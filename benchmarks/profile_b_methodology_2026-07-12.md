@@ -114,6 +114,13 @@ Its `bottom-extend` variant was **withdrawn** — negatives are valid scores.
 
 ## 3b. B-HDR — creation recipe & exact relationship to B (rechecked 2026-07-12)
 
+> **Status note (2026-07-12, later same day):** this section describes the
+> `anchored2` bake (`373eac56`). A cvvdp-mix sibling (`7d7f2123`) was promoted into
+> the `BHdr` slot the same day, then a same-day audit found the promotion's UPIQ
+> significance claim invalid post-selection — see
+> [`bhdr_improvement_split_lineage_2026-07-12.md`](bhdr_improvement_split_lineage_2026-07-12.md)
+> §5–§7 for the promotion, the audit, and the disposition.
+
 B-HDR is **not** "B refit on HDR data." It is an **independent linear fit** with a
 different target, different feature preprocessing, a different scaler, and a
 different dial. The only things it shares with B are the ZNPR-v3 linear
@@ -175,8 +182,10 @@ The two are coupled by exactly **two** mechanisms, both verified:
    explicit knots across the full **`[0,100]`** (deliberate floor + `extend-top`).
    B-HDR's knots cover only **`[25.9, 92.8]`** — its honest HDR-JXL data floor and
    ceiling — and it **extrapolates** outside that band (on the real UPIQ HDR
-   stratum B-HDR mapped to `[0.00, 86.11]`, i.e. it extrapolated below the 25.9
-   knot down to the −100…100 clamp). So the earlier "shared anchor, seam ≤0.92pt"
+   stratum the anchored2 B-HDR mapped to `[−37.3, 86.1]` median 7.0, re-measured
+   2026-07-12 via the pred-dump path; an earlier note said "[0.00, 86.11]" which
+   clipped the extrapolated lower tail — the runtime clamps at −100, not 0).
+   So the earlier "shared anchor, seam ≤0.92pt"
    claim is correct only *inside* `[25.9, 92.8]`; a target dial of, say, 15 or 96
    lands in B-HDR's **extrapolated** (uncalibrated) region, not a calibrated one.
    This is the precise statement of the "92.8 data ceiling" limitation for

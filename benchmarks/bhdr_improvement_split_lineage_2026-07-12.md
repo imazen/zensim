@@ -119,12 +119,14 @@ Because the **pure cvvdp-scalar target is a measured dead end**, twice:
 
 Three reasons it fails, and why the mix works instead:
 
-1. **Representability.** cvvdp's scalar is a heavily *non-linear spatial pooling* of a
-   CSF + contrast-masking model over the pixel field. Our 372 features are *per-image
-   summary statistics* (band energies, masked differences, percentiles). A linear (or
-   small-MLP) map from summary stats **cannot reconstruct** that spatial pooling — the
-   information isn't in the vector. Chasing the cvvdp scalar makes the fit abandon the
-   **ssim2-aligned structure our features *can* represent**, so rank collapses.
+1. **Representability (mechanism HYPOTHESIS — the measured fact is V41's collapse).**
+   cvvdp's scalar is a heavily *non-linear spatial pooling* of a CSF + contrast-masking
+   model over the pixel field, while our 372 features are *per-image summary statistics*
+   (band energies, masked differences, percentiles). The plausible explanation for V41:
+   a linear (or small-MLP) map from summary stats lacks the spatial information to
+   emulate that pooling, so chasing the cvvdp scalar abandons the ssim2-aligned
+   structure the features *can* represent and rank collapses. This mechanism has not
+   been isolated experimentally — what is measured is the collapse itself.
 2. **Ceiling.** cvvdp itself scores only **UPIQ 0.758**. Even *perfect* cvvdp emulation
    caps BHdr at ~0.758 — barely above where the shaped-mix already sits (**0.7536**).
    There is almost no headroom in "being cvvdp."
@@ -210,6 +212,126 @@ AIC-4 loss. UPIQ significance is the tiebreaker for an HDR profile.
 **Honest caveat carried forward:** the AIC-4 −0.014 regression is real (p=0.003). It is
 on a cross-domain SDR holdout; if a future BHdr use exposes it to SDR-JND content, this
 is the one axis where the prior anchored2 bake was better.
+
+---
+
+## 7. POST-PROMOTION AUDIT (2026-07-12, same day) — the §5–§6 significance claim does NOT survive selection correction
+
+A facts-only reexamination (user: "reexamine our conclusions drawing only upon fact")
+found the promotion basis materially overclaimed. **Read this section as overriding
+§5–§6 where they conflict.**
+
+### 7.1 The UPIQ "significant win" was post-selection inference — invalid as stated
+
+The λ was chosen as the **best-of-7 candidates evaluated on the same 380 UPIQ pairs**
+used for the significance test (and the grid was extended adaptively toward the winner).
+The §5 p-values (bootstrap 0.030 / Steiger 0.0052) are unadjusted for that selection.
+Measured correction (Westfall–Young single-step maxT over the 7-candidate family,
+B=3000, joint paired bootstrap, seed 42):
+
+| statistic | value |
+|---|---|
+| unadjusted one-sided p (selected λ0.0003) | 0.017 |
+| **selection-adjusted maxT p (family of 7)** | **0.221 — NOT significant** |
+| family deltas vs BHdr | +0.0223, +0.0120, +0.0101, +0.0019, −0.0043, −0.0367, −0.0402 |
+| family: positive / median | 4/7 positive; **median +0.002 ≈ tie** |
+
+**Corrected claim:** the cvvdp-mix family is UPIQ **non-inferior** (median ≈ tie); an
+in-domain UPIQ *improvement* is **not established**. The +0.0223 point estimate is a
+max-of-7 and is winner's-curse-inflated.
+
+### 7.2 No legitimate selection axis picks the shipped λ
+
+Training-side (selection-legal) axes, from `finalize.json`:
+
+| axis | argmax | that candidate's UPIQ Δ vs BHdr |
+|---|---|---|
+| `hdr_valmix` (matched axis for a mix-target bake) | **λ0.002** | **−0.0402 (clear loss)** |
+| `hdr_val` | λ0.002 | −0.0402 |
+| `bigcodec_val` | λ0.0001 | +0.0101 (ns) |
+
+The only rule that lands on the shipped λ0.0003 is "maximize UPIQ" — the scoreboard.
+Note also the **incumbent anchored2 bake was itself the UPIQ max of its own 2026-07-03
+candidate family** (0.7313 was the round-1 table's shaped best), so *neither* bake has a
+selection-clean UPIQ estimate; incumbent-vs-candidate is max-vs-max. UPIQ (n=380, the
+only HDR human data) is **exhausted as a clean scoreboard for this family** — every
+future comparison against these candidates is partially compromised.
+
+### 7.3 The complete 7-candidate SDR grid shows a λ-TRADE, not a Pareto win
+
+§3's "beats BHdr on 6/7 corpora" was the λ0.0005 tally; the full grid (all 7 candidates
+× all 6 SDR corpora, `bake_verdict`, measured this audit):
+
+| corpus | BHdr | λ3e-5 | λ1e-4 | **λ3e-4 (shipped)** | λ5e-4 | λ1e-3 | λ2e-3 | bvls |
+|---|---|---|---|---|---|---|---|---|
+| CID22 | 0.8347 | 0.8397 | 0.8452 | **0.8440** | 0.8447 | 0.8378 | 0.8406 | 0.7855 |
+| KADID | 0.7505 | 0.6875 | 0.7168 | **0.7357 ✗** | 0.7626 | 0.7600 | 0.7909 | 0.5824 |
+| TID | 0.7165 | 0.7428 | 0.7647 | **0.7570** | 0.7543 | 0.7427 | 0.7559 | 0.5777 |
+| KonJND | 0.3741 | 0.5348 | 0.5285 | **0.4823** | 0.4550 | 0.4369 | 0.4023 | 0.2731 |
+| AIC-3 | 0.7855 | 0.7785 | 0.7910 | **0.7964** | 0.8056 | 0.8123 | 0.8143 | 0.8336 |
+| AIC-4 | 0.9022 | 0.8767 | 0.8839 | **0.8884 ✗** | 0.8902 | — | 0.9170 | 0.9182 |
+| UPIQ | 0.7313 | 0.7332 | 0.7414 | **0.7536** | 0.7433 | 0.6946 | 0.6911 | 0.7270 |
+
+- **λ-robust across the whole lasso family (fact):** CID22 (+0.003..+0.011), TID
+  (+0.026..+0.048), KonJND (+0.028..+0.161) improve at *every* lasso λ. AIC-3 at 5/6.
+- **λ-trade (fact):** KADID, AIC-4, UPIQ flip sign along λ. Sparse λ2e-3 — the
+  `hdr_valmix` legitimate pick — wins **all six SDR corpora incl. AIC-4** but loses
+  UPIQ −0.040 (in-domain). Mid-dense λ wins UPIQ point-estimates but loses KADID/AIC-4.
+  **No candidate dominates BHdr.**
+- **Shipped λ0.0003 corrected tally: 4 wins (CID22/TID/KonJND/AIC-3), 2 losses
+  (KADID −0.015, AIC-4 −0.014), 1 not-established (UPIQ).** Not "6/7."
+- The `bake_compare` "decisive" MRR z-values (−23..−37) are valid but reflect tiny
+  paired SEs (the two bakes correlate r≈0.97): decisive = *reliably nonzero*, and the
+  effects are small except KonJND. All SDR panels feed SDR-shell features to HDR-only
+  bakes — out-of-domain diagnostics for both (equal treatment, but neither is deployed
+  there).
+
+### 7.4 The dial change was a process REGRESSION, not a "side benefit"
+
+§6 called the new `[0, 95.77]` dial a side benefit. Facts:
+
+- The new spline was fit by `finalize` on **`canonical-2026-05-21/train/multiband_anchor_dial100.parquet`
+  — the SDR canonical anchor** (SDR-shell feature rows forwarded through the HDR
+  weights: doubly out-of-domain). The incumbent's `anchored2` step existed precisely to
+  re-anchor BHdr's dial on **HDR** data; the promotion dropped it without replacement.
+- Measured on the 380 real UPIQ HDR pairs (pred-dump path): old dial spans
+  [−37.3, 86.1] median **7.0**; new spans [−29.4, 91.6] median **27.7** — a **+20.7
+  median dial shift** on in-domain content, rank-invariant but semantically large and
+  unvalidated. (This also corrects §3b/§ earlier "[0.00, 86.11]" — the measured lower
+  end extrapolates below 0; the runtime clamps at −100.)
+- There is no HDR dial ground truth to adjudicate which calibration is "right"; but the
+  incumbent's was deliberately HDR-anchored and the replacement is not.
+
+### 7.5 What survives, what doesn't
+
+| conclusion | status |
+|---|---|
+| Split lineage (fe8b00aa; B extracted from HDR probe; cvvdp-mix attribution `1b2bdb9b`) | **FACT — stands** (git-verified) |
+| cvvdp-mix target improves CID22/TID/KonJND at every lasso λ (out-of-domain diagnostics) | **FACT — stands** (7.3) |
+| AIC-4 regression for mid-dense λ | **FACT — stands** (paired p=0.003; λ-dependent: λ2e-3 wins it) |
+| "Significant UPIQ win (p=0.005)" (§5, commit, profile.rs, CHANGELOG) | **INVALID** — post-selection; maxT p=0.221; family median ≈ tie (7.1) |
+| "Pareto-improves 6/7 corpora" | **WRONG for the shipped λ** — 4W/2L/1-ns; family is a λ-trade (7.3) |
+| "Fuller dial = side benefit" | **WRONG** — SDR-anchored spline on an HDR profile, +20.7 median shift, anchored2 step dropped (7.4) |
+| §3a "features CANNOT reconstruct cvvdp's spatial pooling" | mechanism **hypothesis**, not measurement — the measured facts are V41's collapse and cvvdp's 0.758 ceiling; the mechanism is the plausible explanation |
+| V41 cvvdp-scalar dead end; cvvdp UPIQ 0.758 ceiling | recorded measurements — stand as recorded |
+
+### 7.6 Disposition
+
+The promotion (§6) was executed on the invalid §5 significance reading. The shipped
+weights are **not established better in-domain**, carry two real SDR losses, and carry
+an unvalidated SDR-anchored dial. Options, decided by the user (recorded when decided):
+
+- **Revert to `anchored2`** — restores the deliberately HDR-anchored dial and the
+  incumbent; concedes the (real, modest, out-of-domain) CID22/TID/KonJND gains. The
+  epistemically conservative default given max-vs-max UPIQ and the λ-trade.
+- **Keep weights + redo an HDR-anchored dial refit** — keeps the clean-axis gains,
+  treats UPIQ as "no established change," fixes the dial process regression.
+- **Keep as-is** — indefensible dial provenance; not recommended.
+
+A future *establishable* in-domain claim needs either new HDR human data or a
+pre-registered protocol (select λ on training-side axes only, single-shot UPIQ test) —
+noting the matched axis (`hdr_valmix`) currently anti-correlates with UPIQ, which is
+itself an unexplained finding worth understanding before any re-ship.
 
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).

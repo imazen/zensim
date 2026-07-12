@@ -21,11 +21,13 @@
   extrapolating — vs the winsor-only predecessor which failed the dead-zone gate
   at 0.056; rank identical). `BHdr` =
   shaped-feature HDR head (`hdrmix-lasso0.0003-shaped`, cvvdp-mix target, UPIQ
-  **0.7536**, best zensim-family HDR measured — promoted 2026-07-12 from the
-  prior pure-ssim2 `anchored2` bake at UPIQ 0.7313: the cvvdp-mix target lifts
-  UPIQ significantly (+0.022, Steiger p=0.005) and wins CID22/KonJND/AIC-3
-  decisively by MRR, at a small significant AIC-4 cost; see
-  `benchmarks/bhdr_improvement_split_lineage_2026-07-12.md`), PU-linear feature
+  **0.7536 point estimate** — promoted 2026-07-12 from the prior pure-ssim2
+  `anchored2` bake at UPIQ 0.7313. ⚠ Same-day audit: the λ was selected on
+  UPIQ itself; the selection-adjusted (maxT) p is 0.22, so the in-domain UPIQ
+  improvement is NOT established (family median ≈ tie; non-inferiority is).
+  vs the prior bake it wins CID22/TID/KonJND/AIC-3 and loses KADID/AIC-4, and
+  its dial spline is SDR-anchored where the prior bake's was HDR-anchored;
+  see `benchmarks/bhdr_improvement_split_lineage_2026-07-12.md` §7), PU-linear feature
   regime, HDR-content-only (measured invalid on SDR — route by domain). `B` and
   `BHdr` share only a *partial mid-range* dial anchor, NOT a full range — `B`'s
   dial is calibrated `[0,100]`, `BHdr`'s over its HDR data range with a monotone
