@@ -108,6 +108,40 @@ agree on improvement** — clearing the "≥3-of-5 stats agree" bar.
   UPIQ to 0.6946. So the "improves UPIQ too" claim rests on the less-sparse λ; the
   "improves the SDR/perceptibility holdouts" claim is λ-robust.
 
+## 3a. Why not train BHdr on cvvdp *directly*? (it can't, and it's already near the ceiling)
+
+The obvious question: if cvvdp helps, why the 50/50 **mix** — why not target cvvdp itself?
+Because the **pure cvvdp-scalar target is a measured dead end**, twice:
+
+- **V41 (2026-05-25):** training toward the cvvdp scalar gave **CID22 0.66 vs 0.88** —
+  a catastrophic rank collapse. **Re-confirmed 2026-05-27.** "Emulating cvvdp's OUTPUT ≠
+  having its CSF mechanism" (`CLAUDE.md` V39-learnings §5; `feedback_cvvdp_scalar_target_dead_end`).
+
+Three reasons it fails, and why the mix works instead:
+
+1. **Representability.** cvvdp's scalar is a heavily *non-linear spatial pooling* of a
+   CSF + contrast-masking model over the pixel field. Our 372 features are *per-image
+   summary statistics* (band energies, masked differences, percentiles). A linear (or
+   small-MLP) map from summary stats **cannot reconstruct** that spatial pooling — the
+   information isn't in the vector. Chasing the cvvdp scalar makes the fit abandon the
+   **ssim2-aligned structure our features *can* represent**, so rank collapses.
+2. **Ceiling.** cvvdp itself scores only **UPIQ 0.758**. Even *perfect* cvvdp emulation
+   caps BHdr at ~0.758 — barely above where the shaped-mix already sits (**0.7536**).
+   There is almost no headroom in "being cvvdp."
+3. **The mix sidesteps both.** `0.5·ssim2 + 0.5·(cvvdp−6)/4` keeps ssim2 as the
+   **rankable backbone** (representable from our features) and adds cvvdp only as a
+   **bounded 50 % correction** — a JOD-scaled HDR-perceptual nudge that can't dominate.
+   That's why BHdr *does* learn from cvvdp — as a bounded blend, not a pure target — and
+   why the promoted bake wins. (The training renditions have no human study, so the
+   "JOD" term is the cvvdp *metric's* predicted JOD, not human MOS — cvvdp is a teacher,
+   bounded to 50 %.)
+
+**The real way to "learn cvvdp"** is not scalar at all: **spatial cvvdp-diffmap
+supervision** — training a diffmap head against cvvdp's *per-pixel* difference map, which
+would teach the CSF mechanism spatially. That's a different architecture (diffmap head,
+not a linear projection of summary features) and an open research direction, not
+something a linear BHdr can do.
+
 ## 4. Secondary levers (assessed, not yet run)
 
 - **Ensemble blend (like `ens-Pline-cid80`).** BHdr is a single head; B is a 2-head
