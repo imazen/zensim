@@ -112,6 +112,94 @@ Its `bottom-extend` variant was **withdrawn** — negatives are valid scores.
 
 ---
 
+## 3b. B-HDR — creation recipe & exact relationship to B (rechecked 2026-07-12)
+
+B-HDR is **not** "B refit on HDR data." It is an **independent linear fit** with a
+different target, different feature preprocessing, a different scaler, and a
+different dial. The only things it shares with B are the ZNPR-v3 linear
+architecture and the runtime routing that lets `ZensimProfile::B` *reuse* B-HDR's
+weights on the absolute-nits path. This section is the corrective record — a prior
+note claimed the two "share an anchor scale, seam ≤0.92pt," which is true only in
+the mid-range overlap; **their calibrated dial ranges differ by construction.**
+
+### How B-HDR was created
+
+| Step | B-HDR (`bhdr_linear_shaped_anchored2_2026-07-04.bin`, sha `373eac56`) |
+|---|---|
+| Fit | **`hdr-lasso0.001-shaped`** — Lasso λ=0.001, τ=0 (zerobias) |
+| Training corpus | **`hdr_v3`** = `hdr_zenjxl_v3_traindigits_2026-07-03.parquet` — 7,410 HDR-JXL renditions |
+| Target column | **`human_score` = ssim2-based** (NOT the cvvdp-mix `hdr_v3mix` that B's cid head uses) |
+| Feature regime | **PU-linear** (absolute nits, `compute_pu_linear_extended_features`) — not the SDR sRGB→XYB shell |
+| Feature transforms | **"shaped": per-feature MIXED** — `winsor_p99` / `quantile_bins` / `clip_then_log1p` / `log1p` / `signed_cbrt` / `yeo_johnson` (chosen per feature by fit lift) |
+| Scaler | **real standardization** (`(x−mean)/scale`, non-trivial mean/scale per feature) |
+| Dial | **`anchored2`** = shared-anchor refit v2 → **25-knot** PCHIP, knots raw `[0.297, 1.023]` → dial **`[25.88, 92.75]`** |
+
+The **shaping** (mixed transforms + real scaler) is what lifted UPIQ from ~0.65
+(raw features) to **0.7313** — the shaping, not the choice of ssim2 target, drove
+the gain.
+
+### Relationship to B — side by side
+
+| aspect | **B (SDR)** | **B-HDR** |
+|---|---|---|
+| Fit | `ens-Pline-cid80` blend (0.8·cid + 0.2·kon) | single `hdr-lasso0.001-shaped` |
+| Target | cvvdp-mix (cid head) + ssim2-anchor (kon head) | **pure ssim2** |
+| Feature regime | SDR shell (u8/sRGB→XYB) | **PU-linear (nits)** |
+| Transforms | **uniform** `winsor_p99` ×372 | **shaped** (mixed per feature) |
+| Scaler | **IDENTITY** (mean 0 / scale 1) | **real standardization** |
+| Spline | 30-knot, raw `[−1.974, 4.076]` | 25-knot, raw `[0.297, 1.023]` |
+| Calibrated dial | **`[0.00, 100.00]`** (explicit floor + extend-top knots) | **`[25.88, 92.75]`** (its HDR data range) |
+
+> The architecture block in §1 (line 36) writes "standard scaler" for both; that is
+> exact for B-HDR and *degenerate* for B — B's shipped scaler is the **identity**
+> (all means 0, all scales 1), so B's preprocessing is winsor-clamp → dot →
+> spline with no re-centering.
+
+The two are coupled by exactly **two** mechanisms, both verified:
+
+1. **Runtime routing.** `params_pu_linear()` returns `&PROFILE_B_HDR` for
+   `Self::B`, so when a caller feeds absolute nits, `ZensimProfile::B` extracts
+   PU-linear features and forwards B-HDR's shaped weights. **`B.compute(nits) ≡
+   BHdr` is verified byte-for-byte** by
+   `profile::descriptor_hdr_routing_tests::compute_routes_descriptor_flagged_hdr_to_pu_linear`
+   (`via_compute == via_pu`, `b == bh` within 1e-12). So "B on HDR" and "B-HDR"
+   are the *same* function — B-HDR is simply the name for B's PU-linear branch.
+2. **Partially-shared dial anchor.** Both dial splines were fit against the same
+   multiband anchor family, so **in the mid-range** the two dials read within
+   ~1 point of each other. They **diverge at the endpoints** (below) — the
+   "shared anchor" is a mid-range overlap, not a shared range.
+
+### Material findings (these update the docs + memory)
+
+1. **B and B-HDR do NOT share a calibrated dial range.** B is calibrated with
+   explicit knots across the full **`[0,100]`** (deliberate floor + `extend-top`).
+   B-HDR's knots cover only **`[25.9, 92.8]`** — its honest HDR-JXL data floor and
+   ceiling — and it **extrapolates** outside that band (on the real UPIQ HDR
+   stratum B-HDR mapped to `[0.00, 86.11]`, i.e. it extrapolated below the 25.9
+   knot down to the −100…100 clamp). So the earlier "shared anchor, seam ≤0.92pt"
+   claim is correct only *inside* `[25.9, 92.8]`; a target dial of, say, 15 or 96
+   lands in B-HDR's **extrapolated** (uncalibrated) region, not a calibrated one.
+   This is the precise statement of the "92.8 data ceiling" limitation for
+   near-lossless HDR — and its symmetric `~25.9` floor.
+2. **B-HDR's target was never A/B'd against the cvvdp-mix under shaping.** B's cid
+   head trains on `hdr_v3mix` (cvvdp-mix); B-HDR trains on `hdr_v3` (pure ssim2).
+   The cvvdp-mix target was only ever tried on **raw** features (`hdrmix-lasso0.001-raw`,
+   UPIQ 0.6488) — a **shaped-cvvdp-mix** fit does not exist. So "ssim2 is B-HDR's
+   best HDR target" is **unproven**; it is the best among what was fit, and B-HDR
+   likely inherits ssim2's HDR ceiling, which plausibly explains its ~0.73 plateau
+   below the heavy HDR specialists.
+3. **B-HDR is not the single max-UPIQ linear candidate.** `canon-ridge1e-05-raw-tau0.02`
+   reached UPIQ **0.7425**, but it is an SDR-corpus fit with poor KADID (0.4063);
+   B-HDR was chosen as the **HDR-trained + shaped + balanced** pick, which is the
+   defensible choice for an HDR-only profile but is *not* the raw UPIQ argmax.
+
+**Net:** B-HDR is a legitimate, self-contained lightweight HDR metric that B
+*reuses* on the nits path — not a derivative of the SDR bake. The open threads
+are (a) B-HDR's dial is calibrated only over `[25.9, 92.8]` (near-lossless and
+heavy-HDR are extrapolated), and (b) the shaped-cvvdp-mix HDR target is untried.
+
+---
+
 ## 4. Byte-exact reproduction
 
 ```bash
