@@ -102,15 +102,72 @@ spread of the reference within bins. η²(REF|knob)=between-bin/total variance o
 Against CVVDP, A/ssim2 beat B — the known A↔B tradeoff: A is ssim2/CVVDP-shaped,
 B is human-MOS-shaped.
 
+## Part 3b — Normalized span + REACHABILITY (unreachable regions)
+
+The native `span` in Test 1 isn't apples-to-apples (each metric's own scale). Two
+notions of "unreachable": **metric-limited** (the dial compresses a single image's
+true quality range) and **encoder-limited** (even max/min q can't reach a target).
+Measured on **current B** re-forwarded on the stored features — the stored `pred_b`
+is the pre-inclusive-winsor B, off by up to 9.6 dial pts (mean 0.27, corr 0.9997),
+so this step is mandatory. Scripts: `scripts/v_next/knob_reach_ab_rescored.py` (+
+the reforward). Data: `/mnt/v/output/zensim-multicodec-probe/knob_reforward/`.
+
+**Normalized span** = per-ladder span / metric's own (p99−p1), mean over ladders
+(weighted across codecs):
+
+| metric | span_frac (norm) | span_native |
+|--|--:|--:|
+| **B** | **0.6835** | 56.61 |
+| A | 0.6403 | 57.47 |
+| ssim2 | 0.4000 | 57.36 |
+
+**B is the most expressive knob per-image** — one image's q-sweep traverses 68% of
+B's usable dial vs 40% for ssim2. The native-span parity was a scale artifact:
+ssim2's usable range is huge (jpeg p1..p99 = −52..93) but mostly an *unused negative
+tail* real encodes never hit; B uses its dial efficiently (no wasted range).
+
+**Reachability** (fraction of ladders whose [min_q,max_q] spans a dial target):
+
+| codec | metric | reach≥50% band | reach@85 | reach@95 | ceiling (median max) |
+|--|--|--|--:|--:|--:|
+| jpeg | B | 28..80 | 0.37 | 0.00 | 82.1 |
+| jpeg | A | 32..85 | 0.53 | 0.00 | 85.7 |
+| jxl | **B** | 40..80 | **0.26** | 0.00 | **81.2** |
+| jxl | A | 50..85 | 0.58 | 0.00 | 85.9 |
+| webp | **B** | 28..82 | **0.21** | 0.00 | **82.7** |
+| webp | A | 28..85 | 0.67 | 0.00 | 86.8 |
+| avif | B | 10..90 | 0.84 | 0.01 | 92.0 |
+| avif | ssim2 | 0..92 | 0.86 | **0.17** | 92.7 |
+
+- **B's band is shifted DOWN**: reaches lower floors (jpeg median floor 27 vs ssim2
+  34) but lower ceilings (jxl 81 vs A 86, webp 83 vs 87).
+- **The "unreachable top" for B**: on jxl/webp, only 21–26% of images can be dialed
+  to B=85, vs A's 58–67%. B doesn't score even high-q encodes that high — a
+  conservative ceiling. This is B's MOS-shaping as a knob property (human MOS
+  saturates less than ssim2 at the top → lower, more honest, but harder-to-reach
+  high targets). It is *not* the old near-lossless pin (current-B, and the ceiling
+  is encoder-limited).
+- **Dial 95+ is encoder-unreachable for all metrics** on these q-sweeps (they don't
+  produce near-lossless) — except ssim2 reaches 95 on 17% of avif. So the ~92–95 cap
+  is a real encoder ceiling, not a metric defect.
+
 ## Verdict
 
 Against **real encoders + human judgment, B is a legitimately good knob:**
 mechanically sound (|ρ| 0.95, ~80% strict-mono, 1.4% tie across 4 codecs, on par
-with ssim2) and human-consistent (±6.3 MOS at a fixed target, matching ssim2's ±6.0,
+with ssim2), the **most expressive per-image** (normalized span 0.68 > A 0.64 >
+ssim2 0.40), and human-consistent (±6.3 MOS at a fixed target, matching ssim2's ±6.0,
 beating A's ±6.6). The A↔B tradeoff persists in the knob view exactly as in the rank
 view: **B is the better human-MOS knob, A/ssim2 the better metric-agreement knob.**
 This is a knob-quality validation independent of the earlier rank-SROCC and dial-grid
 panels, on real bitstreams, and it does not depend on the corrupt 2026-05-29 grid.
+
+**The one real knob limitation**: B's top-end is conservative — on jxl/webp, high
+targets (dial 85+) are unreachable for most images (21–26% reach vs A's 58–67%),
+because B (MOS-shaped) scores high-q encodes lower than A/ssim2. Likely MOS-honest
+(human MOS saturates less at the top) but a genuine reach cost: a product dialing B
+to 90 on jxl/webp will often cap out ~83–87. If high-target reach on those codecs
+matters, that's A's domain — consistent with A staying the default `codec_target`.
 
 ## Honest gaps / how to strengthen
 
