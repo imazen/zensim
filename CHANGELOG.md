@@ -43,6 +43,38 @@
   errors). Pinned by `flag_not_format_decides_the_pipeline` (same bytes,
   flag flipped → different pipeline) and the mixed-pair refusal test.
 
+### Changed
+- **`ZensimProfile::codec_target()`, `latest_preview()`, and `latest()` now
+  return `B`** (they returned `A`). This flips the DEFAULT codec-quality dial
+  from the generation-A v47 MLP to the deterministic generation-B linear core
+  for every downstream codec that targets `codec_target()`. `B` was validated
+  as an on-par-or-better dial with real encoders: mechanics |ρ| 0.953 vs codec
+  quality, at-a-target MOS resid-SD ±6.33 (ssim2 ±6.04, `A` ±6.60), normalized
+  reachable span 0.68 (`A` 0.64, ssim2 0.40), and independent-reference
+  consistency at scale η²(butteraugli | dial-decile) 0.582 vs `A` 0.344 on
+  ~1 M codec cells. The signature is unchanged (still returns `ZensimProfile`),
+  so this is compatible per `cargo semver-checks` (0.2.7 → 0.3.0: no semver
+  update required) — but it is a **runtime behavior change**: codec-target
+  scores now come from `B`, not `A`. `B` ↔ `A` is a trade (B wins the human-MOS
+  holdouts; A wins raw ssim2-agreement on codec sweeps). Validation +
+  reproduction: `benchmarks/b_knob_validation_real_encoders_2026-07-11.md`,
+  `benchmarks/profile_b_methodology_2026-07-12.md` (`d2953d92`).
+- The crate `include` list now ships the `B` + `BHdr` linear bakes (and the
+  823 B raw pre-guard `B` ensemble for byte-repro); previously it shipped only
+  `A`'s bake, so a packaged build would have failed to compile the
+  `include_bytes!` for `B`/`BHdr` (`f457e2aa`).
+
+### Deprecated
+- **`ZensimProfile::A` (`zensim-a`, the v47 MLP) is `#[deprecated]`** and gated
+  behind the new **`deprecated-profiles`** Cargo feature — **ON by default**,
+  so existing code keeps compiling and `A` stays selectable (it just warns).
+  Build with `--no-default-features` (re-adding the other defaults you need:
+  `avx512`, `imgref`, `threads`) to drop `A` and its ~27 KB MLP bake entirely;
+  the library builds cleanly A-free. Migrate to `ZensimProfile::codec_target()`
+  / `latest_preview()` (now `B`) or name `ZensimProfile::B` directly. A future
+  minor release may move `deprecated-profiles` out of `default`. `A`, `PROFILE_A`,
+  and `mlp_bake_a_v47_qat()` are all gated behind the feature (`d2953d92`).
+
 ### Restored (reverts commit `493c91cd`)
 - **`ZensimProfile::PreviewV0_1` / `PreviewV0_2` and `WEIGHTS_PREVIEW_V0_1`
   are RETAINED for 0.3.0 — the removal in commit `493c91cd` (2026-07-01,
@@ -53,9 +85,10 @@
   the `PROFILE_PREVIEW_V0_1` / `PROFILE_PREVIEW_V0_2` statics — an unapproved
   breaking change that never reached crates.io (0.2.7 is still the published
   version). All of it is restored VERBATIM as first-class, non-deprecated,
-  selectable variants, to preserve semver compatibility with 0.2.7. `A`
-  remains the default and what `latest_preview()` / `latest()` /
-  `codec_target()` return; `B` / `BHdr` (above) are additive. The V0_2-pinned
+  selectable variants, to preserve semver compatibility with 0.2.7. (`A` is
+  now deprecated and `latest_preview()` / `latest()` / `codec_target()` return
+  `B` — see **Changed** / **Deprecated** below; `PreviewV0_1` / `PreviewV0_2`
+  are unaffected and remain non-deprecated.) The V0_2-pinned
   cross-platform golden tests (`hardcoded_reference_scores`, `feature_coverage`,
   `identical_images_score_100`, `preview_v0_1_compat_profile`) and the
   `metric.rs` `compute_extended_features_returns_300` test are restored with

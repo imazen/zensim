@@ -32,7 +32,7 @@ pub enum ZensimProfile {
     /// deterministic generation-B linear profile [`Self::B`], which
     /// [`Self::codec_target`] / [`Self::latest_preview`] now return.
     ///
-    /// **Deprecated since 0.4.0.** Gated behind the `deprecated-profiles`
+    /// **Deprecated since 0.3.0.** Gated behind the `deprecated-profiles`
     /// feature (ON by default so existing code keeps working). To drop `A`
     /// and its ~27 KB MLP bake, build with `--no-default-features` and
     /// re-add the other defaults you need (`avx512`, `imgref`, `threads`).
@@ -47,7 +47,7 @@ pub enum ZensimProfile {
     /// `docs/CODEC_TARGET_METRIC.md`.
     #[cfg(feature = "deprecated-profiles")]
     #[deprecated(
-        since = "0.4.0",
+        since = "0.3.0",
         note = "generation-A (v47 MLP) is superseded by the deterministic linear `B`; \
                 use ZensimProfile::codec_target() / latest_preview() (now `B`) or name \
                 ZensimProfile::B directly. `A` remains behind the default-on \

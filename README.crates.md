@@ -8,11 +8,9 @@ Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — mu
 
 **Interactive chart exploration**: <https://imazen.github.io/zensim/> — scatter zensim / fast-ssim2 / butteraugli against human MOS across CID22 / KADID / TID / AIC corpora, filter by codec + version, with per-band SROCC tables and step-5 (20-bin) breakdowns.
 
-
 ## Correlation with human perception
 
-Full Mohammadi 2025 stat panel against three independent human-rated image quality databases that v0.3 did NOT train on. KADID-10k and TID2013 are excluded because v0.3's recovery-phase-4 retrain included them as training groups — they're no longer fair holdouts. On the **CID22** codec-compression holdout, profile `A` reaches SROCC ≈ 0.86 (fast-ssim2: 0.89) while spending the full 0–100 dial with JND landing at score 60 — the property that matters for codec quality targeting.
-
+Full Mohammadi 2025 stat panel against three independent human-rated image quality databases that v0.3 did NOT train on. KADID-10k and TID2013 are excluded because v0.3's recovery-phase-4 retrain included them as training groups — they're no longer fair holdouts. On the **CID22** codec-compression holdout, the default profile `B` reaches SROCC ≈ 0.876 and the deprecated `A` ≈ 0.86 (fast-ssim2: 0.89), both spending the full 0–100 dial with JND landing near score 60 — the property that matters for codec quality targeting. **The detailed per-corpus / per-band tables below are profile `A`'s** (the prior default); `B`'s full held-out panel is in [`benchmarks/profile_b_methodology_2026-07-12.md`](benchmarks/profile_b_methodology_2026-07-12.md), and regenerating these tables for `B` before release is a tracked follow-up.
 
 ## Quick start
 
@@ -25,12 +23,12 @@ zensim = "0.3"
 use zensim::{Zensim, ZensimProfile, RgbSlice};
 
 // Pick a profile explicitly for pinned reproducibility:
-let z = Zensim::new(ZensimProfile::A);
-// Or use `ZensimProfile::latest_preview()` for whatever current preview
-// ships (rotates as new previews land), or `ZensimProfile::codec_target()`
-// for the stable codec-target contract. `ZensimProfile::B` is a
-// deterministic linear-ensemble profile for SDR content; `BHdr` is its
-// HDR (absolute-nits) counterpart.
+let z = Zensim::new(ZensimProfile::B);
+// `B` is the deterministic linear-ensemble default for SDR content; `BHdr`
+// is its HDR (absolute-nits) counterpart. Or use
+// `ZensimProfile::codec_target()` / `latest_preview()` for the stable
+// codec-target contract (both return `B`). `A` (the v47 MLP) is deprecated
+// (behind the default-on `deprecated-profiles` feature).
 // `src_pixels` / `dst_pixels` are `&[[u8; 3]]` — interleaved, sRGB-encoded
 // (gamma, NOT linear) 8-bit RGB. `width`/`height` are `usize`. See "Input
 // format" below: getting sRGB-vs-linear wrong silently corrupts every score.
@@ -102,7 +100,7 @@ use zensim::{Zensim, ZensimProfile, ZenpixelsSource};
 
 let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
 let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
-let result = Zensim::new(ZensimProfile::A).compute(&source, &distorted)?;
+let result = Zensim::new(ZensimProfile::codec_target()).compute(&source, &distorted)?;
 ```
 
 Format mapping is automatic: RGBX/BGRX becomes opaque, premultiplied alpha is un-premultiplied, color primaries are forwarded. HDR (PQ, HLG) and grayscale are rejected with `UnsupportedFormat`.
@@ -196,17 +194,18 @@ Computed in XYB (cube-root LMS) with O(1)-per-pixel box blur and fused AVX2/AVX-
 
 ## Profiles
 
-Each `ZensimProfile` bundles weights and score-mapping parameters. Scores from a given profile stay stable across crate versions. The published crate ships three profiles; the historical / experimental research profiles are preserved (bit-identically) in the unpublished `zensim-experimental` crate.
+Each `ZensimProfile` bundles weights and score-mapping parameters. Scores from a given profile stay stable across crate versions. The published crate ships five selectable profiles (`A` deprecated, `PreviewV0_1` / `PreviewV0_2` retained for 0.2.7 compatibility, `B` / `BHdr` current); the historical / experimental research profiles are preserved (bit-identically) in the unpublished `zensim-experimental` crate.
 
 | Profile | Kind | CID22 SROCC | Bake |
 |---------|------|------:|------|
-| `A` | 372-input MLP, per-sample-α + monotone PCHIP dial spline | **0.8657** | 27 KB v47-strict-QAT |
-| `B` | 372-input linear ensemble (35-weight lasso) + dial spline, SDR content | **0.8733** | 13.1 KB ens-Pline-cid80 |
+| `B` (**default** — `codec_target()`) | 372-input linear ensemble (35-weight lasso) + dial spline, SDR content | **0.8764** | 7.3 KB ens-Pline-cid80 |
 | `BHdr` | linear ensemble on PU-linear (absolute-nits) features + dial spline, HDR content only | n/a — HDR-only (UPIQ-HDR \|SROCC\| 0.7313) | 11.7 KB hdr-lasso0.001-shaped |
+| `A` (**deprecated** — behind `deprecated-profiles`) | 372-input MLP, per-sample-α + monotone PCHIP dial spline | **0.8657** | 27 KB v47-strict-QAT |
+| `PreviewV0_1` / `PreviewV0_2` | 228-weight linear (no MLP), `100 − 18·d^0.7` mapping — 0.2.7-compat | — | embedded weight arrays |
 
-`ZensimProfile::codec_target()` and `latest_preview()` both return `A` — the canonical production codec-target the zen codecs dial against. The deprecated `latest()` also returns `A`. To load your own bake, construct `ZensimProfile::Custom { params, name }` via [`ProfileParams::builder()`](https://docs.rs/zensim/latest/zensim/profile/struct.ProfileParams.html). Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+`ZensimProfile::codec_target()` and `latest_preview()` both return `B` — the canonical production codec-target the zen codecs dial against (the deprecated `latest()` also returns `B`). `A` (the prior default, the v47 MLP) is now `#[deprecated]` and lives behind the default-on `deprecated-profiles` feature — build with `--no-default-features` to drop it. To load your own bake, construct `ZensimProfile::Custom { params, name }` via [`ProfileParams::builder()`](https://docs.rs/zensim/latest/zensim/profile/struct.ProfileParams.html). Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
 
-`ZensimProfile::PreviewV0_1` / `PreviewV0_2` (the pre-0.3.0 linear profiles) were removed in the unreleased 0.3.0 line (commit `493c91cd`) — see the CHANGELOG `[Unreleased]` entry. Pin to a pre-0.3.0 crates.io release if you depend on their exact scoring behavior; `B` is the current deterministic-linear replacement for SDR content.
+`ZensimProfile::PreviewV0_1` / `PreviewV0_2` (the linear profiles that shipped in 0.2.7) are RETAINED as first-class, non-deprecated, selectable variants — the 0.3.0 line reverted their removal (commit `493c91cd`) to preserve semver compatibility with 0.2.7; see the CHANGELOG `[Unreleased]` **Restored** entry. `B` is the current deterministic-linear default for SDR content.
 
 The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, and `LinearBounded` live in the **`zensim-experimental`** crate (not published), each rebuilt through the `Custom` extension point — e.g. `Zensim::new(zensim_experimental::preview_v0_5_tuner_v4())`. zenpredict (the MLP runtime) is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 
@@ -222,7 +221,6 @@ The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, an
 | `zenpixels` | no | `ImageSource` adapter for zenpixels `PixelSlice`/`PixelBuffer` |
 | `custom-profiles` | no | `ZensimProfile::Custom` + `ProfileParams::builder()` for externally-defined bakes |
 | `streaming_strips_oom` | no | Un-ignores the ~500 MB 80 MP streaming OOM-relief integration test |
-
 
 ## Workspace
 
