@@ -501,6 +501,67 @@ Selection applied per the rule (before any UPIQ look): `hdriwmix-lasso0.001`
 4. Resolve the iwssim tiny-scale gap (ssim2-fallback rows or a scale guard).
 5. HDR-anchored dial refit for any ship candidate (§7.4).
 
+### 8.8 Corpus broadening EXECUTION (2026-07-12, user: "do synthetic hdr distortions like we did kadis … and do avif too")
+
+Two new HDR distortion families over the same 1,140 imazen-26 PQ-PNG refs, both
+consumable by the standard datagen→score→build pipeline. Design decisions of record:
+
+**Family 1 — `kadis-hdr` (synthetic, KADIS catalog in the PQ domain).**
+- Driver: `kadis-distort/scripts/hdr_distort_grid.py` (kadis-distort `e3bb7382`).
+  Distortions run on **PQ code values** (float = code/65535) with
+  `normalize=truncate` — clamp, never mapmm (the MATLAB min/max stretch would
+  rescale absolute luminance). The dist PNG gets the ref's **cICP chunk spliced
+  verbatim** (zenmetrics `decode_pq_png` refuses cICP-less PNGs; primaries 1|12
+  pass through).
+- **Deliberate PQ-domain semantics:** u8-roundtrip types (6 color-quantize, 9 jp2k,
+  10 jpeg, 22 quantize) crush the PQ planes through 8-bit — that IS the distortion:
+  backward-compatible HDR compression banding/wavelet/DCT artifacts, exactly the
+  Narwaria/Korshunov families the JXL-only corpus lacks (§8.2). Photometric types
+  (16/17/18/25) act on PQ code values = perceptually-uniform-ish luminance edits.
+- Design: **2 deterministic types/ref (blake2 of basename) × 5 KADID levels** =
+  11,400 cells; per-cell `io.seed_for` seeding (idempotent, content-reproducible —
+  the KADIS-700k regenerability property). All 25 types usable (torch present for
+  DnCNN t15); smoke gate 24/25 (t18 L3 is the by-design zero-param identity;
+  KADIS signed types 7/18/25 have zero midpoints → identity cells, kept).
+- **Cell key: `q = dist_type·10 + level`** — the corpus builder joins on
+  `(basename, codec, q)` and IGNORES `knob_tuple_json`, so q must disambiguate the
+  two types per ref. `knob_tuple_json` carries `{dist_type, dist_name, level,
+  dist_param}` for provenance.
+- End-to-end gate PASSED before the full run: distorted `.hdr.png` → `score-pairs
+  --hdr` non-NaN on all 4 metrics (zensim-gpu 45.8/17.5, ssim2-gpu 58.7/25.1,
+  iwssim 0.981/0.961, cvvdp 9.42/8.81 for blur/jpeg L3).
+- Gotcha found: **WSL2 drvfs ENOMEM on concurrent multi-MB writes** to /mnt/v
+  (errno 12 at ~200/2280 ref-types, 8 workers) — fixed with 1 MiB chunked writes +
+  ENOMEM retry/backoff + 6 workers.
+- Output: `/mnt/v/output/zenmetrics/datagen-2026-07-12-hdr-kadis/` (datagen-shaped:
+  `dist/`, `omni/kadis-hdr.tsv`, `pairs/kadis-hdr.local.pairs.tsv`; scoring lands
+  `sidecars/kadis-hdr/{zensim_features,ssim2-gpu,cvvdp,iwssim}.parquet`).
+
+**Family 2 — `zenavif` HDR (10-bit PQ AVIF).** The encode-half header said "do not
+add HDR coverage without wiring a true HDR path in sweep::hdr" — so that path was
+wired (zenmetrics, this session): `encode_avif_hdr` (16-bit PQ slice → zenavif
+zencodec adapter → `encode_rgb16` → **10-bit identity-matrix (MC=0/GBR) AV1**, no
+YUV/chroma loss; source CICP → `apply_cicp_to_config` → `build_ravif_encoder` →
+container `nclx` transfer 16) + `decode_avif_to_nits` / `decode_pq_avif` (container
+transfer MUST be 16; 10-bit LSB-replicated to u16 = exact endpoint mapping →
+PQ EOTF). Zero zenavif changes needed — its adapter already wires CICP end-to-end.
+`validate_hdr_sweep` now admits Zenavif; everything else still refused loudly.
+
+**Dependency drift fixed en route** (the cascade that had silently broken all
+zenmetrics builds): ultrahdr-rs `zenjpeg ^0.8 → 0.9.0` + mirrored zencodec git pin
+(ultrahdr `7b427267`); zenmetrics-cli dropped `zenwebp?/zencodec` (feature removed
+upstream — dep now unconditional) + gained the direct `cvvdp` dep edge for hdr.rs's
+HLG path (the missing edge that had made hdr+png/jxl builds uncompilable — and why
+the Jul 6 binary silently lacked PQ-PNG decode).
+
+**Scoring plan (per family, serialized):** `datagen_score_hdr.sh` with
+`CODEC=<family> PAIRS=<pairs.tsv> OUT=<datagen dir>` → zensim-gpu(+372-feature
+sidecar, with-iw) / ssim2-gpu / cvvdp / iwssim. Then
+`build_hdr_train_parquets.py --codec <family> --iwssim-sidecar <own>` (builder now
+takes `--codec` + reads ssim2 from the `ssim2-gpu.parquet` sidecar when the omni
+carries no inline score). Broadened corpora = jxl + kadis-hdr + zenavif rows,
+train AND val — restoring selection validity per §8.6.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`

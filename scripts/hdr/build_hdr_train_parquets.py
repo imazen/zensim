@@ -48,6 +48,10 @@ ap.add_argument("--iwssim-sidecar", action="append", default=[],
                      "v3 pu-linear datagens carry no iwssim sidecar of their own; the "
                      "scores live in the old-feature datagens over the SAME encodes "
                      "(key overlap verified 17,100/17,100 on 2026-07-12).")
+ap.add_argument("--codec", default="zenjxl",
+                help="sidecar/omni codec dir name inside each datagen "
+                     "(sidecars/<codec>/, omni/<codec>.tsv). Non-zenjxl HDR "
+                     "families (kadis-hdr synthetic, zenavif) use their own dir.")
 a = ap.parse_args()
 assert not (a.mix_target and a.iw_target), "--mix-target and --iw-target are exclusive"
 assert not a.iw_target or a.iwssim_sidecar, "--iw-target requires --iwssim-sidecar"
@@ -58,16 +62,30 @@ def key(t):
                     [float(x) for x in t["q"].to_pylist()]))
 
 def load_scores(d):
-    """(key -> (ssim2, cvvdp)) from a datagen dir's omni + cvvdp sidecar."""
+    """(key -> (ssim2, cvvdp)) from a datagen dir's omni + sidecars.
+
+    ssim2 comes from the omni's inline score when present, else from the
+    `ssim2-gpu.parquet` sidecar (non-encode families like kadis-hdr have no
+    inline encode-time score — their ssim2 is a score-pairs pass).
+    """
     out = {}
-    omni = os.path.join(d, "omni", "zenjxl.tsv")
+    omni = os.path.join(d, "omni", f"{a.codec}.tsv")
     if os.path.exists(omni):
         import csv
         for r in csv.DictReader(open(omni), delimiter="\t"):
             s2 = r.get("score_ssim2") or r.get("score_ssim2_gpu") or ""
             if s2:
                 out[(os.path.basename(r["image_path"]), r["codec"], float(r["q"]))] = [float(s2), None]
-    cv = os.path.join(d, "sidecars", "zenjxl", "cvvdp.parquet")
+    s2p = os.path.join(d, "sidecars", a.codec, "ssim2-gpu.parquet")
+    if os.path.exists(s2p):
+        t = pq.read_table(s2p)
+        col = [c for c in t.schema.names if c not in ("image_path", "codec", "q", "knob_tuple_json")][0]
+        for k, v in zip(key(t), np.asarray(t[col], dtype=float)):
+            if np.isfinite(v):
+                out.setdefault(k, [None, None])
+                if out[k][0] is None:
+                    out[k][0] = float(v)
+    cv = os.path.join(d, "sidecars", a.codec, "cvvdp.parquet")
     if os.path.exists(cv):
         t = pq.read_table(cv)
         col = [c for c in t.schema.names if c not in ("image_path", "codec", "q", "knob_tuple_json")][0]
@@ -98,7 +116,7 @@ n_miss_scores = 0
 n_miss_cvvdp = 0
 n_miss_iw = 0
 for d in [a.datagen] + a.extra_datagen:
-    fp = os.path.join(d, "sidecars", "zenjxl", "zensim_features.parquet")
+    fp = os.path.join(d, "sidecars", a.codec, "zensim_features.parquet")
     if not os.path.exists(fp):
         print(f"NOTE: no features sidecar in {d} — skipped")
         continue
