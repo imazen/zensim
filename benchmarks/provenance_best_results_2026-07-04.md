@@ -108,8 +108,15 @@ cross-model scatter). `BHdr` = explicit unrouted handle.
   (zensim `5d4978db`) — matches the product runtime; dial p95 artifacts
   (321/504) were this bug.
 - **Dial alignment**: shared-anchor refits give cross-model MAE 5.05pt in
-  the mutual dial zone (40-95); boundary seam ≤0.92pt; out-of-domain =
-  router territory (measured invalid, rank 0.72).
+  the mutual dial zone; boundary seam ≤0.92pt; out-of-domain =
+  router territory (measured invalid, rank 0.72). **Precision (recheck
+  2026-07-12, `profile_b_methodology_2026-07-12.md` §3b):** the two models'
+  *calibrated* dial ranges differ — **B `[0,100]`** (explicit floor +
+  extend-top knots) vs **B-HDR `[25.9, 92.8]`** (its HDR data floor/ceiling).
+  The "seam ≤0.92pt" holds only inside the overlap ≈`[25.9, 92.8]`; a target
+  dial below 25.9 or above 92.8 lands in B-HDR's **extrapolated** region, not
+  a calibrated one. The ≤0.92pt SDR-anchored seam on line 106 is a separate,
+  still-valid claim (same SDR content via the SDR vs PU21 path).
 - **UPIQ harness**: `scripts/hdr/upiq_panel.py` (380 EXR pairs, JOD);
   SDR25: value-recovered permutation join (reconstruction
   `scripts/v_next/reconstruct_sdr25_jnd.py`, trap-verified semantics).
