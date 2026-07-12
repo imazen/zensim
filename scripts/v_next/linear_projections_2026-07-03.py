@@ -81,11 +81,18 @@ GROUPS = {
     "konjnd_dense": (CANON / "konjnd-dense-norm.parquet", ["human_score", "pjnd_target"]),
     "hdr_v3": (PROBE / "hdr_zenjxl_v3_traindigits_2026-07-03.parquet", ["human_score"]),
     "hdr_v3mix": (PROBE / "hdr_zenjxl_v3mix_traindigits_2026-07-03.parquet", ["human_score"]),
+    # 2026-07-12 teacher-ceiling probe (§8.3): iwssim-teacher targets. NOTE:
+    # iwssim NaNs on ALL tiny scales (5-scale pyramid min size) → these corpora
+    # carry NO tiny renditions (5,928/3,107 vs v3mix's 7,410/3,900).
+    "hdr_v3iwmix": (PROBE / "hdr_zenjxl_v3iwmix_traindigits_2026-07-12.parquet", ["human_score"]),
+    "hdr_v3iw": (PROBE / "hdr_zenjxl_v3iw_traindigits_2026-07-12.parquet", ["human_score"]),
 }
 VAL_SETS = {
     "bigcodec_val": (PROBE / "bigcodec_valdigits_2026-07-02.parquet", "human_score"),
     "hdr_val": (PROBE / "hdr_zenjxl_v3_valdigits_2026-07-03.parquet", "human_score"),
     "hdr_valmix": (PROBE / "hdr_zenjxl_v3mix_valdigits_2026-07-03.parquet", "human_score"),
+    "hdr_valiwmix": (PROBE / "hdr_zenjxl_v3iwmix_valdigits_2026-07-12.parquet", "human_score"),
+    "hdr_valiw": (PROBE / "hdr_zenjxl_v3iw_valdigits_2026-07-12.parquet", "human_score"),
     "konjnd_guard": (CANON / "konjnd-dense-norm.parquet", "pjnd_target"),
     # cid22_train_norm is a TRAIN group (ssim2-anchored, NOT MOS) — using it
     # as a selection axis is train-legal (it is already a fit input).
@@ -303,6 +310,9 @@ MIXES_SDR = {
 MIXES_HDR = {
     "hdr": [("hdr_v3", 1.0, "human_score")],
     "hdrmix": [("hdr_v3mix", 1.0, "human_score")],
+    # 2026-07-12 teacher-ceiling probe (§8.3/§8.4): iwssim-teacher families.
+    "hdriwmix": [("hdr_v3iwmix", 1.0, "human_score")],
+    "hdriw": [("hdr_v3iw", 1.0, "human_score")],
     "w7lin": [("safesyn", 1.0, "human_score"), ("cid22_train", 1.5, "human_score"),
               ("kadid", 0.5, "human_score"), ("tid", 0.5, "human_score"),
               ("konjnd_dense", 1.2, "human_score"), ("bigcodec", 0.25, "human_score"),

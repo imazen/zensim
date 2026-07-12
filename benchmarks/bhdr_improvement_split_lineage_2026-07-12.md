@@ -412,6 +412,43 @@ representation plausibly has the needed ingredients. (Also `pu_iwssim_float` /
 4. **HDR-anchored dial refit** for whatever ships (fixes the §7.4 process regression;
    reusable for every future candidate — `finalize`'s spline is always SDR-anchored).
 
+### 8.5 PRE-REGISTERED EXPERIMENT: iwssim-teacher retarget (registered before any fit ran)
+
+Committed BEFORE `fit` executed for the new families — the selection rule is on record
+before any evaluation number exists.
+
+- **Data:** `hdr_zenjxl_v3iwmix_*_2026-07-12.parquet` (target `0.5·s2n + 0.5·iw_logn`)
+  and `hdr_zenjxl_v3iw_*_2026-07-12.parquet` (target `iw_logn`), where
+  `iw_logn = clamp(−log10(clamp(1−iw, 1e-6, 1))/4, 0, 1)` spreads IW-SSIM's near-1
+  saturation. Built by `build_hdr_train_parquets.py --iw-target {mix,pure}` from the
+  same v3 datagens (v3-june + v3-hq) with iwssim joined from the old-feature datagens
+  over the identical encodes (key overlap verified 17,100/17,100). **Known bias:**
+  IW-SSIM NaNs on all tiny scales (5-scale pyramid minimum size; 229/1,140 refs) →
+  these corpora carry NO tiny renditions (5,928/3,107 rows vs v3mix's 7,410/3,900).
+  Acceptable for the probe (UPIQ content is full-size); MUST be resolved (ssim2
+  fallback rows or a tiny-scale guard) before any ship candidate.
+- **Hypothesis (from §8.3):** iwssim-teacher fits raise **Narwaria** within-study
+  SROCC vs the cvvdp-mix family (teacher ceiling there: cvvdp 0.781 → iwssim-family
+  ~0.88), with Korshunov non-inferior.
+- **Families:** `hdriwmix`, `hdriw` — shaped space, lasso λ grid {3e-5..2e-3} + bvls,
+  τ=0, f16 (identical machinery to the audited family).
+- **SELECTION RULE (the only claimable candidates):** per family, argmax of the
+  MATCHED training-side val axis (`hdr_valiwmix` for hdriwmix, `hdr_valiw` for hdriw)
+  over shaped lasso+bvls fits. No UPIQ-informed selection of any kind.
+- **EVALUATION (single shot, after selection):** within-study UPIQ SROCC
+  (narwaria n=140 / korshunov n=240) for the 2 picked candidates. The full λ grid is
+  ALSO reported — as diagnostics only, explicitly non-claimable. SDR guards
+  (`bake_verdict` cid22/konjnd/aic3) for the picks.
+- **GATES:** hypothesis SUPPORTED if a picked candidate reaches Narwaria ≥ 0.7957
+  (anchored2 0.7757 + 0.02) AND Korshunov ≥ 0.9054 (anchored2 0.9104 − 0.005).
+  Hypothesis FALSIFIED if BOTH picks miss the Narwaria gate.
+- **Known risk, stated up front:** for the cvvdp-mix family the matched training axis
+  anti-correlated with UPIQ (§8.2). If that recurs here, the picks may fail while
+  off-pick λ succeed — that outcome is reported as "selection-axis failure, hypothesis
+  undecided," NOT retro-picked.
+- **Not a ship decision** under any outcome: shipping additionally requires the
+  tiny-scale resolution, an HDR-anchored dial, and user review.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
