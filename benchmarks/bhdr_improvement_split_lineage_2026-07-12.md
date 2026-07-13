@@ -592,6 +592,39 @@ HDR-capable kadis-distort into the worker images (arm64 included).** The
 avif-HDR encode arm is also landed (true CICP→nclx path) pending its own
 datagen run.
 
+**Vast-fleet scoring plan (2026-07-13, user: "do a vast fleet / chunk system is
+priority") — the mapped-out reuse path, mid-execution.** Corrective context: the
+proper metrics-fleet usage lives in `zenmetrics/docs/RUNNING_JOBS.md` +
+`docs/PLAN_SWEEPS.md` §7 + `scripts/jobsys|sweep/` (I initially hand-rolled
+around it; the user course-corrected twice). Findings from the mandated reading:
+
+- **Chunk system** (priority): `zenfleet-vastai` workers process `chunks.jsonl`
+  → `InlineGroupSpec` → in-process `run_sweep` — v27 chunks carry `hdr: bool`
+  and the vastai worker builds with `hdr`. My new `--distort-cmd --hdr` arm
+  slots in once the chunk schema carries `distort_cmd/label` (regenerate-
+  deterministically-and-score variant of the flow; for FUTURE corpora).
+- **For THIS already-generated corpus**: the metric-backfill chunk flow
+  (`scripts/sweep/metric_backfill_chunk_worker.sh` + `launch_backfill.sh`) is
+  the shape — one metric per invocation, chunk JSON → fetch → `score-pairs` →
+  per-chunk sidecar to R2. It already exposes `EXTRA_SCORE_PAIRS_ARGS` (inject
+  `--hdr --hdr-transfer pu-rescale`); the ONE gap is its step-4 "re-encode via
+  sweep" (our variants are persisted — needs a pairs-mode that syncs the
+  chunk's refs+dists from R2 instead). Remaining steps: (1) pairs-mode in the
+  worker + a small `generate_hdr_pairs_chunks.py` (row-range chunks over
+  `kadis-hdr-2026-07-13/pairs.tsv`); (2) sweep-image tag with the hdr binary
+  (BAKED, per the image rule — the staged binary is at
+  `s3://codec-corpus/kadis-hdr-2026-07-13/bin/zenmetrics-x86-hdr`);
+  (3) `launch_backfill.sh` N vast boxes; metrics = zensim-gpu(+372 features) /
+  ssim2-gpu / cvvdp / iwssim-gpu / butteraugli-gpu (dssim = HDR-Unsupported).
+- **ScoreFile/jobexec** is SDR-only (`run_score_file` decodes rgb8) — the HDR
+  arm there is optional follow-on, not the priority path.
+- **zenmetrics worktrees checked** (user question): one jj workspace
+  `zenmetrics--dedup` (parked dispatcher-dedup refactor, clean) + one locked
+  `.claude` agent worktree; neither carries chunk-system WIP.
+- Data staging: R2 run prefix `kadis-hdr-2026-07-13/` (scoped 12h creds minted;
+  binary staged; train-1 holds the consolidation script `kh_consolidate_upload.sh`
+  that verifies 11,400 → builds TSVs → syncs refs/dists/pairs to R2).
+
 **Split-host migration (2026-07-13, user: "kill local / arm-big").** The
 workstation generation was stopped at **5,390/11,400 cells** (kept at
 `/mnt/v/output/zenmetrics/datagen-2026-07-12-hdr-kadis/dist/`); the remainder
