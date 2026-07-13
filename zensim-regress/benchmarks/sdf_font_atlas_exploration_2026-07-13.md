@@ -597,3 +597,24 @@ rust book, python docs, bbc, guardian, lemonde, spiegel, elpais,
 npr-text, cnn-lite, HN, lobsters, gnu GPL, w3c css-fonts-4,
 cloudflare blog, github blog, stackoverflow, seriouseats, allrecipes,
 rfc9110, caniuse, imdb top, openlibrary.
+
+## Addendum: should the baseline itself split? (compression vs allocs)
+
+Measured: s0 (162) split into ascii(95)+promoted(67) PNGs = 12,146 +
+6,684 = 18,830 B vs 18,786 monolithic — **+44 B, compression is
+indifferent**. Decode/RAM is indifferent too: both halves are
+baseline-policy (always wanted), one 342 KB coverage buffer either way.
+**Verdict: keep s0 as ONE storage/decode unit.**
+
+The alloc pressure lives elsewhere: the bitmap path's PER-SIZE strip
+scaling is segment-granular, so every label size pays all 162 baseline
+glyphs (≈2.4 ms, 1.37 MB at 54px; measured 14.6 µs/glyph) even for a
+20-glyph label. The fix is to decouple the SCALING unit from the
+segment: **lazy per-glyph scaling** — `font.rs` already resizes each
+cell in isolation (per-cell StreamingResize); replace the eager
+whole-strip loop with a (glyph, w, h)-keyed cache filled on first
+render. Then per-size cost tracks glyphs actually used (typical label
+≈ 22 glyphs ≈ 0.32 ms / ~190 KB at 54px — better than even the old
+96-glyph strip), and baseline growth stops costing per-size anything.
+Segments remain the DECODE/asset unit; glyphs become the SCALE unit;
+SDF path unaffected (no per-size state). ~50-line change, queued.
