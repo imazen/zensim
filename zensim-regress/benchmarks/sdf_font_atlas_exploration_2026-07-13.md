@@ -131,6 +131,73 @@ Findings:
   positioning); RTL reordering is the caller's job. Arabic/Indic
   excluded — shaping-dependent regardless of atlas bytes.
 
+## Addendum: SDF vs engine rendering speed (same day)
+
+`examples/sdf_speed.rs` (release build, 7950X): 58-char line, prototype
+scalar SDF sampler (bilinear + threshold + sRGB LUT, no cache) vs
+`font::render_text_height` (per-cell Mitchell zenresize, per-size
+cached strip).
+
+| size | out px | engine warm | SDF | ratio |
+|--:|--|--:|--:|--:|
+| 12px | 348×12 | 0.017 ms | 0.029 ms | 0.57× |
+| 18px | 522×18 | 0.040 ms | 0.071 ms | 0.56× |
+| 27px | 754×27 | 0.071 ms | 0.159 ms | 0.45× |
+| 54px | 1508×54 | 0.231 ms | 0.587 ms | 0.39× |
+| 96px | 2668×96 | 0.645 ms | 1.911 ms | 0.34× |
+| **cold sweep, 40 unseen sizes** | | **55.2 ms** | **10.6 ms** | **5.2×** |
+
+Read: warm (strip cache hot) the engine wins ~2–3× (~2.8 vs ~7.2
+ns/px at 54px — cached-cell copy + LUT blend beats per-pixel 4-tap
+float sampling). Cold (each size's first render) SDF wins 5.2× — the
+engine rebuilds a 96-cell strip (~1.4 ms/size) and caches it forever
+(~96·w·h·4 B per size; ~550 KB at 54px — unbounded across sizes; SDF
+holds zero per-size state). Both are sub-millisecond per line —
+negligible next to montage resize/PNG-encode. AutoFit implication:
+binary-search probes several sizes per fit, hitting the engine's cold
+path repeatedly. SDF sampler is scalar/unoptimized (row-weight
+hoisting, fixed-point, magetypes SIMD all unexplored headroom).
+Example-grade Instant timing; port to zenbench when a real sampler
+lands.
+
+## Addendum: console-dev tier + latin-complete block ablation (same day)
+
+`sdf_console_blocks_2026-07-13.py`, same bake pipeline. Console-dev =
+latin-complete + letterlike/arrows/math-ops/misc-technical/control-
+pics/box/blocks/geometric/misc-symbols/dingbats/misc-math-A/
+suppl-arrows-A/braille ∩ DejaVu Sans Mono cmap:
+
+**CONSOLE-DEV: 2,024 glyphs — 514,771 B raw 4-bit / 147,962 B +zenflate
+/ 180,636 B subset TTF.** Here SDF+zenflate BEATS the vector subset
+(148 < 181 KB): box/block/geometric glyphs compress superbly as fields
+(box-drawing: 128 glyphs → 4,059 B zlib) while still costing outline
+bytes in TTF. Gaps: DejaVu Mono has **zero Braille** (TUI graph
+spinners need a fallback face), 1 control-picture, 149/256
+misc-symbols.
+
+Per-block (raw4 / zlib4 bytes, ∩ cmap) — ablation view:
+
+| block | glyphs | raw4 | zlib4 | verdict |
+|---|--:|--:|--:|---|
+| ascii | 95 | 23,033 | 9,327 | core |
+| latin-1 | 96 | 24,794 | 7,538 | core |
+| latin-ext-A | 128 | 37,301 | 9,879 | core (Central-European complete) |
+| latin-ext-B | 180 | 52,465 | 16,260 | **curate ~30** (Romanian Ș/ț, Pinyin ǎǐǒǔ; rest is Africanist/phonetic) |
+| IPA | 96 | 24,899 | 9,865 | **drop** unless phonetics |
+| modifiers | 50 | 5,875 | 2,508 | **drop** (phonetics) |
+| combining | 67 | 22,614 | 2,010 | **drop** — non-shaping renderer can't position marks |
+| latin-ext-add | 182 | 54,849 | 12,316 | **curate ~15** unless Vietnamese (134/182 are Viet forms) |
+| gen-punct | 54 | 6,863 | 2,763 | core |
+| super/sub | 42 | 5,849 | 2,647 | cheap, keep |
+| currency | 26 | 8,172 | 3,944 | keep (€ is in latin-web anyway) |
+
+Dropping combining+IPA+modifiers saves 53 KB raw / 14 KB zlib;
+curating ext-B + ext-add to ~45 practical glyphs saves a further
+~95 KB raw / ~25 KB zlib (arithmetic on the measured block rates). A
+curated "latin-practical" (~490 glyphs) lands ≈ 120 KB raw / ≈ 36 KB
+zenflate — half of latin-complete for full real-language coverage
+minus Vietnamese.
+
 ## Addendum: zenresize filter matrix (same day)
 
 `examples/font_filter_matrix.rs` replicates the production per-cell
