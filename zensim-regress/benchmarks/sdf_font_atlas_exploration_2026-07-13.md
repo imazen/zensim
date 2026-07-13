@@ -478,3 +478,14 @@ visually indistinguishable, diffs confined to AA ramps):
 
 Max|Δ| exceeds the ±8 coverage quantization because sRGB encoding
 steepens near black — isolated dark-ramp pixels only.
+
+## Addendum: console-lean-v2 asset decode time (same day)
+
+7950X, release, one-time startup cost: **16-level PNG (89.7 KB →
+1.94 MB coverage) decodes in 3.25 ms** (zenpng: inflate + unfilter +
+expand); SDF zenflate stream (119.7 KB → 1.26 MB) in 1.22 ms; SDF raw
+embed unpacks in 0.71 ms. All negligible. The bitmap path's real
+first-use cost is per-SIZE strip scaling, which is linear in glyph
+count: measured 1.4 ms for 96 glyphs → ~13 ms per new size at 920
+glyphs (arithmetic on the measured per-glyph cost), paid per distinct
+label size and cached at ~7.8 MB each; SDF pays neither.
