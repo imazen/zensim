@@ -370,3 +370,33 @@ independent of SDF: switching `font.rs`'s hardcoded Mitchell to
 CatmullRom or RobidouxSharp is a one-line change that visibly
 crispens today's labels (changes all montage output — re-baseline
 any golden images when doing so).
+
+## Addendum: atlas base-resolution sweep (user quality review, same day)
+
+User verdict on the 8–128px demo: SDF-27 "looks bad above 27px, only a
+tiny bit better at 12px" — confirmed; "Handgloves" lowercase is a
+harsher test than the earlier 'R' panel (x-height strokes ~2.2 texels
+at 27 base → contour wobble under magnification). Measured ASCII
+(96-glyph) atlases at five bases, 4-bit, zenflate:
+
+| base | cell | raw 4-bit | e30 | quality @≤128px render |
+|--:|--|--:|--:|--|
+| 27 | 13×27 | 16,896 | 6,613 | wavy above ~40px |
+| 40 | 19×40 | 36,480 | 11,224 | — |
+| **54** | **26×54** | **67,392** | **15,229** | **clean through 96, minor wobble at 128** |
+| 96 | 46×96 | 211,968 | 34,893 | — |
+| 128 | 62×128 | 380,928 | 52,193 | 22.5× raw cost of 27 |
+
+Visual proof (bitmap vs SDF-27 vs SDF-54, 12–128px, real feature
+builds): `sdf_base_comparison.png`. **SDF-54 fixes the complaint at 4×
+bytes, not 22×**: crisp at 54–96px where bitmap blurs and SDF-27
+wobbles; at 128px minor residual waviness (part bitmap-derived-bake
+artifact — outline bake improves it). Compression deepens with base
+(smoother field): 39% → 14% of raw across 27→128.
+
+Decision input: default atlas moves to 54 base (67 KB raw zero-dep, or
+15 KB wherever zenflate rides along for charset tiers). 96/128 bases
+only if 200px+ headline rendering materializes. Small sizes (≤20px):
+all paths equivalent — never the SDF sell; parity is the goal there.
+Tier scaling at 54 base = 4× the measured 27-base tier tables (raw);
+compressed scales sub-linearly.
