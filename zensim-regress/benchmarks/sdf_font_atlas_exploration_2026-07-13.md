@@ -239,6 +239,42 @@ VS16 (U+FE0F, 70 files) and ZWJ (U+200D, 15 files) ride along with
 emoji, and a naive renderer would print a tofu box after every emoji.
 Skip category Cf + variation selectors in the glyph mapper.
 
+## Addendum: emoji/symbol automapping design (same day)
+
+Question: color emoji can't live in a single-channel SDF atlas — can we
+automap to renderable equivalents? Measured on the same corpus
+(mechanism → share of the 7,047 post-v2 misses):
+
+| mechanism | rescued | share |
+|---|--:|--:|
+| semantic twin table (~40 entries: ✅→✓ ❌→✗ ⭐→★ ➡→→ 🔴→● 💚→❤ ⛔→⊘ ➖→− ❓→? …) | 1,285 | 18.2% |
+| fullwidth fold (algorithmic: U+FF01–FF5E − 0xFEE0; 。、→ . ,) | 421 | 6.0% |
+| format-char skip (VS16, ZWJ, ZWSP, skin-tone modifiers) | 147 | 2.1% |
+| **total rendered CORRECTLY, zero extra glyphs** | **1,853** | **26.3%** |
+| pictographs with no twin (🚀👀🎉📦…) → `:shortcode:` / `[U+XXXX]` policy | 637 | 9.0% |
+| CJK/hangul text + other-script letters (out of scope → tofu) | 4,533 | 64.3% |
+| residual | 24 | 0.3% |
+
+Excluding CJK (foreign-language *text*, not symbols): **74% of
+non-language misses map exactly; +25% more are shortcode-able → ~99%
+of symbol misses render meaningfully.** Corpus coverage after
+v2 + automap: 99.968% correct, 99.972% meaningful with shortcodes.
+
+Mapper pipeline (per char, shared by bitmap+SDF paths, zero deps,
+~1–3 KB of static tables): atlas hit → format-skip → fullwidth fold →
+twin table (sorted static array, binary search) → pictograph policy
+(`Tofu | Shortcode` config; curated ~100-entry GitHub-shortname table,
+fallback `[U+XXXX]` hex which is still LLM-legible) → .notdef tofu.
+ZWJ sequences render per-component under either policy (v1).
+
+**Prototype bug this surfaced**: the current glyph lookup CLAMPS
+unmapped codepoints into atlas range, so any emoji in a label renders
+as **Δ** (glyph 96) today — silently misleading. The mapper must land
+with a designed .notdef tofu glyph. Real color-emoji rendering
+(COLR/CBDT/Twemoji atlas) stays explicitly out of scope: hundreds of
+KB + RGBA compositing for a *report* font where meaning beats
+decoration.
+
 ## Addendum: SDF vs engine rendering speed (same day)
 
 `examples/sdf_speed.rs` (release build, 7950X): 58-char line, prototype
