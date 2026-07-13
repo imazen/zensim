@@ -692,6 +692,22 @@ u8-shell regime** (matches the jxl HDR corpus — do not mix with
 `--hdr-features-pu-linear` extractions). Monitor: `_DONE`/19 + box liveness,
 3-min ticks (`fleet_status.sh` in the local run dir).
 
+**avif-HDR datagen HALTED (2026-07-13, user: "avif is in flux, dont do that").**
+An avif-HDR encode datagen (1,140 refs × q{5,15,30,50,70,85,95}, LOCAL
+workstation, `datagen_encode_hdr.sh CODEC=zenavif`) was started after a green
+2-cell smoke, then killed ~1.5 chunks in per user directive — the zenavif
+crate is mid-migration (z1 session WIP + unpushed `2e2d0ab6`), so encodes
+built from that tree have unstable provenance. Partial output parked at
+`datagen-2026-06-23-hdr/enc/zenavif.influx-halted-2026-07-13.bak` (do NOT
+consume). Re-run ONLY after zenavif stabilizes — and preferably on Hetzner
+(encode = CPU work per the fleet-split doctrine), not local.
+
+**Fleet debugging note:** worker logs show
+`ERROR session: fetching region failed: Forbidden / status code: 403` once per
+s5cmd invocation — that is s5cmd's GetBucketLocation probe, which R2 scoped
+temp creds can't answer. s5cmd falls back and all actual operations succeed.
+Harmless noise; do not chase it.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
