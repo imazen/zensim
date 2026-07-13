@@ -424,3 +424,33 @@ zenpng+zenresize in the text path and blurs above 54px; SDF keeps the
 40-line sampler, >54px rendering, and threshold effects. Verdict
 unchanged (SDF-54 for tiers) but now byte-honest: the win is deps,
 cache RAM, and ceiling — not compressed bytes.
+
+## Addendum: 4-bit / 16-level PNG via zenpng max (user suggestion, same day)
+
+Two encodings of the 54px-em coverage strips: (a) TRUE 4-bit-packed
+PNG bound = best PNG filter (None wins on packed nibbles; Up/Paeth
+hurt) + zenflate-e30 + ~60 B container; (b) REAL zenpng at
+`Compression::Brag` (Maniac + FullOptimal, beats ECT-9) on gray8
+quantized to 16 levels (multiples of 17) — no 4-bit container needed,
+decodes through the existing strip loader unchanged.
+
+| tier | SDF-54 e30 | 8-bit PNG Brag | **16-level PNG Brag** | true-4bit bound |
+|---|--:|--:|--:|--:|
+| ascii | 18,070 | 20,094 | **12,146** | ~12,034 |
+| latin-practical | 73,984 | 66,985 | **46,479** | ~47,414 |
+| console-lean-v2 | 125,208 | 131,264 | **89,705** | ~88,446 |
+
+**16-level gray8 + Brag matches the true-4-bit container** (filter
+search + zenzop recoup the 2× raw) and **beats SDF-54 compressed by
+~35%**. Quantization cost: ≤ ±8/255 on 1–2px AA ramps — same depth the
+SDF already ships. Asset swap needs ZERO code (values are already
+0..255 coverage).
+
+Decision matrix, final form: for ≤54px labels in a crate that keeps
+zenpng+zenresize anyway (zensim-regress does), **quantized-PNG bitmap
+tiers are the smallest asset**. SDF-54's case = >54px rendering,
+threshold effects, zero-dep raw embed (327 KB vs 990 KB latin), and
+flat per-size cost (bitmap strip cache: ~7.8 MB per cached size at 920
+glyphs). zenmonospace can honestly ship BOTH: `bitmap-png` tiers
+(smallest, ≤54px) and `sdf` tiers (ceiling-free + effects), sharing
+the composer.
