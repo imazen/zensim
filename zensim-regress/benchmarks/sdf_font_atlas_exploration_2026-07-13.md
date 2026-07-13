@@ -547,3 +547,20 @@ https://claude.ai/code/artifact/7072e34b-ef7d-4770-8739-82fcf1016eb6
 Scripts: `readme_charset_coverage_2026-07-13.py` (corpus scan pattern);
 per-segment bake = `sdf_console_blocks_2026-07-13.py` pipeline with the
 PROMOTED list.
+
+## Addendum: baseline v2 — ≥1% cut + family completion (s0 = 154) — same day
+
+User direction: expand ✔✘ and raise coverage. New promotion policy:
+**file-share ≥1.0%** (adds ⇒ ≠ ε © Σ ∧ à ┘ ¹ ┐ λ è τ ┌ ° μ — 16
+glyphs; next band 0.5–1.0% holds 158 more, a flat tail) **+ family
+completion** so no semantic set splits across segments: ✔ ✘ join ✓ ✗;
+┤ ┬ ┴ ┼ complete the light box set; ↑ ↓ ⇐ pair the arrows; ³
+completes ¹ ². 59 promoted → **s0 = 154 glyphs, 18,088 B PNG /
+25,583 B SDF-e30**.
+
+Re-validated on the 19,773-file corpus: **87.3% of files render
+entirely from s0** (was 78.6% at 128); triggers s1 8.3% / s2 4.9% /
+s3 2.2%; s0 serves 99.64% of occurrences. Segment sums 88,483 PNG
+(still −1.2 KB vs monolith) / 121,921 SDF (+2.2 KB). The 8.7-point
+coverage gain cost +2.3 KB of resident asset. Chart updated (same
+artifact URL), s0 specimen lists the full promoted set.
