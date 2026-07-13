@@ -564,3 +564,36 @@ s3 2.2%; s0 serves 99.64% of occurrences. Segment sums 88,483 PNG
 (still −1.2 KB vs monolith) / 121,921 SDF (+2.2 KB). The 8.7-point
 coverage gain cost +2.3 KB of resident asset. Chart updated (same
 artifact URL), s0 specimen lists the full promoted set.
+
+## Addendum: website scan → baseline v3 (s0 = 162) + mapper space/hyphen folds
+
+User probe (‟ † » · bullets · dash family) exposed md-source corpus
+bias: rendered web text differs. Scanned 36 diverse multilingual pages
+(en/fr/de/es/it/pt/pl wikis, news, docs, recipes, specs; curl + tag
+strip + entity decode; scripts in session scratchpad, urls preserved in
+this addendum's commit). Findings vs md corpus:
+
+- **• bullet 9/36 pages (md: 0.37% — list markup hides it)** → PROMOTE
+- **« » 10–11/36 pages (fr prose + wiki language navs)** → PROMOTE;
+  family-complete ‹ › „ ‚ ‟ (with already-in “ ” ‘ ’)
+- **† ‡ ‟: ≤1 page AND ≤0.2% md** → stay s1 (lazy)
+- **NBSP = the web's #2 non-ASCII (22/36 pages, 7.5 k occ)** → mapper
+  FOLD to space, not a glyph; likewise thin/narrow/en/em spaces
+  (U+2000–200A, 202F, 205F), ‐ ‑ ‒ → '-', soft hyphen → Skip.
+  LANDED in glyph_map.rs (+tests; 392/398 green, clippy clean).
+- Cyrillic/Arabic/CJK page-share rows are wiki language-nav artifacts
+  (e.g. Cyrillic 'к': 18 pages but 175 occ total) — occurrence counts
+  expose it; fallback policy unchanged.
+
+**Baseline v3 = 162 glyphs** (154 + • « » ‹ › „ ‚ ‟): md-corpus
+baseline-only files 87.3% → **88.9%** (folds contribute: NBSP no
+longer boxes), s1 trigger 8.3% → 6.5%; web in-font occurrence share
+served by s0: 99.25%. Segments: s0 18,786 / s1 33,962 / s2 31,774 /
+s3 3,708 PNG (sum 88,230 — still −1.5 KB vs monolith); SDF e30 sum
+121,643. Artifact chart updated (same URL).
+
+Scan URL list (36): en/fr/de/es/it/pt/pl wikipedia articles, MDN ×2,
+rust book, python docs, bbc, guardian, lemonde, spiegel, elpais,
+npr-text, cnn-lite, HN, lobsters, gnu GPL, w3c css-fonts-4,
+cloudflare blog, github blog, stackoverflow, seriouseats, allrecipes,
+rfc9110, caniuse, imdb top, openlibrary.

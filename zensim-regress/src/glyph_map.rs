@@ -57,15 +57,27 @@ fn is_skip(cp: u32) -> bool {
         | 0x200B..=0x200D    // ZWSP, ZWNJ, ZWJ
         | 0x2060             // word joiner
         | 0xFEFF             // BOM / ZWNBSP
+        | 0xAD               // soft hyphen (render nothing when not breaking)
         | 0x1F3FB..=0x1F3FF  // emoji skin-tone modifiers
         | 0xE0020..=0xE007F  // tag characters (flag sequences)
     )
 }
 
-/// Fullwidth / ideographic forms → ASCII-range equivalents.
+/// Fullwidth / ideographic / lookalike forms → ASCII-range equivalents.
+///
+/// Space folds matter more than they look: NBSP is the second-most
+/// common non-ASCII character on the web (22/36 pages, 7.5 k
+/// occurrences in the 2026-07-13 site scan) and would otherwise
+/// hex-box in every rendered-HTML-derived string.
 fn fold_width(cp: u32) -> Option<char> {
     match cp {
         0xFF01..=0xFF5E => char::from_u32(cp - 0xFEE0),
+        0xA0 => Some(' '),            // no-break space
+        0x2000..=0x200A => Some(' '), // en/em/thin/hair… spaces
+        0x202F => Some(' '),          // narrow no-break space (fr)
+        0x205F => Some(' '),          // medium mathematical space
+        0x2010 | 0x2011 => Some('-'), // hyphen, non-breaking hyphen
+        0x2012 => Some('-'),          // figure dash
         0x3001 => Some(','),          // ideographic comma
         0x3002 => Some('.'),          // ideographic full stop
         0x300C | 0x300D => Some('"'), // corner brackets
@@ -285,6 +297,21 @@ mod tests {
         assert_eq!(map_char('ｘ'), map_char('x'));
         assert_eq!(map_char('，'), map_char(','));
         assert_eq!(map_char('。'), map_char('.'));
+    }
+
+    #[test]
+    fn spaces_and_hyphen_lookalikes_fold() {
+        for c in ['\u{A0}', '\u{2009}', '\u{202F}', '\u{2003}'] {
+            assert_eq!(map_char(c), map_char(' '), "{c:?} should fold to space");
+        }
+        for c in ['\u{2010}', '\u{2011}', '\u{2012}'] {
+            assert_eq!(map_char(c), map_char('-'), "{c:?} should fold to hyphen");
+        }
+        assert_eq!(
+            map_char('\u{AD}'),
+            Mapped::Skip,
+            "soft hyphen is zero-width"
+        );
     }
 
     #[test]
