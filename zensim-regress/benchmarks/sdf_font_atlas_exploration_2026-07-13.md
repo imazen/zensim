@@ -489,3 +489,30 @@ first-use cost is per-SIZE strip scaling, which is linear in glyph
 count: measured 1.4 ms for 96 glyphs → ~13 ms per new size at 920
 glyphs (arithmetic on the measured per-glyph cost), paid per distinct
 label size and cached at ~7.8 MB each; SDF pays neither.
+
+## Addendum: popularity-segmented tiers (same day)
+
+4-way split of console-lean-v2 by corpus popularity (s0 ascii 95 —
+every label; s1 latin-rest 374; s2 console/symbols 414; s3 greek+marks
+37), each segment a separate asset:
+
+| segment | glyphs | 16-level PNG (Brag) | SDF-54 e30 |
+|---|--:|--:|--:|
+| s0 ascii | 95 | 12,146 | 17,500 |
+| s1 latin | 374 | 36,177 | 54,138 |
+| s2 console | 414 | 33,161 | 40,248 |
+| s3 greek+marks | 37 | 5,925 | 8,581 |
+| **sum vs monolith** | 920 | **87,409 vs 89,705 (−2.3 KB)** | 120,467 vs 119,688 (+0.8 KB) |
+
+**Splitting is byte-free** — PNG even improves (per-segment content
+homogeneity beats the larger DEFLATE window; Brag re-optimizes
+filters/trees per segment); SDF pays +0.7%. Runtime wins (measured
+bases + linear arithmetic): lazy per-segment decode puts the typical
+ascii-only montage at ~0.35 ms / 200 KB instead of 3.25 ms / 1.94 MB;
+per-size strip scaling stays at today's 96-glyph cost (1.4 ms /
+0.77 MB per size) unless a segment's glyph actually appears (first box
+char: +~6 ms once per size for s2; first Greek/✓: +~0.5 ms for s3).
+Implementation: codepoint→(segment, index) table in glyph_map (already
+the single coverage choke point), per-segment lazy OnceLock decode,
+scaled-strip cache keyed (segment, w, h). ~150 lines. Adopted as the
+tier file layout for the future zenmonospace crate.
