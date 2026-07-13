@@ -497,7 +497,19 @@ Selection applied per the rule (before any UPIQ look): `hdriwmix-lasso0.001`
    valid training-side selection axis and directly targets the §8.2 failure mode.
 2. Re-run the §8.5 protocol with the broadened val as the selection axis; bvls in the
    candidate family.
-3. **Ingest untouched HDR human data** (SI-HDR, Zerman 2017) as the confirmation set.
+3. **Ingest untouched HDR human data** as the confirmation set. **Best candidate
+   found (2026-07-12): AIC-HDR2025** (Jenadeleh/Sneyers/…/Saupe, QoMEX 2025,
+   arXiv:2506.12505) — 5 HDR sources (Rec.2100 PQ 10-bit), 100 compressed images
+   across **JPEG AI / JXL / AVIF / JPEG XT × 5 levels**, 34,560 triplet responses
+   → JND-unit scores (CI ≈0.27 JND), AIC-3 methodology. Compression-focused,
+   HDR-display-scored, covers our exact training codec families, and completely
+   untouched by any zensim eval. **NOT YET OBTAINABLE as of 2026-07-12:** the
+   repo (github.com/jpeg-aic/AIC-HDR2025, cloned at
+   `/mnt/v/datasets/aic-hdr2025/`) is README-only — "release after QoMEX 2025
+   (Oct 2025)" is overdue; no GitHub releases/branches, not on aicdb.jpeg.org or
+   database.mmsp-kn.de; the paper's availability claim points at the empty repo.
+   Acquisition: watch the repo; contacting the authors is a user decision.
+   Fallback candidates: SI-HDR (Hanji 2022), Zerman 2017 (availability unchecked).
 4. Resolve the iwssim tiny-scale gap (ssim2-fallback rows or a scale guard).
 5. HDR-anchored dial refit for any ship candidate (§7.4).
 
