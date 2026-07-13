@@ -400,3 +400,27 @@ only if 200px+ headline rendering materializes. Small sizes (≤20px):
 all paths equivalent — never the SDF sell; parity is the goal there.
 Tier scaling at 54 base = 4× the measured 27-base tier tables (raw);
 compressed scales sub-linearly.
+
+## Addendum: curated tiers as BITMAP coverage vs SDF-54 (same day)
+
+Same coverage, same face, each representation stored as its path uses
+it (bitmap: uniform 33×64 cells @54px em, 8-bit coverage; SDF: 54-base
+4-bit tight-crop + 6 B/glyph metrics). zenflate e30 on raw streams;
+PNG = PIL optimize (zopfli-PNG would approach the e30 column).
+
+| tier | glyphs | bitmap PNG | bitmap e30 | SDF-54 raw | SDF-54 e30 |
+|---|--:|--:|--:|--:|--:|
+| ascii | 95 | 23,776 | 20,206 | 64,143 | 18,070 |
+| latin-practical | 469 | 78,684 | 67,951 | 327,489 | 73,984 |
+| console-lean-v2 | 920 | 149,067 | 124,168 | 634,202 | 125,208 |
+
+**Compressed, it's a tie** (bitmap even ~8% smaller at latin tier) —
+at matched 54-base quality, bytes stop deciding. **Raw/zero-dep embed,
+SDF is 3× smaller** (4-bit vs 8-bit coverage). The decisive axes are
+operational: the bitmap path's per-size scaled-strip cache scales with
+glyph count — at 920 glyphs × 33×64 × 4 B ≈ **7.8 MB per cached size**
+(LRU cap 8 → up to 62 MB) vs SDF's zero per-size state; bitmap keeps
+zenpng+zenresize in the text path and blurs above 54px; SDF keeps the
+40-line sampler, >54px rendering, and threshold effects. Verdict
+unchanged (SDF-54 for tiers) but now byte-honest: the win is deps,
+cache RAM, and ceiling — not compressed bytes.
