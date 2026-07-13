@@ -199,15 +199,15 @@ pub fn render_text_height_lh(
     let scaled_char_h = target_char_h;
     let line_advance = line_advance_px(scaled_char_h, line_height);
 
-    // Resample each glyph cell IN ISOLATION. See `build_scaled_strip_per_cell`
-    // for the why; the result is cached by `(char_w, char_h, filter)` so
-    // multi-pass renders at the same canvas size pay the resample cost
-    // exactly once.
+    // Glyph cells are resampled IN ISOLATION (see
+    // `build_scaled_run_per_cell` for the why) and fetched lazily in
+    // SCALE_BATCH runs, so per-size work tracks the glyphs this text
+    // actually uses.
     //
     // Mitchell-Netravali — minimal overshoot, no halo rings. Lanczos
     // produces visible side-lobe ringing on sharp glyph edges; Triangle
     // is artifact-free but visibly soft.
-    let scaled_strip = cached_scaled_strip(scaled_char_w, scaled_char_h, ResampleFilter::Mitchell);
+    let mut run: Option<(u32, Arc<Bitmap>)> = None;
 
     let out_w = max_cols * scaled_char_w;
     let out_h = stacked_height_px(scaled_char_h, line_advance, num_lines);
@@ -245,18 +245,31 @@ pub fn render_text_height_lh(
                 }
             };
             col += 1;
-            let src_x = glyph_idx * scaled_char_w;
+            let batch = glyph_idx / SCALE_BATCH;
+            let scaled_run = match &run {
+                Some((b, bmp)) if *b == batch => bmp,
+                _ => {
+                    let bmp = cached_glyph_batch(
+                        batch,
+                        scaled_char_w,
+                        scaled_char_h,
+                        ResampleFilter::Mitchell,
+                    );
+                    &run.insert((batch, bmp)).1
+                }
+            };
+            let src_x = (glyph_idx - batch * SCALE_BATCH) * scaled_char_w;
 
             for gy in 0..scaled_char_h {
                 for gx in 0..scaled_char_w {
                     let sx = src_x + gx;
-                    if sx >= scaled_strip.width() {
+                    if sx >= scaled_run.width() {
                         continue;
                     }
                     // Read coverage from the RGBA strip's alpha channel.
                     // RGB is constant 255 (white-tinted) and is unused
                     // at composite — we tint with `fg` directly.
-                    let alpha = scaled_strip.get_pixel(sx, gy)[3];
+                    let alpha = scaled_run.get_pixel(sx, gy)[3];
                     if alpha == 0 {
                         continue;
                     }
@@ -366,71 +379,135 @@ fn wrap_text(text: &str, max_cols: usize) -> String {
 /// 255, alpha carries coverage, tinting happens at composite — so the
 /// cache key is purely `(scaled_char_w, scaled_char_h, filter)`.
 ///
-/// Bounded LRU (capacity 8) so a pathological call sequence can't grow
-/// it unboundedly. Vec-based: N is small enough that linear scan beats
-/// a HashMap. Built outside the lock to avoid serialising bench rounds.
-fn cached_scaled_strip(
-    scaled_char_w: u32,
-    scaled_char_h: u32,
-    filter: ResampleFilter,
-) -> Arc<Bitmap> {
-    type Key = (u32, u32, ResampleFilter);
-    type CacheEntry = (Key, Arc<Bitmap>);
-    type Cache = Mutex<Vec<CacheEntry>>;
-    const CAP: usize = 8;
-    static CACHE: OnceLock<Cache> = OnceLock::new();
+/// Glyphs are scaled lazily in RUNS of `SCALE_BATCH` consecutive
+/// indices: batch `b` covers `[b·SCALE_BATCH, min((b+1)·SCALE_BATCH,
+/// CHAR_COUNT))`. Per-size work then tracks the glyphs a label actually
+/// uses instead of the whole (growing) atlas — a 20-glyph label at a
+/// fresh size scales ~3 batches, not 96+ cells.
+///
+/// Why 4 (measured, `examples/glyph_batch_bench.rs`): the producer's
+/// per-run overhead is ~zero (fit `a ≤ 2 µs`; per-glyph `b` = 6–15 µs
+/// across 12–54 px), so smaller batches always win the COLD model —
+/// but batch=1 defeats the compose loop's same-batch memoization and
+/// makes the warm path pay a cache lookup per character against a
+/// much larger entry set. B=4 keeps cold cost within ~2.2× of the
+/// B=1 ideal (and ~3× better than whole-strip scaling) while text's
+/// index clustering (lowercase/digit runs) amortizes lookups.
+pub(crate) const SCALE_BATCH: u32 = 4;
 
-    let key: Key = (scaled_char_w, scaled_char_h, filter);
-    let cache = CACHE.get_or_init(|| Mutex::new(Vec::with_capacity(CAP)));
+/// Byte budget for the scaled-glyph cache (sum of cached run bitmaps).
+/// Generous for many (size × batch) combinations while bounding a
+/// pathological many-sizes sequence; eviction is LRU.
+const GLYPH_CACHE_BUDGET: usize = 6 << 20;
+
+/// Fetch (building on miss) the scaled run for `batch` at the given
+/// cell size. Returned bitmap holds `run_len(batch)` cells side by
+/// side; glyph `idx` sits at `(idx - batch·SCALE_BATCH) * char_w`.
+///
+/// Bounded byte-budget LRU. Vec-based: entry count stays small enough
+/// that linear scan beats a HashMap. Built outside the lock to avoid
+/// serialising concurrent renders.
+fn cached_glyph_batch(batch: u32, char_w: u32, char_h: u32, filter: ResampleFilter) -> Arc<Bitmap> {
+    type Key = (u32, u32, u32, ResampleFilter);
+    struct Cache {
+        entries: Vec<(Key, Arc<Bitmap>)>,
+        bytes: usize,
+    }
+    static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
+
+    let key: Key = (batch, char_w, char_h, filter);
+    let cache = CACHE.get_or_init(|| {
+        Mutex::new(Cache {
+            entries: Vec::new(),
+            bytes: 0,
+        })
+    });
 
     if let Ok(mut guard) = cache.lock()
-        && let Some(idx) = guard.iter().position(|(k, _)| *k == key)
+        && let Some(idx) = guard.entries.iter().position(|(k, _)| *k == key)
     {
         // Bump to MRU (back of vec).
-        let entry = guard.remove(idx);
-        guard.push(entry);
-        return guard.last().unwrap().1.clone();
+        let entry = guard.entries.remove(idx);
+        guard.entries.push(entry);
+        return guard.entries.last().unwrap().1.clone();
     }
 
-    // The `sdf-font` feature swaps the strip *producer* only: same
-    // dimensions, same RGBA-with-coverage-alpha layout, same cache and
-    // composite path downstream. `filter` stays in the cache key but
-    // does not affect SDF output.
-    #[cfg(feature = "sdf-font")]
-    let scaled = Arc::new(crate::sdf_font::build_scaled_strip_sdf(
-        scaled_char_w,
-        scaled_char_h,
-    ));
-    #[cfg(not(feature = "sdf-font"))]
-    let scaled = Arc::new(build_scaled_strip_per_cell(
-        font_strip(),
-        scaled_char_w,
-        scaled_char_h,
-        filter,
-    ));
+    let start = batch * SCALE_BATCH;
+    let count = SCALE_BATCH.min(CHAR_COUNT.saturating_sub(start));
+    let scaled = Arc::new(build_scaled_run(start, count, char_w, char_h, filter));
 
     if let Ok(mut guard) = cache.lock() {
         // Race-tolerant: another thread may have inserted the same key
         // in the gap between the miss and the build. Dedup before push.
-        if !guard.iter().any(|(k, _)| *k == key) {
-            if guard.len() >= CAP {
-                guard.remove(0);
+        if !guard.entries.iter().any(|(k, _)| *k == key) {
+            let sz = scaled.as_raw().len();
+            guard.entries.push((key, scaled.clone()));
+            guard.bytes += sz;
+            while guard.bytes > GLYPH_CACHE_BUDGET && guard.entries.len() > 1 {
+                let (_, old) = guard.entries.remove(0);
+                guard.bytes -= old.as_raw().len();
             }
-            guard.push((key, scaled.clone()));
         }
     }
     scaled
 }
 
-#[cfg_attr(feature = "sdf-font", allow(dead_code))]
+/// Build the scaled cells for glyph indices `[start, start+count)` at
+/// the given cell size — the single producer both paths implement.
+///
+/// The `sdf-font` feature swaps the producer only: same dimensions,
+/// same RGBA-with-coverage-alpha layout, same cache and composite path
+/// downstream. `filter` stays in the cache key but does not affect SDF
+/// output.
+fn build_scaled_run(
+    start: u32,
+    count: u32,
+    char_w: u32,
+    char_h: u32,
+    #[cfg_attr(feature = "sdf-font", allow(unused_variables))] filter: ResampleFilter,
+) -> Bitmap {
+    #[cfg(feature = "sdf-font")]
+    {
+        crate::sdf_font::build_scaled_run_sdf(start, count, char_w, char_h)
+    }
+    #[cfg(not(feature = "sdf-font"))]
+    {
+        build_scaled_run_per_cell(font_strip(), start, count, char_w, char_h, filter)
+    }
+}
+
+/// Internal bench hook for `examples/glyph_batch_bench.rs` — times the
+/// producer at arbitrary run lengths without going through the cache.
+#[cfg(feature = "_internal_api")]
+#[doc(hidden)]
+pub fn bench_build_scaled_run(start: u32, count: u32, char_w: u32, char_h: u32) -> usize {
+    build_scaled_run(start, count, char_w, char_h, ResampleFilter::Mitchell)
+        .as_raw()
+        .len()
+}
+
+/// Full-strip builder retained for the batch/strip equivalence test.
+#[cfg(all(test, not(feature = "sdf-font")))]
 fn build_scaled_strip_per_cell(
     strip: &Bitmap,
     scaled_char_w: u32,
     scaled_char_h: u32,
     filter: ResampleFilter,
 ) -> Bitmap {
-    let scaled_strip_w = scaled_char_w * CHAR_COUNT;
-    if scaled_char_w == 0 || scaled_char_h == 0 {
+    build_scaled_run_per_cell(strip, 0, CHAR_COUNT, scaled_char_w, scaled_char_h, filter)
+}
+
+#[cfg_attr(feature = "sdf-font", allow(dead_code))]
+fn build_scaled_run_per_cell(
+    strip: &Bitmap,
+    start: u32,
+    count: u32,
+    scaled_char_w: u32,
+    scaled_char_h: u32,
+    filter: ResampleFilter,
+) -> Bitmap {
+    let scaled_strip_w = scaled_char_w * count.max(1);
+    if scaled_char_w == 0 || scaled_char_h == 0 || count == 0 {
         return Bitmap::new(scaled_strip_w.max(1), scaled_char_h.max(1));
     }
     let mut out = vec![0u8; (scaled_strip_w as usize) * (scaled_char_h as usize) * 4];
@@ -453,7 +530,8 @@ fn build_scaled_strip_per_cell(
             .input(zenresize::PixelDescriptor::RGBA8_SRGB)
             .build();
 
-    for glyph_idx in 0..CHAR_COUNT {
+    for i in 0..count {
+        let glyph_idx = (start + i).min(CHAR_COUNT - 1);
         // crop_view: zero-copy strided sub-view of cell `glyph_idx`.
         let cell = strip_slice.crop_view(glyph_idx * BASE_CHAR_W, 0, BASE_CHAR_W, BASE_CHAR_H);
 
@@ -461,7 +539,7 @@ fn build_scaled_strip_per_cell(
         // tables are recomputed per glyph (same dims, same filter, so
         // the cost is identical work — just no shared cache today).
         let mut sr = zenresize::StreamingResize::new(&cfg);
-        let cell_x = (glyph_idx as usize) * scaled_char_w_usize;
+        let cell_x = (i as usize) * scaled_char_w_usize;
         let mut output_y = 0u32;
 
         let drain = |sr: &mut zenresize::StreamingResize, output_y: &mut u32, out: &mut [u8]| {
@@ -584,9 +662,9 @@ pub fn render_lines_fitted_lh(
         return (vec![], 0, 0);
     }
 
-    // Per-cell isolated resize, cached by canvas — see
-    // `cached_scaled_strip` and `build_scaled_strip_per_cell`.
-    let scaled_strip = cached_scaled_strip(char_w, char_h, ResampleFilter::Mitchell);
+    // Per-cell isolated resize, fetched lazily in SCALE_BATCH runs —
+    // see `cached_glyph_batch` and `build_scaled_run_per_cell`.
+    let mut run: Option<(u32, Arc<Bitmap>)> = None;
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
     for pixel in buf.chunks_exact_mut(4) {
@@ -613,16 +691,24 @@ pub fn render_lines_fitted_lh(
                 }
             };
             col += 1;
-            let src_x = glyph_idx * char_w;
+            let batch = glyph_idx / SCALE_BATCH;
+            let scaled_run = match &run {
+                Some((b, bmp)) if *b == batch => bmp,
+                _ => {
+                    let bmp = cached_glyph_batch(batch, char_w, char_h, ResampleFilter::Mitchell);
+                    &run.insert((batch, bmp)).1
+                }
+            };
+            let src_x = (glyph_idx - batch * SCALE_BATCH) * char_w;
 
             for gy in 0..char_h {
                 for gx in 0..char_w {
                     let sx = src_x + gx;
-                    if sx >= scaled_strip.width() {
+                    if sx >= scaled_run.width() {
                         continue;
                     }
                     // Coverage from the RGBA strip's alpha channel.
-                    let alpha = scaled_strip.get_pixel(sx, gy)[3];
+                    let alpha = scaled_run.get_pixel(sx, gy)[3];
                     if alpha == 0 {
                         continue;
                     }
@@ -828,6 +914,31 @@ mod tests {
         let (mw, mh) = measure_text_height(text, 24);
         assert_eq!((w, h), (mw, mh));
         assert_eq!(buf.len(), (w * h * 4) as usize);
+    }
+
+    /// Lazy batches must be pixel-identical to the full-strip build —
+    /// every glyph, every pixel, at a representative size.
+    #[test]
+    fn batched_runs_match_full_strip() {
+        let (w, h) = (13u32, 27u32);
+        #[cfg(not(feature = "sdf-font"))]
+        let full = build_scaled_strip_per_cell(font_strip(), w, h, ResampleFilter::Mitchell);
+        #[cfg(feature = "sdf-font")]
+        let full = crate::sdf_font::build_scaled_strip_sdf(w, h);
+        for g in 0..CHAR_COUNT {
+            let b = g / SCALE_BATCH;
+            let run = cached_glyph_batch(b, w, h, ResampleFilter::Mitchell);
+            let off = (g - b * SCALE_BATCH) * w;
+            for y in 0..h {
+                for x in 0..w {
+                    assert_eq!(
+                        run.get_pixel(off + x, y),
+                        full.get_pixel(g * w + x, y),
+                        "glyph {g} at ({x},{y})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

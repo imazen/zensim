@@ -105,14 +105,25 @@ fn axis_taps(out_len: u32, in_len: u32) -> AxisTaps {
     AxisTaps { i0, i1, frac }
 }
 
-/// Build the scaled glyph strip from the SDF atlas: dimensions and
-/// pixel layout identical to `font::build_scaled_strip_per_cell`'s
-/// output — `(char_w * n_glyphs) × char_h` RGBA, RGB = 255, alpha =
-/// linear coverage.
+/// Full-strip builder retained for the in-module tests.
+#[cfg(test)]
 pub(crate) fn build_scaled_strip_sdf(scaled_char_w: u32, scaled_char_h: u32) -> Bitmap {
+    build_scaled_run_sdf(0, atlas().n_glyphs, scaled_char_w, scaled_char_h)
+}
+
+/// Build the scaled cells for glyph indices `[start, start+count)`
+/// from the SDF atlas: dimensions and pixel layout identical to
+/// `font::build_scaled_run_per_cell`'s output — `(char_w * count) ×
+/// char_h` RGBA, RGB = 255, alpha = linear coverage.
+pub(crate) fn build_scaled_run_sdf(
+    start: u32,
+    count: u32,
+    scaled_char_w: u32,
+    scaled_char_h: u32,
+) -> Bitmap {
     let at = atlas();
-    let strip_w = scaled_char_w * at.n_glyphs;
-    if scaled_char_w == 0 || scaled_char_h == 0 {
+    let strip_w = scaled_char_w * count.max(1);
+    if scaled_char_w == 0 || scaled_char_h == 0 || count == 0 {
         return Bitmap::new(strip_w.max(1), scaled_char_h.max(1));
     }
 
@@ -129,9 +140,10 @@ pub(crate) fn build_scaled_strip_sdf(scaled_char_w: u32, scaled_char_h: u32) -> 
     let mut out = vec![0u8; (strip_w as usize) * (scaled_char_h as usize) * 4];
     let row_stride = (strip_w as usize) * 4;
 
-    for glyph in 0..at.n_glyphs as usize {
+    for i in 0..count as usize {
+        let glyph = (start as usize + i).min(at.n_glyphs as usize - 1);
         let base = glyph * cell;
-        let x_off = glyph * scaled_char_w as usize * 4;
+        let x_off = i * scaled_char_w as usize * 4;
         for y in 0..scaled_char_h as usize {
             let r0 = base + (yt.i0[y] * at.cell_w) as usize;
             let r1 = base + (yt.i1[y] * at.cell_w) as usize;

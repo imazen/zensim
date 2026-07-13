@@ -618,3 +618,36 @@ render. Then per-size cost tracks glyphs actually used (typical label
 96-glyph strip), and baseline growth stops costing per-size anything.
 Segments remain the DECODE/asset unit; glyphs become the SCALE unit;
 SDF path unaffected (no per-size state). ~50-line change, queued.
+
+## Addendum: lazy batched glyph scaling LANDED + shape & batch measurements
+
+**PNG shape (strip vs rectangle), measured at Brag**: near-square grids
+beat the 1-row strip — s0(162): 18,779 → 18,019 B across 1→13 rows
+(−4.0%); full 920 set: 89,900 → 87,394 B across 1→30 rows (−2.8%),
+monotone with squareness (vertical cell adjacency feeds the Up
+filter). **Adopt near-square layouts for tier assets**; addressing is
+`(idx / cols, idx % cols)`.
+
+**Batch-size measurement** (`examples/glyph_batch_bench.rs`, release):
+producer cost fits `a + b·count` with `a ≈ 0–2 µs` (per-run overhead is
+noise) and `b` = 6.0 / 8.6 / 15.0 µs/glyph at 12/27/54 px. Because
+`a≈0`, the COLD workload model (10 representative labels) is minimized
+by B=1 (0.107/0.124/0.178 ms per fresh size vs 0.579/0.827/1.438 for
+whole-strip B=96). But B=1 defeats the compose loop's same-batch
+memoization (a cache lookup per CHARACTER against ~1,400 entries at
+budget) — so **SCALE_BATCH = 4**: cold within ~2.2× of the B=1 ideal,
+~3× better than whole-strip, lookups amortized by text's index
+clustering.
+
+**Implementation** (both paths share it): `build_scaled_run_*`
+(start,count) producers + `cached_glyph_batch` byte-budgeted LRU
+(6 MiB) keyed `(batch, w, h, filter)`; compose loops memoize the
+current batch. Full-strip builders retained for the pixel-equivalence
+test (`batched_runs_match_full_strip` — every glyph, every pixel).
+393/399 tests green, clippy clean (default / sdf-font /
+_internal_api). Cold-sweep validation under background load (ratio
+method vs the invariant standalone SDF sampler): engine/SDF cold ratio
+5.2× → 3.75×, i.e. **bitmap cold path ≈1.4× faster on 58-char ladder
+text (~46 distinct glyphs)**; per-size cost and cache now track glyphs
+actually rendered, so baseline/tier growth no longer taxes every label
+size. Warm path unchanged within measurement noise.

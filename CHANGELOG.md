@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- `zensim-regress`: glyph scaling is now lazy and batched — cells are
+  resampled in runs of 4 on first use per size (byte-budgeted LRU), so
+  per-size cost and cache track the glyphs a label actually renders
+  instead of the whole atlas (~1.4x faster cold on typical text; batch
+  size chosen from measurement, see benchmarks doc). Pixel-identical to
+  the old whole-strip path (equivalence-tested per glyph).
 - `zensim-regress`: font strip asset re-encoded as 16-level grayscale PNG via
   zenpng `Compression::Brag` — 20,771 → 10,815 B (−48%) with rendered-output
   impact confined to anti-aliasing ramps (max |Δ| ≤ 18/255 at native sizes,
