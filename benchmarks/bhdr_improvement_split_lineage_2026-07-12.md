@@ -574,6 +574,20 @@ takes `--codec` + reads ssim2 from the `ssim2-gpu.parquet` sidecar when the omni
 carries no inline score). Broadened corpora = jxl + kadis-hdr + zenavif rows,
 train AND val — restoring selection validity per §8.6.
 
+**Split-host migration (2026-07-13, user: "kill local / arm-big").** The
+workstation generation was stopped at **5,390/11,400 cells** (kept at
+`/mnt/v/output/zenmetrics/datagen-2026-07-12-hdr-kadis/dist/`); the remainder
+generates on **arm-big** (Hetzner CAX31, 8c/16G, aarch64 — see zen
+`ARM_DEV_BOX.md`), driven by the existing `scripts/arm` wrapper (`arm sync`,
+`arm bg`). The grid driver gained `--skip-list` (kadis `80d0fd9b`): each host's
+pairs TSV covers exactly its own cells; the box scores its cells with the
+CPU-capable metrics (zensim features / cvvdp / iwssim — aarch64 zenmetrics
+build, no CUDA), ssim2-gpu runs against the full set wherever a CUDA GPU is
+(local, low priority, or a vast box). Cross-host caveat noted for the record:
+aarch64 `target-cpu=neoverse-n1` codegen may drift features at sub-ULP vs the
+x86 extraction — acceptable for training data (the canonical-parity audits
+tolerate sub-ULP), flagged for any future byte-parity claim.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
