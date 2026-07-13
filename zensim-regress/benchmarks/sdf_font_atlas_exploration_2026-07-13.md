@@ -166,6 +166,48 @@ zstd-19 beats zlib ~15–25% — worth revisiting iff zenzstd is
 production-ready when a multi-page tier ships. console-practical
 remains SDF-favorable vs subset TTF (108 vs 146 KB).
 
+### Real zenflate (not the zlib proxy) + console-lean tier
+
+Measured with actual `zenflate::Compressor` at efforts 9/15/22/30
+(deflate stream bytes, metrics excluded; scratch harness over the same
+4-bit tier streams). Effort 30 (`full_optimal`, zopfli-class) beats
+the python zlib-9 proxy by ~5% everywhere; even e15 beats it:
+
+| stream | raw | e9 | e15 | e22 | e30 | +6B/glyph metrics |
+|---|--:|--:|--:|--:|--:|--:|
+| ascii (95) | 22,463 | 9,402 | 8,781 | 8,753 | 8,326 | 8,896 |
+| latin-practical (469) | 111,751 | 33,645 | 30,399 | 30,168 | 28,774 | 31,588 |
+| **console-lean (883)** | 207,856 | 56,971 | 50,738 | 50,094 | 47,454 | **52,752** |
+| console-practical (1,477) | 353,760 | 110,836 | 99,882 | 98,803 | 93,915 | 102,777 |
+
+zstd-19 still ~13% below e30 (latin-practical stream 24,961 vs
+28,774) — the residual zenzstd upside.
+
+**Why console-practical ≫ latin-practical: purely glyph count.**
+Per-glyph cost is virtually identical (240 vs 238 B/glyph raw,
+tight-cropped) — symbols aren't fatter on average; there are just
+3.15× as many glyphs. The +1,008 extras decompose (raw KB): math-ops
+178 gl/45.9 KB, misc-symbols 149/38.8, dingbats 144/32.0,
+misc-technical 136/35.9, box 128/31.0, arrows 112/22.3, geometric
+96/24.7, blocks 32/8.6, rest ~9. The top four cost centers (~153 KB)
+are ornaments and long-tail math — exactly what a console tier
+doesn't need.
+
+**console-lean (new, 883 glyphs ≈ 213 KB raw / 52.8 KB e30)**:
+latin-practical + COMPLETE box-drawing (128/128: all light/heavy/
+double lines, corners, tees, crosses) + block elements (32/32:
+▀▄█░▒▓) + geometric (96/96) + arrows (112) + letterlike (18) +
+curated math (21: ≤≥≠≈±√∞∑∏∫∈∪∩∧∨…) + curated technical (6: ⌂⌘⌥⌦⌫⏎).
+Half of console-practical's bytes with every line/box/console char
+kept.
+
+Coverage answers of record: box/lines/blocks/geometric are COMPLETE
+in both console tiers (and absent from latin-practical). Braille
+(U+2800–FF) is in NO tier — DejaVu Sans Mono has zero braille glyphs;
+TUI-graph use needs a fallback face or a ~30-line procedural 2×4-dot
+generator (better than any atlas). Powerline/Nerd-Font PUA glyphs are
+likewise out of scope.
+
 ## Addendum: SDF vs engine rendering speed (same day)
 
 `examples/sdf_speed.rs` (release build, 7950X): 58-char line, prototype
