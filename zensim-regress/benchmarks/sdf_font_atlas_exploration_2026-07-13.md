@@ -208,6 +208,37 @@ TUI-graph use needs a fallback face or a ~30-line procedural 2×4-dot
 generator (better than any atlas). Powerline/Nerd-Font PUA glyphs are
 likewise out of scope.
 
+## Addendum: README-corpus coverage audit → console-lean-v2 (same day)
+
+`readme_charset_coverage_2026-07-13.py`: scanned 3,466 README.md files
+(~/work + ~/.cache/cargo-read + ~/.cargo/registry/src, pruning
+.git/target/node_modules) = 16.05 M glyph characters.
+**console-lean covers 99.949%** — 8,112 missing occurrences across 859
+distinct codepoints, of which only 69 exist in DejaVu Sans Mono.
+
+Misses by block: CJK 4,511 · dingbats 1,624 · emoji 492 · greek 422 ·
+fullwidth-punct/other 367 · arrows-suppl 246 · VS16 130 · misc-symbols
+128 · everything-dropped-from-latin (IPA/combining/ext) ~110.
+
+**In-font gaps that real docs actually use** (occ/files): ✓ 383/35,
+⚠ 77/44, ✔ 72/3, ⬌ 71/12, ✖ 44/2, ✗ 40/11, ⟶ 20/5, ➡ 14/7, ∇ 10/8,
+⚡ 10/8, ❤ 10/7, ★ 9/4, ⬅ 6/6, ⚙ 4/4 — plus **Greek: α appears in 57
+files (the most widespread miss in the corpus), Δ 36, β 25, τ 15,
+σ/λ/ρ/Σ/μ/η/π/γ/δ**. A 31-glyph curated Greek set covers 422/422
+observed Greek occurrences (100%).
+
+**console-lean-v2 (MEASURED)**: v1 + 31 Greek + {✓ ✔ ✗ ✘ ⚠ ⬌} =
+**920 glyphs, 217,476 B raw stream, zenflate-e30 50,608 B → 56.1 KB
+with metrics** (+3.4 KB over v1). v2.1 spec (arithmetic, not baked):
+add {✖ ⟶ ➡ ⬅ ∇ ⚡ ❤ ★ ⚙} ≈ +2.2 KB raw.
+
+**Renderer policy from the data**: the remaining ~7 K misses are
+CJK/emoji/fullwidth punctuation NOT in the font → render .notdef tofu,
+BUT format characters must be silently skipped, not tofu'd —
+VS16 (U+FE0F, 70 files) and ZWJ (U+200D, 15 files) ride along with
+emoji, and a naive renderer would print a tofu box after every emoji.
+Skip category Cf + variation selectors in the glyph mapper.
+
 ## Addendum: SDF vs engine rendering speed (same day)
 
 `examples/sdf_speed.rs` (release build, 7950X): 58-char line, prototype
