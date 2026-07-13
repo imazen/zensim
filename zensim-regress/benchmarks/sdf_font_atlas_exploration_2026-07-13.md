@@ -94,3 +94,23 @@ rather than this exploration's bitmap-derived EDT.
 
 Future work: graduate the ladder into a golden regression test once the
 SDF path lands (render ladder → checksum via zensim-regress itself).
+
+## Addendum: zenresize filter matrix (same day)
+
+`examples/font_filter_matrix.rs` replicates the production per-cell
+path with selectable zenresize kernels (validated: Mitchell replica vs
+actual engine output max |Δ| = 1/255, mean ≤ 0.01 — LUT rounding).
+Sheet: `/mnt/v/output/zensim-regress/sdf-explainer/filter_matrix_vs_sdf.png`
+(engine/Mitchell, CatmullRom, Lanczos, LanczosSharp, RobidouxSharp,
+SDF-27 c=0.2 at 12/18/27px native + 3×).
+
+Read: sharpened kernels buy crispness but ring — LanczosSharp shows
+clear halo fringing around strokes at 12–18px; CatmullRom /
+RobidouxSharp are modest, halo-light improvements over Mitchell. SDF
+c=0.2 matches the best filter's edge definition without ringing;
+its remaining letterform micro-wobble at 12px is generator-quality
+(bitmap-derived atlas), not representation-limited. Interim option
+independent of SDF: switching `font.rs`'s hardcoded Mitchell to
+CatmullRom or RobidouxSharp is a one-line change that visibly
+crispens today's labels (changes all montage output — re-baseline
+any golden images when doing so).
