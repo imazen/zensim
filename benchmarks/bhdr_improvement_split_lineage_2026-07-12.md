@@ -639,6 +639,59 @@ aarch64 `target-cpu=neoverse-n1` codegen may drift features at sub-ULP vs the
 x86 extraction — acceptable for training data (the canonical-parity audits
 tolerate sub-ULP), flagged for any future byte-parity claim.
 
+### 8.9 kadis-hdr corpus COMPLETE + GPU fleet LAUNCHED (2026-07-13, user: "finish the fleet, launch it")
+
+**Corpus: 11,400/11,400 cells on R2, integrity-verified.** Consolidated on
+zen-train-1 (`kh_consolidate_upload.sh`: count gate 11,400 dists + 1,140 refs,
+0 `.tmp`), synced to `s3://codec-corpus/kadis-hdr-2026-07-13/` (R2 object
+counts confirmed 11,400 + 1,140; 3 random dists sha256-match R2↔train-1).
+`pairs.tsv` frozen with RELATIVE paths (the regenerated absolute `/data/...`
+paths were rewritten before chunking — chunk row-ranges are line-arithmetic
+over the frozen file). Corpus card: the run prefix's `README.md`;
+`~/work/zen/DATA_PROVENANCE.md` entry added.
+
+**Fleet: 6 × 24GB-GPU vast boxes launched 2026-07-13 ~22:20Z** (instances
+44751919/22/24/28/30/32, ≤$0.40/hr, image `zenmetrics-sweep:kadis-persist`,
+19 chunks × 600 pairs, static modulo shards 0..5). Scripts committed at
+zenmetrics master `f3832a55`:
+- `hdr_pairs_chunk_worker.sh` — pairs row-range slice → s5cmd data sync →
+  `score-pairs --hdr --hdr-transfer pu-rescale --gpu-runtime cuda` ×
+  {zensim-gpu (+372 with-iw features), ssim2-gpu, cvvdp, iwssim-gpu,
+  butteraugli-gpu} → per-metric parquet + `_DONE` sentinel (last, rc=0 only —
+  the idempotency marker).
+- `onstart_hdr_pairs.sh` — split-session-token reassembly, SWEEP_BIN_OVERRIDE
+  binary fetch (md5 `2a7bc0583de0049677cbd072747bedf5`, the locally-verified
+  build: zenmetrics `b5cda3b0`, features sweep+png+hdr+gpu-cuda), `_DONE`-skip
+  idempotency, self-destroy on shard completion.
+- `launch_backfill.sh` additive patches — `WORKER_PATH` override,
+  `WORKER_R2_*` scoped-cred injection (CF temp-access-credentials, 6h TTL,
+  rw scoped to `codec-corpus/kadis-hdr-2026-07-13/` ONLY; session token split
+  into 3 × ≤240-char parts for vast's env cap + bootstrap-side reassembly),
+  opt-in `SHARD_N` indexed by successful launches, explicit `CHUNKS_R2`.
+
+**Pre-launch verification gate passed:** 6-row chunk end-to-end locally
+against real R2 data — 5 metrics × 6 rows, 0 NaN-failures, sidecars +
+features + `_DONE` landed (`sidecars-smoke/`). All 5 metrics also smoke-passed
+standalone on 2 local pairs with `--gpu-runtime cuda` (cvvdp ~0.5 s/pair warm;
+column names match the kadis-700k GPU canonical convention).
+
+**Build note:** rebuilding the fleet binary tonight was NOT possible — a
+concurrent agent is mid-refactor in sibling zenjpeg (`.workongoing`:
+"ErrorCategory two-level reshape"; `sweep`→`jpeg` pulls the broken tree), so
+the verified 14:46 binary (built pre-breakage) was re-uploaded as the
+override. The task-8 image bake stays queued for when zenjpeg settles.
+
+**Post-fleet path (ready):** `scripts/hdr/pull_kadis_hdr_sidecars.py`
+(this commit) syncs `sidecars/`, gates on 19/19 `_DONE`, concatenates each
+metric to `<datagen>/sidecars/kadis-hdr/<metric>.parquet` (asserts 11,400
+rows + key uniqueness), then
+`build_hdr_train_parquets.py --codec kadis-hdr --datagen
+/mnt/v/output/zenmetrics/datagen-2026-07-12-hdr-kadis` builds the
+LSD-origin-split train/val parquets. zensim features are the **v1 PU21
+u8-shell regime** (matches the jxl HDR corpus — do not mix with
+`--hdr-features-pu-linear` extractions). Monitor: `_DONE`/19 + box liveness,
+3-min ticks (`fleet_status.sh` in the local run dir).
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
