@@ -516,3 +516,34 @@ Implementation: codepoint→(segment, index) table in glyph_map (already
 the single coverage choke point), per-segment lazy OnceLock decode,
 scaled-strip cache keyed (segment, w, h). ~150 lines. Adopted as the
 tier file layout for the future zenmonospace crate.
+
+## Addendum: demand-measured baseline (s0 = 128 glyphs) — same day
+
+User direction: the always-resident segment should be "ascii + stuff
+that is super common — do real analytics." Measured POST-MAPPER glyph
+demand (a ✅ counts as demand for ✓; ，counts for `,`) across **all
+19,773 .md files** in ~/work + cargo caches (190.9 M chars).
+
+Top of the non-ASCII demand curve (share of files using each glyph):
+— 39.8% · → 27.3% · × 24.4% · – 15.3% · ≥ 14.6% · − 11.3% · ≤ 11.1% ·
+**Δ 10.9% (the strip's hand-picked extra, vindicated)** · ≈ 9.1% ·
+± 8.1% · · 7.6% · … 7.5% · ✓ 6.9% · α 6.3% · § 5.7% · ² 5.5% · ∈ 5.4%
+· ’ 5.0% · σ 4.8% · ↔ 4.5% · “ ” 4.4% · ─ 4.0% (tree output!) ·
+⚠ 3.8% · └ 3.3% · ✗ 3.2% · │ 2.9% · ├ 2.8% · β 2.6% · µ 2.2% ·
+é 2.0% · ← 2.0% · ‘ 2.0%. Cut at ≥2% of files → **33 promoted glyphs;
+s0 baseline = ASCII + 33 = 128 glyphs**.
+
+Re-segmented sizes (PNG Brag / SDF-54 e30): s0 128 gl — 15,779/22,209;
+s1 latin 360 — 35,092/52,755; s2 console 402 — 32,333/39,430; s3
+greek+marks 30 — 4,607/6,993. Sums 87,811 / 121,387 (still −1.9 KB /
++1.7 KB vs monoliths).
+
+**Validation on the same corpus: 78.6% of files render entirely from
+the 128-glyph baseline** (no lazy segment ever loads); s1 triggered by
+11.2% of files, s2 8.7%, s3 6.6%; **s0 serves 99.62% of all character
+occurrences**. Chart + specimens (set in the embedded 920-glyph
+DejaVu subset, 26.6 KB woff2):
+https://claude.ai/code/artifact/7072e34b-ef7d-4770-8739-82fcf1016eb6
+Scripts: `readme_charset_coverage_2026-07-13.py` (corpus scan pattern);
+per-segment bake = `sdf_console_blocks_2026-07-13.py` pipeline with the
+PROMOTED list.
