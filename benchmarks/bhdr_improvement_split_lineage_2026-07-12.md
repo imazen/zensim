@@ -574,6 +574,24 @@ takes `--codec` + reads ssim2 from the `ssim2-gpu.parquet` sidecar when the omni
 carries no inline score). Broadened corpora = jxl + kadis-hdr + zenavif rows,
 train AND val — restoring selection validity per §8.6.
 
+**Fleet-builtin distortion (2026-07-13, user: "shouldn't distort be builtin and
+fleetable? hetzner generation, vastai metrics").** The bespoke-driver posture
+was corrected: HDR distortion is now a **first-class zenmetrics sweep mode** —
+`zenmetrics sweep --hdr --distort-cmd 'python3 -m kadis_distort.serve'
+--distort-label kadis-hdr` (zenmetrics `a20059df` + `0c9b16f5`, kadis-distort
+`78802354`/`50238fba`). Protocol v2 carries u16 PQ frames + name-based seeding;
+the smoke proved a fleet-sweep cell **byte-identical** (max|Δ|=0) to the local
+grid driver's deterministic cell, with the persisted PQ-PNG artifact (source
+cICP, zenpng losslessly depth-reduces u8-roundtrip variants) being exactly the
+scored bytes. Distortion rows carry `--distort-label` so they can never collide
+with codec rows in the (basename, codec, q) join; q up to 255 is accepted in
+distort mode (`q = dist_type·10 + level`). **Remaining for the full fleet
+split (tasks 7–8): declare generation jobs on Hetzner CPU + GPU-metric
+(ssim2-gpu) jobs on vast.ai via the existing jobsys launchers, and bake the
+HDR-capable kadis-distort into the worker images (arm64 included).** The
+avif-HDR encode arm is also landed (true CICP→nclx path) pending its own
+datagen run.
+
 **Split-host migration (2026-07-13, user: "kill local / arm-big").** The
 workstation generation was stopped at **5,390/11,400 cells** (kept at
 `/mnt/v/output/zenmetrics/datagen-2026-07-12-hdr-kadis/dist/`); the remainder
