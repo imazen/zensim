@@ -95,6 +95,42 @@ rather than this exploration's bitmap-derived EDT.
 Future work: graduate the ladder into a golden regression test once the
 SDF path lands (render ladder → checksum via zensim-regress itself).
 
+## Addendum: charset-tier sizes, measured (same day)
+
+Baked from DejaVu Sans Mono (16×31 texels/glyph at 27px em — DejaVu's
+wider advance + line box costs +41% per glyph vs the Consolas-derived
+13×27 cell) through the pinned spec (8× supersample, exact EDT, ±4
+spread). Script: `sdf_charset_sizes_2026-07-13.py`. Subset-TTF column
+= fontTools pyftsubset, hinting stripped (the `ttf`/fontdue-tier
+alternative at identical coverage).
+
+| Coverage ∩ cmap | glyphs | SDF 4-bit raw (0-dep) | SDF 4-bit + zenflate | subset TTF |
+|---|--:|--:|--:|--:|
+| ASCII | 95 | 23,560 | 9,327 | — |
+| latin-web (Lat-1+Ext-A+punct+€) | 338 | 83,824 | 24,284 | — |
+| latin-complete (all Latin, Viet, IPA, marks) | 1,016 | 251,968 | 73,014 | 63,404 |
+| non-asian (+Greek/poly, Cyr, Arm, Heb, Geo, arrows, math, box) | 2,246 | 557,008 | 151,754 | 142,064 |
+
+(Full DejaVuSansMono.ttf: 340,712 B / 3.3k glyphs. Tight sizes include
+6 B/glyph metrics; zlib at level 9.)
+
+Findings:
+- **Crossover at "all Latin": vectors match SDF bytes.** SDF+zenflate
+  73 KB vs subset TTF 63 KB (latin-complete); 152 vs 142 KB
+  (non-asian). Beyond Latin, outlines are the better compressor — the
+  SDF's remaining edge is the ~40-line zero-dep sampler, O(1) sampling
+  (no rasterize-and-cache), and the threshold styling effects.
+- **Tight-cropping an SDF barely saves** (ascii tight4 23,033 ≈
+  uniform4 23,560): the ±4-texel skirt around ink defeats the crop.
+  Unmeasured lever: crop to ink+~1.5 texels and have the sampler clamp
+  outside the subrect to −spread — valid for fill/bold (not glow),
+  should approach coverage-style crop rates.
+- Combining marks (U+0300–036F) are stored but a non-shaping renderer
+  won't position them; precomposed Latin Ext Additional carries real
+  European/Vietnamese usage. Hebrew = consonants (no point
+  positioning); RTL reordering is the caller's job. Arabic/Indic
+  excluded — shaping-dependent regardless of atlas bytes.
+
 ## Addendum: zenresize filter matrix (same day)
 
 `examples/font_filter_matrix.rs` replicates the production per-cell
