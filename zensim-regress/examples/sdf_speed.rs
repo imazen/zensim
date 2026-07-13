@@ -40,7 +40,13 @@ impl SdfAtlas {
         let spread = f32::from_le_bytes(b[12..16].try_into().unwrap());
         let data = b[16..].to_vec();
         assert_eq!(data.len(), (n * cell_w * cell_h) as usize);
-        SdfAtlas { cell_w, cell_h, n, spread, data }
+        SdfAtlas {
+            cell_w,
+            cell_h,
+            n,
+            spread,
+            data,
+        }
     }
 
     #[inline]
@@ -57,7 +63,11 @@ fn srgb_lut() -> &'static [u8; 256] {
         let mut t = [0u8; 256];
         for (i, e) in t.iter_mut().enumerate() {
             let a = i as f32 / 255.0;
-            let v = if a <= 0.003_130_8 { 12.92 * a } else { 1.055 * a.powf(1.0 / 2.4) - 0.055 };
+            let v = if a <= 0.003_130_8 {
+                12.92 * a
+            } else {
+                1.055 * a.powf(1.0 / 2.4) - 0.055
+            };
             *e = (v * 255.0).round() as u8;
         }
         t
@@ -122,21 +132,45 @@ fn main() {
     let text: String = "The quick brown fox jumps over the lazy dog 0123456789 <=>".into();
 
     println!("text: {} chars", text.chars().count());
-    println!("{:>5} {:>10} {:>12} {:>12} {:>8}", "size", "out px", "engine ms", "sdf ms", "ratio");
+    println!(
+        "{:>5} {:>10} {:>12} {:>12} {:>8}",
+        "size", "out px", "engine ms", "sdf ms", "ratio"
+    );
     for &char_h in &[12u32, 18, 27, 54, 96] {
         // Warm both paths (engine builds+caches its scaled strip here).
-        let (e, ew, eh) = zensim_regress::font::render_text_height(
-            &text, [255; 4], [0, 0, 0, 255], char_h);
+        let (e, ew, eh) =
+            zensim_regress::font::render_text_height(&text, [255; 4], [0, 0, 0, 255], char_h);
         let (s, sw, sh) = render_text_sdf(&atlas, &text, char_h);
         assert!(!e.is_empty() && !s.is_empty());
         let iters = (200_000 / (ew * eh).max(1)).clamp(20, 2000);
-        let em = time_ms(|| {
-            let _ = zensim_regress::font::render_text_height(
-                &text, [255; 4], [0, 0, 0, 255], char_h);
-        }, iters);
-        let sm = time_ms(|| { let _ = render_text_sdf(&atlas, &text, char_h); }, iters);
-        println!("{:>4}px {:>4}x{:<5} {:>9.3}ms {:>9.3}ms {:>7.2}x  (sdf out {}x{})",
-                 char_h, ew, eh, em, sm, em / sm, sw, sh);
+        let em = time_ms(
+            || {
+                let _ = zensim_regress::font::render_text_height(
+                    &text,
+                    [255; 4],
+                    [0, 0, 0, 255],
+                    char_h,
+                );
+            },
+            iters,
+        );
+        let sm = time_ms(
+            || {
+                let _ = render_text_sdf(&atlas, &text, char_h);
+            },
+            iters,
+        );
+        println!(
+            "{:>4}px {:>4}x{:<5} {:>9.3}ms {:>9.3}ms {:>7.2}x  (sdf out {}x{})",
+            char_h,
+            ew,
+            eh,
+            em,
+            sm,
+            em / sm,
+            sw,
+            sh
+        );
     }
 
     // COLD sweep: 40 distinct sizes the engine has never seen this run —
@@ -152,6 +186,11 @@ fn main() {
         let _ = render_text_sdf(&atlas, &text, h);
     }
     let sdf_cold = t.elapsed().as_secs_f64() * 1000.0;
-    println!("\ncold sweep, {} unseen sizes: engine {:.1}ms  sdf {:.1}ms  ({:.1}x)",
-             sizes.len(), engine_cold, sdf_cold, engine_cold / sdf_cold);
+    println!(
+        "\ncold sweep, {} unseen sizes: engine {:.1}ms  sdf {:.1}ms  ({:.1}x)",
+        sizes.len(),
+        engine_cold,
+        sdf_cold,
+        engine_cold / sdf_cold
+    );
 }

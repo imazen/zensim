@@ -45,7 +45,7 @@ impl ReferenceStorage {
 
         let upload_prefix = std::env::var("REGRESS_UPLOAD_PREFIX")
             .ok()
-            .and_then(|v| if v.is_empty() { None } else { Some(v) });
+            .filter(|v| !v.is_empty());
         let upload_enabled =
             std::env::var("UPLOAD_REFERENCES").is_ok_and(|v| v == "1" || v == "true");
 

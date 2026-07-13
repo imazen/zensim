@@ -33,7 +33,7 @@ fn main() {
         let gray: Vec<u8> = rgba.chunks_exact(4).map(|p| p[0]).collect();
         let path = out_dir.join(format!("engine_{char_h}px.pgm"));
         let mut f = fs::File::create(&path).expect("create pgm");
-        write!(f, "P5 {w} {h} 255\n").expect("header");
+        writeln!(f, "P5 {w} {h} 255").expect("header");
         f.write_all(&gray).expect("pixels");
         println!("{} ({w}x{h})", path.display());
     }

@@ -131,6 +131,41 @@ Findings:
   positioning); RTL reordering is the caller's job. Arabic/Indic
   excluded — shaping-dependent regardless of atlas bytes.
 
+## Addendum: `sdf-font` feature LANDED + approved curation + lz4 (same day)
+
+**Prototype shipped**: `src/sdf_font.rs` behind `sdf-font = []` (zero
+deps). Dispatch swaps only the strip producer in
+`font::cached_scaled_strip`; `src/sdf_atlas.bin` (16,916 B, 4-bit,
+baked by `bake_sdf_atlas_2026-07-13.py` from the strip). 382/382 tests
+green with the feature (376 without), clippy clean both ways.
+Production-path visual proof (both columns = real `render_text_height`
+output): `/mnt/v/output/zensim-regress/sdf-explainer/
+sdf_feature_production.png` — parity at 12–54px, clean 96px, **no
+visible 4-bit banding** (the pending banding check: passed). Note the
+bitmap path still *renders* >54px by soft strip upscale; it's AutoFit
+that caps at 54.
+
+**Curation APPROVED (user, 2026-07-13): drop Vietnamese + phonetics.**
+`latin-practical` = ascii + latin-1 + ext-A + gen-punct + super/sub +
+currency + ext-B keep-list (Pinyin U+01CD–01DC, Romanian U+0218–021B)
++ ext-add keep-list (Welsh U+1E80–1E85/1EF2–1EF3, ẞ U+1E9E). No
+IPA/modifiers/combining. Measured (DejaVu Sans Mono ∩ cmap):
+
+| tier | glyphs | raw4 | zlib9 | lz4hc | zstd19 | subTTF |
+|---|--:|--:|--:|--:|--:|--:|
+| ascii | 95 | 23,033 | 9,327 | 12,232 | 8,622 | 8,252 |
+| **latin-practical** | 469 | 114,565 | 33,169 | 37,559 | 27,775 | 29,332 |
+| latin-complete | 1,016 | 266,714 | 73,014 | 80,391 | 54,356 | 63,404 |
+| console-practical | 1,477 | 362,622 | 108,126 | 126,630 | 91,529 | 145,504 |
+
+lz4-HC verdict: closer than expected (+13–17% vs zlib — the packed
+nibble stream is LZ-friendly) but strictly dominated by zenflate
+(in-house) on ratio and by zstd on both; a one-time startup
+decompress never needs lz4's decode speed. No lz4 dependency.
+zstd-19 beats zlib ~15–25% — worth revisiting iff zenzstd is
+production-ready when a multi-page tier ships. console-practical
+remains SDF-favorable vs subset TTF (108 vs 146 KB).
+
 ## Addendum: SDF vs engine rendering speed (same day)
 
 `examples/sdf_speed.rs` (release build, 7950X): 58-char line, prototype

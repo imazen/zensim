@@ -84,6 +84,11 @@ pub mod profile;
 pub mod remote;
 /// HTML report generation from manifest data.
 pub mod report;
+/// SDF glyph-strip builder backing [`font`] when the `sdf-font`
+/// feature is enabled (prototype; see `benchmarks/sdf_font_atlas_
+/// exploration_2026-07-13.md`).
+#[cfg(feature = "sdf-font")]
+mod sdf_font;
 /// SIMD consistency testing via archmage token permutations.
 #[cfg(feature = "archmage")]
 pub mod simd;

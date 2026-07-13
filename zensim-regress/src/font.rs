@@ -87,6 +87,7 @@ static FONT_PNG: &[u8] = include_bytes!("font_strip.png");
 ///    just signals "white-tinted glyph" semantically.
 ///
 /// Decoded once on first use; subsequent calls reuse the static.
+#[cfg_attr(feature = "sdf-font", allow(dead_code))]
 fn font_strip() -> &'static Bitmap {
     static STRIP: OnceLock<Bitmap> = OnceLock::new();
     STRIP.get_or_init(|| {
@@ -365,9 +366,18 @@ fn cached_scaled_strip(
         return guard.last().unwrap().1.clone();
     }
 
-    let strip = font_strip();
+    // The `sdf-font` feature swaps the strip *producer* only: same
+    // dimensions, same RGBA-with-coverage-alpha layout, same cache and
+    // composite path downstream. `filter` stays in the cache key but
+    // does not affect SDF output.
+    #[cfg(feature = "sdf-font")]
+    let scaled = Arc::new(crate::sdf_font::build_scaled_strip_sdf(
+        scaled_char_w,
+        scaled_char_h,
+    ));
+    #[cfg(not(feature = "sdf-font"))]
     let scaled = Arc::new(build_scaled_strip_per_cell(
-        strip,
+        font_strip(),
         scaled_char_w,
         scaled_char_h,
         filter,
@@ -386,6 +396,7 @@ fn cached_scaled_strip(
     scaled
 }
 
+#[cfg_attr(feature = "sdf-font", allow(dead_code))]
 fn build_scaled_strip_per_cell(
     strip: &Bitmap,
     scaled_char_w: u32,

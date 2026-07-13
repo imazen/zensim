@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Added
+- `zensim-regress`: `sdf-font` feature (prototype) — renders montage/label
+  text from an embedded 16.9 KB 4-bit signed-distance-field atlas instead of
+  Mitchell-resampling the 20.8 KB PNG strip. Swaps only the glyph-strip
+  producer inside `font::cached_scaled_strip`; composition/wrapping/gamma
+  unchanged. Same glyphs (ASCII+Δ), engine-matched ink via c=0.2 small-size
+  weight compensation, crisp rendering above the 54px strip base, zero new
+  dependencies. Enabling changes every rendered text pixel — re-baseline
+  goldens. Atlas baked by `benchmarks/bake_sdf_atlas_2026-07-13.py`; method +
+  measurements in `benchmarks/sdf_font_atlas_exploration_2026-07-13.md`.
 - `ZensimProfile::B` (`zensim-b`) and `ZensimProfile::BHdr` (`zensim-b-hdr`):
   generation-B deterministic LINEAR profiles from the 2026-07 campaign. `B` =
   `ens-Pline-cid80` lasso ensemble (7.3 KB), beats `A` on the held-out rank

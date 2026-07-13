@@ -61,9 +61,11 @@ fn main() {
     ];
 
     // Decode the strip; coverage = R channel of the expanded RGBA.
-    let strip =
-        zensim_regress::Bitmap::from_png_bytes(FONT_PNG).expect("embedded strip decodes");
-    assert_eq!((strip.width(), strip.height()), (BASE_CHAR_W * CHAR_COUNT, BASE_CHAR_H));
+    let strip = zensim_regress::Bitmap::from_png_bytes(FONT_PNG).expect("embedded strip decodes");
+    assert_eq!(
+        (strip.width(), strip.height()),
+        (BASE_CHAR_W * CHAR_COUNT, BASE_CHAR_H)
+    );
 
     // One isolated RGBA cell (white, alpha = coverage) per glyph index.
     let cell_rgba = |glyph: u32| -> Vec<u8> {
@@ -102,7 +104,7 @@ fn main() {
 
             let path = out_dir.join(format!("filtermx_{name}_{char_h}px.pgm"));
             let mut f = fs::File::create(&path).expect("create pgm");
-            write!(f, "P5 {out_w} {char_h} 255\n").expect("header");
+            writeln!(f, "P5 {out_w} {char_h} 255").expect("header");
             f.write_all(&gray).expect("pixels");
             println!("{} ({out_w}x{char_h})", path.display());
         }

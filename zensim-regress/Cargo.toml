@@ -44,6 +44,12 @@ archmage = ["dep:archmage"]
 ## tools. Not part of the public API; the underscore prefix signals
 ## "do not depend on this from outside `zensim-regress`."
 _internal_api = []
+## PROTOTYPE — render text from the embedded 16.9 KB signed-distance-
+## field atlas instead of Mitchell-resampling the 20.8 KB PNG strip.
+## Same glyphs/metrics; changes every rendered text pixel (re-baseline
+## goldens). Zero additional dependencies. Method + measurements:
+## benchmarks/sdf_font_atlas_exploration_2026-07-13.md.
+sdf-font = []
 
 [dependencies]
 zensim = { workspace = true, default-features = false, features = ["classification", "custom-profiles"] }
