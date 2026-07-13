@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- `zensim-regress`: font strip asset re-encoded as 16-level grayscale PNG via
+  zenpng `Compression::Brag` — 20,771 → 10,815 B (−48%) with rendered-output
+  impact confined to anti-aliasing ramps (max |Δ| ≤ 18/255 at native sizes,
+  visually indistinguishable; see benchmarks/sdf_font_atlas_exploration_
+  2026-07-13.md). `sdf_atlas.bin` rebaked from the quantized strip. 64-level
+  measured at 14,745 B and rejected.
 - `zensim-regress`: character automapper + hex-in-box notdef in every text
   composer (bitmap and `sdf-font` paths): format chars (VS16/ZWJ/skin-tones)
   are zero-width; fullwidth forms fold to ASCII (（ｘ）→ (x)); emoji-class

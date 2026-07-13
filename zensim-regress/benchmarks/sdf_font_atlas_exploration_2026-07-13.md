@@ -454,3 +454,27 @@ flat per-size cost (bitmap strip cache: ~7.8 MB per cached size at 920
 glyphs). zenmonospace can honestly ship BOTH: `bitmap-png` tiers
 (smallest, ≤54px) and `sdf` tiers (ceiling-free + effects), sharing
 the composer.
+
+## Addendum: 16-level strip SWAPPED IN as default (same day)
+
+Real Consolas strip (2496×54) re-encoded via zenpng `Brag`:
+original 8-bit 17,823 B (the committed asset was 20,771 — 14% was
+free); **16-level 10,815 B (−48%, now the shipped `src/font_strip.png`)**;
+64-level 14,745 B (between — not worth the +3.9 KB over 16-level).
+`sdf_atlas.bin` rebaked from the quantized strip (provenance invariant:
+bake script reproduces committed atlas); bytes shifted trivially, all
+391/397 tests green both feature states.
+
+Render impact (original vs 16-level asset, "Rag7 Handgloves",
+production path; sheet `strip_q16_impact.png` incl. ×8 diff column —
+visually indistinguishable, diffs confined to AA ramps):
+
+| size | max|Δ| /255 | mean|Δ| | px with Δ>2 |
+|--:|--:|--:|--:|
+| 12px | 13 | 0.23 | 1.5% |
+| 27px | 13 | 0.23 | 2.0% |
+| 54px | 18 | 0.38 | 6.2% |
+| 96px (soft upscale) | 38 | 0.33 | 4.3% |
+
+Max|Δ| exceeds the ±8 coverage quantization because sRGB encoding
+steepens near black — isolated dark-ramp pixels only.
