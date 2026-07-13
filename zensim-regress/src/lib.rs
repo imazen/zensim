@@ -46,6 +46,10 @@ pub mod fetch;
 pub mod font;
 /// Deterministic synthetic test image generators.
 pub mod generators;
+/// Character → glyph mapping (format-char skip, fullwidth fold,
+/// emoji twin table) + hex-in-box notdef. Shared by [`font`]'s
+/// composers on both the bitmap and `sdf-font` paths.
+pub(crate) mod glyph_map;
 /// Pixel and file hashing (`ChecksumHasher` trait, `SeaHasher`).
 pub mod hasher;
 /// Retained-tree layout primitives for composing labeled image grids.

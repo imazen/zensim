@@ -275,6 +275,15 @@ with a designed .notdef tofu glyph. Real color-emoji rendering
 KB + RGBA compositing for a *report* font where meaning beats
 decoration.
 
+**LANDED same day** (`src/glyph_map.rs`, both composer paths): skip →
+fold → twin (atlas-coverage-aware, lights up with future tiers) →
+hex-in-box notdef (3×5 micro-digit font, 30 bytes; 2-col × 2/3-row
+grid; border-only below ~20px). Δ-clamp removed. Widths/centering use
+mapped cell counts. Visual proof:
+`/mnt/v/output/zensim-regress/sdf-explainer/mapper_demo.png`.
+Deferred: `:shortcode:` expansion policy (design above), wrap_text
+still counts bytes when estimating columns (pre-existing).
+
 ## Addendum: SDF vs engine rendering speed (same day)
 
 `examples/sdf_speed.rs` (release build, 7950X): 58-char line, prototype

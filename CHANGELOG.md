@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Added
+- `zensim-regress`: character automapper + hex-in-box notdef in every text
+  composer (bitmap and `sdf-font` paths): format chars (VS16/ZWJ/skin-tones)
+  are zero-width; fullwidth forms fold to ASCII (（ｘ）→ (x)); emoji-class
+  symbols map to monochrome semantic twins where the atlas covers them
+  (❓→ ?, ➖→ -; ✅→✓ lights up when the symbol tier ships); everything else
+  renders a Firefox-style bordered box containing the codepoint's hex
+  digits. Fixes unknown codepoints silently rendering as space/Δ — a 🚀 in
+  a label now shows `[1F680]`, not fake report data. Widths/centering now
+  count mapped cells (multi-byte text measured correctly).
 - `zensim-regress`: `sdf-font` feature (prototype) — renders montage/label
   text from an embedded 16.9 KB 4-bit signed-distance-field atlas instead of
   Mitchell-resampling the 20.8 KB PNG strip. Swaps only the glyph-strip

@@ -65,7 +65,9 @@ const BASE_CHAR_W: u32 = 26;
 const BASE_CHAR_H: u32 = 54;
 /// Total characters in the strip: ASCII 32-126 (95) + extras (Δ).
 const CHAR_COUNT: u32 = 96;
-/// First printable ASCII codepoint.
+/// First printable ASCII codepoint. (Composers map through
+/// `crate::glyph_map`; this remains for the strip-layout tests.)
+#[cfg(test)]
 const FIRST_CHAR: u32 = 0x20;
 
 /// The embedded font strip PNG (Consolas 48px, grayscale).
@@ -182,7 +184,11 @@ pub fn render_text_height_lh(
     }
 
     let lines: Vec<&str> = text.lines().collect();
-    let max_cols = lines.iter().map(|l| l.len()).max().unwrap_or(0) as u32;
+    let max_cols = lines
+        .iter()
+        .map(|l| crate::glyph_map::cell_count(l))
+        .max()
+        .unwrap_or(0);
     let num_lines = lines.len() as u32;
 
     if max_cols == 0 || num_lines == 0 {
@@ -216,9 +222,29 @@ pub fn render_text_height_lh(
     // Blit characters
     for (line_idx, line) in lines.iter().enumerate() {
         let y_base = line_idx as u32 * line_advance;
-        for (col, ch) in line.chars().enumerate() {
-            let x_base = col as u32 * scaled_char_w;
-            let glyph_idx = char_index(ch);
+        let mut col = 0u32;
+        for ch in line.chars() {
+            let x_base = col * scaled_char_w;
+            let glyph_idx = match crate::glyph_map::map_char(ch) {
+                crate::glyph_map::Mapped::Glyph(idx) => idx,
+                crate::glyph_map::Mapped::Skip => continue,
+                crate::glyph_map::Mapped::NotDef(cp) => {
+                    crate::glyph_map::draw_notdef(
+                        &mut buf,
+                        out_w,
+                        out_h,
+                        x_base,
+                        y_base,
+                        scaled_char_w,
+                        scaled_char_h,
+                        cp,
+                        fg,
+                    );
+                    col += 1;
+                    continue;
+                }
+            };
+            col += 1;
             let src_x = glyph_idx * scaled_char_w;
 
             for gy in 0..scaled_char_h {
@@ -496,8 +522,12 @@ fn stacked_height_px(char_h: u32, line_advance: u32, n_lines: u32) -> u32 {
         .saturating_add(char_h)
 }
 
-/// Map a character to its index in the font strip.
-/// ASCII 32-126 at indices 0-94, then extras: Δ at 95.
+/// Map a character to its index in the font strip. Test-only: the
+/// composers route through [`crate::glyph_map::map_char`], which adds
+/// format-char skipping, fullwidth folding, emoji twins, and the
+/// hex-in-box notdef (the old behavior silently rendered unknown
+/// codepoints as space/Δ).
+#[cfg(test)]
 fn char_index(ch: char) -> u32 {
     let code = ch as u32;
     if (FIRST_CHAR..FIRST_CHAR + 95).contains(&code) {
@@ -541,7 +571,11 @@ pub fn render_lines_fitted_lh(
         return (vec![], 0, 0);
     }
     let line_advance = line_advance_px(char_h, line_height);
-    let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(0) as u32;
+    let longest = lines
+        .iter()
+        .map(|(s, _)| crate::glyph_map::cell_count(s))
+        .max()
+        .unwrap_or(0);
 
     let out_w = longest * char_w;
     let out_h = stacked_height_px(char_h, line_advance, lines.len() as u32);
@@ -562,11 +596,23 @@ pub fn render_lines_fitted_lh(
     for (line_idx, (text, fg)) in lines.iter().enumerate() {
         let y_base = line_idx as u32 * line_advance;
         // Center each line within the output width
-        let line_w = text.len() as u32 * char_w;
+        let line_w = crate::glyph_map::cell_count(text) * char_w;
         let x_offset = (out_w.saturating_sub(line_w)) / 2;
-        for (col, ch) in text.chars().enumerate() {
-            let x_base = x_offset + col as u32 * char_w;
-            let glyph_idx = char_index(ch);
+        let mut col = 0u32;
+        for ch in text.chars() {
+            let x_base = x_offset + col * char_w;
+            let glyph_idx = match crate::glyph_map::map_char(ch) {
+                crate::glyph_map::Mapped::Glyph(idx) => idx,
+                crate::glyph_map::Mapped::Skip => continue,
+                crate::glyph_map::Mapped::NotDef(cp) => {
+                    crate::glyph_map::draw_notdef(
+                        &mut buf, out_w, out_h, x_base, y_base, char_w, char_h, cp, *fg,
+                    );
+                    col += 1;
+                    continue;
+                }
+            };
+            col += 1;
             let src_x = glyph_idx * char_w;
 
             for gy in 0..char_h {
@@ -634,7 +680,11 @@ pub fn measure_text_height_lh(text: &str, target_char_h: u32, line_height: f32) 
         return (0, 0);
     }
     let lines: Vec<&str> = text.lines().collect();
-    let max_cols = lines.iter().map(|l| l.len()).max().unwrap_or(0) as u32;
+    let max_cols = lines
+        .iter()
+        .map(|l| crate::glyph_map::cell_count(l))
+        .max()
+        .unwrap_or(0);
     let num_lines = lines.len() as u32;
     if max_cols == 0 || num_lines == 0 {
         return (0, 0);
@@ -703,7 +753,11 @@ pub(crate) fn fit_char_h_for_lines(lines: &[(&str, [u8; 4])], max_width_px: u32)
     if lines.is_empty() || max_width_px == 0 {
         return (0, 0);
     }
-    let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(1) as u32;
+    let longest = lines
+        .iter()
+        .map(|(s, _)| crate::glyph_map::cell_count(s))
+        .max()
+        .unwrap_or(1);
     if longest == 0 {
         return (0, 0);
     }
@@ -723,6 +777,58 @@ pub(crate) fn fit_char_h_for_lines(lines: &[(&str, [u8; 4])], max_width_px: u32)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── glyph_map integration through the public composers ─────────
+
+    #[test]
+    fn emoji_renders_hex_box_not_delta() {
+        // 🚀 previously clamped to a strip glyph; it must now render a
+        // notdef box (which differs from Δ's pixels) one cell wide.
+        let (rocket, w1, _) = render_text_height("🚀", [255; 4], [0; 4], 40);
+        let (delta, w2, _) = render_text_height("Δ", [255; 4], [0; 4], 40);
+        assert_eq!(w1, w2, "notdef occupies exactly one cell");
+        assert_ne!(rocket, delta, "notdef must not masquerade as Δ");
+        assert!(rocket.chunks_exact(4).any(|p| p[0] == 255), "box drawn");
+    }
+
+    #[test]
+    fn distinct_emoji_render_distinct_hex_boxes() {
+        let (a, ..) = render_text_height("🚀", [255; 4], [0; 4], 40);
+        let (b, ..) = render_text_height("🎉", [255; 4], [0; 4], 40);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn variation_selector_is_zero_width() {
+        let (plain, w1, h1) = render_text_height("✔", [255; 4], [0; 4], 30);
+        let (vs16, w2, h2) = render_text_height("✔\u{FE0F}", [255; 4], [0; 4], 30);
+        assert_eq!((w1, h1), (w2, h2), "VS16 must not add a cell");
+        assert_eq!(plain, vs16, "VS16 must not change pixels");
+    }
+
+    #[test]
+    fn fullwidth_folds_render_as_ascii() {
+        let (fw, w1, _) = render_text_height("（ｘ）", [255; 4], [0; 4], 30);
+        let (ascii, w2, _) = render_text_height("(x)", [255; 4], [0; 4], 30);
+        assert_eq!(w1, w2);
+        assert_eq!(fw, ascii);
+    }
+
+    #[test]
+    fn twin_maps_ornament_question_mark() {
+        let (twin, ..) = render_text_height("❓", [255; 4], [0; 4], 30);
+        let (ascii, ..) = render_text_height("?", [255; 4], [0; 4], 30);
+        assert_eq!(twin, ascii);
+    }
+
+    #[test]
+    fn measure_matches_render_for_mapped_text() {
+        let text = "a🚀✔\u{FE0F}（）";
+        let (buf, w, h) = render_text_height(text, [255; 4], [0; 4], 24);
+        let (mw, mh) = measure_text_height(text, 24);
+        assert_eq!((w, h), (mw, mh));
+        assert_eq!(buf.len(), (w * h * 4) as usize);
+    }
 
     #[test]
     fn font_strip_loads() {
