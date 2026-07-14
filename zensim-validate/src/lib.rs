@@ -12,6 +12,7 @@
 
 pub mod adam_simd;
 pub mod bake_runtime;
+pub mod eval_report;
 #[allow(clippy::all)]
 pub mod mlp_train;
 pub mod output_calibration_spline;

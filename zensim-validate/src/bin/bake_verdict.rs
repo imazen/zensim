@@ -48,6 +48,7 @@ use std::time::Instant;
 
 use zenpredict::{Model, Predictor};
 
+use zensim_validate::eval_report;
 use zensim_validate::panel::{compute_panel, rescale_logistic};
 use zensim_validate::parquet_loader;
 
@@ -255,6 +256,22 @@ struct Args {
     /// dial panel is skipped with a loud note (it cannot be recomputed
     /// without the stored feature grid — fetch from R2 eval-grids/).
     dial_grid: PathBuf,
+    /// Self-contained HTML report path. When set, the full report (every
+    /// section printed to console) is ALSO rendered to a single browsable
+    /// HTML file with a table-of-contents, styled tables, and inline-SVG
+    /// charts — no external assets. The "big html report" half of the
+    /// unified metric-eval command.
+    html: Option<PathBuf>,
+    /// Severity-ramp feature grid (`image_path, q, feat_0..`) where
+    /// `q = dist_type*10 + severity_level`. Enables the severity-ramp
+    /// monotonicity section (distortion dial). The grid's feature regime
+    /// MUST match the bake (PU21-u8 vs PU-linear). Absent → section skipped.
+    ramp_grid: Option<PathBuf>,
+    /// Reference bake for the per-zone dial-agreement section (§8.20):
+    /// scores both bakes on the dial grid, buckets by the reference bake's
+    /// dial in 5-pt zones, and reports the candidate's mean-Δ / RMSE / rank
+    /// per zone. Absent → section skipped.
+    compare: Option<PathBuf>,
 }
 
 fn print_usage() {
@@ -264,12 +281,16 @@ fn print_usage() {
 USAGE:\n\
     bake_verdict --bake <path>\n\
                  [--corpora cid22,kadid,tid,konjnd,aic3,aic4]\n\
-                 [--output <path.md>]\n\
+                 [--output <path.md>] [--html <path.html>]\n\
+                 [--ramp-grid <path.parquet>] [--compare <ref-bake.bin>]\n\
                  [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features]\n\
 \n\
 DEFAULTS:\n\
     --corpora       all 6 (cid22,kadid,tid,konjnd,aic3,aic4)\n\
-    --output        stdout\n\
+    --output        stdout (markdown console report)\n\
+    --html          none (also emit a self-contained big HTML report)\n\
+    --ramp-grid     none (severity-ramp monotonicity section)\n\
+    --compare       none (per-zone dial-agreement vs a reference bake)\n\
     --features-root /mnt/v/zen/zensim-training/2026-05-15-full-features\n"
     );
 }
@@ -279,6 +300,9 @@ fn parse_args() -> Result<Args, String> {
     let mut corpora: Option<Vec<&'static Corpus>> = None;
     let mut output: Option<PathBuf> = None;
     let mut per_pair_output: Option<PathBuf> = None;
+    let mut html: Option<PathBuf> = None;
+    let mut ramp_grid: Option<PathBuf> = None;
+    let mut compare: Option<PathBuf> = None;
     let mut features_root: PathBuf =
         PathBuf::from("/mnt/v/zen/zensim-training/2026-05-15-full-features");
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
@@ -315,6 +339,18 @@ fn parse_args() -> Result<Args, String> {
                 let v = args.next().ok_or("--per-pair-output requires <path>")?;
                 per_pair_output = Some(PathBuf::from(v));
             }
+            "--html" => {
+                let v = args.next().ok_or("--html requires <path>")?;
+                html = Some(PathBuf::from(v));
+            }
+            "--ramp-grid" => {
+                let v = args.next().ok_or("--ramp-grid requires <path>")?;
+                ramp_grid = Some(PathBuf::from(v));
+            }
+            "--compare" => {
+                let v = args.next().ok_or("--compare requires <ref-bake path>")?;
+                compare = Some(PathBuf::from(v));
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -333,7 +369,37 @@ fn parse_args() -> Result<Args, String> {
         features_root,
         per_pair_output,
         dial_grid,
+        html,
+        ramp_grid,
+        compare,
     })
+}
+
+/// Score every row of a feature grid through the same dispatch path
+/// `render_corpus` / `dial_panel` use. Reused by the severity-ramp and
+/// per-zone sections so their numbers match the rest of the report
+/// exactly.
+fn score_grid(model: &Model, has_transforms: bool, n_inputs: usize, rows: &[Vec<f64>]) -> Vec<f64> {
+    let per_sample_alpha_head = extract_per_sample_alpha_head(model);
+    let hybrid_head = extract_hybrid_head(model);
+    let tanh_pin_scale = extract_tanh_output_head_scale(model);
+    let output_spline = zensim_validate::output_calibration_spline::extract(model);
+    let mut predictor = Predictor::new(model);
+    let mut scratch = vec![0.0f32; n_inputs];
+    rows.iter()
+        .map(|row| {
+            score_row(
+                &mut predictor,
+                has_transforms,
+                per_sample_alpha_head.as_ref(),
+                hybrid_head.as_ref(),
+                tanh_pin_scale,
+                output_spline.as_ref(),
+                &mut scratch,
+                row,
+            )
+        })
+        .collect()
 }
 
 // ============================================================================
@@ -904,6 +970,11 @@ exceed ±0.3 SROCC at n<30; rankings between bakes are not statistically \
 distinguishable). MAE / Z-RMSE computed after 4-parameter logistic rescale \
 per Mohammadi 2025._\n",
         );
+        // Legacy 4-band CID22 Table-5 cuts alongside the 10-band grid
+        // (CLAUDE.md per-band mandate: report both on the CID22 corpus).
+        if corpus.name == "cid22" {
+            body.push_str(&eval_report::four_band_section(&scores, &humans));
+        }
     } else {
         body.push('\n');
         body.push_str(&format!(
@@ -1149,6 +1220,88 @@ Run the dedicated q-sweep harness for those._\n",
         &args.dial_grid,
     ));
 
+    let basename = |p: &Path| -> String {
+        p.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| p.display().to_string())
+    };
+
+    // ── Severity-ramp monotonicity (distortion dial) — opt-in ──────────
+    if let Some(ramp_path) = &args.ramp_grid {
+        match parquet_loader::load_ramp_grid(ramp_path) {
+            Ok(grid) if grid.n_features == n_inputs => {
+                let dial = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
+                let images: Vec<String> = grid
+                    .image
+                    .iter()
+                    .map(|p| basename(Path::new(p)))
+                    .collect();
+                let stats = eval_report::severity_ramp(&images, &grid.q, &dial, 0.5);
+                buf.push_str(&eval_report::severity_ramp_section(
+                    &stats,
+                    &ramp_path.display().to_string(),
+                ));
+            }
+            Ok(grid) => {
+                buf.push_str(&format!(
+                    "\n## Severity-ramp monotonicity — ⚠ SKIPPED (feature-count mismatch)\n\n\
+                     Ramp grid `{}` has {} feature columns but the bake expects {}. The grid's \
+                     feature regime must match the bake (PU21-u8 vs PU-linear). Point `--ramp-grid` \
+                     at a regime-consistent parquet.\n",
+                    ramp_path.display(),
+                    grid.n_features,
+                    n_inputs
+                ));
+            }
+            Err(e) => {
+                buf.push_str(&format!(
+                    "\n## Severity-ramp monotonicity — ⚠ FAILED to load grid\n\n`{e}`\n"
+                ));
+            }
+        }
+    }
+
+    // ── Per-zone dial agreement vs a reference bake (§8.20) — opt-in ────
+    if let Some(cmp_path) = &args.compare {
+        let ref_res = std::fs::read(cmp_path)
+            .map_err(|e| format!("read reference bake {}: {e}", cmp_path.display()))
+            .and_then(|b| {
+                Model::from_bytes(&b).map_err(|e| format!("parse reference bake: {e:?}"))
+            });
+        match ref_res {
+            Ok(ref_model) if args.dial_grid.exists() => {
+                match parquet_loader::load_dial_grid(&args.dial_grid) {
+                    Ok(grid) => {
+                        let cand = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
+                        let ref_tf = ref_model.has_nontrivial_feature_transforms();
+                        let ref_n = ref_model.n_inputs();
+                        let refs = score_grid(&ref_model, ref_tf, ref_n, &grid.feature_rows);
+                        let zone = eval_report::zone_buckets(&cand, &refs, 5.0);
+                        buf.push_str(&eval_report::zone_bucket_section(
+                            &zone,
+                            &basename(&args.bake),
+                            &basename(cmp_path),
+                            &args.dial_grid.display().to_string(),
+                        ));
+                    }
+                    Err(e) => buf.push_str(&format!(
+                        "\n## Per-zone dial agreement — ⚠ FAILED to load dial grid\n\n`{e}`\n"
+                    )),
+                }
+            }
+            Ok(_) => buf.push_str(&format!(
+                "\n## Per-zone dial agreement — ⚠ SKIPPED (dial grid absent)\n\n\
+                 The reference bake `{}` loaded, but the dial grid `{}` is missing — the \
+                 per-zone comparison scores both bakes on the dial grid.\n",
+                cmp_path.display(),
+                args.dial_grid.display()
+            )),
+            Err(e) => buf.push_str(&format!(
+                "\n## Per-zone dial agreement — ⚠ FAILED\n\n`{e}`\n"
+            )),
+        }
+    }
+
     for r in &results {
         buf.push_str(&r.body);
     }
@@ -1180,6 +1333,35 @@ Run the dedicated q-sweep harness for those._\n",
         }
     } else {
         print!("{buf}");
+    }
+
+    // Self-contained big HTML report (the "html as well as console" half).
+    if let Some(html_path) = &args.html {
+        let title = format!(
+            "metric eval — {}",
+            args.bake
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default()
+        );
+        let html = eval_report::markdown_to_html(&buf, &title);
+        if let Some(parent) = html_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::write(html_path, &html) {
+            Ok(()) => eprintln!(
+                "wrote HTML report to {} ({} KB)",
+                html_path.display(),
+                html.len() / 1024
+            ),
+            Err(e) => {
+                eprintln!(
+                    "bake_verdict: failed to write HTML {}: {e}",
+                    html_path.display()
+                );
+                return ExitCode::from(1);
+            }
+        }
     }
 
     eprintln!("bake_verdict: complete in {:.2}s", elapsed.as_secs_f64());

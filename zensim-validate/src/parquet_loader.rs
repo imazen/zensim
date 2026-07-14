@@ -493,6 +493,122 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
     })
 }
 
+/// A distortion severity-ramp grid for the severity-ramp monotonicity
+/// section: per row the source `image` basename, the `q` code (which
+/// encodes `dist_type * 10 + severity_level`, levels 1..5), and the
+/// feature vector. Groups by `(image, dist_type)` and checks the dial is
+/// non-increasing as severity rises. Mirrors the schema produced by the
+/// kadis-distort / kadis-hdr feature sidecars (`image_path`, `q`,
+/// `feat_0..feat_<N-1>`).
+#[derive(Debug)]
+pub struct RampGrid {
+    pub image: Vec<String>,
+    pub q: Vec<f64>,
+    pub feature_rows: Vec<Vec<f64>>,
+    pub n_features: usize,
+}
+
+/// Load a severity-ramp feature grid. The image column is located as
+/// `image_path` → `image_id` → `ref_basename` (first present); the
+/// feature columns as `feat_0..` (zenmetrics convention) → `f0..` (dial
+/// convention). `q` may be Float32/Float64/Int. Column order is free.
+///
+/// Used by the `severity-ramp monotonicity` section of the unified
+/// metric-eval report (`bake_verdict --ramp-grid`). The grid's feature
+/// regime (PU21-u8 vs PU-linear) MUST match the bake being scored — the
+/// caller is responsible for pointing at the regime-consistent parquet.
+pub fn load_ramp_grid(path: &PathBuf) -> Result<RampGrid, String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let schema = builder.schema().clone();
+    let names: Vec<String> = schema
+        .fields()
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect();
+    let idx = |n: &str| names.iter().position(|x| x == n);
+    let img_i = idx("image_path")
+        .or_else(|| idx("image_id"))
+        .or_else(|| idx("ref_basename"))
+        .ok_or_else(|| format!("{path:?}: missing image column (image_path/image_id/ref_basename)"))?;
+    let q_i = idx("q").ok_or_else(|| format!("{path:?}: missing q column"))?;
+    // Feature columns: prefer the zenmetrics `feat_N` naming, fall back to
+    // the dial-grid `fN` naming.
+    let feat_prefix = if idx("feat_0").is_some() { "feat_" } else { "f" };
+    let mut feat_idx = Vec::new();
+    let mut fi = 0usize;
+    while let Some(p) = idx(&format!("{feat_prefix}{fi}")) {
+        feat_idx.push(p);
+        fi += 1;
+    }
+    let n_features = feat_idx.len();
+    if n_features == 0 {
+        return Err(format!(
+            "{path:?}: no {feat_prefix}N feature columns found"
+        ));
+    }
+    let reader = builder
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
+
+    let col_f64 = |col: &dyn Array, n_rows: usize| -> Result<Vec<f64>, String> {
+        match col.data_type() {
+            DataType::Float64 => {
+                let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i)).collect())
+            }
+            DataType::Float32 => {
+                let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i) as f64).collect())
+            }
+            DataType::Int64 => {
+                let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i) as f64).collect())
+            }
+            DataType::Int32 => {
+                let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i) as f64).collect())
+            }
+            other => Err(format!("unsupported numeric dtype {other:?}")),
+        }
+    };
+
+    let mut image = Vec::new();
+    let mut q = Vec::new();
+    let mut feature_rows: Vec<Vec<f64>> = Vec::new();
+    for batch_res in reader {
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let n_rows = batch.num_rows();
+        if n_rows == 0 {
+            continue;
+        }
+        let img_arr = batch
+            .column(img_i)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| format!("{path:?}: image column not Utf8"))?;
+        let q_v = col_f64(batch.column(q_i).as_ref(), n_rows)
+            .map_err(|e| format!("{path:?}: q column {e}"))?;
+        let per_col: Vec<Vec<f64>> = feat_idx
+            .iter()
+            .map(|&pi| col_f64(batch.column(pi).as_ref(), n_rows))
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("{path:?}: feature column {e}"))?;
+        for r in 0..n_rows {
+            image.push(img_arr.value(r).to_string());
+            q.push(q_v[r]);
+            feature_rows.push((0..n_features).map(|c| per_col[c][r]).collect());
+        }
+    }
+    Ok(RampGrid {
+        image,
+        q,
+        feature_rows,
+        n_features,
+    })
+}
+
 /// Load an optional scalar f64 column from a parquet file by name.
 ///
 /// Returns `Ok(None)` if the column doesn't exist in the schema. Returns
