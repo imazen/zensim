@@ -1405,3 +1405,44 @@ fixable defect.**
 **Load-bearing process fix:** every BHdr candidate MUST be `upiq_panel.py`'d
 (PU-linear features) before any ship consideration — ramps/seam/dial-reach are
 necessary but NOT sufficient. Added to the confirmation battery.
+
+## §8.25 — Signed U-shaped ramps made RELEVANT by folding at the identity (2026-07-14, user directive)
+
+The severity-ramp instrument (§8.19b) EXCLUDED the 3 signed/U-shaped types
+(d7 color_saturate_hsv, d18 mean_shift, d25 contrast — 266 ramps) because their
+`dist_param` sweeps +→0→− so quality is U-shaped in level, not monotone. Per
+user ("the negative U ramps should be offsettable in some way to become
+relevant"): **fold each U at its identity** (min |dist_param|) into two
+half-ramps, each of which MUST fall monotonically as |dist_param| rises. This
+turns 266 discarded ramps into **532 relevant half-ramps** + an identity-dial
+fidelity check (the param=0 level should score ≈100). Landed in BOTH tools —
+`eval_report.rs::{signed_fold_arms, severity_ramp}` (bake_verdict `--ramp-grid`)
+and `scripts/hdr/severity_ramp_monotonicity.py` — verified byte-parity (unsigned
+63.7% + signed-folded 78.4% match exactly). The per-level params are fixed by
+kadis-distort so the fold is encoded as level-orderings, no knob_tuple_json parse.
+
+**What the fold reveals (shipped BHdr vs hdranch3):**
+
+| | unsigned ramps | **signed folded** | d7 saturate | d18 mean_shift | d25 contrast |
+|---|--:|--:|--:|--:|--:|
+| **shipped BHdr** | 63.7% | **78.4%** | 45% (id 30.0) | 100% (id 98.4) | 100% (id 56.2) |
+| hdranch3 (fulltgt) | 83.5% | 63.2% | 6% (id 13.2) | 100% (id 96.5) | 100% (id 74.0) |
+
+Two findings:
+
+1. **hdranch3's ramp "win" is UNSIGNED-only — on signed U-types the shipped BHdr
+   is BETTER (78.4% vs 63.2%), and much better on saturation (45% vs 6%).** So the
+   ramp advantage that motivated the whole hdranch3 direction (§8.24) is even
+   narrower than it looked: it holds only on exotic unsigned analytic types
+   (noneccentricity/color_block), and REVERSES on the signed types. Reinforces
+   §8.24 — shipped BHdr stays champion.
+
+2. **The identity-fidelity readout caught a DATA property, not a metric bug:** the
+   param=0 level scores ≈100 only for mean_shift (98.4). For contrast (56.2) and
+   saturate (30.0) the param=0 image is NOT a true reference-identity — the
+   corpus's OWN precomputed `zensim_score` at those levels equals the bake's
+   (30.0 / 100.0 / 56.2 exactly), so the kadis-distort generator applies a
+   baseline transform even at param=0 for those two types. The fold-vertex is
+   still correct (param=0 is the U's peak), and the identity check is a useful
+   corpus-QA probe. Follow-up (data side, not blocking): confirm/fix that
+   contrast/saturate param=0 should be a no-op in kadis-distort.

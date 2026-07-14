@@ -36,6 +36,39 @@ use crate::panel::compute_panel;
 /// `severity_ramp_monotonicity.py`.
 pub const SIGNED_DIST_TYPES: [u32; 3] = [7, 18, 25];
 
+/// The two half-ramps of a signed (U-shaped) distortion, as `level` sequences
+/// ordered from the identity (minimum |dist_param|) OUTWARD. A signed type
+/// sweeps its parameter positive → 0 (identity) → negative, so quality is
+/// U-shaped in `level` but MONOTONE in |dist_param| — folding at the identity
+/// turns each U into two proper severity ramps (quality must fall as the
+/// distortion magnitude rises in either direction). The generator's per-level
+/// `dist_param` is fixed by kadis-distort, so we encode the |dist_param|
+/// ordering directly rather than parsing `knob_tuple_json`:
+///   d7  color_saturate_hsv : params +.40 +.20 +.10  .00 −.40  (identity L4)
+///   d18 mean_shift         : params +.15 +.08  .00 −.08 −.15  (identity L3)
+///   d25 contrast           : params +.30 +.15  .00 −.40 −.60  (identity L3)
+/// Returns `[positive_arm, negative_arm]`, each a level sequence starting at
+/// the identity. Keep in lockstep with [`SIGNED_DIST_TYPES`].
+fn signed_fold_arms(ty: u32) -> Option<[&'static [u32]; 2]> {
+    match ty {
+        7 => Some([&[4, 3, 2, 1], &[4, 5]]),
+        18 => Some([&[3, 2, 1], &[3, 4, 5]]),
+        25 => Some([&[3, 2, 1], &[3, 4, 5]]),
+        _ => None,
+    }
+}
+
+/// The identity level (minimum |dist_param|) for a signed type. Its dial
+/// should be ≈100 (the undistorted reference); a low value flags either a
+/// non-identity param=0 image or a metric calibration gap on that distortion.
+fn signed_identity_level(ty: u32) -> Option<u32> {
+    match ty {
+        7 => Some(4),
+        18 | 25 => Some(3),
+        _ => None,
+    }
+}
+
 // ============================================================================
 // Severity-ramp monotonicity
 // ============================================================================
@@ -53,30 +86,44 @@ pub struct RampType {
 pub struct RampStats {
     /// Ramps counted (5-level, non-signed).
     pub n_ramps: usize,
-    /// Ramps skipped because the type is signed/U-shaped.
+    /// Signed/U-shaped ramps folded at their identity (count of source ramps).
     pub n_signed: usize,
-    /// Fraction of ramps non-increasing within `eps` slack (the headline).
+    /// Fraction of ramps non-increasing within `eps` slack (the headline;
+    /// UNSIGNED ramps only — signed folded arms are reported separately so
+    /// the 90% gate stays comparable to history).
     pub pct_monotone: f64,
     /// Fraction strictly decreasing (every step down).
     pub pct_strict: f64,
     /// Mean worst forward-inversion magnitude (dial pts) over the
     /// non-monotone ramps. 0 when all ramps are monotone.
     pub mean_worst_inv: f64,
-    /// Per-type monotone fraction, worst first.
+    /// Per-type monotone fraction, worst first (unsigned types).
     pub per_type: Vec<RampType>,
     /// Tie slack used (dial points).
     pub eps: f64,
+    /// Total folded half-ramps from signed types (2 per source ramp).
+    pub n_signed_arms: usize,
+    /// Fraction of folded signed half-ramps non-increasing within `eps`.
+    pub pct_signed_monotone: f64,
+    /// Per signed-type folded-arm monotone fraction.
+    pub signed_per_type: Vec<RampType>,
+    /// Per signed-type mean identity-level dial (should be ≈100):
+    /// `(dist_type, mean_identity_dial, n)`.
+    pub signed_identity: Vec<(u32, f64, usize)>,
 }
 
 /// Severity-ramp monotonicity. `q` encodes `dist_type * 10 + level`
 /// (level 1..5). For each `(image, dist_type)` ramp with all 5 levels,
 /// the dial must be non-increasing (higher severity → lower quality) as
 /// level rises, within `eps` dial-points of tie slack. Signed types
-/// ([`SIGNED_DIST_TYPES`]) are excluded from the monotone denominator.
+/// ([`SIGNED_DIST_TYPES`]) are U-shaped in level, so instead of discarding
+/// them they are FOLDED at their identity (min |dist_param|) into two
+/// half-ramps each (see [`signed_fold_arms`]) and reported separately — the
+/// unsigned headline stays comparable to history while the signed types stay
+/// relevant (with an identity-dial fidelity check).
 ///
 /// `image` is any stable per-source key (basename); `dial` is the bake's
-/// score for the same row. Bit-for-bit the logic of
-/// `severity_ramp_monotonicity.py`.
+/// score for the same row.
 pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> RampStats {
     // Group dial by (image, dist_type) → {level: dial}.
     let mut ramps: BTreeMap<(String, u32), BTreeMap<u32, f64>> = BTreeMap::new();
@@ -92,7 +139,6 @@ pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> Ram
             .or_default()
             .insert(lv, dial[i]);
     }
-    let signed: std::collections::HashSet<u32> = SIGNED_DIST_TYPES.iter().copied().collect();
     let mut n_ramps = 0usize;
     let mut n_signed = 0usize;
     let mut mono = 0usize;
@@ -100,20 +146,52 @@ pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> Ram
     let mut inv_mags: Vec<f64> = Vec::new();
     // per-type: [monotone, total]
     let mut per_type: BTreeMap<u32, [usize; 2]> = BTreeMap::new();
+    // signed folded-arm tallies (kept separate from the unsigned headline).
+    let mut n_signed_arms = 0usize;
+    let mut signed_mono = 0usize;
+    let mut signed_per_type: BTreeMap<u32, [usize; 2]> = BTreeMap::new();
+    let mut signed_identity: BTreeMap<u32, Vec<f64>> = BTreeMap::new();
+    // Check one monotone (non-increasing within eps) sequence; return (ok, strict).
+    let check = |seq: &[f64]| -> (bool, bool, f64) {
+        let diffs: Vec<f64> = seq.windows(2).map(|w| w[1] - w[0]).collect();
+        let ok = diffs.iter().all(|&d| d <= eps);
+        let st = diffs.iter().all(|&d| d < 0.0);
+        let worst = diffs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        (ok, st, worst)
+    };
     for ((_img, ty), levels) in &ramps {
         if levels.len() < 5 {
             continue;
         }
-        if signed.contains(ty) {
+        if let Some(arms) = signed_fold_arms(*ty) {
+            // Fold the U at its identity: each arm is a half-ramp from the
+            // identity outward and must be non-increasing as |param| rises.
             n_signed += 1;
+            for arm in arms {
+                let seq: Vec<f64> = arm.iter().filter_map(|lv| levels.get(lv).copied()).collect();
+                if seq.len() < 2 {
+                    continue;
+                }
+                let (ok, _st, _worst) = check(&seq);
+                n_signed_arms += 1;
+                if ok {
+                    signed_mono += 1;
+                }
+                let e = signed_per_type.entry(*ty).or_default();
+                e[0] += ok as usize;
+                e[1] += 1;
+            }
+            if let Some(idlv) = signed_identity_level(*ty) {
+                if let Some(&d) = levels.get(&idlv) {
+                    signed_identity.entry(*ty).or_default().push(d);
+                }
+            }
             continue;
         }
-        // Sorted-by-level dial sequence.
+        // Unsigned severity ramp: sorted-by-level dial sequence.
         let seq: Vec<f64> = levels.values().copied().collect();
-        let diffs: Vec<f64> = seq.windows(2).map(|w| w[1] - w[0]).collect();
+        let (ok, st, worst) = check(&seq);
         n_ramps += 1;
-        let ok = diffs.iter().all(|&d| d <= eps);
-        let st = diffs.iter().all(|&d| d < 0.0);
         if ok {
             mono += 1;
         }
@@ -124,20 +202,29 @@ pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> Ram
         e[0] += ok as usize;
         e[1] += 1;
         if !ok {
-            // worst forward step (largest positive diff — wrong direction)
-            let worst = diffs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             inv_mags.push(worst);
         }
     }
-    let mut per_type_v: Vec<RampType> = per_type
+    let to_types = |m: &BTreeMap<u32, [usize; 2]>| -> Vec<RampType> {
+        let mut v: Vec<RampType> = m
+            .iter()
+            .map(|(&ty, c)| RampType {
+                dist_type: ty,
+                monotone_frac: if c[1] > 0 { c[0] as f64 / c[1] as f64 } else { f64::NAN },
+                n: c[1],
+            })
+            .collect();
+        v.sort_by(|a, b| {
+            a.monotone_frac
+                .partial_cmp(&b.monotone_frac)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        v
+    };
+    let signed_identity_v: Vec<(u32, f64, usize)> = signed_identity
         .iter()
-        .map(|(&ty, c)| RampType {
-            dist_type: ty,
-            monotone_frac: if c[1] > 0 { c[0] as f64 / c[1] as f64 } else { f64::NAN },
-            n: c[1],
-        })
+        .map(|(&ty, v)| (ty, v.iter().sum::<f64>() / v.len().max(1) as f64, v.len()))
         .collect();
-    per_type_v.sort_by(|a, b| a.monotone_frac.partial_cmp(&b.monotone_frac).unwrap_or(std::cmp::Ordering::Equal));
     RampStats {
         n_ramps,
         n_signed,
@@ -148,8 +235,16 @@ pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> Ram
         } else {
             inv_mags.iter().sum::<f64>() / inv_mags.len() as f64
         },
-        per_type: per_type_v,
+        per_type: to_types(&per_type),
         eps,
+        n_signed_arms,
+        pct_signed_monotone: if n_signed_arms > 0 {
+            signed_mono as f64 / n_signed_arms as f64
+        } else {
+            f64::NAN
+        },
+        signed_per_type: to_types(&signed_per_type),
+        signed_identity: signed_identity_v,
     }
 }
 
@@ -159,8 +254,9 @@ pub fn severity_ramp_section(stats: &RampStats, grid_label: &str) -> String {
     let mut s = String::new();
     s.push_str("\n## Severity-ramp monotonicity (distortion dial)\n\n");
     s.push_str(&format!(
-        "Grid: `{}` — {} five-level ramps (signed U-shaped types {:?} excluded: {}).\n\n",
-        grid_label, stats.n_ramps, SIGNED_DIST_TYPES, stats.n_signed
+        "Grid: `{}` — {} unsigned five-level ramps; {} signed U-shaped ramps \
+         (types {:?}) folded at their identity into {} half-ramps (reported below).\n\n",
+        grid_label, stats.n_ramps, stats.n_signed, SIGNED_DIST_TYPES, stats.n_signed_arms
     ));
     s.push_str("| metric | value | gate | pass |\n|---|--:|---|:--:|\n");
     let mono_pass = stats.pct_monotone >= 0.90;
@@ -209,10 +305,46 @@ pub fn severity_ramp_section(stats: &RampStats, grid_label: &str) -> String {
         }
         s.push('\n');
     }
+    // Signed U-shaped types, folded at their identity into half-ramps.
+    if stats.n_signed_arms > 0 {
+        s.push_str("\n**Signed U-shaped types (folded at identity — |dist_param| ramps):**\n\n");
+        let _ = writeln!(
+            s,
+            "Overall folded-arm monotone: **{:.1}%** ({} half-ramps). A signed \
+             distortion sweeps its parameter +→0→−, so quality is U-shaped in level \
+             but must fall monotonically as |dist_param| rises from the identity.\n",
+            100.0 * stats.pct_signed_monotone,
+            stats.n_signed_arms
+        );
+        s.push_str("| dist_type | folded monotone % | half-ramps | identity dial (→100) |\n");
+        s.push_str("|---|--:|--:|--:|\n");
+        for t in &stats.signed_per_type {
+            let ident = stats
+                .signed_identity
+                .iter()
+                .find(|(ty, _, _)| *ty == t.dist_type)
+                .map(|(_, d, _)| *d);
+            let ident_s = match ident {
+                Some(d) => format!("{d:.1}"),
+                None => "—".to_string(),
+            };
+            let _ = writeln!(
+                s,
+                "| d{} | {:.0}% | {} | {} |",
+                t.dist_type,
+                100.0 * t.monotone_frac,
+                t.n,
+                ident_s
+            );
+        }
+        s.push('\n');
+    }
     s.push_str(
         "_A correct dial is non-increasing as distortion severity rises (level 1→5). \
-         Signed types are U-shaped by design and excluded. `mean worst-inversion` is the \
-         mean over non-monotone ramps of the largest wrong-direction step._\n",
+         Signed U-shaped types are folded at their identity (min |dist_param|) into two \
+         half-ramps each — relevant, not discarded — with an identity-dial fidelity check \
+         (should be ≈100). `mean worst-inversion` is the mean over non-monotone UNSIGNED \
+         ramps of the largest wrong-direction step._\n",
     );
     s
 }
