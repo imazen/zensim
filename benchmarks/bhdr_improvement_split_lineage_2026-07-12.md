@@ -753,6 +753,42 @@ mix), with a valid selection axis — the §8.6 selection-axis failure is the
 open problem; kadis-hdr val (2,994 rows, human-free but distortion-diverse)
 is a candidate axis to pre-register.
 
+### 8.11 PRE-REGISTERED: broadened-corpus BHdr retrain (registered 2026-07-14, BEFORE any fit ran)
+
+**Hypothesis.** Adding the kadis-hdr family (11,387 cells, 25 synthetic
+distortion types in PQ domain — a SECOND distortion family disjoint from
+jxl-encode artifacts) to the BHdr training gram improves generalization,
+and a clean never-burned selection axis avoids the §8.6 selection-axis
+failure. Falsifier: the selected candidate fails the confirmation gate.
+
+**Family & grid (12 candidates, registered):** linear 372→1, `shaped`
+space only (the shipped-BHdr space), mixes
+`hdrbroad11` (v3mix:1.0 + kadis_mix:1.0), `hdrbroad1h` (1.0 + 0.5),
+`hdrbroadh1` (0.5 + 1.0) × lasso λ ∈ {1e-4, 3e-4, 5e-4, 1e-3}. Ridge/bvls
+fits the tool also emits are IGNORED for selection (registered here to
+avoid post-hoc family switching).
+
+**Splits (verified before registration):** LSD-origin rule on both
+corpora; kadis train=38 origins {0,2,4,6,8} / val=20 origins {1,3,5},
+overlap 0, test-digit leak 0 — whole-source-per-fold (renditions +
+distortions never cross folds).
+
+**Selection axis (registered):** `0.5·SROCC(hdr_valmix) +
+0.5·SROCC(hdr_kadis_valmix)` — both held-out-origin, human-free,
+never-burned. Tie-break: higher `|konjnd_guard|`. NO UPIQ looks during
+selection. Selection is mechanical over the 12 candidates.
+
+**Confirmation (ONE look, single selected candidate):** finalize → bake →
+(a) UPIQ within-study panel (narwaria + korshunov separately) vs shipped
+BHdr `7d7f2123`; (b) `bake_verdict` guard corpora. **Ship gates:** UPIQ
+within-study SROCC ≥ shipped on BOTH strata AND paired-bootstrap p<0.05
+improvement on ≥1 stratum; KonJND + KADID + TID vals within −0.02 of
+shipped BHdr. Any gate fails → record §8.12 verdict, do NOT ship, direction
+waits for AIC-HDR2025.
+
+**Cost ceiling:** one gram build + 12 fits + 1 confirmation pass. No grid
+extensions without a new registration section.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
