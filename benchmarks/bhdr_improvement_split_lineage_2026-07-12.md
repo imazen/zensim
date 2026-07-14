@@ -1275,3 +1275,44 @@ zenjxl ladders, 7 metrics: zensim/ssim2/iwssim/cvvdp/butter-max/butter-p3/dssim)
   keep in the pipeline for future/dirtier sweeps; it just doesn't rescue this
   one. The lever for BHdr remains the top-anchored dial (§8.20), not label
   hygiene.
+
+## §8.22 — Shaped-bake top-extend built + applied: dial 77→87, ramps unchanged; residual is LINEAR-HEAD top-compression (2026-07-14)
+
+The Rust `bake_dial_refit extend-top` rejects shaped bakes (the co-cal bake
+has quantile_bins/yeo_johnson/signed_cbrt transforms on top of winsor_p99 —
+"f64 fit-forward supports identity/winsor_p99 only"). Built the shaped-bake
+counterpart `scripts/hdr/hdr_top_extend.py`: reads the input bake's transforms
++ params + spline VERBATIM from `zenpredict inspect`, computes raw preds on
+`val/anchor.npz`'s post-transform `shaped` features, fits the same
+`log(100−y) ≈ logA − k·raw` concave saturation on the y>70 band, and extends
+ONLY the spline top (bottom+mid kept exactly → rank-invariant). Same math as
+the SDR `dense_dial_refit_b.py`, generalized off the hardcoded winsor.
+
+Applied to `lp_hdranch3_cocal.bin` → `lp_hdranch3_cocal_densetop.bin`:
+- input spline 18 knots, top y=76.7 (the collapse); k=4.60 fit (n=600),
+  +12 saturation knots, top y→100.0, 30 knots, 11.8 KB.
+- **Ramps UNCHANGED: 86.6% monotone / 2.78 worst-inv** (rank-invariant ✓;
+  strict 75.3→75.7 = f16 noise). The new eval tool (`bake_verdict --ramp-grid`)
+  reproduces it natively.
+- **Dial reach on the kadis-hdr ramp grid: max 76.7 → 86.8**; but level-1
+  (near-lossless) p95 barely moved (76.7 → 77.7). The extension lifts only the
+  raw>0.98 tail.
+
+**Root cause of the residual (measured, important):** near-lossless content's
+RAW linear output clusters at ~0.98 — the same raw the anchor's y=97 rows
+produce — so the LINEAR HEAD maps "y=90 content" and "y=97 content" to nearly
+the same raw. A monotone spline can remap but cannot CREATE separation the
+head didn't produce. So the top-collapse is only partly spline placement
+(§8.20c); the deeper half is **linear-head top rank-compression**. The
+top-extend is the correct, reusable fix for the spline half (and the shaped
+top-extend tool now exists), but closing the full top needs the FIT to see
+dense high-quality separation — i.e. top-anchor mass in the training/fit
+Gram, not just in the spline anchor. That is the next lever, NOT another
+spline refit.
+
+**Decision point (UPIQ-HDR look is one-shot per registration):** densetop has
+strong ramps (86.6%, +20 vs shipped BHdr's 63.7%) and improved but not full
+dial reach (87 vs B's ~95). The precious UPIQ-HDR holdout look should be spent
+only on a candidate that has closed the top-compression, so the recommendation
+is to fit top-anchor mass FIRST (address the head compression), re-gate ramps
++ dial reach, and only then spend the look. Tool: `scripts/hdr/hdr_top_extend.py`.
