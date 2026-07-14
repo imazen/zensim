@@ -98,6 +98,11 @@ GROUPS = {
     # kadispl variants below are the v3 PU-linear re-extraction (§8.14).
     "hdr_kadispl_mix": (PROBE / "hdr_kadispl_mix_traindigits_2026-07-14.parquet", ["human_score"]),
     "hdr_kadispl": (PROBE / "hdr_kadispl_traindigits_2026-07-14.parquet", ["human_score"]),
+    # §8.16 unified-domain SDR mass: kadid/tid images re-encoded 203-nit PQ
+    # → PU-linear features (same regime as hdr_v3mix). Ref-id-split; human
+    # MOS/DMOS targets (higher=better, direction-verified vs level).
+    "kadid_pl": (PROBE / "kadid_pl203_traindigits_2026-07-14.parquet", ["human_score"]),
+    "tid_pl": (PROBE / "tid_pl203_traindigits_2026-07-14.parquet", ["human_score"]),
 }
 VAL_SETS = {
     "bigcodec_val": (PROBE / "bigcodec_valdigits_2026-07-02.parquet", "human_score"),
@@ -115,6 +120,9 @@ VAL_SETS = {
     # PU-linear kadis val — the §8.14 selection axis (regime-consistent
     # with hdr_valmix, both v3 PU-linear).
     "hdr_kadispl_valmix": (PROBE / "hdr_kadispl_mix_valdigits_2026-07-14.parquet", "human_score"),
+    # §8.16 SDR selection axes: ref-held-out kadid/tid PU-linear slices.
+    "kadid_pl_val": (PROBE / "kadid_pl203_valdigits_2026-07-14.parquet", "human_score"),
+    "tid_pl_val": (PROBE / "tid_pl203_valdigits_2026-07-14.parquet", "human_score"),
 }
 
 FCOLS = [f"f{i}" for i in range(N_FEAT)]
@@ -345,6 +353,13 @@ MIXES_HDR = {
                      ("hdr_kadispl_mix", 0.5, "human_score")],
     "hdrbroadplh1": [("hdr_v3mix", 0.5, "human_score"),
                      ("hdr_kadispl_mix", 1.0, "human_score")],
+    # §8.16 unified-domain mixes: HDR mass + SDR mass through ONE regime.
+    "hdrunia": [("hdr_v3mix", 1.0, "human_score"),
+                ("kadid_pl", 0.25, "human_score"), ("tid_pl", 0.25, "human_score")],
+    "hdrunib": [("hdr_v3mix", 1.0, "human_score"),
+                ("kadid_pl", 0.5, "human_score"), ("tid_pl", 0.5, "human_score")],
+    "hdrunic": [("hdr_v3mix", 1.0, "human_score"),
+                ("kadid_pl", 1.0, "human_score"), ("tid_pl", 1.0, "human_score")],
     # 2026-07-12 teacher-ceiling probe (§8.3/§8.4): iwssim-teacher families.
     "hdriwmix": [("hdr_v3iwmix", 1.0, "human_score")],
     "hdriw": [("hdr_v3iw", 1.0, "human_score")],

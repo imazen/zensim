@@ -984,6 +984,48 @@ IS the AIC-3 annotation format AIC-HDR2025 will ship — build the Bet2
 triplet ingest against it now and the same pipeline serves our own
 HDR-triplet study AND AIC-HDR2025 on release day.
 
+### 8.16 CAMPAIGN "BHdr right" (user 2026-07-14) — baselines measured; unified-domain gram is the lever
+
+User directive: keep working until BHdr is (a) as good or better than B and
+(b) genuinely HDR-sensitive. Gates formalized in task #13 + PLAN_HDR_SDR_
+ALIGNMENT. Baselines (all committed):
+
+- **G-C seam** (`upiq_crossdomain_baseline_2026-07-14.md`): −8.64 dial pts
+  HDR-vs-SDR at equal JOD; band-shaped (−13 visible-distortion, +3.7
+  near-lossless) → co-calibration-addressable.
+- **G-A identity** (`ga_identity_baseline_2026-07-14.md`): FAIL with
+  structure — B vs BHdr on 3,779 SDR pairs re-encoded 203-nit PQ:
+  center aligned (mean +0.76 / median +1.95) but p95 |Δ| = 36.7, rank
+  0.848; worst-10 all level-5 heavy distortions where BHdr extrapolates
+  deep-negative (−52..−86). **Root cause: BHdr's gram is jxl-HDR-only —
+  it has never seen SDR content or heavy analytic distortions.** (The
+  routing identity test covers routing, not score equivalence.)
+- **G-D probe** built (kadis-distort `a556b6a`): highlight-only
+  distortions + hard-clip TM pairs that are SDR-blind by construction;
+  generation queued behind the extraction jobs.
+
+**Lever (this registration): unified-domain gram.** Re-extract SDR
+training corpora through the SAME PU-linear regime at the 203-nit
+convention (converter `srgb_to_pq_png.py` matches zensim's internal
+SDR→nits parity test), then fit ONE BHdr head on hdr_v3mix + SDR mass.
+This attacks G-A (SDR competence by construction), G-C (shared scale
+via shared supervision), and preserves G-B/G-D (HDR mass + PU-linear
+absolute-luminance features stay).
+
+**Registered grid (BEFORE fitting):** groups `kadid_pl` + `tid_pl`
+(PU-linear-203 features, `human_score` targets, ref-id-split val slices
+held out) added to GROUPS; mixes `hdruni{a,b,c}` =
+hdr_v3mix:1.0 + {kadid_pl:0.25+tid_pl:0.25, kadid_pl:0.5+tid_pl:0.5,
+kadid_pl:1.0+tid_pl:1.0}; lasso λ ∈ {3e-4, 5e-4, 1e-3, 2e-3}; shaped
+only → 12 candidates. **Selection axis:** mean of SROCC(hdr_valmix) and
+SROCC(sdr ref-held-out slice) (both train-legal), tie-break
+|konjnd_guard|. **Confirmation (ONE look, all four instruments):**
+UPIQ-HDR within-study vs shipped (≥ both strata bar unchanged), UPIQ-SDR
+live leg JOD (first use — clean), G-A identity re-run (require p95 |Δ|
+≤ 12 = tails halved, rank ≥ 0.95 as the STEP gate; full ≤2/0.99 is the
+campaign end-state via distillation later), G-C seam (|seam| ≤ 4).
+kadis mass stays OUT per §8.15 (falsified for UPIQ transfer).
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
