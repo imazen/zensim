@@ -651,3 +651,18 @@ method vs the invariant standalone SDF sampler): engine/SDF cold ratio
 text (~46 distinct glyphs)**; per-size cost and cache now track glyphs
 actually rendered, so baseline/tier growth no longer taxes every label
 size. Warm path unchanged within measurement noise.
+
+## Addendum: zenresize weight-table reuse within runs (user catch)
+
+The per-cell builder constructed a fresh `StreamingResize` per glyph,
+recomputing identical filter weight tables every cell (the code
+comment even flagged it). `StreamingResize::reset()` preserves weight
+tables + buffers; hoisting the resizer out of the glyph loop cut
+**~30% off per-glyph cost at every size** (b: 6.0→4.2 / 8.6→5.9 /
+15.0→10.7 µs at 12/27/54 px) and removed the per-glyph buffer allocs.
+Pixel-equivalence test (`batched_runs_match_full_strip`) confirms
+`reset()` output is byte-identical. Side effect: per-run overhead is
+now visible (a ≈ 2–3 µs = the once-per-run weight build), which makes
+batch=1 strictly worse and REINFORCES SCALE_BATCH=4 (cold model: B=4
+0.17–0.40 ms vs whole-strip 0.40–1.03 ms per fresh size on the
+10-label workload). SDF path already shared its axis taps per run.

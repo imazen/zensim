@@ -385,14 +385,16 @@ fn wrap_text(text: &str, max_cols: usize) -> String {
 /// uses instead of the whole (growing) atlas — a 20-glyph label at a
 /// fresh size scales ~3 batches, not 96+ cells.
 ///
-/// Why 4 (measured, `examples/glyph_batch_bench.rs`): the producer's
-/// per-run overhead is ~zero (fit `a ≤ 2 µs`; per-glyph `b` = 6–15 µs
-/// across 12–54 px), so smaller batches always win the COLD model —
-/// but batch=1 defeats the compose loop's same-batch memoization and
-/// makes the warm path pay a cache lookup per character against a
-/// much larger entry set. B=4 keeps cold cost within ~2.2× of the
-/// B=1 ideal (and ~3× better than whole-strip scaling) while text's
-/// index clustering (lowercase/digit runs) amortizes lookups.
+/// Why 4 (measured, `examples/glyph_batch_bench.rs`, with per-run
+/// weight-table reuse in the producer): per-run overhead `a ≈ 2–3 µs`
+/// (the once-per-run weight build), per-glyph `b` = 4.2–10.7 µs
+/// across 12–54 px. Small batches win the COLD workload model (B=1:
+/// 0.09–0.18 ms per fresh size for a 10-label set; whole-strip:
+/// 0.40–1.03 ms) — but batch=1 defeats the compose loop's same-batch
+/// memoization and makes the warm path pay a cache lookup per
+/// character against a much larger entry set. B=4 keeps cold within
+/// ~2.2× of the B=1 ideal (and ~2.6× better than whole-strip) while
+/// text's index clustering (lowercase/digit runs) amortizes lookups.
 pub(crate) const SCALE_BATCH: u32 = 4;
 
 /// Byte budget for the scaled-glyph cache (sum of cached run bitmaps).
@@ -530,15 +532,18 @@ fn build_scaled_run_per_cell(
             .input(zenresize::PixelDescriptor::RGBA8_SRGB)
             .build();
 
+    // One streaming resizer for the whole run: `reset()` between cells
+    // preserves the filter weight tables and internal buffers (every
+    // cell has identical dims/filter), so weights are computed once per
+    // run instead of once per glyph.
+    let mut sr = zenresize::StreamingResize::new(&cfg);
+
     for i in 0..count {
         let glyph_idx = (start + i).min(CHAR_COUNT - 1);
         // crop_view: zero-copy strided sub-view of cell `glyph_idx`.
         let cell = strip_slice.crop_view(glyph_idx * BASE_CHAR_W, 0, BASE_CHAR_W, BASE_CHAR_H);
 
-        // Streaming resizer dimensioned for this single cell. Weight
-        // tables are recomputed per glyph (same dims, same filter, so
-        // the cost is identical work — just no shared cache today).
-        let mut sr = zenresize::StreamingResize::new(&cfg);
+        sr.reset();
         let cell_x = (i as usize) * scaled_char_w_usize;
         let mut output_y = 0u32;
 
