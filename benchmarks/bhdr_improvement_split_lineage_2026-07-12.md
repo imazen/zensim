@@ -708,6 +708,51 @@ s5cmd invocation — that is s5cmd's GetBucketLocation probe, which R2 scoped
 temp creds can't answer. s5cmd falls back and all actual operations succeed.
 Harmless noise; do not chase it.
 
+### 8.10 Fleet COMPLETE + kadis-hdr training parquets BUILT (2026-07-13/14 night)
+
+**Fleet result: 19/19 chunks, 0 failure logs, all boxes reaped.** Wall ~2h
+(launch ~22:20Z → drain ~00:20Z); ~$3-4 total. Two operational findings, both
+fixed + committed (zenmetrics `b24cc750`): (a) self-destroy silently no-ops
+without `VAST_API_KEY` — 4 drained boxes idled until manually reaped (launcher
+gained opt-in `INJECT_VAST_API_KEY=1`; a log-tail reaper covered this run);
+(b) static modulo shards leave a single-box tail (shard 0 = 4 chunks) — the
+job system's work-stealing wouldn't. Per-box utilization is intentionally poor
+(sequential per-pair decode→kernel→next; small images = pure overhead) —
+queued as tasks #9 (jobexec ScoreFile HDR — the RIGHT scheduler; agent
+spawned) + #10 (score-pairs pipelining).
+
+**Consolidation (pull_kadis_hdr_sidecars.py, 19/19 _DONE gate):** six merged
+parquets at exactly 11,400 rows each, unique (basename, codec, q) keys —
+zensim-gpu `6e8ee5e617e3ab76…`, ssim2-gpu `0255ca2ff5011d6d…`, cvvdp
+`dae500e9e35ed8e6…`, iwssim-gpu `06ab40955f233687…`, butteraugli-gpu
+`854ceb440983cfbb…`, zensim_features (372 with-iw, v1 u8-shell)
+`f530a9f268245be2…`. Local: `datagen-2026-07-12-hdr-kadis/sidecars/kadis-hdr/`;
+R2: `s3://codec-corpus/kadis-hdr-2026-07-13/sidecars-merged/`.
+
+**Training parquets (build_hdr_train_parquets.py --codec kadis-hdr,
+validate_parquet ALL CHECKS PASSED, LSD-origin splits, `score_iwssim` column
+included):** joined 11,387/11,400 (13 = dedup-by-content per DATA_SPLITS —
+byte-identical feature+score cells at adjacent levels); train 5,696 / val
+2,994 / test ~2,697 (digits {7,9}, not emitted).
+- cvvdp-mix target (`0.5·s2n + 0.5·JOD-norm` — the shipped-BHdr lever):
+  `hdr_kadis_mix_traindigits_2026-07-13.parquet` `34687ec930d2…` +
+  `…valdigits…` `51d528c43d1f…`
+- plain ssim2 target: `hdr_kadis_traindigits_2026-07-13.parquet`
+  `b4e074d9585e…` + `…valdigits…` `b0ee06ba50c0…`
+- R2 mirror: `s3://zentrain/hdr-corpora/`. Local:
+  `/mnt/v/output/zensim-multicodec-probe/`.
+
+**Storage:** Tower mirror complete + verified (67G; 11,400 dists + 1,140
+refs; 3 random sha256 MATCH vs train-1). Corpus now on R2 + Tower + train-1
++ local(partial). arm-big cleanup + train-1 retirement are now UNBLOCKED
+(mirror rule satisfied) — pending user call on the `.box_hold`.
+
+**Next (pre-register BEFORE fitting, §8.5 discipline):** protocol-v2 retrain
+of the BHdr linear family on the broadened mix (jxl hdr_v3mix + kadis-hdr
+mix), with a valid selection axis — the §8.6 selection-axis failure is the
+open problem; kadis-hdr val (2,994 rows, human-free but distortion-diverse)
+is a candidate axis to pre-register.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
