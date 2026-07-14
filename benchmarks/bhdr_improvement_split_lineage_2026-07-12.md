@@ -1745,3 +1745,81 @@ the honest negative region, matching ssim2's native scale. This is exactly
 user-facing calibration is a ship decision surfaced to the user. The
 `zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin` slot is
 UNCHANGED pending confirmation.
+
+## §8.31 — Can B's negatives be splined to ssim2's negatives? MEASURED: NO (dial), YES (re-fit, at a CID22 cost). B↔BHdr do NOT align in the tail (2026-07-14)
+
+**User directive:** "see if we can spline the negatives to ssim2 negatives or if
+that even makes sense, rely on kadis if needed, also if sdr and hdr b stay aligned."
+
+**Corpus:** KADIS-700k GPU canonical (`kadis700k_canonical_gpu_2026-07-01.parquet`,
+700k SDR cells, `score_ssim2_gpu` + 372 `feat_*` in B's regime). **ssim2 spans to
+−1834, 51.4% negative** (359k rows, p1 −84, p5 −64) — the deep, dense negative
+coverage the multiband anchor lacks (anchor `ssim2_gpu` floors at −64.2, 147 neg).
+Neg-rich 266k sample (all ssim2<−30 + 1-in-12 rest) at
+`/mnt/v/output/zensim/reports/b_negatives/kadis_sample_negrich.parquet`.
+
+**Finding 1 — shipped-B does NOT rank the negative region (so a dial CANNOT fix it).**
+`bake_dial_refit gate` + banded SROCC(dial, ssim2), rank is spline-invariant:
+
+| ssim2 band | shipped-B (winsor-linear) | A (nonlinear MLP) |
+|---|---:|---:|
+| ≥ 0 (positive) | **+0.806** | +0.837 |
+| [−20, 0) | +0.100 | +0.131 |
+| [−64, −20) | +0.199 | +0.334 |
+| **< −64 (deep)** | **+0.047** | +0.233 |
+
+Shipped-B ranks the deep tail at **0.047**. A monotone output spline is
+rank-PRESERVING → it can rescale B's numbers onto ssim2's [−64,…] range but the
+ORDERING stays ~random, so B's "−50" would not correspond pairwise to ssim2's −50
+cell. **Splining negatives to ssim2 is not a faithful operation.**
+
+**Finding 2 — on REAL content the §8.30 unblock is cosmetic (winsor saturation).**
+B_raw floors at **−1.84** on the worst KADIS (bottom spline knot is −1.974), so
+**0% of real KADIS reaches the negative-mapping knots** — B's dial floors at **+0.8**
+(median 12) even at ssim2 −1834. The §8.30 negative dial only fires on synthetic
+corruption that pushes raw below −1.974; on real content B never goes negative.
+
+**Finding 3 — the negatives ARE rankable; the blocker is B's WEIGHTS, not the dial
+or even winsor.** Ridge fit KADIS→ssim2, held-out, banded:
+
+| input transform (re-fit on KADIS→ssim2) | ALL | ssim2<0 | [−64,0) | **<−64** |
+|---|---:|---:|---:|---:|
+| raw-linear | +0.897 | +0.857 | +0.767 | +0.662 |
+| **signed_cbrt-linear** | +0.939 | +0.915 | +0.855 | **+0.723** |
+| winsor-linear (B's transform) | +0.894 | +0.853 | +0.774 | +0.538 |
+
+A head FIT with negative supervision ranks the deep tail at **0.54 (winsor) / 0.72
+(cbrt)** — vs shipped-B's 0.047. So the signal is present; shipped-B's weights are
+optimized for the positive CID22/human-MOS range and simply don't rank negatives.
+**signed_cbrt > winsor in the tail** (0.723 vs 0.538) because cbrt is unbounded/
+compressive (no saturation) — this is exactly why BHdr (cbrt-shaped) reaches −63.9
+while B (winsor) floors.
+
+**Finding 4 — the cost of a negatives-capable head (the tradeoff, measured).** The
+KADIS-cbrt head: deep-neg SROCC **0.735**, ssim2<0 **0.916**, but **CID22 0.815** —
+**−0.061 vs shipped-B 0.876**. A head tuned to rank negatives is a DIFFERENT head
+than B's CID22-optimal weights (consistent with §10 "linear ceiling" + the
+documented "analytic/off-distribution mass poisons CID22").
+
+**Finding 5 — SDR-B and HDR-B (BHdr) do NOT align in the negatives, structurally.**
+Same KADIS SDR content, both heads: B dial floors **+0.8** (winsor saturates),
+BHdr dial extends to **−94.5** (cbrt, no saturation). They diverge because of the
+**feature transform**, not calibration. Aligning them = B adopting cbrt-shaping like
+BHdr = the Finding-4 retrain (−0.061 CID22). Neither's SHIPPED weights rank KADIS
+negatives (B 0.047, BHdr off-regime 0.011) — alignment in the tail needs a fit for it.
+
+**VERDICT.** "Spline B's negatives to ssim2" — as a DIAL change: **does not make
+sense** (rank comes from weights; shipped-B ranks negatives at 0.047; and winsor
+saturation means real content never fires the negative dial anyway). As a WEIGHT
+change: **achievable** (deep-tail 0.72 via cbrt+negative supervision) but costs
+−0.061 CID22 — B's primary job. **B↔BHdr tail alignment has the same price.**
+
+**Recommended framing:** the negative region is catastrophic/garbage content where A
+(0.23 deep, reaches −94) and ssim2 already work; B's job is the positive human-MOS
+dial (0.806). Options if faithful negatives are wanted, in increasing cost:
+(a) keep §8.30's cosmetic dial-unblock for numeric uniformity, don't claim negative
+faithfulness [no cost, no rank]; (b) hard-switched negative-specialist head — keeps
+B's CID22-optimal positive weights, adds a KADIS-cbrt head + runtime dual-forward,
+switch on B_raw<threshold [preserves CID22, +runtime complexity]; (c) retrain B with
+cbrt+negative supervision [−0.061 CID22, aligns tail with BHdr]. Diagnostic scripts +
+sample under `/mnt/v/output/zensim/reports/b_negatives/`.
