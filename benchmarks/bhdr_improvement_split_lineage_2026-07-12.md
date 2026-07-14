@@ -1067,6 +1067,33 @@ the added mass is the same distortion family UPIQ rewards. Then the
 remaining G-A offset falls to shared-anchor spline co-calibration, and
 G-D probe scoring closes the sensitivity leg.
 
+### 8.18 PRE-REGISTERED: compression-shaped SDR mass (registered 2026-07-14 BEFORE fitting)
+
+**Mechanism-grounded prediction (from §8.17's decomposition):** SDR mass of
+the SAME distortion family UPIQ rewards (codec compression) retains the SDR
+competence the unified head demonstrated (live 0.9330 > B) WITHOUT the
+UPIQ-HDR drop that analytic mass causes (3 families of evidence).
+
+**Corpus:** `sdrcodec_pl203_traindigits_2026-07-14.parquet` — 4,364 pairs
+(sha `e7028a9c…`): datagen-2026-06-23 zenjpeg (2,200, 7 q-bands) + zenpng
+(2,164) variants decoded → sRGB PNG → 203-nit PQ → PU-linear features;
+target = cvvdp-mix (0.5·ssim2norm + 0.5·JOD-norm from the 2026-06-24 GPU
+sidecars — the SAME teacher as hdr_v3mix). webp contributed 0 (its unified
+scores are a different fleet grid — key mismatch, noted). ALL rows are
+train-fold (source = imazen-26 train renditions; LSD pre-applied
+upstream), so this group has NO held-out slice — generalization is
+measured only at confirmation. 36/4,400 pairs dropped (converter
+straggler files).
+
+**Grid (12):** `hdrcod{a,b,c}` = hdr_v3mix:1.0 + sdrcodec_pl:{0.25,0.5,1.0}
+× lasso λ ∈ {3e-4, 5e-4, 1e-3, 2e-3}, shaped only. **Selection:** same
+axis as §8.16 for comparability (0.5·hdr_valmix + 0.5·mean(kadid_pl_val,
+tid_pl_val)); tie-break |konjnd_guard|. **Confirmation (ONE look, four
+instruments):** [1] UPIQ-HDR within-study ≥ shipped BOTH strata (hard
+gate); [2] UPIQ-SDR live ≥ B's 0.8945; [3] G-A step gate p95 ≤ 12 ∧ rank
+≥ 0.95; [4] single-head seam |·| ≤ 6. Fail → §8.19 verdict, no grid
+extension without new registration.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`

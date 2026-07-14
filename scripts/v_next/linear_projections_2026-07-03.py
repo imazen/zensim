@@ -103,6 +103,11 @@ GROUPS = {
     # MOS/DMOS targets (higher=better, direction-verified vs level).
     "kadid_pl": (PROBE / "kadid_pl203_traindigits_2026-07-14.parquet", ["human_score"]),
     "tid_pl": (PROBE / "tid_pl203_traindigits_2026-07-14.parquet", ["human_score"]),
+    # §8.18 compression-shaped SDR mass: datagen-2026-06-23 jpeg/png sweep
+    # pairs decoded → PQ-203 → PU-linear; cvvdp-mix target (same teacher as
+    # hdr_v3mix). ALL train-fold (source dir is the train renditions);
+    # generalization measured only at confirmation.
+    "sdrcodec_pl": (PROBE / "sdrcodec_pl203_traindigits_2026-07-14.parquet", ["human_score"]),
 }
 VAL_SETS = {
     "bigcodec_val": (PROBE / "bigcodec_valdigits_2026-07-02.parquet", "human_score"),
@@ -360,6 +365,10 @@ MIXES_HDR = {
                 ("kadid_pl", 0.5, "human_score"), ("tid_pl", 0.5, "human_score")],
     "hdrunic": [("hdr_v3mix", 1.0, "human_score"),
                 ("kadid_pl", 1.0, "human_score"), ("tid_pl", 1.0, "human_score")],
+    # §8.18: compression-shaped SDR mass replaces analytic mass.
+    "hdrcoda": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 0.25, "human_score")],
+    "hdrcodb": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 0.5, "human_score")],
+    "hdrcodc": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 1.0, "human_score")],
     # 2026-07-12 teacher-ceiling probe (§8.3/§8.4): iwssim-teacher families.
     "hdriwmix": [("hdr_v3iwmix", 1.0, "human_score")],
     "hdriw": [("hdr_v3iw", 1.0, "human_score")],
