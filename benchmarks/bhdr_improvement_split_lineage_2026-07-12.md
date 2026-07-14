@@ -789,6 +789,54 @@ waits for AIC-HDR2025.
 **Cost ceiling:** one gram build + 12 fits + 1 confirmation pass. No grid
 extensions without a new registration section.
 
+### 8.12 §8.11 RESULT — gate FAILED, not shipped (corpus-breadth-alone falsified for this family)
+
+**Selection (mechanical, as registered):** `hdrbroadh1-lasso0.0005-shaped`
+won the 12-candidate grid at selection 0.9329 (hdr_valmix 0.9113 +
+hdr_kadis_valmix 0.9544; margin over #2 = 0.0001). Finalized:
+`lp_hdrbroadh1-lasso0.0005-shaped-tau0-f16.bin` (11,780 B, 129 active,
+18 knots).
+
+**Confirmation (the ONE registered UPIQ look, `upiq_panel.py --compare`,
+10k paired bootstrap, seed 20260714):**
+
+| axis | candidate | shipped BHdr (7d7f2123) | Δ | p(A≤B) |
+|---|---|---|---|---|
+| pooled (confounded) | 0.6379 | 0.7081 | −0.0702 | — |
+| narwaria (n=140) | 0.7034 | 0.7173 | **−0.0139** | 0.637 |
+| korshunov (n=240) | 0.9078 | 0.8992 | +0.0086 | 0.076 |
+
+Gate (a) required ≥ shipped on BOTH strata + p<0.05 on ≥1: **fails on
+narwaria's sign alone**; the korshunov edge is not significant. Guard panel
+not run (moot — gate (a) already fails). NOT shipped; shipped BHdr stays
+`bhdr_linear_shaped_cvvdpmix_2026-07-12.bin`.
+
+**Reading (honest):**
+1. **Corpus-breadth-alone is falsified for the linear family.** Adding a
+   second synthetic distortion family (25 KADIS types, 11.4k cells) left
+   within-study UPIQ a wash (−0.014/+0.009) and cratered pooled (−0.070 —
+   cross-study scale alignment shifted, consistent with §8.1's
+   pooled-is-confounded finding).
+2. **The registered process worked exactly as designed.** Selection was
+   mechanical, UPIQ got ONE look, and the would-be overclaim ("kadis val
+   0.954!") died at the gate instead of shipping. Contrast §7's
+   post-selection-inference incident.
+3. **Selection-axis lesson (3rd family):** a human-free synthetic val axis
+   selects for in-family fit — it picked the kadis-heaviest mix, which
+   transfers worst to narwaria's human MOS. With §8.6's two failures this
+   makes selection-axis validity the program's central obstacle; it
+   strengthens §8.7's conclusion that **AIC-HDR2025 (real human HDR MOS at
+   scale) is the unblocking asset**, not more synthetic breadth.
+4. **Do not retry** corpus-breadth variants (more weightings, more λ, plain
+   ssim2 target) without new evidence — that would be grid extension without
+   a new registration, i.e. axis mining.
+
+**Artifacts:** fits + table.json + candidate bake under
+`linear-probe/{fits,bakes}/`; fit log
+`linear-probe/fit_hdrbroad_2026-07-14.log`; kadis corpora remain fully
+valid training assets (the falsification is about UPIQ transfer, not data
+quality) and stay in GROUPS for future registered experiments.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
