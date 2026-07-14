@@ -946,6 +946,30 @@ shipped BHdr remains `bhdr_linear_shaped_cvvdpmix_2026-07-12.bin`.
 `lp_hdrbroadplh1-lasso0.001-shaped-tau0-f16.bin` under
 `linear-probe/{fits,bakes}/`.
 
+**AIC-HDR2025 availability RE-CHECKED 2026-07-14 (user: "aichdr isnt
+public"):** `github.com/jpeg-aic/AIC-HDR2025` is STILL README-only (3
+commits) and no Zenodo record exists — 9 months past the paper's stated
+"publicly released after QoMEX 2025" (Sep 30–Oct 2, 2025) window
+(arXiv:2506.12505: 100 test images, 5 HDR sources × 4 codecs × 5 levels,
+34,560 AIC-3 triplet ratings, 151 participants, CC BY 4.0 planned). So
+"wait for AIC-HDR2025" is NOT a plan. Revised direction, evidence-ordered:
+1. **Nudge the release** — a polite status-inquiry issue on the jpeg-aic
+   repo (third-party org: full text requires user approval before
+   posting). Cheapest possible unlock; their timeline is self-declared
+   and overdue.
+2. **Own-data HDR triplets (the durable bet we control):** an in-house
+   AIC-3-style boosted-triplet study on imazen-26 HDR captures + the
+   jxl/kadis variant pools, on an HDR display. Aligns with
+   PLAN_BEAT_A Bet2 (the AIC-3 420k SDR triplet-training tooling/loss
+   design transfers directly to HDR triplets). Even ~5–10k judgments is
+   training-grade signal we own outright.
+3. **Third public HDR-stills MOS set:** none found current (2025/26
+   releases are video-oriented: HDRSDR-VQA, CompressedVQA-HDR — temporal
+   masking makes per-frame reuse dubious). Re-check periodically.
+4. **UPIQ stays confirmation-only.** Study-level train/confirm splits of
+   UPIQ (train narwaria → confirm korshunov once) would burn the last
+   honest human-HDR holdout for a tiny n — rejected for now.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
