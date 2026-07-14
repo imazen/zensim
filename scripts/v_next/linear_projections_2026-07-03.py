@@ -93,6 +93,11 @@ GROUPS = {
     # mix target = 0.5·ssim2norm + 0.5·cvvdp-JOD-norm (the shipped-BHdr lever).
     "hdr_kadis_mix": (PROBE / "hdr_kadis_mix_traindigits_2026-07-13.parquet", ["human_score"]),
     "hdr_kadis": (PROBE / "hdr_kadis_traindigits_2026-07-13.parquet", ["human_score"]),
+    # ⚠ hdr_kadis[_mix] above are the v1 u8-SHELL feature regime — MIXING
+    # them with hdr_v3* (PU-linear) in one gram is the §8.13 confound. The
+    # kadispl variants below are the v3 PU-linear re-extraction (§8.14).
+    "hdr_kadispl_mix": (PROBE / "hdr_kadispl_mix_traindigits_2026-07-14.parquet", ["human_score"]),
+    "hdr_kadispl": (PROBE / "hdr_kadispl_traindigits_2026-07-14.parquet", ["human_score"]),
 }
 VAL_SETS = {
     "bigcodec_val": (PROBE / "bigcodec_valdigits_2026-07-02.parquet", "human_score"),
@@ -107,6 +112,9 @@ VAL_SETS = {
     # kadis-hdr held-out-origin val (2,994 rows, human-free, never-burned) —
     # registered selection axis of §8.11 alongside hdr_valmix.
     "hdr_kadis_valmix": (PROBE / "hdr_kadis_mix_valdigits_2026-07-13.parquet", "human_score"),
+    # PU-linear kadis val — the §8.14 selection axis (regime-consistent
+    # with hdr_valmix, both v3 PU-linear).
+    "hdr_kadispl_valmix": (PROBE / "hdr_kadispl_mix_valdigits_2026-07-14.parquet", "human_score"),
 }
 
 FCOLS = [f"f{i}" for i in range(N_FEAT)]
@@ -330,6 +338,13 @@ MIXES_HDR = {
                    ("hdr_kadis_mix", 0.5, "human_score")],
     "hdrbroadh1": [("hdr_v3mix", 0.5, "human_score"),
                    ("hdr_kadis_mix", 1.0, "human_score")],
+    # §8.14 regime-consistent broadened mixes (both corpora v3 PU-linear).
+    "hdrbroadpl11": [("hdr_v3mix", 1.0, "human_score"),
+                     ("hdr_kadispl_mix", 1.0, "human_score")],
+    "hdrbroadpl1h": [("hdr_v3mix", 1.0, "human_score"),
+                     ("hdr_kadispl_mix", 0.5, "human_score")],
+    "hdrbroadplh1": [("hdr_v3mix", 0.5, "human_score"),
+                     ("hdr_kadispl_mix", 1.0, "human_score")],
     # 2026-07-12 teacher-ceiling probe (§8.3/§8.4): iwssim-teacher families.
     "hdriwmix": [("hdr_v3iwmix", 1.0, "human_score")],
     "hdriw": [("hdr_v3iw", 1.0, "human_score")],

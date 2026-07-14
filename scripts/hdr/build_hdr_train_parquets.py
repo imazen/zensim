@@ -43,6 +43,10 @@ ap.add_argument("--iw-target", choices=["mix", "pure"], default=None,
                      "iw_logn = clamp(-log10(clamp(1-iw,1e-6,1))/4, 0, 1) spreads the "
                      "near-1 saturation. mix: human_score = 0.5*s2n + 0.5*iw_logn; "
                      "pure: human_score = iw_logn. iwssim-missing rows are DROPPED.")
+ap.add_argument("--features-name", default="zensim_features.parquet",
+                help="features sidecar filename under sidecars/<codec>/ — e.g. "
+                     "zensim_features_pulinear.parquet for the v3 PU-linear regime "
+                     "(bhdr_improvement §8.13: never mix regimes in one gram)")
 ap.add_argument("--iwssim-sidecar", action="append", default=[],
                 help="iwssim.parquet path(s) to join by (basename, codec, q) — the "
                      "v3 pu-linear datagens carry no iwssim sidecar of their own; the "
@@ -116,7 +120,7 @@ n_miss_scores = 0
 n_miss_cvvdp = 0
 n_miss_iw = 0
 for d in [a.datagen] + a.extra_datagen:
-    fp = os.path.join(d, "sidecars", a.codec, "zensim_features.parquet")
+    fp = os.path.join(d, "sidecars", a.codec, a.features_name)
     if not os.path.exists(fp):
         print(f"NOTE: no features sidecar in {d} — skipped")
         continue

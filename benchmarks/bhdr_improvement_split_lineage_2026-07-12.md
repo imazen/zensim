@@ -879,6 +879,30 @@ MEASURABLE claim — verify the regime of both sides before mixing grams;
 one unverified premise invalidated a full registered experiment. Credit:
 the user's "upiq how much?" question triggered the reconciliation.
 
+### 8.14 PRE-REGISTERED: regime-consistent broadened-corpus retrain (registered 2026-07-14, BEFORE any fit; supersedes §8.11's confounded run)
+
+**Change vs §8.11 (the confound fix):** kadis features re-extracted in the
+**v3 PU-linear regime** (train-1 died mid-run → completed locally; 11,400
+rows, features sha `041d88b8…`; parquets `hdr_kadispl[_mix]_*digits_2026-07-14`,
+origin splits re-verified 0-overlap 0-test-leak, same 11,387 join + 13
+content-dups). BOTH gram corpora are now PU-linear (`hdr_v3mix` +
+`hdr_kadispl_mix`), matching the regime the shipped BHdr consumes.
+
+**Grid (12, registered):** `hdrbroadpl{11,1h,h1}` × lasso λ ∈
+{1e-4, 3e-4, 5e-4, 1e-3}, `shaped` only. Ridge/bvls emissions ignored.
+
+**Selection (registered):** `0.5·SROCC(hdr_valmix) +
+0.5·SROCC(hdr_kadispl_valmix)`; tie-break higher `|konjnd_guard|`. No UPIQ
+looks during selection.
+
+**Confirmation (ONE look):** the single selected candidate on the
+**PU-linear UPIQ parquet** (`upiq_features_372_pulinear.parquet`) vs
+shipped BHdr `7d7f2123` (whose correct-regime baseline is pooled 0.7536,
+narwaria 0.7834, korshunov 0.9175). **Ship gates unchanged from §8.11:**
+within-study SROCC ≥ shipped on BOTH strata AND paired-bootstrap p<0.05 on
+≥1 stratum; KonJND/KADID/TID guards within −0.02. Fail → §8.15 verdict,
+no ship, no grid extension without a new registration.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
