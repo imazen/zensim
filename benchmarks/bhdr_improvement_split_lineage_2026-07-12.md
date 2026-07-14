@@ -970,6 +970,20 @@ commits) and no Zenodo record exists — 9 months past the paper's stated
    UPIQ (train narwaria → confirm korshunov once) would burn the last
    honest human-HDR holdout for a tiny n — rejected for now.
 
+**jpeg-aic org mapped + local holdings completed (2026-07-14, user
+pointers):** `aicdb.jpeg.org` hosts only the AIC-4 sample zip (5 HDR-zip
+name guesses all 404). Org repos: `dataset-BTC-PTC-24` (AIC-3 SDR triplet
+raw data, CC BY 4.0 — response CSVs were already local at
+`/mnt/v/datasets/aic3-btc-ptc/`, byte-size-verified; the LFS image zips
+BTC_images.zip 143 MB / PTC_images.zip 150 MB are now mirrored under
+`test-images/` — local mirror COMPLETE, Bet2's exact stimuli in hand),
+`JPEG-AIC-4-datasets` + `dataset-JPEG-AI-SDR25` (already local),
+`AIC-HDR2025` (still README-only; `/mnt/v/datasets/aic-hdr2025/` holds the
+2026-07-02 clone attempt). Practical consequence: BTC-PTC-24's CSV format
+IS the AIC-3 annotation format AIC-HDR2025 will ship — build the Bet2
+triplet ingest against it now and the same pipeline serves our own
+HDR-triplet study AND AIC-HDR2025 on release day.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
