@@ -1222,3 +1222,5 @@ Prediction: at ≤0.15 anchor weight the korshunov dilution (−0.022 at ≥1.0
 weights) shrinks under significance while ramp monotonicity exceeds the
 shipped 63.7%. **Confirmation (ONE look):** [1] UPIQ-HDR ≥ shipped both
 strata (hard); [2] ramp-monotonicity ≥ 75%; [3] UPIQ-SDR live ≥ 0.8945.
+
+### 8.20b hdranch3 partial confirmation: RAMPS PASS 78.6% (gate 75, shipped 63.7, d15 0%→11%); full-range bucket table vs B (3,779 SDR pairs): bucket means near-monotone (2 minor dips), rank 0.8996, but S-shaped miscalibration — mid-range inflated +16..+24, B<5 maps to negative (mean −22), top compressed (−6 at B 90-95). Remaining §8.20 steps: shared-anchor spline co-calibration to B's dial on this overlap (rank-invariant), re-verify ramps post-respline, then the ONE UPIQ-HDR + live look. Bucket table + numbers in fit log dir.
