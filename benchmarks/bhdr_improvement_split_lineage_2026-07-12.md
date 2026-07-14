@@ -1211,3 +1211,14 @@ analytic anchor lifts it +19pts to 83.1%. Together with §8.19 (analytic
 mass costs UPIQ-HDR): the §8.20 mass shape must be compression-majority +
 SMALL analytic anchor, tuned on BOTH instruments. This instrument joins
 the standing confirmation battery.
+
+### 8.20 PRE-REGISTERED: compression-majority + small analytic anchor (registered 2026-07-14 BEFORE fitting)
+
+Mixes `hdranch{1,2,3}` = hdr_v3mix:1.0 + sdrcodec_pl:0.5 + (kadid_pl+tid_pl)
+each at {0.05, 0.10, 0.15} × lasso λ {5e-4, 1e-3, 2e-3} shaped → 9
+candidates (λ3e-4 dropped: never selected in 3 prior grids). Selection:
+§8.16 axis (0.5·hdr_valmix + 0.25·kadid_pl_val + 0.25·tid_pl_val).
+Prediction: at ≤0.15 anchor weight the korshunov dilution (−0.022 at ≥1.0
+weights) shrinks under significance while ramp monotonicity exceeds the
+shipped 63.7%. **Confirmation (ONE look):** [1] UPIQ-HDR ≥ shipped both
+strata (hard); [2] ramp-monotonicity ≥ 75%; [3] UPIQ-SDR live ≥ 0.8945.

@@ -369,6 +369,14 @@ MIXES_HDR = {
     "hdrcoda": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 0.25, "human_score")],
     "hdrcodb": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 0.5, "human_score")],
     "hdrcodc": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 1.0, "human_score")],
+    # §8.20: compression-majority + SMALL analytic anchor (monotonicity per
+    # §8.19c without the §8.17 UPIQ-HDR dilution).
+    "hdranch1": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 0.5, "human_score"),
+                 ("kadid_pl", 0.05, "human_score"), ("tid_pl", 0.05, "human_score")],
+    "hdranch2": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 0.5, "human_score"),
+                 ("kadid_pl", 0.10, "human_score"), ("tid_pl", 0.10, "human_score")],
+    "hdranch3": [("hdr_v3mix", 1.0, "human_score"), ("sdrcodec_pl", 0.5, "human_score"),
+                 ("kadid_pl", 0.15, "human_score"), ("tid_pl", 0.15, "human_score")],
     # 2026-07-12 teacher-ceiling probe (§8.3/§8.4): iwssim-teacher families.
     "hdriwmix": [("hdr_v3iwmix", 1.0, "human_score")],
     "hdriw": [("hdr_v3iw", 1.0, "human_score")],
