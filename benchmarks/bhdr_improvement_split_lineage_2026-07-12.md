@@ -1551,3 +1551,58 @@ priority order:
 analytic-improvement campaign is closed as falsified; the honest levers left are
 (a) real HDR human data at scale (AIC-HDR2025, not yet obtainable — §8.7) and
 (b) the over-smoothing blind-spot probe.
+
+## §8.28 — Over-smoothing blind-spot probe on REAL HDR JXL codec output: MILD, not severe (2026-07-14)
+
+Ran the §8.26 concern ("does BHdr reward over-quantized/over-smoothed codec
+output?") on the real HDR JXL ladder — `hdr_zenjxl_v3_{train,val}digits`
+(v3 PU-linear, BHdr's production regime), rescored with the shipped BHdr via
+`rescore_parquet --profile bhdr` (production runtime path). Reference = `score_cvvdp`
+(detail-aware HDR metric); `human_score` = ssim2-derived = the smoothing-TOLERANT
+baseline; `zensim_score` = old A (full multi-scale). Probe: `scripts/hdr/oversmooth_probe.py`.
+
+**Overall SROCC vs cvvdp (detail-aware reference):**
+
+| split (n cvvdp cells) | **BHdr** | ssim2 (tolerant) | A (full multiscale) |
+|---|---|---|---|
+| val (1800) | **0.9714** | 0.9445 | 0.9795 |
+| train (3420) | **0.9644** | 0.9336 | 0.9717 |
+
+**BHdr tracks the detail-aware reference ABOVE ssim2 on both splits** — the
+over-smoothing blind spot does NOT severely manifest on real JXL codec output.
+BHdr is *more* detail-aware than the smoothing-tolerant baseline, exactly because
+its training target is the cvvdp-**mix** (the reproduction, §8.27, confirmed this is
+what it uses), not pure ssim2.
+
+**Aggressive-compression band (lowest-cvvdp quartile — the over-smoothing danger zone):**
+
+| split | BHdr | ssim2 | A |
+|---|---|---|---|
+| val Q1 (n=450) | +0.691 | +0.439 | +0.791 |
+| train Q1 (n=855) | +0.556 | +0.399 | +0.663 |
+
+BHdr beats ssim2 by +0.16..+0.25 even in the aggressive band, but trails full
+multi-scale A by ~0.08..+0.10. That residual gap is the **linear-head capacity
+limit** (§8.26 class-2: a single 372→1 projection can't retain all of A's
+detail-detection directions), NOT a training-target failure.
+
+**Disagreement test (the decisive one):** on the top-15% cells where ssim2 most
+forgives smoothing relative to cvvdp, BHdr's mean rank-leniency is **+0.055** (val)
+/ **+0.064** (train) vs ssim2's **+0.156** / **+0.155** — BHdr inherits only ~⅓ of
+ssim2's over-smoothing leniency (direction-correlation +0.66/+0.80: it partially
+follows the ssim2 half of its mix target, as expected). It over-scores forgiven
+cells in the same direction 81–86% of the time but by a *much smaller* margin.
+
+**Reading:** the over-smoothing blind spot is **real but mild** on real codec
+output, and **the cvvdp-mix target already mitigated most of it** (BHdr 0.96–0.97
+vs cvvdp, within 0.008–0.010 of full A, well above ssim2). The one remaining
+improvement lever this identifies is *head capacity* — a non-linear BHdr head, or
+folding in A's detail-carrying features, to close the ~0.10 aggressive-band gap vs
+A. But that trades away the linear bake's deterministic / tiny / no-collapse
+virtues (`[[project_linear_projections]]`), and analytic proxies do NOT predict
+UPIQ (§8.24) — so it is only worth pursuing against real HDR human data (AIC-HDR2025),
+not a synthetic proxy. **Campaign conclusion stands: shipped BHdr is the champion;
+no falsification-free improvement is reachable without new HDR human data.**
+
+Artifacts: `scripts/hdr/oversmooth_probe.py`, rescored parquets at
+`/mnt/v/output/zensim/reports/oversmooth_probe/hdr_jxl_{train,val}_bhdr.parquet`.
