@@ -272,6 +272,10 @@ struct Args {
     /// dial in 5-pt zones, and reports the candidate's mean-Δ / RMSE / rank
     /// per zone. Absent → section skipped.
     compare: Option<PathBuf>,
+    /// Corruption-gate grid parquet (`entry, f0..`). Defaults to the
+    /// canonical grid; the section auto-runs when the file is present and
+    /// the feature count matches the bake, else skips silently.
+    corruption_grid: PathBuf,
 }
 
 fn print_usage() {
@@ -291,6 +295,7 @@ DEFAULTS:\n\
     --html          none (also emit a self-contained big HTML report)\n\
     --ramp-grid     none (severity-ramp monotonicity section)\n\
     --compare       none (per-zone dial-agreement vs a reference bake)\n\
+    --corruption-grid canonical grid (negative-tail gate; auto if present)\n\
     --features-root /mnt/v/zen/zensim-training/2026-05-15-full-features\n"
     );
 }
@@ -303,6 +308,13 @@ fn parse_args() -> Result<Args, String> {
     let mut html: Option<PathBuf> = None;
     let mut ramp_grid: Option<PathBuf> = None;
     let mut compare: Option<PathBuf> = None;
+    let mut corruption_grid: PathBuf = std::env::var("ZENSIM_CORRUPTION_GRID")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(
+                "/mnt/v/output/zensim/eval_panels_2026-05-29/corruption_grid_372col_2026-05-28.parquet",
+            )
+        });
     let mut features_root: PathBuf =
         PathBuf::from("/mnt/v/zen/zensim-training/2026-05-15-full-features");
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
@@ -351,6 +363,10 @@ fn parse_args() -> Result<Args, String> {
                 let v = args.next().ok_or("--compare requires <ref-bake path>")?;
                 compare = Some(PathBuf::from(v));
             }
+            "--corruption-grid" => {
+                let v = args.next().ok_or("--corruption-grid requires <path>")?;
+                corruption_grid = PathBuf::from(v);
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -372,6 +388,7 @@ fn parse_args() -> Result<Args, String> {
         html,
         ramp_grid,
         compare,
+        corruption_grid,
     })
 }
 
@@ -1132,6 +1149,22 @@ fn main() -> ExitCode {
             r.display, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse, r.ds_auc, g3
         ));
     }
+    // Per-corpus SROCC at a glance (inline-SVG; renders in the HTML report).
+    if !results.is_empty() {
+        let labels: Vec<String> = results.iter().map(|r| r.display.to_string()).collect();
+        let sroccs: Vec<f64> = results.iter().map(|r| 100.0 * r.srocc).collect();
+        buf.push('\n');
+        buf.push_str(&eval_report::svg_bars(
+            "Per-corpus SROCC ×100 (rank agreement with human MOS)",
+            &labels,
+            &sroccs,
+            0.0,
+            100.0,
+            85.0,
+            true,
+        ));
+        buf.push('\n');
+    }
     // ── CODEC_TARGET_GOALS.md scorecard ──────────────────────────────
     // Measurable from held-out corpus scores alone. Goals needing
     // external q-sweep / cross-codec data (G3, G4, G10) are flagged.
@@ -1302,9 +1335,53 @@ Run the dedicated q-sweep harness for those._\n",
         }
     }
 
+    // ── Corruption gate (negative-tail ranking) — auto when grid present ──
+    if args.corruption_grid.exists() {
+        match parquet_loader::load_labeled_grid(&args.corruption_grid) {
+            Ok(grid) if grid.n_features == n_inputs => {
+                let dial = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
+                let stats = eval_report::corruption_gate(&grid.label, &dial);
+                buf.push_str(&eval_report::corruption_gate_section(
+                    &stats,
+                    &args.corruption_grid.display().to_string(),
+                ));
+            }
+            Ok(grid) => {
+                buf.push_str(&format!(
+                    "\n## Corruption gate — ⚠ SKIPPED (feature-count mismatch)\n\n\
+                     Grid `{}` has {} feature columns; bake expects {}.\n",
+                    args.corruption_grid.display(),
+                    grid.n_features,
+                    n_inputs
+                ));
+            }
+            Err(e) => buf.push_str(&format!(
+                "\n## Corruption gate — ⚠ FAILED to load grid\n\n`{e}`\n"
+            )),
+        }
+    }
+
     for r in &results {
         buf.push_str(&r.body);
     }
+
+    // ── Related specialized evals (tracked-down historical set) ──────────
+    // Everything the default eval does NOT run inline — because it needs a
+    // second bake, a spline-internals gate, or an HDR/UPIQ regime corpus —
+    // is listed here with the exact command, so this report points at the
+    // full historical eval set rather than silently omitting it.
+    buf.push_str("\n## Related specialized evals (run separately)\n\n");
+    buf.push_str(
+        "| eval | tool | when |\n|---|---|---|\n\
+         | A-vs-B decisive (MRR + bootstrap CI) | `bake_compare --a <bake> --b <ref>` | comparing two bakes for a ship decision |\n\
+         | G-RANGE tail gate (raw preds outside spline domain) | `bake_dial_refit gate --bake <bake> --corpus <parquet>` | a bake with an output spline (dial reach) |\n\
+         | cross-codec JND consistency (stddev at JND targets) | `scripts/v_next/cross_codec_jnd_eval.py` | dial precision across codec families |\n\
+         | UPIQ within-study / cross-domain seam (SDR↔HDR) | `scripts/hdr/upiq_panel.py`, `scripts/hdr/upiq_crossdomain_instrument.py` | an HDR bake / SDR-HDR alignment |\n\
+         | sub-domain identity (R1: HDR-path ≡ SDR limit) | `scripts/hdr/ga_identity_report.py` | an HDR bake vs its SDR counterpart |\n\n\
+         _These need a second bake, spline internals, or an HDR/UPIQ regime \
+         corpus, so they stay separate tools; the rank + dial + ramp + zone + \
+         corruption sections above are the always-applicable core._\n",
+    );
 
     let elapsed = t0.elapsed();
     buf.push_str(&format!(

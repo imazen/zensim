@@ -609,6 +609,98 @@ pub fn load_ramp_grid(path: &PathBuf) -> Result<RampGrid, String> {
     })
 }
 
+/// A labeled feature grid: per row a string `label` and the feature
+/// vector. Powers the corruption-gate section (label = the `entry`
+/// column, e.g. `gb82_dog__aliasing__frac2__op100__corruption`).
+#[derive(Debug)]
+pub struct LabeledGrid {
+    pub label: Vec<String>,
+    pub feature_rows: Vec<Vec<f64>>,
+    pub n_features: usize,
+}
+
+/// Load a labeled feature grid (`<label_col>`, `f0..`/`feat_0..`). The
+/// label column is located as `entry` → `image_path` → `image_id` →
+/// `ref_basename` (first present). Column order is free. Used by the
+/// corruption-gate section of the unified metric-eval report.
+pub fn load_labeled_grid(path: &PathBuf) -> Result<LabeledGrid, String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let schema = builder.schema().clone();
+    let names: Vec<String> = schema
+        .fields()
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect();
+    let idx = |n: &str| names.iter().position(|x| x == n);
+    let lbl_i = idx("entry")
+        .or_else(|| idx("image_path"))
+        .or_else(|| idx("image_id"))
+        .or_else(|| idx("ref_basename"))
+        .ok_or_else(|| {
+            format!("{path:?}: missing label column (entry/image_path/image_id/ref_basename)")
+        })?;
+    let feat_prefix = if idx("feat_0").is_some() { "feat_" } else { "f" };
+    let mut feat_idx = Vec::new();
+    let mut fi = 0usize;
+    while let Some(p) = idx(&format!("{feat_prefix}{fi}")) {
+        feat_idx.push(p);
+        fi += 1;
+    }
+    let n_features = feat_idx.len();
+    if n_features == 0 {
+        return Err(format!("{path:?}: no {feat_prefix}N feature columns found"));
+    }
+    let reader = builder
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
+    let col_f64 = |col: &dyn Array, n_rows: usize| -> Result<Vec<f64>, String> {
+        match col.data_type() {
+            DataType::Float64 => {
+                let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i)).collect())
+            }
+            DataType::Float32 => {
+                let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i) as f64).collect())
+            }
+            other => Err(format!("unsupported feature dtype {other:?}")),
+        }
+    };
+    let mut label = Vec::new();
+    let mut feature_rows: Vec<Vec<f64>> = Vec::new();
+    for batch_res in reader {
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let n_rows = batch.num_rows();
+        if n_rows == 0 {
+            continue;
+        }
+        let lbl_arr = batch
+            .column(lbl_i)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| format!("{path:?}: label column not Utf8"))?;
+        let per_col: Vec<Vec<f64>> = feat_idx
+            .iter()
+            .map(|&pi| col_f64(batch.column(pi).as_ref(), n_rows))
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("{path:?}: feature column {e}"))?;
+        // `r` indexes both `lbl_arr` and every `per_col[c]` — a range loop
+        // is the natural shape (same idiom as `load_dial_grid`).
+        #[allow(clippy::needless_range_loop)]
+        for r in 0..n_rows {
+            label.push(lbl_arr.value(r).to_string());
+            feature_rows.push((0..n_features).map(|c| per_col[c][r]).collect());
+        }
+    }
+    Ok(LabeledGrid {
+        label,
+        feature_rows,
+        n_features,
+    })
+}
+
 /// Load an optional scalar f64 column from a parquet file by name.
 ///
 /// Returns `Ok(None)` if the column doesn't exist in the schema. Returns

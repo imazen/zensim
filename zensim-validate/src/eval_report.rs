@@ -466,6 +466,147 @@ pub fn four_band_section(scores: &[f64], humans: &[f64]) -> String {
 }
 
 // ============================================================================
+// Corruption gate (negative-tail ranking)
+// ============================================================================
+
+/// Region tokens used in the corruption-grid entry names, in the position
+/// right after the distortion family.
+const CORRUPTION_REGIONS: [&str; 6] = ["whole", "frac2", "frac4", "sq64", "sq16", "sq8"];
+
+/// Result of the corruption-gate check.
+#[derive(Debug, Clone)]
+pub struct CorruptionStats {
+    /// Corruption entries with a matching q20 anchor.
+    pub n_triples: usize,
+    /// Fraction where score(corruption) < score(q20) — the gate.
+    pub pass_q20: f64,
+    /// Fraction where score(corruption) < score(q10) — a stricter anchor.
+    pub pass_q10: f64,
+    /// Per-family `(family, pass_q20_fraction, n)`, worst first.
+    pub per_family: Vec<(String, f64, usize)>,
+}
+
+fn corruption_family(key: &str) -> String {
+    let toks: Vec<&str> = key.split("__").collect();
+    // family is the token immediately before the region token.
+    for (i, t) in toks.iter().enumerate() {
+        if CORRUPTION_REGIONS.contains(t) && i > 0 {
+            return toks[i - 1].to_string();
+        }
+    }
+    // fall back to the second token (after the ref name).
+    toks.get(1).map(|s| s.to_string()).unwrap_or_else(|| key.to_string())
+}
+
+/// Corruption gate: for each corruption entry, a structurally-broken decode
+/// must rank BELOW an honestly-lossy q20 encode — `score(corruption) <
+/// score(q20)`. `label` is the `entry` column
+/// (`<ref>__<fam>__<region>__<sev>__{corruption,q20,q10}`); `dial` is the
+/// bake's score for the same row. Higher dial = better quality, so the
+/// gate is a strict `<`.
+pub fn corruption_gate(label: &[String], dial: &[f64]) -> CorruptionStats {
+    // key = entry minus the trailing __{corruption,q20,q10} → {kind: dial}.
+    let mut groups: BTreeMap<String, BTreeMap<&str, f64>> = BTreeMap::new();
+    for (i, l) in label.iter().enumerate() {
+        for kind in ["corruption", "q20", "q10"] {
+            let suffix = format!("__{kind}");
+            if let Some(key) = l.strip_suffix(&suffix) {
+                groups.entry(key.to_string()).or_default().insert(kind, dial[i]);
+                break;
+            }
+        }
+    }
+    let mut n_triples = 0usize;
+    let mut pass20 = 0usize;
+    let mut n10 = 0usize;
+    let mut pass10 = 0usize;
+    // per family: [pass20, total20]
+    let mut fam: BTreeMap<String, [usize; 2]> = BTreeMap::new();
+    for (key, kinds) in &groups {
+        let corr = kinds.get("corruption");
+        if let (Some(&c), Some(&q20)) = (corr, kinds.get("q20")) {
+            n_triples += 1;
+            let ok = c < q20;
+            if ok {
+                pass20 += 1;
+            }
+            let e = fam.entry(corruption_family(key)).or_default();
+            e[0] += ok as usize;
+            e[1] += 1;
+        }
+        if let (Some(&c), Some(&q10)) = (corr, kinds.get("q10")) {
+            n10 += 1;
+            if c < q10 {
+                pass10 += 1;
+            }
+        }
+    }
+    let mut per_family: Vec<(String, f64, usize)> = fam
+        .into_iter()
+        .map(|(k, c)| (k, if c[1] > 0 { c[0] as f64 / c[1] as f64 } else { f64::NAN }, c[1]))
+        .collect();
+    per_family.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    CorruptionStats {
+        n_triples,
+        pass_q20: if n_triples > 0 { pass20 as f64 / n_triples as f64 } else { f64::NAN },
+        pass_q10: if n10 > 0 { pass10 as f64 / n10 as f64 } else { f64::NAN },
+        per_family,
+    }
+}
+
+/// Render the corruption-gate section as markdown + an inline-SVG per-family
+/// pass-rate chart.
+pub fn corruption_gate_section(stats: &CorruptionStats, grid_label: &str) -> String {
+    let mut s = String::new();
+    s.push_str("\n## Corruption gate (negative-tail ranking)\n\n");
+    s.push_str(&format!(
+        "Grid: `{}` — {} corruption entries. A structurally-broken decode MUST rank below an \
+         honestly-lossy encode: `score(corruption) < score(q20)`.\n\n",
+        grid_label, stats.n_triples
+    ));
+    s.push_str("| gate | pass % | note | pass |\n|---|--:|---|:--:|\n");
+    let _ = writeln!(
+        s,
+        "| corruption < q20 (honest low-quality) | {:.1}% | negative-tail ranking | {} |",
+        100.0 * stats.pass_q20,
+        if stats.pass_q20 >= 0.95 { "✓" } else { "✗" }
+    );
+    let _ = writeln!(
+        s,
+        "| corruption < q10 (stricter anchor) | {:.1}% | should be near-total | |",
+        100.0 * stats.pass_q10
+    );
+    s.push('\n');
+    let show: Vec<&(String, f64, usize)> = stats.per_family.iter().take(12).collect();
+    if !show.is_empty() {
+        let labels: Vec<String> = show.iter().map(|(f, _, _)| f.clone()).collect();
+        let values: Vec<f64> = show.iter().map(|(_, f, _)| 100.0 * f).collect();
+        s.push_str(&svg_bars(
+            "Per-family corruption<q20 pass % (worst first)",
+            &labels,
+            &values,
+            0.0,
+            100.0,
+            95.0,
+            true,
+        ));
+        s.push('\n');
+        s.push_str("| family | pass % | n |\n|---|--:|--:|\n");
+        for (f, frac, n) in &show {
+            let _ = writeln!(s, "| {f} | {:.0}% | {n} |", 100.0 * frac);
+        }
+        s.push('\n');
+    }
+    s.push_str(
+        "_The negative tail the regression-test use case depends on: a broken decode must not \
+         outscore an honest q20. A low pass rate here means the metric can be fooled by \
+         structural corruption. (Butteraugli-max historically wins this gate 2-4× over MLP \
+         bakes — see the corruption-corpus note.)_\n",
+    );
+    s
+}
+
+// ============================================================================
 // Inline SVG bar chart (self-contained, theme-aware via currentColor)
 // ============================================================================
 
@@ -949,6 +1090,28 @@ mod tests {
     fn inline_bold_code() {
         let h = inline_md("a **bold** and `code` end");
         assert_eq!(h, "a <strong>bold</strong> and <code>code</code> end");
+    }
+
+    #[test]
+    fn corruption_gate_basic() {
+        // two triples; one passes (corruption < q20), one fails.
+        let label = vec![
+            "r__aliasing__whole__op100__corruption".to_string(),
+            "r__aliasing__whole__op100__q20".to_string(),
+            "r__aliasing__whole__op100__q10".to_string(),
+            "r__ringing__sq64__op50__corruption".to_string(),
+            "r__ringing__sq64__op50__q20".to_string(),
+        ];
+        // aliasing: corr 30 < q20 60 → pass. ringing: corr 70 > q20 55 → fail.
+        let dial = vec![30.0, 60.0, 40.0, 70.0, 55.0];
+        let st = corruption_gate(&label, &dial);
+        assert_eq!(st.n_triples, 2);
+        assert!((st.pass_q20 - 0.5).abs() < 1e-9);
+        // family parse: aliasing passes 100%, ringing 0%.
+        let fams: std::collections::HashMap<_, _> =
+            st.per_family.iter().map(|(f, p, _)| (f.clone(), *p)).collect();
+        assert!((fams["aliasing"] - 1.0).abs() < 1e-9);
+        assert!((fams["ringing"] - 0.0).abs() < 1e-9);
     }
 
     #[test]
