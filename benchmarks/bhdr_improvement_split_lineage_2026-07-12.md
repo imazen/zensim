@@ -1191,3 +1191,23 @@ both computable today for any candidate, no new data.
 - Corpora: `hdr_v3mix` (cvvdp-mix, READ-ONLY), UPIQ PU-linear features (n=380), canonical val parquets
 - Tools: `linear_projections_2026-07-03.py` (fit/finalize), `bake_verdict`, `scripts/hdr/upiq_panel.py`
 - Related: `profile_b_methodology_2026-07-12.md` §3b (BHdr recheck), `linear_projections_2026-07-03.md` (fit catalog)
+
+### 8.19c Severity-ramp monotonicity MEASURED (instrument landed 2026-07-14)
+
+`scripts/hdr/severity_ramp_monotonicity.py` on kadis-hdr PU-linear (2,014
+analytic 5-level ramps, signed types excluded, ε=0.5):
+
+| bake (training mass) | monotone | strict | worst types |
+|---|---|---|---|
+| shipped BHdr (compression-only jxl) | **63.7%** | 59.1% | d15 **0%**, d24 1%, d23 18% |
+| hdrunic (+analytic kadid/tid) | **83.1%** | 80.0% | d20 30%, d23 30% |
+| hdrcodc (+compression sdrcodec) | **64.9%** | 59.5% | d15 **0%**, d24 14% |
+
+Quantifies §8.19b axis 1: compression-only training leaves ~36% of
+analytic severity ramps NON-monotone (whole types fully inverted: d15
+0/80 ramps; mean worst inversion 9.1 dial pts — "more distortion scores
+higher"), adding compression SDR mass does NOT fix it (64.9%), a modest
+analytic anchor lifts it +19pts to 83.1%. Together with §8.19 (analytic
+mass costs UPIQ-HDR): the §8.20 mass shape must be compression-majority +
+SMALL analytic anchor, tuned on BOTH instruments. This instrument joins
+the standing confirmation battery.
