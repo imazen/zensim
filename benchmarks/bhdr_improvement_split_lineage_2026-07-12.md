@@ -1026,6 +1026,47 @@ live leg JOD (first use — clean), G-A identity re-run (require p95 |Δ|
 campaign end-state via distillation later), G-C seam (|seam| ≤ 4).
 kadis mass stays OUT per §8.15 (falsified for UPIQ transfer).
 
+### 8.17 §8.16 RESULT — gate FAILED, but the campaign's key decomposition landed
+
+Selected `hdrunic-lasso0.001-shaped` (equal SDR mass; sel 0.8859; 88
+active; bake `lp_hdrunic-lasso0.001-shaped-tau0-f16.bin`). Four-instrument
+confirmation (the ONE registered look):
+
+| instrument | candidate | reference | verdict |
+|---|---|---|---|
+| [1] UPIQ-HDR narwaria | 0.6915 | shipped 0.7834 | **FAIL** (Δ−0.092, p≈1.0) |
+| [1] UPIQ-HDR korshunov | 0.8954 | shipped 0.9175 | FAIL (Δ−0.022, p≈1.0) |
+| [2] UPIQ-SDR **live** (clean, 1st use) | **0.9330** | B = 0.8945 | **BEATS B by +0.039** |
+| [3] G-A identity vs B | rank 0.913 (was 0.848), but median Δ +12.8 (systematic offset) | p95≤12/0.95 | FAIL (offset is spline-calibration-shaped) |
+| [4] single-head seam | −10.14 | shipped-pair −8.64 | FAIL |
+
+NOT shipped (instrument 1 is the registered hard gate). Shipped BHdr
+unchanged.
+
+**The decomposition (what we now know, all measured):**
+1. **SDR mass through PU-linear WORKS for SDR competence** — the unified
+   head beats B itself on the clean human SDR leg (live 0.9330 vs 0.8945)
+   and lifts rank-agreement with B. "BHdr ≥ B on SDR" is demonstrably
+   reachable with one head.
+2. **Analytic-distortion mass damages UPIQ-HDR transfer — third family,
+   same mechanism** (kadis §8.15, now kadid/tid §8.17): KADID/TID are
+   ~95% non-compression ops; UPIQ strata are compression artifacts.
+   In-family HDR held (hdr_valmix 0.9064) — the damage is specifically
+   to compression-artifact ranking.
+3. The G-A offset (+13 median, rank UP) is a dial-calibration artifact —
+   co-calibration territory, not head territory.
+
+**Next registration (§8.18, sketch — register formally before fitting):**
+**compression-shaped SDR mass.** Replace kadid/tid analytic mass with SDR
+codec-sweep pairs (decode datagen SDR variants → sRGB PNG → PQ-203 →
+PU-linear; a few-thousand-pair slice suffices per §8.16's n≈10k signal),
+mixes hdr_v3mix + sdrcodec_pl (± small kadid_pl), same selection shape +
+four-instrument confirmation. Mechanism-grounded prediction: SDR
+competence retained (live-leg check) WITHOUT the UPIQ-HDR drop, because
+the added mass is the same distortion family UPIQ rewards. Then the
+remaining G-A offset falls to shared-anchor spline co-calibration, and
+G-D probe scoring closes the sensitivity leg.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
