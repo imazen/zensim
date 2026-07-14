@@ -1312,7 +1312,96 @@ spline refit.
 
 **Decision point (UPIQ-HDR look is one-shot per registration):** densetop has
 strong ramps (86.6%, +20 vs shipped BHdr's 63.7%) and improved but not full
-dial reach (87 vs B's ~95). The precious UPIQ-HDR holdout look should be spent
-only on a candidate that has closed the top-compression, so the recommendation
-is to fit top-anchor mass FIRST (address the head compression), re-gate ramps
-+ dial reach, and only then spend the look. Tool: `scripts/hdr/hdr_top_extend.py`.
+dial reach (87 vs B's ~95) under the *saturation* extension. See §8.23 — the
+`target-top` mode closes the rest.
+
+## §8.23 — target-top spline fix CLOSES the dial: 0→100, ramps 86.5%, rank-invariant (2026-07-14, CORRECTS §8.22)
+
+§8.22's "next lever = top-anchor mass in the FIT (head compression)" was
+**half-wrong** — corrected here. Measured the head's own top rank power on the
+anchor: **SROCC(raw, y) = 0.79 for y>85, 0.92 for y>70** — the linear head DOES
+rank near-lossless content; it just does so in a compressed raw range (spread
+0.29 at y<50 → 0.06 at y∈[92,98]). And the anchor has **35 rows at y≥95** — not
+zero. So the collapse was **spline top-knot placement**, not a fit-level rank
+ceiling: `fit_spline_knots` bins by RAW percentile, and the anchor is
+bottom-heavy (95% of rows y<77 — B's dial over the SDR overlap rarely exceeds
+77), so the top raw bin's median-y landed at 76.7 and pinned the top knot there.
+The saturation extrapolation (§8.22) then under-shot because it's fit over the
+whole y>70 band (dominated by the 302 mid rows), not the sparse top.
+
+**Fix = `hdr_top_extend.py --mode target-top`** (added this session): keep the
+bottom+mid knots (y≤72) VERBATIM, and place the top knots on the anchor's OWN
+high-y rows binned by TARGET (edges 72/78/84/89/93/96/100). Uses existing data
+only — regime-safe, no new corpus — so the top knots sit on real y=90..96
+content instead of the raw-percentile median.
+
+`lp_hdranch3_cocal.bin` → `lp_hdranch3_cocal_tgttop.bin` (11.7 KB): kept 16
+bottom/mid knots, +4 target-binned top knots, y-top 76.7 → 96.5 (35 rows y≥95).
+Verified (Rust runtime, kadis-hdr PU-linear):
+- **Ramps 86.5% / 2.78 worst-inv** — rank-invariant (co-cal was 86.6%; strict
+  75.3→75.7 = f16 noise). SROCC(dial, anchor-y) identical 0.9347→0.9346.
+- **Dial reach 76.7 → 100.0** (score_bake on the ramp grid); near-lossless
+  (level-1) p95 76.7 → 97.9, max → 100.0. The top un-collapsed.
+- tgttop = co-cal + fixed-top ONLY (the top knots are the sole change).
+
+⚠ **The "meets both requirements" conclusion drafted here was PREMATURE and is
+RETRACTED — see §8.24.** Two things it got wrong, both caught by finishing the
+eval: (a) I dismissed the local-python zone panel's mid meanΔ ≈ −24 as a reimpl
+artifact; the **Rust runtime confirms the −24 mid seam is REAL** (§8.24), so
+§8.20c's "mid tight" was the circular in-sample read on the fit anchor, not
+held-out. (b) I asserted the UPIQ-HDR rank "equals the registered look" as if
+that were fine — but I never RAN the look. When run, the hdranch3 head scores
+**UPIQ-HDR 0.606 vs shipped BHdr 0.7536 — decisively WORSE** (§8.24). tgttop is
+a good dial-repair TOOL on a head that shouldn't ship. Tool stands:
+`scripts/hdr/hdr_top_extend.py` (modes `saturation` | `target-top` | `full-target`).
+
+## §8.24 — hdranch3 FALSIFIED as a BHdr replacement: ramp-proxy optimization craters the UPIQ-HDR human target (2026-07-14)
+
+The §8.20 campaign chased **severity-ramp monotonicity** (63.7% shipped → 86.5%
+hdranch3) as the BHdr-improvement signal and never re-ran `upiq_panel.py` on the
+result. Closing that gap this session decides it:
+
+**Regime-correct runtime bucket table (native PU-linear `raw`, bucketed by B's
+dial `y`, `bake_verdict --per-pair-output` on the 2,000-row anchor):**
+
+| B zone | hdranch3 co-cal meanΔ | full-target respline meanΔ | shipped BHdr meanΔ |
+|---|--:|--:|--:|
+| [30,55) | **−17 … −27** | −1.5 … −0.2 | ~−5 |
+| [55,80) | **−15 … −27** | −0.5 … +0.7 | small |
+| [85,100) | +0.8 … +1.0 | +0.4 | small |
+
+So the co-cal has a genuine **−24 mid seam vs B** (NOT the §8.20c "tight mid" —
+that was measured in-sample on the fit anchor, circular). The new
+`full-target` respline mode (rebuild the WHOLE spline from target-binned anchor
+rows across [0,100], monotone-in-raw → rank-invariant) closes it to ≈0.
+
+**But the respline can't save the head.** UPIQ-HDR (`upiq_panel.py`, PU-linear
+features, n=380), rank-invariant across all resplines (co-cal 0.6063, full-target
+0.6058, hybmid 0.6063 — identical):
+
+| bake | UPIQ pooled | narwaria | korshunov | kadis ramps | mid seam vs B |
+|---|--:|--:|--:|--:|--:|
+| **shipped BHdr** (cvvdpmix λ0.0003) | **0.7536** | 0.7834 | 0.9175 | 63.7% | 5.2 |
+| hdranch3 (any respline) | 0.606 | 0.6818 | 0.8902 | 83.5–86.8% | 1.6–16 |
+
+Paired per-stratum bootstrap (hdranch3 − shipped): narwaria Δ**−0.102** p=1.000,
+korshunov Δ**−0.027** p=0.9998 — hdranch3 is decisively worse on BOTH HDR strata.
+
+**Verdict: hdranch3 is falsified as a BHdr replacement.** It improves the
+ramp proxy and (with full-target) the SDR seam, but regresses the domain-relevant
+HDR-compression human correlation by ~0.15 SROCC. This is the proxy-optimization
+trap: kadis analytic severity-ramps ≠ real HDR-compression JOD. **The shipped
+BHdr (UPIQ 0.7536, mid seam 5.2, intentional neg-tail bottom) stays the champion.**
+
+**Pareto characterization (the real finding):** across available heads, UPIQ-HDR
+and kadis-ramp monotonicity TRADE OFF — shipped BHdr is UPIQ-max / ramp-weak,
+hdranch3 is ramp-strong / UPIQ-weak. A respline is rank-invariant so it can move
+neither metric; both are head properties. Closing the ramp gap WITHOUT losing
+UPIQ needs a **multi-target head** (train for UPIQ-JOD *and* a ramp-monotonicity
+penalty), not another dial edit. Until such a head beats 0.7536 UPIQ, "BHdr right"
+= the shipped bake; its 63.7% ramps are a **characterized Pareto limit, not a
+fixable defect.**
+
+**Load-bearing process fix:** every BHdr candidate MUST be `upiq_panel.py`'d
+(PU-linear features) before any ship consideration — ramps/seam/dial-reach are
+necessary but NOT sufficient. Added to the confirmation battery.

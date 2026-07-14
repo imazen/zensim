@@ -69,6 +69,20 @@ def main():
     ap.add_argument("--space", default="shaped", choices=["shaped", "raw"])
     ap.add_argument("--band-min", type=float, default=70.0)
     ap.add_argument("--n-knots", type=int, default=12)
+    ap.add_argument("--mode", default="saturation",
+                    choices=["saturation", "target-top", "full-target"],
+                    help="saturation = log-OLS concave extrapolation above the top knot "
+                         "(reaches 100 but under-shoots a sparse top); target-top = replace the "
+                         "top knots (ky>keep-below) with knots placed on the anchor's own high-y "
+                         "rows binned by TARGET (regime-safe, no new data, reaches the anchor's "
+                         "real top density — not 100 if the anchor is sparse above ~95); "
+                         "full-target = discard ALL existing knots and rebuild the WHOLE spline "
+                         "from target-binned anchor rows across [0,100] (fixes a sagging/inflated "
+                         "MID, not just the top — the dial tracks the anchor's B-dial in every "
+                         "zone; rank-invariant since the map stays monotone in raw)")
+    ap.add_argument("--keep-below", type=float, default=72.0,
+                    help="target-top: keep existing spline knots with y<=this verbatim (bottom+"
+                         "mid); rebuild knots above it from target-binned anchor rows")
     a = ap.parse_args()
 
     ins = json.loads(subprocess.run(
@@ -96,26 +110,81 @@ def main():
     y = z["y"].astype(np.float64)
     raw_a = (Xa - mu) / sd @ w + bias
 
-    band = y > a.band_min
-    if int(band.sum()) < 10:
-        raise SystemExit(f"only {int(band.sum())} anchor rows with y>{a.band_min}; "
-                         "lower --band-min or use a top-anchored npz")
-    A = np.vstack([np.ones(int(band.sum())), raw_a[band]]).T
-    coef, *_ = np.linalg.lstsq(A, np.log(np.clip(100.0 - y[band], 1e-3, None)), rcond=None)
-    k = float(-coef[1])
-    if k <= 0:
-        raise SystemExit(f"saturation fit gave non-decaying k={k}; anchor's y>band raw "
-                         "does not increase with quality — top-extend not applicable")
-    r_far = x0 + (-np.log(1e-4) / k)
-    added = 0
-    for r in np.linspace(x0 + (r_far - x0) / a.n_knots, r_far, a.n_knots):
-        yv = 100.0 - (100.0 - y0) * np.exp(-k * (r - x0))
-        if r > kx[-1] + 1e-7 and yv > ky[-1]:
-            kx.append(float(r))
-            ky.append(float(yv))
-            added += 1
-    print(f"  top extension: k={k:.3f} (n={int(band.sum())}); {x0:.3f}->{r_far:.2f}, "
-          f"+{added} knots, y-top {ky[-1]:.2f}; final {len(kx)} knots")
+    if a.mode == "saturation":
+        band = y > a.band_min
+        if int(band.sum()) < 10:
+            raise SystemExit(f"only {int(band.sum())} anchor rows with y>{a.band_min}; "
+                             "lower --band-min or use a top-anchored npz")
+        A = np.vstack([np.ones(int(band.sum())), raw_a[band]]).T
+        coef, *_ = np.linalg.lstsq(A, np.log(np.clip(100.0 - y[band], 1e-3, None)), rcond=None)
+        k = float(-coef[1])
+        if k <= 0:
+            raise SystemExit(f"saturation fit gave non-decaying k={k}; anchor's y>band raw "
+                             "does not increase with quality — top-extend not applicable")
+        r_far = x0 + (-np.log(1e-4) / k)
+        added = 0
+        for r in np.linspace(x0 + (r_far - x0) / a.n_knots, r_far, a.n_knots):
+            yv = 100.0 - (100.0 - y0) * np.exp(-k * (r - x0))
+            if r > kx[-1] + 1e-7 and yv > ky[-1]:
+                kx.append(float(r))
+                ky.append(float(yv))
+                added += 1
+        print(f"  top extension (saturation): k={k:.3f} (n={int(band.sum())}); "
+              f"{x0:.3f}->{r_far:.2f}, +{added} knots, y-top {ky[-1]:.2f}; final {len(kx)} knots")
+    elif a.mode == "full-target":
+        # full-target: throw away the input spline entirely and rebuild it from
+        # target-binned anchor rows across the WHOLE range. Bin by the target
+        # dial y in 5-pt zones; each knot sits at (median raw, median y) of its
+        # zone, so the baked dial reproduces the anchor's B-dial per zone —
+        # meanΔ≈0 everywhere, not just the endpoints. The map is monotone in
+        # raw (knots strictly increasing in raw), so rank/ramps are unchanged.
+        edges = list(np.arange(0.0, 100.0 + 1e-6, 5.0)) + [100.01]
+        nk_kept = len(kx)
+        kx, ky = [], []
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            m = (y >= lo) & (y < hi)
+            if int(m.sum()) < 5:
+                continue
+            kxn = float(np.median(raw_a[m]))
+            kyn = float(np.median(y[m]))
+            # enforce strictly-increasing raw (a monotone spline needs a strictly
+            # increasing domain); the target medians are already increasing by
+            # construction of the y-bins, but rank noise can invert raw across
+            # two adjacent thin bins — skip a bin whose median raw regressed.
+            if kx and kxn <= kx[-1] + 1e-6:
+                continue
+            kx.append(kxn)
+            ky.append(kyn)
+        if len(kx) < 4:
+            raise SystemExit(f"full-target produced only {len(kx)} monotone knots; "
+                             "anchor too sparse or raw too noisy — widen bins")
+        added = len(kx)
+        print(f"  full respline (full-target): discarded {nk_kept} input knots; "
+              f"rebuilt {added} target-binned knots across [0,100]; "
+              f"raw [{kx[0]:.3f},{kx[-1]:.3f}] y [{ky[0]:.1f},{ky[-1]:.1f}]")
+    else:
+        # target-top: keep the bottom+mid knots (ky<=keep_below) VERBATIM, then
+        # place the top knots on the anchor's OWN high-y rows binned by target.
+        # Uses existing data only — regime-safe — so it reaches the anchor's real
+        # top density (not 100 if the anchor is sparse above ~95).
+        keep = [(x, yv) for x, yv in zip(kx, ky) if yv <= a.keep_below]
+        if not keep:
+            keep = [(kx[0], ky[0])]
+        kx, ky = [p[0] for p in keep], [p[1] for p in keep]
+        edges = [a.keep_below, 78, 84, 89, 93, 96, 100.01]
+        added = 0
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            m = (y >= lo) & (y < hi)
+            if int(m.sum()) >= 5:
+                kxn = float(np.median(raw_a[m]))
+                kyn = float(np.median(y[m]))
+                if kxn > kx[-1] + 1e-6 and kyn > ky[-1] + 1e-6:
+                    kx.append(kxn)
+                    ky.append(kyn)
+                    added += 1
+        print(f"  top rebuild (target-top): kept {len(keep)} bottom/mid knots (y<={a.keep_below}); "
+              f"+{added} target-binned top knots; final {len(kx)} knots, y-top {ky[-1]:.2f} "
+              f"(n(y>=95)={int((y>=95).sum())} — the top-density ceiling)")
 
     payload = struct.pack("<I", len(kx)) + b"".join(
         struct.pack("<ff", float(x), float(y)) for x, y in zip(kx, ky))
