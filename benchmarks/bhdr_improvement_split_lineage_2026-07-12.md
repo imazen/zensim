@@ -1687,3 +1687,61 @@ Infrastructure (committed, reusable): `bhdr_dial_cocal.py` (Y-remap co-cal,
 negatives-preserving), `bhdr_cocal_eval.py` (rank-invariance + negatives on real
 HDR), `lower_bound_probe.py` (standing lower-bound eval procedure). Candidate bakes
 under `/mnt/v/output/zensim/reports/bhdr_cocal/` (NOT shipped).
+
+## §8.30 — B negatives UNBLOCKED: dial re-anchored to unclamped ssim2_gpu (candidate, not yet shipped) (2026-07-14)
+
+**User directive:** "can we unblock negative values on b" + (standing) "negative
+zensim scores are valid and needed."
+
+**The blocker (diagnosed).** Shipped B (`b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin`)
+floors at **~1.5** on the worst content — **0/2016 negatives** on the corruption
+grid — while every sibling reaches deep negative: `ssim2_gpu` −64, `BHdr` −63.9,
+`A` −35.5 (lower_bound_probe.py, the standing procedure added in §8.29). Root
+cause is **the dial anchor, not the weights**: B's dial was fit against
+`multiband_anchor_dial100.parquet:target_score`, which is **ssim2 CLAMPED at 0**
+(min 0.00, 0 negatives). The *unclamped* `ssim2_gpu` column on the *same* parquet
+reaches −64.16 (147 negatives) and is **byte-identical to `target_score` in the
+positive range**. So B's linear head already ranks catastrophic content correctly;
+the clamped anchor simply threw away the negative half of the dial.
+
+**The fix (surgical, rank-invariant).** Re-fit ONLY the output spline against the
+unclamped `ssim2_gpu`, then re-apply the near-lossless extend-top:
+
+```
+bake_dial_refit shared-anchor --target-col ssim2_gpu   # unblocks the negative tail
+bake_dial_refit extend-top    --target-col target_score # restores dial top 100.0
+```
+
+Reproducible chain: `scripts/reproduce_b_negatives.sh` → **sha256
+`aa28f3702349a8ede8007e8ad0c6328d0bb1a8cb622a99d4051e4b5706ba734c`** (7326 B,
+byte-identical on re-run). Candidate at
+`/mnt/v/output/zensim/reports/b_negatives/b_sdr_linear_cid80_ssim2anchored_dense_dial_2026-07-14.bin`.
+
+**Measured (corruption grid, n=2016; the shipped→candidate dial is a monotone remap
+because SROCC(shipped,cand)=1.000000):**
+
+| shipped-B dial | candidate dial | Δ | region |
+|---:|---:|---:|---|
+| ≥50 (operating range) | identical | **≤0.3** | preserved |
+| 70 / 80 / 90 / 96 | 70.2 / 80.1 / 90.0 / 96.0 | ≤0.1 | preserved |
+| 30–50 (low-q transition) | 26–50 | −3 to −5 | minor un-compression |
+| **<20 (was a dead floor at ~1.5)** | **spreads to −128** | to −130 | **negative tail** |
+
+Lower-bound: candidate min **−128.6**, p1 −46.5, **52/2016 negatives** (was 1.5,
+0/2016). Dial top restored to **100.00** (30 knots, y-range [−14.31, 100.00]).
+
+**Rank preserved EXACTLY** (bake_verdict, monotone spline ⇒ SROCC-invariant):
+CID22 **0.8764**, KADID **0.820**, TID **0.787** — byte-identical to shipped B.
+
+**Why this is the right anchoring (vs the §8.29 BHdr co-cal which was a bad trade):**
+here the target IS B's own metric (ssim2), merely un-clamped — not a foreign SDR
+scale imposed on an HDR head. The positive operating range where all product
+decisions + human corpora live (CID22 MOS is dial 40–95) is preserved to ≤0.3 pts;
+only the previously-compressed floor (everything piled at 1.5) un-compresses into
+the honest negative region, matching ssim2's native scale. This is exactly
+"unblock the negative tail without disturbing the calibrated positive dial."
+
+**Status: CANDIDATE, NOT shipped.** B is the DEFAULT metric — swapping its
+user-facing calibration is a ship decision surfaced to the user. The
+`zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin` slot is
+UNCHANGED pending confirmation.
