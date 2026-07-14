@@ -688,8 +688,10 @@ rows + key uniqueness), then
 `build_hdr_train_parquets.py --codec kadis-hdr --datagen
 /mnt/v/output/zenmetrics/datagen-2026-07-12-hdr-kadis` builds the
 LSD-origin-split train/val parquets. zensim features are the **v1 PU21
-u8-shell regime** (matches the jxl HDR corpus — do not mix with
-`--hdr-features-pu-linear` extractions). Monitor: `_DONE`/19 + box liveness,
+u8-shell regime** — ⚠ **CORRECTED in §8.13: this does NOT match the jxl HDR
+corpus** (`hdr_zenjxl_v3*` is v3 PU-linear); the "matches" claim here was an
+unverified premise that confounded §8.11–§8.12. PU-linear re-extraction in
+flight per §8.13. Monitor: `_DONE`/19 + box liveness,
 3-min ticks (`fleet_status.sh` in the local run dir).
 
 **avif-HDR datagen HALTED (2026-07-13, user: "avif is in flux, dont do that").**
@@ -836,6 +838,46 @@ not run (moot — gate (a) already fails). NOT shipped; shipped BHdr stays
 `linear-probe/fit_hdrbroad_2026-07-14.log`; kadis corpora remain fully
 valid training assets (the falsification is about UPIQ transfer, not data
 quality) and stay in GROUPS for future registered experiments.
+
+### 8.13 CORRECTION — §8.12 is CONFOUNDED; falsification WITHDRAWN as stated (2026-07-14, user: "upiq how much?")
+
+Reconciling the historical UPIQ numbers for the user's question exposed a
+feature-REGIME confound running through §8.10–§8.12:
+
+1. **Two UPIQ extractions exist**: `upiq_features_372.parquet` (v1 PU21
+   u8-shell) and `upiq_features_372_pulinear.parquet` (v3 PU-linear —
+   `compute_pu_linear_extended_features`, the front-end BHdr consumes in
+   production). The shipped BHdr bake on the PU-linear parquet reproduces
+   the recorded promotion number EXACTLY — pooled **0.7536**, narwaria
+   **0.7834**, korshunov **0.9175** — resolving the apparent 0.7536 vs
+   0.7081 discrepancy: §8.12's panel fed BOTH bakes the u8-shell (wrong)
+   extraction via `upiq_panel.py`'s default.
+2. **§8.10's premise was WRONG**: the kadis-hdr fleet extracted features
+   with the v1 u8-shell regime "for consistency with the existing jxl HDR
+   training corpus" — but `hdr_zenjxl_v3*` is **v3 PU-linear**
+   (`merge_v3_shards.py`: "v3 (pu-linear) feature shards"). The claim of
+   regime match was never verified against the jxl corpus. The
+   `hdrbroad*` grams therefore MIXED regimes (jxl rows PU-linear + kadis
+   rows u8-shell) — the candidate is a regime-chimera.
+3. **Therefore §8.12's "corpus-breadth-alone falsified" is WITHDRAWN as
+   stated.** What was actually tested — and failed — is "adding a
+   regime-mismatched corpus". The breadth hypothesis itself is UNTESTED.
+   (The no-ship decision was still correct: the candidate is defective by
+   construction, and on the correct PU-linear extraction it loses both
+   strata, 0.7474/0.9160 vs shipped 0.7834/0.9175.)
+
+**Remediation (in flight):** re-extract kadis-hdr zensim features with
+`--hdr-features-pu-linear` (scores are regime-independent — only the
+feature vector changes; no re-scoring needed), rebuild the kadis parquets,
+then a NEW registration (§8.14) with a regime-consistent gram, PU-linear
+selection axes, and the PU-linear UPIQ parquet for the confirmation look.
+`upiq_panel.py` gains a loud regime note; §8.10's regime sentence and the
+corpus card / DATA_PROVENANCE claims are corrected in this commit.
+
+**Process lesson (embedded):** "matches the existing corpus" is a
+MEASURABLE claim — verify the regime of both sides before mixing grams;
+one unverified premise invalidated a full registered experiment. Credit:
+the user's "upiq how much?" question triggered the reconciliation.
 
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).

@@ -26,7 +26,8 @@ import pyarrow.parquet as pq
 
 ap = argparse.ArgumentParser()
 ap.add_argument("bake")
-ap.add_argument("--features", default="/mnt/v/output/zensim-multicodec-probe/upiq_features_372.parquet")
+ap.add_argument("--features", default="/mnt/v/output/zensim-multicodec-probe/upiq_features_372.parquet",
+                help="REGIME MATTERS (bhdr_improvement §8.13): this default is the v1 PU21 u8-shell extraction. PU-linear bakes (BHdr production path) need upiq_features_372_pulinear.parquet — mis-feeding understates SROCC by ~0.05 and reshuffles strata.")
 ap.add_argument("--jod", default="/mnt/v/output/zenmetrics/upiq-pu/upiq_cid_jod.csv")
 ap.add_argument("--strata", action="store_true")
 ap.add_argument("--compare", default=None, help="second bake for paired per-stratum bootstrap")
