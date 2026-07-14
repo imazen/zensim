@@ -1224,3 +1224,19 @@ shipped 63.7%. **Confirmation (ONE look):** [1] UPIQ-HDR ≥ shipped both
 strata (hard); [2] ramp-monotonicity ≥ 75%; [3] UPIQ-SDR live ≥ 0.8945.
 
 ### 8.20b hdranch3 partial confirmation: RAMPS PASS 78.6% (gate 75, shipped 63.7, d15 0%→11%); full-range bucket table vs B (3,779 SDR pairs): bucket means near-monotone (2 minor dips), rank 0.8996, but S-shaped miscalibration — mid-range inflated +16..+24, B<5 maps to negative (mean −22), top compressed (−6 at B 90-95). Remaining §8.20 steps: shared-anchor spline co-calibration to B's dial on this overlap (rank-invariant), re-verify ramps post-respline, then the ONE UPIQ-HDR + live look. Bucket table + numbers in fit log dir.
+
+### 8.20c Spline co-calibration result + B's own bar (2026-07-14)
+
+Co-cal (finalize spline refit on the B-dial anchor, 3,779 SDR pairs) →
+`lp_hdranch3_cocal.bin`. **Ramps improve again: 86.6% (inv 2.8pts).**
+**B's OWN kadis-ramp bar (u8-shell): 66.9%, inv 3.3 pts** — the candidate
+beats B by +20pts on distortion monotonicity. Zone panel vs B: zones 0–55
+now tight (meanΔ +4..−1, RMSE 4–14) but the TOP COLLAPSED (B 90-95 →
+−19.6 meanΔ; candidate max 77) — sparse high-B anchor mass (n=27..64)
+under-pins the top knots. Fix = the SAME dense-dial top-anchoring B itself
+needed (its shipped bake is *_dense_dial): augment the co-cal anchor with
+near-lossless/identity mass (target 95–100) before refit. Remaining §8.20:
+top-anchored respline → re-gate ramps + zones → ONE UPIQ-HDR+live look.
+Queued per user: B's compression-q-ramp bar + RMSE on datagen jpeg ladders
+FILTERED to ladders whose own ssim2 (and size) are monotone in q — the
+u8 features for it are in unified/zenjpeg/sidecars/zensim_features.parquet.
