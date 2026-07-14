@@ -1497,3 +1497,57 @@ distortions, which is why UPIQ (0.7536, the real target) stays strong despite
 them — EXCEPT the denoise/over-smoothing blind spot, which IS compression-
 adjacent and worth a targeted probe (does BHdr reward over-quantized/over-smooth
 JXL/AVIF?). That, not analytic-ramp chasing, is the productive next HDR direction.
+
+## §8.27 — Shipped BHdr REPRODUCES byte-for-byte + campaign disposition (2026-07-14)
+
+**Reproduction (user: "reproducing shipped bdhr") — DONE, byte-identical
+end-to-end.** The shipped `bhdr_linear_shaped_cvvdpmix_2026-07-12.bin`
+(sha256 `7d7f2123…`, 11,826 B) is exactly `hdrmix-lasso0.0003-shaped`, and the
+whole chain is deterministic (no seed, no SGD):
+
+| step | input | op | output | check |
+|---|---|---|---|---|
+| fit | `grams/hdr_v3mix.npz` (cvvdp-mix corpus: `0.5·ssim2n + 0.5·(JOD−6)/4`, 7,410 rows) | `lasso(λ=0.0003)`, shaped space, fixed sweep order | `fits/hdrmix-lasso0.0003-shaped.npz` | re-fit **bit-exact**: w/bias/mu/sd `max\|Δ\|=0` vs on-disk npz |
+| bake | that npz + `val/anchor.npz` (from `multiband_anchor_dial100.parquet`) | f16 pack (tau0) + shared-anchor PCHIP spline on the packed forward | `bakes/lp_hdrmix-lasso0.0003-shaped-tau0-f16.bin` | **byte-identical** to shipped `7d7f2123` |
+
+Committed runnable artifact: **`scripts/reproduce_bhdr.sh`** (asserts the sha;
+its first run reproduced it against a *same-day-regenerated* `anchor.npz`, so the
+determinism is robust to anchor rebuilds). `scripts/reproduce_b.sh`'s stale
+`BHDR_SHA=373eac56` (the un-shipped anchored2) corrected to point here.
+
+**Campaign disposition (user: "then see about campaign").** With the artifact
+reproducible and the audit (§7) + falsifications (§8.24 hdranch3, §8.12/§8.13
+corpus-breadth) on the record, the analytic-improvement directions are
+**exhausted**:
+
+- **hdranch3 / analytic-ramp chasing — DEAD** (§8.24): improves KADIS ramps
+  63.7→86.5% but craters UPIQ 0.7536→0.606. The whole ramp-proxy family
+  optimizes a target that anti-transfers to the real HDR human holdout.
+- **Corpus-breadth (3rd synthetic family) — FALSIFIED** (§8.12/§8.13): fails its
+  pre-registered UPIQ gate; a human-free synthetic val axis selects for in-family
+  fit, not human transfer.
+- **§8.26 violation-dig:** the shipped BHdr's ramp violations are mostly
+  zensim-family blind spots (shared with the reference metric) or hard-for-
+  everyone cells — NOT bake defects a retrain fixes. One clean bake-specific
+  loss (sharpen); none are compression distortions.
+
+So the shipped BHdr **stays champion** (it is the UPIQ-max artifact and the
+directions that beat its ramps lose its human target). Two threads remain, in
+priority order:
+
+1. **Open provenance item (§7.6, user-decided):** the shipped dial is
+   SDR-anchored (a process regression vs the anchored2 HDR-anchored dial); the
+   in-domain UPIQ "win" is not established (maxT p=0.22). Options unchanged:
+   revert to anchored2 / keep weights + re-anchor the dial on HDR / keep as-is.
+   Rank (hence UPIQ 0.7536 and all SROCCs) is **invariant** to a dial re-anchor,
+   so this is a calibration-provenance choice, not a quality one. Deferred to the
+   user; not blocking.
+2. **The one concrete, compression-adjacent probe (§8.26):** does BHdr reward
+   over-quantized / over-smoothed JXL/AVIF (the denoise/over-smoothing blind
+   spot)? This is testable on existing HDR codec-ladder data without new human
+   labels — the productive next direction, run next.
+
+**Bottom line:** shipped BHdr reproduces exactly and remains the champion; the
+analytic-improvement campaign is closed as falsified; the honest levers left are
+(a) real HDR human data at scale (AIC-HDR2025, not yet obtainable — §8.7) and
+(b) the over-smoothing blind-spot probe.

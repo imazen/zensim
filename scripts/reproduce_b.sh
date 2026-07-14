@@ -39,7 +39,9 @@ OUT="${1:-/tmp/reproduce_b}"
 mkdir -p "$OUT"
 
 B_SHA=b6fe5233          # b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin (SHIPPED)
-BHDR_SHA=373eac56       # bhdr_linear_shaped_anchored2_2026-07-04.bin (BHdr, informational)
+# BHdr is reproduced by its own deterministic script (scripts/reproduce_bhdr.sh):
+# the SHIPPED BHdr is now bhdr_linear_shaped_cvvdpmix_2026-07-12.bin (sha 7d7f2123,
+# hdrmix-lasso0.0003-shaped), NOT the prior anchored2 (373eac56, preserved un-shipped).
 
 echo "== step 1/2: rebuild the shipped B (raw -> inclusive-winsor -> dense-dial), assert byte-identity =="
 REFIT="$REPO/target/release/bake_dial_refit"
@@ -80,4 +82,4 @@ fi
 echo
 echo "DONE — B reproduced byte-identically (sha $B_SHA)."
 echo "Predecessor (hdr_v3mix-only winsor, weights/archive/, sha b78adb15): near-lossless dial pinned 91.5."
-echo "BHdr (sha $BHDR_SHA): bake_dial_refit bottom-extend / shared-anchor (+ research densify in scripts/v_next/hdr_anchor_dense_refit.py)."
+echo "BHdr (sha 7d7f2123): reproduce with scripts/reproduce_bhdr.sh (gram → lasso0.0003 → f16 bake+spline)."
