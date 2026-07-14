@@ -95,6 +95,40 @@ aws s3 cp s3://zentrain/eval-grids/dial_grid_372col_2026-05-29.parquet \
 The standalone `qsweep_eval` binary still exists for multi-bake side-by-side
 dial comparisons, but the mandatory single-bake panel is `bake_verdict` alone.
 
+## Unified report — `bake_verdict` is THE default metric eval (2026-07-14)
+
+`bake_verdict` is the single "default metric evaluation" command: one run
+executes every always-applicable eval/stat/bucket and emits **both** a console
+(markdown) report **and** a self-contained big HTML report (`--html`), with a
+table-of-contents, styled pass/fail tables, and inline-SVG charts — no external
+assets, no scripts. `just metric-eval <bake> [ref] [ramp-grid]` wraps it.
+
+Sections (each auto-skips with a loud note when its data is absent):
+
+- **RANK panel** — per-corpus Mohammadi 6-stat + DS-AUC, aggregate + 10-band,
+  **plus the legacy 4-band CID22 Table-5 cuts** on the CID22 corpus.
+- **DIAL panel** — the 5-bucket codec-target monotonicity / G1 / G3 (above).
+- **Severity-ramp monotonicity** (`--ramp-grid <parquet>`) — per (ref,dist_type)
+  5-level distortion ramp, ε-slack monotone % / strict % / worst-inversion /
+  per-type worst; signed U-shaped types 7/18/25 excluded. Port of
+  `scripts/hdr/severity_ramp_monotonicity.py` (byte-for-byte verified). The grid
+  must be **feature-regime-matched** to the bake (PU21-u8 vs PU-linear); mismatch
+  → SKIPPED note.
+- **Per-zone dial agreement** (`--compare <ref-bake>`) — bucket the dial grid by
+  the reference bake's dial in 5-pt zones; per zone report the candidate's
+  mean-Δ / RMSE / within-zone SROCC (the §8.20 "bucket stats per 5 points of B").
+- **Corruption gate** (auto, `--corruption-grid`) — negative-tail ranking:
+  `score(corruption) < score(q20)` over the canonical corruption grid, overall +
+  q10 anchor + per-family. Auto-runs when the grid is present.
+- **Goals scorecard** (G1/G5/G7/G8/G9) + a **Related specialized evals** footer
+  listing the evals that need a second bake / spline internals / an HDR-UPIQ
+  corpus (`bake_compare`, `bake_dial_refit gate`, `cross_codec_jnd_eval.py`,
+  `upiq_*`, `ga_identity_report.py`) with the exact command for each.
+
+All correlation math routes through `zenstats::panel` (via
+`zensim_validate::panel`) — nothing statistical is re-implemented. The section
+logic lives in the `zensim_validate::eval_report` lib module.
+
 ## Stored feature sets (R2 — download on demand)
 
 Bucket `zentrain`, prefix `eval-grids/`, endpoint
