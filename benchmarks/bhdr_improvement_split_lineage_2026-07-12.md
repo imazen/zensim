@@ -1130,6 +1130,60 @@ construction, so no UPIQ gate needed — verify with G-A/seam instruments
 only); (b) if a head retrain is still wanted after (a), sdrcodec weight
 0.1–0.15 with a compression-shaped selection axis.
 
+### 8.19b Downsides of compression-ONLY training mass (research note, 2026-07-14, user q)
+
+Own-record evidence (measured) + external corroboration; governs how §8.20+
+weights its masses. Compression-only mass costs, by axis:
+
+1. **Severity monotonicity OFF the codec manifold.** Codec sweeps
+   supervise one confounded direction (blocking+blur+ringing arrive
+   together as q drops); pure-axis severity ramps (blur alone, noise
+   alone) get unconstrained gradients. Measured: hdrcodc's analytic-ramp
+   ranking fell to kadid 0.723 / tid 0.683 (vs 0.909/0.822 with analytic
+   mass) — SROCC ~0.7 across severity levels implies frequent level-order
+   inversions, i.e. NON-MONOTONE response to worsening analytic
+   distortion. A dial user sees "more blur scored higher."
+2. **Near-lossless saturation → ties/flat dial.** Metric-teacher targets
+   (ssim2) saturate at high q; compression-only grams inherit it.
+   Measured lineage: HQ-zone ssim2 cvvdp-agreement 0.82→0.48; V0_5
+   Balanced 60% tied above q50; Cell5 tied 0.8%→13.1% on the densified
+   grid; JXL near-lossless OOD ~24× L2. Monotone-in-q ≠ resolving-in-q.
+3. **Corruption blindness (shipping risk).** Compression-trained heads
+   under-react to non-codec catastrophic damage: corruption-gate
+   2026-05-28 measured butteraugli-max 72.2% vs v47 19.6% detection on
+   2,016 corrupted pairs.
+4. **Human-MOS transfer is NOT protected even on codec-focused human
+   corpora.** bigcodec (compression sweep) mass measurably POISONED
+   linear CID22 (2026-07-03 finding) — teacher circularity: the head
+   emulates ssim2-on-codec-artifacts, and human raters disagree with
+   ssim2 exactly where it saturates/fails (CID22 paper's own q<30/q>95
+   caveats).
+5. **JND-threshold anchoring starves.** Step-5 q grids undersample the
+   PJND zone; konjnd_guard fell to 0.050 on hdrcodc (vs 0.097 hdrunic).
+   "Visually lossless" calibration needs near-threshold mass by design.
+6. **Feature-support collapse → OOD cliffs.** Compression artifacts
+   occupy a narrow manifold in the 372-D space: hdrcodc kept only 49
+   active features (vs 88–166 for mixed grams). Everything off-manifold
+   is extrapolation — the §8.16 G-A level-5 craters (−52..−86) are this
+   failure mode.
+7. **Content-class blindspots.** Codec sweeps on photographic renditions
+   miss screen content / line art / synthetic gradients (the KADID
+   critique inverted — each family alone is incomplete).
+
+External corroboration (lit): cross-distortion-family transfer is the
+dominant IQA generalization gap — adding KADID-style synthetic mass helps
+TID/CSIQ but PIPAL-style processed distortions neither transfer out nor
+are covered by codec mass ([DISTS-Transformer study](https://www.mdpi.com/2227-7390/11/7/1599),
+[MILO](https://arxiv.org/html/2509.01411), [geometric-disparity IQA](https://arxiv.org/html/2412.19553v1)).
+
+**Operational consequence for §8.20+:** never compression-ONLY. Shape =
+compression-majority + small analytic anchor (restores severity
+monotonicity + corruption reactivity) + near-threshold mass (JND zone).
+And the confirmation battery gains a **severity-ramp monotonicity
+instrument**: fraction of monotone (ref × dist_type) level-ramps on
+kadis-hdr (analytic, already scored) + the codec dial grid (compression) —
+both computable today for any candidate, no new data.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
