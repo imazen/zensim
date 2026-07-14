@@ -1094,6 +1094,42 @@ gate); [2] UPIQ-SDR live ≥ B's 0.8945; [3] G-A step gate p95 ≤ 12 ∧ rank
 ≥ 0.95; [4] single-head seam |·| ≤ 6. Fail → §8.19 verdict, no grid
 extension without new registration.
 
+### 8.19 §8.18 RESULT — gate FAILED at instrument 1; prediction HALF-confirmed
+
+Selected `hdrcodc-lasso0.002-shaped` (full sdrcodec mass, 49 active, bake
+`lp_hdrcodc-lasso0.002-shaped-tau0-f16.bin`). UPIQ-HDR (hard gate):
+narwaria **0.7673** vs shipped 0.7834 (Δ−0.016, p=0.667 NS), korshunov
+**0.8952** vs 0.9175 (Δ−0.022, p=0.998). FAIL (korshunov). Instruments
+2–4 not run (hard gate already failed). NOT shipped.
+
+**Readings:**
+1. **Prediction half-confirmed:** compression-shaped mass recovered
+   narwaria from the analytic run's 0.6915 → 0.7673 (statistical parity
+   with shipped) — the analytic-vs-compression mechanism is real.
+2. **korshunov −0.022 is mass-type-INVARIANT** (identical drop in §8.17
+   and §8.19, p≈0.998 both) — adding ANY SDR mass at weight ≥0.25·n_hdr
+   dilutes the korshunov (JPEG-XT/DCT high-fidelity) fit. Next lever is
+   therefore WEIGHT, not family: sdrcodec at 0.1–0.15, or a
+   dial-offset-only fix (spline co-calibration on the EXISTING shipped
+   head, zero head retraining) — the §8.17 G-A finding said the offset
+   is spline-shaped anyway.
+3. Grid-note for §8.20: hdrcodc's kadid/tid val axes dropped (~0.72/0.68
+   vs hdrunic's 0.91/0.82) — expected (no analytic mass) and NOT a
+   regression signal; the selection axis penalized all hdrcod
+   candidates for it, which is a selection-axis mismatch to record: for
+   compression-mass registrations the SDR axis should be
+   compression-shaped (e.g. a held-out sdrcodec slice from val
+   renditions, which requires extracting val-fold datagen pairs — none
+   exist yet).
+
+**§8.20 direction (register before executing):** (a) cheap lever first —
+`bake_dial_refit shared-anchor` co-calibration of the SHIPPED BHdr spline
+to B's dial on the 3,779-pair SDR overlap (kills the G-A +13 offset and
+the −8.6 seam without touching the head; UPIQ-rank-invariant by
+construction, so no UPIQ gate needed — verify with G-A/seam instruments
+only); (b) if a head retrain is still wanted after (a), sdrcodec weight
+0.1–0.15 with a compression-shaped selection axis.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
