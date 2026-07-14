@@ -1606,3 +1606,84 @@ no falsification-free improvement is reachable without new HDR human data.**
 
 Artifacts: `scripts/hdr/oversmooth_probe.py`, rescored parquets at
 `/mnt/v/output/zensim/reports/oversmooth_probe/hdr_jxl_{train,val}_bhdr.parquet`.
+
+## §8.29 — Dial co-calibration attempted + MEASURED as a bad trade; shipped dial KEPT; lower-bound probe added to the eval procedure (2026-07-14)
+
+Per the user's "what anchoring makes sense" → "do it, but negative zensim scores
+are valid and needed" → "test completely different pairs to find the lower score
+bounds as part of our eval stats procedure." Built the co-calibration, honored the
+negatives constraint, measured the result honestly — and the data says **keep the
+shipped dial**.
+
+### The lower bound is BHdr's OWN — B doesn't model it (measured)
+
+`scripts/hdr/lower_bound_probe.py` on the 2016-pair corruption grid (catastrophic
+pairs — the "completely different pairs" that exercise the low bound rank corpora
+never reach):
+
+| profile | min | p1 | median | negatives |
+|---|---|---|---|---|
+| **B** (SDR) | **1.5** | 8.7 | 33.7 | **0 / 2016** |
+| **BHdr** | **−63.9** | 4.4 | 28.2 | 20 / 2016 |
+| A | −35.5 | −5.6 | 40.4 | 27 / 2016 |
+
+B **floors at ~1.5 and never goes negative**, even on total corruption — it does
+not model the negative region at all. BHdr (and A) do. So BHdr's negatives are its
+own honest HDR sensitivity, and any dial that clamps them (metric.rs clamps only
+at −100) is broken. This probe is now a standing part of the eval stats procedure.
+
+### The seam decomposes into two parts a dial cannot / must not touch
+
+On the G-A SDR-sub-domain content (UPIQ-SDR re-encoded to 203-nit PQ, n=3779),
+`|Δdial| = BHdr − B`:
+- **Positive product range** (both > 0): mean Δ **+4.38**, |Δ| median 8.65. A real
+  offset — but `SROCC(B, BHdr) = 0.8476`, so most of the |Δ| is **rank
+  disagreement no monotone dial can fix**.
+- **Valid-negative divergence** (405 cells: BHdr < 0 while B floors at +7.7,
+  median BHdr −15.3). This is B's inability to model negatives, **not** a BHdr
+  defect — and per the user constraint it must be **preserved**, not "fixed."
+
+So "minimize the seam" literally means "destroy valid negatives" — the naive
+B-target co-cal did exactly that (0/380 negatives on real UPIQ HDR vs shipped's
+12/380). Confirmed and rejected.
+
+### The neg-preserving co-cal (Y-remap) — correct, but a net-negative trade
+
+`scripts/hdr/bhdr_dial_cocal.py` (Y-REMAP): keep the shipped spline's raw knot
+positions `cx0` (the runtime's own raw scale — the Python `shape_block` forward
+diverges 0.07 SROCC from the runtime, so we do NOT recompute raw), remap only the
+Y-values through a monotone `f: shipped_dial → B_dial` fit on the runtime's own
+outputs, **bottom knot pinned at 0** so the negative extrapolation is byte-for-byte
+the shipped behaviour. Measured (`bhdr_cocal_eval.py`, `upiq_panel.py`):
+
+| axis | shipped | yremap | read |
+|---|---|---|---|
+| SROCC UPIQ (n/k) | 0.7834 / 0.9175 | 0.7834 / 0.9175 | **identical — rank-invariant ✓** |
+| negatives on real UPIQ HDR | 12/380 (→−29.4) | 12/380 (→−36.3) | **preserved ✓** |
+| negatives on corruption | 20/2016 (→−63.9) | 20/2016 (→−78.9) | **preserved ✓** |
+| positive-range seam offset | +4.38 | **−1.12** | co-cal fixes the offset |
+| positive-range \|Δ\| median | 8.65 | 6.54 | ↓ but floored by rank-disagreement |
+| **HDR dial-honesty PLCC narwaria** | **0.7519** | **0.6509** | **−0.10 — REGRESSION** |
+| HDR dial-honesty PLCC korshunov | 0.8991 | 0.8674 | −0.03 |
+
+**Verdict: the co-cal is a net-negative trade for an HDR profile.** Matching B's
+SDR scale forces BHdr onto a dial *shape* tuned for SDR human-MOS, which
+measurably degrades BHdr's calibration against the real HDR human target (PLCC vs
+JOD, −0.10 narwaria within-study — not a pooled artifact). It buys SDR-seam
+consistency (a cross-domain nicety) at the cost of HDR dial-honesty (the HDR
+profile's actual job). The shipped SDR-anchored dial — despite §7.4's provenance
+critique — empirically has the **best HDR PLCC of the options**, preserves valid
+negatives, and its "seam" is dominated by valid negatives (preserve) + irreducible
+rank disagreement (unfixable). **Shipped dial KEPT; no bake swap.**
+
+**Answer to "what anchoring makes sense," now measured:** the current SDR-anchored
+dial. The co-cal exercise falsified the premise that matching B's scale helps — it
+hurts the HDR target. The §7.6 provenance concern is real methodologically but does
+NOT translate to worse HDR behaviour. A genuinely better dial would be one anchored
+to HDR JOD directly, which needs HDR human data at scale (AIC-HDR2025) — the same
+blocker as everything else.
+
+Infrastructure (committed, reusable): `bhdr_dial_cocal.py` (Y-remap co-cal,
+negatives-preserving), `bhdr_cocal_eval.py` (rank-invariance + negatives on real
+HDR), `lower_bound_probe.py` (standing lower-bound eval procedure). Candidate bakes
+under `/mnt/v/output/zensim/reports/bhdr_cocal/` (NOT shipped).
