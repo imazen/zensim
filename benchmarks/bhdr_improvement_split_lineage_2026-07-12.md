@@ -1240,3 +1240,38 @@ top-anchored respline → re-gate ramps + zones → ONE UPIQ-HDR+live look.
 Queued per user: B's compression-q-ramp bar + RMSE on datagen jpeg ladders
 FILTERED to ladders whose own ssim2 (and size) are monotone in q — the
 u8 features for it are in unified/zenjpeg/sidecars/zensim_features.parquet.
+
+## §8.21 — All-metrics-agree ladder filter: MEASURED (2026-07-14)
+
+User refinement (2026-07-14): "filter may or may not help, and it might be
+best to only filter when all metrics agree monotonicity has been violated."
+Built `scripts/v_next/ladder_monotonicity_filter.py` (polarity-aware; groups
+by (image,codec), sorts by encoded_bytes, flags an RD ladder non-monotone in
+a metric when any adjacent byte-increasing step drops that metric's quality
+by > eps·IQR). Ran on `hqfill_7metric_sidecar_2026-07-02.parquet` (4,447
+zenjxl ladders, 7 metrics: zensim/ssim2/iwssim/cvvdp/butter-max/butter-p3/dssim).
+
+**Result — the all-agree rule is decisively correct, and the data is clean:**
+
+| threshold | ladders dropped | % |
+|---|--:|--:|
+| ssim2 ALONE | 53 | 1.2% |
+| ANY metric (naive) | 234 | 5.3% |
+| **ALL metrics AGREE (the filter)** | **3** | **0.1%** |
+
+- **94.3% of ssim2-alone's drops were metric noise** — the other 6 metrics saw
+  a clean ramp on those ladders. Single-metric (or any-metric) filtering
+  over-drops good training data by 18–78×.
+- The 3 all-agree drops are **genuinely broken encodes**: e.g.
+  `o_7050.scale1024x1024` zenjxl, where at bytes 251,737→254,882 EVERY metric
+  worsens (ssim2 93.3→84.9, butter-max 0.26→1.63, zensim 93.7→87.0) despite
+  +3 KB — a real RD reversal (bad distance/effort combo), correctly caught.
+- **Verdict on "does it help":** on this clean HQ sweep the filter is a near
+  no-op (0.1% dropped) — SAFE to apply (removes only genuinely-broken
+  ladders) but it will NOT move a bake, because the compression training data
+  is already RD-clean. The value of the exercise is the guard it provides:
+  had we filtered on ssim2 alone (or any single metric) we would have thrown
+  away 1.2–5.3% of good ladders. All-agree is the right conservative rule to
+  keep in the pipeline for future/dirtier sweeps; it just doesn't rescue this
+  one. The lever for BHdr remains the top-anchored dial (§8.20), not label
+  hygiene.

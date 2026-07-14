@@ -1,0 +1,3 @@
+/data/src/o_7050.png.scale1024x1024.png	zenjxl	14	DROP	score_zensim_gpu:6.68;score_ssim2:8.34;score_iwssim_gpu:0.00;score_cvvdp_imazen_v0_0_1:0.02;score_butteraugli_max_gpu:1.37;score_butteraugli_pnorm3_gpu:0.39;score_dssim:0.00
+/data/src/o_7052.png.scale1024x1024.png	zenjxl	14	DROP	score_zensim_gpu:4.62;score_ssim2:4.02;score_iwssim_gpu:0.00;score_cvvdp_imazen_v0_0_1:0.05;score_butteraugli_max_gpu:1.07;score_butteraugli_pnorm3_gpu:0.19;score_dssim:0.00
+/data/src/o_7053.png.scale1024x1024.png	zenjxl	14	DROP	score_zensim_gpu:6.15;score_ssim2:7.70;score_iwssim_gpu:0.00;score_cvvdp_imazen_v0_0_1:0.02;score_butteraugli_max_gpu:1.01;score_butteraugli_pnorm3_gpu:0.36;score_dssim:0.00
