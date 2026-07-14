@@ -903,6 +903,49 @@ within-study SROCC ≥ shipped on BOTH strata AND paired-bootstrap p<0.05 on
 ≥1 stratum; KonJND/KADID/TID guards within −0.02. Fail → §8.15 verdict,
 no ship, no grid extension without a new registration.
 
+### 8.15 §8.14 RESULT — gate FAILED cleanly; corpus-breadth-alone now GENUINELY falsified for the linear family
+
+**Selection (mechanical):** `hdrbroadplh1-lasso0.001-shaped` (selection
+0.9278; hdr_valmix 0.9106 + hdr_kadispl_valmix 0.9450; 91 active).
+Finalized 11,740 B / 18 knots.
+
+**Confirmation (ONE look, PU-linear UPIQ parquet, 10k paired bootstrap):**
+
+| axis | candidate | shipped BHdr | Δ | p(A≤B) |
+|---|---|---|---|---|
+| pooled | 0.6629 | 0.7536 | −0.0907 | — |
+| narwaria (n=140) | 0.7438 | 0.7834 | **−0.0396** | 0.902 |
+| korshunov (n=240) | 0.9125 | 0.9175 | **−0.0050** | 0.756 |
+
+Candidate loses BOTH strata → gate fails with no ambiguity. NOT shipped;
+shipped BHdr remains `bhdr_linear_shaped_cvvdpmix_2026-07-12.bin`.
+
+**Reading:**
+1. **With the §8.13 confound removed** (regime-consistent PU-linear gram,
+   never-burned selection axis, correct-regime confirmation), adding the
+   kadis synthetic-distortion family makes UPIQ strictly worse. The §8.12
+   direction was right even though that run was invalid; it is now
+   established cleanly.
+2. **Why (post-hoc, consistent with priors):** KADIS distortions are
+   ~95% non-compression analytic ops (the same KADID critique in
+   CLAUDE.md), while UPIQ's strata are compression artifacts
+   (JPEG2000/wavelet + JPEG-XT/DCT). Training mass on analytic
+   distortions pulls the linear head away from what UPIQ's human
+   judgments reward. Synthetic distortion breadth ≠ human-MOS HDR
+   transfer.
+3. **kadis-hdr corpora remain valid assets** for other registered uses
+   (OOD/robustness probes, picker work, dial diagnostics) — just not a
+   UPIQ-transfer lever for this family.
+4. **Program direction unchanged and sharpened:** the §8.7 conclusion
+   stands with three clean data points behind it — the linear family +
+   synthetic-only supervision is at its ceiling on human-MOS HDR;
+   **AIC-HDR2025 (human HDR MOS at scale) is the unblocking asset.** No
+   further breadth variants without a new registration AND new evidence.
+
+**Artifacts:** `fit_hdrbroadpl_2026-07-14.log`, fits table.json,
+`lp_hdrbroadplh1-lasso0.001-shaped-tau0-f16.bin` under
+`linear-probe/{fits,bakes}/`.
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
