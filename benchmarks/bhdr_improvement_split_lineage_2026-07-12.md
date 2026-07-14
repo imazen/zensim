@@ -1446,3 +1446,54 @@ Two findings:
    still correct (param=0 is the U's peak), and the identity check is a useful
    corpus-QA probe. Follow-up (data side, not blocking): confirm/fix that
    contrast/saturate param=0 should be a no-op in kadis-distort.
+
+## §8.26 — Digging into shipped-BHdr ramp violations: zensim-family blind spots vs bake-specific vs hard-distortion (2026-07-14)
+
+Cross-checked the shipped BHdr's worst unsigned ramp types against every metric
+with a kadis-hdr sidecar (ssim2 / iwssim / cvvdp / butteraugli-max, all on the
+SAME 11,400-cell PU-linear corpus, basename-joined). Monotone% (ε = 0.5% of each
+metric's p1..p99 range):
+
+| type | **BHdr** | zensim-GPU | ssim2 | iwssim | cvvdp | butter-max |
+|---|--:|--:|--:|--:|--:|--:|
+| d1 blur_gauss | 100 | 89 | 100 | 100 | 100 | 100 |
+| d10 compress_jpeg | 64 | 64 | 100 | 100 | 99 | 88 |
+| d11 noise_gauss | 36 | 26 | 100 | 100 | 100 | 100 |
+| d12 noise_colorcomp | 40 | 57 | 100 | 100 | 100 | 100 |
+| d15 denoise_dncnn | **0** | **0** | 100 | 100 | 100 | 96 |
+| d24 sharpen_hi | **1** | 69 | 100 | 100 | 99 | 100 |
+| d23 color_block | 19 | 10 | 44 | 52 | 41 | 4 |
+
+Three distinct failure classes:
+
+1. **zensim-FAMILY blind spots (shipped bake AND full zensim-GPU both fail; every
+   SSIM/CVVDP metric is ~100%)** — these are the zensim METRIC's character, in
+   every zensim profile (SDR B too), NOT new to BHdr:
+   - **denoise_dncnn: 0% (both).** Concrete BHdr ramp: `−20 → −31 → −33 → +16 →
+     +34` — the dial DROPS then RISES: BHdr scores *heavily* denoised (smoothed)
+     images HIGHEST. ssim2 falls monotonically `−4 → −29 → −39 → −64 → −66`.
+   - **noise (d11/d12): 26–57%** vs 100% for every other metric.
+   - Mechanism: **zensim rewards over-smoothing** (denoise) and under-penalizes
+     noise — its features read "smooth/clean" as "high quality." **This is
+     compression-relevant**: aggressive quantization over-smooths, and BHdr may
+     reward that. A deep feature issue, NOT fixable by re-linearizing.
+
+2. **shipped-bake-SPECIFIC (the linear projection lost signal the full metric
+   keeps):**
+   - **sharpen_hi: BHdr 1% vs zensim-GPU 69%.** Concrete BHdr ramp: `67 → 64 →
+     62 → 62 → 77` — heavy sharpening scored HIGHEST. The 372→1 linear projection
+     dropped the sharpening penalty that full multi-scale zensim-GPU retains.
+     Potentially recoverable with more capacity / a different projection.
+
+3. **genuinely-hard distortion (ALL metrics ≤52%, butter 4%):**
+   - **color_block: 19%** — not zensim-specific; the distortion's severity isn't
+     cleanly perceptual for any metric.
+
+**Bearing on the campaign:** the analytic-ramp failures that motivated hdranch3
+(§8.24) are mostly class-1 (zensim-family, shared with the reference metric) or
+class-3 (hard for everyone) — NOT bake defects a retrain fixes. The one clean
+bake-specific loss is sharpen (class-2). None of these are compression
+distortions, which is why UPIQ (0.7536, the real target) stays strong despite
+them — EXCEPT the denoise/over-smoothing blind spot, which IS compression-
+adjacent and worth a targeted probe (does BHdr reward over-quantized/over-smooth
+JXL/AVIF?). That, not analytic-ramp chasing, is the productive next HDR direction.
