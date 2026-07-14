@@ -87,6 +87,11 @@ pub mod paint;
 pub mod safety;
 pub mod sizing;
 pub mod stack;
+/// The `taffy` CSS flex/grid solver backend — the default engine behind
+/// [`render`] (see [`Backend`]). Maps the [`Node`] tree to taffy, then
+/// paints taffy's geometry with the same [`paint`] primitives the native
+/// solver uses.
+pub mod taffy_backend;
 pub mod text;
 
 // ── Public API re-exports ─────────────────────────────────────────────
@@ -109,6 +114,22 @@ pub use text::{TextSpec, TextStyle};
 
 // ── RenderConfig ──────────────────────────────────────────────────────
 
+/// Which layout solver [`render_with_config`] uses.
+///
+/// `Taffy` (the default) routes the tree through the `taffy` CSS
+/// flex/grid engine; `Native` uses the hand-written measure/paint math.
+/// Both produce a bitmap via the identical [`paint`] primitives — the
+/// only difference is rect assignment. `Native` is retained for A/B
+/// comparison and for callers pinned to the pre-taffy geometry.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum Backend {
+    /// The `taffy` CSS flex/grid solver (default).
+    #[default]
+    Taffy,
+    /// The hand-written native solver.
+    Native,
+}
+
 /// Per-render configuration — separate from [`LayoutLimits`] (which is
 /// strictly safety) and from the tree itself.
 ///
@@ -130,6 +151,8 @@ pub struct RenderConfig {
     pub scale: f32,
     pub base_em: u32,
     pub limits: LayoutLimits,
+    /// Layout solver backend. Defaults to [`Backend::Taffy`].
+    pub backend: Backend,
 }
 
 impl RenderConfig {
@@ -140,7 +163,12 @@ impl RenderConfig {
             scale: 1.0,
             base_em: DEFAULT_BASE_EM,
             limits: LayoutLimits::default(),
+            backend: Backend::default(),
         }
+    }
+    pub fn with_backend(mut self, backend: Backend) -> Self {
+        self.backend = backend;
+        self
     }
     pub fn with_bg(mut self, bg: Color) -> Self {
         self.bg = bg;
@@ -211,12 +239,20 @@ pub fn render_with_config(tree: &Node, cfg: &RenderConfig) -> Bitmap {
             let scaled = tree.clone().scaled(cfg.scale);
             let scaled_max_w = ((cfg.max_w as f32) * cfg.scale).round() as u32;
             let max_w = safety::clamp_dim(scaled_max_w);
-            let root_max = Size::new(max_w, u32::MAX / 2);
-            let measured = safety::clamp_size(scaled.measure(root_max));
-            let s = safety::clamp_to_pixel_budget(measured);
-            let mut canvas = Bitmap::from_pixel(s.w.max(1), s.h.max(1), cfg.bg);
-            scaled.paint(Rect::new(0, 0, s.w, s.h), &mut canvas);
-            canvas
+            match cfg.backend {
+                Backend::Native => {
+                    let root_max = Size::new(max_w, u32::MAX / 2);
+                    let measured = safety::clamp_size(scaled.measure(root_max));
+                    let s = safety::clamp_to_pixel_budget(measured);
+                    let mut canvas = Bitmap::from_pixel(s.w.max(1), s.h.max(1), cfg.bg);
+                    scaled.paint(Rect::new(0, 0, s.w, s.h), &mut canvas);
+                    canvas
+                }
+                // Runs inside the same limits/base_em scope, so taffy's
+                // leaf-measure callback (which calls our text measure) and
+                // the canvas clamps read the active limits.
+                Backend::Taffy => taffy_backend::render_scaled(&scaled, max_w, cfg.bg),
+            }
         })
     })
 }
@@ -535,7 +571,12 @@ mod tests {
             .child(empty().background([0, 255, 0, 255]).size(100, 20))
             .child(empty().background([0, 0, 255, 255]).size(100, 20))
             .size(120, 20);
-        let outcome = render_checked(&n, 120);
+        // Containment diagnostics fire when the solver lets a child
+        // overflow its parent — the native solver does; taffy shrinks to
+        // fit (CSS flex) so there is nothing to report. Pin the native
+        // backend this diagnostic validates.
+        let outcome =
+            render_with_config_checked(&n, &RenderConfig::new(120).with_backend(Backend::Native));
         assert!(
             !outcome.errors.is_empty(),
             "expected layout errors, got clean render: {outcome}",
@@ -564,7 +605,10 @@ mod tests {
             .child(empty().background(WHITE).size(50, 10))
             .child(empty().background(BLACK).size(50, 10))
             .size(60, 10);
-        let outcome = render_checked(&n, 60);
+        // Native backend: overflow diagnostics require the overflowing
+        // solver (taffy shrinks to fit — see the sibling test).
+        let outcome =
+            render_with_config_checked(&n, &RenderConfig::new(60).with_backend(Backend::Native));
         let r = outcome.into_result();
         assert!(r.is_err());
         if let Err(e) = r {

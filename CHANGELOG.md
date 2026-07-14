@@ -2,7 +2,28 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+<!-- Breaking changes that will ship together in the next zensim-regress
+     minor (0.x) release. -->
+- `zensim-regress`: `RenderConfig` gained a public `backend: Backend` field
+  (new `layout::Backend` enum). Struct-literal construction of `RenderConfig`
+  now needs the extra field; use `RenderConfig::new(..)` + `.with_backend(..)`.
+  Ships as a minor bump (0.4.x → 0.5.0).
+
 ### Added
+- `zensim-regress`: **the `taffy` CSS flex/grid solver is now the default
+  layout backend** (`RenderConfig::backend`, `Backend::Taffy`). It maps the
+  retained `Node` tree to taffy and paints taffy's geometry with the existing
+  paint primitives (same font/compositing), so only rect assignment changes.
+  The hand-written solver stays selectable via `Backend::Native` and still
+  owns the native-only overflow diagnostics (`render_checked`) and
+  `shrink_on_overflow` distribution — under taffy, content shrinks to fit
+  (CSS flex) rather than overflowing. Safety limits (max dim/pixels/depth/
+  children/cells/tracks) are enforced on the taffy path. Full suite green
+  (393 lib + 10 integration + 8 doctests); shipping montages verified
+  unchanged in intent. Eval + adoption record:
+  `zensim-regress/benchmarks/taffy_backend_eval_2026-07-14.md`; parity harness
+  behind the `taffy-backend` feature (`examples/taffy_parity.rs`).
 - `zensim-regress`: glyph scaling is now lazy and batched — cells are
   resampled in runs of 4 on first use per size (byte-budgeted LRU), so
   per-size cost and cache track the glyphs a label actually renders

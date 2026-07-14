@@ -537,13 +537,20 @@ mod tests {
         // its size. Without: total 90 > 60, last child paints partially
         // off-canvas.
         let mk = |c: super::super::color::Color| image_node(solid(30, 10, c));
-        let img = row()
+        // `shrink_on_overflow` is a native-solver knob with a specific
+        // distribution; the taffy backend uses CSS flex-shrink instead
+        // (content still shrinks to fit, but the exact pixels differ), so
+        // this exact-pixel check pins the native backend it validates.
+        let node: super::super::Node = row()
             .shrink_on_overflow(true)
             .child(mk([255, 0, 0, 255]))
             .child(mk([0, 255, 0, 255]))
             .child(mk([0, 0, 255, 255]))
-            .size(60, 10)
-            .render(60);
+            .size(60, 10);
+        let img = super::super::render_with_config(
+            &node,
+            &super::super::RenderConfig::new(60).with_backend(super::super::Backend::Native),
+        );
         // 30 → 20 each. Cursor: 0, 20, 40. Final: red [0..20), green
         // [20..40), blue [40..60).
         assert_eq!(img.get_pixel(10, 5), [255, 0, 0, 255], "red");

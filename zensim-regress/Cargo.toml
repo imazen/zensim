@@ -50,8 +50,15 @@ _internal_api = []
 ## goldens). Zero additional dependencies. Method + measurements:
 ## benchmarks/sdf_font_atlas_exploration_2026-07-13.md.
 sdf-font = []
+## Publicly expose the layout module for the taffy parity harness example.
+taffy-backend = ["_internal_api"]
 
 [dependencies]
+# Layout solver: the `taffy` CSS flex/grid engine backs `layout::render`
+# (RenderConfig::backend, default Taffy). The hand-written native solver
+# remains compiled and selectable via `Backend::Native` for A/B. taffy has
+# no painting/codecs; default-features off keeps it to flexbox+grid+std.
+taffy = { version = "0.12.1", default-features = false, features = ["flexbox", "grid", "std", "taffy_tree"] }
 zensim = { workspace = true, default-features = false, features = ["classification", "custom-profiles"] }
 archmage = { workspace = true, features = ["testable_dispatch"], optional = true }
 # Pixel ops backend — `image`-crate-free. zenresize for resampling,
@@ -119,3 +126,8 @@ required-features = ["_internal_api"]
 [[example]]
 name = "glyph_batch_bench"
 required-features = ["_internal_api"]
+
+# Taffy-vs-native backend parity harness (needs the public layout module).
+[[example]]
+name = "taffy_parity"
+required-features = ["taffy-backend"]
