@@ -11,9 +11,15 @@ into a Python string literal — also unnoticed, because nobody ran it.
 The mechanism is structural, not careless:
 
   1. an agent opens sibling worktree `zensim--foo`
-  2. it writes a script hardcoding `/home/lilith/work/zen/zensim--foo/target/release/bar`
+  2. it writes a script hardcoding `<zen>/zensim--foo/target/release/bar`
   3. the worktree is cleaned up (correctly! the cleanup rule is mandatory)
   4. the script stays, permanently dead, and nothing notices
+
+(That example is spelled `<zen>/` rather than the literal path because the
+2026-07-15 mass-repoint sed — `zensim--*` -> `zensim` across 69 files — rewrote
+this very docstring and silently deleted the illustration. Bulk seds do not
+read context. That is the same mechanism that left `metric_compare_report.py`
+unparseable for weeks.)
 
 CLAUDE.md's worktree-cleanup rule covers the worktree. It does not cover the
 scripts that pointed INTO it. This linter closes that gap: a dead reference
@@ -28,6 +34,8 @@ Checks:
   DEAD-WT   — references a `zensim--*` sibling worktree that no longer exists
   DEAD-BIN  — hardcodes a `target/{release,debug}/...` path that does not exist
               AND whose source cannot be found
+  DEAD-SCRIPT — shells to a `scripts/...` path that does not exist (this is the
+              cross-language edge: a .sh calling a deleted .py)
 
 A hardcoded build artifact under THIS repo's own `target/` is only a warning:
 it may simply not be built yet. A path under a *deleted worktree* is fatal —
@@ -46,6 +54,28 @@ ZEN = ROOT.parent
 
 PATH_RE = re.compile(r'["\'](/(?:home|mnt)/[^"\'\s]{6,})["\']')
 WT_RE = re.compile(r"(zensim--[a-z0-9][a-z0-9-]*)")
+# A repo-relative script path, however it is reached: `python3 scripts/x.py`,
+# a bare `scripts/x.py`, or one embedded in a longer command.
+SCRIPT_RE = re.compile(r"(?<![\w/.-])(scripts/[\w/-]+\.(?:py|sh))")
+
+
+def dead_script_refs(text: str) -> list[str]:
+    """Repo-relative script paths that no longer exist.
+
+    This check was missing at first, and the gap bit immediately: consolidating
+    five `eval_v*_pjnd_check.py` into one broke six shell callers, and the
+    linter still said "all runnable" because it only inspected
+    `/target/release/` paths. It also surfaced a pre-existing break —
+    `v0_20b/bake_v3.py` shelling to `affine_calibrate_znpr_v2.py`, deleted long
+    ago. Cross-language edges are exactly where nothing else is looking.
+    """
+    return sorted(
+        {
+            f"DEAD-SCRIPT calls missing script: {ref}"
+            for ref in SCRIPT_RE.findall(text)
+            if not (ROOT / ref).exists()
+        }
+    )
 
 
 def code_strings(tree: ast.AST) -> list[str]:
@@ -112,24 +142,83 @@ def check(p: Path) -> list[str]:
             if find_source(Path(raw).name):
                 continue
             fails.append(f"DEAD-BIN missing binary with no source: {raw}")
+    fails += dead_script_refs("\n".join(literals))
     return sorted(set(fails))
 
 
 def find_source(binary: str) -> Path | None:
-    """Locate the .rs that would build `binary`, anywhere in the zen tree.
+    """Locate the source that would build `binary`, anywhere in the zen tree.
 
-    Skips `target/` (build output) and `.claude/worktrees/` (ephemeral agent
-    copies — finding a source only there means the source is NOT in the repo).
+    Two ways a binary gets its name, and both must be checked:
+      - convention: `src/bin/<name>.rs`
+      - declaration: `[[bin]] name = "<name>"` in a Cargo.toml, where the file
+        is usually `main.rs` and shares no name with the binary at all.
+
+    Missing the second gave a false DEAD-BIN on `zenmetrics`, which is declared
+    that way. A linter that cries wolf on a shipping binary gets muted, and
+    then it protects nothing.
+
+    Skips `target/` (build output) and `.claude/` (ephemeral agent copies —
+    finding a source only there means it is NOT in the repo).
     """
+    def usable(p: Path) -> bool:
+        parts = p.parts
+        return not ("target" in parts or ".claude" in parts or ".jj" in parts)
+
     for repo in (ROOT, ZEN / "zenanalyze", ZEN / "zenmetrics"):
         if not repo.is_dir():
             continue
         for cand in repo.rglob(f"{binary}.rs"):
-            parts = cand.parts
-            if "target" in parts or ".claude" in parts or ".jj" in parts:
+            if usable(cand):
+                return cand
+        for toml in repo.rglob("Cargo.toml"):
+            if not usable(toml):
                 continue
-            return cand
+            if re.search(
+                rf'\[\[bin\]\][^\[]*?name\s*=\s*"{re.escape(binary)}"',
+                toml.read_text(errors="replace"),
+                re.S,
+            ):
+                return toml
     return None
+
+
+def check_shell(p: Path) -> list[str]:
+    """Same DEAD-WT / DEAD-BIN checks for shell, minus the AST.
+
+    Shell was NOT covered when this linter first landed, and it reported "all
+    runnable" while three `eval_cross_codec_v{6,7,8}.sh` invoked a python
+    checker through `zensim--cross-codec-*` worktrees that no longer exist. A
+    linter that green-lights dead scripts is worse than no linter: it converts
+    "nobody checked" into "something checked and it's fine."
+
+    There is no docstring concept in shell, so `#` comments are stripped
+    instead — prose in a comment may legitimately name a dead path.
+    """
+    fails: list[str] = []
+    body = "\n".join(
+        line.split("#", 1)[0] if not line.lstrip().startswith("#") else ""
+        for line in p.read_text(errors="replace").splitlines()
+    )
+    seen: set[str] = set()
+    for wt in WT_RE.findall(body):
+        if wt in seen:
+            continue
+        seen.add(wt)
+        if not (ZEN / wt).is_dir():
+            fails.append(f"DEAD-WT references deleted sibling worktree {wt}/")
+    for raw in re.findall(r"(/(?:home|mnt)/[^\s\"';|)]{6,})", body):
+        if any(c in raw for c in "{}*?$"):
+            continue
+        if "/target/release/" not in raw and "/target/debug/" not in raw:
+            continue
+        if Path(raw).exists() or WT_RE.search(raw):
+            continue
+        if find_source(Path(raw).name):
+            continue
+        fails.append(f"DEAD-BIN missing binary with no source: {raw}")
+    fails += dead_script_refs(body)
+    return sorted(set(fails))
 
 
 def main() -> int:
@@ -141,6 +230,11 @@ def main() -> int:
             continue
         n += 1
         f = check(p)
+        if f:
+            failures[str(p.relative_to(ROOT))] = f
+    for p in sorted(SCRIPTS.rglob("*.sh")):
+        n += 1
+        f = check_shell(p)
         if f:
             failures[str(p.relative_to(ROOT))] = f
 

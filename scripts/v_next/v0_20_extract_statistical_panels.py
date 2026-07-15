@@ -165,7 +165,7 @@ def main() -> int:
     out_lines.append("rows reflect the bake's RAW output range, not a calibrated 0..100")
     out_lines.append("score. For direct comparison with V_18 ship's PLCC, the V_X bakes")
     out_lines.append("would need affine calibration via")
-    out_lines.append("`scripts/v_next/affine_calibrate_znpr_v2.py`. SROCC + KROCC +")
+    out_lines.append("`affine_calibrate` (zensim-validate bin). SROCC + KROCC +")
     out_lines.append("PWRC are calibration-invariant and tell the true ranking story.")
 
     args.out.write_text("\n".join(out_lines) + "\n")

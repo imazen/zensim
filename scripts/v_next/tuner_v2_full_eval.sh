@@ -12,7 +12,7 @@
 set -euo pipefail
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_tuner_v2_2026-05-19"
-ZENSIM_ROOT="/home/lilith/work/zen/zensim--exp-tuner-v2"
+ZENSIM_ROOT="/home/lilith/work/zen/zensim"
 SCORE_BAKE="${ZENSIM_ROOT}/target/release/score_pair_with_bake"
 BAKE_VERDICT="${ZENSIM_ROOT}/target/release/bake_verdict"
 FEAT_ROOT="/mnt/v/zen/zensim-training/canonical-2026-05-18/val"

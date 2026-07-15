@@ -26,7 +26,7 @@ SEED="${1:?usage: $0 <seed> <W>}"
 WEIGHT="${2:?usage: $0 <seed> <W>}"
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v4_2026-05-19"
-TRAINER="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/zensim_mlp_train"
+TRAINER="/home/lilith/work/zen/zensim/target/release/zensim_mlp_train"
 PARQ_DIR="/mnt/v/zen/zensim-training/canonical-2026-05-18/train"
 # V4: multi-codec PJND anchor (4000 rows = 1000 sources × 4 codecs).
 ANCHOR="/mnt/v/zen/zensim-training/2026-05-19-multi-codec-jnd-anchors/anchors_multi_codec_372col.parquet"

@@ -22,9 +22,9 @@ set -euo pipefail
 V4B_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v4b_2026-05-19"
 QSWEEP_FEATURES="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep_features.csv"
 QSWEEP_MANIFEST="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep/qsweep_manifest.tsv"
-TUNER_BASELINE="/home/lilith/work/zen/zensim--cross-codec-metric/zensim/weights/v_tuner_2026-05-18.bin"
-QSWEEP_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/qsweep_eval"
-VERDICT_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/bake_verdict"
+TUNER_BASELINE="/home/lilith/work/zen/zensim/zensim/weights/v_tuner_2026-05-18.bin"
+QSWEEP_BIN="/home/lilith/work/zen/zensim/target/release/qsweep_eval"
+VERDICT_BIN="/home/lilith/work/zen/zensim/target/release/bake_verdict"
 MULTI_ANCHOR="/mnt/v/zen/zensim-training/2026-05-19-multi-codec-jnd-anchors/anchors_multi_codec_372col.parquet"
 
 mkdir -p "${V4B_DIR}/verdicts"
@@ -53,18 +53,20 @@ done
 
 echo
 echo "=== Phase 3: cross-codec T=63 consistency (n=20 images × 4 codecs) ==="
-# This phase uses the v3 driver — exact same eval, just different bakes.
-if [ -x scripts/v_next/run_cross_codec_v4b_consistency_inline.sh ]; then
-    cp scripts/v_next/run_cross_codec_v4b_consistency_inline.sh /tmp/run_cc_v4_consistency.sh
-    sed -i "s#exp_cross_codec_v3_2026-05-19#exp_cross_codec_v4b_2026-05-19#g" /tmp/run_cc_v4_consistency.sh
-    sed -i "s#cc4v3_#cc4v4b_#g" /tmp/run_cc_v4_consistency.sh
-    sed -i "s#/calibrated/##g" /tmp/run_cc_v4_consistency.sh
-    bash /tmp/run_cc_v4_consistency.sh || echo "consistency driver failed (will fall back to phase 4 alone)"
-fi
+# Was: cp the `_inline` driver to /tmp, sed v3->v4b + cc4v3_->cc4v4b_ + strip
+# /calibrated/, then run the result — the copy-and-sed pattern automated, at
+# runtime. Two things were wrong with it. The `_inline` source has not existed
+# for months, so the `if [ -x ]` guard meant Phase 3 SILENTLY SKIPPED on every
+# run (a graceful skip, which CLAUDE.md forbids: a phase that quietly does
+# nothing is worse than one that fails). And the file those seds were
+# synthesizing already exists — run_cross_codec_v4b_consistency.sh is v4b-
+# targeted with cc4v4b_ bakes and no /calibrated/ path. Call it directly; no
+# guard, so a missing driver fails loudly instead of vanishing.
+bash scripts/v_next/run_cross_codec_v4b_consistency.sh
 
 echo
 echo "=== Phase 4: multi-codec PJND score check ==="
-python3 scripts/v_next/eval_v4b_pjnd_check.py "${V4B_DIR}" || echo "pjnd check failed"
+python3 scripts/v_next/cross_codec_pjnd_check.py v4b "${V4B_DIR}" || echo "pjnd check failed"
 
 echo
 echo "All eval phases complete. See:"

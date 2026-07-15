@@ -17,9 +17,9 @@ set -euo pipefail
 V6_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v6_2026-05-19"
 QSWEEP_FEATURES="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep_features.csv"
 QSWEEP_MANIFEST="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep/qsweep_manifest.tsv"
-TUNER_BASELINE="/home/lilith/work/zen/zensim--cross-codec-metric/zensim/weights/v_tuner_2026-05-18.bin"
-QSWEEP_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/qsweep_eval"
-VERDICT_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/bake_verdict"
+TUNER_BASELINE="/home/lilith/work/zen/zensim/zensim/weights/v_tuner_2026-05-18.bin"
+QSWEEP_BIN="/home/lilith/work/zen/zensim/target/release/qsweep_eval"
+VERDICT_BIN="/home/lilith/work/zen/zensim/target/release/bake_verdict"
 
 mkdir -p "${V6_DIR}/verdicts"
 
@@ -47,9 +47,9 @@ done
 
 echo
 echo "=== Phase 3: cross-codec T=63 consistency (n=20 images × 4 codecs) ==="
-TOOL=/home/lilith/work/zen/zensim--cross-codec-metric/target/release/predict_features_with_bake
-ZEN_METRICS=/home/lilith/work/zen/zenmetrics/target/release/zen-metrics
-CONSISTENCY=/home/lilith/work/zen/zensim--cross-codec-metric/scripts/v_next/cross_codec_consistency.py
+TOOL=/home/lilith/work/zen/zensim/target/release/predict_features_with_bake
+ZEN_METRICS=/home/lilith/work/zen/zenmetrics/target/release/zenmetrics
+CONSISTENCY=/home/lilith/work/zen/zensim/scripts/v_next/cross_codec_consistency.py
 T63_DIR="${V6_DIR}/cross_codec_t63"
 mkdir -p "${T63_DIR}"
 for bake in "${V6_DIR}"/cc4v6_*.bin; do
@@ -73,11 +73,11 @@ done
 
 echo
 echo "=== Phase 4: single-band multi-codec PJND score check (T=63) ==="
-python3 /home/lilith/work/zen/zensim--cross-codec-metric/scripts/v_next/eval_v6_pjnd_check.py "${V6_DIR}" || echo "v6 pjnd check failed"
+python3 scripts/v_next/cross_codec_pjnd_check.py v6 "${V6_DIR}" || echo "v6 pjnd check failed"
 
 echo
 echo "=== Phase 5: multi-band cross-codec consistency check (V6 gate, all 6 bands) ==="
-python3 /home/lilith/work/zen/zensim--cross-codec-metric/scripts/v_next/eval_v6_multi_band_check.py "${V6_DIR}" || echo "v6 multi-band check failed"
+python3 /home/lilith/work/zen/zensim/scripts/v_next/eval_v6_multi_band_check.py "${V6_DIR}" || echo "v6 multi-band check failed"
 
 echo
 echo "All eval phases complete. See:"

@@ -8,7 +8,7 @@
 set -euo pipefail
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_persample_mix3_2026-05-18"
-WS="/home/lilith/work/zen/zensim--exp-mix3-persample"
+WS="/home/lilith/work/zen/zensim"
 BAKE_VERDICT="${WS}/target/release/bake_verdict"
 BAKE_COMPARE="${WS}/target/release/bake_compare"
 ZENPREDICT="/home/lilith/work/zen/zenanalyze/target/release/zenpredict"

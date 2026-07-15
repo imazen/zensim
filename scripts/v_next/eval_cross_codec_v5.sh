@@ -23,9 +23,9 @@ set -euo pipefail
 V5_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v5_2026-05-19"
 QSWEEP_FEATURES="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep_features.csv"
 QSWEEP_MANIFEST="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep/qsweep_manifest.tsv"
-TUNER_BASELINE="/home/lilith/work/zen/zensim--cross-codec-metric/zensim/weights/v_tuner_2026-05-18.bin"
-QSWEEP_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/qsweep_eval"
-VERDICT_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/bake_verdict"
+TUNER_BASELINE="/home/lilith/work/zen/zensim/zensim/weights/v_tuner_2026-05-18.bin"
+QSWEEP_BIN="/home/lilith/work/zen/zensim/target/release/qsweep_eval"
+VERDICT_BIN="/home/lilith/work/zen/zensim/target/release/bake_verdict"
 
 mkdir -p "${V5_DIR}/verdicts"
 
@@ -53,9 +53,9 @@ done
 
 echo
 echo "=== Phase 3: cross-codec T=63 consistency (n=20 images × 4 codecs) ==="
-TOOL=/home/lilith/work/zen/zensim--cross-codec-metric/target/release/predict_features_with_bake
-ZEN_METRICS=/home/lilith/work/zen/zenmetrics/target/release/zen-metrics
-CONSISTENCY=/home/lilith/work/zen/zensim--cross-codec-metric/scripts/v_next/cross_codec_consistency.py
+TOOL=/home/lilith/work/zen/zensim/target/release/predict_features_with_bake
+ZEN_METRICS=/home/lilith/work/zen/zenmetrics/target/release/zenmetrics
+CONSISTENCY=/home/lilith/work/zen/zensim/scripts/v_next/cross_codec_consistency.py
 T63_DIR="${V5_DIR}/cross_codec_t63"
 mkdir -p "${T63_DIR}"
 for bake in "${V5_DIR}"/cc4v5_*.bin; do
@@ -79,7 +79,7 @@ done
 
 echo
 echo "=== Phase 4: single-band multi-codec PJND score check (T=63) ==="
-python3 scripts/v_next/eval_v4b_pjnd_check.py "${V5_DIR}" || echo "v4b pjnd check failed"
+python3 scripts/v_next/cross_codec_pjnd_check.py v4b "${V5_DIR}" || echo "v4b pjnd check failed"
 
 echo
 echo "=== Phase 5: multi-band cross-codec consistency check (V5 gate, all 6 bands) ==="

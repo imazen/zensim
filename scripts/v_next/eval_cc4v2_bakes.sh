@@ -11,12 +11,12 @@
 
 set -euo pipefail
 
-ROOT="/home/lilith/work/zen/zensim--cross-codec-metric"
+ROOT="/home/lilith/work/zen/zensim"
 BAKES_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v2_2026-05-19"
 EVAL_OUT_DIR="/mnt/v/output/zensim/cross_codec_metric_2026-05-19-v2"
 VERDICT_DIR="${BAKES_DIR}/verdicts"
 TOOL="${ROOT}/target/release/score_pair_with_bake"
-ZEN_METRICS="/home/lilith/work/zen/zenmetrics/target/release/zen-metrics"
+ZEN_METRICS="/home/lilith/work/zen/zenmetrics/target/release/zenmetrics"
 CC_SCRIPT="${ROOT}/scripts/v_next/cross_codec_consistency.py"
 BAKE_VERDICT="${ROOT}/target/release/bake_verdict"
 

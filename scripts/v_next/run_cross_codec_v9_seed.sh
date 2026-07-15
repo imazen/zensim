@@ -26,7 +26,7 @@ KBATCH="${KBATCH:-32}"
 LR="${LR_OVERRIDE:-5.66e-3}"
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v9_2026-05-20"
-TRAINER="/home/lilith/work/zen/zensim--cross-codec-v9/target/release/zensim_mlp_train"
+TRAINER="/home/lilith/work/zen/zensim/target/release/zensim_mlp_train"
 PARQ_DIR="/mnt/v/zen/zensim-training/canonical-2026-05-18/train"
 ANCHOR="/mnt/v/zen/zensim-training/2026-05-20-v9-anchors/anchors_v9_372col.parquet"
 EQUIV="/mnt/v/zen/picker-training/2026-05-19-v2/cross_codec_equivalence_tight_v3.parquet"

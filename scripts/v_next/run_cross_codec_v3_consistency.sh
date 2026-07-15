@@ -12,9 +12,9 @@ CALIB_DIR="${V3_DIR}/calibrated"
 OUT_DIR="${V3_DIR}/cross_codec_t63"
 mkdir -p "${OUT_DIR}"
 
-TOOL=/home/lilith/work/zen/zensim--cross-codec-metric/target/release/score_pair_with_bake
-ZEN_METRICS=/home/lilith/work/zen/zenmetrics/target/release/zen-metrics
-CONSISTENCY=/home/lilith/work/zen/zensim--cross-codec-metric/scripts/v_next/cross_codec_consistency.py
+TOOL=/home/lilith/work/zen/zensim/target/release/score_pair_with_bake
+ZEN_METRICS=/home/lilith/work/zen/zenmetrics/target/release/zenmetrics
+CONSISTENCY=/home/lilith/work/zen/zensim/scripts/v_next/cross_codec_consistency.py
 
 for bake in "${CALIB_DIR}"/*.bin; do
     [ -f "$bake" ] || continue

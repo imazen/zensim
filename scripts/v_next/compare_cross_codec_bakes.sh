@@ -10,10 +10,10 @@ set -euo pipefail
 OUT_DIR="${1:?usage: $0 <out_dir> <label:bake> [<label:bake> ...]}"
 shift
 
-ROOT="/home/lilith/work/zen/zensim--cross-codec-metric"
+ROOT="/home/lilith/work/zen/zensim"
 SCRIPT="${ROOT}/scripts/v_next/cross_codec_consistency.py"
-TOOL="/home/lilith/work/zen/zensim--exp-tuner/target/release/score_pair_with_bake"
-ZEN_METRICS="/home/lilith/work/zen/zenmetrics/target/release/zen-metrics"
+TOOL="/home/lilith/work/zen/zensim/target/release/score_pair_with_bake"
+ZEN_METRICS="/home/lilith/work/zen/zenmetrics/target/release/zenmetrics"
 N_IMAGES="${N_IMAGES:-20}"
 TARGETS="${TARGETS:-30,50,63,70,80,90}"
 

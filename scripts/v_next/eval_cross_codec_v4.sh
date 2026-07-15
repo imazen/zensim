@@ -22,9 +22,9 @@ set -euo pipefail
 V4_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v4_2026-05-19"
 QSWEEP_FEATURES="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep_features.csv"
 QSWEEP_MANIFEST="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep/qsweep_manifest.tsv"
-TUNER_BASELINE="/home/lilith/work/zen/zensim--cross-codec-metric/zensim/weights/v_tuner_2026-05-18.bin"
-QSWEEP_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/qsweep_eval"
-VERDICT_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/bake_verdict"
+TUNER_BASELINE="/home/lilith/work/zen/zensim/zensim/weights/v_tuner_2026-05-18.bin"
+QSWEEP_BIN="/home/lilith/work/zen/zensim/target/release/qsweep_eval"
+VERDICT_BIN="/home/lilith/work/zen/zensim/target/release/bake_verdict"
 MULTI_ANCHOR="/mnt/v/zen/zensim-training/2026-05-19-multi-codec-jnd-anchors/anchors_multi_codec_372col.parquet"
 
 mkdir -p "${V4_DIR}/verdicts"
@@ -53,18 +53,19 @@ done
 
 echo
 echo "=== Phase 3: cross-codec T=63 consistency (n=20 images × 4 codecs) ==="
-# This phase uses the v3 driver — exact same eval, just different bakes.
-if [ -x scripts/v_next/run_cross_codec_v3_consistency.sh ]; then
-    cp scripts/v_next/run_cross_codec_v3_consistency.sh /tmp/run_cc_v4_consistency.sh
-    sed -i "s#exp_cross_codec_v3_2026-05-19#exp_cross_codec_v4_2026-05-19#g" /tmp/run_cc_v4_consistency.sh
-    sed -i "s#cc4v3_#cc4v4_#g" /tmp/run_cc_v4_consistency.sh
-    sed -i "s#/calibrated/##g" /tmp/run_cc_v4_consistency.sh
-    bash /tmp/run_cc_v4_consistency.sh || echo "consistency driver failed (will fall back to phase 4 alone)"
-fi
+# Was: cp the v3 driver to /tmp and sed v3->v4 + cc4v3_->cc4v4_ + strip
+# /calibrated/ at runtime. That sed's exact output already exists on disk as
+# run_cross_codec_v4_consistency.sh — v4-targeted, cc4v4_ bakes, no
+# /calibrated/. Which is presumably where that file came from: someone ran the
+# factory once and committed the result, and nobody removed the factory. So the
+# generator and the generated both shipped, free to drift apart. Call the real
+# one; drop the `if [ -x ]` so a missing driver fails loudly rather than
+# skipping Phase 3 in silence.
+bash scripts/v_next/run_cross_codec_v4_consistency.sh
 
 echo
 echo "=== Phase 4: multi-codec PJND score check ==="
-python3 scripts/v_next/eval_v4_pjnd_check.py "${V4_DIR}" || echo "pjnd check failed"
+python3 scripts/v_next/cross_codec_pjnd_check.py v4 "${V4_DIR}" || echo "pjnd check failed"
 
 echo
 echo "All eval phases complete. See:"

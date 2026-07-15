@@ -50,7 +50,7 @@
 
 set -euo pipefail
 
-ROOT=${ROOT:-/home/lilith/work/zen/zensim--v06-rebalance}
+ROOT=${ROOT:-/home/lilith/work/zen/zensim}
 SAFE_BASE=${SAFE_BASE:-/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv}
 E1_FILL=${E1_FILL:-/mnt/v/output/zensim/training.csv}
 GEN_CSV=${GEN_CSV:-/mnt/v/output/zensim/v06-rebalance/training.csv}

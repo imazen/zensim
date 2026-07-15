@@ -15,7 +15,7 @@ SEED="${1:?usage: $0 <seed> <W>}"
 WEIGHT="${2:?usage: $0 <seed> <W>}"
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v2_2026-05-19"
-TRAINER="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/zensim_mlp_train"
+TRAINER="/home/lilith/work/zen/zensim/target/release/zensim_mlp_train"
 PARQ_DIR="/mnt/v/zen/zensim-training/canonical-2026-05-18/train"
 ANCHOR="/mnt/v/zen/zensim-training/2026-05-19-jnd-anchors/anchors_372col.parquet"
 EQUIV="/mnt/v/zen/picker-training/2026-05-19-v2/cross_codec_equivalence_tight_v3.parquet"

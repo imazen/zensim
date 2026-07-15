@@ -13,9 +13,9 @@ set -euo pipefail
 V3_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v3_2026-05-19"
 QSWEEP_FEATURES="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep_features.csv"
 QSWEEP_MANIFEST="/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep/qsweep_manifest.tsv"
-TUNER_BASELINE="/home/lilith/work/zen/zensim--cross-codec-metric/zensim/weights/v_tuner_2026-05-18.bin"
-QSWEEP_BIN="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/qsweep_eval"
-AFFINE_PY="/home/lilith/work/zen/zensim--cross-codec-metric/scripts/v_next/affine_per_sample_alpha.py"
+TUNER_BASELINE="/home/lilith/work/zen/zensim/zensim/weights/v_tuner_2026-05-18.bin"
+QSWEEP_BIN="/home/lilith/work/zen/zensim/target/release/qsweep_eval"
+AFFINE_PY="/home/lilith/work/zen/zensim/scripts/v_next/affine_per_sample_alpha.py"
 
 mkdir -p "${V3_DIR}/calibrated"
 
@@ -130,7 +130,7 @@ for name, cfg in plan.items():
     print(f"  calibrating {name}: α={cfg['alpha']:.3f} β={cfg['beta']:.3f}", file=sys.stderr)
     subprocess.run([
         "python3",
-        "/home/lilith/work/zen/zensim--cross-codec-metric/scripts/v_next/affine_per_sample_alpha.py",
+        "/home/lilith/work/zen/zensim/scripts/v_next/affine_per_sample_alpha.py",
         "--in-bake", str(bake),
         "--out-bake", str(out_bake),
         "--alpha", f"{cfg['alpha']:.6f}",
@@ -160,7 +160,7 @@ for bake in "${V3_DIR}/calibrated"/*.bin; do
     [ -f "$bake" ] || continue
     name=$(basename "$bake" .bin)
     out_md="${V3_DIR}/verdicts/${name}.md"
-    /home/lilith/work/zen/zensim--cross-codec-metric/target/release/bake_verdict \
+    /home/lilith/work/zen/zensim/target/release/bake_verdict \
         --bake "${bake}" \
         --output "${out_md}" 2>&1 | tail -3 || echo "verdict failed for ${name}"
 done

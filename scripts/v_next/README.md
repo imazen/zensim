@@ -79,7 +79,7 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 |---|---|
 | `build_site_data.py` / `build_scatter_data.py` | Generate the per-corpus data files for the interactive comparison site at `https://imazen.github.io/zensim/`. |
 | `make_v02_v18_candlestick.py` | The V_2 → V_18 candlestick chart used in commit / handoff narratives. |
-| `generate_v16_chunks.py` / `launch_v16_sweep.sh` | Vast.ai sweep pre-cursor (V_16 era). Reference only; the canonical sweep infra now lives in zenmetrics + `vastai_iwssim/`. |
+| ~~`generate_v16_chunks.py` / `launch_v16_sweep.sh`~~ | **Deleted 2026-07-15.** Hand-rolled chunk splitters — the thing CLAUDE.md's fleet rule forbids outright. Superseded by the zenfleet job system (`zenmetrics/scripts/jobsys/`); never produced output; marked "reference only" here for 10 weeks, which is the queued-for-removal anti-pattern rather than a reprieve. In git history if needed. |
 
 ### Training (Python trainer — legacy)
 

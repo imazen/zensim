@@ -8,7 +8,7 @@
 set -euo pipefail
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v9_2026-05-20"
-HERE="/home/lilith/work/zen/zensim--cross-codec-v9"
+HERE="/home/lilith/work/zen/zensim"
 mkdir -p "${OUT_DIR}"
 
 echo "=== Step 1: train 3 seeds (parallel) ==="

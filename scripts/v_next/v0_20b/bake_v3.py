@@ -112,8 +112,8 @@ def main() -> int:
     )
     print(
         f"Or, run the affine-calibrate pipeline:"
-        f"\n  python3 scripts/v_next/affine_calibrate_znpr_v2.py "
-        f"--in-bake {collapsed_path} --out-bake {args.out} ..."
+        f"\n  cargo run --release -p zensim-validate --bin affine_calibrate -- "
+        f"--in-bake {collapsed_path} --out-bake {args.out} --alpha A --beta B"
     )
     return 0
 

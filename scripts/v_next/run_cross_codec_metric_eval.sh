@@ -13,10 +13,10 @@ set -euo pipefail
 BAKE="${1:?usage: $0 <bake_path> <label>}"
 LABEL="${2:?usage: $0 <bake_path> <label>}"
 
-ROOT="/home/lilith/work/zen/zensim--cross-codec-metric"
+ROOT="/home/lilith/work/zen/zensim"
 SCRIPT="${ROOT}/scripts/v_next/cross_codec_consistency.py"
-TOOL="/home/lilith/work/zen/zensim--exp-tuner/target/release/score_pair_with_bake"
-ZEN_METRICS="/home/lilith/work/zen/zenmetrics/target/release/zen-metrics"
+TOOL="/home/lilith/work/zen/zensim/target/release/score_pair_with_bake"
+ZEN_METRICS="/home/lilith/work/zen/zenmetrics/target/release/zenmetrics"
 
 OUT_DIR="/mnt/v/output/zensim/cross_codec_metric_2026-05-19/${LABEL}"
 mkdir -p "${OUT_DIR}"
