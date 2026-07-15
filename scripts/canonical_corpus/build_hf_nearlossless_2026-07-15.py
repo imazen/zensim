@@ -158,7 +158,21 @@ def main() -> int:
             pd.DataFrame(
                 {
                     "ref_basename": merged["ref_basename"],
-                    "human_score": merged["score_ssim2"].astype("float64"),
+                    # CANONICAL CONVENTION: `human_score` is the [0,1]-scaled
+                    # anchor; the trainer multiplies by --target-scale (default
+                    # 100) to reach score_zensim units. safesyn holds exactly
+                    # `human_score == ssim2_gpu / 100` (verified: allclose,
+                    # pearson 1.000000), and every other canonical parquet
+                    # follows suit.
+                    #
+                    # The first cut of this file wrote raw ssim2 here and
+                    # DOCUMENTED the deviation in the manifest ("human_score
+                    # (= ssim2, 0..100)"). Documenting a deviation does not make
+                    # it correct: a default-scale run would have trained against
+                    # targets of 9139..10000. Being the one parquet in the set
+                    # that needs a special --target-scale is a trap, not a
+                    # convention. `ssim2_gpu` keeps the raw 0..100 value.
+                    "human_score": merged["score_ssim2"].astype("float64") / 100.0,
                     "ssim2_gpu": merged["score_ssim2"].astype("float64"),
                     "zensim_score": merged["zensim_score"].astype("float64"),
                     "distance": merged["distance"].astype("float64"),
@@ -228,7 +242,7 @@ def main() -> int:
         "rows": int(len(out)),
         "n_refs": int(n_refs),
         "n_features": N_FEAT,
-        "target_column": "human_score (= ssim2, 0..100)",
+        "target_column": "human_score (= ssim2/100, canonical [0,1] scale; ssim2_gpu keeps raw 0..100)",
         "source_paths": [str(feats_path), str(pareto_path)],
         "source_sha256": {
             "features.parquet": sha256_file(feats_path),
@@ -264,7 +278,12 @@ def main() -> int:
         },
         "diagnostics": {
             "max_abs_feature": max_abs,
-            "pct_above_ssim2_95": float((out["human_score"] > 95).mean() * 100),
+            # Read the RAW column, not human_score: human_score is the [0,1]
+            # canonical scale, so `> 95` against it is never true and this stat
+            # silently printed 0.0% the moment the scale was corrected — while
+            # the module docstring says 72%. A diagnostic that reads a rescaled
+            # column is how a corpus gets described wrongly in its own manifest.
+            "pct_above_ssim2_95": float((out["ssim2_gpu"] > 95).mean() * 100),
             "within_ref_ladder_span_p10": float(lad.quantile(0.10)),
             "within_ref_ladder_span_p50": float(lad.quantile(0.50)),
             "within_ref_ladder_span_p90": float(lad.quantile(0.90)),

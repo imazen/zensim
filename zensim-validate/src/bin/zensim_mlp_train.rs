@@ -110,14 +110,26 @@ use mlp_train::{
     about = "Rust RankNet MLP trainer (defaults match V0_16 ship recipe — see benchmarks/recipe_v0_16.sh for the full invocation)"
 )]
 struct Args {
-    /// Group spec: NAME:CSV_PATH:TRAIN_WEIGHT:VAL_WEIGHT. Repeat for
-    /// each dataset. CSV header must include `ref_basename`,
-    /// `human_score`, and `f0..f<N-1>`. `human_score` is in [0, 1] and
-    /// is multiplied by 100 internally to match `score_zensim` scale.
+    /// Group spec: NAME:PATH:TRAIN_WEIGHT:VAL_WEIGHT[:withinref].
+    /// Repeat for each dataset. Header must include `ref_basename`,
+    /// `human_score`, and `f0..f<N-1>` (or `feat_0..`). `human_score`
+    /// is in [0, 1] and is multiplied by 100 internally to match
+    /// `score_zensim` scale.
     ///
     /// Required unless `--manifest` is given (the manifest's `groups`
     /// array supplies the group set). Passing any explicit `--group`
     /// alongside `--manifest` REPLACES the manifest's groups entirely.
+    ///
+    /// The optional 5th field `withinref` draws every RankNet pair from
+    /// WITHIN one reference image instead of uniformly across the group.
+    /// Use it when the group's signal is a per-reference distortion
+    /// ladder: cross-image pairs otherwise teach between-image scale and
+    /// drown the ladder out. On the near-lossless HF corpus the ladder
+    /// moves ~0.92 ssim2 points within an image versus ~6 points between
+    /// images, so uniform pairing leaves it ~1/7th of the gradient.
+    /// Requires ref identity on the source (`ref_basename` or
+    /// `image_path`); the trainer exits 2 rather than silently falling
+    /// back to uniform pairing.
     #[arg(long, required_unless_present = "manifest")]
     group: Vec<String>,
 
