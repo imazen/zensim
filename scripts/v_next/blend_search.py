@@ -67,6 +67,25 @@ ROUND5 = [
     ("r5-hon+kon2",       {**_HON, "konjnd_dense": 2.0}, {"layers": 2, "hidden": 128}),
     ("r5-full+kon1",      {"safesyn": 1, "cid22_train": 1, "kadid": 1, "tid": 1, "bigcodec": 1, "kadis": 0.3, "konjnd_dense": 1.0}, {"layers": 2, "hidden": 128}),
 ]
+# ROUND6 — winsor sweep, driven by the tail stat added 2026-07-15 (see blend_lib.panel).
+# HYPOTHESIS: the honest champion's high-tail SROCC (0.434) sits well below its low-tail
+# (0.642) => near-lossless rank is the genuinely weak end (the width-10 B9 band could not
+# show this — it is range-restricted). `winsor_pct` fits lo/hi percentiles on the TRAINING
+# distribution, so bounds that are too tight clamp near-lossless features to constants
+# (feature-vanishing). This is exactly the Part-7 mechanism: recomputing clean p1/p99 bounds
+# lifted B's near-lossless per-img SROCC 0.286 -> 0.886 AND CID22 +0.049 (a Pareto win).
+# FALSIFICATION: if high-tail is flat across winsor_pct 0..1.0, the weak high-tail is NOT
+# the winsor bound and the next suspect is feature-vanishing proper / ssim2 saturation.
+# READOUT: srocc_hightail (primary), CID22 + nonphoto (must not regress).
+ROUND6 = [
+    ("r6-winsor0",        dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 0.0}),
+    ("r6-winsor0.02",     dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 0.02}),
+    ("r6-winsor0.05",     dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 0.05}),
+    ("r6-winsor0.1(ref)", dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 0.1}),
+    ("r6-winsor0.25",     dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 0.25}),
+    ("r6-winsor0.5",      dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 0.5}),
+    ("r6-winsor1.0",      dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 1.0}),
+]
 # (label, blend spec {corpus: weight}, hp-overrides). The systematic sweep of "does adding the
 # now-clean kadid/tid help, at what weight, traded against div/kadis".
 ROUND1 = [
@@ -90,7 +109,9 @@ def avg_panels(panels):
     out = {}
     for corp in B.VAL_CORPORA:
         agg = {}
-        for k in ["srocc", "srocc_abs", "plcc", "krocc", "zrmse", "n"]:
+        # srocc_lowtail/hightail = range-restriction-free extreme-quality rank (blend_lib.panel)
+        for k in ["srocc", "srocc_abs", "plcc", "krocc", "zrmse", "n",
+                  "srocc_lowtail", "srocc_hightail"]:
             vals = [p[corp][k] for p in panels if np.isfinite(p[corp].get(k, np.nan))]
             agg[k] = float(np.mean(vals)) if vals else float("nan")
         agg["sign"] = panels[0][corp]["sign"]
@@ -110,12 +131,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", default="1,7")
     ap.add_argument("--topk", type=int, default=4)
-    ap.add_argument("--round", default="1", choices=["1", "2", "3", "4", "5"])
+    ap.add_argument("--round", default="1", choices=["1", "2", "3", "4", "5", "6"])
     ap.add_argument("--out-dir", default="/mnt/v/output/zensim/reports/blend")
     a = ap.parse_args()
     seeds = [int(x) for x in a.seeds.split(",")]
     od = Path(a.out_dir); od.mkdir(parents=True, exist_ok=True)
-    CONFIGS = {"1": ROUND1, "2": ROUND2, "3": ROUND3, "4": ROUND4, "5": ROUND5}[a.round]
+    CONFIGS = {"1": ROUND1, "2": ROUND2, "3": ROUND3, "4": ROUND4, "5": ROUND5,
+               "6": ROUND6}[a.round]
     rtag = f"r{a.round}"
 
     cols = ["cid22", "nonphoto", "konjnd", "aic3", "aic4", "kadid", "tid"]
@@ -135,8 +157,13 @@ def main():
         def show(c):
             v = avg[c]["srocc_abs"] if B.VAL_CORPORA[c][2] < 0 else avg[c]["srocc"]
             return v if np.isfinite(v) else float("nan")
+        # Round 6's readout is the CID22 tails (the honest extreme-quality rank), not the bands.
+        tails = ""
+        if a.round == "6":
+            lt, ht = avg["cid22"].get("srocc_lowtail", np.nan), avg["cid22"].get("srocc_hightail", np.nan)
+            tails = f"  loT {lt:+.3f} hiT {ht:+.3f}"
         print(f"{label:16} " + " ".join(f"{show(c):+8.4f}" for c in cols)
-              + f"  {comp:6.3f}  {'REJ' if reject else ' ok'}   ({time.time()-t0:.0f}s)")
+              + f"  {comp:6.3f}  {'REJ' if reject else ' ok'}{tails}   ({time.time()-t0:.0f}s)")
         results.append({"label": label, "spec": spec, "hp": hp, "composite": comp,
                         "reject": bool(reject), "panel": avg,
                         # keep the median-seed payload for the dashboard/bake

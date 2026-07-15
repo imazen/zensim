@@ -245,14 +245,20 @@ Cite: `§8.36`.
   `_archive/` + Tower). Manifest entries [5]/[9] updated (new sha256). R2 + Tower re-synced. Shipped
   bakes were always SAFE (trained on `human_score`, never kadid/tid iwssim). Cite:
   `benchmarks/column_audit_2026-07-15.md`, `…§8.37 A`, `scripts/canonical_corpus/fix_kadid_tid_apply_scores.py`.
-  **INDEPENDENTLY CONFIRMED 2026-07-15 (same day, different route):** a from-scratch GPU re-extraction
-  of KADID ssim2 (`zenmetrics batch --metric ssim2-gpu` over all 10,125 pairs, no reference to the
-  parquet) reproduces the promoted column — range **[−367.2, 100.0]** vs the documented [−367,100],
-  **SROCC-vs-DMOS +0.8133** vs the documented +0.813, and **SROCC(fresh, canonical) = 1.000000** with
-  mean |Δ| **1.4e-5** (10,062/10,125 rows identical to <1e-4; the rest ≤0.001 = f32/GPU noise). The
-  promotion is correct, not merely self-consistent. Byproduct worth knowing: **kadid/tid ssim2 +
-  cvvdp + iwssim already exist in the canonical train parquets** — recomputing them is redundant;
-  only butteraugli is genuinely absent from the canonical schema.
+  **INDEPENDENTLY CONFIRMED 2026-07-15 (same day, different route) — BOTH corpora:** from-scratch GPU
+  re-extractions (`zenmetrics batch --metric ssim2-gpu`, no reference to the parquet) reproduce the
+  promoted columns exactly — **KADID +0.8133** vs documented +0.813 (10,125 pairs, range
+  **[−367.2, 100.0]** vs documented [−367,100]) and **TID +0.8460** vs documented +0.846 (3,000 pairs).
+  On KADID, row-for-row: **SROCC(fresh, canonical) = 1.000000**, mean |Δ| **1.4e-5**, 10,062/10,125 rows
+  identical to <1e-4 (the rest ≤0.001 = f32/GPU noise). The promotion is correct, not merely
+  self-consistent. Byproduct worth knowing: **kadid/tid ssim2 + cvvdp + iwssim already exist in the
+  canonical train parquets** — recomputing them is redundant; only **butteraugli** is genuinely absent
+  from the canonical schema. Fresh reference-metric panel (for the dashboard, `refmetrics/`):
+  KADID ssim2 +0.8133 / cvvdp +0.8339 / butteraugli↓ +0.5431; TID ssim2 +0.8460 / cvvdp +0.8531 /
+  butteraugli↓ +0.6622 — butteraugli is weakest on both, as expected for a compression-tuned metric on
+  KADID/TID's ~95% non-compression distortions (a live confirmation of the §2 "KADID/TID are integrity
+  guards, not compression signal" framing). Gotcha for re-runs: TID's `reference_images/*.BMP` are not
+  decodable by zenmetrics — use `reference_images_png/` (pixel-identical, max|Δ|=0).
 - **3.19 IW/masked HF-moment features explode on non-photographic content — unbounded energy +
   a `1/n`-vs-`Σw` normalization bug (2026-07-15).** bigcodec IW/masked reached 5.8e6 (vs photographic
   p99.9=0.48) — traced to (a) `iw_art4`/`iw_det4` being **unbounded, un-per-image-normalized** edge
