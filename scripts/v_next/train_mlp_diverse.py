@@ -95,8 +95,19 @@ def train_one(seed, a, dev):
     torch.manual_seed(seed); np.random.seed(seed)
     (Xtr, ytr, wtr), val = build(seed, a.div_cap, a.hq_band, a.hq_weight,
                                  a.div_weight, a.kadis_weight)
+    # DE-POISON: bigcodec's IW/masked block (f228..371) carries extraction-garbage
+    # outliers to 5.8M (14M× the photographic ceiling) in ~0.05% of rows, which wreck the
+    # mean/std scaler → CID22 mis-standardized by up to 10 sd-units. Winsorize each feature
+    # to a robust combined-train percentile bound BEFORE the scaler + net (and bake the
+    # bounds as runtime clips). p=0 disables (the old poisoned path).
+    if a.winsor_pct > 0:
+        lo = np.percentile(Xtr, a.winsor_pct, axis=0)
+        hi = np.percentile(Xtr, 100 - a.winsor_pct, axis=0)
+    else:
+        lo = np.full(N_FEAT, -np.inf, np.float64); hi = np.full(N_FEAT, np.inf, np.float64)
+    Xtr = np.clip(Xtr, lo, hi)
     mu, sd = Xtr.mean(0), Xtr.std(0); sd[sd == 0] = 1
-    sc = lambda X: (X - mu) / sd
+    sc = lambda X: (np.clip(X, lo, hi) - mu) / sd
     sclip = np.clip(ytr, -150, 100); tm, ts = sclip.mean(), sclip.std()
     yn = (sclip - tm) / ts
     Xd = torch.tensor(sc(Xtr), dtype=torch.float32, device=dev)
@@ -122,11 +133,13 @@ def train_one(seed, a, dev):
     W0 = net[0].weight.detach().cpu().numpy(); b0 = net[0].bias.detach().cpu().numpy()
     W1 = net[2].weight.detach().cpu().numpy(); b1 = net[2].bias.detach().cpu().numpy()
     return metrics, dict(mu=mu, sd=sd, W0=W0, b0=b0, W1=W1, b1=b1, hidden=a.hidden,
-                         leaky=0.01, seed=seed)
+                         leaky=0.01, seed=seed, lo=lo, hi=hi)
 
 
 def cid22_score(payload, Xcv, ycv):
-    X = (Xcv - payload["mu"]) / payload["sd"]
+    lo = payload.get("lo"); hi = payload.get("hi")
+    Xc = np.clip(Xcv, lo, hi) if lo is not None else Xcv
+    X = (Xc - payload["mu"]) / payload["sd"]
     h = X @ payload["W0"].T + payload["b0"]
     h = np.where(h > 0, h, 0.01 * h)
     o = h @ payload["W1"].T + payload["b1"]
@@ -141,6 +154,9 @@ def main():
     ap.add_argument("--div-cap", type=int, default=120000)
     ap.add_argument("--hq-band", type=float, default=85.0)
     ap.add_argument("--hq-weight", type=float, default=0.3)
+    ap.add_argument("--winsor-pct", type=float, default=0.1,
+                    help="per-feature winsor to combined-train [p, 100-p] before scaler "
+                         "(de-poisons bigcodec IW-block outliers). 0 = off.")
     ap.add_argument("--seeds", default="1,3,7,13,17,23,31,41")
     ap.add_argument("--out", default="/mnt/v/output/zensim/reports/b_negatives/mlp_diverse_best.npz")
     a = ap.parse_args()

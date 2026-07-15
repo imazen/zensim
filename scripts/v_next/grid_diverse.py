@@ -25,6 +25,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", default="1,7,13,17,23,31,41")
     ap.add_argument("--grid", default="1.0:0.3,0.5:0.6,1.0:0.6,0.5:0.3")  # div_w:kadis_w
+    ap.add_argument("--winsor-pct", type=float, default=0.1)  # de-poison; 0=poisoned control
     a = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     seeds = [int(x) for x in a.seeds.split(",")]
@@ -41,7 +42,7 @@ def main():
     for spec in a.grid.split(","):
         dv, kw = (float(x) for x in spec.split(":"))
         cfg = SimpleNamespace(hidden=64, div_cap=120000, hq_band=85.0, hq_weight=0.3,
-                              div_weight=dv, kadis_weight=kw)
+                              div_weight=dv, kadis_weight=kw, winsor_pct=a.winsor_pct)
         picks = []
         for s in seeds:
             m, payload = T.train_one(s, cfg, dev)
@@ -68,7 +69,8 @@ def main():
 
 
 def T_fwd(P, X):
-    z = (X - P["mu"]) / P["sd"]
+    Xc = np.clip(X, P["lo"], P["hi"]) if "lo" in P else X
+    z = (Xc - P["mu"]) / P["sd"]
     h = z @ P["W0"].T + P["b0"]
     h = np.where(h > 0, h, float(P["leaky"]) * h)
     return (h @ P["W1"].T + P["b1"]).ravel()

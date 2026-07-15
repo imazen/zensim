@@ -33,7 +33,10 @@ _spec.loader.exec_module(lp)
 
 
 def fwd(P, X):
-    """numpy forward matching nn.Sequential(Linear, LeakyReLU, Linear)."""
+    """numpy forward matching the runtime: winsor-clip (if bounds present) -> scaler ->
+    Linear -> LeakyReLU -> Linear."""
+    if "lo" in P and np.isfinite(P["lo"]).all():
+        X = np.clip(X, P["lo"], P["hi"])
     z = (X - P["mu"]) / P["sd"]
     h = z @ P["W0"].T + P["b0"]
     h = np.where(h > 0, h, P["leaky"].item() * h)
@@ -55,7 +58,10 @@ def main():
     ap.add_argument("--dtype", default="f32")
     a = ap.parse_args()
     z = np.load(a.npz)
-    P = {k: z[k] for k in ("mu", "sd", "W0", "b0", "W1", "b1", "leaky")}
+    keys = ("mu", "sd", "W0", "b0", "W1", "b1", "leaky")
+    P = {k: z[k] for k in keys}
+    if "lo" in z.files:                      # de-poison winsor bounds (task #19)
+        P["lo"], P["hi"] = z["lo"], z["hi"]
     hidden = int(z["hidden"])
 
     # ---- dial spline: forward MLP raw on the anchor, fit raw -> ssim2_gpu (negative-capable)
@@ -81,6 +87,17 @@ def main():
         ],
         "metadata": [{"key": SPLINE_KEY, "type": "bytes", "hex": payload.hex()}],
     }
+    # De-poison: bake per-feature WinsorP99 clamps to [lo,hi] so the RUNTIME clips
+    # identically to training (predict_transformed applies winsor_p99 pre-scaler). This is
+    # B's own mechanism; it clips the bigcodec IW-block garbage at inference too.
+    if "lo" in P and np.isfinite(P["lo"]).all():
+        toks = "\n".join("winsor_p99" for _ in range(N_FEAT))
+        prm = "\n".join(f"{lo},{hi}" for lo, hi in zip(P["lo"].astype(np.float32),
+                                                       P["hi"].astype(np.float32)))
+        req["metadata"] += [
+            {"key": "zentrain.feature_transforms", "type": "utf8", "text": toks},
+            {"key": "zentrain.feature_transform_params", "type": "utf8", "text": prm},
+        ]
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(req, f)
         jp = Path(f.name)

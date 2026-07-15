@@ -2019,3 +2019,62 @@ diverse MLP *agrees with ssim2 on diverse content where the photographic MLP doe
 robustness/sanity signal, not a human-preference win. Acquiring a screen/UI/document human-MOS
 set is the one thing that would let us value the diversity gain in MOS terms. Candidate bakes +
 per-config crucibles under `/mnt/v/output/zensim/reports/b_negatives/`. [[project_linear_projections]]
+
+---
+
+## §8.35 The CID22 "trade" was a DATA POISON — de-poisoned, adding imazen-26 HELPS (task #19)
+
+**User (2026-07-15):** *"I think we need to figure out how to track down data that poisons,
+because adding data should usually help."* Correct prior — and it held. The §8.34 −0.018
+CID22 cost was NOT a capacity trade; it was **extraction garbage in bigcodec poisoning the
+standardizer.**
+
+**The poison (diagnostic: `scripts/v_next/diagnose_poison.py`).** bigcodec's IW/masked
+feature block (f228..371) carries extraction-garbage outliers to **5.8 MILLION** (14-million×
+the photographic ceiling of ~0.4) — 93 features exceed 100× the sane range, 83 of them in the
+IW block (worst: f241=5.8M, f313=5.8M, f242, f314). Only **1,075 rows (0.05% of 2.32M)** carry
+it — a handful of pathological images (IW-pooling blowups, same family as the 2026-05-29 dial-
+grid GPU garbage, `DATASET_HISTORY §3.4`). But 0.05% of rows at 5.8M is enough to wreck the
+mean/std scaler: the combined `mu/sd` (bigcodec+KADIS = 66% of rows) **mis-standardizes CID22
+by up to 10.3 sd-units** vs a clean scaler. That's the poison channel — the model wasn't
+"trading capacity," it was fed a scaler wrecked by garbage.
+
+**The fix (winsorize before the scaler + bake the clamps).** `--winsor-pct 0.1` clips each
+feature to the combined-train `[p0.1, p99.9]` before computing `mu/sd` and forwarding (clips
+the 0.05% garbage, keeps legit diverse content — a typical bigcodec row has only 2.6 features
+outside photographic range). Baked as per-feature **`WinsorP99` feature-transforms** (B's own
+mechanism) so the runtime clamps identically. winsor 0.1 is the sweet spot (0.5 over-clips
+legit signal → worse CID22).
+
+**Result — CID22 recovers at ZERO diverse cost:**
+
+| config | CID22 | bigcodec (diverse) | deep-neg |
+|---|---|---|---|
+| §8.33 photo (no bigcodec) | 0.8697 | 0.8555 | 0.7762 |
+| bigcodec **poisoned** (winsor 0) | 0.8632 | 0.9428 | 0.7180 |
+| bigcodec **de-poisoned** (winsor 0.1) | **0.8720** | **0.9353** | 0.7284 |
+
+CID22 **0.8632 → 0.8720 (+0.0088)**, above §8.33's 0.8697, with the +0.08 diverse gain fully
+intact. **Full 6-corpus crucible of the de-poisoned bake (baked==numpy, round-trip verified):**
+
+| Corpus | shipped B | §8.33 photo | **de-poisoned diverse (dv0.5/kw0.3, winsor 0.1)** |
+|---|---|---|---|
+| CID22 | 0.8764 | 0.8697 | 0.8720 |
+| KADID | 0.8201 | 0.8098 | 0.8120 |
+| TID2013 | 0.7868 | 0.8417 | 0.8414 |
+| KonJND | 0.5466 | 0.5868 | 0.5883 |
+| AIC-3 | 0.7774 | 0.7872 | 0.7790 |
+| AIC-4 | 0.8906 | 0.9059 | 0.8916 |
+| corruption<q20 | 18.8% | 38.5% | 35.4% |
+| bigcodec (imazen-26 diverse) | ~0.856 | 0.856 | **0.9353** |
+| deep-neg (<−64) | 0.047 | 0.776 | 0.7284 |
+
+vs §8.33: **wins CID22/KADID/KonJND, ties TID, +0.079 diverse**, loses AIC-3/AIC-4 (small) +
+deep-neg −0.048 (the kadis-weight lever; recoverable at a small CID22 cost). vs B: −0.0044
+CID22 for +0.08 diverse + negatives + TID/KonJND. **Adding imazen-26 helped once the garbage
+was removed — no trade.** Bake `mlp_diverse_depoison_dv0.5kw0.3_2026-07-15.bin` (108 KB f32,
+sha 51718a25); scripts `diagnose_poison.py` + `train_mlp_diverse.py --winsor-pct`.
+
+**OPEN (task #21):** is the 5.8M IW garbage a bug in the SHIPPED zensim extractor (→ B and every
+profile can crash on that content at inference — the "non-photo content crashes" the user wants
+caught) or only in the offline bigcodec pipeline? Investigating next. [[project_linear_projections]]
