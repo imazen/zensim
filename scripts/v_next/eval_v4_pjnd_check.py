@@ -34,7 +34,7 @@ ANCHOR_PATH = Path(
     "/mnt/v/zen/zensim-training/2026-05-19-multi-codec-jnd-anchors/anchors_multi_codec_372col.parquet"
 )
 SCORE_BIN = Path(
-    "/home/lilith/work/zen/zensim--cross-codec-metric/target/release/ensemble_score_rows"
+    "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows"
 )
 
 

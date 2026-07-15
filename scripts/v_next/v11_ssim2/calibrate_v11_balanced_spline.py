@@ -35,7 +35,7 @@ V11_ANCHOR_PARQUET_DEFAULT = Path(
     "/mnt/v/zen/zensim-training/2026-05-20-ssim2-anchors/anchors_ssim2_300col.parquet"
 )
 PREDICT_BIN_DEFAULT = Path(
-    "/home/lilith/work/zen/zensim--cross-codec-v8/target/release/"
+    "/home/lilith/work/zen/zensim/target/release/"
     "predict_features_with_bake"
 )
 ZENPREDICT_BIN_DEFAULT = Path(

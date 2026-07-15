@@ -435,7 +435,7 @@ def main() -> None:
         "--comparison-md",
         type=Path,
         default=Path(
-            "/home/lilith/work/zen/zensim--cross-codec-v9/benchmarks/"
+            "/home/lilith/work/zen/zensim/benchmarks/"
             "v_tuner_v9_anchor_design_2026-05-20.md"
         ),
     )

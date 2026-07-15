@@ -180,8 +180,8 @@ def main():
     if not os.path.exists(predict_bin):
         print(f"predict_features_with_bake not found at {predict_bin}")
         print("Building...")
-        os.system("cd /home/lilith/work/zen/zensim--goal-push && cargo build --release -p zensim-validate --bin predict_features_with_bake 2>&1 | tail -3")
-        predict_bin = "/home/lilith/work/zen/zensim--goal-push/target/release/predict_features_with_bake"
+        os.system("cd /home/lilith/work/zen/zensim && cargo build --release -p zensim-validate --bin predict_features_with_bake 2>&1 | tail -3")
+        predict_bin = "/home/lilith/work/zen/zensim/target/release/predict_features_with_bake"
 
     if os.path.exists(predict_bin):
         import tempfile, struct

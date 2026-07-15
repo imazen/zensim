@@ -34,9 +34,9 @@ from pathlib import Path
 
 from PIL import Image
 
-ROOT = Path("/home/lilith/work/zen/zensim--cross-codec-eval")
+ROOT = Path("/home/lilith/work/zen/zensim")
 ZENSIM_BIN = ROOT / "target/release/examples/zensim_score_named"
-ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zen-metrics")
+ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zenmetrics")
 QSWEEP_TSV = Path("/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep/qsweep_manifest.tsv")
 OUT_DIR = Path("/mnt/v/output/zensim/cross_codec_consistency_2026-05-19")
 

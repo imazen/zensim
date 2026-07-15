@@ -57,7 +57,7 @@ def main():
 
     predict_bin = None
     for path in ["./target/release/predict_features_with_bake",
-                  "/home/lilith/work/zen/zensim--spline-cal/target/release/predict_features_with_bake",
+                  "/home/lilith/work/zen/zensim/target/release/predict_features_with_bake",
                   "/home/lilith/work/zen/zensim/target/release/predict_features_with_bake"]:
         if os.path.exists(path):
             predict_bin = path

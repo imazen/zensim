@@ -44,8 +44,8 @@ import time
 from pathlib import Path
 
 WORK_DIR = Path("/mnt/v/output/zensim/cross_codec_consistency_2026-05-19/work")
-ZENSIM_BIN = Path("/home/lilith/work/zen/zensim--cli-per-codec-calibration/target/release/examples/zensim_score_named")
-ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zen-metrics")
+ZENSIM_BIN = Path("/home/lilith/work/zen/zensim/target/release/examples/zensim_score_named")
+ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zenmetrics")
 SOURCES_DIR = Path("/mnt/v/input/zensim/sources")
 
 # Same 10 images as cross_codec_jnd_eval.py

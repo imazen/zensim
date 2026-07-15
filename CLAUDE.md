@@ -1115,6 +1115,36 @@ principle. It covers tasks, not function names, and it covers Rust too.
   the forks kept coming. **Landing the owner is half the job; deleting the
   callers is the other half, and it is the half that gets skipped.**
 
+### NEVER hardcode a sibling-worktree path in a committed script
+
+**A worktree is ephemeral; the repo is not.** Writing
+`/home/lilith/work/zen/zensim--my-experiment/target/release/foo` into a script
+you commit guarantees that script dies the moment the worktree is cleaned up —
+which the mandatory cleanup rule says MUST happen. The worktree rule and the
+script outlive each other badly: cleanup works, and silently leaves fossils.
+
+MEASURED 2026-07-15: **25 of 130 scripts** in `scripts/v_next/` pointed into
+`zensim--cross-codec-metric`, `--cross-codec-v7/v8/v9`, `--v10`,
+`--v10-human-eval`, `--eval-accel`, `--picker-train`, `--exp-tuner-v2`,
+`--cli-per-codec-calibration`. Every one had been unrunnable for weeks. **None
+of them needed to be**: a worktree is a *copy of this repo*, so every one of
+those binaries exists here — the fix was `zensim--whatever` → `zensim`, one
+sed, zero deletions.
+
+- **Reference the main repo**, or better, a repo-relative path / an env var
+  with a repo-relative default (`ZM_BIN`, `SCORE_BIN`).
+- **`just lint-scripts`** fails on a dead worktree ref or a binary with no
+  source. Run it before committing a script that shells out.
+- A missing artifact whose **source still exists** is just unbuilt — that is a
+  `cargo build`, not a fossil. The linter distinguishes these; only 2 of the
+  original 25 were genuinely dead (their target had no source anywhere).
+
+Related failure from the same audit: `metric_compare_report.py` had not
+**parsed** since a bulk sed (`731cf0eb`) inserted an unescaped
+`<meta charset="utf-8">` into a Python string literal. A bulk edit across 293
+files broke one and nothing caught it, because nothing ever asked "does this
+still run?". `just lint-scripts` asks.
+
 ### The rule in practice
 
 1. **Before writing a script that loads/trains/evals/bakes: check the table.**

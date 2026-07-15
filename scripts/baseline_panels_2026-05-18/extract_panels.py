@@ -54,7 +54,7 @@ TID_MOS_STD_TXT = "/mnt/v/dataset/tid2013/mos_std.txt"
 KONJND_SUBJ_CSV = "/mnt/v/datasets/KonJND-1k/KonJND-1k/subjective_ratings.csv"
 
 OUTPUT_MD = (
-    "/home/lilith/work/zen/zensim--baseline-panels/benchmarks/"
+    "/home/lilith/work/zen/zensim/benchmarks/"
     "baseline_panels_2026-05-18.md"
 )
 LOG_PATH = "/tmp/baseline_panels_2026-05-18.log"

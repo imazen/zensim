@@ -29,8 +29,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path("/home/lilith/work/zen/zensim--picker-train")
-ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zen-metrics")
+ROOT = Path("/home/lilith/work/zen/zensim")
+ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zenmetrics")
 WORK_DIR = Path("/mnt/v/output/zensim/cross_codec_consistency_2026-05-19/work")
 FEATURES_PARQUET = Path("/mnt/v/zen/picker-training/2026-05-19/sources_zenanalyze_features.parquet")
 PICKER_INFER = ROOT / "target/release/zensim_picker_infer"

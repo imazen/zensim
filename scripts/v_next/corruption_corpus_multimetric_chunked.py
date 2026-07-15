@@ -15,7 +15,7 @@ from pathlib import Path
 
 CORPUS = Path("/mnt/v/output/zensim/corruption_gate")
 REF = CORPUS / "gb82_dog__reference.png"
-ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zen-metrics")
+ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zenmetrics")
 OUT = Path("/tmp/corruption_multimetric_2026-05-28.tsv")
 CHUNK_SIZE = 50
 

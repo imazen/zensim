@@ -27,7 +27,7 @@ import numpy as np
 # Binary path overridable via ZM_BIN — the f64 fractional-q-grid support
 # (zenmetrics commit 759ab501) must be present, so during rollout point this
 # at the workspace build that has it.
-ZM = os.environ.get("ZM_BIN", "/home/lilith/work/zen/zenmetrics/target/release/zen-metrics")
+ZM = os.environ.get("ZM_BIN", "/home/lilith/work/zen/zenmetrics/target/release/zenmetrics")
 SOURCES = "/tmp/qsweep_sources"
 OUTDIR = "/mnt/v/output/zensim/qsweep_expanded_2026-05-29"
 os.makedirs(OUTDIR, exist_ok=True)

@@ -106,18 +106,58 @@ dropped degenerate groups by filtering `is_finite()`, but `spearman` returns
 groups would have been averaged in as 0.0 — reporting a ranking failure where
 there was nothing to rank. The test now guards the premise itself.
 
-## 5. Deleted
+## 5. Deleted — and a correction worth recording
 
-`bhdr_bottom_extend.py`, `dense_dial_refit_b.py`, `winsorize_bake.py`,
-`w11_webp_ood_refit_2026-07-05.py`. The first three were proven byte-identical
-to their `bake_dial_refit` replacements before deletion; the fourth is a
-falsified campaign. Git history preserves them — "kept for provenance" is
-redundant with version control, and a deprecated file left in tree is a file
-the next session copies.
+**Deleted (6):** `bhdr_bottom_extend.py`, `dense_dial_refit_b.py`,
+`winsorize_bake.py` (all three proven byte-identical to their
+`bake_dial_refit` replacements first), `w11_webp_ood_refit_2026-07-05.py` (a
+falsified campaign), `verify_bake_srocc.py` and `yj_at_l0_per_block.py` (their
+target binaries have no source anywhere).
 
 CLAUDE.md's deprecated list also claimed `affine_calibrate_znpr_v2.py`,
 `score_unified_with_bake.py`, and `soft_iso_smooth.py` were "deprecated but
 present" long after they had been deleted.
+
+**A wrong deletion, caught and reverted.** I first deleted **25** scripts on
+the grounds that they shelled to binaries in deleted sibling worktrees
+(`zensim--cross-codec-metric`, `--v10`, `--eval-accel`, ...). That reasoning
+was wrong: **a worktree is a copy of this repo**, so every one of those
+binaries — `ensemble_score_rows`, `predict_features_with_bake`, `bake_verdict`
+— exists right here in `zensim-validate/src/bin/`. The scripts were not dead,
+they were *mis-pointed*. The fix was `zensim--whatever` → `zensim`: one sed, 25
+scripts recovered, zero deletions.
+
+They were restored from the working copy (uncommitted, so `jj restore`
+recovered all 25) and repointed. Of the original 25, exactly **2** were
+genuinely dead — the two above, whose targets have no source anywhere.
+
+The lesson generalizes past this incident: **"the binary it calls is missing"
+does not mean "the script is dead."** It usually means the path is stale or the
+artifact is unbuilt. `scripts/lint_scripts.py` now encodes the distinction —
+a missing artifact whose source still exists is a `cargo build`, not a fossil,
+and failing that case would train people to ignore the linter.
+
+## 5b. The fossil mechanism (root cause)
+
+The dead references were not carelessness; they were structural:
+
+1. an agent opens sibling worktree `zensim--foo`
+2. it writes a script hardcoding `/home/lilith/work/zen/zensim--foo/target/release/bar`
+3. the worktree is cleaned up — **correctly**, the cleanup rule is mandatory
+4. the script remains, permanently dead, and nothing notices
+
+CLAUDE.md's worktree-cleanup rule covers the worktree. It never covered the
+scripts pointing *into* it. That gap is now closed by a rule ("never hardcode a
+sibling-worktree path in a committed script") plus `just lint-scripts`.
+
+The same audit found `metric_compare_report.py` had not **parsed** since commit
+`731cf0eb` ("utf-8 charset on all 293 report pages") bulk-inserted an
+unescaped `<meta charset="utf-8">` into a Python string literal — and then a
+correctly-escaped one right after it. Broken for weeks, unnoticed, because
+nothing ever asked whether these scripts still run. Now fixed, and
+`just lint-scripts` asks.
+
+**Net: 201 scripts, all runnable, verified by a check that runs in CI.**
 
 ## 6. Still open
 

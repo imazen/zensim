@@ -29,9 +29,9 @@ from pathlib import Path
 
 from PIL import Image
 
-ROOT = Path("/home/lilith/work/zen/zensim--exp-tuner-v2")
+ROOT = Path("/home/lilith/work/zen/zensim")
 SCORE_BAKE_BIN = ROOT / "target/release/score_pair_with_bake"
-ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zen-metrics")
+ZEN_METRICS = Path("/home/lilith/work/zen/zenmetrics/target/release/zenmetrics")
 OUT_DIR = Path("/mnt/v/output/zensim/cross_codec_consistency_2026-05-19")
 
 # Same 10 images as cross_codec_jnd_eval.py for direct comparability

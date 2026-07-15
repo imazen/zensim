@@ -34,3 +34,15 @@ metric-eval bake ref="" ramp="" out="/mnt/v/output/zensim/reports":
         --output {{out}}/$(basename {{bake}} .bin).md \
         --html {{out}}/$(basename {{bake}} .bin).html
     @echo "report: {{out}}/$(basename {{bake}} .bin).html"
+
+# Fail on scripts that cannot run: pinned to a deleted sibling worktree, or
+# hardcoding a binary with no source anywhere. On 2026-07-15 an audit found 25
+# of 130 scripts in scripts/v_next/ pointing into worktrees that had been
+# cleaned up weeks earlier, plus one that had not PARSED since a bulk sed.
+# Nobody noticed because nobody ran them. This is the check that notices.
+lint-scripts:
+    python3 scripts/lint_scripts.py
+
+# Report only, never fails — for a quick survey.
+lint-scripts-list:
+    python3 scripts/lint_scripts.py --list

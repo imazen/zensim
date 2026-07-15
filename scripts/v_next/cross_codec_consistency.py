@@ -265,11 +265,11 @@ def main():
     ap.add_argument("--n-images", type=int, default=20)
     ap.add_argument(
         "--predict-tool",
-        default="/home/lilith/work/zen/zensim--eval-accel/target/release/predict_features_with_bake",
+        default="/home/lilith/work/zen/zensim/target/release/predict_features_with_bake",
     )
     ap.add_argument(
         "--zen-metrics",
-        default="/home/lilith/work/zen/zenmetrics/target/release/zen-metrics",
+        default="/home/lilith/work/zen/zenmetrics/target/release/zenmetrics",
     )
     ap.add_argument(
         "--butter-parquet-root",
