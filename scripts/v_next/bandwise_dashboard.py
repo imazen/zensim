@@ -42,25 +42,58 @@ SCATTER_MAX = 1500              # subsample dense scatters — keeps zoomable-SV
 # corpora bandable on a 0..100-normalized human MOS (JND-scale corpora are not)
 BANDABLE = {"cid22", "kadid", "tid", "nonphoto"}
 
-# --- data provenance: eval role + is-it-cheat, for the DIVERSE-trained primary candidate ---
-# (bake_verdict convention: KADID/TID are train==val pair-overlap -> memorization, not skill.)
-PROVENANCE = {
-    "cid22":    ("TRUE HELD-OUT", "no — cid22_train is a disjoint ssim2-anchored subset; the 49-ref human-MOS set is sacred", "human MCOS/100", "HONEST — primary skill gate"),
-    "kadid":    ("INTEGRITY GUARD", "YES — diverse bakes train on kadid ssim2_gpu (same images)", "human DMOS", "CHEAT — rewards memorization, watch for regressions only"),
-    "tid":      ("INTEGRITY GUARD", "YES — diverse bakes train on tid ssim2_gpu (same images)", "human MOS", "CHEAT — rewards memorization, watch for regressions only"),
-    "konjnd":   ("TRUE HELD-OUT", "no", "mean PJND threshold", "HONEST — HF/near-lossless (G5)"),
-    "aic3":     ("TRUE HELD-OUT", "no", "JND units", "HONEST — compression JND"),
-    "aic4":     ("TRUE HELD-OUT", "no", "JND units", "HONEST — compression JND"),
-    "nonphoto": ("HELD-OUT (val split)", "diverse bakes train on imazen-26 TRAIN-origin {0,2,4,6,8}; this is VAL-origin {1,3,5} — no rendition leak", "ssim2/100", "HONEST generalization; same corpus family"),
+# --- eval-corpus metadata: split-suffixed display, split semantics, cheat-twin, footnote. The
+# per-bake honesty is DERIVED from each bake's <path>.spec.json (train_corpora) at render time —
+# NOT hardcoded — so the dashboard can't desync from what a bake actually trained on. ---
+CORPUS_META = {
+    "cid22":    ("cid22_val", "49-ref human-MOS holdout", None,
+                 "Held-out human MOS. cid22_train (ssim2-anchored, DIFFERENT images) may be in a bake's "
+                 "training — it is disjoint from these 49 refs, so this is NEVER cheat."),
+    "kadid":    ("kadid_val", "KADID-10k — val images == train images", "kadid",
+                 "TRAIN==VAL image overlap. Honest ONLY for bakes that did NOT train on kadid; "
+                 "CHEAT (memorization) for bakes that did (see per-bake honesty matrix)."),
+    "tid":      ("tid_val", "TID2013 — val images == train images", "tid",
+                 "TRAIN==VAL image overlap. Honest only for bakes that didn't train on tid; CHEAT for those that did."),
+    "konjnd":   ("konjnd_val", "KonJND-1k PJND — HF holdout", None, "Never trained on. HF/near-lossless — the G5 weak axis."),
+    "aic3":     ("aic3_val", "AIC-3 CTC JND — holdout", None, "Never trained on. Compression JND."),
+    "aic4":     ("aic4_val", "AIC-4 JND — holdout", None, "Never trained on. Compression JND."),
+    "nonphoto": ("imazen26_val", "imazen-26 non-photo — val-origin {1,3,5}", "bigcodec",
+                 "VAL-SPLIT of the bigcodec/imazen-26 corpus: diverse bakes train on TRAIN-origin "
+                 "{0,2,4,6,8} (disjoint renditions) → honest generalization, NOT cheat."),
 }
-TRAIN_INPUTS = [
-    ("safesyn", "synthetic-safe tiles (CID22-leak-purged)", "ssim2_gpu", "196k (cap 90k)"),
-    ("cid22_train", "CID22 ssim2-anchored subset — NOT the 49-ref MOS holdout", "ssim2_gpu", "~17k"),
-    ("kadid", "KADID-10k (ssim2 FIXED §3.18)", "ssim2_gpu", "10,125"),
-    ("tid", "TID2013 (ssim2 FIXED §3.18)", "ssim2_gpu", "3,000"),
-    ("bigcodec (DIV)", "imazen-26 diverse real-codec, TRAIN-origin", "ssim2/100 (HQ>85 ×0.3)", "2.32M (cap 120k)"),
-    ("kadis (NEG)", "KADIS-700k neg-rich (ssim2 negative tail)", "score_ssim2_gpu", "266k (cap 90k, w0.3)"),
-]
+TRAIN_CORPUS_DESC = {
+    "safesyn": "synthetic-safe tiles (CID22-leak-purged), ssim2_gpu",
+    "cid22_train": "CID22 ssim2-anchored subset — NOT the 49-ref MOS holdout",
+    "kadid": "KADID-10k (ssim2 FIXED §3.18) — overlaps kadid_val",
+    "tid": "TID2013 (ssim2 FIXED §3.18) — overlaps tid_val",
+    "bigcodec": "imazen-26 diverse real-codec, TRAIN-origin {0,2,4,6,8}",
+    "kadis": "KADIS-700k neg-rich (ssim2 negative tail)",
+    "hdr_v3mix": "HDR cvvdp-mix head corpus (7,410 rows) — B's cid head",
+}
+
+
+def bake_train(path):
+    """training corpora for a bake, from its <path>.spec.json sidecar (the desync-proof source of
+    truth). Returns None if no sidecar (dashboard then shows 'unknown', never a guess)."""
+    sp = Path(str(path) + ".spec.json")
+    if not sp.exists():
+        return None
+    try:
+        return set(json.loads(sp.read_text()).get("train_corpora", []))
+    except Exception:
+        return None
+
+
+def honesty(train_set, corpus):
+    """(label, color) — per-bake, per-corpus honesty from the ACTUAL train set."""
+    if train_set is None:
+        return "unknown", "#888"
+    twin = CORPUS_META[corpus][2]
+    if corpus in ("kadid", "tid") and twin in train_set:
+        return "CHEAT", "#c0392b"
+    if corpus == "nonphoto" and twin in train_set:
+        return "val-split", "#e67e22"
+    return "HELD-OUT", "#27ae60"
 
 
 def svg(fig):
@@ -251,7 +284,7 @@ def fig_heatmap(data, labels):
     fig, ax = plt.subplots(figsize=(1.3 + 0.75 * len(corps), 1.0 + 0.42 * len(labels)))
     im = ax.imshow(M, cmap="RdYlGn", vmin=0.4, vmax=1.0, aspect="auto")
     ax.set_xticks(range(len(corps)))
-    ax.set_xticklabels([f"{c}\n{PROVENANCE[c][0].split()[0]}" for c in corps], rotation=30, ha="right", fontsize=6.5)
+    ax.set_xticklabels([CORPUS_META[c][0] for c in corps], rotation=30, ha="right", fontsize=6.5)
     ax.set_yticks(range(len(labels))); ax.set_yticklabels(labels, fontsize=7)
     for i in range(len(labels)):
         for j in range(len(corps)):
@@ -345,23 +378,25 @@ def fig_dial(npz_bakes):
 
 
 # ---------------------------------------------------------------- tables ----------------
-def agg_stat_table(perbake, corp):
+def agg_stat_table(perbake, corp, train):
     sign = B.VAL_CORPORA[corp][2]
-    head = ["SROCC" + (" |·|" if sign < 0 else ""), "PLCC", "KROCC", "Z-RMSE", "n", "kind"]
+    head = ["SROCC" + (" |·|" if sign < 0 else ""), "PLCC", "KROCC", "Z-RMSE", "n", "honesty"]
     rows = ["<table><thead><tr><th>bake / metric</th>" + "".join(f"<th>{h}</th>" for h in head) + "</tr></thead><tbody>"]
     for lab, (_h, _p, pan, kind) in perbake.items():
         sr = pan["srocc_abs"] if sign < 0 else pan["srocc"]
         cls = " class='metric'" if kind == "metric" else ""
         vals = [sr, pan["plcc"], pan["krocc"], pan["zrmse"]]
         cells = "".join(f"<td>{v:.4f}</td>" if np.isfinite(v) else "<td>—</td>" for v in vals)
-        rows.append(f"<tr{cls}><td class='lbl'>{lab}</td>{cells}<td>{pan['n']}</td><td>{kind}</td></tr>")
+        hn, col = honesty(train.get(lab), corp)
+        rows.append(f"<tr{cls}><td class='lbl'>{lab}</td>{cells}<td>{pan['n']}</td>"
+                    f"<td style='background:{col};color:#fff;font-size:9px'>{hn}</td></tr>")
     rows.append("</tbody></table>")
     return "".join(rows)
 
 
-def band_table(perbake, corp):
+def band_table(perbake, corp, train):
     rows = ["<table><thead><tr><th>bake / metric</th>" + "".join(f"<th>{b}</th>" for b in BANDS)
-            + "<th>agg</th><th>n</th></tr></thead><tbody>"]
+            + "<th>agg</th><th>n</th><th>honesty</th></tr></thead><tbody>"]
     allv = {b: [] for b in BANDS + ["agg"]}
     for lab, (_h, _p, pan, _k) in perbake.items():
         for b in BANDS:
@@ -383,37 +418,60 @@ def band_table(perbake, corp):
         agg = pan["srocc_abs"] if B.VAL_CORPORA[corp][2] < 0 else pan["srocc"]
         cls = " class='metric'" if kind == "metric" else ""
         cells = "".join(cell(pan.get("bands", {}).get(b, {}).get("srocc"), b) for b in BANDS)
-        rows.append(f"<tr{cls}><td class='lbl'>{lab}</td>{cells}{cell(agg,'agg')}<td>{pan['n']}</td></tr>")
+        hn, col = honesty(train.get(lab), corp)
+        rows.append(f"<tr{cls}><td class='lbl'>{lab}</td>{cells}{cell(agg,'agg')}<td>{pan['n']}</td>"
+                    f"<td style='background:{col};color:#fff;font-size:9px'>{hn}</td></tr>")
     rows.append("</tbody></table>")
     return "".join(rows)
 
 
 def provenance_section(bakes):
-    b = ["<h2 id='data'>Datasets &amp; provenance — train vs held-out vs \"cheat\"</h2>",
-         "<p class='sub'>What the model learned from vs what honestly tests it. <b>Provenance is for "
-         "the DIVERSE-trained bakes</b> (2L / §8.35 / ep700 — they train on safesyn+cid22_train+kadid+tid"
-         "+bigcodec+kadis). ssim2-only trains on safesyn+cid22_train only, so KADID/TID are honest held-out "
-         "for it. Reference metrics (ssim2/cvvdp/butteraugli) train on nothing.</p>"]
-    b.append("<h3>Training inputs (what the diverse bakes fit)</h3><table><thead><tr>"
-             "<th>corpus</th><th>what</th><th>target</th><th>rows</th></tr></thead><tbody>")
-    for name, what, tgt, rows in TRAIN_INPUTS:
-        b.append(f"<tr><td class='lbl'>{name}</td><td>{what}</td><td>{tgt}</td><td>{rows}</td></tr>")
+    """DERIVED entirely from each bake's <path>.spec.json — cannot desync from the bakes."""
+    train = {lab: bake_train(path) for lab, _k, path in bakes}
+    labels = [lab for lab, *_ in bakes]
+    b = ["<h2 id='data'>Datasets &amp; provenance — derived from each bake's <code>spec.json</code> (can't desync)</h2>",
+         "<p class='sub'>Honesty is computed <b>per bake</b> from what each model ACTUALLY trained on "
+         "(its <code>&lt;bake&gt;.spec.json</code> sidecar) — not hardcoded. So KADID/TID are CHEAT for a bake that "
+         "trained on them but HONEST held-out for one that didn't; change a training set and this whole section "
+         "follows automatically. Reference metrics (ssim2/cvvdp/butteraugli) train on nothing → always held-out.</p>"]
+    # 1) what each bake trained on
+    b.append("<h3>What each bake trained on (from its sidecar)</h3><table><thead><tr>"
+             "<th>bake</th><th>arch</th><th>train corpora</th></tr></thead><tbody>")
+    for lab, _k, path in bakes:
+        sp = Path(str(path) + ".spec.json")
+        meta = json.loads(sp.read_text()) if sp.exists() else {}
+        tc = ", ".join(sorted(meta.get("train_corpora", []))) or "<i>unknown (no sidecar)</i>"
+        b.append(f"<tr><td class='lbl'>{lab}</td><td>{meta.get('arch','?')}</td><td>{tc}</td></tr>")
     b.append("</tbody></table>")
-    b.append("<h3>Evaluation corpora (what the SROCC numbers mean)</h3><table><thead><tr>"
-             "<th>corpus</th><th>eval role</th><th>in diverse-bake training?</th><th>human label</th>"
-             "<th>honesty</th></tr></thead><tbody>")
-    for c, (role, intr, lab, hon) in PROVENANCE.items():
-        cheat = "CHEAT" in hon
-        badge = ("#c0392b" if cheat else ("#e67e22" if "val split" in role else "#27ae60"))
-        b.append(f"<tr><td class='lbl'>{c}</td><td><span class='badge' style='background:{badge}'>{role}</span></td>"
-                 f"<td>{intr}</td><td>{lab}</td><td>{hon}</td></tr>")
+    # 2) honesty matrix: corpus × bake
+    b.append("<h3>Honesty matrix — honest held-out vs CHEAT, per (corpus, bake)</h3>")
+    b.append("<table><thead><tr><th>eval corpus</th>" + "".join(f"<th>{l}</th>" for l in labels)
+             + "</tr></thead><tbody>")
+    for c in B.VAL_CORPORA:
+        cells = ""
+        for lab in labels:
+            hn, col = honesty(train[lab], c)
+            cells += f"<td style='background:{col};color:#fff;font-weight:600'>{hn}</td>"
+        b.append(f"<tr><td class='lbl'>{CORPUS_META[c][0]}</td>{cells}</tr>")
     b.append("</tbody></table>")
-    b.append("<p class='sub'><b style='color:#27ae60'>■ TRUE HELD-OUT</b> = honest skill (CID22 is the "
-             "primary gate; AIC-3/AIC-4/KonJND compression/JND). <b style='color:#c0392b'>■ CHEAT / integrity "
-             "guard</b> = KADID/TID images are in training (as ssim2 targets); their human-MOS SROCC rewards "
-             "MEMORIZATION, not skill — watch only for regressions, never rank on them. "
-             "<b style='color:#e67e22'>■ HELD-OUT val split</b> = non-photo is imazen-26 VAL-origin {1,3,5}, "
-             "disjoint renditions from the TRAIN-origin the bakes fit (honest generalization, same corpus family).</p>")
+    # 3) training corpora actually used
+    used = sorted(set().union(*[t for t in train.values() if t]) if any(train.values()) else set())
+    if used:
+        b.append("<h3>Training corpora used (across these bakes)</h3><table><thead><tr>"
+                 "<th>corpus</th><th>what</th></tr></thead><tbody>")
+        for tc in used:
+            b.append(f"<tr><td class='lbl'>{tc}</td><td>{TRAIN_CORPUS_DESC.get(tc, '?')}</td></tr>")
+        b.append("</tbody></table>")
+    # 4) split footnotes
+    b.append("<h3>Split footnotes</h3><ol class='sub' style='margin-top:.2rem'>")
+    for c in B.VAL_CORPORA:
+        disp, split, _twin, foot = CORPUS_META[c]
+        b.append(f"<li id='fn-{c}'><b>{disp}</b> — {split}. {foot}</li>")
+    b.append("</ol>")
+    b.append("<p class='sub'><b style='color:#27ae60'>■ HELD-OUT</b> honest skill · "
+             "<b style='color:#c0392b'>■ CHEAT</b> train==val image overlap (memorization — never rank on it) · "
+             "<b style='color:#e67e22'>■ val-split</b> disjoint-rendition generalization · "
+             "<b style='color:#888'>■ unknown</b> no spec.json sidecar.</p>")
     return "".join(b)
 
 
@@ -426,8 +484,7 @@ def main():
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
     bakes = []
-    for lab, p in [("B(shipped)", WEIGHTS / "b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin"),
-                   ("§8.35 diverse", REPORTS / "mlp_diverse_depoison_dv0.5kw0.3_2026-07-15.bin")]:
+    for lab, p in [("B(shipped)", WEIGHTS / "b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin")]:
         if Path(p).exists():
             bakes.append((lab, "bin", str(p)))
     if a.bakes:
@@ -446,6 +503,12 @@ def main():
         for lab in data[c]:
             if lab not in labels:
                 labels.append(lab)
+    # per-bake training set (desync-proof, from spec.json). metrics train on nothing -> empty set.
+    train = {lab: bake_train(path) for lab, _k, path in bakes}
+    for c in data:
+        for lab, (_h, _p, _pan, kind) in data[c].items():
+            if kind == "metric":
+                train.setdefault(lab, set())
 
     body = ["<h1>zensim bandwise dashboard — bakes + ssim2/cvvdp/butteraugli × corpus × band</h1>",
             "<p class='sub'>Zoomable SVG. Comparison plots use rank-<b>percentile</b> so bakes on "
@@ -453,6 +516,9 @@ def main():
             "By <code>scripts/v_next/bandwise_dashboard.py</code>.</p>"]
     body.append(provenance_section(bakes))
     body.append("<h2 id='overview'>Cross-corpus overview</h2>")
+    body.append("<p class='sub'>Heatmap columns use split-suffixed names (see provenance). Cells are "
+                "SROCC; a bake's number on a corpus it TRAINED on (CHEAT) is memorization — cross-check "
+                "the honesty column in each corpus table.</p>")
     body.append(fig_heatmap(data, labels))
     body.append("<div class='row'>" + fig_trade(data, labels) + fig_composite(data, labels) + "</div>")
     npz_bakes = [(lab, path) for lab, kind, path in bakes if kind == "npz"]
@@ -471,13 +537,15 @@ def main():
         perbake = data[corp]
         if not perbake:
             continue
-        role = PROVENANCE[corp][0]; cheat = "CHEAT" in PROVENANCE[corp][3]
-        color = "#c0392b" if cheat else ("#e67e22" if "val split" in role else "#27ae60")
-        body.append(f"<h2 id='{corp}'>{corp} <span class='badge' style='background:{color}'>{role}</span></h2>")
-        body.append(f"<p class='sub'>{PROVENANCE[corp][3]}</p>")
-        body.append(agg_stat_table(perbake, corp))
+        disp, split, _twin, foot = CORPUS_META[corp]
+        cheats = [lab for lab in perbake if honesty(train.get(lab), corp)[0] == "CHEAT"]
+        summary = (f" <span class='badge' style='background:#c0392b'>CHEAT for: {', '.join(cheats)}</span>"
+                   if cheats else " <span class='badge' style='background:#27ae60'>held-out for all bakes</span>")
+        body.append(f"<h2 id='{corp}'>{disp}{summary}</h2>")
+        body.append(f"<p class='sub'>{split}. <a href='#fn-{corp}'>footnote↴</a> — {foot}</p>")
+        body.append(agg_stat_table(perbake, corp, train))
         if corp in BANDABLE:
-            body.append(band_table(perbake, corp))
+            body.append(band_table(perbake, corp, train))
             body.append(fig_bands_grouped(perbake, corp))
             body.append(fig_candlestick(perbake, corp))
         body.append("<div class='row'>" + fig_calibration(perbake, corp) + fig_residual(perbake, corp) + "</div>")

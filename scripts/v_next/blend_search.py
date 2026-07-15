@@ -46,6 +46,16 @@ ROUND3 = [
     ("r3-1L-ref",        dict(_KT), {"layers": 1}),
     ("r3-ssim2only-2L",  {"safesyn": 1, "cid22_train": 1}, {"layers": 2}),
 ]
+# round 4 — "can we make a good model WITHOUT cid22 as train data?" (user 2026-07-15). Drop
+# cid22_train; a purest variant drops ALL human-eval-corpus data (safesyn+bigcodec+kadis only) so
+# CID22/KADID/TID become TRUE held-outs. H128 2-layer (the r3 winner arch).
+ROUND4 = [
+    ("r4-2L-ref(withcid)", dict(_KT), {"layers": 2, "hidden": 128}),
+    ("r4-2L-nocid",        {"safesyn": 1, "kadid": 1.0, "tid": 1.0, "bigcodec": 1.0, "kadis": 0.3}, {"layers": 2, "hidden": 128}),
+    ("r4-2L-nocid-noktid", {"safesyn": 1, "bigcodec": 1.0, "kadis": 0.3}, {"layers": 2, "hidden": 128}),
+    ("r4-2L-nocid-div1.5", {"safesyn": 1, "kadid": 1.0, "tid": 1.0, "bigcodec": 1.5, "kadis": 0.3}, {"layers": 2, "hidden": 128}),
+    ("r4-2L-syn+div-only", {"safesyn": 1, "bigcodec": 1.5, "kadis": 0.3}, {"layers": 2, "hidden": 128}),
+]
 # (label, blend spec {corpus: weight}, hp-overrides). The systematic sweep of "does adding the
 # now-clean kadid/tid help, at what weight, traded against div/kadis".
 ROUND1 = [
@@ -89,12 +99,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", default="1,7")
     ap.add_argument("--topk", type=int, default=4)
-    ap.add_argument("--round", default="1", choices=["1", "2", "3"])
+    ap.add_argument("--round", default="1", choices=["1", "2", "3", "4"])
     ap.add_argument("--out-dir", default="/mnt/v/output/zensim/reports/blend")
     a = ap.parse_args()
     seeds = [int(x) for x in a.seeds.split(",")]
     od = Path(a.out_dir); od.mkdir(parents=True, exist_ok=True)
-    CONFIGS = {"1": ROUND1, "2": ROUND2, "3": ROUND3}[a.round]
+    CONFIGS = {"1": ROUND1, "2": ROUND2, "3": ROUND3, "4": ROUND4}[a.round]
     rtag = f"r{a.round}"
 
     cols = ["cid22", "nonphoto", "konjnd", "aic3", "aic4", "kadid", "tid"]
@@ -127,9 +137,9 @@ def main():
     saved = []
     for i, r in enumerate(ranked[:a.topk]):
         pth = od / f"blend_{rtag}_{i}_{r['label'].replace('(', '').replace(')', '').replace('§', 's').replace(',', '_').replace('+', 'p').replace('@', 'a').replace('.', '')}.npz"
-        # strip non-array dict fields (spec/hp live in the json) so np.load needs no allow_pickle
-        arr_only = {k: v for k, v in r["_payloads"][r["payload_idx"]].items() if k not in ("spec", "hp")}
-        np.savez(str(pth), **arr_only)
+        # npz (arrays only, no allow_pickle) + a <npz>.spec.json sidecar recording the training
+        # corpora — the desync-proof provenance source the dashboard reads.
+        B.save_payload(str(pth), r["_payloads"][r["payload_idx"]])
         saved.append({"label": r["label"], "npz": str(pth), "spec": r["spec"], "hp": r["hp"],
                       "composite": r["composite"], "panel": r["panel"]})
         print(f"  #{i} {r['label']:16} composite {r['composite']:.3f}  CID22 "

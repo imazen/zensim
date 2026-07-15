@@ -1,0 +1,16 @@
+{
+  "train_corpora": [
+    "cid22_train",
+    "hdr_v3mix",
+    "kadid",
+    "safesyn",
+    "tid"
+  ],
+  "weights": {
+    "cid_head(hdr_v3mix)": 0.8,
+    "kon_head(safesyn+cid22_train+kadid+tid+hdr_v3mix)": 0.2
+  },
+  "arch": "linear ensemble 0.8\u00b7cid_head(lasso) + 0.2\u00b7kon_head(bvls)",
+  "target": "cvvdp-mix / ssim2-anchored",
+  "note": "SHIPPED B; kon head trained on kadid+tid -> CHEAT for B; cid22_train is ssim2-anchored (honest)"
+}

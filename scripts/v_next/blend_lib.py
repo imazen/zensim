@@ -144,6 +144,27 @@ def train_blend(spec, hp, seed):
     return out
 
 
+def save_payload(path, payload):
+    """Save npz (arrays only) + a <path>.spec.json sidecar recording what this bake trained on,
+    so a dashboard derives train/cheat provenance from the ACTUAL bake — it can't desync. The
+    sidecar is the single source of truth for 'what did this model learn from'."""
+    import json
+    np.savez(path, **{k: v for k, v in payload.items() if k not in ("spec", "hp")})
+    spec = payload.get("spec", {})
+    hp = payload.get("hp", {})
+    layers = int(payload.get("layers", hp.get("layers", 1)))
+    H = int(payload.get("hidden", hp.get("hidden", 64)))
+    meta = {
+        "train_corpora": sorted([k for k, w in spec.items() if w > 0]),
+        "weights": {k: float(w) for k, w in spec.items()},
+        "target": "ssim2_gpu / ssim2-derived (NOT human MOS, NOT score_zensim)",
+        "arch": f"372-{H}-{H}-1" if layers == 2 else f"372-{H}-1",
+        "hp": {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in hp.items()},
+        "seed": int(payload.get("seed", -1)),
+    }
+    Path(str(path) + ".spec.json").write_text(json.dumps(meta, indent=2))
+
+
 def forward(p, X):
     lo, hi = p.get("lo"), p.get("hi")
     Xc = np.clip(X, lo, hi) if lo is not None else X
@@ -229,7 +250,7 @@ if __name__ == "__main__":
     a = ap.parse_args()
     spec = {kv.split(":")[0]: float(kv.split(":")[1]) for kv in a.spec.split(",")}
     p = train_blend(spec, {"hidden": a.hidden, "epochs": 400, "winsor_pct": 0.1}, a.seed)
-    np.savez(a.out, **{k: v for k, v in p.items() if k not in ("spec", "hp")})
+    save_payload(a.out, p)
     res = score_all(p)
     print(f"saved {a.out}  CID22 {res['cid22']['srocc']:.4f}  nonphoto {res['nonphoto']['srocc']:.4f}  "
           f"konjnd {abs(res['konjnd']['srocc']):.4f}  aic3 {abs(res['aic3']['srocc']):.4f}")
