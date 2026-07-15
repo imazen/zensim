@@ -373,12 +373,27 @@ Cite: `§8.36`.
   nothing for a looser bound to recover. Winsorization is not a near-lossless lever when the fit corpus
   already covers the regime — it is only a lever for repairing a mismatch. (Winsor still slightly helps
   CID22: 0.8862 at the 0.1 default vs 0.8802 at 0 — outlier guarding, not near-lossless.)
-  **Next suspects (untested):** (a) feature-vanishing *proper* — at near-lossless the distortion features
-  genuinely → 0, so little signal survives regardless of bounds; (b) **training-target saturation** — the
-  safesyn target is ssim2-derived and ssim2 saturates >95, so there is no gradient at the top (the same
-  mechanism §3.20 measured for cvvdp: "SATURATED on codec pairs → MSE can't discriminate the top"); (c)
-  CID22's own top-end MOS noise. (b) is the most likely and is directly testable with a
-  saturation-re-expanded target (cf. `ssim2_log_norm`, which §3.20 found trains fine at 0.880).
+  **⚠ SELF-CORRECTION (same day, measured within the hour):** the "next suspects" first written here —
+  (a) near-lossless feature-vanishing, (b) training-target saturation, (c) CID22 top-end MOS noise, with
+  (b) called "most likely" — were **two wrong inferences stacked on an unverified premise.** Both are now
+  MEASURED and (a)+(b) are refuted; (c) is right, and is better described as an intrinsic difficulty floor:
+  - **The premise "high-tail = near-lossless" is FALSE.** CID22's high-tail (top 30% by MOS, MCOS
+    81.2–91.9) has ssim2 p10 **75.4** / p50 **81.7** / p90 **88.1**, and **0.0000 of it is above ssim2 95**.
+    It never enters the near-lossless region at all — it is simply the better half of CID22's ordinary
+    compression range, which training covers densely. So (a) cannot apply.
+  - **(b) is REFUTED: the target is NOT ceiling-saturated.** safesyn's actual target is `ssim2_gpu`
+    (not `human_score`): p50 **68.73**, p90 **91.15**, p99 **95.89**, only **1.86%** above 95 and **0.35%**
+    within 2 points of max. That is nothing like the cvvdp saturation §3.20 measured (37% piled in
+    [9.8,10]). There is gradient at the top; `ssim2_log_norm` is not indicated here.
+  - **(c) is the answer, and it is a DIFFICULTY FLOOR, not our defect.** **ssim2 itself** shows the same
+    asymmetry on the same split: ssim2's own low-tail SROCC **+0.649** vs high-tail **+0.463** — versus our
+    honest champion's **+0.642 / +0.434**. Our bake tracks an independent, well-established metric to
+    within **0.007 (low-tail) / 0.029 (high-tail)**. Ranking stimuli humans rated MCOS 81–92 is
+    intrinsically harder than 28–64 (subtler differences, more MOS noise per unit of signal) — the tail
+    gap is a property of the task and the corpus, not of the model.
+  **Standing lesson:** a low tail/band number is only evidence of a model weakness *after* you check what
+  the tail actually contains and what an independent metric scores on the same split. Both checks are
+  cheap; skipping them produced a plausible, well-argued, wrong causal story that survived one commit.
   Cite: `benchmarks/blend_search_r6_2026-07-15.tsv`.
 
 ---

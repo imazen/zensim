@@ -422,7 +422,12 @@ def agg_stat_table(perbake, corp, train):
     rows.append(
         "<p class='sub'><b>low-tail / high-tail SROCC</b> = rank skill on the worst / best 30% by human score. "
         "These are the <b>honest extreme-quality numbers</b>: unlike the width-10 B0/B9 bands below they are "
-        "<b>not range-restricted</b>, so they measure real low-q / near-lossless rank skill instead of noise.</p>")
+        "<b>not range-restricted</b>, so they measure real rank skill at each end instead of noise. "
+        "<b>Read them against the ssim2 row, not against 1.0</b> — the high-tail is intrinsically harder than "
+        "the low-tail for <i>every</i> metric (on CID22, ssim2's own tails are +0.649 / +0.463), because "
+        "ranking stimuli humans scored near the top means subtler differences and noisier MOS. A bake whose "
+        "high-tail tracks ssim2's is at the corpus's difficulty floor, not defective. Note the high-tail is "
+        "<b>not</b> the near-lossless regime: CID22's top 30% by MOS sits at ssim2 ≈75–88, with 0% above 95.</p>")
     return "".join(rows)
 
 
