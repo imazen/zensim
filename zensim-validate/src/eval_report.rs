@@ -184,10 +184,10 @@ pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> Ram
                 e[0] += ok as usize;
                 e[1] += 1;
             }
-            if let Some(idlv) = signed_identity_level(*ty) {
-                if let Some(&d) = levels.get(&idlv) {
-                    signed_identity.entry(*ty).or_default().push(d);
-                }
+            if let Some(idlv) = signed_identity_level(*ty)
+                && let Some(&d) = levels.get(&idlv)
+            {
+                signed_identity.entry(*ty).or_default().push(d);
             }
             continue;
         }

@@ -10,6 +10,8 @@
 //! RUSTFLAGS='-C target-feature=+simd128' \
 //!   cargo test --target wasm32-wasip1 -p zensim-wasm-tests -- --nocapture
 //! ```
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use zensim::{RgbaSlice, Zensim, ZensimProfile};
 use zensim_regress::checksums::ChecksumManager;

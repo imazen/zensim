@@ -8,6 +8,8 @@
 //!
 //! Prints a per-probe trace and a one-line summary with the achieved score,
 //! the chosen knob, and the encoded byte count.
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use std::path::PathBuf;
 

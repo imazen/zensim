@@ -65,10 +65,10 @@ pub fn forward_kernel(
     let nf_us = n_features as usize;
     let row_off = b as usize * nh_us + j as usize;
     let x_row_off = b as usize * nf_us;
-    let zero = f32::new(0.0);
-    let one = f32::new(1.0);
-    let clamp_pos = f32::new(20.0);
-    let clamp_neg = f32::new(-20.0);
+    let zero = f32::new(0.0_f32);
+    let one = f32::new(1.0_f32);
+    let clamp_pos = f32::new(20.0_f32);
+    let clamp_neg = f32::new(-20.0_f32);
 
     // Step 1: per-thread accumulation for h_pre[b, j]
     let mut acc = b1[j as usize];
@@ -134,7 +134,7 @@ pub fn forward_kernel(
 
         let p6_inner = sum_h6 / n_h_f;
         let inv_p_norm = f32::new(1.0 / POOL_P_NORM);
-        let p6 = if p6_inner > f32::new(1e-20) {
+        let p6 = if p6_inner > f32::new(1e-20_f32) {
             f32::powf(p6_inner, inv_p_norm)
         } else {
             zero
@@ -185,7 +185,7 @@ pub fn forward_kernel(
                 z
             };
             let s = one / (one + f32::exp(-z_c));
-            y_score_out[b_u] = f32::new(100.0) * s;
+            y_score_out[b_u] = f32::new(100.0_f32) * s;
         } else {
             y_score_out[b_u] = y_pre;
         }
@@ -212,11 +212,11 @@ pub fn loss_kernel(
     if k >= n_pairs {
         terminate!();
     }
-    let zero = f32::new(0.0);
-    let one = f32::new(1.0);
-    let two = f32::new(2.0);
-    let clamp_pos = f32::new(20.0);
-    let clamp_neg = f32::new(-20.0);
+    let zero = f32::new(0.0_f32);
+    let one = f32::new(1.0_f32);
+    let two = f32::new(2.0_f32);
+    let clamp_pos = f32::new(20.0_f32);
+    let clamp_neg = f32::new(-20.0_f32);
 
     let ihi = pair_hi[k] as usize;
     let ilo = pair_lo[k] as usize;
@@ -253,15 +253,15 @@ pub fn loss_kernel(
 
     // Chain through tanh-pin Jacobian if active.
     let dl_dypre_hi = if tanh_scale > zero {
-        let s_hi = yhi_s / f32::new(100.0);
-        let jac_hi = (f32::new(100.0) / tanh_scale) * s_hi * (one - s_hi);
+        let s_hi = yhi_s / f32::new(100.0_f32);
+        let jac_hi = (f32::new(100.0_f32) / tanh_scale) * s_hi * (one - s_hi);
         dl_dyhi_s * jac_hi
     } else {
         dl_dyhi_s
     };
     let dl_dypre_lo = if tanh_scale > zero {
-        let s_lo = ylo_s / f32::new(100.0);
-        let jac_lo = (f32::new(100.0) / tanh_scale) * s_lo * (one - s_lo);
+        let s_lo = ylo_s / f32::new(100.0_f32);
+        let jac_lo = (f32::new(100.0_f32) / tanh_scale) * s_lo * (one - s_lo);
         dl_dylo_s * jac_lo
     } else {
         dl_dylo_s
@@ -301,8 +301,8 @@ pub fn backprop_heads_kernel(
     if j >= n_hidden {
         terminate!();
     }
-    let zero = f32::new(0.0);
-    let one = f32::new(1.0);
+    let zero = f32::new(0.0_f32);
+    let one = f32::new(1.0_f32);
     let nh_us = n_hidden as usize;
     let row_off = b as usize * nh_us + j as usize;
     let n_h_f = f32::cast_from(n_hidden);
@@ -347,7 +347,7 @@ pub fn backprop_heads_kernel(
     } else {
         zero
     };
-    let p6_floor_thresh = f32::new(1e-12);
+    let p6_floor_thresh = f32::new(1e-12_f32);
     let p6_floor = if p6 > p6_floor_thresh {
         p6
     } else {
@@ -399,7 +399,7 @@ pub fn backprop_w1_kernel(
     }
     let nh_us = n_hidden as usize;
     let nf_us = n_features as usize;
-    let zero = f32::new(0.0);
+    let zero = f32::new(0.0_f32);
 
     let mut acc = zero;
     let mut acc_b = zero;
@@ -435,11 +435,11 @@ pub fn adam_step_kernel(
     if k >= n {
         terminate!();
     }
-    let beta1 = f32::new(0.9);
-    let beta2 = f32::new(0.999);
-    let eps = f32::new(1e-8);
-    let one = f32::new(1.0);
-    let zero = f32::new(0.0);
+    let beta1 = f32::new(0.9_f32);
+    let beta2 = f32::new(0.999_f32);
+    let eps = f32::new(1e-8_f32);
+    let one = f32::new(1.0_f32);
+    let zero = f32::new(0.0_f32);
 
     let g_k = g[k];
     let m_new = beta1 * m[k] + (one - beta1) * g_k;
@@ -469,11 +469,11 @@ pub fn adam_step_atomic_grad_kernel(
     if k >= n {
         terminate!();
     }
-    let beta1 = f32::new(0.9);
-    let beta2 = f32::new(0.999);
-    let eps = f32::new(1e-8);
-    let one = f32::new(1.0);
-    let zero = f32::new(0.0);
+    let beta1 = f32::new(0.9_f32);
+    let beta2 = f32::new(0.999_f32);
+    let eps = f32::new(1e-8_f32);
+    let one = f32::new(1.0_f32);
+    let zero = f32::new(0.0_f32);
 
     let g_k = g[k].load();
     let m_new = beta1 * m[k] + (one - beta1) * g_k;
@@ -494,7 +494,7 @@ pub fn zero_f32_kernel(buf: &mut Array<f32>) {
     if k >= n {
         terminate!();
     }
-    buf[k] = f32::new(0.0);
+    buf[k] = f32::new(0.0_f32);
 }
 
 /// Element-wise zero for atomic-f32 buffers.
@@ -505,7 +505,7 @@ pub fn zero_atomic_f32_kernel(buf: &mut Array<Atomic<f32>>) {
     if k >= n {
         terminate!();
     }
-    buf[k].store(f32::new(0.0));
+    buf[k].store(f32::new(0.0_f32));
 }
 
 /// L2 regularizer: `grad[k] += 2·λ·weight[k]`.
@@ -567,9 +567,9 @@ pub fn anchor_loss_kernel(
     if k >= n {
         terminate!();
     }
-    let zero = f32::new(0.0);
-    let one = f32::new(1.0);
-    let two = f32::new(2.0);
+    let zero = f32::new(0.0_f32);
+    let one = f32::new(1.0_f32);
+    let two = f32::new(2.0_f32);
 
     let y_s = y_score[k];
     let tgt = target_score[k];
@@ -578,8 +578,8 @@ pub fn anchor_loss_kernel(
     let dl_dy_s = two * w_anchor * rw * err;
 
     let dl_dypre = if tanh_scale > zero {
-        let s = y_s / f32::new(100.0);
-        let jac = (f32::new(100.0) / tanh_scale) * s * (one - s);
+        let s = y_s / f32::new(100.0_f32);
+        let jac = (f32::new(100.0_f32) / tanh_scale) * s * (one - s);
         dl_dy_s * jac
     } else {
         dl_dy_s
@@ -618,11 +618,11 @@ pub fn cross_codec_eq_loss_kernel(
     if k >= kp_us {
         terminate!();
     }
-    let zero = f32::new(0.0);
-    let one = f32::new(1.0);
-    let two = f32::new(2.0);
-    let clamp_pos = f32::new(20.0);
-    let clamp_neg = f32::new(-20.0);
+    let zero = f32::new(0.0_f32);
+    let one = f32::new(1.0_f32);
+    let two = f32::new(2.0_f32);
+    let clamp_pos = f32::new(20.0_f32);
+    let clamp_neg = f32::new(-20.0_f32);
 
     let k_u = k;
     let i_a = k_u;
@@ -645,7 +645,7 @@ pub fn cross_codec_eq_loss_kernel(
         // on the |db| > 1e-12 check below, which also rejects NaN
         // because NaN comparisons return false (so NaN > 1e-12 is false).
         let abs_db = if db >= zero { db } else { -db };
-        if abs_db > f32::new(1e-12) {
+        if abs_db > f32::new(1e-12_f32) {
             let s = if db > zero { one } else { -one };
             let w_rp_eff = w_rp * abs_db;
             let u = s * (yb - ya);
@@ -668,15 +668,15 @@ pub fn cross_codec_eq_loss_kernel(
 
     // Chain through tanh-pin Jacobian per side.
     let dl_dypre_a = if tanh_scale > zero {
-        let s_a = ya / f32::new(100.0);
-        let jac_a = (f32::new(100.0) / tanh_scale) * s_a * (one - s_a);
+        let s_a = ya / f32::new(100.0_f32);
+        let jac_a = (f32::new(100.0_f32) / tanh_scale) * s_a * (one - s_a);
         dl_dya_s * jac_a
     } else {
         dl_dya_s
     };
     let dl_dypre_b = if tanh_scale > zero {
-        let s_b = yb / f32::new(100.0);
-        let jac_b = (f32::new(100.0) / tanh_scale) * s_b * (one - s_b);
+        let s_b = yb / f32::new(100.0_f32);
+        let jac_b = (f32::new(100.0_f32) / tanh_scale) * s_b * (one - s_b);
         dl_dyb_s * jac_b
     } else {
         dl_dyb_s
@@ -720,7 +720,7 @@ pub fn sigma_floor_reduce_kernel(
     if tid > 0usize {
         terminate!();
     }
-    let zero = f32::new(0.0);
+    let zero = f32::new(0.0_f32);
     let n_f = f32::cast_from(n_probe);
 
     let mut sum = zero;
@@ -743,9 +743,9 @@ pub fn sigma_floor_reduce_kernel(
     let sigma_obs = f32::sqrt(var_safe);
 
     let viol = sigma_threshold - sigma_obs;
-    let sigma_eps = f32::new(1e-9);
+    let sigma_eps = f32::new(1e-9_f32);
     let (grad_scale, loss) = if viol > zero && sigma_obs > sigma_eps {
-        let g = -f32::new(2.0) * w_dr * viol / (sigma_obs * n_f);
+        let g = -f32::new(2.0_f32) * w_dr * viol / (sigma_obs * n_f);
         let l = w_dr * viol * viol;
         (g, l)
     } else {
@@ -781,16 +781,16 @@ pub fn sigma_floor_grad_kernel(
     if k >= n {
         terminate!();
     }
-    let zero = f32::new(0.0);
-    let one = f32::new(1.0);
+    let zero = f32::new(0.0_f32);
+    let one = f32::new(1.0_f32);
     let mu = reduce_out[0];
     let grad_scale = reduce_out[2];
 
     let y_s = y_score[k];
     let dl_dy_s = grad_scale * (y_s - mu);
     let dl_dypre = if tanh_scale > zero {
-        let s = y_s / f32::new(100.0);
-        let jac = (f32::new(100.0) / tanh_scale) * s * (one - s);
+        let s = y_s / f32::new(100.0_f32);
+        let jac = (f32::new(100.0_f32) / tanh_scale) * s * (one - s);
         dl_dy_s * jac
     } else {
         dl_dy_s

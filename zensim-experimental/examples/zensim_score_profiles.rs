@@ -1,6 +1,9 @@
 //! Compare zensim score across multiple profiles for one (ref, dist) pair.
 //!
 //! Usage: zensim_score_profiles ref.png dist.png
+#![allow(deprecated)]
+// comparing ACROSS profiles is the point, so this deliberately names the
+// deprecated `ZensimProfile::A` (still shipped behind `deprecated-profiles`)
 use std::env;
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
@@ -19,7 +22,8 @@ fn main() {
     let s = RgbSlice::new(&src, w, h);
     let d = RgbSlice::new(&dst, w, h);
     for (name, p) in [
-        ("v0_3 (latest)", ZensimProfile::A),
+        ("b (latest)", ZensimProfile::latest_preview()),
+        ("a (deprecated)", ZensimProfile::A),
         (
             "v0_5_balanced",
             zensim_experimental::preview_v0_5_balanced(),

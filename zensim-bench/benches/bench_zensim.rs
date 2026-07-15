@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 use criterion::{Criterion, criterion_group, criterion_main};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 

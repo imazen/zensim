@@ -3,6 +3,8 @@
 //! (their bake produces ~0 for near-identical inputs).
 //!
 //! `cargo run --release --example smoke_check -p zensim-target -- <path/to/image.png>`
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use image::ImageReader;
 use zensim::{RgbSlice, Zensim, ZensimProfile};

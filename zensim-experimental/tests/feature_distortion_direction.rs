@@ -27,6 +27,8 @@
 // compute_zensim_with_config). Compile-time gate so `cargo test -p zensim`
 // (default features) builds cleanly; run via `cargo test -p zensim --features training`.
 #![cfg(feature = "training")]
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 mod common;
 

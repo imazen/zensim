@@ -15,6 +15,8 @@
 //! Fix: gate `apply_mlp_scoring` on whether the input pair was
 //! byte-identical. Done at the `Zensim::compute*` callsite layer so
 //! the metric.rs MLP path is unchanged for non-identical input.
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 

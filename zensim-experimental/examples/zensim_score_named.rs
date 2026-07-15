@@ -21,6 +21,8 @@
 //!
 //! Used by `cross_codec_consistency.py` to binary-search the q value
 //! achieving a target zensim score under each shipping profile.
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use std::env;
 use std::process::ExitCode;
@@ -56,7 +58,9 @@ fn main() -> ExitCode {
         "v0_5_compression" => zensim_experimental::preview_v0_5_compression(),
         "v0_5_ensemble" => zensim_experimental::preview_v0_5_ensemble(),
         "v0_5_tuner" => zensim_experimental::preview_v0_5_tuner(),
-        "latest" => ZensimProfile::A,
+        // tracks `latest_preview()` — which the 2026-07-12 A->B flip moved to
+        // `B`. Ask for `v0_3` by name if you want the deprecated A bake.
+        "latest" => ZensimProfile::latest_preview(),
         other => {
             eprintln!("unknown profile: {other}");
             print_usage(&args[0]);

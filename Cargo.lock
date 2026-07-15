@@ -5953,7 +5953,7 @@ dependencies = [
 [[package]]
 name = "zenstats"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenmetrics?rev=0ce69492c030776d50381bebf5436f765593019c#0ce69492c030776d50381bebf5436f765593019c"
+source = "git+https://github.com/imazen/zenmetrics?rev=82e7fa936b400984564d4d285a782b9a80482a61#82e7fa936b400984564d4d285a782b9a80482a61"
 dependencies = [
  "rayon",
 ]

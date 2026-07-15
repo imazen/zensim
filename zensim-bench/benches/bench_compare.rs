@@ -6,6 +6,8 @@
 //!   Includes C++ ssimulacra2/butteraugli via FFI when built with libjxl (see build.rs).
 //! - `end_to_end`: includes process spawn + PPM read. Only for the C++ binary
 //!   when FFI is not available. Set `SSIMULACRA2_BIN` to enable.
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use imgref::Img;

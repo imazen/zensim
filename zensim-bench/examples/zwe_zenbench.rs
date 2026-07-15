@@ -7,6 +7,8 @@
 //! each optimization in isolation, then ping-pong via separate binaries.
 //!
 //! Run with: cargo run --release -p zensim-bench --example zwe_zenbench
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 

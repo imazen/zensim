@@ -53,6 +53,9 @@ fn synthetic_group<'a>(
         metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 1.0,
+        // No ref identity: this fixture is synthetic monotone rows, not a
+        // per-reference distortion ladder, so within-ref pairing does not apply.
+        ref_ids: None,
     }
 }
 

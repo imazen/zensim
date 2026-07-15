@@ -1,5 +1,6 @@
 #![cfg(feature = "classification")]
-#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 //! Error classification tests against PNG fixture corpus.
 //!
 //! Validates that:

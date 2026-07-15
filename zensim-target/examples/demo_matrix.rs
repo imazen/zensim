@@ -2,6 +2,8 @@
 //! and print a Markdown-friendly results table.
 //!
 //! `cargo run --release --example demo_matrix -p zensim-target`
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use std::path::PathBuf;
 

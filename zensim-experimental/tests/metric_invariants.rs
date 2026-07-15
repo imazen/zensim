@@ -22,6 +22,8 @@
 //! bounded squash `100·exp(−(a/100)·d^b)`), so this gate passes for it.
 //! The MLP profile `A` (V39) violates them — documented as a tracked
 //! known-limit in `v39_known_limit_violations`, NOT relaxed.
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 mod common;
 

@@ -49,7 +49,9 @@ use std::time::Instant;
 use zenpredict::{Model, Predictor};
 
 use zensim_validate::eval_report;
-use zensim_validate::panel::{PerGroupSrocc, compute_panel, per_group_srocc, rescale_logistic};
+use zensim_validate::panel::{
+    Orientation, PerGroupSrocc, compute_panel, per_group_srocc, rescale_logistic,
+};
 use zensim_validate::parquet_loader;
 
 // ============================================================================
@@ -228,6 +230,29 @@ const CORPORA: &[Corpus] = &[
         // NOTE: this filename is ABSOLUTE — `Path::join` discards `features_root`
         // when the argument is absolute, so it resolves regardless of --features-root.
         filename: "/mnt/v/zen/zensim-training/2026-05-15-full-features/nonphoto_features_372col_2026-07-15.parquet",
+        enable_per_band: false,
+    },
+    Corpus {
+        name: "hf_nearlossless",
+        display: "HF near-lossless (held-out refs)",
+        // THE near-lossless axis (added 2026-07-15). 72% of its cells sit above
+        // ssim2 95, where safesyn has 1.86% — so it covers the regime the
+        // training distribution lacks, and §8.39 measured that a bake trained
+        // without it ranks this regime BACKWARDS (per-ref -0.144, 60% of refs
+        // negative) while every pooled number looks fine.
+        //
+        // READ THE per-ref COLUMN, NOT POOLED. The ladder moves ~0.92 ssim2 pts
+        // within an image against ~6 pts of cross-image spread, so pooled SROCC
+        // reads +0.204 where per-ref reads +0.916 on the same rows — pooled is
+        // dominated by between-image scale and is nearly blind to the ladder.
+        // Same confound as the documented AIC-3 "0.79 pooled / 0.93 per-ref".
+        //
+        // 50 refs x 6 distortions, ref-level split (the 150 train refs are
+        // disjoint), so this is honest holdout for a bake trained on
+        // hf_nearlossless_train.parquet.
+        filename: "/mnt/v/zen/zensim-training/canonical-2026-07-15/train/hf_nearlossless_val.parquet",
+        // Everything here lives in ssim2 91..100, i.e. one width-10 band. A
+        // 10-band split would put all 300 rows in B9 and report nine empties.
         enable_per_band: false,
     },
 ];
@@ -937,10 +962,19 @@ fn render_corpus(
     let (srocc, plcc, krocc, or_, pw, z, ds) = aggregate_panel(&scores, &humans);
     // Grouping by reference image is this binary's call; the statistic is
     // zenstats' (the canonical stats home — never re-derive it here).
+    // Orientation::Auto, not the default-signed reading: `compute_panel`
+    // reports `srocc.abs()`, so a distance-shaped bake (every raw RankNet bake
+    // before its spline — pred range here runs NEGATIVE) shows a healthy pooled
+    // number while its signed per-ref reads as a total inversion. Measured
+    // 2026-07-15 before the fix: pooled +0.8842 beside per-ref -0.9596 / "100%
+    // backwards" on CID22 for a bake whose ladders were all CORRECT. Auto
+    // resolves polarity once from the pooled sign, so this column and the panel
+    // it sits next to cannot contradict each other — while a ladder that
+    // disagrees with the bake's own polarity still reports negative.
     let per_ref = g
         .ref_ids
         .as_ref()
-        .and_then(|r| per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS));
+        .and_then(|r| per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS, Orientation::Auto));
 
     let mut body = String::new();
     body.push_str(&format!("\n## {} (n={})\n\n", corpus.display, n));

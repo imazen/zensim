@@ -199,11 +199,31 @@ def check(p: Path) -> list[str]:
             # `cargo build` fixes it. Only an artifact with no source anywhere
             # is a fossil. Failing the buildable case would train people to
             # ignore this linter, which is worse than not having it.
-            if find_source(Path(raw).name):
+            if unverifiable(raw) or find_source(Path(raw).name):
                 continue
             fails.append(f"DEAD-BIN missing binary with no source: {raw}")
     fails += dead_script_refs("\n".join(literals))
     return sorted(set(fails))
+
+
+def unverifiable(raw: str) -> bool:
+    """True when `raw` lives in a sibling repo that is not checked out here.
+
+    A path into `../zenmetrics` or `../zenanalyze` can only be judged when that
+    repo is actually present. CI checks out zensim ALONE, so on the runner every
+    sibling path resolves to nothing and the DEAD-BIN check fired on 13
+    perfectly good `zenmetrics` invocations — the linter passed locally (where
+    the siblings exist) and failed in CI. A check whose verdict depends on the
+    developer's directory layout is not a check.
+
+    So: verify what is here, and say nothing about what is not. The local run
+    still catches sibling-repo rot (that is how the `zen-metrics` -> `zenmetrics`
+    rename was found); CI just declines to guess.
+    """
+    for sib in ("zenanalyze", "zenmetrics"):
+        if f"/{sib}/" in raw and not (ZEN / sib).is_dir():
+            return True
+    return False
 
 
 def find_source(binary: str) -> Path | None:
@@ -274,7 +294,7 @@ def check_shell(p: Path) -> list[str]:
             continue
         if Path(raw).exists() or WT_RE.search(raw):
             continue
-        if find_source(Path(raw).name):
+        if unverifiable(raw) or find_source(Path(raw).name):
             continue
         fails.append(f"DEAD-BIN missing binary with no source: {raw}")
     fails += dead_script_refs(body)

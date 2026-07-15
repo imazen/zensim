@@ -31,6 +31,8 @@
 //!     --cid22 /mnt/v/dataset/cid22/CID22_validation_set \
 //!     --v04-bake /mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin \
 //!     --output /mnt/v/output/zensim/profile_compat_v02_v04.csv
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -8,6 +8,8 @@
 //!
 //! Gated behind `__experimental_versions` to match the profile's
 //! feature gate.
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 

@@ -1,5 +1,6 @@
 #![cfg(feature = "classification")]
-#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 //! Imageflow visual regression checksum analysis.
 //!
 //! Downloads old/new image pairs from imageflow's S3 bucket and runs
@@ -337,7 +338,7 @@ fn imageflow_checksum_analysis() {
             &commit[..8],
             change_type,
             pairs.len(),
-            &msg.chars().take(60).collect::<String>(),
+            msg.chars().take(60).collect::<String>(),
         );
     }
 
