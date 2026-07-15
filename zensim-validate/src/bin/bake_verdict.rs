@@ -213,6 +213,23 @@ const CORPORA: &[Corpus] = &[
         filename: "aic4_features_372col_2026-05-20.parquet",
         enable_per_band: false,
     },
+    Corpus {
+        name: "nonphoto",
+        display: "imazen-26 non-photo (held-out)",
+        // THE non-photographic axis (added 2026-07-15). All other corpora are
+        // photographic/near-photographic, so a bake blind to screen/UI/document/
+        // line-art/AI-gen content scores ~identically on them — the blindness is
+        // INVISIBLE (see §8.34/§8.35). This is the standing detector: a held-out
+        // val-origin ({1,3,5}) 10k subsample of bigcodec/imazen-26 (real modern-codec
+        // distortions on 21 diverse content categories); `human_score` = ssim2/100, so
+        // SROCC here = rank-agreement with ssim2 on diverse content. A bake that
+        // ranks photographic content well but craters here (§8.33/B ≈ 0.856 vs a
+        // diverse-trained ≈ 0.93) is content-blind — the G-NP gate flags it.
+        // NOTE: this filename is ABSOLUTE — `Path::join` discards `features_root`
+        // when the argument is absolute, so it resolves regardless of --features-root.
+        filename: "/mnt/v/zen/zensim-training/2026-05-15-full-features/nonphoto_features_372col_2026-07-15.parquet",
+        enable_per_band: false,
+    },
 ];
 
 fn parse_corpora_arg(arg: &str) -> Result<Vec<&'static Corpus>, String> {
@@ -1118,6 +1135,23 @@ fn main() -> ExitCode {
 
     let mut results: Vec<CorpusResult> = Vec::new();
     for corpus in &args.corpora {
+        // NO GRACEFUL SKIP (CLAUDE.md): a missing corpus FAILS LOUD with an R2 fetch hint,
+        // never silently drops an axis (a run that skips the non-photo corpus would hide the
+        // very content-blindness this eval exists to catch). All eval corpora are mirrored to
+        // s3://zentrain/eval-corpora/ — the error tells the caller how to restore them.
+        let cpath = args.features_root.join(corpus.filename);
+        if !cpath.exists() {
+            eprintln!(
+                "bake_verdict: MISSING corpus {} at {} — do NOT skip; restore it:\n  \
+                 aws s3 cp s3://zentrain/eval-corpora/{} {} --endpoint-url \
+                 https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com",
+                corpus.display,
+                cpath.display(),
+                Path::new(corpus.filename).file_name().unwrap().to_string_lossy(),
+                cpath.display(),
+            );
+            return ExitCode::from(2);
+        }
         // Per-pair dump only meaningful when a single corpus is selected
         // (one output path → one corpus); pass through for all, last wins.
         match render_corpus(
@@ -1173,6 +1207,7 @@ fn main() -> ExitCode {
         let cid22 = find("CID22");
         let konjnd = find("KonJND");
         let aic3 = find("AIC-3");
+        let nonphoto = find("non-photo");
 
         // G1: dynamic range — pool all dial-space scores, check p5/p95.
         let mut pooled: Vec<f64> = results
@@ -1205,6 +1240,13 @@ fn main() -> ExitCode {
         // G9: DS-AUC — AIC-3 floor 0.70, target 0.85.
         let g9 = aic3.map(|r| soft_gate(r.ds_auc, 0.70, 0.85)).unwrap_or(0.0);
 
+        // G-NP: non-photo content rank (added 2026-07-15). Held-out imazen-26 diverse
+        // content vs ssim2. Floor 0.85, target 0.93 — a content-BLIND bake (photographic-
+        // only training) craters to ~0.856 here while photographic corpora stay high, so
+        // this is the standing detector for "non-photo content crashes" (§8.34/§8.35).
+        // Only scored when the nonphoto corpus is in the run (default set includes it).
+        let gnp = nonphoto.map(|r| soft_gate(r.srocc, 0.85, 0.93));
+
         buf.push_str("\n## CODEC_TARGET_GOALS.md scorecard (measurable subset)\n\n");
         buf.push_str("| Goal | Measure | Value | Soft score |\n");
         buf.push_str("|---|---|---:|---:|\n");
@@ -1228,6 +1270,23 @@ fn main() -> ExitCode {
             "| G9 DS-AUC | AIC-3 ≥0.70 | {:.4} | {g9:.2} |\n",
             aic3.map(|r| r.ds_auc).unwrap_or(f64::NAN),
         ));
+        if let Some(r) = nonphoto {
+            // Crash vs weak: a diverse-trained bake ranks non-photo content ≈0.93; a
+            // photographic-only bake degrades to ≈0.86 (content-weak); a truly broken bake
+            // (garbage IW features, unclipped outliers) collapses toward 0 (crash).
+            let flag = if r.srocc < 0.50 {
+                " ⚠⚠ NON-PHOTO CRASH (garbage ranking)"
+            } else if r.srocc < 0.88 {
+                " ⚠ content-weak (< diverse-trained ~0.93)"
+            } else {
+                ""
+            };
+            buf.push_str(&format!(
+                "| G-NP non-photo rank | imazen-26 SROCC ≥0.85 (target 0.93) | {:.4} | {:.2} |{flag}\n",
+                r.srocc,
+                gnp.unwrap_or(0.0),
+            ));
+        }
         // Weighted composite per the doc's priority order (G1=3, G8=2.5,
         // G5=1.5, G9=1, G7=0.5). G2/G3/G4/G6/G10/G11 need external data.
         let weighted =

@@ -1,0 +1,46 @@
+run-heavy: mem-cap=40G (cgroup, hard) jobs=24/28 avail=41544MiB :: python3 -c 
+import pyarrow.parquet as pq, numpy as np
+from scipy.stats import spearmanr
+TRAIN='/mnt/v/zen/zensim-training/canonical-2026-05-21/train'
+# safesyn canonical has cvvdp_score + ssim2_gpu + f0..f371
+t=pq.read_table(f'{TRAIN}/safesyn.parquet', columns=['cvvdp_score','cvvdp_log_norm','ssim2_gpu']+[f'f{i}' for i in range(372)])
+cv=np.asarray(t['cvvdp_score'],dtype=np.float64); cvln=np.asarray(t['cvvdp_log_norm'],dtype=np.float64)
+ss=np.asarray(t['ssim2_gpu'],dtype=np.float64)
+print(f'safesyn n={len(cv)}')
+print(f'cvvdp_score:  non-null {np.isfinite(cv).mean()*100:.1f}%  range [{np.nanmin(cv):.2f},{np.nanmax(cv):.2f}] med {np.nanmedian(cv):.2f}')
+print(f'cvvdp_log_norm: non-null {np.isfinite(cvln).mean()*100:.1f}%  range [{np.nanmin(cvln):.2f},{np.nanmax(cvln):.2f}]')
+print(f'ssim2_gpu:    non-null {np.isfinite(ss).mean()*100:.1f}%  range [{np.nanmin(ss):.2f},{np.nanmax(ss):.2f}]')
+ok=np.isfinite(cv)&np.isfinite(ss)
+print(f'BOTH finite: {ok.sum()} ({ok.mean()*100:.1f}%)')
+if ok.sum()>100:
+    print(f'  SROCC(cvvdp, ssim2) on safesyn = {spearmanr(cv[ok],ss[ok]).correlation:.4f}  <- do the two targets even AGREE?')
+# (3) feature-predictability: how learnable is cvvdp vs ssim2 from zensim features? quick ridge.
+X=np.stack([np.asarray(t[f'f{i}'],dtype=np.float64) for i in range(372)],1)
+m=ok & np.isfinite(X).all(1)
+X,cvv,ssv=X[m],cv[m],ss[m]
+# winsor de-poison (safesyn had a few big basic feats)
+lo=np.percentile(X,0.1,0); hi=np.percentile(X,99.9,0); X=np.clip(X,lo,hi)
+mu,sd=X.mean(0),X.std(0); sd[sd==0]=1; Xz=(X-mu)/sd
+rs=np.random.RandomState(0); tr=rs.rand(len(Xz))<0.8
+def ridge_srocc(y):
+    import numpy.linalg as la
+    A=Xz[tr]; b=(y[tr]-y[tr].mean())
+    w=la.solve(A.T@A+1e1*np.eye(A.shape[1]), A.T@b)
+    pred=Xz[~tr]@w
+    return spearmanr(pred, y[~tr]).correlation
+print()
+print('=== (3) how well do zensim (ssim2-family) FEATURES predict each target? (held-out ridge SROCC) ===')
+print(f'  features -> ssim2_gpu : {ridge_srocc(ssv):.4f}')
+print(f'  features -> cvvdp     : {ridge_srocc(cvv):.4f}   <- if MUCH lower, features are ssim2-shaped => cvvdp harder to learn')
+
+safesyn n=196086
+cvvdp_score:  non-null 100.0%  range [1.68,10.00] med 9.80
+cvvdp_log_norm: non-null 100.0%  range [0.00,100.00]
+ssim2_gpu:    non-null 100.0%  range [-739.04,98.70]
+BOTH finite: 196086 (100.0%)
+  SROCC(cvvdp, ssim2) on safesyn = 0.9838  <- do the two targets even AGREE?
+
+=== (3) how well do zensim (ssim2-family) FEATURES predict each target? (held-out ridge SROCC) ===
+  features -> ssim2_gpu : 0.9967
+  features -> cvvdp     : 0.9869   <- if MUCH lower, features are ssim2-shaped => cvvdp harder to learn
+run-heavy: done rc=0 20s | peak-RSS 2.98GiB | min-avail 39902MiB | peak-load 14.82

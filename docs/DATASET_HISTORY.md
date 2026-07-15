@@ -86,7 +86,7 @@ falsification from a single-run or SROCC-only call (the latter are re-flagged in
 
 | Approach | Why it failed (stated) | Strength | Re-opened? | Cite |
 |---|---|---|---|---|
-| **CVVDP-scalar-target** (predict CVVDP's pooled JOD) | "emulating CVVDP's OUTPUT ≠ having its CSF mechanism"; strictly worse ranker (CID22 0.66/0.70) | RIGOROUS ×2 (V41 + v47) | settled; open door = *spatial* cvvdp-diffmap supervision (never funded) | `v47_cvvdp_target_FALSIFIED_2026-05-27.md` |
+| **CVVDP-scalar-target** (predict CVVDP's pooled JOD) | "emulating CVVDP's OUTPUT ≠ having its CSF mechanism"; strictly worse ranker (CID22 0.66/0.70) | ⚠ **RE-FRAMED 2026-07-15** — a TARGET-SHAPE confound, not a cvvdp limit (§3.17). RAW `cvvdp_score` trains fine (CID22 0.85); only `cvvdp_log_norm`'s near-lossless-tail expansion craters it (0.58). | RE-OPENED — raw-scalar cvvdp is a viable HF lever | `benchmarks/…§8.36`; `v47_cvvdp_target_FALSIFIED_2026-05-27.md` |
 | **IW-SSIM direction** | "wins KADID+TID, craters CID22 (FRIQUEE transfer)" | ⚠ MIXED — the CID22 crater is the ssim2-SROCC trap (§0.1); IW won TID best-ever (Z-RMSE 0.231) | created "SROCC-only BANNED"; single-MLP high-k re-confirmed on full panel | `CLAUDE.md` "SROCC-only BANNED"; `falsification_reeval_results_2026-05-15.md` |
 | **Su-2023 distortion-manifold pretrain** | wins KADID+TID, loses held-out CID22 −0.027 (synth→authentic transfer) | multi-stat, multi-corpus | no | `docs/v0_20_path_evaluation_2026-05-14.md §B` |
 | **bigcodec mass in a linear fit** | poisons CID22 (0.65–0.76 at ≥0.25 w); MLPs absorb it | deterministic refits | durable rule "keep bigcodec OUT of linear" | `linear_projections_2026-07-03.md` |
@@ -196,6 +196,20 @@ fixed + shipped (inclusive-winsor B).** NUANCE: a later decomposition (`98e9f395
 dominant cause was ~80% feature-vanishing + ~15-20% winsor, so the "winsor is THE cause" framing
 was itself partially walked back — but the fix stands. Cite: commits `a6edbced`→`aaa1ecac`→`98e9f395`.
 
+**3.17 CVVDP-scalar "dead end" = the `cvvdp_log_norm` TARGET SHAPE, not cvvdp (2026-07-15).**
+*Thought:* training toward CVVDP's scalar output is a dead end (V41: CID22 0.66 vs ssim2 0.88) —
+"emulating CVVDP's output ≠ its CSF mechanism." *Actual:* on safesyn cvvdp is 100% present,
+learnable (feat→cvvdp 0.987), and agrees with ssim2 (0.984). Same de-poisoned pipeline: **raw
+`cvvdp_score` → CID22 0.85** (fine), **`cvvdp_log_norm` → CID22 0.58** (craters). log_norm is
+rank-identical to score (SROCC 1.0000) but **exponentially expands the near-lossless tail** (37%
+of pairs in cvvdp [9.9,10] → log_norm [27.75,100], std 20), so MSE loss over-weights the top and
+under-fits the rest. **Status: RE-FRAMED** — the blanket "cvvdp_* scalar is bad" is too broad; raw
+`cvvdp_score` is viable, and per Mohammadi 2025 (cvvdp best in HF/near-lossless) it's the indicated
+lever for the HF regime ssim2 can't rank. **Guard: never MSE-regress a log-expanded target; use
+raw or a rank loss.** Shipped bakes unaffected (all ssim2-trained). Caveat: V41's exact target
+column not re-confirmed from its log; the de-poisoned probe isolates the shape effect regardless.
+Cite: `§8.36`.
+
 ### Tier 3 — contained (caught at/near ship)
 
 - **3.11 V39 output-spline upper-extrapolation** — validate-side extrapolated uncapped above the
@@ -292,6 +306,16 @@ origins). It fixes both gaps at once (content diversity + real codec distortions
 - **CID22-49 / AIC / UPIQ / SDR25 are holdout-only; UPIQ-380 is BURNED for the BHdr linear family.**
 - **UPIQ-panel every BHdr candidate before ship** — §3.13 (hdranch3).
 - **Keep bigcodec/imazen-26 OUT of *linear* mixes; MLPs only.** — §1/§2.
+- **Non-photo standing gate** (added 2026-07-15): `bake_verdict` scores a held-out imazen-26
+  diverse-content axis (`nonphoto` corpus) by default + a **G-NP gate** (SROCC <0.88 = content-weak,
+  <0.50 = crash). Every photographic-only bake (B/A/§8.33) flags content-weak (~0.86) — the
+  blindness the 6 photographic corpora can't see. Dashboard: `scripts/v_next/bake_dashboard.py`.
+- **NO GRACEFUL SKIPS in eval** — a missing corpus fails loud with an R2 fetch hint; all 7 eval
+  corpora are mirrored to `s3://zentrain/eval-corpora/` (the exact `2026-05-15-full-features`
+  files `bake_verdict` reads). Never silently drop an axis.
+- **Winsorize before the scaler on any bigcodec/imazen-26 train** (combined `[p0.1,p99.9]`,
+  baked as `WinsorP99` transforms) — de-poisons the IW-block extraction garbage (§3.4-family). §8.35.
+- **Never MSE-regress a log-expanded target** (e.g. `cvvdp_log_norm`) — use raw or a rank loss. §3.17.
 
 ---
 

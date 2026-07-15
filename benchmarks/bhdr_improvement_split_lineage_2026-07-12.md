@@ -2078,3 +2078,64 @@ sha 51718a25); scripts `diagnose_poison.py` + `train_mlp_diverse.py --winsor-pct
 **OPEN (task #21):** is the 5.8M IW garbage a bug in the SHIPPED zensim extractor (→ B and every
 profile can crash on that content at inference — the "non-photo content crashes" the user wants
 caught) or only in the offline bigcodec pipeline? Investigating next. [[project_linear_projections]]
+
+---
+
+## §8.36 Data-quality diagnostics: eval-corpora IW-scan + the CVVDP "dead end" mechanism (task #19)
+
+User (2026-07-15): *"we should be able to diagnose WHY everything we have tried as data is bad,
+not just that it didn't meet a gate. if cvvdp isn't training us well, might need to dig into
+that more."* + re-read Mohammadi 2025 (arXiv:2509.13150). Three mechanistic findings:
+
+**(A) The IW-garbage is bigcodec-specific + CONTENT-dependent — the photographic eval is clean.**
+`scripts/v_next/diagnose_poison.py` extended across corpora:
+
+| corpus | basic-block \|max\| | IW-block \|max\| | IW feats >1000 |
+|---|---|---|---|
+| EVAL cid22 (photo) | 3.8 | **0.5** | 0 |
+| EVAL kadid | 623 | 1.9 | 0 |
+| EVAL nonphoto 10k (the gate) | 2024 | 72.3 | 0 |
+| TRAIN safesyn | 33107 | 1.3 | 0 |
+| TRAIN bigcodec (full) | 7095 | **5,814,302** | 83 |
+
+The 5.8M IW blowup is **only in bigcodec** (imazen-26 diverse content) — photographic corpora
+extract clean IW features (0.5–1.9). So it's **content-dependent**: the extractor's IW pooling
+blows up on flat/synthetic/low-information content (screenshots, charts, line-art), NOT on
+photographs. That is the "non-photo content crashes" class directly — a likely shipped-extractor
+weakness on flat content, mitigated for the new bake by the winsor transforms (§8.35) and now
+surfaced by the G-NP gate. The nonphoto **eval** 10k subsample only reached 72.3 (the random draw
+missed the 0.05% worst rows), so the gate is only mildly confounded; still, a winsor-clean eval
+subsample is a queued refinement.
+
+**(B) bigcodec stores ONLY ssim2** (`human_score` = ssim2/100) — no cvvdp column. To train toward
+cvvdp on imazen-26 content we'd have to score it (not available today).
+
+**(C) The CVVDP "dead end" (V41, 2026-05-27) is a TARGET-SHAPE confound, not a cvvdp limit.**
+On safesyn, cvvdp is 100% present, learnable (feat→cvvdp held-out ridge SROCC **0.987** vs
+→ssim2 0.997), and agrees with ssim2 (SROCC **0.984**). Same de-poisoned pipeline, three targets
+(`scripts/v_next/cvvdp_target_probe.py`, 4 seeds):
+
+| target | CID22 (holdout) | train-val |
+|---|---|---|
+| ssim2_gpu | 0.8823 | 0.9980 |
+| **cvvdp_score (raw [1.68,10])** | **0.8499** | 0.9915 |
+| **cvvdp_log_norm ([0,100])** | **0.5781** | 0.9576 |
+
+`cvvdp_log_norm` is **perfectly rank-monotonic** with `cvvdp_score` (SROCC **1.0000**) — it does
+NOT scramble rank. It craters CID22 because it **exponentially expands the near-lossless tail**:
+37% of pairs are in cvvdp [9.9,10], which log_norm stretches to [27.75, 100] (std 20 vs 1–3 in
+lower bins). Under MSE/smooth-L1 the expanded top DOMINATES the gradient → the model becomes a
+near-lossless specialist and under-fits the range CID22 rank needs (train-val also drops
+0.9915→0.9576). The raw uniform cvvdp_score spreads the loss evenly → CID22 0.85. **V41 concluded
+"scalar cvvdp is a dead end"; the actual cause was the log-norm target SHAPE.** Raw cvvdp_score is
+a viable target (−0.03 CID22 vs ssim2, the feature-learnability gap).
+
+**Why this matters (paper connection).** Mohammadi 2025 ranks **CVVDP best** (AIC-3 SROCC 0.842 /
+Z-RMSE **9.45**, best in the HF [0,1]-JND near-lossless band) vs **SSIMULACRA2 mid-pack** (0.806 /
+higher Z-RMSE); and notes learning-based metrics fail HF because "most do not include high-to-
+visually-lossless quality ranges in training data...trained using ACR scores rather than
+pairwise." That is EXACTLY zensim (ssim2-derived ACR-like targets) — the structural reason for our
+KonJND/G5 HF weakness. So cvvdp is not a dead end but a **lever for the HF/near-lossless regime
+ssim2 can't rank** — a proper ssim2+cvvdp(raw)-mix, evaluated per-band with Z-RMSE (not SROCC
+alone), is the indicated next experiment. Do NOT use cvvdp_log_norm as an MSE target.
+[[project_linear_projections]]
