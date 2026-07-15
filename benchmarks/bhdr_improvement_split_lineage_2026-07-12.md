@@ -1823,3 +1823,77 @@ B's CID22-optimal positive weights, adds a KADIS-cbrt head + runtime dual-forwar
 switch on B_raw<threshold [preserves CID22, +runtime complexity]; (c) retrain B with
 cbrt+negative supervision [−0.061 CID22, aligns tail with BHdr]. Diagnostic scripts +
 sample under `/mnt/v/output/zensim/reports/b_negatives/`.
+
+## §8.32 — Piecewise-projection prototype: a single MLP holds CID22 AND ranks the deep-negative tail, −0.011 CID22 (2026-07-14)
+
+**User (3 design questions on the §8.31 hard-switch plan):** "maybe piecewise joint
+should lie above zero? should the joint blend? can an mlp represent a piecewise
+projection?" — all three converge on: **use an MLP, not a hand-switch.**
+
+**Q1 — the join lies ABOVE zero (measured).** Per shipped-B-score bin, local
+SROCC(·, ssim2) on KADIS (held-out):
+
+| B-score bin | SROCC(B) | SROCC(neg-head) | ssim2 median |
+|---|---:|---:|---:|
+| [5,15) | +0.044 | +0.933 | −58 |
+| [25,35) | +0.195 | +0.857 | −43 |
+| [35,50) | +0.342 | +0.891 | −30 |
+| [50,70) | +0.447 | +0.901 | +45 |
+| [70,101) | +0.856 | +0.911 | +80 |
+
+B is rank-garbage below B-score ~50 (where ssim2 crosses 0) and only competitive
+above ~70. So a hand-switch join belongs at **B-score ~45–55**, well above 0 — the
+user's intuition confirmed and quantified.
+
+**Q2 — do NOT hand-blend at the join.** Local agreement SROCC(B, neg-head) is only
+**0.24–0.46** across the [25,50) crossover (≈0 below), rising to 0.81 only in
+[70,101). A soft convex blend where the heads disagree scrambles rank — a blend is
+unsafe exactly where you'd place it.
+
+**Q3 — YES, an MLP represents the piecewise projection (proven).** A ReLU MLP is
+piecewise-linear → learns the gated two-projection map with a CONTINUOUS join (no
+hand threshold, no scrambling blend). Two experiments:
+
+*(a) Architecture capacity — MLP vs linear on KADIS→ssim2 (RAW features, so the MLP
+must learn the shaping+gating itself), held-out:*
+
+| model | ALL | ssim2≥0 | [−64,0) | deep<−64 |
+|---|---:|---:|---:|---:|
+| raw-linear | 0.908 | 0.916 | 0.789 | 0.637 |
+| **MLP 372-64-1** | **0.966** | **0.962** | **0.925** | **0.808** |
+
+MLP dominates every band; deep-neg 0.808 from raw features vs signed_cbrt-linear
+0.723 vs shipped-B 0.047.
+
+*(b) The real prototype — one MLP on B's positive corpora (safesyn + cid22_train,
+ssim2 target) + KADIS-700k negatives (ssim2, down-weighted 0.3), CID22 = SACRED MOS
+holdout, 5 seeds:*
+
+| KADIS wt | CID22 (MOS) | KADIS deep<−64 | safesyn-val |
+|---|---:|---:|---:|
+| 0.0 (no neg) | 0.8787 | 0.118 | 0.997 |
+| **0.3** | **0.8648 ± 0.0047** | **0.762 ± 0.016** | 0.994 |
+| 1.0 | 0.8665 | 0.808 | 0.993 |
+
+**Robust across 5 seeds, NO collapse** (all CID22 ≫ 0.75). One MLP holds CID22
+0.865 (≈ shipped-B 0.876, ≈ A 0.866) AND lifts deep-neg 0.047→0.76, for **−0.011
+CID22** — vs the linear hard-switch's −0.061 for worse negatives (0.735). **5×
+cheaper, better negatives, continuous, no hand-tuned join/blend.** Script:
+`scripts/v_next/mlp_piecewise_negatives_probe.py`.
+
+**DECISION SURFACED (architecture branch, user's call).** The MLP path re-opens the
+exact linear-vs-MLP identity question that drove the A→B flip: B was deliberately
+chosen LINEAR (3.7 KB, deterministic, no collapse mode) over MLP-A. Going MLP buys
+faithful negatives cheaply but trades that determinism (though 5-seed spread is tight
++ collapse-free here). Three coherent directions:
+1. **Single MLP replaces B** — CID22 0.865 + deep-neg 0.76, continuous, one metric;
+   trades B's linear-deterministic identity (≈ "A retrained with negative supervision",
+   and it beats A on negatives 0.76 vs 0.233 at ≈-equal CID22).
+2. **Hybrid hard-switch** — keep B (linear, deterministic) for the positive dial,
+   add a small MLP negative-head (deep-neg 0.808 alone), hard switch at B-score ~50
+   (Q1), C0-continuous. Preserves B's positive identity; +runtime dual-forward.
+3. **Keep §8.30 cosmetic unblock** — negatives stay A/ssim2 territory; no arch change.
+
+Prototype (the "yes, build it") is DONE + robust; productionizing any path = a real
+`zensim_mlp_train` bake (v3 + dial spline + collapse gate + full 6-corpus panel).
+No bake swapped. Data/scripts under `/mnt/v/output/zensim/reports/b_negatives/`.
