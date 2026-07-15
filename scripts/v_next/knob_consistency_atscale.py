@@ -8,7 +8,13 @@ For each knob M in {B, A, ssim2} and each independent reference REF, eta^2(REF|M
 = fraction of REF variance pinned down by M's level (higher = M is a better knob for
 that reference). butteraugli + dssim are references B was NEVER trained on (cleanest
 independence; B's cid head saw an ssim2+cvvdp mix, so cvvdp is semi-circular for B)."""
+import sys
+from pathlib import Path
+
 import numpy as np, pandas as pd, pyarrow.parquet as pq
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "canonical_corpus"))
+from join_safety import safe_metric_join  # noqa: E402
 
 RF = "/mnt/v/output/zensim-multicodec-probe/knob_reforward"
 AB = "/mnt/v/output/zensim/ab_rescored_2026-07-05"
@@ -37,7 +43,16 @@ for codec in CODECS:
     ab = pq.read_table(f"{AB}/{codec}.b.parquet", columns=["encoded_filename", "score_ssim2"]).to_pandas()
     assert np.allclose(rf["ssim2"].to_numpy(), ab["score_ssim2"].to_numpy(), atol=1e-6), codec
     rf["encoded_filename"] = ab["encoded_filename"].to_numpy()
-    df = rf.merge(f4, on="encoded_filename", how="inner")
+    # Routed through the join_safety owner (the CI grep-gate's whole point).
+    # `encoded_filename` IS the full per-pair key: it names one encode, so an
+    # inner merge cannot ref-broadcast — verified 2026-07-15, the sidecar is
+    # 4,214,382 rows / 4,214,382 unique keys. safe_metric_join re-checks that
+    # uniqueness on every run rather than trusting this comment, which is the
+    # difference between a guard and a promise. One call per ref because it
+    # attaches one metric column at a time.
+    df = rf
+    for ref in REFS:
+        df = safe_metric_join(df, f4, ["encoded_filename"], ref, how="inner")
     cov = len(df) / len(rf)
     for ref in REFS:
         rv = df[ref].to_numpy()
