@@ -1031,6 +1031,73 @@ through `bake()`). Don't write a v2→v3 upgrade tool — the right
 fix is "retrain, evaluate on full Mohammadi panel" per the
 principled experiment workflow. Bakes are cheap; ghost data isn't.
 
+## NO DUPLICATE IMPLEMENTATIONS — one owner per task, extend it or don't do it (2026-07-15, user directive)
+
+**Every task below has exactly ONE canonical implementation. Re-implementing
+any of them — in Python, in a second Rust site, in a script, anywhere — is
+PROHIBITED. Not discouraged: prohibited.** If the owner can't do what you
+need, **extend the owner**. That is always the move.
+
+| Task | THE owner | Never |
+|---|---|---|
+| Load a feature parquet | `zensim-validate/src/parquet_loader.rs` (`load_parquet`) | `pq.read_table` in a script that then trains/evals |
+| IQA stats (SROCC/PLCC/KROCC/OR/PWRC/Z-RMSE) | `zensim-validate/src/panel.rs` + the `panel` bin (Python: shell it, or the `scripts/lib/zen_stats.py` shim) | `scipy.stats.spearmanr`, a hand-rolled `_srocc`, any private stat math |
+| Train a model / bake | `zensim-validate/src/bin/zensim_mlp_train.rs` | a torch MLP in a script |
+| Evaluate a bake | `bake_verdict` (rank + dial panels) | ad-hoc scoring loops |
+| Edit bake bytes (spline / winsor / gate) | `bake_dial_refit` | numpy PCHIP, `struct.pack` |
+| Serialize / inspect / repack a bake | `zenpredict` CLI (`bake`/`inspect`/`repack`) | any other ZNPR emitter |
+| Build a canonical corpus parquet | `scripts/canonical_corpus/` + `join_safety` | a bespoke join in a probe script |
+
+**Python is not banned — DUPLICATION is.** Python is correct where it IS the
+owner: canonical-corpus building, plotting/HTML dashboards, R2 sync. It is
+prohibited where a Rust owner exists. The test is not "what language" but
+"does this already have an owner".
+
+### Why the old narrow rule failed
+
+A rule already said "Do NOT hand-roll srocc/plcc/krocc/pwrc/z_rmse in Python"
+(the 14-fork consolidation, `benchmarks/iqa_stats_consolidation_2026-05-26.md`).
+On 2026-07-15 an audit of `scripts/v_next/` found **30 of 134 scripts
+hand-rolling IQA stats anyway**, 69 loading parquet in Python, 11 running
+parallel torch trainers, 33 editing bake bytes after that work was migrated to
+`bake_dial_refit`. The rule named one *symptom* (srocc in Python) instead of
+the *principle* (one owner per task), so every new script re-derived the
+forbidden thing under a slightly different name. This section states the
+principle. It covers tasks, not function names, and it covers Rust too.
+
+### What duplication actually costs — measured, not theoretical
+
+- **It hides capability gaps.** `blend_lib.py` grew a within-ref RankNet term
+  in Python because nobody checked whether the Rust trainer could do it. It
+  couldn't — `zensim_mlp_train` drew every pair uniformly across a group
+  (cross-image). The gap sat invisible behind a working Python script until
+  2026-07-15. Extending the owner surfaced it in an hour and fixed it for
+  every future recipe; the duplicate would have hidden it forever.
+- **It diverges silently.** 14 forks of the same stat is not 14 answers, it's
+  14 chances to be subtly wrong with no way to tell which.
+- **It re-pays the same debugging.** `blend_lib._load` OOM'd on a 5.3 GB
+  parquet (one `read_table`, ~2x peak). `parquet_loader.rs` had never had that
+  bug. The duplicate bought a fresh copy of a solved problem.
+
+### The rule in practice
+
+1. **Before writing a script that loads/trains/evals/bakes: check the table.**
+   If an owner exists, use it. If it can't do the thing, go to 2.
+2. **Extend the owner.** Add the flag/mode to the Rust binary, with a test.
+   Prove you didn't break existing callers (build the binary at the parent
+   commit, run an identical recipe, diff the bake bytes — that's how the
+   `:withinref` change proved byte-identity, md5 `346c5a6d…` from both).
+3. **A probe/experiment is not an exemption.** "It's just an experiment" is
+   how all 134 scripts started. If the experiment needs a capability, the
+   capability belongs in the owner; the experiment is then three lines of
+   shell.
+4. **Delete on sight.** A duplicate found is a duplicate removed, same commit
+   if it's dead, next commit if something still calls it. Do not "queue for
+   removal" — queueing IS the bug (ML Data Pipeline Discipline §6).
+
+Companion rule in `~/work/zen/zenanalyze/CLAUDE.md` (the other trainer-owning
+repo). Audit of record: see the §8.40 duplication audit.
+
 ## Canonical bake / eval / training tool inventory (added 2026-05-17)
 
 **When you need to do X, use this tool — don't write a new one.**

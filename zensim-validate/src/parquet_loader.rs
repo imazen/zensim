@@ -3,18 +3,22 @@
 //! Produces an [`OwnedLoadedGroup`] that mirrors `LoadedGroup` in
 //! `zensim-validate/src/bin/zensim_mlp_train.rs` field-for-field.
 //!
-//! The schema mirrors the CSV layout the trainer already understands:
-//! a `target_column` (e.g. `iwssim_log_norm`) plus consecutive
-//! `f0, f1, ..., f<N-1>` feature columns. Any other columns in the file
-//! (image paths, codec names, etc.) are ignored.
+//! A `target_column` (e.g. `iwssim_log_norm`) plus consecutive feature
+//! columns, named either `f0, f1, ...` (the canonical-corpus / CSV
+//! convention) or `feat_0, feat_1, ...` (what zenmetrics sidecars and
+//! the pareto-sweep extractor emit). Both name the same 372-wide with-iw
+//! space. `ref_basename` / `image_path` is read as per-row reference
+//! identity when present; everything else in the file is ignored.
 //!
-//! Wiring into the trainer binary is deliberately deferred — the user
-//! will write a thin `From<OwnedLoadedGroup> for LoadedGroup` shim
-//! during merge once the parallel-CSV agent and SIMD-fusion agent
-//! also land. The conversion is trivial: identical field shapes.
+//! THIS IS THE ONLY FEATURE-PARQUET LOADER. Per the "NO DUPLICATE
+//! IMPLEMENTATIONS" rule in CLAUDE.md, do not read a feature parquet
+//! anywhere else (in Rust or Python) on the way to training/eval — if
+//! this can't express what you need, extend it here.
 //!
-//! Equivalence to the sequential CSV loader is verified by
-//! `tests/parquet_load_equivalence.rs`.
+//! Wired into the trainer binary via `From<OwnedLoadedGroup> for
+//! LoadedGroup`. Equivalence to the sequential CSV loader is verified by
+//! `tests/parquet_load_equivalence.rs`; ref-identity + prefix handling by
+//! `tests/within_ref_pairing.rs`.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -31,10 +35,9 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 /// Owned mirror of the trainer's `LoadedGroup` struct.
 ///
 /// The trainer (in `bin/zensim_mlp_train.rs`) defines `LoadedGroup`
-/// privately; reproducing the shape here lets the parquet loader stay
-/// completely additive (no edits to the trainer source). Merging the
-/// two requires a one-line `From` shim, written by the user during the
-/// agent-worktree merge.
+/// privately; this owned shape crosses the lib/bin boundary and converts
+/// via the `From<OwnedLoadedGroup> for LoadedGroup` shim there. Keep the
+/// two field-for-field: adding a field here means adding it there.
 #[derive(Debug)]
 pub struct OwnedLoadedGroup {
     pub name: String,
@@ -71,18 +74,19 @@ pub struct OwnedLoadedGroup {
 
 /// Load a zensim training feature parquet file.
 ///
-/// Reads the `target_column` (multiplied by `target_scale` to match
-/// the trainer's score units) plus `f0..f<N-1>` consecutive feature
-/// columns. Other columns are skipped. Returns an
-/// [`OwnedLoadedGroup`] with `train_w` / `val_w` set to `0.0` —
-/// callers fill those in from the group-spec parser.
+/// Reads the `target_column` (multiplied by `target_scale` to match the
+/// trainer's score units) plus the consecutive feature columns, accepting
+/// either the `f<i>` or `feat_<i>` prefix. Also reads `ref_basename` (else
+/// `image_path`) into [`OwnedLoadedGroup::ref_ids`] when present. Other
+/// columns are skipped. Returns an [`OwnedLoadedGroup`] with `train_w` /
+/// `val_w` set to `0.0` — callers fill those in from the group-spec parser.
 ///
 /// Errors mirror the CSV loader's phrasing so the binary's error
-/// handling stays uniform after merge:
-/// - missing `target_column` -> `"<path>: missing target column ..."`
-/// - missing `f0` column     -> `"<path>: missing f0 column"`
-/// - no `f0..` columns       -> `"<path>: no fN columns found"`
-/// - empty file              -> `"<path>: empty file ..."`
+/// handling stays uniform:
+/// - missing `target_column`   -> `"<path>: missing target column ..."`
+/// - missing both prefixes     -> `"<path>: missing f0 / feat_0 column"`
+/// - no feature columns        -> `"<path>: no <prefix>N columns found"`
+/// - empty file                -> `"<path>: empty file ..."`
 pub fn load_parquet(
     path: &PathBuf,
     name: &str,
