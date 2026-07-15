@@ -265,6 +265,50 @@ The `zen-metrics` -> `zenmetrics` rename (13 scripts) is the same shape: the
 binary is `[[bin]] name = "zenmetrics"`, no dash, per the no-dash-after-zen
 rule. Nothing had called it successfully since the rename, and nothing said so.
 
+## 5f. A guard nobody reads is not a guard
+
+The Join-Safety Gate — the forcing function against recurrence of the 2026-05-25
+kadid/tid metric corruption — had failed **100 of its last 100 runs**. Not
+flaky, not infrastructure. One real violation:
+
+```
+scripts/v_next/knob_consistency_atscale.py:40
+    df = rf.merge(f4, on="encoded_filename", how="inner")
+```
+
+`ac158352` shipped the gate on 2026-05-26. `001b3c54` **added** that script on
+2026-07-11, six weeks later. So the gate fired on day one, correctly, and the
+commit merged anyway — and every push since has been red.
+
+This is the failure mode the rest of this document keeps circling, in its purest
+form. §2: the lib shipped, the call sites never migrated. §5d: the scripts were
+deleted, the index never updated. Here: the gate was built, and then ignored so
+consistently that red became the normal colour — at which point the next
+violation is free, because nobody can tell it apart from the standing one. A
+guard's value is entirely in someone acting on it.
+
+The join itself was sound: `encoded_filename` is the full per-pair key, and the
+sidecar is 4,214,382 rows / 4,214,382 unique keys, so an inner merge cannot
+ref-broadcast. It could have been allow-listed with `# joinsafety-ok`. It was
+routed through `safe_metric_join` instead, which re-checks metric-side
+uniqueness on every run — the difference between a guard and a promise, and the
+reason not to re-implement that check inline.
+
+Numerically identical, which mattered: this script produced `001b3c54`'s "B wins
+decisively" conclusion, so a silent change would have silently moved a
+benchmark. cvvdp 0.675→0.6749, butteraugli 0.582→0.5824, dssim 0.525→0.5246,
+iwssim 0.485→0.4846, n=678,435 unchanged.
+
+Gate is green for the first time in its recorded history.
+
+**The generalization.** Four instruments in this repo were built correctly and
+then left un-acted-on: `zenstats` (extracted, callers not migrated), the
+2026-05-26 audit (duplicates named, none deleted), the two cleanup commits
+(files deleted, index not updated), the join-safety gate (violation caught, red
+ignored). Building the instrument is the satisfying half and it is worth nothing
+alone. **The half that gets skipped is the half that closes the loop**, and it is
+the whole job.
+
 ## 6. Still open
 
 - **`pack_and_calibrate.py` is a doc conflict, not a clean delete.** It is a
