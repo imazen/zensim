@@ -56,6 +56,17 @@ ROUND4 = [
     ("r4-2L-nocid-div1.5", {"safesyn": 1, "kadid": 1.0, "tid": 1.0, "bigcodec": 1.5, "kadis": 0.3}, {"layers": 2, "hidden": 128}),
     ("r4-2L-syn+div-only", {"safesyn": 1, "bigcodec": 1.5, "kadis": 0.3}, {"layers": 2, "hidden": 128}),
 ]
+# round 5 — does the HF corpus (konjnd-dense, 20,160 near-JND pairs) help the G5/KonJND weak axis?
+# Built on the honest champion (safesyn+bigcodec+kadis). Measure AIC-3 (a TRUE JND holdout) as the
+# honest transfer signal — KonJND-val itself becomes CHEAT once konjnd_dense is trained on.
+_HON = {"safesyn": 1, "bigcodec": 1.5, "kadis": 0.3}
+ROUND5 = [
+    ("r5-honest-ref",     dict(_HON), {"layers": 2, "hidden": 128}),
+    ("r5-hon+kon0.5",     {**_HON, "konjnd_dense": 0.5}, {"layers": 2, "hidden": 128}),
+    ("r5-hon+kon1",       {**_HON, "konjnd_dense": 1.0}, {"layers": 2, "hidden": 128}),
+    ("r5-hon+kon2",       {**_HON, "konjnd_dense": 2.0}, {"layers": 2, "hidden": 128}),
+    ("r5-full+kon1",      {"safesyn": 1, "cid22_train": 1, "kadid": 1, "tid": 1, "bigcodec": 1, "kadis": 0.3, "konjnd_dense": 1.0}, {"layers": 2, "hidden": 128}),
+]
 # (label, blend spec {corpus: weight}, hp-overrides). The systematic sweep of "does adding the
 # now-clean kadid/tid help, at what weight, traded against div/kadis".
 ROUND1 = [
@@ -99,12 +110,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", default="1,7")
     ap.add_argument("--topk", type=int, default=4)
-    ap.add_argument("--round", default="1", choices=["1", "2", "3", "4"])
+    ap.add_argument("--round", default="1", choices=["1", "2", "3", "4", "5"])
     ap.add_argument("--out-dir", default="/mnt/v/output/zensim/reports/blend")
     a = ap.parse_args()
     seeds = [int(x) for x in a.seeds.split(",")]
     od = Path(a.out_dir); od.mkdir(parents=True, exist_ok=True)
-    CONFIGS = {"1": ROUND1, "2": ROUND2, "3": ROUND3, "4": ROUND4}[a.round]
+    CONFIGS = {"1": ROUND1, "2": ROUND2, "3": ROUND3, "4": ROUND4, "5": ROUND5}[a.round]
     rtag = f"r{a.round}"
 
     cols = ["cid22", "nonphoto", "konjnd", "aic3", "aic4", "kadid", "tid"]

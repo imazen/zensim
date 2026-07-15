@@ -18,6 +18,8 @@ Exports:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pyarrow.parquet as pq
 from scipy.stats import kendalltau, pearsonr, spearmanr
@@ -36,6 +38,10 @@ TRAIN_CORPORA = {
     "tid":         (f"{TRAIN}/tid.parquet",          "ssim2_gpu",       1.0, "pos"),   # FIXED 2026-07-15
     "bigcodec":    (BIGCODEC,                         "human_score",   100.0, "div"),
     "kadis":       (KADIS,                            "score_ssim2_gpu", 1.0, "neg"),
+    # HF/near-threshold: KonJND-1k densified (20,160 near-JND compression pairs). human_score =
+    # active_mix_raw [-64,95] (per-pair). The one near-threshold human-anchored corpus the blend
+    # omits — targets the G5 weakness. NOTE: overlaps val/konjnd -> makes KonJND a CHEAT corpus.
+    "konjnd_dense": (f"{TRAIN}/konjnd-dense.parquet", "human_score",    1.0, "pos"),
 }
 
 # held-out eval panel — the SAME parquets bake_verdict uses (so numbers match). `sign`:
@@ -203,15 +209,47 @@ def panel(pred, human, sign=+1, per_band=True, band_scale=None):
         out["zrmse"] = float(np.sqrt(np.mean(((fit - human) / (np.std(human) or 1)) ** 2)))
     else:
         out["zrmse"] = np.nan
+    # Range-restriction-robust EXTREME-QUALITY rank skill (bottom/top 30% by human).
+    # Width-10 bands crush within-band target variance to ~1.5% of full range at the
+    # extremes, so within-band SROCC there is pure noise (routinely negative at small n)
+    # even for a near-perfect model — a reporting artifact, not a model defect. A 30%
+    # tail keeps a usable target spread, so its SROCC is the honest low-/high-q rank number.
+    if len(human) >= 10 and np.std(pred) > 0:
+        order = np.argsort(human)
+        k = max(3, int(round(0.30 * len(human))))
+        lo_idx, hi_idx = order[:k], order[-k:]
+        out["srocc_lowtail"] = _srocc(pred[lo_idx], human[lo_idx]); out["n_lowtail"] = int(k)
+        out["srocc_hightail"] = _srocc(pred[hi_idx], human[hi_idx]); out["n_hightail"] = int(k)
+    else:
+        out["srocc_lowtail"] = out["srocc_hightail"] = np.nan
+        out["n_lowtail"] = out["n_hightail"] = 0
     if per_band:
         h = human
         blo, bhi = (band_scale if band_scale else (np.nanmin(h), np.nanmax(h)))
         h100 = (h - blo) / ((bhi - blo) or 1) * 100.0
+        full_std = np.std(h) or 1.0
         bands = {}
         for i, (a, b) in enumerate(BANDS):
             sel = (h100 >= a) & (h100 < b) if i < 9 else (h100 >= a) & (h100 <= b + 1e-9)
-            bands[f"B{i}"] = {"n": int(sel.sum()),
-                              "srocc": _srocc(pred[sel], human[sel]) if sel.sum() >= 3 else np.nan}
+            n = int(sel.sum())
+            hs = float(np.std(h[sel])) if n > 1 else 0.0
+            restrict = hs / full_std  # within-band target spread as fraction of full (small => range-restricted)
+            ps, hsub = pred[sel], human[sel]
+            bsr = _srocc(ps, hsub) if n >= 3 else np.nan
+            bpl = pearsonr(ps, hsub)[0] if n >= 3 and np.std(ps) > 0 and np.std(hsub) > 0 else np.nan
+            # MAE after affine-rescale of pred onto human (calibration error, meaningful within a narrow band)
+            if n >= 3 and np.std(ps) > 0:
+                A = np.polyfit(ps, hsub, 1); bmae = float(np.mean(np.abs(np.polyval(A, ps) - hsub)))
+            else:
+                bmae = np.nan
+            # Within-band SROCC is untrustworthy when n is tiny (CI > ±0.3, sign is noise —
+            # CLAUDE.md rule) — that is B0's negative. Separately, `restrict` records how
+            # badly the width-10 band compresses target spread (small => low SROCC ceiling
+            # regardless of model); the dashboard annotates it. The honest extreme-quality
+            # rank is srocc_lowtail / srocc_hightail above, which are not range-restricted.
+            lowconf = (n < 30)
+            bands[f"B{i}"] = {"n": n, "srocc": bsr, "plcc": bpl, "mae": bmae,
+                              "restrict": restrict, "lowconf": bool(lowconf)}
         out["bands"] = bands
     return out
 

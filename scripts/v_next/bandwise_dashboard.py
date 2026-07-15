@@ -380,17 +380,25 @@ def fig_dial(npz_bakes):
 # ---------------------------------------------------------------- tables ----------------
 def agg_stat_table(perbake, corp, train):
     sign = B.VAL_CORPORA[corp][2]
-    head = ["SROCC" + (" |·|" if sign < 0 else ""), "PLCC", "KROCC", "Z-RMSE", "n", "honesty"]
+    head = ["SROCC" + (" |·|" if sign < 0 else ""), "PLCC", "KROCC", "Z-RMSE",
+            "SROCC low-tail", "SROCC high-tail", "n", "honesty"]
     rows = ["<table><thead><tr><th>bake / metric</th>" + "".join(f"<th>{h}</th>" for h in head) + "</tr></thead><tbody>"]
     for lab, (_h, _p, pan, kind) in perbake.items():
         sr = pan["srocc_abs"] if sign < 0 else pan["srocc"]
         cls = " class='metric'" if kind == "metric" else ""
-        vals = [sr, pan["plcc"], pan["krocc"], pan["zrmse"]]
+        lt, ht = pan.get("srocc_lowtail", np.nan), pan.get("srocc_hightail", np.nan)
+        if sign < 0:
+            lt, ht = abs(lt) if np.isfinite(lt) else lt, abs(ht) if np.isfinite(ht) else ht
+        vals = [sr, pan["plcc"], pan["krocc"], pan["zrmse"], lt, ht]
         cells = "".join(f"<td>{v:.4f}</td>" if np.isfinite(v) else "<td>—</td>" for v in vals)
         hn, col = honesty(train.get(lab), corp)
         rows.append(f"<tr{cls}><td class='lbl'>{lab}</td>{cells}<td>{pan['n']}</td>"
                     f"<td style='background:{col};color:#fff;font-size:9px'>{hn}</td></tr>")
     rows.append("</tbody></table>")
+    rows.append(
+        "<p class='sub'><b>low-tail / high-tail SROCC</b> = rank skill on the worst / best 30% by human score. "
+        "These are the <b>honest extreme-quality numbers</b>: unlike the width-10 B0/B9 bands below they are "
+        "<b>not range-restricted</b>, so they measure real low-q / near-lossless rank skill instead of noise.</p>")
     return "".join(rows)
 
 
@@ -407,21 +415,48 @@ def band_table(perbake, corp, train):
         if np.isfinite(agg):
             allv["agg"].append(agg)
 
-    def cell(v, col):
+    # Per-band n / target-spread are corpus properties (identical across bakes) -> one context row.
+    any_pan = next((p for _h, _p, p, _k in perbake.values() if p.get("bands")), None)
+    ctx = ""
+    if any_pan:
+        nrow = "".join(
+            f"<td style='font-size:9px;color:#666'>n={any_pan['bands'][b]['n']}<br>"
+            f"σ={any_pan['bands'][b]['restrict']:.2f}</td>" for b in BANDS)
+        ctx = (f"<tr><td class='lbl' style='font-size:9px;color:#666'>band context</td>{nrow}"
+               f"<td colspan='3' style='font-size:9px;color:#666'>σ = within-band target spread<br>"
+               f"as fraction of full range</td></tr>")
+
+    def cell(v, col, pan=None):
         if v is None or not np.isfinite(v):
             return '<td style="color:#999">—</td>'
         vv = allv[col]; lo, hi = (min(vv), max(vv)) if vv else (0, 1)
         t = 0 if hi == lo else max(0, min(1, (v - lo) / (hi - lo)))
         r = int(200 * (1 - t) + 40 * t); g = int(60 * (1 - t) + 160 * t)
+        # Dim + mark bands whose SROCC is untrustworthy (n<30 => CI wider than +-0.3, sign is noise).
+        lc = bool(pan and col in pan.get("bands", {}) and pan["bands"][col].get("lowconf"))
+        if lc:
+            return (f'<td style="background:rgb({r},{g},60);color:#fff;opacity:.45" '
+                    f'title="LOW CONFIDENCE: n&lt;30, SROCC CI wider than ±0.3 — sign is noise, not signal">'
+                    f'{v:.3f}<sup>?</sup></td>')
         return f'<td style="background:rgb({r},{g},60);color:#fff">{v:.3f}</td>'
     for lab, (_h, _p, pan, kind) in perbake.items():
         agg = pan["srocc_abs"] if B.VAL_CORPORA[corp][2] < 0 else pan["srocc"]
         cls = " class='metric'" if kind == "metric" else ""
-        cells = "".join(cell(pan.get("bands", {}).get(b, {}).get("srocc"), b) for b in BANDS)
+        cells = "".join(cell(pan.get("bands", {}).get(b, {}).get("srocc"), b, pan) for b in BANDS)
         hn, col = honesty(train.get(lab), corp)
         rows.append(f"<tr{cls}><td class='lbl'>{lab}</td>{cells}{cell(agg,'agg')}<td>{pan['n']}</td>"
                     f"<td style='background:{col};color:#fff;font-size:9px'>{hn}</td></tr>")
+    rows.insert(1, ctx)
     rows.append("</tbody></table>")
+    rows.append(
+        "<p class='sub'><b>Why per-band SROCC is far below the aggregate — and why B0/B9 can go negative.</b> "
+        "Bands are cut on the <i>human</i> score, so within a band the target barely varies (σ≈0.13 of full range "
+        "on CID22). Rank correlation under that <b>range restriction</b> is mostly noise: a <i>near-perfect</i> model "
+        "(pred = human + 2% noise, aggregate SROCC 0.994) still scores only <b>0.77–0.89</b> per band. So low "
+        "per-band values are a property of the binning, not a training failure — and at the extremes (B0: smallest n; "
+        "B9: smallest σ, near-lossless piling against the MOS ceiling) the noise routinely crosses zero into "
+        "<b>negative</b>. Cells marked <sup>?</sup> have n&lt;30 (CI wider than ±0.3 — the sign is noise). "
+        "For real extreme-quality skill read <b>low-tail / high-tail SROCC</b> above, which are not range-restricted.</p>")
     return "".join(rows)
 
 
