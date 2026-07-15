@@ -1041,17 +1041,38 @@ need, **extend the owner**. That is always the move.
 | Task | THE owner | Never |
 |---|---|---|
 | Load a feature parquet | `zensim-validate/src/parquet_loader.rs` (`load_parquet`) | `pq.read_table` in a script that then trains/evals |
-| IQA stats (SROCC/PLCC/KROCC/OR/PWRC/Z-RMSE) | `zensim-validate/src/panel.rs` + the `panel` bin (Python: shell it, or the `scripts/lib/zen_stats.py` shim) | `scipy.stats.spearmanr`, a hand-rolled `_srocc`, any private stat math |
+| IQA stats (SROCC/PLCC/KROCC/OR/PWRC/Z-RMSE) | **`zenstats`** (`zenmetrics/crates/zenstats/src/panel.rs`), reached via `zensim_validate::panel` (an 82-line `pub use` re-export — the shim is NOT the owner) or the `panel` bin; Python shells it or uses `scripts/lib/zen_stats.py` | `scipy.stats.spearmanr`, a hand-rolled `_srocc`, any private stat math |
+| Per-reference SROCC | `bake_verdict` (first-class panel row since 2026-07-15) | reducing `--per-pair-output` in a script |
 | Train a model / bake | `zensim-validate/src/bin/zensim_mlp_train.rs` | a torch MLP in a script |
 | Evaluate a bake | `bake_verdict` (rank + dial panels) | ad-hoc scoring loops |
 | Edit bake bytes (spline / winsor / gate) | `bake_dial_refit` | numpy PCHIP, `struct.pack` |
 | Serialize / inspect / repack a bake | `zenpredict` CLI (`bake`/`inspect`/`repack`) | any other ZNPR emitter |
 | Build a canonical corpus parquet | `scripts/canonical_corpus/` + `join_safety` | a bespoke join in a probe script |
+| Train/val/test split | `zenmetrics/scripts/picker/origin_split.py` (`split_of()`) | a seeded shuffle (per-rendition → scale leakage) |
 
 **Python is not banned — DUPLICATION is.** Python is correct where it IS the
 owner: canonical-corpus building, plotting/HTML dashboards, R2 sync. It is
 prohibited where a Rust owner exists. The test is not "what language" but
-"does this already have an owner".
+"does this already have an owner". A second **Rust** site is just as much a
+duplicate as a Python one — zensim currently carries ~10 private Rust copies of
+`spearman` across probe binaries plus a separate impl in
+`zensim-train-core/src/stats.rs`.
+
+### The ONE exception: a gated mirror
+
+A second implementation is legitimate **only** when it exists for a measured
+engineering reason AND a test holds it bit-exact against the owner. Two real
+ones, both keep-don't-delete:
+
+- `zenpicker-train/src/picker_eval.rs` — `pwrc_sa_st_auc_lowmem` (O(n²)→O(1)
+  memory), gated by `pwrc_lowmem_matches_canonical_exactly`.
+- `zensim-validate/src/panel.rs` — `compute_light_panel_subsampled`, which
+  fixed a 307 GB OOM.
+
+"Mirror" means: the owner is still the source of truth, the mirror exists to
+solve a *specific measured* problem the owner can't, and a test fails the build
+the moment they diverge. Without that test it is not a mirror, it is a fork
+with a good story.
 
 ### Why the old narrow rule failed
 
@@ -1073,11 +1094,26 @@ principle. It covers tasks, not function names, and it covers Rust too.
   (cross-image). The gap sat invisible behind a working Python script until
   2026-07-15. Extending the owner surfaced it in an hour and fixed it for
   every future recipe; the duplicate would have hidden it forever.
-- **It diverges silently.** 14 forks of the same stat is not 14 answers, it's
-  14 chances to be subtly wrong with no way to tell which.
+- **It diverges silently, and you find out months later.** `bake_verdict` once
+  had its own inline copy of every stat. When `panel.rs`'s OR + PWRC were
+  rewritten to the paper-correct ITU-T P.1401 / Mohammadi SA-ST forms
+  (`83e7ff70`), the copy wasn't. **Every bake_verdict output before that fix
+  reported the wrong OR + PWRC** while the `panel` binary reported correct ones
+  on the same fixture. Nothing failed; the numbers were just wrong. That is the
+  characteristic damage: not a crash, a quietly wrong number in a shipped
+  report. (The 2026-05-26 consolidation found the same shape three more times —
+  PWRC argument order off by ~0.2, an OR definition off by 0.375, and one
+  script whose "pwrc" was Spearman-as-Pearson and not PWRC at all.)
 - **It re-pays the same debugging.** `blend_lib._load` OOM'd on a 5.3 GB
   parquet (one `read_table`, ~2x peak). `parquet_loader.rs` had never had that
   bug. The duplicate bought a fresh copy of a solved problem.
+- **Extraction is not migration.** The 2026-05-26 consolidation succeeded
+  architecturally — `zenstats` shipped, both siblings consume it, the parity
+  gate passes at ~5e-11. It still failed behaviorally, because the old call
+  sites were never migrated and new ones kept appearing. In zenanalyze,
+  `load_features_raw` adoption went from 7-of-25 to ~15-of-35: the lib exists,
+  the forks kept coming. **Landing the owner is half the job; deleting the
+  callers is the other half, and it is the half that gets skipped.**
 
 ### The rule in practice
 
@@ -1095,8 +1131,17 @@ principle. It covers tasks, not function names, and it covers Rust too.
    if it's dead, next commit if something still calls it. Do not "queue for
    removal" — queueing IS the bug (ML Data Pipeline Discipline §6).
 
-Companion rule in `~/work/zen/zenanalyze/CLAUDE.md` (the other trainer-owning
-repo). Audit of record: see the §8.40 duplication audit.
+Companion rule in `~/work/zen/zenanalyze/CLAUDE.md` — the other trainer-owning
+repo (4,347-line `zentrain/tools/train_hybrid.py`, `zenpicker_train.rs`, ~15
+Python torch trainers). zenmetrics deliberately does NOT carry this rule: it is
+the *supplier*, not the patient — it owns `zenstats` (which both siblings
+consume), has zero MLP trainers, and already enforces single-source rules of
+its own (`origin_split.py` hard-errors rather than allow a leaky fallback —
+that hard-error is the enforcement pattern to copy).
+
+Audit of record: `benchmarks/duplication_audit_2026-07-15.md`. Prior art:
+`benchmarks/iqa_stats_consolidation_2026-05-26.md`,
+`benchmarks/cross_repo_duplication_audit_2026-05-26.md`.
 
 ## Canonical bake / eval / training tool inventory (added 2026-05-17)
 
@@ -1280,11 +1325,20 @@ bake_dial_refit gate --bake <bin> --corpus <parquet> [--ref-col human_score]
 Method + measured byte-parity: `benchmarks/bake_refit_rust_migration_2026-07-05.md`.
 
 ### Affine calibration of an existing bake
-**Missing v3 equivalent for the affine (`W' = β·W, b' = β·b + α`) op.** The
-historical `affine_calibrate_znpr_v2.py` hard-coded v2 parse — DEPRECATED,
-refuses to run. (Output-**spline** / dial refits are NOT affine — those now
-live in `bake_dial_refit` above.) Build a v3 affine tool when needed; emit via
-`zenpredict-bake`.
+**`affine_calibrate` binary** at `zensim-validate/src/bin/affine_calibrate.rs`.
+Applies `y' = α + β·y` (`W' = β·W`, `b' = β·b + α`) to a ZNPR **v2 or v3** bake
+— v2 and v3 share the layer-table layout for the first 96 header bytes, and
+v3.1's reserved fields are zero for the F32 bakes we calibrate.
+
+_(Corrected 2026-07-15: this section previously read "Missing v3 equivalent for
+the affine op — build a v3 affine tool when needed". That was false; the Rust
+port has existed since 2026-06-18. A stale "missing tool" claim is worse than
+no claim — it tells the next session to rebuild something that ships, and it
+excused `scripts/v_next/affine_calibrate_bake.py` as filling a gap that was
+never open. Per the no-duplication rule, that script is a duplicate.)_
+
+Output-**spline** / dial refits are NOT affine — those live in
+`bake_dial_refit` above.
 
 ### Per-corpus baseline metric extraction
 **Missing v3 equivalent.** Older `score_unified_with_bake.py` was
@@ -1313,20 +1367,28 @@ Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
 
 ### Deprecated / DO NOT USE
 - `zensim-bench/examples/quant_compare.rs` — drops metadata, catastrophic SROCC loss.
-- `scripts/v_next/affine_calibrate_znpr_v2.py` — refuses to run (v2 only).
-- `scripts/v_next/score_unified_with_bake.py` — refuses to run (v2 only).
-- `scripts/v_next/soft_iso_smooth.py` — refuses to run (depends on v2 scorer).
 - `dataset_metric_baseline` (zensim-bench example) — slow (15-20 min)
   AND silently drops KADID rows on image-decode failures. Use
   `bake_verdict` instead.
-- **Bake-byte-editing Python (DEPRECATED 2026-07-05, migrated to
-  `bake_dial_refit` — carry a header, kept for provenance, don't extend):**
-  `dense_dial_refit_b.py` → `extend-top`, `shared_anchor_refit.py` →
-  `shared-anchor`, `bhdr_bottom_extend.py` → `bottom-extend`,
-  `winsorize_bake.py` → `add-winsor`, `bake_outlier_gate.py` → `gate`.
-  `hdr_anchor_dense_refit.py` / `w11_webp_ood_refit_2026-07-05.py` are
-  research scripts (the latter FALSIFIED) — their bake primitives are in
-  the Rust bin; don't resurrect the numpy PCHIP/serialize code.
+- **DELETED 2026-07-15** (superseded; git history preserves them —
+  "kept for provenance" was redundant with version control, and a
+  deprecated file left in tree is a file the next session copies):
+  `dense_dial_refit_b.py` → `bake_dial_refit extend-top`,
+  `bhdr_bottom_extend.py` → `bottom-extend`, `winsorize_bake.py` →
+  `add-winsor`, `w11_webp_ood_refit_2026-07-05.py` (falsified campaign).
+  The first three were proven **byte-identical** to their Rust
+  replacements before deletion. Already deleted earlier:
+  `affine_calibrate_znpr_v2.py`, `score_unified_with_bake.py`,
+  `soft_iso_smooth.py` — this list claimed they were "deprecated but
+  present" long after they were gone.
+- **Still present, blocked on a live importer** (delete once ported):
+  `bake_outlier_gate.py` → `bake_dial_refit gate` (imported by
+  `xmetric_consensus.py`); `shared_anchor_refit.py` → `shared-anchor`
+  (imported by `hdr_anchor_dense_refit.py`).
+- `hdr_anchor_dense_refit.py` is PARTIALLY migrated: its base whole-spline
+  refit is `bake_dial_refit shared-anchor`; only the 28-bin densify + Q-Q
+  top-end knots remain as experiment logic. Its bake primitives live in the
+  Rust bin — don't resurrect the numpy PCHIP/serialize code.
 
 ## Canonical training/validation corpora (2026-05-18, R2-verified 2026-05-25)
 

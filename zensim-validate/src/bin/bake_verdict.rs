@@ -49,7 +49,7 @@ use std::time::Instant;
 use zenpredict::{Model, Predictor};
 
 use zensim_validate::eval_report;
-use zensim_validate::panel::{compute_panel, rescale_logistic};
+use zensim_validate::panel::{PerGroupSrocc, compute_panel, per_group_srocc, rescale_logistic};
 use zensim_validate::parquet_loader;
 
 // ============================================================================
@@ -452,8 +452,18 @@ struct CorpusResult {
     ds_auc: f64,
     /// Logistic-rescaled scores in [0,100] dial space (for G1 range check).
     rescaled_scores: Vec<f64>,
+    /// Per-reference SROCC summary, when the corpus carries ref identity.
+    per_ref: Option<PerGroupSrocc>,
     body: String,
 }
+
+/// Minimum rows per reference for its ladder to be rankable. A 2-row SROCC is
+/// +/-1 by construction and only adds noise at the extremes.
+///
+/// The stat itself lives in `zenstats::panel::per_group_srocc` — the canonical
+/// home for statistical math. This binary only chooses the grouping (by
+/// reference image) and renders the result.
+const PER_REF_MIN_ROWS: usize = 3;
 
 fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, f64, f64) {
     // Canonical 6-stat panel comes from `compute_panel` (re-exported
@@ -925,6 +935,12 @@ fn render_corpus(
     }
 
     let (srocc, plcc, krocc, or_, pw, z, ds) = aggregate_panel(&scores, &humans);
+    // Grouping by reference image is this binary's call; the statistic is
+    // zenstats' (the canonical stats home — never re-derive it here).
+    let per_ref = g
+        .ref_ids
+        .as_ref()
+        .and_then(|r| per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS));
 
     let mut body = String::new();
     body.push_str(&format!("\n## {} (n={})\n\n", corpus.display, n));
@@ -941,6 +957,36 @@ parquet sidecars). Rescale is 4-parameter logistic (Mohammadi 2025 convention), 
 not affine — affine inflates Z-RMSE on nonlinear metrics by 30× because \
 saturation regions dominate the residual._\n",
     );
+
+    if let Some(pr) = &per_ref {
+        body.push('\n');
+        body.push_str("### Per-reference SROCC (within-image rank agreement)\n\n");
+        body.push_str("| n refs | mean | median | % refs backwards | % refs perfect |\n");
+        body.push_str("|---:|---:|---:|---:|---:|\n");
+        body.push_str(&format!(
+            "| {} | {:+.4} | {:+.4} | {:.0}% | {:.0}% |\n",
+            pr.n_groups,
+            pr.mean,
+            pr.median,
+            pr.frac_negative * 100.0,
+            pr.frac_perfect * 100.0,
+        ));
+        body.push('\n');
+        body.push_str(&format!(
+            "_Aggregate SROCC here is {srocc:+.4} vs per-ref mean {:+.4} (gap {:+.4}). \
+The aggregate mixes two questions: does the bake order ONE image's distortions \
+correctly, and does it put different images on a common scale? A large gap means \
+the pooled number is dominated by cross-image scale, not ranking — the documented \
+AIC-3 confound (0.79 pooled / 0.93 per-ref). **'% refs backwards' is the one to \
+read**: a bake can post a healthy pooled SROCC while ranking most individual \
+ladders in reverse, which is invisible to every pooled and per-band stat above \
+(§8.39 measured exactly that: -0.144 per-ref, 60% backwards, on a corpus the \
+pooled panel had no complaint about). Refs with <3 rows or a degenerate target \
+are excluded._\n",
+            pr.mean,
+            pr.mean - srocc,
+        ));
+    }
 
     if corpus.enable_per_band {
         body.push('\n');
@@ -1031,6 +1077,7 @@ read on this corpus._\n",
         z_rmse: z,
         ds_auc: ds,
         rescaled_scores: scores.clone(),
+        per_ref,
         body,
     })
 }
@@ -1176,16 +1223,33 @@ fn main() -> ExitCode {
     // One-row summary across all corpora at the top.
     buf.push_str("\n## Summary (one row per corpus)\n\n");
     buf.push_str(
-        "| Corpus | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | DS-AUC | geomean3 |\n",
+        "| Corpus | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | DS-AUC | geomean3 | per-ref | %bwd |\n",
     );
-    buf.push_str("|---|--:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    buf.push_str("|---|--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for r in &results {
         let g3 = (r.srocc * r.plcc * r.pwrc).cbrt();
+        let (pr, bwd) = match &r.per_ref {
+            Some(p) => (
+                format!("{:+.4}", p.mean),
+                format!("{:.0}%", p.frac_negative * 100.0),
+            ),
+            None => ("—".to_string(), "—".to_string()),
+        };
         buf.push_str(&format!(
-            "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} | {:.4} | {:.4} |\n",
-            r.display, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse, r.ds_auc, g3
+            "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} | {:.4} | {:.4} | {} | {} |\n",
+            r.display, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse, r.ds_auc, g3,
+            pr, bwd
         ));
     }
+    buf.push('\n');
+    buf.push_str(
+        "_`per-ref` is the mean within-image SROCC and `%bwd` the share of references \
+whose distortion ladder is ranked BACKWARDS. Read them against the pooled SROCC: a wide \
+gap means the pooled number is carried by cross-image scale rather than ranking (the \
+AIC-3 0.79-pooled / 0.93-per-ref confound). A high `%bwd` next to a healthy SROCC is the \
+failure §8.39 found and no pooled or per-band stat can see. `—` = corpus carries no ref \
+identity._\n",
+    );
     // Per-corpus SROCC at a glance (inline-SVG; renders in the HTML report).
     if !results.is_empty() {
         let labels: Vec<String> = results.iter().map(|r| r.display.to_string()).collect();
