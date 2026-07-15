@@ -63,17 +63,88 @@ HOLDOUTS = ["cid22", "aic3", "aic4", "konjnd", "nonphoto"]
 _CACHE: dict = {}
 
 
-def _load(path, ycol, scale=1.0):
+def _load(path, ycol, scale=1.0, batch_rows=50_000):
+    """Load (X[N,372] float32, y[N] float64) from a feature parquet, cached.
+
+    Reads in ROW-GROUP BATCHES rather than one `read_table`. bigcodec is 5.3 GB on disk; a
+    single read materializes the full arrow table AND a stacked numpy copy (~2x peak) in one
+    giant allocation, which fails with ENOMEM once the page cache is warm (measured
+    2026-07-15: `[errno 12] Cannot allocate memory` at a 40G cap with only 9.5 GiB RSS —
+    the box had 45 GiB in buff/cache and 4.7 GiB free, so the big contiguous alloc could not
+    be served). Batching keeps peak to one batch + the accumulating result and is strictly
+    better for every corpus.
+    """
     key = (path, ycol, scale)
     if key not in _CACHE:
         names = [f.name for f in pq.read_schema(path)]
         pfx = "feat_" if "feat_0" in names else "f"
-        t = pq.read_table(path, columns=[ycol] + [f"{pfx}{i}" for i in range(N_FEAT)])
-        X = np.stack([np.asarray(t[f"{pfx}{i}"], dtype=np.float32) for i in range(N_FEAT)], 1)
-        y = np.asarray(t[ycol], dtype=np.float64) * scale
-        ok = np.isfinite(y) & np.isfinite(X).all(1)
-        _CACHE[key] = (X[ok], y[ok])
+        cols = [ycol] + [f"{pfx}{i}" for i in range(N_FEAT)]
+        fcols = [f"{pfx}{i}" for i in range(N_FEAT)]
+        Xs, ys = [], []
+        pf = pq.ParquetFile(path)
+        for b in pf.iter_batches(batch_size=batch_rows, columns=cols):
+            Xb = np.stack([np.asarray(b[c], dtype=np.float32) for c in fcols], 1)
+            yb = np.asarray(b[ycol], dtype=np.float64) * scale
+            ok = np.isfinite(yb) & np.isfinite(Xb).all(1)   # filter per batch -> smaller keep
+            Xs.append(Xb[ok]); ys.append(yb[ok])
+        _CACHE[key] = (np.concatenate(Xs), np.concatenate(ys))
     return _CACHE[key]
+
+
+# --- HF (near-lossless) corpus: the ONLY post-jxl-fix data below distance 0.03 -------------
+# 200 refs x 6 distances {0.005..0.03}. Features live in features.parquet (feat_0..371,
+# with-iw regime); the ssim2 target lives in the sibling pareto.tsv -> joined on the cell key.
+# MEASURED (pointer doc jxl_nearlossless_corpus_2026-07-06): pooled SROCC vs -distance is only
+# +0.204 because cross-image scale swamps it, but PER-REF it is +0.916 — the ladder moves ssim2
+# ~0.92 pts within an image vs ~6 pts between images. So this corpus is usable ONLY as a
+# WITHIN-REF RANK signal; an absolute/MSE target here fits between-image noise.
+HF_DIR = "/mnt/v/output/zensim-jxl-nearlossless/refit"
+_HF_CACHE = {}
+
+
+def load_hf(split="train", eval_every=4):
+    """(X, y_ssim2, ref_idx) for the near-lossless corpus. Ref-level split (leak-free): refs are
+    sorted, every `eval_every`-th goes to 'val'. split in {'train','val','all'}."""
+    import csv as _csv
+    import json as _json
+    if "all" not in _HF_CACHE:
+        names = [f.name for f in pq.read_schema(f"{HF_DIR}/features.parquet")]
+        pfx = "feat_" if "feat_0" in names else "f"
+        t = pq.read_table(f"{HF_DIR}/features.parquet",
+                          columns=["image_path", "codec", "q", "knob_tuple_json"]
+                                  + [f"{pfx}{i}" for i in range(N_FEAT)])
+        X = np.stack([np.asarray(t[f"{pfx}{i}"], dtype=np.float32) for i in range(N_FEAT)], 1)
+        # NOTE: q is float in the parquet ("90.0") but a string in the TSV ("90") -> normalize to
+        # float on BOTH sides or the join silently yields zero rows.
+        key = list(zip(t["image_path"].to_pylist(), t["codec"].to_pylist(),
+                       [float(v) for v in t["q"].to_pylist()], t["knob_tuple_json"].to_pylist()))
+        # join the ssim2 target from pareto.tsv on the same cell key
+        tgt = {}
+        for r in _csv.DictReader(open(f"{HF_DIR}/pareto.tsv"), delimiter="\t"):
+            tgt[(r["image_path"], r["codec"], float(r["q"]), r["knob_tuple_json"])] = float(r["score_ssim2"])
+        y = np.array([tgt.get(k, np.nan) for k in key], float)
+        refs = np.array([k[0] for k in key])
+        uref = sorted(set(refs.tolist()))
+        rid = np.array([uref.index(r) for r in refs])
+        ok = np.isfinite(y) & np.isfinite(X).all(1)
+        _HF_CACHE["all"] = (X[ok], y[ok], rid[ok], len(uref))
+    X, y, rid, nref = _HF_CACHE["all"]
+    if split == "all":
+        return X, y, rid
+    is_val = (rid % eval_every) == 0
+    m = is_val if split == "val" else ~is_val
+    return X[m], y[m], rid[m]
+
+
+def hf_pairs(rid):
+    """All within-ref index pairs (i, j) — the only comparisons this corpus supports."""
+    pi, pj = [], []
+    for r in np.unique(rid):
+        idx = np.where(rid == r)[0]
+        for a in range(len(idx)):
+            for b in range(a + 1, len(idx)):
+                pi.append(idx[a]); pj.append(idx[b])
+    return np.array(pi), np.array(pj)
 
 
 def load_train(name):
@@ -135,9 +206,31 @@ def train_blend(spec, hp, seed):
     else:
         net = nn.Sequential(nn.Linear(N_FEAT, H), nn.LeakyReLU(0.01), nn.Linear(H, 1)).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=1e-3, weight_decay=1e-5)
+
+    # HF (near-lossless) group — RANK-ONLY, within-ref pairwise (RankNet). Deliberately NOT an
+    # MSE term: its ssim2 ladder moves only ~0.92 pts within an image vs ~6 pts of cross-image
+    # spread, so an absolute target would fit between-image noise (see load_hf docstring). Only
+    # the training refs are used; the held-out refs are the honest HF readout.
+    hfw = float(hp.get("hf_rank_weight", 0.0))
+    hf = None
+    if hfw > 0:
+        Xh, yh, rh = load_hf("train", eval_every=int(hp.get("hf_eval_every", 4)))
+        pi, pj = hf_pairs(rh)
+        Xhd = torch.tensor(sc(Xh), dtype=torch.float32, device=dev)
+        # target: 1 if cell i is the better-quality (higher ssim2) member of the pair
+        tgt = torch.tensor((yh[pi] > yh[pj]).astype(np.float32), device=dev)
+        hf = (Xhd, torch.tensor(pi, device=dev), torch.tensor(pj, device=dev), tgt)
+
     for _ in range(hp.get("epochs", 400)):
         opt.zero_grad()
         loss = (nn.functional.smooth_l1_loss(net(Xd), yd, reduction="none") * wd).mean()
+        if hf is not None:
+            Xhd, pi_t, pj_t, tgt = hf
+            sh = net(Xhd).squeeze(1)
+            # RankNet: P(i beats j) = sigmoid(s_i - s_j); scale-free, so it cannot drag the
+            # absolute dial of the MSE groups around.
+            loss = loss + hfw * nn.functional.binary_cross_entropy_with_logits(
+                sh[pi_t] - sh[pj_t], tgt)
         loss.backward(); opt.step()
     out = dict(mu=mu, sd=sd, lo=lo, hi=hi, hidden=H, leaky=0.01, seed=seed, layers=layers,
                tm=tm, ts=ts, spec=spec, hp=hp)
@@ -252,6 +345,27 @@ def panel(pred, human, sign=+1, per_band=True, band_scale=None):
                               "restrict": restrict, "lowconf": bool(lowconf)}
         out["bands"] = bands
     return out
+
+
+def hf_eval(payload, split="val", eval_every=4):
+    """HONEST near-lossless readout: mean/median PER-REF SROCC of the bake vs the ssim2 ladder on
+    HELD-OUT refs (never trained on when hf_rank_weight>0). Per-ref is mandatory here — pooled
+    conflates cross-image scale with the within-ladder question (pooled ssim2 is only +0.204 vs
+    +0.916 per-ref). Reference points measured 2026-07-15 on all 200 refs:
+    ssim2 per-ref +0.916 (median 0.943), zensim per-ref +0.966 (median 1.000), 0% negative."""
+    X, y, rid = load_hf(split, eval_every=eval_every)
+    pred = forward(payload, X)
+    per = []
+    for r in np.unique(rid):
+        m = rid == r
+        if m.sum() >= 3 and np.std(pred[m]) > 0 and np.std(y[m]) > 0:
+            c = _srocc(pred[m], y[m])
+            if np.isfinite(c):
+                per.append(c)
+    per = np.array(per) if per else np.array([np.nan])
+    return {"n_refs": int(len(per)), "per_ref_mean": float(np.nanmean(per)),
+            "per_ref_median": float(np.nanmedian(per)),
+            "frac_perfect": float(np.mean(per > 0.99)), "frac_negative": float(np.mean(per < 0))}
 
 
 def score_all(payload):

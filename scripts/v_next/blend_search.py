@@ -77,6 +77,24 @@ ROUND5 = [
 # FALSIFICATION: if high-tail is flat across winsor_pct 0..1.0, the weak high-tail is NOT
 # the winsor bound and the next suspect is feature-vanishing proper / ssim2 saturation.
 # READOUT: srocc_hightail (primary), CID22 + nonphoto (must not regress).
+# ROUND7 — does the post-jxl-fix HF corpus (the ONLY data below distance 0.03) help?
+# It is consumed RANK-ONLY, within-ref pairwise (RankNet), because its ssim2 ladder moves only
+# ~0.92 pts within an image vs ~6 pts of cross-image spread -> an MSE term would fit noise.
+# Refs are split 150 train / 50 held-out, so the HF readout (per-ref SROCC on held-out refs) is
+# honest and not train==val.
+# HYPOTHESIS: 72% of the HF corpus sits above ssim2 95 where canonical safesyn has only 1.86%.
+#   Adding rank supervision there should improve near-lossless ordering at no cost to CID22
+#   (RankNet is scale-free, so it cannot drag the absolute dial of the MSE groups).
+# FALSIFICATION: if held-out HF per-ref SROCC is flat vs the hf=0 reference, the corpus adds
+#   nothing the existing blend doesn't already know; if CID22/nonphoto regress, it is a trade.
+# READOUT: hfPR (held-out per-ref mean) primary; CID22 + nonphoto must not regress.
+ROUND7 = [
+    ("r7-hf0(ref)",   dict(_HON), {"layers": 2, "hidden": 128, "hf_rank_weight": 0.0}),
+    ("r7-hf0.1",      dict(_HON), {"layers": 2, "hidden": 128, "hf_rank_weight": 0.1}),
+    ("r7-hf0.3",      dict(_HON), {"layers": 2, "hidden": 128, "hf_rank_weight": 0.3}),
+    ("r7-hf1",        dict(_HON), {"layers": 2, "hidden": 128, "hf_rank_weight": 1.0}),
+    ("r7-hf3",        dict(_HON), {"layers": 2, "hidden": 128, "hf_rank_weight": 3.0}),
+]
 ROUND6 = [
     ("r6-winsor0",        dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 0.0}),
     ("r6-winsor0.02",     dict(_HON), {"layers": 2, "hidden": 128, "winsor_pct": 0.02}),
@@ -131,13 +149,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", default="1,7")
     ap.add_argument("--topk", type=int, default=4)
-    ap.add_argument("--round", default="1", choices=["1", "2", "3", "4", "5", "6"])
+    ap.add_argument("--round", default="1", choices=["1", "2", "3", "4", "5", "6", "7"])
     ap.add_argument("--out-dir", default="/mnt/v/output/zensim/reports/blend")
     a = ap.parse_args()
     seeds = [int(x) for x in a.seeds.split(",")]
     od = Path(a.out_dir); od.mkdir(parents=True, exist_ok=True)
     CONFIGS = {"1": ROUND1, "2": ROUND2, "3": ROUND3, "4": ROUND4, "5": ROUND5,
-               "6": ROUND6}[a.round]
+               "6": ROUND6, "7": ROUND7}[a.round]
     rtag = f"r{a.round}"
 
     cols = ["cid22", "nonphoto", "konjnd", "aic3", "aic4", "kadid", "tid"]
@@ -159,7 +177,11 @@ def main():
             return v if np.isfinite(v) else float("nan")
         # Round 6's readout is the CID22 tails (the honest extreme-quality rank), not the bands.
         tails = ""
-        if a.round == "6":
+        if a.round == "7":
+            hf = B.hf_eval(payloads[len(seeds)//2])   # median-seed bake, HELD-OUT refs
+            tails = (f"  hfPR {hf['per_ref_mean']:+.3f} med {hf['per_ref_median']:+.3f}"
+                     f" perf {hf['frac_perfect']:.2f} neg {hf['frac_negative']:.2f}")
+        elif a.round == "6":
             lt, ht = avg["cid22"].get("srocc_lowtail", np.nan), avg["cid22"].get("srocc_hightail", np.nan)
             tails = f"  loT {lt:+.3f} hiT {ht:+.3f}"
         print(f"{label:16} " + " ".join(f"{show(c):+8.4f}" for c in cols)
