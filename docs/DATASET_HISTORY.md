@@ -233,14 +233,18 @@ Cite: `§8.36`.
   `human_score` means TWO quantities (train active-mix [0,1] vs val mean-PJND [22,70]) → a default
   `--target-column human_score` fits the wrong one. Interpretation trap, not a code bug. Cite:
   `feedback_konjnd_human_score_two_columns.md`.
-- **3.18 kadid/tid `iwssim`/`ssim2_gpu` are STILL leaked/misjoined in the CANONICAL training set
-  (2026-07-15).** The V39-#8 bug — `iwssim` = a byte-identical copy of `human_score` (target leak),
-  `ssim2_gpu` = ref-vs-ref misjoin — was documented as "fixed in `*_fixed_2026-05-25.parquet`
-  siblings," but those were **never promoted**. `canonical-2026-05-21/train/kadid.parquet` verified
-  2026-07-15: `iwssim==human_score` max|Δ|=0.00e+00; `ssim2_gpu` pinned 93.5/100/100. Shipped bakes
-  SAFE (trained on `human_score`/ssim2 from safesyn+cid22, never kadid/tid iwssim). Impact: any
-  future multi-target run pulling iwssim/ssim2 from kadid/tid trains on garbage. Fix: promote the
-  fixed siblings / re-extract. Cite: `benchmarks/column_audit_2026-07-15.md`, `…§8.37 A`.
+- **3.18 kadid/tid `iwssim`/`ssim2_gpu` leaked/misjoined in canonical — RESOLVED 2026-07-15.** The
+  V39-#8 bug — `iwssim` = a byte-identical copy of `human_score` (target leak), `ssim2_gpu` =
+  ref-vs-ref misjoin — was documented as "fixed in `*_fixed_2026-05-25.parquet` siblings" but those
+  were never promoted; verified still-live 2026-07-15 (`iwssim==human_score` max|Δ|=0.00e+00; `ssim2`
+  pinned 93.5/100/100). **FIXED by promoting the verified siblings** (`promote_fixed_kadid_tid_2026-07-15.py`,
+  user directive): `canonical-2026-05-21/train/{kadid,tid}.parquet` now carry real iwssim
+  (SROCC-vs-MOS +0.850/+0.779) + real ssim2 (spans [−367,100]/[−96,90], SROCC +0.813/+0.846); all
+  376 preserved cols (372 features + human_score/cvvdp_*/pjnd_target) byte-identical → **zero feature
+  drift**. Corrupt originals preserved at `<c>.CORRUPT-v39bug.pre-2026-07-15.bak.parquet` (+ R2
+  `_archive/` + Tower). Manifest entries [5]/[9] updated (new sha256). R2 + Tower re-synced. Shipped
+  bakes were always SAFE (trained on `human_score`, never kadid/tid iwssim). Cite:
+  `benchmarks/column_audit_2026-07-15.md`, `…§8.37 A`, `scripts/canonical_corpus/fix_kadid_tid_apply_scores.py`.
 - **3.19 IW/masked HF-moment features explode on non-photographic content — unbounded energy +
   a `1/n`-vs-`Σw` normalization bug (2026-07-15).** bigcodec IW/masked reached 5.8e6 (vs photographic
   p99.9=0.48) — traced to (a) `iw_art4`/`iw_det4` being **unbounded, un-per-image-normalized** edge

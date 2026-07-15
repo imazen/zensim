@@ -1280,6 +1280,19 @@ rebuilds and new joins go here.**
 > `s3://zentrain/v11-reproduction-kit-2026-05-25/`. All shipped bakes
 > (41 files, 4.6 MB) are mirrored at `s3://zentrain/bakes-2026-05-25/`
 > for cold-start independence from the zensim git repo.
+>
+> **⚠ 2026-07-15 DATA FIX (DATASET_HISTORY §3.18):** `train/{kadid,tid}.parquet`
+> had the V39-#8 corruption (`iwssim` = a byte-identical `human_score` copy;
+> `ssim2_gpu` = ref-vs-ref misjoin, pinned ~100). RESOLVED by promoting the
+> verified `*_fixed_2026-05-25` siblings (`scripts/canonical_corpus/promote_fixed_kadid_tid_2026-07-15.py`):
+> real iwssim (SROCC-vs-MOS +0.850/+0.779) + real ssim2 ([−367,100]/[−96,90],
+> SROCC +0.813/+0.846); **all 372 features + human_score/cvvdp_*/pjnd_target
+> byte-identical** (zero feature drift, so v11 — trained on `human_score` — is
+> unaffected). New sha256: kadid `38735c46…`, tid `efff176a…`. Corrupt originals
+> preserved at `<c>.CORRUPT-v39bug.pre-2026-07-15.bak.parquet` + R2 `_archive/` +
+> Tower. R2 + Tower re-synced. **NOTE:** the archival `canonical-2026-05-18/train/`
+> kadid/tid were NOT promoted (still corrupt; `*_fixed_2026-05-25` siblings sit
+> there if ever needed) — that layout is archaeology-only.
 
 ### Local + R2 locations
 
