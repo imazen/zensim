@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 # SPEED-B lr-retune sweep — post-bake eval harness.
 #
-# Mirrors eval_cross_codec_v6.sh but globs cc4v6_lr*.bin in SWEEP_DIR.
-# Phases:
+# Shares phases 1-3 with the generic driver (eval_cross_codec.sh) but diverges
+# at phase 4: this one aggregates the lr × seed grid instead of running the
+# PJND/multi-band gates, which is why it is not folded into that driver.
+#
+# Phases (VERIFIED against the code below, 2026-07-15):
 #   1. qsweep_eval on the 50-image × 19-q JPEG sweep (mono/tied/range/band-rmse).
 #   2. bake_verdict for SROCC panel — gates the ±0.01 vs K=1 baseline rule.
-#   3. Cross-codec T=63 consistency (n=20 images × 4 codecs) — V6 gate.
-#   4. Single-band multi-codec PJND score check (T=63 only).
-#   5. Multi-band cross-codec consistency check (V6 gate, all 6 bands).
+#   3. Cross-codec T=63 consistency (n=20 images × 4 codecs).
+#   4. aggregate_lr_retune.py -> lr_retune_summary.md
+#
+# This list previously claimed a "4. Single-band multi-codec PJND score check"
+# and a "5. Multi-band cross-codec consistency check (V6 gate, all 6 bands)".
+# Neither exists here: the header came over with a `cp` from eval_cross_codec_v6.sh,
+# the phases were rewritten, and the list describing them was not. A header that
+# documents phases the script does not run is worse than no header.
 #
 # Output: /mnt/v/zen/zensim-eval/speed_b_lr_retune_2026-05-19/
 set -euo pipefail

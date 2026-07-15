@@ -1,5 +1,19 @@
 # Cycle 7 — dssim co-training plan (2026-05-12, authorized)
 
+> **Status: FALSIFIED 2026-05-12 (cycle-7 verdict, commit `4ed499e`).** All 5
+> dssim-weighted variants regressed CID22 by 0.04–0.07 vs the V0_16 baseline.
+> Per CLAUDE.md: *"Don't retry without a fundamentally different mechanism.
+> The identified next lever for B0/B1 SROCC is direct JPEG-AI training-corpus
+> acquisition."*
+>
+> This header was added 2026-07-15. The plan stated an "Expected outcome" and
+> never recorded the actual one, so for two months it read as authorized,
+> pending work for a hypothesis that had already been killed — which is exactly
+> how a session retries a dead idea. CLAUDE.md's own Step 10 requires the
+> negative result to land where the next reader will hit it. The tools it names
+> (`train_v_next_mlp.py`) were deleted in 34f796f4; the Rust
+> `zensim_mlp_train` is the trainer now. Kept as the record of what was tried.
+
 ## Motivation
 
 Per `benchmarks/cycle_6_finals_2026-05-12.md` and

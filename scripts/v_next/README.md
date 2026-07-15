@@ -9,13 +9,17 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 | If you want to… | Use |
 |---|---|
 | Compute IW-SSIM on the safesyn corpus | [`compute_iwssim_on_safesyn.py`](compute_iwssim_on_safesyn.py) |
-| Run IW-SSIM on vast.ai (parallel) | [`vastai_iwssim/`](vastai_iwssim/) (deployment plan in `benchmarks/iwssim_vastai_deployment_plan_2026-05-15.md`) |
+| Run IW-SSIM on a fleet | The zenfleet job system (`zenmetrics/scripts/jobsys/`) — CLAUDE.md forbids hand-rolled fleet orchestration. `vastai_iwssim/` was committed in 5ccea813 and later deleted; its deployment plan is gone too. |
 | Screen per-feature transforms (V_20 IS pipeline) | [`v0_20_feature_transform_greedy_screen.py`](v0_20_feature_transform_greedy_screen.py) → [`v0_20_screen_to_trainer_args.py`](v0_20_screen_to_trainer_args.py) |
 | Distill V_20b (contrastive pre-train + fine-tune) | [`v0_20b/`](v0_20b/) (subdirectory; see its own README) |
-| Affine-calibrate a bake (distance → score) | [`affine_calibrate_bake.py`](affine_calibrate_bake.py) (preferred) or `affine_calibrate_znpr_v2.py` (legacy v2) |
+| Affine-calibrate a bake (distance → score) | `cargo run --release -p zensim-validate --bin affine_calibrate` — the Rust owner since 2026-06-18. (`affine_calibrate_znpr_v2.py` was deleted; this row pointed at it long after.) |
 | Build the interactive comparison-site data | [`build_site_data.py`](build_site_data.py) + [`build_scatter_data.py`](build_scatter_data.py) |
 | Export a corpus to parquet for the site | [`export_human_corpora_to_parquet.py`](export_human_corpora_to_parquet.py), `export_aic3_to_parquet.py`, `export_aic4_to_parquet.py` |
-| Verify a baked MLP reproduces a known SROCC | [`verify_bake_srocc.py`](verify_bake_srocc.py) |
+| Verify a baked MLP reproduces a known SROCC | `bake_verdict --bake <bin>` (Rust; ~3.5 s for all corpora). `verify_bake_srocc.py` was deleted 2026-07-15 — its target binary had no source anywhere. |
+| Run the cross-codec eval harness for a generation | [`eval_cross_codec.sh`](eval_cross_codec.sh) `<v4\|v4b\|v5\|v6\|v7\|v8>` |
+| Check multi-codec PJND score agreement | [`cross_codec_pjnd_check.py`](cross_codec_pjnd_check.py) `<exp> <dir>` |
+| Check multi-band cross-codec parity | [`cross_codec_multi_band_check.py`](cross_codec_multi_band_check.py) `<exp> <dir>` |
+| Build a cross-codec summary scorecard | [`summarize_cross_codec.py`](summarize_cross_codec.py) `<exp> <dir>` |
 | Sync the unified parquet store to R2 | [`sync_unified_to_r2.sh`](sync_unified_to_r2.sh) |
 
 ## Grouped by theme
@@ -24,8 +28,7 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 
 | Script | Role |
 |---|---|
-| `compute_iwssim_on_safesyn.py` | Compute Wang & Li 2011 IW-SSIM per pair via `piq.information_weighted_ssim` (PyTorch, CUDA). Outputs parquet sidecar with `source_path, decoded_path, iwssim`. ~7.3 pairs/sec on a 4090; ~7.5 hr for the 196k-pair safesyn corpus. The `vastai_iwssim/` subdir parallelizes this across N workers (~1 hr / ~$5). |
-| `vastai_iwssim/` | vast.ai sweep adaptation. Reads safesyn TSV, splits into 99 chunks, uploads to R2, launches N workers, merges results back. Deployment plan: `benchmarks/iwssim_vastai_deployment_plan_2026-05-15.md`. |
+| `compute_iwssim_on_safesyn.py` | Compute Wang & Li 2011 IW-SSIM per pair via `piq.information_weighted_ssim` (PyTorch, CUDA). Outputs parquet sidecar with `source_path, decoded_path, iwssim`. ~7.3 pairs/sec on a 4090; ~7.5 hr for the 196k-pair safesyn corpus. (A `vastai_iwssim/` subdir once parallelized this; it was deleted. Use the zenfleet job system.) |
 
 ### V_20 input shaping (V_20 IS / V_20a / V_20b / V_20 extended)
 
@@ -55,9 +58,7 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 | Script | Role |
 |---|---|
 | `affine_calibrate_bake.py` | (Preferred) Apply `y' = α + β·y` calibration to a ZNPR v3 F32 bake's final layer. Used to map V_X bake's raw output onto the MCOS 0..100 scale. |
-| `affine_calibrate_znpr_v2.py` | Legacy v2 variant. Don't write new code against this; v2 production is prohibited per CLAUDE.md. Kept for reproducing pre-2026-05-13 bakes. |
 | `bake_to_znpr.py` | Pre-`zenpredict-bake` JSON CLI baker. **Legacy**. New bake construction goes through `zenpredict-bake <input.json> <output.bin>` per CLAUDE.md "JSON pipeline mandate" — see `v0_20b/bake_znpr_v3.py` as the canonical template. |
-| `ensemble_seeds.py` | Average MLPs across seeds for a single bake. Used in early V_X cycles before the 3-way concat construction landed. |
 
 ### Eval + analysis
 
@@ -68,9 +69,6 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 | `analyze_score_quality.py` | Per-quality-band score-distribution analysis. Inputs: per-pair eval CSV. |
 | `apply_butter_filter.py` | Filter pairs by butter-vs-ssim2 concordance. Pre-process step for noise-reduction in the synth corpus. |
 | `butter_concordance_audit.py` | Audit how butter and ssim2 disagree across the safesyn corpus. Informed the cycle-7 dssim experiments. |
-| `per_band_step5.py` | Bin per-pair scores into step-5 (20 bins of width 0.05) bands and report per-bin SROCC. The granular alternative to 10-band reporting. |
-| `score_unified_with_bake.py` | Score the unified parquet store with a given bake. Used for the candlestick chart pipeline. |
-| `soft_iso_smooth.py` | Post-hoc smoothing of bake predictions for monotonicity (soft-iso regression). Cycle-11 era. |
 | `regen_tv_pairs.py` | Regenerate the TV-regularizer pair indices TSV when the training CSV changes. |
 
 ### Sweep / chart / site
@@ -85,7 +83,7 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 
 | Script | Role |
 |---|---|
-| `train_v_next_mlp.py` | The Python-side MLP trainer. **Largely retired** — `zensim-validate/src/bin/zensim_mlp_train` (Rust) is the canonical trainer as of V_18. Kept for the Phase 4 trainer reference set. |
+| the MLP trainer | `zensim-validate/src/bin/zensim_mlp_train` (Rust) — the canonical and only trainer. The Python `train_v_next_mlp.py` was deleted in 34f796f4; this row described it as merely "largely retired" for weeks afterwards. |
 
 ### Planning notes
 

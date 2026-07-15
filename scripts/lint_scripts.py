@@ -36,6 +36,9 @@ Checks:
               AND whose source cannot be found
   DEAD-SCRIPT — shells to a `scripts/...` path that does not exist (this is the
               cross-language edge: a .sh calling a deleted .py)
+  DEAD-LINK / DEAD-REF — a README under scripts/ indexes a file that is gone.
+              The index is how people find tools; when it rots it sends the
+              next session to rebuild something that already exists.
 
 A hardcoded build artifact under THIS repo's own `target/` is only a warning:
 it may simply not be built yet. A path under a *deleted worktree* is fatal —
@@ -76,6 +79,63 @@ def dead_script_refs(text: str) -> list[str]:
             if not (ROOT / ref).exists()
         }
     )
+
+
+MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)#:]+?)\)")
+MD_CODE_REF_RE = re.compile(r"`([\w./-]+\.(?:py|sh))`")
+
+
+def check_markdown(p: Path) -> list[str]:
+    """A README that indexes deleted scripts is worse than no README.
+
+    scripts/v_next/README.md is how anyone finds these tools, and on 2026-07-15
+    it still offered `affine_calibrate_znpr_v2.py` ("legacy v2... kept for
+    reproducing pre-2026-05-13 bakes") and `verify_bake_srocc.py` as live
+    options months after both were deleted. Nothing checks prose, so the index
+    rots silently while the code it points at is long gone — and a stale index
+    sends the next session to rebuild a tool that already exists, or to hunt for
+    one that never will.
+
+    Relative links are checked against the file's own directory; bare
+    `code-quoted` script names are checked against that directory too, since
+    that is how these tables cite tools.
+    """
+    fails: list[str] = []
+    text = p.read_text(errors="replace")
+
+    # A doc that DECLARES itself a record of the past legitimately names tools
+    # that existed then; flagging those forever would make this linter noisy,
+    # and a noisy linter gets muted. The exemption is deliberately opt-in and
+    # visible: the doc must say so in its header. `HISTORY_v06_rebalance_
+    # falsified.md` does ("**Status:** FALSIFIED 2026-05-18"). When this check
+    # first ran, `CYCLE_7_DSSIM_COTRAIN_PLAN.md` did NOT — it still read as
+    # "authorized" pending work for a hypothesis CLAUDE.md had recorded as
+    # falsified two months earlier. That is exactly how a session retries a
+    # dead idea, so it got a status header rather than an exemption.
+    if re.search(r"\b(falsified|superseded|historical doc|concluded|abandoned)\b",
+                 "\n".join(text.splitlines()[:12]), re.I):
+        return []
+
+    for target in MD_LINK_RE.findall(text):
+        t = target.strip()
+        if t.startswith(("http://", "https://", "mailto:", "/")):
+            continue
+        if not (p.parent / t).exists():
+            fails.append(f"DEAD-LINK links to missing {t}")
+    for name in MD_CODE_REF_RE.findall(text):
+        # Only judge names that look like siblings in this directory; a path
+        # into another repo or an illustrative name is not ours to resolve.
+        if "/" in name:
+            continue
+        if (p.parent / name).exists():
+            continue
+        # Prose legitimately names a deleted file to say it IS deleted.
+        for line in text.splitlines():
+            if name in line and re.search(r"delet|remov|superseded|was\b|no longer|gone", line, re.I):
+                break
+        else:
+            fails.append(f"DEAD-REF names missing script `{name}` without saying it is gone")
+    return sorted(set(fails))
 
 
 def code_strings(tree: ast.AST) -> list[str]:
@@ -235,6 +295,11 @@ def main() -> int:
     for p in sorted(SCRIPTS.rglob("*.sh")):
         n += 1
         f = check_shell(p)
+        if f:
+            failures[str(p.relative_to(ROOT))] = f
+    for p in sorted(SCRIPTS.rglob("*.md")):
+        n += 1
+        f = check_markdown(p)
         if f:
             failures[str(p.relative_to(ROOT))] = f
 
