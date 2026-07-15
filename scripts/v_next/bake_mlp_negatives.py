@@ -34,12 +34,15 @@ _spec.loader.exec_module(lp)
 
 def fwd(P, X):
     """numpy forward matching the runtime: winsor-clip (if bounds present) -> scaler ->
-    Linear -> LeakyReLU -> Linear."""
+    Linear -> LeakyReLU [-> Linear -> LeakyReLU] -> Linear. Supports 1- and 2-hidden-layer."""
     if "lo" in P and np.isfinite(P["lo"]).all():
         X = np.clip(X, P["lo"], P["hi"])
     z = (X - P["mu"]) / P["sd"]
-    h = z @ P["W0"].T + P["b0"]
-    h = np.where(h > 0, h, P["leaky"].item() * h)
+    lk = P["leaky"].item() if hasattr(P["leaky"], "item") else float(P["leaky"])
+    h = z @ P["W0"].T + P["b0"]; h = np.where(h > 0, h, lk * h)
+    if int(P.get("layers", 1)) == 2 and "W2" in P:
+        h = h @ P["W1"].T + P["b1"]; h = np.where(h > 0, h, lk * h)
+        return (h @ P["W2"].T + P["b2"]).ravel()
     return (h @ P["W1"].T + P["b1"]).ravel()
 
 
@@ -63,6 +66,10 @@ def main():
     if "lo" in z.files:                      # de-poison winsor bounds (task #19)
         P["lo"], P["hi"] = z["lo"], z["hi"]
     hidden = int(z["hidden"])
+    layers = int(z["layers"]) if "layers" in z.files else 1
+    P["layers"] = layers
+    if layers == 2:
+        P["W2"], P["b2"] = z["W2"], z["b2"]
 
     # ---- dial spline: forward MLP raw on the anchor, fit raw -> ssim2_gpu (negative-capable)
     Xa, ya = read_feats(ANCHOR, "ssim2_gpu")
@@ -71,20 +78,24 @@ def main():
     payload = struct.pack("<I", len(cx)) + b"".join(
         struct.pack("<ff", x, y) for x, y in zip(cx, cy))
 
+    # zenpredict layout (model.rs:92): W[i,o] = weights[i*out_dim + o] = INPUT-major.
+    # PyTorch Linear.weight is [out,in], so emit W.T.ravel() (in-major).
+    def layer(Wk, bk, in_d, out_d, act):
+        return {"in_dim": in_d, "out_dim": out_d, "activation": act, "dtype": a.dtype,
+                "weights": [float(v) for v in P[Wk].astype(np.float64).T.ravel()],
+                "biases": [float(v) for v in P[bk]]}
+    if layers == 2:
+        layer_list = [layer("W0", "b0", N_FEAT, hidden, "leakyrelu"),
+                      layer("W1", "b1", hidden, hidden, "leakyrelu"),
+                      layer("W2", "b2", hidden, 1, "identity")]
+    else:
+        layer_list = [layer("W0", "b0", N_FEAT, hidden, "leakyrelu"),
+                      layer("W1", "b1", hidden, 1, "identity")]
     req = {
         "schema_hash": 0, "flags": 0, "compressed": True,
         "scaler_mean": [float(v) for v in P["mu"].astype(np.float32)],
         "scaler_scale": [float(v) for v in P["sd"].astype(np.float32)],
-        # zenpredict layout (model.rs:92): W[i,o] = weights[i*out_dim + o] = INPUT-major.
-        # PyTorch Linear.weight is [out,in], so emit W.T.ravel() (in-major).
-        "layers": [
-            {"in_dim": N_FEAT, "out_dim": hidden, "activation": "leakyrelu", "dtype": a.dtype,
-             "weights": [float(v) for v in P["W0"].astype(np.float64).T.ravel()],
-             "biases": [float(v) for v in P["b0"]]},
-            {"in_dim": hidden, "out_dim": 1, "activation": "identity", "dtype": a.dtype,
-             "weights": [float(v) for v in P["W1"].astype(np.float64).T.ravel()],
-             "biases": [float(v) for v in P["b1"]]},
-        ],
+        "layers": layer_list,
         "metadata": [{"key": SPLINE_KEY, "type": "bytes", "hex": payload.hex()}],
     }
     # De-poison: bake per-feature WinsorP99 clamps to [lo,hi] so the RUNTIME clips
@@ -108,9 +119,10 @@ def main():
     finally:
         jp.unlink(missing_ok=True)
     sha = hashlib.sha256(Path(a.out).read_bytes()).hexdigest()
+    arch = f"372-{hidden}-{hidden}-1" if layers == 2 else f"372-{hidden}-1"
     print(f"baked {a.out} ({Path(a.out).stat().st_size} B, sha {sha[:12]}) "
-          f"arch 372-{hidden}-1 leaky, {len(cx)}-knot dial [{cy[0]:.1f},{cy[-1]:.1f}]")
-    print("verify: run bake_verdict on this bake; CID22 SROCC must match the numpy 0.870.")
+          f"arch {arch} leaky, {len(cx)}-knot dial [{cy[0]:.1f},{cy[-1]:.1f}]")
+    print("verify: run bake_verdict on this bake; CID22 SROCC must match the numpy forward.")
 
 
 if __name__ == "__main__":
