@@ -233,6 +233,33 @@ Cite: `§8.36`.
   `human_score` means TWO quantities (train active-mix [0,1] vs val mean-PJND [22,70]) → a default
   `--target-column human_score` fits the wrong one. Interpretation trap, not a code bug. Cite:
   `feedback_konjnd_human_score_two_columns.md`.
+- **3.18 kadid/tid `iwssim`/`ssim2_gpu` are STILL leaked/misjoined in the CANONICAL training set
+  (2026-07-15).** The V39-#8 bug — `iwssim` = a byte-identical copy of `human_score` (target leak),
+  `ssim2_gpu` = ref-vs-ref misjoin — was documented as "fixed in `*_fixed_2026-05-25.parquet`
+  siblings," but those were **never promoted**. `canonical-2026-05-21/train/kadid.parquet` verified
+  2026-07-15: `iwssim==human_score` max|Δ|=0.00e+00; `ssim2_gpu` pinned 93.5/100/100. Shipped bakes
+  SAFE (trained on `human_score`/ssim2 from safesyn+cid22, never kadid/tid iwssim). Impact: any
+  future multi-target run pulling iwssim/ssim2 from kadid/tid trains on garbage. Fix: promote the
+  fixed siblings / re-extract. Cite: `benchmarks/column_audit_2026-07-15.md`, `…§8.37 A`.
+- **3.19 IW/masked HF-moment features explode on non-photographic content — unbounded energy +
+  a `1/n`-vs-`Σw` normalization bug (2026-07-15).** bigcodec IW/masked reached 5.8e6 (vs photographic
+  p99.9=0.48) — traced to (a) `iw_art4`/`iw_det4` being **unbounded, un-per-image-normalized** edge
+  energies in XYB (sharp synthetic edges → 7 orders above photo; the masked block blows up
+  identically → energy, not weight, is the primary driver), and (b) a genuine secondary bug: the
+  extractor normalizes IW moments by `1/n` (`streaming.rs:424`) while the reference `iw_pool.rs:399`
+  uses `1/Σw` (`shipped = ref·mean_w^0.25`, ~1.5–2× inflation on high-activity). Not a decode
+  corruption (`o_9292.png` is valid in-range). Not a pixel-ZERO-TOLERANCE issue (streaming↔full-image
+  agree; both diverge from the unused reference). Remedy: winsor guard (shipped, §8.35) is load-bearing
+  and sufficient; the `Σw` switch + per-image energy normalization is a scheduled full-retrain fix.
+  Cite: `…§8.37 B`.
+- **3.20 The `mix_cv*` (cvvdp×iwssim) target columns are POISON; raw cvvdp is ceiling-saturated
+  (2026-07-15, completes 3.17).** `mix_cv50_iw50` → CID22 0.705 (poison): it inherits cvvdp's
+  near-lossless saturation AND is log-expanded (safesyn tail 2.06), and is absent on cid22_train
+  (0% cov). Raw `cvvdp_score` is SATURATED on codec pairs (safesyn 37%+ in [9.8,10], tail≈0.0004) →
+  MSE can't discriminate the top → 0.849; log_norm re-expands it → 0.597. cvvdp is damned as an MSE
+  target either way, but rank-fine (SROCC-to-raw 1.0) → use rank/pairwise on raw cvvdp for the HF
+  band only. `ssim2_log_norm` (tail 0.04) trains fine (0.880) → the confound is saturation-specific,
+  not "log_norm." Cite: `benchmarks/column_audit_2026-07-15.md`, `…§8.37 A`.
 
 ---
 

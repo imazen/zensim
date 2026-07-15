@@ -2139,3 +2139,94 @@ KonJND/G5 HF weakness. So cvvdp is not a dead end but a **lever for the HF/near-
 ssim2 can't rank** — a proper ssim2+cvvdp(raw)-mix, evaluated per-band with Z-RMSE (not SROCC
 alone), is the indicated next experiment. Do NOT use cvvdp_log_norm as an MSE target.
 [[project_linear_projections]]
+
+## §8.37 Every-column poison audit + the IW-feature "bug vs guard" verdict (2026-07-15)
+
+User: *"dig into every column and how to make it helpful rather than poisoning; also check if the
+iw fields in zensim are badly computed or just need to be ignored on non photographs."* Two
+deliverables: (A) a per-column helpful/poison verdict with the mechanism + fix for each, and (B) a
+root-cause verdict on the IW feature explosion. Tools: `scripts/v_next/column_audit.py` (Part-A
+distribution/agreement scan + Part-B de-poisoned MLP trained toward each scalar target → CID22
+holdout), full table in `benchmarks/column_audit_2026-07-15.md`.
+
+### A. Per-column verdict (train-toward-it → CID22 holdout, de-poisoned pipeline, 2 seeds)
+
+| column | CID22-as-target | shape (safesyn tail*) | verdict | fix |
+|---|--:|---|---|---|
+| `ssim2_gpu` | **0.8826** | tail 0.04 | **HELPFUL** (the baseline) | ship target |
+| `ssim2_log_norm` | 0.8801 | tail 0.04 (safe) | **HELPFUL** (≡ ssim2) | interchangeable — log_norm of a *non*-saturated metric is fine |
+| `cvvdp_score` (raw) | 0.8486 | **SATURATED [7,9.8,10], tail≈0** | **WEAK/viable** | use for HF band w/ rank loss, NOT MSE — the top is compressed |
+| `cvvdp_log_norm` | **0.5972** | **tail 3.09 (expanded)** | **POISON (target-shape)** | never MSE — re-expands the saturated top → over-weights near-lossless |
+| `iwssim` (safesyn) | 0.8333 | tail 0.002 | WEAK/viable | usable, below ssim2 |
+| `iwssim_log_norm` | 0.7923 | tail 1.17 | WEAK | mild expansion penalty |
+| `mix_cv50_iw50` | **0.7048** | tail 2.06 | **POISON (target-shape)** | drop — inherits cvvdp saturation + is log-expanded; absent on cid22_train anyway |
+| `mix_cv25/75_iw*`, `mix_cv33_iw33_sm33` | (same family) | tail 1.6–7.6 | **POISON** | drop as targets |
+| `score_ssim2_gpu` (KADIS) | — | **median −51.8, min −175** | NEG-TAIL only | down-weight (0.3), negatives-ranking only — not a positive-band target |
+| `human_score` (all incl. bigcodec) | (native) | tail 0.04–0.18 | **HELPFUL** | the safe default; bigcodec's label was NEVER the poison (only its IW *features* were) |
+| `pjnd_target` / `active_mix_*` | — | konjnd-only | SPARSE | anchor/PJND use only |
+
+*tail = (p99.5−p95)/(p50−p5); ≫3 ⇒ log-expanded top.
+
+**Mechanistic answer to "why is cvvdp not a good training source" (completes §3.17):** cvvdp's raw
+JOD scalar is **ceiling-saturated on codec-distortion pairs** — on safesyn 37%+ of pairs sit in
+[9.8,10] (tail≈0.0004), because cvvdp is a near-lossless-optimized scale. So raw-MSE can't
+discriminate the near-lossless band (→ 0.849), and **any monotone re-expansion that un-saturates it
+(`cvvdp_log_norm`, tail 3.09) over-weights that same sliver under MSE (→ 0.597)**. cvvdp is damned
+either way *as an MSE target*. It is NOT rank-broken (SROCC vs raw = 1.0000; feat→cvvdp held-out
+0.987) — so per Mohammadi 2025 (cvvdp best in HF) the right use is a **rank/pairwise loss on raw
+cvvdp for the HF band only**, never MSE on either form. `ssim2_log_norm` proves the confound is
+metric-specific, not "log_norm": ssim2 isn't saturated (tail 0.04) so its log_norm trains identically
+to raw (0.880 ≈ 0.883).
+
+**Second finding — the kadid/tid canonical parquets STILL carry the V39-#8 data bug.** On
+`canonical-2026-05-21/train/kadid.parquet`: `iwssim == human_score` **byte-identically**
+(max|Δ|=0.00e+00) and `ssim2_gpu` is pinned at 93.5/100/100 (ref-vs-ref misjoin — real ssim2 on
+distorted KADID would span widely). The "corrected `*_fixed_2026-05-25.parquet` siblings" from V39
+learning #8 were **never promoted into the canonical set**. Shipped bakes are SAFE (B/BHdr linear +
+A/v47 trained on `human_score`/ssim2, never kadid/tid iwssim), but **any future multi-target
+experiment pulling iwssim/ssim2 from kadid/tid trains on leaked/garbage labels.** Action: promote the
+fixed siblings or re-extract before any iwssim/ssim2-target run touches kadid/tid.
+
+### B. IW-feature verdict: "badly computed" AND "guard on non-photos" — both, same remedy
+
+Traced end-to-end (code + data + arithmetic). The 5.8M IW/masked outliers are:
+
+1. **NOT a decode corruption.** The worst rows are all one source, `o_9292.png` — a valid in-range
+   uint8 image (min 0, max 255, mean 207: a bright, mostly-flat graphic with sharp dark logo/text
+   edges). Every distorted variant pins at the identical 5.814e6 → deterministic, content-driven,
+   not a NaN/random blowup.
+2. **Unbounded edge-energy 4th-moments with no per-image normalization.** `iw_art4`/`iw_det4`
+   (`streaming.rs:508-509`) are Σ of per-pixel HF/edge-artifact energy⁴ in **XYB** space — unbounded,
+   and un-normalized by image scale. On a sharp synthetic edge the per-pixel energy is orders above
+   photographic, so the rooted moment reaches millions (measured 5.814e6 vs photographic p99.9=0.48
+   — **7 orders of magnitude**, 0.0018% of bigcodec rows). The **masked block blows up identically**
+   (5.797e6) on the same rows → the dominant driver is the raw unbounded energy, NOT the IW weight.
+3. **PLUS a genuine secondary normalization bug in the IW block.** The shipped extractor
+   (`streaming.rs:424,505-510`) normalizes every IW moment by `one_over_n = 1/n` (pixel count),
+   while the reference `iw_pool.rs:399-436` (unit-tested) and the Wang & Li IW-SSIM definition
+   normalize by `1/Σw` (weight sum). Since `iw_weight = 1 + 4·activity` is unbounded (unlike the
+   masked weight), the identity is exactly `shipped(1/n) = reference(Σw)·mean_w^0.25` — verified by
+   sim: photo ratio 1.07, synth line-art 1.57, synth-extreme 2.03. So on high-activity content the
+   1/n form inflates the IW block ~1.5–2× beyond the already-large correct value. It's a real
+   divergence from the reference/spec — but it is **not the primary cause** (masked, which has no
+   such weight leak, blows up the same), and **fixing it to Σw does NOT bound the feature** (the sim
+   shows Σw still tracks raw edge energy).
+
+**Verdict:** the IW/masked HF-moment features are **numerically valid but unbounded on
+non-photographic high-contrast content** — so they MUST be guarded regardless of any formula fix.
+There is *also* a genuine `1/n`-vs-`Σw` computation discrepancy in the IW block worth correcting.
+Remedy tiers:
+
+- **Ship-now (done, §8.35):** per-feature winsor to combined-train [p0.1,p99.9] before the scaler +
+  baked `WinsorP99` transforms. Handles BOTH the unbounded tail and the 1/n amplification,
+  bake-local, no extractor change, no retrain. This is correct and sufficient for shipping.
+- **Scheduled correctness fix (full retrain — changes every IW feature value):** (a) switch IW
+  pooling `1/n → 1/Σw` to match the reference; (b) add a **per-image energy normalization** so the
+  edge-energy features are scale-invariant (divide by a robust per-image energy estimate), which is
+  what actually bounds them on synthetic content. Add a `streaming ↔ iw_pool` cross-check regression
+  test so the two implementations can't silently diverge again.
+
+Net: the answer to the user's question is **"both — it's a mild computation bug AND it needs guarding
+on non-photos, and the guard is the load-bearing fix."** Not a pixel-corruption / ZERO-TOLERANCE
+issue (streaming and full-image paths agree with each other; only both diverge from the unused
+reference). Confounds recorded in `DATASET_HISTORY.md §3.18–3.20`. [[project_linear_projections]]
