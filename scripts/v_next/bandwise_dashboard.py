@@ -133,16 +133,41 @@ def score_bin(bin_path, corpus):
         return None, None
 
 
+# Reference-metric TSVs per corpus: (human_col, {label: (filename, column_key, negate)}).
+# human_col is passed through by `zenmetrics batch` from the pairs TSV, so human + metric are
+# row-aligned by construction (never joined). butteraugli is negated so higher=better uniformly.
+# CID22 = CPU run 2026-07-15; KADID/TID = GPU run (ssim2-gpu / butteraugli-gpu / cvvdp-gpu).
+REF_METRIC_FILES = {
+    "cid22": ("MCOS", {
+        "ssim2": ("cid22_ssim2.tsv", "ssim2", False),
+        "cvvdp": ("cid22_cvvdp.tsv", "cvvdp", False),
+        "butteraugli↓": ("cid22_butter.tsv", "butteraugli_pnorm3", True),
+    }),
+    "kadid": ("DMOS", {
+        "ssim2": ("kadid_ssim2_gpu.tsv", "ssim2_gpu", False),
+        "cvvdp": ("kadid_cvvdp_gpu.tsv", "cvvdp", False),
+        "butteraugli↓": ("kadid_butteraugli_gpu.tsv", "butteraugli_pnorm3_gpu", True),
+    }),
+    "tid": ("MOS", {
+        "ssim2": ("tid_ssim2_gpu.tsv", "ssim2_gpu", False),
+        "cvvdp": ("tid_cvvdp_gpu.tsv", "cvvdp", False),
+        "butteraugli↓": ("tid_butteraugli_gpu.tsv", "butteraugli_pnorm3_gpu", True),
+    }),
+}
+
+
 def load_ref_metrics(corpus):
-    """{metric_label: (human, pred)} for corpora with computed metric TSVs — MCOS + the metric read
-    from the SAME file (zenmetrics passes MCOS through, so they're row-aligned by construction).
-    butteraugli negated so higher=better uniformly. Currently CID22 (see refmetrics/)."""
-    out = {}
-    if corpus != "cid22":
-        return out
+    """{metric_label: (human, pred)} for corpora with computed metric TSVs — the human score and the
+    metric are read from the SAME file (zenmetrics passes the human column through), so they are
+    row-aligned by construction. Missing files are skipped silently, so a corpus whose metrics
+    haven't been computed yet simply shows no reference rows."""
+    spec = REF_METRIC_FILES.get(corpus)
+    if not spec:
+        return {}
+    human, files = spec
     import csv
 
-    def load(fn, key, human="MCOS", neg=False):
+    def load(fn, key, neg=False):
         p = REFMET / fn
         if not p.exists():
             return None
@@ -160,9 +185,8 @@ def load_ref_metrics(corpus):
         hh = np.array([num(r, human) for r in rows]); vv = np.array([num(r, name) for r in rows])
         m = np.isfinite(hh) & np.isfinite(vv)
         return (hh[m], (-vv[m] if neg else vv[m]))
-    for lab, fn, key, neg in [("ssim2", "cid22_ssim2.tsv", "ssim2", False),
-                              ("cvvdp", "cid22_cvvdp.tsv", "cvvdp", False),
-                              ("butteraugli↓", "cid22_butter.tsv", "butteraugli_pnorm3", True)]:
+    out = {}
+    for lab, (fn, key, neg) in files.items():
         r = load(fn, key, neg=neg)
         if r is not None:
             out[lab] = r

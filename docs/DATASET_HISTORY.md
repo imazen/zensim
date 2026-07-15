@@ -290,9 +290,24 @@ Cite: `§8.36`.
   green) — nothing remains broken. MEASURED clean, three independent ways: `safesyn` 26,362
   `zenjxl-e7` rows q5–q100, q=100 → ssim2 med **95.13** / butteraugli med **0.229** (monotone across
   all q, never below the 0.03 floor); `cvvdp_iwssim_LARGE` zenjxl distances are only **{0.5,1,2,5}**
-  (16–250× above the boundary — and its 2026-05-18 "fresh jxl" 8-distance sweep was PLANNED but
-  BLOCKED by a vast.ai/cudarc bug and never landed, `c17447f5`, so LARGE stayed 73,300 rows); score
-  sidecars JXL q=10..90 → d≥0.5. **Shipped bakes are UNAFFECTED — no purge of training data was
+  (16–250× above the boundary; LARGE stayed 73,300 rows); score sidecars JXL q=10..90 → d≥0.5. Also
+  verified clean by direct R2/duckdb query: `canonical-picker-2026-06-27/zenjxl_lossy` +
+  `canonical-picker-2026-07-01-zensimA/zenjxl_lossy` (q∈[5,90], generic-quality-only — structurally
+  never resolves to native d<0.03), `zenjxl_lossy_hqfill_2026-07-01.parquet` (62,958 rows, d∈[0.05,1.3]),
+  `hqfill_7metric_sidecar_2026-07-02.parquet` (62,173 rows, d∈[0.05,1.3]).
+  **⚠ CORRECTION (2026-07-15, same day):** an earlier revision of this entry said LARGE's 2026-05-18
+  "fresh jxl" 8-distance sweep "was PLANNED but BLOCKED and never landed (`c17447f5`)" — that was read
+  off the commit message and is **WRONG**. Direct R2 verification (`aws s3 ls --recursive --summarize`
+  on `s3://zentrain/multi-codec-2026-05-18/omni/`) shows the sweep **COMPLETED**: 112/112 objects dated
+  2026-05-19, 24,800 cells; its 6,400 zenjxl rows span distance **[0.1, 10.0]**. It was never *merged*
+  into canonical LARGE — "blocked" described the merge, not the sweep. The clean verdict is unchanged
+  (clean either way, by two independent routes), but do not repeat the "never landed" claim.
+  **Near-miss worth knowing:** `jxl-dense-20260530` (2k k-means sources × 44-distance ladder **starting
+  at 0.025**) is the one sweep that WOULD have mass-produced contaminated rows — **confirmed never
+  launched** (`s3://coefficient/jobs/jxl-dense-20260530/` holds only the 2 prep files from 2026-05-30;
+  no `chunks/`, `done/`, `features/`, `variants/` ever appeared — blocked on red sweep-image CI,
+  `9d8f73a5`, never resumed).
+  **Shipped bakes are UNAFFECTED — no purge of training data was
   needed or done.** What *was* contaminated: `dial_grid_372col_2026-05-29` (eval-only) carries 33 JXL
   cells at d=0.025, built ~5 weeks pre-fix — mean feature-L2 **4.011** / max|feat| **59.29** vs the
   healthy d=0.05..0.35 ceiling **1.56** (L2 0.109→0.246), a **37× distortion explosion at the LOWEST
