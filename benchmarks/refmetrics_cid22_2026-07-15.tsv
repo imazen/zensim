@@ -1,0 +1,17 @@
+# CID22 (n=4292, 49-ref human-MOS holdout) — SROCC vs MCOS. zensim bakes + reference metrics.
+# Reference metrics computed via `zenmetrics batch` on the CID22 pairs (2026-07-15); zensim bakes
+# via bake_verdict (bins) / blend_lib numpy forward (npz). butteraugli negated (lower=better).
+# Takeaway: zensim's best (2L-H128 0.881, ssim2-only 0.887) sits just UNDER ssim2 (0.889, its
+# training target) and well ABOVE cvvdp (0.821) and butteraugli (0.793) on CID22 — while also
+# winning non-photo (+0.09 vs B) and keeping a monotonic dial. ssim2-agreement is expected
+# (trained toward ssim2); the value-add is content breadth + dial + speed, not beating ssim2 here.
+kind	name	cid22_srocc
+metric	ssim2	0.8894
+bake	ssim2-only(npz)	0.8865
+bake	2L-H128(npz,baked)	0.8807
+bake	B(shipped,bin)	0.8764
+bake	2L-ep700(npz)	0.8763
+bake	§8.35-diverse(bin)	0.8720
+metric	cvvdp_cpu_imazen_v0_1_0	0.8214
+metric	butteraugli_pnorm3	0.7931
+metric	butteraugli_max	0.7412
