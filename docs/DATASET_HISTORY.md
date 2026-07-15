@@ -304,6 +304,27 @@ Cite: `§8.36`.
   content — NOT this bug; do not conflate. Cite:
   `benchmarks/jxl_nearlossless_contamination_2026-07-15.md`, `benchmarks/jxl_nearlossless_dial_2026-07-05.md`.
 
+- **3.23 konjnd-dense as a training corpus = a KonJND MEMORIZATION lever, NOT a G5 lever — MEASURED,
+  FALSIFIED (2026-07-15).** *Thought-why:* "we have an HF/near-threshold corpus (konjnd-dense, 20,160
+  rows) sitting unused in canonical — adding it to the blend should close G5 (the KonJND ≥0.70 floor)."
+  *Actual-why:* it lifts KonJND only by turning KonJND into **train==val**. Measured on the honest
+  blend (`{safesyn:1, bigcodec:1.5, kadis:0.3}`, ZERO human eval-corpus data), sweeping
+  konjnd-dense weight 0→0.5→1→2 (`blend_search.py --round 5`, seeds 1,7,13,17,23, deterministic —
+  reproduced byte-for-byte across two runs): **KonJND |SROCC| rises 0.5143 → 0.5411 → 0.5467** (+0.027
+  / +0.032) **while AIC-3 — the one HONEST JND holdout — falls monotonically 0.7908 → 0.7858 → 0.7840**
+  (−0.005 / −0.007), CID22 flat-to-down (0.8850 → 0.8854 → 0.8827). So the KonJND gain does not
+  transfer to held-out JND: it is memorization of the corpus it now trains on. Even at its best, KonJND
+  0.5467 is far under the 0.70 G5 floor.
+  **Symmetry with §3.21 — two opposite supervisions, same verdict:** §3.21 pushed raw-cvvdp rank and
+  got AIC-3 UP / KonJND DOWN; §3.23 pushes KonJND data and gets KonJND UP / AIC-3 DOWN. The two HF
+  holdouts pull against each other under *either* supervision, which is a second independent line of
+  evidence for the standing limit: **G5 needs an HF feature REPRESENTATION, not more supervision and
+  not more data** (consistent with the already-falsified single-MLP agg-head and regime-routed-ensemble
+  attempts). Ship implication: the honest champion (no konjnd) stands; konjnd-dense does not earn a
+  slot. Note the composite ranks `r5-hon+kon0.5` first (1.404) **only because the konjnd leg is now
+  cheat** — a live example of why the honesty-per-(bake,corpus) matrix is load-bearing. Cite:
+  `benchmarks/blend_search_r5_2026-07-15.tsv`.
+
 ---
 
 ## 4. Live doc conflicts + inaccuracies to fix (flagged for user, NOT yet edited)
