@@ -354,6 +354,33 @@ Cite: `§8.36`.
   cheat** — a live example of why the honesty-per-(bake,corpus) matrix is load-bearing. Cite:
   `benchmarks/blend_search_r5_2026-07-15.tsv`.
 
+- **3.24 the weak near-lossless (high-tail) rank is NOT the winsor bound — MEASURED, FALSIFIED
+  (2026-07-15).** Enabled by the tail stat added the same day (§ the range-restriction fix): the honest
+  champion's CID22 **high-tail SROCC 0.434 sits well below its low-tail 0.642** → near-lossless rank is
+  the genuinely weak end. The width-10 B9 band could not show this (range-restricted, see
+  `[[project-band-srocc-range-restriction]]`). *Thought-why:* "`winsor_pct` fits lo/hi percentiles on the
+  TRAINING distribution; bounds too tight clamp near-lossless features to constants (feature-vanishing)
+  — exactly the Part-7 mechanism, where recomputing clean p1/p99 bounds lifted B's near-lossless per-img
+  SROCC 0.286→0.886 AND CID22 +0.049." *Actual-why:* **flat.** Sweeping `winsor_pct` 0 → 0.02 → 0.05 →
+  0.1 → 0.25 → 0.5 → 1.0 (`blend_search.py --round 6`, seeds 1,7,13) moves high-tail only
+  0.426/0.438/0.442/0.437/0.433/0.439/0.446 — a **0.020 spread with no monotone trend across a 50×
+  change**, and **winsor=0 (no winsorization at all) gives 0.426**, i.e. no better. Low-tail equally flat
+  (0.628–0.642). The pre-registered falsification fires.
+  **Why this does NOT contradict Part 7:** Part 7's defect was a **fit-corpus/eval-regime MISMATCH** —
+  B's *shipped* bounds were fit on a corpus that EXCLUDED near-lossless, so 245/372 features went
+  constant there and a recompute recovered them. The honest MLP's bounds are fit on its own training
+  data, which already contains near-lossless content (safesyn q100 → butteraugli 0.229), so there is
+  nothing for a looser bound to recover. Winsorization is not a near-lossless lever when the fit corpus
+  already covers the regime — it is only a lever for repairing a mismatch. (Winsor still slightly helps
+  CID22: 0.8862 at the 0.1 default vs 0.8802 at 0 — outlier guarding, not near-lossless.)
+  **Next suspects (untested):** (a) feature-vanishing *proper* — at near-lossless the distortion features
+  genuinely → 0, so little signal survives regardless of bounds; (b) **training-target saturation** — the
+  safesyn target is ssim2-derived and ssim2 saturates >95, so there is no gradient at the top (the same
+  mechanism §3.20 measured for cvvdp: "SATURATED on codec pairs → MSE can't discriminate the top"); (c)
+  CID22's own top-end MOS noise. (b) is the most likely and is directly testable with a
+  saturation-re-expanded target (cf. `ssim2_log_norm`, which §3.20 found trains fine at 0.880).
+  Cite: `benchmarks/blend_search_r6_2026-07-15.tsv`.
+
 ---
 
 ## 4. Live doc conflicts + inaccuracies to fix (flagged for user, NOT yet edited)
