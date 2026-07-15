@@ -261,6 +261,16 @@ Cite: `§8.36`.
   band only. `ssim2_log_norm` (tail 0.04) trains fine (0.880) → the confound is saturation-specific,
   not "log_norm." Cite: `benchmarks/column_audit_2026-07-15.md`, `…§8.37 A`.
 
+- **3.21 raw-cvvdp-rank auxiliary = an AIC-3 lever, NOT a G5/KonJND lever — MEASURED, FALSIFIED
+  (2026-07-15).** The §3.17 reframe left open "raw cvvdp is the indicated lever for the HF regime
+  ssim2 can't rank (G5)." Tested directly (`cvvdp_hf_probe.py`, `ssim2-MSE + lambda*rank(raw cvvdp)`,
+  lambda 0->0.6): AIC-3 |SROCC| rises monotonically (+0.005 to +0.017) but **KonJND |SROCC| FALLS
+  monotonically (-0.024 to -0.101)** with a small CID22 cost. The two HF holdouts pull opposite —
+  cvvdp saturates (~10) where KonJND needs fine PJND discrimination, so its rank signal orders the
+  mid-band and de-aligns from PJND. G5 (KonJND floor) is NOT closed by cvvdp supervision — consistent
+  with the standing "G5 needs HF *representation*, not supervision" limit. The reframe stands for
+  AIC-3/mid-band only. Untested: a separate gated HF head. Cite: `bhdr_improvement_split_lineage §8.38`.
+
 ---
 
 ## 4. Live doc conflicts + inaccuracies to fix (flagged for user, NOT yet edited)

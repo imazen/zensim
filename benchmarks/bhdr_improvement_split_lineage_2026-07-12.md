@@ -2230,3 +2230,34 @@ Net: the answer to the user's question is **"both — it's a mild computation bu
 on non-photos, and the guard is the load-bearing fix."** Not a pixel-corruption / ZERO-TOLERANCE
 issue (streaming and full-image paths agree with each other; only both diverge from the unused
 reference). Confounds recorded in `DATASET_HISTORY.md §3.18–3.20`. [[project_linear_projections]]
+
+## §8.38 The audit's indicated cvvdp-HF experiment — MEASURED, FALSIFIED as a G5 lever (2026-07-15)
+
+Ran the §8.37-A conclusion directly (`scripts/v_next/cvvdp_hf_probe.py`): shared 372-64-1
+de-poisoned MLP, `loss = smooth_l1(ssim2) + λ·pairwise_margin_rank(raw cvvdp_score)`, λ swept
+0/0.1/0.3/0.6, 2 seeds. Eval CID22 (hold) + KonJND |SROCC| (G5 gate) + AIC-3 |SROCC| (both HF/near-
+lossless holdouts). Result:
+
+| λ | CID22 | KonJND\|S\| | AIC-3\|S\| |
+|--:|--:|--:|--:|
+| 0.00 | 0.8826 | 0.5239 | 0.7877 |
+| 0.10 | 0.8817 | 0.4997 (−0.024) | 0.7925 (+0.005) |
+| 0.30 | 0.8791 | 0.4649 (−0.059) | 0.7991 (+0.011) |
+| 0.60 | 0.8764 | **0.4226 (−0.101)** | 0.8046 (+0.017) |
+
+**The two HF holdouts pull OPPOSITE.** cvvdp-rank monotonically LIFTS AIC-3 (+0.005→+0.017) but
+monotonically HURTS KonJND (−0.024→−0.101), with a small CID22 cost. Since G5 is the **KonJND** floor
+(≥0.70), raw-cvvdp is an **AIC-3 lever, not a G5 lever**. My pre-registered gate (lift BOTH with
+|ΔCID22|<0.005) FAILS. **Falsified as a G5/KonJND fix** — and consistent with the standing
+characterization that G5 needs a better HF feature *representation*, not more supervision tricks
+(cvvdp-rank IS supervision; two prior architectures already failed G5 by weight-tuning/ensembling).
+
+Non-obvious learning: "HF/near-lossless" is **not monolithic** — KonJND (PJND visibility thresholds)
+and AIC-3 (CTC JND) rank the near-lossless band differently, and cvvdp aligns with AIC-3's ordering
+while de-aligning from KonJND's. cvvdp saturates (all ~10) exactly where KonJND needs fine
+discrimination, so its rank signal mostly orders the mid-band and pulls the net off the PJND
+threshold. **Caveat (not exhausted):** this is one shared-net rank formulation; a *separate gated HF
+head* (per-sample-α style) is untested — but per the standing G5 finding, don't chase it without a
+new HF *representation*. The cvvdp reframe (§3.17, §8.36) stands for AIC-3 / mid-band, NOT for G5.
+Verdict recorded in `DATASET_HISTORY.md §3.21`; memory `cvvdp-scalar-target-dead-end` updated.
+[[project_linear_projections]]
