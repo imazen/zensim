@@ -77,7 +77,7 @@ python3 scripts/v_next/cross_codec_pjnd_check.py v7 "${V7_DIR}" || echo "v7 pjnd
 
 echo
 echo "=== Phase 5: multi-band cross-codec consistency check (V6 gate, all 6 bands) ==="
-python3 /home/lilith/work/zen/zensim/scripts/v_next/eval_v7_multi_band_check.py "${V7_DIR}" || echo "v7 multi-band check failed"
+python3 scripts/v_next/cross_codec_multi_band_check.py v7 "${V7_DIR}" || echo "v7 multi-band check failed"
 
 echo
 echo "All eval phases complete. See:"

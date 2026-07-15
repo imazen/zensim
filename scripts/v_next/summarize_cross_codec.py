@@ -1,34 +1,41 @@
 #!/usr/bin/env python3
-"""EXP-CROSS-CODEC-V4 summary table builder (2026-05-19).
+"""EXP-CROSS-CODEC summary table builder — any experiment generation.
 
-Reads:
-  - {V4_DIR}/qsweep_v4b.md → per-bake mono/tied/range/band-rmse
-  - {V4_DIR}/cross_codec_t63/<bake>_t63_n20.tsv → T=63 butter_max, butter_p3
-  - {V4_DIR}/verdicts/<bake>.md → CID22 SROCC + KonJND SROCC + AIC-3 SROCC
-  - {V4_DIR}/v4b_pjnd_check.md → cross-codec score std median
+Replaces summarize_v4.py + summarize_v4b.py (2026-07-15). Those two were 306
+lines each and, after normalizing the version token, IDENTICAL — not "similar",
+not "mostly shared": the same program, byte for byte, written twice so that one
+of them could glob `cc4v4b_*` instead of `cc4v4_*`. 306 lines of pure carrying
+cost for a one-token difference.
 
-Emits a single combined table to {V4_DIR}/v4b_summary.md.
+Reads, for generation <exp> in <dir>:
+  - {dir}/qsweep_{exp}.md              -> per-bake mono/tied/range/band-rmse
+  - {dir}/cross_codec_t63/<bake>_t63_n20.tsv -> T=63 butter_max, butter_p3
+  - {dir}/verdicts/<bake>.md           -> CID22/KADID/TID/KonJND/AIC-3 SROCC
+  - {dir}/{exp}_pjnd_check.md          -> cross-codec score std median
 
-Gate (per task brief):
-  - strict_mono ≥ 0.9378
-  - tied ≤ 5 %
-  - range ≥ 50
+Emits a combined scorecard to {dir}/{exp}_summary.md.
+
+Gate (per the V4 task brief; unchanged):
+  - strict_mono >= 0.9378
+  - tied <= 5 %
+  - range >= 50
   - T=63 butter_max < 2.5 OR butter_p3 < 2.5
-  - cross-codec PJND score std median ≤ 5
-If ALL: pass → ship as PreviewV0_5TunerV2.
+  - cross-codec PJND score std median <= 5
+If ALL pass: ship as PreviewV0_5TunerV2.
 
 Usage:
-    python3 scripts/v_next/summarize_v4.py /mnt/v/zen/zensim-eval/exp_cross_codec_v4_2026-05-19
+    python3 scripts/v_next/summarize_cross_codec.py v4b <dir>
 """
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
 
 
 def parse_qsweep(md_path: Path) -> dict[str, dict]:
-    """Parse qsweep_v4b.md, return per-bake {mono, tied, range, q5_med, q95_med}.
+    """Parse the qsweep report, return per-bake {mono, tied, range, q5_med, q95_med}.
 
     qsweep_eval emits a global mono/tied table near the top:
       | Bake | n_curves | n_adj_pairs | strict_violations | tied | monotonicity_rate | tied_rate |
@@ -146,7 +153,7 @@ def parse_verdicts(v4_dir: Path) -> dict[str, dict]:
     vdir = v4_dir / "verdicts"
     if not vdir.exists():
         return {}
-    for md in vdir.glob("cc4v4b_*.md"):
+    for md in vdir.glob("cc4*_*.md"):
         name = md.stem
         text = md.read_text()
         # The summary table at the top has columns: corpus | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE
@@ -169,7 +176,7 @@ def parse_verdicts(v4_dir: Path) -> dict[str, dict]:
 
 
 def parse_pjnd_check(md_path: Path) -> dict[str, dict]:
-    """Parse v4b_pjnd_check.md table for cc_std_median, agg_mean per bake."""
+    """Parse the pjnd-check table for cc_std_median, agg_mean per bake."""
     out = {}
     if not md_path.exists():
         return {}
@@ -212,27 +219,31 @@ def gate_pjnd_std(v): return "PASS" if (v is not None and v <= 5.0) else "FAIL"
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: summarize_v4.py <v4_dir>", file=sys.stderr)
-        return 2
-    v4_dir = Path(sys.argv[1])
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("exp", help="experiment generation, e.g. v4 / v4b")
+    ap.add_argument("dir", type=Path, help="experiment dir holding the bakes")
+    ap.add_argument("--bake-glob", default=None, help="default: cc4<exp>_*.bin")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="default: <dir>/<exp>_summary.md")
+    a = ap.parse_args()
+    exp, v4_dir = a.exp, a.dir
 
-    qsweep = parse_qsweep(v4_dir / "qsweep_v4b.md")
+    qsweep = parse_qsweep(v4_dir / f"qsweep_{exp}.md")
     t63 = parse_cross_codec_t63(v4_dir)
     verdicts = parse_verdicts(v4_dir)
-    pjnd = parse_pjnd_check(v4_dir / "v4b_pjnd_check.md")
+    pjnd = parse_pjnd_check(v4_dir / f"{exp}_pjnd_check.md")
 
-    # Find all V4 bake names
-    bakes = sorted({b.stem for b in v4_dir.glob("cc4v4b_*.bin")})
+    glob = a.bake_glob or f"cc4{exp}_*.bin"
+    bakes = sorted({b.stem for b in v4_dir.glob(glob)})
     if not bakes:
-        print("no cc4v4b_*.bin found", file=sys.stderr)
+        print(f"no {glob} found under {v4_dir}", file=sys.stderr)
         return 1
 
-    out_md = v4_dir / "v4b_summary.md"
+    out_md = a.out or (v4_dir / f"{exp}_summary.md")
     with open(out_md, "w") as f:
-        f.write("# EXP-CROSS-CODEC-V4 summary table (2026-05-19)\n\n")
+        f.write(f"# EXP-CROSS-CODEC-{exp.upper()} summary table (2026-05-19)\n\n")
         f.write("## Tuner-trail gate scorecard\n\n")
-        f.write("Gates per V4 ship criteria:\n")
+        f.write(f"Gates per {exp.upper()} ship criteria:\n")
         f.write("- strict_mono ≥ 0.9378\n")
         f.write("- tied ≤ 5%\n")
         f.write("- range ≥ 50\n")

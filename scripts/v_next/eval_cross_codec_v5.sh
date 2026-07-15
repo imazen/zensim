@@ -83,7 +83,7 @@ python3 scripts/v_next/cross_codec_pjnd_check.py v4b "${V5_DIR}" || echo "v4b pj
 
 echo
 echo "=== Phase 5: multi-band cross-codec consistency check (V5 gate, all 6 bands) ==="
-python3 scripts/v_next/eval_v5_multi_band_check.py "${V5_DIR}" || echo "v5 multi-band check failed"
+python3 scripts/v_next/cross_codec_multi_band_check.py v5 "${V5_DIR}" || echo "v5 multi-band check failed"
 
 echo
 echo "All eval phases complete. See:"
