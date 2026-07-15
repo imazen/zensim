@@ -1897,3 +1897,55 @@ faithful negatives cheaply but trades that determinism (though 5-seed spread is 
 Prototype (the "yes, build it") is DONE + robust; productionizing any path = a real
 `zensim_mlp_train` bake (v3 + dial spline + collapse gate + full 6-corpus panel).
 No bake swapped. Data/scripts under `/mnt/v/output/zensim/reports/b_negatives/`.
+
+## §8.33 — The piecewise-negatives MLP through B's FULL crucible: wins 4/6 human corpora + solves negatives, −0.0067 CID22 (2026-07-15)
+
+**User: "put the MLP through B's full evaluation so it's judged on the same terms."**
+Done — the same crucible that selected B (Python-fit → `zenpredict-bake` → dial →
+6-corpus Mohammadi panel + dial panel + paired significance).
+
+**Build.** `scripts/v_next/train_mlp_negatives.py` (multi-seed, collapse gate,
+TRAINING-SIDE selection — CID22 never used to pick a seed) → 8 seeds, **zero
+collapse**, safesyn-val 0.994. Corpora = safesyn + cid22_train (ssim2 target;
+kadid/tid DROPPED — their canonical ssim2_gpu is the ref-vs-ref misjoin data bug,
+ranks backwards) + KADIS-700k negatives (wt 0.3). Selected seed 41.
+`scripts/v_next/bake_mlp_negatives.py` bakes a plain 372-64-1 leaky MLP + scaler +
+ssim2-anchored spline via zenpredict-bake. **Weight layout gotcha (fixed):**
+zenpredict is INPUT-major (`model.rs:92` `W[i,o]=weights[i*out_dim+o]`), PyTorch is
+`[out,in]` → emit `W.T.ravel()`. **Round-trip VERIFIED**: baked CID22 SROCC 0.8697 ==
+numpy 0.8697 exactly. Candidate `mlp_neg_candidate_2026-07-15.bin` (99 KB f32).
+
+**Full 6-corpus Mohammadi panel (both bakes, held-out human MOS; PLCC + Z-RMSE agree
+with SROCC on every row — not SROCC-only):**
+
+| corpus | B SROCC | MLP SROCC | Δ | paired bootstrap |
+|---|---:|---:|---:|---|
+| CID22 | 0.8764 | 0.8697 | −0.0067 | **REAL** p=0.014, 95%[−0.011,−0.002] (tiny) |
+| KADID | 0.8201 | 0.8098 | −0.0103 | real |
+| TID2013 | 0.7868 | **0.8417** | **+0.0549** | **REAL** p≈0.000, 95%[+0.041,+0.068] |
+| KonJND | 0.5466 | **0.5868** | **+0.0402** | real |
+| AIC-3 | 0.7774 | 0.7872 | +0.0098 | |
+| AIC-4 | 0.8906 | **0.9059** | +0.0153 | |
+| **KADIS deep<−64** | **0.047** | **0.784** | **+0.737** | (the whole point) |
+
+**MLP wins 4/6 human corpora** (TID/KonJND/AIC-3/AIC-4, panel-agreed) + solves the
+negative tail; **loses 2/6 small** (CID22 −0.0067 real-but-tiny, KADID −0.0103). Note
+KonJND (the perceptibility anchor, goal #3) +0.040 and TID +0.055 are decisive.
+
+**Dial panel (bake_verdict native).** monotonicity **0.9743** (G3 ≥0.93 ✓), G1 dynamic
+range **✓** (p5 −64.7 NEGATIVE-capable, p95 95.8), dead-zone **0.0613** (G3 ≤0.05 ✗) +
+top 95.8 — but this is EXACTLY B's pre-extend-top stage (B was 0.0563 / top 95.9 before
+its final polish). extend-top is the one remaining mechanical dial finish (bake_dial_refit
+is linear-only → Python replication needed for the 2-layer bake). G5 HF: KonJND 0.587
+(> B's 0.547, still < 0.70 floor).
+
+**VERDICT.** The MLP is competitive-to-better on rank (4/6 wins, 2 tiny real losses)
+AND solves the negatives B structurally can't (0.047→0.784), with a monotone negative-
+capable dial. The cost is real but small: **−0.0067 CID22** + B's linear-deterministic
+3.7 KB identity (MLP is 99 KB f32, ~27 KB at f16 like A; 8-seed spread tight, collapse-
+free). Per the shipping policy (gates ADVISORY; "a bake that drops CID22 by 0.005 while
+gaining elsewhere IS the winning trade — surface it, user decides"), this is a
+surface-and-decide. NOT shipped — B is the DEFAULT metric; swapping to an MLP re-opens
+the A→B linear-vs-MLP identity choice. Remaining to ship: extend-top dial finish +
+f16 repack + methodology doc + wire a profile slot. Scripts + candidate under
+`/mnt/v/output/zensim/reports/b_negatives/`. [[project_linear_projections]]
