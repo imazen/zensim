@@ -1949,3 +1949,73 @@ surface-and-decide. NOT shipped — B is the DEFAULT metric; swapping to an MLP 
 the A→B linear-vs-MLP identity choice. Remaining to ship: extend-top dial finish +
 f16 repack + methodology doc + wire a profile slot. Scripts + candidate under
 `/mnt/v/output/zensim/reports/b_negatives/`. [[project_linear_projections]]
+
+---
+
+## §8.34 imazen-26 DIVERSE retrain — measured (task #17)
+
+**User directive (2026-07-15):** *"I'm concerned about the lack of more diverse training
+images; imazen26 fills key gaps."* Added the imazen-26 diverse corpus (real modern-codec
+distortions across 21 content categories — screen/UI, line-art/vector/charts, documents/
+scans/bilevel, AI-gen graphics, artwork, photos) to the §8.33 MLP, per the informed plan
+in `docs/DATASET_HISTORY.md §5`. Corpus = `bigcodec_hqdedup_traindigits_2026-07-02.parquet`
+(2.32M rows, `human_score`=ssim2/100, 608+ imazen-26 origins). **MLP not linear** (bigcodec
+poisons a linear CID22 0.65-0.76 but MLPs absorb it — §1/§2); target ssim2 (NOT score_zensim);
+HQ band (>0.85) down-weighted 0.3× (ssim2 saturates there — §0.1); CID22-49 pure holdout;
+training-side seed selection; collapse-gated. Scripts: `scripts/v_next/train_mlp_diverse.py`,
+`grid_diverse.py`, `cross_eval_diverse.py`.
+
+**The diversity gap is REAL and imazen-26 closes it — but it is a Pareto TRADE, not a free
+win.** The §8.33 photographic MLP ranks held-out imazen-26 diverse content at only **0.856**
+(fully held-out — §8.33 never saw any bigcodec); the diverse MLP hits **0.93+**. That +0.075
+gain is large and lives ENTIRELY on non-photographic content the six standard human corpora
+do not contain — so those corpora can only see the trade's COST, never its benefit.
+
+**Full crucible (bake_verdict, 6 corpora + corruption + the two off-panel axes):**
+
+| Axis | shipped B | §8.33 photo MLP | Diverse dv1.0/kw0.3 | **Diverse-balance dv0.5/kw0.6** |
+|---|---|---|---|---|
+| CID22 | **0.8764** | 0.8697 | 0.8632 | 0.8584 |
+| KADID | **0.8201** | 0.8098 | 0.8120 | 0.8090 |
+| TID2013 | 0.7868 | 0.8417 | 0.8396 | **0.8434** |
+| KonJND | 0.5466 | 0.5868 | 0.5550 | **0.5943** |
+| AIC-3 | 0.7774 | **0.7872** | 0.7736 | 0.7769 |
+| AIC-4 | 0.8906 | **0.9059** | 0.8891 | 0.8952 |
+| corruption<q20 | 18.8% | **38.5%** | 35.6% | 36.0% |
+| **bigcodec-val (imazen-26 diverse)** | ~0.856 | 0.856 | **0.943** | 0.931 |
+| **KADIS deep-neg (<−64)** | 0.047 | 0.776 | 0.718 | 0.774 |
+
+Round-trips verified (baked CID22 == numpy, all configs). `kadis_weight=0.6` fully recovers
+the deep-neg tail (0.774 = §8.33) while retaining ~86% of the diversity gain; **no config
+recovers the last ~0.01 CID22 while keeping the bigcodec gain** — bigcodec content pulls
+CID22 down ~0.01-0.018 (the "poisons-CID22, MLP-absorbs-it" effect, now MEASURED on the MLP:
+absorbed to 0.858, not collapsed to 0.65).
+
+**Where the CID22 cost lands (10-band) — it is NOT a cheap tail loss:**
+
+| CID22 band | n | B | diverse-balance | Δ |
+|---|---|---|---|---|
+| B6 [60,70) | 836 | 0.381 | 0.360 | −0.021 |
+| B7 [70,80) | 1092 | 0.352 | 0.329 | −0.022 |
+| **B8 [80,90)** | **1382** | **0.499** | **0.417** | **−0.083** |
+| B9 [90,100] | 43 | 0.010 | 0.034 | +0.023 (n<30-ish, noisy) |
+
+The −0.018 aggregate is driven by **B8 [80,90) −0.083 (n=1382, the largest band)** — the
+high-quality/subtle-artifact "give me zensim 82" region where PHOTOGRAPHIC product decisions
+live. That is an expensive place to lose, not the free near-lossless B9 tail.
+
+**VERDICT — the diverse retrain is a poor B *replacement* but a strong *sibling* candidate.**
+Against §8.33 the human-corpora picture is genuinely mixed (§8.33 wins CID22/AIC-3/AIC-4;
+diverse-balance wins TID/KonJND; KADID ~tie) and diverse-balance decisively wins the
+diverse-content axis (+0.075) and matches the negatives (0.774). But its CID22 loss is
+concentrated in the product-critical B8 photographic band, so it should NOT displace B as the
+photographic quality dial. It fits as a **sibling profile** for the regression-test / diverse-
+content / robustness use case (screen/UI/doc/line-art/AI-gen + negatives + 2× B's corruption-
+ranking), where content-agnostic robustness matters more than photographic B8 precision.
+
+**Measurement gap (honest):** we have NO non-photographic human-MOS holdout. The +0.075
+diversity gain is measured against ssim2 (imazen-26 has no human labels), so it proves the
+diverse MLP *agrees with ssim2 on diverse content where the photographic MLP does not* — a
+robustness/sanity signal, not a human-preference win. Acquiring a screen/UI/document human-MOS
+set is the one thing that would let us value the diversity gain in MOS terms. Candidate bakes +
+per-config crucibles under `/mnt/v/output/zensim/reports/b_negatives/`. [[project_linear_projections]]
