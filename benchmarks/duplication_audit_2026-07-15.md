@@ -157,7 +157,113 @@ correctly-escaped one right after it. Broken for weeks, unnoticed, because
 nothing ever asked whether these scripts still run. Now fixed, and
 `just lint-scripts` asks.
 
-**Net: 201 scripts, all runnable, verified by a check that runs in CI.**
+**Net: 309 scripts, all runnable, gated by a `lint-scripts` CI job.**
+
+(When first written this line said "verified by a check that runs in CI" while
+`lint_scripts.py` existed only as a justfile target. It was not in CI. The claim
+was false for as long as it took to notice — corrected by adding the job, not by
+softening the sentence.)
+
+## 5c. The fork chain, measured
+
+A normalized-similarity scan (strip comments/docstrings, fold version/date/seed
+tokens, then compare) over all scripts found 61 near-duplicate pairs. Three
+families were collapsed: **2,905 lines -> 1,011, 17 files -> 4.**
+
+| family | before | after |
+|---|--:|--:|
+| `eval_v{4,4b,6,7,8}_pjnd_check.py` | 845 | 221 |
+| `eval_v{5,6,7,8}_multi_band_check.py` | 943 | 307 |
+| `summarize_v4.py` + `summarize_v4b.py` | 612 | 317 |
+| `eval_cross_codec_v{4,4b,5,6,7,8}.sh` | 505 | 166 |
+
+Every number in every report was verified identical against every generation
+first; v6/v7/v8's PJND reports reproduce byte-for-byte.
+
+**The cost was never the line count.** Each `cp` + sed updated the glob and left
+the prose, and the prose is what humans read:
+
+| copy | claimed | did |
+|---|---|---|
+| `eval_v4_pjnd_check` | "Gate (**relaxed start**, per task brief)" | `<= 5.0` — the standard gate, never relaxed |
+| `eval_v4b_pjnd_check` | report titled **V4** | globs `cc4v4b_*` |
+| `eval_v8_pjnd_check` | docstring "Verifies **V6**", usage -> v6 dir | globs `cc4v8_*` |
+| `summarize_v4b` | report titled **V4**, "Gates per **V4** ship criteria" | summarizes V4B |
+| `eval_cross_codec_v4b.sh` | titles itself **V4**; prints "**V4** native", "each **V4** bake" | evaluates V4B |
+| `eval_cross_codec_v7.sh` | prints "**V6**" in three phase banners | evaluates V7 |
+| `eval_lr_retune.sh` | header lists a PJND phase 4 and a multi-band phase 5 | has **neither**; its phase 4 aggregates the lr grid |
+
+Seven instances. Every `v4b` copy in the family mislabeled itself as `v4`.
+
+**And a fork chain can move a gate.** `eval_v8_multi_band_check` passes a band
+only on `cc_std_median <= 5 AND |achieved_mean - target| <= 5`; v5/v6/v7 pass on
+the first alone. Both print "PASS". Comparing a v6 report to a v8 report meant
+comparing different criteria under one label. v6-vs-v8 read as 0.98 "similar" —
+the ship gate underneath them differed. That is why the normalized scan is the
+right instrument and eyeballing a diff is not.
+
+Two more shapes worth naming:
+
+- **The copy-and-sed factory, automated.** `eval_cross_codec_v4.sh` and `v4b.sh`
+  copied a prior driver to `/tmp` and sed'd it into the next generation at
+  runtime. The file each sed synthesized already existed on disk — presumably
+  created by running the factory once and committing the output, leaving
+  generator and generated both shipping and free to drift. Both were wrapped in
+  `if [ -x ]` over a source that had not existed for months, so **Phase 3
+  silently skipped on every run**.
+- **False completion in shell.** Every phase ended `|| echo "... failed"`, which
+  swallows the error despite `set -e`, then printed "All eval phases complete"
+  unconditionally.
+
+## 5d. The index rots because nothing reads it
+
+`scripts/v_next/README.md` — the thing that makes 89 scripts findable — offered
+as live options: `vastai_iwssim/` (committed `5ccea813`, later deleted; its
+cited deployment plan gone too), `ensemble_seeds.py`, `per_band_step5.py`
+(deleted in `4d6715f9`), `score_unified_with_bake.py`, `soft_iso_smooth.py`,
+`train_v_next_mlp.py` (deleted in `34f796f4`), and `affine_calibrate_znpr_v2.py`.
+
+**This is the mirror image of §2.** Those two commits deleted the scripts and
+left the index advertising them; the 2026-05-26 audit named the duplicates and
+deleted nothing. Extraction without migration; deletion without de-indexing;
+documentation without deletion. Each half of the job keeps getting done alone,
+and each half alone is worth roughly zero — a stale index sends the next session
+to rebuild a tool that exists, or hunt for one that never will.
+
+`CYCLE_7_DSSIM_COTRAIN_PLAN.md` stated an "Expected outcome" and never recorded
+the actual one, so for two months it read as *authorized, pending* work — while
+CLAUDE.md recorded that same hypothesis as FALSIFIED (`4ed499e`, all 5 variants
+regressed CID22 by 0.04–0.07, "don't retry"). Exactly how a session retries a
+dead idea, and exactly what CLAUDE.md Step 10 exists to prevent.
+
+`lint_scripts.py` now covers `.md` under `scripts/`. Its historical-record
+exemption is opt-in and visible — a doc is skipped only if its header *declares*
+itself falsified/superseded/historical. `HISTORY_v06_rebalance_falsified.md`
+already did; the cycle-7 plan did not, so it got a status header rather than an
+exemption, and `README.md` carries no marker, so it stays fully linted.
+
+## 5e. Every linter gap was found by the linter being wrong
+
+Four in a row, each caught by disbelieving a green result:
+
+1. It read only `.py` and reported "all runnable" while three `.sh` pointed into
+   deleted worktrees. **68 of 316** were dead — 4× the Python count.
+2. `find_source` knew only `src/bin/<name>.rs`, so it cried wolf on
+   `zenmetrics`, declared via `[[bin]] name`. A linter that cries wolf on a
+   shipping binary gets muted, and then it protects nothing.
+3. No DEAD-SCRIPT check, so consolidating the `.py` silently broke six `.sh`
+   callers. Adding it immediately surfaced three **pre-existing** breaks.
+4. No `.md` check — §5d.
+
+**Self-inflicted, recorded:** the mass repoint sed (`zensim--*` -> `zensim`,
+69 files) rewrote `lint_scripts.py`'s own docstring and deleted the cautionary
+example it was illustrating — the same mechanism (a bulk sed that does not read
+context) that left `metric_compare_report.py` unparseable for weeks, committed
+by me an hour after documenting it.
+
+The `zen-metrics` -> `zenmetrics` rename (13 scripts) is the same shape: the
+binary is `[[bin]] name = "zenmetrics"`, no dash, per the no-dash-after-zen
+rule. Nothing had called it successfully since the rename, and nothing said so.
 
 ## 6. Still open
 

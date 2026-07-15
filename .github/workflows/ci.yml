@@ -26,6 +26,18 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  # Catches scripts that cannot possibly run: pinned to a deleted sibling
+  # worktree, shelling to a deleted script, or a README indexing a file that is
+  # gone. On 2026-07-15, 68 of 316 were in that state — some for months —
+  # because nothing ever asked. Cheap (no toolchain, no deps, ~1 s) and it only
+  # inspects paths, so it is safe to gate every push on.
+  lint-scripts:
+    name: Lint scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 scripts/lint_scripts.py
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
