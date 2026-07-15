@@ -206,11 +206,19 @@ two-clause test is the whole rule — apply it to any new JXL corpus before use.
 
 ## Remaining
 
-- `/mnt/v/output/zensim-jxl-nearlossless/refit/` (the corrected near-lossless
-  re-sweep: 200 refs × 6 distances 0.005–0.03 = 1200 cells, 0 failures) is
-  **local-only** — not mirrored to R2 or Tower. Worth mirroring per the
-  ML-data-discipline rule, since it cost a GPU re-sweep to produce and is the only
-  copy of the post-fix near-lossless data.
+- ~~the post-fix near-lossless re-sweep is local-only~~ — **RESOLVED 2026-07-15.**
+  Mirrored to `s3://zentrain/jxl-nearlossless-2026-07-06/` (29 objects, 54,093,184 B)
+  + `/mnt/tower/output/zensim-jxl-nearlossless/` (sha256-verified byte-identical),
+  with a `_MANIFEST.json` carrying per-file sha256 + build_commit + usage notes.
+  Git-tracked pointer: `benchmarks/jxl_nearlossless_corpus_2026-07-06.pointer.md`.
+  **This is the only post-fix data below distance 0.03** — 1,200 cells, 200 refs × 6
+  distances, 372 with-iw features + `score_ssim2`, and **72% of it sits above ssim2 95
+  vs safesyn's 1.86%**, so it fills the sparse HF region. Consume it **per-ref /
+  pairwise**: pooled SROCC vs −distance is only +0.204, but per-ref it is **+0.916
+  (ssim2) / +0.966 (zensim)** with 0% negative refs — the pooled figure is
+  cross-image scale mixing (the AIC-3 "0.79 pooled / 0.93 per-ref" confound), and the
+  ladder moves ssim2 only ~0.92 points within an image vs ~6 points between images,
+  so an absolute target is swamped.
 - Two zenmetrics bugs surfaced by the rebuild were "logged for deliberate fix" and
   could not be confirmed fixed by name in zenmetrics git log: a stale
   `zenwebp?/zencodec` feature ref, and `hdr.rs::rgb16_hlg_to_nits` using
