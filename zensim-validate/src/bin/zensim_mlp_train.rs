@@ -1051,6 +1051,14 @@ struct LoadedGroup {
     feature_rows: Vec<Vec<f64>>,
     metric_sigmas: Option<Vec<f64>>,
     n_features: usize,
+    /// Dense per-row ref identity from the parquet loader; `None` for
+    /// CSV groups (the CSV loaders don't retain `ref_basename`) and for
+    /// parquets carrying neither `ref_basename` nor `image_path`.
+    /// Required by `within_ref` — see `GroupSpec::within_ref`.
+    ref_ids: Option<Vec<u32>>,
+    /// Draw RankNet pairs WITHIN a reference image rather than uniformly
+    /// across the group. See `TrainingGroup::ref_ids`.
+    within_ref: bool,
 }
 
 impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
@@ -1063,6 +1071,8 @@ impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
             feature_rows: o.feature_rows,
             metric_sigmas: o.metric_sigmas,
             n_features: o.n_features,
+            ref_ids: o.ref_ids,
+            within_ref: false,
         }
     }
 }
@@ -1191,18 +1201,37 @@ fn load_auto_transforms_from_screen(
     loaded
 }
 
-fn parse_group_spec(spec: &str) -> Result<(String, PathBuf, f64, f64), String> {
-    let parts: Vec<&str> = spec.splitn(4, ':').collect();
-    if parts.len() != 4 {
-        return Err(format!("expected NAME:PATH:TRAIN_W:VAL_W, got {spec:?}"));
+/// Parse `NAME:PATH:TRAIN_W:VAL_W` with an optional 5th field.
+///
+/// The only accepted 5th field is `withinref`, which makes this group's
+/// RankNet pairs be drawn within a single reference image instead of
+/// uniformly across the group (see `TrainingGroup::ref_ids`). Adding it
+/// is backward compatible: a 5th field previously made `val_w` parsing
+/// fail, so no existing spec can carry one.
+fn parse_group_spec(spec: &str) -> Result<(String, PathBuf, f64, f64, bool), String> {
+    let parts: Vec<&str> = spec.splitn(5, ':').collect();
+    if parts.len() < 4 {
+        return Err(format!(
+            "expected NAME:PATH:TRAIN_W:VAL_W[:withinref], got {spec:?}"
+        ));
     }
     let train_w: f64 = parts[2].parse().map_err(|e| format!("bad train_w: {e}"))?;
     let val_w: f64 = parts[3].parse().map_err(|e| format!("bad val_w: {e}"))?;
+    let within_ref = match parts.get(4) {
+        None => false,
+        Some(&"withinref") => true,
+        Some(other) => {
+            return Err(format!(
+                "unknown group flag {other:?} in {spec:?} (only 'withinref' is accepted)"
+            ));
+        }
+    };
     Ok((
         parts[0].to_string(),
         PathBuf::from(parts[1]),
         train_w,
         val_w,
+        within_ref,
     ))
 }
 
@@ -1295,6 +1324,8 @@ fn load_csv_sequential(
         feature_rows,
         metric_sigmas: None,
         n_features,
+        ref_ids: None,
+        within_ref: false,
     })
 }
 
@@ -1484,6 +1515,8 @@ pub(crate) fn load_csv(
         feature_rows,
         metric_sigmas: None,
         n_features,
+        ref_ids: None,
+        within_ref: false,
     })
 }
 
@@ -1999,7 +2032,7 @@ fn main() {
             .group
             .iter()
             .filter_map(|s| parse_group_spec(s).ok())
-            .any(|(_, _, train_w, _)| train_w > 0.0);
+            .any(|(_, _, train_w, _, _)| train_w > 0.0);
         if any_train {
             eprintln!(
                 "DATA-INTEGRITY: --target-column {:?} is a MOCK (validation-only) column \
@@ -2035,7 +2068,7 @@ fn main() {
     let mut loaded: Vec<LoadedGroup> = Vec::new();
     let mut n_features = 0usize;
     for spec in &args.group {
-        let (name, path, train_w, val_w) = parse_group_spec(spec).unwrap_or_else(|e| {
+        let (name, path, train_w, val_w, within_ref) = parse_group_spec(spec).unwrap_or_else(|e| {
             eprintln!("{e}");
             std::process::exit(2);
         });
@@ -2056,6 +2089,24 @@ fn main() {
             });
         g.train_w = train_w;
         g.val_w = val_w;
+        // Within-ref pairing needs per-row ref identity. If the group asked
+        // for it but the loader could not supply ids (CSV input, or a
+        // parquet with neither `ref_basename` nor `image_path`), FAIL —
+        // silently falling back to cross-image draws is precisely the
+        // confound the flag exists to avoid, and it would be invisible in
+        // the logs.
+        if within_ref && g.ref_ids.is_none() {
+            eprintln!(
+                "group {name:?}: ':withinref' requires per-row reference identity, but \
+                 {} supplies none (CSV inputs never do; a parquet needs a `ref_basename` \
+                 or `image_path` column). Refusing to train: falling back to cross-image \
+                 pairs would silently reintroduce the scale confound that within-ref \
+                 exists to prevent.",
+                path.display()
+            );
+            std::process::exit(2);
+        }
+        g.within_ref = within_ref;
         let cap = args.max_features;
         if g.n_features > cap {
             for row in &mut g.feature_rows {
@@ -2291,6 +2342,13 @@ fn main() {
             metric_sigmas: g.metric_sigmas.as_deref(),
             train_weight: g.train_w,
             validation_weight: g.val_w,
+            // Only surface ref ids when the group opted in: `Some` IS the
+            // within-ref switch in the trainer core.
+            ref_ids: if g.within_ref {
+                g.ref_ids.as_deref()
+            } else {
+                None
+            },
         })
         .collect();
 

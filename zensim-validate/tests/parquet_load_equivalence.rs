@@ -109,6 +109,7 @@ fn load_csv_reference(
         feature_rows,
         metric_sigmas: None,
         n_features,
+        ref_ids: None,
     })
 }
 

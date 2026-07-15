@@ -1147,7 +1147,10 @@ fn main() -> ExitCode {
                  https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com",
                 corpus.display,
                 cpath.display(),
-                Path::new(corpus.filename).file_name().unwrap().to_string_lossy(),
+                Path::new(corpus.filename)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy(),
                 cpath.display(),
             );
             return ExitCode::from(2);
@@ -1323,11 +1326,8 @@ Run the dedicated q-sweep harness for those._\n",
         match parquet_loader::load_ramp_grid(ramp_path) {
             Ok(grid) if grid.n_features == n_inputs => {
                 let dial = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
-                let images: Vec<String> = grid
-                    .image
-                    .iter()
-                    .map(|p| basename(Path::new(p)))
-                    .collect();
+                let images: Vec<String> =
+                    grid.image.iter().map(|p| basename(Path::new(p))).collect();
                 let stats = eval_report::severity_ramp(&images, &grid.q, &dial, 0.5);
                 buf.push_str(&eval_report::severity_ramp_section(
                     &stats,

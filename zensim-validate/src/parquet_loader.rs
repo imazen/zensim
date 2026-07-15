@@ -16,12 +16,13 @@
 //! Equivalence to the sequential CSV loader is verified by
 //! `tests/parquet_load_equivalence.rs`.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
 
 use arrow::array::{
-    Array, Float32Array, Float64Array, Int32Array, Int64Array, StringArray, UInt32Array,
-    UInt64Array,
+    Array, Float32Array, Float64Array, Int32Array, Int64Array, LargeStringArray, StringArray,
+    UInt32Array, UInt64Array,
 };
 use arrow::datatypes::DataType;
 use parquet::arrow::ProjectionMask;
@@ -49,6 +50,23 @@ pub struct OwnedLoadedGroup {
     /// a per-pair weight in the MSE loss: loss = ((pred - target) / σ)².
     /// None if the metric columns are not available.
     pub metric_sigmas: Option<Vec<f64>>,
+    /// Per-row reference-image identity, densely numbered `0..n_refs`.
+    /// Read from `ref_basename` when present, else `image_path` (the
+    /// zenmetrics sidecar / pareto-sweep convention). `None` when the
+    /// parquet carries neither.
+    ///
+    /// This is what makes WITHIN-REF pair sampling possible. It matters
+    /// because a RankNet pair drawn across images teaches "image A
+    /// scores above image B" — a cross-image *scale* fact — while a pair
+    /// drawn within one image teaches "this distortion is worse than
+    /// that one", the actual ranking task. On corpora whose within-image
+    /// ladder is small next to the between-image spread, the cross-image
+    /// draw drowns the signal: on the post-jxl-fix near-lossless corpus
+    /// the ssim2 ladder moves ~0.92 pts within an image against ~6 pts
+    /// between images, which is why its pooled SROCC reads +0.204 while
+    /// its per-ref SROCC reads +0.916 (the same confound as the
+    /// documented AIC-3 "0.79 pooled / 0.93 per-ref").
+    pub ref_ids: Option<Vec<u32>>,
 }
 
 /// Load a zensim training feature parquet file.
@@ -91,31 +109,53 @@ pub fn load_parquet(
         .position(|f| f.name() == target_column)
         .ok_or_else(|| format!("{path:?}: missing target column {target_column:?}"))?;
 
-    // Locate f0 column, then count consecutive f<i> columns. Mirrors
-    // the CSV loader's scan precisely so the same source data
+    // Locate the first feature column, then count consecutive ones.
+    // Mirrors the CSV loader's scan precisely so the same source data
     // produces the same `n_features`.
-    let f0_arrow_idx = arrow_fields
+    //
+    // TWO PREFIXES are accepted. `f<i>` is the canonical-corpus /
+    // CSV-loader convention (canonical-2026-05-21 train+val). `feat_<i>`
+    // is what zenmetrics sidecars and the pareto-sweep extractor emit
+    // (e.g. the post-jxl-fix near-lossless corpus). Both name the same
+    // 372-wide with-iw feature space; only the header text differs, so
+    // rejecting one of them just forces a rename-copy of the parquet.
+    let (prefix, f0_arrow_idx) = ["f", "feat_"]
         .iter()
-        .position(|f| f.name() == "f0")
-        .ok_or_else(|| format!("{path:?}: missing f0 column"))?;
+        .find_map(|p| {
+            arrow_fields
+                .iter()
+                .position(|f| f.name() == &format!("{p}0"))
+                .map(|i| (*p, i))
+        })
+        .ok_or_else(|| format!("{path:?}: missing f0 / feat_0 column"))?;
     let mut n_features = 0usize;
     while f0_arrow_idx + n_features < n_arrow_cols {
-        let expected = format!("f{}", n_features);
+        let expected = format!("{prefix}{n_features}");
         if arrow_fields[f0_arrow_idx + n_features].name() != &expected {
             break;
         }
         n_features += 1;
     }
     if n_features == 0 {
-        return Err(format!("{path:?}: no fN columns found"));
+        return Err(format!("{path:?}: no {prefix}N columns found"));
     }
+
+    // Optional reference-identity column, for within-ref pair sampling.
+    // `ref_basename` is the canonical-corpus convention; `image_path` is
+    // the sidecar / pareto-sweep one. Absent on neither -> ref_ids None.
+    let ref_arrow_idx = ["ref_basename", "image_path"]
+        .iter()
+        .find_map(|c| arrow_fields.iter().position(|f| f.name() == c));
 
     // Project just the columns we need. For primitive (non-nested)
     // schemas — which zensim feature parquets always are — the
     // arrow-column index maps 1:1 to a parquet leaf index. We use
     // `ProjectionMask::leaves` indexed by these arrow positions.
-    let mut wanted: Vec<usize> = Vec::with_capacity(n_features + 1);
+    let mut wanted: Vec<usize> = Vec::with_capacity(n_features + 2);
     wanted.push(score_arrow_idx);
+    if let Some(r) = ref_arrow_idx {
+        wanted.push(r);
+    }
     for i in 0..n_features {
         wanted.push(f0_arrow_idx + i);
     }
@@ -146,9 +186,19 @@ pub fn load_parquet(
                 .expect("feature idx must be in projection")
         })
         .collect();
+    let proj_ref_idx = ref_arrow_idx.map(|r| {
+        sorted_wanted
+            .iter()
+            .position(|&p| p == r)
+            .expect("ref idx must be in projection")
+    });
 
     let mut human_scores: Vec<f64> = Vec::new();
     let mut feature_rows: Vec<Vec<f64>> = Vec::new();
+    // Dense ref numbering, assigned in first-seen order so the ids are
+    // deterministic for a given file.
+    let mut ref_ids: Vec<u32> = Vec::new();
+    let mut ref_lookup: HashMap<String, u32> = HashMap::new();
 
     for batch_res in reader {
         let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
@@ -187,6 +237,37 @@ pub fn load_parquet(
             }
         };
         human_scores.extend(score_iter);
+
+        // Extract the reference-identity column, mapping each distinct
+        // string to a dense u32 in first-seen order.
+        if let Some(pi) = proj_ref_idx {
+            let col = batch.column(pi);
+            let as_str: Box<dyn Fn(usize) -> String> = match col.data_type() {
+                DataType::Utf8 => {
+                    let a = col.as_any().downcast_ref::<StringArray>().unwrap().clone();
+                    Box::new(move |i| a.value(i).to_string())
+                }
+                DataType::LargeUtf8 => {
+                    let a = col
+                        .as_any()
+                        .downcast_ref::<LargeStringArray>()
+                        .unwrap()
+                        .clone();
+                    Box::new(move |i| a.value(i).to_string())
+                }
+                other => {
+                    return Err(format!(
+                        "{path:?}: ref column has unsupported dtype {other:?} (need Utf8/LargeUtf8)",
+                    ));
+                }
+            };
+            for i in 0..n_rows {
+                let key = as_str(i);
+                let next = ref_lookup.len() as u32;
+                let id = *ref_lookup.entry(key).or_insert(next);
+                ref_ids.push(id);
+            }
+        }
 
         // Extract feature columns. We pre-materialize per-batch into
         // batch-row-major Vec<Vec<f64>> to keep the per-row push hot.
@@ -338,8 +419,13 @@ pub fn load_parquet(
     }
 
     println!(
-        "  {name}: loaded {} pairs × {n_features} features from {path:?}",
-        human_scores.len()
+        "  {name}: loaded {} pairs × {n_features} features ({prefix}0..{prefix}{}) from {path:?}{}",
+        human_scores.len(),
+        n_features - 1,
+        match ref_lookup.len() {
+            0 => String::new(),
+            n => format!(" [{n} refs]"),
+        }
     );
 
     Ok(OwnedLoadedGroup {
@@ -350,6 +436,11 @@ pub fn load_parquet(
         feature_rows,
         n_features,
         metric_sigmas,
+        ref_ids: if ref_ids.is_empty() {
+            None
+        } else {
+            Some(ref_ids)
+        },
     })
 }
 
@@ -531,11 +622,17 @@ pub fn load_ramp_grid(path: &PathBuf) -> Result<RampGrid, String> {
     let img_i = idx("image_path")
         .or_else(|| idx("image_id"))
         .or_else(|| idx("ref_basename"))
-        .ok_or_else(|| format!("{path:?}: missing image column (image_path/image_id/ref_basename)"))?;
+        .ok_or_else(|| {
+            format!("{path:?}: missing image column (image_path/image_id/ref_basename)")
+        })?;
     let q_i = idx("q").ok_or_else(|| format!("{path:?}: missing q column"))?;
     // Feature columns: prefer the zenmetrics `feat_N` naming, fall back to
     // the dial-grid `fN` naming.
-    let feat_prefix = if idx("feat_0").is_some() { "feat_" } else { "f" };
+    let feat_prefix = if idx("feat_0").is_some() {
+        "feat_"
+    } else {
+        "f"
+    };
     let mut feat_idx = Vec::new();
     let mut fi = 0usize;
     while let Some(p) = idx(&format!("{feat_prefix}{fi}")) {
@@ -544,9 +641,7 @@ pub fn load_ramp_grid(path: &PathBuf) -> Result<RampGrid, String> {
     }
     let n_features = feat_idx.len();
     if n_features == 0 {
-        return Err(format!(
-            "{path:?}: no {feat_prefix}N feature columns found"
-        ));
+        return Err(format!("{path:?}: no {feat_prefix}N feature columns found"));
     }
     let reader = builder
         .build()
@@ -641,7 +736,11 @@ pub fn load_labeled_grid(path: &PathBuf) -> Result<LabeledGrid, String> {
         .ok_or_else(|| {
             format!("{path:?}: missing label column (entry/image_path/image_id/ref_basename)")
         })?;
-    let feat_prefix = if idx("feat_0").is_some() { "feat_" } else { "f" };
+    let feat_prefix = if idx("feat_0").is_some() {
+        "feat_"
+    } else {
+        "f"
+    };
     let mut feat_idx = Vec::new();
     let mut fi = 0usize;
     while let Some(p) = idx(&format!("{feat_prefix}{fi}")) {

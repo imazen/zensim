@@ -993,6 +993,124 @@ pub struct TrainingGroup<'a> {
     /// inclusion mask — any group with `validation_weight > 0`
     /// participates in the min.
     pub validation_weight: f64,
+
+    /// Per-row reference-image identity. When `Some`, RankNet pairs for
+    /// this group are drawn WITHIN a single reference image: pick a ref
+    /// uniformly, then two distinct rows inside it. When `None` (the
+    /// default, and every group's behavior before 2026-07-15), pairs are
+    /// drawn uniformly across the whole group, which mixes images.
+    ///
+    /// **Why this exists.** A cross-image pair teaches "image A outranks
+    /// image B" — a statement about between-image *scale*. A within-image
+    /// pair teaches "this distortion is worse than that one" — the actual
+    /// ranking task. When a corpus's within-image ladder is small next to
+    /// its between-image spread, uniform draws bury the ladder under
+    /// scale noise. MEASURED on the post-jxl-fix near-lossless corpus:
+    /// the ssim2 ladder moves ~0.92 pts within an image against ~6 pts
+    /// between images, so its pooled SROCC reads +0.204 while its per-ref
+    /// SROCC reads +0.916 — the same confound as the documented AIC-3
+    /// "0.79 pooled / 0.93 per-ref". Training that corpus with uniform
+    /// pairs fits the scale, not the ladder.
+    ///
+    /// Groups whose target is already cross-image-comparable (safesyn,
+    /// cid22_train, kadid, tid — all MOS/ssim2-anchored on a shared
+    /// scale) should leave this `None`: for them a cross-image pair is a
+    /// *true* and useful statement, and restricting to within-ref would
+    /// discard most of the available signal.
+    pub ref_ids: Option<&'a [u32]>,
+}
+
+/// Row indices bucketed by reference image, for within-ref pair draws.
+///
+/// Built once per group at train start (refs with a single row are
+/// dropped — they can't yield a pair). `flat` holds the row indices of
+/// every usable ref back-to-back; `spans` gives each ref's `(start,
+/// len)` window into it. This layout keeps the draw to two RNG calls and
+/// two index reads, matching the cost of the uniform path it replaces.
+#[derive(Debug, Default)]
+pub(crate) struct RefBuckets {
+    flat: Vec<usize>,
+    spans: Vec<(usize, usize)>,
+    /// row index -> its span slot, `u32::MAX` for rows whose ref was
+    /// dropped as unusable. Lets a partner be re-drawn from the same ref
+    /// (see `redraw_partner`).
+    slot_of_row: Vec<u32>,
+}
+
+impl RefBuckets {
+    /// Bucket `ref_ids` (dense, `0..n_refs`) into per-ref row-index runs,
+    /// dropping refs with fewer than 2 rows. Returns `None` if no ref has
+    /// a usable pair — the caller must then refuse to train the group
+    /// within-ref rather than silently fall back to cross-image draws.
+    pub(crate) fn build(ref_ids: &[u32]) -> Option<Self> {
+        let n_refs = ref_ids.iter().copied().max().map(|m| m as usize + 1)?;
+        let mut by_ref: Vec<Vec<usize>> = vec![Vec::new(); n_refs];
+        for (row, &r) in ref_ids.iter().enumerate() {
+            by_ref[r as usize].push(row);
+        }
+        let mut flat = Vec::with_capacity(ref_ids.len());
+        let mut spans = Vec::new();
+        let mut slot_of_row = vec![u32::MAX; ref_ids.len()];
+        for rows in by_ref {
+            if rows.len() < 2 {
+                continue;
+            }
+            let slot = spans.len() as u32;
+            spans.push((flat.len(), rows.len()));
+            for &r in &rows {
+                slot_of_row[r] = slot;
+            }
+            flat.extend(rows);
+        }
+        if spans.is_empty() {
+            return None;
+        }
+        Some(Self {
+            flat,
+            spans,
+            slot_of_row,
+        })
+    }
+
+    /// Number of refs with at least one drawable pair.
+    pub(crate) fn n_refs(&self) -> usize {
+        self.spans.len()
+    }
+
+    /// Rows reachable by a within-ref draw. Less than the group's row
+    /// count when some refs were dropped for having a single row.
+    pub(crate) fn n_rows(&self) -> usize {
+        self.flat.len()
+    }
+
+    /// Draw a within-ref pair: a ref uniformly, then two rows in it.
+    /// May return `ia == ib`; the caller already skips that case, which
+    /// keeps the RNG draw count identical to the uniform path.
+    pub(crate) fn draw(&self, u_ref: u64, u_a: u64, u_b: u64) -> (usize, usize) {
+        let (start, len) = self.spans[(u_ref as usize) % self.spans.len()];
+        (
+            self.flat[start + (u_a as usize) % len],
+            self.flat[start + (u_b as usize) % len],
+        )
+    }
+
+    /// Re-draw a partner for `row` from `row`'s OWN ref.
+    ///
+    /// The STRATEGY hard-pair miner re-draws row B uniformly over the
+    /// group (`% n`) when hunting a near-threshold pair. On a within-ref
+    /// group that would silently reintroduce cross-image pairs — the
+    /// exact confound within-ref exists to prevent — so the miner must
+    /// route through this instead. Returns `row` unchanged if its ref was
+    /// dropped as unusable; the caller's `ia == ib` skip absorbs that.
+    pub(crate) fn redraw_partner(&self, row: usize, u: u64) -> usize {
+        match self.slot_of_row.get(row).copied() {
+            Some(s) if s != u32::MAX => {
+                let (start, len) = self.spans[s as usize];
+                self.flat[start + (u as usize) % len]
+            }
+            _ => row,
+        }
+    }
 }
 
 /// STRATEGY-2026-07-02: raw human triplet responses for the ordered-probit
@@ -1570,6 +1688,26 @@ pub fn train_mlp_strategy(
             Some(raw.into_iter().map(|c| c / total).collect())
         })
         .collect();
+    // Within-ref pair buckets, parallel to `per_row_cdfs`. `Some` only for
+    // groups the caller opted in via `TrainingGroup::ref_ids` (the binary
+    // sets that only when the group spec asked for within-ref). Groups
+    // without it keep the uniform cross-image draw, byte-for-byte.
+    let ref_buckets: Vec<Option<RefBuckets>> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].ref_ids.and_then(RefBuckets::build))
+        .collect();
+    // Say so out loud: which pairing mode a group trained under changes what
+    // the bake learned, and it must never be a silent default.
+    for (pos, rb) in ref_buckets.iter().enumerate() {
+        if let Some(rb) = rb {
+            println!(
+                "  {}: WITHIN-REF pairs over {} refs ({} rows usable)",
+                groups[train_indices[pos]].name,
+                rb.n_refs(),
+                rb.n_rows(),
+            );
+        }
+    }
 
     // T8.1 (2026-05-16): mini-batch SGD. K=1 keeps per-pair Adam
     // (bit-identical to the legacy trainer). K>1 accumulates K
@@ -1642,16 +1780,21 @@ pub fn train_mlp_strategy(
             if n < 2 {
                 continue;
             }
-            let (ia, ib) = match &per_row_cdfs[train_pos] {
-                Some(row_cdf) => {
-                    let ua = rng.next_f64_unit();
-                    let ub = rng.next_f64_unit();
-                    (
-                        row_cdf.partition_point(|&c| c < ua).min(n - 1),
-                        row_cdf.partition_point(|&c| c < ub).min(n - 1),
-                    )
+            let (ia, ib) = if let Some(rb) = &ref_buckets[train_pos] {
+                // Within-ref: pick a ref, then two rows inside it.
+                rb.draw(rng.next_u64(), rng.next_u64(), rng.next_u64())
+            } else {
+                match &per_row_cdfs[train_pos] {
+                    Some(row_cdf) => {
+                        let ua = rng.next_f64_unit();
+                        let ub = rng.next_f64_unit();
+                        (
+                            row_cdf.partition_point(|&c| c < ua).min(n - 1),
+                            row_cdf.partition_point(|&c| c < ub).min(n - 1),
+                        )
+                    }
+                    None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
                 }
-                None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
             };
             if ia == ib {
                 continue;
@@ -2372,6 +2515,26 @@ fn train_mlp_pool_head_with_tv(
             Some(raw.into_iter().map(|c| c / total).collect())
         })
         .collect();
+    // Within-ref pair buckets, parallel to `per_row_cdfs`. `Some` only for
+    // groups the caller opted in via `TrainingGroup::ref_ids` (the binary
+    // sets that only when the group spec asked for within-ref). Groups
+    // without it keep the uniform cross-image draw, byte-for-byte.
+    let ref_buckets: Vec<Option<RefBuckets>> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].ref_ids.and_then(RefBuckets::build))
+        .collect();
+    // Say so out loud: which pairing mode a group trained under changes what
+    // the bake learned, and it must never be a silent default.
+    for (pos, rb) in ref_buckets.iter().enumerate() {
+        if let Some(rb) = rb {
+            println!(
+                "  {}: WITHIN-REF pairs over {} refs ({} rows usable)",
+                groups[train_indices[pos]].name,
+                rb.n_refs(),
+                rb.n_rows(),
+            );
+        }
+    }
 
     let k = hyperparams.minibatch_size.max(1);
     if hyperparams.parallel_batch && k > 1 {
@@ -2434,16 +2597,21 @@ fn train_mlp_pool_head_with_tv(
             if n < 2 {
                 continue;
             }
-            let (ia, ib) = match &per_row_cdfs[train_pos] {
-                Some(row_cdf) => {
-                    let ua = rng.next_f64_unit();
-                    let ub = rng.next_f64_unit();
-                    (
-                        row_cdf.partition_point(|&c| c < ua).min(n - 1),
-                        row_cdf.partition_point(|&c| c < ub).min(n - 1),
-                    )
+            let (ia, ib) = if let Some(rb) = &ref_buckets[train_pos] {
+                // Within-ref: pick a ref, then two rows inside it.
+                rb.draw(rng.next_u64(), rng.next_u64(), rng.next_u64())
+            } else {
+                match &per_row_cdfs[train_pos] {
+                    Some(row_cdf) => {
+                        let ua = rng.next_f64_unit();
+                        let ub = rng.next_f64_unit();
+                        (
+                            row_cdf.partition_point(|&c| c < ua).min(n - 1),
+                            row_cdf.partition_point(|&c| c < ub).min(n - 1),
+                        )
+                    }
+                    None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
                 }
-                None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
             };
             if ia == ib {
                 continue;
@@ -3175,6 +3343,26 @@ fn train_mlp_hybrid_head_with_tv(
             Some(raw.into_iter().map(|c| c / total).collect())
         })
         .collect();
+    // Within-ref pair buckets, parallel to `per_row_cdfs`. `Some` only for
+    // groups the caller opted in via `TrainingGroup::ref_ids` (the binary
+    // sets that only when the group spec asked for within-ref). Groups
+    // without it keep the uniform cross-image draw, byte-for-byte.
+    let ref_buckets: Vec<Option<RefBuckets>> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].ref_ids.and_then(RefBuckets::build))
+        .collect();
+    // Say so out loud: which pairing mode a group trained under changes what
+    // the bake learned, and it must never be a silent default.
+    for (pos, rb) in ref_buckets.iter().enumerate() {
+        if let Some(rb) = rb {
+            println!(
+                "  {}: WITHIN-REF pairs over {} refs ({} rows usable)",
+                groups[train_indices[pos]].name,
+                rb.n_refs(),
+                rb.n_rows(),
+            );
+        }
+    }
 
     let k = hyperparams.minibatch_size.max(1);
     if hyperparams.parallel_batch && k > 1 {
@@ -3251,16 +3439,21 @@ fn train_mlp_hybrid_head_with_tv(
             if n < 2 {
                 continue;
             }
-            let (ia, ib) = match &per_row_cdfs[train_pos] {
-                Some(row_cdf) => {
-                    let ua = rng.next_f64_unit();
-                    let ub = rng.next_f64_unit();
-                    (
-                        row_cdf.partition_point(|&c| c < ua).min(n - 1),
-                        row_cdf.partition_point(|&c| c < ub).min(n - 1),
-                    )
+            let (ia, ib) = if let Some(rb) = &ref_buckets[train_pos] {
+                // Within-ref: pick a ref, then two rows inside it.
+                rb.draw(rng.next_u64(), rng.next_u64(), rng.next_u64())
+            } else {
+                match &per_row_cdfs[train_pos] {
+                    Some(row_cdf) => {
+                        let ua = rng.next_f64_unit();
+                        let ub = rng.next_f64_unit();
+                        (
+                            row_cdf.partition_point(|&c| c < ua).min(n - 1),
+                            row_cdf.partition_point(|&c| c < ub).min(n - 1),
+                        )
+                    }
+                    None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
                 }
-                None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
             };
             if ia == ib {
                 continue;
@@ -6100,6 +6293,26 @@ fn train_mlp_per_sample_alpha_head(
             Some(raw.into_iter().map(|c| c / total).collect())
         })
         .collect();
+    // Within-ref pair buckets, parallel to `per_row_cdfs`. `Some` only for
+    // groups the caller opted in via `TrainingGroup::ref_ids` (the binary
+    // sets that only when the group spec asked for within-ref). Groups
+    // without it keep the uniform cross-image draw, byte-for-byte.
+    let ref_buckets: Vec<Option<RefBuckets>> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].ref_ids.and_then(RefBuckets::build))
+        .collect();
+    // Say so out loud: which pairing mode a group trained under changes what
+    // the bake learned, and it must never be a silent default.
+    for (pos, rb) in ref_buckets.iter().enumerate() {
+        if let Some(rb) = rb {
+            println!(
+                "  {}: WITHIN-REF pairs over {} refs ({} rows usable)",
+                groups[train_indices[pos]].name,
+                rb.n_refs(),
+                rb.n_rows(),
+            );
+        }
+    }
 
     let k = hyperparams.minibatch_size.max(1);
     log_line(
@@ -6852,25 +7065,29 @@ fn train_mlp_per_sample_alpha_head(
             if n < 2 {
                 continue;
             }
-            let (ia, mut ib) = match &per_row_cdfs[train_pos] {
-                Some(row_cdf) => {
-                    let ua = rng.next_f64_unit();
-                    let ub = rng.next_f64_unit();
-                    (
-                        row_cdf.partition_point(|&c| c < ua).min(n - 1),
-                        row_cdf.partition_point(|&c| c < ub).min(n - 1),
-                    )
-                }
-                None => {
-                    // STRATEGY: stratified row A — band-uniform then row-uniform.
-                    let ia = if !strat_bands.is_empty() {
-                        let bands = &strat_bands[train_pos];
-                        let b = &bands[(rng.next_u64() as usize) % bands.len()];
-                        b[(rng.next_u64() as usize) % b.len()]
-                    } else {
-                        (rng.next_u64() as usize) % n
-                    };
-                    (ia, (rng.next_u64() as usize) % n)
+            let (ia, mut ib) = if let Some(rb) = &ref_buckets[train_pos] {
+                rb.draw(rng.next_u64(), rng.next_u64(), rng.next_u64())
+            } else {
+                match &per_row_cdfs[train_pos] {
+                    Some(row_cdf) => {
+                        let ua = rng.next_f64_unit();
+                        let ub = rng.next_f64_unit();
+                        (
+                            row_cdf.partition_point(|&c| c < ua).min(n - 1),
+                            row_cdf.partition_point(|&c| c < ub).min(n - 1),
+                        )
+                    }
+                    None => {
+                        // STRATEGY: stratified row A — band-uniform then row-uniform.
+                        let ia = if !strat_bands.is_empty() {
+                            let bands = &strat_bands[train_pos];
+                            let b = &bands[(rng.next_u64() as usize) % bands.len()];
+                            b[(rng.next_u64() as usize) % b.len()]
+                        } else {
+                            (rng.next_u64() as usize) % n
+                        };
+                        (ia, (rng.next_u64() as usize) % n)
+                    }
                 }
             };
             // STRATEGY: hard-pair mining — with prob hard_pair_frac, re-draw
@@ -6887,7 +7104,13 @@ fn train_mlp_per_sample_alpha_head(
                     {
                         break;
                     }
-                    ib = (rng.next_u64() as usize) % n;
+                    // Re-draw within ia's ref when the group is within-ref;
+                    // a plain `% n` here would smuggle cross-image pairs
+                    // back in through the miner.
+                    ib = match &ref_buckets[train_pos] {
+                        Some(rb) => rb.redraw_partner(ia, rng.next_u64()),
+                        None => (rng.next_u64() as usize) % n,
+                    };
                 }
             }
             if ia == ib {
@@ -9406,6 +9629,88 @@ fn flush_per_sample_alpha_nin_batch<F>(
 }
 
 #[cfg(test)]
+mod ref_bucket_tests {
+    use super::RefBuckets;
+
+    /// The invariant the whole feature rests on: a within-ref draw must
+    /// never pair rows from two different reference images. If it does,
+    /// the pair teaches between-image scale instead of the within-image
+    /// distortion ladder — the confound that makes the near-lossless
+    /// corpus read pooled +0.204 vs per-ref +0.916.
+    #[test]
+    fn draws_never_cross_a_ref() {
+        // 3 refs, uneven row counts, interleaved rather than contiguous —
+        // real parquets are not sorted by ref.
+        let ref_ids = [0u32, 1, 0, 2, 1, 2, 0, 1, 2, 2];
+        let rb = RefBuckets::build(&ref_ids).expect("all refs have >= 2 rows");
+        assert_eq!(rb.n_refs(), 3);
+        assert_eq!(rb.n_rows(), 10);
+
+        // Sweep the draw space exhaustively enough to catch any leak.
+        for u_ref in 0..64u64 {
+            for u_a in 0..16u64 {
+                for u_b in 0..16u64 {
+                    let (ia, ib) = rb.draw(u_ref, u_a, u_b);
+                    assert_eq!(
+                        ref_ids[ia], ref_ids[ib],
+                        "draw({u_ref},{u_a},{u_b}) crossed refs: row {ia} (ref {}) vs row {ib} (ref {})",
+                        ref_ids[ia], ref_ids[ib]
+                    );
+                }
+            }
+        }
+    }
+
+    /// Refs with a single row can't yield a pair and must be dropped —
+    /// otherwise a draw landing there returns `ia == ib` forever and
+    /// silently wastes that share of the sampling budget.
+    #[test]
+    fn singleton_refs_are_dropped() {
+        let ref_ids = [0u32, 0, 1, 2, 2]; // ref 1 is a singleton
+        let rb = RefBuckets::build(&ref_ids).expect("refs 0 and 2 are usable");
+        assert_eq!(rb.n_refs(), 2, "the singleton ref must not be drawable");
+        assert_eq!(rb.n_rows(), 4, "row 2 is unreachable");
+        for u in 0..64u64 {
+            let (ia, ib) = rb.draw(u, u * 7 + 1, u * 13 + 3);
+            assert_ne!(ref_ids[ia], 1, "singleton ref must never be drawn");
+            assert_eq!(ref_ids[ia], ref_ids[ib]);
+        }
+    }
+
+    /// A corpus with no repeated ref has no drawable pair at all. Build
+    /// must report that (None) so the caller refuses to train rather than
+    /// silently reverting to cross-image pairs.
+    #[test]
+    fn all_singletons_yields_none() {
+        assert!(RefBuckets::build(&[0u32, 1, 2, 3]).is_none());
+        assert!(RefBuckets::build(&[]).is_none());
+    }
+
+    /// The hard-pair miner re-draws row B; on a within-ref group that
+    /// re-draw must stay inside row A's ref.
+    #[test]
+    fn redraw_partner_stays_in_ref() {
+        let ref_ids = [0u32, 1, 0, 2, 1, 2, 0, 1, 2, 2];
+        let rb = RefBuckets::build(&ref_ids).expect("usable");
+        for (row, &r) in ref_ids.iter().enumerate() {
+            for u in 0..64u64 {
+                let p = rb.redraw_partner(row, u);
+                assert_eq!(ref_ids[p], r, "redraw for row {row} left ref {r}");
+            }
+        }
+    }
+
+    /// A row whose ref was dropped has no partner; returning the row
+    /// itself lets the caller's `ia == ib` skip absorb it.
+    #[test]
+    fn redraw_partner_of_dropped_row_is_identity() {
+        let ref_ids = [0u32, 0, 1]; // row 2 is a singleton -> dropped
+        let rb = RefBuckets::build(&ref_ids).expect("ref 0 is usable");
+        assert_eq!(rb.redraw_partner(2, 12345), 2);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use zenpredict::{Model, Predictor};
@@ -9447,6 +9752,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let hyper = MlpHyperparams {
@@ -9515,6 +9821,7 @@ mod tests {
                 metric_sigmas: None,
                 train_weight: 1.0,
                 validation_weight: 0.0,
+                ref_ids: None,
             },
             TrainingGroup {
                 name: "val".to_string(),
@@ -9523,6 +9830,7 @@ mod tests {
                 metric_sigmas: None,
                 train_weight: 0.0,
                 validation_weight: 1.0,
+                ref_ids: None,
             },
         ];
 
@@ -9603,6 +9911,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         // Run 1: no boost (uniform within-group sampling).
@@ -9697,6 +10006,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let base = MlpHyperparams {
@@ -9774,6 +10084,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let hyper = MlpHyperparams {
@@ -9842,6 +10153,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let eval_srocc = |bake: &[u8]| -> f64 {
@@ -9951,6 +10263,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let base = MlpHyperparams {
@@ -10103,6 +10416,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let base = MlpHyperparams {
@@ -10234,6 +10548,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let base = MlpHyperparams {
@@ -10341,6 +10656,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let hyper = MlpHyperparams {
@@ -10394,6 +10710,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let base = MlpHyperparams {
@@ -10485,6 +10802,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let eval_srocc = |bake: &[u8]| -> f64 {
@@ -10586,6 +10904,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
 
         let base = MlpHyperparams {
@@ -10678,6 +10997,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let hyper = MlpHyperparams {
             n_hidden: 4,
@@ -10712,6 +11032,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let hyper = MlpHyperparams {
             n_hidden: 16,
@@ -10754,6 +11075,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let hyper = MlpHyperparams {
             n_hidden: 16,
@@ -10787,6 +11109,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let hyper = MlpHyperparams {
             n_hidden: 16,
@@ -10830,6 +11153,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let hyper = MlpHyperparams {
             n_hidden: 16,
@@ -10966,6 +11290,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
+            ref_ids: None,
         }];
         let mut hp = MlpHyperparams {
             n_hidden: 16,
@@ -11081,6 +11406,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
+            ref_ids: None,
         }];
         let hp = MlpHyperparams {
             n_hidden: 8,
@@ -11395,6 +11721,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11436,6 +11763,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11510,6 +11838,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11554,6 +11883,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let mut log = Vec::new();
         let _bake = train_mlp_per_sample_alpha_head(
@@ -11597,6 +11927,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11639,6 +11970,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11677,6 +12009,7 @@ mod tests {
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11719,6 +12052,7 @@ mod tests {
             metric_sigmas: Some(&sigmas),
             train_weight: 1.0,
             validation_weight: 1.0,
+            ref_ids: None,
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11774,6 +12108,7 @@ mod tests {
                 metric_sigmas: Some(&sigmas),
                 train_weight: 1.0,
                 validation_weight: 1.0,
+                ref_ids: None,
             },
             TrainingGroup {
                 name: "syn_b".to_string(),
@@ -11782,6 +12117,7 @@ mod tests {
                 metric_sigmas: None,
                 train_weight: 0.5,
                 validation_weight: 0.0,
+                ref_ids: None,
             },
         ];
         // triplet pool: stimuli = the same rows; responses consistent with

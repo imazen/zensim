@@ -168,7 +168,10 @@ pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> Ram
             // identity outward and must be non-increasing as |param| rises.
             n_signed += 1;
             for arm in arms {
-                let seq: Vec<f64> = arm.iter().filter_map(|lv| levels.get(lv).copied()).collect();
+                let seq: Vec<f64> = arm
+                    .iter()
+                    .filter_map(|lv| levels.get(lv).copied())
+                    .collect();
                 if seq.len() < 2 {
                     continue;
                 }
@@ -210,7 +213,11 @@ pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> Ram
             .iter()
             .map(|(&ty, c)| RampType {
                 dist_type: ty,
-                monotone_frac: if c[1] > 0 { c[0] as f64 / c[1] as f64 } else { f64::NAN },
+                monotone_frac: if c[1] > 0 {
+                    c[0] as f64 / c[1] as f64
+                } else {
+                    f64::NAN
+                },
                 n: c[1],
             })
             .collect();
@@ -228,8 +235,16 @@ pub fn severity_ramp(image: &[String], q: &[f64], dial: &[f64], eps: f64) -> Ram
     RampStats {
         n_ramps,
         n_signed,
-        pct_monotone: if n_ramps > 0 { mono as f64 / n_ramps as f64 } else { f64::NAN },
-        pct_strict: if n_ramps > 0 { strict as f64 / n_ramps as f64 } else { f64::NAN },
+        pct_monotone: if n_ramps > 0 {
+            mono as f64 / n_ramps as f64
+        } else {
+            f64::NAN
+        },
+        pct_strict: if n_ramps > 0 {
+            strict as f64 / n_ramps as f64
+        } else {
+            f64::NAN
+        },
         mean_worst_inv: if inv_mags.is_empty() {
             0.0
         } else {
@@ -438,7 +453,8 @@ pub fn zone_buckets(candidate: &[f64], reference: &[f64], step: f64) -> ZoneStat
         }
         let cand: Vec<f64> = idxs.iter().map(|&i| candidate[i]).collect();
         let refe: Vec<f64> = idxs.iter().map(|&i| reference[i]).collect();
-        let mean_delta = cand.iter().zip(&refe).map(|(c, r)| c - r).sum::<f64>() / cand.len() as f64;
+        let mean_delta =
+            cand.iter().zip(&refe).map(|(c, r)| c - r).sum::<f64>() / cand.len() as f64;
         let srocc = if cand.len() >= 4 {
             compute_panel(&cand, &refe).srocc
         } else {
@@ -488,7 +504,13 @@ pub fn zone_bucket_section(
     s.push_str(&format!(
         "Grid: `{}` — {} rows bucketed by **{}**'s dial in {:.0}-pt zones. Aggregate: \
          SROCC(cand,ref) = **{:.4}**, RMSE = **{:.2}** dial pts (n={}).\n\n",
-        grid_label, stats.agg_n, ref_label, stats.step, stats.agg_srocc, stats.agg_rmse, stats.agg_n
+        grid_label,
+        stats.agg_n,
+        ref_label,
+        stats.step,
+        stats.agg_srocc,
+        stats.agg_rmse,
+        stats.agg_n
     ));
     s.push_str(&format!(
         "| {ref_label} zone | n | mean Δ (cand−ref) | RMSE | SROCC | cand p5..p95 |\n\
@@ -496,11 +518,7 @@ pub fn zone_bucket_section(
     ));
     for r in &stats.rows {
         if r.n == 0 {
-            let _ = writeln!(
-                s,
-                "| [{:.0},{:.0}) | 0 | — | — | — | — |",
-                r.lo, r.hi
-            );
+            let _ = writeln!(s, "| [{:.0},{:.0}) | 0 | — | — | — | — |", r.lo, r.hi);
             continue;
         }
         let noisy = if r.n < 30 { " ⚠" } else { "" };
@@ -529,7 +547,11 @@ pub fn zone_bucket_section(
         .map(|r| r.mean_delta)
         .collect();
     if !values.is_empty() {
-        let vmax = values.iter().cloned().fold(0.0f64, |m, v| m.max(v.abs())).max(5.0);
+        let vmax = values
+            .iter()
+            .cloned()
+            .fold(0.0f64, |m, v| m.max(v.abs()))
+            .max(5.0);
         s.push_str(&svg_bars(
             &format!("mean Δ (cand − ref) per {ref_label} zone — 0 = perfect agreement"),
             &labels,
@@ -567,7 +589,9 @@ pub fn four_band_section(scores: &[f64], humans: &[f64]) -> String {
     ];
     let mut s = String::new();
     s.push_str("\n### CID22 legacy 4-band cuts (2023 paper Table 5)\n\n");
-    s.push_str("| Band | n | SROCC | PLCC | KROCC | PWRC | Z-RMSE |\n|---|--:|--:|--:|--:|--:|--:|\n");
+    s.push_str(
+        "| Band | n | SROCC | PLCC | KROCC | PWRC | Z-RMSE |\n|---|--:|--:|--:|--:|--:|--:|\n",
+    );
     for (label, lo, hi) in cuts {
         let idxs: Vec<usize> = humans
             .iter()
@@ -575,7 +599,11 @@ pub fn four_band_section(scores: &[f64], humans: &[f64]) -> String {
             .filter_map(|(i, &h)| (h >= lo && h < hi).then_some(i))
             .collect();
         if idxs.len() < 4 {
-            let _ = writeln!(s, "| {label} | {} | n/a | n/a | n/a | n/a | n/a |", idxs.len());
+            let _ = writeln!(
+                s,
+                "| {label} | {} | n/a | n/a | n/a | n/a | n/a |",
+                idxs.len()
+            );
             continue;
         }
         let h: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
@@ -627,7 +655,9 @@ fn corruption_family(key: &str) -> String {
         }
     }
     // fall back to the second token (after the ref name).
-    toks.get(1).map(|s| s.to_string()).unwrap_or_else(|| key.to_string())
+    toks.get(1)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| key.to_string())
 }
 
 /// Corruption gate: for each corruption entry, a structurally-broken decode
@@ -643,7 +673,10 @@ pub fn corruption_gate(label: &[String], dial: &[f64]) -> CorruptionStats {
         for kind in ["corruption", "q20", "q10"] {
             let suffix = format!("__{kind}");
             if let Some(key) = l.strip_suffix(&suffix) {
-                groups.entry(key.to_string()).or_default().insert(kind, dial[i]);
+                groups
+                    .entry(key.to_string())
+                    .or_default()
+                    .insert(kind, dial[i]);
                 break;
             }
         }
@@ -675,13 +708,31 @@ pub fn corruption_gate(label: &[String], dial: &[f64]) -> CorruptionStats {
     }
     let mut per_family: Vec<(String, f64, usize)> = fam
         .into_iter()
-        .map(|(k, c)| (k, if c[1] > 0 { c[0] as f64 / c[1] as f64 } else { f64::NAN }, c[1]))
+        .map(|(k, c)| {
+            (
+                k,
+                if c[1] > 0 {
+                    c[0] as f64 / c[1] as f64
+                } else {
+                    f64::NAN
+                },
+                c[1],
+            )
+        })
         .collect();
     per_family.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
     CorruptionStats {
         n_triples,
-        pass_q20: if n_triples > 0 { pass20 as f64 / n_triples as f64 } else { f64::NAN },
-        pass_q10: if n10 > 0 { pass10 as f64 / n10 as f64 } else { f64::NAN },
+        pass_q20: if n_triples > 0 {
+            pass20 as f64 / n_triples as f64
+        } else {
+            f64::NAN
+        },
+        pass_q10: if n10 > 0 {
+            pass10 as f64 / n10 as f64
+        } else {
+            f64::NAN
+        },
         per_family,
     }
 }
@@ -791,7 +842,11 @@ pub fn svg_bars(
     for i in 0..n {
         let y = top + i as i32 * row_h;
         let v = values[i];
-        let pass = if good_high { v >= threshold } else { v <= threshold };
+        let pass = if good_high {
+            v >= threshold
+        } else {
+            v <= threshold
+        };
         let cls = if !good_high && threshold == 0.0 {
             // diverging: color by sign
             if v >= 0.0 { "zsv-pos" } else { "zsv-neg" }
@@ -899,7 +954,13 @@ fn apply_wrap(s: &str, delim: &str, tag: &str) -> String {
 
 fn slugify(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|p| !p.is_empty())
@@ -1240,15 +1301,26 @@ mod tests {
         assert_eq!(st.n_triples, 2);
         assert!((st.pass_q20 - 0.5).abs() < 1e-9);
         // family parse: aliasing passes 100%, ringing 0%.
-        let fams: std::collections::HashMap<_, _> =
-            st.per_family.iter().map(|(f, p, _)| (f.clone(), *p)).collect();
+        let fams: std::collections::HashMap<_, _> = st
+            .per_family
+            .iter()
+            .map(|(f, p, _)| (f.clone(), *p))
+            .collect();
         assert!((fams["aliasing"] - 1.0).abs() < 1e-9);
         assert!((fams["ringing"] - 0.0).abs() < 1e-9);
     }
 
     #[test]
     fn svg_bars_smoke() {
-        let s = svg_bars("t", &["a".into(), "b".into()], &[10.0, 90.0], 0.0, 100.0, 50.0, true);
+        let s = svg_bars(
+            "t",
+            &["a".into(), "b".into()],
+            &[10.0, 90.0],
+            0.0,
+            100.0,
+            50.0,
+            true,
+        );
         assert!(s.starts_with("<svg"));
         assert!(s.contains("zsv-good")); // 90 ≥ 50
         assert!(s.contains("zsv-bad")); // 10 < 50

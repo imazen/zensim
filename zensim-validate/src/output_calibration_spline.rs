@@ -364,7 +364,10 @@ mod extrapolation_parity_tests {
         assert!((apply(-90.0, &sp) - (-90.0)).abs() < 1e-6);
         // Pathological far-negative (an OOD raw that slipped the winsor guard):
         // floored at -100, NOT the wild linear value (-1e6).
-        assert!((apply(-1.0e6, &sp) - (-100.0)).abs() < 1e-6, "must floor at -100");
+        assert!(
+            (apply(-1.0e6, &sp) - (-100.0)).abs() < 1e-6,
+            "must floor at -100"
+        );
         assert!((apply(-8.63, &sp) - (-8.63)).abs() < 1e-6); // real f155 offender raw stays linear
         // Monotone across the floor transition.
         let mut prev = f64::NEG_INFINITY;
