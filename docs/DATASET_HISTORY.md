@@ -275,6 +275,35 @@ Cite: `§8.36`.
   with the standing "G5 needs HF *representation*, not supervision" limit. The reframe stands for
   AIC-3/mid-band only. Untested: a separate gated HF head. Cite: `bhdr_improvement_split_lineage §8.38`.
 
+- **3.22 JXL near-lossless encoder bug — training corpora NEVER contaminated; 33 eval-grid cells
+  were — AUDITED + PURGED (2026-07-15).** *Thought-why:* "the jxl encoder had a bug at the highest
+  qualities and we never cleaned the parquets — there should be replacement rows somewhere," implying
+  a training-data contamination needing a purge + re-join. *Actual-why:* **the training corpora never
+  sampled the broken zone at all.** The bug (jxl-encoder, two layers: quantized DC stored as `i16`
+  saturated at fine distances → corrupt encode at source, content-dependent on `|DC|>32767`; then the
+  header lied `modular_16bit_buffer_sufficient=true` so conformant decoders truncated the widened DC
+  and desynced the DC ANS stream) only fires at **butteraugli distance ≤0.02** (≈JXL-native quality
+  ≥99.7 — the "0.3 quality points" phrasing; `(100−q)/10 = d`). **Distance ≥0.03 is byte-identical /
+  hash-proven at EVERY date**, so it needs no date bound and no re-encode. Fixed `008499e1` (i32 DC +
+  interim 0.03 floor, zenjxl#18) → `eeb52735` 2026-07-06T06:09Z (`force_modular_32bit`, floor removed,
+  jxl-encoder#94); re-verified 2026-07-14 to d=0.001 across jxl-rs/jxl-oxide/zenjxl (`a0f7e870`, CI
+  green) — nothing remains broken. MEASURED clean, three independent ways: `safesyn` 26,362
+  `zenjxl-e7` rows q5–q100, q=100 → ssim2 med **95.13** / butteraugli med **0.229** (monotone across
+  all q, never below the 0.03 floor); `cvvdp_iwssim_LARGE` zenjxl distances are only **{0.5,1,2,5}**
+  (16–250× above the boundary — and its 2026-05-18 "fresh jxl" 8-distance sweep was PLANNED but
+  BLOCKED by a vast.ai/cudarc bug and never landed, `c17447f5`, so LARGE stayed 73,300 rows); score
+  sidecars JXL q=10..90 → d≥0.5. **Shipped bakes are UNAFFECTED — no purge of training data was
+  needed or done.** What *was* contaminated: `dial_grid_372col_2026-05-29` (eval-only) carries 33 JXL
+  cells at d=0.025, built ~5 weeks pre-fix — mean feature-L2 **4.011** / max|feat| **59.29** vs the
+  healthy d=0.05..0.35 ceiling **1.56** (L2 0.109→0.246), a **37× distortion explosion at the LOWEST
+  distance**, backwards from the monotone trend; 4 of 33 unambiguously broken, all high-DC graphic
+  content exactly as the DC>i16 mechanism predicts. Purged into
+  `dial_grid_372col_2026-05-29_quarantined_v2.parquet` (4,424 rows, sha256 `6546c43e…`, R2
+  `s3://zentrain/eval-grids/`), which drops both this and the §w11 webp garbage; originals preserved.
+  *Caveat:* LARGE's extreme feature values are the **separate** §3.19 IW-explosion on `gen-chart`
+  content — NOT this bug; do not conflate. Cite:
+  `benchmarks/jxl_nearlossless_contamination_2026-07-15.md`, `benchmarks/jxl_nearlossless_dial_2026-07-05.md`.
+
 ---
 
 ## 4. Live doc conflicts + inaccuracies to fix (flagged for user, NOT yet edited)

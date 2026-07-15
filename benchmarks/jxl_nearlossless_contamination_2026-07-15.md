@@ -116,16 +116,50 @@ there is **no codec column**, and ssim2 is null. Cannot attribute to the JXL bug
 by feature magnitude alone — the zenmetrics history agent is resolving what
 distances "fresh jxl" sampled and whether any hit d<0.03.
 
-## Purge plan (pending agent confirmation of LARGE + zenmetrics sweeps)
+## Purge — DONE (zensim side), 2026-07-15
 
-1. Drop the JXL d<0.03 slice (33 cells × 3 grid copies) from the 2026-05-29 dial
-   grids; `mv` originals to `.CONTAM-jxl-nl.pre-2026-07-15.bak.parquet`, rewrite
-   without the slice, re-sha256, refresh the pointer + KV metadata.
-2. If a fixed-encoder re-sweep of those near-lossless cells exists (the
-   "replacement rows" — likely a zenmetrics fleet re-sweep), splice the corrected
-   d=0.025 cells back in instead of just dropping.
-3. Apply the same distance<0.03 filter to any zenmetrics-side sweep parquet the
-   agents flag.
+Followed the repo's established quarantine pattern (as used for w11) rather than
+mutating a canonical grid: **originals are preserved untouched**, a clean sibling
+is published, and historical dial numbers stay reproducible.
+
+**`dial_grid_372col_2026-05-29_quarantined_v2.parquet`** — 4,424 rows
+(4,457 → 4,424), sha256
+`6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd`, 7,819,228 B.
+Drops **both** contaminations: the w11 masked/IW webp ladders (inherited from v1)
+**and** the 33 pre-fix JXL cells at distance < 0.03.
+
+Verified: 0 JXL cells below d=0.03 remain; 1,504 JXL cells retained with min
+distance now 0.05 — i.e. **distance ≥ 0.03 is kept**, because it is
+byte-identical/hash-proven at every date and needs no re-encode. Quarantine
+provenance (mechanism, measured evidence, the 4 named broken images) is embedded
+in the parquet's KV metadata under `quarantine_note_v2`, so it travels with the
+file and cannot desync from this doc.
+
+- Local: `/mnt/v/output/zensim/eval_panels_2026-05-29/`
+- R2: `s3://zentrain/eval-grids/dial_grid_372col_2026-05-29_quarantined_v2.parquet`
+- Pointer updated: `benchmarks/eval_grids_2026-05-29.pointer.md`
+
+**Why drop the whole d<0.03 slice rather than only the 4 provably-broken cells:**
+the encoder team's own boundary is that 0.021–0.029 is *content-dependent-suspect*
+pre-fix (the DC>i16 onset is ~0.025 and depends on content), so a cell that looks
+clean there is unverifiable rather than known-good. It is 33 of 4,817 cells (0.7%)
+of an eval grid whose near-lossless reach is already covered by d≥0.05 and by the
+separate post-fix refit corpus — dropping costs nothing and removes the risk of
+future bakes being scored on garbage.
+
+**Not spliced with replacements:** the post-fix re-sweep
+(`/mnt/v/output/zensim-jxl-nearlossless/refit/`) covers a *different* 200-reference
+set than the dial grid's 33, so there is no 1:1 replacement for these cells. Dropping
+is the correct action; regenerating that slice would need a fresh extraction against
+the fixed encoder.
+
+## Remaining
+
+- zenmetrics-side sweep parquets (R2) — history trace still running; apply the same
+  `distance < 0.03 AND generated before 2026-07-06` filter to anything it flags.
+- `/mnt/v/output/zensim/zensim-jxl-nearlossless/refit/` (the corrected near-lossless
+  data) is **local-only** — not mirrored to R2 or Tower. Worth mirroring per the
+  ML-data-discipline rule, since it cost a 1200-cell GPU re-sweep to produce.
 
 ## Replacement rows
 
