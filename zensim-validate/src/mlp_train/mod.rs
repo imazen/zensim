@@ -1647,11 +1647,13 @@ pub fn train_mlp_strategy(
         };
         log_line(
             &format!(
-                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3}",
+                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3} withinref={} loss={:?}",
                 g.name,
                 g.features.len(),
                 g.train_weight,
                 g.validation_weight,
+                g.ref_ids.is_some(),
+                g.loss_mode,
             ),
             log,
         );
@@ -2551,11 +2553,13 @@ fn train_mlp_pool_head_with_tv(
         };
         log_line(
             &format!(
-                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3}",
+                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3} withinref={} loss={:?}",
                 g.name,
                 g.features.len(),
                 g.train_weight,
                 g.validation_weight,
+                g.ref_ids.is_some(),
+                g.loss_mode,
             ),
             log,
         );
@@ -3381,11 +3385,13 @@ fn train_mlp_hybrid_head_with_tv(
         };
         log_line(
             &format!(
-                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3}",
+                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3} withinref={} loss={:?}",
                 g.name,
                 g.features.len(),
                 g.train_weight,
                 g.validation_weight,
+                g.ref_ids.is_some(),
+                g.loss_mode,
             ),
             log,
         );
@@ -5945,11 +5951,13 @@ fn train_mlp_per_sample_alpha_head(
         };
         log_line(
             &format!(
-                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3}",
+                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3} withinref={} loss={:?}",
                 g.name,
                 g.features.len(),
                 g.train_weight,
                 g.validation_weight,
+                g.ref_ids.is_some(),
+                g.loss_mode,
             ),
             log,
         );
