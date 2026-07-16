@@ -178,9 +178,48 @@ MOS training data (we have none beyond the holdouts) or capacity control that
 is ~what B already is.
 
 reg0p0 is the zero-regularization corner; **reg0p1/reg0p3 (soft penalty) test
-whether regularization pulls the solution back toward B.** Even the best case is
-"approach B," not "beat B as a dial" — but the frontier is being measured, not
-assumed. (reg0p1/reg0p3 verdicts appended when they land.)
+whether regularization pulls the solution back toward B.**
+
+### Full frontier verdict — DECISIVE (all 3 reg points, seed 13)
+
+| reg (`monotonicity_reg`) | held-out CID22 | dial mono | dial G1 (range) | dial G3 (mono≥.93) |
+|---|---|---|---|---|
+| 0.0 | 0.1185 | 0.842 | ✗ | ✗ |
+| 0.1 | 0.2960 | 0.717 | ✗ | ✗ |
+| 0.3 | **0.4372** | 0.450 | ✓ | ✗ |
+| **B (shipped)** | **~0.876** | monotone | ✓ | ✓ |
+
+The frontier is **monotonic in reg but converges nowhere near B**:
+
+- **Rank climbs with reg** (0.12 → 0.30 → 0.44) — soft ordering pressure
+  partially counteracts the ssim2-overfit collapse, but the best point (0.44) is
+  **half of B's 0.876**.
+- **Dial monotonicity FALLS with reg** (0.84 → 0.72 → 0.45) — counterintuitive
+  until you see why: `monotonicity_reg` penalizes *cross-image* training-pair
+  disagreement, and satisfying that pushes the 72 free features harder, which
+  breaks *within-q-ladder* (dial) monotonicity. So reg buys cross-image rank at
+  the cost of the dial. **No reg setting gets both**; G3 fails at every point.
+- Every full run also stays collapsed on the other held-out axes (AIC-3 ≤ 0.08,
+  non-photo ≤ 0.08, HF near-lossless per-ref negative).
+
+**CONCLUSION (now measured across the frontier, not asserted from one point):**
+depth-under-monotone — KEEP-72, any reg — **does not beat B and is not shippable
+as a dial**. It collapses (0.12) or at best reaches half of B (0.44) on held-out
+MOS, and never clears the G3 monotonicity gate. The retraction was right to
+demand the sweep; the sweep confirms depth loses, for the *measured* reasons
+above (capacity overfits the ssim2 target away from MOS; the dial collapses; and
+model selection on ssim2-anchored val groups is blind to both). This is the
+honest end of the "beat B by adding depth" pursuit.
+
+**What would actually beat B is DATA, not architecture:** human-MOS supervision
+(AIC-3 triplets — trainer-wired, measured mild-positive +0.05 CID22 in the
+2026-07-02 ablation, with a fixable dial-starvation interaction) so capacity
+helps MOS instead of overfitting ssim2. That path repurposes the AIC-3 holdout
+(a validation-regime decision, pre-registered in `docs/PLAN_BEAT_A.md` with
+SDR25 as the replacement holdout) and is the next fork, pending user direction.
+
+Reports (comprehensive `bake_verdict --html --compare B`):
+`/mnt/v/output/zensim/zensim-reports/depth_v5_reg0p{0,1,3}.html`.
 
 ## ~~CONVERGED VERDICT: the rank↔dial tension is fundamental (depth_v4 proved it)~~ — RETRACTED, see above
 
