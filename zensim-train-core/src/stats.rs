@@ -6,12 +6,30 @@
 //! panel lives in the `zenstats` crate (zenmetrics workspace). This
 //! module is intentionally kept independent because `zensim-train-core`
 //! must compile on `wasm32-unknown-unknown` for the in-browser trainer,
-//! and the `zenstats` crate is not yet WASM-vetted. The math is
-//! identical to `zenstats::{pearson, ranks, spearman}` (verified by
-//! `tests/test_zen_stats_rust_python_parity.py` in
-//! `scripts/canonical_corpus/` once shipped). If a future change
+//! and the `zenstats` crate is not yet WASM-vetted. If a future change
 //! splits the algorithms — that is a bug; both impls must be kept in
 //! lock-step.
+//!
+//! **That lock-step rule is ENFORCED, as of 2026-07-15, by
+//! `zensim-validate/tests/train_core_zenstats_lockstep.rs`** — which deps
+//! both crates and asserts `to_bits()` equality of `pearson`/`ranks`/
+//! `spearman` across n = 2..196,086 (every canonical corpus size,
+//! including safesyn) with tie-heavy inputs. Bit-identity, not approximate
+//! equality: the trainer picks its best-epoch checkpoint on `spearman`, so
+//! a single ULP would change the bytes of every bake we ship.
+//!
+//! This header previously claimed the math was "verified by
+//! `tests/test_zen_stats_rust_python_parity.py` in
+//! `scripts/canonical_corpus/` once shipped". **That file never shipped**,
+//! so until 2026-07-15 the duplication was documented, declared safe, and
+//! never once checked. The implementations do differ textually — `ranks()`
+//! sorts with `partial_cmp().unwrap_or(Equal)` here vs `total_cmp()` in
+//! zenstats (differs on NaN), and `spearman()` takes its mean as
+//! `sum(ranks)/n` here vs the closed form `(n-1)/2` there. They agree
+//! because a rank vector sums to exactly `n(n-1)/2` and mid-rank ties keep
+//! it a multiple of 0.5, all exactly representable in f64 far below 2^53 at
+//! our sizes — an argument that holds to n ≈ 1.3e8, which the test is
+//! positioned to catch if a corpus ever approaches it.
 
 /// Pearson correlation between two slices of equal length. Returns 0
 /// if either has zero variance.
