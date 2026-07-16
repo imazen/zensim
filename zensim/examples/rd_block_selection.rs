@@ -15,14 +15,18 @@
 //! Given a reference `R` and a distorted encode `D`, tile into blocks and, for
 //! a budget fraction `f`, "refine" the top-`f` blocks — copy `R`'s pixels back
 //! into `D` there (the limit of spending unlimited bits on those blocks).
-//! Three selectors choose which blocks:
-//!   * **sse**   — highest Σ(R−D)² per block (the codec default).
-//!   * **zensim**— highest Σ zensim-diffmap per block (the candidate).
-//!   * **random**— control.
+//! Four selectors choose which blocks:
+//!   * **sse**        — highest Σ(R−D)² per block (the codec default).
+//!   * **zensim**     — highest Σ zensim-diffmap per block (the candidate).
+//!   * **butteraugli**— highest Σ butteraugli-diffmap per block (the signal
+//!     jxl-encoder's adaptive quantizer already deploys — the real bar).
+//!   * **random**     — control.
 //! Every strategy refines the SAME NUMBER of blocks, so they sit at the same
 //! rate. The winner is whichever refined image an INDEPENDENT perceptual judge
-//! (butteraugli / ssim2 via zenmetrics — a different metric family) scores best.
-//! If `zensim` beats `sse`, the diffmap drives better RD decisions.
+//! scores best — and since butteraugli is now a *selector*, the judge must be a
+//! third family (dssim / ssim2), never butteraugli, so nothing grades its own
+//! work. zensim > sse means the diffmap beats the codec default; zensim ≈/>
+//! butteraugli means it is competitive with the deployed perceptual approach.
 //!
 //! Writes the refined variants + a `manifest.tsv` (ref, variant, strategy,
 //! n_blocks) for the judge step. It does NOT score them itself — scoring is the
@@ -74,7 +78,7 @@ fn main() {
     let dpx: Vec<[u8; 3]> = d.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
     // zensim diffmap (per-pixel perceptual error).
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::latest_preview());
     let dm = z
         .compute_with_diffmap(
             &RgbSlice::new(&rpx, w, h),
