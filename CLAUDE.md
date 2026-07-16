@@ -57,11 +57,15 @@ tasks. Reading order on resume:
 
 1. [`SESSION-RESUME.md`](SESSION-RESUME.md) — current state, ~2 min
 2. This doc (`CLAUDE.md`) — methodology + workflow + gotchas
-3. [`CONTEXT-HANDOFF.md`](CONTEXT-HANDOFF.md) — yesterday's snapshot
-4. [`RESEARCH.md`](RESEARCH.md) — corpus map + workflow recipes
-5. [`benchmarks/INDEX.md`](benchmarks/INDEX.md) — find prior
+3. [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) — **the traceability
+   spine**: how a number chains back to bytes (verdict → bake sha → manifest →
+   input shas → trainer commit), which gate enforces each link, and the honest
+   list of gaps. Read before making or citing any measurement.
+4. [`CONTEXT-HANDOFF.md`](CONTEXT-HANDOFF.md) — yesterday's snapshot
+5. [`RESEARCH.md`](RESEARCH.md) — corpus map + workflow recipes
+6. [`benchmarks/INDEX.md`](benchmarks/INDEX.md) — find prior
    experiments
-6. Run `TaskList` and work on the lowest unblocked task
+7. Run `TaskList` and work on the lowest unblocked task
 
 ## Training goals (priority order, locked 2026-05-10, revised 2026-05-11)
 

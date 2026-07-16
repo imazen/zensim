@@ -1148,6 +1148,100 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 // Main
 // ============================================================================
 
+/// Render the provenance header: everything needed to reproduce every number
+/// in this report, named by CONTENT rather than by location.
+///
+/// # Why this exists
+///
+/// Until 2026-07-15 a verdict's header was:
+///
+/// ```text
+/// - Bake: `/mnt/v/output/zensim/r7_rust/seed7_hf0.bin`
+/// - Feature parquets: `/mnt/v/zen/zensim-training/2026-05-15-full-features`
+/// ```
+///
+/// That is not citable. It names a file on one machine's scratch volume, with
+/// no hash, no row count, and no code version. Six months later the path is
+/// gone and the number is unfalsifiable — which is precisely the failure mode
+/// `zensim/weights/manifests/README.md` was written about (the V32
+/// recipe-archaeology incident: a recipe reconstructed from prose alone scored
+/// CID22 0.295 against a documented 0.8879).
+///
+/// It also could not answer "which corpus?" when two plausibly-named ones
+/// exist. They did: `2026-05-15-full-features/cid22_features_372col…` (this
+/// binary's default, sha `a1050ace…`) and `canonical-2026-05-21/val/cid22.parquet`
+/// (the canonical set per CLAUDE.md, sha `6eea0825…`). Measured 2026-07-15:
+/// same 4,292 rows in the same order, `human_score` and all 372 features
+/// byte-identical — the canonical one merely adds 21 target columns. So no
+/// past number is wrong. But the report could not TELL you that, and "the
+/// numbers happen to agree" is a fact someone had to go measure rather than
+/// read.
+///
+/// Hashing costs ~10 ms per corpus against a ~3.5 s run. There is no reason
+/// for a number in this program's output not to name its inputs.
+fn provenance_block(bake: &Path, corpora: &[(String, PathBuf, String, u64)]) -> String {
+    let mut s = String::new();
+
+    let (bake_sha, bake_bytes) = match zensim_validate::train_manifest::sha256_file(bake) {
+        Ok(sha) => (sha, std::fs::metadata(bake).map(|m| m.len()).unwrap_or(0)),
+        Err(e) => (format!("UNHASHABLE ({e})"), 0),
+    };
+
+    // Code version. `git describe`-free: the commit + dirty flag is what a
+    // reproduction needs. A dirty tree is reported LOUDLY rather than
+    // silently — a number from uncommitted code is not reproducible by
+    // anyone else, and that is exactly the thing a paper must not hide.
+    let commit = std::process::Command::new("git")
+        .args(["rev-parse", "--short=12", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "unknown".into());
+    let dirty = std::process::Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=no"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+
+    s.push_str("## Provenance\n\n");
+    s.push_str(
+        "_Every number below is reproducible from this block: inputs are named by \
+         sha256, not by path._\n\n",
+    );
+    s.push_str("| input | sha256 | size | note |\n|---|---|--:|---|\n");
+    s.push_str(&format!(
+        "| bake `{}` | `{}` | {} B | the scored model |\n",
+        bake.file_name().unwrap_or_default().to_string_lossy(),
+        &bake_sha[..16.min(bake_sha.len())],
+        bake_bytes
+    ));
+    for (name, path, sha, bytes) in corpora {
+        s.push_str(&format!(
+            "| corpus **{}** | `{}` | {} B | `{}` |\n",
+            name,
+            &sha[..16.min(sha.len())],
+            bytes,
+            path.display()
+        ));
+    }
+    s.push_str(&format!(
+        "| code | `{commit}`{} | — | zensim @ git HEAD |\n",
+        if dirty { " **+DIRTY**" } else { "" }
+    ));
+    s.push('\n');
+    if dirty {
+        s.push_str(
+            "> ⚠ **The working tree was DIRTY when this ran.** These numbers came from code \
+             that is not committed, so nobody else can reproduce them — including you, later. \
+             Commit and re-run before citing anything here.\n\n",
+        );
+    }
+    s
+}
+
 fn main() -> ExitCode {
     let t0 = Instant::now();
     let args = match parse_args() {
@@ -1197,29 +1291,17 @@ fn main() -> ExitCode {
         if has_hybrid_head { "yes" } else { "no" }
     );
 
-    let mut buf = String::new();
-    buf.push_str("# bake_verdict — instant V_X eval\n\n");
-    buf.push_str(&format!("- Bake: `{}`\n", args.bake.display()));
-    buf.push_str(&format!(
-        "- Feature parquets: `{}`\n",
-        args.features_root.display()
-    ));
-    buf.push_str(&format!("- Bake n_inputs: {n_inputs}\n"));
-    buf.push_str(&format!(
-        "- Feature transforms: {}\n",
-        if has_transforms {
-            "yes (uses predict_transformed)"
-        } else {
-            "no"
-        }
-    ));
-
-    let mut results: Vec<CorpusResult> = Vec::new();
+    // PRE-PASS: resolve, existence-check, and HASH every corpus before any
+    // scoring. Two reasons it runs first rather than inside the scoring loop:
+    // a missing corpus fails before we spend a single row of work, and the
+    // provenance header below can name every input by content hash.
+    //
+    // NO GRACEFUL SKIP (CLAUDE.md): a missing corpus FAILS LOUD with an R2 fetch hint,
+    // never silently drops an axis (a run that skips the non-photo corpus would hide the
+    // very content-blindness this eval exists to catch). All eval corpora are mirrored to
+    // s3://zentrain/eval-corpora/ — the error tells the caller how to restore them.
+    let mut corpus_prov: Vec<(String, PathBuf, String, u64)> = Vec::new();
     for corpus in &args.corpora {
-        // NO GRACEFUL SKIP (CLAUDE.md): a missing corpus FAILS LOUD with an R2 fetch hint,
-        // never silently drops an axis (a run that skips the non-photo corpus would hide the
-        // very content-blindness this eval exists to catch). All eval corpora are mirrored to
-        // s3://zentrain/eval-corpora/ — the error tells the caller how to restore them.
         let cpath = args.features_root.join(corpus.filename);
         if !cpath.exists() {
             eprintln!(
@@ -1236,6 +1318,33 @@ fn main() -> ExitCode {
             );
             return ExitCode::from(2);
         }
+        match zensim_validate::train_manifest::sha256_file(&cpath) {
+            Ok(sha) => {
+                let bytes = std::fs::metadata(&cpath).map(|m| m.len()).unwrap_or(0);
+                corpus_prov.push((corpus.display.to_string(), cpath.clone(), sha, bytes));
+            }
+            Err(e) => {
+                eprintln!("bake_verdict: cannot hash corpus {}: {e}", cpath.display());
+                return ExitCode::from(2);
+            }
+        }
+    }
+
+    let mut buf = String::new();
+    buf.push_str("# bake_verdict — instant V_X eval\n\n");
+    buf.push_str(&provenance_block(&args.bake, &corpus_prov));
+    buf.push_str(&format!("- Bake n_inputs: {n_inputs}\n"));
+    buf.push_str(&format!(
+        "- Feature transforms: {}\n",
+        if has_transforms {
+            "yes (uses predict_transformed)"
+        } else {
+            "no"
+        }
+    ));
+
+    let mut results: Vec<CorpusResult> = Vec::new();
+    for corpus in &args.corpora {
         // Per-pair dump only meaningful when a single corpus is selected
         // (one output path → one corpus); pass through for all, last wins.
         match render_corpus(
@@ -1605,6 +1714,68 @@ Run the dedicated q-sweep harness for those._\n",
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A verdict must name its inputs by CONTENT, not by path.
+    ///
+    /// Before 2026-07-15 the header said `- Bake: /mnt/v/output/.../seed7_hf0.bin`
+    /// and nothing else — a path on one machine's scratch volume, no hash, no
+    /// code version. That is not a citable artifact, and it could not answer
+    /// "which corpus?" when two plausibly-named CID22 parquets existed
+    /// (`a1050ace…` vs the canonical `6eea0825…` — measured identical in rows
+    /// and all 372 features, but the report could not TELL you that).
+    ///
+    /// The bake sha is what links a verdict to its manifest (`grep -rl <sha>
+    /// zensim/weights/manifests/`), which is what makes the whole chain —
+    /// number → verdict → bake → recipe → input hashes — close. If this test
+    /// fails, that chain is broken; fix the emission, do not weaken the test.
+    #[test]
+    fn provenance_names_every_input_by_sha256() {
+        let dir = std::env::temp_dir().join("zensim_prov_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bake = dir.join("fake_bake.bin");
+        std::fs::write(&bake, b"not a real bake, but it hashes").unwrap();
+        let corpus = dir.join("cid22.parquet");
+        std::fs::write(&corpus, b"not a real parquet either").unwrap();
+
+        let bake_sha = zensim_validate::train_manifest::sha256_file(&bake).unwrap();
+        let corpus_sha = zensim_validate::train_manifest::sha256_file(&corpus).unwrap();
+        let prov = provenance_block(
+            &bake,
+            &[("CID22".to_string(), corpus.clone(), corpus_sha.clone(), 25)],
+        );
+
+        assert!(
+            prov.contains(&bake_sha[..16]),
+            "the bake's sha256 must appear — it is the join key from a verdict to its \
+             manifest. Got:\n{prov}"
+        );
+        assert!(
+            prov.contains(&corpus_sha[..16]),
+            "each corpus's sha256 must appear — otherwise 'which corpus produced this \
+             number?' is unanswerable from the artifact. Got:\n{prov}"
+        );
+        assert!(prov.contains("CID22"), "corpus display name must appear");
+        assert!(
+            prov.contains("fake_bake.bin"),
+            "the bake filename must appear alongside its hash"
+        );
+        // Code version: either a real short sha, or an explicit "unknown" —
+        // never silently absent.
+        assert!(
+            prov.contains("git HEAD"),
+            "the code version must appear: a number from unknown code is not \
+             reproducible. Got:\n{prov}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// An unhashable bake must degrade loudly inside the report rather than
+    /// panic the run or silently omit the row.
+    #[test]
+    fn provenance_reports_an_unhashable_bake_instead_of_panicking() {
+        let prov = provenance_block(Path::new("/nonexistent/nope.bin"), &[]);
+        assert!(prov.contains("UNHASHABLE"), "got:\n{prov}");
+    }
 
     #[test]
     fn ds_auc_perfect_separation() {
