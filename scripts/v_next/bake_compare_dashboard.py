@@ -42,7 +42,7 @@ def load(verdict_dir):
         d = json.loads(f.read_text())
         by = {c["display"]: c for c in d["corpora"]}
         bakes[f.stem] = {"sha": d.get("bake_sha256", "")[:12], "corpora": by,
-                         "path": d.get("bake", "")}
+                         "path": d.get("bake", ""), "dial": d.get("dial")}
     return bakes
 
 
@@ -219,6 +219,37 @@ def main():
             'actually needs. A bake can crater pooled HF yet rank every ladder near-perfectly.</p>'
             f'<table><thead><tr>{head}</tr></thead><tbody>{"".join(prrows)}</tbody></table>')
 
+    # DIAL ship-gate panel — a bake can win every rank corpus and still be a
+    # broken dial (non-monotonic / no range). This is the deciding gate for a
+    # codec-target metric and it is why the two-panel eval is mandatory.
+    dial_html = ""
+    if any("dial" in b for b in bakes.values()):
+        head = "<th>codec dial (ship gate)</th>" + "".join(f"<th>{nm}</th>" for nm in bakes)
+        def cell(dm, key, fmt, passing):
+            if not dm:
+                return "<td>—</td>"
+            v = dm.get(key)
+            pv = "✅" if passing else "❌"
+            col = "var(--good)" if passing else "var(--bad)"
+            return f'<td style="color:{col}">{fmt(v)} {pv}</td>'
+        r_mono = "<td class=corp>monotonicity (G3 ≥ 0.93)</td>" + "".join(
+            cell(b.get("dial"), "monotonicity", lambda v: f"{v:.3f}", b.get("dial", {}).get("g3_pass"))
+            for b in bakes.values())
+        r_g1 = "<td class=corp>dial range p5/p95 (G1)</td>" + "".join(
+            (lambda dm: "<td>—</td>" if not dm else
+             f'<td style="color:{"var(--good)" if dm.get("g1_pass") else "var(--bad)"}">'
+             f'{dm.get("p5",0):.0f}/{dm.get("p95",0):.0f} {"✅" if dm.get("g1_pass") else "❌"}</td>')(b.get("dial"))
+            for b in bakes.values())
+        dial_html = (
+            '<h2 class="h2">Codec-dial ship gate (the OTHER mandatory panel)</h2>'
+            '<p class="note">A metric can win every rank corpus above and still be a broken '
+            '<b>dial</b>: non-monotonic in codec quality, or with no usable 0–100 range. For '
+            '"user types zensim 85, codec binary-searches q" this gate is decisive — and it is '
+            'independent of rank. G3 = 1 − backwards-step rate; G1 = the pooled dial spans a '
+            'usable range.</p>'
+            f'<table><thead><tr>{head}</tr></thead><tbody>'
+            f'<tr>{r_mono}</tr><tr>{r_g1}</tr></tbody></table>')
+
     sc_html = " · ".join(f"<b>{nm}</b> beats {a.baseline} on {w}/{h} held-out (pooled)"
                          for nm, (w, h) in scorecard.items()) or "(baseline only)"
 
@@ -250,6 +281,7 @@ td.corp.heldout::before{{content:"● ";color:var(--good)}}
 <h2 class="h2">Pooled SROCC (cross-image rank)</h2>
 <table><thead><tr>{thead}</tr></thead><tbody>{''.join(rows)}</tbody></table>
 {perref_html}
+{dial_html}
 <p class="note">Green/red cells = Δ SROCC vs {a.baseline} (±0.03 saturates). Every number from
 <code>bake_verdict --json</code> (stats owned by zenstats). KADID/TID are 100% train==val
 overlap — shown faint, not a skill signal. per-ref = mean within-image SROCC; %bwd = fraction

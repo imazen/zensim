@@ -603,21 +603,57 @@ fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, 
 /// still be a broken dial. Returns the markdown section, or a loud SKIPPED
 /// note when the stored grid is absent (it can't be recomputed without the
 /// feature grid — see docs/EVAL_PANEL_REQUIREMENT.md).
-fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &Path) -> String {
+/// The DIAL ship-gate numbers, returned alongside the markdown so `--json`
+/// (and the comparative dashboard) can carry the codec-dial verdict — a bake
+/// can win every rank corpus and still be a broken dial (non-monotonic, no
+/// range), which is exactly why the two-panel eval is mandatory.
+#[derive(Clone, Copy)]
+struct DialMetrics {
+    /// G3: monotonicity = 1 − material-inversion rate (gate ≥ 0.93).
+    mono: f64,
+    /// G1 dial dynamic range percentiles (gate p5 ≤ 25 ∧ p95 ≥ 85).
+    p5: f64,
+    p95: f64,
+    /// Flat/clamp dead-zone rate (informational).
+    flat: f64,
+}
+impl DialMetrics {
+    const NAN: Self = Self {
+        mono: f64::NAN,
+        p5: f64::NAN,
+        p95: f64::NAN,
+        flat: f64::NAN,
+    };
+}
+
+fn dial_panel(
+    model: &Model,
+    has_transforms: bool,
+    n_inputs: usize,
+    grid_path: &Path,
+) -> (String, DialMetrics) {
     if !grid_path.exists() {
-        return format!(
-            "\n## DIAL panel — ⚠ SKIPPED (grid not found)\n\n\
+        return (
+            format!(
+                "\n## DIAL panel — ⚠ SKIPPED (grid not found)\n\n\
              Dial grid `{}` is absent. The DIAL panel (G1 range / G3 monotonicity\n\
              / codec reach) is MANDATORY per docs/EVAL_PANEL_REQUIREMENT.md — fetch\n\
              the stored feature grid from `s3://zentrain/eval-grids/` (or set\n\
              `--dial-grid` / `ZENSIM_DIAL_GRID`) and re-run. A rank-only verdict is\n\
              a regression.\n",
-            grid_path.display()
+                grid_path.display()
+            ),
+            DialMetrics::NAN,
         );
     }
     let grid = match parquet_loader::load_dial_grid(&grid_path.to_path_buf()) {
         Ok(g) => g,
-        Err(e) => return format!("\n## DIAL panel — ⚠ FAILED to load grid\n\n`{e}`\n"),
+        Err(e) => {
+            return (
+                format!("\n## DIAL panel — ⚠ FAILED to load grid\n\n`{e}`\n"),
+                DialMetrics::NAN,
+            );
+        }
     };
 
     // Score every grid row through the SAME dispatch path render_corpus uses.
@@ -984,7 +1020,15 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
          zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step .05, 1→3 step .2, \
          13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
-    s
+    (
+        s,
+        DialMetrics {
+            mono,
+            p5,
+            p95,
+            flat,
+        },
+    )
 }
 
 fn render_corpus(
@@ -1624,12 +1668,8 @@ Run the dedicated q-sweep harness for those._\n",
     // ── DIAL panel (codec-target G1/G3) — runs every time, native Rust ──
     // The second mandatory half of the eval (docs/EVAL_PANEL_REQUIREMENT.md):
     // monotonicity + tied + dial range on the densified multi-codec grid.
-    buf.push_str(&dial_panel(
-        &model,
-        has_transforms,
-        n_inputs,
-        &args.dial_grid,
-    ));
+    let (dial_md, dial_metrics) = dial_panel(&model, has_transforms, n_inputs, &args.dial_grid);
+    buf.push_str(&dial_md);
 
     let basename = |p: &Path| -> String {
         p.file_name()
@@ -1785,11 +1825,24 @@ Run the dedicated q-sweep harness for those._\n",
             per_ref_frac_negative: Option<f64>,
         }
         #[derive(serde::Serialize)]
+        struct DialJson {
+            monotonicity: f64,
+            p5: f64,
+            p95: f64,
+            flat: f64,
+            /// G3 pass = monotonicity ≥ 0.93; G1 pass = p5 ≤ 25 ∧ p95 ≥ 85.
+            g3_pass: bool,
+            g1_pass: bool,
+        }
+        #[derive(serde::Serialize)]
         struct VerdictJson {
             bake: String,
             bake_sha256: String,
             n_inputs: usize,
             corpora: Vec<CorpusJson>,
+            /// The codec-dial ship gate — a bake can win every rank corpus and
+            /// still be a broken (non-monotonic, no-range) dial.
+            dial: DialJson,
         }
         let bake_sha = zensim_validate::train_manifest::sha256_file(&args.bake).unwrap_or_default();
         let vj = VerdictJson {
@@ -1812,6 +1865,14 @@ Run the dedicated q-sweep harness for those._\n",
                     per_ref_frac_negative: r.per_ref.as_ref().map(|p| p.frac_negative),
                 })
                 .collect(),
+            dial: DialJson {
+                monotonicity: dial_metrics.mono,
+                p5: dial_metrics.p5,
+                p95: dial_metrics.p95,
+                flat: dial_metrics.flat,
+                g3_pass: dial_metrics.mono >= 0.93,
+                g1_pass: dial_metrics.p5 <= 25.0 && dial_metrics.p95 >= 85.0,
+            },
         };
         if let Some(parent) = json_path.parent() {
             let _ = std::fs::create_dir_all(parent);

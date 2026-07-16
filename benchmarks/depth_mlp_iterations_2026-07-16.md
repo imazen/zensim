@@ -74,6 +74,35 @@ per-image threshold, so cross-image pairing had been teaching between-image scal
 Dashboard: `/mnt/v/output/zensim/depth-iter/dash/depth_2026-07-16.html`
 (browser: http://172.23.240.1:3300/zensim-depth-dashboard/depth_2026-07-16.html).
 
+## ⚠ THE DECIDING GATE: depth wins rank, FAILS the dial (two-panel verdict)
+
+The rank wins above are only half the eval. The codec-dial panel (G1 range /
+G3 monotonicity on the densified multi-codec q-sweep) is the other mandatory
+half — and it is where depth loses decisively:
+
+| bake | monotonicity (G3 ≥ 0.93) | dial range p5/p95 (G1) |
+|---|--:|--:|
+| B | **0.979** ✅ | **13.6 / 99.7** ✅ |
+| A | 0.978 ✅ | 16.7 / 94.5 ✅ |
+| depth_v2 | **0.550** ❌ | **−17.7 / 8.5** ❌ |
+| depth_v3 | 0.526 ❌ | −18.8 / 9.5 ❌ |
+
+depth_v2 has **45% dial inversions** (score goes *backwards* as codec quality
+rises on nearly half of adjacent-q pairs) and **no usable 0–100 range**. For the
+primary use case — "user types zensim 85, codec binary-searches the q that hits
+it" — this dial is unusable. A monotone output spline cannot fix it: the raw
+output is non-monotonic *in codec quality*, so there is no monotone remap.
+
+**So depth_v2 is NOT a drop-in B replacement.** It is a decisively better
+*ranker* (4/5 pooled + HF per-ref) with a broken *dial*. In the SOTA_TRAILS
+framing it is a **rank-trail** candidate (like `PreviewV0_5Compression`), not the
+dial-bearing Profile B. B and A are deliberately dial-optimized (linear /
+masked-monotone + spline) at a rank cost; depth is the opposite trade.
+
+This is exactly the "a bake can win the rank panel and be a broken dial" case
+`CLAUDE.md`'s TWO-PANEL rule exists for — caught by the panel, not by a
+rank-only view.
+
 ## Honest gaps / next
 
 - **KonJND pooled −0.050** — the one genuine pooled loss. G5 is a characterized
