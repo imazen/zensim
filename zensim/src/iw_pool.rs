@@ -999,4 +999,106 @@ mod tests {
             );
         }
     }
+
+    /// MEASURE how much `mean_w` varies across real reference images — the
+    /// number that decides whether the `1/n`-vs-`1/Σw` divergence is worth a
+    /// full re-extract + retrain.
+    ///
+    /// # The divergence (confirmed in source, 2026-07-15)
+    ///
+    /// [`WeightedPool::mean`] here computes `Σ(w·v)/Σw` — a real weighted mean.
+    /// The SHIPPED hot path, `streaming.rs::finalize`, accumulates `w·v` and
+    /// then divides by `n` (`let one_over_n = 1.0 / self.n as f64;`). So:
+    ///
+    /// ```text
+    ///   shipped = Σ(w·v)/n = (Σ(w·v)/Σw)·(Σw/n) = ref · mean_w
+    ///   4th moments carry .powf(0.25):   shipped₄ = ref₄ · mean_w^0.25
+    /// ```
+    ///
+    /// This module is marked `#[allow(dead_code)] // tests-only reference
+    /// implementation; hot path is fused into streaming` — i.e. the two are
+    /// *supposed* to agree, nothing ever checked it, and they do not. That is
+    /// the gated-mirror pattern with no gate (CLAUDE.md permits a second
+    /// implementation only when a test holds it bit-exact against the owner).
+    ///
+    /// # Why the number matters
+    ///
+    /// [`compute_iw_weights`] takes ONLY the reference plane, so `mean_w` is a
+    /// **per-reference constant**. A per-reference multiplicative factor leaves
+    /// within-image ranking exactly intact and corrupts CROSS-image ranking —
+    /// pooled SROCC is cross-image, per-ref SROCC is not. If `mean_w` is
+    /// ~constant the bug is a harmless global scale one weight absorbs; if it
+    /// varies widely then 144 of our 372 features carry a per-image scale error
+    /// that NO linear model can undo (it is a product of signal ×
+    /// reference-property).
+    ///
+    /// Ignored: needs real images. Run with
+    /// `ZENSIM_IW_REF_DIR=<dir> cargo test -p zensim --release iw_mean_weight -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs a dir of reference images; set ZENSIM_IW_REF_DIR and run with --ignored"]
+    fn iw_mean_weight_spread_across_references() {
+        let dir = std::env::var("ZENSIM_IW_REF_DIR")
+            .expect("set ZENSIM_IW_REF_DIR to a directory of reference images");
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read {dir}: {e}"))
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                matches!(
+                    p.extension().and_then(|e| e.to_str()),
+                    Some("png" | "jpg" | "jpeg")
+                )
+            })
+            .collect();
+        paths.sort();
+        paths.truncate(60);
+        assert!(!paths.is_empty(), "no images in {dir}");
+
+        let cfg = IwWeightConfig::default();
+        let mut rows: Vec<(String, f64)> = Vec::new();
+        for p in &paths {
+            let Ok(img) = image::open(p) else { continue };
+            let img = img.to_luma32f();
+            let (w, h) = (img.width() as usize, img.height() as usize);
+            let plane: Vec<f32> = img.pixels().map(|px| px.0[0]).collect();
+            let weights = compute_iw_weights(&plane, w, h, w, cfg);
+            let mean_w = weights.iter().map(|&x| x as f64).sum::<f64>() / weights.len() as f64;
+            rows.push((
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                mean_w,
+            ));
+        }
+        rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let vals: Vec<f64> = rows.iter().map(|r| r.1).collect();
+        let n = vals.len();
+        let pick = |q: f64| vals[((n as f64 - 1.0) * q).round() as usize];
+
+        println!("\n# mean_w across {n} reference images ({dir})\n");
+        println!("| stat | mean_w | feature factor = mean_w^0.25 |");
+        println!("|---|--:|--:|");
+        for (name, q) in [
+            ("min", 0.0),
+            ("p25", 0.25),
+            ("p50", 0.5),
+            ("p75", 0.75),
+            ("max", 1.0),
+        ] {
+            let v = pick(q);
+            println!("| {name} | {v:.6} | {:.4}x |", v.powf(0.25));
+        }
+        let spread = (pick(1.0) / pick(0.0)).powf(0.25);
+        println!("\nCROSS-IMAGE FEATURE-SCALE SPREAD (max/min of mean_w^0.25): {spread:.3}x\n");
+        for (name, v) in rows.iter().take(2) {
+            println!("  LOW   mean_w={v:.6}  {name}");
+        }
+        for (name, v) in rows.iter().rev().take(2) {
+            println!("  HIGH  mean_w={v:.6}  {name}");
+        }
+        println!(
+            "\nEvery IW 4th-moment feature of the LOW image is scaled by {:.4} and of the HIGH \
+             image by {:.4} -- purely from the REFERENCE's activity, nothing to do with the \
+             distortion being measured.",
+            pick(0.0).powf(0.25),
+            pick(1.0).powf(0.25)
+        );
+    }
 }
