@@ -103,6 +103,9 @@ zenpixels = { version = "0.2.11", default-features = false, features = ["std"], 
 zenpredict = { workspace = true }
 
 [dev-dependencies]
+# jxl-encoder-family perceptual diffmap, for the RD block-selection comparison
+# (rd_block_selection example). Matches the version zenavif deploys.
+butteraugli = "0.9.3"
 image = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"

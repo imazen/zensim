@@ -59,7 +59,7 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
 
     # per strategy: list of (refined_score − baseline_score) improvements
-    improve = {"sse": [], "zensim": [], "random": []}
+    improve = {"sse": [], "zensim": [], "butteraugli": [], "random": []}
     z_beats_sse = 0
     n_ok = 0
     overlaps = []
@@ -82,8 +82,11 @@ def main():
         if base is None:
             continue
         row = {"base": base}
-        for strat in ("sse", "zensim", "random"):
-            s = judge(a.metric, ref, str(wd / f"{stem}__{strat}.png"))
+        for strat in ("sse", "zensim", "butteraugli", "random"):
+            vp = wd / f"{stem}__{strat}.png"
+            if not vp.exists():
+                continue
+            s = judge(a.metric, ref, str(vp))
             if s is None:
                 break
             # improvement = how much better than baseline (positive = better)
@@ -99,7 +102,7 @@ def main():
 
     print(f"\n=== RD block-selection: {n_ok} pairs, block={a.block} frac={a.frac} judge={a.metric} ===")
     if n_ok:
-        for strat in ("sse", "zensim", "random"):
+        for strat in ("sse", "zensim", "butteraugli", "random"):
             v = improve[strat]
             print(f"  {strat:8} mean perceptual improvement (refine {int(a.frac*100)}% of blocks): "
                   f"{statistics.mean(v):+.4f} ± {statistics.pstdev(v):.4f}")
@@ -108,9 +111,19 @@ def main():
         if overlaps:
             print(f"  sse∩zensim block overlap: {statistics.mean(overlaps):.0f}% "
                   f"(low = the diffmap makes genuinely different RD choices)")
-        dz = statistics.mean(improve["zensim"]) - statistics.mean(improve["sse"])
-        print(f"\n  VERDICT: zensim-diffmap RD vs SSE RD = {dz:+.4f} mean perceptual improvement "
-              f"({'zensim WINS' if dz>0 else 'SSE wins'} at matched rate)")
+        mz = statistics.mean(improve["zensim"])
+        ms = statistics.mean(improve["sse"])
+        mb = statistics.mean(improve["butteraugli"]) if improve["butteraugli"] else None
+        print(f"\n  VERDICT (mean perceptual improvement at matched rate, higher=better):")
+        print(f"    zensim {mz:+.4f}  vs  sse {ms:+.4f}  => zensim {'WINS' if mz>ms else 'loses'} by {mz-ms:+.4f}")
+        if mb is not None:
+            # the headline: zensim vs butteraugli (the deployed jxl-encoder RD driver)
+            zb = statistics.mean(iz - ib for iz, ib in zip(improve["zensim"], improve["butteraugli"]))
+            print(f"    zensim {mz:+.4f}  vs  butteraugli {mb:+.4f}  => "
+                  f"{'zensim WINS' if mz>mb else 'butteraugli wins'} by {mz-mb:+.4f} "
+                  f"(paired mean Δ {zb:+.4f})")
+            print(f"    both vs sse: zensim {mz-ms:+.4f}, butteraugli {mb-ms:+.4f} "
+                  f"(a perceptual diffmap should beat SSE; the question is by how much, and vs each other)")
 
 
 if __name__ == "__main__":

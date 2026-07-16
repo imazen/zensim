@@ -84,12 +84,39 @@ fn main() {
         .expect("diffmap");
     let diff = dm.diffmap();
 
-    // Per-block SSE and zensim-diffmap sums.
+    // butteraugli per-pixel diffmap — the SAME signal jxl-encoder's adaptive
+    // quantizer uses to allocate bits. This is the deployed perceptual-RD
+    // approach we compare against (crate 0.9.3, as zenavif deploys).
+    let to_img = |px: &[[u8; 3]]| -> imgref::ImgVec<rgb::Rgb<u8>> {
+        imgref::ImgVec::new(
+            px.iter()
+                .map(|p| rgb::Rgb {
+                    r: p[0],
+                    g: p[1],
+                    b: p[2],
+                })
+                .collect(),
+            w,
+            h,
+        )
+    };
+    let bsrc = to_img(&rpx);
+    let bdst = to_img(&dpx);
+    let bparams = butteraugli::ButteraugliParams::new().with_compute_diffmap(true);
+    // Flatten the 2D ImgVec<f32> diffmap to row-major so it indexes like the
+    // zensim diffmap (both then align to the same per-pixel loop).
+    let bmap: Option<Vec<f32>> = butteraugli::butteraugli(bsrc.as_ref(), bdst.as_ref(), &bparams)
+        .ok()
+        .and_then(|ba| ba.diffmap)
+        .map(|m| m.rows().flat_map(|r| r.iter().copied()).collect());
+
+    // Per-block SSE, zensim-diffmap, and butteraugli-diffmap sums.
     let bx = w.div_ceil(block);
     let by = h.div_ceil(block);
     let nblocks = bx * by;
     let mut sse = vec![0f64; nblocks];
     let mut zsum = vec![0f64; nblocks];
+    let mut bsum = vec![0f64; nblocks];
     for y in 0..h {
         for x in 0..w {
             let b = (y / block) * bx + (x / block);
@@ -102,6 +129,9 @@ fn main() {
                 .sum();
             sse[b] += e;
             zsum[b] += diff[p] as f64;
+            if let Some(bm) = &bmap {
+                bsum[b] += bm[p] as f64;
+            }
         }
     }
 
@@ -115,6 +145,7 @@ fn main() {
     };
     let sse_sel = top(&sse);
     let zen_sel = top(&zsum);
+    let butter_sel = bmap.as_ref().map(|_| top(&bsum));
     let rand_sel: Vec<usize> = (0..nblocks).step_by(nblocks.div_ceil(k)).take(k).collect();
 
     std::fs::create_dir_all(out_dir).unwrap();
@@ -140,11 +171,14 @@ fn main() {
         .file_stem()
         .unwrap()
         .to_string_lossy();
-    let variants = [
+    let mut variants: Vec<(&str, &Vec<usize>)> = vec![
         ("sse", &sse_sel),
         ("zensim", &zen_sel),
         ("random", &rand_sel),
     ];
+    if let Some(bs) = &butter_sel {
+        variants.push(("butteraugli", bs));
+    }
     // manifest for the independent judge
     let mut man = String::from("ref\tvariant\tstrategy\tn_blocks_refined\ttotal_blocks\tfrac\n");
     for (strat, sel) in variants {
@@ -159,14 +193,27 @@ fn main() {
     let manp = format!("{out_dir}/manifest_{stem}.tsv");
     std::fs::write(&manp, man).unwrap();
 
-    // overlap between the two selectors — how differently do they choose?
-    let sse_set: std::collections::HashSet<usize> = sse_sel.iter().copied().collect();
-    let overlap = zen_sel.iter().filter(|b| sse_set.contains(b)).count();
+    // overlap between selectors — how differently do they choose blocks?
+    let ov = |a: &[usize], b: &[usize]| -> usize {
+        let bs: std::collections::HashSet<usize> = b.iter().copied().collect();
+        a.iter().filter(|x| bs.contains(x)).count()
+    };
+    let pct = |n: usize| 100.0 * n as f64 / k as f64;
+    let zb = butter_sel
+        .as_ref()
+        .map(|bs| {
+            format!(
+                " zensim∩butter={:.0}% sse∩butter={:.0}%",
+                pct(ov(&zen_sel, bs)),
+                pct(ov(&sse_sel, bs))
+            )
+        })
+        .unwrap_or_default();
     println!(
         "{stem}: {nblocks} blocks, refine top {k} ({:.0}%). \
-         sse∩zensim = {overlap}/{k} ({:.0}% agree). manifest {manp}",
+         sse∩zensim={:.0}%{zb}. manifest {manp}",
         frac * 100.0,
-        100.0 * overlap as f64 / k as f64
+        pct(ov(&sse_sel, &zen_sel)),
     );
     eprintln!(
         "score the 3 variants + baseline with an INDEPENDENT judge (zenmetrics \
