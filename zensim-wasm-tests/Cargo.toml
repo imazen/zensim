@@ -6,7 +6,18 @@ publish = false
 description = "Integration tests for zensim under wasm32-wasip1 + simd128"
 
 [dependencies]
-zensim = { workspace = true, features = ["imgref", "classification"] }
+# `deprecated-profiles` is default-ON for real users, but the workspace dep
+# sets `default-features = false`, so `workspace = true` drops it here. The
+# 2026-07-12 A->B deprecation moved `ZensimProfile::A` behind that feature
+# without adding it back, which silently deleted the variant from THIS crate
+# only — `wasm_regression.rs` still names it, so the WASM job has failed with
+# `E0599: no variant ... named A` ever since. Named explicitly so this crate
+# tests the profile set users actually get.
+zensim = { workspace = true, features = [
+    "imgref",
+    "classification",
+    "deprecated-profiles",
+] }
 zensim-regress = { workspace = true, default-features = false }
 
 [lints.clippy]

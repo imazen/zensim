@@ -19,6 +19,16 @@
 //!
 //! The buckets are `pub(crate)`, so this exercises the observable
 //! behavior through the public loader + trainer surface instead.
+//!
+//! Skip semantics: marked `#[ignore]` so the test does NOT run in CI
+//! environments that lack the `/mnt/v` fixtures (GitHub runners never
+//! have block storage) — the same convention `parquet_load_equivalence.rs`
+//! uses for its `/mnt/v` parquet. This is NOT a graceful skip: the
+//! decision is the caller's and is visible in the invocation, and when
+//! the test DOES run without its corpus it panics loudly with the R2
+//! restore path rather than passing vacuously. To run locally:
+//!
+//!     cargo test -p zensim-validate --test within_ref_pairing -- --ignored
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -42,6 +52,7 @@ fn canonical_safesyn() -> PathBuf {
 /// sidecars and the pareto-sweep extractor emit. Both name the same
 /// 372-wide with-iw space — rejecting either just forces a rename-copy.
 #[test]
+#[ignore = "needs the /mnt/v corpora; run with -- --ignored"]
 fn loads_feat_underscore_prefix_and_ref_identity() {
     let p = hf_corpus();
     if !p.exists() {
@@ -77,6 +88,7 @@ fn loads_feat_underscore_prefix_and_ref_identity() {
 /// The canonical corpora use `f<i>` + `ref_basename`. Both must still
 /// load, and ref identity must come through the other column name.
 #[test]
+#[ignore = "needs the /mnt/v corpora; run with -- --ignored"]
 fn loads_f_prefix_and_ref_basename() {
     let p = canonical_safesyn();
     if !p.exists() {
@@ -106,6 +118,7 @@ fn loads_f_prefix_and_ref_basename() {
 /// yields the same numbering. Determinism here is what lets a bake be
 /// reproduced byte-for-byte.
 #[test]
+#[ignore = "needs the /mnt/v corpora; run with -- --ignored"]
 fn ref_ids_are_deterministic_across_loads() {
     let p = hf_corpus();
     if !p.exists() {
