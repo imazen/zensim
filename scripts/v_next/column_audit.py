@@ -57,6 +57,84 @@ TARGET_COLS = [
 PROBE_TARGETS = ["ssim2_gpu", "ssim2_log_norm", "cvvdp_score", "cvvdp_log_norm",
                  "iwssim", "iwssim_log_norm", "mix_cv50_iw50"]
 
+# ---- Part C: FEATURE-side "bad data" audit over EVERY loaded parquet (2026-07-16,
+# user: 'sweep all input parquets for bad data that might be dragging things down').
+FEATURE_COLS = [f"f{i}" for i in range(N)]
+CAN21 = "/mnt/v/zen/zensim-training/canonical-2026-05-21"
+CAN0715 = "/mnt/v/zen/zensim-training/canonical-2026-07-15"
+MC = "/mnt/v/output/zensim-multicodec-probe"
+DI = "/mnt/v/output/zensim/depth-iter"
+# name -> (path, role). Every parquet a depth/psa recipe actually loads, train AND val.
+ALL_PARQUETS = {
+    "safesyn":            (f"{CAN21}/train/safesyn.parquet", "train"),
+    "cid22_train":        (f"{CAN21}/train/cid22_train.parquet", "train"),
+    "kadid":              (f"{CAN21}/train/kadid.parquet", "train"),
+    "tid":                (f"{CAN21}/train/tid.parquet", "train"),
+    "konjnd-dense-norm":  (f"{CAN21}/train/konjnd-dense-norm.parquet", "train"),
+    "multiband_anchor":   (f"{CAN21}/train/multiband_anchor_dial100.parquet", "anchor"),
+    "hf_nearlossless":    (f"{CAN0715}/train/hf_nearlossless_train.parquet", "train"),
+    "bigcodec_train":     (f"{DI}/bigcodec_train_120k_stride.parquet", "train"),
+    "kadis_train":        (f"{DI}/kadis_train_60k_stride.parquet", "train"),
+    "bigcodec_val":       (f"{MC}/bigcodec_hqdedup_valdigits_2026-07-02.parquet", "val"),
+    "val/cid22":          (f"{CAN21}/val/cid22.parquet", "holdout"),
+    "val/kadid":          (f"{CAN21}/val/kadid.parquet", "holdout"),
+    "val/tid":            (f"{CAN21}/val/tid.parquet", "holdout"),
+    "val/konjnd":         (f"{CAN21}/val/konjnd.parquet", "holdout"),
+    "val/aic3":           (f"{CAN21}/val/aic3.parquet", "holdout"),
+    "val/aic4":           (f"{CAN21}/val/aic4.parquet", "holdout"),
+    "konfig_triplet_stim": (f"{MC}/konfig_features_ladders_2026-07-02.csv", "triplet"),
+}
+
+
+def feature_health(path):
+    """Scan f0..f371 for bad data: NaN/Inf rows, IW-explosion outliers, constants, scale drift."""
+    if path.endswith(".csv"):
+        import pandas as pd
+        head = pd.read_csv(path, nrows=1)
+        fcols = [c for c in FEATURE_COLS if c in head.columns]
+        X = pd.read_csv(path, usecols=fcols).to_numpy(dtype=np.float64)
+    else:
+        sch = set(pq.read_schema(path).names)
+        fcols = [c for c in FEATURE_COLS if c in sch]
+        if not fcols:
+            return dict(err=f"no feature cols ({len(sch)} cols total)")
+        X = pq.read_table(path, columns=fcols).to_pandas().to_numpy(dtype=np.float64)
+    n, nf = X.shape
+    finite = np.isfinite(X)
+    nan_rows = int((~finite.all(1)).sum())
+    nan_feats = np.where(~finite.all(0))[0]
+    Xf = np.where(finite, X, np.nan)
+    absmax = np.nanmax(np.abs(Xf), axis=0)
+    stds = np.nanstd(Xf, axis=0)
+    const_feats = np.where((stds == 0) | ~np.isfinite(stds))[0]
+    exploded = np.where(absmax > 1e4)[0]  # IW-explosion: unbounded HF-moment features
+    wf = int(np.nanargmax(np.where(np.isfinite(absmax), absmax, -1)))
+    return dict(n=n, nf=nf, nan_rows=nan_rows, nan_feats=nan_feats.tolist()[:8],
+                n_nan_feats=len(nan_feats), n_const=len(const_feats),
+                const_feats=const_feats.tolist()[:8], worst_feat=wf,
+                worst_absmax=float(absmax[wf]) if np.isfinite(absmax[wf]) else float("nan"),
+                n_exploded=len(exploded), exploded=exploded.tolist()[:12])
+
+
+def leakage_check(path):
+    """Is human_score byte-identical to a feature or a metric column (target-leak, the kadid/tid bug)?"""
+    if path.endswith(".csv"):
+        return []
+    sch = list(pq.read_schema(path).names)
+    if "human_score" not in sch:
+        return None
+    cand = [c for c in sch if c in ("ssim2_gpu", "iwssim", "cvvdp_score",
+            "ssim2_log_norm", "iwssim_log_norm") or c.startswith("f")]
+    t = pq.read_table(path, columns=["human_score"] + cand).to_pandas()
+    hs = t["human_score"].to_numpy(np.float64)
+    leaks = []
+    for c in cand:
+        v = t[c].to_numpy(np.float64)
+        ok = np.isfinite(hs) & np.isfinite(v)
+        if ok.sum() > 30 and np.allclose(hs[ok], v[ok], rtol=1e-6, atol=1e-6):
+            leaks.append(c)
+    return leaks
+
 
 def col_stats(path, col):
     """coverage, (min,median,max), tail-expansion ratio, ssim2-agreement — cheap, projected read."""
@@ -136,11 +214,53 @@ def verdict(agree, cid22, ssim2_cid):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", default="1,7")
+    ap.add_argument("--mode", default="features", choices=["features", "full"],
+                    help="features=fast feature-health+leakage sweep of every parquet; "
+                         "full=also the slow per-target CID22 train-probes (A+B).")
     ap.add_argument("--out", default=str(REPO / "benchmarks/column_audit_2026-07-15.md"))
     a = ap.parse_args()
+    seeds = [int(x) for x in a.seeds.split(",")]
+
+    # ---- Part C: feature-side bad-data sweep over EVERY loaded parquet (always) ----
+    print("=== Part C: feature-health + leakage sweep (all loaded parquets) ===")
+    LC = ["# Feature-health + leakage sweep — 2026-07-16",
+          "",
+          "User: *'sweep all input parquets for bad data that might be dragging things down'.* "
+          "Scans f0..f371 in every parquet a depth/psa recipe loads. `nan_rows`=rows with any "
+          "non-finite feature; `exploded`=features with |max|>1e4 (unbounded IW HF-moment — the "
+          "5.8M-on-graphics bug); `const`=zero-variance features; `leak`=human_score byte-identical "
+          "to a feature/metric column (the kadid/tid iwssim==human_score bug).",
+          "",
+          "| parquet | role | n | nan_rows | n_nan_feat | n_const | worst_feat |max| | exploded | leak |",
+          "|---|---|--:|--:|--:|--:|---|--:|---|---|"]
+    for name, (path, role) in ALL_PARQUETS.items():
+        try:
+            fh = feature_health(path)
+        except Exception as e:
+            LC.append(f"| {name} | {role} | — | — | — | — | ERR | — | {str(e)[:40]} | — |")
+            print(f"  {name:20s} ERR {str(e)[:60]}")
+            continue
+        if "err" in fh:
+            LC.append(f"| {name} | {role} | — | — | — | — | {fh['err']} | — | — | — |")
+            print(f"  {name:20s} {fh['err']}")
+            continue
+        try:
+            lk = leakage_check(path)
+        except Exception:
+            lk = None
+        leakstr = "—" if lk is None else ("**" + ",".join(lk) + "**" if lk else "clean")
+        expl = "—" if fh["n_exploded"] == 0 else f"**{fh['n_exploded']}: {fh['exploded']}**"
+        LC.append(f"| {name} | {role} | {fh['n']} | {fh['nan_rows']} | {fh['n_nan_feats']} | "
+                  f"{fh['n_const']} | f{fh['worst_feat']} | {fh['worst_absmax']:.3g} | {expl} | {leakstr} |")
+        print(f"  {name:20s} n={fh['n']:>7} nan_rows={fh['nan_rows']:>6} const={fh['n_const']:>3} "
+              f"exploded={fh['n_exploded']:>3} worst=f{fh['worst_feat']}={fh['worst_absmax']:.3g} leak={leakstr}")
+    Path(str(REPO / "benchmarks/feature_health_sweep_2026-07-16.md")).write_text("\n".join(LC) + "\n")
+    print(f"wrote {REPO / 'benchmarks/feature_health_sweep_2026-07-16.md'}")
+    if a.mode == "features":
+        return
+
     import torch
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    seeds = [int(x) for x in a.seeds.split(",")]
 
     L = ["# Per-column poison audit — 2026-07-15",
          "",
