@@ -241,10 +241,14 @@ MOS instead of overfitting ssim2. Tested with KonFiG human triplets
    | KonJND | 0.4805 | 0.2787 | **−0.202** |
    | dial mono | 0.929 | 0.937 | +0.008 |
 
-   Triplet at w=0.5 regresses every rank corpus (KonJND badly), contradicting the
-   2026-07-02 "+0.05 mild" claim (different base/config). A weight sweep
-   {0.1,0.2,0.3} is running to sweep-before-falsify; the 0.0→0.5 trend is
-   monotonically worse, so a recovery at low weight looks unlikely.
+   Triplet at w=0.5 regresses every rank corpus (KonJND badly). BUT the weight
+   sweep {0.1,0.2,0.3} shows the response is **non-monotonic** — w=0.1 lifts CID22
+   to 0.8734 (+0.017, ≈B) and AIC-3 to 0.8059 (+0.016) while w=0.3 lifts KonJND to
+   0.6424; w=0.2/0.5 hurt. So the earlier "hurts" (w=0.5 only) was premature — the
+   good-data signal DOES help at low weight, at a dial-monotonicity cost
+   (0.929→0.85). The non-monotonic bouncing (0.846–0.873 around base 0.856) is
+   within the single-seed noise band, so a low-weight sweep {0.02,0.05,0.075} +
+   seed confirmation is needed before this is a finding, not noise.
 
 **Pareto summary of everything tried this session:** plain depth (CID22 0.890,
 dead dial) · per_sample_alpha+tanh (CID22 0.856, viable dial mono 0.929) ·
