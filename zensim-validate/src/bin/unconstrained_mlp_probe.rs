@@ -53,41 +53,14 @@ fn sig(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
 }
 
+/// Spearman rank correlation.
+///
+/// Delegates to `zenstats` — the single owner of stat math. This file used to
+/// carry its own copy (one of four byte-identical ones across the probes). The
+/// copies used 1-based ranks against zenstats' 0-based, which changes nothing:
+/// a correlation is invariant to a constant offset in the ranks.
 fn spearman(a: &[f64], b: &[f64]) -> f64 {
-    fn ranks(v: &[f64]) -> Vec<f64> {
-        let n = v.len();
-        let mut idx: Vec<usize> = (0..n).collect();
-        idx.sort_by(|&i, &j| v[i].partial_cmp(&v[j]).unwrap_or(std::cmp::Ordering::Equal));
-        let mut r = vec![0.0; n];
-        let mut i = 0;
-        while i < n {
-            let mut k = i;
-            while k + 1 < n && v[idx[k + 1]] == v[idx[i]] {
-                k += 1;
-            }
-            let a = (i + k) as f64 / 2.0 + 1.0;
-            for &t in &idx[i..=k] {
-                r[t] = a;
-            }
-            i = k + 1;
-        }
-        r
-    }
-    let (ra, rb) = (ranks(a), ranks(b));
-    let n = ra.len() as f64;
-    let (ma, mb) = (ra.iter().sum::<f64>() / n, rb.iter().sum::<f64>() / n);
-    let (mut num, mut da, mut db) = (0.0, 0.0, 0.0);
-    for i in 0..ra.len() {
-        let (x, y) = (ra[i] - ma, rb[i] - mb);
-        num += x * y;
-        da += x * x;
-        db += y * y;
-    }
-    if da == 0.0 || db == 0.0 {
-        0.0
-    } else {
-        num / (da.sqrt() * db.sqrt())
-    }
+    zenstats::panel::spearman(a, b)
 }
 
 fn load(path: &str, name: &str) -> Option<(Vec<Vec<f64>>, Vec<f64>)> {
