@@ -169,3 +169,54 @@ fn every_mode_still_recovers_the_ranking() {
 fn mse_weight_without_an_opted_in_group_panics() {
     let _ = train(GroupLossMode::Rank, 1.0);
 }
+
+/// POLARITY. The model has ONE output, so the rank term and the absolute
+/// term must agree on what it means. They do not by default: the legacy
+/// RankNet is distance-shaped (higher quality → LOWER y) while regression
+/// onto `human_score` is score-shaped (higher quality → HIGHER y). Mixed
+/// without reconciliation, the rank group's own corpus INVERTS.
+///
+/// MEASURED 2026-07-15 on the round-7 recipe before the fix: the HF group's
+/// held-out per-ref SROCC went +0.6393 / 6% backwards (no HF group) to
+/// −0.3454 / 75% backwards (HF group added) — adding rank supervision to a
+/// corpus made that corpus rank BACKWARDS, which is only possible if the two
+/// terms are fighting.
+///
+/// So: a `Both` group must rank the SAME DIRECTION as an `Mse` group. If this
+/// fails with a negative correlation, the polarity reconciliation is gone.
+#[test]
+fn rank_and_absolute_terms_agree_on_polarity() {
+    let (_, targets) = synth_rows();
+
+    // Signed, not |·|: the sign IS the property under test.
+    let mse_rho = spearman(&predictions(&train(GroupLossMode::Mse, 1.0)), &targets);
+    let both_rho = spearman(&predictions(&train(GroupLossMode::Both, 0.1)), &targets);
+
+    assert!(
+        mse_rho > 0.85,
+        "an Mse group is score-shaped: higher quality must give HIGHER output; \
+         signed SROCC = {mse_rho:.4}"
+    );
+    assert!(
+        both_rho > 0.85,
+        "a Both group carries BOTH terms — if its rank term still used the \
+         legacy distance polarity it would fight the absolute term and invert. \
+         signed SROCC = {both_rho:.4} (expected same sign as Mse's {mse_rho:.4})"
+    );
+}
+
+/// The reconciliation must NOT touch rank-only training: with no group
+/// carrying an absolute term, the legacy distance convention stands (that is
+/// what every existing recipe and every shipped bake's calibration assumes).
+#[test]
+fn rank_only_training_keeps_the_legacy_distance_polarity() {
+    let (_, targets) = synth_rows();
+    let rho = spearman(&predictions(&train(GroupLossMode::Rank, 0.0)), &targets);
+    assert!(
+        rho < -0.85,
+        "rank-only output is DISTANCE-shaped: higher quality must give LOWER \
+         output. signed SROCC = {rho:.4}. If this flipped positive, the \
+         polarity reconciliation is leaking into rank-only runs and every \
+         existing bake's calibration is now inverted."
+    );
+}

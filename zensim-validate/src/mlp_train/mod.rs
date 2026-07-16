@@ -1578,6 +1578,36 @@ pub fn train_mlp_strategy(
         "no training groups (all train_weight == 0)"
     );
 
+    // OUTPUT POLARITY. The model has one output, so the two loss terms must
+    // agree on what it means — and by default they do NOT:
+    //
+    //   RankNet (legacy): target = sign(mos_a − mos_b), z = −target·(y_b − y_a).
+    //     For mos_a > mos_b this minimizes softplus(y_a − y_b), pushing
+    //     y_a < y_b — higher quality → LOWER y. DISTANCE-shaped.
+    //   Absolute term: y is regressed onto `human_score` directly —
+    //     higher quality → HIGHER y. SCORE-shaped.
+    //
+    // Mixed naively, the two terms pull in opposite directions and the rank
+    // group's own corpus inverts. MEASURED 2026-07-15 on the round-7 recipe
+    // (main groups `mse`, HF `withinref,rank`): HF held-out per-ref SROCC
+    // went +0.6393 / 6% backwards WITHOUT the HF group to −0.3454 / 75%
+    // backwards WITH it — adding rank supervision to a corpus made that
+    // corpus rank backwards, which is only possible if the term is fighting
+    // the absolute one.
+    //
+    // Python's reference recipe has no such conflict: its RankNet is
+    // `BCE(s_i − s_j, 1 if quality_i > quality_j)`, which pushes higher
+    // quality → HIGHER s, agreeing with its `smooth_l1`. So we reconcile the
+    // same way: when ANY group carries the absolute term the model is
+    // score-shaped and the rank term flips to match. With no absolute term
+    // the sign is +1 and the legacy distance convention is preserved
+    // bit-for-bit (every existing recipe is `Rank`-only).
+    let rank_target_sign = if groups.iter().any(|g| g.loss_mode.has_mse()) {
+        -1.0
+    } else {
+        1.0
+    };
+
     let train_indices: Vec<usize> = groups
         .iter()
         .enumerate()
@@ -1987,7 +2017,9 @@ pub fn train_mlp_strategy(
 
             let mos_a = g.human_scores[ia];
             let mos_b = g.human_scores[ib];
-            let target = (mos_a - mos_b).signum();
+            // `rank_target_sign` reconciles the rank term with the absolute
+            // term's polarity; it is +1 (a no-op) unless a group carries MSE.
+            let target = rank_target_sign * (mos_a - mos_b).signum();
             // Per-group loss mode (2026-07-15). `Rank` is the default and
             // reproduces the pre-existing control flow exactly: the two
             // `continue`s below fire unconditionally, as they always did.
