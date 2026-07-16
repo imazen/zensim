@@ -1933,11 +1933,23 @@ fn main() {
     let matches = Args::command().get_matches();
     let mut args = Args::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 
+    // The bake sha256 the manifest CLAIMS, hoisted out of the manifest block so
+    // the write site can check the claim against what we actually produced.
+    // `None` when no manifest, or when the manifest records no sha — a RECIPE
+    // (the normal case since the 2026-07-15 collapse) describes how to train,
+    // not one bake, so it makes no claim and none is checked. See the
+    // verification right after `fs::write`.
+    let mut manifest_claimed_sha: Option<(String, PathBuf)> = None;
+
     if let Some(manifest_path) = args.manifest.clone() {
         let cfg = train_manifest::parse_manifest(&manifest_path).unwrap_or_else(|e| {
             eprintln!("--manifest {}: {e}", manifest_path.display());
             std::process::exit(2);
         });
+        manifest_claimed_sha = cfg
+            .bake_sha256
+            .clone()
+            .map(|sha| (sha, manifest_path.clone()));
 
         // Reproduce-exactly gate #0: trainer version. The 2026-07-01 v47
         // reproduction proved training is DETERMINISTIC (pinned tree →
@@ -3180,6 +3192,60 @@ fn main() {
         std::process::exit(1);
     });
     println!("Wrote {} bytes to {out_path:?}", bake_bytes.len());
+
+    // REPRODUCE-EXACTLY, the output half. `verify_inputs` has always checked
+    // that the manifest's INPUTS are the bytes it claims; nothing checked its
+    // OUTPUT until 2026-07-15, and the parser did not even read
+    // `[bake].sha256` (RawBake carried only `file`, so serde dropped it).
+    //
+    // The cost of that asymmetry, measured: 128 of 142 manifests recorded
+    // `d0ef7a30…` — the shipped Profile A bake — because each new experiment
+    // was forked from `v47_strict_qat.toml` and never updated the outcome
+    // fields. Exactly one of them described that bake. This check is what
+    // would have caught all 128 AT CREATION rather than two months later:
+    // fork a manifest, train, and it says "you claimed X, you produced Y".
+    //
+    // Silent when the manifest makes no claim — a recipe (no `[bake].sha256`)
+    // describes how to train, not one bake. Only a claim gets checked.
+    if let Some((claimed, manifest_path)) = &manifest_claimed_sha {
+        match train_manifest::sha256_file(&out_path) {
+            Ok(actual) if &actual == claimed => {
+                println!(
+                    "[manifest] REPRODUCED: bake sha256 matches {}'s [bake].sha256 ({})",
+                    manifest_path.display(),
+                    &actual[..16]
+                );
+            }
+            Ok(actual) if args.manifest_allow_sha_drift => {
+                // Don't tell someone to pass the flag they just passed.
+                eprintln!(
+                    "[manifest] WARNING: bake sha256 drift ALLOWED via \
+                     --manifest-allow-sha-drift: {} claims {claimed}, this run produced \
+                     {actual}. The bake on disk is NOT the one that manifest describes — \
+                     do not cite the manifest's [eval] for it.",
+                    manifest_path.display()
+                );
+            }
+            Ok(actual) => {
+                eprintln!(
+                    "[manifest] bake sha256 MISMATCH\n  \
+                     manifest: {}\n  \
+                     claimed:  {claimed}\n  \
+                     produced: {actual}\n\
+                     The manifest describes a DIFFERENT bake than this run produced. Either:\n  \
+                     (a) you forked this manifest for a new experiment and kept the parent's \
+                     outcome fields — recompute [bake].sha256/file_bytes/[eval] from YOUR bake, \
+                     or drop them (a recipe makes no claim); or\n  \
+                     (b) this was meant to reproduce the recorded bake and did not — check \
+                     trainer_commit, the input shas, and the seed before trusting either artifact.\n\
+                     Pass --manifest-allow-sha-drift to downgrade this to a warning.",
+                    manifest_path.display()
+                );
+                std::process::exit(3);
+            }
+            Err(e) => eprintln!("[manifest] cannot hash produced bake to verify: {e}"),
+        }
+    }
 
     if let Some(log_path) = &args.log_path {
         let mut f = File::create(log_path).unwrap_or_else(|e| {
