@@ -4,10 +4,26 @@ Answers the standing question *"did you try a bake including it using the
 optimal pairwise/per-ref"* and the directive *"ensure key bakes are
 reproducible with the rust paths and update rust when needed to do so."*
 
-**Verdict: the FINDING reproduces under two different training objectives.
-One number (KonJND) reproduces under neither, and its cause is NOT yet known —
-the objective hypothesis was raised, tested, and falsified. See below; do not
-cite `KonJND −0.03` as attributed.**
+**Verdict: the HF FINDING ITSELF reproduces under two different training
+objectives — that is the load-bearing result and it is solid (HF per-ref
++0.2539 @ 35 % backwards → +0.9500 @ 0 % backwards).**
+
+**The COST numbers do not survive a seed sweep, and an earlier revision of this
+doc wrongly claimed they did.** Corrected 2026-07-15 eve:
+
+- **CID22 (−0.005): RETRACTED as noise.** The delta flips sign across seeds
+  (−0.0047 at seed 1, +0.0012 at seed 7); Python's −0.0041 sits inside that
+  spread. Two draws from one noise band agreeing is not a reproduction.
+- **Non-photo (−0.002): now UNVERIFIED.** Never seed-swept; the same
+  ~0.004-scale objection applies. Do not cite it either.
+- **KonJND (−0.03): NOT attributed, and not the HF group's doing.** Rust's
+  KonJND *level* is uniformly ~0.05 below Python's in every arm, both
+  objectives, all three seeds — a systematic offset that exists before the HF
+  group is added. The objective hypothesis was raised, tested, and falsified.
+
+The lesson is the one this repo already has a rule for: a single seed cannot
+measure a 0.004 effect, and reporting an unswept delta as a reproduction is the
+"post-selection small-n" family in `docs/DATASET_HISTORY.md` §0.
 
 ## What was run
 
@@ -138,19 +154,45 @@ Matching the loss recipe moved KonJND's delta by 0.0035 — it did not flip it.
 So the objective is **not** the explanation. Two of three cost axes reproduce
 under *both* objectives; KonJND reproduces under neither.
 
-**What remains.** The Rust run is 1 seed against Python's 2-seed average (1, 7)
-on the corpus with the largest documented seed variance (v48 multi-seed: 2/9
-runs collapse), and the trainers still differ in batching (Rust: 120 epochs ×
-50k sampled pairs; Python: 400 full-batch steps) and LR schedule (Rust decays
-0.00100 → 0.00068; Python holds 1e-3). A multi-seed sweep is the cheap
-discriminator and is the next step; until it lands, **`KonJND −0.03` is not
-attributed.** Do not cite it as the HF group's effect, and do not cite the
-objective as its cause.
+**The seed sweep ran (2026-07-15 eve).** Rank-only recipe, seeds 7 and 17
+against the seed-1 baseline. It settled two things and **retracted one of this
+doc's own claims**:
 
-Absolute Rust KonJND is also uniformly BELOW Python's (0.4618–0.5024 vs
-0.5187–0.5521) across every arm and both objectives — a level offset, not just
-a delta disagreement, which points at something systematic rather than at the
-HF group.
+| arm | seed 1 | seed 7 | seed 17 | Python r7 (2-seed avg) |
+|---|--:|--:|--:|--:|
+| CID22 hf0 | 0.8842 | 0.8842 | 0.8840 | 0.8862 |
+| CID22 hf0.1 | 0.8795 | 0.8854 | *(pending)* | 0.8821 |
+| **CID22 Δ (hf0.1 − hf0)** | **−0.0047** | **+0.0012** | — | **−0.0041** |
+| KonJND hf0 | 0.5024 | 0.4944 | 0.4978 | 0.5187 |
+| KonJND hf0.1 | 0.4675 | 0.4843 | *(pending)* | 0.5521 |
+| **KonJND Δ** | **−0.0349** | **−0.0101** | — | **+0.0334** |
+
+**RETRACTED — the CID22 delta is seed noise, and this doc previously cited it
+as a reproduction.** It flips sign across seeds (−0.0047 at seed 1, +0.0012 at
+seed 7). Python's −0.0041 sits inside that spread. So "Rust's −0.0047
+reproduces Python's −0.0041" was never a measurement of the HF group; it was
+two draws from the same noise band agreeing by luck. The earlier
+non-photo agreement (Rust −0.0016 vs Python −0.0017) has NOT been
+seed-swept and is now equally suspect — treat it as unverified until it is.
+One seed cannot measure a ~0.004 effect on this corpus.
+
+**KonJND is NOT seed noise.** The delta stays negative at both seeds
+(−0.0349, −0.0101 — a 3.5× magnitude swing but no sign flip) while Python's is
+**positive** (+0.0334). With n=2 that is suggestive rather than decisive on the
+delta alone, but it does not stand alone:
+
+**The level offset is the real signal.** Rust's absolute KonJND is uniformly
+BELOW Python's — 0.4675–0.5024 vs 0.5187–0.5521 — in **every arm, both
+objectives, all three seeds**. A ~0.05 gap that survives the objective change,
+the HF group's presence, and the seed is not the HF group's effect and not
+variance. Something systematic differs in how the two trainers handle KonJND.
+That, not the HF group, is where the remaining suspects point (batching: Rust
+120 epochs × 50k sampled pairs vs Python 400 full-batch; LR schedule: Rust
+decays 0.00100 → 0.00068, Python holds 1e-3).
+
+**So `KonJND −0.03` remains NOT attributed to the HF group** — and the sweep
+narrowed why: the disagreement lives in the KonJND level, which is already
+wrong before the HF group is added.
 
 ## Honest scope of the HF win
 
