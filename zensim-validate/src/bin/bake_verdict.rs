@@ -377,6 +377,10 @@ struct Args {
     /// charts — no external assets. The "big html report" half of the
     /// unified metric-eval command.
     html: Option<PathBuf>,
+    /// `--json <path>`: machine-readable per-corpus panel for the comparative
+    /// dashboard. The structured counterpart to `--output` markdown; consumers
+    /// parse this instead of the report.
+    json: Option<PathBuf>,
     /// Severity-ramp feature grid (`image_path, q, feat_0..`) where
     /// `q = dist_type*10 + severity_level`. Enables the severity-ramp
     /// monotonicity section (distortion dial). The grid's feature regime
@@ -421,6 +425,7 @@ fn parse_args() -> Result<Args, String> {
     let mut output: Option<PathBuf> = None;
     let mut per_pair_output: Option<PathBuf> = None;
     let mut html: Option<PathBuf> = None;
+    let mut json: Option<PathBuf> = None;
     let mut ramp_grid: Option<PathBuf> = None;
     let mut compare: Option<PathBuf> = None;
     let mut corruption_grid: PathBuf = std::env::var("ZENSIM_CORRUPTION_GRID")
@@ -466,6 +471,10 @@ fn parse_args() -> Result<Args, String> {
                 let v = args.next().ok_or("--html requires <path>")?;
                 html = Some(PathBuf::from(v));
             }
+            "--json" => {
+                let v = args.next().ok_or("--json requires <path>")?;
+                json = Some(PathBuf::from(v));
+            }
             "--ramp-grid" => {
                 let v = args.next().ok_or("--ramp-grid requires <path>")?;
                 ramp_grid = Some(PathBuf::from(v));
@@ -497,6 +506,7 @@ fn parse_args() -> Result<Args, String> {
         per_pair_output,
         dial_grid,
         html,
+        json,
         ramp_grid,
         compare,
         corruption_grid,
@@ -1755,6 +1765,71 @@ Run the dedicated q-sweep harness for those._\n",
         results.iter().map(|r| r.n).sum::<usize>(),
         results.len()
     ));
+
+    // Machine-readable panel for the comparative dashboard — the structured
+    // counterpart to the markdown, so consumers never parse the report. Bake
+    // sha ties each row back to its manifest (the reproducibility spine).
+    if let Some(json_path) = &args.json {
+        #[derive(serde::Serialize)]
+        struct CorpusJson {
+            display: String,
+            n: usize,
+            srocc: f64,
+            plcc: f64,
+            krocc: f64,
+            or_ratio: f64,
+            pwrc: f64,
+            z_rmse: f64,
+            ds_auc: f64,
+            per_ref_mean: Option<f64>,
+            per_ref_frac_negative: Option<f64>,
+        }
+        #[derive(serde::Serialize)]
+        struct VerdictJson {
+            bake: String,
+            bake_sha256: String,
+            n_inputs: usize,
+            corpora: Vec<CorpusJson>,
+        }
+        let bake_sha = zensim_validate::train_manifest::sha256_file(&args.bake).unwrap_or_default();
+        let vj = VerdictJson {
+            bake: args.bake.display().to_string(),
+            bake_sha256: bake_sha,
+            n_inputs,
+            corpora: results
+                .iter()
+                .map(|r| CorpusJson {
+                    display: r.display.to_string(),
+                    n: r.n,
+                    srocc: r.srocc,
+                    plcc: r.plcc,
+                    krocc: r.krocc,
+                    or_ratio: r.or_ratio,
+                    pwrc: r.pwrc,
+                    z_rmse: r.z_rmse,
+                    ds_auc: r.ds_auc,
+                    per_ref_mean: r.per_ref.as_ref().map(|p| p.mean),
+                    per_ref_frac_negative: r.per_ref.as_ref().map(|p| p.frac_negative),
+                })
+                .collect(),
+        };
+        if let Some(parent) = json_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match serde_json::to_string_pretty(&vj) {
+            Ok(s) => {
+                if let Err(e) = std::fs::write(json_path, s) {
+                    eprintln!("bake_verdict: failed to write {}: {e}", json_path.display());
+                    return ExitCode::from(1);
+                }
+                eprintln!("wrote json panel to {}", json_path.display());
+            }
+            Err(e) => {
+                eprintln!("bake_verdict: json serialize failed: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
 
     if let Some(out_path) = args.output {
         if let Some(parent) = out_path.parent() {

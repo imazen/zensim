@@ -5930,6 +5930,7 @@ dependencies = [
  "parquet",
  "rayon",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
  "toml",
  "zenbench",
