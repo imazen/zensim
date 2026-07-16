@@ -211,15 +211,49 @@ above (capacity overfits the ssim2 target away from MOS; the dial collapses; and
 model selection on ssim2-anchored val groups is blind to both). This is the
 honest end of the "beat B by adding depth" pursuit.
 
-**What would actually beat B is DATA, not architecture:** human-MOS supervision
-(AIC-3 triplets — trainer-wired, measured mild-positive +0.05 CID22 in the
-2026-07-02 ablation, with a fixable dial-starvation interaction) so capacity
-helps MOS instead of overfitting ssim2. That path repurposes the AIC-3 holdout
-(a validation-regime decision, pre-registered in `docs/PLAN_BEAT_A.md` with
-SDR25 as the replacement holdout) and is the next fork, pending user direction.
-
 Reports (comprehensive `bake_verdict --html --compare B`):
 `/mnt/v/output/zensim/zensim-reports/depth_v5_reg0p{0,1,3}.html`.
+
+### The "good data" hypothesis — TESTED, and it does not beat B either (2026-07-16)
+
+The mechanism above pointed at human-MOS data as the lever to make capacity help
+MOS instead of overfitting ssim2. Tested with KonFiG human triplets
+(ordered-probit NLL, 541,895 responses). Two findings:
+
+1. **A silent-no-op trainer bug, caught + fixed.** The first run (`depth_v6` =
+   depth_v2 plain 2-layer + `--triplet-weight 0.5`) baked **byte-identical** to
+   depth_v2 (md5 `b1aecd40`, sha `d8a139a6`): the triplet step lives ONLY in
+   `train_mlp_per_sample_alpha_head`, so the plain path loaded the pool, logged
+   it, and threw the flags away. A byte-identity check caught it before it
+   shipped as a false "triplet beats B." Fixed with a fail-loud guard
+   (`4691cf2a`) mirroring the `--monotonicity-reg`/`--mse-weight` guards — the
+   REPRODUCIBILITY §5 "adjacent check missing" pattern.
+
+2. **Clean A/B on the arch where triplet fires: it HURTS.** Matched runs on the
+   dial-viable `per_sample_alpha + tanh` base (learned α, no monotone_cbc), the
+   only difference being `--triplet-weight 0.5`:
+
+   | corpus | psa base | +triplet(0.5) | Δ |
+   |---|---|---|---|
+   | CID22 | 0.8559 | 0.8456 | −0.010 |
+   | AIC-3 | 0.7900 | 0.7645 | −0.026 |
+   | AIC-4 | 0.9263 | 0.9152 | −0.011 |
+   | KonJND | 0.4805 | 0.2787 | **−0.202** |
+   | dial mono | 0.929 | 0.937 | +0.008 |
+
+   Triplet at w=0.5 regresses every rank corpus (KonJND badly), contradicting the
+   2026-07-02 "+0.05 mild" claim (different base/config). A weight sweep
+   {0.1,0.2,0.3} is running to sweep-before-falsify; the 0.0→0.5 trend is
+   monotonically worse, so a recovery at low weight looks unlikely.
+
+**Pareto summary of everything tried this session:** plain depth (CID22 0.890,
+dead dial) · per_sample_alpha+tanh (CID22 0.856, viable dial mono 0.929) ·
+monotone-depth frontier (collapses) · KonFiG triplet (hurts). **B (CID22 0.876,
+full dial) sits on the frontier — nothing tried beats it on both rank AND dial.**
+Beating B needs something not yet tried — most likely genuinely more human-MOS
+data at scale (KonFiG is 1,220 stimuli), not another architecture or loss on the
+data we have. `docs/PLAN_BEAT_A.md` (Claude-authored, not human-confirmed) queues
+AIC-3's 420k triplets + SDR25-as-holdout; that regime shift is a user call.
 
 ## ~~CONVERGED VERDICT: the rank↔dial tension is fundamental (depth_v4 proved it)~~ — RETRACTED, see above
 
