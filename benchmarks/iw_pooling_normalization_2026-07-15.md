@@ -1,5 +1,12 @@
 # The IW block is pooled with the wrong denominator — 144 of 372 features carry a per-reference scale error
 
+> ## ➜ MECHANISM RESOLVED 2026-07-16: `benchmarks/ssim_moment_explosion_2026-07-16.md`
+> ## The energy explosion is REAL (5.8e6, full-parquet scan) — this doc's
+> ## "no explosion" read was a SAMPLING error (row-group-0 + too-gentle blur).
+> ## It is unbounded SSIM `d` (no C1, no upper cap), NOT edge energy, NOT the
+> ## weight. The `mean_w`-is-small finding below STANDS; the "no re-extract"
+> ## verdict is REVISED — the *energy* fix may justify one, the *weight* fix not.
+>
 > ## ⚠ VERDICT 2026-07-16: the defect is REAL, the magnitude is SMALL, and this
 > ## doc's headline number was WRONG. Measured against the SHIPPED weights.
 >

@@ -5685,4 +5685,168 @@ mod tests {
             println!("  HIGH  mean_w={v:.4}  {name}");
         }
     }
+
+    /// DUMP the biggest raw ScaleStats field on real content — the tool that
+    /// LOCATED the 5.8e6 explosion `benchmarks/ssim_moment_explosion_2026-07-16.md`
+    /// characterizes.
+    ///
+    /// The explosion is NOT in the edge (`iw_art_4th`/`iw_det_4th`) features
+    /// §3.19 named — those measured 0.02..0.09 here. It is in the higher moments
+    /// of the SSIM map (`iw_ssim_4th`/`masked_ssim_4th`, XYB chroma channel,
+    /// finest scale), whose per-pixel `d = (1 − num_m·num_s/denom_s)·mask` has a
+    /// `.max(0)` floor but NO upper cap, so the un-normalized luminance term
+    /// `num_m = 1 − (mu1−mu2)²` drives it to millions on high-magnitude chroma.
+    /// NOTE: a gentle synthetic blur does NOT trigger it (this printed 0.19 on
+    /// the named o_9292 graphic) — only real codec artifacts on high-contrast
+    /// content do, which is why the full-parquet scan found it and row-group-0
+    /// did not.
+    ///
+    /// `ZENSIM_DUMP_IMG=<png> [ZENSIM_DUMP_IMG2=<png> …] cargo test -p zensim --release dump_ssim_moment_explosion -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs specific images; set ZENSIM_DUMP_IMG (comma-separated) and run --ignored"]
+    fn dump_ssim_moment_explosion() {
+        let list = std::env::var("ZENSIM_DUMP_IMG")
+            .expect("set ZENSIM_DUMP_IMG to comma-separated image paths");
+        let config = ZensimConfig {
+            compute_all_features: true,
+            extended_features: true,
+            compute_iw_features: true,
+            ..Default::default()
+        };
+        let weights: Vec<f64> = WEIGHTS.to_vec();
+
+        println!(
+            "\n| image | ch | iw_art_4th | iw_det_4th | masked_art_4th | masked_det_4th | iw_ssim_4th |"
+        );
+        println!("|---|---|--:|--:|--:|--:|--:|");
+        for path in list.split(',') {
+            let path = path.trim();
+            let Ok(img) = image::open(path) else {
+                println!("| SKIP {path} | | | | | | |");
+                continue;
+            };
+            let rgb = img.to_rgb8();
+            let (w, h) = (rgb.width() as usize, rgb.height() as usize);
+            let px: Vec<[u8; 3]> = rgb.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+            let src_img = RgbSlice::new(&px, w, h);
+            // identity: src vs src isolates the extractor's own feature scale
+            // from any distortion — the edge features on identity should be ~0,
+            // so a large value here is pure extractor pathology.
+            let name = std::path::Path::new(path)
+                .file_name()
+                .unwrap()
+                .to_string_lossy();
+            let short: String = name.chars().take(28).collect();
+
+            // scale 0 only (finest); channel Y = 1 dominant.
+            let (stats, _) = compute_multiscale_stats_streaming_strips(
+                &src_img, &src_img, &config, &weights, 256, 128,
+            );
+            let s = &stats[0];
+            println!(
+                "| {short} (self) | Y | {:.4e} | {:.4e} | {:.4e} | {:.4e} | {:.4e} |",
+                s.iw_art_4th[1],
+                s.iw_det_4th[1],
+                s.masked_art_4th[1],
+                s.masked_det_4th[1],
+                s.iw_ssim[1 * 3 + 1],
+            );
+
+            // also a real distortion: blur the distorted side hard.
+            let mut d = px.clone();
+            for y in 1..h - 1 {
+                for x in 1..w - 1 {
+                    for c in 0..3 {
+                        let a = px[y * w + x - 1][c] as u16
+                            + px[y * w + x + 1][c] as u16
+                            + px[(y - 1) * w + x][c] as u16
+                            + px[(y + 1) * w + x][c] as u16;
+                        d[y * w + x][c] = (a / 4) as u8;
+                    }
+                }
+            }
+            let dst_img = RgbSlice::new(&d, w, h);
+            let (stats2, _) = compute_multiscale_stats_streaming_strips(
+                &src_img, &dst_img, &config, &weights, 256, 128,
+            );
+            let s2 = &stats2[0];
+            println!(
+                "| {short} (blur) | Y | {:.4e} | {:.4e} | {:.4e} | {:.4e} | {:.4e} |",
+                s2.iw_art_4th[1],
+                s2.iw_det_4th[1],
+                s2.masked_art_4th[1],
+                s2.masked_det_4th[1],
+                s2.iw_ssim[1 * 3 + 1],
+            );
+        }
+        println!("\n(self = src-vs-src identity; blur = src vs 4-neighbour-blurred src)");
+        // Direct test of §3.19's "5.8e6 IW/masked feature on o_9292": print the
+        // single largest |feature| across ALL 372 and its index, for a real
+        // (hard-blur) distortion. If §3.19 reproduces, some f>=228 is enormous.
+        println!("\n| image | max|feat| | at index | block |");
+        println!("|---|--:|--:|---|");
+        for path in list.split(',') {
+            let path = path.trim();
+            let Ok(img) = image::open(path) else { continue };
+            let rgb = img.to_rgb8();
+            let (w, h) = (rgb.width() as usize, rgb.height() as usize);
+            let px: Vec<[u8; 3]> = rgb.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+            let mut d = px.clone();
+            for y in 1..h - 1 {
+                for x in 1..w - 1 {
+                    for c in 0..3 {
+                        let a = px[y * w + x - 1][c] as u16
+                            + px[y * w + x + 1][c] as u16
+                            + px[(y - 1) * w + x][c] as u16
+                            + px[(y + 1) * w + x][c] as u16;
+                        d[y * w + x][c] = (a / 4) as u8;
+                    }
+                }
+            }
+            let cfg = ZensimConfig {
+                compute_all_features: true,
+                extended_features: true,
+                compute_iw_features: true,
+                ..Default::default()
+            };
+            let (stats, _) = compute_multiscale_stats_streaming_strips(
+                &RgbSlice::new(&px, w, h),
+                &RgbSlice::new(&d, w, h),
+                &cfg,
+                &weights,
+                256,
+                128,
+            );
+            // scan every field of every scale, tag the biggest by NAME.
+            let mut best = (0.0f64, String::new());
+            for (si, s) in stats.iter().enumerate() {
+                let named: [(&str, &[f64]); 9] = [
+                    ("edge(unweighted)", &s.edge),
+                    ("iw_ssim", &s.iw_ssim),
+                    ("iw_art_4th", &s.iw_art_4th),
+                    ("iw_det_4th", &s.iw_det_4th),
+                    ("iw_mse", &s.iw_mse),
+                    ("masked_art_4th", &s.masked_art_4th),
+                    ("masked_det_4th", &s.masked_det_4th),
+                    ("masked_mse", &s.masked_mse),
+                    ("masked_ssim", &s.masked_ssim),
+                ];
+                for (nm, arr) in named {
+                    for (k, &v) in arr.iter().enumerate() {
+                        if v.abs() > best.0 {
+                            best = (v.abs(), format!("{nm}[s{si} #{k}]"));
+                        }
+                    }
+                }
+            }
+            let short: String = std::path::Path::new(path)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .chars()
+                .take(26)
+                .collect();
+            println!("| {short} | {:.4e} | {} | |", best.0, best.1);
+        }
+    }
 }

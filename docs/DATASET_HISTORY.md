@@ -270,6 +270,21 @@ Cite: `§8.36`.
   agree; both diverge from the unused reference). Remedy: winsor guard (shipped, §8.35) is load-bearing
   and sufficient; the `Σw` switch + per-image energy normalization is a scheduled full-retrain fix.
   Cite: `…§8.37 B`.
+  > **⟳ CORRECTED + QUANTIFIED 2026-07-16 (`benchmarks/ssim_moment_explosion_2026-07-16.md`).**
+  > Two of this row's claims are wrong; the headline 5.8e6 is right. (i) The
+  > exploding features are **`iw_ssim_4th`/`masked_ssim_4th`** (the SSIM-map
+  > higher moments, XYB **ch2**, finest scale), NOT `iw_art4`/`iw_det4` — the
+  > edge features measured 0.02–0.09 on the shipped extractor. (ii) The `1/n`-
+  > vs-`Σw` weight bug is NOT even a "secondary" driver: the shipped weight is
+  > `1+4a` and `mean_w` spans only **1.03–1.27×** (measured, full instrument),
+  > so fixing it does ~nothing. The ACTUAL cause is the per-pixel SSIM
+  > `d = (1 − num_m·num_s/denom_s)·mask` having a `.max(0)` floor but **no upper
+  > cap**, and `num_m = 1 − (mu1−mu2)²` having **no C1** → unbounded-negative on
+  > high-magnitude chroma → `d` to millions, L4-amplified (worst row: 4th/mean =
+  > 630×). Denominator-cancellation was tested and FALSIFIED (f32 floors it at
+  > ~C2, 1.2×). Fix = add a C1 to the luminance term (principled) or cap `d`
+  > (cheap); both need a re-extract + full panel + sign-off. The winsor guard
+  > clamps the symptom; it is why B ships.
 - **3.20 The `mix_cv*` (cvvdp×iwssim) target columns are POISON; raw cvvdp is ceiling-saturated
   (2026-07-15, completes 3.17).** `mix_cv50_iw50` → CID22 0.705 (poison): it inherits cvvdp's
   near-lossless saturation AND is log-expanded (safesyn tail 2.06), and is absent on cid22_train
