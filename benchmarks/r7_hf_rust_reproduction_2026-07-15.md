@@ -4,8 +4,10 @@ Answers the standing question *"did you try a bake including it using the
 optimal pairwise/per-ref"* and the directive *"ensure key bakes are
 reproducible with the rust paths and update rust when needed to do so."*
 
-**Verdict: the FINDING reproduces; one number does not, and the cause is a
-missing Rust feature, not a disagreement.**
+**Verdict: the FINDING reproduces under two different training objectives.
+One number (KonJND) reproduces under neither, and its cause is NOT yet known —
+the objective hypothesis was raised, tested, and falsified. See below; do not
+cite `KonJND −0.03` as attributed.**
 
 ## What was run
 
@@ -14,7 +16,7 @@ missing Rust feature, not a disagreement.**
 | main groups | `safesyn 1, bigcodec 1.5, kadis 0.3` (`_HON`) | same |
 | HF group | `hf_rank_weight 0.1`, within-ref RankNet | `hf_nearlossless:…:0.1:0.0:withinref` |
 | arch | 2-layer, H=128 | 2-layer, H=128 (`--n-hidden-layers 2 --hidden 128`) |
-| **main-group loss** | **`smooth_l1_loss` (Huber — absolute target)** | **RankNet (`mse_weight: 0.0`)** |
+| **main-group loss** | **`smooth_l1_loss` (Huber — absolute target)** | **RankNet (`mse_weight: 0.0`)** — and, after per-group loss mode landed, an `:mse` re-run matching Python; both reported below |
 | **seeds** | **2 (1, 7), averaged** | **1** |
 | epochs | 400 full-batch | 120 × 50k sampled pairs |
 
@@ -62,6 +64,33 @@ ssim2 pts within an image vs ~6 pts between images, so the pooled number is
 carried by cross-image scale. It is not a defect, and it is exactly why the
 group is consumed rank-only and within-ref.
 
+### The HF group helps under BOTH objectives — but the baseline is not fixed
+
+Once per-group loss mode existed, the same experiment ran under Python's
+objective. All four arms, HF axis (50 held-out refs):
+
+| recipe | HF per-ref | %bwd | CID22 | KonJND | non-photo |
+|---|---:|---:|---:|---:|---:|
+| rank-only, hf0 | +0.2539 | **35%** | 0.8842 | 0.5024 | 0.9669 |
+| rank-only, hf0.1 | **+0.9500** | **0%** | 0.8795 | 0.4675 | 0.9653 |
+| mse-recipe, hf0 | +0.6393 | 6% | 0.8745 | 0.4932 | 0.9666 |
+| mse-recipe, hf0.1 | +0.7262 | **0%** | 0.8714 | 0.4618 | 0.9651 |
+
+The HF group drives %bwd to 0 under both objectives, so the finding is robust
+to the recipe. But the *size* of the win is not: **the objective, not the HF
+corpus, is what most of the "35% backwards" was measuring.** An absolute target
+alone — with no HF data whatsoever — already gets near-lossless ordering to
++0.6393 / 6% backwards, versus rank-only's +0.2539 / 35%. So the headline
+"a third of refs ranked backwards" is a property of a *pure-rank* objective,
+not of a model that lacks near-lossless data.
+
+That reframes the corpus's value: it is worth +0.09 per-ref and the last 6% of
+backwards refs on top of an absolute target, not +0.70. Still a real gain (and
+0% backwards is the number that matters for a near-lossless dial), but an order
+of magnitude smaller than the rank-only comparison implies. Rank-only + HF
+remains the best HF number measured (+0.9500), at the cost of having no
+absolute dial at all.
+
 ## Result — the cost
 
 | Δ (hf0 → hf0.1) | Python r7 | Rust r7 | |
@@ -75,36 +104,53 @@ Absolute values — Python `hf0`: CID22 0.8862, non-photo 0.9549, KonJND 0.5187;
 0.8842, non-photo 0.9669, KonJND 0.5024; `hf0.1`: CID22 0.8795, non-photo
 0.9653, KonJND 0.4675.
 
-Two of the three cost axes reproduce to within 0.0006 across two *different*
-training objectives. KonJND is the lone outlier — which is what points at the
-objective, below, rather than at the HF group.
+Two of the three cost axes reproduce to within 0.0006. KonJND is the lone
+outlier. The obvious suspect was the objective mismatch in the table above —
+that suspect has since been tested and cleared; see below.
 
-## Why KonJND does not reproduce — a missing feature, not a contradiction
+## Why KonJND does not reproduce — hypothesis raised, then FALSIFIED
 
-The two runs **optimize different objectives.** `mse_weight` in the Rust
-trainer is wired **only inside `train_mlp_per_sample_alpha_head`**
-(`zensim-validate/src/mlp_train/mod.rs:5698` panics when `mse_weight > 0 &&
-!per_sample_alpha_head`). This run used the standard `train_mlp` path, which
-is **RankNet-only by construction**. So:
+**First hypothesis (WRONG — recorded because it was published, then killed by
+measurement).** The two runs optimized different objectives: `mse_weight` was
+wired only inside `train_mlp_per_sample_alpha_head`, so the standard
+`train_mlp` path this run used was RankNet-only by construction, while Python
+trains its main groups on `smooth_l1` and adds rank only for HF. KonJND is the
+corpus most sensitive to absolute calibration (its `human_score` is a PJND
+threshold, not a ladder position), so a pure-rank objective plausibly moved it
+differently.
 
-- Python: `huber(main groups) + 0.1 · ranknet(HF)` — main groups carry an
-  absolute target; the HF term is scale-free and, per its own comment,
-  *"cannot drag the absolute dial of the MSE groups."*
-- Rust: `ranknet(everything)` — there is no absolute dial to protect.
+**Test.** Per-group loss mode was built precisely to remove this confound
+(`GroupLossMode::{Rank, Mse, Both}`, commit `9af0142b`), plus the polarity
+reconciliation the first attempt needed (`7e7f49c8`). The Python recipe is now
+expressible verbatim: `safesyn/bigcodec/kadis:…:mse` + `hf:…:withinref,rank` +
+`--mse-weight 1.0`.
 
-KonJND is the corpus most sensitive to absolute calibration (its `human_score`
-is a PJND threshold, not a ladder position). A pure-rank objective having a
-different effect on it than a Huber+rank objective is the expected outcome,
-not a disagreement between implementations. The CID22 delta agreeing to 0.0006
-across two different objectives is the more surprising half.
+**Result — the hypothesis is dead.** With the objective matched, KonJND STILL
+moves the wrong way:
 
-The Rust run is also **1 seed** against Python's 2-seed average, and KonJND
-seed variance is known to be large (v48 multi-seed: 2/9 runs collapse), so
-±0.03 on a single seed is not separable from noise regardless.
+| Δ (hf0 → hf0.1) | Python r7 | Rust rank-only | Rust MSE-recipe |
+|---|---:|---:|---:|
+| CID22 | −0.0041 | −0.0047 | −0.0031 |
+| non-photo | −0.0017 | −0.0016 | −0.0015 |
+| KonJND | **+0.0334** | −0.0349 | **−0.0314** |
 
-**Conclusion: do not treat `KonJND −0.035` as a measurement of the HF group's
-effect.** It measures a rank-only objective. The HF finding itself (per-ref,
-%bwd, CID22) reproduces.
+Matching the loss recipe moved KonJND's delta by 0.0035 — it did not flip it.
+So the objective is **not** the explanation. Two of three cost axes reproduce
+under *both* objectives; KonJND reproduces under neither.
+
+**What remains.** The Rust run is 1 seed against Python's 2-seed average (1, 7)
+on the corpus with the largest documented seed variance (v48 multi-seed: 2/9
+runs collapse), and the trainers still differ in batching (Rust: 120 epochs ×
+50k sampled pairs; Python: 400 full-batch steps) and LR schedule (Rust decays
+0.00100 → 0.00068; Python holds 1e-3). A multi-seed sweep is the cheap
+discriminator and is the next step; until it lands, **`KonJND −0.03` is not
+attributed.** Do not cite it as the HF group's effect, and do not cite the
+objective as its cause.
+
+Absolute Rust KonJND is also uniformly BELOW Python's (0.4618–0.5024 vs
+0.5187–0.5521) across every arm and both objectives — a level offset, not just
+a delta disagreement, which points at something systematic rather than at the
+HF group.
 
 ## Honest scope of the HF win
 
@@ -123,14 +169,44 @@ stat which, per the standing directive, belongs in `zenstats` — queued.
 Neither bake is a ship candidate: both are raw rank output with no calibration
 spline (G1 dynamic range 0.00, p5=−16.1 p95=2.5). They are research bakes.
 
-## Gap to close
+## Gap closed (and a bug it exposed)
 
-`within_ref` is a **per-group** modifier; `mse_weight` is a **global**
-hyperparameter that the plain path rejects outright. So the Python r7 recipe —
-*MSE on the main groups, rank-only on HF* — is **not currently expressible in
-the Rust trainer.** Closing that is the per-group-loss-mode work; until it
-lands, a Rust/Python comparison on any absolute-dial corpus is apples to
-oranges.
+`within_ref` was per-group but `mse_weight` was global AND rejected by the
+plain path, so the Python recipe was not expressible in Rust. Closed by
+`GroupLossMode::{Rank, Mse, Both}` (`9af0142b`), selected per group via the
+5th spec field:
+
+```
+--group safesyn:PATH:1.0:0.0:mse  --group hf:PATH:0.1:0.0:withinref,rank  --mse-weight 1.0
+```
+
+Two defects surfaced doing it, both worth recording:
+
+1. **The guard meant to prevent this class of mistake was dead code.** It sat
+   inside `train_mlp_per_sample_alpha_head` testing `!per_sample_alpha_head` —
+   unreachable there by construction. Its doc ("trainer panics if set on other
+   heads") was false: `--mse-weight` on a non-α head silently trained pure rank
+   and discarded the flag. Caught by a `should_panic` test that did not panic.
+   AUDIT: 0 of 142 weight manifests are affected — every one that sets
+   `mse_weight=0.6` also sets `per_sample_alpha_head = true`, so the
+   uselessness was latent and no shipped bake was ever mistrained by it.
+
+2. **The rank and absolute terms trained OPPOSITE polarities** (`7e7f49c8`).
+   Rust's legacy RankNet is distance-shaped (higher quality → lower y);
+   regression onto `human_score` is score-shaped. Mixed, they fight, and the
+   rank group's own corpus inverts: the first MSE-recipe run scored HF at
+   **−0.3454 per-ref / 75% backwards** — adding rank supervision to a corpus
+   made that corpus rank backwards. Python has no such conflict (its RankNet
+   is `BCE(s_i − s_j, 1 if quality_i > quality_j)`, agreeing with its
+   `smooth_l1`); Rust now flips the rank target when any group carries the
+   absolute term. Rank-only runs keep the legacy distance convention
+   bit-for-bit, which matters because every shipped bake's calibration assumes
+   it.
+
+Note what caught (2): only the held-out **per-ref / %bwd** readout. Pooled
+SROCC could not — the panel reports |SROCC|, so the inverted bake read 0.4110,
+a mediocre number rather than an alarming one. This is the §8.39 failure mode
+that no pooled or per-band stat can see.
 
 ## Reproduce
 
