@@ -103,6 +103,39 @@ This is exactly the "a bake can win the rank panel and be a broken dial" case
 `CLAUDE.md`'s TWO-PANEL rule exists for — caught by the panel, not by a
 rank-only view.
 
+## CONVERGED VERDICT: the rank↔dial tension is fundamental (depth_v4 proved it)
+
+The natural question — *can depth keep its rank wins AND get a monotone dial?* —
+was tested directly. **depth_v4** = depth's data + A/v47's full dial machinery
+(per-sample-α head, masked-monotone with the 300/72 sign mask, tanh-pin,
+monotonicity-reg 1.0). Result (seed 13; the effect is ~0.15, far above seed
+noise):
+
+| | dial monotonicity | dial range | CID22 | non-photo |
+|---|--:|--:|--:|--:|
+| depth_v2 (unconstrained) | 0.550 ❌ | −17.7/8.5 ❌ | 0.888 | 0.962 |
+| **depth_v4 (constrained)** | **0.971 ✅** | **22.8/95.3 ✅** | **0.725** | **0.861** |
+| B | 0.979 ✅ | 13.6/99.7 ✅ | 0.876 | 0.861 |
+
+The dial machinery **fixed the dial** (0.55 → 0.971, both gates pass) and in the
+same move **destroyed the rank** — CID22 crashed −0.16, non-photo lost its entire
++0.10 advantage. depth_v4 is now *strictly worse than B*: it only matches B's
+dial while losing B's rank.
+
+**So the depth advantage and a monotone dial are the same coin's two sides.**
+depth_v2's rank wins *come from* the unconstrained 2-layer capacity that also
+makes its output non-monotone in codec quality. Constrain that capacity for the
+dial (monotone weights, sign mask, tanh-pin) and the rank advantage goes with it.
+You get depth_v2's rank *or* depth_v4's dial — the middle ground is B.
+
+**Conclusion.** The depth lever produces a better **ranker**, not a better
+**dial metric**. Its home is codec *selection* / RD-loop *ranking* (where per-ref
+and pooled rank matter and the 0–100 dial is irrelevant) — a **rank-trail
+sibling** in the SOTA_TRAILS framing (like `PreviewV0_5Compression`), NOT a
+replacement for the dial-bearing Profile B. B stays the shipped quality-dial
+metric. This is the honest, measured end of the "beat B" pursuit: B is not beaten
+*as a dial*; it is beaten *as a ranker* by a model that can't also be a dial.
+
 ## Honest gaps / next
 
 - **KonJND pooled −0.050** — the one genuine pooled loss. G5 is a characterized
