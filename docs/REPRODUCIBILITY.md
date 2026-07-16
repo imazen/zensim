@@ -1,5 +1,19 @@
 # Reproducibility spine — how a zensim number stays true
 
+## Reports: `bake_verdict --html` is the ONLY report path (2026-07-16, user directive)
+
+**Ad-hoc HTML/dashboard report scripts are BANNED.** The canonical, comprehensive
+report is `bake_verdict --html [--compare <ref-bake>]` — it emits the full
+self-contained page: provenance, the rank summary, the CODEC-goals scorecard, the
+dial panel, per-zone dial agreement, the corruption gate, and every per-corpus
+section, with `--compare` folding a reference bake in. Do NOT write a small
+Python "report" that renders a subset — it will be tiny, drift from the panel,
+and duplicate the owner. Deleted this directive's day: `shipped_bakes_report.py`,
+`bake_compare_dashboard.py`. If a multi-bake matrix is needed, run `bake_verdict
+--html` per bake (each `--compare` the baseline) or extend the Rust owner — never
+a new render script.
+
+
 **Status 2026-07-15.** Written to answer one question: *if we published a paper
 about zensim tomorrow, could a reader reproduce every number in it?*
 
