@@ -636,6 +636,20 @@ pub(crate) struct ScaleStats {
     pub(crate) iw_det_4th: [f64; 3],
     /// IW MSE per channel = 3 values
     pub(crate) iw_mse: [f64; 3],
+    /// Mean IW **weight** per channel: `Σw / n`, where `w_i = 1 + k_iw · a_i`.
+    ///
+    /// NOT a feature — diagnostic only, and deliberately so. Every `iw_*` field
+    /// above is pooled by `1/n` while a weighted mean is `Σ(w·v)/Σw`, so each
+    /// carries a factor of `mean_w^p` (p = 1 for means, 0.5 for 2nd moments,
+    /// 0.25 for 4th). Since the weights come from the REFERENCE only, `mean_w`
+    /// is a per-reference constant: it cancels within an image and does not
+    /// cancel across images, so it lands entirely on pooled (cross-image) rank.
+    ///
+    /// This field exists to MEASURE that factor against the weights we actually
+    /// ship, rather than against `iw_pool.rs`'s different estimator. See
+    /// `benchmarks/iw_pooling_normalization_2026-07-15.md`.
+    #[cfg_attr(not(feature = "iw-diagnostics"), allow(dead_code))]
+    pub(crate) iw_mean_w: [f64; 3],
 }
 
 /// Result from a zensim comparison.

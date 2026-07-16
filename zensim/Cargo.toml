@@ -37,6 +37,19 @@ all-features = true
 [features]
 default = ["avx512", "imgref", "threads", "deprecated-profiles"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
+## Diagnostic ONLY: accumulate `Σ activity` during extraction so `ScaleStats::
+## iw_mean_w` reports the factor the `1/n`-pooled `iw_*` features carry (they
+## should be pooled `1/Σw`; see benchmarks/iw_pooling_normalization_2026-07-15.md).
+## COST: NOT RESOLVED. An ad-hoc A/B first read +2.8% (23.01 vs 22.38 ms at
+## 1024x1024), but repeating it 3x each gave OFF 23.42/27.68/29.68 and ON
+## 27.00/28.78/23.64 — fully overlapping. That first number was noise, and the
+## harness was the exact back-to-back-timing bias zenbench exists to kill. A
+## paired zenbench run would be needed to resolve it. Gated anyway: OFF is
+## zero-cost BY CONSTRUCTION, which beats an unmeasured cost, and the question
+## it answers is settled (the pooling factor is a uniform 1.03-1.27x, too small
+## to justify a re-extract). Default OFF. Adds only a sum; it CANNOT change any
+## feature value, so on/off builds produce identical bakes.
+iw-diagnostics = []
 ## Enable multi-threaded computation via rayon. Disable for wasm or single-threaded use.
 threads = ["dep:rayon"]
 ## Exposes training/research API: ZensimConfig, try_score_from_features,

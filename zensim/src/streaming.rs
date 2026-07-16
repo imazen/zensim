@@ -338,6 +338,23 @@ pub(crate) struct ScaleAccumulators {
     iw_art4: [f64; 3],
     iw_det4: [f64; 3],
     iw_mse: [f64; 3],
+    /// `Σ activity` over the inner region, per channel — the quantity needed
+    /// to pool the `iw_*` accumulators as an actual weighted mean.
+    ///
+    /// The shipped IW weight is `w_i = 1 + k_iw · a_i` (`simd_ops.rs`:
+    /// "writes iw_out[i] = 1 + k_iw * activity[i]"), so
+    /// `Σw = n + k_iw · Σa` — summing the activity gives `Σw` EXACTLY without
+    /// touching the fused SIMD builders.
+    ///
+    /// Added 2026-07-15 to measure a defect and to make its fix possible:
+    /// `finalize` pools every `iw_*` accumulator by `1/n`, while the reference
+    /// implementation (`iw_pool.rs::WeightedPool::mean`, marked `dead_code`
+    /// "hot path is fused into streaming") computes `Σ(w·v)/Σw`. Until now
+    /// `Σw` did not exist anywhere in this file, so the divergence was not a
+    /// wrong divisor — it was a missing quantity.
+    /// See `benchmarks/iw_pooling_normalization_2026-07-15.md`.
+    #[cfg(feature = "iw-diagnostics")]
+    iw_a_sum: [f64; 3],
     // Total inner pixels processed
     n: usize,
 }
@@ -377,6 +394,8 @@ impl ScaleAccumulators {
             iw_art4: [0.0; 3],
             iw_det4: [0.0; 3],
             iw_mse: [0.0; 3],
+            #[cfg(feature = "iw-diagnostics")]
+            iw_a_sum: [0.0; 3],
             n: 0,
         }
     }
@@ -416,11 +435,23 @@ impl ScaleAccumulators {
             self.iw_art4[c] += other.iw_art4[c];
             self.iw_det4[c] += other.iw_det4[c];
             self.iw_mse[c] += other.iw_mse[c];
+            #[cfg(feature = "iw-diagnostics")]
+            {
+                self.iw_a_sum[c] += other.iw_a_sum[c];
+            }
         }
         self.n += other.n;
     }
 
-    fn finalize(&self) -> ScaleStats {
+    /// `k_iw` is `config.iw_strength` — needed only to report `iw_mean_w`
+    /// (`Σw/n` for `w_i = 1 + k_iw·a_i`). Passed in rather than hardcoded to
+    /// 4.0: `iw_strength` is a config field, and baking its default into the
+    /// pooling is how a diagnostic silently becomes a lie under a non-default
+    /// config.
+    fn finalize(
+        &self,
+        #[cfg_attr(not(feature = "iw-diagnostics"), allow(unused_variables))] k_iw: f64,
+    ) -> ScaleStats {
         let one_over_n = 1.0 / self.n as f64;
 
         let mut ssim = [0.0f64; 6];
@@ -445,6 +476,8 @@ impl ScaleAccumulators {
         let mut iw_art_4th = [0.0f64; 3];
         let mut iw_det_4th = [0.0f64; 3];
         let mut iw_mse = [0.0f64; 3];
+        #[cfg_attr(not(feature = "iw-diagnostics"), allow(unused_mut))]
+        let mut iw_mean_w = [0.0f64; 3];
 
         for c in 0..3 {
             // f64 sums of per-pixel non-negative values CAN go slightly
@@ -508,6 +541,12 @@ impl ScaleAccumulators {
             iw_art_4th[c] = (self.iw_art4[c] * one_over_n).max(0.0).powf(0.25);
             iw_det_4th[c] = (self.iw_det4[c] * one_over_n).max(0.0).powf(0.25);
             iw_mse[c] = self.iw_mse[c] * one_over_n;
+            // Diagnostic (NOT a feature): the factor every iw_* above
+            // carries because they are pooled by 1/n rather than 1/Σw.
+            #[cfg(feature = "iw-diagnostics")]
+            {
+                iw_mean_w[c] = 1.0 + k_iw * (self.iw_a_sum[c] * one_over_n);
+            }
         }
 
         ScaleStats {
@@ -533,6 +572,7 @@ impl ScaleAccumulators {
             iw_art_4th,
             iw_det_4th,
             iw_mse,
+            iw_mean_w,
         }
     }
 }
@@ -1538,6 +1578,17 @@ fn process_strip_channel(
             // activity. Mask plane is NEVER materialized — saves 1 plane
             // write + up to 3 plane reads per channel per scale.
             let activity_inner = &bufs.mul_buf[inner_off..inner_off + inner_n];
+            // Σ activity, from which Σw follows exactly: the shipped IW weight
+            // is `w_i = 1 + k_iw · a_i`, so `Σw = n + k_iw · Σa`. Summing here
+            // (rather than inside the fused SIMD builders) keeps the hot
+            // kernels untouched and is arithmetically identical.
+            //
+            // Only on the IW path — this is the denominator `finalize` needs to
+            // pool `iw_*` as a real weighted mean instead of by `1/n`.
+            #[cfg(feature = "iw-diagnostics")]
+            if do_iw {
+                accum.iw_a_sum[c] += activity_inner.iter().map(|&a| a as f64).sum::<f64>();
+            }
             if do_ext && do_iw {
                 let (mse_m, mse_i) =
                     build_inline_mse(activity_inner, k, k_iw, inner_src, inner_dst);
@@ -1919,7 +1970,7 @@ fn process_scale_bands(
         None,
         None,
     );
-    (accum.finalize(), diffmap)
+    (accum.finalize(config.iw_strength as f64), diffmap)
 }
 
 /// Variant of [`process_scale_bands`] that returns the **raw**
@@ -2717,7 +2768,10 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
         None,
         None,
     );
-    let stats: Vec<ScaleStats> = accums.iter().map(|a| a.finalize()).collect();
+    let stats: Vec<ScaleStats> = accums
+        .iter()
+        .map(|a| a.finalize(config.iw_strength as f64))
+        .collect();
     let mean_offset = if pixel_count == 0 {
         [0.0; 3]
     } else {
@@ -3049,7 +3103,10 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
         mean_offset_pixel_count += strip_pixel_count;
     }
 
-    let final_stats: Vec<ScaleStats> = global_accums.iter().map(|a| a.finalize()).collect();
+    let final_stats: Vec<ScaleStats> = global_accums
+        .iter()
+        .map(|a| a.finalize(config.iw_strength as f64))
+        .collect();
     let final_mean_offset = if mean_offset_pixel_count == 0 {
         [0.0; 3]
     } else {
@@ -3204,7 +3261,10 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
         mean_offset_pixel_count += strip_pixel_count;
     }
 
-    let final_stats: Vec<ScaleStats> = global_accums.iter().map(|a| a.finalize()).collect();
+    let final_stats: Vec<ScaleStats> = global_accums
+        .iter()
+        .map(|a| a.finalize(config.iw_strength as f64))
+        .collect();
     let final_mean_offset = if mean_offset_pixel_count == 0 {
         [0.0; 3]
     } else {
@@ -5505,6 +5565,124 @@ mod tests {
                 "format {:?} declared by PixelFormat but not recognized by the delta-stats guard",
                 fmt,
             );
+        }
+    }
+
+    /// MEASURE `mean_w` under the weights we ACTUALLY SHIP.
+    ///
+    /// The predecessor measurement (`iw_pool.rs::tests::
+    /// iw_mean_weight_spread_across_references`) used
+    /// `iw_pool::compute_iw_weights` — a local-variance/gradient estimator with
+    /// a floor — and found a 15.3x spread. **The shipped path does not call
+    /// that function.** It builds the weight inline as `w_i = 1 + k_iw · a_i`
+    /// from the blurred reference-activity map (`simd_ops.rs`: "writes
+    /// iw_out[i] = 1 + k_iw * activity[i]"), with `k_iw = config.iw_strength =
+    /// 4.0`. Different function, different regime — `w_i >= 1` here, versus
+    /// 0.001..0.018 there. That mismatch is exactly why the earlier number was
+    /// published with a "NOT MEASURED for the shipped path" caveat, and this
+    /// test is what settles it.
+    ///
+    /// Every `iw_*` feature is pooled by `1/n` (`finalize`) instead of `1/Σw`,
+    /// so each carries `mean_w^p` — p = 1 for the means (`iw_ssim_mean`,
+    /// `iw_mse`), 0.5 for 2nd moments, 0.25 for 4th. The weights depend only on
+    /// the REFERENCE, so `mean_w` is a per-reference constant: it cancels
+    /// within an image and does NOT cancel across images. Only the SPREAD of
+    /// `mean_w` across references matters — a constant factor is absorbed by
+    /// one model weight and costs nothing.
+    ///
+    /// `ZENSIM_IW_REF_DIR=<dir> cargo test -p zensim --release shipped_iw_mean_w -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs a dir of reference images; set ZENSIM_IW_REF_DIR and run with --ignored"]
+    fn shipped_iw_mean_w_spread_across_references() {
+        let dir = std::env::var("ZENSIM_IW_REF_DIR")
+            .expect("set ZENSIM_IW_REF_DIR to a directory of reference images");
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read {dir}: {e}"))
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                matches!(
+                    p.extension().and_then(|e| e.to_str()),
+                    Some("png" | "jpg" | "jpeg")
+                )
+            })
+            .collect();
+        paths.sort();
+        paths.truncate(40);
+        assert!(!paths.is_empty(), "no images in {dir}");
+
+        let config = ZensimConfig {
+            compute_all_features: true,
+            extended_features: true,
+            compute_iw_features: true,
+            ..Default::default()
+        };
+        let weights: Vec<f64> = WEIGHTS.to_vec();
+
+        // mean_w depends only on the REFERENCE, so the distorted side is
+        // irrelevant to it — pass the reference against itself. That is the
+        // claim under test as much as the measurement: if identity-vs-self and
+        // a real distortion disagreed on mean_w, the "per-reference constant"
+        // premise would be wrong.
+        let mut rows: Vec<(String, f64)> = Vec::new();
+        for p in &paths {
+            let Ok(img) = image::open(p) else { continue };
+            let rgb = img.to_rgb8();
+            let (w, h) = (rgb.width() as usize, rgb.height() as usize);
+            if w < 64 || h < 64 {
+                continue;
+            }
+            let px: Vec<[u8; 3]> = rgb.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+            let src_img = RgbSlice::new(&px, w, h);
+            let (stats, _) = compute_multiscale_stats_streaming_strips(
+                &src_img, &src_img, &config, &weights, 256, 128,
+            );
+            // scale 0, channel 1 (Y) — the dominant channel.
+            let mw = stats[0].iw_mean_w[1];
+            rows.push((p.file_name().unwrap().to_string_lossy().into_owned(), mw));
+        }
+        assert!(
+            rows.len() >= 5,
+            "need >=5 usable images, got {}",
+            rows.len()
+        );
+
+        rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let vals: Vec<f64> = rows.iter().map(|r| r.1).collect();
+        let n = vals.len();
+        let pick = |q: f64| vals[((n as f64 - 1.0) * q).round() as usize];
+
+        println!(
+            "\n# SHIPPED mean_w (w = 1 + {k}*a) across {n} references — {dir}\n",
+            k = config.iw_strength
+        );
+        println!("| stat | mean_w | mean feat (x mean_w) | 2nd (^0.5) | 4th (^0.25) |");
+        println!("|---|--:|--:|--:|--:|");
+        for (name, q) in [
+            ("min", 0.0),
+            ("p25", 0.25),
+            ("p50", 0.5),
+            ("p75", 0.75),
+            ("max", 1.0),
+        ] {
+            let v = pick(q);
+            println!(
+                "| {name} | {v:.4} | {v:.4}x | {:.4}x | {:.4}x |",
+                v.powf(0.5),
+                v.powf(0.25)
+            );
+        }
+        let (lo, hi) = (pick(0.0), pick(1.0));
+        println!(
+            "\nCROSS-IMAGE SPREAD (max/min):  mean {:.3}x   2nd {:.3}x   4th {:.3}x\n",
+            hi / lo,
+            (hi / lo).powf(0.5),
+            (hi / lo).powf(0.25)
+        );
+        for (name, v) in rows.iter().take(2) {
+            println!("  LOW   mean_w={v:.4}  {name}");
+        }
+        for (name, v) in rows.iter().rev().take(2) {
+            println!("  HIGH  mean_w={v:.4}  {name}");
         }
     }
 }

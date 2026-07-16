@@ -1,5 +1,63 @@
 # The IW block is pooled with the wrong denominator — 144 of 372 features carry a per-reference scale error
 
+> ## ⚠ VERDICT 2026-07-16: the defect is REAL, the magnitude is SMALL, and this
+> ## doc's headline number was WRONG. Measured against the SHIPPED weights.
+>
+> The §4 caveat was the load-bearing part of this document. It said the 15.3×
+> came from `iw_pool::compute_iw_weights`, which the shipped path does not call,
+> and that the shipped magnitude was NOT measured. It has now been measured, and
+> the shipped path is a different regime entirely:
+>
+> | | this doc's `iw_pool` estimate | **shipped, measured** |
+> |---|--:|--:|
+> | mean features (`iw_ssim_mean`, `iw_mse`) | 15.3× | **1.256×** |
+> | 2nd moment | 3.9× | **1.121×** |
+> | 4th moment | 1.98× | **1.059×** |
+>
+> **Why:** the shipped weight is `w_i = 1 + k_iw·a_i` with `k_iw = 4.0` and `a`
+> the *blurred* reference-activity, so `w_i ≥ 1` and `mean_w = 1 + 4·mean(a)`
+> barely leaves 1.0 (measured 1.005–1.294). `iw_pool`'s estimator is a
+> local-variance/gradient measure with a floor, living in 0.001–0.018. Same
+> name, different quantity.
+>
+> **The non-photo prediction is FALSIFIED.** §2 predicted the error should
+> explode on high-activity synthetic content. It does not — non-photo is
+> *narrower* than photo:
+>
+> | corpus | mean-feature spread | 4th-moment spread |
+> |---|--:|--:|
+> | CID22 (photo, n=40) | 1.256× | 1.059× |
+> | imazen-26 screen 1920×1080 (n=72) | **1.116×** | **1.028×** |
+> | imazen-26 office-documents (n=31) | 1.274× | 1.062× |
+>
+> The activity map is blurred and then averaged over the whole image: a
+> screenshot's edges are sharp but SPARSE, so mean activity stays low. Sharp
+> local edges do not move a global mean.
+>
+> **`DATASET_HISTORY.md` §3.19 already said this and I over-read it.** It names
+> the unbounded `iw_art4`/`iw_det4` energies as the cause — *"energy, not
+> weight, is the primary driver"* — and calls the `1/n`-vs-`Σw` divergence *"a
+> genuine **secondary** bug"*. This doc chased the secondary one. §3.19's
+> "~1.5–2× inflation on high-activity" is also slightly high against the shipped
+> path: the max observed is 1.294×.
+>
+> **So: no re-extract, no retrain, on this evidence.** A uniform 3–27%
+> per-image scale on 144 features is real but small, and it is NOT the
+> non-photo lever. The real lever remains §3.19's primary driver — the
+> **unbounded, un-per-image-normalized edge energies** the winsor guard clamps.
+>
+> **What survives unchanged:** the §6 duplication finding (`iw_pool.rs` is a
+> fork with a good story — its comment asserts the hot path agrees, nothing
+> checks it, and the correct impl is the one marked `dead_code`), and the §2
+> *structure* of the error (per-reference ⇒ cross-image-only). Both are proven
+> from source and neither depends on the magnitude.
+>
+> Instruments landed: `ScaleAccumulators::iw_a_sum` + `ScaleStats::iw_mean_w`
+> (`Σw = n + k_iw·Σa`, exact, no SIMD-kernel change) and
+> `streaming.rs::tests::shipped_iw_mean_w_spread_across_references`. The `Σw`
+> the fix would need now exists, if the energy work ever makes it worth doing.
+
+
 **2026-07-15.** Found while answering "let's design the best models, with good
 data this time". The answer to that question turns out to be upstream of
 architecture: **the features are the data, and 144 of them are mis-pooled.**
