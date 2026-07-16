@@ -309,14 +309,70 @@ ignored). Building the instrument is the satisfying half and it is worth nothing
 alone. **The half that gets skipped is the half that closes the loop**, and it is
 the whole job.
 
+## 5g. A red gate hides the next failure — measured, four times over
+
+§5f found the Join-Safety Gate red for 100 straight runs. The main CI workflow
+was in the same state, and this section is what that cost.
+
+At `69b53715` — before this session touched CI — **Clippy, Format, Lint scripts,
+Coverage, WASM SIMD128 and every Test platform were failing simultaneously.**
+When every light is red, a new breakage changes nothing observable, so four
+independent defects landed and sat:
+
+| # | defect | how long | why invisible |
+|---|---|---|---|
+| 1 | A→B deprecation (`d2953d92`) left **14 files** naming `ZensimProfile::A` without `#![allow(deprecated)]` | since 2026-07-12 | Clippy already red |
+| 2 | Same commit put `A` behind a default-on feature, but the workspace pins `default-features = false`, so `A` **ceased to exist** in zensim-wasm-tests — which still names it | since 2026-07-12 | WASM already red |
+| 3 | Same commit left two examples mapping the user-facing name `latest` to the **deprecated** profile, while `latest_preview()` returns `B` | since 2026-07-12 | not a build error at all — just wrong |
+| 4 | A file literally named `"$LOG"` (an unexpanded shell redirect, `9a4e2272`) broke **both Windows runners at `git checkout`** | weeks | Tests already red; the log says only `invalid path`, which reads like a runner fault |
+
+Defect 4 is the sharpest: CLAUDE.md requires `windows-11-arm` CI **with no
+exceptions**, and a stray 2,786-byte file silently removed that platform —
+plus `windows-latest` — from coverage entirely. Not "the tests failed there";
+the tests never ran. Three of the four trace to one commit, and none of the
+three were noticed by it.
+
+**Two guards were also found to be prose, not guards** — the same shape as §5f
+but worse, because both *claimed* to be enforced:
+
+- `--mse-weight`'s reachability check sat **inside**
+  `train_mlp_per_sample_alpha_head` testing `!per_sample_alpha_head` —
+  unreachable there by construction. Its doc said "trainer panics if set on
+  other heads"; in fact `--mse-weight` on any other head was silently
+  discarded and the run trained pure rank. Dead code masquerading as a
+  guarantee. Caught by a `should_panic` test that did not panic. (Audited: 0 of
+  142 weight manifests affected — every one that sets `mse_weight` also sets
+  `per_sample_alpha_head`, so the uselessness was latent.)
+- `zensim-train-core/src/stats.rs` declared "both impls must be kept in
+  lock-step" with zenstats and cited a verifier — `test_zen_stats_rust_python_parity.py`
+  — that **never shipped**. The duplication was documented, declared safe, and
+  had never once been checked. Now enforced by a real bit-identity test.
+
+**The generalization, sharpened.** §5f said building the instrument is the half
+that gets skipped. This adds the sequel: *an instrument left un-read decays into
+an instrument that cannot be read.* A gate that is always red carries zero bits
+— it cannot distinguish "broken" from "still broken," so the cost of the next
+breakage drops to nothing and they accumulate. Four did. Restoring signal was
+not a matter of fixing four bugs; it was a matter of getting back to a state
+where a red light **means** something. Green is not a vanity metric — it is the
+precondition for the gate having any value at all.
+
 ## 6. Still open
 
-- **`pack_and_calibrate.py` is a doc conflict, not a clean delete.** It is a
-  duplicate on the facts (own `fit_spline_knots` + `PchipInterpolator`, own
-  zerobias/dtype repack, scipy `spearmanr`) but CLAUDE.md **mandates** it as
-  the standard non-QAT packing fallback. Either `bake_dial_refit` gains a
-  `pack-and-calibrate` subcommand or CLAUDE.md stops blessing it. Highest-value
-  single item remaining.
+- **`pack_and_calibrate.py` — PARTLY closed.** Its private
+  `fit_spline_knots` is gone: it was AST-identical to
+  `linear_projections_2026-07-03.py`'s (proved by comparing parsed bodies, not
+  by eye), which five other scripts already import as `lp.fit_spline_knots`. It
+  now imports that one — 3 copies of the function down to 2 (1 Python + the
+  port-verified Rust in `bake_dial_refit`). Notably `linear_projections`
+  *documented* the duplication in its own docstring ("Same knot logic as
+  pack_and_calibrate.py") and copied anyway.
+
+  The FILE stays: it is not a duplicate of `bake_dial_refit` — it also does
+  per-layer zerobias with `--protect-last` and enforces the pack-THEN-calibrate
+  order, neither of which Rust has (`zenpredict repack`'s global `--zerobias`
+  uses the wrong order and drops identity). Collapsing it needs a
+  `bake_dial_refit pack` subcommand. Still the highest-value single item.
 - **The torch trainer cluster** (~10 files) is the largest. `blend_lib.py` is
   the keystone — the only file reimplementing the *entire* panel including
   per-band — and `bandwise_dashboard.py` imports it, so it can't be deleted
@@ -325,8 +381,25 @@ the whole job.
   `bake_mlp_negatives.py` imports its `fit_spline_knots`.
 - **Blocked deletions:** `bake_outlier_gate.py` (← `xmetric_consensus.py`),
   `shared_anchor_refit.py` (← `hdr_anchor_dense_refit.py`).
-- **~10 private Rust `spearman` copies** in probe binaries +
-  `zensim-train-core/src/stats.rs` → route to zenstats.
+- **Private Rust `spearman` copies — CLOSED, and the count was wrong.** A
+  `fn spearman` grep returns 14 hits, but the Dedup-K pass (2026-05-26) had
+  already converted 5 to thin `zenstats` wrappers — the grep was matching
+  *wrappers*, not duplicates. Classifying each first left 6 real copies. The 4
+  in zensim-validate (embedding_distance / unconstrained_mlp /
+  monotone_subspace / residual_identity probes) now call zenstats, verified
+  value-identical over 400 tie-heavy cases at n = 3..10,000 (400/400
+  bit-identical, max delta exactly 0) rather than argued from
+  shift-invariance.
+
+  `zensim-train-core/src/stats.rs` is deliberately NOT routed: it is a
+  standalone WASM-targeted bit-exact core and zenstats is not WASM-vetted. That
+  boundary is now *enforced* instead of asserted — see §5g; the lock-step rule
+  it already claimed was backed by a verifier that never shipped.
+
+  Remaining: `zensim-regress/examples/slice_real_codec_localization.rs` and
+  `zensim-experimental/tests/feature_distortion_direction.rs`. Neither crate
+  deps zenstats and zensim-regress is **published**, so adding a dep to its
+  tree to dedup an example is a trade to raise, not to sneak in.
 - **Real gaps with no owner** (D bucket): `affine_per_sample_alpha.py` edits
   the `zentrain.per_sample_alpha_head` metadata payload, which no Rust
   subcommand handles; `strip_spline_metadata.py` needs a `bake_dial_refit
