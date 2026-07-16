@@ -4,7 +4,14 @@
 # + masked-monotone (--monotone-cbc + per-feature sign mask + strict).
 #
 # Reproduce:  zensim_mlp_train --manifest zensim/weights/manifests/v47_strict.toml
-# (TOML recipe replaces the 25-flag scripts/v_next/run_v47_masked_strict_*.sh.)
+#
+# This recipe REPLACED the 25-flag scripts/v_next/run_v47_masked_strict_2026-05-27.sh,
+# which was deleted 2026-07-15 after the equivalence was MEASURED rather than assumed:
+# all 20 [training] hyperparameters and all 5 group train_w/val_w matched the driver's
+# flags exactly (0 mismatches). That check is also the proof the driver->manifest
+# migration is lossless — 69 of 74 shell drivers still predate it.
+# run_v47_masked_partial_2026-05-27.sh is KEPT: no manifest covers the partial variant,
+# so it is still the only record of that recipe.
 # Schema: zensim/weights/manifests/README.md
 
 [bake]
