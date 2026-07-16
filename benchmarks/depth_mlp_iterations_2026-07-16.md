@@ -103,7 +103,39 @@ This is exactly the "a bake can win the rank panel and be a broken dial" case
 `CLAUDE.md`'s TWO-PANEL rule exists for — caught by the panel, not by a
 rank-only view.
 
-## CONVERGED VERDICT: the rank↔dial tension is fundamental (depth_v4 proved it)
+## ⚠ RETRACTION (2026-07-16, same day): "fundamental" was overclaimed from n=1
+
+The "CONVERGED VERDICT" below declared the rank↔dial tension **fundamental** from
+a SINGLE maximally-constrained experiment (depth_v4). That is the same
+premature-conclusion error this session kept catching elsewhere — two endpoints
+do not define a frontier, and I never swept the constraint or used the right
+tool. Specifically depth_v4:
+
+- used `monotone_strict`, which **DELETES the 72 non-sign-safe features** — a
+  naive, lossy way to get monotonicity (all-positive weights + fewer inputs);
+- set `monotonicity_reg = 1.0`, the **maximum**, never 0.05/0.1/0.3;
+- so it measured the *most-constrained* corner and called the line to it
+  "fundamental".
+
+**The forgotten solutions** (monotonicity is a solved problem):
+1. **Partial monotonicity via `monotone_pin_during_training` (KEEP-72)** — pin
+   the 300 sign-safe features, keep the 72 free ones *expressive*. The trainer
+   already has this; depth_v4 used the delete-them flag instead.
+2. **A constraint-strength sweep** — the rank↔dial trade is a *frontier*, and a
+   point on it (dial passes at small rank cost) would falsify "fundamental".
+3. **Monotone-by-construction architectures that don't lose expressiveness** —
+   UMNN (integrate a positive-derivative net), deep lattice networks, Sill
+   min-max monotone nets, mixed-activation constrained monotonic nets. These are
+   universal approximators *for monotone functions*; depth_v4's all-positive +
+   dropped-features method is the lossy special case.
+4. **Two-head decoupling** — expressive rank head + monotone dial head on a
+   shared trunk (the dial being monotone encodes a *true* constraint, so it
+   costs nothing real).
+
+**depth_v5 is mapping the actual frontier** (KEEP-72 + reg ∈ {0.0, 0.1, 0.3}).
+Verdict below is SUSPENDED pending that measurement. Do not cite "fundamental".
+
+## ~~CONVERGED VERDICT: the rank↔dial tension is fundamental (depth_v4 proved it)~~ — RETRACTED, see above
 
 The natural question — *can depth keep its rank wins AND get a monotone dial?* —
 was tested directly. **depth_v4** = depth's data + A/v47's full dial machinery
