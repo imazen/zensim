@@ -1,0 +1,148 @@
+# Depth iteration 4 — decisive "win BOTH panels" test: depth DATA (v2 groups) +
+# A/v47 DIAL MACHINERY (per-sample-alpha head + tanh-pin + masked-monotone +
+# strict sign mask). depth_v2 won rank via UNCONSTRAINED 2-layer capacity and
+# FAILED the dial (mono 0.55, no range); this adds the constraints that give A
+# its monotone dial and measures the rank cost. n_hidden_layers stays 2.
+#
+# (depth_v2 header:)
+# Depth iteration 2 — depth_v1 + the two within-ladder fixes iteration 1's
+# dashboard diagnosed: HF near-lossless cratered (per-ref −0.911, 100% of refs
+# ranked BACKWARDS — the §8.39 inversion; depth_v1 never trained on HF) and
+# KonJND regressed −0.074 (konjnd as a PLAIN group teaches between-image scale).
+# Both are per-image ladders → :withinref (the 5th group field). konjnd switched
+# to withinref; hf_nearlossless_train added withinref.
+#
+# (depth_v1 header:)
+# Depth iteration 1 — 2-hidden-layer MLP, pursuing the blend candidate's
+# non-photo win via the RUST trainer (no Python blend_lib), with konjnd-dense
+# added back (the group the blend recipe dropped — the likely cause of its
+# −0.038 KonJND regression vs B).
+#
+# Reproduce:  zensim_mlp_train --manifest zensim/weights/manifests/depth_v1.toml
+#             --seed <N> --out <path>.bin
+#
+# Recipe, not a bake record: no [bake].sha256 — see the seed-fork collapse +
+# make_manifest.py (a recipe describes HOW to train, not one bake).
+#
+# vs the Python blend candidate (benchmarks/blend_2layer_methodology_2026-07-15.md):
+#   - arch 372→128→64 here (Rust `--n-hidden-layers 2`, 2nd layer = hidden/2)
+#     vs the blend's 372→128→128. The FINDING (depth breaks the CID22↔non-photo
+#     trade a linear head can't) is what we test, not the exact width.
+#   - RankNet loss (the Rust trainer's tested default) vs the blend's smooth_l1.
+#     MSE-loss variant is depth_v2 (per-group :mse), compared head-to-head.
+#   - + konjnd-dense as a training group (blend omitted it).
+
+[bake]
+name             = "depth-v4 (depth data + v47 dial machinery)"
+internal_version = "depth-v4"
+arch             = "372 → 128 → 64 → 1, LeakyReLU(0.01), identity out; winsor_p99 auto-transforms pre-scaler; PCHIP dial spline"
+
+[training]
+trainer            = "zensim_mlp_train"
+hidden             = 128
+n_hidden_layers    = 2
+per_sample_alpha_head = true
+tanh_output_head_scale = 30.0
+monotonicity_reg   = 1.0
+monotone_cbc       = true
+monotone_strict    = true
+monotone_feature_mask = "../../../benchmarks/feature_sign_mask_2026-05-26.tsv"
+epochs             = 160
+pairs_per_epoch    = 50000
+lr                 = 0.001
+l2                 = 0.00001
+seed               = 13
+target_column      = "human_score"
+target_scale       = 100.0
+max_features       = 372
+minibatch_size     = 32
+val_aggregate      = "geomean3"
+val_policy         = "min"
+out_dtype          = "f32"
+auto_transforms    = "../../../benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+anchor_parquet     = "{canonical}/multiband_anchor_dial100.parquet"
+anchor_loss_weight = 0.01
+anchor_step_p      = 0.05
+
+[[training.groups]]
+name = "safesyn"
+path = "{canonical}/safesyn.parquet"
+train_w = 1.0
+val_w = 0.5
+
+[[training.groups]]
+name = "cid22_train"
+path = "{canonical}/cid22_train.parquet"
+train_w = 1.0
+val_w = 2.0
+
+[[training.groups]]
+name = "kadid"
+path = "{canonical}/kadid.parquet"
+train_w = 0.5
+val_w = 1.0
+
+[[training.groups]]
+name = "tid"
+path = "{canonical}/tid.parquet"
+train_w = 0.5
+val_w = 1.0
+
+[[training.groups]]
+name = "konjnd_dense"
+path = "{canonical}/konjnd-dense-norm.parquet"
+train_w = 1.0
+val_w = 1.5
+within_ref = true   # PJND is a per-image threshold; cross-image pairing drowns it
+
+[[training.groups]]
+name = "hf_nearlossless"
+path = "/mnt/v/zen/zensim-training/canonical-2026-07-15/train/hf_nearlossless_train.parquet"
+train_w = 0.5
+val_w = 0.0
+within_ref = true   # near-lossless ladder moves ~0.92 ssim2 pts within-image vs ~6 between
+
+[[training.groups]]
+name = "bigcodec"
+path = "/mnt/v/output/zensim/depth-iter/bigcodec_train_120k_stride.parquet"
+train_w = 1.0
+val_w = 0.0
+
+[[training.groups]]
+name = "bigcodec_val"
+path = "/mnt/v/output/zensim-multicodec-probe/bigcodec_hqdedup_valdigits_2026-07-02.parquet"
+train_w = 0.0
+val_w = 1.5
+
+[[training.groups]]
+name = "kadis"
+path = "/mnt/v/output/zensim/depth-iter/kadis_train_60k_stride.parquet"
+train_w = 0.3
+val_w = 0.0
+
+[inputs.canonical_root]
+local = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train"
+r2    = "s3://zentrain/canonical-2026-05-21/train"
+
+[inputs.bigcodec_slice]
+path   = "/mnt/v/output/zensim/depth-iter/bigcodec_train_120k_stride.parquet"
+sha256 = "ebd1a086a531bb2fa6f1574cd0cdd388a5fbc6346e69df3878e75e595c8454ee"
+rows   = 120000
+notes  = "120k strided sample (stride 19) of bigcodec_hqdedup_traindigits_2026-07-02 for iteration speed; matches the blend recipe's div_cap=120k."
+
+[inputs.kadis_slice]
+path   = "/mnt/v/output/zensim/depth-iter/kadis_train_60k_stride.parquet"
+sha256 = "4786208be5d58e06d0f17fb66450f21f7925a510f4cd29797eb813ca8eed3272"
+rows   = 60000
+notes  = "60k strided sample of kadis_cvvdp_train."
+
+[inputs.hf_nearlossless_train]
+path   = "/mnt/v/zen/zensim-training/canonical-2026-07-15/train/hf_nearlossless_train.parquet"
+sha256 = "e539c6d2782d726673787e1e41117e36ca7234295c75c6ff1d82212b292d37f0"
+rows   = 900
+notes  = "near-lossless HF ladder (900 rows, 150 refs); trained withinref to fix the §8.39 inversion."
+
+[inputs.feature_sign_mask]
+path   = "benchmarks/feature_sign_mask_2026-05-26.tsv"
+sha256 = "5d0e066d2afefc4b5daefaa56a41e8d924e99db3e3e177dd78634eaabe5f58df"
+notes  = "300 pin_geq0 / 72 free; drives --monotone-cbc --monotone-strict."
