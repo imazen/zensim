@@ -20,11 +20,26 @@ Usage:
       [--dtype f16|f32] [--zerobias-bulk TAU] [--protect-last] [--neg-tail] \
       [--anchor PARQUET] [--verify-cid22 PARQUET]
 """
+import importlib.util
 import sys, os, json, struct, subprocess, tempfile, argparse
+from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 from scipy.interpolate import PchipInterpolator
 from scipy.stats import spearmanr
+
+# `fit_spline_knots` had a second, AST-IDENTICAL copy here until 2026-07-15.
+# linear_projections even documented it ("Same knot logic as
+# pack_and_calibrate.py") and copied anyway. One owner: import it.
+# (The Rust `bake_dial_refit` carries the third, port-verified copy — that
+# is the canonical path for bake edits; this script is the non-QAT packing
+# fallback CLAUDE.md still mandates.)
+_SPEC = importlib.util.spec_from_file_location(
+    "lp", Path(__file__).parent / "linear_projections_2026-07-03.py")
+_lp = importlib.util.module_from_spec(_SPEC)
+sys.modules["lp"] = _lp
+_SPEC.loader.exec_module(_lp)
+fit_spline_knots = _lp.fit_spline_knots
 
 ZP = "/home/lilith/work/zen/zenanalyze/target/release/zenpredict"
 PRED = "./target/release/predict_features_with_bake"
@@ -48,32 +63,6 @@ def raw_preds(bake, parquet):
     if r.returncode != 0:
         sys.exit(f"predict failed: {r.stderr[:400]}")
     return np.array([float(x) for x in r.stdout.split() if x and not x.startswith('#')]), t
-
-
-def fit_spline_knots(tp, tgt, neg_tail):
-    edges = np.percentile(tp, np.linspace(1, 99, 18))
-    kx, ky = [], []
-    lo = tp < edges[0]
-    if lo.sum() >= 2:
-        kx.append(float(np.median(tp[lo]))); ky.append(float(np.median(tgt[lo])))
-    for i in range(len(edges) - 1):
-        m = (tp >= edges[i]) & (tp < edges[i + 1])
-        if m.sum() >= 2:
-            kx.append(float(np.median(tp[m]))); ky.append(float(np.median(tgt[m])))
-    hi = tp >= edges[-1]
-    if hi.sum() >= 2:
-        kx.append(float(np.median(tp[hi]))); ky.append(float(np.median(tgt[hi])))
-    cx, cy = [kx[0]], [ky[0]]
-    for i in range(1, len(kx)):
-        if kx[i] > cx[-1] + 1e-7 and ky[i] >= cy[-1]:
-            cx.append(kx[i]); cy.append(ky[i])
-    if neg_tail:
-        zeros = [i for i, y in enumerate(cy) if y <= 1e-6]
-        if len(zeros) > 1:
-            drop = set(zeros[:-1])
-            cx = [x for i, x in enumerate(cx) if i not in drop]
-            cy = [y for i, y in enumerate(cy) if i not in drop]
-    return cx, cy
 
 
 def build_json(insp, dtype, zb_bulk, protect_last):
