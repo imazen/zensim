@@ -23,7 +23,9 @@
 //! (off-manifold inversion) closed structurally.
 
 use zenpredict::{Model, WeightStorage};
-use zensim_validate::mlp_train::{MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp};
+use zensim_validate::mlp_train::{
+    GroupLossMode, MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp,
+};
 
 fn synthetic_group<'a>(
     n_rows: usize,
@@ -56,6 +58,9 @@ fn synthetic_group<'a>(
         // No ref identity: this fixture is synthetic monotone rows, not a
         // per-reference distortion ladder, so within-ref pairing does not apply.
         ref_ids: None,
+        // Rank-only: the fixture asserts monotone ORDERING, not an
+        // absolute dial, so it carries no meaningful regression target.
+        loss_mode: GroupLossMode::default(),
     }
 }
 

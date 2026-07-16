@@ -93,7 +93,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use zensim_validate::mlp_train;
-use zensim_validate::mlp_train::{TripletPool, train_mlp_strategy};
+use zensim_validate::mlp_train::{GroupLossMode, TripletPool, train_mlp_strategy};
 use zensim_validate::train_manifest;
 
 #[path = "../contamination_guard.rs"]
@@ -1071,6 +1071,8 @@ struct LoadedGroup {
     /// Draw RankNet pairs WITHIN a reference image rather than uniformly
     /// across the group. See `TrainingGroup::ref_ids`.
     within_ref: bool,
+    /// Which loss terms this group contributes. See `GroupLossMode`.
+    loss_mode: GroupLossMode,
 }
 
 impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
@@ -1085,6 +1087,7 @@ impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
             n_features: o.n_features,
             ref_ids: o.ref_ids,
             within_ref: false,
+            loss_mode: GroupLossMode::default(),
         }
     }
 }
@@ -1213,37 +1216,62 @@ fn load_auto_transforms_from_screen(
     loaded
 }
 
-/// Parse `NAME:PATH:TRAIN_W:VAL_W` with an optional 5th field.
+/// Parse `NAME:PATH:TRAIN_W:VAL_W` with an optional 5th field of
+/// comma-separated flags.
 ///
-/// The only accepted 5th field is `withinref`, which makes this group's
-/// RankNet pairs be drawn within a single reference image instead of
-/// uniformly across the group (see `TrainingGroup::ref_ids`). Adding it
-/// is backward compatible: a 5th field previously made `val_w` parsing
-/// fail, so no existing spec can carry one.
-fn parse_group_spec(spec: &str) -> Result<(String, PathBuf, f64, f64, bool), String> {
+/// Accepted flags:
+/// - `withinref` — draw this group's RankNet pairs within a single
+///   reference image instead of uniformly across the group (see
+///   `TrainingGroup::ref_ids`).
+/// - `rank` (default) / `mse` / `both` — which loss terms this group
+///   contributes (see `GroupLossMode`). `mse` and `both` require
+///   `--mse-weight`.
+///
+/// Adding the field is backward compatible: a 5th field previously made
+/// `val_w` parsing fail, so no existing spec can carry one.
+fn parse_group_spec(
+    spec: &str,
+) -> Result<(String, PathBuf, f64, f64, bool, GroupLossMode), String> {
     let parts: Vec<&str> = spec.splitn(5, ':').collect();
     if parts.len() < 4 {
         return Err(format!(
-            "expected NAME:PATH:TRAIN_W:VAL_W[:withinref], got {spec:?}"
+            "expected NAME:PATH:TRAIN_W:VAL_W[:flag,flag], got {spec:?}"
         ));
     }
     let train_w: f64 = parts[2].parse().map_err(|e| format!("bad train_w: {e}"))?;
     let val_w: f64 = parts[3].parse().map_err(|e| format!("bad val_w: {e}"))?;
-    let within_ref = match parts.get(4) {
-        None => false,
-        Some(&"withinref") => true,
-        Some(other) => {
-            return Err(format!(
-                "unknown group flag {other:?} in {spec:?} (only 'withinref' is accepted)"
-            ));
+    let mut within_ref = false;
+    let mut loss_mode: Option<GroupLossMode> = None;
+    for flag in parts.get(4).into_iter().flat_map(|f| f.split(',')) {
+        match flag {
+            "withinref" => within_ref = true,
+            "rank" | "mse" | "both" => {
+                let m = match flag {
+                    "rank" => GroupLossMode::Rank,
+                    "mse" => GroupLossMode::Mse,
+                    _ => GroupLossMode::Both,
+                };
+                if loss_mode.replace(m).is_some() {
+                    return Err(format!(
+                        "more than one loss mode in {spec:?} (pick one of rank/mse/both)"
+                    ));
+                }
+            }
+            other => {
+                return Err(format!(
+                    "unknown group flag {other:?} in {spec:?} \
+                     (accepted: withinref, rank, mse, both)"
+                ));
+            }
         }
-    };
+    }
     Ok((
         parts[0].to_string(),
         PathBuf::from(parts[1]),
         train_w,
         val_w,
         within_ref,
+        loss_mode.unwrap_or_default(),
     ))
 }
 
@@ -1338,6 +1366,7 @@ fn load_csv_sequential(
         n_features,
         ref_ids: None,
         within_ref: false,
+        loss_mode: GroupLossMode::default(),
     })
 }
 
@@ -1529,6 +1558,7 @@ pub(crate) fn load_csv(
         n_features,
         ref_ids: None,
         within_ref: false,
+        loss_mode: GroupLossMode::default(),
     })
 }
 
@@ -2044,7 +2074,7 @@ fn main() {
             .group
             .iter()
             .filter_map(|s| parse_group_spec(s).ok())
-            .any(|(_, _, train_w, _, _)| train_w > 0.0);
+            .any(|(_, _, train_w, _, _, _)| train_w > 0.0);
         if any_train {
             eprintln!(
                 "DATA-INTEGRITY: --target-column {:?} is a MOCK (validation-only) column \
@@ -2080,10 +2110,11 @@ fn main() {
     let mut loaded: Vec<LoadedGroup> = Vec::new();
     let mut n_features = 0usize;
     for spec in &args.group {
-        let (name, path, train_w, val_w, within_ref) = parse_group_spec(spec).unwrap_or_else(|e| {
-            eprintln!("{e}");
-            std::process::exit(2);
-        });
+        let (name, path, train_w, val_w, within_ref, loss_mode) = parse_group_spec(spec)
+            .unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(2);
+            });
         // 2026-05-14 contamination guard: refuse to load any CSV that
         // contains a KADID/TID-overlap basename. Exits 2 with a loud
         // message if the input is contaminated. See
@@ -2119,6 +2150,7 @@ fn main() {
             std::process::exit(2);
         }
         g.within_ref = within_ref;
+        g.loss_mode = loss_mode;
         let cap = args.max_features;
         if g.n_features > cap {
             for row in &mut g.feature_rows {
@@ -2356,6 +2388,7 @@ fn main() {
             validation_weight: g.val_w,
             // Only surface ref ids when the group opted in: `Some` IS the
             // within-ref switch in the trainer core.
+            loss_mode: g.loss_mode,
             ref_ids: if g.within_ref {
                 g.ref_ids.as_deref()
             } else {

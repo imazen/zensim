@@ -1018,6 +1018,59 @@ pub struct TrainingGroup<'a> {
     /// *true* and useful statement, and restricting to within-ref would
     /// discard most of the available signal.
     pub ref_ids: Option<&'a [u32]>,
+
+    /// Which loss terms this group contributes. See [`GroupLossMode`].
+    /// Defaults to [`GroupLossMode::Rank`] — the behavior of every group
+    /// before 2026-07-15, so recipes that don't set it are unchanged.
+    pub loss_mode: GroupLossMode,
+}
+
+/// Which loss terms a training group contributes.
+///
+/// **Why this is per-group.** A corpus's target column determines what it
+/// can teach. `safesyn`/`bigcodec`/`kadis` carry an ssim2-derived score on
+/// a shared cross-image scale — an absolute regression target is
+/// meaningful for them. The near-lossless HF corpus does not: its ssim2
+/// ladder moves ~0.92 pts within an image against ~6 pts between images
+/// (see [`TrainingGroup::ref_ids`]), so an absolute term there fits
+/// between-image noise. It can only be consumed as rank.
+///
+/// Before this existed, the plain (non-α-head) path was RankNet-only for
+/// *every* group and `mse_weight` was rejected outright, so "MSE on the
+/// main groups, rank-only on HF" — the round-7 recipe — was not
+/// expressible in Rust at all. Measured consequence:
+/// `benchmarks/r7_hf_rust_reproduction_2026-07-15.md` reproduced round-7's
+/// CID22 (−0.0047 vs −0.0041) and non-photo (−0.0016 vs −0.0017) deltas but
+/// inverted KonJND (−0.035 vs +0.033), because a rank-only objective has no
+/// absolute dial for KonJND — the most calibration-sensitive corpus — to
+/// track.
+///
+/// The RankNet term is scale-free, so a `Rank` group cannot drag the
+/// absolute dial that the `Mse` groups establish.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum GroupLossMode {
+    /// RankNet pairs only. The default, and the behavior of every group
+    /// before 2026-07-15. Pairs with a tied target are skipped (they
+    /// carry no ranking signal).
+    #[default]
+    Rank,
+    /// Absolute regression only (`mse_weight · (y − target)²`), no rank
+    /// term. Tied targets are NOT skipped — an absolute target is still
+    /// valid when two rows happen to score alike.
+    Mse,
+    /// Both terms. Tied-target pairs contribute the regression term only.
+    Both,
+}
+
+impl GroupLossMode {
+    /// Does this group contribute the RankNet term?
+    pub(crate) fn has_rank(self) -> bool {
+        matches!(self, Self::Rank | Self::Both)
+    }
+    /// Does this group contribute the absolute-regression term?
+    pub(crate) fn has_mse(self) -> bool {
+        matches!(self, Self::Mse | Self::Both)
+    }
 }
 
 /// Row indices bucketed by reference image, for within-ref pair draws.
@@ -1431,6 +1484,37 @@ pub fn train_mlp_strategy(
         head_flags <= 1,
         "pool_head / hybrid_head / per_sample_alpha_head are mutually exclusive"
     );
+
+    // Loss-term reachability gates. These MUST live here, in the
+    // dispatcher, ahead of every head branch — the versions they replace
+    // sat INSIDE `train_mlp_per_sample_alpha_head` and tested
+    // `!per_sample_alpha_head`, which is unreachable there by
+    // construction. So they were dead code that could never fire, and
+    // their doc ("trainer panics if set on other heads") was false:
+    // `--mse-weight` on a non-α head silently trained pure rank and threw
+    // the flag away. Found 2026-07-15 by a `should_panic` test that did
+    // not panic.
+    if hyperparams.monotonicity_reg > 0.0 && !hyperparams.per_sample_alpha_head {
+        panic!(
+            "--monotonicity-reg is only wired on the per_sample_alpha_head \
+             path (set --per-sample-alpha-head)."
+        );
+    }
+    if hyperparams.mse_weight > 0.0
+        && !hyperparams.per_sample_alpha_head
+        && !groups.iter().any(|g| g.loss_mode.has_mse())
+    {
+        // On the plain path the absolute term is opt-in PER GROUP, so a
+        // run that sets the weight but flags no group would train pure
+        // rank and ignore the flag — exactly the silent failure above.
+        panic!(
+            "--mse-weight is set but no group opted into an absolute term. \
+             On the plain path the regression term is per-group: append \
+             `:mse` or `:both` to a --group spec (or use \
+             --per-sample-alpha-head)."
+        );
+    }
+
     if hyperparams.per_sample_alpha_head {
         return train_mlp_per_sample_alpha_head(
             groups,
@@ -1904,18 +1988,25 @@ pub fn train_mlp_strategy(
             let mos_a = g.human_scores[ia];
             let mos_b = g.human_scores[ib];
             let target = (mos_a - mos_b).signum();
-            if target == 0.0 {
-                continue;
-            }
+            // Per-group loss mode (2026-07-15). `Rank` is the default and
+            // reproduces the pre-existing control flow exactly: the two
+            // `continue`s below fire unconditionally, as they always did.
+            // A group carrying an absolute term must NOT be dropped by
+            // either — a tied or sub-threshold pair still has a valid
+            // regression target. Both drops happen AFTER the (ia,ib) draw,
+            // so the RNG advances identically either way and an all-`Rank`
+            // run stays bit-identical to the legacy trainer.
+            let mode = g.loss_mode;
+            let rank_tied = target == 0.0;
+            let rank_sub_threshold = hyperparams.pwrc_pair_weight
+                && hyperparams.pwrc_sensory_threshold > 0.0
+                && (mos_a - mos_b).abs() < hyperparams.pwrc_sensory_threshold;
             // PWRC sensory-threshold drop (Wu et al. 2018): pairs with
             // |ΔMOS| < T are perceptually tied and uninformative for
-            // ranking learning. The RNG advances identically vs the
-            // off path (the drop happens AFTER (ia,ib) draw), so K=1
-            // + threshold=0 is bit-identical to the legacy trainer.
-            if hyperparams.pwrc_pair_weight
-                && hyperparams.pwrc_sensory_threshold > 0.0
-                && (mos_a - mos_b).abs() < hyperparams.pwrc_sensory_threshold
-            {
+            // ranking learning.
+            let want_rank = mode.has_rank() && !rank_tied && !rank_sub_threshold;
+            let want_mse = mode.has_mse() && hyperparams.mse_weight > 0.0;
+            if !want_rank && !want_mse {
                 continue;
             }
             // PWRC per-pair weight (default 1.0 when disabled). Scales
@@ -1926,24 +2017,57 @@ pub fn train_mlp_strategy(
             } else {
                 1.0
             };
-            let pred_diff = yb - ya;
-            let z = -target * pred_diff;
-            let loss_raw = if z > 50.0 {
-                z
-            } else if z < -50.0 {
-                0.0
+            // RankNet term. Zeroed for `GroupLossMode::Mse` groups and for
+            // tied / sub-threshold pairs of a `Both` group.
+            let (dl_dya_rn, dl_dyb_rn) = if want_rank {
+                let pred_diff = yb - ya;
+                let z = -target * pred_diff;
+                let loss_raw = if z > 50.0 {
+                    z
+                } else if z < -50.0 {
+                    0.0
+                } else {
+                    (z.exp() + 1.0).ln()
+                };
+                total_loss += loss_raw * pair_weight;
+
+                let sig_z = 1.0 / (1.0 + (-z).exp());
+                let dl_d_pred_diff = -target * sig_z * pair_weight;
+                (-dl_d_pred_diff, dl_d_pred_diff)
             } else {
-                (z.exp() + 1.0).ln()
+                (0.0, 0.0)
             };
-            let loss = loss_raw * pair_weight;
-            total_loss += loss;
+
+            // Absolute-regression term, per prediction:
+            //   loss  = mse_weight · ((y_a−t_a)² + (y_b−t_b)²) / 2
+            //   dL/dy = mse_weight · (y − t)
+            // (the 2 from d/dy of the square cancels the /2 over the pair's
+            // two predictions).
+            //
+            // NOTE the normalization deliberately DIFFERS from the
+            // per-sample-α path's `2·w/(2K)`. There, MSE is an auxiliary
+            // regularizer explicitly scaled to "one RankNet pair's gradient"
+            // — i.e. ~1/K of the rank term. Here it is the PRIMARY term for
+            // an `Mse` group, so a 1/K factor would make `mse_weight`'s
+            // meaning depend on `pairs_per_epoch` (measured: at w=1, K=400
+            // the term is ~1/400 of the rank gradient and a `Both` group
+            // lands 24.9 score units off its target). K-independent keeps
+            // the knob readable: at `mse_weight = 1` the absolute gradient
+            // is ~|y − t|, directly comparable to the rank term's O(1), so
+            // ~0.1 is the balanced setting for `Both`.
+            let (dl_dya_mse, dl_dyb_mse) = if want_mse {
+                let (ra, rb) = (ya - mos_a, yb - mos_b);
+                total_loss += hyperparams.mse_weight * (ra * ra + rb * rb) / 2.0;
+                (hyperparams.mse_weight * ra, hyperparams.mse_weight * rb)
+            } else {
+                (0.0, 0.0)
+            };
+
             n_steps += 1;
             steps_since_adam += 1;
 
-            let sig_z = 1.0 / (1.0 + (-z).exp());
-            let dl_d_pred_diff = -target * sig_z * pair_weight;
-            let dl_dya = -dl_d_pred_diff;
-            let dl_dyb = dl_d_pred_diff;
+            let dl_dya = dl_dya_rn + dl_dya_mse;
+            let dl_dyb = dl_dyb_rn + dl_dyb_mse;
 
             backprop_step(
                 xa,
@@ -5693,16 +5817,6 @@ fn train_mlp_per_sample_alpha_head(
             (0.0..=1.0).contains(&hyperparams.cross_codec_eq_step_p),
             "--cross-codec-eq-step-p must be in [0, 1]; got {}",
             hyperparams.cross_codec_eq_step_p
-        );
-    }
-    if (hyperparams.mse_weight > 0.0 || hyperparams.monotonicity_reg > 0.0)
-        && !hyperparams.per_sample_alpha_head
-    {
-        // Sanity: --mse-weight / --monotonicity-reg are tuner-specific
-        // and only wired on the per-sample-α path.
-        panic!(
-            "--mse-weight and --monotonicity-reg are only wired on the \
-             per_sample_alpha_head path (set --per-sample-alpha-head)."
         );
     }
 
@@ -9753,6 +9867,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let hyper = MlpHyperparams {
@@ -9822,6 +9937,7 @@ mod tests {
                 train_weight: 1.0,
                 validation_weight: 0.0,
                 ref_ids: None,
+                loss_mode: GroupLossMode::default(),
             },
             TrainingGroup {
                 name: "val".to_string(),
@@ -9831,6 +9947,7 @@ mod tests {
                 train_weight: 0.0,
                 validation_weight: 1.0,
                 ref_ids: None,
+                loss_mode: GroupLossMode::default(),
             },
         ];
 
@@ -9912,6 +10029,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         // Run 1: no boost (uniform within-group sampling).
@@ -10007,6 +10125,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let base = MlpHyperparams {
@@ -10085,6 +10204,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let hyper = MlpHyperparams {
@@ -10154,6 +10274,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let eval_srocc = |bake: &[u8]| -> f64 {
@@ -10264,6 +10385,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let base = MlpHyperparams {
@@ -10417,6 +10539,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let base = MlpHyperparams {
@@ -10549,6 +10672,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let base = MlpHyperparams {
@@ -10657,6 +10781,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let hyper = MlpHyperparams {
@@ -10711,6 +10836,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let base = MlpHyperparams {
@@ -10803,6 +10929,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let eval_srocc = |bake: &[u8]| -> f64 {
@@ -10905,6 +11032,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
 
         let base = MlpHyperparams {
@@ -10998,6 +11126,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let hyper = MlpHyperparams {
             n_hidden: 4,
@@ -11033,6 +11162,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let hyper = MlpHyperparams {
             n_hidden: 16,
@@ -11076,6 +11206,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let hyper = MlpHyperparams {
             n_hidden: 16,
@@ -11110,6 +11241,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let hyper = MlpHyperparams {
             n_hidden: 16,
@@ -11154,6 +11286,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let hyper = MlpHyperparams {
             n_hidden: 16,
@@ -11291,6 +11424,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 0.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         }];
         let mut hp = MlpHyperparams {
             n_hidden: 16,
@@ -11407,6 +11541,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 0.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         }];
         let hp = MlpHyperparams {
             n_hidden: 8,
@@ -11722,6 +11857,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11764,6 +11900,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11839,6 +11976,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11884,6 +12022,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let mut log = Vec::new();
         let _bake = train_mlp_per_sample_alpha_head(
@@ -11928,6 +12067,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -11971,6 +12111,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -12010,6 +12151,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -12053,6 +12195,7 @@ mod tests {
             train_weight: 1.0,
             validation_weight: 1.0,
             ref_ids: None,
+            loss_mode: GroupLossMode::default(),
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
@@ -12109,6 +12252,7 @@ mod tests {
                 train_weight: 1.0,
                 validation_weight: 1.0,
                 ref_ids: None,
+                loss_mode: GroupLossMode::default(),
             },
             TrainingGroup {
                 name: "syn_b".to_string(),
@@ -12118,6 +12262,7 @@ mod tests {
                 train_weight: 0.5,
                 validation_weight: 0.0,
                 ref_ids: None,
+                loss_mode: GroupLossMode::default(),
             },
         ];
         // triplet pool: stimuli = the same rows; responses consistent with
