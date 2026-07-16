@@ -1514,6 +1514,24 @@ pub fn train_mlp_strategy(
              --per-sample-alpha-head)."
         );
     }
+    // Same silent-no-op class as the two guards above: the triplet step lives
+    // ONLY inside `train_mlp_per_sample_alpha_head`, so a run that loads a
+    // triplet pool but does NOT set --per-sample-alpha-head silently ignores it
+    // and produces a bake byte-identical to a no-triplet run. Measured
+    // 2026-07-16: depth_v6 (--triplet-weight 0.5, plain 2-layer) == depth_v2
+    // byte-for-byte. Fail loud instead of throwing the flag away.
+    let triplet_requested = hyperparams.triplet_weight > 0.0
+        && triplets.map(|t| !t.responses.is_empty()).unwrap_or(false);
+    if triplet_requested && !hyperparams.per_sample_alpha_head {
+        panic!(
+            "--triplet-weight/-stimuli/-responses are only wired on the \
+             per_sample_alpha_head path; this run has per_sample_alpha_head=false so the \
+             loaded triplet pool ({} responses) would be silently ignored (the bake would \
+             be byte-identical to a no-triplet run). Set --per-sample-alpha-head, or drop \
+             the triplet flags.",
+            triplets.map(|t| t.responses.len()).unwrap_or(0),
+        );
+    }
 
     if hyperparams.per_sample_alpha_head {
         return train_mlp_per_sample_alpha_head(
@@ -11341,6 +11359,47 @@ mod tests {
         };
         let mut log = Vec::new();
         let _ = train_mlp(&[group], n_features, &hyper, &mut log);
+    }
+
+    #[test]
+    #[should_panic(expected = "silently ignored")]
+    fn train_mlp_strategy_triplet_without_alpha_head_panics() {
+        // Regression for the 2026-07-16 silent no-op: a triplet pool loaded on
+        // the plain (non-per-sample-alpha) path was thrown away, producing a
+        // bake byte-identical to a no-triplet run. The guard must fail loud.
+        let n_features = 4;
+        let (features_owned, targets) = make_synth_dataset(14, 50, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "tiny".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            metric_sigmas: None,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+            ref_ids: None,
+            loss_mode: GroupLossMode::default(),
+        };
+        let mut pool = TripletPool::default();
+        for f in &features_owned {
+            pool.features.push(f.clone());
+        }
+        pool.responses.push((0, 1, 0));
+        pool.responses.push((1, 0, 1));
+        let hyper = MlpHyperparams {
+            n_hidden: 16,
+            n_epochs: 5,
+            pairs_per_epoch: 100,
+            triplet_weight: 0.5,          // triplet requested...
+            per_sample_alpha_head: false, // ...on the plain path -> must panic
+            log_every: 100,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let mut log = Vec::new();
+        let _ = train_mlp_strategy(
+            &[group], n_features, &hyper, &mut log, None, None, None, None, None, Some(&pool),
+        );
     }
 
     // ---- KONJND-AGGREGATION-HEAD smoke tests (task #4, 2026-05-24) ----
