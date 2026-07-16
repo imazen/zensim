@@ -183,7 +183,43 @@ def main():
             cells.append(f'<td style="background:{color(d)}">{c["srocc"]:.4f}{dtxt}</td>')
         rows.append(f"<tr>{''.join(cells)}</tr>")
 
-    sc_html = " · ".join(f"<b>{nm}</b> beats {a.baseline} on {w}/{h} held-out"
+    # per-ref (within-image ladder) panel — the metric a CODEC DIAL cares about
+    # (rank one image's distortion ladder). For near-lossless HF the pooled SROCC
+    # measures cross-image *scale* (genuinely hard, less relevant); per-ref
+    # measures the ladder ranking, and it can flip the verdict entirely.
+    perref_corpora = [c for c in order
+                      if any(b["corpora"].get(c, {}).get("per_ref_mean") is not None
+                             for b in bakes.values())]
+    perref_html = ""
+    if perref_corpora:
+        head = "<th>corpus (within-image)</th>" + "".join(f"<th>{nm}</th>" for nm in bakes)
+        prrows = []
+        for corp in perref_corpora:
+            cells = [f'<td class="corp heldout">{short(corp)}</td>']
+            for nm, b in bakes.items():
+                c = b["corpora"].get(corp)
+                pr = c.get("per_ref_mean") if c else None
+                bw = c.get("per_ref_frac_negative") if c else None
+                if pr is None:
+                    cells.append("<td>—</td>"); continue
+                d = None
+                if base and nm != a.baseline:
+                    bp = bakes[a.baseline]["corpora"].get(corp, {}).get("per_ref_mean")
+                    if bp is not None:
+                        d = pr - bp
+                dtxt = f'<span class="d">{d:+.3f}</span>' if d is not None else ""
+                bwtxt = f'<span class="d">{bw:.0%} bwd</span>' if bw is not None else ""
+                cells.append(f'<td style="background:{color(d)}">{pr:+.3f}{dtxt}{bwtxt}</td>')
+            prrows.append(f"<tr>{''.join(cells)}</tr>")
+        perref_html = (
+            '<h2 class="h2">Per-reference SROCC — the codec-dial metric (rank ONE image\'s ladder)</h2>'
+            '<p class="note">For near-lossless HF the pooled table above measures cross-image '
+            '<i>scale</i> (all-near-lossless, genuinely ambiguous); this measures whether each '
+            'image\'s distortion ladder is ordered right — what a codec binary-searching one image '
+            'actually needs. A bake can crater pooled HF yet rank every ladder near-perfectly.</p>'
+            f'<table><thead><tr>{head}</tr></thead><tbody>{"".join(prrows)}</tbody></table>')
+
+    sc_html = " · ".join(f"<b>{nm}</b> beats {a.baseline} on {w}/{h} held-out (pooled)"
                          for nm, (w, h) in scorecard.items()) or "(baseline only)"
 
     html = f"""<!doctype html><html><head><meta charset="utf-8">
@@ -204,14 +240,16 @@ td.corp.heldout::before{{content:"● ";color:var(--good)}}
 .sha{{font-weight:400;font-size:10px;color:var(--mut);font-family:monospace}}
 .d{{display:block;font-size:10px;color:var(--mut)}} .chart{{width:100%;height:auto;margin:8px 0 26px}}
 .ttl{{fill:var(--fg);font-size:12px;font-weight:600}} .ax{{fill:var(--mut);font-size:10px}}
-.grid{{stroke:var(--grid);stroke-width:1}} .note{{color:var(--mut);font-size:12px}}
+.grid{{stroke:var(--grid);stroke-width:1}} .note{{color:var(--mut);font-size:12px}} .h2{{font-size:15px;margin:24px 0 4px}}
 </style></head><body>
 <h1>{a.title}</h1>
 <p class="sub">{len(bakes)} bakes · baseline <b>{a.baseline}</b> · ● = held-out corpus · faint = train==val (memorization, not skill)</p>
 <div class="scorecard">{sc_html}</div>
 {svg_grouped_bars(bakes, order, a.baseline)}
 {svg_delta(bakes, order, a.baseline)}
+<h2 class="h2">Pooled SROCC (cross-image rank)</h2>
 <table><thead><tr>{thead}</tr></thead><tbody>{''.join(rows)}</tbody></table>
+{perref_html}
 <p class="note">Green/red cells = Δ SROCC vs {a.baseline} (±0.03 saturates). Every number from
 <code>bake_verdict --json</code> (stats owned by zenstats). KADID/TID are 100% train==val
 overlap — shown faint, not a skill signal. per-ref = mean within-image SROCC; %bwd = fraction
