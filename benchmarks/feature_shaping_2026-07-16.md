@@ -41,11 +41,45 @@ psa+tanh rank base, more shaping hurts.
 ## Reproducibility
 
 The advantage is **already a Rust recipe knob** (`--auto-transforms-min-lift`) —
-no new code, no Python. The KonJND +0.29 is far beyond seed noise; the CID22
-+0.012 is smaller and **is being seed-confirmed** (no-transform + min-lift-0.20 at
-seeds 7/23) per the "one seed can't measure a small effect" rule that just caught
-the triplet mirage. Composite shapers (winsor→cbrt, reused params via the
-trainer's own `apply_with_params`) are being tested too, but "less is more"
-predicts they won't beat no-transform on the compression axes.
+no new code, no Python.
 
-**Seed-confirm + composite results appended when they land.**
+## Seed-confirm — the s13 CID22 lift was a mirage; KonJND edge is modest+noisy
+
+Same lesson as the triplet. no-transform vs base across seeds {13,7,23}:
+
+| metric | none s13 | none s7 | none s23 | none mean | base mean |
+|---|---|---|---|---|---|
+| CID22 | 0.868 | 0.853 | 0.835 | **0.852** | ~0.853 |
+| KonJND | 0.768 | 0.581 | 0.711 | **0.687** | ~0.526 |
+
+- **CID22: NO robust advantage** — 0.852 ≈ base 0.853; at s23 no-transform is
+  *worse*. The s13 +0.012 was a favorable draw.
+- **KonJND: a real but modest edge** — no-transform ≥ base at all 3 seeds
+  (+0.16 mean, range +0.01…+0.29). "Less shaping helps the near-threshold axis"
+  holds, but it is far smaller than s13's +0.29 and noisy.
+- **Composite winsor→cbrt HURTS** (CID22 0.839, KonJND 0.393 at s13) — adding a
+  shaper is the wrong direction; confirms "less is more".
+
+## Corpus-mix variants (directive: different holdout vs train sets) — mix is FINE
+
+Dropping the machine-metric mega-corpora HURTS (they're load-bearing, not drag):
+
+| variant | CID22 | AIC-3 | KonJND | nonphoto |
+|---|---|---|---|---|
+| full (all) | 0.8559 | 0.7900 | 0.4805 | 0.9515 |
+| no_kadis | 0.8511 | **0.6922** | 0.3745 | 0.9503 |
+| no_bigcodec | 0.8359 | 0.7890 | 0.4546 | **0.7586** |
+| no_mega (both) | 0.8232 | 0.8226 | 0.4442 | **0.7621** |
+
+kadis holds up AIC-3, bigcodec holds up nonphoto + CID22. No mix change helps.
+
+## Verdict
+
+Nothing here robustly beats B. On the primary CID22 gate every variant (base,
+no-transform, min-lift 0.20, corpus-drops) sits on the same **~0.85 seed-noise
+plateau**; B (0.876) is at the top of it with a clean dial. The single real
+(small) lever is **less feature-shaping → modestly better KonJND**, defensible as
+a minor recipe tweak (raise `--auto-transforms-min-lift`), not a B-beater. The
+discipline (seed-confirm) caught two s13 mirages this session (triplet, no-transform)
+— the model is noise-limited near B, and the right conclusion is that B's recipe
+is close to the achievable frontier on this feature set + these corpora.
