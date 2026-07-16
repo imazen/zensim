@@ -181,14 +181,26 @@ These are real and unfixed. Nothing below is claimed to work.
    each cited by 1–4 benchmark docs, so they must be *migrated*, not deleted.
 3. **Two CID22 val parquets** (§2.1). Measured identical, but they must be kept
    in sync by hand and `bake_verdict` defaults to the non-canonical one.
-4. **`--features-root` is a lie for one corpus.** `nonphoto`'s slot is an
-   absolute path, which `Path::join` discards — so the flag silently does not
-   apply to it. A reproduction pointed at a different root gets a corpus mix the
-   flag does not describe.
-5. **`verify_bake` is not wired post-train.** "You claimed sha X, you produced Y"
-   would have caught all 128 forks at creation instead of two months later.
-6. **~40 tracked scripts are referenced by nothing.** "Unreferenced" is not
+4. **Our eval corpora are split across two roots.** `hf_nearlossless` lives in
+   `canonical-2026-07-15/`; everything else in `2026-05-15-full-features/`. So
+   one slot must be absolute, which opts it out of `--features-root`. It is now
+   declared in `PINNED_OUTSIDE_FEATURES_ROOT` with a reason and gated by
+   `corpus_slots_are_relative_or_declared_pinned`, and the provenance block
+   prints every resolved path — but the real fix is **one canonical eval root**,
+   after which that list should be empty. (`nonphoto` was the same hazard for no
+   benefit — its file was in the default root all along; fixed 2026-07-15.)
+5. **~40 tracked scripts are referenced by nothing.** "Unreferenced" is not
    "dead" — one of them is six hours old. Each needs the §3 treatment.
+
+### Closed since this file was written
+
+- ~~`verify_bake` is not wired post-train.~~ **Fixed 2026-07-15** (`f55551e1`).
+  `zensim_mlp_train` now hashes the bake it just wrote and compares it to the
+  manifest's `[bake].sha256`: match → `REPRODUCED`, differ → loud mismatch +
+  exit 3, no claim → silent (a recipe makes none). This is the check that would
+  have caught all 128 forks at creation, and it makes `--manifest` self-checking
+  — `reproduce_v47.sh` now verifies its reproduction instead of asserting it in
+  prose.
 
 ---
 
