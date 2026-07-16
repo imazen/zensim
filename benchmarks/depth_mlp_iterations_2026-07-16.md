@@ -135,6 +135,53 @@ tool. Specifically depth_v4:
 **depth_v5 is mapping the actual frontier** (KEEP-72 + reg ∈ {0.0, 0.1, 0.3}).
 Verdict below is SUSPENDED pending that measurement. Do not cite "fundamental".
 
+### depth_v5 frontier — reg0p0 (reg=0 corner) result + MECHANISM (2026-07-16)
+
+reg0p0 (KEEP-72, `monotonicity_reg=0.0`, 160 epochs, seed 13) is the **worst
+corner** (no soft monotonicity penalty). Its held-out panel **collapsed** — far
+worse than depth_v4, and this pinned down *why* depth doesn't beat B:
+
+| bake | held-out CID22 (MOS) | train cid22 (ssim2) | dial mono | note |
+|---|---|---|---|---|
+| B (linear) | ~0.876 | — | monotone | ship |
+| depth_v4 (strict, reg=1.0) | 0.7247 | — | — | constrained corner |
+| v5_smoke (KEEP-72, short run) | 0.6992 | — | — | sane |
+| **depth_v5 reg0p0 (KEEP-72, 160ep, reg=0)** | **0.1185** | **0.985** | 0.84 | **collapsed** |
+
+**This is NOT a bake_verdict bug** — `v5_smoke` (same KEEP-72 config, fewer
+epochs, same scorer) reads a sane 0.70. The collapse is a training-dynamics +
+selection failure, and the mechanism is the valuable part:
+
+1. **Raw output collapsed to a narrow band.** Best-epoch spline fit:
+   `anchor pred [20.84, 48.60] target [0, 97.37]` — the net's raw predictions
+   span only ~28 units, stretched ~3.5× by the dial spline. Overfit noise inside
+   that band gets amplified into rank noise.
+2. **Model selection was blind to the collapse.** Every val-selection group is
+   **ssim2-anchored AND also trained on** — cid22_train has the *highest*
+   val_w=2.0 *and* train_w=1.0; the one held-out val group (`bigcodec_val`) is
+   also ssim2-anchored. So `val(geomean3)` peaked at 0.939 (train ssim2-SROCC)
+   while held-out human-MOS CID22 sat at 0.12, invisibly. This is the
+   "held-out val group REQUIRED — train==val selection hides collapse" hazard.
+3. **Capacity × monotone constraint = ssim2-overfit away from MOS.** depth_v2
+   (unconstrained) trains on the same ssim2 targets and gets CID22-MOS 0.88 — its
+   ssim2-shaped ranking happens to align with MOS. The monotone constraint
+   removes that natural solution and the high-capacity net spends its capacity
+   on an ssim2-fitting solution that maximizes train/val ssim2-SROCC but drifts
+   *far* from MOS.
+
+**The insight this yields: B's linearity is REGULARIZATION, not a limitation.**
+Low capacity can't overfit the ssim2 training target, so B's ssim2-shaped
+ranking stays close to human MOS. Adding capacity *under the dial (monotone)
+constraint* buys ssim2-ranking you don't need and costs MOS-ranking you do. To
+beat B you need capacity that helps MOS without ssim2-overfit — which requires
+MOS training data (we have none beyond the holdouts) or capacity control that
+is ~what B already is.
+
+reg0p0 is the zero-regularization corner; **reg0p1/reg0p3 (soft penalty) test
+whether regularization pulls the solution back toward B.** Even the best case is
+"approach B," not "beat B as a dial" — but the frontier is being measured, not
+assumed. (reg0p1/reg0p3 verdicts appended when they land.)
+
 ## ~~CONVERGED VERDICT: the rank↔dial tension is fundamental (depth_v4 proved it)~~ — RETRACTED, see above
 
 The natural question — *can depth keep its rank wins AND get a monotone dial?* —
