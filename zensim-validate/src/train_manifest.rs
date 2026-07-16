@@ -52,19 +52,42 @@ pub struct ManifestGroup {
     pub path: PathBuf,
     pub train_w: f64,
     pub val_w: f64,
+    /// `withinref = true` → the trainer draws RankNet pairs from WITHIN one
+    /// reference image (the 5th `--group` field). For per-image distortion
+    /// ladders (near-lossless HF, KonJND PJND) whose within-image signal
+    /// cross-image pairing drowns out.
+    pub within_ref: bool,
+    /// `loss = "rank" | "mse" | "both"` → which loss terms this group feeds
+    /// (the group's `GroupLossMode`). Absent = rank (the default).
+    pub loss_mode: Option<String>,
 }
 
 impl ManifestGroup {
-    /// Render as the `NAME:PATH:TRAIN_W:VAL_W` spec the trainer's
-    /// `--group` flag accepts. Mirrors `parse_group_spec`'s inverse.
+    /// Render as the `NAME:PATH:TRAIN_W:VAL_W[:flag,flag]` spec the trainer's
+    /// `--group` flag accepts. Mirrors `parse_group_spec`'s inverse: the 5th
+    /// field is a comma-joined set of `withinref` / `rank` / `mse` / `both`.
     pub fn to_group_spec(&self) -> String {
-        format!(
+        let mut spec = format!(
             "{}:{}:{}:{}",
             self.name,
             self.path.display(),
             self.train_w,
             self.val_w
-        )
+        );
+        let mut flags: Vec<&str> = Vec::new();
+        if self.within_ref {
+            flags.push("withinref");
+        }
+        if let Some(m) = self.loss_mode.as_deref() {
+            if matches!(m, "rank" | "mse" | "both") {
+                flags.push(m);
+            }
+        }
+        if !flags.is_empty() {
+            spec.push(':');
+            spec.push_str(&flags.join(","));
+        }
+        spec
     }
 }
 
@@ -325,6 +348,10 @@ struct RawGroup {
     path: String,
     train_w: f64,
     val_w: f64,
+    #[serde(default)]
+    within_ref: bool,
+    #[serde(default)]
+    loss: Option<String>,
 }
 
 /// Error type for manifest loading + sha verification.
@@ -577,6 +604,8 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
                 path,
                 train_w: g.train_w,
                 val_w: g.val_w,
+                within_ref: g.within_ref,
+                loss_mode: g.loss,
             });
         }
 
@@ -1076,5 +1105,71 @@ file_bytes = 0
             }
             other => panic!("expected MissingInput, got {other:?}"),
         }
+    }
+
+    /// The 5th group-spec field (withinref / loss mode) must round-trip from
+    /// the manifest through `to_group_spec` to the form `parse_group_spec`
+    /// consumes — the path iteration 2's HF/KonJND :withinref fixes ride on.
+    #[test]
+    fn group_spec_renders_withinref_and_loss_mode() {
+        let plain = ManifestGroup {
+            name: "safesyn".into(),
+            path: PathBuf::from("/x/s.parquet"),
+            train_w: 1.0,
+            val_w: 0.5,
+            within_ref: false,
+            loss_mode: None,
+        };
+        assert_eq!(plain.to_group_spec(), "safesyn:/x/s.parquet:1:0.5");
+        let wr = ManifestGroup {
+            name: "hf".into(),
+            path: PathBuf::from("/x/hf.parquet"),
+            train_w: 0.5,
+            val_w: 0.0,
+            within_ref: true,
+            loss_mode: None,
+        };
+        assert_eq!(wr.to_group_spec(), "hf:/x/hf.parquet:0.5:0:withinref");
+        let both = ManifestGroup {
+            name: "s".into(),
+            path: PathBuf::from("/x/s.parquet"),
+            train_w: 1.0,
+            val_w: 0.0,
+            within_ref: true,
+            loss_mode: Some("mse".into()),
+        };
+        assert_eq!(both.to_group_spec(), "s:/x/s.parquet:1:0:withinref,mse");
+        // an unknown loss string is dropped, not emitted as a bogus flag
+        let bad = ManifestGroup {
+            name: "s".into(),
+            path: PathBuf::from("/x/s.parquet"),
+            train_w: 1.0,
+            val_w: 0.0,
+            within_ref: false,
+            loss_mode: Some("garbage".into()),
+        };
+        assert_eq!(bad.to_group_spec(), "s:/x/s.parquet:1:0");
+    }
+
+    /// A manifest group parses `within_ref` + `loss` from TOML.
+    #[test]
+    fn manifest_group_parses_withinref_and_loss() {
+        let text = r#"
+[[training.groups]]
+name = "hf"
+path = "/abs/hf.parquet"
+train_w = 0.5
+val_w = 0.0
+within_ref = true
+loss = "mse"
+"#;
+        let cfg = parse_manifest_str(text, Path::new("/tmp/m/x.toml")).unwrap();
+        assert_eq!(cfg.groups.len(), 1);
+        assert!(cfg.groups[0].within_ref);
+        assert_eq!(cfg.groups[0].loss_mode.as_deref(), Some("mse"));
+        assert_eq!(
+            cfg.groups[0].to_group_spec(),
+            "hf:/abs/hf.parquet:0.5:0:withinref,mse"
+        );
     }
 }
