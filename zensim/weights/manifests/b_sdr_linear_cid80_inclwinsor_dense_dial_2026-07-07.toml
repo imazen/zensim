@@ -1,0 +1,60 @@
+# Manifest for the shipped `zensim-b` (SDR) bake — the DEFAULT profile
+# since 2026-07-12 (ZensimProfile::latest / codec_target / latest_preview).
+# Schema: zensim/weights/manifests/README.md
+#
+# Added 2026-07-15. The README has always required a manifest per shipped
+# bake ("every shipped bake is bit-exactly reproducible from the manifest"),
+# citing the V32 recipe-archaeology incident. B shipped 2026-07-12 without
+# one and nothing noticed, because nothing checked — `[bake]` was not even
+# parsed (RawBake carried only `file`; serde dropped sha256/file_bytes).
+# `zensim-validate/tests/shipped_bake_provenance.rs` now enforces it.
+#
+# NOTE ON SCOPE — there is deliberately no [training] section.
+# The manifest schema models a `zensim_mlp_train` run: seed, epochs, lr,
+# groups. B is not one. It is a LINEAR bake from the Gram-exact
+# linear-projection path, so seed/epochs/lr have no meaning here (the fits
+# are deterministic full-data solves — no SGD, no seed). Encoding "not
+# applicable" as absence is the schema's own convention; writing "n/a" into
+# a typed field is what made v02_372feat_cell5.toml unparseable for weeks.
+#
+# This is the real gap the 2026-07-15 audit surfaced: the manifest system
+# models ONE of our two bake-production paths. Until the linear path is
+# expressible here, the byte-repro script below IS B's recipe of record —
+# and it is a Python entry point (`linear_projections_2026-07-03.py`),
+# which is what the "rust-native, kill duplication" directive targets.
+
+[bake]
+name               = "zensim-b"
+internal_version   = "b-sdr-linear-cid80-inclwinsor-dense-dial"
+file               = "../b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin"
+sha256             = "b6fe5233ee9c752d29abeb8be8b0814c052dd96f566a82250cdd6ff6a8cb13e0"
+file_bytes         = 7325
+n_inputs           = 372
+arch               = "PURE LINEAR: 372 → 1 (raw-space convex blend of two linear heads, 0.8·cid + 0.2·kon), + 372 winsor_p99 input guards, + PCHIP dial spline with a training-fitted concave top extension. No MLP, no per-sample-α head, no activations. Forward = winsor + dot product + spline lookup."
+date               = "2026-07-07"
+ship_commit        = "d2953d92"   # the A→B default flip (2026-07-12)
+
+# Byte-exact reproduction. The linear fits are Gram-exact full-data solves
+# and add-winsor / extend-top use fixed percentiles, so a same-input re-run
+# reproduces these bytes EXACTLY. The script asserts sha b6fe5233 and cmp's
+# against the shipped file.
+[reproduce]
+command   = "bash scripts/reproduce_b.sh"
+asserts   = "sha256 b6fe5233 + cmp byte-identical to the shipped bake"
+requires  = "/mnt/v fit inputs (hdr_v3mix, the zenjxl near-lossless SDR sweep, the multiband anchor)"
+lineage   = "parquet corpora --gram--> Gram matrices --fit--> per-corpus linear heads (cid = hdrmix-lasso0.002-raw on hdr_v3mix 7,410 rows, ssim2+cvvdp-mix target; kon = canonhdr15-bvls-raw on safesyn+cid22_train+kadid+tid+hdr_v3mix) --ensemble--> ens-Pline-cid80 (raw-space 0.8·cid + 0.2·kon) --add-winsor (fit corpus = hdr_v3mix + zenjxl near-lossless SDR sweep, near-lossless-INCLUSIVE, [p0.1,p99.9] per feature) --extend-top--> SHIPPED"
+entrypoint = "scripts/v_next/linear_projections_2026-07-03.py (subcommands: gram | fit | ensemble | finalize) + zensim-validate bake_dial_refit (add-winsor | extend-top)"
+
+[docs]
+methodology = "benchmarks/profile_b_methodology_2026-07-12.md"
+fit_catalog = "benchmarks/linear_projections_2026-07-03.md"
+provenance  = "benchmarks/provenance_best_results_2026-07-04.md"
+dial_fix    = "benchmarks/jxl_nearlossless_dial_2026-07-05.md"   # §7-§8: why the INCLUSIVE winsor corpus
+
+# Held-out panel at ship time. Recorded here so a future rotation has a
+# baseline to beat. Per CLAUDE.md these numbers are cited from the
+# methodology doc's panel, NOT re-derived here.
+[eval]
+cid22_srocc  = 0.8764
+konjnd_srocc = 0.5466
+notes = "B↔A is a TRADEOFF, not dominance: B wins the human-MOS holdouts, A wins ssim2-agreement on ~1M codec sweeps. The predecessor (b78adb15, weights/archive/) fit winsor bounds on hdr_v3mix ALONE, clamping 245/372 features constant in the SDR near-lossless range and pinning the dial at ~91.5; the inclusive corpus frees those bounds (dial ~96.1, near-lossless per-image rank-vs-ssim2 0.657→0.771) at zero human-MOS cost (CID22 0.8763→0.8764, KonJND 0.5474→0.5466)."

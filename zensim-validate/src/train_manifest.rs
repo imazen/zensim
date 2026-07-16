@@ -189,6 +189,21 @@ pub struct ManifestConfig {
     /// `[bake].file` resolved to an output path, if the manifest carries
     /// one. Maps to `--out` (the manifest's bake filename).
     pub out: Option<PathBuf>,
+
+    /// `[bake].sha256` — the sha256 the manifest CLAIMS its bake has.
+    ///
+    /// Parsed as of 2026-07-15. Before that the field was written by hand
+    /// into every manifest and read by nothing — `RawBake` carried only
+    /// `file`, so serde silently dropped it. The result: 128 of 142
+    /// manifests recorded `d0ef7a30…`, the sha of the *shipped Profile A
+    /// bake*, because each new experiment was forked from
+    /// `v47_strict_qat.toml` and never updated the outcome fields. See
+    /// [`verify_bake`].
+    pub bake_sha256: Option<String>,
+
+    /// `[bake].file_bytes` — the size the manifest CLAIMS its bake has.
+    /// Same history as [`Self::bake_sha256`].
+    pub bake_file_bytes: Option<u64>,
 }
 
 // ---- serde wire types (a subset of the full manifest schema) ----
@@ -208,6 +223,12 @@ struct RawBake {
     /// `[bake].file` — relative to the manifest's parent dir.
     #[serde(default)]
     file: Option<String>,
+    /// `[bake].sha256` — of the bake at `file`. See [`verify_bake`].
+    #[serde(default)]
+    sha256: Option<String>,
+    /// `[bake].file_bytes` — size of the bake at `file`.
+    #[serde(default)]
+    file_bytes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -326,6 +347,20 @@ pub enum ManifestError {
         path: PathBuf,
         mirror: Option<String>,
     },
+    /// `[bake].sha256` disagreed with the bytes at `[bake].file`. Unlike
+    /// [`Self::ShaMismatch`] (an *input* drifted, so the run won't
+    /// reproduce), this means the manifest MISDESCRIBES ITS OWN OUTPUT.
+    BakeShaMismatch {
+        path: PathBuf,
+        expected: String,
+        actual: String,
+    },
+    /// `[bake].file_bytes` disagreed with the size at `[bake].file`.
+    BakeSizeMismatch {
+        path: PathBuf,
+        expected: u64,
+        actual: u64,
+    },
 }
 
 impl std::fmt::Display for ManifestError {
@@ -361,6 +396,27 @@ impl std::fmt::Display for ManifestError {
                 }
                 Ok(())
             }
+            ManifestError::BakeShaMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "[bake].sha256 MISMATCH for {}:\n  expected (manifest): {expected}\n  actual   (on disk):  {actual}\n\
+                 The manifest misdescribes its OWN OUTPUT. Usually this means the manifest was forked from another \
+                 recipe and the outcome fields ([bake].sha256, [bake].file_bytes, [eval].*) were carried over \
+                 unedited. Recompute them from the bake this manifest actually produces — do NOT copy them.",
+                path.display()
+            ),
+            ManifestError::BakeSizeMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "[bake].file_bytes MISMATCH for {}: manifest says {expected}, on disk {actual}",
+                path.display()
+            ),
         }
     }
 }
@@ -460,8 +516,24 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
 
     let mut cfg = ManifestConfig::default();
 
-    if let Some(file) = raw.bake.as_ref().and_then(|b| b.file.as_ref()) {
-        cfg.out = Some(resolve_path(file, manifest_dir, canonical_root, dial_dir)?);
+    if let Some(bake) = raw.bake.as_ref() {
+        if let Some(file) = bake.file.as_ref() {
+            cfg.out = Some(resolve_path(file, manifest_dir, canonical_root, dial_dir)?);
+        }
+        // Normalize to lowercase hex: `sha256_file` emits lowercase, so an
+        // uppercase manifest entry would otherwise read as drift.
+        //
+        // `sha256 = ""` and `file_bytes = 0` are PLACEHOLDERS, not claims —
+        // 8 manifests carry them, meaning "not recorded yet" (a bake is
+        // never zero bytes). Normalizing them to `None` here keeps
+        // "unrecorded" and "recorded wrong" as distinct states, so
+        // `verify_bake` stays silent on the former and loud on the latter.
+        cfg.bake_sha256 = bake
+            .sha256
+            .as_deref()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty());
+        cfg.bake_file_bytes = bake.file_bytes.filter(|&b| b != 0);
     }
 
     if let Some(t) = raw.training {
@@ -627,6 +699,80 @@ fn hex_lower(bytes: &[u8]) -> String {
     s
 }
 
+/// Verify that `[bake].sha256` / `[bake].file_bytes` actually describe the
+/// bytes at `[bake].file`.
+///
+/// **The counterpart to [`verify_inputs`], and the one that was missing.**
+/// `verify_inputs` has always checked that the manifest's *inputs* are the
+/// bytes it claims; nothing ever checked its *output*. Until 2026-07-15 the
+/// parser did not even read `[bake].sha256` — `RawBake` carried only `file`,
+/// so serde dropped it and the field was inert prose in a TOML costume.
+///
+/// What that cost: of 142 manifests, **128 recorded the same sha256**
+/// (`d0ef7a30…` — the shipped Profile A bake) and the same `[eval]` block
+/// (`cid22_srocc = 0.8657` — Profile A's number). Each new experiment was
+/// forked from `v47_strict_qat.toml`, had its seed/groups/hyperparams
+/// edited, and kept the outcome fields verbatim. A manifest's whole job is
+/// to identify a bake; 128 of them identified someone else's.
+///
+/// Returns `Ok(vec![])` when the manifest carries no `[bake].sha256`, or
+/// when the bake is not on disk (probe bakes live on `/mnt/v`, which CI
+/// does not mount — absence is not evidence of drift). With
+/// `allow_sha_drift`, mismatches are downgraded to warnings.
+pub fn verify_bake(
+    cfg: &ManifestConfig,
+    allow_sha_drift: bool,
+) -> Result<Vec<String>, ManifestError> {
+    let mut warnings = Vec::new();
+    let Some(path) = cfg.out.as_ref() else {
+        return Ok(warnings);
+    };
+    // Not-on-disk is silence, not failure: a manifest may describe a bake
+    // that lives on /mnt/v or was never kept. Only *present* bytes are
+    // checked, so this stays CI-safe.
+    if !path.exists() {
+        return Ok(warnings);
+    }
+    if let Some(expected) = cfg.bake_sha256.as_ref() {
+        let actual = sha256_file(path)?;
+        if &actual != expected {
+            if allow_sha_drift {
+                warnings.push(format!(
+                    "[bake].sha256 drift ALLOWED via --manifest-allow-sha-drift: \
+                     expected {expected} got {actual} for {}",
+                    path.display()
+                ));
+            } else {
+                return Err(ManifestError::BakeShaMismatch {
+                    path: path.clone(),
+                    expected: expected.clone(),
+                    actual,
+                });
+            }
+        }
+    }
+    if let Some(expected) = cfg.bake_file_bytes {
+        let actual = std::fs::metadata(path)
+            .map_err(|e| ManifestError::Io(format!("stat {}: {e}", path.display())))?
+            .len();
+        if actual != expected {
+            if allow_sha_drift {
+                warnings.push(format!(
+                    "[bake].file_bytes drift ALLOWED: expected {expected} got {actual} for {}",
+                    path.display()
+                ));
+            } else {
+                return Err(ManifestError::BakeSizeMismatch {
+                    path: path.clone(),
+                    expected,
+                    actual,
+                });
+            }
+        }
+    }
+    Ok(warnings)
+}
+
 /// Verify every manifest input file's sha256 against its on-disk bytes.
 ///
 /// This is the load-bearing reproduce-exactly check: if a referenced
@@ -753,6 +899,128 @@ mod tests {
         assert_eq!(
             got,
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    /// The check that was missing until 2026-07-15: does `[bake].sha256`
+    /// describe the bytes at `[bake].file`?
+    #[test]
+    fn verify_bake_passes_on_match_fails_on_drift() {
+        let p = write_tmp("bake.bin", b"pretend this is a znpr v3 bake");
+        let real_sha = sha256_file(&p).unwrap();
+        let real_len = std::fs::metadata(&p).unwrap().len();
+
+        let good = ManifestConfig {
+            out: Some(p.clone()),
+            bake_sha256: Some(real_sha.clone()),
+            bake_file_bytes: Some(real_len),
+            ..Default::default()
+        };
+        assert!(verify_bake(&good, false).unwrap().is_empty());
+
+        // The fork signature: outcome fields carried over from the parent
+        // manifest, so the sha names a DIFFERENT bake.
+        let forked = ManifestConfig {
+            out: Some(p.clone()),
+            bake_sha256: Some("d0ef7a30".to_string() + &"0".repeat(56)),
+            bake_file_bytes: Some(real_len),
+            ..Default::default()
+        };
+        let err = verify_bake(&forked, false).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::BakeShaMismatch { .. }),
+            "{err}"
+        );
+        // The message must name the fork, since that is the actual cause.
+        assert!(err.to_string().contains("misdescribes its OWN OUTPUT"));
+        let warns = verify_bake(&forked, true).unwrap();
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].contains("drift ALLOWED"));
+
+        let wrong_size = ManifestConfig {
+            out: Some(p.clone()),
+            bake_sha256: Some(real_sha),
+            bake_file_bytes: Some(real_len + 1),
+            ..Default::default()
+        };
+        assert!(matches!(
+            verify_bake(&wrong_size, false).unwrap_err(),
+            ManifestError::BakeSizeMismatch { .. }
+        ));
+    }
+
+    /// Absence must be silence, not failure — probe manifests point at
+    /// `/mnt/v`, which CI does not mount. A manifest with no recorded sha
+    /// is also fine (nothing was claimed, so nothing can be wrong).
+    #[test]
+    fn verify_bake_is_silent_when_nothing_is_claimed_or_present() {
+        // No [bake] at all.
+        assert!(
+            verify_bake(&ManifestConfig::default(), false)
+                .unwrap()
+                .is_empty()
+        );
+        // Claimed, but the bake is not on disk (the /mnt/v case).
+        let absent = ManifestConfig {
+            out: Some(PathBuf::from("/nonexistent/probe/bake.bin")),
+            bake_sha256: Some("0".repeat(64)),
+            bake_file_bytes: Some(123),
+            ..Default::default()
+        };
+        assert!(verify_bake(&absent, false).unwrap().is_empty());
+        // Present, but the manifest claims nothing about it.
+        let p = write_tmp("unclaimed.bin", b"bytes");
+        let unclaimed = ManifestConfig {
+            out: Some(p),
+            ..Default::default()
+        };
+        assert!(verify_bake(&unclaimed, false).unwrap().is_empty());
+    }
+
+    /// `[bake].sha256` must actually reach `ManifestConfig` — the exact bug
+    /// that made 128 wrong hashes invisible was that `RawBake` carried only
+    /// `file`, so serde dropped this field on the floor.
+    #[test]
+    fn bake_sha256_and_file_bytes_are_parsed_not_dropped() {
+        let text = r#"
+[bake]
+name = "zensim-a"
+file = "../some_bake.bin"
+sha256 = "D0EF7A3054D1ED9E70086D306CDA69B71FC95072C6EF3351F362F27DA096D4FC"
+file_bytes = 27316
+arch = "372 -> 128 -> 64"
+"#;
+        let cfg = parse_manifest_str(text, Path::new("/tmp/m/x.toml")).unwrap();
+        assert_eq!(
+            cfg.bake_sha256.as_deref(),
+            Some("d0ef7a3054d1ed9e70086d306cda69b71fc95072c6ef3351f362f27da096d4fc"),
+            "sha256 must be parsed AND normalized to lowercase hex (sha256_file emits lowercase, \
+             so an uppercase manifest entry would otherwise false-positive as drift)"
+        );
+        assert_eq!(cfg.bake_file_bytes, Some(27316));
+    }
+
+    /// `sha256 = ""` / `file_bytes = 0` are placeholders for "not recorded
+    /// yet" (8 manifests carry them). They must normalize to `None`, so
+    /// "unrecorded" stays distinct from "recorded wrong" — otherwise
+    /// `verify_bake` reports every unfilled manifest as drift and the gate
+    /// becomes noise nobody reads.
+    #[test]
+    fn empty_bake_sha_and_zero_bytes_are_placeholders_not_claims() {
+        let text = r#"
+[bake]
+file = "../probe.bin"
+sha256 = ""
+file_bytes = 0
+"#;
+        let cfg = parse_manifest_str(text, Path::new("/tmp/m/x.toml")).unwrap();
+        assert_eq!(
+            cfg.bake_sha256, None,
+            "empty sha256 must not read as a claim"
+        );
+        assert_eq!(
+            cfg.bake_file_bytes, None,
+            "zero file_bytes must not read as a claim"
         );
     }
 

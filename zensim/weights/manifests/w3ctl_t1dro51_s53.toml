@@ -1,9 +1,16 @@
+# [bake].sha256 / file_bytes were INHERITED from v47_strict_qat.toml by
+# fork-and-edit and described the shipped Profile A bake, not this one
+# (128 of 142 manifests carried the same wrong hash). Repaired 2026-07-15
+# by scripts/canonical_corpus/fix_inherited_bake_provenance_2026-07-15.py.
+# The inherited [eval] block was removed for the same reason: it was a
+# copy of v47's numbers (cid22_srocc = 0.8657), not this recipe's.
+# Enforced now by zensim-validate/tests/shipped_bake_provenance.rs.
 [bake]
 name = "wave3 t1dro on v51 corpus"
 internal_version = "v47-strict-qat"
 file = "/mnt/v/output/zensim-multicodec-probe/w3ctl_t1dro51_s53.bin"
-sha256 = "d0ef7a3054d1ed9e70086d306cda69b71fc95072c6ef3351f362f27da096d4fc"
-file_bytes = 27316
+sha256 = "32da7a4ff8c82541dd78a60261be96ce929fa911b3794d0bba0e0449beb8647c"
+file_bytes = 64425
 n_inputs = 372
 arch = "372 → 128 → 64 + per-sample-α + tanh-pin(scale=30), masked-monotone (W1≥0 on sign-safe set, rank_w≤0); f16+zerobias encoder + f32 identity passthrough; spline + pack done IN-PASS (QAT-native, no post-step)"
 date = "2026-05-27"
@@ -90,19 +97,6 @@ name = "kadis_val"
 path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_val.parquet"
 train_w = 0.0
 val_w = 1.0
-
-[eval]
-verdict_file = "../../../benchmarks/v0_qat_native_methodology_2026-05-27.md"
-cid22_srocc = 0.8657
-kadid_srocc = 0.7933
-tid_srocc = 0.7927
-konjnd_srocc = 0.4185
-aic3_srocc = 0.768
-aic4_srocc = 0.8854
-qsweep_monotonicity = 0.9433
-identity = 97.69
-blur_above_identity = 0
-notes = "Costs vs V39 (rank only): CID22 -0.014, KADID -0.132, TID -0.139, KonJND -0.001, AIC-3/4 -0.034/-0.020 — the 72 dropped sign-flip features' analytic-distortion signal + f16 PJND precision. Gains: blur>identity FIXED, identity=max FIXED (V39 scores 0), monotone codec dial (q-sweep 94.3% vs V39 67.7%, 0.33% vs 53.6% tied), 27 KB vs 257 KB, native one-pass packing. V39's higher KADID/TID rank is moot for the dial use case (its dial is non-invertible). Ship decision (replace V39 at Profile::A vs add sibling) USER-GATED — see methodology doc."
 
 [inputs.canonical_root]
 local = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train"

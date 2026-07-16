@@ -10,7 +10,12 @@
 [bake]
 name              = "v47-strict-QAT-native (masked-monotone + quantization-aware fine-tune, one-pass packed)"
 internal_version  = "v47-strict-qat"
-file              = "/mnt/v/output/zensim/bakes/v47_strict_qat_native_2026-05-27.bin"
+# Points at the SHIPPED in-repo bake, not the /mnt/v scratch copy it was
+# trained to. Both are byte-identical (sha d0ef7a30…), but only the in-repo
+# one is what `profile.rs` include_bytes!s — and a manifest that names an
+# unmounted scratch path can never be verified by CI. Corrected 2026-07-15
+# when tests/shipped_bake_provenance.rs first checked this.
+file              = "../v47_strict_qat_native_2026-05-27.bin"
 sha256            = "d0ef7a3054d1ed9e70086d306cda69b71fc95072c6ef3351f362f27da096d4fc"
 file_bytes        = 27316
 n_inputs          = 372

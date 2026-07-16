@@ -22,9 +22,15 @@ date              = "2026-05-28"
 
 [training]
 trainer            = "scripts/v_next/train_v02_372feat.py --cell bake (Python BVLS via scipy.optimize.lsq_linear; the V0_2-recipe optimizer was Nelder-Mead × 10 restarts but BVLS finds the same global LS optimum deterministically)"
-seed               = "n/a"                    # BVLS is deterministic — no random restarts needed
+# `seed` and `target_scale` are deliberately ABSENT, not "n/a": both are
+# Option<T> in the schema, so omission IS "not applicable". A string in a
+# numeric field made this file unparseable by the canonical Rust parser
+# (`invalid type: string "n/a", expected u64`) — i.e. `--manifest
+# v02_372feat_cell5.toml` never once worked. Caught 2026-07-15 by
+# tests/shipped_bake_provenance.rs, the first thing to ever load these.
+#   seed:         BVLS is deterministic — no random restarts needed.
+#   target_scale: standardize-only; the bias absorbs the offset.
 target_column      = "ssim2_gpu"              # in DISTANCE FORM: y_dist = max(0, 100 - ssim2_gpu)
-target_scale       = "n/a"                    # standardize-only; bias absorbs offset
 max_features       = 372
 sign_constraints   = "per-feature mask: 300 features pinned ≥0 (sign-safe), 72 features unconstrained (sign-flip allowed). Mask from benchmarks/feature_sign_mask_2026-05-26.tsv (sha256 5d0e066d2afefc4b5daefaa56a41e8d924e99db3e3e177dd78634eaabe5f58df)."
 concordance_filter = "ssim2_gpu vs cvvdp_score, ±2 buckets of 20 (96.9 % of rows kept). Proxy for V0_2's ssim2+butter concordance — cvvdp is a perceptual metric in a different family from ssim2, similar to butteraugli's role in V0_2."

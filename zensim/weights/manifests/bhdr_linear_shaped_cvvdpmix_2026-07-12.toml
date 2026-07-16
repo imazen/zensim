@@ -1,0 +1,37 @@
+# Manifest for the shipped `zensim-bhdr` (HDR) bake.
+# Schema: zensim/weights/manifests/README.md
+#
+# Added 2026-07-15, same gap as the sibling B manifest: the README has
+# always required one per shipped bake, and nothing checked, because
+# `[bake]` was never parsed. See
+# `zensim-validate/tests/shipped_bake_provenance.rs`.
+#
+# No [training] section — BHdr is a LINEAR bake (Gram-exact lasso, no SGD,
+# no seed), so the schema's seed/epochs/lr/groups have no meaning. Absence
+# is the schema's encoding of "not applicable".
+
+[bake]
+name               = "zensim-bhdr"
+internal_version   = "hdrmix-lasso0.0003-shaped"
+file               = "../bhdr_linear_shaped_cvvdpmix_2026-07-12.bin"
+sha256             = "7d7f212369f734aa9de072f84ac0e8b97b86deefa3c8bfe26de94de6b49b7ce4"
+file_bytes         = 11826
+n_inputs           = 372
+arch               = "PURE LINEAR in SHAPED feature space: 372 → 1 (lasso λ=0.0003, coordinate descent on a full-data Gram), f16-packed (tau=0), + 18-knot monotone PCHIP dial spline [0.00, 95.77] fit on the PACKED forward. No MLP, no activations."
+date               = "2026-07-12"
+
+[reproduce]
+command  = "bash scripts/reproduce_bhdr.sh"
+asserts  = "sha256 7d7f2123 + byte-identical to the shipped bake"
+verified = "2026-07-14 — the script's FIRST run reproduced the shipped sha exactly, including against a same-day-regenerated anchor.npz"
+requires = "/mnt/v fit inputs (grams/hdr_v3mix.npz, val/anchor.npz)"
+lineage  = "grams/hdr_v3mix.npz (cvvdp-mix Gram: hdr_v3mix, target human_score = 0.5·ssim2norm + 0.5·(JOD−6)/4, 7,410 rows) --lasso(λ=0.0003), shaped feature space--> fits/hdrmix-lasso0.0003-shaped.npz --f16 pack (tau=0) + shared-anchor PCHIP spline on the PACKED forward over val/anchor.npz--> SHIPPED"
+determinism = "Full-data Gram solve + fixed coordinate-descent sweep order + f16 rounding + fixed percentile knots + a deterministic baker (zenpredict) => bit-exact on a same-input re-run. No seed exists to record."
+
+[docs]
+lineage_audit = "benchmarks/bhdr_improvement_split_lineage_2026-07-12.md"
+field_compare = "benchmarks/b_bhdr_vs_field_2026-07-12.md"
+
+[eval]
+upiq_srocc = 0.7536
+notes = "PROVENANCE CAVEAT (carried from reproduce_bhdr.sh, NOT a reproduction issue): the λ=0.0003 PICK was scoreboard-selected on UPIQ and is NOT an established in-domain win — see the lineage audit §7 (post-promotion audit). This manifest records the artifact that ships; it does not re-litigate whether that artifact should have been the pick. Standing rule (memory: bhdr-hdranch3-falsified): ALWAYS run upiq_panel.py on a BHdr candidate before shipping it — the hdranch3 ramp-proxy direction craters UPIQ to 0.606."
