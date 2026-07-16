@@ -113,7 +113,7 @@ content class we are weakest on.
    it is why B ships despite this. It hides the defect from the model but leaves
    144 features carrying a clamped-outlier value on exactly the hard content.
 
-**Recommendation to evaluate first:** option 2 (add C1) — it is the principled
+**Evaluated in §7 — verdict: not panel-justified now (winsor already handles it).** Of the two, option 2 (add C1) — it is the principled
 fix, bounds the term by construction rather than by a magic CAP, and is a
 localized change to one expression. Option 1 (cap) is the cheap fallback if the
 retrain cost of 2 is not worth it. Either requires: re-extract the affected
@@ -131,8 +131,77 @@ a 1.27× one.
   work, `iw-diagnostics` feature) — measures the weight factor, now known to be
   the *non*-lever.
 
-## 7. One-line status for the next session
+## 7. IMPACT EVAL of both fixes — VERDICT: do not re-extract
+
+Evaluated both approaches without a re-extraction, two ways. The verdict is
+**the shipped winsor guard already captures the benefit; a per-pixel fix has no
+measured panel benefit today.**
+
+### 7a. Analytical (per-pixel `d`, exact)
+
+On a flat region the structure ratio `num_s/denom_s → 1`, so baseline
+`d ≈ (mu1−mu2)²` — the unbounded path. Evaluated across the pathological
+mu-diff range and a photographic control:
+
+| mu1, mu2 (flat) | baseline `d` | cap(4) | C1(0.01) |
+|---|--:|--:|--:|
+| 50, 60 | 100 | 4.00 | 0.016 |
+| 100, 400 | 90,000 | 4.00 | 0.529 |
+| 50, 2450 | **5,760,000** | 4.00 | 0.959 |
+| photo 0.3, 0.31 | 0.1696 | 0.1696 | 0.1699 |
+
+- Baseline `d ≈ (mu1−mu2)²` reaches 5.76e6 at mu-diff ≈ 2400 — **matches the
+  observed 5.8e6**, confirming the mechanism exactly.
+- **Cap(4):** photo EXACTLY unchanged, but flattens rank among the worst
+  non-photo pixels (all ≥4 → 4).
+- **C1(0.01):** bounds to ~[0,1] *by construction*, **preserves monotone rank**
+  (0.016 → 0.529 → 0.959 stays ordered), and barely moves photo (+0.0003).
+- **C1 is analytically superior** — it is the only option that both bounds the
+  explosion and keeps the distortion-severity ordering.
+
+### 7b. Empirical (does it move the panel?) — the deciding measurement
+
+Both the cap and C1 only differ from the shipped behavior on rows where `d`
+explodes. Measured how often that is, on the held-out non-photo val corpus
+(`nonphoto_features_372col`, 10,000 rows):
+
+- **0.03 % of rows** (3 / 10,000) have ANY exploding-family feature > 4. Each
+  affected column fires on exactly **one** row. Max on non-photo *val* is ~72,
+  not 5.8e6 — the 5.8e6 lives in the 2.3M-row bigcodec *training* sweep.
+- Per-feature **|SROCC| is identical raw vs capped** (e.g. f241 0.6617 →
+  0.6617): one row in 10,000 cannot move a rank correlation.
+
+And the shipped bake already neutralizes the training-standardization risk:
+
+- **B applies `winsor_p99` to all 372 features.** f313's raw 5.8e6 is clamped
+  to **0.412** at BOTH fit and inference (the transform ships in the bake). So
+  the pathological rows never reach the linear head as outliers — the exact
+  failure mode a per-pixel fix would prevent is already prevented.
+
+### 7c. The one thing winsor loses that C1 would keep
+
+Winsor clamps every above-p99 row to the SAME value (0.412 for f313), which
+flattens rank there — identical to the cap. C1 would instead map those rows to
+*distinct* values in [0,1], preserving severity order. But that recoverable
+signal lives on the 0.03 % of held-out rows that are SROCC-neutral, so the panel
+gain is negligible.
+
+### 7d. Recommendation
+
+**No re-extraction now.** The winsor guard is the pragmatic fix and it is
+already shipped. A per-pixel **C1** on the luminance term is the *correct* fix
+and belongs in a future major-version metric redesign (where the whole
+feature set is reconsidered and one re-extract covers many changes) — not a spot
+fix, because on today's panel it would be indistinguishable from what B already
+does. This is the third "the expensive fix isn't justified" verdict of the
+investigation, and like the other two (`mean_w` weight-norm, the `iw_a_sum` perf
+cost) it was reached by measuring the impact rather than assuming it.
+
+## 8. One-line status for the next session
 
 The non-photo lever is **unbounded per-pixel SSIM `d`** (no C1, no upper cap) →
-5.8e6 in `ssim_4th`/`ssim_2nd`, XYB chroma. Weight-normalization (`mean_w`, Σw)
-is NOT it. Fix = add C1 or cap `d`; both need a re-extract + full panel + sign-off.
+5.8e6 in `ssim_4th`/`ssim_2nd`, XYB chroma — but it fires on 0.03 % of held-out
+rows and the shipped `winsor_p99` guard already clamps it (f313 → 0.412). Fix =
+C1 on the luminance term (correct) or cap `d` (cheap); **neither is panel-justified
+now** — bank it for a major-version re-extract. Weight-norm (`mean_w`, Σw) is a
+separate, also-non-lever.
