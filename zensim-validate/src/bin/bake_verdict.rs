@@ -159,13 +159,41 @@ struct Corpus {
     /// Display name in tables (matches dataset_metric_baseline.rs
     /// for diff-friendliness across the two binaries).
     display: &'static str,
-    /// Parquet path (slot under `<features_root>/`).
+    /// Parquet path.
+    ///
+    /// **Normally RELATIVE — a slot under `<features_root>/`.** An absolute
+    /// path here silently opts the corpus OUT of `--features-root`, because
+    /// `Path::join` discards its argument's root when the argument is
+    /// absolute. That is a real hazard, not a style point: a reproduction
+    /// pointed at a different root would load *some* corpora from there and
+    /// the rest from wherever this string says, without being told.
+    ///
+    /// So an absolute slot must be listed in [`PINNED_OUTSIDE_FEATURES_ROOT`]
+    /// with a reason, and `corpus_slots_are_relative_or_declared_pinned`
+    /// fails the build otherwise. The provenance block prints every resolved
+    /// path + sha256, so the mix is at least visible in the report.
     filename: &'static str,
     /// Per-band partitioning enabled? AIC-3 has 600 pairs in a JND
     /// step grid; rank-based per-band stats collapse to 0 on shared
     /// scores (see dataset_metric_baseline.rs comment at L454-471).
     enable_per_band: bool,
 }
+
+/// Corpora whose slot is deliberately absolute, i.e. NOT under
+/// `--features-root`. Each needs a reason; the test below rejects any absolute
+/// slot that is not listed here.
+///
+/// This list should shrink to empty. It is non-empty only because our eval
+/// corpora are scattered across roots — `hf_nearlossless` lives in the
+/// canonical-2026-07-15 set while the rest live in 2026-05-15-full-features.
+/// The right fix is one canonical eval root (tracked in
+/// `docs/REPRODUCIBILITY.md` §4), not more absolute paths.
+const PINNED_OUTSIDE_FEATURES_ROOT: &[(&str, &str)] = &[(
+    "hf_nearlossless",
+    "lives in the canonical-2026-07-15 set, not the 2026-05-15-full-features \
+     root the other corpora use; pinned so the near-lossless axis cannot be \
+     silently dropped while the eval roots are still split",
+)];
 
 const CORPORA: &[Corpus] = &[
     Corpus {
@@ -227,9 +255,14 @@ const CORPORA: &[Corpus] = &[
         // SROCC here = rank-agreement with ssim2 on diverse content. A bake that
         // ranks photographic content well but craters here (§8.33/B ≈ 0.856 vs a
         // diverse-trained ≈ 0.93) is content-blind — the G-NP gate flags it.
-        // NOTE: this filename is ABSOLUTE — `Path::join` discards `features_root`
-        // when the argument is absolute, so it resolves regardless of --features-root.
-        filename: "/mnt/v/zen/zensim-training/2026-05-15-full-features/nonphoto_features_372col_2026-07-15.parquet",
+        // RELATIVE (fixed 2026-07-15). This slot used to be the absolute path
+        // `/mnt/v/zen/zensim-training/2026-05-15-full-features/nonphoto_...parquet`
+        // with a note that `Path::join` discards `features_root` for an absolute
+        // argument — i.e. `--features-root` silently did not apply here. The file
+        // is IN the default root, so the absolute path bought nothing and cost the
+        // flag its meaning: a reproduction pointed at another root got this corpus
+        // from the original one without being told.
+        filename: "nonphoto_features_372col_2026-07-15.parquet",
         enable_per_band: false,
     },
     Corpus {
@@ -1767,6 +1800,55 @@ mod tests {
              reproducible. Got:\n{prov}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `--features-root` must mean what it says.
+    ///
+    /// An absolute slot silently opts a corpus out of the flag (`Path::join`
+    /// drops the root), so a reproduction pointed elsewhere would load a
+    /// SILENT MIX: some corpora from the new root, the absolute ones from the
+    /// original. `nonphoto` was exactly this until 2026-07-15 — and for no
+    /// benefit, since its file was in the default root all along.
+    ///
+    /// Absolute is still allowed where the corpus genuinely lives in another
+    /// root, but it must be declared with a reason. Undeclared absolute slots
+    /// fail here.
+    #[test]
+    fn corpus_slots_are_relative_or_declared_pinned() {
+        let undeclared: Vec<_> = CORPORA
+            .iter()
+            .filter(|c| Path::new(c.filename).is_absolute())
+            .filter(|c| {
+                !PINNED_OUTSIDE_FEATURES_ROOT
+                    .iter()
+                    .any(|(name, _)| *name == c.name)
+            })
+            .map(|c| format!("  {} -> {}", c.name, c.filename))
+            .collect();
+        assert!(
+            undeclared.is_empty(),
+            "corpus slot(s) are absolute but not declared in \
+             PINNED_OUTSIDE_FEATURES_ROOT:\n{}\n\n\
+             An absolute slot silently ignores --features-root, so a reproduction pointed at \
+             another root loads a MIX without being told. Either make it relative (nonphoto's \
+             absolute path bought nothing — the file was in the default root all along), or \
+             add it to PINNED_OUTSIDE_FEATURES_ROOT with the reason it must live elsewhere.",
+            undeclared.join("\n")
+        );
+
+        // ...and the declarations must not rot: every pinned name must exist
+        // and still actually be absolute, so a fixed slot cannot leave a stale
+        // exemption behind that would re-permit the hazard later.
+        for (name, _reason) in PINNED_OUTSIDE_FEATURES_ROOT {
+            let c = CORPORA.iter().find(|c| c.name == *name).unwrap_or_else(|| {
+                panic!("PINNED_OUTSIDE_FEATURES_ROOT names {name}, which is not a corpus")
+            });
+            assert!(
+                Path::new(c.filename).is_absolute(),
+                "{name} is declared pinned-outside-features-root but its slot is relative now. \
+                 Remove the stale exemption — leaving it lets a future absolute slot pass unnoticed."
+            );
+        }
     }
 
     /// An unhashable bake must degrade loudly inside the report rather than
