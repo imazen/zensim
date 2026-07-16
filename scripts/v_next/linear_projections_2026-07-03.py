@@ -329,7 +329,9 @@ def val_metrics(w: np.ndarray, bias: float, mu, sd, space: str) -> dict[str, flo
 
 
 # ---------------------------------------------------------------------------
-# Data mixes.  Weights for *w7lin* mirror w7_guard_s101.toml's train_w.
+# Data mixes.  Weights for *w7lin* mirror w7_guard.toml's train_w (the mix is
+# recipe-level, identical across all 16 seeds; the per-seed w7_guard_s<N>.toml
+# forks were collapsed into that one recipe 2026-07-15).
 MIXES_SDR = {
     "big": [("bigcodec", 1.0, "human_score")],
     "canon": [("safesyn", 1.0, "human_score"), ("cid22_train", 1.5, "human_score"),

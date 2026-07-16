@@ -1,123 +1,131 @@
-# EXPERIMENT (2026-07-01): v47-strict-QAT recipe + KADIS-700k artificial-
-# distortion group. The one untested combination from the KADIS probe cycle:
-# cbc + tanh-pin + anchor-spline enforce a consistent, oriented, calibrated
-# dial BY CONSTRUCTION (v47 dial mono 0.973 ~= the 0.980 oracle ceiling on the
-# held-out KADIS safety grid), while the KADIS data adds the artificial-
-# distortion rank coverage that lifted the probe bakes' Mohammadi panel
-# everywhere (cvvdp_w1 beat A on 4/6 corpora but was regime-orientation-split
-# and dial-flat — unusable as a dial). Everything except the added kadis group
-# is byte-identical to v47_strict_qat.toml.
+# RECIPE (not a bake record). Collapsed 2026-07-15 from 3 seed-fork manifests
+# (v48_kadis_w01_s<N> for N in [7, 47]) which differed ONLY in `seed` and `[bake].file`.
+# Both are CLI arguments — the manifest supplies DEFAULTS and explicit flags win
+# (zensim_mlp_train.rs:1013). Run a seed with:
 #
-# kadis: 560k rows (source_id%10<8 train split of the GPU-metrics canonical),
-# human_score = cvvdp/10 (range ~[0,1], 0.00% negative), 372 feats. KADID/TID
-# remain in training per v47 (their eval numbers are train==val integrity
-# guards); honest holdouts = CID22 49-ref val + AIC-3 + AIC-4 + held-out KADIS
-# safety grid (source_id%10==9).
+#   zensim_mlp_train --manifest zensim/weights/manifests/v48_kadis_w01.toml \
+#       --seed <N> --out <path>.bin
 #
-# Reproduce:  zensim_mlp_train --manifest zensim/weights/manifests/v48_kadis_experiment.toml
-
+# `seed` / `[bake].file` / `[bake].sha256` are deliberately absent: a recipe
+# describes HOW to train, not one bake. See
+# scripts/canonical_corpus/collapse_seed_fork_manifests_2026-07-15.py
 [bake]
-name              = "v48-kadis experiment (v47-strict-QAT recipe + KADIS-700k group @0.1)"
-internal_version  = "v48-kadis-exp"
-file              = "/mnt/v/output/zensim-multicodec-probe/v48_kadis_w01.bin"
-sha256            = ""
-file_bytes        = 0
-n_inputs          = 372
-arch              = "372 → 128 → 64 + per-sample-α + tanh-pin(scale=30), masked-monotone (W1≥0 on sign-safe set, rank_w≤0); f16+zerobias encoder + f32 identity passthrough; spline + pack IN-PASS (QAT-native)"
-date              = "2026-07-01"
+name = "v48-kadis experiment (v47-strict-QAT recipe + KADIS-700k group @0.1)"
+internal_version = "v48-kadis-exp"
+n_inputs = 372
+arch = "372 → 128 → 64 + per-sample-α + tanh-pin(scale=30), masked-monotone (W1≥0 on sign-safe set, rank_w≤0); f16+zerobias encoder + f32 identity passthrough; spline + pack IN-PASS (QAT-native)"
+date = "2026-07-01"
 
 [training]
-trainer            = "zensim_mlp_train"
-seed               = 17
-mse_weight         = 0.6
-ranknet_weight     = 0.6
-monotonicity_reg   = 1.0
+trainer = "zensim_mlp_train"
+mse_weight = 0.6
+ranknet_weight = 0.6
+monotonicity_reg = 1.0
 tanh_output_head_scale = 30.0
 anchor_loss_weight = 0.01
-anchor_step_p      = 0.05
-hidden             = 128
-n_hidden_layers    = 2
+anchor_step_p = 0.05
+hidden = 128
+n_hidden_layers = 2
 per_sample_alpha_head = true
-epochs             = 200
-lr                 = 0.001
-l2                 = 0.0001
-target_column      = "human_score"
-target_scale       = 1.0
-max_features       = 372
-minibatch_size     = 32
-val_aggregate      = "geomean3"
-out_dtype          = "f16"
-monotone_cbc       = true
-monotone_strict    = true
+epochs = 200
+lr = 0.001
+l2 = 0.0001
+target_column = "human_score"
+target_scale = 1.0
+max_features = 372
+minibatch_size = 32
+val_aggregate = "geomean3"
+out_dtype = "f16"
+monotone_cbc = true
+monotone_strict = true
 qat_fine_tune_epochs = 40
-qat_tau            = 0.005
+qat_tau = 0.005
 monotone_feature_mask = "../../../benchmarks/feature_sign_mask_2026-05-26.tsv"
-
-groups = [
-    { name = "safesyn",      path = "{canonical}/safesyn.parquet",          train_w = 1.0, val_w = 0.5 },
-    { name = "cid22_train",  path = "{canonical}/cid22_train_norm.parquet", train_w = 1.5, val_w = 2.0 },
-    { name = "kadid",        path = "{canonical}/kadid.parquet",            train_w = 0.5, val_w = 1.0 },
-    { name = "tid",          path = "{canonical}/tid.parquet",              train_w = 0.5, val_w = 1.0 },
-    { name = "konjnd_dense", path = "{canonical}/konjnd-dense-norm.parquet", train_w = 1.2, val_w = 1.5 },
-    { name = "kadis",        path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_train.parquet", train_w = 0.1, val_w = 0.0 },
-]
-
 auto_transforms = "../../../benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
-anchor_parquet  = "{canonical}/multiband_anchor_dial100.parquet"
+anchor_parquet = "{canonical}/multiband_anchor_dial100.parquet"
+[[training.groups]]
+name = "safesyn"
+path = "{canonical}/safesyn.parquet"
+train_w = 1.0
+val_w = 0.5
+
+[[training.groups]]
+name = "cid22_train"
+path = "{canonical}/cid22_train_norm.parquet"
+train_w = 1.5
+val_w = 2.0
+
+[[training.groups]]
+name = "kadid"
+path = "{canonical}/kadid.parquet"
+train_w = 0.5
+val_w = 1.0
+
+[[training.groups]]
+name = "tid"
+path = "{canonical}/tid.parquet"
+train_w = 0.5
+val_w = 1.0
+
+[[training.groups]]
+name = "konjnd_dense"
+path = "{canonical}/konjnd-dense-norm.parquet"
+train_w = 1.2
+val_w = 1.5
+
+[[training.groups]]
+name = "kadis"
+path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_train.parquet"
+train_w = 0.1
+val_w = 0.0
 
 [inputs.canonical_root]
 local = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train"
-r2    = "s3://zentrain/canonical-2026-05-21/train"
+r2 = "s3://zentrain/canonical-2026-05-21/train"
 tower = "/mnt/tower/output/zensim-archive-2026-05-20/canonical-2026-05-21/train"
 
 [inputs.safesyn]
-path   = "{canonical}/safesyn.parquet"
+path = "{canonical}/safesyn.parquet"
 sha256 = "ad15cc79cde156109d920bfade8ed465908e256fcd1cd8556b430791dcaf1b18"
-rows   = 196086
+rows = 196086
 
 [inputs.cid22_train]
-path   = "{canonical}/cid22_train_norm.parquet"
+path = "{canonical}/cid22_train_norm.parquet"
 sha256 = "59c9888ae3141545082fb58eafb19d1e964154cf79060b3d033e72ba8227c3ca"
-rows   = 17611
-notes  = "TRAINING-ONLY subset (201 refs disjoint from the 49-ref holdout). human_score = ssim2_gpu/100 — NOT human MOS (verified exact 2026-07-02; see docs/DATA_SPLITS.md). CID22 MCOS never trains."
+rows = 17611
+notes = "TRAINING-ONLY subset (201 refs disjoint from the 49-ref holdout). human_score = ssim2_gpu/100 — NOT human MOS (verified exact 2026-07-02; see docs/DATA_SPLITS.md). CID22 MCOS never trains."
 
 [inputs.kadid]
-path   = "{canonical}/kadid.parquet"
+path = "{canonical}/kadid.parquet"
 sha256 = "83356f034dc83e50495ec3cf7d5c5d6df9588f4e39ba3f4af1208a12a1bdacee"
-rows   = 10125
+rows = 10125
 
 [inputs.tid]
-path   = "{canonical}/tid.parquet"
+path = "{canonical}/tid.parquet"
 sha256 = "6704de0c7dcec3a1b9e57495c410c91aee1945cd4411fcdb217688af2d5c0e4f"
-rows   = 3000
+rows = 3000
 
 [inputs.konjnd_dense]
-path   = "{canonical}/konjnd-dense-norm.parquet"
+path = "{canonical}/konjnd-dense-norm.parquet"
 sha256 = "49b65c4890fb9a8f910c5cbf873d75714d47407b5babcf6e8f7fb0df67684c85"
-rows   = 20160
+rows = 20160
 
 [inputs.kadis]
-path   = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_train.parquet"
+path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_train.parquet"
 sha256 = "17c1349f2bc578a57a1a2df8706d53bce9d31cf0f4bd72a4e1999206f825198c"
-rows   = 560000
-notes  = "KADIS-700k GPU-metrics canonical, train split source_id%10<8, human_score = cvvdp/10. Kept keys: source_id/severity_level/dist_type. See ~/work/zen/DATA_PROVENANCE.md."
+rows = 560000
+notes = "KADIS-700k GPU-metrics canonical, train split source_id%10<8, human_score = cvvdp/10. Kept keys: source_id/severity_level/dist_type. See ~/work/zen/DATA_PROVENANCE.md."
 
 [inputs.multiband_anchor]
-path   = "{canonical}/multiband_anchor_dial100.parquet"
+path = "{canonical}/multiband_anchor_dial100.parquet"
 sha256 = "594b3df521e3a2261b64a49fd2df001c1a6a31ff362fdfc4071fb41e06407149"
-notes  = "Per-row anchor for post-training PCHIP dial-spline fit (NOT a training target)."
+notes = "Per-row anchor for post-training PCHIP dial-spline fit (NOT a training target)."
 
 [inputs.feature_sign_mask]
-path   = "benchmarks/feature_sign_mask_2026-05-26.tsv"
+path = "benchmarks/feature_sign_mask_2026-05-26.tsv"
 sha256 = "5d0e066d2afefc4b5daefaa56a41e8d924e99db3e3e177dd78634eaabe5f58df"
 
 [inputs.auto_transforms]
-path   = "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+path = "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
 sha256 = "ada1f1ce1b649b870de14b5bb47f782c1335a0e21942f5ba7697b32096d36ccc"
-
-steps = [
-    "1. zensim_mlp_train --manifest (this file) — one-pass packed+calibrated bake (QAT-native).",
-    "2. bake_verdict on the default codec dial grid (auto-runs post-train).",
-    "3. bake_verdict with ZENSIM_DIAL_GRID=kadis_test_safetygrid.parquet for held-out KADIS safety.",
-    "4. Compare vs A: full Mohammadi panel + 10-band per-band + both dials + KonJND-no-regression gate.",
-]
+steps = [ "1. zensim_mlp_train --manifest (this file) — one-pass packed+calibrated bake (QAT-native).", "2. bake_verdict on the default codec dial grid (auto-runs post-train).", "3. bake_verdict with ZENSIM_DIAL_GRID=kadis_test_safetygrid.parquet for held-out KADIS safety.", "4. Compare vs A: full Mohammadi panel + 10-band per-band + both dials + KonJND-no-regression gate.",]

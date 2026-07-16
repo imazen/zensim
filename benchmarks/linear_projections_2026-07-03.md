@@ -99,7 +99,7 @@ brief's "optionally" clause.
 | w7sdr | canon + konjnd_dense 1.2 + bigcodec 0.25 (w7_guard train mix minus HDR) |
 | hdr | hdr_v3 1.0 |
 | hdrmix | hdr_v3mix 1.0 |
-| w7lin | w7sdr + hdr_v3 1.0 (= w7_guard_s101.toml train mix exactly) |
+| w7lin | w7sdr + hdr_v3 1.0 (= w7_guard.toml train mix exactly; was w7_guard_s101.toml before the 2026-07-15 seed-fork collapse — the mix is recipe-level, identical across all 16 seeds) |
 | w8lin | w7sdr + hdr_v3mix 1.0 (= w8_hdrmix_cvmix train mix) |
 | canonhdr15 / canonhdr40 | canon + hdr_v3mix 15.0 / 40.0 (round 2: no bigcodec) |
 | canonkjhdr15 | canonhdr15 + konjnd_dense 1.2 (round 2) |

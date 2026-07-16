@@ -93,9 +93,16 @@ cross-model scatter). `BHdr` = explicit unrouted handle.
 ### MLP references
 - **t1dro51**: full kit at `scripts/reproduce_t1dro51.sh` (pinned trainer
   commit 78ec8e61, R2 inputs, 5 recorded bake shas, per-SIMD-tier caveat).
-- **w7_guard_s101**: manifest `zensim/weights/manifests/w7_guard_s101.toml`
-  (trainer-commit stamped; konjnd_anchor guard group; deterministic given
-  ISA tier). Trained on the wide fan (box run, ctlfan machinery).
+- **w7_guard_s101**: manifest `zensim/weights/manifests/w7_guard.toml` **+
+  `--seed 101`** (trainer-commit stamped; konjnd_anchor guard group;
+  deterministic given ISA tier). Trained on the wide fan (box run, ctlfan
+  machinery).
+  <br>The 16 per-seed manifests (`w7_guard_s1` … `_s101`) were collapsed
+  2026-07-15 into the one recipe above: they differed only in `seed` and
+  `[bake].file`, both of which are CLI arguments (`--manifest` supplies
+  defaults, explicit flags win — `zensim_mlp_train.rs:1013`). Reproduce with
+  `zensim_mlp_train --manifest zensim/weights/manifests/w7_guard.toml --seed 101
+  --out <path>.bin`.
 
 ### Instruments (what makes the numbers trustworthy)
 - **Collapse gate**: runcells post-train `bake_verdict` floors (CID22<0.75 ∨
