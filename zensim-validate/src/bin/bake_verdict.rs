@@ -179,6 +179,46 @@ struct Corpus {
     enable_per_band: bool,
 }
 
+/// The DIAL-panel grid this binary means when nobody says otherwise.
+///
+/// # Why this is a named constant with a pinned hash
+///
+/// Three dial grids sit in that directory and they are NOT interchangeable:
+///
+/// | file | sha256 | state |
+/// |---|---|---|
+/// | `dial_grid_372col_2026-05-29.parquet` | `f1156924…` | **two known defects** |
+/// | `…_quarantined.parquet` | `b5d27f21…` | fixes defect 1, superseded |
+/// | `…_quarantined_v2.parquet` | `6546c43e…` | fixes both — **this one** |
+///
+/// The original carries (1) the w11 extraction corruption — 9 of 115 ladders
+/// with bit-constant garbage in the masked/IW block (f228..f371 at 34..489 vs
+/// a healthy 0.003..0.025), from the `zensim-gpu` odd-dimension pathology, so
+/// *"any per-ladder dial number on them (any bake, any date since 2026-05-29)
+/// is garbage-input scoring"*; and (2) 33 JXL cells at butteraugli distance
+/// 0.025 encoded before jxl-encoder `eeb52735`, measured at 37× the distortion
+/// of the healthy d≥0.05 ceiling — backwards from the monotone near-lossless
+/// trend. `benchmarks/eval_grids_2026-05-29.pointer.md` documents both and says
+/// to use `_quarantined_v2`.
+///
+/// **Until 2026-07-15 the default here was the original.** Both defects were
+/// found, documented, and *fixed by building the quarantined grids* — and the
+/// default was never switched, so every default run kept scoring against the
+/// bad one. Zero code referenced `_quarantined_v2`; only prose did. That is the
+/// same shape as the three other rules this repo declared and never checked
+/// (see `docs/REPRODUCIBILITY.md` §5) — the fix existed, the wiring did not.
+///
+/// The hash is pinned so a swapped or rebuilt grid cannot pass unnoticed:
+/// `bake_verdict` warns when the grid it loaded is not this one. It warns
+/// rather than fails because `--dial-grid` is a legitimate experiment knob —
+/// but an unremarked swap is exactly how the corrupt grid stayed default for
+/// six weeks.
+const CANONICAL_DIAL_GRID: &str = "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet";
+
+/// sha256 of [`CANONICAL_DIAL_GRID`] (4,424 rows; both defects dropped).
+const CANONICAL_DIAL_GRID_SHA256: &str =
+    "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd";
+
 /// Corpora whose slot is deliberately absolute, i.e. NOT under
 /// `--features-root`. Each needs a reason; the test below rejects any absolute
 /// slot that is not listed here.
@@ -394,11 +434,7 @@ fn parse_args() -> Result<Args, String> {
         PathBuf::from("/mnt/v/zen/zensim-training/2026-05-15-full-features");
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(
-                "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29.parquet",
-            )
-        });
+        .unwrap_or_else(|_| PathBuf::from(CANONICAL_DIAL_GRID));
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -1363,6 +1399,36 @@ fn main() -> ExitCode {
         }
     }
 
+    // The DIAL grid is an INPUT to half this report's numbers, so it belongs in
+    // the provenance block exactly as much as a corpus does. It was omitted
+    // until 2026-07-15 — and the dial grid is the input where it mattered MOST:
+    // three versions exist, they genuinely differ, and the default was the one
+    // with two known defects. A verdict could not say which it used.
+    if args.dial_grid.exists() {
+        if let Ok(sha) = zensim_validate::train_manifest::sha256_file(&args.dial_grid) {
+            let bytes = std::fs::metadata(&args.dial_grid)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            let label = if sha == CANONICAL_DIAL_GRID_SHA256 {
+                "dial grid (canonical)".to_string()
+            } else {
+                eprintln!(
+                    "bake_verdict: WARNING — dial grid {} (sha {}) is NOT the canonical grid \
+                     (sha {}).\n  The canonical grid is {}\n  The original 2026-05-29 grid carries \
+                     TWO known defects: 9/115 ladders of w11 extraction garbage, and 33 pre-fix \
+                     JXL cells at d=0.025. Per-ladder dial numbers on those are garbage-input \
+                     scoring. See benchmarks/eval_grids_2026-05-29.pointer.md.",
+                    args.dial_grid.display(),
+                    &sha[..16],
+                    &CANONICAL_DIAL_GRID_SHA256[..16],
+                    CANONICAL_DIAL_GRID,
+                );
+                "dial grid ⚠ **NOT CANONICAL**".to_string()
+            };
+            corpus_prov.push((label, args.dial_grid.clone(), sha, bytes));
+        }
+    }
+
     let mut buf = String::new();
     buf.push_str("# bake_verdict — instant V_X eval\n\n");
     buf.push_str(&provenance_block(&args.bake, &corpus_prov));
@@ -1849,6 +1915,42 @@ mod tests {
                  Remove the stale exemption — leaving it lets a future absolute slot pass unnoticed."
             );
         }
+    }
+
+    /// The default dial grid must be the quarantined-v2 one, and its pinned
+    /// hash must match the file.
+    ///
+    /// Both defects in the original grid were found, documented, and fixed by
+    /// BUILDING the quarantined siblings — and the default was never switched,
+    /// so from 2026-05-29 to 2026-07-15 every default run scored its dial panel
+    /// against a grid with 9/115 garbage ladders and 33 pre-fix JXL cells.
+    /// Zero code referenced `_quarantined_v2`; only prose did. This test is the
+    /// wiring that prose could not provide.
+    ///
+    /// Skips when the grid is not on disk (CI does not mount `/mnt/v`), so it
+    /// verifies the pin wherever the data exists and never fails for its
+    /// absence.
+    #[test]
+    fn canonical_dial_grid_is_the_quarantined_v2_grid() {
+        assert!(
+            CANONICAL_DIAL_GRID.contains("_quarantined_v2"),
+            "the canonical dial grid must be the v2-quarantined one: the original carries the \
+             w11 extraction corruption (9/115 ladders) AND 33 pre-fix JXL cells at d=0.025, and \
+             the _quarantined (v1) sibling fixes only the first. See \
+             benchmarks/eval_grids_2026-05-29.pointer.md. Got: {CANONICAL_DIAL_GRID}"
+        );
+        let p = Path::new(CANONICAL_DIAL_GRID);
+        if !p.exists() {
+            eprintln!("skip: {CANONICAL_DIAL_GRID} not on this host (CI has no /mnt/v)");
+            return;
+        }
+        let actual = zensim_validate::train_manifest::sha256_file(p).expect("hash dial grid");
+        assert_eq!(
+            actual, CANONICAL_DIAL_GRID_SHA256,
+            "the canonical dial grid's bytes changed. If it was legitimately rebuilt, update \
+             CANONICAL_DIAL_GRID_SHA256 *and* the pointer doc in the same commit — do NOT just \
+             bump the constant, because the pin is the only thing that noticed."
+        );
     }
 
     /// An unhashable bake must degrade loudly inside the report rather than
