@@ -301,6 +301,51 @@ def check_shell(p: Path) -> list[str]:
     return sorted(set(fails))
 
 
+# Characters Windows refuses in a filename. A tracked file carrying one makes
+# `git checkout` fail outright on a Windows runner -- before any compile, so
+# the job's log shows only `error: invalid path` and looks like a toolchain
+# problem rather than a repo one.
+WINDOWS_FORBIDDEN = set('"*:<>?|')
+
+
+def check_windows_paths() -> list[str]:
+    """Tracked paths that Windows cannot check out.
+
+    MEASURED 2026-07-15: a file literally named `"$LOG"` (a shell redirect to
+    an unset `$LOG`, committed by accident in 9a4e2272) broke BOTH mandatory
+    Windows runners at the checkout step for weeks. CLAUDE.md requires
+    windows-11-arm CI, so this is not cosmetic -- it silently removed a
+    required platform from coverage.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "-c", "core.quotepath=off", "ls-files", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []  # not a git checkout (or git absent) -- nothing to assert
+    if out.returncode != 0:
+        return []
+    bad = []
+    for path in out.stdout.split("\0"):
+        if not path:
+            continue
+        hits = sorted(set(path) & WINDOWS_FORBIDDEN)
+        if hits:
+            bad.append(
+                f"WIN-PATH: tracked file {path!r} contains {''.join(hits)!r}, "
+                "which Windows forbids in a filename -- `git checkout` fails on "
+                "the windows runners before anything compiles. Delete it (git "
+                "history keeps it) or rename it."
+            )
+    return bad
+
+
 def main() -> int:
     list_only = "--list" in sys.argv
     failures: dict[str, list[str]] = {}
@@ -322,6 +367,10 @@ def main() -> int:
         f = check_markdown(p)
         if f:
             failures[str(p.relative_to(ROOT))] = f
+
+    win = check_windows_paths()
+    if win:
+        failures["<tracked paths>"] = win
 
     if not failures:
         print(f"lint_scripts: {n} scripts checked, all runnable")
