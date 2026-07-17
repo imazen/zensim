@@ -45,6 +45,8 @@ from scipy.optimize import curve_fit
 
 CORPORA = [
     ("cid22", "CID22-49 holdout (MCOS)", "T0 — honest for zensim AND ssim2"),
+    ("imazen26", "imazen-26 real-codec (ssim2)", "T0 — real modern-codec ssim2-agreement (2026-07-16)"),
+    ("nonphoto", "imazen-26 non-photo (ssim2)", "T0 — non-photo ssim2-agreement"),
     ("aic3", "AIC-3 CTC (JND)", "T0 holdout"),
     ("aic4", "AIC-4 sample (JND)", "T0 holdout — no recipe-search"),
     ("konjnd", "KonJND-1k (PJND)", "T1 guard/anchor"),
@@ -69,7 +71,7 @@ def main():
     out_dir = os.path.join(a.out_root, f"{stamp}_{label}")
     os.makedirs(out_dir, exist_ok=True)
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+    fig, axes = plt.subplots(2, 4, figsize=(21, 10))
     fig.suptitle(
         f"{label} — human score vs bake prediction (per-corpus, 4PL display fit)",
         fontsize=14,
