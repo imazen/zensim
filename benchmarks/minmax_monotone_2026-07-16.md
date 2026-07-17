@@ -179,9 +179,20 @@ a stronger rerun). kadid/tid keep their real DMOS/MOS. K24 seed 13:
 |---|---|---|---|
 | human_score (ssim2 baseline) | 0.831 | **0.880** | **0.895** |
 | mix_cv25_iw75 | 0.848 | 0.861 | 0.871 |
+| mix_cv75_iw25 (cvvdp-heavy) | 0.833 | 0.863 | 0.877 |
+| mix_cv50_iw50 | 0.834 | 0.858 | 0.873 |
 | iwssim (pure IW-SSIM) | **0.859** | 0.847 | 0.860 |
-| mix_cv50_iw50 | (pending) | | |
-| mix_cv75_iw25 | (pending) | | |
+
+**It's the IW-SSIM component that recovers CID22, NOT cvvdp** (complete frontier): the
+cvvdp-heavy mixes barely move CID22 (0.833/0.834) while losing imazen-26/nonphoto; only
+IW-heavy lifts CID22 (mix_cv25 0.848, iwssim 0.859). Confirms the "cvvdp-scalar dead-end"
+[[feedback_cvvdp_scalar_target_dead_end]] + the IW-SSIM↔human-MOS literature. The knob is
+really ssim2↔IW-SSIM. **Honest verdict:** every mix point EXCEPT the ssim2 end is dominated
+by A (iwssim 0.859/0.847/0.860 < A's 0.866/0.862/0.878 on all three) — recovering CID22
+moves the min-max INTO A-dominated territory. The min-max's only non-dominated value is the
+ssim2 end (wins imazen-26/nonphoto). So CID22 recovery via a single target is
+counterproductive for the min-max; a genuinely-better point needs multi-target (ssim2+IW
+pairs together) — unbuilt, uncertain.
 
 **IW-SSIM recovers CID22 to 0.859 (+0.028, ≈ A's 0.866)** — the requested recovery
 WORKS. But it is a TRADEOFF, not a free lunch: more IW-SSIM → higher CID22 (human

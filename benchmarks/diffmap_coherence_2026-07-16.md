@@ -73,6 +73,33 @@ constant). Report SROCC(pooled_diffmap, 100−score) per profile:
 This is the ship gate for the closed-loop feature and the falsification test for
 the fix.
 
+## MEASURED (2026-07-16) — the diffmap is DECENT, not broken (assumption corrected)
+
+Two diagnostics built (`zensim/examples/diffmap_coherence.rs` pooled;
+`diffmap_block_coherence.rs` spatial — refine each block to the ref, rescore,
+correlate ΔS with the diffmap-block sum). On the shipped B profile:
+
+- **Pooled coherence: SROCC 1.0000, PLCC ~0.98** across images/codecs. The
+  diffmap MAGNITUDE tracks the scalar perfectly within a q-sweep — because SSIM
+  dominates BOTH the diffmap and the 372-feature scalar, so both fall
+  monotonically with q. So the incoherence is NOT in the pooled magnitude.
+- **Spatial coherence: SROCC(diffmap_block, ΔS) = 0.20 (q25) / 0.66 (q50) / 0.41
+  (q75)**, and the diffmap BEATS SSE-per-block (the codec PSNR default: 0.44 /
+  0.18) at q50/q75. So the diffmap partially predicts where refining raises the
+  scalar, and is the better spatial predictor than the codec default — but it is
+  far from SROCC≈1.
+
+**Key correction to the premise above:** the scalar is NON-ADDITIVE (it pools
+features non-linearly across scales + IW-weighting), so refining one block changes
+the pooled features non-linearly — NO per-pixel map can perfectly predict per-block
+ΔS. The 0.66 ceiling is PARTLY intrinsic to the non-additive scalar, not only the
+stale V0_2 weights. So the fix (feed the model's `s_k`) can sharpen the spatial
+match but cannot reach 1.0; its marginal value over "already beats SSE" is the open
+question. NEXT diagnostic before building the fix: compare `Balanced` (fixed
+weights, no params.weights) vs `Trained` (V0_2 weights) spatial SROCC — if they
+tie, the weight SOURCE isn't the bottleneck (non-additivity is) and the fix won't
+help; if `Trained` differs, the model-sensitivity fix has headroom.
+
 ## Sequencing
 
 1. Diagnostic first (quantify the current incoherence for B — the default).
