@@ -117,6 +117,23 @@ a new branch alongside `per_sample_alpha` / `hybrid_head`, gated on the
 it dilutes the balanced mix. More epochs (ep140) overfit the ssim2-labeled pairs: CID22
 drops, imazen-26 rises — the ssim2↔human-MOS trade in miniature. Seed-confirm in progress.
 
+## Seed-confirm (2026-07-16) — K24 is the peak, but seed variance is real
+
+| config | CID22 | imazen-26 | nonphoto |
+|---|---|---|---|
+| k24 seed 13 | 0.8307 | **0.8803** | 0.8949 |
+| k24 seed 17 | 0.8291 | 0.8767 | 0.8909 |
+| k24 seed 23 | 0.8140 | 0.8643 | 0.8821 |
+| k32 seed 13 | 0.8301 | 0.8687 | 0.8817 |
+
+**K24 is the capacity sweet spot** — K32 regresses (imazen-26 0.869 < K24's 0.880), so
+more pieces overfit. **Seed variance is meaningful**: K24 imazen-26 = 0.874 ± ~0.009 across
+3 seeds. The median/mean clearly beats A (0.862); nonphoto wins robustly (worst seed 0.882 >
+A's 0.878); but the WORST seed (s23, 0.864) only ties A on imazen-26. Min-max RankNet with
+subgradient-to-active-piece can leave pieces under-trained on a bad init (the classic
+min/max "dead unit" issue). **A ship should pick best-of-N seeds** validated on a train-side
+held-out (CID22 is validation-only, can't select on it). s13 is currently best.
+
 ## Reproducibility gate — PASSED (2026-07-16)
 
 `bake_verdict`'s real-runtime forward on the k16 bake matches the in-process trainer eval
