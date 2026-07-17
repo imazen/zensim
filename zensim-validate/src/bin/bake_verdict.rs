@@ -306,6 +306,18 @@ const CORPORA: &[Corpus] = &[
         enable_per_band: false,
     },
     Corpus {
+        name: "imazen26",
+        display: "imazen-26 real-codec (held-out, ssim2)",
+        // BROAD ssim2-agreement axis (2026-07-16, user "eval on imazen26"): a
+        // 120k stride subsample of the canonical-picker-2026-06-27 held-out TEST
+        // split (origin {7,9}) across 4 real lossy codecs (zenjpeg/zenavif/zenjxl/
+        // zenwebp); `human_score` = score_ssim2, so SROCC here = rank-agreement
+        // with ssim2 on real modern-codec output. The nonphoto slot's all-content,
+        // all-codec sibling. In the default features root.
+        filename: "imazen26_test_120k_2026-07-16.parquet",
+        enable_per_band: false,
+    },
+    Corpus {
         name: "hf_nearlossless",
         display: "HF near-lossless (held-out refs)",
         // THE near-lossless axis (added 2026-07-15). 72% of its cells sit above
