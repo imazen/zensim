@@ -1583,6 +1583,7 @@ identity._\n",
         let konjnd = find("KonJND");
         let aic3 = find("AIC-3");
         let nonphoto = find("non-photo");
+        let imazen26 = find("real-codec");
 
         // G1: dynamic range — pool all dial-space scores, check p5/p95.
         let mut pooled: Vec<f64> = results
@@ -1621,6 +1622,12 @@ identity._\n",
         // this is the standing detector for "non-photo content crashes" (§8.34/§8.35).
         // Only scored when the nonphoto corpus is in the run (default set includes it).
         let gnp = nonphoto.map(|r| soft_gate(r.srocc, 0.85, 0.93));
+        // G-IM26: ssim2-agreement on real-codec output (added 2026-07-16, user
+        // "make imazen-26 a first-class gate"). The broad sibling of G-NP over all
+        // content + all 4 real lossy codecs. B (excluded from bigcodec training)
+        // scores ~0.84 here; an MLP that absorbed bigcodec reaches ~0.95 — the
+        // second axis to G7's CID22. Floor 0.85, target 0.95.
+        let gim26 = imazen26.map(|r| soft_gate(r.srocc, 0.85, 0.95));
 
         buf.push_str("\n## CODEC_TARGET_GOALS.md scorecard (measurable subset)\n\n");
         buf.push_str("| Goal | Measure | Value | Soft score |\n");
@@ -1660,6 +1667,20 @@ identity._\n",
                 "| G-NP non-photo rank | imazen-26 SROCC ≥0.85 (target 0.93) | {:.4} | {:.2} |{flag}\n",
                 r.srocc,
                 gnp.unwrap_or(0.0),
+            ));
+        }
+        if let Some(r) = imazen26 {
+            // The ssim2-agreement axis on real codec output. B ≈ 0.84 (never
+            // trained on bigcodec); bigcodec-absorbing MLPs ≈ 0.95.
+            let flag = if r.srocc < 0.85 {
+                " ⚠ weak ssim2-agreement on real-codec output"
+            } else {
+                ""
+            };
+            buf.push_str(&format!(
+                "| G-IM26 ssim2-agree | imazen-26 real-codec SROCC ≥0.85 (target 0.95) | {:.4} | {:.2} |{flag}\n",
+                r.srocc,
+                gim26.unwrap_or(0.0),
             ));
         }
         // Weighted composite per the doc's priority order (G1=3, G8=2.5,
