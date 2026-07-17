@@ -105,9 +105,19 @@ the loop. Every metric decision serves this:
   corpus in bake_verdict. INCLUDE in training + eval.
 - **Negative-rich data**: `canonical-2026-07-15/train/kadis_negrich.parquet` — the
   negative-dial-tail training corpus.
-- **bigcodec's cvvdp/iwssim ARE backfilled in sidecar parquets** — the depth-iter
+- **bigcodec's cvvdp/iwssim ARE backfilled** (the depth-iter
   `bigcodec_train_120k_stride.parquet` is ssim2-only, but the metrics exist
-  elsewhere; JOIN the sidecars rather than assuming they're missing.
+  elsewhere). CONCRETE (audited 2026-07-16): bigcodec cells WITH `score_cvvdp` +
+  `score_iwssim` (99.6%/100% non-null, feature-space, f0..f371) live at
+  **`/mnt/v/output/zensim-multicodec-probe/bigcodec_mm6_traindigits_2026-07-02.parquet`**
+  (1.56M rows; 6 codecs + jxl-hqfill, NO avif — "mm6"). Authoritative per-encode
+  metric sidecar (all 6 codecs, 4.18M rows, key=`encoded_filename`/`encode_sha`):
+  `/mnt/v/datasets/fill4-6codec-2026-07-01/fill4metrics_sidecar_patched_2026-07-02.parquet`
+  + JXL near-lossless top-up `hqfill_7metric_sidecar_2026-07-02.parquet`. The
+  120k-stride file dropped `encoded_filename`, so the fallback fingerprint to
+  rejoin it is `(ref_basename, round(human_score,9), round(f0..f2,9))` (per
+  `scripts/v_next/linear_projections_2026-07-03.py:1064`). Column names differ:
+  mm6 uses `score_cvvdp`/`score_iwssim`, canonical uses `cvvdp_score`/`iwssim`.
 - **CVVDP/IW-SSIM mix training targets**: safesyn/kadid/tid/cid22_train carry
   `iwssim`, `cvvdp_score`, and `mix_cv{25,50,75}_iw{75,50,25}` (all positive-
   direction, [0,100]). Use them (`train_minmax --synth-target`, or the trainer's
