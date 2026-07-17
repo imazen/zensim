@@ -152,10 +152,16 @@ bit-exact mirrors like the per-sample-α head.
 | min-max k24 (in-proc) | 0.831 | **0.880** | **0.895** | (expected same) |
 
 **The min-max wins the ssim2 north-star decisively** (imazen-26 +0.018/nonphoto +0.017 vs A;
-+0.047/+0.042 vs B) while being the CLEANEST dial we have: 98.15% monotonicity, **0% flat/
-dead-zone** across the densified multi-codec q-sweep (vs V0_5 ships 57-76% tied, Tuner 0.44%
-tied). G3 PASSES. G1 fails ONLY because the raw range is [−11.5, 14.8] not [0,100] — a
-monotone output spline fixes it (rank-invariant, doesn't touch these SROCCs).
++0.047/+0.042 vs B). That is its ONE real advantage.
+
+**Dial cleanliness is a WASH vs the current A/B ships (corrected 2026-07-16 — do not
+overclaim).** Measured DIAL panel: min-max mono 0.9771 / **0% flat**; A_v47 0.9782 / 0% flat;
+B_linear 0.9792 / 0% flat. All three are clean, dead-zone-free monotone dials — the min-max
+is COMPARABLE (marginally lower mono, within noise), NOT cleaner. The "0% flat vs V0_5 ships
+57-76% tied" comparison was to OLD ships; the current A/B are already 0% flat. So the
+min-max's value is purely the ssim2-north-star rank, not the dial. After the [0,100] spline
+(18 knots, y-range [0,95.1]): G1 PASS (dial p5/p95 10.4/94.8), G3 PASS (0.9771 mono), rank
+unchanged (CID22 0.8307, imazen-26 0.8803, nonphoto 0.8938).
 
 **The cost is CID22 (human MOS): −0.035 vs A, −0.046 vs B.** The min-max's capacity fits the
 ssim2 training labels tightly (all of safesyn/bigcodec/kadis are ssim2-anchored), so it
