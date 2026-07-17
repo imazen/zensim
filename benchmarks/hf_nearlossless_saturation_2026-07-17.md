@@ -81,3 +81,37 @@ feature_shaping "less is more" verdict + "nothing robustly beats B".
 Follow-on (untested): a PER-FEATURE transform exemption — apply transforms only to
 features that don't carry near-lossless signal — could in principle keep both, but
 needs a near-lossless-discriminability analysis to pick the exempt set.
+
+## STRATEGIC REFRAME — near-lossless is NOT universal; it's a deep-MLP+transforms failure
+
+Raw HF SROCC across architectures (strip spline):
+
+| bake | raw HF | imazen-26 | arch |
+|---|---|---|---|
+| B (shipped linear) | **0.614** | 0.841 | linear + winsor |
+| A (v47) | 0.622 | 0.862 | small MLP |
+| min-max k24 | 0.568 | 0.880 | monotone, same transforms |
+| fs_none | 0.188 | 0.865 | deep MLP, no transforms |
+| fs_minlift020 | 0.027 | 0.949 | deep MLP + transforms |
+
+**B, A, and the min-max all rank near-lossless ~0.6** — near-lossless is NOT a
+universal weak zone. It is SPECIFICALLY the deep MLP + transforms that breaks it.
+So fs_minlift020's imazen-26 0.949 is a **mid-quality OVERFIT**: the depth + shaping
+fit the bulk of the imazen-26 distribution but fail to generalize to the near-lossless
+tail (0.027). The min-max uses the SAME transforms yet keeps HF 0.568 — so it's the
+depth/capacity (non-monotone overfit), compounded by transforms, not the transforms
+alone. The simpler / monotone models sacrifice the ssim-2 ceiling but stay coherent
+across the WHOLE quality range — which is what a dial needs.
+
+## Retrain confirmation (deterministic)
+
+- `fshf_base` (control) = fs_minlift020 EXACTLY: HFraw 0.0270, imazen-26 0.9490
+  (recipe reproduces).
+- `fshf_hqb4` (--high-q-boost 4): HFraw 0.0108 (WORSE), imazen-26 0.9092 (dropped).
+  high-q-boost destabilizes — you can't upweight rows the features don't separate.
+
+**Bottom line:** fs_minlift020 is an ssim-2-mid-quality specialist that cannot serve
+as a general dial (dead near-lossless zone, and the levers to fix it forfeit the
+ceiling → back to B). This is WHY the depth-MLP campaign concluded "nothing beats B":
+B's linear simplicity is what keeps it coherent across the full range including the
+near-lossless tail the depth MLPs overfit past.
