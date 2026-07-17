@@ -168,6 +168,30 @@ ssim2 training labels tightly (all of safesyn/bigcodec/kadis are ssim2-anchored)
 becomes a better ssim2-predictor and a worse human-MOS predictor — the documented
 ssim2-favoring bias, sharpened by expressiveness. No min-max config reached A's CID22 0.866.
 
+## CID22-recovery experiment — the CVVDP/IW-SSIM mix is a CID22↔ssim2 KNOB (2026-07-16)
+
+`train_minmax --synth-target <col>` switches the ssim2-labeled synth groups
+(safesyn/cid22_train; bigcodec/kadis fall back to ssim2 — they lack the columns in
+the depth-iter parquet; `bigcodec_mm6_traindigits_2026-07-02.parquet` has them for
+a stronger rerun). kadid/tid keep their real DMOS/MOS. K24 seed 13:
+
+| synth target | CID22 | imazen-26 | nonphoto |
+|---|---|---|---|
+| human_score (ssim2 baseline) | 0.831 | **0.880** | **0.895** |
+| mix_cv25_iw75 | 0.848 | 0.861 | 0.871 |
+| iwssim (pure IW-SSIM) | **0.859** | 0.847 | 0.860 |
+| mix_cv50_iw50 | (pending) | | |
+| mix_cv75_iw25 | (pending) | | |
+
+**IW-SSIM recovers CID22 to 0.859 (+0.028, ≈ A's 0.866)** — the requested recovery
+WORKS. But it is a TRADEOFF, not a free lunch: more IW-SSIM → higher CID22 (human
+MOS), lower imazen-26 + nonphoto (ssim2 north-star). ssim2 and IW-SSIM rank real
+content differently; the mix interpolates. The frontier runs ~parallel to A and
+does NOT dominate it (no point reaches CID22 ≥ 0.866 AND imazen-26 ≥ 0.862). So the
+mix gives the user a DIAL between "best ssim2/nonphoto" (ssim2) and "best human-MOS"
+(iwssim), with mix_cv25_iw75 the balanced midpoint. Open: does MULTI-TARGET
+(ssim2+iwssim pairs together) or bigcodec-on-iwssim beat the single-target frontier?
+
 ## Ship framing (user-gated operating point)
 
 The min-max is a NEW point on the monotone-dial frontier: **best ssim2 north-star + cleanest
