@@ -113,6 +113,115 @@ impl MinMaxMonotone {
     }
 }
 
+/// Minibatch RankNet training for a min-max monotone head. `groups[i]` is
+/// `(features_row_major, scores)` for one corpus: `features` is `n_rows *
+/// n_features` and `scores[r]` is that row's quality label (higher = better).
+/// Pairs are drawn WITHIN a group (a codec/quality ladder), the natural unit for
+/// a dial. The sub-gradient flows only to the active (argmin-group, argmax-piece)
+/// linear of each side; weights are sign-projected after every step so the
+/// result is monotone-by-construction throughout.
+///
+/// Returns the trained head. The caller fits the output→[0,100] dial spline.
+#[allow(clippy::too_many_arguments)]
+pub fn train_ranknet(
+    groups: &[(Vec<f64>, Vec<f64>)],
+    sign: &[f64],
+    k: usize,
+    j: usize,
+    n_features: usize,
+    epochs: usize,
+    pairs_per_epoch: usize,
+    lr: f64,
+    seed: u64,
+) -> MinMaxMonotone {
+    let mut state = seed
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(0xDEAD_BEEF_CAFE_BABE)
+        | 1;
+    let mut u = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state >> 11) as f64 / (1u64 << 53) as f64
+    };
+    // He-ish init scaled small so the initial min-max is well-conditioned.
+    let scale = (1.0 / n_features as f64).sqrt() * 0.5;
+    let w: Vec<f64> = (0..k * j * n_features).map(|_| (u() * 2.0 - 1.0) * scale).collect();
+    let b: Vec<f64> = (0..k * j).map(|_| (u() * 2.0 - 1.0) * scale).collect();
+    let mut m = MinMaxMonotone { k, j, n_features, w, b, sign: sign.to_vec() };
+    m.project();
+
+    // Adam state over the FULL parameter vector (w then b). Sparse updates —
+    // only active pieces move each step — but Adam moments are kept dense for
+    // simplicity; unused slots just decay.
+    let np = k * j * n_features + k * j;
+    let (mut mt, mut vt) = (vec![0.0f64; np], vec![0.0f64; np]);
+    let (b1, b2, eps) = (0.9f64, 0.999f64, 1e-8f64);
+    let mut t = 0i32;
+
+    // group sampling weighted by row count (bigger ladders contribute more pairs)
+    let group_rows: Vec<usize> = groups.iter().map(|(f, _)| f.len() / n_features).collect();
+    let total: usize = group_rows.iter().sum();
+
+    for _ in 0..epochs {
+        for _ in 0..pairs_per_epoch {
+            // pick a group ∝ rows, then two distinct rows in it
+            let mut pick = (u() * total as f64) as usize;
+            let mut gi = 0;
+            for (i, &r) in group_rows.iter().enumerate() {
+                if pick < r {
+                    gi = i;
+                    break;
+                }
+                pick -= r;
+            }
+            let nr = group_rows[gi];
+            if nr < 2 {
+                continue;
+            }
+            let (feats, scores) = &groups[gi];
+            let ra = (u() * nr as f64) as usize;
+            let mut rb = (u() * nr as f64) as usize;
+            if rb == ra {
+                rb = (rb + 1) % nr;
+            }
+            let xa = &feats[ra * n_features..(ra + 1) * n_features];
+            let xb = &feats[rb * n_features..(rb + 1) * n_features];
+            // target: +1 if a is higher quality than b
+            let tgt = if scores[ra] > scores[rb] { 1.0 } else { -1.0 };
+            let (ya, ga, ha) = m.forward(xa);
+            let (yb, gb, hb) = m.forward(xb);
+            // RankNet: want tgt*(ya-yb) large. loss = softplus(-tgt*(ya-yb)).
+            // d loss / d(ya-yb) = -tgt * sigmoid(-tgt*(ya-yb)).
+            let d = ya - yb;
+            let sig = 1.0 / (1.0 + (tgt * d).exp());
+            let dl_dd = -tgt * sig;
+            t += 1;
+            let bc1 = 1.0 - b1.powi(t);
+            let bc2 = 1.0 - b2.powi(t);
+            // apply to the two active pieces: +dl_dd to a's piece, -dl_dd to b's.
+            let mut step = |g: usize, h: usize, x: &[f64], grad_y: f64| {
+                let base = (g * j + h) * n_features;
+                for f in 0..n_features {
+                    let gi = base + f;
+                    let grad = grad_y * x[f];
+                    mt[gi] = b1 * mt[gi] + (1.0 - b1) * grad;
+                    vt[gi] = b2 * vt[gi] + (1.0 - b2) * grad * grad;
+                    m.w[gi] -= lr * (mt[gi] / bc1) / ((vt[gi] / bc2).sqrt() + eps);
+                }
+                let bi = k * j * n_features + g * j + h;
+                mt[bi] = b1 * mt[bi] + (1.0 - b1) * grad_y;
+                vt[bi] = b2 * vt[bi] + (1.0 - b2) * grad_y * grad_y;
+                m.b[g * j + h] -= lr * (mt[bi] / bc1) / ((vt[bi] / bc2).sqrt() + eps);
+            };
+            step(ga, ha, xa, dl_dd);
+            step(gb, hb, xb, -dl_dd);
+            m.project();
+        }
+    }
+    m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +286,76 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Training learns to RANK a non-linear monotone target — the point of
+    /// min-max over a single linear. Target = `max(2·x0 + x1, x2 − x3)`, a
+    /// monotone piecewise-linear (increasing in x0/x1/x2, decreasing in x3).
+    /// A single linear can't fit a max-of-two; the min-max (K≥1, J≥2) can.
+    #[test]
+    fn training_learns_to_rank_monotone_target() {
+        let nf = 4;
+        let sign = vec![1.0, 1.0, 1.0, -1.0];
+        let mut state = 0x1234_5678_9ABC_DEF0u64;
+        let mut u = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let target = |x: &[f64]| (2.0 * x[0] + x[1]).max(x[2] - x[3]);
+        // one "group" (ladder) of 400 rows
+        let n = 400;
+        let mut feats = Vec::with_capacity(n * nf);
+        let mut scores = Vec::with_capacity(n);
+        for _ in 0..n {
+            let x: Vec<f64> = (0..nf).map(|_| u() * 2.0 - 1.0).collect();
+            scores.push(target(&x));
+            feats.extend_from_slice(&x);
+        }
+        let m = train_ranknet(
+            &[(feats.clone(), scores.clone())],
+            &sign,
+            2, // K groups
+            2, // J pieces (needs ≥2 to fit the max)
+            nf,
+            60,
+            2000,
+            5e-3,
+            7,
+        );
+        // Spearman of predictions vs target on the training ladder.
+        let pred: Vec<f64> = (0..n)
+            .map(|r| m.forward(&feats[r * nf..(r + 1) * nf]).0)
+            .collect();
+        let srocc = spearman(&pred, &scores);
+        assert!(
+            srocc > 0.90,
+            "min-max should rank a monotone piecewise-linear target well; got SROCC {srocc:.3}"
+        );
+    }
+
+    fn spearman(a: &[f64], b: &[f64]) -> f64 {
+        fn ranks(v: &[f64]) -> Vec<f64> {
+            let mut idx: Vec<usize> = (0..v.len()).collect();
+            idx.sort_by(|&i, &j| v[i].partial_cmp(&v[j]).unwrap());
+            let mut r = vec![0.0; v.len()];
+            for (rank, &i) in idx.iter().enumerate() {
+                r[i] = rank as f64;
+            }
+            r
+        }
+        let (ra, rb) = (ranks(a), ranks(b));
+        let n = a.len() as f64;
+        let mean = (n - 1.0) / 2.0;
+        let (mut num, mut da, mut db) = (0.0, 0.0, 0.0);
+        for i in 0..a.len() {
+            let (x, y) = (ra[i] - mean, rb[i] - mean);
+            num += x * y;
+            da += x * x;
+            db += y * y;
+        }
+        num / (da.sqrt() * db.sqrt())
     }
 
     /// `project` zeroes dropped features and clamps signs.
