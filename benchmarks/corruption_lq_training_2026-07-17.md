@@ -171,3 +171,29 @@ cl_tfm's in-model corruption gate (~100% best-of-N) is a strict IMPROVEMENT over
 established Stage-2-butteraugli approach (72%, `project_corruption_corpus_butter_wins`)
 AND folds negatives + LQ into the same forward pass — that's cl_tfm's genuine advance
 regardless of which routing option ships.
+
+## n=5 best-of-N CONFIRMED (2026-07-17)
+
+| seed | corruption | LQ(negrich) | CID22 | imazen26 | nonphoto | KonJND | HF | survivor? |
+|---|---|---|---|---|---|---|---|---|
+| s13 | 100%  | 0.912 | 0.883 | 0.940 | 0.939 | 0.761 | ~0    | ✓ (best) |
+| s31 | 100%  | 0.907 | 0.868 | 0.930 | 0.932 | 0.679 | 0.167 | ✓ |
+| s23 | 72.5% | 0.906 | 0.869 | 0.937 | 0.937 | 0.732 | ~0    | ✓ |
+| s7  | 74.3% | 0.148 | 0.857 | 0.886 | 0.890 | 0.730 | ~0    | ✗ collapsed |
+| s41 | 60.4% | 0.132 | 0.868 | 0.868 | 0.874 | 0.686 | ~0    | ✗ collapsed |
+
+- Collapse rate 2/5 (psa-α known mode; documented v48 2/9). Collapse is UNAMBIGUOUS
+  (LQ 0.13 vs 0.91) → `held-out kadis_negrich < 0.5` is a clean best-of-N filter.
+- Survivor cluster (s13,s31,s23): LQ 0.91 (rock-solid), corruption 72-100%,
+  CID22 0.868-0.883, imazen26 0.930-0.940, nonphoto 0.932-0.939, KonJND 0.679-0.761.
+- s13 is the best survivor (top corruption+CID22+imazen26+KonJND) and REPRESENTATIVE
+  (s31 also hits corruption 100%). Ship-viable via best-of-N.
+- HF ~0 for all except s31 (0.167) — near-lossless dead regardless of seed (far below
+  B's 0.614); confirms near-lossless is out of cl_tfm's reach by construction (tanh).
+
+**FINAL — cl_tfm is a shippable psa-α best-of-N bake. The seed-confirm downgraded the
+headline (corruption 100→robust 72-100, LQ 0.91 holds, CID22 0.88 holds) but did NOT
+falsify the recipe: corruption-training beats Stage-2-butteraugli, kadis_negrich
+delivers the LQ tail, the tail training delivers negatives — all seed-robust in the
+survivor cluster.** Remaining decision is routing (ship alone as sibling vs cl_tfm⟷B
+router for near-lossless) — the user's call.
