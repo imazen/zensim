@@ -49,6 +49,8 @@ use crate::adam_simd;
 mod loss_norm_in_norm;
 
 mod goals;
+
+pub mod minmax_monotone;
 pub use goals::{ValidationPolicy, compute_goal_scores};
 
 /// Knobs for [`train_mlp`]. Defaults match the V0_4 placeholder
