@@ -142,35 +142,77 @@ fn main() {
         .unwrap_or_else(|| "target_score".to_string());
     let dial_target_scale = arg(&args, "--dial-target-scale", 1.0f64);
     let dial_edges = arg(&args, "--dial-edges", 18usize);
+    // Target column for the SSIM2-labeled synth groups (safesyn/cid22_train/
+    // bigcodec/kadis). Recover-CID22 experiment: set to a cvvdp/iwssim mix
+    // (mix_cv25_iw75.. — all positive-direction, [0,100]) so the dominant synth
+    // data ranks by a more human-MOS-correlated proxy than ssim2. kadid/tid KEEP
+    // their real DMOS/MOS (human labels — don't replace with a proxy). Per-group
+    // fallback to human_score when the column is absent/null (bigcodec/kadis lack
+    // cvvdp/iwssim; cid22_train's mix is null).
+    let synth_target: String = args
+        .iter()
+        .position(|a| a == "--synth-target")
+        .and_then(|i| args.get(i + 1).cloned())
+        .unwrap_or_else(|| "human_score".to_string());
 
     let tf = load_transforms(min_lift);
     let sign = load_sign();
     let n_pin = sign.iter().filter(|&&s| s != 0.0).count();
-    eprintln!("min-max: K={k} J={j} epochs={epochs} pairs={pairs} lr={lr} | {n_pin}/{N} pinned monotone, {} transforms",
+    eprintln!("min-max: K={k} J={j} epochs={epochs} pairs={pairs} lr={lr} synth-target={synth_target} | {n_pin}/{N} pinned monotone, {} transforms",
         tf.iter().filter(|(t,_)| *t != zenpredict::FeatureTransform::Identity).count());
 
-    // base_tfm train groups (name, path). Cap huge groups for a fast probe.
-    let train_specs: &[(&str, String, usize)] = &[
-        ("safesyn", format!("{CAN}/safesyn.parquet"), cap_safesyn),
-        ("cid22_train", format!("{CAN}/cid22_train.parquet"), 0),
-        ("kadid", format!("{CAN}/kadid.parquet"), 0),
-        ("tid", format!("{CAN}/tid.parquet"), 0),
-        ("konjnd", format!("{CAN}/konjnd-dense-norm.parquet"), 0),
-        ("bigcodec", "/mnt/v/output/zensim/depth-iter/bigcodec_train_120k_stride.parquet".into(), cap_bigcodec),
-        ("kadis", "/mnt/v/output/zensim/depth-iter/kadis_train_60k_stride.parquet".into(), cap_kadis),
+    // base_tfm train groups (name, path, cap, is_synth). `is_synth` = ssim2-labeled
+    // groups that get the `--synth-target` override; kadid/tid/konjnd keep their
+    // human_score (real DMOS/MOS/PJND — never replace human labels with a proxy).
+    let train_specs: &[(&str, String, usize, bool)] = &[
+        ("safesyn", format!("{CAN}/safesyn.parquet"), cap_safesyn, true),
+        ("cid22_train", format!("{CAN}/cid22_train.parquet"), 0, true),
+        ("kadid", format!("{CAN}/kadid.parquet"), 0, false),
+        ("tid", format!("{CAN}/tid.parquet"), 0, false),
+        ("konjnd", format!("{CAN}/konjnd-dense-norm.parquet"), 0, false),
+        ("bigcodec", "/mnt/v/output/zensim/depth-iter/bigcodec_train_120k_stride.parquet".into(), cap_bigcodec, true),
+        ("kadis", "/mnt/v/output/zensim/depth-iter/kadis_train_60k_stride.parquet".into(), cap_kadis, true),
     ];
 
     // Load + transform train; compute standardizer (mean/std) from the transformed pool.
     let mut groups_t: Vec<(Vec<Vec<f64>>, Vec<f64>)> = Vec::new();
     let (mut sum, mut sumsq, mut cnt) = (vec![0.0f64; N], vec![0.0f64; N], 0usize);
-    for (name, path, cap) in train_specs {
-        let g = match load_parquet(&std::path::PathBuf::from(path), name, "human_score", 1.0) {
-            Ok(g) => g,
+    for (name, path, cap, is_synth) in train_specs {
+        // Synth groups use --synth-target; per-group fallback to human_score when
+        // the column is absent (bigcodec/kadis lack cvvdp/iwssim) or mostly-null
+        // (cid22_train's mix). Non-synth groups always use human_score.
+        let want = if *is_synth { synth_target.as_str() } else { "human_score" };
+        let load_col = |col: &str| load_parquet(&std::path::PathBuf::from(path), name, col, 1.0);
+        let (g, used) = match load_col(want) {
+            Ok(g) => {
+                let fin = g.human_scores.iter().filter(|v| v.is_finite()).count();
+                if want != "human_score" && fin * 2 < g.human_scores.len() {
+                    match load_col("human_score") {
+                        Ok(g2) => (g2, "human_score"),
+                        Err(e) => {
+                            eprintln!("  skip {name}: {e}");
+                            continue;
+                        }
+                    }
+                } else {
+                    (g, want)
+                }
+            }
+            Err(_) if want != "human_score" => match load_col("human_score") {
+                Ok(g2) => (g2, "human_score"),
+                Err(e) => {
+                    eprintln!("  skip {name}: {e}");
+                    continue;
+                }
+            },
             Err(e) => {
                 eprintln!("  skip {name}: {e}");
                 continue;
             }
         };
+        if used != want {
+            eprintln!("  {name}: target {want:?} unavailable → fell back to human_score");
+        }
         let stride = if *cap > 0 && g.feature_rows.len() > *cap {
             g.feature_rows.len() / *cap
         } else {

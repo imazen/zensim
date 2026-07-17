@@ -67,6 +67,73 @@ tasks. Reading order on resume:
    experiments
 7. Run `TaskList` and work on the lowest unblocked task
 
+## RECURRING PRIORITIES + ASSETS — do not re-forget (consolidated 2026-07-16)
+
+The user has had to repeat these across the last week. They are load-bearing;
+re-search + honor them EVERY session. This section exists because they kept
+getting lost (wrong dashboard picked twice, HF parquets forgotten, bigcodec
+metrics assumed absent, negative-value + diffmap-coherence requirements dropped).
+
+### The product = a CONSISTENT DIAL (not just a ranker)
+
+Users type a target zensim; the codec tunes to hit it, using the diffmap to close
+the loop. Every metric decision serves this:
+- **Monotone in codec quality** (so target-hitting converges) + **bounded [0,100]**.
+- **NEGATIVE zensim values MUST work** — inputs worse than the worst codec output
+  score BELOW 0 (do NOT clamp at 0; the lower spline extrapolation + profile
+  `extrapolate_score` carry it). Negative-tail training data:
+  `canonical-2026-07-15/train/kadis_negrich.parquet` (negative-rich).
+- **The diffmap MUST match the scalar** — `DiffmapResult.diffmap()` must reflect
+  the SAME model as `.score()`, so the per-block "where to adjust" signal drives
+  the closed loop. Currently INCOHERENT (diffmap uses per-scale SSIM weights,
+  scalar uses the 372-feat model) — this is the #1 closed-loop blocker.
+
+### Evaluation north stars (priority order)
+
+- **ssim2 is the best north star for NON-PHOTO content** (user directive).
+  `imazen26` (real-codec ssim2) + `nonphoto` (non-photo ssim2) are FIRST-CLASS
+  gates in bake_verdict (G-IM26, G-NP). Eval every ship-grade bake on them.
+- **CID22** = gold human-MOS holdout (validation only). CID22 trades are user-gated.
+- **HF near-lossless is the metric's WEAK ZONE** — high-fidelity / near-lossless
+  (B8/B9, q75-100) is where compression product decisions live AND where every
+  learning metric is weakest. Always eval AND train it.
+
+### Data assets that keep getting forgotten
+
+- **HF near-lossless parquets**: `canonical-2026-07-15/train/hf_nearlossless_{train,val}.parquet`
+  (900 + 300 rows × 372 feat; targets human_score + ssim2_gpu). The `hf_nearlossless`
+  corpus in bake_verdict. INCLUDE in training + eval.
+- **Negative-rich data**: `canonical-2026-07-15/train/kadis_negrich.parquet` — the
+  negative-dial-tail training corpus.
+- **bigcodec's cvvdp/iwssim ARE backfilled in sidecar parquets** — the depth-iter
+  `bigcodec_train_120k_stride.parquet` is ssim2-only, but the metrics exist
+  elsewhere; JOIN the sidecars rather than assuming they're missing.
+- **CVVDP/IW-SSIM mix training targets**: safesyn/kadid/tid/cid22_train carry
+  `iwssim`, `cvvdp_score`, and `mix_cv{25,50,75}_iw{75,50,25}` (all positive-
+  direction, [0,100]). Use them (`train_minmax --synth-target`, or the trainer's
+  `--target-column`) to recover CID22 from the ssim2-shaping bias. bigcodec/kadis
+  need the sidecar join first. NOTE: pure-cvvdp-SCALAR target is a known dead-end
+  ([[feedback_cvvdp_scalar_target_dead_end]]); a MIX / IW-SSIM is the ask.
+- **High-quality-zone HUMAN data (untapped, local)**: JPEG-AI-SDR25
+  (`/mnt/v/datasets/jpeg-ai-sdr25/`, 95k triplets, q75-100), AIC-3 raw triplets
+  (`/mnt/v/datasets/aic3-btc-ptc/`, 420k), AIC-HDR2025 (`/mnt/v/datasets/aic-hdr2025/`).
+
+### THE dashboard (the "pretty one" the user means)
+
+`scripts/v_next/bandwise_dashboard.py` — the every-graph dashboard. THIS is the
+combined dashboard; EXTEND it, don't rebuild a thinner one. Two modes:
+- `--bakes label:path.bin,...` — compare bakes directly (shipped B auto-prepended;
+  ssim2/cvvdp/butteraugli refs auto-added).
+- `--from-search /mnt/v/output/zensim/reports/blend/blend_results_r7_2026-07-15.json`
+  — the blend-candidate view.
+Plots: per-bake scatter+trend, grouped 10-band SROCC bars, calibration curve,
+residual, candlestick, SROCC heatmap, 2-panel Pareto trade (CID22 vs nonphoto /
+KonJND), composite ranking bar, per-codec dial plots + dial-mono %, full Mohammadi
+stat panel (incl. low-tail/high-tail SROCC), 10-band table, honesty/provenance
+panels. Run from repo root (imports `blend_lib` from cwd). `bake_report.py` adds
+the 2×4 8-corpus scatter grid with 4PL fit + PWRC (reports/); `bake_verdict --html`
+is the single-bake Rust report.
+
 ## Training goals (priority order, locked 2026-05-10, revised 2026-05-11)
 
 zensim is a **user-facing quality dial** — users type a target zensim score
