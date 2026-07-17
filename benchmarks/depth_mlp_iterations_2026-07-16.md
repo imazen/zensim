@@ -304,3 +304,37 @@ metric. This is the honest, measured end of the "beat B" pursuit: B is not beate
 - **Not a swap yet** — a swap needs the dial panel (G1/G3 monotonicity) + size
   (2-layer f32 is ~big; f16 repack) + the full methodology doc gates per the
   ship policy. This doc is the numbers half.
+
+## MULTI-AXIS REFRAME (2026-07-16 eve — user "eval on imazen26", "nonphoto/ssim2 matters")
+
+Everything above measured rank on CID22 (human MOS) + the panel. Adding
+**imazen-26** as a first-class gate (G-IM26: ssim2-agreement over 962k held-out
+real-codec cells across 4 lossy codecs, origin {7,9}) does not soften the "depth
+is a better ranker" conclusion — it makes it **dominance**:
+
+| model | CID22 | imazen-26 (ssim2) | nonphoto | dial |
+|---|---|---|---|---|
+| **B** (shipped linear) | 0.876 | 0.841 | 0.861 | viable ✓ |
+| A_v47 | 0.866 | 0.862 | 0.878 | viable ✓ |
+| no_tfm | 0.868 | 0.865 | 0.877 | viable ✓ |
+| **base_tfm** (psa+tanh+tfm) | 0.856 | 0.948 | 0.952 | viable ✓ (G1) |
+| **depth_v2** | **0.890** | **0.956** | **0.961** | dead (mono 0.55) |
+
+- **depth_v2 DOMINATES B on every rank axis** (+0.013 CID22, +0.114 imazen-26,
+  +0.101 nonphoto) — the rank/selection-trail champion, outright. Dial stays
+  non-monotone (shared-anchor refit fails; a monotone spline can't fix
+  non-monotone-in-q), so it's a *ranker*, confirming the SOTA rank-trail role.
+- **WHY the gap:** B is linear and *excluded* from bigcodec (it poisons a linear
+  model's CID22 per DATASET_HISTORY), so it never learned the real-codec ssim2
+  surface → 0.841. The MLP absorbs bigcodec via capacity → both axes. Held-out.
+- **base_tfm is a dial-viable BETTER all-rounder than B** once ssim2-agreement is
+  weighted: imazen-26 +0.107, nonphoto +0.091, dial G1 ✓ (mono 0.929), −0.02 CID22.
+- **The feature transforms are LOAD-BEARING here** (base_tfm 0.948 vs no_tfm
+  0.865) — the earlier "less is more" was an artifact of ignoring nonphoto/ssim2.
+
+So "B is at the achievable frontier" was **CID22-only**. On the multi-axis
+picture the depth/psa MLPs beat B decisively. B still owns a clean dial — but
+base_tfm has that too. Ship path: **depth_v2 as the rank/selection metric**;
+**base_tfm (or a both-axis-sweep variant) as a candidate dial** that beats B once
+ssim2-agreement counts. Both-axis train sweep (cid22/bigcodec weights) is chasing
+a dial-viable variant that also matches B's CID22.
