@@ -27,10 +27,22 @@ fn main() {
         std::process::exit(2);
     }
     let mut block = 32usize;
+    let mut weighting = DiffmapWeighting::default(); // Trained (V0_2 weights)
     let mut i = 2;
     while i + 1 < args.len() {
-        if args[i] == "--block" {
-            block = args[i + 1].parse().unwrap();
+        match args[i].as_str() {
+            "--block" => block = args[i + 1].parse().unwrap(),
+            "--weighting" => {
+                weighting = match args[i + 1].as_str() {
+                    "balanced" => DiffmapWeighting::Balanced,
+                    "trained" => DiffmapWeighting::Trained,
+                    other => {
+                        eprintln!("unknown weighting {other}");
+                        std::process::exit(2);
+                    }
+                }
+            }
+            _ => {}
         }
         i += 2;
     }
@@ -46,7 +58,7 @@ fn main() {
         .compute_with_diffmap(
             &RgbSlice::new(&rpx, w, h),
             &RgbSlice::new(&dpx, w, h),
-            DiffmapWeighting::default(),
+            weighting,
         )
         .expect("diffmap");
     let base_score = base.score();

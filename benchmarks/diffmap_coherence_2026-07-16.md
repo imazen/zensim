@@ -100,6 +100,34 @@ weights, no params.weights) vs `Trained` (V0_2 weights) spatial SROCC — if the
 tie, the weight SOURCE isn't the bottleneck (non-additivity is) and the fix won't
 help; if `Trained` differs, the model-sensitivity fix has headroom.
 
+## REWEIGHTING FIX FALSIFIED (2026-07-16) — measured before building
+
+Balanced-vs-Trained spatial SROCC on B @ q50: **Trained (V0_2 weights) 0.656 vs
+Balanced (fixed Y-dominant, ignores params.weights) 0.675.** The weight SOURCE
+barely matters (Δ0.02, Balanced marginally better). So feeding the model's
+per-feature sensitivity `s_k` — a third weighting — would NOT meaningfully improve
+spatial coherence. The ~0.66 ceiling is the scalar's NON-ADDITIVITY (non-linear IW
+pooling), which no reweighting of the same per-pixel signals can overcome. The
+originally-designed fix (§"The fix" above) is therefore NOT worth building.
+
+**What this means for the closed loop:** the diffmap is already (a) magnitude-
+coherent (pooled SROCC 1.0), and (b) the best available SPATIAL predictor — it
+beats SSE (the codec PSNR default) at predicting where refining raises the scalar
+(0.66 vs 0.44 @ q50, 0.41 vs 0.18 @ q75). So a closed loop steered by the diffmap
+already outperforms the codec default. The diffmap "matches" as well as a per-pixel
+map can for a non-additive scalar.
+
+**If sharper spatial coherence is ever required**, the only lever that can beat the
+non-additivity ceiling is the TRUE per-block gradient — literally the ΔS the
+diagnostic computes (refine block → rescore) — used AS the map. That is exact but
+O(n_blocks) rescores per image; viable as an offline oracle / calibration, not a
+per-frame encoder signal. A cheaper middle path: make the scalar more additive
+(linear pooling) so the existing diffmap becomes its exact gradient — a metric-
+architecture change, not a diffmap change.
+
+Tools: `zensim/examples/diffmap_coherence.rs` (pooled), `diffmap_block_coherence.rs`
+(spatial, `--weighting trained|balanced`, `--block N`).
+
 ## Sequencing
 
 1. Diagnostic first (quantify the current incoherence for B — the default).
