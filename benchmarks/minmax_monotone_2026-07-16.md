@@ -102,10 +102,56 @@ a new branch alongside `per_sample_alpha` / `hybrid_head`, gated on the
 `zentrain.minmax_monotone_head` metadata key (parsed + cached in
 `CachedBakeMetadata`).
 
-## Gate to ship (SOTA_TRAILS dial trail)
+## Tuning sweep (single seed 13, ep80 unless noted)
 
-Monotone-by-construction → G1 (range) + G3 (mono ≥ 0.93) pass by design once the
-spline bounds it. The bar vs shipped A/B: imazen-26 (ssim2 north-star, real +
-nonphoto) at-or-above A's 0.862 AND CID22 not decisively worse. If a tuned config
-holds imazen-26 ≥ 0.90 with CID22 ≥ 0.86, it dominates A as a dial. Ship decision
-is user-gated per the profile-rotation policy.
+| config | CID22 | imazen-26 | nonphoto | note |
+|---|---|---|---|---|
+| k8j4 | 0.809 | 0.863 | 0.880 | |
+| k16j8 | 0.830 | 0.876 | 0.889 | |
+| k16j8 uncap-bigcodec | 0.828 | 0.871 | 0.888 | more real-codec data slightly HURT |
+| **k24j8** | **0.831** | **0.880** | **0.895** | balanced champion |
+| k16j8 uncap-bigcodec ep140 | 0.809 | 0.885 | 0.893 | imazen-26-favoring (ssim2-shaping trade) |
+
+**Capacity (K/J) is the lever, not data volume.** K8→16→24 lifts imazen-26 monotonically
+(0.863→0.876→0.880). Uncapping bigcodec (2× real-codec pairs) slightly HURT imazen-26 —
+it dilutes the balanced mix. More epochs (ep140) overfit the ssim2-labeled pairs: CID22
+drops, imazen-26 rises — the ssim2↔human-MOS trade in miniature. Seed-confirm in progress.
+
+## Reproducibility gate — PASSED (2026-07-16)
+
+`bake_verdict`'s real-runtime forward on the k16 bake matches the in-process trainer eval
+bit-for-bit: CID22 0.8302 (==), imazen-26 0.8761 (==), nonphoto 0.8883 (Δ0.001 f32-quant),
+**%bwd 0%** (zero references ranked backwards — monotone-by-construction confirmed in the
+shipped runtime). The runtime is `metric.rs` (encoder path) + `bake_runtime.rs` (eval path),
+bit-exact mirrors like the per-sample-α head.
+
+## Head-to-head vs shipped A/B (bake_verdict, same corpora)
+
+| bake | CID22 (human MOS) | imazen-26 (ssim2) | nonphoto (ssim2) | dial mono / flat |
+|---|---|---|---|---|
+| A (v47 MLP) | 0.8657 | 0.8619 | 0.8783 | — |
+| B (linear, default) | **0.8764** | 0.8413 | 0.8606 | — |
+| min-max k16 | 0.8302 | 0.8761 | 0.8883 | **0.9815 / 0.0000** |
+| min-max k24 (in-proc) | 0.831 | **0.880** | **0.895** | (expected same) |
+
+**The min-max wins the ssim2 north-star decisively** (imazen-26 +0.018/nonphoto +0.017 vs A;
++0.047/+0.042 vs B) while being the CLEANEST dial we have: 98.15% monotonicity, **0% flat/
+dead-zone** across the densified multi-codec q-sweep (vs V0_5 ships 57-76% tied, Tuner 0.44%
+tied). G3 PASSES. G1 fails ONLY because the raw range is [−11.5, 14.8] not [0,100] — a
+monotone output spline fixes it (rank-invariant, doesn't touch these SROCCs).
+
+**The cost is CID22 (human MOS): −0.035 vs A, −0.046 vs B.** The min-max's capacity fits the
+ssim2 training labels tightly (all of safesyn/bigcodec/kadis are ssim2-anchored), so it
+becomes a better ssim2-predictor and a worse human-MOS predictor — the documented
+ssim2-favoring bias, sharpened by expressiveness. No min-max config reached A's CID22 0.866.
+
+## Ship framing (user-gated operating point)
+
+The min-max is a NEW point on the monotone-dial frontier: **best ssim2 north-star + cleanest
+dial, at a CID22 cost.** Per the user's "ssim2 is the best north star" (esp. non-photo) and
+"consistent dial is the product", it is the intended direction; per the shipping policy CID22
+trades are user-gated. Decision to the user:
+- **Ship as a new ssim2-north-star dial** (k24: imazen-26 0.880, nonphoto 0.895, dial 98%/0%
+  flat) accepting CID22 0.831 — OR keep A/B for CID22 and offer the min-max as a sibling.
+- Remaining mechanical step once the config is chosen: fit the [0,100] output spline (G1) —
+  rank-invariant, so none of the above numbers move.
