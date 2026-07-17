@@ -91,3 +91,26 @@ B's deep-negative tail (mlp_piecewise_negatives_probe §8.31) applies here — r
 + LQ + ssim2 + CID22 + KonJND) for the bulk, and a near-lossless SPECIALIST (B, HF 0.61) at the
 high-q top (q≳90). Two gated projections, not one. That yields all seven. Alternatively, since
 near-lossless is sub-JND (q97≈q99), ship cl_tfm as-is if a flat visually-lossless top is acceptable.
+
+## SEED-CONFIRM — cl_tfm's s13 headline was a LUCKY draw (2026-07-17)
+
+cl_tfm at seeds {13, 7, 23}:
+
+| seed | corr-gate | LQ (kadis_negrich) | CID22 | imazen26 | KonJND |
+|---|---|---|---|---|---|
+| s13 (headline) | 100% | 0.912 | 0.883 | 0.940 | 0.761 |
+| s7  | 74.3% | **0.148** | 0.857 | 0.886 | 0.730 |
+| s23 | 72.5% | 0.906 | 0.869 | 0.937 | 0.732 |
+
+**Robust picture (all 3): corruption ~72-100% (mean ~82%; s13 lucky), LQ UNSTABLE
+(0.91/0.91/0.15 — s7 collapsed), imazen26 0.89-0.94, CID22 0.86-0.88.** The corruption
+gate still averages above butteraugli (72%) but is NOT the reliable 100% s13 showed.
+The s7 LQ collapse (0.148) is a training-instability red flag (likely the psa-α /
+kadis_negrich-weighting interaction). So cl_tfm is a PROMISING recipe, not a
+ship-ready bake: it needs (1) the s7 LQ-collapse diagnosed/stabilized, (2) best-of-N
+seed selection on a train-side held-out. s13 remains the best single draw. The
+underlying wins (corruption training beats butteraugli; kadis_negrich for LQ;
+negatives via the tail training) are real and seed-robust in DIRECTION; the exact
+magnitudes are not. Discipline note: seed-confirm caught this — single-seed headline
+numbers are provisional until confirmed (same lesson as the min-max + triplet + s13
+feature-shaping mirages this program keeps hitting).
