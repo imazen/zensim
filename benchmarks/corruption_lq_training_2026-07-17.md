@@ -43,3 +43,25 @@ Give it the exposure (corruption + kadis_negrich groups) and it beats butteraugl
 - cl_tfm > cl_notfm on ssim2/CID22 (transforms help mid-q); cl_notfm > on LQ/KonJND.
 
 Bakes: `/mnt/v/output/zensim/corr-lq/cl_{tfm,notfm}.bin`.
+
+## Near-lossless is architectural (psa-MLP can't reach B) — capacity + tanh sweep
+
+Chasing the one HF holdout on the corr-lq recipe:
+
+| config | held-out corr-gate | HF (near-lossless) | imazen26 | CID22 | note |
+|---|---|---|---|---|---|
+| cl_tfm (2-layer, tanh30) | 100% | 0.06 | 0.940 | 0.883 | champion |
+| cl_h16L1 / cl_h48L1 (1-layer) | 76% | 0.00 / 0.16 | 0.928 | 0.87/0.88 | less capacity HURTS corruption, NOT recover HF |
+| cl_notanh (no tanh) | 0% (inverted) | 0.17 | 0.936 | 0.856 | tanh is load-bearing; training diverged (α stuck 1.0) |
+| cl_tanh100 (tanh scale 100) | 100% | 0.10 | 0.935 | 0.864 | easing tanh barely moves HF |
+| B (linear-BVLS) | 18.8%* | **0.61** | 0.841 | 0.876 | *untrained on corruption |
+
+**Verdict:** near-lossless (HF ~0.6) is a property of B's LINEAR-BVLS architecture, not
+the psa-MLP. The psa-MLP tops out at HF ~0.10 regardless of depth (1 vs 2 layers), head
+(tanh 30/100/off). So the complete bake — corruption + LQ + negatives + ssim2 + CID22 +
+near-lossless — needs the LINEAR-BVLS pipeline (which holds HF 0.61 + ssim2 0.84) + the
+corruption + kadis_negrich groups, NOT more psa-MLP tuning. (Quick lstsq probes of a linear
+were method-inadequate — raw targets gate corruption but wreck ssim2; rank-norm the reverse.
+The real linear-projection/BVLS recipe with corruption ordering preserved is the run.)
+
+**Champion so far: cl_tfm** — everything except near-lossless, in one bake.
