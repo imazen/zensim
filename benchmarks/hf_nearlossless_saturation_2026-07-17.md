@@ -52,3 +52,32 @@ the top. If RAW HF stays ~0 even at high-q-boost 4 + w3, the near-lossless FEATU
 don't separate quality at this resolution — a feature-extraction limit, not a
 training-weight one (the honest "near-lossless is the metric's weak zone" verdict).
 Results: `/mnt/v/output/zensim/fs-hf/`.
+
+## RESULT — the feature TRANSFORMS are the near-lossless killer (decisive)
+
+Raw HF SROCC vs feature-shaping (strip spline; original depth-iter bakes):
+
+| bake | raw HF | imazen-26 | nonphoto | CID22 | KonJND |
+|---|---|---|---|---|---|
+| **fs_none (NO transforms)** | **0.188** | 0.865 | 0.877 | 0.868 | 0.768 |
+| fs_minlift020 (few transforms) | 0.027 | 0.949 | 0.949 | 0.858 | 0.723 |
+| fs_minlift002 (many transforms) | 0.036 | 0.942 | 0.947 | 0.828 | 0.254 |
+
+Removing the winsor_p99 / yeo_johnson transforms lifts raw HF **7×** (0.027→0.188).
+The transforms compress the tiny near-lossless feature differences into a flat
+region → the MLP can't rank near-lossless. They are the SAME mechanism that buys
+the ssim2 ceiling (imazen-26 0.949): a direct trade of near-lossless (and CID22 +
+KonJND) FOR mid-quality ssim2-agreement. `--high-q-boost 4` made HF WORSE (0.011),
+not better — you can't upweight rows the features don't separate.
+
+**Verdict:** the ssim2 ceiling and a working near-lossless dial are mutually
+exclusive on this recipe; even transform-free, HF tops out at 0.19 (the metric's
+genuine weak zone). fs_minlift020's 0.949 is an ssim2-specialist number bought
+specifically at the cost of the high-fidelity zone. The only real lever measured is
+"less shaping" (fs_none / raise --auto-transforms-min-lift) — it recovers HF + CID22
++ KonJND but forfeits the ssim2 ceiling, landing back near B. Consistent with the
+feature_shaping "less is more" verdict + "nothing robustly beats B".
+
+Follow-on (untested): a PER-FEATURE transform exemption — apply transforms only to
+features that don't carry near-lossless signal — could in principle keep both, but
+needs a near-lossless-discriminability analysis to pick the exempt set.
