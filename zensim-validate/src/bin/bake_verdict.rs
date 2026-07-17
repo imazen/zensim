@@ -146,7 +146,8 @@ fn ds_auc(predicted: &[f64], human: &[f64], diff_threshold: f64) -> f64 {
 // ============================================================================
 
 use zensim_validate::bake_runtime::{
-    extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_row,
+    extract_hybrid_head, extract_minmax_head, extract_per_sample_alpha_head,
+    extract_tanh_output_head_scale, score_row, score_row_minmax,
 };
 
 // ============================================================================
@@ -534,11 +535,14 @@ fn score_grid(model: &Model, has_transforms: bool, n_inputs: usize, rows: &[Vec<
     let hybrid_head = extract_hybrid_head(model);
     let tanh_pin_scale = extract_tanh_output_head_scale(model);
     let output_spline = zensim_validate::output_calibration_spline::extract(model);
+    let minmax_head = extract_minmax_head(model);
     let mut predictor = Predictor::new(model);
     let mut scratch = vec![0.0f32; n_inputs];
     rows.iter()
-        .map(|row| {
-            score_row(
+        .map(|row| match minmax_head.as_ref() {
+            // Min-max bakes REPLACE the layer forward — bypass the Predictor.
+            Some(mm) => score_row_minmax(model, mm, tanh_pin_scale, output_spline.as_ref(), row),
+            None => score_row(
                 &mut predictor,
                 has_transforms,
                 per_sample_alpha_head.as_ref(),
@@ -547,7 +551,7 @@ fn score_grid(model: &Model, has_transforms: bool, n_inputs: usize, rows: &[Vec<
                 output_spline.as_ref(),
                 &mut scratch,
                 row,
-            )
+            ),
         })
         .collect()
 }
@@ -673,13 +677,16 @@ fn dial_panel(
     let hybrid_head = extract_hybrid_head(model);
     let tanh_pin_scale = extract_tanh_output_head_scale(model);
     let output_spline = zensim_validate::output_calibration_spline::extract(model);
+    let minmax_head = extract_minmax_head(model);
     let mut predictor = Predictor::new(model);
     let mut scratch = vec![0.0f32; n_inputs];
     let scores: Vec<f64> = grid
         .feature_rows
         .iter()
-        .map(|row| {
-            score_row(
+        .map(|row| match minmax_head.as_ref() {
+            // Min-max bakes REPLACE the layer forward — bypass the Predictor.
+            Some(mm) => score_row_minmax(model, mm, tanh_pin_scale, output_spline.as_ref(), row),
+            None => score_row(
                 &mut predictor,
                 has_transforms,
                 per_sample_alpha_head.as_ref(),
@@ -688,7 +695,7 @@ fn dial_panel(
                 output_spline.as_ref(),
                 &mut scratch,
                 row,
-            )
+            ),
         })
         .collect();
 
@@ -1059,6 +1066,7 @@ fn render_corpus(
     let hybrid_head = extract_hybrid_head(model);
     let tanh_pin_scale = extract_tanh_output_head_scale(model);
     let output_spline = zensim_validate::output_calibration_spline::extract(model);
+    let minmax_head = extract_minmax_head(model);
     let mut predictor = Predictor::new(model);
 
     // Score every row. f32 scratch buffer reused across all rows
@@ -1068,8 +1076,10 @@ fn render_corpus(
     let scores: Vec<f64> = g
         .feature_rows
         .iter()
-        .map(|row| {
-            score_row(
+        .map(|row| match minmax_head.as_ref() {
+            // Min-max bakes REPLACE the layer forward — bypass the Predictor.
+            Some(mm) => score_row_minmax(model, mm, tanh_pin_scale, output_spline.as_ref(), row),
+            None => score_row(
                 &mut predictor,
                 has_transforms,
                 per_sample_alpha_head.as_ref(),
@@ -1078,7 +1088,7 @@ fn render_corpus(
                 output_spline.as_ref(),
                 &mut scratch,
                 row,
-            )
+            ),
         })
         .collect();
 

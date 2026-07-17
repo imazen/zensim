@@ -212,6 +212,112 @@ pub fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
     Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm))
 }
 
+/// Min-max monotone head (Sill 1998) parsed from `zentrain.minmax_monotone_head`.
+/// The score REPLACES the layer forward — `min_g max_h (w[g][h]·x + b[g][h])` over
+/// the transform→scale→clamp±8 feature vector — so its runtime BYPASSES the
+/// Predictor (see [`score_row_minmax`]). Bit-exact mirror of the min-max branch
+/// in `zensim::metric` (the encoder-side path), same as the per-sample-α / hybrid
+/// heads are mirrored here.
+#[derive(Clone, Debug)]
+pub struct MinMaxHeadDispatch {
+    pub k: usize,
+    pub j: usize,
+    pub n: usize,
+    /// Row-major `[g][h][f]`, length `k·j·n`.
+    pub w: Vec<f32>,
+    /// Row-major `[g][h]`, length `k·j`.
+    pub b: Vec<f32>,
+}
+
+/// Read the `zentrain.minmax_monotone_head` payload, if any. Layout:
+/// `[u32 k, u32 j, u32 n, w f32×(k·j·n), b f32×(k·j)]`.
+pub fn extract_minmax_head(model: &Model) -> Option<MinMaxHeadDispatch> {
+    let md = model.metadata();
+    let entry = md.get("zentrain.minmax_monotone_head")?;
+    let v = entry.value;
+    if v.len() < 12 {
+        return None;
+    }
+    let rd_u32 = |o: usize| u32::from_le_bytes([v[o], v[o + 1], v[o + 2], v[o + 3]]) as usize;
+    let (k, j, n) = (rd_u32(0), rd_u32(4), rd_u32(8));
+    if k == 0 || j == 0 || n == 0 {
+        return None;
+    }
+    let n_w = k.checked_mul(j)?.checked_mul(n)?;
+    let n_b = k.checked_mul(j)?;
+    let expected = 12usize.checked_add(4usize.checked_mul(n_w.checked_add(n_b)?)?)?;
+    if v.len() != expected {
+        return None;
+    }
+    let rd_f32 = |o: usize| f32::from_le_bytes([v[o], v[o + 1], v[o + 2], v[o + 3]]);
+    let mut w = Vec::with_capacity(n_w);
+    let mut off = 12;
+    for _ in 0..n_w {
+        w.push(rd_f32(off));
+        off += 4;
+    }
+    let mut b = Vec::with_capacity(n_b);
+    for _ in 0..n_b {
+        b.push(rd_f32(off));
+        off += 4;
+    }
+    Some(MinMaxHeadDispatch { k, j, n, w, b })
+}
+
+/// Score one row through a min-max monotone bake — the min-max REPLACES the
+/// layer forward, so this reads the bake's scaler + feature transforms directly
+/// and never touches a `Predictor`. Applies transform→scale→clamp±8→
+/// `min_g max_h(w·x+b)`, then the shared tanh-pin + output spline. The ±8 clamp
+/// mirrors the trainer's standardize clamp (`train_minmax`), so eval scoring is
+/// bit-exact with the in-process held-out eval that qualified the bake. Returns
+/// `f64::NAN` if the head's `n` disagrees with the bake's `n_inputs`.
+pub fn score_row_minmax(
+    model: &Model,
+    mm: &MinMaxHeadDispatch,
+    tanh_pin_scale: Option<f64>,
+    output_spline: Option<&OutputCalibrationSpline>,
+    row: &[f64],
+) -> f64 {
+    let n = model.n_inputs();
+    if mm.n != n {
+        return f64::NAN;
+    }
+    let transforms = model.feature_transforms();
+    let params = model.feature_transform_params();
+    let mean = model.scaler_mean();
+    let scale = model.scaler_scale();
+    let mut x = vec![0.0f64; n];
+    for (i, slot) in x.iter_mut().enumerate() {
+        let raw = *row.get(i).unwrap_or(&0.0) as f32;
+        let t = match (transforms, params) {
+            (Some(tf), Some(p)) => tf[i].apply_with_params(raw, &p[i]),
+            (Some(tf), None) => tf[i].apply_with_params(raw, &[]),
+            (None, _) => raw,
+        } as f64;
+        let s = scale[i] as f64;
+        let safe = if s == 0.0 { 1.0 } else { s };
+        *slot = ((t - mean[i] as f64) / safe).clamp(-8.0, 8.0);
+    }
+    let mut best_min = f64::INFINITY;
+    for g in 0..mm.k {
+        let mut best_max = f64::NEG_INFINITY;
+        for h in 0..mm.j {
+            let base = (g * mm.j + h) * n;
+            let mut acc = mm.b[g * mm.j + h] as f64;
+            for f in 0..n {
+                acc += mm.w[base + f] as f64 * x[f];
+            }
+            if acc > best_max {
+                best_max = acc;
+            }
+        }
+        if best_max < best_min {
+            best_min = best_max;
+        }
+    }
+    apply_post_dispatch(best_min, tanh_pin_scale, output_spline)
+}
+
 /// Score one row through a loaded MLP `Predictor`.
 ///
 /// Per DEDUP-M, this is the single canonical implementation of the

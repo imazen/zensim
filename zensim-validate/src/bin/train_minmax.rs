@@ -12,6 +12,8 @@
 //!   train_minmax --k 8 --j 4 [--epochs 80] [--pairs 60000] [--lr 4e-3] [--min-lift 0.05]
 
 use std::collections::HashMap;
+use zenpredict::{Activation, FeatureTransform, MetadataType, WeightDtype};
+use zenpredict_bake::{bake, BakeLayer, BakeMetadataEntry, BakeRequest};
 use zensim_validate::mlp_train::minmax_monotone::{train_ranknet, MinMaxMonotone};
 use zensim_validate::parquet_loader::load_parquet;
 
@@ -118,6 +120,12 @@ fn main() {
     let cap_safesyn = arg(&args, "--safesyn-cap", 40_000usize);
     let cap_bigcodec = arg(&args, "--bigcodec-cap", 40_000usize);
     let cap_kadis = arg(&args, "--kadis-cap", 20_000usize);
+    // Optional: emit a ZNPR v3 min-max bake so `bake_verdict` can score the
+    // trained head in the real zensim runtime (reproducibility gate).
+    let bake_out: Option<String> = args
+        .iter()
+        .position(|a| a == "--bake")
+        .and_then(|i| args.get(i + 1).cloned());
 
     let tf = load_transforms(min_lift);
     let sign = load_sign();
@@ -194,6 +202,104 @@ fn main() {
 
     eprintln!("training min-max ...");
     let m: MinMaxMonotone = train_ranknet(&flat_groups, &sign, k, j, N, epochs, pairs, lr, seed);
+
+    // Optional ZNPR v3 bake: dummy 372→1 layer (the runtime bypasses it) +
+    // scaler (training mean/std) + screen transforms + the min-max head as
+    // `zentrain.minmax_monotone_head` metadata. No output spline yet — SROCC is
+    // rank-invariant, so bake_verdict's rank panel confirms the runtime forward
+    // matches this in-process eval bit-for-bit. Dial spline is a follow-up.
+    if let Some(path) = &bake_out {
+        // min-max head payload: [k:u32, j:u32, n:u32, w f32×(k·j·n), b f32×(k·j)]
+        let mut mm = Vec::with_capacity(12 + 4 * (m.w.len() + m.b.len()));
+        mm.extend_from_slice(&(k as u32).to_le_bytes());
+        mm.extend_from_slice(&(j as u32).to_le_bytes());
+        mm.extend_from_slice(&(N as u32).to_le_bytes());
+        for &wv in &m.w {
+            mm.extend_from_slice(&(wv as f32).to_le_bytes());
+        }
+        for &bv in &m.b {
+            mm.extend_from_slice(&(bv as f32).to_le_bytes());
+        }
+        // screen transforms → the two standard Utf8 metadata blobs
+        let ftransforms: Vec<FeatureTransform> = tf.iter().map(|(t, _)| *t).collect();
+        let transforms_blob: Option<String> =
+            if ftransforms.iter().all(|t| *t == FeatureTransform::Identity) {
+                None
+            } else {
+                Some(
+                    ftransforms
+                        .iter()
+                        .map(|t| t.as_token())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
+            };
+        let params_blob: Option<String> = if tf.iter().all(|(_, p)| p.is_empty()) {
+            None
+        } else {
+            Some(
+                tf.iter()
+                    .map(|(_, row)| {
+                        row.iter()
+                            .map(|v| format!("{v}"))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        };
+        let scaler_mean_f32: Vec<f32> = mean.iter().map(|&v| v as f32).collect();
+        let scaler_scale_f32: Vec<f32> = std.iter().map(|&v| v as f32).collect();
+        let dummy_w = vec![0.0f32; N];
+        let dummy_b = vec![0.0f32; 1];
+        let layers = [BakeLayer {
+            in_dim: N,
+            out_dim: 1,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &dummy_w,
+            biases: &dummy_b,
+        }];
+        let mut metadata: Vec<BakeMetadataEntry<'_>> = vec![BakeMetadataEntry {
+            key: "zentrain.minmax_monotone_head",
+            kind: MetadataType::Bytes,
+            value: &mm,
+        }];
+        if let Some(b) = &transforms_blob {
+            metadata.push(BakeMetadataEntry {
+                key: zenpredict::keys::FEATURE_TRANSFORMS,
+                kind: MetadataType::Utf8,
+                value: b.as_bytes(),
+            });
+        }
+        if let Some(b) = &params_blob {
+            metadata.push(BakeMetadataEntry {
+                key: zenpredict::keys::FEATURE_TRANSFORM_PARAMS,
+                kind: MetadataType::Utf8,
+                value: b.as_bytes(),
+            });
+        }
+        let bytes = bake(&BakeRequest {
+            schema_hash: 0,
+            flags: 0,
+            scaler_mean: &scaler_mean_f32,
+            scaler_scale: &scaler_scale_f32,
+            layers: &layers,
+            feature_bounds: &[],
+            metadata: &metadata,
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
+        })
+        .expect("v3 min-max bake");
+        std::fs::write(path, &bytes).expect("write bake");
+        eprintln!("wrote bake: {path} ({} bytes, k={k} j={j} n={N})", bytes.len());
+    }
 
     // Held-out eval.
     let evals: &[(&str, String)] = &[

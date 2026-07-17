@@ -2831,6 +2831,104 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
     (h00 * ys[lo] + h10 * h * derivs[lo] + h01 * ys[hi] + h11 * h * derivs[hi]).min(100.0)
 }
 
+// ============================================================================
+// Min-max monotone head runtime dispatch (Sill 1998; 2026-07-16)
+// ============================================================================
+//
+// A min-max monotone bake REPLACES the MLP layer stack: the score is
+// `min over K groups  max over J pieces  (w[g][h]·x + b[g][h])` on the
+// standardized+transformed feature vector, with each `w` sign-constrained so
+// the score is monotone in codec quality BY CONSTRUCTION (see
+// `zensim_validate::mlp_train::minmax_monotone`). Because there is no matmul
+// forward, the runtime BYPASSES `Predictor::predict`: it reads the bake's
+// scaler + feature-transforms directly, applies transform→scale→clamp±8→min-max,
+// then the shared PCHIP output spline. The ±8 clamp mirrors the trainer's
+// standardize clamp (`train_minmax`) so runtime scoring is bit-exact with the
+// held-out eval that qualified the bake.
+//
+// Payload layout (little-endian):
+//   `[u32 k, u32 j, u32 n, w[k·j·n] f32, b[k·j] f32]`
+// so `12 + 4·(k·j·n + k·j)` bytes. `n` MUST equal the bake's `n_inputs`.
+const MINMAX_MONOTONE_HEAD_KEY: &str = "zentrain.minmax_monotone_head";
+
+/// Standardized-feature clamp applied before the min-max forward. Mirrors
+/// `train_minmax`'s `.clamp(-8.0, 8.0)` on the standardized feature vector so
+/// the shipped bake scores identically to the held-out eval that qualified it.
+const MINMAX_STD_CLAMP: f64 = 8.0;
+
+/// Parsed min-max monotone head: `k` outer-min groups × `j` inner-max pieces,
+/// each a sign-constrained linear over `n` standardized features.
+#[derive(Clone, Debug)]
+struct MinMaxHeadMeta {
+    k: usize,
+    j: usize,
+    n: usize,
+    /// Row-major `[g][h][f]`, length `k·j·n`.
+    w: Vec<f32>,
+    /// Row-major `[g][h]`, length `k·j`.
+    b: Vec<f32>,
+}
+
+/// Parse the `zentrain.minmax_monotone_head` payload. Returns `None` on any
+/// layout error (short buffer, zero dims, wrong total length).
+fn parse_minmax_head_meta(payload: &[u8]) -> Option<MinMaxHeadMeta> {
+    if payload.len() < 12 {
+        return None;
+    }
+    let rd_u32 = |o: usize| u32::from_le_bytes([payload[o], payload[o + 1], payload[o + 2], payload[o + 3]]) as usize;
+    let (k, j, n) = (rd_u32(0), rd_u32(4), rd_u32(8));
+    if k == 0 || j == 0 || n == 0 {
+        return None;
+    }
+    let n_w = k.checked_mul(j)?.checked_mul(n)?;
+    let n_b = k.checked_mul(j)?;
+    let expected = 12usize.checked_add(4usize.checked_mul(n_w.checked_add(n_b)?)?)?;
+    if payload.len() != expected {
+        return None;
+    }
+    let rd_f32 = |o: usize| f32::from_le_bytes([payload[o], payload[o + 1], payload[o + 2], payload[o + 3]]);
+    let mut w = Vec::with_capacity(n_w);
+    let mut off = 12;
+    for _ in 0..n_w {
+        w.push(rd_f32(off));
+        off += 4;
+    }
+    let mut b = Vec::with_capacity(n_b);
+    for _ in 0..n_b {
+        b.push(rd_f32(off));
+        off += 4;
+    }
+    if w.iter().chain(b.iter()).any(|v| !v.is_finite()) {
+        return None;
+    }
+    Some(MinMaxHeadMeta { k, j, n, w, b })
+}
+
+/// Min-max forward: `min_g max_h (w[g][h]·x + b[g][h])`. `x` is the clamped
+/// standardized feature vector (length `meta.n`). Mirrors
+/// `MinMaxMonotone::forward` (weights are f32 in the bake, accumulated in f64).
+fn apply_minmax_runtime(x: &[f64], meta: &MinMaxHeadMeta) -> f64 {
+    let n = meta.n;
+    let mut best_min = f64::INFINITY;
+    for g in 0..meta.k {
+        let mut best_max = f64::NEG_INFINITY;
+        for h in 0..meta.j {
+            let base = (g * meta.j + h) * n;
+            let mut acc = meta.b[g * meta.j + h] as f64;
+            for f in 0..n {
+                acc += meta.w[base + f] as f64 * x[f];
+            }
+            if acc > best_max {
+                best_max = acc;
+            }
+        }
+        if best_max < best_min {
+            best_min = best_max;
+        }
+    }
+    best_min
+}
+
 /// EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine
 /// calibration metadata key.
 ///
@@ -3199,6 +3297,7 @@ fn forward_one_bake(
 struct CachedBakeMetadata {
     per_sample_alpha: Option<std::sync::Arc<PerSampleAlphaMeta>>,
     hybrid_head: Option<std::sync::Arc<HybridHeadMeta>>,
+    minmax_head: Option<std::sync::Arc<MinMaxHeadMeta>>,
     tanh_pin_scale: Option<f64>,
     output_spline: Option<std::sync::Arc<OutputCalibrationSpline>>,
     per_codec_calibration: Option<std::sync::Arc<PerCodecCalibration>>,
@@ -3247,6 +3346,10 @@ fn cached_bake_metadata(
             .and_then(|entry| parse_hybrid_head_meta(entry.value, n_hidden))
             .map(Arc::new)
     };
+    let minmax_head = metadata
+        .get(MINMAX_MONOTONE_HEAD_KEY)
+        .and_then(|entry| parse_minmax_head_meta(entry.value))
+        .map(Arc::new);
     let tanh_pin_scale = metadata
         .get(TANH_OUTPUT_HEAD_KEY)
         .and_then(|entry| parse_tanh_output_head_scale(entry.value));
@@ -3262,6 +3365,7 @@ fn cached_bake_metadata(
     let parsed = Arc::new(CachedBakeMetadata {
         per_sample_alpha,
         hybrid_head,
+        minmax_head,
         tanh_pin_scale,
         output_spline,
         per_codec_calibration,
@@ -3320,6 +3424,47 @@ fn forward_one_bake_with_codec(
         (Some(cal), Some(hint)) => lookup_per_codec_affine(cal, hint),
         _ => None,
     };
+
+    // Min-max monotone head (Sill 1998): the score REPLACES the layer forward,
+    // so bypass the Predictor entirely — read the bake's scaler + feature
+    // transforms directly, apply transform→scale→clamp±8→min-max, then the
+    // shared PCHIP spline + per-codec affine. The clamp mirrors the trainer's
+    // standardize clamp so runtime scoring is bit-exact with the qualifying eval.
+    if let Some(mm) = bundle.minmax_head.as_deref() {
+        let n = model.n_inputs();
+        if mm.n != n || features.len() != n {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "min-max head n does not match bake n_inputs / feature length",
+            });
+        }
+        let transforms = model.feature_transforms();
+        let params = model.feature_transform_params();
+        let mean = model.scaler_mean();
+        let scale = model.scaler_scale();
+        let mut x_std = vec![0.0f64; n];
+        for (i, slot) in x_std.iter_mut().enumerate() {
+            // transform in f32 (matches the trainer's `apply_with_params(x as f32)`)
+            let raw = features[i] as f32;
+            let t = match (transforms, params) {
+                (Some(tf), Some(p)) => tf[i].apply_with_params(raw, &p[i]),
+                (Some(tf), None) => tf[i].apply_with_params(raw, &[]),
+                (None, _) => raw,
+            } as f64;
+            // standardize (sklearn zero-variance guard) + clamp, matching train_minmax
+            let s = scale[i] as f64;
+            let safe = if s == 0.0 { 1.0 } else { s };
+            *slot = ((t - mean[i] as f64) / safe).clamp(-MINMAX_STD_CLAMP, MINMAX_STD_CLAMP);
+        }
+        let y_pre = apply_minmax_runtime(&x_std, mm);
+        let y_after_spline = match output_spline {
+            Some(spline) => apply_output_calibration_spline(y_pre, spline),
+            None => y_pre,
+        };
+        return Ok(match per_codec_affine {
+            Some((alpha, beta)) => (alpha as f64) + (beta as f64) * y_after_spline,
+            None => y_after_spline,
+        });
+    }
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         let out = if needs_transforms {
