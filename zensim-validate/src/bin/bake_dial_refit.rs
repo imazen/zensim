@@ -52,6 +52,9 @@ use zenpredict::{Activation, MetadataType, Model, WeightDtype, WeightStorage, f1
 use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 use zensim_validate::output_calibration_spline as spline;
 use zensim_validate::panel::{outlier_ratio, rescale_logistic, spearman, z_rmse};
+// Dial-spline fitting lives in the shared `dial_spline` module (2026-07-16) so
+// this linear tool AND the min-max bake path fit the [0,100] dial identically.
+use zensim_validate::dial_spline::{fit_spline_knots, percentile_linear, spline_payload};
 
 /// Metadata key for the PCHIP output-calibration spline payload. Matches
 /// the private `KEY` in `output_calibration_spline` (which does not
@@ -201,18 +204,6 @@ fn emit_linear(
     .expect("serialize ZNPR v3 bake");
     std::fs::write(out, &bytes)?;
     Ok(bytes.len())
-}
-
-/// Serialize spline knots to the `[u32 n, n×(f32 x, f32 y)]` payload.
-fn spline_payload(xs: &[f64], ys: &[f64]) -> Vec<u8> {
-    let nk = xs.len();
-    let mut p = Vec::with_capacity(4 + 8 * nk);
-    p.extend_from_slice(&(nk as u32).to_le_bytes());
-    for i in 0..nk {
-        p.extend_from_slice(&(xs[i] as f32).to_le_bytes());
-        p.extend_from_slice(&(ys[i] as f32).to_le_bytes());
-    }
-    p
 }
 
 /// Read the parsed spline knots (`x`, `y`, both f64 widened from the f32
@@ -396,29 +387,6 @@ fn read_features(
 // --------------------------------------------------------------------------
 // small numeric helpers (percentile / median / OLS)
 // --------------------------------------------------------------------------
-
-/// `np.percentile(sorted, p)` with the default `linear` interpolation.
-fn percentile_linear(sorted: &[f64], p: f64) -> f64 {
-    let n = sorted.len();
-    if n == 0 {
-        return f64::NAN;
-    }
-    if n == 1 {
-        return sorted[0];
-    }
-    let rank = p / 100.0 * (n as f64 - 1.0);
-    let lo = rank.floor() as usize;
-    let hi = (lo + 1).min(n - 1);
-    let frac = rank - lo as f64;
-    sorted[lo] + frac * (sorted[hi] - sorted[lo])
-}
-
-/// `np.median` of the values at `idx` — linear-interp 50th percentile.
-fn median_at(idx: &[usize], vals: &[f64]) -> f64 {
-    let mut v: Vec<f64> = idx.iter().map(|&i| vals[i]).collect();
-    v.sort_by(f64::total_cmp);
-    percentile_linear(&v, 50.0)
-}
 
 /// Ordinary least squares `y ≈ a + b·x` via the closed-form normal
 /// equations (2×2). Verified equivalent to numpy `lstsq` to 1e-15 for the
@@ -637,78 +605,6 @@ fn cmd_shared_anchor(a: &SharedAnchorArgs) -> Result<(), String> {
     .map_err(|e| format!("write {:?}: {e}", a.out))?;
     eprintln!("emitted {:?} ({sz} B)", a.out);
     Ok(())
-}
-
-/// A quantile bin becomes a knot at its `(median pred, median target)`
-/// iff it holds >= 2 rows (matches `fit_spline_knots`).
-fn push_bin(mask: &[usize], preds: &[f64], tgt: &[f64], kx: &mut Vec<f64>, ky: &mut Vec<f64>) {
-    if mask.len() >= 2 {
-        kx.push(median_at(mask, preds));
-        ky.push(median_at(mask, tgt));
-    }
-}
-
-/// Faithful port of `linear_projections_2026-07-03.py::fit_spline_knots`:
-/// percentile-EDGE bins (edges at `linspace(1,99,n_edges)` percentiles),
-/// per-bin median `(pred, target)` knots, a strictly-increasing-x /
-/// non-decreasing-y monotone filter, and the neg-tail dedup (keep only the
-/// last of any run of `y<=1e-6` knots).
-fn fit_spline_knots(
-    preds: &[f64],
-    tgt: &[f64],
-    n_edges: usize,
-    neg_tail: bool,
-) -> (Vec<f64>, Vec<f64>) {
-    let mut sorted = preds.to_vec();
-    sorted.sort_by(f64::total_cmp);
-    let edges: Vec<f64> = (0..n_edges)
-        .map(|i| {
-            let p = 1.0 + 98.0 * (i as f64) / (n_edges as f64 - 1.0);
-            percentile_linear(&sorted, p)
-        })
-        .collect();
-
-    let mut kx: Vec<f64> = Vec::new();
-    let mut ky: Vec<f64> = Vec::new();
-    let below: Vec<usize> = (0..preds.len()).filter(|&i| preds[i] < edges[0]).collect();
-    push_bin(&below, preds, tgt, &mut kx, &mut ky);
-    for e in 0..n_edges - 1 {
-        let m: Vec<usize> = (0..preds.len())
-            .filter(|&i| preds[i] >= edges[e] && preds[i] < edges[e + 1])
-            .collect();
-        push_bin(&m, preds, tgt, &mut kx, &mut ky);
-    }
-    let hi: Vec<usize> = (0..preds.len())
-        .filter(|&i| preds[i] >= edges[n_edges - 1])
-        .collect();
-    push_bin(&hi, preds, tgt, &mut kx, &mut ky);
-
-    // strictly-increasing-x, non-decreasing-y monotone filter.
-    let mut cx = vec![kx[0]];
-    let mut cy = vec![ky[0]];
-    for i in 1..kx.len() {
-        if kx[i] > cx[cx.len() - 1] + 1e-7 && ky[i] >= cy[cy.len() - 1] {
-            cx.push(kx[i]);
-            cy.push(ky[i]);
-        }
-    }
-    if neg_tail {
-        let zeros: Vec<usize> = (0..cy.len()).filter(|&i| cy[i] <= 1e-6).collect();
-        if zeros.len() > 1 {
-            let drop: std::collections::HashSet<usize> =
-                zeros[..zeros.len() - 1].iter().copied().collect();
-            let fx: Vec<f64> = (0..cx.len())
-                .filter(|i| !drop.contains(i))
-                .map(|i| cx[i])
-                .collect();
-            let fy: Vec<f64> = (0..cy.len())
-                .filter(|i| !drop.contains(i))
-                .map(|i| cy[i])
-                .collect();
-            return (fx, fy);
-        }
-    }
-    (cx, cy)
 }
 
 // --------------------------------------------------------------------------

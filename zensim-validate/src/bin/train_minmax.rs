@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use zenpredict::{Activation, FeatureTransform, MetadataType, WeightDtype};
 use zenpredict_bake::{bake, BakeLayer, BakeMetadataEntry, BakeRequest};
+use zensim_validate::dial_spline::{fit_spline_knots, spline_payload};
 use zensim_validate::mlp_train::minmax_monotone::{train_ranknet, MinMaxMonotone};
 use zensim_validate::parquet_loader::load_parquet;
 
@@ -126,6 +127,21 @@ fn main() {
         .iter()
         .position(|a| a == "--bake")
         .and_then(|i| args.get(i + 1).cloned());
+    // Optional [0,100] output dial spline, fit from a multiband anchor via the
+    // shared `dial_spline::fit_spline_knots` (same fit as bake_dial_refit). The
+    // spline is a MONOTONE remap of the raw min-max output, so it bounds the dial
+    // to [0,100] without changing rank (SROCC-invariant).
+    let dial_anchor: Option<String> = args
+        .iter()
+        .position(|a| a == "--dial-anchor")
+        .and_then(|i| args.get(i + 1).cloned());
+    let dial_target_col: String = args
+        .iter()
+        .position(|a| a == "--dial-target-col")
+        .and_then(|i| args.get(i + 1).cloned())
+        .unwrap_or_else(|| "target_score".to_string());
+    let dial_target_scale = arg(&args, "--dial-target-scale", 1.0f64);
+    let dial_edges = arg(&args, "--dial-edges", 18usize);
 
     let tf = load_transforms(min_lift);
     let sign = load_sign();
@@ -249,6 +265,35 @@ fn main() {
                     .join("\n"),
             )
         };
+        // Optional [0,100] dial spline: score the multiband anchor with the raw
+        // min-max, fit a monotone PCHIP raw→target_score via the shared
+        // fit_spline_knots. Rank-invariant, so held-out SROCC is unchanged.
+        let spline_bytes: Option<Vec<u8>> = dial_anchor.as_ref().and_then(|ap| {
+            match load_parquet(&std::path::PathBuf::from(ap), "dial-anchor", &dial_target_col, 1.0) {
+                Ok(g) => {
+                    let preds: Vec<f64> = g
+                        .feature_rows
+                        .iter()
+                        .map(|row| m.forward(&standardize(&transform_row(row, &tf))).0)
+                        .collect();
+                    let tgt: Vec<f64> =
+                        g.human_scores.iter().map(|&t| t * dial_target_scale).collect();
+                    let (cx, cy) = fit_spline_knots(&preds, &tgt, dial_edges, true);
+                    eprintln!(
+                        "dial spline: {} knots, y-range [{:.1}, {:.1}] from {} anchor rows",
+                        cx.len(),
+                        cy.first().copied().unwrap_or(0.0),
+                        cy.last().copied().unwrap_or(0.0),
+                        preds.len()
+                    );
+                    Some(spline_payload(&cx, &cy))
+                }
+                Err(e) => {
+                    eprintln!("  dial-anchor skipped: {e}");
+                    None
+                }
+            }
+        });
         let scaler_mean_f32: Vec<f32> = mean.iter().map(|&v| v as f32).collect();
         let scaler_scale_f32: Vec<f32> = std.iter().map(|&v| v as f32).collect();
         let dummy_w = vec![0.0f32; N];
@@ -278,6 +323,13 @@ fn main() {
                 key: zenpredict::keys::FEATURE_TRANSFORM_PARAMS,
                 kind: MetadataType::Utf8,
                 value: b.as_bytes(),
+            });
+        }
+        if let Some(sp) = &spline_bytes {
+            metadata.push(BakeMetadataEntry {
+                key: "zentrain.output_calibration_spline",
+                kind: MetadataType::Bytes,
+                value: sp,
             });
         }
         let bytes = bake(&BakeRequest {
