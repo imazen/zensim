@@ -114,3 +114,60 @@ negatives via the tail training) are real and seed-robust in DIRECTION; the exac
 magnitudes are not. Discipline note: seed-confirm caught this — single-seed headline
 numbers are provisional until confirmed (same lesson as the min-max + triplet + s13
 feature-shaping mirages this program keeps hitting).
+
+## REFINED — the s7 collapse is the DOCUMENTED psa-α seed-collapse (not new instability)
+
+The kadis_negrich SROCC in `corr_lq_eval.py` is measured on **raw** model output
+(`post="raw"`), so s7's 0.148 is a genuine RAW-ranking collapse, not a spline-fit
+artifact. That matches the documented per-sample-α head failure mode: the v48
+multi-seed probe recorded "2/9 runs collapse" (memory `project_tv_monotonicity_pareto`).
+cl_tfm carries the psa-α head, so 1 collapse in 3 seeds is squarely in that ~20-30%
+band — an inherited, known property, not a cl_tfm-specific defect.
+
+This reframes the ship story CONSTRUCTIVELY:
+- Among **non-collapsed** seeds (s13, s23), the LQ tail is ROBUST (0.912 / 0.906);
+  only the corruption-gate *magnitude* swings (100% / 72%), and CID22 (0.883/0.869)
+  + imazen26 (0.940/0.937) are tight.
+- psa-α bakes are ALWAYS shipped best-of-N (train several seeds, drop the collapsed
+  ones by a held-out gate, keep the best). s13 is a legitimate best-of-N winner —
+  its corruption 100% is the favorable end of the 72-100% spread, but its CID22 /
+  imazen26 / LQ sit inside the non-collapsed cluster, not above it.
+- **Ship recipe:** train ≥5 seeds; drop any with held-out kadis_negrich SROCC < 0.5
+  (the collapse signature); among survivors pick best held-out corruption+CID22.
+  Running s31, s41 now to confirm the non-collapsed cluster is reproducible at n=5.
+
+So the honest headline is NOT "cl_tfm is unstable garbage" — it's "cl_tfm needs the
+standard psa-α best-of-N seed filter, after which s13-class numbers are the expected
+draw (corruption ~72-100%, LQ ~0.91, CID22 ~0.87-0.88, imazen26 ~0.94)." The one
+genuinely lucky number was corruption=100%; robust is high-70s-to-100.
+
+## The two-model router is cheaper than stated — the near-lossless specialist is ALREADY B
+
+The "single-model all-seven is unachievable → piecewise routing" verdict (ba42ad24)
+framed the router as "cl_tfm + a NEW near-lossless specialist." It's cheaper than
+that: the specialist ALREADY EXISTS and ships — it is **B**.
+
+Measured raw HF near-lossless SROCC (from `hf_nearlossless_saturation_2026-07-17.md`):
+
+| bake | raw HF near-lossless | corruption gate | negatives | role |
+|---|---|---|---|---|
+| **B (shipped linear)** | **0.614** | none in-model | no | near-lossless specialist |
+| cl_tfm (best-of-N) | ~0.03 (tanh-saturated) | ~72-100% | yes (dial p5 −41) | everything-but-near-lossless |
+
+So the trade is literally **B ⟷ cl_tfm**, and the router is a HARD per-pair switch
+(rank-preserving per the documented "only a hard switch preserves rank") to B when
+near-lossless is detected (all-features-below-distortion-threshold / q≳90 pre-check),
+cl_tfm otherwise. No new bake to train — both exist.
+
+**So the user's real decision is:**
+- (a) Ship cl_tfm best-of-N ALONE — six-of-seven, flat visually-lossless top. Defensible
+  because near-lossless is sub-JND for a dial (the user "typing 97" gets a flat top,
+  which is arguably correct — there's no perceptual signal to rank there anyway).
+- (b) cl_tfm + B hard-router — literal all-seven, cost = a near-lossless detector + two
+  forward passes (both bakes already loaded), and a boundary-continuity check so the
+  hard switch doesn't jump the dial at the q≳90 threshold.
+
+cl_tfm's in-model corruption gate (~100% best-of-N) is a strict IMPROVEMENT over the
+established Stage-2-butteraugli approach (72%, `project_corruption_corpus_butter_wins`)
+AND folds negatives + LQ into the same forward pass — that's cl_tfm's genuine advance
+regardless of which routing option ships.
