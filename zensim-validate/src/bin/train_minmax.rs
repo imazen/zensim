@@ -111,6 +111,13 @@ fn main() {
     let pairs = arg(&args, "--pairs", 60_000usize);
     let lr = arg(&args, "--lr", 4e-3f64);
     let min_lift = arg(&args, "--min-lift", 0.05f64);
+    let seed = arg(&args, "--seed", 13u64);
+    // Per-corpus row caps (0 = uncapped). imazen26 is real-codec ssim2-agreement,
+    // and `bigcodec` is its in-distribution training signal — uncapping it is the
+    // primary lever for pushing imazen26 toward base_tfm's 0.948.
+    let cap_safesyn = arg(&args, "--safesyn-cap", 40_000usize);
+    let cap_bigcodec = arg(&args, "--bigcodec-cap", 40_000usize);
+    let cap_kadis = arg(&args, "--kadis-cap", 20_000usize);
 
     let tf = load_transforms(min_lift);
     let sign = load_sign();
@@ -120,13 +127,13 @@ fn main() {
 
     // base_tfm train groups (name, path). Cap huge groups for a fast probe.
     let train_specs: &[(&str, String, usize)] = &[
-        ("safesyn", format!("{CAN}/safesyn.parquet"), 40_000),
+        ("safesyn", format!("{CAN}/safesyn.parquet"), cap_safesyn),
         ("cid22_train", format!("{CAN}/cid22_train.parquet"), 0),
         ("kadid", format!("{CAN}/kadid.parquet"), 0),
         ("tid", format!("{CAN}/tid.parquet"), 0),
         ("konjnd", format!("{CAN}/konjnd-dense-norm.parquet"), 0),
-        ("bigcodec", "/mnt/v/output/zensim/depth-iter/bigcodec_train_120k_stride.parquet".into(), 40_000),
-        ("kadis", "/mnt/v/output/zensim/depth-iter/kadis_train_60k_stride.parquet".into(), 20_000),
+        ("bigcodec", "/mnt/v/output/zensim/depth-iter/bigcodec_train_120k_stride.parquet".into(), cap_bigcodec),
+        ("kadis", "/mnt/v/output/zensim/depth-iter/kadis_train_60k_stride.parquet".into(), cap_kadis),
     ];
 
     // Load + transform train; compute standardizer (mean/std) from the transformed pool.
@@ -186,7 +193,7 @@ fn main() {
         .collect();
 
     eprintln!("training min-max ...");
-    let m: MinMaxMonotone = train_ranknet(&flat_groups, &sign, k, j, N, epochs, pairs, lr, 13);
+    let m: MinMaxMonotone = train_ranknet(&flat_groups, &sign, k, j, N, epochs, pairs, lr, seed);
 
     // Held-out eval.
     let evals: &[(&str, String)] = &[
