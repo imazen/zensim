@@ -336,5 +336,10 @@ So "B is at the achievable frontier" was **CID22-only**. On the multi-axis
 picture the depth/psa MLPs beat B decisively. B still owns a clean dial — but
 base_tfm has that too. Ship path: **depth_v2 as the rank/selection metric**;
 **base_tfm (or a both-axis-sweep variant) as a candidate dial** that beats B once
-ssim2-agreement counts. Both-axis train sweep (cid22/bigcodec weights) is chasing
-a dial-viable variant that also matches B's CID22.
+ssim2-agreement counts. Both-axis train sweep RESULT (cid22/bigcodec weights): FAILED — no variant beat
+base_tfm. Raising cid22 weight *hurt* held-out CID22 (0.856→0.841→0.818) because
+cid22_train is ssim2-anchored (more weight = more ssim2-overfit = worse human
+MOS — the session's recurring trap); ↑both craters (0.530). So no single
+dial-viable bake matches B's CID22 AND wins imazen-26 via weight tuning — the
+dial is a genuine B-vs-base_tfm tradeoff. A true both-axis dial winner would need
+a 2-head (B's linear CID22 head + an MLP ssim2 head), not weight tuning.
