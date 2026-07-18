@@ -169,21 +169,27 @@ def score_bin(bin_path, corpus):
 # human_col is passed through by `zenmetrics batch` from the pairs TSV, so human + metric are
 # row-aligned by construction (never joined). butteraugli is negated so higher=better uniformly.
 # CID22 = CPU run 2026-07-15; KADID/TID = GPU run (ssim2-gpu / butteraugli-gpu / cvvdp-gpu).
+# metric spec: (filename, column_key, negate[, human_col_override]). The 4th element
+# overrides the corpus human column when a metric TSV carries its own (the iwssim TSVs use
+# "human_score", not the corpus DMOS/MOS). iwssim range [0,1], 1=identical → higher=better.
 REF_METRIC_FILES = {
     "cid22": ("MCOS", {
         "ssim2": ("cid22_ssim2.tsv", "ssim2", False),
         "cvvdp": ("cid22_cvvdp.tsv", "cvvdp", False),
         "butteraugli↓": ("cid22_butter.tsv", "butteraugli_pnorm3", True),
+        "iwssim": ("cid22_iwssim.tsv", "iwssim_gpu", False),
     }),
     "kadid": ("DMOS", {
         "ssim2": ("kadid_ssim2_gpu.tsv", "ssim2_gpu", False),
         "cvvdp": ("kadid_cvvdp_gpu.tsv", "cvvdp", False),
         "butteraugli↓": ("kadid_butteraugli_gpu.tsv", "butteraugli_pnorm3_gpu", True),
+        "iwssim": ("kadid_iwssim.tsv", "iwssim_imazen_v0_0_1", False, "human_score"),
     }),
     "tid": ("MOS", {
         "ssim2": ("tid_ssim2_gpu.tsv", "ssim2_gpu", False),
         "cvvdp": ("tid_cvvdp_gpu.tsv", "cvvdp", False),
         "butteraugli↓": ("tid_butteraugli_gpu.tsv", "butteraugli_pnorm3_gpu", True),
+        "iwssim": ("tid_iwssim.tsv", "iwssim_imazen_v0_0_1", False, "human_score"),
     }),
 }
 
@@ -199,12 +205,13 @@ def load_ref_metrics(corpus):
     human, files = spec
     import csv
 
-    def load(fn, key, neg=False):
+    def load(fn, key, neg=False, human_col=None):
+        hcol = human_col or human
         p = REFMET / fn
         if not p.exists():
             return None
         rows = list(csv.DictReader(open(p), delimiter="\t"))
-        if not rows or human not in rows[0]:
+        if not rows or hcol not in rows[0]:
             return None
         name = key if key in rows[0] else next((c for c in rows[0] if key in c), None)  # exact or substring
         if name is None:
@@ -214,12 +221,14 @@ def load_ref_metrics(corpus):
                 return float(r[k])
             except (ValueError, KeyError):
                 return np.nan
-        hh = np.array([num(r, human) for r in rows]); vv = np.array([num(r, name) for r in rows])
+        hh = np.array([num(r, hcol) for r in rows]); vv = np.array([num(r, name) for r in rows])
         m = np.isfinite(hh) & np.isfinite(vv)
         return (hh[m], (-vv[m] if neg else vv[m]))
     out = {}
-    for lab, (fn, key, neg) in files.items():
-        r = load(fn, key, neg=neg)
+    for lab, spec in files.items():
+        fn, key, neg = spec[0], spec[1], spec[2]
+        hcol = spec[3] if len(spec) > 3 else None
+        r = load(fn, key, neg=neg, human_col=hcol)
         if r is not None:
             out[lab] = r
     return out
