@@ -171,3 +171,26 @@ The order that de-risks fastest: **L1 (have it) → Diffmap ModelCoherent + Eval
 additive core gives the exact diffmap the closed loop needs — the thing no MLP can) → **L2+L3+L4**
 (corruption + smooth dial + negatives) → **Eval C** (one-shot). If Eval B confirms additive →
 exact diffmap, the architecture decision is locked and the rest is calibration.
+
+## L2/L3 reframe — corruption is a PRESERVE-THROUGH-DIAL problem (2026-07-18)
+
+Measuring the basic-156 additive core's RAW-output corruption gate returned a surprise:
+**85.6% @q20** (above butteraugli's 72%, far above shipped-B's dialed 18%). The distortion
+features (edge/HF/MSE) the additive core already uses register corruption directly — so the
+corruption ranking is IN the additive raw output. **B's 18% was its dial SPLINE remapping the
+corruption ranking away** (the spline was fit for honest quality), NOT the model being blind.
+
+Consequences for the design:
+- **L3 (asymmetric bottom-pin) is the load-bearing corruption mechanism**, not L2. Its job is
+  to PRESERVE the raw ranking's corruption/negative floor through the dial mapping — precisely
+  what pinning the bottom does (vs a spline that remaps corruption upward).
+- **L2 (max/p-norm floor) narrows to localized breaks the mean misses** — from this run, only
+  `edge_border_all_k4` (33%) is clearly weak; a small targeted supplement, not a co-equal layer.
+
+**CAVEAT — verify before locking L2 scope.** The per-region pattern here (sq8/sq16/sq64 = 100%,
+whole/frac2 = 69%) is INVERTED vs the full-corpus multimetric analysis (small regions hardest
+for ssim2/cvvdp). This 222-recipe held-out subset may be skewed, or the additive core's HF/edge
+features may genuinely catch localized breaks the SSIM-based metrics miss. Re-measure on the
+full 672-recipe corpus + spot-check actual raw scores for small- vs large-region recipes before
+committing L2's scope. The 85.6% headline (corruption-signal-in-raw-output) is robust; the
+per-region attribution is not yet.
