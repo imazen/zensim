@@ -59,6 +59,22 @@ pub enum DiffmapWeighting {
     /// Custom weights `[X, Y, B]`. Automatically normalized to sum to 1.0.
     /// All values must be non-negative.
     Custom([f32; 3]),
+
+    /// **Research (`custom-profiles`): model-coherent weighting.** Per-feature
+    /// sensitivity `s_k = ∂score/∂f_k` of the scalar model under test, laid out
+    /// like the BASIC scored block (scale-major × 3 channels × 13 per-channel,
+    /// the same layout `Trained` reads profile weights from). The diffmap then
+    /// weights per-pixel signals by the MODEL'S own gradient instead of the
+    /// static profile weights — making it (approximately) the scalar's spatial
+    /// gradient. `|s_k|` is used (error polarity), with the {mean, 4th, 2nd}
+    /// pooling triples folded per signal — identical arithmetic to `Trained`.
+    ///
+    /// Measured 2026-07-18 (`diffmap_block_coherence --bake`): the gradient
+    /// ceiling (M2) is ≈1.0 for basic-input models (incl. LeakyReLU MLPs,
+    /// which are piecewise-linear ⇒ locally exact); this weighting is the
+    /// deployable approximation of that gradient.
+    #[cfg(feature = "custom-profiles")]
+    ModelSensitivity(&'static [f64]),
 }
 
 impl Default for DiffmapWeighting {
@@ -186,6 +202,14 @@ impl DiffmapWeighting {
                 include_edge_mse,
                 include_hf,
             ),
+            // Model-coherent: SIGNED clamped fold of the model's own gradient
+            // (v2 2026-07-18 — the abs-fold v1 mis-weighted positive-sensitivity
+            // features like the winner MLP's hf_gain and scored WORSE than the
+            // shipped map on that bake: median M3 0.446 vs M1 0.746).
+            #[cfg(feature = "custom-profiles")]
+            Self::ModelSensitivity(s) => {
+                model_sensitivity_weights(s, num_scales, include_edge_mse, include_hf)
+            }
             Self::Balanced => {
                 let pw = PixelFeatureWeights {
                     ssim: 1.0,
@@ -341,6 +365,80 @@ fn trained_multiscale_weights(
         vec![w; num_scales]
     };
 
+    (per_scale, blend)
+}
+
+/// Model-sensitivity weight mapping (`DiffmapWeighting::ModelSensitivity`).
+///
+/// Like [`trained_multiscale_weights`] but with a **signed** fold: the
+/// {mean, 4th, 2nd} pooling triple of each signal is summed WITH sign and the
+/// per-pixel weight is `−Σ s_k` — a score-oriented model has NEGATIVE
+/// sensitivity on true-error signals (error ↑ ⇒ score ↓ ⇒ refining there
+/// gains score → positive map weight), while a POSITIVE-sensitivity signal
+/// (e.g. the winner MLP's winsorized `hf_gain`: artifact energy the model
+/// REWARDS) gets a NEGATIVE map weight — blocks dominated by it rank below
+/// zero, correctly predicting that refining them LOSES score. The map is
+/// therefore signed; the linear fusion carries negatives through (masking /
+/// sqrt options must stay off with this weighting). Normalization uses
+/// |mass| so signs survive. The abs-fold of `Trained` is correct for profile
+/// weight VECTORS (sign encodes distance polarity there) but wrong for
+/// gradients — measured 2026-07-18: abs-fold scored WORSE than the shipped
+/// map on the sign-mixed winner MLP (median M3 0.446 vs M1 0.746).
+#[cfg(feature = "custom-profiles")]
+fn model_sensitivity_weights(
+    s: &[f64],
+    num_scales: usize,
+    include_edge_mse: bool,
+    include_hf: bool,
+) -> (Vec<[PixelFeatureWeights; 3]>, Vec<f32>) {
+    const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
+    const FPS: usize = FPC * 3;
+    // Signed triple fold; `get` = 0.0 beyond the slice (basic-only slices).
+    let g = |i: usize| s.get(i).copied().unwrap_or(0.0);
+
+    let mut per_scale = Vec::with_capacity(num_scales);
+    let mut scale_totals = Vec::with_capacity(num_scales);
+    for sc in 0..num_scales {
+        let scale_base = sc * FPS;
+        let mut w = [[0.0f64; 7]; 3]; // [channel][ssim,art,det,mse,hf_loss,hf_mag,hf_gain]
+        for (c, wc) in w.iter_mut().enumerate() {
+            let base = scale_base + c * FPC;
+            wc[0] = -(g(base) + g(base + 1) + g(base + 2));
+            if include_edge_mse {
+                wc[1] = -(g(base + 3) + g(base + 4) + g(base + 5));
+                wc[2] = -(g(base + 6) + g(base + 7) + g(base + 8));
+                wc[3] = -g(base + 9);
+            }
+            if include_hf {
+                wc[4] = -g(base + 10);
+                wc[5] = -g(base + 11);
+                wc[6] = -g(base + 12);
+            }
+        }
+        let feat_total: f64 = w.iter().flat_map(|c| c.iter()).map(|v| v.abs()).sum();
+        let ch_weights = if feat_total > 0.0 {
+            core::array::from_fn(|c| PixelFeatureWeights {
+                ssim: (w[c][0] / feat_total) as f32,
+                art: (w[c][1] / feat_total) as f32,
+                det: (w[c][2] / feat_total) as f32,
+                mse: (w[c][3] / feat_total) as f32,
+                hf_loss: (w[c][4] / feat_total) as f32,
+                hf_mag: (w[c][5] / feat_total) as f32,
+                hf_gain: (w[c][6] / feat_total) as f32,
+            })
+        } else {
+            let eq = 1.0 / 3.0;
+            [PixelFeatureWeights { ssim: eq, ..Default::default() }; 3]
+        };
+        per_scale.push(ch_weights);
+        scale_totals.push(feat_total);
+    }
+    let total: f64 = scale_totals.iter().sum();
+    let blend = if total > 0.0 {
+        scale_totals.iter().map(|&t| (t / total) as f32).collect()
+    } else {
+        vec![1.0 / num_scales as f32; num_scales]
+    };
     (per_scale, blend)
 }
 

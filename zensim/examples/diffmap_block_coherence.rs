@@ -17,21 +17,52 @@
 //! ```sh
 //! cargo run --release -p zensim --example diffmap_block_coherence -- <ref> <dist> [--block 32]
 //! ```
+//!
+//! ## `--bake <path>` mode (requires the `custom-profiles` feature)
+//!
+//! Measures coherence for an ARBITRARY bake (e.g. the 156→128→1 MLP "winner" or
+//! an additive basic-156) instead of the shipped profile. The bake is mounted as
+//! a `ZensimProfile::Custom` and scored through the production features→score
+//! runtime (`score_features_with_profile`: bake forward + spline). Reports three
+//! numbers per pair (2026-07-18, the additive-vs-MLP decision instrumentation):
+//!
+//! - **M1** `SROCC(current_diffmap_block, ΔS_bake)` — how well the SHIPPED
+//!   per-pixel diffmap predicts where refining raises THIS bake's scalar.
+//! - **M2** `SROCC(Σ_k s_k·Δf_k(block), ΔS_bake)` — the GRADIENT/LINEARIZATION
+//!   ceiling: `s_k = ∂score/∂f_k` via central differences at the base image,
+//!   applied to the true per-block feature deltas. For an additive bake this is
+//!   exact (≈1 up to spline ties); for an MLP it caps ANY gradient-based
+//!   diffmap — if M2 is low, no per-pixel map can serve that bake's closed loop.
+//! - **SSE** `SROCC(sse_block, ΔS_bake)` — the codec PSNR default bar.
+//!
+//! ```sh
+//! cargo run --release -p zensim --features custom-profiles \
+//!   --example diffmap_block_coherence -- <ref> <dist> --bake winner.bin [--block 32]
+//! ```
 
 use zensim::{DiffmapWeighting, RgbSlice, Zensim, ZensimProfile};
+
+#[cfg(feature = "custom-profiles")]
+static BAKE_BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+#[cfg(feature = "custom-profiles")]
+fn bake_bytes_static() -> &'static [u8] {
+    BAKE_BYTES.get().expect("bake bytes set before profile use")
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 {
-        eprintln!("usage: diffmap_block_coherence <ref> <dist> [--block N]");
+        eprintln!("usage: diffmap_block_coherence <ref> <dist> [--block N] [--weighting trained|balanced] [--bake <path>]");
         std::process::exit(2);
     }
     let mut block = 32usize;
     let mut weighting = DiffmapWeighting::default(); // Trained (V0_2 weights)
+    let mut bake_path: Option<String> = None;
     let mut i = 2;
     while i + 1 < args.len() {
         match args[i].as_str() {
             "--block" => block = args[i + 1].parse().unwrap(),
+            "--bake" => bake_path = Some(args[i + 1].clone()),
             "--weighting" => {
                 weighting = match args[i + 1].as_str() {
                     "balanced" => DiffmapWeighting::Balanced,
@@ -53,6 +84,20 @@ fn main() {
     let rpx: Vec<[u8; 3]> = r.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     let dpx: Vec<[u8; 3]> = d.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
+    if let Some(bp) = bake_path {
+        #[cfg(feature = "custom-profiles")]
+        {
+            run_bake_mode(&bp, &rpx, &dpx, w, h, block, weighting);
+            return;
+        }
+        #[cfg(not(feature = "custom-profiles"))]
+        {
+            let _ = bp;
+            eprintln!("--bake requires building with --features custom-profiles");
+            std::process::exit(2);
+        }
+    }
+
     let z = Zensim::new(ZensimProfile::latest_preview());
     let base = z
         .compute_with_diffmap(
@@ -67,22 +112,7 @@ fn main() {
     let bx = w.div_ceil(block);
     let by = h.div_ceil(block);
     let nblocks = bx * by;
-    let mut dmap_block = vec![0f64; nblocks];
-    let mut sse_block = vec![0f64; nblocks];
-    for y in 0..h {
-        for x in 0..w {
-            let b = (y / block) * bx + (x / block);
-            let p = y * w + x;
-            dmap_block[b] += diff[p] as f64;
-            let e: f64 = (0..3)
-                .map(|c| {
-                    let dv = rpx[p][c] as f64 - dpx[p][c] as f64;
-                    dv * dv
-                })
-                .sum();
-            sse_block[b] += e;
-        }
-    }
+    let (dmap_block, sse_block) = block_sums(&diff, &rpx, &dpx, w, h, block, bx);
 
     // Ground truth per block = how much refining THIS block raises each candidate scalar.
     //   delta_s      : the FULL (non-additive) zensim scalar — the current metric.
@@ -143,6 +173,192 @@ fn main() {
         srocc_add,
         (srocc_add - srocc_full) * 100.0
     );
+}
+
+/// Per-block sums of the diffmap and of pixel SSE (the codec default selector).
+fn block_sums(
+    diff: &[f32],
+    rpx: &[[u8; 3]],
+    dpx: &[[u8; 3]],
+    w: usize,
+    h: usize,
+    block: usize,
+    bx: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let by = h.div_ceil(block);
+    let nblocks = bx * by;
+    let mut dmap_block = vec![0f64; nblocks];
+    let mut sse_block = vec![0f64; nblocks];
+    for y in 0..h {
+        for x in 0..w {
+            let b = (y / block) * bx + (x / block);
+            let p = y * w + x;
+            dmap_block[b] += diff[p] as f64;
+            let e: f64 = (0..3)
+                .map(|c| {
+                    let dv = rpx[p][c] as f64 - dpx[p][c] as f64;
+                    dv * dv
+                })
+                .sum();
+            sse_block[b] += e;
+        }
+    }
+    (dmap_block, sse_block)
+}
+
+/// `--bake` mode: coherence of an arbitrary bake's scalar (2026-07-18).
+///
+/// ΔS comes from the production features→score runtime on per-block-refined
+/// feature vectors; M2's `s_k` is a numerical central-difference gradient of the
+/// same runtime at the base features (spline included — it is monotone, so rank
+/// is preserved; flat-spline pairs are degenerate and should be mid-dial).
+#[cfg(feature = "custom-profiles")]
+fn run_bake_mode(
+    bake_path: &str,
+    rpx: &[[u8; 3]],
+    dpx: &[[u8; 3]],
+    w: usize,
+    h: usize,
+    block: usize,
+    weighting: DiffmapWeighting,
+) {
+    use zensim::profile::ProfileParams;
+    use zensim::score_features_with_profile;
+
+    let bytes = std::fs::read(bake_path).expect("read bake");
+    let n_in = zenpredict::Model::from_bytes(&bytes)
+        .expect("parse bake header")
+        .n_inputs();
+    BAKE_BYTES.set(bytes).expect("bake bytes set once");
+
+    // Feature pipeline sized to the bake: basic-only bakes (n_in ≤ 156) skip the
+    // IW pyramid (cheaper per-block loop); 372-input bakes need the full set.
+    let params = ProfileParams::builder()
+        .mlp(bake_bytes_static)
+        .skip_score_mapping(true)
+        .extrapolate_score(true)
+        .extended_features(true)
+        .compute_iw_features(n_in > 300)
+        .build();
+    let params: &'static ProfileParams = Box::leak(Box::new(params));
+    let profile = ZensimProfile::Custom { params, name: "bake-under-test" };
+    let z = Zensim::new(profile);
+
+    let rs = RgbSlice::new(rpx, w, h);
+    let base = z
+        .compute_extended_features(&rs, &RgbSlice::new(dpx, w, h))
+        .expect("base features");
+    let base_feats = base.features().to_vec();
+    assert!(
+        base_feats.len() >= n_in,
+        "bake wants {n_in} inputs, extractor produced {}",
+        base_feats.len()
+    );
+    let score = |feats: &[f64]| -> f64 {
+        score_features_with_profile(profile, &feats[..n_in], w as u32, h as u32)
+            .expect("bake forward")
+    };
+    let base_score = score(&base_feats);
+
+    // s_k = ∂score/∂f_k at the base image (central differences through the full
+    // runtime: transforms + MLP/linear forward + spline).
+    let mut s = vec![0f64; n_in];
+    let mut probe = base_feats.clone();
+    for k in 0..n_in {
+        let eps = (base_feats[k].abs() * 1e-3).max(1e-5);
+        probe[k] = base_feats[k] + eps;
+        let up = score(&probe);
+        probe[k] = base_feats[k] - eps;
+        let dn = score(&probe);
+        probe[k] = base_feats[k];
+        s[k] = (up - dn) / (2.0 * eps);
+    }
+    let grad_zero = s.iter().filter(|v| v.abs() < 1e-12).count();
+
+    // Three per-pixel diffmaps for the same pair:
+    //   M1  — the CURRENT shipped default (ssim-only signals, profile weighting):
+    //         what a codec consumes today.
+    //   M1b — same weight source, ALL per-pixel signals (edge/mse/hf on):
+    //         isolates the signal-set effect from the weight-source effect.
+    //   M3  — ModelSensitivity: signals weighted by THIS bake's own s_k
+    //         (the deployable approximation of the exact gradient).
+    let dist_slice = RgbSlice::new(dpx, w, h);
+    let diff = z
+        .compute_with_diffmap(&rs, &dist_slice, weighting)
+        .expect("diffmap")
+        .diffmap()
+        .to_vec();
+    let all_signals = |wt: DiffmapWeighting| zensim::DiffmapOptions {
+        weighting: wt,
+        include_edge_mse: true,
+        include_hf: true,
+        ..Default::default()
+    };
+    let diff_all = z
+        .compute_with_diffmap(&rs, &dist_slice, all_signals(weighting))
+        .expect("diffmap all-signals")
+        .diffmap()
+        .to_vec();
+    // s_k over the basic block only — the per-pixel machinery spatializes f0..155.
+    let s_basic: &'static [f64] =
+        Box::leak(s[..n_in.min(156)].to_vec().into_boxed_slice());
+    let diff_model = z
+        .compute_with_diffmap(
+            &rs,
+            &dist_slice,
+            all_signals(DiffmapWeighting::ModelSensitivity(s_basic)),
+        )
+        .expect("diffmap model-sensitivity")
+        .diffmap()
+        .to_vec();
+
+    let bx = w.div_ceil(block);
+    let by = h.div_ceil(block);
+    let nblocks = bx * by;
+    let (dmap_block, sse_block) = block_sums(&diff, rpx, dpx, w, h, block, bx);
+    let (dmap_all_block, _) = block_sums(&diff_all, rpx, dpx, w, h, block, bx);
+    let (dmap_model_block, _) = block_sums(&diff_model, rpx, dpx, w, h, block, bx);
+
+    let mut delta_s = vec![0f64; nblocks];
+    let mut lin_pred = vec![0f64; nblocks];
+    let mut scratch = dpx.to_vec();
+    for by_i in 0..by {
+        for bx_i in 0..bx {
+            let b = by_i * bx + bx_i;
+            let (x0, y0) = (bx_i * block, by_i * block);
+            let (x1, y1) = ((x0 + block).min(w), (y0 + block).min(h));
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    scratch[y * w + x] = rpx[y * w + x];
+                }
+            }
+            let rr = z
+                .compute_extended_features(&rs, &RgbSlice::new(&scratch, w, h))
+                .expect("refined features");
+            let rfeats = rr.features();
+            delta_s[b] = score(rfeats) - base_score;
+            lin_pred[b] = (0..n_in).map(|k| s[k] * (rfeats[k] - base_feats[k])).sum();
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    scratch[y * w + x] = dpx[y * w + x];
+                }
+            }
+        }
+    }
+
+    let m1 = spearman(&dmap_block, &delta_s);
+    let m1b = spearman(&dmap_all_block, &delta_s);
+    let m3 = spearman(&dmap_model_block, &delta_s);
+    let m2 = spearman(&lin_pred, &delta_s);
+    let sse = spearman(&sse_block, &delta_s);
+    println!(
+        "bake spatial coherence ({nblocks} blocks, {block}px)  bake={bake_path}  n_inputs={n_in}  base_score={base_score:.2}  grad_zero={grad_zero}/{n_in}"
+    );
+    println!("  M1  SROCC(shipped_default_diffmap, ΔS_bake) = {m1:+.4}   PLCC {:+.4}   (ssim-only, profile weights)", pearson(&dmap_block, &delta_s));
+    println!("  M1b SROCC(all_signals_diffmap,     ΔS_bake) = {m1b:+.4}   PLCC {:+.4}   (edge/mse/hf on, profile weights)", pearson(&dmap_all_block, &delta_s));
+    println!("  M3  SROCC(model_sensitivity_map,   ΔS_bake) = {m3:+.4}   PLCC {:+.4}   (bake's own s_k — deployable)", pearson(&dmap_model_block, &delta_s));
+    println!("  M2  SROCC(grad_lin_pred,           ΔS_bake) = {m2:+.4}   PLCC {:+.4}   (gradient/linearization ceiling)", pearson(&lin_pred, &delta_s));
+    println!("      SROCC(SSE_block,               ΔS_bake) = {sse:+.4}   (codec PSNR default — the bar)");
 }
 
 fn rank(v: &[f64]) -> Vec<f64> {
