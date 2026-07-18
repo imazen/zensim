@@ -29,6 +29,20 @@ non-additive scalar caps at 0.87–0.91 (+0.07–0.12 left on the table); the co
 default is unreliable (−0.58 to +0.30). Not 1.000 only because of the winsor transforms +
 f16 + multiscale blur — negligible. **The "go additive" decision is locked.**
 
+**L1 quality — no tradeoff (CONFIRMED 2026-07-18).** A basic-only additive linear model
+(f0–155, `--max-features 156`) vs a full-372 control, same recipe/seed:
+
+| | CID22 | imazen26 | nonphoto | HF |
+|---|--|--|--|--|
+| **basic-156 (additive core)** | **0.8978** | 0.8353 | 0.8531 | **0.4446** |
+| full-372 control | 0.8876 | 0.8411 | 0.8605 | 0.3394 |
+
+The additive basic core **beats** the full model on CID22 and near-lossless, at ~0.006 cost
+on imazen26/nonphoto. So the non-additive peak/max features (f156–371) add nothing to CID22
+— they can move to L2 (the severe floor, where max/p-norm is exactly what's wanted) at **no
+quality cost**. Both risks the design carried — "does additive cost the diffmap?" (no, it
+*gives* it) and "does basic-only cost quality?" (no, it *helps*) — are retired.
+
 ## Relaxation (user 2026-07-18): discontinuity below the codec-targetable range is fine
 
 Codecs never emit corruption or deep negatives as a *quality setting* — those are
