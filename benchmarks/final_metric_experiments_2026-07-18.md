@@ -209,3 +209,23 @@ all others ~0.006. hf_gain is an UNBOUNDED ratio that hits 1e7 on extreme conten
 This is the clean resolution of the winsor question: keep winsor's INTENT (OOD stability) but apply
 it surgically to the unbounded feature, not broadly. Next: targeted hf_gain winsor + re-measure
 (expect: extremes tamed, near-lossless PRESERVED, dial-mono/CID22 held).
+
+## E-BOTH + SURGICAL hf_gain winsor — RESOLVED ✓ (the complete recipe)
+Winsor on ONLY the 8 hf_gain features (bounds from safesyn p99), everything else untouched:
+| | kadis_negrich max | dial-mono | CID22 | HF |
+|---|--|--|--|--|
+| E-BOTH no winsor | 1,325,065 ✗ | 0.984 | 0.895 | 0.586 |
+| broad p99 winsor | 53,543 | 0.962 | 0.888 | 0.084 ✗ |
+| **surgical hf_gain winsor** | **67.8** ✓ | **0.984** | **0.894** | **0.587** ✓ |
+Extremes FULLY tamed (0 exploding rows), near-lossless PRESERVED, dial-mono + CID22 held. The
+"winsor problem" was one unbounded feature (hf_gain); surgical winsor on it fixes OOD stability
+at zero cost to everything else — broad winsor's HF collapse is avoided entirely.
+
+### THE COMPLETE WINNING RECIPE (validated end-to-end, 2026-07-18)
+`basic-156 features + :both (RankNet+MSE) loss + surgical winsor on hf_gain (8 feats) + dial spline`
+- dial-mono 0.984 (≥ B 0.979) · CID22 0.894 (> B 0.876, full panel) · HF 0.587 (≈ B 0.614)
+- exact diffmap 0.987 (basic-only — B can't) · OOD-stable (max 67.8, no explosion) · seed-robust
+- corruption handled by the pipeline/offline (NOT the runtime scalar — no external metric at runtime)
+- + dial spline for [neg,100] range & negatives (spline preserves the 0.984 monotonicity)
+Real fix for hf_gain long-term: bound the ratio at feature-extraction (metric.rs) so it's stable
+for ALL bakes, not per-recipe winsor. But the recipe above is validated and shippable-quality now.
