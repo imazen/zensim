@@ -84,3 +84,16 @@ corruption ↔ jittery dial + gates corruption) is now the central axis to resol
   basic-only, but basic-only via RankNet is a jittery dial (0.47). Can B's dial-smoothness be
   had on basic-only features? Lever = loss function (least-squares/BVLS smooth vs RankNet jitter).
   → E-MSE tests it.
+
+## E-MSE — LOSS is the dial-monotonicity lever (CONFIRMED, key finding)
+basic-156, safesyn-only, **MSE loss**: dial-mono **0.9981** (vs RankNet 0.474; ≈ B's 0.979),
+HF 0.532, corruption 27%, CID22 0.074 (safesyn-only → no generalization, DATA issue not loss).
+Conclusions:
+- **Dial monotonicity = the LOSS.** Least-squares/MSE fits VALUES → smooth (0.998); RankNet fits
+  pair ORDER → jittery (0.47). This is why B (BVLS least-squares) is a 0.98 dial. SETTLED.
+- **RankNet's 85% corruption was a loss artifact** — MSE gives 27% (realistic). Over-weighting
+  extreme-feature pairs in RankNet inflated it. Confirms E2: the additive core never had a real
+  corruption edge.
+- Recipe for a good additive dial: **MSE loss + multi-corpus (for CID22) + basic features (exact
+  diffmap)**. MSE needs common target scale (mixed scales diverge). → E-MSE2: safesyn + cid22_train
+  (both ssim2-scale, MSE-compatible).
