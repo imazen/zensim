@@ -256,6 +256,15 @@ const CORPORA: &[Corpus] = &[
         enable_per_band: true,
     },
     Corpus {
+        name: "csiq",
+        display: "CSIQ",
+        // CSIQ (30 refs × 6 distortions incl. JPEG/JPEG2000; 866 pairs). DMOS
+        // stored as `human_score = 1 − DMOS` → quality-oriented [0,1] (matches
+        // kadid/tid). Classic FR benchmark; added 2026-07-18 (FR-corpus expansion).
+        filename: "csiq_features_372col_2026-07-18.parquet",
+        enable_per_band: true,
+    },
+    Corpus {
         name: "konjnd",
         display: "KonJND-1k (full)",
         filename: "konjnd_features_372col_2026-05-15.parquet",
