@@ -182,3 +182,15 @@ a negative weight). Winsor's JOB is exactly this (per-feature p99 clip). I dropp
 E3 showed it didn't help corruption/dial-mono — but that was never its job. The winning recipe
 MUST include winsor for OOD robustness. → E-BOTH+winsor retrain: keep dial-mono/CID22 while
 taming the extremes (measure the tamed range + whether HF survives, since E3-RankNet+winsor hurt HF).
+
+## E-BOTH+winsor — broad p99 winsor is the WRONG fix (kills near-lossless)
+auto-transforms (p99) winsor on E-BOTH: raw max 1.3M→53k (6 rows STILL explode, partial tame),
+dial-mono 0.984→0.962, CID22 0.895→0.888, **HF 0.586→0.084 (DESTROYED)**.
+Root cause: E-BOTH is basic-only, so the OOD explosion is in the BASIC HF/edge features — and
+those SAME features carry the near-lossless signal. p99 winsor clips the near-lossless signal
+along with the OOD spikes → HF collapses (same mechanism as the depth-MLP "transforms kill HF").
+So the fix is NOT broad p99 winsor. Options: (a) a HIGHER clip (p99.9+, above near-lossless but
+below the OOD millions — the gap is huge), (b) per-image feature normalization (the scheduled
+IW-norm fix), (c) an OOD feature-magnitude guard that floors only the ~14 exploding rows. The
+14/39917 exploding rows are OOD severe (below codec-targetable = the relaxation zone), so coarse
+handling is acceptable — but the INVERSION (severe→+1.3M) means we must FLOOR them, not cap high.
