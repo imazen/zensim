@@ -29,19 +29,43 @@ non-additive scalar caps at 0.87–0.91 (+0.07–0.12 left on the table); the co
 default is unreliable (−0.58 to +0.30). Not 1.000 only because of the winsor transforms +
 f16 + multiscale blur — negligible. **The "go additive" decision is locked.**
 
-**L1 quality — no tradeoff (CONFIRMED 2026-07-18).** A basic-only additive linear model
-(f0–155, `--max-features 156`) vs a full-372 control, same recipe/seed:
+**L1 quality — RETRACTED 2026-07-18 (the "additive core" was an MLP).** The table below
+claimed a basic-only *additive* model beats full-372 at CID22 0.8978. That is WRONG: the
+`--max-features 156` bake it measured (`L1_linear_mf156.bin`) is **not additive** — `zenpredict
+inspect` shows every "linear"/"basic-156" bake in this campaign is a `156→128→1` **LeakyReLU
+MLP**. The `zensim_mlp_train` binary has no linear mode (`--n-hidden-layers 0` is never consumed
+by train-core; it always emits a 128-unit hidden layer). So the row below compares two MLPs, and
+the "additive core" label is false.
 
-| | CID22 | imazen26 | nonphoto | HF |
+| ~~model~~ (ALL MLPs — mislabeled) | CID22 | imazen26 | nonphoto | HF |
 |---|--|--|--|--|
-| **basic-156 (additive core)** | **0.8978** | 0.8353 | 0.8531 | **0.4446** |
-| full-372 control | 0.8876 | 0.8411 | 0.8605 | 0.3394 |
+| ~~basic-156 "additive core"~~ (156→128→1 MLP) | 0.8978 | 0.8353 | 0.8531 | 0.4446 |
+| full-372 control (372→128→1 MLP) | 0.8876 | 0.8411 | 0.8605 | 0.3394 |
 
-The additive basic core **beats** the full model on CID22 and near-lossless, at ~0.006 cost
-on imazen26/nonphoto. So the non-additive peak/max features (f156–371) add nothing to CID22
-— they can move to L2 (the severe floor, where max/p-norm is exactly what's wanted) at **no
-quality cost**. Both risks the design carried — "does additive cost the diffmap?" (no, it
-*gives* it) and "does basic-only cost quality?" (no, it *helps*) — are retired.
+**What a GENUINELY additive basic-156 actually scores (measured 2026-07-18,
+`additive_basic156_probe.py` — the linear solver restricted to f0..155, `n_layers=1` identity,
+`additive=True`, `diffmap_basic_fraction=1.0`, verified):**
+
+| model | additive? | CID22 | dial-mono | note |
+|---|---|--|--|--|
+| **additive basic-156** (best of 12: shaped-lasso) | **✓ yes** | **0.8563** | 0.973 | first real additive-156 |
+| additive-372 **B** (`b_sdr_linear`) | ✓ yes | 0.8764 | smooth | ships as Profile B |
+| basic-156 **MLP** (`Ebothg` winner) | ✗ no | 0.8939 | 0.984 | the promoted "winner" |
+| basic-156 MLP (`L1_linear_mf156`) | ✗ no | 0.8978 | 0.474 | the mislabeled row above |
+
+**Both "no tradeoff" conclusions are FALSE; there is a real tradeoff:**
+- **additive costs ~0.038 CID22** vs the basic-156 MLP (0.856 vs 0.894) — the LeakyReLU
+  nonlinearity is doing real ranking work, it is not free.
+- **basic-156 costs ~0.020 CID22** vs additive-372 B (0.856 vs 0.876) — so f156–371 DO help an
+  additive model's CID22; "they add nothing" was an artifact of comparing two MLPs whose
+  nonlinearity absorbed the feature loss.
+
+The one claim that SURVIVES: **additive was never the dial problem** — additive + output spline
+gives a smooth dial (0.973), as B already showed. The gap is CID22 *rank*, not dial smoothness.
+So the honest closed-loop choice is a genuine trade: exact-gradient diffmap (additive B/basic-156,
+CID22 0.86–0.88) **vs** best rank (MLP, CID22 0.894 but input-dependent diffmap whose coherence
+is unmeasured). This is a decision to surface to the user, not a solved "go additive." Detail:
+`benchmarks/additive_vs_mlp_correction_2026-07-18.md`.
 
 ## Relaxation (user 2026-07-18): discontinuity below the codec-targetable range is fine
 
@@ -54,6 +78,16 @@ smooth *inside* the targetable band. Coherence (correct ordering, monotone desce
 holds below; only *continuity* is waived there.
 
 ## 2. The decision: additive core, not an MLP
+
+> **⚠ CORRECTION 2026-07-18 — this decision was made on debunked evidence; it is now a genuine
+> tradeoff, not a slam-dunk.** §1's "additive costs no quality" was measured on mislabeled MLPs
+> (see the retraction above). The real numbers: additive tops out at CID22 0.876 (B, 372-input)
+> / 0.856 (basic-156); the MLP reaches 0.894. So "the depth-MLP's small holdout edge is not
+> worth forfeiting the diffmap" understates the edge — it is ~0.038 CID22, and it buys real
+> rank. The diffmap argument (0.987 exact-gradient for additive, unmeasured for MLP) still
+> favors additive for the *closed loop specifically*; but this is a trade the user should make
+> explicitly (exact diffmap + 0.86–0.88 rank vs input-dependent diffmap + 0.894 rank), not a
+> settled "go additive." The prose below is preserved as the original reasoning.
 
 The session's central tension: MLP precision (non-additive pooling, 372-feat depth) vs
 everything the closed loop needs (additive → exact diffmap; linear → smooth + deterministic +

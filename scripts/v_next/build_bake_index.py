@@ -34,7 +34,13 @@ def main():
                 "cid22": cid(m), "dial_mono": e["dial"]["monotonicity"],
                 "dial_p5": e["dial"]["p5"], "dial_p95": e["dial"]["p95"],
                 "ood_max": e["ood_max_abs_raw"], "corruption": e["corruption_gate_q20"],
-                "diffmap_frac": e["diffmap_basic_fraction"],
+                # closed_loop: {additive, basic_input_only, diffmap_basic_fraction}.
+                # `additive` is the exact-gradient property (was mislabeled as diffmap_frac=1.0
+                # for basic-input MLPs before 2026-07-18). Tolerate old-schema sidecars.
+                "additive": (e.get("closed_loop") or {}).get("additive"),
+                "basic_input": (e.get("closed_loop") or {}).get("basic_input_only"),
+                "diffmap_frac": (e.get("closed_loop") or {}).get("diffmap_basic_fraction",
+                                 e.get("diffmap_basic_fraction")),
                 "train_corpora": (m["provenance"] or {}).get("train_corpora"),
                 "reconstructed_prov": bool((m["provenance"] or {}).get("reconstructed")),
                 "eval_at": m["tool"]["timestamp"],
@@ -47,16 +53,18 @@ def main():
     # human-readable
     md = ["# Bake index — " + str(DIR), "",
           f"{index['n_bakes']} bakes · {index['n_with_metrics']} with metrics · {index['n_with_spec']} with provenance", "",
-          "| bake | sha | n_in | CID22 | dial-mono | OOD max | corr | diffmap-frac | prov | evaluated |",
-          "|---|---|--|--|--|--|--|--|--|--|"]
+          "| bake | sha | n_in | CID22 | dial-mono | OOD max | corr | additive | basic-in | prov | evaluated |",
+          "|---|---|--|--|--|--|--|--|--|--|--|"]
     for r in rows:
         if r["has_metrics"]:
             prov = "recon" if r.get("reconstructed_prov") else ("✓" if r["has_spec"] else "—")
+            add = {True: "✓", False: "✗", None: "?"}[r.get("additive")]
+            bin_ = {True: "✓", False: "—", None: "?"}[r.get("basic_input")]
             md.append(f"| {r['bake']} | `{r['bake_sha256']}` | {r['n_inputs']} | "
                       f"{r['cid22']:.4f} | {r['dial_mono']:.3f} | {r['ood_max']:.0f} | "
-                      f"{r['corruption']*100:.0f}% | {r['diffmap_frac']} | {prov} | {r['eval_at'][:10]} |")
+                      f"{r['corruption']*100:.0f}% | {add} | {bin_} | {prov} | {r['eval_at'][:10]} |")
         else:
-            md.append(f"| {r['bake']} | — | — | **NO metrics.json** | | | | | {'✓' if r['has_spec'] else '—'} | |")
+            md.append(f"| {r['bake']} | — | — | **NO metrics.json** | | | | | | {'✓' if r['has_spec'] else '—'} | |")
     (DIR / "BAKE_INDEX.md").write_text("\n".join(md))
     print(f"wrote {DIR}/BAKE_INDEX.json + .md  ({index['n_bakes']} bakes, "
           f"{index['n_with_metrics']} metrics, {index['n_with_spec']} spec)")

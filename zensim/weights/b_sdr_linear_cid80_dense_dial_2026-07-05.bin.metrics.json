@@ -1,0 +1,177 @@
+{
+  "schema": "zensim.bake_metrics.v1",
+  "bake": "zensim/weights/b_sdr_linear_cid80_dense_dial_2026-07-05.bin",
+  "bake_sha256": "b78adb15b55d5c911ddd65903ac1b8813ab8c1f01d05bb90bdfe149f5e8773cf",
+  "n_inputs": 372,
+  "provenance": null,
+  "provenance_present": false,
+  "eval": {
+    "panel": [
+      {
+        "display": "CID22",
+        "n": 4292,
+        "srocc": 0.8762731763184923,
+        "plcc": 0.8761326831059468,
+        "krocc": 0.6877466003327926,
+        "or_ratio": 0.00023299161230195712,
+        "pwrc": 0.9809298238668077,
+        "z_rmse": 0.4820700380583451,
+        "ds_auc": 0.8256411252247058,
+        "per_ref_mean": 0.9419295817808504,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "imazen-26 real-codec (held-out, ssim2)",
+        "n": 10025,
+        "srocc": 0.8410903901487666,
+        "plcc": 0.7818724105194679,
+        "krocc": 0.6998063150344404,
+        "or_ratio": 0.024538653366583542,
+        "pwrc": 0.9411667163052,
+        "z_rmse": 0.6234384828008167,
+        "ds_auc": 0.8193470833064479,
+        "per_ref_mean": 0.9413537075956162,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "imazen-26 non-photo (held-out)",
+        "n": 10000,
+        "srocc": 0.8602678734167727,
+        "plcc": 0.8361144743186597,
+        "krocc": 0.7175891293833172,
+        "or_ratio": 0.0191,
+        "pwrc": 0.9515473201109389,
+        "z_rmse": 0.5485549983609704,
+        "ds_auc": 0.836030439717628,
+        "per_ref_mean": 0.9258478158613541,
+        "per_ref_frac_negative": 0.0007401924500370096
+      },
+      {
+        "display": "KonJND-1k (full)",
+        "n": 1008,
+        "srocc": 0.5473818093421905,
+        "plcc": 0.5113353287375688,
+        "krocc": 0.383984355559952,
+        "or_ratio": 0.000992063492063492,
+        "pwrc": 0.8504539273626115,
+        "z_rmse": 0.8593812783537014,
+        "ds_auc": 0.5744643654243804,
+        "per_ref_mean": null,
+        "per_ref_frac_negative": null
+      },
+      {
+        "display": "AIC-3 CTC",
+        "n": 600,
+        "srocc": 0.7773542781238088,
+        "plcc": 0.7878884145331168,
+        "krocc": 0.6042411102630684,
+        "or_ratio": 0.0,
+        "pwrc": 0.9376110625060767,
+        "z_rmse": 0.6158180301391727,
+        "ds_auc": 0.7092385453759028,
+        "per_ref_mean": 0.9235570253782465,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "AIC-4 sample",
+        "n": 300,
+        "srocc": 0.8899969999666663,
+        "plcc": 0.8795553730461835,
+        "krocc": 0.7072017837235228,
+        "or_ratio": 0.0,
+        "pwrc": 0.9784338955433624,
+        "z_rmse": 0.47579653818159234,
+        "ds_auc": 0.8327232139838724,
+        "per_ref_mean": 0.9108196721311475,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "HF near-lossless (held-out refs)",
+        "n": 300,
+        "srocc": 0.7253753770441517,
+        "plcc": 0.7756054267298327,
+        "krocc": 0.5411714675798474,
+        "or_ratio": 0.0,
+        "pwrc": 0.9456356505409791,
+        "z_rmse": 0.6312180463554511,
+        "ds_auc": 0.6547346615176785,
+        "per_ref_mean": 0.3291806722689076,
+        "per_ref_frac_negative": 0.2916666666666667
+      },
+      {
+        "display": "CSIQ",
+        "n": 866,
+        "srocc": 0.9340021359064848,
+        "plcc": 0.9096666993099936,
+        "krocc": 0.7711344224856143,
+        "or_ratio": 0.0,
+        "pwrc": 0.9827361265806162,
+        "z_rmse": 0.4153390135473653,
+        "ds_auc": 0.8587892658237398,
+        "per_ref_mean": 0.9316887165578953,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "PIPAL",
+        "n": 21800,
+        "srocc": 0.5643585412344708,
+        "plcc": 0.5809983614616634,
+        "krocc": 0.3969100163848542,
+        "or_ratio": 0.020091743119266054,
+        "pwrc": 0.932901214552348,
+        "z_rmse": 0.8139047266715863,
+        "ds_auc": 0.568262461861108,
+        "per_ref_mean": 0.5902523039990673,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "LIVE-R2",
+        "n": 779,
+        "srocc": 0.9056950907441594,
+        "plcc": 0.8869594638287741,
+        "krocc": 0.7321370528171411,
+        "or_ratio": 0.0,
+        "pwrc": 0.9780185950235684,
+        "z_rmse": 0.46184727976530426,
+        "ds_auc": 0.8031966172718784,
+        "per_ref_mean": 0.9077646189077858,
+        "per_ref_frac_negative": 0.0
+      }
+    ],
+    "dial": {
+      "monotonicity": 0.9786938397406206,
+      "p5": 13.060551686361489,
+      "p95": 99.79302629704,
+      "flat": 0.0002315886984715146,
+      "g3_pass": true,
+      "g1_pass": true
+    },
+    "ood_max_abs_raw": 91.75,
+    "corruption_gate_q20": 0.1802,
+    "corruption_n": 222,
+    "closed_loop": {
+      "additive": true,
+      "basic_input_only": false,
+      "diffmap_basic_fraction": 0.6205
+    }
+  },
+  "inputs": {
+    "dial_grid": {
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
+      "sha256": "6546c43e6d9572dc"
+    },
+    "ood_grid": {
+      "path": "/mnt/v/output/zensim/corr-lq/kadis_negrich_gate.parquet",
+      "sha256": "09e1044ce655d90a"
+    },
+    "corruption_grid": {
+      "path": "/mnt/v/output/zensim/corr-lq/corruption_gate.parquet",
+      "sha256": "97e688e23967382f"
+    }
+  },
+  "tool": {
+    "emitter": "scripts/v_next/emit_bake_metrics.py",
+    "commit": "355184eb3f3a",
+    "timestamp": "2026-07-18T22:37:04Z"
+  }
+}

@@ -620,9 +620,11 @@ def provenance_section(bakes):
 
 def robustness_section(bakes):
     """Closed-loop / robustness factors READ from the persisted <bake>.metrics.json sidecars
-    (emit_bake_metrics.py) — NOT recomputed here. OOD stability, corruption gate, and the
-    diffmap basic-additive fraction (1.0 = exact-gradient-capable). A bake with no sidecar is
-    flagged, never silently dropped (the anti-amnesia contract)."""
+    (emit_bake_metrics.py) — NOT recomputed here. OOD stability, corruption gate, and the TWO
+    distinct closed-loop-diffmap properties: `additive` (all-identity layers → diffmap is the
+    EXACT per-feature spatial gradient; an MLP is NOT additive) and `basic_input_only` (reads
+    only the spatializable basic block f0..155). A bake with no sidecar is flagged, never
+    silently dropped (the anti-amnesia contract)."""
     import json as _json
     rows = []
     for lab, kind, path in bakes:
@@ -642,22 +644,32 @@ def robustness_section(bakes):
          "(read from <code>&lt;bake&gt;.metrics.json</code> sidecars — persisted, not recomputed)</span></h2>",
          "<table><thead><tr><th>bake</th><th>OOD |raw| max<br><span class='note'>lower=safer</span></th>"
          "<th>corruption gate<br><span class='note'>separate concern</span></th>"
-         "<th>diffmap basic-frac<br><span class='note'>1.0=exact gradient</span></th>"
+         "<th>additive<br><span class='note'>exact-gradient diffmap</span></th>"
+         "<th>basic-input<br><span class='note'>spatializable f0..155 only</span></th>"
          "<th>dial-mono</th><th>sha256</th><th>eval</th></tr></thead><tbody>"]
     for lab, m in rows:
         if m is None:
-            b.append(f"<tr><td class='lbl'>{lab}</td><td colspan='6' style='background:#fadbd8'>"
+            b.append(f"<tr><td class='lbl'>{lab}</td><td colspan='7' style='background:#fadbd8'>"
                      "NO metrics.json sidecar — run emit_bake_metrics.py</td></tr>")
             continue
         e = m["eval"]
         ood = e["ood_max_abs_raw"]
         ood_c = "#fadbd8" if ood > 1000 else "#d5f5e3"
-        df = e["diffmap_basic_fraction"]
-        df_c = "#d5f5e3" if df == 1.0 else ("" if df is None else "#fff3cd")
+        # closed_loop {additive, basic_input_only, diffmap_basic_fraction}; tolerate old schema.
+        cl = e.get("closed_loop") or {}
+        add = cl.get("additive")
+        bin_ = cl.get("basic_input_only")
+        frac = cl.get("diffmap_basic_fraction")
+        add_txt = {True: "✓ yes", False: "✗ MLP", None: "?"}[add]
+        add_c = "#d5f5e3" if add is True else ("#fff3cd" if add is False else "")
+        # for additive bakes, annotate the basic-mass fraction; for MLPs show input-scope only
+        bin_txt = ("✓ 156-only" if bin_ else "372-in") + (f" · frac {frac}" if (add and frac is not None) else "")
+        bin_c = "#d5f5e3" if bin_ else ""
         b.append(f"<tr><td class='lbl'>{lab}</td>"
                  f"<td style='background:{ood_c}'>{ood:,.0f}</td>"
                  f"<td>{e['corruption_gate_q20']*100:.0f}%</td>"
-                 f"<td style='background:{df_c}'>{df}</td>"
+                 f"<td style='background:{add_c}'>{add_txt}</td>"
+                 f"<td style='background:{bin_c}'>{bin_txt}</td>"
                  f"<td>{e['dial']['monotonicity']:.3f}</td>"
                  f"<td><code>{m['bake_sha256'][:12]}</code></td>"
                  f"<td class='note'>{m['tool']['timestamp'][:10]}</td></tr>")

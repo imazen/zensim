@@ -35,7 +35,7 @@ CORRLQ = Path("/mnt/v/output/zensim/corr-lq")
 OOD_PARQUET = CORRLQ / "kadis_negrich_gate.parquet"
 CORRUPTION_PARQUET = CORRLQ / "corruption_gate.parquet"
 DIAL_GRID = "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet"
-CORPORA = "cid22,imazen26,nonphoto,konjnd,aic3,aic4,hf_nearlossless,csiq,pipal"
+CORPORA = "cid22,imazen26,nonphoto,konjnd,aic3,aic4,hf_nearlossless,csiq,pipal,live"
 SIDECAR_SCHEMA = "zensim.bake_metrics.v1"
 
 
@@ -88,32 +88,46 @@ def corruption_gate(bake):
     return round(ok / max(tot, 1), 4), tot
 
 
-def diffmap_basic_fraction(bake):
-    """|w|/scale mass on the basic block (f0..155). Linear bakes only; None otherwise."""
+def closed_loop_properties(bake):
+    """The TWO DISTINCT closed-loop-diffmap properties (do NOT conflate them):
+
+      additive        — every layer is `identity`, i.e. score = Σ wᵢ·featureᵢ. Only then is
+                        the diffmap the EXACT per-feature spatial gradient (a fixed per-block
+                        weight map). An MLP with a LeakyReLU hidden layer is NOT additive: its
+                        gradient is input-dependent, so its diffmap is not a fixed per-block map.
+      basic_input_only — the model reads only the spatializable basic block f0..155 (per-scale
+                        per-channel SSIM/edge/detail/mse/hf). Its diffmap then CANNOT depend on
+                        the murky peak/max/masked/IW features (f156..371). This is a real
+                        closed-loop advantage, but it is INDEPENDENT of additivity.
+      diffmap_basic_fraction — |w|/scale mass on f0..155. DEFINED ONLY for additive bakes
+                        (an MLP has no single per-feature weight, so this is None for it).
+
+    Prior bug (fixed 2026-07-18): this returned 1.0 whenever n_inputs≤156, i.e. it reported a
+    156-input LeakyReLU MLP (the `Ebothg` winner) as additive/exact-gradient. It is not."""
     r = subprocess.run([ZP, "inspect", bake, "--weights"], capture_output=True, text=True)
     try:
         d = json.loads(r.stdout)
     except Exception:
-        return None
-    # The INPUT dimension is the deciding signal: a bake that only takes the basic block
-    # (f0..155) is additive-basic by construction → exact-gradient diffmap, whatever its
-    # internal layer count (the Rust "linear" trainer emits n_layers=2 with an identity 2nd).
-    if (d.get("n_inputs") or 999) <= 156:
-        return 1.0
-    if d.get("n_layers") != 1:
-        return None  # 372-input MLP — diffmap proxy undefined
-    lyr = d["layers"][0]
-    w = next((np.array(lyr[k], dtype=float) for k in ("weights", "weight", "values") if isinstance(lyr.get(k), list)), None)
-    sc = np.array(d.get("scaler_scale", []), dtype=float)
-    if w is None:
-        return None
-    n = w.size
-    if n <= 156:
-        return 1.0  # basic-only bake (f0..155) → additive → exact-gradient diffmap
-    if n == 372 and sc.size == 372:
-        s = np.abs(w) / np.where(sc != 0, sc, 1e9)
-        return round(float(s[:156].sum() / s.sum()), 4) if s.sum() > 0 else None
-    return None
+        return {"additive": None, "basic_input_only": None, "diffmap_basic_fraction": None}
+    layers = d.get("layers", [])
+    additive = bool(layers) and all(l.get("activation") == "identity" for l in layers)
+    n_inputs = d.get("n_inputs") or 999
+    basic_input_only = n_inputs <= 156
+    frac = None
+    if additive and len(layers) == 1:  # truly-linear single map (B, linear-projection bakes)
+        lyr = layers[0]
+        w = next((np.array(lyr[k], dtype=float) for k in ("weights", "weight", "values")
+                  if isinstance(lyr.get(k), list)), None)
+        sc = np.array(d.get("scaler_scale", []), dtype=float)
+        if w is not None:
+            n = w.size
+            if n <= 156:
+                frac = 1.0
+            elif n == 372 and sc.size == 372:
+                s = np.abs(w) / np.where(sc != 0, sc, 1e9)
+                frac = round(float(s[:156].sum() / s.sum()), 4) if s.sum() > 0 else None
+    return {"additive": additive, "basic_input_only": basic_input_only,
+            "diffmap_basic_fraction": frac}
 
 
 def emit(bake):
@@ -143,7 +157,7 @@ def emit(bake):
             "ood_max_abs_raw": round(float(np.max(np.abs(ood))), 2),
             "corruption_gate_q20": corr,
             "corruption_n": corr_n,
-            "diffmap_basic_fraction": diffmap_basic_fraction(bake),
+            "closed_loop": closed_loop_properties(bake),
         },
         "inputs": {
             "dial_grid": {"path": DIAL_GRID, "sha256": sha256_file(DIAL_GRID)[:16]},
@@ -155,9 +169,10 @@ def emit(bake):
     out = Path(bake + ".metrics.json")
     out.write_text(json.dumps(sidecar, indent=2))
     cid = next((c["srocc"] for c in vj["corpora"] if c["display"] == "CID22"), None)
+    cl = sidecar["eval"]["closed_loop"]
     print(f"  ✓ {Path(bake).name}: CID22 {cid:.4f} dial {vj['dial']['monotonicity']:.3f} "
           f"OOD {sidecar['eval']['ood_max_abs_raw']:.0f} corr {corr*100:.0f}% "
-          f"diffmap-frac {sidecar['eval']['diffmap_basic_fraction']} prov {spec is not None}")
+          f"additive={cl['additive']} basic-input={cl['basic_input_only']} prov {spec is not None}")
     return out
 
 

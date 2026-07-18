@@ -51,7 +51,48 @@ def build_csiq():
     print(f"CSIQ: {len(out)} pairs → {OUT}  (skipped {miss} missing)")
 
 
-BUILDERS = {"csiq": build_csiq}
+def build_live():
+    """LIVE IQA Release 2: 29 refs × {jp2k,jpeg,wn,gblur,fastfading}, 779 real distortions.
+
+    readme.txt fixes the concat order EXACTLY:
+      dmos=[jp2k(1:227) jpeg(1:233) wn(1:174) gblur(1:174) fastfading(1:174)]  (982 total)
+    orgs(i)==1 marks a reference-copy placed in-sequence (dmos~0) -> skip (982-779=203).
+    We use the REALIGNED dmos (dmos_new, Sheikh 2006 recommended) + refnames_all for the
+    ref join. human_score = 1 - dmos_new/100  (quality-oriented [0,1], higher=better, to
+    match kadid/tid/csiq). dmos_std (per-sample sigma) is emitted as a 4th column for
+    later Z-RMSE; the feature extractor reads only the first 3 (ref/dist/human_score)."""
+    import scipy.io as sio
+    import numpy as np
+    BASE = "/mnt/v/datasets/LIVE/databaserelease2"
+    OUT = "/mnt/v/datasets/LIVE/live_r2_pairs.tsv"
+    # (folder, global offset, count) — offsets are the readme concat order.
+    SEG = [("jp2k", 0, 227), ("jpeg", 227, 233), ("wn", 460, 174),
+           ("gblur", 634, 174), ("fastfading", 808, 174)]
+    rea = sio.loadmat(f"{BASE}/dmos_realigned.mat")
+    dmos = np.asarray(rea["dmos_new"]).flatten()          # realigned DMOS, ~[-3,112]
+    std = np.asarray(rea["dmos_std"]).flatten()           # per-sample sigma
+    orgs = np.asarray(rea["orgs"]).flatten().astype(int)  # 1 == reference-copy -> skip
+    refs = [str(x[0]) for x in np.asarray(sio.loadmat(f"{BASE}/refnames_all.mat")["refnames_all"]).flatten()]
+    out, miss = [], 0
+    for folder, off, cnt in SEG:
+        for k in range(1, cnt + 1):
+            gi = off + (k - 1)
+            if orgs[gi] == 1:            # reference-copy in-sequence, not a real distortion
+                continue
+            ref = f"{BASE}/refimgs/{refs[gi]}"
+            dist = f"{BASE}/{folder}/img{k}.bmp"
+            if not (Path(ref).exists() and Path(dist).exists()):
+                miss += 1
+                continue
+            out.append((ref, dist, 1.0 - float(dmos[gi]) / 100.0, float(std[gi])))
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score", "sigma"])
+        w.writerows(out)
+    print(f"LIVE R2: {len(out)} pairs -> {OUT}  (skipped {miss} missing)")
+
+
+BUILDERS = {"csiq": build_csiq, "live": build_live}
 
 if __name__ == "__main__":
     name = sys.argv[1] if len(sys.argv) > 1 else ""

@@ -1,0 +1,192 @@
+{
+  "schema": "zensim.bake_metrics.v1",
+  "bake": "zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin",
+  "bake_sha256": "b6fe5233ee9c752d29abeb8be8b0814c052dd96f566a82250cdd6ff6a8cb13e0",
+  "n_inputs": 372,
+  "provenance": {
+    "train_corpora": [
+      "cid22_train",
+      "hdr_v3mix",
+      "kadid",
+      "safesyn",
+      "tid"
+    ],
+    "weights": {
+      "cid_head(hdr_v3mix)": 0.8,
+      "kon_head(safesyn+cid22_train+kadid+tid+hdr_v3mix)": 0.2
+    },
+    "arch": "linear ensemble 0.8\u00b7cid_head(lasso) + 0.2\u00b7kon_head(bvls)",
+    "target": "cvvdp-mix / ssim2-anchored",
+    "note": "SHIPPED B; kon head trained on kadid+tid -> CHEAT for B; cid22_train is ssim2-anchored (honest)"
+  },
+  "provenance_present": true,
+  "eval": {
+    "panel": [
+      {
+        "display": "CID22",
+        "n": 4292,
+        "srocc": 0.8763762678439606,
+        "plcc": 0.8760078861011612,
+        "krocc": 0.6877736779912016,
+        "or_ratio": 0.00023299161230195712,
+        "pwrc": 0.9809475458677746,
+        "z_rmse": 0.48229677947149413,
+        "ds_auc": 0.8254513095080926,
+        "per_ref_mean": 0.94135139129333,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "imazen-26 real-codec (held-out, ssim2)",
+        "n": 10025,
+        "srocc": 0.8413322421780152,
+        "plcc": 0.781493129120768,
+        "krocc": 0.6999333847517895,
+        "or_ratio": 0.02423940149625935,
+        "pwrc": 0.941023695869412,
+        "z_rmse": 0.623913850845591,
+        "ds_auc": 0.8183365313941855,
+        "per_ref_mean": 0.941364983737921,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "imazen-26 non-photo (held-out)",
+        "n": 10000,
+        "srocc": 0.8606257514405808,
+        "plcc": 0.836519118837368,
+        "krocc": 0.7180397492052076,
+        "or_ratio": 0.0189,
+        "pwrc": 0.9516555200193643,
+        "z_rmse": 0.5479377372548424,
+        "ds_auc": 0.8350625172664481,
+        "per_ref_mean": 0.9271598324444312,
+        "per_ref_frac_negative": 0.0007401924500370096
+      },
+      {
+        "display": "KonJND-1k (full)",
+        "n": 1008,
+        "srocc": 0.5466487029640777,
+        "plcc": 0.511007623163802,
+        "krocc": 0.38327475540389117,
+        "or_ratio": 0.000992063492063492,
+        "pwrc": 0.8503339324834385,
+        "z_rmse": 0.8595761799098908,
+        "ds_auc": 0.5744834196511485,
+        "per_ref_mean": null,
+        "per_ref_frac_negative": null
+      },
+      {
+        "display": "AIC-3 CTC",
+        "n": 600,
+        "srocc": 0.7774346812607006,
+        "plcc": 0.788036297613572,
+        "krocc": 0.6043348855575921,
+        "or_ratio": 0.0,
+        "pwrc": 0.9376356323515124,
+        "z_rmse": 0.6156287790897164,
+        "ds_auc": 0.7090601248315127,
+        "per_ref_mean": 0.9235905312926773,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "AIC-4 sample",
+        "n": 300,
+        "srocc": 0.8906343403815598,
+        "plcc": 0.8795312018152179,
+        "krocc": 0.7080936454849498,
+        "or_ratio": 0.0,
+        "pwrc": 0.9785514239403764,
+        "z_rmse": 0.475841218300263,
+        "ds_auc": 0.8325133485130204,
+        "per_ref_mean": 0.9113976104473464,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "HF near-lossless (held-out refs)",
+        "n": 300,
+        "srocc": 0.6141742609906059,
+        "plcc": 0.7011994727494659,
+        "krocc": 0.44603108880664954,
+        "or_ratio": 0.006666666666666667,
+        "pwrc": 0.9145085854745056,
+        "z_rmse": 0.7129651460302298,
+        "ds_auc": 0.6338914039871605,
+        "per_ref_mean": 0.4879901960784314,
+        "per_ref_frac_negative": 0.20833333333333334
+      },
+      {
+        "display": "CSIQ",
+        "n": 866,
+        "srocc": 0.9342080050753716,
+        "plcc": 0.9108612214878837,
+        "krocc": 0.7710116061467689,
+        "or_ratio": 0.0,
+        "pwrc": 0.9831960132163716,
+        "z_rmse": 0.41271277566604747,
+        "ds_auc": 0.858501147508329,
+        "per_ref_mean": 0.9320189057931395,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "PIPAL",
+        "n": 21800,
+        "srocc": 0.5649712210593696,
+        "plcc": 0.5811716207516703,
+        "krocc": 0.3972635672880268,
+        "or_ratio": 0.020045871559633027,
+        "pwrc": 0.9331654711378712,
+        "z_rmse": 0.8137810194167171,
+        "ds_auc": 0.5682523759201199,
+        "per_ref_mean": 0.5918586528354224,
+        "per_ref_frac_negative": 0.0
+      },
+      {
+        "display": "LIVE-R2",
+        "n": 779,
+        "srocc": 0.8970262381538091,
+        "plcc": 0.8808145812193662,
+        "krocc": 0.7193063224207856,
+        "or_ratio": 0.0,
+        "pwrc": 0.9758324397249095,
+        "z_rmse": 0.47346137489235973,
+        "ds_auc": 0.799220243720216,
+        "per_ref_mean": 0.9023741812647736,
+        "per_ref_frac_negative": 0.0
+      }
+    ],
+    "dial": {
+      "monotonicity": 0.9791570171375636,
+      "p5": 13.645032446453126,
+      "p95": 99.72170874183841,
+      "flat": 0.0,
+      "g3_pass": true,
+      "g1_pass": true
+    },
+    "ood_max_abs_raw": 96.24,
+    "corruption_gate_q20": 0.1802,
+    "corruption_n": 222,
+    "closed_loop": {
+      "additive": true,
+      "basic_input_only": false,
+      "diffmap_basic_fraction": 0.6205
+    }
+  },
+  "inputs": {
+    "dial_grid": {
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
+      "sha256": "6546c43e6d9572dc"
+    },
+    "ood_grid": {
+      "path": "/mnt/v/output/zensim/corr-lq/kadis_negrich_gate.parquet",
+      "sha256": "09e1044ce655d90a"
+    },
+    "corruption_grid": {
+      "path": "/mnt/v/output/zensim/corr-lq/corruption_gate.parquet",
+      "sha256": "97e688e23967382f"
+    }
+  },
+  "tool": {
+    "emitter": "scripts/v_next/emit_bake_metrics.py",
+    "commit": "355184eb3f3a",
+    "timestamp": "2026-07-18T22:25:00Z"
+  }
+}

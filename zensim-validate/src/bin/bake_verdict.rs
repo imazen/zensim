@@ -275,6 +275,18 @@ const CORPORA: &[Corpus] = &[
         enable_per_band: false,
     },
     Corpus {
+        name: "live",
+        display: "LIVE-R2",
+        // LIVE IQA Release 2 (Sheikh 2006): 29 refs × {jp2k,jpeg,wn,gblur,fastfading};
+        // 779 real distortions. Realigned DMOS → `human_score = 1 − dmos_new/100`
+        // (quality-oriented [0,1]); per-sample `sigma` (dmos_std) carried for Z-RMSE.
+        // Classic FR compression benchmark (JPEG + JPEG2000). HELD-OUT for our bakes.
+        // Added 2026-07-18 (FR-corpus expansion). Pairs builder:
+        // scripts/canonical_corpus/build_fr_corpus_pairs.py live.
+        filename: "live_features_372col_2026-07-18.parquet",
+        enable_per_band: true,
+    },
+    Corpus {
         name: "konjnd",
         display: "KonJND-1k (full)",
         filename: "konjnd_features_372col_2026-05-15.parquet",
