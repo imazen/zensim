@@ -122,3 +122,23 @@ adds nothing to CID22 aggregate): a **basic-only B would have the exact diffmap 
 same CID22 (0.876)** — dropping the 38% non-basic mass costs nothing measurable and buys the exact
 gradient. So the winning recipe = **B's smooth-dial fitting (BVLS least-squares) restricted to
 basic features**. B's basic sensitivities saved for the ModelCoherent diffmap experiment.
+
+## E-BOTH — THE WINNING RECIPE ✓ (RankNet+MSE on basic features)
+Groups: safesyn:both, cid22_train:both, kadid:rank, tid:rank; basic-156; seed 13.
+| metric | E-BOTH | B (ref) | verdict |
+|---|--|--|--|
+| dial-mono | **0.9840** | 0.979 | ✓ matches B (G3 pass) |
+| CID22 | **0.8953** | 0.876 | ✓ BEATS B |
+| imazen26 | 0.8349 | 0.841 | ≈ |
+| nonphoto | 0.8542 | ~0.88 | ≈ |
+| HF near-lossless | **0.5862** | 0.614 | ≈ B (vs RankNet 0.445) |
+| dial range (pre-spline) | −3.4/24.6 | — | real spread (NOT collapsed) |
+| diffmap coherence | **0.987** (basic-only) | 0.87 | ✓ EXACT (B can't — 62% basic) |
+
+`:both` = RankNet (rank, keeps the spread → CID22) + MSE (value-fit → smooth dial), and being
+basic-only it carries the exact diffmap. This is the first recipe to get **smooth dial + quality
++ exact diffmap simultaneously**, beating B on CID22 (0.895) and matching dial-mono (0.984) while
+adding the exact diffmap B structurally can't have. The design CLOSES:
+**basic-156 + `:both` loss + dial spline ([neg,100] + negatives) + butteraugli corruption guard.**
+Caveats before ship: single seed (seed-confirm needed); pre-spline range needs the dial spline;
+full-corpus + konjnd/aic groups to add. But the architecture is validated end to end.
