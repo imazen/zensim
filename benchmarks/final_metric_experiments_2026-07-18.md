@@ -173,3 +173,12 @@ zensim's butteraugli-like features — it inherits butteraugli-max's localizatio
 deliberate perceptibility-calibrated weighting. OPEN QUESTION whether it can be done cleanly
 without hurting the honest dial; the offline butteraugli Stage-2 (zensim-regress) remains the
 reliable corruption check.
+
+## E-BOTH WINSOR HOLE (user caught, 2026-07-18) — dropping winsor breaks OOD rows
+E-BOTH raw range: honest p1/p99 = −14/13.5 (sane) BUT on kadis_negrich min=−2871,
+**max=1,325,065** — 14/39917 rows explode past |1000|, a severe-distortion row scoring 1.3M
+(ultra-high-quality: a catastrophic inversion from the f228-371 IW/HF feature explosion ×
+a negative weight). Winsor's JOB is exactly this (per-feature p99 clip). I dropped it because
+E3 showed it didn't help corruption/dial-mono — but that was never its job. The winning recipe
+MUST include winsor for OOD robustness. → E-BOTH+winsor retrain: keep dial-mono/CID22 while
+taming the extremes (measure the tamed range + whether HF survives, since E3-RankNet+winsor hurt HF).
