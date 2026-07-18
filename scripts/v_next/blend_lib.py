@@ -54,11 +54,15 @@ VAL_CORPORA = {
     "aic3":     (f"{FULLFEAT}/aic3_features_372col_2026-05-15.parquet",   "human_score", -1, False),
     "aic4":     (f"{FULLFEAT}/aic4_features_372col_2026-05-20.parquet",   "human_score", -1, False),
     "nonphoto": (f"{FULLFEAT}/nonphoto_features_372col_2026-07-15.parquet", "human_score", +1, False),
+    # FR-corpus expansion 2026-07-18 (held-out; human_score quality-oriented [0,1], sign +1).
+    "csiq":     (f"{FULLFEAT}/csiq_features_372col_2026-07-18.parquet",   "human_score", +1, True),
+    "live":     (f"{FULLFEAT}/live_features_372col_2026-07-18.parquet",   "human_score", +1, True),
+    "pipal":    (f"{FULLFEAT}/pipal_features_372col_2026-07-18.parquet",  "human_score", +1, False),
 }
 # corpora where train==val image overlap inflates SROCC (memorization, not skill) -> guards only
 INTEGRITY_GUARDS = {"kadid", "tid"}
-# true held-outs used for selection
-HOLDOUTS = ["cid22", "aic3", "aic4", "konjnd", "nonphoto"]
+# true held-outs used for selection (csiq/live/pipal are FR holdouts our bakes never train on)
+HOLDOUTS = ["cid22", "aic3", "aic4", "konjnd", "nonphoto", "csiq", "live", "pipal"]
 
 _CACHE: dict = {}
 

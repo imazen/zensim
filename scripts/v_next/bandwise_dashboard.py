@@ -40,7 +40,7 @@ plt.rcParams.update({"font.size": 7.5, "axes.grid": True, "grid.alpha": 0.25,
 BANDS = [f"B{i}" for i in range(10)]
 SCATTER_MAX = 1500              # subsample dense scatters — keeps zoomable-SVG size responsive
 # corpora bandable on a 0..100-normalized human MOS (JND-scale corpora are not)
-BANDABLE = {"cid22", "kadid", "tid", "nonphoto"}
+BANDABLE = {"cid22", "kadid", "tid", "nonphoto", "csiq", "live"}
 
 # --- eval-corpus metadata: split-suffixed display, split semantics, cheat-twin, footnote. The
 # per-bake honesty is DERIVED from each bake's <path>.spec.json (train_corpora) at render time —
@@ -62,6 +62,15 @@ CORPUS_META = {
     "nonphoto": ("imazen26_val", "imazen-26 non-photo — val-origin {1,3,5}", "bigcodec",
                  "VAL-SPLIT of the bigcodec/imazen-26 corpus: diverse bakes train on TRAIN-origin "
                  "{0,2,4,6,8} (disjoint renditions) → honest generalization, NOT cheat."),
+    # FR-corpus expansion 2026-07-18 — all HELD-OUT (our bakes never train on them).
+    "live":     ("live_val", "LIVE-R2 — 29-ref FR (JPEG/JP2K/blur/WN/fastfading)", None,
+                 "Held-out FR. Sheikh 2006 realigned DMOS → human=1−dmos/100. THE classic "
+                 "compression benchmark; never trained on."),
+    "csiq":     ("csiq_val", "CSIQ — 30-ref FR (JPEG/JP2K/blur/noise/contrast)", None,
+                 "Held-out FR. human=1−DMOS. Classic compression + analytic distortions; never trained on."),
+    "pipal":    ("pipal_val", "PIPAL — 200-ref GAN/restoration (ELO MOS)", None,
+                 "Held-out. GAN/restoration distortions — a DISTINCT, harder axis (NOT compression); "
+                 "never trained on. Expect lower SROCC than the FR compression sets."),
 }
 TRAIN_CORPUS_DESC = {
     "safesyn": "synthetic-safe tiles (CID22-leak-purged), ssim2_gpu",
