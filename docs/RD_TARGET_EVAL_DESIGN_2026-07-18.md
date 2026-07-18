@@ -88,6 +88,24 @@ achieved_self, achieved_B, judges…, passes, metric_evals, ms_encode, ms_metric
 4. **Only if the probe shows real byte savings:** scale corpus + densify targets per the
    source-informing sweep discipline before any constant lands in source.
 
+## Phase 1 smoke — RAN 2026-07-18 (jxl half)
+
+3 default #38 images × d∈{1.0, 2.5} × {zensim-B+all-signal map, butteraugli} drivers, 3 QF
+iters, effort default; decoded outputs judged by independent ssim2 + butteraugli
+(`/mnt/v/output/zensim/rd-target-eval-2026-07/smoke/`, `judge_*.tsv`).
+
+- **Pipeline proven end-to-end**: drivers steer differently (bytes diverge per cell), decodes
+  land, judges score, manifest→judge join works.
+- **Efficiency first datum**: ~190–220 ms/encode at 512² INCLUDING 3 zensim-B refinement
+  iterations (≈ butteraugli-loop cost; the feared 250 ms/iter does not materialize for B at
+  this size); ~2.7 s on the 1024-class screen image.
+- **Directional RD signal (NOT a verdict — unequal bytes at nominal d):** on the 2 photos,
+  zensim-B-driven encodes spend ~+11% bytes and win BOTH judges (e.g. 1025469 d2.5: ssim2
+  76.4 vs 73.7 AND butteraugli 0.98 vs 1.06 — better on the competitor judge's own turf). On
+  screen content, zensim wins ssim2 but loses the butteraugli judge (0.47 vs 0.34 at d1.0).
+  Equal-achieved-score frontier interpolation (the design above) decides; the 2026-05-27 #38
+  campaign's +1–5% bytes-at-equal-quality result remains the prior.
+
 ## Verdict criteria (pre-registered)
 
 - A diffmap driver is **helpful** if median bytes-saved > 2% at equal achieved-B-score with NO
