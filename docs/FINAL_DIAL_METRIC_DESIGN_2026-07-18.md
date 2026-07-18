@@ -194,3 +194,27 @@ features may genuinely catch localized breaks the SSIM-based metrics miss. Re-me
 full 672-recipe corpus + spot-check actual raw scores for small- vs large-region recipes before
 committing L2's scope. The 85.6% headline (corruption-signal-in-raw-output) is robust; the
 per-region attribution is not yet.
+
+## Post-campaign refinement (2026-07-18) — the recipe, not the layers
+
+The E1–E6 + E-MSE experiment campaign (`benchmarks/final_metric_experiments_2026-07-18.md`)
+simplified the 5-layer design to a **recipe** on the additive core:
+
+**Winning recipe = B's smooth-dial least-squares (BVLS) fit, restricted to BASIC features.**
+- **Additive/basic → exact diffmap (0.987)** — confirmed; B is only 62% basic (→ 0.87 diffmap),
+  and basic-only costs no CID22 (E2), so a basic-only B is exact-diffmap + same quality.
+- **Dial monotonicity is the LOSS/fit, not the architecture.** B's BVLS least-squares → dial-mono
+  0.98 with full range. RankNet → jittery (0.47). Naive MSE-SGD → COLLAPSE (near-constant, fake
+  0.998, CID22 0.085). So reproduce B's constrained least-squares, not RankNet or MSE-SGD.
+- **Corruption is a SEPARATE guard, not an in-scalar layer.** The additive core's apparent
+  85% gate was a RankNet over-reaction to localized HF (E2: perceptually inverted; E-MSE: drops
+  to 27% under a non-RankNet loss). Real corruption gating = butteraugli-max Stage-2 on the
+  PERCEPTIBLE subset (72%). L2/L3 of the original design are retired.
+- **Negatives** (severe tail) need winsor to tame the un-clipped feature explosion (E5: raw range
+  to −2.9M; RankNet even inverts the tail) + the spline floor; this is the below-codec-range
+  regime where the relaxation permits coarseness.
+
+So the build reduces to: **(1) reproduce B's BVLS fit on basic-only features → smooth dial +
+CID22 + exact diffmap; (2) wire the ModelCoherent diffmap (B's basic sensitivities); (3) keep
+butteraugli as the separate corruption guard; (4) spline-floor for negatives.** No asymmetric
+squash, no in-scalar corruption layer.
