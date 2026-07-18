@@ -112,3 +112,13 @@ has no inversions AND no rank/range. MSE-SGD on the linear basic model underfits
   achievable but needs B's fitting approach, not naive MSE-SGD.
 - → E-BOTH: RankNet + MSE (`:both`) to get rank (RankNet keeps the spread) + smoothness (MSE),
   and separately consider reproducing B's BVLS on basic features.
+
+## E4-prep — B's sensitivity mass: 62% basic / 38% non-basic (95/372 nonzero)
+Extracted B's linear weights (`zenpredict inspect --weights`) + scaler. Sensitivity mass
+|w|/scale: **BASIC(f0-155) 62.1%, NON-BASIC(f156-371) 37.9%** (46 + 49 nonzero). So B is NOT
+purely additive — 38% of its scalar rides the non-additive peak/max/IW features. That is exactly
+why B's diffmap caps at 0.87 (the basic-only diffmap misses that 38%). Combined with E2 (non-basic
+adds nothing to CID22 aggregate): a **basic-only B would have the exact diffmap (0.987) AND the
+same CID22 (0.876)** — dropping the 38% non-basic mass costs nothing measurable and buys the exact
+gradient. So the winning recipe = **B's smooth-dial fitting (BVLS least-squares) restricted to
+basic features**. B's basic sensitivities saved for the ModelCoherent diffmap experiment.
