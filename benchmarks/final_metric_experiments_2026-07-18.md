@@ -97,3 +97,18 @@ Conclusions:
 - Recipe for a good additive dial: **MSE loss + multi-corpus (for CID22) + basic features (exact
   diffmap)**. MSE needs common target scale (mixed scales diverge). → E-MSE2: safesyn + cid22_train
   (both ssim2-scale, MSE-compatible).
+
+## E-MSE / E-MSE2 CORRECTION — the MSE "smooth dial" is COLLAPSE, not smoothness
+E-MSE2 (MSE, safesyn+cid22_train): dial-mono 0.9981 BUT dial p5/p95 = **−1.3 / −0.1** (near-constant
+output) and CID22 **0.085**. The high monotonicity is SPURIOUS — a collapsed near-constant output
+has no inversions AND no rank/range. MSE-SGD on the linear basic model underfits to the target mean
+(the bulk of human_score dominates the squared error; the spread is ignored). So:
+- **Corrected E-MSE finding**: MSE loss did NOT give a genuine smooth dial — it collapsed.
+  The 0.998 was an artifact of near-constant output.
+- **RankNet vs MSE-SGD is a false dichotomy**: RankNet = ranked (CID22 0.898) + jittery (0.47);
+  MSE-SGD = collapsed (CID22 0.085) + fake-smooth. NEITHER matches B.
+- **B's BVLS least-squares does BOTH** (CID22 0.876, dial-mono 0.98, full range 13.6/99.7) — so a
+  CONSTRAINED/analytical least-squares avoids the collapse that MSE-SGD hits. The dial smoothness is
+  achievable but needs B's fitting approach, not naive MSE-SGD.
+- → E-BOTH: RankNet + MSE (`:both`) to get rank (RankNet keeps the spread) + smoothness (MSE),
+  and separately consider reproducing B's BVLS on basic features.
