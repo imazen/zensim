@@ -53,3 +53,22 @@ whole-image corruption is UNDER-caught (69%). VERDICT: "85.6%" is not a win; the
 mis-ranks corruption by localization. The gate must be perceptibility-calibrated, and the raw
 number is a distractor. This also predicts E3: winsor (clipping the extreme features) should
 kill the small-region over-reaction — which is precisely how B lands at 18%.
+
+## E3 — winsor hypothesis FALSIFIED; E6 — dial-mono is the RECIPE, not additivity
+E3 (basic-156 + winsor): CID22 0.8907, HF **0.3736** (winsor HURT it here, vs 0.445 no-winsor),
+corruption **87.4%** (NOT killed), dial-mono 0.416. So winsor is NOT what blinds corruption or
+smooths the dial — E1's winsor hypothesis is dead.
+
+E6 dial monotonicity (densified multi-codec q-sweep, G3≥0.93):
+| bake | dial-mono | corruption(raw) | CID22 | HF |
+|---|--|--|--|--|
+| B (shipped: BVLS+dial-anchor+spline) | **0.9792** | 18% | 0.876 | 0.614 |
+| basic-156 (RankNet linear, no spline) | 0.4736 | 85.6% | 0.8978 | 0.445 |
+| basic-156 + winsor (RankNet) | 0.4159 | 87.4% | 0.8907 | 0.374 |
+
+Both are additive/linear, yet B is a SMOOTH dial (0.98) and my RankNet is JITTERY (0.47) — so
+additivity isn't the dial issue, the RECIPE is. A monotone spline can't fix 0.47→0.98 (it
+preserves order), so B's RAW model must already be ~0.98 monotone. Prime suspect: the LOSS —
+RankNet optimizes pair ORDER (jittery magnitude within-image); least-squares/BVLS fits VALUES
+(smooth). → test E-MSE: basic-156 with MSE loss. The B↔basic-156 tradeoff (smooth dial + blind
+corruption ↔ jittery dial + gates corruption) is now the central axis to resolve.
