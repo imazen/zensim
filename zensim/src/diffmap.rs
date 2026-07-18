@@ -789,7 +789,22 @@ impl crate::metric::Zensim {
                     &scale_blend,
                 )
             };
-        let result = result.with_profile(self.profile());
+        let mut result = result.with_profile(self.profile());
+        // Apply the profile's REAL scoring (bake forward + spline), exactly as
+        // `compute()` does. FIX 2026-07-18: this path previously returned the
+        // legacy V0_2 dot-product score for EVERY profile (apply_mlp_scoring
+        // was never called), so encoder closed loops steering on
+        // `DiffmapResult::score()` were tracking V0_2 — not the shipped
+        // metric. Two paths scoring the same pair differently is a bug per the
+        // parity contract; no-op for linear-weight legacy profiles
+        // (`mlp_bytes: None` early-returns).
+        crate::metric::apply_mlp_scoring_with_codec(
+            &mut result,
+            params,
+            width as u32,
+            height as u32,
+            None,
+        )?;
 
         // `precomputed.scales[0]` is `(padded_width, comp_h)`. For a ≥64px
         // distorted `comp_h == height` (original flow: trim to logical width,
@@ -949,7 +964,16 @@ impl crate::metric::Zensim {
                     );
                 (result, dm, padded_width)
             };
-        let result = result.with_profile(self.profile());
+        let mut result = result.with_profile(self.profile());
+        // Same real-scoring fix as `compute_with_ref_and_diffmap` (2026-07-18):
+        // apply the profile's bake forward + spline; no-op for legacy profiles.
+        crate::metric::apply_mlp_scoring_with_codec(
+            &mut result,
+            params,
+            width as u32,
+            height as u32,
+            None,
+        )?;
 
         // Mask + sqrt at the compute dims, then trim to the original (same
         // padded-vs-original branch as the RGB `compute_with_ref_and_diffmap`).
