@@ -86,6 +86,30 @@ def bake_train(path):
         return None
 
 
+# Reference-metric tuning provenance (publicly documented — NOT "trained on nothing").
+# `train` = corpora whose EVAL images the metric was fit on → CHEAT there, same rule as bakes.
+# Sources: SSIMULACRA2 README (Nelder-Mead-tuned on CID22 201/250 refs + TID2013 + KADID-10k +
+# KonFiG-IQA) — so KADID/TID are in-sample, while the CID22-49 val is the held-out remainder and
+# is therefore FAIR for ssim2 too (docs/DATA_SPLITS.md §"SSIMULACRA2's own data usage"). cvvdp /
+# butteraugli are fit on external psychophysical / proprietary data (none of these corpora);
+# IW-SSIM is analytical (no learned parameters).
+METRIC_PROVENANCE = {
+    "ssim2": ({"kadid", "tid"},
+              "SSIMULACRA2 — Nelder-Mead-tuned on CID22 (201/250 refs) + TID2013 + KADID-10k + "
+              "KonFiG-IQA. KADID/TID are in-sample (CHEAT); the CID22-49 val is the held-out "
+              "remainder (FAIR). Never scoreboard ssim2 on KADID/TID."),
+    "cvvdp": (set(),
+              "ColorVideoVDP (Mantiuk et al.) — calibrated on psychophysical contrast / JOD "
+              "datasets; none of these corpora → held-out everywhere here."),
+    "butteraugli↓": (set(),
+                     "butteraugli (Google) — tuned on internal data; none of these corpora → "
+                     "held-out everywhere here."),
+    "iwssim": (set(),
+               "IW-SSIM (Wang & Li 2011) — analytical information-content weighting, no learned "
+               "parameters → held-out everywhere here."),
+}
+
+
 def _trained(train_set, key):
     """True if the bake trained on `key` — tolerant of raw manifest group names
     (e.g. 'konjnd_dense' satisfies key 'konjnd', 'bigcodec' the nonphoto twin)."""
@@ -501,11 +525,18 @@ def provenance_section(bakes):
     """DERIVED entirely from each bake's <path>.spec.json — cannot desync from the bakes."""
     train = {lab: bake_train(path) for lab, _k, path in bakes}
     labels = [lab for lab, *_ in bakes]
-    b = ["<h2 id='data'>Datasets &amp; provenance — derived from each bake's <code>spec.json</code> (can't desync)</h2>",
-         "<p class='sub'>Honesty is computed <b>per bake</b> from what each model ACTUALLY trained on "
-         "(its <code>&lt;bake&gt;.spec.json</code> sidecar) — not hardcoded. So KADID/TID are CHEAT for a bake that "
-         "trained on them but HONEST held-out for one that didn't; change a training set and this whole section "
-         "follows automatically. Reference metrics (ssim2/cvvdp/butteraugli) train on nothing → always held-out.</p>"]
+    # reference metrics carry DOCUMENTED tuning provenance (not "trained on nothing")
+    metric_labels = list(METRIC_PROVENANCE.keys())
+    for m in metric_labels:
+        train[m] = METRIC_PROVENANCE[m][0]
+    all_labels = labels + metric_labels
+    b = ["<h2 id='data'>Datasets &amp; provenance — bakes from <code>spec.json</code>, metrics from published tuning sets</h2>",
+         "<p class='sub'>Honesty is computed <b>per series</b> from what it ACTUALLY trained/tuned on. Bakes: their "
+         "<code>&lt;bake&gt;.spec.json</code> sidecar. Reference metrics: their <b>publicly documented</b> tuning "
+         "corpora — <b>not</b> \"trained on nothing\". SSIMULACRA2 was Nelder-Mead-tuned on CID22-201 + TID2013 + "
+         "KADID-10k + KonFiG, so <b>ssim2 is CHEAT (in-sample) on KADID/TID</b> and must never be scoreboarded there; "
+         "the CID22-49 val is the held-out remainder so it is FAIR for ssim2. cvvdp / butteraugli / iwssim were fit "
+         "on external or analytical data disjoint from these corpora → held-out here.</p>"]
     # 1) what each bake trained on
     b.append("<h3>What each bake trained on (from its sidecar)</h3><table><thead><tr>"
              "<th>bake</th><th>arch</th><th>train corpora</th></tr></thead><tbody>")
@@ -515,13 +546,23 @@ def provenance_section(bakes):
         tc = ", ".join(sorted(meta.get("train_corpora", []))) or "<i>unknown (no sidecar)</i>"
         b.append(f"<tr><td class='lbl'>{lab}</td><td>{meta.get('arch','?')}</td><td>{tc}</td></tr>")
     b.append("</tbody></table>")
-    # 2) honesty matrix: corpus × bake
-    b.append("<h3>Honesty matrix — honest held-out vs CHEAT, per (corpus, bake)</h3>")
-    b.append("<table><thead><tr><th>eval corpus</th>" + "".join(f"<th>{l}</th>" for l in labels)
+    # 1b) reference-metric tuning provenance (publicly documented)
+    b.append("<h3>Reference-metric tuning provenance (published, not \"trained on nothing\")</h3>"
+             "<table><thead><tr><th>metric</th><th>tuned/fit on (→ CHEAT there)</th><th>source</th>"
+             "</tr></thead><tbody>")
+    for m in metric_labels:
+        tc = ", ".join(sorted(METRIC_PROVENANCE[m][0])) or "<i>none of these corpora</i>"
+        b.append(f"<tr class='metric'><td class='lbl'>{m}</td><td>{tc}</td><td>{METRIC_PROVENANCE[m][1]}</td></tr>")
+    b.append("</tbody></table>")
+    # 2) honesty matrix: corpus × (bake + metric)
+    b.append("<h3>Honesty matrix — honest held-out vs CHEAT, per (corpus, series)</h3>"
+             "<p class='sub'>Metric columns use each metric's documented tuning set — ssim2 reads CHEAT on "
+             "KADID/TID (in-sample) and HELD-OUT on the CID22-49 remainder.</p>")
+    b.append("<table><thead><tr><th>eval corpus</th>" + "".join(f"<th>{l}</th>" for l in all_labels)
              + "</tr></thead><tbody>")
     for c in B.VAL_CORPORA:
         cells = ""
-        for lab in labels:
+        for lab in all_labels:
             hn, col = honesty(train[lab], c)
             cells += f"<td style='background:{col};color:#fff;font-weight:600'>{hn}</td>"
         b.append(f"<tr><td class='lbl'>{CORPUS_META[c][0]}</td>{cells}</tr>")
@@ -580,7 +621,7 @@ def main():
     for c in data:
         for lab, (_h, _p, _pan, kind) in data[c].items():
             if kind == "metric":
-                train.setdefault(lab, set())
+                train.setdefault(lab, METRIC_PROVENANCE.get(lab, (set(), ""))[0])
 
     body = ["<h1>zensim bandwise dashboard — bakes + ssim2/cvvdp/butteraugli × corpus × band</h1>",
             "<p class='sub'>Zoomable SVG. Comparison plots use rank-<b>percentile</b> so bakes on "
