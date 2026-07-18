@@ -194,3 +194,18 @@ below the OOD millions — the gap is huge), (b) per-image feature normalization
 IW-norm fix), (c) an OOD feature-magnitude guard that floors only the ~14 exploding rows. The
 14/39917 exploding rows are OOD severe (below codec-targetable = the relaxation zone), so coarse
 handling is acceptable — but the INVERSION (severe→+1.3M) means we must FLOOR them, not cap high.
+
+## The winsor issue is ONE feature — hf_gain (f116), not a broad-winsor need
+E-BOTH weights on the 8 hf_gain features: f116 (hf_gain, scale2, B-ch) = **w +0.4722** (dominant);
+all others ~0.006. hf_gain is an UNBOUNDED ratio that hits 1e7 on extreme content → standardized
+× 0.47 → +1.3M output → severe row scores ultra-high (the inversion). So:
+- The "wild extremes" are ONE unbounded feature (hf_gain), not a general winsor deficit.
+- Broad p99 winsor "worked" only by clipping ALL features incl. the near-lossless-carrying
+  hf_loss/hf_mag → HF collapsed. Wrong tool.
+- **Right fix: bound hf_gain specifically** — either (a) a TARGETED winsor on the 8 hf_gain
+  features at a high percentile (above near-lossless, below the 1e7 OOD), or (b) bound the
+  hf_gain ratio at feature-extraction (metric.rs — the real fix, re-extract), or (c) drop
+  hf_gain if it's not load-bearing (its 0.47 weight suggests it IS helping CID22, so bound-don't-drop).
+This is the clean resolution of the winsor question: keep winsor's INTENT (OOD stability) but apply
+it surgically to the unbounded feature, not broadly. Next: targeted hf_gain winsor + re-measure
+(expect: extremes tamed, near-lossless PRESERVED, dial-mono/CID22 held).
