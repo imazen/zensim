@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- zensim_mlp_train now emits a `<bake>.spec.json` provenance sidecar (train_corpora from train_w>0 groups) so dashboards never render train/heldout as "unknown" (14b3113b + this)
+
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next zensim-regress
      minor (0.x) release. -->

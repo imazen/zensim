@@ -3193,6 +3193,42 @@ fn main() {
     });
     println!("Wrote {} bytes to {out_path:?}", bake_bytes.len());
 
+    // Provenance sidecar `<bake>.spec.json` — so downstream tooling (bandwise
+    // dashboard honesty matrix, bake_verdict train-vs-heldout labeling) never has
+    // to GUESS which corpora a bake trained on. Derived from the ACTUAL train_w>0
+    // groups (the desync-proof source of truth); a missing sidecar is what renders
+    // as "unknown". Raw group names are emitted (kadid / tid / konjnd_dense /
+    // bigcodec …) — the dashboard's prefix-tolerant `_trained()` resolves them to
+    // the CHEAT/val-split twins. 2026-07-18.
+    {
+        let mut train_corpora: Vec<String> = loaded
+            .iter()
+            .filter(|g| g.train_w > 0.0)
+            .map(|g| g.name.clone())
+            .collect();
+        train_corpora.sort();
+        train_corpora.dedup();
+        let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let list = train_corpora
+            .iter()
+            .map(|c| format!("\"{}\"", esc(c)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let spec = format!(
+            "{{\n  \"train_corpora\": [{list}],\n  \"note\": \"auto-emitted by zensim_mlp_train from manifest train_w>0 groups\"\n}}\n"
+        );
+        let mut spec_os = out_path.clone().into_os_string();
+        spec_os.push(".spec.json");
+        let spec_path = PathBuf::from(spec_os);
+        match std::fs::write(&spec_path, spec) {
+            Ok(()) => println!(
+                "[spec] wrote provenance sidecar {spec_path:?} ({} train corpora)",
+                train_corpora.len()
+            ),
+            Err(e) => eprintln!("[spec] warning: could not write {spec_path:?}: {e}"),
+        }
+    }
+
     // REPRODUCE-EXACTLY, the output half. `verify_inputs` has always checked
     // that the manifest's INPUTS are the bytes it claims; nothing checked its
     // OUTPUT until 2026-07-15, and the parser did not even read
