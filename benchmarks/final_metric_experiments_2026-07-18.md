@@ -148,3 +148,28 @@ SROCC 0.8953 / PLCC 0.8928 / KROCC 0.7115 / OR 0.0005 / PWRC 0.9842 / Z-RMSE 0.4
 DS-AUC 0.8239 / per-ref 0.9609 / %bwd 0%. Solid across the full Mohammadi panel — the 0.895
 is real, not a SROCC artifact; calibration (PLCC 0.893) and within-ref rank (0.961) are strong.
 Seed-confirm (s7,s23) in flight to check robustness of the beats-B result before any ship claim.
+
+## E-BOTH seed-confirm — ROBUST (s7/s13/s23)
+| seed | dial-mono | CID22 | HF |
+|---|--|--|--|
+| s13 | 0.984 | 0.8953 | 0.586 |
+| s7  | 0.985 | 0.8928 | 0.612 |
+| s23 | 0.984 | 0.8950 | 0.642 |
+Rock-solid across seeds (no collapse). dial-mono 0.984±0.001 ≥ B 0.979; CID22 0.894±0.001 > B
+0.876; HF 0.61±0.03 ≈ B 0.614. The winning recipe is seed-robust.
+
+## E7-lite — zensim's OWN peak features do NOT auto-gate corruption (butteraugli clarification)
+Runtime cannot call butteraugli (user, correct). "Learn from butteraugli" = use zensim's own
+XYB max/p-norm PEAK features (f156-371, the butteraugli-max analog), one forward pass. BUT tested:
+median corruption raw score by region, basic-156 (no peak) vs full-372 (WITH peak):
+| bake | whole | frac2 | frac4 | sq64 | sq16 | sq8 |
+|---|--|--|--|--|--|--|
+| basic-156 (no peak) | −2.1 | −3.4 | −5.8 | −9.3 | −13.9 | −20.4 |
+| full-372 (WITH peak) | −0.6 | −1.9 | −4.5 | −11.2 | −14.0 | −19.1 |
+Adding the peak features does NOT fix the localization inversion (whole-image corruption still
+scored MILDER than an 8px break). This is inherent to max-norm pooling (fires on worst LOCAL
+error → over-weights small intense breaks). So corruption-in-the-runtime-scalar is NOT free from
+zensim's butteraugli-like features — it inherits butteraugli-max's localization bias and needs
+deliberate perceptibility-calibrated weighting. OPEN QUESTION whether it can be done cleanly
+without hurting the honest dial; the offline butteraugli Stage-2 (zensim-regress) remains the
+reliable corruption check.

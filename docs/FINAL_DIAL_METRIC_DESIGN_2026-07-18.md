@@ -195,6 +195,17 @@ full 672-recipe corpus + spot-check actual raw scores for small- vs large-region
 committing L2's scope. The 85.6% headline (corruption-signal-in-raw-output) is robust; the
 per-region attribution is not yet.
 
+
+## CORRECTION (user 2026-07-18): no external metric at runtime
+zensim is ONE self-contained forward pass — butteraugli cannot run at runtime. The corruption
+"severe floor" must use zensim's OWN XYB max/p-norm PEAK features (f156-371, the butteraugli
+analog), not an external metric. The "butteraugli Stage-2" is OFFLINE-only (zensim-regress test
+harness). CAVEAT (E7-lite): those peak features do NOT auto-gate corruption — max-norm pooling
+inherits a localization bias (over-weights small intense breaks vs whole-image corruption), so
+in-scalar corruption gating needs deliberate perceptibility-calibrated weighting and is an OPEN
+question. Runtime corruption-safety may not be cleanly achievable within zensim's features;
+corruption may stay an offline/regression concern.
+
 ## Post-campaign refinement (2026-07-18) — the recipe, not the layers
 
 The E1–E6 + E-MSE experiment campaign (`benchmarks/final_metric_experiments_2026-07-18.md`)
