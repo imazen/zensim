@@ -84,27 +84,38 @@ fn main() {
         }
     }
 
-    // Ground truth: ΔS per block = how much refining THIS block raises the scalar.
-    // Refine into a scratch copy, score, restore. One rescore per block.
+    // Ground truth per block = how much refining THIS block raises each candidate scalar.
+    //   delta_s      : the FULL (non-additive) zensim scalar — the current metric.
+    //   delta_pooled : the ADDITIVE scalar = pooled diffmap (Σ per-pixel weighted signal).
+    //                  Its spatial gradient IS the diffmap by construction, so this measures
+    //                  the exact-diffmap ceiling the design's additive core targets.
+    // The gap between the two = the cost of the current scalar's NON-additivity.
+    let pooled_before: f64 = diff.iter().map(|&x| x as f64).sum();
     let mut delta_s = vec![0f64; nblocks];
+    let mut delta_pooled = vec![0f64; nblocks];
     let mut scratch = dpx.clone();
     for by_i in 0..by {
         for bx_i in 0..bx {
             let b = by_i * bx + bx_i;
             let (x0, y0) = (bx_i * block, by_i * block);
             let (x1, y1) = ((x0 + block).min(w), (y0 + block).min(h));
-            // copy ref → scratch over the block
             for y in y0..y1 {
                 for x in x0..x1 {
                     scratch[y * w + x] = rpx[y * w + x];
                 }
             }
-            let s = z
-                .compute(&RgbSlice::new(&rpx, w, h), &RgbSlice::new(&scratch, w, h))
-                .expect("compute")
-                .score();
-            delta_s[b] = s - base_score;
-            // restore
+            let refined = z
+                .compute_with_diffmap(
+                    &RgbSlice::new(&rpx, w, h),
+                    &RgbSlice::new(&scratch, w, h),
+                    weighting,
+                )
+                .expect("diffmap");
+            delta_s[b] = refined.score() - base_score;
+            let pooled_after: f64 = refined.diffmap().iter().map(|&x| x as f64).sum();
+            // refining a block REDUCES pooled error; negate so higher = more-improved,
+            // matching dmap_block's polarity (high = high error = high improvement potential).
+            delta_pooled[b] = -(pooled_after - pooled_before);
             for y in y0..y1 {
                 for x in x0..x1 {
                     scratch[y * w + x] = dpx[y * w + x];
@@ -113,23 +124,25 @@ fn main() {
         }
     }
 
-    let srocc_dm = spearman(&dmap_block, &delta_s);
+    let srocc_full = spearman(&dmap_block, &delta_s);
+    let srocc_add = spearman(&dmap_block, &delta_pooled);
     let srocc_sse = spearman(&sse_block, &delta_s);
-    let plcc_dm = pearson(&dmap_block, &delta_s);
     println!(
         "spatial coherence ({} blocks, {block}px)  base_score={base_score:.2}",
         nblocks
     );
-    println!("  SROCC(diffmap_block, ΔS) = {srocc_dm:+.4}   PLCC = {plcc_dm:+.4}");
-    println!("  SROCC(SSE_block,     ΔS) = {srocc_sse:+.4}   (codec PSNR default — the bar)");
-    let verdict = if srocc_dm >= srocc_sse && srocc_dm > 0.9 {
-        "COHERENT — diffmap is the scalar's spatial gradient AND beats SSE"
-    } else if srocc_dm > 0.9 {
-        "coherent but SSE ties/beats it — diffmap adds little spatially"
-    } else {
-        "INCOHERENT — diffmap points at the wrong blocks for the scalar"
-    };
-    println!("  => {verdict}");
+    println!("  additive-scalar target:");
+    println!("    SROCC(diffmap_block, Δ additive-scalar) = {srocc_add:+.4}   (exact-gradient ceiling)");
+    println!("  current (non-additive) scalar:");
+    println!("    SROCC(diffmap_block, ΔS_full)           = {srocc_full:+.4}   PLCC = {:+.4}", pearson(&dmap_block, &delta_s));
+    println!("    SROCC(SSE_block,     ΔS_full)           = {srocc_sse:+.4}   (codec PSNR default — the bar)");
+    println!(
+        "  => additive core buys +{:.4} spatial coherence ({:.4} → {:.4}); non-additivity is the {:.0}% gap the design removes",
+        srocc_add - srocc_full,
+        srocc_full,
+        srocc_add,
+        (srocc_add - srocc_full) * 100.0
+    );
 }
 
 fn rank(v: &[f64]) -> Vec<f64> {

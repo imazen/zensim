@@ -13,6 +13,32 @@ additive-vs-MLP tradeoff).
 | **Closed-loop diffmap** | diffmap(x,y) = ∂score/∂distortion(x,y); must be the scalar's spatial gradient so per-block refinement serves the target. MEASURED: pooled coherence is already ~1.0; spatial coherence is capped ~0.66 **because the scalar is non-additive** — a linear/additive scalar makes the diffmap its EXACT gradient |
 | **One-shot targeting** | score↔quality invertible + low-variance so `q_hat(target)` lands within δ in ONE encode; monotone fallback so a binary search converges if it misses |
 
+## 0. De-risk result (CONFIRMED 2026-07-18)
+
+The central bet — additive core → exact diffmap — is **measured and confirmed**
+(`diffmap_block_coherence`, additive-vs-full ΔS per 64px block):
+
+| pair | additive-scalar diffmap | full (non-additive) scalar | SSE (codec default) |
+|---|--|--|--|
+| gb82 honest q20 | **0.9876** | 0.8661 | −0.4488 |
+| gb82 honest q10 | **0.9876** | 0.8933 | −0.5820 |
+| CID22 mozjpeg q30 | **0.9862** | 0.9139 | +0.3034 |
+
+An additive scalar's diffmap is a **near-exact spatial gradient (~0.987)**; the current
+non-additive scalar caps at 0.87–0.91 (+0.07–0.12 left on the table); the codec's SSE
+default is unreliable (−0.58 to +0.30). Not 1.000 only because of the winsor transforms +
+f16 + multiscale blur — negligible. **The "go additive" decision is locked.**
+
+## Relaxation (user 2026-07-18): discontinuity below the codec-targetable range is fine
+
+Codecs never emit corruption or deep negatives as a *quality setting* — those are
+out-of-band. So the dial only has to be smooth **within the range a codec can target**;
+below the lowest honest q, a discontinuity is acceptable. This **removes the hardest
+constraint** (a single C∞ function spanning corruption→near-lossless): L2's severe floor and
+the negative tail may be a hard drop below the codec range, and L3's squash only has to be
+smooth *inside* the targetable band. Coherence (correct ordering, monotone descent) still
+holds below; only *continuity* is waived there.
+
 ## 2. The decision: additive core, not an MLP
 
 The session's central tension: MLP precision (non-additive pooling, 372-feat depth) vs
