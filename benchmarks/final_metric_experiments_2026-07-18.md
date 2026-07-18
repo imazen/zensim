@@ -142,3 +142,9 @@ adding the exact diffmap B structurally can't have. The design CLOSES:
 **basic-156 + `:both` loss + dial spline ([neg,100] + negatives) + butteraugli corruption guard.**
 Caveats before ship: single seed (seed-confirm needed); pre-spline range needs the dial spline;
 full-corpus + konjnd/aic groups to add. But the architecture is validated end to end.
+
+## E-BOTH full-panel confirmation (CID22)
+SROCC 0.8953 / PLCC 0.8928 / KROCC 0.7115 / OR 0.0005 / PWRC 0.9842 / Z-RMSE 0.451 /
+DS-AUC 0.8239 / per-ref 0.9609 / %bwd 0%. Solid across the full Mohammadi panel — the 0.895
+is real, not a SROCC artifact; calibration (PLCC 0.893) and within-ref rank (0.961) are strong.
+Seed-confirm (s7,s23) in flight to check robustness of the beats-B result before any ship claim.
