@@ -29,8 +29,10 @@ extract-omni = ["training", "dep:parquet", "dep:arrow", "dep:zenavif", "dep:zenj
 # bitstreams. `verify-decode` is JPEG-only (lightest — zenjpeg + zencodec).
 # Add per-codec features for the heavier graphs (rav1d / jxl / webp).
 verify-decode = ["dep:zencodec", "dep:zenpixels", "dep:zenjpeg"]
-verify-avif = ["verify-decode", "dep:zenavif", "zenavif/zencodec"]
-verify-jxl = ["verify-decode", "dep:zenjxl", "zenjxl/zencodec"]
+# NB: zencodec is a NON-optional dep in local zenavif/zenjxl (always built), so it
+# cannot be enabled via `zenavif/zencodec` — that ref is invalid. Just pull the dep.
+verify-avif = ["verify-decode", "dep:zenavif"]
+verify-jxl = ["verify-decode", "dep:zenjxl"]
 verify-webp = ["verify-decode", "dep:zenwebp"]
 verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 
@@ -85,8 +87,8 @@ zenpixels = { version = "0.2.10", default-features = false, optional = true }
 # zenjpeg is also patched in [patch.crates-io] for transitive consumers; this
 # direct optional dep adds the zencodec + decoder features for the JPEG path.
 zencodec = { version = "0.1.24", optional = true }
-zenjpeg = { path = "../../zenjpeg/zenjpeg", optional = true, features = ["zencodec", "decoder"] }
-zenwebp = { path = "../../zenwebp", package = "zenwebp", optional = true, default-features = false, features = ["zencodec"] }
+zenjpeg = { path = "../../zenjpeg/zenjpeg", optional = true }
+zenwebp = { path = "../../zenwebp", package = "zenwebp", optional = true, default-features = false }
 
 [[bench]]
 name = "bench_compare"
@@ -138,6 +140,13 @@ check-cfg = ['cfg(feature, values("training"))', 'cfg(has_cpp_ssimulacra2)', 'cf
 [patch.crates-io]
 jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../../zenjpeg/zenjpeg" }
+# use local sibling codecs so the whole graph resolves to one version (2026-07-18):
+# transitive crates.io zenavif/zencodec/zenpixels were skewing (bench 0.1.24 vs
+# zenavif-wants-0.1.26 vs local 0.1.27). Forcing local unifies them.
+zenavif = { path = "../../zenavif" }
+zenjxl = { path = "../../zenjxl" }
+zencodec = { path = "../../zencodec" }
+zenpixels = { path = "../../zenpixels/zenpixels" }
 
 # Mirror the root workspace build profiles (this is its own workspace root).
 [profile.release]
