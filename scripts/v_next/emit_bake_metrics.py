@@ -35,7 +35,7 @@ CORRLQ = Path("/mnt/v/output/zensim/corr-lq")
 OOD_PARQUET = CORRLQ / "kadis_negrich_gate.parquet"
 CORRUPTION_PARQUET = CORRLQ / "corruption_gate.parquet"
 DIAL_GRID = "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet"
-CORPORA = "cid22,imazen26,nonphoto,konjnd,aic3,aic4,hf_nearlossless"
+CORPORA = "cid22,imazen26,nonphoto,konjnd,aic3,aic4,hf_nearlossless,csiq,pipal"
 SIDECAR_SCHEMA = "zensim.bake_metrics.v1"
 
 

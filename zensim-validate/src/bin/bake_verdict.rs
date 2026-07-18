@@ -265,6 +265,16 @@ const CORPORA: &[Corpus] = &[
         enable_per_band: true,
     },
     Corpus {
+        name: "pipal",
+        display: "PIPAL",
+        // PIPAL (200 refs × ~109 GAN/restoration distortions; 21,800 pairs; ELO MOS
+        // → human_score quality-oriented [0,1]). Held-out for our bakes (train set was
+        // safesyn/cid22_train/kadid/tid). A DISTINCT, harder axis: algorithmic/GAN
+        // distortions, not compression — winner ≈0.62 vs 0.96 on CSIQ. Added 2026-07-18.
+        filename: "pipal_features_372col_2026-07-18.parquet",
+        enable_per_band: false,
+    },
+    Corpus {
         name: "konjnd",
         display: "KonJND-1k (full)",
         filename: "konjnd_features_372col_2026-05-15.parquet",
