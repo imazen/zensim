@@ -3208,21 +3208,38 @@ fn main() {
             .collect();
         train_corpora.sort();
         train_corpora.dedup();
-        let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-        let list = train_corpora
+        // Full group provenance (name/weights/loss/within-ref) so the recipe reproduces.
+        let groups: Vec<serde_json::Value> = loaded
             .iter()
-            .map(|c| format!("\"{}\"", esc(c)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let spec = format!(
-            "{{\n  \"train_corpora\": [{list}],\n  \"note\": \"auto-emitted by zensim_mlp_train from manifest train_w>0 groups\"\n}}\n"
-        );
+            .map(|g| {
+                serde_json::json!({
+                    "name": g.name, "train_w": g.train_w, "val_w": g.val_w,
+                    "loss_mode": format!("{:?}", g.loss_mode), "within_ref": g.within_ref,
+                })
+            })
+            .collect();
+        // argv is the EXACT reproduction command (captures every hyperparam + feature-transform
+        // verbatim — the "how was this trained" question answered without archaeology).
+        let spec = serde_json::json!({
+            "train_corpora": train_corpora,
+            "groups": groups,
+            "argv": std::env::args().collect::<Vec<String>>(),
+            "cwd": std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
+            "timestamp_epoch": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            "note": "auto-emitted by zensim_mlp_train; argv is the exact reproduction command",
+        });
         let mut spec_os = out_path.clone().into_os_string();
         spec_os.push(".spec.json");
         let spec_path = PathBuf::from(spec_os);
-        match std::fs::write(&spec_path, spec) {
+        match std::fs::write(
+            &spec_path,
+            serde_json::to_string_pretty(&spec).unwrap_or_default(),
+        ) {
             Ok(()) => println!(
-                "[spec] wrote provenance sidecar {spec_path:?} ({} train corpora)",
+                "[spec] wrote provenance sidecar {spec_path:?} ({} train corpora, argv captured)",
                 train_corpora.len()
             ),
             Err(e) => eprintln!("[spec] warning: could not write {spec_path:?}: {e}"),

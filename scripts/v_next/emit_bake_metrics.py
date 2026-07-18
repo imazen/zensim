@@ -95,8 +95,13 @@ def diffmap_basic_fraction(bake):
         d = json.loads(r.stdout)
     except Exception:
         return None
+    # The INPUT dimension is the deciding signal: a bake that only takes the basic block
+    # (f0..155) is additive-basic by construction → exact-gradient diffmap, whatever its
+    # internal layer count (the Rust "linear" trainer emits n_layers=2 with an identity 2nd).
+    if (d.get("n_inputs") or 999) <= 156:
+        return 1.0
     if d.get("n_layers") != 1:
-        return None  # non-linear (MLP) — diffmap proxy undefined
+        return None  # 372-input MLP — diffmap proxy undefined
     lyr = d["layers"][0]
     w = next((np.array(lyr[k], dtype=float) for k in ("weights", "weight", "values") if isinstance(lyr.get(k), list)), None)
     sc = np.array(d.get("scaler_scale", []), dtype=float)
