@@ -32,3 +32,24 @@ transforms clip the extreme distortion features corruption produces (which is *w
 lifts near-lossless HF 0.614 vs basic-156's 0.445 — same outlier-taming mechanism). So
 corruption-gating vs near-lossless is a **WINSOR tradeoff**, located in the feature transforms,
 not the spline/pooling. This supersedes the "preserve-through-dial" reframe. → test E3.
+
+## E2 — the 85.6% is MISLEADING: over-reaction to localized HF, perceptually inverted
+Per-region median RAW corruption score (higher=better; q20 anchor = constant 0.68):
+| region | n | med corr raw | gate% |
+|---|--|--|--|
+| whole | 42 | −2.14 | 69% |
+| frac2 | 36 | −3.36 | 69% |
+| frac4 | 36 | −5.78 | 78% |
+| sq64 | 36 | −9.33 | 100% |
+| sq16 | 36 | −13.93 | 100% |
+| sq8 | 36 | **−20.35** | 100% |
+
+The additive core scores an **8px break (−20) as far worse than a whole-image corruption
+(−2)** — perceptually BACKWARDS (whole-image is much more visible; small breaks are the
+SUBTLE/sub-perceptible zone per the perceptibility study). So the 85.6% overall gate is
+driven by **over-reaction to localized HF/edge features**, not correct perceptible-corruption
+gating — the exact over-gating-the-subtle pathology flagged earlier. The genuinely-perceptible
+whole-image corruption is UNDER-caught (69%). VERDICT: "85.6%" is not a win; the additive core
+mis-ranks corruption by localization. The gate must be perceptibility-calibrated, and the raw
+number is a distractor. This also predicts E3: winsor (clipping the extreme features) should
+kill the small-region over-reaction — which is precisely how B lands at 18%.
