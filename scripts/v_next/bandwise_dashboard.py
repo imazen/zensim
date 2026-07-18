@@ -191,6 +191,20 @@ REF_METRIC_FILES = {
         "butteraugli↓": ("tid_butteraugli_gpu.tsv", "butteraugli_pnorm3_gpu", True),
         "iwssim": ("tid_iwssim.tsv", "iwssim_imazen_v0_0_1", False, "human_score"),
     }),
+    # held-out corpora: scored fresh on the val-consistent pairs (zenmetrics *-gpu),
+    # human passed through from the pairs TSV (konjnd=pjnd, aic3=jnd). butteraugli negated.
+    "konjnd": ("pjnd", {
+        "ssim2": ("konjnd_ssim2_heldout.tsv", "ssim2", False),
+        "cvvdp": ("konjnd_cvvdp_heldout.tsv", "cvvdp", False),
+        "butteraugli↓": ("konjnd_butteraugli_heldout.tsv", "butter", True),
+        "iwssim": ("konjnd_iwssim_heldout.tsv", "iwssim", False),
+    }),
+    "aic3": ("jnd", {
+        "ssim2": ("aic3_ssim2_heldout.tsv", "ssim2", False),
+        "cvvdp": ("aic3_cvvdp_heldout.tsv", "cvvdp", False),
+        "butteraugli↓": ("aic3_butteraugli_heldout.tsv", "butter", True),
+        "iwssim": ("aic3_iwssim_heldout.tsv", "iwssim", False),
+    }),
 }
 
 
@@ -230,6 +244,11 @@ def load_ref_metrics(corpus):
         hcol = spec[3] if len(spec) > 3 else None
         r = load(fn, key, neg=neg, human_col=hcol)
         if r is not None:
+            # konjnd pairs carry raw `pjnd`, whose polarity is inverted vs the val
+            # parquet's stored human (the bakes score positive on konjnd via sign=-1);
+            # flip the metric human so metric + bake SROCC share one polarity.
+            if corpus == "konjnd":
+                r = (-r[0], r[1])
             out[lab] = r
     return out
 
@@ -246,7 +265,9 @@ def collect(bakes):
                 continue
             data[corp][label] = (h, pr, B.panel(pr, h, sign=sign, per_band=band), kind)
         for label, (h, pr) in load_ref_metrics(corp).items():
-            data[corp][label] = (h, pr, B.panel(pr, h, sign=+1, per_band=band), "metric")
+            # metrics are quality predictors like the bakes → sign identically per corpus
+            # (konjnd/aic3/aic4 are sign=-1; hardcoding +1 flipped their metric SROCC)
+            data[corp][label] = (h, pr, B.panel(pr, h, sign=sign, per_band=band), "metric")
     return data
 
 
