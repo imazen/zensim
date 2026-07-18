@@ -72,3 +72,15 @@ preserves order), so B's RAW model must already be ~0.98 monotone. Prime suspect
 RankNet optimizes pair ORDER (jittery magnitude within-image); least-squares/BVLS fits VALUES
 (smooth). → test E-MSE: basic-156 with MSE loss. The B↔basic-156 tradeoff (smooth dial + blind
 corruption ↔ jittery dial + gates corruption) is now the central axis to resolve.
+
+## Synthesis after E1–E6 — convergence toward B-family
+- **B is the better dial**, decisively: dial-mono 0.98 (vs basic-156 0.47), HF 0.614 (vs 0.445),
+  CID22 0.876 (vs 0.898 — recipe noise, both held-out). basic-156's ONLY apparent edge is
+  corruption 85%, which **E2 debunked** (over-reaction to localized HF, perceptually inverted).
+- So the additive-core experiment does NOT beat B; it trades a real dial for a spurious gate.
+- **Convergent design**: B-family smooth additive dial + SEPARATE corruption guard (butteraugli
+  Stage-2, per "corruption isn't the scalar's job") + ModelCoherent diffmap (B's own weights).
+- **Open question**: B's diffmap is 0.87 (non-basic features); the exact-diffmap 0.987 needs
+  basic-only, but basic-only via RankNet is a jittery dial (0.47). Can B's dial-smoothness be
+  had on basic-only features? Lever = loss function (least-squares/BVLS smooth vs RankNet jitter).
+  → E-MSE tests it.
