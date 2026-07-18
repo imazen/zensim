@@ -54,7 +54,9 @@ CORPUS_META = {
                  "CHEAT (memorization) for bakes that did (see per-bake honesty matrix)."),
     "tid":      ("tid_val", "TID2013 — val images == train images", "tid",
                  "TRAIN==VAL image overlap. Honest only for bakes that didn't train on tid; CHEAT for those that did."),
-    "konjnd":   ("konjnd_val", "KonJND-1k PJND — HF holdout", None, "Never trained on. HF/near-lossless — the G5 weak axis."),
+    "konjnd":   ("konjnd_val", "KonJND-1k PJND — HF holdout", "konjnd",
+                 "CHEAT for bakes that train on konjnd/konjnd_dense (shares the 1008 source refs); "
+                 "HELD-OUT otherwise. HF/near-lossless — the G5 weak axis."),
     "aic3":     ("aic3_val", "AIC-3 CTC JND — holdout", None, "Never trained on. Compression JND."),
     "aic4":     ("aic4_val", "AIC-4 JND — holdout", None, "Never trained on. Compression JND."),
     "nonphoto": ("imazen26_val", "imazen-26 non-photo — val-origin {1,3,5}", "bigcodec",
@@ -84,14 +86,20 @@ def bake_train(path):
         return None
 
 
+def _trained(train_set, key):
+    """True if the bake trained on `key` — tolerant of raw manifest group names
+    (e.g. 'konjnd_dense' satisfies key 'konjnd', 'bigcodec' the nonphoto twin)."""
+    return any(t == key or t.startswith(key) for t in train_set)
+
+
 def honesty(train_set, corpus):
     """(label, color) — per-bake, per-corpus honesty from the ACTUAL train set."""
     if train_set is None:
         return "unknown", "#888"
     twin = CORPUS_META[corpus][2]
-    if corpus in ("kadid", "tid") and twin in train_set:
+    if corpus in ("kadid", "tid", "konjnd") and twin and _trained(train_set, twin):
         return "CHEAT", "#c0392b"
-    if corpus == "nonphoto" and twin in train_set:
+    if corpus == "nonphoto" and twin and _trained(train_set, twin):
         return "val-split", "#e67e22"
     return "HELD-OUT", "#27ae60"
 
