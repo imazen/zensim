@@ -62,3 +62,35 @@ models on both feature sets under identical conditions and compares held-out ran
 
 Execution is serialized AFTER feature-v2 phase 6's bench windows complete (no load
 contamination of its gate measurements).
+
+## AMENDMENT 1 (2026-07-19, recipe-v2) — declared BEFORE unblinding any v2-arm numbers
+
+**Recipe-v1 is an instrument failure, established on the CONTROL arm alone.** The v1
+(372-feature) arm under recipe-v1 scores held-out CID22-val 0.18 / CSIQ 0.06 / LIVE 0.21
+(forward+panel on the saved bake — confirming the trainer-log val numbers) while shipped B
+scores 0.88 / 0.93 / 0.90 on the IDENTICAL extracted rows. A recipe that cannot train the
+known-good substrate to transfer cannot discriminate substrates: at 0.1-0.2 held-out SROCC
+the pre-registered ±0.010/0.030 bands compare noise. Mechanism (consistent with the
+standing "KADID/TID are train==val — memorization, not skill" warning): uniform CROSS-IMAGE
+RankNet pairs on 13k rows with 106 total references lets the net memorize per-reference
+feature signatures; rank-only loss (loss=both was inert — global `--mse-weight` defaults
+0.0) adds no absolute anchor. Train-corpus 0.86-0.89 vs held-out 0.06-0.21 is the
+memorization signature.
+
+**Recipe-v2** (both arms, still identical argv; two changes, each targeting the failure):
+
+1. `withinref,both` group flags — RankNet pairs drawn WITHIN a reference: the net must
+   rank distortion severity on the same content, killing the memorize-the-ref shortcut.
+2. `--mse-weight 1.0` — activates the regression anchor so absolute scale is shared
+   across references and corpora.
+
+Everything else unchanged (seed 13, epochs 120, pairs-per-epoch 50k, h=128, same CSVs).
+The WIN/KILL bands and held-out trio are unchanged and re-apply to recipe-v2.
+
+Integrity note: this amendment was decided and committed while the v2 arm was still
+mid-training under recipe-v1, on the strength of the CONTROL arm's failure only. The
+recipe-v1 v2-arm result will be reported as a broken-recipe replicate, not used for any
+decision. If recipe-v2's control arm STILL fails to transfer (CID22-val < 0.55 —
+well below B yet clearly above noise), the lab-recipe approach is declared unable to
+answer the question and the A/B moves to the production-recipe path (safesyn-mass) instead
+of iterating recipes against the verdict.
