@@ -264,6 +264,43 @@ least. Preview only (small-slice bakes); the production-scale decision follows.
 
 _(decision table pending backfill completion)_
 
+## APPEND-ONLY decision (2026-07-19) — the directive-correct experiment
+
+Per the feature-numbering directive: the question is not "v2 vs v1" (replace) but
+"does v1 ++ post-372 beat v1" (extend). One binary emits the 720 vector
+(`f0..f371` frozen v1 ++ `f372..f719` v2, same pixels — join eliminated). Three
+arms, identical recipe (safesyn_full 111k + kadid + tid → cid22/csiq/live/aic3,
+withinref+both+mse, seed 13, production mass):
+
+- **v1**: ext parquet capped at 372 (frozen block only)
+- **ext-full**: 720
+- **ext-luma**: 720 with the 32 chroma-transducer columns MASKED (zeroed,
+  width-constant — the screen-winning direction)
+
+| arm | CID22 | aic3 | LIVE | CSIQ |
+|---|--:|--:|--:|--:|
+| v1 (372) | 0.6521 | 0.5583 | 0.5732 | **0.3832** |
+| ext-full (720) | 0.6442 | 0.6128 | 0.5948 | 0.2347 |
+| **ext-luma (720)** | **0.6566** | **0.6610** | **0.6043** | 0.2667 |
+
+**Verdict: appending the (luma-masked) v2 features to frozen v1 WINS the
+compression axis** — aic3 +0.103, LIVE +0.031, CID22 +0.004 (neutral) — at the
+cost of general-FR CSIQ −0.117. Opposite of the disjoint A/B's KILL: extend, not
+replace, keeps v1's ranking AND adds v2's compression signal. ext-luma > ext-full
+reconfirms luma-masking at production scale. Artifacts: `dec_{v1,extfull,extluma}.bin`,
+`decision_appendonly.json`.
+
+Honesty: CID22 +0.004 is within n=4292 noise (seed-7 replicate pending); aic3
+(+0.10, n=600) and LIVE (+0.03, n=779) are real; CSIQ −0.12 is a real
+general-FR regression, acceptable only because zensim is a compression dial.
+Single seed. Both arms' checkpoints are again near-epoch-0 (lab-recipe overfit) —
+the comparison is feature-substrate ordering, not training ceiling.
+
+Combining re-admits v1's non-spatializable features (peak/masked/iw, f156-371) →
+the combined model's diffmap coherence (M3) must be measured before ship (the
+two-headed design: full 720 → scalar, spatializable subset f0-155 ∪ f372-719 →
+diffmap). Queued.
+
 ## Reproduction
 
 All artifacts: `/mnt/v/output/zensim/v2-ab-2026-07-19/` — per-arm per-corpus
