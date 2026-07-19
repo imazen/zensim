@@ -248,10 +248,21 @@ fn run_bake_mode(
     let base = z
         .compute_extended_features(&rs, &RgbSlice::new(dpx, w, h))
         .expect("base features");
-    let base_feats = base.features().to_vec();
+    let mut base_feats = base.features().to_vec();
+    // Combined append-only bakes (n_in > 372 = frozen v1-372 ++ v2) need the
+    // v2 block concatenated — same dual-compute the extended extractor does.
+    // Requires the `feature-regime-v2` build feature (2026-07-19).
+    #[cfg(feature = "feature-regime-v2")]
+    if n_in > base_feats.len() {
+        let v2 = z
+            .compute_v2_features(&rs, &RgbSlice::new(dpx, w, h))
+            .expect("v2 features (build with --features feature-regime-v2 for combined bakes)");
+        base_feats.extend_from_slice(v2.features());
+    }
     assert!(
         base_feats.len() >= n_in,
-        "bake wants {n_in} inputs, extractor produced {}",
+        "bake wants {n_in} inputs, extractor produced {} — for a >372 combined \
+         bake, build the example with --features feature-regime-v2",
         base_feats.len()
     );
     let score = |feats: &[f64]| -> f64 {
@@ -274,6 +285,32 @@ fn run_bake_mode(
         s[k] = (up - dn) / (2.0 * eps);
     }
     let grad_zero = s.iter().filter(|v| v.abs() < 1e-12).count();
+
+    // Combined append-only bakes (n_in > 372): the scalar path (score + s_k)
+    // works, but the runtime diffmap generator (`compute_with_diffmap`, used
+    // for M1/M1b/M3 below) is hardwired to the ≤372 feature space — it cannot
+    // fold the v2 block (f372+) into the per-pixel map yet. Rather than panic,
+    // report the scalar-side coherence diagnostics and point at the corpus-
+    // level foldable-mass proxy. M2 (linearization ceiling) is ≈1.0 for any
+    // LeakyReLU MLP (piecewise-linear ⇒ exact local gradient), so the open
+    // question is purely M3-deployed = whether the fold, once extended to read
+    // v2, reaches that ceiling. See benchmarks/v2_trainability_ab_2026-07-19.md
+    // (v2_combined_steer_mass.py: 100% foldable for the coherence-maxed model).
+    if n_in > 372 {
+        let total: f64 = s.iter().map(|v| v.abs()).sum::<f64>().max(1e-30);
+        let nonspat: f64 = s[156..372.min(n_in)].iter().map(|v| v.abs()).sum();
+        println!(
+            "combined bake (n_inputs={n_in})  base_score={base_score:.2}  grad_zero={grad_zero}/{n_in}"
+        );
+        println!(
+            "  scalar path OK. raw-|s_k| mass on NON-spatializable v1 block (f156-371): {:.1}%  (per-pair; corpus σ-weighted proxy is v2_combined_steer_mass.py)",
+            100.0 * nonspat / total
+        );
+        println!(
+            "  M1/M1b/M3 (deployable per-pixel diffmap) require the runtime fold extended to read the v2 block — NOT yet implemented. M2 ceiling ≈1.0 (LeakyReLU exact)."
+        );
+        return;
+    }
 
     // Three per-pixel diffmaps for the same pair:
     //   M1  — the CURRENT shipped default (ssim-only signals, profile weighting):

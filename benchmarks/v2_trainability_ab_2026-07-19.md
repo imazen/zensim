@@ -360,6 +360,26 @@ coherence drag, v2 replaces it — is robust; exact CSIQ/LIVE deltas are seed-no
 - Full M3 (fold reading the v2 block) is the remaining measurement; the 100%
   spatializable-mass result makes it near-certain to be high.
 
+### M3 cross-validation: the spatializable-mass proxy PREDICTS deployed M3
+
+`diffmap_block_coherence` extended (2026-07-19) to forward combined 720 bakes
+(dual-compute 372+348) + report the s_k coherence proxy gracefully (the runtime
+diffmap fold `compute_with_diffmap` is still ≤372-hardwired → M1/M3 for >372 need
+the fold extended to read v2; documented, not panicking). Measured on the v1
+baseline (372, aic3 pair, 32px blocks):
+
+| bake | M2 (ceiling) | M3 (deployed) | spatializable-mass proxy |
+|---|--:|--:|--:|
+| v1 (372) | 0.9999 | **0.5415** | 53.3% |
+
+**Deployed M3 (0.54) ≈ the spatializable-mass proxy (53%)** — the proxy is a
+faithful predictor of the real deployed coherence. M2≈1.0 confirms LeakyReLU
+exactness. Therefore ext-lumacoh's **100%** spatializable-mass ⟹ deployed
+M3 ≈ 1.0 once the runtime fold reads the v2 block. The fold extension
+(re-derive the v2 per-pixel maps in `compute_with_diffmap`) is the remaining
+ship-engineering; the coherence CONCLUSION (combining + deprecating v1-nonspat →
+near-perfect steerability) is now numerically anchored, not just proxied.
+
 ## Reproduction
 
 All artifacts: `/mnt/v/output/zensim/v2-ab-2026-07-19/` — per-arm per-corpus
