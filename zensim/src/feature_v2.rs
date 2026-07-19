@@ -836,6 +836,17 @@ pub struct V2NewFeatureToggles {
     pub gradient_features: bool,
     pub transducer_bank: bool,
     pub blockiness: bool,
+    /// Emit the masking transducers (core + fragility + bank) on the LUMA
+    /// (Y) channel only; zero them on X/B. The 2026-07-19 ablation +
+    /// combined-model steering analysis found the chroma transducers cost
+    /// CID22 and carry near-zero steering mass in a combined model (masking
+    /// is fundamentally a luma phenomenon), while the Y transducer carries
+    /// the CSIQ signal. Index-stable: the X/B slots stay at their indices,
+    /// emitted as 0 (deprecate-by-mask, never renumber). Default OFF — this
+    /// is a compression↔general-FR trade (CID22 up, CSIQ down), so it is
+    /// opt-in until the ship recipe fixes the operating point.
+    /// See `benchmarks/v2_trainability_ab_2026-07-19.md`.
+    pub transducers_luma_only: bool,
 }
 impl Default for V2NewFeatureToggles {
     fn default() -> Self {
@@ -843,7 +854,22 @@ impl Default for V2NewFeatureToggles {
             gradient_features: true,
             transducer_bank: true,
             blockiness: true,
+            transducers_luma_only: false,
         }
+    }
+}
+
+/// Zero the masking-transducer slots (core, fragility, low-k, high-k) for a
+/// non-luma channel when `transducers_luma_only` is set. Index-stable
+/// deprecate-by-mask: the slots keep their positions, emitted as 0. `ch==1`
+/// is the Y (luma) channel — left untouched. No-op when the toggle is off.
+#[inline]
+fn apply_transducer_luma_gate(out: &mut [f64], ch: usize, toggles: V2NewFeatureToggles) {
+    if toggles.transducers_luma_only && ch != 1 {
+        out[idx::PJND_TRANSDUCER] = 0.0;
+        out[idx::PJND_FRAGILITY] = 0.0;
+        out[idx::PJND_TRANSDUCER_LOW_K] = 0.0;
+        out[idx::PJND_TRANSDUCER_HIGH_K] = 0.0;
     }
 }
 
@@ -2103,7 +2129,7 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
                 .zip(scratch.par_iter_mut())
                 .enumerate()
                 .map(|(ch, (out, scr))| {
-                    compute_channel_scale_v2(
+                    let g = compute_channel_scale_v2(
                         &src_planes[ch],
                         &dst_planes[ch],
                         width,
@@ -2111,7 +2137,9 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
                         toggles,
                         scr,
                         out,
-                    )
+                    );
+                    apply_transducer_luma_gate(out, ch, toggles);
+                    g
                 })
                 .collect();
             grads = [results[0], results[1], results[2]];
@@ -2136,6 +2164,7 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
                     &mut scratch[ch],
                     out,
                 );
+                apply_transducer_luma_gate(out, ch, toggles);
             }
         }
 
@@ -2415,6 +2444,85 @@ mod tests {
     }
 
     /// Adversarial fixture: flat source + noise (D2/HF-gain pathology).
+    #[test]
+    fn transducer_luma_gate_zeroes_chroma_only() {
+        // Distorted pair (dst != src) so the transducers are non-zero.
+        let mut src = Vec::with_capacity(64 * 64);
+        let mut dst = Vec::with_capacity(64 * 64);
+        for y in 0..64 {
+            for x in 0..64 {
+                let v = (((x * 7 + y * 13) % 256) as u8).max(1);
+                src.push([v, v.wrapping_add(40), v.wrapping_add(80)]);
+                let d = v.wrapping_add(((x + y) % 17) as u8);
+                dst.push([d, d.wrapping_add(40), d.wrapping_add(80)]);
+            }
+        }
+        let source = RgbSlice::new(&src, 64, 64);
+        let distorted = RgbSlice::new(&dst, 64, 64);
+
+        let base = compute_v2_features_impl(&source, &distorted, None, false).expect("base ok");
+        let gated = compute_v2_features_impl_with_toggles(
+            &source,
+            &distorted,
+            None,
+            false,
+            V2NewFeatureToggles {
+                transducers_luma_only: true,
+                ..Default::default()
+            },
+        )
+        .expect("gated ok");
+        let bv = base.view();
+        let gv = gated.view();
+        let transducers = [
+            idx::PJND_TRANSDUCER,
+            idx::PJND_FRAGILITY,
+            idx::PJND_TRANSDUCER_LOW_K,
+            idx::PJND_TRANSDUCER_HIGH_K,
+        ];
+        let n_scales = base.n_scales();
+        let mut any_chroma_nonzero_in_base = false;
+        for scale in 0..n_scales {
+            for ch in 0..3 {
+                let b = ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                let sb = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+                for t in transducers {
+                    let bval = base.features()[sb + b + t];
+                    let gval = gated.features()[sb + b + t];
+                    if ch == 1 {
+                        // Luma channel: transducers unchanged.
+                        assert_eq!(bval, gval, "Y transducer local {t} scale {scale} changed");
+                    } else {
+                        // Chroma channels: zeroed under the gate.
+                        assert_eq!(gval, 0.0, "chroma transducer local {t} not zeroed");
+                        if bval != 0.0 {
+                            any_chroma_nonzero_in_base = true;
+                        }
+                    }
+                }
+                // Every NON-transducer feature is byte-identical between the two.
+                for local in 0..FEATURES_PER_CHANNEL_V2_TOTAL {
+                    if transducers.contains(&local) {
+                        continue;
+                    }
+                    assert_eq!(
+                        base.features()[sb + b + local],
+                        gated.features()[sb + b + local],
+                        "non-transducer local {local} ch {ch} scale {scale} changed"
+                    );
+                }
+            }
+        }
+        // Guard: the gate is actually testing something (chroma transducers
+        // WERE non-zero without it).
+        assert!(
+            any_chroma_nonzero_in_base,
+            "test fixture produced no non-zero chroma transducers — gate is untested"
+        );
+        // Silence the unused-view warnings while keeping them for future asserts.
+        let _ = (bv.gms(0, 0), gv.gms(0, 0));
+    }
+
     #[test]
     fn bounded_range_flat_source_plus_noise() {
         let w = 64;
