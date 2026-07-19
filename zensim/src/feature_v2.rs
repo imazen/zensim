@@ -2018,6 +2018,317 @@ fn finish_channel_scale(
 }
 
 // ============================================================================
+// Per-pixel diffmap generator (v2 core)
+//
+// Spatializes the SIMPLE-MEAN families of the dense/gradient/blockiness
+// kernels above into an explicit per-pixel map, so
+// `mean_over_pixels(map) == Σ_local weights[local] * feature_local` for
+// every family whose FEATURE is, by construction, the unweighted mean of a
+// well-defined per-pixel quantity. Scalar-only (no `#[magetypes]`/`incant!`
+// dispatch) — this is the correctness-first reference implementation; a
+// SIMD-accelerated sibling is a natural follow-up once this is proven right
+// (see `tests::v2_diffmap_block_pool_matches_features`, the gate this
+// module's own doc requires before anything here is trusted).
+// ============================================================================
+
+/// Per-pixel diffmap for ONE channel-scale, built from the SAME closed-form
+/// formulas [`dense_block_kernel_generic`]/[`gradient_block_kernel_generic`]/
+/// [`blockiness_sparse`] use to accumulate their pooled means — just written
+/// out per-pixel instead of summed. For every SUPPORTED `local` (see below),
+/// `dm[i]` carries `weights[local] * M_local(pixel i)`, where `M_local` is
+/// the exact per-pixel quantity whose unweighted mean over all
+/// `width*height` pixels equals [`finish_channel_scale`]'s `feature_local`
+/// (BEFORE that function's mean-level `clamp01`/`clamp02` — see "Clamping"
+/// below). Returns `dm[i] = Σ_local weights[local] · M_local(pixel i)`.
+///
+/// Reuses [`gather_strip_halo`]/[`run_blur_pass`]/[`ScratchV2Strip`] — the
+/// SAME strip/halo machinery [`compute_channel_scale_v2`] (the function the
+/// real v2 pipeline actually calls) uses to build `mu1`/`mu2`/`ssq`/`s12`/
+/// `activity` — so this function's per-pixel inputs are IDENTICAL to the
+/// ones the pooled features are computed from, not a fresh (and possibly
+/// boundary-divergent) recomputation.
+///
+/// # Supported (spatialized) families
+///
+/// - [`idx::SSIM_MEAN`] — `ssim_d_local(mu1, mu2, s12, ssq)` itself (the
+///   C1/C2-bounded SSIM dissimilarity), unchanged from
+///   [`dense_block_kernel_generic`]'s scalar tail.
+/// - [`idx::ART`] / [`idx::DET`] — the edge-artifact/detail split:
+///   `1 - bounded_sim(|src-mu1|, |dst-mu2|, C_EDGE)` routed to ART when
+///   `|dst-mu2| > |src-mu1|`, to DET when `<`, else neither fires (both 0).
+/// - [`idx::MSE`] — `saturate((src-dst)^2, C_MSE)`.
+/// - [`idx::HF_GAIN`] / [`idx::HF_LOSS`] — the shared-denominator
+///   `bounded_excess_pair(hf_dst^2, hf_src^2, C_HF)` (`hf_x = x - mu_x`).
+/// - [`idx::HF_MAG_LOSS`] — `bounded_excess(|hf_src|, |hf_dst|, C_HF)`.
+/// - [`idx::PJND_TRANSDUCER`] — the CORE masking transducer only
+///   (`k = K_PJND_MASK`): `pjnd_transducer(|src-dst|, activity, K_PJND_MASK,
+///   C_PJND_CLAMP)`.
+/// - [`idx::GMS`] — `1 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS)`
+///   (central-difference gradient magnitude), using
+///   [`gradient_block_kernel_generic`]'s own boundary convention exactly:
+///   x-neighbors clamp-to-edge (`saturating_sub`/`.min`), y-neighbors
+///   whole-sample-mirror via [`reflect_101`] (sourced from the strip's
+///   halo-gathered buffer, so a strip seam or the true image edge both
+///   resolve identically to the pooled feature's own computation).
+/// - [`idx::BLOCKINESS`] — sparse 8-pixel-lattice step-energy comparison
+///   (`bounded_excess(step_dst, step_src, C_BLOCK)`); nonzero ONLY at
+///   `x % BLOCK_LATTICE == 0` / `y % BLOCK_LATTICE == 0` positions, matching
+///   [`blockiness_sparse`]'s own sparsity — a lattice-corner pixel gets BOTH
+///   the vertical- and horizontal-boundary contributions added, exactly as
+///   [`blockiness_sparse`]'s two passes both add into the same running sum.
+/// - [`idx::RINGING`] — `saturate(|src-dst|,C_RING_ERR) *
+///   saturate(activity,C_ACTIVITY) * (1 - saturate(grad_src_mag,C_RING_EDGE))`.
+/// - [`idx::BANDING`] — `bounded_excess(grad_dst_mag, grad_src_mag,
+///   C_BAND_DST) * (1 - saturate(grad_src_mag, C_BAND_SRC))`.
+///
+/// # Excluded families (weight ignored, regardless of what the caller passes)
+///
+/// - [`idx::SSIM_DEV2`] / [`idx::SSIM_DEV4`] — Terriberry/GMSD-style
+///   deviation-FROM-THE-MEAN moments (`dev2 = sqrt(M2/n)`,
+///   `M2/n = E[d^2] - E[d]^2`): a NONLINEAR function of the whole-image
+///   mean, not itself the mean of any single per-pixel quantity.
+/// - [`idx::SSIM_SOFT_PEAK`], [`idx::ART_SOFT_PEAK`], [`idx::DET_SOFT_PEAK`],
+///   [`idx::MASKED_SSIM`], [`idx::MASKED_ART`], [`idx::MASKED_DET`],
+///   [`idx::MASKED_MSE`], [`idx::IW_SSIM`], [`idx::IW_ART`], [`idx::IW_DET`],
+///   [`idx::IW_MSE`] — weighted-pool families (`Σw·v / Σw`): a RATIO of two
+///   sums, not the mean of one quantity. The per-pixel numerator `w·v`
+///   doesn't average to the pooled ratio — it needs normalization by the
+///   whole-image `Σw`, which isn't known until every pixel is visited.
+/// - [`idx::PJND_FRAGILITY`] — `1 - saturate(mean(grad_src_mag),
+///   C_PJND_GRAD)`: reference-only, and a NONLINEAR function of the mean
+///   gradient magnitude (not the mean of a per-pixel fragility value).
+/// - [`idx::PJND_TRANSDUCER_LOW_K`] / [`idx::PJND_TRANSDUCER_HIGH_K`] — the
+///   masking-transducer BANK (extra `k` values). Mechanically these use the
+///   exact same [`pjnd_transducer`] per-pixel formula as the core transducer
+///   above (swap `K_PJND_MASK` for `K_PJND_MASK_LOW`/`K_PJND_MASK_HIGH`) and
+///   would spatialize identically — out of scope for THIS core per the task
+///   brief, not for any correctness reason. Natural follow-up.
+/// - [`idx::EDGE_WIDTH_CHANGE`] — the one genuinely scale-level (not
+///   per-pixel) feature in this set: it compares THIS scale's mean gradient
+///   magnitude against the ADJACENT (coarser) scale's, filled in by
+///   [`compute_v2_features_impl_with_toggles`] only once that scale exists.
+///   No single channel-scale's pixels carry enough information to
+///   spatialize it.
+///
+/// # Clamping
+///
+/// [`finish_channel_scale`] applies a MEAN-level `clamp01`/`clamp02` to
+/// several of the supported families (`out[idx::X] = clamp01(sum_x/n)`) —
+/// i.e. the clamp bounds the AVERAGE, not each pixel. This function emits
+/// the per-pixel quantity WITHOUT that mean-level clamp (`ssim_d_local`'s
+/// own internal `.max(0.0)` guard, and the various `bounded_*`/`saturate`
+/// helpers' own per-pixel bounds, still apply — those are part of the
+/// formula itself, not the mean-level wrapper). So `mean_over_pixels(dm)`
+/// equals `Σ weights[local] * feature_local` exactly when every supported
+/// family's mean lands inside its clamp range on the given input (the
+/// common case for a real, non-degenerate image pair, and the case this
+/// module's own test suite always constructs — see `TOL`'s neighboring
+/// comment on FP-reassociation tolerance). Callers relying on bit-parity
+/// with heavily clamp-saturating input should expect the mean-level clamp
+/// to introduce a (bounded, one-directional) divergence between the pooled
+/// feature and this map's mean.
+///
+/// # Panics
+///
+/// If `src.len() != width*height` or `dst.len() != width*height`.
+pub(crate) fn compute_v2_diffmap_channel_scale(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    weights: &[f64; FEATURES_PER_CHANNEL_V2_TOTAL],
+) -> Vec<f32> {
+    let n = width * height;
+    assert_eq!(src.len(), n, "src plane length must be width*height");
+    assert_eq!(dst.len(), n, "dst plane length must be width*height");
+
+    let mut out = vec![0.0f32; n];
+    if width == 0 || height == 0 {
+        return out;
+    }
+
+    let max_wide_h = STRIP_ROWS + 2 * HALO_P;
+    let mut scratch = ScratchV2Strip::new(width * max_wide_h);
+    let mut src_wide = vec![0.0f32; width * max_wide_h];
+    let mut dst_wide = vec![0.0f32; width * max_wide_h];
+
+    let mut y0 = 0usize;
+    while y0 < height {
+        let strip_h = STRIP_ROWS.min(height - y0);
+        let wide_h = strip_h + 2 * HALO_P;
+        let n_wide = width * wide_h;
+
+        // Same halo-gather + blur-pass as `compute_channel_scale_v2`'s
+        // strip loop (§A.15) — reused verbatim so this function's
+        // mu1/mu2/ssq/s12/activity are IDENTICAL to the ones the pooled
+        // features are computed from, not a fresh (and possibly
+        // boundary-divergent) recomputation.
+        gather_strip_halo(
+            src,
+            width,
+            height,
+            y0,
+            wide_h,
+            HALO_P,
+            &mut src_wide[..n_wide],
+        );
+        gather_strip_halo(
+            dst,
+            width,
+            height,
+            y0,
+            wide_h,
+            HALO_P,
+            &mut dst_wide[..n_wide],
+        );
+        run_blur_pass(
+            &src_wide[..n_wide],
+            &dst_wide[..n_wide],
+            width,
+            wide_h,
+            &mut scratch,
+        );
+
+        let off = HALO_P * width;
+        let strip_n = width * strip_h;
+        let src_strip = &src_wide[off..off + strip_n];
+        let dst_strip = &dst_wide[off..off + strip_n];
+        let mu1_strip = &scratch.mu1[off..off + strip_n];
+        let mu2_strip = &scratch.mu2[off..off + strip_n];
+        let ssq_strip = &scratch.ssq[off..off + strip_n];
+        let s12_strip = &scratch.s12[off..off + strip_n];
+        let activity_strip = &scratch.activity[off..off + strip_n];
+
+        // 1-row-halo view for the gradient family — same slice convention
+        // as `compute_channel_scale_v2`'s call into `gradient_block_kernel`.
+        let g_off = (HALO_P - 1) * width;
+        let g_n = width * (strip_h + 2);
+        let src_g = &src_wide[g_off..g_off + g_n];
+        let dst_g = &dst_wide[g_off..g_off + g_n];
+
+        for y_local in 0..strip_h {
+            let gy = y0 + y_local;
+            let i_strip = y_local * width;
+            let i_self = (y_local + 1) * width; // src_g/dst_g: +1 halo row
+            let i_up = y_local * width; // src_g/dst_g: row y_local-1 (halo-relative)
+            let i_down = (y_local + 2) * width; // src_g/dst_g: row y_local+1 (halo-relative)
+
+            for x in 0..width {
+                let i_local = i_strip + x;
+                let i_global = gy * width + x;
+
+                let s = src_strip[i_local] as f64;
+                let dd = dst_strip[i_local] as f64;
+                let m1 = mu1_strip[i_local] as f64;
+                let m2 = mu2_strip[i_local] as f64;
+                let act = activity_strip[i_local] as f64;
+
+                let mut acc = 0.0f64;
+
+                // --- Dense (always-on) family — bit-for-bit the same
+                //     formulas as `dense_block_kernel_generic`'s scalar
+                //     tail. ---
+                let d = ssim_d_local(m1, m2, s12_strip[i_local] as f64, ssq_strip[i_local] as f64);
+                acc += weights[idx::SSIM_MEAN] * d;
+
+                let diff_src = (s - m1).abs();
+                let diff_dst = (dd - m2).abs();
+                let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+                if diff_dst > diff_src {
+                    acc += weights[idx::ART] * edge_dissim;
+                } else if diff_dst < diff_src {
+                    acc += weights[idx::DET] * edge_dissim;
+                }
+
+                let raw_diff = s - dd;
+                let raw_sq_err = raw_diff * raw_diff;
+                acc += weights[idx::MSE] * saturate(raw_sq_err, C_MSE);
+
+                let hf_src = s - m1;
+                let hf_dst = dd - m2;
+                let hf_src_sq = hf_src * hf_src;
+                let hf_dst_sq = hf_dst * hf_dst;
+                let (hf_gain_i, hf_loss_i) = bounded_excess_pair(hf_dst_sq, hf_src_sq, C_HF);
+                acc += weights[idx::HF_GAIN] * hf_gain_i;
+                acc += weights[idx::HF_LOSS] * hf_loss_i;
+                acc += weights[idx::HF_MAG_LOSS] * bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF);
+
+                let raw_abs_err = raw_diff.abs();
+                acc += weights[idx::PJND_TRANSDUCER]
+                    * pjnd_transducer(raw_abs_err, act, K_PJND_MASK, C_PJND_CLAMP);
+
+                // --- Gradient family — bit-for-bit the same formulas as
+                //     `gradient_block_kernel_generic`'s `scalar_pixel`
+                //     closure (GMS/ringing/banding), same x-clamp / y-mirror
+                //     boundary convention. ---
+                let xl = x.saturating_sub(1);
+                let xr = (x + 1).min(width - 1);
+                let sxl = src_g[i_self + xl] as f64;
+                let sxr = src_g[i_self + xr] as f64;
+                let syu = src_g[i_up + x] as f64;
+                let syd = src_g[i_down + x] as f64;
+                let dxl = dst_g[i_self + xl] as f64;
+                let dxr = dst_g[i_self + xr] as f64;
+                let dyu = dst_g[i_up + x] as f64;
+                let dyd = dst_g[i_down + x] as f64;
+
+                let gx_src = sxr - sxl;
+                let gy_src = syd - syu;
+                let grad_src_mag = (gx_src * gx_src + gy_src * gy_src).sqrt();
+                let gx_dst = dxr - dxl;
+                let gy_dst = dyd - dyu;
+                let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
+
+                acc += weights[idx::GMS] * (1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS));
+
+                let err_b = saturate(raw_abs_err, C_RING_ERR);
+                let act_b = saturate(act, C_ACTIVITY);
+                let edge_r = saturate(grad_src_mag, C_RING_EDGE);
+                acc += weights[idx::RINGING] * (err_b * act_b * (1.0 - edge_r));
+
+                let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
+                let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
+                acc += weights[idx::BANDING] * (edge_excess * src_smooth_b);
+
+                out[i_global] = acc as f32;
+            }
+        }
+
+        y0 += strip_h;
+    }
+
+    // --- Blockiness — sparse 8-pixel-lattice pass over the FULL
+    //     (un-strip-tiled) planes, matching `blockiness_sparse`'s own loop
+    //     exactly (including the lattice-corner double-add: a pixel with
+    //     both x%8==0 and y%8==0 gets a contribution from EACH loop, same
+    //     as `blockiness_sparse`'s single running `sum` does). ---
+    let w_block = weights[idx::BLOCKINESS];
+    let mut x = BLOCK_LATTICE;
+    while x < width {
+        for y in 0..height {
+            let i = y * width + x;
+            let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
+            let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
+            out[i] += (w_block * bounded_excess(step_dst, step_src, C_BLOCK)) as f32;
+        }
+        x += BLOCK_LATTICE;
+    }
+    let mut y = BLOCK_LATTICE;
+    while y < height {
+        for x in 0..width {
+            let i = y * width + x;
+            let i_up = i - width;
+            let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
+            let step_src = (src[i] as f64 - src[i_up] as f64).abs();
+            out[i] += (w_block * bounded_excess(step_dst, step_src, C_BLOCK)) as f32;
+        }
+        y += BLOCK_LATTICE;
+    }
+
+    out
+}
+
+// ============================================================================
 // Top-level entry point
 // ============================================================================
 
@@ -3022,5 +3333,144 @@ mod tests {
             "{mismatches} of {} v2 features diverged between parallel and serial scheduling",
             sf.len()
         );
+    }
+
+    /// Acceptance gate for [`compute_v2_diffmap_channel_scale`]: the
+    /// per-pixel map's own mean must reproduce the pooled feature values it
+    /// claims to spatialize, computed via [`compute_channel_scale_v2`] —
+    /// the SAME entry point the real (non-bypass, `STRIP_BYPASS_HEIGHT=0`)
+    /// v2 pipeline calls for every channel-scale. Tests at the PLANE level
+    /// directly (a synthetic f32 pair, not an RGB image through XYB
+    /// conversion) — sufficient per this function's contract, which only
+    /// operates on one channel-scale's plane, and it sidesteps XYB/
+    /// multi-scale machinery that's orthogonal to what's being proven here.
+    ///
+    /// Fixture: a smooth, strictly-positive (`mu1,mu2 >= 0`, required by
+    /// `C1_V2` boundedness), textured 64x64 plane pair with a MILD signed
+    /// perturbation (so ART and DET both fire somewhere, HF gain and loss
+    /// both fire somewhere) plus a small 8-pixel-lattice bump (so BLOCKINESS
+    /// is non-trivially exercised, not just trivially 0≈0). "Mild" is
+    /// load-bearing: every clamped family (SSIM_MEAN's `clamp02`; ART/DET/
+    /// MSE/HF_*/PJND_TRANSDUCER's `clamp01`) must land inside its clamp
+    /// range on this fixture, or `finish_channel_scale`'s MEAN-level clamp
+    /// would legitimately diverge from this function's unclamped per-pixel
+    /// mean (see `compute_v2_diffmap_channel_scale`'s "Clamping" doc) — the
+    /// asserts at the end confirm no clamp fired, so a future edit that
+    /// makes the fixture more aggressive fails loudly here instead of
+    /// silently comparing a clamped feature against an unclamped map.
+    #[test]
+    fn v2_diffmap_block_pool_matches_features() {
+        let width = 64usize;
+        let height = 64usize;
+        let n = width * height;
+
+        let mut src = vec![0.0f32; n];
+        let mut dst = vec![0.0f32; n];
+        for y in 0..height {
+            for x in 0..width {
+                let i = y * width + x;
+                let fx = x as f32;
+                let fy = y as f32;
+                let base = 0.5 + 0.25 * (fx * 0.19).sin() * (fy * 0.13).cos();
+                let s = base.clamp(0.05, 0.95);
+                src[i] = s;
+
+                // Mild, signed, spatially-varying perturbation (some pixels
+                // brighter, some darker, some unchanged -- exercises ART,
+                // DET, HF_GAIN, and HF_LOSS all in the same fixture) plus a
+                // small block-lattice bump so BLOCKINESS is non-trivially
+                // exercised.
+                let mut d = s + 0.03 * ((fx + fy) * 0.5).sin();
+                if x % BLOCK_LATTICE == 0 && x > 0 {
+                    d += 0.015;
+                }
+                if y % BLOCK_LATTICE == 0 && y > 0 {
+                    d -= 0.015;
+                }
+                dst[i] = d.clamp(0.05, 0.95);
+            }
+        }
+
+        // --- "Official" per-channel-scale features, via the SAME entry
+        //     point the real v2 pipeline calls. ---
+        let toggles = V2NewFeatureToggles::default();
+        let max_wide_h = STRIP_ROWS + 2 * HALO_P;
+        let mut scratch = ScratchV2Strip::new(width * max_wide_h);
+        let mut feat = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
+        compute_channel_scale_v2(&src, &dst, width, height, toggles, &mut scratch, &mut feat);
+
+        // --- Diffmap under test: weight 1.0 on every spatialized family,
+        //     0.0 (excluded) on everything else. ---
+        let supported = [
+            idx::SSIM_MEAN,
+            idx::ART,
+            idx::DET,
+            idx::MSE,
+            idx::HF_GAIN,
+            idx::HF_LOSS,
+            idx::HF_MAG_LOSS,
+            idx::PJND_TRANSDUCER,
+            idx::GMS,
+            idx::BLOCKINESS,
+            idx::RINGING,
+            idx::BANDING,
+        ];
+        let mut weights = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
+        for &local in &supported {
+            weights[local] = 1.0;
+        }
+
+        let map = compute_v2_diffmap_channel_scale(&src, &dst, width, height, &weights);
+        assert_eq!(map.len(), n);
+        assert!(
+            map.iter().all(|v| v.is_finite()),
+            "diffmap has non-finite entries"
+        );
+
+        let map_mean: f64 = map.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
+        let expected: f64 = supported.iter().map(|&local| feat[local]).sum();
+
+        let rel_err = (map_mean - expected).abs() / expected.abs().max(1e-9);
+        assert!(
+            rel_err < 5e-4,
+            "diffmap block-pool mean {map_mean} vs feature sum {expected}: rel_err {rel_err}"
+        );
+
+        // Guard: the fixture must actually exercise every supported family
+        // (a bug that always emits 0 must not pass by matching a
+        // trivially-zero feature) AND must stay clear of every mean-level
+        // clamp (clamp02 at 2.0 for SSIM_MEAN, clamp01 at 1.0 for the
+        // ART/DET/MSE/HF_*/PJND_TRANSDUCER block) so the identity above is
+        // exercised in its EXACT (not clamp-truncated) form.
+        assert!(
+            feat[idx::SSIM_MEAN] > 1e-4,
+            "fixture produced ~zero SSIM_MEAN"
+        );
+        assert!(
+            feat[idx::BLOCKINESS] > 1e-4,
+            "fixture produced ~zero BLOCKINESS"
+        );
+        assert!(feat[idx::ART] > 1e-4, "fixture produced ~zero ART");
+        assert!(feat[idx::DET] > 1e-4, "fixture produced ~zero DET");
+        assert!(
+            feat[idx::SSIM_MEAN] < 2.0 - 1e-6,
+            "SSIM_MEAN clamp02 fired: {}",
+            feat[idx::SSIM_MEAN]
+        );
+        for &local in &[
+            idx::ART,
+            idx::DET,
+            idx::MSE,
+            idx::HF_GAIN,
+            idx::HF_LOSS,
+            idx::HF_MAG_LOSS,
+            idx::PJND_TRANSDUCER,
+        ] {
+            assert!(
+                feat[local] < 1.0 - 1e-6,
+                "clamp01 fired on idx {local}: {}",
+                feat[local]
+            );
+        }
     }
 }
