@@ -94,3 +94,40 @@ decision. If recipe-v2's control arm STILL fails to transfer (CID22-val < 0.55 �
 well below B yet clearly above noise), the lab-recipe approach is declared unable to
 answer the question and the A/B moves to the production-recipe path (safesyn-mass) instead
 of iterating recipes against the verdict.
+
+## AMENDMENT 2 (2026-07-19, recipe-3 = production-shaped) — the Amendment-1 gate FIRED
+
+Recipe-2's control arm reached held-out CID22-val 0.32 / CSIQ 0.40 / LIVE 0.37 —
+above recipe-1's noise floor but far below the pre-committed 0.55 usability bar
+(shipped-B: 0.88 on the same rows). Per Amendment 1 the lab-recipe path is DECLARED
+UNABLE and the raw recipe-2 delta (v2 −0.18 mean, script-labeled KILL) is **VOID —
+not a substrate verdict**: an instrument whose control can't learn the known-good
+substrate has no discriminating power. (Mechanism note, recorded not verdicted: the
+v2 arm overfits kadid/tid HARDER — train 0.977/0.974 vs control 0.942/0.883 — which
+a memorization-prone recipe converts into a held-out penalty.)
+
+**Recipe-3** adds the production ingredient both prior recipes lacked — content-diverse
+training mass. Kadid+tid supply 106 references total; every production zensim recipe
+transfers through safesyn's ~4k sources. Cheapest discriminating form (rigor×efficiency:
+the smallest change that restores instrument function):
+
+- **safesyn JPEG slice**: 1,100 of 3,218 safesyn sources (seed-13 source-level sample,
+  no rendition splitting), all their JPEG-family rows (~38k pairs across
+  mozjpeg-420-e4 / zenjpeg-420-e2 / zenjpeg-420-xyb-e2). JPEG-only because those
+  bitstreams self-decode through both arms' existing loaders (the safesyn PNG decode
+  cache was deleted 2026-06-22; wiring avif/jxl/webp bitstream decode is a bigger
+  build than the question needs). Label = gpu_ssimulacra2/100 — the production
+  training target, ssim2-shaped, on the common [≈0,1] scale (negative tail allowed).
+- Groups: recipe-2 unchanged PLUS `safesyn:1.0:1.0:withinref,both`. Same seed 13,
+  epochs 120, pairs-per-epoch 50k, h=128, `--mse-weight 1.0`, identical argv across
+  arms.
+- BOTH arms extract v1/v2 features from the same TSV (same decoded pixels per pair.)
+- Usability gate unchanged: control CID22-val ≥ 0.55, assessed BEFORE looking at any
+  v2-arm number. If the control fails again, the A/B is reported "unanswerable at lab
+  scale" and closed — no further recipe iteration (the next honest step would be the
+  full production corpus + full multi-codec decode path, a separate build).
+- WIN/KILL bands unchanged.
+
+Known scope cost (stated up front): the training distribution becomes JPEG+synthetic
+distortions; CID22-val contains webp/avif/jxl codecs too — transfer to those rides on
+feature generality, which is precisely what the A/B is asking. Arm-symmetric, so fair.

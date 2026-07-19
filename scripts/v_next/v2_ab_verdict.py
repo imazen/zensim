@@ -6,7 +6,8 @@ computes the stats via the CANONICAL owners — `predict_features_with_bake`
 (forward pass) and `panel` (zenstats Mohammadi panel). This script is packing
 glue only: no stat math, no bake parsing (per the no-duplication rule).
 
-Usage: python3 scripts/v_next/v2_ab_verdict.py /mnt/v/output/zensim/v2-ab-2026-07-19
+Usage: python3 scripts/v_next/v2_ab_verdict.py <ab_dir> [bake_suffix]
+e.g.   python3 scripts/v_next/v2_ab_verdict.py /mnt/v/output/zensim/v2-ab-2026-07-19 _recipe2
 """
 import csv
 import json
@@ -68,9 +69,10 @@ def run_panel(preds, targets) -> dict:
 
 def main():
     ab = Path(sys.argv[1])
+    suffix = sys.argv[2] if len(sys.argv) > 2 else ""
     results = {}
     for arm in ARMS:
-        bake = ab / f"{arm}_arm.bin"
+        bake = ab / f"{arm}_arm{suffix}.bin"
         results[arm] = {}
         for corpus in CORPORA:
             targets, rows = load_csv(ab / f"{arm}_{corpus}.csv")
