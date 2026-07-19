@@ -106,6 +106,27 @@ iters, effort default; decoded outputs judged by independent ssim2 + butteraugli
   Equal-achieved-score frontier interpolation (the design above) decides; the 2026-05-27 #38
   campaign's +1–5% bytes-at-equal-quality result remains the prior.
 
+## Phase 2 wiring — two load-bearing discoveries (2026-07-18, before any RD verdict)
+
+1. **`DiffmapResult::score()` was the LEGACY V0_2 score for every profile** — the diffmap
+   entry points never called `apply_mlp_scoring`, so BOTH encoder closed loops (zenjpeg
+   `Quality::Zq*`, jxl's zensim loop) had been converging on the legacy scalar, not the
+   shipped metric. Caught because a/b/bake profile overrides produced byte-identical encodes
+   + identical achieved scores through the Zq loop. Fixed in zensim (`834b4387`, parity
+   verified 71.15-legacy → 55.01 = the real B forward; 134 tests green). Retroactively
+   explains the 2026-07-16 "zensim diffmap loses under its own scalar as judge" RD result —
+   the loop was optimizing a different scalar than the judge. Consumer calibration tables
+   (zenjpeg zq starting-q, jxl `zensim_targets`) are legacy-seeded and need re-seeding.
+2. **zenjpeg's Zq correction passes were structurally INERT** — the `ScalingController` AQ
+   lever only scales AQ *strengths*, which feed the zero-bias rounding threshold
+   (`quantize_with_zero_bias_zigzag`), not the quant field: a 20% strength change produced
+   byte-identical output, so only pass-0's starting-q ever mattered (and the strict-miss
+   tests pass precisely because the loop can't correct). Worktree fix: GLOBAL q-correction
+   between passes (proportional, ~1.1 jpegli-q per score unit) — target 55 now converges
+   46.7 → 51.1 → 55.5 in 3 passes; t80 in 2. The per-block AQ lever stays layered on top,
+   but a real per-block rate lever for zenjpeg (quant-field modulation, like jxl's QF) is
+   the structural follow-up if per-block steering is to matter for JPEG.
+
 ## Verdict criteria (pre-registered)
 
 - A diffmap driver is **helpful** if median bytes-saved > 2% at equal achieved-B-score with NO
