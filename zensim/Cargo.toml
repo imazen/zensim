@@ -134,6 +134,8 @@ zenpixels = { workspace = true }
 zenresize = { workspace = true }
 enough = { workspace = true }
 zenjpeg = { version = "0.8.4", default-features = false, features = ["decoder"] }
+# BMP decode for the LIVE-R2 corpus (v2_ab_extract) — zen crate, not `image`.
+zenbitmaps = { path = "../../zenbitmaps", features = ["bmp"] }
 
 [lints.clippy]
 uninlined_format_args = "allow"
@@ -156,6 +158,10 @@ required-features = ["feature-regime-v2"]
 
 [[example]]
 name = "v2_helpfulness_screen"
+required-features = ["feature-regime-v2", "threads"]
+
+[[example]]
+name = "v2_ab_extract"
 required-features = ["feature-regime-v2", "threads"]
 
 [[example]]

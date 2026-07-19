@@ -26,8 +26,28 @@ pub fn decode_rgb8(path: &std::path::Path) -> (Vec<[u8; 3]>, usize, usize) {
     match ext.as_str() {
         "png" => decode_png_rgb8(&bytes),
         "jpg" | "jpeg" => decode_jpeg_rgb8(&bytes),
+        "bmp" => decode_bmp_rgb8(&bytes),
         other => panic!("unsupported extension {other:?} for {path:?}"),
     }
+}
+
+fn decode_bmp_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
+    use zenbitmaps::PixelLayout;
+    let out = zenbitmaps::decode(bytes, enough::Unstoppable).expect("zenbitmaps decode");
+    let (w, h) = (out.width as usize, out.height as usize);
+    let px = out.pixels();
+    let rgb: Vec<[u8; 3]> = match out.layout {
+        PixelLayout::Rgb8 => px.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+        PixelLayout::Bgr8 => px.chunks_exact(3).map(|c| [c[2], c[1], c[0]]).collect(),
+        PixelLayout::Bgra8 | PixelLayout::Bgrx8 => {
+            px.chunks_exact(4).map(|c| [c[2], c[1], c[0]]).collect()
+        }
+        PixelLayout::Rgba8 => px.chunks_exact(4).map(|c| [c[0], c[1], c[2]]).collect(),
+        PixelLayout::Gray8 => px.iter().map(|&g| [g, g, g]).collect(),
+        other => panic!("unsupported BMP layout {other:?}"),
+    };
+    assert_eq!(rgb.len(), w * h, "BMP pixel count mismatch");
+    (rgb, w, h)
 }
 
 fn decode_png_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
@@ -36,40 +56,54 @@ fn decode_png_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
     let out = zenpng::decode(bytes, &cfg, &Unstoppable).expect("zenpng decode");
     let (w, h) = (out.info.width as usize, out.info.height as usize);
     let desc = out.pixels.descriptor();
-    assert_eq!(
-        desc.channel_type(),
-        ChannelType::U8,
-        "only 8-bit PNG supported by this helper"
-    );
-    let slice = out.pixels.as_slice();
-    let channels = desc.channels();
+    let channels = desc.channels() as usize;
     let has_alpha = desc.has_alpha();
-    let mut rgb = Vec::with_capacity(w * h);
-    for y in 0..h as u32 {
-        let row = slice.row(y);
-        match (channels, has_alpha) {
-            (4, true) => {
-                for px in row.chunks_exact(4).take(w) {
-                    rgb.push([px[0], px[1], px[2]]);
-                }
+    let slice = out.pixels.as_slice();
+    let samples_per_row = w * channels;
+    // Flatten rows to one u8 sample buffer. 16-bit PNGs (e.g. the CID22
+    // validation set) narrow each native-endian u16 sample by rounded
+    // v*255/65535 — the same convention `image::open().to_rgb8()` applies
+    // on the v1-arm extraction path.
+    let mut samples: Vec<u8> = Vec::with_capacity(h * samples_per_row);
+    match desc.channel_type() {
+        ChannelType::U8 => {
+            for y in 0..h as u32 {
+                samples.extend_from_slice(&slice.row(y)[..samples_per_row]);
             }
-            (3, false) => {
-                for px in row.chunks_exact(3).take(w) {
-                    rgb.push([px[0], px[1], px[2]]);
-                }
-            }
-            (1, false) => {
-                for &g in row.iter().take(w) {
-                    rgb.push([g, g, g]);
-                }
-            }
-            (2, true) => {
-                for px in row.chunks_exact(2).take(w) {
-                    rgb.push([px[0], px[0], px[0]]);
-                }
-            }
-            other => panic!("unsupported PNG channel layout {other:?}"),
         }
+        ChannelType::U16 => {
+            for y in 0..h as u32 {
+                for pair in slice.row(y).chunks_exact(2).take(samples_per_row) {
+                    let v = u16::from_ne_bytes([pair[0], pair[1]]) as u32;
+                    samples.push(((v * 255 + 32767) / 65535) as u8);
+                }
+            }
+        }
+        other => panic!("unsupported PNG channel type {other:?}"),
+    }
+    let mut rgb = Vec::with_capacity(w * h);
+    match (channels, has_alpha) {
+        (4, true) => {
+            for px in samples.chunks_exact(4) {
+                rgb.push([px[0], px[1], px[2]]);
+            }
+        }
+        (3, false) => {
+            for px in samples.chunks_exact(3) {
+                rgb.push([px[0], px[1], px[2]]);
+            }
+        }
+        (1, false) => {
+            for &g in &samples {
+                rgb.push([g, g, g]);
+            }
+        }
+        (2, true) => {
+            for px in samples.chunks_exact(2) {
+                rgb.push([px[0], px[0], px[0]]);
+            }
+        }
+        other => panic!("unsupported PNG channel layout {other:?}"),
     }
     (rgb, w, h)
 }
