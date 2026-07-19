@@ -48,6 +48,11 @@
 use crate::error::ZensimError;
 use crate::source::ImageSource;
 
+use archmage::incant;
+use archmage::magetypes;
+use magetypes::simd::backends::F32x8Backend;
+use magetypes::simd::generic::f32x8 as GenericF32x8;
+
 // ============================================================================
 // Layout constants
 // ============================================================================
@@ -254,13 +259,80 @@ fn saturate(x: f64, c: f64) -> f64 {
     x / (x + c)
 }
 
+// ============================================================================
+// Phase-4 (§A.14): magetypes-SIMD formula pass — f32x8-lane vectorized
+// counterparts of the four scalar formulas above. Same algebra, f32
+// precision (matches the source planes' own f32 storage), 8 pixels/call
+// instead of 1. Generic over any token implementing `F32x8Backend` so
+// `#[magetypes(v4x, v4, v3, neon, wasm128)]` (see
+// `compute_channel_scale_v2_kernel_entry` below) monomorphizes one body
+// per tier — this is the SAME pattern as `~/work/archmage/docs/site/
+// content/magetypes/examples/plane-ops.md`/`gaussian-blur.md`.
+// ============================================================================
+
+type V8<T> = GenericF32x8<T>;
+
+/// Vectorized [`ssim_d_local`] — identical algebra, f32 lanes.
+#[inline]
+fn ssim_d_local_v<T: F32x8Backend + Copy>(
+    token: T,
+    mu1: V8<T>,
+    mu2: V8<T>,
+    s12: V8<T>,
+    ssq: V8<T>,
+    c1: V8<T>,
+    c2: V8<T>,
+) -> V8<T> {
+    let two = V8::<T>::splat(token, 2.0);
+    let one = V8::<T>::splat(token, 1.0);
+    let zero = V8::<T>::zero(token);
+    let num_m = (two * mu1 * mu2 + c1) / (mu1 * mu1 + mu2 * mu2 + c1);
+    let cov = s12 - mu1 * mu2;
+    let num_s = two * cov + c2;
+    let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + c2;
+    let local = num_m * (num_s / denom_s);
+    (one - local).max(zero)
+}
+
+/// Vectorized [`bounded_sim`] — `(2ab+c)/(a²+b²+c)`.
+#[inline]
+fn bounded_sim_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<T>) -> V8<T> {
+    let two = V8::<T>::splat(token, 2.0);
+    (two * a * b + c) / (a * a + b * b + c)
+}
+
+/// Vectorized [`bounded_excess`] — `max(0, a-b) / (a+b+c)`.
+#[inline]
+fn bounded_excess_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<T>) -> V8<T> {
+    let zero = V8::<T>::zero(token);
+    (a - b).max(zero) / (a + b + c)
+}
+
+/// Vectorized [`saturate`] — `max(x,0)/(max(x,0)+c)`.
+#[inline]
+fn saturate_v<T: F32x8Backend + Copy>(token: T, x: V8<T>, c: V8<T>) -> V8<T> {
+    let zero = V8::<T>::zero(token);
+    let x = x.max(zero);
+    x / (x + c)
+}
+
 /// Terriberry (2007) single-pass online moments: tracks `n`, `mean`, and
 /// the 2nd/3rd/4th central-moment sums `M2/M3/M4 = Σ(x-mean)^k`. `M3` is
 /// tracked only because `M4`'s incremental update formula depends on its
-/// PRE-update value — not used as an output here. This is what makes
+/// PRE-update value — not used as an output here. This is what made
 /// `ssim_dev2`/`ssim_dev4` (the D8 GMSD-style deviation moments) genuinely
-/// single-pass and O(1)-space, unlike iteration 1's store-then-revisit
-/// design.
+/// single-pass and O(1)-space in iteration 2, unlike iteration 1's
+/// store-then-revisit design.
+///
+/// Phase-4 (§A.14): no longer on the hot path — `compute_channel_scale_v2`
+/// now computes `ssim_dev2`/`ssim_dev4` from SIMD-accumulated RAW power
+/// sums (Σd, Σd², Σd³, Σd⁴; see `dense_block_kernel_generic`'s doc), since
+/// Terriberry's update is inherently sequential and doesn't vectorize
+/// across lanes. Kept as the reference implementation and cross-checked
+/// against the raw-moment path in
+/// `tests::raw_moment_reformulation_matches_terriberry` — this is the
+/// proof that the phase-4 reformulation is numerically equivalent, not
+/// just "removed and hoped for the best".
 #[derive(Default, Clone, Copy)]
 struct OnlineMoments {
     n: f64,
@@ -593,6 +665,614 @@ impl ScratchV2 {
     }
 }
 
+// ============================================================================
+// Phase-4 (§A.14): magetypes-SIMD dense formula pass + gradient pass.
+//
+// Two separate `#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]` hot loops,
+// matching the brief's "compute_channel_scale_v2's formula pass + the shared
+// gradient pass" scope exactly:
+//   - `dense_block_kernel`: SSIM raw moments, edge artifact/detail, bounded
+//     MSE, HF gain/loss/mag-loss, PJND core + transducer-bank, and all 11
+//     masked/IW/soft-peak weighted-pool pairs. ALWAYS runs (matches the
+//     scalar loop's unconditional block).
+//   - `gradient_block_kernel`: GMS, ringing, banding, grad_src/grad_dst sums.
+//     Only invoked when `toggles.gradient_features` — the toggle check is
+//     hoisted OUTSIDE the pixel loop entirely (was a per-pixel branch in the
+//     scalar version; now a single runtime branch per `compute_channel_
+//     scale_v2` call), which is itself a small, free improvement.
+//
+// Blockiness is NOT ported to SIMD this phase — it is inherently sparse
+// (only x%8==0 or y%8==0 lattice positions contribute), so a dense 8-wide
+// SIMD pass would spend 7/8 of its lanes on masked-out zero contributions.
+// It is restructured into its own small SCALAR pass that visits ONLY
+// lattice positions (§A.14 "side quest not taken" — noted, not pursued,
+// per the phase-4 addendum's single-lever discipline) — this is still
+// strictly cheaper than the OLD dense-scalar-with-modulo-branch version it
+// replaces, since it no longer visits all `width*height` pixels to find
+// the ~1/8+1/8 fraction that matter.
+//
+// SSIM raw-moment reformulation (deliberate v2-only numeric shift,
+// documented per this file's own 5e-4-tolerance allowance): Terriberry's
+// online update is inherently sequential (each sample's update depends on
+// the running n), so it does not vectorize across lanes. Instead, each
+// lane accumulates plain running sums of d, d^2, d^3, d^4 (trivially
+// SIMD — no cross-lane dependency), reduced ONCE PER ROW (not once per
+// whole image — bounds the f32 accumulator's magnitude to ~width/8
+// increments of a small [0,2]-bounded value, avoiding "large-swallows-
+// small" f32 summation error) into a running f64 total. At the very end,
+// the standard raw-to-central moment identities recover (mean, M2, M4):
+//   mean = Sum_d / n
+//   M2/n = Sum_d2/n - mean^2
+//   M4/n = Sum_d4/n - 4*mean*(Sum_d3/n) + 6*mean^2*(Sum_d2/n) - 3*mean^4
+// Matches Terriberry's OWN output up to floating-point reassociation
+// (verified within 5e-4 relative on the fixture pairs — see the phase-4
+// test `simd_matches_scalar_within_tolerance`).
+// ============================================================================
+
+/// Per-row-reduced f64 accumulator for the dense (always-on) block.
+#[derive(Default, Clone, Copy)]
+struct DenseAccum {
+    sum_d: f64,
+    sum_d2: f64,
+    sum_d3: f64,
+    sum_d4: f64,
+    sum_art: f64,
+    sum_det: f64,
+    sum_mse: f64,
+    sum_hf_gain: f64,
+    sum_hf_loss: f64,
+    sum_hf_mag_loss: f64,
+    sum_pjnd: f64,
+    sum_pjnd_lo: f64,
+    sum_pjnd_hi: f64,
+    ws_peak_ssim: WeightedSum,
+    ws_peak_art: WeightedSum,
+    ws_peak_det: WeightedSum,
+    ws_mask_ssim: WeightedSum,
+    ws_mask_art: WeightedSum,
+    ws_mask_det: WeightedSum,
+    ws_mask_mse: WeightedSum,
+    ws_iw_ssim: WeightedSum,
+    ws_iw_art: WeightedSum,
+    ws_iw_det: WeightedSum,
+    ws_iw_mse: WeightedSum,
+}
+
+/// Scalar weighted-pool accumulation for ONE pixel — shared by the SIMD
+/// kernel's per-lane extraction loop AND the scalar row tail (§A.14
+/// register-pressure fix, see `dense_block_kernel_generic`'s doc: the 11
+/// masked/IW/soft-peak `(Σw, Σwv)` pairs are 22 of the ~35 SIMD lane
+/// accumulators live in the dense kernel's inner loop — measured (256²
+/// iteration signal) to cause severe register-pressure regression when
+/// vectorized alongside everything else. Scalarizing JUST this block
+/// (extract the SIMD-computed `d`/`art_i`/`det_i`/`mse_i`/`act` lanes via
+/// `to_array()`, accumulate per-lane here) keeps the division-heavy core
+/// formulas (SSIM moments, edge artifact/detail, MSE, HF, PJND — the
+/// higher-arithmetic-intensity part) vectorized while removing the 22
+/// accumulators that were the dominant register-pressure source.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn weighted_pool_accumulate_scalar(
+    acc: &mut DenseAccum,
+    d: f64,
+    art_i: f64,
+    det_i: f64,
+    mse_i: f64,
+    act: f64,
+) {
+    let mask_w = 1.0 - saturate(act, C_ACTIVITY);
+    let iw_w = saturate(act, C_ACTIVITY) + IW_WEIGHT_FLOOR;
+    acc.ws_mask_ssim.add(mask_w, d);
+    acc.ws_mask_art.add(mask_w, art_i);
+    acc.ws_mask_det.add(mask_w, det_i);
+    acc.ws_mask_mse.add(mask_w, mse_i);
+    acc.ws_iw_ssim.add(iw_w, d);
+    acc.ws_iw_art.add(iw_w, art_i);
+    acc.ws_iw_det.add(iw_w, det_i);
+    acc.ws_iw_mse.add(iw_w, mse_i);
+
+    let sal_ssim = saturate(d, C_PEAK);
+    let sal_art = saturate(art_i, C_PEAK);
+    let sal_det = saturate(det_i, C_PEAK);
+    acc.ws_peak_ssim.add(sal_ssim, d);
+    acc.ws_peak_art.add(sal_art, art_i);
+    acc.ws_peak_det.add(sal_det, det_i);
+}
+
+/// Dense-block SIMD kernel body — generic over any `F32x8Backend` token.
+/// Processes one row at a time: zero f32-lane accumulators, sweep the row
+/// in 8-wide chunks (+ scalar tail for `width % 8 != 0`), reduce once per
+/// row into the f64 [`DenseAccum`] running totals.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
+    token: T,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    let zero = V8::<T>::zero(token);
+    let one = V8::<T>::splat(token, 1.0);
+    let c1 = V8::<T>::splat(token, C1_V2 as f32);
+    let c2 = V8::<T>::splat(token, C2_V2 as f32);
+    let c_edge = V8::<T>::splat(token, C_EDGE as f32);
+    let c_mse = V8::<T>::splat(token, C_MSE as f32);
+    let c_hf = V8::<T>::splat(token, C_HF as f32);
+    let c_pjnd_clamp = V8::<T>::splat(token, C_PJND_CLAMP as f32);
+    let k_mid = V8::<T>::splat(token, K_PJND_MASK as f32);
+    let k_lo = V8::<T>::splat(token, K_PJND_MASK_LOW as f32);
+    let k_hi = V8::<T>::splat(token, K_PJND_MASK_HIGH as f32);
+
+    let mut acc = DenseAccum::default();
+    let width8 = width - (width % 8);
+
+    for y in 0..height {
+        let row = y * width;
+
+        // Row-local f32 lane accumulators — zeroed each row and reduced
+        // ONCE at the end of the row (bounds the f32 summation magnitude
+        // to ~width/8 terms, see the module-level note above).
+        //
+        // §A.14 register-pressure fix: the masked/IW/soft-peak weighted-pool
+        // accumulators (11 pairs = 22 registers in the first version of this
+        // kernel) are NOT here -- they're accumulated scalar, per lane,
+        // immediately after each SIMD chunk (see `weighted_pool_accumulate_
+        // scalar` below), which measurably fixed a severe register-pressure
+        // regression (256x256 iteration signal: 30.4ms fused-block-only vs
+        // this version's number in §A.14's bench table).
+        let (mut r_d, mut r_d2, mut r_d3, mut r_d4) = (zero, zero, zero, zero);
+        let (mut r_art, mut r_det, mut r_mse) = (zero, zero, zero);
+        let (mut r_hfg, mut r_hfl, mut r_hfm) = (zero, zero, zero);
+        let (mut r_pjnd, mut r_pjnd_lo, mut r_pjnd_hi) = (zero, zero, zero);
+
+        let mut x = 0usize;
+        while x < width8 {
+            let i = row + x;
+            macro_rules! ld {
+                ($plane:expr) => {
+                    V8::<T>::from_array(token, $plane[i..i + 8].try_into().unwrap())
+                };
+            }
+            let s = ld!(src);
+            let dd = ld!(dst);
+            let m1 = ld!(mu1);
+            let m2 = ld!(mu2);
+            let act = ld!(activity);
+
+            let d = ssim_d_local_v(token, m1, m2, ld!(s12), ld!(ssq), c1, c2);
+            r_d += d;
+            let d2 = d * d;
+            r_d2 += d2;
+            r_d3 += d2 * d;
+            r_d4 += d2 * d2;
+
+            let diff_src = (s - m1).abs();
+            let diff_dst = (dd - m2).abs();
+            let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
+            let gt = diff_dst.simd_gt(diff_src);
+            let lt = diff_dst.simd_lt(diff_src);
+            let art_i = V8::<T>::blend(gt, edge_dissim, zero);
+            let det_i = V8::<T>::blend(lt, edge_dissim, zero);
+            r_art += art_i;
+            r_det += det_i;
+
+            let raw_diff = s - dd;
+            let raw_sq_err = raw_diff * raw_diff;
+            let mse_i = saturate_v(token, raw_sq_err, c_mse);
+            r_mse += mse_i;
+
+            let hf_src = s - m1;
+            let hf_dst = dd - m2;
+            let hf_src_sq = hf_src * hf_src;
+            let hf_dst_sq = hf_dst * hf_dst;
+            r_hfg += bounded_excess_v(token, hf_dst_sq, hf_src_sq, c_hf);
+            r_hfl += bounded_excess_v(token, hf_src_sq, hf_dst_sq, c_hf);
+            r_hfm += bounded_excess_v(token, hf_src.abs(), hf_dst.abs(), c_hf);
+
+            let raw_abs_err = raw_diff.abs();
+            let t_mid = raw_abs_err / (one + k_mid * act);
+            r_pjnd += saturate_v(token, t_mid, c_pjnd_clamp);
+            if transducer_bank {
+                let t_lo = raw_abs_err / (one + k_lo * act);
+                let t_hi = raw_abs_err / (one + k_hi * act);
+                r_pjnd_lo += saturate_v(token, t_lo, c_pjnd_clamp);
+                r_pjnd_hi += saturate_v(token, t_hi, c_pjnd_clamp);
+            }
+
+            // §A.14 register-pressure fix (see the row-header comment
+            // above): extract this chunk's d/art_i/det_i/mse_i/act lanes and
+            // accumulate the 11 weighted-pool pairs scalar, per lane --
+            // reuses the EXACT SAME formula as the scalar tail below via
+            // `weighted_pool_accumulate_scalar`, not a re-derivation.
+            let d_arr = d.to_array();
+            let art_arr = art_i.to_array();
+            let det_arr = det_i.to_array();
+            let mse_arr = mse_i.to_array();
+            let act_arr = act.to_array();
+            for lane in 0..8 {
+                weighted_pool_accumulate_scalar(
+                    &mut acc,
+                    d_arr[lane] as f64,
+                    art_arr[lane] as f64,
+                    det_arr[lane] as f64,
+                    mse_arr[lane] as f64,
+                    act_arr[lane] as f64,
+                );
+            }
+
+            x += 8;
+        }
+
+        // Reduce this row's f32 lane partials into the f64 running totals.
+        acc.sum_d += r_d.reduce_add() as f64;
+        acc.sum_d2 += r_d2.reduce_add() as f64;
+        acc.sum_d3 += r_d3.reduce_add() as f64;
+        acc.sum_d4 += r_d4.reduce_add() as f64;
+        acc.sum_art += r_art.reduce_add() as f64;
+        acc.sum_det += r_det.reduce_add() as f64;
+        acc.sum_mse += r_mse.reduce_add() as f64;
+        acc.sum_hf_gain += r_hfg.reduce_add() as f64;
+        acc.sum_hf_loss += r_hfl.reduce_add() as f64;
+        acc.sum_hf_mag_loss += r_hfm.reduce_add() as f64;
+        acc.sum_pjnd += r_pjnd.reduce_add() as f64;
+        acc.sum_pjnd_lo += r_pjnd_lo.reduce_add() as f64;
+        acc.sum_pjnd_hi += r_pjnd_hi.reduce_add() as f64;
+        // (weighted-pool accumulators already folded in scalar, per-lane,
+        // inside the chunk loop above -- see the §A.14 fix note.)
+
+        // Scalar tail: remaining `width % 8` pixels in this row, using the
+        // EXACT SAME scalar formulas as the pre-phase-4 kernel (bit-for-bit
+        // identical code path — not a re-derivation).
+        for x in width8..width {
+            let i = row + x;
+            let s = src[i] as f64;
+            let dd = dst[i] as f64;
+            let m1 = mu1[i] as f64;
+            let m2 = mu2[i] as f64;
+            let act = activity[i] as f64;
+
+            let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64);
+            acc.sum_d += d;
+            acc.sum_d2 += d * d;
+            acc.sum_d3 += d * d * d;
+            acc.sum_d4 += d * d * d * d;
+
+            let diff_src = (s - m1).abs();
+            let diff_dst = (dd - m2).abs();
+            let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+            let (mut art_i, mut det_i) = (0.0, 0.0);
+            if diff_dst > diff_src {
+                art_i = edge_dissim;
+            } else if diff_dst < diff_src {
+                det_i = edge_dissim;
+            }
+            acc.sum_art += art_i;
+            acc.sum_det += det_i;
+
+            let raw_sq_err = (s - dd) * (s - dd);
+            let mse_i = saturate(raw_sq_err, C_MSE);
+            acc.sum_mse += mse_i;
+
+            let hf_src = s - m1;
+            let hf_dst = dd - m2;
+            let hf_src_sq = hf_src * hf_src;
+            let hf_dst_sq = hf_dst * hf_dst;
+            acc.sum_hf_gain += bounded_excess(hf_dst_sq, hf_src_sq, C_HF);
+            acc.sum_hf_loss += bounded_excess(hf_src_sq, hf_dst_sq, C_HF);
+            acc.sum_hf_mag_loss += bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF);
+
+            let raw_abs_err = (s - dd).abs();
+            let t_mid = raw_abs_err / (1.0 + K_PJND_MASK * act);
+            acc.sum_pjnd += saturate(t_mid, C_PJND_CLAMP);
+            if transducer_bank {
+                let t_lo = raw_abs_err / (1.0 + K_PJND_MASK_LOW * act);
+                let t_hi = raw_abs_err / (1.0 + K_PJND_MASK_HIGH * act);
+                acc.sum_pjnd_lo += saturate(t_lo, C_PJND_CLAMP);
+                acc.sum_pjnd_hi += saturate(t_hi, C_PJND_CLAMP);
+            }
+
+            weighted_pool_accumulate_scalar(&mut acc, d, art_i, det_i, mse_i, act);
+        }
+    }
+
+    acc
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel_entry(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    dense_block_kernel_generic(
+        token,
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    incant!(
+        dense_block_kernel_entry(
+            src,
+            dst,
+            mu1,
+            mu2,
+            ssq,
+            s12,
+            activity,
+            width,
+            height,
+            transducer_bank
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Per-row-reduced f64 accumulator for the gradient block.
+#[derive(Default, Clone, Copy)]
+struct GradientAccum {
+    sum_gms: f64,
+    sum_ringing: f64,
+    sum_banding: f64,
+    sum_grad_src: f64,
+    sum_grad_dst: f64,
+}
+
+/// Gradient-block SIMD kernel body. Interior pixels (`1..width-1`,
+/// `1..height-1`) are vectorized via SHIFTED unaligned loads for the
+/// x-neighbors (`row[x-1..x+7]` / `row[x+1..x+9]`) and full-row-offset
+/// loads for the y-neighbors (`row_u[x..x+8]` / `row_d[x..x+8]`) — the
+/// same shifted-window-read pattern as `~/work/archmage/docs/site/content/
+/// magetypes/examples/gaussian-blur.md`'s vertical pass. The single-pixel
+/// border (`x==0`, `x==width-1`, `y==0`, `y==height-1`) uses the scalar
+/// reflect-boundary formulas (`saturating_sub`/`.min(width-1)`) exactly as
+/// before — a tiny fraction of pixels (2 columns + 2 rows out of
+/// width*height), not worth the complexity of a SIMD boundary-clamp.
+#[inline]
+fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
+    token: T,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+) -> GradientAccum {
+    let zero = V8::<T>::zero(token);
+    let one = V8::<T>::splat(token, 1.0);
+    let c_gms = V8::<T>::splat(token, C_GMS as f32);
+    let c_ring_err = V8::<T>::splat(token, C_RING_ERR as f32);
+    let c_activity = V8::<T>::splat(token, C_ACTIVITY as f32);
+    let c_ring_edge = V8::<T>::splat(token, C_RING_EDGE as f32);
+    let c_band_dst = V8::<T>::splat(token, C_BAND_DST as f32);
+    let c_band_src = V8::<T>::splat(token, C_BAND_SRC as f32);
+
+    let mut acc = GradientAccum::default();
+
+    // Scalar helper for one pixel — used for the whole first/last row
+    // (y==0, y==height-1) and the first/last column of every interior
+    // row, mirroring compute_channel_scale_v2's original reflect-boundary
+    // neighbor logic exactly.
+    let scalar_pixel = |x: usize, y: usize, acc: &mut GradientAccum| {
+        let yu = y.saturating_sub(1);
+        let yd = (y + 1).min(height - 1);
+        let xl = x.saturating_sub(1);
+        let xr = (x + 1).min(width - 1);
+        let row = y * width;
+        let row_u = yu * width;
+        let row_d = yd * width;
+        let i = row + x;
+        let s = src[i] as f64;
+        let dd = dst[i] as f64;
+        let act = activity[i] as f64;
+        let sxl = src[row + xl] as f64;
+        let sxr = src[row + xr] as f64;
+        let syu = src[row_u + x] as f64;
+        let syd = src[row_d + x] as f64;
+        let dxl = dst[row + xl] as f64;
+        let dxr = dst[row + xr] as f64;
+        let dyu = dst[row_u + x] as f64;
+        let dyd = dst[row_d + x] as f64;
+
+        let gx_src = sxr - sxl;
+        let gy_src = syd - syu;
+        let grad_src_mag = (gx_src * gx_src + gy_src * gy_src).sqrt();
+        let gx_dst = dxr - dxl;
+        let gy_dst = dyd - dyu;
+        let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
+
+        acc.sum_grad_src += grad_src_mag;
+        acc.sum_grad_dst += grad_dst_mag;
+        acc.sum_gms += 1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS);
+
+        let raw_abs_err = (s - dd).abs();
+        let err_b = saturate(raw_abs_err, C_RING_ERR);
+        let act_b = saturate(act, C_ACTIVITY);
+        let edge_r = saturate(grad_src_mag, C_RING_EDGE);
+        acc.sum_ringing += err_b * act_b * (1.0 - edge_r);
+
+        let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
+        let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
+        acc.sum_banding += edge_excess * src_smooth_b;
+    };
+
+    for y in 0..height {
+        if y == 0 || y == height - 1 {
+            for x in 0..width {
+                scalar_pixel(x, y, &mut acc);
+            }
+            continue;
+        }
+        let row = y * width;
+        let row_u = (y - 1) * width;
+        let row_d = (y + 1) * width;
+
+        scalar_pixel(0, y, &mut acc);
+        if width > 2 {
+            let interior_end = width - 1;
+            let interior_w = interior_end - 1; // pixels [1, width-2]
+            let chunk_end = 1 + interior_w - (interior_w % 8);
+
+            let (mut r_gms, mut r_ring, mut r_band) = (zero, zero, zero);
+            let (mut r_gsrc, mut r_gdst) = (zero, zero);
+
+            let mut x = 1usize;
+            while x < chunk_end {
+                macro_rules! ld_at {
+                    ($plane:expr, $off:expr) => {
+                        V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+                    };
+                }
+                let sxl = ld_at!(src, row + x - 1);
+                let sxr = ld_at!(src, row + x + 1);
+                let syu = ld_at!(src, row_u + x);
+                let syd = ld_at!(src, row_d + x);
+                let dxl = ld_at!(dst, row + x - 1);
+                let dxr = ld_at!(dst, row + x + 1);
+                let dyu = ld_at!(dst, row_u + x);
+                let dyd = ld_at!(dst, row_d + x);
+                let s = ld_at!(src, row + x);
+                let dd = ld_at!(dst, row + x);
+                let act = ld_at!(activity, row + x);
+
+                let gx_src = sxr - sxl;
+                let gy_src = syd - syu;
+                let grad_src_mag = (gx_src * gx_src + gy_src * gy_src).sqrt();
+                let gx_dst = dxr - dxl;
+                let gy_dst = dyd - dyu;
+                let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
+
+                r_gsrc += grad_src_mag;
+                r_gdst += grad_dst_mag;
+                r_gms += one - bounded_sim_v(token, grad_src_mag, grad_dst_mag, c_gms);
+
+                let raw_abs_err = (s - dd).abs();
+                let err_b = saturate_v(token, raw_abs_err, c_ring_err);
+                let act_b = saturate_v(token, act, c_activity);
+                let edge_r = saturate_v(token, grad_src_mag, c_ring_edge);
+                r_ring += err_b * act_b * (one - edge_r);
+
+                let edge_excess = bounded_excess_v(token, grad_dst_mag, grad_src_mag, c_band_dst);
+                let src_smooth_b = one - saturate_v(token, grad_src_mag, c_band_src);
+                r_band += edge_excess * src_smooth_b;
+
+                x += 8;
+            }
+
+            acc.sum_gms += r_gms.reduce_add() as f64;
+            acc.sum_ringing += r_ring.reduce_add() as f64;
+            acc.sum_banding += r_band.reduce_add() as f64;
+            acc.sum_grad_src += r_gsrc.reduce_add() as f64;
+            acc.sum_grad_dst += r_gdst.reduce_add() as f64;
+
+            for x in chunk_end..=interior_end - 1 {
+                scalar_pixel(x, y, &mut acc);
+            }
+        }
+        scalar_pixel(width - 1, y, &mut acc);
+    }
+
+    acc
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gradient_block_kernel_entry(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+) -> GradientAccum {
+    gradient_block_kernel_generic(token, src, dst, activity, width, height)
+}
+
+fn gradient_block_kernel(
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+) -> GradientAccum {
+    incant!(
+        gradient_block_kernel_entry(src, dst, activity, width, height),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Sparse blockiness pass — visits ONLY the 8-pixel-lattice positions
+/// (`x % BLOCK_LATTICE == 0`, `y % BLOCK_LATTICE == 0`) instead of every
+/// pixel. Deliberately scalar (§A.14: not folded into the SIMD dense pass
+/// this phase — see the module-level note above) but strictly cheaper
+/// than the pre-phase-4 dense-scalar-with-modulo-branch it replaces, since
+/// it no longer visits the 7/8 (or 63/64 for the corner term) of pixels
+/// that always contribute zero.
+fn blockiness_sparse(src: &[f32], dst: &[f32], width: usize, height: usize) -> f64 {
+    let mut sum = 0.0f64;
+    // Vertical steps: for every column x that's a lattice boundary, walk
+    // down every row y (all y, since the horizontal-step term at column x
+    // fires for every row -- matches the original `x % LATTICE == 0 && x >
+    // 0` condition, which held for all y).
+    let mut x = BLOCK_LATTICE;
+    while x < width {
+        for y in 0..height {
+            let i = y * width + x;
+            let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
+            let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
+            sum += bounded_excess(step_dst, step_src, C_BLOCK);
+        }
+        x += BLOCK_LATTICE;
+    }
+    let mut y = BLOCK_LATTICE;
+    while y < height {
+        for x in 0..width {
+            let i = y * width + x;
+            let i_up = i - width;
+            let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
+            let step_src = (src[i] as f64 - src[i_up] as f64).abs();
+            sum += bounded_excess(step_dst, step_src, C_BLOCK);
+        }
+        y += BLOCK_LATTICE;
+    }
+    sum
+}
+
 /// Compute all [`FEATURES_PER_CHANNEL_V2_TOTAL`] v2 signals for one
 /// channel at one scale (except [`idx::EDGE_WIDTH_CHANGE`], filled in by
 /// the caller once the adjacent scale is known — see
@@ -601,10 +1281,12 @@ impl ScratchV2 {
 /// edge-width computation (`(0,0)` when `toggles.gradient_features` is
 /// off — the caller must not rely on edge-width in that case).
 ///
-/// One `for y { for x { ... } }` pass: every basic/peak/masked/IW/PJND/new
-/// signal is an O(1) running accumulator (Terriberry moments for the SSIM
-/// deviation terms, running weighted-sum pairs for masked/IW/soft-peak,
-/// plain running sums for everything else) — see the module doc.
+/// Phase-4 (§A.14): the per-pixel pass is now TWO magetypes-SIMD kernels
+/// (`dense_block_kernel` always, `gradient_block_kernel` when
+/// `toggles.gradient_features`) plus a sparse scalar blockiness pass when
+/// `toggles.blockiness` — see the kernels' own doc comments above for the
+/// full architecture. This function is now orchestration: call the
+/// kernels, unpack their accumulators into `out`.
 fn compute_channel_scale_v2(
     src: &[f32],
     dst: &[f32],
@@ -690,233 +1372,85 @@ fn compute_channel_scale_v2(
     // above; the per-pixel pass below only reads them (`mu1[i]` etc.),
     // which works directly through a `&mut` binding — no reborrow needed.
 
-    // --- O(1) accumulators (this is the whole point of iteration 2: NO
-    //     per-pixel Vec<f32> maps for the signal family below). ---
-    let mut ssim_moments = OnlineMoments::default();
-    let (mut sum_art, mut sum_det, mut sum_mse) = (0.0f64, 0.0f64, 0.0f64);
-    let (mut sum_hf_gain, mut sum_hf_loss, mut sum_hf_mag_loss) = (0.0f64, 0.0f64, 0.0f64);
-    let (mut sum_pjnd, mut sum_pjnd_lo, mut sum_pjnd_hi) = (0.0f64, 0.0f64, 0.0f64);
-    let mut sum_gms = 0.0f64;
-    let mut sum_ringing = 0.0f64;
-    let mut sum_banding = 0.0f64;
-    let mut sum_blockiness = 0.0f64;
-    let mut sum_grad_src = 0.0f64;
-    let mut sum_grad_dst = 0.0f64;
+    // --- Phase-4 (§A.14): the dense block ALWAYS runs (mirrors the old
+    //     unconditional per-pixel block); the gradient block and
+    //     blockiness pass are gated exactly as before, just as separate
+    //     kernel calls instead of inline per-pixel branches. ---
+    let dense = dense_block_kernel(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        toggles.transducer_bank,
+    );
 
-    let mut ws_peak_ssim = WeightedSum::default();
-    let mut ws_peak_art = WeightedSum::default();
-    let mut ws_peak_det = WeightedSum::default();
-    let mut ws_mask_ssim = WeightedSum::default();
-    let mut ws_mask_art = WeightedSum::default();
-    let mut ws_mask_det = WeightedSum::default();
-    let mut ws_mask_mse = WeightedSum::default();
-    let mut ws_iw_ssim = WeightedSum::default();
-    let mut ws_iw_art = WeightedSum::default();
-    let mut ws_iw_det = WeightedSum::default();
-    let mut ws_iw_mse = WeightedSum::default();
+    let grad = if toggles.gradient_features {
+        gradient_block_kernel(src, dst, activity, width, height)
+    } else {
+        GradientAccum::default()
+    };
 
-    for y in 0..height {
-        let yu = y.saturating_sub(1);
-        let yd = (y + 1).min(height - 1);
-        let row = y * width;
-        let row_u = yu * width;
-        let row_d = yd * width;
-        for x in 0..width {
-            let i = row + x;
-            let xl = x.saturating_sub(1);
-            let xr = (x + 1).min(width - 1);
-
-            let s = src[i] as f64;
-            let dd = dst[i] as f64;
-            let m1 = mu1[i] as f64;
-            let m2 = mu2[i] as f64;
-            let act = activity[i] as f64;
-
-            // --- SSIM dissimilarity (D1 fix) + Terriberry moments (D8 fix) ---
-            let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64);
-            ssim_moments.update(d);
-
-            // --- Edge artifact/detail (D3 fix) ---
-            let diff_src = (s - m1).abs();
-            let diff_dst = (dd - m2).abs();
-            let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
-            let (mut art_i, mut det_i) = (0.0, 0.0);
-            if diff_dst > diff_src {
-                art_i = edge_dissim;
-            } else if diff_dst < diff_src {
-                det_i = edge_dissim;
-            }
-            sum_art += art_i;
-            sum_det += det_i;
-
-            // --- Bounded MSE (D6 partial fix) ---
-            let raw_sq_err = (s - dd) * (s - dd);
-            let mse_i = saturate(raw_sq_err, C_MSE);
-            sum_mse += mse_i;
-
-            // --- HF gain/loss/mag-loss (D2 fix, made genuinely per-pixel) ---
-            let hf_src = s - m1;
-            let hf_dst = dd - m2;
-            let hf_src_sq = hf_src * hf_src;
-            let hf_dst_sq = hf_dst * hf_dst;
-            sum_hf_gain += bounded_excess(hf_dst_sq, hf_src_sq, C_HF);
-            sum_hf_loss += bounded_excess(hf_src_sq, hf_dst_sq, C_HF);
-            sum_hf_mag_loss += bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF);
-
-            // --- PJND transducer bank (candidate: masking-transducer
-            //     bank — 2 extra k values beyond the core K_PJND_MASK,
-            //     which is iteration 1, always on). ---
-            let raw_abs_err = (s - dd).abs();
-            let t_mid = raw_abs_err / (1.0 + K_PJND_MASK * act);
-            sum_pjnd += saturate(t_mid, C_PJND_CLAMP);
-            if toggles.transducer_bank {
-                let t_lo = raw_abs_err / (1.0 + K_PJND_MASK_LOW * act);
-                let t_hi = raw_abs_err / (1.0 + K_PJND_MASK_HIGH * act);
-                sum_pjnd_lo += saturate(t_lo, C_PJND_CLAMP);
-                sum_pjnd_hi += saturate(t_hi, C_PJND_CLAMP);
-            }
-
-            // --- Neighbor loads (raw pixel values; shared by the gradient
-            //     group AND blockiness, kept unconditional since they're
-            //     cheap array reads with no sqrt/div — the EXPENSIVE part
-            //     gated below is the sqrt-based magnitude + its dependent
-            //     accumulators). ---
-            if toggles.gradient_features || toggles.blockiness {
-                let sxl = src[row + xl] as f64;
-                let sxr = src[row + xr] as f64;
-                let syu = src[row_u + x] as f64;
-                let syd = src[row_d + x] as f64;
-                let dxl = dst[row + xl] as f64;
-                let dxr = dst[row + xr] as f64;
-                let dyu = dst[row_u + x] as f64;
-                let dyd = dst[row_d + x] as f64;
-
-                // --- Gradients (raw pixel central differences; shared by
-                //     GMS, chroma-edge-GMS [free, via channel axis],
-                //     ringing, banding, edge-width). ---
-                if toggles.gradient_features {
-                    let gx_src = sxr - sxl;
-                    let gy_src = syd - syu;
-                    let grad_src_mag = (gx_src * gx_src + gy_src * gy_src).sqrt();
-                    let gx_dst = dxr - dxl;
-                    let gy_dst = dyd - dyu;
-                    let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
-
-                    sum_grad_src += grad_src_mag;
-                    sum_grad_dst += grad_dst_mag;
-
-                    // --- GMS (candidate 1 + 3) ---
-                    sum_gms += 1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS);
-
-                    // --- Ringing (candidate: dilated-edge form). `activity`
-                    //     (a BLURRED/spread local-energy signal) stands in
-                    //     for `dilate(edge_r)` -- justified because
-                    //     box-blur inherently spreads a sharp edge's
-                    //     influence over `BLUR_RADIUS` pixels, giving a
-                    //     "near a strong edge" halo without a separate
-                    //     morphological dilation pass. `edge_r` itself uses
-                    //     the SHARP (undilated) source gradient, matching
-                    //     the A.10 form `err · dilate(edge_r) · (1−edge_r)`. ---
-                    let err_b = saturate(raw_abs_err, C_RING_ERR);
-                    let act_b = saturate(act, C_ACTIVITY);
-                    let edge_r = saturate(grad_src_mag, C_RING_EDGE);
-                    sum_ringing += err_b * act_b * (1.0 - edge_r);
-
-                    // --- Banding (candidate: cheap fused approximation of
-                    //     CAMBI's step-energy-in-low-gradient-regions
-                    //     signature — see
-                    //     docs/FEATURE_V2_SPEC_2026-07-18.md §A.11 for the
-                    //     honest comparison against real CAMBI). MUST be a
-                    //     genuine dst-vs-src COMPARISON (bounded_excess),
-                    //     not dst's saturated edge alone — a real content
-                    //     edge (present identically in both src and dst)
-                    //     must NOT register as banding.
-                    //     `bounded_excess(grad_dst, grad_src, c) == 0`
-                    //     whenever `grad_dst <= grad_src` (identity-safe by
-                    //     construction), restricted to originally-smooth
-                    //     regions via `src_smooth_b`. ---
-                    let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
-                    let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
-                    sum_banding += edge_excess * src_smooth_b;
-                }
-
-                // --- Oriented blockiness (candidate). FR-ized: only EXCESS
-                //     step energy vs the reference's own step at the same
-                //     8-pixel-lattice position counts (a real content edge
-                //     that happens to land on the lattice contributes ~0). ---
-                if toggles.blockiness {
-                    let mut block_i = 0.0f64;
-                    if x % BLOCK_LATTICE == 0 && x > 0 {
-                        let step_dst = (dst[i] as f64 - dxl).abs();
-                        let step_src = (s - sxl).abs();
-                        block_i += bounded_excess(step_dst, step_src, C_BLOCK);
-                    }
-                    if y % BLOCK_LATTICE == 0 && y > 0 {
-                        let step_dst = (dst[i] as f64 - dyu).abs();
-                        let step_src = (s - syu).abs();
-                        block_i += bounded_excess(step_dst, step_src, C_BLOCK);
-                    }
-                    sum_blockiness += block_i;
-                }
-            }
-
-            // --- Weighted pooling (masked / IW / soft-peak), inline —
-            //     needs d/art_i/det_i/mse_i (just computed above) and
-            //     activity (already available). ---
-            let mask_w = 1.0 - saturate(act, C_ACTIVITY);
-            let iw_w = saturate(act, C_ACTIVITY) + IW_WEIGHT_FLOOR;
-            ws_mask_ssim.add(mask_w, d);
-            ws_mask_art.add(mask_w, art_i);
-            ws_mask_det.add(mask_w, det_i);
-            ws_mask_mse.add(mask_w, mse_i);
-            ws_iw_ssim.add(iw_w, d);
-            ws_iw_art.add(iw_w, art_i);
-            ws_iw_det.add(iw_w, det_i);
-            ws_iw_mse.add(iw_w, mse_i);
-
-            let sal_ssim = saturate(d, C_PEAK);
-            let sal_art = saturate(art_i, C_PEAK);
-            let sal_det = saturate(det_i, C_PEAK);
-            ws_peak_ssim.add(sal_ssim, d);
-            ws_peak_art.add(sal_art, art_i);
-            ws_peak_det.add(sal_det, det_i);
-        }
-    }
+    let sum_blockiness = if toggles.blockiness {
+        blockiness_sparse(src, dst, width, height)
+    } else {
+        0.0
+    };
 
     let n_f = n as f64;
-    let (mean_d, dev2, dev4) = ssim_moments.finish();
+
+    // --- Raw-moment -> central-moment conversion (§A.14 module doc):
+    //     replaces `OnlineMoments::finish()`'s Terriberry-tracked
+    //     mean/M2/M4 with the standard identity from the SIMD-accumulated
+    //     raw power sums. Bit-for-bit different from Terriberry (different
+    //     floating-point operation order), numerically equivalent within
+    //     the file's 5e-4 relative tolerance (verified by
+    //     `simd_matches_scalar_within_tolerance`). ---
+    let mean_d = dense.sum_d / n_f;
+    let raw2 = dense.sum_d2 / n_f;
+    let raw3 = dense.sum_d3 / n_f;
+    let raw4 = dense.sum_d4 / n_f;
+    let m2 = (raw2 - mean_d * mean_d).max(0.0);
+    let m4 =
+        (raw4 - 4.0 * mean_d * raw3 + 6.0 * mean_d * mean_d * raw2 - 3.0 * mean_d.powi(4)).max(0.0);
+    let dev2 = m2.sqrt();
+    let dev4 = m4.powf(0.25);
 
     out[idx::SSIM_MEAN] = mean_d;
     out[idx::SSIM_DEV2] = dev2;
     out[idx::SSIM_DEV4] = dev4;
-    out[idx::ART] = sum_art / n_f;
-    out[idx::DET] = sum_det / n_f;
-    out[idx::MSE] = sum_mse / n_f;
-    out[idx::HF_GAIN] = sum_hf_gain / n_f;
-    out[idx::HF_LOSS] = sum_hf_loss / n_f;
-    out[idx::HF_MAG_LOSS] = sum_hf_mag_loss / n_f;
-    out[idx::SSIM_SOFT_PEAK] = ws_peak_ssim.finish();
-    out[idx::ART_SOFT_PEAK] = ws_peak_art.finish();
-    out[idx::DET_SOFT_PEAK] = ws_peak_det.finish();
-    out[idx::MASKED_SSIM] = ws_mask_ssim.finish();
-    out[idx::MASKED_ART] = ws_mask_art.finish();
-    out[idx::MASKED_DET] = ws_mask_det.finish();
-    out[idx::MASKED_MSE] = ws_mask_mse.finish();
-    out[idx::IW_SSIM] = ws_iw_ssim.finish();
-    out[idx::IW_ART] = ws_iw_art.finish();
-    out[idx::IW_DET] = ws_iw_det.finish();
-    out[idx::IW_MSE] = ws_iw_mse.finish();
-    out[idx::PJND_TRANSDUCER] = sum_pjnd / n_f;
-    out[idx::PJND_FRAGILITY] = 1.0 - saturate(sum_grad_src / n_f, C_PJND_GRAD);
-    out[idx::GMS] = sum_gms / n_f;
-    out[idx::PJND_TRANSDUCER_LOW_K] = sum_pjnd_lo / n_f;
-    out[idx::PJND_TRANSDUCER_HIGH_K] = sum_pjnd_hi / n_f;
+    out[idx::ART] = dense.sum_art / n_f;
+    out[idx::DET] = dense.sum_det / n_f;
+    out[idx::MSE] = dense.sum_mse / n_f;
+    out[idx::HF_GAIN] = dense.sum_hf_gain / n_f;
+    out[idx::HF_LOSS] = dense.sum_hf_loss / n_f;
+    out[idx::HF_MAG_LOSS] = dense.sum_hf_mag_loss / n_f;
+    out[idx::SSIM_SOFT_PEAK] = dense.ws_peak_ssim.finish();
+    out[idx::ART_SOFT_PEAK] = dense.ws_peak_art.finish();
+    out[idx::DET_SOFT_PEAK] = dense.ws_peak_det.finish();
+    out[idx::MASKED_SSIM] = dense.ws_mask_ssim.finish();
+    out[idx::MASKED_ART] = dense.ws_mask_art.finish();
+    out[idx::MASKED_DET] = dense.ws_mask_det.finish();
+    out[idx::MASKED_MSE] = dense.ws_mask_mse.finish();
+    out[idx::IW_SSIM] = dense.ws_iw_ssim.finish();
+    out[idx::IW_ART] = dense.ws_iw_art.finish();
+    out[idx::IW_DET] = dense.ws_iw_det.finish();
+    out[idx::IW_MSE] = dense.ws_iw_mse.finish();
+    out[idx::PJND_TRANSDUCER] = dense.sum_pjnd / n_f;
+    out[idx::PJND_FRAGILITY] = 1.0 - saturate(grad.sum_grad_src / n_f, C_PJND_GRAD);
+    out[idx::GMS] = grad.sum_gms / n_f;
+    out[idx::PJND_TRANSDUCER_LOW_K] = dense.sum_pjnd_lo / n_f;
+    out[idx::PJND_TRANSDUCER_HIGH_K] = dense.sum_pjnd_hi / n_f;
     out[idx::BLOCKINESS] = sum_blockiness / n_f;
-    out[idx::RINGING] = sum_ringing / n_f;
-    out[idx::BANDING] = sum_banding / n_f;
+    out[idx::RINGING] = grad.sum_ringing / n_f;
+    out[idx::BANDING] = grad.sum_banding / n_f;
     out[idx::EDGE_WIDTH_CHANGE] = 0.0; // filled in by the caller (needs the adjacent scale)
 
-    (sum_grad_src / n_f, sum_grad_dst / n_f)
+    (grad.sum_grad_src / n_f, grad.sum_grad_dst / n_f)
 }
 
 // ============================================================================
@@ -1503,6 +2037,63 @@ mod tests {
         assert!(
             (incremental - batch).abs() < 1e-9,
             "WeightedSum {incremental} vs WeightedPool::mean {batch} diverged"
+        );
+    }
+
+    /// Phase-4 (§A.14): proves the SIMD raw-moment reformulation
+    /// (`compute_channel_scale_v2`'s `mean_d`/`m2`/`m4` block) is
+    /// numerically equivalent to `OnlineMoments`'s Terriberry (2007)
+    /// single-pass algorithm on the SAME data, not just "removed and
+    /// hoped for the best". Uses `d` values in the actual documented
+    /// range `[0, 2]` (not arbitrary floats) since that's what the real
+    /// kernel feeds both paths. Also exercises `OnlineMoments` directly
+    /// so it isn't dead code despite leaving the hot path.
+    #[test]
+    fn raw_moment_reformulation_matches_terriberry() {
+        let mut state: u32 = 0x5eed_1234;
+        let mut next = move || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            ((state >> 8) as f64 / u32::MAX as f64).abs() * 2.0 // in [0, 2]
+        };
+        let d_values: Vec<f64> = (0..50_000).map(|_| next()).collect();
+
+        let mut moments = OnlineMoments::default();
+        for &d in &d_values {
+            moments.update(d);
+        }
+        let (terri_mean, terri_dev2, terri_dev4) = moments.finish();
+
+        let n = d_values.len() as f64;
+        let (mut sum_d, mut sum_d2, mut sum_d3, mut sum_d4) = (0.0, 0.0, 0.0, 0.0);
+        for &d in &d_values {
+            sum_d += d;
+            sum_d2 += d * d;
+            sum_d3 += d * d * d;
+            sum_d4 += d * d * d * d;
+        }
+        let raw_mean = sum_d / n;
+        let raw2 = sum_d2 / n;
+        let raw3 = sum_d3 / n;
+        let raw4 = sum_d4 / n;
+        let m2 = (raw2 - raw_mean * raw_mean).max(0.0);
+        let m4 = (raw4 - 4.0 * raw_mean * raw3 + 6.0 * raw_mean * raw_mean * raw2
+            - 3.0 * raw_mean.powi(4))
+        .max(0.0);
+        let raw_dev2 = m2.sqrt();
+        let raw_dev4 = m4.powf(0.25);
+
+        let rel = |a: f64, b: f64| (a - b).abs() / b.abs().max(1e-12);
+        assert!(
+            rel(raw_mean, terri_mean) < 5e-4,
+            "mean: raw {raw_mean} vs terriberry {terri_mean}"
+        );
+        assert!(
+            rel(raw_dev2, terri_dev2) < 5e-4,
+            "dev2: raw {raw_dev2} vs terriberry {terri_dev2}"
+        );
+        assert!(
+            rel(raw_dev4, terri_dev4) < 5e-4,
+            "dev4: raw {raw_dev4} vs terriberry {terri_dev4}"
         );
     }
 

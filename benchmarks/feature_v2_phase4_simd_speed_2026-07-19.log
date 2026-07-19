@@ -1,0 +1,84 @@
+[zenbench] calibration: int=0.21ns/iter mem_bw=120.2GiB/s mem_lat=9.4ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.491 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1784445718-3f57c7.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1784445718-3f57c7
+═══════════════════════════════════════════════════════════════
+
+  extract_256x256  4 rounds × 1 calls ⚠ only 4 rounds
+                         mean ±mad ms  95% CI vs base    ops/s
+  ├─ v1_372feat_1thread   4.0 ±0.4ms  [3.6–4.3]ms       16.6M
+  ├─ v1_372feat_Nthread   3.7 ±0.1ms  [-18.3%–+7.6%]    17.6M [1]
+  ├─ v2_bounded_1thread   4.7 ±0.0ms  [+3.3%–+39.5%]    14.0M
+  ╰─ v2_bounded_Nthread   3.7 ±0.2ms  [-14.9%–+2.0%]    17.5M [2] [3]
+
+  v1_372feat_Nthread  ██████████████████████████████████████████████ 17.6 Mops/s
+  v2_bounded_Nthread  ██████████████████████████████████████████████ 17.5 Mops/s
+  v1_372feat_1thread  ███████████████████████████████████████████ 16.6 Mops/s
+  v2_bounded_1thread  █████████████████████████████████████ 14.0 Mops/s
+  [1] CI crosses zero
+  [2] CI crosses zero
+  [3] drift r=-1.00 — later rounds faster
+
+  extract_576x576  4 rounds × 1 calls ⚠ only 4 rounds
+                         mean ±mad ms  95% CI vs base       ops/s
+  ├─ v1_372feat_1thread   17.6 ±0.5ms  [17.2–18.0]ms        18.8M
+  ├─ v1_372feat_Nthread    8.0 ±0.7ms  [-58.5%–-49.5%]      41.6M [1]
+  ├─ v2_bounded_1thread   43.4 ±1.4ms  [+136.0%–+154.2%]    7.65M
+  ╰─ v2_bounded_Nthread   23.2 ±0.1ms  [+28.1%–+34.4%]      14.3M
+
+  v1_372feat_Nthread  ██████████████████████████████████████████████ 41.6 Mops/s
+  v1_372feat_1thread  █████████████████████ 18.8 Mops/s
+  v2_bounded_Nthread  ████████████████ 14.3 Mops/s
+  v2_bounded_1thread  ████████ 7.65 Mops/s
+  [1] drift r=0.60 — later rounds slower
+
+  extract_1024x1024  4 rounds × 1 calls ⚠ only 4 rounds
+                          mean ±mad ms  95% CI vs base       ops/s
+  ├─ v1_372feat_1thread    63.9 ±0.7ms  [63.2–64.7]ms        16.4M
+  ├─ v1_372feat_Nthread    14.6 ±0.3ms  [-78.4%–-75.7%]      71.6M
+  ├─ v2_bounded_1thread   197.4 ±2.6ms  [+210.0%–+212.0%]    5.31M
+  ╰─ v2_bounded_Nthread    87.2 ±3.4ms  [+31.2%–+41.3%]      12.0M
+
+  v1_372feat_Nthread  ██████████████████████████████████████████████ 71.6 Mops/s
+  v1_372feat_1thread  ███████████ 16.4 Mops/s
+  v2_bounded_Nthread  ████████ 12.0 Mops/s
+  v2_bounded_1thread  ███ 5.31 Mops/s
+
+  extract_2048x2048  4 rounds × 1 calls ⚠ only 4 rounds
+                          mean ±mad ms  95% CI vs base       ops/s
+  ├─ v1_372feat_1thread   262.4 ±5.0ms  [256.8–268.6]ms      16.0M
+  ├─ v1_372feat_Nthread    54.4 ±0.8ms  [-81.6%–-77.1%]      77.0M
+  ├─ v2_bounded_1thread   871.9 ±5.0ms  [+229.5%–+235.1%]    4.81M [1]
+  ╰─ v2_bounded_Nthread   347.0 ±3.0ms  [+29.2%–+35.3%]      12.1M
+
+  v1_372feat_Nthread  ██████████████████████████████████████████████ 77.0 Mops/s
+  v1_372feat_1thread  ██████████ 16.0 Mops/s
+  v2_bounded_Nthread  ███████ 12.1 Mops/s
+  v2_bounded_1thread  ███ 4.81 Mops/s
+  [1] drift r=0.80 — later rounds slower
+
+  total: 506.0s  (464 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+
+---
+Meta: zensim workspace zensim--feature-v2d, phase-4 magetypes SIMD port
+(register-pressure-fixed version). Parent commit 9f9cef56 (phase-3 landing).
+Command: cargo build -p zensim --features training,feature-regime-v2 --bench v2_speed_baseline --release
+         ./target/release/deps/v2_speed_baseline-<hash>   (full sweep, no --group filter)
+Bench config: min_rounds=15, max_time=30s per group (phase-3's widened config, unchanged).
+Host: same shared workstation as phase 3, load-gated before launch (1-min load
+0.13 at launch time, well under the phase-4 addendum's 8.0 gate threshold).
+No -C target-cpu=native.
+
+GATE RESULT (1024x1024, 1-thread): v1=63.9ms, v2=197.4ms, ratio=3.09x.
+Independently reproduced via a standalone --group=1024x1024 run immediately
+after the register-pressure fix: v1=69.4ms, v2=212.8ms, ratio=3.07x.
+Both readings agree within measurement noise (~1%) -- the fix is stable.
+
+Kill criterion (phase-4 addendum): "1024x1024 1-thread ratio still >2.5x"
+-- 3.07-3.09x > 2.5x, TRIGGERED. Per the addendum's own instruction, this
+stops the optimization loop and reports the residual (docs/FEATURE_V2_SPEC_
+2026-07-18.md SS A.14.5) rather than continuing to iterate.

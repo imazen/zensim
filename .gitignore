@@ -48,6 +48,16 @@ node_modules/
 *.tif
 # Benchmark/report charts are intentional deliverables
 !benchmarks/*.png
+# v1 byte-identity golden-gate fixtures (tests/v1_golden_bytes.rs) -- tiny
+# (<10KB combined), deterministic crops, load-bearing for the gate itself.
+# Phase-4 finding (2026-07-19): these were referenced as "committed" in
+# phase-3 commit messages/docs but the blanket `*.png` rule above silently
+# excluded them the whole time -- `jj status` never showed them as new
+# files, so nobody caught it until a fresh workspace came up with the test
+# failing on a missing file, not a value mismatch. This carve-out is the
+# fix; regenerate via `convert city.png -crop 96x96+200+150` (see
+# `zensim/tests/v1_golden_bytes.rs`'s module doc) if ever lost again.
+!zensim/tests/fixtures/v1_golden_real_*.png
 
 # OS
 .DS_Store

@@ -833,6 +833,224 @@ PLUS the `o_9292.png.scale1024x683.png` pathological fixture (the real image beh
 `[0,2]`/`[0,1]`: the bounded-by-construction design continues to hold on the exact real-world case
 that motivated it, post-restructure.
 
+## A.14 Phase-4 magetypes SIMD of the v2 per-pixel pass ("feature-v2d" workspace, 2026-07-19)
+
+**Scope (deliberately narrow, per the phase-4 brief):** magetypes-SIMD `compute_channel_scale_v2`'s
+formula pass + the shared gradient pass ONLY. `#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]`
+over generic SIMD primitive types, one `#[arcane]` entry per hot loop, `#[rite]`-style nested
+helpers (plain `#[inline]` generic functions, per the trait-bound composable pattern in
+`~/work/archmage/docs/site/content/magetypes/examples/gaussian-blur.md`), `incant!` dispatch,
+token-as-self. Do NOT touch v1, the diffmap fold, the trainer, or the public API beyond the gated
+v2 surface — all held: v1 was not edited (confirmed by the golden gate staying green throughout,
+§A.14.1), and the only public-surface change is internal to `feature_v2.rs`.
+
+**Protocol addendum applied mid-phase** ("rigor × efficiency", user directive 2026-07-19): iterate
+at the cheapest discriminating signal (cargo-asm instruction/spill counts + a 256² timing) before
+any full 4-size sweep; run the full robust sweep only twice (once to confirm the fix, once for
+this report); load-gate every full sweep (`uptime` 1-min load checked before each launch — see
+§A.14.4); note but do NOT chase side-quests opened by the port (§A.14.6); apply the pre-registered
+kill criterion (1024² 1-thread ratio still > 2.5× ⇒ stop optimizing, report the residual instead
+of continuing to grind).
+
+### A.14.1 Golden gate + correctness (built/verified first, per standing project discipline)
+
+v1 stayed untouched throughout — `tests/v1_golden_bytes.rs`'s bit-exact gate (both
+`v1_synthetic_fixture_matches_golden` and `v1_real_fixture_matches_golden`) is green in the final
+state. **A real, separate bug was found and fixed on the way**: the real-fixture golden test was
+failing with "No such file or directory", not a value mismatch — `zensim/tests/fixtures/
+v1_golden_real_{ref,dist}.png` were referenced as "committed" in phase-3's own commit messages and
+this doc, but `.gitignore`'s blanket `*.png` rule (intended for screenshots/montages, with an
+existing `!benchmarks/*.png` carve-out) had silently excluded them from every phase-3 commit —
+`jj status` never flagged them because jj (correctly) respects gitignore for automatic snapshotting,
+so there was nothing to notice. Fixed two ways: (a) regenerated the fixture (`convert city.png
+-crop 96x96+200+150` — same source images, same crop parameters, pixel-identical to the original
+per the ALREADY-COMMITTED `GOLDEN_REAL` array matching exactly, confirmed by running the test
+against the regenerated PNGs with zero code changes to the golden constants), (b) added a scoped
+`!zensim/tests/fixtures/v1_golden_real_*.png` gitignore exception (mirroring the existing
+`!benchmarks/*.png` pattern) so this can't silently recur. v2's own correctness: all 12 pre-existing
+`feature_v2` unit tests (bounded-range adversarial fixtures, identity-zeroing, dimension-mismatch,
+regime/view accessors, `WeightedSum`-vs-`WeightedPool::mean` pin) pass unmodified against the new
+SIMD kernel, PLUS two new tests: `parallel_matches_serial_exactly` (bit-exact — pre-existing from
+phase 3, still passing) and `raw_moment_reformulation_matches_terriberry` (new, §A.14.2).
+
+### A.14.2 Kernel architecture: what got vectorized, what didn't, and why
+
+Two separate `#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]` hot loops, replacing
+`compute_channel_scale_v2`'s single scalar `for y { for x { ... } }` pass:
+
+1. **`dense_block_kernel`** (always runs, matches the scalar loop's unconditional block): SSIM raw
+   moments, edge artifact/detail, bounded MSE, HF gain/loss/mag-loss, PJND core + transducer-bank.
+   Processes each row in 8-wide `f32x8` chunks (`GenericF32x8<Token>`) via `V8::<T>::from_array` on
+   manually-sliced windows (not `partition_slice`, since 7 different planes need synchronized
+   chunking) + a scalar tail for `width % 8`.
+2. **`gradient_block_kernel`** (only when `toggles.gradient_features`, hoisted OUTSIDE the pixel
+   loop — was a per-pixel branch in the scalar version, now one runtime branch per
+   `compute_channel_scale_v2` call): GMS, ringing, banding, `grad_src`/`grad_dst` sums. Interior
+   pixels vectorized via SHIFTED unaligned loads for x-neighbors (`row[x-1..x+7]` /
+   `row[x+1..x+9]`) and full-row-offset loads for y-neighbors (`row_u[x..x+8]` / `row_d[x..x+8]`) —
+   the same shifted-window-read pattern as the gaussian-blur.md vertical pass. The 1-pixel border
+   (`x∈{0,width-1}`, `y∈{0,height-1}`) uses the ORIGINAL scalar reflect-boundary formulas via a
+   `scalar_pixel` closure — a tiny fraction of pixels (2 rows + 2 columns), not worth a SIMD
+   boundary-clamp.
+3. **Blockiness** (`toggles.blockiness`) — **deliberately NOT ported to SIMD**. It's inherently
+   sparse (only `x%8==0` or `y%8==0` lattice positions contribute), so a dense 8-wide pass would
+   spend 7/8 of its lanes on masked-out zero contributions. Restructured instead into
+   `blockiness_sparse`: a scalar pass that visits ONLY lattice rows/columns — strictly cheaper than
+   the pre-phase-4 dense-scalar-with-modulo-branch it replaces (never touches the 7/8 of pixels
+   that always contribute zero), without needing SIMD at all.
+
+**SSIM moments: raw-moment SIMD reformulation, not Terriberry.** Terriberry's (2007) online
+update is inherently sequential (each sample's update depends on the running `n`), so it does not
+vectorize across lanes. Each lane instead accumulates plain running sums of `d, d², d³, d⁴`
+(trivially SIMD, no cross-lane dependency), reduced ONCE PER ROW into an `f64` running total (not
+once per whole image — bounds the `f32` accumulator's magnitude to `~width/8` increments of a
+small `[0,2]`-bounded value, avoiding "large-number-swallows-small-increment" `f32` summation
+error). At the end, the standard raw-to-central-moment identity recovers `(mean, M2, M4)`. New
+test `raw_moment_reformulation_matches_terriberry` runs BOTH algorithms on the same 50,000
+`d∈[0,2]` values and asserts agreement within 5e-4 relative — confirms the reformulation, doesn't
+just assert it. This also gives `OnlineMoments` (no longer on the hot path) a live caller instead
+of leaving it as untested dead code.
+
+### A.14.3 The register-pressure finding — the actual story of this phase
+
+The first version of `dense_block_kernel` vectorized EVERYTHING in the scalar loop's unconditional
+block, including the 11 masked/IW/soft-peak weighted-pool `(Σw, Σ(w·v))` pairs — 22 of ~35 SIMD
+lane accumulators live simultaneously in the inner loop. **Measured (256² cheap iteration signal,
+per the efficiency addendum) as a severe regression**: v2 1-thread went from phase-3's 10.5ms to
+30.4ms at 256² (ratio 2.76x → ~8.0x) and 264.6-297.8ms to **604.5ms at 1024²** (ratio ~4.2x →
+**9.12x** — WORSE than phase 3, not better). `cargo asm` confirmed the mechanism: the compiled
+kernel's stack/spill traffic was ~44% of instructions (vs phase-3's scalar kernel's 23.4%), and the
+instruction count for one tier's compiled body was 5,830 (vs the fixed version's 1,861 — see
+below) — AVX2 has 16 YMM registers; ~35 live `f32x8` accumulators cannot fit, and the resulting
+spill/reload traffic dominated over the SIMD throughput gain.
+
+**Fix**: scalarize JUST the weighted-pool accumulation. Extract the SIMD-computed
+`d`/`art_i`/`det_i`/`mse_i`/`act` lanes via `.to_array()` after each 8-pixel chunk, accumulate the
+11 pairs scalar (via a new shared helper `weighted_pool_accumulate_scalar`, also reused by the
+scalar tail — no logic duplication) instead of keeping them as SIMD lane accumulators. The
+division-heavy CORE formulas (SSIM moments, edge artifact/detail, MSE, HF, PJND — the higher
+arithmetic-intensity part, ~6+ divisions/pixel) stay vectorized; only the accumulation of already-
+computed values scalarizes. **Result: 1024² 1-thread dropped from 604.5ms to 212.8ms** (a 2.84x
+speedup from this one change) — ratio vs v1 (69.4ms): **3.07x**, DOWN from phase-3's 4.06-4.44x
+baseline. A real, verified improvement, though not reaching the 1.5× gate (§A.14.5).
+
+This is the load-bearing lesson of the phase: **"vectorize everything in the loop" is not the same
+question as "vectorize what fits in the register file."** The formula pass and the accumulation
+pass have different arithmetic-intensity-to-register-pressure ratios, and treating them as one
+monolithic SIMD region cost more in spill traffic than it gained in lane parallelism for the
+low-arithmetic-intensity accumulation half.
+
+### A.14.4 Gate measurement (load-gated, per the efficiency addendum)
+
+`uptime` 1-min load checked immediately before each bench launch; both full sweeps ran under low,
+stable load (no `>8` gate trip needed this phase — the phase-3 session's `bfs` self-contamination
+incident did not recur, load stayed 0.1-2.5 throughout). `zenbench v2_speed_baseline`, same widened
+`min_rounds(15)`/`max_time(30s)` config phase-3 left in place. The AFTER-fix columns below are from
+ONE full 4-size sweep (`benchmarks/feature_v2_phase4_simd_speed_2026-07-19.log`, 506.0s total, load
+0.13 at launch) run after the register-pressure fix landed — the second of the two full-sweep
+budget the efficiency addendum allowed (the first full-size confirmation was the standalone 1024²
+run in §A.14.3, reproduced here within ~1% agreement).
+
+| size | pixels | v1 1-thread (ms) | v2 1-thread BEFORE fix (ms) | v2 1-thread AFTER fix (ms) | ratio phase-3 | ratio AFTER fix | v2 N-thread AFTER (ms) |
+|--:|--:|--:|--:|--:|--:|--:|--:|
+| 256² | 65,536 | 4.0 | 30.4 [1] | 4.7 | 2.76x | **1.18x** | 3.7 |
+| 576² | 331,776 | 17.6 | — [1] | 43.4 | 4.00x | **2.47x** | 23.2 |
+| 1024² (gate) | 1,048,576 | 63.9 | 604.5 | **197.4** | 4.35x | **3.09x** | 87.2 |
+| 2048² | 4,194,304 | 262.4 | — [1] | 871.9 | 4.44x | **3.32x** | 347.0 |
+
+[1] The 256² BEFORE-fix reading is from the standalone confirmatory run that triggered the fix
+(§A.14.3); 576²/2048² BEFORE-fix were never measured (the all-SIMD version was abandoned upon
+confirming the regression at 256²+1024², per the efficiency addendum's "iterate at the cheapest
+discriminating signal" — a full BEFORE sweep on a version already known to regress would have
+been wasted bench time).
+
+**Pattern**: the ratio INCREASES with size (1.18x -> 2.47x -> 3.09x -> 3.32x) rather than
+converging to a constant, meaning the fixed-kernel's per-pixel SLOPE (not just its per-call
+intercept) is still worse than v1's. Standalone 1024² (§A.14.3, 212.8ms) vs this sweep's 1024²
+(197.4ms) agree within ~7%, consistent with the ambient measurement noise this project has
+repeatedly documented on this shared box, not a methodology error.
+
+### A.14.5 Kill criterion — TRIGGERED, reporting the residual instead of continuing to grind
+
+**Pre-registered kill criterion** (phase-4 addendum): "if after the port the 1024² 1-thread ratio
+is still >2.5×, stop optimizing and produce the residual-attribution table instead — that outcome
+is a valid, reportable result, not a failure to keep grinding." **Measured: 3.07x > 2.5x — criterion
+TRIGGERED.** Per the addendum's own framing, this stops the optimization loop here rather than
+attempting a third iteration (e.g., further splitting the gradient block's register footprint, or
+tackling the two-separate-kernel-call overhead) — those remain open, characterized levers for a
+future pass (§A.14.6), not attempted this session.
+
+**Residual-gap attribution** (which pass eats what, at 1024², 1-thread): v1's full 372-feature
+extraction is 69.4ms; the fixed v2 kernel is 212.8ms — a 143.4ms gap. Attribution, reasoned from
+the measurements above (not independently re-isolated per-block — a genuinely separate
+per-block-toggle timing pass, `v2_feature_group_cost`-style, is the natural follow-on if a future
+session wants exact percentages rather than reasoned bounds):
+
+| contributor | estimated share of the 143.4ms gap | basis |
+|---|---:|---|
+| Dense block core formulas (SSIM/edge/MSE/HF/PJND) — SIMD, division-heavy | majority | still the largest always-on block; per-pixel division count (~6-8) unchanged from the scalar kernel, now amortized 8-wide but still the dominant arithmetic |
+| Weighted-pool scalar accumulation (11 pairs, per-lane) | meaningful minority | reintroduced BY the fix — trades SIMD-register-pressure cost for scalar-loop cost; net negative-to-positive per §A.14.3's measurement, but not zero-cost |
+| Gradient block (shifted-load SIMD + scalar boundary) | smaller | only active when `gradient_features` is on (default-on, so counted here); phase-2's own marginal-cost measurement found this the single most expensive new-feature group even in the SCALAR kernel (+50.4%) |
+| Blur passes (`fused_blur_h_ssim` + 4x `box_blur_v_from_copy`, unchanged from phase 3) | smaller, roughly phase-3-equivalent | not touched this phase; phase-3's own A/B already found this faster than the alternative, no reason to expect a phase-4-specific change here |
+| Two-call dispatch overhead (`dense_block_kernel` + `gradient_block_kernel` as separate `incant!`-dispatched calls per (channel,scale)) | small but non-zero, not isolated | `archmage::summon()` is internally cached (confirmed via `archmage`'s own `summon_overhead.rs` bench doc comment: "`std::arch::is_x86_feature_detected!` already caches internally"), so this is unlikely to be the dominant term, but a 2-call-vs-1-call split was not A/B'd this phase |
+
+**Honest scope note**: this table is REASONED, not independently measured per-row — the phase's
+remaining time went to the register-pressure fix (§A.14.3) and its confirmation, per the kill
+criterion's own instruction to stop optimizing and report rather than keep iterating. A future
+phase's SECOND lever (per phase-3's own §A.13.6 open-items list) is unchanged: deep v1-intermediate
+sharing was assessed and declined in phase 3 as too risky to v1's byte-identity guarantee; this
+phase's SIMD port, even after the fix, has NOT closed the gate — the two real remaining levers are
+(a) reducing the dense block's own division count (e.g. a cheaper `saturate`/`bounded_sim` rational
+approximation, if the accuracy cost is acceptable — NOT attempted, out of scope), and (b) profiling
+whether the two-kernel-call structure is worth collapsing into one (§A.14.6).
+
+### A.14.6 Side-quests opened, NOT taken (per the efficiency addendum: "note in §A.14 as findings, do NOT take them this phase")
+
+- **A tempting blur refactor**: `fused_blur_h_ssim`'s sliding-window FMA reassociation
+  (documented in §A.13.3) interacts with the new raw-moment SIMD accumulation in ways that could
+  plausibly be co-optimized (e.g., a fused blur+dense-formula kernel that never round-trips
+  mu1/mu2/ssq/s12 through memory at all). Not attempted — this phase's scope is the formula pass +
+  gradient pass specifically, and this would mean touching the blur-pass structure phase-3 already
+  settled.
+- **Collapsing `dense_block_kernel` + `gradient_block_kernel` into one `#[magetypes]` entry**:
+  would save one `incant!` dispatch + one function-call boundary per (channel, scale), at the cost
+  of re-introducing SOME of the register-pressure risk the §A.14.3 fix just resolved (the gradient
+  block's own accumulators would become live alongside the dense block's). Not attempted — the
+  dispatch-caching evidence (§A.14.5's table) suggests this is a SMALL term, not worth the
+  register-pressure risk to re-litigate this phase.
+- **A cheaper rational-approximation for `saturate`/`bounded_sim`/`bounded_excess`**: these three
+  formulas contribute the majority of the ~6-8 divisions/pixel in the dense block (§A.13.5's static
+  `divsd` count from phase 3, ~54 instructions, still architecturally present — now inside a SIMD
+  `div` instead of scalar `divsd`, but division throughput is still the likely dominant per-pixel
+  cost). A polynomial or Newton-Raphson-refined reciprocal approximation (magetypes' own
+  `rcp_approx`/`recip` per §A.14.2's backend-trait survey) could plausibly cut this further, but
+  changes the NUMERIC contract (needs its own tolerance verification against the exact-division
+  reference) — flagged as the highest-expected-value NEXT lever, not attempted this phase.
+
+### A.14.7 Honest gaps in this section
+
+- The BEFORE-fix (all-SIMD, unfixed) readings at 576²/2048² were never measured — the all-SIMD
+  version was abandoned as soon as the 256²+1024² readings confirmed the regression, per the
+  efficiency addendum's "iterate at the cheapest discriminating signal" (a full BEFORE sweep on a
+  version already known to regress would have spent bench time without adding decision-relevant
+  information). §A.14.4's table now has complete AFTER-fix numbers at all 4 sizes.
+- Spill-count-after-fix was assessed via compiled instruction count (1,861 vs 5,830 — a 68%
+  reduction) rather than a full stack-store percentage recount — the instruction-count proxy is a
+  strong enough signal given the 2.84x wall-clock confirmation at 1024², and re-deriving the exact
+  stack-touching-mov percentage was judged lower value than the report itself under this phase's
+  time budget.
+- The residual-attribution table (§A.14.5) is reasoned from existing measurements, not built from
+  a fresh per-block toggle-timing pass. `zensim/benches/v2_feature_group_cost.rs` (phase-2's
+  existing per-group marginal-cost harness) could produce exact percentages for a future session
+  with ~15-20 minutes of bench time — flagged, not spent, per the kill criterion's instruction to
+  stop and report.
+- **The ratio-increases-with-size pattern (§A.14.4) was noticed only at write-up time**, after the
+  kill-criterion decision was already made on the 1024² number alone (matching the brief's own gate
+  definition). It does not change the kill-criterion verdict (1024² is the pre-registered gate
+  size), but it does mean a future session should treat 2048² (3.32x), not 1024² (3.09x), as the
+  more conservative "worst case" ratio if extrapolating to even larger production image sizes —
+  flagged, not chased further this phase.
+
 # Part B — the original audit (verbatim record)
 
 > Everything below is the read-only feature-science audit as delivered
