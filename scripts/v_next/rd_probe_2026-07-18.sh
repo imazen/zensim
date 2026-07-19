@@ -63,7 +63,9 @@ zenjpeg_probe() {
   }
   run_zq global  global
   run_zq aq      aq
-  run_zq aq_winner_signed aq ZENJPEG_ZQ_PROFILE="bake:$WINNER" ZENJPEG_ZQ_MODEL_MAP=signed
+  # NOTE: the winner bake outputs RAW (no dial spline in its bytes) — unusable
+  # as a TARGETING scalar here; it runs on the jxl side (distance ladder, no
+  # target scale needed). ADD156 carries a dial spline → valid scalar+map driver.
   run_zq aq_add156_abs    aq ZENJPEG_ZQ_PROFILE="bake:$ADD156" ZENJPEG_ZQ_MODEL_MAP=abs
   run_zq picker  picker
   echo "== zenjpeg probe DONE ($(wc -l <"$tsv") rows)" | tee -a "$log"
