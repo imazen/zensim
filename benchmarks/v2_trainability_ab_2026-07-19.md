@@ -296,10 +296,27 @@ general-FR regression, acceptable only because zensim is a compression dial.
 Single seed. Both arms' checkpoints are again near-epoch-0 (lab-recipe overfit) —
 the comparison is feature-substrate ordering, not training ceiling.
 
-Combining re-admits v1's non-spatializable features (peak/masked/iw, f156-371) →
-the combined model's diffmap coherence (M3) must be measured before ship (the
-two-headed design: full 720 → scalar, spatializable subset f0-155 ∪ f372-719 →
-diffmap). Queued.
+### Coherence check (sensitivity-mass proxy) — combining IMPROVES steerability
+
+`v2_combined_steer_mass.py`: central-difference output sensitivity (cid22val,
+n=200), mass on the non-spatializable v1 block (f156-371 = peak/masked/iw, which
+the diffmap fold cannot represent per-pixel):
+
+| model | v1-basic | v1 NON-spat (f156-371) | v2 (f372-719) | spatializable |
+|---|--:|--:|--:|--:|
+| v1 (372) | 53.3% | **46.7%** | — | 53.3% |
+| ext-full (720) | 25.1% | 20.5% | 54.4% | 79.5% |
+| ext-luma (720) | 25.1% | **20.5%** | 54.4% | **79.5%** |
+
+The flagged risk (combining re-admits v1's non-spatializable features) does NOT
+materialize — it inverts. The v2 block carries the MOST sensitivity mass (54.4%)
+and is entirely spatializable, so it crowds v1's peak/masked/iw down from 46.7%
+(frozen v1) to 20.5% (combined). Combined is **79.5% spatializable vs v1's 53.3%**,
+well under shipped-B's 38% non-basic (M3 ceiling 0.66). So combining wins BOTH the
+compression rank axis AND closed-loop coherence. The two-headed split may be
+unnecessary — the combined model is already coherence-dominant. (Proxy, not full
+M3; the fold extension to read the v2 block would confirm the absolute number, but
+the 20.5% vs 46.7% direction is unambiguous.)
 
 ## Reproduction
 
