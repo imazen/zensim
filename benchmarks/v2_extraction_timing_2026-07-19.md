@@ -41,6 +41,21 @@ surviving feature set is settled (mask the deprecated ones), the production cost
 skipped in the kernel. Decode dominates at small sizes either way — a
 content-addressed sidecar that computes the final set once amortizes it.
 
+## The gradient sqrt is ALREADY SIMD (2026-07-19, asm-verified)
+
+The +50% `gradient_features` cost is NOT a scalar-sqrt bottleneck. `objdump -d` of
+the built binary shows **16 `vsqrtps`** (AVX 8-wide hardware SIMD sqrt) in the
+gradient kernel, in `ymm5`/`ymm6` pairs (grad_src_mag + grad_dst_mag), vs only 5
+scalar `sqrtss` (the per-channel-scale `dev2 = (m2/n).sqrt()`, negligible). The
+phase-4 magetypes work already vectorized it: `gradient_block_kernel` dispatches
+via `incant![v4x,v4,v3,neon,wasm128,scalar]` → `gradient_block_kernel_generic<T:
+F32x8Backend>` → `V8::sqrt` → `_mm256_sqrt_ps` (x86_v3 backend) / `_mm512_sqrt_ps`
+(v4x). The +50% is inherent: two high-latency HW sqrts per pixel + strided
+neighbor-load setup for the gradient stencil. The only remaining micro-opt is
+`x·rsqrt_approx(x)` + a Newton step (magetypes exposes `rsqrt_approx`), which is
+marginal on Zen4 (vsqrtps ~3-6cyc there) and risks the ≤5e-4 v2 numeric policy —
+not taken. **"SIMD the sqrt" needs no work; it's done.**
+
 ## Doc correction
 
 `docs/FEATURE_V2_SPEC_2026-07-18.md` §A.12 "AFTER" table (4.35× @1MP) is stale vs
