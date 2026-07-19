@@ -162,7 +162,7 @@ required-features = ["feature-regime-v2", "threads"]
 
 [[example]]
 name = "v2_ab_extract"
-required-features = ["feature-regime-v2", "threads"]
+required-features = ["feature-regime-v2", "threads", "training"]
 
 [[example]]
 name = "capture_v1_golden"
