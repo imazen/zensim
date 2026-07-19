@@ -1311,6 +1311,230 @@ split further:
   side-finding in §A.15.4's supplementary table, not investigated — the stated gate is 1-thread
   only and the efficiency ladder did not ask for an N-thread investigation this phase.
 
+## A.16 Phase-6: division-cost reduction (lever A) + size-gated strip bypass (lever B)
+("feature-v2f" workspace, 2026-07-19)
+
+**Scope (per the coordinator's brief):** two independent, characterized levers on the same
+`dense_block_kernel_generic` formula family phase-4's SIMD port produced and phase-5's strip-tiling
+left untouched. Lever A: reduce the ~6-8 per-pixel divides in `saturate`/`bounded_sim`/
+`bounded_excess`/`ssim_d_local`/the PJND transducer bank, via (1) algebraic denominator-sharing
+first, (2) SIMD reciprocal-estimate + Newton-Raphson second. Lever B: below the strip path's
+measured small-image crossover, dispatch to a whole-image path with no halo-gather overhead.
+
+### A.16.1 Lever A step 1 — algebraic division sharing (SHIPPED)
+
+Full audit of every division in `dense_block_kernel_generic`'s per-pixel formula chain (default
+config, `transducer_bank=true`):
+
+| formula call | divisions before | shareable? | divisions after |
+|---|--:|---|--:|
+| `ssim_d_local` (`d = 1 - num_m·(num_s/denom_s)`) | 2 | YES — `(A/B)·(C/D) = (A·C)/(B·D)` is exact fraction algebra; one combined division replaces the chained pair | 1 |
+| `bounded_sim` (`edge_dissim`, shared art/det via `blend`) | 1 | already minimal (single call, no chaining partner) | 1 |
+| `bounded_excess` × 3 (hf_gain / hf_loss / hf_mag_loss) | 3 | hf_gain/hf_loss share ONE denominator by construction (`bounded_excess(a,b,c)` and `bounded_excess(b,a,c)` both have denominator `a+b+c`, commutative) — compute once; hf_mag_loss uses a different value scale (abs, not squared), no partner | 2 |
+| `saturate` (mse) | 1 | already minimal | 1 |
+| PJND transducer × 3 bands (mid/lo/hi, each `saturate(raw/(1+k·act), c)`) | 6 (2/band: the raw ratio + the outer saturate) | YES — multiplying the outer `saturate`'s numerator/denominator by the inner `(1+k·act)` (always ≥1>0) collapses `x/(x+c·(1+k·act))`, ONE division per band instead of two; the 3 bands don't share a denominator with each other (different `k`) | 3 |
+| **Total** | **13** | | **8** |
+
+Derivation for the PJND fusion (the biggest single win, 6→3): let `D=1+k·act`. `saturate(raw/D, c)
+= (raw/D)/(raw/D+c)`; multiply num/den by `D` (valid, `D≥1>0`): `= raw/(raw+c·D) = raw/(raw+c+c·k·
+act)`. Exact algebra, not an approximation — implemented as `pjnd_transducer`/`pjnd_transducer_v`.
+The hf_gain/hf_loss sharing is implemented as `bounded_excess_pair`/`bounded_excess_pair_v`. The
+`ssim_d_local` fusion is inline in the function body (`let local = (a*c)/(b*d)`). All three shipped
+— see `zensim/src/feature_v2.rs`'s formula-function block, both the scalar (f64, `dense_block_
+kernel_generic`'s tail loop) and SIMD (`V8<T>`, the main 8-wide loop) versions.
+
+This reduces per-pixel division count 13→8 (38%) for FREE — native division stays correctly-rounded
+throughout (fraction reassociation, not an approximation), so no new bounds-safety concern beyond
+what pre-phase-6 code already carried.
+
+### A.16.2 Lever A step 2 — reciprocal estimate + Newton-Raphson (TRIED, NOT SHIPPED)
+
+magetypes exposes exactly the "rcp_ps + refine" pattern the brief asked to check for:
+`V8::<T>::recip()` (`archmage/magetypes/src/simd/generic/generated/f32x8_impl.rs:371`) delegates to
+the backend trait's `recip`, which every dispatched tier overrides with a hardware reciprocal
+estimate (x86 `_mm256_rcp_ps`/`_mm_rcp_ps` ~11-12 bit, ARM `vrecpe` ~16 bit) refined by ONE
+Newton-Raphson step (`r·(2-a·r)`, confirmed by reading `archmage/magetypes/src/simd/impls/
+x86_v3.rs`'s `__m256::recip` — 2 muls + 1 sub after the estimate), reaching full f32 precision
+(~24 bit). WASM/scalar tiers use exact division under the hood for `rcp_approx` (no faster hardware
+path exists there), so `recip()` is a no-op-equivalent on those tiers specifically.
+
+**Measured precision** (`tests::recip_precision_vs_exact_division`, built during this investigation,
+NOT shipped — see below): on real AVX2 hardware (`X64V4Token`, `_mm256_rcp_ps` + 1 NR step), max
+absolute deviation from exact division across 5 recip-based formulas × 8 hand-picked inputs
+(spanning the `a==b` boundary, near-zero, and `x >> c` near-1-ceiling regimes) was **3.246e-7** —
+five orders of magnitude under the bounds-smoke test's 1e-6 slack margin. Precision was never a
+concern.
+
+**Two performance findings, both measured on this box (Ryzen 9 7950X, whatever tier `incant!`
+picks)**:
+
+1. A per-pixel `.min(one)`/`.min(two)` clamp after every recip-based division — the naive
+   "guard the estimate against overshooting a documented bound" approach — caused a SEVERE
+   regression: 1024² 1-thread went **147.0ms → 738.2ms (~5x worse)**. `cargo asm` (`X64V4Token`
+   monomorphization of `dense_block_kernel_generic`) showed why: **4268 instructions, 186 un-inlined
+   `call`s** — even `_mm256_mul_ps`/`_mm256_add_ps`/`_mm256_set1_ps` stopped inlining (should always
+   be single instructions), 2112-byte stack frame. The extra splat+min at every one of the 8
+   division sites pushed the function past LLVM's inliner threshold and it degraded wholesale
+   rather than gracefully.
+2. Removing the per-pixel clamps (relying on the mean/weighted-mean accumulation structure — every
+   consumer of these per-pixel values is `sum/n` or `Σwv/Σw`, so a per-pixel epsilon overshoot
+   cannot amplify, only a final defensive clamp is needed) recovered MOST but not all of the
+   regression (524.9ms). The residual gap was `#[inline]` being too weak a hint once the algebra-fused
+   functions grew larger — switching to `#[inline(always)]` on all 6 formula functions fixed it
+   completely: **147.2ms**, matching the algebra-only (no recip) reading of **144.3ms** within
+   ordinary run-to-run noise on this box (both single 4-round measurements, ~5ms MAD; repeat runs of
+   the shipped algebra-only build ranged 144.3-155.1ms across 3 separate measurements).
+
+**Conclusion: recip() is numerically safe and, once the inlining bug is fixed, performance-NEUTRAL
+on this hardware — not a regression, but not a measurable win either.** AMD Zen4's AVX2 divider unit
+is evidently fast enough (unlike the older-Intel-era "14-40 cycle latency, poor throughput" folklore
+the brief's pre-registered expectation was implicitly built on) that trading 1 division for
+~1 estimate + 2-3 dependent multiply/subtract ops does not pay for itself. **NOT SHIPPED**: it adds
+real complexity (the bounds-safety story, a dedicated precision test, the inlining gotcha) for zero
+measured benefit on the hardware this was tested on — kept as a documented, reproducible NEGATIVE
+RESULT rather than silently dropped. `#[inline(always)]` on the 6 formula functions IS kept
+regardless of the recip question (cheap insurance against the same bloat recurring now that the
+algebra-fusion bodies are larger than their pre-phase-6 originals — the fix, not the recip technique
+itself, is the durable finding here). A future session on different hardware (older x86 with slower
+`vdivps`, or a tier where the estimate is a bigger relative win vs. that tier's native divide) could
+reopen this with the inlining fix already known and the precision question already closed.
+
+### A.16.3 Lever A gate measurement
+
+Iterated on 1024² single-runs per the efficiency ladder (algebra-only, then algebra+recip+inline,
+then algebra+recip+inline(always) — 3 configurations, not a repeated full sweep):
+
+| configuration | v1 1T (ms) | v2 1T (ms) | ratio | vs phase-5 (2.27x) |
+|---|--:|--:|--:|--:|
+| phase-5 baseline (no lever A) | 64.9 | 147.0 | 2.27x | — |
+| algebra only (13→8 divides, `#[inline]`) | 64.1 | 144.3 | 2.25x | −0.9% |
+| algebra + recip, `#[inline]` (naive per-pixel clamp) | 64.3 | 738.2 | 11.48x | +406% (severe regression) |
+| algebra + recip, `#[inline]` (final-value clamp only) | 65.1 | 524.9 | 8.06x | +255% (still a severe regression) |
+| algebra + recip, `#[inline(always)]` (final-value clamp) | 63.7 | 147.2 | 2.31x | +1.8% (noise) |
+| **SHIPPED: algebra only, `#[inline(always)]`** (2 confirm runs) | 64.3 / 68.5 | 153.1 / 155.1 | 2.38x / 2.26x | within noise of phase-5 |
+
+**GATE (≤1.8× target, ≤1.5× standing user gate): NOT MET by either configuration.**
+
+**KILL CRITERION** (pre-registered: "<10% total v2 improvement at 1024² ⇒ division attribution
+falsified too"): **TRIGGERED.** Best-measured improvement across every configuration tried is ≤1.8%
+(arguably noise — the shipped algebra-only build's own 3 repeat measurements span 144.3-155.1ms, a
+wider spread than the claimed improvement). Nowhere close to the pre-registered 30-50% expectation,
+nowhere close to the 10% falsification threshold. **Lever A's hypothesis — that the dense block's
+division count was a large, reducible flat-term share of the v1-vs-v2 gap — is FALSIFIED on this
+hardware.** Per the brief's own instruction, this stops lever-A optimization and reports the
+residual rather than continuing to grind on division-related changes.
+
+**Updated residual attribution**: phase-4's §A.14.5/phase-5's §A.15.6 both estimated "dense block
+core formulas, division-heavy" as the majority remaining share of the v1-vs-v2 gap post-strip-
+tiling. This phase directly tested that attribution by removing 38% of the divisions (13→8) and
+measured ~0% change — meaning the divisions themselves were NOT the bottleneck their count
+suggested. The honest residual, after two phases of formula-level investigation (SIMD-ize the
+formulas, then cut their division count) both landing near-zero: **the gap is NOT dominated by
+divide-unit throughput on this hardware.** What remains unmeasured and un-attributed: general SIMD
+lane utilization/ILP within the fused formula chain, cache/TLB behavior of the now-larger
+`#[inline(always)]` function bodies, or something structural in how v1's decades-tuned hot path
+differs from v2's (deliberately more general, more feature-rich) one that isn't captured by
+"count the divisions." A future session wanting to close the gate would need instruction-level
+profiling (`perf stat`, `ncu`-style IPC/port-utilization counters — not available in this sandbox)
+rather than another "count and reduce operation X" pass.
+
+### A.16.4 Lever B — size-gated strip bypass
+
+**Hypothesis**: below some crossover height, `compute_channel_scale_v2` should dispatch to a
+whole-image path (`compute_channel_scale_v2_whole`, mirroring phase-4's pre-strip design — direct
+`run_blur_pass` on the real image, no halo-gather copy for the dense/blur pass) instead of the strip
+loop, recovering the small-image regression phase-5 found (§A.15.4: 256² 1.18x phase-4 → 1.50x
+phase-5).
+
+**Crossover sweep** (both directions, same lever-A-included code, 5 sizes 256-512, `HARD STOP`
+directive: no further sweeps past this):
+
+| size | strip-forced ratio | bypass-forced ratio | winner |
+|--:|--:|--:|---|
+| 256² | 1.30x (4.8/3.7ms) | 2.61x (9.9/3.8ms) | strip, by a wide margin |
+| 320² | 1.29x (7.0/5.4ms) | 2.77x (15.5/5.6ms) | strip, by a wide margin |
+| 384² | 1.35x (10.5/7.8ms) | 2.54x (20.1/7.9ms) | strip, by a wide margin |
+| 448² | 1.41x (14.7/10.4ms) | 2.61x (27.7/10.6ms) | strip, by a wide margin |
+| 512² | 1.63x (23.8/14.6ms) | 2.71x (42.2/15.6ms) | strip, by a wide margin |
+
+**Result: the OPPOSITE of the phase-5 hypothesis.** Strip wins at every tested size, not just the
+large ones — the bypass path never wins in [256², 512²]. This also means lever A's algebra fusion
+(§A.16.1) delivered a real, if modest, benefit specifically at SMALL sizes: strip-forced 256² is
+now 1.30x, materially better than phase-5's un-lever-A'd 1.50x at the same size (though still short
+of phase-4's original 1.18x compute floor) — the small-size story changed enough between phases
+that phase-5's motivating data point (256² regressed under strip) no longer holds with lever A's
+formula fusion in place.
+
+**Root cause of the bypass path's loss, identified but NOT fixed this phase** (out of the hard-stop
+budget): `compute_channel_scale_v2_whole`'s gradient-halo construction allocates and fills a FRESH
+`vec![0.0f32; width*(height+2)]` buffer, TWICE (src_g + dst_g), on EVERY call — up to 12 times per
+`compute_v2_features_impl_with_toggles` invocation (4 scales × 3 channels). This function's own
+original doc comment claimed this copy was "O(width), not O(width*height)" — that claim was WRONG,
+caught only by this measurement: `gather_strip_halo(..., height+2, 1, ...)` copies `height+2` full
+ROWS, i.e. essentially the WHOLE image, not a small O(width) slice. This is exactly the "108
+full-image allocations" class of problem phase 3 fixed for the main pipeline, reintroduced here
+specifically for the bypass's gradient halo. The fix (thread a persistent, scratch-owned buffer for
+this instead of a fresh `vec!` per call, matching how `src_wide`/`dst_wide` are handled elsewhere in
+this file) is well-characterized and NOT attempted — see §A.16.6.
+
+### A.16.5 Lever B gate verdict
+
+**Conservative, data-justified decision per the hard-stop directive** ("round down to the nearest
+clean threshold below where strips win... do NOT run another sweep to refine it"): since strip wins
+at EVERY tested size (256²-512², the full range this phase measured), there is no data-supported
+value of `STRIP_BYPASS_HEIGHT` above 0 that isn't a pure guess. **`STRIP_BYPASS_HEIGHT` is set to
+`0` — the bypass is DISABLED, permanently inert at runtime.** `compute_channel_scale_v2_whole` and
+its dedicated test (`bounded_range_bypass_path_small_image`, now calling the function directly
+rather than through the disabled public dispatch) are KEPT — correctness-verified, ready for a
+future session to re-enable once the allocation bug above is fixed, rather than ripped out under
+time pressure.
+
+**Gate**: lever B contributes nothing to the ≤1.5×/≤1.8× gate as shipped (disabled). Combined with
+lever A's ~0% net effect at 1024²+ (§A.16.3), **phase 6 does not move the standing gate**: 1024²
+1-thread stays at ~2.25-2.38x, matching phase-5's 2.27x baseline within measurement noise.
+
+### A.16.6 Honest gaps
+
+- Lever A's negative result was reproduced 3 times at the shipped (algebra-only) configuration
+  (144.3ms, 153.1ms, 155.1ms) but each reading is still a single 4-round zenbench measurement, not
+  a wider statistical sample — the "within noise of phase-5" conclusion rests on the same
+  `min_rounds=15`/`max_time=30s`-vs-actual-4-rounds gap this project has repeatedly flagged
+  (`⚠ only 4 rounds` in every printed table this phase and prior phases), not a resolved
+  measurement-rigor question.
+- The recip() investigation used ONE hardware token (`X64V4Token`/AVX2, whatever `incant!` actually
+  dispatches to on this Ryzen 9 7950X) for both the precision test and the performance A/B. The
+  brief asked for "estimate-op choices per tier" — this phase only characterizes ONE tier in depth;
+  `v3`/`neon`/`wasm128`/`scalar` were not independently measured (though the `#[inline(always)]`
+  fix and the "WASM/scalar recip is exact division under the hood" fact, both established from
+  reading magetypes source rather than tier-specific benchmarking, should generalize).
+- No `perf stat`/hardware-counter profiling was available in this sandbox to identify what IS
+  costing time in the dense-block formula chain, now that divisions are ruled out as the dominant
+  term — the residual attribution in §A.16.3 is honestly "unmeasured," not a new specific claim.
+- **Lever B's core finding — the gradient-halo O(width·height) reallocation bug — is diagnosed by
+  reasoning from the measured numbers and re-reading the code, NOT independently confirmed with a
+  profiler.** The evidence is strong (the function's own doc comment's complexity claim was
+  objectively wrong on inspection, and the measured slowdown is large enough that a full-image
+  double-alloc-and-copy 12x per call is a plausible sole cause) but this is a diagnosis, not a
+  measurement of the fix's effect — nobody has verified that threading a persistent buffer through
+  actually closes the gap, because that fix was explicitly out of scope for this phase's budget.
+- **No sizes below 256² were tested for lever B.** The hard-stop directive said to pick the
+  threshold from data already in hand rather than sweep further, and the data in hand (256²-512²)
+  uniformly favors strip — but it's possible the bypass's O(width·height) overhead shrinks enough
+  at very small sizes (64²-128²) to eventually win despite the allocation bug, the way phase-4's
+  original (bug-free) non-strip design won at 256² in §A.14.4. This phase does not know one way or
+  the other below 256² — `STRIP_BYPASS_HEIGHT=0` is the conservative (never-wrong) choice given that
+  uncertainty, not a claim that no size would benefit.
+- **The crossover sweep's own zenbench measurements are single 4-round reads** (`⚠ only 4 rounds`),
+  same caveat as lever A — the qualitative conclusion (strip wins by a WIDE margin, 1.3-1.7x vs.
+  2.5-2.8x) is far outside any plausible noise band from that limitation, so it doesn't change the
+  verdict, but the exact ratios at each size shouldn't be treated as more precise than that.
+- One of this phase's crossover-sweep bench launches (`~/tmp/v2f_crossover_stripforced.log`,
+  256²-512² strip-forced data) ran far longer than expected (~20+ min for what should have been a
+  faster sweep) due to zenbench's own exclusive-lock serialization queuing a second, redundant
+  filtered launch behind it — not a bug in this phase's code, but a process-management inefficiency
+  in how the measurement was conducted; a cleaner approach for a future crossover-style sweep would
+  be a single well-planned multi-size run rather than iterative filtered launches.
+
 # Part B — the original audit (verbatim record)
 
 > Everything below is the read-only feature-science audit as delivered

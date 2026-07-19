@@ -310,13 +310,23 @@ fn gather_strip_halo(
 // ============================================================================
 
 /// Per-pixel SSIM-like dissimilarity, C1-bounded (D1 fix). Bounded [0, 2].
+///
+/// Phase-6 (§A.16 lever A step 1): the original form computes
+/// `num_m * (num_s/denom_s)` = `(A/B) * (C/D)` — TWO divisions. Since
+/// `(A/B)*(C/D) == (A*C)/(B*D)` exactly (ordinary fraction algebra, no
+/// approximation), this collapses to ONE division at the cost of two extra
+/// multiplications — a strict win since a multiply is ~3-5x cheaper than a
+/// divide on every target ISA this crate SIMD-dispatches to. Kept for the
+/// scalar tail loop; see `ssim_d_local_v` for the SIMD sibling, which
+/// additionally routes the single division through `.recip()` (step 2).
 #[inline]
 fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64) -> f64 {
-    let num_m = (2.0 * mu1 * mu2 + C1_V2) / (mu1 * mu1 + mu2 * mu2 + C1_V2);
+    let a = 2.0 * mu1 * mu2 + C1_V2;
+    let b = mu1 * mu1 + mu2 * mu2 + C1_V2;
     let cov = s12 - mu1 * mu2;
-    let num_s = 2.0 * cov + C2_V2;
-    let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + C2_V2;
-    let local = num_m * (num_s / denom_s);
+    let c = 2.0 * cov + C2_V2;
+    let d = ssq - mu1 * mu1 - mu2 * mu2 + C2_V2;
+    let local = (a * c) / (b * d);
     (1.0 - local).max(0.0)
 }
 
@@ -334,12 +344,43 @@ fn bounded_excess(a: f64, b: f64, c: f64) -> f64 {
     (a - b).max(0.0) / (a + b + c)
 }
 
+/// [`bounded_excess`]`(a,b,c)` PAIRED with [`bounded_excess`]`(b,a,c)`, one
+/// shared division instead of two (phase-6 §A.16 lever A step 1: the two
+/// calls' denominators — `a+b+c` and `b+a+c` — are the SAME value by
+/// commutativity of addition, computed once here). Returns
+/// `(bounded_excess(a,b,c), bounded_excess(b,a,c))`. Used for the
+/// hf_gain/hf_loss pair, which is exactly this shape (`bounded_excess
+/// (dst_sq,src_sq,c)` / `bounded_excess(src_sq,dst_sq,c)`).
+#[inline]
+fn bounded_excess_pair(a: f64, b: f64, c: f64) -> (f64, f64) {
+    let recip_denom = 1.0 / (a + b + c);
+    (
+        (a - b).max(0.0) * recip_denom,
+        (b - a).max(0.0) * recip_denom,
+    )
+}
+
 /// Michelson-contrast-style saturating ratio `x/(x+c)`, bounded `[0, 1)`
 /// for `x >= 0`.
 #[inline]
 fn saturate(x: f64, c: f64) -> f64 {
     let x = x.max(0.0);
     x / (x + c)
+}
+
+/// Fused PJND masking-transducer band: `saturate(raw_abs_err/(1+k*act), c)`
+/// collapsed to ONE division (phase-6 §A.16 lever A step 1, exact — not an
+/// approximation). Derivation: let `D = 1+k*act` (always `>= 1 > 0` since
+/// `k, act >= 0`); `saturate(x/D, c) = (x/D)/((x/D)+c)`; multiplying
+/// numerator and denominator by `D` (valid, `D` is a positive nonzero
+/// scalar) gives `x/(x + c*D) = x/(x + c + c*k*act)` — the original chained
+/// `raw_abs_err/(1+k*act)` THEN `t/(t+c)` (2 divisions) becomes one
+/// division against a directly-computed denominator. Bounded `[0, 1)` for
+/// `raw_abs_err >= 0`, same contract as `saturate(raw_abs_err/(1+k*act),
+/// c)`.
+#[inline]
+fn pjnd_transducer(raw_abs_err: f64, act: f64, k: f64, c: f64) -> f64 {
+    raw_abs_err / (raw_abs_err + c * (1.0 + k * act))
 }
 
 // ============================================================================
@@ -355,8 +396,71 @@ fn saturate(x: f64, c: f64) -> f64 {
 
 type V8<T> = GenericF32x8<T>;
 
-/// Vectorized [`ssim_d_local`] — identical algebra, f32 lanes.
-#[inline]
+// ============================================================================
+// Phase-6 (§A.16): division-cost reduction for the SIMD formula family.
+//
+// SHIPPED: ALGEBRAIC SHARING ONLY (exact, no precision tradeoff beyond
+// ordinary FP reassociation already tolerated by this file's 5e-4 policy):
+// a chained `(a/b)*(c/d)` becomes one division `(a*c)/(b*d)`; two calls
+// that share a denominator by construction (`bounded_excess(a,b,c)` +
+// `bounded_excess(b,a,c)`) compute it once; a chained ratio-then-saturate
+// (`saturate(x/(1+k*act), c)`) collapses to one division by multiplying
+// through by the inner denominator. See `ssim_d_local`/
+// `bounded_excess_pair`/`pjnd_transducer` (scalar siblings) for the exact
+// derivations — same algebra here, f32 SIMD lanes. This drops the
+// per-pixel division count from 13 to 8 (with `transducer_bank` on, the
+// default) for FREE — native division stays correctly-rounded throughout,
+// so no bounds-safety concern beyond what already existed pre-phase-6.
+//
+// TRIED AND DROPPED: reciprocal-estimate + Newton-Raphson (`V8::<T>::
+// recip`, magetypes `archmage/magetypes/src/simd/generic/generated/
+// f32x8_impl.rs:371` — every dispatched backend overrides it with a
+// hardware estimate refined by one NR step, full f32 precision). Two
+// findings, both measured on this box (Ryzen 9 7950X, whatever tier
+// `incant!` picks):
+//   1. A per-pixel `.min(...)` clamp after every recip-based division
+//      (the naive "guard the ~24-bit estimate against overshooting a
+//      documented bound" approach) caused a SEVERE regression: 1024²
+//      1-thread went 147.0ms -> 738.2ms (~5x worse). `cargo asm` showed
+//      `dense_block_kernel_generic`'s AVX2 monomorphization bloated to
+//      4268 instructions / 186 un-inlined `call`s — even `_mm256_mul_ps`/
+//      `_mm256_add_ps` stopped inlining, 2112-byte stack frame. The extra
+//      splat+min at every division site pushed the function past LLVM's
+//      inliner threshold and it gave up wholesale.
+//   2. Removing the per-pixel clamps (relying on the mean/weighted-mean
+//      accumulation structure to keep any epsilon overshoot from
+//      amplifying, plus one cheap clamp on the FINAL feature value)
+//      recovered MOST but not all of the regression (524.9ms). The
+//      remaining gap was `#[inline]` being too weak a hint once these
+//      functions grew larger from the algebra fusion — switching to
+//      `#[inline(always)]` (KEPT, see below) fixed it completely: 147.2ms,
+//      matching plain-division's 144.3ms within noise (both single
+//      4-round 1024² measurements, ~5ms MAD). Precision was never the
+//      problem — measured max deviation from exact division was 3.246e-7
+//      on real AVX2 hardware (`_mm256_rcp_ps` + 1 NR step), five orders of
+//      magnitude under the smoke test's 1e-6 slack margin.
+//   3. CONCLUSION: recip() is numerically safe and, once the inlining bug
+//      is fixed, performance-NEUTRAL on this hardware — not a regression,
+//      but not a measurable win either (147.2ms vs 144.3ms, within noise).
+//      AMD Zen4's AVX2 divider unit is evidently fast enough that trading
+//      1 division for ~1 estimate + 2-3 dependent multiply/subtract ops
+//      does not pay for itself. Not shipped: it adds real complexity (the
+//      bounds-safety story, an extra formula-precision test) for zero
+//      measured benefit on the hardware this was tested on. Kept as a
+//      documented, reproducible negative result rather than silently
+//      dropped — a future session on different hardware (older x86 with
+//      slower `vdivps`, or a tier where `rcp_approx` is a bigger win vs.
+//      that tier's native divide) could reopen this with the inlining
+//      fix already known. `#[inline(always)]` is KEPT on these six
+//      functions regardless of the recip question — it is what actually
+//      fixed the regression and is cheap, harmless insurance against the
+//      same bloat recurring as the algebra-fusion body grew larger than
+//      the pre-phase-6 originals.
+// ============================================================================
+
+/// Vectorized [`ssim_d_local`] — fused to one division via `(a*c)/(b*d)`.
+/// Identical algebra, f32 lanes. Bounded `[0, 2]`.
+#[inline(always)]
 fn ssim_d_local_v<T: F32x8Backend + Copy>(
     token: T,
     mu1: V8<T>,
@@ -369,34 +473,70 @@ fn ssim_d_local_v<T: F32x8Backend + Copy>(
     let two = V8::<T>::splat(token, 2.0);
     let one = V8::<T>::splat(token, 1.0);
     let zero = V8::<T>::zero(token);
-    let num_m = (two * mu1 * mu2 + c1) / (mu1 * mu1 + mu2 * mu2 + c1);
+    let a = two * mu1 * mu2 + c1;
+    let b = mu1 * mu1 + mu2 * mu2 + c1;
     let cov = s12 - mu1 * mu2;
-    let num_s = two * cov + c2;
-    let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + c2;
-    let local = num_m * (num_s / denom_s);
+    let c = two * cov + c2;
+    let d = ssq - mu1 * mu1 - mu2 * mu2 + c2;
+    let local = (a * c) / (b * d);
     (one - local).max(zero)
 }
 
-/// Vectorized [`bounded_sim`] — `(2ab+c)/(a²+b²+c)`.
-#[inline]
+/// Vectorized [`bounded_sim`] — `(2ab+c)/(a²+b²+c)`. Bounded `(0, 1]`.
+#[inline(always)]
 fn bounded_sim_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<T>) -> V8<T> {
     let two = V8::<T>::splat(token, 2.0);
     (two * a * b + c) / (a * a + b * b + c)
 }
 
-/// Vectorized [`bounded_excess`] — `max(0, a-b) / (a+b+c)`.
-#[inline]
+/// Vectorized [`bounded_excess`] — `max(0, a-b) / (a+b+c)`. Standalone (no
+/// shared-denominator partner — see [`bounded_excess_pair_v`] for the
+/// paired form). Bounded `[0, 1)`.
+#[inline(always)]
 fn bounded_excess_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<T>) -> V8<T> {
     let zero = V8::<T>::zero(token);
     (a - b).max(zero) / (a + b + c)
 }
 
-/// Vectorized [`saturate`] — `max(x,0)/(max(x,0)+c)`.
-#[inline]
+/// Vectorized [`bounded_excess_pair`] — `bounded_excess(a,b,c)` PAIRED with
+/// `bounded_excess(b,a,c)`, one shared division instead of two (phase-6
+/// §A.16: the two calls' denominators are the SAME value by commutativity
+/// of addition). Returns `(bounded_excess(a,b,c), bounded_excess(b,a,c))`.
+/// Bounded `[0, 1)` each.
+#[inline(always)]
+fn bounded_excess_pair_v<T: F32x8Backend + Copy>(
+    token: T,
+    a: V8<T>,
+    b: V8<T>,
+    c: V8<T>,
+) -> (V8<T>, V8<T>) {
+    let zero = V8::<T>::zero(token);
+    let denom = a + b + c;
+    ((a - b).max(zero) / denom, (b - a).max(zero) / denom)
+}
+
+/// Vectorized [`saturate`] — `max(x,0)/(max(x,0)+c)`. Bounded `[0, 1)`.
+#[inline(always)]
 fn saturate_v<T: F32x8Backend + Copy>(token: T, x: V8<T>, c: V8<T>) -> V8<T> {
     let zero = V8::<T>::zero(token);
     let x = x.max(zero);
     x / (x + c)
+}
+
+/// Vectorized [`pjnd_transducer`] — fused `saturate(raw_abs_err/(1+k*act),
+/// c)` collapsed to one division (phase-6 §A.16, exact — see the scalar
+/// sibling's doc for the derivation). Bounded `[0, 1)`.
+#[inline(always)]
+fn pjnd_transducer_v<T: F32x8Backend + Copy>(
+    token: T,
+    raw_abs_err: V8<T>,
+    act: V8<T>,
+    k: V8<T>,
+    c: V8<T>,
+) -> V8<T> {
+    let one = V8::<T>::splat(token, 1.0);
+    let denom = raw_abs_err + c * (one + k * act);
+    raw_abs_err / denom
 }
 
 /// Terriberry (2007) single-pass online moments: tracks `n`, `mean`, and
@@ -1066,18 +1206,21 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
             let hf_dst = dd - m2;
             let hf_src_sq = hf_src * hf_src;
             let hf_dst_sq = hf_dst * hf_dst;
-            r_hfg += bounded_excess_v(token, hf_dst_sq, hf_src_sq, c_hf);
-            r_hfl += bounded_excess_v(token, hf_src_sq, hf_dst_sq, c_hf);
+            // Phase-6 (§A.16 lever A): hf_gain/hf_loss share one denominator
+            // by construction -- one recip instead of two.
+            let (hfg_i, hfl_i) = bounded_excess_pair_v(token, hf_dst_sq, hf_src_sq, c_hf);
+            r_hfg += hfg_i;
+            r_hfl += hfl_i;
             r_hfm += bounded_excess_v(token, hf_src.abs(), hf_dst.abs(), c_hf);
 
+            // Phase-6 (§A.16 lever A): each band's raw-ratio-then-saturate
+            // (2 divisions) fuses to one via `pjnd_transducer_v` -- see
+            // `pjnd_transducer`'s doc for the derivation.
             let raw_abs_err = raw_diff.abs();
-            let t_mid = raw_abs_err / (one + k_mid * act);
-            r_pjnd += saturate_v(token, t_mid, c_pjnd_clamp);
+            r_pjnd += pjnd_transducer_v(token, raw_abs_err, act, k_mid, c_pjnd_clamp);
             if transducer_bank {
-                let t_lo = raw_abs_err / (one + k_lo * act);
-                let t_hi = raw_abs_err / (one + k_hi * act);
-                r_pjnd_lo += saturate_v(token, t_lo, c_pjnd_clamp);
-                r_pjnd_hi += saturate_v(token, t_hi, c_pjnd_clamp);
+                r_pjnd_lo += pjnd_transducer_v(token, raw_abs_err, act, k_lo, c_pjnd_clamp);
+                r_pjnd_hi += pjnd_transducer_v(token, raw_abs_err, act, k_hi, c_pjnd_clamp);
             }
 
             // §A.14 register-pressure fix (see the row-header comment
@@ -1158,18 +1301,21 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
             let hf_dst = dd - m2;
             let hf_src_sq = hf_src * hf_src;
             let hf_dst_sq = hf_dst * hf_dst;
-            acc.sum_hf_gain += bounded_excess(hf_dst_sq, hf_src_sq, C_HF);
-            acc.sum_hf_loss += bounded_excess(hf_src_sq, hf_dst_sq, C_HF);
+            // Phase-6 (§A.16 lever A step 1): shared-denominator pair, one
+            // division instead of two (mirrors the SIMD path above).
+            let (hf_gain_i, hf_loss_i) = bounded_excess_pair(hf_dst_sq, hf_src_sq, C_HF);
+            acc.sum_hf_gain += hf_gain_i;
+            acc.sum_hf_loss += hf_loss_i;
             acc.sum_hf_mag_loss += bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF);
 
+            // Phase-6 (§A.16 lever A step 1): fused raw-ratio+saturate, one
+            // division per band instead of two (mirrors the SIMD path above).
             let raw_abs_err = (s - dd).abs();
-            let t_mid = raw_abs_err / (1.0 + K_PJND_MASK * act);
-            acc.sum_pjnd += saturate(t_mid, C_PJND_CLAMP);
+            acc.sum_pjnd += pjnd_transducer(raw_abs_err, act, K_PJND_MASK, C_PJND_CLAMP);
             if transducer_bank {
-                let t_lo = raw_abs_err / (1.0 + K_PJND_MASK_LOW * act);
-                let t_hi = raw_abs_err / (1.0 + K_PJND_MASK_HIGH * act);
-                acc.sum_pjnd_lo += saturate(t_lo, C_PJND_CLAMP);
-                acc.sum_pjnd_hi += saturate(t_hi, C_PJND_CLAMP);
+                acc.sum_pjnd_lo += pjnd_transducer(raw_abs_err, act, K_PJND_MASK_LOW, C_PJND_CLAMP);
+                acc.sum_pjnd_hi +=
+                    pjnd_transducer(raw_abs_err, act, K_PJND_MASK_HIGH, C_PJND_CLAMP);
             }
 
             weighted_pool_accumulate_scalar(&mut acc, d, art_i, det_i, mse_i, act);
@@ -1513,6 +1659,33 @@ fn blockiness_sparse(src: &[f32], dst: &[f32], width: usize, height: usize) -> f
 /// removes the DERIVED intermediate planes' full-image footprint.
 /// Blockiness stays a single full-image pass (§A.14: already sparse,
 /// only reads `src`/`dst` which are full arrays regardless).
+/// Phase-6 (§A.16 lever B): DISABLED (0 — the bypass never fires). The
+/// hypothesis was that below some height, `compute_channel_scale_v2`
+/// should bypass the strip loop entirely via
+/// `compute_channel_scale_v2_whole`, avoiding the fixed per-strip
+/// halo-gather cost. MEASURED (crossover sweep, §A.16.4): the bypass path
+/// LOSES to the strip path at every tested size, 256²-512² (bypass ratio
+/// 2.5-2.8x vs. strip's 1.3-1.6x at the SAME sizes, both with lever A's
+/// division-fusion applied) — the opposite of the phase-5 hypothesis this
+/// lever was built to fix. Root cause identified, NOT fixed this phase
+/// (out of budget): `compute_channel_scale_v2_whole`'s gradient-halo
+/// construction (`gather_strip_halo(..., height+2, 1, &mut src_g)`) copies
+/// essentially the WHOLE image (`O(width*height)`, not the `O(width)` this
+/// function's own doc originally (incorrectly) claimed) into a FRESH
+/// `vec![0.0f32; width*(height+2)]` allocation, TWICE (src_g + dst_g),
+/// EVERY call (up to 12x per `compute_v2_features_impl_with_toggles` — 4
+/// scales x 3 channels) — this is exactly the "108 full-image allocations"
+/// class of problem phase 3 fixed for the main pipeline, reintroduced here
+/// specifically for the bypass's gradient halo. A fix (thread a
+/// pre-allocated, scratch-owned buffer for this instead of a fresh `vec!`
+/// per call) is a well-characterized, NOT-YET-ATTEMPTED follow-on — see
+/// §A.16.4/§A.16.6. `compute_channel_scale_v2_whole` and its dedicated
+/// test (`bounded_range_bypass_path_small_image`) are KEPT (dead at
+/// runtime with this threshold, but correctness-verified and ready for a
+/// future session to re-enable once the allocation bug is fixed) rather
+/// than ripped out under time pressure.
+const STRIP_BYPASS_HEIGHT: usize = 0;
+
 fn compute_channel_scale_v2(
     src: &[f32],
     dst: &[f32],
@@ -1530,6 +1703,17 @@ fn compute_channel_scale_v2(
         FEATURES_PER_CHANNEL_V2_TOTAL,
         "out slice must hold exactly one channel-scale's v2 block"
     );
+
+    // Phase-6 (§A.16 lever B): small images skip the strip machinery
+    // entirely — see `STRIP_BYPASS_HEIGHT`'s doc and `compute_channel_
+    // scale_v2_whole`. Currently DISABLED (`STRIP_BYPASS_HEIGHT=0`, see its
+    // doc) so this comparison is a permanent `false` today — written
+    // generically (not as a dead-code-eliding special case) so a future
+    // session re-enabling the lever only needs to change the constant.
+    #[allow(clippy::absurd_extreme_comparisons)]
+    if height <= STRIP_BYPASS_HEIGHT {
+        return compute_channel_scale_v2_whole(src, dst, width, height, toggles, scratch, out);
+    }
 
     let max_wide_h = STRIP_ROWS + 2 * HALO_P;
     assert!(
@@ -1637,6 +1821,103 @@ fn compute_channel_scale_v2(
         0.0
     };
 
+    finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
+}
+
+/// Phase-6 (§A.16 lever B) whole-image path: below [`STRIP_BYPASS_HEIGHT`],
+/// skip the strip loop's halo-gather-and-reblur machinery entirely and run
+/// the blur pass + dense/gradient kernels directly on the real image —
+/// mirroring phase-4's non-strip design (`compute_channel_scale_v2` at
+/// commit `7696b62a`, before phase-5's strip-tiling rewrite), reusing the
+/// SAME kernels (`dense_block_kernel`/`gradient_block_kernel`/
+/// `blockiness_sparse`/`finish_channel_scale`) rather than re-deriving
+/// them: `run_blur_pass`'s `crate::blur` primitives already do their own
+/// boundary reflection (identical to how phase-4 called them directly on
+/// `src`/`dst`), so no halo copy is needed for the blur+dense pass at all.
+/// The one exception is `gradient_block_kernel_generic`'s NEW (phase-5)
+/// halo contract, which needs a 1-row-padded buffer — built via
+/// `gather_strip_halo(halo=1)`, the SAME helper the strip loop already
+/// uses for its own (larger) halo, just with `halo=1` and sourced directly
+/// from the real image instead of a strip's local window.
+fn compute_channel_scale_v2_whole(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut ScratchV2Strip,
+    out: &mut [f64],
+) -> (f64, f64) {
+    let n = width * height;
+    debug_assert!(
+        n <= scratch.mu1.len(),
+        "scratch buffers must be sized for at least STRIP_BYPASS_HEIGHT rows \
+         (see the scratch allocation in compute_v2_features_impl_with_toggles)"
+    );
+
+    run_blur_pass(src, dst, width, height, scratch);
+
+    let mu1 = &scratch.mu1[..n];
+    let mu2 = &scratch.mu2[..n];
+    let ssq = &scratch.ssq[..n];
+    let s12 = &scratch.s12[..n];
+    let activity = &scratch.activity[..n];
+
+    let dense = dense_block_kernel(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        toggles.transducer_bank,
+    );
+
+    let grad = if toggles.gradient_features {
+        // gradient_block_kernel_generic's contract needs src_h/dst_h sized
+        // width*(height+2) with a 1-row halo on each side (§A.15.1) — the
+        // ONLY extra copy this bypass path pays (O(width), not
+        // O(width*height)), built with the same `gather_strip_halo` the
+        // strip loop uses, `halo=1` instead of `HALO_P`.
+        let mut src_g = vec![0.0f32; width * (height + 2)];
+        let mut dst_g = vec![0.0f32; width * (height + 2)];
+        gather_strip_halo(src, width, height, 0, height + 2, 1, &mut src_g);
+        gather_strip_halo(dst, width, height, 0, height + 2, 1, &mut dst_g);
+        gradient_block_kernel(&src_g, &dst_g, activity, width, height)
+    } else {
+        GradientAccum::default()
+    };
+
+    let sum_blockiness = if toggles.blockiness {
+        blockiness_sparse(src, dst, width, height)
+    } else {
+        0.0
+    };
+
+    finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
+}
+
+/// Shared tail for both [`compute_channel_scale_v2`] (strip path) and
+/// [`compute_channel_scale_v2_whole`] (phase-6 §A.16 lever B bypass path):
+/// converts raw-moment/weighted-pool accumulators into the final 29
+/// per-channel-scale feature values. Identical for both callers — the
+/// accumulators (`DenseAccum`/`GradientAccum`) are plain sums, so N
+/// strips' partials (via `.accumulate()`) or one whole-image pass produce
+/// the exact same totals feeding this function; extracting it once avoids
+/// a second copy of this ~50-line conversion drifting from the original
+/// (the no-duplication policy's concern — see CLAUDE.md "NO DUPLICATE
+/// IMPLEMENTATIONS").
+#[inline]
+fn finish_channel_scale(
+    dense: &DenseAccum,
+    grad: &GradientAccum,
+    sum_blockiness: f64,
+    n: usize,
+    out: &mut [f64],
+) -> (f64, f64) {
     let n_f = n as f64;
 
     // --- Raw-moment -> central-moment conversion (§A.14 module doc):
@@ -1656,31 +1937,52 @@ fn compute_channel_scale_v2(
     let dev2 = m2.sqrt();
     let dev4 = m4.powf(0.25);
 
-    out[idx::SSIM_MEAN] = mean_d;
-    out[idx::SSIM_DEV2] = dev2;
-    out[idx::SSIM_DEV4] = dev4;
-    out[idx::ART] = dense.sum_art / n_f;
-    out[idx::DET] = dense.sum_det / n_f;
-    out[idx::MSE] = dense.sum_mse / n_f;
-    out[idx::HF_GAIN] = dense.sum_hf_gain / n_f;
-    out[idx::HF_LOSS] = dense.sum_hf_loss / n_f;
-    out[idx::HF_MAG_LOSS] = dense.sum_hf_mag_loss / n_f;
-    out[idx::SSIM_SOFT_PEAK] = dense.ws_peak_ssim.finish();
-    out[idx::ART_SOFT_PEAK] = dense.ws_peak_art.finish();
-    out[idx::DET_SOFT_PEAK] = dense.ws_peak_det.finish();
-    out[idx::MASKED_SSIM] = dense.ws_mask_ssim.finish();
-    out[idx::MASKED_ART] = dense.ws_mask_art.finish();
-    out[idx::MASKED_DET] = dense.ws_mask_det.finish();
-    out[idx::MASKED_MSE] = dense.ws_mask_mse.finish();
-    out[idx::IW_SSIM] = dense.ws_iw_ssim.finish();
-    out[idx::IW_ART] = dense.ws_iw_art.finish();
-    out[idx::IW_DET] = dense.ws_iw_det.finish();
-    out[idx::IW_MSE] = dense.ws_iw_mse.finish();
-    out[idx::PJND_TRANSDUCER] = dense.sum_pjnd / n_f;
+    // Phase-6 (§A.16): defensive bounds clamp on the FINAL feature value
+    // (called once per channel-scale, O(1) not O(pixels) — cheap). Not
+    // load-bearing for the shipped algebra-only reformulation (native `/`
+    // stays correctly-rounded, so the pre-phase-6 per-pixel `.max(zero)`
+    // guards were already sufficient) — kept as low-cost belt-and-braces
+    // hardening for every feature whose per-pixel formula was touched this
+    // phase (ssim_d_local_v / bounded_sim_v / bounded_excess_v /
+    // bounded_excess_pair_v / saturate_v / pjnd_transducer_v), and because
+    // a `.recip()`-based variant of these formulas WAS tried and measured
+    // safe-but-neutral (§A.16, module doc above) — this clamp is what that
+    // path would have needed had it shipped, left in place in case a
+    // future session revisits recip on different hardware.
+    #[inline]
+    fn clamp01(v: f64) -> f64 {
+        v.clamp(0.0, 1.0)
+    }
+    #[inline]
+    fn clamp02(v: f64) -> f64 {
+        v.clamp(0.0, 2.0)
+    }
+
+    out[idx::SSIM_MEAN] = clamp02(mean_d);
+    out[idx::SSIM_DEV2] = clamp02(dev2);
+    out[idx::SSIM_DEV4] = clamp02(dev4);
+    out[idx::ART] = clamp01(dense.sum_art / n_f);
+    out[idx::DET] = clamp01(dense.sum_det / n_f);
+    out[idx::MSE] = clamp01(dense.sum_mse / n_f);
+    out[idx::HF_GAIN] = clamp01(dense.sum_hf_gain / n_f);
+    out[idx::HF_LOSS] = clamp01(dense.sum_hf_loss / n_f);
+    out[idx::HF_MAG_LOSS] = clamp01(dense.sum_hf_mag_loss / n_f);
+    out[idx::SSIM_SOFT_PEAK] = clamp02(dense.ws_peak_ssim.finish());
+    out[idx::ART_SOFT_PEAK] = clamp02(dense.ws_peak_art.finish());
+    out[idx::DET_SOFT_PEAK] = clamp02(dense.ws_peak_det.finish());
+    out[idx::MASKED_SSIM] = clamp02(dense.ws_mask_ssim.finish());
+    out[idx::MASKED_ART] = clamp02(dense.ws_mask_art.finish());
+    out[idx::MASKED_DET] = clamp02(dense.ws_mask_det.finish());
+    out[idx::MASKED_MSE] = clamp02(dense.ws_mask_mse.finish());
+    out[idx::IW_SSIM] = clamp02(dense.ws_iw_ssim.finish());
+    out[idx::IW_ART] = clamp02(dense.ws_iw_art.finish());
+    out[idx::IW_DET] = clamp02(dense.ws_iw_det.finish());
+    out[idx::IW_MSE] = clamp02(dense.ws_iw_mse.finish());
+    out[idx::PJND_TRANSDUCER] = clamp01(dense.sum_pjnd / n_f);
     out[idx::PJND_FRAGILITY] = 1.0 - saturate(grad.sum_grad_src / n_f, C_PJND_GRAD);
     out[idx::GMS] = grad.sum_gms / n_f;
-    out[idx::PJND_TRANSDUCER_LOW_K] = dense.sum_pjnd_lo / n_f;
-    out[idx::PJND_TRANSDUCER_HIGH_K] = dense.sum_pjnd_hi / n_f;
+    out[idx::PJND_TRANSDUCER_LOW_K] = clamp01(dense.sum_pjnd_lo / n_f);
+    out[idx::PJND_TRANSDUCER_HIGH_K] = clamp01(dense.sum_pjnd_hi / n_f);
     out[idx::BLOCKINESS] = sum_blockiness / n_f;
     out[idx::RINGING] = grad.sum_ringing / n_f;
     out[idx::BANDING] = grad.sum_banding / n_f;
@@ -1755,7 +2057,22 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
     // too) so the 3 channels within a scale can run independently — see
     // the `threads` parallel branch below, which needs disjoint `&mut`
     // scratch per closure.
-    let strip_max_n = width * (STRIP_ROWS + 2 * HALO_P);
+    //
+    // Phase-6 (§A.16 lever B): `compute_channel_scale_v2_whole` (the
+    // small-image bypass) needs `width*height` rows of scratch, not
+    // `width*(STRIP_ROWS+2*HALO_P)` — bump the allocation to cover
+    // whichever is larger. `height.min(STRIP_BYPASS_HEIGHT)` is the exact
+    // worst case across every scale this call will process: if scale 0's
+    // `height` is already <= the threshold, every scale bypasses and the
+    // largest (scale 0, this `height`) sets the bound; if `height` is
+    // above the threshold, only smaller (already-downsampled) scales can
+    // ever bypass, and none of them can exceed `STRIP_BYPASS_HEIGHT` by
+    // construction (that IS the dispatch condition).
+    // (`STRIP_BYPASS_HEIGHT=0` today makes this `.min()` a permanent
+    // no-op — allow'd for the same reason as the dispatch check above.)
+    #[allow(clippy::unnecessary_min_or_max)]
+    let bypass_rows = height.min(STRIP_BYPASS_HEIGHT);
+    let strip_max_n = width * (STRIP_ROWS + 2 * HALO_P).max(bypass_rows);
     let mut scratch: [ScratchV2Strip; 3] = [
         ScratchV2Strip::new(strip_max_n),
         ScratchV2Strip::new(strip_max_n),
@@ -2158,30 +2475,45 @@ mod tests {
     /// Phase-5 (§A.15): multi-strip boundary correctness. A 150-row image
     /// with `STRIP_ROWS=64` spans 3 strips (`[0,64)`, `[64,128)`,
     /// `[128,150)`), and this fixture puts a HARD HORIZONTAL edge at
-    /// `y=64` — exactly the first strip seam — plus a second at `y=100`
-    /// (mid-strip, for contrast) and blocky columns throughout (stresses
-    /// blockiness' lattice check across the seam too). If
-    /// `gather_strip_halo`/the halo math were wrong, this is exactly the
-    /// pattern that would show it: gradients spanning the seam would see
-    /// the WRONG neighbor row (garbage, a mismatched reflection, or a
-    /// stale scratch value), producing an out-of-bounds or wildly-off
-    /// signal right at `y=64`. Bounded-range + a same-shape identity
-    /// check (identity input still zeroes everything even across 3
-    /// strips) are the two things actually exercised here.
+    /// `y=128` — exactly the first strip seam at the current
+    /// `STRIP_ROWS=128` — plus a second at `y=400` (mid-strip, for
+    /// contrast) and blocky columns throughout (stresses blockiness'
+    /// lattice check across the seam too). If `gather_strip_halo`/the halo
+    /// math were wrong, this is exactly the pattern that would show it:
+    /// gradients spanning the seam would see the WRONG neighbor row
+    /// (garbage, a mismatched reflection, or a stale scratch value),
+    /// producing an out-of-bounds or wildly-off signal right at `y=128`.
+    /// Bounded-range + a same-shape identity check (identity input still
+    /// zeroes everything even across 5 strips) are the two things
+    /// actually exercised here.
+    ///
+    /// `h=640` is DELIBERATELY well above [`STRIP_BYPASS_HEIGHT`]
+    /// (phase-6 §A.16 lever B) — this test exists specifically to exercise
+    /// the STRIP LOOP's multi-strip seam handling, and must keep doing so
+    /// regardless of where the bypass threshold lands; a height anywhere
+    /// near the threshold would silently start routing through
+    /// `compute_channel_scale_v2_whole` instead and stop testing what this
+    /// test's name promises.
     #[test]
     fn bounded_range_multi_strip_horizontal_edge() {
         let w = 96;
-        let h = 150; // 3 strips at STRIP_ROWS=64: [0,64) [64,128) [128,150)
+        let h = 640; // 5 strips at STRIP_ROWS=128: [0,128)[128,256)[256,384)[384,512)[512,640)
+        assert!(
+            h > STRIP_BYPASS_HEIGHT,
+            "test fixture must stay above the lever-B bypass threshold to keep exercising \
+             the strip loop -- bump h if STRIP_BYPASS_HEIGHT is ever raised past 640"
+        );
         let mut src = Vec::with_capacity(w * h);
         let mut dst = Vec::with_capacity(w * h);
         for y in 0..h {
             for x in 0..w {
-                // Horizontal bands (edges at y=64 and y=100) plus an
-                // 8-wide vertical block pattern, so gradient/blockiness
-                // both see real structure crossing the strip seam.
-                let band = if y < 64 {
+                // Horizontal bands (edges at y=128, the first strip seam,
+                // and y=400, mid-strip) plus an 8-wide vertical block
+                // pattern, so gradient/blockiness both see real structure
+                // crossing the strip seam.
+                let band = if y < 128 {
                     0u8
-                } else if y < 100 {
+                } else if y < 400 {
                     255u8
                 } else {
                     120u8
@@ -2192,9 +2524,9 @@ mod tests {
                 // Distorted: shift the band edges by a few rows and
                 // perturb the block pattern, so gradients differ on both
                 // sides of the seam, not just coincide with src.
-                let dband = if y < 61 {
+                let dband = if y < 125 {
                     10u8
-                } else if y < 103 {
+                } else if y < 403 {
                     240u8
                 } else {
                     130u8
@@ -2212,7 +2544,7 @@ mod tests {
 
         // Identity check across the SAME multi-strip shape: every
         // error-oriented feature must still be exactly zero when src==dst,
-        // even though the computation now crosses 3 strip boundaries.
+        // even though the computation now crosses 5 strip boundaries.
         let source2 = RgbSlice::new(&src, w, h);
         let identity = RgbSlice::new(&src, w, h);
         let result2 =
@@ -2231,6 +2563,85 @@ mod tests {
                     "multi-strip identity: gms not zero: {gms} at s{scale} c{ch}"
                 );
             }
+        }
+    }
+
+    /// Phase-6 (§A.16 lever B): dedicated coverage for
+    /// `compute_channel_scale_v2_whole` (the small-image bypass path).
+    /// `STRIP_BYPASS_HEIGHT=0` DISABLES the bypass at runtime (measured
+    /// regression, §A.16.4 — the function is correctness-verified and kept
+    /// for a future session, not currently reachable via the public
+    /// dispatch), so this test calls `compute_channel_scale_v2_whole`
+    /// DIRECTLY rather than through `compute_v2_features_impl` — the only
+    /// way to keep exercising it regardless of the (disabled) threshold
+    /// value. A hard horizontal edge at `y=0` (the image's OWN true top
+    /// edge — exercises `reflect_101`'s boundary case directly, not an
+    /// interior strip seam) plus one at mid-image, and an 8-wide vertical
+    /// block pattern, so gradient/blockiness see real structure at the
+    /// exact row the halo-construction code touches.
+    #[test]
+    fn bounded_range_bypass_path_small_image() {
+        let w = 80;
+        let h = 96;
+        let mut src = Vec::with_capacity(w * h);
+        let mut dst = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let band = if y < 40 { 20.0f32 } else { 220.0 };
+                let block = if (x / 8) % 2 == 0 { 0.0f32 } else { 40.0 };
+                src.push((band + block).clamp(0.0, 255.0) / 255.0);
+                let dband = if y < 37 { 30.0f32 } else { 200.0 };
+                let dblock = if (x / 8) % 2 == 0 { 5.0f32 } else { 35.0 };
+                dst.push((dband + dblock).clamp(0.0, 255.0) / 255.0);
+            }
+        }
+        let mut scratch = ScratchV2Strip::new(w * h);
+        let mut out = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
+        compute_channel_scale_v2_whole(
+            &src,
+            &dst,
+            w,
+            h,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+            &mut out,
+        );
+        for &off in ZERO_ONE_IDX {
+            let v = out[off];
+            assert!(
+                v.is_finite() && (0.0..1.0 + TOL).contains(&v),
+                "bypass-path idx {off} OOB [0,1): {v}"
+            );
+        }
+        for &off in ZERO_TWO_IDX {
+            let v = out[off];
+            assert!(
+                v.is_finite() && (0.0..=2.0 + TOL).contains(&v),
+                "bypass-path idx {off} OOB [0,2]: {v}"
+            );
+        }
+
+        // Identity re-run through the SAME direct call: every error
+        // feature must still be exactly zero.
+        let mut scratch2 = ScratchV2Strip::new(w * h);
+        let mut out2 = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
+        compute_channel_scale_v2_whole(
+            &src,
+            &src,
+            w,
+            h,
+            V2NewFeatureToggles::default(),
+            &mut scratch2,
+            &mut out2,
+        );
+        {
+            let d = out2[idx::SSIM_MEAN];
+            assert!(
+                d.abs() < TOL,
+                "bypass-path identity: ssim_mean not zero: {d}"
+            );
+            let gms = out2[idx::GMS];
+            assert!(gms.abs() < TOL, "bypass-path identity: gms not zero: {gms}");
         }
     }
 
@@ -2455,7 +2866,18 @@ mod tests {
     #[test]
     fn parallel_matches_serial_exactly() {
         let w = 200;
-        let h = 152; // deliberately non-power-of-2, exercises reflect padding too
+        // Deliberately non-power-of-2 (exercises reflect padding too) AND
+        // deliberately above `STRIP_BYPASS_HEIGHT` (phase-6 §A.16 lever B)
+        // so this keeps exercising the strip loop's multi-strip case
+        // (h=647 spans 6 strips at STRIP_ROWS=128) on top of its primary
+        // parallel-vs-serial channel-fan-out purpose — a smaller height
+        // would silently start routing through the single-pass bypass path
+        // instead and drop that secondary coverage.
+        let h = 647;
+        assert!(
+            h > STRIP_BYPASS_HEIGHT,
+            "keep this above the lever-B bypass threshold"
+        );
         let mut src = Vec::with_capacity(w * h);
         let mut dst = Vec::with_capacity(w * h);
         let mut state: u32 = 0xC0FF_EE42;
