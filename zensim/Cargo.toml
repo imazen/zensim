@@ -158,6 +158,10 @@ required-features = ["feature-regime-v2"]
 name = "v2_helpfulness_screen"
 required-features = ["feature-regime-v2", "threads"]
 
+[[example]]
+name = "capture_v1_golden"
+required-features = ["training"]
+
 [[bench]]
 name = "pu21_bench"
 harness = false

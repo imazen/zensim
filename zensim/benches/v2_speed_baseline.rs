@@ -62,6 +62,17 @@ fn bench_extraction(suite: &mut Suite) {
 
         suite.group(format!("extract_{size}x{size}"), |g| {
             g.throughput(Throughput::Elements(pixels));
+            // Perf pass (§A.13): this box is shared with several other
+            // concurrent agent sessions (real, observed ambient load during
+            // the perf pass — `uptime`/`ps` showed 10+ concurrent `claude`
+            // processes). The default 5 min_rounds / 10s max_time produced
+            // "only 4 rounds" warnings and visible run-to-run drift (v1's
+            // own number moved 66.6ms -> 70.5ms +-5.2ms between back-to-back
+            // invocations). Widen both so a single invocation is trustworthy
+            // even under shared-box noise.
+            g.config()
+                .min_rounds(15)
+                .max_time(std::time::Duration::from_secs(30));
 
             {
                 let (rs, ds) = (Arc::clone(&rs), Arc::clone(&ds));
