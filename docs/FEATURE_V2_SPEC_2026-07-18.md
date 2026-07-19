@@ -290,6 +290,28 @@ adversarial fixtures — flat+noise, chroma mean-shift, hard-edge-on-flat),
 
 ---
 
+## A.10 Iteration-2+ candidate features (2026-07-19 — per-pixel-map additions, prioritized)
+
+Every candidate below satisfies the v2 contract by construction (bounded, explicit per-pixel
+map mean-pooled, error-oriented, literature-named) and is tied to a MEASURED gap. None is
+built; each must earn its way through the five-gate v2-vs-v1 A/B — search `zenpapers` for the
+named paper before implementing.
+
+| candidate | per-pixel map | targets (measured gap) | literature | cost |
+|---|---|---|---|--|
+| **gradient-magnitude similarity** | `1 − (2·m_r·m_d+c)/(m_r²+m_d²+c)` on Sobel magnitudes | general rank — best quality/compute in classic FR benchmarks; distinct axis from covariance-SSIM (sharpness/blur) | GMSD (Xue et al. 2013) | tiny |
+| **masking-transducer bank** | `err/(1+k·a)` at 2–3 spaced `k` (we ship ONE) | KonJND/PJND banding — separates near- vs supra-threshold error | Teo-Heeger divisive norm; CVVDP transducer | tiny (reuses maps) |
+| **banding/contour detector** | step-edges inside low-gradient regions (CAMBI-style contrast bins, per-pixel) | near-lossless + HDR + screens — banding is THE smooth-gradient killer | CAMBI (Netflix, Tandon et al. 2021) | small |
+| **ringing detector** | `err · dilate(edge_r) · (1−edge_r)` — error NEAR strong ref edges but not ON them | HF near-lossless (JPEG/JXL ring), screens (text halos) | classic ringing-metric family (Marziliano 2004) | tiny (maps exist) |
+| **oriented blockiness** | H/V step energy at fixed phase (8-px lattice) minus ref's | JPEG near-lossless; screens | Wang-Bovik blockiness, FR-ized | tiny |
+| **chroma-edge similarity** | GMS form on X/B-channel gradients | screens (colored text/edges; the probe's screen gap) | FSIMc chromatic term (Zhang 2011) | tiny |
+| **edge-width change** | per-edge-pixel spread estimate delta, bounded ratio | blur percept distinct from hf energy loss | Marziliano blur 2002 | small |
+| phase-congruency similarity | PC similarity map | structural salience (rank) | FSIM (Zhang 2011) | LARGE (log-Gabor bank) — only if GMS underdelivers |
+
+Deliberately NOT candidates: order statistics (unspatializable — the D4 lesson), deep-feature
+terms (out of the pure-Rust runtime contract), temporal (stills). Saliency-WEIGHTING is
+already covered by the soft-peak/IW weight-map pattern.
+
 # Part B — the original audit (verbatim record)
 
 > Everything below is the read-only feature-science audit as delivered
