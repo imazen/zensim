@@ -92,7 +92,83 @@ def build_live():
     print(f"LIVE R2: {len(out)} pairs -> {OUT}  (skipped {miss} missing)")
 
 
-BUILDERS = {"csiq": build_csiq, "live": build_live}
+def build_kadid():
+    """KADID-10k for the v2 trainability A/B: quality-oriented q=(5-dmos)/4 in [0,1]."""
+    SRC = "/mnt/v/dataset/kadid10k"
+    OUT = f"{SRC}/kadid_pairs_ab.tsv"
+    out, miss = [], 0
+    with open(f"{SRC}/dmos.csv") as f:
+        for r in csv.DictReader(f):
+            ref = f"{SRC}/images/{r['ref_img']}"
+            dist = f"{SRC}/images/{r['dist_img']}"
+            if not (Path(ref).exists() and Path(dist).exists()):
+                miss += 1
+                continue
+            out.append((ref, dist, (5.0 - float(r["dmos"])) / 4.0))
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"KADID: {len(out)} pairs -> {OUT}  (skipped {miss})")
+
+
+def build_tid():
+    """TID2013 for the A/B: q=mos/9 in [0,1]. Uses the pre-converted PNGs; the
+    distorted filenames are mixed-case (i01/I01) — resolved case-insensitively."""
+    SRC = "/mnt/v/dataset/tid2013"
+    OUT = f"{SRC}/tid_pairs_ab.tsv"
+    dist_dir = Path(f"{SRC}/distorted_images_png")
+    by_lower = {p.name.lower(): p for p in dist_dir.iterdir()}
+    out, miss = [], 0
+    with open(f"{SRC}/mos_with_names.txt") as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) != 2:
+                continue
+            mos, bmp = float(parts[0]), parts[1]
+            png = by_lower.get(bmp.lower().replace(".bmp", ".png"))
+            refname = bmp.split("_")[0].upper() + ".png"
+            ref = Path(f"{SRC}/reference_images_png/{refname}")
+            if png is None or not ref.exists():
+                miss += 1
+                continue
+            out.append((str(ref), str(png), mos / 9.0))
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"TID2013: {len(out)} pairs -> {OUT}  (skipped {miss})")
+
+
+def build_cid22val():
+    """CID22 validation set (HOLDOUT-ONLY, eval side of the A/B): human = MCOS/100."""
+    SRC = "/mnt/v/dataset/cid22/CID22_validation_set"
+    OUT = f"{SRC}/cid22val_pairs_ab.tsv"
+    out, miss = [], 0
+    with open(f"{SRC}/CID22_validation_set.csv") as f:
+        for r in csv.DictReader(f):
+            if r["encoder"] == "Reference":
+                continue
+            ref = f"{SRC}/{r['reference_img']}"
+            dist = f"{SRC}/{r['distorted_img']}"
+            if not (Path(ref).exists() and Path(dist).exists()):
+                miss += 1
+                continue
+            out.append((ref, dist, float(r["MCOS"]) / 100.0))
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"CID22-val: {len(out)} pairs -> {OUT}  (skipped {miss})")
+
+
+BUILDERS = {
+    "csiq": build_csiq,
+    "live": build_live,
+    "kadid": build_kadid,
+    "tid": build_tid,
+    "cid22val": build_cid22val,
+}
 
 if __name__ == "__main__":
     name = sys.argv[1] if len(sys.argv) > 1 else ""
