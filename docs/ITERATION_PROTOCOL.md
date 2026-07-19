@@ -135,3 +135,40 @@ window instead of retire-restore cycling. Veto with
 `touch $PROBE/.box_hold` while queuing a follow-on wave; remove the hold to
 re-enable. Log: `$PROBE/autoretire_<name>.log`. This turns the lifecycle rule
 ("retire after pull") into machinery instead of memory.
+
+## Rigor × efficiency — co-equal constraints (USER DIRECTIVE 2026-07-19)
+
+User, verbatim: *"do rigorous science, but also make experiments efficient."* Neither
+subordinates the other: an unrigorous fast result is noise, and a rigorous result obtained
+10× slower than necessary starves the next ten experiments. Both are DESIGN constraints on
+every experiment, checked at design time (the 4-line hypothesis note should say what the
+CHEAPEST DISCRIMINATING measurement is, not just the falsification bar).
+
+**The efficiency ladder — always climb from the bottom:**
+1. **Pre-registered gate + kill criterion FIRST** (rigor's cheapest tool is also efficiency's:
+   a numeric bar decided before measuring kills a dead direction in one round, not five).
+2. **Cheapest discriminating measurement first**: asm/spill inspection before wall-clock;
+   64-256² fixtures before 1024²+; seed-1 before seed sweeps; a 9-pair bounds smoke before a
+   13k-pair screen before a 2.3M-row corpus scan; the stored-feature rescore path
+   (`bake_verdict` over parquets, seconds) before ANY re-extraction (hours). Escalate scale
+   ONLY when the cheap level cannot discriminate the hypothesis.
+3. **Reuse instruments, never rebuild**: the committed zenbench benches, the probe harness,
+   the sidecar emitters. Building a new harness for a question an owner already answers is
+   both a rigor bug (duplication drift) and an efficiency bug.
+4. **Measure on a quiet box or don't measure**: check `uptime` load before benching; a
+   contended measurement is WORSE than none (phase-3 2026-07-19 burned a large fraction of
+   its budget chasing noise from 10+ concurrent sessions + a stray background process; the
+   2026-07-02 "80-min cell" myth came from the same failure). Load-gate + record load next
+   to every number.
+5. **One lever per phase**: narrow scope beats broad sweeps for engineering experiments —
+   phase briefs that changed one thing produced attributable results; the phase that landed
+   a kernel rewrite + 7 features together lost its before/after spill diff.
+6. **Time-box, then report-and-move-on**: an honest "not attempted, here is the residual
+   attribution" (phase-3 SIMD deferral) preserves both rigor and the schedule; silent
+   scope-creep destroys both.
+
+**What rigor still never yields** (unchanged by efficiency pressure): pre-registration,
+full-panel stats over SROCC-only, held-out discipline, honest failure reporting, golden
+byte-stability tests before touching frozen code, and full-scale validation before any
+constant lands in source (a sampled scan MISSED the 5.8M D1 explosion that a full scan
+caught — sampling is an efficiency tool for ITERATION, never for the final claim).
