@@ -32,22 +32,17 @@ pub fn decode_rgb8(path: &std::path::Path) -> (Vec<[u8; 3]>, usize, usize) {
 }
 
 fn decode_bmp_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
-    use zenbitmaps::PixelLayout;
-    let out = zenbitmaps::decode(bytes, enough::Unstoppable).expect("zenbitmaps decode");
-    let (w, h) = (out.width as usize, out.height as usize);
-    let px = out.pixels();
-    let rgb: Vec<[u8; 3]> = match out.layout {
-        PixelLayout::Rgb8 => px.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
-        PixelLayout::Bgr8 => px.chunks_exact(3).map(|c| [c[2], c[1], c[0]]).collect(),
-        PixelLayout::Bgra8 | PixelLayout::Bgrx8 => {
-            px.chunks_exact(4).map(|c| [c[2], c[1], c[0]]).collect()
-        }
-        PixelLayout::Rgba8 => px.chunks_exact(4).map(|c| [c[0], c[1], c[2]]).collect(),
-        PixelLayout::Gray8 => px.iter().map(|&g| [g, g, g]).collect(),
-        other => panic!("unsupported BMP layout {other:?}"),
-    };
-    assert_eq!(rgb.len(), w * h, "BMP pixel count mismatch");
-    (rgb, w, h)
+    // BMP (the LIVE-R2 corpus) via the `image` crate — already a dev-dep and
+    // used by the other examples. Deliberately NOT a zen crate here: the zen
+    // BMP codec (zenbitmaps) is an unpublished sibling, and a path/git dep on
+    // it breaks the manifest on CI (siblings aren't checked out). This is a
+    // research example, so the pragmatic, CI-safe decode wins.
+    let img = image::load_from_memory(bytes)
+        .expect("image decode bmp")
+        .to_rgb8();
+    let (w, h) = img.dimensions();
+    let rgb: Vec<[u8; 3]> = img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+    (rgb, w as usize, h as usize)
 }
 
 fn decode_png_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {

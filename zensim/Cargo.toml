@@ -134,8 +134,6 @@ zenpixels = { workspace = true }
 zenresize = { workspace = true }
 enough = { workspace = true }
 zenjpeg = { version = "0.8.4", default-features = false, features = ["decoder"] }
-# BMP decode for the LIVE-R2 corpus (v2_ab_extract) — zen crate, not `image`.
-zenbitmaps = { path = "../../zenbitmaps", features = ["bmp"] }
 
 [lints.clippy]
 uninlined_format_args = "allow"
