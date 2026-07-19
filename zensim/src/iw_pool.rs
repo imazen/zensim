@@ -383,33 +383,33 @@ fn compute_gradient(
 /// [`compute_iw_weights`]. Normalisation divides by the sum of weights
 /// (which equals N for unit weights, recovering the standard mean).
 ///
-/// **`mean` promoted 2026-07-18** to be the canonical pooling helper for
-/// the v2 "bounded" feature-extraction regime (`feature-regime-v2`,
-/// [`crate::feature_v2`]) — masked, IW, and soft-peak pooling all go
-/// through this one implementation (see
-/// `docs/FEATURE_V2_SPEC_2026-07-18.md` §(b) design principle 2, "one
-/// canonical form, reused everywhere"). It matches Wang & Li 2011's own
-/// IW-SSIM formula (`Σw·q/Σw`, Eq.36) exactly — v1's shipped hot path
+/// **`mean` established 2026-07-18 (iteration 1)** as THE canonical
+/// `Σw·v/Σw` formula (Wang & Li 2011's IW-SSIM Eq.36 exactly) for v2
+/// "bounded" masked/IW/soft-peak pooling — v1's shipped hot path
 /// (`streaming.rs`, `1/n`-pooled) does NOT match this form and is
-/// unaffected by this promotion; see
-/// `benchmarks/iw_pooling_normalization_2026-07-15.md` for that
-/// divergence. `l2`/`l4` are not yet used by v2 iteration 1 (kept for
-/// parity / future use, individually `#[allow(dead_code)]` below) — v1's
-/// non-streaming path also still exists for offline experimentation.
+/// unaffected; see `benchmarks/iw_pooling_normalization_2026-07-15.md`
+/// for that divergence.
 ///
-/// Without `feature-regime-v2` this type's only caller is `iw_pool`'s own
-/// `#[cfg(test)]` module (a genuinely different build, where `mean` is
-/// live), so a plain non-test build with the feature off is correctly
-/// flagged dead code by rustc — `#[cfg_attr]`'d below rather than a
-/// blanket `#[allow]`, matching this crate's existing pattern for
-/// `ScaleStats::iw_mean_w` (`metric.rs`, `iw-diagnostics`-gated).
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+/// **Iteration 2 update:** the v2 kernel (`feature_v2.rs`,
+/// `compute_channel_scale_v2`) no longer CALLS `mean` directly — batching
+/// per-pixel values into arrays to call it was measured to make v2 2-5x
+/// slower than v1 (`docs/FEATURE_V2_SPEC_2026-07-18.md` §A.12). The kernel
+/// now uses `feature_v2::WeightedSum`, an O(1)-space incremental
+/// accumulator computing the IDENTICAL `Σw·v/Σw` formula online. `mean`
+/// remains the canonical REFERENCE form — `feature_v2::tests::
+/// weighted_sum_matches_weighted_pool_mean_exactly` pins the two bit-exact
+/// on random data (the "gated mirror" exception to the no-duplication
+/// policy: same formula, different computational strategy, tested
+/// equivalent). `l2`/`l4` remain unused by v2 (kept for parity / future
+/// use, individually `#[allow(dead_code)]` below).
+#[allow(dead_code)] // only caller is the gated-mirror equivalence test in feature_v2.rs
 pub(crate) struct WeightedPool;
 
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
 impl WeightedPool {
     /// Weighted mean: `(Σ w_i v_i) / Σ w_i`. Returns 0 if weight sum
-    /// is below 1e-12.
+    /// is below 1e-12. Canonical reference form — see the struct doc for
+    /// why the v2 hot path calls `feature_v2::WeightedSum` instead.
+    #[allow(dead_code)] // only caller is the gated-mirror equivalence test in feature_v2.rs
     pub(crate) fn mean(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;

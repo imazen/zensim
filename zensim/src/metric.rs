@@ -1265,6 +1265,29 @@ impl Zensim {
         )
     }
 
+    /// Like [`Self::compute_v2_features`], but with explicit control over
+    /// which phase-2 new-feature GROUPS (`crate::feature_v2::
+    /// V2NewFeatureToggles`) are computed. Used for per-group marginal-cost
+    /// measurement (`docs/FEATURE_V2_SPEC_2026-07-18.md` §A.12) and to keep
+    /// a group that fails the speed gate available (default OFF) without
+    /// deleting its implementation. `compute_v2_features` is equivalent to
+    /// calling this with `V2NewFeatureToggles::default()` (all groups on).
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_v2_features_with_toggles(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_v2_features_impl_with_toggles(
+            source,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+        )
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors

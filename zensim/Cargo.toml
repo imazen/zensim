@@ -125,6 +125,15 @@ butteraugli = "0.9.3"
 image = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"
+# Phase-2 (feature-v2b) tooling: decode/resize/re-encode real corpus images
+# through zen* crates instead of the `image` crate, per project convention
+# (image::open/imageops::resize are only kept above for the pre-existing
+# examples that already used them; new example/bench tooling uses these).
+zenpng = { workspace = true }
+zenpixels = { workspace = true }
+zenresize = { workspace = true }
+enough = { workspace = true }
+zenjpeg = { version = "0.8.4", default-features = false, features = ["decoder"] }
 
 [lints.clippy]
 uninlined_format_args = "allow"
@@ -141,6 +150,29 @@ version = "0.1.8"
 name = "v2_bounds_smoke"
 required-features = ["feature-regime-v2"]
 
+[[example]]
+name = "gen_jpeg_distortion"
+required-features = ["feature-regime-v2"]
+
+[[example]]
+name = "v2_helpfulness_screen"
+required-features = ["feature-regime-v2", "threads"]
+
 [[bench]]
 name = "pu21_bench"
 harness = false
+
+[[bench]]
+name = "v2_speed_baseline"
+harness = false
+required-features = ["training", "feature-regime-v2"]
+
+[[bench]]
+name = "v2_stage_profile"
+harness = false
+required-features = ["training", "feature-regime-v2"]
+
+[[bench]]
+name = "v2_feature_group_cost"
+harness = false
+required-features = ["training", "feature-regime-v2"]

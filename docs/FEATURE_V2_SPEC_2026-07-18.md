@@ -312,6 +312,323 @@ Deliberately NOT candidates: order statistics (unspatializable — the D4 lesson
 terms (out of the pure-Rust runtime contract), temporal (stills). Saliency-WEIGHTING is
 already covered by the soft-peak/IW weight-map pattern.
 
+## A.11 Phase-2 fused as-built (2026-07-19 — "feature-v2b" workspace)
+
+**Contract**: gate that new features cost real speed before they earn a place in the extractor
+(user directive, verbatim: "utility/relevance of a feature is as important as speed of a
+feature"). This section is the formulas/approximations/codegen record; §A.12 is the
+measurements the speed-gate verdict rests on.
+
+### A.11.1 Kernel redesign: iteration 1's array-heavy design was itself the problem
+
+Before adding any of the 7 candidates, the phase-2 baseline (§A.12.1) measured iteration 1's
+existing 22-feature `compute_channel_scale_v2` at **2-5x slower than v1's full 372-feature
+extraction** — an unacceptable starting point for adding more work. Root cause: iteration 1
+stored NINE full-image `Vec<f32>` per-pixel maps (`d_ssim`, `art`, `det`, `mse`, `hf_gain`,
+`hf_loss`, `hf_mag_loss`, `pjnd_trans`, `pjnd_frag`) and processed them in two passes — real
+memory-bandwidth cost with no compute payoff, since every one of those quantities is only ever
+consumed as a mean or a weighted mean.
+
+**Rewrite**: `compute_channel_scale_v2` is now a single `for y { for x { ... } }` pass with O(1)
+extra space:
+
+- **Simple means** (art, det, mse, hf_gain/loss/mag_loss, pjnd_transducer, gms, ringing,
+  banding, blockiness): a running `f64` sum, divided by `n` at the end. No array.
+- **`ssim_mean`/`ssim_dev2`/`ssim_dev4`** (the D8 GMSD-style deviation-from-mean moments):
+  Terriberry's (2007) single-pass online higher-order moments — `n`, `mean`, and the 2nd/3rd/4th
+  central-moment running sums `M2`/`M3`/`M4` (`M3` tracked only because `M4`'s incremental
+  update formula needs its pre-update value, not used as an output). `dev2 = sqrt(M2/n)`,
+  `dev4 = (M4/n)^0.25` — computed WITHOUT ever revisiting a stored `d(i)` array, unlike
+  iteration 1's store-then-revisit design. (Terriberry, T.B. 2007, "Computing Higher-Order
+  Moments Online", freely-circulated note; the algorithm is the standard single-pass extension
+  of Welford's (1962) online variance, used throughout streaming-statistics libraries.)
+- **Masked/IW/soft-peak weighted pooling**: a `WeightedSum` accumulator tracking running
+  `(Σw·v, Σw)`, finished as `Σw·v/Σw` — the IDENTICAL canonical formula
+  `crate::iw_pool::WeightedPool::mean` established in iteration 1 (Wang & Li 2011 Eq.36), now
+  computed incrementally instead of from materialized weight/value arrays. **This is a gated
+  mirror, not a duplicate**, per this crate's no-duplication policy: `WeightedPool::mean` is the
+  reference form (still used and tested), `WeightedSum` is the O(1)-space streaming variant used
+  by the hot path, and `feature_v2::tests::weighted_sum_matches_weighted_pool_mean_exactly` pins
+  the two bit-exact (`<1e-9`) on 1000 random `(weight, value)` pairs. `WeightedPool::mean`'s doc
+  comment records this relationship; `l2`/`l4` remain unused, individually `#[allow(dead_code)]`.
+
+The five blur-pass arrays (`mu1`, `mu2`, `s12`, `ssq`, `activity`) remain full-image — a box blur
+is inherently multi-pixel and cannot be expressed as a running per-pixel accumulator. v1's own
+architecture carries the same five arrays for the same reason (`streaming.rs`).
+
+**Two real bugs, both caught by the test suite (not found by inspection)**:
+
+1. **Downscale-loop dimension corruption.** An early draft updated the pyramid's `width`/
+   `height` INSIDE the per-channel downscale loop instead of after it, so channels 1/2
+   downscaled from channel 0's already-halved dimensions. Every test exercising `scale > 0`
+   panicked with `"src plane length must be width*height", left: 1024, right: 64` — a loud,
+   immediate failure, not a silent corruption. Fixed by restoring iteration 1's pattern (compute
+   `new_wh` once per scale, apply it only after all 3 channels have downscaled from the SAME
+   dimensions).
+2. **Banding not identity-safe.** The first banding formula used `saturate(grad_dst, C)` alone —
+   a function of the distorted gradient only, not a comparison to the reference's gradient. On
+   identity input (`src == dst`, so `grad_dst == grad_src` exactly), a real content edge still
+   produced a nonzero `dst_edge_b` term, so banding did not vanish where the spec (and every
+   other v2 feature) requires it to. Caught by
+   `identity_input_zeroes_every_error_feature` (`idx 27 not zero on identity: 0.124`). Fixed by
+   switching to `bounded_excess(grad_dst, grad_src, c)`, which is exactly `0` whenever
+   `grad_dst <= grad_src` by construction — the general lesson (recorded here for future
+   candidates): **any "does dst have MORE of X than src" feature must be written as a
+   dst-vs-src comparison, never as a saturated function of dst alone**, or it fails to be
+   identity-safe the moment src itself has the property being measured.
+
+### A.11.2 The seven candidates, as-built (formula + citation + honest approximation-vs-paper delta)
+
+All seven share ONE per-pixel gradient computation (raw-pixel central difference, `gx = right -
+left`, `gy = down - up`, `mag = sqrt(gx²+gy²)`, computed once per channel per scale for both
+`src` and `dst`) — the phase-2 brief's explicit fold requirement.
+
+| # | feature (`idx`) | formula (as-built) | citation | approximation vs. paper |
+|---|---|---|---|---|
+| 1 | `GMS` | `1 − (2·m_r·m_d+c)/(m_r²+m_d²+c)`, `c=1e-4` | GMSD, Xue, Zhang, Mou, Bovik 2013, arXiv:1308.3052, Eq.4 | Paper uses a Prewitt filter; this uses a cheaper central-difference gradient (no diagonal terms) — same bounded-similarity shape, cheaper kernel. Not validated against the paper's own reported SROCC numbers (out of scope for a phase-2 speed/bound pass; see item 6 for OUR corpus's correlation instead). |
+| 3 | `GMS` on `ch∈{0,2}` | identical formula, X/B channels | FSIMc chromatic term, Zhang, Zhang, Mou, Zhang 2011 | FSIMc's actual chroma term is a PRODUCT of two similarity maps on I/Q-like channels, pooled together into one composite term. This implementation does NOT combine X and B into one signal — `gms(scale,0)` and `gms(scale,2)` are reported SEPARATELY (free, via the existing per-channel loop architecture, zero extra compute) rather than as FSIMc's single joint chroma term. Cheaper, less faithful to the paper's specific combination. |
+| 2 | `PJND_TRANSDUCER_LOW_K`/`_HIGH_K` | `saturate(err/(1+k·activity), C_PJND_CLAMP)` at `k∈{1.0, 16.0}` (core `k=4.0` is iteration 1, unchanged) | Teo & Heeger 1994 divisive normalization; CVVDP transducer, Mantiuk et al. 2024 | Geometric ×4 spacing around the existing core k (A.10's "2-3 spaced k values"); the paper's own transducer has a more elaborate multi-band CSF-weighted masking pool this reuses only the scalar `k·activity` form of, per iteration 1's own already-documented approximation. |
+| — | oriented `BLOCKINESS` | FR-ized 8px-lattice step energy: `bounded_excess(\|dst step\|, \|src step\|, c)` at `x%8==0`/`y%8==0` boundaries, summed if both fire (corner) | Wang, Bovik, blockiness family; FR-ized here (v1 has no reference-free blockiness at all) | Real blockiness detectors (e.g. Wang, Bovik, Evans 2000) use a full 8-point DCT-domain or FFT-based periodicity estimate across the whole image; this is a spatial-domain, per-pixel, FR (differences-only) approximation — cheap, bounded, identity-safe, but does not detect blockiness whose PHASE has shifted (e.g. a re-cropped image whose 8px grid no longer aligns with the original MCU boundaries). |
+| — | `RINGING` | `saturate(err,c1) · saturate(activity,c2) · (1 − saturate(grad_src,c3))` | classic ringing-metric family, Marziliano et al. 2004-2006 | The A.10 table's form is `err · dilate(edge_r) · (1−edge_r)` — a genuine morphological dilation of the edge-indicator mask. This implementation uses `activity` (the existing blurred local-energy signal, `blur(\|src-μ\|)`) as the dilation proxy, justified because box-blur inherently spreads a sharp edge's influence over `BLUR_RADIUS=5` pixels — a "near a strong edge" halo without a second dilation pass. **Approximation, not identical**: a true morphological dilation has a HARD cutoff radius and ignores the edge's local contrast; `activity` is a soft, contrast-weighted spread that also responds to the DISTORTED image's own local energy in a way a pure reference-derived dilation would not. Cheaper (zero extra passes; reuses the blur-pass array already computed for masked/IW), less faithful. |
+| — | `BANDING` | `bounded_excess(grad_dst, grad_src, c1) · (1 − saturate(grad_src, c2))` | CAMBI, Tandon et al. 2021 (Netflix) | **The largest approximation gap of the seven.** Real CAMBI: multi-scale (multiple spatial filter widths), per-pixel JND-based maximum-noticeable-difference contrast bins with an 8-bit-precision-boosting step, aggregated with an explicit visibility/weighting model calibrated against banding-specific subjective data, and a per-frame (or per-region) score, not a simple pooled mean. This implementation: single-scale (whatever the current pyramid level is), a single gradient-based smoothness/step heuristic, no JND calibration, no bit-depth boosting. It is a genuinely CHEAP, bounded, identity-safe, single-pass proxy for "distorted introduced a step where the reference was smooth" — not a CAMBI reimplementation, and should not be cited as one. Item 6's correlation number is the only evidence for whether this cheap proxy is worth anything. |
+| — | `EDGE_WIDTH_CHANGE` | `1 − bounded_sim(decay_src, decay_dst, c)`, `decay = mean_grad(coarser scale) / (mean_grad(finer scale) + c)` | Marziliano, Dufaux, Winkler, Ebrahimi 2002/2004 perceptual blur metric | **The one scale-level (not per-pixel) exception in this feature set.** Marziliano's method finds, PER EDGE PIXEL, the distance to the nearest local extrema on either side of the edge (a genuinely per-pixel, per-edge spread estimate) — expensive and sequential (a 1D profile scan per edge), and not easily foldable into this crate's fused per-pixel loop without materializing an edge map and a second traversal. The as-built version instead compares the MEAN gradient magnitude at one pyramid scale against the next-coarser scale (a scalar per channel per scale, reusing `mean_grad_src`/`mean_grad_dst` — the same accumulators GMS/ringing/banding already need), on the theory that a genuinely sharp edge's gradient energy survives 2x box-downscale less completely than an already-blurred edge's (which has less fine-scale energy to lose). This is NOT spatializable at the per-pixel level the way the other 28 signals are — flagged explicitly, the same category iteration 1 already flagged for v1's non-basic (peak/masked/IW) blocks: real signal, not currently diffmap-foldable. The coarsest scale has no next-coarser scale to compare against; its slot duplicates the second-coarsest scale's value (documented, not fabricated). |
+
+### A.11.3 Codegen / spill findings (`cargo asm`, non-native build)
+
+Measured on `compute_channel_scale_v2` (all 7 new features + all 22 iteration-1 features
+compiled in — the toggles gate RUNTIME accumulation, not compilation, so this is the
+worst-case/full function regardless of which `V2NewFeatureToggles` are active at runtime):
+
+```
+cargo asm -p zensim --features training,feature-regime-v2 --lib compute_channel_scale_v2 --no-color
+```
+
+| metric | count |
+|---|--:|
+| total instructions (function body) | 1,470 |
+| `mov`-class instructions touching `[rsp]`/`[rbp]` (spill/reload traffic) | 412 (28.0%) |
+| of those, stack STORES specifically (spill writes) | 195 (13.3%) |
+
+**Honest gap**: the phase-2 brief asked for spill counts "before vs after adding the [7 new]
+features" — that comparison was not run as a clean two-point measurement. The kernel rewrite
+(§A.11.1) and the seven new candidates landed together in one pass, so there is no intermediate
+"single-pass, 22-feature-only" build to diff against. What WAS measured instead, and serves the
+same diagnostic purpose the brief wanted (identifying which additions are expensive and whether
+splitting would help): the **per-group marginal wall-time cost via `V2NewFeatureToggles`**
+(§A.12.3) — a more direct signal than a static instruction count, since it measures what
+actually executes rather than what the compiler emitted for the union of all paths.
+
+**28% stack traffic is high** and consistent with genuine register pressure from ~30 live `f64`
+accumulators (9 basic + 3 peak-pair-sums + 9 masked/IW-pair-sums + several new-feature sums) in
+one function body. Per the brief's own guidance ("cache-friendly two-pass usually beats a
+spilling one-pass"), a 2-pass split (materializing ONE small per-pixel array — e.g. `d_ssim(i)`—
+and revisiting it for the weighted-pool pass) was considered but NOT implemented in phase 2:
+§A.12.4's speed-gate verdict shows the dominant cost gap is the base kernel's scalar-vs-SIMD
+architecture (present since iteration 1, before ANY of the 7 new features existed), not spilling
+from the new features specifically — spending the remaining phase-2 time on a 2-pass restructure
+would not have moved the gate result, so it is recorded here as a characterized, deferred
+option rather than attempted blind.
+
+## A.12 Phase-2 performance (baseline, stage profile, per-group cost, IW-skip, speed-gate verdict)
+
+All numbers below: `~/work/zen/scripts/run-heavy --jobs 8 --` (never unbounded parallelism),
+zenbench (interleaved paired statistics, hardware timers), no `-C target-cpu=native`. zenbench's
+own auto-convergence stopped most groups at 4 rounds on this box (flagged `only 4 rounds` in its
+own output) — every number below carries that same round count and zenbench's own noise
+footnotes (CV%, drift) where present; treat single-run absolute values as directionally solid,
+not four-significant-figure precise, and prefer the RATIOS (which are more stable than either
+raw number alone since shared system noise partially cancels).
+
+### A.12.1 Baseline (item 1): v1 372-feature vs v2 bounded, 4 sizes, 1-thread and N-thread
+
+Corpus: gb82 `city.png` (576x576 native) + its ImageMagick JPEG q50 encode, resized via
+zenresize (Lanczos) to each target size — decode/resize happens once, outside every timed
+region (`zensim/benches/v2_speed_baseline.rs`).
+
+| size | pixels | v1 1-thread (ms) | v1 N-thread (ms) | v2 1-thread (ms) | v2 N-thread (ms) | v2/v1 ratio (1-thread) |
+|--:|--:|--:|--:|--:|--:|--:|
+| 256² | 65,536 | 3.8 | 3.8 | 9.6 | 10.3 | 2.53x |
+| 576² | 331,776 | 18.6 | 7.4 | 51.1 | 50.4 | 2.75x |
+| 1024² | 1,048,576 | 65.2 | 16.0 | 264.6 | 254.8 | **4.06x** |
+| 2048² | 4,194,304 | 281.7 | 53.3 | 1189.0 | 1115.5 | 4.22x |
+
+OLS fit `time_ms = alpha + beta_per_Mpixel * (pixels/1e6)` (`R²` in parentheses — all four fits
+are >0.999, i.e. the intercept+slope model explains the sweep well despite the 4-round noise):
+
+| config | alpha (ms) | beta (ms / Mpixel) |
+|---|--:|--:|
+| v1 372-feat, 1-thread | -3.24 (R²=0.9997) | 67.78 |
+| v1 372-feat, N-thread | 3.30 (R²=0.9999) | 11.94 |
+| v2 bounded, 1-thread | -30.26 (R²=0.9992) | 289.95 |
+| v2 bounded, N-thread | -24.94 (R²=0.9993) | 271.40 |
+
+The negative v2 intercepts are a 4-point-fit artifact (small negative numbers, not a real
+"negative fixed cost" — flagged rather than silently reported as if physical). The load-bearing
+number is the SLOPE: v2's per-pixel cost is **~4.3x v1's** (289.95/67.78, 1-thread) — this
+matches the per-size ratio column converging toward ~4.2x at the larger sizes (where the slope
+term dominates over any fixed-cost noise), and is the core finding item 1 exists to surface.
+
+**v1 threads well (68→12 ms/Mpixel, 5.7x), v2 barely benefits from more threads at all**
+(290→271 ms/Mpixel, 1.07x) — `Zensim::compute_v2_features`'s only "parallel" surface is
+threading `convert_source_to_xyb`'s color conversion; the per-channel loop in
+`compute_v2_features_impl` (`for ch in 0..3`) is a plain sequential loop, unlike v1's
+rayon-parallel channel/scale dispatch. A cheap, unimplemented follow-on (§A.6 item 10 in Part A
+already flagged this; phase 2 confirms it with numbers).
+
+### A.12.2 Stage profile (item 2): where v1's own time goes (existing `ZensimConfig` toggles reused as the harness — no new instrumentation needed)
+
+`Zensim`'s `config_from_params` (`metric.rs:2431-2451`) already threads `extended_features`
+(masked block) and `compute_iw_features` (IW block) straight from `ProfileParams` into
+`ZensimConfig` — this is item 2's harness AND, as it turns out, item 5a's mechanism (§A.12.3):
+comparing configs at `{228 basic+peak, +masked=300, +IW=372}` directly measures each block's
+marginal cost with zero new code.
+
+| size | 228 (basic+peak) | 300 (+masked) | masked marginal | 372 (+IW) | IW marginal (vs 300) |
+|--:|--:|--:|--:|--:|--:|
+| 256² | 3.0ms | 3.7ms | +23% | 3.9ms | +5% |
+| 576² | 13.0ms | 17.8ms | +37% | 18.5ms | +4% |
+| 1024² | 45.1ms | 62.8ms | +39% | 63.5ms | +1.6% (within noise) |
+| 2048² | *(pending — background run in progress at doc-write time; see A.12.5 note)* | | | | |
+
+**Masked is the real cost (23-39%, growing with size); IW's marginal cost over masked is small
+and noise-dominated (1.6-5%) at every size measured.** This directly informs item 5b: if a
+future session wants to cut v1 cost for models that need masked-derived signal but not IW
+specifically, masked is the block worth optimizing, not IW.
+
+### A.12.3 Per-feature-group marginal cost (item 4, `V2NewFeatureToggles`, 1024x1024 1-thread — the gate size)
+
+`zensim/benches/v2_feature_group_cost.rs`, toggling `gradient_features` (GMS + chroma-edge-GMS +
+ringing + banding + edge-width — grouped because they share the `sqrt`-based gradient
+magnitude), `transducer_bank` (2 extra PJND k values), `blockiness` independently:
+
+| variant | mean (ms) | vs `v0` (no new features) |
+|---|--:|--:|
+| `v0` — none of the 7 new features | 243.1 | baseline |
+| `v0` + `gradient_features` only | 365.5 | **+50.4%** (noisy: CV=46%, drift flagged) |
+| `v0` + `transducer_bank` only | 257.0 | +5.7% |
+| `v0` + `blockiness` only | 305.4 | +25.6% (noisy: CV=35%, drift flagged) |
+| all 7 new features on (`v4`, phase-2 default) | 287.4 | **+18.2%** |
+
+`gradient_features` is the expensive group (dominated by 2 `sqrt` calls per pixel plus the
+branchy neighbor-load setup); `transducer_bank` is cheap as expected (2 more divisions, no new
+memory access); `blockiness` costs more than its simplicity suggests, likely branch-misprediction
+on the sparse (`1/8` of pixels) lattice-boundary check. The all-7-on number (+18.2%) is LOWER
+than gradient-alone or blockiness-alone individually in this run — the individual-group numbers
+carry real noise (CV 35-46%, "later rounds slower/faster" drift flags from zenbench itself); the
+all-7 number and the base-vs-full numbers from §A.12.1 (243-264ms range) are mutually consistent
+within that noise band. Re-running with more rounds forced (not done — time-boxed) would tighten
+these; the DIRECTION (gradient > blockiness > transducer_bank in cost) is what this measurement
+supports, not the exact percentages.
+
+### A.12.4 Speed-gate verdict — FAILS, and the 7 new features are not why
+
+**Pre-registered gate**: fused v2-with-all-new-features extraction ≤ 1.25x v1's 372-feature wall
+time, single-thread, 1024x1024.
+
+**Measured**: v2 all-7-on / v1 = 264.6 / 65.2 = **4.06x** (§A.12.1's dedicated sweep) to
+287.4/65.2 = **4.41x** (§A.12.3's cross-check run). **Gate FAILS by a wide margin — not
+relaxed, reported as measured**, per the phase-2 brief's own instruction for this outcome.
+
+**The critical, honest finding: turning OFF all 7 new features does not come close to closing
+the gate either.** §A.12.3's `v0` (zero new features, iteration-1-equivalent signal set on the
+iteration-2 kernel) still measures 243.1ms — a ratio of 243.1/65.2 = **3.73x**. The 7 new
+features' own marginal cost (+18.2% combined, §A.12.3) is real but SMALL relative to the ~3.7x
+gap that exists with none of them. **The gate failure is dominated by the base v2 kernel
+architecture, not by anything added in phase 2**: v1 dispatches through archmage/magetypes
+explicit SIMD (AVX-512/AVX2/NEON tiers, fused blur+feature kernels) throughout; v2's kernel
+(both iteration 1's and iteration 2's rewrite) is straightforward scalar Rust relying on LLVM
+auto-vectorization, which — per §A.11.3's spill measurement (28% of instructions touch the
+stack) — is not achieving anywhere near SIMD parity for this accumulator-heavy workload. This
+gap PREDATES phase 2 entirely: the phase-1 baseline (iteration 1, before ANY of the 7 candidates
+existed) already measured 2-5x.
+
+**Default-on/off decision**: given (a) none of the 7 features is individually responsible for
+the gate failure, (b) their combined marginal cost (+18%) is a reasonable ADDED cost once a SIMD
+base kernel exists, and (c) disabling any subset still leaves the ratio at ~3.7-4.4x — nowhere
+near 1.25x either way — **all 7 new features ship ON by default** (`V2NewFeatureToggles::
+default()` — every field `true`). The `V2NewFeatureToggles` mechanism itself ships regardless
+(it is what made the per-group measurement in §A.12.3 possible at all, and remains available for
+a future session to use once the base-kernel SIMD gap is closed and the marginal costs above
+actually matter for a ship decision). Per item 6 (§A.12.6): if any specific feature's
+utility-per-cost turns out to be poor, `gradient_features` is the first candidate to reconsider
+disabling by default, since it is both the most expensive single group AND covers 5 of the 7
+candidates (GMS, chroma-edge-GMS, ringing, banding, edge-width-change) at once.
+
+**What would actually close the gate** (not attempted in phase 2 — a properly-scoped follow-on,
+not a quick fix): SIMD-ize `compute_channel_scale_v2` using archmage/magetypes dispatch matching
+v1's own architecture (`#[magetypes(_v4x, v4, v3, neon, wasm128)]` generic SIMD primitives per
+this project's own stated preference for new hot kernels), fusing the blur passes with the
+per-pixel accumulator loop the way v1's `streaming.rs` fuses H-blur+V-blur+feature-extract. This
+is a substantially larger engineering investment than phase 2's scope — flagged honestly as the
+real lever, not glossed over.
+
+### A.12.5 Note on measurement completeness at doc-write time
+
+The 2048² row of §A.12.2's stage profile was collected in a background run that had not
+completed when this section was drafted; §A.12.2's table above shows exactly what was measured
+and marks the pending cell explicitly rather than estimating or extrapolating it (per this
+project's own anti-extrapolation rule). See the final phase-2 report for whether it landed
+before this session ended.
+
+### A.12.6 Helpfulness screen (item 6): correlation vs human label, KADID-10k + TID2013
+
+Methodology: `zensim/examples/v2_helpfulness_screen.rs` extracts v2 features for every
+(reference, distorted) pair via zen* crates (zenpng/zenjpeg decode, no `image` crate),
+rayon-parallel (8-core, `run-heavy`), aggregating each new feature to one scalar per pair (mean
+across all 4 scales x 3 channels — a coarse aggregate; a trained model would use the full
+per-scale-per-channel vector, this screen exists only to check "is there ANY signal here" per
+the phase-2 brief's "correlation screen only" scope). Correlation computed by
+`zensim-validate`'s canonical `panel` binary (`--col-predicted <feature> --col-target
+human_score --json`) — NOT hand-rolled, per this crate's no-duplicate-implementations policy.
+KADID: 10,125/10,125 pairs processed, zero decode/dimension errors. TID2013: 2,950/3,000 label
+rows yielded valid pairs (50 rows dropped at the label-file parse stage, before any image
+touched — not investigated further, time-boxed; zero decode/dimension SKIPs on the pairs that
+did parse).
+
+**Bonus real-content bounds confirmation** (beyond item 6's correlation ask, essentially free
+given the extraction already ran): across all 13,075 successfully-processed real (reference,
+distorted) pairs — every KADID/TID distortion type (noise, blur, JPEG/JPEG2000, color
+shift, contrast change, etc.), not just the synthetic adversarial fixtures in §A.11.1's test
+suite — every one of the 7 new features' per-pair aggregate stayed inside its documented bound
+(observed range `[0.0000, 0.7087]`, well inside the `[0,1)`/`[0,2]` contracts) with **zero
+`NaN`/`inf` values** in any of the `7 features × 13,075 pairs = 91,525` aggregated values. This
+is the real-content evidence the user's earlier mid-task directive asked for (§A.7's
+`o_9292`-class validation), extended to the phase-2 features specifically.
+
+| feature | KADID SROCC | KADID PLCC | KADID KROCC | TID SROCC | TID PLCC | TID KROCC |
+|---|--:|--:|--:|--:|--:|--:|
+| `gms` | **0.594** | 0.584 | 0.418 | 0.478 | 0.495 | 0.326 |
+| `pjnd_transducer_low_k` | 0.420 | 0.425 | 0.288 | **0.489** | 0.547 | 0.353 |
+| `pjnd_transducer_high_k` | 0.424 | 0.428 | 0.293 | 0.478 | 0.533 | 0.341 |
+| `ringing` | 0.386 | 0.398 | 0.264 | 0.473 | 0.530 | 0.344 |
+| `edge_width_change` | 0.469 | 0.497 | 0.324 | 0.193 | 0.226 | 0.131 |
+| `banding` | 0.326 | 0.337 | 0.225 | 0.167 | 0.202 | 0.114 |
+| `blockiness` | 0.298 | 0.298 | 0.203 | 0.105 | 0.187 | 0.077 |
+
+(All correlations are unsigned magnitudes here — sign consistency was already established by
+construction in §A.11.1/A.10; KADID uses DMOS so its raw sign is inverted vs TID's MOS, `panel`
+reports the correlation as computed on the raw columns, not re-signed for this table — the
+MAGNITUDES are what this screen is checking, per the brief's `|Spearman|` framing.)
+
+**Reading this, per feature (utility-per-cost, joining §A.12.3's marginal-ms column)**:
+
+| feature | avg \|SROCC\| (KADID+TID) | marginal cost (group) | verdict |
+|---|--:|--:|---|
+| `gms` | 0.536 | in `gradient_features` (+50.4% group) | **strong, general-purpose signal** — matches GMSD's own literature reputation as one of the best cheap FR features; carries its share of the group's cost |
+| `pjnd_transducer_low_k`/`_high_k` | 0.454 / 0.451 | `transducer_bank`, cheapest group (+5.7%) | **best utility-per-cost of the seven** — solid correlation on both corpora at negligible marginal cost |
+| `ringing` | 0.429 | in `gradient_features` | solid on both corpora, especially TID (0.473, TID's blur/noise-heavy distortion mix is closer to what ringing targets than KADID's) |
+| `edge_width_change` | 0.331 | in `gradient_features`, near-zero marginal cost beyond the shared gradient | inconsistent — strong on KADID (0.469), weak on TID (0.193); consistent with §A.11.2's flag that this is the least paper-faithful of the seven (a scale-level proxy, not Marziliano's actual per-edge measurement) |
+| `banding` | 0.246 | in `gradient_features` | weak on both — **expected, not damning**: neither KADID nor TID concentrates distortion types that specifically produce banding/posterization (their distortion sets are noise/blur/color/compression-mix, not a banding-focused corpus); the adversarial unit test (§A.11.1) confirms the feature DOES fire on a genuine banding pattern, this screen just doesn't have much banding content to check it against |
+| `blockiness` | 0.202 | its own group (+25.6%) | **weakest of the seven on this screen, and NOT cheap** — same "wrong corpus for this distortion type" caveat as banding (KADID/TID aren't JPEG-blocking-focused), but unlike banding this one also has real marginal cost. First candidate to reconsider default-off if a FUTURE JPEG/blocking-focused screen (or the trainability A/B) doesn't recover its utility |
+
+**This does not change the phase-2 default (§A.12.4: all 7 ship ON)** — the speed gate is
+already failing for reasons unrelated to any single feature's cost (the base-kernel
+architecture gap), so there is no speed pressure actually forcing a default-off decision right
+now. This table is the evidence a FUTURE session doing the real trainability A/B (explicitly
+the parent's next step, not phase 2's) should start from: `gms` and the `transducer_bank` are
+the clear keepers; `blockiness` is the one feature where cost AND this screen's utility are both
+unfavorable simultaneously.
+
 # Part B — the original audit (verbatim record)
 
 > Everything below is the read-only feature-science audit as delivered
@@ -412,4 +729,6 @@ V1 (372 features, all 40+ shipped bakes, every canonical parquet under `/mnt/v/z
 
 ---
 
-**Key files:** `zensim/zensim/src/metric.rs` (module doc 1-107, `ScaleStats` 587-653, `FeatureView` 3657-3960, vector assembly 3980-4059, new `compute_v2_features` method), `zensim/zensim/src/simd_ops.rs` (C2 const + SSIM kernels), `zensim/zensim/src/streaming.rs` (hot-path `finalize`, 451-550), `zensim/zensim/src/iw_pool.rs` (promoted `WeightedPool::mean`), `zensim/zensim/src/diffmap.rs` (fold restricted to basic-13, 279-439 — untouched by iteration 1), `zensim/zensim/src/profile.rs` (`ProfileParams`, 357-465 — untouched), `zensim/zensim/src/feature_v2.rs` (new, iteration 1), `zensim/zensim/examples/v2_bounds_smoke.rs` (new). Prior-session docs carried forward: `benchmarks/iw_pooling_normalization_2026-07-15.md`, `benchmarks/ssim_moment_explosion_2026-07-16.md`, `benchmarks/mlp_diffmap_coherence_2026-07-18.md`, `docs/MODEL_SELECTION_SCORECARD.md`, `docs/TOP_MODELS_COOKBOOK.md`.
+**Key files (iteration 1):** `zensim/zensim/src/metric.rs` (module doc 1-107, `ScaleStats` 587-653, `FeatureView` 3657-3960, vector assembly 3980-4059, new `compute_v2_features` method), `zensim/zensim/src/simd_ops.rs` (C2 const + SSIM kernels), `zensim/zensim/src/streaming.rs` (hot-path `finalize`, 451-550), `zensim/zensim/src/iw_pool.rs` (promoted `WeightedPool::mean`), `zensim/zensim/src/diffmap.rs` (fold restricted to basic-13, 279-439 — untouched by iteration 1), `zensim/zensim/src/profile.rs` (`ProfileParams`, 357-465 — untouched), `zensim/zensim/src/feature_v2.rs` (new, iteration 1), `zensim/zensim/examples/v2_bounds_smoke.rs` (new). Prior-session docs carried forward: `benchmarks/iw_pooling_normalization_2026-07-15.md`, `benchmarks/ssim_moment_explosion_2026-07-16.md`, `benchmarks/mlp_diffmap_coherence_2026-07-18.md`, `docs/MODEL_SELECTION_SCORECARD.md`, `docs/TOP_MODELS_COOKBOOK.md`.
+
+**Key files (phase 2 / "feature-v2b"):** `zensim/src/feature_v2.rs` (rewritten: single-pass O(1)-accumulator kernel, `OnlineMoments` Terriberry moments, `WeightedSum` gated-mirror accumulator, `V2NewFeatureToggles`, 7 new candidates, 29 signals/channel/scale, 12 tests), `zensim/src/iw_pool.rs` (`WeightedPool::mean` doc updated to record the gated-mirror relationship; dead-code attributes corrected to unconditional since the only caller is now the equivalence test), `zensim/src/metric.rs` (`Zensim::compute_v2_features_with_toggles`), `zensim/examples/support/zen_io.rs` (new — zenpng/zenjpeg/zenresize decode/resize/encode helpers, replacing the `image` crate for all phase-2 tooling), `zensim/examples/v2_bounds_smoke.rs` (switched to `zen_io`), `zensim/examples/gen_jpeg_distortion.rs` (new — real-content distortion generator, used for the imazen-26 `o_9292` re-validation), `zensim/examples/v2_helpfulness_screen.rs` (new — item 6 KADID/TID extraction), `zensim/benches/v2_speed_baseline.rs` + `v2_stage_profile.rs` + `v2_feature_group_cost.rs` (new zenbench harnesses, items 1/2/4). `docs/FEATURE_V2_SPEC_2026-07-18.md` SS A.11/A.12 (this file, phase-2 sections).

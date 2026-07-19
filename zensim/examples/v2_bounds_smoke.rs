@@ -11,6 +11,9 @@
 //!   --example v2_bounds_smoke -- <ref1.png> <dist1.jpg> [<ref2.png> <dist2.jpg> ...]
 //! ```
 
+#[path = "support/zen_io.rs"]
+mod zen_io;
+
 use zensim::feature_v2::{FEATURES_PER_CHANNEL_V2_TOTAL, idx};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
@@ -75,14 +78,11 @@ fn main() {
 
     for pair in args.chunks(2) {
         let (ref_path, dist_path) = (&pair[0], &pair[1]);
-        let r = image::open(ref_path).expect("open ref").to_rgb8();
-        let d = image::open(dist_path).expect("open dist").to_rgb8();
-        assert_eq!(r.dimensions(), d.dimensions(), "pair dimension mismatch");
-        let (w, h) = r.dimensions();
-        let (w, h) = (w as usize, h as usize);
+        let (r_pixels, rw, rh) = zen_io::decode_rgb8(std::path::Path::new(ref_path));
+        let (d_pixels, dw, dh) = zen_io::decode_rgb8(std::path::Path::new(dist_path));
+        assert_eq!((rw, rh), (dw, dh), "pair dimension mismatch");
+        let (w, h) = (rw, rh);
 
-        let r_pixels: Vec<[u8; 3]> = r.pixels().map(|p| [p[0], p[1], p[2]]).collect();
-        let d_pixels: Vec<[u8; 3]> = d.pixels().map(|p| [p[0], p[1], p[2]]).collect();
         let source = RgbSlice::new(&r_pixels, w, h);
         let distorted = RgbSlice::new(&d_pixels, w, h);
 
