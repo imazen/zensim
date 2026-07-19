@@ -246,6 +246,22 @@ on the lab-scale ablation. Backfill in flight:
 - Scope cost (stated): still JPEG-only training mass; webp/jxl decode-wiring into
   zen_io is the documented next expansion (avif excluded per zenavif-in-flux).
 
+### aic3 preview (independent gate, SMALL-slice recipe-3 bakes)
+
+Forwarding the existing recipe-3 bakes over the fresh AIC-3 gate — a corpus NOT
+used to pick the luma direction, and compression-specific like CID22:
+
+| model | aic3 (CTC-JND) SROCC |
+|---|--:|
+| v1 control | 0.5064 |
+| full-v2 | 0.6137 |
+| **luma-v2** | **0.6867** |
+
+luma-v2 wins BOTH compression-focused held-out corpora — CID22 0.653 AND aic3
+0.687 — beating v1 and full-v2 on each. The CSIQ regression is confined to
+general (non-compression) FR distortion, the axis a compression dial weights
+least. Preview only (small-slice bakes); the production-scale decision follows.
+
 _(decision table pending backfill completion)_
 
 ## Reproduction
