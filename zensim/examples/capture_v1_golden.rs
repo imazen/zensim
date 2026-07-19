@@ -70,18 +70,26 @@ fn main() {
     let syn_dist = generators::distort_block_artifacts(&syn_ref, w, h);
 
     let cfg = v1_config();
-    let syn_result = compute_zensim_with_config(&syn_ref, &syn_dist, w, h, cfg).expect("synthetic v1 compute");
+    let syn_result =
+        compute_zensim_with_config(&syn_ref, &syn_dist, w, h, cfg).expect("synthetic v1 compute");
     print_vec("GOLDEN_SYNTHETIC", syn_result.features());
-    eprintln!("synthetic: score={} n_features={}", syn_result.score(), syn_result.features().len());
+    eprintln!(
+        "synthetic: score={} n_features={}",
+        syn_result.score(),
+        syn_result.features().len()
+    );
 
     // --- Real fixture (cropped from gb82 city.png / city_q50.jpg, committed
     //     at tests/fixtures/v1_golden_real_{ref,dist}.png, <10KB combined). ---
     let manifest = env!("CARGO_MANIFEST_DIR");
-    let (real_ref, rw, rh) = load_png_rgb8(&format!("{manifest}/tests/fixtures/v1_golden_real_ref.png"));
-    let (real_dist, dw, dh) = load_png_rgb8(&format!("{manifest}/tests/fixtures/v1_golden_real_dist.png"));
+    let (real_ref, rw, rh) =
+        load_png_rgb8(&format!("{manifest}/tests/fixtures/v1_golden_real_ref.png"));
+    let (real_dist, dw, dh) = load_png_rgb8(&format!(
+        "{manifest}/tests/fixtures/v1_golden_real_dist.png"
+    ));
     assert_eq!((rw, rh), (dw, dh));
-    let real_result =
-        compute_zensim_with_config(&real_ref, &real_dist, rw, rh, v1_config()).expect("real v1 compute");
+    let real_result = compute_zensim_with_config(&real_ref, &real_dist, rw, rh, v1_config())
+        .expect("real v1 compute");
     print_vec("GOLDEN_REAL", real_result.features());
     eprintln!(
         "real: {}x{} score={} n_features={}",

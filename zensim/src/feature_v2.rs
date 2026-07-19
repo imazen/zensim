@@ -654,7 +654,17 @@ fn compute_channel_scale_v2(
     let mu2_h = &mut scratch.mu2_h[..n];
     let ssq_h = &mut scratch.ssq_h[..n];
     let s12_h = &mut scratch.s12_h[..n];
-    crate::blur::fused_blur_h_ssim(src, dst, mu1_h, mu2_h, ssq_h, s12_h, width, height, BLUR_RADIUS);
+    crate::blur::fused_blur_h_ssim(
+        src,
+        dst,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        width,
+        height,
+        BLUR_RADIUS,
+    );
 
     let mu1 = &mut scratch.mu1[..n];
     crate::blur::box_blur_v_from_copy(mu1_h, mu1, width, height, BLUR_RADIUS);
@@ -974,8 +984,7 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
     // the `threads` parallel branch below, which needs disjoint `&mut`
     // scratch per closure.
     let n0 = width * height;
-    let mut scratch: [ScratchV2; 3] =
-        [ScratchV2::new(n0), ScratchV2::new(n0), ScratchV2::new(n0)];
+    let mut scratch: [ScratchV2; 3] = [ScratchV2::new(n0), ScratchV2::new(n0), ScratchV2::new(n0)];
 
     for scale in 0..n_scales {
         let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
@@ -989,8 +998,7 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
         // `features[scale_base..]` chunks; only the iteration strategy
         // differs.
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
-        let out_region =
-            &mut features[scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
+        let out_region = &mut features[scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
 
         #[cfg(feature = "threads")]
         let ran_parallel = if parallel {
@@ -1567,7 +1575,8 @@ mod tests {
             }
         }
         assert_eq!(
-            mismatches, 0,
+            mismatches,
+            0,
             "{mismatches} of {} v2 features diverged between parallel and serial scheduling",
             sf.len()
         );
