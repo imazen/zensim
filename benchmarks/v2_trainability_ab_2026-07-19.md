@@ -200,6 +200,54 @@ luma-only) rather than deletion. GMS graduates: strongest candidate, no measured
 downside. Blockiness+banding remain demotion candidates (consistent with their
 per-feature screens: 0.202 "wrong jury" / 0.246).
 
+## Transducer-recal SCREEN (2026-07-19, channel-aware column subsets, lab data)
+
+Cheap screen — no re-extraction — testing WHICH part of the transducer family
+costs CID22 (`v2_transducer_recal_subsets.py`, `ablation_recipe3_panels.json` +
+per-variant bakes). All recipe-3 conditions, seed 13.
+
+| model | width | CID22-val | CSIQ | LIVE-R2 |
+|---|--:|--:|--:|--:|
+| v1 control | 372 | 0.6180 | 0.3156 | 0.4385 |
+| full v2 | 348 | 0.5761 | 0.3113 | 0.6543 |
+| noPJND (drop all transducers) | 300 | 0.6707 | 0.1829 | 0.5733 |
+| **luma (transducers Y-only)** | 316 | **0.6528** | 0.2169 | **0.6244** |
+| corelow (drop fragility+high_k) | 324 | 0.6697 | 0.2041 | 0.5924 |
+| nohighk (drop high_k only) | 336 | 0.5811 | 0.2451 | 0.5675 |
+
+**Direction: luma-gate the transducers** (compute on Y only, drop X/B). It
+recovers CID22 ABOVE the v1 control (0.653 > 0.618) while keeping nearly all of
+full-v2's LIVE win (0.624 vs 0.654) — and it's principled (contrast masking is a
+luma phenomenon; chroma transducers added CID22 noise without LIVE value).
+`nohighk` shows the cost is NOT the aggressive k=16 member (dropping it alone
+barely moves CID22); it's the chroma transducers broadly. **Honest cost: CSIQ**
+(0.217 vs 0.311) — every transducer-reduction variant pays it, so the transducers
+genuinely carry CSIQ's noise/contrast signal. luma is a FEATURE-EXTRACTION change
+(drop X/B transducer computation — also a small speed win) but tested here as a
+column subset, so no re-extraction was needed to screen it.
+
+Same lab caveats as the A/B (epoch-0 checkpoints, JPEG-only training, single
+seed, small-n CSIQ/LIVE). This SCREEN picks the direction; the decision waits for
+the backfill.
+
+## Backfill (post-372 features at production scale) — the decision basis
+
+Per the user directive (2026-07-19): a feature-definition change can't be decided
+on the lab-scale ablation. Backfill in flight:
+- **Held-out gates**: add AIC-3 (600, PNG, CTC-JND) to the existing cid22/csiq/
+  live/kadid/tid. (KonJND deferred — half its distortions are BPG, no decoder;
+  documented gap, not silently dropped.)
+- **Training mass**: full safesyn JPEG — ALL 3,218 sources / 111,068 pairs, up
+  from the 1,100-source lab slice. Directly attacks the epoch-0 overfit (more
+  content diversity = later overfit = more honest transfer). `decoded_path` is
+  the `.jpg` bitstream, so the deleted PNG cache is irrelevant.
+- Both v1 + v2 arms, matched pairs. Decision compares v1 / full-v2 / luma-v2 on
+  {safesyn_full + kadid + tid} → {cid22, csiq, live, aic3}, multi-seed.
+- Scope cost (stated): still JPEG-only training mass; webp/jxl decode-wiring into
+  zen_io is the documented next expansion (avif excluded per zenavif-in-flux).
+
+_(decision table pending backfill completion)_
+
 ## Reproduction
 
 All artifacts: `/mnt/v/output/zensim/v2-ab-2026-07-19/` — per-arm per-corpus
