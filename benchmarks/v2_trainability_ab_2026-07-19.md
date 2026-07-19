@@ -283,18 +283,28 @@ withinref+both+mse, seed 13, production mass):
 | ext-full (720) | 0.6442 | 0.6128 | 0.5948 | 0.2347 |
 | **ext-luma (720)** | **0.6566** | **0.6610** | **0.6043** | 0.2667 |
 
-**Verdict: appending the (luma-masked) v2 features to frozen v1 WINS the
-compression axis** — aic3 +0.103, LIVE +0.031, CID22 +0.004 (neutral) — at the
-cost of general-FR CSIQ −0.117. Opposite of the disjoint A/B's KILL: extend, not
-replace, keeps v1's ranking AND adds v2's compression signal. ext-luma > ext-full
-reconfirms luma-masking at production scale. Artifacts: `dec_{v1,extfull,extluma}.bin`,
-`decision_appendonly.json`.
+**Verdict (2-seed, corrected):** appending luma-masked v2 to frozen v1 **robustly
+wins aic3 and robustly loses CSIQ; CID22 and LIVE are seed-noise.** The clean
+seed-13 sweep was partly single-seed luck — seed-7 flips CID22 and LIVE:
 
-Honesty: CID22 +0.004 is within n=4292 noise (seed-7 replicate pending); aic3
-(+0.10, n=600) and LIVE (+0.03, n=779) are real; CSIQ −0.12 is a real
-general-FR regression, acceptable only because zensim is a compression dial.
-Single seed. Both arms' checkpoints are again near-epoch-0 (lab-recipe overfit) —
-the comparison is feature-substrate ordering, not training ceiling.
+| corpus | Δ seed-13 | Δ seed-7 | 2-seed mean | robust |
+|---|--:|--:|--:|:--:|
+| aic3 | +0.103 | +0.126 | **+0.114** | ✅ win |
+| CSIQ | −0.117 | −0.148 | **−0.132** | ✅ loss |
+| CID22 | +0.004 | −0.021 | −0.008 | ✗ noise |
+| LIVE | +0.031 | −0.075 | −0.022 | ✗ noise |
+
+Absolute SROCCs swung ~0.10 between seeds (v1 CID22 0.652→0.551) — the near-epoch-0
+lab-recipe instability. So only the LARGE effects survive: combining decisively
+wins aic3 (CTC compression-JND, +0.11), decisively loses CSIQ (general-FR, −0.13),
+and improves coherence (structural, below). CID22/LIVE are inconclusive at lab
+scale. ext-luma > ext-full holds at seed-13; not re-run at seed-7.
+
+This is weaker than the seed-13-only read but honest: at lab scale (epoch-0
+checkpoints, single recipe) the substrate comparison is seed-dominated except for
+the biggest effects. A production-recipe run (later overfit, more seeds) is needed
+to resolve CID22/LIVE. What DOES hold: aic3 win + CSIQ loss + coherence gain.
+Artifacts: `dec_{v1,extfull,extluma}{,_s7}.bin`, `decision_appendonly.json`.
 
 ### Coherence check (sensitivity-mass proxy) — combining IMPROVES steerability
 
