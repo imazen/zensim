@@ -1226,6 +1226,45 @@ impl Zensim {
         Ok(result.with_profile(self.profile))
     }
 
+    /// Compute the v2 "bounded" feature vector (`feature-regime-v2`,
+    /// iteration 1) for a source/distorted pair.
+    ///
+    /// This is a SEPARATE, strictly additive extraction regime — see
+    /// [`crate::feature_v2`]'s module doc and
+    /// `docs/FEATURE_V2_SPEC_2026-07-18.md` for the defect inventory (D1-D9)
+    /// it fixes, the per-feature formula/bound/citation table, and the
+    /// as-built layout. It does not read from or write to any v1 code path
+    /// (`compute`, `compute_extended_features`, `compute_with_ref`, ...);
+    /// v1's byte-stable 372-feature output is unaffected whether this
+    /// method exists in the build or not.
+    ///
+    /// Iteration 1 is a scalar correctness-first reference implementation —
+    /// not yet fused into the archmage/SIMD streaming hot path, so it is
+    /// slower than v1's `compute*` methods. There is no v2 scoring/profile
+    /// yet (no bake consumes these features); this method returns raw,
+    /// bounded, spatializable features for validation and future trainer
+    /// experiments.
+    ///
+    /// # Errors
+    ///
+    /// Same error conditions as [`Self::compute_extended_features`]:
+    /// [`ZensimError::DimensionMismatch`], [`ZensimError::ImageTooSmall`]
+    /// (zero-dimension only — sub-64px reflect-pads), and
+    /// [`ZensimError::ImageTooLarge`] if `max_pixels` is exceeded.
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_v2_features(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_v2_features_impl(
+            source,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+        )
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors

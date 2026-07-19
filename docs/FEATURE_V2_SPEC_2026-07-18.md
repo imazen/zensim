@@ -1,0 +1,393 @@
+# zensim v2 "bounded" feature extraction — defect inventory, spec, and iteration-1 as-built
+
+Two-part document. **Part A (as-built)** describes what iteration 1 actually
+implements, as landed in `zensim/src/feature_v2.rs` behind the opt-in
+`feature-regime-v2` Cargo feature (default OFF). **Part B (the audit)** is
+the original read-only feature-science audit that Part A was built from —
+the defect inventory (D1-D9), the v2 design spec, near-threshold candidates,
+the compatibility plan, and the validation plan, preserved verbatim as the
+durable record per the project's "DOCS: SEARCH + UPDATE FOR EVERY LEARNING"
+rule. Where iteration 1's implementation diverges from Part B's spec, Part A
+says so explicitly (§A.6, "spec deviations") — Part B is not silently
+edited to match what got built.
+
+---
+
+# Part A — iteration 1 as-built (2026-07-18)
+
+## A.1 Status and scope
+
+Iteration 1 = "the bounded core": a scalar, correctness-first reference
+implementation of the v1→v2 redesign, validated for boundedness and basic
+correctness (identity, dimension handling). It is **not**:
+
+- fused into the archmage/SIMD streaming hot path (`streaming.rs`) — v2 is
+  its own straightforward-Rust code path;
+- wired into any scoring/profile/bake system — there is no v2 `ZensimProfile`
+  and no trainer support yet;
+- validated at full-corpus scale — only unit fixtures + 9 real (ref,
+  distorted) pairs (§A.7).
+
+v1's 372-feature extraction (`metric.rs`, `streaming.rs`, `simd_ops.rs`,
+`diffmap.rs`) is untouched. Verified: the full v1 test suite (103 tests)
+passes identically with `feature-regime-v2` on and off; zero new clippy
+warnings in either configuration (§A.8).
+
+## A.2 Files changed
+
+| File | Change |
+|---|---|
+| `zensim/Cargo.toml` | New `feature-regime-v2 = []` feature (default OFF), documented; added to `check-cfg` |
+| `zensim/src/feature_v2.rs` | **New.** Constants, per-pixel formulas, `FeatureRegime`, `ZensimV2Result`, `FeatureViewV2`, `compute_v2_features_impl`, 8 tests |
+| `zensim/src/lib.rs` | `pub mod feature_v2;` gated behind the feature |
+| `zensim/src/metric.rs` | New `Zensim::compute_v2_features()` method, gated |
+| `zensim/src/iw_pool.rs` | Promoted `WeightedPool::mean` out of blanket `#[allow(dead_code)]` (now v2's canonical pooling helper); `l2`/`l4` individually still allowed (unused by v2 iteration 1) |
+| `zensim/examples/v2_bounds_smoke.rs` | **New.** Real-pair bounds smoke tool (§A.7) |
+| `docs/FEATURE_V2_SPEC_2026-07-18.md` | **New.** This file |
+
+## A.3 Layout (as-built)
+
+22 signals per channel per scale (4 scales × 3 XYB channels × 22 = **264**
+total v2 features at the default `NUM_SCALES=4`) — a concrete instantiation
+of Part B §(b)'s design table, not a byte-for-byte port of v1's 13/6/6/6
+block widths. Four-pass-equivalent conceptual grouping (basic / soft-peak /
+masked / iw), plus a new PJND block Part B §(c) proposed but v1 never had:
+
+| local idx | name | formula (informal) | bound | pooling |
+|--:|---|---|---|---|
+| 0 | `ssim_mean` | `mean(d)`, `d` = C1-bounded SSIM dissimilarity | `[0,2]` | mean of explicit per-pixel map |
+| 1 | `ssim_dev2` | `sqrt(mean((d-mean_d)²))` — GMSD-style 2nd deviation | `[0,2]` | mean of explicit per-pixel map |
+| 2 | `ssim_dev4` | `(mean((d-mean_d)⁴))^0.25` — GMSD-style 4th deviation | `[0,2]` | mean of explicit per-pixel map |
+| 3 | `art` | mean bounded-similarity edge-artifact dissimilarity (dst>src half) | `[0,1)` | mean |
+| 4 | `det` | mean bounded-similarity edge-detail-loss dissimilarity (dst<src half) | `[0,1)` | mean |
+| 5 | `mse` | `mean(saturate((src-dst)², C_MSE))` | `[0,1)` | mean |
+| 6 | `hf_gain` | mean bounded-excess of per-pixel HF energy (dst>src half) | `[0,1)` | mean |
+| 7 | `hf_loss` | mean bounded-excess of per-pixel HF energy (src>dst half) | `[0,1)` | mean |
+| 8 | `hf_mag_loss` | mean bounded-excess of per-pixel HF magnitude (L1, src>dst half) | `[0,1)` | mean |
+| 9 | `ssim_soft_peak` | `Σsal(d)·d / Σsal(d)`, `sal=saturate(·,C_PEAK)` | `[0,2]` | canonical weighted mean |
+| 10 | `art_soft_peak` | same construction on `art` | `[0,1)` | canonical weighted mean |
+| 11 | `det_soft_peak` | same construction on `det` | `[0,1)` | canonical weighted mean |
+| 12 | `masked_ssim` | `Σw_mask·d / Σw_mask` | `[0,2]` | canonical weighted mean |
+| 13 | `masked_art` | `Σw_mask·art / Σw_mask` | `[0,1)` | canonical weighted mean |
+| 14 | `masked_det` | `Σw_mask·det / Σw_mask` | `[0,1)` | canonical weighted mean |
+| 15 | `masked_mse` | `Σw_mask·mse / Σw_mask` | `[0,1)` | canonical weighted mean |
+| 16 | `iw_ssim` | `Σw_iw·d / Σw_iw` | `[0,2]` | canonical weighted mean |
+| 17 | `iw_art` | `Σw_iw·art / Σw_iw` | `[0,1)` | canonical weighted mean |
+| 18 | `iw_det` | `Σw_iw·det / Σw_iw` | `[0,1)` | canonical weighted mean |
+| 19 | `iw_mse` | `Σw_iw·mse / Σw_iw` | `[0,1)` | canonical weighted mean |
+| 20 | `pjnd_transducer` | `mean(saturate(\|src-dst\|/(1+k·activity), C_PJND_CLAMP))` | `[0,1)` | mean |
+| 21 | `pjnd_fragility` | `mean(1-saturate(grad_energy(src), C_PJND_GRAD))` — **reference-only** | `[0,1)` | mean |
+
+Flat layout: `features[scale*3*22 + ch*22 + local_idx]`, `ch ∈ {0=X,1=Y,2=B}`.
+Accessed via `FeatureViewV2::{ssim_mean, ssim_dev2, ..., pjnd_fragility}(scale, ch)`.
+
+### Constants (all named, all cited — `feature_v2.rs`)
+
+| const | value | derivation |
+|---|--:|---|
+| `C1_V2` | 0.0001 | `(K1·L)²`, K1=0.01 (Wang et al. 2004 default), L=1 — see boundedness proof below |
+| `C2_V2` | 0.0009 | identical value/derivation to v1's `simd_ops::C2`, kept independent |
+| `C_EDGE` | 1e-4 | GMSD/FSIM/DISTS stabilizer, order of `C1_V2` |
+| `C_MSE` | 0.01 | `mse=0.5` at squared-error 0.01 (≈10% local-intensity shift, L=1 convention) |
+| `C_HF` | 1e-4 | stabilizer for the HF bounded-excess forms |
+| `C_PEAK` | 0.05 | soft-saliency saturating half-point |
+| `C_ACTIVITY` | 0.01 | bounds the activity signal before use as a pooling weight (D6 fix) |
+| `IW_WEIGHT_FLOOR` | 0.001 | prevents all-zero weight sum on a flat image |
+| `C_PJND_CLAMP` | 0.1 | CVVDP-style final soft-clamp half-point |
+| `C_PJND_GRAD` | 0.02 | gradient-energy saturating half-point |
+| `K_PJND_MASK` | 4.0 | masking-denominator strength, same order as v1's `k_mask`/`k_iw` |
+| `BLUR_RADIUS` | 5 | matches v1's `ZensimConfig::default()` |
+
+**`C1_V2` boundedness proof (verified against source, not assumed):**
+`μ1, μ2 ≥ 0` is required for `num_m = (2μ1μ2+C1)/(μ1²+μ2²+C1) ∈ [0,1]`, and
+it holds here because [`crate::streaming::convert_source_to_xyb`] calls
+**exclusively** the *positive*-XYB conversion variants
+(`srgb_to_positive_xyb_planar_into` / `linear_to_positive_xyb_planar_into`,
+confirmed at `streaming.rs`'s XYB-conversion call sites) — so all three XYB
+channels are non-negative by construction, not just Y. `num_m ≤ 1` holds
+unconditionally (AM-GM, no sign assumption). `num_s/denom_s ∈ [-1,1]`
+(Cauchy-Schwarz). So `d = max(0, 1-num_m·num_s/denom_s) ∈ [0,2]`.
+
+## A.4 API surface (new, all gated behind `feature-regime-v2`)
+
+```rust
+// zensim::Zensim
+pub fn compute_v2_features(&self, source: &impl ImageSource, distorted: &impl ImageSource)
+    -> Result<zensim::feature_v2::ZensimV2Result, ZensimError>;
+
+// zensim::feature_v2
+pub enum FeatureRegime { V1, V2Bounded }
+pub struct ZensimV2Result { /* .features() .into_features() .n_scales() .regime() .view() */ }
+pub struct FeatureViewV2<'a> { /* .new(features, n_scales) -> Option<Self>; named accessors */ }
+pub const FEATURES_PER_CHANNEL_V2_{BASIC,PEAK,MASKED,IW,PJND,TOTAL}: usize;
+pub mod idx { /* named local offsets */ }
+```
+
+Disambiguation is by **distinct Rust type**, not runtime length-sniffing —
+`FeatureViewV2::new` VALIDATES the exact expected length for `n_scales` and
+returns `None` on mismatch; it does not guess a regime from an ambiguous
+length the way v1's `FeatureView::new` does. `FeatureRegime` still exists
+(returned by `ZensimV2Result::regime()`) for callers threading results
+through generic/dynamic code — this is the "or a `FeatureRegime` enum"
+option from Part B §(d), kept alongside the type-level tag rather than
+instead of it.
+
+## A.5 Design principles satisfied (Part B §(b), verified per-feature)
+
+1. **Bounded** — every one of the 22 signals has a closed-form bound
+   ([0,1), [0,2], or [0,1]-ish), proved analytically for the SSIM family
+   (§A.3) and by construction for the saturating/bounded-similarity/
+   bounded-excess/canonical-weighted-mean forms (a weighted mean of a
+   bounded quantity with non-negative weights cannot exceed the quantity's
+   bound — convexity). No feature is a raw, uncapped ratio.
+2. **Normalized consistently** — masked, IW, and soft-peak pooling all go
+   through the ONE promoted helper, `WeightedPool::mean` (`Σw·v/Σw`,
+   `iw_pool.rs`), matching Wang & Li 2011 Eq.36 exactly. There is no second
+   pooling convention anywhere in v2.
+3. **Spatializable** — every feature is `mean_i(explicit_per_pixel_map(i))`.
+   This includes the deviation moments (D8 fix: `dev(i)=(d(i)-mean_d)^p`
+   is itself a per-pixel map) and the soft-peak weight (D4 fix: a
+   saturating function of the signal itself, not a hard order statistic).
+   HF gain/loss/mag-loss go further than D2 strictly required: v1's HF
+   features were pool-then-ratio (no per-pixel decomposition existed even
+   in principle); v2 redefines them as genuinely per-pixel comparisons
+   from the start.
+4. **Sign-consistent** — 21 of 22 signals are error-oriented (higher=worse)
+   by construction. The one documented exception is `pjnd_fragility`
+   (reference-only masking-susceptibility, Bondžulić et al. 2022) — it is
+   still oriented "higher = this region is more likely to show visible
+   distortion," but it is not a src-vs-dst error term. See §A.6 item 7.
+
+## A.6 Spec deviations (honest list — what iteration 1 chose that Part B left open or didn't specify)
+
+1. **Concrete signal count (22/channel/scale)** — Part B's table was
+   qualitative ("per-block redesign"); iteration 1 picked exact counts
+   (9+3+4+4+2) to make something buildable. Not a contradiction, an
+   instantiation.
+2. **Edge artifact/detail did NOT get the dev2/dev4 treatment** — only
+   `ssim_mean` got the full mean/dev2/dev4 triple; `art`/`det` are
+   single mean-pooled bounded-similarity signals. Part B's D8 discussion
+   was general ("the pooling triple"); scoping the deviation-moment
+   treatment to SSIM only was a deliberate iteration-1 scope cut, not an
+   oversight. Extending it to art/det is straightforward follow-on work.
+3. **HF gain/loss/mag-loss use a bounded-EXCESS form `(a-b)/(a+b+c)`, not
+   literally GMSD's bounded-SIMILARITY form `(2ab+c)/(a²+b²+c)`** — because
+   gain/loss need a signed asymmetry (which side is bigger), not a
+   symmetric similarity. Same bounded-ratio family (denominator dominates
+   the numerator by construction), different member of it. Named
+   `bounded_excess` vs `bounded_sim` in code to keep the distinction
+   explicit rather than silently reusing one name for two shapes.
+4. **HF features made genuinely per-pixel** — beyond D2's literal ask
+   (bound the ratio); v1's HF features had no per-pixel form at all
+   (pool-then-ratio of two whole-scale energies). This is a superset fix,
+   flagged in case a future comparison expects v2's HF features to be a
+   drop-in bounded replacement of v1's semantics — they are bounded
+   replacements of v1's INTENT, not numerically comparable to v1's values.
+5. **Soft-peak weighting is self-weighted** (a signal weighted by a
+   saturating function of itself), not FSIM's external phase-congruency
+   weight. Part B's own audit text already flagged this
+   ("not identical to FSIM's PC-based external weight") — restated here
+   for the as-built record, not a new deviation.
+6. **`pjnd_fragility`'s sign convention was decided during implementation.**
+   Part B §(c) discussed the Bondžulić gradient-energy signal as a
+   "masking-capacity" feature without committing to a final sign; iteration
+   1 inverts it (`1 - saturate(grad_energy, c)`) so "higher = more fragile"
+   to satisfy the coordinator's sign-consistency requirement (item 6) while
+   staying honest that it is not an error term (§A.5 item 4).
+7. **No config knobs exposed** — `NUM_SCALES` (4) and `BLUR_RADIUS` (5) are
+   hardcoded to v1's defaults, not threaded through a `V2Config` the way
+   v1's `ZensimConfig` exposes them. There is no v2 config struct yet.
+8. **No per-block opt-in toggles** — v1's `extended_features`/
+   `compute_iw_features` let callers skip expensive blocks; v2 iteration 1
+   always computes the full 22-signal set. A reasonable perf follow-on, not
+   needed for a correctness/boundedness validation pass.
+9. **Memory shape not yet optimized.** `compute_channel_scale_v2` allocates
+   ~18 transient `f32` buffers of `width×height` (blur intermediates + 9
+   per-pixel maps), freed at the end of each channel-scale call — fine at
+   the 576×576 smoke-test scale (§A.7, ~90ms/pair, no memory pressure
+   observed), but **not measured at large image sizes**. Per this project's
+   "NEVER EXTRAPOLATE memory" rule, no GB-at-4K figure is given here — if
+   large-image capacity matters before the SIMD-fusion iteration, heaptrack
+   it directly rather than trusting a multiplied buffer-count estimate.
+10. **`convert_source_to_xyb`'s `parallel` flag is threaded through from
+    `Zensim::parallel()`**, but scale-pyramid construction and the 3-channel
+    loop inside `compute_v2_features_impl` are single-threaded (a plain
+    `for ch in 0..3` loop, no rayon). Parallelizing that loop is a cheap,
+    unimplemented follow-on.
+
+## A.7 Real-pair bounds smoke test (validation plan item, executed)
+
+Tool: `zensim/examples/v2_bounds_smoke.rs`. Run:
+
+```sh
+cargo run --release -p zensim --features feature-regime-v2 --example v2_bounds_smoke -- \
+  city.png city_q20.jpg city.png city_q50.jpg city.png city_q75.jpg \
+  dog.png dog_q20.jpg dog.png dog_q50.jpg dog.png dog_q75.jpg \
+  girl.png girl_q20.jpg girl.png girl_q50.jpg girl.png girl_q75.jpg
+```
+
+Corpus: `/mnt/v/output/zensim/diffmap-coherence-2026-07-18/{city,dog,girl}.png`
+(576×576 references) against their ImageMagick JPEG q20/q50/q75 encodes — 9
+(reference, distorted) pairs, real codec output, not synthetic. Per-block
+min/max across all 4 scales × 3 channels × block-member-signals (measured
+2026-07-18, `feature-regime-v2` release build):
+
+| pair | basic [0,2] | soft-peak [0,2] | masked [0,2] | iw [0,2] | pjnd [0,1] |
+|---|---|---|---|---|---|
+| city q20 | 0.0026–0.5114 | 0.0135–0.2507 | 0.0023–0.0822 | 0.0026–0.1560 | 0.0334–0.7797 |
+| city q50 | 0.0005–0.3572 | 0.0029–0.2242 | 0.0005–0.0580 | 0.0005–0.1200 | 0.0145–0.7797 |
+| city q75 | 0.0001–0.3488 | 0.0007–0.2003 | 0.0001–0.0500 | 0.0001–0.1011 | 0.0077–0.7797 |
+| dog q20 | 0.0027–0.4781 | 0.0115–0.2771 | 0.0029–0.1324 | 0.0027–0.1611 | 0.0344–0.6556 |
+| dog q50 | 0.0005–0.4129 | 0.0021–0.2583 | 0.0005–0.1205 | 0.0005–0.1450 | 0.0144–0.6556 |
+| dog q75 | 0.0001–0.3726 | 0.0006–0.2429 | 0.0001–0.1096 | 0.0001–0.1305 | 0.0079–0.6556 |
+| girl q20 | 0.0009–0.2004 | 0.0041–0.2911 | 0.0007–0.0443 | 0.0009–0.1497 | 0.0278–0.8448 |
+| girl q50 | 0.0002–0.1773 | 0.0012–0.2575 | 0.0002–0.0345 | 0.0002–0.1210 | 0.0097–0.8448 |
+| girl q75 | 0.0001–0.1563 | 0.0005–0.2337 | 0.0001–0.0305 | 0.0001–0.1023 | 0.0056–0.8448 |
+
+**Result: `OK: every block stayed within its documented bound on every
+pair.`** — zero out-of-bounds cells across 9 pairs × 5 blocks. Observed
+maxima sit far below the theoretical worst case (~0.2–0.5 vs a bound of
+2.0) — expected, since the theoretical bound is only approached by the
+adversarial synthetic fixtures (unit tests), not typical codec content.
+Two qualitative sanity checks, both consistent with a correctly-signed
+metric: (a) `basic`/`masked`/`iw` maxima **decrease monotonically** as
+quality rises q20→q50→q75 for all three references; (b) `pjnd`'s max is
+**identical across q20/q50/q75 of the same reference** (city: 0.7797 all
+three; dog: 0.6556; girl: 0.8448) — expected, since `pjnd_fragility` is
+reference-only and is the larger of the two PJND signals in every pair
+measured here, so it pins the block max regardless of distortion level.
+Per-pair timing: ~86–95 ms (unoptimized scalar, 576×576, 4 scales, 3
+channels — not a throughput claim, just confirms iteration 1 runs in
+reasonable wall time for validation-scale work).
+
+## A.8 Test coverage (item 7, verified)
+
+Ran via `~/work/zen/scripts/run-heavy --jobs 8 -- cargo test -p zensim [--features feature-regime-v2]`:
+
+| config | lib tests | result |
+|---|--:|---|
+| default (v2 OFF) | 103 | 103 passed, 0 failed |
+| `--features feature-regime-v2` (v2 ON) | 111 | 111 passed, 0 failed (103 v1 + 8 new v2) |
+
+The 103 v1 tests are identical in both runs (same names, same count) —
+v1's suite is unaffected by the feature flag either way. `cargo clippy
+--all-targets` in both configurations: zero warnings attributable to
+`feature_v2.rs` or the `iw_pool.rs`/`metric.rs` edits (pre-existing
+warnings in unrelated files — `metric.rs:2952`, `examples/
+rd_block_selection.rs`, `streaming.rs:5752/5779` — present identically
+before this work and in both configurations; not touched).
+
+The 8 new tests: `regime_tag_and_view_accessors_match_raw_indexing`
+(item 7d), `identity_input_zeroes_every_error_feature` (item 7c — 21 of 22
+signals asserted `<1e-6` on a non-flat identity pair; `pjnd_fragility`
+explicitly excluded with a documented reason), `bounded_range_flat_
+source_plus_noise_hf_gain` / `bounded_range_large_chroma_mean_shift` /
+`bounded_range_hard_edge_on_flat_masked_and_iw` (item 7b's three named
+adversarial fixtures — flat+noise, chroma mean-shift, hard-edge-on-flat),
+`bounded_range_all_signals_random_content` (blanket sweep), plus
+`dimension_mismatch_rejected` / `small_image_reflect_pads_and_scores`
+(v1-parity input handling).
+
+---
+
+# Part B — the original audit (verbatim record)
+
+> Everything below is the read-only feature-science audit as delivered
+> before implementation began. It is preserved unedited as the durable
+> record of the reasoning and literature grounding behind Part A. Where
+> Part A's implementation differs, Part A says so explicitly (§A.6) — this
+> section is not patched to match what got built.
+
+## (a) DEFECT INVENTORY
+
+**Layout ground truth** (verified against the actual vector-assembly loop, `metric.rs:3986-4059`, not just doc comments): four passes, each `4 scales × 3 XYB channels × width`, concatenated: basic `[0,156)` width 13, peak `[156,228)` width 6, masked `[228,300)` width 6, IW `[300,372)` width 6. Within a pass, offset = `pass_base + scale·(3·width) + ch·width + local`. (The task brief's `hf_gain` offset list `{12,38,51,77,90,116,129,155}` is a partial subset — the full correct 12 offsets, scale-major/channel-minor, are `{12,25,38,51,64,77,90,103,116,129,142,155}`; I recompute this from source rather than repeat the approximation.)
+
+### 13 basic signals (`metric.rs:1-107` module doc + `ScaleStats`, `metric.rs:587-653`; SIMD kernel `simd_ops.rs`)
+
+| idx | signal | formula | range (claimed/actual) | per-pixel map? |
+|---|---|---|---|---|
+| 0-2 | ssim_mean/4th/2nd | `d=max(0, 1-num_m·num_s/denom_s)`; `num_m=1-(μ1-μ2)²` **[no C1]**, `num_s=2·cov+C2`, `denom_s=σ1²+σ2²+C2`, `C2=0.0009` (`simd_ops.rs:255`, comment: *"There is no C1"*); pooled mean/`(mean d⁴)^.25`/`(mean d²)^.5` | claimed ≤1 (SSIM contract); **actual: unbounded above** | yes, `d(i)` exists per-pixel |
+| 3-8 | art/det mean/4th/2nd | `d=(1+\|dst-μ2\|)/(1+\|src-μ1\|)-1`; artifact=max(0,d), detail=max(0,-d) | claimed small; **artifact unbounded above** when `\|src-μ1\|→0` | yes |
+| 9 | mse | `mean((src-dst)²)` in XYB | bounded by SDR input range only; **no explicit clamp**; HDR/PU-linear path (`compute_pu_linear`, `metric.rs:1616`) has a wider unaudited range | yes |
+| 10-12 | hf_energy_loss/mag_loss/**gain** | `var_src=mean((src-μ)²)`; `gain=var_src>1e-10 ? max(0,var_dst/var_src-1):0` (`streaming.rs:499-510`) | loss ∈[0,1] (bounded, subtractive form); **gain unbounded above** — epsilon only guards literal ÷0, not magnitude | yes |
+
+**D1 — unbounded SSIM `d` (dominant driver, measured).** No C1 on the luminance term means a large chroma mean-difference makes `num_m` a large negative number, so `d` (floored at 0, never capped) explodes. Full-corpus scan (`bigcodec_hqdedup_traindigits_2026-07-02.parquet`, 2.3M rows) found max `d`-derived feature = **5,814,302** (`iw_ssim_4th`, scale 0, channel 2/chroma) — analytically reproduced exactly: `d≈(μ1-μ2)²` reaches 5.76e6 at Δμ≈2400 (`benchmarks/ssim_moment_explosion_2026-07-16.md` §3, §7a). Concentrated in **masked/IW blocks** (5.8e6) far more than **basic** (max 29,009) because the flatness mask *multiplies* exactly the flat-chroma-region-with-hard-edge pixels where the defect is worst. Fires on 0.03% of held-out rows; currently masked only by a per-bake `winsor_p99` clip (`bake_dial_refit add-winsor`, `zensim-validate/src/bin/bake_dial_refit.rs:853-913`) applied post-extraction — a symptom clamp, not a fix, and it flattens rank among clamped rows (ties) where a bounded-by-construction feature would preserve severity order (§7c of the same doc).
+
+**D2 — `hf_energy_gain` unbounded ratio (the task's named defect, distinct mechanism from D1).** Division-by-near-zero, not the missing-C1 problem: `var_src` can be legitimately tiny in a truly flat source block, so any distortion energy in `var_dst` produces a huge ratio. `streaming.rs:506-510`'s `1e-10` guard prevents NaN/Inf but not magnitude — matches the task's reported ~1e7 spike on a severe-distortion row.
+
+**D3 — edge artifact ratio, same family as D2, lower measured severity.** `(1+diff_dst)/(1+diff_src)-1` is unbounded above when `diff_src→0`; empirically measured at 0.02-0.09 max on the shipped extractor (§2 of the moment-explosion doc) but *unbounded by construction*, which the task's "every feature must be bounded" bar does not forgive on the basis of empirical rarity alone.
+
+### Peak block (`ssim_max/art_max/det_max`, `ssim_l8/art_l8/det_l8` — field literally named `ssim_p95` in `ScaleStats` at `metric.rs:623` despite computing an L8 norm, not a percentile — minor naming defect, `streaming.rs:524-526`)
+
+**D4 — order statistics are not sums.** `max` is a per-pixel order statistic; a block-local pixel edit does not have a well-defined linear effect on the whole-image max, so it cannot be expressed as "mean of an explicit per-pixel map" the way the basic block can. `ssim_l8 = (mean d⁸)^(1/8)` inherits D1's explosion (root-8 dampens it less than intuition suggests: measured 4th-moment/mean ratio was 630× on the worst row, §3).
+
+### Masked block (`metric.rs:217-224`: `mask[i]=1/(1+k_mask·a[i])`, `k_mask`=`extended_masking_strength`, default 4.0) and IW block (`metric.rs:243-247`: `iw[i]=1+k_iw·a[i]`, `k_iw`=`iw_strength`, default 4.0), both `a[i]=blur(|src-μ|)` — **same activity map, opposite polarity**
+
+**D5 — `1/n` vs `Σw` normalization divergence (real, but small — two prior "wrong turns" in this repo already ruled out the scary version).** `streaming.rs:529-543` (the shipped hot path) divides masked/IW accumulators of `Σ(w·v)` by `1/n` — this is *mean-of-weighted-values*, not a *weighted mean* (`Σ(w·v)/Σw`). The correct weighted-mean implementation exists at `iw_pool.rs:390-410` (`WeightedPool::mean`, `#[allow(dead_code)]`, test-only) but is never called by the hot path, and **no test holds the two implementations together** — a textbook instance of this repo's own "fork with a good story" duplication anti-pattern. Two rounds of measurement (`iw_a_sum`/`iw_mean_w` diagnostic, gated behind `iw-diagnostics`, `Cargo.toml:40-52`, zero-cost when off) found the *shipped* `mean_w` spans only **1.03-1.27×** across references (not the originally-fitted-but-wrong-estimator's 15.3×) — real, uniform per-reference scale error on 144/372 features, structurally invisible to per-reference SROCC and landing entirely on pooled cross-image rank, but NOT the dominant non-photo driver (that's D1).
+
+**D6 — masked/IW weight itself is unbounded for HDR content.** `a=blur(|src-μ|)` is bounded for SDR (bounded input range) but `iw[i]=1+k_iw·a[i]` has no explicit cap and PU-linear/HDR inputs (`compute_pu_linear*`, `metric.rs:1616-1796`) have materially larger dynamic range — unaudited.
+
+### Diffmap fold (`diffmap.rs`) — confirms defect #3's structural claim directly in code, not just by inference
+
+**D7 — the diffmap can only ever read the basic-13 block.** `trained_multiscale_weights` (`diffmap.rs:279-369`) and `model_sensitivity_weights` (`diffmap.rs:388-439`, `custom-profiles`-gated) both hardcode `const FPC: usize = FEATURES_PER_CHANNEL_BASIC` (13) and index `weights[base..base+12]` for `base=scale_base+c·FPC` — peak/masked/IW (f156-371) are never referenced by any diffmap code path; this is a hardwired 13-wide window, not a missing `if`. Measured consequence (`benchmarks/mlp_diffmap_coherence_2026-07-18.md`): shipped **B** has ~38% of its weight mass on non-basic features → **G-STEER** deployable coherence (M3) ceilings at 0.66 vs a measured M2=1.0 gradient-linearization ceiling for *every* architecture tested (piecewise-linear MLPs have an exact local gradient). Basic-156-only models reach M3 0.66-0.85.
+
+**D8 — the `{mean, 4th, 2nd}` pooling triple has non-uniform true per-pixel gradients even where it IS spatializable.** `∂‖x‖₄/∂x_i ∝ x_i³` concentrates on high-error pixels; the mean's gradient is uniform `1/N`. A single scalar fold-weight per pooling type only approximates this (residual gap in the same doc, §"residual gap"). Compounding: additive/linear solves **sign-mix within a triple** (mean +w, 4th −w) to shape response curvature — this cancels real per-pixel information under a signed fold and requires an `abs`-fold workaround (`diffmap.rs:205-208` comment); MLP gradients don't sign-mix this way but the 372-feature linear ship (B) does.
+
+**D9 — KonJND/PJND signal partially lives in the excluded (D7) block.** Measured (`docs/TOP_MODELS_COOKBOOK.md:75-78`): basic-156-input top models score KonJND 0.271 / 0.335; the 372-feature shipped B scores 0.547 (still below the 0.70 G5 floor, but clearly carrying *more* near-threshold signal than basic-156 alone). Confirms the task's defect #4 directly — whatever peak/masked/IW carry for KonJND cannot reach the diffmap today.
+
+## (b) V2 SPEC — "perfectable features"
+
+**Principles**, each grounded:
+1. **Bounded by construction**, not by post-hoc clamp. SSIM's own founding paper states boundedness as a *design condition*, not an incidental property (Wang, Bovik, Sheikh, Simoncelli 2004, *IQA: From Error Visibility to Structural Similarity*, IEEE TIP 13(4); restated in Wang, Simoncelli, Bovik 2003, *Multiscale SSIM*, Asilomar 2003, Eq. 6: "SSIM(x,y) ≤ 1"). Zensim's own `d` formula violates its ancestor's contract by dropping C1.
+2. **One saturating-ratio family, reused everywhere.** GMSD (Xue, Zhang, Mou, Bovik 2013/2014, arXiv:1308.3052, Eq.4: `GMS=(2m_r·m_d+c)/(m_r²+m_d²+c)`, `c=0.0026`), FSIM (Zhang, Zhang, Mou, Zhang 2011, Eq.5-6, same shape with `T1/T2`), and DISTS (Ding, Ma, Wang, Simoncelli 2020, arXiv:2004.07728, `c1=c2=1e-6`) all converge on the identical `(2ab+c)/(a²+b²+c)` bounded-similarity form for "compare two non-negative magnitudes without one blowing up the ratio." This is literally SSIM-with-C1 restated — so the *same* fix (add C1) closes D1, and the *same shape* (applied to `var_src, var_dst`) closes D2/D3, with zero new machinery.
+3. **Spatializable = explicit per-pixel map, mean-pooled, nonlinearity applied last.** GMSD's own innovation (std-pooling, not mean) is itself spatializable because it is `mean_i[(GMS(i)-mean(GMS))²]` — the *deviation* is its own per-pixel map, pooled by an ordinary mean, with `sqrt` applied once at the very end (Eq.6, `gmsd.txt:207-217`). This is the direct template for fixing D8: don't ship `(mean d⁴)^0.25` as an opaque scalar — expose `dev4(i)=(d(i)-mean(d))⁴`-style per-pixel maps (or simpler, a per-pixel *deviation-from-mean* map) so the diffmap fold has an actual per-pixel quantity to weight, not an implicit gradient it has to approximate.
+4. **Weighted pooling = weight-map × signal-map, normalized-sum-pooled — never `Σ(w·v)/n`.** IW-SSIM's own formula (Wang & Li 2011, IEEE TIP 20(5), Eq.36/45-46) is `Σw_i·q_i/Σw_i`; FSIM's is the same shape (`ΣS_L(x)PC_m(x)/ΣPC_m(x)`, Eq.8). Zensim's masked/IW blocks currently match **neither** this canonical form nor its own dead-code reference (`iw_pool.rs`) — pick the paper's own `Σw·q/Σw` as the single canonical form and delete the divergent `iw_pool.rs` fork (fixes D5).
+5. **Replace hard max/L8 with a saturating saliency-weighted mean** (fixes D4). FSIM's `PC_m(x)=max(PC1,PC2)` used *as a weight*, not as the pooled quantity, shows the field's standard move: keep "worst region dominates" behavior via a **soft, bounded weight** (e.g. a normalized `softmax(β·d(i))` or `d(i)^p / Σd(j)^p`-style saliency map, `p` tunable), then pool as `Σ weight(i)·d(i) / Σ weight(i)` — exactly the D5 weighted-mean shape, reused. This is differentiable per-pixel by construction, unlike a hard max.
+
+**Per-block redesign:**
+
+| block | v1 (defect) | v2 replacement | bounded? | spatializable? |
+|---|---|---|---|---|
+| ssim mean/4th/2nd | no-C1 `d`, D1 | add `C1` to `num_m`: `num_m=(2μ1μ2+C1)/(μ1²+μ2²+C1)` (standard SSIM luminance term) | yes, ≤1 by construction | yes (per-pixel `d(i)` unchanged in shape) |
+| hf_gain/loss/mag | ratio, D2 | `(2·var_src·var_dst+c)/(var_src²+var_dst²+c)`-shaped GMSD-style bounded similarity, signed for gain vs loss | yes, (0,1] | yes |
+| art/det | ratio, D3 | same bounded-similarity shape on `diff_src, diff_dst` | yes | yes |
+| ssim_4th/2nd (moment) | opaque scalar, D8 | expose `dev_p(i)=|d(i)-mean(d)|^p` as its own per-pixel map (GMSD pattern), mean-pool, single root at the end | yes (bounded `d` ⇒ bounded `dev_p`) | yes, exactly |
+| peak/max/L8 | order stat, D4 | saliency-weighted mean: `Σ σ(d(i))·d(i) / Σ σ(d(i))`, `σ`=bounded saturating weight (FSIM pattern) | yes | yes |
+| masked | `mean(v·w)`, D5/D6 | `Σw_i·v_i/Σw_i` (IW-SSIM Eq.36 form), `w` from a bounded activity signal | yes if `w` bounded | yes, exactly |
+| IW | same, D5 | identical canonical form, opposite-polarity `w`; delete `iw_pool.rs`'s divergent second implementation, keep ONE weighted-mean helper used by both blocks | yes | yes |
+| MSE / IW weight on HDR | unaudited range, D6 | explicit `min(x, cap)` or divisive-normalize by PU-linear's own known max, audited for the HDR front-end specifically | yes | yes |
+
+**Cross-scale combination (optional, not required for the bounded/spatializable/sign-consistent bar):** MS-SSIM's own cross-scale combination is a **weighted geometric mean** with psychophysically-fit exponents `{0.0448, 0.2856, 0.3001, 0.2363}` (Wang, Simoncelli, Bovik 2003, Eq.7), not zensim's current linear per-scale blend. Worth a follow-on experiment but out of scope for a bounded/spatializable feature *extraction* redesign — flag, don't build. (**Confirmed still out of scope for iteration 1** — Part A did not touch cross-scale combination.)
+
+**Sign consistency:** every v2 signal above is a "higher = worse" bounded similarity/dissimilarity by construction (the GMSD/FSIM/SSIM family is naturally error-oriented once written as `1 - similarity`), so a diffmap fold never needs the `abs`-vs-`signed` fold ambiguity D8 documents for the current triple.
+
+## (c) NEAR-THRESHOLD (PJND) candidates, spatializable form
+
+Two independent literature families converge on the same per-pixel shape, and zensim already computes half of it:
+
+1. **Divisive-normalization transducer** (Mantiuk, Hanji, Ashraf, Asano, Chapiro 2024, *ColorVideoVDP*, SIGGRAPH 2024, arXiv:2401.11485, Eq.9-13): `D(x) = (ΔC(x))^p / (1 + C_mask(x))`, with an explicit final soft-clamp `D̂ = k_C·D/(k_C+D)`. This normalizes the **raw per-pixel error** by local masking energy *before* any further nonlinearity — importantly different from zensim's current masked block, which multiplies an *already-pooled dissimilarity* by a mask derived from reference-only activity. Recommendation: compute a genuine per-pixel `err(i)/(1+k·a(i))` map (numerator = raw XYB residual, not SSIM's `d`), mean-pool that as its own v2 feature. **(Built as `pjnd_transducer`, §A.3.)**
+2. **Mean gradient magnitude of the source alone** (Bondžulić, Pavlović, Stojanović et al. 2022, *PJND prediction for JPEG*, Vojnotehnički glasnik 70(2)): a plain per-pixel gradient-energy map of the *reference only*, mean-pooled, predicts first-JND PSNR at >92% correlation with no masking model at all — cheap, and structurally identical to zensim's existing `activity=blur(|src-μ|)` signal. The gap isn't the signal, it's what's done with it. **(Built as `pjnd_fragility`, §A.3 — implemented with a simple centered-difference L1 gradient rather than `activity`'s blurred-abs-residual, per the paper's literal "gradient magnitude" framing.)**
+3. **Validation target, not a feature**: KonJND++ (Chen, Lin, Wiedemann, Saupe 2023, QoMEX, arXiv:2306.07678) produces genuine per-pixel PJND-criticality maps (click-aggregated, Gaussian-blurred σ=35px) — use these to validate a v2 near-threshold feature's spatial agreement, don't try to hand-derive the feature from them. **(Not used in iteration 1 — no trainer/validation-corpus wiring yet; flagged as future validation work.)**
+4. **Content-conditioning caveat**: Liu, Zhu, Callet 2023 (*Bridge the Gap between VDP and JND*, MMSP 2023) measured near-zero correlation (PCC=0.008) between a *global scalar* VDP score and satisfied-user-ratio across different content at fixed score — a universal threshold constant is the wrong shape. This matches this repo's own already-falsified finding (`docs/DATASET_HISTORY.md` §3.21: raw-cvvdp-rank supervision helps AIC-3 but *hurts* KonJND monotonically) — any v2 near-threshold feature must be validated per-content-class, not assumed to transfer. **(Still an open validation question — iteration 1 has not trained anything against KonJND.)**
+
+## (d) COMPATIBILITY PLAN
+
+V1 (372 features, all 40+ shipped bakes, every canonical parquet under `/mnt/v/zen/zensim-training/canonical-2026-05-21/`) must not move a single bit. Exact seam, following this crate's own existing precedent (`training`/`classification`/`custom-profiles`/`iw-diagnostics` — all default-off, additive `Cargo.toml:38-77`):
+
+- **New cargo feature**, e.g. `feature-regime-v2`, default OFF. Gates new `pub` surface only; zero cost and zero behavior change when off (mirrors `iw-diagnostics`'s "adds only a sum; cannot change any feature value" pattern, `Cargo.toml:40-51`). **(Built exactly as specified, §A.2.)**
+- **New sibling constants**, not edits to existing ones: `FEATURES_PER_CHANNEL_BASIC=13` / `_WITH_PEAKS=19` / `_EXTENDED=25` / `_IW=6` (`metric.rs:3599-3643`) stay untouched; add `FEATURES_PER_CHANNEL_V2_*` alongside. **(Built exactly as specified — `FEATURES_PER_CHANNEL_V2_{BASIC,PEAK,MASKED,IW,PJND,TOTAL}`, §A.3.)**
+- **New API entry point**, not a new branch inside `compute_extended_features` (`metric.rs:1206`): a `Zensim::compute_v2_features(...)` (or a `FeatureRegime` enum threaded through a generalized `compute_with_regime`), returning its own result type or a `FeatureView`-like accessor tagged with the regime explicitly. `FeatureView::new` currently auto-detects tier by **vector length** (`metric.rs:3682-3704`) — this is a landmine for a v2 vector whose length could collide with a v1 length combination; a v2 accessor should carry an explicit regime tag rather than extend the length-sniffing. **(Built: `Zensim::compute_v2_features` calling a separate `compute_v2_features_impl`; `FeatureViewV2` is a distinct type with length VALIDATION not sniffing, `FeatureRegime` enum also present — see §A.4 for why both.)**
+- **`ProfileParams`** (`profile.rs:414-440`) already has the `extended_features`/`compute_iw_features` bool-flag precedent for "this profile needs a wider feature vector" — a v2-consuming profile adds an analogous `feature_regime_v2: bool` or a `FeatureRegime` field, default `V1`. **(Not built — no v2 profile/scoring exists yet, out of scope per the coordinator's iteration-1 brief.)**
+- **ZNPR v3 bake compatibility**: v2 bakes are new bake *content* (new feature count, new metadata declaring the regime) using the existing v3 wire format — no format change needed, per this repo's existing `zentrain.feature_transforms` metadata precedent (already used to signal per-bake input shaping). **(Not built — no v2 bake exists yet, correctly out of scope per the coordinator's brief.)**
+
+## (e) VALIDATION PLAN
+
+1. **Bounded-range assertions**, new — v1 currently has `is_finite()` checks (`metric.rs:4068,4792`) but **no upper-bound magnitude assertion anywhere** in the extractor (confirmed by grep; this absence is itself evidence of the gap). For v2: `assert!(f <= UPPER_BOUND)` per feature, run against (a) the existing `kadis_negrich` severe-tail corpus (`canonical-2026-07-15/train/kadis_negrich.parquet`, already the dedicated negative-dial-tail corpus) and (b) the `nonphoto_features_372col` held-out corpus (10,000 rows) plus a direct `o_9292.png`-class fixture (specific high-contrast-non-photo regression image already implicated in D1). Reuse the existing instrument pattern at `streaming.rs::tests::dump_ssim_moment_explosion` (`#[ignore]`) as the template — it already dumps the max raw `ScaleStats` field per image; extend it to assert bounds instead of just reporting. **(Iteration 1 built the SYNTHETIC adversarial-fixture version of this — §A.8 items b — and the 9-real-pair smoke test, §A.7. The `kadis_negrich`/`nonphoto_features_372col`/`o_9292.png` full-corpus versions are NOT run — v2 has no feature-parquet extraction pipeline yet, out of scope per the coordinator's brief, "the full-corpus 2.3M re-extraction" explicitly excluded.)**
+2. **Full-corpus scan, not sampled** — D1's 5.8e6 explosion was invisible on a 10,000-row held-out sample (0.03% incidence) and only surfaced on the 2.3M-row `bigcodec_hqdedup_traindigits_2026-07-02.parquet` full scan. Any v2 "no more explosions" claim needs the same full-scale sweep, not a holdout sample. **(Not run — explicitly out of scope for iteration 1.)**
+3. **V1 byte-stability regression** — since v2 is strictly additive (new opt-in function/feature-gate), the existing v1 test suite is already the stability gate: the invariant tests at `metric.rs:4700-4860` (`masked_ssim_mean ≤ ssim_mean`, `ssim_max ≥ ssim_4th ≥ ssim_mean`, etc.) and the `compute_all_features`/`FeatureView` length assertions (`metric.rs:4248-4665`) must all continue passing unmodified with `feature-regime-v2` both on and off. **(Verified, §A.8 — 103/103 v1 tests pass identically both configurations.)**
+4. **G-STEER reuse** — `zensim/examples/diffmap_block_coherence.rs --bake` and the `diffmap_basic_fraction` metric (`docs/MODEL_SELECTION_SCORECARD.md`) already measure exactly "what fraction of a trained model's weight mass is spatializable." A v2-trained model's target is `diffmap_basic_fraction ≈ 1.0` (all 372 v2 features spatializable, vs v1's structural ~62% cap) — this tool needs no changes to validate v2, just a v2-input bake to score. **(Not run — no v2 bake/scoring exists yet; correctly out of scope, "any change to diffmap.rs fold logic" explicitly excluded from iteration 1.)**
+5. **V2-vs-v1 trainability A/B, same recipe** — run the identical `zensim_mlp_train` recipe (same corpora, same `:both` RankNet+MSE loss per `benchmarks/final_metric_experiments_2026-07-18.md`) once on v1-372 and once on v2-of-equivalent-width, compare the full Mohammadi panel (SROCC/PLCC/KROCC/OR/PWRC/Z-RMSE) on CID22/KADID/TID/KonJND/nonphoto, **plus** the G-STEER coherence number specifically — the win condition is not "matches v1 rank" alone but "matches-or-beats v1 rank AND KonJND (closes D9) AND diffmap coherence (closes D7) simultaneously," per the two-panel (rank+dial) and now five-gate (`MODEL_SELECTION_SCORECARD.md`) discipline already standard in this repo. **(Not run — "trainer integration" explicitly out of scope for iteration 1; this is the natural iteration-2 deliverable once the bounded core here is reviewed and approved.)**
+
+---
+
+**Key files:** `zensim/zensim/src/metric.rs` (module doc 1-107, `ScaleStats` 587-653, `FeatureView` 3657-3960, vector assembly 3980-4059, new `compute_v2_features` method), `zensim/zensim/src/simd_ops.rs` (C2 const + SSIM kernels), `zensim/zensim/src/streaming.rs` (hot-path `finalize`, 451-550), `zensim/zensim/src/iw_pool.rs` (promoted `WeightedPool::mean`), `zensim/zensim/src/diffmap.rs` (fold restricted to basic-13, 279-439 — untouched by iteration 1), `zensim/zensim/src/profile.rs` (`ProfileParams`, 357-465 — untouched), `zensim/zensim/src/feature_v2.rs` (new, iteration 1), `zensim/zensim/examples/v2_bounds_smoke.rs` (new). Prior-session docs carried forward: `benchmarks/iw_pooling_normalization_2026-07-15.md`, `benchmarks/ssim_moment_explosion_2026-07-16.md`, `benchmarks/mlp_diffmap_coherence_2026-07-18.md`, `docs/MODEL_SELECTION_SCORECARD.md`, `docs/TOP_MODELS_COOKBOOK.md`.

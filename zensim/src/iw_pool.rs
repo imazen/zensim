@@ -383,13 +383,30 @@ fn compute_gradient(
 /// [`compute_iw_weights`]. Normalisation divides by the sum of weights
 /// (which equals N for unit weights, recovering the standard mean).
 ///
-/// **Crate-internal as of 0.3.0.** No external caller in the workspace
-/// uses these helpers. The streaming hot path fuses the same math into
-/// `streaming::process_strip_into_accum`.
-#[allow(dead_code)] // used only by iw_pool's #[cfg(test)] tests as a reference implementation
+/// **`mean` promoted 2026-07-18** to be the canonical pooling helper for
+/// the v2 "bounded" feature-extraction regime (`feature-regime-v2`,
+/// [`crate::feature_v2`]) — masked, IW, and soft-peak pooling all go
+/// through this one implementation (see
+/// `docs/FEATURE_V2_SPEC_2026-07-18.md` §(b) design principle 2, "one
+/// canonical form, reused everywhere"). It matches Wang & Li 2011's own
+/// IW-SSIM formula (`Σw·q/Σw`, Eq.36) exactly — v1's shipped hot path
+/// (`streaming.rs`, `1/n`-pooled) does NOT match this form and is
+/// unaffected by this promotion; see
+/// `benchmarks/iw_pooling_normalization_2026-07-15.md` for that
+/// divergence. `l2`/`l4` are not yet used by v2 iteration 1 (kept for
+/// parity / future use, individually `#[allow(dead_code)]` below) — v1's
+/// non-streaming path also still exists for offline experimentation.
+///
+/// Without `feature-regime-v2` this type's only caller is `iw_pool`'s own
+/// `#[cfg(test)]` module (a genuinely different build, where `mean` is
+/// live), so a plain non-test build with the feature off is correctly
+/// flagged dead code by rustc — `#[cfg_attr]`'d below rather than a
+/// blanket `#[allow]`, matching this crate's existing pattern for
+/// `ScaleStats::iw_mean_w` (`metric.rs`, `iw-diagnostics`-gated).
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
 pub(crate) struct WeightedPool;
 
-#[allow(dead_code)] // tests-only reference implementation; hot path is fused into streaming
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
 impl WeightedPool {
     /// Weighted mean: `(Σ w_i v_i) / Σ w_i`. Returns 0 if weight sum
     /// is below 1e-12.
@@ -407,6 +424,7 @@ impl WeightedPool {
     /// Weighted L2 norm: `√((Σ w_i v_i²) / Σ w_i)`. Square-root taken
     /// after weighted mean of squares so units match the underlying
     /// signal.
+    #[allow(dead_code)] // not used by v2 iteration 1 (bounded-basic block doesn't need weighted L2 pooling yet); kept for parity/future use
     pub(crate) fn l2(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;
@@ -421,6 +439,7 @@ impl WeightedPool {
     /// Weighted L4 norm: `((Σ w_i v_i⁴) / Σ w_i)^(1/4)`. Matches the
     /// basic feature block's L4 ("`ssim_4th`") which emphasises peak
     /// errors.
+    #[allow(dead_code)] // not used by v2 iteration 1 (bounded-basic block doesn't need weighted L4 pooling yet); kept for parity/future use
     pub(crate) fn l4(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;
