@@ -75,6 +75,17 @@ fn main() {
     let pairs = load_pairs_tsv(&args[0]);
     eprintln!("{} pairs from {}", pairs.len(), args[0]);
 
+    // ZENSIM_AB_MODE: "ext" (default, v1-372 ++ v2-348 = 720) | "v1" (372 only)
+    // | "v2" (348 only). For the clean 3-way timing bench — same binary, same
+    // decode path, only the compute set changes.
+    let mode = std::env::var("ZENSIM_AB_MODE").unwrap_or_else(|_| "ext".into());
+    let (do_v1, do_v2) = match mode.as_str() {
+        "v1" => (true, false),
+        "v2" => (false, true),
+        "none" => (false, false), // decode-only, for timing decomposition
+        _ => (true, true),
+    };
+
     let mut n_feat_seen = std::sync::atomic::AtomicUsize::new(0);
     let rows: Vec<String> = pairs
         .par_iter()
@@ -93,31 +104,36 @@ fn main() {
                 eprintln!("SKIP dim mismatch: {:?}", p.dist_path);
                 return None;
             }
+            let mut combined: Vec<f64> = Vec::new();
             // FROZEN v1-372 block (extended + iw = 372 features), same config
             // extract_features_372col uses.
-            let mut cfg = ZensimConfig::default();
-            cfg.extended_features = true;
-            cfg.compute_iw_features = true;
-            let v1 = match compute_zensim_with_config(&r_px, &d_px, rw, rh, cfg) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("SKIP v1 compute error {:?}: {e:?}", p.dist_path);
-                    return None;
-                }
-            };
+            if do_v1 {
+                let mut cfg = ZensimConfig::default();
+                cfg.extended_features = true;
+                cfg.compute_iw_features = true;
+                let v1 = match compute_zensim_with_config(&r_px, &d_px, rw, rh, cfg) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("SKIP v1 compute error {:?}: {e:?}", p.dist_path);
+                        return None;
+                    }
+                };
+                combined.extend_from_slice(v1.features());
+            }
             // v2-348 block, same pixels.
-            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
-            let v2 = match z
-                .compute_v2_features(&RgbSlice::new(&r_px, rw, rh), &RgbSlice::new(&d_px, dw, dh))
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("SKIP v2 compute error {:?}: {e:?}", p.dist_path);
-                    return None;
-                }
-            };
-            let mut combined = v1.features().to_vec();
-            combined.extend_from_slice(v2.features());
+            if do_v2 {
+                let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+                let v2 = match z
+                    .compute_v2_features(&RgbSlice::new(&r_px, rw, rh), &RgbSlice::new(&d_px, dw, dh))
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("SKIP v2 compute error {:?}: {e:?}", p.dist_path);
+                        return None;
+                    }
+                };
+                combined.extend_from_slice(v2.features());
+            }
             n_feat_seen.store(combined.len(), std::sync::atomic::Ordering::Relaxed);
             let base = p
                 .ref_path

@@ -746,6 +746,10 @@ direct comparison). "After" = this pass's final state, measured post-bfs-kill (2
 the 256/576/1024 groups below were measured slightly earlier, some overlapping the noise spike —
 flagged per-row):
 
+> **⚠ SUPERSEDED (2026-07-19):** these AFTER ratios (~4.35× @1MP) are stale vs the
+> current binary. Direct 4-mode measurement on real images: v2/v1 compute ≈ **1.4–1.7×**
+> (size-dependent), extended-720/v2 ≈ **1.5× wall**. See `benchmarks/v2_extraction_timing_2026-07-19.md`.
+
 | size | pixels | v1 1-thread (ms) | v2 1-thread BEFORE (ms) | v2 1-thread AFTER (ms) | ratio BEFORE | ratio AFTER | v2 N-thread BEFORE (ms) | v2 N-thread AFTER (ms) |
 |--:|--:|--:|--:|--:|--:|--:|--:|--:|
 | 256² | 65,536 | 3.8 | 9.6 | 10.5 | 2.53x | 2.76x | 10.3 | 6.2 |
