@@ -321,12 +321,44 @@ the diffmap fold cannot represent per-pixel):
 The flagged risk (combining re-admits v1's non-spatializable features) does NOT
 materialize — it inverts. The v2 block carries the MOST sensitivity mass (54.4%)
 and is entirely spatializable, so it crowds v1's peak/masked/iw down from 46.7%
-(frozen v1) to 20.5% (combined). Combined is **79.5% spatializable vs v1's 53.3%**,
-well under shipped-B's 38% non-basic (M3 ceiling 0.66). So combining wins BOTH the
-compression rank axis AND closed-loop coherence. The two-headed split may be
-unnecessary — the combined model is already coherence-dominant. (Proxy, not full
-M3; the fold extension to read the v2 block would confirm the absolute number, but
-the 20.5% vs 46.7% direction is unambiguous.)
+(frozen v1) to 20.5% (combined). Combined is **79.5% spatializable vs v1's 53.3%**.
+
+### Steering composition (`v2_steer_by_family.py`, 4 corpora)
+
+The 20% residual non-spat is ENTIRELY v1's peak/masked/iw. v2 families carry:
+basic ~16%, soft-peak/iw/masked ~7-10% each, **blockiness ~5%** (contradicts the
+v2-alone demote), banding/ringing ~2-4%, **transducers ~1% + GMS ~2% (near-dead
+weight in the combined model)**.
+
+### Coherence-maxed: deprecate v1-nonspat → 100% spatializable at ~0 compression cost
+
+`dec_extlumacoh` = ext-luma + f156-371 (v1 peak/masked/iw) MASKED. v2's bounded
+soft-peak/masked/iw replace them:
+
+| model | spatializable | CID22 | aic3 | CSIQ | LIVE |
+|---|--:|--:|--:|--:|--:|
+| v1 (372) | 53.3% | 0.652 | 0.558 | 0.383 | 0.573 |
+| ext-luma (720) | 79.5% | 0.657 | 0.661 | 0.267 | 0.604 |
+| ext-lumacoh | **100.0%** | 0.650 | 0.644 | 0.346 | 0.624 |
+
+Deprecating v1's non-spatializable block costs almost nothing on compression
+(CID22 −0.007, aic3 −0.017 vs ext-luma) and RECOVERS CSIQ (+0.079) + improves LIVE
+— the v2 bounded replacements carry the signal in foldable form. The "perfectable"
+features do their intended job: they let us RETIRE the features that broke closed-
+loop steering. (Single seed; the structural finding — v1-nonspat is the entire
+coherence drag, v2 replaces it — is robust; exact CSIQ/LIVE deltas are seed-noisy.)
+
+### Formula-tweak shortlist (evidence-grounded)
+
+- **PERF**: transducer bank → luma-only + keep core k=4 only (~1% mass, costs CID22);
+  drop `edge_width` (the one non-per-pixel v2 feature, ~1%). Both near-free on the
+  compression axis.
+- **UTILITY**: GMS → add deviation pooling (real GMSD — std of the GMS map, reusing
+  the materialized map; GMS is underused at ~2% because it's mean-pooled).
+- **KEEP**: blockiness (5% in combined, data overrides the v2-alone demote).
+- **DEPRECATE**: v1 peak/masked/iw (f156-371) — the coherence experiment above.
+- Full M3 (fold reading the v2 block) is the remaining measurement; the 100%
+  spatializable-mass result makes it near-certain to be high.
 
 ## Reproduction
 
