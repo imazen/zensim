@@ -55,17 +55,26 @@ Then return here. `SESSION-RESUME.md` is the canonical entry point —
 it points at every other doc + lists the current critical-path
 tasks. Reading order on resume:
 
-1. [`SESSION-RESUME.md`](SESSION-RESUME.md) — current state, ~2 min
-2. This doc (`CLAUDE.md`) — methodology + workflow + gotchas
-3. [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) — **the traceability
+1. [`SESSION-RESUME.md`](SESSION-RESUME.md) — current state, ~1 min
+2. [`docs/TOP_MODELS_COOKBOOK.md`](docs/TOP_MODELS_COOKBOOK.md) — **the validated
+   science + exact reproduction of the top models + the new-model loop + the
+   pitfall list.** THE entry point for any model work (2026-07-18).
+3. [`docs/MODEL_SELECTION_SCORECARD.md`](docs/MODEL_SELECTION_SCORECARD.md) —
+   the five-gate exam (RANK/DIAL/STEER/RD/TARGET) every ship candidate takes.
+4. This doc (`CLAUDE.md`) — methodology + workflow + gotchas. **NOTE: the V0_x /
+   PreviewV0_5-era status sections below are HISTORICAL; the cookbook supersedes
+   them for current state.**
+5. [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) — **the traceability
    spine**: how a number chains back to bytes (verdict → bake sha → manifest →
    input shas → trainer commit), which gate enforces each link, and the honest
    list of gaps. Read before making or citing any measurement.
-4. [`CONTEXT-HANDOFF.md`](CONTEXT-HANDOFF.md) — yesterday's snapshot
-5. [`RESEARCH.md`](RESEARCH.md) — corpus map + workflow recipes
-6. [`benchmarks/INDEX.md`](benchmarks/INDEX.md) — find prior
-   experiments
-7. Run `TaskList` and work on the lowest unblocked task
+6. [`RESEARCH.md`](RESEARCH.md) — corpus map + workflow recipes
+7. [`benchmarks/INDEX.md`](benchmarks/INDEX.md) — find prior experiments
+8. Run `TaskList` and work on the lowest unblocked task
+
+(CONTEXT-HANDOFF.md is DELETED — handoff files are banned; durable facts live in
+the docs above. The IQA literature corpus is `~/work/zen/zenpapers` — search it
+before designing features or metrics.)
 
 ## RECURRING PRIORITIES + ASSETS — do not re-forget (consolidated 2026-07-16)
 
