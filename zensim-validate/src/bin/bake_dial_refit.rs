@@ -73,6 +73,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Fit + inject an output-calibration spline for an ARBITRARY spline-less
+    /// bake (incl. MLPs) — the generic sibling of `shared-anchor`, which is
+    /// linear-only. Forwards through `zenpredict::Predictor` (transform-safe
+    /// `predict_transformed` dispatch), fits the shared `fit_spline_knots`,
+    /// re-emits every layer VERBATIM (f32/f16 dtypes preserved) with only the
+    /// spline metadata entry added. Rank-invariant by construction.
+    /// Added 2026-07-18 to give the Ebothg winner MLP a dial (scorecard P1).
+    AddSpline(AddSplineArgs),
     /// Extend ONLY the output spline's top by a training-fitted concave
     /// saturation (reproduces `dense_dial_refit_b.py`).
     ExtendTop(ExtendTopArgs),
@@ -543,6 +551,166 @@ fn metadata_with_spline(model: &Model, new_spline: &[u8]) -> Vec<OwnedMeta> {
 }
 
 // --------------------------------------------------------------------------
+// subcommand: add-spline  (generic, MLP-capable — 2026-07-18)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct AddSplineArgs {
+    #[arg(long = "in")]
+    input: PathBuf,
+    #[arg(long)]
+    out: PathBuf,
+    /// Anchor parquet (`f0..fN` + `--target-col`).
+    #[arg(long)]
+    anchor: PathBuf,
+    #[arg(long, default_value = "target_score")]
+    target_col: String,
+    #[arg(long, default_value = "f")]
+    feat_prefix: String,
+    /// Multiply the anchor target by this before fitting.
+    #[arg(long, default_value_t = 1.0)]
+    target_scale: f64,
+    /// Percentile-edge count for `fit_spline_knots`.
+    #[arg(long, default_value_t = 18)]
+    n_edges: usize,
+}
+
+fn cmd_add_spline(a: &AddSplineArgs) -> Result<(), String> {
+    let bytes = std::fs::read(&a.input).map_err(|e| format!("read {:?}: {e}", a.input))?;
+    let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
+    if spline::extract(&model).is_some() {
+        return Err(
+            "bake already carries an output-calibration spline — add-spline is for \
+             spline-less bakes (use shared-anchor semantics for a refit, which would \
+             otherwise compound two splines)"
+                .into(),
+        );
+    }
+    if !model.feature_bounds().is_empty() {
+        return Err(format!(
+            "bake carries {} feature_bounds entries; add-spline does not round-trip \
+             bounds yet — extend emit_full first (fail-loud beats silent drop)",
+            model.feature_bounds().len()
+        ));
+    }
+    let n_in = model.n_inputs();
+
+    // Forward the anchor through the PRODUCTION predictor (transform-safe).
+    let (feats, tgt) = read_features(&a.anchor, &a.feat_prefix, n_in, &a.target_col);
+    let transformed = model.has_nontrivial_feature_transforms();
+    let mut predictor = zenpredict::Predictor::new(&model);
+    let mut preds = Vec::with_capacity(feats.len());
+    let mut xbuf = vec![0f32; n_in];
+    for row in &feats {
+        for (d, s) in xbuf.iter_mut().zip(row.iter()) {
+            *d = *s as f32;
+        }
+        let out = if transformed {
+            predictor.predict_transformed(&xbuf)
+        } else {
+            predictor.predict(&xbuf)
+        }
+        .map_err(|e| format!("predictor forward: {e:?}"))?;
+        preds.push(out[0] as f64);
+    }
+    let tgt_scaled: Vec<f64> = tgt.iter().map(|&t| t * a.target_scale).collect();
+
+    let (cx, cy) = fit_spline_knots(&preds, &tgt_scaled, a.n_edges, true);
+    if cx.len() < 2 {
+        return Err(format!("anchor fit produced only {} knots (<2)", cx.len()));
+    }
+    eprintln!(
+        "add-spline: n={} anchor rows, raw pred range [{:.3}, {:.3}], {} knots, dial y-range [{:.1}, {:.1}]",
+        preds.len(),
+        preds.iter().cloned().fold(f64::INFINITY, f64::min),
+        preds.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        cx.len(),
+        cy[0],
+        cy[cy.len() - 1]
+    );
+
+    let metadata = metadata_with_spline(&model, &spline_payload(&cx, &cy));
+    let sz = emit_full(&a.out, &model, &metadata).map_err(|e| format!("write {:?}: {e}", a.out))?;
+    eprintln!("emitted {:?} ({sz} B)", a.out);
+    Ok(())
+}
+
+/// Re-emit an arbitrary bake VERBATIM (every layer, dtype-preserving) with
+/// replacement metadata — the MLP-capable sibling of [`emit_linear`]. f16
+/// weights round-trip exactly; i8 layers error (extend when needed).
+fn emit_full(out: &Path, model: &Model, metadata: &[OwnedMeta]) -> std::io::Result<usize> {
+    struct OwnedLayer {
+        in_dim: usize,
+        out_dim: usize,
+        activation: Activation,
+        dtype: WeightDtype,
+        weights: Vec<f32>,
+        biases: Vec<f32>,
+    }
+    let mut owned: Vec<OwnedLayer> = Vec::with_capacity(model.n_layers());
+    for l in model.layers() {
+        let (dtype, weights) = match &l.weights {
+            WeightStorage::F32(w) => (WeightDtype::F32, w.to_vec()),
+            WeightStorage::F16(w) => (
+                WeightDtype::F16,
+                w.iter().map(|b| f16_bits_to_f32(*b)).collect(),
+            ),
+            WeightStorage::I8 { .. } => {
+                return Err(std::io::Error::other(
+                    "emit_full: i8 layers not supported yet (extend the dequant like repack)",
+                ));
+            }
+        };
+        owned.push(OwnedLayer {
+            in_dim: l.in_dim,
+            out_dim: l.out_dim,
+            activation: l.activation,
+            dtype,
+            weights,
+            biases: l.biases.to_vec(),
+        });
+    }
+    let layers: Vec<BakeLayer<'_>> = owned
+        .iter()
+        .map(|l| BakeLayer {
+            in_dim: l.in_dim,
+            out_dim: l.out_dim,
+            activation: l.activation,
+            dtype: l.dtype,
+            weights: &l.weights,
+            biases: &l.biases,
+        })
+        .collect();
+    let md: Vec<BakeMetadataEntry<'_>> = metadata
+        .iter()
+        .map(|m| BakeMetadataEntry {
+            key: &m.key,
+            kind: m.kind,
+            value: &m.value,
+        })
+        .collect();
+    let bytes = bake(&BakeRequest {
+        schema_hash: 0,
+        flags: 0,
+        scaler_mean: model.scaler_mean(),
+        scaler_scale: model.scaler_scale(),
+        layers: &layers,
+        feature_bounds: &[],
+        metadata: &md,
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: true,
+        hu_permutations: None,
+    })
+    .expect("serialize ZNPR v3 bake");
+    std::fs::write(out, &bytes)?;
+    Ok(bytes.len())
+}
+
+// --------------------------------------------------------------------------
 // subcommand: shared-anchor  (reproduces shared_anchor_refit.py core)
 // --------------------------------------------------------------------------
 
@@ -866,6 +1034,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result: Result<bool, String> = match &cli.cmd {
+        Cmd::AddSpline(a) => cmd_add_spline(a).map(|_| false),
         Cmd::ExtendTop(a) => cmd_extend_top(a).map(|_| false),
         Cmd::SharedAnchor(a) => cmd_shared_anchor(a).map(|_| false),
         Cmd::BottomExtend(a) => cmd_bottom_extend(a).map(|_| false),

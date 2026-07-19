@@ -136,25 +136,18 @@ def main():
         drivers = sorted({c["label"] for c in zj} - {"global"})
         out.append("\n## zenjpeg — bytes saved vs `global` baseline at equal judged score\n")
         out.append(fmt_saved(helpful(zj, "global", judges, "zenjpeg"), drivers))
-        out.append("\n### efficiency + targeting residual (B-scale drivers)\n")
+        out.append("\n### efficiency + targeting residual (each driver on its OWN dial)\n")
         out.append("| driver | med passes | med ms | med abs(achieved−T) | n |")
         out.append("|---|---|---|---|---|")
-        for d in ["global", "aq", "picker"]:
+        for d in sorted({c["label"] for c in zj}):
             v = [c for c in zj if c["label"] == d]
-            if not v:
-                continue
-            res = [abs(c["achieved"] - c["target"]) for c in v]
+            res = [abs(c["achieved"] - c["target"]) for c in v
+                   if not math.isnan(c["achieved"])]
+            res_s = f"{st.median(res):.2f}" if res else "n/a (one-shot, no measure)"
             out.append(
                 f"| {d} | {st.median([c['passes'] for c in v]):.0f} "
                 f"| {st.median([c['ms'] for c in v]):.0f} "
-                f"| {st.median(res):.2f} | {len(v)} |"
-            )
-        v = [c for c in zj if c["label"] == "aq_add156_abs"]
-        if v:
-            res = [abs(c["achieved"] - c["target"]) for c in v]
-            out.append(
-                f"| aq_add156_abs (own dial) | {st.median([c['passes'] for c in v]):.0f} "
-                f"| {st.median([c['ms'] for c in v]):.0f} | {st.median(res):.2f} | {len(v)} |"
+                f"| {res_s} | {len(v)} |"
             )
 
     text = "\n".join(out) + "\n"
