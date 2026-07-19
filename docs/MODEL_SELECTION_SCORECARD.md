@@ -54,6 +54,25 @@ policy); G-DIAL → the BHdr dial grid; G-STEER → PU-linear pairs through the 
 **screen every BHdr candidate on `diffmap_basic_fraction` before training** — the 2026-07-18
 audit measured shipped BHdr at 0.43 (57% of its steer mass unspatializable).
 
+**HDR steer-mass landscape (measured 2026-07-18, 63 bakes across the linear-probe HDR
+families — family medians of `diffmap_basic_fraction`):**
+
+| family | med steer mass | n | note |
+|---|--|--|---|
+| hdrbroadplh1 (shaped, lasso) | **0.963** | 1 | most steerable HDR bake measured |
+| hdriwmix (iwssim-teacher mixes) | 0.762 | 7 | steerable family |
+| canonhdr40 / canonhdr15 / canonkjhdr15 | 0.58–0.65 | 18 | canonhdr15-bvls = the KonJND-HDR record holder (0.6696) |
+| **bhdr_linear_shaped_cvvdpmix (SHIPPED)** | **0.435** | 1 | 57% unspatializable |
+| hdriw | 0.359 | 7 | |
+| hdrmix (shaped/anchored lineage) | 0.161 | 16 | |
+| hdr / bhdr_anchored2 / hdrcodc | 0.01–0.07 | 6 | effectively unsteerable |
+
+Implication: the shipped BHdr's whole shaped/anchored lineage is a steering dead-end; if the
+HDR closed loop matters, the next BHdr campaign should start from (or constrain toward) the
+hdrbroadplh1/hdriwmix/canonhdr families and hold the UPIQ guard — do NOT train more hdrmix-
+shaped variants and hope the map follows. Rank-vs-steer for these families must be settled by
+the HDR G-RD leg, not another proxy.
+
 ## Provenance
 
 Scorecard rows live in each bake's `.metrics.json` sidecar (+ probe TSVs under
