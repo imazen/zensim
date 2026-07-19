@@ -162,12 +162,57 @@ def build_cid22val():
     print(f"CID22-val: {len(out)} pairs -> {OUT}  (skipped {miss})")
 
 
+def build_aic3():
+    """AIC-3 CTC held-out gate (v2 backfill): ref=original/{img}.png,
+    dist=decoded/{img}/{codec}_{img}_{q}.png, human=score.jnd (signed JND;
+    verdict uses |SROCC| so orientation is fine). HOLDOUT-ONLY."""
+    root = Path("/mnt/v/dataset/aic3_ctc_epfl")
+    OUT = "/mnt/v/output/zensim/v2-ab-2026-07-19/aic3_pairs_ab.tsv"
+    out, miss = [], 0
+    with open(root / "decoded/info.csv") as f:
+        for r in csv.DictReader(f):
+            img, codec, q = r["img.name"], r["codec"], r["quality"]
+            ref = root / "original" / f"{img}.png"
+            dist = root / "decoded" / img / f"{codec}_{img}_{q}.png"
+            if ref.exists() and dist.exists():
+                out.append((str(ref), str(dist), r["score.jnd"]))
+            else:
+                miss += 1
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"AIC-3: {len(out)} pairs -> {OUT}  (skipped {miss})")
+
+
+def build_safesyn_jpeg_full():
+    """Full safesyn JPEG training mass (v2 backfill, ALL 3,218 sources — up
+    from the 1,100-source lab slice). decoded_path is the .jpg BITSTREAM
+    (zenjpeg-decodable; the deleted PNG cache is irrelevant to JPEG rows).
+    human = gpu_ssimulacra2/100 (production ssim2-shaped target)."""
+    OUT = "/mnt/v/output/zensim/v2-ab-2026-07-19/safesyn_jpeg_FULL_pairs_ab.tsv"
+    out = []
+    with open("/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv") as f:
+        for r in csv.DictReader(f):
+            if r["decoded_path"].endswith(".jpg"):
+                out.append((r["source_path"], r["decoded_path"],
+                            float(r["gpu_ssimulacra2"]) / 100.0))
+    srcs = len({s for s, _, _ in out})
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"safesyn JPEG FULL: {len(out)} pairs from {srcs} sources -> {OUT}")
+
+
 BUILDERS = {
     "csiq": build_csiq,
     "live": build_live,
     "kadid": build_kadid,
     "tid": build_tid,
     "cid22val": build_cid22val,
+    "aic3": build_aic3,
+    "safesyn_jpeg_full": build_safesyn_jpeg_full,
 }
 
 if __name__ == "__main__":
