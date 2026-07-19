@@ -53,7 +53,34 @@ Hidden 128 (default), lr 1e-3 cosine, target `human_score` (default), target-sca
 
 Artifacts: `/mnt/v/output/zensim/v2-ab-2026-07-19/` (feature CSVs, bakes, train logs).
 
-## Results
+## Recipe-1 result: INSTRUMENT FAILURE (control arm), no substrate verdict
+
+Recipe-1 (cross-image rank-only — `both` was inert since global `--mse-weight`
+defaults 0) produced models that memorize the train corpora and do not transfer.
+Established on the CONTROL (v1/372) arm BEFORE unblinding the v2 arm — see
+AMENDMENT 1 in the pre-registration. Endpoint forward+panel on the saved bakes
+(`recipe1_endpoint_panels.json`):
+
+| corpus | v1-arm SROCC | v2-arm SROCC | shipped-B SROCC (same rows) |
+|---|--:|--:|--:|
+| kadid (train) | +0.864 | +0.926 | +0.809 |
+| tid (train) | +0.894 | +0.947 | +0.779 |
+| CID22-val (held-out) | +0.182 | +0.266 | +0.882 |
+| CSIQ (held-out) | +0.058 | +0.153 | +0.934 |
+| LIVE-R2 (held-out) | +0.211 | +0.481 | +0.897 |
+
+The shipped-B column is the data-integrity control: the extracted rows carry the
+signal; the recipe failed to learn it. Beat-train / lose-held-out is the
+memorization signature (106 total references; the net learns per-reference
+feature identity). The v2 arm was directionally better on every corpus under the
+broken recipe (LIVE +0.27, CID22 +0.08) — RECORDED, NOT VERDICTED: a broken
+instrument's deltas are not evidence per the pre-registered bands.
+
+Mechanical footnote: `:withinref` requires ref identity, which the trainer only
+carries for parquet inputs — the arm CSVs were converted to parquet (pyarrow,
+zstd) for recipe-2; identical rows.
+
+## Recipe-2 results (withinref,both + --mse-weight 1.0)
 
 _(pending — filled after both arms complete)_
 
@@ -67,4 +94,6 @@ _(pending — filled after both arms complete)_
 ## Verdict per pre-registered bands
 
 _(pending)_ WIN = v2 ≥ v1 − 0.010 on the mean AND ≥ v1 − 0.020 each;
-KILL = v2 ≤ v1 − 0.030 on any; between → seed-7 replicate.
+KILL = v2 ≤ v1 − 0.030 on any; between → seed-7 replicate. Amendment-1 usability
+gate first: recipe-2 control arm must reach CID22-val ≥ 0.55 or the lab-recipe
+path is declared unable to answer the question.
