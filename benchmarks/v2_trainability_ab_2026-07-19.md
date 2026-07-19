@@ -162,6 +162,44 @@ Interpretation rules (fixed now): a variant "recovers CID22" if ≥ 0.598 (contr
 − 0.020); a variant "carries LIVE" if dropping it loses ≥ 0.10 LIVE vs full-v2.
 Attribution only — no ship/kill semantics; feeds the next feature-design round.
 
+### Ablation results (`ablation_recipe3_panels.json`)
+
+| model | width | CID22-val | CSIQ | LIVE-R2 |
+|---|--:|--:|--:|--:|
+| v1 control | 372 | 0.6180 | 0.3156 | 0.4385 |
+| full v2 | 348 | 0.5761 | 0.3113 | 0.6543 |
+| v2-base22 (no candidates) | 264 | 0.5197 | 0.3053 | 0.3158 |
+| v2-noBB (no blockiness/banding) | 324 | **0.6047** | 0.2554 | 0.6345 |
+| v2-noPJND (no transducer family) | 300 | **0.6707** | 0.1829 | 0.5733 |
+
+### Attribution (per the fixed rules)
+
+1. **The CID22 cost is the masking-transducer family** (locals 20/21/23/24):
+   dropping it moves CID22 0.576 → **0.671 — above the v1 control**. Blockiness+
+   banding cost a further ~0.03 (noBB recovers to 0.605 ≥ the 0.598 bar).
+2. **The LIVE win is carried by the phase-2 candidates jointly**: dropping all of
+   them collapses LIVE 0.654 → 0.316 (below control). GMS is the largest single
+   carrier — it is retained in both recovering variants (LIVE 0.635/0.573) and is
+   positive-or-free on CID22 (noPJND, which keeps GMS, has the best CID22 of any
+   model measured). Transducers contribute ~0.06–0.08 of LIVE and are the main
+   CSIQ carrier (0.311 → 0.183 without them — CSIQ's noise/contrast distortions
+   reward masking models).
+3. **No variant dominates all three corpora** — the transducer family trades
+   CID22 against CSIQ+LIVE. Under the strict any-corpus −0.030 band, full-v2
+   fails on CID22 and both recovering variants fail on CSIQ. At lab scale the
+   substrate question decomposes per-family; there is no single v2-vs-v1 winner.
+4. Small-n caveat: CSIQ 866 / LIVE 779 pairs, single seed — CIs ±0.03–0.05. The
+   load-bearing effects (LIVE −0.34 on base22, CID22 +0.095 on noPJND) are far
+   beyond noise; noBB's CID22 +0.029 is borderline.
+
+### Prescribed next design (documented, not run — a feature-design decision)
+
+The transducer bank's k∈{1,4,16} was set by construction, never fit; its CID22
+cost with CSIQ/LIVE value suggests recalibration (fit k, or gate transducers to
+luma-only) rather than deletion. GMS graduates: strongest candidate, no measured
+downside. Blockiness+banding remain demotion candidates (consistent with their
+per-feature screens: 0.202 "wrong jury" / 0.246).
+
 ## Reproduction
 
 All artifacts: `/mnt/v/output/zensim/v2-ab-2026-07-19/` — per-arm per-corpus
