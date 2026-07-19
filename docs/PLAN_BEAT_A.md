@@ -1,5 +1,7 @@
 # PLAN_BEAT_A.md — beating Profile::A as a KNOB and as an RD-LOOP metric
 
+> **⚠ BANNER 2026-07-18:** goal ACHIEVED 2026-07-04 (the deterministic-linear route beat A). Superseded as entry point by `docs/TOP_MODELS_COOKBOOK.md`; kept for the evidence trail.
+
 > **STATUS 2026-07-04 — A IS BEATEN (deterministic linear route).**
 > `lp_ens-Pline-cid80-anchored` (823 B) beats A on 7/9 panel axes (CID22
 > 0.8733 vs 0.8657, KonJND 0.5439 vs 0.4185) with dial gates green;

@@ -1,5 +1,7 @@
 # Migration plan: `ZensimProfile::A` → `ZensimProfile::B`
 
+> **⚠ BANNER 2026-07-18: SHIPPED 2026-07-12** — `codec_target()`/`latest_preview()`/`latest()` all return B (the header's 'PLANNING ONLY' is obsolete). See `docs/PROFILE_B_ROUTING_DESIGN_2026-07-05.md` + README.md. Kept for its file:line survey rigor.
+
 **Status:** PLANNING ONLY. No consumer code has been touched. This document is
 a survey + phased plan; execution is future work, tracked per-phase below.
 

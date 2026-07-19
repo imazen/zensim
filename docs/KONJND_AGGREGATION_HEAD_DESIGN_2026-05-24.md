@@ -1,5 +1,7 @@
 # Konjnd-dense per-source aggregation head — design (2026-05-24)
 
+> **⚠ BANNER 2026-07-18:** implemented + tested since (v42 sweep): clears KonJND G5 but craters CID22/KADID/TID/AIC-3 — Pareto tension; FALSIFIED as a G5 fix (CLAUDE.md V39-learnings #9).
+
 **Task #4.** Architectural work in the Rust trainer to unblock the
 KonJND training budget. Currently `konjnd-dense` can only carry weight
 ≤ 0.02 because higher weights cause per-pair MSE to push the network

@@ -1,5 +1,7 @@
 # Two-trail SOTA tracker
 
+> **⚠ HISTORICAL (banner 2026-07-18):** the Tuner/Balanced/Compression trail framework here predates Profile A/B entirely. Current process = `docs/MODEL_SELECTION_SCORECARD.md`; current state = `docs/TOP_MODELS_COOKBOOK.md`.
+
 zensim ships TWO PreviewV0_5 variants in parallel, each defending a
 different Pareto frontier. This doc is the source of truth for what
 ships on each trail, what's been falsified against each trail's gate,

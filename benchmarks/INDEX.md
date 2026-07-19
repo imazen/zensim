@@ -1,5 +1,7 @@
 # `benchmarks/` — INDEX
 
+> **⚠ BANNER 2026-07-18:** this index STOPS at 2026-05-15 — its 'ship a new bake' reading order is obsolete (points at v0_18 methodology). For 2026-06/07 work (five-gate scorecard, RD probe, diffmap coherence, additive-vs-MLP correction, HDR steer screen) start from `docs/TOP_MODELS_COOKBOOK.md` or `ls benchmarks/*2026-0[67]*.md`.
+
 Methodology docs, falsification logs, sweep outputs, perf
 benchmarks, and bake binaries. 76 markdown files as of 2026-05-16,
 organized by theme + chronology. Each entry is one line:

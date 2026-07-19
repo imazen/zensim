@@ -1,5 +1,7 @@
 # Codec-target metric — integration guide
 
+> **⚠ STALE — REWRITE PENDING (banner 2026-07-18):** `codec_target()` returns **`ZensimProfile::B`** since 2026-07-12 (NOT A/V39 as stated below), and the 'three production trails' framing predates A/B. Trust `zensim/src/profile.rs` + `docs/MODEL_SELECTION_SCORECARD.md`; the alias table below is broken.
+
 **Stable alias:** `ZensimProfile::codec_target()` → `ZensimProfile::A`.
 
 ## Variant → backing bake mapping (THE single source of truth)

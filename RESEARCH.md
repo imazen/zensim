@@ -1,5 +1,7 @@
 # zensim research guide
 
+> **⚠ STALE — REWRITE PENDING (banner 2026-07-18):** the bakes inventory + Workflow A below are Tuner-trail/228-feature-era fossils (wrong architecture, wrong corpus roots). Use `docs/TOP_MODELS_COOKBOOK.md` for training workflows and `canonical-2026-05-21/` for corpora. Corpus-location tables below are still mostly valid; verify paths before use.
+
 If you just want to compute zensim on an image pair, the
 [README](README.md) is enough. **This doc is for researchers,
 contributors, and AI agents** who need to train bakes, evaluate

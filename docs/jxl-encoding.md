@@ -1,5 +1,7 @@
 # Zensim as a JXL Encoder Optimization Target
 
+> **⚠ STALE — DO NOT FOLLOW (banner 2026-07-18):** built on the pre-`834b4387` `DiffmapResult::score()` (legacy-V0_2 scoring), the 228-weight architecture, and recommends `DiffmapWeighting::Trained` — measured 2026-07-18 as the WORST steering pairing (0.243). Use `benchmarks/mlp_diffmap_coherence_2026-07-18.md` + `benchmarks/rd_probe_results_2026-07-18.md` + the diffmap-RD worktrees instead.
+
 Reference document for replacing or supplementing Butteraugli with zensim's diffmap in jxl-encoder-rs's quantization loop.
 
 ## Context: Why Butteraugli Is Hard to Beat

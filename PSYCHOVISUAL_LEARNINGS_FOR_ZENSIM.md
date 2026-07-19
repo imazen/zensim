@@ -1,5 +1,7 @@
 # Psychovisual learnings for zensim — research-paper synthesis
 
+> **⚠ BANNER 2026-07-18:** §0's status box is from 2026-05-18 (pre-Profile-A/B) — ignore it; see `docs/TOP_MODELS_COOKBOOK.md` for current state. §A's literature synthesis remains valid. This file is tracked in git (its 'gitignored' self-claim is wrong).
+
 *Generated 2026-05-18 from a deep read of ~70 OA papers across six metric families. This file is **gitignored** — it's a working reference, not a spec. Source for everything below is a converted PDF under `/mnt/v/input/papers/<bb>/<blake3>.md` (corpus built by `imazen-private/zenpapers`). A mirror copy lives at `~/work/zen/zenpapers/PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md`.*
 
 Read this against `~/work/zen/zensim/CONTEXT-HANDOFF.md` (V0_7 / V_22-mix ship status) and `~/work/zen/zenanalyze/everything.md` (training-pipeline status).

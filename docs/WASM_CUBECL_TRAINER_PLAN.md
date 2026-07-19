@@ -1,5 +1,7 @@
 # Pure-Rust WASM+CubeCL trainer plan
 
+> **⚠ BANNER 2026-07-18:** Phase 1 (pure-Rust trainer core) landed as `zensim-train-core/`. The WASM+CubeCL browser frontend is NOT built — still open.
+
 **Status**: scoping doc, 2026-05-11 (post-V0_5 ship). Per user directive
 "work toward a pure Rust training pipeline that can run in WebAssembly
 on background workers with CubeCL acceleration to allow interactive

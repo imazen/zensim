@@ -1,5 +1,7 @@
 # Metric invariants: the V39 inversion mechanism, principled detection, and a redesign that can't regress off-distribution (2026-05-26)
 
+> **⚠ BANNER 2026-07-18:** the V39-inversion forensics remain valid. The proposed forward path (partial-monotone Deep-Lattice MLP) was NOT what shipped — the Profile-B deterministic-linear route won; see `docs/TOP_MODELS_COOKBOOK.md`.
+
 Companion to `benchmarks/ROOT_CAUSE_v39_invariant_violations_2026-05-26.md`.
 That doc establishes *what* broke; this one establishes *why* at the
 mechanism level (with numbers), *how to detect* this class of failure in

@@ -1,5 +1,7 @@
 # Reproducing the shipped v47 bake (ZensimProfile::A)
 
+> **⚠ HISTORICAL (banner 2026-07-18):** Profile A is deprecated (`deprecated-profiles` feature). For the shipped default (B) see `scripts/reproduce_b.sh` + `benchmarks/profile_b_methodology_2026-07-12.md`; for current best candidates `docs/TOP_MODELS_COOKBOOK.md` §3.
+
 **One command** (after the prerequisites below):
 
 ```bash

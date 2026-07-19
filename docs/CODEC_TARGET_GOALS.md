@@ -1,5 +1,7 @@
 # Codec-Target Metric Goals
 
+> **⚠ BANNER 2026-07-18:** concrete ship numbers here (v11, CID22 0.860) are 2026-05-24 fossils. The goal framework is superseded operationally by `docs/MODEL_SELECTION_SCORECARD.md`'s five gates.
+
 The zensim codec-target metric is a **user-facing quality dial**.
 Users type a target score; the codec hits it. Every goal below
 derives from that use case. Rank correlation with human MOS

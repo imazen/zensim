@@ -1,5 +1,7 @@
 # zensim HDR support — process, plan, and test methodology
 
+> **⚠ BANNER 2026-07-18:** superseded as the ACTIVE plan by `docs/PLAN_HDR_SDR_ALIGNMENT.md` (2026-07-14); constants/corpus pointers here still valid.
+
 _Synthesized 2026-06-01 from the `zenpapers` corpus (4-agent fan-out over
 `docs/iqa-methods/`, the converted-paper markdown under `/mnt/v/input/papers/`,
 and the on-disk datasets). Every constant below is either a public ITU/SMPTE
