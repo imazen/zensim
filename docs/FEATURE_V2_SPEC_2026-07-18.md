@@ -1051,6 +1051,266 @@ whether the two-kernel-call structure is worth collapsing into one (§A.14.6).
   more conservative "worst case" ratio if extrapolating to even larger production image sizes —
   flagged, not chased further this phase.
 
+## A.15 Phase-5 strip-tiled pipeline ("feature-v2e" workspace, 2026-07-19) — bandwidth hypothesis
+
+**Hypothesis under test** (coordinator, from phase-4's own ratio-vs-size curve): phase-4's ratio
+grows with size (1.18x @256² → 2.47x @576² → 3.09x @1024² → 3.32x @2048², see §A.14.4) rather than
+staying flat, which is the signature of MEMORY TRAFFIC — at 256² the materialized `ScratchV2`
+planes (mu1/mu2/ssq/s12/activity, each `width*height` `f32`) fit in cache; at 1024²+ v2 streams
+full-image planes to/from DRAM repeatedly while v1's own strip-wise pipeline stays cache-resident.
+If true, strip-tiling the pipeline (never materializing a full-image intermediate plane) should
+recover most of the size-dependent slope, dropping the ratio toward the 256²-ish "compute floor"
+(pre-registered expectation: ~1.2-1.8x) at every size, most visibly at 2048² where bandwidth bites
+hardest.
+
+### A.15.1 Architecture: strip loop, halo math, and the register-pressure-safe refactor
+
+`compute_channel_scale_v2` is now a STRIP LOOP over `[0, height)` in chunks of `STRIP_ROWS` rows
+(the final strip clipped to whatever remains). Per strip:
+
+1. **Halo gather** (`gather_strip_halo`): copy `STRIP_ROWS + 2*HALO_P` rows of REAL src/dst pixel
+   data from the full channel-scale planes (which remain fully materialized — unchanged from
+   phases 1-4, produced once by the caller's XYB conversion) into two small local buffers, using
+   `reflect_101` (mirror-without-repeating-edge, matching `crate::blur`'s own boundary convention)
+   for any row outside `[0, height)`. Every halo row is real image data — either an interior
+   neighbor row or a correctly mirror-reflected true-edge row — never synthetic/zero padding.
+2. **Blur pass** (`run_blur_pass`, algebra IDENTICAL to phases 3/4's inline version, extracted so
+   the strip loop can call it once per strip): `fused_blur_h_ssim` + 4x `box_blur_v_from_copy` +
+   activity's own H+V blur, run on the `STRIP_ROWS + 2*HALO_P`-row buffer only.
+3. **Slice + kernel calls**: `mu1`/`mu2`/`ssq`/`s12`/`activity` are sliced down to the strip's own
+   `STRIP_ROWS` rows (buffer offset `HALO_P`) and fed to `dense_block_kernel` (phase-4's SIMD
+   kernel, unmodified). `gradient_block_kernel` gets a 1-row halo slice (offset `HALO_P-1`, well
+   inside the buffer) and a NEW halo contract (below).
+4. **Accumulate**: each strip's `DenseAccum`/`GradientAccum` folds into a running whole-image total
+   via the new `.accumulate()` methods (plain field-wise sums — combining N strips' partials is
+   exactly equivalent to one whole-image pass, see `DenseAccum::accumulate`'s doc).
+
+**Halo depth derivation (`HALO_P = 2*BLUR_RADIUS`)**: the widest-reaching consumer is `activity`,
+which needs `mu1`/`mu2` at strip-local `[-R, STRIP_ROWS+R)` (one blur-radius beyond the strip, for
+`activity`'s own blur window) — and `mu1`'s OWN computation needs H-blurred INPUT at `[-2R,
+STRIP_ROWS+2R)`. Padding the wide buffer with `HALO_P=2R` real rows on each side keeps every window
+strictly inside `[0, STRIP_ROWS+2*HALO_P)` without ever touching the wide buffer's own edge (which
+would apply the WRONG reflection — the buffer isn't the true image). Verified sufficient: every
+test in §A.15.3 passes, including a fixture specifically designed to stress the seam (below).
+
+**`gradient_block_kernel_generic`'s NEW halo contract** (the one v1-adjacent-style refactor this
+phase required): phase-4's version took `src`/`dst`/`activity` all sized `width*height` and
+special-cased `y==0`/`y==height-1` with `saturating_sub`/`.min(height-1)` scalar reflection. That
+special-casing assumed the array's own edges WERE the true image edges — false for a strip's
+interior boundary. The function now takes `src_h`/`dst_h` sized `width*(height+2)` (ONE halo row
+prepended + appended — local row `y+1` is the strip's real row `y`) and `activity` UNCHANGED
+(`width*height`, read only at each pixel's own row, confirmed by inspection — never a neighbor
+row). This REMOVES the `y==0`/`y==height-1` special case entirely: every row now uses identical
+halo-relative indexing (`row=(y+1)*width`, `row_u=y*width`, `row_d=(y+2)*width`), since the caller
+(the strip loop) guarantees valid neighbor data for every row — either genuine interior-strip data
+or a `reflect_101`-populated true-edge row. Simpler code, not just different code: one code path
+instead of two. `ScratchV2` (full-image-sized) is fully superseded by `ScratchV2Strip` (sized
+`width*(STRIP_ROWS+2*HALO_P)` — independent of `height`) and removed; `src_wide`/`dst_wide` are
+kept as plain locals in `compute_channel_scale_v2` rather than `ScratchV2Strip` fields specifically
+to avoid aliasing a `&mut ScratchV2Strip` borrow against the `&[f32]` slices `run_blur_pass` needs
+for its (disjoint) fields — see `ScratchV2Strip`'s doc comment for the full reasoning.
+
+**Blockiness stays a single full-image pass**, unstriped (§A.14: already sparse, and it only reads
+`src`/`dst`, which are full arrays regardless of strip-tiling — no memory-traffic reduction
+available there).
+
+### A.15.2 Numerics: strip-order accumulation vs the phase-4 (non-strip) reference
+
+Strip accumulation reassociates the same sums phase-4's single-pass version computed (N partial
+`DenseAccum`/`GradientAccum`s summed instead of one running total) — same class of floating-point
+reassociation already tolerated for the phase-4 SIMD-lane-then-row reduction, per this file's
+5e-4-relative-tolerance policy. All of phase 3/4's existing numeric-sensitive tests (`identity_
+input_zeroes_every_error_feature`, the `bounded_range_*` adversarial fixtures, `raw_moment_
+reformulation_matches_terriberry`) pass UNMODIFIED against the strip-tiled kernel — no tolerance
+widening was needed this phase. v1's golden gate (`tests/v1_golden_bytes.rs`, bit-exact) stayed
+green throughout, confirming v1 was never touched (verified by construction — v1 source files
+were not edited this phase — and independently by the gate itself).
+
+### A.15.3 Multi-strip boundary correctness (new test)
+
+Phase-4's fixtures were all 64×64 (all ≤ old `STRIP_ROWS`/single-strip-sized regardless of the
+value chosen), so none of them exercised a strip SEAM. Two things now do:
+
+- **`parallel_matches_serial_exactly`** (pre-existing, phase-3): 200×152, spans 2-5 strips
+  depending on `STRIP_ROWS` — bit-exact parallel-vs-serial match, unmodified, still passes.
+- **`bounded_range_multi_strip_horizontal_edge`** (NEW, phase-5): 96×150, spans 3 strips at
+  `STRIP_ROWS=64` (fewer at 128). A hard HORIZONTAL edge is placed EXACTLY at `y=64` (the first
+  strip seam at `STRIP_ROWS=64`) plus a second at `y=100` and an 8-wide vertical block pattern
+  throughout, so gradient/blockiness both see real structure crossing the seam — exactly the
+  pattern that would expose a wrong halo row (garbage, a mismatched reflection, or a stale scratch
+  value) as an out-of-bounds or wildly-off signal right at the seam. Checks bounded-range PLUS a
+  same-shape identity re-run (src==dst must still zero every error feature across 3 strips).
+  Passed on first implementation at every `STRIP_ROWS` value tried (32/64/128) — see §A.15.5.
+
+**Real-pair bounds smoke re-run** (`v2_bounds_smoke`, post-strip-tiling binary, `STRIP_ROWS=128`):
+the original 9 real (city/dog/girl × q20/q50/q75) pairs at
+`/mnt/v/output/zensim/diffmap-coherence-2026-07-18/` PLUS the `o_9292.png.scale1024x683.png`
+pathological fixture (the real image behind v1's 5,814,302-max explosion,
+`/mnt/v/output/clean-picker-corpus-2026-06-26/`, distorted via `gen_jpeg_distortion` at q20/q50,
+reusing the already-generated `~/tmp/o_9292_q{20,50}.jpg` fixtures from phase-3) — **`OK: every
+block stayed within its documented bound on every pair`**, 11/11 pairs. Values match §A.7's
+ORIGINAL (pre-any-perf-pass) table to printed precision on spot-checked entries (e.g. city q20
+basic block 0.0026–0.5114 here vs §A.7's identical 0.0026–0.5114) and match §A.13.6's phase-3
+o_9292 re-run (basic max 0.276, pjnd max 0.906) to 3 decimal places (0.276145 / 0.906443 measured
+here) — the strip-order reassociation introduced no numerically-meaningful drift on either the
+original smoke corpus or the specific real-world pathological case that motivated the
+bounded-by-construction design in the first place. Full output:
+`benchmarks/feature_v2_phase5_bounds_smoke_2026-07-19.log`.
+
+### A.15.4 Gate measurement (load-gated, per the efficiency ladder)
+
+Per-`uptime` 1-min load recorded immediately before each launch; all launches stayed under the
+`>8` gate (no trip needed — `bfs`-style self-contamination did not recur). Iteration used the
+**2048² group ALONE** as the cheap discriminating signal (per the efficiency ladder: bandwidth
+bites hardest there, a strip-tiling win shows first and largest, and 256² is the overhead
+diagnostic — if IT got slower, strip bookkeeping cost too much) across 3 `STRIP_ROWS` candidates,
+THEN one full 4-size sweep at the winning value for this report (2 full-size-sweep budget: the
+2048²-only iteration counts as the size-focused measurement the ladder asks for; the table below
+is the "for the final report" sweep).
+
+**`STRIP_ROWS` sweep (2048², 1-thread, `HALO_P=2*BLUR_RADIUS=10` fixed)**:
+
+| `STRIP_ROWS` | halo/strip-height ratio | v1 (ms) | v2 (ms) | ratio | vs phase-4 (3.32x) |
+|--:|--:|--:|--:|--:|--:|
+| 32 | 20/32 = 62.5% | 264.5 | 716.7 | 2.71x | −18.4% |
+| 64 | 20/64 = 31.3% | 272.2 | 650.6 | **2.39x** | **−28.0%** |
+| 128 | 20/128 = 15.6% | 280.6 | 648.6 | **2.31x** | **−30.4%** |
+
+`STRIP_ROWS=32`'s worse-than-64 result is the halo-overhead signature the ladder predicted:
+`HALO_P` is FIXED at 10 rows regardless of strip height, so at `STRIP_ROWS=32` the halo is 62.5%
+of the strip's own height — most of the gathered/blurred data is redundant halo, not strip output.
+128 edges out 64 by a further ~3% (within this box's measurement noise band, but consistently
+in the same direction on repeat single-group runs) — larger strips keep amortizing the fixed halo
+cost, though the working set per strip is correspondingly larger (less strictly "L2-resident" than
+a smaller strip, a real tension the pre-registered "128-512KB" target undersold: at 2048px width,
+`13 buffers * 2048 * 4 bytes ≈ 106.5KB PER ROW`, so even `STRIP_ROWS=8` would need ~3.2MB across all
+scratch buffers combined — an L2-strict target was never reachable at this image width regardless
+of `STRIP_ROWS`; what's actually being measured is "how much less DRAM traffic than the full
+`height` rows", not "does it fit L2", and by that measure larger strips (fewer halo-relative
+re-reads) keep winning up to the point where L3/TLB pressure would presumably reverse the trend —
+not reached in this 3-point sweep). **`STRIP_ROWS=128` is the value shipped this phase.**
+
+**Full 4-size sweep at `STRIP_ROWS=128` (final report numbers)**:
+
+Measured `benchmarks/feature_v2_phase5_strip_tiling_speed_2026-07-19.log` (505.7s total, load
+0.13-7.95 at launch/finish — see honest note below), one complete run of all 4 size groups, the
+second of the two full-sweep budget the efficiency ladder allowed (the first was the 3-point
+`STRIP_ROWS`-selection iteration above, run 2048²-only per the ladder's own instruction).
+
+| size | pixels | v1 1-thread (ms) | v2 1-thread phase-4 (ms, no strip) | v2 1-thread phase-5 (ms, strip-tiled) | ratio phase-4 | ratio phase-5 | Δratio |
+|--:|--:|--:|--:|--:|--:|--:|--:|
+| 256² | 65,536 | 3.6 | 4.7 | 5.4 | 1.18x | **1.50x** | **+0.32x (regression)** |
+| 576² | 331,776 | 18.1 | 43.4 | 24.6 | 2.47x | **1.36x** | −1.11x |
+| 1024² (gate) | 1,048,576 | 64.9 | 197.4 | 147.0 | 3.09x | **2.27x** | −0.82x |
+| 2048² | 4,194,304 | 282.2 | 871.9 | 650.8 | 3.32x | **2.31x** | −1.01x |
+
+Supplementary (N-thread, not gate-relevant — the stated gate is 1-thread only, reported here as an
+observed side-finding, not chased further this phase):
+
+| size | v1 N-thread (ms) | v2 N-thread phase-5 (ms) | N-thread ratio |
+|--:|--:|--:|--:|
+| 256² | 3.8 | 3.8 | 1.00x |
+| 576² | 7.5 | 12.5 | 1.67x |
+| 1024² | 15.3 | 59.8 | 3.91x |
+| 2048² | 60.9 | 257.8 | 4.23x |
+
+**256² regressed, exactly the diagnostic the efficiency ladder called out in advance**: "256² should
+be ~unchanged, and that's a diagnostic: if 256² gets slower, strip overhead is too high." It got
+slower — 1.18x → 1.50x, a +0.32x ratio increase, driven by v2 itself growing 4.7ms → 5.4ms (+15%)
+while v1's own 256² time moved by a comparable amount run-to-run (4.0ms phase-4's sweep vs 3.6ms
+phase-5's sweep, −10%, ordinary noise on a ~4ms measurement) — so this is v2 getting genuinely
+slower at this size, not a v1-side noise artifact flattering the phase-4 ratio. At 256² with
+`STRIP_ROWS=128`, the image is exactly 2 strips; the fixed `HALO_P=10`-row gather-and-reblur cost
+(paid twice) plus the loss of the single-pass-whole-image blur's better instruction/data locality
+at a size that ALREADY fit cache under the phase-4 (non-strip) design is a real, not spurious, net
+loss. This is the mirror image of the 2048² win: strip-tiling trades a fixed per-strip bootstrap
+cost for a memory-traffic win, and at small-enough images the trade is negative. A future pass
+could special-case "skip strip-tiling below N pixels" to recover this regression without touching
+the large-image win — not attempted this phase (out of the stated scope, and the 256²/576² sizes
+are not the gate).
+
+**576²/1024²/2048² all improved**, consistent with the bandwidth hypothesis: the larger the image,
+the more the memory-traffic saving from never materializing full-image intermediate planes
+outweighs the fixed per-strip overhead that costs 256² its regression.
+
+**Cross-run v1 noise note**: v1's own 1-thread ms differs between the phase-4 sweep run and this
+phase-5 sweep run at every size (256²: 4.0→3.6, 576²: 17.6→18.1, 1024²: 63.9→64.9, 2048²:
+262.4→282.2 — up to 8% run-to-run drift), consistent with this project's repeatedly-documented
+shared-box measurement noise (§A.13.3, §A.14.4). This is why the comparison is done on RATIOS
+computed within a single sweep run (v2/v1 from the same run), never on raw ms compared across two
+different sweep runs — the ratio-vs-ratio comparison above is noise-robust by construction; a
+naive "v2 phase-4 ms vs v2 phase-5 ms" delta alone would not be.
+
+### A.15.5 Gate verdict
+
+**Pre-registered gate: ≤1.5× @ 1024², 1-thread.**
+
+**Measured: 2.27× @ 1024², 1-thread (147.0ms v2 vs 64.9ms v1, final report sweep). GATE NOT MET.**
+Strip-tiling closed a substantial fraction of the phase-4 gap (3.09x → 2.27x, a 26.5% relative
+ratio reduction at the gate size) but did not reach 1.5x. Reported honestly, per this project's own
+"NEVER CLAIM FALSE COMPLETION" discipline: this phase does NOT close the stated performance gate.
+It DOES falsify-in-the-productive-direction the "it's all divisions, flat across size" reading of
+phase-4's own data — see the kill-criterion result immediately below, which is a genuinely
+different question (was the bandwidth hypothesis right?) from the gate question (is v2 fast
+enough?) and gets a different answer (yes / not yet, respectively).
+
+**Kill criterion: strip-tiling improves 2048² by <20% ⇒ bandwidth hypothesis falsified.**
+**Measured: 2048² improved 871.9ms → 650.8ms, a 25.4% reduction — ABOVE the 20% threshold. The
+bandwidth hypothesis is CONFIRMED, not falsified** — memory traffic from full-image intermediate
+planes was a real, measurable component of phase-4's size-dependent slope, and removing it
+recovered roughly a quarter of the 2048² wall time. The ratio did NOT reach the pre-registered
+"~1.2-1.8x compute floor" — landing at 2.31x instead — meaning bandwidth was A dominant
+size-dependent term, not THE ONLY one; see §A.15.6 for the residual attribution this implies.
+
+### A.15.6 Residual attribution, updated
+
+Phase-4's §A.14.5 attributed the majority of the v1-vs-v2 gap to "dense block core formulas
+(SIMD, division-heavy)" with memory traffic unmeasured/unseparated. Phase-5's result lets that be
+split further:
+
+| contributor | phase-4 estimate | phase-5 finding |
+|---|---|---|
+| Memory traffic (full-image intermediate planes) | not separated out | **Real and measurable**: ~25-30% of the 2048² gap, confirmed by strip-tiling's direct effect. Size-DEPENDENT (grows the ratio with image size, per §A.14.4's curve) — consistent with a bandwidth-bound term that scales with `pixels`, not `sqrt(pixels)` or a constant. |
+| Dense block core formulas (SIMD, division-heavy) | "majority" (unverified) | Still the LARGER remaining share post-strip-tiling (2.31x at 2048² vs v1's 1.0x baseline) — the strip-tiled kernel still does the same ~6-8 divisions/pixel phase-4 already SIMD-ized; this is now the clearer next lever (per phase-4's own §A.14.6 "side quest not taken": a cheaper rational approximation for `saturate`/`bounded_sim`/`bounded_excess`). |
+| Gradient block + blockiness | "smaller" | Unchanged this phase (gradient's own kernel logic is identical, just fed halo-relative buffers; blockiness untouched). |
+| Halo-gather overhead (NEW, phase-5-introduced) | n/a | Small but non-zero and PARTIALLY counteracts the memory-traffic win — visible in the 32-vs-64-vs-128 sweep (smaller strips pay more halo-relative overhead). Not isolated as its own line item this phase; the 3-point `STRIP_ROWS` sweep is the closest measurement available. |
+
+### A.15.7 Honest gaps
+
+- The `STRIP_ROWS` sweep is 3 points (32/64/128), all measured on 2048² only (per the efficiency
+  ladder's explicit instruction to iterate on the cheap discriminating signal, not a full sweep per
+  candidate) — a finer sweep (e.g. 96, 160, 192) or a width-adaptive strip-height formula (this
+  phase used a single compile-time constant across all 4 image sizes and all 4 pyramid scales) are
+  both open, not attempted.
+- The "L2-resident working set" framing in the original brief does not hold at large image widths
+  (§A.15.4's byte-budget note) — this was discovered empirically during the sweep, not derived
+  up front. The mechanism that's actually winning is reduced total DRAM traffic (fewer full-`height`
+  passes over `mu1`/`mu2`/`ssq`/`s12`/`activity`), not cache residency in the strict L2 sense.
+  Worth stating precisely since a future session tuning `STRIP_ROWS` should optimize for the right
+  target.
+- Per-strip halo-gather cost was not isolated as its own bench line (would need a dedicated
+  micro-bench of `gather_strip_halo` alone) — inferred only from the 32-vs-64-vs-128 comparison.
+- `src_wide`/`dst_wide` are reallocated (`vec![0.0f32; ...]`) once per `compute_channel_scale_v2`
+  call (12 times per `compute_v2_features_impl_with_toggles` — 4 scales × 3 channels), not threaded
+  through the caller's per-channel `scratch` array the way `ScratchV2Strip` is. A borrow-checker
+  conflict (documented on `ScratchV2Strip`) was the reason; threading them through a second,
+  disjoint per-channel struct would remove these 24 allocations (2 buffers × 12 calls) but was
+  judged lower priority than landing the strip-tiling result itself, given the buffers are strip-
+  sized (not full-image), not phase-3's "108 full-image allocations" problem.
+- The 256² regression (§A.15.4: 1.18x → 1.50x) is reported and reasoned-about but NOT root-caused
+  to instruction level this phase — no `cargo asm`/callgrind pass was run to confirm "fixed halo
+  bootstrap cost" is the actual mechanism versus, e.g., lost auto-vectorization opportunity from the
+  smaller per-call buffer size. The reasoning in §A.15.4 is consistent with the measured numbers and
+  the ladder's own pre-registered diagnostic, but "consistent with" is not the same rigor as the
+  instruction-count evidence phase-3/4 used elsewhere in this doc (e.g. §A.13.3's `cargo asm` spill
+  count). A size-gated dispatch (skip strip-tiling below some threshold) would sidestep the
+  regression without needing the root cause, if a future session wants to ship both wins.
+- N-thread ratios got WORSE under strip-tiling at 1024²/2048² (3.91x/4.23x vs phase-4's presumed-
+  better N-thread scaling — phase-4's own N-thread numbers were not tabulated by size in §A.14, so
+  a direct before/after N-thread comparison isn't available from this doc alone). Reported as a
+  side-finding in §A.15.4's supplementary table, not investigated — the stated gate is 1-thread
+  only and the efficiency ladder did not ask for an N-thread investigation this phase.
+
 # Part B — the original audit (verbatim record)
 
 > Everything below is the read-only feature-science audit as delivered

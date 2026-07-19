@@ -223,6 +223,89 @@ const BLUR_RADIUS: usize = 5;
 const BLOCK_LATTICE: usize = 8;
 
 // ============================================================================
+// Phase-5 (§A.15): strip-tiled pipeline constants + halo-boundary helper.
+//
+// Bandwidth hypothesis (coordinator, from phase-4's own ratio-vs-size curve
+// 1.18x@256^2 -> 3.32x@2048^2 -- growing, not flat, meaning DRAM traffic
+// from materializing full-image mu1/mu2/ssq/s12/activity planes, not
+// division-bound compute, is the dominant slope term at large sizes):
+// process the image in row STRIPS small enough that one strip's live
+// planes stay cache-resident, fusing blur -> formula pass -> gradient
+// pass -> accumulation per strip so full-image intermediate planes are
+// NEVER materialized (`ScratchV2Strip` below is sized per-strip, not
+// per-image).
+// ============================================================================
+
+/// Strip height in rows. Tunable; swept per §A.15's strip-height table
+/// (candidates measured: see the spec doc). Not a public knob — phase-5's
+/// scope is proving/falsifying the bandwidth hypothesis, not exposing a
+/// user-facing tuning parameter.
+const STRIP_ROWS: usize = 128;
+
+/// Half-halo (rows of REAL context loaded beyond the strip on each side).
+/// Sized so the existing (UNMODIFIED) `box_blur_v_from_copy`'s own
+/// reflect-boundary logic never touches the sub-range this module
+/// actually reads back out -- derivation (§A.15): computing mu1 (etc.) at
+/// buffer-local row `r` needs H-blurred input at `[r-R, r+R]`; the
+/// widest-reaching consumer is `activity`, which needs mu1 at strip-local
+/// `[-R, strip_h+R)` (one blur-radius beyond the strip itself), so mu1's
+/// OWN computation needs INPUT (mu1_h) at `[-2R, strip_h+2R)`. Padding the
+/// wide buffer with `HALO_P = 2*BLUR_RADIUS` real rows on each side keeps
+/// every window inside `[0, strip_h + 2*HALO_P)` without ever touching
+/// the wide-buffer's own synthetic edge (which would apply the WRONG
+/// reflection -- the buffer isn't the true image).
+const HALO_P: usize = 2 * BLUR_RADIUS;
+
+/// Mirror-without-repeating-edge boundary reflection ("reflect_101" /
+/// whole-sample-symmetric convention: `-1 -> 1`, `-2 -> 2`, `height ->
+/// height-2`, matching the mirror convention `crate::blur`'s own
+/// boundary-handling comments describe, e.g. `fused_blur_h_ssim_inner_v4`'s
+/// "reflect the index back into the image (`2*(height-1) - add_raw`)").
+/// Used ONLY to gather a strip's halo rows from the FULL (already fully
+/// materialized -- src/dst planes are the caller's whole-channel-scale
+/// input, unchanged from phases 1-4) src/dst planes; every row this
+/// pulls in is REAL image data, either directly (interior strips) or via
+/// this exact mirror (strips touching the true top/bottom edge) — never
+/// synthetic/zero-padding.
+#[inline]
+fn reflect_101(y: isize, height: usize) -> usize {
+    if height <= 1 {
+        return 0;
+    }
+    let h = height as isize;
+    let period = 2 * (h - 1);
+    let mut m = y.rem_euclid(period);
+    if m >= h {
+        m = period - m;
+    }
+    m as usize
+}
+
+/// Populate `dst` (`width * h_local` rows) from the FULL `src_full` plane
+/// (`width * height_full`), where local row `i` maps to global row
+/// `reflect_101(y0 as isize - halo as isize + i as isize, height_full)`.
+/// For `i` such that the mapped global row is in-bounds (the common case
+/// for interior strips and the strip's own core rows), this is an exact,
+/// unreflected copy — `reflect_101` is the identity on `[0, height_full)`.
+fn gather_strip_halo(
+    src_full: &[f32],
+    width: usize,
+    height_full: usize,
+    y0: usize,
+    h_local: usize,
+    halo: usize,
+    dst: &mut [f32],
+) {
+    debug_assert_eq!(dst.len(), width * h_local);
+    for i in 0..h_local {
+        let gy = y0 as isize - halo as isize + i as isize;
+        let gy_r = reflect_101(gy, height_full);
+        let src_row = &src_full[gy_r * width..(gy_r + 1) * width];
+        dst[i * width..(i + 1) * width].copy_from_slice(src_row);
+    }
+}
+
+// ============================================================================
 // Bounded per-pixel formulas
 // ============================================================================
 
@@ -406,6 +489,17 @@ impl WeightedSum {
         } else {
             self.num / self.den
         }
+    }
+    /// Phase-5 (§A.15): fold another (partial-strip) accumulator's
+    /// `(num, den)` in directly — `Σw·v` and `Σw` are both plain sums, so
+    /// combining N strips' partial `WeightedSum`s is exactly equivalent to
+    /// one whole-image `WeightedSum` (no reassociation beyond ordinary
+    /// floating-point addition, same class of drift as any other
+    /// SIMD-lane-then-strip reduction already tolerated in this file).
+    #[inline]
+    fn accumulate(&mut self, other: &WeightedSum) {
+        self.num += other.num;
+        self.den += other.den;
     }
 }
 
@@ -624,7 +718,19 @@ impl Default for V2NewFeatureToggles {
 /// change: does not alter any arithmetic or its order, so it carries zero
 /// numerical risk (and zero risk to v1's byte-identity gate, since v1 never
 /// calls into this module).
-struct ScratchV2 {
+///
+/// Phase-5 (§A.15) RESIZED: was sized for the FULL channel-scale plane
+/// (`width*height`, up to 4.2M elements at 2048²); now sized for one
+/// STRIP-plus-halo (`width*(STRIP_ROWS+2*HALO_P)`, ≤ ~172K elements even
+/// at 2048² width) — the actual memory-traffic reduction the bandwidth
+/// hypothesis predicts should matter. `src`/`dst` are NOT scratch fields
+/// (kept as ordinary local `Vec<f32>` in `compute_channel_scale_v2`,
+/// reused across strips within one call) — threading them through this
+/// struct would alias a `&mut ScratchV2Strip` borrow against the `&[f32]`
+/// slices `run_blur_pass` needs, forcing either unsafe cell tricks or
+/// splitting the struct; two extra plain locals sidestep that for zero
+/// added complexity.
+struct ScratchV2Strip {
     /// H-blur-only intermediates from [`crate::blur::fused_blur_h_ssim`]
     /// (see below) — analogous to v2 iteration-2's old per-call `tmp`, but
     /// now 4-wide since the fused kernel produces all four H-blurred planes
@@ -647,7 +753,7 @@ struct ScratchV2 {
     activity_tmp: Vec<f32>,
     activity: Vec<f32>,
 }
-impl ScratchV2 {
+impl ScratchV2Strip {
     fn new(max_n: usize) -> Self {
         Self {
             mu1_h: vec![0.0f32; max_n],
@@ -663,6 +769,57 @@ impl ScratchV2 {
             activity: vec![0.0f32; max_n],
         }
     }
+}
+
+/// Runs the blur pass (fused H-blur + 4x V-blur + activity) on a LOCAL
+/// image — the strip-plus-halo buffer in phase-5's strip orchestration.
+/// Identical algebra to phases 3/4's inline version (extracted here so
+/// the strip loop can call it once per strip); writes `n = width *
+/// height_local` elements into each of `scratch`'s 11 buffers.
+fn run_blur_pass(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height_local: usize,
+    scratch: &mut ScratchV2Strip,
+) {
+    let n = width * height_local;
+    let mu1_h = &mut scratch.mu1_h[..n];
+    let mu2_h = &mut scratch.mu2_h[..n];
+    let ssq_h = &mut scratch.ssq_h[..n];
+    let s12_h = &mut scratch.s12_h[..n];
+    crate::blur::fused_blur_h_ssim(
+        src,
+        dst,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        width,
+        height_local,
+        BLUR_RADIUS,
+    );
+
+    let mu1 = &mut scratch.mu1[..n];
+    crate::blur::box_blur_v_from_copy(mu1_h, mu1, width, height_local, BLUR_RADIUS);
+    let mu2 = &mut scratch.mu2[..n];
+    crate::blur::box_blur_v_from_copy(mu2_h, mu2, width, height_local, BLUR_RADIUS);
+    let ssq = &mut scratch.ssq[..n];
+    crate::blur::box_blur_v_from_copy(ssq_h, ssq, width, height_local, BLUR_RADIUS);
+    let s12 = &mut scratch.s12[..n];
+    crate::blur::box_blur_v_from_copy(s12_h, s12, width, height_local, BLUR_RADIUS);
+
+    let abs_src = &mut scratch.abs_src[..n];
+    crate::simd_ops::abs_diff_into(src, mu1, abs_src);
+    let activity = &mut scratch.activity[..n];
+    crate::blur::box_blur_1pass_into(
+        abs_src,
+        activity,
+        &mut scratch.activity_tmp[..n],
+        width,
+        height_local,
+        BLUR_RADIUS,
+    );
 }
 
 // ============================================================================
@@ -736,6 +893,43 @@ struct DenseAccum {
     ws_iw_art: WeightedSum,
     ws_iw_det: WeightedSum,
     ws_iw_mse: WeightedSum,
+}
+
+impl DenseAccum {
+    /// Phase-5 (§A.15): fold one strip's `DenseAccum` into the running
+    /// whole-image total. Every field is a plain sum (or a `WeightedSum`,
+    /// itself two plain sums), so summing N strips' partials is exactly
+    /// equivalent to accumulating over the whole image in one pass —
+    /// strip order does not change WHICH additions happen, only their
+    /// grouping (associativity-level float reassociation only, same class
+    /// already tolerated for the phase-4 SIMD-lane-then-row reduction).
+    #[inline]
+    fn accumulate(&mut self, other: &DenseAccum) {
+        self.sum_d += other.sum_d;
+        self.sum_d2 += other.sum_d2;
+        self.sum_d3 += other.sum_d3;
+        self.sum_d4 += other.sum_d4;
+        self.sum_art += other.sum_art;
+        self.sum_det += other.sum_det;
+        self.sum_mse += other.sum_mse;
+        self.sum_hf_gain += other.sum_hf_gain;
+        self.sum_hf_loss += other.sum_hf_loss;
+        self.sum_hf_mag_loss += other.sum_hf_mag_loss;
+        self.sum_pjnd += other.sum_pjnd;
+        self.sum_pjnd_lo += other.sum_pjnd_lo;
+        self.sum_pjnd_hi += other.sum_pjnd_hi;
+        self.ws_peak_ssim.accumulate(&other.ws_peak_ssim);
+        self.ws_peak_art.accumulate(&other.ws_peak_art);
+        self.ws_peak_det.accumulate(&other.ws_peak_det);
+        self.ws_mask_ssim.accumulate(&other.ws_mask_ssim);
+        self.ws_mask_art.accumulate(&other.ws_mask_art);
+        self.ws_mask_det.accumulate(&other.ws_mask_det);
+        self.ws_mask_mse.accumulate(&other.ws_mask_mse);
+        self.ws_iw_ssim.accumulate(&other.ws_iw_ssim);
+        self.ws_iw_art.accumulate(&other.ws_iw_art);
+        self.ws_iw_det.accumulate(&other.ws_iw_det);
+        self.ws_iw_mse.accumulate(&other.ws_iw_mse);
+    }
 }
 
 /// Scalar weighted-pool accumulation for ONE pixel — shared by the SIMD
@@ -1055,25 +1249,56 @@ struct GradientAccum {
     sum_grad_dst: f64,
 }
 
-/// Gradient-block SIMD kernel body. Interior pixels (`1..width-1`,
-/// `1..height-1`) are vectorized via SHIFTED unaligned loads for the
-/// x-neighbors (`row[x-1..x+7]` / `row[x+1..x+9]`) and full-row-offset
-/// loads for the y-neighbors (`row_u[x..x+8]` / `row_d[x..x+8]`) — the
-/// same shifted-window-read pattern as `~/work/archmage/docs/site/content/
-/// magetypes/examples/gaussian-blur.md`'s vertical pass. The single-pixel
-/// border (`x==0`, `x==width-1`, `y==0`, `y==height-1`) uses the scalar
+impl GradientAccum {
+    /// Phase-5 (§A.15): fold one strip's `GradientAccum` into the running
+    /// whole-image total — same reasoning as `DenseAccum::accumulate`.
+    #[inline]
+    fn accumulate(&mut self, other: &GradientAccum) {
+        self.sum_gms += other.sum_gms;
+        self.sum_ringing += other.sum_ringing;
+        self.sum_banding += other.sum_banding;
+        self.sum_grad_src += other.sum_grad_src;
+        self.sum_grad_dst += other.sum_grad_dst;
+    }
+}
+
+/// Gradient-block SIMD kernel body. Phase-5 (§A.15) NEW CONTRACT: `src_h`/
+/// `dst_h` carry ONE HALO ROW top and bottom (`width*(height+2)` total —
+/// local row `y+1` is the strip's real row `y`; local rows `0` and
+/// `height+1` are the caller-provided neighbor context, real data for an
+/// interior strip or a properly reflected row at the true image edge —
+/// see `gather_strip_halo`). This REMOVES the old `y==0`/`y==height-1`
+/// special-casing entirely: every output row now uses the identical
+/// "interior" halo-relative indexing, since the caller guarantees valid
+/// neighbor rows for ALL of them, not just strip-interior ones.
+/// `activity` is NOT halo-padded (`width*height`, exactly the strip) — it
+/// is read only at each pixel's own row, never a neighbor row (confirmed
+/// by inspection: only `ld_at!(activity, row + x)`/`activity[i]` below,
+/// no `row_u`/`row_d` indexing into it).
+///
+/// Interior pixels (`1..width-1`) are vectorized via SHIFTED unaligned
+/// loads for the x-neighbors (`row[x-1..x+7]` / `row[x+1..x+9]`) and
+/// full-row-offset loads for the y-neighbors (`row_u[x..x+8]` /
+/// `row_d[x..x+8]`) — the same shifted-window-read pattern as
+/// `~/work/archmage/docs/site/content/magetypes/examples/gaussian-blur.md`'s
+/// vertical pass. The single-pixel column border (`x==0`, `x==width-1`)
+/// still uses the scalar
 /// reflect-boundary formulas (`saturating_sub`/`.min(width-1)`) exactly as
 /// before — a tiny fraction of pixels (2 columns + 2 rows out of
 /// width*height), not worth the complexity of a SIMD boundary-clamp.
 #[inline]
 fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     token: T,
-    src: &[f32],
-    dst: &[f32],
+    src_h: &[f32],
+    dst_h: &[f32],
     activity: &[f32],
     width: usize,
     height: usize,
 ) -> GradientAccum {
+    debug_assert_eq!(src_h.len(), width * (height + 2));
+    debug_assert_eq!(dst_h.len(), width * (height + 2));
+    debug_assert_eq!(activity.len(), width * height);
+
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
     let c_gms = V8::<T>::splat(token, C_GMS as f32);
@@ -1085,30 +1310,30 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
 
     let mut acc = GradientAccum::default();
 
-    // Scalar helper for one pixel — used for the whole first/last row
-    // (y==0, y==height-1) and the first/last column of every interior
-    // row, mirroring compute_channel_scale_v2's original reflect-boundary
-    // neighbor logic exactly.
+    // Scalar helper for one pixel — used for the first/last COLUMN of
+    // every row (x-axis boundary only; the y-axis "first/last row"
+    // special case from phase 4 is GONE, per this function's new halo
+    // contract — every row `y` has valid `row_u`/`row_d` neighbor data
+    // in `src_h`/`dst_h` by construction, either real interior-strip
+    // rows or a caller-supplied reflected true-edge row).
     let scalar_pixel = |x: usize, y: usize, acc: &mut GradientAccum| {
-        let yu = y.saturating_sub(1);
-        let yd = (y + 1).min(height - 1);
         let xl = x.saturating_sub(1);
         let xr = (x + 1).min(width - 1);
-        let row = y * width;
-        let row_u = yu * width;
-        let row_d = yd * width;
+        let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
+        let row_u = y * width; // y-1, in halo-relative terms
+        let row_d = (y + 2) * width; // y+1, in halo-relative terms
         let i = row + x;
-        let s = src[i] as f64;
-        let dd = dst[i] as f64;
-        let act = activity[i] as f64;
-        let sxl = src[row + xl] as f64;
-        let sxr = src[row + xr] as f64;
-        let syu = src[row_u + x] as f64;
-        let syd = src[row_d + x] as f64;
-        let dxl = dst[row + xl] as f64;
-        let dxr = dst[row + xr] as f64;
-        let dyu = dst[row_u + x] as f64;
-        let dyd = dst[row_d + x] as f64;
+        let s = src_h[i] as f64;
+        let dd = dst_h[i] as f64;
+        let act = activity[y * width + x] as f64;
+        let sxl = src_h[row + xl] as f64;
+        let sxr = src_h[row + xr] as f64;
+        let syu = src_h[row_u + x] as f64;
+        let syd = src_h[row_d + x] as f64;
+        let dxl = dst_h[row + xl] as f64;
+        let dxr = dst_h[row + xr] as f64;
+        let dyu = dst_h[row_u + x] as f64;
+        let dyd = dst_h[row_d + x] as f64;
 
         let gx_src = sxr - sxl;
         let gy_src = syd - syu;
@@ -1133,15 +1358,10 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     };
 
     for y in 0..height {
-        if y == 0 || y == height - 1 {
-            for x in 0..width {
-                scalar_pixel(x, y, &mut acc);
-            }
-            continue;
-        }
-        let row = y * width;
-        let row_u = (y - 1) * width;
-        let row_d = (y + 1) * width;
+        let row = (y + 1) * width;
+        let row_u = y * width;
+        let row_d = (y + 2) * width;
+        let act_row = y * width;
 
         scalar_pixel(0, y, &mut acc);
         if width > 2 {
@@ -1159,17 +1379,17 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
                         V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
                     };
                 }
-                let sxl = ld_at!(src, row + x - 1);
-                let sxr = ld_at!(src, row + x + 1);
-                let syu = ld_at!(src, row_u + x);
-                let syd = ld_at!(src, row_d + x);
-                let dxl = ld_at!(dst, row + x - 1);
-                let dxr = ld_at!(dst, row + x + 1);
-                let dyu = ld_at!(dst, row_u + x);
-                let dyd = ld_at!(dst, row_d + x);
-                let s = ld_at!(src, row + x);
-                let dd = ld_at!(dst, row + x);
-                let act = ld_at!(activity, row + x);
+                let sxl = ld_at!(src_h, row + x - 1);
+                let sxr = ld_at!(src_h, row + x + 1);
+                let syu = ld_at!(src_h, row_u + x);
+                let syd = ld_at!(src_h, row_d + x);
+                let dxl = ld_at!(dst_h, row + x - 1);
+                let dxr = ld_at!(dst_h, row + x + 1);
+                let dyu = ld_at!(dst_h, row_u + x);
+                let dyd = ld_at!(dst_h, row_d + x);
+                let s = ld_at!(src_h, row + x);
+                let dd = ld_at!(dst_h, row + x);
+                let act = ld_at!(activity, act_row + x);
 
                 let gx_src = sxr - sxl;
                 let gy_src = syd - syu;
@@ -1281,19 +1501,25 @@ fn blockiness_sparse(src: &[f32], dst: &[f32], width: usize, height: usize) -> f
 /// edge-width computation (`(0,0)` when `toggles.gradient_features` is
 /// off — the caller must not rely on edge-width in that case).
 ///
-/// Phase-4 (§A.14): the per-pixel pass is now TWO magetypes-SIMD kernels
-/// (`dense_block_kernel` always, `gradient_block_kernel` when
-/// `toggles.gradient_features`) plus a sparse scalar blockiness pass when
-/// `toggles.blockiness` — see the kernels' own doc comments above for the
-/// full architecture. This function is now orchestration: call the
-/// kernels, unpack their accumulators into `out`.
+/// Phase-5 (§A.15): the per-pixel pass is now a STRIP LOOP — blur +
+/// dense-formula-kernel + gradient-kernel FUSED per strip, so full-image
+/// mu1/mu2/ssq/s12/activity planes are never materialized (only one
+/// strip's worth, `ScratchV2Strip`, sized `width*(STRIP_ROWS+2*HALO_P)`
+/// regardless of the channel-scale's actual `height`). Each strip's
+/// `DenseAccum`/`GradientAccum` folds into a running whole-image total
+/// via `.accumulate()`. `src`/`dst` (this function's own params) remain
+/// the FULL channel-scale planes — unchanged from phases 1-4, still
+/// materialized once by the caller's XYB conversion — strip-tiling only
+/// removes the DERIVED intermediate planes' full-image footprint.
+/// Blockiness stays a single full-image pass (§A.14: already sparse,
+/// only reads `src`/`dst` which are full arrays regardless).
 fn compute_channel_scale_v2(
     src: &[f32],
     dst: &[f32],
     width: usize,
     height: usize,
     toggles: V2NewFeatureToggles,
-    scratch: &mut ScratchV2,
+    scratch: &mut ScratchV2Strip,
     out: &mut [f64],
 ) -> (f64, f64) {
     let n = width * height;
@@ -1304,96 +1530,106 @@ fn compute_channel_scale_v2(
         FEATURES_PER_CHANNEL_V2_TOTAL,
         "out slice must hold exactly one channel-scale's v2 block"
     );
+
+    let max_wide_h = STRIP_ROWS + 2 * HALO_P;
     assert!(
-        n <= scratch.mu1.len(),
-        "scratch buffers must be sized for the largest scale (scale 0)"
+        width * max_wide_h <= scratch.mu1.len(),
+        "scratch buffers must be sized for the largest strip+halo"
     );
 
-    // --- Blur-pass arrays (inherently multi-pixel; matches v1's own
-    //     architecture, which also carries mu1/mu2/s12/ssq/activity as
-    //     full-image arrays ahead of its per-pixel kernel).
-    //
-    //     Perf pass (§A.13) MEASUREMENT NOTE: this box was under real,
-    //     observed concurrent load from 10+ OTHER agent sessions while this
-    //     was benchmarked (`uptime`/`ps aux` confirmed it mid-investigation)
-    //     — an initial reading mis-flagged `fused_blur_h_ssim` (below) as a
-    //     REGRESSION by comparing it against an *inferred* pre-perf-pass
-    //     number (phase-2's 4.06x ratio x this session's v1 reading) rather
-    //     than a directly-measured one. A same-day A/B against the
-    //     alternative (separate `mul_into`/`sq_sum_into` + 4 simple
-    //     `box_blur_1pass_into` calls, matching iteration-2's original
-    //     structure) — 2 process launches per side, `v2_speed_baseline
-    //     --group=1024x1024` — put fused_blur_h_ssim at 278-282ms and the
-    //     separate-calls alternative at 310-331ms EVERY time, despite the
-    //     shared v1 baseline itself drifting 66.6-70.5ms run to run. Fused
-    //     wins by ~10-15% consistently regardless of ambient noise level, so
-    //     it is the one kept. `fused_blur_h_ssim` is v1's OWN public fused
-    //     H-blur primitive (H-blurred mu1/mu2/Σ(s²+d²)/Σ(s·d) in one SIMD
-    //     pass, called directly by `streaming.rs::process_strip_channel` for
-    //     the identical algebra) — reusing it here is not a v1 code change,
-    //     zero risk to the v1 byte-identity golden gate. ---
-    let mu1_h = &mut scratch.mu1_h[..n];
-    let mu2_h = &mut scratch.mu2_h[..n];
-    let ssq_h = &mut scratch.ssq_h[..n];
-    let s12_h = &mut scratch.s12_h[..n];
-    crate::blur::fused_blur_h_ssim(
-        src,
-        dst,
-        mu1_h,
-        mu2_h,
-        ssq_h,
-        s12_h,
-        width,
-        height,
-        BLUR_RADIUS,
-    );
+    // Halo-gather targets — kept as plain locals (NOT `ScratchV2Strip`
+    // fields) specifically so `run_blur_pass(&src_wide, &dst_wide, ...,
+    // scratch)` doesn't alias an immutable borrow of `scratch` against
+    // the `&mut ScratchV2Strip` the same call needs for its OTHER
+    // (disjoint) fields — see `ScratchV2Strip`'s doc.
+    let mut src_wide = vec![0.0f32; width * max_wide_h];
+    let mut dst_wide = vec![0.0f32; width * max_wide_h];
 
-    let mu1 = &mut scratch.mu1[..n];
-    crate::blur::box_blur_v_from_copy(mu1_h, mu1, width, height, BLUR_RADIUS);
-    let mu2 = &mut scratch.mu2[..n];
-    crate::blur::box_blur_v_from_copy(mu2_h, mu2, width, height, BLUR_RADIUS);
-    let ssq = &mut scratch.ssq[..n];
-    crate::blur::box_blur_v_from_copy(ssq_h, ssq, width, height, BLUR_RADIUS);
-    let s12 = &mut scratch.s12[..n];
-    crate::blur::box_blur_v_from_copy(s12_h, s12, width, height, BLUR_RADIUS);
+    let mut dense = DenseAccum::default();
+    let mut grad = GradientAccum::default();
 
-    let abs_src = &mut scratch.abs_src[..n];
-    crate::simd_ops::abs_diff_into(src, mu1, abs_src);
-    let activity = &mut scratch.activity[..n];
-    crate::blur::box_blur_1pass_into(
-        abs_src,
-        activity,
-        &mut scratch.activity_tmp[..n],
-        width,
-        height,
-        BLUR_RADIUS,
-    );
-    // `mu1`/`mu2`/`ssq`/`s12`/`activity` are `&mut [f32]` from the writes
-    // above; the per-pixel pass below only reads them (`mu1[i]` etc.),
-    // which works directly through a `&mut` binding — no reborrow needed.
+    let mut y0 = 0usize;
+    while y0 < height {
+        let strip_h = STRIP_ROWS.min(height - y0);
+        let wide_h = strip_h + 2 * HALO_P;
+        let n_wide = width * wide_h;
 
-    // --- Phase-4 (§A.14): the dense block ALWAYS runs (mirrors the old
-    //     unconditional per-pixel block); the gradient block and
-    //     blockiness pass are gated exactly as before, just as separate
-    //     kernel calls instead of inline per-pixel branches. ---
-    let dense = dense_block_kernel(
-        src,
-        dst,
-        mu1,
-        mu2,
-        ssq,
-        s12,
-        activity,
-        width,
-        height,
-        toggles.transducer_bank,
-    );
+        // --- Gather this strip's halo-padded input (real image data,
+        //     mirror-reflected only within BLUR_RADIUS*2 of the TRUE
+        //     image top/bottom — see `gather_strip_halo`/`reflect_101`). ---
+        gather_strip_halo(
+            src,
+            width,
+            height,
+            y0,
+            wide_h,
+            HALO_P,
+            &mut src_wide[..n_wide],
+        );
+        gather_strip_halo(
+            dst,
+            width,
+            height,
+            y0,
+            wide_h,
+            HALO_P,
+            &mut dst_wide[..n_wide],
+        );
 
-    let grad = if toggles.gradient_features {
-        gradient_block_kernel(src, dst, activity, width, height)
-    } else {
-        GradientAccum::default()
-    };
+        // --- Blur pass on the strip+halo buffer only (§A.15's actual
+        //     memory-traffic reduction: `wide_h` is O(STRIP_ROWS), not
+        //     O(height) — see `run_blur_pass`, identical algebra to
+        //     phases 3/4's inline version, extracted so this loop can
+        //     call it once per strip). ---
+        run_blur_pass(
+            &src_wide[..n_wide],
+            &dst_wide[..n_wide],
+            width,
+            wide_h,
+            scratch,
+        );
+
+        // --- Slice down to the strip's own real rows (buffer-local
+        //     offset HALO_P, matching `gather_strip_halo`'s convention:
+        //     local row `HALO_P + k` is global row `y0 + k`). ---
+        let off = HALO_P * width;
+        let strip_n = width * strip_h;
+        let src_strip = &src_wide[off..off + strip_n];
+        let dst_strip = &dst_wide[off..off + strip_n];
+        let mu1_strip = &scratch.mu1[off..off + strip_n];
+        let mu2_strip = &scratch.mu2[off..off + strip_n];
+        let ssq_strip = &scratch.ssq[off..off + strip_n];
+        let s12_strip = &scratch.s12[off..off + strip_n];
+        let activity_strip = &scratch.activity[off..off + strip_n];
+
+        let strip_dense = dense_block_kernel(
+            src_strip,
+            dst_strip,
+            mu1_strip,
+            mu2_strip,
+            ssq_strip,
+            s12_strip,
+            activity_strip,
+            width,
+            strip_h,
+            toggles.transducer_bank,
+        );
+        dense.accumulate(&strip_dense);
+
+        if toggles.gradient_features {
+            // Gradient needs src/dst at [y0-1, y0+strip_h+1) — 1-row
+            // halo, comfortably inside the HALO_P(=10)-row buffer we
+            // already gathered. Buffer-local offset HALO_P-1.
+            let g_off = (HALO_P - 1) * width;
+            let g_n = width * (strip_h + 2);
+            let src_g = &src_wide[g_off..g_off + g_n];
+            let dst_g = &dst_wide[g_off..g_off + g_n];
+            let strip_grad = gradient_block_kernel(src_g, dst_g, activity_strip, width, strip_h);
+            grad.accumulate(&strip_grad);
+        }
+
+        y0 += strip_h;
+    }
 
     let sum_blockiness = if toggles.blockiness {
         blockiness_sparse(src, dst, width, height)
@@ -1511,14 +1747,20 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
     // (finer) scale, for the edge-width-change cross-scale comparison.
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
-    // Perf pass (§A.13): one scratch buffer set PER CHANNEL, sized once for
-    // the largest (scale-0) `n`, reused across all `n_scales` calls for
-    // that channel. 3 separate sets (rather than 1 reused across channels
+    // Perf pass (§A.13) / phase-5 (§A.15): one scratch buffer set PER
+    // CHANNEL, sized for one STRIP+halo at the largest (scale-0) `width`
+    // (`width * (STRIP_ROWS + 2*HALO_P)` — NOT `width*height` anymore;
+    // this is the actual memory-traffic reduction §A.15 exists to
+    // measure). 3 separate sets (rather than 1 reused across channels
     // too) so the 3 channels within a scale can run independently — see
     // the `threads` parallel branch below, which needs disjoint `&mut`
     // scratch per closure.
-    let n0 = width * height;
-    let mut scratch: [ScratchV2; 3] = [ScratchV2::new(n0), ScratchV2::new(n0), ScratchV2::new(n0)];
+    let strip_max_n = width * (STRIP_ROWS + 2 * HALO_P);
+    let mut scratch: [ScratchV2Strip; 3] = [
+        ScratchV2Strip::new(strip_max_n),
+        ScratchV2Strip::new(strip_max_n),
+        ScratchV2Strip::new(strip_max_n),
+    ];
 
     for scale in 0..n_scales {
         let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
@@ -1911,6 +2153,85 @@ mod tests {
         let result =
             compute_v2_features_impl(&source, &distorted, None, false).expect("compute ok");
         assert_all_bounded(&result.view(), TOL);
+    }
+
+    /// Phase-5 (§A.15): multi-strip boundary correctness. A 150-row image
+    /// with `STRIP_ROWS=64` spans 3 strips (`[0,64)`, `[64,128)`,
+    /// `[128,150)`), and this fixture puts a HARD HORIZONTAL edge at
+    /// `y=64` — exactly the first strip seam — plus a second at `y=100`
+    /// (mid-strip, for contrast) and blocky columns throughout (stresses
+    /// blockiness' lattice check across the seam too). If
+    /// `gather_strip_halo`/the halo math were wrong, this is exactly the
+    /// pattern that would show it: gradients spanning the seam would see
+    /// the WRONG neighbor row (garbage, a mismatched reflection, or a
+    /// stale scratch value), producing an out-of-bounds or wildly-off
+    /// signal right at `y=64`. Bounded-range + a same-shape identity
+    /// check (identity input still zeroes everything even across 3
+    /// strips) are the two things actually exercised here.
+    #[test]
+    fn bounded_range_multi_strip_horizontal_edge() {
+        let w = 96;
+        let h = 150; // 3 strips at STRIP_ROWS=64: [0,64) [64,128) [128,150)
+        let mut src = Vec::with_capacity(w * h);
+        let mut dst = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                // Horizontal bands (edges at y=64 and y=100) plus an
+                // 8-wide vertical block pattern, so gradient/blockiness
+                // both see real structure crossing the strip seam.
+                let band = if y < 64 {
+                    0u8
+                } else if y < 100 {
+                    255u8
+                } else {
+                    120u8
+                };
+                let block = if (x / 8) % 2 == 0 { 0i16 } else { 40i16 };
+                let v = (band as i16 + block).clamp(0, 255) as u8;
+                src.push([v, v.wrapping_add(30), v.wrapping_add(60)]);
+                // Distorted: shift the band edges by a few rows and
+                // perturb the block pattern, so gradients differ on both
+                // sides of the seam, not just coincide with src.
+                let dband = if y < 61 {
+                    10u8
+                } else if y < 103 {
+                    240u8
+                } else {
+                    130u8
+                };
+                let dblock = if (x / 8) % 2 == 0 { 5i16 } else { 35i16 };
+                let dv = (dband as i16 + dblock).clamp(0, 255) as u8;
+                dst.push([dv, dv.wrapping_add(25), dv.wrapping_add(55)]);
+            }
+        }
+        let source = RgbSlice::new(&src, w, h);
+        let distorted = RgbSlice::new(&dst, w, h);
+        let result =
+            compute_v2_features_impl(&source, &distorted, None, false).expect("compute ok");
+        assert_all_bounded(&result.view(), TOL);
+
+        // Identity check across the SAME multi-strip shape: every
+        // error-oriented feature must still be exactly zero when src==dst,
+        // even though the computation now crosses 3 strip boundaries.
+        let source2 = RgbSlice::new(&src, w, h);
+        let identity = RgbSlice::new(&src, w, h);
+        let result2 =
+            compute_v2_features_impl(&source2, &identity, None, false).expect("compute ok");
+        let view2 = result2.view();
+        for scale in 0..result2.n_scales() {
+            for ch in 0..3 {
+                let d = view2.ssim_mean(scale, ch);
+                assert!(
+                    d.abs() < TOL,
+                    "multi-strip identity: ssim_mean not zero: {d} at s{scale} c{ch}"
+                );
+                let gms = view2.gms(scale, ch);
+                assert!(
+                    gms.abs() < TOL,
+                    "multi-strip identity: gms not zero: {gms} at s{scale} c{ch}"
+                );
+            }
+        }
     }
 
     /// Adversarial fixture: 8x8-periodic step pattern (stresses the NEW

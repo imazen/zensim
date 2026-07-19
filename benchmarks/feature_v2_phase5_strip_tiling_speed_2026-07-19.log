@@ -1,0 +1,104 @@
+[zenbench] calibration: int=0.23ns/iter mem_bw=98.7GiB/s mem_lat=9.7ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.491 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1784448263-2d76.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1784448263-2d76
+═══════════════════════════════════════════════════════════════
+
+  extract_256x256  4 rounds × 1 calls ⚠ only 4 rounds
+                         mean ±mad ms  95% CI vs base     ops/s
+  ├─ v1_372feat_1thread   3.6 ±0.2ms  [3.4–3.7]ms        18.2M
+  ├─ v1_372feat_Nthread   3.8 ±0.2ms  [+0.1%–+8.3%]      17.4M [1] [2]
+  ├─ v2_bounded_1thread   5.4 ±0.4ms  [+31.9%–+71.3%]    12.1M
+  ╰─ v2_bounded_Nthread   3.8 ±0.4ms  [-3.3%–+15.2%]     17.4M [3]
+
+  v1_372feat_1thread  ██████████████████████████████████████████████ 18.2 Mops/s
+  v1_372feat_Nthread  ████████████████████████████████████████████ 17.4 Mops/s
+  v2_bounded_Nthread  ████████████████████████████████████████████ 17.4 Mops/s
+  v2_bounded_1thread  ███████████████████████████████ 12.1 Mops/s
+  [1] CI crosses zero
+  [2] drift r=1.00 — later rounds slower
+  [3] CI crosses zero
+
+  extract_576x576  4 rounds × 1 calls ⚠ only 4 rounds
+                         mean ±mad ms  95% CI vs base     ops/s
+  ├─ v1_372feat_1thread   18.1 ±0.1ms  [18.0–18.3]ms      18.3M
+  ├─ v1_372feat_Nthread    7.5 ±0.2ms  [-60.2%–-56.0%]    44.1M
+  ├─ v2_bounded_1thread   24.6 ±1.0ms  [+31.2%–+40.3%]    13.5M
+  ╰─ v2_bounded_Nthread   12.5 ±0.8ms  [-36.1%–-25.3%]    26.5M [1]
+
+  v1_372feat_Nthread  ██████████████████████████████████████████████ 44.1 Mops/s
+  v2_bounded_Nthread  ████████████████████████████ 26.5 Mops/s
+  v1_372feat_1thread  ███████████████████ 18.3 Mops/s
+  v2_bounded_1thread  ██████████████ 13.5 Mops/s
+  [1] drift r=-1.00 — later rounds faster
+
+  extract_1024x1024  4 rounds × 1 calls ⚠ only 4 rounds
+                          mean ±mad ms  95% CI vs base       ops/s
+  ├─ v1_372feat_1thread    64.9 ±4.5ms  [60.7–68.9]ms        16.1M
+  ├─ v1_372feat_Nthread    15.3 ±0.9ms  [-82.3%–-69.6%]      68.6M
+  ├─ v2_bounded_1thread   147.0 ±1.5ms  [+121.4%–+132.2%]    7.13M [1]
+  ╰─ v2_bounded_Nthread    59.8 ±1.0ms  [-14.7%–-1.1%]       17.5M
+[1] drift r=0.80 — later rounds slower
+
+  v1_372feat_Nthread  ██████████████████████████████████████████████ 68.6 Mops/s
+  v2_bounded_Nthread  ████████████ 17.5 Mops/s
+  v1_372feat_1thread  ███████████ 16.1 Mops/s
+  v2_bounded_1thread  █████ 7.13 Mops/s
+
+  extract_2048x2048  4 rounds × 1 calls ⚠ only 4 rounds
+                           mean ±mad ms  95% CI vs base       ops/s
+  ├─ v1_372feat_1thread   282.2 ±14.0ms  [264.8–303.9]ms      14.9M
+  ├─ v1_372feat_Nthread     60.9 ±7.1ms  [-80.1%–-73.8%]      68.9M
+  ├─ v2_bounded_1thread   650.8 ±21.7ms  [+123.0%–+140.4%]    6.44M
+  ╰─ v2_bounded_Nthread    257.8 ±9.4ms  [-7.4%–-4.4%]        16.3M
+
+  v1_372feat_Nthread  ██████████████████████████████████████████████ 68.9 Mops/s
+  v2_bounded_Nthread  ███████████ 16.3 Mops/s
+  v1_372feat_1thread  ██████████ 14.9 Mops/s
+  v2_bounded_1thread  ████ 6.44 Mops/s
+
+  total: 505.7s  (469 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+
+---
+Meta: zensim workspace zensim--feature-v2e, phase-5 strip-tiled v2 pipeline
+(bandwidth-hypothesis test, STRIP_ROWS=128). Parent commit 7696b62a (phase-4
+landing).
+Command: cargo build -p zensim --features training,feature-regime-v2 --bench v2_speed_baseline --release
+         ./target/release/deps/v2_speed_baseline-<hash>   (full sweep, no --group filter)
+Bench config: min_rounds=15, max_time=30s per group (phase-3's widened config, unchanged).
+Host: same shared workstation as phases 3/4, load-gated before launch (1-min
+load 0.13 at launch time, well under the efficiency ladder's 8.0 gate
+threshold; load rose to ~8 by the time this sweep finished due to unrelated
+leftover wait-loop processes from this same session, cleaned up afterward —
+did not affect this run, which had already completed).
+No -C target-cpu=native.
+
+Pre-sweep signal (2048²-only, 3-point STRIP_ROWS selection, same load-gating,
+not itself part of this file): STRIP_ROWS=32 -> 2.71x, STRIP_ROWS=64 -> 2.39x,
+STRIP_ROWS=128 -> 2.31x. STRIP_ROWS=128 selected as the value for this sweep.
+
+GATE RESULT (1024x1024, 1-thread): v1=64.9ms, v2=147.0ms, ratio=2.27x.
+GATE (<=1.5x): NOT MET. Down from phase-4's 3.09x (a 26.5% relative ratio
+reduction at the gate size), but does not close the gate.
+
+Kill criterion (phase-5 addendum): "strip-tiling improves 2048x2048 by <20%
+=> bandwidth hypothesis falsified". Measured: v2 871.9ms (phase-4, no strip)
+-> 650.8ms (phase-5, strip-tiled) = 25.4% reduction. NOT TRIGGERED -- the
+bandwidth hypothesis is CONFIRMED: memory traffic from full-image
+intermediate planes was a real, measurable ~25-30% component of phase-4's
+size-dependent slope. The ratio did not reach the pre-registered "~1.2-1.8x
+compute floor" (landed at 2.31x @ 2048x2048 instead), meaning bandwidth was
+A dominant term, not the only one -- see docs/FEATURE_V2_SPEC_2026-07-18.md
+SS A.15.6 for the updated residual attribution (dense-block division count
+is now the clearer larger remaining share).
+
+Side finding: 256x256 REGRESSED under strip-tiling (1.18x phase-4 -> 1.50x
+phase-5), exactly the diagnostic the efficiency ladder pre-registered ("if
+256sq gets slower, strip overhead is too high"). Fixed per-strip halo-gather
+cost (HALO_P=10 rows, paid on every strip regardless of size) outweighs the
+memory-traffic saving at small images that already fit cache under the
+phase-4 (non-strip) design. See SS A.15.4 for the full reasoning.
