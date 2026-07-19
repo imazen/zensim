@@ -146,6 +146,22 @@ ablation question is which v2 family buys LIVE +0.22 while costing CID22 −0.04
 - Three recipes' worth of instrument-validation record (memorization → partial →
   functional) with the shipped-B integrity control pinned at 0.88/0.93/0.90.
 
+## Per-family ablation (the KILL prescription) — design pre-registered before running
+
+Question: which v2 family buys LIVE +0.216 while costing CID22 −0.042? Variants
+(v2 arm only; recipe-3 conditions byte-identical, column-subset parquets; v1
+control fixed at 0.618/0.316/0.439; full-v2 reference 0.576/0.311/0.654):
+
+| variant | drops (local idx per ch/scale) | width | tests |
+|---|---|--:|---|
+| v2-base22 | 22–28 (all phase-2 candidates) | 264 | are the candidates the CID22 cost? |
+| v2-noBB | 25 blockiness, 27 banding | 324 | the two pre-flagged weak candidates |
+| v2-noPJND | 20,21,23,24 (transducer core+bank+fragility) | 300 | is the masking-transducer family the LIVE carrier? |
+
+Interpretation rules (fixed now): a variant "recovers CID22" if ≥ 0.598 (control
+− 0.020); a variant "carries LIVE" if dropping it loses ≥ 0.10 LIVE vs full-v2.
+Attribution only — no ship/kill semantics; feeds the next feature-design round.
+
 ## Reproduction
 
 All artifacts: `/mnt/v/output/zensim/v2-ab-2026-07-19/` — per-arm per-corpus
