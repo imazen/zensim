@@ -1,0 +1,138 @@
+# Feature-v2 → optimal-model experiment ladder (2026-07-20)
+
+Step-by-step plan for EVERY remaining experiment in the feature-v2 program:
+datasets, evals, gates, and order. Companion to
+`docs/OPTIMAL_MODEL_PLAN_2026-07-19.md` (fleet mechanics + methodology); this
+file is the executable ladder. Every experiment is pre-registered (hypothesis +
+kill band written BEFORE unblinding) per `docs/ITERATION_PROTOCOL.md`.
+
+**Feature space:** append-only 720 = frozen v1-372 (f0..371) ++ v2-348
+(f372..719). Deprecation = column masking (width-constant), never renumbering.
+New features (E6/E7) append at **f720+**.
+
+**Division of labor (2026-07-20):** the zenmetrics session owns the FLEET
+backfill (its `.workongoing`: "launch 40x cx43 full backfill" — in flight).
+This session owns the LOCAL backfill leg, the experiment ladder, and all
+zensim-side training/eval work.
+
+---
+
+## Datasets
+
+### Training (T)
+
+| id | corpus | pairs | codecs / distortions | target | 720 status |
+|---|---|--:|---|---|---|
+| T-big | bigcodec_hqdedup (canonical-picker-2026-07-01-zensimA) | 2,322,579 | REAL zenjpeg/webp/png/jxl ±lossless | ssim2 [0,1] | **fleet (in flight, 40×cx43)** — dist via `encodes/`+`variant_tar_r2_url` (NOT `variant_r2_url`, 404 trap); fresh run-id (content-address silent-skip) |
+| T-safe | safesyn full | 196,086 (−avif ≈ ~160k) | mozjpeg/zenjpeg/zenjxl/zenwebp (+avif EXCLUDED: zenavif-in-flux + mm6 precedent) | gpu_ssim2/100 | fleet or local-multicodec; bitstream decode (PNG cache deleted; decoder-drift caveat — decode ALL through one decoder) |
+| T-cid201 | cid22_train 201-ref subset | 17,611 | mixed real codecs | ssim2-anchored (NOT MCOS — legal) | **investigate** pair-pixel source, then local |
+| T-kadid / T-tid | KADID-10k / TID2013 | 10,125 / 3,000 | analytic (guard weight only) | DMOS/MOS | **DONE** (`ext_kadid/ext_tid`, 2026-07-19) |
+| T-konjnd | KonJND-1k train, JPEG half | ~10k | JPEG (BPG half: no decoder — documented gap) | PJND mix | local (needs pairs builder) |
+| T-negrich (opt) | kadis_negrich | subset | analytic negatives | negative-tail | investigate (pixels via kadis-700k-gpu `distorted_url`) |
+| T-hfnl (opt) | hf_nearlossless train | 900 | JXL near-lossless | human+ssim2 | investigate pixel URLs |
+
+### Held-out (H — NEVER trained; the verdict set)
+
+| id | corpus | pairs | axis | 720 status |
+|---|---|--:|---|---|
+| H-cid22 | CID22-49 val (gold MCOS) | 4,292 | compression, human | **DONE** |
+| H-aic3 | AIC-3 CTC (JND) | 600 | compression, human | **DONE** |
+| H-aic4 | AIC-4 sample (JND) | 300 | compression, human | local (builder needed) |
+| H-konjnd | KonJND-1k val, JPEG half | ~500 | near-threshold | local (builder needed) |
+| H-sdr25 | JPEG-AI-SDR25 | 95k | HQ zone q75-100 (weak zone) | local ~30 min (investigate triplet→pair layout first) |
+| H-csiq / H-live | CSIQ / LIVE-R2 | 866 / 779 | general-FR (context, not gate) | **DONE** |
+| H-nonphoto / imazen26 | ssim2 north-star gates | — | non-photo / real-codec | investigate pixel sources |
+| eval grids | dial + corruption grids @720 | — | G-DIAL / corruption gate | **investigate** re-extractability (stored grids are 372-only) |
+
+**Bans in force:** CID22-49 human MOS never trains. AIC-3 raw triplets (420k)
+banned pending ref-disjointness vs the CTC 10-ref holdout. AIC-4 holdout-only.
+
+### Eval instruments
+
+- **forward+panel** (`predict_features_with_bake` + `panel`): width-agnostic — works for 720 today (A/B-proven).
+- **bake_verdict @720**: registry is 372-only → extend to ext_ parquets + width autodetect (infrastructure item I-1; owner = bake_verdict).
+- **steer-mass / family-sensitivity** (`v2_steer_by_family.py`, `v2_combined_steer_mass.py`): work today.
+- **coherence** (`diffmap_block_coherence`): 720 scalar-side works; runtime M3 needs E9.
+- **dial panel @720**: blocked on eval-grid re-extraction (I-2).
+- **RD probe** (jxl/zenjpeg worktrees): needs a 720 bake behind a custom profile — E10.
+
+---
+
+## The ladder (each step pre-registered before unblinding)
+
+**E0 — 720 pipeline smoke.** Local jobexec cell + fleet first-chunk artifact
+check: feature rows length **720** or stop-the-line. Cross-check jobexec-vs-
+`v2_ab_extract` on ~10 shared pairs (≤5e-4 rel) — decoder/pipeline parity.
+*(Fleet side owned by zenmetrics session; verify before trusting their ledger.)*
+
+**E1 — backfill.** Fleet: T-big, T-safe (zenmetrics session). Local: H-aic4,
+H/T-konjnd-JPEG, H-sdr25, T-cid201 + investigations (this session's agent).
+Gate: row counts = pair counts (skip rate ≤0.1%); `_MANIFEST.json` with
+build_commit + image digest per output (ML-discipline §2). Convert all to
+parquet; index in DATA_PROVENANCE.
+
+**E2 — ceiling model (the production append-only decision).** Train 720 MLP on
+{T-big + T-safe + T-cid201 + guards}, target ssim2, `withinref,both` +
+mse-weight, seeds {1,7,13}, val groups = ALL of H. Twin v1-372 arm, identical
+argv (cap 372). Gates: best-epoch > 0 (instrument trains past epoch 0 — the
+lab-recipe failure mode is gone); seed σ(CID22) < 0.02; then the pre-registered
+append-only bands (WIN = ext ≥ v1 − 0.010 mean across compression holdouts, no
+corpus ≤ −0.030). This SETTLES the seed-noisy lab CID22/LIVE verdict.
+
+**E3 — masked variants at scale.** ext-luma (chroma transducers masked) and
+ext-lumacoh (+ v1-nonspat f156-371 masked) under E2's recipe/seeds. Decides at
+production scale: chroma-transducer deprecation + v1-nonspat deprecation
+(currently supported by lab evidence: lumacoh = 100% spatializable at ~0 cost).
+
+**E4 — feature-family LOO at the optimum.** In the E2/E3 winner config: mask
+each v2 family (width-constant), ×3 seeds, full panel per holdout. Verdict per
+family: load-bearing (|Δ| > seed-σ, hurts when removed) / redundant (drop-mask)
+/ neutral. This replaces every lab-scale family claim (incl. blockiness-keep,
+GMS-graduates) with marginal-at-the-optimum evidence.
+
+**E5 — per-feature sensitivity (cheap cross-check).** `s_k` central-difference
+importance on the winner (no retrain); grouped by family/scale/channel.
+Agreement with E4 → confidence; disagreement → investigate before freezing.
+
+**E6 (conditional) — transducer k-refit.** ONLY if the Y-transducer family
+survives E4. Append k∈{2,8} variants at **f720+** (append-only), subset-screen
+on ~100k pairs before any full extraction. Kill: no holdout gains > seed-σ.
+
+**E7 (conditional) — GMS-deviation (real GMSD).** Append std-pooled GMS at
+f720+ (reuses the materialized GMS map; near-free at extraction). Same subset-
+screen protocol. (The one remaining validated utility candidate — GMS is
+mean-pooled today and underused at ~2% steering mass.)
+
+**E8 — feature-set freeze.** Survivor list + mask list → docs + memory +
+`bake_verdict` registry (I-1). The production feature definition for the next
+zensim generation; code change to `feature_v2.rs` emission (drop dead compute)
+only AFTER this freeze ("when research is done we could change that").
+
+**E9 — diffmap completion for survivors** (task #48). Wire
+`compute_v2_diffmap_channel_scale` (landed `ce45a1ff`) into streaming
+`compute_with_diffmap`; add per-pixel gradient maps ONLY for load-bearing
+excluded families (masked/iw = `w·v/Σw`; dev = deviation term; soft-peak =
+product rule; fragility = correct 0). Block-pool identity test per family;
+measure DEPLOYED M3 vs the 1.0 ceiling (proxy-validated: v1's 0.54 ≈ its 53%).
+
+**E10 — five-gate scorecard + ship decision.** G-RANK (bake_verdict@720),
+G-DIAL (needs I-2), G-STEER (E9's M3), G-RD (jxl+zenjpeg probe with independent
+judges), G-TARGET. Winner vs shipped B; swap is USER-GATED.
+
+### Infrastructure items
+- **I-1**: bake_verdict 720-corpus support (before E2's verdicts).
+- **I-2**: eval-grid (dial+corruption) 720 re-extraction — investigate source
+  pixels; blocks G-DIAL only.
+- **I-3**: `score-pairs --feature-output` still emits 372 (WithIw) — latent
+  footgun, fix or loudly document in zenmetrics.
+
+### Cost/time (workstation-derived; smoke-verify before trusting)
+T-big ≈ 109 CPU-h ⇒ ~7 h on 40×cx43 ≫ margin (in flight); T-safe ≈ 9 CPU-h;
+local legs ≈ 1-2 h wall total. E2/E3 training ≈ 30-60 min/arm ×3 seeds ×~4 arms
+(run-heavy, serialized; Hetzner trainer fan-out if it drags). E4 ≈ 11 families
+×3 seeds — the big training bill; batch on Hetzner per feedback_hetzner_cpu.
+
+### Standing rules that bind every step
+Pre-register before unblinding; multi-seed for any claim; CID22-49 sacred;
+results → `benchmarks/*.md` + sidecars same-day; no /tmp; run-heavy for
+everything heavy; jj push-verify (`main@{u}` ancestor check) before "done".

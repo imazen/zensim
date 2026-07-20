@@ -5,8 +5,12 @@ in git history — their durable facts are in the linked docs, not here.
 
 ## ⇒ ACTIVE WORK (2026-07-19): optimal global model + feature validation + diffmap
 
-**Read [`docs/OPTIMAL_MODEL_PLAN_2026-07-19.md`](docs/OPTIMAL_MODEL_PLAN_2026-07-19.md) — it is
-the forward plan AND the resume manifest for this thread.** One-paragraph state:
+**Read [`docs/V2_EXPERIMENT_PLAN_2026-07-20.md`](docs/V2_EXPERIMENT_PLAN_2026-07-20.md) (the
+E0–E10 experiment ladder: datasets, evals, gates) and
+[`docs/OPTIMAL_MODEL_PLAN_2026-07-19.md`](docs/OPTIMAL_MODEL_PLAN_2026-07-19.md) (fleet
+mechanics + methodology).** Fleet backfill of T-big/T-safe is owned by the zenmetrics
+session (40×cx43, launched 2026-07-20); local backfill leg + experiments live here.
+One-paragraph state:
 
 The feature-v2 "perfectable features" program finished its lab-scale phase. Verdicts (all in
 `benchmarks/v2_trainability_ab_2026-07-19.md`): the append-only v1-372 ++ v2-348 = **720**
