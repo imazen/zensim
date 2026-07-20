@@ -25,11 +25,11 @@ zensim-side training/eval work.
 |---|---|--:|---|---|---|
 | T-big | bigcodec_hqdedup (canonical-picker-2026-07-01-zensimA) | 2,322,579 | REAL zenjpeg/webp/png/jxl ±lossless | ssim2 [0,1] | **fleet (in flight, 40×cx43)** — dist via `encodes/`+`variant_tar_r2_url` (NOT `variant_r2_url`, 404 trap); fresh run-id (content-address silent-skip) |
 | T-safe | safesyn full | 196,086 (−avif ≈ ~160k) | mozjpeg/zenjpeg/zenjxl/zenwebp (+avif EXCLUDED: zenavif-in-flux + mm6 precedent) | gpu_ssim2/100 | fleet or local-multicodec; bitstream decode (PNG cache deleted; decoder-drift caveat — decode ALL through one decoder) |
-| T-cid201 | cid22_train 201-ref subset | 17,611 | mixed real codecs | ssim2-anchored (NOT MCOS — legal) | **investigate** pair-pixel source, then local |
+| T-cid201 | cid22_train 201-ref subset | 17,611 | mixed real codecs | ssim2-anchored (NOT MCOS — legal) | **DONE** (`ext_cid22_train201`, backfill 2026-07-20; verified 0-overlap w/ 49-ref holdout) |
 | T-kadid / T-tid | KADID-10k / TID2013 | 10,125 / 3,000 | analytic (guard weight only) | DMOS/MOS | **DONE** (`ext_kadid/ext_tid`, 2026-07-19) |
-| T-konjnd | KonJND-1k train, JPEG half | ~10k | JPEG (BPG half: no decoder — documented gap) | PJND mix | local (needs pairs builder) |
-| T-negrich (opt) | kadis_negrich | subset | analytic negatives | negative-tail | investigate (pixels via kadis-700k-gpu `distorted_url`) |
-| T-hfnl (opt) | hf_nearlossless train | 900 | JXL near-lossless | human+ssim2 | investigate pixel URLs |
+| T-konjnd | KonJND-1k train, JPEG half | ~10k | JPEG (BPG half: no decoder — documented gap) | **SKIPPED** (backfill 2026-07-20): no local parquet carries a ref/dist path + the 20-sample selection discriminator; target is a CVVDP+IW-SSIM blend (zenmetrics territory). Fully-local ssim2-anchored alt `konjnd_full_scored.csv` (50,400 rows) exists if wanted — NOT auto-substituted. |
+| T-negrich (opt) | kadis_negrich | subset | analytic negatives | **SKIPPED** — own manifest says "selection rule unrecorded" (un-recoverable, not an R2 pull) |
+| T-hfnl (opt) | hf_nearlossless train | 900 | JXL near-lossless | **SKIPPED** — pixels were in a wiped `/tmp` scratchpath; 0 rows have a persisted dist bitstream; `.jxl` refs not decodable by the extractor anyway |
 
 ### Held-out (H — NEVER trained; the verdict set)
 
@@ -37,9 +37,9 @@ zensim-side training/eval work.
 |---|---|--:|---|---|
 | H-cid22 | CID22-49 val (gold MCOS) | 4,292 | compression, human | **DONE** |
 | H-aic3 | AIC-3 CTC (JND) | 600 | compression, human | **DONE** |
-| H-aic4 | AIC-4 sample (JND) | 300 | compression, human | local (builder needed) |
-| H-konjnd | KonJND-1k val, JPEG half | ~500 | near-threshold | local (builder needed) |
-| H-sdr25 | JPEG-AI-SDR25 | 95k | HQ zone q75-100 (weak zone) | local ~30 min (investigate triplet→pair layout first) |
+| H-aic4 | AIC-4 sample (JND) | 300 | compression, human | **DONE** (`ext_aic4`, 2026-07-20) |
+| H-konjnd | KonJND-1k val, JPEG half | 504 | near-threshold (raw mean-PJND target) | **DONE** (`ext_konjnd_jpeg_val`, 2026-07-20) |
+| H-sdr25 | JPEG-AI-SDR25 | **50** (NOT 95k) | HQ zone, JPEG-AI only | **DONE** (`ext_sdr25`, 2026-07-20). CORRECTION: the "95k" were triplet-comparison *responses*, not pairs — they collapse via ordered-probit into 50 scoreable JPEG-AI pairs (byte-identical to the pre-existing `sdr25_eval_pairs.tsv`). A HQ-zone gate at n=50 is thin — treat as directional, not a hard gate. |
 | H-csiq / H-live | CSIQ / LIVE-R2 | 866 / 779 | general-FR (context, not gate) | **DONE** |
 | H-nonphoto / imazen26 | ssim2 north-star gates | — | non-photo / real-codec | investigate pixel sources |
 | eval grids | dial + corruption grids @720 | — | G-DIAL / corruption gate | **investigate** re-extractability (stored grids are 372-only) |
