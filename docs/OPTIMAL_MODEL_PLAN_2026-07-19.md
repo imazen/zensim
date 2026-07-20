@@ -44,10 +44,18 @@ implements v1). `cpu-metrics` (a default feature) pulls in `zensim/feature-regim
 automatically. `JobKind::Feature{regime}` exists in the type system but is NOT
 implemented in the executor — use `ScoreFile`/`Metric` with `metric=zensim-gpu`.
 
-**⚠ BLOCKER (must fix before any Hetzner/CPU run):** the CPU executor image
-`ghcr.io/imazen/zenfleet-worker:exec` is STALE — last pushed 2026-07-19T19:34Z,
-*before* the V2Ab commit `428b4aeb` (21:13Z). A run against it today silently
-produces **372**-feature rows, no error. Rebuild + push first:
+**✅ BLOCKER CLEARED (2026-07-19):** the CPU executor image
+`ghcr.io/imazen/zenfleet-worker:exec` was rebuilt from the committed V2Ab fix
+(`c3cfd92e` "repoint to features-only + entrypoint-panic zensim executor") and
+**pushed** — digest `sha256:9d2898e26aa6d15cd6a7ab496a804470914b29e187bfb6ae3257160b8d8ca753`
+(jobexec present, `V2Ab`/720 source-verified: `extract_features_regime` returns
+720-or-errors; `V2Ab::total_features()=372+348`). **Fleet execution (declare →
+launch → extract → train) is owned by the zenmetrics session going forward** (user
+handoff 2026-07-19). NOTE: `score-pairs --feature-output` still emits **372**
+(WithIw) — a separate local path the fleet does NOT use, but a latent footgun if a
+future caller expects 720 there.
+
+_Original rebuild recipe (for reference / arm64 tier):_
 ```
 cd ~/work/zen/zenmetrics
 cargo build --release -p zenmetrics-cli --no-default-features \
