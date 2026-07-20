@@ -1,7 +1,30 @@
 # SESSION-RESUME — read this first after every compact
 
-**Last updated:** 2026-07-18 (five-gate scorecard era). Prior snapshots live in git history —
-their durable facts are in the linked docs, not here.
+**Last updated:** 2026-07-19 (feature-v2 program → optimal-model fleet). Prior snapshots live
+in git history — their durable facts are in the linked docs, not here.
+
+## ⇒ ACTIVE WORK (2026-07-19): optimal global model + feature validation + diffmap
+
+**Read [`docs/OPTIMAL_MODEL_PLAN_2026-07-19.md`](docs/OPTIMAL_MODEL_PLAN_2026-07-19.md) — it is
+the forward plan AND the resume manifest for this thread.** One-paragraph state:
+
+The feature-v2 "perfectable features" program finished its lab-scale phase. Verdicts (all in
+`benchmarks/v2_trainability_ab_2026-07-19.md`): the append-only v1-372 ++ v2-348 = **720**
+regime is built + extractor + fleet-wired (jobexec emits 720 for `metric=zensim`). The
+**append-only decision** — "does v1 ++ post-372 beat v1?" — is seed-noisy at lab scale: robust
+= combining wins **aic3 +0.11** and improves **coherence** (ext-lumacoh = **100% spatializable**
+by deprecating v1's non-spatializable block at ~0 compression cost), loses CSIQ (general-FR);
+CID22/LIVE flip sign between seeds (epoch-0 lab-recipe instability). Runtime: v2/v1 compute
+**1.4–1.7×** (`benchmarks/v2_extraction_timing_2026-07-19.md`); the gradient **sqrt is already
+SIMD** (asm-verified). **Diffmap core landed** (`ce45a1ff`, `compute_v2_diffmap_channel_scale`,
+test-gated block-pool identity); the excluded families are computable via the per-pixel gradient
+(`Σ_k s_k·∂f_k/∂pixel`, hits M2≈1.0). Directives: **feature numbering is append-only** (v2 at
+f372+, deprecate-by-mask never renumber); transducer **luma-gate** landed as an opt-in toggle.
+
+**Next step:** build the optimal global model to settle which features are load-bearing
+(marginal-at-the-optimum, not lab-seed-noise), THEN complete the diffmap for survivors. Step 1
+is the fleet blocker: **rebuild+push the CPU executor image** `zenfleet-worker:exec` (stale =
+silently emits 372 not 720). Full order + corpus + risks: the plan doc §D.
 
 ## Reading order on resume
 
