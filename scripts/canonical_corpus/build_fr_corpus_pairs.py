@@ -205,6 +205,174 @@ def build_safesyn_jpeg_full():
     print(f"safesyn JPEG FULL: {len(out)} pairs from {srcs} sources -> {OUT}")
 
 
+def build_aic4():
+    """AIC-4 sample dataset (v2 backfill H-aic4, HOLDOUT-ONLY): 5 source
+    images x 6 codecs x 10 distortion levels ~= 300 pairs. Mirrors the v1
+    Rust loader `load_aic4` in `zensim-bench/examples/extract_features_372col.rs`
+    exactly (same CSV columns, same PTC_images path convention, same
+    human_score = signed JND `distortion` column).
+
+    CSV: img_num,codec,dlevel,img_source,img_distorted,distortion,CI_min,CI_max
+    Images: <aic4_root>/PTC_images/<img_num zero-padded to 5>/<img_source|img_distorted>
+    human_score = distortion (signed JND; verdict uses |SROCC| so orientation is fine,
+    matching AIC-3's score.jnd convention)."""
+    CSV = "/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG_AIC_reconstructed_jnd_scores.csv"
+    AIC4_ROOT = Path("/mnt/v/dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset")
+    PTC_ROOT = AIC4_ROOT / "PTC_images"
+    OUT = "/mnt/v/output/zensim/v2-backfill-2026-07-20/aic4_pairs.tsv"
+    out, miss = [], 0
+    with open(CSV) as f:
+        for r in csv.DictReader(f):
+            img_num = int(r["img_num"])
+            img_dir = PTC_ROOT / f"{img_num:05d}"
+            ref = img_dir / r["img_source"]
+            dist = img_dir / r["img_distorted"]
+            if not (ref.exists() and dist.exists()):
+                miss += 1
+                continue
+            out.append((str(ref), str(dist), float(r["distortion"])))
+    Path(OUT).parent.mkdir(parents=True, exist_ok=True)
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"AIC-4: {len(out)} pairs -> {OUT}  (skipped {miss} missing)")
+
+
+def build_konjnd_jpeg_val():
+    """KonJND-1k JPEG-half val corpus (v2 backfill H-konjnd, HOLDOUT-ONLY,
+    near-threshold). Mirrors the v1 Rust loader `load_konjnd` in
+    `zensim-bench/examples/extract_features_372col.rs` EXACTLY, filtered to
+    `Compression type == JPEG` (BPG has no local decoder -- documented gap,
+    see docs/V2_EXPERIMENT_PLAN_2026-07-20.md).
+
+    subjective_ratings.csv columns: image_id, Compression type, No. of
+    ratings, mean, std, ratings. human_score = raw `mean` PJND threshold
+    (NOT normalized -- matches the documented val/konjnd.parquet convention,
+    range ~[6,90], nominal [22,70] per project memory
+    feedback_konjnd_human_score_two_columns.md). dist filename convention:
+    `{stem}_JPEG_{round(mean):03}.jpg` under `<base>/jpeg/`.
+
+    NOTE: this is NOT the same corpus as `konjnd-dense` (the CVVDP+IWSSIM
+    'active-mix' 20-samples-per-ref TRAIN corpus referenced as T-konjnd in
+    the v2 plan) -- that corpus has no raw pixel path columns in any local
+    parquet (only ref_basename, duplicated 20x with no per-row quality-level
+    discriminator) and its target requires zenmetrics-side CVVDP scoring.
+    See benchmarks/v2_backfill_local_2026-07-20.md for the full flag."""
+    BASE = Path("/mnt/v/datasets/KonJND-1k/KonJND-1k")
+    OUT = "/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv"
+    out, miss = [], 0
+    with open(BASE / "subjective_ratings.csv") as f:
+        for r in csv.DictReader(f):
+            if r["Compression type"] != "JPEG":
+                continue
+            image_id = r["image_id"]
+            stem = image_id[:-4] if image_id.endswith(".png") else image_id
+            mean_threshold = float(r["mean"])
+            level = max(1, min(100, round(mean_threshold)))
+            dist = BASE / "jpeg" / f"{stem}_JPEG_{level:03d}.jpg"
+            ref = BASE / "source_image" / image_id
+            if not (ref.exists() and dist.exists()):
+                miss += 1
+                continue
+            out.append((str(ref), str(dist), mean_threshold))
+    Path(OUT).parent.mkdir(parents=True, exist_ok=True)
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"KonJND-1k JPEG val: {len(out)} pairs -> {OUT}  (skipped {miss} missing)")
+
+
+def build_sdr25():
+    """JPEG-AI-SDR25 scoreable subset (v2 backfill H-sdr25, HOLDOUT-ONLY,
+    HQ zone q75-100 weak zone). The dataset's ~95k rows are TRIPLET
+    COMPARISON RESPONSES (which-side-is-more-distorted judgments against a
+    pivot original), NOT independent labeled pairs -- they were already
+    reconstructed into an absolute per-stimulus JND scale via ordered-probit
+    joint MLE by `scripts/v_next/reconstruct_sdr25_jnd.py` (T0 eval anchor,
+    BUILT 2026-07-02, docs/DATA_SPLITS.md:108). This builder does NOT
+    re-derive that reconstruction (owner = reconstruct_sdr25_jnd.py) -- it
+    only builds the (ref,dist,human_score) pairs layer on top of its output.
+
+    Of the 116 reconstructed stimuli (5 images x up to 6 codecs), only the
+    JPEG-AI codec (codec==6) subset has locally-available pixels -- 5 images
+    x 10 distortion levels = 50 pairs. The other 5 codecs (AVIF/JPEG-1/
+    JPEG-2000/JPEG-XL/VVC) are 'anchor' stimuli whose bitstreams are NOT in
+    the public zip (sparse/inconsistent dlevel coverage per image confirms
+    this -- verified 2026-07-20 via direct parquet inspection). Reproduces
+    (byte-for-byte path convention) the pre-existing
+    /mnt/v/output/zensim-multicodec-probe/sdr25_eval_pairs.tsv (50 rows,
+    verified identical 2026-07-20) -- always uses the PTC crop file for a
+    given (img_num, dlevel) regardless of whether the reconstructed row's
+    `filename` says BTC_ or PTC_ (a deliberate prior-session choice: PTC is
+    the single crop file used for feature extraction; BTC/PTC only
+    distinguish which DISPLAY condition a given triplet response came from).
+
+    ref  = crops_sources/PTC_{img:05d}_0ref_00.png
+    dist = PTC_JPEG-AI_images/{img:05d}/PTC_{img:05d}_JPEG-AI_{dlevel:02d}.png
+    human_score = q_jnd (ordered-probit JND-scale distortion magnitude,
+    0=original/best, higher=more distorted -- matches AIC-3/AIC-4 convention
+    in this file; downstream eval uses |SROCC|)."""
+    import pyarrow.parquet as pq
+    RECON = "/mnt/v/output/zensim-multicodec-probe/sdr25_jnd_reconstructed_2026-07-02.parquet"
+    ROOT = Path("/mnt/v/datasets/jpeg-ai-sdr25/dataset-JPEG-AI-SDR25")
+    OUT = "/mnt/v/output/zensim/v2-backfill-2026-07-20/sdr25_pairs.tsv"
+    df = pq.read_table(RECON).to_pandas()
+    jai = df[df["codec"] == 6]  # codec 6 = JPEG-AI -- the only pixel-available codec
+    out, miss = [], 0
+    for _, r in jai.iterrows():
+        img, dlevel = int(r["img_num"]), int(r["dlevel"])
+        ref = ROOT / "crops_sources" / f"PTC_{img:05d}_0ref_00.png"
+        dist = ROOT / "PTC_JPEG-AI_images" / f"{img:05d}" / f"PTC_{img:05d}_JPEG-AI_{dlevel:02d}.png"
+        if not (ref.exists() and dist.exists()):
+            miss += 1
+            continue
+        out.append((str(ref), str(dist), float(r["q_jnd"])))
+    Path(OUT).parent.mkdir(parents=True, exist_ok=True)
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"SDR25 (JPEG-AI scoreable subset): {len(out)} pairs -> {OUT}  (skipped {miss} missing)")
+
+
+def build_cid22_train201():
+    """CID22 train-only 201-ref subset (v2 backfill T-cid201, TRAINABLE --
+    ssim2-anchored, NEVER human MCOS per CLAUDE.md 'CID22 is VALIDATION-ONLY').
+
+    Reuses the ALREADY-BUILT raw-pixel-path workspace TSV
+    `canonical-2026-05-21/_workspace/cid22_train_ssim2.tsv` (produced by
+    `scripts/canonical_corpus/v11_extract_cid22_train.py` +
+    `v11_cid22_train_backfill_cvvdp_iwssim.py`; this builder does NOT
+    re-derive the 201-ref split or re-score ssim2, it only reformats the
+    existing (ref_path, dist_path, ..., ssim2_gpu) table into this file's
+    (ref_path, dist_path, human_score) convention). human_score =
+    ssim2_gpu / 100, matching the documented invariant
+    `cid22_train_norm.human_score == ssim2_gpu/100 exactly` (docs/DATA_SPLITS.md:99).
+
+    SAFETY: verified 2026-07-20 -- the 201 unique ref_basenames here have
+    ZERO overlap with the 49-ref CID22_validation_set.csv `reference_img`
+    basenames (the sacred human-MOS holdout). Source images live at
+    /mnt/v/dataset/cid22/CID22/ (the broader CID22 library), NOT
+    /mnt/v/dataset/cid22/CID22_validation_set/."""
+    SRC = "/mnt/v/zen/zensim-training/canonical-2026-05-21/_workspace/cid22_train_ssim2.tsv"
+    OUT = "/mnt/v/output/zensim/v2-backfill-2026-07-20/cid22_train201_pairs.tsv"
+    out, miss = [], 0
+    with open(SRC) as f:
+        for r in csv.DictReader(f, delimiter="\t"):
+            ref, dist = r["ref_path"], r["dist_path"]
+            if not (Path(ref).exists() and Path(dist).exists()):
+                miss += 1
+                continue
+            out.append((ref, dist, float(r["ssim2_gpu"]) / 100.0))
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score"])
+        w.writerows(out)
+    print(f"CID22-train-201: {len(out)} pairs -> {OUT}  (skipped {miss} missing)")
+
+
 BUILDERS = {
     "csiq": build_csiq,
     "live": build_live,
@@ -213,6 +381,10 @@ BUILDERS = {
     "cid22val": build_cid22val,
     "aic3": build_aic3,
     "safesyn_jpeg_full": build_safesyn_jpeg_full,
+    "aic4": build_aic4,
+    "konjnd_jpeg_val": build_konjnd_jpeg_val,
+    "sdr25": build_sdr25,
+    "cid22_train201": build_cid22_train201,
 }
 
 if __name__ == "__main__":
