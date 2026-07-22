@@ -3,8 +3,13 @@
 Context: `docs/V2_EXPERIMENT_PLAN_2026-07-20.md` "720 GAP AUDIT" — four
 eval-side instruments lacked the 720-wide (v1-372 ++ v2-348) feature vectors
 needed to run G-DIAL / corruption-gate / G-NP / G-IM26 against a 720 model.
-This session closed all four. Tooling: `scripts/v_next/backfill_dial_grid_720.py`,
-`scripts/v_next/backfill_corruption_grid_720.py`, `scripts/v_next/fleet_blob_fetch_720.py`.
+This session **fully** closed dial_grid + corruption_grid (100% re-encoded/
+re-extracted, verified) and **partially** closed nonphoto/imazen26 (~26%/23%
+via a fleet ledger+blob join — see §3+4 for why it stopped short of 100%; not
+fabricated, honestly incomplete, re-run recommended). Tooling:
+`scripts/v_next/backfill_dial_grid_720.py`,
+`scripts/v_next/backfill_corruption_grid_720.py`,
+`scripts/v_next/fleet_blob_fetch_720.py`.
 
 ## Summary table
 
@@ -12,8 +17,8 @@ This session closed all four. Tooling: `scripts/v_next/backfill_dial_grid_720.py
 |---|--:|--:|---|---|---|
 | dial_grid | 4,817 | 4,817 (100.0%) | re-encode (CPU) + re-extract | cross-backend drift, see below | 536 rows (11.1%) flagged L2>0.5 |
 | corruption_grid | 2,016 | 2,016 (100.0%) | pure re-extract (pixels existed) | near-ULP (both CPU) | 0 flagged |
-| nonphoto | see final numbers below | 10,000 | fleet ledger+blob join | exact fingerprint match | 0 (join is exact-match-or-drop) |
-| imazen26 | see final numbers below | 10,025 | fleet ledger+blob join | exact fingerprint match | 0 (join is exact-match-or-drop) |
+| nonphoto | 2,599 | 10,000 (26.0%) | fleet ledger+blob join, stopped early (see §3+4) | exact fingerprint match | 0 (join is exact-match-or-drop) |
+| imazen26 | 2,297 | 10,025 (22.9%) | fleet ledger+blob join, stopped early (see §3+4) | exact fingerprint match | 0 (join is exact-match-or-drop) |
 
 Output: `/mnt/v/output/zensim/v2-eval-720-2026-07-22/` + `_MANIFEST.json`
 (per-corpus rows/method/verify-stats/sha256/zensim_main_commit).
@@ -210,11 +215,68 @@ consumed) and relaunched — confirmed flat/bounded on relaunch, and ~4x
 faster besides (the leak had also been throttling throughput via memory
 pressure).
 
-**Match rate:** see `_MANIFEST.json` for the final numbers (the fetch runs in
-the background past this note's writing; update the manifest with final
-counts once it completes — do NOT block on 100%, per the task brief: "run
-the join against what exists... if <95% note it needs a re-run when the
-fleet completes").
+**Final result: 2,599/10,000 nonphoto (26.0%) + 2,297/10,025 imazen26
+(22.9%) — honestly incomplete, not fabricated, re-run recommended.** The
+fetch was progressing steadily (rate climbed 71 -> 138 blobs/s as the thread
+pool warmed up, matches climbing every checkpoint) when it **stopped
+unexpectedly** after scanning 160,000/378,172 blobs (42.3%), with no Python
+traceback in its log and no OOM-kill signature found in `dmesg` (kernel-log
+access is otherwise unrestricted on this box, so the absence is a real
+negative result, not a permissions gap). Checkpointed output at that point
+is intact and is what's reported here — every `--report-every` checkpoint
+rewrites the two output parquets in full, so nothing between checkpoints was
+lost, only progress past the last one.
+
+**Why this wasn't relaunched:** around the same time, a second, much larger
+`fleet_blob_fetch_720.py fetch-all` invocation appeared on this same box —
+a full T-big-corpus consolidation (949,343 blobs, ETA 90+ minutes),
+apparently launched by the concurrent session that owns the T-big fleet
+backfill (see "concurrent-edit collision" below — this is the same party).
+It was still actively running 96 workers when the death was investigated.
+Relaunching a second competing 96-worker fetch on top of that risks the
+exact kind of resource contention the machine-safety mandate exists to
+prevent, and may have been what killed the first run in the first place
+(no direct evidence either way, but the timing lines up: their job started
+~10 minutes before mine died). Given the task brief explicitly permits
+partial results ("run the join against what exists... don't block on
+100%"), this session accepted the checkpointed 26.0%/22.9% as final rather
+than compound the load. **Recommended follow-up:** rerun
+`fleet_blob_fetch_720.py fetch-and-match` once the box is free of concurrent
+heavy jobs — the underlying ledger-scan + dedup (`fleet_ledger_matched_pooled
+.parquet`, 466,418 distinct blobs after excluding the 2 broken pools) is
+already built and reusable, so a rerun does not need to repeat the 56-pool
+`aws s3 sync` or the ledger scan, only the blob-fetch+match stage.
+
+## Concurrent-edit collision on `fleet_blob_fetch_720.py` (mid-session)
+
+While `fetch-and-match` was running, `scripts/v_next/fleet_blob_fetch_720.py`
+gained two functions (`_records_to_table_full`, `cmd_fetch_all`) that this
+session did not write, between two of its own edits — discovered because a
+routine re-read of the file showed unfamiliar content. `.workongoing` never
+showed anything but this session's own claim throughout, so this was a
+concurrent process editing the shared jj working copy directly (not through
+the lock protocol) rather than a stale-marker handoff. The content turned
+out to be a legitimate, well-built extension (a `fetch-all` streaming
+full-merge mode + a `scan-ledgers --all` no-filter mode, for exactly the
+T-big consolidation the concurrent zenmetrics session owns) — not
+vandalism, just an unannounced shared-workspace collision (the class of
+failure the CLAUDE.md's jj-workspace guidance exists to prevent).
+
+Handling, in order: (1) froze the unreviewed diff into its own honestly-
+labeled local commit (`wip(unreviewed): ...NOT authored by this session`)
+rather than silently folding it into this session's own commit message or
+discarding it; (2) the auto-mode classifier blocked the push of that
+commit (reasonably — pushing unreviewed third-party code); (3) rather than
+work around the block, forked this session's own next change off the last
+verified-good commit instead, bypassing the frozen commit entirely, so nothing
+of this session's authorship or the other party's work needed to be
+destroyed; (4) shortly after, the other session independently `describe`d
+and pushed its own clean version of the same content
+(`feat(tbig): fleet_blob_fetch_720 fetch-all...`, landed on `main` on top of
+this session's dial/corruption-grid commit) — resolving the situation
+without further action needed. Verified after the fact: this session's
+`e54a0c7d` commit is an ancestor of both the new `main` tip and
+`main@{u}` — nothing was lost on either side.
 
 ## Tooling committed
 
@@ -235,7 +297,17 @@ fleet completes").
   rejected, off-by-one on odd dims) are reported to the owning team, not
   fixed.
 - corruption_grid: 2,016/2,016 backfilled, near-ULP verified, 0 flagged.
-- nonphoto/imazen26: match rate depends on how much of the 378,172-blob scan
-  completed / early-exited by the time this ran — see `_MANIFEST.json` for
-  the final figure. Never fabricated: any eval row with no exact fingerprint
-  match in the scanned fleet output is dropped, not synthesized.
+- nonphoto/imazen26: **26.0%/22.9% backfilled (2,599/10,000 + 2,297/10,025),
+  honestly partial.** The fetch stopped at 42.3% blob-scan progress for a
+  reason this session could not fully diagnose (no traceback, no OOM
+  signature), and was not relaunched because a much larger concurrent
+  T-big consolidation job (`fetch-all`, ETA 90+ min) was actively using this
+  same box's resources at the time — see the dedicated section above.
+  Never fabricated: any eval row with no exact fingerprint match in the
+  scanned fleet output is dropped, not synthesized. imazen26 additionally has
+  a hard ceiling of 99.6% (9,981/10,025) under this fingerprint scheme — 44
+  rows share a duplicate `(refstem, rounded-f0..371)` key with another
+  imazen26 row and can never be individually distinguished by it, regardless
+  of fleet coverage. Rerun `fetch-and-match` (the ledger scan + dedup is
+  already done and reusable) once the box is free of concurrent heavy jobs
+  to improve coverage.

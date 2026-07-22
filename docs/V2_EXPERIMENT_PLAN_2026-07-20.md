@@ -67,20 +67,26 @@ the docker `jobexec` path (fetches R2 tars, decodes all codecs, emits 720). Sour
 | H-konjnd | KonJND-1k val, JPEG half | 504 | near-threshold (raw mean-PJND target) | **DONE** (`ext_konjnd_jpeg_val`, 2026-07-20) |
 | H-sdr25 | JPEG-AI-SDR25 | **50** (NOT 95k) | HQ zone, JPEG-AI only | **DONE** (`ext_sdr25`, 2026-07-20). CORRECTION: the "95k" were triplet-comparison *responses*, not pairs — they collapse via ordered-probit into 50 scoreable JPEG-AI pairs (byte-identical to the pre-existing `sdr25_eval_pairs.tsv`). A HQ-zone gate at n=50 is thin — treat as directional, not a hard gate. |
 | H-csiq / H-live | CSIQ / LIVE-R2 | 866 / 779 | general-FR (context, not gate) | **DONE** |
-| H-nonphoto | non-photo ssim2 gate (bake_verdict G-NP) | 10,000 | non-photo | **BACKFILLED 2026-07-22** via fleet ledger+blob join (`scripts/v_next/fleet_blob_fetch_720.py fetch-and-match`) — see `benchmarks/v2_eval_720_backfill_2026-07-22.md` + `/mnt/v/output/zensim/v2-eval-720-2026-07-22/ext_nonphoto_720.parquet` + `_MANIFEST.json` for final match-rate (fetch ran past the writing of this row; never fabricated — unmatched rows dropped, not synthesized). |
-| H-imazen26 | real-codec ssim2 gate (bake_verdict G-IM26) | 10,025 | real-codec, non-photo content | **BACKFILLED 2026-07-22**, same method/tool as H-nonphoto — `ext_imazen26_720.parquet` + `_MANIFEST.json`. |
+| H-nonphoto | non-photo ssim2 gate (bake_verdict G-NP) | 10,000 | non-photo | **PARTIALLY BACKFILLED 2026-07-22 — 2,599/10,000 (26.0%).** Fleet ledger+blob join (`scripts/v_next/fleet_blob_fetch_720.py fetch-and-match`) stopped at 42.3% blob-scan progress for an undiagnosed reason (no traceback, no OOM signature) and was not relaunched because a much larger concurrent T-big consolidation job (`fetch-all`, ETA 90+ min) was using this box's resources — see `benchmarks/v2_eval_720_backfill_2026-07-22.md`. Never fabricated (unmatched rows dropped). **Rerun recommended** once the box is free — the ledger scan + dedup (466,418 distinct blobs) is already done and reusable, only the fetch+match stage needs repeating. |
+| H-imazen26 | real-codec ssim2 gate (bake_verdict G-IM26) | 10,025 | real-codec, non-photo content | **PARTIALLY BACKFILLED 2026-07-22 — 2,297/10,025 (22.9%)**, same method/run/reason as H-nonphoto. Hard ceiling under this fingerprint scheme is 99.6% (9,981/10,025; 44 rows share a duplicate fingerprint with another imazen26 row). Rerun recommended. |
 | eval: dial grid | G-DIAL (mono/reach) | 4,817 cells | JPEG/WebP/JXL/AVIF q-sweep | **BACKFILLED 2026-07-22 — 4817/4817 (100%) matched.** Re-encoded the exact `build_qsweep_expanded.py` grid via `zenmetrics sweep` (CPU encode+decode-back only; GPU zensim SCORING is now fully disabled so the original `--metric zensim-gpu` recipe can't literally rerun) + `zensim/examples/v2_ab_extract` (CPU 720) + joined back to the original identity. 536/4817 rows flagged as cross-backend (GPU-original vs CPU-backfill) drift, concentrated exactly on the already-documented w11 webp/jpeg + JXL near-lossless contaminations (cross-validates the pipeline). Two zenjxl encode-limitation findings surfaced (distance=0 now rejected; odd-dim images decode back +1px) — reported, not fixed (out of scope). Tool: `scripts/v_next/backfill_dial_grid_720.py`. Details: `benchmarks/v2_eval_720_backfill_2026-07-22.md`. |
 | eval: corruption grid | corruption gate | — | corruptions | **BACKFILLED 2026-07-22 — 2016/2016 (100%) matched.** Pixels already existed (`/mnt/v/output/zensim/corruption_gate/`) — pure re-extraction via `zensim/examples/v2_ab_extract`, no re-encode. Near-ULP verify vs the original (both CPU): L2 median 2.0e-8, 0 flagged. Tool: `scripts/v_next/backfill_corruption_grid_720.py`. |
 
 **Bans in force:** CID22-49 human MOS never trains. AIC-3 raw triplets (420k)
 banned pending ref-disjointness vs the CTC 10-ref holdout. AIC-4 holdout-only.
 
-### ⇒ 720 GAP AUDIT (2026-07-22) — CLOSED same day; history below for context
+### ⇒ 720 GAP AUDIT (2026-07-22) — 2/4 CLOSED, 2/4 PARTIAL same day; history below for context
 
-**UPDATE (2026-07-22, later same day): all 4 gaps closed.** dial_grid
-(4817/4817) + corruption_grid (2016/2016) backfilled by re-encode/re-extract;
-nonphoto + imazen26 backfilled by fleet ledger+blob join. Full method,
-verify-stats, and cross-validation against known contamination:
+**UPDATE (2026-07-22, later same day): dial_grid + corruption_grid fully
+closed; nonphoto + imazen26 partially closed (26.0%/22.9%).** dial_grid
+(4817/4817) + corruption_grid (2016/2016) backfilled by re-encode/re-extract,
+100% matched and verified. nonphoto (2,599/10,000) + imazen26 (2,297/10,025)
+backfilled by fleet ledger+blob join, but the fetch stopped at 42.3%
+blob-scan progress for an undiagnosed reason and was not relaunched given a
+much larger concurrent T-big consolidation job was using this box's
+resources at the time — rerun recommended once the box is free (the ledger
+scan + dedup is already done and reusable). Full method, verify-stats, and
+cross-validation against known contamination:
 `benchmarks/v2_eval_720_backfill_2026-07-22.md` +
 `/mnt/v/output/zensim/v2-eval-720-2026-07-22/_MANIFEST.json`. Tools:
 `scripts/v_next/backfill_dial_grid_720.py`,
