@@ -67,15 +67,37 @@ the docker `jobexec` path (fetches R2 tars, decodes all codecs, emits 720). Sour
 | H-konjnd | KonJND-1k val, JPEG half | 504 | near-threshold (raw mean-PJND target) | **DONE** (`ext_konjnd_jpeg_val`, 2026-07-20) |
 | H-sdr25 | JPEG-AI-SDR25 | **50** (NOT 95k) | HQ zone, JPEG-AI only | **DONE** (`ext_sdr25`, 2026-07-20). CORRECTION: the "95k" were triplet-comparison *responses*, not pairs — they collapse via ordered-probit into 50 scoreable JPEG-AI pairs (byte-identical to the pre-existing `sdr25_eval_pairs.tsv`). A HQ-zone gate at n=50 is thin — treat as directional, not a hard gate. |
 | H-csiq / H-live | CSIQ / LIVE-R2 | 866 / 779 | general-FR (context, not gate) | **DONE** |
-| H-nonphoto | non-photo ssim2 gate (bake_verdict G-NP) | 10,000 | non-photo | **LACKS 720, NOT QUEUED.** 372 parquet keyed on `ref_basename`+ssim2; pixels exist (`/mnt/v/output/nonphoto-picker-corpus-2026-06-26`) but pairs need reconstruction from basename → local extraction job (medium effort). |
-| H-imazen26 | real-codec ssim2 gate (bake_verdict G-IM26) | 10,025 | real-codec, non-photo content | **LACKS 720, NOT QUEUED.** 372 parquet keyed on `ref_basename`+ssim2; pixels in `/mnt/v/zen/imazen26-sat-corpus` + `/mnt/v/output/imazen-26-features/*` (246k w/ `image_path`); pairs need reconstruction → local extraction job. |
-| eval: dial grid | G-DIAL (mono/reach) | 4,817 cells | JPEG/WebP/JXL/AVIF q-sweep | **LACKS 720, NOT QUEUED, HARDEST.** Stored parquet is FEATURE-VECTORS only (`image_id,codec,q,codec_param,f0..f371`) — **pixels NOT persisted** → needs a re-ENCODE of the exact densified sweep from source refs + re-extract. Decide: regenerate, or run G-DIAL on 372 only. |
-| eval: corruption grid | corruption gate | — | corruptions | **LACKS 720, NOT QUEUED.** Same as dial grid — feature-vectors only, pixels not persisted; needs re-encode+re-extract. |
+| H-nonphoto | non-photo ssim2 gate (bake_verdict G-NP) | 10,000 | non-photo | **BACKFILLED 2026-07-22** via fleet ledger+blob join (`scripts/v_next/fleet_blob_fetch_720.py fetch-and-match`) — see `benchmarks/v2_eval_720_backfill_2026-07-22.md` + `/mnt/v/output/zensim/v2-eval-720-2026-07-22/ext_nonphoto_720.parquet` + `_MANIFEST.json` for final match-rate (fetch ran past the writing of this row; never fabricated — unmatched rows dropped, not synthesized). |
+| H-imazen26 | real-codec ssim2 gate (bake_verdict G-IM26) | 10,025 | real-codec, non-photo content | **BACKFILLED 2026-07-22**, same method/tool as H-nonphoto — `ext_imazen26_720.parquet` + `_MANIFEST.json`. |
+| eval: dial grid | G-DIAL (mono/reach) | 4,817 cells | JPEG/WebP/JXL/AVIF q-sweep | **BACKFILLED 2026-07-22 — 4817/4817 (100%) matched.** Re-encoded the exact `build_qsweep_expanded.py` grid via `zenmetrics sweep` (CPU encode+decode-back only; GPU zensim SCORING is now fully disabled so the original `--metric zensim-gpu` recipe can't literally rerun) + `zensim/examples/v2_ab_extract` (CPU 720) + joined back to the original identity. 536/4817 rows flagged as cross-backend (GPU-original vs CPU-backfill) drift, concentrated exactly on the already-documented w11 webp/jpeg + JXL near-lossless contaminations (cross-validates the pipeline). Two zenjxl encode-limitation findings surfaced (distance=0 now rejected; odd-dim images decode back +1px) — reported, not fixed (out of scope). Tool: `scripts/v_next/backfill_dial_grid_720.py`. Details: `benchmarks/v2_eval_720_backfill_2026-07-22.md`. |
+| eval: corruption grid | corruption gate | — | corruptions | **BACKFILLED 2026-07-22 — 2016/2016 (100%) matched.** Pixels already existed (`/mnt/v/output/zensim/corruption_gate/`) — pure re-extraction via `zensim/examples/v2_ab_extract`, no re-encode. Near-ULP verify vs the original (both CPU): L2 median 2.0e-8, 0 flagged. Tool: `scripts/v_next/backfill_corruption_grid_720.py`. |
 
 **Bans in force:** CID22-49 human MOS never trains. AIC-3 raw triplets (420k)
 banned pending ref-disjointness vs the CTC 10-ref holdout. AIC-4 holdout-only.
 
-### ⇒ 720 GAP AUDIT (2026-07-22) — what lacks 720, and is it queued?
+### ⇒ 720 GAP AUDIT (2026-07-22) — CLOSED same day; history below for context
+
+**UPDATE (2026-07-22, later same day): all 4 gaps closed.** dial_grid
+(4817/4817) + corruption_grid (2016/2016) backfilled by re-encode/re-extract;
+nonphoto + imazen26 backfilled by fleet ledger+blob join. Full method,
+verify-stats, and cross-validation against known contamination:
+`benchmarks/v2_eval_720_backfill_2026-07-22.md` +
+`/mnt/v/output/zensim/v2-eval-720-2026-07-22/_MANIFEST.json`. Tools:
+`scripts/v_next/backfill_dial_grid_720.py`,
+`scripts/v_next/backfill_corruption_grid_720.py`,
+`scripts/v_next/fleet_blob_fetch_720.py`. Two notable corrections to the
+plan as originally written below: (1) `join_eval_720.py` (the tool this plan
+names) assumed the fleet exposed a clean `(ref, f0..f719)` parquet —it does
+not; the fleet's `ledger/*.parquet` is job-tracking metadata only (q=-1,
+knob_tuple_json="scorefile" for score_file jobs) and blobs are per-pool
+JSONL batches of ~5-12 variant records, not one-blob-one-JSON-object, so the
+actual join needed a 2-stage ledger-scan + blob-fetch pipeline
+(`fleet_blob_fetch_720.py`), not a direct parquet join. (2) the original
+GPU-based dial-grid recipe (`--metric zensim-gpu`) can no longer run at all —
+GPU zensim SCORING was fully disabled 2026-07-19 — so "regenerate" meant a
+CPU-only re-encode + re-extract, not a literal rerun.
+
+**Original audit (2026-07-22, pre-backfill) — kept for the reasoning trail:**
 
 **Answer: NO — the eval-side gaps are NOT queued. The fleet pool is 100% bigcodec
 TRAINING encodes** (54 tar-boxes: zenjxl-lossy/modular, zenwebp, zenavif-SDR, zenpng);
@@ -105,6 +127,9 @@ a **feature-space JOIN**: match each eval row to the fleet row on `ref_basename`
 `f0..f371` (the 372 block uniquely fingerprints the cell), append `f372..f719`. Tool:
 `scripts/v_next/join_eval_720.py` (written 2026-07-22). Runs when the fleet completes
 (currently grinding); reports match-rate and flags any unmatched row (never fabricates).
+**[Superseded — see UPDATE above: the fleet has no clean `(ref, f0..f719)` parquet to join
+against; the actual tool ended up being `fleet_blob_fetch_720.py`'s ledger-scan +
+JSONL-blob-fetch + inline-fingerprint-match pipeline.]**
 
 **dial + corruption grids are the ONLY genuinely-new work.** They are a custom multi-codec
 q-sweep (q0 + step-1 q90→100 + fractional near-lossless + JND zone + jxl-in-butter-distance
@@ -114,6 +139,9 @@ were never persisted (parquet is feature-vectors only). Backfilling 720 requires
 — a sweep job (encode+score+extract), the fleet's `Dockerfile.sweep` domain. Options:
 (a) add the two grid sweeps to the fleet (zenmetrics session owns the sweep image), or
 (b) run an independent sweep leg. Until decided, G-DIAL/corruption run on the 372 block only.
+**[Superseded — see UPDATE above: ran as an independent local sweep leg via
+`zenmetrics sweep` (encode/decode-back only) + `zensim/examples/v2_ab_extract`
+(CPU feature extraction), not added to the fleet.]**
 
 **Net:** "backfill all with 720" = one JOIN (nonphoto+imazen26, ~free, fleet byproduct) +
 one re-encode SWEEP (the two grids, the real remaining compute).
