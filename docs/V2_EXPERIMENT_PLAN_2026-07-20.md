@@ -58,11 +58,38 @@ the docker `jobexec` path (fetches R2 tars, decodes all codecs, emits 720). Sour
 | H-konjnd | KonJND-1k val, JPEG half | 504 | near-threshold (raw mean-PJND target) | **DONE** (`ext_konjnd_jpeg_val`, 2026-07-20) |
 | H-sdr25 | JPEG-AI-SDR25 | **50** (NOT 95k) | HQ zone, JPEG-AI only | **DONE** (`ext_sdr25`, 2026-07-20). CORRECTION: the "95k" were triplet-comparison *responses*, not pairs — they collapse via ordered-probit into 50 scoreable JPEG-AI pairs (byte-identical to the pre-existing `sdr25_eval_pairs.tsv`). A HQ-zone gate at n=50 is thin — treat as directional, not a hard gate. |
 | H-csiq / H-live | CSIQ / LIVE-R2 | 866 / 779 | general-FR (context, not gate) | **DONE** |
-| H-nonphoto / imazen26 | ssim2 north-star gates | — | non-photo / real-codec | investigate pixel sources |
-| eval grids | dial + corruption grids @720 | — | G-DIAL / corruption gate | **investigate** re-extractability (stored grids are 372-only) |
+| H-nonphoto | non-photo ssim2 gate (bake_verdict G-NP) | 10,000 | non-photo | **LACKS 720, NOT QUEUED.** 372 parquet keyed on `ref_basename`+ssim2; pixels exist (`/mnt/v/output/nonphoto-picker-corpus-2026-06-26`) but pairs need reconstruction from basename → local extraction job (medium effort). |
+| H-imazen26 | real-codec ssim2 gate (bake_verdict G-IM26) | 10,025 | real-codec, non-photo content | **LACKS 720, NOT QUEUED.** 372 parquet keyed on `ref_basename`+ssim2; pixels in `/mnt/v/zen/imazen26-sat-corpus` + `/mnt/v/output/imazen-26-features/*` (246k w/ `image_path`); pairs need reconstruction → local extraction job. |
+| eval: dial grid | G-DIAL (mono/reach) | 4,817 cells | JPEG/WebP/JXL/AVIF q-sweep | **LACKS 720, NOT QUEUED, HARDEST.** Stored parquet is FEATURE-VECTORS only (`image_id,codec,q,codec_param,f0..f371`) — **pixels NOT persisted** → needs a re-ENCODE of the exact densified sweep from source refs + re-extract. Decide: regenerate, or run G-DIAL on 372 only. |
+| eval: corruption grid | corruption gate | — | corruptions | **LACKS 720, NOT QUEUED.** Same as dial grid — feature-vectors only, pixels not persisted; needs re-encode+re-extract. |
 
 **Bans in force:** CID22-49 human MOS never trains. AIC-3 raw triplets (420k)
 banned pending ref-disjointness vs the CTC 10-ref holdout. AIC-4 holdout-only.
+
+### ⇒ 720 GAP AUDIT (2026-07-22) — what lacks 720, and is it queued?
+
+**Answer: NO — the eval-side gaps are NOT queued. The fleet pool is 100% bigcodec
+TRAINING encodes** (54 tar-boxes: zenjxl-lossy/modular, zenwebp, zenavif-SDR, zenpng);
+zero eval sets in it. Full status:
+
+- **DONE @720 (11 corpora):** train — safesyn-JPEG, cid201, KADID, TID; held-out —
+  CID22-49, AIC-3, AIC-4, KonJND-val, SDR25, CSIQ, LIVE.
+- **IN PROGRESS (fleet, live):** T-big multi-codec (bigcodec) — the training mass.
+- **LACKS 720 AND UNQUEUED — 4 validation instruments** (needed to run the panel on the
+  720 model): **nonphoto** (G-NP) + **imazen26** (G-IM26) — extractable, pairs need
+  reconstruction, ~20k pairs total, local job; **dial grid** (G-DIAL) + **corruption
+  grid** — pixels not persisted, need re-encode+re-extract (or accept 372-only on those
+  two gates).
+- **Optional/undecided:** safesyn multi-codec (webp/jxl, ~50k) — bigcodec already covers
+  real multi-codec, so likely redundant; not queued.
+
+**Close-the-gap plan:** (1) reconstruct nonphoto + imazen26 pairs from `ref_basename` →
+local `v2_ab_extract` (or a tower/fleet leg) — the same reconstruction some local-backfill
+items were SKIPPED on, so verify the basename→pixel map resolves before extracting;
+(2) decide the dial/corruption grids: regenerate the exact sweep (re-encode) for 720, or
+run G-DIAL/corruption on 372 only and note the model there is scored on its v1 block. Until
+these land, the 720 model can be RANK-evaluated on the 7 done held-outs but NOT on the
+ssim2 north-star gates or the dial panel.
 
 ### Eval instruments
 
