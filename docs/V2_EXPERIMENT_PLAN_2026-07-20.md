@@ -83,13 +83,31 @@ zero eval sets in it. Full status:
 - **Optional/undecided:** safesyn multi-codec (webp/jxl, ~50k) — bigcodec already covers
   real multi-codec, so likely redundant; not queued.
 
-**Close-the-gap plan:** (1) reconstruct nonphoto + imazen26 pairs from `ref_basename` →
-local `v2_ab_extract` (or a tower/fleet leg) — the same reconstruction some local-backfill
-items were SKIPPED on, so verify the basename→pixel map resolves before extracting;
-(2) decide the dial/corruption grids: regenerate the exact sweep (re-encode) for 720, or
-run G-DIAL/corruption on 372 only and note the model there is scored on its v1 block. Until
-these land, the 720 model can be RANK-evaluated on the 7 done held-outs but NOT on the
-ssim2 north-star gates or the dial panel.
+**Close-the-gap plan (REVISED 2026-07-22 after tracing the cells):**
+
+**nonphoto + imazen26 are NOT a separate corpus — they are content-filtered subsets of
+the bigcodec (canonical-picker) validate/test cells the fleet is filling NOW.** Verified:
+their `ref_basename` (`o_NNNN.png.scaleWxH`) is identical to canonical-picker
+`test.parquet`/`validate.parquet` `ref_filename` (100% overlap on the sampled refs). So
+their 720 features are a BYPRODUCT of the running fleet — no re-extraction needed. The eval
+parquets carry only `(ref_basename, human_score=ssim2, f0..f371)`, and the fleet 720 output
+(`s3://zentrain/jobs/bf-*/blobs/`) carries `f0..f719` for the same cells, so the backfill is
+a **feature-space JOIN**: match each eval row to the fleet row on `ref_basename` + exact
+`f0..f371` (the 372 block uniquely fingerprints the cell), append `f372..f719`. Tool:
+`scripts/v_next/join_eval_720.py` (written 2026-07-22). Runs when the fleet completes
+(currently grinding); reports match-rate and flags any unmatched row (never fabricates).
+
+**dial + corruption grids are the ONLY genuinely-new work.** They are a custom multi-codec
+q-sweep (q0 + step-1 q90→100 + fractional near-lossless + JND zone + jxl-in-butter-distance
+over JPEG/WebP/JXL/AVIF) — DIFFERENT q points than bigcodec, so NOT fleet cells, and pixels
+were never persisted (parquet is feature-vectors only). Backfilling 720 requires
+**re-encoding the exact documented sweep** on the source refs (`image_id`) + extracting 720
+— a sweep job (encode+score+extract), the fleet's `Dockerfile.sweep` domain. Options:
+(a) add the two grid sweeps to the fleet (zenmetrics session owns the sweep image), or
+(b) run an independent sweep leg. Until decided, G-DIAL/corruption run on the 372 block only.
+
+**Net:** "backfill all with 720" = one JOIN (nonphoto+imazen26, ~free, fleet byproduct) +
+one re-encode SWEEP (the two grids, the real remaining compute).
 
 ### Eval instruments
 
