@@ -2345,6 +2345,58 @@ pub fn fused_blur_h_ssim(
     );
 }
 
+/// 3-output fused H-blur — `mu2`/`sigma_sq`/`sigma12` only, for the
+/// cached-reference-moments path (`mu1` comes from a
+/// `V2PreparedReference` cache, so its accumulator chain + stores are
+/// pure waste there). On the v4x tier the mu1 chain is compiled out
+/// (`fused_blur_h_ssim_v4x_body::<false>`); every other tier falls back
+/// to the 4-output kernel with `mu1_scratch` receiving the unused plane
+/// — identical output planes either way (the accumulator chains are
+/// independent; gated by `ssim3_matches_ssim4_bitwise`).
+#[allow(clippy::too_many_arguments)]
+pub fn fused_blur_h_ssim3(
+    src: &[f32],
+    dst: &[f32],
+    mu1_scratch: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use archmage::SimdToken as _;
+        if let Some(token) = archmage::X64V4xToken::summon() {
+            fused_blur_h_ssim3_inner_v4x(
+                token,
+                src,
+                dst,
+                mu1_scratch,
+                out_mu2,
+                out_sigma_sq,
+                out_sigma12,
+                width,
+                height,
+                radius,
+            );
+            return;
+        }
+    }
+    fused_blur_h_ssim(
+        src,
+        dst,
+        mu1_scratch,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        radius,
+    );
+}
+
 #[cfg(target_arch = "x86_64")]
 #[arcane]
 #[allow(clippy::too_many_arguments)]
@@ -2610,6 +2662,77 @@ fn fused_blur_h_ssim_inner_v4x(
     height: usize,
     radius: usize,
 ) {
+    fused_blur_h_ssim_v4x_body::<true>(
+        token,
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        radius,
+    );
+}
+
+/// 3-output variant (no `mu1`): the ref-side mean is read from a
+/// [`V2PreparedReference`-style cache](crate::feature_v2), so the `sum_s`
+/// accumulator chain and the `out_mu1` stores are pure waste on that
+/// path. `out_mu1` is accepted but untouched (callers pass their scratch
+/// slice; non-v4x tiers of the public dispatcher fall back to the
+/// 4-output kernel writing into it).
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim3_inner_v4x(
+    token: archmage::X64V4xToken,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    fused_blur_h_ssim_v4x_body::<false>(
+        token,
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        radius,
+    );
+}
+
+/// Shared v4x body — `MU1` const-guards the `sum_s` chain + `out_mu1`
+/// stores; every other accumulator chain is textually identical in both
+/// monomorphizations, so the 3-output variant's `mu2`/`ssq`/`s12` are
+/// bit-identical to the 4-output kernel's (independent accumulators).
+/// `#[inline(always)]`: must fuse into the `#[arcane]` wrappers'
+/// target_feature region (see `dense_block_kernel_generic`'s doc for the
+/// measured 5.3x cliff when this inlining is left to the cost model).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
+    token: archmage::X64V4xToken,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -2639,7 +2762,9 @@ fn fused_blur_h_ssim_inner_v4x(
             }
             let sv = f32x16::from_array(token, s_arr);
             let dv = f32x16::from_array(token, d_arr);
-            sum_s = sum_s + sv;
+            if MU1 {
+                sum_s = sum_s + sv;
+            }
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
             sum_prod = sv.mul_add(dv, sum_prod);
@@ -2647,13 +2772,18 @@ fn fused_blur_h_ssim_inner_v4x(
 
         // Slide window
         for x in 0..width {
-            let mu1_result = (sum_s * inv_v).to_array();
             let mu2_result = (sum_d * inv_v).to_array();
             let sq_result = (sum_sq * inv_v).to_array();
             let prod_result = (sum_prod * inv_v).to_array();
+            if MU1 {
+                let mu1_result = (sum_s * inv_v).to_array();
+                for ro in 0..16 {
+                    let base = (row_base + ro) * width + x;
+                    out_mu1[base] = mu1_result[ro];
+                }
+            }
             for ro in 0..16 {
                 let base = (row_base + ro) * width + x;
-                out_mu1[base] = mu1_result[ro];
                 out_mu2[base] = mu2_result[ro];
                 out_sigma_sq[base] = sq_result[ro];
                 out_sigma12[base] = prod_result[ro];
@@ -2689,7 +2819,9 @@ fn fused_blur_h_ssim_inner_v4x(
             let da = f32x16::from_array(token, d_add);
             let sr = f32x16::from_array(token, s_rem);
             let dr = f32x16::from_array(token, d_rem);
-            sum_s = sum_s + sa - sr;
+            if MU1 {
+                sum_s = sum_s + sa - sr;
+            }
             sum_d = sum_d + da - dr;
             sum_sq = sa.mul_add(
                 sa,
@@ -2727,20 +2859,27 @@ fn fused_blur_h_ssim_inner_v4x(
             }
             let sv = f32x8::from_array(v3, s_arr);
             let dv = f32x8::from_array(v3, d_arr);
-            sum_s = sum_s + sv;
+            if MU1 {
+                sum_s = sum_s + sv;
+            }
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
             sum_prod = sv.mul_add(dv, sum_prod);
         }
 
         for x in 0..width {
-            let mu1_result = (sum_s * inv_v8).to_array();
             let mu2_result = (sum_d * inv_v8).to_array();
             let sq_result = (sum_sq * inv_v8).to_array();
             let prod_result = (sum_prod * inv_v8).to_array();
+            if MU1 {
+                let mu1_result = (sum_s * inv_v8).to_array();
+                for ro in 0..8 {
+                    let base = (row_base + ro) * width + x;
+                    out_mu1[base] = mu1_result[ro];
+                }
+            }
             for ro in 0..8 {
                 let base = (row_base + ro) * width + x;
-                out_mu1[base] = mu1_result[ro];
                 out_mu2[base] = mu2_result[ro];
                 out_sigma_sq[base] = sq_result[ro];
                 out_sigma12[base] = prod_result[ro];
@@ -2776,7 +2915,9 @@ fn fused_blur_h_ssim_inner_v4x(
             let da = f32x8::from_array(v3, d_add);
             let sr = f32x8::from_array(v3, s_rem);
             let dr = f32x8::from_array(v3, d_rem);
-            sum_s = sum_s + sa - sr;
+            if MU1 {
+                sum_s = sum_s + sa - sr;
+            }
             sum_d = sum_d + da - dr;
             sum_sq = sa.mul_add(
                 sa,
@@ -2805,14 +2946,18 @@ fn fused_blur_h_ssim_inner_v4x(
             };
             let s = s_row[idx];
             let d = d_row[idx];
-            sum_s += s;
+            if MU1 {
+                sum_s += s;
+            }
             sum_d += d;
             sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
             sum_prod = s.mul_add(d, sum_prod);
         }
 
         for x in 0..width {
-            out_mu1[row_off + x] = sum_s * inv;
+            if MU1 {
+                out_mu1[row_off + x] = sum_s * inv;
+            }
             out_mu2[row_off + x] = sum_d * inv;
             out_sigma_sq[row_off + x] = sum_sq * inv;
             out_sigma12[row_off + x] = sum_prod * inv;
@@ -2835,7 +2980,9 @@ fn fused_blur_h_ssim_inner_v4x(
             let da = d_row[add_idx];
             let sr = s_row[rem_idx];
             let dr = d_row[rem_idx];
-            sum_s = sum_s + sa - sr;
+            if MU1 {
+                sum_s = sum_s + sa - sr;
+            }
             sum_d = sum_d + da - dr;
             sum_sq = sa.mul_add(
                 sa,
@@ -3534,6 +3681,46 @@ mod tests {
         box_blur_h(input, &mut temp, width, height, radius);
         box_blur_v_from_copy(&temp, &mut output, width, height, radius);
         output
+    }
+
+    /// `fused_blur_h_ssim3`'s three outputs must be BIT-IDENTICAL to the
+    /// 4-output kernel's — the accumulator chains are independent, so
+    /// removing the mu1 chain cannot change them. Guards the
+    /// cached-moments fast path's numeric contract at the blur level.
+    #[test]
+    fn ssim3_matches_ssim4_bitwise() {
+        for &(w, h) in &[(64usize, 64usize), (97, 149), (200, 137)] {
+            let mut state = 0xABCD_EF01u32;
+            let mut next_val = |i: usize| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                ((state >> 8) as f32 / (1u32 << 24) as f32) * 0.8 + (i % w) as f32 * 1e-3
+            };
+            let src: Vec<f32> = (0..w * h).map(&mut next_val).collect();
+            let dst: Vec<f32> = (0..w * h).map(&mut next_val).collect();
+            let n = w * h;
+            let (mut m1a, mut m2a, mut sqa, mut s12a) = (
+                vec![0.0f32; n],
+                vec![0.0f32; n],
+                vec![0.0f32; n],
+                vec![0.0f32; n],
+            );
+            fused_blur_h_ssim(&src, &dst, &mut m1a, &mut m2a, &mut sqa, &mut s12a, w, h, 5);
+            let (mut m1b, mut m2b, mut sqb, mut s12b) = (
+                vec![0.0f32; n],
+                vec![0.0f32; n],
+                vec![0.0f32; n],
+                vec![0.0f32; n],
+            );
+            fused_blur_h_ssim3(&src, &dst, &mut m1b, &mut m2b, &mut sqb, &mut s12b, w, h, 5);
+            for i in 0..n {
+                assert!(
+                    m2a[i].to_bits() == m2b[i].to_bits()
+                        && sqa[i].to_bits() == sqb[i].to_bits()
+                        && s12a[i].to_bits() == s12b[i].to_bits(),
+                    "{w}x{h}: ssim3 diverged from ssim4 at {i}"
+                );
+            }
+        }
     }
 
     /// `downscale_2x_into` must be BIT-IDENTICAL to `downscale_2x_inplace`

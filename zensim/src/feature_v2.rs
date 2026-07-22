@@ -1083,9 +1083,10 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
 }
 
 /// Strip-path blur pass when the reference-side moments (`mu1`,
-/// `activity`) come from a [`V2PreparedReference`] cache: fused H (all 4
-/// outputs — `mu1_h` is computed and discarded; a 3-output H variant is a
-/// known follow-up) + V-blur of the 3 distorted/joint planes only. The
+/// `activity`) come from a [`V2PreparedReference`] cache: 3-output fused
+/// H (`fused_blur_h_ssim3` — the mu1 chain is compiled out on the v4x
+/// tier; `mu1_h` is only fallback scratch) + V-blur of the 3
+/// distorted/joint planes only. The
 /// mu1 V-blur and the whole activity chain (abs-diff + 2-pass blur) are
 /// SKIPPED — their values are read from the cache instead, which was
 /// filled by replaying this exact strip walk (see
@@ -1105,7 +1106,7 @@ fn run_blur_pass_strip_cached_ref(width: usize, height_local: usize, scratch: &m
         s12,
         ..
     } = scratch;
-    crate::blur::fused_blur_h_ssim(
+    crate::blur::fused_blur_h_ssim3(
         &src_wide[..n],
         &dst_wide[..n],
         &mut mu1_h[..n],
