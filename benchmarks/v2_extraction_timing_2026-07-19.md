@@ -1,5 +1,11 @@
 # v2 / v1 / extended extraction timing — direct measurement (2026-07-19)
 
+> **PARTIALLY SUPERSEDED (2026-07-21):** the per-pair costs below predate
+> the ref-reuse + kernel campaign. Current numbers (v2c ≈ 30 ms/pair
+> amortized at ~1 MP, 2.33× v2 / 1.55× ext-720):
+> `benchmarks/v2_ref_reuse_perf_2026-07-21.md`. The decomposition METHOD
+> and the v1c figure here remain valid.
+
 Resolves the doc conflict (spec §A.12 "AFTER" table claimed v2/v1 ≈ 4.35× at 1MP;
 the min-max/blend session memory said ~2.3×). Measured directly on the CURRENT
 post-phase-6 binary, real images, single-thread — supersedes both.

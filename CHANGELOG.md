@@ -3,7 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- `zensim` (`feature-regime-v2`): **prepared-reference API for v2 extraction** — `Zensim::prepare_v2_reference[_with_moments]` → `feature_v2::V2PreparedReference` + `compute_v2_features_with_ref[_and_scratch]` (+ reusable `feature_v2::V2Scratch`). Sweep drivers score N variants per reference without redoing reference-side decode-adjacent work; with `_with_moments` the per-pair mu1 V-blur + activity chain drop out too (cache filled by strip-walk replay ⇒ bit-identical features, test-gated). Pair path refactored to prepare+with_ref composition — one scale-walk owner. (99cc8fb3, fdd6514a)
+- `zensim` (`feature-regime-v2`): 3-output `blur::fused_blur_h_ssim3` (mu1 chain compiled out on v4x) for the cached-moments path. (1640f424)
 - zensim_mlp_train now emits a `<bake>.spec.json` provenance sidecar (train_corpora from train_w>0 groups) so dashboards never render train/heldout as "unknown" (14b3113b + this)
+
+### Changed
+- `zensim` (`feature-regime-v2`): **v2 extraction 2.33× faster end-to-end on real ~1 MP pairs** (118.7 → 50.9 ms/pair single-thread; ext-720 1.55×): ref-grouped reuse + skipped identity reflect-pads + cross-pair scratch + SIMD weighted pools on the AVX-512 tier (16-accumulator layout — mask/IW families share Σw; 4 vector divisions replace 40 scalar f64 divisions per 8 px) + 3-output fused H. Numerics: byte-identical except pool features on v4x, max 1.1e-7 rel (policy 5e-4). Full record: `benchmarks/v2_ref_reuse_perf_2026-07-21.md`. (99cc8fb3..1640f424)
+- `zensim/examples/v2_ab_extract.rs`: ref-grouped extraction by default (LPT scheduling + intra-group parallelism + per-worker scratch + nested-rayon fix); `ZENSIM_AB_GROUPED=0` / `ZENSIM_AB_MOMENTS=0` opt-outs; output rows byte-identical and in input order. (fdd6514a)
+
+### Fixed
+- `zensim` benches: `v2_feature_group_cost` failed to compile since the `transducers_luma_only` toggle landed (739484e2); `v2_speed_baseline` gained `v2_with_ref[_moments]_1thread` + `v2_prepare_ref_1thread`. (99cc8fb3, fdd6514a)
 
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next zensim-regress
