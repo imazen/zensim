@@ -889,14 +889,23 @@ fn apply_transducer_luma_gate(out: &mut [f64], ch: usize, toggles: V2NewFeatureT
 /// (`width*height`, up to 4.2M elements at 2048²); now sized for one
 /// STRIP-plus-halo (`width*(STRIP_ROWS+2*HALO_P)`, ≤ ~172K elements even
 /// at 2048² width) — the actual memory-traffic reduction the bandwidth
-/// hypothesis predicts should matter. `src`/`dst` are NOT scratch fields
-/// (kept as ordinary local `Vec<f32>` in `compute_channel_scale_v2`,
-/// reused across strips within one call) — threading them through this
-/// struct would alias a `&mut ScratchV2Strip` borrow against the `&[f32]`
-/// slices `run_blur_pass` needs, forcing either unsafe cell tricks or
-/// splitting the struct; two extra plain locals sidestep that for zero
-/// added complexity.
+/// hypothesis predicts should matter.
+///
+/// Ref-reuse pass: the halo-gather targets (`src_wide`/`dst_wide`) moved IN
+/// here (they were per-call locals). The old aliasing objection — a
+/// `&mut ScratchV2Strip` borrow against the `&[f32]` slices `run_blur_pass`
+/// needs — is dissolved by `run_blur_pass_strip`, which destructures the
+/// struct ONCE into disjoint field borrows (src/dst read-only, moment
+/// buffers `&mut`), so no cell tricks are needed. Moving them in makes the
+/// whole scratch set reusable ACROSS pairs via [`V2Scratch`], eliminating
+/// the last per-call `vec![0.0f32; ..]` traffic (2 buffers × 3 channels ×
+/// 4 scales = 24 zero-filled allocations per pair).
 struct ScratchV2Strip {
+    /// Halo-gathered strip inputs (`gather_strip_halo` targets) — the
+    /// mirror-padded local windows of the source/distorted planes that
+    /// every downstream stage of one strip iteration reads.
+    src_wide: Vec<f32>,
+    dst_wide: Vec<f32>,
     /// H-blur-only intermediates from [`crate::blur::fused_blur_h_ssim`]
     /// (see below) — analogous to v2 iteration-2's old per-call `tmp`, but
     /// now 4-wide since the fused kernel produces all four H-blurred planes
@@ -922,6 +931,8 @@ struct ScratchV2Strip {
 impl ScratchV2Strip {
     fn new(max_n: usize) -> Self {
         Self {
+            src_wide: vec![0.0f32; max_n],
+            dst_wide: vec![0.0f32; max_n],
             mu1_h: vec![0.0f32; max_n],
             mu2_h: vec![0.0f32; max_n],
             ssq_h: vec![0.0f32; max_n],
@@ -937,11 +948,59 @@ impl ScratchV2Strip {
     }
 }
 
+/// Reusable cross-pair scratch for the v2 extraction kernels — all 13
+/// strip-sized working buffers for all 3 channels. Create ONCE per worker
+/// thread and pass to
+/// [`Zensim::compute_v2_features_with_ref_and_scratch`](crate::Zensim::compute_v2_features_with_ref_and_scratch)
+/// for every pair that thread scores: buffers are lazily (re)sized to the
+/// largest image seen and reused verbatim afterwards, so steady-state
+/// extraction performs ZERO scratch allocation. Contents are overwritten
+/// before every read (each strip iteration fully writes the ranges it
+/// consumes), so reuse across unrelated pairs cannot leak data between
+/// them — guarded by `scratch_reuse_matches_fresh_scratch` in this file's
+/// tests.
+pub struct V2Scratch {
+    strips: [ScratchV2Strip; 3],
+    sized_for: usize,
+}
+
+impl V2Scratch {
+    /// New, empty scratch. Buffers are allocated on first use.
+    pub fn new() -> Self {
+        Self {
+            strips: [
+                ScratchV2Strip::new(0),
+                ScratchV2Strip::new(0),
+                ScratchV2Strip::new(0),
+            ],
+            sized_for: 0,
+        }
+    }
+
+    /// Grow (never shrink) every buffer to hold `strip_max_n` elements.
+    fn ensure(&mut self, strip_max_n: usize) {
+        if strip_max_n > self.sized_for {
+            self.strips = [
+                ScratchV2Strip::new(strip_max_n),
+                ScratchV2Strip::new(strip_max_n),
+                ScratchV2Strip::new(strip_max_n),
+            ];
+            self.sized_for = strip_max_n;
+        }
+    }
+}
+
+impl Default for V2Scratch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Runs the blur pass (fused H-blur + 4x V-blur + activity) on a LOCAL
-/// image — the strip-plus-halo buffer in phase-5's strip orchestration.
-/// Identical algebra to phases 3/4's inline version (extracted here so
-/// the strip loop can call it once per strip); writes `n = width *
-/// height_local` elements into each of `scratch`'s 11 buffers.
+/// image — external `src`/`dst` variant, used by the phase-6 whole-image
+/// bypass path (which reads the real planes directly, no halo copy).
+/// Identical algebra to phases 3/4's inline version; writes `n = width *
+/// height_local` elements into each of `scratch`'s 11 moment buffers.
 fn run_blur_pass(
     src: &[f32],
     dst: &[f32],
@@ -949,11 +1008,105 @@ fn run_blur_pass(
     height_local: usize,
     scratch: &mut ScratchV2Strip,
 ) {
+    let ScratchV2Strip {
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        abs_src,
+        activity_tmp,
+        activity,
+        ..
+    } = scratch;
+    run_blur_pass_inner(
+        src,
+        dst,
+        width,
+        height_local,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        abs_src,
+        activity_tmp,
+        activity,
+    );
+}
+
+/// Strip-path variant of [`run_blur_pass`]: the inputs are `scratch`'s own
+/// `src_wide`/`dst_wide` halo buffers (filled by `gather_strip_halo` just
+/// before this call). Destructuring the struct once yields disjoint
+/// borrows — read-only input fields alongside `&mut` moment fields — which
+/// is what lets the halo buffers live inside the reusable scratch at all.
+fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV2Strip) {
     let n = width * height_local;
-    let mu1_h = &mut scratch.mu1_h[..n];
-    let mu2_h = &mut scratch.mu2_h[..n];
-    let ssq_h = &mut scratch.ssq_h[..n];
-    let s12_h = &mut scratch.s12_h[..n];
+    let ScratchV2Strip {
+        src_wide,
+        dst_wide,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        abs_src,
+        activity_tmp,
+        activity,
+    } = scratch;
+    run_blur_pass_inner(
+        &src_wide[..n],
+        &dst_wide[..n],
+        width,
+        height_local,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        abs_src,
+        activity_tmp,
+        activity,
+    );
+}
+
+/// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
+/// fused H-blur + 4x V-blur + activity sequence, over explicit buffers.
+#[allow(clippy::too_many_arguments)]
+fn run_blur_pass_inner(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height_local: usize,
+    mu1_h: &mut [f32],
+    mu2_h: &mut [f32],
+    ssq_h: &mut [f32],
+    s12_h: &mut [f32],
+    mu1: &mut [f32],
+    mu2: &mut [f32],
+    ssq: &mut [f32],
+    s12: &mut [f32],
+    abs_src: &mut [f32],
+    activity_tmp: &mut [f32],
+    activity: &mut [f32],
+) {
+    let n = width * height_local;
+    let mu1_h = &mut mu1_h[..n];
+    let mu2_h = &mut mu2_h[..n];
+    let ssq_h = &mut ssq_h[..n];
+    let s12_h = &mut s12_h[..n];
     crate::blur::fused_blur_h_ssim(
         src,
         dst,
@@ -966,22 +1119,22 @@ fn run_blur_pass(
         BLUR_RADIUS,
     );
 
-    let mu1 = &mut scratch.mu1[..n];
+    let mu1 = &mut mu1[..n];
     crate::blur::box_blur_v_from_copy(mu1_h, mu1, width, height_local, BLUR_RADIUS);
-    let mu2 = &mut scratch.mu2[..n];
+    let mu2 = &mut mu2[..n];
     crate::blur::box_blur_v_from_copy(mu2_h, mu2, width, height_local, BLUR_RADIUS);
-    let ssq = &mut scratch.ssq[..n];
+    let ssq = &mut ssq[..n];
     crate::blur::box_blur_v_from_copy(ssq_h, ssq, width, height_local, BLUR_RADIUS);
-    let s12 = &mut scratch.s12[..n];
+    let s12 = &mut s12[..n];
     crate::blur::box_blur_v_from_copy(s12_h, s12, width, height_local, BLUR_RADIUS);
 
-    let abs_src = &mut scratch.abs_src[..n];
+    let abs_src = &mut abs_src[..n];
     crate::simd_ops::abs_diff_into(src, mu1, abs_src);
-    let activity = &mut scratch.activity[..n];
+    let activity = &mut activity[..n];
     crate::blur::box_blur_1pass_into(
         abs_src,
         activity,
-        &mut scratch.activity_tmp[..n],
+        &mut activity_tmp[..n],
         width,
         height_local,
         BLUR_RADIUS,
@@ -1747,14 +1900,6 @@ fn compute_channel_scale_v2(
         "scratch buffers must be sized for the largest strip+halo"
     );
 
-    // Halo-gather targets — kept as plain locals (NOT `ScratchV2Strip`
-    // fields) specifically so `run_blur_pass(&src_wide, &dst_wide, ...,
-    // scratch)` doesn't alias an immutable borrow of `scratch` against
-    // the `&mut ScratchV2Strip` the same call needs for its OTHER
-    // (disjoint) fields — see `ScratchV2Strip`'s doc.
-    let mut src_wide = vec![0.0f32; width * max_wide_h];
-    let mut dst_wide = vec![0.0f32; width * max_wide_h];
-
     let mut dense = DenseAccum::default();
     let mut grad = GradientAccum::default();
 
@@ -1766,7 +1911,9 @@ fn compute_channel_scale_v2(
 
         // --- Gather this strip's halo-padded input (real image data,
         //     mirror-reflected only within BLUR_RADIUS*2 of the TRUE
-        //     image top/bottom — see `gather_strip_halo`/`reflect_101`). ---
+        //     image top/bottom — see `gather_strip_halo`/`reflect_101`)
+        //     into the scratch's own halo buffers (reused across strips,
+        //     calls, and — via `V2Scratch` — across pairs). ---
         gather_strip_halo(
             src,
             width,
@@ -1774,7 +1921,7 @@ fn compute_channel_scale_v2(
             y0,
             wide_h,
             HALO_P,
-            &mut src_wide[..n_wide],
+            &mut scratch.src_wide[..n_wide],
         );
         gather_strip_halo(
             dst,
@@ -1783,29 +1930,22 @@ fn compute_channel_scale_v2(
             y0,
             wide_h,
             HALO_P,
-            &mut dst_wide[..n_wide],
+            &mut scratch.dst_wide[..n_wide],
         );
 
         // --- Blur pass on the strip+halo buffer only (§A.15's actual
         //     memory-traffic reduction: `wide_h` is O(STRIP_ROWS), not
-        //     O(height) — see `run_blur_pass`, identical algebra to
-        //     phases 3/4's inline version, extracted so this loop can
-        //     call it once per strip). ---
-        run_blur_pass(
-            &src_wide[..n_wide],
-            &dst_wide[..n_wide],
-            width,
-            wide_h,
-            scratch,
-        );
+        //     O(height)). `run_blur_pass_strip` reads the halo buffers
+        //     straight out of `scratch` via disjoint field borrows. ---
+        run_blur_pass_strip(width, wide_h, scratch);
 
         // --- Slice down to the strip's own real rows (buffer-local
         //     offset HALO_P, matching `gather_strip_halo`'s convention:
         //     local row `HALO_P + k` is global row `y0 + k`). ---
         let off = HALO_P * width;
         let strip_n = width * strip_h;
-        let src_strip = &src_wide[off..off + strip_n];
-        let dst_strip = &dst_wide[off..off + strip_n];
+        let src_strip = &scratch.src_wide[off..off + strip_n];
+        let dst_strip = &scratch.dst_wide[off..off + strip_n];
         let mu1_strip = &scratch.mu1[off..off + strip_n];
         let mu2_strip = &scratch.mu2[off..off + strip_n];
         let ssq_strip = &scratch.ssq[off..off + strip_n];
@@ -1832,8 +1972,8 @@ fn compute_channel_scale_v2(
             // already gathered. Buffer-local offset HALO_P-1.
             let g_off = (HALO_P - 1) * width;
             let g_n = width * (strip_h + 2);
-            let src_g = &src_wide[g_off..g_off + g_n];
-            let dst_g = &dst_wide[g_off..g_off + g_n];
+            let src_g = &scratch.src_wide[g_off..g_off + g_n];
+            let dst_g = &scratch.dst_wide[g_off..g_off + g_n];
             let strip_grad = gradient_block_kernel(src_g, dst_g, activity_strip, width, strip_h);
             grad.accumulate(&strip_grad);
         }
@@ -2332,6 +2472,115 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
 // Top-level entry point
 // ============================================================================
 
+/// Precomputed reference-side state for the v2 extraction: the
+/// (reflect-padded, XYB-converted) reference planes at every pyramid
+/// scale. Build once per reference via
+/// [`crate::Zensim::prepare_v2_reference`], then score any number of
+/// distorted variants against it with
+/// [`crate::Zensim::compute_v2_features_with_ref`] — each call skips the
+/// reference-side decode-adjacent work (reflect-pad copy, RGB→XYB
+/// conversion, and the 3-level downscale chain) that the pair entry point
+/// would otherwise redo per pair.
+///
+/// Bit-exactness contract: the planes are built by the SAME functions in
+/// the SAME order as the pair path (`convert_source_to_xyb` +
+/// `downscale_2x` per level), so `compute_v2_features_with_ref(prepare(r),
+/// d)` produces features **bit-identical** to `compute_v2_features(r, d)`
+/// — guarded by `prepared_ref_bit_identical_to_pair_path` in this file's
+/// tests. Memory: ~`5.33 * w * h` f32s (≈21 MB at 1 MP, ≈85 MB at 4 MP).
+pub struct V2PreparedReference {
+    /// Per pyramid scale: 3 XYB planes at that scale's exact
+    /// `(width, height)` — same layout the pair path materializes.
+    scales: Vec<([Vec<f32>; 3], usize, usize)>,
+    /// Original (pre reflect-pad) source dimensions; distorted images are
+    /// validated against these, exactly like `validate_pair`.
+    orig_width: usize,
+    orig_height: usize,
+}
+
+impl V2PreparedReference {
+    /// Reference width in pixels (unpadded). Distorted images scored
+    /// against this reference must match exactly.
+    pub fn width(&self) -> usize {
+        self.orig_width
+    }
+    /// Reference height in pixels (unpadded).
+    pub fn height(&self) -> usize {
+        self.orig_height
+    }
+}
+
+/// Build a [`V2PreparedReference`]: validate, reflect-pad if sub-64px
+/// (identity-skip otherwise — the pad is a pure copy at ≥64px and is NOT
+/// performed), convert to XYB once, and materialize all
+/// [`crate::NUM_SCALES`] pyramid levels.
+pub(crate) fn prepare_v2_reference_impl(
+    source: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+) -> Result<V2PreparedReference, ZensimError> {
+    if source.width() == 0 || source.height() == 0 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    crate::metric::reject_hdr_input(source)?;
+    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+
+    let (orig_width, orig_height) = (source.width(), source.height());
+    let scales = if orig_width < crate::metric::MIN_PYRAMID_DIM
+        || orig_height < crate::metric::MIN_PYRAMID_DIM
+    {
+        build_v2_ref_scales(&crate::metric::reflect_pad_to_min(source), parallel)
+    } else {
+        build_v2_ref_scales(source, parallel)
+    };
+    Ok(V2PreparedReference {
+        scales,
+        orig_width,
+        orig_height,
+    })
+}
+
+/// Materialize the reference XYB pyramid: scale 0 from
+/// `convert_source_to_xyb`, each further level via `downscale_2x_into`
+/// (bit-identical arithmetic to the pair path's `downscale_2x_inplace` —
+/// both compute `(a + b + c + d) * 0.25` per output element in the same
+/// order; the in-place/out-of-place split changes only where the result
+/// is stored).
+fn build_v2_ref_scales(
+    img: &impl ImageSource,
+    parallel: bool,
+) -> Vec<([Vec<f32>; 3], usize, usize)> {
+    let mut width = img.width();
+    let mut height = img.height();
+    let mut scales: Vec<([Vec<f32>; 3], usize, usize)> = Vec::with_capacity(crate::NUM_SCALES);
+    scales.push((
+        crate::streaming::convert_source_to_xyb(img, width, parallel),
+        width,
+        height,
+    ));
+    for _ in 1..crate::NUM_SCALES {
+        let new_w = width / 2;
+        let new_h = height / 2;
+        let mut next: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; new_w * new_h]);
+        {
+            let (prev_planes, _, _) = scales.last().expect("scale 0 pushed above");
+            for ch in 0..3 {
+                crate::blur::downscale_2x_into(
+                    &prev_planes[ch],
+                    width,
+                    &mut next[ch],
+                    new_w,
+                    new_h,
+                );
+            }
+        }
+        scales.push((next, new_w, new_h));
+        width = new_w;
+        height = new_h;
+    }
+    scales
+}
+
 /// Compute the v2 "bounded" feature vector for a source/distorted pair.
 ///
 /// Reuses [`crate::metric::validate_pair`] and
@@ -2362,6 +2611,13 @@ pub(crate) fn compute_v2_features_impl(
 /// `Zensim::compute_v2_features_with_toggles` (per-group marginal-cost
 /// measurement, `docs/FEATURE_V2_SPEC_2026-07-18.md` §A.12) and by the
 /// `v2_speed_baseline`/`v2_stage_profile` benches.
+///
+/// Ref-reuse pass: this is now a thin composition of
+/// [`prepare_v2_reference_impl`] + [`compute_v2_features_with_ref_impl`]
+/// — the pair path and the prepared path share ONE scale-walk owner, so
+/// they cannot drift. `validate_pair`/`check_within_max_pixels` run first
+/// to preserve the original error precedence (dimension mismatch before
+/// any per-side rejection).
 pub(crate) fn compute_v2_features_impl_with_toggles(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -2371,16 +2627,62 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
 ) -> Result<ZensimV2Result, ZensimError> {
     crate::metric::validate_pair(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    let prepared = prepare_v2_reference_impl(source, max_pixels, parallel)?;
+    let mut scratch = V2Scratch::new();
+    compute_v2_features_with_ref_impl(
+        &prepared,
+        distorted,
+        max_pixels,
+        parallel,
+        toggles,
+        &mut scratch,
+    )
+}
 
-    let padded_src = crate::metric::reflect_pad_to_min(source);
-    let padded_dst = crate::metric::reflect_pad_to_min(distorted);
-    let mut width = padded_src.width();
-    let mut height = padded_src.height();
+/// Score one distorted image against a prepared reference — the shared
+/// scale-walk owner for BOTH the pair entry point (which prepares
+/// inline) and the batch/reuse entry points. Only distorted-side work
+/// happens per call: conditional reflect-pad (skipped at ≥64px, where it
+/// is an identity copy), XYB conversion, per-scale kernels, and the
+/// distorted pyramid downscale. Reference planes are read from
+/// `prepared`.
+pub(crate) fn compute_v2_features_with_ref_impl(
+    prepared: &V2PreparedReference,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    if distorted.width() != prepared.orig_width || distorted.height() != prepared.orig_height {
+        return Err(ZensimError::DimensionMismatch);
+    }
+    crate::metric::reject_hdr_input(distorted)?;
+    crate::metric::check_within_max_pixels(distorted.width(), distorted.height(), max_pixels)?;
 
-    let mut src_planes = crate::streaming::convert_source_to_xyb(&padded_src, width, parallel);
-    let mut dst_planes = crate::streaming::convert_source_to_xyb(&padded_dst, width, parallel);
+    // Distorted-side reflect-pad only when genuinely below the pyramid
+    // minimum. At ≥64px `reflect_pad_to_min` degenerates to an identity
+    // copy (reflect_index(i, n) == i for i < n), so skipping it changes
+    // no plane values — it only removes a full per-pixel copy of the
+    // image from every pair.
+    let mut dst_planes = if distorted.width() < crate::metric::MIN_PYRAMID_DIM
+        || distorted.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
+        crate::streaming::convert_source_to_xyb(&padded_dst, padded_dst.width(), parallel)
+    } else {
+        crate::streaming::convert_source_to_xyb(distorted, distorted.width(), parallel)
+    };
 
-    let n_scales = crate::NUM_SCALES;
+    let (mut width, mut height) = (prepared.scales[0].1, prepared.scales[0].2);
+    debug_assert_eq!(
+        dst_planes[0].len(),
+        width * height,
+        "distorted planes must match the prepared reference's scale-0 dims \
+         (same original dims + same pad rule guarantee this)"
+    );
+
+    let n_scales = prepared.scales.len();
     let mut features = vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL];
     // Per-channel (mean_grad_src, mean_grad_dst) from the previous
     // (finer) scale, for the edge-width-change cross-scale comparison.
@@ -2393,7 +2695,9 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
     // measure). 3 separate sets (rather than 1 reused across channels
     // too) so the 3 channels within a scale can run independently — see
     // the `threads` parallel branch below, which needs disjoint `&mut`
-    // scratch per closure.
+    // scratch per closure. The sets live in the caller-supplied
+    // [`V2Scratch`] so batch drivers pay the allocation once per worker,
+    // not once per pair.
     //
     // Phase-6 (§A.16 lever B): `compute_channel_scale_v2_whole` (the
     // small-image bypass) needs `width*height` rows of scratch, not
@@ -2410,14 +2714,21 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
     #[allow(clippy::unnecessary_min_or_max)]
     let bypass_rows = height.min(STRIP_BYPASS_HEIGHT);
     let strip_max_n = width * (STRIP_ROWS + 2 * HALO_P).max(bypass_rows);
-    let mut scratch: [ScratchV2Strip; 3] = [
-        ScratchV2Strip::new(strip_max_n),
-        ScratchV2Strip::new(strip_max_n),
-        ScratchV2Strip::new(strip_max_n),
-    ];
+    scratch.ensure(strip_max_n);
+    let scratch = &mut scratch.strips;
 
     for scale in 0..n_scales {
         let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+
+        // Reference planes for this scale come straight from the prepared
+        // pyramid (read-only); only the distorted planes are walked
+        // in-place below.
+        let (src_planes, ref_w, ref_h) = &prepared.scales[scale];
+        debug_assert_eq!(
+            (*ref_w, *ref_h),
+            (width, height),
+            "prepared reference scale dims must track the distorted pyramid walk"
+        );
 
         // Each channel's compute is fully independent WITHIN a scale (only
         // `prev_grad[ch]` from the SAME channel's earlier scale is read,
@@ -2515,10 +2826,12 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
             // pyramid (caught by this file's own test suite: "src plane
             // length must be width*height" panics on every test that
             // exercises scale > 0).
+            //
+            // Only the DISTORTED pyramid is walked here — the reference
+            // levels were materialized once in `prepared`.
             let mut new_wh = (width, height);
-            for ch in 0..3 {
-                new_wh = crate::blur::downscale_2x_inplace(&mut src_planes[ch], width, height);
-                crate::blur::downscale_2x_inplace(&mut dst_planes[ch], width, height);
+            for plane in dst_planes.iter_mut() {
+                new_wh = crate::blur::downscale_2x_inplace(plane, width, height);
             }
             width = new_wh.0;
             height = new_wh.1;
@@ -3472,5 +3785,223 @@ mod tests {
                 feat[local]
             );
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Prepared-reference (pyramid reuse) path
+    // ------------------------------------------------------------------
+
+    /// Deterministic structured content: gradients + edges + pseudo-noise
+    /// texture (LCG), so every feature family (SSIM, HF, gradient,
+    /// blockiness, transducer) sees real signal.
+    fn textured_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
+        let mut state = seed | 1;
+        let mut px = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                let noise = (state >> 24) as u8;
+                let grad = ((x * 255) / w.max(1)) as u8;
+                let edge = if (x / 9 + y / 7) % 2 == 0 { 200 } else { 40 };
+                let r = grad.wrapping_add(noise / 4);
+                let g = edge;
+                let b = ((y * 255) / h.max(1)) as u8 ^ (noise / 8);
+                px.push([r, g, b]);
+            }
+        }
+        px
+    }
+
+    /// Blocky quantization distortion — deterministic, codec-flavored.
+    fn quantize_distort(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 3]> {
+        let mut out = src.to_vec();
+        for y in 0..h {
+            for x in 0..w {
+                let p = &mut out[y * w + x];
+                for c in p.iter_mut() {
+                    // 8x8-block DC-ish flattening + level quantization.
+                    *c = (*c / 24) * 24 + ((x % 8 == 0 || y % 8 == 0) as u8) * 6;
+                }
+            }
+        }
+        out
+    }
+
+    /// The prepared-reference path must produce features BIT-IDENTICAL to
+    /// the pair path — same functions, same order, only the storage of the
+    /// reference pyramid differs. Covers: multi-strip (h > STRIP_ROWS),
+    /// odd dims (SIMD tails), the exact-64 floor, and the sub-64
+    /// reflect-pad path.
+    #[test]
+    fn prepared_ref_bit_identical_to_pair_path() {
+        for &(w, h) in &[
+            (64usize, 64usize),
+            (96, 80),
+            (200, 136),
+            (40, 30),
+            (65, 129),
+        ] {
+            let src = textured_image(w, h, 0xBEEF);
+            let dst = quantize_distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+
+            let pair = compute_v2_features_impl(&source, &distorted, None, false)
+                .expect("pair path computes");
+
+            let prepared =
+                prepare_v2_reference_impl(&source, None, false).expect("prepare computes");
+            let mut scratch = V2Scratch::new();
+            let with_ref = compute_v2_features_with_ref_impl(
+                &prepared,
+                &distorted,
+                None,
+                false,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .expect("with_ref computes");
+
+            assert_eq!(pair.features().len(), with_ref.features().len());
+            for (i, (a, b)) in pair
+                .features()
+                .iter()
+                .zip(with_ref.features().iter())
+                .enumerate()
+            {
+                assert!(
+                    a.to_bits() == b.to_bits(),
+                    "{w}x{h}: feature {i} diverged: pair={a:e} with_ref={b:e}"
+                );
+            }
+        }
+    }
+
+    /// Toggle combinations must round-trip through the prepared path
+    /// identically too (the luma gate + disabled groups change which
+    /// slots are written — index-stability must not depend on which
+    /// entry point ran).
+    #[test]
+    fn prepared_ref_bit_identical_with_toggles() {
+        let (w, h) = (96usize, 96usize);
+        let src = textured_image(w, h, 0x5EED);
+        let dst = quantize_distort(&src, w, h);
+        let source = RgbSlice::new(&src, w, h);
+        let distorted = RgbSlice::new(&dst, w, h);
+
+        for toggles in [
+            V2NewFeatureToggles {
+                transducers_luma_only: true,
+                ..Default::default()
+            },
+            V2NewFeatureToggles {
+                gradient_features: false,
+                ..Default::default()
+            },
+            V2NewFeatureToggles {
+                blockiness: false,
+                transducer_bank: false,
+                ..Default::default()
+            },
+        ] {
+            let pair =
+                compute_v2_features_impl_with_toggles(&source, &distorted, None, false, toggles)
+                    .expect("pair path computes");
+            let prepared =
+                prepare_v2_reference_impl(&source, None, false).expect("prepare computes");
+            let mut scratch = V2Scratch::new();
+            let with_ref = compute_v2_features_with_ref_impl(
+                &prepared,
+                &distorted,
+                None,
+                false,
+                toggles,
+                &mut scratch,
+            )
+            .expect("with_ref computes");
+            for (i, (a, b)) in pair
+                .features()
+                .iter()
+                .zip(with_ref.features().iter())
+                .enumerate()
+            {
+                assert!(
+                    a.to_bits() == b.to_bits(),
+                    "toggles {toggles:?}: feature {i} diverged"
+                );
+            }
+        }
+    }
+
+    /// One `V2Scratch` reused across pairs of DIFFERENT sizes and content
+    /// must produce the same bits as a fresh scratch per pair — i.e. no
+    /// stale-buffer leakage between pairs (buffers are fully written
+    /// before every read).
+    #[test]
+    fn scratch_reuse_matches_fresh_scratch() {
+        let mut shared = V2Scratch::new();
+        // Big pair first so the small pair runs on oversized buffers full
+        // of the big pair's data — the harshest staleness ordering.
+        for &(w, h, seed) in &[
+            (200usize, 136usize, 0xAAAAu32),
+            (64, 64, 0xBBBB),
+            (96, 80, 7),
+        ] {
+            let src = textured_image(w, h, seed);
+            let dst = quantize_distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+            let prepared =
+                prepare_v2_reference_impl(&source, None, false).expect("prepare computes");
+
+            let mut fresh = V2Scratch::new();
+            let a = compute_v2_features_with_ref_impl(
+                &prepared,
+                &distorted,
+                None,
+                false,
+                V2NewFeatureToggles::default(),
+                &mut fresh,
+            )
+            .expect("fresh-scratch computes");
+            let b = compute_v2_features_with_ref_impl(
+                &prepared,
+                &distorted,
+                None,
+                false,
+                V2NewFeatureToggles::default(),
+                &mut shared,
+            )
+            .expect("shared-scratch computes");
+            for (i, (x, y)) in a.features().iter().zip(b.features().iter()).enumerate() {
+                assert!(
+                    x.to_bits() == y.to_bits(),
+                    "{w}x{h}: feature {i} diverged under scratch reuse"
+                );
+            }
+        }
+    }
+
+    /// Dimension mismatch against the prepared reference is rejected the
+    /// same way `validate_pair` rejects it on the pair path.
+    #[test]
+    fn prepared_ref_rejects_dim_mismatch() {
+        let src = textured_image(96, 96, 3);
+        let source = RgbSlice::new(&src, 96, 96);
+        let prepared = prepare_v2_reference_impl(&source, None, false).expect("prepare computes");
+
+        let other = textured_image(64, 96, 4);
+        let distorted = RgbSlice::new(&other, 64, 96);
+        let mut scratch = V2Scratch::new();
+        let err = compute_v2_features_with_ref_impl(
+            &prepared,
+            &distorted,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ZensimError::DimensionMismatch));
     }
 }

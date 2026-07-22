@@ -3536,6 +3536,46 @@ mod tests {
         output
     }
 
+    /// `downscale_2x_into` must be BIT-IDENTICAL to `downscale_2x_inplace`
+    /// on the same input — both compute `(a + b + c + d) * 0.25` per output
+    /// element in the same order; only the storage differs. The v2
+    /// prepared-reference pyramid is built with `_into` while the pair
+    /// path's distorted walk uses `_inplace`, and the v2 feature
+    /// bit-identity guarantee (`prepared_ref_bit_identical_to_pair_path`)
+    /// rests on this equivalence.
+    #[test]
+    fn downscale_into_bit_identical_to_inplace() {
+        for &(w, h) in &[(64usize, 64usize), (97, 65), (200, 137), (66, 130)] {
+            // Structured + pseudo-noise content, incl. negative values.
+            let mut state = 0x1234_5678u32;
+            let plane: Vec<f32> = (0..w * h)
+                .map(|i| {
+                    state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                    let noise = (state >> 8) as f32 / (1u32 << 24) as f32;
+                    let x = (i % w) as f32;
+                    let y = (i / w) as f32;
+                    (x * 0.013 + y * 0.007).sin() * 0.4 + noise * 0.2 - 0.1
+                })
+                .collect();
+
+            let new_w = w / 2;
+            let new_h = h / 2;
+            let mut out_into = vec![0.0f32; new_w * new_h];
+            downscale_2x_into(&plane, w, &mut out_into, new_w, new_h);
+
+            let mut inplace = plane.clone();
+            let (iw, ih) = downscale_2x_inplace(&mut inplace, w, h);
+            assert_eq!((iw, ih), (new_w, new_h));
+
+            for (i, (a, b)) in out_into.iter().zip(inplace.iter()).enumerate() {
+                assert!(
+                    a.to_bits() == b.to_bits(),
+                    "{w}x{h}: downscaled element {i} diverged: into={a:e} inplace={b:e}"
+                );
+            }
+        }
+    }
+
     /// Blur of a uniform plane must return the same uniform value everywhere,
     /// including at edges. Any boundary handling that biases edges will fail.
     #[test]

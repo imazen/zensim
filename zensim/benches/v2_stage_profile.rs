@@ -71,7 +71,8 @@ fn bench_stages(suite: &mut Suite) {
                     b.with_input(move || (Arc::clone(&rs), Arc::clone(&ds)))
                         .run(move |(rs, ds)| {
                             let res =
-                                compute_zensim_with_config(&rs, &ds, size, size, cfg_basic_peak()).unwrap();
+                                compute_zensim_with_config(&rs, &ds, size, size, cfg_basic_peak())
+                                    .unwrap();
                             std::hint::black_box(res.features().len());
                             (rs, ds)
                         })
@@ -85,7 +86,8 @@ fn bench_stages(suite: &mut Suite) {
                     b.with_input(move || (Arc::clone(&rs), Arc::clone(&ds)))
                         .run(move |(rs, ds)| {
                             let res =
-                                compute_zensim_with_config(&rs, &ds, size, size, cfg_plus_masked()).unwrap();
+                                compute_zensim_with_config(&rs, &ds, size, size, cfg_plus_masked())
+                                    .unwrap();
                             std::hint::black_box(res.features().len());
                             (rs, ds)
                         })
@@ -99,7 +101,8 @@ fn bench_stages(suite: &mut Suite) {
                     b.with_input(move || (Arc::clone(&rs), Arc::clone(&ds)))
                         .run(move |(rs, ds)| {
                             let res =
-                                compute_zensim_with_config(&rs, &ds, size, size, cfg_plus_iw()).unwrap();
+                                compute_zensim_with_config(&rs, &ds, size, size, cfg_plus_iw())
+                                    .unwrap();
                             std::hint::black_box(res.features().len());
                             (rs, ds)
                         })

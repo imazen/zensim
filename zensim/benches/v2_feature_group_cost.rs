@@ -24,6 +24,9 @@ fn all_off() -> V2NewFeatureToggles {
         gradient_features: false,
         transducer_bank: false,
         blockiness: false,
+        // Deprecate-by-mask toggle (default off) — listed explicitly so this
+        // bench keeps compiling when new toggles are added with defaults.
+        ..V2NewFeatureToggles::default()
     }
 }
 
@@ -38,15 +41,24 @@ fn bench_groups(suite: &mut Suite) {
         ("v0_none_of_the_7_new", all_off()),
         (
             "v1_plus_gradient_group",
-            V2NewFeatureToggles { gradient_features: true, ..all_off() },
+            V2NewFeatureToggles {
+                gradient_features: true,
+                ..all_off()
+            },
         ),
         (
             "v2_plus_transducer_bank",
-            V2NewFeatureToggles { transducer_bank: true, ..all_off() },
+            V2NewFeatureToggles {
+                transducer_bank: true,
+                ..all_off()
+            },
         ),
         (
             "v3_plus_blockiness",
-            V2NewFeatureToggles { blockiness: true, ..all_off() },
+            V2NewFeatureToggles {
+                blockiness: true,
+                ..all_off()
+            },
         ),
         ("v4_all_7_new_features", V2NewFeatureToggles::default()),
     ];
@@ -62,7 +74,9 @@ fn bench_groups(suite: &mut Suite) {
                         let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
                         let source = RgbSlice::new(&rs, SIZE, SIZE);
                         let distorted = RgbSlice::new(&ds, SIZE, SIZE);
-                        let res = z.compute_v2_features_with_toggles(&source, &distorted, toggles).unwrap();
+                        let res = z
+                            .compute_v2_features_with_toggles(&source, &distorted, toggles)
+                            .unwrap();
                         std::hint::black_box(res.features().len());
                         (rs, ds)
                     })

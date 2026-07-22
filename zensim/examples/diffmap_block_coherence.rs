@@ -52,7 +52,9 @@ fn bake_bytes_static() -> &'static [u8] {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 {
-        eprintln!("usage: diffmap_block_coherence <ref> <dist> [--block N] [--weighting trained|balanced] [--bake <path>]");
+        eprintln!(
+            "usage: diffmap_block_coherence <ref> <dist> [--block N] [--weighting trained|balanced] [--bake <path>]"
+        );
         std::process::exit(2);
     }
     let mut block = 32usize;
@@ -80,7 +82,11 @@ fn main() {
     let r = image::open(&args[0]).expect("open ref").to_rgb8();
     let d = image::open(&args[1]).expect("open dist").to_rgb8();
     let (w, h) = (r.width() as usize, r.height() as usize);
-    assert_eq!((d.width() as usize, d.height() as usize), (w, h), "size mismatch");
+    assert_eq!(
+        (d.width() as usize, d.height() as usize),
+        (w, h),
+        "size mismatch"
+    );
     let rpx: Vec<[u8; 3]> = r.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     let dpx: Vec<[u8; 3]> = d.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
@@ -162,10 +168,17 @@ fn main() {
         nblocks
     );
     println!("  additive-scalar target:");
-    println!("    SROCC(diffmap_block, Δ additive-scalar) = {srocc_add:+.4}   (exact-gradient ceiling)");
+    println!(
+        "    SROCC(diffmap_block, Δ additive-scalar) = {srocc_add:+.4}   (exact-gradient ceiling)"
+    );
     println!("  current (non-additive) scalar:");
-    println!("    SROCC(diffmap_block, ΔS_full)           = {srocc_full:+.4}   PLCC = {:+.4}", pearson(&dmap_block, &delta_s));
-    println!("    SROCC(SSE_block,     ΔS_full)           = {srocc_sse:+.4}   (codec PSNR default — the bar)");
+    println!(
+        "    SROCC(diffmap_block, ΔS_full)           = {srocc_full:+.4}   PLCC = {:+.4}",
+        pearson(&dmap_block, &delta_s)
+    );
+    println!(
+        "    SROCC(SSE_block,     ΔS_full)           = {srocc_sse:+.4}   (codec PSNR default — the bar)"
+    );
     println!(
         "  => additive core buys +{:.4} spatial coherence ({:.4} → {:.4}); non-additivity is the {:.0}% gap the design removes",
         srocc_add - srocc_full,
@@ -241,7 +254,10 @@ fn run_bake_mode(
         .compute_iw_features(n_in > 300)
         .build();
     let params: &'static ProfileParams = Box::leak(Box::new(params));
-    let profile = ZensimProfile::Custom { params, name: "bake-under-test" };
+    let profile = ZensimProfile::Custom {
+        params,
+        name: "bake-under-test",
+    };
     let z = Zensim::new(profile);
 
     let rs = RgbSlice::new(rpx, w, h);
@@ -337,8 +353,7 @@ fn run_bake_mode(
         .diffmap()
         .to_vec();
     // s_k over the basic block only — the per-pixel machinery spatializes f0..155.
-    let s_basic: &'static [f64] =
-        Box::leak(s[..n_in.min(156)].to_vec().into_boxed_slice());
+    let s_basic: &'static [f64] = Box::leak(s[..n_in.min(156)].to_vec().into_boxed_slice());
     let diff_model = z
         .compute_with_diffmap(
             &rs,
@@ -391,11 +406,25 @@ fn run_bake_mode(
     println!(
         "bake spatial coherence ({nblocks} blocks, {block}px)  bake={bake_path}  n_inputs={n_in}  base_score={base_score:.2}  grad_zero={grad_zero}/{n_in}"
     );
-    println!("  M1  SROCC(shipped_default_diffmap, ΔS_bake) = {m1:+.4}   PLCC {:+.4}   (ssim-only, profile weights)", pearson(&dmap_block, &delta_s));
-    println!("  M1b SROCC(all_signals_diffmap,     ΔS_bake) = {m1b:+.4}   PLCC {:+.4}   (edge/mse/hf on, profile weights)", pearson(&dmap_all_block, &delta_s));
-    println!("  M3  SROCC(model_sensitivity_map,   ΔS_bake) = {m3:+.4}   PLCC {:+.4}   (bake's own s_k — deployable)", pearson(&dmap_model_block, &delta_s));
-    println!("  M2  SROCC(grad_lin_pred,           ΔS_bake) = {m2:+.4}   PLCC {:+.4}   (gradient/linearization ceiling)", pearson(&lin_pred, &delta_s));
-    println!("      SROCC(SSE_block,               ΔS_bake) = {sse:+.4}   (codec PSNR default — the bar)");
+    println!(
+        "  M1  SROCC(shipped_default_diffmap, ΔS_bake) = {m1:+.4}   PLCC {:+.4}   (ssim-only, profile weights)",
+        pearson(&dmap_block, &delta_s)
+    );
+    println!(
+        "  M1b SROCC(all_signals_diffmap,     ΔS_bake) = {m1b:+.4}   PLCC {:+.4}   (edge/mse/hf on, profile weights)",
+        pearson(&dmap_all_block, &delta_s)
+    );
+    println!(
+        "  M3  SROCC(model_sensitivity_map,   ΔS_bake) = {m3:+.4}   PLCC {:+.4}   (bake's own s_k — deployable)",
+        pearson(&dmap_model_block, &delta_s)
+    );
+    println!(
+        "  M2  SROCC(grad_lin_pred,           ΔS_bake) = {m2:+.4}   PLCC {:+.4}   (gradient/linearization ceiling)",
+        pearson(&lin_pred, &delta_s)
+    );
+    println!(
+        "      SROCC(SSE_block,               ΔS_bake) = {sse:+.4}   (codec PSNR default — the bar)"
+    );
 }
 
 fn rank(v: &[f64]) -> Vec<f64> {

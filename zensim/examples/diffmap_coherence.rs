@@ -48,7 +48,11 @@ fn main() {
             }
         };
         if d.width() as usize != w || d.height() as usize != h {
-            eprintln!("  skip {dp}: size {}x{} != ref {w}x{h}", d.width(), d.height());
+            eprintln!(
+                "  skip {dp}: size {}x{} != ref {w}x{h}",
+                d.width(),
+                d.height()
+            );
             continue;
         }
         let dpx: Vec<[u8; 3]> = d.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();

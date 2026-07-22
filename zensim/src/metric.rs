@@ -1288,6 +1288,86 @@ impl Zensim {
         )
     }
 
+    /// Precompute the v2 reference-side state (reflect-padded XYB planes at
+    /// every pyramid scale) for scoring MANY distorted variants against one
+    /// reference. Sweep/extraction workloads pair each reference with dozens
+    /// of distorted images; preparing once amortizes the reference-side
+    /// convert + pyramid work to ~zero per pair.
+    ///
+    /// Features from [`Self::compute_v2_features_with_ref`] are
+    /// **bit-identical** to [`Self::compute_v2_features`] on the same pair —
+    /// the prepared planes are built by the same functions in the same
+    /// order (test-gated).
+    ///
+    /// # Errors
+    ///
+    /// [`ZensimError::ImageTooSmall`] (zero-dimension),
+    /// [`ZensimError::HdrInputRequiresPuPath`] (HDR-flagged source), or
+    /// [`ZensimError::ImageTooLarge`] (`max_pixels` exceeded).
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn prepare_v2_reference(
+        &self,
+        source: &impl ImageSource,
+    ) -> Result<crate::feature_v2::V2PreparedReference, ZensimError> {
+        crate::feature_v2::prepare_v2_reference_impl(source, self.max_pixels, self.parallel)
+    }
+
+    /// Compute v2 features for one distorted image against a prepared
+    /// reference (see [`Self::prepare_v2_reference`]). Convenience form
+    /// that allocates its scratch internally and uses default
+    /// [`crate::feature_v2::V2NewFeatureToggles`]; batch drivers should
+    /// prefer [`Self::compute_v2_features_with_ref_and_scratch`] with one
+    /// [`crate::feature_v2::V2Scratch`] per worker thread to also
+    /// eliminate per-pair scratch allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`ZensimError::DimensionMismatch`] if `distorted` does not match the
+    /// prepared reference's dimensions, plus the error conditions of
+    /// [`Self::compute_v2_features`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_v2_features_with_ref(
+        &self,
+        reference: &crate::feature_v2::V2PreparedReference,
+        distorted: &impl ImageSource,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        crate::feature_v2::compute_v2_features_with_ref_impl(
+            reference,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            crate::feature_v2::V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+    }
+
+    /// Full-control batch form of [`Self::compute_v2_features_with_ref`]:
+    /// explicit feature-group toggles and a caller-owned reusable
+    /// [`crate::feature_v2::V2Scratch`] (one per worker thread), so
+    /// steady-state extraction performs zero scratch allocation per pair.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_v2_features_with_ref`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_v2_features_with_ref_and_scratch(
+        &self,
+        reference: &crate::feature_v2::V2PreparedReference,
+        distorted: &impl ImageSource,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+        scratch: &mut crate::feature_v2::V2Scratch,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_v2_features_with_ref_impl(
+            reference,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+            scratch,
+        )
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors
@@ -2937,7 +3017,9 @@ fn parse_minmax_head_meta(payload: &[u8]) -> Option<MinMaxHeadMeta> {
     if payload.len() < 12 {
         return None;
     }
-    let rd_u32 = |o: usize| u32::from_le_bytes([payload[o], payload[o + 1], payload[o + 2], payload[o + 3]]) as usize;
+    let rd_u32 = |o: usize| {
+        u32::from_le_bytes([payload[o], payload[o + 1], payload[o + 2], payload[o + 3]]) as usize
+    };
     let (k, j, n) = (rd_u32(0), rd_u32(4), rd_u32(8));
     if k == 0 || j == 0 || n == 0 {
         return None;
@@ -2948,7 +3030,8 @@ fn parse_minmax_head_meta(payload: &[u8]) -> Option<MinMaxHeadMeta> {
     if payload.len() != expected {
         return None;
     }
-    let rd_f32 = |o: usize| f32::from_le_bytes([payload[o], payload[o + 1], payload[o + 2], payload[o + 3]]);
+    let rd_f32 =
+        |o: usize| f32::from_le_bytes([payload[o], payload[o + 1], payload[o + 2], payload[o + 3]]);
     let mut w = Vec::with_capacity(n_w);
     let mut off = 12;
     for _ in 0..n_w {

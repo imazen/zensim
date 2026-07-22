@@ -29,6 +29,7 @@ mod zen_io;
 
 use std::sync::Arc;
 use zenbench::prelude::*;
+use zensim::feature_v2::{V2NewFeatureToggles, V2Scratch};
 use zensim::{RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config};
 
 const SIZES: &[usize] = &[256, 576, 1024, 2048];
@@ -133,6 +134,56 @@ fn bench_extraction(suite: &mut Suite) {
                             std::hint::black_box(res.features().len());
                             (rs, ds)
                         })
+                });
+            }
+
+            // Ref-reuse pass: the amortized sweep steady state — reference
+            // prepared ONCE (outside the timed region), scratch reused
+            // across iterations. This is the per-pair cost a ref-grouped
+            // extraction driver actually pays; v2_bounded_1thread minus
+            // this = the reference-side share the prepared path amortizes
+            // away.
+            {
+                let (rs, ds) = (Arc::clone(&rs), Arc::clone(&ds));
+                g.bench("v2_with_ref_1thread", move |b| {
+                    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+                    let prepared = {
+                        let source = RgbSlice::new(&rs, size, size);
+                        Arc::new(z.prepare_v2_reference(&source).unwrap())
+                    };
+                    let ds = Arc::clone(&ds);
+                    b.with_input(move || (Arc::clone(&prepared), Arc::clone(&ds), V2Scratch::new()))
+                        .run(move |(prepared, ds, mut scratch)| {
+                            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+                            let distorted = RgbSlice::new(&ds, size, size);
+                            let res = z
+                                .compute_v2_features_with_ref_and_scratch(
+                                    &prepared,
+                                    &distorted,
+                                    V2NewFeatureToggles::default(),
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            std::hint::black_box(res.features().len());
+                            (prepared, ds, scratch)
+                        })
+                });
+            }
+
+            // The one-time reference-preparation cost (reflect-pad skip +
+            // XYB convert + 3-level pyramid). Amortization math:
+            // with_ref + prepare/N vs v2_bounded, N = variants per ref.
+            {
+                let rs = Arc::clone(&rs);
+                g.bench("v2_prepare_ref_1thread", move |b| {
+                    let rs = Arc::clone(&rs);
+                    b.with_input(move || Arc::clone(&rs)).run(move |rs| {
+                        let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+                        let source = RgbSlice::new(&rs, size, size);
+                        let prepared = z.prepare_v2_reference(&source).unwrap();
+                        std::hint::black_box(prepared.width());
+                        rs
+                    })
                 });
             }
         });

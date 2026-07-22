@@ -428,7 +428,10 @@ fn model_sensitivity_weights(
             })
         } else {
             let eq = 1.0 / 3.0;
-            [PixelFeatureWeights { ssim: eq, ..Default::default() }; 3]
+            [PixelFeatureWeights {
+                ssim: eq,
+                ..Default::default()
+            }; 3]
         };
         per_scale.push(ch_weights);
         scale_totals.push(feat_total);

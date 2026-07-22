@@ -123,9 +123,10 @@ fn main() {
             // v2-348 block, same pixels.
             if do_v2 {
                 let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
-                let v2 = match z
-                    .compute_v2_features(&RgbSlice::new(&r_px, rw, rh), &RgbSlice::new(&d_px, dw, dh))
-                {
+                let v2 = match z.compute_v2_features(
+                    &RgbSlice::new(&r_px, rw, rh),
+                    &RgbSlice::new(&d_px, dw, dh),
+                ) {
                     Ok(r) => r,
                     Err(e) => {
                         eprintln!("SKIP v2 compute error {:?}: {e:?}", p.dist_path);
@@ -160,5 +161,9 @@ fn main() {
         out.push('\n');
     }
     std::fs::write(&args[1], out).expect("write out csv");
-    eprintln!("wrote {} rows x {n_feat} features to {}", rows.len(), args[1]);
+    eprintln!(
+        "wrote {} rows x {n_feat} features to {}",
+        rows.len(),
+        args[1]
+    );
 }
