@@ -1460,9 +1460,35 @@ fn weighted_pool_accumulate_scalar(
 /// Processes one row at a time: zero f32-lane accumulators, sweep the row
 /// in 8-wide chunks (+ scalar tail for `width % 8 != 0`), reduce once per
 /// row into the f64 [`DenseAccum`] running totals.
-#[inline]
+///
+/// `POOL_SIMD` (register-assignment experiment, 2026-07-21): when `true`,
+/// the 11 masked/IW/soft-peak weighted pools are accumulated in f32 SIMD
+/// lanes (reduced per row to f64) instead of the §A.14 per-lane scalar
+/// extraction. The pool block then needs only **16** lane accumulators —
+/// not the 22 that caused §A.14's register-pressure regression — because
+/// the mask family shares one `Σw` (same `mask_w` for all 4 pools), the
+/// IW family shares one `Σw`, and both weights derive from a single
+/// `saturate(act)` (1 division for 8 pixels instead of 16 scalar f64
+/// divisions). Total live vectors ≈ 13 core + 16 pool + constants — fits
+/// the 32 SIMD registers of AVX-512(VL); on 16-register tiers (AVX2/NEON)
+/// it would spill, so the entry dispatch enables it for the v4x tier
+/// only. Numerics: pool sums move from f64-per-pixel to
+/// f32-lane-then-f64-row accumulation — the SAME reassociation class as
+/// the phase-4 core-moment change, inside this module's documented 5e-4
+/// tolerance (fixture tests + `pool_simd_drift_within_policy` gate it).
+/// The scalar row tail keeps the exact f64 path in both modes.
+///
+/// `#[inline(always)]`, not `#[inline]`: this body exists ONLY to fuse
+/// into its `#[arcane]`/magetypes entry's `target_feature` region. When
+/// the POOL_SIMD variant pushed the body past LLVM's inline-cost
+/// threshold, the hint stopped being honored and every V8 operator
+/// compiled into a CALL to a non-inlined `core::arch` shim outside the
+/// feature region — measured 5.3x whole-extraction regression (38.2s vs
+/// 7.2s on 100 aic3 pairs; perf showed `__mm256_add_ps` as a standalone
+/// 26% symbol). Forcing the inline is the entire fix.
+#[inline(always)]
 #[allow(clippy::too_many_arguments)]
-fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
+fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
     token: T,
     src: &[f32],
     dst: &[f32],
@@ -1486,6 +1512,10 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
     let k_mid = V8::<T>::splat(token, K_PJND_MASK as f32);
     let k_lo = V8::<T>::splat(token, K_PJND_MASK_LOW as f32);
     let k_hi = V8::<T>::splat(token, K_PJND_MASK_HIGH as f32);
+    // POOL_SIMD-only constants (const-folded out otherwise).
+    let c_activity = V8::<T>::splat(token, C_ACTIVITY as f32);
+    let c_peak = V8::<T>::splat(token, C_PEAK as f32);
+    let iw_floor = V8::<T>::splat(token, IW_WEIGHT_FLOOR as f32);
 
     let mut acc = DenseAccum::default();
     let width8 = width - (width % 8);
@@ -1508,6 +1538,21 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
         let (mut r_art, mut r_det, mut r_mse) = (zero, zero, zero);
         let (mut r_hfg, mut r_hfl, mut r_hfm) = (zero, zero, zero);
         let (mut r_pjnd, mut r_pjnd_lo, mut r_pjnd_hi) = (zero, zero, zero);
+
+        // POOL_SIMD lane accumulators (16 — see the function doc). Dead
+        // (const-folded away, zero register cost) when POOL_SIMD=false.
+        let (mut p_mask_w, mut p_mask_d, mut p_mask_art, mut p_mask_det, mut p_mask_mse) =
+            (zero, zero, zero, zero, zero);
+        let (mut p_iw_w, mut p_iw_d, mut p_iw_art, mut p_iw_det, mut p_iw_mse) =
+            (zero, zero, zero, zero, zero);
+        let (
+            mut p_sal_d,
+            mut p_sal_dv,
+            mut p_sal_art,
+            mut p_sal_artv,
+            mut p_sal_det,
+            mut p_sal_detv,
+        ) = (zero, zero, zero, zero, zero, zero);
 
         let mut x = 0usize;
         while x < width8 {
@@ -1566,25 +1611,55 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
                 r_pjnd_hi += pjnd_transducer_v(token, raw_abs_err, act, k_hi, c_pjnd_clamp);
             }
 
-            // §A.14 register-pressure fix (see the row-header comment
-            // above): extract this chunk's d/art_i/det_i/mse_i/act lanes and
-            // accumulate the 11 weighted-pool pairs scalar, per lane --
-            // reuses the EXACT SAME formula as the scalar tail below via
-            // `weighted_pool_accumulate_scalar`, not a re-derivation.
-            let d_arr = d.to_array();
-            let art_arr = art_i.to_array();
-            let det_arr = det_i.to_array();
-            let mse_arr = mse_i.to_array();
-            let act_arr = act.to_array();
-            for lane in 0..8 {
-                weighted_pool_accumulate_scalar(
-                    &mut acc,
-                    d_arr[lane] as f64,
-                    art_arr[lane] as f64,
-                    det_arr[lane] as f64,
-                    mse_arr[lane] as f64,
-                    act_arr[lane] as f64,
-                );
+            if POOL_SIMD {
+                // Register-assignment variant: pools in-lane. ONE division
+                // yields both family weights (mask_w = 1-sat, iw_w =
+                // sat+floor); three more give the soft-peak saliencies —
+                // 4 vector divisions per 8 pixels vs 40 scalar f64
+                // divisions on the extraction path.
+                let sat_act = saturate_v(token, act, c_activity);
+                let mask_w = one - sat_act;
+                let iw_w = sat_act + iw_floor;
+                p_mask_w += mask_w;
+                p_mask_d += mask_w * d;
+                p_mask_art += mask_w * art_i;
+                p_mask_det += mask_w * det_i;
+                p_mask_mse += mask_w * mse_i;
+                p_iw_w += iw_w;
+                p_iw_d += iw_w * d;
+                p_iw_art += iw_w * art_i;
+                p_iw_det += iw_w * det_i;
+                p_iw_mse += iw_w * mse_i;
+                let sal_d = saturate_v(token, d, c_peak);
+                let sal_art = saturate_v(token, art_i, c_peak);
+                let sal_det = saturate_v(token, det_i, c_peak);
+                p_sal_d += sal_d;
+                p_sal_dv += sal_d * d;
+                p_sal_art += sal_art;
+                p_sal_artv += sal_art * art_i;
+                p_sal_det += sal_det;
+                p_sal_detv += sal_det * det_i;
+            } else {
+                // §A.14 register-pressure fix (see the row-header comment
+                // above): extract this chunk's d/art_i/det_i/mse_i/act lanes
+                // and accumulate the 11 weighted-pool pairs scalar, per lane
+                // -- reuses the EXACT SAME formula as the scalar tail below
+                // via `weighted_pool_accumulate_scalar`, not a re-derivation.
+                let d_arr = d.to_array();
+                let art_arr = art_i.to_array();
+                let det_arr = det_i.to_array();
+                let mse_arr = mse_i.to_array();
+                let act_arr = act.to_array();
+                for lane in 0..8 {
+                    weighted_pool_accumulate_scalar(
+                        &mut acc,
+                        d_arr[lane] as f64,
+                        art_arr[lane] as f64,
+                        det_arr[lane] as f64,
+                        mse_arr[lane] as f64,
+                        act_arr[lane] as f64,
+                    );
+                }
             }
 
             x += 8;
@@ -1604,8 +1679,37 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
         acc.sum_pjnd += r_pjnd.reduce_add() as f64;
         acc.sum_pjnd_lo += r_pjnd_lo.reduce_add() as f64;
         acc.sum_pjnd_hi += r_pjnd_hi.reduce_add() as f64;
-        // (weighted-pool accumulators already folded in scalar, per-lane,
-        // inside the chunk loop above -- see the §A.14 fix note.)
+        if POOL_SIMD {
+            // Fold the 16 pool lane-sums into the per-pool WeightedSums.
+            // The mask/IW family `den`s are the SAME row sum replicated
+            // (that sharing is what makes 16 accumulators suffice).
+            let mask_w_sum = p_mask_w.reduce_add() as f64;
+            acc.ws_mask_ssim.num += p_mask_d.reduce_add() as f64;
+            acc.ws_mask_ssim.den += mask_w_sum;
+            acc.ws_mask_art.num += p_mask_art.reduce_add() as f64;
+            acc.ws_mask_art.den += mask_w_sum;
+            acc.ws_mask_det.num += p_mask_det.reduce_add() as f64;
+            acc.ws_mask_det.den += mask_w_sum;
+            acc.ws_mask_mse.num += p_mask_mse.reduce_add() as f64;
+            acc.ws_mask_mse.den += mask_w_sum;
+            let iw_w_sum = p_iw_w.reduce_add() as f64;
+            acc.ws_iw_ssim.num += p_iw_d.reduce_add() as f64;
+            acc.ws_iw_ssim.den += iw_w_sum;
+            acc.ws_iw_art.num += p_iw_art.reduce_add() as f64;
+            acc.ws_iw_art.den += iw_w_sum;
+            acc.ws_iw_det.num += p_iw_det.reduce_add() as f64;
+            acc.ws_iw_det.den += iw_w_sum;
+            acc.ws_iw_mse.num += p_iw_mse.reduce_add() as f64;
+            acc.ws_iw_mse.den += iw_w_sum;
+            acc.ws_peak_ssim.num += p_sal_dv.reduce_add() as f64;
+            acc.ws_peak_ssim.den += p_sal_d.reduce_add() as f64;
+            acc.ws_peak_art.num += p_sal_artv.reduce_add() as f64;
+            acc.ws_peak_art.den += p_sal_art.reduce_add() as f64;
+            acc.ws_peak_det.num += p_sal_detv.reduce_add() as f64;
+            acc.ws_peak_det.den += p_sal_det.reduce_add() as f64;
+        }
+        // (POOL_SIMD=false: weighted-pool accumulators already folded in
+        // scalar, per-lane, inside the chunk loop above -- §A.14 fix note.)
 
         // Scalar tail: remaining `width % 8` pixels in this row, using the
         // EXACT SAME scalar formulas as the pre-phase-4 kernel (bit-for-bit
@@ -1668,7 +1772,13 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy>(
     acc
 }
 
-#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+// Two disjoint-tier blocks emit the same base name (the
+// `downscale_2x_into_inner` pattern): AVX-512(VL) has 32 SIMD registers,
+// so the v4x tier runs the POOL_SIMD=true body (13 core + 16 pool lane
+// accumulators live comfortably); every 16-register tier keeps the §A.14
+// scalar-pool body, whose extraction fix exists precisely because 22+
+// live vectors spill there.
+#[magetypes(+v4x, -v4, -v3, -neon, -wasm128, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_entry(
     token: Token,
@@ -1683,7 +1793,7 @@ fn dense_block_kernel_entry(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
-    dense_block_kernel_generic(
+    dense_block_kernel_generic::<_, true>(
         token,
         src,
         dst,
@@ -1695,6 +1805,101 @@ fn dense_block_kernel_entry(
         width,
         height,
         transducer_bank,
+    )
+}
+
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel_entry(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    dense_block_kernel_generic::<_, false>(
+        token,
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+    )
+}
+
+/// Test/measurement-only dispatch that FORCES the §A.14 scalar-pool body
+/// on every tier — the baseline side of the POOL_SIMD drift + timing
+/// comparisons (`pool_simd_drift_within_policy`, `v2_pool_simd_ab` bench).
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel_entry_pools_scalar(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    dense_block_kernel_generic::<_, false>(
+        token,
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+    )
+}
+
+/// Forced-scalar-pool sibling of [`dense_block_kernel`] (see
+/// [`dense_block_kernel_entry_pools_scalar`]).
+#[allow(clippy::too_many_arguments, dead_code)]
+fn dense_block_kernel_pools_scalar(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    incant!(
+        dense_block_kernel_entry_pools_scalar(
+            src,
+            dst,
+            mu1,
+            mu2,
+            ssq,
+            s12,
+            activity,
+            width,
+            height,
+            transducer_bank
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
     )
 }
 
@@ -4257,6 +4462,82 @@ mod tests {
                      pair={a:e} with_ref={b:e}"
                 );
             }
+        }
+    }
+
+    /// POOL_SIMD drift gate: the vectorized weighted-pool path (enabled on
+    /// the v4x tier) must stay within this module's documented 5e-4
+    /// relative tolerance of the §A.14 scalar-pool path — same
+    /// reassociation class as the phase-4 core-moment change. On hosts
+    /// where the active tier runs scalar pools anyway, both sides are
+    /// identical and the gate passes trivially.
+    #[test]
+    fn pool_simd_drift_within_policy() {
+        let (w, h) = (200usize, 136usize);
+        let src_px = textured_image(w, h, 0xD1FF);
+        let dst_px = quantize_distort(&src_px, w, h);
+
+        // Build real moment planes via the whole-image blur pass.
+        let source = RgbSlice::new(&src_px, w, h);
+        let distorted = RgbSlice::new(&dst_px, w, h);
+        let src_planes = crate::streaming::convert_source_to_xyb(&source, w, false);
+        let dst_planes = crate::streaming::convert_source_to_xyb(&distorted, w, false);
+        let mut scratch = ScratchV2Strip::new(w * h);
+        for ch in 0..3 {
+            run_blur_pass(&src_planes[ch], &dst_planes[ch], w, h, &mut scratch);
+            let n = w * h;
+            let a = dense_block_kernel(
+                &src_planes[ch],
+                &dst_planes[ch],
+                &scratch.mu1[..n],
+                &scratch.mu2[..n],
+                &scratch.ssq[..n],
+                &scratch.s12[..n],
+                &scratch.activity[..n],
+                w,
+                h,
+                true,
+            );
+            let b = dense_block_kernel_pools_scalar(
+                &src_planes[ch],
+                &dst_planes[ch],
+                &scratch.mu1[..n],
+                &scratch.mu2[..n],
+                &scratch.ssq[..n],
+                &scratch.s12[..n],
+                &scratch.activity[..n],
+                w,
+                h,
+                true,
+            );
+            let pools = [
+                ("mask_ssim", a.ws_mask_ssim, b.ws_mask_ssim),
+                ("mask_art", a.ws_mask_art, b.ws_mask_art),
+                ("mask_det", a.ws_mask_det, b.ws_mask_det),
+                ("mask_mse", a.ws_mask_mse, b.ws_mask_mse),
+                ("iw_ssim", a.ws_iw_ssim, b.ws_iw_ssim),
+                ("iw_art", a.ws_iw_art, b.ws_iw_art),
+                ("iw_det", a.ws_iw_det, b.ws_iw_det),
+                ("iw_mse", a.ws_iw_mse, b.ws_iw_mse),
+                ("peak_ssim", a.ws_peak_ssim, b.ws_peak_ssim),
+                ("peak_art", a.ws_peak_art, b.ws_peak_art),
+                ("peak_det", a.ws_peak_det, b.ws_peak_det),
+            ];
+            for (name, pa, pb) in pools {
+                for (part, va, vb) in [("num", pa.num, pb.num), ("den", pa.den, pb.den)] {
+                    let rel = (va - vb).abs() / vb.abs().max(1e-9);
+                    assert!(
+                        rel <= TOL,
+                        "ch{ch} pool {name}.{part}: rel drift {rel:e} \
+                         (simd={va:e} scalar={vb:e}) exceeds policy {TOL:e}"
+                    );
+                }
+            }
+            // Non-pool sums must be BIT-identical — POOL_SIMD touches
+            // nothing else.
+            assert_eq!(a.sum_d.to_bits(), b.sum_d.to_bits());
+            assert_eq!(a.sum_mse.to_bits(), b.sum_mse.to_bits());
+            assert_eq!(a.sum_pjnd.to_bits(), b.sum_pjnd.to_bits());
         }
     }
 
