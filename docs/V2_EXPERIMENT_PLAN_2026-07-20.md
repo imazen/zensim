@@ -19,6 +19,23 @@ zensim-side training/eval work.
 
 ## Datasets
 
+### ⇒ LIVE FILL STATUS (2026-07-22) — the fleet is filling T-big multi-codec NOW
+
+A **3-worker zenfleet** (`dev` + `tower-unraid` + `node2`, bucket `zentrain`, job-pool
+`s3://zentrain/jobs/_pool/runlist.tsv`, 54 tar-boxes) is grinding the bigcodec multi-codec
+720-feature backfill "to 100%" (concurrent zenmetrics session; DO NOT disrupt). Codecs in
+the pool: **zenjxl-lossy/VarDCT (24 boxes), zenjxl-modular (10), zenwebp (9), zenavif SDR
+(8), zenpng (2), +1** — the codecs the native `v2_ab_extract` couldn't decode, now done via
+the docker `jobexec` path (fetches R2 tars, decodes all codecs, emits 720). Source runs:
+`canonical/2026-06-27/zenjpeg_lossy/encodes` + `mandfix*` per-codec runs. This is T-big.
+- Note: **zenavif SDR is being feature-extracted** here — that is scoring EXISTING encodes,
+  distinct from the halted avif-**HDR datagen** ([[feedback_zenavif_in_flux_no_datagen]] is
+  about generating new avif-HDR, not extracting features on existing SDR encodes).
+- Already at 720 (done earlier): safesyn-JPEG (111k), T-cid201, KADID, TID, and the full
+  held-out set (CID22-49, AIC-3, AIC-4, KonJND-val, SDR25, CSIQ, LIVE).
+- The tower's enrollment + the 2.33× extractor perf win (ref-pyramid reuse, cached moments,
+  SIMD pools) landed 2026-07-20…22.
+
 ### Training (T)
 
 | id | corpus | pairs | codecs / distortions | target | 720 status |
