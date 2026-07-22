@@ -170,6 +170,37 @@ fn bench_extraction(suite: &mut Suite) {
                 });
             }
 
+            // Cached-moments steady state: reference pyramid AND ref-side
+            // blur moments (mu1 + activity) prepared once — per-pair work
+            // drops the mu1 V-blur + activity chain per channel-scale.
+            // Bit-identical to v2_bounded (test-gated).
+            {
+                let (rs, ds) = (Arc::clone(&rs), Arc::clone(&ds));
+                g.bench("v2_with_ref_moments_1thread", move |b| {
+                    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+                    let prepared = {
+                        let source = RgbSlice::new(&rs, size, size);
+                        Arc::new(z.prepare_v2_reference_with_moments(&source).unwrap())
+                    };
+                    let ds = Arc::clone(&ds);
+                    b.with_input(move || (Arc::clone(&prepared), Arc::clone(&ds), V2Scratch::new()))
+                        .run(move |(prepared, ds, mut scratch)| {
+                            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+                            let distorted = RgbSlice::new(&ds, size, size);
+                            let res = z
+                                .compute_v2_features_with_ref_and_scratch(
+                                    &prepared,
+                                    &distorted,
+                                    V2NewFeatureToggles::default(),
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            std::hint::black_box(res.features().len());
+                            (prepared, ds, scratch)
+                        })
+                });
+            }
+
             // The one-time reference-preparation cost (reflect-pad skip +
             // XYB convert + 3-level pyramid). Amortization math:
             // with_ref + prepare/N vs v2_bounded, N = variants per ref.

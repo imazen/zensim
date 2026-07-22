@@ -1082,6 +1082,170 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
     );
 }
 
+/// Strip-path blur pass when the reference-side moments (`mu1`,
+/// `activity`) come from a [`V2PreparedReference`] cache: fused H (all 4
+/// outputs — `mu1_h` is computed and discarded; a 3-output H variant is a
+/// known follow-up) + V-blur of the 3 distorted/joint planes only. The
+/// mu1 V-blur and the whole activity chain (abs-diff + 2-pass blur) are
+/// SKIPPED — their values are read from the cache instead, which was
+/// filled by replaying this exact strip walk (see
+/// [`compute_ref_moments_channel`]), so consumers see bit-identical
+/// inputs.
+fn run_blur_pass_strip_cached_ref(width: usize, height_local: usize, scratch: &mut ScratchV2Strip) {
+    let n = width * height_local;
+    let ScratchV2Strip {
+        src_wide,
+        dst_wide,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu2,
+        ssq,
+        s12,
+        ..
+    } = scratch;
+    crate::blur::fused_blur_h_ssim(
+        &src_wide[..n],
+        &dst_wide[..n],
+        &mut mu1_h[..n],
+        &mut mu2_h[..n],
+        &mut ssq_h[..n],
+        &mut s12_h[..n],
+        width,
+        height_local,
+        BLUR_RADIUS,
+    );
+    crate::blur::box_blur_v_from_copy(&mu2_h[..n], &mut mu2[..n], width, height_local, BLUR_RADIUS);
+    crate::blur::box_blur_v_from_copy(&ssq_h[..n], &mut ssq[..n], width, height_local, BLUR_RADIUS);
+    crate::blur::box_blur_v_from_copy(&s12_h[..n], &mut s12[..n], width, height_local, BLUR_RADIUS);
+}
+
+/// Fill one channel-scale's cached reference moments by REPLAYING the
+/// strip walk on `(src, src)`: same `gather_strip_halo` geometry, same
+/// `fused_blur_h_ssim` sliding-sum chains (its `sum_s`/mu1 accumulator
+/// reads ONLY the first input, so feeding `src` twice yields a `mu1_h`
+/// bit-identical to the pair path's — the other three outputs are
+/// discarded), same V-blur and activity functions. Bit-exactness of the
+/// cache is BY CONSTRUCTION, not by tolerance: every arithmetic op that
+/// produces a cached value is the same op, in the same order, on the same
+/// input as the per-pair kernel would have executed.
+fn compute_ref_moments_channel(
+    src: &[f32],
+    width: usize,
+    height: usize,
+    scratch: &mut ScratchV2Strip,
+) -> V2RefMoments {
+    let n = width * height;
+    let mut mu1_full = vec![0.0f32; n];
+    let mut act_full = vec![0.0f32; n];
+
+    // Mirror the (currently disabled) whole-image bypass: below the
+    // threshold the kernels blur the full plane directly, so the cache
+    // must too.
+    #[allow(clippy::absurd_extreme_comparisons)]
+    if height <= STRIP_BYPASS_HEIGHT {
+        run_blur_pass(src, src, width, height, scratch);
+        mu1_full.copy_from_slice(&scratch.mu1[..n]);
+        act_full.copy_from_slice(&scratch.activity[..n]);
+        return V2RefMoments {
+            mu1: mu1_full,
+            activity: act_full,
+        };
+    }
+
+    let mut y0 = 0usize;
+    while y0 < height {
+        let strip_h = STRIP_ROWS.min(height - y0);
+        let wide_h = strip_h + 2 * HALO_P;
+        let n_wide = width * wide_h;
+        gather_strip_halo(
+            src,
+            width,
+            height,
+            y0,
+            wide_h,
+            HALO_P,
+            &mut scratch.src_wide[..n_wide],
+        );
+        {
+            let ScratchV2Strip {
+                src_wide,
+                mu1_h,
+                mu2_h,
+                ssq_h,
+                s12_h,
+                mu1,
+                abs_src,
+                activity_tmp,
+                activity,
+                ..
+            } = scratch;
+            crate::blur::fused_blur_h_ssim(
+                &src_wide[..n_wide],
+                &src_wide[..n_wide],
+                &mut mu1_h[..n_wide],
+                &mut mu2_h[..n_wide],
+                &mut ssq_h[..n_wide],
+                &mut s12_h[..n_wide],
+                width,
+                wide_h,
+                BLUR_RADIUS,
+            );
+            crate::blur::box_blur_v_from_copy(
+                &mu1_h[..n_wide],
+                &mut mu1[..n_wide],
+                width,
+                wide_h,
+                BLUR_RADIUS,
+            );
+            crate::simd_ops::abs_diff_into(
+                &src_wide[..n_wide],
+                &mu1[..n_wide],
+                &mut abs_src[..n_wide],
+            );
+            crate::blur::box_blur_1pass_into(
+                &abs_src[..n_wide],
+                &mut activity[..n_wide],
+                &mut activity_tmp[..n_wide],
+                width,
+                wide_h,
+                BLUR_RADIUS,
+            );
+        }
+        let off = HALO_P * width;
+        let strip_n = width * strip_h;
+        let out_base = y0 * width;
+        mu1_full[out_base..out_base + strip_n].copy_from_slice(&scratch.mu1[off..off + strip_n]);
+        act_full[out_base..out_base + strip_n]
+            .copy_from_slice(&scratch.activity[off..off + strip_n]);
+        y0 += strip_h;
+    }
+
+    V2RefMoments {
+        mu1: mu1_full,
+        activity: act_full,
+    }
+}
+
+/// Build the full per-scale/per-channel moment cache for a prepared
+/// reference (see [`V2PreparedReference::moments`]).
+fn fill_ref_moments(scales: &[([Vec<f32>; 3], usize, usize)]) -> Vec<[V2RefMoments; 3]> {
+    let (_, w0, h0) = &scales[0];
+    #[allow(clippy::absurd_extreme_comparisons, clippy::unnecessary_min_or_max)]
+    let bypass_rows = (*h0).min(STRIP_BYPASS_HEIGHT);
+    let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P).max(bypass_rows);
+    let mut scratch = ScratchV2Strip::new(strip_max_n);
+    scales
+        .iter()
+        .map(|(planes, width, height)| {
+            std::array::from_fn(|ch| {
+                compute_ref_moments_channel(&planes[ch], *width, *height, &mut scratch)
+            })
+        })
+        .collect()
+}
+
 /// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
 /// fused H-blur + 4x V-blur + activity sequence, over explicit buffers.
 #[allow(clippy::too_many_arguments)]
@@ -1871,12 +2035,21 @@ fn compute_channel_scale_v2(
     width: usize,
     height: usize,
     toggles: V2NewFeatureToggles,
+    moments: Option<(&[f32], &[f32])>,
     scratch: &mut ScratchV2Strip,
     out: &mut [f64],
 ) -> (f64, f64) {
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
     assert_eq!(dst.len(), n, "dst plane length must be width*height");
+    if let Some((mu1_full, act_full)) = moments {
+        assert_eq!(mu1_full.len(), n, "cached mu1 plane must be width*height");
+        assert_eq!(
+            act_full.len(),
+            n,
+            "cached activity plane must be width*height"
+        );
+    }
     assert_eq!(
         out.len(),
         FEATURES_PER_CHANNEL_V2_TOTAL,
@@ -1935,22 +2108,37 @@ fn compute_channel_scale_v2(
 
         // --- Blur pass on the strip+halo buffer only (§A.15's actual
         //     memory-traffic reduction: `wide_h` is O(STRIP_ROWS), not
-        //     O(height)). `run_blur_pass_strip` reads the halo buffers
-        //     straight out of `scratch` via disjoint field borrows. ---
-        run_blur_pass_strip(width, wide_h, scratch);
+        //     O(height)). With cached reference moments the mu1 V-blur +
+        //     activity chain drop out of the per-pair cost entirely. ---
+        if moments.is_some() {
+            run_blur_pass_strip_cached_ref(width, wide_h, scratch);
+        } else {
+            run_blur_pass_strip(width, wide_h, scratch);
+        }
 
         // --- Slice down to the strip's own real rows (buffer-local
         //     offset HALO_P, matching `gather_strip_halo`'s convention:
-        //     local row `HALO_P + k` is global row `y0 + k`). ---
+        //     local row `HALO_P + k` is global row `y0 + k`). Cached
+        //     reference moments are FULL-plane buffers, indexed by global
+        //     row (`y0 * width`), not halo-local offset. ---
         let off = HALO_P * width;
         let strip_n = width * strip_h;
+        let out_base = y0 * width;
         let src_strip = &scratch.src_wide[off..off + strip_n];
         let dst_strip = &scratch.dst_wide[off..off + strip_n];
-        let mu1_strip = &scratch.mu1[off..off + strip_n];
+        let (mu1_strip, activity_strip) = match moments {
+            Some((mu1_full, act_full)) => (
+                &mu1_full[out_base..out_base + strip_n],
+                &act_full[out_base..out_base + strip_n],
+            ),
+            None => (
+                &scratch.mu1[off..off + strip_n],
+                &scratch.activity[off..off + strip_n],
+            ),
+        };
         let mu2_strip = &scratch.mu2[off..off + strip_n];
         let ssq_strip = &scratch.ssq[off..off + strip_n];
         let s12_strip = &scratch.s12[off..off + strip_n];
-        let activity_strip = &scratch.activity[off..off + strip_n];
 
         let strip_dense = dense_block_kernel(
             src_strip,
@@ -2492,10 +2680,25 @@ pub struct V2PreparedReference {
     /// Per pyramid scale: 3 XYB planes at that scale's exact
     /// `(width, height)` — same layout the pair path materializes.
     scales: Vec<([Vec<f32>; 3], usize, usize)>,
+    /// Optional cached reference-side blur moments (`mu1` = blurred ref,
+    /// `activity` = blurred |ref − mu1|), per scale per channel, at full
+    /// plane size. Filled by REPLAYING the strip walk (same halo gather,
+    /// same sliding-sum chain starts), so the cached values are
+    /// bit-identical to what the kernels would recompute — see
+    /// [`fill_ref_moments`]. When present, each per-pair call skips the
+    /// mu1 V-blur and the entire activity chain (abs-diff + 2-pass blur)
+    /// per channel-scale.
+    moments: Option<Vec<[V2RefMoments; 3]>>,
     /// Original (pre reflect-pad) source dimensions; distorted images are
     /// validated against these, exactly like `validate_pair`.
     orig_width: usize,
     orig_height: usize,
+}
+
+/// One channel-scale's cached reference-side blur moments (full-plane).
+struct V2RefMoments {
+    mu1: Vec<f32>,
+    activity: Vec<f32>,
 }
 
 impl V2PreparedReference {
@@ -2508,6 +2711,11 @@ impl V2PreparedReference {
     pub fn height(&self) -> usize {
         self.orig_height
     }
+    /// Whether reference-side blur moments are cached (see
+    /// [`crate::Zensim::prepare_v2_reference_with_moments`]).
+    pub fn has_cached_moments(&self) -> bool {
+        self.moments.is_some()
+    }
 }
 
 /// Build a [`V2PreparedReference`]: validate, reflect-pad if sub-64px
@@ -2518,6 +2726,7 @@ pub(crate) fn prepare_v2_reference_impl(
     source: &impl ImageSource,
     max_pixels: Option<usize>,
     parallel: bool,
+    cache_moments: bool,
 ) -> Result<V2PreparedReference, ZensimError> {
     if source.width() == 0 || source.height() == 0 {
         return Err(ZensimError::ImageTooSmall);
@@ -2533,8 +2742,10 @@ pub(crate) fn prepare_v2_reference_impl(
     } else {
         build_v2_ref_scales(source, parallel)
     };
+    let moments = cache_moments.then(|| fill_ref_moments(&scales));
     Ok(V2PreparedReference {
         scales,
+        moments,
         orig_width,
         orig_height,
     })
@@ -2627,7 +2838,7 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
 ) -> Result<ZensimV2Result, ZensimError> {
     crate::metric::validate_pair(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
-    let prepared = prepare_v2_reference_impl(source, max_pixels, parallel)?;
+    let prepared = prepare_v2_reference_impl(source, max_pixels, parallel, false)?;
     let mut scratch = V2Scratch::new();
     compute_v2_features_with_ref_impl(
         &prepared,
@@ -2729,6 +2940,11 @@ pub(crate) fn compute_v2_features_with_ref_impl(
             (width, height),
             "prepared reference scale dims must track the distorted pyramid walk"
         );
+        // Cached reference-side moments for this scale (if prepared with
+        // them): per-channel (mu1, activity) full planes.
+        let moments_scale = prepared.moments.as_ref().map(|m| &m[scale]);
+        let moments_for =
+            |ch: usize| moments_scale.map(|ms| (&ms[ch].mu1[..], &ms[ch].activity[..]));
 
         // Each channel's compute is fully independent WITHIN a scale (only
         // `prev_grad[ch]` from the SAME channel's earlier scale is read,
@@ -2757,6 +2973,7 @@ pub(crate) fn compute_v2_features_with_ref_impl(
                         width,
                         height,
                         toggles,
+                        moments_for(ch),
                         scr,
                         out,
                     );
@@ -2783,6 +3000,7 @@ pub(crate) fn compute_v2_features_with_ref_impl(
                     width,
                     height,
                     toggles,
+                    moments_for(ch),
                     &mut scratch[ch],
                     out,
                 );
@@ -3710,7 +3928,16 @@ mod tests {
         let max_wide_h = STRIP_ROWS + 2 * HALO_P;
         let mut scratch = ScratchV2Strip::new(width * max_wide_h);
         let mut feat = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
-        compute_channel_scale_v2(&src, &dst, width, height, toggles, &mut scratch, &mut feat);
+        compute_channel_scale_v2(
+            &src,
+            &dst,
+            width,
+            height,
+            toggles,
+            None,
+            &mut scratch,
+            &mut feat,
+        );
 
         // --- Diffmap under test: weight 1.0 on every spatialized family,
         //     0.0 (excluded) on everything else. ---
@@ -3850,7 +4077,7 @@ mod tests {
                 .expect("pair path computes");
 
             let prepared =
-                prepare_v2_reference_impl(&source, None, false).expect("prepare computes");
+                prepare_v2_reference_impl(&source, None, false, false).expect("prepare computes");
             let mut scratch = V2Scratch::new();
             let with_ref = compute_v2_features_with_ref_impl(
                 &prepared,
@@ -3908,7 +4135,7 @@ mod tests {
                 compute_v2_features_impl_with_toggles(&source, &distorted, None, false, toggles)
                     .expect("pair path computes");
             let prepared =
-                prepare_v2_reference_impl(&source, None, false).expect("prepare computes");
+                prepare_v2_reference_impl(&source, None, false, false).expect("prepare computes");
             let mut scratch = V2Scratch::new();
             let with_ref = compute_v2_features_with_ref_impl(
                 &prepared,
@@ -3952,7 +4179,7 @@ mod tests {
             let source = RgbSlice::new(&src, w, h);
             let distorted = RgbSlice::new(&dst, w, h);
             let prepared =
-                prepare_v2_reference_impl(&source, None, false).expect("prepare computes");
+                prepare_v2_reference_impl(&source, None, false, false).expect("prepare computes");
 
             let mut fresh = V2Scratch::new();
             let a = compute_v2_features_with_ref_impl(
@@ -3982,13 +4209,65 @@ mod tests {
         }
     }
 
+    /// The cached-moments prepared path (mu1 + activity read from the
+    /// reference cache; V-blur + activity chain skipped per pair) must ALSO
+    /// be bit-identical to the pair path — the cache is filled by replaying
+    /// the exact strip walk, so this gate holds by construction and this
+    /// test enforces it stays that way. Multi-strip + odd + pad sizes.
+    #[test]
+    fn prepared_ref_with_moments_bit_identical_to_pair_path() {
+        for &(w, h) in &[
+            (64usize, 64usize),
+            (96, 80),
+            (200, 136),
+            (65, 129),
+            (40, 30),
+        ] {
+            let src = textured_image(w, h, 0xC0DE);
+            let dst = quantize_distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+
+            let pair = compute_v2_features_impl(&source, &distorted, None, false)
+                .expect("pair path computes");
+
+            let prepared = prepare_v2_reference_impl(&source, None, false, true)
+                .expect("prepare with moments computes");
+            assert!(prepared.has_cached_moments());
+            let mut scratch = V2Scratch::new();
+            let with_ref = compute_v2_features_with_ref_impl(
+                &prepared,
+                &distorted,
+                None,
+                false,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .expect("with_ref computes");
+
+            for (i, (a, b)) in pair
+                .features()
+                .iter()
+                .zip(with_ref.features().iter())
+                .enumerate()
+            {
+                assert!(
+                    a.to_bits() == b.to_bits(),
+                    "{w}x{h}: feature {i} diverged under cached moments: \
+                     pair={a:e} with_ref={b:e}"
+                );
+            }
+        }
+    }
+
     /// Dimension mismatch against the prepared reference is rejected the
     /// same way `validate_pair` rejects it on the pair path.
     #[test]
     fn prepared_ref_rejects_dim_mismatch() {
         let src = textured_image(96, 96, 3);
         let source = RgbSlice::new(&src, 96, 96);
-        let prepared = prepare_v2_reference_impl(&source, None, false).expect("prepare computes");
+        let prepared =
+            prepare_v2_reference_impl(&source, None, false, false).expect("prepare computes");
 
         let other = textured_image(64, 96, 4);
         let distorted = RgbSlice::new(&other, 64, 96);

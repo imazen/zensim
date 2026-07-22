@@ -1309,7 +1309,27 @@ impl Zensim {
         &self,
         source: &impl ImageSource,
     ) -> Result<crate::feature_v2::V2PreparedReference, ZensimError> {
-        crate::feature_v2::prepare_v2_reference_impl(source, self.max_pixels, self.parallel)
+        crate::feature_v2::prepare_v2_reference_impl(source, self.max_pixels, self.parallel, false)
+    }
+
+    /// Like [`Self::prepare_v2_reference`], but ALSO caches the
+    /// reference-side blur moments (`mu1` + activity/masking planes) at
+    /// every scale, so each subsequent
+    /// [`Self::compute_v2_features_with_ref`] call skips the reference
+    /// V-blur and the whole activity chain per channel-scale. Costs ~2x
+    /// the prepare time and ~2x the prepared memory (still amortized to
+    /// ~zero across a sweep's variants); features remain bit-identical —
+    /// the cache is filled by replaying the exact per-strip kernel walk.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::prepare_v2_reference`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn prepare_v2_reference_with_moments(
+        &self,
+        source: &impl ImageSource,
+    ) -> Result<crate::feature_v2::V2PreparedReference, ZensimError> {
+        crate::feature_v2::prepare_v2_reference_impl(source, self.max_pixels, self.parallel, true)
     }
 
     /// Compute v2 features for one distorted image against a prepared

@@ -23,6 +23,13 @@
 //! is irrelevant to this experiment: the v1 and v2 blocks are on IDENTICAL
 //! pixels, which is what the append-only comparison needs.
 //!
+//! Ref-reuse pass: pairs are GROUPED BY REFERENCE (default) — each group
+//! decodes its reference once and prepares the v2 reference pyramid once
+//! (`Zensim::prepare_v2_reference`), so per-pair work is distorted-side
+//! only. Output rows keep the input TSV's order and are byte-identical to
+//! the ungrouped path (`ZENSIM_AB_GROUPED=0`, the pre-reuse flow kept for
+//! A/B timing).
+//!
 //! ```sh
 //! cargo run --release -p zensim --features feature-regime-v2,threads \
 //!   --example v2_ab_extract -- pairs.tsv ext_out.csv
@@ -31,9 +38,12 @@
 #[path = "support/zen_io.rs"]
 mod zen_io;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rayon::prelude::*;
+use zensim::feature_v2::{V2NewFeatureToggles, V2Scratch};
 use zensim::{RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config};
 
 struct Pair {
@@ -86,71 +96,204 @@ fn main() {
         _ => (true, true),
     };
 
-    let mut n_feat_seen = std::sync::atomic::AtomicUsize::new(0);
-    let rows: Vec<String> = pairs
-        .par_iter()
-        .enumerate()
-        .filter_map(|(i, p)| {
-            if i % 1000 == 0 {
-                eprintln!("progress: {i}/{}", pairs.len());
-            }
-            if !p.ref_path.exists() || !p.dist_path.exists() {
-                eprintln!("SKIP missing: {:?} / {:?}", p.ref_path, p.dist_path);
-                return None;
-            }
-            let (r_px, rw, rh) = zen_io::decode_rgb8(&p.ref_path);
-            let (d_px, dw, dh) = zen_io::decode_rgb8(&p.dist_path);
-            if (rw, rh) != (dw, dh) {
-                eprintln!("SKIP dim mismatch: {:?}", p.dist_path);
-                return None;
-            }
-            let mut combined: Vec<f64> = Vec::new();
-            // FROZEN v1-372 block (extended + iw = 372 features), same config
-            // extract_features_372col uses.
-            if do_v1 {
-                let mut cfg = ZensimConfig::default();
-                cfg.extended_features = true;
-                cfg.compute_iw_features = true;
-                let v1 = match compute_zensim_with_config(&r_px, &d_px, rw, rh, cfg) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("SKIP v1 compute error {:?}: {e:?}", p.dist_path);
-                        return None;
-                    }
-                };
-                combined.extend_from_slice(v1.features());
-            }
-            // v2-348 block, same pixels.
-            if do_v2 {
-                let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
-                let v2 = match z.compute_v2_features(
-                    &RgbSlice::new(&r_px, rw, rh),
-                    &RgbSlice::new(&d_px, dw, dh),
-                ) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("SKIP v2 compute error {:?}: {e:?}", p.dist_path);
-                        return None;
-                    }
-                };
-                combined.extend_from_slice(v2.features());
-            }
-            n_feat_seen.store(combined.len(), std::sync::atomic::Ordering::Relaxed);
-            let base = p
-                .ref_path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let mut row = format!("{base},{}", p.human_score);
-            for v in &combined {
-                row.push(',');
-                row.push_str(&format!("{v}"));
-            }
-            Some(row)
-        })
-        .collect();
+    // ZENSIM_AB_GROUPED: "1"/unset (default) = ref-grouped extraction with
+    // prepared-reference reuse; "0" = the original per-pair flow (each pair
+    // re-decodes its reference and rebuilds both ref pyramids) — kept for
+    // A/B timing of the reuse win itself. Both produce byte-identical CSVs.
+    let grouped = std::env::var("ZENSIM_AB_GROUPED")
+        .map(|v| v != "0")
+        .unwrap_or(true);
 
-    let n_feat = *n_feat_seen.get_mut();
+    let n_feat_seen = AtomicUsize::new(0);
+    let n_done = AtomicUsize::new(0);
+    let progress = |k: usize| {
+        if k % 1000 == 0 {
+            eprintln!("progress: {k}/{}", pairs.len());
+        }
+    };
+
+    // Per-pair body shared by both flows: decode the distorted image, run
+    // the requested blocks, and render the CSV row. `prepared`/`scratch`
+    // are Some only on the grouped path.
+    let score_pair = |p: &Pair,
+                      r_px: &[[u8; 3]],
+                      rw: usize,
+                      rh: usize,
+                      prepared: Option<&zensim::feature_v2::V2PreparedReference>,
+                      scratch: &mut V2Scratch|
+     -> Option<String> {
+        if !p.dist_path.exists() {
+            eprintln!("SKIP missing: {:?} / {:?}", p.ref_path, p.dist_path);
+            return None;
+        }
+        let (d_px, dw, dh) = zen_io::decode_rgb8(&p.dist_path);
+        if (rw, rh) != (dw, dh) {
+            eprintln!("SKIP dim mismatch: {:?}", p.dist_path);
+            return None;
+        }
+        let mut combined: Vec<f64> = Vec::new();
+        // FROZEN v1-372 block (extended + iw = 372 features), same config
+        // extract_features_372col uses. Inner multithreading OFF — the
+        // outer rayon loop already saturates cores (thread count never
+        // changes v1's output bytes, only speed).
+        if do_v1 {
+            let mut cfg = ZensimConfig::default();
+            cfg.extended_features = true;
+            cfg.compute_iw_features = true;
+            cfg.allow_multithreading = false;
+            let v1 = match compute_zensim_with_config(r_px, &d_px, rw, rh, cfg) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("SKIP v1 compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            };
+            combined.extend_from_slice(v1.features());
+        }
+        // v2-348 block, same pixels — through the prepared reference when
+        // the grouped path supplies one (bit-identical either way).
+        if do_v2 {
+            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+            let distorted = RgbSlice::new(&d_px, dw, dh);
+            let v2 = match prepared {
+                Some(pre) => z.compute_v2_features_with_ref_and_scratch(
+                    pre,
+                    &distorted,
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                ),
+                None => z.compute_v2_features(&RgbSlice::new(r_px, rw, rh), &distorted),
+            };
+            let v2 = match v2 {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("SKIP v2 compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            };
+            combined.extend_from_slice(v2.features());
+        }
+        n_feat_seen.store(combined.len(), Ordering::Relaxed);
+        let base = p
+            .ref_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut row = format!("{base},{}", p.human_score);
+        for v in &combined {
+            row.push(',');
+            row.push_str(&format!("{v}"));
+        }
+        Some(row)
+    };
+
+    let rows: Vec<String> = if grouped {
+        // Group pair indices by reference path, preserving first-seen
+        // order; rows are re-emitted in input order below.
+        let mut group_of: HashMap<PathBuf, usize> = HashMap::new();
+        let mut groups: Vec<(PathBuf, Vec<usize>)> = Vec::new();
+        for (i, p) in pairs.iter().enumerate() {
+            let gid = *group_of.entry(p.ref_path.clone()).or_insert_with(|| {
+                groups.push((p.ref_path.clone(), Vec::new()));
+                groups.len() - 1
+            });
+            groups[gid].1.push(i);
+        }
+        eprintln!(
+            "{} groups ({}x mean reuse) — ref-grouped extraction",
+            groups.len(),
+            pairs.len() / groups.len().max(1)
+        );
+
+        // LPT scheduling: a group runs sequentially on one rayon worker, so
+        // without ordering the biggest (large-image × many-variant) groups
+        // land last and straggle the whole run. Sort by estimated cost
+        // (variant count × reference file size ∝ pixels) descending; row
+        // order is restored by the index sort below either way.
+        groups.sort_by_key(|(ref_path, idxs)| {
+            std::cmp::Reverse(
+                idxs.len() as u64 * std::fs::metadata(ref_path).map(|m| m.len()).unwrap_or(1),
+            )
+        });
+
+        let mut indexed: Vec<(usize, String)> = groups
+            .par_iter()
+            .map(|(ref_path, idxs)| -> Vec<(usize, String)> {
+                if !ref_path.exists() {
+                    for &i in idxs {
+                        eprintln!(
+                            "SKIP missing: {:?} / {:?}",
+                            pairs[i].ref_path, pairs[i].dist_path
+                        );
+                        progress(n_done.fetch_add(1, Ordering::Relaxed));
+                    }
+                    return Vec::new();
+                }
+                let (r_px, rw, rh) = zen_io::decode_rgb8(ref_path);
+                // Prepare the v2 reference pyramid ONCE per group —
+                // with cached ref-side moments unless ZENSIM_AB_MOMENTS=0
+                // (both bit-identical; moments trade ~2x prepared memory
+                // for skipping the ref V-blur + activity chain per pair).
+                let want_moments = std::env::var("ZENSIM_AB_MOMENTS")
+                    .map(|v| v != "0")
+                    .unwrap_or(true);
+                let prepared = if do_v2 {
+                    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+                    let r = if want_moments {
+                        z.prepare_v2_reference_with_moments(&RgbSlice::new(&r_px, rw, rh))
+                    } else {
+                        z.prepare_v2_reference(&RgbSlice::new(&r_px, rw, rh))
+                    };
+                    match r {
+                        Ok(p) => Some(p),
+                        Err(e) => {
+                            for &i in idxs {
+                                eprintln!("SKIP v2 prepare error {:?}: {e:?}", pairs[i].dist_path);
+                                progress(n_done.fetch_add(1, Ordering::Relaxed));
+                            }
+                            return Vec::new();
+                        }
+                    }
+                } else {
+                    None
+                };
+                // Variants fan out in parallel WITHIN the group too (rayon
+                // work-stealing handles the nesting): corpora with few
+                // references and many variants — the sweep shape — would
+                // otherwise be wall-bounded by the largest single group.
+                // The prepared pyramid + decoded reference are shared by
+                // `&`; each rayon split gets its own `V2Scratch`.
+                idxs.par_iter()
+                    .map_init(V2Scratch::new, |scratch, &i| {
+                        let row = score_pair(&pairs[i], &r_px, rw, rh, prepared.as_ref(), scratch)
+                            .map(|row| (i, row));
+                        progress(n_done.fetch_add(1, Ordering::Relaxed));
+                        row
+                    })
+                    .flatten()
+                    .collect()
+            })
+            .flatten()
+            .collect();
+        indexed.sort_unstable_by_key(|(i, _)| *i);
+        indexed.into_iter().map(|(_, row)| row).collect()
+    } else {
+        pairs
+            .par_iter()
+            .filter_map(|p| {
+                progress(n_done.fetch_add(1, Ordering::Relaxed));
+                if !p.ref_path.exists() {
+                    eprintln!("SKIP missing: {:?} / {:?}", p.ref_path, p.dist_path);
+                    return None;
+                }
+                let (r_px, rw, rh) = zen_io::decode_rgb8(&p.ref_path);
+                let mut scratch = V2Scratch::new();
+                score_pair(p, &r_px, rw, rh, None, &mut scratch)
+            })
+            .collect()
+    };
+
+    let n_feat = n_feat_seen.load(Ordering::Relaxed);
     let mut out = String::from("ref_basename,human_score");
     for k in 0..n_feat {
         out.push_str(&format!(",f{k}"));
