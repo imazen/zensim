@@ -130,9 +130,17 @@ def bounded_map(executor, fn, items, in_flight):
 
 
 def cmd_scan_ledgers(args):
-    with open(args.target_stems_json) as f:
-        target_stems = set(json.load(f))
-    print(f"{len(target_stems)} target stems", file=sys.stderr)
+    # --all: no stem filter — consolidate EVERY done ledger row (the T-big
+    # full-merge path). Otherwise filter to the target stems as before.
+    target_stems = None
+    if not args.all:
+        if not args.target_stems_json:
+            raise SystemExit("scan-ledgers: pass --target-stems-json or --all")
+        with open(args.target_stems_json) as f:
+            target_stems = set(json.load(f))
+        print(f"{len(target_stems)} target stems", file=sys.stderr)
+    else:
+        print("scan mode: ALL stems (no target filter)", file=sys.stderr)
 
     cols = ["image_path", "codec", "q", "knob_tuple_json", "output_sha", "status"]
     pools = sorted(
@@ -152,7 +160,10 @@ def cmd_scan_ledgers(args):
                 continue
             df = batch.to_pandas()
             df["_stem"] = df["image_path"].map(refstem)
-            m = df[df["_stem"].isin(target_stems) & (df["status"] == "done")]
+            if target_stems is None:
+                m = df[df["status"] == "done"]
+            else:
+                m = df[df["_stem"].isin(target_stems) & (df["status"] == "done")]
             if len(m):
                 m = m.copy()
                 m["pool"] = pool
@@ -284,6 +295,175 @@ def _records_to_table(records):
     for i in range(720):
         cols[f"f{i}"] = pa.array(feats[:, i], type=pa.float64())
     return pa.table(cols)
+
+
+def _records_to_table_full(records):
+    """fetch-all row shape: identity (image_path/codec/encode_sha/pool) +
+    optional zensim_score + f0..f719. Separate from `_records_to_table` so
+    the eval fetch paths keep their exact schema."""
+    cols = {
+        "image_path": pa.array([r["image_path"] for r in records]),
+        "codec": pa.array([r["codec"] for r in records]),
+        "encode_sha": pa.array([r.get("encode_sha", "") for r in records]),
+        "pool": pa.array([r["_pool"] for r in records]),
+        "zensim_score": pa.array(
+            [r.get("zensim_score") for r in records], type=pa.float64()
+        ),
+    }
+    feats = np.array([r["features"] for r in records], dtype=np.float64)
+    for i in range(720):
+        cols[f"f{i}"] = pa.array(feats[:, i], type=pa.float64())
+    return pa.table(cols)
+
+
+def cmd_fetch_all(args):
+    """Streaming full merge of EVERY feature record: fetch each distinct
+    (pool, output_sha) blob, keep kind=feature/regime=v2-ab/len=720 rows,
+    dedupe on encode_sha ACROSS pools (poisoned early pools produce only
+    error rows, which drop at parse; codec-retry pools like bf-zjl2 then
+    supply the real rows — first good record per encode_sha wins, dupes
+    counted), and append to ONE zstd parquet via row-group streaming
+    (constant memory — `fetch-blobs`'s all-in-RAM checkpoint rewrite is
+    exactly what this mode exists to avoid at ~1M-blob scale).
+
+    Resume: flushed blobs are logged to `<out>.fetched`; rerunning skips
+    them (a crash loses only the unflushed buffer, which refetches)."""
+    import boto3
+    from botocore.config import Config
+
+    with open(os.path.expanduser(args.r2_credentials)) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("export "):
+                line = line[len("export "):]
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k, v.strip('"'))
+
+    endpoint = f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        config=Config(max_pool_connections=args.workers, retries={"max_attempts": 3}),
+    )
+
+    df = pd.read_parquet(args.matched)
+    if args.exclude_pool:
+        before = len(df)
+        df = df[~df["pool"].isin(set(args.exclude_pool))]
+        print(f"excluded pools {args.exclude_pool}: {before - len(df)} rows dropped", file=sys.stderr)
+    todo = df.drop_duplicates(subset=["pool", "output_sha"])[["pool", "output_sha"]]
+
+    fetched_log = args.out + ".fetched"
+    already = set()
+    if os.path.exists(fetched_log):
+        with open(fetched_log) as f:
+            already = {line.strip() for line in f if line.strip()}
+        print(f"resume: {len(already)} blobs already flushed", file=sys.stderr)
+    items = [
+        (p, s) for p, s in zip(todo["pool"], todo["output_sha"]) if f"{p}/{s}" not in already
+    ]
+    print(
+        f"{len(items)} blobs to fetch ({len(todo)} total distinct (pool, output_sha))",
+        file=sys.stderr,
+    )
+
+    def fetch_one(pool, sha):
+        try:
+            obj = s3.get_object(Bucket=args.bucket, Key=f"jobs/{pool}/blobs/{sha}")
+            body = obj["Body"].read()
+        except Exception:
+            return (pool, sha, {"fetch_error": 1}, [])
+        counts = {}
+        ok = []
+        for line in body.strip().split(b"\n"):
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                counts["json_error"] = counts.get("json_error", 0) + 1
+                continue
+            if rec.get("kind") != "feature":
+                k = "error_row" if rec.get("error") else f"kind_{rec.get('kind', 'unknown')}"
+                counts[k] = counts.get(k, 0) + 1
+                continue
+            if rec.get("regime") != "v2-ab":
+                counts[f"regime_{rec.get('regime')}"] = counts.get(f"regime_{rec.get('regime')}", 0) + 1
+                continue
+            feats = rec.get("features")
+            if not isinstance(feats, list) or len(feats) != 720:
+                counts["bad_feature_len"] = counts.get("bad_feature_len", 0) + 1
+                continue
+            counts["ok"] = counts.get("ok", 0) + 1
+            rec["_pool"] = pool
+            ok.append(rec)
+        return (pool, sha, counts, ok)
+
+    counts = {}
+    per_pool_ok = {}
+    seen = set()
+    dupes = 0
+    buffer = []
+    buffer_blobs = []
+    writer = None
+    rows_written = 0
+    t0 = time.time()
+    n_done = 0
+
+    def flush():
+        nonlocal writer, rows_written, buffer, buffer_blobs
+        if buffer:
+            tbl = _records_to_table_full(buffer)
+            if writer is None:
+                writer = pq.ParquetWriter(args.out, tbl.schema, compression="zstd")
+            writer.write_table(tbl)
+            rows_written += len(buffer)
+            buffer = []
+        if buffer_blobs:
+            with open(fetched_log, "a") as f:
+                for b in buffer_blobs:
+                    f.write(b + "\n")
+            buffer_blobs = []
+
+    with ThreadPoolExecutor(max_workers=args.workers) as ex:
+        for pool, sha, blob_counts, ok in bounded_map(
+            ex, lambda ps: fetch_one(ps[0], ps[1]), items, in_flight=args.workers * 4
+        ):
+            for k, v in blob_counts.items():
+                counts[k] = counts.get(k, 0) + v
+            if blob_counts.get("ok"):
+                per_pool_ok[pool] = per_pool_ok.get(pool, 0) + blob_counts["ok"]
+            for rec in ok:
+                key = rec.get("encode_sha", "")
+                if key in seen:
+                    dupes += 1
+                    continue
+                seen.add(key)
+                buffer.append(rec)
+            buffer_blobs.append(f"{pool}/{sha}")
+            n_done += 1
+            if len(buffer) >= args.rows_per_group:
+                flush()
+            if n_done % args.checkpoint == 0:
+                rate = n_done / max(time.time() - t0, 1e-9)
+                eta = (len(items) - n_done) / max(rate, 1e-9) / 60
+                print(
+                    f"[{n_done}/{len(items)}] rate={rate:.1f} blobs/s eta={eta:.0f}m "
+                    f"rows={rows_written + len(buffer)} dupes={dupes} counts={counts}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+    flush()
+    if writer is not None:
+        writer.close()
+    print(f"\nFINAL: {rows_written} rows -> {args.out}", file=sys.stderr)
+    print(f"dupes (same encode_sha, cross re-run/pool): {dupes}", file=sys.stderr)
+    print(f"status counts: {counts}", file=sys.stderr)
+    print("per-pool ok rows:", json.dumps(per_pool_ok, indent=0, sort_keys=True), file=sys.stderr)
 
 
 ROUND = 6
@@ -515,7 +695,8 @@ def main():
 
     s1 = sub.add_parser("scan-ledgers")
     s1.add_argument("--ledgers-dir", required=True)
-    s1.add_argument("--target-stems-json", required=True)
+    s1.add_argument("--target-stems-json")
+    s1.add_argument("--all", action="store_true", help="no stem filter — every done row (T-big full merge)")
     s1.add_argument("--out", required=True)
     s1.set_defaults(func=cmd_scan_ledgers)
 
@@ -542,6 +723,20 @@ def main():
     s3_.add_argument("--eval-372", required=True)
     s3_.add_argument("--out", required=True)
     s3_.set_defaults(func=cmd_join)
+
+    s5_ = sub.add_parser(
+        "fetch-all",
+        help="streaming FULL merge: every feature record -> one zstd parquet (T-big write-back)",
+    )
+    s5_.add_argument("--matched", required=True)
+    s5_.add_argument("--bucket", default="zentrain")
+    s5_.add_argument("--out", required=True)
+    s5_.add_argument("--workers", type=int, default=96)
+    s5_.add_argument("--checkpoint", type=int, default=5000)
+    s5_.add_argument("--rows-per-group", type=int, default=50000)
+    s5_.add_argument("--exclude-pool", action="append")
+    s5_.add_argument("--r2-credentials", default="~/.config/cloudflare/r2-credentials")
+    s5_.set_defaults(func=cmd_fetch_all)
 
     s4 = sub.add_parser("fetch-and-match", help="RECOMMENDED: fuses fetch-blobs+join, bounded memory")
     s4.add_argument("--matched", required=True)
