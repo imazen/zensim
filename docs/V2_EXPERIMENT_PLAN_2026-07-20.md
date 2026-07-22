@@ -33,6 +33,15 @@ the docker `jobexec` path (fetches R2 tars, decodes all codecs, emits 720). Sour
   about generating new avif-HDR, not extracting features on existing SDR encodes).
 - Already at 720 (done earlier): safesyn-JPEG (111k), T-cid201, KADID, TID, and the full
   held-out set (CID22-49, AIC-3, AIC-4, KonJND-val, SDR25, CSIQ, LIVE).
+- **CONSOLIDATED 2026-07-22:** all 11 local-leg datasets (149,195 rows) promoted to
+  `/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/` + R2
+  (`s3://zentrain/ext720-canonical-2026-07-22/`) + Tower, with unified `_MANIFEST.json`
+  (per-corpus sha256/build_commit/role/target semantics) — the E1 "convert + manifest +
+  index" gate is CLOSED for the local legs. Pointer:
+  `benchmarks/ext720_canonical_2026-07-22.pointer.md`; index: `~/work/zen/DATA_PROVENANCE.md`.
+  Fleet write-backs (T-big, T-safe, bigcodec valdigits — asked of zenmetrics 2026-07-22)
+  get indexed there when they land; bigcodec **testdigits pair list is not yet materialized**
+  (needs the 2026-07-02 dedup pipeline rerun on {7,9}-digit origins).
 - The tower's enrollment + the 2.33× extractor perf win (ref-pyramid reuse, cached moments,
   SIMD pools) landed 2026-07-20…22.
 
