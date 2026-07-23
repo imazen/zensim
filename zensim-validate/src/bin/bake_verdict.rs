@@ -236,6 +236,40 @@ const PINNED_OUTSIDE_FEATURES_ROOT: &[(&str, &str)] = &[(
      silently dropped while the eval roots are still split",
 )];
 
+/// 720-regime (`feature-regime-v2`) feature-parquet slot for a corpus: the
+/// v1-372 space (`f0..f371`) ++ the appended v2-348 block (`f372..f719`).
+/// `None` = no 720 extraction exists yet, so the corpus is skipped under
+/// `--regime 720`. All live under [`DEFAULT_FEATURES_ROOT_720`]; the
+/// nonphoto/imazen26 NN-joined evals are symlinked into that root.
+///
+/// The 372 loader is already width-dynamic (`parquet_loader::load_parquet`
+/// counts contiguous `f0..fN`), so 720 support is purely this filename map +
+/// the regime flag — the scorer reads the bake's own `n_inputs`.
+fn slot_720(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "cid22" => "ext_cid22val.parquet",
+        "kadid" => "ext_kadid.parquet",
+        "tid" => "ext_tid.parquet",
+        "csiq" => "ext_csiq.parquet",
+        "live" => "ext_live.parquet",
+        "konjnd" => "ext_konjnd_jpeg_val.parquet",
+        "aic3" => "ext_aic3.parquet",
+        "aic4" => "ext_aic4.parquet",
+        "nonphoto" => "ext_nonphoto_720_nn_full.parquet",
+        "imazen26" => "ext_imazen26_720_nn_full.parquet",
+        // pipal, hf_nearlossless: no 720 extraction yet.
+        _ => return None,
+    })
+}
+
+/// Default `--features-root` for `--regime 720`.
+const DEFAULT_FEATURES_ROOT_720: &str = "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22";
+/// Default dial + corruption grids for `--regime 720` (720-wide re-extractions).
+const DEFAULT_DIAL_GRID_720: &str =
+    "/mnt/v/output/zensim/v2-eval-720-2026-07-22/dial_grid_720col_2026-07-22.parquet";
+const DEFAULT_CORRUPTION_GRID_720: &str =
+    "/mnt/v/output/zensim/v2-eval-720-2026-07-22/corruption_grid_720col_2026-07-22.parquet";
+
 const CORPORA: &[Corpus] = &[
     Corpus {
         name: "cid22",
@@ -405,6 +439,9 @@ struct Args {
     corpora: Vec<&'static Corpus>,
     output: Option<PathBuf>,
     features_root: PathBuf,
+    /// `feature-regime-v2`: score the 720-wide bake against 720-wide corpora
+    /// (via [`slot_720`]). Selected by `--regime 720`.
+    regime_720: bool,
     /// Diagnostic: dump per-row `human<TAB>pred` (parquet row order) to this
     /// path. Used by the AIC-3 CVVDP-feature spike to compute per-ref SROCC
     /// (which the aggregate panel does not split out).
@@ -484,6 +521,12 @@ fn parse_args() -> Result<Args, String> {
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(CANONICAL_DIAL_GRID));
+    // `--regime 720` swaps the three defaults below to their 720-wide variants,
+    // but only when the user did not set them explicitly (tracked here).
+    let mut regime_720 = false;
+    let mut features_root_set = false;
+    let mut dial_grid_set = std::env::var("ZENSIM_DIAL_GRID").is_ok();
+    let mut corruption_grid_set = std::env::var("ZENSIM_CORRUPTION_GRID").is_ok();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -502,10 +545,20 @@ fn parse_args() -> Result<Args, String> {
             "--features-root" => {
                 let v = args.next().ok_or("--features-root requires <path>")?;
                 features_root = PathBuf::from(v);
+                features_root_set = true;
+            }
+            "--regime" => {
+                let v = args.next().ok_or("--regime requires 372|720")?;
+                match v.as_str() {
+                    "372" => regime_720 = false,
+                    "720" => regime_720 = true,
+                    other => return Err(format!("--regime must be 372|720, got {other:?}")),
+                }
             }
             "--dial-grid" => {
                 let v = args.next().ok_or("--dial-grid requires <path>")?;
                 dial_grid = PathBuf::from(v);
+                dial_grid_set = true;
             }
             "--per-pair-output" => {
                 let v = args.next().ok_or("--per-pair-output requires <path>")?;
@@ -530,6 +583,7 @@ fn parse_args() -> Result<Args, String> {
             "--corruption-grid" => {
                 let v = args.next().ok_or("--corruption-grid requires <path>")?;
                 corruption_grid = PathBuf::from(v);
+                corruption_grid_set = true;
             }
             "-h" | "--help" => {
                 print_usage();
@@ -541,12 +595,36 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     let bake = bake.ok_or("--bake is required (path to ZNPR v3 bake)")?;
-    let corpora = corpora.unwrap_or_else(|| CORPORA.iter().collect());
+    // --regime 720: swap unset defaults to the 720-wide variants.
+    if regime_720 {
+        if !features_root_set {
+            features_root = PathBuf::from(DEFAULT_FEATURES_ROOT_720);
+        }
+        if !dial_grid_set {
+            dial_grid = PathBuf::from(DEFAULT_DIAL_GRID_720);
+        }
+        if !corruption_grid_set {
+            corruption_grid = PathBuf::from(DEFAULT_CORRUPTION_GRID_720);
+        }
+    }
+    let mut corpora = corpora.unwrap_or_else(|| CORPORA.iter().collect());
+    if regime_720 {
+        let before = corpora.len();
+        corpora.retain(|c| slot_720(c.name).is_some());
+        let skipped = before - corpora.len();
+        if skipped > 0 {
+            eprintln!(
+                "bake_verdict --regime 720: skipped {skipped} corpora with no 720 extraction \
+                 (pipal/hf_nearlossless)"
+            );
+        }
+    }
     Ok(Args {
         bake,
         corpora,
         output,
         features_root,
+        regime_720,
         per_pair_output,
         dial_grid,
         html,
@@ -1084,12 +1162,18 @@ fn dial_panel(
 fn render_corpus(
     corpus: &Corpus,
     features_root: &Path,
+    regime_720: bool,
     has_transforms: bool,
     n_inputs: usize,
     model: &Model,
     per_pair_output: Option<&Path>,
 ) -> Result<CorpusResult, String> {
-    let path = features_root.join(corpus.filename);
+    let fname = if regime_720 {
+        slot_720(corpus.name).ok_or_else(|| format!("no 720 slot for corpus {}", corpus.name))?
+    } else {
+        corpus.filename
+    };
+    let path = features_root.join(fname);
     let g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
         .map_err(|e| format!("load {} parquet: {e}", corpus.display))?;
     let humans = g.human_scores;
@@ -1478,7 +1562,18 @@ fn main() -> ExitCode {
     // s3://zentrain/eval-corpora/ — the error tells the caller how to restore them.
     let mut corpus_prov: Vec<(String, PathBuf, String, u64)> = Vec::new();
     for corpus in &args.corpora {
-        let cpath = args.features_root.join(corpus.filename);
+        // Regime-aware slot: --regime 720 loads the 720-wide ext_*.parquet
+        // (via slot_720), NOT the 372col filename. render_corpus resolves the
+        // same way — keep these two in sync.
+        let cfname = if args.regime_720 {
+            match slot_720(corpus.name) {
+                Some(f) => f,
+                None => continue, // filtered already; belt-and-braces
+            }
+        } else {
+            corpus.filename
+        };
+        let cpath = args.features_root.join(cfname);
         if !cpath.exists() {
             eprintln!(
                 "bake_verdict: MISSING corpus {} at {} — do NOT skip; restore it:\n  \
@@ -1486,10 +1581,7 @@ fn main() -> ExitCode {
                  https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com",
                 corpus.display,
                 cpath.display(),
-                Path::new(corpus.filename)
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy(),
+                Path::new(cfname).file_name().unwrap().to_string_lossy(),
                 cpath.display(),
             );
             return ExitCode::from(2);
@@ -1556,6 +1648,7 @@ fn main() -> ExitCode {
         match render_corpus(
             corpus,
             &args.features_root,
+            args.regime_720,
             has_transforms,
             n_inputs,
             &model,
