@@ -53,32 +53,70 @@ def main():
     eval_refset = set(erefs)
     print(f"eval: {et.num_rows} rows, {len(eval_refset)} distinct refs")
 
-    # stream corpus, keep only eval-ref rows -> per-ref (fleet_372 matrix, fleet_720 matrix)
+    # Build per-ref (nvar x 720) fleet-variant matrices. TWO-PASS + PREALLOCATED:
+    # the naive one-pass (append allf[i] views to a list, then vstack) OOMs at the
+    # 5.7M-row T-big scale — allf[i] is a VIEW that pins each row-group's full
+    # matrix alive, and the finalize vstack transiently doubles the ~16 GB of kept
+    # data. Pass 1 counts variants per ref (ref column only, cheap); pass 2 fills
+    # preallocated arrays by direct assignment (a copy into the target — no parent
+    # pinning, no vstack). Peak ~= the 720 data once (~16 GB) instead of ~2x+.
     pf = pq.ParquetFile(corpus_p)
-    cf = fcols(pf.schema_arrow.names)
+    cf = fcols(pf.schema_arrow.names)[:720]
     crc = refcol(pf.schema_arrow.names)
-    by_ref = {}  # ref -> [list of (f372 np, f720 np)]
+
+    counts = {}
     seen = 0
     for bi in range(pf.num_row_groups):
-        rg = pf.read_row_group(bi, columns=[crc] + cf[:720])
+        refs = pf.read_row_group(bi, columns=[crc]).column(crc).to_pylist()
+        for r in refs:
+            s = stem(r)
+            if s in eval_refset:
+                counts[s] = counts.get(s, 0) + 1
+        seen += len(refs)
+        if bi % 40 == 0:
+            print(f"  [pass1] scanned {seen:,}, refs-seen={len(counts)}", flush=True)
+    total_var = sum(counts.values())
+    print(f"  [pass1] {len(counts)} eval refs present in corpus, {total_var:,} total variants "
+          f"(~{total_var * 720 * 4 / 1e9:.1f} GB @ f4)", flush=True)
+
+    by_ref = {r: np.empty((n, 720), dtype="f4") for r, n in counts.items()}
+    pos = {r: 0 for r in counts}
+    seen = 0
+    for bi in range(pf.num_row_groups):
+        rg = pf.read_row_group(bi, columns=[crc] + cf)
         refs = rg.column(crc).to_pylist()
         keepidx = [i for i, r in enumerate(refs) if stem(r) in eval_refset]
         if keepidx:
-            allf = np.column_stack([rg.column(c).to_numpy() for c in cf[:720]]).astype("f4")
+            allf = np.column_stack([rg.column(c).to_numpy() for c in cf]).astype("f4")
             for i in keepidx:
-                by_ref.setdefault(stem(refs[i]), []).append(allf[i])
+                s = stem(refs[i])
+                by_ref[s][pos[s]] = allf[i]   # assignment copies -> parent freeable
+                pos[s] += 1
+            del allf
         seen += rg.num_rows
-        if bi % 20 == 0:
-            print(f"  scanned {seen:,}, kept refs={len(by_ref)}")
-    # finalize per-ref arrays
-    for r in by_ref:
-        by_ref[r] = np.vstack(by_ref[r])  # (nvar, 720)
-    print(f"collected fleet variants for {len(by_ref)}/{len(eval_refset)} eval refs")
+        if bi % 40 == 0:
+            print(f"  [pass2] scanned {seen:,}/{pf.metadata.num_rows:,}", flush=True)
+    print(f"collected fleet variants for {len(by_ref)}/{len(eval_refset)} eval refs", flush=True)
 
-    keep_rows = []
-    dists = []
-    n_nomatch_ref = 0
-    n_toofar = 0
+    # Stream output via ParquetWriter (bounded memory — the eval version's
+    # collect-all-then-vstack OOMs at the 2.3M-row T-big scale).
+    erefs_full = et.column(erc).to_pylist()
+    schema = pa.schema([("ref_basename", pa.string()), ("human_score", pa.float64()),
+                        ("nn_dist", pa.float64())] + [(f"f{k}", pa.float64()) for k in range(720)])
+    writer = pq.ParquetWriter(out_p, schema, compression="zstd")
+    b_ref, b_hum, b_d, b_f = [], [], [], []
+
+    def flush():
+        nonlocal b_ref, b_hum, b_d, b_f
+        if not b_ref:
+            return
+        F = np.vstack(b_f)
+        cols = [pa.array(b_ref), pa.array(b_hum), pa.array(b_d)] + [pa.array(F[:, k].astype("f8")) for k in range(720)]
+        writer.write_table(pa.table(cols, schema=schema))
+        b_ref, b_hum, b_d, b_f = [], [], [], []
+
+    matched = dists = n_nomatch_ref = n_toofar = 0
+    dist_samp = []
     for i in range(len(erefs)):
         fv = by_ref.get(erefs[i])
         if fv is None:
@@ -89,23 +127,22 @@ def main():
         if d[j] > THRESH:
             n_toofar += 1
             continue
-        keep_rows.append((i, fv[j]))
-        dists.append(float(d[j]))
+        b_ref.append(erefs_full[i]); b_hum.append(ehuman[i]); b_d.append(float(d[j])); b_f.append(fv[j])
+        matched += 1
+        if len(dist_samp) < 200000:
+            dist_samp.append(float(d[j]))
+        if len(b_ref) >= 50000:
+            flush()
+    flush()
+    writer.close()
     n = len(erefs)
-    print(f"matched {len(keep_rows)}/{n} ({100*len(keep_rows)/n:.1f}%)  "
-          f"[no-ref={n_nomatch_ref}, too-far>{THRESH}={n_toofar}]")
-    if dists:
-        print(f"  NN dist: median={np.median(dists):.2e} p95={np.percentile(dists,95):.2e} max={max(dists):.2e}")
-    if not keep_rows:
+    print(f"matched {matched}/{n} ({100*matched/n:.1f}%)  [no-ref={n_nomatch_ref}, too-far>{THRESH}={n_toofar}]")
+    if dist_samp:
+        ds = np.array(dist_samp)
+        print(f"  NN dist (sample): median={np.median(ds):.2e} p95={np.percentile(ds,95):.2e} max={ds.max():.2e}")
+    if matched == 0:
         raise SystemExit("0 matched")
-    out = {"ref_basename": pa.array([et.column(erc)[i].as_py() for i, _ in keep_rows]),
-           "human_score": pa.array([ehuman[i] for i, _ in keep_rows]),
-           "nn_dist": pa.array(dists, type=pa.float64())}
-    F = np.vstack([v for _, v in keep_rows])
-    for k in range(720):
-        out[f"f{k}"] = pa.array(F[:, k].astype("f8"))
-    pq.write_table(pa.table(out), out_p, compression="zstd")
-    print(f"  wrote {len(keep_rows)} x720 -> {out_p}")
+    print(f"  wrote {matched} x720 -> {out_p}")
 
 
 if __name__ == "__main__":
