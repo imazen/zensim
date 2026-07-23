@@ -18,13 +18,19 @@ from pathlib import Path
 def build_csiq():
     """CSIQ: 30 refs × 6 distortions. DMOS in [0,1] (0=best). human = 1 − DMOS."""
     import openpyxl
+    # CONSOLIDATED 2026-07-22: csiq lives entirely under the SINGULAR
+    # /mnt/v/dataset/csiq (source PNGs + the per-distortion dirs awgn/blur/...
+    # AND the DMOS xlsx + pairs tsv, moved here from the old plural
+    # /mnt/v/datasets/csiq). The plural distorted dst_imgs/ was a duplicate of
+    # the singular per-distortion dirs; its archive is on tower. See
+    # benchmarks/dataset_path_audit_2026-07-22.md.
     SRC = "/mnt/v/dataset/csiq"
-    DST = "/mnt/v/datasets/csiq/dst_imgs"
-    OUT = "/mnt/v/datasets/csiq/csiq_pairs.tsv"
+    DST = "/mnt/v/dataset/csiq"  # per-distortion dirs live directly under csiq/
+    OUT = "/mnt/v/dataset/csiq/csiq_pairs.tsv"
     # dst_type (xlsx) -> (folder, filename_token)
     M = {"noise": ("awgn", "AWGN"), "blur": ("blur", "BLUR"), "contrast": ("contrast", "contrast"),
          "fnoise": ("fnoise", "fnoise"), "jpeg": ("jpeg", "JPEG"), "jpeg 2000": ("jpeg2000", "jpeg2000")}
-    ws = openpyxl.load_workbook("/mnt/v/datasets/csiq/csiq.DMOS.xlsx")["all_by_image"]
+    ws = openpyxl.load_workbook("/mnt/v/dataset/csiq/csiq.DMOS.xlsx")["all_by_image"]
     rows = [r for r in ws.iter_rows(values_only=True)]
     hi = next(i for i, r in enumerate(rows) if r and "image" in [str(x) for x in r])
     hdr = [str(x) for x in rows[hi]]

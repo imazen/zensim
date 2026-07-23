@@ -49,7 +49,7 @@ the docker `jobexec` path (fetches R2 tars, decodes all codecs, emits 720). Sour
 
 | id | corpus | pairs | codecs / distortions | target | 720 status |
 |---|---|--:|---|---|---|
-| T-big | bigcodec_hqdedup (canonical-picker-2026-07-01-zensimA) | 2,322,579 | REAL zenjpeg/webp/png/jxl ±lossless | ssim2 [0,1] | **fleet (in flight, 40×cx43)** — dist via `encodes/`+`variant_tar_r2_url` (NOT `variant_r2_url`, 404 trap); fresh run-id (content-address silent-skip) |
+| T-big | bigcodec_hqdedup (canonical-picker-2026-07-01-zensimA) | 2,322,579 | REAL zenjpeg/webp/png/jxl ±lossless | ssim2 [0,1] | **DONE + WRITTEN BACK 2026-07-22** — fleet extracted the WHOLE canonical corpus (5,742,660 rows @720 = 100.0000% of cells, ALL digits incl. val+test); sidecar + 21 exact-join split views w/ ssim2/zensim targets on R2+Tower (`_MANIFEST_bigcodec.json` in the canonical dir). Note: hqdedup's 2.32M knob-no-op-dedup selection not reproduced (no variant key in its parquet) — train views = full pre-dedup traindigits 2.95M; dedup-equivalent selection is a follow-up if E2 wants it. |
 | T-safe | safesyn full | 196,086 (−avif ≈ ~160k) | mozjpeg/zenjpeg/zenjxl/zenwebp (+avif EXCLUDED: zenavif-in-flux + mm6 precedent) | gpu_ssim2/100 | fleet or local-multicodec; bitstream decode (PNG cache deleted; decoder-drift caveat — decode ALL through one decoder) |
 | T-cid201 | cid22_train 201-ref subset | 17,611 | mixed real codecs | ssim2-anchored (NOT MCOS — legal) | **DONE** (`ext_cid22_train201`, backfill 2026-07-20; verified 0-overlap w/ 49-ref holdout) |
 | T-kadid / T-tid | KADID-10k / TID2013 | 10,125 / 3,000 | analytic (guard weight only) | DMOS/MOS | **DONE** (`ext_kadid/ext_tid`, 2026-07-19) |

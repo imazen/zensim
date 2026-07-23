@@ -252,7 +252,10 @@ def main() -> int:
         "Mirrors: `s3://zentrain/ext720-canonical-2026-07-22/` (R2), "
         "`/mnt/tower/output/zensim-ext720-canonical-2026-07-22/` (Tower).\n"
         "Sources (kept in place): `/mnt/v/output/zensim/v2-ab-2026-07-19/`, "
-        "`/mnt/v/output/zensim/v2-backfill-2026-07-20/`.\n"
+        "`/mnt/v/output/zensim/v2-backfill-2026-07-20/`.\n\n"
+        "T-big (bigcodec, 5.74M rows @720, ALL splits): see "
+        "`_MANIFEST_bigcodec.json` — sidecar + 21 split views live on R2 "
+        "(`.../bigcodec/`) + Tower; too large for /mnt/v.\n"
     )
     (DEST / "README.md").write_text("\n".join(readme))
 

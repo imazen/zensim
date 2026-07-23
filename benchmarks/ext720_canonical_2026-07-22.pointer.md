@@ -31,5 +31,17 @@ Waves: 2026-07-19 (@6f191264) + 2026-07-20 (@9e7516d7), both pre pool-SIMD
 
 Produced by `scripts/canonical_corpus/promote_ext720_canonical.py`
 (idempotent; dated source dirs kept in place with POINTER.md breadcrumbs).
-Fleet legs (T-big / T-safe / bigcodec valdigits) are separate write-backs —
-index in DATA_PROVENANCE when they land.
+
+## T-big write-back (2026-07-22, same canonical family)
+
+The fleet's bigcodec run covered the ENTIRE canonical-picker corpus —
+**5,742,660 rows @720 = 100.0000% of cells, all origin digits (train +
+validate + test)**. R2 `s3://zentrain/ext720-canonical-2026-07-22/bigcodec/`
+(sidecar 27.4 GiB + 21 split views with score_ssim2/score_zensim, exact
+encoded_filename join, match_rate 1.0000 everywhere) + Tower mirror.
+Full shas/coverage/dedupe provenance: `_MANIFEST_bigcodec.json` in the
+canonical dir; tools: `fleet_blob_fetch_720.py fetch-all` +
+`tbig_join_720.py` (86d1f495). The 9 manifest-declared-but-absent variants
+are zenwebp_q0 orphans not present in canonical datasets either.
+
+T-safe remains the open fleet leg — index in DATA_PROVENANCE when it lands.

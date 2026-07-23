@@ -37,5 +37,28 @@ Ripgrep audit after noticing corpora referenced under BOTH path forms.
 There is no single canonical prefix — it's two storage eras. **Rule of thumb:**
 older FR-IQA corpora → `/mnt/v/dataset/<name>` (singular, extracted); newer
 downloads → `/mnt/v/datasets/<name>` (plural). Check disk before hardcoding a new
-ref. The only genuine consolidation candidate is **csiq** (unify its source +
-dst/pairs under one path); the rest is benign redundancy + dead-doc refs.
+ref.
+
+## CONSOLIDATION DONE (2026-07-22 → 07-23, user directive "consolidate, move duplicate archives to tower")
+
+1. **csiq → fully consolidated under SINGULAR `/mnt/v/dataset/csiq/`.** The
+   distorted images already existed there (per-distortion dirs `awgn/blur/...`,
+   150 each — identical to the old plural `dst_imgs/`); only the DMOS xlsx + pairs
+   TSV were plural-only. Moved DMOS to singular, regenerated
+   `/mnt/v/dataset/csiq/csiq_pairs.tsv` (866 pairs, 0 missing, 0 plural refs),
+   updated `build_fr_corpus_pairs.py::build_csiq` (SRC/DST/OUT/xlsx all singular).
+   The old plural `/mnt/v/datasets/csiq/` (dup dst_imgs + moved DMOS/pairs) →
+   backed up to tower (`plural-extracted/`) + removed local.
+2. **Duplicate raw archives → tower** `/mnt/tower/v-datasets-archives-2026-07-22/`
+   (size-verified before local rm; recoverable): kadid10k (`*_images.zip` +
+   plural `.zip`), tid2013 (`.rar`), csiq (`dst_imgs.zip`/`src_imgs.zip`), cid22
+   (`CID22.zip` 7.3 GB full-library + `CID22_validation_set*.zip`), konfig-iqa
+   (`.zip`). ~17 GB reclaimed locally. Extracted working data KEPT in place.
+3. **Empty plural archive-only dirs removed** (kadid10k, tid2013 — they held only
+   the raw archive).
+
+**Result — each corpus now has ONE canonical path:** the FR-IQA set under singular
+`/mnt/v/dataset/` (kadid10k, tid2013, cid22, aic3_ctc_epfl, aic4_sample, csiq,
+pipal, konfig-iqa); the newer datasets under plural `/mnt/v/datasets/` (LIVE,
+KonJND-1k, jpeg-ai-sdr25, kadis700k, fill4, aic-hdr2025, upiq). No corpus is split
+across both anymore. Dead-doc `konjnd-1k` refs (historical) left as-is.

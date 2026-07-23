@@ -23,8 +23,15 @@ from pyarrow import fs
 import pyarrow as pa, pyarrow.parquet as pq
 
 E = dict(os.environ)
-S3 = fs.S3FileSystem(access_key=E["R2_ACCESS_KEY_ID"], secret_key=E["R2_SECRET_ACCESS_KEY"],
-    endpoint_override="https://%s.r2.cloudflarestorage.com" % E["R2_ACCOUNT_ID"], region="auto")
+def _s3():
+    # dev box: root R2 keys (R2_*). fleet node: scoped temp cred (AWS_* + session token).
+    if E.get("R2_ACCESS_KEY_ID"):
+        return fs.S3FileSystem(access_key=E["R2_ACCESS_KEY_ID"], secret_key=E["R2_SECRET_ACCESS_KEY"],
+            endpoint_override="https://%s.r2.cloudflarestorage.com" % E["R2_ACCOUNT_ID"], region="auto")
+    ep = E.get("ZEN_R2_ENDPOINT") or ("https://%s.r2.cloudflarestorage.com" % E["R2_ACCOUNT_ID"])
+    return fs.S3FileSystem(access_key=E["AWS_ACCESS_KEY_ID"], secret_key=E["AWS_SECRET_ACCESS_KEY"],
+        session_token=E.get("AWS_SESSION_TOKEN"), endpoint_override=ep, region="auto")
+S3 = _s3()
 BUCKET = "zentrain"
 NFEAT = 720
 THREADS = int(E.get("MERGE_THREADS", "24"))
@@ -35,16 +42,18 @@ def ref_stem(image_path):
     return str(image_path).replace(".png", "").split(".scale")[0]
 
 
+def _ledger_shas(path):
+    t = pq.read_table(S3.open_input_file(path), columns=["output_sha", "status"])
+    return [s for s, st in zip(t.column("output_sha").to_pylist(), t.column("status").to_pylist())
+            if s and str(st) == "done"]
+
 def blob_shas(run):
-    shas = set()
     sel = fs.FileSelector(f"{BUCKET}/jobs/{run}/ledger/", recursive=False)
-    for b in S3.get_file_info(sel):
-        if not b.path.endswith(".parquet"):
-            continue
-        t = pq.read_table(S3.open_input_file(b.path), columns=["output_sha", "status"])
-        for s, st in zip(t.column("output_sha").to_pylist(), t.column("status").to_pylist()):
-            if s and str(st) == "done":
-                shas.add(s)
+    paths = [b.path for b in S3.get_file_info(sel) if b.path.endswith(".parquet")]
+    shas = set()
+    with ThreadPoolExecutor(max_workers=THREADS) as ex:  # ledger can be 1000s of chunks — parallelize
+        for chunk in ex.map(_ledger_shas, paths):
+            shas.update(chunk)
     return shas
 
 
