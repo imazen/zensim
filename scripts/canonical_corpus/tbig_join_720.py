@@ -125,7 +125,16 @@ def main() -> int:
             dset, split = datasets[di], SPLITS[si]
             idx = [r[0] for r in rows]
             ids = [r[1] for r in rows]
-            arrs = [pa.array([x[j] for x in ids], type=out_schema.field(j).type) for j in range(6)]
+            # Canonical datasets are not type-uniform across codecs (q /
+            # origin_id are strings in some, numbers in others) — coerce
+            # the 6 identity columns to strings explicitly.
+            arrs = [
+                pa.array(
+                    [None if x[j] is None else (x[j] if isinstance(x[j], str) else str(x[j])) for x in ids],
+                    type=pa.string(),
+                )
+                for j in range(6)
+            ]
             arrs.append(pa.array([_f(x[6]) for x in ids], type=pa.float64()))
             arrs.append(pa.array([_f(x[7]) for x in ids], type=pa.float64()))
             idx_arr = pa.array(idx, type=pa.int32())
