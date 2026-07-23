@@ -43,11 +43,28 @@ def main():
         keymap.setdefault(key_of(brefs[i], bmat[i]), []).append(i)
     print(f"bigcodec: {len(brefs):,} rows, {len(keymap):,} distinct keys")
 
-    # --- stream tbig, match, collect the 720 for matched bigcodec rows ---
+    brefs_full = bc.column("ref_basename").to_pylist()  # keep original (with .png) for output
+
+    # --- stream tbig; write matched rows to the output writer immediately
+    #     (bounded memory: keymap + one row-group + a small flush batch). ---
     pf = pq.ParquetFile(tb_p)
     fcols = [f"f{k}" for k in range(720)]
-    matched = {}  # bc_idx -> f0..f719 (from tbig, self-consistent)
-    seen = 0
+    schema = pa.schema([("ref_basename", pa.string()), ("human_score", pa.float64())]
+                       + [(f"f{k}", pa.float64()) for k in range(720)])
+    writer = pq.ParquetWriter(out_p, schema, compression="zstd")
+    done = set()          # bc_idx already emitted (dedupe: emit each bigcodec row once)
+    buf_ref, buf_hum, buf_feat = [], [], []   # flush batch
+    seen = written = 0
+
+    def flush():
+        nonlocal buf_ref, buf_hum, buf_feat
+        if not buf_ref:
+            return
+        F = np.vstack(buf_feat)
+        cols = [pa.array(buf_ref), pa.array(buf_hum)] + [pa.array(F[:, k]) for k in range(720)]
+        writer.write_table(pa.table(cols, schema=schema))
+        buf_ref, buf_hum, buf_feat = [], [], []
+
     for bi in range(pf.num_row_groups):
         rg = pf.read_row_group(bi, columns=["image_path"] + fcols)
         refs = [stem(x) for x in rg.column("image_path").to_pylist()]
@@ -57,28 +74,24 @@ def main():
             if not cands:
                 continue
             for bi_idx in cands:
-                if bi_idx in matched:
+                if bi_idx in done:
                     continue
-                # verify f0..f2 close (guard against hash collision)
-                if np.abs(allf[r][:3] - bmat[bi_idx][:3]).max() < 1e-4:
-                    matched[bi_idx] = allf[r]
+                if np.abs(allf[r][:3] - bmat[bi_idx][:3]).max() < 1e-4:  # collision guard
+                    done.add(bi_idx)
+                    buf_ref.append(brefs_full[bi_idx]); buf_hum.append(bhuman[bi_idx]); buf_feat.append(allf[r])
+                    written += 1
                     break
+        if len(buf_ref) >= 50000:
+            flush()
         seen += rg.num_rows
         if bi % 20 == 0:
-            print(f"  scanned {seen:,} tbig rows, matched {len(matched):,}/{len(brefs):,}")
+            print(f"  scanned {seen:,} tbig rows, matched {written:,}/{len(brefs):,}", flush=True)
+    flush()
+    writer.close()
     n = len(brefs)
-    print(f"matched {len(matched):,}/{n:,} ({100*len(matched)/n:.1f}%)")
-    if not matched:
+    print(f"matched {written:,}/{n:,} ({100*written/n:.1f}%)  -> {out_p}")
+    if written == 0:
         raise SystemExit("0 matched")
-
-    keep = sorted(matched)
-    out = {"ref_basename": pa.array([bc.column("ref_basename")[i].as_py() for i in keep]),
-           "human_score": pa.array([bhuman[i] for i in keep])}
-    F = np.vstack([matched[i] for i in keep])
-    for k in range(720):
-        out[f"f{k}"] = pa.array(F[:, k])
-    pq.write_table(pa.table(out), out_p, compression="zstd")
-    print(f"  wrote {len(keep):,} x720 (+ human_score target) -> {out_p}")
 
 
 if __name__ == "__main__":
