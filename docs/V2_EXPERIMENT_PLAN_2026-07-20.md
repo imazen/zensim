@@ -188,6 +188,21 @@ lab-recipe failure mode is gone); seed σ(CID22) < 0.02; then the pre-registered
 append-only bands (WIN = ext ≥ v1 − 0.010 mean across compression holdouts, no
 corpus ≤ −0.030). This SETTLES the seed-noisy lab CID22/LIVE verdict.
 
+**⇒ E2 RESULT (seed 1, 2026-07-23) — pre-registered WIN; multi-seed {7,13}
+running.** Both arms trained + verdicted at `--regime 720` (`bake_verdict` I-1,
+identical holdout pairs). Recipe refinement vs the pre-registered sketch: kadid/tid
+are **train-only guards** (`val_w=0`, different DMOS target) and early-stop uses
+`--val-policy mean` over the ssim2 groups — the default min-of-all pathologically
+peaked at epoch 0 as the model specialized on the ssim2 target. **Both bands PASS
+at seed 1**: comp-holdout mean Δ = −0.0026 (≥ −0.010 ✓), worst clean −0.0041 (no
+corpus ≤ −0.030 ✓). The v2-348 block adds **clean-holdout FR generalization** —
+CSIQ +0.112, KonJND +0.035, LIVE +0.025 — and is neutral on every
+compression-human holdout (CID22 −0.003, AIC-3/4 −0.004/−0.003, imazen26 −0.0005).
+KADID +0.154 is train-guard-contaminated (flagged, not counted). Full record:
+`benchmarks/e2_optimal_model_720_vs_372_2026-07-23.md`; bakes at
+`/mnt/v/output/zensim/bakes/e2_{ext720,v1372}_s{1,7,13}_2026-07-23.bin`; driver
+`scripts/v_next/e2_multiseed_driver.sh`; aggregate `e2_aggregate_seeds.py`.
+
 **E3 — masked variants at scale.** ext-luma (chroma transducers masked) and
 ext-lumacoh (+ v1-nonspat f156-371 masked) under E2's recipe/seeds. Decides at
 production scale: chroma-transducer deprecation + v1-nonspat deprecation

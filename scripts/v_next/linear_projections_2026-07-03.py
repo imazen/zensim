@@ -50,12 +50,17 @@ import pyarrow.parquet as pq
 from scipy.optimize import lsq_linear
 from scipy.stats import spearmanr
 
+import os
+
 REPO = Path(__file__).resolve().parent.parent.parent
 SCRATCH = Path("/mnt/v/output/zensim-multicodec-probe/linear-probe")
 PROBE = Path("/mnt/v/output/zensim-multicodec-probe")
 CANON = Path("/mnt/v/zen/zensim-training/canonical-2026-05-21/train")
 ANCHOR_PQ = CANON / "multiband_anchor_dial100.parquet"
-N_FEAT = 372
+# Feature-count is env-driven so the `twin` subcommand can fit the SAME corpora
+# at 372 (v1 only) and 720 (v1 ++ appended v2-348). Default 372 = every existing
+# subcommand unchanged.
+N_FEAT = int(os.environ.get("ZLIN_NFEAT", "372"))
 BAKER = Path.home() / "work/zen/zenanalyze/target/release/zenpredict"
 SPLINE_KEY = "zentrain.output_calibration_spline"
 
@@ -67,8 +72,49 @@ _spec = importlib.util.spec_from_file_location(
 _v02 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_v02)
 apply_transform = _v02.apply_transform
-load_transforms = _v02.load_transforms
-load_mask = _v02.load_mask
+_base_load_transforms = _v02.load_transforms
+_base_load_mask = _v02.load_mask
+
+
+import csv as _csv
+
+
+def load_transforms():
+    """Transforms for all N_FEAT features. If ZLIN_SCREEN is set (the merged
+    720 screen: shipped v1 f0..f371 ++ new v2 f372..f719), load it directly —
+    this SHAPES the v2 block (338/348 features get a non-identity transform).
+    Otherwise fall back to the 372 screen + identity pad (raw-v2 floor)."""
+    screen = os.environ.get("ZLIN_SCREEN")
+    if screen:
+        toks = ["identity"] * N_FEAT
+        params = [[] for _ in range(N_FEAT)]
+        with open(screen) as f:
+            for row in _csv.DictReader(f, delimiter="\t"):
+                i = int(row["feat_idx"])
+                if i < N_FEAT:
+                    toks[i] = row["best_transform"]
+                    cp = (row.get("params_csv", "") or "").strip()
+                    if cp:
+                        params[i] = [float(v) for v in cp.split(",")]
+        return toks, params
+    toks, params = _base_load_transforms()
+    toks = list(toks)
+    params = list(params)
+    while len(toks) < N_FEAT:
+        toks.append("identity")
+        params.append([])
+    return toks[:N_FEAT], params[:N_FEAT]
+
+
+def load_mask():
+    """v1 sign mask from the 372 screen; the v2-348 block is left FREE (pin=0),
+    so BVLS picks each v2 feature's sign — the honest 'does it help' test rather
+    than pinning a guessed direction."""
+    m = _base_load_mask()
+    m = np.asarray(m)
+    if len(m) < N_FEAT:
+        m = np.concatenate([m, np.zeros(N_FEAT - len(m), dtype=m.dtype)])
+    return m[:N_FEAT]
 
 # ---------------------------------------------------------------------------
 # Group registry: (name, path, target columns to accumulate q for)
@@ -108,6 +154,14 @@ GROUPS = {
     # hdr_v3mix). ALL train-fold (source dir is the train renditions);
     # generalization measured only at confirmation.
     "sdrcodec_pl": (PROBE / "sdrcodec_pl203_traindigits_2026-07-14.parquet", ["human_score"]),
+    # ext720 corpora (720-feature re-extractions) for the deterministic linear
+    # 720-vs-372 feature-validation twin (see the `twinsdr` mix + `cmd_twin`).
+    # SDR-only, NO bigcodec (its mass drags linear CID22 down — round-2 finding).
+    "t720_safesyn": (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_safesyn_full.parquet"), ["human_score"]),
+    "t720_cid201":  (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_cid22_train201.parquet"), ["human_score"]),
+    "t720_kadid":   (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_kadid.parquet"), ["human_score"]),
+    "t720_tid":     (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_tid.parquet"), ["human_score"]),
+    "t720_konjnd":  (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_konjnd_jpeg_val.parquet"), ["human_score"]),
 }
 VAL_SETS = {
     "bigcodec_val": (PROBE / "bigcodec_valdigits_2026-07-02.parquet", "human_score"),
@@ -151,7 +205,13 @@ def cmd_gram(args) -> int:
     (SCRATCH / "grams").mkdir(parents=True, exist_ok=True)
     (SCRATCH / "val").mkdir(parents=True, exist_ok=True)
 
+    # --only scopes accumulation to a group subset (and skips the 372-feature
+    # VAL_SETS below) — needed for the 720 twin, whose ext720 groups live
+    # alongside 372-feature canonical groups that would crash at N_FEAT=720.
+    only = set(args.only.split(",")) if getattr(args, "only", None) else None
     for name, (path, tcols) in GROUPS.items():
+        if only is not None and name not in only:
+            continue
         out = SCRATCH / "grams" / f"{name}.npz"
         if out.exists() and not args.force:
             print(f"[gram] {name}: cached, skip")
@@ -209,7 +269,10 @@ def cmd_gram(args) -> int:
         print(f"[gram] {name}: n={acc['raw']['n']:.0f} dropped_raw={acc['raw']['dropped']} "
               f"dropped_shaped={acc['shaped']['dropped']} t={time.time()-t0:.1f}s")
 
-    # Val / guard / anchor matrices, cached raw+shaped as f32
+    # Val / guard / anchor matrices, cached raw+shaped as f32. Skipped under
+    # --only (they are 372-feature and the twin verdicts via bake_verdict).
+    if only is not None:
+        return 0
     for name, (path, tcol) in VAL_SETS.items():
         out = SCRATCH / "val" / f"{name}.npz"
         if out.exists() and not args.force:
@@ -336,6 +399,12 @@ MIXES_SDR = {
     "big": [("bigcodec", 1.0, "human_score")],
     "canon": [("safesyn", 1.0, "human_score"), ("cid22_train", 1.5, "human_score"),
               ("kadid", 0.5, "human_score"), ("tid", 0.5, "human_score")],
+    # feature-validation twin mix: the ext720 corpora (same recipe as `canon`
+    # + konjnd, NO bigcodec). Run at N_FEAT=372 and 720 → the delta is the
+    # marginal value of the shaped v2 block. cmd_twin --mix twinsdr.
+    "twinsdr": [("t720_safesyn", 1.0, "human_score"), ("t720_cid201", 1.5, "human_score"),
+                ("t720_kadid", 0.5, "human_score"), ("t720_tid", 0.5, "human_score"),
+                ("t720_konjnd", 1.2, "human_score")],
     "w7sdr": [("safesyn", 1.0, "human_score"), ("cid22_train", 1.5, "human_score"),
               ("kadid", 0.5, "human_score"), ("tid", 0.5, "human_score"),
               ("konjnd_dense", 1.2, "human_score"), ("bigcodec", 0.25, "human_score")],
@@ -484,13 +553,18 @@ def bake_candidate(key: str, tau: float, out_path: Path, use_f16: bool = True) -
         w = w.astype(np.float16).astype(np.float64)   # exact packed weights
     n1 = int((np.abs(w) > 0).sum())
 
-    # spline on the PACKED forward over the anchor
-    az = np.load(SCRATCH / "val" / "anchor.npz")
-    Xa = az[space].astype(np.float64)
-    raw_a = (Xa - mu) / sd @ w + bias
-    cx, cy = fit_spline_knots(raw_a, az["y"].astype(np.float64))
-    payload = struct.pack("<I", len(cx)) + b"".join(
-        struct.pack("<ff", x, y) for x, y in zip(cx, cy))
+    # spline on the PACKED forward over the anchor. OPTIONAL: the twin bakes at
+    # N_FEAT=720 where the 372-feature anchor doesn't apply. The output spline is
+    # MONOTONE, so it is rank-invariant — omitting it does NOT change SROCC (the
+    # twin's metric). Skip when the anchor is absent or feature-width mismatched.
+    anchor_p = SCRATCH / "val" / "anchor.npz"
+    cx = []
+    if anchor_p.exists():
+        az = np.load(anchor_p)
+        if space in az and az[space].shape[1] == N_FEAT:
+            Xa = az[space].astype(np.float64)
+            raw_a = (Xa - mu) / sd @ w + bias
+            cx, cy = fit_spline_knots(raw_a, az["y"].astype(np.float64))
 
     metadata = []
     if space == "shaped":
@@ -501,7 +575,10 @@ def bake_candidate(key: str, tau: float, out_path: Path, use_f16: bool = True) -
             {"key": "zentrain.feature_transform_params", "type": "utf8",
              "text": "\n".join(",".join(f"{p}" for p in row) if row else "" for row in tparams)},
         ]
-    metadata.append({"key": SPLINE_KEY, "type": "bytes", "hex": payload.hex()})
+    if cx:  # only attach a spline when one was fit (anchor present + width-matched)
+        payload = struct.pack("<I", len(cx)) + b"".join(
+            struct.pack("<ff", x, y) for x, y in zip(cx, cy))
+        metadata.append({"key": SPLINE_KEY, "type": "bytes", "hex": payload.hex()})
     req = {
         "schema_hash": 0, "flags": 0, "compressed": True,
         "scaler_mean": [float(v) for v in mu.astype(np.float32)],
@@ -523,7 +600,12 @@ def bake_candidate(key: str, tau: float, out_path: Path, use_f16: bool = True) -
             raise RuntimeError(f"zenpredict bake failed: {r.stderr[:400]}")
     finally:
         jp.unlink(missing_ok=True)
-    vm = val_metrics(w, bias, mu, sd, space)
+    # val_metrics evals on the 372-feature VAL_SETS; skip at N_FEAT != 372
+    # (the twin verdicts via bake_verdict --regime 720 instead).
+    try:
+        vm = val_metrics(w, bias, mu, sd, space) if N_FEAT == 372 else {}
+    except Exception:
+        vm = {}
     return {"key": key, "tau": tau, "f16": use_f16, "n_active": n1, "n_active_pre": n0,
             "size": out_path.stat().st_size, "knots": len(cx),
             "sha256": hashlib.sha256(out_path.read_bytes()).hexdigest()[:12], **vm}
@@ -1125,10 +1207,44 @@ def cmd_residual2(args) -> int:
     return 0
 
 
+def cmd_twin(args) -> int:
+    """Deterministic linear feature-validation twin. Thin ORCHESTRATION over the
+    existing owners: `MixGram` (moments+BVLS, from the grams cmd_gram writes) and
+    `bake_candidate` (pack+bake). The only genuinely-new bit is zero-ablation LOO
+    (drop a v2 family's weights, re-bake) — a per-family variant the tool lacked.
+
+    Prereq: `cmd_gram --only <TWIN groups>` has been run at this N_FEAT/screen so
+    the grams exist. mix name comes from --mix (a key in MIXES_SDR)."""
+    (SCRATCH / "fits").mkdir(parents=True, exist_ok=True)
+    mix = MIXES_SDR[args.mix]
+    print(f"[twin] N_FEAT={N_FEAT} mix={args.mix} screen={os.environ.get('ZLIN_SCREEN','(372+identity)')}", flush=True)
+    mg = MixGram("shaped", mix)            # OWNER: standardized Gram + rhs
+    w, b = mg.bvls(load_mask())            # OWNER: BVLS solve
+    print(f"[twin] BVLS active weights: {int((np.abs(w) > 1e-7).sum())}/{N_FEAT}", flush=True)
+    key = f"twin_n{N_FEAT}"
+    np.savez_compressed(SCRATCH / "fits" / f"{key}.npz",
+                        w=w, bias=b, mu=mg.mu, sd=mg.sd, space="shaped", desc="|".join(mg.desc))
+    out = Path(args.out)
+    bake_candidate(key, args.tau, out)     # OWNER: pack + bake
+    print(f"[twin] baked {out}")
+    if args.loo and N_FEAT >= 720:         # NEW: per-v2-family zero-ablation
+        fam = json.load(open(args.loo))["families"]
+        loo_dir = out.parent / f"{out.stem}_loo"; loo_dir.mkdir(exist_ok=True)
+        for fname, fdef in fam.items():
+            wz = w.copy(); wz[fdef["indices"]] = 0.0
+            kz = f"{key}_drop_{fname}"
+            np.savez_compressed(SCRATCH / "fits" / f"{kz}.npz",
+                                w=wz, bias=b, mu=mg.mu, sd=mg.sd, space="shaped", desc=f"LOO-drop-{fname}")
+            bake_candidate(kz, args.tau, loo_dir / f"drop_{fname}.bin")
+            print(f"[twin][loo] baked drop_{fname} ({len(fdef['indices'])} feats zeroed)", flush=True)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("gram"); g.add_argument("--force", action="store_true")
+    g.add_argument("--only", default=None, help="comma group subset (skips 372 val-sets)")
     f = sub.add_parser("fit"); f.add_argument("--only", default=None)
     z = sub.add_parser("finalize")
     z.add_argument("--keys", required=True)
@@ -1138,11 +1254,16 @@ def main() -> int:
     sub.add_parser("cascade")
     sub.add_parser("residual")
     sub.add_parser("residual2")
+    tw = sub.add_parser("twin")
+    tw.add_argument("--mix", default="twinsdr", help="a MIXES_SDR key (default twinsdr)")
+    tw.add_argument("--out", required=True)
+    tw.add_argument("--tau", type=float, default=0.0)
+    tw.add_argument("--loo", default=None, help="v2 family map JSON for zero-ablation LOO (720 only)")
     args = ap.parse_args()
     return {"gram": cmd_gram, "fit": cmd_fit, "finalize": cmd_finalize,
             "poolfits": cmd_poolfits, "ensemble": cmd_ensemble,
             "cascade": cmd_cascade, "residual": cmd_residual,
-            "residual2": cmd_residual2}[args.cmd](args)
+            "residual2": cmd_residual2, "twin": cmd_twin}[args.cmd](args)
 
 
 if __name__ == "__main__":
