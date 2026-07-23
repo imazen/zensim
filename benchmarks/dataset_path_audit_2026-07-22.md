@@ -54,8 +54,18 @@ ref.
    plural `.zip`), tid2013 (`.rar`), csiq (`dst_imgs.zip`/`src_imgs.zip`), cid22
    (`CID22.zip` 7.3 GB full-library + `CID22_validation_set*.zip`), konfig-iqa
    (`.zip`). ~17 GB reclaimed locally. Extracted working data KEPT in place.
-3. **Empty plural archive-only dirs removed** (kadid10k, tid2013 — they held only
-   the raw archive).
+3. **Empty plural archive-only dirs removed** (tid2013).
+4. **ALL raw archives relocated** (2026-07-23): 16 archives total — the 11
+   duplicate/split ones above PLUS 5 single-path raw archives (upiq_dataset.zip,
+   aic4_sample, LIVE databaserelease2.zip, jpeg-ai-sdr25 ×2) whose extracted forms
+   were verified present. **0 archives remain local**; **21 GB on tower**, every
+   one size-verified before local rm. Recover any via
+   `/mnt/tower/v-datasets-archives-2026-07-22/<corpus>/`.
+
+**Orchestration note (for future archive moves):** `rsync -a` to the tower NFS
+export FAILS on `chgrp` ("Operation not permitted") — data transfers but rsync
+returns code 23. Use `cp` (or `rsync --no-o --no-g --no-p`). And never `set -e`
+with a glob that may not match (`*.rar` where none exist exits the whole script).
 
 **Result — each corpus now has ONE canonical path:** the FR-IQA set under singular
 `/mnt/v/dataset/` (kadid10k, tid2013, cid22, aic3_ctc_epfl, aic4_sample, csiq,
