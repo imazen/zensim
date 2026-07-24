@@ -107,3 +107,31 @@ suffice — not a speedup. (A genuinely-cheap gate would need corruption-specifi
 - 720-negrich (via kadis-distort on imazen-26, matched content) only if a future
   measurement shows v2 helps — this one says it doesn't, materially.
 - Finish the last 32 corpus sources (builder now guards truncated CSVs).
+
+## The dial+diffmap subset detects corruption BEST (2026-07-24, reverses "372")
+
+The perceptual (dial+diffmap) model uses only its **foldable subset** — basic-156 +
+228 foldable v2, and ZERO of the f156..371 mask/iw/peak block. Asked whether
+corruption can run on THAT subset (→ one shared feature extraction for the whole
+system). Measured (source-held-out, corpus honest negatives, no negrich, T=0.9):
+
+| subset | nfeat | detection | broad-FP |
+|---|--:|--:|--:|
+| basic-156 | 156 | 94.6% | 0.39% |
+| **perceptual foldable (basic+v2)** | **384** | **98.0%** | **0.18%** |
+| native-372 (basic+v1-mask) | 372 | 96.9% | 0.35% |
+| full-720 | 720 | 89.8% (overfits) | 0.44% |
+
+**The perceptual foldable subset is the BEST for corruption** — the foldable v2
+features are more discriminative than the v1 mask/iw/peak block, and full-720
+overfits on the source-held-out split. So:
+- **One shared feature extraction** for dial + diffmap + corruption (the 384-feat
+  foldable subset); the f156..371 block can be dropped entirely — neither head needs
+  it. Corruption is then truly free AND enables the extraction optimization.
+- This REVERSES the earlier "372≈720, v2 marginal" (which compared basic+v1-mask vs
+  all-720; the right axis is basic+v2, which wins).
+- **To ship it, negrich must be 720** (its severe-honest hard negatives need v2). The
+  regen path: kadis-distort the 24 IQA types on the imazen-26 sources (matched
+  content) → extract 720 → the severe-honest boundary on the shared subset. This is
+  the payoff that justifies the 720-negrich regen deferred earlier.
+Subset scan: `corruption-head-2026-07-24/compare_subsets.py` + `foldable_idx.npy`.
