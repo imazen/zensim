@@ -32,7 +32,8 @@ from sklearn.calibration import CalibratedClassifierCV
 NFEAT = 372
 CANON = "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22"
 FOLD = "/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24"
-NEGRICH = "/mnt/v/zen/zensim-training/canonical-2026-07-15/train/kadis_negrich.parquet"
+NEGRICH = ("/mnt/v/zen/zensim-training/kadis-negrich-regen-2026-07-24/"
+           "kadis_negrich_srcid.parquet")  # regenerated WITH source_id → leak-free split
 DST = "/mnt/v/output/zensim/signedpow-clean-2026-07-24"
 PERC = f"{DST}/ideal_p0p2_L0p003_F0p005_bd.bin"
 
@@ -86,17 +87,22 @@ def main():
     parts.append((Xc720[:, :NFEAT], isc, ex["ref_id"], ex["family"], ex["content_class"],
                   ex["severity"], np.where(isc == 1, "corruption", "matched_anchor"), Xc720))
 
-    # negrich severe-honest hard negatives (372)
+    # negrich severe-honest hard negatives (372) — regenerated WITH source_id, so
+    # the split is LEAK-FREE (one KADIS reference → 5 severity rows must not straddle
+    # folds). This is the fix the provenance-gapped original could not support.
     if os.path.exists(a.negrich):
-        Xn, _ = load_X(a.negrich, NFEAT)
+        Xn, exn = load_X(a.negrich, NFEAT, extra=("source_id",))
         if len(Xn) > a.negrich_n:
-            Xn = Xn[rng.choice(len(Xn), a.negrich_n, replace=False)]
-        z = np.zeros(len(Xn), dtype=int)
-        s = np.array([f"negrich/{i%50}" for i in range(len(Xn))])  # pseudo-blocks (no source_id)
-        lab = lambda v: np.array([v]*len(Xn))
-        parts.append((Xn, z, s, lab("severe_honest"), lab("severe_honest"),
-                      lab("severe_honest"), lab("severe_honest"), None))
-        print(f"negrich: {len(Xn)} severe-honest hard negatives (372-feat)")
+            idx = rng.choice(len(Xn), a.negrich_n, replace=False)
+            Xn, sid = Xn[idx], exn["source_id"][idx]
+        else:
+            sid = exn["source_id"]
+        s = np.array([f"negrich/{v}" for v in sid])  # real source_id → leak-free
+        lab = lambda v: np.array([v] * len(Xn))
+        parts.append((Xn, np.zeros(len(Xn), dtype=int), s, lab("severe_honest"),
+                      lab("severe_honest"), lab("severe_honest"), lab("severe_honest"), None))
+        print(f"negrich: {len(Xn)} severe-honest hard negatives (372-feat, "
+              f"{len(set(sid))} unique KADIS source_ids → leak-free split)")
     else:
         print("WARN: negrich missing — no severe-honest hard negatives!")
 
