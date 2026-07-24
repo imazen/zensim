@@ -96,6 +96,51 @@ M3 = mean over the 9-pair city/dog/girl × q20/q50/q75 grid):
   signed_pow --pow 0.2 --only-cbrt`, then `linear_projections twin --mix foldcanon` with
   `ZLIN_NFEAT=720 ZLIN_SCREEN=OUT.tsv`. M3 via `examples/diffmap_block_coherence --bake`.
 
+## DIAL VALIDATION (2026-07-24) — G1 closed, G3 is a real intrinsic gap
+
+Ran the proper dial validation (the "validate the dial first" step): fit each
+candidate's [0,100] spline by **co-calibrating to the shipped-B dial** (the
+repo's sanctioned technique) on the **exact dial grid** G1/G3 are graded on
+(4817 rows, 115 curves, 4 codecs), via `bake_dial_refit add-spline` with an
+anchor = `dial_grid_720col` features + `target_score` = B's own dial per row.
+This is the fair measurement the pre-spline `dial=1.000` could not give.
+
+| model (B co-cal) | dial p5/p95 | **G3 mono** | inv>0.5pt | strict-bwd (cal-invariant) |
+|---|--:|--:|--:|--:|
+| **B (shipped reference)** | 13.9/99.7 | **0.976 ✓** | 2.4% | 7.6% |
+| cbrt (old clean ideal) | 14.8/91.4 | 0.888 | 11.2% | 27.8% |
+| signed_pow p=0.25 | 14.4/91.8 | 0.894 | 10.6% | 27.6% |
+| signed_pow p=0.20 | 14.6/92.4 | 0.898 | 10.3% | 26.6% |
+| signed_pow p=0.17 | 14.7/92.9 | 0.896 | 10.4% | 25.3% |
+| signed_pow p=0.15 | 14.9/93.1 | 0.907 | 9.3% | 24.6% |
+
+**Two findings:**
+1. **G1 dynamic range is CLOSED** for the whole clean-model family (p5≈14.5 ≤25 ✓,
+   p95 91–93 ≥85 ✓). The earlier safesyn `add-spline` "failure" was purely the
+   wrong anchor (distribution mismatch); with a proper grid-matched anchor G1 passes.
+2. **G3 fine-grained monotonicity is a REAL, INTRINSIC gap.** Every clean foldable
+   model lands 0.888–0.907 (fails G3 ≥0.93) vs B's 0.976. This is NOT a calibration
+   artifact: the **strict backward rate (26.6% vs B's 7.6%) is calibration-invariant**
+   (any monotone spline preserves the raw rank order), and the inversions are spread
+   across **all codecs** — including **JPEG-q (9.6% vs B's 0.45%)**, whose integer-q
+   axis is an *unambiguous* quality order with no sub-JND excuse. signed_pow
+   marginally helps (cbrt 0.888 → p0.15 0.907) but does not close it.
+
+**Why — and the tension it reveals.** B passes G3 because winsor-shaping + the full
+372 features give a smoother per-q response; the clean model's sign-constrained
+BVLS on the *foldable* feature subset (336 cols masked for diffmap coherence) has a
+noisier q-response. So there is a **G3 (smooth dial) ↔ G-STEER (diffmap coherence)
+tension**: B has the dial but not the diffmap (winsor breaks M3); the clean model
+has the diffmap but not the dial. Closing G3 without re-breaking the diffmap is the
+real open problem — candidate levers: a **q-monotonicity regularizer in the linear
+fit** (penalize adjacent-q inversions on the dial grid during BVLS — the linear tool
+lacks this today; the MLP trainer has `monotonicity_reg`/`monotone_cbc`), un-masking
+a few smoothing features that don't wreck the fold, or accepting ~0.90 (median
+backward step is only 0.28pt — the dial mostly-tracks, it just wiggles).
+
+Dialed bakes + co-cal anchor + per-candidate verdicts:
+`/mnt/v/output/zensim/signedpow-clean-2026-07-24/` (`*_bdial.bin`, `bdial_anchor_720.parquet`).
+
 ## Honest status
 
 - **Clean on the meaningful gates** (ship point = `signed_pow` p=0.2): dial monotonicity

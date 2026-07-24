@@ -37,3 +37,13 @@ example over `/mnt/v/output/zensim/diffmap-coherence-2026-07-18/{city,dog,girl}.
 Recipe corpus: `ext720-foldable-2026-07-24` (basic-156 ++ 19 diffmap-folding v2
 families; 336 non-foldable/harmful cols zeroed). Mix `foldcanon` =
 safesyn(1.0)+cid201(1.5)+kadid(0.5)+tid(0.5), no bigcodec, no CID22-val.
+
+## Dial validation (B co-calibration, 2026-07-24)
+- `bdial_anchor_720.parquet` — dial-grid features + `target_score` = shipped-B dial
+  per row (the co-cal target). `build_bdial_anchor.py` regenerates it (score B on the
+  grid via `predict_features_with_bake --bake-post raw`, then attach).
+- `*_bdial.bin` — each candidate re-dialed via `bake_dial_refit add-spline
+  --anchor bdial_anchor_720.parquet --target-col target_score`.
+- Result (in `ideal_clean_model_2026-07-24.md` DIAL VALIDATION section): G1 range
+  CLOSED for all; G3 mono 0.888–0.907 (fails 0.93) — a real intrinsic gap vs B's
+  0.976, revealing a G3↔diffmap tension.
