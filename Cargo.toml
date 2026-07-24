@@ -50,8 +50,8 @@ enough = { version = "0.4.2", default-features = false, features = ["std"] }
 #     zenpredict      = { path = "../zenanalyze/zenpredict" }
 #     zenpredict-bake = { path = "../zenanalyze/zenpredict-bake" }
 # Bump the rev deliberately when a zenanalyze fix zensim needs lands.
-zenpredict      = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
-zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
+zenpredict      = { git = "https://github.com/imazen/zenanalyze", rev = "14dbe93d6af294a9598f9d27387103b87eb1a4af" }
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "14dbe93d6af294a9598f9d27387103b87eb1a4af" }
 
 # zenstats — canonical IQA-stats home extracted on 2026-05-26 from the
 # pre-existing `zensim-validate/src/panel.rs`. Lives in the zenmetrics

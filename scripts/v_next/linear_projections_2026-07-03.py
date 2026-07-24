@@ -53,7 +53,12 @@ from scipy.stats import spearmanr
 import os
 
 REPO = Path(__file__).resolve().parent.parent.parent
-SCRATCH = Path("/mnt/v/output/zensim-multicodec-probe/linear-probe")
+# Scratch (gram/val/fit cache) is env-overridable so runs with different screens
+# (e.g. smooth signed_cbrt vs soft_sign) keep separate gram caches and can be
+# A/B'd without --force clobbering. Grams cache by group NAME only, NOT by
+# screen, so a different screen REQUIRES either --force or a distinct scratch.
+SCRATCH = Path(os.environ.get(
+    "ZLIN_SCRATCH", "/mnt/v/output/zensim-multicodec-probe/linear-probe"))
 PROBE = Path("/mnt/v/output/zensim-multicodec-probe")
 CANON = Path("/mnt/v/zen/zensim-training/canonical-2026-05-21/train")
 ANCHOR_PQ = CANON / "multiband_anchor_dial100.parquet"

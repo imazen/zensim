@@ -169,6 +169,34 @@ def apply_transform(token: str, params: list[float], x: np.ndarray) -> np.ndarra
         if lam <= -49.0:  # caller error fallback in runtime → Identity
             return x
         return yeo_johnson(x, lam)
+    if token == "soft_sign":
+        # x / (scale + |x|) — smooth, monotone, saturating. Mirrors
+        # zenpredict::FeatureTransform::SoftSign (params=[scale], default 1.0).
+        scale = params[0] if params else 1.0
+        if scale <= 0.0:
+            scale = 1.0
+        return x / (scale + np.abs(x))
+    if token == "signed_pow":
+        # sign(x)·|x|^p — power family (sqrt=0.5, cbrt≈0.333). Mirrors
+        # zenpredict::FeatureTransform::SignedPow (params=[p], default 0.5;
+        # p≤0 → identity).
+        p = params[0] if params else 0.5
+        if p <= 0.0:
+            return x
+        return np.sign(x) * np.power(np.abs(x), p)
+    if token == "soft_clip":
+        # Identity core + unbounded log tail (Huber-log winsor). Mirrors
+        # zenpredict::FeatureTransform::SoftClip (params=[knee, soft], both 1.0).
+        knee = params[0] if len(params) > 0 else 1.0
+        soft = params[1] if len(params) > 1 else 1.0
+        if knee <= 0.0:
+            knee = 1.0
+        if soft <= 0.0:
+            soft = 1.0
+        ax = np.abs(x)
+        core = ax <= knee
+        tail = np.sign(x) * (knee + soft * np.log1p((ax - knee) / soft))
+        return np.where(core, x, tail)
     # Stacked variants we don't need yet — keep as identity fallback.
     return x
 
