@@ -73,7 +73,13 @@ def main():
                     "corruption_head_372.json")
     ap.add_argument("--honest-per-corpus", type=int, default=12000)
     ap.add_argument("--negrich-n", type=int, default=120000)
+    ap.add_argument("--nfeat", type=int, default=372,
+                    help="372 (v1, uses the native-372 negrich) or 720 (v1++v2; the "
+                         "corpus is 720 so this tests whether v2 helps — negrich is "
+                         "skipped at 720 until it is regenerated at 720 via kadis-distort)")
     a = ap.parse_args()
+    global NFEAT
+    NFEAT = a.nfeat
     rng = np.random.default_rng(0)
 
     # positives + matched anchors (load 720 so we can score the perceptual model;
@@ -91,7 +97,12 @@ def main():
     # negrich severe-honest hard negatives (372) — regenerated WITH source_id, so
     # the split is LEAK-FREE (one KADIS reference → 5 severity rows must not straddle
     # folds). This is the fix the provenance-gapped original could not support.
-    if os.path.exists(a.negrich):
+    # At NFEAT=720 negrich is skipped (it is native-372; 720 regen via kadis-distort
+    # is the follow-on IF this comparison shows v2 helps).
+    if NFEAT > 372:
+        print(f"NFEAT={NFEAT}: skipping native-372 negrich (720 regen pending); this "
+              f"run measures whether v2 helps on corruption vs broad-honest+matched.")
+    elif os.path.exists(a.negrich):
         Xn, exn = load_X(a.negrich, NFEAT, extra=("source_id",))
         if len(Xn) > a.negrich_n:
             idx = rng.choice(len(Xn), a.negrich_n, replace=False)
