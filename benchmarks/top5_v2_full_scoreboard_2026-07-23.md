@@ -57,6 +57,33 @@ v2-extended anchor (small extraction, not yet done).
   Remaining chunk: thread a v2-prepared reference into `compute_with_ref_and_diffmap`'s
   `ModelSensitivity` path + a public `Zensim::compute_v2_diffmap` so the DEPLOYED map (M3)
   reads v2 — then re-measure M3 on v3/ebothg-504.
+
+### The diffmap superset the best models use IS additive (confirmed 2026-07-23)
+
+Scope the fold to the features the best models actually use — and, per the "perfectable
+features" thesis, verify they're additive (fold to a per-pixel mean). Confirmed against
+`finish_channel_scale`: **25 of 29 v2 signals are additive weighted-means**, foldable:
+
+| group | signals | per-pixel map | in the fold? |
+|---|--|---|---|
+| basic (ssim_mean/art/det/mse/hf×3) | 7 | simple mean of `M_local` | ✅ `compute_v2_diffmap_full` |
+| gms, ringing, blockiness, banding, pjnd-transducer(core) | 5 | simple mean | ✅ |
+| **masked** (ssim/art/det/mse) | 4 | `n·w·v/Σw`, `w=1−sat(act,C_ACT)` | ⏳ two-pass (workhorse per LOO) |
+| **iw** (ssim/art/det/mse) | 4 | `n·w·v/Σw`, `w=sat(act,C_ACT)+FLOOR` | ⏳ two-pass (workhorse per LOO) |
+| **soft-peak** (ssim/art/det) | 3 | `n·w·v/Σw`, `w=saliency` | ⏳ two-pass |
+| transducer-bank (low/high-k) | 2 | simple mean (same formula, other k) | ⏳ trivial |
+| dev2/dev4 | 2 | central moment — **NOT additive** | ✗ (nonlinear-of-mean) |
+| fragility | 1 | reference-only, `1−sat(mean grad)` — **NOT additive** | ✗ (correct 0 for steer) |
+| edge_width | 1 | cross-scale — **not per-pixel** | ✗ |
+
+**The masked/iw/soft-peak spatialization is the remaining chunk** — a two-pass over each
+channel-scale (Σw then `n·w·v/Σw`), reusing the `act`/`d`/`art_i`/`det_i`/`mse_i` the
+diffmap core already computes per pixel. Each family gets its own block-pool identity test
+(`mean(map) == weight·feature`), same gate as the 12 simple-mean families. That makes the
+deployed diffmap exact for the additive superset — which is precisely what an **additive**
+ship model (ADD-504 / an ADD-v3 on the good v2 subset: perfect dial 1.000, exact fold)
+needs for the closed loop. Only dev/fragility/edge_width stay out (genuinely non-additive);
+none is load-bearing per the LOO.
 - **G-RD / G-TARGET (codec-in-loop):** not run (~30 min probe, worktree binaries).
   Rank+dial gains must survive the equal-judged-quality byte comparison before ship.
 

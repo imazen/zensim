@@ -2614,6 +2614,15 @@ fn finish_channel_scale(
 ///   saturate(activity,C_ACTIVITY) * (1 - saturate(grad_src_mag,C_RING_EDGE))`.
 /// - [`idx::BANDING`] — `bounded_excess(grad_dst_mag, grad_src_mag,
 ///   C_BAND_DST) * (1 - saturate(grad_src_mag, C_BAND_SRC))`.
+/// - [`idx::MASKED_SSIM`] / [`idx::MASKED_ART`] / [`idx::MASKED_DET`] /
+///   [`idx::MASKED_MSE`] and [`idx::IW_SSIM`] / [`idx::IW_ART`] /
+///   [`idx::IW_DET`] / [`idx::IW_MSE`] — the weighted-pool families
+///   `Σ(w·v)/Σw`. Additive weighted means, so spatializable as `n·w·v/Σw`:
+///   the per-pixel numerators (`mask_w·v` with `mask_w = 1 - sat(act)`,
+///   `iw_w·v` with `iw_w = sat(act) + IW_WEIGHT_FLOOR`) and the global `Σw`
+///   are accumulated in the strip pass, then normalized by `n/Σw` after — so
+///   `mean_over_pixels(map)` equals the pooled ratio exactly (block-pool test).
+///   ART/DET route by `diff_dst`≷`diff_src`, matching the pooled kernel.
 ///
 /// # Excluded families (weight ignored, regardless of what the caller passes)
 ///
@@ -2621,13 +2630,11 @@ fn finish_channel_scale(
 ///   deviation-FROM-THE-MEAN moments (`dev2 = sqrt(M2/n)`,
 ///   `M2/n = E[d^2] - E[d]^2`): a NONLINEAR function of the whole-image
 ///   mean, not itself the mean of any single per-pixel quantity.
-/// - [`idx::SSIM_SOFT_PEAK`], [`idx::ART_SOFT_PEAK`], [`idx::DET_SOFT_PEAK`],
-///   [`idx::MASKED_SSIM`], [`idx::MASKED_ART`], [`idx::MASKED_DET`],
-///   [`idx::MASKED_MSE`], [`idx::IW_SSIM`], [`idx::IW_ART`], [`idx::IW_DET`],
-///   [`idx::IW_MSE`] — weighted-pool families (`Σw·v / Σw`): a RATIO of two
-///   sums, not the mean of one quantity. The per-pixel numerator `w·v`
-///   doesn't average to the pooled ratio — it needs normalization by the
-///   whole-image `Σw`, which isn't known until every pixel is visited.
+/// - [`idx::SSIM_SOFT_PEAK`], [`idx::ART_SOFT_PEAK`], [`idx::DET_SOFT_PEAK`]
+///   — the saliency-weighted-pool families (`Σw·v/Σw` with `w = saliency`).
+///   Additive like masked/iw and spatializable the same way once the
+///   per-pixel saliency weight is threaded through — a natural follow-up
+///   (masked/iw landed the pattern; soft-peak reuses it with `w = sal`).
 /// - [`idx::PJND_FRAGILITY`] — `1 - saturate(mean(grad_src_mag),
 ///   C_PJND_GRAD)`: reference-only, and a NONLINEAR function of the mean
 ///   gradient magnitude (not the mean of a per-pixel fragility value).
@@ -2680,6 +2687,26 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
     if width == 0 || height == 0 {
         return out;
     }
+
+    // Weighted-pool families (masked/iw) are additive weighted means
+    // `Σ(w·v)/Σw` — spatializable as `n·w·v/Σw` once the global `Σw` is known.
+    // Accumulate per-pixel weighted numerators + the global `Σw` during the
+    // strip pass; normalize into `out` after (so the map's mean equals the
+    // pooled weighted-mean feature, the block-pool identity the test gates).
+    // soft-peak needs the saliency weight (a follow-up); dev/fragility/
+    // edge_width are non-additive and stay excluded.
+    let has_mask = weights[idx::MASKED_SSIM] != 0.0
+        || weights[idx::MASKED_ART] != 0.0
+        || weights[idx::MASKED_DET] != 0.0
+        || weights[idx::MASKED_MSE] != 0.0;
+    let has_iw = weights[idx::IW_SSIM] != 0.0
+        || weights[idx::IW_ART] != 0.0
+        || weights[idx::IW_DET] != 0.0
+        || weights[idx::IW_MSE] != 0.0;
+    let mut masked_num = if has_mask { vec![0.0f32; n] } else { Vec::new() };
+    let mut iw_num = if has_iw { vec![0.0f32; n] } else { Vec::new() };
+    let mut sum_mask_w = 0.0f64;
+    let mut sum_iw_w = 0.0f64;
 
     let max_wide_h = STRIP_ROWS + 2 * HALO_P;
     let mut scratch = ScratchV2Strip::new(width * max_wide_h);
@@ -2776,7 +2803,43 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
 
                 let raw_diff = s - dd;
                 let raw_sq_err = raw_diff * raw_diff;
-                acc += weights[idx::MSE] * saturate(raw_sq_err, C_MSE);
+                let mse_v = saturate(raw_sq_err, C_MSE);
+                acc += weights[idx::MSE] * mse_v;
+
+                // Masked / IW weighted-pool numerators (normalized after the
+                // pass by n/Σw). Same `mask_w`/`iw_w` weights and ART/DET
+                // routing the pooled kernel uses: `mask_w = 1 - sat(act)`,
+                // `iw_w = sat(act) + FLOOR`.
+                if has_mask || has_iw {
+                    let sat_act = saturate(act, C_ACTIVITY);
+                    let (edge_art, edge_det) = if diff_dst > diff_src {
+                        (edge_dissim, 0.0)
+                    } else if diff_dst < diff_src {
+                        (0.0, edge_dissim)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    if has_mask {
+                        let mask_w = 1.0 - sat_act;
+                        sum_mask_w += mask_w;
+                        masked_num[i_global] += (mask_w
+                            * (weights[idx::MASKED_SSIM] * d
+                                + weights[idx::MASKED_ART] * edge_art
+                                + weights[idx::MASKED_DET] * edge_det
+                                + weights[idx::MASKED_MSE] * mse_v))
+                            as f32;
+                    }
+                    if has_iw {
+                        let iw_w = sat_act + IW_WEIGHT_FLOOR;
+                        sum_iw_w += iw_w;
+                        iw_num[i_global] += (iw_w
+                            * (weights[idx::IW_SSIM] * d
+                                + weights[idx::IW_ART] * edge_art
+                                + weights[idx::IW_DET] * edge_det
+                                + weights[idx::IW_MSE] * mse_v))
+                            as f32;
+                    }
+                }
 
                 let hf_src = s - m1;
                 let hf_dst = dd - m2;
@@ -2857,6 +2920,23 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
             out[i] += (w_block * bounded_excess(step_dst, step_src, C_BLOCK)) as f32;
         }
         y += BLOCK_LATTICE;
+    }
+
+    // Normalize the weighted-pool numerators: feature = Σ(w·v)/Σw, so the
+    // per-pixel map is (n/Σw)·Σ_family(weight·w·v). Then mean_over_pixels ==
+    // Σ_family weight·(Σ w·v / Σw) == Σ_family weight·feature, matching the
+    // block-pool identity for the masked/iw families. No-op if a pool's Σw≈0.
+    if has_mask && sum_mask_w > 1e-12 {
+        let f = n as f64 / sum_mask_w;
+        for i in 0..n {
+            out[i] += (f * masked_num[i] as f64) as f32;
+        }
+    }
+    if has_iw && sum_iw_w > 1e-12 {
+        let f = n as f64 / sum_iw_w;
+        for i in 0..n {
+            out[i] += (f * iw_num[i] as f64) as f32;
+        }
     }
 
     out
@@ -4240,6 +4320,15 @@ mod tests {
             idx::BLOCKINESS,
             idx::RINGING,
             idx::BANDING,
+            // Weighted-pool families (additive weighted means, normalized by n/Σw).
+            idx::MASKED_SSIM,
+            idx::MASKED_ART,
+            idx::MASKED_DET,
+            idx::MASKED_MSE,
+            idx::IW_SSIM,
+            idx::IW_ART,
+            idx::IW_DET,
+            idx::IW_MSE,
         ];
         let mut weights = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
         for &local in &supported {
@@ -4350,6 +4439,14 @@ mod tests {
             idx::BLOCKINESS,
             idx::RINGING,
             idx::BANDING,
+            idx::MASKED_SSIM,
+            idx::MASKED_ART,
+            idx::MASKED_DET,
+            idx::MASKED_MSE,
+            idx::IW_SSIM,
+            idx::IW_ART,
+            idx::IW_DET,
+            idx::IW_MSE,
         ];
         let rprep = prepare_v2_reference_impl(&refimg, None, false, false).unwrap();
         let dprep = prepare_v2_reference_impl(&dstimg, None, false, false).unwrap();
