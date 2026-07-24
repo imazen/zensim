@@ -72,6 +72,62 @@ both the 156-basic winner and the full-372 baseline, without the 720 FR-crater.
 
 Bakes: `/mnt/v/output/zensim/bakes/top5/`. Recipe: cookbook §3.
 
-## Remaining top models (queued)
-- `Ebothg_scr0.5` (= winner + bigcodec line) + v2
-- `ADD156` (additive linear basic-156) + v2 (linear 504 via the twin tool)
+## Ebothg_scr0.5 (winner + bigcodec) + v2 — CONFIRMS + amplifies
+
+Same 156-vs-504 twin with the bigcodec line added (`bigcodec:tbig504:0.5:1.0:both`,
+the scr0.5 recipe). v2 helps even more on FR, trading a small CID22/KonJND dip:
+
+| corpus | Eb156 | Eb504+v2 | Δ | (winner Δ, no bigcodec) |
+|---|--:|--:|--:|--:|
+| CID22 | 0.890 | 0.884 | −0.006 | (+0.004) |
+| imazen26 real-codec | 0.879 | **0.930** | +0.051 | (+0.021) |
+| imazen26 non-photo | 0.866 | **0.927** | +0.061 | (+0.022) |
+| CSIQ | 0.320 | 0.488 | +0.168 | (+0.085) |
+| LIVE | 0.272 | **0.684** | **+0.412** | (+0.217) |
+| KonJND | 0.452 | 0.425 | −0.027 | (+0.161) |
+
+**bigcodec mass + v2's FR families (gms/ringing/blockiness) synergize** — LIVE more
+than doubles, imazen26 clears 0.92 (beating shipped B's 0.896). Without bigcodec the
+benefit shifts to CID22 + KonJND. Either way, **the 504 (basic+v2) config is a net
+win**; the only regressions are ≤0.03 (CID22/KonJND with bigcodec).
+
+## ADD156 (additive linear, safesyn-only RAW) + v2 — same pattern
+
+The additive-linear top model (`ADD156_safesyn_only_raw_lasso`), 156 vs 504 RAW
+(BVLS, safesyn-only — via `linear_projections twin --mix add156 --raw`):
+
+| corpus | 156 | 504+v2 | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.810 | 0.780 | **−0.030** |
+| imazen26 real-codec | 0.837 | 0.851 | +0.014 |
+| imazen26 non-photo | 0.841 | 0.865 | +0.024 |
+| CSIQ | 0.531 | 0.787 | **+0.255** |
+| LIVE | 0.487 | **0.921** | **+0.434** |
+| KonJND | 0.386 | 0.476 | +0.091 |
+
+v2 helps FR massively (LIVE nearly doubles) but costs CID22 −0.030 — the classic
+linear behaviour (v2's FR mass drags linear CID22, same as bigcodec-poisons-linear).
+
+## BOTTOM LINE — v2 in the 504 config helps every replicated top model
+
+| model | CID22 Δ | FR (LIVE/CSIQ) | KonJND / imazen26 |
+|---|--:|---|---|
+| **winner_dial** (MLP, no bigcodec) | **+0.004** | +0.22 / +0.09 | +0.16 / +0.02 |
+| **Ebothg_scr0.5** (MLP, bigcodec) | −0.006 | **+0.41** / +0.17 | −0.03 / +0.06 |
+| **ADD156** (additive linear) | −0.030 | +0.43 / +0.26 | +0.09 / +0.02 |
+
+**Consistent across all three top models: `basic-156 ++ v2-348` (504) delivers large
+FR/non-photo gains** (LIVE +0.22…+0.43, CSIQ +0.09…+0.26, imazen26 +0.02…+0.06). The
+CID22 effect scales with architecture: the MLP winner *gains* CID22 (+0.004), the
+linear *loses* it (−0.030). **For the actual top model (winner_dial MLP), 504+v2 is a
+clean net win.**
+
+The earlier "v2 doesn't help" verdict was wrong because it tested the wrong config
+(372→720, where v2 is redundant) on the wrong instrument (linear). Replicating the
+real top models and testing the right config (drop v1's redundant masked/iw, add v2)
+shows v2 is a genuine improvement — strongest on the FR/non-photo axis the product
+cares about, and CID22-positive on the winning MLP.
+
+**Next (not done):** confirm 504 at full 196k safesyn (needs v2 extraction on the
+remaining 85k rows); run the RD + steer gates (§scorecard) on the 504 winner — rank
+gains must survive the codec-in-the-loop probe before any ship.

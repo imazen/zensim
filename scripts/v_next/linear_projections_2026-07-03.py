@@ -162,6 +162,8 @@ GROUPS = {
     "t720_kadid":   (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_kadid.parquet"), ["human_score"]),
     "t720_tid":     (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_tid.parquet"), ["human_score"]),
     "t720_konjnd":  (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_konjnd_jpeg_val.parquet"), ["human_score"]),
+    # ext504 (basic-156 ++ v2-348) safesyn — for the ADD156 replication twin.
+    "t504_safesyn": (Path("/mnt/v/zen/zensim-training/ext504-basic-v2-2026-07-23/ext_safesyn_full.parquet"), ["human_score"]),
 }
 VAL_SETS = {
     "bigcodec_val": (PROBE / "bigcodec_valdigits_2026-07-02.parquet", "human_score"),
@@ -405,6 +407,9 @@ MIXES_SDR = {
     "twinsdr": [("t720_safesyn", 1.0, "human_score"), ("t720_cid201", 1.5, "human_score"),
                 ("t720_kadid", 0.5, "human_score"), ("t720_tid", 0.5, "human_score"),
                 ("t720_konjnd", 1.2, "human_score")],
+    # ADD156 replication: safesyn-only additive linear (raw). Run at N_FEAT 156
+    # (basic) and 504 (basic++v2) on the ext504 corpus via cmd_twin --raw.
+    "add156": [("t504_safesyn", 1.0, "human_score")],
     "w7sdr": [("safesyn", 1.0, "human_score"), ("cid22_train", 1.5, "human_score"),
               ("kadid", 0.5, "human_score"), ("tid", 0.5, "human_score"),
               ("konjnd_dense", 1.2, "human_score"), ("bigcodec", 0.25, "human_score")],
@@ -1217,13 +1222,14 @@ def cmd_twin(args) -> int:
     the grams exist. mix name comes from --mix (a key in MIXES_SDR)."""
     (SCRATCH / "fits").mkdir(parents=True, exist_ok=True)
     mix = MIXES_SDR[args.mix]
-    print(f"[twin] N_FEAT={N_FEAT} mix={args.mix} screen={os.environ.get('ZLIN_SCREEN','(372+identity)')}", flush=True)
-    mg = MixGram("shaped", mix)            # OWNER: standardized Gram + rhs
+    space = "raw" if getattr(args, "raw", False) else "shaped"
+    print(f"[twin] N_FEAT={N_FEAT} mix={args.mix} space={space} screen={os.environ.get('ZLIN_SCREEN','(372+identity)')}", flush=True)
+    mg = MixGram(space, mix)               # OWNER: standardized Gram + rhs
     w, b = mg.bvls(load_mask())            # OWNER: BVLS solve
     print(f"[twin] BVLS active weights: {int((np.abs(w) > 1e-7).sum())}/{N_FEAT}", flush=True)
     key = f"twin_n{N_FEAT}"
     np.savez_compressed(SCRATCH / "fits" / f"{key}.npz",
-                        w=w, bias=b, mu=mg.mu, sd=mg.sd, space="shaped", desc="|".join(mg.desc))
+                        w=w, bias=b, mu=mg.mu, sd=mg.sd, space=space, desc="|".join(mg.desc))
     out = Path(args.out)
     bake_candidate(key, args.tau, out)     # OWNER: pack + bake
     print(f"[twin] baked {out}")
@@ -1234,7 +1240,7 @@ def cmd_twin(args) -> int:
             wz = w.copy(); wz[fdef["indices"]] = 0.0
             kz = f"{key}_drop_{fname}"
             np.savez_compressed(SCRATCH / "fits" / f"{kz}.npz",
-                                w=wz, bias=b, mu=mg.mu, sd=mg.sd, space="shaped", desc=f"LOO-drop-{fname}")
+                                w=wz, bias=b, mu=mg.mu, sd=mg.sd, space=space, desc=f"LOO-drop-{fname}")
             bake_candidate(kz, args.tau, loo_dir / f"drop_{fname}.bin")
             print(f"[twin][loo] baked drop_{fname} ({len(fdef['indices'])} feats zeroed)", flush=True)
     return 0
@@ -1256,6 +1262,7 @@ def main() -> int:
     sub.add_parser("residual2")
     tw = sub.add_parser("twin")
     tw.add_argument("--mix", default="twinsdr", help="a MIXES_SDR key (default twinsdr)")
+    tw.add_argument("--raw", action="store_true", help="fit in RAW feature space (no transforms) — for ADD156 replication")
     tw.add_argument("--out", required=True)
     tw.add_argument("--tau", type=float, default=0.0)
     tw.add_argument("--loo", default=None, help="v2 family map JSON for zero-ablation LOO (720 only)")
