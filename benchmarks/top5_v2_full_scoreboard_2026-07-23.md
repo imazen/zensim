@@ -109,4 +109,29 @@ transducer-Y}`** ≈ 156 + ~270 = ~430 features — the 504 config minus banding
 edge_width + chroma-transducers. Bake as an MLP with the winner recipe **+ bigcodec**
 (for the dial), then the v2 diffmap fold (task #48) makes it a coherent steerer.
 
-Next: build + train v3, run the full gauntlet incl. G-STEER (needs the fold) + G-RD.
+### v3 MEASURED (trained + gauntleted, winner+bigcodec recipe, 504-width, 48 harmful cols zeroed)
+
+| model | CID22 | im26_rc | im26_np | CSIQ | LIVE | KonJND | G3 mono | corruption |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| **v3-hybrid** | 0.880 | 0.928 | 0.923 | 0.441 | 0.661 | 0.422 | **0.960 ✓** | **10.4%** |
+| ebothg-504 (all v2) | 0.884 | 0.930 | 0.927 | 0.488 | 0.684 | 0.424 | 0.960 ✓ | 5.7% |
+| winner-504 (all v2) | 0.892 | 0.828 | 0.829 | 0.452 | 0.457 | 0.360 | 0.922 ✗ | 3.7% |
+
+**The design holds.** Dropping banding + edge_width + chroma-transducers (the LOO's
+harmful/non-foldable set):
+- **keeps the dial** (mono 0.960, passes G3) and near-identical CID22/imazen26 rank;
+- **nearly doubles corruption robustness** (3.7%→10.4% — the largest of any v2 MLP;
+  the harmful families were part of why broken decodes out-ranked honest q20);
+- costs a little FR rank (CSIQ −0.05, LIVE −0.02 vs ebothg-504) — the LOO's linear
+  "harmful" verdict didn't fully transfer to the MLP+bigcodec, where those families
+  carry a little FR signal.
+
+So v3 is the **cleaner, more robust** hybrid: same dial, best-of-v2 corruption, ~same
+rank on the product axes (CID22/imazen26). The pure-FR-rank optimum is ebothg-504
+(all v2); v3 trades a little of that for coherence (drops the non-foldable edge_width
++ chroma) + robustness. Which to ship is the rank-vs-robustness call the G-RD probe
+should settle. Corpora: `/mnt/v/zen/zensim-training/ext504-v3-2026-07-23`; bake
+`/mnt/v/output/zensim/bakes/top5/v3_hybrid.bin`.
+
+**Still to run before any ship:** the v2 diffmap fold (task #48 — unblocks G-STEER on
+v3/504), a v2-extended dial anchor (unblocks G1), and the G-RD codec-in-loop probe.
