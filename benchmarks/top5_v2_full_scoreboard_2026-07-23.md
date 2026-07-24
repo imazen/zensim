@@ -76,14 +76,21 @@ features" thesis, verify they're additive (fold to a per-pixel mean). Confirmed 
 | fragility | 1 | reference-only, `1−sat(mean grad)` — **NOT additive** | ✗ (correct 0 for steer) |
 | edge_width | 1 | cross-scale — **not per-pixel** | ✗ |
 
-**The masked/iw/soft-peak spatialization is the remaining chunk** — a two-pass over each
-channel-scale (Σw then `n·w·v/Σw`), reusing the `act`/`d`/`art_i`/`det_i`/`mse_i` the
-diffmap core already computes per pixel. Each family gets its own block-pool identity test
-(`mean(map) == weight·feature`), same gate as the 12 simple-mean families. That makes the
-deployed diffmap exact for the additive superset — which is precisely what an **additive**
-ship model (ADD-504 / an ADD-v3 on the good v2 subset: perfect dial 1.000, exact fold)
-needs for the closed loop. Only dev/fragility/edge_width stay out (genuinely non-additive);
-none is load-bearing per the LOO.
+**DONE (2026-07-23): masked+iw spatialized + wired end-to-end; G-STEER M3 ~0 → +0.36.**
+Added the two LOO workhorses (masked×4, iw×4) to `compute_v2_diffmap_channel_scale` — the
+weighted pool `Σ(w·v)/Σw` as `n·w·v/Σw` (accumulate `mask_w=1−sat(act)` / `iw_w=sat(act)+FLOOR`
+and the global Σw in the strip pass, normalize after). Each block-pool-identity tested.
+**20 of 29 families now fold** (12 simple-mean + masked + iw). Public
+`Zensim::compute_v2_diffmap` (feature-gated) exposes the fold; the G-STEER harness blends it
+with the v1 ModelSensitivity map (negating `s[372..]` to match v1's `−s` refine-here
+polarity). **Measured on winner_m720 (a v1-372++v2 bake, 512px CID22 pair): M3 = +0.3642 vs
+M1 +0.033 / v1-372 M3 −0.05** — an order-of-magnitude coherence gain; the fold works.
+The gap to the M2=1.0 ceiling is (a) 33% of this bake's gradient sits on the NON-foldable v1
+block (`f156-371` masked/iw/peak) — a pure **basic-156 ++ v2** model (the v3/504 config, or
+an **additive** ADD-v3: perfect dial 1.000) avoids it entirely; (b) soft-peak (×3, additive,
+reuses the masked/iw pattern with `w=saliency`) not yet folded; (c) single-pair noise.
+Remaining: soft-peak fold + re-measure M3 on a basic-156++v2 (foldable-only) bake → expected
+to approach the ceiling. dev/fragility/edge_width stay out (non-additive; none LOO-load-bearing).
 - **G-RD / G-TARGET (codec-in-loop):** not run (~30 min probe, worktree binaries).
   Rank+dial gains must survive the equal-judged-quality byte comparison before ship.
 
