@@ -19,10 +19,35 @@ Usage:
 """
 import argparse, os, glob, subprocess, shutil, sys, tempfile
 import numpy as np, pyarrow as pa, pyarrow.parquet as pq
+from PIL import Image
+Image.MAX_IMAGE_PIXELS = None  # sources include legit 100+ MP scans, not attacks
 
 GEN = os.path.expanduser("~/work/codec-corpus/crate/target/release/examples/corruption_corpus")
 EXTRACT = "./target/release/examples/v2_ab_extract"
 FEATCOLS = [f"f{i}" for i in range(720)]
+MAX_DIM = 1024  # cap source max-dimension (~1MP) — corruption signatures are
+                # scale-invariant, and this aligns resolution with the KADIS/safesyn
+                # negatives (~0.25-1MP) AND makes 720-feat extraction tractable
+                # (the raw imazen-26 sources run to 146 MP → hours/ref otherwise).
+
+
+def maybe_downsize(ref_path, tmpdir):
+    """Return a path to a ≤MAX_DIM version of ref_path (Lanczos), or the original
+    if already small enough. Writes a temp PNG so ref+corruption share dimensions."""
+    try:
+        im = Image.open(ref_path)
+        im = im.convert("RGB")
+        w, h = im.size
+        if max(w, h) <= MAX_DIM:
+            return ref_path
+        s = MAX_DIM / max(w, h)
+        im = im.resize((max(1, round(w * s)), max(1, round(h * s))), Image.LANCZOS)
+        out = os.path.join(tmpdir, "ref_small.png")
+        im.save(out)
+        return out
+    except Exception as e:
+        print(f"  downsize failed for {ref_path}: {e}", flush=True)
+        return ref_path
 
 
 def parse_name(stem):
@@ -35,6 +60,7 @@ def parse_name(stem):
 
 
 def process_ref(ref_path, ref_id, cclass, tmpdir):
+    ref_path = maybe_downsize(ref_path, tmpdir)  # cap ~MAX_DIM for tractable extraction
     outdir = os.path.join(tmpdir, "gen")
     if os.path.isdir(outdir):
         shutil.rmtree(outdir)
@@ -96,15 +122,16 @@ def process_ref(ref_path, ref_id, cclass, tmpdir):
 
 
 def main():
-    global GEN, EXTRACT
+    global GEN, EXTRACT, MAX_DIM
     ap = argparse.ArgumentParser()
     ap.add_argument("--sources", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--gen", default=GEN)
     ap.add_argument("--extract", default=EXTRACT)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--max-dim", type=int, default=MAX_DIM)
     a = ap.parse_args()
-    GEN, EXTRACT = a.gen, a.extract
+    GEN, EXTRACT, MAX_DIM = a.gen, a.extract, a.max_dim
     srcs = [l.rstrip("\n").split("\t") for l in open(a.sources) if l.strip()]
     if a.limit:
         srcs = srcs[:a.limit]
