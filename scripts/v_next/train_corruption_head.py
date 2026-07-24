@@ -73,6 +73,8 @@ def main():
                     "corruption_head_372.json")
     ap.add_argument("--honest-per-corpus", type=int, default=12000)
     ap.add_argument("--negrich-n", type=int, default=120000)
+    ap.add_argument("--ablate", action="store_true",
+                    help="sweep #features (top-K by |coef|) → the minimal detector for perf")
     ap.add_argument("--nfeat", type=int, default=372,
                     help="372 (v1, uses the native-372 negrich) or 720 (v1++v2; the "
                          "corpus is 720 so this tests whether v2 helps — negrich is "
@@ -144,6 +146,41 @@ def main():
           f"subclasses {dict(zip(*np.unique(sub, return_counts=True)))}")
 
     sc = StandardScaler().fit(X[tr]); Z = lambda M: np.clip(sc.transform(M), -8, 8)
+
+    # --- feature ablation: how few features does the detector actually need? ---
+    if getattr(a, "ablate", False):
+        def feat_desc(i):
+            # v1-372 layout: basic-156 = 13/ch/scale × 3ch × 4scale (f0..155);
+            # masked/iw/peak = f156..371 (18/ch/scale × 3ch × 4scale).
+            if i < 156:
+                blk, loc = "basic", i
+                scale = loc // 39; ch = (loc % 39) // 13
+            else:
+                blk, loc = "mask/iw/peak", i - 156
+                scale = loc // 54; ch = (loc % 54) // 18
+            return f"{blk} s{scale} c{ch}"
+        base = LogisticRegression(C=0.05, class_weight="balanced", max_iter=3000).fit(Z(X[tr]), y[tr])
+        order = np.argsort(-np.abs(base.coef_[0]))  # importance on standardized feats
+        corr_te = te & (y == 1)
+        print("\n=== ABLATION: detection + FP vs #features (top-K by |coef|, T=0.9) ===")
+        print(f"  {'K':>4} {'detection':>10} {'severe_FP':>10} {'broad_FP':>9}")
+        for K in [5, 8, 12, 16, 24, 32, 48, 64, 96, 156, 372]:
+            cols = order[:K]
+            Zk = Z(X)[:, cols]
+            ck = CalibratedClassifierCV(LogisticRegression(C=0.05, class_weight="balanced",
+                 max_iter=3000), method="isotonic", cv=3).fit(Zk[tr], y[tr])
+            pk = ck.predict_proba(Zk)[:, 1]
+            det = float((pk[corr_te] > 0.9).mean())
+            sfp = te & (y == 0) & (sub == "severe_honest")
+            bfp = te & (y == 0) & (sub == "broad_honest")
+            sv = float((pk[sfp] > 0.9).mean()) if sfp.sum() else float("nan")
+            bv = float((pk[bfp] > 0.9).mean()) if bfp.sum() else float("nan")
+            print(f"  {K:>4} {det*100:>9.1f}% {sv*100:>9.2f}% {bv*100:>8.2f}%")
+        print("\n  top-16 features (index : scale/channel/family):")
+        for i in order[:16]:
+            print(f"    f{int(i):<3} coef={base.coef_[0][i]:+.3f}  {feat_desc(int(i))}")
+        return
+
     clf = CalibratedClassifierCV(LogisticRegression(C=0.05, class_weight="balanced", max_iter=3000),
                                  method="isotonic", cv=3).fit(Z(X[tr]), y[tr])
     P = lambda M: clf.predict_proba(Z(M))[:, 1]

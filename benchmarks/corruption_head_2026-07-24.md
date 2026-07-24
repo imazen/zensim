@@ -72,6 +72,34 @@ false-firing on honest content in the loop. Deadband `T=0.9` → ~0.3% honest FP
 - `head_{372,720}_nonegrich.json` — the feature-comparison heads.
 Tower: `/mnt/tower/output/zensim-corruption-head-2026-07-24/`.
 
+## Feature ablation (perf question)
+
+`train_corruption_head.py --ablate` sweeps top-K features (by |coef|). Detection +
+FP vs K (held-out sources, T=0.9):
+
+| K | detection | severe-honest FP | broad FP |
+|--:|--:|--:|--:|
+| 32 | 77.8% | 0.17% | 0.41% |
+| 48 | 80.6% | 0.11% | 0.28% |
+| **64** | **81.8%** | **0.04%** | 0.34% |
+| 156 | 85.1% | 0.06% | 0.37% |
+| 372 | 84.8% | 0.06% | 0.33% |
+
+**64 features ≈ full (81.8% vs 84.8%)** — a 6× smaller head for ~3% detection. But
+the perf payoff is limited, and honestly so: the top features span **all scales
+(s0..s3), both chroma channels, AND both blocks** (basic `f17-21` at the *finest*
+scale + mask/iw/peak `f255-334`). Consequences:
+- **Deployment is already free:** the head reads features the perceptual model
+  already extracts → one dot-product; K doesn't change deployment cost.
+- **No cheap standalone gate:** the signal needs the finest (most expensive) scale
+  *and* the mask/iw/peak block, so corruption detection cannot run without the full
+  multi-scale pipeline. A fast regression-test gate that skips the perceptual
+  extraction is NOT reachable from this feature set.
+So ablation buys a smaller/less-overfit head + the knowledge that 64 features
+suffice — not a speedup. (A genuinely-cheap gate would need corruption-specific
+*cheap* features, e.g. a coarse-scale structural-signature à la
+`structural_signature_spike.py`, which is a different design.)
+
 ## Follow-ons
 
 - Detection 85% + broad-FP 0.34% is a solid v1; a small MLP (vs logistic) or more
