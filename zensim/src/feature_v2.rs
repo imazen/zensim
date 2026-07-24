@@ -2968,12 +2968,11 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
 /// and nearest-upsampling preserves a plane's mean. See
 /// `tests::v2_diffmap_full_block_pool_matches_features`.
 ///
-/// Staged landing: this correctness core is proven by its block-pool test; the
-/// runtime wiring (threading a v2-prepared reference into
-/// `compute_with_ref_and_diffmap`'s `ModelSensitivity` path + a public
-/// `Zensim::compute_v2_diffmap` for the G-STEER harness) is the next chunk of
-/// task #48, which will make this non-test-only and remove the allow.
-#[cfg_attr(not(test), allow(dead_code))]
+/// Exposed to consumers via the public [`crate::Zensim::compute_v2_diffmap`]
+/// (the G-STEER harness + encoder closed loop call it there). The `s_v2`
+/// gradient it takes is the `s[372..]` tail of a v1-372 ++ v2 bake's full
+/// gradient; the v1 contribution comes from the ordinary `ModelSensitivity`
+/// diffmap path, summed with this.
 pub(crate) fn compute_v2_diffmap_full(
     reference: &impl ImageSource,
     distorted: &impl ImageSource,

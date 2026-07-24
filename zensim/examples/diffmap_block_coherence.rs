@@ -312,21 +312,30 @@ fn run_bake_mode(
     // question is purely M3-deployed = whether the fold, once extended to read
     // v2, reaches that ceiling. See benchmarks/v2_trainability_ab_2026-07-19.md
     // (v2_combined_steer_mass.py: 100% foldable for the coherence-maxed model).
-    if n_in > 372 {
+    // Combined append-only bake (n_in > 372 = v1-372 ++ v2): the v2 block's
+    // gradient `s[372..]` now folds into a per-pixel map via
+    // `Zensim::compute_v2_diffmap` (task #48), so M3 below reads v2. The v1
+    // masked/iw/peak (f156-371) remain non-spatializable in the v1 fold, so
+    // that share of the gradient still can't be deployed — reported here.
+    let v2_grad: Option<Vec<f64>> = if n_in > 372 {
         let total: f64 = s.iter().map(|v| v.abs()).sum::<f64>().max(1e-30);
-        let nonspat: f64 = s[156..372.min(n_in)].iter().map(|v| v.abs()).sum();
+        let nonspat: f64 = s[156..372].iter().map(|v| v.abs()).sum();
         println!(
             "combined bake (n_inputs={n_in})  base_score={base_score:.2}  grad_zero={grad_zero}/{n_in}"
         );
         println!(
-            "  scalar path OK. raw-|s_k| mass on NON-spatializable v1 block (f156-371): {:.1}%  (per-pair; corpus σ-weighted proxy is v2_combined_steer_mass.py)",
+            "  non-deployable v1 block (f156-371) raw-|s_k| mass: {:.1}%  (the v1 masked/iw/peak the v1 fold can't spatialize; the v2 versions at f372+ DO fold)",
             100.0 * nonspat / total
         );
-        println!(
-            "  M1/M1b/M3 (deployable per-pixel diffmap) require the runtime fold extended to read the v2 block — NOT yet implemented. M2 ceiling ≈1.0 (LeakyReLU exact)."
-        );
-        return;
-    }
+        // NEGATE the gradient to match the v1 `model_sensitivity_weights`
+        // convention (`w = -s`): with `s_k<0` for a quality metric, `-s_k>0`
+        // makes the map high where refining raises the score (the "refine-here"
+        // polarity M1/M3 share). compute_v2_diffmap folds Σ w·M with whatever
+        // weights it's given; the steering weight is `-∂score/∂f`.
+        Some(s[372..n_in].iter().map(|&x| -x).collect::<Vec<f64>>())
+    } else {
+        None
+    };
 
     // Three per-pixel diffmaps for the same pair:
     //   M1  — the CURRENT shipped default (ssim-only signals, profile weighting):
@@ -336,7 +345,14 @@ fn run_bake_mode(
     //   M3  — ModelSensitivity: signals weighted by THIS bake's own s_k
     //         (the deployable approximation of the exact gradient).
     let dist_slice = RgbSlice::new(dpx, w, h);
-    let diff = z
+    // The per-pixel MAPS are the deployed v1 error signals (weighted); they do
+    // not depend on the bake's scalar. `compute_with_diffmap` on the custom
+    // bake would try to SCORE it (needs all n_in features; the streaming path
+    // only extracts ≤372 → fails for a 720 bake), so the maps are built with a
+    // v1 profile. The bake (`z`) is used only for the ground-truth `delta_s` /
+    // `s_k` below. The v2 contribution is added separately via `compute_v2_diffmap`.
+    let z_map = Zensim::new(ZensimProfile::latest_preview());
+    let diff = z_map
         .compute_with_diffmap(&rs, &dist_slice, weighting)
         .expect("diffmap")
         .diffmap()
@@ -347,14 +363,14 @@ fn run_bake_mode(
         include_hf: true,
         ..Default::default()
     };
-    let diff_all = z
+    let diff_all = z_map
         .compute_with_diffmap(&rs, &dist_slice, all_signals(weighting))
         .expect("diffmap all-signals")
         .diffmap()
         .to_vec();
     // s_k over the basic block only — the per-pixel machinery spatializes f0..155.
     let s_basic: &'static [f64] = Box::leak(s[..n_in.min(156)].to_vec().into_boxed_slice());
-    let diff_model = z
+    let mut diff_model = z_map
         .compute_with_diffmap(
             &rs,
             &dist_slice,
@@ -363,6 +379,19 @@ fn run_bake_mode(
         .expect("diffmap model-sensitivity")
         .diffmap()
         .to_vec();
+
+    // task #48: for a v1++v2 bake, add the v2 block's per-pixel contribution
+    // (its gradient s[372..] folded through the additive v2 families) to the
+    // v1 model-sensitivity map — the deployed map now reads v2.
+    if let Some(v2g) = &v2_grad {
+        let v2map = z_map
+            .compute_v2_diffmap(&rs, &dist_slice, v2g)
+            .expect("v2 diffmap");
+        assert_eq!(v2map.len(), diff_model.len());
+        for (m, v) in diff_model.iter_mut().zip(v2map.iter()) {
+            *m += *v;
+        }
+    }
 
     let bx = w.div_ceil(block);
     let by = h.div_ceil(block);
@@ -387,8 +416,17 @@ fn run_bake_mode(
             let rr = z
                 .compute_extended_features(&rs, &RgbSlice::new(&scratch, w, h))
                 .expect("refined features");
-            let rfeats = rr.features();
-            delta_s[b] = score(rfeats) - base_score;
+            let mut rfeats = rr.features().to_vec();
+            // Concat the refined v2 block for a >372 combined bake — same dual-
+            // compute as base_feats, so `score`/`s_k` see the full n_in vector.
+            #[cfg(feature = "feature-regime-v2")]
+            if n_in > rfeats.len() {
+                let v2 = z
+                    .compute_v2_features(&rs, &RgbSlice::new(&scratch, w, h))
+                    .expect("refined v2 features");
+                rfeats.extend_from_slice(v2.features());
+            }
+            delta_s[b] = score(&rfeats) - base_score;
             lin_pred[b] = (0..n_in).map(|k| s[k] * (rfeats[k] - base_feats[k])).sum();
             for y in y0..y1 {
                 for x in x0..x1 {

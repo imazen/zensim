@@ -1265,6 +1265,44 @@ impl Zensim {
         )
     }
 
+    /// Per-pixel diffmap for the v2 feature block: the contribution of an
+    /// append-only bake's v2 weights to its scalar, at full resolution. This
+    /// is the steering companion to [`Self::compute_v2_features`] — folding
+    /// each v2 family's per-pixel error map, weighted by the bake's gradient
+    /// `s_v2` w.r.t. that feature, so an encoder closed loop can read *where*
+    /// to refine for the v2 part of the score. The v1 (≤372) contribution
+    /// comes from the ordinary [`crate::DiffmapWeighting::ModelSensitivity`]
+    /// path; summing the two gives the deployed map for a v1++v2 bake.
+    ///
+    /// `s_v2` is laid out exactly as the v2 feature view indexes it —
+    /// `s_v2[scale*3*29 + ch*29 + local]`, length `n_scales*3*29` — i.e. the
+    /// `s[372..]` tail of a frozen-v1-372 ++ v2 bake's full gradient.
+    ///
+    /// The map spatializes the ADDITIVE families exactly (simple-mean +
+    /// masked/iw weighted-pools, block-pool-identity tested); the genuinely
+    /// non-additive families (`dev2/dev4`, `fragility`, `edge_width`) carry no
+    /// weight, matching their exclusion from an exact per-pixel fold.
+    ///
+    /// # Errors
+    ///
+    /// [`ZensimError::ImageTooSmall`], [`ZensimError::HdrInputRequiresPuPath`],
+    /// or [`ZensimError::ImageTooLarge`] — same as the feature path.
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_v2_diffmap(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        s_v2: &[f64],
+    ) -> Result<Vec<f32>, ZensimError> {
+        crate::feature_v2::compute_v2_diffmap_full(
+            source,
+            distorted,
+            s_v2,
+            self.max_pixels,
+            self.parallel,
+        )
+    }
+
     /// Like [`Self::compute_v2_features`], but with explicit control over
     /// which phase-2 new-feature GROUPS (`crate::feature_v2::
     /// V2NewFeatureToggles`) are computed. Used for per-group marginal-cost
