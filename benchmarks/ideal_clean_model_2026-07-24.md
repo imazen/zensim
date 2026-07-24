@@ -75,7 +75,17 @@ M3 = mean over the 9-pair city/dog/girl × q20/q50/q75 grid):
 
 - **p=0.2 is the recommended ship point**: corruption plateaus after it (81.2→82.0 for p
   0.2→0.15) while CID22 keeps eroding. vs cbrt: **corruption +17.8pt, M3 +0.024, LIVE
-  +0.033, AIC4 +0.008; CID22 −0.016, CSIQ −0.005.** dial monotonicity stays a perfect 1.000.
+  +0.033, AIC4 +0.008; CID22 −0.016, CSIQ −0.005.**
+- **⚠ the `dial=1.000` column is the PRE-SPLINE [0,1]-scale measurement and is NOT a
+  validated fine-grained G3 pass.** These splineless bakes output ~[0,1], so the dial
+  gate's 0.5-*point* backward-step threshold (designed for a [0,100] dial) never triggers
+  → mono reads 1.000 trivially. It confirms only COARSE monotonicity. The true
+  fine-grained dial monotonicity is measurable only after a [0,100] spline — and the
+  safesyn-proxy spline (below) gave **0.878** (fails G3 ≤0.07 inversions; median backward
+  step 0.58pt, p90 4.74pt = real errors, not just near-lossless noise). So the proper 720
+  dial anchor is required BOTH to close G1 range AND to actually validate G3 on a real
+  [0,100] dial. The whole frontier's `dial=1.000` should be read as "coarse-monotone;
+  fine-grained TBD," not "gate passed."
 - **The CID22 −0.016 is a user-gated trade** (per `~/work/zen/CLAUDE.md`: CID22 trades are
   user-gated) to actually swap into a shipped profile. As a *research* clean-model it is a
   clear strict improvement on 5 of 6 axes.
@@ -90,11 +100,22 @@ M3 = mean over the 9-pair city/dog/girl × q20/q50/q75 grid):
 
 - **Clean on the meaningful gates** (ship point = `signed_pow` p=0.2): dial monotonicity
   1.000, diffmap M3 0.53 (coherent — vs the MLPs' ~0), corruption 81%, foldable-mass 100%.
-- **G1 dial *range* (p5≤25 ∧ p95≥85)** needs a full-0-100 anchor at 720 — the
-  `multiband_anchor_dial100` is 372-feature; splining on `cid201` (human_score∈[0.4,0.9])
-  gives a monotone but narrow range. Mechanical fix: extract v2 on the ~2000 dial-anchor
-  images → a 720 anchor, then `bake_dial_refit add-spline`. **This is the one remaining
-  step to a fully-shippable dial; the rank/diffmap/corruption science is done.**
+- **G1 dial *range* (p5≤25 ∧ p95≥85)** needs a full-0-100 anchor at 720. **Attempted
+  2026-07-24 and confirmed the doc's assessment — a proxy anchor is NOT enough:**
+  `bake_dial_refit add-spline` on the 720 `safesyn` (`human_score`×100) fit cleanly
+  (raw pred [−0.26,1.15] → dial [−5.6,90.6]; G1 **p95=90.6 ✓**, **p5=28.9** just misses
+  ≤25), and CID22 (0.787) + corruption (81.2%) were unchanged (spline is rank-invariant,
+  as designed). BUT **G3 dial monotonicity dropped 1.000→0.878**: scaling the raw [0,1]
+  output to [0,100] amplifies the densified near-lossless (q97→100) sub-JND wiggles past
+  the gate's 0.5-pt backward-step threshold — wiggles that were sub-0.5 in raw units and
+  so invisible at [0,1] scale. The mechanical fix therefore needs (a) a 720 anchor whose
+  raw-output distribution *matches the dial grid* (re-extract v2 on the ~2000
+  `multiband_anchor_dial100` pairs → a 720 anchor with `target_score`; source pairs must
+  be located first), OR (b) near-lossless-aware knot placement so the top-end spline
+  slope doesn't amplify sub-JND noise. The safesyn proxy dial bake lives at
+  `signedpow-clean-2026-07-24/ideal_smoothpow_p0p2_dial.bin` (G1-close but G3-failing — a
+  diagnostic, NOT the ship). **The rank/diffmap/corruption/raw-monotonicity science is
+  done; this is the final calibration step.**
 - **Rank ceiling.** CID22 0.79 / CSIQ 0.77 is the price of clean: additive +
   sign-constrained + foldable-only + smooth-shaped. The MLP's 0.89 buys ~+0.10 CID22 at
   the cost of the dial and the diffmap — not a trade the closed-loop product should make.
