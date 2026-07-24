@@ -168,24 +168,52 @@ at λ_corr=0.0005) and re-breaks monotonicity — the two constraints fight.
 | mono+corr λ0.0005 | 0.406 | 0.760 | 0.758 | **96.0** | 0.924~ | — | corruption + ~G3 |
 | mono λ1.0 (heavy) | 0.558 | 0.823 | 0.868 | 31.2 | **0.987 ✓** | 0.62 | G3 only |
 
-**Conclusion — a capacity limit, not a tuning miss.** For the sign-constrained
-linear foldable model, the three orderings **CID22 human-rank ↔ codec-q dial
-monotonicity (G3) ↔ corruption-tail order** are **mutually antagonistic: any two
-are reachable, never all three.** This is the "too-small blanket": the linear model
-lacks the degrees of freedom to satisfy all three simultaneously. It is the same
-capacity wall from the other side of the earlier G3↔diffmap tension — B buys G3 with
-winsor + full-372 features but loses the diffmap (M3≈0); the clean linear model buys
-the diffmap but can hold only two of {CID22, G3, corruption}.
+**Conclusion (SUPERSEDED — see RESOLUTION below).** Within *one scalar*, the three
+orderings **CID22 human-rank ↔ codec-q dial monotonicity (G3) ↔ corruption-tail
+order** are mutually antagonistic for the linear foldable model: any two reachable,
+never all three. I first read this as a capacity wall needing a bigger brain. That
+was wrong — the fix is architectural (corruption → 2nd head), not capacity. The
+"only two of three in one scalar" observation still holds; its *interpretation*
+changes: you should only ask the perceptual scalar for CID22 + G3 (+ the diffmap it
+already carries), and detect corruption separately. See RESOLUTION.
 
-**Resolution requires more capacity, not more tuning:** a small non-linear head
-(shallow MLP) has the room for all three — but historically breaks the diffmap fold
-(M3≈0). The unlock is to extend the runtime diffmap fold (task #48, now done for the
-linear/foldable survivors) to a shallow MLP so it keeps M3 *and* gains the capacity
-for CID22 + G3 + corruption together. That is the next real step; picking a 2-of-3
-linear point (best: mono λ0.003 = CID22 + G3, sacrifices corruption) is the fallback.
+**RESOLUTION (2026-07-24, user-driven) — corruption is a 2nd HEAD; the "3-way
+tension" was self-inflicted.** The framing above ("need a bigger brain for all
+three in one scalar") was WRONG, corrected by three questions:
 
-Regularizer bakes + the frontier verdicts: `signedpow-clean-2026-07-24/`
-(`ideal_p0p2_mono*.bin`, `ideal_p0p2_L*_F*.bin`, `ideal_p0p2_c*.bin`).
+1. **The two-model split (B-dial + clean-diffmap) is out — it breaks the closed
+   loop.** The codec nudges bits *where the damage-map points* to move *the dial*
+   toward a target. The damage-map must be the gradient of the SAME scalar that
+   defines the dial, or pushing bits per the map doesn't move the dial predictably.
+   Dial + diffmap are therefore inseparable — one model.
+2. **Corruption belongs in a SEPARATE eval head, not the perceptual scalar.**
+   Corruption is a *catastrophic-mismatch* regime (extreme feature values), distinct
+   from the *smooth-degradation* range the dial operates in. Forcing the smooth
+   monotone dial to also rank structural corruption below q20 is what created the
+   apparent tension. **Measured: a cheap logistic head on the same 720 features
+   separates corruption from honest at AUC ≈ 1.000 / 99.8% accuracy on held-out
+   scenarios** — corruption detection is trivial for a dedicated head and does not
+   need to constrain the dial at all.
+3. So the goal is **ONE perceptual model (rank + smooth-dial + coherent diffmap,
+   coupled for the loop) + a separate corruption head** — NOT one scalar doing all
+   four. With corruption removed from its constraints, the **mono λ0.003 model IS
+   that clean perceptual model**: CID22 0.787, CSIQ 0.833, LIVE 0.743, nonphoto
+   0.817, im26 0.826, **dial G3 0.958 ✓, G1 14.7/94.5 ✓, M3 0.58** — rank + dial +
+   diffmap all clean, in one loop-coherent scalar. (KADID/TID/KonJND dip: the
+   codec-q monotonicity prior does not help their ~95%-non-compression synthetic
+   distortions; those are the known integrity/weak corpora.)
+
+The earlier per-category corruption check that motivated this: the perceptual
+baseline catches genuinely-visible damage (block/noise/aliasing) at 80% and the
+G3-regularized model at 25% — real evidence that catastrophic corruption and the
+smooth dial are separable regimes a 2nd head should own, not a capacity wall.
+
+**Ship shape:** perceptual model = `ideal_p0p2_L0p003_F0p005.bin` (needs its final
+[0,100] dial spline from the proper anchor per the DIAL VALIDATION section) +
+corruption head (prototype validated; a proper detector is the small follow-on).
+A shallow-MLP perceptual model remains a *possible* upgrade for raw rank, but is no
+longer *required* to resolve the tension. Regularizer bakes + verdicts:
+`signedpow-clean-2026-07-24/` (`ideal_p0p2_mono*.bin`, `*_L*_F*.bin`, `*_c*.bin`).
 
 ## Honest status
 
