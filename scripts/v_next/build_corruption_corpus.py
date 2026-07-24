@@ -94,6 +94,11 @@ def process_ref(ref_path, ref_id, cclass, tmpdir):
     feats = {}
     with open(fcsv) as f:
         rd = _csv.reader(f); hdr = next(rd)
+        missing = [c for c in FEATCOLS if c not in hdr]
+        if missing or "human_score" not in hdr:
+            print(f"  SKIP {ref_id}: extractor output missing cols "
+                  f"(e.g. {missing[:2]}) — truncated CSV, skipping ref", flush=True)
+            return None
         fi = [hdr.index(c) for c in FEATCOLS]
         hj = hdr.index("human_score")
         for row in rd:
