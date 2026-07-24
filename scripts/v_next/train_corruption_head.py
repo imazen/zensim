@@ -69,7 +69,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--negrich", default=NEGRICH)
-    ap.add_argument("--out", default=f"{DST}/corruption_head_372.json")
+    ap.add_argument("--out", default="/mnt/v/output/zensim/corruption-head-2026-07-24/"
+                    "corruption_head_372.json")
     ap.add_argument("--honest-per-corpus", type=int, default=12000)
     ap.add_argument("--negrich-n", type=int, default=120000)
     a = ap.parse_args()
@@ -127,8 +128,8 @@ def main():
     cc = np.concatenate([p[4] for p in parts])
     sub = np.concatenate([p[6] for p in parts])
     which = split_ids(src, rng)
-    tr, te = which == "train", which == "test"
-    print(f"total {len(X)} rows | split train {tr.sum()} / test {te.sum()} | "
+    tr, va, te = which == "train", which == "val", which == "test"
+    print(f"total {len(X)} rows | split train {tr.sum()} / val {va.sum()} / test {te.sum()} | "
           f"subclasses {dict(zip(*np.unique(sub, return_counts=True)))}")
 
     sc = StandardScaler().fit(X[tr]); Z = lambda M: np.clip(sc.transform(M), -8, 8)
@@ -138,52 +139,91 @@ def main():
 
     corr_te = te & (y == 1)
     if corr_te.sum() == 0:
-        print("WARN: no held-out-source corruptions in test fold (too few corruption "
-              "sources — expected only in a tiny pilot). Skipping detection report.")
+        print("WARN: no held-out-source corruptions in test fold (tiny pilot). Skipping.")
         return
+
+    metrics = {"n_train": int(tr.sum()), "n_test": int(te.sum()),
+               "subclass_counts": {k: int(v) for k, v in zip(*np.unique(sub, return_counts=True))},
+               "threshold_curve": [], "per_family_detection_T0.9": {},
+               "per_content_T0.9": {}}
     print("\n=== HELD-OUT-SOURCE detection + false-positive by subclass ===")
-    for T in (0.5, 0.9, 0.99):
-        det = float((P(X[corr_te]) > T).mean())
-        line = f"  T={T}: detection={det*100:5.1f}%"
-        for sc_name in ("severe_honest", "broad_honest", "matched_anchor"):
-            m = te & (y == 0) & (sub == sc_name)
+    pcorr = P(X[corr_te])
+    for T in (0.5, 0.9, 0.95, 0.99):
+        row = {"T": T, "detection": float((pcorr > T).mean())}
+        line = f"  T={T}: detection={row['detection']*100:5.1f}%"
+        for scn in ("severe_honest", "broad_honest", "matched_anchor"):
+            m = te & (y == 0) & (sub == scn)
             if m.sum():
-                line += f"  FP[{sc_name}]={float((P(X[m])>T).mean())*100:.2f}%"
-        print(line)
+                row[f"fp_{scn}"] = float((P(X[m]) > T).mean())
+                line += f"  FP[{scn}]={row[f'fp_{scn}']*100:.2f}%"
+        metrics["threshold_curve"].append(row); print(line)
 
     print("\n=== per-corruption-family detection (held-out sources, T=0.9) ===")
     for f in sorted(set(fam[corr_te])):
         m = corr_te & (fam == f)
         if m.sum() >= 5:
-            print(f"  {f:26s}: {float((P(X[m])>0.9).mean())*100:5.1f}%  (n={int(m.sum())})")
+            d = float((P(X[m]) > 0.9).mean()); metrics["per_family_detection_T0.9"][f] = d
+            print(f"  {f:26s}: {d*100:5.1f}%  (n={int(m.sum())})")
 
     print("\n=== per-content-class corruption detection (held-out sources, T=0.9) ===")
     for c in sorted(set(cc[corr_te])):
         m = corr_te & (cc == c)
         if m.sum():
-            print(f"  {c:10s}: {float((P(X[m])>0.9).mean())*100:5.1f}% (n={int(m.sum())})")
+            d = float((P(X[m]) > 0.9).mean()); metrics["per_content_T0.9"][c] = d
+            print(f"  {c:10s}: {d*100:5.1f}% (n={int(m.sum())})")
 
-    # perceptual-miss value-add: score the perceptual model (full 720) on the
-    # corpus corruption rows in the test fold. The corpus is the FIRST block of the
-    # concatenated arrays, so which[:len(Xc720)] are its split labels.
     try:
         te_corpus = which[:len(Xc720)]
         mask = (te_corpus == "test") & (isc == 1)
         if mask.sum():
-            ps = perc_score(Xc720[mask], "perc_corr_te")
-            det = P(Xc720[mask][:, :NFEAT])
+            ps = perc_score(Xc720[mask], "perc_corr_te"); det = P(Xc720[mask][:, :NFEAT])
             miss = ps > 40
             if miss.sum():
+                metrics["value_add"] = {"perceptual_miss_frac": float(miss.mean()),
+                                        "head_catches_of_misses": float((det[miss] > 0.9).mean())}
                 print(f"\n=== VALUE-ADD: perceptual scores {float(miss.mean())*100:.1f}% of held-out "
-                      f"corruptions >40 ('looks OK'); head catches {float((det[miss]>0.9).mean())*100:.1f}% of THOSE ===")
+                      f"corruptions >40; head catches {float((det[miss]>0.9).mean())*100:.1f}% of THOSE ===")
     except Exception as e:
         print(f"(value-add skipped: {e})")
 
+    # recommend the deadband threshold: lowest T with severe-honest FP < 1%
+    rec = 0.99
+    for row in metrics["threshold_curve"]:
+        if row.get("fp_severe_honest", 1.0) < 0.01:
+            rec = row["T"]; break
+    metrics["recommended_deadband_T"] = rec
+
+    # --- PERSIST durably to block storage: portable head + calibration + metrics + manifest ---
+    from sklearn.isotonic import IsotonicRegression
     lr = LogisticRegression(C=0.05, class_weight="balanced", max_iter=3000).fit(Z(X[tr]), y[tr])
-    json.dump({"nfeat": NFEAT, "mean": sc.mean_.tolist(), "scale": sc.scale_.tolist(),
-               "coef": lr.coef_[0].tolist(), "intercept": float(lr.intercept_[0]), "clip": 8.0},
-              open(a.out, "w"))
-    print(f"\nsaved 372-feat head → {a.out}")
+    raw_va = lr.decision_function(Z(X[va])) if va.sum() else lr.decision_function(Z(X[tr]))
+    y_va = y[va] if va.sum() else y[tr]
+    iso = IsotonicRegression(out_of_bounds="clip").fit(1 / (1 + np.exp(-raw_va)), y_va)
+    outdir = os.path.dirname(a.out); os.makedirs(outdir, exist_ok=True)
+    head = {"nfeat": NFEAT, "mean": sc.mean_.tolist(), "scale": sc.scale_.tolist(),
+            "coef": lr.coef_[0].tolist(), "intercept": float(lr.intercept_[0]), "clip": 8.0,
+            "calibration": {"x": iso.X_thresholds_.tolist(), "y": iso.y_thresholds_.tolist()},
+            "recommended_deadband_T": rec,
+            "deploy": "P=isotonic(sigmoid(clip((feat[:372]-mean)/scale,±8)·coef+intercept)); "
+                      "gate=100 unless P>recommended_deadband_T; final=min(perceptual,gate)"}
+    json.dump(head, open(a.out, "w"))
+    json.dump(metrics, open(os.path.join(outdir, "metrics.json"), "w"), indent=1)
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        commit = "unknown"
+    json.dump({"artifact": os.path.basename(a.out), "build_commit": commit,
+               "corpus": a.corpus, "negrich": a.negrich, "perceptual_model": PERC,
+               "nfeat": NFEAT, "split": "source-held-out (ref_id / KADIS source_id), seed 0",
+               "n_sources_corruption": len(set(ex["ref_id"])),
+               "recommended_deadband_T": rec,
+               "key_result": {k: metrics.get(k) for k in ("value_add",)},
+               "deadband_row": next((r for r in metrics["threshold_curve"]
+                                     if r["T"] == rec), None)},
+              open(os.path.join(outdir, "_MANIFEST.json"), "w"), indent=1)
+    print(f"\nPERSISTED → {outdir}/")
+    print(f"  corruption_head_372.json (weights+calibration), metrics.json, _MANIFEST.json")
+    print(f"  recommended deadband T={rec}")
 
 
 if __name__ == "__main__":
