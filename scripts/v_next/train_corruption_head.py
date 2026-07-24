@@ -38,8 +38,8 @@ DST = "/mnt/v/output/zensim/signedpow-clean-2026-07-24"
 PERC = f"{DST}/ideal_p0p2_L0p003_F0p005_bd.bin"
 
 
-def load_X(path, nfeat, extra=()):
-    cols = [f"f{i}" for i in range(nfeat)]
+def load_X(path, idx, extra=()):
+    cols = [f"f{i}" for i in idx]
     t = pq.read_table(path, columns=cols + list(extra))
     X = np.column_stack([t.column(c).to_numpy(zero_copy_only=False).astype(np.float64) for c in cols])
     ex = {e: np.asarray(t.column(e).to_pylist()) for e in extra}
@@ -79,46 +79,61 @@ def main():
                     help="372 (v1, uses the native-372 negrich) or 720 (v1++v2; the "
                          "corpus is 720 so this tests whether v2 helps — negrich is "
                          "skipped at 720 until it is regenerated at 720 via kadis-distort)")
+    ap.add_argument("--feat-subset", default=None,
+                    help="npy of feature indices to restrict to (e.g. the dial+diffmap "
+                         "foldable subset). Default: f0..f{nfeat-1}.")
+    ap.add_argument("--severe-720", default=None,
+                    help="a 720-feat severe-honest parquet (matched kadis-distort) to use "
+                         "as the severe_honest negatives INSTEAD of native-372 negrich — "
+                         "required for a v2/foldable subset. Leak-free split on its ref_id.")
     a = ap.parse_args()
     global NFEAT
     NFEAT = a.nfeat
     rng = np.random.default_rng(0)
+    FEAT_IDX = (np.load(a.feat_subset).astype(int).tolist() if a.feat_subset
+                else list(range(NFEAT)))
+    print(f"feature set: {len(FEAT_IDX)} features "
+          f"({'subset '+os.path.basename(a.feat_subset) if a.feat_subset else f'f0..f{NFEAT-1}'})")
 
-    # positives + matched anchors (load 720 so we can score the perceptual model;
-    # the detector uses only the first 372)
-    Xc720, ex = load_X(a.corpus, 720, extra=("is_corruption", "family", "content_class",
-                                             "severity", "ref_id"))
+    # positives + matched anchors (load full 720 for the perceptual value-add;
+    # the detector uses the FEAT_IDX subset)
+    Xc720, ex = load_X(a.corpus, range(720), extra=("is_corruption", "family",
+                       "content_class", "severity", "ref_id"))
     isc = ex["is_corruption"].astype(int)
     print(f"corpus: {len(Xc720)} rows ({int(isc.sum())}c/{int((isc==0).sum())} matched-honest), "
           f"{len(set(ex['ref_id']))} sources, {len(set(ex['family']))} families")
 
-    parts = []  # (X372, y, source, family, content, severity, subclass, X720_or_None)
-    parts.append((Xc720[:, :NFEAT], isc, ex["ref_id"], ex["family"], ex["content_class"],
+    parts = []  # (X_subset, y, source, family, content, severity, subclass, X720_or_None)
+    parts.append((Xc720[:, FEAT_IDX], isc, ex["ref_id"], ex["family"], ex["content_class"],
                   ex["severity"], np.where(isc == 1, "corruption", "matched_anchor"), Xc720))
 
-    # negrich severe-honest hard negatives (372) — regenerated WITH source_id, so
-    # the split is LEAK-FREE (one KADIS reference → 5 severity rows must not straddle
-    # folds). This is the fix the provenance-gapped original could not support.
-    # At NFEAT=720 negrich is skipped (it is native-372; 720 regen via kadis-distort
-    # is the follow-on IF this comparison shows v2 helps).
-    if NFEAT > 372:
-        print(f"NFEAT={NFEAT}: skipping native-372 negrich (720 regen pending); this "
-              f"run measures whether v2 helps on corruption vs broad-honest+matched.")
-    elif os.path.exists(a.negrich):
-        Xn, exn = load_X(a.negrich, NFEAT, extra=("source_id",))
-        if len(Xn) > a.negrich_n:
-            idx = rng.choice(len(Xn), a.negrich_n, replace=False)
-            Xn, sid = Xn[idx], exn["source_id"][idx]
-        else:
-            sid = exn["source_id"]
-        s = np.array([f"negrich/{v}" for v in sid])  # real source_id → leak-free
+    # severe-honest hard negatives — leak-free split on source. Prefer the matched
+    # 720 kadis-distort set (works with ANY feature subset incl. v2/foldable);
+    # else the native-372 negrich (regenerated WITH source_id).
+    def add_severe(Xn, srcids, n_uniq, tag):
+        s = np.array([f"severe/{v}" for v in srcids])
         lab = lambda v: np.array([v] * len(Xn))
         parts.append((Xn, np.zeros(len(Xn), dtype=int), s, lab("severe_honest"),
                       lab("severe_honest"), lab("severe_honest"), lab("severe_honest"), None))
-        print(f"negrich: {len(Xn)} severe-honest hard negatives (372-feat, "
-              f"{len(set(sid))} unique KADIS source_ids → leak-free split)")
+        print(f"severe_honest: {len(Xn)} hard negatives ({tag}, {n_uniq} unique "
+              f"sources → leak-free split)")
+    if a.severe_720 and os.path.exists(a.severe_720):
+        Xn, exn = load_X(a.severe_720, FEAT_IDX, extra=("ref_id",))
+        if len(Xn) > a.negrich_n:
+            k = rng.choice(len(Xn), a.negrich_n, replace=False); Xn, sid = Xn[k], exn["ref_id"][k]
+        else:
+            sid = exn["ref_id"]
+        add_severe(Xn, sid, len(set(sid)), f"matched-720 {os.path.basename(a.severe_720)}")
+    elif max(FEAT_IDX) < 372 and os.path.exists(a.negrich):
+        Xn, exn = load_X(a.negrich, FEAT_IDX, extra=("source_id",))
+        if len(Xn) > a.negrich_n:
+            k = rng.choice(len(Xn), a.negrich_n, replace=False); Xn, sid = Xn[k], exn["source_id"][k]
+        else:
+            sid = exn["source_id"]
+        add_severe(Xn, sid, len(set(sid)), "native-372 negrich")
     else:
-        print("WARN: negrich missing — no severe-honest hard negatives!")
+        print("WARN: no severe-honest source for this feature subset "
+              "(need --severe-720 for a v2/foldable subset)!")
 
     # broad honest easy negatives (span q, diverse content)
     for name, p in [("safesyn", f"{FOLD}/ext_safesyn_full.parquet"),
@@ -127,7 +142,7 @@ def main():
                     ("csiq", f"{FOLD}/ext_csiq.parquet"), ("live", f"{FOLD}/ext_live.parquet")]:
         if not os.path.exists(p):
             continue
-        Xb, exb = load_X(p, NFEAT, extra=("ref_basename",))
+        Xb, exb = load_X(p, FEAT_IDX, extra=("ref_basename",))
         idx = rng.choice(len(Xb), min(a.honest_per_corpus, len(Xb)), replace=False)
         s = np.array([f"{name}/{r}" for r in exb["ref_basename"][idx]])
         lab = lambda v: np.array([v]*len(idx))
@@ -224,7 +239,7 @@ def main():
         te_corpus = which[:len(Xc720)]
         mask = (te_corpus == "test") & (isc == 1)
         if mask.sum():
-            ps = perc_score(Xc720[mask], "perc_corr_te"); det = P(Xc720[mask][:, :NFEAT])
+            ps = perc_score(Xc720[mask], "perc_corr_te"); det = P(Xc720[mask][:, FEAT_IDX])
             miss = ps > 40
             if miss.sum():
                 metrics["value_add"] = {"perceptual_miss_frac": float(miss.mean()),
@@ -248,11 +263,12 @@ def main():
     y_va = y[va] if va.sum() else y[tr]
     iso = IsotonicRegression(out_of_bounds="clip").fit(1 / (1 + np.exp(-raw_va)), y_va)
     outdir = os.path.dirname(a.out); os.makedirs(outdir, exist_ok=True)
-    head = {"nfeat": NFEAT, "mean": sc.mean_.tolist(), "scale": sc.scale_.tolist(),
+    head = {"nfeat": len(FEAT_IDX), "feat_idx": [int(i) for i in FEAT_IDX],
+            "mean": sc.mean_.tolist(), "scale": sc.scale_.tolist(),
             "coef": lr.coef_[0].tolist(), "intercept": float(lr.intercept_[0]), "clip": 8.0,
             "calibration": {"x": iso.X_thresholds_.tolist(), "y": iso.y_thresholds_.tolist()},
             "recommended_deadband_T": rec,
-            "deploy": "P=isotonic(sigmoid(clip((feat[:372]-mean)/scale,±8)·coef+intercept)); "
+            "deploy": "x=feat[feat_idx]; P=isotonic(sigmoid(clip((x-mean)/scale,±8)·coef+intercept)); "
                       "gate=100 unless P>recommended_deadband_T; final=min(perceptual,gate)"}
     json.dump(head, open(a.out, "w"))
     json.dump(metrics, open(os.path.join(outdir, "metrics.json"), "w"), indent=1)

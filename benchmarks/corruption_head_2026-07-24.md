@@ -135,3 +135,33 @@ overfits on the source-held-out split. So:
   content) → extract 720 → the severe-honest boundary on the shared subset. This is
   the payoff that justifies the 720-negrich regen deferred earlier.
 Subset scan: `corruption-head-2026-07-24/compare_subsets.py` + `foldable_idx.npy`.
+
+## Unified head (foldable-384 subset + MATCHED 720 severe-honest) — 2026-07-24
+
+Regenerated severe-honest at 720 the right way — matched content, no confound —
+via `build_severe_honest_720.py`: kadis-distort's 24 IQA types × severe levels
+{3,4,5} on the SAME imazen-26 sources → 11,664 severe-honest rows, 161 sources,
+all 720-feat (`severe-honest-720-2026-07-24/`). Trainer gained `--feat-subset`
+(arbitrary feature indices) + `--severe-720` (720 severe negatives, leak-free on
+ref_id) so the corruption head can train on the dial+diffmap **foldable-384**
+subset.
+
+Trained the unified head (foldable-384 + matched-720 severe-honest, source-held-out):
+detection 89.7% (photo/text 89.7/89.8), broad-honest FP 0.04%, matched-anchor 0.00%,
+value-add: catches 92.6% of perceptual-missed corruptions. **The 384-subset is
+viable** — corruption runs on exactly the dial+diffmap features, one shared
+extraction, mask/iw/peak dropped.
+
+BUT the corruption-vs-severe-honest boundary is **under-trained**: severe-honest FP
+= 8.77% at T=0.9 (foldable-384) / 6.11% (full-720) — the mask/iw/peak block barely
+helps (so keep it dropped), but 11k matched severe-honest is too little vs 95k
+corruption. (The earlier 0.06% was a CONTENT artifact — KADIS-content negrich ≠
+imazen corruptions; this matched test is the honest, harder one.)
+
+**What closes it — the full 720 negrich (the lilith-lianli job):** the KADIS-700k
+severe-honest at 720 (280k rows, v2-populated) gives the volume + KADIS content
+diversity to nail the boundary on the shared subset. Re-extract 720 on the
+GPU-canonical `distorted_url` PNGs, or regenerate via kadis-distort on the 140k
+KADIS refs. This is the standing "all datasets → 720" population, routed to
+lilith-lianli. Heads persisted: `corruption_head_foldable384.json` (with `feat_idx`),
+`head_full720_matched.json`.
