@@ -45,10 +45,18 @@ v2-extended anchor (small extraction, not yet done).
 
 ## Gates NOT run (honest blockers)
 
-- **G-STEER (diffmap coherence M2/M3):** the runtime diffmap fold is ≤372-hardwired
-  (task #48) — it cannot read the v2 block, so M3 for any 504/720 bake is unmeasurable
-  until the fold is extended. The proxy (spatializable-mass) predicts ext-lumacoh ≈1.0
-  M3 once wired; that wiring is the remaining ship-engineering.
+- **G-STEER (diffmap coherence M2/M3): NOW MEASURABLE on v2 bakes (task #48 progress).**
+  Built the coherence example with `feature-regime-v2` and ran it on the v2-720 bake:
+  **M2 ceiling ≈ 1.0** (LeakyReLU-exact) — so the v2 bake **passes the "can be steered"
+  gate**. Two findings: (1) the tool cleanly reports M2 + flags M1/M3 for v2 instead of
+  panicking; (2) **M3 (deployed map) ≈ 0 for EVERY MLP bake** — v1-156 +0.009, v1-372
+  −0.05, even SSE (+0.45) beats them — so the deployed diffmap needs the gradient-weighted
+  fold regardless of v2. The correctness core of that fold, **`compute_v2_diffmap_full`**
+  (full-image v2 contribution from a bake's v2 gradient), is **landed + block-pool-identity
+  tested** (`feature_v2::tests::v2_diffmap_full_block_pool_matches_features`, rel_err <2e-3).
+  Remaining chunk: thread a v2-prepared reference into `compute_with_ref_and_diffmap`'s
+  `ModelSensitivity` path + a public `Zensim::compute_v2_diffmap` so the DEPLOYED map (M3)
+  reads v2 — then re-measure M3 on v3/ebothg-504.
 - **G-RD / G-TARGET (codec-in-loop):** not run (~30 min probe, worktree binaries).
   Rank+dial gains must survive the equal-judged-quality byte comparison before ship.
 

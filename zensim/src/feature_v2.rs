@@ -2862,6 +2862,86 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
     out
 }
 
+/// Full-image v2 diffmap: the per-pixel contribution of a bake's v2 block to
+/// its scalar, at scale-0 (full) resolution. This is the builder the runtime
+/// steering fold (`compute_with_ref_and_diffmap`'s `ModelSensitivity` path)
+/// needs to make the DEPLOYED diffmap read v2 — currently it folds only the
+/// ≤372 v1 block, so `M3` (deployed-map coherence) is ~0 for every v2 bake
+/// (and every v1 MLP bake) while `M2` (the gradient ceiling) is ≈1.0.
+///
+/// `s_v2` is the bake's gradient w.r.t. each v2 feature, laid out exactly as
+/// [`FeatureViewV2`] indexes them: `s_v2[scale*3*TOTAL + ch*TOTAL + local]`,
+/// length `n_scales*3*`[`FEATURES_PER_CHANNEL_V2_TOTAL`]. The caller slices it
+/// out of the full bake gradient (`s[372..]` for a frozen-v1++v2 720 bake).
+///
+/// Builds the SAME pyramid the feature extractor uses (via
+/// [`prepare_v2_reference_impl`] for both images — bit-identical planes), runs
+/// [`compute_v2_diffmap_channel_scale`] per channel-scale with that scale's
+/// weight slice, and nearest-upsamples each coarser scale's map to full res
+/// (mean-preserving on even dims) accumulating into one map.
+///
+/// # Block-pool identity (the correctness gate)
+///
+/// `mean_over_pixels(full) == Σ_{scale,ch,local∈SUPPORTED} s_v2[..]·feature`,
+/// to FP-reassociation tolerance, because each channel-scale map already
+/// satisfies that identity ([`compute_v2_diffmap_channel_scale`]'s own gate)
+/// and nearest-upsampling preserves a plane's mean. See
+/// `tests::v2_diffmap_full_block_pool_matches_features`.
+///
+/// Staged landing: this correctness core is proven by its block-pool test; the
+/// runtime wiring (threading a v2-prepared reference into
+/// `compute_with_ref_and_diffmap`'s `ModelSensitivity` path + a public
+/// `Zensim::compute_v2_diffmap` for the G-STEER harness) is the next chunk of
+/// task #48, which will make this non-test-only and remove the allow.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn compute_v2_diffmap_full(
+    reference: &impl ImageSource,
+    distorted: &impl ImageSource,
+    s_v2: &[f64],
+    max_pixels: Option<usize>,
+    parallel: bool,
+) -> Result<Vec<f32>, ZensimError> {
+    let rprep = prepare_v2_reference_impl(reference, max_pixels, parallel, false)?;
+    let dprep = prepare_v2_reference_impl(distorted, max_pixels, parallel, false)?;
+    let n_scales = rprep.scales.len().min(dprep.scales.len());
+    let per_scale = 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+    debug_assert!(
+        s_v2.len() >= n_scales * per_scale,
+        "s_v2 too short: {} < {}",
+        s_v2.len(),
+        n_scales * per_scale
+    );
+    let (w0, h0) = (rprep.scales[0].1, rprep.scales[0].2);
+    let mut out = vec![0.0f32; w0 * h0];
+    for scale in 0..n_scales {
+        let (ref planes_r, ws, hs) = rprep.scales[scale];
+        let planes_d = &dprep.scales[scale].0;
+        for ch in 0..3 {
+            // This channel-scale's weight slice → the [TOTAL] array the core takes.
+            let mut weights = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
+            let base = scale * per_scale + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+            weights.copy_from_slice(&s_v2[base..base + FEATURES_PER_CHANNEL_V2_TOTAL]);
+            if weights.iter().all(|&w| w == 0.0) {
+                continue;
+            }
+            let cs =
+                compute_v2_diffmap_channel_scale(&planes_r[ch], &planes_d[ch], ws, hs, &weights);
+            // Nearest-upsample (ws,hs)->(w0,h0), accumulate. Mean-preserving when
+            // w0/h0 are integer multiples of ws/hs (the pyramid's even case).
+            for y in 0..h0 {
+                let sy = if hs == h0 { y } else { y * hs / h0 };
+                let row_c = sy * ws;
+                let row_o = y * w0;
+                for x in 0..w0 {
+                    let sx = if ws == w0 { x } else { x * ws / w0 };
+                    out[row_o + x] += cs[row_c + sx];
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 // ============================================================================
 // Top-level entry point
 // ============================================================================
@@ -4218,6 +4298,95 @@ mod tests {
                 feat[local]
             );
         }
+    }
+
+    /// Acceptance gate for [`compute_v2_diffmap_full`] (the runtime-fold
+    /// builder): its full-image map's mean equals the summed weighted feature
+    /// over EVERY channel-scale, not just one. Expected is computed from the
+    /// SAME prepared planes the builder uses (`compute_channel_scale_v2` on
+    /// `prepare_v2_reference_impl`'s scales), so the XYB conversion + pyramid
+    /// are shared and the only thing under test is the per-channel-scale
+    /// accumulate + nearest-upsample. Even dims (96→48→24→12) make the
+    /// upsample exactly mean-preserving.
+    #[test]
+    fn v2_diffmap_full_block_pool_matches_features() {
+        let (width, height) = (96usize, 96usize);
+        let n = width * height;
+        // Mild RGB fixture (kept clear of mean-level clamps, like the
+        // channel-scale test above).
+        let mut refpx = vec![[0u8; 3]; n];
+        let mut dstpx = vec![[0u8; 3]; n];
+        for y in 0..height {
+            for x in 0..width {
+                let i = y * width + x;
+                let base = 120.0 + 40.0 * ((x as f32) * 0.11).sin() * ((y as f32) * 0.09).cos();
+                let r = base.clamp(20.0, 235.0);
+                let g = (base + 8.0).clamp(20.0, 235.0);
+                let b = (base - 6.0).clamp(20.0, 235.0);
+                refpx[i] = [r as u8, g as u8, b as u8];
+                let d = 4.0 * (((x + y) as f32) * 0.5).sin();
+                dstpx[i] = [
+                    (r + d).clamp(20.0, 235.0) as u8,
+                    (g - d).clamp(20.0, 235.0) as u8,
+                    (b + d * 0.5).clamp(20.0, 235.0) as u8,
+                ];
+            }
+        }
+        let refimg = crate::RgbSlice::new(&refpx, width, height);
+        let dstimg = crate::RgbSlice::new(&dstpx, width, height);
+
+        // Expected: Σ over every (scale,ch) of the supported families' features,
+        // from the builder's own planes.
+        let supported = [
+            idx::SSIM_MEAN,
+            idx::ART,
+            idx::DET,
+            idx::MSE,
+            idx::HF_GAIN,
+            idx::HF_LOSS,
+            idx::HF_MAG_LOSS,
+            idx::PJND_TRANSDUCER,
+            idx::GMS,
+            idx::BLOCKINESS,
+            idx::RINGING,
+            idx::BANDING,
+        ];
+        let rprep = prepare_v2_reference_impl(&refimg, None, false, false).unwrap();
+        let dprep = prepare_v2_reference_impl(&dstimg, None, false, false).unwrap();
+        let n_scales = rprep.scales.len();
+        let per_scale = 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+        let mut s_v2 = vec![0.0f64; n_scales * per_scale];
+        let mut expected = 0.0f64;
+        let toggles = V2NewFeatureToggles::default();
+        let max_wide_h = STRIP_ROWS + 2 * HALO_P;
+        for scale in 0..n_scales {
+            let (ref pr, ws, hs) = rprep.scales[scale];
+            let pd = &dprep.scales[scale].0;
+            for ch in 0..3 {
+                let mut scratch = ScratchV2Strip::new(ws * max_wide_h);
+                let mut feat = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
+                compute_channel_scale_v2(
+                    &pr[ch], &pd[ch], ws, hs, toggles, None, &mut scratch, &mut feat,
+                );
+                let base = scale * per_scale + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                for &local in &supported {
+                    s_v2[base + local] = 1.0;
+                    expected += feat[local];
+                }
+            }
+        }
+
+        let map = compute_v2_diffmap_full(&refimg, &dstimg, &s_v2, None, false).unwrap();
+        assert_eq!(map.len(), n);
+        assert!(map.iter().all(|v| v.is_finite()), "non-finite entries");
+        let map_mean: f64 = map.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
+        let rel_err = (map_mean - expected).abs() / expected.abs().max(1e-9);
+        assert!(
+            rel_err < 2e-3,
+            "full-diffmap block-pool mean {map_mean} vs feature sum {expected}: rel_err {rel_err}"
+        );
+        // Fixture must actually exercise the families (not pass trivially at 0).
+        assert!(expected > 1e-3, "fixture produced ~zero supported-feature sum");
     }
 
     // ------------------------------------------------------------------
