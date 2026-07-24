@@ -212,6 +212,89 @@ def shape_block(X: np.ndarray, transforms, tparams) -> np.ndarray:
     return Y
 
 
+# The 720-feature dial grid (codec q-sweeps) — the structural source for the
+# q-monotonicity regularizer. Uses ONLY the q ORDER (public codec quality order),
+# never any eval label, so it is a structural prior, not eval-label leakage.
+DIAL_GRID_720 = Path("/mnt/v/output/zensim/v2-eval-720-2026-07-22/"
+                     "dial_grid_720col_2026-07-22.parquet")
+
+
+def build_dial_mono_diffs(sd: np.ndarray, transforms, tparams, hold_frac: float = 0.0):
+    """Standardized shaped-feature differences (hi−lo) for adjacent-q pairs within
+    each (image_id, codec) dial curve. `q` is quality-ascending for every codec
+    (jxl's q-equiv already inverts distance), so a positive `Δz·w` == a monotone
+    step. Returns (dz_reg, dz_held): dz_reg trains the regularizer; if hold_frac>0
+    a disjoint image-id split is held out for a leak-free G3 check. mu cancels in
+    the difference, so only `/sd` standardization is needed."""
+    import pyarrow.parquet as _pq
+    t = _pq.read_table(DIAL_GRID_720, columns=FCOLS + ["image_id", "codec", "q"])
+    X = np.column_stack([t[c].to_numpy(zero_copy_only=False).astype(np.float64)
+                         for c in FCOLS])
+    img = np.asarray([str(v) for v in t["image_id"].to_pylist()])
+    cod = np.asarray([str(v) for v in t["codec"].to_pylist()])
+    q = t["q"].to_numpy(zero_copy_only=False).astype(np.float64)
+    Xs = shape_block(X, transforms, tparams)
+    uimg = sorted(set(img))
+    # deterministic held-out split on a stable hash of image_id
+    held = set()
+    if hold_frac > 0.0:
+        for u in uimg:
+            h = int(hashlib.md5(u.encode()).hexdigest()[:8], 16)
+            if (h % 1000) / 1000.0 < hold_frac:
+                held.add(u)
+    reg, hld = [], []
+    key = np.char.add(np.char.add(img, "|"), cod)
+    for k in np.unique(key):
+        idx = np.where(key == k)[0]
+        order = idx[np.argsort(q[idx], kind="mergesort")]
+        this_img = img[idx[0]]
+        bucket = hld if this_img in held else reg
+        for a, b in zip(order[:-1], order[1:]):
+            if q[b] <= q[a]:
+                continue
+            d = Xs[b] - Xs[a]
+            if not np.all(np.isfinite(d)) or float(np.max(np.abs(d))) < 1e-12:
+                continue  # codec-saturated / identical encode → no signal
+            bucket.append(d)
+    dz_reg = (np.array(reg) / sd) if reg else np.zeros((0, N_FEAT))
+    dz_hld = (np.array(hld) / sd) if hld else np.zeros((0, N_FEAT))
+    return dz_reg, dz_hld
+
+
+CORRUPTION_GRID_720 = Path("/mnt/v/output/zensim/v2-eval-720-2026-07-22/"
+                           "corruption_grid_720col_2026-07-22.parquet")
+
+
+def build_corruption_order_diffs(sd: np.ndarray, transforms, tparams):
+    """Standardized shaped-feature differences `z(q20) − z(corruption)` for each
+    (scenario) prefix in the corruption grid. A positive `Δz·w` == q20 (honest
+    low-quality) scores ABOVE the structurally-broken corruption, i.e. the
+    negative-tail gate `score(corruption) < score(q20)` holds. Feeds the SAME
+    augmented normal-equations machinery as the q-monotonicity rows, so a single
+    fit can hold BOTH G3 (dial monotonicity) and the corruption gate."""
+    import pyarrow.parquet as _pq
+    t = _pq.read_table(CORRUPTION_GRID_720, columns=FCOLS + ["entry"])
+    X = np.column_stack([t[c].to_numpy(zero_copy_only=False).astype(np.float64)
+                         for c in FCOLS])
+    entry = [str(v) for v in t["entry"].to_pylist()]
+    Xs = shape_block(X, transforms, tparams)
+    by = {}
+    for i, e in enumerate(entry):
+        # 'PREFIX__corruption' / 'PREFIX__q20' — split off the trailing tag
+        if "__" not in e:
+            continue
+        prefix, tag = e.rsplit("__", 1)
+        by.setdefault(prefix, {})[tag] = i
+    diffs = []
+    for prefix, tags in by.items():
+        if "corruption" in tags and "q20" in tags:
+            d = Xs[tags["q20"]] - Xs[tags["corruption"]]
+            if np.all(np.isfinite(d)) and float(np.max(np.abs(d))) >= 1e-12:
+                diffs.append(d)
+    dz = (np.array(diffs) / sd) if diffs else np.zeros((0, N_FEAT))
+    return dz
+
+
 # ---------------------------------------------------------------------------
 def cmd_gram(args) -> int:
     transforms, tparams = load_transforms()
@@ -343,6 +426,19 @@ class MixGram:
         A = self.G + lam * self.W * np.eye(N_FEAT)
         w = np.linalg.solve(A, self.c)
         return w, self.ybar
+
+    def add_dial_mono(self, dz: np.ndarray, targets: np.ndarray, lam: float):
+        """Fold a q-monotonicity penalty into the normal equations IN PLACE:
+        `lam · Σ_pairs (dz·w − target)²`. Each row wants the standardized
+        adjacent-q feature step `dz·w` to reach `target` (a positive gap), so
+        inverted steps are pulled up. Contributes `lam·dzᵀdz` to G and
+        `lam·dzᵀtargets` to c — the sign-constrained BVLS then solves the
+        augmented system unchanged. `lam` is scaled to the data mass (W) inside
+        cmd_twin so it is comparable across mixes."""
+        if dz.shape[0] == 0 or lam <= 0.0:
+            return
+        self.G = self.G + lam * (dz.T @ dz)
+        self.c = self.c + lam * (dz.T @ targets)
 
     def _chol(self):
         # NaN/inf guard: a shaped feature-column that is all-zero (e.g. a masked
@@ -1249,9 +1345,50 @@ def cmd_twin(args) -> int:
     print(f"[twin] N_FEAT={N_FEAT} mix={args.mix} space={space} screen={os.environ.get('ZLIN_SCREEN','(372+identity)')}", flush=True)
     mg = MixGram(space, mix)               # OWNER: standardized Gram + rhs
     ridge_lam = getattr(args, "ridge", 0.0) or 0.0
+    mono_lam = getattr(args, "dial_mono_lambda", 0.0) or 0.0
     if ridge_lam > 0.0:
         w, b = mg.ridge(ridge_lam)         # OWNER: ridge (λI — non-singular under masked/zero cols)
         print(f"[twin] ridge(λ={ridge_lam}) active weights: {int((np.abs(w) > 1e-7).sum())}/{N_FEAT}", flush=True)
+    elif mono_lam > 0.0 and N_FEAT >= 720:
+        # q-monotonicity-regularized BVLS: iterative one-sided hinge. Solve
+        # unregularized, then for each adjacent-q dial step keep its current gap
+        # if already ≥ floor else lift it to floor, fold that into the normal
+        # equations, and re-solve. Uses only the dial grid's q ORDER (structural
+        # prior). A disjoint image-id split is held out for a leak-free G3 check.
+        floor = getattr(args, "dial_mono_floor", 0.02)
+        hold = getattr(args, "dial_mono_hold", 0.3)
+        corr_lam_raw = getattr(args, "dial_corr_lambda", 0.0) or 0.0
+        corr_margin = getattr(args, "dial_corr_margin", 0.05)
+        transforms, tparams = load_transforms()
+        dz, dz_held = build_dial_mono_diffs(mg.sd, transforms, tparams, hold_frac=hold)
+        # scale λ to the data mass so it is comparable across mixes / grids
+        lam = mono_lam * (mg.W / max(dz.shape[0], 1))
+        # corruption-ordering rows (q20 above corruption) — the SAME augmented
+        # machinery, its own λ, so one fit holds both G3 and the corruption gate.
+        dz_corr = (build_corruption_order_diffs(mg.sd, transforms, tparams)
+                   if corr_lam_raw > 0.0 else np.zeros((0, N_FEAT)))
+        lam_corr = corr_lam_raw * (mg.W / max(dz_corr.shape[0], 1)) if dz_corr.shape[0] else 0.0
+        pin = load_mask()
+        w, b = mg.bvls(pin)
+        def inv_rate(ww, D):
+            if D.shape[0] == 0:
+                return float("nan")
+            return float((D @ ww <= 0.0).mean())
+        print(f"[twin] mono: {dz.shape[0]} reg-pairs, {dz_held.shape[0]} held-pairs, "
+              f"λ_eff={lam:.4g} floor={floor} | corr: {dz_corr.shape[0]} pairs "
+              f"λ_corr_eff={lam_corr:.4g} margin={corr_margin}", flush=True)
+        print(f"[twin] iter0 (unreg): mono-held-inv={inv_rate(w,dz_held):.4f} "
+              f"corr-viol={inv_rate(w,dz_corr):.4f}", flush=True)
+        for it in range(1, getattr(args, "dial_mono_iters", 3) + 1):
+            targets = np.maximum(dz @ w, floor)     # keep good gaps, lift inversions
+            mg2 = MixGram(space, mix)               # fresh G/c (add_dial_mono mutates)
+            mg2.add_dial_mono(dz, targets, lam)
+            if lam_corr > 0.0:                      # corruption: fixed positive margin
+                mg2.add_dial_mono(dz_corr, np.full(dz_corr.shape[0], corr_margin), lam_corr)
+            w, b = mg2.bvls(pin)
+            print(f"[twin] iter{it}: mono-held-inv={inv_rate(w,dz_held):.4f} "
+                  f"corr-viol={inv_rate(w,dz_corr):.4f} active={int((np.abs(w)>1e-7).sum())}/{N_FEAT}", flush=True)
+        mg = mg2
     else:
         w, b = mg.bvls(load_mask())        # OWNER: BVLS solve
         print(f"[twin] BVLS active weights: {int((np.abs(w) > 1e-7).sum())}/{N_FEAT}", flush=True)
@@ -1295,6 +1432,18 @@ def main() -> int:
     tw.add_argument("--out", required=True)
     tw.add_argument("--tau", type=float, default=0.0)
     tw.add_argument("--loo", default=None, help="v2 family map JSON for zero-ablation LOO (720 only)")
+    tw.add_argument("--dial-mono-lambda", type=float, default=0.0,
+                    help="q-monotonicity regularizer strength (>0 enables; scaled by data mass). 720 only.")
+    tw.add_argument("--dial-mono-floor", type=float, default=0.02,
+                    help="min per-adjacent-q-step standardized gap the regularizer lifts inversions to")
+    tw.add_argument("--dial-mono-iters", type=int, default=3,
+                    help="iterative-reweighting rounds for the one-sided hinge")
+    tw.add_argument("--dial-mono-hold", type=float, default=0.3,
+                    help="fraction of dial-grid image-ids held out for a leak-free G3 check")
+    tw.add_argument("--dial-corr-lambda", type=float, default=0.0,
+                    help="corruption-ordering (q20>corruption) regularizer strength; folds into the same augmented fit")
+    tw.add_argument("--dial-corr-margin", type=float, default=0.05,
+                    help="target standardized gap by which q20 should out-score its corruption")
     args = ap.parse_args()
     return {"gram": cmd_gram, "fit": cmd_fit, "finalize": cmd_finalize,
             "poolfits": cmd_poolfits, "ensemble": cmd_ensemble,

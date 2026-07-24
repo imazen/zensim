@@ -141,6 +141,52 @@ backward step is only 0.28pt — the dial mostly-tracks, it just wiggles).
 Dialed bakes + co-cal anchor + per-candidate verdicts:
 `/mnt/v/output/zensim/signedpow-clean-2026-07-24/` (`*_bdial.bin`, `bdial_anchor_720.parquet`).
 
+## G3 REGULARIZER (2026-07-24) — fixes the dial, but exposes a FUNDAMENTAL 3-way tension
+
+Implemented the q-monotonicity-regularized linear fit (user-chosen G3 lever):
+augment the sign-constrained BVLS normal equations with **ordering rows** from
+the dial grid — for each adjacent-q step, a soft constraint `Δz·w ≥ floor` (an
+iterative one-sided hinge: keep good gaps, lift inversions), using only the q
+ORDER (structural prior, no eval labels), with a disjoint image-id split held out
+for a leak-free check. `linear_projections twin --dial-mono-lambda/-floor/-iters`.
+A matching `--dial-corr-lambda` adds corruption-ordering rows (`z(q20)−z(corruption)`)
+to the SAME augmented system.
+
+**It fixes G3 powerfully:** held-out strict inversion 27.5% → 5.3% (below B's 7.6%);
+co-cal dial G3 0.898 → 0.958–0.99 (passes ≥0.93). At a light setting (λ=0.003,
+floor=0.005) it even **preserves CID22 (0.787) and boosts CSIQ 0.768→0.833 / LIVE
+0.702→0.743 / M3 0.53→0.58**. But it **breaks the corruption gate** (81%→38%) at
+*every* mono setting, and adding corruption rows back **craters CID22** (0.787→0.41
+at λ_corr=0.0005) and re-breaks monotonicity — the two constraints fight.
+
+**The measured 3-way frontier (all signed_pow p=0.2, foldable BVLS):**
+
+| model | CID22 | CSIQ | LIVE | corr% | dial-G3 | M3 | which 2 of 3 |
+|---|--:|--:|--:|--:|--:|--:|---|
+| λ=0 baseline | 0.787 | 0.768 | 0.702 | **81.2** | 0.898 ✗ | 0.53 | CID22 + corruption |
+| **mono λ0.003/fl0.005** | **0.787** | 0.833 | 0.743 | 38.7 | **0.958 ✓** | 0.58 | **CID22 + G3** |
+| mono+corr λ0.0005 | 0.406 | 0.760 | 0.758 | **96.0** | 0.924~ | — | corruption + ~G3 |
+| mono λ1.0 (heavy) | 0.558 | 0.823 | 0.868 | 31.2 | **0.987 ✓** | 0.62 | G3 only |
+
+**Conclusion — a capacity limit, not a tuning miss.** For the sign-constrained
+linear foldable model, the three orderings **CID22 human-rank ↔ codec-q dial
+monotonicity (G3) ↔ corruption-tail order** are **mutually antagonistic: any two
+are reachable, never all three.** This is the "too-small blanket": the linear model
+lacks the degrees of freedom to satisfy all three simultaneously. It is the same
+capacity wall from the other side of the earlier G3↔diffmap tension — B buys G3 with
+winsor + full-372 features but loses the diffmap (M3≈0); the clean linear model buys
+the diffmap but can hold only two of {CID22, G3, corruption}.
+
+**Resolution requires more capacity, not more tuning:** a small non-linear head
+(shallow MLP) has the room for all three — but historically breaks the diffmap fold
+(M3≈0). The unlock is to extend the runtime diffmap fold (task #48, now done for the
+linear/foldable survivors) to a shallow MLP so it keeps M3 *and* gains the capacity
+for CID22 + G3 + corruption together. That is the next real step; picking a 2-of-3
+linear point (best: mono λ0.003 = CID22 + G3, sacrifices corruption) is the fallback.
+
+Regularizer bakes + the frontier verdicts: `signedpow-clean-2026-07-24/`
+(`ideal_p0p2_mono*.bin`, `ideal_p0p2_L*_F*.bin`, `ideal_p0p2_c*.bin`).
+
 ## Honest status
 
 - **Clean on the meaningful gates** (ship point = `signed_pow` p=0.2): dial monotonicity
