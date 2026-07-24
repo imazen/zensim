@@ -164,6 +164,12 @@ GROUPS = {
     "t720_konjnd":  (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_konjnd_jpeg_val.parquet"), ["human_score"]),
     # ext504 (basic-156 ++ v2-348) safesyn — for the ADD156 replication twin.
     "t504_safesyn": (Path("/mnt/v/zen/zensim-training/ext504-basic-v2-2026-07-23/ext_safesyn_full.parquet"), ["human_score"]),
+    # ideal foldable model (basic-156 ++ v2-FOLDED-only; non-foldable/harmful masked).
+    "fold_safesyn": (Path("/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24/ext_safesyn_full.parquet"), ["human_score"]),
+    "fold_cid201":  (Path("/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24/ext_cid22_train201.parquet"), ["human_score"]),
+    "fold_kadid":   (Path("/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24/ext_kadid.parquet"), ["human_score"]),
+    "fold_tid":     (Path("/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24/ext_tid.parquet"), ["human_score"]),
+    "fold_konjnd":  (Path("/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24/ext_konjnd_jpeg_val.parquet"), ["human_score"]),
 }
 VAL_SETS = {
     "bigcodec_val": (PROBE / "bigcodec_valdigits_2026-07-02.parquet", "human_score"),
@@ -334,10 +340,16 @@ class MixGram:
         return w, self.ybar
 
     def _chol(self):
-        jit = 1e-10 * float(np.trace(self.G)) / N_FEAT
-        for _ in range(8):
+        # NaN/inf guard: a shaped feature-column that is all-zero (e.g. a masked
+        # foldable-model column) can transform to a constant whose standardized
+        # Gram row is 0 — harmless — but a stray non-finite entry would make
+        # Cholesky fail at any jitter. Zero them so the jitter can regularize.
+        g = np.nan_to_num(self.G, nan=0.0, posinf=0.0, neginf=0.0)
+        base = max(float(np.trace(g)) / max(N_FEAT, 1), 1.0)
+        jit = 1e-9 * base
+        for _ in range(14):
             try:
-                return np.linalg.cholesky(self.G + jit * np.eye(N_FEAT))
+                return np.linalg.cholesky(g + jit * np.eye(N_FEAT))
             except np.linalg.LinAlgError:
                 jit *= 10.0
         raise RuntimeError("cholesky failed")
@@ -410,6 +422,12 @@ MIXES_SDR = {
     # ADD156 replication: safesyn-only additive linear (raw). Run at N_FEAT 156
     # (basic) and 504 (basic++v2) on the ext504 corpus via cmd_twin --raw.
     "add156": [("t504_safesyn", 1.0, "human_score")],
+    # ideal foldable additive model — canon mix, NO bigcodec (poisons linear CID22).
+    "foldcanon": [("fold_safesyn", 1.0, "human_score"), ("fold_cid201", 1.5, "human_score"),
+                  ("fold_kadid", 0.5, "human_score"), ("fold_tid", 0.5, "human_score")],
+    "foldkj": [("fold_safesyn", 1.0, "human_score"), ("fold_cid201", 1.5, "human_score"),
+               ("fold_kadid", 0.5, "human_score"), ("fold_tid", 0.5, "human_score"),
+               ("fold_konjnd", 1.2, "human_score")],
     "w7sdr": [("safesyn", 1.0, "human_score"), ("cid22_train", 1.5, "human_score"),
               ("kadid", 0.5, "human_score"), ("tid", 0.5, "human_score"),
               ("konjnd_dense", 1.2, "human_score"), ("bigcodec", 0.25, "human_score")],
@@ -1225,8 +1243,13 @@ def cmd_twin(args) -> int:
     space = "raw" if getattr(args, "raw", False) else "shaped"
     print(f"[twin] N_FEAT={N_FEAT} mix={args.mix} space={space} screen={os.environ.get('ZLIN_SCREEN','(372+identity)')}", flush=True)
     mg = MixGram(space, mix)               # OWNER: standardized Gram + rhs
-    w, b = mg.bvls(load_mask())            # OWNER: BVLS solve
-    print(f"[twin] BVLS active weights: {int((np.abs(w) > 1e-7).sum())}/{N_FEAT}", flush=True)
+    ridge_lam = getattr(args, "ridge", 0.0) or 0.0
+    if ridge_lam > 0.0:
+        w, b = mg.ridge(ridge_lam)         # OWNER: ridge (λI — non-singular under masked/zero cols)
+        print(f"[twin] ridge(λ={ridge_lam}) active weights: {int((np.abs(w) > 1e-7).sum())}/{N_FEAT}", flush=True)
+    else:
+        w, b = mg.bvls(load_mask())        # OWNER: BVLS solve
+        print(f"[twin] BVLS active weights: {int((np.abs(w) > 1e-7).sum())}/{N_FEAT}", flush=True)
     key = f"twin_n{N_FEAT}"
     np.savez_compressed(SCRATCH / "fits" / f"{key}.npz",
                         w=w, bias=b, mu=mg.mu, sd=mg.sd, space=space, desc="|".join(mg.desc))
@@ -1263,6 +1286,7 @@ def main() -> int:
     tw = sub.add_parser("twin")
     tw.add_argument("--mix", default="twinsdr", help="a MIXES_SDR key (default twinsdr)")
     tw.add_argument("--raw", action="store_true", help="fit in RAW feature space (no transforms) — for ADD156 replication")
+    tw.add_argument("--ridge", type=float, default=0.0, help="ridge λ (>0 = ridge instead of BVLS; non-singular under masked/zero cols)")
     tw.add_argument("--out", required=True)
     tw.add_argument("--tau", type=float, default=0.0)
     tw.add_argument("--loo", default=None, help="v2 family map JSON for zero-ablation LOO (720 only)")
