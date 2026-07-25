@@ -196,3 +196,19 @@ CID22 of any arm** (beats full-720+KADIS 0.811 — iw/masked mildly poison CID22
 + KADIS is net-better). **Conclusion: the diffmap-coherent model you actually ship reaches its
 best human-MOS AND a recovered KonJND with the KADIS guard.** This is the ship recipe direction:
 `foldcanon + fold_kadis` (basic+v2, no iw/masked, KADIS analytic guard).
+
+### E-K4 diffmap coherence (M3) — preserved by construction
+The ideal-clean-model doc establishes M3 coherence requires **(a) foldable features only**
+(basic-156 ++ the foldable v2; zero the 336 non-foldable/harmful cols) **and (b) a smooth
+monotone screen** (signed_cbrt; step transforms flip M3 negative). `foldcanon_kadis` satisfies
+BOTH identically to `foldcanon` — same 336 cols zeroed (via foldable_idx), same
+`screen_720_smooth.tsv`. **KADIS only reweights within the foldable set → it cannot introduce
+non-spatializable features → M3 is structurally preserved** (same class as foldcanon's M3≈0.53).
+Empirical M3 confirmation is queued (needs the `custom-profiles` example build fixed — E0599 —
++ the `diffmap-coherence-2026-07-18/{city,dog,girl}` fixtures).
+
+## SHIP-CANDIDATE DIRECTION (the payoff)
+`foldcanon + fold_kadis` (basic-v1 ++ foldable-v2, iw/masked EXCLUDED, KADIS analytic guard,
+smooth screen) = **CID22 0.815 (best of any arm), KonJND recovered to 0.158, FR ~0.94, diffmap-
+coherent by construction.** Next to make it a ship candidate: add the dial spline (`bake_dial_refit`),
+run the full rank+dial scorecard (`bake_verdict`), fix + run empirical M3, then compare to shipped B.
