@@ -157,3 +157,19 @@ KonJND 0.230 vs 0.127; FR ~0.9), while **372+KADIS is NOT** (hurts CID22/KonJND)
 **Next (queued):** apply KADIS to the ship recipe (does it lift the Ebothg/winner_dial ship
 candidates' KonJND without CID22 cost?); KADIS mix-target (cvvdp/iwssim) for CID22; full-700k
 mass vs 50k. Bakes: `bakes/p1kadis/`. Tool groups/mixes: `t720_kadis`, `kbase[_kadis[12]]`.
+
+### E-K2c — KADIS 50k→200k scale (w0.5) — more data = same trend as more weight
+| corpus | 50k | 200k | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.811 | 0.805 | −0.005 (still +0.007 vs base) |
+| imazen26_rc | 0.854 | 0.855 | +0.001 |
+| KonJND | 0.230 | 0.267 | **+0.036** |
+| CSIQ | 0.888 | 0.925 | +0.037 |
+| LIVE | 0.926 | 0.937 | +0.010 |
+
+Data-volume is the same lever as weight: more KADIS → more KonJND/FR, tiny CID22 cost, always
+above baseline. **Operating point:** 50k@w0.5 max-CID22; scale KADIS up when KonJND/FR matter more.
+
+**⚠ tool gotcha:** `gram --force` at one `ZLIN_NFEAT` clobbers the other's cached grams (cache is
+keyed by group, not N_FEAT). E-K3's 372 grams clobbered the 720 set → restore with a 720
+`gram --force` before any 720 twin. (Fix: key the gram cache on N_FEAT — queued.)
