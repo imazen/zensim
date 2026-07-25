@@ -167,6 +167,9 @@ GROUPS = {
     "t720_kadid":   (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_kadid.parquet"), ["human_score"]),
     "t720_tid":     (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_tid.parquet"), ["human_score"]),
     "t720_konjnd":  (Path("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_konjnd_jpeg_val.parquet"), ["human_score"]),
+    # KADIS-700k 720 analytic-severe guard (score_ssim2/100 clip[-1,1]); 50k balanced
+    # subsample. P1 full-data lever (benchmarks/p1_fulldata_kadis_2026-07-25.md).
+    "t720_kadis":   (Path("/mnt/v/zen/zensim-training/kadis-720-2026-07-24/kadis_train720_ssim2_50k.parquet"), ["human_score"]),
     # ext504 (basic-156 ++ v2-348) safesyn — for the ADD156 replication twin.
     "t504_safesyn": (Path("/mnt/v/zen/zensim-training/ext504-basic-v2-2026-07-23/ext_safesyn_full.parquet"), ["human_score"]),
     # ideal foldable model (basic-156 ++ v2-FOLDED-only; non-foldable/harmful masked).
@@ -520,6 +523,18 @@ MIXES_SDR = {
     "twinsdr": [("t720_safesyn", 1.0, "human_score"), ("t720_cid201", 1.5, "human_score"),
                 ("t720_kadid", 0.5, "human_score"), ("t720_tid", 0.5, "human_score"),
                 ("t720_konjnd", 1.2, "human_score")],
+    # P1 KADIS lever (2026-07-25): CLEAN base (konjnd truly held-out, no leak) ± KADIS.
+    "kbase":       [("t720_safesyn", 1.0, "human_score"), ("t720_cid201", 1.5, "human_score"),
+                    ("t720_kadid", 0.5, "human_score"), ("t720_tid", 0.5, "human_score")],
+    "kbase_kadis": [("t720_safesyn", 1.0, "human_score"), ("t720_cid201", 1.5, "human_score"),
+                    ("t720_kadid", 0.5, "human_score"), ("t720_tid", 0.5, "human_score"),
+                    ("t720_kadis", 0.5, "human_score")],
+    "kbase_kadis1": [("t720_safesyn", 1.0, "human_score"), ("t720_cid201", 1.5, "human_score"),
+                    ("t720_kadid", 0.5, "human_score"), ("t720_tid", 0.5, "human_score"),
+                    ("t720_kadis", 1.0, "human_score")],
+    "kbase_kadis2": [("t720_safesyn", 1.0, "human_score"), ("t720_cid201", 1.5, "human_score"),
+                    ("t720_kadid", 0.5, "human_score"), ("t720_tid", 0.5, "human_score"),
+                    ("t720_kadis", 2.0, "human_score")],
     # ADD156 replication: safesyn-only additive linear (raw). Run at N_FEAT 156
     # (basic) and 504 (basic++v2) on the ext504 corpus via cmd_twin --raw.
     "add156": [("t504_safesyn", 1.0, "human_score")],
