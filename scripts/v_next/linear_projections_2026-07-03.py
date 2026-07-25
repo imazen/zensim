@@ -178,6 +178,7 @@ GROUPS = {
     "fold_kadid":   (Path("/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24/ext_kadid.parquet"), ["human_score"]),
     "fold_tid":     (Path("/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24/ext_tid.parquet"), ["human_score"]),
     "fold_konjnd":  (Path("/mnt/v/zen/zensim-training/ext720-foldable-2026-07-24/ext_konjnd_jpeg_val.parquet"), ["human_score"]),
+    "fold_kadis":   (Path("/mnt/v/zen/zensim-training/kadis-720-2026-07-24/kadis_fold720_ssim2_50k.parquet"), ["human_score"]),
 }
 VAL_SETS = {
     "bigcodec_val": (PROBE / "bigcodec_valdigits_2026-07-02.parquet", "human_score"),
@@ -541,6 +542,8 @@ MIXES_SDR = {
     # ideal foldable additive model — canon mix, NO bigcodec (poisons linear CID22).
     "foldcanon": [("fold_safesyn", 1.0, "human_score"), ("fold_cid201", 1.5, "human_score"),
                   ("fold_kadid", 0.5, "human_score"), ("fold_tid", 0.5, "human_score")],
+    "foldcanon_kadis": [("fold_safesyn", 1.0, "human_score"), ("fold_cid201", 1.5, "human_score"),
+                  ("fold_kadid", 0.5, "human_score"), ("fold_tid", 0.5, "human_score"), ("fold_kadis", 0.5, "human_score")],
     "foldkj": [("fold_safesyn", 1.0, "human_score"), ("fold_cid201", 1.5, "human_score"),
                ("fold_kadid", 0.5, "human_score"), ("fold_tid", 0.5, "human_score"),
                ("fold_konjnd", 1.2, "human_score")],

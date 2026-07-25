@@ -173,3 +173,26 @@ above baseline. **Operating point:** 50k@w0.5 max-CID22; scale KADIS up when Kon
 **⚠ tool gotcha:** `gram --force` at one `ZLIN_NFEAT` clobbers the other's cached grams (cache is
 keyed by group, not N_FEAT). E-K3's 372 grams clobbered the 720 set → restore with a 720
 `gram --force` before any 720 twin. (Fix: key the gram cache on N_FEAT — queued.)
+
+### E-K4 — KADIS on the FOLDABLE (diffmap-coherent) regime — **the ship-relevant test**
+User correction: the PRODUCT needs the dial+diffmap+human coherence, which requires the
+**foldable** feature set = basic-v1 (f0..155) + spatializable v2, **excluding iw+masked+peak**
+(f156..371, not spatializable → would break diffmap↔scalar coherence). E-K1..3 used full-720
+(includes iw/masked). Re-ran on `foldcanon` (ext720-foldable, non-foldable cols zeroed,
+`screen_720_smooth.tsv`) ± KADIS (foldable KADIS = same 336 cols zeroed).
+
+| corpus | foldable | +KADIS | Δ | vs full-720+KADIS |
+|---|--:|--:|--:|--:|
+| **CID22** (gold) | 0.803 | **0.815** | +0.013 | **beats 0.811 (best arm)** |
+| imazen26_rc | 0.794 | 0.828 | +0.034 | ~ |
+| KonJND | 0.071 | 0.158 | **+0.087** | below 0.230 (foldable drops iw/masked KonJND signal; KADIS recovers most) |
+| CSIQ | 0.773 | 0.931 | +0.159 | ~ |
+| LIVE | 0.669 | 0.941 | +0.272 | ~ |
+| AIC-3 | 0.751 | 0.761 | +0.010 | ~ |
+
+**The foldable regime COSTS KonJND** (0.127→0.071 — dropping iw/masked loses near-threshold
+signal) **but KADIS gives it back** (+0.087). And **foldable+KADIS = CID22 0.815, the best
+CID22 of any arm** (beats full-720+KADIS 0.811 — iw/masked mildly poison CID22, dropping them
++ KADIS is net-better). **Conclusion: the diffmap-coherent model you actually ship reaches its
+best human-MOS AND a recovered KonJND with the KADIS guard.** This is the ship recipe direction:
+`foldcanon + fold_kadis` (basic+v2, no iw/masked, KADIS analytic guard).
