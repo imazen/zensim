@@ -1426,6 +1426,68 @@ impl Zensim {
         )
     }
 
+    /// Compute the FOLDED 720-layout feature vector in ONE v2-walk pass:
+    /// `[f0..156) = v1 basic` (computed from the v2 walk's shared
+    /// H-blurred planes via v1's own fused kernel — parity-gated against
+    /// the frozen v1 path, not byte-frozen), `[156..372) = 0.0` (v1's
+    /// peak/masked/IW pool blocks, deprecated: no current model reads
+    /// them), `[372..720) = v2-348`.
+    ///
+    /// This is the production extraction for the foldable-384 / 504-class
+    /// models (dial + diffmap + corruption head): one pass replaces the
+    /// research-only double extraction (`compute_extended_features` ++
+    /// `compute_v2_features`), skipping the v1 activity/pool machinery
+    /// those models never read. Do NOT mix folded rows into corpora whose
+    /// `f156..371` columns are live — this is its own extraction regime
+    /// ([`crate::feature_v2::FeatureRegime::Folded720`]).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_v2_features`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_features(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_impl_with_toggles(
+            source,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            crate::feature_v2::V2NewFeatureToggles::default(),
+        )
+    }
+
+    /// Batch form of [`Self::compute_folded720_features`]: prepared
+    /// reference + explicit toggles + caller-owned scratch (the
+    /// [`Self::compute_v2_features_with_ref_and_scratch`] contract, folded
+    /// layout). With a moments-cached reference the fold swaps the
+    /// 3-output H kernel back to the 4-output one (it needs `mu1_h`), so
+    /// the moments cache saves slightly less than on the pure-v2 path —
+    /// still strictly faster than not caching.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_v2_features_with_ref`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_features_with_ref_and_scratch(
+        &self,
+        reference: &crate::feature_v2::V2PreparedReference,
+        distorted: &impl ImageSource,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+        scratch: &mut crate::feature_v2::V2Scratch,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_with_ref_impl(
+            reference,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+            scratch,
+        )
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors

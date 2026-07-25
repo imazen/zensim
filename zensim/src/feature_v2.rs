@@ -659,6 +659,16 @@ pub enum FeatureRegime {
     V1,
     /// The v2 "bounded" extraction this module implements.
     V2Bounded,
+    /// The folded 720-layout extraction (2026-07-24): ONE v2-walk pass
+    /// emitting `[f0..156) = v1 basic` (computed inside the v2 strip walk
+    /// via the same `fused_blur_h_ssim` H-planes + v1's own
+    /// `fused_vblur_features_ssim` kernel — parity-gated against the v1
+    /// path, NOT byte-frozen), `[156..372) = 0.0` (v1's peak/masked/IW
+    /// pool blocks, deprecated: no current model reads them — see
+    /// `benchmarks/corruption_head_2026-07-24.md` "the f156..371 block can
+    /// be dropped entirely"), `[372..720) = v2-348`. Index-stable
+    /// emit-0, per the append-only feature-numbering rule.
+    Folded720,
 }
 
 /// Result of [`compute_v2_features_impl`]/[`crate::Zensim::compute_v2_features`].
@@ -683,8 +693,17 @@ impl ZensimV2Result {
         self.regime
     }
     /// Explicit-regime named view over this result's features.
+    ///
+    /// For [`FeatureRegime::Folded720`] results the view covers the v2
+    /// block (the vector's tail); the v1 basic block has no v2-named
+    /// accessors and is read positionally (`features()[0..156]`).
     pub fn view(&self) -> FeatureViewV2<'_> {
-        FeatureViewV2::new(&self.features, self.n_scales)
+        let v2_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+        let v2_block = match self.regime {
+            FeatureRegime::Folded720 => &self.features[self.features.len() - v2_len..],
+            _ => &self.features[..],
+        };
+        FeatureViewV2::new(v2_block, self.n_scales)
             .expect("compute_v2_features always emits the v2-total layout for its own n_scales")
     }
 }
@@ -1107,6 +1126,50 @@ fn run_blur_pass_strip_cached_ref(width: usize, height_local: usize, scratch: &m
         ..
     } = scratch;
     crate::blur::fused_blur_h_ssim3(
+        &src_wide[..n],
+        &dst_wide[..n],
+        &mut mu1_h[..n],
+        &mut mu2_h[..n],
+        &mut ssq_h[..n],
+        &mut s12_h[..n],
+        width,
+        height_local,
+        BLUR_RADIUS,
+    );
+    crate::blur::box_blur_v_from_copy(&mu2_h[..n], &mut mu2[..n], width, height_local, BLUR_RADIUS);
+    crate::blur::box_blur_v_from_copy(&ssq_h[..n], &mut ssq[..n], width, height_local, BLUR_RADIUS);
+    crate::blur::box_blur_v_from_copy(&s12_h[..n], &mut s12[..n], width, height_local, BLUR_RADIUS);
+}
+
+/// [`run_blur_pass_strip_cached_ref`] variant for the v1-basic FOLD path:
+/// identical except it uses the 4-output [`crate::blur::fused_blur_h_ssim`]
+/// so `mu1_h` is genuinely materialized — the v1 fold kernel
+/// (`fused_vblur_features_ssim`) V-blurs mu1 internally from the H-plane,
+/// which `fused_blur_h_ssim3` compiles out on the v4x tier. The three
+/// shared outputs (`mu2_h`/`ssq_h`/`s12_h`) are bit-identical between the
+/// two H kernels (ssim3 exists purely to skip the mu1 chain), so the v2
+/// block's inputs are unchanged by this swap. Costs back the mu1 H-chain
+/// vs the plain cached path; the cached mu1 V-blur + activity chain
+/// savings are kept.
+fn run_blur_pass_strip_cached_ref_fold(
+    width: usize,
+    height_local: usize,
+    scratch: &mut ScratchV2Strip,
+) {
+    let n = width * height_local;
+    let ScratchV2Strip {
+        src_wide,
+        dst_wide,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu2,
+        ssq,
+        s12,
+        ..
+    } = scratch;
+    crate::blur::fused_blur_h_ssim(
         &src_wide[..n],
         &dst_wide[..n],
         &mut mu1_h[..n],
@@ -2235,6 +2298,183 @@ fn blockiness_sparse(src: &[f32], dst: &[f32], width: usize, height: usize) -> f
 /// than ripped out under time pressure.
 const STRIP_BYPASS_HEIGHT: usize = 0;
 
+/// Per-channel-scale f64 sums for the v1 BASIC-13 fold — the exact subset
+/// of v1's `streaming::ChannelAccum` fields that the basic block
+/// (`f0..156`) finalizes from. Filled by v1's own
+/// [`crate::fused::fused_vblur_features_ssim`] kernel run over the v2
+/// strip walk's shared H-planes; the peak accumulators the kernel also
+/// returns (max/L8) are deliberately dropped — v1's peak block `f156..228`
+/// is deprecated (no current model reads it).
+#[derive(Debug, Clone, Copy, Default)]
+struct V1BasicSums {
+    ssim_d: f64,
+    ssim_d4: f64,
+    ssim_d2: f64,
+    edge_art: f64,
+    edge_art4: f64,
+    edge_art2: f64,
+    edge_det: f64,
+    edge_det4: f64,
+    edge_det2: f64,
+    mse: f64,
+    hf_sq_src: f64,
+    hf_sq_dst: f64,
+    hf_abs_src: f64,
+    hf_abs_dst: f64,
+}
+
+impl V1BasicSums {
+    fn accumulate(&mut self, s: &crate::fused::StripChannelAccum) {
+        self.ssim_d += s.ssim_d;
+        self.ssim_d4 += s.ssim_d4;
+        self.ssim_d2 += s.ssim_d2;
+        self.edge_art += s.edge_art;
+        self.edge_art4 += s.edge_art4;
+        self.edge_art2 += s.edge_art2;
+        self.edge_det += s.edge_det;
+        self.edge_det4 += s.edge_det4;
+        self.edge_det2 += s.edge_det2;
+        self.mse += s.mse;
+        self.hf_sq_src += s.hf_sq_src;
+        self.hf_sq_dst += s.hf_sq_dst;
+        self.hf_abs_src += s.hf_abs_src;
+        self.hf_abs_dst += s.hf_abs_dst;
+    }
+
+    /// Finalize into one channel's 13 basic features, replicating v1's
+    /// pooling + assembly EXACTLY (`streaming::ChannelAccum::finalize` +
+    /// `metric.rs`'s pass-1 feature push, `.abs()` included): mean, L4
+    /// (`(Σx⁴/n)^¼`), L2 (`(Σx²/n)^½`) for ssim/art/det; mse mean; the
+    /// three HF ratio features with their `1e-10` guards. `n` is the
+    /// scale's full pixel count (`w_s * h_s`) — identical to v1's per-scale
+    /// accumulator `n` since both walks cover every row exactly once.
+    fn finalize_into(&self, n: usize, out: &mut [f64]) {
+        debug_assert_eq!(out.len(), 13);
+        let one_over_n = 1.0 / n as f64;
+        out[0] = (self.ssim_d * one_over_n).abs();
+        out[1] = (self.ssim_d4 * one_over_n).max(0.0).powf(0.25).abs();
+        out[2] = (self.ssim_d2 * one_over_n).max(0.0).sqrt().abs();
+        out[3] = (self.edge_art * one_over_n).abs();
+        out[4] = (self.edge_art4 * one_over_n).max(0.0).powf(0.25).abs();
+        out[5] = (self.edge_art2 * one_over_n).max(0.0).sqrt().abs();
+        out[6] = (self.edge_det * one_over_n).abs();
+        out[7] = (self.edge_det4 * one_over_n).max(0.0).powf(0.25).abs();
+        out[8] = (self.edge_det2 * one_over_n).max(0.0).sqrt().abs();
+        out[9] = self.mse * one_over_n;
+        let var_src = self.hf_sq_src * one_over_n;
+        let var_dst = self.hf_sq_dst * one_over_n;
+        out[10] = if var_src > 1e-10 {
+            (1.0 - var_dst / var_src).max(0.0)
+        } else {
+            0.0
+        };
+        out[12] = if var_src > 1e-10 {
+            (var_dst / var_src - 1.0).max(0.0)
+        } else {
+            0.0
+        };
+        let mad_src = self.hf_abs_src * one_over_n;
+        let mad_dst = self.hf_abs_dst * one_over_n;
+        out[11] = if mad_src > 1e-10 {
+            (1.0 - mad_dst / mad_src).max(0.0)
+        } else {
+            0.0
+        };
+    }
+}
+
+/// v1's band tiling constants, replicated for the fold. v1 tiles every
+/// scale into 32-row bands ([`crate::streaming`]'s `STRIP_INNER`) and
+/// V-blurs each band from a buffer extending `overlap = blur_passes(1) ×
+/// radius(5) = 5` rows past the band, mirror-clamped at the PLANE bounds.
+/// The band layout is part of v1's numerics contract: the f32 sliding
+/// V-blur state re-initializes at every band's buffer top, so pooled
+/// sums depend on the tiling. The fold reproduces the tiling exactly —
+/// same buffer extents, same init points, same band order — which makes
+/// the accumulated sums bit-identical to v1's whenever the plane values
+/// themselves are (true-width == v1's SIMD-padded width; see the parity
+/// test for the padded-width caveat).
+const V1_BAND_ROWS: usize = 32;
+const V1_BAND_OVERLAP: usize = 5;
+
+/// Run v1's fused V-blur + basic-feature kernel over the v1-aligned bands
+/// covered by one fold buffer (the FOLD hook): consumes the v2 blur
+/// pass's H-planes + halo buffers directly (H-blur is per-row/stateless,
+/// so H values are shareable; the V state is NOT, hence the band replay).
+///
+/// `rows` are the image rows this call must accumulate (the strip's inner
+/// rows), `strip_y0`/`halo_offset` map image rows to buffer-local rows
+/// (`local = row − strip_y0 + halo_offset`; strip path: `y0`/`HALO_P` —
+/// a band's ±5-row extent always lands on real gathered rows because
+/// bands and strips are both 32-row aligned and `HALO_P ≥ 5`; whole-plane
+/// path: `0`/`0`), and `height` is the full plane height at this scale
+/// (band extents clamp against it, exactly like v1 clamps against the
+/// plane).
+///
+/// Store flags are off, so the kernel's `mu1/mu2/sd` side-outputs are
+/// never written — empty slices are safe (every write in every tier is
+/// `if store_*`-gated).
+///
+/// `planes = [mu1_h, mu2_h, ssq_h, s12_h, src, dst]`, all in the SAME
+/// buffer-local coordinate system (`local = row − strip_y0 +
+/// halo_offset`): the strip path passes the scratch H-planes + halo
+/// buffers; the whole-plane path passes the full-plane H-planes + the
+/// real src/dst planes with `strip_y0 = halo_offset = 0`.
+#[allow(clippy::too_many_arguments)]
+fn fold_v1_basic_bands(
+    width: usize,
+    rows: core::ops::Range<usize>,
+    strip_y0: usize,
+    halo_offset: usize,
+    height: usize,
+    planes: [&[f32]; 6],
+    sums: &mut V1BasicSums,
+) {
+    debug_assert_eq!(rows.start % V1_BAND_ROWS, 0, "strips are 32-row aligned");
+    let [mu1_h, mu2_h, ssq_h, s12_h, src, dst] = planes;
+    let mut b0 = rows.start;
+    while b0 < rows.end {
+        let b1 = (b0 + V1_BAND_ROWS).min(rows.end);
+        // v1's band buffer: [b0 − overlap, b1 + overlap) clamped to the
+        // plane — the kernel's own mirror at the buffer edges then
+        // reproduces v1's boundary/init behavior bit-for-bit.
+        let top = b0.saturating_sub(V1_BAND_OVERLAP);
+        let bot = (b1 + V1_BAND_OVERLAP).min(height);
+        let lt = top + halo_offset - strip_y0;
+        let lb = bot + halo_offset - strip_y0;
+        let h_local = bot - top;
+        let inner_start = b0 - top;
+        let inner_h = b1 - b0;
+        let span = lt * width..lb * width;
+        let mut empty_mu1: [f32; 0] = [];
+        let mut empty_mu2: [f32; 0] = [];
+        let mut empty_sd: [f32; 0] = [];
+        sums.accumulate(&crate::fused::fused_vblur_features_ssim(
+            &mu1_h[span.clone()],
+            &mu2_h[span.clone()],
+            &ssq_h[span.clone()],
+            &s12_h[span.clone()],
+            &src[span.clone()],
+            &dst[span],
+            width,
+            h_local,
+            inner_start,
+            inner_h,
+            BLUR_RADIUS,
+            &mut empty_mu1,
+            &mut empty_mu2,
+            false,
+            &mut empty_sd,
+            false,
+        ));
+        b0 = b1;
+    }
+}
+
+/// No-fold form of [`compute_channel_scale_v2_with_fold`] — the walk now
+/// routes through the fold-aware body unconditionally, so this thin
+/// delegate exists only for the direct-call unit tests.
+#[cfg(test)]
 fn compute_channel_scale_v2(
     src: &[f32],
     dst: &[f32],
@@ -2245,6 +2485,31 @@ fn compute_channel_scale_v2(
     scratch: &mut ScratchV2Strip,
     out: &mut [f64],
 ) -> (f64, f64) {
+    let (g, _sums) = compute_channel_scale_v2_with_fold(
+        src, dst, width, height, toggles, moments, false, scratch, out,
+    );
+    g
+}
+
+/// [`compute_channel_scale_v2_whole`]'s strip-path sibling plus the
+/// optional v1-basic FOLD: when `fold_v1` is set, each strip additionally
+/// runs v1's `fused_vblur_features_ssim` over the SAME H-blurred planes
+/// the v2 blur pass just produced (see [`fold_v1_basic_bands`]), returning
+/// the accumulated [`V1BasicSums`] alongside the gradient pair. With
+/// `fold_v1 == false` the extra work is one untaken branch per strip and
+/// the returned sums are zeros.
+#[allow(clippy::too_many_arguments)]
+fn compute_channel_scale_v2_with_fold(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    toggles: V2NewFeatureToggles,
+    moments: Option<(&[f32], &[f32])>,
+    fold_v1: bool,
+    scratch: &mut ScratchV2Strip,
+    out: &mut [f64],
+) -> ((f64, f64), V1BasicSums) {
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
     assert_eq!(dst.len(), n, "dst plane length must be width*height");
@@ -2270,7 +2535,9 @@ fn compute_channel_scale_v2(
     // session re-enabling the lever only needs to change the constant.
     #[allow(clippy::absurd_extreme_comparisons)]
     if height <= STRIP_BYPASS_HEIGHT {
-        return compute_channel_scale_v2_whole(src, dst, width, height, toggles, scratch, out);
+        return compute_channel_scale_v2_whole_with_fold(
+            src, dst, width, height, toggles, fold_v1, scratch, out,
+        );
     }
 
     let max_wide_h = STRIP_ROWS + 2 * HALO_P;
@@ -2281,6 +2548,7 @@ fn compute_channel_scale_v2(
 
     let mut dense = DenseAccum::default();
     let mut grad = GradientAccum::default();
+    let mut v1_sums = V1BasicSums::default();
 
     let mut y0 = 0usize;
     while y0 < height {
@@ -2317,9 +2585,38 @@ fn compute_channel_scale_v2(
         //     O(height)). With cached reference moments the mu1 V-blur +
         //     activity chain drop out of the per-pair cost entirely. ---
         if moments.is_some() {
-            run_blur_pass_strip_cached_ref(width, wide_h, scratch);
+            if fold_v1 {
+                run_blur_pass_strip_cached_ref_fold(width, wide_h, scratch);
+            } else {
+                run_blur_pass_strip_cached_ref(width, wide_h, scratch);
+            }
         } else {
             run_blur_pass_strip(width, wide_h, scratch);
+        }
+
+        // --- v1-basic FOLD: v1's own fused V-blur+features kernel over
+        //     the H-planes this strip's blur pass just filled, replaying
+        //     v1's 32-row band tiling (see `fold_v1_basic_bands`). Runs
+        //     before the dense kernel purely for locality (the H-planes
+        //     are cache-hot); the two reads are independent. ---
+        if fold_v1 {
+            let n_wide = width * wide_h;
+            fold_v1_basic_bands(
+                width,
+                y0..y0 + strip_h,
+                y0,
+                HALO_P,
+                height,
+                [
+                    &scratch.mu1_h[..n_wide],
+                    &scratch.mu2_h[..n_wide],
+                    &scratch.ssq_h[..n_wide],
+                    &scratch.s12_h[..n_wide],
+                    &scratch.src_wide[..n_wide],
+                    &scratch.dst_wide[..n_wide],
+                ],
+                &mut v1_sums,
+            );
         }
 
         // --- Slice down to the strip's own real rows (buffer-local
@@ -2381,7 +2678,10 @@ fn compute_channel_scale_v2(
         0.0
     };
 
-    finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
+    (
+        finish_channel_scale(&dense, &grad, sum_blockiness, n, out),
+        v1_sums,
+    )
 }
 
 /// Phase-6 (§A.16 lever B) whole-image path: below [`STRIP_BYPASS_HEIGHT`],
@@ -2399,6 +2699,9 @@ fn compute_channel_scale_v2(
 /// `gather_strip_halo(halo=1)`, the SAME helper the strip loop already
 /// uses for its own (larger) halo, just with `halo=1` and sourced directly
 /// from the real image instead of a strip's local window.
+/// No-fold form of [`compute_channel_scale_v2_whole_with_fold`] — kept
+/// for the direct-call unit tests, same as `compute_channel_scale_v2`.
+#[cfg(test)]
 fn compute_channel_scale_v2_whole(
     src: &[f32],
     dst: &[f32],
@@ -2408,6 +2711,29 @@ fn compute_channel_scale_v2_whole(
     scratch: &mut ScratchV2Strip,
     out: &mut [f64],
 ) -> (f64, f64) {
+    let (g, _sums) = compute_channel_scale_v2_whole_with_fold(
+        src, dst, width, height, toggles, false, scratch, out,
+    );
+    g
+}
+
+/// [`compute_channel_scale_v2_whole`] with the optional v1-basic fold —
+/// same relationship as `compute_channel_scale_v2_with_fold` to its plain
+/// form. On this (whole-plane) path the v1 kernel runs over the full
+/// planes with `inner_start = 0`; its V-blur mirror at the plane's own
+/// rows 0/height-1 is the reflect-101 image-boundary treatment, the same
+/// convention `gather_strip_halo` applies on the strip path.
+#[allow(clippy::too_many_arguments)]
+fn compute_channel_scale_v2_whole_with_fold(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    toggles: V2NewFeatureToggles,
+    fold_v1: bool,
+    scratch: &mut ScratchV2Strip,
+    out: &mut [f64],
+) -> ((f64, f64), V1BasicSums) {
     let n = width * height;
     debug_assert!(
         n <= scratch.mu1.len(),
@@ -2416,6 +2742,28 @@ fn compute_channel_scale_v2_whole(
     );
 
     run_blur_pass(src, dst, width, height, scratch);
+
+    // v1-basic fold, whole-plane form: full-plane H-planes + the real
+    // src/dst planes, identity local mapping (strip_y0 = halo_offset = 0).
+    let mut v1_sums = V1BasicSums::default();
+    if fold_v1 {
+        fold_v1_basic_bands(
+            width,
+            0..height,
+            0,
+            0,
+            height,
+            [
+                &scratch.mu1_h[..n],
+                &scratch.mu2_h[..n],
+                &scratch.ssq_h[..n],
+                &scratch.s12_h[..n],
+                src,
+                dst,
+            ],
+            &mut v1_sums,
+        );
+    }
 
     let mu1 = &scratch.mu1[..n];
     let mu2 = &scratch.mu2[..n];
@@ -2457,7 +2805,10 @@ fn compute_channel_scale_v2_whole(
         0.0
     };
 
-    finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
+    (
+        finish_channel_scale(&dense, &grad, sum_blockiness, n, out),
+        v1_sums,
+    )
 }
 
 /// Shared tail for both [`compute_channel_scale_v2`] (strip path) and
@@ -2703,7 +3054,11 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
         || weights[idx::IW_ART] != 0.0
         || weights[idx::IW_DET] != 0.0
         || weights[idx::IW_MSE] != 0.0;
-    let mut masked_num = if has_mask { vec![0.0f32; n] } else { Vec::new() };
+    let mut masked_num = if has_mask {
+        vec![0.0f32; n]
+    } else {
+        Vec::new()
+    };
     let mut iw_num = if has_iw { vec![0.0f32; n] } else { Vec::new() };
     let mut sum_mask_w = 0.0f64;
     let mut sum_iw_w = 0.0f64;
@@ -3230,6 +3585,60 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
+    compute_v2_features_with_ref_impl_inner(
+        prepared, distorted, max_pixels, parallel, toggles, false, scratch,
+    )
+}
+
+/// Folded-720 pair entry (see [`FeatureRegime::Folded720`] for the
+/// layout): validate + prepare + folded with-ref walk, mirroring
+/// [`compute_v2_features_impl_with_toggles`]'s composition.
+pub(crate) fn compute_folded720_impl_with_toggles(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+) -> Result<ZensimV2Result, ZensimError> {
+    crate::metric::validate_pair(source, distorted)?;
+    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    let prepared = prepare_v2_reference_impl(source, max_pixels, parallel, false)?;
+    let mut scratch = V2Scratch::new();
+    compute_folded720_with_ref_impl(
+        &prepared,
+        distorted,
+        max_pixels,
+        parallel,
+        toggles,
+        &mut scratch,
+    )
+}
+
+/// Folded-720 with-ref entry: ONE v2 scale-walk that also computes the v1
+/// basic block. Emits the 720-layout vector
+/// `[v1 basic f0..156 | zeros f156..372 | v2-348 f372..720]`.
+pub(crate) fn compute_folded720_with_ref_impl(
+    prepared: &V2PreparedReference,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    compute_v2_features_with_ref_impl_inner(
+        prepared, distorted, max_pixels, parallel, toggles, true, scratch,
+    )
+}
+
+fn compute_v2_features_with_ref_impl_inner(
+    prepared: &V2PreparedReference,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    fold_v1: bool,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
     if distorted.width() != prepared.orig_width || distorted.height() != prepared.orig_height {
         return Err(ZensimError::DimensionMismatch);
     }
@@ -3259,7 +3668,12 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     );
 
     let n_scales = prepared.scales.len();
-    let mut features = vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL];
+    // Folded layout: v1's full 372-wide block precedes the v2 block —
+    // 3 ch × (13 basic + 6 peak + 6 masked + 6 IW) = 93 per scale, 372 at
+    // the standard 4 scales (720 total). Only the basic 13/ch/scale are
+    // written; the pool blocks stay 0.0 (deprecated, index-stable).
+    let v1_total = if fold_v1 { n_scales * 3 * 31 } else { 0 };
+    let mut features = vec![0.0f64; v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL];
     // Per-channel (mean_grad_src, mean_grad_dst) from the previous
     // (finer) scale, for the edge-width-change cross-scale comparison.
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
@@ -3320,25 +3734,28 @@ pub(crate) fn compute_v2_features_with_ref_impl(
         // `features[scale_base..]` chunks; only the iteration strategy
         // differs.
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
-        let out_region = &mut features[scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
+        let mut fold_sums: [V1BasicSums; 3] = [V1BasicSums::default(); 3];
+        let out_region =
+            &mut features[v1_total + scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
 
         #[cfg(feature = "threads")]
         let ran_parallel = if parallel {
             use rayon::prelude::*;
-            let results: Vec<(f64, f64)> = out_region
+            let results: Vec<((f64, f64), V1BasicSums)> = out_region
                 .chunks_mut(FEATURES_PER_CHANNEL_V2_TOTAL)
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .zip(scratch.par_iter_mut())
                 .enumerate()
                 .map(|(ch, (out, scr))| {
-                    let g = compute_channel_scale_v2(
+                    let g = compute_channel_scale_v2_with_fold(
                         &src_planes[ch],
                         &dst_planes[ch],
                         width,
                         height,
                         toggles,
                         moments_for(ch),
+                        fold_v1,
                         scr,
                         out,
                     );
@@ -3346,7 +3763,8 @@ pub(crate) fn compute_v2_features_with_ref_impl(
                     g
                 })
                 .collect();
-            grads = [results[0], results[1], results[2]];
+            grads = [results[0].0, results[1].0, results[2].0];
+            fold_sums = [results[0].1, results[1].1, results[2].1];
             true
         } else {
             false
@@ -3359,17 +3777,33 @@ pub(crate) fn compute_v2_features_with_ref_impl(
                 .chunks_mut(FEATURES_PER_CHANNEL_V2_TOTAL)
                 .enumerate()
             {
-                grads[ch] = compute_channel_scale_v2(
+                let (g, sums) = compute_channel_scale_v2_with_fold(
                     &src_planes[ch],
                     &dst_planes[ch],
                     width,
                     height,
                     toggles,
                     moments_for(ch),
+                    fold_v1,
                     &mut scratch[ch],
                     out,
                 );
+                grads[ch] = g;
+                fold_sums[ch] = sums;
                 apply_transducer_luma_gate(out, ch, toggles);
+            }
+        }
+
+        // --- v1-basic fold finalize: this scale's 13 basic features per
+        //     channel, at v1's exact layout (scale-major, 13/ch — the
+        //     `features[scale*39 + ch*13 + k]` addressing of the frozen
+        //     372 vector). Pooling math replicates v1's finalize
+        //     bit-for-bit on the (reassociated) strip sums. ---
+        if fold_v1 {
+            let n_scale_pixels = width * height;
+            for (ch, sums) in fold_sums.iter().enumerate() {
+                let base = scale * 39 + ch * 13;
+                sums.finalize_into(n_scale_pixels, &mut features[base..base + 13]);
             }
         }
 
@@ -3381,7 +3815,8 @@ pub(crate) fn compute_v2_features_with_ref_impl(
                 // the time we reach the next coarser scale".
                 let decay_src = gsrc / (prev_gsrc + C_GRAD_DECAY);
                 let decay_dst = gdst / (prev_gdst + C_GRAD_DECAY);
-                let prev_base = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                let prev_base = v1_total
+                    + (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
                     + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
                 features[prev_base + idx::EDGE_WIDTH_CHANGE] =
                     1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
@@ -3392,8 +3827,9 @@ pub(crate) fn compute_v2_features_with_ref_impl(
                 // Coarsest scale has no next scale to compare against --
                 // duplicate the previous (second-coarsest) scale's value
                 // (documented approximation; see module/spec doc).
-                let this_base = scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-                let prev_base = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                let this_base = v1_total + scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                let prev_base = v1_total
+                    + (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
                     + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
                 features[this_base + idx::EDGE_WIDTH_CHANGE] =
                     features[prev_base + idx::EDGE_WIDTH_CHANGE];
@@ -3424,7 +3860,11 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     Ok(ZensimV2Result {
         features,
         n_scales,
-        regime: FeatureRegime::V2Bounded,
+        regime: if fold_v1 {
+            FeatureRegime::Folded720
+        } else {
+            FeatureRegime::V2Bounded
+        },
     })
 }
 
@@ -4462,7 +4902,14 @@ mod tests {
                 let mut scratch = ScratchV2Strip::new(ws * max_wide_h);
                 let mut feat = [0.0f64; FEATURES_PER_CHANNEL_V2_TOTAL];
                 compute_channel_scale_v2(
-                    &pr[ch], &pd[ch], ws, hs, toggles, None, &mut scratch, &mut feat,
+                    &pr[ch],
+                    &pd[ch],
+                    ws,
+                    hs,
+                    toggles,
+                    None,
+                    &mut scratch,
+                    &mut feat,
                 );
                 let base = scale * per_scale + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
                 for &local in &supported {
@@ -4482,7 +4929,10 @@ mod tests {
             "full-diffmap block-pool mean {map_mean} vs feature sum {expected}: rel_err {rel_err}"
         );
         // Fixture must actually exercise the families (not pass trivially at 0).
-        assert!(expected > 1e-3, "fixture produced ~zero supported-feature sum");
+        assert!(
+            expected > 1e-3,
+            "fixture produced ~zero supported-feature sum"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -4829,5 +5279,195 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ZensimError::DimensionMismatch));
+    }
+
+    /// FOLD PARITY GATE (2026-07-24). The folded-720 path replays v1's
+    /// exact 32-row band tiling over shared H-planes, so its v1 basic
+    /// block (`f0..156`) is **BIT-IDENTICAL** to the frozen v1 extraction
+    /// path whenever the working widths agree — i.e. whenever
+    /// `simd_padded_width(w) == w` (multiples of 16 below 512, plus the
+    /// non-bumped alignments above; see `blur::simd_padded_width`).
+    ///
+    /// For other widths the two regimes are STRUCTURALLY different by
+    /// v1's own frozen semantics: v1 computes over the SIMD-padded width
+    /// (mirrored pad columns participate in pooling, and the downscale
+    /// chain halves the padded width, shifting every deeper scale's
+    /// grid), while the fold runs at the true width. That divergence is
+    /// v1's pad wart, not fold noise — it is the documented boundary of
+    /// the [`FeatureRegime::Folded720`] contract, measured on real
+    /// content + real models in `benchmarks/` (fold_v1_basic_*), and it
+    /// is why folded rows must NEVER be silently mixed into v1-extracted
+    /// corpora.
+    ///
+    /// Also gates: `f156..372` all-zero (deprecated pool blocks) and the
+    /// v2 block (`f372..`) BIT-identical to the plain v2 path, for BOTH
+    /// width classes.
+    #[test]
+    fn folded720_v1_basic_matches_v1_path() {
+        // (w, h, expect_bit_exact): 16-multiple widths are bit-exact;
+        // 127 (pads to 128) and 200 (pads to 208) document the padded-
+        // width divergence class. ≥64 sizes only: `compute_zensim_with_
+        // config` (the fleet v1 extractor) does not reflect-pad sub-64
+        // (see `folded720_sub64_matches_padding_v1_entry` for that).
+        for &(w, h, exact) in &[
+            (96usize, 64usize, true),
+            (64, 300, true),
+            (208, 144, true),
+            (127, 93, false),
+            (200, 150, false),
+        ] {
+            let src = textured_image(w, h, 7);
+            let dst = quantize_distort(&src, w, h);
+
+            // v1, the production extraction config (extended + IW = 372).
+            let mut cfg = crate::ZensimConfig::default();
+            cfg.extended_features = true;
+            cfg.compute_iw_features = true;
+            cfg.allow_multithreading = false;
+            let v1 = crate::compute_zensim_with_config(&src, &dst, w, h, cfg).unwrap();
+            let v1f = v1.features();
+            assert_eq!(v1f.len(), 372);
+
+            let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            let v2 = z.compute_v2_features(&sref, &dref).unwrap();
+            let folded = z.compute_folded720_features(&sref, &dref).unwrap();
+            assert_eq!(folded.regime(), FeatureRegime::Folded720);
+            let ff = folded.features();
+            assert_eq!(ff.len(), 720);
+
+            // v2 block: bit-identical to the plain v2 path.
+            for (i, (&a, &b)) in ff[372..].iter().zip(v2.features().iter()).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "{w}x{h}: folded v2 slot {i} ({a:e}) != plain v2 ({b:e})"
+                );
+            }
+            // Deprecated pool blocks: exactly zero.
+            assert!(
+                ff[156..372].iter().all(|&v| v == 0.0),
+                "{w}x{h}: deprecated f156..372 must be exactly 0.0"
+            );
+            if exact {
+                // simd_padded_width(w) == w ⇒ the band replay makes the
+                // basic block bit-identical. If this fires, something
+                // structural regressed (band extents, H sharing, merge
+                // order) — investigate, never widen to a tolerance.
+                for i in 0..156 {
+                    assert_eq!(
+                        ff[i].to_bits(),
+                        v1f[i].to_bits(),
+                        "{w}x{h}: basic f{i} fold {:e} != v1 {:e} (bit-exact class)",
+                        ff[i],
+                        v1f[i]
+                    );
+                }
+                eprintln!("fold parity {w}x{h}: BIT-EXACT");
+            } else {
+                // Padded-width divergence class: document the magnitude,
+                // assert sanity (finite, non-negative like v1's basics).
+                let mut max_rel = 0.0f64;
+                for i in 0..156 {
+                    let (a, b) = (ff[i], v1f[i]);
+                    assert!(a.is_finite(), "{w}x{h}: basic f{i} not finite");
+                    if b.abs() > 1e-12 {
+                        max_rel = max_rel.max((a - b).abs() / b.abs());
+                    }
+                }
+                eprintln!(
+                    "fold parity {w}x{h}: padded-width class (v1 pads {w}->{}), max rel {max_rel:.3e}",
+                    crate::blur::simd_padded_width(w),
+                    max_rel = max_rel
+                );
+            }
+        }
+    }
+
+    /// Sub-64 inputs: the folded path inherits v2's reflect-pad-to-64
+    /// pyramid, which matches the v1 `Zensim` API entries
+    /// (`compute_with_config_inner` pads with the same
+    /// `reflect_pad_to_min`) — gate the basic block against
+    /// `Zensim::compute_extended_features` (its `f0..156` prefix).
+    #[test]
+    fn folded720_sub64_matches_padding_v1_entry() {
+        let (w, h) = (48usize, 40usize);
+        let src = textured_image(w, h, 11);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let v1 = z.compute_extended_features(&sref, &dref).unwrap();
+        let v1f = v1.features();
+        let folded = z.compute_folded720_features(&sref, &dref).unwrap();
+        let ff = folded.features();
+        assert_eq!(ff.len(), 720);
+        // Both sides pad 48x40 → 64x64 via the same `reflect_pad_to_min`,
+        // and simd_padded_width(64) == 64 ⇒ bit-exact class.
+        for i in 0..156 {
+            assert_eq!(
+                ff[i].to_bits(),
+                v1f[i].to_bits(),
+                "sub64 basic f{i}: fold {:e} != v1 {:e}",
+                ff[i],
+                v1f[i]
+            );
+        }
+    }
+
+    /// The three folded entry forms must agree: pair path, prepared-ref
+    /// (no moments), prepared-ref (with moments). The moments form swaps
+    /// `fused_blur_h_ssim3` → `fused_blur_h_ssim` for `mu1_h`, whose three
+    /// shared outputs are bit-identical, so ALL 720 slots must match
+    /// bitwise across the three.
+    #[test]
+    fn folded720_ref_paths_bit_identical() {
+        let (w, h) = (150usize, 170usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+
+        let pair = z.compute_folded720_features(&sref, &dref).unwrap();
+        let mut scratch = V2Scratch::new();
+        let plain = z.prepare_v2_reference(&sref).unwrap();
+        let a = z
+            .compute_folded720_features_with_ref_and_scratch(
+                &plain,
+                &dref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        let moments = z.prepare_v2_reference_with_moments(&sref).unwrap();
+        let b = z
+            .compute_folded720_features_with_ref_and_scratch(
+                &moments,
+                &dref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+
+        for i in 0..720 {
+            assert_eq!(
+                pair.features()[i].to_bits(),
+                a.features()[i].to_bits(),
+                "pair vs prepared(no moments) diverge at f{i}"
+            );
+            assert_eq!(
+                pair.features()[i].to_bits(),
+                b.features()[i].to_bits(),
+                "pair vs prepared(moments) diverge at f{i}"
+            );
+        }
+        // Folded view() exposes the v2 tail.
+        assert_eq!(
+            pair.view().ssim_mean(0, 0).to_bits(),
+            pair.features()[372 + idx::SSIM_MEAN].to_bits()
+        );
     }
 }

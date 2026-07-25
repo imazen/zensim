@@ -88,11 +88,18 @@ fn main() {
     // ZENSIM_AB_MODE: "ext" (default, v1-372 ++ v2-348 = 720) | "v1" (372 only)
     // | "v2" (348 only). For the clean 3-way timing bench — same binary, same
     // decode path, only the compute set changes.
+    // Fold-investigation modes (2026-07-24): "v1e" = v1 extended-only (300,
+    // IW skipped) | "v1s" = v1 standard (228, masked+IW skipped). Same v1
+    // code path, only the config flags change — isolates the activity-path
+    // (masked/IW pool) share of v1c for the fold-basic-156-into-v2 design.
+    // "fold" = the folded-720 ONE-pass extraction (v1 basic in the v2 walk,
+    // f156..371 = 0, v2-348) — `Zensim::compute_folded720_features*`.
     let mode = std::env::var("ZENSIM_AB_MODE").unwrap_or_else(|_| "ext".into());
+    let do_fold = mode == "fold";
     let (do_v1, do_v2) = match mode.as_str() {
-        "v1" => (true, false),
+        "v1" | "v1e" | "v1s" => (true, false),
         "v2" => (false, true),
-        "none" => (false, false), // decode-only, for timing decomposition
+        "none" | "fold" => (false, false), // fold has its own branch below
         _ => (true, true),
     };
 
@@ -138,8 +145,8 @@ fn main() {
         // changes v1's output bytes, only speed).
         if do_v1 {
             let mut cfg = ZensimConfig::default();
-            cfg.extended_features = true;
-            cfg.compute_iw_features = true;
+            cfg.extended_features = mode != "v1s";
+            cfg.compute_iw_features = mode != "v1s" && mode != "v1e";
             cfg.allow_multithreading = false;
             let v1 = match compute_zensim_with_config(r_px, &d_px, rw, rh, cfg) {
                 Ok(r) => r,
@@ -172,6 +179,29 @@ fn main() {
                 }
             };
             combined.extend_from_slice(v2.features());
+        }
+        // Folded-720 ONE-pass block: v1 basic (f0..156) + zeros (f156..372)
+        // + v2-348 (f372..720), emitted by a single v2-walk pass.
+        if do_fold {
+            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+            let distorted = RgbSlice::new(&d_px, dw, dh);
+            let folded = match prepared {
+                Some(pre) => z.compute_folded720_features_with_ref_and_scratch(
+                    pre,
+                    &distorted,
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                ),
+                None => z.compute_folded720_features(&RgbSlice::new(r_px, rw, rh), &distorted),
+            };
+            let folded = match folded {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("SKIP fold compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            };
+            combined.extend_from_slice(folded.features());
         }
         n_feat_seen.store(combined.len(), Ordering::Relaxed);
         let base = p
@@ -237,7 +267,7 @@ fn main() {
                 let want_moments = std::env::var("ZENSIM_AB_MOMENTS")
                     .map(|v| v != "0")
                     .unwrap_or(true);
-                let prepared = if do_v2 {
+                let prepared = if do_v2 || do_fold {
                     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
                     let r = if want_moments {
                         z.prepare_v2_reference_with_moments(&RgbSlice::new(&r_px, rw, rh))
