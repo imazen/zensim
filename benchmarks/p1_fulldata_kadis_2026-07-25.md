@@ -212,3 +212,26 @@ Empirical M3 confirmation is queued (needs the `custom-profiles` example build f
 smooth screen) = **CID22 0.815 (best of any arm), KonJND recovered to 0.158, FR ~0.94, diffmap-
 coherent by construction.** Next to make it a ship candidate: add the dial spline (`bake_dial_refit`),
 run the full rank+dial scorecard (`bake_verdict`), fix + run empirical M3, then compare to shipped B.
+
+## ⚠ HONEST CORRECTION (2026-07-25, after user: "we hit .89 CID22 before")
+
+My E-K1..K4 "KADIS Pareto win" was measured against a **weak linear-BVLS baseline**
+(kbase/foldcanon, CID22 ~0.80). That was misleading. The REAL ship bar is
+`Ebothg_scr0.5_dial` (verdicted fresh, 720): **CID22 0.879, KonJND 0.411, CSIQ 0.958,
+LIVE 0.959, imazen26 0.922** — stronger EVERYWHERE than my KADIS-boosted models
+(foldcanon+KADIS was CID22 0.815 / KonJND 0.158 / CSIQ 0.93). So KADIS largely
+*compensated for my weak recipe*, it did not beat the ship model.
+
+**BUT the tension the user pointed at is real and unresolved:**
+- **Ebothg (0.879) is v1-372 WITH iw/masked + bigcodec → NOT diffmap-coherent** (uses the
+  non-spatializable pools). It can't drive the closed loop — high rank, no coherent diffmap.
+  Its KonJND 0.411 is partly *because* it keeps iw/masked (which carry near-threshold signal).
+- **The diffmap-coherent regime (foldable: basic+v2, NO iw/masked) is what the product needs**,
+  and it's ~0.80 CID22 / 0.07 KonJND before KADIS → 0.815 / 0.158 after. KADIS is a real lever
+  ON THE COHERENT REGIME, but a **gap to Ebothg's 0.879 remains**.
+
+**The actual open problem = close the coherent-regime gap to ~0.89 WITHOUT iw/masked.**
+Untested and the right next step: KADIS + **bigcodec** + the MLP recipe on the **foldable**
+feature set (Ebothg's power came from bigcodec + MLP, which I never combined with the coherent
+regime + KADIS). Dashboard `p1kadis_dashboard.html` used the weak `ebothg_m504` (CID22 0.30) —
+regen with `Ebothg_scr0.5_dial` as the real baseline.
