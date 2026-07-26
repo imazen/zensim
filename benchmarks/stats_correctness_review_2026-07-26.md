@@ -203,3 +203,31 @@ but will fail a triple on an exact tie.
 None of these are correctness bugs in the estimators — the math is right and matches the
 compiled code. They are about **surfacing uncertainty, retiring redundant/degenerate
 columns, flagging memorization corpora, and rebuilding the one thin bespoke stat (M3).**
+
+## Implementation (2026-07-26) — all 9 recommendations landed
+
+Implemented consumer-side in zensim (every needed `zenstats` fn was already `pub`; zero
+edits to the zenmetrics repo). Worked in an isolated jj workspace alongside a concurrent
+v2-feature session; each chunk built, tested, and pushed to `main`.
+
+| # | Recommendation | Done | Where |
+|---|---|---|---|
+| 1 | Paired/bootstrap CI in the artifact + tie band | ✅ | `bake_verdict` `bootstrap_srocc_ci` → `--full-json srocc_ci`; dashboard `CID22 95%CI±` column |
+| 2 | Surface `frac_negative` per model | ✅ | `--full-json rank.*.frac_negative` (was markdown-only); dashboard `CID22 %bwd` |
+| 3 | Demote OR to a pass/fail gate | ✅ | G-OR (worst-corpus catastrophe gate); OR removed from every ranking/composite |
+| 4 | Join per-stimulus σ or document | ✅ (doc) | σ exists in sources (TID `mos_std`, KADID raw, CID22 SOS) + loader supports it; join queued; non-blocking since OR is now a gate |
+| 5 | Signed SROCC for quality corpora | ✅ | `--full-json rank.*.srocc_signed` (exposes global inversion the abs form hides) |
+| 6 | Flag KADID/TID (train==val) | ✅ | `train_eq_val()` → JSON flag + `⚠t=v` in the summary table + amber heatmap headers |
+| 7 | Reconcile the two composites | ✅ | one Rust `product_composite` emitted as `composite`; dashboard READS it, never re-derives |
+| 8 | Rebuild M3 | ✅ | tie-correct `rank` (mirrors zenstats); dropped-f156-371 mass emitted for EVERY bake (`m3_dropped_mass_pct`); run_full_eval widened 3×q50 → content×size×q (27 pairs) |
+| 9 | Product-weighted aggregate | ✅ | the `product_composite` weights (CID22 + imazen26 + non-photo centered, KADID/TID excluded) |
+
+**Key measured validations:** the Rust bootstrap CI reproduces the scipy paired bootstrap
+(winner CID22 `[0.888, 0.900]`); the M3 dropped-mass separates the two failure modes it was
+built to (B-372 leans 37.9% on non-spatializable pooled features → M3 structurally capped,
+distinct from an incoherent map; winner-156 and E-K5-720-foldable both 0.0%). Commits:
+`0ab6e31b` (signed SROCC + CI + frac_neg + flag), `cf24e2ab` (composite + OR-gate),
+`df025f38` (M3 rebuild + σ doc), `c5a33577` (dashboard). Surfacing the new fields requires
+re-running `run_full_eval.sh` across the 15 bakes (each fulleval JSON is regenerated with
+`composite` / `srocc_ci` / `srocc_signed` / `frac_negative` / `train_eq_val` /
+`m3_dropped_mass_pct` + the 27-pair M3), then rebuilding the dashboard from them.
