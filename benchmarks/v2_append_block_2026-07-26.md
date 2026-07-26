@@ -106,6 +106,52 @@ RAYON_NUM_THREADS=1 ZENSIM_AB_MODE=foldapp target/release/examples/v2_ab_extract
 RAYON_NUM_THREADS=1 ZENSIM_AB_MODE=foldapp heaptrack target/release/examples/v2_ab_extract ~/tmp/aic3_100.tsv /tmp/fa.csv
 ```
 
+## 12 MP peak memory (measured 2026-07-26, same host/commit + `72156df5`)
+
+Single 4000×3000 pair (aic3 ref resized + JPEG-82 roundtrip; memory is
+dimension-, not content-, driven), heaptrack peak heap. One f32 plane at
+12 MP = 48.0 MB.
+
+| config | peak heap | composition check |
+|---|--:|---|
+| fold, grouped+moments | 882.2 MB | pyramids+scratch+decode ≈ 499 + mu1/act cache 383 |
+| **foldapp, grouped+moments** | **1.03 GB** | + bs2 cache 143 (2.98 planes) + misc |
+| fold, `ZENSIM_AB_MOMENTS=0` | 499.7 MB | cache term gone (882 − 383 exactly) |
+| foldapp, `ZENSIM_AB_MOMENTS=0` | 835.7 MB | 499.7 + 336 replay planes (7 × 48) exactly |
+| foldapp, pair path (`GROUPED=0`) | 835.7 MB | same replay shape |
+
+Timing at 12 MP, ONE variant per reference (3 rounds, wall incl. ~decode):
+fold+moments ~1.74 s; foldapp+moments ~2.1 s; **foldapp MOMENTS=0 ~1.90 s —
+faster AND 194 MB smaller than foldapp+moments**, because with a single
+variant the cache costs more to fill than it saves. The cache pays off only
+when many variants share one reference (the aic3-100 batch shape).
+
+### Bringing 12 MP peak down — options by measured MB
+
+1. **Zero code, available now:** score single photos (or few-variant refs)
+   with `ZENSIM_AB_MOMENTS=0` / the pair entry — 1.03 GB → **835.7 MB**
+   (−19%), and faster in that shape. Driver policy worth adopting: enable
+   the moments cache only when variants-per-reference is high enough to
+   amortize it (and/or below a megapixel cap).
+2. **Strip-tile the bs2 fill/replay** (moderate, do it BEFORE any corpus
+   freezes append values — it shifts bs2 by f32 ULPs): replaces the two
+   48 MB whole-plane temps with strip-local scratch → replay-path peak
+   835.7 → ~740 MB. Same CPU.
+3. **bf16 the moments cache** (invasive): mu1+act+bs2 526 MB → 263 MB on
+   the cached path (1.03 GB → ~790 MB). ~0.4% stored-value precision;
+   breaks the simple bitwise path-parity story — needs both paths to
+   quantize identically. Only worth it if 12 MP batch extraction with
+   cache becomes a real workload.
+4. **Driver: drop the decoded reference RGB8 after prepare** in fold modes
+   (−36 MB; r_px is only consumed by the v1/None-prepared fallbacks).
+5. **`STRIP_ROWS` 128 → 64**: scratch 92 → ~52 MB (−40 MB) for ~+13% blur
+   halo overhead (~+3-5% compute) — a knob, probably not worth the trade.
+
+Floor context: any 12 MP scoring here carries ≈ 500 MB regardless of the
+append block (ref+dst XYB pyramids 335, strip scratch 92, decode buffers +
+misc ~70). The append block itself adds +152 MB cached / +143 MB replayed
+at 12 MP (linear in reference megapixels).
+
 ## Follow-ups (not blockers)
 
 - The append block has no trained consumer yet: next training round should
