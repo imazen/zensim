@@ -44,7 +44,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rayon::prelude::*;
 use zensim::feature_v2::{V2NewFeatureToggles, V2Scratch};
-use zensim::{RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config};
+use zensim::{
+    PrecomputedReference, RgbSlice, Zensim, ZensimConfig, ZensimProfile,
+    compute_zensim_with_config, compute_zensim_with_ref_and_config,
+};
 
 struct Pair {
     ref_path: PathBuf,
@@ -100,13 +103,21 @@ fn main() {
     // (`compute_streaming_strips_default`, per-strip reference pyramid,
     // O(strip×width) memory) — for memory A/B against the materialized
     // v2/folded paths. Emits the profile score, not the 372 vector.
+    // Ref-cache A/B modes (2026-07-26): "v1ref" = v1 372 via a per-group
+    // PrecomputedReference (compute_zensim_with_ref_and_config); "v1streamref"
+    // = streaming distorted side against a full precomputed reference
+    // (compute_with_ref_streaming_strips_default, score-only). Both require
+    // the grouped flow (ZENSIM_AB_GROUPED=1, the default).
     let mode = std::env::var("ZENSIM_AB_MODE").unwrap_or_else(|_| "ext".into());
     let do_fold = mode == "fold" || mode == "foldapp";
     let do_v1stream = mode == "v1stream";
+    let do_v1ref = mode == "v1ref";
+    let do_v1streamref = mode == "v1streamref";
     let (do_v1, do_v2) = match mode.as_str() {
         "v1" | "v1e" | "v1s" => (true, false),
         "v2" => (false, true),
-        "none" | "fold" | "foldapp" | "v1stream" => (false, false), // own branches below
+        // own branches below
+        "none" | "fold" | "foldapp" | "v1stream" | "v1ref" | "v1streamref" => (false, false),
         _ => (true, true),
     };
 
@@ -134,6 +145,7 @@ fn main() {
                       rw: usize,
                       rh: usize,
                       prepared: Option<&zensim::feature_v2::V2PreparedReference>,
+                      v1_prepared: Option<&PrecomputedReference>,
                       scratch: &mut V2Scratch|
      -> Option<String> {
         if !p.dist_path.exists() {
@@ -195,6 +207,40 @@ fn main() {
                 Ok(r) => combined.push(r.score()),
                 Err(e) => {
                     eprintln!("SKIP v1stream compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            }
+        }
+        // v1-372 against a per-group precomputed reference (ref-cache A/B).
+        if do_v1ref {
+            let Some(v1p) = v1_prepared else {
+                eprintln!("SKIP v1ref requires the grouped flow: {:?}", p.dist_path);
+                return None;
+            };
+            let mut cfg = ZensimConfig::default();
+            cfg.extended_features = true;
+            cfg.compute_iw_features = true;
+            cfg.allow_multithreading = false;
+            match compute_zensim_with_ref_and_config(v1p, &d_px, dw, dh, cfg) {
+                Ok(r) => combined.extend_from_slice(r.features()),
+                Err(e) => {
+                    eprintln!("SKIP v1ref compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            }
+        }
+        // Streaming distorted side vs full precomputed reference (score-only).
+        if do_v1streamref {
+            let Some(v1p) = v1_prepared else {
+                eprintln!("SKIP v1streamref requires the grouped flow: {:?}", p.dist_path);
+                return None;
+            };
+            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+            let distorted = RgbSlice::new(&d_px, dw, dh);
+            match z.compute_with_ref_streaming_strips_default(v1p, &distorted) {
+                Ok(r) => combined.push(r.score()),
+                Err(e) => {
+                    eprintln!("SKIP v1streamref compute error {:?}: {e:?}", p.dist_path);
                     return None;
                 }
             }
@@ -333,6 +379,25 @@ fn main() {
                 } else {
                     None
                 };
+                // v1 PrecomputedReference per group (ref-cache A/B modes).
+                let v1_prepared = if do_v1ref || do_v1streamref {
+                    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+                    match z.precompute_reference(&RgbSlice::new(&r_px, rw, rh)) {
+                        Ok(p) => Some(p),
+                        Err(e) => {
+                            for &i in idxs {
+                                eprintln!(
+                                    "SKIP v1 precompute error {:?}: {e:?}",
+                                    pairs[i].dist_path
+                                );
+                                progress(n_done.fetch_add(1, Ordering::Relaxed));
+                            }
+                            return Vec::new();
+                        }
+                    }
+                } else {
+                    None
+                };
                 // Variants fan out in parallel WITHIN the group too (rayon
                 // work-stealing handles the nesting): corpora with few
                 // references and many variants — the sweep shape — would
@@ -341,8 +406,16 @@ fn main() {
                 // `&`; each rayon split gets its own `V2Scratch`.
                 idxs.par_iter()
                     .map_init(V2Scratch::new, |scratch, &i| {
-                        let row = score_pair(&pairs[i], &r_px, rw, rh, prepared.as_ref(), scratch)
-                            .map(|row| (i, row));
+                        let row = score_pair(
+                            &pairs[i],
+                            &r_px,
+                            rw,
+                            rh,
+                            prepared.as_ref(),
+                            v1_prepared.as_ref(),
+                            scratch,
+                        )
+                        .map(|row| (i, row));
                         progress(n_done.fetch_add(1, Ordering::Relaxed));
                         row
                     })
@@ -364,7 +437,7 @@ fn main() {
                 }
                 let (r_px, rw, rh) = zen_io::decode_rgb8(&p.ref_path);
                 let mut scratch = V2Scratch::new();
-                score_pair(p, &r_px, rw, rh, None, &mut scratch)
+                score_pair(p, &r_px, rw, rh, None, None, &mut scratch)
             })
             .collect()
     };
