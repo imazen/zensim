@@ -690,8 +690,33 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--from-search", default="/mnt/v/output/zensim/reports/blend/blend_results_r3_2026-07-15.json")
     ap.add_argument("--bakes", default=None)
-    ap.add_argument("--out", default=str(OUTDIR / "bandwise_dashboard_2026-07-15.html"))
+    # NEW (2026-07-26): interactive summer-gauntlet mode. Reads pre-computed per-bake
+    # *.fulleval.json (schema: make_stub_fulleval.py) and emits ONE self-contained, OFFLINE
+    # HTML with bake-toggle checkboxes, a sortable scoreboard, and the predicted-vs-reference
+    # correlation scatter matrix (MOS/JND/ssim2/butteraugli/cvvdp). See gauntlet.py.
+    ap.add_argument("--fulleval-dir", default=None,
+                    help="interactive gauntlet mode: dir of *.fulleval.json to compare (offline HTML)")
+    ap.add_argument("--best-per-day", default=None,
+                    help="optional best_per_day.json giving champion order for --fulleval-dir")
+    ap.add_argument("--out", default=None)
     a = ap.parse_args()
+
+    # ---- interactive gauntlet mode (self-contained offline HTML) --------------------------
+    if a.fulleval_dir:
+        import os as _os
+        import sys as _sys
+        _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        from gauntlet import build_html, load_fulleval
+        out = a.out or "/mnt/v/output/zensim/reports/summer_gauntlet.html"
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        gbakes = load_fulleval(a.fulleval_dir, a.best_per_day)
+        _p, size = build_html(gbakes, out)
+        print(f"wrote {out}  ({size // 1024} KB)  {len(gbakes)} bakes (interactive gauntlet)\n  view: "
+              + out.replace("/mnt/v/output/", "http://localhost:3300/"))
+        return
+
+    # ---- legacy per-bake matplotlib bandwise dashboard (unchanged) -------------------------
+    a.out = a.out or str(OUTDIR / "bandwise_dashboard_2026-07-15.html")
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
     bakes = []

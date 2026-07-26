@@ -69,6 +69,13 @@ silently emits 372 not 720). Full order + corpus + risks: the plan doc §D.
   features/metrics.
 - **Worktrees live**: `jxl-encoder--zensim-diffmap-rd` + `zenjpeg--zensim-diffmap-rd` carry
   the RD-probe wiring (env-selectable profiles/maps, q-correction, probe binaries).
+- **Interactive summer-gauntlet dashboard** (2026-07-26): `bandwise_dashboard.py --fulleval-dir
+  /mnt/v/output/zensim/reports/fulleval --out …/summer_gauntlet.html` — one self-contained OFFLINE
+  HTML comparing ALL summer bakes: bake-toggle checkboxes, sortable scoreboard, cross-corpus SROCC
+  heatmap, trade map, and the predicted-vs-reference (MOS/JND/ssim2/butteraugli/cvvdp) scatter
+  matrix. Input contract + fixtures: `scripts/v_next/make_stub_fulleval.py` (the eval agent emits
+  the real `*.fulleval.json` + `best_per_day.json`); builder: `scripts/v_next/gauntlet.py`. Stats
+  come from the canonical `panel`, never hand-rolled. See CLAUDE.md "THE dashboard".
 
 ## Standing open items (beyond TaskList)
 

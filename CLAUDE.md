@@ -141,18 +141,32 @@ the loop. Every metric decision serves this:
 ### THE dashboard (the "pretty one" the user means)
 
 `scripts/v_next/bandwise_dashboard.py` — the every-graph dashboard. THIS is the
-combined dashboard; EXTEND it, don't rebuild a thinner one. Two modes:
+combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
 - `--bakes label:path.bin,...` — compare bakes directly (shipped B auto-prepended;
   ssim2/cvvdp/butteraugli refs auto-added).
 - `--from-search /mnt/v/output/zensim/reports/blend/blend_results_r7_2026-07-15.json`
   — the blend-candidate view.
-Plots: per-bake scatter+trend, grouped 10-band SROCC bars, calibration curve,
-residual, candlestick, SROCC heatmap, 2-panel Pareto trade (CID22 vs nonphoto /
-KonJND), composite ranking bar, per-codec dial plots + dial-mono %, full Mohammadi
-stat panel (incl. low-tail/high-tail SROCC), 10-band table, honesty/provenance
-panels. Run from repo root (imports `blend_lib` from cwd). `bake_report.py` adds
-the 2×4 8-corpus scatter grid with 4PL fit + PWRC (reports/); `bake_verdict --html`
-is the single-bake Rust report.
+- **`--fulleval-dir /mnt/v/output/zensim/reports/fulleval` — the INTERACTIVE
+  summer-gauntlet** (2026-07-26). Reads pre-computed per-bake `*.fulleval.json`
+  (schema + fixtures: `scripts/v_next/make_stub_fulleval.py`; ordering from
+  `best_per_day.json`) and emits ONE self-contained, **OFFLINE** HTML
+  (`--out …/summer_gauntlet.html`) via `scripts/v_next/gauntlet.py`: bake-toggle
+  checkboxes (stable per-bake color; all/none/top-6), a **sortable scoreboard**
+  (click any header — CID22/KonJND/dial-mono/M3/corruption/composite/…), a
+  cross-corpus SROCC heatmap, the CID22-vs-{nonphoto,KonJND} trade map, and the
+  **correlation SCATTER MATRIX** — predicted vs each reference (MOS/JND/ssim2/
+  butteraugli/cvvdp), one clean faceted scatter per (bake × corpus) with OLS fit +
+  canonical SROCC/PLCC. Hand-rolled inline SVG+JS (no CDN/plotly — opens offline),
+  theme-aware (light/dark), dataviz-validated palette. **Stats are NEVER
+  hand-rolled**: SROCC/PLCC come from the fulleval JSON's `scatter` block (eval
+  agent → canonical `panel`) or, if omitted, `scripts/lib/zen_stats.panel` at build.
+The first two modes' plots: per-bake scatter+trend, grouped 10-band SROCC bars,
+calibration curve, residual, candlestick, SROCC heatmap, 2-panel Pareto trade
+(CID22 vs nonphoto / KonJND), composite ranking bar, per-codec dial plots +
+dial-mono %, full Mohammadi stat panel (incl. low-tail/high-tail SROCC), 10-band
+table, honesty/provenance panels. Run from `scripts/v_next/` (imports `blend_lib`/
+`gauntlet` from cwd). `bake_report.py` adds the 2×4 8-corpus scatter grid with 4PL
+fit + PWRC (reports/); `bake_verdict --html` is the single-bake Rust report.
 
 > **Historical (May-2026 V0_x / PreviewV0_5 era):** the training goals + three-trail SOTA + shipping/experiment-rigor policies, 2026-05-1x eval mandates, V_20/V39 learnings, canonical-2026-05-18 corpus archaeology, the interactive-site spec (since shipped: `site/compare.html`), V_X experiment workflow, V0_1-era weight status, and V0_7 e1 fill were moved verbatim to [`docs/HISTORY-2026-05-v0x-era.md`](docs/HISTORY-2026-05-v0x-era.md) on 2026-07-19. Current guidance: [`docs/TOP_MODELS_COOKBOOK.md`](docs/TOP_MODELS_COOKBOOK.md).
 
