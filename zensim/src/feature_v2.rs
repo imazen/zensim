@@ -2502,34 +2502,70 @@ fn gradient_block_kernel(
 /// than the pre-phase-4 dense-scalar-with-modulo-branch it replaces, since
 /// it no longer visits the 7/8 (or 63/64 for the corner term) of pixels
 /// that always contribute zero.
+///
+/// **Canonical accumulation order (streaming pre-chunk P1, 2026-07-26 —
+/// `docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md` §2):** both term
+/// families accumulate ROW-ORDERED (y-outer), into two separate f64 sums
+/// combined once at the end:
+///
+/// - `sum_v` (vertical lattice-BOUNDARY steps, `x % LATTICE == 0, x > 0`,
+///   every row): `for y in 0..h { for x in lattice }`.
+/// - `sum_h` (horizontal lattice-boundary steps, `y % LATTICE == 0, y > 0`,
+///   every column): `for y in lattice { for x in 0..w }` (this family was
+///   already row-ordered).
+///
+/// The previous form iterated the vertical family COLUMN-outer and folded
+/// both families into one running f64 — an association no row-ordered
+/// strip walk can reproduce. Reordering shifts the pooled BLOCKINESS value
+/// by f64 reassociation only (~1e-16 rel; 12 of 720 slots affected, all
+/// entry paths shift identically so path-parity gates are unaffected), and
+/// lets a strip-fed variant accumulate rows `[y0, y1)` per kernel strip
+/// into running `(sum_v, sum_h)` with a bit-identical f64 op sequence.
+/// (Also a locality win: the old column-outer walk strode `width` floats
+/// per step.)
 fn blockiness_sparse(src: &[f32], dst: &[f32], width: usize, height: usize) -> f64 {
-    let mut sum = 0.0f64;
-    // Vertical steps: for every column x that's a lattice boundary, walk
-    // down every row y (all y, since the horizontal-step term at column x
-    // fires for every row -- matches the original `x % LATTICE == 0 && x >
-    // 0` condition, which held for all y).
-    let mut x = BLOCK_LATTICE;
-    while x < width {
-        for y in 0..height {
-            let i = y * width + x;
+    let (sum_v, sum_h) = blockiness_sparse_rows(src, dst, width, 0, height);
+    sum_v + sum_h
+}
+
+/// Row-range core of [`blockiness_sparse`]: accumulate BOTH term families
+/// for image rows `[y0, y1)` (`src`/`dst` hold the full plane here; the
+/// streamed walk (C2) will call this shape with strip-local slices and
+/// translated row indexing). Returns `(sum_v, sum_h)` so a strip walk can
+/// keep the two running sums across strips and combine ONCE at finalize,
+/// reproducing [`blockiness_sparse`]'s f64 op sequence exactly.
+fn blockiness_sparse_rows(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    y0: usize,
+    y1: usize,
+) -> (f64, f64) {
+    let mut sum_v = 0.0f64;
+    let mut sum_h = 0.0f64;
+    for y in y0..y1 {
+        let row = y * width;
+        // Vertical steps at lattice columns, this row.
+        let mut x = BLOCK_LATTICE;
+        while x < width {
+            let i = row + x;
             let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
             let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
-            sum += bounded_excess(step_dst, step_src, C_BLOCK);
+            sum_v += bounded_excess(step_dst, step_src, C_BLOCK);
+            x += BLOCK_LATTICE;
         }
-        x += BLOCK_LATTICE;
-    }
-    let mut y = BLOCK_LATTICE;
-    while y < height {
-        for x in 0..width {
-            let i = y * width + x;
-            let i_up = i - width;
-            let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
-            let step_src = (src[i] as f64 - src[i_up] as f64).abs();
-            sum += bounded_excess(step_dst, step_src, C_BLOCK);
+        // Horizontal steps across the whole row, lattice rows only.
+        if y % BLOCK_LATTICE == 0 && y > 0 {
+            for x in 0..width {
+                let i = row + x;
+                let i_up = i - width;
+                let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
+                let step_src = (src[i] as f64 - src[i_up] as f64).abs();
+                sum_h += bounded_excess(step_dst, step_src, C_BLOCK);
+            }
         }
-        y += BLOCK_LATTICE;
     }
-    sum
+    (sum_v, sum_h)
 }
 
 /// Compute all [`FEATURES_PER_CHANNEL_V2_TOTAL`] v2 signals for one
