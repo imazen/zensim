@@ -319,15 +319,36 @@ fn run_bake_mode(
     // `Zensim::compute_v2_diffmap` (task #48), so M3 below reads v2. The v1
     // masked/iw/peak (f156-371) remain non-spatializable in the v1 fold, so
     // that share of the gradient still can't be deployed — reported here.
-    let v2_grad: Option<Vec<f64>> = if n_in > 372 {
+    // Non-spatializable v1 mass — the share of THIS bake's gradient on the
+    // f156-371 masked/iw/peak block, which the v1 fold cannot spatialize into the
+    // per-pixel map, so M3 is STRUCTURALLY BLIND to it. Reported for EVERY bake
+    // (0.0% for a basic-156 bake; the real fraction for a 372 bake that leans on
+    // iw/masked; the v1 share for a 720 bake whose v2 f372+ versions DO fold).
+    // This is the number that lets a LOW M3 be read correctly: a bake with high
+    // dropped-mass has a structurally-capped M3 (it uses pooled features the map
+    // can't carry), which is a DIFFERENT thing from an incoherent map. Widened +
+    // always-emitted 2026-07-26 (stats review §Rec-8); previously only n_in>372.
+    {
         let total: f64 = s.iter().map(|v| v.abs()).sum::<f64>().max(1e-30);
-        let nonspat: f64 = s[156..372].iter().map(|v| v.abs()).sum();
+        let hi = n_in.min(372);
+        let nonspat: f64 = if hi > 156 {
+            s[156..hi].iter().map(|v| v.abs()).sum()
+        } else {
+            0.0
+        };
+        println!(
+            "  non-deployable v1 block (f156-371) raw-|s_k| mass: {:.1}%  (masked/iw/peak the v1 fold can't spatialize; M3 is blind to it{})",
+            100.0 * nonspat / total,
+            if n_in > 372 {
+                "; the v2 versions at f372+ DO fold"
+            } else {
+                ""
+            }
+        );
+    }
+    let v2_grad: Option<Vec<f64>> = if n_in > 372 {
         println!(
             "combined bake (n_inputs={n_in})  base_score={base_score:.2}  grad_zero={grad_zero}/{n_in}"
-        );
-        println!(
-            "  non-deployable v1 block (f156-371) raw-|s_k| mass: {:.1}%  (the v1 masked/iw/peak the v1 fold can't spatialize; the v2 versions at f372+ DO fold)",
-            100.0 * nonspat / total
         );
         // NEGATE the gradient to match the v1 `model_sensitivity_weights`
         // convention (`w = -s`): with `s_k<0` for a quality metric, `-s_k>0`
@@ -485,12 +506,29 @@ fn run_bake_mode(
     );
 }
 
+/// Tie-correct ranks (midrank averaging over equal values) — a verified-equivalent
+/// mirror of `zenstats::panel::ranks`. This example lives in the `zensim` crate,
+/// which does not depend on `zenmetrics`/`zenstats`, so the stat is mirrored here
+/// rather than adding a cross-repo dev-dep for one diagnostic binary. The previous
+/// body assigned the raw sort position, which is WRONG for ties: block sums tie
+/// often (flat/clamped blocks share a diffmap value), and distinct ranks on tied
+/// inputs bias the Spearman that M3 reports. Midrank matches the canonical panel.
 fn rank(v: &[f64]) -> Vec<f64> {
-    let mut idx: Vec<usize> = (0..v.len()).collect();
+    let n = v.len();
+    let mut idx: Vec<usize> = (0..n).collect();
     idx.sort_by(|&a, &b| v[a].partial_cmp(&v[b]).unwrap_or(std::cmp::Ordering::Equal));
-    let mut r = vec![0.0; v.len()];
-    for (k, &ix) in idx.iter().enumerate() {
-        r[ix] = k as f64;
+    let mut r = vec![0.0; n];
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n && (v[idx[j]] - v[idx[i]]).abs() < 1e-12 {
+            j += 1;
+        }
+        let avg = (i + j - 1) as f64 / 2.0; // midrank over the tie block [i, j)
+        for &ix in &idx[i..j] {
+            r[ix] = avg;
+        }
+        i = j;
     }
     r
 }

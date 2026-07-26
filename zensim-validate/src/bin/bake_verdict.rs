@@ -1425,10 +1425,15 @@ fn render_corpus(
     ));
     body.push('\n');
     body.push_str(
-        "_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable from \
-parquet sidecars). Rescale is 4-parameter logistic (Mohammadi 2025 convention), \
-not affine — affine inflates Z-RMSE on nonlinear metrics by 30× because \
-saturation regions dominate the residual._\n",
+        "_Z-RMSE + OR use corpus-wide σ. Per-stimulus observer σ is NOT in the eval \
+feature parquets, so `zenstats`' per-sample forms (`z_rmse_per_sample` / \
+`outlier_ratio_per_sample`, Mohammadi Eq 6 / P.1401) are unreachable here. The σ \
+EXISTS in the sources (TID `mos_std.txt`; KADID `raw_crowdsource_data.csv`; CID22 SOS) \
+and the loader already supports it (`metric_sigmas`, `ZENSIM_SIGMA_MSE`) — joining it \
+into the eval parquets is a queued re-extraction. Non-blocking: OR is now a catastrophe \
+GATE (G-OR), not a ranking column, so the corpus-σ approximation no longer feeds any \
+ordering. Rescale is 4-parameter logistic (Mohammadi 2025), not affine — affine inflates \
+Z-RMSE on nonlinear metrics ~30× because saturation regions dominate the residual._\n",
     );
 
     if let Some(pr) = &per_ref {
