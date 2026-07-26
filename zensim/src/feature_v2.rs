@@ -1119,6 +1119,12 @@ struct ScratchV2Strip {
     abs_src: Vec<f32>,
     activity_tmp: Vec<f32>,
     activity: Vec<f32>,
+    /// Streamed-walk σ-split plane: this kernel strip's `blur(src²)` wide
+    /// buffer, filled per strip by the streaming walk (square + H + V
+    /// inside the wide window — the P2 tiling) after the activity chain
+    /// frees `abs_src`/`activity_tmp` for reuse as its temps. Unused by
+    /// the materialized walk (which reads cached/replayed full planes).
+    bs2: Vec<f32>,
 }
 impl ScratchV2Strip {
     fn new(max_n: usize) -> Self {
@@ -1136,6 +1142,7 @@ impl ScratchV2Strip {
             abs_src: vec![0.0f32; max_n],
             activity_tmp: vec![0.0f32; max_n],
             activity: vec![0.0f32; max_n],
+            bs2: vec![0.0f32; max_n],
         }
     }
 }
@@ -1294,6 +1301,7 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
         abs_src,
         activity_tmp,
         activity,
+        ..
     } = scratch;
     run_blur_pass_inner(
         &src_wide[..n],
@@ -3143,6 +3151,15 @@ fn finish_append(
     };
 }
 
+/// `out[i] = input[i]²` — the streamed walk's σ-split square (reads the
+/// wide window in place, writes into a free scratch buffer). Plain scalar
+/// loop; LLVM auto-vectorizes the independent multiply.
+fn square_into(input: &[f32], out: &mut [f32]) {
+    for (o, &v) in out.iter_mut().zip(input.iter()) {
+        *o = v * v;
+    }
+}
+
 /// `buf[i] = buf[i]²` — feeds the append σ-split's `blur(src²)` strip
 /// chain. Plain scalar loop; LLVM auto-vectorizes the independent multiply.
 fn square_in_place(buf: &mut [f32]) {
@@ -4718,6 +4735,513 @@ pub(crate) fn compute_folded720_append_with_ref_impl(
     compute_v2_features_with_ref_impl_inner(
         prepared, distorted, max_pixels, parallel, toggles, true, scratch,
     )
+}
+
+// ============================================================================
+// STREAMING folded-720[+append] walk (C2 of
+// docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
+//
+// Consumes `feature_v2_stream::StripPlaneProducer`'s kernel strips instead
+// of materialized full-image pyramids: per emitted strip, phase A fills
+// each channel's wide windows (`gather_strip_halo` semantics from the
+// rolling planes) + runs the SAME blur pass the materialized walk runs on
+// its moments-free path + the P2 strip-tiled bs2 chain; phase B runs the
+// SAME dense/gradient/append/fold kernels and folds their per-strip
+// accumulators into per-(scale, channel) totals in kernel-strip order —
+// the exact f64 op sequence of the materialized walk. Finalize replays
+// the materialized walk's per-scale epilogue (finish + fold finalize +
+// edge-width chain) on the merged accumulators. Output is BITWISE equal
+// to the materialized pair path (test-gated below); no full-image f32
+// plane exists on either side at any point.
+// ============================================================================
+
+/// Per-channel accumulator state for the streaming walk: per-scale totals
+/// for every family the walk pools, merged strictly in kernel-strip order.
+struct StreamChannelAccums {
+    dense: Vec<DenseAccum>,
+    grad: Vec<GradientAccum>,
+    app: Vec<AppendAccum>,
+    v1: Vec<V1BasicSums>,
+    /// Row-ordered blockiness partials `(sum_v, sum_h)` (P1 canonical).
+    block: Vec<(f64, f64)>,
+}
+
+impl StreamChannelAccums {
+    fn new(n_scales: usize) -> Self {
+        Self {
+            dense: vec![DenseAccum::default(); n_scales],
+            grad: vec![GradientAccum::default(); n_scales],
+            app: vec![AppendAccum::default(); n_scales],
+            v1: vec![V1BasicSums::default(); n_scales],
+            block: vec![(0.0, 0.0); n_scales],
+        }
+    }
+}
+
+/// True when the append kernel runs for this (channel, scale) — mirrors
+/// the materialized walk's [`APPEND_SKIP_B_SCALE0`] dispatch.
+#[inline]
+fn append_cell_active(append_on: bool, ch: usize, scale: usize) -> bool {
+    append_on && !(APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0)
+}
+
+/// Phase A of one (strip, channel): wide windows + blur pass (+ bs2).
+/// After this, `scr` holds exactly what the materialized walk's strip
+/// iteration holds before its kernels run — src/dst wide windows, the
+/// four H planes, the four V planes, activity — plus the strip's `bs2`
+/// wide plane when the append cell is active.
+fn stream_phase_a<S: ImageSource, D: ImageSource>(
+    producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
+    info: &crate::feature_v2_stream::StripInfo,
+    ch: usize,
+    want_bs2: bool,
+    scr: &mut ScratchV2Strip,
+) {
+    use crate::feature_v2_stream::Side;
+    let width = info.plane_w;
+    let wide_h = info.wide_h();
+    let n_wide = width * wide_h;
+    producer.fill_wide(Side::Source, ch, info, &mut scr.src_wide[..n_wide]);
+    producer.fill_wide(Side::Distorted, ch, info, &mut scr.dst_wide[..n_wide]);
+    // The materialized walk's moments-free blur pass — fused H + 4x V +
+    // activity, wholly inside the wide buffer.
+    run_blur_pass_strip(width, wide_h, scr);
+    if want_bs2 {
+        // P2's strip-tiled σ-split chain on the SAME wide window
+        // (`compute_ref_s2blur_into` per-strip body, minus the gather —
+        // the window is already materialized here). `abs_src` and
+        // `activity_tmp` are dead after the blur pass finishes the
+        // activity chain, so they serve as the square/H temps.
+        let ScratchV2Strip {
+            src_wide,
+            abs_src,
+            activity_tmp,
+            bs2,
+            ..
+        } = scr;
+        square_into(&src_wide[..n_wide], &mut abs_src[..n_wide]);
+        crate::blur::box_blur_h(
+            &abs_src[..n_wide],
+            &mut activity_tmp[..n_wide],
+            width,
+            wide_h,
+            BLUR_RADIUS,
+        );
+        crate::blur::box_blur_v_from_copy(
+            &activity_tmp[..n_wide],
+            &mut bs2[..n_wide],
+            width,
+            wide_h,
+            BLUR_RADIUS,
+        );
+    }
+}
+
+/// Phase B of one (strip, channel): the materialized walk's kernel set
+/// over the phase-A planes, folded into `acc` in kernel-strip order.
+/// Reads all three channels' scratches immutably (the Y channel's append
+/// kernel consumes X/B activity — computed once per strip in phase A,
+/// replacing the materialized pair path's whole-plane replay planes).
+#[allow(clippy::too_many_arguments)]
+fn stream_phase_b(
+    scratches: &[ScratchV2Strip; 3],
+    info: &crate::feature_v2_stream::StripInfo,
+    ch: usize,
+    toggles: V2NewFeatureToggles,
+    fold_v1: bool,
+    append: bool,
+    acc: &mut StreamChannelAccums,
+) {
+    let width = info.plane_w;
+    let strip_h = info.strip_h;
+    let y0 = info.y0;
+    let scale = info.scale;
+    let n_wide = width * info.wide_h();
+    let off = HALO_P * width;
+    let strip_n = width * strip_h;
+    let scr = &scratches[ch];
+
+    let src_strip = &scr.src_wide[off..off + strip_n];
+    let dst_strip = &scr.dst_wide[off..off + strip_n];
+    let mu1_strip = &scr.mu1[off..off + strip_n];
+    let mu2_strip = &scr.mu2[off..off + strip_n];
+    let ssq_strip = &scr.ssq[off..off + strip_n];
+    let s12_strip = &scr.s12[off..off + strip_n];
+    let act_strip = &scr.activity[off..off + strip_n];
+
+    let d = dense_block_kernel(
+        src_strip,
+        dst_strip,
+        mu1_strip,
+        mu2_strip,
+        ssq_strip,
+        s12_strip,
+        act_strip,
+        width,
+        strip_h,
+        toggles.transducer_bank,
+    );
+    acc.dense[scale].accumulate(&d);
+
+    if toggles.gradient_features {
+        let g_off = (HALO_P - 1) * width;
+        let g_n = width * (strip_h + 2);
+        let g = gradient_block_kernel(
+            &scr.src_wide[g_off..g_off + g_n],
+            &scr.dst_wide[g_off..g_off + g_n],
+            act_strip,
+            width,
+            strip_h,
+        );
+        acc.grad[scale].accumulate(&g);
+    }
+
+    if fold_v1 {
+        fold_v1_basic_bands(
+            width,
+            y0..y0 + strip_h,
+            y0,
+            HALO_P,
+            info.plane_h,
+            [
+                &scr.mu1_h[..n_wide],
+                &scr.mu2_h[..n_wide],
+                &scr.ssq_h[..n_wide],
+                &scr.s12_h[..n_wide],
+                &scr.src_wide[..n_wide],
+                &scr.dst_wide[..n_wide],
+            ],
+            &mut acc.v1[scale],
+        );
+    }
+
+    if append {
+        // ref_y = the source Y plane's strip rows — already sitting in the
+        // Y channel's gathered wide window.
+        let refy_strip = &scratches[1].src_wide[off..off + strip_n];
+        let cross = if ch == 1 {
+            Some((
+                &scratches[0].activity[off..off + strip_n],
+                &scratches[2].activity[off..off + strip_n],
+            ))
+        } else {
+            None
+        };
+        let a = append_block_kernel(
+            src_strip,
+            dst_strip,
+            mu1_strip,
+            mu2_strip,
+            ssq_strip,
+            &scr.bs2[off..off + strip_n],
+            act_strip,
+            refy_strip,
+            cross,
+            width,
+            strip_h,
+        );
+        acc.app[scale].accumulate(&a);
+    }
+
+    if toggles.blockiness {
+        let (sum_v, sum_h) = &mut acc.block[scale];
+        blockiness_sparse_strip_wide(
+            &scr.src_wide[..n_wide],
+            &scr.dst_wide[..n_wide],
+            width,
+            y0,
+            strip_h,
+            sum_v,
+            sum_h,
+        );
+    }
+}
+
+/// [`blockiness_sparse_rows`] over a strip's WIDE buffer: buffer row
+/// `HALO_P + k` is plane row `y0 + k`. The horizontal family at plane row
+/// `y0` (a lattice row whenever `y0 > 0` — kernel strips are 128-aligned)
+/// reads its upper neighbor from the halo row `HALO_P − 1`, which is the
+/// REAL plane row `y0 − 1` for every strip that can fire it (`y > 0`
+/// never fires on the top strip's first row).
+///
+/// `sum_v`/`sum_h` are the CALLER's running totals, accumulated into
+/// directly — NOT per-strip partials folded afterwards — so the global
+/// f64 op sequence continues seamlessly across kernel strips and equals
+/// [`blockiness_sparse_rows`]'s canonical whole-range form bit-for-bit
+/// (a per-strip partial would reassociate: `(Σ strip0) + (Σ strip1)` ≠
+/// one running sum — measured as a 1-ULP BLOCKINESS divergence when this
+/// function briefly returned partials).
+#[allow(clippy::too_many_arguments)]
+fn blockiness_sparse_strip_wide(
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    sum_v: &mut f64,
+    sum_h: &mut f64,
+) {
+    for k in 0..strip_h {
+        let y = y0 + k;
+        let row = (HALO_P + k) * width;
+        let mut x = BLOCK_LATTICE;
+        while x < width {
+            let i = row + x;
+            let step_dst = (dst_wide[i] as f64 - dst_wide[i - 1] as f64).abs();
+            let step_src = (src_wide[i] as f64 - src_wide[i - 1] as f64).abs();
+            *sum_v += bounded_excess(step_dst, step_src, C_BLOCK);
+            x += BLOCK_LATTICE;
+        }
+        if y % BLOCK_LATTICE == 0 && y > 0 {
+            for x in 0..width {
+                let i = row + x;
+                let i_up = i - width;
+                let step_dst = (dst_wide[i] as f64 - dst_wide[i_up] as f64).abs();
+                let step_src = (src_wide[i] as f64 - src_wide[i_up] as f64).abs();
+                *sum_h += bounded_excess(step_dst, step_src, C_BLOCK);
+            }
+        }
+    }
+}
+
+/// Streaming folded-720[+append] pair entry: validation + sub-64
+/// reflect-pad exactly like the materialized pair entry
+/// ([`compute_folded720_impl_with_toggles`] → prepare → with-ref inner),
+/// then the streaming walk. Output is bitwise equal to the materialized
+/// path (`streamed_foldapp_bitwise_vs_materialized`).
+pub(crate) fn compute_folded720_streaming_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    crate::metric::validate_pair(source, distorted)?;
+    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    crate::metric::reject_hdr_input(source)?;
+    crate::metric::reject_hdr_input(distorted)?;
+    if source.width() < crate::metric::MIN_PYRAMID_DIM
+        || source.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded_src = crate::metric::reflect_pad_to_min(source);
+        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
+        return Ok(foldapp_streaming_walk(
+            &padded_src,
+            &padded_dst,
+            parallel,
+            toggles,
+            scratch,
+        ));
+    }
+    Ok(foldapp_streaming_walk(
+        source, distorted, parallel, toggles, scratch,
+    ))
+}
+
+/// [`compute_folded720_streaming_impl`] with the append block forced on
+/// (the [`FeatureRegime::Folded720Append`] entry shape).
+pub(crate) fn compute_folded720_append_streaming_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    mut toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    toggles.append_block = true;
+    compute_folded720_streaming_impl(source, distorted, max_pixels, parallel, toggles, scratch)
+}
+
+/// The streaming walk body (inputs already validated + ≥ 64px).
+fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
+    source: &S,
+    distorted: &D,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> ZensimV2Result {
+    use crate::feature_v2_stream::StripPlaneProducer;
+    let fold_v1 = true;
+    let append_on = toggles.append_block;
+    let n_scales = crate::NUM_SCALES;
+    let (w0, h0) = (source.width(), source.height());
+
+    // Scale dims: floor-halving, matching both the producer and the
+    // materialized walk's `downscale_2x_inplace` returns.
+    let mut dims = Vec::with_capacity(n_scales);
+    {
+        let (mut w, mut h) = (w0, h0);
+        for _ in 0..n_scales {
+            dims.push((w, h));
+            w /= 2;
+            h /= 2;
+        }
+    }
+
+    let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P);
+    scratch.ensure(strip_max_n);
+    let scratch_strips = &mut scratch.strips;
+
+    let mut accums: [StreamChannelAccums; 3] = std::array::from_fn(|_| StreamChannelAccums::new(n_scales));
+    let mut producer = StripPlaneProducer::new(source, distorted, parallel);
+
+    while let Some(info) = producer.next_strip() {
+        let scale = info.scale;
+
+        #[cfg(feature = "threads")]
+        let ran_parallel = if parallel {
+            use rayon::prelude::*;
+            scratch_strips
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(ch, scr)| {
+                    stream_phase_a(
+                        &producer,
+                        &info,
+                        ch,
+                        append_cell_active(append_on, ch, scale),
+                        scr,
+                    );
+                });
+            let scratches: &[ScratchV2Strip; 3] = scratch_strips;
+            accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
+                stream_phase_b(
+                    scratches,
+                    &info,
+                    ch,
+                    toggles,
+                    fold_v1,
+                    append_cell_active(append_on, ch, scale),
+                    acc,
+                );
+            });
+            true
+        } else {
+            false
+        };
+        #[cfg(not(feature = "threads"))]
+        let ran_parallel = false;
+
+        if !ran_parallel {
+            for (ch, scr) in scratch_strips.iter_mut().enumerate() {
+                stream_phase_a(
+                    &producer,
+                    &info,
+                    ch,
+                    append_cell_active(append_on, ch, scale),
+                    scr,
+                );
+            }
+            let scratches: &[ScratchV2Strip; 3] = scratch_strips;
+            for (ch, acc) in accums.iter_mut().enumerate() {
+                stream_phase_b(
+                    scratches,
+                    &info,
+                    ch,
+                    toggles,
+                    fold_v1,
+                    append_cell_active(append_on, ch, scale),
+                    acc,
+                );
+            }
+        }
+    }
+
+    // --- Finalize: the materialized walk's per-scale epilogue, replayed
+    //     on the merged accumulators (identical f64 ops on identical
+    //     values ⇒ identical bits). ---
+    let v1_total = if fold_v1 { n_scales * 3 * 31 } else { 0 };
+    let v12_total = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+    let append_total = if append_on {
+        n_scales * 3 * FEATURES_PER_CHANNEL_APPEND
+    } else {
+        0
+    };
+    let mut features = vec![0.0f64; v12_total + append_total];
+    let (features_v12, features_app) = features.split_at_mut(v12_total);
+    let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
+
+    for scale in 0..n_scales {
+        let (width, height) = dims[scale];
+        let n = width * height;
+        let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+        let app_scale_base = scale * 3 * FEATURES_PER_CHANNEL_APPEND;
+        let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
+
+        for (ch, acc) in accums.iter().enumerate() {
+            let out = &mut features_v12
+                [v1_total + scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL..]
+                [..FEATURES_PER_CHANNEL_V2_TOTAL];
+            let sum_blockiness = if toggles.blockiness {
+                acc.block[scale].0 + acc.block[scale].1
+            } else {
+                0.0
+            };
+            grads[ch] = finish_channel_scale(
+                &acc.dense[scale],
+                &acc.grad[scale],
+                sum_blockiness,
+                n,
+                out,
+            );
+            if append_cell_active(append_on, ch, scale) {
+                let out_app = &mut features_app
+                    [app_scale_base + ch * FEATURES_PER_CHANNEL_APPEND..]
+                    [..FEATURES_PER_CHANNEL_APPEND];
+                finish_append(
+                    &acc.dense[scale],
+                    &acc.app[scale],
+                    &acc.grad[scale],
+                    n,
+                    ch == 1,
+                    toggles,
+                    out_app,
+                );
+            }
+            apply_transducer_luma_gate(out, ch, toggles);
+        }
+
+        if fold_v1 {
+            for (ch, acc) in accums.iter().enumerate() {
+                let base = scale * 39 + ch * 13;
+                acc.v1[scale].finalize_into(n, &mut features_v12[base..base + 13]);
+            }
+        }
+
+        for ch in 0..3 {
+            let (gsrc, gdst) = grads[ch];
+            if let Some((prev_gsrc, prev_gdst)) = prev_grad[ch] {
+                let decay_src = gsrc / (prev_gsrc + C_GRAD_DECAY);
+                let decay_dst = gdst / (prev_gdst + C_GRAD_DECAY);
+                let prev_base = v1_total
+                    + (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                    + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                features_v12[prev_base + idx::EDGE_WIDTH_CHANGE] =
+                    1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
+            }
+            prev_grad[ch] = Some((gsrc, gdst));
+
+            if scale == n_scales - 1 && n_scales >= 2 {
+                let this_base = v1_total + scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                let prev_base = v1_total
+                    + (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                    + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                features_v12[this_base + idx::EDGE_WIDTH_CHANGE] =
+                    features_v12[prev_base + idx::EDGE_WIDTH_CHANGE];
+            }
+        }
+    }
+
+    ZensimV2Result {
+        features,
+        n_scales,
+        regime: if append_on {
+            FeatureRegime::Folded720Append
+        } else {
+            FeatureRegime::Folded720
+        },
+    }
 }
 
 fn compute_v2_features_with_ref_impl_inner(
@@ -6940,5 +7464,214 @@ mod tests {
             }
         }
         assert!(any_nonzero, "append block is entirely zero on a distorted pair");
+    }
+
+    // ========================================================================
+    // C2 streaming-walk parity gates
+    // (docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md §3)
+    // ========================================================================
+
+    /// THE C2 gate: the streaming walk's output is BITWISE equal to the
+    /// materialized pair path — all 720 slots (fold) and all 924 slots
+    /// (foldapp) — across odd dims, sub-one-strip heights, multi-strip
+    /// heights, and a tall multi-production-chunk case.
+    #[test]
+    fn streamed_foldapp_bitwise_vs_materialized() {
+        let cases = [
+            (150usize, 170usize),
+            (127, 93),
+            (200, 150),
+            (96, 517),
+        ];
+        let z_parallel = false;
+        for (w, h) in cases {
+            let src = textured_image(w, h, 23);
+            let dst = quantize_distort(&src, w, h);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+
+            // Foldapp (924).
+            let mat = compute_folded720_append_impl(
+                &sref,
+                &dref,
+                None,
+                z_parallel,
+                V2NewFeatureToggles::default(),
+            )
+            .unwrap();
+            let mut scratch = V2Scratch::new();
+            let st = compute_folded720_append_streaming_impl(
+                &sref,
+                &dref,
+                None,
+                z_parallel,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+            assert_eq!(mat.regime(), st.regime());
+            assert_eq!(mat.features().len(), st.features().len());
+            for i in 0..mat.features().len() {
+                assert_eq!(
+                    mat.features()[i].to_bits(),
+                    st.features()[i].to_bits(),
+                    "{w}x{h} foldapp: streamed diverges from materialized at f{i} \
+                     ({} vs {})",
+                    mat.features()[i],
+                    st.features()[i]
+                );
+            }
+
+            // Fold-only (720).
+            let mat_f = compute_folded720_impl_with_toggles(
+                &sref,
+                &dref,
+                None,
+                z_parallel,
+                V2NewFeatureToggles::default(),
+            )
+            .unwrap();
+            let st_f = compute_folded720_streaming_impl(
+                &sref,
+                &dref,
+                None,
+                z_parallel,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+            assert_eq!(mat_f.features().len(), 720);
+            for i in 0..720 {
+                assert_eq!(
+                    mat_f.features()[i].to_bits(),
+                    st_f.features()[i].to_bits(),
+                    "{w}x{h} fold: streamed diverges at f{i}"
+                );
+            }
+        }
+    }
+
+    /// Sub-64 inputs reflect-pad before the streaming walk exactly like
+    /// the materialized entry — outputs stay bitwise equal.
+    #[test]
+    fn streamed_sub64_matches_materialized() {
+        let (w, h) = (40usize, 30usize);
+        let src = textured_image(w, h, 9);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let mat = compute_folded720_append_impl(
+            &sref,
+            &dref,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+        )
+        .unwrap();
+        let mut scratch = V2Scratch::new();
+        let st = compute_folded720_append_streaming_impl(
+            &sref,
+            &dref,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        for i in 0..mat.features().len() {
+            assert_eq!(
+                mat.features()[i].to_bits(),
+                st.features()[i].to_bits(),
+                "sub-64 streamed diverges at f{i}"
+            );
+        }
+    }
+
+    /// Streaming walk: parallel channel fan-out is bitwise equal to the
+    /// serial path (per-channel accumulators + deterministic strip order,
+    /// so scheduling cannot change any sum).
+    #[test]
+    fn streamed_parallel_matches_serial() {
+        let (w, h) = (200usize, 300usize);
+        let src = textured_image(w, h, 31);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let mut scratch = V2Scratch::new();
+        let serial = compute_folded720_append_streaming_impl(
+            &sref,
+            &dref,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        let parallel = compute_folded720_append_streaming_impl(
+            &sref,
+            &dref,
+            None,
+            true,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        for i in 0..serial.features().len() {
+            assert_eq!(
+                serial.features()[i].to_bits(),
+                parallel.features()[i].to_bits(),
+                "streamed parallel/serial diverge at f{i}"
+            );
+        }
+    }
+
+    /// Scratch reuse across unrelated streamed pairs leaks nothing.
+    #[test]
+    fn streamed_scratch_reuse_matches_fresh() {
+        let (w, h) = (150usize, 170usize);
+        let src_a = textured_image(w, h, 3);
+        let dst_a = quantize_distort(&src_a, w, h);
+        let src_b = textured_image(w, h, 77);
+        let dst_b = quantize_distort(&src_b, w, h);
+        let toggles = V2NewFeatureToggles::default();
+
+        let mut fresh = V2Scratch::new();
+        let clean = compute_folded720_append_streaming_impl(
+            &RgbSlice::new(&src_b, w, h),
+            &RgbSlice::new(&dst_b, w, h),
+            None,
+            false,
+            toggles,
+            &mut fresh,
+        )
+        .unwrap();
+
+        let mut reused = V2Scratch::new();
+        let _ = compute_folded720_append_streaming_impl(
+            &RgbSlice::new(&src_a, w, h),
+            &RgbSlice::new(&dst_a, w, h),
+            None,
+            false,
+            toggles,
+            &mut reused,
+        )
+        .unwrap();
+        let with_reuse = compute_folded720_append_streaming_impl(
+            &RgbSlice::new(&src_b, w, h),
+            &RgbSlice::new(&dst_b, w, h),
+            None,
+            false,
+            toggles,
+            &mut reused,
+        )
+        .unwrap();
+
+        for i in 0..clean.features().len() {
+            assert_eq!(
+                clean.features()[i].to_bits(),
+                with_reuse.features()[i].to_bits(),
+                "streamed scratch reuse changed f{i}"
+            );
+        }
     }
 }
