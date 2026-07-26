@@ -1488,6 +1488,59 @@ impl Zensim {
         )
     }
 
+    /// [`Self::compute_folded720_features`] plus the f720+ APPEND block
+    /// (17/ch/scale — cross-channel masking, luminance conditioning,
+    /// MSCN divisive comparison, σ-split contrast/texture, deviation
+    /// pooling, global stats; see `feature_v2::idx_append` and the
+    /// 2026-07-26 gap audit in
+    /// `zenpapers/docs/zensim-720-feature-gaps-2026-07-26.md`). Emits a
+    /// 924-slot vector: the first 720 slots are bit-identical to the
+    /// plain folded extraction
+    /// ([`crate::feature_v2::FeatureRegime::Folded720Append`]).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_v2_features`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_append_features(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_append_impl(
+            source,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            crate::feature_v2::V2NewFeatureToggles::default(),
+        )
+    }
+
+    /// Batch form of [`Self::compute_folded720_append_features`]:
+    /// prepared reference + explicit toggles + caller-owned scratch
+    /// (`toggles.append_block` is forced on).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_v2_features_with_ref`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_append_features_with_ref_and_scratch(
+        &self,
+        reference: &crate::feature_v2::V2PreparedReference,
+        distorted: &impl ImageSource,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+        scratch: &mut crate::feature_v2::V2Scratch,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_append_with_ref_impl(
+            reference,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+            scratch,
+        )
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors
