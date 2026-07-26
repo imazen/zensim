@@ -114,11 +114,27 @@ dimension-, not content-, driven), heaptrack peak heap. One f32 plane at
 
 | config | peak heap | composition check |
 |---|--:|---|
+| v1 streaming strips (`v1stream`, score) | **153.9 MB** | per-strip XYB + pyramid + accumulators (O(strip×width)) |
+| v1 full path (372) | 366.0 MB | src+dst XYB 288 + scratch/decode, walked in place |
 | fold, grouped+moments | 882.2 MB | pyramids+scratch+decode ≈ 499 + mu1/act cache 383 |
 | **foldapp, grouped+moments** | **1.03 GB** | + bs2 cache 143 (2.98 planes) + misc |
 | fold, `ZENSIM_AB_MOMENTS=0` | 499.7 MB | cache term gone (882 − 383 exactly) |
 | foldapp, `ZENSIM_AB_MOMENTS=0` | 835.7 MB | 499.7 + 336 replay planes (7 × 48) exactly |
 | foldapp, pair path (`GROUPED=0`) | 835.7 MB | same replay shape |
+
+The v1 rows are the streaming context: v1's Y-strip streaming path
+(`compute_streaming_strips[_default]`, byte-exact vs full per its own test
+gates, ~125 MB even at 80 MP) was never ported to the v2/folded regime —
+v2 was built full-materialized for the prepared-reference/moments sweep
+amortization, and phase-5 strip-tiled only the SCRATCH planes. Porting the
+v1 streaming skeleton (per-strip XYB + per-strip pyramid + accumulator
+merge) to the folded+append walk is the structural fix for large-image
+memory: every append signal is strip-local-with-halo computable (bs2 via
+strip blur, activity/cross-channel per-strip, global sums are
+accumulators; `blockiness_sparse` needs a strip-fed variant). Expected
+foldapp-streaming peak at 12 MP ≈ the v1stream class (~150–250 MB, or with
+a full ref pyramid kept for variant reuse ≈ +190 MB). The `v1stream`
+driver mode added with this doc measures the reference point.
 
 Timing at 12 MP, ONE variant per reference (3 rounds, wall incl. ~decode):
 fold+moments ~1.74 s; foldapp+moments ~2.1 s; **foldapp MOMENTS=0 ~1.90 s —

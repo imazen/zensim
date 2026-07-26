@@ -96,12 +96,17 @@ fn main() {
     // f156..371 = 0, v2-348) — `Zensim::compute_folded720_features*`.
     // "foldapp" (2026-07-26) = fold + the f720+ append block (924 columns)
     // — `Zensim::compute_folded720_append_features*`.
+    // "v1stream" (2026-07-26) = v1's Y-strip streaming path
+    // (`compute_streaming_strips_default`, per-strip reference pyramid,
+    // O(strip×width) memory) — for memory A/B against the materialized
+    // v2/folded paths. Emits the profile score, not the 372 vector.
     let mode = std::env::var("ZENSIM_AB_MODE").unwrap_or_else(|_| "ext".into());
     let do_fold = mode == "fold" || mode == "foldapp";
+    let do_v1stream = mode == "v1stream";
     let (do_v1, do_v2) = match mode.as_str() {
         "v1" | "v1e" | "v1s" => (true, false),
         "v2" => (false, true),
-        "none" | "fold" | "foldapp" => (false, false), // fold has its own branch below
+        "none" | "fold" | "foldapp" | "v1stream" => (false, false), // own branches below
         _ => (true, true),
     };
 
@@ -181,6 +186,18 @@ fn main() {
                 }
             };
             combined.extend_from_slice(v2.features());
+        }
+        // v1 streaming-strips path (score-only; memory A/B mode).
+        if do_v1stream {
+            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+            let distorted = RgbSlice::new(&d_px, dw, dh);
+            match z.compute_streaming_strips_default(&RgbSlice::new(r_px, rw, rh), &distorted) {
+                Ok(r) => combined.push(r.score()),
+                Err(e) => {
+                    eprintln!("SKIP v1stream compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            }
         }
         // Folded-720 ONE-pass block: v1 basic (f0..156) + zeros (f156..372)
         // + v2-348 (f372..720), emitted by a single v2-walk pass.
