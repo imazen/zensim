@@ -1370,6 +1370,25 @@ impl Zensim {
         crate::feature_v2::prepare_v2_reference_impl(source, self.max_pixels, self.parallel, true)
     }
 
+    /// [`Self::prepare_v2_reference_with_moments`] for the append regime:
+    /// the moments cache additionally carries `blur(src²)` per
+    /// channel-scale, which the f720+ append block's σ-split reads —
+    /// making the per-pair `blur(dst²)` a single in-kernel subtraction
+    /// (`d2 = ssq − bs2`) instead of a blur chain. One extra plane-kind
+    /// of cache memory, charged only when this variant is used; use with
+    /// [`Self::compute_folded720_append_features_with_ref_and_scratch`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::prepare_v2_reference`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn prepare_v2_reference_with_moments_append(
+        &self,
+        source: &impl ImageSource,
+    ) -> Result<crate::feature_v2::V2PreparedReference, ZensimError> {
+        crate::feature_v2::prepare_v2_reference_append_impl(source, self.max_pixels, self.parallel)
+    }
+
     /// Compute v2 features for one distorted image against a prepared
     /// reference (see [`Self::prepare_v2_reference`]). Convenience form
     /// that allocates its scratch internally and uses default

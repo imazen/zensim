@@ -234,6 +234,15 @@ pub const C_GRAD_DECAY: f64 = 1e-4;
 /// scales = 204; full folded-append vector = 720 + 204 = 924).
 pub const FEATURES_PER_CHANNEL_APPEND: usize = 17;
 
+/// Skip the append kernel entirely for the B (yellow-violet) channel at
+/// scale 0 — its 17 slots emit 0.0 (index-stable, deprecate-by-absence).
+/// Grounds: the yellow-violet foveal resolution limit is ~53 ppd vs 94
+/// achromatic (Ashraf/Chapiro/Mantiuk 2025), and butteraugli carries no B
+/// channel at all in its two highest-frequency bands — finest-scale B
+/// append features would model signal the eye cannot resolve, at 25% of
+/// the append block's pixel cost (scale 0 is ~75% of pyramid pixels).
+pub const APPEND_SKIP_B_SCALE0: bool = true;
+
 /// Named local offsets within one channel's append block.
 pub mod idx_append {
     /// Cross-channel masked transducer (gap-audit A1). Y channel ONLY:
@@ -247,22 +256,34 @@ pub mod idx_append {
     /// Luminance-adapted transducer (A2): activity + local-luminance term
     /// in the divisive denominator, `t = sat(ref_Y, C_LUM_T)` standing in
     /// for the DeVries-Rose/Weber background-luminance dependence.
+    /// Y channel ONLY (X/B emit 0.0): the 2026-07-19 luma-gate ablation
+    /// measured the v2 chroma transducers as a broad CID22 cost with
+    /// near-zero steering mass — the same masking family, so the append
+    /// block ships luma-gated from the start
+    /// (`zensim:benchmarks/v2_trainability_ab_2026-07-19.md:209-216`).
     pub const LUM_TRANSDUCER: usize = 1;
-    /// SSIM dissimilarity pooled over the DARK reference-luminance soft
-    /// bin, weight `(1−t)²` (A2: shadow banding/blocking that uniform
-    /// pooling dilutes). Reference-only weights — same foldable
-    /// `Σw·v/Σw` shape as the masked/IW families.
-    pub const LUM_DARK_SSIM: usize = 2;
+    /// Bounded error (`mse_i = sat((s−d)², C_MSE)` — the v1/v2 MSE
+    /// vocabulary) pooled over the DARK reference-luminance soft bin,
+    /// weight `(1−t)²` (A2: shadow banding/blocking that uniform pooling
+    /// dilutes). Reference-only weights — same foldable `Σw·v/Σw` shape
+    /// as the masked/IW families. Pools `mse_i` rather than a
+    /// recomputed SSIM map: the luminance CONDITIONING is the feature;
+    /// `mse_i` needs no extra plane loads and keeps the kernel inside
+    /// the perf gate.
+    pub const LUM_DARK_ERR: usize = 2;
     /// Mid-luminance soft bin, weight `2t(1−t)`.
-    pub const LUM_MID_SSIM: usize = 3;
+    pub const LUM_MID_ERR: usize = 3;
     /// Bright soft bin, weight `t²`.
-    pub const LUM_BRIGHT_SSIM: usize = 4;
+    pub const LUM_BRIGHT_ERR: usize = 4;
     /// Normalize-then-difference divisive comparison (A3, NLPD/MSCN
     /// shape — Laparra et al. 2017; BRISQUE's MSCN): per-pixel
     /// `sat(|r₁/σ₁′ − r₂/σ₂′|, C_MSCN_ABS)` mean, `r_i` the blur
     /// residual, `σ_i′ = sqrt(var_i + C_MSCN_VAR)`. Unlike the pjnd
     /// transducer (reference-masked raw error), BOTH images normalize by
-    /// their OWN local energy first.
+    /// their OWN local energy first. The σ-split comes from the cached /
+    /// replayed reference plane `bs2 = blur(src²)`:
+    /// `var₁ = bs2 − mu1²`, `var₂ = (ssq − bs2) − mu2²` — no per-pair
+    /// blur is ever run for it.
     pub const MSCN_DIFF_MEAN: usize = 5;
     /// Squared variant: `sat((n₁−n₂)², C_MSCN_SQ)` mean.
     pub const MSCN_DIFF_L2: usize = 6;
@@ -1098,17 +1119,6 @@ struct ScratchV2Strip {
     abs_src: Vec<f32>,
     activity_tmp: Vec<f32>,
     activity: Vec<f32>,
-    /// Append-block σ-split plane: full (H+V) box blur of `dst²`, from
-    /// which `var₂ = d2 − mu2²` and `var₁ = (ssq − d2) − mu1²` are
-    /// derived per pixel (the existing fused `ssq` plane is untouched —
-    /// the SSIM formula and every f0..f719 byte stay stable). Filled per
-    /// strip by the `square → box_blur_1pass_into` chain, which REUSES
-    /// `abs_src`/`activity_tmp` as its temporaries: in cached-moments
-    /// mode those buffers are idle (activity comes from the cache), and
-    /// in the pair path the activity chain has already fully consumed
-    /// them by the time the append chain runs. Only touched when
-    /// `append_block` is on.
-    d2: Vec<f32>,
 }
 impl ScratchV2Strip {
     fn new(max_n: usize) -> Self {
@@ -1126,7 +1136,6 @@ impl ScratchV2Strip {
             abs_src: vec![0.0f32; max_n],
             activity_tmp: vec![0.0f32; max_n],
             activity: vec![0.0f32; max_n],
-            d2: vec![0.0f32; max_n],
         }
     }
 }
@@ -1145,16 +1154,19 @@ impl ScratchV2Strip {
 pub struct V2Scratch {
     strips: [ScratchV2Strip; 3],
     sized_for: usize,
-    /// Append-block cross-channel activity planes (FULL-plane, scale-0
-    /// sized), used ONLY by the pair path when `append_block` is on and
-    /// no reference-moments cache exists: the X/B activity chains are
-    /// replayed per scale into these (bit-identical to what a moments
-    /// cache would hold — same helpers, same strip tiling) so the Y
-    /// channel's cross-masked transducer reads the same values on every
-    /// path. Never allocated otherwise (`Vec::new()` — zero RAM when the
-    /// append block is off or a moments cache is present).
+    /// Append-block pair-path replay planes (FULL-plane, scale-0 sized),
+    /// used ONLY when `append_block` is on and the prepared reference
+    /// carries no (s2-)moments cache: the X/B activity chains and the
+    /// three `blur(src²)` planes are replayed per scale into these —
+    /// bit-identical to what an append moments cache would hold (same
+    /// helpers, same geometry) — so every path emits the same bytes.
+    /// Never allocated otherwise (`Vec::new()` — zero RAM when the
+    /// append block is off or an append-moments cache is present).
     append_act_x: Vec<f32>,
     append_act_b: Vec<f32>,
+    append_bs2: [Vec<f32>; 3],
+    append_tmp_a: Vec<f32>,
+    append_tmp_b: Vec<f32>,
     append_sized_for: usize,
 }
 
@@ -1170,6 +1182,9 @@ impl V2Scratch {
             sized_for: 0,
             append_act_x: Vec::new(),
             append_act_b: Vec::new(),
+            append_bs2: [Vec::new(), Vec::new(), Vec::new()],
+            append_tmp_a: Vec::new(),
+            append_tmp_b: Vec::new(),
             append_sized_for: 0,
         }
     }
@@ -1186,13 +1201,16 @@ impl V2Scratch {
         }
     }
 
-    /// Grow (never shrink) the pair-path cross-channel activity planes to
-    /// one full scale-0 plane each. Only called on the
-    /// append-block-without-moments path.
+    /// Grow (never shrink) the pair-path replay planes to one full
+    /// scale-0 plane each. Only called on the
+    /// append-block-without-cache path.
     fn ensure_append(&mut self, plane_n: usize) {
         if plane_n > self.append_sized_for {
             self.append_act_x = vec![0.0f32; plane_n];
             self.append_act_b = vec![0.0f32; plane_n];
+            self.append_bs2 = std::array::from_fn(|_| vec![0.0f32; plane_n]);
+            self.append_tmp_a = vec![0.0f32; plane_n];
+            self.append_tmp_b = vec![0.0f32; plane_n];
             self.append_sized_for = plane_n;
         }
     }
@@ -1270,7 +1288,6 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
         abs_src,
         activity_tmp,
         activity,
-        d2: _,
     } = scratch;
     run_blur_pass_inner(
         &src_wide[..n],
@@ -1405,6 +1422,7 @@ fn compute_ref_moments_channel(
         return V2RefMoments {
             mu1: mu1_full,
             activity: act_full,
+            bs2: Vec::new(),
         };
     }
 
@@ -1479,25 +1497,84 @@ fn compute_ref_moments_channel(
     V2RefMoments {
         mu1: mu1_full,
         activity: act_full,
+        bs2: Vec::new(),
     }
 }
 
 /// Build the full per-scale/per-channel moment cache for a prepared
 /// reference (see [`V2PreparedReference::moments`]).
-fn fill_ref_moments(scales: &[([Vec<f32>; 3], usize, usize)]) -> Vec<[V2RefMoments; 3]> {
+fn fill_ref_moments(
+    scales: &[([Vec<f32>; 3], usize, usize)],
+    with_s2: bool,
+) -> Vec<[V2RefMoments; 3]> {
     let (_, w0, h0) = &scales[0];
     #[allow(clippy::absurd_extreme_comparisons, clippy::unnecessary_min_or_max)]
     let bypass_rows = (*h0).min(STRIP_BYPASS_HEIGHT);
     let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P).max(bypass_rows);
     let mut scratch = ScratchV2Strip::new(strip_max_n);
+    // Full-plane temps for the append σ-split's `blur(src²)` fill, reused
+    // across every (channel, scale); only allocated when `with_s2`.
+    let (mut s2_sq, mut s2_stage) = if with_s2 {
+        (vec![0.0f32; w0 * h0], vec![0.0f32; w0 * h0])
+    } else {
+        (Vec::new(), Vec::new())
+    };
     scales
         .iter()
         .map(|(planes, width, height)| {
             std::array::from_fn(|ch| {
-                compute_ref_moments_channel(&planes[ch], *width, *height, &mut scratch)
+                let mut m =
+                    compute_ref_moments_channel(&planes[ch], *width, *height, &mut scratch);
+                // The (B, scale 0) cell is skipped by the append kernel
+                // (`APPEND_SKIP_B_SCALE0`) — don't spend cache memory or
+                // fill time on a plane nothing reads. Scale is inferred
+                // from the plane dims (scale 0 == the largest).
+                let is_scale0 = width * height == w0 * h0;
+                let skipped = APPEND_SKIP_B_SCALE0 && ch == 2 && is_scale0;
+                if with_s2 && !skipped {
+                    let n = width * height;
+                    let mut bs2 = vec![0.0f32; n];
+                    compute_ref_s2blur_into(
+                        &planes[ch],
+                        *width,
+                        *height,
+                        &mut s2_sq,
+                        &mut s2_stage,
+                        &mut bs2,
+                    );
+                    m.bs2 = bs2;
+                }
+                m
             })
         })
         .collect()
+}
+
+/// `out = box_blur_1pass(src²)` over the FULL plane — the reference side
+/// of the append σ-split. One shared implementation for the moments-cache
+/// fill AND the pair path's per-scale replay, which is what makes cached
+/// and replayed `bs2` planes bit-identical by construction (same ops,
+/// same order, same whole-plane blur geometry). `sq_tmp`/`stage_tmp` are
+/// caller-owned full-plane scratch (≥ width·height each).
+fn compute_ref_s2blur_into(
+    src: &[f32],
+    width: usize,
+    height: usize,
+    sq_tmp: &mut [f32],
+    stage_tmp: &mut [f32],
+    out: &mut [f32],
+) {
+    let n = width * height;
+    debug_assert!(sq_tmp.len() >= n && stage_tmp.len() >= n && out.len() >= n);
+    square_into(&src[..n], &mut sq_tmp[..n]);
+    crate::blur::box_blur_1pass_into(
+        &sq_tmp[..n],
+        &mut out[..n],
+        &mut stage_tmp[..n],
+        width,
+        height,
+        BLUR_RADIUS,
+    );
 }
 
 /// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
@@ -2527,6 +2604,10 @@ const STRIP_BYPASS_HEIGHT: usize = 0;
 #[derive(Clone, Copy)]
 struct AppendCtx<'a> {
     ref_y: &'a [f32],
+    /// This channel's `blur(src²)` plane (moments cache or pair-path
+    /// replay — bit-identical either way), the reference half of the
+    /// σ-split.
+    bs2: &'a [f32],
     cross: Option<(&'a [f32], &'a [f32])>,
 }
 
@@ -2536,8 +2617,13 @@ struct AppendAccum {
     sum_xmask: f64,
     sum_lumt: f64,
     ws_dark: WeightedSum,
-    ws_mid: WeightedSum,
     ws_bright: WeightedSum,
+    /// Σ mse_i — the mid-luminance bin is DERIVED at finalize: Bernstein
+    /// weights sum to 1, so `Σw_mid = n − Σw_dark − Σw_bright` and
+    /// `Σw_mid·v = Σv − Σw_dark·v − Σw_bright·v`. One fewer lane pair in
+    /// the kernel; bitwise path-stable because the derivation runs in f64
+    /// finalize on sums that are themselves path-bitwise-equal.
+    sum_mse: f64,
     sum_mscn: f64,
     sum_mscn2: f64,
     sum_cgain: f64,
@@ -2562,8 +2648,8 @@ impl AppendAccum {
         self.sum_xmask += other.sum_xmask;
         self.sum_lumt += other.sum_lumt;
         self.ws_dark.accumulate(&other.ws_dark);
-        self.ws_mid.accumulate(&other.ws_mid);
         self.ws_bright.accumulate(&other.ws_bright);
+        self.sum_mse += other.sum_mse;
         self.sum_mscn += other.sum_mscn;
         self.sum_mscn2 += other.sum_mscn2;
         self.sum_cgain += other.sum_cgain;
@@ -2597,8 +2683,7 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
     mu1: &[f32],
     mu2: &[f32],
     ssq: &[f32],
-    s12: &[f32],
-    d2: &[f32],
+    bs2: &[f32],
     activity: &[f32],
     ref_y: &[f32],
     act_x: &[f32],
@@ -2608,10 +2693,8 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
 ) -> AppendAccum {
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
-    let two = V8::<T>::splat(token, 2.0);
-    let c1 = V8::<T>::splat(token, C1_V2 as f32);
-    let c2 = V8::<T>::splat(token, C2_V2 as f32);
     let c_edge = V8::<T>::splat(token, C_EDGE as f32);
+    let c_mse = V8::<T>::splat(token, C_MSE as f32);
     let c_pjnd_clamp = V8::<T>::splat(token, C_PJND_CLAMP as f32);
     let k_mid = V8::<T>::splat(token, K_PJND_MASK as f32);
     let c_lum = V8::<T>::splat(token, C_LUM_T as f32);
@@ -2633,8 +2716,7 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
         let row = y * width;
 
         let (mut r_xm, mut r_lumt) = (zero, zero);
-        let (mut p_wd, mut p_wdv, mut p_wm, mut p_wmv, mut p_wb, mut p_wbv) =
-            (zero, zero, zero, zero, zero, zero);
+        let (mut p_wd, mut p_wdv, mut p_wb, mut p_wbv, mut r_mse) = (zero, zero, zero, zero, zero);
         let (mut r_mscn, mut r_mscn2) = (zero, zero);
         let (mut r_cg, mut r_cl, mut r_tex) = (zero, zero, zero);
         let (mut r_art2, mut r_det2) = (zero, zero);
@@ -2652,11 +2734,8 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
             let dd = ld!(dst);
             let m1 = ld!(mu1);
             let m2 = ld!(mu2);
-            let act = ld!(activity);
             let ry = ld!(ref_y);
-            let q2 = ld!(d2);
-
-            let d = ssim_d_local_v(token, m1, m2, ld!(s12), ld!(ssq), c1, c2);
+            let b2 = ld!(bs2);
 
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
@@ -2668,16 +2747,23 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
             r_art2 += art_i * art_i;
             r_det2 += det_i * det_i;
 
-            let raw_abs_err = (s - dd).abs();
+            let raw_diff = s - dd;
+            let raw_abs_err = raw_diff.abs();
+            let mse_i = saturate_v(token, raw_diff * raw_diff, c_mse);
             let t = saturate_v(token, ry, c_lum);
-            r_lumt += pjnd_transducer_v(
-                token,
-                raw_abs_err,
-                t.mul_add(k_lum_ratio, act),
-                k_mid,
-                c_pjnd_clamp,
-            );
+            // Luminance + cross-channel transducers are Y-only (CROSS is
+            // the Y channel's dispatch): the luma-gate ablation measured
+            // chroma transducers as a broad CID22 cost. `activity` is
+            // only consumed here, so the load lives inside the branch.
             if CROSS {
+                let act = ld!(activity);
+                r_lumt += pjnd_transducer_v(
+                    token,
+                    raw_abs_err,
+                    t.mul_add(k_lum_ratio, act),
+                    k_mid,
+                    c_pjnd_clamp,
+                );
                 let act_c = ld!(act_x) + ld!(act_b);
                 r_xm += pjnd_transducer_v(
                     token,
@@ -2691,16 +2777,14 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
             let one_mt = one - t;
             let wd = one_mt * one_mt;
             let wb = t * t;
-            let wm = two * t * one_mt;
             p_wd += wd;
-            p_wdv += wd * d;
-            p_wm += wm;
-            p_wmv += wm * d;
+            p_wdv += wd * mse_i;
             p_wb += wb;
-            p_wbv += wb * d;
+            p_wbv += wb * mse_i;
+            r_mse += mse_i;
 
-            let var2 = (q2 - m2 * m2).max(zero);
-            let var1 = ((ld!(ssq) - q2) - m1 * m1).max(zero);
+            let var1 = (b2 - m1 * m1).max(zero);
+            let var2 = ((ld!(ssq) - b2) - m2 * m2).max(zero);
             let n1 = (s - m1) * (var1 + c_mvar).rsqrt();
             let n2 = (dd - m2) * (var2 + c_mvar).rsqrt();
             let dn = n1 - n2;
@@ -2724,10 +2808,9 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
         acc.sum_lumt += r_lumt.reduce_add() as f64;
         acc.ws_dark.num += p_wdv.reduce_add() as f64;
         acc.ws_dark.den += p_wd.reduce_add() as f64;
-        acc.ws_mid.num += p_wmv.reduce_add() as f64;
-        acc.ws_mid.den += p_wm.reduce_add() as f64;
         acc.ws_bright.num += p_wbv.reduce_add() as f64;
         acc.ws_bright.den += p_wb.reduce_add() as f64;
+        acc.sum_mse += r_mse.reduce_add() as f64;
         acc.sum_mscn += r_mscn.reduce_add() as f64;
         acc.sum_mscn2 += r_mscn2.reduce_add() as f64;
         acc.sum_cgain += r_cg.reduce_add() as f64;
@@ -2749,10 +2832,8 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
             let m2 = mu2[i] as f64;
             let act = activity[i] as f64;
             let ry = ref_y[i] as f64;
-            let q2 = d2[i] as f64;
+            let b2 = bs2[i] as f64;
             let sq = ssq[i] as f64;
-
-            let d = ssim_d_local(m1, m2, s12[i] as f64, sq);
 
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
@@ -2762,15 +2843,17 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
             acc.sum_art2 += art_i * art_i;
             acc.sum_det2 += det_i * det_i;
 
-            let raw_abs_err = (s - dd).abs();
+            let raw_diff = s - dd;
+            let raw_abs_err = raw_diff.abs();
+            let mse_i = saturate(raw_diff * raw_diff, C_MSE);
             let t = saturate(ry, C_LUM_T);
-            acc.sum_lumt += pjnd_transducer(
-                raw_abs_err,
-                act + t * (K_LUM_ADAPT / K_PJND_MASK),
-                K_PJND_MASK,
-                C_PJND_CLAMP,
-            );
             if CROSS {
+                acc.sum_lumt += pjnd_transducer(
+                    raw_abs_err,
+                    act + t * (K_LUM_ADAPT / K_PJND_MASK),
+                    K_PJND_MASK,
+                    C_PJND_CLAMP,
+                );
                 let act_c = act_x[i] as f64 + act_b[i] as f64;
                 acc.sum_xmask += pjnd_transducer(
                     raw_abs_err,
@@ -2781,12 +2864,12 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool>(
             }
 
             let one_mt = 1.0 - t;
-            acc.ws_dark.add(one_mt * one_mt, d);
-            acc.ws_mid.add(2.0 * t * one_mt, d);
-            acc.ws_bright.add(t * t, d);
+            acc.ws_dark.add(one_mt * one_mt, mse_i);
+            acc.ws_bright.add(t * t, mse_i);
+            acc.sum_mse += mse_i;
 
-            let var2 = (q2 - m2 * m2).max(0.0);
-            let var1 = ((sq - q2) - m1 * m1).max(0.0);
+            let var1 = (b2 - m1 * m1).max(0.0);
+            let var2 = ((sq - b2) - m2 * m2).max(0.0);
             let n1 = (s - m1) / (var1 + C_MSCN_VAR).sqrt();
             let n2 = (dd - m2) / (var2 + C_MSCN_VAR).sqrt();
             let dn = n1 - n2;
@@ -2817,8 +2900,7 @@ fn append_block_kernel_entry_cross(
     mu1: &[f32],
     mu2: &[f32],
     ssq: &[f32],
-    s12: &[f32],
-    d2: &[f32],
+    bs2: &[f32],
     activity: &[f32],
     ref_y: &[f32],
     act_x: &[f32],
@@ -2827,7 +2909,7 @@ fn append_block_kernel_entry_cross(
     height: usize,
 ) -> AppendAccum {
     append_block_kernel_generic::<_, true>(
-        token, src, dst, mu1, mu2, ssq, s12, d2, activity, ref_y, act_x, act_b, width, height,
+        token, src, dst, mu1, mu2, ssq, bs2, activity, ref_y, act_x, act_b, width, height,
     )
 }
 
@@ -2840,15 +2922,14 @@ fn append_block_kernel_entry_nocross(
     mu1: &[f32],
     mu2: &[f32],
     ssq: &[f32],
-    s12: &[f32],
-    d2: &[f32],
+    bs2: &[f32],
     activity: &[f32],
     ref_y: &[f32],
     width: usize,
     height: usize,
 ) -> AppendAccum {
     append_block_kernel_generic::<_, false>(
-        token, src, dst, mu1, mu2, ssq, s12, d2, activity, ref_y, &[], &[], width, height,
+        token, src, dst, mu1, mu2, ssq, bs2, activity, ref_y, &[], &[], width, height,
     )
 }
 
@@ -2862,8 +2943,7 @@ fn append_block_kernel(
     mu1: &[f32],
     mu2: &[f32],
     ssq: &[f32],
-    s12: &[f32],
-    d2: &[f32],
+    bs2: &[f32],
     activity: &[f32],
     ref_y: &[f32],
     cross: Option<(&[f32], &[f32])>,
@@ -2874,8 +2954,7 @@ fn append_block_kernel(
         Some((act_x, act_b)) => {
             incant!(
                 append_block_kernel_entry_cross(
-                    src, dst, mu1, mu2, ssq, s12, d2, activity, ref_y, act_x, act_b, width,
-                    height
+                    src, dst, mu1, mu2, ssq, bs2, activity, ref_y, act_x, act_b, width, height
                 ),
                 [v4x, v4, v3, neon, wasm128, scalar]
             )
@@ -2883,7 +2962,7 @@ fn append_block_kernel(
         None => {
             incant!(
                 append_block_kernel_entry_nocross(
-                    src, dst, mu1, mu2, ssq, s12, d2, activity, ref_y, width, height
+                    src, dst, mu1, mu2, ssq, bs2, activity, ref_y, width, height
                 ),
                 [v4x, v4, v3, neon, wasm128, scalar]
             )
@@ -2924,10 +3003,21 @@ fn finish_append(
     } else {
         0.0
     };
-    out[idx_append::LUM_TRANSDUCER] = clamp01(app.sum_lumt / n_f);
-    out[idx_append::LUM_DARK_SSIM] = clamp02(app.ws_dark.finish());
-    out[idx_append::LUM_MID_SSIM] = clamp02(app.ws_mid.finish());
-    out[idx_append::LUM_BRIGHT_SSIM] = clamp02(app.ws_bright.finish());
+    out[idx_append::LUM_TRANSDUCER] = if cross {
+        clamp01(app.sum_lumt / n_f)
+    } else {
+        0.0
+    };
+    out[idx_append::LUM_DARK_ERR] = clamp02(app.ws_dark.finish());
+    // Mid bin derived from the Bernstein partition of unity (see
+    // `AppendAccum::sum_mse`): Σw_mid = n − Σw_dark − Σw_bright,
+    // Σw_mid·v = Σv − Σw_dark·v − Σw_bright·v.
+    let ws_mid = WeightedSum {
+        num: app.sum_mse - app.ws_dark.num - app.ws_bright.num,
+        den: n_f - app.ws_dark.den - app.ws_bright.den,
+    };
+    out[idx_append::LUM_MID_ERR] = clamp02(ws_mid.finish());
+    out[idx_append::LUM_BRIGHT_ERR] = clamp02(app.ws_bright.finish());
     out[idx_append::MSCN_DIFF_MEAN] = clamp01(app.sum_mscn / n_f);
     out[idx_append::MSCN_DIFF_L2] = clamp01(app.sum_mscn2 / n_f);
     out[idx_append::CONTRAST_GAIN] = clamp01(app.sum_cgain / n_f);
@@ -3374,29 +3464,6 @@ fn compute_channel_scale_v2_with_fold(
             run_blur_pass_strip(width, wide_h, scratch);
         }
 
-        // --- Append-block σ-split: blur(dst²) for this strip. Runs AFTER
-        //     the blur pass so `abs_src`/`activity_tmp` are free to serve
-        //     as its temporaries (cached-moments mode never uses them;
-        //     the pair path's activity chain has fully consumed them by
-        //     now — `activity` itself is preserved). ---
-        if append_ctx.is_some() {
-            let ScratchV2Strip {
-                dst_wide,
-                abs_src,
-                activity_tmp,
-                d2,
-                ..
-            } = scratch;
-            square_into(&dst_wide[..n_wide], &mut abs_src[..n_wide]);
-            crate::blur::box_blur_1pass_into(
-                &abs_src[..n_wide],
-                &mut d2[..n_wide],
-                &mut activity_tmp[..n_wide],
-                width,
-                wide_h,
-                BLUR_RADIUS,
-            );
-        }
 
         // --- v1-basic FOLD: v1's own fused V-blur+features kernel over
         //     the H-planes this strip's blur pass just filled, replaying
@@ -3474,10 +3541,13 @@ fn compute_channel_scale_v2_with_fold(
         }
 
         // --- Append-block second formula pass over the (cache-hot) strip
-        //     planes. Full-plane inputs (`ref_y`, cross activities) index
-        //     by global row, exactly like the cached moments above. ---
+        //     planes. Full-plane inputs (`ref_y`, `bs2`, cross
+        //     activities) index by global row, exactly like the cached
+        //     moments above. No per-pair blur runs for the σ-split: the
+        //     kernel derives `var₂ = (ssq − bs2) − mu2²` from the cached/
+        //     replayed reference `bs2` plane. ---
         if let Some(ctx) = append_ctx {
-            let d2_strip = &scratch.d2[off..off + strip_n];
+            let bs2_strip = &ctx.bs2[out_base..out_base + strip_n];
             let refy_strip = &ctx.ref_y[out_base..out_base + strip_n];
             let cross_strips = ctx
                 .cross
@@ -3488,8 +3558,7 @@ fn compute_channel_scale_v2_with_fold(
                 mu1_strip,
                 mu2_strip,
                 ssq_strip,
-                s12_strip,
-                d2_strip,
+                bs2_strip,
                 activity_strip,
                 refy_strip,
                 cross_strips,
@@ -3583,27 +3652,6 @@ fn compute_channel_scale_v2_whole_with_fold(
 
     run_blur_pass(src, dst, width, height, scratch);
 
-    // Append-block σ-split, whole-plane form (same sequential temp reuse
-    // as the strip path — the activity chain above has fully released
-    // `abs_src`/`activity_tmp`).
-    if append.is_some() {
-        let ScratchV2Strip {
-            abs_src,
-            activity_tmp,
-            d2,
-            ..
-        } = scratch;
-        square_into(&dst[..n], &mut abs_src[..n]);
-        crate::blur::box_blur_1pass_into(
-            &abs_src[..n],
-            &mut d2[..n],
-            &mut activity_tmp[..n],
-            width,
-            height,
-            BLUR_RADIUS,
-        );
-    }
-
     // v1-basic fold, whole-plane form: full-plane H-planes + the real
     // src/dst planes, identity local mapping (strip_y0 = halo_offset = 0).
     let mut v1_sums = V1BasicSums::default();
@@ -3674,8 +3722,7 @@ fn compute_channel_scale_v2_whole_with_fold(
             mu1,
             mu2,
             ssq,
-            s12,
-            &scratch.d2[..n],
+            &ctx.bs2[..n],
             activity,
             &ctx.ref_y[..n],
             ctx.cross.map(|(ax, ab)| (&ax[..n], &ab[..n])),
@@ -4303,6 +4350,14 @@ pub struct V2PreparedReference {
 struct V2RefMoments {
     mu1: Vec<f32>,
     activity: Vec<f32>,
+    /// `box_blur(src²)` — the reference half of the append block's σ-split
+    /// (`var₁ = bs2 − mu1²`, `var₂ = (ssq − bs2) − mu2²`; see
+    /// [`idx_append`]). EMPTY unless the cache was prepared for the append
+    /// regime ([`prepare_v2_reference_impl`] `cache_s2`) — existing
+    /// moments users pay zero extra memory. Computed by
+    /// [`compute_ref_s2blur_into`], the same helper the pair path replays,
+    /// so cached and replayed planes are bit-identical by construction.
+    bs2: Vec<f32>,
 }
 
 impl V2PreparedReference {
@@ -4332,6 +4387,28 @@ pub(crate) fn prepare_v2_reference_impl(
     parallel: bool,
     cache_moments: bool,
 ) -> Result<V2PreparedReference, ZensimError> {
+    prepare_v2_reference_impl_inner(source, max_pixels, parallel, cache_moments, false)
+}
+
+/// [`prepare_v2_reference_impl`] for the append regime: moments cache
+/// INCLUDING the `bs2 = blur(src²)` planes the f720+ σ-split consumes
+/// (+one plane-kind of cache memory — charged only to append-regime
+/// preparation; plain moments users keep today's exact footprint).
+pub(crate) fn prepare_v2_reference_append_impl(
+    source: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+) -> Result<V2PreparedReference, ZensimError> {
+    prepare_v2_reference_impl_inner(source, max_pixels, parallel, true, true)
+}
+
+fn prepare_v2_reference_impl_inner(
+    source: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    cache_moments: bool,
+    cache_s2: bool,
+) -> Result<V2PreparedReference, ZensimError> {
     if source.width() == 0 || source.height() == 0 {
         return Err(ZensimError::ImageTooSmall);
     }
@@ -4346,7 +4423,7 @@ pub(crate) fn prepare_v2_reference_impl(
     } else {
         build_v2_ref_scales(source, parallel)
     };
-    let moments = cache_moments.then(|| fill_ref_moments(&scales));
+    let moments = cache_moments.then(|| fill_ref_moments(&scales, cache_s2));
     Ok(V2PreparedReference {
         scales,
         moments,
@@ -4634,17 +4711,25 @@ fn compute_v2_features_with_ref_impl_inner(
     let bypass_rows = height.min(STRIP_BYPASS_HEIGHT);
     let strip_max_n = width * (STRIP_ROWS + 2 * HALO_P).max(bypass_rows);
     scratch.ensure(strip_max_n);
-    // Pair-path cross-channel activity planes (append block only, no
-    // moments cache): one full scale-0-sized plane per chroma channel,
-    // reused (sliced down) across scales. Zero allocation on the
-    // cached-moments extraction path or when the append block is off.
-    if append_on && prepared.moments.is_none() {
+    // Append-block replay planes (pair path / non-append moments cache):
+    // full scale-0-sized planes, reused (sliced down) across scales.
+    // Zero allocation on the append-moments extraction path or when the
+    // append block is off.
+    let have_s2_cache = prepared
+        .moments
+        .as_ref()
+        .map(|m| !m[0][0].bs2.is_empty())
+        .unwrap_or(false);
+    if append_on && !(have_s2_cache && prepared.moments.is_some()) {
         scratch.ensure_append(width * height);
     }
     let V2Scratch {
         strips: scratch,
         append_act_x,
         append_act_b,
+        append_bs2,
+        append_tmp_a,
+        append_tmp_b,
         ..
     } = scratch;
     // Split off the append output region so the v1+v2 writes below keep
@@ -4684,17 +4769,19 @@ fn compute_v2_features_with_ref_impl_inner(
             &mut features_v12[v1_total + scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
 
         // --- Append-block per-scale provisioning: the X/B activity planes
-        //     the Y channel's cross-masked transducer reads. With cached
-        //     reference moments these are borrows of the cache (zero cost,
-        //     channel fan-out stays fully independent); on the pair path
-        //     they are replayed into the `V2Scratch` planes — bit-identical
-        //     to the cache by construction (`compute_ref_activity_into`),
-        //     and done BEFORE the fan-out so both branches only read. ---
+        //     the Y channel's cross-masked transducer reads, and each
+        //     channel's `bs2 = blur(src²)` σ-split plane. With an
+        //     append-prepared moments cache these are borrows of the
+        //     cache (zero cost, channel fan-out stays fully independent);
+        //     otherwise they are replayed into the `V2Scratch` planes —
+        //     bit-identical to the cache by construction (same helpers,
+        //     same geometry) — BEFORE the fan-out, so both branches only
+        //     read. ---
+        let scale_n = width * height;
         let append_cross: Option<(&[f32], &[f32])> = if append_on {
             Some(match moments_scale {
                 Some(ms) => (&ms[0].activity[..], &ms[2].activity[..]),
                 None => {
-                    let scale_n = width * height;
                     compute_ref_activity_into(
                         &src_planes[0],
                         width,
@@ -4711,6 +4798,33 @@ fn compute_v2_features_with_ref_impl_inner(
                     );
                     (&append_act_x[..scale_n], &append_act_b[..scale_n])
                 }
+            })
+        } else {
+            None
+        };
+        let append_bs2_planes: Option<[&[f32]; 3]> = if append_on {
+            Some(if have_s2_cache {
+                let ms = moments_scale.expect("have_s2_cache implies moments");
+                [&ms[0].bs2[..], &ms[1].bs2[..], &ms[2].bs2[..]]
+            } else {
+                for ch in 0..3 {
+                    if APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0 {
+                        continue; // cell skipped by the kernel — plane never read
+                    }
+                    compute_ref_s2blur_into(
+                        &src_planes[ch],
+                        width,
+                        height,
+                        append_tmp_a,
+                        append_tmp_b,
+                        &mut append_bs2[ch][..scale_n],
+                    );
+                }
+                [
+                    &append_bs2[0][..scale_n],
+                    &append_bs2[1][..scale_n],
+                    &append_bs2[2][..scale_n],
+                ]
             })
         } else {
             None
@@ -4737,15 +4851,20 @@ fn compute_v2_features_with_ref_impl_inner(
                 .zip(scratch.par_iter_mut())
                 .enumerate()
                 .map(|(ch, ((out, out_app), scr))| {
-                    let append_arg = out_app.map(|oa| {
-                        (
-                            AppendCtx {
-                                ref_y: ref_y_plane,
-                                cross: if ch == 1 { append_cross } else { None },
-                            },
-                            oa,
-                        )
-                    });
+                    let append_arg = if APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0 {
+                        None
+                    } else {
+                        out_app.map(|oa| {
+                            (
+                                AppendCtx {
+                                    ref_y: ref_y_plane,
+                                    bs2: append_bs2_planes.expect("append_on when out_app set")[ch],
+                                    cross: if ch == 1 { append_cross } else { None },
+                                },
+                                oa,
+                            )
+                        })
+                    };
                     let g = compute_channel_scale_v2_with_fold(
                         &src_planes[ch],
                         &dst_planes[ch],
@@ -4785,15 +4904,20 @@ fn compute_v2_features_with_ref_impl_inner(
                 .zip(app_chunks.iter_mut())
                 .enumerate()
             {
-                let append_arg = out_app.take().map(|oa| {
-                    (
-                        AppendCtx {
-                            ref_y: ref_y_plane,
-                            cross: if ch == 1 { append_cross } else { None },
-                        },
-                        oa,
-                    )
-                });
+                let append_arg = if APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0 {
+                    None
+                } else {
+                    out_app.take().map(|oa| {
+                        (
+                            AppendCtx {
+                                ref_y: ref_y_plane,
+                                bs2: append_bs2_planes.expect("append_on when out_app set")[ch],
+                                cross: if ch == 1 { append_cross } else { None },
+                            },
+                            oa,
+                        )
+                    })
+                };
                 let (g, sums) = compute_channel_scale_v2_with_fold(
                     &src_planes[ch],
                     &dst_planes[ch],
@@ -6537,6 +6661,18 @@ mod tests {
                 &mut scratch,
             )
             .unwrap();
+        // Fourth leg: the append-prepared cache (moments + bs2) — the
+        // production extraction shape; bs2 comes from the cache instead
+        // of the per-scale replay and must still match bitwise.
+        let moments_app = z.prepare_v2_reference_with_moments_append(&sref).unwrap();
+        let c = z
+            .compute_folded720_append_features_with_ref_and_scratch(
+                &moments_app,
+                &dref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
 
         for i in 0..pair.features().len() {
             assert_eq!(
@@ -6547,7 +6683,12 @@ mod tests {
             assert_eq!(
                 pair.features()[i].to_bits(),
                 b.features()[i].to_bits(),
-                "pair vs prepared(moments) diverge at f{i}"
+                "pair vs prepared(moments, replayed bs2) diverge at f{i}"
+            );
+            assert_eq!(
+                pair.features()[i].to_bits(),
+                c.features()[i].to_bits(),
+                "pair vs prepared(append moments, cached bs2) diverge at f{i}"
             );
         }
     }
@@ -6602,9 +6743,12 @@ mod tests {
         let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
         let r = z.compute_folded720_append_features(&sref, &sref).unwrap();
         let app = r.append_features().unwrap();
-        const EXACT_ZERO: [usize; 8] = [
+        const EXACT_ZERO: [usize; 11] = [
             idx_append::XMASK_TRANSDUCER,
             idx_append::LUM_TRANSDUCER,
+            idx_append::LUM_DARK_ERR,
+            idx_append::LUM_MID_ERR,
+            idx_append::LUM_BRIGHT_ERR,
             idx_append::GMS_DEV2,
             idx_append::ART_DEV2,
             idx_append::DET_DEV2,
@@ -6675,11 +6819,25 @@ mod tests {
                         0.0,
                         "xmask must be 0 on chroma channel {ch}"
                     );
+                    assert_eq!(
+                        app[base + idx_append::LUM_TRANSDUCER],
+                        0.0,
+                        "lum transducer must be 0 on chroma channel {ch} (luma-gate)"
+                    );
                 } else {
                     assert!(
                         app[base + idx_append::XMASK_TRANSDUCER] > 0.0,
                         "Y xmask should fire on a distorted pair (s{scale})"
                     );
+                }
+                if APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0 {
+                    for local in 0..FEATURES_PER_CHANNEL_APPEND {
+                        assert_eq!(
+                            app[base + local],
+                            0.0,
+                            "B channel scale 0 must be fully skipped (local {local})"
+                        );
+                    }
                 }
             }
         }

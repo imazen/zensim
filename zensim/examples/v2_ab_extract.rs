@@ -94,12 +94,14 @@ fn main() {
     // (masked/IW pool) share of v1c for the fold-basic-156-into-v2 design.
     // "fold" = the folded-720 ONE-pass extraction (v1 basic in the v2 walk,
     // f156..371 = 0, v2-348) — `Zensim::compute_folded720_features*`.
+    // "foldapp" (2026-07-26) = fold + the f720+ append block (924 columns)
+    // — `Zensim::compute_folded720_append_features*`.
     let mode = std::env::var("ZENSIM_AB_MODE").unwrap_or_else(|_| "ext".into());
-    let do_fold = mode == "fold";
+    let do_fold = mode == "fold" || mode == "foldapp";
     let (do_v1, do_v2) = match mode.as_str() {
         "v1" | "v1e" | "v1s" => (true, false),
         "v2" => (false, true),
-        "none" | "fold" => (false, false), // fold has its own branch below
+        "none" | "fold" | "foldapp" => (false, false), // fold has its own branch below
         _ => (true, true),
     };
 
@@ -185,14 +187,32 @@ fn main() {
         if do_fold {
             let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
             let distorted = RgbSlice::new(&d_px, dw, dh);
+            let with_append = mode == "foldapp";
             let folded = match prepared {
-                Some(pre) => z.compute_folded720_features_with_ref_and_scratch(
-                    pre,
-                    &distorted,
-                    V2NewFeatureToggles::default(),
-                    scratch,
-                ),
-                None => z.compute_folded720_features(&RgbSlice::new(r_px, rw, rh), &distorted),
+                Some(pre) => {
+                    if with_append {
+                        z.compute_folded720_append_features_with_ref_and_scratch(
+                            pre,
+                            &distorted,
+                            V2NewFeatureToggles::default(),
+                            scratch,
+                        )
+                    } else {
+                        z.compute_folded720_features_with_ref_and_scratch(
+                            pre,
+                            &distorted,
+                            V2NewFeatureToggles::default(),
+                            scratch,
+                        )
+                    }
+                }
+                None => {
+                    if with_append {
+                        z.compute_folded720_append_features(&RgbSlice::new(r_px, rw, rh), &distorted)
+                    } else {
+                        z.compute_folded720_features(&RgbSlice::new(r_px, rw, rh), &distorted)
+                    }
+                }
             };
             let folded = match folded {
                 Ok(r) => r,
@@ -270,7 +290,16 @@ fn main() {
                 let prepared = if do_v2 || do_fold {
                     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
                     let r = if want_moments {
-                        z.prepare_v2_reference_with_moments(&RgbSlice::new(&r_px, rw, rh))
+                        if mode == "foldapp" {
+                            // Append regime: moments cache incl. blur(src²)
+                            // so the σ-split is a per-pair subtract, not a
+                            // per-pair blur.
+                            z.prepare_v2_reference_with_moments_append(&RgbSlice::new(
+                                &r_px, rw, rh,
+                            ))
+                        } else {
+                            z.prepare_v2_reference_with_moments(&RgbSlice::new(&r_px, rw, rh))
+                        }
                     } else {
                         z.prepare_v2_reference(&RgbSlice::new(&r_px, rw, rh))
                     };

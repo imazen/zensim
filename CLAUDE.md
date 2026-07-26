@@ -2,6 +2,14 @@
 
 Workspace with three crates: `zensim` (library), `zensim-regress` (regression testing binary), `zensim-validate` (validation binary).
 
+**Feature-gap map (read before feature work):**
+`~/work/zen/zenpapers/docs/zensim-720-feature-gaps-2026-07-26.md` — the
+2026-07-26 audit of the 720-feature set (v1-vs-v2 iw/masked naming trap,
+ranked weaknesses, fast-CPU candidates with evidence, regime-inversion
+finding, don't-build list). The f720+ append block
+(`benchmarks/v2_append_block_2026-07-26.md`, `FeatureRegime::Folded720Append`)
+implements its A1-A5/A9 candidates.
+
 ## Known Bugs
 
 _(none open)_
