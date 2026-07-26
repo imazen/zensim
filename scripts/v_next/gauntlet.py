@@ -324,7 +324,7 @@ const COLS=[
   ['dial_mono','dial-mono',false,b=>b.dial.mono_pct],
   ['dial_tied','tied',false,b=>b.dial.tied_pct],
   ['m3','M3-coh',false,b=>b.m3],
-  ['corr','corrupt-t50',false,b=>b.corruption.detection_t50],
+  ['corr','corr-passq20',false,b=>b.corruption&&b.corruption.pass_q20!=null?b.corruption.pass_q20:null],
 ];
 const rs=(b,c)=>{const r=b.rank[c];return r?r.srocc:null;};
 function fmtCell(key,v){
