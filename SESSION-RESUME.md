@@ -44,6 +44,12 @@ silently emits 372 not 720). Full order + corpus + risks: the plan doc §D.
 6. `benchmarks/INDEX.md` → the July-2026 docs when you need the evidence chain.
 7. `TaskList` for open work.
 
+**Retrospective (2026-07-26):** [`benchmarks/best_per_day_summer_2026.md`](benchmarks/best_per_day_summer_2026.md)
+maps the **best model per calendar day** (05-01 → 07-25) with verified bake paths + summer
+champions (best CID22 = winner_dial 0.894; best KonJND = cl_tfm 0.761 — first past the G5
+floor; best HF-NL/dial = Ebothg_scr0.5_dial; shipped B/A/BHdr). JSON twin:
+`/mnt/v/output/zensim/reports/best_per_day.json`.
+
 ## Current state (2026-07-18)
 
 - **Shipped default = `ZensimProfile::B`** (linear-372 + dial spline; A deprecated behind
