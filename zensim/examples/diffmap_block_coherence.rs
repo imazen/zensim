@@ -242,6 +242,18 @@ fn run_bake_mode(
     let n_in = zenpredict::Model::from_bytes(&bytes)
         .expect("parse bake header")
         .n_inputs();
+    // M3 supports the v1 layouts (n_in ≤ 372) and the combined v1+v2 layout
+    // (720 = 372 v1 ++ 348 v2). Any other width — e.g. an ext504 bake
+    // (156 basic ++ 348 v2) — puts the v2 block at a different offset, so the
+    // v2 fold and the f156-371 dropped-mass are undefined for it. Skip cleanly
+    // rather than panic (the v2 fold previously indexed `s[372..]` on a 504-wide
+    // gradient and crashed at feature_v2.rs; run_full_eval leaves M3 null).
+    if n_in > 372 && n_in != 720 {
+        println!(
+            "  M3 skipped: unsupported bake layout (n_inputs={n_in}; the diffmap fold supports n_inputs ≤ 372 or exactly 720)"
+        );
+        return;
+    }
     BAKE_BYTES.set(bytes).expect("bake bytes set once");
 
     // Feature pipeline sized to the bake: basic-only bakes (n_in ≤ 156) skip the
