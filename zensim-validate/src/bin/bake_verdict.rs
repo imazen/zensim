@@ -50,7 +50,7 @@ use zenpredict::{Model, Predictor};
 
 use zensim_validate::eval_report;
 use zensim_validate::panel::{
-    Orientation, PerGroupSrocc, compute_panel, per_group_srocc, rescale_logistic,
+    Orientation, PerGroupSrocc, compute_panel, per_group_srocc, rescale_logistic, spearman,
 };
 use zensim_validate::parquet_loader;
 
@@ -733,6 +733,15 @@ struct CorpusResult {
     pwrc: f64,
     z_rmse: f64,
     ds_auc: f64,
+    /// Signed SROCC (NOT abs'd). `srocc` above is `|·|` per the Mohammadi panel
+    /// convention; this preserves polarity so a globally-inverted bake reads
+    /// negative instead of masquerading as a healthy positive. The dashboard
+    /// shows it for the MOS corpora; the abs form is reserved for the JND
+    /// corpora whose target sign is genuinely ambiguous.
+    srocc_signed: f64,
+    /// Marginal bootstrap 95% CI `(lo, hi)` of `|SROCC|` — makes a mid-cluster
+    /// ranking gap legible as real-or-noise (the bare point estimate cannot).
+    srocc_ci: (f64, f64),
     /// Logistic-rescaled scores in [0,100] dial space (for G1 range check).
     rescaled_scores: Vec<f64>,
     /// Corpus key (lowercase, e.g. "cid22") for `--full-json` keying and the
@@ -754,6 +763,66 @@ struct CorpusResult {
 /// home for statistical math. This binary only chooses the grouping (by
 /// reference image) and renders the result.
 const PER_REF_MIN_ROWS: usize = 3;
+
+/// KADID/TID are 100% train==val pair-overlap in the zensim training corpus
+/// (docs + project MEMORY): their held-out SROCC rewards memorization, not
+/// generalization skill, so the eval must MARK them rather than let a reader
+/// rank a bake by numbers that reward overfit. This is the runtime flag the
+/// report + `--full-json` lacked — the fact previously lived only in a code
+/// comment (see `benchmarks/stats_correctness_review_2026-07-26.md` §4b).
+fn train_eq_val(name: &str) -> bool {
+    matches!(name, "kadid" | "tid")
+}
+
+/// Marginal bootstrap 95% CI of |SROCC| for one corpus: resample the
+/// `(score, human)` PAIRS with replacement `N_BOOT` times, take |SROCC| of
+/// each resample, and return the (2.5th, 97.5th) percentiles.
+///
+/// **Why this exists.** The single-bake report prints SROCC to 3 decimals with
+/// no uncertainty, which silently invites reading a 0.882-vs-0.880 gap as an
+/// ordering. It usually isn't: at n≈4292 the 95% CI half-width is ≈0.006, so
+/// adjacent bakes in the mid-cluster are a statistical tie. The CI makes that
+/// visible (paired A-vs-B significance still lives in `bake_compare`; this is
+/// the marginal per-corpus band the dashboard renders as a tie-guide).
+///
+/// The STATISTIC is `zenstats::panel::spearman` — only the resampling loop is
+/// here, so this is orchestration, not a duplicate stat (per the no-duplication
+/// rule). Deterministic: a fixed-seed SplitMix64/xorshift keyed off `n` so a
+/// bake's CI is reproducible run-to-run without a new `rand` dependency.
+fn bootstrap_srocc_ci(scores: &[f64], humans: &[f64]) -> (f64, f64) {
+    fn xs(s: &mut u64) -> u64 {
+        *s ^= *s << 13;
+        *s ^= *s >> 7;
+        *s ^= *s << 17;
+        *s
+    }
+    let n = scores.len().min(humans.len());
+    if n < 8 {
+        return (f64::NAN, f64::NAN);
+    }
+    const N_BOOT: usize = 1000;
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15 ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D);
+    let mut rs: Vec<f64> = Vec::with_capacity(N_BOOT);
+    let mut bs = vec![0.0f64; n];
+    let mut bh = vec![0.0f64; n];
+    for _ in 0..N_BOOT {
+        for k in 0..n {
+            let idx = (xs(&mut state) % n as u64) as usize;
+            bs[k] = scores[idx];
+            bh[k] = humans[idx];
+        }
+        rs.push(spearman(&bs, &bh).abs());
+    }
+    rs.sort_by(f64::total_cmp);
+    let pct = |p: f64| -> f64 {
+        let pos = p * (N_BOOT as f64 - 1.0);
+        let lo = pos.floor() as usize;
+        let hi = (lo + 1).min(N_BOOT - 1);
+        let frac = pos - lo as f64;
+        rs[lo] * (1.0 - frac) + rs[hi] * frac
+    };
+    (pct(0.025), pct(0.975))
+}
 
 fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, f64, f64) {
     // Canonical 6-stat panel comes from `compute_panel` (re-exported
@@ -1308,6 +1377,11 @@ fn render_corpus(
         .ref_ids
         .as_ref()
         .and_then(|r| per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS, Orientation::Auto));
+    // Signed SROCC (polarity-preserving) + marginal bootstrap CI. `aggregate_panel`
+    // returns `|SROCC|`; a globally-inverted bake would hide behind that abs, so
+    // keep the sign here. The CI resolves whether a 3-decimal ranking gap is real.
+    let srocc_signed = spearman(&scores, &humans);
+    let srocc_ci = bootstrap_srocc_ci(&scores, &humans);
 
     let mut body = String::new();
     body.push_str(&format!("\n## {} (n={})\n\n", corpus.display, n));
@@ -1443,6 +1517,8 @@ read on this corpus._\n",
         pwrc: pw,
         z_rmse: z,
         ds_auc: ds,
+        srocc_signed,
+        srocc_ci,
         rescaled_scores: scores.clone(),
         name: corpus.name,
         humans: humans.clone(),
@@ -1752,9 +1828,16 @@ fn main() -> ExitCode {
             ),
             None => ("—".to_string(), "—".to_string()),
         };
+        // Mark train==val corpora (KADID/TID): their SROCC rewards memorization,
+        // not held-out skill, so it must not be read as a generalization number.
+        let disp = if train_eq_val(r.name) {
+            format!("{} ⚠t=v", r.display)
+        } else {
+            r.display.to_string()
+        };
         buf.push_str(&format!(
             "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} | {:.4} | {:.4} | {} | {} |\n",
-            r.display, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse, r.ds_auc, g3,
+            disp, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse, r.ds_auc, g3,
             pr, bwd
         ));
     }
@@ -1765,7 +1848,8 @@ whose distortion ladder is ranked BACKWARDS. Read them against the pooled SROCC:
 gap means the pooled number is carried by cross-image scale rather than ranking (the \
 AIC-3 0.79-pooled / 0.93-per-ref confound). A high `%bwd` next to a healthy SROCC is the \
 failure §8.39 found and no pooled or per-band stat can see. `—` = corpus carries no ref \
-identity._\n",
+identity. **⚠t=v** marks KADID/TID, whose 100% train==val pair-overlap makes their SROCC \
+a memorization number — not held-out generalization; do not rank a bake by them._\n",
     );
     // Per-corpus SROCC at a glance (inline-SVG; renders in the HTML report).
     if !results.is_empty() {
@@ -2172,11 +2256,23 @@ Run the dedicated q-sweep harness for those._\n",
                 json!({
                     "n": r.n,
                     "srocc": r.srocc,
+                    // Signed (polarity-preserving) SROCC — a negative here means the
+                    // bake is globally inverted, which `srocc` (abs) hides.
+                    "srocc_signed": r.srocc_signed,
+                    // Marginal bootstrap 95% CI of |SROCC| → the dashboard tie-band.
+                    "srocc_ci": [r.srocc_ci.0, r.srocc_ci.1],
                     "plcc": r.plcc,
                     "krocc": r.krocc,
                     "or": r.or_ratio,
                     "pwrc": r.pwrc,
                     "z_rmse": r.z_rmse,
+                    // Per-reference backwards-ladder share (null when the corpus
+                    // carries no ref identity) — the one signal no pooled stat sees.
+                    "frac_negative": r.per_ref.as_ref().map(|p| p.frac_negative),
+                    "per_ref_mean": r.per_ref.as_ref().map(|p| p.mean),
+                    "per_ref_n": r.per_ref.as_ref().map(|p| p.n_groups),
+                    // KADID/TID are train==val (memorization) — flagged, not hidden.
+                    "train_eq_val": train_eq_val(r.name),
                 }),
             );
         }
