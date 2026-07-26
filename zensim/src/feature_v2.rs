@@ -1165,6 +1165,8 @@ pub struct V2Scratch {
     append_act_x: Vec<f32>,
     append_act_b: Vec<f32>,
     append_bs2: [Vec<f32>; 3],
+    /// σ-split blur temps for the strip-tiled bs2 replay — strip-wide
+    /// (`width·(STRIP_ROWS+2·HALO_P)`), NOT full-plane, since P2.
     append_tmp_a: Vec<f32>,
     append_tmp_b: Vec<f32>,
     append_sized_for: usize,
@@ -1202,16 +1204,20 @@ impl V2Scratch {
     }
 
     /// Grow (never shrink) the pair-path replay planes to one full
-    /// scale-0 plane each. Only called on the
-    /// append-block-without-cache path.
-    fn ensure_append(&mut self, plane_n: usize) {
+    /// scale-0 plane each (the act/bs2 planes are indexed by global row by
+    /// the kernels), and the σ-split blur temps to `strip_n` (P2: the bs2
+    /// fill is kernel-strip-tiled, so its temps are strip-wide, not
+    /// full-plane). Only called on the append-block-without-cache path.
+    fn ensure_append(&mut self, plane_n: usize, strip_n: usize) {
         if plane_n > self.append_sized_for {
             self.append_act_x = vec![0.0f32; plane_n];
             self.append_act_b = vec![0.0f32; plane_n];
             self.append_bs2 = std::array::from_fn(|_| vec![0.0f32; plane_n]);
-            self.append_tmp_a = vec![0.0f32; plane_n];
-            self.append_tmp_b = vec![0.0f32; plane_n];
             self.append_sized_for = plane_n;
+        }
+        if strip_n > self.append_tmp_a.len() {
+            self.append_tmp_a = vec![0.0f32; strip_n];
+            self.append_tmp_b = vec![0.0f32; strip_n];
         }
     }
 }
@@ -1512,10 +1518,12 @@ fn fill_ref_moments(
     let bypass_rows = (*h0).min(STRIP_BYPASS_HEIGHT);
     let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P).max(bypass_rows);
     let mut scratch = ScratchV2Strip::new(strip_max_n);
-    // Full-plane temps for the append σ-split's `blur(src²)` fill, reused
-    // across every (channel, scale); only allocated when `with_s2`.
+    // Strip-wide temps for the append σ-split's `blur(src²)` fill (P2:
+    // the fill is kernel-strip-tiled, so the temps no longer need to hold
+    // a full plane), reused across every (channel, scale); only allocated
+    // when `with_s2`.
     let (mut s2_sq, mut s2_stage) = if with_s2 {
-        (vec![0.0f32; w0 * h0], vec![0.0f32; w0 * h0])
+        (vec![0.0f32; strip_max_n], vec![0.0f32; strip_max_n])
     } else {
         (Vec::new(), Vec::new())
     };
@@ -1550,12 +1558,29 @@ fn fill_ref_moments(
         .collect()
 }
 
-/// `out = box_blur_1pass(src²)` over the FULL plane — the reference side
-/// of the append σ-split. One shared implementation for the moments-cache
-/// fill AND the pair path's per-scale replay, which is what makes cached
-/// and replayed `bs2` planes bit-identical by construction (same ops,
-/// same order, same whole-plane blur geometry). `sq_tmp`/`stage_tmp` are
-/// caller-owned full-plane scratch (≥ width·height each).
+/// `out = blur(src²)` — the reference side of the append σ-split — computed
+/// per 128-row KERNEL STRIP with the walk's own `gather_strip_halo`
+/// geometry (streaming pre-chunk P2, 2026-07-26 —
+/// `docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md` §2): per strip, gather
+/// the `HALO_P`-padded wide window, square in place, H-blur + V-blur inside
+/// the wide buffer, copy out the strip's own rows. One shared
+/// implementation for the moments-cache fill AND the pair path's per-scale
+/// replay, which is what keeps cached and replayed `bs2` planes
+/// bit-identical by construction (same ops, same order, same strip
+/// geometry) — and, from C2 on, identical to what the streamed walk
+/// computes per kernel strip from its rolling planes.
+///
+/// The previous form ran ONE whole-plane `box_blur_1pass_into`, whose V
+/// pass carries a single f32 running sum from plane row 0 to the bottom —
+/// an accumulation history no strip walk can reproduce. Re-tiling shifts
+/// `bs2` by f32 ULPs (⇒ ULP-scale shifts on the 5 σ-split append lanes;
+/// no trained consumer exists, pre-sanctioned by
+/// `benchmarks/v2_append_block_2026-07-26.md` "do it BEFORE any corpus
+/// freezes append values"), gives `bs2` the SAME V-accumulation tiling as
+/// the `ssq` plane it is subtracted from (`var₂ = (ssq − bs2) − mu2²` now
+/// subtracts same-rounding-class operands), and drops the two whole-plane
+/// temps to strip-wide size (`sq_tmp`/`stage_tmp` ≥
+/// `width·(STRIP_ROWS + 2·HALO_P)` — was ≥ `width·height`).
 fn compute_ref_s2blur_into(
     src: &[f32],
     width: usize,
@@ -1565,16 +1590,53 @@ fn compute_ref_s2blur_into(
     out: &mut [f32],
 ) {
     let n = width * height;
-    debug_assert!(sq_tmp.len() >= n && stage_tmp.len() >= n && out.len() >= n);
-    square_into(&src[..n], &mut sq_tmp[..n]);
-    crate::blur::box_blur_1pass_into(
-        &sq_tmp[..n],
-        &mut out[..n],
-        &mut stage_tmp[..n],
-        width,
-        height,
-        BLUR_RADIUS,
-    );
+    debug_assert!(out.len() >= n);
+
+    // Mirror the (currently disabled) whole-image bypass dispatch, exactly
+    // like `compute_ref_moments_channel`: below the threshold the kernels
+    // blur the full plane directly, so the cache must too.
+    #[allow(clippy::absurd_extreme_comparisons)]
+    if height <= STRIP_BYPASS_HEIGHT {
+        debug_assert!(sq_tmp.len() >= n && stage_tmp.len() >= n);
+        sq_tmp[..n].copy_from_slice(&src[..n]);
+        square_in_place(&mut sq_tmp[..n]);
+        crate::blur::box_blur_1pass_into(
+            &sq_tmp[..n],
+            &mut out[..n],
+            &mut stage_tmp[..n],
+            width,
+            height,
+            BLUR_RADIUS,
+        );
+        return;
+    }
+
+    let mut y0 = 0usize;
+    while y0 < height {
+        let strip_h = STRIP_ROWS.min(height - y0);
+        let wide_h = strip_h + 2 * HALO_P;
+        let n_wide = width * wide_h;
+        debug_assert!(sq_tmp.len() >= n_wide && stage_tmp.len() >= n_wide);
+        // Gather src's wide window, square it in place, then H+V blur
+        // wholly inside the wide buffer (the V window at strip rows reads
+        // H(sq) rows [strip−R, strip+R) ⊂ the HALO_P(=2R) window, so the
+        // wide buffer's own synthetic edge is never consumed — the same
+        // §A.15 argument the mu2/ssq/s12 chains rest on).
+        gather_strip_halo(src, width, height, y0, wide_h, HALO_P, &mut sq_tmp[..n_wide]);
+        square_in_place(&mut sq_tmp[..n_wide]);
+        crate::blur::box_blur_h(&sq_tmp[..n_wide], &mut stage_tmp[..n_wide], width, wide_h, BLUR_RADIUS);
+        crate::blur::box_blur_v_from_copy(
+            &stage_tmp[..n_wide],
+            &mut sq_tmp[..n_wide],
+            width,
+            wide_h,
+            BLUR_RADIUS,
+        );
+        let off = HALO_P * width;
+        let strip_n = width * strip_h;
+        out[y0 * width..y0 * width + strip_n].copy_from_slice(&sq_tmp[off..off + strip_n]);
+        y0 += strip_h;
+    }
 }
 
 /// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
@@ -3081,11 +3143,11 @@ fn finish_append(
     };
 }
 
-/// `out[i] = input[i]²` — feeds the append σ-split's `blur(dst²)` chain.
-/// Plain scalar loop; LLVM auto-vectorizes the independent multiply.
-fn square_into(input: &[f32], out: &mut [f32]) {
-    for (o, &v) in out.iter_mut().zip(input.iter()) {
-        *o = v * v;
+/// `buf[i] = buf[i]²` — feeds the append σ-split's `blur(src²)` strip
+/// chain. Plain scalar loop; LLVM auto-vectorizes the independent multiply.
+fn square_in_place(buf: &mut [f32]) {
+    for v in buf.iter_mut() {
+        *v = *v * *v;
     }
 }
 
@@ -4757,7 +4819,7 @@ fn compute_v2_features_with_ref_impl_inner(
         .map(|m| !m[0][0].bs2.is_empty())
         .unwrap_or(false);
     if append_on && !(have_s2_cache && prepared.moments.is_some()) {
-        scratch.ensure_append(width * height);
+        scratch.ensure_append(width * height, strip_max_n);
     }
     let V2Scratch {
         strips: scratch,
@@ -6764,9 +6826,9 @@ mod tests {
     /// compute identical-bit operands on both sides); the SSIM/σ-derived
     /// features are tiny-but-nonzero, because on an identity pair `ssq`
     /// accumulates `(s²+d²)` per tap while `s12` accumulates `s·d` —
-    /// `Σ(2a)` vs `2Σ(a)` round differently in f32 — and the append `d2`
-    /// plane comes from a different blur operator
-    /// (`box_blur_1pass_into`) than the fused `ssq` chain, so
+    /// `Σ(2a)` vs `2Σ(a)` round differently in f32 — and the append `bs2`
+    /// plane comes from a different H kernel (`box_blur_h` on `src²`,
+    /// strip-tiled per P2) than the fused `ssq` chain, so
     /// `var₁ ≠ var₂` at the ULP scale. Observed magnitude ~2e-6; the 1e-4
     /// bound is far below any real-signal value while catching sign or
     /// formula errors. `GRAD_SRC_MEAN` is reference-only and genuinely
