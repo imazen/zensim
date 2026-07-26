@@ -70,8 +70,12 @@ def _panel_srocc_plcc(pred, ref):
 
 
 def _composite(rank):
-    """Goal-aware ranking scalar (reuses blend_lib.composite — the owner — when importable,
-    else a transparent documented fallback). rank: {corpus: {srocc,...}} with srocc already
+    """FALLBACK ONLY (pre-2026-07-26 JSONs). The canonical composite is the Rust
+    `product_composite`, emitted as `composite` in the fulleval JSON; `load_fulleval`
+    READS that and only calls this when the field is absent, so there is one source
+    of truth (stats review Rec-7). Goal-aware ranking scalar (reuses blend_lib.composite
+    — the owner — when importable, else a transparent documented fallback). rank:
+    {corpus: {srocc,...}} with srocc already
     polarity-corrected (abs for JND corpora), per the fulleval schema."""
     def g(c):
         v = rank.get(c, {}).get("srocc")
@@ -113,7 +117,19 @@ def load_fulleval(fulleval_dir, best_per_day=None):
     bakes = []
     for ci, o in enumerate(raw):
         rank = o.get("rank", {})
-        comp, reject = _composite(rank)
+        # Prefer the Rust-emitted `composite` (product_composite is the single
+        # source — stats review Rec-7); the dashboard READS it rather than
+        # re-deriving a divergent one. `_composite` stays only as the fallback
+        # for pre-2026-07-26 JSONs that predate the field. The reject gate is a
+        # dashboard concern (CID22<0.84 or nonphoto<0.80), computed either way.
+        emitted = o.get("composite")
+        if emitted is not None:
+            comp = round(float(emitted), 4)
+            cid = rank.get("cid22", {}).get("srocc")
+            nph = rank.get("nonphoto", {}).get("srocc")
+            reject = (cid is None or abs(cid) < 0.84) or (nph is not None and abs(nph) < 0.80)
+        else:
+            comp, reject = _composite(rank)
         scatter_out = {}
         pp = o.get("per_pair", {})
         sc_json = o.get("scatter", {})
@@ -144,6 +160,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "date": o.get("date", ""), "colorIndex": ci,
             "rank": rank, "dial": o.get("dial", {}), "m3": o.get("m3_coherence"),
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
+            "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
             "scatter": scatter_out, "is_stub": bool(o.get("_stub")),
         })
     return bakes
@@ -324,20 +341,30 @@ const COLS=[
   ['dial_mono','dial-mono',false,b=>b.dial.mono_pct],
   ['dial_tied','tied',false,b=>b.dial.tied_pct],
   ['m3','M3-coh',false,b=>b.m3],
+  ['m3_mass','M3 drop%',false,b=>b.m3_dropped_mass],
   ['corr','corr-passq20',false,b=>b.corruption&&b.corruption.pass_q20!=null?b.corruption.pass_q20:null],
+  ['cid22_ci','CID22 95%CI±',false,b=>{const r=b.rank.cid22;return r&&r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;}],
+  ['cid22_bwd','CID22 %bwd',false,b=>{const r=b.rank.cid22;return r&&r.frac_negative!=null?r.frac_negative:null;}],
 ];
 const rs=(b,c)=>{const r=b.rank[c];return r?r.srocc:null;};
 function fmtCell(key,v){
   if(key==='name'||key==='regime')return v;
+  if(key==='cid22_bwd')return v==null?'—':pct(v);
   if(key==='dial_tied')return pct(v);
   if(key==='corr'||key==='dial_mono')return pct(v);
+  if(key==='m3_mass')return v==null?'—':v.toFixed(1)+'%';
+  if(key==='cid22_ci')return v==null?'—':'±'+v.toFixed(3);
   return f3(v);
 }
 function renderTable(){
   const wrap=el('div',{});
   const cap=el('div',{class:'cap',html:'Sortable scoreboard — click a header. SROCC is polarity-corrected '
-    +'(|SROCC| for JND corpora). <b>composite</b> = goal-aware (blend_lib.composite: CID22 + 0.3·nonphoto '
-    +'+ 0.2·KonJND + …). Cells shade by column rank (sequential blue). Greyed row = composite reject-gate.'});
+    +'(|SROCC| for JND corpora). <b>composite</b> = the Rust <code>product_composite</code> (CID22·1.0 + '
+    +'imazen26·0.5 + nonphoto·0.3 + KonJND·0.2 + AIC·0.15; KADID/TID excluded, train==val), READ from the JSON '
+    +'not re-derived. <b>CID22 95%CI±</b> = bootstrap half-width; bakes with overlapping CIs are a statistical '
+    +'TIE, not an ordering. <b>CID22 %bwd</b> = share of reference ladders ranked BACKWARDS (no pooled stat sees '
+    +'it). <b>M3 drop%</b> = f156-371 mass the diffmap cannot spatialize — read a low M3 against it (high drop% '
+    +'= M3 structurally capped, not incoherent). Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80).'});
   const tbl=el('table',{});
   const thead=el('tr',{});
   COLS.forEach(c=>{const th=el('th',{class:(c[0]==='name'||c[0]==='regime'?'lbl':'')
@@ -364,8 +391,9 @@ function renderTable(){
       if(c[0]==='name'){td.textContent='';td.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),document.createTextNode(b.name+(b.is_stub?' ✳':'')));}
       if(c[0]!=='name'&&c[0]!=='regime'&&v!=null&&isFinite(v)){
         const[lo,hi]=ranges[c[0]];let t=hi===lo?.5:(v-lo)/(hi-lo);
-        // invert shading where lower is better
-        if(c[0]==='dial_tied')t=1-t;
+        // invert shading where lower is better (tied dead-zone, CI width,
+        // backwards-ref share, dropped-mass — all "smaller is better")
+        if(c[0]==='dial_tied'||c[0]==='cid22_ci'||c[0]==='cid22_bwd'||c[0]==='m3_mass')t=1-t;
         td.style.background='color-mix(in srgb, var(--seq-hi) '+Math.round(t*62)+'%, var(--surface-1))';
         if(t>.6)td.style.color='#fff';
       }
@@ -442,10 +470,15 @@ function renderHeat(){
   const host=$('#heat');if(!host)return;host.innerHTML='';
   const bs=visBakes();if(!bs.length){return;}
   const corps=DATA.corpOrder.filter(c=>bs.some(b=>b.rank[c]));
+  // train==val corpora (KADID/TID) read from the Rust-emitted flag — mark them so
+  // their SROCC is not read as held-out skill (stats review Rec-6).
+  const TVSET=new Set();
+  DATA.bakes.forEach(b=>Object.entries(b.rank||{}).forEach(([c,r])=>{if(r&&r.train_eq_val)TVSET.add(c);}));
   const cw=62,rh=22,mL=140,mT=52;const W=mL+corps.length*cw+8,Ht=mT+bs.length*rh+8;
   const svg=S('svg',{viewBox:`0 0 ${W} ${Ht}`,width:W,height:Ht});
   corps.forEach((c,j)=>svg.append(S('text',{x:mL+j*cw+cw/2,y:mT-6,'text-anchor':'end','font-size':9.5,
-    fill:cssv('--text-secondary'),transform:`rotate(-32 ${mL+j*cw+cw/2} ${mT-6})`,text:c})));
+    fill:TVSET.has(c)?cssv('--warn'):cssv('--text-secondary'),transform:`rotate(-32 ${mL+j*cw+cw/2} ${mT-6})`,
+    text:TVSET.has(c)?c+' ⚠':c})));
   bs.forEach((b,i)=>{
     svg.append(S('text',{x:mL-6,y:mT+i*rh+rh/2+3,'text-anchor':'end','font-size':10,fill:cssv('--text-primary'),text:b.name}));
     svg.append(S('rect',{x:mL-16,y:mT+i*rh+rh/2-5,width:10,height:10,rx:2,fill:color(b)}));
@@ -463,7 +496,8 @@ function renderHeat(){
     });
   });
   host.append(el('h2',{text:'Cross-corpus SROCC'}),
-    el('div',{class:'cap',text:'Bake × corpus, SROCC (|SROCC| for JND corpora). Sequential blue: darker = higher.'}),svg);
+    el('div',{class:'cap',html:'Bake × corpus, SROCC (|SROCC| for JND corpora). Sequential blue: darker = higher. '
+      +'<b>⚠</b> (amber header) = KADID/TID, train==val — SROCC rewards memorization, not held-out generalization.'}),svg);
 }
 
 // ---- operating-point trade map: CID22 vs nonphoto and vs KonJND (labeled points)
