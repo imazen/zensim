@@ -264,6 +264,8 @@ fn run_bake_mode(
     let base = z
         .compute_extended_features(&rs, &RgbSlice::new(dpx, w, h))
         .expect("base features");
+    // `mut` used only by the v2 concat below (feature-regime-v2 / >372 bake).
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
     let mut base_feats = base.features().to_vec();
     // Combined append-only bakes (n_in > 372 = frozen v1-372 ++ v2) need the
     // v2 block concatenated — same dual-compute the extended extractor does.
@@ -370,6 +372,9 @@ fn run_bake_mode(
         .to_vec();
     // s_k over the basic block only — the per-pixel machinery spatializes f0..155.
     let s_basic: &'static [f64] = Box::leak(s[..n_in.min(156)].to_vec().into_boxed_slice());
+    // `mut` is used only by the v2 fold below (a >372 combined bake). Without
+    // `feature-regime-v2` that fold is compiled out and the binding stays immutable.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
     let mut diff_model = z_map
         .compute_with_diffmap(
             &rs,
@@ -383,6 +388,15 @@ fn run_bake_mode(
     // task #48: for a v1++v2 bake, add the v2 block's per-pixel contribution
     // (its gradient s[372..] folded through the additive v2 families) to the
     // v1 model-sensitivity map — the deployed map now reads v2.
+    //
+    // `compute_v2_diffmap` (and `compute_v2_features` above) are gated behind
+    // `feature-regime-v2` — the impl reads the v2 family bank that only exists in
+    // that regime. The sibling `compute_v2_features` calls are already cfg-gated;
+    // this consumer was NOT, so `--features custom-profiles` alone failed to build
+    // (E0599: method not found). It is only reachable for a >372 bake, which cannot
+    // occur without the regime anyway (the `base_feats.len() >= n_in` assert above
+    // fires first when the v2 block is absent), so gating it is sound.
+    #[cfg(feature = "feature-regime-v2")]
     if let Some(v2g) = &v2_grad {
         let v2map = z_map
             .compute_v2_diffmap(&rs, &dist_slice, v2g)
@@ -392,6 +406,10 @@ fn run_bake_mode(
             *m += *v;
         }
     }
+    // Without `feature-regime-v2` the fold is compiled out; `v2_grad` is then only
+    // read for its diagnostic prints (built above), so acknowledge it here.
+    #[cfg(not(feature = "feature-regime-v2"))]
+    let _ = &v2_grad;
 
     let bx = w.div_ceil(block);
     let by = h.div_ceil(block);
@@ -416,6 +434,8 @@ fn run_bake_mode(
             let rr = z
                 .compute_extended_features(&rs, &RgbSlice::new(&scratch, w, h))
                 .expect("refined features");
+            // `mut` used only by the v2 concat below (feature-regime-v2).
+            #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
             let mut rfeats = rr.features().to_vec();
             // Concat the refined v2 block for a >372 combined bake — same dual-
             // compute as base_feats, so `score`/`s_k` see the full n_in vector.

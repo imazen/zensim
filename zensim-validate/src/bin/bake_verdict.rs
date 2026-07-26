@@ -269,6 +269,20 @@ const DEFAULT_DIAL_GRID_720: &str =
     "/mnt/v/output/zensim/v2-eval-720-2026-07-22/dial_grid_720col_2026-07-22.parquet";
 const DEFAULT_CORRUPTION_GRID_720: &str =
     "/mnt/v/output/zensim/v2-eval-720-2026-07-22/corruption_grid_720col_2026-07-22.parquet";
+/// Default multi-metric per-pair source for `--full-json`: the KADIS-720 metric
+/// parquet carries `f0..f719` plus `score_{ssim2,butteraugli_max,cvvdp,...}` per
+/// cell, so a bake's `(prediction, {ssim2, butter, cvvdp})` scatter can be
+/// sampled from it. A <=372-input bake scores over its first `n_inputs`
+/// features, so this source works in both regimes.
+const DEFAULT_PERPAIR_METRICS: &str =
+    "/mnt/v/zen/zensim-training/kadis-720-2026-07-24/kadis700k_720.parquet";
+/// Metric columns requested from the per-pair source (a superset — only those
+/// present are emitted). Mapped to the schema keys ssim2 / butter / cvvdp.
+const PERPAIR_METRIC_COLS: &[(&str, &str)] = &[
+    ("score_ssim2_gpu", "ssim2"),
+    ("score_butteraugli_max_gpu", "butter"),
+    ("score_cvvdp_cpu_imazen_v0_1_0", "cvvdp"),
+];
 
 const CORPORA: &[Corpus] = &[
     Corpus {
@@ -476,6 +490,20 @@ struct Args {
     /// canonical grid; the section auto-runs when the file is present and
     /// the feature count matches the bake, else skips silently.
     corruption_grid: PathBuf,
+    /// `--full-json <path>`: the unified "full-eval" JSON consumed by
+    /// `scripts/run_full_eval.sh` + the summer-gauntlet dashboard. Richer than
+    /// `--json` (which stays a stable per-corpus panel): rank map + dial
+    /// (mono/tied/reach/dynamic_range) + corruption + a sampled multi-metric
+    /// `per_pair` block. `m3_coherence` is left null for the wrapper to inject.
+    full_json: Option<PathBuf>,
+    /// Human-readable model name embedded in `--full-json` (else the bake stem).
+    name: Option<String>,
+    /// Multi-metric per-pair source for `--full-json` (default [`DEFAULT_PERPAIR_METRICS`]).
+    /// Provides the ssim2 / butter / cvvdp scatter. Set to a non-existent path
+    /// to skip the metric per-pair block.
+    perpair_metrics: PathBuf,
+    /// Max rows sampled per corpus for the `per_pair` block (default 5000).
+    perpair_cap: usize,
 }
 
 fn print_usage() {
@@ -507,6 +535,10 @@ fn parse_args() -> Result<Args, String> {
     let mut per_pair_output: Option<PathBuf> = None;
     let mut html: Option<PathBuf> = None;
     let mut json: Option<PathBuf> = None;
+    let mut full_json: Option<PathBuf> = None;
+    let mut name: Option<String> = None;
+    let mut perpair_metrics: PathBuf = PathBuf::from(DEFAULT_PERPAIR_METRICS);
+    let mut perpair_cap: usize = 5000;
     let mut ramp_grid: Option<PathBuf> = None;
     let mut compare: Option<PathBuf> = None;
     let mut corruption_grid: PathBuf = std::env::var("ZENSIM_CORRUPTION_GRID")
@@ -572,6 +604,24 @@ fn parse_args() -> Result<Args, String> {
                 let v = args.next().ok_or("--json requires <path>")?;
                 json = Some(PathBuf::from(v));
             }
+            "--full-json" => {
+                let v = args.next().ok_or("--full-json requires <path>")?;
+                full_json = Some(PathBuf::from(v));
+            }
+            "--name" => {
+                let v = args.next().ok_or("--name requires <string>")?;
+                name = Some(v);
+            }
+            "--perpair-metrics" => {
+                let v = args.next().ok_or("--perpair-metrics requires <path>")?;
+                perpair_metrics = PathBuf::from(v);
+            }
+            "--perpair-cap" => {
+                let v = args.next().ok_or("--perpair-cap requires <n>")?;
+                perpair_cap = v
+                    .parse()
+                    .map_err(|e| format!("--perpair-cap must be an integer: {e}"))?;
+            }
             "--ramp-grid" => {
                 let v = args.next().ok_or("--ramp-grid requires <path>")?;
                 ramp_grid = Some(PathBuf::from(v));
@@ -632,6 +682,10 @@ fn parse_args() -> Result<Args, String> {
         ramp_grid,
         compare,
         corruption_grid,
+        full_json,
+        name,
+        perpair_metrics,
+        perpair_cap,
     })
 }
 
@@ -681,6 +735,13 @@ struct CorpusResult {
     ds_auc: f64,
     /// Logistic-rescaled scores in [0,100] dial space (for G1 range check).
     rescaled_scores: Vec<f64>,
+    /// Corpus key (lowercase, e.g. "cid22") for `--full-json` keying and the
+    /// mos-vs-jnd per_pair classification.
+    name: &'static str,
+    /// Human target per pair, aligned 1:1 with `rescaled_scores` — the y-axis
+    /// of the `--full-json` per_pair scatter (mos for MOS corpora, jnd for the
+    /// JND corpora).
+    humans: Vec<f64>,
     /// Per-reference SROCC summary, when the corpus carries ref identity.
     per_ref: Option<PerGroupSrocc>,
     body: String,
@@ -741,6 +802,10 @@ struct DialMetrics {
     p95: f64,
     /// Flat/clamp dead-zone rate (informational).
     flat: f64,
+    /// Full representable dial reach across the codec grid = pooled max − min
+    /// (the G4 "cross-codec reach"). `--full-json`'s `dynamic_range` is the
+    /// robust p95 − p5; `reach` is the total span (outliers included).
+    reach: f64,
 }
 impl DialMetrics {
     const NAN: Self = Self {
@@ -748,6 +813,7 @@ impl DialMetrics {
         p5: f64::NAN,
         p95: f64::NAN,
         flat: f64::NAN,
+        reach: f64::NAN,
     };
 }
 
@@ -1036,6 +1102,12 @@ fn dial_panel(
     } else {
         (percentile(&pooled, 5.0), percentile(&pooled, 95.0))
     };
+    // Full cross-codec reach = pooled max − min (sorted above).
+    let reach = if pooled.is_empty() {
+        f64::NAN
+    } else {
+        pooled[pooled.len() - 1] - pooled[0]
+    };
     let g1 = soft_gate(p5, 50.0, 25.0).min(soft_gate(p95, 50.0, 85.0));
     let g3 = soft_gate(mono, 0.90, 0.93).min(soft_gate(flat, 0.10, 0.05));
 
@@ -1155,6 +1227,7 @@ fn dial_panel(
             p5,
             p95,
             flat,
+            reach,
         },
     )
 }
@@ -1371,6 +1444,8 @@ read on this corpus._\n",
         z_rmse: z,
         ds_auc: ds,
         rescaled_scores: scores.clone(),
+        name: corpus.name,
+        humans: humans.clone(),
         per_ref,
         body,
     })
@@ -1918,6 +1993,8 @@ Run the dedicated q-sweep harness for those._\n",
     }
 
     // ── Corruption gate (negative-tail ranking) — auto when grid present ──
+    // Hoisted out of the block so `--full-json` can carry the gate result.
+    let mut corruption_stats: Option<eval_report::CorruptionStats> = None;
     if args.corruption_grid.exists() {
         match parquet_loader::load_labeled_grid(&args.corruption_grid) {
             Ok(grid) if grid.n_features == n_inputs => {
@@ -1927,6 +2004,7 @@ Run the dedicated q-sweep harness for those._\n",
                     &stats,
                     &args.corruption_grid.display().to_string(),
                 ));
+                corruption_stats = Some(stats);
             }
             Ok(grid) => {
                 buf.push_str(&format!(
@@ -2054,6 +2132,163 @@ Run the dedicated q-sweep harness for those._\n",
             }
             Err(e) => {
                 eprintln!("bake_verdict: json serialize failed: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+
+    // ── Unified "full-eval" JSON (scripts/run_full_eval.sh + dashboard) ──────
+    // A superset of `--json`: rank as a map keyed by corpus, dial with
+    // mono/tied/reach/dynamic_range, the corruption gate, and a sampled
+    // multi-metric `per_pair` block for the scatter panels. `m3_coherence` is
+    // left null — the wrapper computes it (diffmap_block_coherence) and injects
+    // it, so this binary stays free of image I/O.
+    if let Some(json_path) = &args.full_json {
+        use serde_json::{Map, Value, json};
+        // Even-stride down to `cap` indices across [0,len) — keeps the scatter
+        // spread across the corpus rather than truncating to a prefix.
+        let stride = |len: usize, cap: usize| -> Vec<usize> {
+            if cap == 0 || len <= cap {
+                (0..len).collect()
+            } else {
+                (0..cap).map(|k| k * len / cap).collect()
+            }
+        };
+        let bake_sha = zensim_validate::train_manifest::sha256_file(&args.bake).unwrap_or_default();
+        let name = args.name.clone().unwrap_or_else(|| {
+            args.bake
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("bake")
+                .to_string()
+        });
+        let regime = if args.regime_720 { "720" } else { "372" };
+
+        // rank: { "<corpus>": {n, srocc, plcc, krocc, or, pwrc, z_rmse} }
+        let mut rank = Map::new();
+        for r in &results {
+            rank.insert(
+                r.name.to_string(),
+                json!({
+                    "n": r.n,
+                    "srocc": r.srocc,
+                    "plcc": r.plcc,
+                    "krocc": r.krocc,
+                    "or": r.or_ratio,
+                    "pwrc": r.pwrc,
+                    "z_rmse": r.z_rmse,
+                }),
+            );
+        }
+
+        // dial: mono/tied/reach/dynamic_range (+ raw p5/p95 for context).
+        let dynamic_range = dial_metrics.p95 - dial_metrics.p5;
+        let dial = json!({
+            "mono_pct": dial_metrics.mono,
+            "tied_pct": dial_metrics.flat,
+            "reach": dial_metrics.reach,
+            "dynamic_range": dynamic_range,
+            "p5": dial_metrics.p5,
+            "p95": dial_metrics.p95,
+        });
+
+        // corruption: the real bake_verdict gate (score(corruption) < score(q20)
+        // pass-rate) — not a detection/false-positive ROC. null when no grid.
+        let corruption = match &corruption_stats {
+            Some(cs) => json!({
+                "n_triples": cs.n_triples,
+                "pass_q20": cs.pass_q20,
+                "pass_q10": cs.pass_q10,
+                "per_family": cs.per_family.iter().map(|(fam, rate, n)| json!({
+                    "family": fam, "pass_rate": rate, "n": n,
+                })).collect::<Vec<_>>(),
+            }),
+            None => Value::Null,
+        };
+
+        // per_pair: {corpus: {pred, <mos|jnd>}} for the rank corpora + a
+        // {kadis: {pred, ssim2, butter, cvvdp}} block from the metric parquet.
+        let jnd_prefixes = ["aic3", "aic4", "konjnd"];
+        let mut per_pair = Map::new();
+        for r in &results {
+            let idx = stride(r.rescaled_scores.len(), args.perpair_cap);
+            let pred: Vec<f64> = idx.iter().map(|&i| r.rescaled_scores[i]).collect();
+            let tgt: Vec<f64> = idx.iter().map(|&i| r.humans[i]).collect();
+            let key = if jnd_prefixes.iter().any(|j| r.name.starts_with(j)) {
+                "jnd"
+            } else {
+                "mos"
+            };
+            per_pair.insert(r.name.to_string(), json!({ "pred": pred, key: tgt }));
+        }
+        // KADIS multi-metric per_pair. Read a bounded window (≤40k rows) then
+        // stride to the cap for source diversity; score the bake's first
+        // n_inputs features (the frozen v1 block for a 372 bake).
+        if args.perpair_metrics.exists() {
+            let read_cap = args
+                .perpair_cap
+                .saturating_mul(8)
+                .clamp(args.perpair_cap, 40_000);
+            let cols: Vec<&str> = PERPAIR_METRIC_COLS.iter().map(|(c, _)| *c).collect();
+            match parquet_loader::load_perpair_sample(&args.perpair_metrics, &cols, read_cap) {
+                Ok(sample) if sample.n_features >= n_inputs => {
+                    let idx = stride(sample.feature_rows.len(), args.perpair_cap);
+                    let rows: Vec<Vec<f64>> = idx
+                        .iter()
+                        .map(|&i| sample.feature_rows[i][..n_inputs].to_vec())
+                        .collect();
+                    let pred = score_grid(&model, has_transforms, n_inputs, &rows);
+                    let mut obj = Map::new();
+                    obj.insert("pred".into(), json!(pred));
+                    for (col, key) in PERPAIR_METRIC_COLS {
+                        if let Some((_, vals)) = sample.metrics.iter().find(|(n, _)| n == col) {
+                            let s: Vec<f64> = idx.iter().map(|&i| vals[i]).collect();
+                            obj.insert((*key).to_string(), json!(s));
+                        }
+                    }
+                    per_pair.insert("kadis".to_string(), Value::Object(obj));
+                }
+                Ok(sample) => eprintln!(
+                    "bake_verdict --full-json: perpair-metrics has {} features, bake needs {} — skipping kadis per_pair",
+                    sample.n_features, n_inputs
+                ),
+                Err(e) => {
+                    eprintln!("bake_verdict --full-json: perpair-metrics load failed: {e}")
+                }
+            }
+        } else {
+            eprintln!(
+                "bake_verdict --full-json: perpair-metrics {} absent — no ssim2/butter/cvvdp scatter",
+                args.perpair_metrics.display()
+            );
+        }
+
+        let full = json!({
+            "bake": args.bake.display().to_string(),
+            "bake_sha256": bake_sha,
+            "name": name,
+            "regime": regime,
+            "n_inputs": n_inputs,
+            // Injected by run_full_eval.sh from diffmap_block_coherence --bake.
+            "m3_coherence": Value::Null,
+            "rank": rank,
+            "dial": dial,
+            "corruption": corruption,
+            "per_pair": per_pair,
+        });
+        if let Some(parent) = json_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match serde_json::to_string_pretty(&full) {
+            Ok(s) => {
+                if let Err(e) = std::fs::write(json_path, s) {
+                    eprintln!("bake_verdict: failed to write {}: {e}", json_path.display());
+                    return ExitCode::from(1);
+                }
+                eprintln!("wrote full-eval json to {}", json_path.display());
+            }
+            Err(e) => {
+                eprintln!("bake_verdict: full-json serialize failed: {e}");
                 return ExitCode::from(1);
             }
         }

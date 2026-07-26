@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use arrow::array::{
     Array, Float32Array, Float64Array, Int32Array, Int64Array, LargeStringArray, StringArray,
@@ -1131,5 +1131,191 @@ pub fn load_konjnd_aggregation_pool(
         ref_ranges,
         ref_pjnd_target,
         ref_weight,
+    })
+}
+
+/// A row-capped, multi-metric sample for per-pair scatter/diagnostic use.
+///
+/// Unlike [`load_parquet`] (one `target_column`, ALL rows), this reads the
+/// feature block plus any of `metric_columns` that are present, stopping once
+/// `max_rows` rows are collected. It exists so a per-pair panel can sample a
+/// bake's `(prediction, {ssim2, butteraugli, cvvdp, ...})` scatter from a
+/// multi-gigabyte metric parquet (e.g. the 2.7 GB KADIS-720
+/// `kadis700k_720.parquet`) without materializing the whole file — the reader
+/// projects only the requested columns and short-circuits at `max_rows`.
+///
+/// Absent metric columns are silently skipped (they appear in
+/// [`PerPairSample::metrics`] only when present), so a caller may request a
+/// superset and use whatever the file carries.
+pub struct PerPairSample {
+    pub feature_rows: Vec<Vec<f64>>,
+    pub n_features: usize,
+    /// `(column_name, values)` for each requested metric column that existed,
+    /// aligned 1:1 (by row) with `feature_rows`. Order follows `metric_columns`.
+    pub metrics: Vec<(String, Vec<f64>)>,
+}
+
+/// Widen any supported numeric Arrow column to `Vec<f64>` (first `n_rows`).
+/// Feature and metric columns are always numeric; ints are widened silently
+/// (some extractors emit count-style features as integers).
+fn numeric_col_to_f64(path: &Path, col: &dyn Array, n_rows: usize) -> Result<Vec<f64>, String> {
+    Ok(match col.data_type() {
+        DataType::Float64 => {
+            let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+            (0..n_rows).map(|i| a.value(i)).collect()
+        }
+        DataType::Float32 => {
+            let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+            (0..n_rows).map(|i| a.value(i) as f64).collect()
+        }
+        DataType::Int64 => {
+            let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+            (0..n_rows).map(|i| a.value(i) as f64).collect()
+        }
+        DataType::Int32 => {
+            let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+            (0..n_rows).map(|i| a.value(i) as f64).collect()
+        }
+        DataType::UInt64 => {
+            let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+            (0..n_rows).map(|i| a.value(i) as f64).collect()
+        }
+        DataType::UInt32 => {
+            let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+            (0..n_rows).map(|i| a.value(i) as f64).collect()
+        }
+        other => {
+            return Err(format!(
+                "{path:?}: numeric column has unsupported dtype {other:?} (need Float32/Float64/Int32/Int64/UInt32/UInt64)"
+            ));
+        }
+    })
+}
+
+/// See [`PerPairSample`]. `metric_columns` is a superset request; only present
+/// columns are returned. Reads at most `max_rows` rows (the first `max_rows` in
+/// file order).
+pub fn load_perpair_sample(
+    path: &Path,
+    metric_columns: &[&str],
+    max_rows: usize,
+) -> Result<PerPairSample, String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let schema = builder.schema().clone();
+    let parquet_schema = builder.parquet_schema().clone();
+    let arrow_fields = schema.fields();
+    let n_arrow_cols = arrow_fields.len();
+
+    // Feature block: `f<i>` or `feat_<i>`, consecutive from index 0 (same scan
+    // as `load_parquet`, so `n_features` matches).
+    let (prefix, f0_arrow_idx) = ["f", "feat_"]
+        .iter()
+        .find_map(|p| {
+            arrow_fields
+                .iter()
+                .position(|f| f.name() == &format!("{p}0"))
+                .map(|i| (*p, i))
+        })
+        .ok_or_else(|| format!("{path:?}: missing f0 / feat_0 column"))?;
+    let mut n_features = 0usize;
+    while f0_arrow_idx + n_features < n_arrow_cols {
+        let expected = format!("{prefix}{n_features}");
+        if arrow_fields[f0_arrow_idx + n_features].name() != &expected {
+            break;
+        }
+        n_features += 1;
+    }
+    if n_features == 0 {
+        return Err(format!("{path:?}: no {prefix}N columns found"));
+    }
+
+    // Metric columns actually present, preserving request order.
+    let present_metrics: Vec<(String, usize)> = metric_columns
+        .iter()
+        .filter_map(|name| {
+            arrow_fields
+                .iter()
+                .position(|f| f.name() == name)
+                .map(|i| (name.to_string(), i))
+        })
+        .collect();
+
+    // Projection = features ++ present metric columns.
+    let mut wanted: Vec<usize> = Vec::with_capacity(n_features + present_metrics.len());
+    for i in 0..n_features {
+        wanted.push(f0_arrow_idx + i);
+    }
+    for (_, i) in &present_metrics {
+        wanted.push(*i);
+    }
+    let mask = ProjectionMask::leaves(&parquet_schema, wanted.iter().copied());
+
+    let reader = builder
+        .with_projection(mask)
+        .with_batch_size(16384)
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
+
+    // Projection emits columns in ascending original-index order; map each
+    // wanted column to its post-projection position.
+    let mut sorted_wanted = wanted.clone();
+    sorted_wanted.sort_unstable();
+    let pos = |orig: usize| {
+        sorted_wanted
+            .iter()
+            .position(|&p| p == orig)
+            .expect("wanted idx must be in projection")
+    };
+    let proj_feature_indices: Vec<usize> = (0..n_features).map(|i| pos(f0_arrow_idx + i)).collect();
+    let proj_metric_indices: Vec<usize> = present_metrics.iter().map(|(_, i)| pos(*i)).collect();
+
+    let mut feature_rows: Vec<Vec<f64>> = Vec::new();
+    let mut metric_vals: Vec<Vec<f64>> = vec![Vec::new(); present_metrics.len()];
+
+    for batch_res in reader {
+        if feature_rows.len() >= max_rows {
+            break;
+        }
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let full_rows = batch.num_rows();
+        if full_rows == 0 {
+            continue;
+        }
+        // Cap the final batch so the total never exceeds `max_rows`.
+        let n_rows = full_rows.min(max_rows - feature_rows.len());
+
+        // Features → per-column f64, then transpose to row-major.
+        let mut per_col: Vec<Vec<f64>> = Vec::with_capacity(n_features);
+        for &pi in &proj_feature_indices {
+            per_col.push(numeric_col_to_f64(path, batch.column(pi).as_ref(), n_rows)?);
+        }
+        for row_i in 0..n_rows {
+            let mut row = Vec::with_capacity(n_features);
+            for col in &per_col {
+                row.push(col[row_i]);
+            }
+            feature_rows.push(row);
+        }
+        // Metric columns.
+        for (mi, &pi) in proj_metric_indices.iter().enumerate() {
+            let v = numeric_col_to_f64(path, batch.column(pi).as_ref(), n_rows)?;
+            metric_vals[mi].extend(v);
+        }
+    }
+
+    if feature_rows.is_empty() {
+        return Err(format!("{path:?}: empty file / no rows"));
+    }
+    let metrics = present_metrics
+        .into_iter()
+        .map(|(name, _)| name)
+        .zip(metric_vals)
+        .collect();
+    Ok(PerPairSample {
+        feature_rows,
+        n_features,
+        metrics,
     })
 }
