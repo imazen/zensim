@@ -235,3 +235,23 @@ Untested and the right next step: KADIS + **bigcodec** + the MLP recipe on the *
 feature set (Ebothg's power came from bigcodec + MLP, which I never combined with the coherent
 regime + KADIS). Dashboard `p1kadis_dashboard.html` used the weak `ebothg_m504` (CID22 0.30) —
 regen with `Ebothg_scr0.5_dial` as the real baseline.
+
+### E-K5 — coherent MLP + bigcodec + KADIS (foldable) — **the tension is bridgeable**
+The right test (Ebothg's ingredients on the coherent regime): `zensim_mlp_train` seed 13, 120ep,
+foldable groups (safesyn/cid201/kadid/tid, iw/masked zeroed) + **foldable bigcodec** (tbig_720
+non-foldable-zeroed, 200k) + **foldable KADIS** (50k) + Ebothg's 8 winsor transforms.
+Bake `bakes/p1kadis/foldmlp_bigcodec_kadis_720.bin`.
+
+| corpus | foldcanon+KADIS | **foldMLP+bigcodec+KADIS** | Ebothg (non-coherent) |
+|---|--:|--:|--:|
+| CID22 | 0.815 | **0.8713** | 0.879 |
+| KonJND | 0.158 | 0.285 | 0.411 |
+| CSIQ | 0.931 | 0.863 | 0.958 |
+| LIVE | 0.941 | 0.838 | 0.959 |
+| imazen26_rc | 0.854 | 0.898 | 0.922 |
+
+**CID22 0.871 in the diffmap-coherent regime — within 0.008 of the non-coherent ship model.**
+Dropping iw/masked does NOT cap CID22 at 0.80; bigcodec+MLP+KADIS nearly closes the gap. KonJND
+still trails (iw/masked carry real near-threshold signal). ⚠ single-seed (needs multi-seed);
+MLP M3 coherence UNMEASURED (nonlinearity — the full eval measures it). This is the ship-candidate
+direction: near-best human-MOS AND diffmap-coherent.
