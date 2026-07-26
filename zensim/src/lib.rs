@@ -255,6 +255,11 @@ pub mod xyb_lms_features;
 #[cfg(feature = "feature-regime-v2")]
 pub mod feature_v2;
 
+// Streaming strip-plane producer for the folded-720+append walk
+// (docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) mod feature_v2_stream;
+
 // --- Primary API ---
 pub use error::ZensimError;
 pub use metric::{

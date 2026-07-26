@@ -1016,13 +1016,41 @@ pub(crate) fn convert_source_to_xyb_into(
     source: &impl ImageSource,
     planes: &mut [Vec<f32>; 3],
     padded_width: usize,
+    parallel: bool,
+) {
+    let [ref mut p0, ref mut p1, ref mut p2] = *planes;
+    convert_source_to_xyb_into_slices(source, p0, p1, p2, padded_width, parallel, 0);
+}
+
+/// Slice-target core of [`convert_source_to_xyb_into`]: writes the XYB
+/// planes of ALL of `source`'s rows into three caller-provided plane
+/// slices (each ≥ `padded_width * source.height()` elements).
+///
+/// `abs_row_offset` is added to the row index passed to the ALPHA
+/// noise-background compositors (`composite_*`'s `y` — see
+/// [`crate::color::composite_srgb8_rgba_to_linear`]'s
+/// `alpha_background_linear(x, y)` hash): when `source` is a
+/// [`crate::source::SubsetView`] starting at parent row `r0`, passing
+/// `abs_row_offset = r0` keeps the deterministic noise background in the
+/// PARENT image's phase, so a strip-by-strip conversion of a translucent
+/// image is bit-identical to converting the whole image at once. Opaque
+/// sources never consult it. (The v1 streaming-strip path predates this
+/// parameter and passes 0 — its subset conversions keep their historical
+/// subset-local phase.)
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn convert_source_to_xyb_into_slices(
+    source: &impl ImageSource,
+    p0: &mut [f32],
+    p1: &mut [f32],
+    p2: &mut [f32],
+    padded_width: usize,
     #[allow(unused_variables)] parallel: bool,
+    abs_row_offset: usize,
 ) {
     let width = source.width();
     let height = source.height();
 
     let chunk_rows = 64;
-    let [ref mut p0, ref mut p1, ref mut p2] = *planes;
     let p0_chunks: Vec<&mut [f32]> = p0.chunks_mut(chunk_rows * padded_width).collect();
     let p1_chunks: Vec<&mut [f32]> = p1.chunks_mut(chunk_rows * padded_width).collect();
     let p2_chunks: Vec<&mut [f32]> = p2.chunks_mut(chunk_rows * padded_width).collect();
@@ -1139,7 +1167,7 @@ pub(crate) fn convert_source_to_xyb_into(
                             } else {
                                 composite_srgb8_rgba_to_linear(
                                     &rgba_row[..width],
-                                    y,
+                                    abs_row_offset + y,
                                     &mut linear_row,
                                 );
                             }
@@ -1191,7 +1219,7 @@ pub(crate) fn convert_source_to_xyb_into(
                             } else {
                                 composite_srgb8_bgra_to_linear(
                                     &bgra_row[..width],
-                                    y,
+                                    abs_row_offset + y,
                                     &mut linear_row,
                                 );
                             }
@@ -1228,7 +1256,7 @@ pub(crate) fn convert_source_to_xyb_into(
                                 ];
                             }
                         } else {
-                            composite_srgb16_rgba_to_linear(row_bytes, width, y, &mut linear_row);
+                            composite_srgb16_rgba_to_linear(row_bytes, width, abs_row_offset + y, &mut linear_row);
                         }
                         if need_gamut {
                             gamut_convert_row(&mut linear_row[..width], primaries);
@@ -1272,7 +1300,7 @@ pub(crate) fn convert_source_to_xyb_into(
                                     *pixel = [r, g, b];
                                 }
                             } else {
-                                composite_linear_f32_rgba(&rgba_row[..width], y, &mut linear_row);
+                                composite_linear_f32_rgba(&rgba_row[..width], abs_row_offset + y, &mut linear_row);
                             }
                             if need_gamut {
                                 gamut_convert_row(&mut linear_row[..width], primaries);

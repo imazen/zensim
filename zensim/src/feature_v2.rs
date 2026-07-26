@@ -359,7 +359,7 @@ pub const C_GCONTRAST: f64 = 1e-4;
 pub const C_GRADM: f64 = 0.02;
 
 /// Box blur radius at scale 0 — matches v1's `ZensimConfig::default()`.
-const BLUR_RADIUS: usize = 5;
+pub(crate) const BLUR_RADIUS: usize = 5;
 /// Oriented-blockiness lattice period (JPEG's 8x8 MCU grid).
 const BLOCK_LATTICE: usize = 8;
 
@@ -381,7 +381,7 @@ const BLOCK_LATTICE: usize = 8;
 /// (candidates measured: see the spec doc). Not a public knob — phase-5's
 /// scope is proving/falsifying the bandwidth hypothesis, not exposing a
 /// user-facing tuning parameter.
-const STRIP_ROWS: usize = 128;
+pub(crate) const STRIP_ROWS: usize = 128;
 
 /// Half-halo (rows of REAL context loaded beyond the strip on each side).
 /// Sized so the existing (UNMODIFIED) `box_blur_v_from_copy`'s own
@@ -395,7 +395,7 @@ const STRIP_ROWS: usize = 128;
 /// every window inside `[0, strip_h + 2*HALO_P)` without ever touching
 /// the wide-buffer's own synthetic edge (which would apply the WRONG
 /// reflection -- the buffer isn't the true image).
-const HALO_P: usize = 2 * BLUR_RADIUS;
+pub(crate) const HALO_P: usize = 2 * BLUR_RADIUS;
 
 /// Mirror-without-repeating-edge boundary reflection ("reflect_101" /
 /// whole-sample-symmetric convention: `-1 -> 1`, `-2 -> 2`, `height ->
@@ -409,7 +409,7 @@ const HALO_P: usize = 2 * BLUR_RADIUS;
 /// this exact mirror (strips touching the true top/bottom edge) — never
 /// synthetic/zero-padding.
 #[inline]
-fn reflect_101(y: isize, height: usize) -> usize {
+pub(crate) fn reflect_101(y: isize, height: usize) -> usize {
     if height <= 1 {
         return 0;
     }
@@ -428,7 +428,7 @@ fn reflect_101(y: isize, height: usize) -> usize {
 /// For `i` such that the mapped global row is in-bounds (the common case
 /// for interior strips and the strip's own core rows), this is an exact,
 /// unreflected copy — `reflect_101` is the identity on `[0, height_full)`.
-fn gather_strip_halo(
+pub(crate) fn gather_strip_halo(
     src_full: &[f32],
     width: usize,
     height_full: usize,
