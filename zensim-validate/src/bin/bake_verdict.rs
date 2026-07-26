@@ -824,6 +824,38 @@ fn bootstrap_srocc_ci(scores: &[f64], humans: &[f64]) -> (f64, f64) {
     (pct(0.025), pct(0.975))
 }
 
+/// Canonical PRODUCT-WEIGHTED ranking composite over the per-corpus results —
+/// the single "which bake ranks best for the product?" number. Called by BOTH
+/// the scorecard and the `--full-json` writer, and the dashboard READS the
+/// emitted value rather than re-deriving one, so there is exactly one formula
+/// (the 2026-07-26 review found two composites that could disagree). Weights
+/// center the product axes (CID22 gold MOS + imazen26 real-codec ssim2 +
+/// non-photo) over held-out human JND; **KADID/TID are excluded** (train==val
+/// memorization). |SROCC| per corpus; a corpus absent from the run drops from
+/// both numerator and denominator. Matched byte-for-byte in `gauntlet.py`'s
+/// fallback only — the primary path reads this value from the JSON.
+fn product_composite(results: &[CorpusResult]) -> f64 {
+    let term = |sub: &str, w: f64| -> Option<(f64, f64)> {
+        results
+            .iter()
+            .find(|r| r.display.contains(sub))
+            .map(|r| (w * r.srocc, w))
+    };
+    let terms = [
+        term("CID22", 1.00),
+        term("real-codec", 0.50),
+        term("non-photo", 0.30),
+        term("KonJND", 0.20),
+        term("AIC-3", 0.10),
+        term("AIC-4", 0.05),
+    ];
+    let (num, den) = terms
+        .iter()
+        .flatten()
+        .fold((0.0f64, 0.0f64), |(n, d), (x, y)| (n + x, d + y));
+    if den > 0.0 { num / den } else { f64::NAN }
+}
+
 fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, f64, f64) {
     // Canonical 6-stat panel comes from `compute_panel` (re-exported
     // from `zenstats::panel` via `zensim_validate::panel`). Pre-2026-05-26
@@ -1922,6 +1954,24 @@ a memorization number — not held-out generalization; do not rank a bake by the
         // second axis to G7's CID22. Floor 0.85, target 0.95.
         let gim26 = imazen26.map(|r| soft_gate(r.srocc, 0.85, 0.95));
 
+        // Canonical product-weighted ranking composite (single source: the
+        // `product_composite` helper; the --full-json writer + the dashboard read
+        // the SAME formula). CID22 + imazen26 + non-photo centered, KADID/TID out.
+        let product_comp = product_composite(&results);
+
+        // ── G-OR: OR is a CATASTROPHE FLOOR, not a ranker ───────────────────
+        // Measured across 15 bakes (stats review §2a): OR std ≤0.018 on every
+        // corpus, ≈0 for all real models — it only lifts on a broken bake. So it
+        // earns a pass/fail gate on the WORST-corpus OR, never a ranking column.
+        // Per-sample σ is unavailable in the parquets, so OR runs the lenient
+        // corpus-σ fallback; the 0.10 fail point reflects that leniency.
+        let max_or = results
+            .iter()
+            .map(|r| r.or_ratio)
+            .filter(|x| x.is_finite())
+            .fold(0.0_f64, f64::max);
+        let g_or = soft_gate(1.0 - max_or, 0.90, 0.98); // pass when worst OR ≲ 0.10
+
         buf.push_str("\n## CODEC_TARGET_GOALS.md scorecard (measurable subset)\n\n");
         buf.push_str("| Goal | Measure | Value | Soft score |\n");
         buf.push_str("|---|---|---:|---:|\n");
@@ -1976,12 +2026,27 @@ a memorization number — not held-out generalization; do not rank a bake by the
                 gim26.unwrap_or(0.0),
             ));
         }
-        // Weighted composite per the doc's priority order (G1=3, G8=2.5,
-        // G5=1.5, G9=1, G7=0.5). G2/G3/G4/G6/G10/G11 need external data.
-        let weighted =
-            (3.0 * g1 + 2.5 * g8 + 1.5 * g5 + 1.0 * g9 + 0.5 * g7) / (3.0 + 2.5 + 1.5 + 1.0 + 0.5);
         buf.push_str(&format!(
-            "\n**Weighted goal score (measurable subset): {weighted:.3}**\n\n"
+            "| G-OR catastrophe floor | worst-corpus OR ≤0.10 (floor, NOT a ranker) | {max_or:.4} | {g_or:.2} |\n"
+        ));
+        // Weighted GATE score = "is it shippable?" — dial + calibration + the
+        // first-class real-codec/non-photo gates. gim26/gnp were computed-but-
+        // EXCLUDED before the 2026-07-26 review (§4a); added at weight 1 each
+        // (+ G-OR at 0.5) so the gate reflects every first-class axis. This is a
+        // DIFFERENT question from `product_composite` (the "which ranks best?"
+        // ranking number) — both are emitted to --full-json; neither is silently
+        // authoritative.
+        let g_np_v = gnp.unwrap_or(0.0);
+        let g_im26_v = gim26.unwrap_or(0.0);
+        let weighted = (3.0 * g1 + 2.5 * g8 + 1.5 * g5 + 1.0 * g9 + 1.0 * g_im26_v
+            + 1.0 * g_np_v + 0.5 * g7 + 0.5 * g_or)
+            / (3.0 + 2.5 + 1.5 + 1.0 + 1.0 + 1.0 + 0.5 + 0.5);
+        buf.push_str(&format!(
+            "\n**Product composite (ranking, KADID/TID excluded): {product_comp:.4}**  \
+— CID22·1.0 + imazen26·0.5 + non-photo·0.3 + KonJND·0.2 + AIC3·0.1 + AIC4·0.05, / Σweights.\n"
+        ));
+        buf.push_str(&format!(
+            "\n**Weighted goal score (shippability gate): {weighted:.3}**\n\n"
         ));
         buf.push_str(
             "_G2 (JND anchor), G3 (monotonicity), G4 (cross-codec), G6 (MF \
@@ -2365,6 +2430,9 @@ Run the dedicated q-sweep harness for those._\n",
             "name": name,
             "regime": regime,
             "n_inputs": n_inputs,
+            // Canonical product-weighted ranking composite (single Rust source;
+            // the dashboard READS this, never re-derives it). KADID/TID excluded.
+            "composite": product_composite(&results),
             // Injected by run_full_eval.sh from diffmap_block_coherence --bake.
             "m3_coherence": Value::Null,
             "rank": rank,
