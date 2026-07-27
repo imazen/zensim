@@ -753,7 +753,27 @@ struct CorpusResult {
     humans: Vec<f64>,
     /// Per-reference SROCC summary, when the corpus carries ref identity.
     per_ref: Option<PerGroupSrocc>,
+    /// 10-band panel rows (`None` when per-band doesn't apply to the corpus).
+    /// Captured alongside the markdown table so `--full-json` can carry the
+    /// band structure the interactive dashboard renders (bands used to live
+    /// only in verdict.md).
+    bands: Option<Vec<BandRow>>,
     body: String,
+}
+
+/// One row of the 10-band Mohammadi panel, mirrored into `--full-json`.
+struct BandRow {
+    band: String,
+    lo: f64,
+    hi: f64,
+    n: usize,
+    srocc: f64,
+    plcc: f64,
+    krocc: f64,
+    or_ratio: f64,
+    pwrc: f64,
+    z_rmse: f64,
+    mae: f64,
 }
 
 /// Minimum rows per reference for its ladder to be rankable. A 2-row SROCC is
@@ -772,6 +792,12 @@ const PER_REF_MIN_ROWS: usize = 3;
 /// comment (see `benchmarks/stats_correctness_review_2026-07-26.md` §4b).
 fn train_eq_val(name: &str) -> bool {
     matches!(name, "kadid" | "tid")
+}
+
+/// JSON-safe float: non-finite → `None` (serialized as null) so NaN band/dial
+/// stats can't produce invalid JSON or a silent 0.
+fn nan_null(v: f64) -> Option<f64> {
+    v.is_finite().then_some(v)
 }
 
 /// Marginal bootstrap 95% CI of |SROCC| for one corpus: resample the
@@ -894,7 +920,7 @@ fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, 
 /// (and the comparative dashboard) can carry the codec-dial verdict — a bake
 /// can win every rank corpus and still be a broken dial (non-monotonic, no
 /// range), which is exactly why the two-panel eval is mandatory.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct DialMetrics {
     /// G3: monotonicity = 1 − material-inversion rate (gate ≥ 0.93).
     mono: f64,
@@ -907,7 +933,32 @@ struct DialMetrics {
     /// (the G4 "cross-codec reach"). `--full-json`'s `dynamic_range` is the
     /// robust p95 − p5; `reach` is the total span (outliers included).
     reach: f64,
+    /// Per-codec dial stats (codec, n_curves, n_pairs, monotonicity, tied) —
+    /// the headline mono/flat pool across codecs, which can mask one broken
+    /// family; `--full-json` carries the breakout so the dashboard shows it.
+    per_codec: Vec<PerCodecDial>,
+    /// Per-codec aggregated dial CURVE for plotting: at each grid param q,
+    /// the (p25, median, p75) of the dial score across that codec's image
+    /// ladders. Compact (~40-60 pts/codec) yet enough to draw the dial shape.
+    curves: Vec<CodecCurve>,
 }
+
+#[derive(Clone)]
+struct PerCodecDial {
+    codec: String,
+    n_curves: usize,
+    n_pairs: usize,
+    mono: f64,
+    tied: f64,
+}
+
+#[derive(Clone)]
+struct CodecCurve {
+    codec: String,
+    /// (q, p25, median, p75) sorted by q.
+    pts: Vec<(f64, f64, f64, f64)>,
+}
+
 impl DialMetrics {
     const NAN: Self = Self {
         mono: f64::NAN,
@@ -915,6 +966,8 @@ impl DialMetrics {
         p95: f64::NAN,
         flat: f64::NAN,
         reach: f64::NAN,
+        per_codec: Vec::new(),
+        curves: Vec::new(),
     };
 }
 
@@ -1321,6 +1374,61 @@ fn dial_panel(
          zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step .05, 1→3 step .2, \
          13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
+    // Per-codec breakout + aggregated dial curves for --full-json (the
+    // markdown table above prints the same numbers; this is the structured
+    // twin the dashboard reads — never re-derived downstream).
+    let per_codec_json: Vec<PerCodecDial> = per_codec
+        .iter()
+        .map(|(codec, c)| PerCodecDial {
+            codec: codec.clone(),
+            n_curves: c[3],
+            n_pairs: c[0],
+            mono: if c[0] > 0 {
+                1.0 - c[1] as f64 / c[0] as f64
+            } else {
+                f64::NAN
+            },
+            tied: if c[0] > 0 {
+                c[2] as f64 / c[0] as f64
+            } else {
+                f64::NAN
+            },
+        })
+        .collect();
+    // Bucket scores by (codec, q) — q keyed at 1e-3 resolution (the densified
+    // grid's finest step is 0.025) — then per-q p25/median/p75 across ladders.
+    let mut by_cq: BTreeMap<String, BTreeMap<i64, Vec<f64>>> = BTreeMap::new();
+    for ((_img, codec), pts) in curves.iter() {
+        let m = by_cq.entry(codec.clone()).or_default();
+        for &(q, score, _) in pts.iter() {
+            m.entry((q * 1000.0).round() as i64).or_default().push(score);
+        }
+    }
+    let pctl = |v: &[f64], p: f64| -> f64 {
+        let pos = p * (v.len() as f64 - 1.0);
+        let lo = pos.floor() as usize;
+        let hi = (lo + 1).min(v.len() - 1);
+        let frac = pos - lo as f64;
+        v[lo] * (1.0 - frac) + v[hi] * frac
+    };
+    let curve_json: Vec<CodecCurve> = by_cq
+        .into_iter()
+        .map(|(codec, qs)| CodecCurve {
+            codec,
+            pts: qs
+                .into_iter()
+                .map(|(qk, mut ss)| {
+                    ss.sort_by(f64::total_cmp);
+                    (
+                        qk as f64 / 1000.0,
+                        pctl(&ss, 0.25),
+                        pctl(&ss, 0.50),
+                        pctl(&ss, 0.75),
+                    )
+                })
+                .collect(),
+        })
+        .collect();
     (
         s,
         DialMetrics {
@@ -1329,6 +1437,8 @@ fn dial_panel(
             p95,
             flat,
             reach,
+            per_codec: per_codec_json,
+            curves: curve_json,
         },
     )
 }
@@ -1466,6 +1576,7 @@ are excluded._\n",
         ));
     }
 
+    let mut band_rows: Vec<BandRow> = Vec::new();
     if corpus.enable_per_band {
         body.push('\n');
         body.push_str(&format!(
@@ -1503,6 +1614,19 @@ are excluded._\n",
                     "| {label} | {range_label} | {} | n/a | n/a | n/a | n/a | n/a | n/a | n/a |\n",
                     idxs.len()
                 ));
+                band_rows.push(BandRow {
+                    band: label,
+                    lo,
+                    hi: if band_idx == 9 { 1.0 } else { hi },
+                    n: idxs.len(),
+                    srocc: f64::NAN,
+                    plcc: f64::NAN,
+                    krocc: f64::NAN,
+                    or_ratio: f64::NAN,
+                    pwrc: f64::NAN,
+                    z_rmse: f64::NAN,
+                    mae: f64::NAN,
+                });
                 continue;
             }
             let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
@@ -1520,6 +1644,19 @@ are excluded._\n",
                 "| {label}{noisy} | {range_label} | {} | {b_srocc:.4} | {b_plcc:.4} | {b_krocc:.4} | {b_or:.4} | {b_pwrc:.4} | {b_z:.3} | {mae:.4} |\n",
                 idxs.len()
             ));
+            band_rows.push(BandRow {
+                band: label,
+                lo,
+                hi: if band_idx == 9 { 1.0 } else { hi },
+                n: idxs.len(),
+                srocc: b_srocc,
+                plcc: b_plcc,
+                krocc: b_krocc,
+                or_ratio: b_or,
+                pwrc: b_pwrc,
+                z_rmse: b_z,
+                mae,
+            });
         }
         body.push('\n');
         body.push_str(
@@ -1556,6 +1693,7 @@ read on this corpus._\n",
         ds_auc: ds,
         srocc_signed,
         srocc_ci,
+        bands: corpus.enable_per_band.then_some(band_rows),
         rescaled_scores: scores.clone(),
         name: corpus.name,
         humans: humans.clone(),
@@ -1907,6 +2045,9 @@ a memorization number — not held-out generalization; do not rank a bake by the
     // ── CODEC_TARGET_GOALS.md scorecard ──────────────────────────────
     // Measurable from held-out corpus scores alone. Goals needing
     // external q-sweep / cross-codec data (G3, G4, G10) are flagged.
+    // `gates_json` mirrors the scorecard into `--full-json` (same values,
+    // never re-derived downstream).
+    let mut gates_json: Option<serde_json::Value> = None;
     {
         let find = |name: &str| results.iter().find(|r| r.display.contains(name));
         let cid22 = find("CID22");
@@ -2053,6 +2194,14 @@ a memorization number — not held-out generalization; do not rank a bake by the
         buf.push_str(&format!(
             "\n**Weighted goal score (shippability gate): {weighted:.3}**\n\n"
         ));
+        gates_json = Some(serde_json::json!({
+            "g1_dynamic_range": g1, "g5_hf_rank": g5, "g7_cid22": g7,
+            "g8_zrmse": g8, "g9_ds_auc": g9,
+            "g_np_nonphoto": gnp, "g_im26_realcodec": gim26,
+            "g_or_catastrophe": g_or, "max_or": max_or,
+            "p5": p5, "p95": p95,
+            "weighted_goal": weighted,
+        }));
         buf.push_str(
             "_G2 (JND anchor), G3 (monotonicity), G4 (cross-codec), G6 (MF \
 band coverage), G10 (per-source), G11 (display) require external q-sweep / \
@@ -2343,11 +2492,21 @@ Run the dedicated q-sweep harness for those._\n",
                     "per_ref_n": r.per_ref.as_ref().map(|p| p.n_groups),
                     // KADID/TID are train==val (memorization) — flagged, not hidden.
                     "train_eq_val": train_eq_val(r.name),
+                    // 10-band panel (null for JND/step-grid corpora). NaN → null
+                    // via serde_json's f64 handling for bands with n < 4.
+                    "bands": r.bands.as_ref().map(|bs| bs.iter().map(|b| json!({
+                        "band": b.band, "lo": b.lo, "hi": b.hi, "n": b.n,
+                        "srocc": nan_null(b.srocc), "plcc": nan_null(b.plcc),
+                        "krocc": nan_null(b.krocc), "or": nan_null(b.or_ratio),
+                        "pwrc": nan_null(b.pwrc), "z_rmse": nan_null(b.z_rmse),
+                        "mae": nan_null(b.mae),
+                    })).collect::<Vec<_>>()),
                 }),
             );
         }
 
-        // dial: mono/tied/reach/dynamic_range (+ raw p5/p95 for context).
+        // dial: mono/tied/reach/dynamic_range (+ raw p5/p95 for context) +
+        // the per-codec breakout and aggregated per-codec curves for plotting.
         let dynamic_range = dial_metrics.p95 - dial_metrics.p5;
         let dial = json!({
             "mono_pct": dial_metrics.mono,
@@ -2356,6 +2515,15 @@ Run the dedicated q-sweep harness for those._\n",
             "dynamic_range": dynamic_range,
             "p5": dial_metrics.p5,
             "p95": dial_metrics.p95,
+            "per_codec": dial_metrics.per_codec.iter().map(|c| json!({
+                "codec": c.codec, "n_curves": c.n_curves, "n_pairs": c.n_pairs,
+                "mono": nan_null(c.mono), "tied": nan_null(c.tied),
+            })).collect::<Vec<_>>(),
+            // curves: {codec: [[q, p25, median, p75], ...]} sorted by q.
+            "curves": dial_metrics.curves.iter().map(|c| (
+                c.codec.clone(),
+                c.pts.iter().map(|&(q, p25, med, p75)| vec![q, p25, med, p75]).collect::<Vec<_>>(),
+            )).collect::<std::collections::BTreeMap<_, _>>(),
         });
 
         // corruption: the real bake_verdict gate (score(corruption) < score(q20)
@@ -2438,6 +2606,9 @@ Run the dedicated q-sweep harness for those._\n",
             // Canonical product-weighted ranking composite (single Rust source;
             // the dashboard READS this, never re-derives it). KADID/TID excluded.
             "composite": product_composite(&results),
+            // CODEC_TARGET_GOALS scorecard values (same numbers as the report's
+            // scorecard table; null when the run computed no gates).
+            "gates": gates_json.clone().unwrap_or(Value::Null),
             // Injected by run_full_eval.sh from diffmap_block_coherence --bake.
             "m3_coherence": Value::Null,
             "rank": rank,

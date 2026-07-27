@@ -161,6 +161,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "rank": rank, "dial": o.get("dial", {}), "m3": o.get("m3_coherence"),
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
+            "gates": o.get("gates") or {},
             "scatter": scatter_out, "is_stub": bool(o.get("_stub")),
         })
     return bakes
@@ -591,16 +592,133 @@ function renderMPanel(){
   });
   tbl.append(tb);
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
+  // 10-band SROCC grouped bars for the selected corpus (when the corpus is banded).
+  const banded=rows.filter(b=>b.rank[c]&&b.rank[c].bands);
+  if(banded.length){
+    host.append(el('h3',{text:'10-band SROCC — '+c}));
+    host.append(el('div',{class:'cap',html:'Per-band SROCC across the quality range (B0 worst → B9 best). '
+      +'Dimmed = n&lt;30 (noisy; CI &gt; ±0.3 — do not rank bakes on those bands). Band SROCC is '
+      +'range-restricted — B0/B9 values run low by construction; compare bakes, not bands.'}));
+    const bands=banded[0].rank[c].bands.map(x=>x.band);
+    const W=Math.max(560,bands.length*(banded.length*9+16)+70),H=210,mL=38,mB=26,mT=10;
+    const svg=S('svg',{viewBox:`0 0 ${W} ${H}`,width:W,height:H,style:'max-width:100%'});
+    const Y0=-0.2,Y1=1.0,SY=v=>mT+(Y1-Math.max(Y0,Math.min(Y1,v)))/(Y1-Y0)*(H-mT-mB);
+    [0,0.25,0.5,0.75,1].forEach(g=>{svg.append(S('line',{x1:mL,y1:SY(g),x2:W-6,y2:SY(g),stroke:cssv('--grid'),'stroke-width':.5}));
+      svg.append(S('text',{x:mL-4,y:SY(g)+3,'text-anchor':'end','font-size':8.5,fill:cssv('--muted'),text:g.toFixed(2)}));});
+    svg.append(S('line',{x1:mL,y1:SY(0),x2:W-6,y2:SY(0),stroke:cssv('--axis'),'stroke-width':1}));
+    bands.forEach((bn,bi)=>{
+      const gx=mL+8+bi*(banded.length*9+16);
+      banded.forEach((b,k)=>{
+        const row=b.rank[c].bands[bi];if(!row||row.srocc==null)return;
+        const x=gx+k*9,y=SY(Math.max(0,row.srocc)),y0=SY(0);
+        const r=S('rect',{x,y:Math.min(y,y0),width:7,height:Math.abs(y0-y)||1,fill:color(b),opacity:row.n<30?0.35:0.95});
+        r.addEventListener('mousemove',ev=>showTip('<b>'+b.name+'</b> '+bn+' n='+row.n+'<br>SROCC <b>'+f3(row.srocc)+'</b> · PLCC '+f3(row.plcc)+' · PWRC '+f3(row.pwrc)+' · Z-RMSE '+(row.z_rmse!=null?row.z_rmse.toFixed(2):'—'),ev));
+        r.addEventListener('mouseleave',hideTip);svg.append(r);
+      });
+      svg.append(S('text',{x:gx+(banded.length*9)/2,y:H-8,'text-anchor':'middle','font-size':9,fill:cssv('--text-secondary'),text:bn}));
+    });
+    const bw=el('div',{style:'overflow-x:auto'});bw.append(svg);host.append(bw);
+  }
+  // Calibration curve (binned pred → mean target) for MOS corpora from per_pair.
+  const mosRows=rows.filter(b=>b.scatter[c]&&b.scatter[c].mos&&b.scatter[c].mos.pts.length>30);
+  if(mosRows.length){
+    host.append(el('h3',{text:'Calibration — '+c}));
+    host.append(el('div',{class:'cap',text:'Binned mean MOS per predicted-score bin (15 bins). A straight rising line = well-calibrated dial; plateaus = dead zones; non-monotone = mis-calibration.'}));
+    const W=430,H=250,mL=40,mB=30,mT=10,mR=10;
+    const svg=S('svg',{viewBox:`0 0 ${W} ${H}`,width:W,height:H,style:'background:var(--surface-1);border:1px solid var(--border);border-radius:6px'});
+    let xmin=1e9,xmax=-1e9;mosRows.forEach(b=>b.scatter[c].mos.pts.forEach(p=>{if(p[0]<xmin)xmin=p[0];if(p[0]>xmax)xmax=p[0];}));
+    const SX=v=>mL+(v-xmin)/(xmax-xmin||1)*(W-mL-mR),SY=v=>mT+(1-v)*(H-mT-mB);
+    [0,0.5,1].forEach(g=>{svg.append(S('line',{x1:mL,y1:SY(g),x2:W-mR,y2:SY(g),stroke:cssv('--grid'),'stroke-width':.5}));
+      svg.append(S('text',{x:mL-4,y:SY(g)+3,'text-anchor':'end','font-size':8.5,fill:cssv('--muted'),text:g.toFixed(1)}));});
+    svg.append(S('text',{x:(mL+W-mR)/2,y:H-6,'text-anchor':'middle','font-size':9.5,fill:cssv('--text-secondary'),text:'predicted score'}));
+    mosRows.forEach(b=>{
+      const pts=b.scatter[c].mos.pts,NB=15,acc=Array.from({length:NB},()=>[0,0]);
+      pts.forEach(([x,y])=>{let i=Math.min(NB-1,Math.floor((x-xmin)/(xmax-xmin||1)*NB));acc[i][0]+=y;acc[i][1]++;});
+      const line=acc.map((a,i)=>a[1]>=3?[SX(xmin+(i+0.5)/NB*(xmax-xmin)),SY(a[0]/a[1])]:null).filter(Boolean);
+      if(line.length>1)svg.append(S('polyline',{points:line.map(p=>p.join(',')).join(' '),fill:'none',stroke:color(b),'stroke-width':1.8,opacity:.9}));
+    });
+    host.append(svg);
+  }
+}
+
+// ---- PER-CODEC DIAL CURVES (median dial score vs q per codec, per visible bake)
+function renderDial(){
+  const host=$('#dialsec');if(!host)return;host.innerHTML='';
+  const bs=visBakes().filter(b=>b.dial&&b.dial.curves&&Object.keys(b.dial.curves).length);
+  if(!bs.length)return;
+  host.append(el('h2',{text:'Per-codec dial curves'}));
+  host.append(el('div',{class:'cap',html:'Median dial score vs grid quality per codec family (across that codec\\'s '
+    +'image ladders on the densified grid; jxl x-axis = butteraugli-distance mapped to q-equiv). A good dial rises '
+    +'monotonically and spans low→high. The per-codec mono% is in the tooltip — a family can be broken while the '
+    +'pooled headline stays green.'}));
+  const codecs=[...new Set(bs.flatMap(b=>Object.keys(b.dial.curves)))].sort();
+  const grid=el('div',{style:'display:flex;flex-wrap:wrap;gap:10px'});
+  codecs.forEach(cd=>{
+    const W=330,H=240,mL=38,mB=28,mT=24,mR=8;
+    const svg=S('svg',{viewBox:`0 0 ${W} ${H}`,width:W,height:H,style:'background:var(--surface-1);border:1px solid var(--border);border-radius:6px'});
+    let xmin=1e9,xmax=-1e9,ymin=0,ymax=100;
+    bs.forEach(b=>{const cv=b.dial.curves[cd];if(cv)cv.forEach(p=>{if(p[0]<xmin)xmin=p[0];if(p[0]>xmax)xmax=p[0];});});
+    if(xmax<=xmin)return;
+    const SX=v=>mL+(v-xmin)/(xmax-xmin)*(W-mL-mR),SY=v=>mT+(ymax-Math.max(ymin,Math.min(ymax,v)))/(ymax-ymin)*(H-mT-mB);
+    [0,25,50,75,100].forEach(g=>{svg.append(S('line',{x1:mL,y1:SY(g),x2:W-mR,y2:SY(g),stroke:cssv('--grid'),'stroke-width':.5}));
+      svg.append(S('text',{x:mL-4,y:SY(g)+3,'text-anchor':'end','font-size':8.5,fill:cssv('--muted'),text:String(g)}));});
+    svg.append(S('text',{x:mL+4,y:14,'font-size':11,'font-weight':700,fill:cssv('--text-primary'),text:cd}));
+    [xmin,xmax].forEach(v=>svg.append(S('text',{x:SX(v),y:H-8,'text-anchor':'middle','font-size':8.5,fill:cssv('--muted'),text:v.toFixed(0)})));
+    bs.forEach(b=>{
+      const cv=b.dial.curves[cd];if(!cv||cv.length<2)return;
+      const pc=(b.dial.per_codec||[]).find(x=>x.codec===cd);
+      const pl=S('polyline',{points:cv.map(p=>SX(p[0])+','+SY(p[2])).join(' '),fill:'none',stroke:color(b),'stroke-width':1.7,opacity:.9});
+      pl.addEventListener('mousemove',ev=>showTip('<b>'+b.name+'</b> × '+cd+(pc?'<br>mono <b>'+pct(pc.mono)+'</b> · tied '+pct(pc.tied)+' · '+pc.n_curves+' ladders':''),ev));
+      pl.addEventListener('mouseleave',hideTip);svg.append(pl);
+    });
+    grid.append(svg);
+  });
+  host.append(grid);
+}
+
+// ---- GATE SCORECARD (CODEC_TARGET_GOALS soft-gates per bake)
+function renderGates(){
+  const host=$('#gates');if(!host)return;host.innerHTML='';
+  const bs=visBakes().filter(b=>b.gates&&Object.keys(b.gates).length);
+  if(!bs.length)return;
+  host.append(el('h2',{text:'Gate scorecard'}));
+  host.append(el('div',{class:'cap',html:'CODEC_TARGET_GOALS soft-gates (1.00 = full pass). <b>weighted</b> = the '
+    +'shippability gate (G1·3 + G8·2.5 + G5·1.5 + G9·1 + G-IM26·1 + G-NP·1 + G7·0.5 + G-OR·0.5) — a DIFFERENT '
+    +'question from the ranking composite. G-OR is the catastrophe floor (worst-corpus outlier ratio).'}));
+  const KEYS=[['g1_dynamic_range','G1 range'],['g5_hf_rank','G5 HF'],['g7_cid22','G7 CID22'],['g8_zrmse','G8 Z-RMSE'],
+    ['g9_ds_auc','G9 DS-AUC'],['g_np_nonphoto','G-NP'],['g_im26_realcodec','G-IM26'],['g_or_catastrophe','G-OR'],['weighted_goal','weighted']];
+  const tbl=el('table',{});
+  const thead=el('tr',{});thead.append(el('th',{class:'lbl',text:'bake'}));
+  KEYS.forEach(([,h])=>thead.append(el('th',{text:h})));
+  tbl.append(el('thead',{},thead));
+  const tb=el('tbody',{});
+  bs.sort((a,b)=>(b.gates.weighted_goal||0)-(a.gates.weighted_goal||0)).forEach(b=>{
+    const tr=el('tr',{});
+    const nameTd=el('td',{class:'lbl'});
+    nameTd.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),document.createTextNode(b.name));
+    tr.append(nameTd);
+    KEYS.forEach(([k])=>{
+      const v=b.gates[k];
+      const td=el('td',{text:v!=null?v.toFixed(2):'—'});
+      if(v!=null){const t=Math.max(0,Math.min(1,v));
+        td.style.background='color-mix(in srgb, var(--seq-hi) '+Math.round(t*55)+'%, var(--surface-1))';
+        if(t>.65)td.style.color='#fff';}
+      tr.append(td);
+    });
+    tb.append(tr);
+  });
+  tbl.append(tb);
+  const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
 }
 
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'gates'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
-function rerender(){mountTable();renderHeat();renderMPanel();renderTrade();renderScatter();}
+function rerender(){mountTable();renderHeat();renderMPanel();renderDial();renderGates();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 if(window.matchMedia)matchMedia('(prefers-color-scheme:dark)').addEventListener('change',()=>{if(!document.documentElement.getAttribute('data-theme'))rerender();});
