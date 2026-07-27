@@ -2448,6 +2448,71 @@ Run the dedicated q-sweep harness for those._\n",
     // it, so this binary stays free of image I/O.
     if let Some(json_path) = &args.full_json {
         use serde_json::{Map, Value, json};
+        // "model": the bake's own architecture + in/out modifiers, read from the
+        // loaded ZNPR (zenpredict is the single parser — no byte-poking anywhere
+        // else). Structured twin of `zenpredict inspect` for the dashboard's
+        // per-model details card. Head/spline extraction is a cheap re-read.
+        let model_block = {
+            let alpha = extract_per_sample_alpha_head(&model).is_some();
+            let hybrid = extract_hybrid_head(&model).is_some();
+            let minmax = extract_minmax_head(&model).is_some();
+            let tanh = extract_tanh_output_head_scale(&model);
+            let spline = zensim_validate::output_calibration_spline::extract(&model);
+            let layers: Vec<Value> = model
+                .layers()
+                .map(|l| {
+                    let dtype = match l.weights {
+                        zenpredict::WeightStorage::F32(_) => "f32",
+                        zenpredict::WeightStorage::F16 { .. } => "f16",
+                        zenpredict::WeightStorage::I8 { .. } => "i8",
+                    };
+                    json!({
+                        "in": l.in_dim, "out": l.out_dim,
+                        "activation": format!("{:?}", l.activation),
+                        "dtype": dtype,
+                    })
+                })
+                .collect();
+            // Non-identity per-feature INPUT transforms (idx, kind, params).
+            let transforms: Vec<Value> = match model.feature_transforms() {
+                Some(ts) => {
+                    let params = model.feature_transform_params();
+                    ts.iter()
+                        .enumerate()
+                        .filter(|(_, t)| !matches!(t, zenpredict::FeatureTransform::Identity))
+                        .map(|(i, t)| {
+                            let p: Vec<f32> = params
+                                .and_then(|ps| ps.get(i).cloned())
+                                .unwrap_or_default();
+                            json!({"idx": i, "kind": format!("{t:?}"), "params": p})
+                        })
+                        .collect()
+                }
+                None => Vec::new(),
+            };
+            json!({
+                "n_inputs": n_inputs,
+                "n_outputs": model.n_outputs(),
+                "n_layers": model.n_layers(),
+                "znpr_version": model.version(),
+                "file_bytes": std::fs::metadata(&args.bake).map(|m| m.len()).unwrap_or(0),
+                "layers": layers,
+                "scaler": {"present": !model.scaler_mean().is_empty(), "n": model.scaler_mean().len()},
+                "feature_transforms": transforms,
+                "n_feature_bounds": model.feature_bounds().len(),
+                // OUTPUT modifier: the dial calibration spline (knots for plotting).
+                "output_spline": spline.map(|sp| json!({
+                    "n_knots": sp.xs.len(), "xs": sp.xs, "ys": sp.ys,
+                })),
+                "heads": {
+                    "per_sample_alpha": alpha, "hybrid": hybrid, "minmax": minmax,
+                    "tanh_pin_scale": tanh.and_then(nan_null),
+                },
+                "n_output_specs": model.output_specs().len(),
+                "n_discrete_sets": model.discrete_sets().len(),
+                "metadata_keys": model.metadata().iter().map(|e| e.key.to_string()).collect::<Vec<_>>(),
+            })
+        };
         // Even-stride down to `cap` indices across [0,len) — keeps the scatter
         // spread across the corpus rather than truncating to a prefix.
         let stride = |len: usize, cap: usize| -> Vec<usize> {
@@ -2603,6 +2668,9 @@ Run the dedicated q-sweep harness for those._\n",
             "name": name,
             "regime": regime,
             "n_inputs": n_inputs,
+            // Architecture + in/out modifiers (transforms, winsor bounds, spline,
+            // heads) — the structured `zenpredict inspect`.
+            "model": model_block,
             // Canonical product-weighted ranking composite (single Rust source;
             // the dashboard READS this, never re-derives it). KADID/TID excluded.
             "composite": product_composite(&results),

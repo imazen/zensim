@@ -162,6 +162,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
             "gates": o.get("gates") or {},
+            "model": o.get("model") or {},
             "scatter": scatter_out, "is_stub": bool(o.get("_stub")),
         })
     return bakes
@@ -711,14 +712,85 @@ function renderGates(){
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
 }
 
+// ---- MODEL DETAILS (architecture + in/out modifiers per bake, from the ZNPR itself)
+function renderModels(){
+  const host=$('#models');if(!host)return;host.innerHTML='';
+  const bs=visBakes().filter(b=>b.model&&b.model.layers);
+  if(!bs.length)return;
+  host.append(el('h2',{text:'Model details'}));
+  host.append(el('div',{class:'cap',html:'Read from each bake\\'s ZNPR (structured <code>zenpredict inspect</code>): '
+    +'architecture, weight dtype, INPUT modifiers (per-feature transforms + winsor guard count + scaler), and the '
+    +'OUTPUT modifier — the dial calibration spline (plotted raw→dial; the top cap at 100 and any negative-tail '
+    +'extension are visible in the knots). Hover a transform chip for its params.'}));
+  const grid=el('div',{style:'display:flex;flex-wrap:wrap;gap:12px;align-items:stretch'});
+  bs.forEach(b=>{
+    const m=b.model;
+    const card=el('div',{style:'border:1px solid var(--border);border-radius:8px;padding:10px 12px;'
+      +'background:var(--surface-1);min-width:300px;max-width:360px;flex:1 1 300px'});
+    const hd=el('div',{style:'display:flex;align-items:center;gap:6px;margin-bottom:6px'});
+    hd.append(el('span',{class:'sw',style:'display:inline-block;background:'+color(b)}),
+      el('b',{text:b.name}));
+    card.append(hd);
+    const arch=(m.layers||[]).map(l=>l.in+'→'+l.out+' '+l.activation+(l.dtype!=='f32'?' ('+l.dtype+')':'')).join('  ·  ');
+    const kb=m.file_bytes?(m.file_bytes/1024).toFixed(1)+' KB':'—';
+    const lines=[
+      ['arch', arch||'—'],
+      ['size / ZNPR', kb+' · v'+(m.znpr_version||'?')],
+      ['inputs', m.n_inputs+' feats · scaler '+(m.scaler&&m.scaler.present?('z-norm ('+m.scaler.n+')'):'none')],
+      ['in-mods', (m.feature_transforms&&m.feature_transforms.length?m.feature_transforms.length+' transforms':'none')
+        +' · '+(m.n_feature_bounds||0)+' winsor bounds'],
+      ['heads', ['per_sample_alpha','hybrid','minmax'].filter(k=>m.heads&&m.heads[k]).join(', ')
+        +((m.heads&&m.heads.tanh_pin_scale!=null)?' tanh-pin '+m.heads.tanh_pin_scale:'')||'none'],
+      ['out-mods', (m.output_spline?('spline '+m.output_spline.n_knots+' knots'):'no spline')
+        +(m.n_output_specs?(' · '+m.n_output_specs+' output_specs'):'')
+        +(m.n_discrete_sets?(' · '+m.n_discrete_sets+' discrete'):'')],
+    ];
+    const tb=el('table',{style:'font-size:11px;width:100%'});
+    lines.forEach(([k,v])=>{const tr=el('tr',{});
+      tr.append(el('td',{class:'lbl',style:'opacity:.65;padding-right:8px;white-space:nowrap',text:k}),
+        el('td',{text:v}));tb.append(tr);});
+    card.append(tb);
+    // transform chips (hover = kind + params)
+    if(m.feature_transforms&&m.feature_transforms.length){
+      const chips=el('div',{style:'display:flex;flex-wrap:wrap;gap:3px;margin-top:6px'});
+      m.feature_transforms.slice(0,48).forEach(t=>{
+        const ch=el('span',{style:'font-size:9.5px;padding:1px 5px;border-radius:8px;'
+          +'background:color-mix(in srgb, var(--seq-hi) 18%, var(--surface-1));border:1px solid var(--border)',
+          text:'f'+t.idx});
+        ch.addEventListener('mousemove',ev=>showTip('<b>f'+t.idx+'</b> '+t.kind+'<br>params ['+(t.params||[]).map(p=>(+p).toPrecision(4)).join(', ')+']',ev));
+        ch.addEventListener('mouseleave',hideTip);
+        chips.append(ch);
+      });
+      if(m.feature_transforms.length>48)chips.append(el('span',{style:'font-size:9.5px;opacity:.6',text:'+'+(m.feature_transforms.length-48)+' more'}));
+      card.append(chips);
+    }
+    // spline mini-plot: raw pred (x) -> dial score (y)
+    if(m.output_spline&&m.output_spline.xs&&m.output_spline.xs.length>1){
+      const xs=m.output_spline.xs,ys=m.output_spline.ys;
+      const W=300,H=110,mL=30,mB=18,mT=6,mR=6;
+      const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(0,...ys),y1=Math.max(100,...ys);
+      const SX=v=>mL+(v-x0)/(x1-x0||1)*(W-mL-mR),SY=v=>mT+(y1-v)/(y1-y0||1)*(H-mT-mB);
+      const svg=S('svg',{viewBox:`0 0 ${W} ${H}`,width:W,height:H,style:'margin-top:6px;background:var(--plane);border-radius:5px;max-width:100%'});
+      [0,50,100].forEach(g=>{if(g>=y0&&g<=y1){svg.append(S('line',{x1:mL,y1:SY(g),x2:W-mR,y2:SY(g),stroke:cssv('--grid'),'stroke-width':.5}));
+        svg.append(S('text',{x:mL-3,y:SY(g)+3,'text-anchor':'end','font-size':7.5,fill:cssv('--muted'),text:String(g)}));}});
+      svg.append(S('polyline',{points:xs.map((x,i)=>SX(x)+','+SY(ys[i])).join(' '),fill:'none',stroke:color(b),'stroke-width':1.6}));
+      xs.forEach((x,i)=>svg.append(S('circle',{cx:SX(x),cy:SY(ys[i]),r:1.6,fill:color(b)})));
+      svg.append(S('text',{x:(mL+W-mR)/2,y:H-4,'text-anchor':'middle','font-size':7.5,fill:cssv('--muted'),text:'output spline: raw → dial'}));
+      card.append(svg);
+    }
+    grid.append(card);
+  });
+  host.append(grid);
+}
+
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'gates'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'gates'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
-function rerender(){mountTable();renderHeat();renderMPanel();renderDial();renderGates();renderTrade();renderScatter();}
+function rerender(){mountTable();renderHeat();renderMPanel();renderDial();renderGates();renderModels();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 if(window.matchMedia)matchMedia('(prefers-color-scheme:dark)').addEventListener('change',()=>{if(!document.documentElement.getAttribute('data-theme'))rerender();});
