@@ -71,6 +71,15 @@ def bvls(X: np.ndarray, y: np.ndarray):
 
 
 def main() -> None:
+    import sys as _sys
+    # Optional pathology-enriched arm: argv[1] = alternate |r|-mass parquet
+    # (features only; e.g. kadis_negrich_924), argv[2] = output tag.
+    mass_path = _sys.argv[1] if len(_sys.argv) > 1 else None
+    tag = _sys.argv[2] if len(_sys.argv) > 2 else "plain"
+    global OUT_TSV, OUT_MD
+    if tag != "plain":
+        OUT_TSV = OUT_TSV.with_name(OUT_TSV.name.replace(".tsv", f".{tag}.tsv"))
+        OUT_MD = OUT_MD.with_name(OUT_MD.name.replace(".md", f".{tag}.md"))
     excl = set(range(156, 372))
     excl |= cell_cols(V2_BASE, V2_PER, 27)   # BANDING
     excl |= cell_cols(APP_BASE, APP_PER, 16)  # E1 GRAD_SRC_MEAN
@@ -81,7 +90,16 @@ def main() -> None:
     Xs, ys = load("ext_safesyn_full")
     Xh, yh = load("ext_cid22_train201")
 
-    Xc = Xs[:, cand]
+    if mass_path:
+        import pyarrow.parquet as _pq
+        _t = _pq.read_table(mass_path, columns=[f"f{i}" for i in range(N)])
+        Xmass = np.column_stack(
+            [np.asarray(_t[f"f{i}"].combine_chunks().to_numpy(zero_copy_only=False), np.float64) for i in range(N)]
+        )
+        print(f"|r| mass = {mass_path} ({len(Xmass)} rows, tag={tag})")
+    else:
+        Xmass = Xs
+    Xc = Xmass[:, cand]
     sd = Xc.std(0)
     dead = sd < 1e-12
     mu = Xc.mean(0)
