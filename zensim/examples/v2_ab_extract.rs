@@ -222,8 +222,10 @@ fn main() {
     let do_foldstream =
         mode == "fold" || mode == "foldapp" || mode == "foldstream" || mode == "foldappstream";
     let stream_append = mode == "foldapp" || mode == "foldappstream";
-    let do_hdr100 = mode == "foldapphdr100";
-    let do_hdrpq = mode == "foldapphdrpq";
+    let do_hdr100 = mode == "foldapphdr100" || mode == "foldapp2hdr100";
+    let do_hdrpq = mode == "foldapphdrpq" || mode == "foldapp2hdrpq";
+    let do_app2 = mode == "foldapp2";
+    let app2_on = mode.starts_with("foldapp2");
     let do_v1stream = mode == "v1stream";
     let do_v1ref = mode == "v1ref";
     let do_v1streamref = mode == "v1streamref";
@@ -232,7 +234,8 @@ fn main() {
         "v2" => (false, true),
         // own branches below
         "none" | "fold" | "foldapp" | "foldstream" | "foldappstream" | "foldapphdr100"
-        | "foldapphdrpq" | "v1stream" | "v1ref" | "v1streamref" => (false, false),
+        | "foldapphdrpq" | "foldapp2" | "foldapp2hdr100" | "foldapp2hdrpq" | "v1stream"
+        | "v1ref" | "v1streamref" => (false, false),
         _ => (true, true),
     };
 
@@ -363,19 +366,56 @@ fn main() {
                 }
             }
         }
+        // SDR 944 (append2) mode — the batch shape: explicit per-worker
+        // scratch via the streaming entry with the append2 toggle (the
+        // pair wrapper allocates a fresh V2Scratch per call, which is
+        // exactly the per-pair page-fault cost the batch form exists to
+        // avoid — measured +14% total when this branch used it).
+        if do_app2 {
+            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+            let toggles = V2NewFeatureToggles {
+                append2_block: true,
+                ..V2NewFeatureToggles::default()
+            };
+            let t0 = std::time::Instant::now();
+            let r = z.compute_folded720_append_features_streaming(
+                &RgbSlice::new(r_px, rw, rh),
+                &RgbSlice::new(&d_px, dw, dh),
+                toggles,
+                scratch,
+            );
+            compute_us.fetch_add(t0.elapsed().as_micros() as usize, Ordering::Relaxed);
+            match r {
+                Ok(r) => combined.extend_from_slice(r.features()),
+                Err(e) => {
+                    eprintln!("SKIP foldapp2 compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            }
+        }
         // Declared-HDR modes: same streaming walk behind the PU front-end.
         if do_hdr100 {
             let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
             let r_n = rgb8_to_nits100(r_px, rw, rh);
             let d_n = rgb8_to_nits100(&d_px, dw, dh);
             let t0 = std::time::Instant::now();
-            let r = z.compute_folded720_append_features_hdr(
-                &r_n,
-                &d_n,
-                zensim::feature_v2::HdrEncoding::Linear,
-                V2NewFeatureToggles::default(),
-                scratch,
-            );
+            let r = if app2_on {
+                z.compute_folded720_append2_features_hdr(
+                    &r_n,
+                    &d_n,
+                    zensim::feature_v2::HdrEncoding::Linear,
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                )
+            } else {
+                z.compute_folded720_append_features_hdr(
+                    &r_n,
+                    &d_n,
+                    zensim::feature_v2::HdrEncoding::Linear,
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                )
+            };
             compute_us.fetch_add(t0.elapsed().as_micros() as usize, Ordering::Relaxed);
             match r {
                 Ok(r) => combined.extend_from_slice(r.features()),
@@ -393,13 +433,23 @@ fn main() {
                 return None;
             }
             let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
-            let r = z.compute_folded720_append_features_hdr(
-                &Pq16Image::from_rgb16(&r16, r16w, r16h),
-                &Pq16Image::from_rgb16(&d16, d16w, d16h),
-                zensim::feature_v2::HdrEncoding::Pq { peak_nits: 10_000.0 },
-                V2NewFeatureToggles::default(),
-                scratch,
-            );
+            let r = if app2_on {
+                z.compute_folded720_append2_features_hdr(
+                    &Pq16Image::from_rgb16(&r16, r16w, r16h),
+                    &Pq16Image::from_rgb16(&d16, d16w, d16h),
+                    zensim::feature_v2::HdrEncoding::Pq { peak_nits: 10_000.0 },
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                )
+            } else {
+                z.compute_folded720_append_features_hdr(
+                    &Pq16Image::from_rgb16(&r16, r16w, r16h),
+                    &Pq16Image::from_rgb16(&d16, d16w, d16h),
+                    zensim::feature_v2::HdrEncoding::Pq { peak_nits: 10_000.0 },
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                )
+            };
             match r {
                 Ok(r) => combined.extend_from_slice(r.features()),
                 Err(e) => {

@@ -1616,6 +1616,58 @@ impl Zensim {
         )
     }
 
+    /// Folded-720+append+**append2** extraction (944 slots;
+    /// [`crate::feature_v2::FeatureRegime::Folded720Append2`]): the 924
+    /// layout plus [`crate::feature_v2::idx_append2`] — BANDVIS banding
+    /// gain/loss (empirical per-route δ band-pass × flatness mask), the
+    /// free reference-luminance conditioner, and (HDR route only)
+    /// highlight bins. OPT-IN and additive-only: joins the NEXT
+    /// extraction regime wave; never mix 944 rows into 924 tables.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_folded720_append_features`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_append2_features(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_append2_impl(
+            source,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            crate::feature_v2::V2NewFeatureToggles::default(),
+        )
+    }
+
+    /// Declared-HDR form of [`Self::compute_folded720_append2_features`]
+    /// (PU-domain BANDVIS constants; highlight bins live).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_folded720_append_features_hdr`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_append2_features_hdr(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        encoding: crate::feature_v2::HdrEncoding,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+        scratch: &mut crate::feature_v2::V2Scratch,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_append2_hdr_streaming_impl(
+            source,
+            distorted,
+            encoding,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+            scratch,
+        )
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors
