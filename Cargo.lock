@@ -5877,7 +5877,7 @@ dependencies = [
 [[package]]
 name = "zenpredict"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zenanalyze?rev=14dbe93d6af294a9598f9d27387103b87eb1a4af#14dbe93d6af294a9598f9d27387103b87eb1a4af"
+source = "git+https://github.com/imazen/zenanalyze?rev=a7d82249a189cffa1d72261c351e1dd7b383d790#a7d82249a189cffa1d72261c351e1dd7b383d790"
 dependencies = [
  "bytemuck",
  "libm",
@@ -5887,7 +5887,7 @@ dependencies = [
 [[package]]
 name = "zenpredict-bake"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenanalyze?rev=14dbe93d6af294a9598f9d27387103b87eb1a4af#14dbe93d6af294a9598f9d27387103b87eb1a4af"
+source = "git+https://github.com/imazen/zenanalyze?rev=a7d82249a189cffa1d72261c351e1dd7b383d790#a7d82249a189cffa1d72261c351e1dd7b383d790"
 dependencies = [
  "bytemuck",
  "lz4_flex 0.11.6",

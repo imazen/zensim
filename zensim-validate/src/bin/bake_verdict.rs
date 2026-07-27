@@ -2662,6 +2662,46 @@ Run the dedicated q-sweep harness for those._\n",
             );
         }
 
+        // Reproduction provenance: embedded zentrain.repro > .spec.json sidecar > null.
+        let repro_value: Value = {
+            let embedded = model
+                .metadata()
+                .get_utf8("zentrain.repro")
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(s).ok());
+            match embedded {
+                Some(mut v) => {
+                    if let Some(o) = v.as_object_mut() {
+                        o.insert("source".into(), json!("embedded"));
+                    }
+                    v
+                }
+                None => {
+                    let mut sc = args.bake.clone().into_os_string();
+                    sc.push(".spec.json");
+                    match std::fs::read_to_string(PathBuf::from(sc))
+                        .ok()
+                        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                    {
+                        Some(mut v) => {
+                            if let Some(o) = v.as_object_mut() {
+                                o.insert("source".into(), json!("sidecar"));
+                            }
+                            eprintln!(
+                                "bake_verdict: no embedded zentrain.repro (legacy bake) — using .spec.json sidecar"
+                            );
+                            v
+                        }
+                        None => {
+                            eprintln!(
+                                "bake_verdict: ⚠ NO reproduction provenance (no embedded zentrain.repro, no .spec.json) — this bake is irreproducible without archaeology"
+                            );
+                            Value::Null
+                        }
+                    }
+                }
+            }
+        };
         let full = json!({
             "bake": args.bake.display().to_string(),
             "bake_sha256": bake_sha,
@@ -2671,6 +2711,12 @@ Run the dedicated q-sweep harness for those._\n",
             // Architecture + in/out modifiers (transforms, winsor bounds, spline,
             // heads) — the structured `zenpredict inspect`.
             "model": model_block,
+            // Reproduction instructions. Preferred source: the `zentrain.repro`
+            // entry EMBEDDED in the bake bytes (mandatory for new trainer output —
+            // inseparable from the model). Fallback for legacy bakes: the
+            // `<bake>.spec.json` sidecar (argv + groups; separable, so flagged).
+            // null = irreproducible without archaeology — the report warns.
+            "repro": repro_value,
             // Canonical product-weighted ranking composite (single Rust source;
             // the dashboard READS this, never re-derives it). KADID/TID excluded.
             "composite": product_composite(&results),

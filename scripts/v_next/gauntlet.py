@@ -163,6 +163,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
             "gates": o.get("gates") or {},
             "model": o.get("model") or {},
+            "repro": o.get("repro"),
             "scatter": scatter_out, "is_stub": bool(o.get("_stub")),
         })
     return bakes
@@ -772,6 +773,50 @@ function renderModels(){
       });
       if(m.feature_transforms.length>48)chips.append(el('span',{style:'font-size:9.5px;opacity:.6',text:'+'+(m.feature_transforms.length-48)+' more'}));
       card.append(chips);
+    }
+    // Reproduction provenance: source badge + seed/commit + input-parquet
+    // chips (hover = path + sha256 prefix + rows) + argv in a collapsible.
+    {
+      const r=b.repro;
+      const rep=el('div',{style:'margin-top:7px;border-top:1px dashed var(--border);padding-top:6px'});
+      const badge=(txt,tone)=>el('span',{style:'font-size:9px;font-weight:700;letter-spacing:.04em;'
+        +'padding:1px 6px;border-radius:8px;margin-right:6px;background:'+tone,text:txt});
+      if(!r){
+        rep.append(badge('NO REPRO','color-mix(in srgb, var(--serious) 30%, var(--surface-1))'),
+          el('span',{style:'font-size:10px;opacity:.7',text:'no embedded zentrain.repro, no .spec.json — irreproducible without archaeology'}));
+      }else{
+        const emb=r.source==='embedded';
+        rep.append(badge(emb?'REPRO: EMBEDDED':'REPRO: SIDECAR',
+          emb?'color-mix(in srgb, var(--good) 25%, var(--surface-1))':'color-mix(in srgb, var(--warn) 25%, var(--surface-1))'));
+        const bits=[];
+        if(r.seed!=null)bits.push('seed '+r.seed);
+        if(r.epochs!=null)bits.push(r.epochs+' ep');
+        if(r.trainer_head_at_train)bits.push('@'+r.trainer_head_at_train);
+        if(r.timestamp_epoch)bits.push(new Date(r.timestamp_epoch*1000).toISOString().slice(0,10));
+        rep.append(el('span',{style:'font-size:10px;opacity:.85',text:bits.join(' · ')}));
+        const ins=r.inputs||[];
+        if(ins.length){
+          const chips=el('div',{style:'display:flex;flex-wrap:wrap;gap:3px;margin-top:4px'});
+          ins.forEach(inp=>{
+            const ch=el('span',{style:'font-size:9.5px;padding:1px 6px;border-radius:8px;'
+              +'background:color-mix(in srgb, var(--good) 12%, var(--surface-1));border:1px solid var(--border)',
+              text:inp.name+(inp.rows?' ('+(inp.rows>=1000?Math.round(inp.rows/1000)+'k':inp.rows)+')':'')});
+            ch.addEventListener('mousemove',ev=>showTip('<b>'+inp.name+'</b><br>'+(inp.path||'?')
+              +'<br>sha256 '+String(inp.sha256||'?').slice(0,16)+'… · '+(inp.rows||'?')+' rows',ev));
+            ch.addEventListener('mouseleave',hideTip);
+            chips.append(ch);
+          });
+          rep.append(chips);
+        }
+        if(r.argv&&r.argv.length){
+          const det=el('details',{style:'margin-top:4px'});
+          det.append(el('summary',{style:'font-size:9.5px;cursor:pointer;opacity:.7',text:'reproduction command (argv)'}),
+            el('pre',{style:'font-size:9px;white-space:pre-wrap;word-break:break-all;max-height:120px;'
+              +'overflow-y:auto;background:var(--plane);padding:5px;border-radius:4px',text:r.argv.join(' ')}));
+          rep.append(det);
+        }
+      }
+      card.append(rep);
     }
     // spline mini-plot: raw pred (x) -> dial score (y)
     if(m.output_spline&&m.output_spline.xs&&m.output_spline.xs.length>1){

@@ -208,6 +208,21 @@ These are real and unfixed. Nothing below is claimed to work.
 
 ### Closed since this file was written
 
+- **Reproduction provenance is now EMBEDDED in the bake bytes (mandatory).**
+  2026-07-27: `zensim_mlp_train` assembles a `zentrain.repro` metadata entry —
+  content-addressed inputs (canonical path + sha256 + rows per parquet), seed,
+  epochs, structured hyperparams, full argv, trainer HEAD at train time, host,
+  timestamp — and embeds it into the ZNPR at the single write choke-point via
+  `zenpredict_bake::append_metadata_utf8` (section-level splice, score/byte
+  identity gated by composer-equivalence tests in zenpredict-bake). Embedding
+  failure is FATAL (exit 4); there is no opt-out flag. `.spec.json` carries the
+  same structured `inputs` + `seed` for sidecar-only tooling. `bake_verdict
+  --full-json` emits `repro` with a source ladder (embedded > sidecar > null +
+  loud warning) and the gauntlet dashboard shows a REPRO badge per model.
+  Legacy bakes cannot be retro-embedded (bytes frozen) — they render as
+  SIDECAR or NO-REPRO honestly.
+
+
 - ~~`verify_bake` is not wired post-train.~~ **Fixed 2026-07-15** (`f55551e1`).
   `zensim_mlp_train` now hashes the bake it just wrote and compares it to the
   manifest's `[bake].sha256`: match → `REPRODUCED`, differ → loud mismatch +
