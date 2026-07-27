@@ -96,14 +96,13 @@ fn main() {
     // code path, only the config flags change — isolates the activity-path
     // (masked/IW pool) share of v1c for the fold-basic-156-into-v2 design.
     // "fold" = the folded-720 ONE-pass extraction (v1 basic in the v2 walk,
-    // f156..371 = 0, v2-348) — `Zensim::compute_folded720_features*`.
-    // "foldapp" (2026-07-26) = fold + the f720+ append block (924 columns)
-    // — `Zensim::compute_folded720_append_features*`.
-    // "foldstream" / "foldappstream" (2026-07-26, streaming port C3) =
-    // the STREAMING walk (`compute_folded720[_append]_features_streaming`):
-    // bit-identical output, O(width) rolling planes, NO prepared reference
-    // or moments cache — the grouped flow skips prepare entirely for
-    // these modes (there is nothing to prepare).
+    // f156..371 = 0, v2-348); "foldapp" = fold + the f720+ append block
+    // (924 columns). STREAMING-ONLY since the C5 switchover (2026-07-26):
+    // both run `compute_folded720[_append]_features_streaming` — O(width)
+    // rolling planes, NO prepared reference or moments cache (the grouped
+    // flow has nothing to prepare for them, and ZENSIM_AB_MOMENTS is a
+    // NO-OP for these modes — it only affects the plain-v2 "v2" mode).
+    // "foldstream" / "foldappstream" = aliases kept for A/B script compat.
     // "v1stream" (2026-07-26) = v1's Y-strip streaming path
     // (`compute_streaming_strips_default`, per-strip reference pyramid,
     // O(strip×width) memory) — for memory A/B against the materialized
@@ -114,8 +113,9 @@ fn main() {
     // (compute_with_ref_streaming_strips_default, score-only). Both require
     // the grouped flow (ZENSIM_AB_GROUPED=1, the default).
     let mode = std::env::var("ZENSIM_AB_MODE").unwrap_or_else(|_| "ext".into());
-    let do_fold = mode == "fold" || mode == "foldapp";
-    let do_foldstream = mode == "foldstream" || mode == "foldappstream";
+    let do_foldstream =
+        mode == "fold" || mode == "foldapp" || mode == "foldstream" || mode == "foldappstream";
+    let stream_append = mode == "foldapp" || mode == "foldappstream";
     let do_v1stream = mode == "v1stream";
     let do_v1ref = mode == "v1ref";
     let do_v1streamref = mode == "v1streamref";
@@ -252,54 +252,13 @@ fn main() {
                 }
             }
         }
-        // Folded-720 ONE-pass block: v1 basic (f0..156) + zeros (f156..372)
-        // + v2-348 (f372..720), emitted by a single v2-walk pass.
-        if do_fold {
-            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
-            let distorted = RgbSlice::new(&d_px, dw, dh);
-            let with_append = mode == "foldapp";
-            let folded = match prepared {
-                Some(pre) => {
-                    if with_append {
-                        z.compute_folded720_append_features_with_ref_and_scratch(
-                            pre,
-                            &distorted,
-                            V2NewFeatureToggles::default(),
-                            scratch,
-                        )
-                    } else {
-                        z.compute_folded720_features_with_ref_and_scratch(
-                            pre,
-                            &distorted,
-                            V2NewFeatureToggles::default(),
-                            scratch,
-                        )
-                    }
-                }
-                None => {
-                    if with_append {
-                        z.compute_folded720_append_features(&RgbSlice::new(r_px, rw, rh), &distorted)
-                    } else {
-                        z.compute_folded720_features(&RgbSlice::new(r_px, rw, rh), &distorted)
-                    }
-                }
-            };
-            let folded = match folded {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("SKIP fold compute error {:?}: {e:?}", p.dist_path);
-                    return None;
-                }
-            };
-            combined.extend_from_slice(folded.features());
-        }
         // Streaming folded walk (no prepared reference — both sides
         // stream per pair; bit-identical to the materialized path).
         if do_foldstream {
             let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
             let distorted = RgbSlice::new(&d_px, dw, dh);
             let source = RgbSlice::new(r_px, rw, rh);
-            let r = if mode == "foldappstream" {
+            let r = if stream_append {
                 z.compute_folded720_append_features_streaming(
                     &source,
                     &distorted,
@@ -386,21 +345,13 @@ fn main() {
                 let want_moments = std::env::var("ZENSIM_AB_MOMENTS")
                     .map(|v| v != "0")
                     .unwrap_or(true);
-                let prepared = if do_v2 || do_fold {
-                    // (stream modes deliberately NOT included — nothing to
-                    // prepare; the walk streams the reference per pair.)
+                let prepared = if do_v2 {
+                    // (fold/foldapp/stream modes deliberately NOT included —
+                    // nothing to prepare; the walk streams the reference
+                    // per pair.)
                     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
                     let r = if want_moments {
-                        if mode == "foldapp" {
-                            // Append regime: moments cache incl. blur(src²)
-                            // so the σ-split is a per-pair subtract, not a
-                            // per-pair blur.
-                            z.prepare_v2_reference_with_moments_append(&RgbSlice::new(
-                                &r_px, rw, rh,
-                            ))
-                        } else {
-                            z.prepare_v2_reference_with_moments(&RgbSlice::new(&r_px, rw, rh))
-                        }
+                        z.prepare_v2_reference_with_moments(&RgbSlice::new(&r_px, rw, rh))
                     } else {
                         z.prepare_v2_reference(&RgbSlice::new(&r_px, rw, rh))
                     };

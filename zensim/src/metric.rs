@@ -1359,6 +1359,10 @@ impl Zensim {
     /// ~zero across a sweep's variants); features remain bit-identical —
     /// the cache is filled by replaying the exact per-strip kernel walk.
     ///
+    /// Serves the plain-v2 (`V2Bounded`) research path ONLY: the
+    /// folded-720[+append] extraction is streaming-only since the C5
+    /// switchover (2026-07-26) and takes no prepared reference.
+    ///
     /// # Errors
     ///
     /// Same as [`Self::prepare_v2_reference`].
@@ -1368,25 +1372,6 @@ impl Zensim {
         source: &impl ImageSource,
     ) -> Result<crate::feature_v2::V2PreparedReference, ZensimError> {
         crate::feature_v2::prepare_v2_reference_impl(source, self.max_pixels, self.parallel, true)
-    }
-
-    /// [`Self::prepare_v2_reference_with_moments`] for the append regime:
-    /// the moments cache additionally carries `blur(src²)` per
-    /// channel-scale, which the f720+ append block's σ-split reads —
-    /// making the per-pair `blur(dst²)` a single in-kernel subtraction
-    /// (`d2 = ssq − bs2`) instead of a blur chain. One extra plane-kind
-    /// of cache memory, charged only when this variant is used; use with
-    /// [`Self::compute_folded720_append_features_with_ref_and_scratch`].
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::prepare_v2_reference`].
-    #[cfg(feature = "feature-regime-v2")]
-    pub fn prepare_v2_reference_with_moments_append(
-        &self,
-        source: &impl ImageSource,
-    ) -> Result<crate::feature_v2::V2PreparedReference, ZensimError> {
-        crate::feature_v2::prepare_v2_reference_append_impl(source, self.max_pixels, self.parallel)
     }
 
     /// Compute v2 features for one distorted image against a prepared
@@ -1460,6 +1445,13 @@ impl Zensim {
     /// `f156..371` columns are live — this is its own extraction regime
     /// ([`crate::feature_v2::FeatureRegime::Folded720`]).
     ///
+    /// STREAMING-ONLY since the C5 switchover (2026-07-26, user-approved
+    /// ~1.33× batch-CPU trade for the 4.7× memory reduction + one code
+    /// path): routes through the strip-plane producer; there is no
+    /// prepared-reference form — batch drivers use
+    /// [`Self::compute_folded720_features_streaming`] with a per-worker
+    /// [`crate::feature_v2::V2Scratch`].
+    ///
     /// # Errors
     ///
     /// Same as [`Self::compute_v2_features`].
@@ -1475,35 +1467,6 @@ impl Zensim {
             self.max_pixels,
             self.parallel,
             crate::feature_v2::V2NewFeatureToggles::default(),
-        )
-    }
-
-    /// Batch form of [`Self::compute_folded720_features`]: prepared
-    /// reference + explicit toggles + caller-owned scratch (the
-    /// [`Self::compute_v2_features_with_ref_and_scratch`] contract, folded
-    /// layout). With a moments-cached reference the fold swaps the
-    /// 3-output H kernel back to the 4-output one (it needs `mu1_h`), so
-    /// the moments cache saves slightly less than on the pure-v2 path —
-    /// still strictly faster than not caching.
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::compute_v2_features_with_ref`].
-    #[cfg(feature = "feature-regime-v2")]
-    pub fn compute_folded720_features_with_ref_and_scratch(
-        &self,
-        reference: &crate::feature_v2::V2PreparedReference,
-        distorted: &impl ImageSource,
-        toggles: crate::feature_v2::V2NewFeatureToggles,
-        scratch: &mut crate::feature_v2::V2Scratch,
-    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
-        crate::feature_v2::compute_folded720_with_ref_impl(
-            reference,
-            distorted,
-            self.max_pixels,
-            self.parallel,
-            toggles,
-            scratch,
         )
     }
 
@@ -1532,31 +1495,6 @@ impl Zensim {
             self.max_pixels,
             self.parallel,
             crate::feature_v2::V2NewFeatureToggles::default(),
-        )
-    }
-
-    /// Batch form of [`Self::compute_folded720_append_features`]:
-    /// prepared reference + explicit toggles + caller-owned scratch
-    /// (`toggles.append_block` is forced on).
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::compute_v2_features_with_ref`].
-    #[cfg(feature = "feature-regime-v2")]
-    pub fn compute_folded720_append_features_with_ref_and_scratch(
-        &self,
-        reference: &crate::feature_v2::V2PreparedReference,
-        distorted: &impl ImageSource,
-        toggles: crate::feature_v2::V2NewFeatureToggles,
-        scratch: &mut crate::feature_v2::V2Scratch,
-    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
-        crate::feature_v2::compute_folded720_append_with_ref_impl(
-            reference,
-            distorted,
-            self.max_pixels,
-            self.parallel,
-            toggles,
-            scratch,
         )
     }
 

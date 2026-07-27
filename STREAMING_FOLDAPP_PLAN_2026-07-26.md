@@ -1,5 +1,17 @@
 # Streaming-only folded+append extraction — plan (2026-07-26)
 
+> **STATUS (2026-07-26): COMPLETE — C0-C6 done.** Chunks C0-C4 landed
+> `e421f28a..d9e4f9f9`; G-CPU measured 1.33× vs the 1.15× gate (floor
+> ≈1.27× — the honest cache-free price; the gate's v1-derived anchor
+> under-estimated what the v2 moments cache amortizes), G-PARITY byte-
+> exact on fixtures + 100 real pairs, G-RAM 221 MB @ 12 MP (4.7× under
+> the cached path). The user accepted the CPU trade ("Delete now") and
+> the C5 switchover shipped: folded/append extraction is STREAMING-ONLY,
+> the reference-cache machinery is deleted (net −880 lines), plain-v2
+> keeps its own moments cache. Record:
+> `benchmarks/streaming_foldapp_gates_2026-07-26.md` (+ C5 addendum),
+> design note `docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md`.
+
 **Goal (user directive):** port the v1 streaming-strips architecture to the
 folded-720+append (924) walk and make it the ONLY path — eliminating the
 materialized-pyramid + reference-cache machinery (V2PreparedReference

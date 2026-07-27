@@ -144,6 +144,54 @@ bounded and measured, and 12 MP+ extraction gets FASTER. But this is the
 plan-anchored gate failing by design-relevant margin, so it is the user's
 call, not this session's.
 
+## C5 ADDENDUM (2026-07-26, same day): switchover EXECUTED — G-SIMPLER done
+
+USER DECISION on the verdict above: **"Delete now"** — the ~1.33× batch
+CPU cost was accepted for the streaming-only architecture. The C5
+switchover is complete (commit on top of `d9e4f9f9`):
+
+- **Deleted** (net **−880 lines**: 996 deleted / 116 inserted across
+  `feature_v2.rs` −947, `metric.rs` −84, `v2_ab_extract.rs` −81): the
+  folded/append reference-cache machinery — `V2RefMoments.bs2` + the
+  append cache fill, `prepare_v2_reference_with_moments_append`,
+  `compute_folded720[_append]_features_with_ref_and_scratch`,
+  `compute_folded720[_append]_with_ref_impl`, `AppendCtx`, the pair-path
+  replay planes (`V2Scratch::append_*` + `ensure_append`,
+  `compute_ref_activity_into`, `compute_ref_s2blur_into`,
+  `square_in_place`), `run_blur_pass_strip_cached_ref_fold`, and every
+  fold/append branch of the materialized walk
+  (`compute_v2_features_with_ref_impl_inner` is plain-v2-only again;
+  `compute_channel_scale_v2_with_fold` collapsed back into
+  `compute_channel_scale_v2`).
+- **Kept**: `prepare_v2_reference[_with_moments]` + the mu1/activity
+  moments cache for the plain-v2 (`V2Bounded`) research path ONLY (its
+  bench `v2_with_ref_moments_1thread` and parity tests still exercise
+  it); all streaming-walk kernels (`fold_v1_basic_bands`,
+  `append_block_kernel`, `V1BasicSums` …) — they are the one code path
+  now.
+- **Entries**: `compute_folded720_features` / `compute_folded720_append_
+  features` are thin wrappers over the streaming walk (internal scratch);
+  batch drivers use the `_streaming` forms with a per-worker `V2Scratch`.
+  Driver modes `fold`/`foldapp` now RUN the streaming walk
+  (`foldstream`/`foldappstream` kept as aliases; `ZENSIM_AB_MOMENTS` is a
+  no-op for them).
+- **Test successors** (no invariant dropped): `folded720_ref_paths_bit_
+  identical` → `folded720_entry_paths_bit_identical` (pair wrapper vs
+  streaming batch form vs parallel + the `view()`-tail assertion);
+  `append_ref_paths_bit_identical` → `append_entry_paths_bit_identical`
+  (adds a reused-scratch leg); the cached-leg comparisons are meaningless
+  by construction (the cached path no longer exists). Suite: **212
+  passed / 0 failed** (same count as pre-C5).
+
+### Post-deletion re-measurements (same protocol, this commit)
+
+| check | pre-C5 (C4) | post-C5 | verdict |
+|---|--:|--:|---|
+| foldapp ms/pair (aic3-100, 1T, median of 3) | 68.15 (streamed) | 65.2 | no regression (box variance) |
+| fold ms/pair | 57.05 (streamed) | 56.4 | no regression |
+| foldapp CSV vs C4 streamed CSV | — | **byte-identical** | outputs unchanged by the deletion |
+| 12 MP peak heap (heaptrack) | 221.04 MB | **221.04 MB** | identical |
+
 ## Reproduce
 
 ```

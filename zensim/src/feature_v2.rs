@@ -1161,22 +1161,6 @@ impl ScratchV2Strip {
 pub struct V2Scratch {
     strips: [ScratchV2Strip; 3],
     sized_for: usize,
-    /// Append-block pair-path replay planes (FULL-plane, scale-0 sized),
-    /// used ONLY when `append_block` is on and the prepared reference
-    /// carries no (s2-)moments cache: the X/B activity chains and the
-    /// three `blur(src²)` planes are replayed per scale into these —
-    /// bit-identical to what an append moments cache would hold (same
-    /// helpers, same geometry) — so every path emits the same bytes.
-    /// Never allocated otherwise (`Vec::new()` — zero RAM when the
-    /// append block is off or an append-moments cache is present).
-    append_act_x: Vec<f32>,
-    append_act_b: Vec<f32>,
-    append_bs2: [Vec<f32>; 3],
-    /// σ-split blur temps for the strip-tiled bs2 replay — strip-wide
-    /// (`width·(STRIP_ROWS+2·HALO_P)`), NOT full-plane, since P2.
-    append_tmp_a: Vec<f32>,
-    append_tmp_b: Vec<f32>,
-    append_sized_for: usize,
     /// Recycled rolling-plane buffers for the STREAMING walk's
     /// [`crate::feature_v2_stream::StripPlaneProducer`] (drained at
     /// construction, refilled by `recycle` at walk end) — steady-state
@@ -1194,12 +1178,6 @@ impl V2Scratch {
                 ScratchV2Strip::new(0),
             ],
             sized_for: 0,
-            append_act_x: Vec::new(),
-            append_act_b: Vec::new(),
-            append_bs2: [Vec::new(), Vec::new(), Vec::new()],
-            append_tmp_a: Vec::new(),
-            append_tmp_b: Vec::new(),
-            append_sized_for: 0,
             stream_pool: Vec::new(),
         }
     }
@@ -1216,23 +1194,6 @@ impl V2Scratch {
         }
     }
 
-    /// Grow (never shrink) the pair-path replay planes to one full
-    /// scale-0 plane each (the act/bs2 planes are indexed by global row by
-    /// the kernels), and the σ-split blur temps to `strip_n` (P2: the bs2
-    /// fill is kernel-strip-tiled, so its temps are strip-wide, not
-    /// full-plane). Only called on the append-block-without-cache path.
-    fn ensure_append(&mut self, plane_n: usize, strip_n: usize) {
-        if plane_n > self.append_sized_for {
-            self.append_act_x = vec![0.0f32; plane_n];
-            self.append_act_b = vec![0.0f32; plane_n];
-            self.append_bs2 = std::array::from_fn(|_| vec![0.0f32; plane_n]);
-            self.append_sized_for = plane_n;
-        }
-        if strip_n > self.append_tmp_a.len() {
-            self.append_tmp_a = vec![0.0f32; strip_n];
-            self.append_tmp_b = vec![0.0f32; strip_n];
-        }
-    }
 }
 
 impl Default for V2Scratch {
@@ -1368,50 +1329,6 @@ fn run_blur_pass_strip_cached_ref(width: usize, height_local: usize, scratch: &m
     crate::blur::box_blur_v_from_copy(&s12_h[..n], &mut s12[..n], width, height_local, BLUR_RADIUS);
 }
 
-/// [`run_blur_pass_strip_cached_ref`] variant for the v1-basic FOLD path:
-/// identical except it uses the 4-output [`crate::blur::fused_blur_h_ssim`]
-/// so `mu1_h` is genuinely materialized — the v1 fold kernel
-/// (`fused_vblur_features_ssim`) V-blurs mu1 internally from the H-plane,
-/// which `fused_blur_h_ssim3` compiles out on the v4x tier. The three
-/// shared outputs (`mu2_h`/`ssq_h`/`s12_h`) are bit-identical between the
-/// two H kernels (ssim3 exists purely to skip the mu1 chain), so the v2
-/// block's inputs are unchanged by this swap. Costs back the mu1 H-chain
-/// vs the plain cached path; the cached mu1 V-blur + activity chain
-/// savings are kept.
-fn run_blur_pass_strip_cached_ref_fold(
-    width: usize,
-    height_local: usize,
-    scratch: &mut ScratchV2Strip,
-) {
-    let n = width * height_local;
-    let ScratchV2Strip {
-        src_wide,
-        dst_wide,
-        mu1_h,
-        mu2_h,
-        ssq_h,
-        s12_h,
-        mu2,
-        ssq,
-        s12,
-        ..
-    } = scratch;
-    crate::blur::fused_blur_h_ssim(
-        &src_wide[..n],
-        &dst_wide[..n],
-        &mut mu1_h[..n],
-        &mut mu2_h[..n],
-        &mut ssq_h[..n],
-        &mut s12_h[..n],
-        width,
-        height_local,
-        BLUR_RADIUS,
-    );
-    crate::blur::box_blur_v_from_copy(&mu2_h[..n], &mut mu2[..n], width, height_local, BLUR_RADIUS);
-    crate::blur::box_blur_v_from_copy(&ssq_h[..n], &mut ssq[..n], width, height_local, BLUR_RADIUS);
-    crate::blur::box_blur_v_from_copy(&s12_h[..n], &mut s12[..n], width, height_local, BLUR_RADIUS);
-}
-
 /// Fill one channel-scale's cached reference moments by REPLAYING the
 /// strip walk on `(src, src)`: same `gather_strip_halo` geometry, same
 /// `fused_blur_h_ssim` sliding-sum chains (its `sum_s`/mu1 accumulator
@@ -1442,7 +1359,6 @@ fn compute_ref_moments_channel(
         return V2RefMoments {
             mu1: mu1_full,
             activity: act_full,
-            bs2: Vec::new(),
         };
     }
 
@@ -1517,140 +1433,25 @@ fn compute_ref_moments_channel(
     V2RefMoments {
         mu1: mu1_full,
         activity: act_full,
-        bs2: Vec::new(),
     }
 }
 
 /// Build the full per-scale/per-channel moment cache for a prepared
 /// reference (see [`V2PreparedReference::moments`]).
-fn fill_ref_moments(
-    scales: &[([Vec<f32>; 3], usize, usize)],
-    with_s2: bool,
-) -> Vec<[V2RefMoments; 3]> {
+fn fill_ref_moments(scales: &[([Vec<f32>; 3], usize, usize)]) -> Vec<[V2RefMoments; 3]> {
     let (_, w0, h0) = &scales[0];
     #[allow(clippy::absurd_extreme_comparisons, clippy::unnecessary_min_or_max)]
     let bypass_rows = (*h0).min(STRIP_BYPASS_HEIGHT);
     let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P).max(bypass_rows);
     let mut scratch = ScratchV2Strip::new(strip_max_n);
-    // Strip-wide temps for the append σ-split's `blur(src²)` fill (P2:
-    // the fill is kernel-strip-tiled, so the temps no longer need to hold
-    // a full plane), reused across every (channel, scale); only allocated
-    // when `with_s2`.
-    let (mut s2_sq, mut s2_stage) = if with_s2 {
-        (vec![0.0f32; strip_max_n], vec![0.0f32; strip_max_n])
-    } else {
-        (Vec::new(), Vec::new())
-    };
     scales
         .iter()
         .map(|(planes, width, height)| {
             std::array::from_fn(|ch| {
-                let mut m =
-                    compute_ref_moments_channel(&planes[ch], *width, *height, &mut scratch);
-                // The (B, scale 0) cell is skipped by the append kernel
-                // (`APPEND_SKIP_B_SCALE0`) — don't spend cache memory or
-                // fill time on a plane nothing reads. Scale is inferred
-                // from the plane dims (scale 0 == the largest).
-                let is_scale0 = width * height == w0 * h0;
-                let skipped = APPEND_SKIP_B_SCALE0 && ch == 2 && is_scale0;
-                if with_s2 && !skipped {
-                    let n = width * height;
-                    let mut bs2 = vec![0.0f32; n];
-                    compute_ref_s2blur_into(
-                        &planes[ch],
-                        *width,
-                        *height,
-                        &mut s2_sq,
-                        &mut s2_stage,
-                        &mut bs2,
-                    );
-                    m.bs2 = bs2;
-                }
-                m
+                compute_ref_moments_channel(&planes[ch], *width, *height, &mut scratch)
             })
         })
         .collect()
-}
-
-/// `out = blur(src²)` — the reference side of the append σ-split — computed
-/// per 128-row KERNEL STRIP with the walk's own `gather_strip_halo`
-/// geometry (streaming pre-chunk P2, 2026-07-26 —
-/// `docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md` §2): per strip, gather
-/// the `HALO_P`-padded wide window, square in place, H-blur + V-blur inside
-/// the wide buffer, copy out the strip's own rows. One shared
-/// implementation for the moments-cache fill AND the pair path's per-scale
-/// replay, which is what keeps cached and replayed `bs2` planes
-/// bit-identical by construction (same ops, same order, same strip
-/// geometry) — and, from C2 on, identical to what the streamed walk
-/// computes per kernel strip from its rolling planes.
-///
-/// The previous form ran ONE whole-plane `box_blur_1pass_into`, whose V
-/// pass carries a single f32 running sum from plane row 0 to the bottom —
-/// an accumulation history no strip walk can reproduce. Re-tiling shifts
-/// `bs2` by f32 ULPs (⇒ ULP-scale shifts on the 5 σ-split append lanes;
-/// no trained consumer exists, pre-sanctioned by
-/// `benchmarks/v2_append_block_2026-07-26.md` "do it BEFORE any corpus
-/// freezes append values"), gives `bs2` the SAME V-accumulation tiling as
-/// the `ssq` plane it is subtracted from (`var₂ = (ssq − bs2) − mu2²` now
-/// subtracts same-rounding-class operands), and drops the two whole-plane
-/// temps to strip-wide size (`sq_tmp`/`stage_tmp` ≥
-/// `width·(STRIP_ROWS + 2·HALO_P)` — was ≥ `width·height`).
-fn compute_ref_s2blur_into(
-    src: &[f32],
-    width: usize,
-    height: usize,
-    sq_tmp: &mut [f32],
-    stage_tmp: &mut [f32],
-    out: &mut [f32],
-) {
-    let n = width * height;
-    debug_assert!(out.len() >= n);
-
-    // Mirror the (currently disabled) whole-image bypass dispatch, exactly
-    // like `compute_ref_moments_channel`: below the threshold the kernels
-    // blur the full plane directly, so the cache must too.
-    #[allow(clippy::absurd_extreme_comparisons)]
-    if height <= STRIP_BYPASS_HEIGHT {
-        debug_assert!(sq_tmp.len() >= n && stage_tmp.len() >= n);
-        sq_tmp[..n].copy_from_slice(&src[..n]);
-        square_in_place(&mut sq_tmp[..n]);
-        crate::blur::box_blur_1pass_into(
-            &sq_tmp[..n],
-            &mut out[..n],
-            &mut stage_tmp[..n],
-            width,
-            height,
-            BLUR_RADIUS,
-        );
-        return;
-    }
-
-    let mut y0 = 0usize;
-    while y0 < height {
-        let strip_h = STRIP_ROWS.min(height - y0);
-        let wide_h = strip_h + 2 * HALO_P;
-        let n_wide = width * wide_h;
-        debug_assert!(sq_tmp.len() >= n_wide && stage_tmp.len() >= n_wide);
-        // Gather src's wide window, square it in place, then H+V blur
-        // wholly inside the wide buffer (the V window at strip rows reads
-        // H(sq) rows [strip−R, strip+R) ⊂ the HALO_P(=2R) window, so the
-        // wide buffer's own synthetic edge is never consumed — the same
-        // §A.15 argument the mu2/ssq/s12 chains rest on).
-        gather_strip_halo(src, width, height, y0, wide_h, HALO_P, &mut sq_tmp[..n_wide]);
-        square_in_place(&mut sq_tmp[..n_wide]);
-        crate::blur::box_blur_h(&sq_tmp[..n_wide], &mut stage_tmp[..n_wide], width, wide_h, BLUR_RADIUS);
-        crate::blur::box_blur_v_from_copy(
-            &stage_tmp[..n_wide],
-            &mut sq_tmp[..n_wide],
-            width,
-            wide_h,
-            BLUR_RADIUS,
-        );
-        let off = HALO_P * width;
-        let strip_n = width * strip_h;
-        out[y0 * width..y0 * width + strip_n].copy_from_slice(&sq_tmp[off..off + strip_n]);
-        y0 += strip_h;
-    }
 }
 
 /// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
@@ -2706,23 +2507,6 @@ const STRIP_BYPASS_HEIGHT: usize = 0;
 // derived accumulator without altering any existing operation).
 // ============================================================================
 
-/// Per-channel append-kernel inputs that come from OUTSIDE the channel's own
-/// strip planes: the raw reference-Y plane for this scale (luminance
-/// conditioning — always available, every path materializes the reference
-/// pyramid up front), and, for the Y channel only, the X/B activity planes
-/// for the cross-channel masked transducer (from the reference-moments
-/// cache when present, else from the pair path's `V2Scratch` replay
-/// planes — bit-identical by construction, see `compute_ref_activity_into`).
-#[derive(Clone, Copy)]
-struct AppendCtx<'a> {
-    ref_y: &'a [f32],
-    /// This channel's `blur(src²)` plane (moments cache or pair-path
-    /// replay — bit-identical either way), the reference half of the
-    /// σ-split.
-    bs2: &'a [f32],
-    cross: Option<(&'a [f32], &'a [f32])>,
-}
-
 /// Per-row-reduced f64 accumulator for the append block.
 #[derive(Default, Clone, Copy)]
 struct AppendAccum {
@@ -3166,107 +2950,6 @@ fn square_into(input: &[f32], out: &mut [f32]) {
     }
 }
 
-/// `buf[i] = buf[i]²` — feeds the append σ-split's `blur(src²)` strip
-/// chain. Plain scalar loop; LLVM auto-vectorizes the independent multiply.
-fn square_in_place(buf: &mut [f32]) {
-    for v in buf.iter_mut() {
-        *v = *v * *v;
-    }
-}
-
-/// Replay ONE channel-scale's reference activity chain into `act_out`
-/// (full plane) — [`compute_ref_moments_channel`] minus the mu1 plane
-/// copy-out. Used by the append-block pair path (no moments cache) to
-/// provision the X/B activity planes the Y channel's cross-masked
-/// transducer reads; the replay uses the same helpers, the same strip
-/// tiling, and the same chain starts as the moments fill, so the values
-/// are bit-identical to what a `prepare_v2_reference_with_moments` cache
-/// would hold — which is what keeps the pair/prepared/moments paths
-/// byte-equal on the append block (`append_ref_paths_bit_identical`).
-fn compute_ref_activity_into(
-    src: &[f32],
-    width: usize,
-    height: usize,
-    scratch: &mut ScratchV2Strip,
-    act_out: &mut [f32],
-) {
-    let n = width * height;
-    debug_assert!(act_out.len() >= n);
-
-    #[allow(clippy::absurd_extreme_comparisons)]
-    if height <= STRIP_BYPASS_HEIGHT {
-        run_blur_pass(src, src, width, height, scratch);
-        act_out[..n].copy_from_slice(&scratch.activity[..n]);
-        return;
-    }
-
-    let mut y0 = 0usize;
-    while y0 < height {
-        let strip_h = STRIP_ROWS.min(height - y0);
-        let wide_h = strip_h + 2 * HALO_P;
-        let n_wide = width * wide_h;
-        gather_strip_halo(
-            src,
-            width,
-            height,
-            y0,
-            wide_h,
-            HALO_P,
-            &mut scratch.src_wide[..n_wide],
-        );
-        {
-            let ScratchV2Strip {
-                src_wide,
-                mu1_h,
-                mu2_h,
-                ssq_h,
-                s12_h,
-                mu1,
-                abs_src,
-                activity_tmp,
-                activity,
-                ..
-            } = scratch;
-            crate::blur::fused_blur_h_ssim(
-                &src_wide[..n_wide],
-                &src_wide[..n_wide],
-                &mut mu1_h[..n_wide],
-                &mut mu2_h[..n_wide],
-                &mut ssq_h[..n_wide],
-                &mut s12_h[..n_wide],
-                width,
-                wide_h,
-                BLUR_RADIUS,
-            );
-            crate::blur::box_blur_v_from_copy(
-                &mu1_h[..n_wide],
-                &mut mu1[..n_wide],
-                width,
-                wide_h,
-                BLUR_RADIUS,
-            );
-            crate::simd_ops::abs_diff_into(
-                &src_wide[..n_wide],
-                &mu1[..n_wide],
-                &mut abs_src[..n_wide],
-            );
-            crate::blur::box_blur_1pass_into(
-                &abs_src[..n_wide],
-                &mut activity[..n_wide],
-                &mut activity_tmp[..n_wide],
-                width,
-                wide_h,
-                BLUR_RADIUS,
-            );
-        }
-        let off = HALO_P * width;
-        let strip_n = width * strip_h;
-        let out_base = y0 * width;
-        act_out[out_base..out_base + strip_n].copy_from_slice(&scratch.activity[off..off + strip_n]);
-        y0 += strip_h;
-    }
-}
-
 /// Per-channel-scale f64 sums for the v1 BASIC-13 fold — the exact subset
 /// of v1's `streaming::ChannelAccum` fields that the basic block
 /// (`f0..156`) finalizes from. Filled by v1's own
@@ -3440,10 +3123,10 @@ fn fold_v1_basic_bands(
     }
 }
 
-/// No-fold form of [`compute_channel_scale_v2_with_fold`] — the walk now
-/// routes through the fold-aware body unconditionally, so this thin
-/// delegate exists only for the direct-call unit tests.
-#[cfg(test)]
+/// One channel-scale of the plain-v2 (V2Bounded) materialized walk: the
+/// strip loop over halo-gathered wide buffers. (The folded/append regimes
+/// route through the STREAMING walk since the C5 switchover — this
+/// function serves only `compute_v2_features*`.)
 fn compute_channel_scale_v2(
     src: &[f32],
     dst: &[f32],
@@ -3454,32 +3137,6 @@ fn compute_channel_scale_v2(
     scratch: &mut ScratchV2Strip,
     out: &mut [f64],
 ) -> (f64, f64) {
-    let (g, _sums) = compute_channel_scale_v2_with_fold(
-        src, dst, width, height, toggles, moments, false, None, scratch, out,
-    );
-    g
-}
-
-/// [`compute_channel_scale_v2_whole`]'s strip-path sibling plus the
-/// optional v1-basic FOLD: when `fold_v1` is set, each strip additionally
-/// runs v1's `fused_vblur_features_ssim` over the SAME H-blurred planes
-/// the v2 blur pass just produced (see [`fold_v1_basic_bands`]), returning
-/// the accumulated [`V1BasicSums`] alongside the gradient pair. With
-/// `fold_v1 == false` the extra work is one untaken branch per strip and
-/// the returned sums are zeros.
-#[allow(clippy::too_many_arguments)]
-fn compute_channel_scale_v2_with_fold(
-    src: &[f32],
-    dst: &[f32],
-    width: usize,
-    height: usize,
-    toggles: V2NewFeatureToggles,
-    moments: Option<(&[f32], &[f32])>,
-    fold_v1: bool,
-    append: Option<(AppendCtx<'_>, &mut [f64])>,
-    scratch: &mut ScratchV2Strip,
-    out: &mut [f64],
-) -> ((f64, f64), V1BasicSums) {
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
     assert_eq!(dst.len(), n, "dst plane length must be width*height");
@@ -3496,18 +3153,6 @@ fn compute_channel_scale_v2_with_fold(
         FEATURES_PER_CHANNEL_V2_TOTAL,
         "out slice must hold exactly one channel-scale's v2 block"
     );
-    let (append_ctx, mut append_out) = match append {
-        Some((ctx, out_app)) => {
-            assert!(ctx.ref_y.len() >= n, "append ref_y plane must cover the scale");
-            assert_eq!(
-                out_app.len(),
-                FEATURES_PER_CHANNEL_APPEND,
-                "append out slice must hold exactly one channel-scale's append block"
-            );
-            (Some(ctx), Some(out_app))
-        }
-        None => (None, None),
-    };
 
     // Phase-6 (§A.16 lever B): small images skip the strip machinery
     // entirely — see `STRIP_BYPASS_HEIGHT`'s doc and `compute_channel_
@@ -3517,17 +3162,7 @@ fn compute_channel_scale_v2_with_fold(
     // session re-enabling the lever only needs to change the constant.
     #[allow(clippy::absurd_extreme_comparisons)]
     if height <= STRIP_BYPASS_HEIGHT {
-        return compute_channel_scale_v2_whole_with_fold(
-            src,
-            dst,
-            width,
-            height,
-            toggles,
-            fold_v1,
-            append_ctx.map(|ctx| (ctx, append_out.take().expect("ctx and out arrive together"))),
-            scratch,
-            out,
-        );
+        return compute_channel_scale_v2_whole(src, dst, width, height, toggles, scratch, out);
     }
 
     let max_wide_h = STRIP_ROWS + 2 * HALO_P;
@@ -3538,8 +3173,6 @@ fn compute_channel_scale_v2_with_fold(
 
     let mut dense = DenseAccum::default();
     let mut grad = GradientAccum::default();
-    let mut v1_sums = V1BasicSums::default();
-    let mut app_acc = AppendAccum::default();
 
     let mut y0 = 0usize;
     while y0 < height {
@@ -3576,39 +3209,9 @@ fn compute_channel_scale_v2_with_fold(
         //     O(height)). With cached reference moments the mu1 V-blur +
         //     activity chain drop out of the per-pair cost entirely. ---
         if moments.is_some() {
-            if fold_v1 {
-                run_blur_pass_strip_cached_ref_fold(width, wide_h, scratch);
-            } else {
-                run_blur_pass_strip_cached_ref(width, wide_h, scratch);
-            }
+            run_blur_pass_strip_cached_ref(width, wide_h, scratch);
         } else {
             run_blur_pass_strip(width, wide_h, scratch);
-        }
-
-
-        // --- v1-basic FOLD: v1's own fused V-blur+features kernel over
-        //     the H-planes this strip's blur pass just filled, replaying
-        //     v1's 32-row band tiling (see `fold_v1_basic_bands`). Runs
-        //     before the dense kernel purely for locality (the H-planes
-        //     are cache-hot); the two reads are independent. ---
-        if fold_v1 {
-            let n_wide = width * wide_h;
-            fold_v1_basic_bands(
-                width,
-                y0..y0 + strip_h,
-                y0,
-                HALO_P,
-                height,
-                [
-                    &scratch.mu1_h[..n_wide],
-                    &scratch.mu2_h[..n_wide],
-                    &scratch.ssq_h[..n_wide],
-                    &scratch.s12_h[..n_wide],
-                    &scratch.src_wide[..n_wide],
-                    &scratch.dst_wide[..n_wide],
-                ],
-                &mut v1_sums,
-            );
         }
 
         // --- Slice down to the strip's own real rows (buffer-local
@@ -3661,34 +3264,6 @@ fn compute_channel_scale_v2_with_fold(
             grad.accumulate(&strip_grad);
         }
 
-        // --- Append-block second formula pass over the (cache-hot) strip
-        //     planes. Full-plane inputs (`ref_y`, `bs2`, cross
-        //     activities) index by global row, exactly like the cached
-        //     moments above. No per-pair blur runs for the σ-split: the
-        //     kernel derives `var₂ = (ssq − bs2) − mu2²` from the cached/
-        //     replayed reference `bs2` plane. ---
-        if let Some(ctx) = append_ctx {
-            let bs2_strip = &ctx.bs2[out_base..out_base + strip_n];
-            let refy_strip = &ctx.ref_y[out_base..out_base + strip_n];
-            let cross_strips = ctx
-                .cross
-                .map(|(ax, ab)| (&ax[out_base..out_base + strip_n], &ab[out_base..out_base + strip_n]));
-            let strip_app = append_block_kernel(
-                src_strip,
-                dst_strip,
-                mu1_strip,
-                mu2_strip,
-                ssq_strip,
-                bs2_strip,
-                activity_strip,
-                refy_strip,
-                cross_strips,
-                width,
-                strip_h,
-            );
-            app_acc.accumulate(&strip_app);
-        }
-
         y0 += strip_h;
     }
 
@@ -3698,19 +3273,7 @@ fn compute_channel_scale_v2_with_fold(
         0.0
     };
 
-    let grads = finish_channel_scale(&dense, &grad, sum_blockiness, n, out);
-    if let (Some(ctx), Some(out_app)) = (append_ctx, append_out) {
-        finish_append(
-            &dense,
-            &app_acc,
-            &grad,
-            n,
-            ctx.cross.is_some(),
-            toggles,
-            out_app,
-        );
-    }
-    (grads, v1_sums)
+    finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
 }
 
 /// Phase-6 (§A.16 lever B) whole-image path: below [`STRIP_BYPASS_HEIGHT`],
@@ -3728,9 +3291,6 @@ fn compute_channel_scale_v2_with_fold(
 /// `gather_strip_halo(halo=1)`, the SAME helper the strip loop already
 /// uses for its own (larger) halo, just with `halo=1` and sourced directly
 /// from the real image instead of a strip's local window.
-/// No-fold form of [`compute_channel_scale_v2_whole_with_fold`] — kept
-/// for the direct-call unit tests, same as `compute_channel_scale_v2`.
-#[cfg(test)]
 fn compute_channel_scale_v2_whole(
     src: &[f32],
     dst: &[f32],
@@ -3740,30 +3300,6 @@ fn compute_channel_scale_v2_whole(
     scratch: &mut ScratchV2Strip,
     out: &mut [f64],
 ) -> (f64, f64) {
-    let (g, _sums) = compute_channel_scale_v2_whole_with_fold(
-        src, dst, width, height, toggles, false, None, scratch, out,
-    );
-    g
-}
-
-/// [`compute_channel_scale_v2_whole`] with the optional v1-basic fold —
-/// same relationship as `compute_channel_scale_v2_with_fold` to its plain
-/// form. On this (whole-plane) path the v1 kernel runs over the full
-/// planes with `inner_start = 0`; its V-blur mirror at the plane's own
-/// rows 0/height-1 is the reflect-101 image-boundary treatment, the same
-/// convention `gather_strip_halo` applies on the strip path.
-#[allow(clippy::too_many_arguments)]
-fn compute_channel_scale_v2_whole_with_fold(
-    src: &[f32],
-    dst: &[f32],
-    width: usize,
-    height: usize,
-    toggles: V2NewFeatureToggles,
-    fold_v1: bool,
-    append: Option<(AppendCtx<'_>, &mut [f64])>,
-    scratch: &mut ScratchV2Strip,
-    out: &mut [f64],
-) -> ((f64, f64), V1BasicSums) {
     let n = width * height;
     debug_assert!(
         n <= scratch.mu1.len(),
@@ -3772,28 +3308,6 @@ fn compute_channel_scale_v2_whole_with_fold(
     );
 
     run_blur_pass(src, dst, width, height, scratch);
-
-    // v1-basic fold, whole-plane form: full-plane H-planes + the real
-    // src/dst planes, identity local mapping (strip_y0 = halo_offset = 0).
-    let mut v1_sums = V1BasicSums::default();
-    if fold_v1 {
-        fold_v1_basic_bands(
-            width,
-            0..height,
-            0,
-            0,
-            height,
-            [
-                &scratch.mu1_h[..n],
-                &scratch.mu2_h[..n],
-                &scratch.ssq_h[..n],
-                &scratch.s12_h[..n],
-                src,
-                dst,
-            ],
-            &mut v1_sums,
-        );
-    }
 
     let mu1 = &scratch.mu1[..n];
     let mu2 = &scratch.mu2[..n];
@@ -3835,32 +3349,7 @@ fn compute_channel_scale_v2_whole_with_fold(
         0.0
     };
 
-    let grads = finish_channel_scale(&dense, &grad, sum_blockiness, n, out);
-    if let Some((ctx, out_app)) = append {
-        let app_acc = append_block_kernel(
-            src,
-            dst,
-            mu1,
-            mu2,
-            ssq,
-            &ctx.bs2[..n],
-            activity,
-            &ctx.ref_y[..n],
-            ctx.cross.map(|(ax, ab)| (&ax[..n], &ab[..n])),
-            width,
-            height,
-        );
-        finish_append(
-            &dense,
-            &app_acc,
-            &grad,
-            n,
-            ctx.cross.is_some(),
-            toggles,
-            out_app,
-        );
-    }
-    (grads, v1_sums)
+    finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
 }
 
 /// Shared tail for both [`compute_channel_scale_v2`] (strip path) and
@@ -4471,14 +3960,6 @@ pub struct V2PreparedReference {
 struct V2RefMoments {
     mu1: Vec<f32>,
     activity: Vec<f32>,
-    /// `box_blur(src²)` — the reference half of the append block's σ-split
-    /// (`var₁ = bs2 − mu1²`, `var₂ = (ssq − bs2) − mu2²`; see
-    /// [`idx_append`]). EMPTY unless the cache was prepared for the append
-    /// regime ([`prepare_v2_reference_impl`] `cache_s2`) — existing
-    /// moments users pay zero extra memory. Computed by
-    /// [`compute_ref_s2blur_into`], the same helper the pair path replays,
-    /// so cached and replayed planes are bit-identical by construction.
-    bs2: Vec<f32>,
 }
 
 impl V2PreparedReference {
@@ -4508,19 +3989,7 @@ pub(crate) fn prepare_v2_reference_impl(
     parallel: bool,
     cache_moments: bool,
 ) -> Result<V2PreparedReference, ZensimError> {
-    prepare_v2_reference_impl_inner(source, max_pixels, parallel, cache_moments, false)
-}
-
-/// [`prepare_v2_reference_impl`] for the append regime: moments cache
-/// INCLUDING the `bs2 = blur(src²)` planes the f720+ σ-split consumes
-/// (+one plane-kind of cache memory — charged only to append-regime
-/// preparation; plain moments users keep today's exact footprint).
-pub(crate) fn prepare_v2_reference_append_impl(
-    source: &impl ImageSource,
-    max_pixels: Option<usize>,
-    parallel: bool,
-) -> Result<V2PreparedReference, ZensimError> {
-    prepare_v2_reference_impl_inner(source, max_pixels, parallel, true, true)
+    prepare_v2_reference_impl_inner(source, max_pixels, parallel, cache_moments)
 }
 
 fn prepare_v2_reference_impl_inner(
@@ -4528,7 +3997,6 @@ fn prepare_v2_reference_impl_inner(
     max_pixels: Option<usize>,
     parallel: bool,
     cache_moments: bool,
-    cache_s2: bool,
 ) -> Result<V2PreparedReference, ZensimError> {
     if source.width() == 0 || source.height() == 0 {
         return Err(ZensimError::ImageTooSmall);
@@ -4544,7 +4012,7 @@ fn prepare_v2_reference_impl_inner(
     } else {
         build_v2_ref_scales(source, parallel)
     };
-    let moments = cache_moments.then(|| fill_ref_moments(&scales, cache_s2));
+    let moments = cache_moments.then(|| fill_ref_moments(&scales));
     Ok(V2PreparedReference {
         scales,
         moments,
@@ -4668,13 +4136,14 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
     compute_v2_features_with_ref_impl_inner(
-        prepared, distorted, max_pixels, parallel, toggles, false, scratch,
+        prepared, distorted, max_pixels, parallel, toggles, scratch,
     )
 }
 
 /// Folded-720 pair entry (see [`FeatureRegime::Folded720`] for the
-/// layout): validate + prepare + folded with-ref walk, mirroring
-/// [`compute_v2_features_impl_with_toggles`]'s composition.
+/// layout) — routes to the STREAMING walk (C5 switchover, 2026-07-26,
+/// user-approved: the materialized folded walk and its reference cache
+/// are deleted; `benchmarks/streaming_foldapp_gates_2026-07-26.md`).
 pub(crate) fn compute_folded720_impl_with_toggles(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -4682,40 +4151,14 @@ pub(crate) fn compute_folded720_impl_with_toggles(
     parallel: bool,
     toggles: V2NewFeatureToggles,
 ) -> Result<ZensimV2Result, ZensimError> {
-    crate::metric::validate_pair(source, distorted)?;
-    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
-    let prepared = prepare_v2_reference_impl(source, max_pixels, parallel, false)?;
     let mut scratch = V2Scratch::new();
-    compute_folded720_with_ref_impl(
-        &prepared,
-        distorted,
-        max_pixels,
-        parallel,
-        toggles,
-        &mut scratch,
-    )
-}
-
-/// Folded-720 with-ref entry: ONE v2 scale-walk that also computes the v1
-/// basic block. Emits the 720-layout vector
-/// `[v1 basic f0..156 | zeros f156..372 | v2-348 f372..720]`.
-pub(crate) fn compute_folded720_with_ref_impl(
-    prepared: &V2PreparedReference,
-    distorted: &impl ImageSource,
-    max_pixels: Option<usize>,
-    parallel: bool,
-    toggles: V2NewFeatureToggles,
-    scratch: &mut V2Scratch,
-) -> Result<ZensimV2Result, ZensimError> {
-    compute_v2_features_with_ref_impl_inner(
-        prepared, distorted, max_pixels, parallel, toggles, true, scratch,
-    )
+    compute_folded720_streaming_impl(source, distorted, max_pixels, parallel, toggles, &mut scratch)
 }
 
 /// Folded-720-plus-append pair entry (see
 /// [`FeatureRegime::Folded720Append`]): the folded 720 layout with the
 /// f720+ append block (204 slots) emitted after it. Forces
-/// `toggles.append_block = true`.
+/// `toggles.append_block = true`. Routes to the STREAMING walk (C5).
 pub(crate) fn compute_folded720_append_impl(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -4725,22 +4168,6 @@ pub(crate) fn compute_folded720_append_impl(
 ) -> Result<ZensimV2Result, ZensimError> {
     toggles.append_block = true;
     compute_folded720_impl_with_toggles(source, distorted, max_pixels, parallel, toggles)
-}
-
-/// Folded-720-plus-append with-ref entry, mirroring
-/// [`compute_folded720_with_ref_impl`].
-pub(crate) fn compute_folded720_append_with_ref_impl(
-    prepared: &V2PreparedReference,
-    distorted: &impl ImageSource,
-    max_pixels: Option<usize>,
-    parallel: bool,
-    mut toggles: V2NewFeatureToggles,
-    scratch: &mut V2Scratch,
-) -> Result<ZensimV2Result, ZensimError> {
-    toggles.append_block = true;
-    compute_v2_features_with_ref_impl_inner(
-        prepared, distorted, max_pixels, parallel, toggles, true, scratch,
-    )
 }
 
 // ============================================================================
@@ -5404,7 +4831,6 @@ fn compute_v2_features_with_ref_impl_inner(
     max_pixels: Option<usize>,
     parallel: bool,
     toggles: V2NewFeatureToggles,
-    fold_v1: bool,
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
     if distorted.width() != prepared.orig_width || distorted.height() != prepared.orig_height {
@@ -5436,26 +4862,7 @@ fn compute_v2_features_with_ref_impl_inner(
     );
 
     let n_scales = prepared.scales.len();
-    // Folded layout: v1's full 372-wide block precedes the v2 block —
-    // 3 ch × (13 basic + 6 peak + 6 masked + 6 IW) = 93 per scale, 372 at
-    // the standard 4 scales (720 total). Only the basic 13/ch/scale are
-    // written; the pool blocks stay 0.0 (deprecated, index-stable).
-    let v1_total = if fold_v1 { n_scales * 3 * 31 } else { 0 };
-    // f720+ append block (see the module-level "f720+ APPEND block"
-    // section): emitted strictly AFTER the frozen v1+v2 layout, so every
-    // existing index below is untouched whether it is on or off.
-    let append_on = toggles.append_block;
-    assert!(
-        !append_on || fold_v1,
-        "append_block requires the folded720 path (use the Folded720Append entries)"
-    );
-    let v12_total = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
-    let append_total = if append_on {
-        n_scales * 3 * FEATURES_PER_CHANNEL_APPEND
-    } else {
-        0
-    };
-    let mut features = vec![0.0f64; v12_total + append_total];
+    let mut features = vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL];
     // Per-channel (mean_grad_src, mean_grad_dst) from the previous
     // (finer) scale, for the edge-width-change cross-scale comparison.
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
@@ -5472,46 +4879,14 @@ fn compute_v2_features_with_ref_impl_inner(
     // not once per pair.
     //
     // Phase-6 (§A.16 lever B): `compute_channel_scale_v2_whole` (the
-    // small-image bypass) needs `width*height` rows of scratch, not
-    // `width*(STRIP_ROWS+2*HALO_P)` — bump the allocation to cover
-    // whichever is larger. `height.min(STRIP_BYPASS_HEIGHT)` is the exact
-    // worst case across every scale this call will process: if scale 0's
-    // `height` is already <= the threshold, every scale bypasses and the
-    // largest (scale 0, this `height`) sets the bound; if `height` is
-    // above the threshold, only smaller (already-downsampled) scales can
-    // ever bypass, and none of them can exceed `STRIP_BYPASS_HEIGHT` by
-    // construction (that IS the dispatch condition).
-    // (`STRIP_BYPASS_HEIGHT=0` today makes this `.min()` a permanent
-    // no-op — allow'd for the same reason as the dispatch check above.)
+    // small-image bypass) needs `width*height` rows of scratch — bump the
+    // allocation to cover whichever is larger (`STRIP_BYPASS_HEIGHT=0`
+    // today makes this `.min()` a permanent no-op).
     #[allow(clippy::unnecessary_min_or_max)]
     let bypass_rows = height.min(STRIP_BYPASS_HEIGHT);
     let strip_max_n = width * (STRIP_ROWS + 2 * HALO_P).max(bypass_rows);
     scratch.ensure(strip_max_n);
-    // Append-block replay planes (pair path / non-append moments cache):
-    // full scale-0-sized planes, reused (sliced down) across scales.
-    // Zero allocation on the append-moments extraction path or when the
-    // append block is off.
-    let have_s2_cache = prepared
-        .moments
-        .as_ref()
-        .map(|m| !m[0][0].bs2.is_empty())
-        .unwrap_or(false);
-    if append_on && !(have_s2_cache && prepared.moments.is_some()) {
-        scratch.ensure_append(width * height, strip_max_n);
-    }
-    let V2Scratch {
-        strips: scratch,
-        append_act_x,
-        append_act_b,
-        append_bs2,
-        append_tmp_a,
-        append_tmp_b,
-        ..
-    } = scratch;
-    // Split off the append output region so the v1+v2 writes below keep
-    // their exact indexing into `features_v12` while per-channel append
-    // chunks borrow disjointly from `features_app`.
-    let (features_v12, features_app) = features.split_at_mut(v12_total);
+    let scratch = &mut scratch.strips;
 
     for scale in 0..n_scales {
         let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
@@ -5536,120 +4911,27 @@ fn compute_v2_features_with_ref_impl_inner(
         // below, after all 3 channels finish, and each channel owns its
         // own scratch set) -- so the 3-channel fan-out can run in
         // parallel when both the `threads` feature and the caller's
-        // `parallel` flag are active. Both branches write into the same
-        // `features[scale_base..]` chunks; only the iteration strategy
-        // differs.
+        // `parallel` flag are active.
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
-        let mut fold_sums: [V1BasicSums; 3] = [V1BasicSums::default(); 3];
-        let out_region =
-            &mut features_v12[v1_total + scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
-
-        // --- Append-block per-scale provisioning: the X/B activity planes
-        //     the Y channel's cross-masked transducer reads, and each
-        //     channel's `bs2 = blur(src²)` σ-split plane. With an
-        //     append-prepared moments cache these are borrows of the
-        //     cache (zero cost, channel fan-out stays fully independent);
-        //     otherwise they are replayed into the `V2Scratch` planes —
-        //     bit-identical to the cache by construction (same helpers,
-        //     same geometry) — BEFORE the fan-out, so both branches only
-        //     read. ---
-        let scale_n = width * height;
-        let append_cross: Option<(&[f32], &[f32])> = if append_on {
-            Some(match moments_scale {
-                Some(ms) => (&ms[0].activity[..], &ms[2].activity[..]),
-                None => {
-                    compute_ref_activity_into(
-                        &src_planes[0],
-                        width,
-                        height,
-                        &mut scratch[0],
-                        &mut append_act_x[..scale_n],
-                    );
-                    compute_ref_activity_into(
-                        &src_planes[2],
-                        width,
-                        height,
-                        &mut scratch[2],
-                        &mut append_act_b[..scale_n],
-                    );
-                    (&append_act_x[..scale_n], &append_act_b[..scale_n])
-                }
-            })
-        } else {
-            None
-        };
-        let append_bs2_planes: Option<[&[f32]; 3]> = if append_on {
-            Some(if have_s2_cache {
-                let ms = moments_scale.expect("have_s2_cache implies moments");
-                [&ms[0].bs2[..], &ms[1].bs2[..], &ms[2].bs2[..]]
-            } else {
-                for ch in 0..3 {
-                    if APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0 {
-                        continue; // cell skipped by the kernel — plane never read
-                    }
-                    compute_ref_s2blur_into(
-                        &src_planes[ch],
-                        width,
-                        height,
-                        append_tmp_a,
-                        append_tmp_b,
-                        &mut append_bs2[ch][..scale_n],
-                    );
-                }
-                [
-                    &append_bs2[0][..scale_n],
-                    &append_bs2[1][..scale_n],
-                    &append_bs2[2][..scale_n],
-                ]
-            })
-        } else {
-            None
-        };
-        let ref_y_plane: &[f32] = &src_planes[1];
-        let app_scale_base = scale * 3 * FEATURES_PER_CHANNEL_APPEND;
+        let out_region = &mut features[scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
 
         #[cfg(feature = "threads")]
         let ran_parallel = if parallel {
             use rayon::prelude::*;
-            let app_chunks: Vec<Option<&mut [f64]>> = if append_on {
-                features_app[app_scale_base..][..3 * FEATURES_PER_CHANNEL_APPEND]
-                    .chunks_mut(FEATURES_PER_CHANNEL_APPEND)
-                    .map(Some)
-                    .collect()
-            } else {
-                vec![None, None, None]
-            };
-            let results: Vec<((f64, f64), V1BasicSums)> = out_region
+            let results: Vec<(f64, f64)> = out_region
                 .chunks_mut(FEATURES_PER_CHANNEL_V2_TOTAL)
-                .zip(app_chunks)
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .zip(scratch.par_iter_mut())
                 .enumerate()
-                .map(|(ch, ((out, out_app), scr))| {
-                    let append_arg = if APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0 {
-                        None
-                    } else {
-                        out_app.map(|oa| {
-                            (
-                                AppendCtx {
-                                    ref_y: ref_y_plane,
-                                    bs2: append_bs2_planes.expect("append_on when out_app set")[ch],
-                                    cross: if ch == 1 { append_cross } else { None },
-                                },
-                                oa,
-                            )
-                        })
-                    };
-                    let g = compute_channel_scale_v2_with_fold(
+                .map(|(ch, (out, scr))| {
+                    let g = compute_channel_scale_v2(
                         &src_planes[ch],
                         &dst_planes[ch],
                         width,
                         height,
                         toggles,
                         moments_for(ch),
-                        fold_v1,
-                        append_arg,
                         scr,
                         out,
                     );
@@ -5657,8 +4939,7 @@ fn compute_v2_features_with_ref_impl_inner(
                     g
                 })
                 .collect();
-            grads = [results[0].0, results[1].0, results[2].0];
-            fold_sums = [results[0].1, results[1].1, results[2].1];
+            grads = [results[0], results[1], results[2]];
             true
         } else {
             false
@@ -5667,61 +4948,21 @@ fn compute_v2_features_with_ref_impl_inner(
         let ran_parallel = false;
 
         if !ran_parallel {
-            let mut app_chunks: Vec<Option<&mut [f64]>> = if append_on {
-                features_app[app_scale_base..][..3 * FEATURES_PER_CHANNEL_APPEND]
-                    .chunks_mut(FEATURES_PER_CHANNEL_APPEND)
-                    .map(Some)
-                    .collect()
-            } else {
-                vec![None, None, None]
-            };
-            for (ch, (out, out_app)) in out_region
+            for (ch, out) in out_region
                 .chunks_mut(FEATURES_PER_CHANNEL_V2_TOTAL)
-                .zip(app_chunks.iter_mut())
                 .enumerate()
             {
-                let append_arg = if APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0 {
-                    None
-                } else {
-                    out_app.take().map(|oa| {
-                        (
-                            AppendCtx {
-                                ref_y: ref_y_plane,
-                                bs2: append_bs2_planes.expect("append_on when out_app set")[ch],
-                                cross: if ch == 1 { append_cross } else { None },
-                            },
-                            oa,
-                        )
-                    })
-                };
-                let (g, sums) = compute_channel_scale_v2_with_fold(
+                grads[ch] = compute_channel_scale_v2(
                     &src_planes[ch],
                     &dst_planes[ch],
                     width,
                     height,
                     toggles,
                     moments_for(ch),
-                    fold_v1,
-                    append_arg,
                     &mut scratch[ch],
                     out,
                 );
-                grads[ch] = g;
-                fold_sums[ch] = sums;
                 apply_transducer_luma_gate(out, ch, toggles);
-            }
-        }
-
-        // --- v1-basic fold finalize: this scale's 13 basic features per
-        //     channel, at v1's exact layout (scale-major, 13/ch — the
-        //     `features[scale*39 + ch*13 + k]` addressing of the frozen
-        //     372 vector). Pooling math replicates v1's finalize
-        //     bit-for-bit on the (reassociated) strip sums. ---
-        if fold_v1 {
-            let n_scale_pixels = width * height;
-            for (ch, sums) in fold_sums.iter().enumerate() {
-                let base = scale * 39 + ch * 13;
-                sums.finalize_into(n_scale_pixels, &mut features_v12[base..base + 13]);
             }
         }
 
@@ -5733,10 +4974,9 @@ fn compute_v2_features_with_ref_impl_inner(
                 // the time we reach the next coarser scale".
                 let decay_src = gsrc / (prev_gsrc + C_GRAD_DECAY);
                 let decay_dst = gdst / (prev_gdst + C_GRAD_DECAY);
-                let prev_base = v1_total
-                    + (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                let prev_base = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
                     + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-                features_v12[prev_base + idx::EDGE_WIDTH_CHANGE] =
+                features[prev_base + idx::EDGE_WIDTH_CHANGE] =
                     1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
             }
             prev_grad[ch] = Some((gsrc, gdst));
@@ -5745,24 +4985,19 @@ fn compute_v2_features_with_ref_impl_inner(
                 // Coarsest scale has no next scale to compare against --
                 // duplicate the previous (second-coarsest) scale's value
                 // (documented approximation; see module/spec doc).
-                let this_base = v1_total + scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-                let prev_base = v1_total
-                    + (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                let this_base = scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                let prev_base = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
                     + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-                features_v12[this_base + idx::EDGE_WIDTH_CHANGE] =
-                    features_v12[prev_base + idx::EDGE_WIDTH_CHANGE];
+                features[this_base + idx::EDGE_WIDTH_CHANGE] =
+                    features[prev_base + idx::EDGE_WIDTH_CHANGE];
             }
         }
 
         if scale + 1 < n_scales {
             // BUG TRAP: all 3 channels must downscale from the SAME
             // (width, height) — only update the outer width/height AFTER
-            // the per-channel loop. Updating them mid-loop (as an earlier
-            // draft of this function did) downscales channels 1/2 from
-            // channel 0's ALREADY-HALVED dimensions, corrupting the
-            // pyramid (caught by this file's own test suite: "src plane
-            // length must be width*height" panics on every test that
-            // exercises scale > 0).
+            // the per-channel loop (see the test-suite-caught corruption
+            // this comment originally documented).
             //
             // Only the DISTORTED pyramid is walked here — the reference
             // levels were materialized once in `prepared`.
@@ -5778,14 +5013,7 @@ fn compute_v2_features_with_ref_impl_inner(
     Ok(ZensimV2Result {
         features,
         n_scales,
-        regime: match (fold_v1, append_on) {
-            (true, true) => FeatureRegime::Folded720Append,
-            (true, false) => FeatureRegime::Folded720,
-            (false, false) => FeatureRegime::V2Bounded,
-            (false, true) => unreachable!(
-                "append_block requires the folded path (asserted at function entry)"
-            ),
-        },
+        regime: FeatureRegime::V2Bounded,
     })
 }
 
@@ -7338,13 +6566,15 @@ mod tests {
         }
     }
 
-    /// The three folded entry forms must agree: pair path, prepared-ref
-    /// (no moments), prepared-ref (with moments). The moments form swaps
-    /// `fused_blur_h_ssim3` → `fused_blur_h_ssim` for `mu1_h`, whose three
-    /// shared outputs are bit-identical, so ALL 720 slots must match
-    /// bitwise across the three.
+    /// SUCCESSOR of `folded720_ref_paths_bit_identical` (C5: the
+    /// prepared/moments entry forms are deleted with the reference
+    /// cache): every REMAINING folded-720 entry form must agree bitwise
+    /// on all 720 slots — the pair wrapper (`compute_folded720_features`,
+    /// internal scratch), the explicit streaming batch form (caller
+    /// scratch), and the parallel fan-out. Also keeps the old test's
+    /// `view()`-exposes-the-v2-tail assertion.
     #[test]
-    fn folded720_ref_paths_bit_identical() {
+    fn folded720_entry_paths_bit_identical() {
         let (w, h) = (150usize, 170usize);
         let src = textured_image(w, h, 23);
         let dst = quantize_distort(&src, w, h);
@@ -7354,35 +6584,35 @@ mod tests {
 
         let pair = z.compute_folded720_features(&sref, &dref).unwrap();
         let mut scratch = V2Scratch::new();
-        let plain = z.prepare_v2_reference(&sref).unwrap();
         let a = z
-            .compute_folded720_features_with_ref_and_scratch(
-                &plain,
+            .compute_folded720_features_streaming(
+                &sref,
                 &dref,
                 V2NewFeatureToggles::default(),
                 &mut scratch,
             )
             .unwrap();
-        let moments = z.prepare_v2_reference_with_moments(&sref).unwrap();
-        let b = z
-            .compute_folded720_features_with_ref_and_scratch(
-                &moments,
+        let zp = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(true);
+        let b = zp
+            .compute_folded720_features_streaming(
+                &sref,
                 &dref,
                 V2NewFeatureToggles::default(),
                 &mut scratch,
             )
             .unwrap();
 
+        assert_eq!(pair.features().len(), 720);
         for i in 0..720 {
             assert_eq!(
                 pair.features()[i].to_bits(),
                 a.features()[i].to_bits(),
-                "pair vs prepared(no moments) diverge at f{i}"
+                "pair wrapper vs streaming batch form diverge at f{i}"
             );
             assert_eq!(
                 pair.features()[i].to_bits(),
                 b.features()[i].to_bits(),
-                "pair vs prepared(moments) diverge at f{i}"
+                "serial vs parallel streaming diverge at f{i}"
             );
         }
         // Folded view() exposes the v2 tail.
@@ -7396,13 +6626,15 @@ mod tests {
     // f720+ append block
     // ------------------------------------------------------------------
 
-    /// The three append entry forms must agree bitwise on ALL 924 slots.
-    /// This is the gate on the pair path's cross-channel activity replay
-    /// (`compute_ref_activity_into`): its planes must be bit-identical to
-    /// the moments cache's, or the Y channel's cross-masked transducer
-    /// diverges across paths.
+    /// SUCCESSOR of `append_ref_paths_bit_identical` (C5: the cached
+    /// bs2/moments legs are deleted with the reference cache — the
+    /// streamed walk computes bs2 + cross activities per kernel strip):
+    /// every REMAINING append entry form must agree bitwise on ALL 924
+    /// slots — pair wrapper, explicit streaming batch form, parallel
+    /// fan-out, and a REUSED-scratch second run (the cross-pair leak
+    /// gate the old cached legs also exercised).
     #[test]
-    fn append_ref_paths_bit_identical() {
+    fn append_entry_paths_bit_identical() {
         let (w, h) = (150usize, 170usize);
         let src = textured_image(w, h, 23);
         let dst = quantize_distort(&src, w, h);
@@ -7419,31 +6651,27 @@ mod tests {
         );
 
         let mut scratch = V2Scratch::new();
-        let plain = z.prepare_v2_reference(&sref).unwrap();
         let a = z
-            .compute_folded720_append_features_with_ref_and_scratch(
-                &plain,
+            .compute_folded720_append_features_streaming(
+                &sref,
                 &dref,
                 V2NewFeatureToggles::default(),
                 &mut scratch,
             )
             .unwrap();
-        let moments = z.prepare_v2_reference_with_moments(&sref).unwrap();
-        let b = z
-            .compute_folded720_append_features_with_ref_and_scratch(
-                &moments,
+        // Scratch reuse (second run on the same scratch).
+        let a2 = z
+            .compute_folded720_append_features_streaming(
+                &sref,
                 &dref,
                 V2NewFeatureToggles::default(),
                 &mut scratch,
             )
             .unwrap();
-        // Fourth leg: the append-prepared cache (moments + bs2) — the
-        // production extraction shape; bs2 comes from the cache instead
-        // of the per-scale replay and must still match bitwise.
-        let moments_app = z.prepare_v2_reference_with_moments_append(&sref).unwrap();
-        let c = z
-            .compute_folded720_append_features_with_ref_and_scratch(
-                &moments_app,
+        let zp = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(true);
+        let b = zp
+            .compute_folded720_append_features_streaming(
+                &sref,
                 &dref,
                 V2NewFeatureToggles::default(),
                 &mut scratch,
@@ -7454,17 +6682,17 @@ mod tests {
             assert_eq!(
                 pair.features()[i].to_bits(),
                 a.features()[i].to_bits(),
-                "pair vs prepared(no moments) diverge at f{i}"
+                "pair wrapper vs streaming batch form diverge at f{i}"
+            );
+            assert_eq!(
+                pair.features()[i].to_bits(),
+                a2.features()[i].to_bits(),
+                "scratch reuse diverges at f{i}"
             );
             assert_eq!(
                 pair.features()[i].to_bits(),
                 b.features()[i].to_bits(),
-                "pair vs prepared(moments, replayed bs2) diverge at f{i}"
-            );
-            assert_eq!(
-                pair.features()[i].to_bits(),
-                c.features()[i].to_bits(),
-                "pair vs prepared(append moments, cached bs2) diverge at f{i}"
+                "serial vs parallel streaming diverge at f{i}"
             );
         }
     }
@@ -7625,10 +6853,13 @@ mod tests {
     // (docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md §3)
     // ========================================================================
 
-    /// THE C2 gate: the streaming walk's output is BITWISE equal to the
-    /// materialized pair path — all 720 slots (fold) and all 924 slots
-    /// (foldapp) — across odd dims, sub-one-strip heights, multi-strip
-    /// heights, and a tall multi-production-chunk case.
+    /// Originally the C2 gate (streamed vs the since-deleted materialized
+    /// foldapp walk, bitwise). Post-C5 the pair entries ROUTE to the
+    /// streaming walk, so this now gates the wrapper entries against the
+    /// explicit-scratch streaming form across the full adversarial dim
+    /// matrix (odd dims, sub-one-strip, exact/one-past strip multiples,
+    /// 1-row strips, tall multi-production-chunk) — the geometry coverage
+    /// the C2 gate provided lives on here.
     #[test]
     fn streamed_foldapp_bitwise_vs_materialized() {
         let cases = [
