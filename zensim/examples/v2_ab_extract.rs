@@ -55,6 +55,98 @@ struct Pair {
     human_score: f64,
 }
 
+/// Absolute-linear cd/m² source (declared HDR) for the hdr100 mode.
+struct NitsImage {
+    data: Vec<[f32; 4]>,
+    w: usize,
+    h: usize,
+}
+
+impl zensim::source::ImageSource for NitsImage {
+    fn width(&self) -> usize {
+        self.w
+    }
+    fn height(&self) -> usize {
+        self.h
+    }
+    fn pixel_format(&self) -> zensim::source::PixelFormat {
+        zensim::source::PixelFormat::LinearF32Rgba
+    }
+    fn row_bytes(&self, y: usize) -> &[u8] {
+        bytemuck::cast_slice(&self.data[y * self.w..(y + 1) * self.w])
+    }
+    fn alpha_mode(&self) -> zensim::source::AlphaMode {
+        zensim::source::AlphaMode::Opaque
+    }
+    fn is_hdr(&self) -> bool {
+        true
+    }
+}
+
+fn srgb_eotf_f(v: f32) -> f32 {
+    if v <= 0.040_449_936 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn rgb8_to_nits100(px: &[[u8; 3]], w: usize, h: usize) -> NitsImage {
+    NitsImage {
+        data: px
+            .iter()
+            .map(|&[r, g, b]| {
+                [
+                    srgb_eotf_f(r as f32 / 255.0) * 100.0,
+                    srgb_eotf_f(g as f32 / 255.0) * 100.0,
+                    srgb_eotf_f(b as f32 / 255.0) * 100.0,
+                    1.0,
+                ]
+            })
+            .collect(),
+        w,
+        h,
+    }
+}
+
+/// PQ code-value source over 16-bit samples (`Srgb16Rgba` container).
+struct Pq16Image {
+    data: Vec<[u16; 4]>,
+    w: usize,
+    h: usize,
+}
+
+impl Pq16Image {
+    fn from_rgb16(px: &[[u16; 3]], w: usize, h: usize) -> Self {
+        Self {
+            data: px.iter().map(|&[r, g, b]| [r, g, b, 65535]).collect(),
+            w,
+            h,
+        }
+    }
+}
+
+impl zensim::source::ImageSource for Pq16Image {
+    fn width(&self) -> usize {
+        self.w
+    }
+    fn height(&self) -> usize {
+        self.h
+    }
+    fn pixel_format(&self) -> zensim::source::PixelFormat {
+        zensim::source::PixelFormat::Srgb16Rgba
+    }
+    fn row_bytes(&self, y: usize) -> &[u8] {
+        bytemuck::cast_slice(&self.data[y * self.w..(y + 1) * self.w])
+    }
+    fn alpha_mode(&self) -> zensim::source::AlphaMode {
+        zensim::source::AlphaMode::Opaque
+    }
+    fn is_hdr(&self) -> bool {
+        true
+    }
+}
+
 fn load_pairs_tsv(path: &str) -> Vec<Pair> {
     let text = std::fs::read_to_string(path).expect("read pairs tsv");
     let mut lines = text.lines();
@@ -103,6 +195,20 @@ fn main() {
     // flow has nothing to prepare for them, and ZENSIM_AB_MOMENTS is a
     // NO-OP for these modes — it only affects the plain-v2 "v2" mode).
     // "foldstream" / "foldappstream" = aliases kept for A/B script compat.
+    // HDR modes (HDR_PLAN chunk 2, 2026-07-27):
+    // "foldapphdr100" = decode the SAME sRGB pairs, map to absolute linear
+    //   at diffuse-white 100 cd/m² (srgb_eotf × 100), and run the declared-
+    //   HDR streaming route (HdrEncoding::Linear) — the V5 same-content
+    //   perf leg and a live V3 consistency probe (924 columns).
+    // "foldapphdrpq" = pairs TSV of PQ code-value PNGs (16-bit, e.g.
+    //   kadis-hdr-2026-07-13 or the imazen-26-hdr[-grid] sets); decoded at
+    //   full depth and run through HdrEncoding::Pq { peak_nits: 10000 }
+    //   (924 columns). SPLIT RULE for the imazen-26-derived sets: any
+    //   train/eval/test split is on the ORIGINAL 26 SOURCE IDS — the
+    //   1,140 HDR refs are crops/scales of those 26 sources, so per-ref
+    //   splits leak (gaps doc §6b, USER DIRECTIVE 2026-07-27). This tool
+    //   deliberately bakes in NO per-ref grouping assumption beyond
+    //   ref-decode reuse.
     // "v1stream" (2026-07-26) = v1's Y-strip streaming path
     // (`compute_streaming_strips_default`, per-strip reference pyramid,
     // O(strip×width) memory) — for memory A/B against the materialized
@@ -116,6 +222,8 @@ fn main() {
     let do_foldstream =
         mode == "fold" || mode == "foldapp" || mode == "foldstream" || mode == "foldappstream";
     let stream_append = mode == "foldapp" || mode == "foldappstream";
+    let do_hdr100 = mode == "foldapphdr100";
+    let do_hdrpq = mode == "foldapphdrpq";
     let do_v1stream = mode == "v1stream";
     let do_v1ref = mode == "v1ref";
     let do_v1streamref = mode == "v1streamref";
@@ -123,8 +231,8 @@ fn main() {
         "v1" | "v1e" | "v1s" => (true, false),
         "v2" => (false, true),
         // own branches below
-        "none" | "fold" | "foldapp" | "foldstream" | "foldappstream" | "v1stream" | "v1ref"
-        | "v1streamref" => (false, false),
+        "none" | "fold" | "foldapp" | "foldstream" | "foldappstream" | "foldapphdr100"
+        | "foldapphdrpq" | "v1stream" | "v1ref" | "v1streamref" => (false, false),
         _ => (true, true),
     };
 
@@ -138,6 +246,9 @@ fn main() {
 
     let n_feat_seen = AtomicUsize::new(0);
     let n_done = AtomicUsize::new(0);
+    // Compute-only µs accumulator (V5 gate: route cost net of decode +
+    // harness-side input prep, which the wall clock conflates under load).
+    let compute_us = AtomicUsize::new(0);
     let progress = |k: usize| {
         if k % 1000 == 0 {
             eprintln!("progress: {k}/{}", pairs.len());
@@ -252,12 +363,58 @@ fn main() {
                 }
             }
         }
+        // Declared-HDR modes: same streaming walk behind the PU front-end.
+        if do_hdr100 {
+            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+            let r_n = rgb8_to_nits100(r_px, rw, rh);
+            let d_n = rgb8_to_nits100(&d_px, dw, dh);
+            let t0 = std::time::Instant::now();
+            let r = z.compute_folded720_append_features_hdr(
+                &r_n,
+                &d_n,
+                zensim::feature_v2::HdrEncoding::Linear,
+                V2NewFeatureToggles::default(),
+                scratch,
+            );
+            compute_us.fetch_add(t0.elapsed().as_micros() as usize, Ordering::Relaxed);
+            match r {
+                Ok(r) => combined.extend_from_slice(r.features()),
+                Err(e) => {
+                    eprintln!("SKIP hdr100 compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            }
+        }
+        if do_hdrpq {
+            let (r16, r16w, r16h) = zen_io::decode_rgb16(&p.ref_path);
+            let (d16, d16w, d16h) = zen_io::decode_rgb16(&p.dist_path);
+            if (r16w, r16h) != (d16w, d16h) {
+                eprintln!("SKIP dim mismatch (pq16): {:?}", p.dist_path);
+                return None;
+            }
+            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+            let r = z.compute_folded720_append_features_hdr(
+                &Pq16Image::from_rgb16(&r16, r16w, r16h),
+                &Pq16Image::from_rgb16(&d16, d16w, d16h),
+                zensim::feature_v2::HdrEncoding::Pq { peak_nits: 10_000.0 },
+                V2NewFeatureToggles::default(),
+                scratch,
+            );
+            match r {
+                Ok(r) => combined.extend_from_slice(r.features()),
+                Err(e) => {
+                    eprintln!("SKIP hdrpq compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            }
+        }
         // Streaming folded walk (no prepared reference — both sides
         // stream per pair; bit-identical to the materialized path).
         if do_foldstream {
             let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
             let distorted = RgbSlice::new(&d_px, dw, dh);
             let source = RgbSlice::new(r_px, rw, rh);
+            let t0 = std::time::Instant::now();
             let r = if stream_append {
                 z.compute_folded720_append_features_streaming(
                     &source,
@@ -273,6 +430,7 @@ fn main() {
                     scratch,
                 )
             };
+            compute_us.fetch_add(t0.elapsed().as_micros() as usize, Ordering::Relaxed);
             match r {
                 Ok(r) => combined.extend_from_slice(r.features()),
                 Err(e) => {
@@ -447,4 +605,12 @@ fn main() {
         rows.len(),
         args[1]
     );
+    let cu = compute_us.load(Ordering::Relaxed);
+    if cu > 0 {
+        eprintln!(
+            "compute-only: {:.1} ms/pair over {} rows",
+            cu as f64 / 1000.0 / rows.len() as f64,
+            rows.len()
+        );
+    }
 }

@@ -216,6 +216,18 @@ in PU/PQ space.
   on UPIQ (held-out — would overfit); clearing the bar needs an HDR *training*
   corpus (chunk 4), which is data-blocked per §5. Full numbers:
   `benchmarks/upiq_pu_validation_2026-06-01.md`.
+- **Chunk 2b-STREAMING — PU21 front-end in the streaming 924 walk.**
+  **✅ DONE 2026-07-27** (`benchmarks/hdr_streaming_gates_2026-07-27.md`):
+  the SAME validated PU-XYB composition now feeds the streaming
+  folded+append (924) walk via `Zensim::compute_folded720[_append]_
+  features_hdr` (`HdrEncoding::{Linear, Pq, Hlg}`; PQ/HLG display-model
+  decode in `transfer.rs`; `is_hdr + LinearF32Rgba` pairs auto-route on
+  the plain entries). SDR byte-stability gated (aic3-100 CSVs
+  byte-identical; 218/0 suite); UPIQ HDR-band SROCC **0.7145** — beats
+  the recorded chunk-2b/c numbers (0.687/0.694) under the same harness.
+  THIS is the one HDR extraction regime now: kadis-hdr (v1 u8-shell) and
+  hdr/zenjxl + BHdr (v3 PU-linear) feature rows are old-regime and must
+  be re-extracted before any joint training (gaps-doc §6b directive).
 - **Chunk 3 — luminance-dependent per-channel CSF** (also lifts SDR — the
   standing P0 from `vdp-csf-perceptual-math.md`). Seed `s_ch=[1.0,1.7,0.237]`;
   CSF *shape* from castleCSF (exact coeffs are OCR-garbled → `gfxdisp/castleCSF`

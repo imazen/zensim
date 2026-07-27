@@ -154,3 +154,61 @@ pub fn encode_jpeg_q(pixels: &[[u8; 3]], w: usize, h: usize, quality: u8) -> Vec
     enc.push_packed(&flat, Unstoppable).expect("zenjpeg push");
     enc.finish().expect("zenjpeg finish")
 }
+
+/// Decode a PNG to packed RGB u16 (native 16-bit samples preserved — for
+/// PQ/HLG code-value containers like the kadis-hdr cICP-spliced PNGs);
+/// 8-bit inputs widen by `v * 257`. Alpha dropped. Panics on failure.
+pub fn decode_rgb16(path: &std::path::Path) -> (Vec<[u16; 3]>, usize, usize) {
+    use zenpixels::ChannelType;
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+    let cfg = zenpng::PngDecodeConfig::default();
+    let out = zenpng::decode(&bytes, &cfg, &Unstoppable).expect("zenpng decode");
+    let (w, h) = (out.info.width as usize, out.info.height as usize);
+    let desc = out.pixels.descriptor();
+    let channels = desc.channels() as usize;
+    let slice = out.pixels.as_slice();
+    let samples_per_row = w * channels;
+    let mut samples: Vec<u16> = Vec::with_capacity(h * samples_per_row);
+    match desc.channel_type() {
+        ChannelType::U8 => {
+            for y in 0..h as u32 {
+                for &v in &slice.row(y)[..samples_per_row] {
+                    samples.push(v as u16 * 257);
+                }
+            }
+        }
+        ChannelType::U16 => {
+            for y in 0..h as u32 {
+                for pair in slice.row(y).chunks_exact(2).take(samples_per_row) {
+                    samples.push(u16::from_ne_bytes([pair[0], pair[1]]));
+                }
+            }
+        }
+        other => panic!("unsupported PNG channel type {other:?}"),
+    }
+    let mut rgb = Vec::with_capacity(w * h);
+    match channels {
+        4 => {
+            for px in samples.chunks_exact(4) {
+                rgb.push([px[0], px[1], px[2]]);
+            }
+        }
+        3 => {
+            for px in samples.chunks_exact(3) {
+                rgb.push([px[0], px[1], px[2]]);
+            }
+        }
+        1 => {
+            for &g in &samples {
+                rgb.push([g, g, g]);
+            }
+        }
+        2 => {
+            for px in samples.chunks_exact(2) {
+                rgb.push([px[0], px[0], px[0]]);
+            }
+        }
+        other => panic!("unsupported channel count {other}"),
+    }
+    (rgb, w, h)
+}
