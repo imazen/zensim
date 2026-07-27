@@ -268,7 +268,7 @@ const el=(t,a={},kids=[])=>{const e=document.createElementNS(t.startsWith('svg:'
   (Array.isArray(kids)?kids:[kids]).forEach(c=>c&&e.appendChild(c));return e;};
 const S=(t,a={},k=[])=>el('svg:'+t,a,k);
 
-const state={visible:new Set(DATA.bakes.map(b=>b.name)), ref:null, sortKey:'composite', sortDir:-1};
+const state={visible:new Set(DATA.bakes.map(b=>b.name)), ref:null, sortKey:'composite', sortDir:-1, mcorp:null};
 function effTheme(){const dt=document.documentElement.getAttribute('data-theme');
   return dt||((window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light');}
 const pal=()=>DATA.palette[effTheme()==='dark'?'dark':'light'];
@@ -538,14 +538,69 @@ function renderTrade(){
   host.appendChild(grid);
 }
 
+// ---- FULL MOHAMMADI PANEL (all six stats per corpus, per visible bake)
+function renderMPanel(){
+  const host=$('#mpanel');if(!host)return;host.innerHTML='';
+  const bs=visBakes();if(!bs.length)return;
+  const corps=DATA.corpOrder.filter(c=>DATA.bakes.some(b=>b.rank[c]));
+  if(!state.mcorp||!corps.includes(state.mcorp))state.mcorp=corps[0];
+  const TV=new Set();
+  DATA.bakes.forEach(b=>Object.entries(b.rank||{}).forEach(([c,r])=>{if(r&&r.train_eq_val)TV.add(c);}));
+  host.append(el('h2',{text:'Full Mohammadi panel'}));
+  host.append(el('div',{class:'cap',html:'All six stats (Mohammadi 2025): SROCC/KROCC on raw ranks; '
+    +'PLCC, OR, PWRC, Z-RMSE on the 4-param-logistic-rescaled prediction. <b>OR + Z-RMSE: lower is '
+    +'better</b>; OR is a catastrophe gate, not a ranker. <b>SROCC</b> is signed (a negative = globally '
+    +'inverted bake) with the bootstrap 95% CI half-width. <b>per-ref / %bwd</b> = within-image mean SROCC '
+    +'and share of reference ladders ranked backwards (— when the corpus carries no ref identity). '
+    +'⚠ = train==val (KADID/TID: memorization, not held-out skill).'}));
+  const sel=el('div',{class:'bar',style:'margin:6px 0 10px'});
+  corps.forEach(c=>{
+    const b=el('button',{class:'btn',text:(TV.has(c)?c+' ⚠':c)});
+    if(state.mcorp===c)b.style.cssText='font-weight:700;outline:2px solid var(--seq-hi)';
+    b.onclick=()=>{state.mcorp=c;renderMPanel();};
+    sel.append(b);
+  });
+  host.append(sel);
+  const c=state.mcorp;
+  const tbl=el('table',{});
+  const thead=el('tr',{});
+  ['bake','n','SROCC ±CI','PLCC','KROCC','OR','PWRC','Z-RMSE','per-ref','%bwd'].forEach((h,i)=>
+    thead.append(el('th',{class:i===0?'lbl':'',text:h})));
+  tbl.append(el('thead',{},thead));
+  const tb=el('tbody',{});
+  const rows=bs.filter(b=>b.rank[c]).sort((a,b)=>(b.rank[c].srocc||0)-(a.rank[c].srocc||0));
+  rows.forEach(b=>{
+    const r=b.rank[c];
+    const sroccs=(r.srocc_signed!=null?r.srocc_signed:r.srocc);
+    const ciw=r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;
+    const tr=el('tr',{});
+    const nameTd=el('td',{class:'lbl'});
+    nameTd.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),
+      document.createTextNode(b.name));
+    tr.append(nameTd);
+    const cells=[
+      r.n!=null?String(r.n):'—',
+      (sroccs!=null?(sroccs>=0?'+':'')+sroccs.toFixed(4):'—')+(ciw!=null?' ±'+ciw.toFixed(3):''),
+      f3(r.plcc), f3(r.krocc), r.or!=null?r.or.toFixed(4):'—', f3(r.pwrc),
+      r.z_rmse!=null?r.z_rmse.toFixed(3):'—',
+      r.per_ref_mean!=null?(r.per_ref_mean>=0?'+':'')+r.per_ref_mean.toFixed(4):'—',
+      r.frac_negative!=null?pct(r.frac_negative):'—'];
+    cells.forEach(v=>tr.append(el('td',{text:v})));
+    if(sroccs!=null&&sroccs<0)tr.style.background='color-mix(in srgb, var(--serious) 18%, transparent)';
+    tb.append(tr);
+  });
+  tbl.append(tb);
+  const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
+}
+
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
-function rerender(){mountTable();renderHeat();renderTrade();renderScatter();}
+function rerender(){mountTable();renderHeat();renderMPanel();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 if(window.matchMedia)matchMedia('(prefers-color-scheme:dark)').addEventListener('change',()=>{if(!document.documentElement.getAttribute('data-theme'))rerender();});
