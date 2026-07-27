@@ -140,6 +140,55 @@ impl DisplayModel {
     }
 }
 
+/// BT.2100 luminance coefficients (`Y_s = 0.2627 R + 0.6780 G + 0.0593 B`)
+/// — the scene-luminance weights the HLG OOTF applies its system gamma to.
+/// Public ITU-R BT.2100-2 Table 6 values.
+pub(crate) const BT2100_LUMA: [f32; 3] = [0.2627, 0.6780, 0.0593];
+
+/// Decode one row of PQ code-value RGB triples (`[0, 1]`) IN PLACE to
+/// absolute display-light cd/m², per channel:
+/// `F_D = min(EOTF_PQ(v), peak) + black + reflection` — the
+/// [`DisplayModel::pq_to_luminance`] display model applied per channel
+/// (ST 2084 is defined per color component). `peak_nits` caps what the
+/// display physically emits (pass `10000.0` for a spec-peak/mastering
+/// decode with no display clamp).
+pub(crate) fn decode_pq_row(row: &mut [[f32; 3]], peak_nits: f32) {
+    let dm = DisplayModel {
+        y_peak: peak_nits,
+        y_black: DisplayModel::STANDARD_HDR_PQ_1000.y_black,
+        y_refl: DisplayModel::STANDARD_HDR_PQ_1000.y_refl,
+    };
+    for px in row.iter_mut() {
+        px[0] = dm.pq_to_luminance(px[0]);
+        px[1] = dm.pq_to_luminance(px[1]);
+        px[2] = dm.pq_to_luminance(px[2]);
+    }
+}
+
+/// Decode one row of HLG signal-value RGB triples (`[0, 1]`) IN PLACE to
+/// absolute display-light cd/m² per BT.2100's reference OOTF:
+/// per-channel scene light `E_s = OETF⁻¹(E')`, scene luminance
+/// `Y_s = Σ BT2100_LUMA·E_s`, then
+/// `F_D = peak · Y_s^(γ−1) · E_s + black + reflection` with
+/// `γ = hlg_system_gamma(peak, ambient)`. Black/reflection lift matches
+/// the PQ decode's display model for cross-transfer consistency.
+pub(crate) fn decode_hlg_row(row: &mut [[f32; 3]], peak_nits: f32, ambient_lux: f32) {
+    let gamma = hlg_system_gamma(peak_nits, ambient_lux);
+    let lift =
+        DisplayModel::STANDARD_HDR_PQ_1000.y_black + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
+    for px in row.iter_mut() {
+        let rs = hlg_inverse_oetf(px[0].clamp(0.0, 1.0));
+        let gs = hlg_inverse_oetf(px[1].clamp(0.0, 1.0));
+        let bs = hlg_inverse_oetf(px[2].clamp(0.0, 1.0));
+        let ys = BT2100_LUMA[0] * rs + BT2100_LUMA[1] * gs + BT2100_LUMA[2] * bs;
+        // Y_s = 0 ⇒ 0^(γ−1) with γ > 1 is 0; the multiply keeps it 0.
+        let scale = peak_nits * ys.max(0.0).powf(gamma - 1.0);
+        px[0] = scale * rs + lift;
+        px[1] = scale * gs + lift;
+        px[2] = scale * bs + lift;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,5 +303,46 @@ mod tests {
             close(mid, 92.2466 + d.y_black + d.y_refl, 0.05),
             "pq mid = {mid}"
         );
+    }
+
+    #[test]
+    fn decode_pq_row_reference_values() {
+        // PQ 0.5 → 92.25 cd/m² (HDR_PLAN §1 golden) + the display lift.
+        let lift = DisplayModel::STANDARD_HDR_PQ_1000.y_black
+            + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
+        let mut row = [[0.5f32; 3], [1.0; 3], [0.0; 3]];
+        decode_pq_row(&mut row, 10_000.0);
+        assert!(close(row[0][0], 92.25 + lift, 0.05), "{}", row[0][0]);
+        assert!(close(row[1][1], 10_000.0 + lift, 1.0), "{}", row[1][1]);
+        assert!(row[2][2] >= 0.0 && row[2][2] <= lift + 1e-3);
+        // Display-limited decode clamps the highlight at peak.
+        let mut row = [[1.0f32; 3]];
+        decode_pq_row(&mut row, 1000.0);
+        assert!(close(row[0][0], 1000.0 + lift, 0.5), "{}", row[0][0]);
+    }
+
+    #[test]
+    fn decode_hlg_row_reference_values() {
+        // Full-scale white (E' = 1 on all channels): E_s = 1, Y_s = 1,
+        // F_D = peak · 1^(γ−1) · 1 = peak (+ lift).
+        let lift = DisplayModel::STANDARD_HDR_PQ_1000.y_black
+            + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
+        let mut row = [[1.0f32; 3]];
+        decode_hlg_row(&mut row, 1000.0, 5.0);
+        assert!(close(row[0][0], 1000.0 + lift, 0.5), "{}", row[0][0]);
+        // BT.2100 luma weights sum to 1 (spec identity).
+        assert!(close(BT2100_LUMA.iter().sum::<f32>(), 1.0, 1e-4));
+        // Monotone in signal value on a gray axis; zero stays at the lift.
+        let mut prev = -1.0f32;
+        for i in 0..=20 {
+            let v = i as f32 / 20.0;
+            let mut r = [[v; 3]];
+            decode_hlg_row(&mut r, 1000.0, 5.0);
+            assert!(r[0][0] >= prev, "not monotone at {v}");
+            prev = r[0][0];
+        }
+        let mut r = [[0.0f32; 3]];
+        decode_hlg_row(&mut r, 1000.0, 5.0);
+        assert!(close(r[0][0], lift, 1e-4), "{}", r[0][0]);
     }
 }

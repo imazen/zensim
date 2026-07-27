@@ -996,6 +996,35 @@ impl<'a> FeatureViewV2<'a> {
 // Per-channel-per-scale computation — SINGLE PASS, O(1) accumulators
 // ============================================================================
 
+/// How a declared-HDR source's pixel values map to absolute display light
+/// (cd/m²) on the folded/append STREAMING HDR route (HDR_PLAN chunk 2).
+/// The declaration is explicit at the entry — the route never guesses a
+/// transfer from pixel bytes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HdrEncoding {
+    /// Pixels are already absolute linear light in cd/m² (the
+    /// [`crate::Zensim::compute_pu_linear`] contract; e.g. decoded EXR).
+    Linear,
+    /// Pixels are PQ (SMPTE ST 2084) code values in `[0, 1]`, decoded per
+    /// channel through the display model (`min(EOTF_PQ, peak) + black +
+    /// reflection`). `peak_nits = 10000.0` decodes at spec peak with no
+    /// display clamp; `1000.0` matches pycvvdp's `standard_hdr_pq`.
+    Pq {
+        /// Display peak luminance, cd/m².
+        peak_nits: f32,
+    },
+    /// Pixels are HLG (ITU-R BT.2100) signal values in `[0, 1]`, decoded
+    /// through the reference OOTF (`F_D = peak·Y_s^(γ−1)·E_s`) with the
+    /// BT.2100 system gamma for `peak_nits`/`ambient_lux`.
+    Hlg {
+        /// Display peak luminance, cd/m².
+        peak_nits: f32,
+        /// Ambient illuminance, lux (5.0 = reference environment).
+        ambient_lux: f32,
+    },
+}
+
+
 /// Runtime toggles for the phase-2 new-feature GROUPS (A.10 candidates),
 /// grouped by shared per-pixel computation rather than 1:1 with feature
 /// slots (per `docs/FEATURE_V2_SPEC_2026-07-18.md` §A.12's per-group
@@ -4511,10 +4540,47 @@ pub(crate) fn compute_folded720_streaming_impl(
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
-    crate::metric::validate_pair(source, distorted)?;
+    crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
-    crate::metric::reject_hdr_input(source)?;
-    crate::metric::reject_hdr_input(distorted)?;
+    // HDR routing (HDR_PLAN chunk 2) in the exact position the
+    // unconditional `reject_hdr_input` calls held: a pair of
+    // HDR-declared sources whose pixels are ABSOLUTE LINEAR cd/m²
+    // (`LinearF32Rgba` + `is_hdr()`, the `compute_pu_linear` contract)
+    // routes to the PU front-end with `HdrEncoding::Linear`. Every other
+    // HDR-flagged shape (code-value formats without a declared transfer,
+    // translucent alpha, mixed SDR/HDR pairs) still gets
+    // `HdrInputRequiresPuPath` — the reject remains for every path the
+    // HDR validation did not cover. sRGB sources take the identical
+    // SDR path as before this routing existed (byte-stability gate).
+    if source.is_hdr() || distorted.is_hdr() {
+        fn linear_ok(
+            is_hdr: bool,
+            fmt: crate::source::PixelFormat,
+            alpha: crate::source::AlphaMode,
+        ) -> bool {
+            is_hdr
+                && fmt == crate::source::PixelFormat::LinearF32Rgba
+                && matches!(alpha, crate::source::AlphaMode::Opaque)
+        }
+        if linear_ok(source.is_hdr(), source.pixel_format(), source.alpha_mode())
+            && linear_ok(
+                distorted.is_hdr(),
+                distorted.pixel_format(),
+                distorted.alpha_mode(),
+            )
+        {
+            return compute_folded720_hdr_streaming_impl(
+                source,
+                distorted,
+                HdrEncoding::Linear,
+                max_pixels,
+                parallel,
+                toggles,
+                scratch,
+            );
+        }
+        return Err(ZensimError::HdrInputRequiresPuPath);
+    }
     if source.width() < crate::metric::MIN_PYRAMID_DIM
         || source.height() < crate::metric::MIN_PYRAMID_DIM
     {
@@ -4525,12 +4591,95 @@ pub(crate) fn compute_folded720_streaming_impl(
             &padded_dst,
             parallel,
             toggles,
+            crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
         ));
     }
     Ok(foldapp_streaming_walk(
-        source, distorted, parallel, toggles, scratch,
+        source,
+        distorted,
+        parallel,
+        toggles,
+        crate::feature_v2_stream::FrontEnd::Sdr,
+        scratch,
     ))
+}
+
+/// The declared-HDR folded/append streaming entry (HDR_PLAN chunk 2):
+/// pixel values → absolute cd/m² per `encoding` → the UPIQ-validated
+/// PU-XYB front-end → the UNCHANGED streaming 924 walk (same layout,
+/// same formulas, same constants — `FeatureRegime` reports as the same
+/// folded regimes; HDR-ness is a property of the extraction run, tracked
+/// by the caller exactly like the fold-vs-ext regime rule).
+///
+/// Accepted sources: `LinearF32Rgba` (f32; cd/m² for `Linear`, code
+/// values for `Pq`/`Hlg`) or `Srgb16Rgba` (u16 code values, `Pq`/`Hlg`
+/// only) — both with `AlphaMode::Opaque` (the alpha noise-background
+/// compositor is `[0,1]`-relative and NOT validated on absolute-light
+/// pixels). `ColorPrimaries` are taken as-is (no gamut mapping — the
+/// `compute_pu_linear` contract). Everything else:
+/// `HdrInputRequiresPuPath`.
+pub(crate) fn compute_folded720_hdr_streaming_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    crate::metric::validate_pair_dims(source, distorted)?;
+    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    let shape_ok = |fmt: crate::source::PixelFormat, alpha: crate::source::AlphaMode| {
+        let fmt_ok = match encoding {
+            HdrEncoding::Linear => fmt == crate::source::PixelFormat::LinearF32Rgba,
+            HdrEncoding::Pq { .. } | HdrEncoding::Hlg { .. } => {
+                fmt == crate::source::PixelFormat::LinearF32Rgba
+                    || fmt == crate::source::PixelFormat::Srgb16Rgba
+            }
+        };
+        fmt_ok && matches!(alpha, crate::source::AlphaMode::Opaque)
+    };
+    if !shape_ok(source.pixel_format(), source.alpha_mode())
+        || !shape_ok(distorted.pixel_format(), distorted.alpha_mode())
+    {
+        return Err(ZensimError::HdrInputRequiresPuPath);
+    }
+    let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
+    if source.width() < crate::metric::MIN_PYRAMID_DIM
+        || source.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded_src = crate::metric::reflect_pad_to_min(source);
+        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
+        return Ok(foldapp_streaming_walk(
+            &padded_src,
+            &padded_dst,
+            parallel,
+            toggles,
+            front_end,
+            scratch,
+        ));
+    }
+    Ok(foldapp_streaming_walk(
+        source, distorted, parallel, toggles, front_end, scratch,
+    ))
+}
+
+/// [`compute_folded720_hdr_streaming_impl`] with the append block forced
+/// on (the 924 shape).
+pub(crate) fn compute_folded720_append_hdr_streaming_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    mut toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    toggles.append_block = true;
+    compute_folded720_hdr_streaming_impl(
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch,
+    )
 }
 
 /// [`compute_folded720_streaming_impl`] with the append block forced on
@@ -4553,6 +4702,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     distorted: &D,
     parallel: bool,
     toggles: V2NewFeatureToggles,
+    front_end: crate::feature_v2_stream::FrontEnd,
     scratch: &mut V2Scratch,
 ) -> ZensimV2Result {
     use crate::feature_v2_stream::StripPlaneProducer;
@@ -4582,7 +4732,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     } = scratch;
 
     let mut accums: [StreamChannelAccums; 3] = std::array::from_fn(|_| StreamChannelAccums::new(n_scales));
-    let mut producer = StripPlaneProducer::new(source, distorted, parallel, stream_pool);
+    let mut producer =
+        StripPlaneProducer::new_with_front_end(source, distorted, parallel, stream_pool, front_end);
 
     while let Some(info) = producer.next_strip() {
         let scale = info.scale;
@@ -7064,5 +7215,370 @@ mod tests {
                 "streamed scratch reuse changed f{i}"
             );
         }
+    }
+
+    // ========================================================================
+    // HDR route gates (HDR_PLAN chunk 2 — streaming PU front-end)
+    // ========================================================================
+
+    /// Minimal declared-HDR test source: absolute-linear cd/m² RGBA f32,
+    /// `is_hdr() == true`, opaque.
+    struct NitsImage {
+        data: Vec<[f32; 4]>,
+        w: usize,
+        h: usize,
+    }
+
+    impl NitsImage {
+        fn from_rgb_nits(rgb: &[[f32; 3]], w: usize, h: usize) -> Self {
+            Self {
+                data: rgb.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
+                w,
+                h,
+            }
+        }
+    }
+
+    impl crate::source::ImageSource for NitsImage {
+        fn width(&self) -> usize {
+            self.w
+        }
+        fn height(&self) -> usize {
+            self.h
+        }
+        fn pixel_format(&self) -> crate::source::PixelFormat {
+            crate::source::PixelFormat::LinearF32Rgba
+        }
+        fn row_bytes(&self, y: usize) -> &[u8] {
+            bytemuck::cast_slice(&self.data[y * self.w..(y + 1) * self.w])
+        }
+        fn alpha_mode(&self) -> crate::source::AlphaMode {
+            crate::source::AlphaMode::Opaque
+        }
+        fn is_hdr(&self) -> bool {
+            true
+        }
+    }
+
+    /// PQ/HLG code-value test source (`Srgb16Rgba` container), HDR-flagged.
+    struct Code16Image {
+        data: Vec<[u16; 4]>,
+        w: usize,
+        h: usize,
+    }
+
+    impl Code16Image {
+        fn from_unit_codes(codes: &[[f32; 3]], w: usize, h: usize) -> Self {
+            Self {
+                data: codes
+                    .iter()
+                    .map(|p| {
+                        [
+                            (p[0].clamp(0.0, 1.0) * 65535.0).round() as u16,
+                            (p[1].clamp(0.0, 1.0) * 65535.0).round() as u16,
+                            (p[2].clamp(0.0, 1.0) * 65535.0).round() as u16,
+                            65535,
+                        ]
+                    })
+                    .collect(),
+                w,
+                h,
+            }
+        }
+    }
+
+    impl crate::source::ImageSource for Code16Image {
+        fn width(&self) -> usize {
+            self.w
+        }
+        fn height(&self) -> usize {
+            self.h
+        }
+        fn pixel_format(&self) -> crate::source::PixelFormat {
+            crate::source::PixelFormat::Srgb16Rgba
+        }
+        fn row_bytes(&self, y: usize) -> &[u8] {
+            bytemuck::cast_slice(&self.data[y * self.w..(y + 1) * self.w])
+        }
+        fn alpha_mode(&self) -> crate::source::AlphaMode {
+            crate::source::AlphaMode::Opaque
+        }
+        fn is_hdr(&self) -> bool {
+            true
+        }
+    }
+
+    /// Deterministic HDR test content spanning the given luminance range
+    /// (geometric ramp + texture), in cd/m².
+    fn nits_image(w: usize, h: usize, lo: f32, hi: f32, seed: u32) -> Vec<[f32; 3]> {
+        let mut px = vec![[0.0f32; 3]; w * h];
+        let mut state = seed.wrapping_mul(0x9E37_79B9) | 1;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            (state & 0xFFFF) as f32 / 65535.0
+        };
+        for y in 0..h {
+            for x in 0..w {
+                let t = (x + y * 3) as f32 / (w + h * 3) as f32;
+                let base = lo * (hi / lo).powf(t);
+                let n = 0.7 + 0.6 * next();
+                px[y * w + x] = [base * n, base * (0.8 + 0.4 * next()), base * n * 0.9];
+            }
+        }
+        px
+    }
+
+    fn distort_nits(src: &[[f32; 3]]) -> Vec<[f32; 3]> {
+        src.iter()
+            .map(|&[r, g, b]| {
+                // Multiplicative + quantization-flavored distortion that
+                // stays strictly positive at every luminance.
+                [
+                    (r * 1.06).max(0.001),
+                    (g * 0.95 + 0.02 * r).max(0.001),
+                    (b * 1.02).max(0.001),
+                ]
+            })
+            .collect()
+    }
+
+    /// Unvalidated HDR shapes stay rejected: HDR-flagged 8-bit sRGB on the
+    /// SDR entry, mixed SDR/HDR pairs, wrong format for `Linear` on the
+    /// explicit entry.
+    #[test]
+    fn hdr_route_rejects_unvalidated_shapes() {
+        let (w, h) = (96usize, 80usize);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+
+        // HDR-flagged source whose pixels are NOT absolute-linear f32:
+        // still rejected on the plain entries (routing covers only the
+        // validated Linear shape).
+        struct HdrSrgb8 {
+            data: Vec<[u8; 3]>,
+            w: usize,
+            h: usize,
+        }
+        impl crate::source::ImageSource for HdrSrgb8 {
+            fn width(&self) -> usize {
+                self.w
+            }
+            fn height(&self) -> usize {
+                self.h
+            }
+            fn pixel_format(&self) -> crate::source::PixelFormat {
+                crate::source::PixelFormat::Srgb8Rgb
+            }
+            fn row_bytes(&self, y: usize) -> &[u8] {
+                bytemuck::cast_slice(&self.data[y * self.w..(y + 1) * self.w])
+            }
+            fn alpha_mode(&self) -> crate::source::AlphaMode {
+                crate::source::AlphaMode::Opaque
+            }
+            fn is_hdr(&self) -> bool {
+                true
+            }
+        }
+        let bad = HdrSrgb8 {
+            data: vec![[128, 128, 128]; w * h],
+            w,
+            h,
+        };
+        let e = z.compute_folded720_append_features(&bad, &bad).unwrap_err();
+        assert!(matches!(e, ZensimError::HdrInputRequiresPuPath), "{e:?}");
+
+        // Mixed pair: SDR + HDR.
+        let srgb = textured_image(w, h, 5);
+        let sdr = RgbSlice::new(&srgb, w, h);
+        let nits = nits_image(w, h, 1.0, 200.0, 7);
+        let hdr = NitsImage::from_rgb_nits(&nits, w, h);
+        let e = z.compute_folded720_append_features(&sdr, &hdr).unwrap_err();
+        assert!(matches!(e, ZensimError::HdrInputRequiresPuPath), "{e:?}");
+
+        // Explicit entry, Linear encoding, code-value container: rejected.
+        let codes = Code16Image::from_unit_codes(&nits_image(w, h, 0.0, 1.0, 9), w, h);
+        let e = z
+            .compute_folded720_append_features_hdr(
+                &codes,
+                &codes,
+                HdrEncoding::Linear,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap_err();
+        assert!(matches!(e, ZensimError::HdrInputRequiresPuPath), "{e:?}");
+    }
+
+    /// An HDR-declared absolute-linear pair routed through the PLAIN
+    /// folded/append entries produces bit-identical output to the explicit
+    /// HDR entry with `HdrEncoding::Linear` — the auto-route is the same
+    /// walk.
+    #[test]
+    fn hdr_auto_route_matches_explicit_linear() {
+        let (w, h) = (150usize, 170usize);
+        let src = nits_image(w, h, 0.5, 800.0, 21);
+        let dst = distort_nits(&src);
+        let s_img = NitsImage::from_rgb_nits(&src, w, h);
+        let d_img = NitsImage::from_rgb_nits(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+
+        let auto = z.compute_folded720_append_features(&s_img, &d_img).unwrap();
+        let explicit = z
+            .compute_folded720_append_features_hdr(
+                &s_img,
+                &d_img,
+                HdrEncoding::Linear,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        assert_eq!(auto.regime(), FeatureRegime::Folded720Append);
+        for i in 0..auto.features().len() {
+            assert_eq!(
+                auto.features()[i].to_bits(),
+                explicit.features()[i].to_bits(),
+                "auto-route vs explicit diverge at f{i}"
+            );
+        }
+    }
+
+    /// Identity HDR pair: the error-driven append classes are EXACTLY 0 and
+    /// the σ-derived ones sit in the identity ULP band — the same contract
+    /// as `append_identity_pair_zeros`, on PU-domain planes.
+    #[test]
+    fn hdr_identity_pair_append_zeros() {
+        let (w, h) = (150usize, 130usize);
+        let src = nits_image(w, h, 0.05, 2000.0, 5);
+        let img = NitsImage::from_rgb_nits(&src, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+        let r = z
+            .compute_folded720_append_features_hdr(
+                &img,
+                &img,
+                HdrEncoding::Linear,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        let app = r.append_features().unwrap();
+        const EXACT_ZERO: [usize; 11] = [
+            idx_append::XMASK_TRANSDUCER,
+            idx_append::LUM_TRANSDUCER,
+            idx_append::LUM_DARK_ERR,
+            idx_append::LUM_MID_ERR,
+            idx_append::LUM_BRIGHT_ERR,
+            idx_append::GMS_DEV2,
+            idx_append::ART_DEV2,
+            idx_append::DET_DEV2,
+            idx_append::GLOBAL_DMEAN,
+            idx_append::GLOBAL_CGAIN,
+            idx_append::GLOBAL_CLOSS,
+        ];
+        for scale in 0..4 {
+            for ch in 0..3 {
+                for local in 0..FEATURES_PER_CHANNEL_APPEND {
+                    let v = app[scale * 3 * FEATURES_PER_CHANNEL_APPEND
+                        + ch * FEATURES_PER_CHANNEL_APPEND
+                        + local];
+                    if local == idx_append::GRAD_SRC_MEAN {
+                        assert!((0.0..1.0).contains(&v), "grad_src_mean {v} s{scale} ch{ch}");
+                    } else if EXACT_ZERO.contains(&local) {
+                        assert_eq!(v, 0.0, "append {local} not zero on HDR identity: {v}");
+                    } else {
+                        // Identity ULP band, HDR-scaled: the σ-split noise
+                        // (`(ssq − bs2) − mu2²` vs `bs2 − mu1²`) grows with
+                        // the PLANE AMPLITUDE squared, and PU planes reach
+                        // `pu21(10000)/PU_WHITE ≈ 2.5` vs the SDR path's
+                        // ≤ ~1.0 — so the SDR test's 1e-4 band scales by
+                        // ~6.5× here. Measured on this fixture: 4.3e-4 max
+                        // (CONTRAST_GAIN); 2e-3 leaves ~4× headroom while
+                        // still far below any real-signal value.
+                        assert!(v.abs() < 2e-3, "append {local} above identity band: {v}");
+                    }
+                }
+            }
+        }
+        // The whole 720 block must also be finite.
+        assert!(r.features().iter().all(|v| v.is_finite()));
+    }
+
+    /// Extremes: content at the PU21 domain edges (0.005 and 10,000 cd/m²)
+    /// through all three encodings — every one of the 924 slots finite and
+    /// inside its documented bound class.
+    #[test]
+    fn hdr_extremes_bounded_all_encodings() {
+        let (w, h) = (96usize, 96usize);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+
+        let check = |r: &ZensimV2Result, tag: &str| {
+            assert_eq!(r.features().len(), 924, "{tag}");
+            for (i, v) in r.features().iter().enumerate() {
+                assert!(v.is_finite(), "{tag}: f{i} not finite: {v}");
+                assert!(
+                    (-1.0..=3.0).contains(v),
+                    "{tag}: f{i} outside sanity range: {v}"
+                );
+            }
+        };
+
+        // Linear at the domain floor and ceiling (plus a full-range ramp).
+        for (lo, hi, tag) in [
+            (0.005f32, 0.05f32, "linear-black"),
+            (5_000.0, 10_000.0, "linear-peak"),
+            (0.005, 10_000.0, "linear-fullrange"),
+        ] {
+            let src = nits_image(w, h, lo, hi, 3);
+            let dst = distort_nits(&src);
+            let r = z
+                .compute_folded720_append_features_hdr(
+                    &NitsImage::from_rgb_nits(&src, w, h),
+                    &NitsImage::from_rgb_nits(&dst, w, h),
+                    HdrEncoding::Linear,
+                    V2NewFeatureToggles::default(),
+                    &mut scratch,
+                )
+                .unwrap();
+            check(&r, tag);
+        }
+
+        // PQ code values 0.0..=1.0 (decodes to 0..10000 at spec peak;
+        // clamps at 1000 for the display-limited variant).
+        let codes = nits_image(w, h, 1e-4, 1.0, 13); // reuse generator as unit ramp
+        let dstc: Vec<[f32; 3]> = codes
+            .iter()
+            .map(|&[r, g, b]| [(r * 0.97).min(1.0), (g * 1.02).min(1.0), b.min(1.0)])
+            .collect();
+        for (peak, tag) in [(10_000.0f32, "pq-spec-peak"), (1_000.0, "pq-1000")] {
+            let r = z
+                .compute_folded720_append_features_hdr(
+                    &Code16Image::from_unit_codes(&codes, w, h),
+                    &Code16Image::from_unit_codes(&dstc, w, h),
+                    HdrEncoding::Pq { peak_nits: peak },
+                    V2NewFeatureToggles::default(),
+                    &mut scratch,
+                )
+                .unwrap();
+            check(&r, tag);
+        }
+
+        // HLG signal values through the reference OOTF.
+        let r = z
+            .compute_folded720_append_features_hdr(
+                &Code16Image::from_unit_codes(&codes, w, h),
+                &Code16Image::from_unit_codes(&dstc, w, h),
+                HdrEncoding::Hlg {
+                    peak_nits: 1000.0,
+                    ambient_lux: 5.0,
+                },
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        check(&r, "hlg-1000");
     }
 }

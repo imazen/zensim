@@ -1554,6 +1554,68 @@ impl Zensim {
         )
     }
 
+    /// Declared-HDR form of [`Self::compute_folded720_features_streaming`]
+    /// (HDR_PLAN chunk 2): pixel values map to absolute display light per
+    /// `encoding` (PQ / HLG display model, or already-linear cd/m²), then
+    /// the UPIQ-validated PU-XYB front-end (opsin → PU21 `banding_glare`
+    /// per channel, normalized so 100 cd/m² → 1.0 — SDR-range content
+    /// lands on the scale the downstream formulas were tuned on) feeds
+    /// the UNCHANGED streaming 720 walk. Sources: `LinearF32Rgba` (f32)
+    /// or `Srgb16Rgba` (code values; `Pq`/`Hlg` only), `AlphaMode::Opaque`,
+    /// primaries taken as-is. SDR sRGB extraction is untouched by this
+    /// route existing (byte-stability gated).
+    ///
+    /// # Errors
+    ///
+    /// [`ZensimError::HdrInputRequiresPuPath`] for unsupported
+    /// format/alpha shapes, plus the error conditions of
+    /// [`Self::compute_v2_features`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_features_hdr(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        encoding: crate::feature_v2::HdrEncoding,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+        scratch: &mut crate::feature_v2::V2Scratch,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_hdr_streaming_impl(
+            source,
+            distorted,
+            encoding,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+            scratch,
+        )
+    }
+
+    /// [`Self::compute_folded720_features_hdr`] with the f720+ append
+    /// block forced on — the 924-slot declared-HDR extraction.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_folded720_features_hdr`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_append_features_hdr(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        encoding: crate::feature_v2::HdrEncoding,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+        scratch: &mut crate::feature_v2::V2Scratch,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_append_hdr_streaming_impl(
+            source,
+            distorted,
+            encoding,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+            scratch,
+        )
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors
@@ -2403,6 +2465,22 @@ pub(crate) fn validate_pair(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
 ) -> Result<(), ZensimError> {
+    validate_pair_dims(source, distorted)?;
+    // Refuse HDR-flagged input on either side — a mixed SDR/HDR pair is
+    // just as unscorable by the SDR pipeline as an all-HDR one.
+    reject_hdr_input(source)?;
+    reject_hdr_input(distorted)?;
+    Ok(())
+}
+
+/// [`validate_pair`]'s dimension/zero checks WITHOUT the HDR refusal —
+/// for the folded/append streaming entries, which ROUTE declared-HDR
+/// pairs to the PU front-end instead of refusing them (HDR_PLAN chunk 2).
+/// Every other entry keeps [`validate_pair`]'s refusal.
+pub(crate) fn validate_pair_dims(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+) -> Result<(), ZensimError> {
     // Empty images are unscoreable; sub-64px images are now handled by
     // reflect-padding in `compute_with_config_inner` (scores down to 1×1),
     // so they are NOT rejected here anymore.
@@ -2412,10 +2490,6 @@ pub(crate) fn validate_pair(
     if source.width() != distorted.width() || source.height() != distorted.height() {
         return Err(ZensimError::DimensionMismatch);
     }
-    // Refuse HDR-flagged input on either side — a mixed SDR/HDR pair is
-    // just as unscorable by the SDR pipeline as an all-HDR one.
-    reject_hdr_input(source)?;
-    reject_hdr_input(distorted)?;
     Ok(())
 }
 

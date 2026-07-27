@@ -40,8 +40,21 @@
 
 #[cfg(test)]
 use crate::feature_v2::gather_strip_halo;
-use crate::feature_v2::{reflect_101, HALO_P, STRIP_ROWS};
-use crate::source::{ImageSource, SubsetView};
+use crate::feature_v2::{reflect_101, HdrEncoding, HALO_P, STRIP_ROWS};
+use crate::source::{ImageSource, PixelFormat, SubsetView};
+
+/// Which front-end fills the scale-0 rolling planes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum FrontEnd {
+    /// The SDR path: `convert_source_to_xyb_into_slices` (sRGB → linear →
+    /// opsin → cube-root XYB) — byte-identical to the pre-HDR producer.
+    Sdr,
+    /// The HDR path (HDR_PLAN chunk 2): pixel values → absolute cd/m² per
+    /// the declared [`HdrEncoding`] → the UPIQ-validated PU-XYB front-end
+    /// (`color::linear_to_pu_xyb_planar_into`: opsin mix → PU21
+    /// banding_glare per channel ÷ PU21(100) → opponent axes, X×4).
+    Hdr(HdrEncoding),
+}
 
 /// Rows appended to scale 0 per production step. A multiple of
 /// `2^(NUM_SCALES-1)` keeps every deeper scale's fill cadence in whole
@@ -193,6 +206,9 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     planes: [[Vec<RollingPlane>; 3]; 2],
     scales: Vec<ScaleState>,
     parallel: bool,
+    front_end: FrontEnd,
+    /// Row scratch for the HDR front-end (decode + PU conversion input).
+    hdr_row: Vec<[f32; 3]>,
     /// Peak `hi − lo` observed per scale (capacity-budget telemetry for
     /// the C1 tests; also what G-RAM's O(width) claim rests on).
     max_held_rows: Vec<usize>,
@@ -222,6 +238,16 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         distorted: &'a D,
         parallel: bool,
         pool: &mut Vec<Vec<f32>>,
+    ) -> Self {
+        Self::new_with_front_end(source, distorted, parallel, pool, FrontEnd::Sdr)
+    }
+
+    pub(crate) fn new_with_front_end(
+        source: &'a S,
+        distorted: &'a D,
+        parallel: bool,
+        pool: &mut Vec<Vec<f32>>,
+        front_end: FrontEnd,
     ) -> Self {
         let (w0, h0) = (source.width(), source.height());
         debug_assert_eq!(w0, distorted.width());
@@ -261,6 +287,11 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             planes,
             scales,
             parallel,
+            front_end,
+            hdr_row: match front_end {
+                FrontEnd::Sdr => Vec::new(),
+                FrontEnd::Hdr(_) => vec![[0.0f32; 3]; w0],
+            },
             max_held_rows: vec![0; crate::NUM_SCALES],
         }
     }
@@ -336,37 +367,58 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         let n_new = ADVANCE_ROWS.min(h0 - hi0);
 
         // --- Scale-0 conversion, both sides. ---
+        let front_end = self.front_end;
         for si in 0..2 {
+            let width = self.scales[0].plane_w;
             let [c0, c1, c2] = &mut self.planes[si];
             let (p0, p1, p2) = (
                 c0[0].append_rows(n_new),
                 c1[0].append_rows(n_new),
                 c2[0].append_rows(n_new),
             );
-            match si {
-                0 => {
-                    let sub = SubsetView::new(self.source, hi0, n_new);
-                    crate::streaming::convert_source_to_xyb_into_slices(
-                        &sub,
-                        p0,
-                        p1,
-                        p2,
-                        self.scales[0].plane_w,
-                        self.parallel,
-                        hi0,
-                    );
-                }
-                _ => {
-                    let sub = SubsetView::new(self.distorted, hi0, n_new);
-                    crate::streaming::convert_source_to_xyb_into_slices(
-                        &sub,
-                        p0,
-                        p1,
-                        p2,
-                        self.scales[0].plane_w,
-                        self.parallel,
-                        hi0,
-                    );
+            match front_end {
+                FrontEnd::Sdr => match si {
+                    0 => {
+                        let sub = SubsetView::new(self.source, hi0, n_new);
+                        crate::streaming::convert_source_to_xyb_into_slices(
+                            &sub,
+                            p0,
+                            p1,
+                            p2,
+                            width,
+                            self.parallel,
+                            hi0,
+                        );
+                    }
+                    _ => {
+                        let sub = SubsetView::new(self.distorted, hi0, n_new);
+                        crate::streaming::convert_source_to_xyb_into_slices(
+                            &sub,
+                            p0,
+                            p1,
+                            p2,
+                            width,
+                            self.parallel,
+                            hi0,
+                        );
+                    }
+                },
+                FrontEnd::Hdr(encoding) => {
+                    for k in 0..n_new {
+                        let y = hi0 + k;
+                        let row_off = k * width;
+                        if si == 0 {
+                            hdr_source_row_to_nits(self.source, y, encoding, &mut self.hdr_row);
+                        } else {
+                            hdr_source_row_to_nits(self.distorted, y, encoding, &mut self.hdr_row);
+                        }
+                        crate::color::linear_to_pu_xyb_planar_into(
+                            &self.hdr_row[..width],
+                            &mut p0[row_off..row_off + width],
+                            &mut p1[row_off..row_off + width],
+                            &mut p2[row_off..row_off + width],
+                        );
+                    }
                 }
             }
         }
@@ -493,6 +545,51 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 }
             }
         }
+    }
+}
+
+/// Read one source row as absolute-linear cd/m² RGB triples per the
+/// declared [`HdrEncoding`]. Accepted pixel formats (validated at the HDR
+/// entry): `LinearF32Rgba` (f32 values used directly — cd/m² for
+/// `Linear`, code values for `Pq`/`Hlg`; alpha ignored, Opaque required)
+/// and `Srgb16Rgba` (u16 code values normalized by 65535 — `Pq`/`Hlg`
+/// code-value containers like cICP-spliced 16-bit PNG).
+fn hdr_source_row_to_nits(
+    src: &impl ImageSource,
+    y: usize,
+    encoding: HdrEncoding,
+    out: &mut [[f32; 3]],
+) {
+    let width = src.width();
+    let row_bytes = src.row_bytes(y);
+    match src.pixel_format() {
+        PixelFormat::LinearF32Rgba => {
+            let px: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
+            for (o, p) in out[..width].iter_mut().zip(&px[..width]) {
+                *o = [p[0], p[1], p[2]];
+            }
+        }
+        PixelFormat::Srgb16Rgba => {
+            const INV: f32 = 1.0 / 65535.0;
+            for (x, o) in out[..width].iter_mut().enumerate() {
+                let off = x * 8;
+                let r = u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
+                let g = u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
+                let b = u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
+                *o = [r as f32 * INV, g as f32 * INV, b as f32 * INV];
+            }
+        }
+        other => unreachable!(
+            "HDR route accepts LinearF32Rgba/Srgb16Rgba only (validated at the entry); got {other:?}"
+        ),
+    }
+    match encoding {
+        HdrEncoding::Linear => {}
+        HdrEncoding::Pq { peak_nits } => crate::transfer::decode_pq_row(&mut out[..width], peak_nits),
+        HdrEncoding::Hlg {
+            peak_nits,
+            ambient_lux,
+        } => crate::transfer::decode_hlg_row(&mut out[..width], peak_nits, ambient_lux),
     }
 }
 
