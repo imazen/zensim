@@ -731,10 +731,19 @@ function renderModels(){
     hd.append(el('span',{class:'sw',style:'display:inline-block;background:'+color(b)}),
       el('b',{text:b.name}));
     card.append(hd);
-    const arch=(m.layers||[]).map(l=>l.in+'→'+l.out+' '+l.activation+(l.dtype!=='f32'?' ('+l.dtype+')':'')).join('  ·  ');
+    // Full dim chain with hidden sizes: "720 → 128 (LeakyRelu) → 1", trainer-log style.
+    // Identity on the last layer is the plain linear output head — omit the label.
+    const L=m.layers||[];
+    let arch=L.length?String(L[0].in):'—';
+    let nparams=0;
+    L.forEach((l,i)=>{
+      const act=(l.activation==='Identity'&&i===L.length-1)?'':' ('+l.activation+(l.dtype!=='f32'?' '+l.dtype:'')+')';
+      arch+=' → '+l.out+act;
+      nparams+=l.in*l.out+l.out;
+    });
     const kb=m.file_bytes?(m.file_bytes/1024).toFixed(1)+' KB':'—';
     const lines=[
-      ['arch', arch||'—'],
+      ['arch', arch+(nparams?'  ·  '+(nparams>=1000?(nparams/1000).toFixed(1)+'k':nparams)+' params':'')],
       ['size / ZNPR', kb+' · v'+(m.znpr_version||'?')],
       ['inputs', m.n_inputs+' feats · scaler '+(m.scaler&&m.scaler.present?('z-norm ('+m.scaler.n+')'):'none')],
       ['in-mods', (m.feature_transforms&&m.feature_transforms.length?m.feature_transforms.length+' transforms':'none')
