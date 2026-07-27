@@ -99,6 +99,11 @@ fn main() {
     // f156..371 = 0, v2-348) — `Zensim::compute_folded720_features*`.
     // "foldapp" (2026-07-26) = fold + the f720+ append block (924 columns)
     // — `Zensim::compute_folded720_append_features*`.
+    // "foldstream" / "foldappstream" (2026-07-26, streaming port C3) =
+    // the STREAMING walk (`compute_folded720[_append]_features_streaming`):
+    // bit-identical output, O(width) rolling planes, NO prepared reference
+    // or moments cache — the grouped flow skips prepare entirely for
+    // these modes (there is nothing to prepare).
     // "v1stream" (2026-07-26) = v1's Y-strip streaming path
     // (`compute_streaming_strips_default`, per-strip reference pyramid,
     // O(strip×width) memory) — for memory A/B against the materialized
@@ -110,6 +115,7 @@ fn main() {
     // the grouped flow (ZENSIM_AB_GROUPED=1, the default).
     let mode = std::env::var("ZENSIM_AB_MODE").unwrap_or_else(|_| "ext".into());
     let do_fold = mode == "fold" || mode == "foldapp";
+    let do_foldstream = mode == "foldstream" || mode == "foldappstream";
     let do_v1stream = mode == "v1stream";
     let do_v1ref = mode == "v1ref";
     let do_v1streamref = mode == "v1streamref";
@@ -117,7 +123,8 @@ fn main() {
         "v1" | "v1e" | "v1s" => (true, false),
         "v2" => (false, true),
         // own branches below
-        "none" | "fold" | "foldapp" | "v1stream" | "v1ref" | "v1streamref" => (false, false),
+        "none" | "fold" | "foldapp" | "foldstream" | "foldappstream" | "v1stream" | "v1ref"
+        | "v1streamref" => (false, false),
         _ => (true, true),
     };
 
@@ -286,6 +293,35 @@ fn main() {
             };
             combined.extend_from_slice(folded.features());
         }
+        // Streaming folded walk (no prepared reference — both sides
+        // stream per pair; bit-identical to the materialized path).
+        if do_foldstream {
+            let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+            let distorted = RgbSlice::new(&d_px, dw, dh);
+            let source = RgbSlice::new(r_px, rw, rh);
+            let r = if mode == "foldappstream" {
+                z.compute_folded720_append_features_streaming(
+                    &source,
+                    &distorted,
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                )
+            } else {
+                z.compute_folded720_features_streaming(
+                    &source,
+                    &distorted,
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                )
+            };
+            match r {
+                Ok(r) => combined.extend_from_slice(r.features()),
+                Err(e) => {
+                    eprintln!("SKIP foldstream compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            }
+        }
         n_feat_seen.store(combined.len(), Ordering::Relaxed);
         let base = p
             .ref_path
@@ -351,6 +387,8 @@ fn main() {
                     .map(|v| v != "0")
                     .unwrap_or(true);
                 let prepared = if do_v2 || do_fold {
+                    // (stream modes deliberately NOT included — nothing to
+                    // prepare; the walk streams the reference per pair.)
                     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
                     let r = if want_moments {
                         if mode == "foldapp" {

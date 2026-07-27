@@ -1560,6 +1560,62 @@ impl Zensim {
         )
     }
 
+    /// STREAMING form of [`Self::compute_folded720_features`]: the same
+    /// 720-layout output, bit-for-bit, computed through the strip-plane
+    /// producer (`docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md`) —
+    /// O(width) rolling planes instead of materialized full-image
+    /// pyramids, no prepared reference, no moments cache. Peak memory is
+    /// the `v1stream` class regardless of image height.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_v2_features`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_features_streaming(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+        scratch: &mut crate::feature_v2::V2Scratch,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_streaming_impl(
+            source,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+            scratch,
+        )
+    }
+
+    /// STREAMING form of [`Self::compute_folded720_append_features`]
+    /// (924 slots, `toggles.append_block` forced on): bit-identical
+    /// output through the strip-plane producer — the append σ-split's
+    /// `bs2 = blur(src²)` and the Y channel's X/B cross-activities are
+    /// computed per kernel strip inside the walk, so no reference cache
+    /// or replay plane is ever materialized.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compute_v2_features`].
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded720_append_features_streaming(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        toggles: crate::feature_v2::V2NewFeatureToggles,
+        scratch: &mut crate::feature_v2::V2Scratch,
+    ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        crate::feature_v2::compute_folded720_append_streaming_impl(
+            source,
+            distorted,
+            self.max_pixels,
+            self.parallel,
+            toggles,
+            scratch,
+        )
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors

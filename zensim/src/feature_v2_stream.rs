@@ -71,9 +71,16 @@ struct RollingPlane {
 }
 
 impl RollingPlane {
-    fn new(width: usize, cap_rows: usize) -> Self {
+    /// Build from a recycled buffer (see [`StripPlaneProducer::recycle`])
+    /// — resized up if the pooled buffer is too small; contents are
+    /// irrelevant (every row is fully written before it is read).
+    fn from_pooled(mut buf: Vec<f32>, width: usize, cap_rows: usize) -> Self {
+        let need = width * cap_rows;
+        if buf.len() < need {
+            buf.resize(need, 0.0);
+        }
         Self {
-            buf: vec![0.0f32; width * cap_rows],
+            buf,
             width,
             lo: 0,
             hi: 0,
@@ -205,7 +212,17 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     /// applied entry-point validation (dims match, ≥ MIN_PYRAMID_DIM —
     /// sub-64 inputs are reflect-padded BEFORE constructing, exactly like
     /// the materialized entries).
-    pub(crate) fn new(source: &'a S, distorted: &'a D, parallel: bool) -> Self {
+    /// `pool` recycles rolling-plane buffers across pairs (the caller's
+    /// [`crate::feature_v2::V2Scratch`] owns it): construction drains it,
+    /// [`Self::recycle`] refills it — steady-state batch extraction
+    /// performs zero producer allocation (measured ~1.7k page
+    /// faults/pair from fresh per-pair Vecs before this).
+    pub(crate) fn new(
+        source: &'a S,
+        distorted: &'a D,
+        parallel: bool,
+        pool: &mut Vec<Vec<f32>>,
+    ) -> Self {
         let (w0, h0) = (source.width(), source.height());
         debug_assert_eq!(w0, distorted.width());
         debug_assert_eq!(h0, distorted.height());
@@ -228,7 +245,11 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                     .iter()
                     .enumerate()
                     .map(|(s, st)| {
-                        RollingPlane::new(st.plane_w, scale_capacity_rows(s, st.plane_h))
+                        RollingPlane::from_pooled(
+                            pool.pop().unwrap_or_default(),
+                            st.plane_w,
+                            scale_capacity_rows(s, st.plane_h),
+                        )
                     })
                     .collect::<Vec<_>>()
             })
@@ -462,6 +483,17 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     pub(crate) fn max_held_rows(&self) -> &[usize] {
         &self.max_held_rows
     }
+
+    /// Return every rolling-plane buffer to `pool` for the next pair.
+    pub(crate) fn recycle(self, pool: &mut Vec<Vec<f32>>) {
+        for side in self.planes {
+            for ch in side {
+                for plane in ch {
+                    pool.push(plane.buf);
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -590,7 +622,8 @@ mod tests {
             let mat_s = materialize(&s_img);
             let mat_d = materialize(&d_img);
 
-            let mut prod = StripPlaneProducer::new(&s_img, &d_img, false);
+            let mut pool = Vec::new();
+            let mut prod = StripPlaneProducer::new(&s_img, &d_img, false, &mut pool);
             let mut emitted: Vec<Vec<usize>> = vec![Vec::new(); crate::NUM_SCALES];
             let mut wide = Vec::new();
             let mut wide_ref = Vec::new();
@@ -680,7 +713,8 @@ mod tests {
         let img = crate::source::RgbaSlice::new(&rgba, w, h);
         let mat = materialize(&img);
 
-        let mut prod = StripPlaneProducer::new(&img, &img, false);
+        let mut pool = Vec::new();
+        let mut prod = StripPlaneProducer::new(&img, &img, false, &mut pool);
         let mut wide = Vec::new();
         let mut wide_ref = Vec::new();
         while let Some(info) = prod.next_strip() {

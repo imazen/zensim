@@ -1177,6 +1177,11 @@ pub struct V2Scratch {
     append_tmp_a: Vec<f32>,
     append_tmp_b: Vec<f32>,
     append_sized_for: usize,
+    /// Recycled rolling-plane buffers for the STREAMING walk's
+    /// [`crate::feature_v2_stream::StripPlaneProducer`] (drained at
+    /// construction, refilled by `recycle` at walk end) — steady-state
+    /// batch extraction performs zero producer allocation.
+    stream_pool: Vec<Vec<f32>>,
 }
 
 impl V2Scratch {
@@ -1195,6 +1200,7 @@ impl V2Scratch {
             append_tmp_a: Vec::new(),
             append_tmp_b: Vec::new(),
             append_sized_for: 0,
+            stream_pool: Vec::new(),
         }
     }
 
@@ -4785,11 +4791,41 @@ fn append_cell_active(append_on: bool, ch: usize, scale: usize) -> bool {
     append_on && !(APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0)
 }
 
-/// Phase A of one (strip, channel): wide windows + blur pass (+ bs2).
-/// After this, `scr` holds exactly what the materialized walk's strip
-/// iteration holds before its kernels run — src/dst wide windows, the
-/// four H planes, the four V planes, activity — plus the strip's `bs2`
-/// wide plane when the append cell is active.
+/// One (strip, channel)'s wide input windows: zero-copy slices of the
+/// producer's rolling planes for interior strips, or the scratch
+/// `src_wide`/`dst_wide` buffers filled via `fill_wide` when the strip
+/// touches the true top/bottom (reflection must be materialized). Both
+/// forms hold IDENTICAL bytes for identical rows (C1's producer gate), so
+/// every downstream kernel is bitwise-indifferent to which one it reads —
+/// the zero-copy path just skips two `n_wide` memcpys per channel-strip.
+/// Re-derive one (strip, channel)'s wide windows for a SHARED-borrow
+/// consumer (phase B): zero-copy producer slices for interior strips, or
+/// the scratch buffers phase A filled for edge strips. Identical bytes
+/// either way (C1's producer gate).
+fn stream_windows_shared<'w, S: ImageSource, D: ImageSource>(
+    producer: &'w crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
+    info: &crate::feature_v2_stream::StripInfo,
+    ch: usize,
+    scr: &'w ScratchV2Strip,
+) -> (&'w [f32], &'w [f32]) {
+    use crate::feature_v2_stream::Side;
+    let n_wide = info.plane_w * info.wide_h();
+    match (
+        producer.wide_window(Side::Source, ch, info),
+        producer.wide_window(Side::Distorted, ch, info),
+    ) {
+        (Some(sw), Some(dw)) => (sw, dw),
+        _ => (&scr.src_wide[..n_wide], &scr.dst_wide[..n_wide]),
+    }
+}
+
+/// Phase A of one (strip, channel): resolve the wide windows (zero-copy
+/// producer slices for interior strips; `fill_wide` into the scratch
+/// buffers when the strip touches the true top/bottom), then the
+/// materialized walk's moments-free blur pass (fused H + 4x V +
+/// activity), plus the P2 strip-tiled bs2 σ-split chain when the append
+/// cell is active (`abs_src`/`activity_tmp` are dead after the activity
+/// chain and serve as its square/H temps).
 fn stream_phase_a<S: ImageSource, D: ImageSource>(
     producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
     info: &crate::feature_v2_stream::StripInfo,
@@ -4801,25 +4837,52 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
     let width = info.plane_w;
     let wide_h = info.wide_h();
     let n_wide = width * wide_h;
-    producer.fill_wide(Side::Source, ch, info, &mut scr.src_wide[..n_wide]);
-    producer.fill_wide(Side::Distorted, ch, info, &mut scr.dst_wide[..n_wide]);
-    // The materialized walk's moments-free blur pass — fused H + 4x V +
-    // activity, wholly inside the wide buffer.
-    run_blur_pass_strip(width, wide_h, scr);
+    let ScratchV2Strip {
+        src_wide,
+        dst_wide,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        abs_src,
+        activity_tmp,
+        activity,
+        bs2,
+    } = scr;
+    let (src_win, dst_win): (&[f32], &[f32]) = match (
+        producer.wide_window(Side::Source, ch, info),
+        producer.wide_window(Side::Distorted, ch, info),
+    ) {
+        (Some(sw), Some(dw)) => (sw, dw),
+        _ => {
+            producer.fill_wide(Side::Source, ch, info, &mut src_wide[..n_wide]);
+            producer.fill_wide(Side::Distorted, ch, info, &mut dst_wide[..n_wide]);
+            (&src_wide[..n_wide], &dst_wide[..n_wide])
+        }
+    };
+    run_blur_pass_inner(
+        src_win,
+        dst_win,
+        width,
+        wide_h,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        abs_src,
+        activity_tmp,
+        activity,
+    );
     if want_bs2 {
-        // P2's strip-tiled σ-split chain on the SAME wide window
-        // (`compute_ref_s2blur_into` per-strip body, minus the gather —
-        // the window is already materialized here). `abs_src` and
-        // `activity_tmp` are dead after the blur pass finishes the
-        // activity chain, so they serve as the square/H temps.
-        let ScratchV2Strip {
-            src_wide,
-            abs_src,
-            activity_tmp,
-            bs2,
-            ..
-        } = scr;
-        square_into(&src_wide[..n_wide], &mut abs_src[..n_wide]);
+        square_into(src_win, &mut abs_src[..n_wide]);
         crate::blur::box_blur_h(
             &abs_src[..n_wide],
             &mut activity_tmp[..n_wide],
@@ -4839,17 +4902,32 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
 
 /// Phase B of one (strip, channel): the materialized walk's kernel set
 /// over the phase-A planes, folded into `acc` in kernel-strip order.
-/// Reads all three channels' scratches immutably (the Y channel's append
-/// kernel consumes X/B activity — computed once per strip in phase A,
-/// replacing the materialized pair path's whole-plane replay planes).
+///
+/// `refy_strip` is the reference Y plane's strip rows (from the
+/// producer's rolling plane — valid until the next `next_strip` call);
+/// `cross` is `Some((act_x, act_b))` strip slices for the Y channel's
+/// cross-masked transducer (X/B's phase-A activity, still live in their
+/// scratches — computed once per strip, replacing the materialized pair
+/// path's whole-plane replay planes).
+///
+/// LOCALITY CONTRACT: call this IMMEDIATELY after the same channel's
+/// [`stream_phase_a`] — the fold band replay re-reads the H planes and
+/// the kernels re-read the V planes while they are cache-hot (the same
+/// reason the materialized walk runs its fold hook "before the dense
+/// kernel purely for locality"). Interleaving another channel's phase A
+/// in between evicts ~9 MB of wide buffers and was measured at
+/// +50 ms/pair on aic3-100 (the C3 two-phase draft).
 #[allow(clippy::too_many_arguments)]
 fn stream_phase_b(
-    scratches: &[ScratchV2Strip; 3],
+    scr: &ScratchV2Strip,
+    src_win: &[f32],
+    dst_win: &[f32],
     info: &crate::feature_v2_stream::StripInfo,
-    ch: usize,
     toggles: V2NewFeatureToggles,
     fold_v1: bool,
     append: bool,
+    refy_strip: &[f32],
+    cross: Option<(&[f32], &[f32])>,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -4859,10 +4937,9 @@ fn stream_phase_b(
     let n_wide = width * info.wide_h();
     let off = HALO_P * width;
     let strip_n = width * strip_h;
-    let scr = &scratches[ch];
 
-    let src_strip = &scr.src_wide[off..off + strip_n];
-    let dst_strip = &scr.dst_wide[off..off + strip_n];
+    let src_strip = &src_win[off..off + strip_n];
+    let dst_strip = &dst_win[off..off + strip_n];
     let mu1_strip = &scr.mu1[off..off + strip_n];
     let mu2_strip = &scr.mu2[off..off + strip_n];
     let ssq_strip = &scr.ssq[off..off + strip_n];
@@ -4887,8 +4964,8 @@ fn stream_phase_b(
         let g_off = (HALO_P - 1) * width;
         let g_n = width * (strip_h + 2);
         let g = gradient_block_kernel(
-            &scr.src_wide[g_off..g_off + g_n],
-            &scr.dst_wide[g_off..g_off + g_n],
+            &src_win[g_off..g_off + g_n],
+            &dst_win[g_off..g_off + g_n],
             act_strip,
             width,
             strip_h,
@@ -4908,25 +4985,15 @@ fn stream_phase_b(
                 &scr.mu2_h[..n_wide],
                 &scr.ssq_h[..n_wide],
                 &scr.s12_h[..n_wide],
-                &scr.src_wide[..n_wide],
-                &scr.dst_wide[..n_wide],
+                &src_win[..n_wide],
+                &dst_win[..n_wide],
             ],
             &mut acc.v1[scale],
         );
     }
 
     if append {
-        // ref_y = the source Y plane's strip rows — already sitting in the
-        // Y channel's gathered wide window.
-        let refy_strip = &scratches[1].src_wide[off..off + strip_n];
-        let cross = if ch == 1 {
-            Some((
-                &scratches[0].activity[off..off + strip_n],
-                &scratches[2].activity[off..off + strip_n],
-            ))
-        } else {
-            None
-        };
+        debug_assert_eq!(refy_strip.len(), strip_n);
         let a = append_block_kernel(
             src_strip,
             dst_strip,
@@ -4946,8 +5013,8 @@ fn stream_phase_b(
     if toggles.blockiness {
         let (sum_v, sum_h) = &mut acc.block[scale];
         blockiness_sparse_strip_wide(
-            &scr.src_wide[..n_wide],
-            &scr.dst_wide[..n_wide],
+            &src_win[..n_wide],
+            &dst_win[..n_wide],
             width,
             y0,
             strip_h,
@@ -5081,17 +5148,41 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 
     let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P);
     scratch.ensure(strip_max_n);
-    let scratch_strips = &mut scratch.strips;
+    let V2Scratch {
+        strips: scratch_strips,
+        stream_pool,
+        ..
+    } = scratch;
 
     let mut accums: [StreamChannelAccums; 3] = std::array::from_fn(|_| StreamChannelAccums::new(n_scales));
-    let mut producer = StripPlaneProducer::new(source, distorted, parallel);
+    let mut producer = StripPlaneProducer::new(source, distorted, parallel, stream_pool);
 
     while let Some(info) = producer.next_strip() {
         let scale = info.scale;
 
+        // ref_y strip rows straight from the producer's rolling plane
+        // (valid until the next `next_strip` call).
+        let need_refy = append_on;
+        let refy = if need_refy {
+            producer.rows(
+                crate::feature_v2_stream::Side::Source,
+                1,
+                scale,
+                info.y0,
+                info.y0 + info.strip_h,
+            )
+        } else {
+            &[][..]
+        };
+
         #[cfg(feature = "threads")]
         let ran_parallel = if parallel {
             use rayon::prelude::*;
+            // Parallel fan-out keeps the two-phase shape (A for all
+            // channels, then B) — Y's cross inputs need X/B's phase A
+            // done. Values are identical to the serial order (pure
+            // kernels on identical inputs); only cache locality differs,
+            // and parallel wall is not the 1-thread gate path.
             scratch_strips
                 .par_iter_mut()
                 .enumerate()
@@ -5106,13 +5197,28 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 });
             let scratches: &[ScratchV2Strip; 3] = scratch_strips;
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
+                let (src_win, dst_win) =
+                    stream_windows_shared(&producer, &info, ch, &scratches[ch]);
+                let cross = if ch == 1 && append_cell_active(append_on, ch, scale) {
+                    let off = HALO_P * info.plane_w;
+                    let strip_n = info.plane_w * info.strip_h;
+                    Some((
+                        &scratches[0].activity[off..off + strip_n],
+                        &scratches[2].activity[off..off + strip_n],
+                    ))
+                } else {
+                    None
+                };
                 stream_phase_b(
-                    scratches,
+                    &scratches[ch],
+                    src_win,
+                    dst_win,
                     &info,
-                    ch,
                     toggles,
                     fold_v1,
                     append_cell_active(append_on, ch, scale),
+                    refy,
+                    cross,
                     acc,
                 );
             });
@@ -5124,29 +5230,77 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         let ran_parallel = false;
 
         if !ran_parallel {
-            for (ch, scr) in scratch_strips.iter_mut().enumerate() {
-                stream_phase_a(
-                    &producer,
-                    &info,
-                    ch,
-                    append_cell_active(append_on, ch, scale),
-                    scr,
-                );
-            }
-            let scratches: &[ScratchV2Strip; 3] = scratch_strips;
-            for (ch, acc) in accums.iter_mut().enumerate() {
+            // Serial: FUSED phase A+B per channel (the locality contract
+            // in `stream_phase_b`'s doc — H/V planes stay cache-hot into
+            // the band replay + kernels), and ONE shared scratch set for
+            // all three channels — each stage overwrites the same ~9 MB
+            // in place, so the working set stays L2/L3-resident across
+            // channels AND strips (three per-channel sets measured
+            // +15 ms/pair on aic3-100: each channel's buffers were
+            // evicted by the other two between its consecutive strips).
+            // Order X(0), B(2), then Y(1); Y's cross transducer reads
+            // X/B's activity STRIP rows, stashed into the (otherwise
+            // idle) second/third scratch sets' activity buffers — a
+            // 2×strip_n copy, bitwise-identical values.
+            let off = HALO_P * info.plane_w;
+            let strip_n = info.plane_w * info.strip_h;
+            let (s0, s_rest) = scratch_strips.split_at_mut(1);
+            let scr = &mut s0[0];
+            let (stash_x_buf, stash_b_buf) = s_rest.split_at_mut(1);
+            let y_active = append_cell_active(append_on, 1, scale);
+            for ch in [0usize, 2] {
+                let active = append_cell_active(append_on, ch, scale);
+                stream_phase_a(&producer, &info, ch, active, scr);
+                if y_active {
+                    let stash = if ch == 0 {
+                        &mut stash_x_buf[0].activity
+                    } else {
+                        &mut stash_b_buf[0].activity
+                    };
+                    stash[..strip_n].copy_from_slice(&scr.activity[off..off + strip_n]);
+                }
+                let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
                 stream_phase_b(
-                    scratches,
+                    scr,
+                    src_win,
+                    dst_win,
                     &info,
-                    ch,
                     toggles,
                     fold_v1,
-                    append_cell_active(append_on, ch, scale),
-                    acc,
+                    active,
+                    refy,
+                    None,
+                    &mut accums[ch],
+                );
+            }
+            {
+                stream_phase_a(&producer, &info, 1, y_active, scr);
+                let cross = if y_active {
+                    Some((
+                        &stash_x_buf[0].activity[..strip_n],
+                        &stash_b_buf[0].activity[..strip_n],
+                    ))
+                } else {
+                    None
+                };
+                let (src_win, dst_win) = stream_windows_shared(&producer, &info, 1, scr);
+                stream_phase_b(
+                    scr,
+                    src_win,
+                    dst_win,
+                    &info,
+                    toggles,
+                    fold_v1,
+                    y_active,
+                    refy,
+                    cross,
+                    &mut accums[1],
                 );
             }
         }
     }
+
+    producer.recycle(stream_pool);
 
     // --- Finalize: the materialized walk's per-scale epilogue, replayed
     //     on the merged accumulators (identical f64 ops on identical
@@ -7482,6 +7636,12 @@ mod tests {
             (127, 93),
             (200, 150),
             (96, 517),
+            // C3 adversarial rows: exact kernel-strip multiple (h = 256),
+            // one past it (h = 257 — 1-row final strip), and h = 129
+            // (1-row second strip at scale 0, sub-strip deeper scales).
+            (96, 256),
+            (96, 257),
+            (72, 129),
         ];
         let z_parallel = false;
         for (w, h) in cases {
