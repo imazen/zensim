@@ -31,7 +31,12 @@ scripts/run_full_eval.sh \
 
 Env overrides: `ZENSIM_M3_FIXTURES` (default
 `/mnt/v/output/zensim/diffmap-coherence-2026-07-18`), `ZENSIM_M3_DIST_Q`
-(default `q50`), `ZENSIM_FULLEVAL_OUT` (default the reports dir above).
+(default `q50`), `ZENSIM_FULLEVAL_OUT` (default the reports dir above),
+`ZENSIM_M3_REUSE=1` — carry `m3_*` from the bake's previous fulleval JSON
+instead of re-measuring. **Use this for schema re-emits**: the rank/dial/
+corruption portion is a cheap rescore over stored feature parquets (numbers
+cannot change unless the bake/parquets/estimators changed), but the M3 sweep
+is 27 diffmap runs per bake — re-measuring an unchanged value.
 
 ## What it chains (no duplicate stat implementations)
 

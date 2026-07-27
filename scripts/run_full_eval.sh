@@ -57,10 +57,29 @@ JSON="$OUTDIR/$NAME.fulleval.json"
 MD="$OUTDIR/$NAME.verdict.md"
 
 echo "== bake_verdict --regime $REGIME --full-json ==" >&2
+# Stash the previous JSON so ZENSIM_M3_REUSE=1 can carry its M3 fields after
+# bake_verdict overwrites the file (bake_verdict always emits m3=null).
+[[ "${ZENSIM_M3_REUSE:-0}" == "1" && -f "$JSON" ]] && cp "$JSON" "$JSON.pre"
 "${HEAVY[@]}" "$BV" --bake "$BAKE" --name "$NAME" --regime "$REGIME" \
     --full-json "$JSON" --output "$MD" >&2
 
 # ── M3 diffmap-coherence: content × size × quality sweep ──────────────────
+# ZENSIM_M3_REUSE=1: carry m3_coherence/m3_n/m3_dropped_mass_pct from the
+# PREVIOUS fulleval JSON instead of re-measuring. Use for schema re-emits —
+# the rank/dial/corruption portion is a cheap rescore over stored feature
+# parquets, but the M3 sweep is 27 diffmap runs (~minutes/bake) measuring a
+# value that cannot change unless the bake or fixtures changed. (2026-07-27:
+# a 17-bake schema re-emit redid ~45 min of unchanged M3 before this existed.)
+if [[ "${ZENSIM_M3_REUSE:-0}" == "1" && -f "$JSON.pre" ]]; then
+    jq --slurpfile o "$JSON.pre" \
+        '.m3_coherence=$o[0].m3_coherence | .m3_n=$o[0].m3_n | .m3_dropped_mass_pct=$o[0].m3_dropped_mass_pct' \
+        "$JSON" >"$JSON.tmp" && mv "$JSON.tmp" "$JSON"
+    rm -f "$JSON.pre"
+    echo "== M3 carried from previous JSON (ZENSIM_M3_REUSE=1) ==" >&2
+    echo "wrote $JSON" >&2
+    echo "$JSON"
+    exit 0
+fi
 # WIDENED 2026-07-26 (stats review §Rec-8) from 3 fixtures × q50 to a
 # content × size × quality grid — the size axis matters because M3 spatializes
 # a per-block map and block count scales with resolution. Sizes are Mitchell
