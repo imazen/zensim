@@ -1112,8 +1112,7 @@ impl ZensimV2Result {
             }
             FeatureRegime::Folded720Csfw => {
                 let len = self.n_scales * APPEND2_PER_SCALE;
-                let start =
-                    self.features.len() - len - self.n_scales * CSFW_PER_SCALE;
+                let start = self.features.len() - len - self.n_scales * CSFW_PER_SCALE;
                 Some(&self.features[start..start + len])
             }
             _ => None,
@@ -1283,7 +1282,6 @@ pub enum HdrEncoding {
         ambient_lux: f32,
     },
 }
-
 
 /// Runtime toggles for the phase-2 new-feature GROUPS (A.10 candidates),
 /// grouped by shared per-pixel computation rather than 1:1 with feature
@@ -1501,7 +1499,6 @@ impl V2Scratch {
             self.sized_for = strip_max_n;
         }
     }
-
 }
 
 impl Default for V2Scratch {
@@ -2688,10 +2685,10 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy, const BANDVIS: bool>(
                     let d2y_d = dyu + dyd - two * dd;
                     let curv_d = (d2x_d * d2x_d + d2y_d * d2y_d).sqrt();
                     let flat = one - act_b;
-                    let band_s = saturate_v(token, curv_s, bv_lo)
-                        * (one - saturate_v(token, curv_s, bv_hi));
-                    let band_d = saturate_v(token, curv_d, bv_lo)
-                        * (one - saturate_v(token, curv_d, bv_hi));
+                    let band_s =
+                        saturate_v(token, curv_s, bv_lo) * (one - saturate_v(token, curv_s, bv_hi));
+                    let band_d =
+                        saturate_v(token, curv_d, bv_lo) * (one - saturate_v(token, curv_d, bv_hi));
                     let b_src = band_s * flat;
                     let b_dst = band_d * flat;
                     let (gain, loss) = bounded_excess_pair_v(token, b_dst, b_src, c_bv);
@@ -3289,7 +3286,19 @@ fn append_block_kernel_entry_nocross(
     height: usize,
 ) -> AppendAccum {
     append_block_kernel_generic::<_, false, false>(
-        token, src, dst, mu1, mu2, ssq, bs2, activity, ref_y, &[], &[], width, height,
+        token,
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        bs2,
+        activity,
+        ref_y,
+        &[],
+        &[],
+        width,
+        height,
     )
 }
 
@@ -4821,7 +4830,14 @@ pub(crate) fn compute_folded720_impl_with_toggles(
     toggles: V2NewFeatureToggles,
 ) -> Result<ZensimV2Result, ZensimError> {
     let mut scratch = V2Scratch::new();
-    compute_folded720_streaming_impl(source, distorted, max_pixels, parallel, toggles, &mut scratch)
+    compute_folded720_streaming_impl(
+        source,
+        distorted,
+        max_pixels,
+        parallel,
+        toggles,
+        &mut scratch,
+    )
 }
 
 /// Folded-720-plus-append pair entry (see
@@ -5514,7 +5530,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         ..
     } = scratch;
 
-    let mut accums: [StreamChannelAccums; 3] = std::array::from_fn(|_| StreamChannelAccums::new(n_scales));
+    let mut accums: [StreamChannelAccums; 3] =
+        std::array::from_fn(|_| StreamChannelAccums::new(n_scales));
     let mut producer =
         StripPlaneProducer::new_with_front_end(source, distorted, parallel, stream_pool, front_end);
 
@@ -5684,7 +5701,11 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     } else {
         0
     };
-    let csfw_total = if csfw_on { n_scales * CSFW_PER_SCALE } else { 0 };
+    let csfw_total = if csfw_on {
+        n_scales * CSFW_PER_SCALE
+    } else {
+        0
+    };
     let mut features = vec![0.0f64; v12_total + append_total + append2_total + csfw_total];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
     let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
@@ -5707,13 +5728,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             } else {
                 0.0
             };
-            grads[ch] = finish_channel_scale(
-                &acc.dense[scale],
-                &acc.grad[scale],
-                sum_blockiness,
-                n,
-                out,
-            );
+            grads[ch] =
+                finish_channel_scale(&acc.dense[scale], &acc.grad[scale], sum_blockiness, n, out);
             if append_cell_active(append_on, ch, scale) {
                 let out_app = &mut features_app
                     [app_scale_base + ch * FEATURES_PER_CHANNEL_APPEND..]
@@ -7629,7 +7645,10 @@ mod tests {
         let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
 
         let pair = z.compute_folded720_append_features(&sref, &dref).unwrap();
-        assert_eq!(pair.features().len(), 720 + 4 * 3 * FEATURES_PER_CHANNEL_APPEND);
+        assert_eq!(
+            pair.features().len(),
+            720 + 4 * 3 * FEATURES_PER_CHANNEL_APPEND
+        );
         assert_eq!(pair.regime(), FeatureRegime::Folded720Append);
         assert_eq!(
             pair.append_features().expect("append regime").len(),
@@ -7792,7 +7811,8 @@ mod tests {
         let mut any_nonzero = false;
         for scale in 0..4 {
             for ch in 0..3 {
-                let base = scale * 3 * FEATURES_PER_CHANNEL_APPEND + ch * FEATURES_PER_CHANNEL_APPEND;
+                let base =
+                    scale * 3 * FEATURES_PER_CHANNEL_APPEND + ch * FEATURES_PER_CHANNEL_APPEND;
                 for local in 0..FEATURES_PER_CHANNEL_APPEND {
                     let v = app[base + local];
                     assert!(
@@ -7831,7 +7851,10 @@ mod tests {
                 }
             }
         }
-        assert!(any_nonzero, "append block is entirely zero on a distorted pair");
+        assert!(
+            any_nonzero,
+            "append block is entirely zero on a distorted pair"
+        );
     }
 
     // ========================================================================
@@ -8482,7 +8505,10 @@ mod tests {
         println!("HDR/PU (PQ 10-bit steps → PU-Y):");
         for nits in [1.0f32, 10.0, 100.0, 1000.0, 5000.0] {
             for st in [1u32, 4] {
-                println!("  {nits} nits, {st} steps: |ΔPU-Y| = {:.6}", pu_step(nits, st));
+                println!(
+                    "  {nits} nits, {st} steps: |ΔPU-Y| = {:.6}",
+                    pu_step(nits, st)
+                );
             }
         }
 
@@ -8647,7 +8673,9 @@ mod tests {
         let g5 = gain_at(&posterize(&ramp, 5));
         let g4 = gain_at(&posterize(&ramp, 4));
         let g3 = gain_at(&posterize(&ramp, 3));
-        println!("ladder: 6bit {g6:?}\n        5bit {g5:?}\n        4bit {g4:?}\n        3bit {g3:?}");
+        println!(
+            "ladder: 6bit {g6:?}\n        5bit {g5:?}\n        4bit {g4:?}\n        3bit {g3:?}"
+        );
         // MEASURED STRUCTURE (design-true invariants; full matrix in the
         // gates doc): the response over the posterize ladder is UNIMODAL —
         // it rises through the visibility band (step sizes approaching the
@@ -8678,13 +8706,24 @@ mod tests {
         }
         // 2. Unimodal: the ladder's interior peak exceeds both endpoints.
         let pmax = [p7, p6, p5, p4, p3].into_iter().fold(0.0f64, f64::max);
-        assert!(pmax > p7 && pmax > p3, "ladder should peak in the interior: {p7} .. {pmax} .. {p3}");
+        assert!(
+            pmax > p7 && pmax > p3,
+            "ladder should peak in the interior: {p7} .. {pmax} .. {p3}"
+        );
         // 3. Cap rolloff: monotone decline past the band (5b → 4b → 3b).
-        assert!(p5 > p4 && p4 > p3, "cap rolloff not monotone: {p5} {p4} {p3}");
+        assert!(
+            p5 > p4 && p4 > p3,
+            "cap rolloff not monotone: {p5} {p4} {p3}"
+        );
 
         // (b) Dither masking: ordered-dither the SAME 4-bit posterize —
         // gain must drop substantially.
-        let bayer = [[0u8, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+        let bayer = [
+            [0u8, 8, 2, 10],
+            [12, 4, 14, 6],
+            [3, 11, 1, 9],
+            [15, 7, 13, 5],
+        ];
         let dithered: Vec<[u8; 3]> = (0..w * h)
             .map(|i| {
                 let (x, y) = (i % w, i / w);
@@ -8820,7 +8859,10 @@ mod tests {
         // pairs it with. Pinned invariants: blockiness fires decisively,
         // and the bandvis cross-response is nonzero (characterization pin
         // — if either moves, re-verdict the gates doc).
-        assert!(blockiness > 0.1, "blocky fixture must fire blockiness: {blockiness}");
+        assert!(
+            blockiness > 0.1,
+            "blocky fixture must fire blockiness: {blockiness}"
+        );
         assert!(
             gain_blocky_max > 0.1,
             "characterization pin: dense DC lattices currently cross-fire bandvis \
@@ -8910,9 +8952,12 @@ mod tests {
             )
             .unwrap();
         let app2 = r.append2_features().unwrap();
-        println!("HL highlight-error: hl1 {:.5} hl2 {:.5} dark-ctl mse {:.5}",
-            app2[idx_append2::HL_BIN1], app2[idx_append2::HL_BIN2],
-            r.append_features().unwrap()[idx_append::LUM_DARK_ERR]);
+        println!(
+            "HL highlight-error: hl1 {:.5} hl2 {:.5} dark-ctl mse {:.5}",
+            app2[idx_append2::HL_BIN1],
+            app2[idx_append2::HL_BIN2],
+            r.append_features().unwrap()[idx_append::LUM_DARK_ERR]
+        );
         assert!(app2[idx_append2::HL_BIN1] > 1e-3, "HL1 should fire");
         assert!(app2[idx_append2::HL_BIN2] > 1e-3, "HL2 should fire");
 
@@ -8937,8 +8982,16 @@ mod tests {
         let app2 = r.append2_features().unwrap();
         for scale in 0..4 {
             let b = scale * APPEND2_PER_SCALE;
-            assert_eq!(app2[b + idx_append2::HL_BIN1], 0.0, "hl1 on ≤80-nit content");
-            assert_eq!(app2[b + idx_append2::HL_BIN2], 0.0, "hl2 on ≤80-nit content");
+            assert_eq!(
+                app2[b + idx_append2::HL_BIN1],
+                0.0,
+                "hl1 on ≤80-nit content"
+            );
+            assert_eq!(
+                app2[b + idx_append2::HL_BIN2],
+                0.0,
+                "hl2 on ≤80-nit content"
+            );
         }
 
         // PU-route BANDVIS: posterize the PU ramp (quantize nits through
@@ -9005,7 +9058,10 @@ mod tests {
             a956.append2_features().unwrap(),
             a944.append2_features().unwrap()
         );
-        assert_eq!(a956.append_features().unwrap(), a944.append_features().unwrap());
+        assert_eq!(
+            a956.append_features().unwrap(),
+            a944.append_features().unwrap()
+        );
         // Turning CSFW on must not move a bit of the first 944.
         for i in 0..944 {
             assert_eq!(
@@ -9132,8 +9188,14 @@ mod tests {
         };
         let (wd, ud) = lane_pair(&dark_shift);
         let (wb, ub) = lane_pair(&bright_shift);
-        println!("SDR dark-shift:   weighted {wd:.6} unweighted {ud:.6} (ratio {:.3})", wd / ud);
-        println!("SDR bright-shift: weighted {wb:.6} unweighted {ub:.6} (ratio {:.3})", wb / ub);
+        println!(
+            "SDR dark-shift:   weighted {wd:.6} unweighted {ud:.6} (ratio {:.3})",
+            wd / ud
+        );
+        println!(
+            "SDR bright-shift: weighted {wb:.6} unweighted {ub:.6} (ratio {:.3})",
+            wb / ub
+        );
         assert!(
             wd > ud * 1.05,
             "dark-confined mean shift must up-weigh: {wd} vs {ud}"
@@ -9173,8 +9235,14 @@ mod tests {
         };
         let (hwd, hud) = hdr_lane_pair(&hdark, &mut scratch);
         let (hwb, hub) = hdr_lane_pair(&hbright, &mut scratch);
-        println!("HDR dark-shift:   weighted {hwd:.6} unweighted {hud:.6} (ratio {:.3})", hwd / hud);
-        println!("HDR bright-shift: weighted {hwb:.6} unweighted {hub:.6} (ratio {:.3})", hwb / hub);
+        println!(
+            "HDR dark-shift:   weighted {hwd:.6} unweighted {hud:.6} (ratio {:.3})",
+            hwd / hud
+        );
+        println!(
+            "HDR bright-shift: weighted {hwb:.6} unweighted {hub:.6} (ratio {:.3})",
+            hwb / hub
+        );
         assert!(
             hwd > hud * 1.05,
             "HDR dark-confined shift must up-weigh: {hwd} vs {hud}"
@@ -9201,7 +9269,10 @@ mod tests {
                 [nits, nits, nits]
             })
             .collect();
-        let dst: Vec<[f32; 3]> = ramp.iter().map(|&[r, g, b]| [r * 1.12, g * 1.12, b * 1.12]).collect();
+        let dst: Vec<[f32; 3]> = ramp
+            .iter()
+            .map(|&[r, g, b]| [r * 1.12, g * 1.12, b * 1.12])
+            .collect();
         let sref = NitsImage::from_rgb_nits(&ramp, w, h);
         let dref = NitsImage::from_rgb_nits(&dst, w, h);
 
@@ -9276,10 +9347,16 @@ mod tests {
         // global lanes.
         let csfw = a.csfw_features().unwrap();
         for (i, v) in csfw.iter().enumerate() {
-            assert!((0.0..=1.0).contains(v) && v.is_finite(), "hdr csfw[{i}] = {v}");
+            assert!(
+                (0.0..=1.0).contains(v) && v.is_finite(),
+                "hdr csfw[{i}] = {v}"
+            );
         }
         let fired = (0..4).any(|s| csfw[s * CSFW_PER_SCALE + idx_csfw::W_GLOBAL_DMEAN] > 1e-4);
-        assert!(fired, "W_GLOBAL_DMEAN should fire on a 12% gain pair: {csfw:?}");
+        assert!(
+            fired,
+            "W_GLOBAL_DMEAN should fire on a 12% gain pair: {csfw:?}"
+        );
 
         // HDR identity: exactly 0 on every CSFW slot.
         let idr = z
@@ -9355,7 +9432,8 @@ mod tests {
             let y = y_sdr(c);
             let wd = w_derived_sdr(c) / norm_sdr;
             let ws = (1.0
-                + CSFW_KAPPA_Y * (CSFW_PHI_Y_SDR[0] + y * (CSFW_PHI_Y_SDR[1] + y * CSFW_PHI_Y_SDR[2])))
+                + CSFW_KAPPA_Y
+                    * (CSFW_PHI_Y_SDR[0] + y * (CSFW_PHI_Y_SDR[1] + y * CSFW_PHI_Y_SDR[2])))
                 .clamp(CSFW_W_MIN, CSFW_W_MAX);
             let err = (ws - wd).abs();
             sdr_errs.push((c, err));
@@ -9379,11 +9457,14 @@ mod tests {
         println!("HDR/PU route (castleCSF ÷ live PU front-end, norm @ 100 cd/m²):");
         println!("  L[cd/m²]  y_live   w_derived  w_shipped  |err|");
         let mut pu_errs = Vec::new();
-        for nits in [1.0f64, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 400.0, 1000.0, 2000.0, 4000.0] {
+        for nits in [
+            1.0f64, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 400.0, 1000.0, 2000.0, 4000.0,
+        ] {
             let y = y_pu(nits);
             let wd = w_derived_pu(nits) / norm_pu;
             let ws = (1.0
-                + CSFW_KAPPA_Y * (CSFW_PHI_Y_PU[0] + y * (CSFW_PHI_Y_PU[1] + y * CSFW_PHI_Y_PU[2])))
+                + CSFW_KAPPA_Y
+                    * (CSFW_PHI_Y_PU[0] + y * (CSFW_PHI_Y_PU[1] + y * CSFW_PHI_Y_PU[2])))
                 .clamp(CSFW_W_MIN, CSFW_W_MAX);
             let err = (ws - wd).abs();
             pu_errs.push((nits, err));
@@ -9426,11 +9507,12 @@ mod tests {
                     .max_by(|&i, &j| m[i][col].abs().partial_cmp(&m[j][col].abs()).unwrap())
                     .unwrap();
                 m.swap(col, piv);
+                let piv_row = m[col];
                 for row in 0..3 {
                     if row != col {
-                        let f = m[row][col] / m[col][col];
-                        for k in col..4 {
-                            m[row][k] -= f * m[col][k];
+                        let f = m[row][col] / piv_row[col];
+                        for (k, mk) in m[row].iter_mut().enumerate().skip(col) {
+                            *mk -= f * piv_row[k];
                         }
                     }
                 }
@@ -9500,8 +9582,14 @@ mod tests {
         // And the fitted curve agrees with the castleCSF-derived one
         // within the doc's honest fit class (§5.2: quadratic residuals —
         // brackets set from this run's printed rms/max).
-        assert!(sdr_rms < 0.25 && sdr_max < 0.9, "SDR refit residual blew up: rms {sdr_rms} max {sdr_max}");
-        assert!(pu_rms < 0.15 && pu_max < 0.45, "PU refit residual blew up: rms {pu_rms} max {pu_max}");
+        assert!(
+            sdr_rms < 0.25 && sdr_max < 0.9,
+            "SDR refit residual blew up: rms {sdr_rms} max {sdr_max}"
+        );
+        assert!(
+            pu_rms < 0.15 && pu_max < 0.45,
+            "PU refit residual blew up: rms {pu_rms} max {pu_max}"
+        );
         // The derived curves stay inside the clamp everywhere in the fit
         // range — the clamp is a guard band, not an active regularizer.
         for c in 4u8..=252 {

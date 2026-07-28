@@ -362,7 +362,10 @@ fn main() {
         // Streaming distorted side vs full precomputed reference (score-only).
         if do_v1streamref {
             let Some(v1p) = v1_prepared else {
-                eprintln!("SKIP v1streamref requires the grouped flow: {:?}", p.dist_path);
+                eprintln!(
+                    "SKIP v1streamref requires the grouped flow: {:?}",
+                    p.dist_path
+                );
                 return None;
             };
             let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
@@ -450,7 +453,9 @@ fn main() {
                 z.compute_folded720_append2_features_hdr(
                     &Pq16Image::from_rgb16(&r16, r16w, r16h),
                     &Pq16Image::from_rgb16(&d16, d16w, d16h),
-                    zensim::feature_v2::HdrEncoding::Pq { peak_nits: 10_000.0 },
+                    zensim::feature_v2::HdrEncoding::Pq {
+                        peak_nits: 10_000.0,
+                    },
                     V2NewFeatureToggles {
                         csfw_block: csfw_on,
                         ..V2NewFeatureToggles::default()
@@ -461,7 +466,9 @@ fn main() {
                 z.compute_folded720_append_features_hdr(
                     &Pq16Image::from_rgb16(&r16, r16w, r16h),
                     &Pq16Image::from_rgb16(&d16, d16w, d16h),
-                    zensim::feature_v2::HdrEncoding::Pq { peak_nits: 10_000.0 },
+                    zensim::feature_v2::HdrEncoding::Pq {
+                        peak_nits: 10_000.0,
+                    },
                     V2NewFeatureToggles::default(),
                     scratch,
                 )

@@ -1,5 +1,24 @@
 # Chunk 3 — luminance-dependent per-channel CSF weighting: design + calibration plan
 
+> **STATUS 2026-07-28 — TIER-1 IMPLEMENTED (12 Y-only lanes f944..f955, 956,
+> opt-in default-OFF; coordinator descope per §12 Q1's cheaper wave).** Both
+> pre-merge falsifiers ALIVE (non-absorption P24 median R² 0.971 vs 0.99 kill;
+> V3 GLOBAL_DMEAN Y cross-route SROCC up at all scales). Two findings amend
+> this doc, recorded in `benchmarks/csf_tier1_gates_2026-07-28.md`:
+> (1) the §5.3 SDR φ table was fitted in an idealized `cbrt(rel)` coordinate —
+> the live Y plane is `cbrt(rel+β)−cbrt(β)+0.01` (opsin bias), so the shipped
+> constants are the §5.2 derivation RE-COMPOSED through the live front-ends
+> per §6's own rule (`csfw_phi_derivation_table` pins them; the PU values were
+> already live-accurate within 0.016); (2) **falsifier 2 FIRED** — the fitted
+> per-band strengths run COARSE-ward (per-scale optima g* ≈ [0.5, 1, 1.5, 1.5]),
+> opposite §3.3's fine-ward prediction (likely the 2^b-average luminance-range
+> compression at depth, a term this design did not model) — so `λ_b ≡ 1` ships
+> per that falsifier's honest-stop clause and the per-band term is unshipped.
+> κ_Y = 1.0 (the derived curve; stage-1 uniform-g objective ties 1.0 vs 0.5
+> inside n=90 noise). G1 ≥0.95 met at s1 only (s3 ceiling ~0.91) — flagged per
+> the chunk-2 aspiration-miss precedent; G6 LOO adjudicates. Chroma tiers
+> (f956..f979) + tier B + stage-2 remain per §8.2.
+
 **2026-07-28. DESIGN ONLY — no implementation in this commit.** This decides the
 runtime form, the seeding, the landing shape, and the gates for `HDR_PLAN.md`
 chunk 3 (the standing P0 from `zenpapers/docs/iqa-methods/vdp-csf-perceptual-math.md`,

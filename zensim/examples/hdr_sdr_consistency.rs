@@ -176,7 +176,9 @@ fn spearman(a: &[f64], b: &[f64]) -> f64 {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let pairs_tsv = args.first().expect("usage: hdr_sdr_consistency <pairs.tsv> [n_refs]");
+    let pairs_tsv = args
+        .first()
+        .expect("usage: hdr_sdr_consistency <pairs.tsv> [n_refs]");
     let n_refs: usize = args.get(1).map(|s| s.parse().unwrap()).unwrap_or(8);
 
     let text = std::fs::read_to_string(pairs_tsv).expect("read pairs tsv");
@@ -198,7 +200,9 @@ fn main() {
     // SROCC of each weighted GLOBAL_* lane AGAINST its unweighted twin —
     // the design's primary falsifier readout
     // (`docs/CSF_CHUNK3_DESIGN_2026-07-28.md` §9.3 G1).
-    let csfw_mode = std::env::var("ZENSIM_CSFW").map(|v| v == "1").unwrap_or(false);
+    let csfw_mode = std::env::var("ZENSIM_CSFW")
+        .map(|v| v == "1")
+        .unwrap_or(false);
 
     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
     let mut scratch = V2Scratch::new();
@@ -266,7 +270,10 @@ fn main() {
 
     let n_pairs = sdr_scores.len();
     println!("pairs: {n_pairs}");
-    println!("score SROCC (routes): {:.6}", spearman(&sdr_scores, &hdr_scores));
+    println!(
+        "score SROCC (routes): {:.6}",
+        spearman(&sdr_scores, &hdr_scores)
+    );
     // Within-ref SROCC: rank the 9-step ladder of ONE ref through both
     // routes (the pooled stat above additionally mixes cross-content
     // difficulty ordering, which no single-domain metric pins at 0.99
