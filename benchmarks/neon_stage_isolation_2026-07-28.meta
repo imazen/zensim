@@ -117,3 +117,61 @@ matches the documented design (the golden is a reference-platform x86-64
 tripwire, `--skip`ped in the portable matrix). Verified explicitly so the
 failure is not mistaken for damage from the three shipped dispatches — those
 were bit-identical and changed no feature.
+
+## ROOT CAUSE of the sigma_sq/sigma12 divergence — it is magetypes' scalar mul_add
+
+Traced 2026-07-28. The divergence that blocks the fused_blur 1.43x is not in
+zensim at all:
+
+  magetypes/src/simd/backends/f32x8.rs:88   "/// Fused multiply-add: a * b + c."
+  magetypes/src/simd/impls/arm_neon.rs:118   vfmaq_f32(c, a, b)      <- TRUE FMA, 1 rounding
+  magetypes/src/simd/impls/scalar.rs:573     a[i] * b[i] + c[i]      <- UNFUSED, 2 roundings
+
+`fused_blur_h_ssim_inner` uses `mul_add` for the sigma_sq and sigma12
+accumulators and plain `+` for mu1/mu2. That exactly predicts what was measured:
+mu1/mu2 are bit-identical between tiers, sigma_sq/sigma12 diverge on ~85% of
+lanes. The divergence is one rounding per accumulate, compounded over the
+window.
+
+This also explains zensim's own documented finding (CLAUDE.md, 2026-06-20):
+"9 SIMD-reduced statistical features have per-SIMD-tier value divergence".
+The FMA/non-FMA split in magetypes is a mechanism behind that, not just
+"reduction order".
+
+### NOT a magetypes bug — a documented tradeoff
+
+magetypes/src/nostd_math.rs:400 is explicit:
+
+  /// f32 fused multiply-add (non-fused fallback: `a * b + c`).
+  /// In a scalar no_std context there's no hardware FMA instruction to use,
+  /// so this is just the unfused version. The precision difference vs true
+  /// FMA is acceptable for a fallback path.
+
+So the scalar tier is knowingly unfused. Making it use `f32::mul_add` under
+`std` (a single hardware instruction on aarch64 and on x86-with-FMA) would make
+scalar bit-identical to NEON and unlock zensim's 1.43x — but it changes results
+for EVERY magetypes consumer's scalar tier on EVERY platform, against an
+explicitly documented decision, and the x86/wasm effect cannot be measured on
+this aarch64-only host. Not done here.
+
+### The route that needs NO cross-crate change
+
+zensim's NEON `fused_blur_h_ssim_inner` is slow for a reason unrelated to FMA:
+it vectorises across 8 ROWS while the data is row-major, so per output column it
+does ~64 scalar strided loads, ~32 scalar strided stores and 8 `to_array` /
+`from_array` stack round-trips to feed 8 vector FMAs. Same anti-pattern as
+ultrahdr's `apply_gain_inner` (fixed 2026-07-28, 1.82x).
+
+The 8-rows-in-parallel axis is REQUIRED for bit-exactness — the horizontal
+sliding window is a recurrence in x (`sum(x+1) = sum(x) + add - rem`), so
+vectorising along x would compute each window independently and change the
+arithmetic. But the gather/scatter is pure DATA MOVEMENT: a tiled version that
+accumulates in registers and transposes on store (NEON does a 4x4 f32 transpose
+in 4 vtrn/vzip ops) would preserve every FMA in the same order while replacing
+32 scalar strided stores with 8 vector stores.
+
+That is the one remaining avenue that delivers the 1.43x with ZERO output
+change and no cross-crate risk. It is a careful rewrite of a 4-output
+sliding-window kernel on a metric that drives ship decisions, so it wants its
+own session with the bit-exactness harness (`__bench_stages` + the differential
+check used here) in place from the start — not a tail-end change.
