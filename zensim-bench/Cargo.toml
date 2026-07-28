@@ -56,6 +56,10 @@ zenpnm = "0.1"
 bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 which = "8"
 zenbench = "0.1.2"
+# `testable_dispatch` lets benches/tier_isolation.rs disable the baseline SIMD
+# token (NEON on aarch64) so the scalar arm is real rather than a second
+# measurement of the SIMD path.
+archmage = { version = "0.9.28", features = ["std", "testable_dispatch"] }
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
 zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
 csv = "1"
@@ -96,6 +100,10 @@ harness = false
 
 [[bench]]
 name = "bench_zensim"
+harness = false
+
+[[bench]]
+name = "tier_isolation"
 harness = false
 
 # `extract_features_372col` uses `zensim::{ZensimConfig,

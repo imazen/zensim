@@ -1,0 +1,44 @@
+# zensim NEON vs forced-scalar — first tier-isolated measurement
+date:    2026-07-28
+host:    Apple M4 Pro (12 core), macOS, aarch64
+command: cd zensim-bench && cargo bench --bench tier_isolation
+build:   release, NO -C target-cpu=native
+profile: ZensimProfile::B (current deterministic linear profile)
+
+## Why this file exists
+
+bench_zensim.rs measures absolute throughput; bench_compare.rs measures zensim
+against other metrics. Neither can tell you whether the SIMD paths earn their
+keep — a kernel slower than its own scalar fallback is invisible in both. This
+bench runs the identical pipeline with the native SIMD token disabled.
+
+## Result
+
+| size       | NEON      | scalar    | speedup |
+|------------|-----------|-----------|---------|
+| 256x256    |  1.0676ms |  1.2521ms |  1.17x  |
+| 512x512    |  2.4541ms |  3.0959ms |  1.26x  |
+| 1920x1080  | 14.508ms  | 18.805ms  |  1.30x  |
+
+No regression, but this is the WEAKEST SIMD payoff measured across the zen
+crates on this host. For comparison, same machine, same method:
+
+  butteraugli  3.4-3.7x     zenresize (linear) 4.0-4.3x
+  linear-srgb  3.3-6.6x     fast-ssim2         1.7-1.8x
+  zenwebp      1.5-1.6x     zensim             1.2-1.3x   <- here
+
+butteraugli and zensim are both multi-scale perceptual metrics over XYB with
+blur pyramids, so ~3x less SIMD benefit is a signal, not a property of the
+problem. Two concrete things to check:
+
+1. Coverage. zensim's kernels are declared `#[magetypes(neon, wasm128, scalar)]`
+   — note there is no `v3`/`v4` in those lists at all, unlike every other zen
+   crate. Whatever the reason on x86, it is worth confirming the NEON variants
+   are actually reached for the hot kernels rather than only the few that
+   carry the attribute (grep shows magetypes on 4 sites in fused.rs/color.rs
+   while blur.rs, feature_v2.rs and simd_ops.rs carry the bulk of the work).
+2. Attribution. These are whole-pipeline numbers. A profile is needed to say
+   which stage is scalar-bound; the 372/924-feature extraction path is a
+   plausible suspect since it is not obviously vectorised.
+
+This is a LEAD, not a conclusion — nothing here is measured per kernel.
