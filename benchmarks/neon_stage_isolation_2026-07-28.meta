@@ -224,3 +224,63 @@ must be re-measured end-to-end before shipping. The three reduction kernels
 shipped in 9f9f72b0 were validated that way (8.6% at 1080p, end-to-end); this
 one failed the same gate. To retry, first instrument which (size, radius) pairs
 the pipeline actually calls fused_blur with, and optimise for those.
+
+## ============ CORRECTION: the per-stage table above used WRONG SHAPES ============
+
+The table at the top of this file was measured at 1024x1024, radius 3. The
+pipeline never calls fused_blur at that shape. Instrumenting
+`fused_blur_h_ssim` during a real 1920x1080 compute gives:
+
+  96 calls   w=1936 h=42 r=5      <- dominant
+  45 calls   w=968  h=42 r=5
+  21 calls   w=484  h=42 r=5
+   9 calls   w=242  h=42 r=5
+  (plus a tail at h=37/33/29/19/12, always r=5)
+
+It processes wide STRIPS — 1936 px across, 42 rows tall — not square tiles.
+42 rows is 5 vector row-groups plus a 2-row scalar remainder.
+
+Re-measured at the real shape (1936x42, r=5):
+
+| stage                        | NEON      | scalar    | ratio |
+|------------------------------|-----------|-----------|-------|
+| blur/fused_blur_h_ssim       | 117.24us  | 182.97us  | 1.56x |
+| color/srgb_to_positive_xyb   | 167.88us  | 230.29us  | 1.37x |
+| simd_ops/mul_into            |   6.83us  |   8.16us  | 1.19x |
+| simd_ops/sq_sum_into         |   8.13us  |   8.21us  | 1.01x |
+| simd_ops/sq_diff_sum         |   9.10us  |   9.11us  | 1.00x |
+| blur/downscale_2x            |   6.98us  |   6.97us  | 1.00x |
+| simd_ops/abs_diff_sum        |   6.73us  |   6.72us  | 1.00x |
+| blur/box_blur_1pass          |  67.98us  |  67.25us  | 0.99x |
+
+**fused_blur_h_ssim is 1.56x IN NEON'S FAVOUR at the shape it is actually
+called with.** The "0.70x, NEON is slower" reading at the top of this file was
+an artefact of a shape the pipeline never uses.
+
+### What this settles
+
+The "1.43x available on fused_blur" NEVER EXISTED. There was nothing to
+optimise: the kernel is already winning by 1.56x on real input. That closes the
+thread — not by declining a trade, but by the opportunity not being real. It
+also explains cleanly why the autovec rewrite (bit-identical, 1.46x at the fake
+shape) made the PRODUCT 1.4% slower: it replaced a kernel that was already 1.56x
+ahead on the real workload.
+
+The three reduction fixes shipped in 9f9f72b0 are unaffected and remain valid —
+they read 1.00x here only because both arms now run the same code on aarch64
+(that is the fix), and because at 1936x42 = 81k elements the reductions are far
+below the full-plane sizes (1920x1080 = 2M) where they were 3-4x. Their
+justification was always the END-TO-END measurement (14.508 -> 13.264ms, 8.6%),
+not this table.
+
+### Method correction, and it is the important part
+
+Stage benches need PER-STAGE representative shapes, taken from instrumentation,
+not one convenient default. In this crate the blur runs on wide strips while the
+reductions run on full planes; a single (W,H,radius) cannot represent both, and
+the wrong choice inverted a conclusion completely — 0.70x vs 1.56x on the same
+kernel.
+
+`benches/stage_isolation.rs` now defaults to the instrumented shape (1936x42
+r=5) with that provenance in a comment. Anyone extending it should re-instrument
+for the stage they are adding rather than inheriting this default.

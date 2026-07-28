@@ -40,8 +40,13 @@ fn set_simd(_enabled: bool) -> bool {
     false
 }
 
-const W: usize = 1024;
-const H: usize = 1024;
+// The shapes the PIPELINE actually uses, recovered by instrumenting
+// fused_blur_h_ssim during a 1920x1080 compute: it processes wide STRIPS —
+// w=1936 h=42 r=5 dominates (96 calls), then 968/484/242 at the same h and r.
+// The previous 1024x1024 r=3 default was a shape the pipeline never calls, and
+// a kernel tuned against it regressed the product (see benchmarks/).
+const W: usize = 1936;
+const H: usize = 42;
 const N: usize = W * H;
 
 fn plane(seed: u32) -> Vec<f32> {
@@ -95,7 +100,7 @@ fn bench_stages(c: &mut Criterion) {
         let (mut out, mut tmp) = (vec![0f32; N], vec![0f32; N]);
         let a2 = a.clone();
         ab(c, "blur/box_blur_1pass", move || {
-            st::box_blur_1pass_into(&a2, &mut out, &mut tmp, W, H, 3);
+            st::box_blur_1pass_into(&a2, &mut out, &mut tmp, W, H, 5);
         });
     }
     {
@@ -111,7 +116,7 @@ fn bench_stages(c: &mut Criterion) {
         let (mut ss, mut s12) = (vec![0f32; N], vec![0f32; N]);
         let (a2, b2) = (a.clone(), bb.clone());
         ab(c, "blur/fused_blur_h_ssim", move || {
-            st::fused_blur_h_ssim(&a2, &b2, &mut m1, &mut m2, &mut ss, &mut s12, W, H, 3);
+            st::fused_blur_h_ssim(&a2, &b2, &mut m1, &mut m2, &mut ss, &mut s12, W, H, 5);
         });
     }
     {
