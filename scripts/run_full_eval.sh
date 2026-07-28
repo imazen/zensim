@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# 924-era NOTE (2026-07-28): imazen26/nonphoto eval slices for 924-regime models come from the
+# canonical bigcodec 924 TEST views, NOT the NN-matched ext_*_720 tables — see docs/FULL_EVAL.md
+# "924-era eval slices" (user directive; fingerprint matching cannot cross regimes).
 # run_full_eval.sh — ONE comprehensive Rust "full-eval" per bake → unified JSON.
 #
 #   scripts/run_full_eval.sh <bake.bin> <name> [regime=720]

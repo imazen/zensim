@@ -142,3 +142,25 @@ Related single-purpose evals that need a second bake / spline internals / an HDR
 corpus (`bake_compare`, `bake_dial_refit gate`, the UPIQ panels) are listed in
 `bake_verdict`'s own "Related specialized evals" report footer and
 `docs/EVAL_PANEL_REQUIREMENT.md`.
+
+---
+
+## 924-era eval slices — REPOINTED at the canonical test views (2026-07-28, user directive)
+
+For models in the folded+append **924** regime, the `imazen26` and `nonphoto`
+eval slices come from the **canonical bigcodec 924 TEST views** (held-out
+origins {7,9}; exact `encoded_filename`-key joins, match_rate 1.0000):
+
+    /mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/bigcodec/<dataset>/test_924.parquet
+    (R2: s3://zentrain/ext924-canonical-2026-07-27/bigcodec/ · Tower mirror sha-verified)
+
+with `score_ssim2` / `score_zensim` targets carried from the canonical picker
+datasets. The `nonphoto` slice = the same test views filtered to non-photo
+content classes via `/mnt/v/output/imazen-26-features/imazen26_manifest.tsv`.
+
+The 720-era `ext_imazen26_720` / `ext_nonphoto_720` tables were built by
+NEAREST-NEIGHBOR fingerprint matching against fleet blobs (winning encode
+identities never persisted); fingerprint matching cannot cross regimes (the
+folded block replaces v1-372), so those tables are **720-legacy only — do NOT
+rebuild them for 924**. The eval instruments `corruption_grid_924col` and
+`dial_grid_924col` live in `/mnt/v/output/zensim/v2-eval-924-2026-07-27/`.
