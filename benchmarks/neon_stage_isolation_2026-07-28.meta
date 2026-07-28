@@ -175,3 +175,52 @@ change and no cross-crate risk. It is a careful rewrite of a 4-output
 sliding-window kernel on a metric that drives ship decisions, so it wants its
 own session with the bit-exactness harness (`__bench_stages` + the differential
 check used here) in place from the start — not a tail-end change.
+
+## The fused_blur tiling route was ATTEMPTED — and refuted at pipeline level
+
+The record above proposed a rewrite that keeps every FMA in order while fixing
+the data movement, to get the 1.43x with zero output change. That was built and
+measured. It works as a kernel and does NOT help the product.
+
+WHAT WAS BUILT: `fused_blur_h_ssim_autovec` — the same algorithm in plain Rust
+arrays using `f32::mul_add`, left to LLVM's autovectoriser. The insight was that
+magetypes' SCALAR variant is fast because LLVM vectorises the plain-array shape
+well, and differs from NEON ONLY because magetypes' scalar `mul_add` is unfused
+(`a*b + c`) while NEON's is `vfmaq_f32`. Rust's `f32::mul_add` IS fused and
+lowers to `fmla` on aarch64 — so a plain-array kernel using it should get the
+autovectoriser's speed AND bit-identity with NEON.
+
+It did, exactly:
+
+  BIT-IDENTICAL to the NEON variant on 256x256 r=3, 129x67 r=5 (odd dims),
+  64x64 r=1, 512x512 r=7 — output hashes equal on all four shapes.
+
+  Stage (1024x1024, r=3):  10.741ms -> 7.376ms   1.46x
+  (also beats the magetypes scalar variant's 7.526ms, since fmla is one
+  instruction where `a*b + c` is two)
+
+BUT THE PIPELINE GOT SLOWER. Direct within-session A/B, stash/unstash, same
+build settings, 1920x1080:
+
+  without the autovec kernel:  13.619ms
+  with    the autovec kernel:  13.809ms     ~1.4% SLOWER
+
+Reproducible (the pipeline bench reads to 3 decimal places identically across
+repeat runs, so 1.4% is well outside its noise).
+
+WHY: the stage bench's parameters were not representative. A single 1024x1024
+r=3 call costs 10.7ms, which cannot fit inside a 13.5ms whole-pipeline 1080p
+run — so the pipeline is NOT calling this kernel at that shape. It calls it per
+pyramid level, on progressively smaller planes, where the autovectorised form's
+advantage does not materialise and the added code perturbs layout.
+
+VERDICT: NOT SHIPPED. A kernel that is 1.46x faster in isolation but makes the
+product 1.4% slower is not an optimisation. Preserved in `git stash` ("refuted:
+autovec fused_blur kernel").
+
+LESSON, and it applies to the whole per-stage table above: stage-level ratios
+identify WHERE time goes, they do NOT predict product impact. Any stage fix
+must be re-measured end-to-end before shipping. The three reduction kernels
+shipped in 9f9f72b0 were validated that way (8.6% at 1080p, end-to-end); this
+one failed the same gate. To retry, first instrument which (size, radius) pairs
+the pipeline actually calls fused_blur with, and optimise for those.
