@@ -67,9 +67,53 @@ association differs between the hand-written and autovectorised forms).
 
 `sq_sum_into` (0.92x) is likewise not bit-identical (10675/65536 lanes).
 
-Switching those changes zensim's OUTPUT. Given this crate's documented
-cross-platform bit-identity discipline (the 2026-06-20 `rsqrt_stable` incident,
-the golden tripwires, `REL_TOLERANCE` overrides), that is the owner's call, not
-a NEON pass's. Flagged here with the measurement so the decision can be made on
-data: ~1.4x on the dominant stage, in exchange for a bounded change in
-sigma_sq/sigma12 rounding.
+### RESOLVED — measured the cost, and the crate's own threshold rules it out
+
+Rather than leave this as a judgement call, the score-level impact was measured.
+The intermediate-lane divergence is not the thing that matters; the SCORE is.
+
+`fused_blur_h_ssim` was switched to the scalar tier on aarch64 and zensim
+scores (ZensimProfile::B) were compared before/after across 3 sizes x 3
+distortion levels:
+
+  case                current(NEON)    scalar-tier      delta
+  128x128 delta=2     95.661428026     95.661461108     3.31e-05
+  128x128 delta=10    90.507352098     90.500504942     6.85e-03
+  128x128 delta=30    78.945956683     78.948438528     2.48e-03
+  256x256 delta=2     95.671092033     95.663554960     7.54e-03
+  256x256 delta=10    90.531155493     90.525126443     6.03e-03
+  256x256 delta=30    78.821579502     78.822552416     9.73e-04
+  512x512 delta=2     95.568990906     95.558500443     1.05e-02
+  512x512 delta=10    90.146993562     90.158889384     1.19e-02
+  512x512 delta=30    78.137755759     78.128091802     9.66e-03
+
+  worst score delta = 1.19e-02
+  crate tolerance   = 1.00e-02   (zensim/tests/cross_platform.rs::TOLERANCE)
+
+**VERDICT: EXCEEDS the crate's own score tolerance. NOT shipped.**
+
+This is not a deferral — the crate publishes a score-comparison threshold and
+the change crosses it, at the largest size tested (and the trend is worse with
+size, so 1920x1080 would be worse still). 1.19e-2 on a 0-100 scale is small in
+absolute terms, but zensim drives ship/no-ship codec decisions and is a
+training target; the owner set 1e-2 and this is over it.
+
+The change is preserved in `git stash` if the threshold is ever revisited. To
+re-evaluate: re-run the score-delta comparison above, and note that any
+acceptance would also need the affected features' REL_TOLERANCE overrides
+re-derived, since sigma_sq/sigma12 feed the SSIM-family features directly.
+
+`sq_sum_into` (0.92x) was not pursued separately: it is also non-bit-identical
+(10675/65536 lanes) and its upside is 8%, far below fused_blur's 43%, so it
+carries the same numeric risk for a fraction of the gain.
+
+### Note on the v1 byte-identity gate
+
+`zensim/tests/v1_golden_bytes.rs` calls itself "the gate" and says to back out
+any refactor that changes a v1 bit. It CANNOT serve as the arbiter here: it
+fails on aarch64 regardless — 246/372 (synthetic) and 241/372 (real) features
+diverge at HEAD **and** at HEAD~1, i.e. before any change in this work. That
+matches the documented design (the golden is a reference-platform x86-64
+tripwire, `--skip`ped in the portable matrix). Verified explicitly so the
+failure is not mistaken for damage from the three shipped dispatches — those
+were bit-identical and changed no feature.
