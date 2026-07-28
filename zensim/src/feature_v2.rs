@@ -456,6 +456,91 @@ pub mod idx_append2 {
     pub const HL_BIN2: usize = 4;
 }
 
+// ============================================================================
+// CSFW (f944+) constants — chunk-3 luminance-CSF tier-1: Y-only
+// luminance-weighted GLOBAL_* pooling lanes
+// (`docs/CSF_CHUNK3_DESIGN_2026-07-28.md`; coordinator descope 2026-07-28:
+// tier-1 ships the 12 achromatic lanes f944..f955 only — the chroma tiers
+// keep the f956..f979 claim). The φ quadratics are DERIVED AND FROZEN, not
+// fitted: castleCSF's published achromatic-sustained luminance sensitivity
+// (Eq. 21, constants 56.49/7.547/0.1445/5.583e−7/9.669e9) divided by each
+// route's own encoding derivative (cube root on the SDR route; PU21
+// `banding_glare` from `pu21.rs` on the HDR route), normalized at the
+// route anchor (sRGB code 128 = 43.73 cd/m² SDR; 100 cd/m² HDR), quadratic
+// least-squares in the ENCODED coordinate over codes 4–255 (SDR) /
+// L ∈ [1, 4000] cd/m² (HDR — below ~0.5 cd/m² PU21's glare term and
+// castleCSF's glare-free model disagree; the clamp owns that region).
+// `csfw_phi_derivation_table` recomputes the derivation against the LIVE
+// front-ends and brackets these constants — the `bandvis_delta_derivation_
+// table` pattern that keeps them honest.
+// ============================================================================
+
+/// SDR-route achromatic weight quadratic `φ_Y(y) = c0 + c1·y + c2·y²`
+/// (design §5.3; fit rms 0.096 nats, max 0.696 at the sub-code-8 tail).
+/// `y` is the reference Y-plane value (cbrt-domain).
+pub(crate) const CSFW_PHI_Y_SDR: [f64; 3] = [1.12644, -2.14749, 0.58452];
+/// HDR/PU-route achromatic weight quadratic (design §5.3; fit rms 0.080,
+/// max 0.329). `y` is the reference PU-Y plane value.
+pub(crate) const CSFW_PHI_Y_PU: [f64; 3] = [0.77215, -1.09073, 0.30256];
+/// Fitted amplitude for the achromatic luminance modulation — SEED 1.0
+/// (design §5.3: `κ = 1` applies the derived castleCSF curve exactly;
+/// `κ = 0` reproduces the unweighted features bit-for-bit). Stage-1/2
+/// calibration (§9.2) adjusts this from measurement, never by hand.
+pub(crate) const CSFW_KAPPA_Y: f64 = 1.0;
+/// Per-band (per-scale) strength multipliers `λ_b`, achromatic only —
+/// the published chromatic peak frequencies do NOT move with luminance
+/// (castleCSF Eq. 24 discussion; design §3.3). `λ_2 ≡ 1` is the
+/// identifiability anchor; all SEED 1.0. Pre-registered expectation for
+/// the stage-1 fit: increasing toward finer scales (falsifier 2).
+pub(crate) const CSFW_LAMBDA_B: [f64; 4] = [1.0, 1.0, 1.0, 1.0];
+/// Weight clamp bounds (design §5.3): bracket every derived curve (SDR
+/// span 2.96×, HDR chroma 2.5×) and own the sub-0.5 cd/m² glare
+/// disagreement + the fit's dark-tail extrapolation. No lane can be
+/// annihilated (§3.2: supra-threshold flattening — MAD's premise).
+pub(crate) const CSFW_W_MIN: f64 = 0.25;
+/// Upper weight clamp bound (see [`CSFW_W_MIN`]).
+pub(crate) const CSFW_W_MAX: f64 = 4.0;
+
+/// CSFW slots per scale (Y-only tier-1 block — no channel axis, same
+/// documented layout deviation as append2; layout
+/// `f944 + scale*CSFW_PER_SCALE + local`, 4 scales × 3 = 12 slots, full
+/// vector = 956). The chroma tiers (X/B weighted twins, design §8.1)
+/// keep the f956..f979 claim and are NOT emitted by this wave.
+pub const CSFW_PER_SCALE: usize = 3;
+
+/// Named local offsets within one scale's CSFW block (all Y-only).
+///
+/// Each lane is the luminance-CSF-weighted twin of the same scale's
+/// unweighted Y-channel [`idx_append`] GLOBAL_* statistic: the pooling
+/// mean `Σv/n` becomes `Σw·v/Σw` with the per-pixel REF-side weight
+/// `w(y) = clamp(1 + κ_Y·λ_b·φ_Y(y), CSFW_W_MIN, CSFW_W_MAX)` evaluated
+/// at the reference Y-plane value (the same per-pixel `ref_y` the HL
+/// bins read). Same constants (`C_GDMEAN`/`C_GCONTRAST`), same clamps,
+/// same bounds as the unweighted twins. E2-CLASS CAVEAT: the weighted
+/// twins are correlated with their unweighted originals BY CONSTRUCTION
+/// (`κ→0` makes them identical) — trainers must treat each (weighted,
+/// unweighted) pair as non-orthogonal; LOO on a 956 bake adjudicates
+/// slot-worth, exactly the BANDVIS discipline.
+pub mod idx_csfw {
+    /// Luminance-weighted global mean shift:
+    /// `sat(|Σw·s − Σw·d| / Σw, C_GDMEAN)` — the weighted twin of
+    /// [`super::idx_append::GLOBAL_DMEAN`] (Y). V3's worst cross-route
+    /// diverging lane family (SROCC 0.49–0.85,
+    /// `benchmarks/hdr_streaming_gates_2026-07-27.md`): a mean shift's
+    /// visibility depends on WHERE in the tonal range it lands, and the
+    /// cbrt/PU encodings weight that differently — the route-common
+    /// physical weight is the fix (design §5.1).
+    pub const W_GLOBAL_DMEAN: usize = 0;
+    /// Luminance-weighted global contrast gain:
+    /// `bounded_excess(gvar₂ʷ, gvar₁ʷ, C_GCONTRAST)` on the
+    /// weighted-population variances `gvarᵢʷ = Σw·xᵢ²/Σw − (Σw·xᵢ/Σw)²`
+    /// — weighted twin of [`super::idx_append::GLOBAL_CGAIN`] (Y).
+    pub const W_GLOBAL_CGAIN: usize = 1;
+    /// Reverse polarity of [`W_GLOBAL_CGAIN`] — weighted twin of
+    /// [`super::idx_append::GLOBAL_CLOSS`] (Y).
+    pub const W_GLOBAL_CLOSS: usize = 2;
+}
+
 /// Box blur radius at scale 0 — matches v1's `ZensimConfig::default()`.
 pub(crate) const BLUR_RADIUS: usize = 5;
 /// Oriented-blockiness lattice period (JPEG's 8x8 MCU grid).
@@ -919,6 +1004,13 @@ pub enum FeatureRegime {
     /// Additive-only and default-OFF — new-regime rows only (the HDR
     /// backfill wave); never mixed into 924-regime tables.
     Folded720Append2,
+    /// [`Folded720Append2`](Self::Folded720Append2) plus the f944+ CSFW
+    /// block ([`idx_csfw`]; 944 + 4×[`CSFW_PER_SCALE`] = 956 slots —
+    /// chunk-3 tier-1, Y-only luminance-CSF-weighted GLOBAL_* twins).
+    /// Additive-only and default-OFF — new-regime rows only (the HDR
+    /// backfill wave); never mixed into 944- or 924-regime tables. The
+    /// chroma tiers (f956..f979) are a later wave.
+    Folded720Csfw,
 }
 
 /// Result of [`compute_v2_features_impl`]/[`crate::Zensim::compute_v2_features`].
@@ -961,6 +1053,12 @@ impl ZensimV2Result {
                 let end = self.features.len() - tail;
                 &self.features[end - v2_len..end]
             }
+            FeatureRegime::Folded720Csfw => {
+                let tail = self.n_scales
+                    * (3 * FEATURES_PER_CHANNEL_APPEND + APPEND2_PER_SCALE + CSFW_PER_SCALE);
+                let end = self.features.len() - tail;
+                &self.features[end - v2_len..end]
+            }
             _ => &self.features[..],
         };
         FeatureViewV2::new(v2_block, self.n_scales)
@@ -981,16 +1079,42 @@ impl ZensimV2Result {
                 let start = self.features.len() - append_len - self.n_scales * APPEND2_PER_SCALE;
                 Some(&self.features[start..start + append_len])
             }
+            FeatureRegime::Folded720Csfw => {
+                let append_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
+                let start = self.features.len()
+                    - append_len
+                    - self.n_scales * (APPEND2_PER_SCALE + CSFW_PER_SCALE);
+                Some(&self.features[start..start + append_len])
+            }
             _ => None,
         }
     }
 
     /// The f924+ append2 slots (`n_scales × APPEND2_PER_SCALE`), when the
-    /// result carries them ([`FeatureRegime::Folded720Append2`]).
+    /// result carries them ([`FeatureRegime::Folded720Append2`] or
+    /// [`FeatureRegime::Folded720Csfw`]).
     pub fn append2_features(&self) -> Option<&[f64]> {
         match self.regime {
             FeatureRegime::Folded720Append2 => {
                 let len = self.n_scales * APPEND2_PER_SCALE;
+                Some(&self.features[self.features.len() - len..])
+            }
+            FeatureRegime::Folded720Csfw => {
+                let len = self.n_scales * APPEND2_PER_SCALE;
+                let start =
+                    self.features.len() - len - self.n_scales * CSFW_PER_SCALE;
+                Some(&self.features[start..start + len])
+            }
+            _ => None,
+        }
+    }
+
+    /// The f944+ CSFW slots (`n_scales × CSFW_PER_SCALE`), when the
+    /// result carries them ([`FeatureRegime::Folded720Csfw`]).
+    pub fn csfw_features(&self) -> Option<&[f64]> {
+        match self.regime {
+            FeatureRegime::Folded720Csfw => {
+                let len = self.n_scales * CSFW_PER_SCALE;
                 Some(&self.features[self.features.len() - len..])
             }
             _ => None,
@@ -1200,6 +1324,15 @@ pub struct V2NewFeatureToggles {
     /// block sits at f924+ and reuses append accumulators. Additive-only;
     /// joins the NEXT extraction regime wave (the HDR backfill).
     pub append2_block: bool,
+    /// Emit the f944+ CSFW block ([`idx_csfw`]: chunk-3 tier-1 —
+    /// luminance-CSF-weighted GLOBAL_* pooling twins, `CSFW_PER_SCALE`
+    /// Y-only slots per scale, both routes with route-local derived φ
+    /// constants). Default OFF: with this false the CSFW pass never runs
+    /// and every existing path, layout, and byte — SDR and HDR routes —
+    /// is unchanged. Requires `append2_block` (asserted): the block sits
+    /// at f944+ after append2. Additive-only; joins the NEXT extraction
+    /// regime wave (the HDR backfill).
+    pub csfw_block: bool,
 }
 impl Default for V2NewFeatureToggles {
     fn default() -> Self {
@@ -1210,6 +1343,7 @@ impl Default for V2NewFeatureToggles {
             transducers_luma_only: false,
             append_block: false,
             append2_block: false,
+            csfw_block: false,
         }
     }
 }
@@ -3198,6 +3332,197 @@ fn append_block_kernel(
     }
 }
 
+// ============================================================================
+// CSFW (f944+) kernel — chunk-3 tier-1 second pass over the Y strip rows.
+//
+// A SEPARATE const-gated pass, not a growth of the append kernel: the append
+// kernel already carries ~19 row-lane accumulators against the 16-register
+// AVX2/NEON budget with accepted L1 spills — five more lanes land on the
+// wrong side of that cliff (design §4.2). A second pass over strip-resident
+// planes re-reads L2, not DRAM (§A.15's locality), so the marginal cost is
+// close to the 10 ops/px of its own arithmetic. With `csfw_block` off this
+// pass is never invoked and every existing kernel is untouched machine code
+// — the byte-stability guarantee is structural.
+// ============================================================================
+
+/// Per-row-reduced f64 accumulators for the CSFW weighted-pool pass:
+/// `Σw, Σw·s, Σw·d, Σw·s², Σw·d²` (design §4.1 — pure sums of products,
+/// strip-foldable exactly like [`AppendAccum`]).
+#[derive(Default, Clone, Copy)]
+struct CsfwAccum {
+    sum_w: f64,
+    sum_ws: f64,
+    sum_wd: f64,
+    sum_ws2: f64,
+    sum_wd2: f64,
+}
+
+impl CsfwAccum {
+    /// Strip-partial fold, same reasoning as [`AppendAccum::accumulate`].
+    #[inline]
+    fn accumulate(&mut self, other: &CsfwAccum) {
+        self.sum_w += other.sum_w;
+        self.sum_ws += other.sum_ws;
+        self.sum_wd += other.sum_wd;
+        self.sum_ws2 += other.sum_ws2;
+        self.sum_wd2 += other.sum_wd2;
+    }
+}
+
+/// Per-walk CSFW parameters, derived once from the route: the effective
+/// per-scale weight quadratic `w(y) = clamp(b0 + b1·y + b2·y², w_min,
+/// w_max)` with `b = [1 + g·c0, g·c1, g·c2]`, `g = κ_Y·λ_b` folded at
+/// walk setup (design §4.2: `κ_c·λ_b` folds to one constant per band —
+/// no runtime multiply of the two) and `c` the route's derived φ
+/// quadratic ([`CSFW_PHI_Y_SDR`]/[`CSFW_PHI_Y_PU`]).
+#[derive(Clone, Copy)]
+struct CsfwParams {
+    eff: [[f64; 3]; crate::NUM_SCALES],
+}
+
+impl CsfwParams {
+    fn for_phi(phi: [f64; 3]) -> Self {
+        let eff = std::array::from_fn(|scale| {
+            let g = CSFW_KAPPA_Y * CSFW_LAMBDA_B[scale];
+            [1.0 + g * phi[0], g * phi[1], g * phi[2]]
+        });
+        Self { eff }
+    }
+}
+
+/// CSFW SIMD kernel body — generic over any `F32x8Backend` token, same
+/// row-lane-then-f64 reduction structure as [`append_block_kernel_generic`].
+/// `ref_y` is the reference Y strip rows (for the Y channel these are the
+/// same values as `src`; the argument stays separate so the weight is
+/// explicitly a function of the REFERENCE plane only — design §4.1 — and
+/// so a chroma tier can reuse the kernel unchanged).
+#[inline(always)]
+fn csfw_block_kernel_generic<T: F32x8Backend + Copy>(
+    token: T,
+    src: &[f32],
+    dst: &[f32],
+    ref_y: &[f32],
+    eff: [f64; 3],
+    width: usize,
+    height: usize,
+) -> CsfwAccum {
+    let b0 = V8::<T>::splat(token, eff[0] as f32);
+    let b1 = V8::<T>::splat(token, eff[1] as f32);
+    let b2 = V8::<T>::splat(token, eff[2] as f32);
+    let w_min = V8::<T>::splat(token, CSFW_W_MIN as f32);
+    let w_max = V8::<T>::splat(token, CSFW_W_MAX as f32);
+
+    let mut acc = CsfwAccum::default();
+    let width8 = width - (width % 8);
+
+    for y in 0..height {
+        let row = y * width;
+        let (mut r_w, mut r_ws, mut r_wd, mut r_ws2, mut r_wd2) = (
+            V8::<T>::zero(token),
+            V8::<T>::zero(token),
+            V8::<T>::zero(token),
+            V8::<T>::zero(token),
+            V8::<T>::zero(token),
+        );
+
+        let mut x = 0usize;
+        while x < width8 {
+            let i = row + x;
+            let s = V8::<T>::from_array(token, src[i..i + 8].try_into().unwrap());
+            let dd = V8::<T>::from_array(token, dst[i..i + 8].try_into().unwrap());
+            let ry = V8::<T>::from_array(token, ref_y[i..i + 8].try_into().unwrap());
+
+            // w = clamp(b0 + y·(b1 + y·b2), w_min, w_max) — Horner, 2 FMA.
+            let w = ry.mul_add(ry.mul_add(b2, b1), b0).max(w_min).min(w_max);
+            let ws = w * s;
+            let wd = w * dd;
+            r_w += w;
+            r_ws += ws;
+            r_wd += wd;
+            r_ws2 += ws * s;
+            r_wd2 += wd * dd;
+
+            x += 8;
+        }
+
+        acc.sum_w += r_w.reduce_add() as f64;
+        acc.sum_ws += r_ws.reduce_add() as f64;
+        acc.sum_wd += r_wd.reduce_add() as f64;
+        acc.sum_ws2 += r_ws2.reduce_add() as f64;
+        acc.sum_wd2 += r_wd2.reduce_add() as f64;
+
+        // Scalar tail — same formulas in f64, the house tail idiom.
+        for x in width8..width {
+            let i = row + x;
+            let s = src[i] as f64;
+            let dd = dst[i] as f64;
+            let ry = ref_y[i] as f64;
+            let w = (eff[0] + ry * (eff[1] + ry * eff[2])).clamp(CSFW_W_MIN, CSFW_W_MAX);
+            let ws = w * s;
+            let wd = w * dd;
+            acc.sum_w += w;
+            acc.sum_ws += ws;
+            acc.sum_wd += wd;
+            acc.sum_ws2 += ws * s;
+            acc.sum_wd2 += wd * dd;
+        }
+    }
+
+    acc
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn csfw_block_kernel_entry(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    ref_y: &[f32],
+    eff: [f64; 3],
+    width: usize,
+    height: usize,
+) -> CsfwAccum {
+    csfw_block_kernel_generic(token, src, dst, ref_y, eff, width, height)
+}
+
+/// Runtime dispatch wrapper for the CSFW kernel (same `incant!` shape as
+/// [`append_block_kernel`]).
+fn csfw_block_kernel(
+    src: &[f32],
+    dst: &[f32],
+    ref_y: &[f32],
+    eff: [f64; 3],
+    width: usize,
+    height: usize,
+) -> CsfwAccum {
+    incant!(
+        csfw_block_kernel_entry(src, dst, ref_y, eff, width, height),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Finalize one scale's CSFW block into its 3 output slots — the weighted
+/// twins of [`finish_append`]'s GLOBAL_* trio, same constants, same
+/// clamps. `Σw ≥ w_min·n > 0` structurally; the [`WeightedSum`]-class
+/// 1e-12 denominator floor is kept as defense in depth.
+fn finish_csfw(csfw: &CsfwAccum, out: &mut [f64]) {
+    debug_assert_eq!(out.len(), CSFW_PER_SCALE);
+    if csfw.sum_w < 1e-12 {
+        out[idx_csfw::W_GLOBAL_DMEAN] = 0.0;
+        out[idx_csfw::W_GLOBAL_CGAIN] = 0.0;
+        out[idx_csfw::W_GLOBAL_CLOSS] = 0.0;
+        return;
+    }
+    out[idx_csfw::W_GLOBAL_DMEAN] =
+        saturate((csfw.sum_ws - csfw.sum_wd).abs() / csfw.sum_w, C_GDMEAN);
+    let wmean_s = csfw.sum_ws / csfw.sum_w;
+    let wmean_d = csfw.sum_wd / csfw.sum_w;
+    let gvar1_w = (csfw.sum_ws2 / csfw.sum_w - wmean_s * wmean_s).max(0.0);
+    let gvar2_w = (csfw.sum_wd2 / csfw.sum_w - wmean_d * wmean_d).max(0.0);
+    let (g_cgain, g_closs) = bounded_excess_pair(gvar2_w, gvar1_w, C_GCONTRAST);
+    out[idx_csfw::W_GLOBAL_CGAIN] = g_cgain.clamp(0.0, 1.0);
+    out[idx_csfw::W_GLOBAL_CLOSS] = g_closs.clamp(0.0, 1.0);
+}
+
 /// Finalize one channel-scale's append block into its 17 output slots.
 /// `dense`/`grad` supply the first moments matching `app`'s second moments
 /// (identical per-pixel values by construction — see [`AppendAccum`]).
@@ -4540,6 +4865,9 @@ struct StreamChannelAccums {
     v1: Vec<V1BasicSums>,
     /// Row-ordered blockiness partials `(sum_v, sum_h)` (P1 canonical).
     block: Vec<(f64, f64)>,
+    /// CSFW weighted-pool partials (Y channel + `csfw_block` only —
+    /// untouched zeros otherwise).
+    csfw: Vec<CsfwAccum>,
 }
 
 impl StreamChannelAccums {
@@ -4550,6 +4878,7 @@ impl StreamChannelAccums {
             app: vec![AppendAccum::default(); n_scales],
             v1: vec![V1BasicSums::default(); n_scales],
             block: vec![(0.0, 0.0); n_scales],
+            csfw: vec![CsfwAccum::default(); n_scales],
         }
     }
 }
@@ -4699,6 +5028,7 @@ fn stream_phase_b(
     refy_strip: &[f32],
     cross: Option<(&[f32], &[f32])>,
     append2: Option<Append2Params>,
+    csfw: Option<CsfwParams>,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -4788,6 +5118,22 @@ fn stream_phase_b(
             strip_h,
         );
         acc.app[scale].accumulate(&a);
+
+        // CSFW pass accumulates only on (Y, csfw_block on) — a separate
+        // kernel invocation over the strip-resident rows (design §4.2);
+        // every other path never dispatches it. `cross.is_some()` is the
+        // Y-channel discriminant, same as the BANDVIS gate above.
+        if let Some(cp) = csfw.filter(|_| cross.is_some()) {
+            let c = csfw_block_kernel(
+                src_strip,
+                dst_strip,
+                refy_strip,
+                cp.eff[scale],
+                width,
+                strip_h,
+            );
+            acc.csfw[scale].accumulate(&c);
+        }
     }
 
     if toggles.blockiness {
@@ -5021,6 +5367,40 @@ pub(crate) fn compute_folded720_append2_hdr_streaming_impl(
     )
 }
 
+/// Folded-720+append+append2+CSFW pair entry (956; [`FeatureRegime::
+/// Folded720Csfw`]): forces `append_block` + `append2_block` + `csfw_block`.
+pub(crate) fn compute_folded720_csfw_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    mut toggles: V2NewFeatureToggles,
+) -> Result<ZensimV2Result, ZensimError> {
+    toggles.append_block = true;
+    toggles.append2_block = true;
+    toggles.csfw_block = true;
+    compute_folded720_impl_with_toggles(source, distorted, max_pixels, parallel, toggles)
+}
+
+/// Declared-HDR 956 entry: [`compute_folded720_hdr_streaming_impl`] with
+/// append + append2 + CSFW forced on (PU-route φ constants).
+pub(crate) fn compute_folded720_csfw_hdr_streaming_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    mut toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    toggles.append_block = true;
+    toggles.append2_block = true;
+    toggles.csfw_block = true;
+    compute_folded720_hdr_streaming_impl(
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch,
+    )
+}
+
 /// [`compute_folded720_hdr_streaming_impl`] with the append block forced
 /// on (the 924 shape).
 pub(crate) fn compute_folded720_append_hdr_streaming_impl(
@@ -5082,6 +5462,22 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 bv_delta_hi: BV_DELTA_HI_PU,
                 hl_bins: true,
             },
+        }
+    });
+    let csfw_on = toggles.csfw_block;
+    assert!(
+        !csfw_on || append2_on,
+        "csfw_block requires append2_block (f944+ sits after the append2 block)"
+    );
+    // Route-local derived φ: the SAME weighting mechanism on both routes,
+    // pre-composed with each route's own encoding (design §6 — runtime
+    // never inverts an encoding; the route-dependence lives entirely in
+    // which constant set is selected, the `BV_DELTA_*` pattern).
+    let csfw = csfw_on.then(|| {
+        use crate::feature_v2_stream::FrontEnd;
+        match front_end {
+            FrontEnd::Sdr => CsfwParams::for_phi(CSFW_PHI_Y_SDR),
+            FrontEnd::Hdr(_) => CsfwParams::for_phi(CSFW_PHI_Y_PU),
         }
     });
     let n_scales = crate::NUM_SCALES;
@@ -5174,6 +5570,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     refy,
                     cross,
                     append2,
+                    csfw,
                     acc,
                 );
             });
@@ -5226,6 +5623,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     refy,
                     None,
                     append2,
+                    csfw,
                     &mut accums[ch],
                 );
             }
@@ -5251,6 +5649,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     refy,
                     cross,
                     append2,
+                    csfw,
                     &mut accums[1],
                 );
             }
@@ -5274,9 +5673,11 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     } else {
         0
     };
-    let mut features = vec![0.0f64; v12_total + append_total + append2_total];
+    let csfw_total = if csfw_on { n_scales * CSFW_PER_SCALE } else { 0 };
+    let mut features = vec![0.0f64; v12_total + append_total + append2_total + csfw_total];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
-    let (features_app, features_app2) = features_tail.split_at_mut(append_total);
+    let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
+    let (features_app2, features_csfw) = features_tail2.split_at_mut(append2_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     for scale in 0..n_scales {
@@ -5375,13 +5776,26 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         }
     }
 
+    // --- CSFW finalize (Y-only, per scale): the weighted GLOBAL_* twins
+    //     from the Y CSFW accumulators (design §4.1). ---
+    if csfw_on {
+        for scale in 0..n_scales {
+            let base = scale * CSFW_PER_SCALE;
+            finish_csfw(
+                &accums[1].csfw[scale],
+                &mut features_csfw[base..base + CSFW_PER_SCALE],
+            );
+        }
+    }
+
     ZensimV2Result {
         features,
         n_scales,
-        regime: match (append_on, append2_on) {
-            (true, true) => FeatureRegime::Folded720Append2,
-            (true, false) => FeatureRegime::Folded720Append,
-            (false, _) => FeatureRegime::Folded720,
+        regime: match (append_on, append2_on, csfw_on) {
+            (true, true, true) => FeatureRegime::Folded720Csfw,
+            (true, true, false) => FeatureRegime::Folded720Append2,
+            (true, false, _) => FeatureRegime::Folded720Append,
+            (false, _, _) => FeatureRegime::Folded720,
         },
     }
 }
