@@ -90,3 +90,36 @@ Artifacts: bakes + fulleval JSONs in `/mnt/v/output/zensim/bakes/coherent-089/`
 Data: foldable parquets per `p1_fulldata_kadis_2026-07-25.md`; transforms =
 `benchmarks/v0_20_feature_transform_greedy_screen_2026-05-15.tsv` filtered to
 `foldable_idx.npy` (384 = 156 basic + 228 v2), top-40 by lift.
+
+## E-M1 — the coherent recipe on the 924 regime (v3 append block) — 2026-07-28
+
+The fold40 recipe at `--max-features 924` on the ext924 canonical legs +
+`tbig_924_200k` (stratified 208k from the 4 lossy bigcodec TRAIN views; the 720
+table has no join key — documented fresh) + `kadis_924_ssim2_50k` (multiset
+key-join to the 720 guard on `(source_id, f32(clip(ssim2/100)))` — ≥99%
+row-identical; clip-saturated siblings interchangeable). Seed 13, eval on the
+ext924 legs + 924 dial/corruption grids. Bake carries EMBEDDED zentrain.repro.
+
+| corpus | E-K5 (720, s13) | E-M1 (924, s13) | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8713 | **0.8861** | **+0.0147** |
+| KonJND | 0.2852 | **0.4047** | **+0.1195** |
+| CSIQ | 0.8634 | 0.7523 | −0.1111 |
+| LIVE | 0.8380 | 0.7797 | −0.0583 |
+| kadid | 0.3371 | 0.5162 | +0.1791 |
+| tid | 0.8779 | 0.8608 | −0.0171 |
+| aic3 | 0.7896 | 0.8075 | +0.0179 |
+| aic4 | 0.9044 | 0.9350 | +0.0306 |
+
+CID22 0.8861 is above the ENTIRE 14-seed 720 fold40 band (max 0.8859) at a seed
+that drew LOW at 720. KonJND doubles the kw0.5 band — the near-threshold signal
+the append block was designed for (gap-audit A1-A5/A9), reached WITHOUT the
+KADIS upweight. **Trade:** classic-FR (CSIQ/LIVE) and corruption-ordering
+(pass_q20 0.214→0.060) drop — the profile of amplified analytic/KADIS character
+(many v3 features are pathology-sensitive). CSIQ/LIVE are not product gates;
+the corruption drop is a real concern (mitigable by the separate corruption
+head — negrich_924 exists).
+
+⚠ single-seed. E-M2 (in flight, lianli): 6-seed fold924 + kw {0.25, 0.75} ×
+{13,42} + a **no-KADIS attribution arm** ×2 — is the CSIQ/corruption trade the
+append block itself, or its interaction with the KADIS analytic mass?
