@@ -186,7 +186,15 @@ draining 924 tables; with the toggle off nothing changes anywhere.
 3. **dst-side texture masking** (the V3(b)/(c) fix): a Y-only
    dst-activity plane (~+5% CPU) or the A8 soft-tile pooling upgrade —
    the principled contour-extent/masking route; revisit with the A8
-   work.
+   work. **RESOLVED 2026-07-28 — DEFERRED with a zero-cost RESHAPE**
+   (`bandvis_dither_retest_2026-07-28.md`, on the real
+   grain-pathology-2026-07-28 corpus): the fixture cross-fire reproduces
+   on real content (1.4–1.65× at s0–s2; 26–37% of dither pairs reach
+   real-banding GAIN amplitude) but `texture_dissim_s3` separates
+   dither-dst from banding-dst at AUC 0.023 (GAIN-independent), so the
+   trained head gates for free — do NOT build the plane unless the 944
+   LOO shows the gate unlearned, or a per-tile map is required (then
+   prefer A8).
 4. **Chroma-BANDVIS variant** — not built (Y-only per the cost table).
 5. **A8 soft-tile pooling** for contour extent (CAMBI's topk analog
    without the D4 order-statistic hazard).
