@@ -218,14 +218,21 @@ fn main() {
     // = streaming distorted side against a full precomputed reference
     // (compute_with_ref_streaming_strips_default, score-only). Both require
     // the grouped flow (ZENSIM_AB_GROUPED=1, the default).
+    // CSFW modes (chunk-3 tier-1, 2026-07-28): "foldcsfw" = 956-column
+    // SDR extraction (append + append2 + csfw toggles through the
+    // streaming batch entry); "foldcsfwhdr100" / "foldcsfwhdrpq" = the
+    // declared-HDR variants (csfw_block toggle through the append2 HDR
+    // entry). Same batch shape as foldapp2; imazen-26 split rule above
+    // applies unchanged.
     let mode = std::env::var("ZENSIM_AB_MODE").unwrap_or_else(|_| "ext".into());
     let do_foldstream =
         mode == "fold" || mode == "foldapp" || mode == "foldstream" || mode == "foldappstream";
     let stream_append = mode == "foldapp" || mode == "foldappstream";
-    let do_hdr100 = mode == "foldapphdr100" || mode == "foldapp2hdr100";
-    let do_hdrpq = mode == "foldapphdrpq" || mode == "foldapp2hdrpq";
-    let do_app2 = mode == "foldapp2";
-    let app2_on = mode.starts_with("foldapp2");
+    let do_hdr100 = mode == "foldapphdr100" || mode == "foldapp2hdr100" || mode == "foldcsfwhdr100";
+    let do_hdrpq = mode == "foldapphdrpq" || mode == "foldapp2hdrpq" || mode == "foldcsfwhdrpq";
+    let do_app2 = mode == "foldapp2" || mode == "foldcsfw";
+    let app2_on = mode.starts_with("foldapp2") || mode.starts_with("foldcsfw");
+    let csfw_on = mode.starts_with("foldcsfw");
     let do_v1stream = mode == "v1stream";
     let do_v1ref = mode == "v1ref";
     let do_v1streamref = mode == "v1streamref";
@@ -234,8 +241,10 @@ fn main() {
         "v2" => (false, true),
         // own branches below
         "none" | "fold" | "foldapp" | "foldstream" | "foldappstream" | "foldapphdr100"
-        | "foldapphdrpq" | "foldapp2" | "foldapp2hdr100" | "foldapp2hdrpq" | "v1stream"
-        | "v1ref" | "v1streamref" => (false, false),
+        | "foldapphdrpq" | "foldapp2" | "foldapp2hdr100" | "foldapp2hdrpq" | "foldcsfw"
+        | "foldcsfwhdr100" | "foldcsfwhdrpq" | "v1stream" | "v1ref" | "v1streamref" => {
+            (false, false)
+        }
         _ => (true, true),
     };
 
@@ -375,6 +384,7 @@ fn main() {
             let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
             let toggles = V2NewFeatureToggles {
                 append2_block: true,
+                csfw_block: csfw_on,
                 ..V2NewFeatureToggles::default()
             };
             let t0 = std::time::Instant::now();
@@ -404,7 +414,10 @@ fn main() {
                     &r_n,
                     &d_n,
                     zensim::feature_v2::HdrEncoding::Linear,
-                    V2NewFeatureToggles::default(),
+                    V2NewFeatureToggles {
+                        csfw_block: csfw_on,
+                        ..V2NewFeatureToggles::default()
+                    },
                     scratch,
                 )
             } else {
@@ -438,7 +451,10 @@ fn main() {
                     &Pq16Image::from_rgb16(&r16, r16w, r16h),
                     &Pq16Image::from_rgb16(&d16, d16w, d16h),
                     zensim::feature_v2::HdrEncoding::Pq { peak_nits: 10_000.0 },
-                    V2NewFeatureToggles::default(),
+                    V2NewFeatureToggles {
+                        csfw_block: csfw_on,
+                        ..V2NewFeatureToggles::default()
+                    },
                     scratch,
                 )
             } else {

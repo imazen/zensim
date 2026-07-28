@@ -193,6 +193,13 @@ fn main() {
     }
     eprintln!("{} refs", refs.len());
 
+    // ZENSIM_CSFW=1 (chunk-3 tier-1 gate G1): extract at 956 through the
+    // CSFW entries on BOTH routes and print the per-lane cross-route
+    // SROCC of each weighted GLOBAL_* lane AGAINST its unweighted twin —
+    // the design's primary falsifier readout
+    // (`docs/CSF_CHUNK3_DESIGN_2026-07-28.md` §9.3 G1).
+    let csfw_mode = std::env::var("ZENSIM_CSFW").map(|v| v == "1").unwrap_or(false);
+
     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
     let mut scratch = V2Scratch::new();
     let weights = zensim::WEIGHTS;
@@ -211,21 +218,39 @@ fn main() {
                 let d_px = distort(&r_px, rw, rh, kind, level);
                 let d_nits = to_nits(&d_px, rw, rh, 100.0);
 
-                let sdr = z
-                    .compute_folded720_append_features(
-                        &RgbSlice::new(&r_px, rw, rh),
-                        &RgbSlice::new(&d_px, rw, rh),
+                let (sdr, hdr) = if csfw_mode {
+                    (
+                        z.compute_folded720_csfw_features(
+                            &RgbSlice::new(&r_px, rw, rh),
+                            &RgbSlice::new(&d_px, rw, rh),
+                        )
+                        .unwrap(),
+                        z.compute_folded720_csfw_features_hdr(
+                            &r_nits,
+                            &d_nits,
+                            zensim::feature_v2::HdrEncoding::Linear,
+                            V2NewFeatureToggles::default(),
+                            &mut scratch,
+                        )
+                        .unwrap(),
                     )
-                    .unwrap();
-                let hdr = z
-                    .compute_folded720_append_features_hdr(
-                        &r_nits,
-                        &d_nits,
-                        zensim::feature_v2::HdrEncoding::Linear,
-                        V2NewFeatureToggles::default(),
-                        &mut scratch,
+                } else {
+                    (
+                        z.compute_folded720_append_features(
+                            &RgbSlice::new(&r_px, rw, rh),
+                            &RgbSlice::new(&d_px, rw, rh),
+                        )
+                        .unwrap(),
+                        z.compute_folded720_append_features_hdr(
+                            &r_nits,
+                            &d_nits,
+                            zensim::feature_v2::HdrEncoding::Linear,
+                            V2NewFeatureToggles::default(),
+                            &mut scratch,
+                        )
+                        .unwrap(),
                     )
-                    .unwrap();
+                };
 
                 let (ss, _) =
                     zensim::try_score_from_features(&sdr.features()[..228], weights).unwrap();
@@ -330,4 +355,61 @@ fn main() {
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f64, f64::max)
     );
+
+    // --- G1 lane table (csfw mode only): cross-route SROCC of each
+    //     weighted GLOBAL_* lane vs its unweighted Y twin. Layout:
+    //     unweighted twin at 720 + scale*51 + 17 (Y) + local{13,14,15};
+    //     weighted at 944 + scale*3 + local{0,1,2}.
+    if csfw_mode {
+        let lane_srocc = |idx: usize| -> f64 {
+            let a: Vec<f64> = sdr_feats.iter().map(|v| v[idx]).collect();
+            let b: Vec<f64> = hdr_feats.iter().map(|v| v[idx]).collect();
+            spearman(&a, &b)
+        };
+        let lane_std = |idx: usize| -> (f64, f64) {
+            let std_of = |vv: Vec<f64>| {
+                let m = vv.iter().sum::<f64>() / vv.len() as f64;
+                (vv.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / vv.len() as f64).sqrt()
+            };
+            (
+                std_of(sdr_feats.iter().map(|v| v[idx]).collect()),
+                std_of(hdr_feats.iter().map(|v| v[idx]).collect()),
+            )
+        };
+        println!("\nG1 lane table (cross-route SROCC, weighted vs unweighted twin):");
+        println!("scale lane            unweighted  weighted  d(SROCC)  std_sdr(u/w)");
+        let names = ["GLOBAL_DMEAN", "GLOBAL_CGAIN", "GLOBAL_CLOSS"];
+        let mut improved = 0usize;
+        let mut regressed = 0usize;
+        let mut live_pairs = 0usize;
+        for scale in 0..4 {
+            for local in 0..3 {
+                let u_idx = 720 + scale * 51 + 17 + [13, 14, 15][local];
+                let w_idx = 944 + scale * 3 + local;
+                let su = lane_srocc(u_idx);
+                let sw = lane_srocc(w_idx);
+                let (stdu, _) = lane_std(u_idx);
+                let (stdw, _) = lane_std(w_idx);
+                let live = stdu > 1e-9 && stdw > 1e-9;
+                if live {
+                    live_pairs += 1;
+                    if sw > su + 1e-6 {
+                        improved += 1;
+                    }
+                    if sw < su - 0.01 {
+                        regressed += 1;
+                    }
+                }
+                println!(
+                    "s{scale}    {:14}  {su:8.4}  {sw:8.4}  {:+8.4}  {stdu:.2e}/{stdw:.2e}{}",
+                    names[local],
+                    sw - su,
+                    if live { "" } else { "  [dead lane]" }
+                );
+            }
+        }
+        println!(
+            "G1 summary: {improved}/{live_pairs} live lanes improved, {regressed} regressed (>0.01)"
+        );
+    }
 }
