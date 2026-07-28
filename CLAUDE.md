@@ -57,6 +57,33 @@ Quick paths:
 
 The 2026-05-20 byte-equivalence audit (`10-canonical-build-audit.md`) confirmed current zensim main produces features bit-equivalent to all 13 canonical-2026-05-21 parquets (sub-ULP precision). No build drift; trustworthy as-is. The `cvvdp_iwssim_LARGE_372col.parquet` (73,300 rows, 85.5 MB, sha256: 14c205332701b5ff6f2842a8d60f8ac1282f8be3d5cd89c11700e1e4b864a20f) lives at `canonical-2026-05-21/features/` — extracted 2026-05-20 to fill the f300..f371 IW-pool gap.
 
+## ★ THE 924-FEATURE PARQUETS (folded+append STREAMING regime) — the current-era datasets (2026-07-27/28)
+
+**Every canonical dataset now exists at 924 features** (regime `Folded720Append`, zensim
+`0b3d16b0` C5 streaming-only, `ZENSIM_AB_MODE=foldapp`, `codec_target` profile, RAW unpadded
+slices). Layout: f0..f155 folded v1-basic, f156..f371 STRUCTURAL ZEROS, f372..f719 v2-348,
+f720..f923 append-204. **REGIME PURITY: never column-mix 924 rows with 720/v1 parquets**
+(padded-width divergence + zeroed pools). All triple-mirrored (local + R2 + Tower, sha-manifested);
+full provenance in `~/work/zen/DATA_PROVENANCE.md`. Train on THESE for all new work:
+
+| dataset | rows | local path |
+|---|---|---|
+| 11 local legs (cid22val/aic3/aic4/csiq/live/kadid/tid/safesyn/cid22t201/konjnd/sdr25) | 149,195 | `/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/` |
+| bigcodec fleet table `tbig_924_full.parquet` (keyed encode_sha) | 5,742,660 | `/mnt/v/output/zensim/tbig-924-2026-07-27/` |
+| bigcodec 21 split views (7 picker datasets × train/validate/test, match_rate 1.0000) | 5,742,660 | `/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/bigcodec/<dataset>/<split>_924.parquet` |
+| `kadis700k_924.parquet` (7 byte-carried metric targets, split on source_id) | 699,999 | `/mnt/v/zen/zensim-training/kadis-924-2026-07-27/` |
+| `kadis_negrich_924.parquet` (severe, score_zensim_gpu<0 — corruption-head negatives) | 167,034 | same dir |
+| eval instruments: `corruption_grid_924col` + `dial_grid_924col` | 2,016 + 4,817 | `/mnt/v/output/zensim/v2-eval-924-2026-07-27/` |
+
+Eval slices: FULL_EVAL's 924-era imazen26/nonphoto point at the **canonical bigcodec 924 TEST
+views** (see `docs/FULL_EVAL.md` "924-era eval slices"); the NN-matched `ext_*_720` tables are
+720-legacy, never rebuilt. First instruments on this data: P12 residual-boost ranking + P11
+decorrelated-auto (both arms + the empirical S-class map) — `benchmarks/p12_*`/`p11_*_2026-07-27*`.
+
+**Coming later: additional HDR features.** The 924 set is SDR-only by design; a future wave
+appends HDR-specific features (the append-only discipline holds — new slots will EXTEND, never
+renumber, and HDR rows will be their own regime/datasets, never column-mixed into these).
+
 ## ⇒ POST-COMPACT / NEW SESSION: read [`SESSION-RESUME.md`](SESSION-RESUME.md) FIRST
 
 Then return here. `SESSION-RESUME.md` is the canonical entry point —
