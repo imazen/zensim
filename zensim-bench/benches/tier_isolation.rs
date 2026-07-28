@@ -91,6 +91,29 @@ fn bench_tiers(c: &mut Criterion) {
         set_simd(true);
         group.finish();
     }
+    // Attribution arm: extended-feature extraction alone, so the SIMD ratio of
+    // the image-processing stages can be compared against the ratio of the FULL
+    // metric. zensim's whole-pipeline ratio (~1.2-1.3x) is far below the 3.4x
+    // that butteraugli — a comparable multi-scale XYB+blur metric — gets on the
+    // same host. If extraction alone shows a much higher ratio than `compute`,
+    // the shortfall is in scoring/mapping (scalar by nature) rather than in the
+    // vectorised image kernels, and further NEON work on those kernels has a
+    // low ceiling.
+    let (src, dst) = make_pair(512, 512);
+    let mut group = c.benchmark_group("extract_features/512x512");
+    for (arm, simd) in [(TIER_NAME, true), ("scalar", false)] {
+        group.bench_function(arm, |b| {
+            set_simd(simd);
+            b.iter(|| {
+                let s = RgbSlice::new(std::hint::black_box(&src), 512, 512);
+                let d = RgbSlice::new(std::hint::black_box(&dst), 512, 512);
+                z.compute_extended_features(&s, &d).unwrap()
+            })
+        });
+    }
+    set_simd(true);
+    group.finish();
+
     set_simd(true);
 }
 

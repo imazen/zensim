@@ -42,3 +42,45 @@ problem. Two concrete things to check:
    plausible suspect since it is not obviously vectorised.
 
 This is a LEAD, not a conclusion — nothing here is measured per kernel.
+
+## Follow-up (same day): the shortfall is IN the image kernels, not in scoring
+
+The lead above suggested checking whether the 372/924-feature extraction path
+was scalar-bound. It is not. Adding an `extract_features` arm that runs
+`compute_extended_features` under the same SIMD/scalar A/B settles it:
+
+| stage                              | NEON     | scalar   | speedup |
+|------------------------------------|----------|----------|---------|
+| full `compute` (512x512)           | 2.4158ms | 2.9514ms |  1.22x  |
+| `compute_extended_features` (512²) | 2.3852ms | 3.0114ms |  1.26x  |
+
+Feature extraction is ~99% of total compute time (2.385 of 2.416 ms) and shows
+the SAME ratio. So scoring/mapping is negligible and cannot be the reason
+zensim gets 1.2-1.3x where butteraugli gets 3.4-3.7x — the shortfall is inside
+the vectorised image kernels themselves.
+
+That rules out the cheaper of the two hypotheses recorded above. Narrowing it
+further needs a profiler; macOS dtrace (cargo-flamegraph) requires SIP off, so
+it was not run here. The next step is a per-stage breakdown inside
+`compute_extended_features` (blur / colour / feature_v2 / iw_pool), NOT more
+whole-pipeline runs.
+
+Context worth carrying: zensim at 512x512 costs 2.4ms where butteraugli costs
+24.2ms — a 10x lighter metric. A lighter per-pixel workload spends
+proportionally more of its time on loads/stores, which is a plausible reason
+the SIMD ratio is lower, but that is reasoning, not a measurement.
+
+## SEPARATE finding — 25 kernels have NO x86 SIMD tier at all
+
+Not an ARM issue, but surfaced by the same audit and worth acting on:
+
+  25 sites  #[magetypes(neon, wasm128, scalar)]      <- no v3, no v4
+  13 sites  #[magetypes(v4, v3, neon, wasm128, scalar)]
+   7 sites  #[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+
+Twenty-five kernels declare NEON and WASM but omit the x86 tiers entirely, so
+they run SCALAR on every x86_64 machine — including the fleet boxes that run
+the sweeps. Every other zen crate audited lists v3 alongside neon. Adding
+`v3` (and `v4` where the body allows) to those 25 attributes is a mechanical
+change, but it MUST be measured on x86 before landing, which this aarch64-only
+host cannot do.
