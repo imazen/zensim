@@ -475,13 +475,24 @@ pub mod idx_append2 {
 // table` pattern that keeps them honest.
 // ============================================================================
 
-/// SDR-route achromatic weight quadratic `φ_Y(y) = c0 + c1·y + c2·y²`
-/// (design §5.3; fit rms 0.096 nats, max 0.696 at the sub-code-8 tail).
-/// `y` is the reference Y-plane value (cbrt-domain).
-pub(crate) const CSFW_PHI_Y_SDR: [f64; 3] = [1.12644, -2.14749, 0.58452];
-/// HDR/PU-route achromatic weight quadratic (design §5.3; fit rms 0.080,
-/// max 0.329). `y` is the reference PU-Y plane value.
-pub(crate) const CSFW_PHI_Y_PU: [f64; 3] = [0.77215, -1.09073, 0.30256];
+/// SDR-route achromatic weight quadratic `φ_Y(y) = c0 + c1·y + c2·y²`,
+/// with `y` the LIVE reference Y-plane value (`cbrt(rel + β) − cbrt(β)
+/// + 0.01`, β the opsin bias — measured through
+/// `srgb_to_positive_xyb_planar_into`). LSQ over sRGB codes 4–253, this
+/// refit: rms 0.092, max 0.431 (dark tail). Implementation-found
+/// deviation from the design doc's §5.3 table: those values were fitted
+/// in an idealized bias-free `cbrt(rel)` coordinate that the live plane
+/// is NOT an affine map of (the opsin bias regularizes the doc's
+/// dark-tail derivative collapse); §6's pre-composition rule resolves
+/// in favor of the live coordinate, and `csfw_phi_derivation_table`
+/// recomputes this exact fit and pins the constants to it.
+pub(crate) const CSFW_PHI_Y_SDR: [f64; 3] = [1.77430, -5.81908, 4.04916];
+/// HDR/PU-route achromatic weight quadratic, `y` the LIVE reference
+/// PU-Y plane value (`pu21(mix)/PU_WHITE + 0.01`). LSQ over L ∈
+/// [1, 4000] cd/m² log-uniform, this refit: rms 0.082, max 0.329 —
+/// within 0.016 of the design §5.3 values (the doc's PU coordinate was
+/// already live-accurate up to the +0.01 bias).
+pub(crate) const CSFW_PHI_Y_PU: [f64; 3] = [0.78830, -1.10402, 0.30460];
 /// Fitted amplitude for the achromatic luminance modulation — SEED 1.0
 /// (design §5.3: `κ = 1` applies the derived castleCSF curve exactly;
 /// `κ = 0` reproduces the unweighted features bit-for-bit). Stage-1/2
@@ -8965,5 +8976,544 @@ mod tests {
             g_coarse > 1e-4,
             "PU-domain BANDVIS should fire at coarse scales on posterized HDR ramp"
         );
+    }
+
+    // ========================================================================
+    // CSFW gates (chunk-3 tier-1: luminance-weighted GLOBAL_* twins)
+    // ========================================================================
+
+    /// Identity + layout + first-944 bit-stability + SDR entry parity at
+    /// 956 (the append2 gate shape, one block up).
+    #[test]
+    fn csfw_layout_identity_and_first944_bit_stable() {
+        let (w, h) = (150usize, 170usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+
+        let a944 = z.compute_folded720_append2_features(&sref, &dref).unwrap();
+        let a956 = z.compute_folded720_csfw_features(&sref, &dref).unwrap();
+        assert_eq!(a956.regime(), FeatureRegime::Folded720Csfw);
+        assert_eq!(a956.features().len(), 956);
+        assert_eq!(a956.csfw_features().unwrap().len(), 12);
+        assert_eq!(a956.append2_features().unwrap().len(), 20);
+        assert_eq!(a956.append_features().unwrap().len(), 204);
+        // The windowed accessors must agree with the 944 result's views.
+        assert_eq!(
+            a956.append2_features().unwrap(),
+            a944.append2_features().unwrap()
+        );
+        assert_eq!(a956.append_features().unwrap(), a944.append_features().unwrap());
+        // Turning CSFW on must not move a bit of the first 944.
+        for i in 0..944 {
+            assert_eq!(
+                a944.features()[i].to_bits(),
+                a956.features()[i].to_bits(),
+                "csfw toggled on moved f{i}"
+            );
+        }
+        // Parallel + scratch parity at 956.
+        let zp = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(true);
+        let b = zp.compute_folded720_csfw_features(&sref, &dref).unwrap();
+        for i in 0..956 {
+            assert_eq!(
+                a956.features()[i].to_bits(),
+                b.features()[i].to_bits(),
+                "serial vs parallel diverge at f{i}"
+            );
+        }
+        // SDR entry parity: the pair entry vs BOTH toggle-carrying
+        // streaming batch forms — byte-identical 956.
+        let mut scratch = V2Scratch::new();
+        let toggles = V2NewFeatureToggles {
+            append2_block: true,
+            csfw_block: true,
+            ..V2NewFeatureToggles::default()
+        };
+        let via_append_stream = z
+            .compute_folded720_append_features_streaming(&sref, &dref, toggles, &mut scratch)
+            .unwrap();
+        let via_fold_stream = z
+            .compute_folded720_features_streaming(
+                &sref,
+                &dref,
+                V2NewFeatureToggles {
+                    append_block: true,
+                    ..toggles
+                },
+                &mut scratch,
+            )
+            .unwrap();
+        assert_eq!(via_append_stream.regime(), FeatureRegime::Folded720Csfw);
+        assert_eq!(via_fold_stream.regime(), FeatureRegime::Folded720Csfw);
+        for i in 0..956 {
+            assert_eq!(
+                a956.features()[i].to_bits(),
+                via_append_stream.features()[i].to_bits(),
+                "pair vs append-streaming entry diverge at f{i}"
+            );
+            assert_eq!(
+                a956.features()[i].to_bits(),
+                via_fold_stream.features()[i].to_bits(),
+                "pair vs fold-streaming entry diverge at f{i}"
+            );
+        }
+        // All 12 new slots bounded [0,1] + finite.
+        for (i, v) in a956.csfw_features().unwrap().iter().enumerate() {
+            assert!((0.0..=1.0).contains(v) && v.is_finite(), "csfw[{i}] = {v}");
+        }
+        // The weighted twins must actually differ from the unweighted
+        // GLOBAL_* on a real distortion (the weight is not a no-op): at
+        // least one scale's W_GLOBAL_DMEAN differs when the unweighted
+        // twin is nonzero.
+        let app = a956.append_features().unwrap();
+        let csfw = a956.csfw_features().unwrap();
+        let mut any_diff = false;
+        for scale in 0..4 {
+            let u = app[scale * (3 * FEATURES_PER_CHANNEL_APPEND)
+                + FEATURES_PER_CHANNEL_APPEND
+                + idx_append::GLOBAL_DMEAN];
+            let wv = csfw[scale * CSFW_PER_SCALE + idx_csfw::W_GLOBAL_DMEAN];
+            if u > 1e-9 && (wv - u).abs() > 1e-12 {
+                any_diff = true;
+            }
+        }
+        assert!(
+            any_diff,
+            "weighted GLOBAL_DMEAN identical to unweighted on a distorted pair — weight inert?"
+        );
+
+        // Identity pair: every CSFW slot EXACTLY 0 (v ≡ 0 ⇒ weighted
+        // pools of identical planes cancel exactly, independent of w).
+        let idr = z.compute_folded720_csfw_features(&sref, &sref).unwrap();
+        let csfw_id = idr.csfw_features().unwrap();
+        for (i, v) in csfw_id.iter().enumerate() {
+            assert_eq!(*v, 0.0, "identity csfw[{i}] = {v}");
+        }
+    }
+
+    /// The doc-predicted luminance direction (design §5.1/§5.2): the SDR
+    /// achromatic weight peaks in the darks (~×1.8 near sRGB code 32)
+    /// and falls below 1 in the highlights (~×0.62 at code 255), so a
+    /// mean shift confined to DARK content must weigh MORE in
+    /// `W_GLOBAL_DMEAN` than its unweighted twin, and a bright-confined
+    /// shift LESS. Same direction on the HDR route (castleCSF-over-PU21
+    /// residual: w 1.95 at 1 cd/m² → 0.63 at 4000).
+    #[test]
+    fn csfw_luminance_direction_dark_up_bright_down() {
+        let (w, h) = (128usize, 128usize);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+
+        // SDR: left half dark (code 20), right half bright (code 220).
+        let half = |dark: u8, bright: u8| -> Vec<[u8; 3]> {
+            (0..w * h)
+                .map(|i| {
+                    let v = if i % w < w / 2 { dark } else { bright };
+                    [v, v, v]
+                })
+                .collect()
+        };
+        let src = half(20, 220);
+        let dark_shift = half(26, 220); // +6 codes, dark half only
+        let bright_shift = half(20, 226); // +6 codes, bright half only
+        let lane_pair = |dst: &Vec<[u8; 3]>| -> (f64, f64) {
+            let r = z
+                .compute_folded720_csfw_features(
+                    &RgbSlice::new(&src, w, h),
+                    &RgbSlice::new(dst, w, h),
+                )
+                .unwrap();
+            let u = r.append_features().unwrap()
+                [FEATURES_PER_CHANNEL_APPEND + idx_append::GLOBAL_DMEAN];
+            let wv = r.csfw_features().unwrap()[idx_csfw::W_GLOBAL_DMEAN];
+            (wv, u)
+        };
+        let (wd, ud) = lane_pair(&dark_shift);
+        let (wb, ub) = lane_pair(&bright_shift);
+        println!("SDR dark-shift:   weighted {wd:.6} unweighted {ud:.6} (ratio {:.3})", wd / ud);
+        println!("SDR bright-shift: weighted {wb:.6} unweighted {ub:.6} (ratio {:.3})", wb / ub);
+        assert!(
+            wd > ud * 1.05,
+            "dark-confined mean shift must up-weigh: {wd} vs {ud}"
+        );
+        assert!(
+            wb < ub * 0.95,
+            "bright-confined mean shift must down-weigh: {wb} vs {ub}"
+        );
+
+        // HDR route: left half 2 cd/m², right half 400 cd/m².
+        let nits_half = |dark: f32, bright: f32| -> Vec<[f32; 3]> {
+            (0..w * h)
+                .map(|i| {
+                    let v = if i % w < w / 2 { dark } else { bright };
+                    [v, v, v]
+                })
+                .collect()
+        };
+        let mut scratch = V2Scratch::new();
+        let hsrc = nits_half(2.0, 400.0);
+        let hdark = nits_half(2.4, 400.0); // +20% dark half
+        let hbright = nits_half(2.0, 480.0); // +20% bright half
+        let hdr_lane_pair = |dst: &Vec<[f32; 3]>, scratch: &mut V2Scratch| -> (f64, f64) {
+            let r = z
+                .compute_folded720_csfw_features_hdr(
+                    &NitsImage::from_rgb_nits(&hsrc, w, h),
+                    &NitsImage::from_rgb_nits(dst, w, h),
+                    HdrEncoding::Linear,
+                    V2NewFeatureToggles::default(),
+                    scratch,
+                )
+                .unwrap();
+            let u = r.append_features().unwrap()
+                [FEATURES_PER_CHANNEL_APPEND + idx_append::GLOBAL_DMEAN];
+            let wv = r.csfw_features().unwrap()[idx_csfw::W_GLOBAL_DMEAN];
+            (wv, u)
+        };
+        let (hwd, hud) = hdr_lane_pair(&hdark, &mut scratch);
+        let (hwb, hub) = hdr_lane_pair(&hbright, &mut scratch);
+        println!("HDR dark-shift:   weighted {hwd:.6} unweighted {hud:.6} (ratio {:.3})", hwd / hud);
+        println!("HDR bright-shift: weighted {hwb:.6} unweighted {hub:.6} (ratio {:.3})", hwb / hub);
+        assert!(
+            hwd > hud * 1.05,
+            "HDR dark-confined shift must up-weigh: {hwd} vs {hud}"
+        );
+        assert!(
+            hwb < hub * 0.95,
+            "HDR bright-confined shift must down-weigh: {hwb} vs {hub}"
+        );
+    }
+
+    /// HDR-route CSFW: 956 shape, HDR entry parity, identity zeros, and
+    /// bounded firing on a real gain-error nits pair.
+    #[test]
+    fn csfw_hdr_route_entry_parity_and_smoke() {
+        let (w, h) = (128usize, 128usize);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+
+        let ramp: Vec<[f32; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let t = (x + y) as f32 / (w + h - 2) as f32;
+                let nits = 0.5 * (2000.0f32 / 0.5).powf(t);
+                [nits, nits, nits]
+            })
+            .collect();
+        let dst: Vec<[f32; 3]> = ramp.iter().map(|&[r, g, b]| [r * 1.12, g * 1.12, b * 1.12]).collect();
+        let sref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let dref = NitsImage::from_rgb_nits(&dst, w, h);
+
+        let a = z
+            .compute_folded720_csfw_features_hdr(
+                &sref,
+                &dref,
+                HdrEncoding::Linear,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        assert_eq!(a.regime(), FeatureRegime::Folded720Csfw);
+        assert_eq!(a.features().len(), 956);
+        // First-944 bit-stability on the HDR route.
+        let a944 = z
+            .compute_folded720_append2_features_hdr(
+                &sref,
+                &dref,
+                HdrEncoding::Linear,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        for i in 0..944 {
+            assert_eq!(
+                a944.features()[i].to_bits(),
+                a.features()[i].to_bits(),
+                "HDR csfw toggled on moved f{i}"
+            );
+        }
+        // HDR entry parity: the csfw entry vs the append2/append HDR
+        // entries carrying the toggle — byte-identical 956.
+        let via_a2 = z
+            .compute_folded720_append2_features_hdr(
+                &sref,
+                &dref,
+                HdrEncoding::Linear,
+                V2NewFeatureToggles {
+                    csfw_block: true,
+                    ..V2NewFeatureToggles::default()
+                },
+                &mut scratch,
+            )
+            .unwrap();
+        let via_app = z
+            .compute_folded720_append_features_hdr(
+                &sref,
+                &dref,
+                HdrEncoding::Linear,
+                V2NewFeatureToggles {
+                    append2_block: true,
+                    csfw_block: true,
+                    ..V2NewFeatureToggles::default()
+                },
+                &mut scratch,
+            )
+            .unwrap();
+        for i in 0..956 {
+            assert_eq!(
+                a.features()[i].to_bits(),
+                via_a2.features()[i].to_bits(),
+                "HDR csfw vs append2-entry toggles diverge at f{i}"
+            );
+            assert_eq!(
+                a.features()[i].to_bits(),
+                via_app.features()[i].to_bits(),
+                "HDR csfw vs append-entry toggles diverge at f{i}"
+            );
+        }
+        // Bounded + fires: a global 12% gain must move the weighted
+        // global lanes.
+        let csfw = a.csfw_features().unwrap();
+        for (i, v) in csfw.iter().enumerate() {
+            assert!((0.0..=1.0).contains(v) && v.is_finite(), "hdr csfw[{i}] = {v}");
+        }
+        let fired = (0..4).any(|s| csfw[s * CSFW_PER_SCALE + idx_csfw::W_GLOBAL_DMEAN] > 1e-4);
+        assert!(fired, "W_GLOBAL_DMEAN should fire on a 12% gain pair: {csfw:?}");
+
+        // HDR identity: exactly 0 on every CSFW slot.
+        let idr = z
+            .compute_folded720_csfw_features_hdr(
+                &sref,
+                &sref,
+                HdrEncoding::Linear,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        for (i, v) in idr.csfw_features().unwrap().iter().enumerate() {
+            assert_eq!(*v, 0.0, "HDR identity csfw[{i}] = {v}");
+        }
+    }
+
+    /// CSFW φ-constant derivation (design §13, the
+    /// `bandvis_delta_derivation_table` pattern): recompute the derived
+    /// weight `w(L) = S_Ach(L) / (L · dV/dL)` from castleCSF Eq. 21 and
+    /// the LIVE front-end encodings (numeric dV/dL through
+    /// `srgb_to_positive_xyb_planar_into` / `linear_to_pu_xyb_planar_into`
+    /// gray probes), normalize at each route's anchor, and bracket the
+    /// shipped quadratics `1 + φ(y_live)` against it. Prints the table
+    /// (`--nocapture`) committed in `benchmarks/csf_tier1_gates_2026-07-28.md`.
+    #[test]
+    fn csfw_phi_derivation_table() {
+        // castleCSF Appendix Table 5, achromatic sustained (Eq. 21):
+        // S(Y) = k1·(1 + k2/Y)^(−k3) · [1 − (1 + k4/Y)^(−k5)].
+        let s_ach = |l: f64| -> f64 {
+            let (k1, k2, k3, k4, k5) = (56.49, 7.547, 0.1445, 5.583e-7, 9.669e9);
+            // (1 + k4/Y)^(−k5) with k4/Y ≪ 1: exp(−k5·ln1p(k4/Y)) — the
+            // numerically-stable form of the high-luminance roll-off
+            // (≈ exp(−5398/Y)).
+            let roll = 1.0 - (-k5 * (k4 / l).ln_1p()).exp();
+            k1 * (1.0 + k2 / l).powf(-k3) * roll
+        };
+
+        // --- SDR route: live Y-plane of gray at sRGB code c, and the
+        //     standard_4k display model (Y_peak 200, Y_black 0.2,
+        //     Y_refl 0.39788736).
+        let y_sdr = |c: u8| -> f64 {
+            let px = [[c, c, c]];
+            let (mut o0, mut o1, mut o2) = ([0.0f32; 1], [0.0f32; 1], [0.0f32; 1]);
+            crate::color::srgb_to_positive_xyb_planar_into(&px, &mut o0, &mut o1, &mut o2);
+            o1[0] as f64
+        };
+        let srgb_eotf = |c: f64| -> f64 {
+            let v = c / 255.0;
+            if v <= 0.040_449_936 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let l_of_code = |c: f64| -> f64 { (200.0 - 0.2) * srgb_eotf(c) + 0.2 + 0.397_887_36 };
+
+        // dy/dL through the live front-end, centered difference over ±2
+        // codes (the plane is C¹ in code).
+        let anchor_code = 128u8;
+        let w_derived_sdr = |c: u8| -> f64 {
+            let (cm, cp) = (c - 2, c + 2);
+            let dy = y_sdr(cp) - y_sdr(cm);
+            let dl = l_of_code(cp as f64) - l_of_code(cm as f64);
+            let l = l_of_code(c as f64);
+            s_ach(l) / (l * (dy / dl))
+        };
+        let norm_sdr = w_derived_sdr(anchor_code);
+        println!("SDR route (castleCSF ÷ live cbrt front-end, norm @ code 128):");
+        println!("  code    L[cd/m²]  y_live   w_derived  w_shipped  |err|");
+        let mut sdr_errs = Vec::new();
+        for c in [8u8, 16, 24, 32, 48, 64, 96, 128, 160, 192, 224, 248] {
+            let l = l_of_code(c as f64);
+            let y = y_sdr(c);
+            let wd = w_derived_sdr(c) / norm_sdr;
+            let ws = (1.0
+                + CSFW_KAPPA_Y * (CSFW_PHI_Y_SDR[0] + y * (CSFW_PHI_Y_SDR[1] + y * CSFW_PHI_Y_SDR[2])))
+                .clamp(CSFW_W_MIN, CSFW_W_MAX);
+            let err = (ws - wd).abs();
+            sdr_errs.push((c, err));
+            println!("  {c:4}  {l:9.3}  {y:.4}   {wd:.4}     {ws:.4}     {err:.4}");
+        }
+
+        // --- HDR/PU route: live PU-Y plane of gray at L cd/m², norm @ 100.
+        let y_pu = |nits: f64| -> f64 {
+            let px = [[nits as f32, nits as f32, nits as f32]];
+            let (mut o0, mut o1, mut o2) = ([0.0f32; 1], [0.0f32; 1], [0.0f32; 1]);
+            crate::color::linear_to_pu_xyb_planar_into(&px, &mut o0, &mut o1, &mut o2);
+            o1[0] as f64
+        };
+        let w_derived_pu = |nits: f64| -> f64 {
+            let (lm, lp) = (nits * 0.99, nits * 1.01);
+            let dy = y_pu(lp) - y_pu(lm);
+            let dl = lp - lm;
+            s_ach(nits) / (nits * (dy / dl))
+        };
+        let norm_pu = w_derived_pu(100.0);
+        println!("HDR/PU route (castleCSF ÷ live PU front-end, norm @ 100 cd/m²):");
+        println!("  L[cd/m²]  y_live   w_derived  w_shipped  |err|");
+        let mut pu_errs = Vec::new();
+        for nits in [1.0f64, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 400.0, 1000.0, 2000.0, 4000.0] {
+            let y = y_pu(nits);
+            let wd = w_derived_pu(nits) / norm_pu;
+            let ws = (1.0
+                + CSFW_KAPPA_Y * (CSFW_PHI_Y_PU[0] + y * (CSFW_PHI_Y_PU[1] + y * CSFW_PHI_Y_PU[2])))
+                .clamp(CSFW_W_MIN, CSFW_W_MAX);
+            let err = (ws - wd).abs();
+            pu_errs.push((nits, err));
+            println!("  {nits:8.1}  {y:.4}   {wd:.4}     {ws:.4}     {err:.4}");
+        }
+
+        // --- Live-coordinate LSQ refit (the shipped constants' actual
+        //     derivation): quadratic least squares of `w_derived − 1` on
+        //     `[1, y_live, y_live²]`, exactly the design §5.2 recipe but
+        //     composed with the LIVE front-end encoding rather than the
+        //     doc's idealized `cbrt(rel)` / `PU21/PU_WHITE` coordinates.
+        //     (Found during implementation: the SDR Y plane is
+        //     `cbrt(rel + β) − cbrt(β) + 0.01` with the opsin bias β —
+        //     NOT an affine map of `cbrt(rel)` — so the doc's §5.3
+        //     table values are mis-anchored when evaluated at the live
+        //     plane value; the doc's §6 pre-composition rule + §13
+        //     live-bracket requirement resolve in favor of the live
+        //     coordinate. Recorded in the gates doc.)
+        let fit_quadratic = |samples: &[(f64, f64)]| -> [f64; 3] {
+            // Normal equations for min Σ (c0 + c1·y + c2·y² − t)².
+            let mut a = [[0.0f64; 3]; 3];
+            let mut b = [0.0f64; 3];
+            for &(y, t) in samples {
+                let basis = [1.0, y, y * y];
+                for i in 0..3 {
+                    for j in 0..3 {
+                        a[i][j] += basis[i] * basis[j];
+                    }
+                    b[i] += basis[i] * t;
+                }
+            }
+            // Gaussian elimination, partial pivot (3×3).
+            let mut m = [
+                [a[0][0], a[0][1], a[0][2], b[0]],
+                [a[1][0], a[1][1], a[1][2], b[1]],
+                [a[2][0], a[2][1], a[2][2], b[2]],
+            ];
+            for col in 0..3 {
+                let piv = (col..3)
+                    .max_by(|&i, &j| m[i][col].abs().partial_cmp(&m[j][col].abs()).unwrap())
+                    .unwrap();
+                m.swap(col, piv);
+                for row in 0..3 {
+                    if row != col {
+                        let f = m[row][col] / m[col][col];
+                        for k in col..4 {
+                            m[row][k] -= f * m[col][k];
+                        }
+                    }
+                }
+            }
+            [m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]]
+        };
+
+        let sdr_samples: Vec<(f64, f64)> = (4u8..=253)
+            .map(|c| (y_sdr(c), w_derived_sdr(c) / norm_sdr - 1.0))
+            .collect();
+        let sdr_fit = fit_quadratic(&sdr_samples);
+        let (sdr_rms, sdr_max) = {
+            let (mut s2, mut mx) = (0.0f64, 0.0f64);
+            for &(y, t) in &sdr_samples {
+                let e = (sdr_fit[0] + y * (sdr_fit[1] + y * sdr_fit[2]) - t).abs();
+                s2 += e * e;
+                mx = mx.max(e);
+            }
+            ((s2 / sdr_samples.len() as f64).sqrt(), mx)
+        };
+        println!(
+            "SDR live-coordinate refit: c0 {:+.5} c1 {:+.5} c2 {:+.5}  (rms {:.4} max {:.4})",
+            sdr_fit[0], sdr_fit[1], sdr_fit[2], sdr_rms, sdr_max
+        );
+
+        let pu_samples: Vec<(f64, f64)> = (0..200)
+            .map(|i| {
+                let l = (4000.0f64 / 1.0).powf(i as f64 / 199.0);
+                (y_pu(l), w_derived_pu(l) / norm_pu - 1.0)
+            })
+            .collect();
+        let pu_fit = fit_quadratic(&pu_samples);
+        let (pu_rms, pu_max) = {
+            let (mut s2, mut mx) = (0.0f64, 0.0f64);
+            for &(y, t) in &pu_samples {
+                let e = (pu_fit[0] + y * (pu_fit[1] + y * pu_fit[2]) - t).abs();
+                s2 += e * e;
+                mx = mx.max(e);
+            }
+            ((s2 / pu_samples.len() as f64).sqrt(), mx)
+        };
+        println!(
+            "PU  live-coordinate refit: c0 {:+.5} c1 {:+.5} c2 {:+.5}  (rms {:.4} max {:.4})",
+            pu_fit[0], pu_fit[1], pu_fit[2], pu_rms, pu_max
+        );
+
+        // The SHIPPED constants must BE the live-coordinate refit (the
+        // one true derivation loop: castleCSF Eq. 21 → live encoding →
+        // LSQ → const). Curve-level agreement over each route's fit
+        // range, |Δw| < 0.01 everywhere.
+        for &(y, _) in &sdr_samples {
+            let ship = CSFW_PHI_Y_SDR[0] + y * (CSFW_PHI_Y_SDR[1] + y * CSFW_PHI_Y_SDR[2]);
+            let refit = sdr_fit[0] + y * (sdr_fit[1] + y * sdr_fit[2]);
+            assert!(
+                (ship - refit).abs() < 0.01,
+                "shipped SDR φ drifted from the live refit at y={y}: {ship} vs {refit}"
+            );
+        }
+        for &(y, _) in &pu_samples {
+            let ship = CSFW_PHI_Y_PU[0] + y * (CSFW_PHI_Y_PU[1] + y * CSFW_PHI_Y_PU[2]);
+            let refit = pu_fit[0] + y * (pu_fit[1] + y * pu_fit[2]);
+            assert!(
+                (ship - refit).abs() < 0.01,
+                "shipped PU φ drifted from the live refit at y={y}: {ship} vs {refit}"
+            );
+        }
+        // And the fitted curve agrees with the castleCSF-derived one
+        // within the doc's honest fit class (§5.2: quadratic residuals —
+        // brackets set from this run's printed rms/max).
+        assert!(sdr_rms < 0.25 && sdr_max < 0.9, "SDR refit residual blew up: rms {sdr_rms} max {sdr_max}");
+        assert!(pu_rms < 0.15 && pu_max < 0.45, "PU refit residual blew up: rms {pu_rms} max {pu_max}");
+        // The derived curves stay inside the clamp everywhere in the fit
+        // range — the clamp is a guard band, not an active regularizer.
+        for c in 4u8..=252 {
+            let wd = w_derived_sdr(c) / norm_sdr;
+            assert!(
+                wd > CSFW_W_MIN && wd < CSFW_W_MAX,
+                "derived SDR w at code {c} outside clamp: {wd}"
+            );
+        }
+        // Seeds: λ_2 is the identifiability anchor and κ seeds at the
+        // derived-curve strength.
+        assert_eq!(CSFW_LAMBDA_B[2], 1.0);
+        assert_eq!(CSFW_KAPPA_Y, 1.0);
     }
 }
