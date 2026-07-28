@@ -1,0 +1,75 @@
+# zensim per-stage NEON attribution — 3 kernels were SLOWER than scalar; fixed
+date:    2026-07-28
+host:    Apple M4 Pro (12 core), macOS, aarch64
+build:   release, NO -C target-cpu=native
+bench:   cd zensim-bench && cargo bench --bench stage_isolation   (1024x1024)
+
+## Why per-stage
+
+The whole-pipeline bench showed zensim getting only 1.2-1.3x from NEON where
+butteraugli — a comparable multi-scale XYB+blur metric — gets 3.4-3.7x on the
+same host, and that the shortfall was inside the image kernels rather than in
+scoring. Attributing further normally wants a profiler; macOS dtrace
+(cargo-flamegraph) needs SIP disabled. Exporting the stage entry points
+(`zensim::__bench_stages`, doc(hidden), following the existing
+`bench_pu_xyb_*` precedent) gets the same attribution from an A/B instead.
+
+## Per-stage result — most kernels were SLOWER with NEON
+
+| stage                        | NEON     | scalar   | ratio |
+|------------------------------|----------|----------|-------|
+| simd_ops/abs_diff_sum        |  0.351ms |  0.087ms | 0.25x |
+| simd_ops/sq_diff_sum         |  0.351ms |  0.117ms | 0.33x |
+| blur/downscale_2x            |  0.149ms |  0.099ms | 0.66x |
+| blur/fused_blur_h_ssim       | 10.741ms |  7.526ms | 0.70x |
+| simd_ops/sq_sum_into         |  0.100ms |  0.092ms | 0.92x |
+| blur/box_blur_1pass          |  1.730ms |  1.762ms | 1.02x |
+| simd_ops/mul_into            |  0.099ms |  0.104ms | 1.05x |
+| color/srgb_to_positive_xyb   |  2.134ms |  2.951ms | 1.38x |
+
+## Root cause
+
+On AArch64, NEON is BASELINE — so LLVM autovectorises the scalar body anyway.
+The hand-written NEON variants are not competing against scalar code, they are
+competing against the autovectoriser, and mostly losing.
+
+For the two reductions the mechanism is explicit: `abs_diff_sum_inner` /
+`sq_diff_sum_inner` call `reduce_add()` INSIDE the loop, once per 8 elements.
+A horizontal reduction per iteration is a serialising cross-lane op and creates
+a loop-carried dependency on the accumulator. The autovectorised scalar form
+keeps a vector accumulator and reduces once. (The x86 `_v3`/`_v4` variants at
+simd_ops.rs:389/418 have the same shape — unmeasured here, no x86 host.)
+
+## FIXED — three kernels, bit-identical, now dispatch to scalar on aarch64
+
+Bit-identity was VERIFIED before switching (differing lanes = 0 on 64K-element
+inputs), so these are pure speed changes with no effect on any score:
+
+  abs_diff_sum   0.351 -> 0.089ms   3.9x
+  sq_diff_sum    0.351 -> 0.116ms   3.0x
+  downscale_2x   0.149 -> 0.098ms   1.5x
+
+Whole-pipeline effect (tier_isolation, same host):
+
+  1920x1080   14.508 -> 13.264ms    8.6% faster
+  512x512      2.416 ->  2.397ms    0.8%
+  256x256      1.068 ->  1.074ms    ~0
+
+104 lib tests green; the metric is numerically unchanged by construction.
+
+## NOT FIXED — needs a numerics decision from the owner
+
+`fused_blur_h_ssim` is the biggest single opportunity: 10.741ms NEON vs
+7.526ms scalar = **1.43x available**, and it is the dominant stage. But it is
+NOT bit-identical between the two paths — `mu1`/`mu2` match exactly while
+`sigma_sq` and `sigma12` differ on 55426/65536 and 56300/65536 lanes (FMA
+association differs between the hand-written and autovectorised forms).
+
+`sq_sum_into` (0.92x) is likewise not bit-identical (10675/65536 lanes).
+
+Switching those changes zensim's OUTPUT. Given this crate's documented
+cross-platform bit-identity discipline (the 2026-06-20 `rsqrt_stable` incident,
+the golden tripwires, `REL_TOLERANCE` overrides), that is the owner's call, not
+a NEON pass's. Flagged here with the measurement so the decision can be made on
+data: ~1.4x on the dominant stage, in exchange for a bounded change in
+sigma_sq/sigma12 rounding.

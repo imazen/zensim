@@ -268,6 +268,26 @@ pub use metric::{
 
 #[doc(hidden)]
 pub use color::{bench_pu_xyb_dispatch, bench_pu_xyb_scalar};
+
+/// Dev-only stage-level exports for per-stage SIMD benchmarking.
+///
+/// NOT part of the public API and NOT semver-covered — same status as the
+/// `bench_pu_xyb_*` exports above, which set this precedent.
+///
+/// These exist because the whole-pipeline tier bench established that NEON is
+/// worth only ~1.26x here while butteraugli — a comparable multi-scale
+/// XYB+blur metric — gets 3.4x on the same host, and that the shortfall is
+/// inside the image kernels rather than in scoring. Attributing it further
+/// needs per-stage numbers, and on macOS the usual profilers (dtrace via
+/// cargo-flamegraph) require SIP to be disabled. Exporting the stage entry
+/// points lets `zensim-bench`'s `stage_isolation` bench get the same
+/// attribution with an A/B instead of a profiler.
+#[doc(hidden)]
+pub mod __bench_stages {
+    pub use crate::blur::{box_blur_1pass_into, downscale_2x_into, fused_blur_h_ssim};
+    pub use crate::color::srgb_to_positive_xyb_planar_into;
+    pub use crate::simd_ops::{abs_diff_sum, mul_into, sq_diff_sum, sq_sum_into};
+}
 /// Classification API — requires `features = ["classification"]`.
 ///
 /// Exposes `classify()`, error categorization, and per-pixel delta statistics

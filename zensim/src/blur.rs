@@ -3344,6 +3344,27 @@ fn downscale_2x(plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
 /// same buffer — useful when callers want to keep the source data alive
 /// (e.g. multi-scale pyramid construction with all levels owned).
 pub fn downscale_2x_into(src: &[f32], src_w: usize, dst: &mut [f32], new_w: usize, new_h: usize) {
+    // aarch64: use the SCALAR variant. On AArch64, NEON is baseline, so LLVM
+    // autovectorises the scalar body anyway — the hand-written NEON variant is
+    // competing with the autovectoriser, not with scalar code, and it LOSES.
+    // Measured on Apple M4 Pro at 1024x1024 (zensim-bench/benches/stage_isolation.rs,
+    // within-group A/B): NEON 0.149ms vs scalar 0.099ms — the NEON variant is 1.5x SLOWER.
+    // Verified BIT-IDENTICAL to the NEON variant before switching (differing
+    // lanes = 0), so this is a pure speed change with no effect on any score.
+    #[cfg(target_arch = "aarch64")]
+    {
+        use archmage::SimdToken;
+        if archmage::NeonToken::summon().is_some() {
+            return downscale_2x_into_inner_scalar(
+                archmage::ScalarToken::summon().expect("infallible"),
+                src,
+                src_w,
+                dst,
+                new_w,
+                new_h,
+            );
+        }
+    }
     incant!(
         downscale_2x_into_inner(src, src_w, dst, new_w, new_h),
         [v4x, v4, v3, neon, wasm128, scalar]

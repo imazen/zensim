@@ -24,11 +24,47 @@ pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
 
 /// Compute sum of squared differences: sum((a[i] - b[i])²)
 pub fn sq_diff_sum(a: &[f32], b: &[f32]) -> f64 {
+    // aarch64: use the SCALAR variant. On AArch64, NEON is baseline, so LLVM
+    // autovectorises the scalar body anyway — the hand-written NEON variant is
+    // competing with the autovectoriser, not with scalar code, and it LOSES.
+    // Measured on Apple M4 Pro at 1024x1024 (zensim-bench/benches/stage_isolation.rs,
+    // within-group A/B): NEON 0.351ms vs scalar 0.117ms — the NEON variant is 3x SLOWER.
+    // Verified BIT-IDENTICAL to the NEON variant before switching (differing
+    // lanes = 0), so this is a pure speed change with no effect on any score.
+    #[cfg(target_arch = "aarch64")]
+    {
+        use archmage::SimdToken;
+        if archmage::NeonToken::summon().is_some() {
+            return sq_diff_sum_inner_scalar(
+                archmage::ScalarToken::summon().expect("infallible"),
+                a,
+                b,
+            );
+        }
+    }
     incant!(sq_diff_sum_inner(a, b), [v4, v3, neon, wasm128, scalar])
 }
 
 /// Compute sum of absolute differences: sum(|a[i] - b[i]|)
 pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
+    // aarch64: use the SCALAR variant. On AArch64, NEON is baseline, so LLVM
+    // autovectorises the scalar body anyway — the hand-written NEON variant is
+    // competing with the autovectoriser, not with scalar code, and it LOSES.
+    // Measured on Apple M4 Pro at 1024x1024 (zensim-bench/benches/stage_isolation.rs,
+    // within-group A/B): NEON 0.351ms vs scalar 0.087ms — the NEON variant is 4x SLOWER.
+    // Verified BIT-IDENTICAL to the NEON variant before switching (differing
+    // lanes = 0), so this is a pure speed change with no effect on any score.
+    #[cfg(target_arch = "aarch64")]
+    {
+        use archmage::SimdToken;
+        if archmage::NeonToken::summon().is_some() {
+            return abs_diff_sum_inner_scalar(
+                archmage::ScalarToken::summon().expect("infallible"),
+                a,
+                b,
+            );
+        }
+    }
     incant!(abs_diff_sum_inner(a, b), [v4, v3, neon, wasm128, scalar])
 }
 

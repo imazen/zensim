@@ -1,0 +1,214 @@
+warning: patch `jxl-encoder v0.3.2 (/Users/lilith/work/zen/jxl-encoder/jxl-encoder)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+   Compiling zensim v0.3.0 (/Users/lilith/work/zen/zensim/zensim)
+warning: zensim-bench@0.0.0: In file included from ffi/ssimulacra2_ffi.cpp:9:
+warning: zensim-bench@0.0.0: In file included from /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/status.h:18:
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/common.h:133:40: warning: unused parameter 'other' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   133 |       const UninitializedAllocator<U>& other) noexcept {}
+warning: zensim-bench@0.0.0:       |                                        ^
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/common.h:141:21: warning: unused parameter 'place' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   141 |   void construct(U* place, Args&&... args) {}
+warning: zensim-bench@0.0.0:       |                     ^
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/common.h:141:38: warning: unused parameter 'args' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   141 |   void construct(U* place, Args&&... args) {}
+warning: zensim-bench@0.0.0:       |                                      ^
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/common.h:144:19: warning: unused parameter 'place' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   144 |   void destroy(U* place) {}
+warning: zensim-bench@0.0.0:       |                   ^
+warning: zensim-bench@0.0.0: In file included from ffi/ssimulacra2_ffi.cpp:12:
+warning: zensim-bench@0.0.0: In file included from /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/image_bundle.h:22:
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/data_parallel.h:146:36: warning: unused parameter 'num_threads' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   146 |   const auto init_func = [](size_t num_threads) -> Status { return true; };
+warning: zensim-bench@0.0.0:       |                                    ^
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/data_parallel.h:144:42: warning: unused parameter 'no_init_func' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   144 |                  const ThreadPoolNoInit& no_init_func,
+warning: zensim-bench@0.0.0:       |                                          ^
+warning: zensim-bench@0.0.0: 6 warnings generated.
+warning: zensim-bench@0.0.0: In file included from ffi/butteraugli_ffi.cpp:8:
+warning: zensim-bench@0.0.0: In file included from /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/status.h:18:
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/common.h:133:40: warning: unused parameter 'other' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   133 |       const UninitializedAllocator<U>& other) noexcept {}
+warning: zensim-bench@0.0.0:       |                                        ^
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/common.h:141:21: warning: unused parameter 'place' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   141 |   void construct(U* place, Args&&... args) {}
+warning: zensim-bench@0.0.0:       |                     ^
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/common.h:141:38: warning: unused parameter 'args' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   141 |   void construct(U* place, Args&&... args) {}
+warning: zensim-bench@0.0.0:       |                                      ^
+warning: zensim-bench@0.0.0: /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/lib/jxl/base/common.h:144:19: warning: unused parameter 'place' [-Wunused-parameter]
+warning: zensim-bench@0.0.0:   144 |   void destroy(U* place) {}
+warning: zensim-bench@0.0.0:       |                   ^
+warning: zensim-bench@0.0.0: 4 warnings generated.
+warning: zensim-bench@0.0.0: Skipping C++ FFI benchmarks: ssimulacra2.cc.o not found at /Users/lilith/work/zen/zensim/zensim-bench/vendor/libjxl/build/tools/CMakeFiles/ssimulacra2.dir/ssimulacra2.cc.o
+warning: function `fused_blur_h_ssim3` is never used
+    --> /Users/lilith/work/zen/zensim/zensim/src/blur.rs:2357:8
+     |
+2357 | pub fn fused_blur_h_ssim3(
+     |        ^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zensim` (lib) generated 1 warning
+   Compiling zensim-bench v0.0.0 (/Users/lilith/work/zen/zensim/zensim-bench)
+warning: unused import: `archmage::SimdToken`
+  --> benches/stage_isolation.rs:34:9
+   |
+34 |     use archmage::SimdToken;
+   |         ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zensim-bench` (bench "stage_isolation") generated 1 warning (run `cargo fix --bench "stage_isolation" -p zensim-bench` to apply 1 suggestion)
+    Finished `bench` profile [optimized] target(s) in 6.57s
+     Running benches/stage_isolation.rs (target/release/deps/stage_isolation-572a03170299d984)
+[stage_isolation] comparing neon vs forced scalar, 1024x1024
+Benchmarking blur/box_blur_1pass/neon
+Benchmarking blur/box_blur_1pass/neon: Warming up for 1.0000 s
+Benchmarking blur/box_blur_1pass/neon: Collecting 100 samples in estimated 2.0811 s (1200 iterations)
+Benchmarking blur/box_blur_1pass/neon: Analyzing
+blur/box_blur_1pass/neon
+                        time:   [1.7253 ms 1.7296 ms 1.7339 ms]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+Benchmarking blur/box_blur_1pass/scalar
+Benchmarking blur/box_blur_1pass/scalar: Warming up for 1.0000 s
+Benchmarking blur/box_blur_1pass/scalar: Collecting 100 samples in estimated 2.0921 s (1200 iterations)
+Benchmarking blur/box_blur_1pass/scalar: Analyzing
+blur/box_blur_1pass/scalar
+                        time:   [1.7589 ms 1.7624 ms 1.7659 ms]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) low mild
+
+Benchmarking blur/downscale_2x/neon
+Benchmarking blur/downscale_2x/neon: Warming up for 1.0000 s
+Benchmarking blur/downscale_2x/neon: Collecting 100 samples in estimated 2.2482 s (15k iterations)
+Benchmarking blur/downscale_2x/neon: Analyzing
+blur/downscale_2x/neon  time:   [147.24 µs 148.83 µs 150.68 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  1 (1.00%) low severe
+  2 (2.00%) low mild
+  4 (4.00%) high severe
+Benchmarking blur/downscale_2x/scalar
+Benchmarking blur/downscale_2x/scalar: Warming up for 1.0000 s
+Benchmarking blur/downscale_2x/scalar: Collecting 100 samples in estimated 2.4840 s (25k iterations)
+Benchmarking blur/downscale_2x/scalar: Analyzing
+blur/downscale_2x/scalar
+                        time:   [98.352 µs 98.509 µs 98.654 µs]
+Found 9 outliers among 100 measurements (9.00%)
+  1 (1.00%) low severe
+  6 (6.00%) low mild
+  2 (2.00%) high mild
+
+Benchmarking blur/fused_blur_h_ssim/neon
+Benchmarking blur/fused_blur_h_ssim/neon: Warming up for 1.0000 s
+Benchmarking blur/fused_blur_h_ssim/neon: Collecting 100 samples in estimated 2.1361 s (200 iterations)
+Benchmarking blur/fused_blur_h_ssim/neon: Analyzing
+blur/fused_blur_h_ssim/neon
+                        time:   [10.724 ms 10.741 ms 10.759 ms]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking blur/fused_blur_h_ssim/scalar
+Benchmarking blur/fused_blur_h_ssim/scalar: Warming up for 1.0000 s
+Benchmarking blur/fused_blur_h_ssim/scalar: Collecting 100 samples in estimated 2.2782 s (300 iterations)
+Benchmarking blur/fused_blur_h_ssim/scalar: Analyzing
+blur/fused_blur_h_ssim/scalar
+                        time:   [7.5074 ms 7.5258 ms 7.5441 ms]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking color/srgb_to_positive_xyb/neon
+Benchmarking color/srgb_to_positive_xyb/neon: Warming up for 1.0000 s
+Benchmarking color/srgb_to_positive_xyb/neon: Collecting 100 samples in estimated 2.1390 s (1000 iterations)
+Benchmarking color/srgb_to_positive_xyb/neon: Analyzing
+color/srgb_to_positive_xyb/neon
+                        time:   [2.1284 ms 2.1335 ms 2.1384 ms]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+Benchmarking color/srgb_to_positive_xyb/scalar
+Benchmarking color/srgb_to_positive_xyb/scalar: Warming up for 1.0000 s
+Benchmarking color/srgb_to_positive_xyb/scalar: Collecting 100 samples in estimated 2.0595 s (700 iterations)
+Benchmarking color/srgb_to_positive_xyb/scalar: Analyzing
+color/srgb_to_positive_xyb/scalar
+                        time:   [2.9457 ms 2.9506 ms 2.9551 ms]
+Found 10 outliers among 100 measurements (10.00%)
+  4 (4.00%) low severe
+  4 (4.00%) low mild
+  2 (2.00%) high mild
+
+Benchmarking simd_ops/mul_into/neon
+Benchmarking simd_ops/mul_into/neon: Warming up for 1.0000 s
+Benchmarking simd_ops/mul_into/neon: Collecting 100 samples in estimated 2.0998 s (20k iterations)
+Benchmarking simd_ops/mul_into/neon: Analyzing
+simd_ops/mul_into/neon  time:   [96.795 µs 98.697 µs 100.58 µs]
+Found 14 outliers among 100 measurements (14.00%)
+  9 (9.00%) low severe
+  5 (5.00%) low mild
+Benchmarking simd_ops/mul_into/scalar
+Benchmarking simd_ops/mul_into/scalar: Warming up for 1.0000 s
+Benchmarking simd_ops/mul_into/scalar: Collecting 100 samples in estimated 2.0973 s (20k iterations)
+Benchmarking simd_ops/mul_into/scalar: Analyzing
+simd_ops/mul_into/scalar
+                        time:   [103.75 µs 103.99 µs 104.23 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  4 (4.00%) low severe
+  4 (4.00%) low mild
+
+Benchmarking simd_ops/sq_sum_into/neon
+Benchmarking simd_ops/sq_sum_into/neon: Warming up for 1.0000 s
+Benchmarking simd_ops/sq_sum_into/neon: Collecting 100 samples in estimated 2.4192 s (25k iterations)
+Benchmarking simd_ops/sq_sum_into/neon: Analyzing
+simd_ops/sq_sum_into/neon
+                        time:   [99.413 µs 100.01 µs 100.49 µs]
+Benchmarking simd_ops/sq_sum_into/scalar
+Benchmarking simd_ops/sq_sum_into/scalar: Warming up for 1.0000 s
+Benchmarking simd_ops/sq_sum_into/scalar: Collecting 100 samples in estimated 2.0511 s (20k iterations)
+Benchmarking simd_ops/sq_sum_into/scalar: Analyzing
+simd_ops/sq_sum_into/scalar
+                        time:   [89.000 µs 92.036 µs 94.568 µs]
+
+Benchmarking simd_ops/sq_diff_sum/neon
+Benchmarking simd_ops/sq_diff_sum/neon: Warming up for 1.0000 s
+Benchmarking simd_ops/sq_diff_sum/neon: Collecting 100 samples in estimated 3.5487 s (10k iterations)
+Benchmarking simd_ops/sq_diff_sum/neon: Analyzing
+simd_ops/sq_diff_sum/neon
+                        time:   [351.18 µs 351.47 µs 351.78 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  4 (4.00%) high mild
+  4 (4.00%) high severe
+Benchmarking simd_ops/sq_diff_sum/scalar
+Benchmarking simd_ops/sq_diff_sum/scalar: Warming up for 1.0000 s
+Benchmarking simd_ops/sq_diff_sum/scalar: Collecting 100 samples in estimated 2.3707 s (20k iterations)
+Benchmarking simd_ops/sq_diff_sum/scalar: Analyzing
+simd_ops/sq_diff_sum/scalar
+                        time:   [116.74 µs 116.99 µs 117.23 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  2 (2.00%) low severe
+  3 (3.00%) low mild
+  1 (1.00%) high mild
+
+Benchmarking simd_ops/abs_diff_sum/neon
+Benchmarking simd_ops/abs_diff_sum/neon: Warming up for 1.0000 s
+Benchmarking simd_ops/abs_diff_sum/neon: Collecting 100 samples in estimated 3.5487 s (10k iterations)
+Benchmarking simd_ops/abs_diff_sum/neon: Analyzing
+simd_ops/abs_diff_sum/neon
+                        time:   [351.12 µs 351.35 µs 351.60 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking simd_ops/abs_diff_sum/scalar
+Benchmarking simd_ops/abs_diff_sum/scalar: Warming up for 1.0000 s
+Benchmarking simd_ops/abs_diff_sum/scalar: Collecting 100 samples in estimated 2.2034 s (25k iterations)
+Benchmarking simd_ops/abs_diff_sum/scalar: Analyzing
+simd_ops/abs_diff_sum/scalar
+                        time:   [87.357 µs 87.481 µs 87.600 µs]
+Found 14 outliers among 100 measurements (14.00%)
+  1 (1.00%) low severe
+  9 (9.00%) low mild
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+
