@@ -1,5 +1,24 @@
 # Cross-scale features (A6) against the streaming-only walk — design (2026-07-28)
 
+> **OUTCOME (2026-07-28, same day): KILLED AT F1 — honest-stop, nothing
+> merged.** The wave was implemented in full (forms i+ii, all §6 gates
+> green in-workspace, bitwise two-pass reference parity) and the §8 F1
+> kill-test ran pre-merge on 600 aic3 pairs: **median R² 0.99988** (min
+> 0.99888, 9/9 lanes ≥ 0.99) of every XSW lane explained by the
+> same-scale pools — the v1-IW death signature one scale up, decisively
+> past the pre-registered 0.99 bar. §9's "single riskiest claim" was
+> false. No 964 regime exists; the CSF chunk-3 block keeps f944. Record,
+> mechanism analysis, escapee addendum, and the preserved unmerged
+> implementation head (`3ca485b5`): see
+> `benchmarks/append3_f1_killtest_2026-07-28.md`. One implementation
+> correction is folded into that doc: the §3.2 occupancy proof has an
+> odd-height tail-preemption hole (the last coarse strip can emit one
+> row before the fine tail strip; fixed by a pending-activity
+> mechanism). This design stays as the reference for the analysis that
+> survives it: the timing math, the fold analysis, and the now-measured
+> conclusion that ref-only activity-vocabulary weighting is in-span at
+> ANY scale pairing.
+
 Design only, no implementation. Decides which of gap-audit A6's three forms
 (`zenpapers:docs/zensim-720-feature-gaps-2026-07-26.md` §2 fact 5, §5 A6) are
 buildable in the streaming-only foldapp walk, by what mechanism, at what cost,
