@@ -121,6 +121,16 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   region-incremental re-query is for per-block-probe codecs (zenjpeg) — SAT re-query is
   already O(1), local re-COMPUTE bounded by blur footprint is the later optimization.
   **Order (user): get it coherent, THEN optimize.**
+- **C1 SHIPPED (2026-07-29): `Zensim::compute_attribution_density` + `AttributionResult`
+  (SAT, `query_rect` O(1)) with exact basic integrands** (p2/p4 removal-consistent 1/p;
+  hf = signed clamped-ratio first-order — slots 10-12 are ratio-pooled, NOT means).
+  M3a > M3 in 8/8 gate cells; healthy-720@128 = 0.895; but the ≥0.85 gate is NOT met:
+  ATTRDIAG proves |s|-mass ≠ rank-variance — EM2's 98.4%-mass basic block true-ranks ΔS
+  at only 0.33-0.54 (append-blind ceiling 0.43-0.68, NEGATIVE at 128 where the 0.5%-mass
+  append block alone carries the signal). Distance = append fold + exact non-additive v2
+  integrands, both measured. Raw v2map ADD into the score-unit density is unit-broken
+  (swamps it) — use weights ×1/(w·h). Perf 2.4-3.4× (C2 target ≤1.1×).
+  `benchmarks/attribution_map_c1_2026-07-29.md`.
 
 ### Trainer/eval capabilities added this campaign (all on main)
 - **MANDATORY embedded repro**: every new bake carries `zentrain.repro` (inputs w/ sha256 +

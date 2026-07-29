@@ -213,6 +213,9 @@
 
 #![forbid(unsafe_code)]
 
+/// Attribution-density steering map (research; `custom-profiles`).
+#[cfg(feature = "custom-profiles")]
+mod attribution;
 mod blur;
 mod color;
 mod diffmap;
@@ -302,6 +305,8 @@ pub use source::{
     AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,
 };
 
+#[cfg(feature = "custom-profiles")]
+pub use attribution::AttributionResult;
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::{PrecomputedReference, ZensimScratch};
 

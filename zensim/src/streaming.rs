@@ -73,7 +73,7 @@ where
 }
 
 /// Downscale 3 planes in-place, parallel or sequential.
-fn downscale_3_planes(
+pub(crate) fn downscale_3_planes(
     planes: &mut [Vec<f32>; 3],
     w: usize,
     h: usize,
