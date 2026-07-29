@@ -152,6 +152,23 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   marginal) missed at floor 5.7×@576/2.2×@1152 — the fold folds in-kernel with no pooled
   scalars; next levers ranked in the C3a doc (ref-side hf cache → in-kernel mean slots →
   stale-scalar single-pass). 924 fusion needs extractor-side hooks (that session's domain).
+- **C3b (jxl loop A/B, `f195c8c0` in jxl-encoder): attr steering did NOT beat the fold at
+  target-hitting** — med |achieved−target| v47A 0.807 vs fold 0.594 (and BASELINE 0.244
+  beats both model maps there); shippedB 1.507 vs 0.982; 1W/7-8L per-cell, equal median
+  iterations. Probe shows the tile signal is STRONG (full ratio range at 8px) and the fused
+  scalar tracks decode BETTER than the fold arm — the loss is the allocation×redistribution×
+  controller interaction, NOT the map. So: **M3a coherence is proven; loop VALUE is not** —
+  the next lever for closed-loop wins is the controller/redistribution design, not map
+  fidelity. `attr-stale ≈ attr` (0.589/1.355) ⇒ the stale-scalar single-pass ≤1.1× perf
+  endpoint is semantically viable when a positive product case exists. Fused adds
+  +8.2ms/compare @576² (matches C3a's marginal). Caveats: n=9 cells/bake, t=92 clamps
+  saturate, t=75 controller-overshoot-dominated. Tables:
+  `jxl-encoder/benchmarks/zensim_attr_ab_2026-07-29.md` (+2 TSVs; medians re-derived
+  independently from the TSVs — exact match). Bonus: C3b found+bisected the pre-existing
+  `from_linear_planar` sub-64 panic (missing reflect-pad; ≤63px planar refs died in the
+  mean-offset pass since the entry point landed) — FIXED this commit with a
+  fails-without-fix regression test (`m1_sub64_planar_precompute_scores_and_matches_
+  interleaved`, planar-vs-interleaved pad-path agreement ≤1e-4).
 
 ### Trainer/eval capabilities added this campaign (all on main)
 - **MANDATORY embedded repro**: every new bake carries `zentrain.repro` (inputs w/ sha256 +

@@ -370,16 +370,52 @@ fn run_bake_mode(
         println!(
             "  GRADMASS regions: basic {:.1}% | v1-pool {:.1}% | v2 {:.1}% | append {:.1}%",
             mass(0..156.min(n_in)),
-            if n_in > 156 { mass(156..372.min(n_in)) } else { 0.0 },
-            if n_in > 372 { mass(372..720.min(n_in)) } else { 0.0 },
-            if n_in > 720 { mass(720..924.min(n_in)) } else { 0.0 },
+            if n_in > 156 {
+                mass(156..372.min(n_in))
+            } else {
+                0.0
+            },
+            if n_in > 372 {
+                mass(372..720.min(n_in))
+            } else {
+                0.0
+            },
+            if n_in > 720 {
+                mass(720..924.min(n_in))
+            } else {
+                0.0
+            },
         );
         if n_in >= 720 {
             const V2_NAMES: [&str; 29] = [
-                "SSIM_MEAN", "SSIM_DEV2", "SSIM_DEV4", "ART", "DET", "MSE", "HF_GAIN", "HF_LOSS",
-                "HF_MAG_LOSS", "SSIM_SOFT_PEAK", "ART_SOFT_PEAK", "DET_SOFT_PEAK", "MASKED_SSIM",
-                "MASKED_ART", "MASKED_DET", "MASKED_MSE", "IW_SSIM", "IW_ART", "IW_DET", "IW_MSE",
-                "PJND_TRANSDUCER", "PJND_FRAGILITY", "GMS", "s23", "s24", "s25", "s26", "s27",
+                "SSIM_MEAN",
+                "SSIM_DEV2",
+                "SSIM_DEV4",
+                "ART",
+                "DET",
+                "MSE",
+                "HF_GAIN",
+                "HF_LOSS",
+                "HF_MAG_LOSS",
+                "SSIM_SOFT_PEAK",
+                "ART_SOFT_PEAK",
+                "DET_SOFT_PEAK",
+                "MASKED_SSIM",
+                "MASKED_ART",
+                "MASKED_DET",
+                "MASKED_MSE",
+                "IW_SSIM",
+                "IW_ART",
+                "IW_DET",
+                "IW_MSE",
+                "PJND_TRANSDUCER",
+                "PJND_FRAGILITY",
+                "GMS",
+                "s23",
+                "s24",
+                "s25",
+                "s26",
+                "s27",
                 "s28",
             ];
             let mut per_slot = [0f64; 29];
@@ -393,8 +429,7 @@ fn run_bake_mode(
                     }
                 }
             }
-            let mut ranked: Vec<(usize, f64)> =
-                per_slot.iter().cloned().enumerate().collect();
+            let mut ranked: Vec<(usize, f64)> = per_slot.iter().cloned().enumerate().collect();
             ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
             let line: Vec<String> = ranked
                 .iter()
@@ -422,8 +457,10 @@ fn run_bake_mode(
         }
         println!(
             "  GRADMASS basic-scales: s0={:.1}% s1={:.1}% s2={:.1}% s3={:.1}%",
-            100.0 * per_scale[0] / total, 100.0 * per_scale[1] / total,
-            100.0 * per_scale[2] / total, 100.0 * per_scale[3] / total
+            100.0 * per_scale[0] / total,
+            100.0 * per_scale[1] / total,
+            100.0 * per_scale[2] / total,
+            100.0 * per_scale[3] / total
         );
     }
 

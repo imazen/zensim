@@ -2697,6 +2697,45 @@ impl PrecomputedReference {
         num_scales: usize,
         parallel: bool,
     ) -> Self {
+        // Sub-64px planar sources can't form the 4-scale pyramid; reflect-pad
+        // the LINEAR planes to the minimum — the planar analogue of
+        // [`Self::new`]'s ImageSource branch (linear→XYB is pointwise, so
+        // padding before conversion equals converting reflect-padded input).
+        // The contract dims stay the ORIGINAL size, matching `Self::new`.
+        // Without this branch, ≤63px planar precompute panicked in the
+        // mean-offset pass (found via jxl-encoder's cpu_zensim_* 32² tests,
+        // 2026-07-29; present since the entry point was added).
+        {
+            use crate::metric::{MIN_PYRAMID_DIM, reflect_index};
+            if width > 0 && height > 0 && (width < MIN_PYRAMID_DIM || height < MIN_PYRAMID_DIM) {
+                let bw = width.max(MIN_PYRAMID_DIM);
+                let bh = height.max(MIN_PYRAMID_DIM);
+                let padded: [Vec<f32>; 3] = std::array::from_fn(|c| {
+                    let src = planes[c];
+                    let mut out = vec![0.0f32; bw * bh];
+                    for y in 0..bh {
+                        let sy = reflect_index(y, height);
+                        for x in 0..bw {
+                            out[y * bw + x] = src[sy * stride + reflect_index(x, width)];
+                        }
+                    }
+                    out
+                });
+                let padded_refs: [&[f32]; 3] = [&padded[0], &padded[1], &padded[2]];
+                let padded_width = simd_padded_width(bw);
+                return Self::build_from_dims(num_scales, padded_width, bh, parallel, |scale0| {
+                    convert_linear_planar_to_xyb_into(
+                        padded_refs,
+                        bw,
+                        bh,
+                        bw,
+                        padded_width,
+                        scale0,
+                    );
+                })
+                .with_ref_dims(width, height);
+            }
+        }
         let padded_width = simd_padded_width(width);
         Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
             convert_linear_planar_to_xyb_into(planes, width, height, stride, padded_width, scale0);

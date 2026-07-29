@@ -327,3 +327,99 @@ fn m4_try_score_from_features_matched_lengths_ok() {
     assert!(score.is_finite());
     assert!(raw.is_finite());
 }
+
+/// Sub-64px PLANAR precompute panicked before 2026-07-29: `from_linear_planar`
+/// lacked the reflect-pad branch `PrecomputedReference::new` (ImageSource path)
+/// has, so a ≤63px planar reference built a pyramid that can't sustain 4 scales
+/// and died in the mean-offset pass. Found + bisected via jxl-encoder's 32²
+/// `cpu_zensim_*` tests (C3b, task #67); present since the entry point landed.
+/// Gates: (a) every sub-pyramid size scores finite through the planar path;
+/// (b) the planar pad agrees with the ImageSource (StridedBytes LinearF32Rgba)
+/// pad on identical pixels — linear→XYB is pointwise, so the two pipelines
+/// must produce the same score to f32-accumulation tolerance.
+#[test]
+fn m1_sub64_planar_precompute_scores_and_matches_interleaved() {
+    use zensim::DiffmapOptions;
+    for &(w, h) in &[(32usize, 32usize), (48, 63), (63, 64), (64, 63)] {
+        // Deterministic linear-light gradient reference + mildly perturbed distorted.
+        let px = |x: usize, y: usize, c: usize| -> f32 {
+            0.05 + 0.9 * ((x * 7 + y * 13 + c * 29) % 101) as f32 / 101.0
+        };
+        let mut r = vec![0f32; w * h];
+        let mut g = vec![0f32; w * h];
+        let mut b = vec![0f32; w * h];
+        let mut dr = vec![0f32; w * h];
+        let mut dg = vec![0f32; w * h];
+        let mut db = vec![0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                r[i] = px(x, y, 0);
+                g[i] = px(x, y, 1);
+                b[i] = px(x, y, 2);
+                let bump = if (x + y) % 5 == 0 { 0.02 } else { 0.0 };
+                dr[i] = (r[i] + bump).min(1.0);
+                dg[i] = (g[i] - bump).max(0.0);
+                db[i] = (b[i] + bump).min(1.0);
+            }
+        }
+
+        let z = Zensim::new(ZensimProfile::B).with_parallel(false);
+        // (a) planar path: no panic, finite score, diffmap at ORIGINAL dims.
+        let pre = z
+            .precompute_reference_linear_planar([&r, &g, &b], w, h, w)
+            .unwrap_or_else(|e| panic!("planar precompute {w}x{h}: {e:?}"));
+        let res = z
+            .compute_with_ref_and_diffmap_linear_planar(
+                &pre,
+                [&dr, &dg, &db],
+                w,
+                h,
+                w,
+                DiffmapOptions::default(),
+            )
+            .unwrap_or_else(|e| panic!("planar compare {w}x{h}: {e:?}"));
+        let planar_score = res.score();
+        assert!(
+            planar_score.is_finite() && (-100.0..=100.0).contains(&planar_score),
+            "{w}x{h}: planar score {planar_score}"
+        );
+
+        // (b) the SAME pixels as interleaved LinearF32Rgba through the
+        // ImageSource pad path.
+        let interleave = |rr: &[f32], gg: &[f32], bb: &[f32]| -> Vec<f32> {
+            let mut v = Vec::with_capacity(w * h * 4);
+            for i in 0..w * h {
+                v.extend_from_slice(&[rr[i], gg[i], bb[i], 1.0]);
+            }
+            v
+        };
+        let ri = interleave(&r, &g, &b);
+        let di = interleave(&dr, &dg, &db);
+        let rsrc = StridedBytes::try_new(
+            bytemuck::cast_slice(&ri),
+            w,
+            h,
+            w * 16,
+            PixelFormat::LinearF32Rgba,
+        )
+        .unwrap();
+        let dsrc = StridedBytes::try_new(
+            bytemuck::cast_slice(&di),
+            w,
+            h,
+            w * 16,
+            PixelFormat::LinearF32Rgba,
+        )
+        .unwrap();
+        let pre2 = z.precompute_reference(&rsrc).unwrap();
+        let res2 = z
+            .compute_with_ref_and_diffmap(&pre2, &dsrc, DiffmapOptions::default())
+            .unwrap();
+        assert!(
+            (planar_score - res2.score()).abs() < 1e-4,
+            "{w}x{h}: planar {planar_score} vs interleaved {} — pad paths diverged",
+            res2.score()
+        );
+    }
+}
