@@ -296,3 +296,29 @@ grid of the same knob was stopped mid-flight.
 `w *= 1 − lr·rate·mult` on coarse rows AFTER each Adam step (7 step sites), bypassing
 the rescale. Rate compounds per-step → empirical sweep E-M8 {0.001, 0.01, 0.1} × s99
 in flight.
+
+## E-M8b — decoupled decay: bites, hits DATA-PREFERENCE EQUILIBRIUM, M3 unmoved (2026-07-29)
+
+| decay | M3 | CID22 | KonJND | CSIQ | basic-scale mass |
+|---|--:|--:|--:|--:|---|
+| none | 0.114 | 0.8851 | 0.203 | 0.804 | {1,8,30,59}% |
+| 1e-5 | 0.172 | 0.8828 | 0.354 | 0.875 | {6,18,20,54}% |
+| 1e-4 | 0.166 | 0.879 | 0.261 | 0.762 | {3,19,29,47}% |
+| 1e-3 | 0.101 | 0.880 | 0.370 | 0.855 | {5,19,25,48}% |
+
+The decay is mechanically live (mass redistributes; 1e-5 buys KonJND +0.15 and CSIQ +0.07
+nearly free — a keeper as a general regularizer) but **s3 mass plateaus at ~50% across a
+100× rate range and M3 stays 0.10-0.17**: Adam re-grows coarse weights against the decay
+because the DATA prefers coarse-MSE — weight decay can't overrule the loss. **Scale-mass
+was a symptom.** (Two implementation bugs en route, both instrument-caught: coupled L2
+neutralized by Adam; the setup block accidentally moved post-training with the best_val
+relocation — decay-debug counter is permanent equipment now.)
+
+**PIVOT — productize M2 as the deployable map.** M2 = Σ_k s_k·Δf_k(block) ≈ 0.99 on every
+model tested: per-BLOCK gradient attribution through the feature layer is near-perfect
+steering guidance, and the closed loop is per-block anyway (codecs spend bits per block).
+For mean-type basic features (incl. the MSE slot the models love) the per-block Δf_k is an
+exact cheap partial sum over existing planes. The per-pixel signal fold — which fails
+for coarse-heavy models — becomes the visualization layer, not the steering layer.
+Direction requires a runtime-diffmap architecture decision (block-attribution map API) —
+surfaced for user sign-off before building.

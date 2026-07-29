@@ -981,6 +981,15 @@ fn apply_coarse_decay(w1: &mut [f64], n_hidden: usize, lr: f64, rate: f64) {
     if rate <= 0.0 {
         return;
     }
+    // debug telemetry (ZENSIM_DECAY_DEBUG=1): prove the decay executes + bites.
+    if std::env::var("ZENSIM_DECAY_DEBUG").as_deref() == Ok("1") {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static CALLS: AtomicU64 = AtomicU64::new(0);
+        let c = CALLS.fetch_add(1, Ordering::Relaxed);
+        if c % 500 == 0 {
+            eprintln!("[decay-debug] call #{c} lr={lr} rate={rate}");
+        }
+    }
     if let Some(mult) = l2_feature_mult() {
         for (i, &m) in mult.iter().enumerate() {
             if m > 1.0 {

@@ -2995,6 +2995,40 @@ fn main() {
     // GPU-supported (per-sample-α head, no aux losses, no TV).
     let gpu_runtime_str = args.gpu_runtime.trim().to_ascii_lowercase();
     let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
+    // Scale-mass regularizer: build the per-feature L2 multiplier and hand it
+    // to the trainer via the module global (uniform when mult == 1.0). Coarse
+    // scales are s2/s3 of each region: basic 78..156, v2 546..720, append
+    // 822..924 (scale-major layouts: basic 39/scale, v2 87/scale, append
+    // 51/scale). The v1-pool 156..372 is left at 1.0 (structural zeros in the
+    // folded regimes; real pools in v1 bakes are not scale-separable here).
+    if args.coarse_decay > 0.0 {
+        *zensim_validate::mlp_train::COARSE_DECAY_RATE.lock().unwrap() = args.coarse_decay;
+        println!("[coarse-decay] decoupled decay ON: rate {}", args.coarse_decay);
+    }
+    if args.coarse_l2_mult != 1.0 || args.coarse_decay > 0.0 {
+        let nf = args.max_features;
+        // When only --coarse-decay is given, mark coarse rows at 2.0 so the
+        // decay gate (m > 1) engages; the rate absorbs the scaling.
+        let eff = if args.coarse_l2_mult != 1.0 { args.coarse_l2_mult } else { 2.0 };
+        let mut mult = vec![1.0f64; nf];
+        let coarse = |r: core::ops::Range<usize>, mult: &mut Vec<f64>| {
+            for i in r {
+                if i < nf {
+                    mult[i] = eff;
+                }
+            }
+        };
+        coarse(78..156, &mut mult);
+        coarse(546..720, &mut mult);
+        coarse(822..924, &mut mult);
+        *zensim_validate::mlp_train::L2_FEATURE_MULT.lock().unwrap() =
+            Some(std::sync::Arc::new(mult));
+        println!(
+            "[coarse-l2] scale-mass regularizer ON: mult {} on basic-s2/s3 + v2-s2/s3 + append-s2/s3",
+            args.coarse_l2_mult
+        );
+    }
+
     let bake_bytes = if want_gpu {
         if !args.per_sample_alpha_head {
             eprintln!(
@@ -3229,40 +3263,6 @@ fn main() {
             triplet_pool.as_ref(),
         )
     };
-
-    // Scale-mass regularizer: build the per-feature L2 multiplier and hand it
-    // to the trainer via the module global (uniform when mult == 1.0). Coarse
-    // scales are s2/s3 of each region: basic 78..156, v2 546..720, append
-    // 822..924 (scale-major layouts: basic 39/scale, v2 87/scale, append
-    // 51/scale). The v1-pool 156..372 is left at 1.0 (structural zeros in the
-    // folded regimes; real pools in v1 bakes are not scale-separable here).
-    if args.coarse_decay > 0.0 {
-        *zensim_validate::mlp_train::COARSE_DECAY_RATE.lock().unwrap() = args.coarse_decay;
-        println!("[coarse-decay] decoupled decay ON: rate {}", args.coarse_decay);
-    }
-    if args.coarse_l2_mult != 1.0 || args.coarse_decay > 0.0 {
-        let nf = args.max_features;
-        // When only --coarse-decay is given, mark coarse rows at 2.0 so the
-        // decay gate (m > 1) engages; the rate absorbs the scaling.
-        let eff = if args.coarse_l2_mult != 1.0 { args.coarse_l2_mult } else { 2.0 };
-        let mut mult = vec![1.0f64; nf];
-        let coarse = |r: core::ops::Range<usize>, mult: &mut Vec<f64>| {
-            for i in r {
-                if i < nf {
-                    mult[i] = eff;
-                }
-            }
-        };
-        coarse(78..156, &mut mult);
-        coarse(546..720, &mut mult);
-        coarse(822..924, &mut mult);
-        *zensim_validate::mlp_train::L2_FEATURE_MULT.lock().unwrap() =
-            Some(std::sync::Arc::new(mult));
-        println!(
-            "[coarse-l2] scale-mass regularizer ON: mult {} on basic-s2/s3 + v2-s2/s3 + append-s2/s3",
-            args.coarse_l2_mult
-        );
-    }
 
     // ── MANDATORY reproduction provenance ──────────────────────────────
     // Assembled BEFORE baking, embedded INTO the bake bytes as the
