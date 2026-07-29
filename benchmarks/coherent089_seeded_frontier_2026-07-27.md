@@ -182,3 +182,22 @@ M3 blind-spot line. First measurement: EM1 city/q50 M3 +0.206.
   features move rank metrics while carrying ~no gradient mass — their effect routes through
   scaler/interactions. Coherence-regression suspects: fresh bigcodec-924 rows, or append
   reshaping the basic/v2 weight structure. E-M4 (masked retrain) discriminates.
+
+## E-M4 — DET/ART mask at RETRAIN does NOT restore corruption (2026-07-28/29)
+
+| run | CID22 | KonJND | CSIQ | corr |
+|---|--:|--:|--:|--:|
+| mask2 kw0.15 s13/s42 | 0.8747 / **0.8924** | 0.342 / **0.429** | 0.77/0.79 | 0.08/0.04 |
+| mask2 kw0.5 s13/s42 | 0.880 / 0.875 | 0.077 / 0.232 | 0.74/0.79 | 0.14/0.14 |
+| mask2 noK s13/s42 | 0.878 / 0.882 | 0.355 / 0.464 | 0.48 | 0.11/0.03 |
+| maskDET kw0.5 s13 | 0.879 | 0.213 | 0.77 | 0.167 |
+
+**Occlusion ≠ ablation**: removing DEV2 from the FIXED model restored ordering (+0.15),
+but retraining with them masked lets the optimizer re-route the corruption-friendly
+reading through other features — corr stays 0.03-0.17 (vs 0.214 @720). The break is
+distributional at 924, not two families. **Mitigation = the separate corruption HEAD
+(negrich_924), per the original design — the dial doesn't have to carry this gate.**
+
+**Candidate flag**: EM4_mask2_kw0.15_s42 = CID22 0.8924 + KonJND 0.4286 + CSIQ 0.79 —
+best coherent-regime run recorded. ⚠ single-seed (s13 sibling 0.8747); E-M5 seed-band
+(6 more seeds, in flight) decides if it's a mode or luck.
