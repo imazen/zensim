@@ -1415,7 +1415,9 @@ fn dial_panel(
     for ((_img, codec), pts) in curves.iter() {
         let m = by_cq.entry(codec.clone()).or_default();
         for &(q, score, _) in pts.iter() {
-            m.entry((q * 1000.0).round() as i64).or_default().push(score);
+            m.entry((q * 1000.0).round() as i64)
+                .or_default()
+                .push(score);
         }
     }
     let pctl = |v: &[f64], p: f64| -> f64 {
@@ -2198,8 +2200,14 @@ a memorization number — not held-out generalization; do not rank a bake by the
         // authoritative.
         let g_np_v = gnp.unwrap_or(0.0);
         let g_im26_v = gim26.unwrap_or(0.0);
-        let weighted = (3.0 * g1 + 2.5 * g8 + 1.5 * g5 + 1.0 * g9 + 1.0 * g_im26_v
-            + 1.0 * g_np_v + 0.5 * g7 + 0.5 * g_or)
+        let weighted = (3.0 * g1
+            + 2.5 * g8
+            + 1.5 * g5
+            + 1.0 * g9
+            + 1.0 * g_im26_v
+            + 1.0 * g_np_v
+            + 0.5 * g7
+            + 0.5 * g_or)
             / (3.0 + 2.5 + 1.5 + 1.0 + 1.0 + 1.0 + 0.5 + 0.5);
         buf.push_str(&format!(
             "\n**Product composite (ranking, KADID/TID excluded): {product_comp:.4}**  \
@@ -2495,9 +2503,8 @@ Run the dedicated q-sweep harness for those._\n",
                         .enumerate()
                         .filter(|(_, t)| !matches!(t, zenpredict::FeatureTransform::Identity))
                         .map(|(i, t)| {
-                            let p: Vec<f32> = params
-                                .and_then(|ps| ps.get(i).cloned())
-                                .unwrap_or_default();
+                            let p: Vec<f32> =
+                                params.and_then(|ps| ps.get(i).cloned()).unwrap_or_default();
                             json!({"idx": i, "kind": format!("{t:?}"), "params": p})
                         })
                         .collect()

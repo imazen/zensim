@@ -657,7 +657,9 @@ def cmd_fit(args) -> int:
 
 # ---------------------------------------------------------------------------
 def fit_spline_knots(tp: np.ndarray, tgt: np.ndarray, neg_tail: bool = True):
-    """Same knot logic as pack_and_calibrate.py."""
+    """Same knot logic as `bake_dial_refit` (zensim-validate/src/dial_spline.rs
+    `fit_spline_knots` — the canonical owner; this Python copy predates it and
+    survives only for this script's in-process fits)."""
     edges = np.percentile(tp, np.linspace(1, 99, 18))
     kx, ky = [], []
     lo = tp < edges[0]

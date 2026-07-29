@@ -13,9 +13,9 @@
 
 use std::collections::HashMap;
 use zenpredict::{Activation, FeatureTransform, MetadataType, WeightDtype};
-use zenpredict_bake::{bake, BakeLayer, BakeMetadataEntry, BakeRequest};
+use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 use zensim_validate::dial_spline::{fit_spline_knots, spline_payload};
-use zensim_validate::mlp_train::minmax_monotone::{train_ranknet, MinMaxMonotone};
+use zensim_validate::mlp_train::minmax_monotone::{MinMaxMonotone, train_ranknet};
 use zensim_validate::parquet_loader::load_parquet;
 
 const N: usize = 372;
@@ -158,20 +158,44 @@ fn main() {
     let tf = load_transforms(min_lift);
     let sign = load_sign();
     let n_pin = sign.iter().filter(|&&s| s != 0.0).count();
-    eprintln!("min-max: K={k} J={j} epochs={epochs} pairs={pairs} lr={lr} synth-target={synth_target} | {n_pin}/{N} pinned monotone, {} transforms",
-        tf.iter().filter(|(t,_)| *t != zenpredict::FeatureTransform::Identity).count());
+    eprintln!(
+        "min-max: K={k} J={j} epochs={epochs} pairs={pairs} lr={lr} synth-target={synth_target} | {n_pin}/{N} pinned monotone, {} transforms",
+        tf.iter()
+            .filter(|(t, _)| *t != zenpredict::FeatureTransform::Identity)
+            .count()
+    );
 
     // base_tfm train groups (name, path, cap, is_synth). `is_synth` = ssim2-labeled
     // groups that get the `--synth-target` override; kadid/tid/konjnd keep their
     // human_score (real DMOS/MOS/PJND — never replace human labels with a proxy).
     let train_specs: &[(&str, String, usize, bool)] = &[
-        ("safesyn", format!("{CAN}/safesyn.parquet"), cap_safesyn, true),
+        (
+            "safesyn",
+            format!("{CAN}/safesyn.parquet"),
+            cap_safesyn,
+            true,
+        ),
         ("cid22_train", format!("{CAN}/cid22_train.parquet"), 0, true),
         ("kadid", format!("{CAN}/kadid.parquet"), 0, false),
         ("tid", format!("{CAN}/tid.parquet"), 0, false),
-        ("konjnd", format!("{CAN}/konjnd-dense-norm.parquet"), 0, false),
-        ("bigcodec", "/mnt/v/output/zensim/depth-iter/bigcodec_train_120k_stride.parquet".into(), cap_bigcodec, true),
-        ("kadis", "/mnt/v/output/zensim/depth-iter/kadis_train_60k_stride.parquet".into(), cap_kadis, true),
+        (
+            "konjnd",
+            format!("{CAN}/konjnd-dense-norm.parquet"),
+            0,
+            false,
+        ),
+        (
+            "bigcodec",
+            "/mnt/v/output/zensim/depth-iter/bigcodec_train_120k_stride.parquet".into(),
+            cap_bigcodec,
+            true,
+        ),
+        (
+            "kadis",
+            "/mnt/v/output/zensim/depth-iter/kadis_train_60k_stride.parquet".into(),
+            cap_kadis,
+            true,
+        ),
     ];
 
     // Load + transform train; compute standardizer (mean/std) from the transformed pool.
@@ -181,7 +205,11 @@ fn main() {
         // Synth groups use --synth-target; per-group fallback to human_score when
         // the column is absent (bigcodec/kadis lack cvvdp/iwssim) or mostly-null
         // (cid22_train's mix). Non-synth groups always use human_score.
-        let want = if *is_synth { synth_target.as_str() } else { "human_score" };
+        let want = if *is_synth {
+            synth_target.as_str()
+        } else {
+            "human_score"
+        };
         let load_col = |col: &str| load_parquet(&std::path::PathBuf::from(path), name, col, 1.0);
         let (g, used) = match load_col(want) {
             Ok(g) => {
@@ -243,7 +271,9 @@ fn main() {
         .map(|f| ((sumsq[f] / cnt as f64 - mean[f] * mean[f]).max(1e-12)).sqrt())
         .collect();
     let standardize = |t: &[f64]| -> Vec<f64> {
-        (0..N).map(|f| ((t[f] - mean[f]) / std[f]).clamp(-8.0, 8.0)).collect()
+        (0..N)
+            .map(|f| ((t[f] - mean[f]) / std[f]).clamp(-8.0, 8.0))
+            .collect()
     };
 
     // Flatten standardized train groups for train_ranknet.
@@ -310,32 +340,41 @@ fn main() {
         // Optional [0,100] dial spline: score the multiband anchor with the raw
         // min-max, fit a monotone PCHIP raw→target_score via the shared
         // fit_spline_knots. Rank-invariant, so held-out SROCC is unchanged.
-        let spline_bytes: Option<Vec<u8>> = dial_anchor.as_ref().and_then(|ap| {
-            match load_parquet(&std::path::PathBuf::from(ap), "dial-anchor", &dial_target_col, 1.0) {
-                Ok(g) => {
-                    let preds: Vec<f64> = g
-                        .feature_rows
-                        .iter()
-                        .map(|row| m.forward(&standardize(&transform_row(row, &tf))).0)
-                        .collect();
-                    let tgt: Vec<f64> =
-                        g.human_scores.iter().map(|&t| t * dial_target_scale).collect();
-                    let (cx, cy) = fit_spline_knots(&preds, &tgt, dial_edges, true);
-                    eprintln!(
-                        "dial spline: {} knots, y-range [{:.1}, {:.1}] from {} anchor rows",
-                        cx.len(),
-                        cy.first().copied().unwrap_or(0.0),
-                        cy.last().copied().unwrap_or(0.0),
-                        preds.len()
-                    );
-                    Some(spline_payload(&cx, &cy))
+        let spline_bytes: Option<Vec<u8>> =
+            dial_anchor.as_ref().and_then(|ap| {
+                match load_parquet(
+                    &std::path::PathBuf::from(ap),
+                    "dial-anchor",
+                    &dial_target_col,
+                    1.0,
+                ) {
+                    Ok(g) => {
+                        let preds: Vec<f64> = g
+                            .feature_rows
+                            .iter()
+                            .map(|row| m.forward(&standardize(&transform_row(row, &tf))).0)
+                            .collect();
+                        let tgt: Vec<f64> = g
+                            .human_scores
+                            .iter()
+                            .map(|&t| t * dial_target_scale)
+                            .collect();
+                        let (cx, cy) = fit_spline_knots(&preds, &tgt, dial_edges, true);
+                        eprintln!(
+                            "dial spline: {} knots, y-range [{:.1}, {:.1}] from {} anchor rows",
+                            cx.len(),
+                            cy.first().copied().unwrap_or(0.0),
+                            cy.last().copied().unwrap_or(0.0),
+                            preds.len()
+                        );
+                        Some(spline_payload(&cx, &cy))
+                    }
+                    Err(e) => {
+                        eprintln!("  dial-anchor skipped: {e}");
+                        None
+                    }
                 }
-                Err(e) => {
-                    eprintln!("  dial-anchor skipped: {e}");
-                    None
-                }
-            }
-        });
+            });
         let scaler_mean_f32: Vec<f32> = mean.iter().map(|&v| v as f32).collect();
         let scaler_scale_f32: Vec<f32> = std.iter().map(|&v| v as f32).collect();
         let dummy_w = vec![0.0f32; N];
@@ -392,14 +431,26 @@ fn main() {
         })
         .expect("v3 min-max bake");
         std::fs::write(path, &bytes).expect("write bake");
-        eprintln!("wrote bake: {path} ({} bytes, k={k} j={j} n={N})", bytes.len());
+        eprintln!(
+            "wrote bake: {path} ({} bytes, k={k} j={j} n={N})",
+            bytes.len()
+        );
     }
 
     // Held-out eval.
     let evals: &[(&str, String)] = &[
-        ("CID22", format!("{FR}/cid22_features_372col_2026-05-15.parquet")),
-        ("imazen26", format!("{FR}/imazen26_test_120k_2026-07-16.parquet")),
-        ("nonphoto", format!("{FR}/nonphoto_features_372col_2026-07-15.parquet")),
+        (
+            "CID22",
+            format!("{FR}/cid22_features_372col_2026-05-15.parquet"),
+        ),
+        (
+            "imazen26",
+            format!("{FR}/imazen26_test_120k_2026-07-16.parquet"),
+        ),
+        (
+            "nonphoto",
+            format!("{FR}/nonphoto_features_372col_2026-07-15.parquet"),
+        ),
     ];
     let mut results: HashMap<&str, f64> = HashMap::new();
     for (name, path) in evals {

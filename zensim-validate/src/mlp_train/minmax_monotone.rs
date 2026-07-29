@@ -146,9 +146,18 @@ pub fn train_ranknet(
     };
     // He-ish init scaled small so the initial min-max is well-conditioned.
     let scale = (1.0 / n_features as f64).sqrt() * 0.5;
-    let w: Vec<f64> = (0..k * j * n_features).map(|_| (u() * 2.0 - 1.0) * scale).collect();
+    let w: Vec<f64> = (0..k * j * n_features)
+        .map(|_| (u() * 2.0 - 1.0) * scale)
+        .collect();
     let b: Vec<f64> = (0..k * j).map(|_| (u() * 2.0 - 1.0) * scale).collect();
-    let mut m = MinMaxMonotone { k, j, n_features, w, b, sign: sign.to_vec() };
+    let mut m = MinMaxMonotone {
+        k,
+        j,
+        n_features,
+        w,
+        b,
+        sign: sign.to_vec(),
+    };
     m.project();
 
     // Adam state over the FULL parameter vector (w then b). Sparse updates —
@@ -237,7 +246,14 @@ mod tests {
         };
         let w: Vec<f64> = (0..k * j * nf).map(|_| nxt()).collect();
         let b: Vec<f64> = (0..k * j).map(|_| nxt()).collect();
-        let mut m = MinMaxMonotone { k, j, n_features: nf, w, b, sign };
+        let mut m = MinMaxMonotone {
+            k,
+            j,
+            n_features: nf,
+            w,
+            b,
+            sign,
+        };
         m.project();
         m
     }

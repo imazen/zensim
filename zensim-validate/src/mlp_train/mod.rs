@@ -2237,7 +2237,7 @@ pub fn train_mlp_strategy(
             // K>1 sequential → step once per K accumulated pairs.
             if k == 1 || steps_since_adam >= k as u64 {
                 adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                 steps_since_adam = 0;
             }
 
@@ -2332,7 +2332,7 @@ pub fn train_mlp_strategy(
                     if k == 1 || tv_steps_since_adam >= k as u64 || is_last_tv {
                         if tv_steps_since_adam > 0 {
                             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                            apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                         }
                         tv_steps_since_adam = 0;
                     }
@@ -2346,7 +2346,7 @@ pub fn train_mlp_strategy(
         // (steps_since_adam resets to 0 after each Adam call).
         if k > 1 && !parallel && steps_since_adam > 0 {
             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+            apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
         }
         // T8.2 final-flush for parallel buffer: handle the partial
         // batch at epoch end if pairs_per_epoch % K != 0. Buffer is
@@ -2412,7 +2412,7 @@ pub fn train_mlp_strategy(
                 n_steps += steps_added;
                 if steps_added > 0 {
                     adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                    apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                 }
             }
         }
@@ -2531,7 +2531,7 @@ pub fn train_mlp_strategy(
             }
         }
     }
-record_best_val(best_val_score);
+    record_best_val(best_val_score);
 
     log_line(
         &format!("MLP train: best validation mean SROCC = {best_val_score:.4}"),
@@ -3326,7 +3326,7 @@ fn train_mlp_pool_head_with_tv(
             }
         }
     }
-record_best_val(best_val_score);
+    record_best_val(best_val_score);
 
     log_line(
         &format!(
@@ -9259,7 +9259,7 @@ fn train_mlp_per_sample_alpha_head(
             }
         }
     }
-record_best_val(best_val_score);
+    record_best_val(best_val_score);
 
     log_line(
         &format!(
@@ -11481,7 +11481,16 @@ mod tests {
         };
         let mut log = Vec::new();
         let _ = train_mlp_strategy(
-            &[group], n_features, &hyper, &mut log, None, None, None, None, None, Some(&pool),
+            &[group],
+            n_features,
+            &hyper,
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&pool),
         );
     }
 

@@ -3002,14 +3002,23 @@ fn main() {
     // 51/scale). The v1-pool 156..372 is left at 1.0 (structural zeros in the
     // folded regimes; real pools in v1 bakes are not scale-separable here).
     if args.coarse_decay > 0.0 {
-        *zensim_validate::mlp_train::COARSE_DECAY_RATE.lock().unwrap() = args.coarse_decay;
-        println!("[coarse-decay] decoupled decay ON: rate {}", args.coarse_decay);
+        *zensim_validate::mlp_train::COARSE_DECAY_RATE
+            .lock()
+            .unwrap() = args.coarse_decay;
+        println!(
+            "[coarse-decay] decoupled decay ON: rate {}",
+            args.coarse_decay
+        );
     }
     if args.coarse_l2_mult != 1.0 || args.coarse_decay > 0.0 {
         let nf = args.max_features;
         // When only --coarse-decay is given, mark coarse rows at 2.0 so the
         // decay gate (m > 1) engages; the rate absorbs the scaling.
-        let eff = if args.coarse_l2_mult != 1.0 { args.coarse_l2_mult } else { 2.0 };
+        let eff = if args.coarse_l2_mult != 1.0 {
+            args.coarse_l2_mult
+        } else {
+            2.0
+        };
         let mut mult = vec![1.0f64; nf];
         let coarse = |r: core::ops::Range<usize>, mult: &mut Vec<f64>| {
             for i in r {
@@ -3342,11 +3351,12 @@ fn main() {
     // score/byte identity guarantees (weights untouched — no requantization).
     // Failure here is FATAL by design: shipping an unreproducible bake is a
     // defect, not a degraded mode.
-    let bake_bytes = zenpredict_bake::append_metadata_utf8(&bake_bytes, "zentrain.repro", &repro_json)
-        .unwrap_or_else(|e| {
-            eprintln!("FATAL: could not embed zentrain.repro into the bake: {e:?}");
-            std::process::exit(4);
-        });
+    let bake_bytes =
+        zenpredict_bake::append_metadata_utf8(&bake_bytes, "zentrain.repro", &repro_json)
+            .unwrap_or_else(|e| {
+                eprintln!("FATAL: could not embed zentrain.repro into the bake: {e:?}");
+                std::process::exit(4);
+            });
     std::fs::write(&out_path, &bake_bytes).unwrap_or_else(|e| {
         eprintln!("write {out_path:?}: {e}");
         std::process::exit(1);

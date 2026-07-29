@@ -665,16 +665,19 @@ OPT-IN (`qat_fine_tune_epochs` default 0): the codec-dial ship recipe opts in
 (CID22 + native packing win); an HF/PJND-focused bake stays non-QAT.
 
 **Non-QAT fallback** (existing f32 bakes, or HF-focused bakes that can't take
-the KonJND trade): `scripts/v_next/pack_and_calibrate.py IN.bin OUT.bin
---dtype f16 --zerobias-bulk 0.005 --neg-tail` — pack-then-calibrate as a
+the KonJND trade): `bake_dial_refit pack --in IN.bin --out OUT.bin --neg-tail`
+(defaults `--dtype f16 --zerobias-bulk 0.005`) — pack-then-calibrate as a
 post-step (strip → zerobias+dtype → refit spline on packed → re-inject).
+_(Was `scripts/v_next/pack_and_calibrate.py` — DELETED 2026-07-29 after the
+Rust port reproduced the shipped `v47_strict_recal_negtail_packed30k` artifact
+BYTE-IDENTICALLY, sha256 `302c9154…`, triple-matched vs a fresh Python run.)_
 
-#### pack_and_calibrate.py (non-QAT post-step) details
+#### `bake_dial_refit pack` (non-QAT post-step) details
 
 **Load-bearing rule: QUANTIZE, then CALIBRATE.** zerobias/f16/i8 preserve
 RANK (signs intact) but SHIFT the network's raw outputs, so a spline fit on
 the f32 net maps the PACKED net's identity output to the wrong dial value →
-identity drops (97.8 → 93.4 observed). `pack_and_calibrate.py` refits the
+identity drops (97.8 → 93.4 observed). `bake_dial_refit pack` refits the
 output spline ON THE PACKED network (strip → zerobias+dtype → refit spline on
 packed → re-inject), which re-anchors identity exactly. SROCC is rank-invariant
 under the monotone spline. This makes plain GLOBAL zerobias safe — `repack`'s
@@ -774,9 +777,14 @@ bake_dial_refit add-winsor --in <raw.bin> --out <out.bin> --fit-corpus <parquet>
 # G-RANGE tail gate (below/above-knot raw-pred fraction) + Z-RMSE/OR/SROCC,
 # NO PWRC (OOM-safe). The 3rd eval panel SROCC is blind to.
 bake_dial_refit gate --bake <bin> --corpus <parquet> [--ref-col human_score]
+# STANDARD non-QAT packing: per-layer zerobias + dtype, spline refit ON THE
+# PACKED net (BYTE-IDENTICAL to pack_and_calibrate.py + the shipped packed30k)
+bake_dial_refit pack --in <f32.bin> --out <out.bin> [--neg-tail] \
+    [--dtype f16] [--zerobias-bulk 0.005] [--protect-last]
 ```
 
-Method + measured byte-parity: `benchmarks/bake_refit_rust_migration_2026-07-05.md`.
+Method + measured byte-parity: `benchmarks/bake_refit_rust_migration_2026-07-05.md`
+(+ `benchmarks/pack_rust_migration_2026-07-29.md` for `pack`).
 
 ### Affine calibration of an existing bake
 **`affine_calibrate` binary** at `zensim-validate/src/bin/affine_calibrate.rs`.
@@ -835,6 +843,10 @@ Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
   `affine_calibrate_znpr_v2.py`, `score_unified_with_bake.py`,
   `soft_iso_smooth.py` — this list claimed they were "deprecated but
   present" long after they were gone.
+- **DELETED 2026-07-29**: `pack_and_calibrate.py` → `bake_dial_refit pack`
+  — proven byte-identical THREE ways (fresh Python run == Rust ==
+  the shipped `v47_strict_recal_negtail_packed30k_2026-05-27.bin`,
+  sha256 `302c9154…`; `benchmarks/pack_rust_migration_2026-07-29.md`).
 - **Still present, blocked on a live importer** (delete once ported):
   `bake_outlier_gate.py` → `bake_dial_refit gate` (imported by
   `xmetric_consensus.py`); `shared_anchor_refit.py` → `shared-anchor`

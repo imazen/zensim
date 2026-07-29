@@ -39,6 +39,13 @@
 //!   detector SROCC is blind to) + advisory Z-RMSE / outlier-ratio / SROCC
 //!   vs a reference column. Computes NO PWRC (the `zenstats` `sa_st_curve`
 //!   O(n²) allocation OOMs broad corpora — see the module's PWRC note).
+//! * `pack` — reproduces `pack_and_calibrate.py` (the STANDARD non-QAT
+//!   packing path): per-layer zerobias (`--protect-last` exempts the final
+//!   layer, keeping it f32) + dtype quantization, then refit the output
+//!   spline ON THE PACKED network. The pack-THEN-calibrate order is
+//!   load-bearing: quantization preserves rank but shifts raw outputs, so
+//!   a spline fit on the f32 net maps the packed net's identity to the
+//!   wrong dial value (identity drops 97.8→93.4 observed).
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -96,6 +103,10 @@ enum Cmd {
     /// G-RANGE tail gate + advisory Z-RMSE/OR/SROCC (reproduces
     /// `bake_outlier_gate.py`).
     Gate(GateArgs),
+    /// Per-layer zerobias + dtype pack, THEN spline refit on the packed
+    /// network (reproduces `pack_and_calibrate.py`, the STANDARD non-QAT
+    /// packing path).
+    Pack(PackArgs),
 }
 
 // --------------------------------------------------------------------------
@@ -1016,6 +1027,364 @@ fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
 }
 
 // --------------------------------------------------------------------------
+// subcommand: pack  (reproduces pack_and_calibrate.py — STANDARD non-QAT path)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct PackArgs {
+    /// Input bake (multi-layer MLPs supported; f32/f16 layers).
+    #[arg(long = "in")]
+    input: PathBuf,
+    #[arg(long)]
+    out: PathBuf,
+    /// Bulk-layer weight dtype after packing (`f16`, `f32`, or `i8`).
+    #[arg(long, default_value = "f16")]
+    dtype: String,
+    /// Zero every bulk-layer weight with |w| < tau (per-layer zerobias).
+    #[arg(long = "zerobias-bulk", default_value_t = 0.005)]
+    zerobias_bulk: f64,
+    /// Exempt the LAST layer from zerobias AND keep it f32 (identity-
+    /// critical layers, e.g. the per-sample-alpha passthrough, are tiny in
+    /// bytes but precision-sensitive).
+    #[arg(long)]
+    protect_last: bool,
+    /// Keep only the last of any run of y<=1e-6 spline knots (negative-tail
+    /// dedup in `fit_spline_knots`).
+    #[arg(long)]
+    neg_tail: bool,
+    /// Anchor parquet the packed-network spline is fit on
+    /// (`f0..fN` + `--target-col`).
+    #[arg(
+        long,
+        default_value = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/multiband_anchor_dial100.parquet"
+    )]
+    anchor: PathBuf,
+    #[arg(long, default_value = "target_score")]
+    target_col: String,
+    #[arg(long, default_value = "f")]
+    feat_prefix: String,
+    /// Advisory verification parquet (post-spline SROCC + calibration
+    /// percentiles). Pass `--verify none` to skip.
+    #[arg(
+        long,
+        default_value = "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet"
+    )]
+    verify: String,
+    #[arg(long, default_value = "human_score")]
+    verify_col: String,
+    /// Multiply the verify column by this before the SROCC (CID22 stores
+    /// MCOS/100, so the default re-scales to 0..100).
+    #[arg(long, default_value_t = 100.0)]
+    verify_scale: f64,
+    /// If given, assert the output sha256 begins with this hex prefix.
+    #[arg(long)]
+    expect_sha256: Option<String>,
+}
+
+/// One packed layer, owned (weights dequantized to f32).
+struct PackLayer {
+    in_dim: usize,
+    out_dim: usize,
+    activation: Activation,
+    dtype: WeightDtype,
+    weights: Vec<f32>,
+    biases: Vec<f32>,
+}
+
+/// Per-layer zerobias + dtype assignment — the pure core of `pack`.
+/// Returns the packed layers + per-layer `(index, zeroed, total)` counts.
+///
+/// Parity note (byte-identity with `pack_and_calibrate.py`): the Python
+/// compared `|w| < tau` on weights that had round-tripped through
+/// `zenpredict inspect` JSON — i.e. on `float(shortest_repr(w_f32))`, which
+/// is NOT always the same f64 as `w_f32 as f64`. The comparison here does
+/// the same string round-trip so threshold-straddling weights mask
+/// identically. The weights passed on are the original f32s (the Python's
+/// JSON f64 → baker f32 narrowing recovers exactly these), so the emitted
+/// bytes match.
+fn pack_layers(
+    model: &Model,
+    dtype: WeightDtype,
+    tau: f64,
+    protect_last: bool,
+) -> Result<(Vec<PackLayer>, Vec<(usize, usize, usize)>), String> {
+    let n_layers = model.n_layers();
+    let mut packed = Vec::with_capacity(n_layers);
+    let mut counts = Vec::with_capacity(n_layers);
+    for (li, l) in model.layers().enumerate() {
+        let mut weights: Vec<f32> = match &l.weights {
+            WeightStorage::F32(w) => w.to_vec(),
+            WeightStorage::F16(w) => w.iter().map(|b| f16_bits_to_f32(*b)).collect(),
+            WeightStorage::I8 { .. } => {
+                return Err(format!(
+                    "pack: layer {li} is i8 — repacking an already-i8 bake is \
+                     lossy; start from the f32/f16 original"
+                ));
+            }
+        };
+        let is_last = li == n_layers - 1;
+        let layer_tau = if protect_last && is_last { 0.0 } else { tau };
+        let mut zeroed = 0usize;
+        if layer_tau > 0.0 {
+            for w in weights.iter_mut() {
+                // Python-pipeline parity: threshold on the shortest-repr
+                // string round-trip (see fn doc).
+                let wj: f64 = format!("{w}").parse().unwrap_or(*w as f64);
+                if wj.abs() < layer_tau {
+                    *w = 0.0;
+                    zeroed += 1;
+                }
+            }
+        }
+        counts.push((li, zeroed, weights.len()));
+        packed.push(PackLayer {
+            in_dim: l.in_dim,
+            out_dim: l.out_dim,
+            activation: l.activation,
+            dtype: if protect_last && is_last {
+                WeightDtype::F32
+            } else {
+                dtype
+            },
+            weights,
+            biases: l.biases.to_vec(),
+        });
+    }
+    Ok((packed, counts))
+}
+
+/// Serialize packed layers + metadata through the canonical serializer,
+/// returning the bytes. `schema_hash` is preserved from the input;
+/// `flags: 0` and `compressed: true` match the Python pipeline verbatim.
+fn emit_packed(
+    schema_hash: u64,
+    scaler_mean: &[f32],
+    scaler_scale: &[f32],
+    layers: &[PackLayer],
+    metadata: &[OwnedMeta],
+) -> Vec<u8> {
+    let bl: Vec<BakeLayer<'_>> = layers
+        .iter()
+        .map(|l| BakeLayer {
+            in_dim: l.in_dim,
+            out_dim: l.out_dim,
+            activation: l.activation,
+            dtype: l.dtype,
+            weights: &l.weights,
+            biases: &l.biases,
+        })
+        .collect();
+    let md: Vec<BakeMetadataEntry<'_>> = metadata
+        .iter()
+        .map(|m| BakeMetadataEntry {
+            key: &m.key,
+            kind: m.kind,
+            value: &m.value,
+        })
+        .collect();
+    bake(&BakeRequest {
+        schema_hash,
+        flags: 0,
+        scaler_mean,
+        scaler_scale,
+        layers: &bl,
+        feature_bounds: &[],
+        metadata: &md,
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: true,
+        hu_permutations: None,
+    })
+    .expect("serialize ZNPR v3 bake")
+}
+
+/// Forward `feats` through a bake's FULL runtime dispatch (per-sample-α /
+/// hybrid head / tanh pin / output spline when present) — the shared
+/// `bake_runtime::score_with_bake_alloc` path, bit-exact with
+/// `predict_features_with_bake`. Two pipeline-parity details:
+/// * features are narrowed to f32 first (the Python packed a f32 matrix);
+/// * each score is round-tripped through its `%.6f` print (the Python fit
+///   knots on the subprocess's 6-decimal stdout).
+fn forward_scored_6dec(bytes: &[u8], feats: &[Vec<f64>]) -> Result<Vec<f64>, String> {
+    use zensim_validate::bake_runtime::{
+        extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
+        score_with_bake_alloc,
+    };
+    let model = Model::from_bytes(bytes).map_err(|e| format!("parse packed bake: {e:?}"))?;
+    let n_inputs = model.n_inputs();
+    let has_transforms = model.has_nontrivial_feature_transforms();
+    let psa = extract_per_sample_alpha_head(&model);
+    let hyb = extract_hybrid_head(&model);
+    let pin = extract_tanh_output_head_scale(&model);
+    let sp = spline::extract(&model);
+    let mut predictor = zenpredict::Predictor::new(&model);
+    let mut out = Vec::with_capacity(feats.len());
+    let mut row_f64 = vec![0f64; n_inputs];
+    for row in feats {
+        if row.len() != n_inputs {
+            return Err(format!(
+                "feature row has {} values, bake expects {n_inputs}",
+                row.len()
+            ));
+        }
+        for (d, s) in row_f64.iter_mut().zip(row.iter()) {
+            *d = (*s as f32) as f64;
+        }
+        let y = score_with_bake_alloc(
+            &mut predictor,
+            has_transforms,
+            psa.as_ref(),
+            hyb.as_ref(),
+            pin,
+            sp.as_ref(),
+            n_inputs,
+            &row_f64,
+        );
+        out.push(round_6dec(y));
+    }
+    Ok(out)
+}
+
+/// `%.6f`-print round-trip (see [`forward_scored_6dec`]).
+fn round_6dec(y: f64) -> f64 {
+    format!("{y:.6}").parse().unwrap_or(y)
+}
+
+fn cmd_pack(a: &PackArgs) -> Result<(), String> {
+    let dtype = match a.dtype.as_str() {
+        "f16" => WeightDtype::F16,
+        "f32" => WeightDtype::F32,
+        "i8" => WeightDtype::I8,
+        other => return Err(format!("--dtype must be f16|f32|i8 (got {other:?})")),
+    };
+    let bytes = std::fs::read(&a.input).map_err(|e| format!("read {:?}: {e}", a.input))?;
+    let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
+    // The Python JSON pipeline silently DROPPED these sections. Refuse
+    // instead — a pack that strips output_specs ships a broken bake.
+    if !model.feature_bounds().is_empty()
+        || !model.output_specs().is_empty()
+        || !model.discrete_sets().is_empty()
+        || !model.sparse_overrides().is_empty()
+    {
+        return Err(
+            "bake carries feature_bounds/output_specs/discrete_sets/sparse_overrides — \
+             pack does not round-trip those sections yet (extend emit_packed first; \
+             fail-loud beats the Python's silent drop)"
+                .into(),
+        );
+    }
+    if model.flags() != 0 {
+        eprintln!(
+            "warning: input flags=0x{:x} are reset to 0 (pipeline parity with pack_and_calibrate.py)",
+            model.flags()
+        );
+    }
+
+    let (packed, counts) = pack_layers(&model, dtype, a.zerobias_bulk, a.protect_last)?;
+    eprintln!(
+        "per-layer zerobias (zeroed/total): {}",
+        counts
+            .iter()
+            .map(|(li, z, t)| format!("L{li}:{z}/{t}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+
+    // metadata = input order minus the spline; the refit spline is appended
+    // at the END (matches the Python's `md2 = md + [spline]`).
+    let md_nospline: Vec<OwnedMeta> = clone_metadata(&model)
+        .into_iter()
+        .filter(|m| m.key != SPLINE_KEY)
+        .collect();
+
+    // 1. packed network WITHOUT spline -> its raw (tanh-pin) outputs.
+    let nospline_bytes = emit_packed(
+        model.schema_hash(),
+        model.scaler_mean(),
+        model.scaler_scale(),
+        &packed,
+        &md_nospline,
+    );
+    let n_in = model.n_inputs();
+    let (feats, tgt) = read_features(&a.anchor, &a.feat_prefix, n_in, &a.target_col);
+    let preds = forward_scored_6dec(&nospline_bytes, &feats)?;
+    let pmin = preds.iter().copied().fold(f64::INFINITY, f64::min);
+    let pmax = preds.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    eprintln!(
+        "packed tanh-pin range [{pmin:.4},{pmax:.4}] corr={:.4}",
+        zensim_validate::panel::pearson(&preds, &tgt)
+    );
+
+    // 2. fit spline ON THE PACKED NETWORK (re-anchors identity).
+    let (cx, cy) = fit_spline_knots(&preds, &tgt, 18, a.neg_tail);
+    if cx.len() < 2 {
+        return Err(format!(
+            "packed-network spline fit produced only {} knots (<2)",
+            cx.len()
+        ));
+    }
+
+    // 3. inject the spline -> final.
+    let mut md_final = md_nospline;
+    md_final.push(OwnedMeta {
+        key: SPLINE_KEY.to_string(),
+        kind: MetadataType::Bytes,
+        value: spline_payload(&cx, &cy),
+    });
+    let final_bytes = emit_packed(
+        model.schema_hash(),
+        model.scaler_mean(),
+        model.scaler_scale(),
+        &packed,
+        &md_final,
+    );
+    std::fs::write(&a.out, &final_bytes).map_err(|e| format!("write {:?}: {e}", a.out))?;
+    eprintln!(
+        "packed {:?} ({} B) -> {:?} ({} B); {} spline knots, dial y-range [{:.1},{:.1}]",
+        a.input,
+        bytes.len(),
+        a.out,
+        final_bytes.len(),
+        cx.len(),
+        cy[0],
+        cy[cy.len() - 1]
+    );
+
+    // advisory verification: post-spline (unclamped) SROCC + calibration
+    // percentiles on the verify corpus.
+    if a.verify != "none" {
+        let vpath = PathBuf::from(&a.verify);
+        let (vfeats, vref) = read_features(&vpath, &a.feat_prefix, n_in, &a.verify_col);
+        let vpred = forward_scored_6dec(&final_bytes, &vfeats)?;
+        let vref_scaled: Vec<f64> = vref.iter().map(|&t| t * a.verify_scale).collect();
+        let mut sorted = vpred.clone();
+        sorted.sort_by(f64::total_cmp);
+        eprintln!(
+            "verify {}: SROCC (post-spline)={:.4}  cal pctl p5={:.1} p95={:.1}  (n={})",
+            vpath.file_name().and_then(|s| s.to_str()).unwrap_or("?"),
+            spearman(&vpred, &vref_scaled),
+            percentile_linear(&sorted, 5.0),
+            percentile_linear(&sorted, 95.0),
+            vpred.len()
+        );
+    }
+
+    let got = sha256_hex(&final_bytes);
+    eprintln!("  sha256 {got}");
+    if let Some(expect) = &a.expect_sha256 {
+        if got.starts_with(expect) {
+            eprintln!("  BYTE-REPRODUCED (matches expected {expect})");
+        } else {
+            return Err(format!("sha mismatch: expected {expect}, got {got}"));
+        }
+    }
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
 // sha256 (for add-winsor's byte-repro assertion)
 // --------------------------------------------------------------------------
 
@@ -1040,6 +1409,7 @@ fn main() -> ExitCode {
         Cmd::BottomExtend(a) => cmd_bottom_extend(a).map(|_| false),
         Cmd::AddWinsor(a) => cmd_add_winsor(a).map(|_| false),
         Cmd::Gate(a) => cmd_gate(a),
+        Cmd::Pack(a) => cmd_pack(a).map(|_| false),
     };
     match result {
         Ok(gate_failed) => {
@@ -1234,5 +1604,133 @@ mod tests {
         assert_eq!(op.apply(-3.0), -1.0);
         assert_eq!(op.apply(0.5), 0.5);
         assert_eq!(op.apply(9.0), 2.0);
+    }
+
+    /// A 2-layer f32 MLP bake (3→2 leaky-relu, 2→1 identity) with weights
+    /// straddling the zerobias threshold in both layers.
+    fn two_layer_bake() -> Vec<u8> {
+        let w0 = [0.004f32, -0.0049, 0.006, -1.0, 0.5, 0.0051];
+        let b0 = [0.1f32, -0.2];
+        let w1 = [0.003f32, 0.8];
+        let b1 = [0.05f32];
+        bake(&BakeRequest {
+            schema_hash: 0xabc123,
+            flags: 0,
+            scaler_mean: &[0.0; 3],
+            scaler_scale: &[1.0; 3],
+            layers: &[
+                BakeLayer {
+                    in_dim: 3,
+                    out_dim: 2,
+                    activation: Activation::LeakyRelu,
+                    dtype: WeightDtype::F32,
+                    weights: &w0,
+                    biases: &b0,
+                },
+                BakeLayer {
+                    in_dim: 2,
+                    out_dim: 1,
+                    activation: Activation::Identity,
+                    dtype: WeightDtype::F32,
+                    weights: &w1,
+                    biases: &b1,
+                },
+            ],
+            feature_bounds: &[],
+            metadata: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn pack_layers_zerobias_protect_last() {
+        let bytes = two_layer_bake();
+        let model = Model::from_bytes(&bytes).unwrap();
+
+        // protect-last: bulk layer zerobias'd + f16, last layer untouched f32.
+        let (packed, counts) = pack_layers(&model, WeightDtype::F16, 0.005, true).unwrap();
+        assert_eq!(counts, vec![(0, 2, 6), (1, 0, 2)]);
+        assert_eq!(packed[0].dtype as u8, WeightDtype::F16 as u8);
+        assert_eq!(packed[0].weights, vec![0.0, 0.0, 0.006, -1.0, 0.5, 0.0051]);
+        assert_eq!(packed[1].dtype as u8, WeightDtype::F32 as u8);
+        assert_eq!(packed[1].weights, vec![0.003, 0.8]); // 0.003 SURVIVES (protected)
+        assert_eq!(packed[0].biases, vec![0.1, -0.2]); // biases never zerobias'd
+        assert_eq!(packed[1].biases, vec![0.05]);
+
+        // without protect-last: the last layer gets the bulk treatment too.
+        let (packed, counts) = pack_layers(&model, WeightDtype::F16, 0.005, false).unwrap();
+        assert_eq!(counts, vec![(0, 2, 6), (1, 1, 2)]);
+        assert_eq!(packed[1].dtype as u8, WeightDtype::F16 as u8);
+        assert_eq!(packed[1].weights, vec![0.0, 0.8]);
+    }
+
+    /// The whole point of pack-THEN-calibrate: fitting the spline on the
+    /// PACKED network's outputs re-anchors identity exactly, where a spline
+    /// fit on the pre-pack outputs would map the packed net's (shifted)
+    /// identity output to the wrong dial value.
+    #[test]
+    fn pack_then_calibrate_reanchors_identity() {
+        let bytes = two_layer_bake();
+        let model = Model::from_bytes(&bytes).unwrap();
+        let (packed, _) = pack_layers(&model, WeightDtype::F16, 0.005, false).unwrap();
+        let nospline = emit_packed(
+            model.schema_hash(),
+            model.scaler_mean(),
+            model.scaler_scale(),
+            &packed,
+            &[],
+        );
+        // schema_hash survives the re-emit.
+        assert_eq!(
+            Model::from_bytes(&nospline).unwrap().schema_hash(),
+            0xabc123
+        );
+
+        // synthetic anchor: rows spanning the packed net's output range,
+        // target = the PACKED net's own output min-max mapped to [0,100]
+        // (the identity-dial relation the spline must re-anchor).
+        let feats: Vec<Vec<f64>> = (0..200)
+            .map(|i| {
+                let t = -2.0 + 0.02 * i as f64;
+                vec![t, t, t]
+            })
+            .collect();
+        let preds = forward_scored_6dec(&nospline, &feats).unwrap();
+        let (lo, hi) = preds
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |a, &p| {
+                (a.0.min(p), a.1.max(p))
+            });
+        let tgt: Vec<f64> = preds
+            .iter()
+            .map(|&p| (p - lo) / (hi - lo) * 100.0)
+            .collect();
+        let (cx, cy) = fit_spline_knots(&preds, &tgt, 18, false);
+        assert!(cx.len() >= 2);
+        // the fitted spline maps the packed net's own top-of-range output to
+        // (approximately) the top target — identity is re-anchored on the
+        // PACKED outputs, not the f32 originals.
+        let sp = spline::parse_payload(&spline_payload(&cx, &cy)).unwrap();
+        let top_pred = preds.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let mapped_top = spline::apply(top_pred, &sp);
+        assert!(
+            mapped_top > 90.0,
+            "packed top output should map near the top target (got {mapped_top:.2})"
+        );
+    }
+
+    #[test]
+    fn six_decimal_roundtrip_matches_printed_pipe() {
+        assert_eq!(round_6dec(0.123456789), 0.123457);
+        assert_eq!(round_6dec(-1e-7), 0.0); // "-0.000000" parses to -0.0 == 0.0
+        assert_eq!(round_6dec(97.5), 97.5);
+        assert!(round_6dec(f64::NAN).is_nan());
     }
 }
