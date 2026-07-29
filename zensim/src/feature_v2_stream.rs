@@ -40,7 +40,7 @@
 
 #[cfg(test)]
 use crate::feature_v2::gather_strip_halo;
-use crate::feature_v2::{reflect_101, HdrEncoding, HALO_P, STRIP_ROWS};
+use crate::feature_v2::{HALO_P, HdrEncoding, STRIP_ROWS, reflect_101};
 use crate::source::{ImageSource, PixelFormat, SubsetView};
 
 /// Which front-end fills the scale-0 rolling planes.
@@ -133,10 +133,8 @@ impl RollingPlane {
         let held = self.hi - self.lo;
         if self.base + held + n_rows > self.cap_rows() {
             // Compact the live window to the buffer front.
-            self.buf.copy_within(
-                self.base * self.width..(self.base + held) * self.width,
-                0,
-            );
+            self.buf
+                .copy_within(self.base * self.width..(self.base + held) * self.width, 0);
             self.base = 0;
             if held + n_rows > self.cap_rows() {
                 // Capacity fallback — correctness-safe, should not happen
@@ -322,9 +320,9 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             }
             if !self.produce() {
                 debug_assert!(
-                    self.scales.iter().all(|st| {
-                        st.next_ks * STRIP_ROWS >= st.plane_h
-                    }),
+                    self.scales
+                        .iter()
+                        .all(|st| { st.next_ks * STRIP_ROWS >= st.plane_h }),
                     "production exhausted with unemitted strips"
                 );
                 return None;
@@ -500,10 +498,10 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         if !info.interior() {
             return None;
         }
-        Some(self.plane(side, ch, info.scale).rows(
-            info.y0 - HALO_P,
-            info.y0 + info.strip_h + HALO_P,
-        ))
+        Some(
+            self.plane(side, ch, info.scale)
+                .rows(info.y0 - HALO_P, info.y0 + info.strip_h + HALO_P),
+        )
     }
 
     /// Materialize the strip's wide window into `dst`
@@ -585,7 +583,9 @@ fn hdr_source_row_to_nits(
     }
     match encoding {
         HdrEncoding::Linear => {}
-        HdrEncoding::Pq { peak_nits } => crate::transfer::decode_pq_row(&mut out[..width], peak_nits),
+        HdrEncoding::Pq { peak_nits } => {
+            crate::transfer::decode_pq_row(&mut out[..width], peak_nits)
+        }
         HdrEncoding::Hlg {
             peak_nits,
             ambient_lux,
@@ -638,9 +638,7 @@ mod tests {
     /// `downscale_2x_into` per level). The materialized walk's distorted
     /// side uses `downscale_2x_inplace` instead — documented (and
     /// asserted here) bit-identical arithmetic.
-    fn materialize(
-        img: &impl ImageSource,
-    ) -> Vec<([Vec<f32>; 3], usize, usize)> {
+    fn materialize(img: &impl ImageSource) -> Vec<([Vec<f32>; 3], usize, usize)> {
         let mut width = img.width();
         let mut height = img.height();
         let mut scales: Vec<([Vec<f32>; 3], usize, usize)> = Vec::new();

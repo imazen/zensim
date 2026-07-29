@@ -1256,7 +1256,12 @@ pub(crate) fn convert_source_to_xyb_into_slices(
                                 ];
                             }
                         } else {
-                            composite_srgb16_rgba_to_linear(row_bytes, width, abs_row_offset + y, &mut linear_row);
+                            composite_srgb16_rgba_to_linear(
+                                row_bytes,
+                                width,
+                                abs_row_offset + y,
+                                &mut linear_row,
+                            );
                         }
                         if need_gamut {
                             gamut_convert_row(&mut linear_row[..width], primaries);
@@ -1300,7 +1305,11 @@ pub(crate) fn convert_source_to_xyb_into_slices(
                                     *pixel = [r, g, b];
                                 }
                             } else {
-                                composite_linear_f32_rgba(&rgba_row[..width], abs_row_offset + y, &mut linear_row);
+                                composite_linear_f32_rgba(
+                                    &rgba_row[..width],
+                                    abs_row_offset + y,
+                                    &mut linear_row,
+                                );
                             }
                             if need_gamut {
                                 gamut_convert_row(&mut linear_row[..width], primaries);

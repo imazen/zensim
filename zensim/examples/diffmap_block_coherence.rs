@@ -297,7 +297,9 @@ fn run_bake_mode(
                 .features()
                 .to_vec();
         }
-        let base = z.compute_extended_features(&rs, &ds).expect("base features");
+        let base = z
+            .compute_extended_features(&rs, &ds)
+            .expect("base features");
         #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
         let mut feats = base.features().to_vec();
         #[cfg(feature = "feature-regime-v2")]

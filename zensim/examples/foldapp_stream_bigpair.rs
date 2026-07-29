@@ -55,7 +55,10 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let w: usize = args.first().map(|s| s.parse().unwrap()).unwrap_or(8000);
     let h: usize = args.get(1).map(|s| s.parse().unwrap()).unwrap_or(10000);
-    eprintln!("generating {w}x{h} ({:.1} MP) pair...", (w * h) as f64 / 1e6);
+    eprintln!(
+        "generating {w}x{h} ({:.1} MP) pair...",
+        (w * h) as f64 / 1e6
+    );
     let t0 = std::time::Instant::now();
     let (src, dst) = make_pair(w, h, 1);
     eprintln!("generated in {:.2}s", t0.elapsed().as_secs_f64());
