@@ -84,6 +84,75 @@ decorrelated-auto (both arms + the empirical S-class map) — `benchmarks/p12_*`
 appends HDR-specific features (the append-only discipline holds — new slots will EXTEND, never
 renumber, and HDR rows will be their own regime/datasets, never column-mixed into these).
 
+## ★ THE E-M CAMPAIGN (924/v3 era) — findings + recipes + the steering pivot (2026-07-28/29)
+
+Full evidence: `benchmarks/coherent089_seeded_frontier_2026-07-27.md` (E-M1..E-M9).
+Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/{,em2/}`.
+
+### Rank results (924 regime = coherent by construction)
+- **fold924 kw0.5, n=6: CID22 0.8825±0.0025**; **no-KADIS n=6: 0.8816±0.0016 + KonJND 0.398**
+  (v3 features carry near-threshold natively; KADIS ROLE-REVERSED at 924 — suppresses KonJND,
+  rescues CSIQ; crash zone kw(0.15,0.5]).
+- **ATTRIBUTION (E-M6b, width discriminator): most of the CID22 lift is the DATA** — the
+  924-era bigcodec slice lifts 720-width to 0.8837; v3-marginal ≈ +0.001. tbig_924_200k is
+  the one non-row-identical slice (no join key) and drives the coarse-scale shift too.
+- **Seed selection is VALIDATED**: sdr25 (bake_verdict corpus, never trained, not a gate)
+  predicts CID22 at SROCC +0.752 over 35 bakes, rejects every collapsed seed. Ship recipe =
+  train k seeds → select by sdr25/`best_val`. Best selected: `EM4_mask2_kw0.15_s42`
+  CID22 0.8924 + KonJND 0.4286 (`coherent924_selected` on the gauntlet).
+- Corruption ordering breaks at 924 in ALL arms (0.03-0.17 vs 0.214@720); occlusion blamed
+  DET/ART_DEV2 but **masked RETRAIN does not recover (occlusion≠ablation)** — distributional;
+  mitigate with the corruption HEAD (negrich_924), not the dial.
+
+### The coherence resolution (THE steering pivot — build task #67)
+- Mechanism: 924-era data → ~89% basic gradient mass on COARSE-scale MSE → the
+  mass-blended per-pixel fold degrades to 1/8-res → M3 0.10-0.25 while **M2 ≈ 0.99**.
+- Weight-decay remedies FAIL: coupled L2 is neutralized by Adam (AdamW insight); decoupled
+  `--coarse-decay` bites but hits data-preference equilibrium (s3 ~50% across 100× rates).
+  **Keeper: `--coarse-decay 1e-5` = KonJND +0.15, CSIQ +0.07, ~free.** Scale-mass = symptom.
+- **PROVEN architecture (E-M9): per-block gradient attribution M2 = 0.999-1.000 at EVERY
+  block size 16-128px** on the pathological bakes, while the signal-fold M3 inverts at 128px.
+  **Ship design: per-pixel attribution DENSITY (true per-feature integrands; mean-pooled
+  exact — covers the dominant MSE slot; p2/p4 value-weighted) + summed-area table → O(1)
+  arbitrary-rectangle queries** for variable codec partitions (AV1 4-128px, JXL var-DCT,
+  HEVC CTU). The old signal fold becomes visualization-only. Perf bar: build ≤ current
+  diffmap build (same planes, different weighting, +O(N) SAT). jxl's loop is
+  global-iterative (iters+1 full-frame compares) → full-map-per-iter is its contract;
+  region-incremental re-query is for per-block-probe codecs (zenjpeg) — SAT re-query is
+  already O(1), local re-COMPUTE bounded by blur footprint is the later optimization.
+  **Order (user): get it coherent, THEN optimize.**
+
+### Trainer/eval capabilities added this campaign (all on main)
+- **MANDATORY embedded repro**: every new bake carries `zentrain.repro` (inputs w/ sha256 +
+  rows, seed, argv, trainer HEAD, `best_val`) via `zenpredict_bake::append_metadata_utf8`
+  (section-splice, byte/score-identity gated). Embed failure = exit 4. bake_verdict emits
+  `repro` (embedded > .spec.json > null+warning); dashboard badges it.
+- `--coarse-l2-mult` / `--coarse-decay` (decoupled, post-Adam-step; the coupled form is a
+  no-op under Adam — do not use it expecting effect). `ZENSIM_DECAY_DEBUG=1` telemetry.
+- `bake_verdict`: sdr25 corpus; bands + per-codec dial curves + gates + `model` block +
+  bootstrap `srocc_ci` + signed SROCC + `frac_negative` + `train_eq_val` in `--full-json`;
+  `product_composite` = THE ranking composite (dashboard reads, never re-derives).
+- `diffmap_block_coherence`: n_in==924 via the CANONICAL folded-append streaming extractor
+  (extended path would inject untrained-weight noise into the structural-zero block);
+  `ZENSIM_GRAD_MASS=1` gradient-mass diagnostic (region/v2-slot/basic-scale/top-idx);
+  tie-correct midrank Spearman; dropped-mass printed for every layout.
+- `run_full_eval.sh`: `ZENSIM_M3_REUSE=1` (schema re-emits carry M3 — a fulleval re-run is
+  a cheap rescore over stored parquets; only re-measure when bake/parquets/fixtures change).
+
+### Gotchas (bled for; do not re-learn)
+- pq.write_table defaults SNAPPY → the Rust parquet reader has no snap; write eval grids zstd.
+- f32-vs-f64 + clip-saturation traps in parquet key-joins (multiset join on
+  `(source_id, f32(clip(s/100)))`).
+- The JS dashboard template is a RAW Python string: `\'` becomes a literal backslash-quote
+  and kills the whole <script> (blank page). Gate regen on `node --check` + the DOM-shim
+  render harness (both in the pipeline now).
+- pkill/pgrep -f self-match the invoking shell (locally AND over ssh); pgrep name-match
+  truncates comm to 15 chars. Kill by PID; use pgrep -x with the truncated name.
+- Observe-before-load on household nodes (jason 7× incident = a live zensim-720 backfill
+  worker, not a slow box).
+- Trainer-bin globals must be set BEFORE the training call — the best_val relocation
+  silently moved the regularizer setup post-training (caught by the decay-debug counter).
+
 ## ⇒ POST-COMPACT / NEW SESSION: read [`SESSION-RESUME.md`](SESSION-RESUME.md) FIRST
 
 Then return here. `SESSION-RESUME.md` is the canonical entry point —
