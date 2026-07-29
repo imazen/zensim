@@ -162,3 +162,23 @@ parquets incl. f156-371 structural zeros — the extended path would inject real
 iw/masked values into weights that only saw zeros), skips probing the structural-zero
 block, folds v2 as s[372..720], and reports the append block's |s_k| share as a second
 M3 blind-spot line. First measurement: EM1 city/q50 M3 +0.206.
+
+## E-M3a — kw micro-sweep + no-KADIS confirmation (2026-07-28)
+
+| arm | n | CID22 | KonJND | CSIQ | LIVE | corr |
+|---|--:|---|---|--:|--:|--:|
+| **no-KADIS** | **6** | **0.8816 ±0.0016** | **0.398 ±0.077** | 0.39 | 0.67 | 0.035 |
+| kw0.05 | 2 | 0.863 | 0.461 | 0.56 | 0.53 | 0.013 |
+| kw0.1 | 2 | 0.875 | 0.363 | 0.58 | 0.69 | 0.051 |
+| kw0.15 | 2 | 0.868 | 0.390 | 0.77 | 0.78 | 0.060 |
+| kw0.5 (E-M2) | 6 | 0.8825 ±0.0025 | 0.244 | 0.78 | 0.80 | 0.104 |
+
+- **no-KADIS confirmed at n=6: CID22 0.8816±0.0016 + KonJND 0.398** — statistically equal
+  CID22 to kw0.5 with +0.15 KonJND. The v3 block alone carries the near-threshold signal.
+- The KonJND crash sits between kw0.15→0.5; CSIQ recovery needs kw≥0.15 and saturates by
+  kw0.5. No kw wins all axes; kw0.15 is the balanced point (0.868/0.390/0.77).
+- **M3-924 (27-pair) for EM1_924_s13: 0.342, append |s_k| mass 0.7%** — coherence DROPPED
+  vs E-K5-720 (0.58) even though the M3 blind spot (append share) is negligible. The v3
+  features move rank metrics while carrying ~no gradient mass — their effect routes through
+  scaler/interactions. Coherence-regression suspects: fresh bigcodec-924 rows, or append
+  reshaping the basic/v2 weight structure. E-M4 (masked retrain) discriminates.
