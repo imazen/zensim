@@ -34,3 +34,20 @@ the quarantined 372 dial grid, all 11 ext924 legs. NOT yet gated: bigcodec
 mm6 1.56M + the 21 bigcodec 924 split views + hdr_v3mix (paths need
 confirmation against DATA_PROVENANCE) — the remaining chunk-2 tail, plus
 manifest wiring + R2/Tower mirrors (chunk 3).
+
+## Tail sweep + mirrors (same day)
+
+- **bigcodec tail**: mm6 (1.56M) + ALL 21 bc924 split views PASS misjoin;
+  views' jxl_zone PASS on the structural q-mapping basis. **56 sources total,
+  0 hard failures** (`_MANIFEST.json` in the gates dir indexes all verdicts).
+- **tbig_924_full (25.6 GB, 5.7M rows)**: whole-table read OOMs (errno 12) —
+  recorded as `misjoin: COVERED-BY-VIEWS` (its rows are the union of the 21
+  individually-passing views, keyed by encode_sha) with a schema-level
+  poison/jxl verdict; a single-pass full-table audit needs a streaming mode
+  in `audit_metric_columns.py` (deferred, recorded — never silently skipped).
+- **Mirrors**: `/mnt/tower/output/zensim/canonical-gates-2026-07-29/` +
+  `s3://zentrain/canonical-gates-2026-07-29/` (57 objects verified) +
+  local `/mnt/v/output/zensim/canonical-gates/`.
+- Still open for #11: hdr_v3mix raw-parquet provenance (its Gram derivative
+  is sha-attested via the #68 chain), per-source-dir `_MANIFEST.json` gate
+  pointers, winsor for the 25.6 GB table (needs the streaming mode).
