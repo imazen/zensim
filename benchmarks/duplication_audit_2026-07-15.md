@@ -359,6 +359,27 @@ precondition for the gate having any value at all.
 
 ## 6. Still open
 
+> **2026-07-29 status sweep** (commits `36fd508c..26ee566c`; details in
+> `benchmarks/pack_rust_migration_2026-07-29.md` +
+> `benchmarks/key_bake_repro_verification_2026-07-29.md`): **22 scripts
+> retired in one day.** CLOSED since this audit: `pack_and_calibrate.py`
+> (→ `bake_dial_refit pack`, byte-identical 3 ways incl. the shipped
+> packed30k artifact); both "blocked deletions" (`bake_outlier_gate.py` →
+> `gate` with `xmetric_consensus.py` migrated to the canonical Rust
+> forward; `shared_anchor_refit.py` — its claimed importer was STALE,
+> docstring-only); the ENTIRE D bucket (`strip_spline_metadata.py` →
+> `strip` byte-identical ×2 fixtures; `affine_per_sample_alpha.py` — its
+> only consumer was the concluded EXP-CROSS-CODEC-V3 harness, both
+> deleted, no speculative Rust port for a zero-consumer capability;
+> `convert_features_bin.py` + `bake_to_znpr.py` dead); plus 13 concluded
+> one-shot stat scripts (g5 trio, cvvdp probes [falsified campaign],
+> A_Phone pair, pre-QAT v47 pair, V0_2/3 pair, lr-retune pair).
+> STILL OPEN: the torch-trainer cluster below (`blend_lib.py` keystone —
+> unchanged), `linear_projections` (BHdr fit chain → task #68 with a
+> concrete lasso-CD + npz-reader port plan), and the two Rust `spearman`
+> stragglers in zensim-regress/zensim-experimental (the published-crate
+> dep trade — still a trade to raise, not sneak in).
+
 - **`pack_and_calibrate.py` — PARTLY closed.** Its private
   `fit_spline_knots` is gone: it was AST-identical to
   `linear_projections_2026-07-03.py`'s (proved by comparing parsed bodies, not
