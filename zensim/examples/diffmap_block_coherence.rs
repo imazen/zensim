@@ -242,18 +242,19 @@ fn run_bake_mode(
     let n_in = zenpredict::Model::from_bytes(&bytes)
         .expect("parse bake header")
         .n_inputs();
-    // M3 supports the v1 layouts (n_in ≤ 372) and the combined v1+v2 layout
-    // (720 = 372 v1 ++ 348 v2). Any other width — e.g. an ext504 bake
-    // (156 basic ++ 348 v2) — puts the v2 block at a different offset, so the
-    // v2 fold and the f156-371 dropped-mass are undefined for it. Skip cleanly
-    // rather than panic (the v2 fold previously indexed `s[372..]` on a 504-wide
-    // gradient and crashed at feature_v2.rs; run_full_eval leaves M3 null).
-    if n_in > 372 && n_in != 720 {
+    // M3 supports the v1 layouts (n_in ≤ 372), the combined v1+v2 layout
+    // (720 = 372 v1 ++ 348 v2), and the folded-append 924 regime (f0-155
+    // folded basic, f156-371 STRUCTURAL ZEROS, f372-719 v2, f720-923 append).
+    // Any other width — e.g. an ext504 bake (156 basic ++ 348 v2) — puts the
+    // v2 block at a different offset, so the fold and the dropped-mass are
+    // undefined for it. Skip cleanly rather than panic.
+    if n_in > 372 && n_in != 720 && n_in != 924 {
         println!(
-            "  M3 skipped: unsupported bake layout (n_inputs={n_in}; the diffmap fold supports n_inputs ≤ 372 or exactly 720)"
+            "  M3 skipped: unsupported bake layout (n_inputs={n_in}; the diffmap fold supports n_inputs ≤ 372, 720, or 924)"
         );
         return;
     }
+    let folded924 = n_in == 924;
     BAKE_BYTES.set(bytes).expect("bake bytes set once");
 
     // Feature pipeline sized to the bake: basic-only bakes (n_in ≤ 156) skip the
@@ -273,22 +274,42 @@ fn run_bake_mode(
     let z = Zensim::new(profile);
 
     let rs = RgbSlice::new(rpx, w, h);
-    let base = z
-        .compute_extended_features(&rs, &RgbSlice::new(dpx, w, h))
-        .expect("base features");
-    // `mut` used only by the v2 concat below (feature-regime-v2 / >372 bake).
-    #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
-    let mut base_feats = base.features().to_vec();
-    // Combined append-only bakes (n_in > 372 = frozen v1-372 ++ v2) need the
-    // v2 block concatenated — same dual-compute the extended extractor does.
-    // Requires the `feature-regime-v2` build feature (2026-07-19).
+    // Feature extraction closure, regime-matched to the bake:
+    //  - 924 (folded+append): the CANONICAL streaming extractor — bit-identical
+    //    to the ext924 parquets, INCLUDING the f156-371 structural zeros. Using
+    //    the extended path here would feed real iw/masked values into weights
+    //    that only ever saw zeros in training (noise injection, wrong regime).
+    //  - otherwise: extended (+v2 concat for a >372 combined bake).
     #[cfg(feature = "feature-regime-v2")]
-    if n_in > base_feats.len() {
-        let v2 = z
-            .compute_v2_features(&rs, &RgbSlice::new(dpx, w, h))
-            .expect("v2 features (build with --features feature-regime-v2 for combined bakes)");
-        base_feats.extend_from_slice(v2.features());
-    }
+    let mut v2_scratch = zensim::feature_v2::V2Scratch::new();
+    let mut feats_of = |dist: &[[u8; 3]]| -> Vec<f64> {
+        let ds = RgbSlice::new(dist, w, h);
+        #[cfg(feature = "feature-regime-v2")]
+        if folded924 {
+            return z
+                .compute_folded720_append_features_streaming(
+                    &rs,
+                    &ds,
+                    zensim::feature_v2::V2NewFeatureToggles::default(),
+                    &mut v2_scratch,
+                )
+                .expect("folded-append 924 features")
+                .features()
+                .to_vec();
+        }
+        let base = z.compute_extended_features(&rs, &ds).expect("base features");
+        #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
+        let mut feats = base.features().to_vec();
+        #[cfg(feature = "feature-regime-v2")]
+        if n_in > feats.len() {
+            let v2 = z
+                .compute_v2_features(&rs, &ds)
+                .expect("v2 features (build with --features feature-regime-v2 for combined bakes)");
+            feats.extend_from_slice(v2.features());
+        }
+        feats
+    };
+    let base_feats = feats_of(dpx);
     assert!(
         base_feats.len() >= n_in,
         "bake wants {n_in} inputs, extractor produced {} — for a >372 combined \
@@ -306,6 +327,12 @@ fn run_bake_mode(
     let mut s = vec![0f64; n_in];
     let mut probe = base_feats.clone();
     for k in 0..n_in {
+        // Folded-924: f156-371 are STRUCTURAL ZEROS in this regime — never
+        // probed (the deployed runtime cannot vary them; probing them measures
+        // untrained-weight noise, not the model).
+        if folded924 && (156..372).contains(&k) {
+            continue;
+        }
         let eps = (base_feats[k].abs() * 1e-3).max(1e-5);
         probe[k] = base_feats[k] + eps;
         let up = score(&probe);
@@ -357,6 +384,16 @@ fn run_bake_mode(
                 ""
             }
         );
+        // Folded-924: the append block (f720-923) has no per-pixel fold yet —
+        // its gradient share is a SECOND blind spot for M3, reported so a low
+        // M3 on a 924 bake is read against append reliance, not miscoherence.
+        if folded924 {
+            let app: f64 = s[720..924].iter().map(|v| v.abs()).sum();
+            println!(
+                "  not-yet-foldable append block (f720-923) raw-|s_k| mass: {:.1}%  (no per-pixel fold for the append kernels yet; M3 is blind to it)",
+                100.0 * app / total
+            );
+        }
     }
     let v2_grad: Option<Vec<f64>> = if n_in > 372 {
         println!(
@@ -367,7 +404,7 @@ fn run_bake_mode(
         // makes the map high where refining raises the score (the "refine-here"
         // polarity M1/M3 share). compute_v2_diffmap folds Σ w·M with whatever
         // weights it's given; the steering weight is `-∂score/∂f`.
-        Some(s[372..n_in].iter().map(|&x| -x).collect::<Vec<f64>>())
+        Some(s[372..720].iter().map(|&x| -x).collect::<Vec<f64>>())
     } else {
         None
     };
@@ -464,21 +501,9 @@ fn run_bake_mode(
                     scratch[y * w + x] = rpx[y * w + x];
                 }
             }
-            let rr = z
-                .compute_extended_features(&rs, &RgbSlice::new(&scratch, w, h))
-                .expect("refined features");
-            // `mut` used only by the v2 concat below (feature-regime-v2).
-            #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
-            let mut rfeats = rr.features().to_vec();
-            // Concat the refined v2 block for a >372 combined bake — same dual-
-            // compute as base_feats, so `score`/`s_k` see the full n_in vector.
-            #[cfg(feature = "feature-regime-v2")]
-            if n_in > rfeats.len() {
-                let v2 = z
-                    .compute_v2_features(&rs, &RgbSlice::new(&scratch, w, h))
-                    .expect("refined v2 features");
-                rfeats.extend_from_slice(v2.features());
-            }
+            // Regime-matched refined features (extended+v2 concat, or the
+            // canonical folded-append 924 path) — same closure as base_feats.
+            let rfeats = feats_of(&scratch);
             delta_s[b] = score(&rfeats) - base_score;
             lin_pred[b] = (0..n_in).map(|k| s[k] * (rfeats[k] - base_feats[k])).sum();
             for y in y0..y1 {

@@ -137,3 +137,28 @@ append block itself, or its interaction with the KADIS analytic mass?
 2. **CORRECTION: E-M1's KonJND 0.405 was a seed draw** (band 0.244±0.097). Same single-seed trap as fold40's "+0.010"; the doc's E-M1 claim is superseded by this band.
 3. **Role reversal at 924**: v3 features natively carry near-threshold signal (no-KADIS KonJND 0.404) and KADIS *suppresses* it (kw0.25→0.244) while rescuing classic-FR (CSIQ 0.48→0.82). At 720 KADIS was the KonJND source; at 924 it's the generalization stabilizer.
 4. **Corruption ordering broken in ALL 924 arms** (0.06–0.12 vs 0.214 @720) — intrinsic to the append block. Next: per-family attribution + negrich-924 head.
+
+## E-M3b — corruption-break ATTRIBUTION via occlusion (2026-07-28)
+
+Per-family occlusion probe on EM1_924_s13: mask each of the 17 append slot-families
+(12 cols each: 4 scales × 3 ch) to its column mean in `corruption_grid_924col`,
+rescore. Baseline pass_q20 0.0595. **DET_DEV2 Δ+0.149 and ART_DEV2 Δ+0.109 are the
+breakers** — masking DET_DEV2 alone restores ~0.21 ≈ the 720 level; the other 15
+families are ≤±0.02 (neutral). Mechanism consistent with detail/artifact-deviation
+aggregates reading corruption pixels as detail gain. Probe: `~/tmp` script recorded
+here; 18 evals, ~6 min (occlusion = trained-model sensitivity, not retrain).
+Gotcha for the record: pq.write_table defaults to SNAPPY — the Rust parquet reader
+is compiled without snap; write eval grids with compression="zstd".
+
+**Mask mechanism found**: `--feature-transform winsor_p99:IDX:0,0` clamps a feature
+to zero through the EXISTING transform flag = deprecate-by-mask with no data rewrite
+and no new trainer surface. E-M4 (queued): retrain fold924 with DET_DEV2+ART_DEV2
+masked (24 flags) × 3 seeds + DET-only × 2 — recover corruption without losing the
+CID22/KonJND gains.
+
+**M3 extended to 924** (this commit): the example accepts n_in==924, extracts via the
+CANONICAL `compute_folded720_append_features_streaming` (bit-identical to the ext924
+parquets incl. f156-371 structural zeros — the extended path would inject real
+iw/masked values into weights that only saw zeros), skips probing the structural-zero
+block, folds v2 as s[372..720], and reports the append block's |s_k| share as a second
+M3 blind-spot line. First measurement: EM1 city/q50 M3 +0.206.
