@@ -109,6 +109,7 @@ use crate::source::ImageSource;
 use crate::streaming::{
     MultiScaleRef, PrecomputedReference, convert_source_to_xyb, downscale_3_planes,
 };
+use archmage::autoversion;
 
 /// Production band height for the V-blur running-sum chains (must equal
 /// `streaming::STRIP_INNER` so the per-band accumulator init points — and
@@ -1148,6 +1149,85 @@ mod tests {
         }
     }
 
+    /// C3a golden gate 1: the fused compare's SCORE is bit-identical to the
+    /// fold-diffmap path's score (same pipeline, same stats, same
+    /// apply_mlp_scoring) on a bake profile.
+    #[test]
+    fn fused_score_bit_matches_diffmap_path() {
+        let (w, h) = (150, 170);
+        let (src, dst) = test_pair(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let fold = z
+            .compute_with_ref_and_diffmap(&pre, &ds, crate::DiffmapWeighting::Trained)
+            .unwrap();
+        let s = vec![-1.0f64; 156];
+        let (res, attr) = z
+            .compute_with_ref_score_and_attribution(&pre, &ds, &s)
+            .unwrap();
+        assert_eq!(
+            res.score().to_bits(),
+            fold.score().to_bits(),
+            "fused score {} != fold-path score {}",
+            res.score(),
+            fold.score()
+        );
+        assert_eq!(attr.width(), w);
+        assert_eq!(attr.height(), h);
+        assert!(attr.density().iter().all(|v| v.is_finite()));
+    }
+
+    /// C3a golden gate 2: the fused attribution equals the standalone f64
+    /// density to f32-combine precision (identical retained planes by the
+    /// C1 banding-parity construction; the deltas are the f32 kernel, the
+    /// f32 canvas, and stats-derived vs sum-derived coefficients).
+    #[test]
+    fn fused_matches_standalone_attribution() {
+        let (w, h) = (150, 170);
+        let (src, dst) = test_pair(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let mut s = vec![0.0f64; 156];
+        for (k, v) in s.iter_mut().enumerate() {
+            // Mixed-sign, all-slot gradient exercising every integrand.
+            *v = if k % 3 == 0 { -1.0 } else { -0.25 } * (1.0 + (k % 7) as f64 * 0.1);
+        }
+        let std_attr = z.compute_attribution_density(&rs, &ds, &s).unwrap();
+        let (_, fused_attr) = z
+            .compute_with_ref_score_and_attribution(&pre, &ds, &s)
+            .unwrap();
+        let max_abs = std_attr
+            .density()
+            .iter()
+            .fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(max_abs > 0.0);
+        for (i, (a, b)) in fused_attr
+            .density()
+            .iter()
+            .zip(std_attr.density().iter())
+            .enumerate()
+        {
+            assert!(
+                (a - b).abs() <= 3e-5 * max_abs + 1e-9,
+                "pixel {i}: fused {a} vs standalone {b} (max_abs {max_abs})"
+            );
+        }
+        // Block sums through the SAT agree at the same class.
+        let bs_f = fused_attr.block_sums(16);
+        let bs_s = std_attr.block_sums(16);
+        let bmax = bs_s.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        for (i, (a, b)) in bs_f.iter().zip(bs_s.iter()).enumerate() {
+            assert!(
+                (a - b).abs() <= 1e-4 * bmax.max(1e-12),
+                "block {i}: fused {a} vs standalone {b}"
+            );
+        }
+    }
+
     /// The density must be finite everywhere on adversarial flat/extreme
     /// content (guards the pooled-scalar divisions).
     #[test]
@@ -1175,5 +1255,376 @@ mod tests {
                 "non-finite density value"
             );
         }
+    }
+}
+
+// ============================================================================
+// C3a: the FUSED compare — scalar score + attribution map from ONE pipeline
+// ============================================================================
+
+/// Coefficient pack for the f32 fused combine, ordered
+/// `[sd, sd4, sd2, art, art4, art2, det, det4, det2, mse, hfe, hfm]`.
+fn coeffs_to_f32(co: &SlotCoeffs) -> [f32; 12] {
+    [
+        co.c_sd as f32,
+        co.c_sd4 as f32,
+        co.c_sd2 as f32,
+        co.c_art as f32,
+        co.c_art4 as f32,
+        co.c_art2 as f32,
+        co.c_det as f32,
+        co.c_det4 as f32,
+        co.c_det2 as f32,
+        co.c_mse as f32,
+        co.c_hfe as f32,
+        co.c_hfm as f32,
+    ]
+}
+
+/// f32 fused-combine kernel (C3a perf lever): the same integrand formulas as
+/// [`basic_combine_channel`], computed in f32 and auto-vectorized per ISA.
+/// Precision class: the density-sum identities move from the f64 path's
+/// 1e-9/1e-6 to ~1e-5 relative (measured; the standalone f64 path and its
+/// strict tests are unchanged — this kernel serves the fused entry only).
+#[autoversion]
+#[allow(clippy::too_many_arguments)]
+fn fused_combine_plane_f32(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    co: [f32; 12],
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    let n = id_plane.len();
+    for i in 0..n {
+        let sdv = sd[i];
+        let sv = src[i];
+        let dv = dst[i];
+        let m1 = mu1[i];
+        let m2 = mu2[i];
+        let d1 = (sv - m1).abs();
+        let d2 = (dv - m2).abs();
+        let ed = (1.0 + d2) / (1.0 + d1) - 1.0;
+        let art = ed.max(0.0);
+        let det = (-ed).max(0.0);
+        let sd2 = sdv * sdv;
+        let a2 = art * art;
+        let dt2 = det * det;
+        let pd = sv - dv;
+        let e_hf = d1 * d1 - d2 * d2;
+        let win_term = co[0] * sdv + co[1] * (sd2 * sd2) + co[2] * sd2;
+        let res_term = co[3] * art
+            + co[4] * (a2 * a2)
+            + co[5] * a2
+            + co[6] * det
+            + co[7] * (dt2 * dt2)
+            + co[8] * dt2
+            + co[10] * e_hf
+            + co[11] * (d1 - d2);
+        let px_term = co[9] * (pd * pd);
+        id_plane[i] += px_term + res_term;
+        win_plane[i] += win_term;
+    }
+}
+
+/// `Σ (src−mu1)²` and `Σ |src−mu1|` over a plane — the two reference-side
+/// pooled sums the hf coefficients need that `ScaleStats` does not carry.
+#[autoversion]
+fn hf_src_sums(src: &[f32], mu1: &[f32]) -> (f64, f64) {
+    let mut sq = 0.0f64;
+    let mut ab = 0.0f64;
+    for i in 0..src.len().min(mu1.len()) {
+        let r = src[i] - mu1[i];
+        sq += (r * r) as f64;
+        ab += r.abs() as f64;
+    }
+    (sq, ab)
+}
+
+/// f32 twin of [`upsample_add_sum_preserving`] for the fused canvas.
+fn upsample_add_sum_preserving_f32(
+    scale_plane: &[f32],
+    sw: usize,
+    sh: usize,
+    canvas: &mut [f32],
+    cw: usize,
+    ch: usize,
+    factor: usize,
+) {
+    if factor == 1 {
+        debug_assert_eq!(sw, cw);
+        for (c, &v) in canvas.iter_mut().zip(scale_plane.iter()) {
+            *c += v;
+        }
+        return;
+    }
+    let inv_area = 1.0 / ((factor * factor) as f32);
+    for sy in 0..sh {
+        let y0 = sy * factor;
+        let y1 = (y0 + factor).min(ch);
+        let src_row = sy * sw;
+        for sx in 0..sw {
+            let v = scale_plane[src_row + sx] * inv_area;
+            let x0 = sx * factor;
+            let x1 = (x0 + factor).min(cw);
+            for row in canvas[y0 * cw..].chunks_mut(cw).take(y1.saturating_sub(y0)) {
+                for slot in &mut row[x0..x1] {
+                    *slot += v;
+                }
+            }
+        }
+    }
+}
+
+impl SlotCoeffs {
+    /// Derive the combine coefficients from a finalized [`ScaleStats`]
+    /// (the fused path — the pooled roots are inverted back to raw-moment
+    /// means: `M4 = f4⁴`, `M2 = f2²`) plus the two reference-side hf sums
+    /// the stats do not carry. Matches [`SlotCoeffs::derive`]'s math; the
+    /// clamp-side gating for the hf ratio slots reads the stats' CLAMPED
+    /// feature values directly (`f10 > 0` ⇔ loss side active, etc.).
+    fn from_scale_stats(
+        s: &[f64],
+        base_k: usize,
+        stats: &crate::metric::ScaleStats,
+        c: usize,
+        n_f: f64,
+        hf_sq_src_sum: f64,
+        hf_abs_src_sum: f64,
+    ) -> Self {
+        let g = |slot: usize| s.get(base_k + slot).copied().unwrap_or(0.0);
+        let inv_n = 1.0 / n_f;
+        let p_coeff = |sk: f64, m: f64, p: f64| -> f64 {
+            if m > 0.0 {
+                -sk * inv_n * (1.0 / p) * m.powf((1.0 - p) / p)
+            } else {
+                0.0
+            }
+        };
+        let m4_ssim = stats.ssim[c * 2 + 1].powi(4);
+        let m2_ssim = stats.ssim_2nd[c].powi(2);
+        let m4_art = stats.edge[c * 4 + 1].powi(4);
+        let m2_art = stats.edge_2nd[c * 2].powi(2);
+        let m4_det = stats.edge[c * 4 + 3].powi(4);
+        let m2_det = stats.edge_2nd[c * 2 + 1].powi(2);
+        let c_hfe = if hf_sq_src_sum > 1e-10 * n_f {
+            if stats.hf_energy_loss[c] > 0.0 {
+                -g(10) / hf_sq_src_sum
+            } else if stats.hf_energy_gain[c] > 0.0 {
+                g(12) / hf_sq_src_sum
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let c_hfm = if hf_abs_src_sum > 1e-10 * n_f && stats.hf_mag_loss[c] > 0.0 {
+            -g(11) / hf_abs_src_sum
+        } else {
+            0.0
+        };
+        Self {
+            c_sd: -g(0) * inv_n,
+            c_sd4: p_coeff(g(1), m4_ssim, 4.0),
+            c_sd2: p_coeff(g(2), m2_ssim, 2.0),
+            c_art: -g(3) * inv_n,
+            c_art4: p_coeff(g(4), m4_art, 4.0),
+            c_art2: p_coeff(g(5), m2_art, 2.0),
+            c_det: -g(6) * inv_n,
+            c_det4: p_coeff(g(7), m4_det, 4.0),
+            c_det2: p_coeff(g(8), m2_det, 2.0),
+            c_mse: -g(9) * inv_n,
+            c_hfe,
+            c_hfm,
+        }
+    }
+}
+
+impl crate::metric::Zensim {
+    /// **The fused compare (task #67 C3a)**: scalar score + attribution
+    /// steering map from ONE plane pipeline — the codec-loop call shape.
+    ///
+    /// Runs the SAME per-scale walk as
+    /// [`compute_with_ref_and_diffmap`](Self::compute_with_ref_and_diffmap)
+    /// (the score is bit-identical to that path's), retaining each scale's
+    /// SSIM-error and mu planes and deriving the BASIC-block (f0-155)
+    /// attribution density from them with no additional blur work. The
+    /// marginal cost over a score-only compare is the f32 combine + spread
+    /// + SAT.
+    ///
+    /// `s` is the caller-supplied model gradient (`∂score/∂f_k`, basic
+    /// layout; entries past 155 ignored). The density uses the C2b-final
+    /// allocation (window-only spread) and the f32 fused-combine kernel —
+    /// vs the standalone f64 [`compute_attribution_density`]
+    /// (Self::compute_attribution_density) the density agrees to f32
+    /// recompute precision (~2e-5 relative, gated by
+    /// `fused_matches_standalone_attribution`), while the standalone path
+    /// and its strict f64 identities are unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Besides the usual pair validations: the profile must compute the
+    /// full basic feature set on every channel (an MLP/bake profile —
+    /// `compute_all_features` — or `extended_features`), and
+    /// `blur_passes == 1`; otherwise
+    /// [`ZensimError::ModelForwardFailed`] with a static reason.
+    pub fn compute_with_ref_score_and_attribution(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+    ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
+        let params = self.profile().params();
+        if distorted.width() == 0 || distorted.height() == 0 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        validate_ref_match(precomputed, distorted)?;
+        check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
+        let config = config_from_params(params, self.parallel());
+        if config.blur_passes != 1 {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "fused attribution requires blur_passes == 1 (all shipped profiles)",
+            });
+        }
+        if !(config.compute_all_features || config.extended_features) {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "fused attribution requires a profile computing all basic features \
+                         (an MLP/bake profile or extended_features)",
+            });
+        }
+
+        let width = distorted.width();
+        let height = distorted.height();
+        let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
+
+        let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
+        let t_all = std::time::Instant::now();
+        let combine_ms = std::cell::Cell::new(0.0f64);
+        let mut canvas = vec![0.0f32; comp_pw * comp_h];
+        let mut id_plane = vec![0.0f32; comp_pw * comp_h];
+        let mut win_plane = vec![0.0f32; comp_pw * comp_h];
+        let mut spread_tmp: Vec<f32> = Vec::new();
+
+        let on_scale = |scale: usize,
+                        stats: &crate::metric::ScaleStats,
+                        src_planes: [&[f32]; 3],
+                        dst_planes: [&[f32]; 3],
+                        ret: &crate::streaming::AttrScaleRetention,
+                        sw: usize,
+                        sh: usize| {
+            let t_c = std::time::Instant::now();
+            let n = sw * sh;
+            let n_f = n as f64;
+            id_plane[..n].fill(0.0);
+            win_plane[..n].fill(0.0);
+            let co32: [[f32; 12]; 3] = core::array::from_fn(|c| {
+                let (hf_sq, hf_ab) = hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n]);
+                let base_k = scale * FPC * 3 + c * FPC;
+                coeffs_to_f32(&SlotCoeffs::from_scale_stats(
+                    s, base_k, stats, c, n_f, hf_sq, hf_ab,
+                ))
+            });
+            // Row-banded parallel combine (disjoint id/win rows per band).
+            let run_band = |band: usize, idc: &mut [f32], winc: &mut [f32]| {
+                let off = band * 64 * sw;
+                let len = idc.len();
+                for c in 0..3 {
+                    fused_combine_plane_f32(
+                        &ret.sd[c][off..off + len],
+                        &src_planes[c][off..off + len],
+                        &dst_planes[c][off..off + len],
+                        &ret.mu1[c][off..off + len],
+                        &ret.mu2[c][off..off + len],
+                        co32[c],
+                        idc,
+                        winc,
+                    );
+                }
+            };
+            #[cfg(feature = "threads")]
+            let banded = if config.allow_multithreading && sh > 64 {
+                use rayon::prelude::*;
+                id_plane[..n]
+                    .par_chunks_mut(64 * sw)
+                    .zip(win_plane[..n].par_chunks_mut(64 * sw))
+                    .enumerate()
+                    .for_each(|(band, (idc, winc))| run_band(band, idc, winc));
+                true
+            } else {
+                false
+            };
+            #[cfg(not(feature = "threads"))]
+            let banded = false;
+            if !banded {
+                run_band(0, &mut id_plane[..n], &mut win_plane[..n]);
+            }
+            // Window-class spread (C2b-final allocation), f32 fast path.
+            crate::blur::box_spread_sum_preserving_f32(
+                &mut win_plane[..n],
+                sw,
+                sh,
+                config.blur_radius,
+                &mut spread_tmp,
+            );
+            for (idp, wv) in id_plane[..n].iter_mut().zip(win_plane[..n].iter()) {
+                *idp += *wv;
+            }
+            upsample_add_sum_preserving_f32(
+                &id_plane[..n],
+                sw,
+                sh,
+                &mut canvas,
+                comp_pw,
+                comp_h,
+                1usize << scale,
+            );
+            combine_ms.set(combine_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
+        };
+
+        let result = crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes(
+            precomputed,
+            distorted,
+            &config,
+            params.weights,
+            on_scale,
+        );
+        let mut result = result.with_profile(self.profile());
+        // Same real-scoring step as `compute_with_ref_and_diffmap` — the
+        // scalar golden gate (`fused_score_bit_matches_diffmap_path`) holds
+        // this path bit-identical to the fold-diffmap call's score.
+        crate::metric::apply_mlp_scoring_with_codec(
+            &mut result,
+            params,
+            width as u32,
+            height as u32,
+            None,
+        )?;
+
+        let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
+        let t_sat0 = std::time::Instant::now();
+        let trimmed = if comp_pw == width && comp_h == height {
+            canvas
+        } else {
+            let mut out = Vec::with_capacity(width * height);
+            for y in 0..height.min(comp_h) {
+                out.extend_from_slice(&canvas[y * comp_pw..y * comp_pw + width.min(comp_pw)]);
+            }
+            out
+        };
+        let attr = AttributionResult::from_density(trimmed, width, height);
+        if perf_log {
+            eprintln!(
+                "ATTRPERF fused: pipeline {:.1} ms (combine/spread/upsample {:.1} ms → retention+stats {:.1} ms) | trim+SAT {:.1} ms",
+                t_pipe,
+                combine_ms.get(),
+                t_pipe - combine_ms.get(),
+                t_sat0.elapsed().as_secs_f64() * 1e3,
+            );
+        }
+        Ok((result, attr))
     }
 }

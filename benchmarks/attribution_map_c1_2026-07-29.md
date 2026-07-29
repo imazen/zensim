@@ -331,3 +331,88 @@ single-thread per the C0 gate doc). Remaining levers, with honest estimates:
   structurally wrong (zero net mass).
 - The remaining K720 fine-block gap is reclassified from "blur bleed
   (hypothesis)" to **finite-removal floor (measured)**.
+
+---
+
+# C3a — the FUSED compare: score + steering map from one pipeline (2026-07-29)
+
+Tests: 262 passed / 0 failed. 8-cell gate rerun at the final fused state:
+**IDENTICAL to C2b-final to 4 decimals in all 8 cells** (the standalone path
+is untouched; fusion is additive). Logs: `~/tmp/attrmap-c1/gate_matrix_c3a.log`.
+
+## What shipped
+
+- **`Zensim::compute_with_ref_score_and_attribution(pre, dist, s)`**
+  (`custom-profiles`) → `(ZensimResult, AttributionResult)` — the codec-loop
+  call shape for the shipped 372-class profiles (requires a profile that
+  computes the full basic set: an MLP/bake profile or `extended_features`;
+  `blur_passes == 1`). One plane pipeline: the production per-scale walk
+  retains each (scale, channel)'s SSIM-error + mu planes IN PLACE
+  (band-aligned pre-split slices through the parallel bands — no per-band
+  allocation, no concatenation), derives the basic-density coefficients from
+  the scalar's own `ScaleStats` (+ two reference-side hf sums the stats
+  don't carry), and combines with a row-band-parallel `#[autoversion]` f32
+  kernel + f32 sum-preserving spread + f32 upsample + f64 SAT.
+- Retention plumbing (`AttrScaleRetention`, additive `Option` params through
+  `process_scale_bands_into_accum` / `process_strip_channel`) is `None` on
+  every pre-existing caller — byte-identical behavior (suite-verified).
+- `examples/fused_compare_bench.rs` — the four-number perf harness.
+
+## Golden gates (fused vs unfused)
+
+- **Score: BIT-identical** to `compute_with_ref_and_diffmap`'s score
+  (`fused_score_bit_matches_diffmap_path` — same pipeline, same stats, same
+  `apply_mlp_scoring`). The plain `compute_with_ref`/fold paths are
+  untouched code (retention `None`).
+- **Attribution vs the standalone f64 path**: agrees to the f32-combine
+  class (`fused_matches_standalone_attribution`: per-pixel ≤ 3e-5·max|D|,
+  16-px block sums ≤ 1e-4 rel) — the standalone path and its strict f64
+  1e-9 identities are unchanged.
+
+## Perf (codec-loop shape: reference precomputed once, medians of 15-21)
+
+| size | scalar-only | fold (score+fold-map) | FUSED (score+attr map) | marginal map | marginal fold | ratio |
+|---|--:|--:|--:|--:|--:|--:|
+| 576² | 5.8 ms | 7.4 ms | **14.8 ms** | 9.0 ms | 1.6 ms | **5.7×** |
+| 1152² | 13.3 ms | 26.2 ms | **41.9 ms** | 28.6 ms | 12.9 ms | **2.2×** |
+
+(1152² fixture: 2×2 montage of city/dog/girl/city + IM q50 JPEG —
+`~/tmp/attrmap-c1/fixtures/`, regenerable from the doc'd command.)
+
+Levers landed inside the fusion: in-place band-sliced retention (killed the
+alloc/concat churn: 1152² marginal 60.3 → 29 ms), f32 `#[autoversion]`
+combine + row-band rayon + f32 spread (576² marginal 14.7 → 9.0 ms).
+Context against the pre-fusion state: the standalone basic density was
+36.8 ms at 576² — the fused call now delivers **score + map in 14.8 ms
+total**, 2.5× less than the old map alone.
+
+**TARGET (marginal ≤ 1.1× the fold's marginal): NOT met — measured floor
+5.7× @576² / 2.2× @1152².** The fold's marginal is nearly free because its
+per-pixel fold runs INSIDE the strip kernels on cache-hot bands and needs no
+pooled scalars; the attribution combine structurally needs post-scale pooled
+scalars (the C1 ordering problem), so it pays retention traffic + a separate
+combine pass. Remaining levers, honest estimates (per-section timing
+`ZENSIM_ATTR_PERF=1`: 1152² = retention ~8-11 ms + combine block ~18 ms
+(≈6 ms of which is the hf pre-pass) + SAT 1.7 ms):
+
+1. **Reference-side hf-sum caching** (`Σ(src−mu1)²`, `Σ|src−mu1|` are
+   distortion-independent — computable once per `PrecomputedReference`):
+   −5-6 ms @1152² → ratio ~1.8×. API-additive; next chunk.
+2. **In-kernel fold for the MEAN slots** (coefficients `−s_k/N` are known
+   up front; only p-pools + hf need post-scale scalars): moves the dominant
+   MSE/mean mass to fold-marginal cost; the deferred slots then need only
+   sd-plane retention. Est. ratio ~1.3-1.5×; deeper kernel surgery.
+3. **Stale-scalar single-pass** (codec-loop iteration n uses iteration
+   n−1's pooled scalars → everything folds in-kernel): the true ≤1.1×
+   endpoint; changes steering semantics between iterations — needs its own
+   coherence gate; C3b candidate.
+
+## Shape (b) — 924-MLP class: measured, not fused (per constraint)
+
+The 924 scalar's planes live inside `compute_folded720_append_features_streaming`
+(another session's domain; "do not restructure the extractor"). Fusing would
+need the same retention hooks inside that walk. Measured today at 576²: 924
+scalar features ≈ the extractor call, + standalone full density 95-98 ms
+(C2b). The v1-fused machinery here covers the basic block's share when a
+924 loop uses a v1-class steering profile; full 924 fusion = extractor-side
+retention hooks, listed as the follow-up requiring that session's sign-off.

@@ -147,6 +147,10 @@ check-cfg = ['cfg(feature, values("training", "imgref", "classification", "zenpi
 version = "0.1.8"
 
 [[example]]
+name = "fused_compare_bench"
+required-features = ["custom-profiles"]
+
+[[example]]
 name = "v2_bounds_smoke"
 required-features = ["feature-regime-v2"]
 

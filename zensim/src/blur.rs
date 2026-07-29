@@ -3771,6 +3771,70 @@ pub(crate) fn box_spread_sum_preserving(
     plane.copy_from_slice(&out);
 }
 
+/// f32 twin of [`box_spread_sum_preserving`] for the fused attribution
+/// path (C3a): same clipped-window per-source-normalized convention, f32
+/// storage with f64 row accumulators in the vertical slide. Sum
+/// preservation holds to f32 rounding — the fused path's documented
+/// precision class.
+pub(crate) fn box_spread_sum_preserving_f32(
+    plane: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    tmp: &mut Vec<f32>,
+) {
+    if r == 0 || width == 0 || height == 0 {
+        return;
+    }
+    tmp.clear();
+    tmp.resize(width + 1, 0.0);
+    for row in plane.chunks_mut(width) {
+        let mut run = 0.0f32;
+        for (x, v) in row.iter().enumerate() {
+            let len = ((x + r).min(width - 1) - x.saturating_sub(r) + 1) as f32;
+            run += *v / len;
+            tmp[x + 1] = run;
+        }
+        for (j, out) in row.iter_mut().enumerate() {
+            let lo = j.saturating_sub(r);
+            let hi = (j + r).min(width - 1);
+            *out = tmp[hi + 1] - tmp[lo];
+        }
+    }
+    for y in 0..height {
+        let len = ((y + r).min(height - 1) - y.saturating_sub(r) + 1) as f32;
+        let inv = 1.0 / len;
+        for v in &mut plane[y * width..(y + 1) * width] {
+            *v *= inv;
+        }
+    }
+    tmp.clear();
+    tmp.resize(width, 0.0);
+    let mut out = vec![0.0f32; width * height];
+    for y in 0..=r.min(height - 1) {
+        for (t, v) in tmp.iter_mut().zip(&plane[y * width..(y + 1) * width]) {
+            *t += *v;
+        }
+    }
+    out[..width].copy_from_slice(tmp);
+    for j in 1..height {
+        let add = j + r;
+        if add < height {
+            for (t, v) in tmp.iter_mut().zip(&plane[add * width..(add + 1) * width]) {
+                *t += *v;
+            }
+        }
+        if j > r {
+            let rem = j - r - 1;
+            for (t, v) in tmp.iter_mut().zip(&plane[rem * width..(rem + 1) * width]) {
+                *t -= *v;
+            }
+        }
+        out[j * width..(j + 1) * width].copy_from_slice(tmp);
+    }
+    plane.copy_from_slice(&out);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

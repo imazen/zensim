@@ -145,6 +145,13 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   Perf: single-sweep + channel/row-band rayon → full 95-98ms, basic ~38ms vs fold 11-12ms
   (8.3×/3.3×; ≤1.1× structurally needs fusion into a shared 924 compare — levers + estimates
   in the C2b doc section). `blur::box_spread_sum_preserving` = the exact-sum spread primitive.
+- **C3a SHIPPED (2026-07-29): the FUSED compare** — `Zensim::compute_with_ref_score_and_
+  attribution` = score + steering map from ONE pipeline (v1/372 class; score BIT-identical
+  to the fold path, gated; standalone paths untouched, 8-cell identical). 576²: score+map
+  **14.8ms total** (the old standalone map alone was 36.8). Marginal-map bar (≤1.1× fold's
+  marginal) missed at floor 5.7×@576/2.2×@1152 — the fold folds in-kernel with no pooled
+  scalars; next levers ranked in the C3a doc (ref-side hf cache → in-kernel mean slots →
+  stale-scalar single-pass). 924 fusion needs extractor-side hooks (that session's domain).
 
 ### Trainer/eval capabilities added this campaign (all on main)
 - **MANDATORY embedded repro**: every new bake carries `zentrain.repro` (inputs w/ sha256 +
