@@ -6279,7 +6279,9 @@ mod tests {
         let mut s = seed;
         (0..n)
             .map(|_| {
-                s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                s = s
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let u = ((s >> 33) as u32) as f32 / u32::MAX as f32;
                 lo + (hi - lo) * u
             })
@@ -6334,7 +6336,8 @@ mod tests {
                         for x in dx0..dx1 {
                             a += nn[y * dw + x] as f64;
                             b += jbu[y * dw + x] as f64;
-                            max_px_delta = max_px_delta.max((nn[y * dw + x] - jbu[y * dw + x]).abs());
+                            max_px_delta =
+                                max_px_delta.max((nn[y * dw + x] - jbu[y * dw + x]).abs());
                         }
                     }
                     let rel = (a - b).abs() / a.abs().max(1e-9);

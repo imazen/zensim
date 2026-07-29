@@ -559,8 +559,7 @@ fn run_bake_mode(
             .expect("diffmap model-sensitivity (guided)");
         ms_jbu = t_jbu.elapsed().as_secs_f64() * 1e3;
         // Scalar-drift gate: the render option must not perturb scoring.
-        let sd = (jbu_res.score() - map_score_off).abs()
-            / map_score_off.abs().max(1e-12);
+        let sd = (jbu_res.score() - map_score_off).abs() / map_score_off.abs().max(1e-12);
         println!(
             "  JBU scalar drift (map-profile score, ON vs OFF): {:.3e} rel ({})",
             sd,
@@ -1063,7 +1062,11 @@ fn run_jbu_perf(spec: &str) {
         let t = std::time::Instant::now();
         let b = z.compute_with_ref_and_diffmap(&pre, &ds, opts_on).unwrap();
         t_on.push(t.elapsed().as_secs_f64() * 1e3);
-        assert_eq!(a.score(), b.score(), "scalar must be untouched by the render option");
+        assert_eq!(
+            a.score(),
+            b.score(),
+            "scalar must be untouched by the render option"
+        );
         std::hint::black_box((a.diffmap()[0], b.diffmap()[0]));
     }
     let med = |v: &mut Vec<f64>| -> f64 {
