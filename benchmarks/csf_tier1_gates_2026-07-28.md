@@ -272,8 +272,13 @@ construction — LOO adjudicates slot-worth.
    the §9.2 ladder extension (mean-shifting / chroma-only distortions) —
    with the backfill round; also re-visit the s3 DMEAN ceiling (~0.91)
    there.
-3. **G6: LOO on a 956 bake** — the training-side acceptance (BANDVIS
-   discipline); nothing consumes the lanes until it passes.
+3. **G6: LOO on a 956 bake** — **ADJUDICATED 2026-07-29: FAIL**
+   (`csfw_g6_loo_2026-07-29.md`: family Σ **+0.0608**, harmful on every
+   robustness cut; carrier = the weighted contrast twins, W_GLOBAL_DMEAN
+   exactly neutral; design falsifier 7 — the lanes STAY default-OFF,
+   constants stay recorded, nothing consumes f944..f955 in SDR bakes; the
+   HDR-route commensurability claim routes to stage-2/chroma-tier
+   adjudication).
 4. **G2 UPIQ within-study decomposition** — still residual #5 from the
    chunk-2 gates; pre-register it before any chunk-3 constant is FIT on
    UPIQ-adjacent data (not needed for this default-OFF landing).
