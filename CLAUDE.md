@@ -131,6 +131,13 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   integrands, both measured. Raw v2map ADD into the score-unit density is unit-broken
   (swamps it) — use weights ×1/(w·h). Perf 2.4-3.4× (C2 target ≤1.1×).
   `benchmarks/attribution_map_c1_2026-07-29.md`.
+- **C2a SHIPPED (2026-07-29): `compute_attribution_density_full` — exact integrands for
+  ALL v2+append slots** (production-kernel pass A, 1e-9 feature parity; FD direction tests
+  caught an edge-width sign bug pre-landing). Gate 5/8: **EM2 4/4 ≥0.85 — the 128px
+  inversion is CURED (−0.36 fold → +0.99, at the M2 ceiling; the 0.5%-mass append block
+  was the whole coarse signal)**; K720 1/4 (0.69/0.53/0.38/0.90) — miss isolated to v2
+  density approximation at fine blocks (v2attr-vs-true-lin 0.61/0.40/0.18/0.89; basic holds
+  0.89-0.98) → C2b lever = blur-bleed spreading + perf (full 125-138ms vs fold 11ms).
 
 ### Trainer/eval capabilities added this campaign (all on main)
 - **MANDATORY embedded repro**: every new bake carries `zentrain.repro` (inputs w/ sha256 +

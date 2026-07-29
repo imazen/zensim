@@ -6020,6 +6020,983 @@ fn compute_v2_features_with_ref_impl_inner(
 }
 
 // ============================================================================
+// Attribution densities for the v2 (f372-719) + append (f720-923) blocks
+// (task #67 C2a — the coverage levers the C1 basic density measured missing).
+//
+// Same contract as `crate::attribution`: per-pixel density whose rectangle
+// sum over a block approximates `Σ_k s_k·Δf_k(block)` — the first-order
+// score change from refining the block to reference — with TRUE integrands
+// and ABSOLUTE normalization. `s` slices are the RAW model gradient
+// `∂score/∂f_k`; the sign fold happens via the `density = Σ_k s_k·(δf_k)_i`
+// rule ((δf_k)_i = the first-order feature change from refining pixel i's
+// content, e.g. `−v_i/N` for a mean-pooled error signal).
+//
+// Integrand classes (all derived from the production kernels in this file):
+//  - mean pools (v2: ssim_mean/art/det/mse/hf×3/pjnd×3/gms/ringing/banding;
+//    append: xmask/lumt/mscn×2/contrast×2/tex): (δf)_i = −v_i/N. Exact.
+//  - reference-weighted pools (masked/iw, append luminance bins):
+//    (δf)_i = −w_i·v_i/Σw (w reference-side). Exact.
+//  - self-weighted soft-peak (w_i = sat(v_i, C_PEAK), f = Σw·v/Σw):
+//    (δf)_i = w(v_i)·(f − v_i)/Σw — SIGNED; full-plane sum is exactly 0.
+//  - deviation pools (v2 SSIM_DEV2/DEV4; append GMS/ART/DET_DEV2):
+//    central-moment chain rule, SIGNED (zeroing a mean-valued pixel RAISES
+//    the deviation). DEV2: (δf)_i = (2μv−v²)/(2f·N); DEV4 via raw moments.
+//  - global slots (append GLOBAL_DMEAN/CGAIN/CLOSS): exact chain rule on
+//    whole-plane means/variances, SIGNED.
+//  - blockiness: lattice-step terms, split 50/50 across the step pair.
+//  - EDGE_WIDTH_CHANGE: exact two-scale chain rule on the adjacent-scale
+//    mean-gradient ratios (incl. the last-scale copy's weight).
+//  - reference-only (PJND_FRAGILITY, GRAD_SRC_MEAN): (δf)_i = 0 exactly.
+//  - structural zeros (X/B transducer slots, the (B, scale 0) append cell):
+//    features are constant 0.0 in the regime ⇒ Δf ≡ 0 ⇒ integrand 0,
+//    regardless of the probed gradient (mirrors the harness's f156-371
+//    structural-zero handling).
+//
+// The finalize clamps (`clamp01`/`clamp02`) are treated as inert (features
+// live strictly inside their bounds on real content; at a saturated clamp
+// the true gradient is 0 and the density would over-attribute — accepted
+// and documented as an approximation).
+//
+// Pass A replays the MATERIALIZED strip walk (STRIP_ROWS + HALO_P halos,
+// `run_blur_pass_strip`, the σ-split `bs2` chain from `stream_phase_a`) and
+// then runs the PRODUCTION kernels over the cached planes, so every pooled
+// scalar feeding a coefficient is production-arithmetic (parity-gated by
+// `v2_append_attr_features_match_production`). Pass B re-derives the
+// per-pixel signals in f64 from the same planes — the density's plane sums
+// therefore match production features to per-pixel f32-vs-f64 recompute
+// noise (~1e-7 rel), not 1e-9; the pooled-scalar parity is the strict gate.
+// ============================================================================
+
+/// Output of [`compute_v2_append_attribution`].
+pub(crate) struct V2AppendAttribution {
+    /// Full-resolution density (f64, `width × height`, trimmed to the
+    /// original image), in score units per pixel.
+    pub density: Vec<f64>,
+    pub width: usize,
+    pub height: usize,
+    /// Pass-A finalized v2 features (`n_scales·3·29`, scale-major) — the
+    /// production-kernel pooled values the coefficients were derived from.
+    /// Read by the 1e-9 production-parity gate
+    /// (`v2_append_attr_features_match_production`); retained on the struct
+    /// as the audit surface for any consumer of the density.
+    #[allow(dead_code)]
+    pub v2_features: Vec<f64>,
+    /// Pass-A finalized append features (`n_scales·3·17`), empty when the
+    /// append block was not requested. Same audit role as `v2_features`.
+    #[allow(dead_code)]
+    pub append_features: Vec<f64>,
+}
+
+/// Per-(scale, channel) pass-A pooled state.
+#[derive(Default, Clone, Copy)]
+struct AttrCellSums {
+    dense: DenseAccum,
+    grad: GradientAccum,
+    app: AppendAccum,
+    blockiness: f64,
+    n: usize,
+}
+
+/// Per-scale per-channel cached planes (scale-plane sized slices of
+/// scale-0-sized buffers).
+struct AttrChPlanes {
+    mu1: Vec<f32>,
+    mu2: Vec<f32>,
+    ssq: Vec<f32>,
+    s12: Vec<f32>,
+    act: Vec<f32>,
+    bs2: Vec<f32>,
+}
+
+impl AttrChPlanes {
+    fn new(n: usize) -> Self {
+        Self {
+            mu1: vec![0.0; n],
+            mu2: vec![0.0; n],
+            ssq: vec![0.0; n],
+            s12: vec![0.0; n],
+            act: vec![0.0; n],
+            bs2: vec![0.0; n],
+        }
+    }
+}
+
+/// Blur + cache one (scale, channel): materialized strip walk
+/// (`gather_strip_halo` + `run_blur_pass_strip` + the `stream_phase_a`
+/// σ-split chain for `bs2`), core rows copied into `planes`.
+fn attr_blur_cache_channel(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    want_bs2: bool,
+    scratch: &mut ScratchV2Strip,
+    planes: &mut AttrChPlanes,
+) {
+    let mut y0 = 0usize;
+    while y0 < height {
+        let strip_h = STRIP_ROWS.min(height - y0);
+        let wide_h = strip_h + 2 * HALO_P;
+        let n_wide = width * wide_h;
+        gather_strip_halo(
+            src,
+            width,
+            height,
+            y0,
+            wide_h,
+            HALO_P,
+            &mut scratch.src_wide[..n_wide],
+        );
+        gather_strip_halo(
+            dst,
+            width,
+            height,
+            y0,
+            wide_h,
+            HALO_P,
+            &mut scratch.dst_wide[..n_wide],
+        );
+        run_blur_pass_strip(width, wide_h, scratch);
+        if want_bs2 {
+            // Same chain as `stream_phase_a`: square(src) → H-box → V-box.
+            // `abs_src`/`activity_tmp` are free after the activity chain.
+            square_into(&scratch.src_wide[..n_wide], &mut scratch.abs_src[..n_wide]);
+            crate::blur::box_blur_h(
+                &scratch.abs_src[..n_wide],
+                &mut scratch.activity_tmp[..n_wide],
+                width,
+                wide_h,
+                BLUR_RADIUS,
+            );
+            crate::blur::box_blur_v_from_copy(
+                &scratch.activity_tmp[..n_wide],
+                &mut scratch.bs2[..n_wide],
+                width,
+                wide_h,
+                BLUR_RADIUS,
+            );
+        }
+        let off = HALO_P * width;
+        let strip_n = width * strip_h;
+        let out = y0 * width;
+        planes.mu1[out..out + strip_n].copy_from_slice(&scratch.mu1[off..off + strip_n]);
+        planes.mu2[out..out + strip_n].copy_from_slice(&scratch.mu2[off..off + strip_n]);
+        planes.ssq[out..out + strip_n].copy_from_slice(&scratch.ssq[off..off + strip_n]);
+        planes.s12[out..out + strip_n].copy_from_slice(&scratch.s12[off..off + strip_n]);
+        planes.act[out..out + strip_n].copy_from_slice(&scratch.activity[off..off + strip_n]);
+        if want_bs2 {
+            planes.bs2[out..out + strip_n].copy_from_slice(&scratch.bs2[off..off + strip_n]);
+        }
+        y0 += strip_h;
+    }
+}
+
+/// Pass A kernels for one (scale, channel) over cached planes: production
+/// dense/gradient/append kernels in kernel-strip order + canonical
+/// blockiness. `cross` = `(act_x, act_b)` full planes for the Y channel.
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_a_kernels(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    planes: &AttrChPlanes,
+    cross: Option<(&[f32], &[f32])>,
+    ref_y: &[f32],
+    want_append: bool,
+    append_active: bool,
+    grad_halo: &mut Vec<f32>,
+    grad_halo_d: &mut Vec<f32>,
+) -> AttrCellSums {
+    let mut cell = AttrCellSums {
+        n: width * height,
+        ..Default::default()
+    };
+    let mut y0 = 0usize;
+    while y0 < height {
+        let strip_h = STRIP_ROWS.min(height - y0);
+        let base = y0 * width;
+        let strip_n = width * strip_h;
+        let src_s = &src[base..base + strip_n];
+        let dst_s = &dst[base..base + strip_n];
+        let d = dense_block_kernel(
+            src_s,
+            dst_s,
+            &planes.mu1[base..base + strip_n],
+            &planes.mu2[base..base + strip_n],
+            &planes.ssq[base..base + strip_n],
+            &planes.s12[base..base + strip_n],
+            &planes.act[base..base + strip_n],
+            width,
+            strip_h,
+            true, // transducer_bank (V2NewFeatureToggles::default())
+        );
+        cell.dense.accumulate(&d);
+        // Gradient needs a 1-row halo; gather from the full planes (real
+        // rows except the reflect_101 mirror at the true image edges —
+        // identical values to the production wide-window slices).
+        let g_n = width * (strip_h + 2);
+        grad_halo.resize(g_n, 0.0);
+        grad_halo_d.resize(g_n, 0.0);
+        gather_strip_halo(src, width, height, y0, strip_h + 2, 1, grad_halo);
+        gather_strip_halo(dst, width, height, y0, strip_h + 2, 1, grad_halo_d);
+        let g = gradient_block_kernel(
+            grad_halo,
+            grad_halo_d,
+            &planes.act[base..base + strip_n],
+            width,
+            strip_h,
+            None,
+        );
+        cell.grad.accumulate(&g);
+        if want_append && append_active {
+            let a = append_block_kernel(
+                src_s,
+                dst_s,
+                &planes.mu1[base..base + strip_n],
+                &planes.mu2[base..base + strip_n],
+                &planes.ssq[base..base + strip_n],
+                &planes.bs2[base..base + strip_n],
+                &planes.act[base..base + strip_n],
+                &ref_y[base..base + strip_n],
+                cross.map(|(x, b)| (&x[base..base + strip_n], &b[base..base + strip_n])),
+                false, // hl (append2) — not part of the 924 regime
+                width,
+                strip_h,
+            );
+            cell.app.accumulate(&a);
+        }
+        y0 += strip_h;
+    }
+    cell.blockiness = blockiness_sparse(src, dst, width, height);
+    cell
+}
+
+/// All deferred pass-B coefficients for one (scale, channel), derived from
+/// the raw gradients and the pass-A pooled sums. Field semantics: each is
+/// the multiplier on the named per-pixel term in the pass-B combine (the
+/// `s_k` sign fold and `1/N` already applied).
+#[derive(Default, Clone, Copy)]
+struct V2AppCoeffs {
+    // v2 mean-pool slots: coefficient × per-pixel value.
+    c_ssim: f64,
+    c_art: f64,
+    c_det: f64,
+    c_mse: f64,
+    c_hf_gain: f64,
+    c_hf_loss: f64,
+    c_hf_mag: f64,
+    c_pjnd: f64,
+    c_pjnd_lo: f64,
+    c_pjnd_hi: f64,
+    c_gms: f64,
+    c_ringing: f64,
+    c_banding: f64,
+    c_blockiness: f64,
+    // v2 weighted pools: coefficient × (w · v); w recomputed per pixel.
+    c_mask_ssim: f64,
+    c_mask_art: f64,
+    c_mask_det: f64,
+    c_mask_mse: f64,
+    c_iw_ssim: f64,
+    c_iw_art: f64,
+    c_iw_det: f64,
+    c_iw_mse: f64,
+    // soft-peak: s_k/W and the pooled f per member.
+    sp_ssim: (f64, f64),
+    sp_art: (f64, f64),
+    sp_det: (f64, f64),
+    // ssim dev pools: μ, raw2, raw3, f2, f4 and the two s_k.
+    dev_mu: f64,
+    dev_raw2: f64,
+    dev_raw3: f64,
+    dev_f2: f64,
+    dev_f4: f64,
+    s_dev2: f64,
+    s_dev4: f64,
+    // append mean slots.
+    c_xmask: f64,
+    c_lumt: f64,
+    c_mscn: f64,
+    c_mscn2: f64,
+    c_cgain: f64,
+    c_closs: f64,
+    c_tex: f64,
+    // append luminance bins: coefficient × (w · mse_i) per bin.
+    c_dark: f64,
+    c_mid: f64,
+    c_bright: f64,
+    // append dev pools (gms/art/det): (s_k, μ, f) per member.
+    gd_gms: (f64, f64, f64),
+    gd_art: (f64, f64, f64),
+    gd_det: (f64, f64, f64),
+    // append globals.
+    g_dmean: f64, // coefficient × (s − d)
+    g_var: f64,   // coefficient × ((s²−d²) − 2·gmean_d·(s−d))
+    gmean_d: f64,
+    // edge-width: coefficient × (|∇d| − |∇s|).
+    c_edgew: f64,
+    inv_n: f64,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn derive_v2app_coeffs(
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    scale: usize,
+    ch: usize,
+    cell: &AttrCellSums,
+    append_active: bool,
+    cross: bool,
+    edgew_coeff: f64,
+) -> V2AppCoeffs {
+    let n_f = cell.n as f64;
+    let inv_n = 1.0 / n_f;
+    let v2b = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+    let gv2 = |slot: usize| s_v2.get(v2b + slot).copied().unwrap_or(0.0);
+    let apb = scale * 3 * FEATURES_PER_CHANNEL_APPEND + ch * FEATURES_PER_CHANNEL_APPEND;
+    let gap = |slot: usize| -> f64 {
+        s_append
+            .and_then(|s| s.get(apb + slot))
+            .copied()
+            .unwrap_or(0.0)
+    };
+    let dense = &cell.dense;
+    let app = &cell.app;
+    let grad = &cell.grad;
+
+    let mut c = V2AppCoeffs {
+        inv_n,
+        // Mean pools: density += s_k · (−v_i/N).
+        c_ssim: -gv2(idx::SSIM_MEAN) * inv_n,
+        c_art: -gv2(idx::ART) * inv_n,
+        c_det: -gv2(idx::DET) * inv_n,
+        c_mse: -gv2(idx::MSE) * inv_n,
+        c_hf_gain: -gv2(idx::HF_GAIN) * inv_n,
+        c_hf_loss: -gv2(idx::HF_LOSS) * inv_n,
+        c_hf_mag: -gv2(idx::HF_MAG_LOSS) * inv_n,
+        c_pjnd: -gv2(idx::PJND_TRANSDUCER) * inv_n,
+        c_pjnd_lo: -gv2(idx::PJND_TRANSDUCER_LOW_K) * inv_n,
+        c_pjnd_hi: -gv2(idx::PJND_TRANSDUCER_HIGH_K) * inv_n,
+        c_gms: -gv2(idx::GMS) * inv_n,
+        c_ringing: -gv2(idx::RINGING) * inv_n,
+        c_banding: -gv2(idx::BANDING) * inv_n,
+        c_blockiness: -gv2(idx::BLOCKINESS) * inv_n,
+        c_edgew: edgew_coeff,
+        ..Default::default()
+    };
+
+    // Weighted pools: density += s_k · (−w_i·v_i/Σw). Σw is shared per
+    // family (same weight for all 4 members).
+    let mask_den = dense.ws_mask_ssim.den;
+    if mask_den > 0.0 {
+        c.c_mask_ssim = -gv2(idx::MASKED_SSIM) / mask_den;
+        c.c_mask_art = -gv2(idx::MASKED_ART) / mask_den;
+        c.c_mask_det = -gv2(idx::MASKED_DET) / mask_den;
+        c.c_mask_mse = -gv2(idx::MASKED_MSE) / mask_den;
+    }
+    let iw_den = dense.ws_iw_ssim.den;
+    if iw_den > 0.0 {
+        c.c_iw_ssim = -gv2(idx::IW_SSIM) / iw_den;
+        c.c_iw_art = -gv2(idx::IW_ART) / iw_den;
+        c.c_iw_det = -gv2(idx::IW_DET) / iw_den;
+        c.c_iw_mse = -gv2(idx::IW_MSE) / iw_den;
+    }
+    // Soft-peak (self-weighted): density += s_k · w(v_i)·(f − v_i)/W.
+    let sp = |ws: &WeightedSum, sk: f64| -> (f64, f64) {
+        if ws.den > 0.0 {
+            (sk / ws.den, ws.num / ws.den)
+        } else {
+            (0.0, 0.0)
+        }
+    };
+    c.sp_ssim = sp(&dense.ws_peak_ssim, gv2(idx::SSIM_SOFT_PEAK));
+    c.sp_art = sp(&dense.ws_peak_art, gv2(idx::ART_SOFT_PEAK));
+    c.sp_det = sp(&dense.ws_peak_det, gv2(idx::DET_SOFT_PEAK));
+    // SSIM deviation pools (central moments of the d map).
+    let mu = dense.sum_d * inv_n;
+    let raw2 = dense.sum_d2 * inv_n;
+    let raw3 = dense.sum_d3 * inv_n;
+    let raw4 = dense.sum_d4 * inv_n;
+    let m2 = (raw2 - mu * mu).max(0.0);
+    let m4 = (raw4 - 4.0 * mu * raw3 + 6.0 * mu * mu * raw2 - 3.0 * mu.powi(4)).max(0.0);
+    c.dev_mu = mu;
+    c.dev_raw2 = raw2;
+    c.dev_raw3 = raw3;
+    c.dev_f2 = m2.sqrt();
+    c.dev_f4 = m4.powf(0.25);
+    c.s_dev2 = gv2(idx::SSIM_DEV2);
+    c.s_dev4 = gv2(idx::SSIM_DEV4);
+
+    if append_active {
+        if cross {
+            c.c_xmask = -gap(idx_append::XMASK_TRANSDUCER) * inv_n;
+            c.c_lumt = -gap(idx_append::LUM_TRANSDUCER) * inv_n;
+        }
+        c.c_mscn = -gap(idx_append::MSCN_DIFF_MEAN) * inv_n;
+        c.c_mscn2 = -gap(idx_append::MSCN_DIFF_L2) * inv_n;
+        c.c_cgain = -gap(idx_append::CONTRAST_GAIN) * inv_n;
+        c.c_closs = -gap(idx_append::CONTRAST_LOSS) * inv_n;
+        c.c_tex = -gap(idx_append::TEXTURE_DISSIM) * inv_n;
+        if app.ws_dark.den > 0.0 {
+            c.c_dark = -gap(idx_append::LUM_DARK_ERR) / app.ws_dark.den;
+        }
+        let mid_den = n_f - app.ws_dark.den - app.ws_bright.den;
+        if mid_den > 0.0 {
+            c.c_mid = -gap(idx_append::LUM_MID_ERR) / mid_den;
+        }
+        if app.ws_bright.den > 0.0 {
+            c.c_bright = -gap(idx_append::LUM_BRIGHT_ERR) / app.ws_bright.den;
+        }
+        // Append deviation pools: (s_k, μ, f).
+        let gd = |sk: f64, sum: f64, sum2: f64| -> (f64, f64, f64) {
+            let m = sum * inv_n;
+            let f = ((sum2 * inv_n) - m * m).max(0.0).sqrt();
+            (sk, m, f)
+        };
+        c.gd_gms = gd(gap(idx_append::GMS_DEV2), grad.sum_gms, grad.sum_gms2);
+        c.gd_art = gd(gap(idx_append::ART_DEV2), dense.sum_art, app.sum_art2);
+        c.gd_det = gd(gap(idx_append::DET_DEV2), dense.sum_det, app.sum_det2);
+        // Globals. GLOBAL_DMEAN: f = sat(|Δ|, C), Δ = (Σs−Σd)/N;
+        // (δf)_i = −sat'(|Δ|)·sign(Δ)·(s_i−d_i)/N.
+        let delta = (app.sum_s - app.sum_d) * inv_n;
+        let sat_p = C_GDMEAN / ((delta.abs() + C_GDMEAN) * (delta.abs() + C_GDMEAN));
+        c.g_dmean = gap(idx_append::GLOBAL_DMEAN) * (-sat_p * delta.signum() * inv_n);
+        // GLOBAL_CGAIN/CLOSS: chain rule on gvar2 (gvar1 is reference-side).
+        let gmean_s = app.sum_s * inv_n;
+        let gmean_d = app.sum_d * inv_n;
+        let gvar1 = (app.sum_s2 * inv_n - gmean_s * gmean_s).max(0.0);
+        let gvar2 = (app.sum_d2 * inv_n - gmean_d * gmean_d).max(0.0);
+        let denom = gvar1 + gvar2 + C_GCONTRAST;
+        // δgvar2 per refined pixel = ((s²−d²) − 2·gmean_d·(s−d))/N.
+        let df_dg2 = if gvar2 > gvar1 {
+            gap(idx_append::GLOBAL_CGAIN) * ((2.0 * gvar1 + C_GCONTRAST) / (denom * denom))
+        } else if gvar1 > gvar2 {
+            gap(idx_append::GLOBAL_CLOSS) * (-(2.0 * gvar1 + C_GCONTRAST) / (denom * denom))
+        } else {
+            0.0
+        };
+        c.g_var = df_dg2 * inv_n;
+        c.gmean_d = gmean_d;
+        // GRAD_SRC_MEAN (slot 16): reference-only ⇒ integrand 0 (no term).
+    }
+    c
+}
+
+/// Pass B for one (scale, channel): f64 per-pixel combine over the cached
+/// planes into `density` (scale resolution). Three sweeps: the main
+/// per-pixel loop, the gradient-family loop (needs ±1-row neighbors), and
+/// the sparse blockiness lattice.
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_channel(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    planes: &AttrChPlanes,
+    cross: Option<(&[f32], &[f32])>,
+    ref_y: &[f32],
+    co: &V2AppCoeffs,
+    density: &mut [f64],
+) {
+    let cross_on = cross.is_some();
+    for y in 0..height {
+        let row = y * width;
+        for x in 0..width {
+            let i = row + x;
+            let s = src[i] as f64;
+            let dd = dst[i] as f64;
+            let m1 = planes.mu1[i] as f64;
+            let m2 = planes.mu2[i] as f64;
+            let sq = planes.ssq[i] as f64;
+            let s12v = planes.s12[i] as f64;
+            let act = planes.act[i] as f64;
+
+            let mut acc = 0.0f64;
+
+            // Dense family (same formulas as `dense_block_kernel`'s tail).
+            let d = ssim_d_local(m1, m2, s12v, sq);
+            let diff_src = (s - m1).abs();
+            let diff_dst = (dd - m2).abs();
+            let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+            let (art_i, det_i) = if diff_dst > diff_src {
+                (edge_dissim, 0.0)
+            } else if diff_dst < diff_src {
+                (0.0, edge_dissim)
+            } else {
+                (0.0, 0.0)
+            };
+            let raw_diff = s - dd;
+            let raw_abs_err = raw_diff.abs();
+            let mse_i = saturate(raw_diff * raw_diff, C_MSE);
+            acc += co.c_ssim * d + co.c_art * art_i + co.c_det * det_i + co.c_mse * mse_i;
+
+            let hf_src = s - m1;
+            let hf_dst = dd - m2;
+            let (hf_gain_i, hf_loss_i) =
+                bounded_excess_pair(hf_dst * hf_dst, hf_src * hf_src, C_HF);
+            acc += co.c_hf_gain * hf_gain_i + co.c_hf_loss * hf_loss_i;
+            acc += co.c_hf_mag * bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF);
+
+            acc += co.c_pjnd * pjnd_transducer(raw_abs_err, act, K_PJND_MASK, C_PJND_CLAMP);
+            acc += co.c_pjnd_lo * pjnd_transducer(raw_abs_err, act, K_PJND_MASK_LOW, C_PJND_CLAMP);
+            acc += co.c_pjnd_hi * pjnd_transducer(raw_abs_err, act, K_PJND_MASK_HIGH, C_PJND_CLAMP);
+
+            // Weighted pools (masked / iw): −s_k·w_i·v_i/Σw.
+            let sat_act = saturate(act, C_ACTIVITY);
+            let mask_w = 1.0 - sat_act;
+            let iw_w = sat_act + IW_WEIGHT_FLOOR;
+            acc += mask_w
+                * (co.c_mask_ssim * d
+                    + co.c_mask_art * art_i
+                    + co.c_mask_det * det_i
+                    + co.c_mask_mse * mse_i);
+            acc += iw_w
+                * (co.c_iw_ssim * d
+                    + co.c_iw_art * art_i
+                    + co.c_iw_det * det_i
+                    + co.c_iw_mse * mse_i);
+
+            // Soft-peak: s_k·w(v)·(f − v)/W  (sp = (s_k/W, f)).
+            acc += co.sp_ssim.0 * saturate(d, C_PEAK) * (co.sp_ssim.1 - d);
+            acc += co.sp_art.0 * saturate(art_i, C_PEAK) * (co.sp_art.1 - art_i);
+            acc += co.sp_det.0 * saturate(det_i, C_PEAK) * (co.sp_det.1 - det_i);
+
+            // SSIM deviation pools (v = d).
+            if co.s_dev2 != 0.0 && co.dev_f2 > 1e-12 {
+                acc += co.s_dev2 * (2.0 * co.dev_mu * d - d * d)
+                    / (2.0 * co.dev_f2 * (1.0 / co.inv_n));
+            }
+            if co.s_dev4 != 0.0 && co.dev_f4 > 1e-12 {
+                let mu = co.dev_mu;
+                let dm4 = -d.powi(4) + 4.0 * d * co.dev_raw3 + 4.0 * mu * d.powi(3)
+                    - 12.0 * mu * d * co.dev_raw2
+                    - 6.0 * mu * mu * d * d
+                    + 12.0 * mu.powi(3) * d;
+                acc += co.s_dev4 * co.inv_n * dm4 / (4.0 * co.dev_f4.powi(3));
+            }
+
+            // Append block.
+            let b2 = planes.bs2[i] as f64;
+            let var1 = (b2 - m1 * m1).max(0.0);
+            let var2 = ((sq - b2) - m2 * m2).max(0.0);
+            let n1 = (s - m1) / (var1 + C_MSCN_VAR).sqrt();
+            let n2 = (dd - m2) / (var2 + C_MSCN_VAR).sqrt();
+            let dn = n1 - n2;
+            acc += co.c_mscn * saturate(dn.abs(), C_MSCN_ABS);
+            acc += co.c_mscn2 * saturate(dn * dn, C_MSCN_SQ);
+            let (cg, cl) = bounded_excess_pair(var2, var1, C_CONTRAST);
+            acc += co.c_cgain * cg + co.c_closs * cl;
+            acc += co.c_tex * (1.0 - bounded_sim(var1, var2, C_CONTRAST));
+
+            if cross_on {
+                let ry = ref_y[i] as f64;
+                let t = saturate(ry, C_LUM_T);
+                acc += co.c_lumt
+                    * pjnd_transducer(
+                        raw_abs_err,
+                        act + t * (K_LUM_ADAPT / K_PJND_MASK),
+                        K_PJND_MASK,
+                        C_PJND_CLAMP,
+                    );
+                if let Some((ax, ab)) = cross {
+                    let act_c = ax[i] as f64 + ab[i] as f64;
+                    acc += co.c_xmask
+                        * pjnd_transducer(
+                            raw_abs_err,
+                            act + act_c * (K_XCH / K_PJND_MASK),
+                            K_PJND_MASK,
+                            C_PJND_CLAMP,
+                        );
+                }
+            }
+            // Luminance bins (t from the reference Y plane, all channels).
+            {
+                let ry = ref_y[i] as f64;
+                let t = saturate(ry, C_LUM_T);
+                let one_mt = 1.0 - t;
+                let wd = one_mt * one_mt;
+                let wb = t * t;
+                let wm = 1.0 - wd - wb;
+                acc += (co.c_dark * wd + co.c_mid * wm + co.c_bright * wb) * mse_i;
+            }
+            // Append dev pools for art/det (gms handled in the gradient loop).
+            let gdp = |g: (f64, f64, f64), v: f64, inv_n: f64| -> f64 {
+                let (sk, m, f) = g;
+                if sk != 0.0 && f > 1e-12 {
+                    sk * (2.0 * m * v - v * v) * inv_n / (2.0 * f)
+                } else {
+                    0.0
+                }
+            };
+            acc += gdp(co.gd_art, art_i, co.inv_n);
+            acc += gdp(co.gd_det, det_i, co.inv_n);
+            // Globals.
+            acc += co.g_dmean * (s - dd);
+            acc += co.g_var * ((s * s - dd * dd) - 2.0 * co.gmean_d * (s - dd));
+
+            density[i] += acc;
+        }
+    }
+
+    // Gradient family: gms / ringing / banding / gms-dev / edge-width.
+    let need_grad = co.c_gms != 0.0
+        || co.c_ringing != 0.0
+        || co.c_banding != 0.0
+        || co.gd_gms.0 != 0.0
+        || co.c_edgew != 0.0;
+    if need_grad {
+        for y in 0..height {
+            let row = y * width;
+            let y_up = reflect_101(y as isize - 1, height);
+            let y_dn = reflect_101(y as isize + 1, height);
+            for x in 0..width {
+                let i = row + x;
+                let xl = x.saturating_sub(1);
+                let xr = (x + 1).min(width - 1);
+                let gx_s = src[row + xr] as f64 - src[row + xl] as f64;
+                let gy_s = src[y_dn * width + x] as f64 - src[y_up * width + x] as f64;
+                let gmag_s = (gx_s * gx_s + gy_s * gy_s).sqrt();
+                let gx_d = dst[row + xr] as f64 - dst[row + xl] as f64;
+                let gy_d = dst[y_dn * width + x] as f64 - dst[y_up * width + x] as f64;
+                let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
+                let g = 1.0 - bounded_sim(gmag_s, gmag_d, C_GMS);
+                let mut acc = co.c_gms * g;
+                if co.gd_gms.0 != 0.0 && co.gd_gms.2 > 1e-12 {
+                    acc += co.gd_gms.0 * (2.0 * co.gd_gms.1 * g - g * g) * co.inv_n
+                        / (2.0 * co.gd_gms.2);
+                }
+                if co.c_ringing != 0.0 {
+                    let s = src[i] as f64;
+                    let dd = dst[i] as f64;
+                    let act = planes.act[i] as f64;
+                    let err_b = saturate((s - dd).abs(), C_RING_ERR);
+                    let act_b = saturate(act, C_ACTIVITY);
+                    let edge_r = saturate(gmag_s, C_RING_EDGE);
+                    acc += co.c_ringing * (err_b * act_b * (1.0 - edge_r));
+                }
+                if co.c_banding != 0.0 {
+                    let edge_excess = bounded_excess(gmag_d, gmag_s, C_BAND_DST);
+                    let src_smooth = 1.0 - saturate(gmag_s, C_BAND_SRC);
+                    acc += co.c_banding * (edge_excess * src_smooth);
+                }
+                // Edge-width: coefficient × (|∇d| − |∇s|) — the per-pixel
+                // change of this scale's mean distorted gradient under
+                // refinement is −(|∇d|−|∇s|)/N (folded into c_edgew).
+                acc += co.c_edgew * (gmag_d - gmag_s);
+                density[i] += acc;
+            }
+        }
+    }
+
+    // Blockiness lattice terms: split 50/50 across the step pair (a step
+    // dies only when BOTH pixels are refined; halving allocates the mass
+    // consistently when a partition boundary splits the pair).
+    if co.c_blockiness != 0.0 {
+        for y in 0..height {
+            let row = y * width;
+            let mut x = BLOCK_LATTICE;
+            while x < width {
+                let i = row + x;
+                let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
+                let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
+                let v = co.c_blockiness * bounded_excess(step_dst, step_src, C_BLOCK);
+                density[i] += 0.5 * v;
+                density[i - 1] += 0.5 * v;
+                x += BLOCK_LATTICE;
+            }
+            if y % BLOCK_LATTICE == 0 && y > 0 {
+                for x in 0..width {
+                    let i = row + x;
+                    let i_up = i - width;
+                    let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
+                    let step_src = (src[i] as f64 - src[i_up] as f64).abs();
+                    let v = co.c_blockiness * bounded_excess(step_dst, step_src, C_BLOCK);
+                    density[i] += 0.5 * v;
+                    density[i_up] += 0.5 * v;
+                }
+            }
+        }
+    }
+}
+
+/// Build the v2 (+ optional append) attribution density for a pair.
+///
+/// `s_v2` = raw `∂score/∂f` for the v2 block (`f372..720` layout,
+/// `scale*87 + ch*29 + slot`, up to 348 entries); `s_append` likewise for
+/// the append block (`f720..924`, `scale*51 + ch*17 + slot`, 204 entries).
+/// Toggles are fixed to `V2NewFeatureToggles::default()` — the 924-regime
+/// canon. See the section comment above for integrand classes and the
+/// documented approximations.
+pub(crate) fn compute_v2_append_attribution(
+    reference: &impl ImageSource,
+    distorted: &impl ImageSource,
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    max_pixels: Option<usize>,
+    parallel: bool,
+) -> Result<V2AppendAttribution, ZensimError> {
+    let rprep = prepare_v2_reference_impl(reference, max_pixels, parallel, false)?;
+    let dprep = prepare_v2_reference_impl(distorted, max_pixels, parallel, false)?;
+    let n_scales = rprep.scales.len().min(dprep.scales.len());
+    let (w0, h0) = (rprep.scales[0].1, rprep.scales[0].2);
+    let want_append = s_append.is_some();
+    let toggles = V2NewFeatureToggles::default();
+
+    let mut scratch = ScratchV2Strip::new(w0 * (STRIP_ROWS + 2 * HALO_P));
+    let mut planes: [AttrChPlanes; 3] = [
+        AttrChPlanes::new(w0 * h0),
+        AttrChPlanes::new(w0 * h0),
+        AttrChPlanes::new(w0 * h0),
+    ];
+    let mut grad_halo: Vec<f32> = Vec::new();
+    let mut grad_halo_d: Vec<f32> = Vec::new();
+
+    // ── Sweep 1 (pass A): pooled sums + production-finalized features. ──
+    let mut cells: Vec<[AttrCellSums; 3]> = Vec::with_capacity(n_scales);
+    let mut v2_features = vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL];
+    let mut append_features = if want_append {
+        vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_APPEND]
+    } else {
+        Vec::new()
+    };
+    // (mean grad src, mean grad dst) per (scale, ch) for edge-width.
+    let mut mg = vec![[(0.0f64, 0.0f64); 3]; n_scales];
+    // `scale` indexes rprep/dprep/mg/features in lockstep — an iterator
+    // form over four structures obscures more than it helps here.
+    #[allow(clippy::needless_range_loop)]
+    for scale in 0..n_scales {
+        let (ref rplanes, ws, hs) = rprep.scales[scale];
+        let dplanes = &dprep.scales[scale].0;
+        for ch in 0..3 {
+            attr_blur_cache_channel(
+                &rplanes[ch],
+                &dplanes[ch],
+                ws,
+                hs,
+                want_append,
+                &mut scratch,
+                &mut planes[ch],
+            );
+        }
+        let mut scale_cells = [AttrCellSums::default(); 3];
+        for ch in 0..3 {
+            let append_active = append_cell_active(want_append, ch, scale);
+            let cross: Option<(&[f32], &[f32])> = if ch == 1 {
+                Some((&planes[0].act, &planes[2].act))
+            } else {
+                None
+            };
+            let cell = attr_pass_a_kernels(
+                &rplanes[ch],
+                &dplanes[ch],
+                ws,
+                hs,
+                &planes[ch],
+                cross,
+                &rplanes[1],
+                want_append,
+                append_active,
+                &mut grad_halo,
+                &mut grad_halo_d,
+            );
+            let v2b =
+                scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+            let (gs, gd) = finish_channel_scale(
+                &cell.dense,
+                &cell.grad,
+                cell.blockiness,
+                cell.n,
+                &mut v2_features[v2b..v2b + FEATURES_PER_CHANNEL_V2_TOTAL],
+            );
+            mg[scale][ch] = (gs, gd);
+            if want_append {
+                let apb =
+                    scale * 3 * FEATURES_PER_CHANNEL_APPEND + ch * FEATURES_PER_CHANNEL_APPEND;
+                if append_active {
+                    finish_append(
+                        &cell.dense,
+                        &cell.app,
+                        &cell.grad,
+                        cell.n,
+                        ch == 1,
+                        toggles,
+                        &mut append_features[apb..apb + FEATURES_PER_CHANNEL_APPEND],
+                    );
+                }
+            }
+            scale_cells[ch] = cell;
+        }
+        cells.push(scale_cells);
+    }
+    // Edge-width features (cross-scale) — replicate the production loop.
+    // (`ch` indexes mg + the offset-computed feature slice in lockstep.)
+    #[allow(clippy::needless_range_loop)]
+    for ch in 0..3 {
+        for scale in 1..n_scales {
+            let (pgs, pgd) = mg[scale - 1][ch];
+            let (gs, gd) = mg[scale][ch];
+            let decay_src = gs / (pgs + C_GRAD_DECAY);
+            let decay_dst = gd / (pgd + C_GRAD_DECAY);
+            let prev_b = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+            v2_features[prev_b + idx::EDGE_WIDTH_CHANGE] =
+                1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
+            if scale == n_scales - 1 && n_scales >= 2 {
+                let this_b =
+                    scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                v2_features[this_b + idx::EDGE_WIDTH_CHANGE] =
+                    v2_features[prev_b + idx::EDGE_WIDTH_CHANGE];
+            }
+        }
+    }
+
+    // Edge-width pass-B coefficients: for E(t) = 1 − bounded_sim(a_t, b_t)
+    // (stored at scale t; the LAST scale's slot is a copy of E(n−2), so its
+    // gradient weight folds into E(n−2)'s), the chain rule puts terms on
+    // the (|∇d|−|∇s|) planes of scales t and t+1:
+    //   δE(t) per refined pixel at scale u = −∂bs/∂b · ∂b_t/∂mgd_u ·
+    //   (|∇d|−|∇s|)_i / N_u   (mgd_u's per-pixel refinement change).
+    let mut c_edgew = vec![[0.0f64; 3]; n_scales];
+    if n_scales >= 2 {
+        for ch in 0..3 {
+            for t in 0..n_scales - 1 {
+                let v2b =
+                    t * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                let mut sk = s_v2
+                    .get(v2b + idx::EDGE_WIDTH_CHANGE)
+                    .copied()
+                    .unwrap_or(0.0);
+                if t == n_scales - 2 {
+                    let lb = (n_scales - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                        + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                    sk += s_v2
+                        .get(lb + idx::EDGE_WIDTH_CHANGE)
+                        .copied()
+                        .unwrap_or(0.0);
+                }
+                if sk == 0.0 {
+                    continue;
+                }
+                let (pgs, pgd) = mg[t][ch];
+                let (gs, gd) = mg[t + 1][ch];
+                let a = gs / (pgs + C_GRAD_DECAY);
+                let b = gd / (pgd + C_GRAD_DECAY);
+                let den = a * a + b * b + C_EDGEWIDTH;
+                // ∂bs(a,b)/∂b; E = 1 − bs ⇒ ∂E/∂b = −dbs_db.
+                let dbs_db = (2.0 * a * den - (2.0 * a * b + C_EDGEWIDTH) * 2.0 * b) / (den * den);
+                let de_db = -dbs_db;
+                let n_t = (rprep.scales[t].1 * rprep.scales[t].2) as f64;
+                let n_t1 = (rprep.scales[t + 1].1 * rprep.scales[t + 1].2) as f64;
+                // ∂b/∂mgd_{t+1} = 1/(pgd + C); ∂b/∂mgd_t = −gd/(pgd + C)².
+                // δmgd_u per refined pixel = −(|∇d|−|∇s|)_i / N_u, so BOTH
+                // terms carry the −1/N_u factor (the earlier +1/n_t here was
+                // a sign bug — caught by the finite-difference direction
+                // test `v2_append_attr_signed_integrand_directions`).
+                c_edgew[t + 1][ch] += sk * de_db * (1.0 / (pgd + C_GRAD_DECAY)) * (-1.0 / n_t1);
+                c_edgew[t][ch] += sk
+                    * de_db
+                    * (-gd / ((pgd + C_GRAD_DECAY) * (pgd + C_GRAD_DECAY)))
+                    * (-1.0 / n_t);
+            }
+        }
+    }
+
+    // ── Sweep 2 (pass B): re-blur caches per scale, combine, upsample. ──
+    let mut canvas = vec![0.0f64; w0 * h0];
+    let mut scale_density = vec![0.0f64; w0 * h0];
+    for scale in 0..n_scales {
+        let (ref rplanes, ws, hs) = rprep.scales[scale];
+        let dplanes = &dprep.scales[scale].0;
+        let n = ws * hs;
+        for ch in 0..3 {
+            attr_blur_cache_channel(
+                &rplanes[ch],
+                &dplanes[ch],
+                ws,
+                hs,
+                want_append,
+                &mut scratch,
+                &mut planes[ch],
+            );
+        }
+        scale_density[..n].fill(0.0);
+        for ch in 0..3 {
+            let append_active = append_cell_active(want_append, ch, scale);
+            let cross: Option<(&[f32], &[f32])> = if ch == 1 {
+                Some((&planes[0].act, &planes[2].act))
+            } else {
+                None
+            };
+            let co = derive_v2app_coeffs(
+                s_v2,
+                s_append,
+                scale,
+                ch,
+                &cells[scale][ch],
+                append_active,
+                ch == 1,
+                c_edgew[scale][ch],
+            );
+            attr_pass_b_channel(
+                &rplanes[ch],
+                &dplanes[ch],
+                ws,
+                hs,
+                &planes[ch],
+                cross,
+                &rplanes[1],
+                &co,
+                &mut scale_density[..n],
+            );
+        }
+        // Sum-preserving footprint upsample (the v2 pyramid floor-halves,
+        // so footprints are full 2^s × 2^s blocks; ÷4^s is exact).
+        let factor = 1usize << scale;
+        if factor == 1 {
+            for (c, &v) in canvas.iter_mut().zip(scale_density[..n].iter()) {
+                *c += v;
+            }
+        } else {
+            let inv_area = 1.0 / ((factor * factor) as f64);
+            for sy in 0..hs {
+                let y0 = sy * factor;
+                let y1 = (y0 + factor).min(h0);
+                for sx in 0..ws {
+                    let v = scale_density[sy * ws + sx] * inv_area;
+                    let x0 = sx * factor;
+                    let x1 = (x0 + factor).min(w0);
+                    for row in canvas[y0 * w0..].chunks_mut(w0).take(y1.saturating_sub(y0)) {
+                        for slot in &mut row[x0..x1] {
+                            *slot += v;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Trim the (possibly reflect-padded sub-64) canvas to the original.
+    let (ow, oh) = (reference.width(), reference.height());
+    let density = if ow == w0 && oh == h0 {
+        canvas
+    } else {
+        let mut out = Vec::with_capacity(ow * oh);
+        for y in 0..oh.min(h0) {
+            out.extend_from_slice(&canvas[y * w0..y * w0 + ow.min(w0)]);
+        }
+        out
+    };
+    Ok(V2AppendAttribution {
+        density,
+        width: ow,
+        height: oh,
+        v2_features,
+        append_features,
+    })
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -9607,5 +10584,339 @@ mod tests {
         // derived-curve strength.
         assert_eq!(CSFW_LAMBDA_B[2], 1.0);
         assert_eq!(CSFW_KAPPA_Y, 1.0);
+    }
+
+    // ── task #67 C2a: v2+append attribution density ─────────────────────
+
+    /// Pass A of the attribution builder must reproduce the production
+    /// v2 + append features: same kernels over replicated planes, so the
+    /// pooled scalars every coefficient derives from are
+    /// production-arithmetic. Compared against the canonical folded-append
+    /// STREAMING extractor (what the 924 bakes were trained on).
+    #[test]
+    fn v2_append_attr_features_match_production() {
+        let (w, h) = (150usize, 170usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+        let prod = z
+            .compute_folded720_append_features_streaming(
+                &sref,
+                &dref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        let pf = prod.features();
+        assert_eq!(pf.len(), 924);
+
+        let s_zero_v2 = vec![0.0f64; 348];
+        let s_zero_app = vec![0.0f64; 204];
+        let attr =
+            compute_v2_append_attribution(&sref, &dref, &s_zero_v2, Some(&s_zero_app), None, false)
+                .unwrap();
+        assert_eq!(attr.v2_features.len(), 348);
+        assert_eq!(attr.append_features.len(), 204);
+        let mut worst = 0.0f64;
+        for k in 0..348 {
+            let (a, b) = (attr.v2_features[k], pf[372 + k]);
+            let rel = (a - b).abs() / b.abs().max(1e-12);
+            worst = worst.max(rel);
+            assert!(
+                rel <= 1e-9,
+                "v2 slot {k}: attr {a} vs production {b} (rel {rel:.3e})"
+            );
+        }
+        for k in 0..204 {
+            let (a, b) = (attr.append_features[k], pf[720 + k]);
+            let rel = (a - b).abs() / b.abs().max(1e-12);
+            worst = worst.max(rel);
+            assert!(
+                rel <= 1e-9,
+                "append slot {k}: attr {a} vs production {b} (rel {rel:.3e})"
+            );
+        }
+        let _ = worst;
+    }
+
+    /// Sum identities of the density (full-image rectangle sum) for the
+    /// pool classes, against the PRODUCTION feature values: mean pools
+    /// (Σ density = −s_k·f_k), reference-weighted pools (same identity),
+    /// and the self-weighted soft-peak (Σ density = 0 exactly, since
+    /// Σ w(v)(f−v) ≡ 0). Tolerances are 1e-5-class: pass B re-derives the
+    /// per-pixel signals in f64 while the kernels pooled f32-lane values —
+    /// a documented recompute-precision gap, NOT a pooling mismatch (that
+    /// is gated at 1e-9 by `v2_append_attr_features_match_production`).
+    #[test]
+    fn v2_append_attr_sum_identities() {
+        let (w, h) = (150usize, 170usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+        let prod = z
+            .compute_folded720_append_features_streaming(
+                &sref,
+                &dref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        let pf = prod.features();
+
+        let run = |sv2: Vec<f64>, sap: Option<Vec<f64>>| -> f64 {
+            let attr =
+                compute_v2_append_attribution(&sref, &dref, &sv2, sap.as_deref(), None, false)
+                    .unwrap();
+            attr.density.iter().sum()
+        };
+
+        // Mean pools: v2 ART (scale 0, ch Y, slot 3) and append
+        // MSCN_DIFF_MEAN (scale 1, ch X, slot 5) + XMASK (scale 0, Y).
+        for (v2_idx, app_idx, feat_idx) in [
+            (Some(29 + idx::ART), None, 372 + 29 + idx::ART),
+            (
+                None,
+                Some(3 * FEATURES_PER_CHANNEL_APPEND + idx_append::MSCN_DIFF_MEAN),
+                720 + 3 * FEATURES_PER_CHANNEL_APPEND + idx_append::MSCN_DIFF_MEAN,
+            ),
+            (
+                None,
+                Some(FEATURES_PER_CHANNEL_APPEND + idx_append::XMASK_TRANSDUCER),
+                720 + FEATURES_PER_CHANNEL_APPEND + idx_append::XMASK_TRANSDUCER,
+            ),
+            // Reference-weighted pools: v2 MASKED_SSIM (scale 0, Y) and
+            // append LUM_DARK_ERR (scale 0, Y).
+            (
+                Some(29 + idx::MASKED_SSIM),
+                None,
+                372 + 29 + idx::MASKED_SSIM,
+            ),
+            (
+                None,
+                Some(FEATURES_PER_CHANNEL_APPEND + idx_append::LUM_DARK_ERR),
+                720 + FEATURES_PER_CHANNEL_APPEND + idx_append::LUM_DARK_ERR,
+            ),
+        ] {
+            let mut sv2 = vec![0.0f64; 348];
+            let mut sap = vec![0.0f64; 204];
+            if let Some(k) = v2_idx {
+                sv2[k] = -1.0;
+            }
+            if let Some(k) = app_idx {
+                sap[k] = -1.0;
+            }
+            let sum = run(sv2, Some(sap));
+            let expect = pf[feat_idx];
+            assert!(
+                expect > 0.0,
+                "fixture must exercise feature {feat_idx} (got {expect})"
+            );
+            // 1e-5: the kernels pool f32-lane values (the dense kernel's
+            // POOL_SIMD masked/iw block is f32-lane-accumulated on v4x —
+            // documented 5e-4 reassociation class in the module docs) while
+            // pass B re-derives in f64; measured gap ~2e-6 on this fixture
+            // (MASKED_SSIM). Pooling parity itself is gated at 1e-9 by
+            // `v2_append_attr_features_match_production`.
+            assert!(
+                (sum - expect).abs() <= 1e-5 * expect.max(1e-9),
+                "slot f{feat_idx}: density sum {sum} vs feature {expect}"
+            );
+        }
+
+        // Soft-peak: full-image sum is identically 0 (Σ w(v)(f−v) = 0).
+        let mut sv2 = vec![0.0f64; 348];
+        sv2[29 + idx::SSIM_SOFT_PEAK] = -1.0;
+        let attr = compute_v2_append_attribution(&sref, &dref, &sv2, None, None, false).unwrap();
+        let total: f64 = attr.density.iter().sum();
+        let mass: f64 = attr.density.iter().map(|v| v.abs()).sum();
+        // 1e-4·mass: the identity Σw(v)·v = f·Σw(v) is exact only when `f`
+        // is computed from the same per-pixel arithmetic; here `f` comes
+        // from the f32-lane kernel pools while the density recomputes in
+        // f64 (measured residual ~2e-5·mass). A sign/formula error would
+        // land at ~mass scale — 4 orders above this bound.
+        assert!(
+            total.abs() <= 1e-4 * mass.max(1e-12),
+            "soft-peak density must sum to 0: total {total}, |mass| {mass}"
+        );
+        assert!(mass > 0.0, "soft-peak density must be non-trivial");
+    }
+
+    /// Global-slot integrand sanity: refining a block moves GLOBAL_DMEAN's
+    /// density block-sum onto the TRUE feature delta (first-order; the
+    /// global slots have no blur bleed, so the agreement is tight).
+    #[test]
+    fn v2_append_attr_global_dmean_matches_true_delta() {
+        let (w, h) = (128usize, 128usize);
+        let src = textured_image(w, h, 7);
+        // Distortion with a global mean shift (so GLOBAL_DMEAN is active).
+        let mut dst = quantize_distort(&src, w, h);
+        for p in dst.iter_mut() {
+            p[0] = p[0].saturating_add(6);
+            p[1] = p[1].saturating_add(6);
+        }
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+        let base = z
+            .compute_folded720_append_features_streaming(
+                &sref,
+                &dref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        // Refine a 16×16 block (copy reference pixels).
+        let (bx0, by0, bs) = (48usize, 64usize, 16usize);
+        let mut refined = dst.clone();
+        for y in by0..by0 + bs {
+            for x in bx0..bx0 + bs {
+                refined[y * w + x] = src[y * w + x];
+            }
+        }
+        let rref = RgbSlice::new(&refined, w, h);
+        let ref_feats = z
+            .compute_folded720_append_features_streaming(
+                &sref,
+                &rref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        // GLOBAL_DMEAN, scale 0, ch Y.
+        let k = 720 + FEATURES_PER_CHANNEL_APPEND + idx_append::GLOBAL_DMEAN;
+        let true_delta = ref_feats.features()[k] - base.features()[k];
+        assert!(true_delta != 0.0, "fixture must move GLOBAL_DMEAN");
+
+        let mut sap = vec![0.0f64; 204];
+        sap[FEATURES_PER_CHANNEL_APPEND + idx_append::GLOBAL_DMEAN] = 1.0; // s_k = +1
+        let sv2 = vec![0.0f64; 348];
+        let attr =
+            compute_v2_append_attribution(&sref, &dref, &sv2, Some(&sap), None, false).unwrap();
+        // density block sum ≈ s_k · Δf = true_delta (s_k = 1).
+        let mut block_sum = 0.0f64;
+        for y in by0..by0 + bs {
+            for x in bx0..bx0 + bs {
+                block_sum += attr.density[y * w + x];
+            }
+        }
+        let rel = (block_sum - true_delta).abs() / true_delta.abs();
+        assert!(
+            rel <= 0.05,
+            "GLOBAL_DMEAN first-order: density block sum {block_sum} vs true Δf {true_delta} (rel {rel:.4})"
+        );
+    }
+
+    /// Finite-difference direction check for every SIGNED / chain-rule
+    /// integrand family: refine one block, compare each slot's density
+    /// block-sum against the TRUE production feature delta. These are
+    /// first-order estimates of blurred, clamped pool functionals under a
+    /// FINITE removal — magnitude agreement is loose by nature (blur bleed
+    /// alone moves mass across the block border) — but the SIGN and the
+    /// gross magnitude must agree, or a chain-rule sign error exists.
+    #[test]
+    fn v2_append_attr_signed_integrand_directions() {
+        let (w, h) = (128usize, 128usize);
+        let src = textured_image(w, h, 11);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+        let base = z
+            .compute_folded720_append_features_streaming(
+                &sref,
+                &dref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        let (bx0, by0, bs) = (32usize, 48usize, 32usize);
+        let mut refined = dst.clone();
+        for y in by0..by0 + bs {
+            for x in bx0..bx0 + bs {
+                refined[y * w + x] = src[y * w + x];
+            }
+        }
+        let rref = RgbSlice::new(&refined, w, h);
+        let rfeats = z
+            .compute_folded720_append_features_streaming(
+                &sref,
+                &rref,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+
+        // (label, v2 slice index or append slice index)
+        let v2_cases: &[(&str, usize)] = &[
+            ("SSIM_DEV2 s0 Y", 29 + idx::SSIM_DEV2),
+            ("SSIM_SOFT_PEAK s0 Y", 29 + idx::SSIM_SOFT_PEAK),
+            ("EDGE_WIDTH s0 Y", 29 + idx::EDGE_WIDTH_CHANGE),
+            ("BLOCKINESS s0 Y", 29 + idx::BLOCKINESS),
+        ];
+        let app_cases: &[(&str, usize)] = &[
+            (
+                "GMS_DEV2 s0 Y",
+                FEATURES_PER_CHANNEL_APPEND + idx_append::GMS_DEV2,
+            ),
+            (
+                "GLOBAL_CGAIN s0 Y",
+                FEATURES_PER_CHANNEL_APPEND + idx_append::GLOBAL_CGAIN,
+            ),
+            (
+                "GLOBAL_CLOSS s0 Y",
+                FEATURES_PER_CHANNEL_APPEND + idx_append::GLOBAL_CLOSS,
+            ),
+        ];
+        let mut checked = 0usize;
+        let mut check = |label: &str, sv2: Vec<f64>, sap: Option<Vec<f64>>, feat_idx: usize| {
+            let true_delta = rfeats.features()[feat_idx] - base.features()[feat_idx];
+            // Slots the fixture barely moves can't direction-check.
+            if true_delta.abs() < 1e-7 {
+                return;
+            }
+            let attr =
+                compute_v2_append_attribution(&sref, &dref, &sv2, sap.as_deref(), None, false)
+                    .unwrap();
+            let mut block_sum = 0.0f64;
+            for y in by0..by0 + bs {
+                for x in bx0..bx0 + bs {
+                    block_sum += attr.density[y * w + x];
+                }
+            }
+            // s_k = +1 ⇒ block sum ≈ Δf. Sign must match; magnitude within
+            // a factor of ~3 either way (blur bleed + curvature).
+            assert!(
+                block_sum.signum() == true_delta.signum(),
+                "{label}: sign mismatch — density {block_sum} vs true Δf {true_delta}"
+            );
+            let ratio = block_sum / true_delta;
+            assert!(
+                (0.3..=3.0).contains(&ratio),
+                "{label}: magnitude off — density {block_sum} vs true Δf {true_delta} (ratio {ratio:.3})"
+            );
+            checked += 1;
+        };
+        for &(label, k) in v2_cases {
+            let mut sv2 = vec![0.0f64; 348];
+            sv2[k] = 1.0;
+            check(label, sv2, None, 372 + k);
+        }
+        for &(label, k) in app_cases {
+            let mut sap = vec![0.0f64; 204];
+            sap[k] = 1.0;
+            check(label, vec![0.0f64; 348], Some(sap), 720 + k);
+        }
+        assert!(
+            checked >= 3,
+            "fixture too tame — only {checked} signed slots direction-checked"
+        );
     }
 }

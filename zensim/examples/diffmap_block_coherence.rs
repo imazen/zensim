@@ -566,53 +566,51 @@ fn run_bake_mode(
     #[cfg(not(feature = "feature-regime-v2"))]
     let _ = &v2_grad;
 
-    // M3a (task #67 C1): attribution density with TRUE per-feature integrands
-    // + summed-area table — block sums via the O(1) rectangle-query API the
-    // codec loop would use. Same s_k, same v2 fold-in as M3; the difference
-    // is the fold itself (absolute integrand attribution vs the normalized
-    // mass-blended signal fold).
+    // M3a (task #67 C1+C2a): attribution density with TRUE per-feature
+    // integrands + summed-area table — block sums via the O(1)
+    // rectangle-query API the codec loop would use. C1 covered the basic
+    // block (f0-155); C2a extends coverage with exact-integrand densities
+    // for the v2 (f372-719) and append (f720-923) blocks
+    // (`compute_attribution_density_full`), replacing C1's unit-scaled
+    // mean-integrand `compute_v2_diffmap` fold-in.
     let t_attr = std::time::Instant::now();
     let attr = z_map
         .compute_attribution_density(&rs, &dist_slice, s_basic)
         .expect("attribution density");
     let ms_attr = t_attr.elapsed().as_secs_f64() * 1e3;
     let attr_block_basic = attr.block_sums(block);
-    // v2 fold-in, UNIT-CORRECT (unlike M3's raw add, which is fine for the
-    // normalized signal fold but would swamp the score-unit density by
-    // orders of magnitude): the v2 channel-scale fold is linear in the
-    // per-(scale,ch,slot) weights, replicate-upsamples coarse scales, and
-    // its family maps pool to the features by (weighted) MEAN over the
-    // scale plane (`v2_diffmap_block_pool_matches_features`). Scaling each
-    // weight by 1/(w·h) = 1/(N_sc·4^sc) (exact for even pyramid dims)
-    // therefore turns the fold into a v2 attribution density in score
-    // units — a mean-integrand approximation; the fold's non-additive v2
-    // families (dev/soft-peak/fragility/edge-width) stay excluded, and the
-    // append block f720-923 stays blind.
     #[cfg(feature = "feature-regime-v2")]
-    let mut v2attr_block: Option<Vec<f64>> = None;
+    let mut ms_attr_full = 0.0f64;
     #[cfg(feature = "feature-regime-v2")]
-    let attr_block: Vec<f64> = if let Some(v2g) = &v2_grad {
-        let inv_n0 = 1.0 / (w as f64 * h as f64);
-        let v2g_attr: Vec<f64> = v2g.iter().map(|&x| x * inv_n0).collect();
-        let v2attr = z_map
-            .compute_v2_diffmap(&rs, &dist_slice, &v2g_attr)
-            .expect("v2 attribution diffmap");
-        v2attr_block =
-            Some(zensim::AttributionResult::from_density(v2attr.clone(), w, h).block_sums(block));
-        let mut d = attr.density().to_vec();
-        for (a, v) in d.iter_mut().zip(v2attr.iter()) {
-            *a += *v;
-        }
-        zensim::AttributionResult::from_density(d, w, h).block_sums(block)
+    let attr_block: Vec<f64> = if n_in > 372 {
+        let t_full = std::time::Instant::now();
+        let full = z_map
+            .compute_attribution_density_full(&rs, &dist_slice, &s[..n_in])
+            .expect("full attribution density");
+        ms_attr_full = t_full.elapsed().as_secs_f64() * 1e3;
+        full.block_sums(block)
     } else {
         attr_block_basic.clone()
     };
     #[cfg(not(feature = "feature-regime-v2"))]
     let attr_block: Vec<f64> = attr_block_basic.clone();
     #[cfg(feature = "feature-regime-v2")]
-    let attr_has_v2 = v2_grad.is_some();
+    let attr_has_v2 = n_in > 372;
     #[cfg(not(feature = "feature-regime-v2"))]
     let attr_has_v2 = false;
+    // v2+append-only block sums (full − basic): the diag's approximation-
+    // quality probe against the non-basic true linearization.
+    let v2attr_block: Option<Vec<f64>> = if attr_has_v2 {
+        Some(
+            attr_block
+                .iter()
+                .zip(attr_block_basic.iter())
+                .map(|(f, b)| f - b)
+                .collect(),
+        )
+    } else {
+        None
+    };
 
     let bx = w.div_ceil(block);
     let by = h.div_ceil(block);
@@ -716,11 +714,16 @@ fn run_bake_mode(
             spearman(&lin_append, &delta_s),
             spearman(&lin_no_append, &delta_s),
         );
-        #[cfg(feature = "feature-regime-v2")]
         if let Some(v2b) = &v2attr_block {
+            let lin_v2app: Vec<f64> = lin_v2
+                .iter()
+                .zip(lin_append.iter())
+                .map(|(a, b)| a + b)
+                .collect();
             println!(
-                "  ATTRDIAG v2attr_block vs true-lin_v2 SROCC {:+.4}  (v2 fold-in approximation quality)",
-                spearman(v2b, &lin_v2)
+                "  ATTRDIAG v2+append attr vs true-lin (v2 {:+.4} | v2+append {:+.4})  (non-basic density approximation quality)",
+                spearman(v2b, &lin_v2),
+                spearman(v2b, &lin_v2app)
             );
         }
     }
@@ -748,8 +751,16 @@ fn run_bake_mode(
             String::new()
         }
     );
+    #[cfg(feature = "feature-regime-v2")]
+    let full_note = if attr_has_v2 {
+        format!(" | full (basic+v2+append) {ms_attr_full:.1} ms")
+    } else {
+        String::new()
+    };
+    #[cfg(not(feature = "feature-regime-v2"))]
+    let full_note = String::new();
     println!(
-        "      perf: attribution build {ms_attr:.1} ms vs ModelSensitivity diffmap {ms_model:.1} ms  (C1 reports; C2 bar is <=1.1x)"
+        "      perf: attribution basic {ms_attr:.1} ms{full_note} vs ModelSensitivity diffmap {ms_model:.1} ms  (measure-only; C2b optimizes)"
     );
     println!(
         "  M2  SROCC(grad_lin_pred,           ΔS_bake) = {m2:+.4}   PLCC {:+.4}   (gradient/linearization ceiling)",

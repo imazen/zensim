@@ -652,6 +652,73 @@ impl crate::metric::Zensim {
         distorted: &impl ImageSource,
         s: &[f64],
     ) -> Result<AttributionResult, ZensimError> {
+        let (canvas, width, height) = self.basic_canvas_trimmed(precomputed, distorted, s)?;
+        Ok(AttributionResult::from_f64_canvas(canvas, width, height))
+    }
+
+    /// FULL-coverage attribution density (task #67 C2a): the BASIC block
+    /// density plus exact-integrand densities for the v2 (`f372-719`) and —
+    /// when `s` extends past 720 — append (`f720-923`) blocks, built by
+    /// [`crate::feature_v2::compute_v2_append_attribution`]'s replication of
+    /// the production kernels. `s` is the raw full-layout gradient
+    /// (`∂score/∂f_k`, 720- or 924-wide; the `f156-371` peak/masked/iw block
+    /// is not spatializable and is ignored, as in the harness's
+    /// structural-zero handling).
+    ///
+    /// Remaining documented approximations: first-order integrands
+    /// throughout, blur bleed unmodeled, finalize clamps treated as inert,
+    /// blockiness steps split 50/50 across their pixel pair, reference-only
+    /// slots (fragility, grad-src-mean) exactly zero. See the module docs
+    /// here and the `feature_v2` attribution section.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`compute_attribution_density`](Self::compute_attribution_density).
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_attribution_density_full(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        s: &[f64],
+    ) -> Result<AttributionResult, ZensimError> {
+        validate_pair(source, distorted)?;
+        let precomputed = self.precompute_reference(source)?;
+        let (mut canvas, width, height) = self.basic_canvas_trimmed(&precomputed, distorted, s)?;
+        let s_v2: &[f64] = if s.len() > 372 {
+            &s[372..s.len().min(720)]
+        } else {
+            &[]
+        };
+        let s_append: Option<&[f64]> = if s.len() > 720 {
+            Some(&s[720..s.len().min(924)])
+        } else {
+            None
+        };
+        if !s_v2.is_empty() || s_append.is_some() {
+            let v2a = crate::feature_v2::compute_v2_append_attribution(
+                source,
+                distorted,
+                s_v2,
+                s_append,
+                self.max_pixels(),
+                self.parallel(),
+            )?;
+            debug_assert_eq!((v2a.width, v2a.height), (width, height));
+            for (c, v) in canvas.iter_mut().zip(v2a.density.iter()) {
+                *c += *v;
+            }
+        }
+        Ok(AttributionResult::from_f64_canvas(canvas, width, height))
+    }
+
+    /// Shared basic-block canvas builder (f64, trimmed to the logical
+    /// image): the C1 path and the full-coverage path both start here.
+    fn basic_canvas_trimmed(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+    ) -> Result<(Vec<f64>, usize, usize), ZensimError> {
         let params = self.profile().params();
         if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
@@ -700,7 +767,7 @@ impl crate::metric::Zensim {
             }
             out
         };
-        Ok(AttributionResult::from_f64_canvas(trimmed, width, height))
+        Ok((trimmed, width, height))
     }
 }
 
@@ -946,6 +1013,47 @@ mod tests {
         assert_eq!(attr.width(), w);
         assert_eq!(attr.height(), h);
         assert_eq!(attr.density().len(), w * h);
+    }
+
+    /// `compute_attribution_density_full` wiring: with a gradient that is
+    /// zero beyond the basic block it must equal the basic-only path
+    /// exactly, and with v2/append weights present the result must equal
+    /// basic + the feature_v2 density (same trimmed canvas addition).
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn full_density_is_basic_plus_v2_append() {
+        let (w, h) = (96, 80);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let mut s = vec![0.0f64; 924];
+        s[13] = -0.7; // basic: scale 0, ch Y, ssim mean
+        let full_basic_only = z.compute_attribution_density_full(&rs, &ds, &s).unwrap();
+        let basic = z.compute_attribution_density(&rs, &ds, &s[..156]).unwrap();
+        for (a, b) in full_basic_only.density().iter().zip(basic.density().iter()) {
+            assert!((a - b).abs() <= 1e-12, "basic-only full != basic path");
+        }
+        s[372 + 29 + 3] = -0.4; // v2 ART, scale 0, ch Y
+        s[720 + 17 + 9] = -0.3; // append TEXTURE_DISSIM, scale 0, ch Y
+        let full = z.compute_attribution_density_full(&rs, &ds, &s).unwrap();
+        let v2a = crate::feature_v2::compute_v2_append_attribution(
+            &rs,
+            &ds,
+            &s[372..720],
+            Some(&s[720..924]),
+            None,
+            false,
+        )
+        .unwrap();
+        for i in 0..w * h {
+            let expect = basic.density()[i] as f64 + v2a.density[i];
+            let got = full.density()[i] as f64;
+            assert!(
+                (got - expect).abs() <= 1e-6 * expect.abs().max(1e-9) + 1e-9,
+                "pixel {i}: full {got} vs basic+v2app {expect}"
+            );
+        }
     }
 
     /// The density must be finite everywhere on adversarial flat/extreme

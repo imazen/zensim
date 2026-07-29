@@ -132,3 +132,108 @@ ZENSIM_ATTR_DIAG=1 target/release/examples/diffmap_block_coherence \
   $D/city.png $D/city_576_q50.jpg \
   --bake /mnt/v/output/zensim/bakes/coherent-089/em2/EM2_fold924_s99.bin --block 32
 ```
+
+---
+
+# C2a — coverage completion: exact v2 + append integrands (2026-07-29)
+
+Same pair/bakes/host as C1. Logs: `~/tmp/attrmap-c1/gate_matrix_c2a_v2.log`
+(final, post edge-width sign fix); perf re-measured uncontended.
+
+## What shipped
+
+- **`Zensim::compute_attribution_density_full`** (`custom-profiles` +
+  `feature-regime-v2`): basic density (C1) + **exact-integrand densities for
+  every v2 (f372-719) and append (f720-923) slot**, built by
+  `feature_v2::compute_v2_append_attribution`. Pass A replays the materialized
+  strip walk (STRIP_ROWS/HALO_P geometry, `run_blur_pass`, the `stream_phase_a`
+  σ-split `bs2` chain) and runs the PRODUCTION kernels
+  (dense/gradient/append/blockiness) over the replicated planes — pooled
+  scalars are production-arithmetic, gated at **1e-9** against the canonical
+  924 streaming extractor (`v2_append_attr_features_match_production`).
+  Pass B combines exact f64 integrands per slot class and upsamples
+  sum-preservingly. This REPLACES C1's unit-scaled mean-integrand
+  `compute_v2_diffmap` fold-in in the harness.
+- Integrand classes (all 29 v2 + 17 append slots covered):
+  mean pools exact (`−v/N`); reference-weighted pools exact (`−w·v/Σw`:
+  masked/iw, append luminance bins with the Bernstein mid-bin);
+  **self-weighted soft-peaks** exact first-order (`w(v)(f−v)/W`, full-plane
+  sum ≡ 0); **deviation pools** (SSIM_DEV2/DEV4, GMS/ART/DET_DEV2) exact
+  central-moment chain rule, SIGNED; **global slots** (GLOBAL_DMEAN/CGAIN/
+  CLOSS) exact whole-plane chain rule; **blockiness** lattice terms split
+  50/50 across the step pair; **EDGE_WIDTH_CHANGE** exact two-scale chain
+  rule (incl. the last-scale copy's weight); reference-only slots
+  (PJND_FRAGILITY, GRAD_SRC_MEAN) exactly 0; structural zeros (X/B
+  transducers, the (B, scale 0) append cell) exactly 0.
+- Tests: production-parity 1e-9 (the strict gate); density sum identities at
+  1e-5 (mean + weighted pools; **the density-sum-vs-feature identity is
+  1e-5/1e-6-class by physics** — kernels pool f32-lane values, pass B
+  recomputes in f64; a 1e-9 density-sum identity is only achievable for
+  kernel-stored planes, i.e. C1's basic sd slots); soft-peak zero-sum;
+  finite-difference direction checks on every SIGNED integrand family
+  (GLOBAL_DMEAN at 5 %; dev/soft-peak/edge-width/blockiness/globals at
+  sign + factor-3) — **this FD test caught a real sign bug in the
+  edge-width scale-t term before landing**; full-density wiring test.
+  Suite: 259 passed / 0 failed.
+
+## Gate table (M3a = full-coverage density; targets ≥ 0.85 every cell)
+
+### EM2_fold924_s99 (924, pathological)
+
+| block | M2 | M3 (fold) | C1 M3a | **C2a M3a** | gate |
+|---|---|---|---|---|---|
+| 16 | 1.0000 | +0.377 | +0.506 | **+0.8605** | PASS |
+| 32 | 0.9999 | +0.305 | +0.426 | **+0.9254** | PASS |
+| 64 | 0.9999 | +0.249 | +0.384 | **+0.9748** | PASS |
+| 128 | 0.9992 | −0.362 | −0.187 | **+0.9915** | PASS |
+
+The 128 px inversion — the E-M9 pathology this program exists to fix — is
+CURED: −0.36 (fold) → **+0.99**, essentially at the M2 ceiling. The append
+block (0.5 % |s|-mass, the whole coarse-block signal) is what did it:
+non-basic density vs non-basic true-lin = 0.84/0.91/0.96/1.00.
+
+### foldmlp_bigcodec_kadis_720 (720, healthy)
+
+| block | M2 | M3 (fold) | C1 M3a | **C2a M3a** | gate |
+|---|---|---|---|---|---|
+| 16 | 1.0000 | +0.420 | +0.569 | **+0.6850** | miss |
+| 32 | 1.0000 | +0.281 | +0.499 | **+0.5330** | miss |
+| 64 | 0.9999 | +0.003 | +0.426 | **+0.3828** | miss |
+| 128 | 1.0000 | +0.592 | +0.895 | **+0.9023** | PASS |
+
+## Verdict — 5/8 cells pass (EM2 4/4, K720 1/4); K720 gap decomposed
+
+- **Coverage: COMPLETE.** Every f0-923 slot is attributed (exact, exact
+  first-order, or exactly-zero-by-structure). The C1 append-blind ceiling is
+  gone; for a 720 bake, basic+v2 true-lin = M2 = 1.0000.
+- **True-nonlinearity: negligible** (M2 0.9992-1.0000 everywhere).
+- **The K720 16-64 px miss is APPROXIMATION error, isolated to the v2
+  density**: basic-density-vs-its-true-lin holds 0.89-0.98 at all sizes,
+  while v2-density-vs-true-lin_v2 runs 0.61/0.40/0.18/0.89 (16/32/64/128).
+  K720 carries 17.3 % v2 mass spread over ~29 slots × 12 cells; EM2's v2
+  mass is 1.1 % (noise there, dominated by its append block, hence 4/4).
+  Leading mechanism (hypothesis, C2b lever): **blur bleed** — the v2 signals
+  are 11×11-box-blurred at each scale and the density attributes each signal
+  wholly to its own pixel; at 16-64 px the bleed zone rivals the block. The
+  natural C2b remedy is spreading each blurred signal's attribution over its
+  blur support (sum-preserving box-spread before upsampling).
+- M3a ≥ M3 (fold) in 7/8 cells; the exception is K720@64 where M3 is 0.003
+  (noise floor) and M3a is 0.383.
+
+## Perf (measure-only; C2b optimizes)
+
+Uncontended at 576²: **full density 125-138 ms** vs C1 basic 28-31 ms vs
+ModelSensitivity fold 11.3 ms. Known C2b levers: single sweep instead of the
+current pass-A/pass-B double blur, sharing the reference prep with the basic
+path (each currently prepares its own pyramid), SIMD for the f64 combine,
+strip-level parallelism.
+
+## Repro (C2a)
+
+```sh
+cargo test -p zensim --features custom-profiles,feature-regime-v2,training \
+  --release --lib v2_append_attr
+ZENSIM_ATTR_DIAG=1 target/release/examples/diffmap_block_coherence \
+  $D/city.png $D/city_576_q50.jpg \
+  --bake /mnt/v/output/zensim/bakes/p1kadis/foldmlp_bigcodec_kadis_720.bin --block 64
+```
