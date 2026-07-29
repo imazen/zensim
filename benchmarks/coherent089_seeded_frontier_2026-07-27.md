@@ -216,3 +216,21 @@ best coherent-regime run recorded. ⚠ single-seed (s13 sibling 0.8747); E-M5 se
   kadis kw0.15 × k seeds → select by sdr25/best_val. Selected: `EM4_mask2_kw0.15_s42` —
   **CID22 0.8924 · KonJND 0.4286 · CSIQ 0.788 · LIVE 0.801** (coherent regime; corruption
   0.042 delegated to the negrich-924 head per E-M4's distributional finding).
+
+**M3 for the selected candidate: 0.251** (27-pair) — the coherence regression deepens
+(EM1 unmasked 0.342; 720-coherent E1_s7 0.694). Honest era ledger:
+
+| model | CID22 | KonJND | M3 | corr-q20 |
+|---|--:|--:|--:|--:|
+| 720 E1_s7 (coherent peak) | 0.893 | 0.254 | **0.694** | — |
+| 720 E-K5 s13 | 0.871 | 0.285 | 0.58 | 0.214 |
+| 924 EM1 s13 | 0.886 | 0.244-band | 0.342 | 0.060 |
+| **924 cand (m2kw0.15_s42)** | **0.8924** | **0.4286** | 0.251 | 0.042 |
+
+**924 wins RANK (CID22+KonJND); 720 wins the CLOSED LOOP (M3+corruption).** The #1 open
+problem of the v3 era is the M3 regression — NOT append-blindness (append |s_k| mass is
+0.7%): the 924-trained models' basic+v2 gradient structure itself is less spatially
+coherent. Suspects: the fresh bigcodec-924 mix, KADIS interaction, or DEV2-mask removing
+spatially-coherent signal (the mask cost coherence without buying corruption). Next
+levers: append per-pixel fold; a coherence-regularized retrain; row-identical bigcodec
+join to isolate the data-mix effect.
