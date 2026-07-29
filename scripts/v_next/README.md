@@ -49,7 +49,7 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 | `export_human_corpora_to_parquet.py` | Export KADID / TID / CID22 / KonJND to parquet with consistent schema. |
 | `export_aic3_to_parquet.py` / `export_aic4_to_parquet.py` | AIC-3 / AIC-4 EPFL JPEG-AIC corpus → parquet. |
 | `aic3_pairs_csv.py` / `aic3_anchor_pairs_tsv.py` / `aic3_jnd_sanity.py` | AIC-3 specific helpers (pair list extraction, sanity-check JND values). |
-| `convert_features_bin.py` | Convert the binary `features.bin` cache (from `zensim-validate`'s extractor) to CSV for inspection or alternate consumption. |
+| _(deleted 2026-07-29)_ `convert_features_bin.py` | DEAD: its consumer (`train_v_next_mlp.py --human-csv`) no longer exists; the ZSFC reader it reimplemented lives in `zensim-validate/src/main.rs`. |
 | `band_balance_safesyn.py` | Audit / rebalance safesyn rows by quality band. |
 | `content_class_explore.py` | Cluster safesyn refs by feature embedding to inform content-class training experiments. |
 
@@ -64,7 +64,6 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 
 | Script | Role |
 |---|---|
-| `verify_bake_srocc.py` | Smoke-test that a bake reproduces a published SROCC on a corpus + features CSV. Doesn't run full Mohammadi panel — use `dataset_metric_baseline` for that. |
 | `verify_mohammadi_anchor.py` | Verify our logistic rescale reproduces Mohammadi 2025 Table 2 anchor values (PSNR-Y / IW-SSIM / CVVDP Z-RMSE on AIC-3 CTC). Companion test exists in `dataset_metric_baseline.rs`. |
 | `analyze_score_quality.py` | Per-quality-band score-distribution analysis. Inputs: per-pair eval CSV. |
 | `apply_butter_filter.py` | Filter pairs by butter-vs-ssim2 concordance. Pre-process step for noise-reduction in the synth corpus. |
