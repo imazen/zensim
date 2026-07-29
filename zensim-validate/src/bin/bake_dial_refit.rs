@@ -46,6 +46,9 @@
 //!   load-bearing: quantization preserves rank but shifts raw outputs, so
 //!   a spline fit on the f32 net maps the packed net's identity to the
 //!   wrong dial value (identity drops 97.8→93.4 observed).
+//! * `strip` — reproduces `strip_spline_metadata.py`: drop one metadata
+//!   entry (default the output-calibration spline), everything else
+//!   re-emitted verbatim.
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -107,6 +110,10 @@ enum Cmd {
     /// network (reproduces `pack_and_calibrate.py`, the STANDARD non-QAT
     /// packing path).
     Pack(PackArgs),
+    /// Drop a metadata entry (default: the output-calibration spline) and
+    /// re-emit everything else verbatim (reproduces
+    /// `strip_spline_metadata.py`).
+    Strip(StripArgs),
 }
 
 // --------------------------------------------------------------------------
@@ -641,7 +648,8 @@ fn cmd_add_spline(a: &AddSplineArgs) -> Result<(), String> {
     );
 
     let metadata = metadata_with_spline(&model, &spline_payload(&cx, &cy));
-    let sz = emit_full(&a.out, &model, &metadata).map_err(|e| format!("write {:?}: {e}", a.out))?;
+    let sz =
+        emit_full(&a.out, &model, &metadata, 0).map_err(|e| format!("write {:?}: {e}", a.out))?;
     eprintln!("emitted {:?} ({sz} B)", a.out);
     Ok(())
 }
@@ -649,7 +657,14 @@ fn cmd_add_spline(a: &AddSplineArgs) -> Result<(), String> {
 /// Re-emit an arbitrary bake VERBATIM (every layer, dtype-preserving) with
 /// replacement metadata — the MLP-capable sibling of [`emit_linear`]. f16
 /// weights round-trip exactly; i8 layers error (extend when needed).
-fn emit_full(out: &Path, model: &Model, metadata: &[OwnedMeta]) -> std::io::Result<usize> {
+/// `schema_hash`: `add-spline` passes 0 (its established output bytes predate
+/// the parameter — do not change them); `strip` preserves the input's.
+fn emit_full(
+    out: &Path,
+    model: &Model,
+    metadata: &[OwnedMeta],
+    schema_hash: u64,
+) -> std::io::Result<usize> {
     struct OwnedLayer {
         in_dim: usize,
         out_dim: usize,
@@ -701,7 +716,7 @@ fn emit_full(out: &Path, model: &Model, metadata: &[OwnedMeta]) -> std::io::Resu
         })
         .collect();
     let bytes = bake(&BakeRequest {
-        schema_hash: 0,
+        schema_hash,
         flags: 0,
         scaler_mean: model.scaler_mean(),
         scaler_scale: model.scaler_scale(),
@@ -1385,6 +1400,68 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
 }
 
 // --------------------------------------------------------------------------
+// subcommand: strip  (reproduces strip_spline_metadata.py)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct StripArgs {
+    #[arg(long = "in")]
+    input: PathBuf,
+    #[arg(long)]
+    out: PathBuf,
+    /// Metadata key to remove.
+    #[arg(long, default_value = SPLINE_KEY)]
+    key: String,
+}
+
+fn cmd_strip(a: &StripArgs) -> Result<(), String> {
+    let bytes = std::fs::read(&a.input).map_err(|e| format!("read {:?}: {e}", a.input))?;
+    let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
+    if !model.feature_bounds().is_empty()
+        || !model.output_specs().is_empty()
+        || !model.discrete_sets().is_empty()
+        || !model.sparse_overrides().is_empty()
+    {
+        return Err(
+            "bake carries feature_bounds/output_specs/discrete_sets/sparse_overrides — \
+             strip does not round-trip those sections yet (fail-loud beats the \
+             Python pipeline's silent drop)"
+                .into(),
+        );
+    }
+    let before = model.metadata().len();
+    let metadata: Vec<OwnedMeta> = clone_metadata(&model)
+        .into_iter()
+        .filter(|m| m.key != a.key)
+        .collect();
+    if metadata.len() == before {
+        return Err(format!(
+            "metadata key {:?} not present in {:?} (keys: {})",
+            a.key,
+            a.input,
+            model
+                .metadata()
+                .iter()
+                .map(|e| e.key)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    // schema_hash preserved, flags 0 + compressed true — the same pipeline
+    // contract as `pack` (and the Python it replaces).
+    let sz = emit_full(&a.out, &model, &metadata, model.schema_hash())
+        .map_err(|e| format!("write {:?}: {e}", a.out))?;
+    eprintln!(
+        "stripped {:?} ({} -> {} metadata entries) -> {:?} ({sz} B)",
+        a.key,
+        before,
+        metadata.len(),
+        a.out
+    );
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
 // sha256 (for add-winsor's byte-repro assertion)
 // --------------------------------------------------------------------------
 
@@ -1410,6 +1487,7 @@ fn main() -> ExitCode {
         Cmd::AddWinsor(a) => cmd_add_winsor(a).map(|_| false),
         Cmd::Gate(a) => cmd_gate(a),
         Cmd::Pack(a) => cmd_pack(a).map(|_| false),
+        Cmd::Strip(a) => cmd_strip(a).map(|_| false),
     };
     match result {
         Ok(gate_failed) => {

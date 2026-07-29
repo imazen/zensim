@@ -57,8 +57,8 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 
 | Script | Role |
 |---|---|
-| `affine_calibrate_bake.py` | (Preferred) Apply `y' = α + β·y` calibration to a ZNPR v3 F32 bake's final layer. Used to map V_X bake's raw output onto the MCOS 0..100 scale. |
-| `bake_to_znpr.py` | Pre-`zenpredict-bake` JSON CLI baker. **Legacy**. New bake construction goes through `zenpredict-bake <input.json> <output.bin>` per CLAUDE.md "JSON pipeline mandate" — see `v0_20b/bake_znpr_v3.py` as the canonical template. |
+| _(deleted 2026-07-29)_ `affine_calibrate_bake.py` | Duplicate of the Rust `affine_calibrate` bin (`zensim-validate/src/bin/affine_calibrate.rs`, exists since 2026-06-18) — use that. |
+| _(deleted 2026-07-29)_ `bake_to_znpr.py` | Emitted BANNED ZNPR v2; its trainer (`train_v_next_mlp.py`) no longer exists. Bake construction goes through `zenpredict bake <input.json> <output.bin>`. |
 
 ### Eval + analysis
 

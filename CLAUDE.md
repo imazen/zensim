@@ -781,6 +781,9 @@ bake_dial_refit gate --bake <bin> --corpus <parquet> [--ref-col human_score]
 # PACKED net (BYTE-IDENTICAL to pack_and_calibrate.py + the shipped packed30k)
 bake_dial_refit pack --in <f32.bin> --out <out.bin> [--neg-tail] \
     [--dtype f16] [--zerobias-bulk 0.005] [--protect-last]
+# drop one metadata entry, rest verbatim (BYTE-IDENTICAL to the deleted
+# strip_spline_metadata.py on both MLP and linear fixtures)
+bake_dial_refit strip --in <bake> --out <out> [--key zentrain.output_calibration_spline]
 ```
 
 Method + measured byte-parity: `benchmarks/bake_refit_rust_migration_2026-07-05.md`
@@ -850,9 +853,14 @@ Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
   Also deleted same day: `bake_outlier_gate.py` → `bake_dial_refit gate`
   (its one importer `xmetric_consensus.py` now shells the canonical
   `predict_features_with_bake` forward + `zen_stats.srocc` — smoke-verified
-  on a kadis-gpu slice) and `shared_anchor_refit.py` → `shared-anchor`
+  on a kadis-gpu slice); `shared_anchor_refit.py` → `shared-anchor`
   (the claimed `hdr_anchor_dense_refit.py` importer was STALE — it imports
-  `linear_projections`, the mention was docstring-only).
+  `linear_projections`, the mention was docstring-only);
+  `strip_spline_metadata.py` → `bake_dial_refit strip` (byte-identical on
+  the v47 MLP `7c65814e…` AND shipped-B `5ec68b1f…`; live caller
+  `recal_v47_dial.py` migrated); `bake_to_znpr.py` (DEAD: emitted banned
+  v2, trainer gone); `affine_calibrate_bake.py` (duplicate of the Rust
+  `affine_calibrate` bin per the affine section above).
 - `hdr_anchor_dense_refit.py` is PARTIALLY migrated: its base whole-spline
   refit is `bake_dial_refit shared-anchor`; only the 28-bin densify + Q-Q
   top-end knots remain as experiment logic. Its bake primitives live in the

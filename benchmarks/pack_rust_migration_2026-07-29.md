@@ -77,3 +77,24 @@ bake_dial_refit pack --in v47_strict_recal_negtail_2026-05-27.bin --out /tmp/x.b
 Environment: repo @ the commit carrying this doc; anchor
 `/mnt/v/zen/zensim-training/canonical-2026-05-21/train/multiband_anchor_dial100.parquet`;
 verify `cid22_features_372col_2026-05-15.parquet`; host WSL2 7950X.
+
+## Addendum (same day): `strip` subcommand + 3 more deletions
+
+`bake_dial_refit strip` replaces `strip_spline_metadata.py` (generic
+`--key`, default the spline; schema_hash preserved / flags 0 / compressed
+true — the same pipeline contract as `pack`). Byte-parity, Python vs Rust:
+
+| fixture | sha256 (both) |
+|---|---|
+| `v47_strict_recal_negtail_2026-05-27.bin` (f32 MLP, psa heads, 5→4 metadata) | `7c65814e4507317c…` |
+| shipped B `b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin` (f16 linear, winsor transforms, 3→2) | `5ec68b1f828615ad…` |
+
+Live caller `recal_v47_dial.py` migrated to shell the Rust binary
+(`REFIT_BIN` env override, repo-relative default). Also deleted:
+`bake_to_znpr.py` (DEAD — emitted banned ZNPR v2; its trainer
+`train_v_next_mlp.py` no longer exists; refs were docstring/README-only) and
+`affine_calibrate_bake.py` (duplicate of the Rust `affine_calibrate` bin,
+zero code importers; the README row calling it "(Preferred)" was stale and
+contradicted CLAUDE.md's affine section). `emit_full` gained an explicit
+`schema_hash` param — `add-spline` still passes 0 (its established output
+bytes are frozen); `strip` preserves the input's.

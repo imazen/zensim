@@ -54,9 +54,10 @@ def main():
     orig, out = sys.argv[1], sys.argv[2]
     nospline = out + ".nospline.bin"
 
-    # 1. strip the old spline
-    subprocess.run(["python3", "scripts/v_next/strip_spline_metadata.py",
-                    "--bake", orig, "--out", nospline, "--zenpredict-bin", ZP], check=True)
+    # 1. strip the old spline (canonical Rust owner; byte-identical to the
+    #    deleted strip_spline_metadata.py — see pack_rust_migration_2026-07-29.md)
+    refit = os.environ.get("REFIT_BIN", "target/release/bake_dial_refit")
+    subprocess.run([refit, "strip", "--in", orig, "--out", nospline], check=True)
 
     # 2. tanh-pin (pre-spline) preds on the anchor
     tp, at = raw_preds(nospline, ANCHOR)
