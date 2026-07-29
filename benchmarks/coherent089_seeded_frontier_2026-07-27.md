@@ -256,3 +256,28 @@ per-basic-scale |s_k| mass + top indices). Findings on city/q50:
 width, seed-matched to fold924_s99): append-features-during-training vs data-mix as the
 cause of the coarse shift. **Remedy directions** (independent of verdict): scale-mass
 regularizer / fine-scale boost in training; or fold-side coarse-plane localization.
+
+## E-M6b — width discriminator: THE DATA MIX, not the v3 features (2026-07-29)
+
+`DISC_720w_924data_s99` (720-width, identical 924-era training data, seed-matched):
+
+| s99, same data | CID22 | KonJND | CSIQ | LIVE | M3 | basic-scale mass |
+|---|--:|--:|--:|--:|--:|---|
+| 720-width | 0.8837 | 0.307 | 0.863 | 0.826 | 0.245 | {4,15,23,57}% |
+| 924-width | 0.8851 | 0.203 | 0.804 | — | 0.114 | {1,8,30,59}% |
+
+1. **The coarse-scale-MSE shift (and the M3 collapse) reproduces WITHOUT any v3 features**
+   → caused by the 924-era DATA MIX — almost certainly `tbig_924_200k` (the one
+   non-row-identical slice, flagged at build time; fresh stratified canonical-picker
+   TRAIN views vs the old TRAIN_NN-derived 200k).
+2. **CORRECTION to E-M1/E-M2 attribution: most of the CID22 lift is the data**
+   (0.8794 → 0.8837 at 720-width), the v3 features add ~+0.001 at this seed. The earlier
+   "+0.003 from v3" compared different features AND different data; the controlled
+   comparison splits it. (4th honest correction of the campaign; the row-identical kadis
+   control worked, the uncontrolled tbig bit exactly as documented.)
+3. CSIQ −0.06 and KonJND at-this-seed −0.10 ARE feature-attributable (same data, width-only
+   delta) — but single-seed; the fair v3-marginal verdict needs the width A/B multi-seed.
+4. **Remedy priority reordered**: the scale-mass regularizer / fine-scale boost now fixes
+   BOTH regimes (the pathology is data-driven and lives at 720 too on this data); a
+   distribution-matched tbig rebuild is the data-side alternative; the fair width-A/B
+   (multi-seed, both widths, identical data) is the clean v3 verdict experiment.
