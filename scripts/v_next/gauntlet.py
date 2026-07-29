@@ -159,6 +159,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "name": o.get("name", f"bake{ci}"), "regime": o.get("regime", "?"),
             "date": o.get("date", ""), "colorIndex": ci,
             "rank": rank, "dial": o.get("dial", {}), "m3": o.get("m3_coherence"),
+            "m3a": o.get("m3a_coherence"),
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
             "gates": o.get("gates") or {},
@@ -343,6 +344,7 @@ const COLS=[
   ['csiq','CSIQ',false,b=>rs(b,'csiq')],
   ['dial_mono','dial-mono',false,b=>b.dial.mono_pct],
   ['dial_tied','tied',false,b=>b.dial.tied_pct],
+  ['m3a','M3a-attr',false,b=>b.m3a],
   ['m3','M3-coh',false,b=>b.m3],
   ['m3_mass','M3 drop%',false,b=>b.m3_dropped_mass],
   ['corr','corr-passq20',false,b=>b.corruption&&b.corruption.pass_q20!=null?b.corruption.pass_q20:null],
@@ -366,7 +368,7 @@ function renderTable(){
     +'imazen26·0.5 + nonphoto·0.3 + KonJND·0.2 + AIC·0.15; KADID/TID excluded, train==val), READ from the JSON '
     +'not re-derived. <b>CID22 95%CI±</b> = bootstrap half-width; bakes with overlapping CIs are a statistical '
     +'TIE, not an ordering. <b>CID22 %bwd</b> = share of reference ladders ranked BACKWARDS (no pooled stat sees '
-    +'it). <b>M3 drop%</b> = f156-371 mass the diffmap cannot spatialize — read a low M3 against it (high drop% '
+    +'it). <b>M3a-attr</b> = the DEPLOYABLE attribution-density steering map vs \u0394S (exact integrands + SAT, task #67 \u2014 the map codecs query); <b>M3-coh</b> = the legacy signal fold, kept for the before/after story (the 128px fold inversion the attribution map cures). <b>M3 drop%</b> = f156-371 mass the FOLD cannot spatialize — read a low M3 against it (high drop% '
     +'= M3 structurally capped, not incoherent). Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80).'});
   const tbl=el('table',{});
   const thead=el('tr',{});

@@ -12,9 +12,10 @@
 #      (mono/tied/reach/dynamic_range) + corruption gate + a sampled multi-metric
 #      per_pair block (pred vs mos/jnd for the rank corpora; pred vs
 #      ssim2/butter/cvvdp from the KADIS-720 metric parquet).
-#   2. diffmap_block_coherence --bake  → the G-STEER M3 (deployable diffmap↔ΔS
-#      coherence) averaged over the 3 fixture image pairs.
-#   3. jq injects the averaged M3 as the top-level `m3_coherence`.
+#   2. diffmap_block_coherence --bake  → G-STEER coherence: M3 (legacy signal
+#      fold) AND M3a (the DEPLOYABLE attribution-density map, task #67 —
+#      exact integrands + SAT), averaged over the fixture sweep.
+#   3. jq injects the averages as top-level `m3_coherence` + `m3a_coherence`.
 #
 # Output: /mnt/v/output/zensim/reports/fulleval/<name>.fulleval.json
 #         (+ <name>.verdict.md — the human bake_verdict report, for reference)
@@ -67,15 +68,15 @@ echo "== bake_verdict --regime $REGIME --full-json ==" >&2
     --full-json "$JSON" --output "$MD" >&2
 
 # ── M3 diffmap-coherence: content × size × quality sweep ──────────────────
-# ZENSIM_M3_REUSE=1: carry m3_coherence/m3_n/m3_dropped_mass_pct from the
-# PREVIOUS fulleval JSON instead of re-measuring. Use for schema re-emits —
+# ZENSIM_M3_REUSE=1: carry m3_coherence/m3_n/m3_dropped_mass_pct +
+# m3a_coherence/m3a_n from the PREVIOUS fulleval JSON instead of re-measuring. Use for schema re-emits —
 # the rank/dial/corruption portion is a cheap rescore over stored feature
 # parquets, but the M3 sweep is 27 diffmap runs (~minutes/bake) measuring a
 # value that cannot change unless the bake or fixtures changed. (2026-07-27:
 # a 17-bake schema re-emit redid ~45 min of unchanged M3 before this existed.)
 if [[ "${ZENSIM_M3_REUSE:-0}" == "1" && -f "$JSON.pre" ]]; then
     jq --slurpfile o "$JSON.pre" \
-        '.m3_coherence=$o[0].m3_coherence | .m3_n=$o[0].m3_n | .m3_dropped_mass_pct=$o[0].m3_dropped_mass_pct' \
+        '.m3_coherence=$o[0].m3_coherence | .m3_n=$o[0].m3_n | .m3_dropped_mass_pct=$o[0].m3_dropped_mass_pct | .m3a_coherence=$o[0].m3a_coherence | .m3a_n=$o[0].m3a_n' \
         "$JSON" >"$JSON.tmp" && mv "$JSON.tmp" "$JSON"
     rm -f "$JSON.pre"
     echo "== M3 carried from previous JSON (ZENSIM_M3_REUSE=1) ==" >&2
@@ -115,7 +116,7 @@ else
 fi
 
 echo "== M3 coherence: ${#M3_CONTENT[@]} content × ${#M3_SIZES[@]} size × ${#M3_QS[@]} q ==" >&2
-M3_SUM=0; MASS_SUM=0; M3_N=0; MASS_N=0
+M3_SUM=0; MASS_SUM=0; M3_N=0; MASS_N=0; M3A_SUM=0; M3A_N=0
 for ref in "${M3_CONTENT[@]}"; do
     for sz in "${M3_SIZES[@]}"; do
         if [[ "$sz" == "576" ]]; then R="$FIX/${ref}.png"; else R="$FIX/${ref}_${sz}.png"; fi
@@ -127,12 +128,20 @@ for ref in "${M3_CONTENT[@]}"; do
                 echo "   skip ${ref}/${sz}/q${q}: diffmap_block_coherence failed" >&2
                 continue
             fi
-            # READ + average the Rust-computed M3 SROCC + dropped-mass (never re-derive).
+            # READ + average the Rust-computed M3/M3a SROCCs + dropped-mass
+            # (never re-derive). M3a = the DEPLOYABLE attribution-density map
+            # (task #67, exact integrands + SAT); M3 = the legacy signal fold,
+            # kept for the before/after story.
             m3=$(awk -F'=' '/^  M3 /{split($2,a," "); print a[1]; exit}' "$log")
+            m3a=$(awk -F'=' '/^  M3a /{split($2,a," "); print a[1]; exit}' "$log")
             mass=$(grep -oE "mass: [0-9.]+" "$log" | head -1 | awk '{print $2}')
             [[ -z "$m3" ]] && { echo "   skip ${ref}/${sz}/q${q}: no M3 line" >&2; continue; }
             M3_SUM=$(awk -v s="$M3_SUM" -v v="$m3" 'BEGIN{printf "%.10f", s + v}')
             M3_N=$((M3_N + 1))
+            if [[ -n "$m3a" ]]; then
+                M3A_SUM=$(awk -v s="$M3A_SUM" -v v="$m3a" 'BEGIN{printf "%.10f", s + v}')
+                M3A_N=$((M3A_N + 1))
+            fi
             if [[ -n "$mass" ]]; then
                 MASS_SUM=$(awk -v s="$MASS_SUM" -v v="$mass" 'BEGIN{printf "%.6f", s + v}')
                 MASS_N=$((MASS_N + 1))
@@ -146,6 +155,13 @@ if [[ "$M3_N" -gt 0 ]]; then
     echo "== M3 mean over $M3_N pair(s) = $M3_AVG ==" >&2
     jq --argjson m3 "$M3_AVG" --argjson n "$M3_N" '.m3_coherence = $m3 | .m3_n = $n' \
         "$JSON" >"$JSON.tmp" && mv "$JSON.tmp" "$JSON"
+    if [[ "$M3A_N" -gt 0 ]]; then
+        M3A_AVG=$(awk -v s="$M3A_SUM" -v n="$M3A_N" 'BEGIN{printf "%.6f", s / n}')
+        echo "== M3a (attribution density) mean over $M3A_N pair(s) = $M3A_AVG ==" >&2
+        jq --argjson m3a "$M3A_AVG" --argjson n "$M3A_N" \
+            '.m3a_coherence = $m3a | .m3a_n = $n' "$JSON" >"$JSON.tmp" \
+            && mv "$JSON.tmp" "$JSON"
+    fi
     if [[ "$MASS_N" -gt 0 ]]; then
         MASS_AVG=$(awk -v s="$MASS_SUM" -v n="$MASS_N" 'BEGIN{printf "%.4f", s / n}')
         echo "== M3 dropped-f156-371 mass mean = ${MASS_AVG}% (read a low M3 against this) ==" >&2
