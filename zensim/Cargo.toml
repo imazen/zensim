@@ -166,6 +166,18 @@ required-features = ["feature-regime-v2", "threads", "training"]
 name = "capture_v1_golden"
 required-features = ["training"]
 
+# The HDR gate scorers read training-gated exports (WEIGHTS /
+# try_score_from_features) on top of the folded-924 routes; without these
+# entries auto-discovery tried to build them at every feature combo and
+# `custom-profiles,feature-regime-v2` (sans `training`) failed to compile.
+[[example]]
+name = "upiq_hdr924_score"
+required-features = ["feature-regime-v2", "training"]
+
+[[example]]
+name = "hdr_sdr_consistency"
+required-features = ["feature-regime-v2", "training"]
+
 [[example]]
 name = "upiq_features_extract"
 required-features = ["feature-regime-v2", "threads", "training"]

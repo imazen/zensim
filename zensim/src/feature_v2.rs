@@ -7453,6 +7453,10 @@ mod tests {
     /// Also gates: `f156..372` all-zero (deprecated pool blocks) and the
     /// v2 block (`f372..`) BIT-identical to the plain v2 path, for BOTH
     /// width classes.
+    ///
+    /// `training`-gated: the v1 side of the comparison is
+    /// `compute_zensim_with_config`, a training-only export.
+    #[cfg(feature = "training")]
     #[test]
     fn folded720_v1_basic_matches_v1_path() {
         // (w, h, expect_bit_exact): 16-multiple widths are bit-exact;
