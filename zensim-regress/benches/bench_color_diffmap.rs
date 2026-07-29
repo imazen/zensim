@@ -81,12 +81,11 @@ fn bench_diffmap_minimal(suite: &mut zenbench::Suite) {
             let z = Zensim::new(zensim_regress::profile::legacy_linear());
             let src = gradient_rgba(w, h);
             let dst = noise_rgba(w, h, 11);
+            // Spread: zensim is built with `custom-profiles` here, which adds
+            // cfg-gated research fields to `DiffmapOptions`.
             let opts = DiffmapOptions {
                 weighting: DiffmapWeighting::Balanced,
-                masking_strength: None,
-                sqrt: false,
-                include_edge_mse: false,
-                include_hf: false,
+                ..Default::default()
             };
             group.bench(label, move |b| {
                 b.iter(|| {
@@ -112,6 +111,7 @@ fn bench_diffmap_full(suite: &mut zenbench::Suite) {
                 sqrt: true,
                 include_edge_mse: true,
                 include_hf: true,
+                ..Default::default()
             };
             group.bench(label, move |b| {
                 b.iter(|| {

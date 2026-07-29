@@ -251,6 +251,90 @@ fn upsample_row_powx_add(src_row: &[f32], dst_row: &mut [f32], factor: usize, we
     }
 }
 
+/// Guided mass-conserving redistribution upsample (E-JBU, research; used only
+/// when `DiffmapOptions::guided_coarse_redistribution` is set — default path is
+/// [`upsample_pow2x_add`], byte-identical to prior behavior).
+///
+/// For each coarse-scale cell, deposits the cell's exact NN mass
+/// (`src[cell] · weight · footprint_count`) within its aligned
+/// `factor × factor` footprint proportional to the full-res `guide` plane,
+/// instead of replicating the value uniformly:
+///
+/// ```text
+/// dst(x,y) += cell_mass · g(x,y) / Σ_footprint g
+/// ```
+///
+/// Properties (by construction, verified by `jbu_*` tests below):
+/// - **Per-cell mass conservation**: the footprint sum equals what NN deposits
+///   (up to f32 summation order), so any aligned block aggregation at ≥ the
+///   footprint size — and the pooled map total — is unchanged.
+/// - **ε-fallback**: a uniform (or all-zero) guide reproduces NN exactly; the
+///   caller adds ε to the guide so `Σ g > 0` always holds (a `gsum <= 0` guard
+///   still degrades to NN for belt and suspenders).
+/// - **O(N)**: two passes over each footprint (guide sum, deposit); per-cell
+///   accumulation in f64 for stability. Diffmap render only — never on the
+///   scoring path.
+fn redistribute_pow2x_guided_add(
+    src: &[f32],
+    src_w: usize,
+    src_h: usize,
+    dst: &mut [f32],
+    dst_w: usize,
+    dst_h: usize,
+    factor: usize,
+    weight: f32,
+    guide: &[f32],
+) {
+    debug_assert!(factor >= 2, "scale 0 never redistributes");
+    debug_assert!(guide.len() >= dst_w * dst_h, "guide must cover dst");
+    for sy in 0..src_h {
+        let dy0 = sy * factor;
+        if dy0 >= dst_h {
+            break;
+        }
+        let dy1 = (dy0 + factor).min(dst_h);
+        let src_row = &src[sy * src_w..(sy + 1) * src_w];
+        for (sx, &v) in src_row.iter().enumerate() {
+            let dx0 = sx * factor;
+            if dx0 >= dst_w {
+                break;
+            }
+            let dx1 = (dx0 + factor).min(dst_w);
+            // Pass 1: guide sum over the (edge-clipped) footprint.
+            let mut gsum = 0.0f64;
+            for y in dy0..dy1 {
+                for &g in &guide[y * dst_w + dx0..y * dst_w + dx1] {
+                    gsum += g as f64;
+                }
+            }
+            // Cell mass = exactly what NN would deposit over the clipped
+            // footprint: value × blend weight × pixel count.
+            let count = ((dy1 - dy0) * (dx1 - dx0)) as f64;
+            let mass = v as f64 * weight as f64 * count;
+            if gsum <= 0.0 {
+                // Degenerate guide: uniform deposit == NN (mass / count).
+                let add = v * weight;
+                for y in dy0..dy1 {
+                    for d in &mut dst[y * dst_w + dx0..y * dst_w + dx1] {
+                        *d += add;
+                    }
+                }
+                continue;
+            }
+            let scale = mass / gsum;
+            // Pass 2: deposit mass ∝ guide.
+            for y in dy0..dy1 {
+                let base = y * dst_w;
+                let grow = &guide[base + dx0..base + dx1];
+                let drow = &mut dst[base + dx0..base + dx1];
+                for (d, &g) in drow.iter_mut().zip(grow) {
+                    *d += (scale * g as f64) as f32;
+                }
+            }
+        }
+    }
+}
+
 /// Track background deallocation thread to prevent accumulation on repeated calls.
 #[cfg(feature = "threads")]
 static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
@@ -3477,6 +3561,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
     weights: &[f64],
     per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
     scale_blend_weights: &[f32],
+    guided_redistribution: bool,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
     let width = distorted.width();
     let height = distorted.height();
@@ -3493,6 +3578,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
         weights,
         per_scale_channel_weights,
         scale_blend_weights,
+        guided_redistribution,
     )
 }
 
@@ -3508,6 +3594,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
     weights: &[f64],
     per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
     scale_blend_weights: &[f32],
+    guided_redistribution: bool,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
     let padded_width = simd_padded_width(width);
     let dst_planes = convert_linear_planar_to_xyb(planes, width, height, stride, padded_width);
@@ -3522,6 +3609,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
         weights,
         per_scale_channel_weights,
         scale_blend_weights,
+        guided_redistribution,
     )
 }
 
@@ -3537,6 +3625,7 @@ fn compute_diffmap_from_xyb(
     weights: &[f64],
     per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
     scale_blend_weights: &[f32],
+    guided_redistribution: bool,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
     let num_scales = config.num_scales.min(precomputed.scales.len());
     let parallel = config.allow_multithreading;
@@ -3614,6 +3703,27 @@ fn compute_diffmap_from_xyb(
     let full_h = height;
     let mut fused = vec![0.0f32; full_w * full_h];
 
+    // E-JBU guide (research, opt-in): |scale-0 contribution plane| + ε. The
+    // scale-0 plane is the fold's own full-res localization signal; |·| makes
+    // it sign-robust under the signed ModelSensitivity weighting, and the
+    // per-cell normalization `g / Σ_cell g` cancels any global scaling (so the
+    // guide is independent of scale-0's blend weight). ε = 1e-6·mean|s0| +
+    // 1e-20 keeps `Σ_cell g > 0`; an all-zero plane degrades to exactly the
+    // uniform (NN) deposit.
+    let guide: Option<Vec<f32>> = if guided_redistribution && scale_diffmaps.len() > 1 {
+        scale_diffmaps
+            .first()
+            .filter(|(dm0, w0, h0)| *w0 == full_w && *h0 == full_h && dm0.len() >= full_w * full_h)
+            .map(|(dm0, _, _)| {
+                let mean_abs =
+                    dm0.iter().map(|&v| v.abs() as f64).sum::<f64>() / dm0.len().max(1) as f64;
+                let eps = (mean_abs * 1e-6) as f32 + 1e-20f32;
+                dm0.iter().map(|&v| v.abs() + eps).collect()
+            })
+    } else {
+        None
+    };
+
     for (scale, (dm, dm_w, dm_h)) in scale_diffmaps.iter().enumerate() {
         let blend = scale_blend_weights.get(scale).copied().unwrap_or(0.0);
         if blend <= 0.0 {
@@ -3622,7 +3732,12 @@ fn compute_diffmap_from_xyb(
         // factor = 2^scale: scale 0 is identity (no upsample), scale s replicates each
         // src pixel into a (2^s) × (2^s) block.
         let factor = 1usize << scale;
-        upsample_pow2x_add(dm, *dm_w, *dm_h, &mut fused, full_w, full_h, factor, blend);
+        match &guide {
+            Some(g) if factor > 1 => redistribute_pow2x_guided_add(
+                dm, *dm_w, *dm_h, &mut fused, full_w, full_h, factor, blend, g,
+            ),
+            _ => upsample_pow2x_add(dm, *dm_w, *dm_h, &mut fused, full_w, full_h, factor, blend),
+        }
     }
 
     let result = combine_scores(&stats, weights, config, mean_offset);
@@ -6109,6 +6224,104 @@ mod tests {
                 .take(26)
                 .collect();
             println!("| {short} | {:.4e} | {} | |", best.0, best.1);
+        }
+    }
+
+    // ── E-JBU: guided mass-conserving redistribution (kernel-level) ─────────
+
+    /// Deterministic positive pseudo-random values (LCG) for guide/src planes.
+    fn jbu_lcg(n: usize, seed: u64, lo: f32, hi: f32) -> Vec<f32> {
+        let mut s = seed;
+        (0..n)
+            .map(|_| {
+                s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let u = ((s >> 33) as u32) as f32 / u32::MAX as f32;
+                lo + (hi - lo) * u
+            })
+            .collect()
+    }
+
+    /// ε-fallback: a UNIFORM guide reproduces NN exactly (bit-equal): the
+    /// deposit `mass·g/Σg = v·w·count/(count·g)·g = v·w` is the same
+    /// correctly-rounded product NN writes.
+    #[test]
+    fn jbu_uniform_guide_equals_nn() {
+        let (sw, sh, f) = (4usize, 3usize, 8usize);
+        let (dw, dh) = (sw * f, sh * f);
+        let src = jbu_lcg(sw * sh, 7, -0.5, 1.5); // signed cells (ModelSensitivity folds are signed)
+        let guide = vec![1.0f32; dw * dh];
+        let mut nn = vec![0.0f32; dw * dh];
+        let mut jbu = vec![0.0f32; dw * dh];
+        upsample_pow2x_add(&src, sw, sh, &mut nn, dw, dh, f, 0.7);
+        redistribute_pow2x_guided_add(&src, sw, sh, &mut jbu, dw, dh, f, 0.7, &guide);
+        for (i, (a, b)) in nn.iter().zip(jbu.iter()).enumerate() {
+            assert_eq!(a, b, "pixel {i}: NN {a} vs uniform-guide JBU {b}");
+        }
+    }
+
+    /// Per-cell mass conservation vs NN with a non-uniform guide, including
+    /// edge-clipped footprints (dst dims NOT multiples of the factor), and the
+    /// per-pixel maps must actually differ (the path is engaged).
+    #[test]
+    fn jbu_mass_conservation_per_cell_and_pixels_move() {
+        let (sw, sh, f) = (5usize, 7usize, 4usize);
+        for (dw, dh) in [(sw * f, sh * f), (sw * f - 3, sh * f - 1)] {
+            let src = jbu_lcg(sw * sh, 42, -1.0, 2.0);
+            let guide = jbu_lcg(dw * dh, 99, 1e-3, 3.0);
+            let mut nn = vec![0.0f32; dw * dh];
+            let mut jbu = vec![0.0f32; dw * dh];
+            upsample_pow2x_add(&src, sw, sh, &mut nn, dw, dh, f, 0.31);
+            redistribute_pow2x_guided_add(&src, sw, sh, &mut jbu, dw, dh, f, 0.31, &guide);
+            let mut max_cell_rel = 0.0f64;
+            let mut max_px_delta = 0.0f32;
+            for sy in 0..sh {
+                let (dy0, dy1) = (sy * f, ((sy + 1) * f).min(dh));
+                if dy0 >= dh {
+                    break;
+                }
+                for sx in 0..sw {
+                    let (dx0, dx1) = (sx * f, ((sx + 1) * f).min(dw));
+                    if dx0 >= dw {
+                        break;
+                    }
+                    let (mut a, mut b) = (0.0f64, 0.0f64);
+                    for y in dy0..dy1 {
+                        for x in dx0..dx1 {
+                            a += nn[y * dw + x] as f64;
+                            b += jbu[y * dw + x] as f64;
+                            max_px_delta = max_px_delta.max((nn[y * dw + x] - jbu[y * dw + x]).abs());
+                        }
+                    }
+                    let rel = (a - b).abs() / a.abs().max(1e-9);
+                    max_cell_rel = max_cell_rel.max(rel);
+                }
+            }
+            assert!(
+                max_cell_rel < 1e-5,
+                "per-cell mass drift {max_cell_rel:.3e} (dw={dw} dh={dh})"
+            );
+            assert!(
+                max_px_delta > 1e-3,
+                "guided redistribution changed no pixels (max Δ {max_px_delta:.3e}) — path not engaged"
+            );
+        }
+    }
+
+    /// Degenerate guide (all zeros — below any ε the caller adds): the
+    /// `gsum <= 0` guard must degrade to exactly NN, never NaN.
+    #[test]
+    fn jbu_zero_guide_degrades_to_nn() {
+        let (sw, sh, f) = (3usize, 3usize, 2usize);
+        let (dw, dh) = (sw * f, sh * f);
+        let src = jbu_lcg(sw * sh, 5, 0.0, 1.0);
+        let guide = vec![0.0f32; dw * dh];
+        let mut nn = vec![0.0f32; dw * dh];
+        let mut jbu = vec![0.0f32; dw * dh];
+        upsample_pow2x_add(&src, sw, sh, &mut nn, dw, dh, f, 1.3);
+        redistribute_pow2x_guided_add(&src, sw, sh, &mut jbu, dw, dh, f, 1.3, &guide);
+        for (a, b) in nn.iter().zip(jbu.iter()) {
+            assert!(b.is_finite());
+            assert_eq!(a, b);
         }
     }
 }

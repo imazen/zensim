@@ -145,6 +145,24 @@ pub struct DiffmapOptions {
     ///
     /// Default: `false`.
     pub include_hf: bool,
+
+    /// **Research (`custom-profiles`): guided mass-conserving redistribution of
+    /// coarse-scale contributions (E-JBU, 2026-07-30).** When `true`, each
+    /// coarse-scale (s1–s3) contribution cell deposits its exact NN mass within
+    /// its aligned `2^s × 2^s` footprint proportional to the full-res scale-0
+    /// contribution plane (+ε) instead of replicating the value uniformly:
+    /// `out(x,y) += cell_mass · g(x,y) / Σ_cell g`.
+    ///
+    /// Per-cell mass-conserving by construction: the pooled map total, the
+    /// scalar score, and any grid-aligned block aggregation at ≥ the footprint
+    /// size (8px) are unchanged (up to f32 summation order) — only
+    /// sub-footprint localization sharpens. ε-fallback: a flat or all-zero
+    /// scale-0 plane reproduces the current NN behavior exactly. O(N), diffmap
+    /// render only — never on the scoring path.
+    ///
+    /// Default: `false` (current NN-replicate behavior).
+    #[cfg(feature = "custom-profiles")]
+    pub guided_coarse_redistribution: bool,
 }
 
 impl From<DiffmapWeighting> for DiffmapOptions {
@@ -765,6 +783,14 @@ impl crate::metric::Zensim {
             options.include_hf,
         );
 
+        // E-JBU (research): guided coarse-scale redistribution, opt-in via
+        // `DiffmapOptions::guided_coarse_redistribution` (custom-profiles only;
+        // hard-false otherwise so the default fold path is untouched).
+        #[cfg(feature = "custom-profiles")]
+        let guided = options.guided_coarse_redistribution;
+        #[cfg(not(feature = "custom-profiles"))]
+        let guided = false;
+
         // Fused: compute the full zensim score AND the multi-scale diffmap in a
         // single pipeline. Each scale's SSIM error is collected, then coarser
         // scales are upsampled and blended with trained scale weights.
@@ -781,6 +807,7 @@ impl crate::metric::Zensim {
                     params.weights,
                     &per_scale_ch,
                     &scale_blend,
+                    guided,
                 )
             } else {
                 crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
@@ -790,6 +817,7 @@ impl crate::metric::Zensim {
                     params.weights,
                     &per_scale_ch,
                     &scale_blend,
+                    guided,
                 )
             };
         let mut result = result.with_profile(self.profile());
@@ -931,6 +959,12 @@ impl crate::metric::Zensim {
             options.include_hf,
         );
 
+        // E-JBU (research): same opt-in as `compute_with_ref_and_diffmap`.
+        #[cfg(feature = "custom-profiles")]
+        let guided = options.guided_coarse_redistribution;
+        #[cfg(not(feature = "custom-profiles"))]
+        let guided = false;
+
         // Sub-64px planes are reflect-padded to the pyramid minimum (matching
         // the also-padded reference). The reflect-pad keeps the original in the
         // top-left, recovered by the trim below.
@@ -949,6 +983,7 @@ impl crate::metric::Zensim {
                         params.weights,
                         &per_scale_ch,
                         &scale_blend,
+                        guided,
                     );
                 (result, dm, padded_width)
             } else {
@@ -964,6 +999,7 @@ impl crate::metric::Zensim {
                         params.weights,
                         &per_scale_ch,
                         &scale_blend,
+                        guided,
                     );
                 (result, dm, padded_width)
             };
@@ -1170,9 +1206,7 @@ mod tests {
                 super::DiffmapOptions {
                     weighting: DiffmapWeighting::Balanced,
                     masking_strength: Some(4.0),
-                    sqrt: false,
-                    include_edge_mse: false,
-                    include_hf: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1217,10 +1251,8 @@ mod tests {
                 &dst,
                 super::DiffmapOptions {
                     weighting: DiffmapWeighting::Balanced,
-                    masking_strength: None,
                     sqrt: true,
-                    include_edge_mse: false,
-                    include_hf: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1278,10 +1310,8 @@ mod tests {
                 &dst,
                 super::DiffmapOptions {
                     weighting: DiffmapWeighting::Balanced,
-                    masking_strength: None,
-                    sqrt: false,
                     include_edge_mse: true,
-                    include_hf: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1332,10 +1362,8 @@ mod tests {
                 &dst,
                 super::DiffmapOptions {
                     weighting: DiffmapWeighting::Trained,
-                    masking_strength: None,
-                    sqrt: false,
                     include_edge_mse: true,
-                    include_hf: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1411,21 +1439,19 @@ mod tests {
                 masking_strength: Some(4.0),
                 sqrt: true,
                 include_edge_mse: true,
-                include_hf: false,
+                ..Default::default()
             },
             super::DiffmapOptions {
                 weighting: DiffmapWeighting::Trained,
-                masking_strength: None,
-                sqrt: false,
-                include_edge_mse: false,
                 include_hf: true,
+                ..Default::default()
             },
             super::DiffmapOptions {
-                weighting: DiffmapWeighting::Trained,
                 masking_strength: Some(4.0),
                 sqrt: true,
                 include_edge_mse: true,
                 include_hf: true,
+                ..Default::default()
             },
         ];
         // Adversarial patterns: uniform, solid black, solid white, random-ish,
@@ -1532,5 +1558,113 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// E-JBU integration: guided coarse-scale redistribution is per-cell
+    /// mass-conserving, so (a) the scalar score is bit-identical, (b) aligned
+    /// 8px and 16px block sums are unchanged up to f32 summation order, (c) the
+    /// map total is preserved — while (d) per-pixel values DO move (the path is
+    /// engaged and changes sub-footprint localization only).
+    #[cfg(feature = "custom-profiles")]
+    #[test]
+    fn test_guided_redistribution_block_invariant_pixels_move() {
+        let (w, h) = (128usize, 96usize);
+        let mut src = vec![[0u8, 0, 0]; w * h];
+        let mut dst = vec![[0u8, 0, 0]; w * h];
+        let mut lcg = 0x243F6A8885A308D3u64;
+        let mut rnd = move || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((lcg >> 33) & 0x7) as i16 - 3 // -3..=4, deterministic
+        };
+        for y in 0..h {
+            for x in 0..w {
+                // Gradient + sine texture: gives the s0 guide real structure.
+                let g = (x * 255 / w) as f32;
+                let t = 24.0 * ((x as f32 * 0.7).sin() * (y as f32 * 0.5).cos());
+                let v = (g + t).clamp(0.0, 255.0) as u8;
+                src[y * w + x] = [v, v.saturating_add(8), v / 2 + 40];
+                // Distortion: mild noise everywhere + blocky 8×8 artifacts in a
+                // few spots (coarse-scale error mass with fine-scale texture).
+                let n = rnd();
+                let mut p = src[y * w + x];
+                for c in &mut p {
+                    *c = (*c as i16 + n).clamp(0, 255) as u8;
+                }
+                if (16..48).contains(&x) && (16..48).contains(&y) {
+                    let q = ((x / 8) * 8 + (y / 8) * 8) as i16 % 48 - 24;
+                    for c in &mut p {
+                        *c = (*c as i16 + q).clamp(0, 255) as u8;
+                    }
+                }
+                dst[y * w + x] = p;
+            }
+        }
+        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let s = RgbSlice::new(&src, w, h);
+        let d = RgbSlice::new(&dst, w, h);
+        let base_opts = super::DiffmapOptions {
+            weighting: DiffmapWeighting::Balanced,
+            include_edge_mse: true,
+            include_hf: true,
+            ..Default::default()
+        };
+        let on_opts = super::DiffmapOptions {
+            guided_coarse_redistribution: true,
+            ..base_opts
+        };
+        let a = z.compute_with_diffmap(&s, &d, base_opts).unwrap();
+        let b = z.compute_with_diffmap(&s, &d, on_opts).unwrap();
+
+        // (a) scalar score untouched (the option is render-only).
+        assert_eq!(a.score(), b.score(), "score must be bit-identical");
+
+        let (ma, mb) = (a.diffmap(), b.diffmap());
+        assert_eq!(ma.len(), mb.len());
+        // (c) total mass preserved.
+        let (ta, tb) = (
+            ma.iter().map(|&v| v as f64).sum::<f64>(),
+            mb.iter().map(|&v| v as f64).sum::<f64>(),
+        );
+        let total_rel = (ta - tb).abs() / ta.abs().max(1e-12);
+        assert!(total_rel < 1e-5, "total mass drift {total_rel:.3e}");
+        // (b) aligned block sums unchanged for blocks ≥ the coarsest footprint.
+        for block in [8usize, 16] {
+            let (bx, by) = (w.div_ceil(block), h.div_ceil(block));
+            let mut max_rel = 0.0f64;
+            for byi in 0..by {
+                for bxi in 0..bx {
+                    let (mut sa, mut sb) = (0.0f64, 0.0f64);
+                    for y in (byi * block)..((byi + 1) * block).min(h) {
+                        for x in (bxi * block)..((bxi + 1) * block).min(w) {
+                            sa += ma[y * w + x] as f64;
+                            sb += mb[y * w + x] as f64;
+                        }
+                    }
+                    max_rel = max_rel.max((sa - sb).abs() / sa.abs().max(1e-12));
+                }
+            }
+            assert!(
+                max_rel < 1e-4,
+                "{block}px block-sum drift {max_rel:.3e} — redistribution leaked across aligned footprints"
+            );
+        }
+        // (d) per-pixel localization DID change.
+        let max_delta = ma
+            .iter()
+            .zip(mb.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max);
+        let changed = ma
+            .iter()
+            .zip(mb.iter())
+            .filter(|(x, y)| (**x - **y).abs() > 1e-9)
+            .count();
+        assert!(
+            max_delta > 1e-6 && changed > ma.len() / 20,
+            "guided redistribution changed too little (max Δ {max_delta:.3e}, {changed}/{} px)",
+            ma.len()
+        );
     }
 }

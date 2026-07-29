@@ -125,12 +125,11 @@ fn main() {
         let d = RgbaSlice::new(&dst, w as usize, h as usize);
 
         let result = z.compute(&s, &d).unwrap();
+        // Spread: zensim is built with `custom-profiles` here, which adds
+        // cfg-gated research fields to `DiffmapOptions`.
         let opts = DiffmapOptions {
             weighting: DiffmapWeighting::Balanced,
-            masking_strength: None,
-            sqrt: false,
-            include_edge_mse: false,
-            include_hf: false,
+            ..Default::default()
         };
         let dm = z.compute_with_diffmap(&s, &d, opts).unwrap();
         let dm_data = dm.diffmap();
