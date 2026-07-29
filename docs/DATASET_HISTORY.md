@@ -296,7 +296,8 @@ Cite: `§8.36`.
 
 - **3.21 raw-cvvdp-rank auxiliary = an AIC-3 lever, NOT a G5/KonJND lever — MEASURED, FALSIFIED
   (2026-07-15).** The §3.17 reframe left open "raw cvvdp is the indicated lever for the HF regime
-  ssim2 can't rank (G5)." Tested directly (`cvvdp_hf_probe.py`, `ssim2-MSE + lambda*rank(raw cvvdp)`,
+  ssim2 can't rank (G5)." Tested directly (`cvvdp_hf_probe.py` — deleted 2026-07-29 with the
+  falsified campaign, in git history; `ssim2-MSE + lambda*rank(raw cvvdp)`,
   lambda 0->0.6): AIC-3 |SROCC| rises monotonically (+0.005 to +0.017) but **KonJND |SROCC| FALLS
   monotonically (-0.024 to -0.101)** with a small CID22 cost. The two HF holdouts pull opposite —
   cvvdp saturates (~10) where KonJND needs fine PJND discrimination, so its rank signal orders the
