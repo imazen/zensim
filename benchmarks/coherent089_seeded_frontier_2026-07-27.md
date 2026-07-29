@@ -234,3 +234,25 @@ coherent. Suspects: the fresh bigcodec-924 mix, KADIS interaction, or DEV2-mask 
 spatially-coherent signal (the mask cost coherence without buying corruption). Next
 levers: append per-pixel fold; a coherence-regularized retrain; row-identical bigcodec
 join to isolate the data-mix effect.
+
+## E-M6 — the coherence regression MECHANISM (2026-07-29)
+
+Instrument: `ZENSIM_GRAD_MASS=1` on `diffmap_block_coherence` (per-region / per-v2-slot /
+per-basic-scale |s_k| mass + top indices). Findings on city/q50:
+
+1. **M2 ≈ 0.99 on every 924 bake** — the scalar is steerable in feature space; the FOLD is
+   what fails (M3 0.11-0.25). Mask/KADIS suspects eliminated (plain arms are worse).
+2. **924 models put 97-98% of gradient mass on BASIC** (v2 collapsed 17.3%→1-2% vs E-K5-720),
+   concentrated on **slot 9 = the per-scale MSE feature, at COARSE scales**:
+   basic-scale mass E-K5-720 = {19,18,14,31}% vs fold924_s99 = **{1,8,30,59}%**.
+3. **Mechanism**: the ModelSensitivity fold blends scales by gradient mass → the 924 map is
+   effectively a 1/4-1/8-resolution MSE plane → cannot rank 32px blocks → M3 collapses.
+   Coarse-scale MSE is a strong GLOBAL quality proxy (CID22 ↑) and spatially useless
+   (steer ↓) — the rank↔steer tension isolated to scale-mass placement.
+4. Folded-basic ≡ v1-basic numerically (≤1.2% rel drift, same features) — definition-drift
+   suspect eliminated.
+
+**Discriminator in flight** (`DISC_720w_924data_s99`: identical 924 data truncated to 720
+width, seed-matched to fold924_s99): append-features-during-training vs data-mix as the
+cause of the coarse shift. **Remedy directions** (independent of verdict): scale-mass
+regularizer / fine-scale boost in training; or fold-side coarse-plane localization.

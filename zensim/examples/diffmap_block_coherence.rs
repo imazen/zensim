@@ -345,6 +345,80 @@ fn run_bake_mode(
     }
     let grad_zero = s.iter().filter(|v| v.abs() < 1e-12).count();
 
+    // ── gradient-mass diagnostic (ZENSIM_GRAD_MASS=1) ────────────────────
+    // Where does THIS bake's |s_k| live? The M2≈0.99-vs-M3≈0.2 gap at 924
+    // means the scalar is steerable but the per-pixel FOLD misses the mass —
+    // this print locates it (region / v2-slot / top indices) so the fold gap
+    // is attributable to named families instead of guessed at.
+    if std::env::var("ZENSIM_GRAD_MASS").as_deref() == Ok("1") {
+        let total: f64 = s.iter().map(|v| v.abs()).sum::<f64>().max(1e-30);
+        let mass = |r: core::ops::Range<usize>| -> f64 {
+            if r.end <= n_in {
+                100.0 * s[r].iter().map(|v| v.abs()).sum::<f64>() / total
+            } else {
+                0.0
+            }
+        };
+        println!(
+            "  GRADMASS regions: basic {:.1}% | v1-pool {:.1}% | v2 {:.1}% | append {:.1}%",
+            mass(0..156.min(n_in)),
+            if n_in > 156 { mass(156..372.min(n_in)) } else { 0.0 },
+            if n_in > 372 { mass(372..720.min(n_in)) } else { 0.0 },
+            if n_in > 720 { mass(720..924.min(n_in)) } else { 0.0 },
+        );
+        if n_in >= 720 {
+            const V2_NAMES: [&str; 29] = [
+                "SSIM_MEAN", "SSIM_DEV2", "SSIM_DEV4", "ART", "DET", "MSE", "HF_GAIN", "HF_LOSS",
+                "HF_MAG_LOSS", "SSIM_SOFT_PEAK", "ART_SOFT_PEAK", "DET_SOFT_PEAK", "MASKED_SSIM",
+                "MASKED_ART", "MASKED_DET", "MASKED_MSE", "IW_SSIM", "IW_ART", "IW_DET", "IW_MSE",
+                "PJND_TRANSDUCER", "PJND_FRAGILITY", "GMS", "s23", "s24", "s25", "s26", "s27",
+                "s28",
+            ];
+            let mut per_slot = [0f64; 29];
+            for sc in 0..4 {
+                for ch in 0..3 {
+                    for slot in 0..29 {
+                        let i = 372 + sc * 87 + ch * 29 + slot;
+                        if i < n_in {
+                            per_slot[slot] += s[i].abs();
+                        }
+                    }
+                }
+            }
+            let mut ranked: Vec<(usize, f64)> =
+                per_slot.iter().cloned().enumerate().collect();
+            ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let line: Vec<String> = ranked
+                .iter()
+                .take(8)
+                .map(|&(i, m)| format!("{}={:.1}%", V2_NAMES[i], 100.0 * m / total))
+                .collect();
+            println!("  GRADMASS v2-slots(top8): {}", line.join(" "));
+        }
+        let mut top: Vec<(usize, f64)> = s.iter().map(|v| v.abs()).enumerate().collect();
+        top.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let line: Vec<String> = top
+            .iter()
+            .take(12)
+            .map(|&(i, m)| format!("f{}={:.1}%", i, 100.0 * m / total))
+            .collect();
+        println!("  GRADMASS top-idx: {}", line.join(" "));
+        // Basic mass per scale — the fold's spatial resolution is scale-blended
+        // by mass, so coarse-scale concentration = a blurry map (M3 mechanism).
+        let mut per_scale = [0f64; 4];
+        for sc in 0..4 {
+            let base = sc * 39;
+            if base + 39 <= n_in.min(156) {
+                per_scale[sc] = s[base..base + 39].iter().map(|v| v.abs()).sum();
+            }
+        }
+        println!(
+            "  GRADMASS basic-scales: s0={:.1}% s1={:.1}% s2={:.1}% s3={:.1}%",
+            100.0 * per_scale[0] / total, 100.0 * per_scale[1] / total,
+            100.0 * per_scale[2] / total, 100.0 * per_scale[3] / total
+        );
+    }
+
     // Combined append-only bakes (n_in > 372): the scalar path (score + s_k)
     // works, but the runtime diffmap generator (`compute_with_diffmap`, used
     // for M1/M1b/M3 below) is hardwired to the ≤372 feature space — it cannot
