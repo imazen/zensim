@@ -281,3 +281,18 @@ regularizer / fine-scale boost in training; or fold-side coarse-plane localizati
    BOTH regimes (the pathology is data-driven and lives at 720 too on this data); a
    distribution-matched tbig rebuild is the data-side alternative; the fair width-A/B
    (multi-seed, both widths, identical data) is the clean v3 verdict experiment.
+
+## E-M7 — coupled L2 regularizer: NEUTRALIZED BY ADAM (negative, 2026-07-29)
+
+`--coarse-l2-mult {8,32}` (per-feature L2 multiplier on coarse-scale layer-1 rows,
+applied through the gradient): the flag engaged, the bakes differ byte-wise, and the
+models are **functionally identical** to unregularized (M3 0.1135, CID22 0.8851,
+scale-mass {1,8,30,59}% — all to 4 decimals). Mechanism: Adam's per-parameter
+rescaling absorbs a constant L2 pull (the AdamW insight, reproduced here; coupled
+L2 at λ·mult ≤ 3.2e-4 is noise). Wasted arm caught in one seed; the 8-run lianli
+grid of the same knob was stopped mid-flight.
+
+**Fix: decoupled (AdamW-style) per-feature decay** — `--coarse-decay <rate>` applies
+`w *= 1 − lr·rate·mult` on coarse rows AFTER each Adam step (7 step sites), bypassing
+the rescale. Rate compounds per-step → empirical sweep E-M8 {0.001, 0.01, 0.1} × s99
+in flight.

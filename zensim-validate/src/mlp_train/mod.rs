@@ -956,6 +956,50 @@ impl Default for MlpHyperparams {
 /// variant reports (the GPU path currently does not).
 pub static LAST_BEST_VAL: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
 
+/// Per-INPUT-FEATURE L2 multiplier on layer-1 rows (len = n_features), set by
+/// the trainer bin before training. The scale-mass regularizer: coarse-scale
+/// inputs get mult > 1 so the optimizer prefers fine-scale reliance — the
+/// ModelSensitivity fold blends per-pixel maps by gradient mass, and coarse
+/// concentration collapses the map to 1/8-resolution (E-M6, 2026-07-29:
+/// data-mix-driven basic-scale mass {1,8,30,59}% -> M3 0.11-0.25 while
+/// M2=0.99). `None` = uniform L2 (bit-identical legacy behavior).
+pub static L2_FEATURE_MULT: std::sync::Mutex<Option<std::sync::Arc<Vec<f64>>>> =
+    std::sync::Mutex::new(None);
+
+fn l2_feature_mult() -> Option<std::sync::Arc<Vec<f64>>> {
+    L2_FEATURE_MULT.lock().ok().and_then(|g| g.clone())
+}
+
+/// Decoupled (AdamW-style) per-feature weight decay on layer-1 rows, applied
+/// AFTER the Adam step. Coupled L2-via-gradient is neutralized by Adam's
+/// per-parameter rescaling (measured 2026-07-29: mult 8-32 on lambda 1e-5
+/// produced byte-different but functionally IDENTICAL bakes); decoupling
+/// bypasses the rescale so the coarse-scale pressure actually binds.
+/// `mult` rows (the coarse-scale features) decay by `lr * rate * mult[i]`;
+/// rows at mult 1.0 are left untouched (rate applies only where mult > 1).
+fn apply_coarse_decay(w1: &mut [f64], n_hidden: usize, lr: f64, rate: f64) {
+    if rate <= 0.0 {
+        return;
+    }
+    if let Some(mult) = l2_feature_mult() {
+        for (i, &m) in mult.iter().enumerate() {
+            if m > 1.0 {
+                let f = 1.0 - (lr * rate * m).min(0.5);
+                for w in &mut w1[i * n_hidden..(i + 1) * n_hidden] {
+                    *w *= f;
+                }
+            }
+        }
+    }
+}
+
+/// Decay rate for [`apply_coarse_decay`] — set by the bin (0.0 = off).
+pub static COARSE_DECAY_RATE: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
+
+fn coarse_decay_rate() -> f64 {
+    COARSE_DECAY_RATE.lock().map(|g| *g).unwrap_or(0.0)
+}
+
 fn record_best_val(v: f64) {
     if let Ok(mut g) = LAST_BEST_VAL.lock() {
         *g = Some(v);
@@ -1984,6 +2028,7 @@ pub fn train_mlp_strategy(
                     n_steps += steps_added;
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                     }
                 }
                 continue;
@@ -2021,6 +2066,7 @@ pub fn train_mlp_strategy(
                     n_steps += steps_added;
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                     }
                 }
                 continue;
@@ -2168,8 +2214,10 @@ pub fn train_mlp_strategy(
             );
 
             if hyperparams.l2_lambda > 0.0 {
-                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
-                    *g += hyperparams.l2_lambda * w;
+                let fmult = l2_feature_mult();
+                for (idx, (g, &w)) in adam.gw1.iter_mut().zip(w1.iter()).enumerate() {
+                    let m = fmult.as_ref().map_or(1.0, |v| v[idx / n_hidden]);
+                    *g += hyperparams.l2_lambda * m * w;
                 }
                 for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
                     *g += hyperparams.l2_lambda * w;
@@ -2180,6 +2228,7 @@ pub fn train_mlp_strategy(
             // K>1 sequential → step once per K accumulated pairs.
             if k == 1 || steps_since_adam >= k as u64 {
                 adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                 steps_since_adam = 0;
             }
 
@@ -2274,6 +2323,7 @@ pub fn train_mlp_strategy(
                     if k == 1 || tv_steps_since_adam >= k as u64 || is_last_tv {
                         if tv_steps_since_adam > 0 {
                             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                         }
                         tv_steps_since_adam = 0;
                     }
@@ -2287,6 +2337,7 @@ pub fn train_mlp_strategy(
         // (steps_since_adam resets to 0 after each Adam call).
         if k > 1 && !parallel && steps_since_adam > 0 {
             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
         }
         // T8.2 final-flush for parallel buffer: handle the partial
         // batch at epoch end if pairs_per_epoch % K != 0. Buffer is
@@ -2325,6 +2376,7 @@ pub fn train_mlp_strategy(
                     n_steps += steps_added;
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                     }
                 }
                 parallel_batch_buffer.clear();
@@ -2351,6 +2403,7 @@ pub fn train_mlp_strategy(
                 n_steps += steps_added;
                 if steps_added > 0 {
                     adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
                 }
             }
         }
@@ -5419,8 +5472,10 @@ fn run_minibatch_with_nin(
     // convention).
     if l2_lambda > 0.0 && steps_added > 0 {
         let scale = l2_lambda * steps_added as f64;
-        for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
-            *g += scale * w;
+        let fmult = l2_feature_mult();
+        for (idx, (g, &w)) in adam.gw1.iter_mut().zip(w1.iter()).enumerate() {
+            let m = fmult.as_ref().map_or(1.0, |v| v[idx / n_hidden]);
+            *g += scale * m * w;
         }
         for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
             *g += scale * w;

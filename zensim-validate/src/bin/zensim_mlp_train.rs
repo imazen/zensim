@@ -209,6 +209,24 @@ struct Args {
     #[arg(long, default_value_t = 372)]
     max_features: usize,
 
+    /// Scale-mass regularizer (E-M6 remedy): L2 multiplier on layer-1 rows of
+    /// COARSE-scale inputs (basic s2/s3 f78-155, v2 s2/s3 f546-719, append
+    /// s2/s3 f822-923). >1 pushes gradient mass toward fine scales so the
+    /// ModelSensitivity fold keeps spatial resolution (coarse concentration
+    /// collapses the map to 1/8-res: M3 0.11-0.25 at M2 0.99). 1.0 = uniform
+    /// L2, bit-identical legacy behavior.
+    #[arg(long, default_value_t = 1.0)]
+    coarse_l2_mult: f64,
+
+    /// Decoupled (AdamW-style) weight-decay RATE on coarse-scale layer-1 rows,
+    /// applied after each Adam step (bypasses Adam's rescaling, which
+    /// neutralizes coupled L2 — measured 2026-07-29). Effective per-step decay
+    /// = lr * rate * coarse_l2_mult (so pair with --coarse-l2-mult as the
+    /// row marker/multiplier; mult defaults to marking coarse rows at 1x when
+    /// only the rate is given). 0.0 = off.
+    #[arg(long, default_value_t = 0.0)]
+    coarse_decay: f64,
+
     /// Escape hatch for `--max-features < 372` (BANNED by default —
     /// narrow bakes can't ship as runtime weights). Research/content-
     /// classifier use only; never produces a `ZensimProfile` bake.
@@ -3211,6 +3229,40 @@ fn main() {
             triplet_pool.as_ref(),
         )
     };
+
+    // Scale-mass regularizer: build the per-feature L2 multiplier and hand it
+    // to the trainer via the module global (uniform when mult == 1.0). Coarse
+    // scales are s2/s3 of each region: basic 78..156, v2 546..720, append
+    // 822..924 (scale-major layouts: basic 39/scale, v2 87/scale, append
+    // 51/scale). The v1-pool 156..372 is left at 1.0 (structural zeros in the
+    // folded regimes; real pools in v1 bakes are not scale-separable here).
+    if args.coarse_decay > 0.0 {
+        *zensim_validate::mlp_train::COARSE_DECAY_RATE.lock().unwrap() = args.coarse_decay;
+        println!("[coarse-decay] decoupled decay ON: rate {}", args.coarse_decay);
+    }
+    if args.coarse_l2_mult != 1.0 || args.coarse_decay > 0.0 {
+        let nf = args.max_features;
+        // When only --coarse-decay is given, mark coarse rows at 2.0 so the
+        // decay gate (m > 1) engages; the rate absorbs the scaling.
+        let eff = if args.coarse_l2_mult != 1.0 { args.coarse_l2_mult } else { 2.0 };
+        let mut mult = vec![1.0f64; nf];
+        let coarse = |r: core::ops::Range<usize>, mult: &mut Vec<f64>| {
+            for i in r {
+                if i < nf {
+                    mult[i] = eff;
+                }
+            }
+        };
+        coarse(78..156, &mut mult);
+        coarse(546..720, &mut mult);
+        coarse(822..924, &mut mult);
+        *zensim_validate::mlp_train::L2_FEATURE_MULT.lock().unwrap() =
+            Some(std::sync::Arc::new(mult));
+        println!(
+            "[coarse-l2] scale-mass regularizer ON: mult {} on basic-s2/s3 + v2-s2/s3 + append-s2/s3",
+            args.coarse_l2_mult
+        );
+    }
 
     // ── MANDATORY reproduction provenance ──────────────────────────────
     // Assembled BEFORE baking, embedded INTO the bake bytes as the
