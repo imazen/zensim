@@ -187,9 +187,13 @@ These are real and unfixed. Nothing below is claimed to work.
    a `zensim_mlp_train` run. **B and BHdr — the bakes we actually ship — are
    linear bakes**, so their manifests carry `[bake]` + `[reproduce]` and no
    `[training]`. They reproduce byte-exactly (`scripts/reproduce_b.sh`,
-   `scripts/reproduce_bhdr.sh`, the latter verified on its first run), but via a
-   **Python** entry point (`scripts/v_next/linear_projections_2026-07-03.py`).
-   Our default profile's recipe of record is a Python script.
+   `scripts/reproduce_bhdr.sh`), and since 2026-07-29 both chains are
+   **pure Rust** (BHdr's Python lasso stage was ported as `bake_dial_refit
+   fit-lasso`, task #68). What remains of this gap is schema-shaped, not
+   language-shaped: linear-fit runs still aren't described by a `[training]`
+   manifest section, and the λ-pick lineage lives in
+   `scripts/v_next/linear_projections_2026-07-03.py` history rather than a
+   manifest.
 2. **69 of 74 shell drivers bypass the manifest.** The v47 check (§3) proves the
    migration is lossless; it has not been done. The 20 `run_*_seed.sh` files are
    each cited by 1–4 benchmark docs, so they must be *migrated*, not deleted.
@@ -222,6 +226,13 @@ These are real and unfixed. Nothing below is claimed to work.
   Legacy bakes cannot be retro-embedded (bytes frozen) — they render as
   SIDECAR or NO-REPRO honestly.
 
+
+- **BHdr's reproduction chain is Python-free.** 2026-07-29 (task #68):
+  `bake_dial_refit fit-lasso` ports the `linear_projections` gram-lasso +
+  f16-pack + anchor-spline chain to Rust — lasso w/bias/mu/sd f64 BIT-EXACT vs
+  the Python fit (`--parity-fit` gate), whole file sha `7d7f2123…` byte-identical.
+  `scripts/reproduce_bhdr.sh` now runs zero Python between fit and bake.
+  Details: `benchmarks/key_bake_repro_verification_2026-07-29.md`.
 
 - ~~`verify_bake` is not wired post-train.~~ **Fixed 2026-07-15** (`f55551e1`).
   `zensim_mlp_train` now hashes the bake it just wrote and compares it to the

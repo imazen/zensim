@@ -49,6 +49,18 @@
 //! * `strip` — reproduces `strip_spline_metadata.py`: drop one metadata
 //!   entry (default the output-calibration spline), everything else
 //!   re-emitted verbatim.
+//! * `fit-lasso` — reproduces `linear_projections_2026-07-03.py`'s
+//!   `MixGram.lasso` + `bake_candidate` (the SHIPPED-BHdr producer, task
+//!   #68): lasso coordinate descent on a FROZEN feature-Gram `.npz`, f16
+//!   pack, dial spline fit on the PACKED forward over the anchor `.npz`,
+//!   one bake out. Unlike the other subcommands this CREATES a bake instead
+//!   of editing one; it lives here (rather than a new bin) because this bin
+//!   is the Rust home of the `scripts/v_next` bake-family ports and the
+//!   plumbing it must share — `emit_linear`, `fit_spline_knots`,
+//!   `spline_payload`, `SPLINE_KEY` — is this bin's (a second bin would
+//!   duplicate `emit_linear`, violating the one-owner rule). Fit math lives
+//!   in [`zensim_validate::gram_lasso`], npz reading in
+//!   [`zensim_validate::npz`].
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -114,6 +126,11 @@ enum Cmd {
     /// re-emit everything else verbatim (reproduces
     /// `strip_spline_metadata.py`).
     Strip(StripArgs),
+    /// Lasso-CD fit on a frozen feature-Gram npz, f16 pack, anchor spline,
+    /// and bake — the Rust-native BHdr fit chain (reproduces
+    /// `linear_projections_2026-07-03.py` `fit` plus `finalize` for one
+    /// gram/lambda, bit-exactly).
+    FitLasso(FitLassoArgs),
 }
 
 // --------------------------------------------------------------------------
@@ -1462,6 +1479,327 @@ fn cmd_strip(a: &StripArgs) -> Result<(), String> {
 }
 
 // --------------------------------------------------------------------------
+// subcommand: fit-lasso  (reproduces linear_projections_2026-07-03.py
+// `MixGram.lasso` + `bake_candidate` — the shipped-BHdr fit chain, task #68)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct FitLassoArgs {
+    /// Frozen per-group Gram .npz (keys `<space>__S`, `<space>__s`,
+    /// `<space>__n`, `<space>__q_<target>`, `<space>__Y1_<target>` — the
+    /// exact artifact `cmd_gram` wrote). READ-ONLY; bit-exactness requires
+    /// consuming this artifact, never re-assembling the Gram from parquets
+    /// (BLAS accumulation order differs).
+    #[arg(long)]
+    gram: PathBuf,
+    /// Feature-space prefix inside the gram / anchor npz.
+    #[arg(long, default_value = "shaped")]
+    space: String,
+    /// Target column name (selects `__q_<target>` / `__Y1_<target>`).
+    #[arg(long, default_value = "human_score")]
+    target: String,
+    /// Mix weight for the group (1.0 = exact pass-through, the shipped-BHdr
+    /// single-group case).
+    #[arg(long, default_value_t = 1.0)]
+    weight: f64,
+    /// L1 penalty on the mean-loss scale (Python `lasso{lam}`).
+    #[arg(long)]
+    lam: f64,
+    /// Coordinate-descent sweep cap (Python `n_sweeps`).
+    #[arg(long, default_value_t = 200)]
+    n_sweeps: usize,
+    /// Sweep max-|Δw| convergence threshold (Python `tol`).
+    #[arg(long, default_value_t = 1e-10)]
+    tol: f64,
+    /// Zero weights with |w| < tau BEFORE the f16 pack (Python `--taus`).
+    #[arg(long, default_value_t = 0.0)]
+    tau: f64,
+    /// Anchor .npz (`raw`/`shaped` f32 matrices + `y`) — the dial spline is
+    /// fit on the PACKED forward over these rows.
+    #[arg(long)]
+    anchor: PathBuf,
+    /// Transform screen TSV (`feat_idx`/`best_transform`/`params_csv`)
+    /// providing the `zentrain.feature_transform*` metadata TEXT. Required
+    /// for `--space shaped`; the params are re-emitted in CPython float-repr
+    /// form because that text is part of the bake bytes.
+    #[arg(long)]
+    transforms_tsv: Option<PathBuf>,
+    /// Output bake path.
+    #[arg(long)]
+    out: PathBuf,
+    /// Parity gate 1: a Python `fits/*.npz` (`w`/`bias`/`mu`/`sd`) that the
+    /// Rust fit must match BIT-EXACTLY (errors on any f64 mismatch).
+    #[arg(long)]
+    parity_fit: Option<PathBuf>,
+    /// If given, assert the output sha256 begins with this hex prefix.
+    #[arg(long)]
+    expect_sha256: Option<String>,
+}
+
+/// Parse the yeo-johnson screen TSV exactly like the Python loaders
+/// (`train_v02_bvls_shaped.load_transforms`): rows keyed by `feat_idx`,
+/// missing features stay `identity` with no params, `params_csv` split on
+/// `,` and parsed as f64 (Python `float()` and Rust `str::parse` are both
+/// correctly rounded, so the VALUES are identical; the repr difference is
+/// handled at emission by `py_repr_f64`).
+fn load_transform_screen(
+    path: &Path,
+    n_feat: usize,
+) -> Result<(Vec<String>, Vec<Vec<f64>>), String> {
+    let mut toks = vec!["identity".to_string(); n_feat];
+    let mut params = vec![Vec::<f64>::new(); n_feat];
+    let mut rdr = csv::ReaderBuilder::new()
+        .delimiter(b'\t')
+        .from_path(path)
+        .map_err(|e| format!("open screen TSV {path:?}: {e}"))?;
+    let headers = rdr
+        .headers()
+        .map_err(|e| format!("screen TSV header: {e}"))?
+        .clone();
+    let col = |name: &str| {
+        headers
+            .iter()
+            .position(|h| h == name)
+            .ok_or_else(|| format!("screen TSV missing column {name:?}"))
+    };
+    let c_idx = col("feat_idx")?;
+    let c_tok = col("best_transform")?;
+    let c_par = col("params_csv")?;
+    for rec in rdr.records() {
+        let rec = rec.map_err(|e| format!("screen TSV row: {e}"))?;
+        let fi: usize = rec
+            .get(c_idx)
+            .ok_or("screen TSV row missing feat_idx")?
+            .trim()
+            .parse()
+            .map_err(|e| format!("bad feat_idx: {e}"))?;
+        if fi >= n_feat {
+            continue;
+        }
+        toks[fi] = rec.get(c_tok).unwrap_or("").to_string();
+        let cp = rec.get(c_par).unwrap_or("");
+        if !cp.trim().is_empty() {
+            params[fi] = cp
+                .split(',')
+                .map(|t| {
+                    t.trim()
+                        .parse::<f64>()
+                        .map_err(|e| format!("bad param {t:?} for feat {fi}: {e}"))
+                })
+                .collect::<Result<Vec<f64>, String>>()?;
+        }
+    }
+    Ok((toks, params))
+}
+
+fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
+    use zensim_validate::gram_lasso::{
+        f16_bits_to_f64, f64_to_f16_bits, lasso_cd, py_repr_f64, standardize_gram,
+    };
+    use zensim_validate::npz::Npz;
+
+    // 1. frozen Gram moments → standardized system (MixGram.__init__).
+    let gram = Npz::open(&a.gram)?;
+    let key = |suffix: &str| format!("{}__{suffix}", a.space);
+    let s_arr = gram.get(&key("S"))?;
+    let s_vec = gram.get(&key("s"))?;
+    let q_arr = gram.get(&key(&format!("q_{}", a.target)))?;
+    let y1 = gram.get(&key(&format!("Y1_{}", a.target)))?.scalar_f64()?;
+    let n_rows = gram.get(&key("n"))?.scalar_f64()?;
+    let n_feat = *s_vec
+        .shape
+        .first()
+        .ok_or("gram `__s` must be 1-d, got 0-d")?;
+    if s_arr.shape != [n_feat, n_feat] {
+        return Err(format!(
+            "gram `__S` shape {:?} != ({n_feat}, {n_feat})",
+            s_arr.shape
+        ));
+    }
+    let sg = standardize_gram(
+        n_feat,
+        a.weight,
+        s_arr.f64s()?,
+        s_vec.f64s()?,
+        q_arr.f64s()?,
+        y1,
+        n_rows,
+    )?;
+
+    // 2. lasso coordinate descent (MixGram.lasso).
+    let w = lasso_cd(&sg, a.lam, a.n_sweeps, a.tol);
+    let bias = sg.ybar;
+    let n_active_pre = w.iter().filter(|v| v.abs() > 1e-7).count();
+    eprintln!(
+        "lasso(lam={}) on {:?} [{} space, target {}]: n={:.0} act={n_active_pre} bias={bias:.6}",
+        a.lam, a.gram, a.space, a.target, sg.w_total
+    );
+
+    // 3. parity gate 1: bit-exact w/bias/mu/sd vs the Python fit npz.
+    if let Some(pf) = &a.parity_fit {
+        let fit = Npz::open(pf)?;
+        let pw_arr = fit.get("w")?;
+        let pmu_arr = fit.get("mu")?;
+        let psd_arr = fit.get("sd")?;
+        let pbias = fit.get("bias")?.scalar_f64()?;
+        let mut bad = 0usize;
+        let mut check = |name: &str, ours: &[f64], theirs: &[f64]| {
+            if ours.len() != theirs.len() {
+                eprintln!("  parity {name}: length {} != {}", ours.len(), theirs.len());
+                bad += 1;
+                return;
+            }
+            for (i, (o, t)) in ours.iter().zip(theirs).enumerate() {
+                if o.to_bits() != t.to_bits() {
+                    if bad < 8 {
+                        eprintln!(
+                            "  parity {name}[{i}]: rust {o:?} ({:#018x}) != python {t:?} ({:#018x})",
+                            o.to_bits(),
+                            t.to_bits()
+                        );
+                    }
+                    bad += 1;
+                }
+            }
+        };
+        check("w", &w, pw_arr.f64s()?);
+        check("mu", &sg.mu, pmu_arr.f64s()?);
+        check("sd", &sg.sd, psd_arr.f64s()?);
+        if pbias.to_bits() != bias.to_bits() {
+            eprintln!(
+                "  parity bias: rust {bias:?} ({:#018x}) != python {pbias:?} ({:#018x})",
+                bias.to_bits(),
+                pbias.to_bits()
+            );
+            bad += 1;
+        }
+        if bad > 0 {
+            return Err(format!(
+                "parity gate 1 FAILED: {bad} f64 mismatches vs {pf:?}"
+            ));
+        }
+        eprintln!("  parity gate 1 PASS: w/bias/mu/sd bit-exact vs {pf:?}");
+    }
+
+    // 4. tau prune + f16 pack (bake_candidate: `w[|w| < tau] = 0`, then
+    // `w.astype(f16).astype(f64)` — single-rounding f64→f16).
+    let mut w = w;
+    if a.tau > 0.0 {
+        for v in &mut w {
+            if v.abs() < a.tau {
+                *v = 0.0;
+            }
+        }
+    }
+    let wp: Vec<f64> = w
+        .iter()
+        .map(|v| f16_bits_to_f64(f64_to_f16_bits(*v)))
+        .collect();
+    let n_active = wp.iter().filter(|v| v.abs() > 0.0).count();
+
+    // 5. dial spline on the PACKED forward over the anchor.
+    let anchor = Npz::open(&a.anchor)?;
+    let xa = anchor.get(&a.space)?;
+    let (rows, cols) = match xa.shape[..] {
+        [r, c] => (r, c),
+        _ => {
+            return Err(format!(
+                "anchor {:?} entry {:?} must be 2-d, got {:?}",
+                a.anchor, a.space, xa.shape
+            ));
+        }
+    };
+    if cols != n_feat {
+        return Err(format!(
+            "anchor width {cols} != gram n_feat {n_feat} — wrong anchor for this gram"
+        ));
+    }
+    let xaf = xa.f32s()?;
+    let ya = anchor.get("y")?.f64s()?.to_vec();
+    if ya.len() != rows {
+        return Err(format!("anchor y len {} != rows {rows}", ya.len()));
+    }
+    let mut preds = vec![0.0f64; rows];
+    for (r, pred) in preds.iter_mut().enumerate() {
+        let row = &xaf[r * n_feat..(r + 1) * n_feat];
+        let mut acc = 0.0f64;
+        for j in 0..n_feat {
+            // mirrors `(Xa - mu) / sd @ w`: widen, subtract, divide, multiply
+            // — each rounded once; sequential sum (see the parity note in the
+            // repro doc: knots are f32-rounded, which absorbs the BLAS
+            // accumulation-order difference).
+            acc += (row[j] as f64 - sg.mu[j]) / sg.sd[j] * wp[j];
+        }
+        *pred = acc + bias;
+    }
+    let (cx, cy) = fit_spline_knots(&preds, &ya, 18, true);
+
+    // 6. metadata: transforms text (shaped space) + spline payload, in the
+    // exact order bake_candidate emits them.
+    let mut metadata: Vec<OwnedMeta> = Vec::new();
+    if a.space == "shaped" {
+        let tsv = a.transforms_tsv.as_ref().ok_or(
+            "--transforms-tsv is required for --space shaped (the transform \
+             metadata text ships inside the bake bytes)",
+        )?;
+        let (toks, params) = load_transform_screen(tsv, n_feat)?;
+        metadata.push(OwnedMeta {
+            key: zenpredict::keys::FEATURE_TRANSFORMS.to_string(),
+            kind: MetadataType::Utf8,
+            value: toks.join("\n").into_bytes(),
+        });
+        let params_txt = params
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|p| py_repr_f64(*p))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        metadata.push(OwnedMeta {
+            key: zenpredict::keys::FEATURE_TRANSFORM_PARAMS.to_string(),
+            kind: MetadataType::Utf8,
+            value: params_txt.into_bytes(),
+        });
+    }
+    if !cx.is_empty() {
+        metadata.push(OwnedMeta {
+            key: SPLINE_KEY.to_string(),
+            kind: MetadataType::Bytes,
+            value: spline_payload(&cx, &cy),
+        });
+    }
+
+    // 7. emit through the shared canonical serializer (same BakeRequest
+    // shape as the Python JSON pipeline: f16 layer, compressed, flags 0).
+    let mu32: Vec<f32> = sg.mu.iter().map(|v| *v as f32).collect();
+    let sd32: Vec<f32> = sg.sd.iter().map(|v| *v as f32).collect();
+    let w32: Vec<f32> = wp.iter().map(|v| *v as f32).collect();
+    let sz = emit_linear(&a.out, &mu32, &sd32, &w32, bias as f32, &metadata)
+        .map_err(|e| format!("write {:?}: {e}", a.out))?;
+
+    let out_bytes = std::fs::read(&a.out).map_err(|e| format!("re-read {:?}: {e}", a.out))?;
+    let got = sha256_hex(&out_bytes);
+    eprintln!(
+        "fit-lasso -> {:?} ({sz} B): act={n_active} (pre-pack {n_active_pre}), {} spline knots, dial y-range [{:.2},{:.2}]\n  sha256 {got}",
+        a.out,
+        cx.len(),
+        cy.first().copied().unwrap_or(f64::NAN),
+        cy.last().copied().unwrap_or(f64::NAN)
+    );
+    if let Some(expect) = &a.expect_sha256 {
+        if got.starts_with(expect) {
+            eprintln!("  BYTE-REPRODUCED (matches expected {expect})");
+        } else {
+            return Err(format!("sha mismatch: expected {expect}, got {got}"));
+        }
+    }
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
 // sha256 (for add-winsor's byte-repro assertion)
 // --------------------------------------------------------------------------
 
@@ -1488,6 +1826,7 @@ fn main() -> ExitCode {
         Cmd::Gate(a) => cmd_gate(a),
         Cmd::Pack(a) => cmd_pack(a).map(|_| false),
         Cmd::Strip(a) => cmd_strip(a).map(|_| false),
+        Cmd::FitLasso(a) => cmd_fit_lasso(a).map(|_| false),
     };
     match result {
         Ok(gate_failed) => {

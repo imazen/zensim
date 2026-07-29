@@ -832,10 +832,22 @@ bake_dial_refit pack --in <f32.bin> --out <out.bin> [--neg-tail] \
 # drop one metadata entry, rest verbatim (BYTE-IDENTICAL to the deleted
 # strip_spline_metadata.py on both MLP and linear fixtures)
 bake_dial_refit strip --in <bake> --out <out> [--key zentrain.output_calibration_spline]
+# lasso-CD fit on a FROZEN gram npz + f16 pack + anchor spline + bake — THE
+# shipped-BHdr producer, pure Rust (task #68; lasso w/bias/mu/sd f64 BIT-EXACT
+# vs the Python fit via --parity-fit; whole file sha 7d7f2123… BYTE-IDENTICAL;
+# reproduce_bhdr.sh now runs zero Python between fit and bake)
+bake_dial_refit fit-lasso --gram <grams/hdr_v3mix.npz> --space shaped \
+    --target human_score --lam 0.0003 --anchor <val/anchor.npz> \
+    --transforms-tsv <screen.tsv> --out <bake.bin> [--parity-fit <fits/*.npz>] \
+    [--tau 0] [--expect-sha256 <hex>]
 ```
 
 Method + measured byte-parity: `benchmarks/bake_refit_rust_migration_2026-07-05.md`
-(+ `benchmarks/pack_rust_migration_2026-07-29.md` for `pack`).
+(+ `benchmarks/pack_rust_migration_2026-07-29.md` for `pack`,
+`benchmarks/key_bake_repro_verification_2026-07-29.md` for `fit-lasso`).
+`fit-lasso` support modules: `zensim_validate::gram_lasso` (bit-exact
+MixGram+lasso port, single-rounding f64→f16, CPython float-repr) and
+`zensim_validate::npz` (minimal stored+deflate npz reader via zenflate).
 
 ### Affine calibration of an existing bake
 **`affine_calibrate` binary** at `zensim-validate/src/bin/affine_calibrate.rs`.

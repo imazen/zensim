@@ -5779,6 +5779,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenflate"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6a6d1257350f0e4dbe68918130e9e32629dc6a0bdcf645825e54e4252396e01"
+dependencies = [
+ "archmage",
+ "enough",
+]
+
+[[package]]
 name = "zenjpeg"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5852,7 +5862,7 @@ dependencies = [
  "thiserror",
  "whereat",
  "zencodec",
- "zenflate",
+ "zenflate 0.3.6",
  "zenpixels",
  "zenpixels-convert",
 ]
@@ -6001,6 +6011,7 @@ dependencies = [
  "sha2 0.11.0",
  "toml",
  "zenbench",
+ "zenflate 0.4.0",
  "zenpredict",
  "zenpredict-bake",
  "zensim",

@@ -14,8 +14,10 @@ pub mod adam_simd;
 pub mod bake_runtime;
 pub mod dial_spline;
 pub mod eval_report;
+pub mod gram_lasso;
 #[allow(clippy::all)]
 pub mod mlp_train;
+pub mod npz;
 pub mod output_calibration_spline;
 pub mod panel;
 pub mod parquet_loader;
