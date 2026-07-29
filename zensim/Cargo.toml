@@ -175,6 +175,10 @@ name = "sihdr_features_extract"
 required-features = ["feature-regime-v2", "threads", "training"]
 
 [[example]]
+name = "hdrvdc_features_extract"
+required-features = ["feature-regime-v2", "threads", "training"]
+
+[[example]]
 name = "rousselot_features_extract"
 required-features = ["feature-regime-v2", "threads", "training"]
 
