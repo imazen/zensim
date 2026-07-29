@@ -18,6 +18,11 @@
 > inside n=90 noise). G1 ≥0.95 met at s1 only (s3 ceiling ~0.91) — flagged per
 > the chunk-2 aspiration-miss precedent; G6 LOO adjudicates. Chroma tiers
 > (f956..f979) + tier B + stage-2 remain per §8.2.
+> **UPDATE 2026-07-29: G6 LOO FAILED (`csfw_g6_loo_2026-07-29.md`, falsifier
+> 7) and the surviving HDR cross-route claim was then priced and found empty
+> (`hdr_dmean_commensurability_2026-07-29.md`: DMEAN-only transfer probe
+> harms Narwaria, bootstrap-decisive; lane-level G1 win non-propagating) —
+> chroma tiers / tier B / stage-2 are recommended CLOSED, f956..f979 freed.**
 
 **2026-07-28. DESIGN ONLY — no implementation in this commit.** This decides the
 runtime form, the seeding, the landing shape, and the gates for `HDR_PLAN.md`

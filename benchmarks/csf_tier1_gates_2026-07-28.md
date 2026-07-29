@@ -267,11 +267,15 @@ construction — LOO adjudicates slot-worth.
 
 1. **Chroma tiers (f956..f979)** — X/B weighted twins (V3's deep-scale
    chroma divergence) + tier B (dense-kernel error pools): later waves; the
-   ledger claim shifts to f956..f979.
+   ledger claim shifts to f956..f979. **ADJUDICATED 2026-07-29: claim
+   recommended CLOSED** — the HDR cross-route commensurability study
+   (`hdr_dmean_commensurability_2026-07-29.md`) found no consumer-level
+   value on UPIQ (DMEAN-only transfer probe nar Δ −0.0273, bootstrap
+   p 0.0000 harmful; lane-level G1 win real but non-propagating).
 2. **Stage-2 calibration** (κ_X, κ_B on the re-extracted HDR corpora) +
    the §9.2 ladder extension (mean-shifting / chroma-only distortions) —
    with the backfill round; also re-visit the s3 DMEAN ceiling (~0.91)
-   there.
+   there. **ADJUDICATED 2026-07-29: not to proceed** per the same study.
 3. **G6: LOO on a 956 bake** — **ADJUDICATED 2026-07-29: FAIL**
    (`csfw_g6_loo_2026-07-29.md`: family Σ **+0.0608**, harmful on every
    robustness cut; carrier = the weighted contrast twins, W_GLOBAL_DMEAN
