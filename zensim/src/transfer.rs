@@ -308,8 +308,8 @@ mod tests {
     #[test]
     fn decode_pq_row_reference_values() {
         // PQ 0.5 → 92.25 cd/m² (HDR_PLAN §1 golden) + the display lift.
-        let lift = DisplayModel::STANDARD_HDR_PQ_1000.y_black
-            + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
+        let lift =
+            DisplayModel::STANDARD_HDR_PQ_1000.y_black + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
         let mut row = [[0.5f32; 3], [1.0; 3], [0.0; 3]];
         decode_pq_row(&mut row, 10_000.0);
         assert!(close(row[0][0], 92.25 + lift, 0.05), "{}", row[0][0]);
@@ -325,8 +325,8 @@ mod tests {
     fn decode_hlg_row_reference_values() {
         // Full-scale white (E' = 1 on all channels): E_s = 1, Y_s = 1,
         // F_D = peak · 1^(γ−1) · 1 = peak (+ lift).
-        let lift = DisplayModel::STANDARD_HDR_PQ_1000.y_black
-            + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
+        let lift =
+            DisplayModel::STANDARD_HDR_PQ_1000.y_black + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
         let mut row = [[1.0f32; 3]];
         decode_hlg_row(&mut row, 1000.0, 5.0);
         assert!(close(row[0][0], 1000.0 + lift, 0.5), "{}", row[0][0]);

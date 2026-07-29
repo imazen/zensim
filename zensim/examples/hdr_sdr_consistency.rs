@@ -268,6 +268,42 @@ fn main() {
         }
     }
 
+    // ZENSIM_CSFW_DUMP=<dir>: write the raw per-pair feature vectors of
+    // both routes (plus the readout scores) as CSVs, so downstream
+    // analyses (the HDR cross-route commensurability study) can consume
+    // the ladder without reimplementing it. Purely additive output.
+    if let Ok(dir) = std::env::var("ZENSIM_CSFW_DUMP") {
+        std::fs::create_dir_all(&dir).expect("create dump dir");
+        for (name, feats, scores) in [
+            ("sdr_feats.csv", &sdr_feats, &sdr_scores),
+            ("hdr_feats.csv", &hdr_feats, &hdr_scores),
+        ] {
+            let nf = feats[0].len();
+            let mut w = String::from("pair_idx,ref_idx,kind,level,score228");
+            for k in 0..nf {
+                w.push_str(&format!(",f{k}"));
+            }
+            w.push('\n');
+            for (i, row) in feats.iter().enumerate() {
+                w.push_str(&format!(
+                    "{i},{},{},{},{}",
+                    i / 9,
+                    (i % 9) / 3,
+                    i % 3,
+                    scores[i]
+                ));
+                for v in row {
+                    w.push(',');
+                    w.push_str(&format!("{v}"));
+                }
+                w.push('\n');
+            }
+            let path = std::path::Path::new(&dir).join(name);
+            std::fs::write(&path, w).expect("write dump csv");
+            eprintln!("dumped {}", path.display());
+        }
+    }
+
     let n_pairs = sdr_scores.len();
     println!("pairs: {n_pairs}");
     println!(

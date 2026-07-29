@@ -166,6 +166,10 @@ required-features = ["feature-regime-v2", "threads", "training"]
 name = "capture_v1_golden"
 required-features = ["training"]
 
+[[example]]
+name = "upiq_features_extract"
+required-features = ["feature-regime-v2", "threads", "training"]
+
 [[bench]]
 name = "pu21_bench"
 harness = false
