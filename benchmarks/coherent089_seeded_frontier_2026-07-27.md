@@ -123,3 +123,17 @@ head — negrich_924 exists).
 ⚠ single-seed. E-M2 (in flight, lianli): 6-seed fold924 + kw {0.25, 0.75} ×
 {13,42} + a **no-KADIS attribution arm** ×2 — is the CSIQ/corruption trade the
 append block itself, or its interaction with the KADIS analytic mass?
+
+## E-M2 — seeded 924 verdict (2026-07-28)
+
+| arm | n | CID22 | KonJND | CSIQ | LIVE | corr-q20 |
+|---|--:|---|---|--:|--:|--:|
+| no-KADIS | 2 | 0.8790 ±0.0004 | **0.404** ±0.025 | 0.48 | 0.60 | 0.06 |
+| kw0.25 | 2 | 0.876 | 0.244 | 0.82 | 0.84 | 0.07 |
+| kw0.5 | 6 | **0.8825 ±0.0025** | 0.244 ±0.097 | 0.78 | 0.80 | 0.10 |
+| kw0.75 | 2 | 0.864 | 0.321 | 0.82 | 0.81 | 0.12 |
+
+1. **v3 CID22 lift is real, modest: +0.003** (0.8825±0.0025 vs 720's 0.8794±0.0036; all 6 seeds ≥0.880).
+2. **CORRECTION: E-M1's KonJND 0.405 was a seed draw** (band 0.244±0.097). Same single-seed trap as fold40's "+0.010"; the doc's E-M1 claim is superseded by this band.
+3. **Role reversal at 924**: v3 features natively carry near-threshold signal (no-KADIS KonJND 0.404) and KADIS *suppresses* it (kw0.25→0.244) while rescuing classic-FR (CSIQ 0.48→0.82). At 720 KADIS was the KonJND source; at 924 it's the generalization stabilizer.
+4. **Corruption ordering broken in ALL 924 arms** (0.06–0.12 vs 0.214 @720) — intrinsic to the append block. Next: per-family attribution + negrich-924 head.
