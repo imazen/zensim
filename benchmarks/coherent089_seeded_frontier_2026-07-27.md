@@ -201,3 +201,18 @@ distributional at 924, not two families. **Mitigation = the separate corruption 
 **Candidate flag**: EM4_mask2_kw0.15_s42 = CID22 0.8924 + KonJND 0.4286 + CSIQ 0.79 —
 best coherent-regime run recorded. ⚠ single-seed (s13 sibling 0.8747); E-M5 seed-band
 (6 more seeds, in flight) decides if it's a mode or luck.
+
+## E-M5 + SELECTION — the v3-era recipe closes (2026-07-29)
+
+- **mask2+kw0.15 is a lottery** (n=8: CID22 0.8679±0.0268, bimodal — 2 collapsed seeds
+  with CSIQ cratered) BUT its peaks are the two best coherent runs ever (s42 0.8924,
+  s99 0.8921).
+- **Selection-by-sdr25 WORKS**: SROCC(sdr25-oracle → CID22-outcome) = **+0.752** over all
+  35 E-M bakes; every collapsed seed ranks bottom; within the lottery arm the top-2 by
+  sdr25 ARE the two 0.892 peaks. sdr25 (JPEG-AI HQ-zone human, never trained, not a
+  product gate) is now a first-class bake_verdict corpus; `best_val` is recorded in
+  spec.json + embedded repro by all 4 trainer variants for future in-run selection.
+- **The v3-era ship-candidate recipe**: fold924 + WT40 + DET/ART mask (winsor:0,0) +
+  kadis kw0.15 × k seeds → select by sdr25/best_val. Selected: `EM4_mask2_kw0.15_s42` —
+  **CID22 0.8924 · KonJND 0.4286 · CSIQ 0.788 · LIVE 0.801** (coherent regime; corruption
+  0.042 delegated to the negrich-924 head per E-M4's distributional finding).
