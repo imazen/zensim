@@ -649,7 +649,7 @@ function renderDial(){
   const bs=visBakes().filter(b=>b.dial&&b.dial.curves&&Object.keys(b.dial.curves).length);
   if(!bs.length)return;
   host.append(el('h2',{text:'Per-codec dial curves'}));
-  host.append(el('div',{class:'cap',html:'Median dial score vs grid quality per codec family (across that codec\\'s '
+  host.append(el('div',{class:'cap',html:'Median dial score vs grid quality per codec family (across each family\u2019s '
     +'image ladders on the densified grid; jxl x-axis = butteraugli-distance mapped to q-equiv). A good dial rises '
     +'monotonically and spans low→high. The per-codec mono% is in the tooltip — a family can be broken while the '
     +'pooled headline stays green.'}));
@@ -719,7 +719,7 @@ function renderModels(){
   const bs=visBakes().filter(b=>b.model&&b.model.layers);
   if(!bs.length)return;
   host.append(el('h2',{text:'Model details'}));
-  host.append(el('div',{class:'cap',html:'Read from each bake\\'s ZNPR (structured <code>zenpredict inspect</code>): '
+  host.append(el('div',{class:'cap',html:'Read from each bake\u2019s ZNPR (structured <code>zenpredict inspect</code>): '
     +'architecture, weight dtype, INPUT modifiers (per-feature transforms + winsor guard count + scaler), and the '
     +'OUTPUT modifier — the dial calibration spline (plotted raw→dial; the top cap at 100 and any negative-tail '
     +'extension are visible in the knots). Hover a transform chip for its params.'}));
