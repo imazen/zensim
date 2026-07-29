@@ -51,9 +51,17 @@ fn bake_bytes_static() -> &'static [u8] {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // E-JBU perf mode (protocol: ms/MP of the redistribution pass): `--perf WxH`
+    // synthesizes a pair and times the diffmap render with the guided option
+    // OFF vs ON, interleaved, medians of 4 per arm.
+    #[cfg(feature = "custom-profiles")]
+    if args.first().map(String::as_str) == Some("--perf") {
+        run_jbu_perf(args.get(1).map(String::as_str).unwrap_or("1024x1024"));
+        return;
+    }
     if args.len() < 2 {
         eprintln!(
-            "usage: diffmap_block_coherence <ref> <dist> [--block N] [--weighting trained|balanced] [--bake <path>]"
+            "usage: diffmap_block_coherence <ref> <dist> [--block N] [--weighting trained|balanced] [--bake <path>] | --perf WxH"
         );
         std::process::exit(2);
     }
@@ -521,17 +529,49 @@ fn run_bake_mode(
     // `mut` is used only by the v2 fold below (a >372 combined bake). Without
     // `feature-regime-v2` that fold is compiled out and the binding stays immutable.
     let t_model = std::time::Instant::now();
-    #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
-    let mut diff_model = z_map
+    let model_res = z_map
         .compute_with_diffmap(
             &rs,
             &dist_slice,
             all_signals(DiffmapWeighting::ModelSensitivity(s_basic)),
         )
-        .expect("diffmap model-sensitivity")
-        .diffmap()
-        .to_vec();
+        .expect("diffmap model-sensitivity");
     let ms_model = t_model.elapsed().as_secs_f64() * 1e3;
+    let map_score_off = model_res.score();
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
+    let mut diff_model = model_res.diffmap().to_vec();
+
+    // ── E-JBU A/B (ZENSIM_JBU_AB=1, protocol 2026-07-30) ────────────────────
+    // Second ModelSensitivity map with `guided_coarse_redistribution: true`,
+    // computed in the SAME process so s_k / ΔS / M2 are shared exactly between
+    // arms. Per-cell mass conservation predicts aligned block sums ≥ 8px
+    // unchanged (f32 order only); the drift lines verify it, the per-pixel
+    // lines locate where the map actually moved.
+    let jbu_ab = std::env::var("ZENSIM_JBU_AB").as_deref() == Ok("1");
+    let mut diff_model_jbu: Option<Vec<f32>> = None;
+    let mut ms_jbu = 0.0f64;
+    if jbu_ab {
+        let mut o = all_signals(DiffmapWeighting::ModelSensitivity(s_basic));
+        o.guided_coarse_redistribution = true;
+        let t_jbu = std::time::Instant::now();
+        let jbu_res = z_map
+            .compute_with_diffmap(&rs, &dist_slice, o)
+            .expect("diffmap model-sensitivity (guided)");
+        ms_jbu = t_jbu.elapsed().as_secs_f64() * 1e3;
+        // Scalar-drift gate: the render option must not perturb scoring.
+        let sd = (jbu_res.score() - map_score_off).abs()
+            / map_score_off.abs().max(1e-12);
+        println!(
+            "  JBU scalar drift (map-profile score, ON vs OFF): {:.3e} rel ({})",
+            sd,
+            if jbu_res.score() == map_score_off {
+                "bit-identical"
+            } else {
+                "NONZERO — gate is <=1e-6"
+            }
+        );
+        diff_model_jbu = Some(jbu_res.diffmap().to_vec());
+    }
 
     // task #48: for a v1++v2 bake, add the v2 block's per-pixel contribution
     // (its gradient s[372..] folded through the additive v2 families) to the
@@ -555,10 +595,26 @@ fn run_bake_mode(
         assert_eq!(m.len(), diff_model.len());
         m
     });
+    // E-JBU: v1-fold-only copies for the A/B per-pixel report. The combined
+    // map below adds the raw v2 fold, which is orders of magnitude larger in
+    // VALUE than the v1 signal fold (the C1 "raw add swamps" note, seen from
+    // the other side) — per-pixel stats on the combined map would portray the
+    // redistribution (which acts inside the v1 fold only) as ~0.01% noise.
+    let jbu_v1_pair: Option<(Vec<f32>, Vec<f32>)> = diff_model_jbu
+        .as_ref()
+        .map(|jm| (diff_model.clone(), jm.clone()));
     #[cfg(feature = "feature-regime-v2")]
     if let Some(v2m) = &v2map {
         for (m, v) in diff_model.iter_mut().zip(v2m.iter()) {
             *m += *v;
+        }
+        // E-JBU: the IDENTICAL v2 fold-in goes into the guided arm — the A/B
+        // isolates the v1 fold's coarse upsample; the v2 fold is out of scope
+        // (pre-registered) and shared bit-for-bit between arms.
+        if let Some(jm) = &mut diff_model_jbu {
+            for (m, v) in jm.iter_mut().zip(v2m.iter()) {
+                *m += *v;
+            }
         }
     }
     // Without `feature-regime-v2` the fold is compiled out; `v2_grad` is then only
@@ -742,6 +798,144 @@ fn run_bake_mode(
         "  M3  SROCC(model_sensitivity_map,   ΔS_bake) = {m3:+.4}   PLCC {:+.4}   (bake's own s_k — deployable)",
         pearson(&dmap_model_block, &delta_s)
     );
+    // ── E-JBU A/B report (protocol 2026-07-30) ──────────────────────────────
+    if let Some(jm) = &diff_model_jbu {
+        let (jbu_block, _) = block_sums(jm, rpx, dpx, w, h, block, bx);
+        let m3r = spearman(&jbu_block, &delta_s);
+        // Drift: totals + per-block (predicted f32-order-only at aligned ≥8px).
+        let tot_off: f64 = diff_model.iter().map(|&v| v as f64).sum();
+        let tot_on: f64 = jm.iter().map(|&v| v as f64).sum();
+        let tot_rel = (tot_on - tot_off).abs() / tot_off.abs().max(1e-12);
+        let mut max_blk_rel = 0.0f64;
+        let blk_scale = dmap_model_block
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0f64, f64::max)
+            .max(1e-12);
+        for (a, b) in dmap_model_block.iter().zip(jbu_block.iter()) {
+            max_blk_rel = max_blk_rel.max((a - b).abs() / blk_scale);
+        }
+        // Per-pixel movement: where the render actually changed.
+        let mut max_px = 0.0f32;
+        let mut changed = 0usize;
+        for (a, b) in diff_model.iter().zip(jm.iter()) {
+            let d = (a - b).abs();
+            max_px = max_px.max(d);
+            if d > 1e-9 {
+                changed += 1;
+            }
+        }
+        let off64: Vec<f64> = diff_model.iter().map(|&v| v as f64).collect();
+        let on64: Vec<f64> = jm.iter().map(|&v| v as f64).collect();
+        let px_srocc = spearman(&off64, &on64);
+        // Map scale for reading the per-pixel deltas: p50/p99.5 of |OFF map|.
+        let mut mag: Vec<f32> = diff_model.iter().map(|v| v.abs()).collect();
+        mag.sort_by(f32::total_cmp);
+        let p50 = mag[mag.len() / 2];
+        let p995 = mag[((mag.len() - 1) as f64 * 0.995) as usize].max(1e-30);
+        println!(
+            "  M3r SROCC(guided_redistrib_map,    ΔS_bake) = {m3r:+.4}   PLCC {:+.4}   (E-JBU: per-cell mass-conserving; ΔM3 {:+.4})",
+            pearson(&jbu_block, &delta_s),
+            m3r - m3
+        );
+        println!(
+            "      JBU drift: total {tot_rel:.3e} rel | max block Δ {max_blk_rel:.3e} of max|block| | px changed {:.1}% | max px Δ {max_px:.3e} ({:.2}% of map p99.5 {p995:.3e}; p50 {p50:.3e}) | px SROCC(off,on) {px_srocc:+.6}",
+            100.0 * changed as f64 / diff_model.len() as f64,
+            100.0 * max_px as f64 / p995 as f64
+        );
+        // v2-only M3: if the combined map's ranks are set by the raw v2 add
+        // (v1 value share ~1e-6..1e-4), M3(v2-only) must ≈ M3(combined). A
+        // direct measurement, not an inference from value shares.
+        #[cfg(feature = "feature-regime-v2")]
+        if let Some(v2m) = &v2map {
+            let (v2b, _) = block_sums(v2m, rpx, dpx, w, h, block, bx);
+            println!(
+                "      JBU v2-only: M3(v2map alone) {:+.4} vs combined {m3:+.4}",
+                spearman(&v2b, &delta_s)
+            );
+        }
+        // v1-fold-only A/B: the redistribution acts inside the v1 fold; report
+        // its effect at the scale where it lives (the combined map above is
+        // value-dominated by the shared raw v2 add for >372 bakes).
+        if let Some((v1_off, v1_on)) = &jbu_v1_pair {
+            let (v1b_off, _) = block_sums(v1_off, rpx, dpx, w, h, block, bx);
+            let (v1b_on, _) = block_sums(v1_on, rpx, dpx, w, h, block, bx);
+            let m3_v1_off = spearman(&v1b_off, &delta_s);
+            let m3_v1_on = spearman(&v1b_on, &delta_s);
+            let mut mag: Vec<f32> = v1_off.iter().map(|v| v.abs()).collect();
+            mag.sort_by(f32::total_cmp);
+            let v1_p995 = mag[((mag.len() - 1) as f64 * 0.995) as usize].max(1e-30);
+            let mut v1_max_px = 0.0f32;
+            for (a, b) in v1_off.iter().zip(v1_on.iter()) {
+                v1_max_px = v1_max_px.max((a - b).abs());
+            }
+            let o64: Vec<f64> = v1_off.iter().map(|&v| v as f64).collect();
+            let n64: Vec<f64> = v1_on.iter().map(|&v| v as f64).collect();
+            println!(
+                "      JBU v1-fold-only: M3(off) {m3_v1_off:+.4} -> M3(on) {m3_v1_on:+.4} (Δ {:+.4}) | max px Δ {v1_max_px:.3e} = {:.1}% of v1 p99.5 {v1_p995:.3e} | px SROCC(off,on) {:+.6} | v1 share of combined p99.5: {:.4}%",
+                m3_v1_on - m3_v1_off,
+                100.0 * v1_max_px as f64 / v1_p995 as f64,
+                spearman(&o64, &n64),
+                100.0 * v1_p995 as f64 / p995 as f64
+            );
+        }
+        println!(
+            "      JBU perf (incl. ref precompute + score): guided {ms_jbu:.1} ms vs base {ms_model:.1} ms"
+        );
+        // Optional visual A/B: ZENSIM_JBU_DUMP=<prefix> writes p99.5-normalized
+        // grayscale PNGs (shared scale so brightness is comparable).
+        if let Ok(prefix) = std::env::var("ZENSIM_JBU_DUMP") {
+            let mut sorted: Vec<f32> = diff_model.iter().map(|v| v.abs()).collect();
+            sorted.sort_by(f32::total_cmp);
+            let p995 = sorted[((sorted.len() - 1) as f64 * 0.995) as usize].max(1e-12);
+            let dump = |m: &[f32], path: String| {
+                let px: Vec<u8> = m
+                    .iter()
+                    .map(|&v| ((v.abs() / p995) * 255.0).clamp(0.0, 255.0) as u8)
+                    .collect();
+                image::GrayImage::from_raw(w as u32, h as u32, px)
+                    .expect("gray image")
+                    .save(&path)
+                    .expect("save png");
+                eprintln!("      wrote {path}");
+            };
+            dump(&diff_model, format!("{prefix}_b{block}_off.png"));
+            dump(jm, format!("{prefix}_b{block}_on.png"));
+            let delta: Vec<f32> = diff_model
+                .iter()
+                .zip(jm.iter())
+                .map(|(a, b)| (a - b).abs() * 4.0) // ×4 so structure is visible
+                .collect();
+            dump(&delta, format!("{prefix}_b{block}_absdelta_x4.png"));
+            // v1-fold-only visuals — where the redistribution actually acts
+            // (normalized to the v1 fold's own p99.5, not the v2-swamped
+            // combined scale).
+            if let Some((v1_off, v1_on)) = &jbu_v1_pair {
+                let mut m: Vec<f32> = v1_off.iter().map(|v| v.abs()).collect();
+                m.sort_by(f32::total_cmp);
+                let v1s = m[((m.len() - 1) as f64 * 0.995) as usize].max(1e-30);
+                let dump1 = |mp: &[f32], path: String| {
+                    let px: Vec<u8> = mp
+                        .iter()
+                        .map(|&v| ((v.abs() / v1s) * 255.0).clamp(0.0, 255.0) as u8)
+                        .collect();
+                    image::GrayImage::from_raw(w as u32, h as u32, px)
+                        .expect("gray image")
+                        .save(&path)
+                        .expect("save png");
+                    eprintln!("      wrote {path}");
+                };
+                dump1(v1_off, format!("{prefix}_b{block}_v1_off.png"));
+                dump1(v1_on, format!("{prefix}_b{block}_v1_on.png"));
+                let d1: Vec<f32> = v1_off
+                    .iter()
+                    .zip(v1_on.iter())
+                    .map(|(a, b)| (a - b).abs() * 2.0)
+                    .collect();
+                dump1(&d1, format!("{prefix}_b{block}_v1_absdelta_x2.png"));
+            }
+        }
+    }
     println!(
         "  M3a SROCC(attribution_density,     ΔS_bake) = {m3a:+.4}   PLCC {:+.4}   (true-integrand density + SAT{})",
         pearson(&attr_block, &delta_s),
@@ -811,4 +1005,78 @@ fn pearson(a: &[f64], b: &[f64]) -> f64 {
 }
 fn spearman(a: &[f64], b: &[f64]) -> f64 {
     pearson(&rank(a), &rank(b))
+}
+
+/// E-JBU perf protocol (2026-07-30): time the diffmap render with the guided
+/// coarse redistribution OFF vs ON on a synthesized pair, interleaved
+/// (off,on)×4, report per-arm medians-of-4 and the ON−OFF delta in ms and
+/// ms/MP. Reference precompute is done ONCE outside the timed region — the
+/// timed call is `compute_with_ref_and_diffmap` (the encoder-loop shape).
+#[cfg(feature = "custom-profiles")]
+fn run_jbu_perf(spec: &str) {
+    let (ws, hs) = spec.split_once('x').expect("--perf WxH");
+    let (w, h): (usize, usize) = (ws.parse().expect("W"), hs.parse().expect("H"));
+    let mut rpx = vec![[0u8; 3]; w * h];
+    let mut dpx = vec![[0u8; 3]; w * h];
+    let mut lcg = 0x9E3779B97F4A7C15u64;
+    for y in 0..h {
+        for x in 0..w {
+            let g = (x * 255 / w.max(1)) as f32;
+            let t = 26.0 * ((x as f32 * 0.61).sin() * (y as f32 * 0.43).cos());
+            let v = (g + t).clamp(0.0, 255.0) as u8;
+            rpx[y * w + x] = [v, v.saturating_add(6), v / 2 + 30];
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let n = ((lcg >> 33) & 0xB) as i16 - 5;
+            let q = if (x / 8 + y / 8) % 7 == 0 { 12i16 } else { 0 };
+            let mut p = rpx[y * w + x];
+            for c in &mut p {
+                *c = (*c as i16 + n + q).clamp(0, 255) as u8;
+            }
+            dpx[y * w + x] = p;
+        }
+    }
+    let rs = RgbSlice::new(&rpx, w, h);
+    let ds = RgbSlice::new(&dpx, w, h);
+    let z = Zensim::new(ZensimProfile::latest_preview());
+    let pre = z.precompute_reference(&rs).expect("precompute");
+    let opts_off = zensim::DiffmapOptions {
+        include_edge_mse: true,
+        include_hf: true,
+        ..Default::default()
+    };
+    let opts_on = zensim::DiffmapOptions {
+        guided_coarse_redistribution: true,
+        ..opts_off
+    };
+    let mp = (w * h) as f64 / 1e6;
+    let mut t_off = Vec::new();
+    let mut t_on = Vec::new();
+    // Warmup (untimed) then interleaved (off,on) × 4.
+    let _ = z.compute_with_ref_and_diffmap(&pre, &ds, opts_off).unwrap();
+    let _ = z.compute_with_ref_and_diffmap(&pre, &ds, opts_on).unwrap();
+    for _ in 0..4 {
+        let t = std::time::Instant::now();
+        let a = z.compute_with_ref_and_diffmap(&pre, &ds, opts_off).unwrap();
+        t_off.push(t.elapsed().as_secs_f64() * 1e3);
+        let t = std::time::Instant::now();
+        let b = z.compute_with_ref_and_diffmap(&pre, &ds, opts_on).unwrap();
+        t_on.push(t.elapsed().as_secs_f64() * 1e3);
+        assert_eq!(a.score(), b.score(), "scalar must be untouched by the render option");
+        std::hint::black_box((a.diffmap()[0], b.diffmap()[0]));
+    }
+    let med = |v: &mut Vec<f64>| -> f64 {
+        v.sort_by(f64::total_cmp);
+        (v[1] + v[2]) / 2.0
+    };
+    let (mo, mn) = (med(&mut t_off), med(&mut t_on));
+    println!(
+        "JBU perf {w}x{h} ({mp:.2} MP): OFF median {mo:.2} ms ({:.2} ms/MP) | ON median {mn:.2} ms ({:.2} ms/MP) | redistribution pass {:+.2} ms = {:+.3} ms/MP",
+        mo / mp,
+        mn / mp,
+        mn - mo,
+        (mn - mo) / mp
+    );
+    println!("      raw OFF {t_off:.2?}  ON {t_on:.2?}");
 }

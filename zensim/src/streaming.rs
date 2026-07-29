@@ -3723,6 +3723,51 @@ fn compute_diffmap_from_xyb(
     } else {
         None
     };
+    // E-JBU diagnostic (ZENSIM_JBU_GUIDE_STATS=1): how much differential
+    // signal does the guide actually carry WITHIN coarse footprints? Prints
+    // the guide's global stats and the mean/max within-cell relative spread
+    // (sd/mean per aligned f×f cell) for each coarse factor. If within-cell
+    // spread is ~0 the redistribution is a near-no-op regardless of mass.
+    #[cfg(feature = "custom-profiles")]
+    if let Some(g) = &guide {
+        if std::env::var("ZENSIM_JBU_GUIDE_STATS").as_deref() == Ok("1") {
+            let n = (full_w * full_h) as f64;
+            let gm = g.iter().map(|&v| v as f64).sum::<f64>() / n;
+            for factor in [2usize, 4, 8] {
+                let (mut sum_rel, mut max_rel, mut cells) = (0.0f64, 0.0f64, 0usize);
+                let mut sy = 0;
+                while sy * factor < full_h {
+                    let (y0, y1) = (sy * factor, ((sy + 1) * factor).min(full_h));
+                    let mut sx = 0;
+                    while sx * factor < full_w {
+                        let (x0, x1) = (sx * factor, ((sx + 1) * factor).min(full_w));
+                        let (mut s1, mut s2, mut cnt) = (0.0f64, 0.0f64, 0.0f64);
+                        for y in y0..y1 {
+                            for &v in &g[y * full_w + x0..y * full_w + x1] {
+                                let v = v as f64;
+                                s1 += v;
+                                s2 += v * v;
+                                cnt += 1.0;
+                            }
+                        }
+                        let mean = s1 / cnt;
+                        let sd = (s2 / cnt - mean * mean).max(0.0).sqrt();
+                        let rel = sd / mean.max(1e-30);
+                        sum_rel += rel;
+                        max_rel = max_rel.max(rel);
+                        cells += 1;
+                        sx += 1;
+                    }
+                    sy += 1;
+                }
+                eprintln!(
+                    "  JBU guide stats: factor {factor}: within-cell sd/mean mean {:.4} max {:.4} ({cells} cells; guide mean {gm:.3e})",
+                    sum_rel / cells as f64,
+                    max_rel
+                );
+            }
+        }
+    }
 
     for (scale, (dm, dm_w, dm_h)) in scale_diffmaps.iter().enumerate() {
         let blend = scale_blend_weights.get(scale).copied().unwrap_or(0.0);
