@@ -1,6 +1,11 @@
 # SESSION-RESUME — read this first after every compact
 
-**Last updated:** 2026-07-19 (feature-v2 program → optimal-model fleet). Prior snapshots live
+**Last updated:** 2026-07-29 (E-M campaign: 924/v3 era + the steering pivot). **ACTIVE:
+the attribution-density steering map (task #67)** — per-pixel true-integrand density + SAT
+for O(1) arbitrary-rectangle codec queries; proven E-M9 (M2 0.999-1.000 at 16-128px while
+the signal fold inverts). Read CLAUDE.md "THE E-M CAMPAIGN" section for the era record
+(rank results, data-vs-v3 attribution, sdr25/best_val seed-selection recipe, gotchas).
+Prior era (2026-07-19, feature-v2 → optimal-model fleet) below still holds for context. Prior snapshots live
 in git history — their durable facts are in the linked docs, not here.
 
 ## ⇒ ACTIVE WORK (2026-07-19): optimal global model + feature validation + diffmap
