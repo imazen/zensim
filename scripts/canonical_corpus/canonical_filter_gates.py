@@ -103,16 +103,28 @@ def gate_misjoin(parquet: Path) -> dict:
     }
 
 
-def gate_jxl_zone(t) -> dict:
+def gate_jxl_zone(t, jxl_postfix: bool) -> dict:
+    """§3.20 is a TWO-CLAUSE test: broken iff (native distance < 0.03 AND the
+    encode predates fix `eeb52735`, 2026-07-06T06:09Z). Sources documented as
+    post-fix (`--jxl-postfix`; e.g. the HF near-lossless refit corpus,
+    generated 06:35 same day — `benchmarks/jxl_nearlossless_corpus_2026-07-06
+    .pointer.md`) legitimately sample d<0.03. A distance-only assert here
+    false-positived on exactly those two legs (2026-07-29 sweep) — the date
+    clause is load-bearing, not belt-and-suspenders."""
     cols = set(t.schema.names)
-    # distance-carrying sources: assert min distance clear of the zone.
     for dcol in ("distance", "butteraugli_distance", "d"):
         if dcol in cols:
             import pyarrow.compute as pc
             dmin = pc.min(t.column(dcol)).as_py()
-            ok = dmin is None or dmin >= JXL_BROKEN_ZONE_D
-            return {"verdict": "PASS" if ok else "FAIL",
-                    "basis": f"min({dcol})={dmin} vs broken zone d<{JXL_BROKEN_ZONE_D}"}
+            in_zone = dmin is not None and dmin < JXL_BROKEN_ZONE_D
+            if in_zone and jxl_postfix:
+                return {"verdict": "PASS",
+                        "basis": f"min({dcol})={dmin} < {JXL_BROKEN_ZONE_D} but source "
+                                 "is documented POST-fix eeb52735 (--jxl-postfix; the "
+                                 "broken zone was pre-fix only, §3.20)"}
+            return {"verdict": "PASS" if not in_zone else "FAIL",
+                    "basis": f"min({dcol})={dmin} vs broken zone d<{JXL_BROKEN_ZONE_D} "
+                             "(pre-fix source or provenance unattested)"}
     if {"codec", "q"} <= cols or {"codec", "quality"} <= cols:
         return {"verdict": "PASS",
                 "basis": "generic-quality source — q-mapping structurally never "
@@ -157,6 +169,10 @@ def main() -> int:
     ap.add_argument("--parquet", required=True, type=Path)
     ap.add_argument("--winsor", action="store_true",
                     help="also compute per-feature winsor bounds (expensive)")
+    ap.add_argument("--jxl-postfix", action="store_true",
+                    help="source documented as generated AFTER jxl fix eeb52735 "
+                         "(2026-07-06T06:09Z) — d<0.03 rows are then clean per "
+                         "the §3.20 two-clause test")
     ap.add_argument("--sha", action="store_true",
                     help="sha256 the input (expensive on multi-GB sources)")
     ap.add_argument("--out-dir", type=Path,
@@ -173,7 +189,7 @@ def main() -> int:
         "input_sha256": sha256_file(a.parquet) if a.sha else None,
         "gates": {
             "misjoin": gate_misjoin(a.parquet),
-            "jxl_zone": gate_jxl_zone(t),
+            "jxl_zone": gate_jxl_zone(t, a.jxl_postfix),
             "poison": gate_poison(t),
         },
     }
