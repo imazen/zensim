@@ -5,7 +5,7 @@ false alarm and a real blind spot is caught only when the independents AGREE.
 
 This is the honest form of "sanity-check against other metrics": rather than
 trust one reference (which may share the bake's biases or have floor artifacts —
-see bake_outlier_gate.py's ssim2-floor caveat), we require a QUORUM of unrelated
+see `bake_dial_refit gate`'s ssim2-floor caveat), we require a QUORUM of unrelated
 metrics to agree that the bake is out of line before flagging a row.
 
 Per row, on a corpus that carries the 372 features AND >=2 independent metric
@@ -26,20 +26,46 @@ high-confidence blind spots (bake far from a tight independent consensus).
 """
 import argparse
 import os
+import struct
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
-from scipy.stats import rankdata, spearmanr
+from scipy.stats import rankdata
 
-sys.path.insert(0, os.path.abspath("."))
-# reuse the faithful forward from the outlier gate (same transform code as the bakes)
-import importlib.util  # noqa: E402
-_g = importlib.util.spec_from_file_location(
-    "gate", Path(__file__).parent / "bake_outlier_gate.py")
-gate = importlib.util.module_from_spec(_g)
-_g.loader.exec_module(gate)
+_REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO))
+from scripts.lib.zen_stats import srocc  # noqa: E402  (the canonical SROCC)
+
+# The bake forward is the CANONICAL Rust runtime (`predict_features_with_bake`,
+# the same bake_runtime::score_with_bake dispatch every eval tool uses) — the
+# prior in-process Python forward (bake_outlier_gate.load_bake/raw_forward/dial)
+# was a duplicate and is deleted. `--bake-post raw` = post-spline UNCLAMPED, so
+# rank01(scores) is the raw forward's rank with no clamp-induced ties at the ends.
+_PRED = Path(os.environ.get(
+    "PRED_BIN", _REPO / "target" / "release" / "predict_features_with_bake"))
+
+
+def bake_scores(bake: str, F: np.ndarray) -> np.ndarray:
+    if not _PRED.exists():
+        sys.exit(f"missing {_PRED} — build: cargo build --release -p zensim-validate "
+                 f"--bin predict_features_with_bake (or set PRED_BIN)")
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+        f.write(struct.pack("<II", F.shape[1], F.shape[0]))
+        f.write(F.astype(np.float32).tobytes())
+        blob = f.name
+    try:
+        r = subprocess.run([str(_PRED), "--bake", bake, "--bake-post", "raw",
+                            "--features-file", blob],
+                           capture_output=True, text=True, timeout=600)
+    finally:
+        os.unlink(blob)
+    if r.returncode != 0:
+        sys.exit(f"predict_features_with_bake failed: {r.stderr[:400]}")
+    return np.array([float(x) for x in r.stdout.split()])
 
 
 def rank01(v):
@@ -59,7 +85,6 @@ def main():
     ap.add_argument("--top", type=int, default=20)
     a = ap.parse_args()
 
-    bk = gate.load_bake(a.bake)
     t = pq.read_table(a.corpus)
     cols = sorted([c for c in t.schema.names
                    if (c.startswith("f") and c[1:].isdigit()) or c.startswith("feat_")],
@@ -76,7 +101,7 @@ def main():
     masked = F[:, 228:300]
     susp = float((masked > 5).any(axis=1).mean())
 
-    dial = gate.dial(bk, gate.raw_forward(bk, F))
+    dial = bake_scores(a.bake, F)
     braw = rank01(dial)
 
     refs = []
@@ -94,7 +119,7 @@ def main():
         full = np.full(len(F), np.nan)
         full[ok] = r if not ok.all() else r
         refs.append((col, full))
-        sr = spearmanr(dial[ok], v[ok]).statistic
+        sr = srocc(dial[ok], v[ok])
         print(f"  B vs {col:<34} SROCC {abs(sr):.4f} (n={int(ok.sum()):,})")
 
     R = np.vstack([r for _, r in refs])           # (n_metrics, n_rows), polarity-aligned ranks

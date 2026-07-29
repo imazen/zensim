@@ -847,10 +847,12 @@ Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
   — proven byte-identical THREE ways (fresh Python run == Rust ==
   the shipped `v47_strict_recal_negtail_packed30k_2026-05-27.bin`,
   sha256 `302c9154…`; `benchmarks/pack_rust_migration_2026-07-29.md`).
-- **Still present, blocked on a live importer** (delete once ported):
-  `bake_outlier_gate.py` → `bake_dial_refit gate` (imported by
-  `xmetric_consensus.py`); `shared_anchor_refit.py` → `shared-anchor`
-  (imported by `hdr_anchor_dense_refit.py`).
+  Also deleted same day: `bake_outlier_gate.py` → `bake_dial_refit gate`
+  (its one importer `xmetric_consensus.py` now shells the canonical
+  `predict_features_with_bake` forward + `zen_stats.srocc` — smoke-verified
+  on a kadis-gpu slice) and `shared_anchor_refit.py` → `shared-anchor`
+  (the claimed `hdr_anchor_dense_refit.py` importer was STALE — it imports
+  `linear_projections`, the mention was docstring-only).
 - `hdr_anchor_dense_refit.py` is PARTIALLY migrated: its base whole-spline
   refit is `bake_dial_refit shared-anchor`; only the 28-bin densify + Q-Q
   top-end knots remain as experiment logic. Its bake primitives live in the

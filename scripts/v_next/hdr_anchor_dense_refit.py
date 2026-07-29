@@ -6,8 +6,9 @@
 # benchmarks/bake_refit_rust_migration_2026-07-05.md.
 """Densify the HDR anchored sibling's spline top-end (2026-07-03 night).
 
-The 2026-07-03 shared-anchor HDR sibling (`shared_anchor_refit.py`) fit its
-spline on hdr-v3 valdigits alone (3,900 rows, 18 bins) — the top bin's median
+The 2026-07-03 shared-anchor HDR sibling (whole-spline refit, now
+`bake_dial_refit shared-anchor`; the Python original was deleted 2026-07-29)
+fit its spline on hdr-v3 valdigits alone (3,900 rows, 18 bins) — the top bin's median
 lands at ~88.6 while the data reaches 92.3, and only 103 rows sit above
 human_score 0.9. This refit:
 
