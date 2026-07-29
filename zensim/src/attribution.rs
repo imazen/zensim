@@ -78,10 +78,17 @@
 //! 1. **f156-371 (peak/masked/iw) and any block beyond are NOT spatialized**
 //!    — same structural blind spot as the signal fold. The harness prints the
 //!    dropped `|s_k|` mass per bake.
-//! 2. **Blur bleed**: refining block `B` also changes signals within the blur
-//!    radius outside `B` (at every scale); the density attributes a signal
-//!    wholly to its own pixel. This is the residual between block sums and
-//!    M2's exact feature deltas.
+//! 2. **Blur bleed** (C2b MEASURED): refining block `B` also changes signals
+//!    within the blur radius outside `B`. The pure-window-supported signals
+//!    (ssim `d`; v2 contrast/texture) ARE spread over their blur window via
+//!    the sum-preserving box spread (`blur::box_spread_sum_preserving`,
+//!    clipped-window per-source-normalized convention) — measured NEUTRAL on
+//!    the 8-cell gate (±0.003). Residual-form signals (art/det/hf/mscn) stay
+//!    pixel-allocated: the 50/50 pixel/window split was measured and
+//!    REGRESSED all 8 cells (−0.01..−0.08), and the pure `I − K` adjoint
+//!    allocates zero net mass (wrong for removal semantics). The remaining
+//!    fine-block residual is the finite-removal floor, not an allocation
+//!    fix — see `benchmarks/attribution_map_c1_2026-07-29.md` §C2b.
 //! 3. **SIMD-padding columns** (padded width − width) carry feature mass that
 //!    the trimmed map cannot attribute (≤ ~3 % of columns; near-zero signal
 //!    since both planes zero-pad identically).
@@ -504,6 +511,57 @@ impl ChannelBuffers {
     }
 }
 
+/// Exact-integrand combine (f64) for one channel: all seven signals
+/// re-derived from the SAME planes the pooled features consumed. Mass is
+/// routed by SUPPORT class (C2b bleed allocation, MEASURED variant:
+/// window-only spread):
+///  - ssim terms → the blur-window plane (per-pixel value is a pure
+///    function of K-blurred planes);
+///  - art/det/hf terms → the pixel plane (residual form `d_i − (K∗d)_i`;
+///    the 50/50 pixel/window split was measured and REGRESSED all 8 gate
+///    cells, and the pure `I − K` adjoint allocates zero net mass — both
+///    recorded in the C2b benchmark section);
+///  - mse → the pixel plane (no blur in its signal).
+fn basic_combine_channel(
+    bufs: &ChannelBuffers,
+    src_c: &[f32],
+    dst_c: &[f32],
+    n: usize,
+    co: &SlotCoeffs,
+    id_slice: &mut [f64],
+    bl_slice: &mut [f64],
+) {
+    for i in 0..n {
+        let sd = bufs.sd[i] as f64;
+        let sv = src_c[i] as f64;
+        let dv = dst_c[i] as f64;
+        let m1 = bufs.mu1[i] as f64;
+        let m2 = bufs.mu2[i] as f64;
+        let d1 = (sv - m1).abs();
+        let d2 = (dv - m2).abs();
+        let ed = (1.0 + d2) / (1.0 + d1) - 1.0;
+        let art = ed.max(0.0);
+        let det = (-ed).max(0.0);
+        let sd2 = sd * sd;
+        let a2 = art * art;
+        let dt2 = det * det;
+        let pd = sv - dv;
+        let e_hf = d1 * d1 - d2 * d2;
+        let win_term = co.c_sd * sd + co.c_sd4 * (sd2 * sd2) + co.c_sd2 * sd2;
+        let res_term = co.c_art * art
+            + co.c_art4 * (a2 * a2)
+            + co.c_art2 * a2
+            + co.c_det * det
+            + co.c_det4 * (dt2 * dt2)
+            + co.c_det2 * dt2
+            + co.c_hfe * e_hf
+            + co.c_hfm * (d1 - d2);
+        let px_term = co.c_mse * (pd * pd);
+        id_slice[i] += px_term + res_term;
+        bl_slice[i] += win_term;
+    }
+}
+
 /// Core builder: multi-scale pyramid walk over (reference pyramid, distorted
 /// XYB planes), exact-integrand combine per (scale, channel), sum-preserving
 /// upsample into a full-resolution f64 canvas at padded-compute dims.
@@ -524,8 +582,17 @@ fn build_attribution_canvas(
     const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
     let mut canvas = vec![0.0f64; comp_pw * comp_h];
     let mut own_features = Vec::with_capacity(num_scales * FPC * 3);
-    let mut bufs = ChannelBuffers::new(comp_pw * comp_h);
+    let n0 = comp_pw * comp_h;
+    let mut bufs3: [ChannelBuffers; 3] = [
+        ChannelBuffers::new(n0),
+        ChannelBuffers::new(n0),
+        ChannelBuffers::new(n0),
+    ];
+    let mut chan_id: [Vec<f64>; 3] = [vec![0.0; n0], vec![0.0; n0], vec![0.0; n0]];
+    let mut chan_win: [Vec<f64>; 3] = [vec![0.0; n0], vec![0.0; n0], vec![0.0; n0]];
     let mut scale_density = vec![0.0f64; comp_pw * comp_h];
+    let mut spread_plane = vec![0.0f64; comp_pw * comp_h];
+    let mut spread_tmp: Vec<f64> = Vec::new();
 
     let mut w = comp_pw;
     let mut h = comp_h;
@@ -538,48 +605,73 @@ fn build_attribution_canvas(
         assert_eq!(h, sh, "attribution: height mismatch at scale {scale}");
         let n = sw * sh;
         let n_f = n as f64;
-        let sd_slice = &mut scale_density[..n];
-        sd_slice.fill(0.0);
+        scale_density[..n].fill(0.0);
+        spread_plane[..n].fill(0.0);
 
-        for c in 0..3 {
-            let src_c = &src_planes[c][..n];
-            let dst_c = &dst_planes[c][..n];
-            let acc = process_channel_banded(src_c, dst_c, sw, sh, radius, &mut bufs);
-            let base_k = scale * FPC * 3 + c * FPC;
-            let co = SlotCoeffs::derive(s, base_k, &acc, n_f);
-            own_features.extend_from_slice(&basic13_from_acc(&acc, n_f));
-
-            // Exact-integrand combine (f64): all seven signals re-derived
-            // from the SAME planes the pooled features consumed.
-            for i in 0..n {
-                let sd = bufs.sd[i] as f64;
-                let sv = src_c[i] as f64;
-                let dv = dst_c[i] as f64;
-                let m1 = bufs.mu1[i] as f64;
-                let m2 = bufs.mu2[i] as f64;
-                let d1 = (sv - m1).abs();
-                let d2 = (dv - m2).abs();
-                let ed = (1.0 + d2) / (1.0 + d1) - 1.0;
-                let art = ed.max(0.0);
-                let det = (-ed).max(0.0);
-                let sd2 = sd * sd;
-                let a2 = art * art;
-                let dt2 = det * det;
-                let pd = sv - dv;
-                let e_hf = d1 * d1 - d2 * d2;
-                sd_slice[i] += co.c_sd * sd
-                    + co.c_sd4 * (sd2 * sd2)
-                    + co.c_sd2 * sd2
-                    + co.c_art * art
-                    + co.c_art4 * (a2 * a2)
-                    + co.c_art2 * a2
-                    + co.c_det * det
-                    + co.c_det4 * (dt2 * dt2)
-                    + co.c_det2 * dt2
-                    + co.c_mse * (pd * pd)
-                    + co.c_hfe * e_hf
-                    + co.c_hfm * (d1 - d2);
+        // Per-channel work is independent (own blur buffers, own output
+        // planes) — channel-parallel under `threads` (C2b Part 2).
+        let mut accs: [Option<StripChannelAccum>; 3] = [None, None, None];
+        {
+            let [b0, b1, b2] = &mut bufs3;
+            let [i0, i1, i2] = &mut chan_id;
+            let [w0p, w1p, w2p] = &mut chan_win;
+            let run = |c: usize,
+                       buf: &mut ChannelBuffers,
+                       idp: &mut Vec<f64>,
+                       winp: &mut Vec<f64>|
+             -> StripChannelAccum {
+                idp[..n].fill(0.0);
+                winp[..n].fill(0.0);
+                let src_c = &src_planes[c][..n];
+                let dst_c = &dst_planes[c][..n];
+                let acc = process_channel_banded(src_c, dst_c, sw, sh, radius, buf);
+                let base_k = scale * FPC * 3 + c * FPC;
+                let co = SlotCoeffs::derive(s, base_k, &acc, n as f64);
+                basic_combine_channel(buf, src_c, dst_c, n, &co, &mut idp[..n], &mut winp[..n]);
+                acc
+            };
+            #[cfg(feature = "threads")]
+            if parallel {
+                let ((a0, (a1, a2)), ()) = rayon::join(
+                    || {
+                        rayon::join(
+                            || run(0, b0, i0, w0p),
+                            || rayon::join(|| run(1, b1, i1, w1p), || run(2, b2, i2, w2p)),
+                        )
+                    },
+                    || (),
+                );
+                accs = [Some(a0), Some(a1), Some(a2)];
             }
+            if accs[0].is_none() {
+                accs = [
+                    Some(run(0, b0, i0, w0p)),
+                    Some(run(1, b1, i1, w1p)),
+                    Some(run(2, b2, i2, w2p)),
+                ];
+            }
+        }
+        for acc in accs.iter().flatten() {
+            own_features.extend_from_slice(&basic13_from_acc(acc, n_f));
+        }
+        for c in 0..3 {
+            for i in 0..n {
+                scale_density[i] += chan_id[c][i];
+                spread_plane[i] += chan_win[c][i];
+            }
+        }
+
+        // One sum-preserving spread per scale for the window-supported mass,
+        // then fold into the pixel plane.
+        crate::blur::box_spread_sum_preserving(
+            &mut spread_plane[..n],
+            sw,
+            sh,
+            radius,
+            &mut spread_tmp,
+        );
+        for (d, s) in scale_density[..n].iter_mut().zip(spread_plane[..n].iter()) {
+            *d += *s;
         }
 
         upsample_add_sum_preserving(

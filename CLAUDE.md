@@ -138,6 +138,13 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   was the whole coarse signal)**; K720 1/4 (0.69/0.53/0.38/0.90) — miss isolated to v2
   density approximation at fine blocks (v2attr-vs-true-lin 0.61/0.40/0.18/0.89; basic holds
   0.89-0.98) → C2b lever = blur-bleed spreading + perf (full 125-138ms vs fold 11ms).
+- **C2b SHIPPED (2026-07-29): bleed-spread hypothesis MEASURED-FALSIFIED + perf −30%.**
+  The `I−K` adjoint is structurally wrong for residual signals (zero net mass); the 50/50
+  split REGRESSED all 8 cells; window-only spread (shipped) is neutral — K720's fine-block
+  gap is the finite-removal floor, not allocation. Gate unchanged 5/8 (EM2 4/4 holds).
+  Perf: single-sweep + channel/row-band rayon → full 95-98ms, basic ~38ms vs fold 11-12ms
+  (8.3×/3.3×; ≤1.1× structurally needs fusion into a shared 924 compare — levers + estimates
+  in the C2b doc section). `blur::box_spread_sum_preserving` = the exact-sum spread primitive.
 
 ### Trainer/eval capabilities added this campaign (all on main)
 - **MANDATORY embedded repro**: every new bake carries `zentrain.repro` (inputs w/ sha256 +

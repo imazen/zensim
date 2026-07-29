@@ -237,3 +237,97 @@ ZENSIM_ATTR_DIAG=1 target/release/examples/diffmap_block_coherence \
   $D/city.png $D/city_576_q50.jpg \
   --bake /mnt/v/output/zensim/bakes/p1kadis/foldmlp_bigcodec_kadis_720.bin --block 64
 ```
+
+---
+
+# C2b — bleed allocation (measured NEGATIVE) + perf floor (2026-07-29)
+
+Same pair/bakes/host. Logs: `~/tmp/attrmap-c1/gate_matrix_c2b_p1.log` (50/50
+residual-split variant), `gate_matrix_c2b_final.log` (final state). Tests:
+260 passed / 0 failed (adds `box_spread_preserves_sums_exactly`).
+
+## Part 1 — the adjoint/spread hypothesis, measured honestly
+
+The proposed exact fix (blur the plane-integrand with the pipeline kernel,
+`∂f/∂x = K∗(∂f/∂g)`) is exact only for signals LINEAR in a blurred plane.
+Two structural findings, then the A/B:
+
+1. **The pure adjoint is wrong for residual-form signals** (art/det/hf/mscn
+   cores are `d_i − (K∗d)_i`): the adjoint of `I − K` is `I − K` (symmetric),
+   whose columns sum to 0 — it allocates ZERO net mass per signal, destroying
+   the removal-semantics contract (refining a signal's support kills the whole
+   signal, mass 1). The implementable family is support-allocation: spread a
+   signal's mass over the pixels whose refinement kills it.
+2. **Sum-preserving spread operator**: `blur::box_spread_sum_preserving` —
+   separable, clipped windows, per-SOURCE normalization (`Σout == Σin` to f64
+   rounding, gated by `box_spread_preserves_sums_exactly`; interior ==
+   normalized box blur). Boundary convention documented at the fn.
+
+**A/B on the 8-cell gate** (allocation classes: window = ssim-d + v2
+contrast/texture; residual = art/det/hf/mscn; pixel = mse/transducers/
+globals/blockiness/gradient-family):
+
+| variant | result |
+|---|---|
+| C2a baseline (all pixel-allocated) | EM2 .8605/.9254/.9748/.9915; K720 .6850/.5330/.3828/.9023 |
+| 50/50 residual split + window spread | **REGRESSED all 8 cells** (−0.01..−0.08; EM2@16 fell to .784, below gate) |
+| window-only spread (SHIPPED) | NEUTRAL (±0.003): EM2 .8602/.9225/.9722/.9900; K720 .6836/.5309/.3811/.9023 |
+
+**Verdict: the blur-bleed hypothesis for the K720 fine-block gap is
+FALSIFIED** — no allocation scheme in this family recovers it. Since C2a
+already showed coverage is complete and M2 (true linearization) ≈ 1.0, the
+K720 16-64 px residual is the **finite-removal / nonlinear-interaction floor
+of a first-order density on a v2-heavy gradient mix** — reported as the
+measured floor, not a gate relaxation. The shipped state keeps the window-only
+spread (theoretically defensible for zero-pixel-support signals, measured
+free) and pixel allocation for everything else. Gate state unchanged: **5/8
+(EM2 4/4 — no regression from the spread; K720 128 px only).**
+
+## Part 2 — perf: measured floor and the honest gap to ≤1.1×
+
+Levers landed (exactness gates unchanged — pass-A production-kernel parity
+still 1e-9; all sum identities/FD tests green; the final 8-cell table above
+IS the final perf state):
+
+1. **Single-sweep pipeline** in `compute_v2_append_attribution`: pass B(s)
+   scheduled after pass A(s+1) (the edge-width lookahead), ping-ponged plane
+   sets — kills the former second full blur+cache sweep.
+2. **Channel-parallel pass A** (rayon join, per-channel scratch) + **row-banded
+   parallel pass B** (64-row bands, disjoint output rows; blockiness stays
+   serial — it writes the row above).
+3. Same channel-parallel structure in the basic builder (measured ~neutral —
+   memory-bound; kept for uniformity).
+
+Section timing (`ZENSIM_ATTR_PERF=1`, 576², uncontended): v2app pipeline
+108 → **47-51 ms** (blur+cache 26→13, kernels 6, pass-B combine 69→21).
+
+**Final perf line (uncontended, city 576²):** full **95-98 ms** | basic
+**~38 ms** | ModelSensitivity fold **11-12 ms** → ratios **~8.3×** (full) /
+**~3.3×** (basic) vs the fold. C2a was 125-138 ms → **−30 %**.
+
+**The ≤1.1× bar is NOT met, and is structurally out of reach for the
+STANDALONE full density**: the fold baseline computes only the v1 pyramid +
+a trivial f32 per-pixel fold, while the full density computes the v1 pipeline
+PLUS the entire v2+append plane set + production kernels + exact f64
+integrands — strictly more plane work than a 924-feature extraction (54 ms/MP
+single-thread per the C0 gate doc). Remaining levers, with honest estimates:
+
+- **f32 + magetypes SIMD for the pass-B combine** (~21 ms → est 5-8 ms; the
+  1e-5/1e-6 identity class already tolerates f32 recompute; pass-A parity
+  unaffected). Est. full ~75-80 ms.
+- **Deeper band-parallel blur** inside channels (13 → est 5-6 ms).
+- **Fusion into a single combined compare** — the real path to ≤1.1×: a codec
+  computing the 924 scalar per iteration already produces every plane the
+  density needs; fused, the marginal density cost ≈ pass-B combine + SAT
+  (est 10-25 ms today, 5-10 ms with SIMD). Requires bit-unchanged golden
+  gating on the existing outputs; integration-level work, out of C2b scope.
+
+## Approximation-list delta (C2b)
+
+- ADDED: window-supported signals spread over their blur window
+  (sum-preserving, clipped-window per-source-normalized boundary convention).
+- CONFIRMED (measured): residual-form + pixel-form signals stay
+  pixel-allocated — the 50/50 window split regresses, the pure adjoint is
+  structurally wrong (zero net mass).
+- The remaining K720 fine-block gap is reclassified from "blur bleed
+  (hypothesis)" to **finite-removal floor (measured)**.

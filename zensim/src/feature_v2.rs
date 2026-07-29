@@ -6067,6 +6067,13 @@ fn compute_v2_features_with_ref_impl_inner(
 // noise (~1e-7 rel), not 1e-9; the pooled-scalar parity is the strict gate.
 // ============================================================================
 
+// Coarse per-section timers for ZENSIM_ATTR_PERF=1 (seconds, thread-local).
+thread_local! {
+    static PERF_BLUR: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+    static PERF_KERN: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+    static PERF_PASSB: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+}
+
 /// Output of [`compute_v2_append_attribution`].
 pub(crate) struct V2AppendAttribution {
     /// Full-resolution density (f64, `width × height`, trimmed to the
@@ -6484,9 +6491,20 @@ fn derive_v2app_coeffs(
 }
 
 /// Pass B for one (scale, channel): f64 per-pixel combine over the cached
-/// planes into `density` (scale resolution). Three sweeps: the main
-/// per-pixel loop, the gradient-family loop (needs ±1-row neighbors), and
-/// the sparse blockiness lattice.
+/// planes. Three sweeps: the main per-pixel loop, the gradient-family loop
+/// (needs ±1-row neighbors), and the sparse blockiness lattice.
+///
+/// C2b bleed allocation (MEASURED variant: window-only): mass is routed by
+/// SUPPORT class into two planes — `id_plane` (everything pixel-supported
+/// plus, per the 8-cell A/B below, the residual-form signals) and
+/// `win_plane` (the pure blur-window signals: the ssim `d` map, the
+/// var-based contrast/texture signals, and the ssim-derived pools — whose
+/// per-pixel values are functions of K-blurred planes only). The caller
+/// spreads `win_plane` ONCE per scale with the sum-preserving box spread.
+/// The 50/50 residual split (art/det/hf/mscn half-spread) was measured and
+/// REGRESSED all 8 gate cells (−0.01..−0.08); the pure `I − K` adjoint for
+/// residual signals allocates zero net mass and is structurally wrong for
+/// removal semantics — both recorded in the C2b benchmark section.
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_channel(
     src: &[f32],
@@ -6497,10 +6515,59 @@ fn attr_pass_b_channel(
     cross: Option<(&[f32], &[f32])>,
     ref_y: &[f32],
     co: &V2AppCoeffs,
-    density: &mut [f64],
+    parallel: bool,
+    id_plane: &mut [f64],
+    win_plane: &mut [f64],
 ) {
+    // Row-banded parallel main+gradient sweeps (C2b Part 2): each band
+    // writes only its own rows of id/win (disjoint), reads shared planes
+    // (gradient reads ±1 row of src/dst — immutable). Blockiness stays
+    // serial (it writes the row ABOVE at lattice rows).
+    const BAND: usize = 64;
+    #[cfg(feature = "threads")]
+    if parallel && height > BAND {
+        use rayon::prelude::*;
+        id_plane[..width * height]
+            .par_chunks_mut(BAND * width)
+            .zip(win_plane[..width * height].par_chunks_mut(BAND * width))
+            .enumerate()
+            .for_each(|(band, (id_rows, win_rows))| {
+                let y0 = band * BAND;
+                let y1 = (y0 + BAND).min(height);
+                attr_pass_b_rows(
+                    src, dst, width, height, planes, cross, ref_y, co, y0, y1, id_rows, win_rows,
+                );
+            });
+        attr_pass_b_blockiness(src, dst, width, height, co, id_plane);
+        return;
+    }
+    let _ = parallel;
+    attr_pass_b_rows(
+        src, dst, width, height, planes, cross, ref_y, co, 0, height, id_plane, win_plane,
+    );
+    attr_pass_b_blockiness(src, dst, width, height, co, id_plane);
+}
+
+/// Rows `[y0, y1)` of the main + gradient sweeps; `id_rows`/`win_rows` are
+/// the band-local output slices (row `y` writes at `(y − y0) * width`).
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_rows(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    planes: &AttrChPlanes,
+    cross: Option<(&[f32], &[f32])>,
+    ref_y: &[f32],
+    co: &V2AppCoeffs,
+    y0: usize,
+    y1: usize,
+    id_plane: &mut [f64],
+    win_plane: &mut [f64],
+) {
+    let out_off = y0 * width;
     let cross_on = cross.is_some();
-    for y in 0..height {
+    for y in y0..y1 {
         let row = y * width;
         for x in 0..width {
             let i = row + x;
@@ -6512,7 +6579,12 @@ fn attr_pass_b_channel(
             let s12v = planes.s12[i] as f64;
             let act = planes.act[i] as f64;
 
-            let mut acc = 0.0f64;
+            // Class accumulators: pixel-supported (a_id), window-supported
+            // (a_win), and residual-form (a_res; routed to id per the
+            // measured A/B — see the fn doc).
+            let mut a_id = 0.0f64;
+            let mut a_win = 0.0f64;
+            let mut a_res = 0.0f64;
 
             // Dense family (same formulas as `dense_block_kernel`'s tail).
             let d = ssim_d_local(m1, m2, s12v, sq);
@@ -6529,42 +6601,41 @@ fn attr_pass_b_channel(
             let raw_diff = s - dd;
             let raw_abs_err = raw_diff.abs();
             let mse_i = saturate(raw_diff * raw_diff, C_MSE);
-            acc += co.c_ssim * d + co.c_art * art_i + co.c_det * det_i + co.c_mse * mse_i;
+            a_win += co.c_ssim * d;
+            a_res += co.c_art * art_i + co.c_det * det_i;
+            a_id += co.c_mse * mse_i;
 
             let hf_src = s - m1;
             let hf_dst = dd - m2;
             let (hf_gain_i, hf_loss_i) =
                 bounded_excess_pair(hf_dst * hf_dst, hf_src * hf_src, C_HF);
-            acc += co.c_hf_gain * hf_gain_i + co.c_hf_loss * hf_loss_i;
-            acc += co.c_hf_mag * bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF);
+            a_res += co.c_hf_gain * hf_gain_i + co.c_hf_loss * hf_loss_i;
+            a_res += co.c_hf_mag * bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF);
 
-            acc += co.c_pjnd * pjnd_transducer(raw_abs_err, act, K_PJND_MASK, C_PJND_CLAMP);
-            acc += co.c_pjnd_lo * pjnd_transducer(raw_abs_err, act, K_PJND_MASK_LOW, C_PJND_CLAMP);
-            acc += co.c_pjnd_hi * pjnd_transducer(raw_abs_err, act, K_PJND_MASK_HIGH, C_PJND_CLAMP);
+            a_id += co.c_pjnd * pjnd_transducer(raw_abs_err, act, K_PJND_MASK, C_PJND_CLAMP);
+            a_id += co.c_pjnd_lo * pjnd_transducer(raw_abs_err, act, K_PJND_MASK_LOW, C_PJND_CLAMP);
+            a_id +=
+                co.c_pjnd_hi * pjnd_transducer(raw_abs_err, act, K_PJND_MASK_HIGH, C_PJND_CLAMP);
 
             // Weighted pools (masked / iw): −s_k·w_i·v_i/Σw.
             let sat_act = saturate(act, C_ACTIVITY);
             let mask_w = 1.0 - sat_act;
             let iw_w = sat_act + IW_WEIGHT_FLOOR;
-            acc += mask_w
-                * (co.c_mask_ssim * d
-                    + co.c_mask_art * art_i
-                    + co.c_mask_det * det_i
-                    + co.c_mask_mse * mse_i);
-            acc += iw_w
-                * (co.c_iw_ssim * d
-                    + co.c_iw_art * art_i
-                    + co.c_iw_det * det_i
-                    + co.c_iw_mse * mse_i);
+            // Weights are reference-side; each member routes by its VALUE's
+            // support class (ssim → window, art/det → residual, mse → pixel).
+            a_win += mask_w * (co.c_mask_ssim * d) + iw_w * (co.c_iw_ssim * d);
+            a_res += mask_w * (co.c_mask_art * art_i + co.c_mask_det * det_i)
+                + iw_w * (co.c_iw_art * art_i + co.c_iw_det * det_i);
+            a_id += mask_w * (co.c_mask_mse * mse_i) + iw_w * (co.c_iw_mse * mse_i);
 
             // Soft-peak: s_k·w(v)·(f − v)/W  (sp = (s_k/W, f)).
-            acc += co.sp_ssim.0 * saturate(d, C_PEAK) * (co.sp_ssim.1 - d);
-            acc += co.sp_art.0 * saturate(art_i, C_PEAK) * (co.sp_art.1 - art_i);
-            acc += co.sp_det.0 * saturate(det_i, C_PEAK) * (co.sp_det.1 - det_i);
+            a_win += co.sp_ssim.0 * saturate(d, C_PEAK) * (co.sp_ssim.1 - d);
+            a_res += co.sp_art.0 * saturate(art_i, C_PEAK) * (co.sp_art.1 - art_i);
+            a_res += co.sp_det.0 * saturate(det_i, C_PEAK) * (co.sp_det.1 - det_i);
 
             // SSIM deviation pools (v = d).
             if co.s_dev2 != 0.0 && co.dev_f2 > 1e-12 {
-                acc += co.s_dev2 * (2.0 * co.dev_mu * d - d * d)
+                a_win += co.s_dev2 * (2.0 * co.dev_mu * d - d * d)
                     / (2.0 * co.dev_f2 * (1.0 / co.inv_n));
             }
             if co.s_dev4 != 0.0 && co.dev_f4 > 1e-12 {
@@ -6573,7 +6644,7 @@ fn attr_pass_b_channel(
                     - 12.0 * mu * d * co.dev_raw2
                     - 6.0 * mu * mu * d * d
                     + 12.0 * mu.powi(3) * d;
-                acc += co.s_dev4 * co.inv_n * dm4 / (4.0 * co.dev_f4.powi(3));
+                a_win += co.s_dev4 * co.inv_n * dm4 / (4.0 * co.dev_f4.powi(3));
             }
 
             // Append block.
@@ -6583,16 +6654,16 @@ fn attr_pass_b_channel(
             let n1 = (s - m1) / (var1 + C_MSCN_VAR).sqrt();
             let n2 = (dd - m2) / (var2 + C_MSCN_VAR).sqrt();
             let dn = n1 - n2;
-            acc += co.c_mscn * saturate(dn.abs(), C_MSCN_ABS);
-            acc += co.c_mscn2 * saturate(dn * dn, C_MSCN_SQ);
+            a_res += co.c_mscn * saturate(dn.abs(), C_MSCN_ABS);
+            a_res += co.c_mscn2 * saturate(dn * dn, C_MSCN_SQ);
             let (cg, cl) = bounded_excess_pair(var2, var1, C_CONTRAST);
-            acc += co.c_cgain * cg + co.c_closs * cl;
-            acc += co.c_tex * (1.0 - bounded_sim(var1, var2, C_CONTRAST));
+            a_win += co.c_cgain * cg + co.c_closs * cl;
+            a_win += co.c_tex * (1.0 - bounded_sim(var1, var2, C_CONTRAST));
 
             if cross_on {
                 let ry = ref_y[i] as f64;
                 let t = saturate(ry, C_LUM_T);
-                acc += co.c_lumt
+                a_id += co.c_lumt
                     * pjnd_transducer(
                         raw_abs_err,
                         act + t * (K_LUM_ADAPT / K_PJND_MASK),
@@ -6601,7 +6672,7 @@ fn attr_pass_b_channel(
                     );
                 if let Some((ax, ab)) = cross {
                     let act_c = ax[i] as f64 + ab[i] as f64;
-                    acc += co.c_xmask
+                    a_id += co.c_xmask
                         * pjnd_transducer(
                             raw_abs_err,
                             act + act_c * (K_XCH / K_PJND_MASK),
@@ -6618,7 +6689,7 @@ fn attr_pass_b_channel(
                 let wd = one_mt * one_mt;
                 let wb = t * t;
                 let wm = 1.0 - wd - wb;
-                acc += (co.c_dark * wd + co.c_mid * wm + co.c_bright * wb) * mse_i;
+                a_id += (co.c_dark * wd + co.c_mid * wm + co.c_bright * wb) * mse_i;
             }
             // Append dev pools for art/det (gms handled in the gradient loop).
             let gdp = |g: (f64, f64, f64), v: f64, inv_n: f64| -> f64 {
@@ -6629,13 +6700,14 @@ fn attr_pass_b_channel(
                     0.0
                 }
             };
-            acc += gdp(co.gd_art, art_i, co.inv_n);
-            acc += gdp(co.gd_det, det_i, co.inv_n);
-            // Globals.
-            acc += co.g_dmean * (s - dd);
-            acc += co.g_var * ((s * s - dd * dd) - 2.0 * co.gmean_d * (s - dd));
+            a_res += gdp(co.gd_art, art_i, co.inv_n);
+            a_res += gdp(co.gd_det, det_i, co.inv_n);
+            // Globals (pixel class — raw whole-plane sums).
+            a_id += co.g_dmean * (s - dd);
+            a_id += co.g_var * ((s * s - dd * dd) - 2.0 * co.gmean_d * (s - dd));
 
-            density[i] += acc;
+            id_plane[i - out_off] += a_id + a_res;
+            win_plane[i - out_off] += a_win;
         }
     }
 
@@ -6646,7 +6718,7 @@ fn attr_pass_b_channel(
         || co.gd_gms.0 != 0.0
         || co.c_edgew != 0.0;
     if need_grad {
-        for y in 0..height {
+        for y in y0..y1 {
             let row = y * width;
             let y_up = reflect_101(y as isize - 1, height);
             let y_dn = reflect_101(y as isize + 1, height);
@@ -6684,14 +6756,24 @@ fn attr_pass_b_channel(
                 // change of this scale's mean distorted gradient under
                 // refinement is −(|∇d|−|∇s|)/N (folded into c_edgew).
                 acc += co.c_edgew * (gmag_d - gmag_s);
-                density[i] += acc;
+                id_plane[i - out_off] += acc;
             }
         }
     }
+}
 
-    // Blockiness lattice terms: split 50/50 across the step pair (a step
-    // dies only when BOTH pixels are refined; halving allocates the mass
-    // consistently when a partition boundary splits the pair).
+/// Blockiness lattice terms: split 50/50 across the step pair (a step
+/// dies only when BOTH pixels are refined; halving allocates the mass
+/// consistently when a partition boundary splits the pair). Serial — the
+/// horizontal family writes the row above.
+fn attr_pass_b_blockiness(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    co: &V2AppCoeffs,
+    id_plane: &mut [f64],
+) {
     if co.c_blockiness != 0.0 {
         for y in 0..height {
             let row = y * width;
@@ -6701,8 +6783,8 @@ fn attr_pass_b_channel(
                 let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
                 let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
                 let v = co.c_blockiness * bounded_excess(step_dst, step_src, C_BLOCK);
-                density[i] += 0.5 * v;
-                density[i - 1] += 0.5 * v;
+                id_plane[i] += 0.5 * v;
+                id_plane[i - 1] += 0.5 * v;
                 x += BLOCK_LATTICE;
             }
             if y % BLOCK_LATTICE == 0 && y > 0 {
@@ -6712,8 +6794,8 @@ fn attr_pass_b_channel(
                     let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
                     let step_src = (src[i] as f64 - src[i_up] as f64).abs();
                     let v = co.c_blockiness * bounded_excess(step_dst, step_src, C_BLOCK);
-                    density[i] += 0.5 * v;
-                    density[i_up] += 0.5 * v;
+                    id_plane[i] += 0.5 * v;
+                    id_plane[i_up] += 0.5 * v;
                 }
             }
         }
@@ -6736,24 +6818,43 @@ pub(crate) fn compute_v2_append_attribution(
     max_pixels: Option<usize>,
     parallel: bool,
 ) -> Result<V2AppendAttribution, ZensimError> {
+    // ZENSIM_ATTR_PERF=1: coarse section timing to stderr (perf lever triage).
+    let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
+    let t0 = std::time::Instant::now();
     let rprep = prepare_v2_reference_impl(reference, max_pixels, parallel, false)?;
     let dprep = prepare_v2_reference_impl(distorted, max_pixels, parallel, false)?;
+    let t_prep = t0.elapsed();
     let n_scales = rprep.scales.len().min(dprep.scales.len());
     let (w0, h0) = (rprep.scales[0].1, rprep.scales[0].2);
     let want_append = s_append.is_some();
     let toggles = V2NewFeatureToggles::default();
 
-    let mut scratch = ScratchV2Strip::new(w0 * (STRIP_ROWS + 2 * HALO_P));
-    let mut planes: [AttrChPlanes; 3] = [
-        AttrChPlanes::new(w0 * h0),
-        AttrChPlanes::new(w0 * h0),
-        AttrChPlanes::new(w0 * h0),
+    // Single-sweep pipeline (C2b Part 2): pass B(s) needs the edge-width
+    // coefficients, which need mean gradients up to scale s+1 — so the
+    // schedule is A(0), A(1), B(0), A(2), B(1), ..., B(n−1), with TWO
+    // ping-ponged plane sets so scale s's caches survive A(s+1). This
+    // removes the former second full blur+cache sweep entirely.
+    let mut scratches: [ScratchV2Strip; 3] = [
+        ScratchV2Strip::new(w0 * (STRIP_ROWS + 2 * HALO_P)),
+        ScratchV2Strip::new(w0 * (STRIP_ROWS + 2 * HALO_P)),
+        ScratchV2Strip::new(w0 * (STRIP_ROWS + 2 * HALO_P)),
+    ];
+    let mut planes_pp: [[AttrChPlanes; 3]; 2] = [
+        [
+            AttrChPlanes::new(w0 * h0),
+            AttrChPlanes::new(w0 * h0),
+            AttrChPlanes::new(w0 * h0),
+        ],
+        [
+            AttrChPlanes::new(w0 * h0),
+            AttrChPlanes::new(w0 * h0),
+            AttrChPlanes::new(w0 * h0),
+        ],
     ];
     let mut grad_halo: Vec<f32> = Vec::new();
     let mut grad_halo_d: Vec<f32> = Vec::new();
 
-    // ── Sweep 1 (pass A): pooled sums + production-finalized features. ──
-    let mut cells: Vec<[AttrCellSums; 3]> = Vec::with_capacity(n_scales);
+    let mut cells: Vec<[AttrCellSums; 3]> = vec![[AttrCellSums::default(); 3]; n_scales];
     let mut v2_features = vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL];
     let mut append_features = if want_append {
         vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_APPEND]
@@ -6762,24 +6863,88 @@ pub(crate) fn compute_v2_append_attribution(
     };
     // (mean grad src, mean grad dst) per (scale, ch) for edge-width.
     let mut mg = vec![[(0.0f64, 0.0f64); 3]; n_scales];
-    // `scale` indexes rprep/dprep/mg/features in lockstep — an iterator
-    // form over four structures obscures more than it helps here.
-    #[allow(clippy::needless_range_loop)]
-    for scale in 0..n_scales {
+    let mut canvas = vec![0.0f64; w0 * h0];
+    let mut scale_density = vec![0.0f64; w0 * h0];
+    let mut win_plane = vec![0.0f64; w0 * h0];
+    let mut spread_tmp: Vec<f64> = Vec::new();
+
+    // ── Pass A for one scale into the given plane set. ──
+    #[allow(clippy::too_many_arguments)]
+    fn pass_a_scale(
+        rprep: &V2PreparedReference,
+        dprep: &V2PreparedReference,
+        scale: usize,
+        want_append: bool,
+        parallel: bool,
+        toggles: V2NewFeatureToggles,
+        planes: &mut [AttrChPlanes; 3],
+        scratches: &mut [ScratchV2Strip; 3],
+        cells: &mut [[AttrCellSums; 3]],
+        mg: &mut [[(f64, f64); 3]],
+        v2_features: &mut [f64],
+        append_features: &mut [f64],
+        grad_halo: &mut Vec<f32>,
+        grad_halo_d: &mut Vec<f32>,
+    ) {
         let (ref rplanes, ws, hs) = rprep.scales[scale];
         let dplanes = &dprep.scales[scale].0;
-        for ch in 0..3 {
-            attr_blur_cache_channel(
-                &rplanes[ch],
-                &dplanes[ch],
-                ws,
-                hs,
-                want_append,
-                &mut scratch,
-                &mut planes[ch],
+        let tb = std::time::Instant::now();
+        // Channel-parallel blur+cache (C2b Part 2): the three channels are
+        // independent given per-channel scratch.
+        #[cfg(feature = "threads")]
+        let did_parallel = if parallel {
+            let [p0, p1, p2] = planes;
+            let [s0, s1, s2] = scratches;
+            rayon::join(
+                || attr_blur_cache_channel(&rplanes[0], &dplanes[0], ws, hs, want_append, s0, p0),
+                || {
+                    rayon::join(
+                        || {
+                            attr_blur_cache_channel(
+                                &rplanes[1],
+                                &dplanes[1],
+                                ws,
+                                hs,
+                                want_append,
+                                s1,
+                                p1,
+                            )
+                        },
+                        || {
+                            attr_blur_cache_channel(
+                                &rplanes[2],
+                                &dplanes[2],
+                                ws,
+                                hs,
+                                want_append,
+                                s2,
+                                p2,
+                            )
+                        },
+                    )
+                },
             );
+            true
+        } else {
+            false
+        };
+        #[cfg(not(feature = "threads"))]
+        let did_parallel = false;
+        if !did_parallel {
+            for ch in 0..3 {
+                attr_blur_cache_channel(
+                    &rplanes[ch],
+                    &dplanes[ch],
+                    ws,
+                    hs,
+                    want_append,
+                    &mut scratches[0],
+                    &mut planes[ch],
+                );
+            }
         }
-        let mut scale_cells = [AttrCellSums::default(); 3];
+        PERF_BLUR.with(|c| c.set(c.get() + tb.elapsed().as_secs_f64()));
+        let tk = std::time::Instant::now();
         for ch in 0..3 {
             let append_active = append_cell_active(want_append, ch, scale);
             let cross: Option<(&[f32], &[f32])> = if ch == 1 {
@@ -6797,8 +6962,8 @@ pub(crate) fn compute_v2_append_attribution(
                 &rplanes[1],
                 want_append,
                 append_active,
-                &mut grad_halo,
-                &mut grad_halo_d,
+                grad_halo,
+                grad_halo_d,
             );
             let v2b =
                 scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
@@ -6825,102 +6990,86 @@ pub(crate) fn compute_v2_append_attribution(
                     );
                 }
             }
-            scale_cells[ch] = cell;
+            cells[scale][ch] = cell;
         }
-        cells.push(scale_cells);
-    }
-    // Edge-width features (cross-scale) — replicate the production loop.
-    // (`ch` indexes mg + the offset-computed feature slice in lockstep.)
-    #[allow(clippy::needless_range_loop)]
-    for ch in 0..3 {
-        for scale in 1..n_scales {
-            let (pgs, pgd) = mg[scale - 1][ch];
-            let (gs, gd) = mg[scale][ch];
-            let decay_src = gs / (pgs + C_GRAD_DECAY);
-            let decay_dst = gd / (pgd + C_GRAD_DECAY);
-            let prev_b = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
-                + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-            v2_features[prev_b + idx::EDGE_WIDTH_CHANGE] =
-                1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
-            if scale == n_scales - 1 && n_scales >= 2 {
-                let this_b =
-                    scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-                v2_features[this_b + idx::EDGE_WIDTH_CHANGE] =
-                    v2_features[prev_b + idx::EDGE_WIDTH_CHANGE];
-            }
-        }
+        PERF_KERN.with(|c| c.set(c.get() + tk.elapsed().as_secs_f64()));
     }
 
-    // Edge-width pass-B coefficients: for E(t) = 1 − bounded_sim(a_t, b_t)
-    // (stored at scale t; the LAST scale's slot is a copy of E(n−2), so its
-    // gradient weight folds into E(n−2)'s), the chain rule puts terms on
-    // the (|∇d|−|∇s|) planes of scales t and t+1:
-    //   δE(t) per refined pixel at scale u = −∂bs/∂b · ∂b_t/∂mgd_u ·
-    //   (|∇d|−|∇s|)_i / N_u   (mgd_u's per-pixel refinement change).
-    let mut c_edgew = vec![[0.0f64; 3]; n_scales];
-    if n_scales >= 2 {
-        for ch in 0..3 {
-            for t in 0..n_scales - 1 {
-                let v2b =
-                    t * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-                let mut sk = s_v2
-                    .get(v2b + idx::EDGE_WIDTH_CHANGE)
+    // ── Edge-width pass-B coefficient for one (scale u, ch). ──
+    // Contributions from E(t) at t = u (denominator role of the decay
+    // ratio) and t = u−1 (numerator role); E(t) = 1 − bounded_sim(a, b);
+    // the LAST scale's slot is a copy of E(n−2) so its gradient weight
+    // folds into E(n−2)'s. δmgd per refined pixel = −(|∇d|−|∇s|)_i/N on
+    // BOTH terms (sign FD-gate-verified in C2a).
+    let ew_coeff = |u: usize, ch: usize, mg: &[[(f64, f64); 3]]| -> f64 {
+        if n_scales < 2 {
+            return 0.0;
+        }
+        let mut coeff = 0.0f64;
+        let n_u = (rprep.scales[u].1 * rprep.scales[u].2) as f64;
+        let s_at = |t: usize| -> f64 {
+            let v2b = t * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+            let mut sk = s_v2
+                .get(v2b + idx::EDGE_WIDTH_CHANGE)
+                .copied()
+                .unwrap_or(0.0);
+            if t == n_scales - 2 {
+                let lb = (n_scales - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                    + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                sk += s_v2
+                    .get(lb + idx::EDGE_WIDTH_CHANGE)
                     .copied()
                     .unwrap_or(0.0);
-                if t == n_scales - 2 {
-                    let lb = (n_scales - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
-                        + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-                    sk += s_v2
-                        .get(lb + idx::EDGE_WIDTH_CHANGE)
-                        .copied()
-                        .unwrap_or(0.0);
-                }
-                if sk == 0.0 {
-                    continue;
-                }
-                let (pgs, pgd) = mg[t][ch];
-                let (gs, gd) = mg[t + 1][ch];
-                let a = gs / (pgs + C_GRAD_DECAY);
-                let b = gd / (pgd + C_GRAD_DECAY);
-                let den = a * a + b * b + C_EDGEWIDTH;
-                // ∂bs(a,b)/∂b; E = 1 − bs ⇒ ∂E/∂b = −dbs_db.
-                let dbs_db = (2.0 * a * den - (2.0 * a * b + C_EDGEWIDTH) * 2.0 * b) / (den * den);
-                let de_db = -dbs_db;
-                let n_t = (rprep.scales[t].1 * rprep.scales[t].2) as f64;
-                let n_t1 = (rprep.scales[t + 1].1 * rprep.scales[t + 1].2) as f64;
-                // ∂b/∂mgd_{t+1} = 1/(pgd + C); ∂b/∂mgd_t = −gd/(pgd + C)².
-                // δmgd_u per refined pixel = −(|∇d|−|∇s|)_i / N_u, so BOTH
-                // terms carry the −1/N_u factor (the earlier +1/n_t here was
-                // a sign bug — caught by the finite-difference direction
-                // test `v2_append_attr_signed_integrand_directions`).
-                c_edgew[t + 1][ch] += sk * de_db * (1.0 / (pgd + C_GRAD_DECAY)) * (-1.0 / n_t1);
-                c_edgew[t][ch] += sk
+            }
+            sk
+        };
+        // (−∂bs/∂b, pgd, gd) for E(t).
+        let de_db_at = |t: usize| -> (f64, f64, f64) {
+            let (pgs, pgd) = mg[t][ch];
+            let (gs, gd) = mg[t + 1][ch];
+            let a = gs / (pgs + C_GRAD_DECAY);
+            let b = gd / (pgd + C_GRAD_DECAY);
+            let den = a * a + b * b + C_EDGEWIDTH;
+            let dbs_db = (2.0 * a * den - (2.0 * a * b + C_EDGEWIDTH) * 2.0 * b) / (den * den);
+            (-dbs_db, pgd, gd)
+        };
+        // E(u): scale u is the DENOMINATOR (mgd_t) of b.
+        if u + 1 < n_scales {
+            let sk = s_at(u);
+            if sk != 0.0 {
+                let (de_db, pgd, gd) = de_db_at(u);
+                coeff += sk
                     * de_db
                     * (-gd / ((pgd + C_GRAD_DECAY) * (pgd + C_GRAD_DECAY)))
-                    * (-1.0 / n_t);
+                    * (-1.0 / n_u);
             }
         }
-    }
+        // E(u−1): scale u is the NUMERATOR (mgd_{t+1}) of b.
+        if u >= 1 {
+            let sk = s_at(u - 1);
+            if sk != 0.0 {
+                let (de_db, pgd, _gd) = de_db_at(u - 1);
+                coeff += sk * de_db * (1.0 / (pgd + C_GRAD_DECAY)) * (-1.0 / n_u);
+            }
+        }
+        coeff
+    };
 
-    // ── Sweep 2 (pass B): re-blur caches per scale, combine, upsample. ──
-    let mut canvas = vec![0.0f64; w0 * h0];
-    let mut scale_density = vec![0.0f64; w0 * h0];
-    for scale in 0..n_scales {
+    // ── Pass B for one scale (combine → spread window mass → upsample). ──
+    let pass_b_scale = |scale: usize,
+                        planes: &[AttrChPlanes; 3],
+                        cells: &[[AttrCellSums; 3]],
+                        mg: &[[(f64, f64); 3]],
+                        scale_density: &mut Vec<f64>,
+                        win_plane: &mut Vec<f64>,
+                        canvas: &mut Vec<f64>,
+                        spread_tmp: &mut Vec<f64>| {
+        let tpb = std::time::Instant::now();
         let (ref rplanes, ws, hs) = rprep.scales[scale];
         let dplanes = &dprep.scales[scale].0;
         let n = ws * hs;
-        for ch in 0..3 {
-            attr_blur_cache_channel(
-                &rplanes[ch],
-                &dplanes[ch],
-                ws,
-                hs,
-                want_append,
-                &mut scratch,
-                &mut planes[ch],
-            );
-        }
         scale_density[..n].fill(0.0);
+        win_plane[..n].fill(0.0);
         for ch in 0..3 {
             let append_active = append_cell_active(want_append, ch, scale);
             let cross: Option<(&[f32], &[f32])> = if ch == 1 {
@@ -6936,7 +7085,7 @@ pub(crate) fn compute_v2_append_attribution(
                 &cells[scale][ch],
                 append_active,
                 ch == 1,
-                c_edgew[scale][ch],
+                ew_coeff(scale, ch, mg),
             );
             attr_pass_b_channel(
                 &rplanes[ch],
@@ -6947,9 +7096,22 @@ pub(crate) fn compute_v2_append_attribution(
                 cross,
                 &rplanes[1],
                 &co,
+                parallel,
                 &mut scale_density[..n],
+                &mut win_plane[..n],
             );
         }
+        crate::blur::box_spread_sum_preserving(
+            &mut win_plane[..n],
+            ws,
+            hs,
+            BLUR_RADIUS,
+            spread_tmp,
+        );
+        for (d, s) in scale_density[..n].iter_mut().zip(win_plane[..n].iter()) {
+            *d += *s;
+        }
+        PERF_PASSB.with(|c| c.set(c.get() + tpb.elapsed().as_secs_f64()));
         // Sum-preserving footprint upsample (the v2 pyramid floor-halves,
         // so footprints are full 2^s × 2^s blocks; ÷4^s is exact).
         let factor = 1usize << scale;
@@ -6974,6 +7136,87 @@ pub(crate) fn compute_v2_append_attribution(
                 }
             }
         }
+    };
+
+    // ── Pipeline: A(s); once A(s) exists, fill the cross-scale edge-width
+    //    FEATURES for scale s−1 (production replication incl. the
+    //    last-scale copy), then B(s−1); finish with B(n−1). ──
+    for scale in 0..n_scales {
+        {
+            let [set_a, set_b] = &mut planes_pp;
+            let pset = if scale % 2 == 0 { set_a } else { set_b };
+            pass_a_scale(
+                &rprep,
+                &dprep,
+                scale,
+                want_append,
+                parallel,
+                toggles,
+                pset,
+                &mut scratches,
+                &mut cells,
+                &mut mg,
+                &mut v2_features,
+                &mut append_features,
+                &mut grad_halo,
+                &mut grad_halo_d,
+            );
+        }
+        if scale >= 1 {
+            for ch in 0..3 {
+                let (pgs, pgd) = mg[scale - 1][ch];
+                let (gs, gd) = mg[scale][ch];
+                let decay_src = gs / (pgs + C_GRAD_DECAY);
+                let decay_dst = gd / (pgd + C_GRAD_DECAY);
+                let prev_b = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                    + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                v2_features[prev_b + idx::EDGE_WIDTH_CHANGE] =
+                    1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
+                if scale == n_scales - 1 && n_scales >= 2 {
+                    let this_b = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                        + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+                    v2_features[this_b + idx::EDGE_WIDTH_CHANGE] =
+                        v2_features[prev_b + idx::EDGE_WIDTH_CHANGE];
+                }
+            }
+            let prev = scale - 1;
+            pass_b_scale(
+                prev,
+                &planes_pp[prev % 2],
+                &cells,
+                &mg,
+                &mut scale_density,
+                &mut win_plane,
+                &mut canvas,
+                &mut spread_tmp,
+            );
+        }
+    }
+    {
+        let last = n_scales - 1;
+        pass_b_scale(
+            last,
+            &planes_pp[last % 2],
+            &cells,
+            &mg,
+            &mut scale_density,
+            &mut win_plane,
+            &mut canvas,
+            &mut spread_tmp,
+        );
+    }
+    if perf_log {
+        eprintln!(
+            "ATTRPERF v2app: prep {:.1} ms | pipeline {:.1} ms (A: blur+cache {:.1}, kernels {:.1}; B: combine {:.1})",
+            t_prep.as_secs_f64() * 1e3,
+            t0.elapsed().as_secs_f64() * 1e3 - t_prep.as_secs_f64() * 1e3,
+            PERF_BLUR.with(|c| c.get()) * 1e3,
+            PERF_KERN.with(|c| c.get()) * 1e3,
+            PERF_PASSB.with(|c| c.get()) * 1e3,
+        );
+        PERF_BLUR.with(|c| c.set(0.0));
+        PERF_KERN.with(|c| c.set(0.0));
+        PERF_PASSB.with(|c| c.set(0.0));
     }
 
     // Trim the (possibly reflect-padded sub-64) canvas to the original.

@@ -3690,9 +3690,143 @@ pub(crate) fn checked_padded_plane_len(
         .ok_or(crate::ZensimError::ImageTooLarge)
 }
 
+/// EXACTLY sum-preserving separable box spread (task #67 C2b): each source
+/// value spreads uniformly over its `(2r+1)²` window *clipped to bounds*,
+/// normalized **per source** — the transpose-normalized counterpart of a box
+/// blur, i.e. the allocation operator for attribution mass whose signals live
+/// on a blur window.
+///
+/// Boundary convention (documented per the C2b gate): windows are CLIPPED at
+/// the image edge (no mirror); each 1-D pass computes `y_i = x_i / len_i`
+/// (`len_i` = in-bounds window length of source `i`) followed by a clipped
+/// unnormalized box sum, so `Σ out == Σ x` to f64 rounding **exactly** —
+/// every source's mass lands fully in bounds (a mirrored convention re-enters
+/// mass at edges and does not preserve column sums). Interior pixels (≥ `r`
+/// from every edge) match a normalized `(2r+1)²` box blur bit-for-bit in
+/// exact arithmetic. O(N) via prefix sums per row + a sliding row-window for
+/// the vertical pass. `tmp` must be `width` long; `plane` is modified in
+/// place.
+pub(crate) fn box_spread_sum_preserving(
+    plane: &mut [f64],
+    width: usize,
+    height: usize,
+    r: usize,
+    tmp: &mut Vec<f64>,
+) {
+    if r == 0 || width == 0 || height == 0 {
+        return;
+    }
+    // ── Horizontal pass (per row): out_j = Σ_{i∈[j−r, j+r]∩bounds} x_i/len_i.
+    tmp.clear();
+    tmp.resize(width + 1, 0.0);
+    for row in plane.chunks_mut(width) {
+        // Prefix sums of the per-source-normalized row.
+        let mut run = 0.0f64;
+        for (x, v) in row.iter().enumerate() {
+            let len = ((x + r).min(width - 1) - x.saturating_sub(r) + 1) as f64;
+            run += v / len;
+            tmp[x + 1] = run;
+        }
+        for (j, out) in row.iter_mut().enumerate() {
+            let lo = j.saturating_sub(r);
+            let hi = (j + r).min(width - 1);
+            *out = tmp[hi + 1] - tmp[lo];
+        }
+    }
+    // ── Vertical pass: normalize each SOURCE row by its in-bounds window
+    //    length, then slide a row-window sum down the image.
+    for y in 0..height {
+        let len = ((y + r).min(height - 1) - y.saturating_sub(r) + 1) as f64;
+        let inv = 1.0 / len;
+        for v in &mut plane[y * width..(y + 1) * width] {
+            *v *= inv;
+        }
+    }
+    // Sliding window of normalized rows: out_row(j) = Σ rows [j−r, j+r]∩bounds.
+    tmp.clear();
+    tmp.resize(width, 0.0);
+    let mut out = vec![0.0f64; width * height];
+    // Initialize window sum for j = 0: rows [0, r].
+    for y in 0..=r.min(height - 1) {
+        for (t, v) in tmp.iter_mut().zip(&plane[y * width..(y + 1) * width]) {
+            *t += *v;
+        }
+    }
+    out[..width].copy_from_slice(tmp);
+    for j in 1..height {
+        let add = j + r;
+        if add < height {
+            for (t, v) in tmp.iter_mut().zip(&plane[add * width..(add + 1) * width]) {
+                *t += *v;
+            }
+        }
+        if j > r {
+            let rem = j - r - 1;
+            for (t, v) in tmp.iter_mut().zip(&plane[rem * width..(rem + 1) * width]) {
+                *t -= *v;
+            }
+        }
+        out[j * width..(j + 1) * width].copy_from_slice(tmp);
+    }
+    plane.copy_from_slice(&out);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `box_spread_sum_preserving` must conserve total mass EXACTLY (to f64
+    /// rounding) on arbitrary signed planes including edge-heavy mass, and
+    /// match a normalized box blur in the deep interior.
+    #[test]
+    fn box_spread_preserves_sums_exactly() {
+        for &(w, h, r) in &[
+            (37usize, 23usize, 5usize),
+            (64, 64, 5),
+            (8, 128, 3),
+            (11, 1, 5),
+        ] {
+            let mut seed = 0x1234_5678_9ABC_DEF0u64;
+            let mut next = move || {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                (seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+            };
+            let mut plane: Vec<f64> = (0..w * h).map(|_| next()).collect();
+            // Pile extra mass on the borders to stress the clipped windows.
+            for x in 0..w {
+                plane[x] += 3.0;
+                plane[(h - 1) * w + x] -= 2.0;
+            }
+            let before: f64 = plane.iter().sum();
+            let mass: f64 = plane.iter().map(|v| v.abs()).sum();
+            let mut tmp = Vec::new();
+            box_spread_sum_preserving(&mut plane, w, h, r, &mut tmp);
+            let after: f64 = plane.iter().sum();
+            assert!(
+                (after - before).abs() <= 1e-12 * mass.max(1.0),
+                "({w}x{h}, r={r}): sum {before} -> {after}"
+            );
+        }
+        // Interior equivalence with a normalized (2r+1)^2 box blur: an
+        // impulse far from every edge spreads to a uniform window.
+        let (w, h, r) = (32usize, 32usize, 5usize);
+        let mut plane = vec![0.0f64; w * h];
+        plane[16 * w + 16] = 121.0;
+        let mut tmp = Vec::new();
+        box_spread_sum_preserving(&mut plane, w, h, r, &mut tmp);
+        for dy in -(r as isize)..=(r as isize) {
+            for dx in -(r as isize)..=(r as isize) {
+                let i = ((16 + dy) as usize) * w + (16 + dx) as usize;
+                assert!(
+                    (plane[i] - 1.0).abs() < 1e-12,
+                    "interior impulse spread: got {} at ({dx},{dy})",
+                    plane[i]
+                );
+            }
+        }
+    }
 
     /// Helper: 1-pass box blur (H then V) on a plane.
     fn blur_1pass(input: &[f32], width: usize, height: usize, radius: usize) -> Vec<f32> {
