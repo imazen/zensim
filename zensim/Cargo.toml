@@ -170,6 +170,10 @@ required-features = ["training"]
 name = "upiq_features_extract"
 required-features = ["feature-regime-v2", "threads", "training"]
 
+[[example]]
+name = "sihdr_features_extract"
+required-features = ["feature-regime-v2", "threads", "training"]
+
 [[bench]]
 name = "pu21_bench"
 harness = false
