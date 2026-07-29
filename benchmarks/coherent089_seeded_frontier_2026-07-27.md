@@ -322,3 +322,31 @@ exact cheap partial sum over existing planes. The per-pixel signal fold — whic
 for coarse-heavy models — becomes the visualization layer, not the steering layer.
 Direction requires a runtime-diffmap architecture decision (block-attribution map API) —
 surfaced for user sign-off before building.
+
+## E-M9 — attribution-map design PROOF across block sizes (2026-07-29)
+
+User constraint: modern codecs partition at highly variable sizes (AV1 4-128px recursive,
+JXL variable DCT, HEVC CTU splits) — a fixed-grid map is the wrong interface. Measured on
+city/q50 for the two pathological 924 bakes:
+
+| block px | fold924 M2 / M3 | candidate M2 / M3 |
+|---|---|---|
+| 16 | 1.0000 / +0.377 | 1.0000 / +0.431 |
+| 32 | 0.9999 / +0.305 | 1.0000 / +0.403 |
+| 64 | 0.9999 / +0.249 | 1.0000 / +0.335 |
+| 128 | 0.9992 / **−0.362** | 0.9985 / −0.083 |
+
+**Per-block gradient attribution (M2 = Σ_k s_k·Δf_k(block)) is 0.999-1.000 at EVERY
+partition size**; the per-pixel signal fold (M3) degrades with size and INVERTS at 128px.
+The steering architecture is therefore:
+
+**Per-pixel attribution DENSITY + summed-area table.** D(x,y) = Σ_k s_k·∂f_k/∂pixel with
+each feature's TRUE integrand (mean-pooled features — incl. the dominant MSE slot — are
+exactly linear; p2/p4-pooled get value-weighted densities from the same planes). Any
+rectangle query = O(1) SAT lookup → the codec steers its own partitions at any size, and
+M2-exactness transfers by linearity. The signal fold becomes visualization-only.
+
+Build plan (next chunk): (1) expose per-scale signal planes from the metric internals;
+(2) integrand density per pooling type (mean exact first, p2/p4 weighted); (3) SAT +
+rectangle-query runtime API; (4) gate: attribution-M3 ≥ 0.9·M2 at {16,32,64,128} on both
+eras' models, wired into run_full_eval.
