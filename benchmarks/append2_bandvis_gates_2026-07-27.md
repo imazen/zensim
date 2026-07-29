@@ -34,6 +34,13 @@ total; `FeatureRegime::Folded720Append2`; `append2_features()` accessor):
   the SDR route (weight identically 0 ⇒ `WeightedSum::finish` → 0).
   **E2 partition caveat** (in the idx docs): the bins overlap each other
   AND `LUM_BRIGHT_ERR` — not a partition of unity.
+  **HL_BIN2 regime note (2026-07-29, adjudicated):** the 1.649 edge
+  equals the achievable ceiling of every ≤1000-nit-capped route by
+  construction (`Pq{1000}` max ry 1.649204 → weight ≤6.4e-4; `Pq{700}`
+  ceiling 0.105 BELOW the edge → exact 0) — the bin is live only on
+  >1000-nit mastering (`Linear`/UPIQ 97% fire at all scales; `Pq{4000}`
+  ceiling weight 0.57). The V4 gate ran `Pq{10000}` and could not see
+  this. Full adjudication: `benchmarks/hl_bin2_deadslot_2026-07-29.md`.
 
 Entries: `Zensim::compute_folded720_append2_features[_hdr]` + the
 `append2_block` toggle on the existing `_streaming` batch forms; driver
