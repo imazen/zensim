@@ -949,6 +949,19 @@ impl Default for MlpHyperparams {
 ///
 /// Always returns a finite, positive weight. NaN-safe: clamps inputs
 /// into `[0, 100]` first so the band index can't index OOB.
+/// Best validation score of the LAST completed training run in this process —
+/// read by the trainer bin for spec.json + the embedded `zentrain.repro` (the
+/// bimodal-seed campaigns select seeds by internal val; a Mutex global instead
+/// of return-type churn across the five train variants). `None` until a
+/// variant reports (the GPU path currently does not).
+pub static LAST_BEST_VAL: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
+
+fn record_best_val(v: f64) {
+    if let Ok(mut g) = LAST_BEST_VAL.lock() {
+        *g = Some(v);
+    }
+}
+
 #[inline]
 pub fn pwrc_pair_weight(a: f64, b: f64, band_weights: Option<&[f64]>) -> f64 {
     let max_mos = a.max(b).clamp(0.0, 100.0);
@@ -2456,6 +2469,7 @@ pub fn train_mlp_strategy(
             }
         }
     }
+record_best_val(best_val_score);
 
     log_line(
         &format!("MLP train: best validation mean SROCC = {best_val_score:.4}"),
@@ -3250,6 +3264,7 @@ fn train_mlp_pool_head_with_tv(
             }
         }
     }
+record_best_val(best_val_score);
 
     log_line(
         &format!(
@@ -4259,6 +4274,7 @@ fn train_mlp_hybrid_head_with_tv(
         let xc = alpha_logit.clamp(-20.0, 20.0);
         1.0 / (1.0 + (-xc).exp())
     };
+    record_best_val(best_val_score);
     log_line(
         &format!(
             "MLP train (HYBRID-HEAD): best validation SROCC = {best_val_score:.4} | final α={alpha_final:.4} (logit={alpha_logit:+.4}) reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}]",
@@ -9179,6 +9195,7 @@ fn train_mlp_per_sample_alpha_head(
             }
         }
     }
+record_best_val(best_val_score);
 
     log_line(
         &format!(

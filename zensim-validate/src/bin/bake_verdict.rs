@@ -257,6 +257,7 @@ fn slot_720(name: &str) -> Option<&'static str> {
         "aic4" => "ext_aic4.parquet",
         "nonphoto" => "ext_nonphoto_720_nn_full.parquet",
         "imazen26" => "ext_imazen26_720_nn_full.parquet",
+        "sdr25" => "ext_sdr25.parquet",
         // pipal, hf_nearlossless: no 720 extraction yet.
         _ => return None,
     })
@@ -395,6 +396,19 @@ const CORPORA: &[Corpus] = &[
         // with ssim2 on real modern-codec output. The nonphoto slot's all-content,
         // all-codec sibling. In the default features root.
         filename: "imazen26_test_120k_2026-07-16.parquet",
+        enable_per_band: false,
+    },
+    Corpus {
+        name: "sdr25",
+        display: "JPEG-AI SDR25 (HQ-zone human)",
+        // High-quality-zone HUMAN data (q75-100 triplets) — one of the
+        // CLAUDE.md "untapped local human datasets". Never trained on;
+        // added 2026-07-29 as a SELECTION/eval leg (the bimodal-seed
+        // campaigns need an oracle that is neither a training group nor a
+        // product gate). 720-root has no extraction — the 924 root does
+        // (ext_sdr25.parquet); under the default root the load fails loud
+        // and the corpus is skipped.
+        filename: "ext_sdr25.parquet",
         enable_per_band: false,
     },
     Corpus {

@@ -2977,78 +2977,6 @@ fn main() {
     // GPU-supported (per-sample-α head, no aux losses, no TV).
     let gpu_runtime_str = args.gpu_runtime.trim().to_ascii_lowercase();
     let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
-    // ── MANDATORY reproduction provenance ──────────────────────────────
-    // Assembled BEFORE baking, embedded INTO the bake bytes as the
-    // `zentrain.repro` metadata entry at the single write choke-point below
-    // (covers every arch/GPU/CPU path), and merged into the .spec.json
-    // sidecar. The embedded copy is the one that matters: a bake copied
-    // without its sidecar keeps its reproduction instructions. Not optional,
-    // no flag: an unreproducible bake is a defect (2026-07-27 user directive).
-    let repro_json: String = {
-        // Trainer source identity: HEAD of the source dir at TRAIN time
-        // (honest label — the binary may have been built at an older commit).
-        let src_dir = env!("CARGO_MANIFEST_DIR");
-        // git first (colocated primary checkout); jj fallback for secondary
-        // jj workspaces, which carry .jj but no .git.
-        let git_head = std::process::Command::new("git")
-            .args(["-C", src_dir, "rev-parse", "--short=12", "HEAD"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .or_else(|| {
-                // cwd-based: jj searches upward from the crate dir to the
-                // workspace root (--repository would need the root itself).
-                std::process::Command::new("jj")
-                    .current_dir(src_dir)
-                    .args(["log", "--no-graph", "-r", "@-", "-T", "commit_id.short(12)"])
-                    .output()
-                    .ok()
-                    .filter(|o| o.status.success())
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            })
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "unknown".into());
-        let inputs: Vec<serde_json::Value> = loaded
-            .iter()
-            .map(|g| {
-                serde_json::json!({
-                    "name": g.name, "path": g.source_path, "sha256": g.source_sha256,
-                    "rows": g.human_scores.len(), "n_features": g.n_features,
-                    "train_w": g.train_w, "val_w": g.val_w,
-                    "loss_mode": format!("{:?}", g.loss_mode), "within_ref": g.within_ref,
-                })
-            })
-            .collect();
-        serde_json::json!({
-            "schema": 1,
-            "tool": "zensim_mlp_train",
-            // argv reproduces every hyperparameter + transform verbatim.
-            "argv": std::env::args().collect::<Vec<String>>(),
-            "cwd": std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
-            // Structured duplicates of the load-bearing knobs (greppable
-            // without argv parsing):
-            "seed": args.seed,
-            "epochs": args.epochs,
-            "pairs_per_epoch": args.pairs_per_epoch,
-            "n_hidden_layers": args.n_hidden_layers,
-            "target_column": args.target_column,
-            "target_scale": args.target_scale,
-            "max_features": args.max_features,
-            "algorithm": "RankNet pairwise (+per-group loss modes; see argv for full hyperparams)",
-            // Content-addressed inputs: the canonical reproduction identity.
-            "inputs": inputs,
-            "trainer_source_dir": src_dir,
-            "trainer_head_at_train": git_head,
-            "hostname": std::env::var("HOSTNAME").unwrap_or_default(),
-            "timestamp_epoch": std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
-        })
-        .to_string()
-    };
-
     let bake_bytes = if want_gpu {
         if !args.per_sample_alpha_head {
             eprintln!(
@@ -3284,6 +3212,79 @@ fn main() {
         )
     };
 
+    // ── MANDATORY reproduction provenance ──────────────────────────────
+    // Assembled BEFORE baking, embedded INTO the bake bytes as the
+    // `zentrain.repro` metadata entry at the single write choke-point below
+    // (covers every arch/GPU/CPU path), and merged into the .spec.json
+    // sidecar. The embedded copy is the one that matters: a bake copied
+    // without its sidecar keeps its reproduction instructions. Not optional,
+    // no flag: an unreproducible bake is a defect (2026-07-27 user directive).
+    let repro_json: String = {
+        // Trainer source identity: HEAD of the source dir at TRAIN time
+        // (honest label — the binary may have been built at an older commit).
+        let src_dir = env!("CARGO_MANIFEST_DIR");
+        // git first (colocated primary checkout); jj fallback for secondary
+        // jj workspaces, which carry .jj but no .git.
+        let git_head = std::process::Command::new("git")
+            .args(["-C", src_dir, "rev-parse", "--short=12", "HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .or_else(|| {
+                // cwd-based: jj searches upward from the crate dir to the
+                // workspace root (--repository would need the root itself).
+                std::process::Command::new("jj")
+                    .current_dir(src_dir)
+                    .args(["log", "--no-graph", "-r", "@-", "-T", "commit_id.short(12)"])
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "unknown".into());
+        let inputs: Vec<serde_json::Value> = loaded
+            .iter()
+            .map(|g| {
+                serde_json::json!({
+                    "name": g.name, "path": g.source_path, "sha256": g.source_sha256,
+                    "rows": g.human_scores.len(), "n_features": g.n_features,
+                    "train_w": g.train_w, "val_w": g.val_w,
+                    "loss_mode": format!("{:?}", g.loss_mode), "within_ref": g.within_ref,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "schema": 1,
+            "tool": "zensim_mlp_train",
+            // argv reproduces every hyperparameter + transform verbatim.
+            "argv": std::env::args().collect::<Vec<String>>(),
+            "cwd": std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
+            // Structured duplicates of the load-bearing knobs (greppable
+            // without argv parsing):
+            "seed": args.seed,
+            "epochs": args.epochs,
+            "pairs_per_epoch": args.pairs_per_epoch,
+            "n_hidden_layers": args.n_hidden_layers,
+            "target_column": args.target_column,
+            "target_scale": args.target_scale,
+            "max_features": args.max_features,
+            "algorithm": "RankNet pairwise (+per-group loss modes; see argv for full hyperparams)",
+            // Content-addressed inputs: the canonical reproduction identity.
+            "inputs": inputs,
+            "best_val": *zensim_validate::mlp_train::LAST_BEST_VAL.lock().unwrap(),
+            "trainer_source_dir": src_dir,
+            "trainer_head_at_train": git_head,
+            "hostname": std::env::var("HOSTNAME").unwrap_or_default(),
+            "timestamp_epoch": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        })
+        .to_string()
+    };
+
     // MANDATORY: embed reproduction provenance into the bake bytes themselves.
     // append_metadata_utf8 is zenpredict-bake's section-level splice with
     // score/byte identity guarantees (weights untouched — no requantization).
@@ -3339,6 +3340,7 @@ fn main() {
                 "rows": g.human_scores.len(),
             })).collect::<Vec<_>>(),
             "seed": args.seed,
+            "best_val": *zensim_validate::mlp_train::LAST_BEST_VAL.lock().unwrap(),
             "repro_embedded": true,
             "argv": std::env::args().collect::<Vec<String>>(),
             "cwd": std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
