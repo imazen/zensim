@@ -169,6 +169,17 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   mean-offset pass since the entry point landed) — FIXED this commit with a
   fails-without-fix regression test (`m1_sub64_planar_precompute_scores_and_matches_
   interleaved`, planar-vs-interleaved pad-path agreement ≤1e-4).
+- **#69 loop-steering study (jxl `d17cf7ce`; plan `5f7d16a3`, gates frozen): H3 MAGNITUDE
+  steering is the one loop rule with value** — passes G1+G2 on v47A (t70 |err| 0.31 vs
+  baseline 1.87 at bytes ratio 0.99; supervisor re-derived medians from the TSVs — exact)
+  and is the only arm beating baseline on nonphoto on BOTH bakes; staleness free (G4) so
+  the single-pass ≤1.1× endpoint stays viable for H3. The ratio-normalized family (C3b
+  attr / H1-signed / H2-ctrl) NEVER beats the plain damped controller, and on shippedB-
+  linear ALL arms fail G1. Mechanism: score-unit steps skip the normalization that erased
+  the map's magnitude information. ZENSIM_H3_GAIN unswept (registered default 10.0) —
+  a gain sweep is future work, not claimed. Hazard noted: unknown JXL_ZENSIM_MODEL_MAP
+  values fall through to baseline silently (caught in-run by a control-arm mismatch).
+  `jxl-encoder/benchmarks/zensim_attr_loop69_2026-07-29.md`.
 
 ### Trainer/eval capabilities added this campaign (all on main)
 - **MANDATORY embedded repro**: every new bake carries `zentrain.repro` (inputs w/ sha256 +
