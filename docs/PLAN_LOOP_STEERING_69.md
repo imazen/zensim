@@ -57,3 +57,30 @@ One fixture-widening pass + 4 arms × 2 bakes × 27 cells ≈ a few hours of
 576² encodes on this box (nice'd) — no fleet needed. All work in the
 jxl-encoder diffmap-rd workspace (the C3b substrate); zensim stays read-only
 unless H3 needs a query helper (additive only).
+
+## Post-study register — task #70 productization (added 2026-07-31)
+
+#69 RAN and concluded (jxl `d17cf7ce`; verdict `cc6e9575`; results doc:
+jxl-encoder `benchmarks/zensim_attr_loop69_2026-07-29.md` + 3 TSVs). **H3
+magnitude steering is the one loop rule with value** — v47A t70 med |err|
+0.306 vs baseline 1.867 at bytes ratio 0.990; the only arm winning nonphoto
+on both bakes; staleness free (G4). The ratio-normalized family (C3b attr /
+H1 / H2) never beats the plain damped controller; on shippedB-linear ALL
+arms fail. Follow-up work is task #70; the spec is recorded here so it
+survives independent of any session task store:
+
+1. **`ZENSIM_H3_GAIN` sweep** — #69 ran only the registered default 10.0.
+   Sweep {2.5, 5, 10, 20, 40} on the #69 matrix. Pre-register the selection
+   gate BEFORE running: best all-median |achieved−target| subject to G2
+   (bytes at equal achieved within +2% of baseline).
+2. **Single-pass ≤1.1× perf endpoint for H3** — staleness proven free twice
+   (C3b + #69 G4), so implement the stale-scalar single-pass fused compare
+   (C3a's ranked lever 3) and re-run the H3 arm at the final perf state;
+   loop-quality gates must hold unchanged.
+3. **The shippedB story, honestly** — the linear bake gains nothing from any
+   steering arm. If H3 ships, it ships for MLP-class dials only, documented.
+4. **924-class loop steering (longer term)** — needs the extractor-side
+   retention hooks (C3a deviation 2; the extractor session's domain).
+
+Substrate: jxl-encoder diffmap-rd harness (`d17cf7ce`) + the zensim
+fused-compare API.
