@@ -69,10 +69,15 @@ BV_EXTRA=()
 BV_REGIME=$REGIME
 if [[ "$REGIME" == "924" ]]; then
     BV_REGIME=720
+    # Corpora = the slots that EXIST as canonical 924 extractions. imazen26 /
+    # nonphoto are deliberately absent: their 720 NN tables cannot cross
+    # regimes (docs/FULL_EVAL.md "924-era eval slices") and the bigcodec
+    # 924-test-view slices are not wired as bake_verdict slot files yet.
     BV_EXTRA=(--features-root /mnt/v/zen/zensim-training/ext924-canonical-2026-07-27
               --dial-grid /mnt/v/output/zensim/v2-eval-924-2026-07-27/dial_grid_924col_2026-07-28.parquet
               --corruption-grid /mnt/v/output/zensim/v2-eval-924-2026-07-27/corruption_grid_924col_2026-07-27.parquet
-              --perpair-metrics /mnt/v/zen/zensim-training/kadis-924-2026-07-27/kadis700k_924.parquet)
+              --perpair-metrics /mnt/v/zen/zensim-training/kadis-924-2026-07-27/kadis700k_924.parquet
+              --corpora cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25)
 fi
 # Stash the previous JSON so ZENSIM_M3_REUSE=1 can carry its M3 fields after
 # bake_verdict overwrites the file (bake_verdict always emits m3=null).
