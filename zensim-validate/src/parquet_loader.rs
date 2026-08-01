@@ -29,6 +29,7 @@ use arrow::array::{
     UInt32Array, UInt64Array,
 };
 use arrow::datatypes::DataType;
+use arrow::record_batch::RecordBatch;
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -445,6 +446,201 @@ pub fn load_parquet(
         } else {
             Some(ref_ids)
         },
+    })
+}
+
+/// Batch callback for [`stream_parquet_rows`]: `(features_row_major,
+/// n_rows, targets_per_column)`.
+pub type StreamBatchFn<'a> = dyn FnMut(&[f64], usize, &[Vec<f64>]) -> Result<(), String> + 'a;
+
+/// Summary of one [`stream_parquet_rows`] pass.
+#[derive(Debug)]
+pub struct StreamInfo {
+    pub n_rows: usize,
+    pub n_features: usize,
+}
+
+/// STREAMING row visitor over a feature parquet — the memory-capped sibling
+/// of [`load_parquet`] for accumulation passes (Gram moments, running
+/// statistics) where materializing every row (`Vec<Vec<f64>>`) would need
+/// tens of GB. Same column conventions as `load_parquet` (THE loader owner —
+/// extend here, never re-read feature parquets elsewhere): consecutive
+/// `f<i>` / `feat_<i>` feature columns, named target columns (multiple
+/// allowed, each scaled by `target_scale`), Float32/Float64/int widening.
+///
+/// Determinism: single-threaded, batches in file order, rows in batch order
+/// — a given file yields one exact visit sequence.
+///
+/// Contract differences vs `load_parquet` (accumulation passes must not
+/// silently absorb bad data):
+/// * errors on any NULL in a projected column (feature or target);
+/// * errors on any non-finite feature or target value;
+/// * no ref-identity / sigma handling (not needed for moment accumulation).
+///
+/// `on_batch(features, n_rows, targets)`: `features` is row-major
+/// `n_rows × n_features` (buffer reused between batches), `targets[t]` has
+/// `n_rows` scaled values for `target_columns[t]`.
+pub fn stream_parquet_rows(
+    path: &PathBuf,
+    target_columns: &[&str],
+    target_scale: f64,
+    on_batch: &mut StreamBatchFn<'_>,
+) -> Result<StreamInfo, String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let schema = builder.schema().clone();
+    let parquet_schema = builder.parquet_schema().clone();
+    let arrow_fields = schema.fields();
+    let n_arrow_cols = arrow_fields.len();
+
+    // Target columns by name (same error phrasing as load_parquet).
+    let mut target_arrow_idx: Vec<usize> = Vec::with_capacity(target_columns.len());
+    for t in target_columns {
+        let i = arrow_fields
+            .iter()
+            .position(|f| f.name() == t)
+            .ok_or_else(|| format!("{path:?}: missing target column {t:?}"))?;
+        target_arrow_idx.push(i);
+    }
+
+    // First feature column + consecutive count — mirrors load_parquet.
+    let (prefix, f0_arrow_idx) = ["f", "feat_"]
+        .iter()
+        .find_map(|p| {
+            arrow_fields
+                .iter()
+                .position(|f| f.name() == &format!("{p}0"))
+                .map(|i| (*p, i))
+        })
+        .ok_or_else(|| format!("{path:?}: missing f0 / feat_0 column"))?;
+    let mut n_features = 0usize;
+    while f0_arrow_idx + n_features < n_arrow_cols {
+        let expected = format!("{prefix}{n_features}");
+        if arrow_fields[f0_arrow_idx + n_features].name() != &expected {
+            break;
+        }
+        n_features += 1;
+    }
+    if n_features == 0 {
+        return Err(format!("{path:?}: no {prefix}N columns found"));
+    }
+
+    let mut wanted: Vec<usize> = Vec::with_capacity(n_features + target_columns.len());
+    wanted.extend(target_arrow_idx.iter().copied());
+    for i in 0..n_features {
+        wanted.push(f0_arrow_idx + i);
+    }
+    let mask = ProjectionMask::leaves(&parquet_schema, wanted.iter().copied());
+    let reader = builder
+        .with_projection(mask)
+        .with_batch_size(16384)
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
+
+    // Post-projection indices (projection emits ascending original order).
+    let mut sorted_wanted = wanted.clone();
+    sorted_wanted.sort_unstable();
+    sorted_wanted.dedup();
+    let proj_of = |orig: usize| -> usize {
+        sorted_wanted
+            .iter()
+            .position(|&p| p == orig)
+            .expect("index must be in projection")
+    };
+    let proj_target_indices: Vec<usize> = target_arrow_idx.iter().map(|&i| proj_of(i)).collect();
+    let proj_feature_indices: Vec<usize> =
+        (0..n_features).map(|i| proj_of(f0_arrow_idx + i)).collect();
+
+    // Column extractor shared by targets and features: any null or
+    // non-finite value is a hard error (accumulation contract).
+    let col_to_f64 = |batch: &RecordBatch,
+                      pi: usize,
+                      colname: &str,
+                      scale: f64,
+                      out: &mut Vec<f64>|
+     -> Result<(), String> {
+        let col = batch.column(pi);
+        if col.null_count() > 0 {
+            return Err(format!(
+                "{path:?}: column {colname:?} has {} NULLs — accumulation passes reject nulls",
+                col.null_count()
+            ));
+        }
+        let n_rows = batch.num_rows();
+        out.clear();
+        out.reserve(n_rows);
+        match col.data_type() {
+            DataType::Float64 => {
+                let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                out.extend((0..n_rows).map(|i| a.value(i) * scale));
+            }
+            DataType::Float32 => {
+                let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                out.extend((0..n_rows).map(|i| a.value(i) as f64 * scale));
+            }
+            DataType::Int64 => {
+                let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                out.extend((0..n_rows).map(|i| a.value(i) as f64 * scale));
+            }
+            DataType::Int32 => {
+                let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                out.extend((0..n_rows).map(|i| a.value(i) as f64 * scale));
+            }
+            DataType::UInt64 => {
+                let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+                out.extend((0..n_rows).map(|i| a.value(i) as f64 * scale));
+            }
+            DataType::UInt32 => {
+                let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+                out.extend((0..n_rows).map(|i| a.value(i) as f64 * scale));
+            }
+            other => {
+                return Err(format!(
+                    "{path:?}: column {colname:?} has unsupported dtype {other:?} (need Float32/Float64/int)",
+                ));
+            }
+        }
+        if let Some(bad) = out.iter().position(|v| !v.is_finite()) {
+            return Err(format!(
+                "{path:?}: column {colname:?} has non-finite value {} at in-batch row {bad}",
+                out[bad]
+            ));
+        }
+        Ok(())
+    };
+
+    let mut total_rows = 0usize;
+    let mut features_rm: Vec<f64> = Vec::new();
+    let mut targets: Vec<Vec<f64>> = vec![Vec::new(); target_columns.len()];
+    let mut col_buf: Vec<f64> = Vec::new();
+    for batch_res in reader {
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let n_rows = batch.num_rows();
+        if n_rows == 0 {
+            continue;
+        }
+        for (t, &pi) in proj_target_indices.iter().enumerate() {
+            col_to_f64(&batch, pi, target_columns[t], target_scale, &mut targets[t])?;
+        }
+        // Row-major feature buffer: fill column-wise into strided slots.
+        features_rm.clear();
+        features_rm.resize(n_rows * n_features, 0.0);
+        for (fi, &pi) in proj_feature_indices.iter().enumerate() {
+            col_to_f64(&batch, pi, &format!("{prefix}{fi}"), 1.0, &mut col_buf)?;
+            for (r, v) in col_buf.iter().enumerate() {
+                features_rm[r * n_features + fi] = *v;
+            }
+        }
+        on_batch(&features_rm, n_rows, &targets)?;
+        total_rows += n_rows;
+    }
+    if total_rows == 0 {
+        return Err(format!("{path:?}: empty file / no rows"));
+    }
+    Ok(StreamInfo {
+        n_rows: total_rows,
+        n_features,
     })
 }
 

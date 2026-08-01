@@ -16,6 +16,12 @@
 //!
 //! DEFLATE decompression goes through zenflate (the workspace's pure-Rust
 //! DEFLATE owner) — no external zip/npy crates.
+//!
+//! Also home to the matching minimal WRITER ([`write_npz_f64`]) used by
+//! `bake_dial_refit gram` to persist per-corpus Gram moments (E-LIN, task
+//! linear-924). Writes stored (method 0) entries with correct CRC-32
+//! (zenflate's `crc32`), v1.0 `.npy` headers — loadable by `np.load` and by
+//! [`Npz`] alike.
 
 use std::path::Path;
 
@@ -216,6 +222,114 @@ impl Npz {
             )),
         }
     }
+}
+
+/// One `<f8` array to be written into an `.npz`: a name (without the `.npy`
+/// suffix), a shape (`[]` = 0-d scalar, `[n]`, `[r, c]`), and the row-major
+/// data (`shape.product().max(1)` elements).
+pub struct NpzF64Entry<'a> {
+    pub name: &'a str,
+    pub shape: &'a [usize],
+    pub data: &'a [f64],
+}
+
+/// Serialize one v1.0 `.npy` blob (`<f8`, C-order) — same layout numpy
+/// writes: header dict padded (incl. the 10-byte preamble) to a multiple of
+/// 64, terminated by `\n`.
+fn npy_f64_bytes(shape: &[usize], data: &[f64]) -> Result<Vec<u8>, String> {
+    let n_elems: usize = shape.iter().product::<usize>().max(1);
+    if data.len() != n_elems {
+        return Err(format!(
+            "npy write: shape {shape:?} needs {n_elems} elements, got {}",
+            data.len()
+        ));
+    }
+    let shape_txt = match shape.len() {
+        0 => "()".to_string(),
+        1 => format!("({},)", shape[0]),
+        2 => format!("({}, {})", shape[0], shape[1]),
+        n => return Err(format!("npy write: rank-{n} arrays unsupported")),
+    };
+    let dict = format!("{{'descr': '<f8', 'fortran_order': False, 'shape': {shape_txt}, }}");
+    let unpadded = 10 + dict.len() + 1;
+    let pad = (64 - unpadded % 64) % 64;
+    let header = format!("{dict}{}\n", " ".repeat(pad));
+    if header.len() > u16::MAX as usize {
+        return Err("npy write: header too large for v1.0".into());
+    }
+    let mut out = Vec::with_capacity(10 + header.len() + n_elems * 8);
+    out.extend_from_slice(b"\x93NUMPY\x01\x00");
+    out.extend_from_slice(&(header.len() as u16).to_le_bytes());
+    out.extend_from_slice(header.as_bytes());
+    for v in data {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    Ok(out)
+}
+
+/// Write an `.npz` (zip of stored `.npy` entries, correct CRC-32 via
+/// zenflate) readable by both `np.load` and [`Npz::open`]. Entries are
+/// written in the order given; no zip64 (errors if any entry or the archive
+/// exceeds u32 offsets — Gram artifacts are a few MB).
+pub fn write_npz_f64(path: &Path, entries: &[NpzF64Entry<'_>]) -> Result<(), String> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut central: Vec<u8> = Vec::new();
+    for e in entries {
+        let payload = npy_f64_bytes(e.shape, e.data)?;
+        if payload.len() >= u32::MAX as usize {
+            return Err(format!("npz write: entry {:?} exceeds u32 size", e.name));
+        }
+        let crc = zenflate::crc32(0, &payload);
+        let name = format!("{}.npy", e.name);
+        if name.len() > u16::MAX as usize {
+            return Err(format!("npz write: entry name too long: {:?}", e.name));
+        }
+        let local_offset = out.len();
+        if local_offset >= u32::MAX as usize {
+            return Err("npz write: archive exceeds u32 offsets".into());
+        }
+        // local header (version-needed 20, no flags, method 0 = stored)
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        out.extend_from_slice(&[20, 0, 0, 0]);
+        out.extend_from_slice(&0u16.to_le_bytes()); // method 0
+        out.extend_from_slice(&[0; 4]); // dos time+date
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); // csize
+        out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); // usize
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // extra len
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&payload);
+        // central-directory record
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        central.extend_from_slice(&[20, 0, 20, 0, 0, 0]); // made-by, need, flags
+        central.extend_from_slice(&0u16.to_le_bytes()); // method 0
+        central.extend_from_slice(&[0; 4]); // dos time+date
+        central.extend_from_slice(&crc.to_le_bytes());
+        central.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0; 12]); // extra, comment, disk, int+ext attrs
+        central.extend_from_slice(&(local_offset as u32).to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let cd_offset = out.len();
+    if cd_offset >= u32::MAX as usize || central.len() >= u32::MAX as usize {
+        return Err("npz write: central directory exceeds u32".into());
+    }
+    let n = entries.len();
+    if n > u16::MAX as usize {
+        return Err("npz write: too many entries".into());
+    }
+    out.extend_from_slice(&central);
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    out.extend_from_slice(&[0; 4]); // disk numbers
+    out.extend_from_slice(&(n as u16).to_le_bytes());
+    out.extend_from_slice(&(n as u16).to_le_bytes());
+    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(cd_offset as u32).to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // comment len
+    std::fs::write(path, &out).map_err(|e| format!("write {path:?}: {e}"))
 }
 
 /// Extract the value of a single-quoted `'key': 'value'` pair from an npy
@@ -469,6 +583,65 @@ mod tests {
         let zip = zip_bytes(&[("x.npy", &npy, false)]);
         let npz = Npz::from_bytes(zip).expect("open");
         assert_eq!(npz.get("x").unwrap().scalar_f64().unwrap(), 1.25);
+    }
+
+    /// Writer → reader round trip: shapes and f64 bit patterns survive, and
+    /// the archive parses via the same strict reader the fit chain uses.
+    #[test]
+    fn writer_round_trips_through_reader() {
+        let mat: Vec<f64> = vec![1.5, -2.25, 3.0, 0.125, -0.0, 7410.0];
+        let vec1: Vec<f64> = vec![1e-300, -1.0 / 3.0, 65504.0];
+        let scalar = [42.5f64];
+        let dir = std::path::PathBuf::from(
+            std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into()),
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("npz_writer_roundtrip_test.npz");
+        write_npz_f64(
+            &path,
+            &[
+                NpzF64Entry {
+                    name: "raw__S",
+                    shape: &[2, 3],
+                    data: &mat,
+                },
+                NpzF64Entry {
+                    name: "raw__s",
+                    shape: &[3],
+                    data: &vec1,
+                },
+                NpzF64Entry {
+                    name: "raw__n",
+                    shape: &[],
+                    data: &scalar,
+                },
+            ],
+        )
+        .expect("write");
+        let npz = Npz::open(&path).expect("reopen");
+        assert_eq!(npz.keys(), vec!["raw__S", "raw__s", "raw__n"]);
+        let a = npz.get("raw__S").expect("S");
+        assert_eq!(a.shape, vec![2, 3]);
+        for (x, y) in a.f64s().unwrap().iter().zip(&mat) {
+            assert_eq!(x.to_bits(), y.to_bits());
+        }
+        let b = npz.get("raw__s").expect("s");
+        assert_eq!(b.shape, vec![3]);
+        for (x, y) in b.f64s().unwrap().iter().zip(&vec1) {
+            assert_eq!(x.to_bits(), y.to_bits());
+        }
+        assert_eq!(npz.get("raw__n").unwrap().scalar_f64().unwrap(), 42.5);
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// The writer's shape/data mismatch and rank guards fail loudly.
+    #[test]
+    fn writer_rejects_bad_shapes() {
+        let d = [1.0f64, 2.0];
+        assert!(npy_f64_bytes(&[3], &d).is_err(), "wrong element count");
+        assert!(npy_f64_bytes(&[1, 1, 2], &d).is_err(), "rank 3");
+        assert!(npy_f64_bytes(&[2], &d).is_ok());
+        assert!(npy_f64_bytes(&[], &d[..1]).is_ok());
     }
 
     #[test]

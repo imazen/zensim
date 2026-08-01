@@ -60,7 +60,15 @@
 //!   `spline_payload`, `SPLINE_KEY` — is this bin's (a second bin would
 //!   duplicate `emit_linear`, violating the one-owner rule). Fit math lives
 //!   in [`zensim_validate::gram_lasso`], npz reading in
-//!   [`zensim_validate::npz`].
+//!   [`zensim_validate::npz`]. Accepts MULTIPLE `--gram`+`--weight` pairs
+//!   (MixGram multi-group accumulation) and a `--anchor-parquet`
+//!   alternative to the frozen npz anchor (E-LIN linear-924 campaign).
+//! * `gram` — builds a per-corpus raw-moment Gram npz (`S`, `s`, `q_<t>`,
+//!   `Y1_<t>`, `n`) from a feature parquet via
+//!   `parquet_loader::stream_parquet_rows` (memory-capped, f64,
+//!   deterministic file order) — the artifact `fit-lasso` consumes. One
+//!   corpus per invocation; arms combine grams with `--weight`s.
+//!   Pre-registration: `benchmarks/linear924_phase1_2026-08-01.md`.
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -131,6 +139,12 @@ enum Cmd {
     /// `linear_projections_2026-07-03.py` `fit` plus `finalize` for one
     /// gram/lambda, bit-exactly).
     FitLasso(FitLassoArgs),
+    /// Build a per-corpus raw-moment feature Gram (`S = Σxxᵀ`, `s = Σx`,
+    /// `q_t = Σx·y_t`, `Y1_t = Σy_t`, `n`) from a feature parquet, streamed
+    /// through `parquet_loader::stream_parquet_rows` (memory-capped, f64,
+    /// deterministic row order) into the `.npz` layout `fit-lasso` consumes.
+    /// E-LIN linear-924 campaign (`benchmarks/linear924_phase1_2026-08-01.md`).
+    Gram(GramArgs),
 }
 
 // --------------------------------------------------------------------------
@@ -1487,21 +1501,25 @@ fn cmd_strip(a: &StripArgs) -> Result<(), String> {
 struct FitLassoArgs {
     /// Frozen per-group Gram .npz (keys `<space>__S`, `<space>__s`,
     /// `<space>__n`, `<space>__q_<target>`, `<space>__Y1_<target>` — the
-    /// exact artifact `cmd_gram` wrote). READ-ONLY; bit-exactness requires
-    /// consuming this artifact, never re-assembling the Gram from parquets
-    /// (BLAS accumulation order differs).
-    #[arg(long)]
-    gram: PathBuf,
+    /// exact artifact the Python `cmd_gram` / the `gram` subcommand wrote).
+    /// READ-ONLY; bit-exactness vs a Python fit requires consuming the same
+    /// frozen artifact, never re-assembling its Gram from parquets (BLAS
+    /// accumulation order differs). REPEATABLE: multiple grams accumulate
+    /// `S += w·S_z` in argv order (MixGram multi-group semantics); pair each
+    /// with a `--weight`.
+    #[arg(long, required = true)]
+    gram: Vec<PathBuf>,
     /// Feature-space prefix inside the gram / anchor npz.
     #[arg(long, default_value = "shaped")]
     space: String,
     /// Target column name (selects `__q_<target>` / `__Y1_<target>`).
     #[arg(long, default_value = "human_score")]
     target: String,
-    /// Mix weight for the group (1.0 = exact pass-through, the shipped-BHdr
-    /// single-group case).
-    #[arg(long, default_value_t = 1.0)]
-    weight: f64,
+    /// Mix weight per `--gram`, in the same order (1.0 = exact
+    /// pass-through, the shipped-BHdr single-group case). Omit entirely for
+    /// all-1.0; otherwise give exactly one per gram.
+    #[arg(long)]
+    weight: Vec<f64>,
     /// L1 penalty on the mean-loss scale (Python `lasso{lam}`).
     #[arg(long)]
     lam: f64,
@@ -1515,9 +1533,32 @@ struct FitLassoArgs {
     #[arg(long, default_value_t = 0.0)]
     tau: f64,
     /// Anchor .npz (`raw`/`shaped` f32 matrices + `y`) — the dial spline is
-    /// fit on the PACKED forward over these rows.
+    /// fit on the PACKED forward over these rows. Mutually exclusive with
+    /// `--anchor-parquet`.
     #[arg(long)]
-    anchor: PathBuf,
+    anchor: Option<PathBuf>,
+    /// Parquet anchor alternative (REPEATABLE): rows are loaded through
+    /// `parquet_loader::load_parquet` (THE loader owner), stride-sampled
+    /// (`--anchor-stride`, paired per parquet, default 1), concatenated in
+    /// argv order; `y` = `--anchor-target` × `--anchor-scale`, optionally
+    /// clamped to ≥ `--anchor-clip-min`. Features are f32-rounded first so
+    /// the packed forward matches the npz-anchor numeric path (and the f32
+    /// runtime).
+    #[arg(long)]
+    anchor_parquet: Vec<PathBuf>,
+    /// Target column for `--anchor-parquet` rows.
+    #[arg(long)]
+    anchor_target: Option<String>,
+    /// Scale applied to the anchor target (e.g. 100 for [0,1]-scale legs).
+    #[arg(long, default_value_t = 1.0)]
+    anchor_scale: f64,
+    /// Row stride per `--anchor-parquet`, same order (rows 0, s, 2s, …).
+    /// Omit entirely for all-1.
+    #[arg(long)]
+    anchor_stride: Vec<usize>,
+    /// Clamp anchor targets to at least this value (post-scale).
+    #[arg(long)]
+    anchor_clip_min: Option<f64>,
     /// Transform screen TSV (`feat_idx`/`best_transform`/`params_csv`)
     /// providing the `zentrain.feature_transform*` metadata TEXT. Required
     /// for `--space shaped`; the params are re-emitted in CPython float-repr
@@ -1594,45 +1635,91 @@ fn load_transform_screen(
 
 fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
     use zensim_validate::gram_lasso::{
-        f16_bits_to_f64, f64_to_f16_bits, lasso_cd, py_repr_f64, standardize_gram,
+        GramGroup, f16_bits_to_f64, f64_to_f16_bits, lasso_cd, py_repr_f64, standardize_gram_multi,
     };
     use zensim_validate::npz::Npz;
 
-    // 1. frozen Gram moments → standardized system (MixGram.__init__).
-    let gram = Npz::open(&a.gram)?;
-    let key = |suffix: &str| format!("{}__{suffix}", a.space);
-    let s_arr = gram.get(&key("S"))?;
-    let s_vec = gram.get(&key("s"))?;
-    let q_arr = gram.get(&key(&format!("q_{}", a.target)))?;
-    let y1 = gram.get(&key(&format!("Y1_{}", a.target)))?.scalar_f64()?;
-    let n_rows = gram.get(&key("n"))?.scalar_f64()?;
-    let n_feat = *s_vec
-        .shape
-        .first()
-        .ok_or("gram `__s` must be 1-d, got 0-d")?;
-    if s_arr.shape != [n_feat, n_feat] {
+    // 1. frozen Gram moments → standardized system (MixGram.__init__;
+    // multiple grams accumulate `S += w·S_z` in argv order).
+    let weights: Vec<f64> = if a.weight.is_empty() {
+        vec![1.0; a.gram.len()]
+    } else if a.weight.len() == a.gram.len() {
+        a.weight.clone()
+    } else {
         return Err(format!(
-            "gram `__S` shape {:?} != ({n_feat}, {n_feat})",
-            s_arr.shape
+            "--weight count {} != --gram count {} (omit for all-1.0, else one per gram)",
+            a.weight.len(),
+            a.gram.len()
         ));
+    };
+    let key = |suffix: &str| format!("{}__{suffix}", a.space);
+    struct LoadedGram {
+        s_arr: zensim_validate::npz::NpyArray,
+        s_vec: zensim_validate::npz::NpyArray,
+        q_arr: zensim_validate::npz::NpyArray,
+        y1: f64,
+        n_rows: f64,
     }
-    let sg = standardize_gram(
-        n_feat,
-        a.weight,
-        s_arr.f64s()?,
-        s_vec.f64s()?,
-        q_arr.f64s()?,
-        y1,
-        n_rows,
-    )?;
+    let mut loaded: Vec<LoadedGram> = Vec::with_capacity(a.gram.len());
+    let mut n_feat = 0usize;
+    for (gi, gpath) in a.gram.iter().enumerate() {
+        let gram = Npz::open(gpath)?;
+        let s_arr = gram.get(&key("S"))?;
+        let s_vec = gram.get(&key("s"))?;
+        let q_arr = gram.get(&key(&format!("q_{}", a.target)))?;
+        let y1 = gram.get(&key(&format!("Y1_{}", a.target)))?.scalar_f64()?;
+        let n_rows = gram.get(&key("n"))?.scalar_f64()?;
+        let nf = *s_vec
+            .shape
+            .first()
+            .ok_or("gram `__s` must be 1-d, got 0-d")?;
+        if s_arr.shape != [nf, nf] {
+            return Err(format!(
+                "gram `__S` shape {:?} != ({nf}, {nf}) in {gpath:?}",
+                s_arr.shape
+            ));
+        }
+        if gi == 0 {
+            n_feat = nf;
+        } else if nf != n_feat {
+            return Err(format!(
+                "gram width mismatch: {gpath:?} has n_feat {nf}, first gram has {n_feat}"
+            ));
+        }
+        loaded.push(LoadedGram {
+            s_arr,
+            s_vec,
+            q_arr,
+            y1,
+            n_rows,
+        });
+    }
+    let mut groups: Vec<GramGroup<'_>> = Vec::with_capacity(loaded.len());
+    for (g, w) in loaded.iter().zip(&weights) {
+        groups.push(GramGroup {
+            weight: *w,
+            s_mat: g.s_arr.f64s()?,
+            s_vec: g.s_vec.f64s()?,
+            q: g.q_arr.f64s()?,
+            y1: g.y1,
+            n_rows: g.n_rows,
+        });
+    }
+    let sg = standardize_gram_multi(n_feat, &groups)?;
 
     // 2. lasso coordinate descent (MixGram.lasso).
     let w = lasso_cd(&sg, a.lam, a.n_sweeps, a.tol);
     let bias = sg.ybar;
     let n_active_pre = w.iter().filter(|v| v.abs() > 1e-7).count();
     eprintln!(
-        "lasso(lam={}) on {:?} [{} space, target {}]: n={:.0} act={n_active_pre} bias={bias:.6}",
-        a.lam, a.gram, a.space, a.target, sg.w_total
+        "lasso(lam={}) on {} gram(s) {:?} w={:?} [{} space, target {}]: W={:.0} act={n_active_pre} bias={bias:.6}",
+        a.lam,
+        a.gram.len(),
+        a.gram,
+        weights,
+        a.space,
+        a.target,
+        sg.w_total
     );
 
     // 3. parity gate 1: bit-exact w/bias/mu/sd vs the Python fit npz.
@@ -1697,28 +1784,102 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
         .collect();
     let n_active = wp.iter().filter(|v| v.abs() > 0.0).count();
 
-    // 5. dial spline on the PACKED forward over the anchor.
-    let anchor = Npz::open(&a.anchor)?;
-    let xa = anchor.get(&a.space)?;
-    let (rows, cols) = match xa.shape[..] {
-        [r, c] => (r, c),
-        _ => {
-            return Err(format!(
-                "anchor {:?} entry {:?} must be 2-d, got {:?}",
-                a.anchor, a.space, xa.shape
-            ));
+    // 5. dial spline on the PACKED forward over the anchor (npz matrix, or
+    // parquet rows through the canonical loader).
+    let (xaf, ya, rows): (Vec<f32>, Vec<f64>, usize) = match (&a.anchor, a.anchor_parquet.len()) {
+        (Some(_), n) if n > 0 => {
+            return Err("--anchor and --anchor-parquet are mutually exclusive".into());
+        }
+        (Some(anchor_path), _) => {
+            let anchor = Npz::open(anchor_path)?;
+            let xa = anchor.get(&a.space)?;
+            let (rows, cols) = match xa.shape[..] {
+                [r, c] => (r, c),
+                _ => {
+                    return Err(format!(
+                        "anchor {:?} entry {:?} must be 2-d, got {:?}",
+                        anchor_path, a.space, xa.shape
+                    ));
+                }
+            };
+            if cols != n_feat {
+                return Err(format!(
+                    "anchor width {cols} != gram n_feat {n_feat} — wrong anchor for this gram"
+                ));
+            }
+            let xaf = xa.f32s()?.to_vec();
+            let ya = anchor.get("y")?.f64s()?.to_vec();
+            if ya.len() != rows {
+                return Err(format!("anchor y len {} != rows {rows}", ya.len()));
+            }
+            (xaf, ya, rows)
+        }
+        (None, 0) => {
+            return Err("one of --anchor / --anchor-parquet is required".into());
+        }
+        (None, np) => {
+            let target = a.anchor_target.as_ref().ok_or(
+                "--anchor-target is required with --anchor-parquet (the dial target column)",
+            )?;
+            let strides: Vec<usize> = if a.anchor_stride.is_empty() {
+                vec![1; np]
+            } else if a.anchor_stride.len() == np {
+                a.anchor_stride.clone()
+            } else {
+                return Err(format!(
+                    "--anchor-stride count {} != --anchor-parquet count {np}",
+                    a.anchor_stride.len()
+                ));
+            };
+            if strides.contains(&0) {
+                return Err("--anchor-stride must be >= 1".into());
+            }
+            let mut xaf: Vec<f32> = Vec::new();
+            let mut ya: Vec<f64> = Vec::new();
+            for (path, &stride) in a.anchor_parquet.iter().zip(&strides) {
+                let g = zensim_validate::parquet_loader::load_parquet(
+                    path,
+                    "anchor",
+                    target,
+                    a.anchor_scale,
+                )?;
+                if g.n_features != n_feat {
+                    return Err(format!(
+                        "anchor parquet {path:?} width {} != gram n_feat {n_feat}",
+                        g.n_features
+                    ));
+                }
+                let mut taken = 0usize;
+                let mut ri = 0usize;
+                while ri < g.feature_rows.len() {
+                    // f32-round the features so the packed forward matches
+                    // the npz-anchor numeric path (and the f32 runtime).
+                    xaf.extend(g.feature_rows[ri].iter().map(|v| *v as f32));
+                    let mut y = g.human_scores[ri];
+                    if let Some(clip) = a.anchor_clip_min
+                        && y < clip
+                    {
+                        y = clip;
+                    }
+                    ya.push(y);
+                    taken += 1;
+                    ri += stride;
+                }
+                eprintln!(
+                    "  anchor: {taken} rows (stride {stride}) from {path:?} [target {target} x{}]",
+                    a.anchor_scale
+                );
+            }
+            let rows = ya.len();
+            if rows < 50 {
+                return Err(format!(
+                    "anchor has only {rows} rows — too few to fit an 18-knot dial spline"
+                ));
+            }
+            (xaf, ya, rows)
         }
     };
-    if cols != n_feat {
-        return Err(format!(
-            "anchor width {cols} != gram n_feat {n_feat} — wrong anchor for this gram"
-        ));
-    }
-    let xaf = xa.f32s()?;
-    let ya = anchor.get("y")?.f64s()?.to_vec();
-    if ya.len() != rows {
-        return Err(format!("anchor y len {} != rows {rows}", ya.len()));
-    }
+    let xaf: &[f32] = &xaf;
     let mut preds = vec![0.0f64; rows];
     for (r, pred) in preds.iter_mut().enumerate() {
         let row = &xaf[r * n_feat..(r + 1) * n_feat];
@@ -1800,6 +1961,201 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
 }
 
 // --------------------------------------------------------------------------
+// subcommand: gram  (per-corpus raw-moment Gram builder for fit-lasso;
+// E-LIN linear-924 — benchmarks/linear924_phase1_2026-08-01.md)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct GramArgs {
+    /// Feature parquet (consecutive `f<i>` / `feat_<i>` columns + the
+    /// target column(s)).
+    #[arg(long)]
+    parquet: PathBuf,
+    /// Target column(s); each gets `__q_<target>` + `__Y1_<target>` entries.
+    #[arg(long = "target", required = true)]
+    targets: Vec<String>,
+    /// Scale applied to every target (e.g. 100 for [0,1]-scale legs).
+    #[arg(long, default_value_t = 1.0)]
+    target_scale: f64,
+    /// Clamp targets to at least this value (POST-scale). Registered E-LIN
+    /// policy: -100 (MSE magnitude protection for catastrophic tails).
+    #[arg(long)]
+    target_clip_min: Option<f64>,
+    /// Feature-space prefix for the npz keys (raw features ⇒ "raw").
+    #[arg(long, default_value = "raw")]
+    space: String,
+    /// Fail unless the parquet's feature width is exactly this (regime
+    /// purity guard — 924 for the folded+append campaign).
+    #[arg(long)]
+    expect_n_feat: Option<usize>,
+    /// Output `.npz` path.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+/// Accumulate `S = Σxxᵀ` (upper triangle + mirror), `s = Σx`,
+/// `q_t = Σx·y_t`, `Y1_t = Σy_t`, `n` over every row, in file order,
+/// single-threaded f64 — the canonical deterministic accumulation for
+/// E-LIN grams. The upper-triangle skip of `x_i == 0` rows is bit-exact
+/// vs the naive triple loop (adding `±0.0·x_j` never changes a finite
+/// accumulator that starts at +0.0), verified by
+/// `tests/gram_stream_equivalence.rs`.
+fn cmd_gram(a: &GramArgs) -> Result<(), String> {
+    use zensim_validate::npz::{NpzF64Entry, write_npz_f64};
+    use zensim_validate::parquet_loader::stream_parquet_rows;
+
+    let sha = zensim_validate::train_manifest::sha256_file(&a.parquet)
+        .map_err(|e| format!("sha256 {:?}: {e:?}", a.parquet))?;
+    eprintln!("gram: input {:?}\n  sha256 {sha}", a.parquet);
+
+    let target_refs: Vec<&str> = a.targets.iter().map(|s| s.as_str()).collect();
+    let mut n_feat = 0usize;
+    let mut s_mat: Vec<f64> = Vec::new();
+    let mut s_vec: Vec<f64> = Vec::new();
+    let mut q: Vec<Vec<f64>> = Vec::new();
+    let mut y1: Vec<f64> = Vec::new();
+    let mut clipped: Vec<usize> = vec![0; a.targets.len()];
+    let mut ymin = vec![f64::INFINITY; a.targets.len()];
+    let mut ymax = vec![f64::NEG_INFINITY; a.targets.len()];
+    let mut ysum = vec![0.0f64; a.targets.len()];
+
+    let info = stream_parquet_rows(
+        &a.parquet,
+        &target_refs,
+        a.target_scale,
+        &mut |features, n_rows, targets| {
+            if n_feat == 0 {
+                n_feat = features.len() / n_rows;
+                if let Some(exp) = a.expect_n_feat
+                    && n_feat != exp
+                {
+                    return Err(format!(
+                        "regime guard: {:?} has {n_feat} features, expected {exp}",
+                        a.parquet
+                    ));
+                }
+                s_mat = vec![0.0f64; n_feat * n_feat];
+                s_vec = vec![0.0f64; n_feat];
+                q = vec![vec![0.0f64; n_feat]; a.targets.len()];
+                y1 = vec![0.0f64; a.targets.len()];
+            }
+            for r in 0..n_rows {
+                let x = &features[r * n_feat..(r + 1) * n_feat];
+                // S upper triangle: row-sequential rank-1 update. The inner
+                // loop is contiguous over j for auto-vectorization.
+                for i in 0..n_feat {
+                    let xi = x[i];
+                    if xi != 0.0 {
+                        let base = i * n_feat;
+                        for j in i..n_feat {
+                            s_mat[base + j] += xi * x[j];
+                        }
+                    }
+                }
+                for (acc, v) in s_vec.iter_mut().zip(x) {
+                    *acc += *v;
+                }
+                for (t, tv) in targets.iter().enumerate() {
+                    let mut y = tv[r];
+                    if let Some(clip) = a.target_clip_min
+                        && y < clip
+                    {
+                        y = clip;
+                        clipped[t] += 1;
+                    }
+                    let qt = &mut q[t];
+                    for (acc, v) in qt.iter_mut().zip(x) {
+                        *acc += *v * y;
+                    }
+                    y1[t] += y;
+                    if y < ymin[t] {
+                        ymin[t] = y;
+                    }
+                    if y > ymax[t] {
+                        ymax[t] = y;
+                    }
+                    ysum[t] += y;
+                }
+            }
+            Ok(())
+        },
+    )?;
+
+    // Mirror the upper triangle (bitwise-symmetric by construction, matching
+    // the numpy X'X property the lasso comment documents).
+    for i in 0..n_feat {
+        for j in (i + 1)..n_feat {
+            s_mat[j * n_feat + i] = s_mat[i * n_feat + j];
+        }
+    }
+
+    let n_rows_f = info.n_rows as f64;
+    let mut entries: Vec<NpzF64Entry<'_>> = Vec::new();
+    let key_s = format!("{}__S", a.space);
+    let key_sv = format!("{}__s", a.space);
+    let key_n = format!("{}__n", a.space);
+    let key_q: Vec<String> = a
+        .targets
+        .iter()
+        .map(|t| format!("{}__q_{t}", a.space))
+        .collect();
+    let key_y1: Vec<String> = a
+        .targets
+        .iter()
+        .map(|t| format!("{}__Y1_{t}", a.space))
+        .collect();
+    let shape2 = [n_feat, n_feat];
+    let shape1 = [n_feat];
+    entries.push(NpzF64Entry {
+        name: &key_s,
+        shape: &shape2,
+        data: &s_mat,
+    });
+    entries.push(NpzF64Entry {
+        name: &key_sv,
+        shape: &shape1,
+        data: &s_vec,
+    });
+    entries.push(NpzF64Entry {
+        name: &key_n,
+        shape: &[],
+        data: std::slice::from_ref(&n_rows_f),
+    });
+    for t in 0..a.targets.len() {
+        entries.push(NpzF64Entry {
+            name: &key_q[t],
+            shape: &shape1,
+            data: &q[t],
+        });
+        entries.push(NpzF64Entry {
+            name: &key_y1[t],
+            shape: &[],
+            data: std::slice::from_ref(&y1[t]),
+        });
+    }
+    write_npz_f64(&a.out, &entries)?;
+
+    eprintln!(
+        "gram -> {:?}: {} rows x {n_feat} feats [space {}]",
+        a.out, info.n_rows, a.space
+    );
+    for (t, name) in a.targets.iter().enumerate() {
+        eprintln!(
+            "  target {name} (x{}, clip>={}): min {:.3} max {:.3} mean {:.3} clipped {}",
+            a.target_scale,
+            a.target_clip_min
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "-inf".into()),
+            ymin[t],
+            ymax[t],
+            ysum[t] / n_rows_f,
+            clipped[t]
+        );
+    }
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
 // sha256 (for add-winsor's byte-repro assertion)
 // --------------------------------------------------------------------------
 
@@ -1827,6 +2183,7 @@ fn main() -> ExitCode {
         Cmd::Pack(a) => cmd_pack(a).map(|_| false),
         Cmd::Strip(a) => cmd_strip(a).map(|_| false),
         Cmd::FitLasso(a) => cmd_fit_lasso(a).map(|_| false),
+        Cmd::Gram(a) => cmd_gram(a).map(|_| false),
     };
     match result {
         Ok(gate_failed) => {

@@ -31,16 +31,28 @@ pub struct StandardizedGram {
     pub ybar: f64,
 }
 
+/// One group's RAW moments for [`standardize_gram_multi`]: exactly what a
+/// frozen gram npz stores (`s_mat = S = Σ x xᵀ` row-major, `s_vec = Σ x`,
+/// `q = Σ x·y`, `y1 = Σ y`, `n_rows = n`) plus its mix weight.
+pub struct GramGroup<'a> {
+    pub weight: f64,
+    pub s_mat: &'a [f64],
+    pub s_vec: &'a [f64],
+    pub q: &'a [f64],
+    pub y1: f64,
+    pub n_rows: f64,
+}
+
 /// Mirror of `MixGram.__init__` for a single `(group, weight, target)` —
 /// the shipped-BHdr case (`hdrmix = [("hdr_v3mix", 1.0, "human_score")]`).
 ///
 /// Inputs are the RAW per-group moments exactly as stored in the frozen
-/// gram npz: `s_mat = S = Σ x xᵀ` (row-major), `s_vec = Σ x`,
-/// `q = Σ x·y`, `y1 = Σ y`, `n_rows = n`. With `weight == 1.0` the
-/// weighting (`S += w·S_z`, …) is exact pass-through, so the standardized
-/// system is bit-identical to numpy's. Every expression below keeps the
-/// Python's operation ORDER (each `·`/`/`/`−` rounds once, no FMA — Rust
-/// guarantees no contraction).
+/// gram npz. With `weight == 1.0` the weighting (`S += w·S_z`, …) is exact
+/// pass-through, so the standardized system is bit-identical to numpy's.
+/// Delegates to [`standardize_gram_multi`] with one group — the multi
+/// accumulation reduces to exactly the old single-group expressions
+/// (`acc = w·v`, one rounding), so this stays bit-exact vs the Python fit
+/// (guarded by the `--parity-fit` gate and the unit tests below).
 pub fn standardize_gram(
     n_feat: usize,
     weight: f64,
@@ -50,20 +62,63 @@ pub fn standardize_gram(
     y1: f64,
     n_rows: f64,
 ) -> Result<StandardizedGram, String> {
-    if s_mat.len() != n_feat * n_feat || s_vec.len() != n_feat || q.len() != n_feat {
-        return Err(format!(
-            "standardize_gram: shape mismatch (n_feat={n_feat}, S={}, s={}, q={})",
-            s_mat.len(),
-            s_vec.len(),
-            q.len()
-        ));
+    standardize_gram_multi(
+        n_feat,
+        &[GramGroup {
+            weight,
+            s_mat,
+            s_vec,
+            q,
+            y1,
+            n_rows,
+        }],
+    )
+}
+
+/// Multi-group `MixGram.__init__`: accumulate `S += w·S_z ; s += w·s_z ;
+/// q += w·q_z ; Y1 += w·Y1_z ; W += w·n` over the groups IN ORDER (each
+/// `·` and `+` rounds once, matching numpy's `acc += w * arr` loop), then
+/// standardize the combined system. Every expression keeps the Python's
+/// operation ORDER (no FMA — Rust guarantees no contraction).
+pub fn standardize_gram_multi(
+    n_feat: usize,
+    groups: &[GramGroup<'_>],
+) -> Result<StandardizedGram, String> {
+    if groups.is_empty() {
+        return Err("standardize_gram_multi: no groups".into());
     }
-    // S += w * S_z ; s += w * s_z ; q += w * q_z ; Y1 += w * Y1_z ; W += w * n
-    let s_mat: Vec<f64> = s_mat.iter().map(|v| weight * v).collect();
-    let s_vec: Vec<f64> = s_vec.iter().map(|v| weight * v).collect();
-    let q: Vec<f64> = q.iter().map(|v| weight * v).collect();
-    let y1 = weight * y1;
-    let w_total = weight * n_rows;
+    for (gi, g) in groups.iter().enumerate() {
+        if g.s_mat.len() != n_feat * n_feat || g.s_vec.len() != n_feat || g.q.len() != n_feat {
+            return Err(format!(
+                "standardize_gram_multi: group {gi} shape mismatch (n_feat={n_feat}, S={}, s={}, q={})",
+                g.s_mat.len(),
+                g.s_vec.len(),
+                g.q.len()
+            ));
+        }
+    }
+    // First group: acc = w·v (single rounding — identical to the old
+    // single-group path). Subsequent groups: acc += w·v (mul then add,
+    // two roundings, matching `S += w * S_z`).
+    let g0 = &groups[0];
+    let mut s_mat: Vec<f64> = g0.s_mat.iter().map(|v| g0.weight * v).collect();
+    let mut s_vec: Vec<f64> = g0.s_vec.iter().map(|v| g0.weight * v).collect();
+    let mut q: Vec<f64> = g0.q.iter().map(|v| g0.weight * v).collect();
+    let mut y1 = g0.weight * g0.y1;
+    let mut w_total = g0.weight * g0.n_rows;
+    for g in &groups[1..] {
+        for (acc, v) in s_mat.iter_mut().zip(g.s_mat) {
+            *acc += g.weight * v;
+        }
+        for (acc, v) in s_vec.iter_mut().zip(g.s_vec) {
+            *acc += g.weight * v;
+        }
+        for (acc, v) in q.iter_mut().zip(g.q) {
+            *acc += g.weight * v;
+        }
+        y1 += g.weight * g.y1;
+        w_total += g.weight * g.n_rows;
+    }
 
     // mu = s / W
     let mu: Vec<f64> = s_vec.iter().map(|v| v / w_total).collect();
@@ -501,6 +556,95 @@ mod tests {
                 "normal-eq residual row {i}: {gw} vs {}",
                 sg.c[i]
             );
+        }
+    }
+
+    /// Multi-group accumulation == the standardized system of the pooled
+    /// weighted data. Two groups with weights (1.0, 0.5): the combined
+    /// moments must equal moments computed over the concatenation with the
+    /// second group's rows carrying weight 0.5 — verified analytically via
+    /// the closed forms (mu = Σwx/Σwn etc.), and the single-group path must
+    /// be BIT-identical to the delegating `standardize_gram`.
+    #[test]
+    fn multi_group_matches_pooled_weighted_moments() {
+        let xa = [[1.0, 2.0, -0.5], [0.5, -1.0, 2.0], [2.0, 0.0, 1.0]];
+        let ya = [1.0, 2.0, 3.0];
+        let xb = [[3.0, 1.0, 0.0], [-2.0, 0.5, 1.5]];
+        let yb = [4.0, -1.0];
+        let (sa, va, qa, y1a, na) = moments(&xa, &ya);
+        let mut sb = [0.0f64; 9];
+        let mut vb = [0.0f64; 3];
+        let mut qb = [0.0f64; 3];
+        let mut y1b = 0.0f64;
+        for (row, &yv) in xb.iter().zip(&yb) {
+            for i in 0..3 {
+                for j in 0..3 {
+                    sb[i * 3 + j] += row[i] * row[j];
+                }
+                vb[i] += row[i];
+                qb[i] += row[i] * yv;
+            }
+            y1b += yv;
+        }
+        let wa = 1.0;
+        let wb = 0.5;
+        let sg = standardize_gram_multi(
+            3,
+            &[
+                GramGroup {
+                    weight: wa,
+                    s_mat: &sa,
+                    s_vec: &va,
+                    q: &qa,
+                    y1: y1a,
+                    n_rows: na,
+                },
+                GramGroup {
+                    weight: wb,
+                    s_mat: &sb,
+                    s_vec: &vb,
+                    q: &qb,
+                    y1: y1b,
+                    n_rows: xb.len() as f64,
+                },
+            ],
+        )
+        .expect("multi");
+        // Closed-form pooled checks (analytic, tolerance-based).
+        let w_total = wa * na + wb * xb.len() as f64;
+        assert!((sg.w_total - w_total).abs() < 1e-12);
+        for i in 0..3 {
+            let sum_i: f64 = xa.iter().map(|r| r[i]).sum::<f64>() * wa
+                + xb.iter().map(|r| r[i]).sum::<f64>() * wb;
+            assert!((sg.mu[i] - sum_i / w_total).abs() < 1e-12, "mu[{i}]");
+        }
+        let ybar = (wa * y1a + wb * y1b) / w_total;
+        assert!((sg.ybar - ybar).abs() < 1e-12);
+
+        // Single group through multi == the delegating standardize_gram,
+        // bit for bit.
+        let a = standardize_gram(3, 0.75, &sa, &va, &qa, y1a, na).expect("single");
+        let b = standardize_gram_multi(
+            3,
+            &[GramGroup {
+                weight: 0.75,
+                s_mat: &sa,
+                s_vec: &va,
+                q: &qa,
+                y1: y1a,
+                n_rows: na,
+            }],
+        )
+        .expect("multi single");
+        assert_eq!(a.ybar.to_bits(), b.ybar.to_bits());
+        assert_eq!(a.w_total.to_bits(), b.w_total.to_bits());
+        for k in 0..9 {
+            assert_eq!(a.g[k].to_bits(), b.g[k].to_bits(), "g[{k}]");
+        }
+        for k in 0..3 {
+            assert_eq!(a.c[k].to_bits(), b.c[k].to_bits(), "c[{k}]");
+            assert_eq!(a.mu[k].to_bits(), b.mu[k].to_bits(), "mu[{k}]");
+            assert_eq!(a.sd[k].to_bits(), b.sd[k].to_bits(), "sd[{k}]");
         }
     }
 
