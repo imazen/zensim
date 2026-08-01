@@ -287,7 +287,9 @@ pub use color::{bench_pu_xyb_dispatch, bench_pu_xyb_scalar};
 /// attribution with an A/B instead of a profiler.
 #[doc(hidden)]
 pub mod __bench_stages {
-    pub use crate::blur::{box_blur_1pass_into, downscale_2x_into, fused_blur_h_ssim};
+    pub use crate::blur::{
+        box_blur_1pass_into, box_spread_merge_f32, downscale_2x_into, fused_blur_h_ssim,
+    };
     pub use crate::color::srgb_to_positive_xyb_planar_into;
     pub use crate::simd_ops::{abs_diff_sum, mul_into, sq_diff_sum, sq_sum_into};
 }

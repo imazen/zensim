@@ -146,11 +146,25 @@ impl AttributionResult {
     ///
     /// Panics if `density.len() != width * height`.
     pub fn from_density(density: Vec<f32>, width: usize, height: usize) -> Self {
+        Self::from_density_with_sat_scratch(density, width, height, Vec::new())
+    }
+
+    /// Internal `from_density` variant reusing a caller-provided SAT
+    /// buffer's capacity (the stale single-pass session's recycle path —
+    /// avoids a fresh multi-MB allocation + page-fault storm per codec
+    /// iteration). An empty `sat_scratch` reproduces
+    /// [`from_density`](Self::from_density) exactly.
+    fn from_density_with_sat_scratch(
+        density: Vec<f32>,
+        width: usize,
+        height: usize,
+        mut sat_scratch: Vec<f64>,
+    ) -> Self {
         assert_eq!(density.len(), width * height, "density len != width*height");
-        let sat = build_sat(|i| density[i] as f64, width, height);
+        build_sat_into(|i| density[i] as f64, width, height, &mut sat_scratch);
         Self {
             density,
-            sat,
+            sat: sat_scratch,
             width,
             height,
         }
@@ -229,8 +243,27 @@ impl AttributionResult {
 
 /// Standard SAT recurrence from an index-addressed f64 source.
 fn build_sat(get: impl Fn(usize) -> f64, width: usize, height: usize) -> Vec<f64> {
+    let mut sat = Vec::new();
+    build_sat_into(get, width, height, &mut sat);
+    sat
+}
+
+/// [`build_sat`] into a reusable buffer: only the guard row and guard
+/// column are re-zeroed — every other element is written by the
+/// recurrence before any read, so recycled contents are never observable.
+/// Bitwise-identical to a fresh build.
+fn build_sat_into(get: impl Fn(usize) -> f64, width: usize, height: usize, sat: &mut Vec<f64>) {
     let w1 = width + 1;
-    let mut sat = vec![0.0f64; w1 * (height + 1)];
+    let len = w1 * (height + 1);
+    if sat.len() != len {
+        sat.clear();
+        sat.resize(len, 0.0);
+    } else {
+        sat[..w1].fill(0.0);
+        for y in 1..=height {
+            sat[y * w1] = 0.0;
+        }
+    }
     for y in 0..height {
         let row = y * width;
         let sat_prev = y * w1;
@@ -241,7 +274,6 @@ fn build_sat(get: impl Fn(usize) -> f64, width: usize, height: usize) -> Vec<f64
             sat[sat_row + x + 1] = run + sat[sat_prev + x + 1];
         }
     }
-    sat
 }
 
 /// Per-(scale, channel) combine coefficients — everything deferred until the
@@ -1365,6 +1397,7 @@ mod tests {
         let mut id_plane = vec![0.0f32; comp_pw * comp_h];
         let mut win_plane = vec![0.0f32; comp_pw * comp_h];
         let mut spread_tmp: Vec<f32> = Vec::new();
+        let mut spread_out: Vec<f32> = Vec::new();
         let on_scale = |scale: usize,
                         _stats: &crate::metric::ScaleStats,
                         src_planes: [&[f32]; 3],
@@ -1388,16 +1421,16 @@ mod tests {
                     &mut win_plane[..n],
                 );
             }
-            crate::blur::box_spread_sum_preserving_f32(
+            crate::blur::box_spread_merge_f32(
                 &mut win_plane[..n],
+                &mut id_plane[..n],
                 sw,
                 sh,
                 config.blur_radius,
                 &mut spread_tmp,
+                &mut spread_out,
+                config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
             );
-            for (idv, wv) in id_plane[..n].iter_mut().zip(win_plane[..n].iter()) {
-                *idv += *wv;
-            }
             upsample_add_sum_preserving_f32(
                 &id_plane[..n],
                 sw,
@@ -1469,6 +1502,79 @@ mod tests {
             assert_eq!(a.to_bits(), b.to_bits(), "re-primed map != fresh map");
         }
         assert_eq!(sess.s_saved, s2);
+    }
+
+    /// #70: recycling spent results into the session is a pure allocation
+    /// optimization — density AND SAT (guard-row/column re-zero logic in
+    /// `build_sat_into`) must be bitwise-identical to the never-recycled
+    /// arm on every subsequent call.
+    #[test]
+    fn stale_recycled_buffers_produce_identical_maps() {
+        let (w, h) = (150, 170);
+        let (src, dst) = test_pair(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let s = vec![-1.0f64; 156];
+        let rects = [
+            (0usize, 0usize, w, h),
+            (0, 0, 17, 23),
+            (5, 7, 64, 64),
+            (31, 100, 150, 170),
+        ];
+        // Arm A: never recycles.
+        let mut sa = AttributionSession::new();
+        let _ = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sa)
+            .unwrap();
+        let (_, a2) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sa)
+            .unwrap();
+        let (_, a3) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sa)
+            .unwrap();
+        // Arm B: recycles the spent result before every call.
+        let mut sb = AttributionSession::new();
+        let (_, b1) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sb)
+            .unwrap();
+        sb.recycle(b1);
+        let (_, b2) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sb)
+            .unwrap();
+        for (i, (x, y)) in b2.density().iter().zip(a2.density().iter()).enumerate() {
+            assert_eq!(
+                x.to_bits(),
+                y.to_bits(),
+                "px {i}: recycled density != fresh-alloc"
+            );
+        }
+        for &(x0, y0, x1, y1) in &rects {
+            assert_eq!(
+                b2.query_rect(x0, y0, x1, y1).to_bits(),
+                a2.query_rect(x0, y0, x1, y1).to_bits(),
+                "SAT rect ({x0},{y0})..({x1},{y1}) differs after recycle"
+            );
+        }
+        sb.recycle(b2);
+        let (_, b3) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sb)
+            .unwrap();
+        for (i, (x, y)) in b3.density().iter().zip(a3.density().iter()).enumerate() {
+            assert_eq!(
+                x.to_bits(),
+                y.to_bits(),
+                "px {i}: 2nd recycled density != fresh-alloc"
+            );
+        }
+        for &(x0, y0, x1, y1) in &rects {
+            assert_eq!(
+                b3.query_rect(x0, y0, x1, y1).to_bits(),
+                a3.query_rect(x0, y0, x1, y1).to_bits(),
+                "SAT rect ({x0},{y0})..({x1},{y1}) differs after 2nd recycle"
+            );
+        }
     }
 }
 
@@ -1575,21 +1681,20 @@ fn upsample_add_sum_preserving_f32(
         }
         return;
     }
+    // Destination-row-major replicate-add via the diffmap fusion's SIMD
+    // kernel (#70: the former source-major footprint loop revisited each
+    // canvas row `factor` times with scattered block writes — same op
+    // count, far worse locality). Bitwise-identical: each canvas element
+    // still receives exactly one add of the identically-formed product
+    // `src · inv_area`.
     let inv_area = 1.0 / ((factor * factor) as f32);
-    for sy in 0..sh {
-        let y0 = sy * factor;
-        let y1 = (y0 + factor).min(ch);
-        let src_row = sy * sw;
-        for sx in 0..sw {
-            let v = scale_plane[src_row + sx] * inv_area;
-            let x0 = sx * factor;
-            let x1 = (x0 + factor).min(cw);
-            for row in canvas[y0 * cw..].chunks_mut(cw).take(y1.saturating_sub(y0)) {
-                for slot in &mut row[x0..x1] {
-                    *slot += v;
-                }
-            }
-        }
+    let copy_w = (sw * factor).min(cw);
+    let dh = (sh * factor).min(ch);
+    for dy in 0..dh {
+        let sy = dy / factor;
+        let src_row = &scale_plane[sy * sw..(sy + 1) * sw];
+        let dst_row = &mut canvas[dy * cw..dy * cw + copy_w];
+        crate::streaming::upsample_row_powx_add(src_row, dst_row, factor, inv_area);
     }
 }
 
@@ -1689,6 +1794,11 @@ pub struct AttributionSession {
     id_plane: Vec<f32>,
     win_plane: Vec<f32>,
     spread_tmp: Vec<f32>,
+    spread_out: Vec<f32>,
+    /// Recycled result buffers (see [`recycle`](Self::recycle)); empty
+    /// unless the caller opts in.
+    density_scratch: Vec<f32>,
+    sat_scratch: Vec<f64>,
 }
 
 impl AttributionSession {
@@ -1706,6 +1816,18 @@ impl AttributionSession {
         self.s_saved.clear();
         self.width = 0;
         self.height = 0;
+    }
+
+    /// Return a spent [`AttributionResult`] to the session so the next
+    /// stale compare reuses its buffers (density plane + f64 SAT) instead
+    /// of allocating and page-faulting fresh multi-MB ones every
+    /// iteration — the codec-loop shape drops one result per compare.
+    /// Purely an allocation optimization: opting out (never calling this)
+    /// changes nothing but the per-call allocations, and the produced
+    /// maps are bitwise-identical either way.
+    pub fn recycle(&mut self, spent: AttributionResult) {
+        self.density_scratch = spent.density;
+        self.sat_scratch = spent.sat;
     }
 
     fn primed_for(&self, width: usize, height: usize, s: &[f64]) -> bool {
@@ -1793,6 +1915,7 @@ impl crate::metric::Zensim {
         let mut id_plane = vec![0.0f32; comp_pw * comp_h];
         let mut win_plane = vec![0.0f32; comp_pw * comp_h];
         let mut spread_tmp: Vec<f32> = Vec::new();
+        let mut spread_out: Vec<f32> = Vec::new();
 
         let on_scale = |scale: usize,
                         stats: &crate::metric::ScaleStats,
@@ -1855,26 +1978,54 @@ impl crate::metric::Zensim {
             if !banded {
                 run_band(0, &mut id_plane[..n], &mut win_plane[..n]);
             }
-            // Window-class spread (C2b-final allocation), f32 fast path.
-            crate::blur::box_spread_sum_preserving_f32(
-                &mut win_plane[..n],
-                sw,
-                sh,
-                config.blur_radius,
-                &mut spread_tmp,
-            );
-            for (idp, wv) in id_plane[..n].iter_mut().zip(win_plane[..n].iter()) {
-                *idp += *wv;
+            // Window-class spread (C2b-final allocation) fused with the
+            // window→identity merge, f32 fast path (#70 lever 1:
+            // parallel, bitwise-invariant to banding). At scale 0 the
+            // upsample is elementwise, so the spread merges directly into
+            // the canvas — skipping a full id-plane store+reload; this is
+            // value-exact: `(0+a)+b` and `0+(a+b)` round identically
+            // (the first add is exact, signed zeros included).
+            if scale == 0 {
+                upsample_add_sum_preserving_f32(
+                    &id_plane[..n],
+                    sw,
+                    sh,
+                    &mut canvas,
+                    comp_pw,
+                    comp_h,
+                    1,
+                );
+                crate::blur::box_spread_merge_f32(
+                    &mut win_plane[..n],
+                    &mut canvas[..n],
+                    sw,
+                    sh,
+                    config.blur_radius,
+                    &mut spread_tmp,
+                    &mut spread_out,
+                    config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                );
+            } else {
+                crate::blur::box_spread_merge_f32(
+                    &mut win_plane[..n],
+                    &mut id_plane[..n],
+                    sw,
+                    sh,
+                    config.blur_radius,
+                    &mut spread_tmp,
+                    &mut spread_out,
+                    config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                );
+                upsample_add_sum_preserving_f32(
+                    &id_plane[..n],
+                    sw,
+                    sh,
+                    &mut canvas,
+                    comp_pw,
+                    comp_h,
+                    1usize << scale,
+                );
             }
-            upsample_add_sum_preserving_f32(
-                &id_plane[..n],
-                sw,
-                sh,
-                &mut canvas,
-                comp_pw,
-                comp_h,
-                1usize << scale,
-            );
             combine_ms.set(combine_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
         };
 
@@ -2006,6 +2157,7 @@ impl crate::metric::Zensim {
         let mut id_plane = std::mem::take(&mut session.id_plane);
         let mut win_plane = std::mem::take(&mut session.win_plane);
         let mut spread_tmp = std::mem::take(&mut session.spread_tmp);
+        let mut spread_out = std::mem::take(&mut session.spread_out);
         // The previous compare's packs drive THIS pass's in-strip fold;
         // this pass's stats produce the packs for the NEXT call. (On an
         // error return below the session is left unprimed — the next call
@@ -2024,27 +2176,42 @@ impl crate::metric::Zensim {
             let n = sw * sh;
             let n_f = n as f64;
             // Post-scale tail — IDENTICAL code to the fresh path (same
-            // spread, same merge, same upsample ⇒ bitwise-equal maps when
-            // the coefficient packs coincide).
-            crate::blur::box_spread_sum_preserving_f32(
-                &mut winp[..n],
-                sw,
-                sh,
-                config.blur_radius,
-                &mut spread_tmp,
-            );
-            for (idv, wv) in idp[..n].iter_mut().zip(winp[..n].iter()) {
-                *idv += *wv;
+            // fused spread+merge, same scale-0 canvas-target fusion, same
+            // upsample ⇒ bitwise-equal maps when the coefficient packs
+            // coincide).
+            if scale == 0 {
+                upsample_add_sum_preserving_f32(&idp[..n], sw, sh, &mut canvas, comp_pw, comp_h, 1);
+                crate::blur::box_spread_merge_f32(
+                    &mut winp[..n],
+                    &mut canvas[..n],
+                    sw,
+                    sh,
+                    config.blur_radius,
+                    &mut spread_tmp,
+                    &mut spread_out,
+                    config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                );
+            } else {
+                crate::blur::box_spread_merge_f32(
+                    &mut winp[..n],
+                    &mut idp[..n],
+                    sw,
+                    sh,
+                    config.blur_radius,
+                    &mut spread_tmp,
+                    &mut spread_out,
+                    config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                );
+                upsample_add_sum_preserving_f32(
+                    &idp[..n],
+                    sw,
+                    sh,
+                    &mut canvas,
+                    comp_pw,
+                    comp_h,
+                    1usize << scale,
+                );
             }
-            upsample_add_sum_preserving_f32(
-                &idp[..n],
-                sw,
-                sh,
-                &mut canvas,
-                comp_pw,
-                comp_h,
-                1usize << scale,
-            );
             // Derive the NEXT call's packs from THIS compare's pooled
             // scalars + the cached reference-side hf sums.
             let hf = hf_cached.get(scale).copied().unwrap_or([(0.0, 0.0); 3]);
@@ -2081,21 +2248,27 @@ impl crate::metric::Zensim {
 
         let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
         let t_sat0 = std::time::Instant::now();
-        let trimmed: Vec<f32> = if comp_pw == width && comp_h == height {
-            canvas.clone()
+        // Trim into the recycled density buffer (fresh alloc when the
+        // caller never recycles — identical behavior, just re-allocating).
+        let mut trimmed = std::mem::take(&mut session.density_scratch);
+        trimmed.clear();
+        if comp_pw == width && comp_h == height {
+            trimmed.extend_from_slice(&canvas);
         } else {
-            let mut out = Vec::with_capacity(width * height);
+            trimmed.reserve(width * height);
             for y in 0..height.min(comp_h) {
-                out.extend_from_slice(&canvas[y * comp_pw..y * comp_pw + width.min(comp_pw)]);
+                trimmed.extend_from_slice(&canvas[y * comp_pw..y * comp_pw + width.min(comp_pw)]);
             }
-            out
-        };
+        }
+        let sat_scratch = std::mem::take(&mut session.sat_scratch);
         // Return the scratch to the session for the next iteration.
         session.canvas = canvas;
         session.id_plane = id_plane;
         session.win_plane = win_plane;
         session.spread_tmp = spread_tmp;
-        let attr = AttributionResult::from_density(trimmed, width, height);
+        session.spread_out = spread_out;
+        let attr =
+            AttributionResult::from_density_with_sat_scratch(trimmed, width, height, sat_scratch);
         if perf_log {
             eprintln!(
                 "ATTRPERF stale: pipeline {:.1} ms (spread/upsample/derive tail {:.1} ms; in-strip fold inside walk) | trim+SAT {:.1} ms",

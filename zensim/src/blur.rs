@@ -3771,68 +3771,311 @@ pub(crate) fn box_spread_sum_preserving(
     plane.copy_from_slice(&out);
 }
 
-/// f32 twin of [`box_spread_sum_preserving`] for the fused attribution
-/// path (C3a): same clipped-window per-source-normalized convention, f32
-/// storage with f64 row accumulators in the vertical slide. Sum
-/// preservation holds to f32 rounding — the fused path's documented
-/// precision class.
-pub(crate) fn box_spread_sum_preserving_f32(
-    plane: &mut [f32],
+/// Row band height for the parallel phases of [`box_spread_merge_f32`]:
+/// coarse enough that a rayon job is tens of microseconds (per-row jobs
+/// drown in fork-join overhead), fine enough to load-balance.
+#[cfg(feature = "threads")]
+const SPREAD_ROW_BAND: usize = 64;
+
+/// Call-site policy cutoff for [`box_spread_merge_f32`]'s `parallel`
+/// switch: engage rayon only at/above this element count. Measured
+/// crossover 2026-08-01 (28-core WSL2 host, `spread_microbench`, against
+/// the fused serial V+merge pass): 0.18x @341k, 0.45x @1.35M, 0.95x
+/// @5.3M, **1.36x @16.8M** — the fork-join barriers cost ~0.5-1 ms
+/// against low-ms serial work, and the serial path got faster than the
+/// banded one below ~8M elements. Every 576²/1152² compare therefore
+/// takes the serial path; 4K-class compares' scale 0 engages rayon.
+pub(crate) const SPREAD_PARALLEL_MIN_N: usize = 8_388_608;
+
+/// f32 spread-and-merge twin of [`box_spread_sum_preserving`] for the
+/// fused attribution paths (C3a/#70): same clipped-window
+/// per-source-normalized convention, f32 storage, fused with the
+/// window→identity merge — `target[i] += spread(win)[i]` — so the spread
+/// result never round-trips through a full plane store/reload.
+/// `win_plane` is clobbered (used as the H-pass intermediate). Sum
+/// delivered into `target` is preserved to f32 rounding — the fused
+/// path's documented precision class. Merging is value-exact vs the old
+/// two-step (spread in place, then add): an f32 store/load round-trip
+/// between producing the spread value and adding it cannot change bits.
+///
+/// **task #70 lever 1 (parallel spread)**: `parallel` enables a rayon
+/// split whose output is **BITWISE identical** to the serial path for any
+/// thread/band count — every partition owns its accumulation chains:
+///
+/// - Pass 1 (horizontal prefix-window + source-row normalization, fused):
+///   each row's prefix-sum chain and its `1/len_row` scale are row-local,
+///   so row-band parallel with per-band scratch preserves every element's
+///   op order.
+/// - Pass 2 (vertical slide): the running window sum is an independent
+///   per-COLUMN add/sub chain (`acc[x]` only ever combines with values
+///   from column `x`, in fixed row order), so column-band partitioning
+///   replays exactly the serial chain per element. Bands write band-local
+///   column strips into `out_scratch`.
+/// - Pass 3 (merge-gather): `target[row][x] += strip value` — row-band
+///   parallel, one f32 add per element, disjoint target rows.
+///
+/// The serial path runs the same loops with one band each, so
+/// parallel==serial bitwise (gated by
+/// `box_spread_merge_f32_parallel_matches_serial_bitwise`). `tmp` and
+/// `out_scratch` are caller-owned so per-iteration callers (the stale
+/// single-pass session) pay no per-call allocation.
+pub fn box_spread_merge_f32(
+    win_plane: &mut [f32],
+    target: &mut [f32],
     width: usize,
     height: usize,
     r: usize,
     tmp: &mut Vec<f32>,
+    out_scratch: &mut Vec<f32>,
+    parallel: bool,
 ) {
-    if r == 0 || width == 0 || height == 0 {
+    if width == 0 || height == 0 {
         return;
     }
-    tmp.clear();
-    tmp.resize(width + 1, 0.0);
-    for row in plane.chunks_mut(width) {
+    let n = width * height;
+    debug_assert!(win_plane.len() >= n && target.len() >= n);
+    // `parallel` is the mechanism switch only — the WHEN-it-pays policy
+    // (plane-size cutoff) lives at the call sites, because the output is
+    // bitwise-invariant to the branch taken. Measured 2026-08-01 (28-core
+    // WSL2 host): rayon loses below ~4M elements (0.19x @341k, 0.54x
+    // @1.35M) and wins above (1.15x @5.3M, 1.58x @16.8M) — three
+    // sub-millisecond fork-join barriers dominate small planes.
+    #[cfg(not(feature = "threads"))]
+    let parallel = {
+        // Without rayon the banded path (and its scratch) never runs.
+        let _ = (parallel, &mut *out_scratch);
+        false
+    };
+    if r == 0 {
+        // Radius-0 spread is the identity: plain merge.
+        let merge = |dst: &mut [f32], src: &[f32]| {
+            for (d, s) in dst.iter_mut().zip(src) {
+                *d += *s;
+            }
+        };
+        if parallel {
+            #[cfg(feature = "threads")]
+            {
+                use rayon::prelude::*;
+                target[..n]
+                    .par_chunks_mut(SPREAD_ROW_BAND * width)
+                    .zip(win_plane[..n].par_chunks(SPREAD_ROW_BAND * width))
+                    .for_each(|(d, s)| merge(d, s));
+            }
+        } else {
+            merge(&mut target[..n], &win_plane[..n]);
+        }
+        return;
+    }
+
+    // ── Pass 1: horizontal clipped prefix-window + vertical source-row
+    //    normalization, fused per row:
+    //    h(y,j) = (Σ_{i∈[j−r,j+r]∩bounds} x_i/lenH_i) · 1/lenV_y.
+    //    The 3-segment split (left edge / constant-`len` interior / right
+    //    edge) changes no operand or op order — the interior windowed
+    //    subtract is a plain slice zip so LLVM can vectorize it.
+    let h_row = |y: usize, row: &mut [f32], tmp: &mut Vec<f32>| {
+        // `tmp[1..=width]` is fully overwritten before any read and
+        // `tmp[0]` is re-anchored explicitly — no full re-zero per row.
+        if tmp.len() != width + 1 {
+            tmp.clear();
+            tmp.resize(width + 1, 0.0);
+        }
+        tmp[0] = 0.0;
         let mut run = 0.0f32;
-        for (x, v) in row.iter().enumerate() {
-            let len = ((x + r).min(width - 1) - x.saturating_sub(r) + 1) as f32;
-            run += *v / len;
-            tmp[x + 1] = run;
+        if width > 2 * r {
+            for (x, v) in row[..r].iter().enumerate() {
+                run += *v / (x + r + 1) as f32;
+                tmp[x + 1] = run;
+            }
+            let ilen = (2 * r + 1) as f32;
+            for (t, v) in tmp[r + 1..width - r + 1].iter_mut().zip(&row[r..width - r]) {
+                run += *v / ilen;
+                *t = run;
+            }
+            for (x, v) in (width - r..width).zip(&row[width - r..]) {
+                run += *v / (width + r - x) as f32;
+                tmp[x + 1] = run;
+            }
+        } else {
+            for (x, v) in row.iter().enumerate() {
+                let len = ((x + r).min(width - 1) - x.saturating_sub(r) + 1) as f32;
+                run += *v / len;
+                tmp[x + 1] = run;
+            }
         }
-        for (j, out) in row.iter_mut().enumerate() {
-            let lo = j.saturating_sub(r);
-            let hi = (j + r).min(width - 1);
-            *out = tmp[hi + 1] - tmp[lo];
+        let vlen = ((y + r).min(height - 1) - y.saturating_sub(r) + 1) as f32;
+        let vinv = 1.0 / vlen;
+        if width > 2 * r {
+            for (j, out) in row[..r].iter_mut().enumerate() {
+                *out = (tmp[j + r + 1] - tmp[0]) * vinv;
+            }
+            let (mid, lo_side) = (&tmp[2 * r + 1..width + 1], &tmp[..width - 2 * r]);
+            for ((out, hi), lo) in row[r..width - r].iter_mut().zip(mid).zip(lo_side) {
+                *out = (*hi - *lo) * vinv;
+            }
+            let top = tmp[width];
+            for (j, out) in (width - r..width).zip(row[width - r..].iter_mut()) {
+                *out = (top - tmp[j - r]) * vinv;
+            }
+        } else {
+            for (j, out) in row.iter_mut().enumerate() {
+                let lo = j.saturating_sub(r);
+                let hi = (j + r).min(width - 1);
+                *out = (tmp[hi + 1] - tmp[lo]) * vinv;
+            }
+        }
+    };
+    if parallel {
+        #[cfg(feature = "threads")]
+        {
+            use rayon::prelude::*;
+            win_plane[..n]
+                .par_chunks_mut(SPREAD_ROW_BAND * width)
+                .enumerate()
+                .for_each_init(Vec::new, |tmp, (band, rows)| {
+                    let y0 = band * SPREAD_ROW_BAND;
+                    for (dy, row) in rows.chunks_mut(width).enumerate() {
+                        h_row(y0 + dy, row, tmp);
+                    }
+                });
+        }
+    } else {
+        for (y, row) in win_plane[..n].chunks_mut(width).enumerate() {
+            h_row(y, row, tmp);
         }
     }
-    for y in 0..height {
-        let len = ((y + r).min(height - 1) - y.saturating_sub(r) + 1) as f32;
-        let inv = 1.0 / len;
-        for v in &mut plane[y * width..(y + 1) * width] {
-            *v *= inv;
+
+    // ── Pass 2 (+3): vertical slide over normalized rows, as independent
+    //    per-column running chains, merged into `target`.
+    //
+    //    SERIAL (#70 lever 2 endpoint — the in-strip-scatter payoff in its
+    //    bitwise-safe form): the slide merges DIRECTLY into `target`
+    //    (`target_row(j) += acc`) in one fused pass — no band scratch, no
+    //    gather. The in-place hazard the scratch existed for died when the
+    //    merge target became a separate plane.
+    //
+    //    PARALLEL: column bands write band-local strips into
+    //    `out_scratch`, then a row-band merge-gather adds them into
+    //    `target` (safe Rust cannot hand disjoint column ranges of the
+    //    same rows to different workers). Bitwise-equal to the serial
+    //    fused pass: identical per-column chain order, and the strip
+    //    copy round-trip cannot change the single merge add per element.
+    let win_ro: &[f32] = win_plane;
+    if parallel {
+        #[cfg(feature = "threads")]
+        {
+            use rayon::prelude::*;
+            let workers = rayon::current_num_threads().max(1);
+            let bw = (width.div_ceil(workers).max(64) + 15) & !15;
+            // (x0, band_width, base offset into out_scratch) per band.
+            let mut layout: Vec<(usize, usize, usize)> = Vec::new();
+            let mut x0 = 0usize;
+            let mut base = 0usize;
+            while x0 < width {
+                let b = bw.min(width - x0);
+                layout.push((x0, b, base));
+                x0 += b;
+                base += b * height;
+            }
+            // Ensure capacity WITHOUT re-zeroing: every element of the
+            // band strips is written (row 0 and each j copy the full
+            // accumulator row) before the merge-gather reads it, so stale
+            // contents are never observable.
+            if out_scratch.len() < n {
+                out_scratch.resize(n, 0.0);
+            }
+            // Per-band slide: exactly the serial per-column chain over the
+            // band's columns; writes are band-local (disjoint regions).
+            let v_slide = |x0: usize, b: usize, out_band: &mut [f32], acc: &mut Vec<f32>| {
+                acc.clear();
+                acc.resize(b, 0.0);
+                for y in 0..=r.min(height - 1) {
+                    let src = &win_ro[y * width + x0..y * width + x0 + b];
+                    for (t, v) in acc.iter_mut().zip(src) {
+                        *t += *v;
+                    }
+                }
+                out_band[..b].copy_from_slice(acc);
+                for j in 1..height {
+                    let add = j + r;
+                    if add < height {
+                        let src = &win_ro[add * width + x0..add * width + x0 + b];
+                        for (t, v) in acc.iter_mut().zip(src) {
+                            *t += *v;
+                        }
+                    }
+                    if j > r {
+                        let rem = j - r - 1;
+                        let src = &win_ro[rem * width + x0..rem * width + x0 + b];
+                        for (t, v) in acc.iter_mut().zip(src) {
+                            *t -= *v;
+                        }
+                    }
+                    out_band[j * b..(j + 1) * b].copy_from_slice(acc);
+                }
+            };
+            let mut regions: Vec<(usize, usize, &mut [f32])> = Vec::with_capacity(layout.len());
+            let mut rest = &mut out_scratch[..n];
+            for &(x0, b, _) in &layout {
+                let (head, tail) = rest.split_at_mut(b * height);
+                regions.push((x0, b, head));
+                rest = tail;
+            }
+            regions
+                .into_par_iter()
+                .for_each_init(Vec::new, |acc, (x0, b, region)| v_slide(x0, b, region, acc));
+            // Merge-gather the band strips into `target` (one f32 add per
+            // element; strips read-only, target rows disjoint per job).
+            let scratch: &[f32] = out_scratch;
+            target[..n]
+                .par_chunks_mut(SPREAD_ROW_BAND * width)
+                .enumerate()
+                .for_each(|(band, rows)| {
+                    for (dy, row) in rows.chunks_mut(width).enumerate() {
+                        let j = band * SPREAD_ROW_BAND + dy;
+                        for &(x0, b, base) in &layout {
+                            let src = &scratch[base + j * b..base + (j + 1) * b];
+                            for (d, s) in row[x0..x0 + b].iter_mut().zip(src) {
+                                *d += *s;
+                            }
+                        }
+                    }
+                });
         }
-    }
-    tmp.clear();
-    tmp.resize(width, 0.0);
-    let mut out = vec![0.0f32; width * height];
-    for y in 0..=r.min(height - 1) {
-        for (t, v) in tmp.iter_mut().zip(&plane[y * width..(y + 1) * width]) {
-            *t += *v;
-        }
-    }
-    out[..width].copy_from_slice(tmp);
-    for j in 1..height {
-        let add = j + r;
-        if add < height {
-            for (t, v) in tmp.iter_mut().zip(&plane[add * width..(add + 1) * width]) {
+    } else {
+        // Fused V+merge single pass.
+        tmp.clear();
+        tmp.resize(width, 0.0);
+        for y in 0..=r.min(height - 1) {
+            for (t, v) in tmp.iter_mut().zip(&win_ro[y * width..(y + 1) * width]) {
                 *t += *v;
             }
         }
-        if j > r {
-            let rem = j - r - 1;
-            for (t, v) in tmp.iter_mut().zip(&plane[rem * width..(rem + 1) * width]) {
-                *t -= *v;
+        for (d, t) in target[..width].iter_mut().zip(tmp.iter()) {
+            *d += *t;
+        }
+        for j in 1..height {
+            let add = j + r;
+            if add < height {
+                for (t, v) in tmp.iter_mut().zip(&win_ro[add * width..(add + 1) * width]) {
+                    *t += *v;
+                }
+            }
+            if j > r {
+                let rem = j - r - 1;
+                for (t, v) in tmp.iter_mut().zip(&win_ro[rem * width..(rem + 1) * width]) {
+                    *t -= *v;
+                }
+            }
+            for (d, t) in target[j * width..(j + 1) * width]
+                .iter_mut()
+                .zip(tmp.iter())
+            {
+                *d += *t;
             }
         }
-        out[j * width..(j + 1) * width].copy_from_slice(tmp);
     }
-    plane.copy_from_slice(&out);
 }
 
 #[cfg(test)]
@@ -3888,6 +4131,96 @@ mod tests {
                     "interior impulse spread: got {} at ({dx},{dy})",
                     plane[i]
                 );
+            }
+        }
+    }
+
+    /// #70 lever 1 HARD GATE: the parallel spread+merge must be
+    /// **BITWISE** identical to the serial path — the row-band H pass,
+    /// the column-banded V slide, and the row-band merge-gather preserve
+    /// every output element's accumulation order by construction, for ANY
+    /// thread/band count. Exercised across several pool sizes (⇒ several
+    /// band layouts) via local rayon pools.
+    #[cfg(feature = "threads")]
+    #[test]
+    fn box_spread_merge_f32_parallel_matches_serial_bitwise() {
+        // Sizes at/above the parallel cutoff (n ≥ 32768, height ≥ 64),
+        // including a padded-width-like shape, a non-multiple-of-16 width,
+        // a narrow-width clamp case, and the r == 0 identity-merge path.
+        for &(w, h, r) in &[
+            (592usize, 576usize, 5usize),
+            (331, 200, 5),
+            (296, 288, 3),
+            (48, 1000, 7),
+            (592, 576, 0),
+        ] {
+            let mut seed = 0x0DDB_1A5E_5BAD_5EEDu64;
+            let mut next = move || {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                (seed >> 11) as f32 / (1u64 << 53) as f32 - 2.4e-4
+            };
+            let mut base: Vec<f32> = (0..w * h).map(|_| next() * 3.0).collect();
+            // Edge mass to stress the clipped windows.
+            for x in 0..w {
+                base[x] += 2.0;
+                base[(h - 1) * w + x] -= 1.5;
+            }
+            // Non-trivial merge target (the id plane in production).
+            let target0: Vec<f32> = (0..w * h).map(|_| next()).collect();
+            let mut serial_win = base.clone();
+            let mut serial_tgt = target0.clone();
+            let mut tmp = Vec::new();
+            let mut scratch = Vec::new();
+            box_spread_merge_f32(
+                &mut serial_win,
+                &mut serial_tgt,
+                w,
+                h,
+                r,
+                &mut tmp,
+                &mut scratch,
+                false,
+            );
+            // f32-class sanity: merged mass = target mass + win mass.
+            let sb: f64 = base.iter().map(|&v| v as f64).sum::<f64>()
+                + target0.iter().map(|&v| v as f64).sum::<f64>();
+            let sa: f64 = serial_tgt.iter().map(|&v| v as f64).sum();
+            let mass: f64 = base.iter().map(|&v| v.abs() as f64).sum::<f64>()
+                + target0.iter().map(|&v| v.abs() as f64).sum::<f64>();
+            assert!(
+                (sa - sb).abs() <= 1e-3 * mass.max(1.0),
+                "({w}x{h}, r={r}): f32 spread+merge sum {sb} -> {sa}"
+            );
+            for threads in [1usize, 2, 3, 7, 28] {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap();
+                let mut par_win = base.clone();
+                let mut par_tgt = target0.clone();
+                pool.install(|| {
+                    let mut tmp = Vec::new();
+                    let mut scratch = Vec::new();
+                    box_spread_merge_f32(
+                        &mut par_win,
+                        &mut par_tgt,
+                        w,
+                        h,
+                        r,
+                        &mut tmp,
+                        &mut scratch,
+                        true,
+                    );
+                });
+                for (i, (a, b)) in par_tgt.iter().zip(serial_tgt.iter()).enumerate() {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "({w}x{h}, r={r}, threads={threads}) px {i}: parallel {a} != serial {b}"
+                    );
+                }
             }
         }
     }

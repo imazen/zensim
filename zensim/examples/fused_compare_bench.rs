@@ -54,6 +54,7 @@ fn main() {
     let mut t_fold = Vec::new();
     let mut t_fused = Vec::new();
     let mut t_stale = Vec::new();
+    let mut prev_stale: Option<zensim::AttributionResult> = None;
     for _ in 0..iters {
         let t = std::time::Instant::now();
         let r1 = z.compute_with_ref(&pre, &ds).unwrap();
@@ -77,13 +78,19 @@ fn main() {
         // #70 stale-scalar single-pass arm (session primed in warm-up, so
         // every measured call is the single-pass path — the codec-loop
         // shape). Interleaved with the other arms per iteration so load
-        // shifts hit all arms equally.
+        // shifts hit all arms equally. The previous iterate's map is
+        // recycled into the session between compares, exactly as a codec
+        // loop would (drops one result per compare).
+        if let Some(spent) = prev_stale.take() {
+            sess.recycle(spent);
+        }
         let t = std::time::Instant::now();
         let (r4, a4) = z
             .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sess)
             .unwrap();
         t_stale.push(t.elapsed().as_secs_f64() * 1e3);
         std::hint::black_box((r4.score(), a4.query_rect(0, 0, 32, 32)));
+        prev_stale = Some(a4);
     }
 
     let (ms_s, ms_fo, ms_fu, ms_st) = (

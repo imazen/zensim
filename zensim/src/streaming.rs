@@ -235,7 +235,12 @@ fn upsample_pow2x_add(
 /// `factor` is small (typically 2, 4, 8) and known at the SIMD-version
 /// inlining boundary.
 #[autoversion]
-fn upsample_row_powx_add(src_row: &[f32], dst_row: &mut [f32], factor: usize, weight: f32) {
+pub(crate) fn upsample_row_powx_add(
+    src_row: &[f32],
+    dst_row: &mut [f32],
+    factor: usize,
+    weight: f32,
+) {
     let dst_len = dst_row.len();
     let mut di = 0;
     for &s in src_row {

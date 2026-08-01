@@ -143,22 +143,60 @@ change #70's design space:
   Exactness, not tolerance: score bit-identical on every call; map
   BITWISE-equal to the fresh combine given matching packs (same-pair
   test + a planes(B)×coeffs(A) reference construction).
-  - **Perf endpoint (the ≤1.1× bar): NOT met — measured floor 1.84×
-    @576² / 1.40× @1152²** (marginal stale map 3.4 / 13.8 ms vs fold
-    marginal 1.9 / 9.9 ms; the FRESH fused path measured 6.29× / 2.86×
-    on the same interleaved quiet-box runs, load ~2.4 — so the lever cut
-    the marginal 3.4× / 2.0×). Decomposition: the in-strip fold itself
-    is fold-marginal-class (~0.5-0.7 ms @576²; the C1 ordering problem
-    is solved); the floor sits in the per-scale **window SPREAD**
-    (`box_spread_sum_preserving_f32`: 2.2-2.7 ms @576², 7.5-7.8 @1152²)
-    + SAT/trim (0.5-0.6 / 1.7-1.9 ms) + the forced sd-plane store.
-    Ranked remaining levers: (1) parallel spread — H pass is bitwise-safe
-    row-parallel, V pass needs per-band running-sum re-init (f32-noise
-    class; both fused paths shift together, stale==fresh exactness
-    preserved) — est. lands ~at-bar @576² and PASSES @1152²; (2)
-    in-strip clipped-window scatter of the window slots (kills the
-    spread pass entirely; changes summation order → needs its own
-    tolerance gate); (3) lazy/band-parallel SAT build.
+  - **Perf endpoint (the ≤1.1× bar), 2026-08-01 spreadperf pass:
+    marginal stale map cut −41% at both sizes — 3.4 → 2.0 ms @576² and
+    13.8 → 8.2 ms @1152² (interleaved 41-iter medians, load ~2.4-3.4,
+    same-session A/B vs the `326185e9` baseline binary: 3.2-3.7 → 2.0 /
+    12.8-14.4 → 8.1-8.3). Bar MET @1152² (0.70× vs same-run fold
+    marginal 11.6-11.9) — NOT met @576² (1.25-1.35× vs fold marginal
+    1.5-1.6).** Maps + scores are **bitwise-identical to the deployed
+    `326185e9` path** — verified cross-version (density-bit FNV + SAT
+    quadrant digests, both paths, both sizes), so every gate that held
+    there holds unchanged. Levers landed (each proven value-exact):
+    - `blur::box_spread_merge_f32` — the spread FUSED with the
+      window→identity merge: 3-segment H pass (vectorizable interior)
+      with the source-row normalize folded into the H store, and the V
+      slide merging DIRECTLY into the target in one pass (the old
+      3-pass in-place form's scratch+gather existed only for a contract
+      the merge removed). Serial spread total @576²: 2.2-2.7 → ~0.5 ms.
+    - Scale-0 spread merges straight into the CANVAS (factor-1 upsample
+      is elementwise; `(0+a)+b ≡ 0+(a+b)` bitwise) — a full id-plane
+      store+reload skipped.
+    - Upsample-add rewritten dst-row-major on the diffmap fusion's
+      `upsample_row_powx_add` SIMD kernel (same single add per element).
+    - `AttributionSession::recycle(spent)` (additive API) — the loop
+      returns the spent map; density + f64 SAT buffers are reused
+      (`build_sat_into` re-zeroes only guard row/col), killing a
+      multi-MB alloc + page-fault storm per iteration.
+    - **Ranked lever 1 (parallel spread) was built, bitwise-gated
+      (`box_spread_merge_f32_parallel_matches_serial_bitwise`: H
+      row-bands + V COLUMN-bands own their accumulation chains, so the
+      output is bitwise-invariant to thread/band count — no f32-noise
+      re-init needed, better than the register's estimate) — and then
+      MEASURED A LOSS at every production size** (`examples/
+      spread_microbench.rs`: 0.18× @341k, 0.45× @1.35M, 0.95× @5.3M,
+      1.36× @16.8M — three sub-ms fork-join barriers dominate). It ships
+      behind `SPREAD_PARALLEL_MIN_N = 8M` elements: every 576²/1152²
+      compare takes the (now much faster) serial form; 4K-class scale-0
+      planes engage rayon. Lever 2's in-strip relocation of the spread
+      was analyzed against this state and cannot pay: the win_plane is
+      L3-resident at on_scale time and the remaining spread is ~0.35 ms
+      @576², smaller than the gap to the bar.
+    - **The bar's denominator is the ill-conditioned part now**: the
+      fold arm's marginal is bimodal-allocator-coupled — 5.2 ↔ 12.8 ms
+      @1152² across runs of the SAME binary minutes apart (its per-call
+      multi-MB diffmap alloc/fault behavior bifurcates with heap
+      history), and unmodified `326185e9` measures 0.89-1.12× @1152²
+      today vs its recorded 1.40×. In the low-denominator mode the
+      @1152² ratio would read ~1.6×. Honest @576² floor decomposition
+      (marginal 2.0): in-strip fold ~0.5-0.7 (fold-class; the
+      denominator pays the same), spread ~0.35, upsample ~0.3, SAT+trim
+      ~0.3 (recycled), canvas zero + pack derive + walk jitter ~0.3.
+      Meeting 1.10× against a 1.5-ms denominator means the whole map
+      tail ≤ ~0.15 ms — i.e. deleting the SAT+trim+spread from the
+      call, not optimizing them. Next levers if re-opened: overlap the
+      scale-s tail with the scale-s+1 walk (double-buffered id/win),
+      SAT-on-first-query (relocates rather than saves loop cost).
   - **Loop-quality gate: staleness free, FOURTH consecutive
     measurement** (h3 g20 c1.35, k6, 27 cells, decoded-judged):
     all-cells med |err| 0.926 → **0.801** (improved 0.125; per-cell
