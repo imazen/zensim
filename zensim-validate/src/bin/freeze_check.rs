@@ -165,7 +165,10 @@ fn main() {
         "the E-M corruption-ordering instrument, evaluated on the HEAD bake".into(),
     ));
 
-    for (name, bar, key) in [("CSIQ SROCC", bar_csiq, "csiq"), ("LIVE SROCC", bar_live, "live")] {
+    for (name, bar, key) in [
+        ("CSIQ SROCC", bar_csiq, "csiq"),
+        ("LIVE SROCC", bar_live, "live"),
+    ] {
         match (bar, f(&v, &["rank", key, "srocc"])) {
             (Some(b), Some(x)) => rows.push(Row::Eval(
                 format!("{name} (≥ best 924-arm)"),
@@ -242,7 +245,11 @@ fn main() {
     rows.push(Row::Eval(
         "Byte-repro (embedded zentrain.repro)".into(),
         "present".into(),
-        if repro_ok { "present".into() } else { "MISSING".into() },
+        if repro_ok {
+            "present".into()
+        } else {
+            "MISSING".into()
+        },
         repro_ok,
     ));
 
@@ -282,7 +289,10 @@ fn main() {
                 if !ok {
                     n_fail += 1;
                 }
-                println!("| {g} | {b} | {m} | {} |", if *ok { "PASS" } else { "**FAIL**" });
+                println!(
+                    "| {g} | {b} | {m} | {} |",
+                    if *ok { "PASS" } else { "**FAIL**" }
+                );
             }
             Row::Attach(g, b, w) => {
                 n_attach += 1;

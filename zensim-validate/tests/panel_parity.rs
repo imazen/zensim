@@ -176,3 +176,65 @@ fn cross_language_parity_via_python() {
         "parity script did not report PASS:\n{stdout}"
     );
 }
+
+/// Batch-mode cross-language parity + determinism gate (decision-surface
+/// audit 2026-07-31 gap 4). Same opt-in contract as
+/// `cross_language_parity_via_python`: the skip is caller-controlled via
+/// `--ignored`, never silent. Gates `panel --batch` (the canonical
+/// replacement for scipy-spearmanr-in-a-bootstrap-loop call sites)
+/// against scipy midrank to <= 1e-12 including tie-heavy fixtures, plus
+/// indexed==explicit and byte-determinism across runs.
+#[test]
+#[ignore = "requires python3 + numpy + scipy + a built `panel` binary; run with --ignored"]
+fn cross_language_batch_parity_via_python() {
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest
+        .parent()
+        .expect("zensim-validate has a parent dir")
+        .to_path_buf();
+    let script = repo_root.join("scripts/verify_panel_batch_parity.py");
+    assert!(
+        script.exists(),
+        "batch parity script missing at {}",
+        script.display()
+    );
+
+    let bin = ["target/release/panel", "target/debug/panel"]
+        .iter()
+        .map(|p| repo_root.join(p))
+        .find(|p| p.exists())
+        .expect(
+            "build the `panel` binary first: \
+             cargo build -p zensim-validate --bin panel",
+        );
+
+    let out = Command::new("python3")
+        .arg(&script)
+        .arg("--bin")
+        .arg(&bin)
+        .arg("--tol")
+        .arg("1e-12")
+        .current_dir(&repo_root)
+        .output()
+        .expect("failed to launch python3 — install python3 + numpy + scipy");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    eprintln!("{stdout}");
+    if !stderr.trim().is_empty() {
+        eprintln!("--- stderr ---\n{stderr}");
+    }
+    assert!(
+        out.status.success(),
+        "panel --batch parity FAILED — a gated stat diverged > 1e-12 from \
+         the scipy midrank reference (or determinism broke). Fix the \
+         divergence, do not relax the gate. Output:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("ALL GATES PASS"),
+        "batch parity script did not report ALL GATES PASS:\n{stdout}"
+    );
+}

@@ -290,7 +290,10 @@ struct Columns {
 }
 
 fn load_columns(args: &Args) -> Result<Columns, String> {
-    let path = args.input.as_ref().expect("aggregate mode requires --input");
+    let path = args
+        .input
+        .as_ref()
+        .expect("aggregate mode requires --input");
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -306,7 +309,10 @@ fn load_columns(args: &Args) -> Result<Columns, String> {
 }
 
 fn load_tsv_columns(args: &Args) -> Result<Columns, String> {
-    let path: &Path = args.input.as_ref().expect("aggregate mode requires --input");
+    let path: &Path = args
+        .input
+        .as_ref()
+        .expect("aggregate mode requires --input");
     let text = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
     let mut lines = text.lines();
     let header = lines
@@ -369,7 +375,10 @@ fn load_tsv_columns(args: &Args) -> Result<Columns, String> {
 }
 
 fn load_parquet_columns(args: &Args) -> Result<Columns, String> {
-    let path: &Path = args.input.as_ref().expect("aggregate mode requires --input");
+    let path: &Path = args
+        .input
+        .as_ref()
+        .expect("aggregate mode requires --input");
     let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
@@ -610,7 +619,10 @@ fn build_reports(cols: &Columns) -> Vec<GroupReport> {
 /// One parsed batch job. `Indexed` references `#def`'d base vectors by
 /// slot so 10k resample jobs share storage instead of cloning floats.
 enum BatchJob {
-    Explicit { x: Vec<f64>, y: Vec<f64> },
+    Explicit {
+        x: Vec<f64>,
+        y: Vec<f64>,
+    },
     Indexed {
         x_base: usize,
         y_base: usize,
@@ -708,7 +720,11 @@ fn parse_batch(text: &str) -> Result<BatchInput, String> {
                 }
                 Some(idx)
             };
-            BatchJob::Indexed { x_base, y_base, idx }
+            BatchJob::Indexed {
+                x_base,
+                y_base,
+                idx,
+            }
         } else {
             let x = parse_float_csv(fields[1], lineno, "x")?;
             let y = parse_float_csv(fields[2], lineno, "y")?;
@@ -784,7 +800,11 @@ fn run_batch(input: &BatchInput, srocc_only: bool) -> String {
         .par_iter()
         .map(|(_, job)| match job {
             BatchJob::Explicit { x, y } => compute_batch_row(x, y, srocc_only),
-            BatchJob::Indexed { x_base, y_base, idx } => {
+            BatchJob::Indexed {
+                x_base,
+                y_base,
+                idx,
+            } => {
                 let (bx, by) = (&input.bases[*x_base], &input.bases[*y_base]);
                 match idx {
                     None => compute_batch_row(bx, by, srocc_only),
