@@ -504,6 +504,12 @@ struct Args {
     /// canonical grid; the section auto-runs when the file is present and
     /// the feature count matches the bake, else skips silently.
     corruption_grid: PathBuf,
+    /// `--corruption-head <bake.bin>`: companion corruption-head bake — the
+    /// shipping design's corruption owner (at 924 the dial's own ordering is
+    /// broken by design, distributional; the head trained on negrich carries
+    /// the gate). Scored on the same corruption grid; the dial-alone numbers
+    /// stay in the report for honesty. Absent → dial-only, unchanged.
+    corruption_head: Option<PathBuf>,
     /// `--full-json <path>`: the unified "full-eval" JSON consumed by
     /// `scripts/run_full_eval.sh` + the summer-gauntlet dashboard. Richer than
     /// `--json` (which stays a stable per-corpus panel): rank map + dial
@@ -538,6 +544,7 @@ DEFAULTS:\n\
     --ramp-grid     none (severity-ramp monotonicity section)\n\
     --compare       none (per-zone dial-agreement vs a reference bake)\n\
     --corruption-grid canonical grid (negative-tail gate; auto if present)\n\
+    --corruption-head none (companion head bake scored on the corruption grid)\n\
     --features-root /mnt/v/zen/zensim-training/2026-05-15-full-features\n"
     );
 }
@@ -562,6 +569,7 @@ fn parse_args() -> Result<Args, String> {
                 "/mnt/v/output/zensim/eval_panels_2026-05-29/corruption_grid_372col_2026-05-28.parquet",
             )
         });
+    let mut corruption_head: Option<PathBuf> = None;
     let mut features_root: PathBuf =
         PathBuf::from("/mnt/v/zen/zensim-training/2026-05-15-full-features");
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
@@ -649,6 +657,10 @@ fn parse_args() -> Result<Args, String> {
                 corruption_grid = PathBuf::from(v);
                 corruption_grid_set = true;
             }
+            "--corruption-head" => {
+                let v = args.next().ok_or("--corruption-head requires <bake.bin>")?;
+                corruption_head = Some(PathBuf::from(v));
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -696,6 +708,7 @@ fn parse_args() -> Result<Args, String> {
         ramp_grid,
         compare,
         corruption_grid,
+        corruption_head,
         full_json,
         name,
         perpair_metrics,
@@ -2320,30 +2333,78 @@ Run the dedicated q-sweep harness for those._\n",
     // ── Corruption gate (negative-tail ranking) — auto when grid present ──
     // Hoisted out of the block so `--full-json` can carry the gate result.
     let mut corruption_stats: Option<eval_report::CorruptionStats> = None;
+    let mut corruption_head_stats: Option<eval_report::CorruptionStats> = None;
     if args.corruption_grid.exists() {
         match parquet_loader::load_labeled_grid(&args.corruption_grid) {
-            Ok(grid) if grid.n_features == n_inputs => {
-                let dial = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
-                let stats = eval_report::corruption_gate(&grid.label, &dial);
-                buf.push_str(&eval_report::corruption_gate_section(
-                    &stats,
-                    &args.corruption_grid.display().to_string(),
-                ));
-                corruption_stats = Some(stats);
-            }
             Ok(grid) => {
-                buf.push_str(&format!(
-                    "\n## Corruption gate — ⚠ SKIPPED (feature-count mismatch)\n\n\
-                     Grid `{}` has {} feature columns; bake expects {}.\n",
-                    args.corruption_grid.display(),
-                    grid.n_features,
-                    n_inputs
-                ));
+                if grid.n_features == n_inputs {
+                    let dial = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
+                    let stats = eval_report::corruption_gate(&grid.label, &dial);
+                    buf.push_str(&eval_report::corruption_gate_section(
+                        &stats,
+                        &args.corruption_grid.display().to_string(),
+                        "Corruption gate (negative-tail ranking)",
+                    ));
+                    corruption_stats = Some(stats);
+                } else {
+                    buf.push_str(&format!(
+                        "\n## Corruption gate — ⚠ SKIPPED (feature-count mismatch)\n\n\
+                         Grid `{}` has {} feature columns; bake expects {}.\n",
+                        args.corruption_grid.display(),
+                        grid.n_features,
+                        n_inputs
+                    ));
+                }
+                // Companion corruption head (`--corruption-head`): the shipping
+                // design routes corruption to a separate head (the 924 dial's
+                // own ordering is broken by design — distributional), so the
+                // freeze gate reads the HEAD's numbers; the dial-alone section
+                // above stays for honesty.
+                if let Some(head_path) = &args.corruption_head {
+                    match std::fs::read(head_path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|b| Model::from_bytes(&b).map_err(|e| format!("{e:?}")))
+                    {
+                        Ok(head) if head.n_inputs() == grid.n_features => {
+                            let head_tf = head.has_nontrivial_feature_transforms();
+                            let head_n = head.n_inputs();
+                            let scores = score_grid(&head, head_tf, head_n, &grid.feature_rows);
+                            let stats = eval_report::corruption_gate(&grid.label, &scores);
+                            buf.push_str(&eval_report::corruption_gate_section(
+                                &stats,
+                                &args.corruption_grid.display().to_string(),
+                                &format!(
+                                    "Corruption gate — companion head `{}` (the shipping owner)",
+                                    basename(head_path)
+                                ),
+                            ));
+                            corruption_head_stats = Some(stats);
+                        }
+                        Ok(head) => buf.push_str(&format!(
+                            "\n## Corruption gate (head) — ⚠ SKIPPED (feature-count mismatch)\n\n\
+                             Grid `{}` has {} feature columns; head `{}` expects {}.\n",
+                            args.corruption_grid.display(),
+                            grid.n_features,
+                            head_path.display(),
+                            head.n_inputs()
+                        )),
+                        Err(e) => buf.push_str(&format!(
+                            "\n## Corruption gate (head) — ⚠ FAILED to load `{}`\n\n`{e}`\n",
+                            head_path.display()
+                        )),
+                    }
+                }
             }
             Err(e) => buf.push_str(&format!(
                 "\n## Corruption gate — ⚠ FAILED to load grid\n\n`{e}`\n"
             )),
         }
+    } else if args.corruption_head.is_some() {
+        buf.push_str(&format!(
+            "\n## Corruption gate (head) — ⚠ SKIPPED (grid absent)\n\n\
+             `--corruption-head` given but the corruption grid `{}` is missing.\n",
+            args.corruption_grid.display()
+        ));
     }
 
     for r in &results {
@@ -2626,6 +2687,22 @@ Run the dedicated q-sweep harness for those._\n",
             None => Value::Null,
         };
 
+        // corruption_head: the same gate evaluated on the companion head bake
+        // (`--corruption-head`) — the shipping design's corruption owner.
+        // null when no head was given (or it failed to load / mismatched).
+        let corruption_head = match &corruption_head_stats {
+            Some(cs) => json!({
+                "head": args.corruption_head.as_ref().map(|p| basename(p)),
+                "n_triples": cs.n_triples,
+                "pass_q20": cs.pass_q20,
+                "pass_q10": cs.pass_q10,
+                "per_family": cs.per_family.iter().map(|(fam, rate, n)| json!({
+                    "family": fam, "pass_rate": rate, "n": n,
+                })).collect::<Vec<_>>(),
+            }),
+            None => Value::Null,
+        };
+
         // per_pair: {corpus: {pred, <mos|jnd>}} for the rank corpora + a
         // {kadis: {pred, ssim2, butter, cvvdp}} block from the metric parquet.
         let jnd_prefixes = ["aic3", "aic4", "konjnd"];
@@ -2749,6 +2826,7 @@ Run the dedicated q-sweep harness for those._\n",
             "rank": rank,
             "dial": dial,
             "corruption": corruption,
+            "corruption_head": corruption_head,
             "per_pair": per_pair,
         });
         if let Some(parent) = json_path.parent() {

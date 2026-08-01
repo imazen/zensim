@@ -739,9 +739,9 @@ pub fn corruption_gate(label: &[String], dial: &[f64]) -> CorruptionStats {
 
 /// Render the corruption-gate section as markdown + an inline-SVG per-family
 /// pass-rate chart.
-pub fn corruption_gate_section(stats: &CorruptionStats, grid_label: &str) -> String {
+pub fn corruption_gate_section(stats: &CorruptionStats, grid_label: &str, title: &str) -> String {
     let mut s = String::new();
-    s.push_str("\n## Corruption gate (negative-tail ranking)\n\n");
+    let _ = writeln!(s, "\n## {title}\n");
     s.push_str(&format!(
         "Grid: `{}` — {} corruption entries. A structurally-broken decode MUST rank below an \
          honestly-lossy encode: `score(corruption) < score(q20)`.\n\n",
