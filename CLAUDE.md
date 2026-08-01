@@ -780,7 +780,14 @@ JSON into the freeze-bar PASS/FAIL table:
 externally-owned rows (UPIQ/Korshunov/perf/LOO/corruption-ORDERING) print as
 explicit ATTACH rows, exit 1 on any FAIL; it computes NO stats, only compares
 what the owning tools produced. Bars = zenpapers final-metric plan §5; owner
-map = `benchmarks/decision_surface_audit_2026-07-31.md`.
+map = `benchmarks/decision_surface_audit_2026-07-31.md`. The Korshunov row's
+owner (audit gap 3) is now **`scripts/external_reads/run_external_reads.py`**
+— the committed seven-domain external-read runner (UPIQ hdr-dmean / SI-HDR /
+HDR-VDC / AVT / CHUG / Rousselot / BANDVIS+CSFW LOO): `--from-stored`
+rescores the stored feature tables in ~11 s and gate-checks the recorded
+numbers (Korshunov 0.9346, Narwaria 0.7688, AVT pooled 0.7742, …);
+`--scorer bake:<final.bin>` is the Phase-4 final-bake mode; as-run
+provenance copies live in `scripts/external_reads/asrun/`. See its README.
 
 ### IQA statistical panel on arbitrary (predicted, target) pairs
 **`panel` binary** at
@@ -796,6 +803,7 @@ canonical corpus use `bake_verdict`.) Reads TSV or Parquet with columns
 ```sh
 panel --input scores.tsv [--json]            # aggregate panel
 panel --input eval.parquet --json            # + per-band when `band` present
+panel --batch jobs.tsv --stats srocc         # N (x,y) pairs -> N rows, ONE process
 ```
 
 Wraps `zensim_validate::panel::{compute_panel, z_rmse_per_sample,
@@ -806,6 +814,20 @@ the thin `scripts/lib/zen_stats.py` shim (`from scripts.lib.zen_stats
 import panel`). **Do NOT hand-roll srocc/plcc/krocc/pwrc/z_rmse in
 Python** — that re-creates the 14-fork divergence this consolidates
 (see `benchmarks/iqa_stats_consolidation_2026-05-26.md`).
+
+**Batch mode (2026-07-31, audit gap 4):** `panel --batch <FILE|->`
+takes a manifest of many (x, y) vector pairs — explicit rows, or
+`#def`'d base vectors + index-set resamples (the paired-bootstrap
+shape; the caller keeps the RNG) — and emits one TSV stat row per pair
+in ONE process, so a 10k-resample bootstrap is a single invocation.
+`--stats srocc` fast path; full mode adds `srocc_signed` (pre-abs
+midrank) + `plcc_raw` (un-rescaled Pearson). Python:
+`zen_stats.panel_batch` / `panel_batch_indexed`. Gate:
+`scripts/verify_panel_batch_parity.py` (<=1e-12 vs scipy midrank incl.
+tie-heavy; determinism) + `tests/panel_parity.rs --ignored`.
+**scipy-in-a-bootstrap-loop is the banned pattern this replaces** —
+`scripts/hdr/upiq_panel.py` is the migrated exemplar (byte-identical
+recorded outputs, 3× faster).
 
 ### Bake training (MLP supervised learning)
 **`zensim_mlp_train` binary** at
