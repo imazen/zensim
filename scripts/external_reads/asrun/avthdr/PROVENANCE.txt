@@ -1,0 +1,11 @@
+# PROVENANCE — asrun/avthdr
+# source dir:   /mnt/v/output/zensim/avthdr-validation-2026-07-29
+# build_commit: 1f0f92d5075d
+# protocol doc: zensim:benchmarks/avthdr_validation_2026-07-29.md
+# file <TAB> sha256(source) <TAB> header
+analyze_avthdr.py	eec054f5e2b94682f01d14d67b5eaa0c68897f0301c6999cb802b5d10c850b07	header-after-shebang
+analyze_chug.py	0a6942a193cea9b2b230cdc31c9fc908b48b71c283cd7de46c36be5f6458deec	header-after-shebang
+driver.py	035dff245f213b89714cc17e989e37f902a993e76f492a59ce9d689f7dd44d7f	header-after-shebang
+chug_driver.py	815a916df14588fa2d85d8a90fa5010195047196d9526ff89203fca4d2243d48	header-after-shebang
+chug_scope.py	07d6dab0e2f05be09e27f290ba515c0a937274caae30232ac2aba5c1a53c6938	header-after-shebang
+PROTOCOL.md	cd9d5ec7a5e7725c6c2ea0282b9e64d563e8aff272d571c5e4bf24ef863e8498	header-prepended

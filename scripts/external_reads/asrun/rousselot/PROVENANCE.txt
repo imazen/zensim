@@ -1,0 +1,7 @@
+# PROVENANCE — asrun/rousselot
+# source dir:   /mnt/v/output/zensim/rousselot-chroma-2026-07-29
+# build_commit: 73734d8820b46c825aea26f8e4511d50e6a92dc7
+# protocol doc: zensim:benchmarks/rousselot_chroma_validation_2026-07-29.md
+# file <TAB> sha256(source) <TAB> header
+analyze_rousselot.py	e7028e5b1ac041fc66b7a763d539e8645f01f203038b977353d053622c819749	header-after-shebang
+PROTOCOL.md	e1c581397e83ed300eae4493732133ff63958a3c15dcc688aa2d8ffe3d393186	header-prepended

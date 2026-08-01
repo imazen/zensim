@@ -1,0 +1,13 @@
+# PROVENANCE — asrun/csfw_g6_loo_956
+# source dir:   /mnt/v/output/zensim/csfw-g6-loo-2026-07-29/harness
+# build_commit: 7bfd511de78f85e8fcd618df15716ca56575bb60
+# protocol doc: zensim:benchmarks/csfw_g6_loo_2026-07-29.md
+# file <TAB> sha256(source) <TAB> header
+byte_gate_956.py	215bed2587f5fdde3a0876a860b80b59cea3943869f62090af9a66fc69314b66	header-after-shebang
+collect_loo956.py	c2ee99ca11f216e9a7c455c6bd0198fb6e29b1b44059bdd0fcc3b2cbdcb1dcef	header-after-shebang
+extract_956.sh	2a8f291b0a8e3701d8ffb808df3e0e5d1477bc22c817c90105de6a9244eefcf5	header-after-shebang
+fam956.json	3a3cf381d2ccdaf8bc9e9a57a72189645cc6ca36c1e33e9a91db84754f733820	verbatim-no-header
+p12_residual_boost_956.py	e53c791fa4006cbacabd33797e5ed1ecba79e451796b23dc5e016b97778996aa	header-after-shebang
+promote_ext956_instrument.py	1a3257d206e7bd4d2da2865d329e59a2476541b4275a16c2c9b220a43d838f23	header-after-shebang
+run_twin956.py	fd4809a551f7b9e226ef922066b6542763b5bdb1fce7c2b3c0430f5e633292f3	header-after-shebang
+verdict_parallel_956.sh	09e67bc2d171bf4a4d956af946a4c962728fc9595ecd2ff9d32d6e7b0a38cebe	header-after-shebang

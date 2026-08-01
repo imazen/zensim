@@ -1,0 +1,7 @@
+# PROVENANCE — asrun/hdr_dmean
+# source dir:   /mnt/v/output/zensim/hdr-dmean-2026-07-29
+# build_commit: c4632d6257b14e7647cd6daf9e846733b4bffec8
+# protocol doc: zensim:benchmarks/hdr_dmean_commensurability_2026-07-29.md
+# file <TAB> sha256(source) <TAB> header
+analyze.py	5dc4401343f08940ed1f89a13f2cca043186e40bda007896047df390706bd31d	header-after-shebang
+PROTOCOL.md	0b6b23992d04d108ff927914ba6495782c77ed0ab749919a057285c76f13de6a	header-prepended

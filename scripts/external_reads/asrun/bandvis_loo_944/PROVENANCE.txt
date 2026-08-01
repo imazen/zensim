@@ -1,0 +1,15 @@
+# PROVENANCE — asrun/bandvis_loo_944
+# source dir:   /mnt/v/output/zensim/bandvis-loo-2026-07-28/harness
+# build_commit: b1d4bc257e57f7c3215ec8a237e9f87cdad8e35f
+# protocol doc: zensim:benchmarks/bandvis_loo_944_2026-07-28.md
+# file <TAB> sha256(source) <TAB> header
+byte_gate_944.py	a6e093322f323e978196ebbcbd594f037313cc6e270211952f2f13e17f6e54e6	header-after-shebang
+collect_loo944.py	ca6c95011d45032eeccdd469fc0b3fa3d0e8359b49ff4c44cc6b988f5842369a	header-after-shebang
+extract_944.sh	1fe375363fabe6e00ae016b2fc6367c26b0ba27c4612185697210eefd3a4a1d6	header-after-shebang
+fam944.json	eb6d63cfab69d0e3d448e3018016fa9ac5ad181b4759005a2d7e3282b14ca9d1	verbatim-no-header
+p12_residual_boost_944.py	684fa3b6b23330fc4783d532d4937c378c84e499b80d04174b46f8daf8f7ed39	header-after-shebang
+pin_sigma_720.py	cfc32706329827617ec773d9912b0c7c535c49259f96457ec9462f32786bf6d4	header-after-shebang
+promote_ext944_instrument.py	0f7c6990feb7807e248f93ab9617a6930b4d02dd178a1530e8fa2fe5239cd67d	header-after-shebang
+run_twin944.py	d3325a9399b48ac2624f3e3198ba5d14d81db998a219d05ad55fa151241c6604	header-after-shebang
+verdict_loo944.sh	d76bb15f5fcdeed4b7a25b368c012d1f1075abeb32c3e7e09e0cc626d04bda79	header-after-shebang
+verdict_parallel.sh	3f20d7ccfdde4a1ead69c9a24b831209ca7e65afd705893c8ecbeb50a304e685	header-after-shebang

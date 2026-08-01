@@ -1,0 +1,9 @@
+# PROVENANCE — asrun/sihdr
+# source dir:   /mnt/v/output/zensim/sihdr-transfer-2026-07-29
+# build_commit: 34cbd9cf03673c48d69127b7c648bc2fd7d95adc
+# protocol doc: zensim:benchmarks/sihdr_transfer_2026-07-29.md
+# file <TAB> sha256(source) <TAB> header
+analyze_sihdr.py	0502c6bb82d9434f43a891f3341d1cca828aa9d1a4f6e8e99fa9c1cdcbc2d074	header-after-shebang
+rmse_labeled.py	efc5c2f3b78d89f0ef13950411bb28a4405b385553b70a6163fe596568f208bb	header-after-shebang
+run_extraction.sh	690c36491db45d6805563580ecf21cfc4e5f467d8c47a5b1a3177c2eebaceb5f	header-after-shebang
+PROTOCOL.md	27b1fcef3430ecea815f8071a40a7421700fbec75dbb8a23a2f6c1502f7df5c2	header-prepended

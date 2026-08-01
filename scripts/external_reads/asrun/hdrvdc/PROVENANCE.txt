@@ -1,0 +1,8 @@
+# PROVENANCE — asrun/hdrvdc
+# source dir:   /mnt/v/output/zensim/hdrvdc-conditions-2026-07-29
+# build_commit: 6b3505a57174
+# protocol doc: zensim:benchmarks/hdrvdc_conditions_2026-07-29.md
+# file <TAB> sha256(source) <TAB> header
+analyze_hdrvdc.py	0cf44170758a4335078e40c1c7e79e97d7e224d5e3088e492925e52e77b71652	header-after-shebang
+driver.py	c7185ad2dd00144fbe5c10318a29baa63e175d3348758043c6f7b5e0bd46bcd4	header-after-shebang
+PROTOCOL.md	972e408ec29310c7b0cbff9f31054d1d637d9419a53055f77c4c4516dfbdce89	header-prepended
