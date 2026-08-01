@@ -1494,9 +1494,23 @@ fn process_strip_channel(
     // score+attribution path's plane retention. `None` (every pre-existing
     // caller) is byte-identical to the previous behavior.
     attr_ret: Option<(&mut [f32], &mut [f32], &mut [f32])>,
+    // task #70 stale-scalar single-pass: when `Some((coeffs, id, win))`,
+    // run the fused attribution combine for this channel IN-STRIP (on the
+    // cache-hot sd/mu planes, accumulated rows only) with the caller's
+    // per-channel coefficient pack — no plane retention, no post-scale
+    // combine sweep. The kernel is per-pixel elementwise `+=`, so the
+    // result is bitwise-identical to the retained-plane combine given the
+    // same coefficients. Requires `need_ssim` (the stale entry validates
+    // an all-features profile, under which every channel computes SSIM).
+    // `None` (every pre-existing caller) is byte-identical.
+    attr_fold: Option<([f32; 12], &mut [f32], &mut [f32])>,
 ) {
     // MSE-only path: no blur needed
     if !need_ssim && !need_edge {
+        debug_assert!(
+            attr_fold.is_none(),
+            "attr_fold requires an all-features profile (every channel SSIM)"
+        );
         if let Some((sd_out, mu1_out, mu2_out)) = attr_ret {
             sd_out.fill(0.0);
             mu1_out.fill(0.0);
@@ -1517,7 +1531,8 @@ fn process_strip_channel(
 
         let dm_needs_edge = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_edge_mse());
         let dm_needs_hf = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_hf());
-        let store_sd = (diffmap.is_some() || attr_ret.is_some()) && need_ssim;
+        let store_sd =
+            (diffmap.is_some() || attr_ret.is_some() || attr_fold.is_some()) && need_ssim;
         // Force mu1/mu2 storage when diffmap needs edge/MSE or HF features
         // OR when IW features are required (mu1 is the reference plane for
         // the IW weight's activity-map computation).
@@ -1525,7 +1540,8 @@ fn process_strip_channel(
             || config.compute_iw_features
             || dm_needs_edge
             || dm_needs_hf
-            || attr_ret.is_some();
+            || attr_ret.is_some()
+            || attr_fold.is_some();
         if need_ssim {
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
             fused_blur_h_ssim(
@@ -1645,6 +1661,39 @@ fn process_strip_channel(
             }
             mu1_out.copy_from_slice(&bufs.mask[inner_off..inner_off + inner_n]);
             mu2_out.copy_from_slice(&bufs.mul_buf[inner_off..inner_off + inner_n]);
+        }
+
+        // task #70 stale-scalar single-pass: run the fused combine for this
+        // channel right here, while sd (temp_blur) and the V-blurred
+        // mu1/mu2 (mask/mul_buf, pre-swap) are cache-hot — the same values
+        // the retention path would copy out. Accumulated rows only; the
+        // caller's id/win slices are band-local at the same offsets as the
+        // retention slices.
+        if let Some((co, id_out, win_out)) = attr_fold {
+            debug_assert!(
+                need_ssim,
+                "attr_fold requires an all-features profile (every channel SSIM)"
+            );
+            // The kernel lives in the `custom-profiles`-gated attribution
+            // module (the only module that ever passes `attr_fold`); the
+            // no-feature branch is structurally unreachable.
+            #[cfg(feature = "custom-profiles")]
+            if need_ssim {
+                let inner_off = inner_start * width;
+                let inner_n = inner_h * width;
+                crate::attribution::fused_combine_plane_f32(
+                    &bufs.temp_blur[inner_off..inner_off + inner_n],
+                    &src_c[inner_off..inner_off + inner_n],
+                    &dst_c[inner_off..inner_off + inner_n],
+                    &bufs.mask[inner_off..inner_off + inner_n],
+                    &bufs.mul_buf[inner_off..inner_off + inner_n],
+                    co,
+                    id_out,
+                    win_out,
+                );
+            }
+            #[cfg(not(feature = "custom-profiles"))]
+            let _ = (co, id_out, win_out);
         }
 
         // Swap: mu1/mu2 now hold V-blurred values, mask/mul_buf hold H-blurred garbage
@@ -2121,6 +2170,7 @@ fn process_scale_bands(
         None,
         None,
         None,
+        None,
     );
     (accum.finalize(config.iw_strength as f64), diffmap)
 }
@@ -2156,6 +2206,22 @@ struct AttrBandSlices<'a> {
     mu1: [&'a mut [f32]; 3],
     mu2: [&'a mut [f32]; 3],
 }
+
+/// One band's in-strip fused-combine spec (task #70 stale-scalar
+/// single-pass): the per-channel coefficient packs (copied per band —
+/// 144 bytes) and the band's row-range-disjoint id/win output slices,
+/// pre-split from the caller's scale-sized planes exactly like
+/// [`AttrBandSlices`].
+struct AttrFoldBand<'a> {
+    co: [[f32; 12]; 3],
+    id: &'a mut [f32],
+    win: &'a mut [f32],
+}
+
+/// One scale's in-strip fold spec (task #70): per-channel coefficient packs
+/// + the scale-sized id/win accumulation planes (`width * height` prefixes,
+/// caller-zeroed).
+type AttrFoldOut<'a> = (&'a [[f32; 12]; 3], &'a mut [f32], &'a mut [f32]);
 
 /// Variant of [`process_scale_bands`] that returns the **raw**
 /// [`ScaleAccumulators`] instead of the finalized [`ScaleStats`].
@@ -2196,6 +2262,11 @@ fn process_scale_bands_into_accum(
     inner_y_filter: Option<(usize, usize)>,
     outer_layout: Option<(usize, usize)>,
     attr_ret_out: Option<&mut AttrScaleRetention>,
+    // task #70 stale-scalar single-pass: per-channel fused-combine
+    // coefficient packs + the scale-sized id/win accumulation planes
+    // (`width * height` prefixes, caller-zeroed). The combine runs
+    // in-strip per (sub-strip, channel) — no retention, no second sweep.
+    attr_fold_out: Option<AttrFoldOut<'_>>,
 ) -> (ScaleAccumulators, Option<Vec<f32>>) {
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
@@ -2250,144 +2321,154 @@ fn process_scale_bands_into_accum(
     let strip_outer_y0 = plane_offset;
     let strip_outer_y1 = plane_offset + height;
 
-    let process_band =
-        |bufs: &mut ScaleBuffers, band_idx: usize, mut band_ret: Option<AttrBandSlices<'_>>| {
-            // Band in OUTER (full-image) coords:
-            let outer_band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(layout_h);
-            let outer_band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(layout_h);
-            // Skip bands that don't overlap the strip:
-            if outer_band_end_y <= strip_outer_y0 || outer_band_first_y >= strip_outer_y1 {
-                return (ScaleAccumulators::new(), None);
-            }
-            // Map band-inner to strip-local coords:
-            let band_first_y = outer_band_first_y.saturating_sub(strip_outer_y0);
-            let band_end_y = (outer_band_end_y - strip_outer_y0).min(height);
+    let process_band = |bufs: &mut ScaleBuffers,
+                        band_idx: usize,
+                        mut band_ret: Option<AttrBandSlices<'_>>,
+                        mut band_fold: Option<AttrFoldBand<'_>>| {
+        // Band in OUTER (full-image) coords:
+        let outer_band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(layout_h);
+        let outer_band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(layout_h);
+        // Skip bands that don't overlap the strip:
+        if outer_band_end_y <= strip_outer_y0 || outer_band_first_y >= strip_outer_y1 {
+            return (ScaleAccumulators::new(), None);
+        }
+        // Map band-inner to strip-local coords:
+        let band_first_y = outer_band_first_y.saturating_sub(strip_outer_y0);
+        let band_end_y = (outer_band_end_y - strip_outer_y0).min(height);
 
-            if band_first_y >= band_end_y {
-                return (ScaleAccumulators::new(), None);
-            }
+        if band_first_y >= band_end_y {
+            return (ScaleAccumulators::new(), None);
+        }
 
-            let band_rows = band_end_y - band_first_y;
-            let mut band_dm = diffmap_weights.map(|_| vec![0.0f32; band_rows * width]);
+        let band_rows = band_end_y - band_first_y;
+        let mut band_dm = diffmap_weights.map(|_| vec![0.0f32; band_rows * width]);
 
-            let mut accum = ScaleAccumulators::new();
-            // bufs is provided externally (per-rayon-worker via map_init);
-            // first use grows to max_strip_n; subsequent uses reuse the
-            // existing allocation. Eliminates the per-band ScaleBuffers::new
-            // memset overhead (~9 % of wall time at 1080p pre-opt).
-            bufs.ensure_capacity(max_strip_n);
+        let mut accum = ScaleAccumulators::new();
+        // bufs is provided externally (per-rayon-worker via map_init);
+        // first use grows to max_strip_n; subsequent uses reuse the
+        // existing allocation. Eliminates the per-band ScaleBuffers::new
+        // memset overhead (~9 % of wall time at 1080p pre-opt).
+        bufs.ensure_capacity(max_strip_n);
 
-            // We iterate through the band's source-row inner positions in
-            // OUTER coordinates, advancing by STRIP_INNER. Each inner chunk
-            // is mapped to strip-local coords for the V-blur kernel.
-            let mut outer_y = outer_band_first_y.max(strip_outer_y0);
-            while outer_y < outer_band_end_y.min(strip_outer_y1) {
-                let outer_inner_end = (outer_y + STRIP_INNER)
-                    .min(outer_band_end_y)
-                    .min(strip_outer_y1);
-                let inner_h_full = outer_inner_end - outer_y;
+        // We iterate through the band's source-row inner positions in
+        // OUTER coordinates, advancing by STRIP_INNER. Each inner chunk
+        // is mapped to strip-local coords for the V-blur kernel.
+        let mut outer_y = outer_band_first_y.max(strip_outer_y0);
+        while outer_y < outer_band_end_y.min(strip_outer_y1) {
+            let outer_inner_end = (outer_y + STRIP_INNER)
+                .min(outer_band_end_y)
+                .min(strip_outer_y1);
+            let inner_h_full = outer_inner_end - outer_y;
 
-                // Strip-local mapping for THIS sub-strip's processing:
-                let strip_local_inner_y = outer_y - strip_outer_y0;
-                let strip_local_inner_end = outer_inner_end - strip_outer_y0;
+            // Strip-local mapping for THIS sub-strip's processing:
+            let strip_local_inner_y = outer_y - strip_outer_y0;
+            let strip_local_inner_end = outer_inner_end - strip_outer_y0;
 
-                // Overlap reads in OUTER coords (consistent with full-image
-                // path's band behavior). Mirror-clamp against the OUTER
-                // plane bounds, NOT the strip bounds — this is what makes
-                // the V-blur running-sum init point match the full-image
-                // path.
-                let outer_strip_top = outer_y.saturating_sub(overlap);
-                let outer_strip_bot = (outer_inner_end + overlap).min(layout_h);
+            // Overlap reads in OUTER coords (consistent with full-image
+            // path's band behavior). Mirror-clamp against the OUTER
+            // plane bounds, NOT the strip bounds — this is what makes
+            // the V-blur running-sum init point match the full-image
+            // path.
+            let outer_strip_top = outer_y.saturating_sub(overlap);
+            let outer_strip_bot = (outer_inner_end + overlap).min(layout_h);
 
-                // For the strip's V-blur kernel, the overlap reads must
-                // land within the strip's data. This requires
-                // `strip_margin >= overlap` at every scale.
-                //
-                // If `outer_strip_top < strip_outer_y0`, the strip doesn't
-                // contain those rows — that's OK for the FIRST strip
-                // (strip_outer_y0 == 0, so saturating_sub gives the same
-                // mirror behavior as full-image path at image top). For
-                // interior strips, this is a precondition violation.
-                //
-                // Similarly at the bottom.
-                let strip_top = outer_strip_top.saturating_sub(strip_outer_y0);
-                let strip_bot = (outer_strip_bot - strip_outer_y0).min(height);
-                let strip_h = strip_bot - strip_top;
-                let inner_start_full = strip_local_inner_y - strip_top;
+            // For the strip's V-blur kernel, the overlap reads must
+            // land within the strip's data. This requires
+            // `strip_margin >= overlap` at every scale.
+            //
+            // If `outer_strip_top < strip_outer_y0`, the strip doesn't
+            // contain those rows — that's OK for the FIRST strip
+            // (strip_outer_y0 == 0, so saturating_sub gives the same
+            // mirror behavior as full-image path at image top). For
+            // interior strips, this is a precondition violation.
+            //
+            // Similarly at the bottom.
+            let strip_top = outer_strip_top.saturating_sub(strip_outer_y0);
+            let strip_bot = (outer_strip_bot - strip_outer_y0).min(height);
+            let strip_h = strip_bot - strip_top;
+            let inner_start_full = strip_local_inner_y - strip_top;
 
-                let strip_n = width * strip_h;
-                bufs.resize(strip_n);
+            let strip_n = width * strip_h;
+            bufs.resize(strip_n);
 
-                // Apply the inner_y_filter: only rows in [filter_y0, filter_y1)
-                // of the plane contribute to the accumulator. We process the
-                // full band-inner range so the blur stencil is correct, but
-                // hand the kernel a clipped (inner_start, inner_h) so it
-                // skips accumulation outside the filter.
-                let acc_y0 = strip_local_inner_y.max(filter_y0);
-                let acc_y1 = strip_local_inner_end.min(filter_y1);
-                if acc_y0 >= acc_y1 {
-                    // Entire band-inner is outside the filter — skip.
-                    outer_y = outer_inner_end;
-                    continue;
-                }
-                let inner_start = acc_y0 - strip_top;
-                let inner_h = acc_y1 - acc_y0;
-                // Sanity: inner_start..inner_start+inner_h must lie within
-                // the band-inner and within [0..strip_h].
-                debug_assert!(inner_start >= inner_start_full);
-                debug_assert!(inner_start + inner_h <= inner_start_full + inner_h_full);
-                debug_assert!(inner_start + inner_h <= strip_h);
-                let _ = (inner_start_full, inner_h_full);
-
-                accum.n += inner_h * width;
-
-                // Diffmap slice for the accumulated rows (band-local offset).
-                // The diffmap is allocated for the full band, so we offset
-                // into it by (acc_y0 - band_first_y) rows.
-                let dm_start = (acc_y0 - band_first_y) * width;
-                let dm_n = inner_h * width;
-
-                for entry in &scale_active {
-                    let Some((c, need_ssim, need_edge)) = *entry else {
-                        continue;
-                    };
-                    let dm_info = match band_dm.as_mut() {
-                        Some(dm) if need_ssim => {
-                            let dm_w = diffmap_weights.unwrap();
-                            Some((&mut dm[dm_start..dm_start + dm_n], dm_w[c]))
-                        }
-                        _ => None,
-                    };
-                    let ret_info = band_ret.as_mut().map(|r| {
-                        (
-                            &mut r.sd[c][dm_start..dm_start + dm_n],
-                            &mut r.mu1[c][dm_start..dm_start + dm_n],
-                            &mut r.mu2[c][dm_start..dm_start + dm_n],
-                        )
-                    });
-                    process_strip_channel(
-                        &src_planes[c][strip_top * width..strip_bot * width],
-                        &dst_planes[c][strip_top * width..strip_bot * width],
-                        width,
-                        strip_h,
-                        inner_start,
-                        inner_h,
-                        config,
-                        c,
-                        need_ssim,
-                        need_edge,
-                        bufs,
-                        &mut accum,
-                        dm_info,
-                        ret_info,
-                    );
-                }
-
+            // Apply the inner_y_filter: only rows in [filter_y0, filter_y1)
+            // of the plane contribute to the accumulator. We process the
+            // full band-inner range so the blur stencil is correct, but
+            // hand the kernel a clipped (inner_start, inner_h) so it
+            // skips accumulation outside the filter.
+            let acc_y0 = strip_local_inner_y.max(filter_y0);
+            let acc_y1 = strip_local_inner_end.min(filter_y1);
+            if acc_y0 >= acc_y1 {
+                // Entire band-inner is outside the filter — skip.
                 outer_y = outer_inner_end;
+                continue;
+            }
+            let inner_start = acc_y0 - strip_top;
+            let inner_h = acc_y1 - acc_y0;
+            // Sanity: inner_start..inner_start+inner_h must lie within
+            // the band-inner and within [0..strip_h].
+            debug_assert!(inner_start >= inner_start_full);
+            debug_assert!(inner_start + inner_h <= inner_start_full + inner_h_full);
+            debug_assert!(inner_start + inner_h <= strip_h);
+            let _ = (inner_start_full, inner_h_full);
+
+            accum.n += inner_h * width;
+
+            // Diffmap slice for the accumulated rows (band-local offset).
+            // The diffmap is allocated for the full band, so we offset
+            // into it by (acc_y0 - band_first_y) rows.
+            let dm_start = (acc_y0 - band_first_y) * width;
+            let dm_n = inner_h * width;
+
+            for entry in &scale_active {
+                let Some((c, need_ssim, need_edge)) = *entry else {
+                    continue;
+                };
+                let dm_info = match band_dm.as_mut() {
+                    Some(dm) if need_ssim => {
+                        let dm_w = diffmap_weights.unwrap();
+                        Some((&mut dm[dm_start..dm_start + dm_n], dm_w[c]))
+                    }
+                    _ => None,
+                };
+                let ret_info = band_ret.as_mut().map(|r| {
+                    (
+                        &mut r.sd[c][dm_start..dm_start + dm_n],
+                        &mut r.mu1[c][dm_start..dm_start + dm_n],
+                        &mut r.mu2[c][dm_start..dm_start + dm_n],
+                    )
+                });
+                let fold_info = band_fold.as_mut().map(|f| {
+                    (
+                        f.co[c],
+                        &mut f.id[dm_start..dm_start + dm_n],
+                        &mut f.win[dm_start..dm_start + dm_n],
+                    )
+                });
+                process_strip_channel(
+                    &src_planes[c][strip_top * width..strip_bot * width],
+                    &dst_planes[c][strip_top * width..strip_bot * width],
+                    width,
+                    strip_h,
+                    inner_start,
+                    inner_h,
+                    config,
+                    c,
+                    need_ssim,
+                    need_edge,
+                    bufs,
+                    &mut accum,
+                    dm_info,
+                    ret_info,
+                    fold_info,
+                );
             }
 
-            (accum, band_dm)
-        };
+            outer_y = outer_inner_end;
+        }
+
+        (accum, band_dm)
+    };
 
     // Pre-split the caller's retention planes into band-aligned mutable
     // chunks (bands tile the plane in `STRIP_INNER`-row order, matching
@@ -2395,7 +2476,7 @@ fn process_scale_bands_into_accum(
     // parallel bands write in place — no per-band allocation, no
     // concatenation copies (the C3a retention-churn lever).
     let band_chunk_rows = STRIP_INNER * strips_per_band;
-    let mut band_rets: Vec<Option<AttrBandSlices<'_>>> = match attr_ret_out {
+    let band_rets: Vec<Option<AttrBandSlices<'_>>> = match attr_ret_out {
         Some(ret) => {
             let n_used = width * height;
             fn split3(
@@ -2438,6 +2519,24 @@ fn process_scale_bands_into_accum(
     };
     debug_assert_eq!(band_rets.len(), num_bands);
 
+    // Pre-split the fold's id/win planes into the SAME band tiling as the
+    // retention planes (row-range-disjoint chunks in band order).
+    let band_folds: Vec<Option<AttrFoldBand<'_>>> = match attr_fold_out {
+        Some((co, id_plane, win_plane)) => {
+            let n_used = width * height;
+            let chunk = band_chunk_rows * width;
+            id_plane[..n_used]
+                .chunks_mut(chunk)
+                .zip(win_plane[..n_used].chunks_mut(chunk))
+                .map(|(id, win)| Some(AttrFoldBand { co: *co, id, win }))
+                .collect()
+        }
+        None => (0..num_bands).map(|_| None).collect(),
+    };
+    debug_assert_eq!(band_folds.len(), num_bands);
+    let band_aux: Vec<(Option<AttrBandSlices<'_>>, Option<AttrFoldBand<'_>>)> =
+        band_rets.into_iter().zip(band_folds).collect();
+
     #[allow(clippy::redundant_closure)]
     let band_results: Vec<_> = {
         // Per-rayon-worker scratch — first band on each worker grows
@@ -2450,26 +2549,28 @@ fn process_scale_bands_into_accum(
         #[cfg(feature = "threads")]
         if run_parallel {
             use rayon::prelude::*;
-            band_rets
+            band_aux
                 .into_par_iter()
                 .enumerate()
-                .map_init(init_bufs, |bufs, (i, ret)| process_band(bufs, i, ret))
+                .map_init(init_bufs, |bufs, (i, (ret, fold))| {
+                    process_band(bufs, i, ret, fold)
+                })
                 .collect()
         } else {
             let mut bufs = init_bufs();
-            band_rets
-                .drain(..)
+            band_aux
+                .into_iter()
                 .enumerate()
-                .map(|(i, ret)| process_band(&mut bufs, i, ret))
+                .map(|(i, (ret, fold))| process_band(&mut bufs, i, ret, fold))
                 .collect()
         }
         #[cfg(not(feature = "threads"))]
         {
             let mut bufs = init_bufs();
-            band_rets
-                .drain(..)
+            band_aux
+                .into_iter()
                 .enumerate()
-                .map(|(i, ret)| process_band(&mut bufs, i, ret))
+                .map(|(i, (ret, fold))| process_band(&mut bufs, i, ret, fold))
                 .collect()
         }
     };
@@ -3199,6 +3300,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
             scale_filter,
             scale_outer,
             None,
+            None,
         );
         accums.push(accum);
 
@@ -3899,9 +4001,113 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
             None,
             None,
             Some(&mut retention),
+            None,
         );
         let scale_stat = accum.finalize(config.iw_strength as f64);
         on_scale(scale, &scale_stat, src_planes, dst_view, &retention, w, h);
+        stats.push(scale_stat);
+
+        if scale < num_scales - 1 {
+            let (nw, nh) = downscale_3_planes(&mut dst_planes, w, h, parallel);
+            w = nw;
+            h = nh;
+        }
+    }
+
+    #[cfg(feature = "threads")]
+    dealloc_planes(dst_planes, None);
+    #[cfg(not(feature = "threads"))]
+    drop(dst_planes);
+
+    combine_scores(&stats, weights, config, mean_offset)
+}
+
+/// task #70 stale-scalar single-pass: the fold twin of
+/// [`compute_zensim_streaming_with_ref_and_attr_planes`]. Instead of
+/// retaining planes for a post-scale combine, each scale's attribution
+/// combine runs IN-STRIP with the caller-supplied per-scale coefficient
+/// packs (derived from a PREVIOUS compare's pooled scalars — the stale
+/// semantics), accumulating into the caller's scale-0-sized `id`/`win`
+/// planes (zeroed here per scale). `on_scale` receives the finalized
+/// stats plus this scale's accumulated id/win prefixes for the
+/// spread/merge/upsample tail and next-coefficient derivation. The score
+/// path (stats, finalize, combine_scores) is IDENTICAL to the other
+/// walks.
+pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
+    precomputed: &PrecomputedReference,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    coeffs_per_scale: &[[[f32; 12]; 3]],
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+    mut on_scale: impl FnMut(usize, &ScaleStats, &mut [f32], &mut [f32], usize, usize),
+) -> crate::metric::ZensimResult {
+    let width = distorted.width();
+    let height = distorted.height();
+    let padded_width = simd_padded_width(width);
+    let mut dst_planes =
+        convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
+
+    let num_scales = config.num_scales.min(precomputed.scales.len());
+    let parallel = config.allow_multithreading;
+
+    let (src_planes_s0, _, _) = precomputed.scale(0);
+    let dst_view_s0: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
+    let mean_offset =
+        compute_xyb_mean_offset(src_planes_s0, dst_view_s0, width, height, padded_width);
+
+    let mut stats = Vec::with_capacity(num_scales);
+    let mut w = padded_width;
+    let mut h = height;
+
+    for scale in 0..num_scales {
+        if w < 8 || h < 8 {
+            break;
+        }
+        let (src_planes, src_w, src_h) = precomputed.scale(scale);
+        assert_eq!(
+            w, src_w,
+            "internal invariant violated: width mismatch at scale {scale}"
+        );
+        assert_eq!(
+            h, src_h,
+            "internal invariant violated: height mismatch at scale {scale}"
+        );
+        let n = w * h;
+        id_plane[..n].fill(0.0);
+        win_plane[..n].fill(0.0);
+        // Same-dims sessions always carry one pack per visited scale; the
+        // zero default (no map contribution) is unreachable there.
+        debug_assert!(scale < coeffs_per_scale.len());
+        let co = coeffs_per_scale
+            .get(scale)
+            .copied()
+            .unwrap_or([[0.0; 12]; 3]);
+        let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
+        let (accum, _) = process_scale_bands_into_accum(
+            src_planes,
+            dst_view,
+            w,
+            h,
+            config,
+            scale,
+            weights,
+            None,
+            None,
+            None,
+            None,
+            Some((&co, &mut id_plane[..n], &mut win_plane[..n])),
+        );
+        let scale_stat = accum.finalize(config.iw_strength as f64);
+        on_scale(
+            scale,
+            &scale_stat,
+            &mut id_plane[..n],
+            &mut win_plane[..n],
+            w,
+            h,
+        );
         stats.push(scale_stat);
 
         if scale < num_scales - 1 {

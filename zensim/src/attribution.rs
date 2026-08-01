@@ -1256,6 +1256,220 @@ mod tests {
             );
         }
     }
+
+    /// #70 stale-scalar single-pass, exactness gate 1: with the SAME pair
+    /// presented twice, the second (stale single-pass) call's map equals
+    /// the fresh fused map of the previous input pair BITWISE — the
+    /// in-strip fold with matching coefficient packs reproduces the
+    /// retained-plane combine exactly (per-pixel elementwise kernel,
+    /// identical spread/merge/upsample tail). Scores stay bit-identical on
+    /// every call.
+    #[test]
+    fn stale_same_pair_second_call_equals_fresh_map_exactly() {
+        let (w, h) = (150, 170);
+        let (src, dst) = test_pair(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let mut s = vec![0.0f64; 156];
+        for (k, v) in s.iter_mut().enumerate() {
+            *v = if k % 3 == 0 { -1.0 } else { -0.25 } * (1.0 + (k % 7) as f64 * 0.1);
+        }
+        let (res_fresh, attr_fresh) = z
+            .compute_with_ref_score_and_attribution(&pre, &ds, &s)
+            .unwrap();
+        let mut sess = AttributionSession::new();
+        let (res1, attr1) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sess)
+            .unwrap();
+        // The priming call IS the fresh path.
+        assert_eq!(res1.score().to_bits(), res_fresh.score().to_bits());
+        for (a, b) in attr1.density().iter().zip(attr_fresh.density().iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "priming map != fresh map");
+        }
+        // Second call: single-pass with the previous (same-pair) scalars —
+        // must equal the fresh map of the previous input pair EXACTLY.
+        let (res2, attr2) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sess)
+            .unwrap();
+        assert_eq!(
+            res2.score().to_bits(),
+            res_fresh.score().to_bits(),
+            "stale-path score must stay bit-identical"
+        );
+        for (i, (a, b)) in attr2
+            .density()
+            .iter()
+            .zip(attr_fresh.density().iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "pixel {i}: stale map {a} != fresh-previous-pair map {b}"
+            );
+        }
+    }
+
+    /// #70 exactness gate 2 (the stale semantics on DISTINCT pairs): after
+    /// priming on pair A, the call on pair B returns score(B) bit-identical
+    /// and a map equal — bitwise — to the reference construction "pair B's
+    /// planes combined with pair A's coefficient packs" built through the
+    /// retained-plane walk. Also proves staleness engages (differs from
+    /// fresh(B)'s map).
+    #[test]
+    fn stale_call_on_new_pair_combines_current_planes_with_previous_scalars() {
+        let (w, h) = (150, 170);
+        let (src, dst_a) = test_pair(w, h);
+        // A second, visibly different distortion for pair B.
+        let dst_b: Vec<[u8; 3]> = dst_a
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let d = ((i % 13) as i16) - 6;
+                [
+                    (p[0] as i16 + d).clamp(0, 255) as u8,
+                    (p[1] as i16 - d).clamp(0, 255) as u8,
+                    (p[2] as i16 + d / 2).clamp(0, 255) as u8,
+                ]
+            })
+            .collect();
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let rs = RgbSlice::new(&src, w, h);
+        let dsa = RgbSlice::new(&dst_a, w, h);
+        let dsb = RgbSlice::new(&dst_b, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let s = vec![-1.0f64; 156];
+
+        let mut sess = AttributionSession::new();
+        let _ = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &dsa, &s, &mut sess)
+            .unwrap();
+        let coeffs_a = sess.coeffs.clone();
+        let (res_b, attr_ab) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &dsb, &s, &mut sess)
+            .unwrap();
+
+        let (res_b_fresh, attr_b_fresh) = z
+            .compute_with_ref_score_and_attribution(&pre, &dsb, &s)
+            .unwrap();
+        assert_eq!(res_b.score().to_bits(), res_b_fresh.score().to_bits());
+
+        // Reference construction: planes of B × coefficient packs of A,
+        // through the retained-plane walk + the identical tail.
+        let params = z.profile().params();
+        let config = config_from_params(params, z.parallel());
+        let (comp_pw, comp_h) = (pre.scales[0].1, pre.scales[0].2);
+        let mut canvas = vec![0.0f32; comp_pw * comp_h];
+        let mut id_plane = vec![0.0f32; comp_pw * comp_h];
+        let mut win_plane = vec![0.0f32; comp_pw * comp_h];
+        let mut spread_tmp: Vec<f32> = Vec::new();
+        let on_scale = |scale: usize,
+                        _stats: &crate::metric::ScaleStats,
+                        src_planes: [&[f32]; 3],
+                        dst_planes: [&[f32]; 3],
+                        ret: &crate::streaming::AttrScaleRetention,
+                        sw: usize,
+                        sh: usize| {
+            let n = sw * sh;
+            id_plane[..n].fill(0.0);
+            win_plane[..n].fill(0.0);
+            let co32 = coeffs_a[scale];
+            for c in 0..3 {
+                fused_combine_plane_f32(
+                    &ret.sd[c][..n],
+                    &src_planes[c][..n],
+                    &dst_planes[c][..n],
+                    &ret.mu1[c][..n],
+                    &ret.mu2[c][..n],
+                    co32[c],
+                    &mut id_plane[..n],
+                    &mut win_plane[..n],
+                );
+            }
+            crate::blur::box_spread_sum_preserving_f32(
+                &mut win_plane[..n],
+                sw,
+                sh,
+                config.blur_radius,
+                &mut spread_tmp,
+            );
+            for (idv, wv) in id_plane[..n].iter_mut().zip(win_plane[..n].iter()) {
+                *idv += *wv;
+            }
+            upsample_add_sum_preserving_f32(
+                &id_plane[..n],
+                sw,
+                sh,
+                &mut canvas,
+                comp_pw,
+                comp_h,
+                1usize << scale,
+            );
+        };
+        let _ = crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes(
+            &pre,
+            &dsb,
+            &config,
+            params.weights,
+            on_scale,
+        );
+        let expected: Vec<f32> = if comp_pw == w && comp_h == h {
+            canvas
+        } else {
+            let mut out = Vec::with_capacity(w * h);
+            for y in 0..h.min(comp_h) {
+                out.extend_from_slice(&canvas[y * comp_pw..y * comp_pw + w.min(comp_pw)]);
+            }
+            out
+        };
+        for (i, (a, b)) in attr_ab.density().iter().zip(expected.iter()).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "pixel {i}: stale map {a} != planes(B)×coeffs(A) reference {b}"
+            );
+        }
+        // Staleness engages: the returned map differs from fresh(B).
+        assert!(
+            attr_ab
+                .density()
+                .iter()
+                .zip(attr_b_fresh.density().iter())
+                .any(|(a, b)| a.to_bits() != b.to_bits()),
+            "stale map unexpectedly identical to fresh(B) — staleness did not engage"
+        );
+    }
+
+    /// #70: a gradient change re-primes (fresh path for the new gradient)
+    /// instead of silently mixing semantics.
+    #[test]
+    fn stale_reprimes_on_gradient_change() {
+        let (w, h) = (96, 80);
+        let (src, dst) = test_pair(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let s1 = vec![-1.0f64; 156];
+        let mut s2 = vec![-0.5f64; 156];
+        s2[13] = -2.0;
+        let mut sess = AttributionSession::new();
+        let _ = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s1, &mut sess)
+            .unwrap();
+        let (_, attr_s2) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s2, &mut sess)
+            .unwrap();
+        let (_, attr_s2_fresh) = z
+            .compute_with_ref_score_and_attribution(&pre, &ds, &s2)
+            .unwrap();
+        for (a, b) in attr_s2.density().iter().zip(attr_s2_fresh.density().iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "re-primed map != fresh map");
+        }
+        assert_eq!(sess.s_saved, s2);
+    }
 }
 
 // ============================================================================
@@ -1288,7 +1502,7 @@ fn coeffs_to_f32(co: &SlotCoeffs) -> [f32; 12] {
 /// strict tests are unchanged — this kernel serves the fused entry only).
 #[autoversion]
 #[allow(clippy::too_many_arguments)]
-fn fused_combine_plane_f32(
+pub(crate) fn fused_combine_plane_f32(
     sd: &[f32],
     src: &[f32],
     dst: &[f32],
@@ -1443,6 +1657,62 @@ impl SlotCoeffs {
     }
 }
 
+/// Cross-compare state for the **stale-scalar single-pass** fused compare
+/// (task #70, C3a ranked lever 3):
+/// [`Zensim::compute_with_ref_score_and_attribution_stale`](crate::Zensim::compute_with_ref_score_and_attribution_stale).
+///
+/// Holds, from the previous compare against the same reference: the
+/// per-(scale, channel) fused-combine coefficient packs (derived from that
+/// compare's pooled scalars) and the reference-side hf sums (distortion-
+/// independent, cached at the priming call). One session serves ONE
+/// (reference, image-size, gradient) triple — a codec loop creates one per
+/// encode. Reuse across a *different* reference of the same size is a
+/// caller error the session cannot detect (the map would mix references);
+/// call [`reset`](Self::reset) when the reference changes. Size or
+/// gradient changes are detected and re-prime automatically.
+#[derive(Default)]
+pub struct AttributionSession {
+    /// Per visited scale: per-channel combine coefficient packs from the
+    /// previous compare's pooled scalars.
+    coeffs: Vec<[[f32; 12]; 3]>,
+    /// Per visited scale: per-channel reference-side hf sums
+    /// `(Σ(src−μ1)², Σ|src−μ1|)` — constant for a fixed reference.
+    hf_src: Vec<[(f64, f64); 3]>,
+    /// The gradient + dims the session was primed with (identity guard).
+    s_saved: Vec<f64>,
+    width: usize,
+    height: usize,
+    /// Reusable per-call scratch (comp-plane sized) — kept across calls so
+    /// the single-pass path pays no allocation / page-fault cost per
+    /// iteration.
+    canvas: Vec<f32>,
+    id_plane: Vec<f32>,
+    win_plane: Vec<f32>,
+    spread_tmp: Vec<f32>,
+}
+
+impl AttributionSession {
+    /// Empty (unprimed) session — the first compare through it runs the
+    /// fresh fused path and primes the cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Drop all cached state; the next compare re-primes (fresh path).
+    /// Call when switching to a different reference image.
+    pub fn reset(&mut self) {
+        self.coeffs.clear();
+        self.hf_src.clear();
+        self.s_saved.clear();
+        self.width = 0;
+        self.height = 0;
+    }
+
+    fn primed_for(&self, width: usize, height: usize, s: &[f64]) -> bool {
+        !self.coeffs.is_empty() && self.width == width && self.height == height && self.s_saved == s
+    }
+}
+
 impl crate::metric::Zensim {
     /// **The fused compare (task #67 C3a)**: scalar score + attribution
     /// steering map from ONE plane pipeline — the codec-loop call shape.
@@ -1476,6 +1746,21 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
+    ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        self.fused_score_attr_fresh(precomputed, distorted, s, None)
+    }
+
+    /// The fresh fused pipeline (the pre-#70 body of
+    /// [`compute_with_ref_score_and_attribution`](Self::compute_with_ref_score_and_attribution),
+    /// unchanged numerically). When `prime` is `Some`, additionally record
+    /// each scale's coefficient packs + reference-side hf sums into the
+    /// session — the stale entry's priming path.
+    fn fused_score_attr_fresh(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        mut prime: Option<&mut AttributionSession>,
     ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
@@ -1521,13 +1806,21 @@ impl crate::metric::Zensim {
             let n_f = n as f64;
             id_plane[..n].fill(0.0);
             win_plane[..n].fill(0.0);
+            let hf: [(f64, f64); 3] =
+                core::array::from_fn(|c| hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n]));
             let co32: [[f32; 12]; 3] = core::array::from_fn(|c| {
-                let (hf_sq, hf_ab) = hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n]);
                 let base_k = scale * FPC * 3 + c * FPC;
                 coeffs_to_f32(&SlotCoeffs::from_scale_stats(
-                    s, base_k, stats, c, n_f, hf_sq, hf_ab,
+                    s, base_k, stats, c, n_f, hf[c].0, hf[c].1,
                 ))
             });
+            // task #70: prime the stale session — THIS compare's coefficient
+            // packs become the NEXT stale call's fold input; the hf sums are
+            // reference-side constants cached once here.
+            if let Some(sess) = prime.as_deref_mut() {
+                sess.coeffs.push(co32);
+                sess.hf_src.push(hf);
+            }
             // Row-banded parallel combine (disjoint id/win rows per band).
             let run_band = |band: usize, idc: &mut [f32], winc: &mut [f32]| {
                 let off = band * 64 * sw;
@@ -1622,6 +1915,192 @@ impl crate::metric::Zensim {
                 t_pipe,
                 combine_ms.get(),
                 t_pipe - combine_ms.get(),
+                t_sat0.elapsed().as_secs_f64() * 1e3,
+            );
+        }
+        Ok((result, attr))
+    }
+
+    /// **Stale-scalar single-pass fused compare (task #70; C3a ranked
+    /// lever 3)**: scalar score + attribution steering map from ONE
+    /// pipeline pass with NO second sweep — the attribution combine runs
+    /// in-strip on cache-hot planes using the coefficient packs derived
+    /// from the PREVIOUS compare through the same `session`.
+    ///
+    /// **Semantics — the map lags one iterate.** The returned map combines
+    /// THIS compare's per-pixel signal planes with the PREVIOUS compare's
+    /// pooled scalars (`SlotCoeffs` — the stats-derived coefficient
+    /// packs). One-iterate staleness of the steering signal is the
+    /// proven-free semantics in the codec loop (C3b `attr-stale`, #69 G4,
+    /// and the metric-matrix study all measured it free); this variant is
+    /// strictly fresher than those arms' fully-stale map (planes are
+    /// current, only the pooled scalars lag). The **score is bit-identical
+    /// to every other compare path** (the fold never touches the stats
+    /// pipeline) — only the map lags.
+    ///
+    /// The FIRST call through an unprimed `session` (and any call after
+    /// [`AttributionSession::reset`], or when the image size or `s`
+    /// changes) runs the fresh fused path
+    /// ([`compute_with_ref_score_and_attribution`](Self::compute_with_ref_score_and_attribution))
+    /// and primes the session — that call returns the FRESH map at fresh
+    /// cost; subsequent calls are single-pass. The session is valid for
+    /// ONE precomputed reference; switching references without `reset()`
+    /// is a caller error the session cannot detect.
+    ///
+    /// # Errors
+    ///
+    /// Same contract as the fresh fused entry (all-basic-features profile,
+    /// `blur_passes == 1`, matching pair dims).
+    pub fn compute_with_ref_score_and_attribution_stale(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        session: &mut AttributionSession,
+    ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
+        let params = self.profile().params();
+        if distorted.width() == 0 || distorted.height() == 0 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        validate_ref_match(precomputed, distorted)?;
+        check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
+        let config = config_from_params(params, self.parallel());
+        if config.blur_passes != 1 {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "fused attribution requires blur_passes == 1 (all shipped profiles)",
+            });
+        }
+        if !(config.compute_all_features || config.extended_features) {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "fused attribution requires a profile computing all basic features \
+                         (an MLP/bake profile or extended_features)",
+            });
+        }
+
+        let width = distorted.width();
+        let height = distorted.height();
+
+        // Unprimed, or the size/gradient changed: fresh fused path, prime.
+        if !session.primed_for(width, height, s) {
+            session.reset();
+            session.width = width;
+            session.height = height;
+            session.s_saved = s.to_vec();
+            return self.fused_score_attr_fresh(precomputed, distorted, s, Some(session));
+        }
+
+        let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
+        let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
+        let t_all = std::time::Instant::now();
+        let tail_ms = std::cell::Cell::new(0.0f64);
+        // Session-owned scratch: no per-iteration allocation/page-fault
+        // cost on the single-pass path. The canvas accumulates across
+        // scales, so it is re-zeroed here.
+        let comp_n = comp_pw * comp_h;
+        session.canvas.resize(comp_n, 0.0);
+        session.canvas.fill(0.0);
+        session.id_plane.resize(comp_n, 0.0);
+        session.win_plane.resize(comp_n, 0.0);
+        let mut canvas = std::mem::take(&mut session.canvas);
+        let mut id_plane = std::mem::take(&mut session.id_plane);
+        let mut win_plane = std::mem::take(&mut session.win_plane);
+        let mut spread_tmp = std::mem::take(&mut session.spread_tmp);
+        // The previous compare's packs drive THIS pass's in-strip fold;
+        // this pass's stats produce the packs for the NEXT call. (On an
+        // error return below the session is left unprimed — the next call
+        // re-primes through the fresh path.)
+        let coeffs_prev = std::mem::take(&mut session.coeffs);
+        let mut next_coeffs: Vec<[[f32; 12]; 3]> = Vec::with_capacity(coeffs_prev.len());
+        let hf_cached = &session.hf_src;
+
+        let on_scale = |scale: usize,
+                        stats: &crate::metric::ScaleStats,
+                        idp: &mut [f32],
+                        winp: &mut [f32],
+                        sw: usize,
+                        sh: usize| {
+            let t_c = std::time::Instant::now();
+            let n = sw * sh;
+            let n_f = n as f64;
+            // Post-scale tail — IDENTICAL code to the fresh path (same
+            // spread, same merge, same upsample ⇒ bitwise-equal maps when
+            // the coefficient packs coincide).
+            crate::blur::box_spread_sum_preserving_f32(
+                &mut winp[..n],
+                sw,
+                sh,
+                config.blur_radius,
+                &mut spread_tmp,
+            );
+            for (idv, wv) in idp[..n].iter_mut().zip(winp[..n].iter()) {
+                *idv += *wv;
+            }
+            upsample_add_sum_preserving_f32(
+                &idp[..n],
+                sw,
+                sh,
+                &mut canvas,
+                comp_pw,
+                comp_h,
+                1usize << scale,
+            );
+            // Derive the NEXT call's packs from THIS compare's pooled
+            // scalars + the cached reference-side hf sums.
+            let hf = hf_cached.get(scale).copied().unwrap_or([(0.0, 0.0); 3]);
+            next_coeffs.push(core::array::from_fn(|c| {
+                let base_k = scale * FPC * 3 + c * FPC;
+                coeffs_to_f32(&SlotCoeffs::from_scale_stats(
+                    s, base_k, stats, c, n_f, hf[c].0, hf[c].1,
+                ))
+            }));
+            tail_ms.set(tail_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
+        };
+
+        let result = crate::streaming::compute_zensim_streaming_with_ref_and_attr_fold(
+            precomputed,
+            distorted,
+            &config,
+            params.weights,
+            &coeffs_prev,
+            &mut id_plane,
+            &mut win_plane,
+            on_scale,
+        );
+        let mut result = result.with_profile(self.profile());
+        // Same real-scoring step as every compare path — bit-identical
+        // score (the in-strip fold reads planes, never writes stats).
+        crate::metric::apply_mlp_scoring_with_codec(
+            &mut result,
+            params,
+            width as u32,
+            height as u32,
+            None,
+        )?;
+        session.coeffs = next_coeffs;
+
+        let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
+        let t_sat0 = std::time::Instant::now();
+        let trimmed: Vec<f32> = if comp_pw == width && comp_h == height {
+            canvas.clone()
+        } else {
+            let mut out = Vec::with_capacity(width * height);
+            for y in 0..height.min(comp_h) {
+                out.extend_from_slice(&canvas[y * comp_pw..y * comp_pw + width.min(comp_pw)]);
+            }
+            out
+        };
+        // Return the scratch to the session for the next iteration.
+        session.canvas = canvas;
+        session.id_plane = id_plane;
+        session.win_plane = win_plane;
+        session.spread_tmp = spread_tmp;
+        let attr = AttributionResult::from_density(trimmed, width, height);
+        if perf_log {
+            eprintln!(
+                "ATTRPERF stale: pipeline {:.1} ms (spread/upsample/derive tail {:.1} ms; in-strip fold inside walk) | trim+SAT {:.1} ms",
+                t_pipe,
+                tail_ms.get(),
                 t_sat0.elapsed().as_secs_f64() * 1e3,
             );
         }

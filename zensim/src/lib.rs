@@ -306,7 +306,7 @@ pub use source::{
 };
 
 #[cfg(feature = "custom-profiles")]
-pub use attribution::AttributionResult;
+pub use attribution::{AttributionResult, AttributionSession};
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::{PrecomputedReference, ZensimScratch};
 

@@ -43,9 +43,17 @@ fn main() {
         .compute_with_ref_score_and_attribution(&pre, &ds, &s)
         .unwrap();
 
+    // #70 stale arm setup: prime the session during warm-up so every
+    // measured call below is the single-pass path (the codec-loop shape).
+    let mut sess = zensim::AttributionSession::new();
+    let _ = z
+        .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sess)
+        .unwrap();
+
     let mut t_scalar = Vec::new();
     let mut t_fold = Vec::new();
     let mut t_fused = Vec::new();
+    let mut t_stale = Vec::new();
     for _ in 0..iters {
         let t = std::time::Instant::now();
         let r1 = z.compute_with_ref(&pre, &ds).unwrap();
@@ -65,12 +73,34 @@ fn main() {
             .unwrap();
         t_fused.push(t.elapsed().as_secs_f64() * 1e3);
         std::hint::black_box((r3.score(), a3.query_rect(0, 0, 32, 32)));
+
+        // #70 stale-scalar single-pass arm (session primed in warm-up, so
+        // every measured call is the single-pass path — the codec-loop
+        // shape). Interleaved with the other arms per iteration so load
+        // shifts hit all arms equally.
+        let t = std::time::Instant::now();
+        let (r4, a4) = z
+            .compute_with_ref_score_and_attribution_stale(&pre, &ds, &s, &mut sess)
+            .unwrap();
+        t_stale.push(t.elapsed().as_secs_f64() * 1e3);
+        std::hint::black_box((r4.score(), a4.query_rect(0, 0, 32, 32)));
     }
-    let (ms_s, ms_fo, ms_fu) = (median_ms(t_scalar), median_ms(t_fold), median_ms(t_fused));
+
+    let (ms_s, ms_fo, ms_fu, ms_st) = (
+        median_ms(t_scalar),
+        median_ms(t_fold),
+        median_ms(t_fused),
+        median_ms(t_stale),
+    );
     let marg_attr = ms_fu - ms_s;
     let marg_fold = ms_fo - ms_s;
+    let marg_stale = ms_st - ms_s;
     println!(
         "FUSEDPERF {w}x{h} (iters {iters}): scalar-only {ms_s:.1} ms | fold {ms_fo:.1} ms | fused(score+map) {ms_fu:.1} ms | marginal map {marg_attr:.1} ms | marginal fold {marg_fold:.1} ms | ratio {:.2}x (target <=1.10x)",
         marg_attr / marg_fold.max(1e-9)
+    );
+    println!(
+        "STALEPERF {w}x{h} (iters {iters}): stale(score+map) {ms_st:.1} ms | marginal stale map {marg_stale:.1} ms | stale ratio {:.2}x vs fold marginal {marg_fold:.1} ms (target <=1.10x)",
+        marg_stale / marg_fold.max(1e-9)
     );
 }
