@@ -323,6 +323,19 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   theme-aware (light/dark), dataviz-validated palette. **Stats are NEVER
   hand-rolled**: SROCC/PLCC come from the fulleval JSON's `scatter` block (eval
   agent → canonical `panel`) or, if omitted, `scripts/lib/zen_stats.panel` at build.
+  Plus (2026-08-01) the **JXL loop-targeting panel**: `2shot/3shot ±2` scoreboard
+  columns (emit-best, mapped bakes only via `gauntlet.LOOP_BAKE_MAP`) + its own
+  section table (all loop models incl. emit-last, the outer arms and ssim2, which
+  are not bakes), fed by the jxl-encoder sweep summary via `--loop-targeting`
+  (default = the committed
+  `~/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-01.json`;
+  section omitted with a loud note when absent). Counts/medians are READ from that
+  JSON, never re-derived (the jxl-encoder analyze script is the owner).
+  **Regen gates (MANDATORY, run on every emitted HTML):**
+  `scripts/v_next/gauntlet_gates.sh <html>` = `node --check` on the extracted
+  inline JS + the DOM-shim render harness (`gauntlet_render_check.js`) — committed
+  2026-08-01 (previously ad-hoc; the raw-Python-string `\'` escape class blanked
+  the page once, e7f929ca).
 The first two modes' plots: per-bake scatter+trend, grouped 10-band SROCC bars,
 calibration curve, residual, candlestick, SROCC heatmap, 2-panel Pareto trade
 (CID22 vs nonphoto / KonJND), composite ranking bar, per-codec dial plots +

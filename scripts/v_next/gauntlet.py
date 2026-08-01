@@ -12,7 +12,11 @@ and emits ONE self-contained, offline HTML page with:
   * the correlation SCATTER MATRIX — for the selected reference, one clean scatter per
     (bake x corpus) with an OLS fit line + canonical SROCC/PLCC annotated, faceted so bakes sit
     side by side per corpus,
-  * a cross-corpus SROCC heatmap and a CID22-vs-{nonphoto,KonJND} operating-point trade map.
+  * a cross-corpus SROCC heatmap and a CID22-vs-{nonphoto,KonJND} operating-point trade map,
+  * the JXL loop-targeting panel (2026-08-01): 2-shot/3-shot within-±2 scoreboard columns
+    (emit-best, bakes mapped via ``LOOP_BAKE_MAP``) + a section table of every loop model
+    (emit-last detail, outer arms, ssim2), fed verbatim by the jxl-encoder sweep summary
+    JSON (``--loop-targeting``; counts/medians are READ, never re-derived here).
 
 NO external requests: all CSS/JS/data are inlined (no CDN, no web fonts) so the file opens
 offline. NO hand-rolled statistics: every SROCC/PLCC comes from the canonical ``panel`` (via the
@@ -47,6 +51,52 @@ REF_LABELS = {"mos": "MOS (human)", "jnd": "JND (human)", "ssim2": "SSIMULACRA2"
 # scoreboard columns beyond CID22: (key, header, higher_is_better, fmt)
 CORP_ORDER = ["cid22", "nonphoto", "konjnd", "aic3", "aic4", "live", "csiq", "kadid", "tid"]
 SCATTER_MAX = 500  # subsample dense per_pair for embedding — keeps the offline file responsive
+
+# ---- JXL loop-targeting (2/3-shot) summary — produced by the jxl-encoder repo's exact
+# 2/3-shot sweep (raw cells: benchmarks/zensim_loop_23shot_2026-08-01.tsv there; doc:
+# benchmarks/zensim_loop_23shot_2026-08-01.md). The dashboard READS the machine summary
+# JSON — counts/medians are never re-derived here (no-duplication rule; the jxl analyze
+# script is the owner). Loop-model keys -> gauntlet bake names (fulleval `name`): models
+# not in this map (the outer arms + ssim2, which are not bakes) render only in the
+# section's own table; bakes without loop data render an em-dash.
+DEFAULT_LOOP_TARGETING = (
+    "/home/lilith/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-01.json"
+)
+LOOP_BAKE_MAP = {
+    # loop-model key (summary JSON `models` key, = the sweep TSV run prefix)
+    #   ->  bake `name` on the gauntlet board (fulleval JSON `name`).
+    # Order matters: the FIRST model mapping to a bake is that bake's scoreboard
+    # primary (v47A_base before the h3 variant and the outer arm).
+    "v47A_base": "v47_strict_QAT_native",
+    "v47A_h3g20c135": "v47_strict_QAT_native",
+    "B_base": "b_sdr_linear_cid80_inclwinsor_dense_dial",
+    "bvls_base": "v02_bvls_NO_shaping",
+    "outer_zensimA": "v47_strict_QAT_native",
+    # blend2L_base's bake (mlp_2L_diverse_H128) has no fulleval JSON on the board —
+    # its row shows the bake filename from the summary JSON; map it when one lands.
+}
+
+
+def load_loop_targeting(path=None):
+    """Read the Part-A machine summary JSON (jxl-encoder sweep). Returns the embed dict
+    {meta, models, bakeMap, modelBake} or None (missing file -> section omitted, loud note).
+    Counts/medians are READ verbatim, never re-derived here."""
+    p = Path(path or DEFAULT_LOOP_TARGETING)
+    if not p.exists():
+        print(f"NOTE: loop-targeting summary not found at {p} — JXL loop panel omitted",
+              file=sys.stderr)
+        return None
+    o = json.loads(p.read_text())
+    models = o.get("models") or {}
+    bake_map = {}     # bake name -> PRIMARY loop-model key (first map hit wins = baseline arm)
+    model_bake = {}   # loop-model key -> bake name (for the section table's bake column)
+    for mk, bake in LOOP_BAKE_MAP.items():
+        if mk in models:
+            model_bake[mk] = bake
+            if bake not in bake_map:
+                bake_map[bake] = mk
+    return {"meta": {k: o.get(k) for k in ("date", "matrix", "notes", "source") if k in o},
+            "models": models, "bakeMap": bake_map, "modelBake": model_bake}
 
 
 def _fit_line(x, y):
@@ -231,9 +281,10 @@ svg{display:block;max-width:100%;height:auto}
 """
 
 
-def build_html(bakes, out_path, title="zensim summer gauntlet"):
+def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=None):
     data = {"bakes": bakes, "palette": PALETTE, "references": REFERENCES,
-            "refLabels": REF_LABELS, "corpOrder": CORP_ORDER}
+            "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
+            "loopTargeting": loop_targeting}
     any_stub = any(b.get("is_stub") for b in bakes)
     stub_note = ("<span class='stub'>STUB DATA</span> — synthesized fixtures "
                  "(<code>make_stub_fulleval.py</code>); drop the eval agent's real "
@@ -352,6 +403,17 @@ const COLS=[
   ['cid22_bwd','CID22 %bwd',false,b=>{const r=b.rank.cid22;return r&&r.frac_negative!=null?r.frac_negative:null;}],
 ];
 const rs=(b,c)=>{const r=b.rank[c];return r?r.srocc:null;};
+// ---- JXL loop-targeting join (2/3-shot). LT is the jxl-encoder sweep summary (READ, not
+// re-derived). Scoreboard shows the mapped bake's emit-best cells; full detail (emit-last,
+// outer arms, ssim2) lives in the JXL loop targeting section.
+const LT=DATA.loopTargeting||null;
+const ltN=()=>(LT&&LT.meta&&LT.meta.matrix&&LT.meta.matrix.n_cells)||27;
+const ltCell=(b,mode)=>{if(!LT)return null;const mk=LT.bakeMap[b.name];if(!mk)return null;
+  const m=LT.models[mk];return (m&&m.cells&&m.cells[mode])||null;};
+if(LT){COLS.push(
+  ['loop2','2shot ±2',false,b=>{const c=ltCell(b,'k2_emit_best');return c?c.within2:null;}],
+  ['loop3','3shot ±2',false,b=>{const c=ltCell(b,'k3_emit_best');return c?c.within2:null;}],
+  ['loop3err','3shot med|err|',false,b=>{const c=ltCell(b,'k3_emit_best');return c!=null&&c.med_abs_err!=null?c.med_abs_err:null;}]);}
 function fmtCell(key,v){
   if(key==='name'||key==='regime')return v;
   if(key==='cid22_bwd')return v==null?'—':pct(v);
@@ -359,6 +421,8 @@ function fmtCell(key,v){
   if(key==='corr'||key==='dial_mono')return pct(v);
   if(key==='m3_mass')return v==null?'—':v.toFixed(1)+'%';
   if(key==='cid22_ci')return v==null?'—':'±'+v.toFixed(3);
+  if(key==='loop2'||key==='loop3')return v==null?'—':v+'/'+ltN();
+  if(key==='loop3err')return v==null?'—':(+v).toFixed(2);
   return f3(v);
 }
 function renderTable(){
@@ -369,7 +433,10 @@ function renderTable(){
     +'not re-derived. <b>CID22 95%CI±</b> = bootstrap half-width; bakes with overlapping CIs are a statistical '
     +'TIE, not an ordering. <b>CID22 %bwd</b> = share of reference ladders ranked BACKWARDS (no pooled stat sees '
     +'it). <b>M3a-attr</b> = the DEPLOYABLE attribution-density steering map vs \u0394S (exact integrands + SAT, task #67 \u2014 the map codecs query); <b>M3-coh</b> = the legacy signal fold, kept for the before/after story (the 128px fold inversion the attribution map cures). <b>M3 drop%</b> = f156-371 mass the FOLD cannot spatialize — read a low M3 against it (high drop% '
-    +'= M3 structurally capped, not incoherent). Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80).'});
+    +'= M3 structurally capped, not incoherent). Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80).'
+    +(LT?' <b>2shot/3shot ±2</b> = JXL loop targeting: cells (of '+ltN()+') where the DECODED-judged score lands '
+    +'within ±2 of target in the bake’s own units at encode budget k=2/3, emit-best (emit-last + outer arms: '
+    +'see the JXL loop targeting section).':'')});
   const tbl=el('table',{});
   const thead=el('tr',{});
   COLS.forEach(c=>{const th=el('th',{class:(c[0]==='name'||c[0]==='regime'?'lbl':'')
@@ -398,7 +465,7 @@ function renderTable(){
         const[lo,hi]=ranges[c[0]];let t=hi===lo?.5:(v-lo)/(hi-lo);
         // invert shading where lower is better (tied dead-zone, CI width,
         // backwards-ref share, dropped-mass — all "smaller is better")
-        if(c[0]==='dial_tied'||c[0]==='cid22_ci'||c[0]==='cid22_bwd'||c[0]==='m3_mass')t=1-t;
+        if(c[0]==='dial_tied'||c[0]==='cid22_ci'||c[0]==='cid22_bwd'||c[0]==='m3_mass'||c[0]==='loop3err')t=1-t;
         td.style.background='color-mix(in srgb, var(--seq-hi) '+Math.round(t*62)+'%, var(--surface-1))';
         if(t>.6)td.style.color='#fff';
       }
@@ -715,6 +782,68 @@ function renderGates(){
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
 }
 
+// ---- JXL LOOP TARGETING (2-shot / 3-shot) — fed by the jxl-encoder exact-sweep summary
+// JSON (READ verbatim; the jxl-encoder analyze script is the stats owner). Shows EVERY
+// loop model, including the outer arms + ssim2 which are not bakes on this board.
+function renderLoop(){
+  const host=$('#looptgt');if(!host)return;host.innerHTML='';
+  if(!LT||!LT.models||!Object.keys(LT.models).length)return;
+  const meta=LT.meta||{};const mx=meta.matrix||{};const N=ltN();
+  host.append(el('h2',{text:'JXL loop targeting — 2-shot / 3-shot'}));
+  host.append(el('div',{class:'cap',html:'Which model, driving the jxl-encoder zensim loop, HITS a requested target '
+    +'in k encodes? '+(mx.refs||9)+' refs × targets {'+((mx.targets||[70,80,88]).join(', '))+'} = '+N+' cells; a cell '
+    +'scores when the DECODED-judged result lands within ±'+(mx.within_tol!=null?mx.within_tol:2)+' of target '
+    +'<b>in the arm’s OWN metric units</b> — rows are NOT unit-comparable across metrics. <b>k2/k3</b> = inner-loop '
+    +'budget of 2/3 encodes; <b>emit-best</b> = best-scoring iterate kept (primary, what the scoreboard columns '
+    +'show); <b>emit-last</b> = final iterate. Outer arms (<b>j2/j3</b>, marked °) re-encode outside the inner loop, '
+    +'judged at outer_iter ≤ 2/3, and sit in the k2/k3 emit-last columns (an outer iterate IS its last emit). '
+    +'Hover a cell for median |err|, median bytes and provenance (fresh run vs derived from a committed TSV). '
+    +'Source: <code>'+(meta.source||'jxl-encoder benchmarks/zensim_loop_23shot_summary_2026-08-01.json')+'</code>.'}));
+  const MODES=[['k2_emit_best','k2 emit-best'],['k3_emit_best','k3 emit-best'],['k2_emit_last','k2 emit-last'],['k3_emit_last','k3 emit-last']];
+  const OUTER={k2_emit_last:'j2',k3_emit_last:'j3'};
+  const cellOf=(m,mode)=>{const cs=m.cells||{};if(cs[mode])return cs[mode];
+    if(m.kind==='outer'&&OUTER[mode]&&cs[OUTER[mode]])return cs[OUTER[mode]];return null;};
+  const tbl=el('table',{});
+  const h1=el('tr',{});
+  h1.append(el('th',{class:'lbl',text:'loop model'}),el('th',{class:'lbl',text:'bake row'}));
+  MODES.forEach(([,lab])=>{h1.append(el('th',{text:lab+' ±2'}),el('th',{text:'med|err|'}));});
+  h1.append(el('th',{text:'med bytes (k3 best)'}));
+  tbl.append(el('thead',{},h1));
+  const tb=el('tbody',{});
+  Object.entries(LT.models).forEach(([mk,m])=>{
+    const tr=el('tr',{});
+    const bakeName=(LT.modelBake&&LT.modelBake[mk])||null;
+    const bk=bakeName?DATA.bakes.find(x=>x.name===bakeName):null;
+    const nameTd=el('td',{class:'lbl'});
+    if(bk)nameTd.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(bk)}));
+    nameTd.append(document.createTextNode(mk));
+    tr.append(nameTd);
+    tr.append(el('td',{class:'lbl',text:bakeName?bakeName:(m.bake?m.bake+' (bake not on board)':'(not a bake)')}));
+    MODES.forEach(([mode])=>{
+      const c=cellOf(m,mode);
+      const outer=!!(m.kind==='outer'&&!(m.cells||{})[mode]&&c);
+      const tdA=el('td',{text:c&&c.within2!=null?(c.within2+'/'+(c.n_cells||N)+(outer?'°':'')):'—'});
+      if(c&&c.within2!=null){const t=Math.max(0,Math.min(1,c.within2/(c.n_cells||N)));
+        tdA.style.background='color-mix(in srgb, var(--seq-hi) '+Math.round(t*62)+'%, var(--surface-1))';
+        if(t>.6)tdA.style.color='#fff';}
+      if(c){const tip='<b>'+mk+'</b> '+mode+(outer?' (outer '+OUTER[mode]+')':'')
+        +'<br>within ±2: <b>'+c.within2+'/'+(c.n_cells||N)+'</b>'
+        +'<br>med|err| '+(c.med_abs_err!=null?(+c.med_abs_err).toFixed(2):'—')
+        +' · med bytes '+(c.med_bytes!=null?Math.round(c.med_bytes/1024)+' KB':'—')
+        +(c.provenance?'<br>'+c.provenance:'');
+        tdA.addEventListener('mousemove',ev=>showTip(tip,ev));tdA.addEventListener('mouseleave',hideTip);}
+      tr.append(tdA);
+      tr.append(el('td',{text:c&&c.med_abs_err!=null?(+c.med_abs_err).toFixed(2):'—'}));
+    });
+    const c3=cellOf(m,'k3_emit_best')||cellOf(m,'k3_emit_last');
+    tr.append(el('td',{text:c3&&c3.med_bytes!=null?Math.round(c3.med_bytes/1024)+' KB':'—'}));
+    tb.append(tr);
+  });
+  tbl.append(tb);
+  const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
+  if(meta.notes)host.append(el('div',{class:'cap',text:'notes: '+meta.notes}));
+}
+
 // ---- MODEL DETAILS (architecture + in/out modifiers per bake, from the ZNPR itself)
 function renderModels(){
   const host=$('#models');if(!host)return;host.innerHTML='';
@@ -842,11 +971,11 @@ function renderModels(){
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'gates'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'gates'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
-function rerender(){mountTable();renderHeat();renderMPanel();renderDial();renderGates();renderModels();renderTrade();renderScatter();}
+function rerender(){mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderGates();renderModels();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 if(window.matchMedia)matchMedia('(prefers-color-scheme:dark)').addEventListener('change',()=>{if(!document.documentElement.getAttribute('data-theme'))rerender();});
@@ -858,8 +987,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--fulleval-dir", default="/mnt/v/output/zensim/reports/fulleval")
     ap.add_argument("--best-per-day", default=None)
+    ap.add_argument("--loop-targeting", default=DEFAULT_LOOP_TARGETING,
+                    help="jxl-encoder 2/3-shot loop-targeting summary JSON (section omitted if absent)")
     ap.add_argument("--out", default="/mnt/v/output/zensim/reports/summer_gauntlet.html")
     a = ap.parse_args()
     bakes = load_fulleval(a.fulleval_dir, a.best_per_day)
-    out, size = build_html(bakes, a.out)
+    out, size = build_html(bakes, a.out, loop_targeting=load_loop_targeting(a.loop_targeting))
     print(f"wrote {out}  ({size // 1024} KB)  {len(bakes)} bakes")

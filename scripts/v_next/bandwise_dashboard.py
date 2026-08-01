@@ -698,6 +698,10 @@ def main():
                     help="interactive gauntlet mode: dir of *.fulleval.json to compare (offline HTML)")
     ap.add_argument("--best-per-day", default=None,
                     help="optional best_per_day.json giving champion order for --fulleval-dir")
+    ap.add_argument("--loop-targeting", default=None,
+                    help="jxl-encoder 2/3-shot loop-targeting summary JSON for the gauntlet's "
+                         "JXL loop panel (default: the committed jxl-encoder path; section "
+                         "omitted when the file is absent)")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
 
@@ -706,11 +710,11 @@ def main():
         import os as _os
         import sys as _sys
         _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-        from gauntlet import build_html, load_fulleval
+        from gauntlet import build_html, load_fulleval, load_loop_targeting
         out = a.out or "/mnt/v/output/zensim/reports/summer_gauntlet.html"
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         gbakes = load_fulleval(a.fulleval_dir, a.best_per_day)
-        _p, size = build_html(gbakes, out)
+        _p, size = build_html(gbakes, out, loop_targeting=load_loop_targeting(a.loop_targeting))
         print(f"wrote {out}  ({size // 1024} KB)  {len(gbakes)} bakes (interactive gauntlet)\n  view: "
               + out.replace("/mnt/v/output/", "http://localhost:3300/"))
         return
