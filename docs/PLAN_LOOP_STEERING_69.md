@@ -117,3 +117,58 @@ change #70's design space:
   quality-run at equal bytes) — size dialing doesn't cost quality.
 - Cost context: ~36 ms/compare baseline, ~47.5 ms h3 + one-time ~196 ms
   model gradient at iteration 0 (576²).
+
+### #70 status (2026-08-01) — items 1-2 + the emission sub-item landed
+
+- **Item 1 (gain sweep): DONE** by the metric-matrix study (jxl
+  `0eb31edc`, `benchmarks/zensim_loop_metric_matrix_2026-07-31.md`):
+  pre-registered gate winner = **gain 20, clamp 1.35** (F1 tie 13/27 at
+  k3; bytes tie-break 0.976; none disqualified; the clamp axis is dead at
+  k3, +1 cell at k6).
+- **Best-so-far emission sub-item: SHIPPED** (`JXL_ZENSIM_EMIT_BEST=1`,
+  jxl `14f67aec` + results `4888b56a`,
+  `benchmarks/zensim_emit_best_2026-07-31.md`): at k6 the within-2 census
+  is unchanged exactly as trace-priced (base 18/27, h3 21/27) with
+  medians improved (h3 0.926→0.745); at k12 the diagnosed overshoot
+  regime is CURED — h3 med |err| 0.747→**0.382**, census 22→**25/27**
+  (base 0.750→0.432, 23→25/27); bytes neutral-to-saving (med ratio
+  1.0000 k6 / 0.992-0.993 k12). Extended budgets now help instead of
+  hurting; h3 k12+emit-best is the best arm measured in the series.
+- **Item 2 (stale-scalar single-pass): SHIPPED, additive** — zensim
+  `326185e9` (`AttributionSession` +
+  `Zensim::compute_with_ref_score_and_attribution_stale`; the combine
+  folds IN-STRIP with the previous compare's coefficient packs — no
+  retention, no second sweep) + jxl `1d3866e4`
+  (`JXL_ZENSIM_SINGLEPASS=1`, default off, R0 sha `12cf08e0` preserved).
+  Exactness, not tolerance: score bit-identical on every call; map
+  BITWISE-equal to the fresh combine given matching packs (same-pair
+  test + a planes(B)×coeffs(A) reference construction).
+  - **Perf endpoint (the ≤1.1× bar): NOT met — measured floor 1.84×
+    @576² / 1.40× @1152²** (marginal stale map 3.4 / 13.8 ms vs fold
+    marginal 1.9 / 9.9 ms; the FRESH fused path measured 6.29× / 2.86×
+    on the same interleaved quiet-box runs, load ~2.4 — so the lever cut
+    the marginal 3.4× / 2.0×). Decomposition: the in-strip fold itself
+    is fold-marginal-class (~0.5-0.7 ms @576²; the C1 ordering problem
+    is solved); the floor sits in the per-scale **window SPREAD**
+    (`box_spread_sum_preserving_f32`: 2.2-2.7 ms @576², 7.5-7.8 @1152²)
+    + SAT/trim (0.5-0.6 / 1.7-1.9 ms) + the forced sd-plane store.
+    Ranked remaining levers: (1) parallel spread — H pass is bitwise-safe
+    row-parallel, V pass needs per-band running-sum re-init (f32-noise
+    class; both fused paths shift together, stale==fresh exactness
+    preserved) — est. lands ~at-bar @576² and PASSES @1152²; (2)
+    in-strip clipped-window scatter of the window slots (kills the
+    spread pass entirely; changes summation order → needs its own
+    tolerance gate); (3) lazy/band-parallel SAT build.
+  - **Loop-quality gate: staleness free, FOURTH consecutive
+    measurement** (h3 g20 c1.35, k6, 27 cells, decoded-judged):
+    all-cells med |err| 0.926 → **0.801** (improved 0.125; per-cell
+    delta med −0.002, IQR [−0.092, +0.026]; only 2/27 cells move >0.5,
+    both improvements, both nonphoto; worst regression +0.33 sc_gui
+    t88); per-target Δ t70 +0.008 / t80 +0.143 / t88 0.000; within-2
+    21/27 → 20/27. Loop cost −11 % (med ms/compare 66.2 → 58.9). The
+    fresh arm reproduced the emit-best study's h3 row exactly (zensim
+    `326185e9` is byte-transparent to the deployed fresh loop).
+- **Item 3 (shippedB story)**: unchanged — no steering arm helps the
+  linear bake; H3-class steering ships for MLP-class dials only.
+- **Item 4 (924-class loop steering)**: unchanged — blocked on
+  extractor-side retention hooks (that session's domain).

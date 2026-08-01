@@ -405,7 +405,13 @@ combine pass. Remaining levers, honest estimates (per-section timing
 3. **Stale-scalar single-pass** (codec-loop iteration n uses iteration
    n−1's pooled scalars → everything folds in-kernel): the true ≤1.1×
    endpoint; changes steering semantics between iterations — needs its own
-   coherence gate; C3b candidate.
+   coherence gate; C3b candidate. _[SHIPPED 2026-08-01 as
+   `AttributionSession` + `compute_with_ref_score_and_attribution_stale`
+   (zensim `326185e9`): the in-strip fold IS fold-marginal-class, but the
+   shared spread+SAT tail leaves the measured floor at 1.84×@576² /
+   1.40×@1152² — status, decomposition + next levers in
+   `docs/PLAN_LOOP_STEERING_69.md` "#70 status (2026-08-01)"; loop-quality
+   staleness measured free a fourth time.]_
 
 ## Shape (b) — 924-MLP class: measured, not fused (per constraint)
 
