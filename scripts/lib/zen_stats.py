@@ -150,6 +150,110 @@ def panel(
     return result
 
 
+# ----------------------------------------------------------------------
+# Batch mode (decision_surface_audit_2026-07-31.md gap 4)
+#
+# Per-call shelling is fine for aggregates but prohibitive inside
+# bootstrap loops (10k resamples = 10k process spawns). These wrappers drive
+# `panel --batch`: N (x, y) vector pairs in, N stat rows out, ONE
+# process. The caller keeps ownership of any resampling RNG (send the
+# index sets), so recorded bootstrap numbers stay bit-reproducible and
+# the Rust side stays RNG-free/deterministic.
+# ----------------------------------------------------------------------
+
+_BATCH_FULL_COLS = ("n", "n_dropped", "srocc", "srocc_signed", "plcc",
+                    "plcc_raw", "krocc", "or", "pwrc", "z_rmse")
+_BATCH_SROCC_COLS = ("n", "n_dropped", "srocc", "srocc_signed")
+
+
+def _run_batch(text: str, stats: str, timeout: float) -> list[dict]:
+    if stats not in ("full", "srocc"):
+        raise ValueError(f"stats must be 'full' or 'srocc', got {stats!r}")
+    bin_path = _find_panel_bin()
+    with tempfile.NamedTemporaryFile("w", suffix=".batch.tsv", delete=False) as f:
+        tmp = f.name
+        f.write(text)
+    try:
+        out = subprocess.run(
+            [bin_path, "--batch", tmp, "--stats", stats],
+            capture_output=True, text=True, timeout=timeout, check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"panel --batch failed: {e.stderr.strip()}") from e
+    finally:
+        os.unlink(tmp)
+    lines = out.stdout.splitlines()
+    header = lines[0].split("\t")
+    want = ("label",) + (_BATCH_SROCC_COLS if stats == "srocc" else _BATCH_FULL_COLS)
+    if tuple(header) != want:
+        raise RuntimeError(f"unexpected batch header {header!r}")
+    rows = []
+    for line in lines[1:]:
+        parts = line.split("\t")
+        d = {"label": parts[0]}
+        for k, v in zip(header[1:], parts[1:]):
+            d[k] = int(v) if k in ("n", "n_dropped") else float(v)
+        rows.append(d)
+    return rows
+
+
+def _fmt_vec(v) -> str:
+    # repr(float(...)) is the shortest round-trippable decimal — the
+    # Rust side reads it back bit-exactly (same convention as panel()).
+    return ",".join(repr(float(x)) for x in v)
+
+
+def panel_batch(jobs, stats: str = "full", timeout: float = 1800.0) -> list[dict]:
+    """N explicit (x, y) pairs -> N stat rows, one `panel` process.
+
+    Args:
+        jobs:  iterable of (label, x, y) with x/y equal-length float
+               sequences. x = predicted / metric, y = target / human
+               (same convention as `panel`).
+        stats: "full" (everything the aggregate panel emits, plus
+               srocc_signed + plcc_raw) or "srocc" (bootstrap fast path).
+
+    Returns one dict per job, in input order. Non-finite (x, y) rows are
+    dropped per job and counted in `n_dropped` (aggregate-mode policy).
+    """
+    parts = []
+    for label, x, y in jobs:
+        if "\t" in str(label) or "\n" in str(label):
+            raise ValueError(f"label {label!r} must not contain tab/newline")
+        if len(x) != len(y):
+            raise ValueError(f"job {label!r}: x ({len(x)}) != y ({len(y)})")
+        parts.append(f"{label}\t{_fmt_vec(x)}\t{_fmt_vec(y)}\n")
+    return _run_batch("".join(parts), stats, timeout)
+
+
+def panel_batch_indexed(bases: dict, jobs, stats: str = "full",
+                        timeout: float = 1800.0) -> list[dict]:
+    """N index-set resamples over shared base vectors -> N stat rows.
+
+    The paired-bootstrap shape: declare each base vector ONCE, then each
+    job references two bases plus an index set applied to BOTH (or None
+    for all rows). ~n integers per job instead of ~2n floats.
+
+    Args:
+        bases: {name: float sequence}. Names must be tab/colon-free.
+        jobs:  iterable of (label, x_name, y_name, indices_or_None).
+        stats: "full" or "srocc".
+    """
+    parts = []
+    for name, v in bases.items():
+        if any(c in str(name) for c in "\t\n:@"):
+            raise ValueError(f"base name {name!r} must not contain tab/colon/@")
+        parts.append(f"#def {name}\t{_fmt_vec(v)}\n")
+    for label, xn, yn, idx in jobs:
+        if "\t" in str(label) or "\n" in str(label):
+            raise ValueError(f"label {label!r} must not contain tab/newline")
+        if xn not in bases or yn not in bases:
+            raise ValueError(f"job {label!r}: undefined base {xn!r} or {yn!r}")
+        sel = "*" if idx is None else ",".join(str(int(i)) for i in idx)
+        parts.append(f"{label}\t@{xn}:@{yn}\t{sel}\n")
+    return _run_batch("".join(parts), stats, timeout)
+
+
 # Convenience single-stat accessors for drop-in replacement of the
 # retired one-off `def srocc(...)` / `def spearman(...)` helpers. Each
 # delegates to `panel` so there is still exactly ONE stat code path.

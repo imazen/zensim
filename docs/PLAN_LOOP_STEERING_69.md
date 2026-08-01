@@ -84,3 +84,36 @@ survives independent of any session task store:
 
 Substrate: jxl-encoder diffmap-rd harness (`d17cf7ce`) + the zensim
 fused-compare API.
+
+### Loop-efficiency study (2026-07-31) — reshapes items 1–2 above
+
+Pre-registered characterization, jxl-encoder `c57e634c..7c36807f`
+(`benchmarks/zensim_diffmap_efficiency_2026-07-31.md` + 3 TSVs; supervisor
+re-derived 5 endpoint families from the TSVs, 5/5 exact). Findings that
+change #70's design space:
+
+- **The loop is budget-limited, not tolerance-limited**: at the stock 6-iter
+  budget, τ=0.25 is unreachable in 20/27 cells (baseline) / 17/27 (h3);
+  doubling to 12 iters cuts the median floor 3.6–7× (baseline 0.955→0.268,
+  h3-mag 0.649→**0.090**). Mechanism: nonphoto seeds land ~20 points high
+  and the ≤1.35× controller clamp needs 10+ iterations to close that. The
+  gain sweep (item 1) should co-sweep budget/clamp or it will measure the
+  clamp, not the gain.
+- **The loop emits the LAST iterate, not the best**: h3's judged error
+  worsens past its sweet spot (0.59@k6 → 1.02@k12) because overshoot doesn't
+  self-correct. Best-so-far emission (track the iterate whose internal score
+  is closest to target; emit that) is a cheap, likely-large win — new
+  sub-item for #70.
+- **Early stop at looser τ does NOT save bytes on v47A** (+0.5% to +3.9%,
+  landing above target — the loop approaches from above); only the linear
+  bake saves. Don't sell tolerance-stopping as a byte saver.
+- **The internal fused score is a trustworthy stop signal on photos**
+  (judged-vs-internal med ±0.13 at every budget; nonphoto worst ±1.5) —
+  further de-risks the stale/single-pass endpoint (item 2).
+- **Bytes-targeting works as an outer loop** (transplanted damped controller
+  on a new `JXL_ZENSIM_QF_GLOBAL_SCALE`): median 4 full encodes to within
+  5%, 6 to 2%; 1% often unreachable in 8 (17/27) with deliberately-untuned
+  damping. Quality at fixed size is path-independent (med +0.21 vs the
+  quality-run at equal bytes) — size dialing doesn't cost quality.
+- Cost context: ~36 ms/compare baseline, ~47.5 ms h3 + one-time ~196 ms
+  model gradient at iteration 0 (576²).

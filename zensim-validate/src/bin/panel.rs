@@ -82,7 +82,58 @@
 //!
 //! # Per-band breakdown from a parquet
 //! panel --input eval.parquet --json > panel.json
+//!
+//! # Batch mode: N (x, y) vector pairs in, N panel rows out, ONE process
+//! panel --batch jobs.tsv --stats srocc > sroccs.tsv
 //! ```
+//!
+//! ## Batch mode (`--batch`, decision-surface audit 2026-07-31 gap 4)
+//!
+//! Per-call shelling is fine for aggregates but prohibitive inside
+//! bootstrap loops (10k resamples = 10k process spawns). `--batch`
+//! reads a manifest of many (x, y) vector pairs and emits one stats row
+//! per pair **in one process**, so a 10k-resample bootstrap is a single
+//! invocation. This is the canonical replacement for every
+//! `scipy.stats.spearmanr`-in-a-loop call site (the banned pattern);
+//! Python callers use `scripts/lib/zen_stats.panel_batch` /
+//! `panel_batch_indexed`.
+//!
+//! Input (`--batch <FILE|->`, `-` = stdin) is line-oriented, tab-separated:
+//!
+//! ```text
+//! #def NAME<TAB>v1,v2,v3,...            define a named base vector
+//! LABEL<TAB>x1,x2,...<TAB>y1,y2,...     explicit (x, y) pair
+//! LABEL<TAB>@X:@Y<TAB>i1,i2,...         indexed pair: (X[i], Y[i]) over
+//!                                       previously #def'd bases (the SAME
+//!                                       index set applies to both — the
+//!                                       paired-bootstrap resample shape)
+//! LABEL<TAB>@X:@Y<TAB>*                 indexed pair over ALL rows
+//! ```
+//!
+//! Blank lines and `#`-comments (other than `#def`) are skipped. The
+//! indexed form exists so a caller resampling the same base vectors 10k
+//! times ships ~n integers per job instead of ~2n floats; the caller
+//! keeps ownership of the resampling RNG (deterministic seeding stays at
+//! the call site, e.g. upiq_panel.py's `np.random.default_rng(20260714)`),
+//! and this binary stays RNG-free — batch output is a pure deterministic
+//! function of the input bytes.
+//!
+//! Output: TSV with a header, one row per job in input order. Columns:
+//!
+//! * `--stats srocc` (the bootstrap fast path):
+//!   `label n n_dropped srocc srocc_signed`
+//! * `--stats full` (default — everything the aggregate panel emits):
+//!   `label n n_dropped srocc srocc_signed plcc plcc_raw krocc or pwrc z_rmse`
+//!
+//! Zero new stat math, matching this binary's charter: `srocc_signed` is
+//! a direct `panel::spearman` call (tie-correct midrank, pre-`.abs()`),
+//! `plcc_raw` a direct `panel::pearson` on the raw pair (no logistic
+//! rescale — some registered instruments, e.g. `scripts/hdr/upiq_panel.py`,
+//! report raw-Pearson |PLCC|), and everything else comes from
+//! `compute_panel` exactly as in aggregate mode. Non-finite (x, y) rows
+//! are dropped per job and counted in `n_dropped` (same policy as
+//! aggregate mode). Floats print as `{:.17e}` (round-trip exact).
+//! `--json` is not supported with `--batch` (the TSV is the contract).
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -100,7 +151,12 @@ use zensim_validate::panel::{self, PanelStats};
 // ----------------------------------------------------------------------
 
 struct Args {
-    input: PathBuf,
+    input: Option<PathBuf>,
+    /// Batch mode: a manifest of many (x, y) vector pairs (`-` = stdin).
+    /// Mutually exclusive with `--input`. See the module docs.
+    batch: Option<PathBuf>,
+    /// Batch column set: `full` (default) or `srocc` (bootstrap fast path).
+    stats_srocc_only: bool,
     json: bool,
     /// Override default column names if a caller's table uses different
     /// headers. Defaults: predicted / target / sigma / band.
@@ -124,6 +180,7 @@ fn print_usage() {
          \n\
          USAGE:\n\
          \x20\x20panel --input <FILE.tsv|FILE.parquet> [--json] [column overrides]\n\
+         \x20\x20panel --batch <FILE.tsv|-> [--stats full|srocc]\n\
          \n\
          INPUT COLUMNS (located by name; order free):\n\
          \x20\x20predicted   required   metric / model output\n\
@@ -132,8 +189,13 @@ fn print_usage() {
          \x20\x20band        optional   grouping key (per-band + aggregate panel)\n\
          \n\
          OPTIONS:\n\
-         \x20\x20--input <PATH>          input TSV or Parquet (required)\n\
-         \x20\x20--json                  emit JSON instead of text\n\
+         \x20\x20--input <PATH>          input TSV or Parquet (aggregate mode)\n\
+         \x20\x20--batch <PATH|->        batch manifest: N (x,y) vector pairs in,\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20N stat rows out, ONE process (see docs;\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20lines: '#def N<TAB>csv', 'L<TAB>x-csv<TAB>y-csv',\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20'L<TAB>@X:@Y<TAB>idx-csv|*')\n\
+         \x20\x20--stats <full|srocc>    batch column set (default full)\n\
+         \x20\x20--json                  emit JSON instead of text (aggregate mode only)\n\
          \x20\x20--col-predicted <NAME>  override the 'predicted' column name\n\
          \x20\x20--col-target <NAME>     override the 'target' column name\n\
          \x20\x20--col-sigma <NAME>      override the 'sigma' column name\n\
@@ -147,6 +209,8 @@ fn print_usage() {
 
 fn parse_args() -> Result<Args, String> {
     let mut input: Option<PathBuf> = None;
+    let mut batch: Option<PathBuf> = None;
+    let mut stats_srocc_only = false;
     let mut json = false;
     let mut col_predicted = "predicted".to_string();
     let mut col_target = "target".to_string();
@@ -159,6 +223,17 @@ fn parse_args() -> Result<Args, String> {
         match a.as_str() {
             "--input" | "-i" => {
                 input = Some(PathBuf::from(it.next().ok_or("--input requires a value")?));
+            }
+            "--batch" => {
+                batch = Some(PathBuf::from(it.next().ok_or("--batch requires a value")?));
+            }
+            "--stats" => {
+                let v = it.next().ok_or("--stats requires a value")?;
+                stats_srocc_only = match v.as_str() {
+                    "srocc" => true,
+                    "full" => false,
+                    other => return Err(format!("--stats must be 'full' or 'srocc', got {other}")),
+                };
             }
             "--json" => json = true,
             // Hidden — see Args::emit_rescaled.
@@ -177,8 +252,20 @@ fn parse_args() -> Result<Args, String> {
         }
     }
 
+    if input.is_some() && batch.is_some() {
+        return Err("--input and --batch are mutually exclusive".to_string());
+    }
+    if batch.is_some() && json {
+        return Err("--json is not supported with --batch (the TSV is the contract)".to_string());
+    }
+    if input.is_none() && batch.is_none() {
+        return Err("--input or --batch is required".to_string());
+    }
+
     Ok(Args {
-        input: input.ok_or("--input is required")?,
+        input,
+        batch,
+        stats_srocc_only,
         json,
         col_predicted,
         col_target,
@@ -203,7 +290,7 @@ struct Columns {
 }
 
 fn load_columns(args: &Args) -> Result<Columns, String> {
-    let path = &args.input;
+    let path = args.input.as_ref().expect("aggregate mode requires --input");
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -219,7 +306,7 @@ fn load_columns(args: &Args) -> Result<Columns, String> {
 }
 
 fn load_tsv_columns(args: &Args) -> Result<Columns, String> {
-    let path: &Path = &args.input;
+    let path: &Path = args.input.as_ref().expect("aggregate mode requires --input");
     let text = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
     let mut lines = text.lines();
     let header = lines
@@ -282,7 +369,7 @@ fn load_tsv_columns(args: &Args) -> Result<Columns, String> {
 }
 
 fn load_parquet_columns(args: &Args) -> Result<Columns, String> {
-    let path: &Path = &args.input;
+    let path: &Path = args.input.as_ref().expect("aggregate mode requires --input");
     let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
@@ -515,6 +602,235 @@ fn build_reports(cols: &Columns) -> Vec<GroupReport> {
 }
 
 // ----------------------------------------------------------------------
+// Batch mode — N (x, y) pairs in, N stat rows out, one process.
+// (decision_surface_audit_2026-07-31.md gap 4; zero new stat math —
+// every number is a direct `zensim_validate::panel` owner call.)
+// ----------------------------------------------------------------------
+
+/// One parsed batch job. `Indexed` references `#def`'d base vectors by
+/// slot so 10k resample jobs share storage instead of cloning floats.
+enum BatchJob {
+    Explicit { x: Vec<f64>, y: Vec<f64> },
+    Indexed {
+        x_base: usize,
+        y_base: usize,
+        /// `None` = all rows (the `*` form).
+        idx: Option<Vec<usize>>,
+    },
+}
+
+struct BatchInput {
+    bases: Vec<Vec<f64>>,
+    jobs: Vec<(String, BatchJob)>,
+}
+
+fn parse_float_csv(s: &str, lineno: usize, what: &str) -> Result<Vec<f64>, String> {
+    s.split(',')
+        .map(|t| {
+            let t = t.trim();
+            t.parse::<f64>()
+                .map_err(|e| format!("batch line {lineno}: bad {what} float {t:?}: {e}"))
+        })
+        .collect()
+}
+
+fn parse_batch(text: &str) -> Result<BatchInput, String> {
+    let mut bases: Vec<Vec<f64>> = Vec::new();
+    let mut base_names: BTreeMap<String, usize> = BTreeMap::new();
+    let mut jobs: Vec<(String, BatchJob)> = Vec::new();
+
+    for (i, line) in text.lines().enumerate() {
+        let lineno = i + 1;
+        let line = line.trim_end_matches('\r');
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("#def") {
+            let mut parts = rest.trim_start().splitn(2, '\t');
+            let name = parts
+                .next()
+                .filter(|n| !n.is_empty())
+                .ok_or_else(|| format!("batch line {lineno}: #def needs NAME<TAB>csv"))?;
+            let csv = parts
+                .next()
+                .ok_or_else(|| format!("batch line {lineno}: #def {name} missing vector"))?;
+            let vec = parse_float_csv(csv, lineno, &format!("#def {name}"))?;
+            if base_names.insert(name.to_string(), bases.len()).is_some() {
+                return Err(format!("batch line {lineno}: duplicate #def {name}"));
+            }
+            bases.push(vec);
+            continue;
+        }
+        if line.starts_with('#') {
+            continue; // plain comment
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != 3 {
+            return Err(format!(
+                "batch line {lineno}: expected LABEL<TAB>x<TAB>y (3 fields), got {}",
+                fields.len()
+            ));
+        }
+        let label = fields[0].to_string();
+        let job = if let Some(refs) = fields[1].strip_prefix('@') {
+            // Indexed form: @X:@Y <TAB> idx-csv | *
+            let (xn, yn) = refs
+                .split_once(":@")
+                .ok_or_else(|| format!("batch line {lineno}: indexed form needs @X:@Y"))?;
+            let x_base = *base_names
+                .get(xn)
+                .ok_or_else(|| format!("batch line {lineno}: undefined base @{xn}"))?;
+            let y_base = *base_names
+                .get(yn)
+                .ok_or_else(|| format!("batch line {lineno}: undefined base @{yn}"))?;
+            let (xl, yl) = (bases[x_base].len(), bases[y_base].len());
+            if xl != yl {
+                return Err(format!(
+                    "batch line {lineno}: base @{xn} (len {xl}) and @{yn} (len {yl}) differ — \
+                     the shared index set requires equal-length bases"
+                ));
+            }
+            let idx = if fields[2].trim() == "*" {
+                None
+            } else {
+                let idx: Vec<usize> = fields[2]
+                    .split(',')
+                    .map(|t| {
+                        let t = t.trim();
+                        t.parse::<usize>()
+                            .map_err(|e| format!("batch line {lineno}: bad index {t:?}: {e}"))
+                    })
+                    .collect::<Result<_, _>>()?;
+                if let Some(&bad) = idx.iter().find(|&&v| v >= xl) {
+                    return Err(format!(
+                        "batch line {lineno}: index {bad} out of bounds for base len {xl}"
+                    ));
+                }
+                Some(idx)
+            };
+            BatchJob::Indexed { x_base, y_base, idx }
+        } else {
+            let x = parse_float_csv(fields[1], lineno, "x")?;
+            let y = parse_float_csv(fields[2], lineno, "y")?;
+            if x.len() != y.len() {
+                return Err(format!(
+                    "batch line {lineno}: x (len {}) and y (len {}) differ",
+                    x.len(),
+                    y.len()
+                ));
+            }
+            BatchJob::Explicit { x, y }
+        };
+        jobs.push((label, job));
+    }
+    Ok(BatchInput { bases, jobs })
+}
+
+/// One computed batch row. Field meanings match the aggregate panel;
+/// `srocc_signed` / `plcc_raw` are the direct owner calls documented in
+/// the module docs (pre-`.abs()` midrank Spearman; raw un-rescaled Pearson).
+struct BatchRow {
+    n: usize,
+    n_dropped: usize,
+    srocc: f64,
+    srocc_signed: f64,
+    full: Option<(PanelStats, f64)>, // (compute_panel stats, plcc_raw)
+}
+
+fn compute_batch_row(x: &[f64], y: &[f64], srocc_only: bool) -> BatchRow {
+    // Same finite-row drop policy as aggregate mode (report_group).
+    let n_in = x.len().min(y.len());
+    let mut xf = Vec::with_capacity(n_in);
+    let mut yf = Vec::with_capacity(n_in);
+    let mut n_dropped = 0usize;
+    for i in 0..n_in {
+        if x[i].is_finite() && y[i].is_finite() {
+            xf.push(x[i]);
+            yf.push(y[i]);
+        } else {
+            n_dropped += 1;
+        }
+    }
+    // panel.rs:50 `spearman` — tie-correct midrank, signed.
+    let srocc_signed = panel::spearman(&xf, &yf);
+    let full = if srocc_only {
+        None
+    } else {
+        // compute_panel (panel.rs:656) — the full 6-stat panel — plus the
+        // raw (un-rescaled) Pearson via panel.rs:72 `pearson`.
+        let stats = panel::compute_panel(&xf, &yf);
+        let plcc_raw = panel::pearson(&xf, &yf);
+        Some((stats, plcc_raw))
+    };
+    BatchRow {
+        n: xf.len(),
+        n_dropped,
+        srocc: srocc_signed.abs(),
+        srocc_signed,
+        full,
+    }
+}
+
+/// Round-trip-exact float formatting for the batch TSV.
+fn fmt_batch_f(v: f64) -> String {
+    format!("{v:.17e}")
+}
+
+fn run_batch(input: &BatchInput, srocc_only: bool) -> String {
+    use rayon::prelude::*;
+
+    let rows: Vec<BatchRow> = input
+        .jobs
+        .par_iter()
+        .map(|(_, job)| match job {
+            BatchJob::Explicit { x, y } => compute_batch_row(x, y, srocc_only),
+            BatchJob::Indexed { x_base, y_base, idx } => {
+                let (bx, by) = (&input.bases[*x_base], &input.bases[*y_base]);
+                match idx {
+                    None => compute_batch_row(bx, by, srocc_only),
+                    Some(idx) => {
+                        let x: Vec<f64> = idx.iter().map(|&i| bx[i]).collect();
+                        let y: Vec<f64> = idx.iter().map(|&i| by[i]).collect();
+                        compute_batch_row(&x, &y, srocc_only)
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let mut out = String::new();
+    if srocc_only {
+        out.push_str("label\tn\tn_dropped\tsrocc\tsrocc_signed\n");
+    } else {
+        out.push_str(
+            "label\tn\tn_dropped\tsrocc\tsrocc_signed\tplcc\tplcc_raw\tkrocc\tor\tpwrc\tz_rmse\n",
+        );
+    }
+    for ((label, _), r) in input.jobs.iter().zip(&rows) {
+        out.push_str(label);
+        out.push_str(&format!("\t{}\t{}", r.n, r.n_dropped));
+        out.push_str(&format!(
+            "\t{}\t{}",
+            fmt_batch_f(r.srocc),
+            fmt_batch_f(r.srocc_signed)
+        ));
+        if let Some((p, plcc_raw)) = &r.full {
+            out.push_str(&format!(
+                "\t{}\t{}\t{}\t{}\t{}\t{}",
+                fmt_batch_f(p.plcc),
+                fmt_batch_f(*plcc_raw),
+                fmt_batch_f(p.krocc),
+                fmt_batch_f(p.or_ratio),
+                fmt_batch_f(p.pwrc),
+                fmt_batch_f(p.z_rmse)
+            ));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+// ----------------------------------------------------------------------
 // Rendering
 // ----------------------------------------------------------------------
 
@@ -634,6 +950,36 @@ fn main() -> ExitCode {
         }
     };
 
+    // Batch mode: read the manifest (file or stdin), emit the TSV, done.
+    if let Some(batch_path) = &args.batch {
+        let text = if batch_path.as_os_str() == "-" {
+            use std::io::Read;
+            let mut s = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut s) {
+                eprintln!("panel: read stdin: {e}");
+                return ExitCode::from(1);
+            }
+            s
+        } else {
+            match std::fs::read_to_string(batch_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("panel: read {batch_path:?}: {e}");
+                    return ExitCode::from(1);
+                }
+            }
+        };
+        let input = match parse_batch(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("panel: {e}");
+                return ExitCode::from(2);
+            }
+        };
+        print!("{}", run_batch(&input, args.stats_srocc_only));
+        return ExitCode::SUCCESS;
+    }
+
     let cols = match load_columns(&args) {
         Ok(c) => c,
         Err(e) => {
@@ -732,5 +1078,134 @@ mod tests {
         assert_eq!(json_f(f64::NAN), "null");
         assert_eq!(json_f(f64::INFINITY), "null");
         assert_eq!(json_f(0.5), "0.5000000000");
+    }
+
+    // ------------------------------------------------------------------
+    // Batch-mode plumbing (the stat math itself is tested in panel.rs /
+    // tests/panel_parity.rs; scipy cross-check in
+    // scripts/verify_panel_batch_parity.py).
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn batch_parses_explicit_and_indexed_and_star() {
+        let text = "#def X\t1,2,3,4\n#def Y\t10,20,30,40\n\
+                    # a comment\n\
+                    e1\t1,2,3\t3,2,1\n\
+                    i1\t@X:@Y\t0,2,1\n\
+                    all\t@X:@Y\t*\n";
+        let b = parse_batch(text).unwrap();
+        assert_eq!(b.bases.len(), 2);
+        assert_eq!(b.jobs.len(), 3);
+        match &b.jobs[0].1 {
+            BatchJob::Explicit { x, y } => {
+                assert_eq!(x, &[1.0, 2.0, 3.0]);
+                assert_eq!(y, &[3.0, 2.0, 1.0]);
+            }
+            _ => panic!("job 0 should be explicit"),
+        }
+        match &b.jobs[1].1 {
+            BatchJob::Indexed { idx: Some(idx), .. } => assert_eq!(idx, &[0, 2, 1]),
+            _ => panic!("job 1 should be indexed"),
+        }
+        match &b.jobs[2].1 {
+            BatchJob::Indexed { idx: None, .. } => {}
+            _ => panic!("job 2 should be the * form"),
+        }
+    }
+
+    #[test]
+    fn batch_rejects_bad_input_loudly() {
+        assert!(parse_batch("l\t1,2\t1,2,3\n").is_err(), "length mismatch");
+        assert!(parse_batch("l\t@A:@B\t0\n").is_err(), "undefined base");
+        assert!(
+            parse_batch("#def A\t1,2\nl\t@A:@A\t5\n").is_err(),
+            "index out of bounds"
+        );
+        assert!(parse_batch("l\t1,zz\t1,2\n").is_err(), "garbage float");
+        assert!(
+            parse_batch("#def A\t1,2\n#def A\t3,4\n").is_err(),
+            "duplicate def"
+        );
+        assert!(
+            parse_batch("#def A\t1,2\n#def B\t1,2,3\nl\t@A:@B\t*\n").is_err(),
+            "unequal base lengths"
+        );
+    }
+
+    #[test]
+    fn batch_indexed_matches_explicit_and_is_deterministic() {
+        // Same resample expressed both ways must produce identical rows,
+        // and two runs must be byte-identical (no RNG anywhere).
+        let text = "#def P\t12,9,30,25,5,40\n#def T\t80,85,40,55,92,20\n\
+                    ex\t9,30,5,9\t85,40,92,85\n\
+                    ix\t@P:@T\t1,2,4,1\n";
+        let b = parse_batch(text).unwrap();
+        let out1 = run_batch(&b, false);
+        let out2 = run_batch(&b, false);
+        assert_eq!(out1, out2, "batch output must be deterministic");
+        let lines: Vec<&str> = out1.lines().collect();
+        assert_eq!(lines.len(), 3);
+        let ex_cols: Vec<&str> = lines[1].split('\t').collect();
+        let ix_cols: Vec<&str> = lines[2].split('\t').collect();
+        assert_eq!(ex_cols[1..], ix_cols[1..], "indexed == explicit");
+    }
+
+    #[test]
+    fn batch_row_drops_nonfinite_and_counts() {
+        let x = [1.0, f64::NAN, 3.0, 4.0];
+        let y = [1.0, 2.0, f64::INFINITY, 4.0];
+        let r = compute_batch_row(&x, &y, true);
+        assert_eq!(r.n, 2);
+        assert_eq!(r.n_dropped, 2);
+    }
+
+    #[test]
+    fn batch_srocc_signed_carries_polarity() {
+        // Anti-correlated pair: signed is negative, abs is 1.0.
+        let x = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let y = [10.0, 8.0, 6.0, 4.0, 2.0];
+        let r = compute_batch_row(&x, &y, true);
+        assert!((r.srocc - 1.0).abs() < 1e-12, "srocc={}", r.srocc);
+        assert!(
+            (r.srocc_signed + 1.0).abs() < 1e-12,
+            "srocc_signed={}",
+            r.srocc_signed
+        );
+    }
+
+    #[test]
+    fn batch_full_matches_aggregate_compute_panel() {
+        // The full batch row must equal what aggregate mode's
+        // report_group produces on the same pair.
+        let pred: Vec<f64> = vec![12.0, 9.0, 30.0, 25.0, 5.0, 40.0, 22.0, 18.0];
+        let tgt: Vec<f64> = vec![80.0, 85.0, 40.0, 55.0, 92.0, 20.0, 60.0, 70.0];
+        let r = compute_batch_row(&pred, &tgt, false);
+        let agg = report_group("t", &pred, &tgt, None);
+        let (p, plcc_raw) = r.full.as_ref().unwrap();
+        assert_eq!(p.srocc, agg.panel.srocc);
+        assert_eq!(p.plcc, agg.panel.plcc);
+        assert_eq!(p.krocc, agg.panel.krocc);
+        assert_eq!(p.or_ratio, agg.panel.or_ratio);
+        assert_eq!(p.pwrc, agg.panel.pwrc);
+        assert_eq!(p.z_rmse, agg.panel.z_rmse);
+        assert_eq!(r.srocc, agg.panel.srocc, "abs srocc column == panel srocc");
+        // plcc_raw is signed raw Pearson (distance-shaped fixture → negative).
+        assert!(*plcc_raw < 0.0, "raw pearson keeps polarity: {plcc_raw}");
+    }
+
+    #[test]
+    fn batch_tie_heavy_midrank() {
+        // Heavy exact ties; golden value from scipy.stats.spearmanr
+        // (midrank) run on this exact fixture: 0.8846153846153847
+        // (recomputed 2026-07-31; the full randomized sweep incl.
+        // tie-heavy cases is scripts/verify_panel_batch_parity.py).
+        let x = [1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 4.0];
+        let y = [1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0];
+        let r = compute_batch_row(&x, &y, true);
+        assert!(
+            (r.srocc_signed - 0.884_615_384_615_384_7).abs() < 1e-12,
+            "tie-heavy midrank srocc={}",
+            r.srocc_signed
+        );
     }
 }
