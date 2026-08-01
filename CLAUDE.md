@@ -770,6 +770,18 @@ Mohammadi panel (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE) aggregate +
 10-band per corpus. **~3.5 sec for all 5 corpora.** Replaces the older
 `dataset_metric_baseline` which re-decodes images (~15-20 min per bake).
 
+**Freeze-decision surface (2026-07-31):** `bake_verdict --corruption-head
+<head.bin>` adds the companion corruption-head joint report (the shipping
+design's corruption owner — the 924 dial's own ordering is broken by design;
+dial-alone numbers kept for honesty; `corruption_head` block in
+`--full-json`). **`freeze_check`** (same crate) turns one bake's fulleval
+JSON into the freeze-bar PASS/FAIL table:
+`freeze_check --fulleval <bake.fulleval.json> [--bar csiq=X --bar live=X]` —
+externally-owned rows (UPIQ/Korshunov/perf/LOO/corruption-ORDERING) print as
+explicit ATTACH rows, exit 1 on any FAIL; it computes NO stats, only compares
+what the owning tools produced. Bars = zenpapers final-metric plan §5; owner
+map = `benchmarks/decision_surface_audit_2026-07-31.md`.
+
 ### IQA statistical panel on arbitrary (predicted, target) pairs
 **`panel` binary** at
 `/home/lilith/work/zen/zensim/zensim-validate/src/bin/panel.rs`.
