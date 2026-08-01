@@ -1515,6 +1515,13 @@ struct FitLassoArgs {
     /// Target column name (selects `__q_<target>` / `__Y1_<target>`).
     #[arg(long, default_value = "human_score")]
     target: String,
+    /// Per-gram target-name override (REPEATABLE, paired with `--gram` in
+    /// order) for mixing corpora whose grams store their q/Y1 under
+    /// different column names but the same target CLASS (E-LIN: legs =
+    /// `human_score`, kadis = `score_ssim2_gpu`, bigcodec = `score_ssim2`).
+    /// Omit entirely to use `--target` for every gram.
+    #[arg(long)]
+    gram_target: Vec<String>,
     /// Mix weight per `--gram`, in the same order (1.0 = exact
     /// pass-through, the shipped-BHdr single-group case). Omit entirely for
     /// all-1.0; otherwise give exactly one per gram.
@@ -1557,7 +1564,7 @@ struct FitLassoArgs {
     #[arg(long)]
     anchor_stride: Vec<usize>,
     /// Clamp anchor targets to at least this value (post-scale).
-    #[arg(long)]
+    #[arg(long, allow_negative_numbers = true)]
     anchor_clip_min: Option<f64>,
     /// Transform screen TSV (`feat_idx`/`best_transform`/`params_csv`)
     /// providing the `zentrain.feature_transform*` metadata TEXT. Required
@@ -1664,10 +1671,21 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
     let mut n_feat = 0usize;
     for (gi, gpath) in a.gram.iter().enumerate() {
         let gram = Npz::open(gpath)?;
+        let gtarget: &str = if a.gram_target.is_empty() {
+            &a.target
+        } else if a.gram_target.len() == a.gram.len() {
+            &a.gram_target[gi]
+        } else {
+            return Err(format!(
+                "--gram-target count {} != --gram count {} (omit entirely, or one per gram)",
+                a.gram_target.len(),
+                a.gram.len()
+            ));
+        };
         let s_arr = gram.get(&key("S"))?;
         let s_vec = gram.get(&key("s"))?;
-        let q_arr = gram.get(&key(&format!("q_{}", a.target)))?;
-        let y1 = gram.get(&key(&format!("Y1_{}", a.target)))?.scalar_f64()?;
+        let q_arr = gram.get(&key(&format!("q_{gtarget}")))?;
+        let y1 = gram.get(&key(&format!("Y1_{gtarget}")))?.scalar_f64()?;
         let n_rows = gram.get(&key("n"))?.scalar_f64()?;
         let nf = *s_vec
             .shape
@@ -1979,7 +1997,7 @@ struct GramArgs {
     target_scale: f64,
     /// Clamp targets to at least this value (POST-scale). Registered E-LIN
     /// policy: -100 (MSE magnitude protection for catastrophic tails).
-    #[arg(long)]
+    #[arg(long, allow_negative_numbers = true)]
     target_clip_min: Option<f64>,
     /// Feature-space prefix for the npz keys (raw features ⇒ "raw").
     #[arg(long, default_value = "raw")]

@@ -24,7 +24,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-    echo "usage: run_full_eval.sh <bake.bin> <name> [regime=720]" >&2
+    echo "usage: run_full_eval.sh <bake.bin> <name> [regime=720|372|924]" >&2
     exit 2
 fi
 BAKE=$1
@@ -61,10 +61,24 @@ JSON="$OUTDIR/$NAME.fulleval.json"
 MD="$OUTDIR/$NAME.verdict.md"
 
 echo "== bake_verdict --regime $REGIME --full-json ==" >&2
+# regime "924" = the folded+append campaign invocation: bake_verdict's
+# feature-regime flag stays 720 (slot_720 filename map), but the three data
+# roots swap to the canonical 924 extractions + the kadis-924 perpair source
+# (docs/FULL_EVAL.md "924-era eval slices"; E-LIN linear924_phase1).
+BV_EXTRA=()
+BV_REGIME=$REGIME
+if [[ "$REGIME" == "924" ]]; then
+    BV_REGIME=720
+    BV_EXTRA=(--features-root /mnt/v/zen/zensim-training/ext924-canonical-2026-07-27
+              --dial-grid /mnt/v/output/zensim/v2-eval-924-2026-07-27/dial_grid_924col_2026-07-28.parquet
+              --corruption-grid /mnt/v/output/zensim/v2-eval-924-2026-07-27/corruption_grid_924col_2026-07-27.parquet
+              --perpair-metrics /mnt/v/zen/zensim-training/kadis-924-2026-07-27/kadis700k_924.parquet)
+fi
 # Stash the previous JSON so ZENSIM_M3_REUSE=1 can carry its M3 fields after
 # bake_verdict overwrites the file (bake_verdict always emits m3=null).
 [[ "${ZENSIM_M3_REUSE:-0}" == "1" && -f "$JSON" ]] && cp "$JSON" "$JSON.pre"
-"${HEAVY[@]}" "$BV" --bake "$BAKE" --name "$NAME" --regime "$REGIME" \
+"${HEAVY[@]}" "$BV" --bake "$BAKE" --name "$NAME" --regime "$BV_REGIME" \
+    "${BV_EXTRA[@]}" \
     --full-json "$JSON" --output "$MD" >&2
 
 # ── M3 diffmap-coherence: content × size × quality sweep ──────────────────
