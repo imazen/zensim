@@ -2290,8 +2290,8 @@ struct AttrFoldBand<'a> {
 }
 
 /// One scale's in-strip fold spec (task #70): per-channel coefficient packs
-/// + the scale-sized id/win accumulation planes (`width * height` prefixes,
-/// caller-zeroed).
+/// plus the scale-sized id/win accumulation planes (`width * height`
+/// prefixes, caller-zeroed).
 type AttrFoldOut<'a> = (&'a [[f32; 12]; 3], &'a mut [f32], &'a mut [f32]);
 
 /// Variant of [`process_scale_bands`] that returns the **raw**
@@ -3984,43 +3984,43 @@ fn compute_diffmap_from_xyb(
     // (sd/mean per aligned f×f cell) for each coarse factor. If within-cell
     // spread is ~0 the redistribution is a near-no-op regardless of mass.
     #[cfg(feature = "custom-profiles")]
-    if let Some(g) = &guide {
-        if std::env::var("ZENSIM_JBU_GUIDE_STATS").as_deref() == Ok("1") {
-            let n = (full_w * full_h) as f64;
-            let gm = g.iter().map(|&v| v as f64).sum::<f64>() / n;
-            for factor in [2usize, 4, 8] {
-                let (mut sum_rel, mut max_rel, mut cells) = (0.0f64, 0.0f64, 0usize);
-                let mut sy = 0;
-                while sy * factor < full_h {
-                    let (y0, y1) = (sy * factor, ((sy + 1) * factor).min(full_h));
-                    let mut sx = 0;
-                    while sx * factor < full_w {
-                        let (x0, x1) = (sx * factor, ((sx + 1) * factor).min(full_w));
-                        let (mut s1, mut s2, mut cnt) = (0.0f64, 0.0f64, 0.0f64);
-                        for y in y0..y1 {
-                            for &v in &g[y * full_w + x0..y * full_w + x1] {
-                                let v = v as f64;
-                                s1 += v;
-                                s2 += v * v;
-                                cnt += 1.0;
-                            }
+    if let Some(g) = &guide
+        && std::env::var("ZENSIM_JBU_GUIDE_STATS").as_deref() == Ok("1")
+    {
+        let n = (full_w * full_h) as f64;
+        let gm = g.iter().map(|&v| v as f64).sum::<f64>() / n;
+        for factor in [2usize, 4, 8] {
+            let (mut sum_rel, mut max_rel, mut cells) = (0.0f64, 0.0f64, 0usize);
+            let mut sy = 0;
+            while sy * factor < full_h {
+                let (y0, y1) = (sy * factor, ((sy + 1) * factor).min(full_h));
+                let mut sx = 0;
+                while sx * factor < full_w {
+                    let (x0, x1) = (sx * factor, ((sx + 1) * factor).min(full_w));
+                    let (mut s1, mut s2, mut cnt) = (0.0f64, 0.0f64, 0.0f64);
+                    for y in y0..y1 {
+                        for &v in &g[y * full_w + x0..y * full_w + x1] {
+                            let v = v as f64;
+                            s1 += v;
+                            s2 += v * v;
+                            cnt += 1.0;
                         }
-                        let mean = s1 / cnt;
-                        let sd = (s2 / cnt - mean * mean).max(0.0).sqrt();
-                        let rel = sd / mean.max(1e-30);
-                        sum_rel += rel;
-                        max_rel = max_rel.max(rel);
-                        cells += 1;
-                        sx += 1;
                     }
-                    sy += 1;
+                    let mean = s1 / cnt;
+                    let sd = (s2 / cnt - mean * mean).max(0.0).sqrt();
+                    let rel = sd / mean.max(1e-30);
+                    sum_rel += rel;
+                    max_rel = max_rel.max(rel);
+                    cells += 1;
+                    sx += 1;
                 }
-                eprintln!(
-                    "  JBU guide stats: factor {factor}: within-cell sd/mean mean {:.4} max {:.4} ({cells} cells; guide mean {gm:.3e})",
-                    sum_rel / cells as f64,
-                    max_rel
-                );
+                sy += 1;
             }
+            eprintln!(
+                "  JBU guide stats: factor {factor}: within-cell sd/mean mean {:.4} max {:.4} ({cells} cells; guide mean {gm:.3e})",
+                sum_rel / cells as f64,
+                max_rel
+            );
         }
     }
 
@@ -6553,7 +6553,7 @@ mod tests {
                 s.iw_det_4th[1],
                 s.masked_art_4th[1],
                 s.masked_det_4th[1],
-                s.iw_ssim[1 * 3 + 1],
+                s.iw_ssim[3 + 1],
             );
 
             // also a real distortion: blur the distorted side hard.
@@ -6580,7 +6580,7 @@ mod tests {
                 s2.iw_det_4th[1],
                 s2.masked_art_4th[1],
                 s2.masked_det_4th[1],
-                s2.iw_ssim[1 * 3 + 1],
+                s2.iw_ssim[3 + 1],
             );
         }
         println!("\n(self = src-vs-src identity; blur = src vs 4-neighbour-blurred src)");

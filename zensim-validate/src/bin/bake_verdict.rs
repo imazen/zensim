@@ -229,6 +229,7 @@ const CANONICAL_DIAL_GRID_SHA256: &str =
 /// canonical-2026-07-15 set while the rest live in 2026-05-15-full-features.
 /// The right fix is one canonical eval root (tracked in
 /// `docs/REPRODUCIBILITY.md` §4), not more absolute paths.
+#[allow(dead_code)] // consumer lost in an eval-root refactor; kept as the documented pin until docs/REPRODUCIBILITY.md §4 unifies the roots
 const PINNED_OUTSIDE_FEATURES_ROOT: &[(&str, &str)] = &[(
     "hf_nearlossless",
     "lives in the canonical-2026-07-15 set, not the 2026-05-15-full-features \
@@ -1958,29 +1959,29 @@ fn main() -> ExitCode {
     // until 2026-07-15 — and the dial grid is the input where it mattered MOST:
     // three versions exist, they genuinely differ, and the default was the one
     // with two known defects. A verdict could not say which it used.
-    if args.dial_grid.exists() {
-        if let Ok(sha) = zensim_validate::train_manifest::sha256_file(&args.dial_grid) {
-            let bytes = std::fs::metadata(&args.dial_grid)
-                .map(|m| m.len())
-                .unwrap_or(0);
-            let label = if sha == CANONICAL_DIAL_GRID_SHA256 {
-                "dial grid (canonical)".to_string()
-            } else {
-                eprintln!(
-                    "bake_verdict: WARNING — dial grid {} (sha {}) is NOT the canonical grid \
+    if args.dial_grid.exists()
+        && let Ok(sha) = zensim_validate::train_manifest::sha256_file(&args.dial_grid)
+    {
+        let bytes = std::fs::metadata(&args.dial_grid)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let label = if sha == CANONICAL_DIAL_GRID_SHA256 {
+            "dial grid (canonical)".to_string()
+        } else {
+            eprintln!(
+                "bake_verdict: WARNING — dial grid {} (sha {}) is NOT the canonical grid \
                      (sha {}).\n  The canonical grid is {}\n  The original 2026-05-29 grid carries \
                      TWO known defects: 9/115 ladders of w11 extraction garbage, and 33 pre-fix \
                      JXL cells at d=0.025. Per-ladder dial numbers on those are garbage-input \
                      scoring. See benchmarks/eval_grids_2026-05-29.pointer.md.",
-                    args.dial_grid.display(),
-                    &sha[..16],
-                    &CANONICAL_DIAL_GRID_SHA256[..16],
-                    CANONICAL_DIAL_GRID,
-                );
-                "dial grid ⚠ **NOT CANONICAL**".to_string()
-            };
-            corpus_prov.push((label, args.dial_grid.clone(), sha, bytes));
-        }
+                args.dial_grid.display(),
+                &sha[..16],
+                &CANONICAL_DIAL_GRID_SHA256[..16],
+                CANONICAL_DIAL_GRID,
+            );
+            "dial grid ⚠ **NOT CANONICAL**".to_string()
+        };
+        corpus_prov.push((label, args.dial_grid.clone(), sha, bytes));
     }
 
     let mut buf = String::new();
@@ -2076,7 +2077,7 @@ a memorization number — not held-out generalization; do not rank a bake by the
     // external q-sweep / cross-codec data (G3, G4, G10) are flagged.
     // `gates_json` mirrors the scorecard into `--full-json` (same values,
     // never re-derived downstream).
-    let mut gates_json: Option<serde_json::Value> = None;
+    let gates_json: Option<serde_json::Value>;
     {
         let find = |name: &str| results.iter().find(|r| r.display.contains(name));
         let cid22 = find("CID22");

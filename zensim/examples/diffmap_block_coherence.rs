@@ -421,6 +421,7 @@ fn run_bake_mode(
             let mut per_slot = [0f64; 29];
             for sc in 0..4 {
                 for ch in 0..3 {
+                    #[allow(clippy::needless_range_loop)] // slot builds i AND indexes per_slot
                     for slot in 0..29 {
                         let i = 372 + sc * 87 + ch * 29 + slot;
                         if i < n_in {
@@ -449,6 +450,7 @@ fn run_bake_mode(
         // Basic mass per scale — the fold's spatial resolution is scale-blended
         // by mass, so coarse-scale concentration = a blurry map (M3 mechanism).
         let mut per_scale = [0f64; 4];
+        #[allow(clippy::needless_range_loop)] // sc builds base AND indexes per_scale
         for sc in 0..4 {
             let base = sc * 39;
             if base + 39 <= n_in.min(156) {

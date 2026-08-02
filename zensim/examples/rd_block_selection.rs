@@ -21,6 +21,7 @@
 //!   * **butteraugli**— highest Σ butteraugli-diffmap per block (the signal
 //!     jxl-encoder's adaptive quantizer already deploys — the real bar).
 //!   * **random**     — control.
+//!
 //! Every strategy refines the SAME NUMBER of blocks, so they sit at the same
 //! rate. The winner is whichever refined image an INDEPENDENT perceptual judge
 //! scores best — and since butteraugli is now a *selector*, the judge must be a

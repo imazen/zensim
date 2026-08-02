@@ -124,7 +124,7 @@ def main() -> int:
         "worker_image": a.image,
         "provenance": {
             "recipe": "zensim benchmarks/backfill944_bigcodec_2026-08-02.md",
-            "declare": "zenmetrics scripts/jobsys/declare_bf944_tiered.py (SIMD-tier-matched: "
+            "declare": "zenmetrics/scripts/jobsys/declare_bf944_tiered.py (SIMD-tier-matched: "
                        "v4 226,818 / v4x 231,836 / neon 31,519 cells by bf924 ledger attribution)",
             "assemble": "zensim scripts/v_next/fleet_blob_assemble_944.py",
             "join": "zensim scripts/canonical_corpus/tbig_join_944.py (924-view row order; "

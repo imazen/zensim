@@ -231,6 +231,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     /// [`Self::recycle`] refills it — steady-state batch extraction
     /// performs zero producer allocation (measured ~1.7k page
     /// faults/pair from fresh per-pair Vecs before this).
+    #[cfg_attr(not(test), allow(dead_code))] // production sites pass FrontEnd explicitly (new_with_front_end)
     pub(crate) fn new(
         source: &'a S,
         distorted: &'a D,
@@ -674,6 +675,7 @@ mod tests {
         let mut planes = crate::streaming::convert_source_to_xyb(&img, w, false);
         let reference = materialize(&img);
         let (mut cw, mut ch_) = (w, h);
+        #[allow(clippy::needless_range_loop)] // scale drives geometry AND indexes reference/planes
         for scale in 1..crate::NUM_SCALES {
             for p in planes.iter_mut() {
                 crate::blur::downscale_2x_inplace(p, cw, ch_);
@@ -730,6 +732,7 @@ mod tests {
                 for (side, mat) in [(Side::Source, &mat_s), (Side::Distorted, &mat_d)] {
                     let (planes, pw, ph) = &mat[info.scale];
                     assert_eq!((*pw, *ph), (info.plane_w, info.plane_h));
+                    #[allow(clippy::needless_range_loop)] // ch feeds fill_wide AND indexes planes
                     for ch in 0..3 {
                         prod.fill_wide(side, ch, &info, &mut wide);
                         gather_strip_halo(
@@ -768,6 +771,7 @@ mod tests {
 
             // Full, ordered coverage of every scale's strip tiling.
             let (mut pw, mut ph) = (w, h);
+            #[allow(clippy::needless_range_loop)] // scale drives tiling AND indexes emitted
             for scale in 0..crate::NUM_SCALES {
                 let expect: Vec<usize> = (0..ph.div_ceil(STRIP_ROWS))
                     .map(|k| k * STRIP_ROWS)
@@ -817,6 +821,7 @@ mod tests {
             wide.resize(n_wide, 0.0);
             wide_ref.resize(n_wide, 0.0);
             let (planes, pw, ph) = &mat[info.scale];
+            #[allow(clippy::needless_range_loop)] // ch feeds fill_wide AND indexes planes
             for ch in 0..3 {
                 prod.fill_wide(Side::Source, ch, &info, &mut wide);
                 gather_strip_halo(

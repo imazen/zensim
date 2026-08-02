@@ -64,14 +64,15 @@ fn load_sign() -> Vec<f64> {
     let txt = std::fs::read_to_string(SIGN).expect("sign tsv");
     for line in txt.lines().skip(1) {
         let c: Vec<&str> = line.split('\t').collect();
-        if let Ok(idx) = c[0].parse::<usize>() {
-            if idx < N && c.get(1) == Some(&"pin_geq0") {
-                // `pin_geq0` = W1≥0 in the trainer, which pairs with rank_w≤0 —
-                // so the OUTPUT decreases with these features: they increase with
-                // DISTORTION (decrease with quality). A score-increasing min-max
-                // therefore needs w≤0 on them → sign = −1.
-                s[idx] = -1.0;
-            }
+        if let Ok(idx) = c[0].parse::<usize>()
+            && idx < N
+            && c.get(1) == Some(&"pin_geq0")
+        {
+            // `pin_geq0` = W1≥0 in the trainer, which pairs with rank_w≤0 —
+            // so the OUTPUT decreases with these features: they increase with
+            // DISTORTION (decrease with quality). A score-increasing min-max
+            // therefore needs w≤0 on them → sign = −1.
+            s[idx] = -1.0;
         }
     }
     s

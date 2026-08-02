@@ -304,8 +304,8 @@ pub fn score_row_minmax(
         for h in 0..mm.j {
             let base = (g * mm.j + h) * n;
             let mut acc = mm.b[g * mm.j + h] as f64;
-            for f in 0..n {
-                acc += mm.w[base + f] as f64 * x[f];
+            for (wv, xv) in mm.w[base..base + n].iter().zip(&x[..n]) {
+                acc += *wv as f64 * xv;
             }
             if acc > best_max {
                 best_max = acc;

@@ -1148,12 +1148,15 @@ struct PackLayer {
 /// identically. The weights passed on are the original f32s (the Python's
 /// JSON f64 → baker f32 narrowing recovers exactly these), so the emitted
 /// bytes match.
+/// Per-layer (kept, zeroed, total) weight counts reported by [`pack_layers`].
+type PackCounts = Vec<(usize, usize, usize)>;
+
 fn pack_layers(
     model: &Model,
     dtype: WeightDtype,
     tau: f64,
     protect_last: bool,
-) -> Result<(Vec<PackLayer>, Vec<(usize, usize, usize)>), String> {
+) -> Result<(Vec<PackLayer>, PackCounts), String> {
     let n_layers = model.n_layers();
     let mut packed = Vec::with_capacity(n_layers);
     let mut counts = Vec::with_capacity(n_layers);

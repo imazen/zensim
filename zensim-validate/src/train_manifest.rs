@@ -78,10 +78,10 @@ impl ManifestGroup {
         if self.within_ref {
             flags.push("withinref");
         }
-        if let Some(m) = self.loss_mode.as_deref() {
-            if matches!(m, "rank" | "mse" | "both") {
-                flags.push(m);
-            }
+        if let Some(m) = self.loss_mode.as_deref()
+            && matches!(m, "rank" | "mse" | "both")
+        {
+            flags.push(m);
         }
         if !flags.is_empty() {
             spec.push(':');

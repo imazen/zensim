@@ -986,7 +986,7 @@ fn apply_coarse_decay(w1: &mut [f64], n_hidden: usize, lr: f64, rate: f64) {
         use std::sync::atomic::{AtomicU64, Ordering};
         static CALLS: AtomicU64 = AtomicU64::new(0);
         let c = CALLS.fetch_add(1, Ordering::Relaxed);
-        if c % 500 == 0 {
+        if c.is_multiple_of(500) {
             eprintln!("[decay-debug] call #{c} lr={lr} rate={rate}");
         }
     }

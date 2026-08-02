@@ -484,8 +484,8 @@ pub mod idx_append2 {
 // ============================================================================
 
 /// SDR-route achromatic weight quadratic `φ_Y(y) = c0 + c1·y + c2·y²`,
-/// with `y` the LIVE reference Y-plane value (`cbrt(rel + β) − cbrt(β)
-/// + 0.01`, β the opsin bias — measured through
+/// with `y` the LIVE reference Y-plane value
+/// (`cbrt(rel + β) − cbrt(β) + 0.01`, β the opsin bias — measured through
 /// `srgb_to_positive_xyb_planar_into`). LSQ over sRGB codes 4–253, this
 /// refit: rms 0.092, max 0.431 (dark tail). Implementation-found
 /// deviation from the design doc's §5.3 table: those values were fitted
@@ -900,6 +900,7 @@ fn pjnd_transducer_v<T: F32x8Backend + Copy>(
 /// proof that the phase-4 reformulation is numerically equivalent, not
 /// just "removed and hoped for the best".
 #[derive(Default, Clone, Copy)]
+#[cfg_attr(not(test), allow(dead_code))] // test-referenced reference impl (raw_moment_reformulation_matches_terriberry)
 struct OnlineMoments {
     n: f64,
     mean: f64,
@@ -908,6 +909,7 @@ struct OnlineMoments {
     m4: f64,
 }
 
+#[cfg_attr(not(test), allow(dead_code))] // see struct note: exercised by the Terriberry parity test
 impl OnlineMoments {
     #[inline]
     fn update(&mut self, x: f64) {
@@ -3461,7 +3463,6 @@ fn append_block_kernel_entry_nocross(
 /// Runtime dispatch wrapper for the append kernel (same `incant!` shape as
 /// [`dense_block_kernel`]). `cross` carries the X/B activity strips for the
 /// Y channel; `None` compiles the cross-channel chain out entirely.
-#[allow(clippy::too_many_arguments)]
 /// `hl`: append2 highlight bins on (Y channel, HDR route, `append2_block`)
 /// — requires `cross` (Y-only by construction; asserted).
 #[allow(clippy::too_many_arguments)]
@@ -5400,7 +5401,7 @@ fn blockiness_sparse_strip_wide(
             *sum_v += bounded_excess(step_dst, step_src, C_BLOCK);
             x += BLOCK_LATTICE;
         }
-        if y % BLOCK_LATTICE == 0 && y > 0 {
+        if y.is_multiple_of(BLOCK_LATTICE) && y > 0 {
             for x in 0..width {
                 let i = row + x;
                 let i_up = i - width;
@@ -5911,6 +5912,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     let (features_app2, features_csfw) = features_tail2.split_at_mut(append2_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
+    #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
     for scale in 0..n_scales {
         let (width, height) = dims[scale];
         let n = width * height;
@@ -5981,6 +5983,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     //     gradient accumulators, the free luminance conditioner from the
     //     Y append accumulator's Σs, and the HDR highlight bins. ---
     if append2_on {
+        #[allow(clippy::needless_range_loop)] // scale derives offsets across distinct arrays
         for scale in 0..n_scales {
             let (width, height) = dims[scale];
             let n_f = (width * height) as f64;
@@ -7363,6 +7366,7 @@ pub(crate) fn compute_v2_append_attribution(
             );
         }
         if scale >= 1 {
+            #[allow(clippy::needless_range_loop)] // ch indexes two scales of mg + feature bases
             for ch in 0..3 {
                 let (pgs, pgd) = mg[scale - 1][ch];
                 let (gs, gd) = mg[scale][ch];
@@ -8895,10 +8899,12 @@ mod tests {
             let dst = quantize_distort(&src, w, h);
 
             // v1, the production extraction config (extended + IW = 372).
-            let mut cfg = crate::ZensimConfig::default();
-            cfg.extended_features = true;
-            cfg.compute_iw_features = true;
-            cfg.allow_multithreading = false;
+            let cfg = crate::ZensimConfig {
+                extended_features: true,
+                compute_iw_features: true,
+                allow_multithreading: false,
+                ..Default::default()
+            };
             let v1 = crate::compute_zensim_with_config(&src, &dst, w, h, cfg).unwrap();
             let v1f = v1.features();
             assert_eq!(v1f.len(), 372);
@@ -11303,6 +11309,7 @@ mod tests {
                     .unwrap();
                 m.swap(col, piv);
                 let piv_row = m[col];
+                #[allow(clippy::needless_range_loop)] // row != col guard needs the index
                 for row in 0..3 {
                     if row != col {
                         let f = m[row][col] / piv_row[col];

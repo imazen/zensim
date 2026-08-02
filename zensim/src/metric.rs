@@ -649,7 +649,11 @@ pub(crate) struct ScaleStats {
     /// This field exists to MEASURE that factor against the weights we actually
     /// ship, rather than against `iw_pool.rs`'s different estimator. See
     /// `benchmarks/iw_pooling_normalization_2026-07-15.md`.
-    #[cfg_attr(not(feature = "iw-diagnostics"), allow(dead_code))]
+    // Read only by the `iw_mean_weight_spread_across_references` diagnostic
+    // test (iw_pool.rs); non-test builds only WRITE it, under every feature
+    // combination (the old `iw-diagnostics` gate no longer has a non-test
+    // reader).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) iw_mean_w: [f64; 3],
 }
 
@@ -3534,8 +3538,8 @@ fn apply_minmax_runtime(x: &[f64], meta: &MinMaxHeadMeta) -> f64 {
         for h in 0..meta.j {
             let base = (g * meta.j + h) * n;
             let mut acc = meta.b[g * meta.j + h] as f64;
-            for f in 0..n {
-                acc += meta.w[base + f] as f64 * x[f];
+            for (wv, xv) in meta.w[base..base + n].iter().zip(&x[..n]) {
+                acc += *wv as f64 * xv;
             }
             if acc > best_max {
                 best_max = acc;

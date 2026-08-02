@@ -273,7 +273,7 @@ fn main() {
     // harness-side input prep, which the wall clock conflates under load).
     let compute_us = AtomicUsize::new(0);
     let progress = |k: usize| {
-        if k % 1000 == 0 {
+        if k.is_multiple_of(1000) {
             eprintln!("progress: {k}/{}", pairs.len());
         }
     };
