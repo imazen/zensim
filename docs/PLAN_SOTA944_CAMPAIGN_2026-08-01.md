@@ -45,6 +45,20 @@ wins; 5.7M-row bigcodec is not). The LOO half of acceptance runs in P3's model
 wave. If the toggle wins, ALL P1 outputs get the append-block re-extraction
 before P3 fits.
 
+**ADJUDICATED 2026-08-02 (`103568d2`+`4c383163`+`1d57ca72`; supervisor
+re-verified — committed analyzer reproduces every headline number on the
+masters, mirrored at `/mnt/v/output/zensim/bandvis-dst-2026-08-02/`):
+extract bigcodec AND all P1 with the toggle OFF.** Both pre-registered
+suppression arms failed their fixture gates (arm 1: ratio-normalized masks
+cancel, cross-fire WORSE 1.715→1.959; arm 2: lattice fixed 0.433→0.142 but
+deband credit inverted at the resonant scale) — the 2026-07-28 DEFER+RESHAPE
+call is confirmed by direct measurement. The shipped GAIN-only combine
+(toggle ON: only f924/f929/f934/f939 move; OFF bit-exact 5/5 legs; +3.1% CPU)
+PASSED the registered LYB read (GAIN-vs-MOS SROCC up at every scale,
+mean-of-scales −0.113→−0.228; LOSS bit-stable) and stands as a **P3/LOO
+candidate at zero re-implementation cost** — NOT in the canonical 944
+extraction. bigcodec fleet leg UNBLOCKED on current (toggle-off) math.
+
 ## P2 — logged-issue wave (after P1's heavy extraction; one heavy stream)
 
 From `gh issue list` 2026-08-01: FIX in code: **#48** (max_pixels safe default +
