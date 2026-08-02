@@ -2354,6 +2354,7 @@ pub fn fused_blur_h_ssim(
 /// — identical output planes either way (the accumulator chains are
 /// independent; gated by `ssim3_matches_ssim4_bitwise`).
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(any(feature = "feature-regime-v2", test)), allow(dead_code))] // v2-walk + tests only
 pub fn fused_blur_h_ssim3(
     src: &[f32],
     dst: &[f32],
@@ -2721,6 +2722,7 @@ fn fused_blur_h_ssim3_inner_v4x(
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(any(feature = "feature-regime-v2", test)), allow(dead_code))] // callers live in the ssim3 v4x chain (v2-walk); the arcane-registered siblings mask their own liveness
 fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     token: archmage::X64V4xToken,
     src: &[f32],
@@ -3706,6 +3708,7 @@ pub(crate) fn checked_padded_plane_len(
 /// exact arithmetic. O(N) via prefix sums per row + a sliding row-window for
 /// the vertical pass. `tmp` must be `width` long; `plane` is modified in
 /// place.
+#[cfg_attr(not(any(feature = "custom-profiles", feature = "feature-regime-v2", test)), allow(dead_code))] // attribution + v2 JBU spread + tests
 pub(crate) fn box_spread_sum_preserving(
     plane: &mut [f64],
     width: usize,
@@ -3785,6 +3788,7 @@ const SPREAD_ROW_BAND: usize = 64;
 /// against low-ms serial work, and the serial path got faster than the
 /// banded one below ~8M elements. Every 576²/1152² compare therefore
 /// takes the serial path; 4K-class compares' scale 0 engages rayon.
+#[cfg_attr(not(any(feature = "custom-profiles", test)), allow(dead_code))] // attribution parallel-spread crossover + its bitwise gate test
 pub(crate) const SPREAD_PARALLEL_MIN_N: usize = 8_388_608;
 
 /// f32 spread-and-merge twin of [`box_spread_sum_preserving`] for the

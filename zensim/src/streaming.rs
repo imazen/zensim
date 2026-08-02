@@ -2261,6 +2261,7 @@ pub(crate) struct AttrScaleRetention {
 impl AttrScaleRetention {
     /// Planes sized for the scale-0 (largest) resolution; coarser scales
     /// use the leading `w × h` prefix of each plane.
+    #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))] // attribution-only constructor
     pub fn new(n: usize) -> Self {
         Self {
             sd: core::array::from_fn(|_| vec![0.0; n]),
@@ -4055,6 +4056,7 @@ fn compute_diffmap_from_xyb(
 /// once per processed scale, BEFORE the dst pyramid is downscaled for the
 /// next scale.
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))] // attribution-only walker
 pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
     precomputed: &PrecomputedReference,
     distorted: &impl ImageSource,
@@ -4148,6 +4150,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
 /// spread/merge/upsample tail and next-coefficient derivation. The score
 /// path (stats, finalize, combine_scores) is IDENTICAL to the other
 /// walks.
+#[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))] // attribution-only walker
 pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
     precomputed: &PrecomputedReference,
     distorted: &impl ImageSource,
