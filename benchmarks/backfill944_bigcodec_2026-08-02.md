@@ -102,8 +102,71 @@ carry exactly `["zensim-foldapp"]` before the metric rewrite.
 All three SIMD tiers verified bitwise against the canonical 924 bytes before
 scale-out completed — 7,029 fleet rows, 0 mismatches total.
 
-RESULTS_PLACEHOLDER (per-view G-BF1/G-BF2 table + assembly stats + wall time
-+ node utilization land here when the wave drains.)
+## ★ SECOND FINDING: CPU-VENDOR nondeterminism in the MSCN append slots (G-BF1 round 2)
+
+The first 21-view gate run FAILED G-BF1 on **exactly 22 columns in every
+dataset incl. lossless PNG/WebP**: the `idx_append::MSCN_DIFF_MEAN`(+5) /
+`MSCN_DIFF_L2`(+6) pair in 11 of 12 (channel×scale) append groups
+(f725/726, 742/743, 776/777, 793/794, 810/811, 827/828, 844/845, 861/862,
+878/879, 895/896, 912/913), deltas ~1e-8..1e-9 rel.
+
+- Lossless codecs decode bit-exact on every CPU ⇒ pixels identical ⇒
+  extractor-side. Only 22 slots move (a pixel diff moves ~235/924 — the
+  tier study's signature) ⇒ localized to the MSCN divisive-normalization
+  math (`sqrt(var + C)` reciprocal — approximate rsqrt/rcp instructions
+  have VENDOR-SPECIFIC tables; one NR step leaves the observed ~1e-8).
+  Filed: **imazen/zensim#56** (zero-tolerance bug; fix = exact sqrt+div or
+  full-precision refine + a cross-vendor CI gate). Related infra bug found
+  in the same diagnosis: **imazen/zenmetrics#38** (JobId::of depends on
+  serde_json preserve_order via feature unification — the docker fleet's
+  ledger ids are insertion-order-encoded, ctl/mac/bf924's sorted; all bf944
+  joins handle both encodings).
+- Direct proof: cell `o_7067.png.scale96x96_…_zenavif_q30_….avif`
+  (bf944v4-zavif-t3) re-extracted on the tower = bitwise-identical to its
+  bf924 row (0/924); on i265 = f725 off by 8.7e-9. In `zenavif_lossy/test`,
+  85,392 of 271,488 rows diverge somewhere (only cross-vendor-re-extracted
+  rows; the rest happen to refine identically).
+
+**Consequence: G-BF1 requires CPU-VENDOR×tier-matched extraction.** The
+measured equivalence classes (all verified by bitwise gates in this wave):
+
+| class | boxes (bf924-era worker names) | cells attributed |
+|---|---|--:|
+| amdv4x (AMD Zen4, AVX-512) | lianli (`lilith-lianli`), wsl (`wsl-smoke`→`wsl-944`) | 231,836 |
+| amdv4 (AMD Zen1/Zen3, AVX2) | tower (`tower-unraid`), ian (`zen-node-3`) | 129,648 |
+| intelv4 (Intel RaptorLake/ArrowLake, AVX2) | jason (`zen-node-2`), i265 | 97,170 |
+| neon (Apple M4 Pro) | mac (`lilith-mac` + test names) | 31,519 |
+
+Zen1↔Zen3 and RaptorLake↔ArrowLake are interchangeable (measured: their
+cross-extractions gate bitwise); AMD↔Intel are not. Future backfill waves
+inherit this: partition by vendor-class, not SIMD tier alone.
+
+**Repair wave (2026-08-02 ~18:0xZ):** census over all wave ledgers (both
+JobId encodings): 406,203 / 490,173 cells already had a class-matched blob
+(the wave's multi-worker re-scoring); **83,970 repair cells** declared as
+`bf944amd-*` (44,679; `_pool944amdv4`; tower+ian) and `bf944int-*` (39,291;
+`_pool944intelv4`; i265+jason) by `zenmetrics scripts/jobsys/
+declare_bf944_repair.py`. Selection at assembly =
+`bf944_classpref_select.py`: exact-bf924-worker first, then vendor class,
+FAIL loud otherwise.
+
+### Drain accounting for the original 173-cell gap (main wave)
+
+The last 173 cells (bf944neon zavif-t0 170 / zjxll-t6 1+37 shard-collision
+re-lost / zwebp-t7 2) were starved by a mac-worker pass pathology: the mac
+run.sh passes carry no `--ledger-in`, so each pass re-walked all cells
+against persistent chunk claims (fail-once ⇒ claim persists ⇒ skipped
+forever) while pass timeouts + shard-name collisions across container
+restarts (`mac-$WORKER-$cyc.chunk-*.parquet`) hid/re-lost rows. Cleared by:
+stale-claim deletion + manual `zenfleet-worker` passes ON THE MAC (neon
+class preserved) with the run's ledger snapshot as `--ledger-in`
+(`done=170`, `done=1`, `done=37`; worker `lilith-mac-gapfix`). During
+diagnosis two instrument passes with an incomplete exec env wrote 170
+FAILED rows (`encoder_panic` = my missing `ZEN_R2_ENDPOINT`, not a real
+panic); those shards were deleted from the run ledger before the fix pass.
+
+RESULTS_PLACEHOLDER (final per-view G-BF1/G-BF2 table + assembly stats +
+wall time + node utilization land here at promote.)
 
 ## Post-fleet pipeline (committed this session)
 
