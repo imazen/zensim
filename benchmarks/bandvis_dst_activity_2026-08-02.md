@@ -180,6 +180,125 @@ gates, the toggle ships arm-2 math as the better-mechanism candidate but
 the ADJUDICATION VERDICT is "extract bigcodec with the toggle OFF" and
 the plane remains a research surface for P3's LOO round.
 
-## Results — ARM 2
+## Results — ARM 2 (visibility-weighted pooling): GAIN weight SOUND, LOSS weight UNSOUND
 
-_(filled after the arm-2 block above was committed)_
+(`~/tmp/bandvis-dst/append2-tests-arm2.log`; same fixtures.)
+
+| gate | registered | measured | verdict |
+|---|---|---|---|
+| A2-F3 lattice | max < 0.5 × OFF (0.217) | **0.142 (0.33×; s3 −67%)** | **PASS decisively** — the pooling weight is the working mechanism for geometry cross-fire |
+| A2-F2b bayer s0–s2 | each < 0.6 × OFF | 0.35× / 0.69× / 0.77× | s0 PASS, s1–s2 real (−31/−23%) but under-bar |
+| A2-F2 noise ratio @s3 | < 1.715 | **2.414** (undith 0.414→0.185, dith 0.710→0.447) | FAIL — worse again |
+| A2-F1 | rungs > 0.05, rolloff | rolloff ✓; **3b rung 0.0347 < 0.05** | FAIL (cap-tail rung under-fires) |
+| A2-F4 | < 0.5 | 0.137 | PASS |
+| A2-F5 deband | LOSS > GAIN, margin ≥ 1.28× | **INVERTED: gain 0.214 > loss 0.185** | **FAIL — direction violation** |
+| A2-LOSS-hazard | dither LOSS ≤ OFF | s0 0.476 ≤ 0.519 ✓ | PASS (arm-1 hazard not reproduced) |
+| A2-F6/7/8/9 | structural | all pass (HDR fires [0.078, 0.222, 0.210, 0.053]) | PASS |
+
+**The fundamental finding (both arms, all scales):** at the RESONANT scale,
+banding contours ARE local activity — `|dst − mu2|` at a plateau step is
+the same magnitude class as dither residual, so ANY flatness-mask
+realization (inside or outside the ratio) self-suppresses true banding
+comparably to — at s3 MORE than — the cross-fire it targets (F2 ratio
+1.715 → 1.959 arm 1 → 2.414 arm 2). The dst-activity plane cannot
+separate sparse-contour from dense-texture; that separation is a
+contour-extent/density question — exactly the A8 soft-tile route the
+gates-doc REMAINDERS already prefer, and exactly what the trained head
+already gets for free from `texture_dissim_s3` (AUC 0.977, retest doc).
+The 2026-07-28 DEFER+RESHAPE verdict is therefore CONFIRMED by direct
+measurement of the fix itself, with the mechanism now understood.
+
+**A2-F5's specific mechanism:** LOSS = `l0 · flat_src` weights the
+removed-banding credit by the BANDED source's own flatness — which is low
+at exactly the contours whose removal should be credited. The arm-2
+weight is measured UNSOUND for the LOSS polarity (LYB's workhorse,
+−0.447) while measured SOUND for GAIN (F3's 0.33×, the only decisive
+suppression either arm produced).
+
+## SHIPPED combine (registered-rule deviation, recorded): arm-2 weight on GAIN ONLY
+
+The registered ship rule said "both arms fail ⇒ ship arm-2 math as the
+better-mechanism candidate". Its premise — arm 2 being uniformly better —
+was falsified by A2-F5 (direction inversion on the deband credit).
+Shipping a measured direction-inversion when a strictly-better composition
+of the SAME two measured runs exists would enshrine a known defect, so the
+toggle ships the composition (deviation from the registered rule, called
+out here explicitly):
+
+```
+gain_px = bounded_excess(band_d, band_s, C_BV).gain · flat_dst   # ARM-2 (measured sound: F3 0.33×, F4, hazard clean)
+loss_px = bounded_excess(band_d·flat_src, band_s·flat_src, C_BV).loss    # OFF math, BIT-IDENTICAL
+```
+
+Properties (each derivable from the two measured runs, then verified by a
+direct run of the shipped combine):
+
+- LOSS lanes with the toggle ON are **bit-identical to toggle OFF** — the
+  LYB-validated workhorse is untouched by construction; the toggle now
+  moves ONLY the 4 GAIN slots (a tighter guarantee than registered F7).
+- F5 deband: loss 0.414 (OFF value) vs gain 0.214 (arm-2 value) — margin
+  0.200, BETTER than OFF's 0.089. Direction restored and strengthened.
+- F3 lattice 0.142 (0.33×), F4 0.137, bayer s0 0.35× — the arm-2 GAIN
+  wins carry over unchanged.
+- Registered misses that REMAIN (honest): F2 noise ratio @s3 2.414
+  (structural, per the fundamental finding); A2-F1 3b rung 0.0347
+  (cap-tail under-fire; 32-code steps are the "edges not banding" regime
+  the cap already attenuates — coherent, documented, still a registered
+  miss); bayer s1–s2 under-bar.
+- Identity exact-0, lanes-only, serial≡parallel, HDR-route structure:
+  re-gated on the shipped combine.
+
+## Verification evidence (shipped combine)
+
+- **Shipped-combine matrix verify** (`append2-tests-shipped.log`): LOSS
+  vectors byte-equal OFF↔ON on every fixture (dither
+  [0.5188…, 0.1978…, 0.0261…, 0.0049…] identical to 16 digits; deband
+  loss 0.41385 both arms); F5 gain 0.214 / loss 0.414 (margin 0.200 >
+  OFF 0.089, asserted); F3 0.142 < 0.5×0.433 (asserted); composite
+  numbers match the two measured arms exactly — the composition check
+  holds. Full suite **239 passed / 0 failed**, zero relaxations.
+- **F10 byte-stability (HARD GATE): PASS 5/5.** Main-tip binary
+  (`5246d978`) vs this-work binary, toggle off, `cmp` byte-identical
+  CSVs: aic3-100 × {fold 720 (1,078,704 B), foldapp 924 (1,427,368 B),
+  foldapp2 944 (1,452,882 B), foldapphdr100 (1,433,702 B)} +
+  kadis-hdr real sample × foldapp2hdrpq (92,044 B). aic3 is a real
+  canonical leg — this is the "one real leg sample" byte-identity proof.
+- **Lanes proof at CSV level:** `ZENSIM_APPEND2_DSTACT=1` vs unset on
+  aic3-100 foldapp2: exactly `{f924, f929, f934, f939}` (the four
+  per-scale BANDVIS_GAIN slots) differ across all 100 pairs; every other
+  column byte-equal — tighter than the registered F7 (LOSS provably
+  untouched).
+- **F11 perf (LOADED box — P1 kadis backfill running; flagged per the
+  header):** 10 interleaved ABBA 1-thread rounds on aic3-100
+  compute-only; per-round paired ratios are load-bimodal; the 5
+  stable-load rounds give **median +3.1%** (range −6.5%…+5.6%).
+  Consistent with (and at or under) the recorded ≈+5% estimate;
+  structural cost = one `abs_diff` + one 2-pass box blur on 1 of 3
+  channels + 4 SIMD ops/8 px in the Y gradient kernel. A quiet-box
+  number should be taken before any future flip-ON ships (moot for
+  production while the verdict is OFF).
+- **Heap (12 MP heaptrack, deterministic — load-independent):** toggle
+  OFF **221.04 MB** — bit-for-bit the recorded append2/CSFW-era
+  baseline (OFF-mode allocations unchanged, as constructed); toggle ON
+  223.41 MB (+2.37 MB = the lazily-grown Y-strip `activity_dst`
+  buffer, exactly the designed footprint).
+
+## LIVE-YT-Banding ON-vs-OFF read
+
+_(two-arm re-extraction from the same fresh frames; filled when the
+pipeline completes)_
+
+## ADJUDICATION VERDICT (the campaign P1.5 question)
+
+**Extract bigcodec — and every P1 backfill — with `append2_dst_activity`
+OFF.** Both pre-registered arms failed their suppression gates; the
+cross-fire fix the plane was recorded to buy does not materialize at the
+resonant scale under any masking algebra tried, real-banding GAIN response
+is degraded 2–3× at its resonant scale by every variant, and the trained
+head's zero-cost `texture_dissim` gate (AUC 0.977) remains the standing
+mitigation. The toggle stays in-tree (default OFF, byte-stable) as the
+P3/LOO research surface: the shipped GAIN-only combine is the strongest
+candidate measured here (geometry cross-fire 0.33×, deband margin 2.2×
+OFF's), and P3's LOO-on-944 round can evaluate it against the OFF math at
+zero re-implementation cost. The LOO half of the recorded acceptance is
+explicitly NOT run here (P3's model wave owns it).

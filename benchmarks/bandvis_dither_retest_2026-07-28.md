@@ -1,5 +1,13 @@
 # BANDVIS dst-side dither retest — real content, the +5% fix decision (2026-07-28)
 
+> **2026-08-02 UPDATE:** the plane was subsequently BUILT (opt-in
+> `append2_dst_activity`, default OFF) and adjudicated for SOTA-944 P1.5 —
+> both pre-registered masking arms FAILED their suppression gates and this
+> doc's DEFER verdict is CONFIRMED by direct measurement (mechanism:
+> flatness masks inside `bounded_excess` are ratio-cancelled; at the
+> resonant scale banding contours ARE local activity). See
+> `bandvis_dst_activity_2026-08-02.md`.
+
 Decides append2 REMAINDERS #3: is the Y-only dst-activity plane (~+5% CPU,
 the V3(b) dst-masking fix) warranted? Evidence base: the
 **grain-pathology-2026-07-28** starter tranche

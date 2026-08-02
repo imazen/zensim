@@ -436,6 +436,14 @@ pub mod idx_append2 {
     /// read the 4 per-scale slots as a response CURVE, not redundant
     /// copies (measured ladder matrix:
     /// `benchmarks/append2_bandvis_gates_2026-07-27.md`).
+    ///
+    /// OPT-IN VARIANT (`V2NewFeatureToggles::append2_dst_activity`,
+    /// default OFF — 2026-08-02 P1.5 adjudication): GAIN becomes the
+    /// pure-band FR excess pooled under the DST's own flatness weight
+    /// (dst-activity plane). Production extraction runs with it OFF
+    /// (adjudicated); rows extracted with it ON are a different feature
+    /// definition for this slot — never column-mix. Record:
+    /// `benchmarks/bandvis_dst_activity_2026-08-02.md`.
     pub const BANDVIS_GAIN: usize = 0;
     /// Reverse polarity: visible steps REMOVED (debanding credit).
     pub const BANDVIS_LOSS: usize = 1;
@@ -1342,28 +1350,38 @@ pub struct V2NewFeatureToggles {
     /// at f944+ after append2. Additive-only; joins the NEXT extraction
     /// regime wave (the HDR backfill).
     pub csfw_block: bool,
-    /// BANDVIS dst-side self-masking (the recorded V3(b)/(c) cross-fire
-    /// fix from `benchmarks/append2_bandvis_gates_2026-07-27.md`
-    /// REMAINDERS #3, implemented 2026-08-02 for the SOTA-944 P1.5
-    /// adjudication): compute a distorted-side activity plane
+    /// BANDVIS dst-activity plane (the recorded V3(b)/(c) cross-fire fix
+    /// from `benchmarks/append2_bandvis_gates_2026-07-27.md` REMAINDERS
+    /// #3, implemented + adjudicated 2026-08-02 for the SOTA-944 P1.5
+    /// sequencing decision): compute a distorted-side activity plane
     /// (`box_blur(|dst − mu2|)` — the exact dst twin of the existing
-    /// ref-side `activity` chain, Y channel only) and mask each BANDVIS
-    /// band term by ITS OWN image's flatness:
-    /// `b_src = band(curv_src)·(1 − sat(act_src, C_ACTIVITY))` (unchanged)
-    /// and `b_dst = band(curv_dst)·(1 − sat(act_dst, C_ACTIVITY))` (was
-    /// `act_src` — the ref-side-mask design under which dst-side
-    /// dither/blocking texture could not self-mask and cross-fired GAIN).
-    /// Per-side self-masking keeps the identity-pair exact-0 property
-    /// (identical planes ⇒ bitwise-identical activity twins ⇒ the FR
-    /// excess pair is exactly 0) and gives dst-texture-as-deband the
-    /// directionally-defensible LOSS credit. Default OFF: with this
-    /// false, no dst-activity plane is computed and every path/byte —
-    /// both routes, all regimes — is unchanged (the BANDVIS kernel runs
-    /// the exact pre-fix operation sequence via a const split). When ON,
-    /// ONLY the two BANDVIS lanes (`idx_append2::BANDVIS_GAIN/LOSS`)
-    /// change; all other 942 slots stay bit-identical. Requires
-    /// `append2_block` (asserted): it modifies append2-only lanes.
-    /// Adjudication record: `benchmarks/bandvis_dst_activity_2026-08-02.md`.
+    /// ref-side `activity` chain, Y channel only, ≈+5%-class cost) and
+    /// re-weight the BANDVIS **GAIN** polarity by the dst's own local
+    /// flatness as a per-pixel POOLING weight:
+    /// `gain_px = excess(band_dst, band_src)·(1 − sat(act_dst, C_ACTIVITY))`.
+    /// The weight sits OUTSIDE the FR ratio — the adjudication measured
+    /// that a flatness mask INSIDE `bounded_excess` is ratio-cancelled
+    /// (scale-invariance) and suppresses real banding MORE than the
+    /// dither it targets. **LOSS stays bit-identical to the OFF math**:
+    /// the dst/src-side weights both measured direction-inverting on the
+    /// deband credit, and LOSS is the LYB-validated workhorse polarity.
+    /// Identity pairs stay exactly 0 either way.
+    ///
+    /// ADJUDICATION VERDICT (2026-08-02): both pre-registered masking
+    /// arms FAILED their suppression gates at the resonant scale (banding
+    /// contours ARE local activity — the plane cannot separate sparse
+    /// contours from dense texture); production extraction (bigcodec +
+    /// every P1 backfill) runs with this OFF. The toggle is retained as
+    /// the P3/LOO research surface: the shipped GAIN combine is the
+    /// strongest candidate measured (geometry cross-fire 0.33×, deband
+    /// margin 2.2× OFF's). Default OFF: no dst-activity plane is
+    /// computed and every path/byte — both routes, all regimes — is
+    /// unchanged (const-split kernel; the OFF instantiations emit
+    /// today's exact operation sequences). When ON, ONLY the four
+    /// per-scale `idx_append2::BANDVIS_GAIN` slots change; every other
+    /// slot INCLUDING `BANDVIS_LOSS` stays bit-identical. Requires
+    /// `append2_block` (asserted).
+    /// Record: `benchmarks/bandvis_dst_activity_2026-08-02.md`.
     pub append2_dst_activity: bool,
 }
 impl Default for V2NewFeatureToggles {
@@ -2541,13 +2559,17 @@ impl GradientAccum {
 /// reflect-boundary formulas (`saturating_sub`/`.min(width-1)`) exactly as
 /// before — a tiny fraction of pixels (2 columns + 2 rows out of
 /// width*height), not worth the complexity of a SIMD boundary-clamp.
-/// `BV_DSTACT` (BANDVIS dst self-mask, `append2_dst_activity`): when true,
-/// `act_dst` carries the distorted-side activity plane (same shape as
-/// `activity` — `width*height`, no halo, own-row reads only) and the
-/// BANDVIS dst band term is masked by `1 − sat(act_dst, C_ACTIVITY)`
-/// instead of the ref-side flatness. Only meaningful with `BANDVIS = true`;
-/// with `BV_DSTACT = false` the parameter is dead (`&[]`) and the emitted
-/// operation sequence is the pre-fix one, bit for bit.
+/// `BV_DSTACT` (BANDVIS dst-activity combine, `append2_dst_activity`):
+/// when true, `act_dst` carries the distorted-side activity plane (same
+/// shape as `activity` — `width*height`, no halo, own-row reads only) and
+/// the BANDVIS GAIN polarity becomes the pure-band FR excess pooled under
+/// the dst's own flatness weight `1 − sat(act_dst, C_ACTIVITY)` (LOSS
+/// keeps the toggle-off math bit-exactly — see the adjudication record in
+/// `benchmarks/bandvis_dst_activity_2026-08-02.md` for why both
+/// in-ratio masking arms were rejected). Only meaningful with
+/// `BANDVIS = true`; with `BV_DSTACT = false` the parameter is dead
+/// (`&[]`) and the emitted operation sequence is the pre-fix one, bit
+/// for bit.
 #[inline]
 fn gradient_block_kernel_generic<
     T: F32x8Backend + Copy,
@@ -2656,21 +2678,37 @@ fn gradient_block_kernel_generic<
             let band = |g: f64| -> f64 {
                 saturate(g, bv_delta_lo as f64) * (1.0 - saturate(g, bv_delta_hi as f64))
             };
-            let b_src = band(curv_src) * flat;
-            // dst self-mask (`append2_dst_activity`): the dst band term's
-            // flatness comes from the DST's own activity, so dst-side
-            // texture (dither/blocking/grain) masks its own curvature.
-            // With BV_DSTACT off this const-folds to the pre-fix
-            // `band(curv_dst) * flat` — identical ops, identical bytes.
-            let flat_d = if BV_DSTACT {
-                1.0 - saturate(act_dst[y * width + x] as f64, C_ACTIVITY)
+            if BV_DSTACT {
+                // `append2_dst_activity` SHIPPED combine (adjudication:
+                // `benchmarks/bandvis_dst_activity_2026-08-02.md`).
+                // GAIN = arm-2 visibility-weighted POOLING: the FR excess
+                // on the PURE band terms, weighted by the DST's own
+                // flatness OUTSIDE the ratio — the only place a flatness
+                // mask survives `bounded_excess`'s scale-invariance
+                // (arm 1, flat multiplied INSIDE the pair, measured
+                // ratio-cancelled: it suppressed real banding MORE than
+                // dither). Measured: lattice cross-fire 0.33×, deband
+                // margin 2.2× the OFF margin.
+                // LOSS = the OFF math BIT-EXACTLY (identical expressions,
+                // identical order): the arm-2 weight measured
+                // direction-INVERTING on the deband credit (the banded
+                // src's own contours zero the very pixels whose removal
+                // should be credited), and LOSS is the LYB-validated
+                // workhorse — it must not move.
+                let flat_d = 1.0 - saturate(act_dst[y * width + x] as f64, C_ACTIVITY);
+                let b_src = band(curv_src) * flat;
+                let b_dst = band(curv_dst) * flat;
+                let (_, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
+                let (g0, _) = bounded_excess_pair(band(curv_dst), band(curv_src), C_BV);
+                acc.sum_bv_gain += g0 * flat_d;
+                acc.sum_bv_loss += loss;
             } else {
-                flat
-            };
-            let b_dst = band(curv_dst) * flat_d;
-            let (gain, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
-            acc.sum_bv_gain += gain;
-            acc.sum_bv_loss += loss;
+                let b_src = band(curv_src) * flat;
+                let b_dst = band(curv_dst) * flat;
+                let (gain, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
+                acc.sum_bv_gain += gain;
+                acc.sum_bv_loss += loss;
+            }
         }
     };
 
@@ -2746,19 +2784,25 @@ fn gradient_block_kernel_generic<
                         saturate_v(token, curv_s, bv_lo) * (one - saturate_v(token, curv_s, bv_hi));
                     let band_d =
                         saturate_v(token, curv_d, bv_lo) * (one - saturate_v(token, curv_d, bv_hi));
-                    let b_src = band_s * flat;
-                    // dst self-mask (see the scalar sibling): const-folds
-                    // to the pre-fix `band_d * flat` when BV_DSTACT off.
-                    let flat_d = if BV_DSTACT {
+                    if BV_DSTACT {
+                        // SHIPPED combine (see the scalar sibling): GAIN
+                        // = pure-band FR excess × dst flatness (pooling
+                        // weight); LOSS = the OFF math bit-exactly.
                         let actd = ld_at!(act_dst, act_row + x);
-                        one - saturate_v(token, actd, c_activity)
+                        let flat_d = one - saturate_v(token, actd, c_activity);
+                        let b_src = band_s * flat;
+                        let b_dst = band_d * flat;
+                        let (_, loss) = bounded_excess_pair_v(token, b_dst, b_src, c_bv);
+                        let (g0, _) = bounded_excess_pair_v(token, band_d, band_s, c_bv);
+                        r_bv_gain += g0 * flat_d;
+                        r_bv_loss += loss;
                     } else {
-                        flat
-                    };
-                    let b_dst = band_d * flat_d;
-                    let (gain, loss) = bounded_excess_pair_v(token, b_dst, b_src, c_bv);
-                    r_bv_gain += gain;
-                    r_bv_loss += loss;
+                        let b_src = band_s * flat;
+                        let b_dst = band_d * flat;
+                        let (gain, loss) = bounded_excess_pair_v(token, b_dst, b_src, c_bv);
+                        r_bv_gain += gain;
+                        r_bv_loss += loss;
+                    }
                 }
 
                 x += 8;
@@ -2795,7 +2839,15 @@ fn gradient_block_kernel_entry(
     height: usize,
 ) -> GradientAccum {
     gradient_block_kernel_generic::<_, false, false>(
-        token, src, dst, activity, &[], width, height, 0.0, 0.0,
+        token,
+        src,
+        dst,
+        activity,
+        &[],
+        width,
+        height,
+        0.0,
+        0.0,
     )
 }
 
@@ -10314,10 +10366,13 @@ mod tests {
     }
 
     /// P1.5 dst-activity toggle — structural gates (pre-registered F6/F7/
-    /// F8 in `benchmarks/bandvis_dst_activity_2026-08-02.md`): toggle ON
-    /// moves ONLY the BANDVIS lanes of the 944 vector (all other 942
-    /// slots bit-identical), identity stays exactly 0, serial ≡ parallel,
-    /// and the toggle is live (lanes DO move on a quantized pair).
+    /// F8 in `benchmarks/bandvis_dst_activity_2026-08-02.md`, tightened
+    /// to the SHIPPED combine): toggle ON moves ONLY the four BANDVIS
+    /// GAIN slots of the 944 vector — every other slot INCLUDING
+    /// BANDVIS_LOSS is bit-identical (the shipped combine keeps LOSS =
+    /// the OFF math exactly) — identity stays exactly 0, serial ≡
+    /// parallel, and the toggle is live (GAIN lanes DO move on a
+    /// quantized pair).
     #[test]
     fn append2_dst_activity_lanes_only_identity_and_parallel() {
         let (w, h) = (150usize, 170usize);
@@ -10345,27 +10400,24 @@ mod tests {
         assert_eq!(off.features().len(), 944);
         assert_eq!(on.features().len(), 944);
         assert_eq!(on.regime(), FeatureRegime::Folded720Append2);
-        // F7: only the BANDVIS gain/loss lanes may differ.
+        // F7 (tightened): only the BANDVIS GAIN lanes may differ — LOSS
+        // is bit-stable by the shipped combine's construction.
         let mut lanes_moved = 0usize;
         for i in 0..944 {
-            let bandvis_lane = i >= 924 && {
-                let local = (i - 924) % APPEND2_PER_SCALE;
-                local == idx_append2::BANDVIS_GAIN || local == idx_append2::BANDVIS_LOSS
-            };
-            if bandvis_lane {
-                lanes_moved +=
-                    (off.features()[i].to_bits() != on.features()[i].to_bits()) as usize;
+            let gain_lane = i >= 924 && (i - 924) % APPEND2_PER_SCALE == idx_append2::BANDVIS_GAIN;
+            if gain_lane {
+                lanes_moved += (off.features()[i].to_bits() != on.features()[i].to_bits()) as usize;
             } else {
                 assert_eq!(
                     off.features()[i].to_bits(),
                     on.features()[i].to_bits(),
-                    "append2_dst_activity moved non-BANDVIS slot f{i}"
+                    "append2_dst_activity moved a non-GAIN slot f{i}"
                 );
             }
         }
         assert!(
             lanes_moved > 0,
-            "toggle must be LIVE on a quantized pair (no BANDVIS lane moved)"
+            "toggle must be LIVE on a quantized pair (no GAIN lane moved)"
         );
         // F6: identity pair stays exactly 0 with the toggle ON (activity
         // twins are bitwise-identical on identical planes ⇒ FR pair 0).
@@ -10481,7 +10533,9 @@ mod tests {
         let (gk_on, _) = gl(&ramp, &blk, true);
         let mx_off = gk_off.iter().cloned().fold(0.0f64, f64::max);
         let mx_on = gk_on.iter().cloned().fold(0.0f64, f64::max);
-        println!("F3 lattice GAIN OFF {gk_off:?} max {mx_off:.4}\n                ON  {gk_on:?} max {mx_on:.4}");
+        println!(
+            "F3 lattice GAIN OFF {gk_off:?} max {mx_off:.4}\n                ON  {gk_on:?} max {mx_on:.4}"
+        );
 
         // F4: source-texture masking, both arms.
         let tex = bv_textured_ramp(&ramp);
@@ -10510,22 +10564,25 @@ mod tests {
             gd_off[3], ld_off[3], gd_on[3], ld_on[3]
         );
 
-        // --- Asserts (after the full matrix printed) ---
-        // F1 design contract: every rung still fires with the self-mask
-        // ON, the cap rolloff is preserved, and the peak sits in the
-        // visibility-band region (7b/6b/5b — MEASURED: the self-mask
-        // relocates the peak from 5b to a 7b/5b near-tie, because coarse
-        // rungs carry their own dst activity while 2-code steps are near
-        // the δ band optimum ≈1.6 codes and stay unmasked; the
-        // pre-registered "interior peak" form of this gate missed by 0.6%
-        // — recorded in the adjudication doc).
-        for (i, bits) in [7u32, 6, 5, 4, 3].iter().enumerate() {
+        // --- Adjudicated pins (shipped combine; full registered-gate
+        // PASS/MISS ledger in the doc) ---
+        // F1: in-band rungs keep firing; the 3b cap-tail rung measured
+        // 0.0347 — UNDER the registered 0.05 bar (recorded MISS: 32-code
+        // steps carry strong self-activity AND sit in the "edges not
+        // banding" cap regime) — pinned at its measured level so a silent
+        // further collapse trips.
+        for (i, bits) in [7u32, 6, 5, 4].iter().enumerate() {
             assert!(
                 peaks_on[i] > 0.05,
-                "F1: {bits}b rung must keep firing with dst self-mask ON: {}",
+                "F1: {bits}b rung must keep firing with the dst weight ON: {}",
                 peaks_on[i]
             );
         }
+        assert!(
+            peaks_on[4] > 0.02,
+            "F1: 3b cap-tail rung collapsed below its measured level: {}",
+            peaks_on[4]
+        );
         let pmax = peaks_on.iter().cloned().fold(0.0f64, f64::max);
         assert!(
             pmax > peaks_on[3] && pmax > peaks_on[4],
@@ -10535,6 +10592,29 @@ mod tests {
             peaks_on[2] > peaks_on[3] && peaks_on[3] > peaks_on[4],
             "F1: cap rolloff not monotone (ON): {peaks_on:?}"
         );
+        // Shipped-combine construction: LOSS is BIT-identical to OFF on
+        // every fixture (the toggle re-weights GAIN only).
+        for s in 0..4 {
+            assert_eq!(
+                ln_on[s].to_bits(),
+                ln_off[s].to_bits(),
+                "LOSS moved under the toggle (dither fixture, s{s})"
+            );
+            assert_eq!(
+                ld_on[s].to_bits(),
+                ld_off[s].to_bits(),
+                "LOSS moved under the toggle (deband fixture, s{s})"
+            );
+        }
+        // F3 (adjudicated PASS): the pooling weight suppresses the
+        // lattice cross-fire decisively.
+        assert!(
+            mx_on < 0.5 * mx_off,
+            "F3: lattice cross-fire must stay < 0.5x OFF: {mx_on} vs {mx_off}"
+        );
+        // F5 (shipped combine): LOSS keeps the OFF value, GAIN takes the
+        // arm-2 weight — direction restored with a margin ABOVE the OFF
+        // margin.
         assert!(
             ld_on[3] > gd_on[3],
             "F5: debanding must credit LOSS over GAIN at s3 (ON): g {} l {}",
@@ -10545,6 +10625,10 @@ mod tests {
             ld_on[3] > 0.1,
             "F5: debanding LOSS should fire strongly (ON): {}",
             ld_on[3]
+        );
+        assert!(
+            (ld_on[3] - gd_on[3]) > (ld_off[3] - gd_off[3]),
+            "F5: the shipped combine's deband margin must exceed the OFF margin"
         );
     }
 
@@ -10718,18 +10802,14 @@ mod tests {
             .unwrap();
         let mut lanes_moved = 0usize;
         for i in 0..944 {
-            let bandvis_lane = i >= 924 && {
-                let local = (i - 924) % APPEND2_PER_SCALE;
-                local == idx_append2::BANDVIS_GAIN || local == idx_append2::BANDVIS_LOSS
-            };
-            if bandvis_lane {
-                lanes_moved +=
-                    (off.features()[i].to_bits() != on.features()[i].to_bits()) as usize;
+            let gain_lane = i >= 924 && (i - 924) % APPEND2_PER_SCALE == idx_append2::BANDVIS_GAIN;
+            if gain_lane {
+                lanes_moved += (off.features()[i].to_bits() != on.features()[i].to_bits()) as usize;
             } else {
                 assert_eq!(
                     off.features()[i].to_bits(),
                     on.features()[i].to_bits(),
-                    "HDR route: append2_dst_activity moved non-BANDVIS slot f{i}"
+                    "HDR route: append2_dst_activity moved a non-GAIN slot f{i}"
                 );
             }
         }

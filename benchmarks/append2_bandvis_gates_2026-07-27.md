@@ -202,6 +202,19 @@ draining 924 tables; with the toggle off nothing changes anywhere.
    trained head gates for free — do NOT build the plane unless the 944
    LOO shows the gate unlearned, or a per-tile map is required (then
    prefer A8).
+   **BUILT + ADJUDICATED 2026-08-02** (SOTA-944 P1.5,
+   `bandvis_dst_activity_2026-08-02.md`): the plane exists as the
+   opt-in `V2NewFeatureToggles::append2_dst_activity` (default OFF,
+   byte-stable). Both pre-registered masking arms FAILED their
+   suppression gates — a flatness mask inside `bounded_excess` is
+   ratio-cancelled (which is WHY V3(b) fired in the first place: the
+   shipped ref-side flat inside the pair is largely decorative — the
+   b2 "source masking" is band_s FR-cancellation), and at the resonant
+   scale banding contours ARE local activity, so every masking algebra
+   also suppresses true banding. Verdict: production extraction stays
+   toggle-OFF; the DEFER+RESHAPE above is CONFIRMED by direct
+   measurement; the shipped GAIN-only pooling-weight combine remains
+   the P3/LOO research surface.
 4. **Chroma-BANDVIS variant** — not built (Y-only per the cost table).
 5. **A8 soft-tile pooling** for contour extent (CAMBI's topk analog
    without the D4 order-statistic hazard).
