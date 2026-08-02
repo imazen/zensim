@@ -50,7 +50,18 @@ enough = { version = "0.4.2", default-features = false, features = ["std"] }
 #     zenpredict      = { path = "../zenanalyze/zenpredict" }
 #     zenpredict-bake = { path = "../zenanalyze/zenpredict-bake" }
 # Bump the rev deliberately when a zenanalyze fix zensim needs lands.
-zenpredict      = { git = "https://github.com/imazen/zenanalyze", rev = "a7d82249a189cffa1d72261c351e1dd7b383d790" }
+#
+# Release staging (issue #46): `version = "0.2.0"` on the zenpredict git
+# dep is the crates-io-ready form — day-to-day builds keep using the git
+# pin (cargo verifies the checkout IS 0.2.0), and at publish time cargo
+# strips the git spec and records `zenpredict = "0.2.0"` in the registry
+# metadata. `cargo package -p zensim` still requires zenpredict 0.2.0 to
+# EXIST on crates.io (the v3 runtime; 0.1.0 there is ZNPR-v2-only and
+# cannot load the shipped B bake), so the publish chain is:
+# zenpredict 0.2.0 publish → `cargo package -p zensim` gate → zensim
+# 0.3.0 publish → zensim-regress. zenpredict-bake is consumed only by
+# the unpublished zensim-validate, so it stays a bare git pin.
+zenpredict      = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "a7d82249a189cffa1d72261c351e1dd7b383d790" }
 zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "a7d82249a189cffa1d72261c351e1dd7b383d790" }
 
 # zenstats — canonical IQA-stats home extracted on 2026-05-26 from the
