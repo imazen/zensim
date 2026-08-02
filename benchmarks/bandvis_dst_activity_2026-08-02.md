@@ -283,10 +283,61 @@ direct run of the shipped combine):
   223.41 MB (+2.37 MB = the lazily-grown Y-strip `activity_dst`
   buffer, exactly the designed footprint).
 
-## LIVE-YT-Banding ON-vs-OFF read
+## LIVE-YT-Banding ON-vs-OFF read: the registered read PASSED both criteria
 
-_(two-arm re-extraction from the same fresh frames; filled when the
-pipeline completes)_
+Two-arm re-extraction, 960 FR pairs/arm from the SAME fresh frames
+(committed pipeline `bandvis_lyb_pipeline_dstact_2026-08-02.py`, analyzer
+`bandvis_lyb_analyze_arms_2026-08-02.py`, scorer = the committed July eval
+script per arm; logs `~/tmp/bandvis-dst/lyb_{pipeline,arms_analysis,on_eval}.log`).
+
+- **Drift check: fresh-OFF master BYTE-IDENTICAL to the July master** —
+  ffmpeg frame extraction is deterministic AND toggle-off math is
+  byte-stable on 960 real 1080p video-frame pairs (an F10-class gate at
+  real-content scale, for free).
+- **Paired-arm structure: 0/960 rows moved any non-GAIN column; 960/960
+  moved GAIN** (the lanes-only guarantee on real content). Median ON/OFF
+  GAIN ratios per scale: 0.79 / 0.74 / 0.71 / 0.68 — the weight bites on
+  real compressed video.
+
+SROCC vs MOS (120 distorted videos; more negative = better discrimination):
+
+| slot | OFF | ON | read |
+|---|--:|--:|---|
+| GAIN s0 | −0.0229 | **−0.1132** | ~5× |
+| GAIN s1 | −0.0939 | **−0.1642** | +75% |
+| GAIN s2 | −0.1227 | **−0.2346** | +91% |
+| GAIN s3 | −0.1626 | **−0.2447** | +50% |
+| GAIN mean-of-scales | −0.1134 | **−0.2277** | 2× |
+| GAIN s3, official 1000×24 test folds | −0.1535 ± 0.2503 | **−0.2136 ± 0.2493** | +39% |
+| LOSS s0–s3 | −0.095/−0.323/−0.391/−0.447 | IDENTICAL (bit-stable) | workhorse untouched ✓ |
+
+- **Registered criterion 1 (GAIN improves): PASS at every scale + the
+  official folds.** The visibility weight removes texture-driven false
+  fires on real AV1 video — the high-MOS false-positive check confirms
+  the mechanism (max GAIN among >60-MOS videos 0.0454 → 0.0330; the
+  MOS-81.9 racing_game false fire 0.045 → 0.029).
+- **Registered criterion 2 (LOSS within 0.03): PASS trivially** — LOSS
+  is bit-identical by the shipped combine's construction.
+- GAIN ON (0.245) still does not beat mscn_s0 alone (0.322) or LOSS
+  (0.447) — the slot's value remains as a pair member for a trained
+  head, same as the July verdict.
+- Honest counter-signal: the within-content 3-point CQ-ladder mean SROCC
+  for GAIN s3 moved +0.0375 ± 0.82 → +0.2625 ± 0.78 (wrong-direction
+  trend within content, high variance on 3-point ladders) — cross-content
+  calibration improved while within-content tracking got mildly worse;
+  the registered read was pooled/folds, which is what a trained-head
+  consumer sees, but this belongs in the P3/LOO read-out.
+
+**Net LYB verdict:** the fixture gates and the real-content external read
+DISAGREE in an informative way — synthetic u8 posterize/dither fixtures
+punish the weight (real banding carries self-activity at the resonant
+scale), while on real compressed video the weight IMPROVES the designed
+polarity's MOS discrimination substantially at zero cost to the
+workhorse. This strengthens the P3/LOO-candidate case for the shipped
+combine WITHOUT changing the registered production verdict below (the
+suppression gates were the registered adjudicators for extraction math,
+and per-slot SROCC on one 120-video set is not a training-side
+acceptance — the LOO half stays with P3).
 
 ## ADJUDICATION VERDICT (the campaign P1.5 question)
 
