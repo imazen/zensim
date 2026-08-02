@@ -808,6 +808,7 @@ impl crate::metric::Zensim {
                     &per_scale_ch,
                     &scale_blend,
                     guided,
+                    self.stop_ref(),
                 )
             } else {
                 crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
@@ -818,8 +819,10 @@ impl crate::metric::Zensim {
                     &per_scale_ch,
                     &scale_blend,
                     guided,
+                    self.stop_ref(),
                 )
             };
+        self.check_stop()?;
         let mut result = result.with_profile(self.profile());
         // Apply the profile's REAL scoring (bake forward + spline), exactly as
         // `compute()` does. FIX 2026-07-18: this path previously returned the
@@ -984,6 +987,7 @@ impl crate::metric::Zensim {
                         &per_scale_ch,
                         &scale_blend,
                         guided,
+                        self.stop_ref(),
                     );
                 (result, dm, padded_width)
             } else {
@@ -1000,9 +1004,11 @@ impl crate::metric::Zensim {
                         &per_scale_ch,
                         &scale_blend,
                         guided,
+                        self.stop_ref(),
                     );
                 (result, dm, padded_width)
             };
+        self.check_stop()?;
         let mut result = result.with_profile(self.profile());
         // Same real-scoring fix as `compute_with_ref_and_diffmap` (2026-07-18):
         // apply the profile's bake forward + spline; no-op for legacy profiles.

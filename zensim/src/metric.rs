@@ -573,6 +573,7 @@ pub fn compute_zensim_with_ref_and_config(
         &dst_img,
         &config,
         WEIGHTS,
+        None,
     );
     // This entry point scores via the plain WEIGHTS (V0_2 linear) distance,
     // never an MLP forward pass — tag honestly rather than inheriting
@@ -1043,6 +1044,22 @@ pub struct Zensim {
     /// the streaming pipeline, so callers feeding untrusted dimensions
     /// should set this. See [`Zensim::with_max_pixels`].
     max_pixels: Option<usize>,
+    /// Optional cooperative-cancellation token, checked at row-band and
+    /// scale boundaries inside the streaming walk. See [`Zensim::with_stop`].
+    stop: Option<StopHandle>,
+}
+
+/// Shared cancellation token stored on [`Zensim`]. Wraps the caller's
+/// [`enough::Stop`] in an `Arc` so `Zensim` stays `Clone` (clones share
+/// the same token). Debug output elides the token (trait objects have no
+/// useful Debug form).
+#[derive(Clone)]
+struct StopHandle(std::sync::Arc<dyn enough::Stop>);
+
+impl core::fmt::Debug for StopHandle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("StopHandle(..)")
+    }
 }
 
 impl Zensim {
@@ -1058,6 +1075,7 @@ impl Zensim {
             profile,
             parallel: true,
             max_pixels: Some(120_000_000),
+            stop: None,
         }
     }
 
@@ -1072,18 +1090,84 @@ impl Zensim {
     /// `compute*` entry point. Images exceeding the cap are rejected with
     /// [`ZensimError::ImageTooLarge`] before any allocation runs.
     ///
-    /// Default: `None` (no cap). Recommended for services accepting
-    /// network-supplied dimensions: zensim allocates roughly
-    /// `width × height × 4 bytes × ~14` for the streaming XYB pyramid plus
-    /// destination planes, so a 4K (≈8.3 MP) image needs ~470 MB of
-    /// scratch. A cap of e.g. 64 MP (8192×8192) keeps the worst case at
-    /// ~3.6 GB.
+    /// Default: **120 MP** (set by [`Zensim::new`]). Zensim allocates
+    /// roughly `width × height × 4 bytes × ~14` for the streaming XYB
+    /// pyramid plus destination planes, so a 4K (≈8.3 MP) image needs
+    /// ~470 MB of scratch. A cap of e.g. 64 MP (8192×8192) keeps the
+    /// worst case at ~3.6 GB.
     ///
     /// Pass [`usize::MAX`] explicitly to disable the cap on a previously
     /// configured `Zensim`.
     pub fn with_max_pixels(mut self, max_pixels: usize) -> Self {
         self.max_pixels = Some(max_pixels);
         self
+    }
+
+    /// Install a cooperative-cancellation token, checked at row-band and
+    /// scale boundaries inside the streaming compute walk. When the token
+    /// fires, the walk abandons remaining work promptly and the entry
+    /// point returns [`ZensimError::Cancelled`].
+    ///
+    /// Accepts any [`enough::Stop`] implementation — typically a
+    /// `Stopper` from the sibling
+    /// [`almost-enough`](https://docs.rs/almost-enough) crate, cancelled
+    /// from another thread (or wired to a timeout). Passing
+    /// [`Unstoppable`](enough::Unstoppable) (or any token whose
+    /// [`may_stop`](enough::Stop::may_stop) is `false`) stores nothing and
+    /// keeps the zero-check fast path.
+    ///
+    /// Coverage: the scoring entry points (`compute`,
+    /// `compute_with_codec_hint`, `compute_with_ref`, `compute_pu_linear`,
+    /// `compute_pu_linear_planar`) and the diffmap entries
+    /// (`compute_with_ref_and_diffmap`,
+    /// `compute_with_ref_and_diffmap_linear_planar`). The v2
+    /// feature-extraction walks and the caller-paced strip APIs
+    /// (`compute_streaming_strips*`, where the caller already controls
+    /// cadence between strips) do not check the token yet.
+    ///
+    /// Cancellation granularity is one row band (a few dozen rows) at the
+    /// current scale; a fired token is detected within roughly one band's
+    /// worth of work per rayon worker.
+    ///
+    /// ```no_run
+    /// use zensim::{Zensim, ZensimProfile};
+    /// # struct S(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    /// # impl enough::Stop for S {
+    /// #     fn check(&self) -> Result<(), enough::StopReason> {
+    /// #         if self.0.load(std::sync::atomic::Ordering::Relaxed) {
+    /// #             Err(enough::StopReason::Cancelled)
+    /// #         } else { Ok(()) }
+    /// #     }
+    /// # }
+    /// # let token = S(Default::default());
+    /// let z = Zensim::new(ZensimProfile::codec_target()).with_stop(token);
+    /// // z.compute(..) now returns Err(ZensimError::Cancelled { .. })
+    /// // soon after the token fires.
+    /// ```
+    pub fn with_stop(mut self, stop: impl enough::Stop + 'static) -> Self {
+        // may_stop() == false (e.g. Unstoppable) can never fire — skip
+        // storing it so every check stays on the None fast path.
+        self.stop = if stop.may_stop() {
+            Some(StopHandle(std::sync::Arc::new(stop)))
+        } else {
+            None
+        };
+        self
+    }
+
+    /// Borrow the installed stop token for threading into the walkers.
+    pub(crate) fn stop_ref(&self) -> Option<&dyn enough::Stop> {
+        self.stop.as_ref().map(|h| &*h.0 as &dyn enough::Stop)
+    }
+
+    /// Return `Err(ZensimError::Cancelled)` if the installed token has
+    /// fired. Entry points call this up front (cheap pre-flight) and after
+    /// the walk returns (converting an abandoned walk into the error).
+    pub(crate) fn check_stop(&self) -> Result<(), ZensimError> {
+        match &self.stop {
+            Some(h) => h.0.check().map_err(ZensimError::from),
+            None => Ok(()),
+        }
     }
 
     /// Current `max_pixels` cap, if any.
@@ -1169,8 +1253,11 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
+        self.check_stop()?;
         let config = config_from_params(params, self.parallel);
-        let mut result = compute_with_config_inner(source, distorted, &config, params.weights);
+        let mut result =
+            compute_with_config_inner(source, distorted, &config, params.weights, self.stop_ref());
+        self.check_stop()?;
         apply_mlp_scoring_with_codec(
             &mut result,
             params,
@@ -1222,7 +1309,9 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let mut config = config_from_params(params, self.parallel);
         config.extended_features = true;
-        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        let result =
+            compute_with_config_inner(source, distorted, &config, params.weights, self.stop_ref());
+        self.check_stop()?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -1785,6 +1874,7 @@ impl Zensim {
                 &d,
                 &config,
                 params.weights,
+                self.stop_ref(),
             )
         } else {
             crate::streaming::compute_zensim_streaming_with_ref(
@@ -1792,8 +1882,10 @@ impl Zensim {
                 distorted,
                 &config,
                 params.weights,
+                self.stop_ref(),
             )
         };
+        self.check_stop()?;
         apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
         Ok(result.with_profile(self.profile))
     }
@@ -2024,7 +2116,9 @@ impl Zensim {
                 &mut scratch.dst_planes,
                 &config,
                 params.weights,
+                self.stop_ref(),
             );
+        self.check_stop()?;
         let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
         apply_mlp_scoring(
             &mut result,
@@ -2159,9 +2253,11 @@ impl Zensim {
                     dist_stride,
                     &config,
                     params.weights,
+                    self.stop_ref(),
                 );
             combine_scores(&stats, params.weights, &config, mean_offset)
         };
+        self.check_stop()?;
         apply_mlp_scoring(&mut result, params, width as u32, height as u32)?;
         Ok(result.with_profile(self.profile))
     }
@@ -2221,9 +2317,11 @@ impl Zensim {
                     dist_stride,
                     &config,
                     params.weights,
+                    self.stop_ref(),
                 );
             combine_scores(&stats, params.weights, &config, mean_offset)
         };
+        self.check_stop()?;
         apply_mlp_scoring(&mut result, params, width as u32, height as u32)?;
         Ok(result.with_profile(self.profile))
     }
@@ -2278,9 +2376,11 @@ impl Zensim {
                 stride,
                 &config,
                 params.weights,
+                self.stop_ref(),
             );
             combine_scores(&stats, params.weights, &config, mean_offset)
         };
+        self.check_stop()?;
         apply_mlp_scoring(&mut result, params, width as u32, height as u32)?;
         Ok(result.with_profile(self.profile))
     }
@@ -2297,7 +2397,9 @@ impl Zensim {
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params, self.parallel);
         config.compute_all_features = true;
-        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        let result =
+            compute_with_config_inner(source, distorted, &config, params.weights, self.stop_ref());
+        self.check_stop()?;
         Ok(result.with_profile(self.profile))
     }
 }
@@ -2351,7 +2453,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params, true);
-        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        let result = compute_with_config_inner(source, distorted, &config, params.weights, None);
         Ok(result)
     }
 }
@@ -2811,6 +2913,7 @@ fn compute_with_config_inner(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> ZensimResult {
     // Sub-64px inputs can't form the 4-scale pyramid. Reflect-pad both sides
     // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
@@ -2819,9 +2922,9 @@ fn compute_with_config_inner(
     if w > 0 && h > 0 && (w < MIN_PYRAMID_DIM || h < MIN_PYRAMID_DIM) {
         let s = reflect_pad_to_min(source);
         let d = reflect_pad_to_min(distorted);
-        return compute_with_config_core(&s, &d, config, weights);
+        return compute_with_config_core(&s, &d, config, weights, stop);
     }
-    compute_with_config_core(source, distorted, config, weights)
+    compute_with_config_core(source, distorted, config, weights, stop)
 }
 
 fn compute_with_config_core(
@@ -2829,6 +2932,7 @@ fn compute_with_config_core(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> ZensimResult {
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
@@ -2836,7 +2940,7 @@ fn compute_with_config_core(
         return identical_result(config);
     }
 
-    crate::streaming::compute_zensim_streaming(source, distorted, config, weights)
+    crate::streaming::compute_zensim_streaming_stoppable(source, distorted, config, weights, stop)
 }
 
 /// The identical-pair short-circuit payload, shared by the SDR byte-identical

@@ -264,6 +264,12 @@ pub mod feature_v2;
 pub(crate) mod feature_v2_stream;
 
 // --- Primary API ---
+/// Cooperative-cancellation vocabulary, re-exported from the
+/// [`enough`](https://docs.rs/enough) crate for use with
+/// [`Zensim::with_stop`]. Construct a real cancellable token with the
+/// sibling [`almost-enough`](https://docs.rs/almost-enough) crate's
+/// `Stopper` (any `impl Stop` works).
+pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::ZensimError;
 pub use metric::{
     FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,

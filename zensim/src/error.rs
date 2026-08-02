@@ -91,6 +91,24 @@ pub enum ZensimError {
          absolute-luminance linear RGB and use compute_pu_linear"
     )]
     HdrInputRequiresPuPath,
+
+    /// The computation was cancelled through the cooperative-cancellation
+    /// token installed via [`Zensim::with_stop`](crate::Zensim::with_stop).
+    ///
+    /// `reason` is the [`enough::StopReason`] reported by the token
+    /// (explicit cancellation vs. timeout). Partial results are discarded;
+    /// re-run the computation to retry.
+    #[error("computation cancelled: {reason:?}")]
+    Cancelled {
+        /// Why the stop token fired.
+        reason: enough::StopReason,
+    },
+}
+
+impl From<enough::StopReason> for ZensimError {
+    fn from(reason: enough::StopReason) -> Self {
+        ZensimError::Cancelled { reason }
+    }
 }
 
 /// Pixel format conversion error from the zenpixels adapter.

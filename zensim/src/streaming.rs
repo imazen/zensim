@@ -864,6 +864,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let width = source.width();
     let height = source.height();
@@ -889,11 +890,17 @@ pub(crate) fn compute_multiscale_stats_streaming(
         if w < 8 || h < 8 {
             break;
         }
+        // Cooperative cancellation (issue #48): abandon remaining scales.
+        // The entry point's post-walk `check_stop` discards the partial
+        // stats and returns `ZensimError::Cancelled`.
+        if enough::Stop::should_stop(&stop) {
+            break;
+        }
 
         let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
         let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
         let (scale_stat, _) =
-            process_scale_bands(src_view, dst_view, w, h, config, scale, weights, None);
+            process_scale_bands(src_view, dst_view, w, h, config, scale, weights, None, stop);
         stats.push(scale_stat);
 
         if scale < num_scales - 1 {
@@ -928,6 +935,7 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
     stride: usize,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let padded_width = simd_padded_width(width);
     let n = padded_width * height;
@@ -957,6 +965,7 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
         padded_width,
         config,
         weights,
+        stop,
     )
 }
 
@@ -972,6 +981,7 @@ pub(crate) fn compute_multiscale_stats_pu_linear_interleaved(
     dist_stride: usize,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let padded_width = simd_padded_width(width);
     let n = padded_width * height;
@@ -1001,6 +1011,7 @@ pub(crate) fn compute_multiscale_stats_pu_linear_interleaved(
         padded_width,
         config,
         weights,
+        stop,
     )
 }
 
@@ -1047,6 +1058,7 @@ fn multiscale_stats_over_pu_xyb(
     padded_width: usize,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     // Sub-pyramid-minimum inputs reflect-pad up, exactly like the SDR funnel
     // (`compute_with_config_inner`); scores stay comparable down to 1×1.
@@ -1069,10 +1081,14 @@ fn multiscale_stats_over_pu_xyb(
         if w < 8 || h < 8 {
             break;
         }
+        // Cooperative cancellation (issue #48): abandon remaining scales.
+        if enough::Stop::should_stop(&stop) {
+            break;
+        }
         let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
         let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
         let (scale_stat, _) =
-            process_scale_bands(src_view, dst_view, w, h, config, scale, weights, None);
+            process_scale_bands(src_view, dst_view, w, h, config, scale, weights, None, stop);
         stats.push(scale_stat);
         if scale < num_scales - 1 {
             let (nw, nh) = downscale_6_planes(&mut src_planes, &mut dst_planes, w, h, parallel);
@@ -2162,6 +2178,7 @@ fn process_scale_bands(
     scale_idx: usize,
     weights: &[f64],
     diffmap_weights: Option<[PixelFeatureWeights; 3]>,
+    stop: Option<&dyn enough::Stop>,
 ) -> (ScaleStats, Option<Vec<f32>>) {
     let (accum, diffmap) = process_scale_bands_into_accum(
         src_planes,
@@ -2176,6 +2193,7 @@ fn process_scale_bands(
         None,
         None,
         None,
+        stop,
     );
     (accum.finalize(config.iw_strength as f64), diffmap)
 }
@@ -2272,6 +2290,12 @@ fn process_scale_bands_into_accum(
     // (`width * height` prefixes, caller-zeroed). The combine runs
     // in-strip per (sub-strip, channel) — no retention, no second sweep.
     attr_fold_out: Option<AttrFoldOut<'_>>,
+    // Cooperative cancellation (issue #48): checked once per band. A
+    // fired token makes remaining bands return empty accumulators
+    // immediately (in both the rayon and serial paths); the public entry
+    // point converts the abandoned walk into `ZensimError::Cancelled`,
+    // so the partial results are never observable.
+    stop: Option<&dyn enough::Stop>,
 ) -> (ScaleAccumulators, Option<Vec<f32>>) {
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
@@ -2330,6 +2354,12 @@ fn process_scale_bands_into_accum(
                         band_idx: usize,
                         mut band_ret: Option<AttrBandSlices<'_>>,
                         mut band_fold: Option<AttrFoldBand<'_>>| {
+        // Cooperative cancellation: once the token fires, every remaining
+        // band degenerates to an empty accumulator. The result is
+        // discarded by the entry point's post-walk `check_stop`.
+        if enough::Stop::should_stop(&stop) {
+            return (ScaleAccumulators::new(), None);
+        }
         // Band in OUTER (full-image) coords:
         let outer_band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(layout_h);
         let outer_band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(layout_h);
@@ -2593,6 +2623,12 @@ fn process_scale_bands_into_accum(
         if let (Some(dm), Some(bdm)) = (&mut diffmap, band_dm) {
             dm.extend_from_slice(&bdm);
         }
+    }
+    // Cancelled mid-scale: skipped bands contributed no diffmap rows, so a
+    // partial map would be shape-invalid downstream. Drop it — the entry
+    // point's post-walk check discards the whole result anyway.
+    if enough::Stop::should_stop(&stop) {
+        diffmap = None;
     }
     (accum, diffmap)
 }
@@ -3126,6 +3162,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let width = distorted.width();
     let height = distorted.height();
@@ -3138,6 +3175,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
         &mut dst_planes,
         config,
         weights,
+        stop,
     );
     #[cfg(feature = "threads")]
     dealloc_planes(dst_planes, None);
@@ -3156,6 +3194,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
     dst_planes: &mut [Vec<f32>; 3],
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let (accums, offset_sums, pixel_count) = compute_multiscale_accums_streaming_with_ref_borrowed(
         precomputed,
@@ -3165,6 +3204,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
         weights,
         None,
         None,
+        stop,
     );
     let stats: Vec<ScaleStats> = accums
         .iter()
@@ -3208,6 +3248,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
     weights: &[f64],
     inner_y_filter: Option<(usize, usize)>,
     outer_layout_scale_0: Option<(usize, usize)>,
+    stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
     let width = distorted.width();
     let height = distorted.height();
@@ -3288,6 +3329,10 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
         if w < 8 || h < 8 {
             break;
         }
+        // Cooperative cancellation (issue #48): abandon remaining scales.
+        if enough::Stop::should_stop(&stop) {
+            break;
+        }
         let (src_planes, src_w, src_h) = precomputed.scale(scale);
         assert_eq!(w, src_w, "scale {scale} width mismatch");
         assert_eq!(h, src_h, "scale {scale} height mismatch");
@@ -3306,6 +3351,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
             scale_outer,
             None,
             None,
+            stop,
         );
         accums.push(accum);
 
@@ -3404,6 +3450,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
             distorted,
             config,
             weights,
+            None,
         );
     }
 
@@ -3458,6 +3505,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
             weights,
             Some((fy0, fy1)),
             Some((height, strip_y0)),
+            None,
         )
     };
 
@@ -3548,6 +3596,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
             distorted,
             config,
             weights,
+            None,
         );
     }
 
@@ -3614,6 +3663,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
                 weights,
                 Some((fy0, fy1)),
                 Some((height, strip_y0)),
+                None,
             )
         };
 
@@ -3685,9 +3735,10 @@ pub(crate) fn compute_zensim_streaming_with_ref(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
 ) -> crate::metric::ZensimResult {
     let (scale_stats, mean_offset) =
-        compute_multiscale_stats_streaming_with_ref(precomputed, distorted, config, weights);
+        compute_multiscale_stats_streaming_with_ref(precomputed, distorted, config, weights, stop);
     combine_scores(&scale_stats, weights, config, mean_offset)
 }
 
@@ -3708,6 +3759,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
     per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
     scale_blend_weights: &[f32],
     guided_redistribution: bool,
+    stop: Option<&dyn enough::Stop>,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
     let width = distorted.width();
     let height = distorted.height();
@@ -3725,6 +3777,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
         per_scale_channel_weights,
         scale_blend_weights,
         guided_redistribution,
+        stop,
     )
 }
 
@@ -3741,6 +3794,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
     per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
     scale_blend_weights: &[f32],
     guided_redistribution: bool,
+    stop: Option<&dyn enough::Stop>,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
     let padded_width = simd_padded_width(width);
     let dst_planes = convert_linear_planar_to_xyb(planes, width, height, stride, padded_width);
@@ -3756,6 +3810,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
         per_scale_channel_weights,
         scale_blend_weights,
         guided_redistribution,
+        stop,
     )
 }
 
@@ -3772,6 +3827,7 @@ fn compute_diffmap_from_xyb(
     per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
     scale_blend_weights: &[f32],
     guided_redistribution: bool,
+    stop: Option<&dyn enough::Stop>,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
     let num_scales = config.num_scales.min(precomputed.scales.len());
     let parallel = config.allow_multithreading;
@@ -3789,6 +3845,10 @@ fn compute_diffmap_from_xyb(
 
     for scale in 0..num_scales {
         if w < 8 || h < 8 {
+            break;
+        }
+        // Cooperative cancellation (issue #48): abandon remaining scales.
+        if enough::Stop::should_stop(&stop) {
             break;
         }
 
@@ -3825,6 +3885,7 @@ fn compute_diffmap_from_xyb(
             scale,
             weights,
             Some(ch_weights),
+            stop,
         );
         stats.push(scale_stat);
 
@@ -4007,6 +4068,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
             None,
             Some(&mut retention),
             None,
+            None,
         );
         let scale_stat = accum.finalize(config.iw_strength as f64);
         on_scale(scale, &scale_stat, src_planes, dst_view, &retention, w, h);
@@ -4103,6 +4165,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
             None,
             None,
             Some((&co, &mut id_plane[..n], &mut win_plane[..n])),
+            None,
         );
         let scale_stat = accum.finalize(config.iw_strength as f64);
         on_scale(
@@ -4132,14 +4195,32 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
 
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
 /// Produces identical results to the full-image path.
+/// Un-stoppable convenience wrapper. Production paths thread a stop token
+/// via [`compute_zensim_streaming_stoppable`]; this remains for the
+/// `training`-feature `compute_zensim_with_config` and in-crate tests.
+#[cfg(any(feature = "training", test))]
 pub(crate) fn compute_zensim_streaming(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
 ) -> crate::metric::ZensimResult {
+    compute_zensim_streaming_stoppable(source, distorted, config, weights, None)
+}
+
+/// [`compute_zensim_streaming`] with a cooperative-cancellation token
+/// (issue #48). A fired token abandons remaining bands/scales promptly;
+/// the caller MUST re-check the token afterwards and discard the result
+/// (the `Zensim` entry points do this via `check_stop`).
+pub(crate) fn compute_zensim_streaming_stoppable(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
+) -> crate::metric::ZensimResult {
     let (scale_stats, mean_offset) =
-        compute_multiscale_stats_streaming(source, distorted, config, weights);
+        compute_multiscale_stats_streaming(source, distorted, config, weights, stop);
     combine_scores(&scale_stats, weights, config, mean_offset)
 }
 
@@ -4719,8 +4800,9 @@ mod tests {
 
         // Full-image stats.
         let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
-        let (full_stats, full_offset) =
-            compute_multiscale_stats_streaming_with_ref(&precomp, &dst_img, &config, &weights);
+        let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
+            &precomp, &dst_img, &config, &weights, None,
+        );
 
         // Strip-aggregated stats with strip_inner=64, margin=16
         // (4 strips of 64-row inner each).
@@ -4832,8 +4914,9 @@ mod tests {
         let weights: Vec<f64> = WEIGHTS.to_vec();
 
         let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
-        let (full_stats, full_offset) =
-            compute_multiscale_stats_streaming_with_ref(&precomp, &dst_img, &config, &weights);
+        let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
+            &precomp, &dst_img, &config, &weights, None,
+        );
 
         let (strip_stats, strip_offset) = compute_multiscale_stats_streaming_strips(
             &src_img, &dst_img, &config, &weights, 256, 128,
@@ -5360,8 +5443,9 @@ mod tests {
 
             // Full path
             let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
-            let (full_stats, full_offset) =
-                compute_multiscale_stats_streaming_with_ref(&precomp, &dst_img, &config, &weights);
+            let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
+                &precomp, &dst_img, &config, &weights, None,
+            );
             // Strip path
             let (strip_stats, strip_offset) = compute_multiscale_stats_streaming_strips(
                 &src_img,
@@ -5932,7 +6016,7 @@ mod tests {
         let streaming_result = compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
         let precomputed = PrecomputedReference::new(&src_img, config.num_scales, true);
         let precomp_result =
-            compute_zensim_streaming_with_ref(&precomputed, &dst_img, &config, WEIGHTS);
+            compute_zensim_streaming_with_ref(&precomputed, &dst_img, &config, WEIGHTS, None);
 
         assert_eq!(streaming_result.score(), precomp_result.score());
         assert_eq!(
