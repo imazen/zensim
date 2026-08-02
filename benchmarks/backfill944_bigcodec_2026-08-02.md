@@ -97,7 +97,10 @@ carry exactly `["zensim-foldapp"]` before the metric rewrite.
 |---|---|--:|---|
 | v4 (tower) | bf944v4-zjxll-t2 | 2,301 | **PASS — 2,301/2,301 bitwise-identical, 0 mismatches** (append2 range [0, 0.634]) |
 | v4x (lianli) | bf944v4x-zavif-t6 | 2,400 | **PASS — 2,400/2,400 bitwise-identical, 0 mismatches** (append2 range [0, 0.696]) |
-| neon (mac) | (first blobs pending) | | pending |
+| neon (mac) | bf944neon-zjxll-t23 | 2,328 | **PASS — 2,328/2,328 bitwise-identical, 0 mismatches** (append2 range [0, 0.703]) |
+
+All three SIMD tiers verified bitwise against the canonical 924 bytes before
+scale-out completed — 7,029 fleet rows, 0 mismatches total.
 
 RESULTS_PLACEHOLDER (per-view G-BF1/G-BF2 table + assembly stats + wall time
 + node utilization land here when the wave drains.)
@@ -121,11 +124,10 @@ RESULTS_PLACEHOLDER (per-view G-BF1/G-BF2 table + assembly stats + wall time
 
 ## Honest gaps / caveats
 
-- The neon partition (31,519 cells, 6.4%) rides the mac's native arm64 build
-  of TODAY'S codec siblings; the July-vs-today decode identity was proven on
-  x86 (ab_decode) but arm has no equivalent pre-proof — the neon pool's own
-  G-BF1 gate is the arbiter (any NEON-path decode change since 2026-07-27
-  would surface there as mismatches).
+- ~~The neon partition rides an unproven arm decode path~~ — CLOSED by
+  measurement: the neon spot gate PASSED bitwise (2,328/2,328 vs tbig_924),
+  so the mac's native arm64 build of today's siblings reproduces its own
+  bf924 rows exactly. (The per-view gates remain the final arbiter.)
 - jason carried 97,170 of the v4 cells in bf924 but is running another
   session's training this session — the v4 pool runs without it (tower + i265
   + ian cover the tier; wall-time impact only).
