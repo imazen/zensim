@@ -24,6 +24,7 @@ Env: KADIS944_OUT (chunk dir), KADIS944_DEST (default
 import glob
 import hashlib
 import os
+import shutil
 import sys
 from datetime import date
 
@@ -32,6 +33,17 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 D924 = "/mnt/v/zen/zensim-training/kadis-924-2026-07-27"
+
+
+def read_table_staged(path, stage_dir):
+    """pq.read_table via a local-disk staged copy. The threaded dataset
+    scanner fails with ENOMEM on multi-GB files on the /mnt/v DrvFS mount
+    (measured 2026-08-01); a byte copy to ext4 + normal read is reliable."""
+    os.makedirs(stage_dir, exist_ok=True)
+    local = os.path.join(stage_dir, os.path.basename(path))
+    if not os.path.exists(local) or os.path.getsize(local) != os.path.getsize(path):
+        shutil.copyfile(path, local)
+    return pq.read_table(local)
 OUTDIR = os.path.expanduser(os.environ.get("KADIS944_OUT", "~/tmp/backfill944/kadis944"))
 DEST = os.environ.get("KADIS944_DEST", f"/mnt/v/zen/zensim-training/kadis-944-{date.today()}")
 FEATCOLS = [f"f{i}" for i in range(944)]
@@ -55,7 +67,7 @@ if len(keep) != t.num_rows:
 print(f"extraction rows (deduped): {t.num_rows}", flush=True)
 
 # --- kadis700k_944: verbatim 924 metadata + fresh features in 924 row order ---
-old = pq.read_table(f"{D924}/kadis700k_924.parquet")
+old = read_table_staged(f"{D924}/kadis700k_924.parquet", f"{OUTDIR}/stage924")
 old_nonf = [n for n in old.column_names if not (n.startswith("f") and n[1:].isdigit())]
 old_urls = old.column("distorted_url").to_pylist()
 pos = {u: i for i, u in enumerate(t.column("distorted_url").to_pylist())}
@@ -86,7 +98,7 @@ if neg.num_rows != n_old_neg:
     sys.exit("ABORT: negrich row count differs from 924")
 
 # --- ssim2_50k view: match rows by f0..f923 f32 byte-hash ---
-v924 = pq.read_table(f"{D924}/kadis_924_ssim2_50k.parquet")
+v924 = read_table_staged(f"{D924}/kadis_924_ssim2_50k.parquet", f"{OUTDIR}/stage924")
 v_nonf = [n for n in v924.column_names if not (n.startswith("f") and n[1:].isdigit())]
 
 def row_hashes(tbl, cols):
