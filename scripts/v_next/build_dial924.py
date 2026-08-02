@@ -12,7 +12,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 D = os.path.expanduser("~/tmp/dial924")
-EXTRACT = os.path.expanduser("~/work/zen/zensim--w1-924/target/release/examples/v2_ab_extract")
+# v2_ab_extract from THIS repo (env override for a custom build); the
+# original as-run used a since-deleted sibling worktree — same source.
+EXTRACT = os.environ.get("ZM924_BIN") or os.path.expanduser(
+    "~/work/zen/zensim/target/release/examples/v2_ab_extract"
+)
 OLD = "/mnt/v/output/zensim/v2-eval-720-2026-07-22/dial_grid_720col_2026-07-22.parquet"
 OUT = "/mnt/v/output/zensim/v2-eval-924-2026-07-27/dial_grid_924col_2026-07-28.parquet"
 FAM = {"zenjpeg": "jpeg", "zenwebp": "webp", "zenavif": "avif", "zenjxl": "jxl"}
