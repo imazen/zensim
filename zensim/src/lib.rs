@@ -310,7 +310,8 @@ pub use metric::{
 };
 pub use profile::ZensimProfile;
 pub use source::{
-    AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,
+    AlphaMode, ColorPrimaries, GamutMapping, ImageSource, PixelFormat, RgbSlice, RgbaSlice,
+    StridedBytes,
 };
 
 #[cfg(feature = "custom-profiles")]

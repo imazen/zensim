@@ -64,15 +64,23 @@ const BT2020_TO_SRGB: [[f32; 3]; 3] = [
     [-0.018_151_0, -0.100_578_6,  1.118_729_6],
 ];
 
-use crate::source::ColorPrimaries;
+use crate::source::{ColorPrimaries, GamutMapping};
 
 /// Apply a gamut conversion matrix to a linear RGB pixel.
 ///
 /// Converts from the source color primaries to sRGB linear light.
-/// For [`ColorPrimaries::Srgb`] this is a no-op. Results are clamped
-/// to \[0, 1\] — out-of-gamut colors are clipped (acceptable for SDR).
+/// For [`ColorPrimaries::Srgb`] this is a no-op. Out-of-gamut handling
+/// follows `mapping` (issue #17): [`GamutMapping::Clip`] clamps to
+/// \[0, 1\] (post-display-clamp semantics, the default);
+/// [`GamutMapping::Preserve`] lets negative / >1 components flow into
+/// XYB (the opsin stage's `max(0)` on the post-mix sum keeps the
+/// cube-root domain valid), making codec gamut clipping detectable.
 #[inline]
-pub(crate) fn apply_gamut_matrix(rgb: &mut [f32; 3], primaries: ColorPrimaries) {
+pub(crate) fn apply_gamut_matrix(
+    rgb: &mut [f32; 3],
+    primaries: ColorPrimaries,
+    mapping: GamutMapping,
+) {
     #[allow(unreachable_patterns)]
     let m = match primaries {
         ColorPrimaries::Srgb => return,
@@ -81,9 +89,26 @@ pub(crate) fn apply_gamut_matrix(rgb: &mut [f32; 3], primaries: ColorPrimaries) 
         _ => return, // future variants: pass through unchanged
     };
     let [r, g, b] = *rgb;
-    rgb[0] = (m[0][0] * r + m[0][1] * g + m[0][2] * b).clamp(0.0, 1.0);
-    rgb[1] = (m[1][0] * r + m[1][1] * g + m[1][2] * b).clamp(0.0, 1.0);
-    rgb[2] = (m[2][0] * r + m[2][1] * g + m[2][2] * b).clamp(0.0, 1.0);
+    let out = [
+        m[0][0] * r + m[0][1] * g + m[0][2] * b,
+        m[1][0] * r + m[1][1] * g + m[1][2] * b,
+        m[2][0] * r + m[2][1] * g + m[2][2] * b,
+    ];
+    #[allow(unreachable_patterns)]
+    match mapping {
+        GamutMapping::Clip => {
+            rgb[0] = out[0].clamp(0.0, 1.0);
+            rgb[1] = out[1].clamp(0.0, 1.0);
+            rgb[2] = out[2].clamp(0.0, 1.0);
+        }
+        GamutMapping::Preserve => *rgb = out,
+        // Future variants behave as the documented default (Clip).
+        _ => {
+            rgb[0] = out[0].clamp(0.0, 1.0);
+            rgb[1] = out[1].clamp(0.0, 1.0);
+            rgb[2] = out[2].clamp(0.0, 1.0);
+        }
+    }
 }
 
 /// Convert sRGB u8 to linear f32 via lookup table.
@@ -1563,6 +1588,55 @@ fn linear_to_positive_xyb_planar_inner(
     }
 }
 
+/// Unclamped scalar sibling of [`linear_to_positive_xyb_planar_into`],
+/// used ONLY by the [`GamutMapping::Preserve`](crate::source::GamutMapping)
+/// conversion path (issue #17).
+///
+/// Input components may be negative or > 1 (out-of-sRGB-gamut linear light
+/// after a wide-gamut primaries matrix) — the clamped kernels would clip
+/// them back to the gamut boundary, re-masking exactly the difference
+/// `Preserve` exists to expose. The opsin mix's `max(0)` keeps the
+/// cube-root domain valid for arbitrary finite input; inputs must be
+/// finite (u8-linearized wide-gamut rows always are; `LinearF32Rgba`
+/// callers own their float hygiene in this opt-in mode).
+///
+/// Per-pixel math mirrors the clamped kernels' scalar remainder exactly
+/// (same `mul_add` chains, same [`cbrtf_fast`], same biases), so for
+/// in-`[0,1]` inputs the outputs are bit-identical to the scalar path —
+/// locked by `unclamped_matches_clamped_scalar_for_in_gamut` below.
+pub(crate) fn linear_to_positive_xyb_planar_into_unclamped(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+    for (i, p) in pixels.iter().enumerate() {
+        let [r, g, b] = *p;
+
+        let mixed0 = K_M00
+            .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed1 = K_M10
+            .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed2 = K_M20
+            .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+            .max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x.mul_add(14.0, 0.42);
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+
 /// HDR PU-XYB conversion (scalar): **absolute-luminance** linear RGB (cd/m²,
 /// NOT clamped to `[0,1]`) → PU-encoded XYB-like planes.
 ///
@@ -1880,11 +1954,56 @@ mod tests {
     use super::*;
     use crate::source::ColorPrimaries;
 
+    /// Gated-mirror parity (issue #17): the unclamped scalar converter
+    /// must be BIT-identical to the clamped entry's scalar remainder for
+    /// in-gamut input. n = 7 (< the 8-wide SIMD chunk) forces the clamped
+    /// entry onto its scalar remainder, where the clamp is an arithmetic
+    /// no-op on in-[0,1] values — any divergence means the mirror drifted.
+    #[test]
+    fn unclamped_matches_clamped_scalar_for_in_gamut() {
+        let pixels: Vec<[f32; 3]> = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0],
+            [0.25, 0.5, 0.75],
+            [0.999, 0.001, 0.5],
+            [0.1, 0.9, 0.3],
+            [0.66, 0.33, 0.0],
+            [0.5, 0.5, 0.5],
+        ];
+        let n = pixels.len();
+        let (mut xc, mut yc, mut bc) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+        let (mut xu, mut yu, mut bu) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+        linear_to_positive_xyb_planar_into(&pixels, &mut xc, &mut yc, &mut bc);
+        linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut xu, &mut yu, &mut bu);
+        for i in 0..n {
+            assert_eq!(xc[i].to_bits(), xu[i].to_bits(), "X differs at px {i}");
+            assert_eq!(yc[i].to_bits(), yu[i].to_bits(), "Y differs at px {i}");
+            assert_eq!(bc[i].to_bits(), bu[i].to_bits(), "B differs at px {i}");
+        }
+    }
+
+    /// The unclamped converter handles out-of-gamut input without NaN/inf:
+    /// the opsin mix's `max(0)` keeps the cube-root domain valid.
+    #[test]
+    fn unclamped_out_of_gamut_stays_finite() {
+        let pixels: Vec<[f32; 3]> = vec![
+            [1.66, -0.125, -0.018], // BT.2020 red through the matrix
+            [-0.51, 1.04, -0.31],
+            [2.0, -1.0, 3.0],
+        ];
+        let n = pixels.len();
+        let (mut x, mut y, mut b) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+        linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut x, &mut y, &mut b);
+        for i in 0..n {
+            assert!(x[i].is_finite() && y[i].is_finite() && b[i].is_finite());
+        }
+    }
+
     /// Verify P3→sRGB matrix: sRGB white (1,1,1) should stay (1,1,1).
     #[test]
     fn p3_to_srgb_preserves_white() {
         let mut rgb = [1.0f32, 1.0, 1.0];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3, GamutMapping::Clip);
         for (c, &val) in rgb.iter().enumerate() {
             assert!(
                 (val - 1.0).abs() < 1e-4,
@@ -1897,7 +2016,7 @@ mod tests {
     #[test]
     fn bt2020_to_srgb_preserves_white() {
         let mut rgb = [1.0f32, 1.0, 1.0];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020, GamutMapping::Clip);
         for (c, &val) in rgb.iter().enumerate() {
             assert!(
                 (val - 1.0).abs() < 1e-4,
@@ -1911,7 +2030,7 @@ mod tests {
     #[test]
     fn p3_red_clamps_to_srgb_gamut() {
         let mut rgb = [1.0f32, 0.0, 0.0];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3, GamutMapping::Clip);
         assert_eq!(rgb[0], 1.0, "R should be clamped to 1.0");
         assert_eq!(rgb[1], 0.0, "G should be clamped to 0.0");
         assert_eq!(rgb[2], 0.0, "B should be clamped to 0.0");
@@ -1922,7 +2041,7 @@ mod tests {
     fn srgb_is_noop() {
         let mut rgb = [0.5f32, 0.3, 0.8];
         let original = rgb;
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::Srgb);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Srgb, GamutMapping::Clip);
         assert_eq!(rgb, original);
     }
 
@@ -1931,7 +2050,7 @@ mod tests {
     #[test]
     fn p3_grey_stays_grey() {
         let mut rgb = [0.5f32, 0.5, 0.5];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3, GamutMapping::Clip);
         for (c, &val) in rgb.iter().enumerate() {
             assert!(
                 (val - 0.5).abs() < 1e-3,
@@ -1944,7 +2063,7 @@ mod tests {
     #[test]
     fn bt2020_red_clamps_to_srgb_gamut() {
         let mut rgb = [1.0f32, 0.0, 0.0];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020, GamutMapping::Clip);
         assert_eq!(rgb[0], 1.0, "R should be clamped to 1.0");
         assert_eq!(rgb[1], 0.0, "G should be clamped to 0.0");
         assert_eq!(rgb[2], 0.0, "B should be clamped to 0.0");

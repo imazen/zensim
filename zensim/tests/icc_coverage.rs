@@ -20,7 +20,7 @@ mod common;
 
 use common::generators::*;
 use zensim::profile::ProfileParams;
-use zensim::{ColorPrimaries, PixelFormat, StridedBytes, Zensim, ZensimProfile};
+use zensim::{ColorPrimaries, GamutMapping, PixelFormat, StridedBytes, Zensim, ZensimProfile};
 
 // These tests assert metric SANITY (score in [0,100), identical = 100,
 // wider-gamut → lower score) on ICC/gamut-converted content. The
@@ -386,57 +386,155 @@ fn p3_saturated_green_self_comparison() {
     );
 }
 
-// Saturated-corner gamut tests are temporarily ignored pending the design
-// decision in https://github.com/imazen/zensim/issues/17 — `apply_gamut_matrix`
-// clamps to [0, 1] post-conversion, so saturated BT.2020/P3 primaries collapse
-// to the same sRGB linear values as their sRGB counterparts and these
-// assertions can't fire under the current "post-display-clamp" design. The
-// non-saturated counterpart `bt2020_vs_srgb_interpretation_differs` (which
-// stays a passing test) covers the in-gamut path.
+// Saturated-corner gamut tests (issue #17, resolved by `GamutMapping`):
+// under the default `Clip` mode, `apply_gamut_matrix` clamps to [0, 1]
+// post-conversion, so saturated BT.2020/P3 primaries collapse to the same
+// sRGB linear values as their sRGB counterparts — post-display-clamp
+// semantics, unchanged. The opt-in `GamutMapping::Preserve` lets
+// out-of-gamut values flow into XYB, so these saturated-corner assertions
+// now fire. The non-saturated counterpart
+// `bt2020_vs_srgb_interpretation_differs` covers the in-gamut path in both
+// modes.
 
 #[test]
-#[ignore = "gamut clamping masks saturated-corner differences (see issue #17)"]
 fn bt2020_saturated_colors_differ_from_srgb() {
     // Saturated red in BT.2020 vs sRGB should produce different XYB
+    // under GamutMapping::Preserve (issue #17).
     let (w, h) = (32, 32);
     let buf = vec![[255u8, 0, 0]; w * h];
     let bytes: Vec<u8> = buf.iter().flat_map(|p| p.iter().copied()).collect();
 
-    let src = rgb_source_with_primaries(&bytes, w, h, ColorPrimaries::Bt2020);
+    let src = rgb_source_with_primaries(&bytes, w, h, ColorPrimaries::Bt2020)
+        .with_gamut_mapping(GamutMapping::Preserve);
     let dst = rgb_source_with_primaries(&bytes, w, h, ColorPrimaries::Srgb);
     let result = zensim().compute(&src, &dst).unwrap();
 
     assert!(
         result.score() < 100.0,
-        "BT.2020 red vs sRGB red should differ, got {:.4}",
+        "BT.2020 red vs sRGB red should differ under Preserve, got {:.4}",
         result.score()
     );
     println!(
-        "  BT.2020 red vs sRGB red: {:.4} (expected < 100)",
+        "  BT.2020 red vs sRGB red (Preserve): {:.4} (expected < 100)",
         result.score()
     );
 }
 
 #[test]
-#[ignore = "gamut clamping masks saturated-corner differences (see issue #17)"]
 fn p3_green_outside_srgb_gamut_differs() {
-    // Pure green (0,255,0) labeled P3 vs same labeled sRGB
+    // Pure green (0,255,0) labeled P3 vs same labeled sRGB, under
+    // GamutMapping::Preserve (issue #17).
     let (w, h) = (32, 32);
     let buf = vec![[0u8, 255, 0]; w * h];
     let bytes: Vec<u8> = buf.iter().flat_map(|p| p.iter().copied()).collect();
 
-    let src = rgb_source_with_primaries(&bytes, w, h, ColorPrimaries::DisplayP3);
+    let src = rgb_source_with_primaries(&bytes, w, h, ColorPrimaries::DisplayP3)
+        .with_gamut_mapping(GamutMapping::Preserve);
     let dst = rgb_source_with_primaries(&bytes, w, h, ColorPrimaries::Srgb);
     let result = zensim().compute(&src, &dst).unwrap();
 
     assert!(
         result.score() < 100.0,
-        "P3 green vs sRGB green should differ, got {:.4}",
+        "P3 green vs sRGB green should differ under Preserve, got {:.4}",
         result.score()
     );
     println!(
-        "  P3 green vs sRGB green: {:.4} (expected < 100)",
+        "  P3 green vs sRGB green (Preserve): {:.4} (expected < 100)",
         result.score()
+    );
+}
+
+/// The issue #17 failure case end-to-end: a faithful wide-gamut encode vs
+/// one that destructively clipped to sRGB gamut before encoding, both
+/// decoded and scored as BT.2020.
+///
+/// - Default `Clip` mode: both sides collapse to the same clamped sRGB
+///   linear values → the regression is MASKED (score ≈ 100).
+/// - `Preserve` mode: the clip is DETECTED (score clearly below the
+///   masked score).
+#[test]
+fn gamut_clip_regression_masked_by_clip_detected_by_preserve() {
+    let (w, h) = (32, 32);
+    // Faithful output: saturated BT.2020 red, preserved wide-gamut.
+    let faithful = vec![[255u8, 0, 0]; w * h];
+    // Lossy output: the encoder clipped to sRGB gamut before encoding —
+    // sRGB red expressed in BT.2020 coordinates. sRGB-linear (1,0,0) in
+    // BT.2020 primaries is ≈ (0.6274, 0.0691, 0.0164) linear; through the
+    // sRGB transfer that is ≈ (210, 74, 33) in 8-bit code values.
+    let clipped = vec![[210u8, 74, 33]; w * h];
+
+    let f_bytes: Vec<u8> = faithful.iter().flat_map(|p| p.iter().copied()).collect();
+    let c_bytes: Vec<u8> = clipped.iter().flat_map(|p| p.iter().copied()).collect();
+
+    // Default Clip mode: masked.
+    let refc = rgb_source_with_primaries(&f_bytes, w, h, ColorPrimaries::Bt2020);
+    let dstc = rgb_source_with_primaries(&c_bytes, w, h, ColorPrimaries::Bt2020);
+    let masked = zensim().compute(&refc, &dstc).unwrap().score();
+    assert!(
+        masked > 99.0,
+        "under Clip the gamut-clip regression should be invisible (≈100), got {masked:.4}"
+    );
+
+    // Preserve mode: detected.
+    let refp = rgb_source_with_primaries(&f_bytes, w, h, ColorPrimaries::Bt2020)
+        .with_gamut_mapping(GamutMapping::Preserve);
+    let dstp = rgb_source_with_primaries(&c_bytes, w, h, ColorPrimaries::Bt2020)
+        .with_gamut_mapping(GamutMapping::Preserve);
+    let detected = zensim().compute(&refp, &dstp).unwrap().score();
+    assert!(
+        detected < masked - 1.0,
+        "under Preserve the gamut clip must be detectable: preserve={detected:.4} vs clip={masked:.4}"
+    );
+    println!(
+        "  gamut clip: Clip mode {masked:.4} (masked), Preserve mode {detected:.4} (detected)"
+    );
+}
+
+/// `Preserve` must be semantically a no-op for in-gamut wide-gamut
+/// content: nothing is clipped, so both modes see the same linear light.
+/// Scores are NOT bit-identical, because `Preserve` routes the
+/// gamut-converted rows through the unclamped scalar XYB converter
+/// (`cbrtf_fast`, ~20-bit) while the default path uses the SIMD kernels
+/// (`cbrt_midp`, ~15-bit) — measured delta ≈ 0.045 score points on this
+/// fixture. Assert tight agreement, not bit equality.
+#[test]
+fn preserve_matches_clip_for_in_gamut_content() {
+    let (w, h) = (32, 32);
+    // Mid-saturation content, comfortably inside sRGB gamut even after
+    // the BT.2020→sRGB matrix.
+    let a: Vec<[u8; 3]> = (0..w * h)
+        .map(|i| {
+            let v = 90 + (i % 60) as u8;
+            [v, 110, 130]
+        })
+        .collect();
+    let b: Vec<[u8; 3]> = a
+        .iter()
+        .map(|p| [p[0].saturating_add(2), p[1], p[2]])
+        .collect();
+    let a_bytes: Vec<u8> = a.iter().flat_map(|p| p.iter().copied()).collect();
+    let b_bytes: Vec<u8> = b.iter().flat_map(|p| p.iter().copied()).collect();
+
+    let clip = zensim()
+        .compute(
+            &rgb_source_with_primaries(&a_bytes, w, h, ColorPrimaries::Bt2020),
+            &rgb_source_with_primaries(&b_bytes, w, h, ColorPrimaries::Bt2020),
+        )
+        .unwrap()
+        .score();
+    let preserve = zensim()
+        .compute(
+            &rgb_source_with_primaries(&a_bytes, w, h, ColorPrimaries::Bt2020)
+                .with_gamut_mapping(GamutMapping::Preserve),
+            &rgb_source_with_primaries(&b_bytes, w, h, ColorPrimaries::Bt2020)
+                .with_gamut_mapping(GamutMapping::Preserve),
+        )
+        .unwrap()
+        .score();
+    assert!(
+        (clip - preserve).abs() < 0.2,
+        "in-gamut content must score near-identically in both modes \
+         (cbrt-precision difference only): clip={clip} preserve={preserve}"
     );
 }
 

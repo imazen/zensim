@@ -1177,7 +1177,9 @@ pub(crate) fn convert_source_to_xyb_into_slices(
     let pixel_format = source.pixel_format();
     let opaque = matches!(source.alpha_mode(), AlphaMode::Opaque);
     let primaries = source.color_primaries();
+    let gamut_mapping = source.gamut_mapping();
     let need_gamut = primaries != ColorPrimaries::Srgb;
+    let preserve_oog = need_gamut && matches!(gamut_mapping, crate::source::GamutMapping::Preserve);
 
     #[allow(clippy::type_complexity)]
     let process_chunk =
@@ -1188,9 +1190,37 @@ pub(crate) fn convert_source_to_xyb_into_slices(
 
             // Helper: apply gamut matrix to every pixel in a linear row buffer.
             #[inline]
-            fn gamut_convert_row(row: &mut [[f32; 3]], primaries: ColorPrimaries) {
+            fn gamut_convert_row(
+                row: &mut [[f32; 3]],
+                primaries: ColorPrimaries,
+                mapping: crate::source::GamutMapping,
+            ) {
                 for px in row.iter_mut() {
-                    apply_gamut_matrix(px, primaries);
+                    apply_gamut_matrix(px, primaries, mapping);
+                }
+            }
+
+            // Linear-row → XYB converter for the gamut path (issue #17):
+            // under `GamutMapping::Preserve` the gamut-converted rows may
+            // carry out-of-[0,1] components, which the SIMD kernels'
+            // input clamp would re-clip — route those rows through the
+            // unclamped scalar sibling instead. `preserve_oog` is false
+            // whenever no gamut conversion runs, so every existing path
+            // stays on the SIMD kernel bit-identically.
+            #[inline]
+            fn xyb_row_convert(
+                preserve_oog: bool,
+                pixels: &[[f32; 3]],
+                x_out: &mut [f32],
+                y_out: &mut [f32],
+                b_out: &mut [f32],
+            ) {
+                if preserve_oog {
+                    crate::color::linear_to_positive_xyb_planar_into_unclamped(
+                        pixels, x_out, y_out, b_out,
+                    );
+                } else {
+                    linear_to_positive_xyb_planar_into(pixels, x_out, y_out, b_out);
                 }
             }
 
@@ -1210,9 +1240,10 @@ pub(crate) fn convert_source_to_xyb_into_slices(
                                     crate::color::srgb_u8_to_linear(b),
                                 ];
                             }
-                            gamut_convert_row(&mut linear_row[..width], primaries);
+                            gamut_convert_row(&mut linear_row[..width], primaries, gamut_mapping);
                             let row_offset = (y - row_start) * width;
-                            linear_to_positive_xyb_planar_into(
+                            xyb_row_convert(
+                                preserve_oog,
                                 &linear_row[..width],
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
@@ -1277,10 +1308,15 @@ pub(crate) fn convert_source_to_xyb_into_slices(
                                 );
                             }
                             if need_gamut {
-                                gamut_convert_row(&mut linear_row[..width], primaries);
+                                gamut_convert_row(
+                                    &mut linear_row[..width],
+                                    primaries,
+                                    gamut_mapping,
+                                );
                             }
                             let row_offset = (y - row_start) * width;
-                            linear_to_positive_xyb_planar_into(
+                            xyb_row_convert(
+                                preserve_oog,
                                 &linear_row[..width],
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
@@ -1329,10 +1365,15 @@ pub(crate) fn convert_source_to_xyb_into_slices(
                                 );
                             }
                             if need_gamut {
-                                gamut_convert_row(&mut linear_row[..width], primaries);
+                                gamut_convert_row(
+                                    &mut linear_row[..width],
+                                    primaries,
+                                    gamut_mapping,
+                                );
                             }
                             let row_offset = (y - row_start) * width;
-                            linear_to_positive_xyb_planar_into(
+                            xyb_row_convert(
+                                preserve_oog,
                                 &linear_row[..width],
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
@@ -1369,10 +1410,11 @@ pub(crate) fn convert_source_to_xyb_into_slices(
                             );
                         }
                         if need_gamut {
-                            gamut_convert_row(&mut linear_row[..width], primaries);
+                            gamut_convert_row(&mut linear_row[..width], primaries, gamut_mapping);
                         }
                         let row_offset = (y - row_start) * width;
-                        linear_to_positive_xyb_planar_into(
+                        xyb_row_convert(
+                            preserve_oog,
                             &linear_row,
                             &mut c0[row_offset..row_offset + width],
                             &mut c1[row_offset..row_offset + width],
@@ -1392,7 +1434,8 @@ pub(crate) fn convert_source_to_xyb_into_slices(
                                 rgb_buf.push([r, g, b]);
                             }
                         }
-                        linear_to_positive_xyb_planar_into(
+                        xyb_row_convert(
+                            preserve_oog,
                             &rgb_buf,
                             &mut c0[..raw_elems],
                             &mut c1[..raw_elems],
@@ -1417,10 +1460,15 @@ pub(crate) fn convert_source_to_xyb_into_slices(
                                 );
                             }
                             if need_gamut {
-                                gamut_convert_row(&mut linear_row[..width], primaries);
+                                gamut_convert_row(
+                                    &mut linear_row[..width],
+                                    primaries,
+                                    gamut_mapping,
+                                );
                             }
                             let row_offset = (y - row_start) * width;
-                            linear_to_positive_xyb_planar_into(
+                            xyb_row_convert(
+                                preserve_oog,
                                 &linear_row,
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],

@@ -33,6 +33,46 @@ pub enum ColorPrimaries {
     Bt2020,
 }
 
+/// How colors outside the sRGB gamut are handled when converting from
+/// wide-gamut [`ColorPrimaries`] (Display P3 / BT.2020) to the metric's
+/// internal sRGB-linear space (issue #17).
+///
+/// Irrelevant for [`ColorPrimaries::Srgb`] sources (no conversion runs).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum GamutMapping {
+    /// Clip out-of-gamut colors to `[0, 1]` after the primaries matrix
+    /// (default — matches every zensim release to date).
+    ///
+    /// This measures **post-display-clamp** perception: an sRGB display
+    /// cannot show out-of-gamut colors, so a codec that destructively
+    /// clips them to the sRGB gamut produces output *visually identical
+    /// on that display* — and zensim scores it ≈100. The trade-off: such
+    /// gamut-clipping regressions are below the metric's measurement
+    /// floor in this mode.
+    #[default]
+    Clip,
+    /// Preserve out-of-gamut values — negative / >1 sRGB-linear
+    /// components flow into the XYB transform unclamped (the opsin
+    /// stage's own `max(0)` on the post-mix sum keeps the cube-root
+    /// domain valid).
+    ///
+    /// This makes **codec gamut clipping detectable**: a faithful
+    /// wide-gamut encode and one that clipped to sRGB gamut before
+    /// encoding produce different XYB, hence a score < 100. Scores for
+    /// wide-gamut content with saturated colors shift relative to
+    /// `Clip` mode, and no shipped profile was *trained* on preserved
+    /// out-of-gamut input — treat the absolute score as a regression
+    /// *signal*, not a calibrated perceptual value.
+    ///
+    /// Numeric note: this mode routes gamut-converted rows through an
+    /// unclamped scalar XYB converter (the SIMD kernels clamp input to
+    /// `[0, 1]`), so even in-gamut wide-gamut content scores differ from
+    /// `Clip` mode by cube-root-precision amounts (~0.05 score points
+    /// measured). Input must be finite in this mode.
+    Preserve,
+}
+
 /// Pixel format describing the channel layout, bit depth, and transfer function.
 ///
 /// All formats are converted to linear RGB internally before XYB color space conversion.
@@ -124,6 +164,15 @@ pub trait ImageSource: Sync {
     /// Defaults to [`ColorPrimaries::Srgb`]. Override for Display P3 or BT.2020 content.
     fn color_primaries(&self) -> ColorPrimaries {
         ColorPrimaries::Srgb
+    }
+    /// How out-of-sRGB-gamut colors are handled when converting from
+    /// wide-gamut [`ColorPrimaries`] (issue #17). Defaults to
+    /// [`GamutMapping::Clip`] (post-display-clamp semantics — every
+    /// release to date). Return [`GamutMapping::Preserve`] to make codec
+    /// gamut-clipping regressions detectable. Ignored for
+    /// [`ColorPrimaries::Srgb`] sources.
+    fn gamut_mapping(&self) -> GamutMapping {
+        GamutMapping::Clip
     }
     /// True if the pixel data is HDR-coded (PQ/HLG code values, or linear
     /// absolute luminance). Defaults to `false`; SDR pipelines never need to
@@ -326,6 +375,7 @@ pub struct StridedBytes<'a> {
     pixel_format: PixelFormat,
     alpha_mode: AlphaMode,
     color_primaries: ColorPrimaries,
+    gamut_mapping: GamutMapping,
 }
 
 impl<'a> StridedBytes<'a> {
@@ -417,6 +467,7 @@ impl<'a> StridedBytes<'a> {
             pixel_format,
             alpha_mode,
             color_primaries: ColorPrimaries::Srgb,
+            gamut_mapping: GamutMapping::Clip,
         })
     }
 
@@ -445,6 +496,15 @@ impl<'a> StridedBytes<'a> {
         self.color_primaries = primaries;
         self
     }
+
+    /// Set how out-of-sRGB-gamut colors are handled during the
+    /// wide-gamut → sRGB primaries conversion (issue #17). Default:
+    /// [`GamutMapping::Clip`]. No effect for [`ColorPrimaries::Srgb`]
+    /// sources.
+    pub fn with_gamut_mapping(mut self, mapping: GamutMapping) -> Self {
+        self.gamut_mapping = mapping;
+        self
+    }
 }
 
 impl ImageSource for StridedBytes<'_> {
@@ -464,6 +524,11 @@ impl ImageSource for StridedBytes<'_> {
     fn alpha_mode(&self) -> AlphaMode {
         self.alpha_mode
     }
+    #[inline]
+    fn gamut_mapping(&self) -> GamutMapping {
+        self.gamut_mapping
+    }
+
     #[inline]
     fn color_primaries(&self) -> ColorPrimaries {
         self.color_primaries
@@ -542,6 +607,10 @@ impl<S: ImageSource + ?Sized> ImageSource for SubsetView<'_, S> {
     #[inline]
     fn color_primaries(&self) -> ColorPrimaries {
         self.parent.color_primaries()
+    }
+    #[inline]
+    fn gamut_mapping(&self) -> GamutMapping {
+        self.parent.gamut_mapping()
     }
     #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {

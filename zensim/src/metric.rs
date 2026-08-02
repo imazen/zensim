@@ -2846,6 +2846,7 @@ pub(crate) struct OwnedImage {
     format: crate::source::PixelFormat,
     alpha: crate::source::AlphaMode,
     primaries: crate::source::ColorPrimaries,
+    gamut_mapping: crate::source::GamutMapping,
 }
 
 impl ImageSource for OwnedImage {
@@ -2863,6 +2864,9 @@ impl ImageSource for OwnedImage {
     }
     fn color_primaries(&self) -> crate::source::ColorPrimaries {
         self.primaries
+    }
+    fn gamut_mapping(&self) -> crate::source::GamutMapping {
+        self.gamut_mapping
     }
     fn row_bytes(&self, y: usize) -> &[u8] {
         let stride = self.width * self.format.bytes_per_pixel();
@@ -2905,6 +2909,7 @@ pub(crate) fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
         format: src.pixel_format(),
         alpha: src.alpha_mode(),
         primaries: src.color_primaries(),
+        gamut_mapping: src.gamut_mapping(),
     }
 }
 
