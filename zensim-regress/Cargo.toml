@@ -100,6 +100,11 @@ image = { workspace = true }
 # codec-corpus-fetch is local-only; uncomment for real_images tests
 # codec-corpus-fetch = { path = "/home/lilith/work/codec-corpus-fetch" }
 
+# Ad-hoc image-diff CLI (issue #14) — wraps the diff_image primitives.
+[[bin]]
+name = "zensim-diff"
+path = "src/bin/diff.rs"
+
 [[bench]]
 name = "bench_mismatch"
 harness = false

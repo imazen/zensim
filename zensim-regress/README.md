@@ -344,6 +344,29 @@ tolerance off-by-one
 
 ## Diff images and montages
 
+### `zensim-diff` — the ad-hoc CLI
+
+The diff primitives are also available as an installed command for any two
+PNGs — no Rust project needed:
+
+```bash
+cargo install zensim-regress   # installs the `zensim-diff` binary
+zensim-diff expected.png actual.png                     # 4-panel montage → diff.png
+zensim-diff a.png b.png --mode structural -o s.png      # cyan/orange high-pass residual
+zensim-diff a.png b.png --mode pixel --amp 24           # amplified per-channel diff
+zensim-diff a.png b.png --mode spatial --grid 8x8 --json  # per-region stats
+zensim-diff a.png b.png --score                         # + zensim score (codec_target)
+```
+
+Modes map 1:1 onto the library: `montage` = `MontageOptions::render`
+(labeled 2×2 grid + annotation + heatmap; handles mismatched dimensions),
+`pixel` = `generate_diff_image`, `structural` = `generate_structural_diff`,
+`spatial` = `spatial_analysis` (text or `--json`). `--label` sets the
+montage title; panel headers default to the input file stems. See
+`zensim-diff --help` for the full option list.
+
+### Library usage
+
 Enable automatic diff image generation on mismatch:
 
 ```rust
