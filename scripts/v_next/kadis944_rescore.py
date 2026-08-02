@@ -44,7 +44,13 @@ CHUNK_N = int(os.environ.get("CHUNK_N", "1"))
 BATCH_REFS = int(os.environ.get("BATCH_REFS", "400"))
 S5_WORKERS = int(os.environ.get("S5_WORKERS", "128"))
 OUTDIR = os.path.expanduser(os.environ.get("KADIS944_OUT", "~/tmp/backfill944/kadis944"))
-OUT = f"{OUTDIR}/out/kadis944_c{CHUNK_I:02d}.parquet"
+# Rolling part files: the writer CLOSES (valid footer) every ROLL_BATCHES
+# batches, so a crash/kill loses at most the open part — the 2026-08-01 run
+# lost 356k cells to a footerless single-file write when the launcher task
+# was killed mid-stream. Resume unions the done-sets of every READABLE part.
+ROLL_BATCHES = int(os.environ.get("ROLL_BATCHES", "25"))
+OUT_GLOB_DIR = f"{OUTDIR}/out"
+OUT_BASE = f"kadis944_c{CHUNK_I:02d}"
 REF_BUCKET, REF_PREFIX = "zentrain", "kadis-700k/refs/"
 LOCAL_REFS = "/mnt/v/datasets/kadis700k/refs"  # local mirror; fall back to R2
 FEATCOLS = [f"f{i}" for i in range(944)]
@@ -64,15 +70,22 @@ def main():
         for r in sorted(by)
         if int(hashlib.md5(r.encode()).hexdigest()[:8], 16) % CHUNK_N == CHUNK_I
     ]
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    os.makedirs(OUT_GLOB_DIR, exist_ok=True)
+    import glob as _glob
+
     done = set()
-    if os.path.exists(OUT):
+    part_no = 0
+    for p in sorted(_glob.glob(f"{OUT_GLOB_DIR}/{OUT_BASE}_part*.parquet")):
         try:
-            done = set(
-                pq.read_table(OUT, columns=["distorted_url"]).column("distorted_url").to_pylist()
+            done.update(
+                pq.read_table(p, columns=["distorted_url"]).column("distorted_url").to_pylist()
             )
+            n = int(p.rsplit("_part", 1)[1].split(".")[0])
+            part_no = max(part_no, n + 1)
         except Exception:
-            pass
+            bak = p + ".unreadable.bak"
+            os.rename(p, bak)
+            print(f"resume: unreadable part moved aside -> {bak}", flush=True)
     batches = [refs[i : i + BATCH_REFS] for i in range(0, len(refs), BATCH_REFS)]
     print(
         f"kadis944 rescore c{CHUNK_I:02d}/{CHUNK_N}: {len(refs)} refs, "
@@ -126,6 +139,8 @@ def main():
                   flush=True)
         return bdir, jobs
 
+    state = {"part": part_no, "batches_in_part": 0}
+
     def flush(buf_f, buf_u):
         if not buf_u:
             return
@@ -136,8 +151,15 @@ def main():
             }
         )
         if writer[0] is None:
-            writer[0] = pq.ParquetWriter(OUT, t.schema, compression="zstd")
+            path = f"{OUT_GLOB_DIR}/{OUT_BASE}_part{state['part']:03d}.parquet"
+            writer[0] = pq.ParquetWriter(path, t.schema, compression="zstd")
         writer[0].write_table(t)
+        state["batches_in_part"] += 1
+        if state["batches_in_part"] >= ROLL_BATCHES:
+            writer[0].close()
+            writer[0] = None
+            state["part"] += 1
+            state["batches_in_part"] = 0
 
     processed = 0
     nxt = pool.submit(dl_batch, 0) if batches else None
@@ -185,7 +207,7 @@ def main():
         print(f"[batch {bi + 1}/{len(batches)}] {processed} cells written", flush=True)
     if writer[0]:
         writer[0].close()
-    print(f"DONE: {OUT}  {processed} cells", flush=True)
+    print(f"DONE: {OUT_GLOB_DIR}/{OUT_BASE}_part*  {processed} cells this run", flush=True)
 
 
 if __name__ == "__main__":
