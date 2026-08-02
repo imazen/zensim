@@ -147,20 +147,34 @@ def main() -> int:
                 print(f"FAIL {dset}/{split}: {missing} view rows unmatched by fleet",
                       file=sys.stderr)
                 continue
+            # Stream the 924 view's non-feature columns ROW-GROUP-AT-A-TIME
+            # (multi-GB whole-file reads over /mnt/v DrvFS can ENOMEM — the
+            # P1 merge gotcha), appending the fleet features positionally.
             old_path = os.path.join(root, dset, f"{split}_924.parquet")
-            old = pq.read_table(old_path)
-            nonfeat = [n for n in old.column_names
+            old_pf = pq.ParquetFile(old_path)
+            nonfeat = [n for n in old_pf.schema_arrow.names
                        if not (n.startswith("f") and n[1:].isdigit())]
-            arrays = [old.column(n) for n in nonfeat]
-            names = list(nonfeat)
-            for j, fn in enumerate(feat_names):
-                arrays.append(pa.array(feats[split][:, j], type=pa.float64()))
-                names.append(fn)
+            out_schema = pa.schema(
+                [old_pf.schema_arrow.field(n) for n in nonfeat]
+                + [(fn, pa.float64()) for fn in feat_names]
+            )
             out_p = os.path.join(args.out, dset, f"{split}_944.parquet")
-            pq.write_table(pa.table(dict(zip(names, arrays))), out_p,
-                           compression="zstd")
+            writer = pq.ParquetWriter(out_p, out_schema, compression="zstd")
+            row0 = 0
+            for org in range(old_pf.num_row_groups):
+                t_old = old_pf.read_row_group(org, columns=nonfeat)
+                n = t_old.num_rows
+                arrays = [t_old.column(nm) for nm in nonfeat]
+                for j, fn in enumerate(feat_names):
+                    arrays.append(pa.array(feats[split][row0:row0 + n, j],
+                                           type=pa.float64()))
+                writer.write_table(
+                    pa.table(dict(zip(out_schema.names, arrays)), schema=out_schema))
+                row0 += n
+                del t_old, arrays
+            writer.close()
+            assert row0 == n_rows[split], f"row-group walk {row0} != {n_rows[split]}"
             print(f"  wrote {out_p} ({n_rows[split]} rows)", file=sys.stderr, flush=True)
-            del old, arrays
         del feats, filled
 
     os.makedirs(args.out, exist_ok=True)

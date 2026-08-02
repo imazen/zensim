@@ -49,7 +49,10 @@ import pyarrow.parquet as pq
 N_FEAT = 944
 REGIME = "folded720append2"
 BUCKET = "zentrain"
-POOLS = ("_pool944v4", "_pool944v4x", "_pool944neon")
+POOLS = ("_pool944v4", "_pool944v4x", "_pool944neon",
+         # vendor-class repair pools (2026-08-02): cells whose bf924 extractor's
+         # CPU-vendor class had no matching blob in the main wave.
+         "_pool944amdv4", "_pool944intelv4")
 
 
 def envs():
