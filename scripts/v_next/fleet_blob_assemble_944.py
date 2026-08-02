@@ -146,7 +146,7 @@ def bounded_map(executor, fn, items, in_flight):
             yield f.result()
 
 
-def cmd_fetch(work: Path, out: Path, workers: int, flush_every: int) -> None:
+def cmd_fetch(work: Path, out: Path, workers: int, flush_every: int, part_blobs: int) -> None:
     import boto3
     from botocore.config import Config
 
@@ -180,23 +180,61 @@ def cmd_fetch(work: Path, out: Path, workers: int, flush_every: int) -> None:
         [(n, pa.string()) for n in names[:4]] + [(n, pa.float64()) for n in names[4:]]
     )
     out.parent.mkdir(parents=True, exist_ok=True)
-    mode_append = out.exists() and len(done_ids) > 0
-    writer = pq.ParquetWriter(
-        str(out) + (".resume.parquet" if mode_append else ""), schema, compression="zstd"
-    )
+
+    # PART-FILE ROLLING (the kadis944_rescore 3050db67 design): the writer closes
+    # a VALID footer every `part_blobs` blobs into `<out>.part-NNN.parquet`, and
+    # the checkpoint is written+fsynced ONLY at part close, so ckpt ⊆ closed
+    # parts — a mid-write kill loses at most one open part and its blobs simply
+    # re-fetch on resume. Startup quarantines any footerless part as .bak.
+    def part_path(i: int) -> Path:
+        return out.parent / f"{out.stem}.part-{i:03d}.parquet"
+
+    part_idx = 0
+    while part_path(part_idx).exists():
+        p = part_path(part_idx)
+        try:
+            pq.ParquetFile(str(p))
+            part_idx += 1
+        except Exception:
+            bak = str(p) + ".bak"
+            p.rename(bak)
+            print(f"quarantined footerless part -> {bak}")
+            break
+    print(f"starting at part {part_idx}")
+
     buf = {n: [] for n in names}
     stats = {"rows": 0, "blobs": 0, "fetch_err": 0, "bad_record": 0, "error_record": 0}
     t0 = time.time()
     ck = open(ckpt, "a")
+    state = {"writer": None, "part_blobs": 0, "pending_ck": []}
 
-    def flush():
+    def open_part():
+        state["writer"] = pq.ParquetWriter(str(part_path(part_idx)), schema, compression="zstd")
+        state["part_blobs"] = 0
+
+    def flush_rows():
         if buf["image_path"]:
-            writer.write_table(pa.table(
+            state["writer"].write_table(pa.table(
                 {n: pa.array(buf[n], type=schema.field(n).type) for n in names}, schema=schema))
             for n in names:
                 buf[n].clear()
-        ck.flush()
 
+    def close_part():
+        nonlocal part_idx
+        if state["writer"] is None:
+            return
+        flush_rows()
+        state["writer"].close()
+        state["writer"] = None
+        for jid in state["pending_ck"]:
+            ck.write(jid + "\n")
+        state["pending_ck"].clear()
+        ck.flush()
+        os.fsync(ck.fileno())
+        print(f"part {part_idx} closed ({stats['blobs']} blobs cum)", flush=True)
+        part_idx += 1
+
+    open_part()
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for job, body, err in bounded_map(ex, get, todo, workers * 2):
             pool, jid, sha, ip, cod = job
@@ -228,23 +266,25 @@ def cmd_fetch(work: Path, out: Path, workers: int, flush_every: int) -> None:
                     buf[f"f{i}"].append(float(v))
                 stats["rows"] += 1
             stats["blobs"] += 1
-            ck.write(jid + "\n")
+            state["part_blobs"] += 1
+            state["pending_ck"].append(jid)
             if stats["rows"] - n_before == 0:
                 print(f"EMPTY-BLOB {pool}/{sha} (no feature records)", flush=True)
             if len(buf["image_path"]) >= flush_every:
-                flush()
+                flush_rows()
+            if state["part_blobs"] >= part_blobs:
+                close_part()
+                open_part()
             if stats["blobs"] % 5000 == 0:
                 el = time.time() - t0
                 print(f"[{el:6.0f}s] blobs={stats['blobs']} rows={stats['rows']} "
                       f"({stats['blobs'] / el:.0f} blobs/s) err={stats['fetch_err']} "
                       f"skip={stats['error_record']}+{stats['bad_record']}", flush=True)
-    flush()
-    writer.close()
+    close_part()
     ck.close()
     print(f"DONE {json.dumps(stats)}")
-    if mode_append:
-        print("NOTE: resume output written alongside as .resume.parquet — concatenate "
-              "with the prior part via pyarrow before the join.")
+    print(f"parts: {out.stem}.part-000..{part_idx - 1:03d} in {out.parent} "
+          f"(the join reads the part set; no concat needed)")
 
 
 def main() -> None:
@@ -255,6 +295,8 @@ def main() -> None:
                     default=Path("/mnt/v/output/zensim/tbig-944-2026-08-02/tbig_944_full.parquet"))
     ap.add_argument("--workers", type=int, default=96)
     ap.add_argument("--flush", type=int, default=250_000)
+    ap.add_argument("--part-blobs", type=int, default=50_000,
+                    help="close a valid parquet part every N blobs (crash-safe resume)")
     a = ap.parse_args()
     a.work.mkdir(parents=True, exist_ok=True)
     if a.stage == "sync-ledgers":
@@ -262,7 +304,7 @@ def main() -> None:
     elif a.stage == "scan":
         cmd_scan(a.work)
     else:
-        cmd_fetch(a.work, a.out, a.workers, a.flush)
+        cmd_fetch(a.work, a.out, a.workers, a.flush, a.part_blobs)
 
 
 if __name__ == "__main__":

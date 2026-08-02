@@ -63,8 +63,29 @@ def main() -> int:
 
     feat_names = [f"f{i}" for i in range(N_FEAT)]
     fleet_cols = ["encode_sha"] + feat_names
-    pf_path = args.fleet
-    report = {"per_split": {}, "fleet": pf_path, "views_root": root}
+    # --fleet may be a single parquet, a directory of part files, or a base
+    # path whose `<stem>.part-NNN.parquet` siblings exist (the assembler's
+    # crash-safe part-rolling output).
+    fp = args.fleet
+    if os.path.isdir(fp):
+        fleet_files = sorted(
+            os.path.join(fp, f) for f in os.listdir(fp)
+            if f.endswith(".parquet") and ".bak" not in f
+        )
+    elif os.path.isfile(fp):
+        fleet_files = [fp]
+    else:
+        stem = os.path.splitext(os.path.basename(fp))[0]
+        d = os.path.dirname(fp)
+        fleet_files = sorted(
+            os.path.join(d, f) for f in os.listdir(d)
+            if f.startswith(stem + ".part-") and f.endswith(".parquet")
+        )
+    if not fleet_files:
+        print(f"FATAL: no fleet parquet(s) at {fp}", file=sys.stderr)
+        return 1
+    print(f"fleet: {len(fleet_files)} file(s)", file=sys.stderr)
+    report = {"per_split": {}, "fleet": fleet_files, "views_root": root}
     any_fail = False
 
     for dset in datasets:
@@ -91,24 +112,25 @@ def main() -> int:
         feats = {s: np.full((n_rows[s], N_FEAT), np.nan, np.float64) for s in SPLITS}
         filled = {s: np.zeros(n_rows[s], bool) for s in SPLITS}
         dup_fleet = 0
-        pf = pq.ParquetFile(pf_path)
-        for rg in range(pf.num_row_groups):
-            t = pf.read_row_group(rg, columns=["encode_sha"])
-            keys = t.column("encode_sha").to_pylist()
-            hits = [(i, lookup[k]) for i, k in enumerate(keys) if k in lookup]
-            if not hits:
-                continue
-            t = pf.read_row_group(rg, columns=fleet_cols)
-            keys = t.column("encode_sha").to_pylist()
-            cols = [t.column(f).to_numpy(zero_copy_only=False) for f in feat_names]
-            for i, (split, ridx) in hits:
-                if filled[split][ridx]:
-                    dup_fleet += 1
+        for fpath in fleet_files:
+            pf = pq.ParquetFile(fpath)
+            for rg in range(pf.num_row_groups):
+                t = pf.read_row_group(rg, columns=["encode_sha"])
+                keys = t.column("encode_sha").to_pylist()
+                hits = [(i, lookup[k]) for i, k in enumerate(keys) if k in lookup]
+                if not hits:
                     continue
-                for j in range(N_FEAT):
-                    feats[split][ridx, j] = cols[j][i]
-                filled[split][ridx] = True
-            del t, cols
+                t = pf.read_row_group(rg, columns=fleet_cols)
+                keys = t.column("encode_sha").to_pylist()
+                cols = [t.column(f).to_numpy(zero_copy_only=False) for f in feat_names]
+                for i, (split, ridx) in hits:
+                    if filled[split][ridx]:
+                        dup_fleet += 1
+                        continue
+                    for j in range(N_FEAT):
+                        feats[split][ridx, j] = cols[j][i]
+                    filled[split][ridx] = True
+                del t, cols
         # 3) coverage gate + write, per split, in view order with carried columns
         os.makedirs(os.path.join(args.out, dset), exist_ok=True)
         for split in SPLITS:
