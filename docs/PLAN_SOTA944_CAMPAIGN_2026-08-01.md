@@ -28,6 +28,23 @@ build_commit + shas + DATA_PROVENANCE.md pointer. Compute: local first (legs +
 grids + kadis are local-feasible); bigcodec 5.7M via zenfleet/household nodes if
 local ETA > ~6h (NEVER hand-rolled fleets).
 
+## P1.5 — BANDVIS dst-activity adjudication (added 2026-08-02, user: "we may
+## have fixed some feature math")
+
+Findings on record: the BANDVIS |∇|→|∇²| operator revision + δ re-derivation
+**IS in** the backfill (landed with append2 2026-07-27; P1's gates pin it —
+f0..923 bitwise vs 924 + full-944 byte-identity vs the 2026-07-28 instrument
+across 84 commits). The **dst-activity plane** (dst-side dither/blocking
+cross-fires BANDVIS; recorded fix, ≈+5% CPU, acceptance = LOO-on-944-bake +
+LIVE-YT-Banding) was DEFERRED and is implemented NOWHERE. Sequencing decision:
+implement it now as an OPT-IN toggle (default-off byte-stable, hard gate) +
+run the recorded characterization/acceptance; **the bigcodec fleet extraction
+is HELD until this adjudicates** (legs/kadis/grids proceed on current math —
+their append block is cheap to re-run via the committed P1 tooling if the fix
+wins; 5.7M-row bigcodec is not). The LOO half of acceptance runs in P3's model
+wave. If the toggle wins, ALL P1 outputs get the append-block re-extraction
+before P3 fits.
+
 ## P2 — logged-issue wave (after P1's heavy extraction; one heavy stream)
 
 From `gh issue list` 2026-08-01: FIX in code: **#48** (max_pixels safe default +
