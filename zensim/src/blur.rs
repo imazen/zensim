@@ -3708,7 +3708,10 @@ pub(crate) fn checked_padded_plane_len(
 /// exact arithmetic. O(N) via prefix sums per row + a sliding row-window for
 /// the vertical pass. `tmp` must be `width` long; `plane` is modified in
 /// place.
-#[cfg_attr(not(any(feature = "custom-profiles", feature = "feature-regime-v2", test)), allow(dead_code))] // attribution + v2 JBU spread + tests
+#[cfg_attr(
+    not(any(feature = "custom-profiles", feature = "feature-regime-v2", test)),
+    allow(dead_code)
+)] // attribution + v2 JBU spread + tests
 pub(crate) fn box_spread_sum_preserving(
     plane: &mut [f64],
     width: usize,
