@@ -141,7 +141,7 @@ def cmd_finalize(args):
     ext["idx"] = ext["human_score"].round().astype(int)
 
     mp = pq.read_table(args.map).to_pandas()
-    merged = mp.merge(ext, on="idx", how="left", suffixes=("", "_ext"))
+    merged = mp.merge(ext, on="idx", how="left", suffixes=("", "_ext"))  # joinsafety-ok: idx is the harness row-index round-tripped through human_score (same run, same table build); left-join with isna() accounting + drop below — historical as-run script, predates the gate
     n_unmatched_extract = merged["f0"].isna().sum()
     if n_unmatched_extract:
         print(
@@ -187,7 +187,7 @@ def cmd_finalize(args):
     merged["_k_p"] = merged["codec_param"].round(ROUND)
 
     key_cols = ["image_id", "codec", "_k_q", "_k_p"]
-    joined = orig.merge(
+    joined = orig.merge(  # joinsafety-ok: full explicit key (image_id, codec, q, codec_param) + indicator=True + matched/missing accounting ("dropped, not fabricated") — historical as-run script, predates the gate
         merged, on=key_cols, how="left", suffixes=("_orig", "_new"), indicator=True
     )
 

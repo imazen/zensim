@@ -81,7 +81,7 @@ def cmd_finalize(args):
     orig = orig.reset_index().rename(columns={"index": "idx"})
     print(f"original grid: {len(orig)} rows", file=sys.stderr)
 
-    joined = orig.merge(ext, on="idx", how="left", suffixes=("_orig", "_new"), indicator=True)
+    joined = orig.merge(ext, on="idx", how="left", suffixes=("_orig", "_new"), indicator=True)  # joinsafety-ok: idx = reset_index() row id vs the harness row-index round-tripped through human_score (same run); indicator + matched/missing accounting + 372-feature near-ULP verify AFTER the join — historical as-run script, predates the gate
     matched = joined[joined["_merge"] == "both"].copy()
     missing = joined[joined["_merge"] == "left_only"].copy()
     print(
