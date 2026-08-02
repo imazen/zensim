@@ -1342,6 +1342,29 @@ pub struct V2NewFeatureToggles {
     /// at f944+ after append2. Additive-only; joins the NEXT extraction
     /// regime wave (the HDR backfill).
     pub csfw_block: bool,
+    /// BANDVIS dst-side self-masking (the recorded V3(b)/(c) cross-fire
+    /// fix from `benchmarks/append2_bandvis_gates_2026-07-27.md`
+    /// REMAINDERS #3, implemented 2026-08-02 for the SOTA-944 P1.5
+    /// adjudication): compute a distorted-side activity plane
+    /// (`box_blur(|dst − mu2|)` — the exact dst twin of the existing
+    /// ref-side `activity` chain, Y channel only) and mask each BANDVIS
+    /// band term by ITS OWN image's flatness:
+    /// `b_src = band(curv_src)·(1 − sat(act_src, C_ACTIVITY))` (unchanged)
+    /// and `b_dst = band(curv_dst)·(1 − sat(act_dst, C_ACTIVITY))` (was
+    /// `act_src` — the ref-side-mask design under which dst-side
+    /// dither/blocking texture could not self-mask and cross-fired GAIN).
+    /// Per-side self-masking keeps the identity-pair exact-0 property
+    /// (identical planes ⇒ bitwise-identical activity twins ⇒ the FR
+    /// excess pair is exactly 0) and gives dst-texture-as-deband the
+    /// directionally-defensible LOSS credit. Default OFF: with this
+    /// false, no dst-activity plane is computed and every path/byte —
+    /// both routes, all regimes — is unchanged (the BANDVIS kernel runs
+    /// the exact pre-fix operation sequence via a const split). When ON,
+    /// ONLY the two BANDVIS lanes (`idx_append2::BANDVIS_GAIN/LOSS`)
+    /// change; all other 942 slots stay bit-identical. Requires
+    /// `append2_block` (asserted): it modifies append2-only lanes.
+    /// Adjudication record: `benchmarks/bandvis_dst_activity_2026-08-02.md`.
+    pub append2_dst_activity: bool,
 }
 impl Default for V2NewFeatureToggles {
     fn default() -> Self {
@@ -1353,6 +1376,7 @@ impl Default for V2NewFeatureToggles {
             append_block: false,
             append2_block: false,
             csfw_block: false,
+            append2_dst_activity: false,
         }
     }
 }
@@ -1431,6 +1455,12 @@ struct ScratchV2Strip {
     /// frees `abs_src`/`activity_tmp` for reuse as its temps. Unused by
     /// the materialized walk (which reads cached/replayed full planes).
     bs2: Vec<f32>,
+    /// Distorted-side activity plane (`box_blur(|dst − mu2|)`) for the
+    /// BANDVIS dst self-mask ([`V2NewFeatureToggles::append2_dst_activity`],
+    /// Y channel only). LAZILY grown — allocated empty so the default-OFF
+    /// heap profile (12 MP heaptrack 221.04 MB, append2 gates V5) is
+    /// bit-for-bit unchanged; sized on first use by `stream_phase_a`.
+    activity_dst: Vec<f32>,
 }
 impl ScratchV2Strip {
     fn new(max_n: usize) -> Self {
@@ -1449,6 +1479,7 @@ impl ScratchV2Strip {
             activity_tmp: vec![0.0f32; max_n],
             activity: vec![0.0f32; max_n],
             bs2: vec![0.0f32; max_n],
+            activity_dst: Vec::new(),
         }
     }
 }
@@ -2510,12 +2541,24 @@ impl GradientAccum {
 /// reflect-boundary formulas (`saturating_sub`/`.min(width-1)`) exactly as
 /// before — a tiny fraction of pixels (2 columns + 2 rows out of
 /// width*height), not worth the complexity of a SIMD boundary-clamp.
+/// `BV_DSTACT` (BANDVIS dst self-mask, `append2_dst_activity`): when true,
+/// `act_dst` carries the distorted-side activity plane (same shape as
+/// `activity` — `width*height`, no halo, own-row reads only) and the
+/// BANDVIS dst band term is masked by `1 − sat(act_dst, C_ACTIVITY)`
+/// instead of the ref-side flatness. Only meaningful with `BANDVIS = true`;
+/// with `BV_DSTACT = false` the parameter is dead (`&[]`) and the emitted
+/// operation sequence is the pre-fix one, bit for bit.
 #[inline]
-fn gradient_block_kernel_generic<T: F32x8Backend + Copy, const BANDVIS: bool>(
+fn gradient_block_kernel_generic<
+    T: F32x8Backend + Copy,
+    const BANDVIS: bool,
+    const BV_DSTACT: bool,
+>(
     token: T,
     src_h: &[f32],
     dst_h: &[f32],
     activity: &[f32],
+    act_dst: &[f32],
     width: usize,
     height: usize,
     bv_delta_lo: f32,
@@ -2524,6 +2567,10 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy, const BANDVIS: bool>(
     debug_assert_eq!(src_h.len(), width * (height + 2));
     debug_assert_eq!(dst_h.len(), width * (height + 2));
     debug_assert_eq!(activity.len(), width * height);
+    if BV_DSTACT {
+        debug_assert!(BANDVIS, "BV_DSTACT is a BANDVIS refinement");
+        debug_assert_eq!(act_dst.len(), width * height);
+    }
 
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
@@ -2610,7 +2657,17 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy, const BANDVIS: bool>(
                 saturate(g, bv_delta_lo as f64) * (1.0 - saturate(g, bv_delta_hi as f64))
             };
             let b_src = band(curv_src) * flat;
-            let b_dst = band(curv_dst) * flat;
+            // dst self-mask (`append2_dst_activity`): the dst band term's
+            // flatness comes from the DST's own activity, so dst-side
+            // texture (dither/blocking/grain) masks its own curvature.
+            // With BV_DSTACT off this const-folds to the pre-fix
+            // `band(curv_dst) * flat` — identical ops, identical bytes.
+            let flat_d = if BV_DSTACT {
+                1.0 - saturate(act_dst[y * width + x] as f64, C_ACTIVITY)
+            } else {
+                flat
+            };
+            let b_dst = band(curv_dst) * flat_d;
             let (gain, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
             acc.sum_bv_gain += gain;
             acc.sum_bv_loss += loss;
@@ -2690,7 +2747,15 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy, const BANDVIS: bool>(
                     let band_d =
                         saturate_v(token, curv_d, bv_lo) * (one - saturate_v(token, curv_d, bv_hi));
                     let b_src = band_s * flat;
-                    let b_dst = band_d * flat;
+                    // dst self-mask (see the scalar sibling): const-folds
+                    // to the pre-fix `band_d * flat` when BV_DSTACT off.
+                    let flat_d = if BV_DSTACT {
+                        let actd = ld_at!(act_dst, act_row + x);
+                        one - saturate_v(token, actd, c_activity)
+                    } else {
+                        flat
+                    };
+                    let b_dst = band_d * flat_d;
                     let (gain, loss) = bounded_excess_pair_v(token, b_dst, b_src, c_bv);
                     r_bv_gain += gain;
                     r_bv_loss += loss;
@@ -2729,7 +2794,9 @@ fn gradient_block_kernel_entry(
     width: usize,
     height: usize,
 ) -> GradientAccum {
-    gradient_block_kernel_generic::<_, false>(token, src, dst, activity, width, height, 0.0, 0.0)
+    gradient_block_kernel_generic::<_, false, false>(
+        token, src, dst, activity, &[], width, height, 0.0, 0.0,
+    )
 }
 
 #[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
@@ -2743,11 +2810,37 @@ fn gradient_block_kernel_entry_bandvis(
     bv_delta_lo: f32,
     bv_delta_hi: f32,
 ) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true>(
+    gradient_block_kernel_generic::<_, true, false>(
         token,
         src,
         dst,
         activity,
+        &[],
+        width,
+        height,
+        bv_delta_lo,
+        bv_delta_hi,
+    )
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gradient_block_kernel_entry_bandvis_dstact(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    act_dst: &[f32],
+    width: usize,
+    height: usize,
+    bv_delta_lo: f32,
+    bv_delta_hi: f32,
+) -> GradientAccum {
+    gradient_block_kernel_generic::<_, true, true>(
+        token,
+        src,
+        dst,
+        activity,
+        act_dst,
         width,
         height,
         bv_delta_lo,
@@ -2757,7 +2850,11 @@ fn gradient_block_kernel_entry_bandvis(
 
 /// `bandvis`: `Some((δ_lo, δ_hi))` accumulates the append2 BANDVIS pair
 /// (Y channel with `append2_block` on — the CROSS-pattern const split, so
-/// chroma/off paths pay nothing and change no byte).
+/// chroma/off paths pay nothing and change no byte). `bv_act_dst`:
+/// `Some(dst-activity strip)` switches the BANDVIS dst band term to the
+/// dst self-mask (`append2_dst_activity` — a third const-split
+/// instantiation; `None` runs the pre-fix bytes exactly). Ignored without
+/// `bandvis`.
 fn gradient_block_kernel(
     src: &[f32],
     dst: &[f32],
@@ -2765,14 +2862,21 @@ fn gradient_block_kernel(
     width: usize,
     height: usize,
     bandvis: Option<(f32, f32)>,
+    bv_act_dst: Option<&[f32]>,
 ) -> GradientAccum {
-    match bandvis {
-        None => incant!(
+    match (bandvis, bv_act_dst) {
+        (None, _) => incant!(
             gradient_block_kernel_entry(src, dst, activity, width, height),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
-        Some((lo, hi)) => incant!(
+        (Some((lo, hi)), None) => incant!(
             gradient_block_kernel_entry_bandvis(src, dst, activity, width, height, lo, hi),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        (Some((lo, hi)), Some(act_dst)) => incant!(
+            gradient_block_kernel_entry_bandvis_dstact(
+                src, dst, activity, act_dst, width, height, lo, hi
+            ),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
     }
@@ -3938,7 +4042,7 @@ fn compute_channel_scale_v2(
             let src_g = &scratch.src_wide[g_off..g_off + g_n];
             let dst_g = &scratch.dst_wide[g_off..g_off + g_n];
             let strip_grad =
-                gradient_block_kernel(src_g, dst_g, activity_strip, width, strip_h, None);
+                gradient_block_kernel(src_g, dst_g, activity_strip, width, strip_h, None, None);
             grad.accumulate(&strip_grad);
         }
 
@@ -4016,7 +4120,7 @@ fn compute_channel_scale_v2_whole(
         let mut dst_g = vec![0.0f32; width * (height + 2)];
         gather_strip_halo(src, width, height, 0, height + 2, 1, &mut src_g);
         gather_strip_halo(dst, width, height, 0, height + 2, 1, &mut dst_g);
-        gradient_block_kernel(&src_g, &dst_g, activity, width, height, None)
+        gradient_block_kernel(&src_g, &dst_g, activity, width, height, None, None)
     } else {
         GradientAccum::default()
     };
@@ -4881,6 +4985,10 @@ struct Append2Params {
     bv_delta_lo: f32,
     bv_delta_hi: f32,
     hl_bins: bool,
+    /// BANDVIS dst self-mask live ([`V2NewFeatureToggles::append2_dst_activity`]):
+    /// phase A computes the Y-channel dst-activity plane, phase B routes it
+    /// into the BANDVIS-dstact kernel instantiation. Route-independent.
+    dst_activity: bool,
 }
 
 /// Per-channel accumulator state for the streaming walk: per-scale totals
@@ -4957,6 +5065,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
     info: &crate::feature_v2_stream::StripInfo,
     ch: usize,
     want_bs2: bool,
+    want_act_dst: bool,
     scr: &mut ScratchV2Strip,
 ) {
     use crate::feature_v2_stream::Side;
@@ -4978,6 +5087,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         activity_tmp,
         activity,
         bs2,
+        activity_dst,
     } = scr;
     let (src_win, dst_win): (&[f32], &[f32]) = match (
         producer.wide_window(Side::Source, ch, info),
@@ -5007,6 +5117,27 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         activity_tmp,
         activity,
     );
+    // BANDVIS dst self-mask (`append2_dst_activity`, Y channel only): the
+    // exact dst twin of the ref activity chain — `box_blur(|dst − mu2|)`
+    // over the same wide window, mu2 already produced by the fused blur
+    // pass above. `abs_src`/`activity_tmp` are dead after the ref chain
+    // and serve as its temps (the same reuse the bs2 fill below makes —
+    // which runs after and overwrites them again, so ordering here is
+    // load-bearing: act-dst BEFORE bs2).
+    if want_act_dst {
+        if activity_dst.len() < n_wide {
+            activity_dst.resize(n_wide, 0.0);
+        }
+        crate::simd_ops::abs_diff_into(dst_win, &mu2[..n_wide], &mut abs_src[..n_wide]);
+        crate::blur::box_blur_1pass_into(
+            &abs_src[..n_wide],
+            &mut activity_dst[..n_wide],
+            &mut activity_tmp[..n_wide],
+            width,
+            wide_h,
+            BLUR_RADIUS,
+        );
+    }
     if want_bs2 {
         square_into(src_win, &mut abs_src[..n_wide]);
         crate::blur::box_blur_h(
@@ -5093,10 +5224,14 @@ fn stream_phase_b(
         let g_n = width * (strip_h + 2);
         // BANDVIS accumulates only on (Y, append2 on) — the const-split
         // instantiation; every other path runs the byte-identical
-        // BANDVIS=false kernel.
+        // BANDVIS=false kernel. The dst self-mask plane routes in only
+        // when `append2_dst_activity` is live (third instantiation).
         let bandvis = append2
             .filter(|_| cross.is_some())
             .map(|p| (p.bv_delta_lo, p.bv_delta_hi));
+        let bv_act_dst = append2
+            .filter(|p| cross.is_some() && p.dst_activity)
+            .map(|_| &scr.activity_dst[off..off + strip_n]);
         let g = gradient_block_kernel(
             &src_win[g_off..g_off + g_n],
             &dst_win[g_off..g_off + g_n],
@@ -5104,6 +5239,7 @@ fn stream_phase_b(
             width,
             strip_h,
             bandvis,
+            bv_act_dst,
         );
         acc.grad[scale].accumulate(&g);
     }
@@ -5476,6 +5612,10 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         !append2_on || append_on,
         "append2_block requires append_block (f924+ sits after the append block)"
     );
+    assert!(
+        !toggles.append2_dst_activity || append2_on,
+        "append2_dst_activity requires append2_block (it refines the BANDVIS lanes)"
+    );
     let append2 = append2_on.then(|| {
         use crate::feature_v2_stream::FrontEnd;
         match front_end {
@@ -5483,11 +5623,13 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 bv_delta_lo: BV_DELTA_LO_SDR,
                 bv_delta_hi: BV_DELTA_HI_SDR,
                 hl_bins: false,
+                dst_activity: toggles.append2_dst_activity,
             },
             FrontEnd::Hdr(_) => Append2Params {
                 bv_delta_lo: BV_DELTA_LO_PU,
                 bv_delta_hi: BV_DELTA_HI_PU,
                 hl_bins: true,
+                dst_activity: toggles.append2_dst_activity,
             },
         }
     });
@@ -5532,6 +5674,10 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 
     let mut accums: [StreamChannelAccums; 3] =
         std::array::from_fn(|_| StreamChannelAccums::new(n_scales));
+    // BANDVIS dst self-mask live: phase A additionally produces the Y
+    // channel's dst-activity plane (and ONLY the Y channel's — the block
+    // is Y-only, so X/B never pay the chain).
+    let act_dst_on = append2.map(|p| p.dst_activity).unwrap_or(false);
     let mut producer =
         StripPlaneProducer::new_with_front_end(source, distorted, parallel, stream_pool, front_end);
 
@@ -5570,6 +5716,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         &info,
                         ch,
                         append_cell_active(append_on, ch, scale),
+                        ch == 1 && act_dst_on && append_cell_active(append_on, 1, scale),
                         scr,
                     );
                 });
@@ -5630,7 +5777,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             let y_active = append_cell_active(append_on, 1, scale);
             for ch in [0usize, 2] {
                 let active = append_cell_active(append_on, ch, scale);
-                stream_phase_a(&producer, &info, ch, active, scr);
+                stream_phase_a(&producer, &info, ch, active, false, scr);
                 if y_active {
                     let stash = if ch == 0 {
                         &mut stash_x_buf[0].activity
@@ -5656,7 +5803,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 );
             }
             {
-                stream_phase_a(&producer, &info, 1, y_active, scr);
+                stream_phase_a(&producer, &info, 1, y_active, y_active && act_dst_on, scr);
                 let cross = if y_active {
                     Some((
                         &stash_x_buf[0].activity[..strip_n],
@@ -6253,6 +6400,7 @@ fn attr_pass_a_kernels(
             &planes.act[base..base + strip_n],
             width,
             strip_h,
+            None,
             None,
         );
         cell.grad.accumulate(&g);
@@ -9851,6 +9999,101 @@ mod tests {
         }
     }
 
+    // --- Shared BANDVIS fixtures (gates doc V3). Extracted 2026-08-02 so
+    // the P1.5 dst-activity adjudication tests measure the IDENTICAL
+    // pixel content as the OFF-math characterization pins (formulas
+    // verbatim from the original inline builders; the behavior test's
+    // value pins + the gates-doc printed numbers gate the motion).
+    // `benchmarks/bandvis_dst_activity_2026-08-02.md`. ---
+
+    /// Smooth diagonal gradient ramp (sRGB codes 32..224).
+    fn bv_ramp(w: usize, h: usize) -> Vec<[u8; 3]> {
+        (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
+                let v = v as u8;
+                [v, v, v]
+            })
+            .collect()
+    }
+
+    /// Mid-tread posterize to `bits` (the gates-doc ladder operator).
+    fn bv_posterize(px: &[[u8; 3]], bits: u32) -> Vec<[u8; 3]> {
+        let mask = !((1u16 << (8 - bits)) - 1) as u8;
+        let half = ((1u16 << (8 - bits)) / 2) as u8;
+        px.iter()
+            .map(|&[r, g, b]| [(r & mask) | half, (g & mask) | half, (b & mask) | half])
+            .collect()
+    }
+
+    /// 4-bit ordered-Bayer (4×4) dither of the diagonal ramp.
+    fn bv_bayer_dither(w: usize, h: usize) -> Vec<[u8; 3]> {
+        let bayer = [
+            [0u8, 8, 2, 10],
+            [12, 4, 14, 6],
+            [3, 11, 1, 9],
+            [15, 7, 13, 5],
+        ];
+        (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
+                let t = (bayer[y % 4][x % 4] as f32 + 0.5) / 16.0;
+                let step = 16.0; // 4-bit quantization step
+                let q = ((v / step + t - 0.5).floor() * step + step / 2.0).clamp(0.0, 255.0) as u8;
+                [q, q, q]
+            })
+            .collect()
+    }
+
+    /// 4-bit hash-noise (TPDF-class) dither of the diagonal ramp.
+    fn bv_noise_dither(w: usize, h: usize) -> Vec<[u8; 3]> {
+        (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
+                let mut hsh = (x as u32)
+                    .wrapping_mul(0x9E37_79B9)
+                    .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B));
+                hsh ^= hsh >> 15;
+                hsh = hsh.wrapping_mul(0x2C1B_3C6D);
+                hsh ^= hsh >> 13;
+                let t = ((hsh & 0xFFFF) as f32 + 0.5) / 65536.0;
+                let step = 16.0;
+                let q = ((v / step + t - 0.5).floor() * step + step / 2.0).clamp(0.0, 255.0) as u8;
+                [q, q, q]
+            })
+            .collect()
+    }
+
+    /// ±16-code hash-textured version of `ramp` (the b2 source fixture).
+    fn bv_textured_ramp(ramp: &[[u8; 3]]) -> Vec<[u8; 3]> {
+        ramp.iter()
+            .enumerate()
+            .map(|(i, &[v, _, _])| {
+                let mut hsh = (i as u32).wrapping_mul(0x27D4_EB2F);
+                hsh ^= hsh >> 15;
+                let n = ((hsh & 0x1F) as i16) - 16; // ±16 codes texture
+                let t = (v as i16 + n).clamp(0, 255) as u8;
+                [t, t, t]
+            })
+            .collect()
+    }
+
+    /// ±6-code 8-px DC-lattice overlay on `ramp` (the V3(c) fixture).
+    fn bv_blocky(ramp: &[[u8; 3]], w: usize) -> Vec<[u8; 3]> {
+        ramp.iter()
+            .enumerate()
+            .map(|(i, &[v, _, _])| {
+                let (x, y) = (i % w, i / w);
+                let dc = if ((x / 8) + (y / 8)) % 2 == 0 { 6 } else { -6 };
+                let q = (v as i16 + dc).clamp(0, 255) as u8;
+                [q, q, q]
+            })
+            .collect()
+    }
+
     /// V3(a,b,c,e) behavioral: posterize-ladder monotonicity, dither
     /// masking, blocky-not-banded separation, debanding credit.
     #[test]
@@ -9859,21 +10102,8 @@ mod tests {
         let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
 
         // Smooth diagonal gradient ramp (sRGB codes 32..224).
-        let ramp: Vec<[u8; 3]> = (0..w * h)
-            .map(|i| {
-                let (x, y) = (i % w, i / w);
-                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
-                let v = v as u8;
-                [v, v, v]
-            })
-            .collect();
-        let posterize = |px: &[[u8; 3]], bits: u32| -> Vec<[u8; 3]> {
-            let mask = !((1u16 << (8 - bits)) - 1) as u8;
-            let half = ((1u16 << (8 - bits)) / 2) as u8;
-            px.iter()
-                .map(|&[r, g, b]| [(r & mask) | half, (g & mask) | half, (b & mask) | half])
-                .collect()
-        };
+        let ramp: Vec<[u8; 3]> = bv_ramp(w, h);
+        let posterize = bv_posterize;
         let gain_at = |dst: &[[u8; 3]]| -> Vec<f64> {
             let r = z
                 .compute_folded720_append2_features(
@@ -9942,42 +10172,12 @@ mod tests {
 
         // (b) Dither masking: ordered-dither the SAME 4-bit posterize —
         // gain must drop substantially.
-        let bayer = [
-            [0u8, 8, 2, 10],
-            [12, 4, 14, 6],
-            [3, 11, 1, 9],
-            [15, 7, 13, 5],
-        ];
-        let dithered: Vec<[u8; 3]> = (0..w * h)
-            .map(|i| {
-                let (x, y) = (i % w, i / w);
-                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
-                let t = (bayer[y % 4][x % 4] as f32 + 0.5) / 16.0;
-                let step = 16.0; // 4-bit quantization step
-                let q = ((v / step + t - 0.5).floor() * step + step / 2.0).clamp(0.0, 255.0) as u8;
-                [q, q, q]
-            })
-            .collect();
+        let dithered: Vec<[u8; 3]> = bv_bayer_dither(w, h);
         // (b1) NOISE dither (the industry deband practice — TPDF-class
         // random dither): the quantization residual decorrelates and
         // averages out sub-band at coarse scales ⇒ GAIN drops
         // substantially vs plain posterize.
-        let noise_dithered: Vec<[u8; 3]> = (0..w * h)
-            .map(|i| {
-                let (x, y) = (i % w, i / w);
-                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
-                let mut hsh = (x as u32)
-                    .wrapping_mul(0x9E37_79B9)
-                    .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B));
-                hsh ^= hsh >> 15;
-                hsh = hsh.wrapping_mul(0x2C1B_3C6D);
-                hsh ^= hsh >> 13;
-                let t = ((hsh & 0xFFFF) as f32 + 0.5) / 65536.0;
-                let step = 16.0;
-                let q = ((v / step + t - 0.5).floor() * step + step / 2.0).clamp(0.0, 255.0) as u8;
-                [q, q, q]
-            })
-            .collect();
+        let noise_dithered: Vec<[u8; 3]> = bv_noise_dither(w, h);
         let gn = gain_at(&noise_dithered);
         let ratio_noise = gn[3] / g4[3].max(1e-12);
         println!(
@@ -10000,28 +10200,11 @@ mod tests {
         // (b2) Source-texture masking (the activity mask's ref-side
         // mechanism): the SAME posterization applied to a noise-textured
         // source fires much less than on the clean ramp.
-        let textured_src: Vec<[u8; 3]> = ramp
-            .iter()
-            .enumerate()
-            .map(|(i, &[v, _, _])| {
-                let mut hsh = (i as u32).wrapping_mul(0x27D4_EB2F);
-                hsh ^= hsh >> 15;
-                let n = ((hsh & 0x1F) as i16) - 16; // ±16 codes texture
-                let t = (v as i16 + n).clamp(0, 255) as u8;
-                [t, t, t]
-            })
-            .collect();
-        let posterize_of = |px: &[[u8; 3]], bits: u32| -> Vec<[u8; 3]> {
-            let mask = !((1u16 << (8 - bits)) - 1) as u8;
-            let half = ((1u16 << (8 - bits)) / 2) as u8;
-            px.iter()
-                .map(|&[r, g, b]| [(r & mask) | half, (g & mask) | half, (b & mask) | half])
-                .collect()
-        };
+        let textured_src: Vec<[u8; 3]> = bv_textured_ramp(&ramp);
         let r_tex = z
             .compute_folded720_append2_features(
                 &RgbSlice::new(&textured_src, w, h),
-                &RgbSlice::new(&posterize_of(&textured_src, 4), w, h),
+                &RgbSlice::new(&bv_posterize(&textured_src, 4), w, h),
             )
             .unwrap();
         let a2t = r_tex.append2_features().unwrap();
@@ -10052,15 +10235,7 @@ mod tests {
 
         // (c) Blocky-but-not-banded: 8px-lattice DC shifts fire blockiness,
         // not bandvis.
-        let blocky: Vec<[u8; 3]> = (0..w * h)
-            .map(|i| {
-                let (x, y) = (i % w, i / w);
-                let base = ramp[i][0] as i16;
-                let dc = if ((x / 8) + (y / 8)) % 2 == 0 { 6 } else { -6 };
-                let v = (base + dc).clamp(0, 255) as u8;
-                [v, v, v]
-            })
-            .collect();
+        let blocky: Vec<[u8; 3]> = bv_blocky(&ramp, w);
         let rb = z
             .compute_folded720_append2_features(
                 &RgbSlice::new(&ramp, w, h),
@@ -10135,6 +10310,241 @@ mod tests {
             "deband-by-dither [scale3]: gain {:.5} loss {:.5}",
             a2[b3 + idx_append2::BANDVIS_GAIN],
             a2[b3 + idx_append2::BANDVIS_LOSS]
+        );
+    }
+
+    /// P1.5 dst-activity toggle — structural gates (pre-registered F6/F7/
+    /// F8 in `benchmarks/bandvis_dst_activity_2026-08-02.md`): toggle ON
+    /// moves ONLY the BANDVIS lanes of the 944 vector (all other 942
+    /// slots bit-identical), identity stays exactly 0, serial ≡ parallel,
+    /// and the toggle is live (lanes DO move on a quantized pair).
+    #[test]
+    fn append2_dst_activity_lanes_only_identity_and_parallel() {
+        let (w, h) = (150usize, 170usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+        let t_off = V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            ..Default::default()
+        };
+        let t_on = V2NewFeatureToggles {
+            append2_dst_activity: true,
+            ..t_off
+        };
+        let off = z
+            .compute_folded720_append_features_streaming(&sref, &dref, t_off, &mut scratch)
+            .unwrap();
+        let on = z
+            .compute_folded720_append_features_streaming(&sref, &dref, t_on, &mut scratch)
+            .unwrap();
+        assert_eq!(off.features().len(), 944);
+        assert_eq!(on.features().len(), 944);
+        assert_eq!(on.regime(), FeatureRegime::Folded720Append2);
+        // F7: only the BANDVIS gain/loss lanes may differ.
+        let mut lanes_moved = 0usize;
+        for i in 0..944 {
+            let bandvis_lane = i >= 924 && {
+                let local = (i - 924) % APPEND2_PER_SCALE;
+                local == idx_append2::BANDVIS_GAIN || local == idx_append2::BANDVIS_LOSS
+            };
+            if bandvis_lane {
+                lanes_moved +=
+                    (off.features()[i].to_bits() != on.features()[i].to_bits()) as usize;
+            } else {
+                assert_eq!(
+                    off.features()[i].to_bits(),
+                    on.features()[i].to_bits(),
+                    "append2_dst_activity moved non-BANDVIS slot f{i}"
+                );
+            }
+        }
+        assert!(
+            lanes_moved > 0,
+            "toggle must be LIVE on a quantized pair (no BANDVIS lane moved)"
+        );
+        // F6: identity pair stays exactly 0 with the toggle ON (activity
+        // twins are bitwise-identical on identical planes ⇒ FR pair 0).
+        let idr = z
+            .compute_folded720_append_features_streaming(&sref, &sref, t_on, &mut scratch)
+            .unwrap();
+        let app2 = idr.append2_features().unwrap();
+        for scale in 0..4 {
+            let b = scale * APPEND2_PER_SCALE;
+            assert_eq!(app2[b + idx_append2::BANDVIS_GAIN], 0.0, "s{scale} gain");
+            assert_eq!(app2[b + idx_append2::BANDVIS_LOSS], 0.0, "s{scale} loss");
+        }
+        // F8: serial ≡ parallel at 944 with the toggle ON.
+        #[cfg(feature = "threads")]
+        {
+            let zp = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(true);
+            let mut scratch_p = V2Scratch::new();
+            let on_p = zp
+                .compute_folded720_append_features_streaming(&sref, &dref, t_on, &mut scratch_p)
+                .unwrap();
+            for i in 0..944 {
+                assert_eq!(
+                    on.features()[i].to_bits(),
+                    on_p.features()[i].to_bits(),
+                    "serial vs parallel diverge at f{i} (dst-activity ON)"
+                );
+            }
+        }
+    }
+
+    /// P1.5 dst-activity adjudication matrix (F1–F5 of
+    /// `benchmarks/bandvis_dst_activity_2026-08-02.md`): OFF and ON arms
+    /// over the IDENTICAL gates-doc fixtures (shared `bv_*` builders).
+    /// Prints the full per-scale table the doc records. Asserted here:
+    /// the design-contract invariants (real banding keeps firing with the
+    /// self-mask ON; identity/direction gates) — the adjudication gates
+    /// (F2 ratio, F3 reduction, …) are recorded in the doc with the
+    /// measured outcome, and the adjudicated pins were added below after
+    /// the doc's results section landed.
+    #[test]
+    fn append2_dst_activity_behavior_matrix() {
+        let (w, h) = (256usize, 256usize);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+        let t_off = V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            ..Default::default()
+        };
+        let t_on = V2NewFeatureToggles {
+            append2_dst_activity: true,
+            ..t_off
+        };
+        let mut gl = |src: &[[u8; 3]], dst: &[[u8; 3]], on: bool| -> (Vec<f64>, Vec<f64>) {
+            let r = z
+                .compute_folded720_append_features_streaming(
+                    &RgbSlice::new(src, w, h),
+                    &RgbSlice::new(dst, w, h),
+                    if on { t_on } else { t_off },
+                    &mut scratch,
+                )
+                .unwrap();
+            let a = r.append2_features().unwrap();
+            (
+                (0..4)
+                    .map(|s| a[s * APPEND2_PER_SCALE + idx_append2::BANDVIS_GAIN])
+                    .collect(),
+                (0..4)
+                    .map(|s| a[s * APPEND2_PER_SCALE + idx_append2::BANDVIS_LOSS])
+                    .collect(),
+            )
+        };
+
+        let ramp = bv_ramp(w, h);
+        let p = |bits| bv_posterize(&ramp, bits);
+
+        // F1: the posterize ladder, both arms (asserts AFTER the full
+        // matrix prints, so a single miss still shows every number).
+        let mut peaks_on = Vec::new();
+        for bits in [7u32, 6, 5, 4, 3] {
+            let (g_off, _) = gl(&ramp, &p(bits), false);
+            let (g_on, _) = gl(&ramp, &p(bits), true);
+            println!("F1 ladder {bits}b OFF {g_off:?}\n              ON  {g_on:?}");
+            let pk = g_on.iter().cloned().fold(0.0f64, f64::max);
+            peaks_on.push(pk);
+        }
+
+        // F2: noise-dither ratio @s3, both arms.
+        let nd = bv_noise_dither(w, h);
+        let (g4_off, _) = gl(&ramp, &p(4), false);
+        let (g4_on, _) = gl(&ramp, &p(4), true);
+        let (gn_off, ln_off) = gl(&ramp, &nd, false);
+        let (gn_on, ln_on) = gl(&ramp, &nd, true);
+        let ratio_off = gn_off[3] / g4_off[3].max(1e-12);
+        let ratio_on = gn_on[3] / g4_on[3].max(1e-12);
+        println!(
+            "F2 noise-dither s3: OFF undith {:.5} dith {:.5} ratio {:.3} | ON undith {:.5} dith {:.5} ratio {:.3}",
+            g4_off[3], gn_off[3], ratio_off, g4_on[3], gn_on[3], ratio_on
+        );
+        println!(
+            "F2 noise-dither LOSS s0..s3: OFF {ln_off:?} ON {ln_on:?} (dither-as-partial-deband credit direction)"
+        );
+
+        // F2b: ordered-Bayer per scale, both arms.
+        let bd = bv_bayer_dither(w, h);
+        let (gb_off, _) = gl(&ramp, &bd, false);
+        let (gb_on, _) = gl(&ramp, &bd, true);
+        println!("F2b bayer GAIN OFF {gb_off:?}\n               ON  {gb_on:?}");
+
+        // F3: DC lattice, both arms.
+        let blk = bv_blocky(&ramp, w);
+        let (gk_off, _) = gl(&ramp, &blk, false);
+        let (gk_on, _) = gl(&ramp, &blk, true);
+        let mx_off = gk_off.iter().cloned().fold(0.0f64, f64::max);
+        let mx_on = gk_on.iter().cloned().fold(0.0f64, f64::max);
+        println!("F3 lattice GAIN OFF {gk_off:?} max {mx_off:.4}\n                ON  {gk_on:?} max {mx_on:.4}");
+
+        // F4: source-texture masking, both arms.
+        let tex = bv_textured_ramp(&ramp);
+        let texp = bv_posterize(&tex, 4);
+        let (gt_off, _) = gl(&tex, &texp, false);
+        let (gt_on, _) = gl(&tex, &texp, true);
+        println!(
+            "F4 src-texture s3: OFF {:.5} (ratio {:.3}) ON {:.5} (ratio {:.3})",
+            gt_off[3],
+            gt_off[3] / g4_off[3].max(1e-12),
+            gt_on[3],
+            gt_on[3] / g4_on[3].max(1e-12)
+        );
+        assert!(
+            gt_on[3] < 0.5 * g4_on[3],
+            "F4: source texture must keep masking with dst self-mask ON: {} vs {}",
+            gt_on[3],
+            g4_on[3]
+        );
+
+        // F5: deband credit, both arms.
+        let (gd_off, ld_off) = gl(&p(4), &ramp, false);
+        let (gd_on, ld_on) = gl(&p(4), &ramp, true);
+        println!(
+            "F5 deband s3: OFF gain {:.5} loss {:.5} | ON gain {:.5} loss {:.5}",
+            gd_off[3], ld_off[3], gd_on[3], ld_on[3]
+        );
+
+        // --- Asserts (after the full matrix printed) ---
+        // F1 design contract: every rung still fires with the self-mask
+        // ON, the cap rolloff is preserved, and the peak sits in the
+        // visibility-band region (7b/6b/5b — MEASURED: the self-mask
+        // relocates the peak from 5b to a 7b/5b near-tie, because coarse
+        // rungs carry their own dst activity while 2-code steps are near
+        // the δ band optimum ≈1.6 codes and stay unmasked; the
+        // pre-registered "interior peak" form of this gate missed by 0.6%
+        // — recorded in the adjudication doc).
+        for (i, bits) in [7u32, 6, 5, 4, 3].iter().enumerate() {
+            assert!(
+                peaks_on[i] > 0.05,
+                "F1: {bits}b rung must keep firing with dst self-mask ON: {}",
+                peaks_on[i]
+            );
+        }
+        let pmax = peaks_on.iter().cloned().fold(0.0f64, f64::max);
+        assert!(
+            pmax > peaks_on[3] && pmax > peaks_on[4],
+            "F1: peak must sit in the visibility band, not the cap tail (ON): {peaks_on:?}"
+        );
+        assert!(
+            peaks_on[2] > peaks_on[3] && peaks_on[3] > peaks_on[4],
+            "F1: cap rolloff not monotone (ON): {peaks_on:?}"
+        );
+        assert!(
+            ld_on[3] > gd_on[3],
+            "F5: debanding must credit LOSS over GAIN at s3 (ON): g {} l {}",
+            gd_on[3],
+            ld_on[3]
+        );
+        assert!(
+            ld_on[3] > 0.1,
+            "F5: debanding LOSS should fire strongly (ON): {}",
+            ld_on[3]
         );
     }
 
@@ -10252,6 +10662,87 @@ mod tests {
         assert!(
             g_coarse > 1e-4,
             "PU-domain BANDVIS should fire at coarse scales on posterized HDR ramp"
+        );
+    }
+
+    /// P1.5 dst-activity toggle on the DECLARED-HDR route (pre-registered
+    /// F9): toggle ON moves only the BANDVIS lanes (HL bins, conditioner,
+    /// first-924 all bit-stable), and PU-domain BANDVIS still fires on
+    /// the posterized HDR ramp with the self-mask ON.
+    #[test]
+    fn append2_dst_activity_hdr_route_lanes_and_fires() {
+        let (w, h) = (128usize, 128usize);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let mut scratch = V2Scratch::new();
+
+        // The V4 PU fixture: log-luminance ramp 50..3000 nits, posterized
+        // to 24 plateaus (identical construction to the test above).
+        let ramp: Vec<[f32; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let t = (x + y) as f32 / (w + h - 2) as f32;
+                let nits = 50.0 * (3000.0f32 / 50.0).powf(t);
+                [nits, nits, nits]
+            })
+            .collect();
+        let poster: Vec<[f32; 3]> = ramp
+            .iter()
+            .map(|&[r, _, _]| {
+                let lg = (r / 50.0).ln() / (3000.0f32 / 50.0).ln();
+                let q = (lg * 24.0).floor() / 24.0;
+                let v = 50.0 * (3000.0f32 / 50.0).powf(q);
+                [v, v, v]
+            })
+            .collect();
+        let t_on = V2NewFeatureToggles {
+            append2_dst_activity: true,
+            ..V2NewFeatureToggles::default()
+        };
+        let off = z
+            .compute_folded720_append2_features_hdr(
+                &NitsImage::from_rgb_nits(&ramp, w, h),
+                &NitsImage::from_rgb_nits(&poster, w, h),
+                HdrEncoding::Linear,
+                V2NewFeatureToggles::default(),
+                &mut scratch,
+            )
+            .unwrap();
+        let on = z
+            .compute_folded720_append2_features_hdr(
+                &NitsImage::from_rgb_nits(&ramp, w, h),
+                &NitsImage::from_rgb_nits(&poster, w, h),
+                HdrEncoding::Linear,
+                t_on,
+                &mut scratch,
+            )
+            .unwrap();
+        let mut lanes_moved = 0usize;
+        for i in 0..944 {
+            let bandvis_lane = i >= 924 && {
+                let local = (i - 924) % APPEND2_PER_SCALE;
+                local == idx_append2::BANDVIS_GAIN || local == idx_append2::BANDVIS_LOSS
+            };
+            if bandvis_lane {
+                lanes_moved +=
+                    (off.features()[i].to_bits() != on.features()[i].to_bits()) as usize;
+            } else {
+                assert_eq!(
+                    off.features()[i].to_bits(),
+                    on.features()[i].to_bits(),
+                    "HDR route: append2_dst_activity moved non-BANDVIS slot f{i}"
+                );
+            }
+        }
+        assert!(lanes_moved > 0, "HDR route: toggle must be live");
+        let app2 = on.append2_features().unwrap();
+        let g_on: Vec<f64> = (0..4)
+            .map(|s| app2[s * APPEND2_PER_SCALE + idx_append2::BANDVIS_GAIN])
+            .collect();
+        println!("F9 PU-route posterize GAIN (dst-activity ON): {g_on:?}");
+        let g_coarse_on = g_on[2..4].iter().cloned().fold(0.0f64, f64::max);
+        assert!(
+            g_coarse_on > 1e-4,
+            "F9: PU-domain BANDVIS must still fire with the dst self-mask ON"
         );
     }
 

@@ -256,6 +256,17 @@ fn main() {
         .map(|v| v != "0")
         .unwrap_or(true);
 
+    // ZENSIM_APPEND2_DSTACT=1 (2026-08-02): flip the BANDVIS dst-self-mask
+    // toggle (`V2NewFeatureToggles::append2_dst_activity`) on every
+    // append2-bearing mode (foldapp2*/foldcsfw*, SDR + both HDR routes) —
+    // same 944/956 CSV shape, dst-activity BANDVIS math. The adjudication
+    // A/B is `ZENSIM_AB_MODE=foldapp2` with this unset vs =1
+    // (`benchmarks/bandvis_dst_activity_2026-08-02.md`).
+    let dstact_on = app2_on
+        && std::env::var("ZENSIM_APPEND2_DSTACT")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+
     let n_feat_seen = AtomicUsize::new(0);
     let n_done = AtomicUsize::new(0);
     // Compute-only µs accumulator (V5 gate: route cost net of decode +
@@ -388,6 +399,7 @@ fn main() {
             let toggles = V2NewFeatureToggles {
                 append2_block: true,
                 csfw_block: csfw_on,
+                append2_dst_activity: dstact_on,
                 ..V2NewFeatureToggles::default()
             };
             let t0 = std::time::Instant::now();
@@ -419,6 +431,7 @@ fn main() {
                     zensim::feature_v2::HdrEncoding::Linear,
                     V2NewFeatureToggles {
                         csfw_block: csfw_on,
+                        append2_dst_activity: dstact_on,
                         ..V2NewFeatureToggles::default()
                     },
                     scratch,
@@ -458,6 +471,7 @@ fn main() {
                     },
                     V2NewFeatureToggles {
                         csfw_block: csfw_on,
+                        append2_dst_activity: dstact_on,
                         ..V2NewFeatureToggles::default()
                     },
                     scratch,
