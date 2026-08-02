@@ -152,6 +152,11 @@ version = "0.1.8"
 name = "fused_compare_bench"
 required-features = ["custom-profiles"]
 
+# Issue #50 top-cliff decomposition instrument (score vs pre-spline raw).
+[[example]]
+name = "issue50_topcliff"
+required-features = ["custom-profiles"]
+
 [[example]]
 name = "v2_bounds_smoke"
 required-features = ["feature-regime-v2"]
