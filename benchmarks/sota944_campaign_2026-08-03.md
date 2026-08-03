@@ -393,7 +393,7 @@ Findings (arm B):
 | 5 | wsl | 0.8402 | 0.4444 | 0.8224 | 0.5002 |
 | 7 | wsl | 0.8785 | 0.2940 | 0.9237 | 0.5028 |
 | 17 | wsl | 0.8791 | 0.3240 | 0.9055 | 0.4867 |
-| 23 | lianli (AMD Zen4) | *(training)* | | | |
+| 23 | lianli (AMD Zen4) | 0.8803 | 0.2997 | 0.9242 | 0.4647 |
 | 31 | i265 (Intel — vendor float-path noted; lottery entry, legitimate) | *(training)* | | | |
 
 Ops incidents (recorded): two external background-task kills hit the chain/waiters

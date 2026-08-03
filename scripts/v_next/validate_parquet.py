@@ -55,7 +55,10 @@ def validate(path, kind="train", expect_rows=None, expect_sha=None,
     pf = pq.ParquetFile(path)
     names = pf.schema_arrow.names
     fcols, fidx = featcols(names)
-    check(len(fcols) in (228, 300, 372) or (kind == "grid" and len(fcols) > 0),
+    # Regime widths: v1 228/300/372, combined 720 (372++348), folded+append
+    # 924, folded+append2 944 (SOTA-944), +CSFW 956. (C2 predated the v2
+    # regimes and silently failed every >372 leg — widened 2026-08-03.)
+    check(len(fcols) in (228, 300, 372, 504, 720, 924, 944, 956) or (kind == "grid" and len(fcols) > 0),
           "C2", f"{len(fcols)} feature cols ({fcols[0] if fcols else '-'}..{fcols[-1] if fcols else '-'}), contiguous={fidx == list(range(len(fidx)))}")
     has_target = target_col in names
     if kind in ("train", "eval"):
