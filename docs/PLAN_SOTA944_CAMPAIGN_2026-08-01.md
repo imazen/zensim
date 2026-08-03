@@ -74,6 +74,18 @@ trivially closable. Every fix: test + CHANGELOG + push + verify.
 
 ## P3 — the SOTA-944 model campaign (tasks #10 + SOTA; blocked on P1)
 
+> **OUTCOME (2026-08-03): HONEST NULL — no new SOTA. All three registered
+> systematic levers are measured and exhausted** (seed luck n=23; near-top
+> training mass n=8; coarse-mass/coherence n=21 — 52 independent draws total).
+> The stabilized 944 regime's best CID22 is **0.89067** (`C_co3a_s1301`), short
+> of the 0.89238 bar by 0.0017, with a broader axis profile than the bar's own
+> source model; best M3a is 0.8470 vs the 0.85 bar. Full protocol, grids,
+> per-arm selection, mechanism findings, and the honest gaps:
+> `benchmarks/sota944_campaign_2026-08-03.md`. Nothing was shipped or swapped —
+> **the peak-vs-stability freeze decision is the user's.** Re-read that doc
+> before proposing any further lever; the ones listed below were tried.
+
+
 Arms, all fit/evaluated on the UNIFIED 944 regime:
 1. **Additive class (user: THE key)** — ADD156 lineage extended to the
    spatializable 944 subset (basic-156 + mean-pooled append slots); monotone
