@@ -331,6 +331,15 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   `~/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-01.json`;
   section omitted with a loud note when absent). Counts/medians are READ from that
   JSON, never re-derived (the jxl-encoder analyze script is the owner).
+  Plus (2026-08-03) the **cross-bake per-band SROCC table** under the Mohammadi
+  panel's 10-band bars: rows = visible bakes (same order + color), columns = the
+  bands that carry pairs (n=0 bands are dropped — CID22's B0/B1 are structurally
+  empty), header shows each band's n, cells with n&lt;30 render parenthesized +
+  dimmed, and a JS-computed **band-profile line** names the leader in the highest
+  and lowest populated band (on CID22 the two ends have DIFFERENT leaders — the
+  top band B9 is a real discriminator while the low bands rest on a few dozen
+  pairs). Read down a column, never across one: band SROCC is range-restricted.
+  All values are read from `rank.<corpus>.bands[]`; nothing is recomputed.
   **Regen gates (MANDATORY, run on every emitted HTML):**
   `scripts/v_next/gauntlet_gates.sh <html>` = `node --check` on the extracted
   inline JS + the DOM-shim render harness (`gauntlet_render_check.js`) — committed

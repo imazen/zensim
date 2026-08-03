@@ -689,6 +689,69 @@ function renderMPanel(){
       svg.append(S('text',{x:gx+(banded.length*9)/2,y:H-8,'text-anchor':'middle','font-size':9,fill:cssv('--text-secondary'),text:bn}));
     });
     const bw=el('div',{style:'overflow-x:auto'});bw.append(svg);host.append(bw);
+    // ---- the NUMBERS behind those bars: cross-bake per-band SROCC table.
+    // Columns = bands populated somewhere in this corpus (n>0); on CID22 that drops the
+    // structurally-empty B0/B1. Values come straight from rank.<corpus>.bands[] — nothing
+    // is recomputed here (the fulleval JSON, i.e. zenstats, owns every statistic).
+    const bandN=i=>Math.max(...banded.map(b=>{const r=b.rank[c].bands[i];return r&&r.n!=null?r.n:0;}));
+    const bandS=(b,i)=>{const r=b.rank[c].bands[i];return r&&r.srocc!=null?r.srocc:null;};
+    const cols=bands.map((_,i)=>i).filter(i=>bandN(i)>0);
+    const scored=cols.filter(i=>banded.some(b=>bandS(b,i)!=null));
+    if(cols.length&&scored.length){
+      // band-profile summary: who leads the top band vs the bottom band (the finding —
+      // a bake can own the near-lossless end and trail at the low end, or vice versa).
+      const lead=i=>{let best=null;banded.forEach(b=>{const v=bandS(b,i);
+        if(v!=null&&(best===null||v>best.v))best={nm:b.name,v};});return best;};
+      const span=i=>{const vs=banded.map(b=>bandS(b,i)).filter(v=>v!=null);
+        return [Math.min.apply(null,vs),Math.max.apply(null,vs)];};
+      const loI=scored[0],hiI=scored[scored.length-1];
+      const loL=lead(loI),hiL=lead(hiI),loS=span(loI),hiS=span(hiI);
+      const sum=el('div',{class:'cap',style:'margin:8px 0 3px'});
+      const put=(t,b)=>sum.append(b?el('b',{text:t}):document.createTextNode(t));
+      put('Band profile ('+banded.length+' bake'+(banded.length===1?'':'s')+' shown) — ');
+      put('top band '+bands[hiI]+' (n='+bandN(hiI)+')',1);
+      put(' spans '+f3(hiS[0])+' → '+f3(hiS[1])+', led by ');
+      put(hiL.nm+' '+f3(hiL.v),1);
+      put('.  ');
+      put('bottom band '+bands[loI]+' (n='+bandN(loI)+')',1);
+      put(' spans '+f3(loS[0])+' → '+f3(loS[1])+', led by ');
+      put(loL.nm+' '+f3(loL.v),1);
+      put('. ');
+      put(hiL.nm===loL.nm
+        ? 'Same bake leads both ends.'
+        : 'Different leaders at the two ends — this is a band PROFILE, not one ranking.');
+      host.append(sum);
+      const bt=el('table',{});
+      const bh=el('tr',{});
+      bh.append(el('th',{class:'lbl',text:'bake'}));
+      cols.forEach(i=>{const t=el('th',{text:bands[i]});
+        t.append(el('div',{style:'font-weight:400;font-size:9px;color:var(--muted)',text:'n='+bandN(i)}));
+        bh.append(t);});
+      bt.append(el('thead',{},bh));
+      const bb=el('tbody',{});
+      banded.forEach(b=>{
+        const tr=el('tr',{});
+        const nm=el('td',{class:'lbl'});
+        nm.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),
+          document.createTextNode(b.name));
+        tr.append(nm);
+        cols.forEach(i=>{
+          const r=b.rank[c].bands[i],v=bandS(b,i),noisy=!r||r.n==null||r.n<30;
+          const td=el('td',{text:v==null?'—':(noisy?'('+v.toFixed(3)+')':v.toFixed(3))});
+          if(noisy)td.style.color='var(--muted)';
+          tr.append(td);
+        });
+        bb.append(tr);
+      });
+      bt.append(bb);
+      const btw=el('div',{style:'overflow-x:auto'});btw.append(bt);host.append(btw);
+      host.append(el('div',{class:'cap',style:'margin-top:3px',html:
+        'Read DOWN a column (which bake wins that band), never ACROSS one: band SROCC is '
+        +'range-restricted, so every value runs low by construction and bands are not comparable '
+        +'to each other. Parenthesized + dimmed = n&lt;30, which is noise (CI &gt; ±0.3) — do not '
+        +'rank on it. Empty bands are omitted; on CID22 the low bands are structurally near-empty '
+        +'(B0/B1 hold no pairs at all), so the low-end signal rests on a few dozen pairs.'}));
+    }
   }
   // Calibration curve (binned pred → mean target) for MOS corpora from per_pair.
   const mosRows=rows.filter(b=>b.scatter[c]&&b.scatter[c].mos&&b.scatter[c].mos.pts.length>30);
