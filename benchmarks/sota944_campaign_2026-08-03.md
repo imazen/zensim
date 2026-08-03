@@ -402,4 +402,32 @@ and the remaining seeds were moved to household fleet nodes per the user's
 parallelize directive — data staged node-local (LAN scp; `tbig_944_200k` has no R2
 mirror yet), trainer = the same WSL-built binary, seeds 23/31 launched idle-checked.
 
-*(selection + winner instruments + LOO + B-gap resolution + scorecard land below)*
+### B-gap resolution (the hdr_v3mix-944 amendment — user: "did we try the bhdr v3mix stuff on 944?")
+
+Answer before this campaign: NO — no hdr_v3mix extraction existed past 372. Now built
+(`/mnt/v/output/zensim/hdr944-leg/`, 7,410 train rows exact, targets carried
+7,386 bitwise + 24 @ ≤1.2e-7 — the q5/q15 dedup-survivor GPU-cvvdp jitter, mechanism
+proven; HL bins fire; own dataset file, never column-mixed) and measured through the
+full arm-B machinery (canonhdr15-faithful weights incl. hdr 15.0, minmax01 anchors,
+same λ/α grid) + one additive+hdr cell:
+
+| cell | cid22 | konjnd | sdr25 | hfnl |
+|---|---|---|---|---|
+| B2 blend λ1e-3 α0.7 (best B2 CID22) | 0.8228 | 0.3556 | 0.8865 | −0.029 |
+| B2 blend λ3e-3 α0.9 | 0.8146 | 0.3585 | 0.8632 | **+0.391** |
+| B2 kon head (+hdr 15.0) | **0.7739** (vs 0.7465 without) | 0.2437 | 0.9062 | 0.274 |
+| B2 cid head (+hdr 15.0) | 0.8007 (vs 0.8286 without) | 0.3562 | 0.8522 | 0.481 |
+| B2 additive X-AM5+hdr | 0.7599 (vs 0.8069 without) | 0.2946 | 0.9360 | 0.415 |
+
+**VERDICT: the missing hdr_v3mix leg does NOT close the 944 linear-class gap**
+(0.833 → 0.876-class). At canonhdr15 weight it lifts the kon head (+0.027 CID22)
+and REPAIRS the α0.9 blend's HF-NL inversion (−0.25 → +0.39 — the leg's q95/q99
+near-lossless mass is exactly the winsor-gap medicine), but drags the cid head
+(−0.028) and every blend (−0.002..−0.018). The residual gap vs 372-era B is
+therefore attributable to the FRONT-END/regime difference (B's hdr features were
+v3 PU-linear-372; the 944 HDR route is the chunk-2 PU21 lineage — a different
+feature space with folded-zero v1 pools), not to missing hdr supervision. Honest
+open lever recorded: a shaped-transform screen fit ON the hdr leg (the BHdr
+"shaping" mechanism) was not run — the screen used SDR legs only.
+
+*(selection + winner instruments + LOO + scorecard land below)*
