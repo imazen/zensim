@@ -585,3 +585,43 @@ infra + era-bridge · `27b7fb60` fit-chain owners · `8123313e` slices ·
 `1e7148af` hfnlproxy + screen · `3b1856ef` drivers · `bb5373a4` arms A+B ·
 `2b1fab2a` hdr amendment infra · `3f84d549` arm C 6/8 + fleet record ·
 `b26736cb` hdr leg · `0eb35d74` B-gap resolution · (this commit) endgame.
+
+---
+
+## REGISTERED AMENDMENT — seed-scale wave (2026-08-03, committed BEFORE any new seed)
+
+The user's standing directive continues the campaign; the evidence names the
+lever: the arm-C recipe's seed DISTRIBUTION. The 924-era comparable arm was
+bimodal 0.8679±0.0268 with peaks ≥0.892; this campaign's 8 draws (0.8706±0.0146)
+maxed 0.8869 with KonJND already above the bar and dial passing. k was never
+frozen at 8 — seed scale is WITHIN the registered §5 design (same data, same
+recipe bytes, ONLY the seed varies; no new hypothesis).
+
+- **+15 seeds, registered here: {3, 11, 19, 29, 37, 43, 53, 61, 71, 79, 101,
+  127, 199, 256, 512}** (distinct from the original {5,7,13,17,23,31,42,99};
+  23 total draws).
+- Fleet-parallel per the working node map: lianli + local wsl + tower
+  (Docker-only, cpuset/mem-capped per house rules) + jason/ian only if
+  already-idle-in-Ubuntu; i265 stays retired. Per-seed train node recorded.
+- Per-seed full verdict + fulleval (incl. M3a) as each lands.
+- **Selection: the frozen sdr25/best_val rule WITHIN the MLP family only**
+  (the registered cross-family oracle break makes cross-family sdr25
+  comparison invalid — the campaign-level §2.2 rule is superseded for this
+  wave by its own recorded finding).
+- **Decision (no relaxations):** (a) selected peak clears CID22 > 0.8924 with
+  the other rows → full winner battery (LOO ×2, corruption joint,
+  freeze_check, era-tagged scorecard) → SOTA-candidate report; (b) M3a
+  (< 0.85 on every 944-trained seed so far) is the ONLY failing row on an
+  otherwise-passing peak → STOP and report precisely — the M3a row then needs
+  its own registered coherence study, not a fudge; (c) no peak clears CID22
+  across 23 seeds → distribution-level null, reported with the seed histogram
+  (mean/σ/max) vs the 924-era distribution — itself a publishable finding
+  (944-era data shifts the seed distribution).
+- Parallel small item ONLY in non-contending cycles: the true-HF-NL
+  evaluability fix (persist the HF corpus in 944-evaluable form via the
+  pinned-rev re-encode path recorded in §1b); best-effort, reported honestly
+  either way.
+
+### Seed-scale wave results (appended as they land)
+
+*(pending)*
