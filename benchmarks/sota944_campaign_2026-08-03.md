@@ -622,6 +622,69 @@ recipe bytes, ONLY the seed varies; no new hypothesis).
   pinned-rev re-encode path recorded in §1b); best-effort, reported honestly
   either way.
 
-### Seed-scale wave results (appended as they land)
+### Seed-scale wave results (FINAL — 23 total draws)
 
-*(pending)*
+Per-seed (SROCC; sorted by cid22; node = train box; wave seeds marked *):
+
+| seed | node | cid22 | konjnd | sdr25 | nonphoto | hfnl | best_val | dial mono |
+|---|---|---|---|---|---|---|---|---|
+| 31 | lianli | **0.8869** | 0.4689 | 0.9521 | 0.9162 | 0.037 | 0.4863 | 93.4% |
+| 512* | wsl | 0.8849 | 0.3017 | 0.9286 | 0.9176 | 0.130 | 0.4038 | 94.5% |
+| 79* | wsl | 0.8816 | 0.3352 | 0.9241 | 0.9248 | 0.230 | 0.4800 | 94.1% |
+| 19* | lianli | 0.8815 | 0.2931 | 0.9307 | 0.9254 | 0.168 | 0.4924 | 94.5% |
+| 37* | lianli | 0.8812 | 0.2535 | 0.9471 | 0.9151 | 0.047 | 0.5770 | 95.6% |
+| 23 | lianli | 0.8803 | 0.2997 | 0.9242 | 0.9130 | −0.136 | 0.4647 | 95.9% |
+| 3* | lianli | 0.8796 | 0.3376 | 0.9086 | 0.9222 | 0.368 | 0.5940 | 95.6% |
+| 17 | wsl | 0.8792 | 0.3240 | 0.9056 | 0.9162 | −0.028 | 0.4867 | 95.4% |
+| 7 | wsl | 0.8785 | 0.2941 | 0.9237 | 0.9280 | 0.287 | 0.5028 | 94.8% |
+| 71* | wsl | 0.8782 | 0.3832 | 0.9242 | 0.9217 | −0.093 | 0.4892 | 94.6% |
+| 256* | lianli (reassigned from tower) | 0.8769 | 0.3169 | 0.9036 | 0.9244 | 0.177 | 0.4771 | 94.2% |
+| 61* | wsl | 0.8768 | 0.2539 | 0.9054 | 0.9255 | 0.128 | 0.4846 | 94.7% |
+| 199* | lianli (reassigned from tower) | 0.8767 | 0.3193 | 0.9336 | 0.9236 | 0.022 | 0.4521 | 95.3% |
+| 101* | tower (Zen1 docker) | 0.8758 | 0.3128 | 0.9177 | 0.9182 | 0.159 | 0.5781 | 96.0% |
+| 53* | wsl | 0.8751 | 0.3650 | 0.9160 | 0.9199 | 0.099 | 0.5039 | 94.5% |
+| 29* | lianli | 0.8744 | 0.3111 | 0.9075 | 0.9118 | −0.046 | 0.4701 | 94.2% |
+| 43* | wsl | 0.8720 | 0.3295 | 0.9040 | 0.9242 | 0.272 | 0.4594 | 94.8% |
+| 42 | wsl | 0.8719 | 0.3722 | 0.9187 | 0.9196 | 0.328 | 0.4683 | 94.9% |
+| 99 | wsl | 0.8661 | 0.3588 | 0.8929 | 0.9100 | −0.260 | 0.4194 | 95.0% |
+| 13 | wsl | 0.8616 | 0.4169 | 0.8576 | 0.9074 | 0.333 | 0.3311 | 96.6% |
+| 127* | tower (Zen1 docker) | 0.8591 | 0.4624 | 0.8529 | 0.9003 | 0.356 | 0.3314 | 96.6% |
+| 5 | wsl | 0.8402 | 0.4445 | 0.8224 | 0.7411 | 0.405 | 0.5002 | 99.5% |
+| 11* | lianli | 0.8305 | 0.4962 | 0.7998 | 0.7299 | 0.362 | 0.5534 | 99.5% |
+
+**Distribution (n=23): mean 0.8726 ± 0.0136, max 0.8869, min 0.8305.**
+924-era comparable arm (mask2+kw0.15 lottery): n=8, 0.8679 ± 0.0268, max 0.8924
+(2 collapsed seeds, peaks 0.8921/0.8924).
+
+**DECISION (amendment branch c): DISTRIBUTION-LEVEL NULL.** No draw in 23 clears
+CID22 > 0.8924. The 944 recipe (+`--coarse-decay 1e-5`, 944-era data) shifts the
+seed distribution: mean +0.005, spread HALVED, zero collapsed seeds — but the
+UPPER TAIL IS TRUNCATED (best of 23 = 0.8869; under the naive normal read the bar
+sits at +1.46σ and ~1-2 of 23 draws should have crossed — none did; the 924
+lottery's 0.892-class peaks appear to be exactly the unstable mode the decay
+suppresses). Publishable finding: **the stabilizer trades peak for reliability.**
+
+Selection (within-MLP-family sdr25/best_val, frozen): **`C_em944_s31` confirmed**
+(sdr25 0.9521; the wave produced no oracle-superior seed). Its bar slate is
+unchanged (CID22 0.8869 / M3a 0.7926 short; KonJND/nonphoto/dial/repro PASS).
+
+**M3a coverage hypothesis (supervisor-registered) — REFUTED for this candidate:**
+the dropped-mass diagnostic shows append (f720-923) ≈ 0.6% and append2/BANDVIS
+(f924-943) ≈ 0.0-0.2% of raw |s_k| mass on s31 — the attribution map's
+no-integrand blind spots are numerically negligible here, so the M3a shortfall
+(0.79 vs 0.85) lives in the ATTRIBUTED basic/v2 fold quality (the E-M
+coarse-mass / fine-block-floor story), not in missing f924-943 integrands.
+
+**Registered systematic levers for the next campaign** (not new hypotheses,
+both already on record): (1) the M3a coherence study (fold/attribution quality
+at 944 — the #1 blocker, two independent candidates failed on it); (2) issue #50
+near-top anchors (the CID22 gap concentrates where training pairs end — the
+0.0055 deficit is the size of the near-top signal the anchors would add).
+
+Wave ops (recorded): i265 retired (5.4×); jason observed BUSY (another
+session's zensr job — untouched); tower's {199,256,512} sentinel-blocked and
+reassigned to lianli/wsl when tower's pace measured ~90 s/epoch; the lianli
+lane wrapper's bake_verdict-not-found stderr is expected-by-design (verdicts
+run locally); SIX external background-task kills over the campaign — all work
+survived via setsid/container detachment, at the cost of manual re-arms.
+
