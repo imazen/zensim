@@ -1681,6 +1681,34 @@ struct FitLassoArgs {
     /// is fatal, exit-4 class).
     #[arg(long)]
     embed_repro: bool,
+    /// Coordinate-slice file (newline-separated feature indices): the
+    /// ADD156-class `w[out-of-slice] = 0` constraint — CD sweeps ONLY these
+    /// coordinates (SOTA-944 §3a spatializable slices). Omit for all.
+    #[arg(long)]
+    slice_file: Option<PathBuf>,
+}
+
+/// Parse a newline-separated feature-index slice file (comments `#` ok).
+fn load_slice_file(path: &Path, n_feat: usize) -> Result<Vec<usize>, String> {
+    let txt = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let mut idx = Vec::new();
+    for (ln, line) in txt.lines().enumerate() {
+        let t = line.split('#').next().unwrap_or("").trim();
+        if t.is_empty() {
+            continue;
+        }
+        let i: usize = t
+            .parse()
+            .map_err(|e| format!("{path:?}:{}: bad index {t:?}: {e}", ln + 1))?;
+        if i >= n_feat {
+            return Err(format!("{path:?}:{}: index {i} >= n_feat {n_feat}", ln + 1));
+        }
+        idx.push(i);
+    }
+    if idx.is_empty() {
+        return Err(format!("{path:?}: empty slice"));
+    }
+    Ok(idx)
 }
 
 /// Load a sign-mask TSV into z-space box bounds (`pin_geq0` → [0, +inf);
@@ -1800,7 +1828,7 @@ fn load_transform_screen(
 
 fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
     use zensim_validate::gram_lasso::{
-        GramGroup, f16_bits_to_f64, f64_to_f16_bits, lasso_cd, py_repr_f64, standardize_gram_multi,
+        GramGroup, f16_bits_to_f64, f64_to_f16_bits, py_repr_f64, standardize_gram_multi,
     };
     use zensim_validate::npz::Npz;
 
@@ -1885,14 +1913,35 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
 
     // 2. solver: lasso coordinate descent (MixGram.lasso) or the BVLS-class
     // box-constrained CD (SOTA-944 §3e — sign-mask bounds).
+    let slice_idx: Option<Vec<usize>> = match &a.slice_file {
+        Some(p) => {
+            let idx = load_slice_file(p, n_feat)?;
+            eprintln!("  slice: {} of {n_feat} coordinates active ({:?})", idx.len(), p);
+            Some(idx)
+        }
+        None => None,
+    };
     let w = match a.solver.as_str() {
-        "lasso" => lasso_cd(&sg, a.lam, a.n_sweeps, a.tol),
+        "lasso" => zensim_validate::gram_lasso::lasso_cd_slice(
+            &sg,
+            a.lam,
+            a.n_sweeps,
+            a.tol,
+            slice_idx.as_deref(),
+        ),
         "bvls" => {
             let (lo, hi) = match &a.bounds_tsv {
                 Some(p) => load_sign_bounds(p, n_feat)?,
                 None => (vec![f64::NEG_INFINITY; n_feat], vec![f64::INFINITY; n_feat]),
             };
-            zensim_validate::gram_lasso::box_cd(&sg, &lo, &hi, a.n_sweeps, a.tol)
+            zensim_validate::gram_lasso::box_cd_slice(
+                &sg,
+                &lo,
+                &hi,
+                a.n_sweeps,
+                a.tol,
+                slice_idx.as_deref(),
+            )
         }
         other => return Err(format!("--solver must be lasso|bvls, got {other:?}")),
     };

@@ -179,6 +179,21 @@ fn np_sign(x: f64) -> f64 {
 /// * `Gw += Gn[:, j] * (nw - w[j])` — per-element mul then add (two
 ///   roundings, no FMA), reading COLUMN `j`.
 pub fn lasso_cd(sg: &StandardizedGram, lam: f64, n_sweeps: usize, tol: f64) -> Vec<f64> {
+    lasso_cd_slice(sg, lam, n_sweeps, tol, None)
+}
+
+/// [`lasso_cd`] restricted to a coordinate SLICE — the ADD156-class
+/// `w[out-of-slice] = 0` constraint (SOTA-944 §3a: additive spatializable
+/// subsets are gram-column selections). `slice = None` sweeps `0..n` with
+/// the EXACT float-op sequence of the unrestricted solver (the full-index
+/// walk is the same loop; BHdr byte-parity depends on this).
+pub fn lasso_cd_slice(
+    sg: &StandardizedGram,
+    lam: f64,
+    n_sweeps: usize,
+    tol: f64,
+    slice: Option<&[usize]>,
+) -> Vec<f64> {
     let n = sg.n_feat;
     // Column-major copy of Gn = G / W so the update reads a contiguous
     // column. (The frozen grams are bitwise symmetric, but we still index
@@ -196,11 +211,19 @@ pub fn lasso_cd(sg: &StandardizedGram, lam: f64, n_sweeps: usize, tol: f64) -> V
             *v = 1e-12;
         }
     }
+    let all: Vec<usize>;
+    let idx: &[usize] = match slice {
+        Some(s) => s,
+        None => {
+            all = (0..n).collect();
+            &all
+        }
+    };
     let mut w = vec![0.0f64; n];
     let mut gw = vec![0.0f64; n];
     for _ in 0..n_sweeps {
         let mut delta = 0.0f64;
-        for j in 0..n {
+        for &j in idx {
             let rho = cn[j] - gw[j] + d[j] * w[j];
             let nw = np_sign(rho) * (rho.abs() - lam).max(0.0) / d[j];
             if nw != w[j] {
@@ -245,6 +268,18 @@ pub fn box_cd(
     n_sweeps: usize,
     tol: f64,
 ) -> Vec<f64> {
+    box_cd_slice(sg, lo, hi, n_sweeps, tol, None)
+}
+
+/// [`box_cd`] restricted to a coordinate slice (see [`lasso_cd_slice`]).
+pub fn box_cd_slice(
+    sg: &StandardizedGram,
+    lo: &[f64],
+    hi: &[f64],
+    n_sweeps: usize,
+    tol: f64,
+    slice: Option<&[usize]>,
+) -> Vec<f64> {
     let n = sg.n_feat;
     assert_eq!(lo.len(), n, "box_cd: lo bound length");
     assert_eq!(hi.len(), n, "box_cd: hi bound length");
@@ -261,11 +296,19 @@ pub fn box_cd(
             *v = 1e-12;
         }
     }
+    let all: Vec<usize>;
+    let idx: &[usize] = match slice {
+        Some(s) => s,
+        None => {
+            all = (0..n).collect();
+            &all
+        }
+    };
     let mut w = vec![0.0f64; n];
     let mut gw = vec![0.0f64; n];
     for _ in 0..n_sweeps {
         let mut delta = 0.0f64;
-        for j in 0..n {
+        for &j in idx {
             let rho = cn[j] - gw[j] + d[j] * w[j];
             let nw = (rho / d[j]).clamp(lo[j], hi[j]);
             if nw != w[j] {
@@ -685,6 +728,37 @@ mod tests {
         assert!((w[0] - 0.8).abs() < 1e-12, "w0 = {}", w[0]);
         assert_eq!(w[1], 0.0, "negative-direction weight must sit ON the bound");
         assert_eq!(w[2], 0.0, "constant feature stays zero");
+    }
+
+    /// Slice restriction: sweeping only {0} must leave every other weight
+    /// EXACTLY zero and give f0 its single-feature solution (orthogonal
+    /// design ⇒ same as the full solve's w0).
+    #[test]
+    fn lasso_slice_restricts_coordinates() {
+        let x = [
+            [1.0, 1.0, 0.5],
+            [1.0, -1.0, -0.5],
+            [-1.0, 1.0, 0.5],
+            [-1.0, -1.0, -0.5],
+            [1.0, 1.0, -0.5],
+            [1.0, -1.0, 0.5],
+            [-1.0, 1.0, -0.5],
+            [-1.0, -1.0, 0.5],
+        ];
+        let y: Vec<f64> = x.iter().map(|r| 0.8 * r[0] + 0.3 * r[1]).collect();
+        let (s_mat, s_vec, q, y1, n) = moments(&x, &y);
+        let sg = standardize_gram(3, 1.0, &s_mat, &s_vec, &q, y1, n).expect("standardize");
+        let w = lasso_cd_slice(&sg, 0.0, 1000, 1e-14, Some(&[0usize]));
+        assert!((w[0] - 0.8).abs() < 1e-10, "w0 = {}", w[0]);
+        assert_eq!(w[1], 0.0);
+        assert_eq!(w[2], 0.0);
+        // None slice must equal the plain solver bit-for-bit.
+        let wa = lasso_cd(&sg, 0.05, 200, 1e-10);
+        let wb = lasso_cd_slice(&sg, 0.05, 200, 1e-10, None);
+        assert_eq!(
+            wa.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            wb.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
     }
 
     /// Multi-group accumulation == the standardized system of the pooled
