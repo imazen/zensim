@@ -157,6 +157,21 @@ fn main() {
             .unwrap_or(path);
         let zb = Zensim::new(ZensimProfile::B);
         let zraw = raw_profile.map(Zensim::new);
+        // 944-regime bakes (SOTA-944 near-top arm): the Custom compute path
+        // can't extract folded-append2 features itself, so score them via the
+        // CANONICAL streaming extractor + score_features_with_profile (the
+        // diffmap_block_coherence pattern). Raw == output for spline-less MLPs.
+        #[cfg(feature = "feature-regime-v2")]
+        let raw_n_in: usize = zraw
+            .as_ref()
+            .map(|_| {
+                zenpredict::Model::from_bytes(STRIPPED_BAKE.get().unwrap())
+                    .expect("parse bake")
+                    .n_inputs()
+            })
+            .unwrap_or(0);
+        #[cfg(feature = "feature-regime-v2")]
+        let mut v2_scratch = zensim::feature_v2::V2Scratch::new();
         for &(frac, codes) in grid {
             let dst = if codes == 0 {
                 src.clone()
@@ -166,6 +181,35 @@ fn main() {
             let sref = RgbSlice::new(&src, w, h);
             let sdst = RgbSlice::new(&dst, w, h);
             let score = zb.compute(&sref, &sdst).expect("B compute").score();
+            #[cfg(feature = "feature-regime-v2")]
+            let raw = zraw.as_ref().map(|z| {
+                if raw_n_in > 720 {
+                    let toggles = zensim::feature_v2::V2NewFeatureToggles {
+                        append2_block: raw_n_in == 944,
+                        ..Default::default()
+                    };
+                    let feats = z
+                        .compute_folded720_append_features_streaming(
+                            &sref,
+                            &sdst,
+                            toggles,
+                            &mut v2_scratch,
+                        )
+                        .expect("folded features")
+                        .features()
+                        .to_vec();
+                    zensim::score_features_with_profile(
+                        z.profile(),
+                        &feats[..raw_n_in],
+                        w as u32,
+                        h as u32,
+                    )
+                    .expect("bake forward")
+                } else {
+                    z.compute(&sref, &sdst).expect("raw compute").score()
+                }
+            });
+            #[cfg(not(feature = "feature-regime-v2"))]
             let raw = zraw
                 .as_ref()
                 .map(|z| z.compute(&sref, &sdst).expect("raw compute").score());

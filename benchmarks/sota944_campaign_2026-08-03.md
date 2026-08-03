@@ -726,6 +726,53 @@ TRAINING mass.
   that redirects the remaining gap to the M3a/coherence study (the last
   registered systematic lever).
 
-### Near-top arm results (appended when the wave lands)
+### Near-top arm results (FINAL — 8 runs: 6 × W=1.0 + 2 × W=0.5)
 
-*(pending)*
+| tag | seed | node | cid22 | konjnd | sdr25 | hfnl | B8 | B9 | dial | M3a |
+|---|---|---|---|---|---|---|---|---|---|---|
+| nt944lo | 211 | wsl | 0.8765 | 0.2327 | 0.9620 | 0.706 | 0.454 | 0.177 | 97.0% | — |
+| nt944 | 229 | lianli | 0.8752 | 0.4069 | 0.9553 | 0.795 | 0.449 | 0.297 | 97.8% | — |
+| nt944lo | 223 | lianli | 0.8744 | 0.3244 | 0.9524 | 0.728 | 0.453 | 0.160 | 97.6% | — |
+| nt944 | 227 | wsl | 0.8743 | 0.1669 | 0.9452 | 0.785 | 0.448 | 0.128 | 98.1% | — |
+| nt944 | 233 | lianli | 0.8621 | 0.4291 | 0.9014 | 0.779 | 0.406 | 0.203 | 96.8% | — |
+| nt944 | 239 | lianli | 0.8602 | 0.3079 | 0.9226 | 0.693 | 0.410 | 0.106 | 97.0% | — |
+| nt944 | 211 | wsl | 0.8525 | 0.2580 | 0.9031 | 0.770 | 0.403 | 0.092 | 97.8% | — |
+| **nt944 (SELECTED)** | **223** | wsl | 0.8417 | 0.1981 | **0.9617** | 0.784 | 0.394 | 0.109 | 96.7% | 0.697 |
+
+(s31 reference row: cid22 0.8869 · konjnd 0.4689 · hfnl 0.037 · B8 0.496 · B9 0.263 · M3a 0.793.)
+
+**Endpoint slate (frozen rules applied):**
+
+1. **PRIMARY — CID22: NULL.** W=1.0 family max 0.8752 (mean ≈0.861); the frozen
+   within-family sdr25 selection picks s223 (0.8417, family-worst CID22) — the
+   oracle↔CID22 decoupling now reproduces IN-family whenever top-band mass rises
+   (third observation of the mechanism; sdr25's q75-100 zone is what the mass
+   feeds). Dose-response is clean: W=0.5 costs less CID22 than W=1.0.
+2. **Saturation-ceiling instrument (issue50, extended to 944 this commit):**
+   BOTH models (nt223 AND s31) are NON-MONOTONE-INVERTED on the ±code
+   perturbation class — identity raw sits BELOW mild-noise raw (nt223 1.01 →
+   3.4-6.8; s31 4.01 → 5.7-9.7) — and the near-top mass did not change that.
+   The perturbation class is OOD for the MLP family; B's "saturation ceiling"
+   framing does not transfer (these models invert rather than saturate).
+3. **CID22 top band (B8/B9): did NOT move** — s31 keeps B8 0.496 / B9 0.263 vs
+   family ≤0.454 / ≤0.297. The lever moved the TRAINING-DISTRIBUTION instrument
+   instead: **hfnlproxy 0.037 → 0.69-0.80** across every nt run (real-codec
+   near-lossless per-ref ordering — a genuine, large mechanism win).
+4. **KonJND guard: VIOLATED** broadly at W=1.0 (0.167-0.429) — the registered
+   bigcodec-mass pitfall fired exactly as warned.
+5. M3a 0.697 (selected) — below s31's 0.793; the mass also costs coherence.
+   Dial mono 96.7-98.1% (family-best axis).
+
+**DECISION (per the amendment): the #50 near-top lever is FALSIFIED as the
+CID22 gap-closer** — it repairs precisely the axis its mass comes from
+(codec-ladder near-lossless ordering) while leaving the human top-band pairs
+and the perturbation-class behavior unmoved and taxing KonJND/M3a/CID22. The
+remaining gap therefore redirects to the **M3a/coherence study — the last
+registered systematic lever** of this campaign. Positive shipped anyway:
+`topband944` is a measured HF-NL ingredient (+0.7 per-ref at modest cost in
+the W=0.5 dose) for a future composite recipe, and the issue50 instrument now
+speaks 944.
+
+Wave ops: 8/8 trained (wsl + lianli; per-seed nodes above); 7th external
+task-kill absorbed (supervisor retrieved lianli's tail; ~30 min lost).
+
