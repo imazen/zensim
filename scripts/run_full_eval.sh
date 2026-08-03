@@ -55,8 +55,10 @@ echo "== build (release): bake_verdict + diffmap_block_coherence ==" >&2
     -p zensim --features custom-profiles,feature-regime-v2 \
     --example diffmap_block_coherence >&2
 
-BV="$REPO_ROOT/target/release/bake_verdict"
-DM="$REPO_ROOT/target/release/examples/diffmap_block_coherence"
+# Honor CARGO_TARGET_DIR (campaign workspaces build out-of-tree).
+TGT="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
+BV="$TGT/release/bake_verdict"
+DM="$TGT/release/examples/diffmap_block_coherence"
 JSON="$OUTDIR/$NAME.fulleval.json"
 MD="$OUTDIR/$NAME.verdict.md"
 

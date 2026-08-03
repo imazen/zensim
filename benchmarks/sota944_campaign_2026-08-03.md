@@ -430,4 +430,158 @@ feature space with folded-zero v1 pools), not to missing hdr supervision. Honest
 open lever recorded: a shaped-transform screen fit ON the hdr leg (the BHdr
 "shaping" mechanism) was not run — the screen used SDR legs only.
 
-*(selection + winner instruments + LOO + scorecard land below)*
+### Arm C final band (8/8 seeds)
+
+| seed | node | cid22 | konjnd | sdr25 | nonphoto | best_val |
+|---|---|---|---|---|---|---|
+| 31 | **lianli** (relaunched off i265 — 89 s/ep there, 5.4×; retired for this workload) | **0.8869** | **0.4689** | 0.9521 | 0.9162 | 0.4863 |
+| 23 | lianli | 0.8803 | 0.2997 | 0.9242 | 0.9130 | 0.4647 |
+| 17 | wsl | 0.8791 | 0.3240 | 0.9055 | 0.9162 | 0.4867 |
+| 7 | wsl | 0.8785 | 0.2940 | 0.9237 | — | 0.5028 |
+| 42 | wsl | 0.8718 | 0.3722 | 0.9186 | 0.9196 | 0.4683 |
+| 99 | wsl | 0.8661 | 0.3587 | 0.8929 | — | 0.4194 |
+| 13 | wsl | 0.8615 | 0.4169 | 0.8575 | — | 0.3311 |
+| 5 | wsl | 0.8402 | 0.4444 | 0.8224 | — | 0.5002 |
+
+Arm-C candidate (max sdr25): **`C_em944_s31`** (0.9521; no tie). Band mean CID22
+0.8706 ± 0.0146 (n=8). The comparable 924-era arm (mask2+kw0.15, the E-M5
+lottery) was 0.8679 ± 0.0268 with two collapsed seeds and peaks at 0.892; this
+944 band has a slightly higher mean, HALF the spread, and NO collapsed seed
+(min 0.8402) — consistent with `--coarse-decay 1e-5`'s stabilizer role — but its
+peak (0.8869) does not reach the 924 lottery's peaks (0.8921/0.8924).
+
+## SELECTION (frozen §2 applied verbatim)
+
+Campaign winner = max sdr25 across the three arm candidates, selected BEFORE the
+bar slate was read:
+
+| arm | candidate | sdr25 |
+|---|---|---|
+| **A → CAMPAIGN WINNER** | `A_bvls_X_AM5_w` | **0.9746** |
+| C | `C_em944_s31` | 0.9521 |
+| B | `B_blend_lam1e-3_a0.7_w` | 0.9005 |
+
+**Selection-oracle finding (honest, important):** the sdr25 oracle — validated
+in-family for MLPs (+0.752) and lasso cells (+0.9097) — BREAKS ACROSS the
+mm01-target BVLS family: `A_bvls_X_AM5`'s sdr25 0.9746 pairs with the grid-worst
+candidate CID22 (0.7947). The per-corpus minmax01 target concentrates fit mass in
+exactly sdr25's q75-100 zone. sdr25 remains a within-family selector; it is NOT
+cross-family-comparable when a family retargets the HQ zone. Recorded for the
+next campaign's selection design.
+
+## THE BAR VERDICT — HONEST NULL (no axis silently sacrificed)
+
+| axis | bar | winner `A_bvls_X_AM5_w` | best-per-axis anywhere |
+|---|---|---|---|
+| CID22 | > 0.8924 | 0.7947 **FAIL** | 0.8869 (`C_em944_s31`) — 0.0055 short |
+| KonJND | ≥ 0.43 | 0.3296 **FAIL** | 0.4689 (`C_em944_s31`) PASS-level |
+| nonphoto | 0.90-class | 0.7750 **FAIL** | 0.9196 (`C_em944_s42`) PASS-level |
+| HF-NL (registered substitute: ≥ arm-B cand's proxy 0.193) | see §1b | 0.266 pass (era 0.614 row NOT EVALUABLE — recorded gap) | 0.611 (`A_shaped_P_AM5_lam1.8e-2`) |
+| dial mono / tied | ≥93% / ≤5% | 90.4% **FAIL** / 0.0% pass | 93.4%/0.0% (`C_em944_s31`) PASS |
+| M3a | ≥ 0.85 | 0.6299 **FAIL** | 0.7926 (`C_em944_s31`) — 0.057 short |
+| G-RANGE | clean | PASS | s31: owner (`bake_dial_refit gate`) is linear-only — tool gap recorded; A/B cands PASS |
+| corruption (HEAD) | via companion head | **0.7932 pass_q20** (head `corrhead944_s13`, best_val-selected; dial-alone 0.0506 reported for honesty) | same (head-intrinsic) |
+| embedded repro | present | PASS | PASS everywhere (trainer-native + fit-chain `--embed-repro`) |
+
+**No arm passes the frozen bar → the pre-registered honest-null clause fires:
+this campaign does NOT produce a new SOTA on the unified 944 regime.** The
+closest candidate is `C_em944_s31` — KonJND (0.4689), nonphoto (0.9162), dial
+(93.4%/0%), repro PASS; CID22 0.8869 (−0.0055 vs the bar) and M3a 0.7926
+(−0.057) short. Its bake is spline-less (raw dial; mono/tied are rank stats —
+valid; `add-spline` is the rank-invariant packaging step, not run since no bar
+pass). freeze_check outputs recorded for both
+(`~/tmp` logs + `/mnt/v/output/zensim/reports/fulleval/sota944_*.fulleval.json`):
+winner 4 evaluable FAILs; s31 2 evaluable FAILs.
+
+## LOO instruments (§7, run on the winner + the bar-relevant candidate)
+
+Data-side masked-root rescores (`loo_bandvis_root` / `loo_append2_root` under the
+campaign dir; winner = TRUE ablation by construction — slice X carries no
+append2 coordinates — masks measured as EXACT zeros, confirming the slice):
+
+| bake | mask | Δcid22 | Δkonjnd | Δsdr25 | Δnonphoto | Δhfnl | family Σ(|full|−|drop|) |
+|---|---|---|---|---|---|---|---|
+| A_bvls_X_AM5_w | BANDVIS lanes | 0 | 0 | 0 | 0 | 0 | 0 (out-of-slice; exact) |
+| A_bvls_X_AM5_w | append2 block | 0 | 0 | 0 | 0 | 0 | 0 |
+| C_em944_s31 | BANDVIS lanes | −0.0033 | −0.0211 | +0.0077 | −0.0156 | +0.0067 | **+0.0257 (helps → keep)** |
+| C_em944_s31 | append2 block | −0.0122 | +0.0023 | +0.0103 | −0.0243 | −0.0313 | **+0.0552 (helps → keep)** |
+
+Acceptance frame (append2 gates lineage): Σ(drop−full) ≤ ~0 keeps the block —
+−0.026 / −0.055 → **append2 + the BANDVIS pair STAY**, now confirmed on a
+944-TRAINED bake (the 2026-07-28 read was −0.0687 on a 720-era bake). Caveat:
+MLP occlusion ≠ ablation (E-M4); a masked retrain was not owed (s31 is not the
+rule-winner) and is listed as follow-up. The additive grid's X-vs-Bplus contrast
+gives the ablation-true read for the linear class: BANDVIS lanes buy
+KonJND +0.02-0.03 at ~0 CID22.
+
+## Scorecard vs the era-tagged bests
+
+Cross-era numbers are NOT comparable (different eval instruments); the
+unified-944 block is the only cross-comparable set. Era-bridge: EM4's 924
+numbers carry EXACTLY to the 944 root (verified bitwise-features truncation).
+
+| model | era | cid22 | konjnd | nonphoto | HF-NL | M3a | dial |
+|---|---|---|---|---|---|---|---|
+| winner_dial | @372-eval | 0.894 | 0.335 | — | 0.587 | — | — |
+| Ebothg_scr0.5 | @372-eval | 0.879 | 0.271 | 0.906 | 0.712 | — | 0.985 |
+| B (shipped) | @372-eval | 0.8764 | 0.5466 | 0.856-class | 0.614 | — | 97.9%/0% |
+| **EM4_mask2_kw0.15_s42** | **unified-944** (=924) | **0.8924** | 0.4286 | **0.9098** | hfnl-proxy 0.554* | 0.852 (924-era instrument) | 95.7%/0%* |
+| C_em944_s31 | unified-944 | 0.8869 | **0.4689** | 0.9162 | 0.4104* | 0.7926 | 93.4%/0% |
+| A_bvls_X_AM5_w | unified-944 | 0.7947 | 0.3296 | 0.7750 | 0.266 | 0.6299 | 90.4%/0% |
+| B_blend_lam1e-3_a0.7_w | unified-944 | 0.8243 | 0.3623 | 0.8118 | 0.193 | — | 96.0%/0% |
+
+\* EM4 hfnl-proxy/dial re-read on the 944 root this campaign
+(`EM4_s42_on944root.full.json`); s31 hfnl from its corrjoint verdict.
+**EM4 remains the unified-944 rank champion.** s31 beats it on KonJND (+0.040)
+and nonphoto (+0.006) at −0.0055 CID22 — a genuine near-threshold/diversity
+trade candidate, not a dominator.
+
+## What this campaign SHIPPED despite the null
+
+1. **The unified-944 eval surface**: imazen26/nonphoto/hfnlproxy TEST-view
+   slices + slot wiring + fulleval 944 regime + M3a at 944 + validator width fix.
+2. **The corruption HEAD at 944** (`corrhead944_s13`, pass_q20 **0.7932** vs
+   dial-alone 0.05) — the first ZNPR head; the shipping design's corruption
+   owner now EXISTS and `bake_verdict --corruption-head` is exercised.
+3. **The fit-chain owners**: BVLS box-CD + slices + shaped grams + minmax01
+   targets + blend-heads + screen-transforms + embedded-repro + winsor compose —
+   all tested, BHdr byte-repro preserved.
+4. **The hdr_v3mix-944 leg** + the measured B-gap answer (front-end/regime, not
+   missing supervision).
+5. **tbig_944_200k** (committed builder, row-identity-gated) + the arm-C 944
+   band (8 seeds, no collapse, +coarse-decay).
+6. Selection-oracle family-sensitivity finding (mm01 families break sdr25
+   cross-family comparability).
+
+## Honest losses / gaps (complete list)
+
+- The SOTA bar FAILED on every arm (the campaign's registered primary outcome).
+- HF-NL's true 0.614 row NOT EVALUABLE at 944 (bitstreams unpersisted; fix path
+  = pinned-rev re-encode, recorded in §1b).
+- G-RANGE owner is linear-only (MLP candidates un-gateable by it — tool gap).
+- s31 is spline-less (add-spline packaging deferred — no ship).
+- M3a ≥0.85 unmet by every 944-trained candidate (winner 0.63, s31 0.79) — the
+  E-M coherence story continues; EM4's 0.852 was the 924-era instrument.
+- shaped-transform screen never fit ON the hdr leg (B-gap §, open lever).
+- kadis all-digits in-sample caveat (registered).
+- MLP LOO is occlusion, not ablation (masked retrain = follow-up).
+- Two external background-task kills cost ~1.5 h (mitigated setsid; recorded).
+- i265 5.4×-slow for this trainer (SIMD tier + P/E scheduling) — retired mid-run.
+- The 262 MB features TSV is not sha256'd in the leg manifest (DrvFS-under-load
+  cost; regenerable, inputs pinned).
+
+## Artifacts + commits
+
+Bakes/verdicts/grids/grams/LOO roots: `/mnt/v/output/zensim/bakes/sota944/` ·
+hdr leg: `/mnt/v/output/zensim/hdr944-leg/` · fulleval JSONs:
+`/mnt/v/output/zensim/reports/fulleval/sota944_*.fulleval.json` · Tower mirror
+(sha spot-verified 3/3): `/mnt/tower/output/zensim-sota944-2026-08-03/`.
+Supervisor cross-check: re-run `scripts/sota944_verdict.sh` on any bake — every
+number above re-derives from the verdict JSONs; the winner + s31 fullevals are
+the freeze_check inputs.
+
+Commits (all on origin/main): `57a17eed` pre-registration · `4a3d5ec0` eval
+infra + era-bridge · `27b7fb60` fit-chain owners · `8123313e` slices ·
+`1e7148af` hfnlproxy + screen · `3b1856ef` drivers · `bb5373a4` arms A+B ·
+`2b1fab2a` hdr amendment infra · `3f84d549` arm C 6/8 + fleet record ·
+`b26736cb` hdr leg · `0eb35d74` B-gap resolution · (this commit) endgame.
