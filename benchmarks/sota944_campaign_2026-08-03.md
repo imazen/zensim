@@ -525,13 +525,22 @@ numbers carry EXACTLY to the 944 root (verified bitwise-features truncation).
 | winner_dial | @372-eval | 0.894 | 0.335 | — | 0.587 | — | — |
 | Ebothg_scr0.5 | @372-eval | 0.879 | 0.271 | 0.906 | 0.712 | — | 0.985 |
 | B (shipped) | @372-eval | 0.8764 | 0.5466 | 0.856-class | 0.614 | — | 97.9%/0% |
-| **EM4_mask2_kw0.15_s42** | **unified-944** (=924) | **0.8924** | 0.4286 | **0.9098** | hfnl-proxy 0.554* | 0.852 (924-era instrument) | 95.7%/0%* |
-| C_em944_s31 | unified-944 | 0.8869 | **0.4689** | 0.9162 | 0.4104* | 0.7926 | 93.4%/0% |
+| **EM4_mask2_kw0.15_s42** | **unified-944** (=924) | **0.8924** | 0.4286 | **0.9098** | hfnl-proxy **0.1319**† | 0.852 (924-era instrument) | 94.7%/0%* |
+| C_em944_s31 | unified-944 | 0.8869 | **0.4689** | 0.9162 | **0.0373**† | 0.7926 | 93.4%/0% |
 | A_bvls_X_AM5_w | unified-944 | 0.7947 | 0.3296 | 0.7750 | 0.266 | 0.6299 | 90.4%/0% |
 | B_blend_lam1e-3_a0.7_w | unified-944 | 0.8243 | 0.3623 | 0.8118 | 0.193 | — | 96.0%/0% |
 
-\* EM4 hfnl-proxy/dial re-read on the 944 root this campaign
-(`EM4_s42_on944root.full.json`); s31 hfnl from its corrjoint verdict.
+\* EM4 dial re-read on the 944 root this campaign (`EM4_s42_on944root.full.json`).
+
+† **CORRECTED 2026-08-03** (coherence wave, §"Corrections to this document's
+earlier ENDGAME scorecard"). These two cells previously read 0.554 (EM4) and
+0.4104 (s31); neither reconciles with the verdict JSON it cited — EM4's cited
+file has `rank.hfnlproxy = null` (the corpus was not in that run's `--corpora`),
+and s31's gives `per_ref_mean` 0.03726. Re-derived: EM4 0.13195 (from the
+standard §0 re-run `EM4_s42_on944root_hfnl.full.json`; every other EM4 field
+reproduces exactly, and its dial mono is 94.7%, not 95.7%), s31 0.03726.
+**Consequence: EM4 — the bar's own CID22 source — fails this campaign's HF-NL
+row** (0.132 < the 0.193 arm-B reference), as does s31.
 **EM4 remains the unified-944 rank champion.** s31 beats it on KonJND (+0.040)
 and nonphoto (+0.006) at −0.0055 CID22 — a genuine near-threshold/diversity
 trade candidate, not a dominator.
@@ -819,6 +828,248 @@ then states the measured conclusion: the bar encodes the unstable mode's peak,
 the stabilized 944 regime's ceiling is ≈0.887, and the freeze decision (user's)
 chooses between peak-chasing and stability.
 
-### Coherence-study results (appended when the wave lands)
+### Coherence-study results (2026-08-03) — HONEST NULL; the registered lever queue CLOSES
 
-*(pending)*
+**Ops.** 21/21 trained, 21/21 verdicts, 9 full-evals (M3a), 2 corruption-joint
+reports, 1 G-RANGE attempt. Lanes by embedded-repro `cwd`: **wsl**
+(`~/work/zen/zensim--sota944`) = co1a/co3a/co3b ×3 each, last finish 18:14:02Z;
+**lianli** (`~/sota944`) = co1b/co1c/co2a/co2b ×3 each, last finish 19:11:30Z.
+Every run carries `zentrain.repro` (`source: embedded`, `schema 1`) — the
+mandate holds. Registered configs are **structurally confirmed from the
+embedded repro**, not from the launch script: input-group counts are 6 / 6 / 6
+for co1a·co1b·co1c, **5 for co2a** (tbig absent, as registered), 6 for co2b,
+and **9 for co3a·co3b** (6 + the three EM4-teacher twins `tsafesyn`/`ttbig`/
+`tkadis`); `--coarse-decay` reads `1e-4` (co1a), `1e-3` (co1b), `1e-5` (all
+others). Honest gap: the repro block's `hostname` field is **empty** on all 21
+— the node is recoverable only via `cwd`. That is a trainer defect worth fixing
+before the next wave (the field exists and is populated with `""`).
+
+**Verdict provenance.** All 21 verdicts use `scripts/sota944_verdict.sh` (the
+one frozen §0 invocation). Two independent provenance gates were run before any
+result was read: (1) **re-running the stored `C_em944_s31` verdict reproduced it
+bit-identically** on every headline field; (2) a **fresh build** of
+`bake_verdict` from `3d834f8a` in a clean target dir reproduced
+`C_co3a_s1301` bit-identically against the campaign binary
+(`~/tmp/zensimsota-target`). `bake_verdict.rs` and its deps are unchanged since
+`e53bed10`, so the two builds are the same program; the numbers below are
+directly comparable to every earlier arm in this document.
+
+#### The full 21-cell grid
+
+HF-NL-proxy is the registered **per-ref mean** (`rank.hfnlproxy.per_ref_mean`),
+matching §1b. M3a "—" = not measured (9 of 21 selected, see below).
+
+| bake | cid22 | konjnd | nonphoto | sdr25 | HF-NL-proxy | dial mono | tied | M3a | best_val | csiq | live | aic3 | aic4 | imazen26 | composite | node |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `C_co1a_s1301` | 0.8828 | 0.3462 | 0.9074 | 0.9005 | +0.0870 | 94.0% | 0.0% | — | 0.4148 | 0.8108 | 0.8480 | 0.8010 | 0.9046 | 0.9046 | 0.8381 | wsl |
+| `C_co1a_s1303` | 0.8862 | 0.3327 | 0.9167 | 0.9134 | +0.0618 | 95.6% | 0.0% | 0.7713 | 0.4698 | 0.7963 | 0.8332 | 0.7983 | 0.9088 | 0.9130 | 0.8417 | wsl |
+| `C_co1a_s1307` | 0.8836 | 0.3768 | 0.9081 | 0.9552 | +0.2617 | 95.1% | 0.0% | 0.7869 | 0.4872 | 0.8266 | 0.7634 | 0.8023 | 0.9121 | 0.9066 | 0.8421 | wsl |
+| `C_co1b_s1301` | 0.8712 | 0.2723 | 0.9177 | 0.8941 | -0.1220 | 95.3% | 0.0% | — | 0.4741 | 0.8085 | 0.8220 | 0.7833 | 0.9032 | 0.9134 | 0.8285 | lianli |
+| `C_co1b_s1303` | 0.8870 | 0.3847 | 0.9164 | 0.9342 | -0.0090 | 95.9% | 0.0% | 0.7932 | 0.4226 | 0.7458 | 0.8166 | 0.7922 | 0.8925 | 0.9128 | 0.8461 | lianli |
+| `C_co1b_s1307` | 0.8735 | 0.3305 | 0.9064 | 0.8957 | +0.0453 | 94.1% | 0.0% | — | 0.4392 | 0.7771 | 0.7654 | 0.7807 | 0.8898 | 0.9037 | 0.8307 | lianli |
+| `C_co1c_s1301` | 0.8783 | 0.1680 | 0.9225 | 0.9310 | +0.1348 | 94.9% | 0.0% | 0.7962 | 0.6718 | 0.7616 | 0.7572 | 0.7859 | 0.9031 | 0.9201 | 0.8244 | lianli |
+| `C_co1c_s1303` | 0.8652 | 0.3030 | 0.9076 | 0.9111 | +0.2422 | 95.0% | 0.0% | — | 0.6280 | 0.7169 | 0.6991 | 0.7724 | 0.8904 | 0.9023 | 0.8237 | lianli |
+| `C_co1c_s1307` | 0.8774 | 0.3045 | 0.9219 | 0.9157 | -0.0279 | 94.5% | 0.0% | — | 0.7049 | 0.8439 | 0.8208 | 0.7922 | 0.9151 | 0.9173 | 0.8365 | lianli |
+| `C_co2a_s1301` | 0.8823 | 0.2882 | 0.8063 | 0.9657 | +0.0553 | 93.7% | 0.0% | — | 0.5838 | 0.7992 | 0.7519 | 0.7705 | 0.8971 | 0.8020 | 0.7929 | lianli |
+| `C_co2a_s1303` | 0.8794 | 0.2791 | 0.8039 | 0.9336 | -0.0185 | 93.4% | 0.0% | — | 0.6113 | 0.7664 | 0.7917 | 0.7857 | 0.9131 | 0.8029 | 0.7917 | lianli |
+| `C_co2a_s1307` | 0.8887 | 0.2843 | 0.8078 | 0.9657 | -0.0122 | 93.8% | 0.0% | 0.8261 | 0.6212 | 0.8159 | 0.8036 | 0.7803 | 0.9165 | 0.8052 | 0.7974 | lianli |
+| `C_co2b_s1301` | 0.8653 | 0.3720 | 0.9140 | 0.9019 | -0.0398 | 95.6% | 0.0% | — | 0.4815 | 0.7954 | 0.7725 | 0.7804 | 0.8874 | 0.9076 | 0.8326 | lianli |
+| `C_co2b_s1303` | 0.8815 | 0.4198 | 0.9107 | 0.8963 | +0.1108 | 95.9% | 0.0% | — | 0.4853 | 0.7094 | 0.8125 | 0.7907 | 0.8981 | 0.9062 | 0.8445 | lianli |
+| `C_co2b_s1307` | 0.8836 | 0.4139 | 0.9107 | 0.9291 | +0.1275 | 94.2% | 0.0% | 0.7993 | 0.4632 | 0.8474 | 0.8609 | 0.7941 | 0.9049 | 0.9088 | 0.8459 | lianli |
+| `C_co3a_s1301` | 0.8907 | 0.4050 | 0.9045 | 0.9282 | +0.2508 | 95.9% | 0.0% | 0.7598 | 0.4357 | 0.8359 | 0.8393 | 0.7878 | 0.9032 | 0.9005 | 0.8452 | wsl |
+| `C_co3a_s1303` | 0.8791 | 0.4135 | 0.9106 | 0.9328 | -0.0815 | 95.4% | 0.0% | — | 0.4869 | 0.7004 | 0.8561 | 0.7981 | 0.9127 | 0.9088 | 0.8441 | wsl |
+| `C_co3a_s1307` | 0.8857 | 0.4330 | 0.9123 | 0.9184 | +0.2327 | 95.7% | 0.0% | 0.7625 | 0.4347 | 0.7625 | 0.8167 | 0.7923 | 0.9095 | 0.9088 | 0.8489 | wsl |
+| `C_co3b_s1301` | 0.8816 | 0.2997 | 0.8944 | 0.9069 | +0.1473 | 94.3% | 0.0% | — | 0.4791 | 0.7490 | 0.8203 | 0.7828 | 0.9093 | 0.8944 | 0.8283 | wsl |
+| `C_co3b_s1303` | 0.8688 | 0.4465 | 0.9159 | 0.9361 | -0.1565 | 92.5% | 0.0% | 0.8470 | 0.4974 | 0.7904 | 0.8246 | 0.7849 | 0.8823 | 0.9130 | 0.8428 | wsl |
+| `C_co3b_s1307` | 0.8790 | 0.3456 | 0.9102 | 0.8792 | -0.0872 | 94.8% | 0.0% | — | 0.4562 | 0.7580 | 0.7969 | 0.7820 | 0.8772 | 0.9088 | 0.8361 | wsl |
+
+#### Per-config summary (3 seeds each)
+
+| cfg | arm | change | cid22 mean | cid22 max | konjnd max | nonphoto mean | sdr25 max | HF-NL max | dial mono min | M3a |
+|---|---|---|---|---|---|---|---|---|---|---|
+| co1a | 1 | `--coarse-decay 1e-4` | 0.8842 | 0.8862 | 0.3768 | 0.9107 | 0.9552 | +0.2617 | 94.0% | 0.771 / 0.787 |
+| co1b | 1 | `--coarse-decay 1e-3` | 0.8772 | 0.8870 | 0.3847 | 0.9135 | 0.9342 | +0.0453 | 94.1% | 0.793 |
+| co1c | 1 | kadis kw 0.5 | 0.8737 | 0.8783 | 0.3045 | 0.9173 | 0.9310 | +0.2422 | 94.5% | 0.796 |
+| co2a | 2 | NO tbig group | 0.8835 | **0.8887** | 0.2882 | **0.8060** | **0.9657** | +0.0553 | 93.4% | **0.826** |
+| co2b | 2 | WT40 − 12 MSE winsors | 0.8768 | 0.8836 | 0.4198 | 0.9118 | 0.9291 | +0.1275 | 94.2% | 0.799 |
+| co3a | 3 | EM4-distill w=0.5 | **0.8852** | **0.8907** | 0.4330 | 0.9091 | 0.9328 | +0.2508 | 95.4% | 0.760 / 0.763 |
+| co3b | 3 | EM4-distill w=1.5 | 0.8765 | 0.8816 | **0.4465** | 0.9068 | 0.9361 | +0.1473 | **92.5%** | **0.847** |
+
+#### Selection (frozen rule applied verbatim)
+
+Rule: within each arm, one candidate = **max sdr25**; MLP tie-break = higher
+`best_val`. Cross-family sdr25 comparison is the registered oracle break, so the
+arm-2 pick is reported with that caveat attached (co2a and co2b are different
+data mixes and sit in the same registered arm).
+
+| arm | candidate | sdr25 | cid22 | konjnd | nonphoto | HF-NL | dial mono | M3a |
+|---|---|---|---|---|---|---|---|---|
+| 1 coherence-reg | `C_co1a_s1307` | 0.9552 | 0.8836 | 0.3768 | 0.9081 | +0.2617 | 95.1% | 0.7869 |
+| 2 data-mix | `C_co2a_s1307` | 0.9657 | 0.8887 | 0.2843 | 0.8078 | −0.0122 | 93.8% | 0.8261 |
+| 3 distillation | `C_co3b_s1303` | 0.9361 | 0.8688 | 0.4465 | 0.9159 | −0.1565 | **92.5%** | 0.8470 |
+
+Arm 2's sdr25 max is an **exact tie** between `C_co2a_s1301` and `C_co2a_s1307`
+(0.9657142857142857 both); the registered `best_val` tie-break selects s1307
+(0.6212 > 0.5838). The tie is structural, not coincidence: **sdr25 is n=50 pairs
+over 5 references**, so its Spearman takes a coarse, discrete set of values and
+exact ties between unrelated bakes are expected. A 50-pair rank statistic is a
+thin basis for a campaign's single selection rule — record that alongside the
+decoupling finding below.
+
+- **Winner-by-rule** (max sdr25 across arm-candidates) = **`C_co2a_s1307`**.
+- **Raw CID22 leader** = **`C_co3a_s1301`, 0.89067**.
+- **Raw M3a leader** = **`C_co3b_s1303`, 0.8470**.
+
+**The oracle/CID22 decoupling reproduces for the fourth time.** sdr25 selects a
+bake whose nonphoto has collapsed to 0.808 while the CID22 leader sits in a
+different arm entirely. Recording it again as a finding, not an error: sdr25's
+validated predictive power (+0.752 over 35 MLP bakes) was established *within*
+one data mix, and every wave that spans mixes breaks it. **The next campaign
+must not use a cross-mix oracle as its selection rule.**
+
+#### The bar verdict — HONEST NULL
+
+Bar CID22 re-derived from EM4 on the 944 root this session: **0.8923796503**.
+
+| axis | bar | `C_co3a_s1301` (CID22 leader) | `C_co2a_s1307` (winner-by-rule) | `C_co3b_s1303` (M3a leader) | `C_co3a_s1307` (best bar coverage) |
+|---|---|---|---|---|---|
+| CID22 | > 0.89238 | 0.8907 **FAIL** (−0.0017) | 0.8887 **FAIL** | 0.8688 **FAIL** | 0.8857 **FAIL** |
+| KonJND | ≥ 0.43 | 0.4050 **FAIL** | 0.2843 **FAIL** | 0.4465 PASS | 0.4330 PASS |
+| nonphoto | ≥ 0.90-class | 0.9045 PASS | 0.8078 **FAIL** | 0.9159 PASS | 0.9123 PASS |
+| HF-NL-proxy | ≥ 0.1931 (arm-B cand) | +0.2508 PASS | −0.0122 **FAIL** | −0.1565 **FAIL** | +0.2327 PASS |
+| dial mono / tied | ≥93% / ≤5% | 95.9% / 0.0% PASS | 93.8% / 0.0% PASS | **92.5% FAIL** / 0.0% | 95.7% / 0.0% PASS |
+| M3a | ≥ 0.85 | 0.7598 **FAIL** | 0.8261 **FAIL** | 0.8470 **FAIL** (−0.003) | 0.7625 **FAIL** |
+| G-RANGE | clean | **NOT EVALUABLE** | NOT EVALUABLE | NOT EVALUABLE | NOT EVALUABLE |
+| corruption (HEAD) | via companion head | **0.7932 pass_q20** (dial-alone 0.0565) | — | 0.7932 (dial-alone 0.0372) | — |
+| embedded repro | present | PASS | PASS | PASS | PASS |
+
+**No candidate passes the frozen bar. Not one of the 21 clears CID22.** Bar-row
+coverage over the five rows evaluable for every cell (cid22/konjnd/nonphoto/
+HF-NL/dial): best is `C_co3a_s1307` at **4/5**, missing only CID22 (−0.0067) —
+and its M3a is 0.7625, so it is *not* the registered "passes everything except
+M3a" special case. That case did not occur: M3a and CID22 never passed together
+in any cell.
+
+- **G-RANGE is NOT EVALUABLE for these bakes** — `bake_dial_refit gate` asserts
+  a single-layer linear bake and panics on a 2-layer MLP
+  (`bake_dial_refit.rs:182`, "got 2 layers"). This is the same tool gap the
+  earlier ENDGAME section recorded for s31; it is now reproduced with the exact
+  failure site. Reported as a gap, **not** as a PASS.
+- **The corruption row is head-owned, and that is now measured rather than
+  assumed**: both leaders return byte-identical joint numbers
+  (`pass_q20` 0.79315, `pass_q10` 0.92560, n=672) with head `corrhead944_s13`,
+  while their dial-alone corruption differs (0.0565 vs 0.0372). The head is the
+  corruption owner independent of the dial bake, exactly as the shipping design
+  claims.
+
+#### What the coherence study actually measured (the scientific result)
+
+The registered hypothesis was that the E-M coarse-mass mechanism is what holds
+944 below the bar, and that regularizing it (arm 1) raises M3a and CID22
+together. **Arm 1 is a null on its own paired endpoint.**
+
+| M3a (9 measured) | Δ vs s31 (0.7926) |
+|---|---|
+| `C_co3b_s1303` 0.8470 | **+0.054** (arm 3, distill w=1.5) |
+| `C_co2a_s1307` 0.8261 | **+0.033** (arm 2, no tbig) |
+| `C_co2b_s1307` 0.7993 | +0.007 |
+| `C_co1c_s1301` 0.7962 | +0.004 |
+| `C_co1b_s1303` 0.7932 | +0.001 |
+| `C_co1a_s1307` 0.7869 | −0.006 |
+| `C_co1a_s1303` 0.7713 | −0.021 |
+| `C_co3a_s1307` 0.7625 | −0.030 |
+| `C_co3a_s1301` 0.7598 | −0.033 |
+
+1. **The coarse-decay knob does not buy coherence.** 10× and 100× the keeper
+   rate (co1a, co1b) land M3a at 0.771–0.793 — inside seed noise of s31's
+   0.7926, which used the 1× keeper. Raising the regularizer 100-fold moved M3a
+   by ≈ +0.001. The registered mechanism story is **falsified as a lever**: the
+   E-M6 diagnostic correctly describes where the gradient mass sits, but
+   shrinking that mass with decoupled decay does not relocate the model's
+   spatial attribution.
+2. **M3a responds to DATA composition instead.** The only two configs that moved
+   it are both data-side: dropping the tbig group (+0.033) and distilling from
+   EM4 at w=1.5 (+0.054). Neither is free — co2a's nonphoto collapses
+   −0.10 to 0.806 (tbig *is* the non-photo codec-ladder mass), and co3b_s1303
+   breaks dial monotonicity (92.5%) and gives up 0.022 CID22.
+3. **M3a and CID22 pull against each other at the extremes.** Of the nine
+   measured, the M3a leader has the **lowest** CID22 (0.8688) and the CID22
+   leader has the **lowest** M3a (0.7598); the middle seven are flat (CID22
+   0.878–0.887 across M3a 0.762–0.826). No rank correlation is claimed — n=9
+   spanning three different data mixes is not a population, and the IQA panel is
+   a (pred, MOS) instrument, not a meta-correlation tool. The extremes are
+   stated because they are directly checkable from the table.
+4. **Distillation is the most interesting surviving direction, and it is
+   dose-dependent in opposite ways on the two endpoints**: w=0.5 (co3a) gives the
+   wave's best CID22 (0.8907) with the *worst* M3a (0.760); w=1.5 (co3b) gives
+   the best M3a (0.847) with poor CID22 (0.869). A dose between them was not
+   registered and is not claimed to exist — but that is the one lever this wave
+   leaves genuinely open, and it is data-side, matching finding 2.
+
+#### `best_val` is not cross-comparable — confirmed, with the numbers
+
+co1c (0.628–0.705) and co2a (0.584–0.621) carry by far the highest `best_val`;
+every other config sits at 0.415–0.497. Read naively that says co1c and co2a
+won. They did not: co1c has three of the wave's lowest CID22 cells
+(0.865–0.878) and co2a's nonphoto collapses to 0.806. **Both configs changed the
+validation composite** — co1c reweights kadis (kw 0.5), co2a removes a group
+entirely — so their `best_val` is computed over a different objective and cannot
+be compared to the others'. `best_val` remains valid only as the registered
+*within-family* tie-break, which is how it was used here.
+
+#### Corrections to this document's earlier ENDGAME scorecard
+
+Re-derived from the verdict JSONs this session; both prior cells are wrong and
+neither reconciles with any field in the file it cites.
+
+| cell | previously published | re-derived | evidence |
+|---|---|---|---|
+| `C_em944_s31` HF-NL | 0.4104 | **0.03726** | `C_em944_s31{,_corrjoint}.full.json` → `rank.hfnlproxy.per_ref_mean` (srocc 0.01206). No 0.410x exists anywhere in the rank block. The same document's near-top-arm section already quotes 0.037 for s31 — the scorecard cell contradicted its own text. |
+| `EM4_mask2_kw0.15_s42` HF-NL | 0.554 | **0.13195** | `EM4_s42_on944root.full.json` has `rank.hfnlproxy = null` — the corpus was not in that run's `--corpora` list, so no HF-NL number was ever produced there. Re-ran the standard §0 invocation as `EM4_s42_on944root_hfnl` (all other EM4 fields reproduce exactly: cid22 0.8923796503, konjnd 0.4286, nonphoto 0.9098, sdr25 0.9556, dial 94.7%/0%). |
+
+**This changes a conclusion: EM4 — the model the bar is taken from — fails the
+campaign's own HF-NL row** (0.132 < the 0.193 arm-B reference), as does s31
+(0.037). Four of this wave's 21 cells pass it (co1a_s1307 +0.262, co3a_s1301
++0.251, co1c_s1303 +0.242, co3a_s1307 +0.233). The bar was never met by a single
+model on all axes simultaneously — including by its own CID22 source.
+
+#### Campaign close — the registered lever queue is EXHAUSTED
+
+Three registered systematic levers, three measured nulls:
+
+| lever | wave | result |
+|---|---|---|
+| seed luck | seed-scale, n=23 | NULL — 0.8726 ± 0.0136, max 0.8869 |
+| near-top training mass | amendment 2, n=8 | NULL on rank — family max 0.8752; real win on HF-NL only |
+| coarse-mass / coherence | amendment 3, n=21 | NULL — max 0.8907 (−0.0017), M3a max 0.8470 (−0.003) |
+
+The standing framing is unchanged and now carries a third independent
+confirmation: **the 0.8924 bar encodes the pre-stabilizer lottery's unstable
+peak** (a single 924-era draw), while the stabilized 944 regime's reliable
+ceiling measures **≈0.887–0.891** across 52 independent draws (23 seed-scale +
+8 near-top + 21 coherence). This wave moved the stabilized max from 0.8869 to
+**0.89067 — the closest any 944-regime model has come, short by 0.0017** — and
+did so with KonJND 0.405, nonphoto 0.905, HF-NL +0.251 and dial 95.9%/0%, a
+broader axis profile than the bar's own source model.
+
+**The peak-vs-stability freeze choice belongs to the user.** Nothing here is
+shipped, swapped, or published: no default changed, no bake promoted. The
+honest statement is that chasing the 924 peak has now failed on every
+pre-registered mechanism, and the decision is whether to freeze on the
+stabilized regime's reliable ~0.89 with its better secondary axes, or to keep
+the unstable 0.8924 draw as the reference.
+
+**Follow-ups this wave earned** (none started, none owed by the registration):
+distillation dose between w=0.5 and w=1.5 (the one open data-side lever);
+`bake_dial_refit gate` MLP support to close the G-RANGE tool gap;
+`zentrain.repro` hostname population; a selection oracle that survives a
+data-mix change.
+
+#### Artifacts
+
+- Bakes + specs: `/mnt/v/output/zensim/bakes/sota944/bakes/C_co{1a,1b,1c,2a,2b,3a,3b}_s{1301,1303,1307}.bin`
+- Verdicts (21 + 2 corrjoint + `EM4_s42_on944root_hfnl` + 2 provenance checks):
+  `/mnt/v/output/zensim/bakes/sota944/verdicts/`
+- Full-evals (9, M3a): `/mnt/v/output/zensim/reports/fulleval/C_co*.fulleval.json`
+- Tower mirror: `/mnt/tower/output/zensim-sota944-2026-08-03/`
+
