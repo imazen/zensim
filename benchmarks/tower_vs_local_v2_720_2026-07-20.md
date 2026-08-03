@@ -12,7 +12,7 @@ runtime CPU dispatch picking each box's best SIMD tier.
 | CPU | AMD Ryzen 9 7950X (Zen4, 16C/32T) | AMD Threadripper 2950X (Zen1+, 16C/32T) |
 | SIMD tier used | **AVX512** (magetypes `v4x`) | **AVX2** (`v4`) — no AVX512 |
 | Env | WSL2, 28 threads visible, RAM 59 GiB | Unraid OS 7.3.1 bare metal, 32T, 62 GiB |
-| Reach | — | `root@192.168.50.170` (passwordless key), glibc 2.43 |
+| Reach | — | `root@tower` (passwordless key), glibc 2.43 |
 | Load during run | 2.4–4.9 (shared w/ agents) | 1.5–1.7 |
 
 ## Results (best of 3, 40 pairs)

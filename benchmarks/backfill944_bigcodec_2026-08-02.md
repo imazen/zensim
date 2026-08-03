@@ -66,7 +66,7 @@ extractor. Any uniform-tier re-extraction fails G-BF1 structurally.
 |---|--:|---|
 | lilith-lianli (7900X Zen4) | 229,064 | v4x (AVX-512) |
 | tower-unraid (TR 2950X Zen1) | 129,648 | v4 (AVX2) |
-| zen-node-2 = jason (i5-13400F) | 97,170 | v4 |
+| zen-node-2 = node-2 (i5-13400F) | 97,170 | v4 |
 | lilith-mac (M4 Pro) + mac-login-test + mac-debug | 31,317 + 170 + 32 | neon |
 | wsl-smoke (7950X Zen4) | 2,772 | v4x |
 | **totals** | **v4x 231,836 · v4 226,818 · neon 31,519** | = 490,173 |
@@ -83,7 +83,7 @@ tier into `bf944v4-*` / `bf944v4x-*` / `bf944neon-*` (manifest-index ↔
 
 | pool | runs | cells | boxes |
 |---|--:|--:|---|
-| `jobs/_pool944v4/runlist.tsv` | 31 | 226,818 | tower (24c capped) + i265 (20T) + ian (12T); jason SKIPPED (another session's training live on it) |
+| `jobs/_pool944v4/runlist.tsv` | 31 | 226,818 | tower (24c capped) + i265 (20T) + node-3 (12T); node-2 SKIPPED (another session's training live on it) |
 | `jobs/_pool944v4x/runlist.tsv` | 27 | 231,836 | lianli (24T); wsl excluded (P1 kadis extraction owns local compute) |
 | `jobs/_pool944neon/runlist.tsv` | 8 | 31,519 | mac (M4 Pro, idle-only launchd, native arm64 build) |
 
@@ -133,8 +133,8 @@ measured equivalence classes (all verified by bitwise gates in this wave):
 | class | boxes (bf924-era worker names) | cells attributed |
 |---|---|--:|
 | amdv4x (AMD Zen4, AVX-512) | lianli (`lilith-lianli`), wsl (`wsl-smoke`→`wsl-944`) | 231,836 |
-| amdv4 (AMD Zen1/Zen3, AVX2) | tower (`tower-unraid`), ian (`zen-node-3`) | 129,648 |
-| intelv4 (Intel RaptorLake/ArrowLake, AVX2) | jason (`zen-node-2`), i265 | 97,170 |
+| amdv4 (AMD Zen1/Zen3, AVX2) | tower (`tower-unraid`), node-3 (`zen-node-3`) | 129,648 |
+| intelv4 (Intel RaptorLake/ArrowLake, AVX2) | node-2 (`zen-node-2`), i265 | 97,170 |
 | neon (Apple M4 Pro) | mac (`lilith-mac` + test names) | 31,519 |
 
 Zen1↔Zen3 and RaptorLake↔ArrowLake are interchangeable (measured: their
@@ -144,8 +144,8 @@ inherit this: partition by vendor-class, not SIMD tier alone.
 **Repair wave (2026-08-02 ~18:0xZ):** census over all wave ledgers (both
 JobId encodings): 406,203 / 490,173 cells already had a class-matched blob
 (the wave's multi-worker re-scoring); **83,970 repair cells** declared as
-`bf944amd-*` (44,679; `_pool944amdv4`; tower+ian) and `bf944int-*` (39,291;
-`_pool944intelv4`; i265+jason) by `zenmetrics scripts/jobsys/
+`bf944amd-*` (44,679; `_pool944amdv4`; tower+node-3) and `bf944int-*` (39,291;
+`_pool944intelv4`; i265+node-2) by `zenmetrics scripts/jobsys/
 declare_bf944_repair.py`. Selection at assembly =
 `bf944_classpref_select.py`: exact-bf924-worker first, then vendor class,
 FAIL loud otherwise.
@@ -192,9 +192,9 @@ spot-verified (Tower 3/3, R2 1/1). Fleet table = part set
 
 | phase | wall | nodes |
 |---|---|---|
-| main tier-matched wave (490,173 cells / 5.74M rows) | **~8.6 h** (03:41→~12:15Z 99.96%) | v4: tower(24c cap)+i265+ian+jason(joined 08:20 after its other job) · v4x: lianli(+wsl container from 08:20) · neon: mac (idle-only) |
+| main tier-matched wave (490,173 cells / 5.74M rows) | **~8.6 h** (03:41→~12:15Z 99.96%) | v4: tower(24c cap)+i265+node-3+node-2(joined 08:20 after its other job) · v4x: lianli(+wsl container from 08:20) · neon: mac (idle-only) |
 | neon straggler fix (173 cells: stale-claim starvation) | ~2 h diagnosis+fix | mac (manual gapfix passes) |
-| vendor repair wave (83,970 cells) | **~1.9 h** (22:44→00:36Z) | amd: tower+ian · intel: i265+jason |
+| vendor repair wave (83,970 cells) | **~1.9 h** (22:44→00:36Z) | amd: tower+node-3 · intel: i265+node-2 |
 | assemble fetch (490k blobs) | 62+55 min (two full passes — see below) + **12.7 min delta** | wsl |
 | 21-view join ×2 (initial + post-repair) | ~21 min each (per-dataset run-heavy, ext4-staged parts) | wsl |
 | 21 gates ×2 | ~35 min each | wsl |
@@ -228,8 +228,8 @@ harness-kill mid-write cost one footerless 23.9 GB file, quarantined .bak.)
   0 missing.
 - Superseded artifacts kept as .bak: the pre-vendor-fix staged views
   (`bigcodec_staged_prevendorfix.bak`) + the footerless first-fetch parquet.
-- jason ran another session's training until ~08:20Z (excluded till idle);
-  kids' boxes were used only while genuinely idle and their workers are
+- node-2 ran another session's training until ~08:20Z (excluded till idle);
+  shared boxes were used only while genuinely idle and their workers are
   now disabled again (enrolled-stopped); mac worker daemon left unloaded;
   tower container removed; all pool workers stood down at drain.
 
@@ -256,8 +256,8 @@ harness-kill mid-write cost one footerless 23.9 GB file, quarantined .bak.)
   measurement: the neon spot gate PASSED bitwise (2,328/2,328 vs tbig_924),
   so the mac's native arm64 build of today's siblings reproduces its own
   bf924 rows exactly. (The per-view gates remain the final arbiter.)
-- jason carried 97,170 of the v4 cells in bf924 but is running another
+- node-2 carried 97,170 of the v4 cells in bf924 but is running another
   session's training this session — the v4 pool runs without it (tower + i265
-  + ian cover the tier; wall-time impact only).
+  + node-3 cover the tier; wall-time impact only).
 - The flat-pool smoke burned ~30 box-minutes on lianli (3,433 tier-mismatched
   blobs, deleted with the retired flat runs).

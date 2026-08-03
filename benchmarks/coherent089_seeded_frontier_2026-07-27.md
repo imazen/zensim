@@ -10,7 +10,7 @@ bigcodec 200k + foldable KADIS 50k, `zensim_mlp_train` 1×128 LeakyReLU, ep120 p
 + **top-40 foldable-only v3 `feature_transform`s** (winsor set filtered to `foldable_idx`
 — transforms on spatializable features preserve coherence by construction; the greedy
 screen's top overall transforms f275/f293 are iw-block and were correctly excluded).
-34 runs total: 23 on **lianli** (24c, 2×12-thread lanes, ~10 min/run), 2 on **jason**
+34 runs total: 23 on **lianli** (24c, 2×12-thread lanes, ~10 min/run), 2 on **node-2**
 (valid but contended — see infra notes), 9 local. All x86 (mac excluded on purpose:
 arch-noise would contaminate the seed-variance measurement). Eval: `bake_verdict
 --regime 720` on cid22/konjnd/nonphoto/imazen26 (test corpora untouched by training);
@@ -74,7 +74,7 @@ point is the open question (good mode = 4/7 seeds until val-selection lands).
 
 - **lianli** (24c Ubuntu): staged 1.2 GB + binaries, 2 lanes × 12 threads, ~10 min/run —
   23/23 clean. The workhorse.
-- **jason**: my runs went 7× slow — NOT a slow box: it was already running the sanctioned
+- **node-2**: my runs went 7× slow — NOT a slow box: it was already running the sanctioned
   zenfleet **zensim-720 backfill** (`zen-worker.service` + `zen720` container + python
   scorer at nice 5); my nice-19 trainers were starved. **Lesson re-learned: "observe
   before adding load" — check for a live worker service BEFORE staging work on any

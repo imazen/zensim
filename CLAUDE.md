@@ -207,7 +207,7 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   render harness (both in the pipeline now).
 - pkill/pgrep -f self-match the invoking shell (locally AND over ssh); pgrep name-match
   truncates comm to 15 chars. Kill by PID; use pgrep -x with the truncated name.
-- Observe-before-load on household nodes (jason 7× incident = a live zensim-720 backfill
+- Observe-before-load on fleet nodes (node-2 7× incident = a live zensim-720 backfill
   worker, not a slow box).
 - Trainer-bin globals must be set BEFORE the training call — the best_val relocation
   silently moved the regularizer setup post-training (caught by the decay-debug counter).

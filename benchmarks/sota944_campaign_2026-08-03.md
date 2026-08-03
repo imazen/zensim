@@ -398,7 +398,7 @@ Findings (arm B):
 
 Ops incidents (recorded): two external background-task kills hit the chain/waiters
 (the kadis-incident class); the chain was relaunched `setsid`-detached (kill-proof)
-and the remaining seeds were moved to household fleet nodes per the user's
+and the remaining seeds were moved to home fleet nodes per the user's
 parallelize directive — data staged node-local (LAN scp; `tbig_944_200k` has no R2
 mirror yet), trainer = the same WSL-built binary, seeds 23/31 launched idle-checked.
 
@@ -601,7 +601,7 @@ recipe bytes, ONLY the seed varies; no new hypothesis).
   127, 199, 256, 512}** (distinct from the original {5,7,13,17,23,31,42,99};
   23 total draws).
 - Fleet-parallel per the working node map: lianli + local wsl + tower
-  (Docker-only, cpuset/mem-capped per house rules) + jason/ian only if
+  (Docker-only, cpuset/mem-capped per house rules) + node-2/node-3 only if
   already-idle-in-Ubuntu; i265 stays retired. Per-seed train node recorded.
 - Per-seed full verdict + fulleval (incl. M3a) as each lands.
 - **Selection: the frozen sdr25/best_val rule WITHIN the MLP family only**

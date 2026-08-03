@@ -25,7 +25,7 @@ row** (byte-stability is proven at both tips — any mismatch = STOP, diagnose).
 G-BF2: row counts + key columns identical; zstd parquet (never snappy).
 G-BF3: triple-mirror (local + s3://zentrain + Tower) + `_MANIFEST.json` with
 build_commit + shas + DATA_PROVENANCE.md pointer. Compute: local first (legs +
-grids + kadis are local-feasible); bigcodec 5.7M via zenfleet/household nodes if
+grids + kadis are local-feasible); bigcodec 5.7M via zenfleet/fleet nodes if
 local ETA > ~6h (NEVER hand-rolled fleets).
 
 ## P1.5 — BANDVIS dst-activity adjudication (added 2026-08-02, user: "we may
