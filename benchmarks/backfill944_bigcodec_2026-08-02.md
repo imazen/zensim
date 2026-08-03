@@ -165,8 +165,73 @@ diagnosis two instrument passes with an incomplete exec env wrote 170
 FAILED rows (`encoder_panic` = my missing `ZEN_R2_ENDPOINT`, not a real
 panic); those shards were deleted from the run ledger before the fix pass.
 
-RESULTS_PLACEHOLDER (final per-view G-BF1/G-BF2 table + assembly stats +
-wall time + node utilization land here at promote.)
+## FINAL RESULTS (promoted 2026-08-03 ~02:5xZ)
+
+**All 21 views: G-BF1 + G-BF2 + structural PASS** (join match_rate 1.0000,
+5,742,660 rows exact; per-view JSON in `bigcodec/gates/`):
+
+| dataset | train | validate | test |
+|---|---|---|---|
+| zenavif_lossy (775,152 / 464,352 / 271,488 rows) | PASS | PASS | PASS |
+| zenjpeg_lossy | PASS | PASS | PASS |
+| zenjxl_lossless | PASS | PASS | PASS |
+| zenjxl_lossy | PASS | PASS | PASS |
+| zenpng_lossless | PASS | PASS | PASS |
+| zenwebp_lossless | PASS | PASS | PASS |
+| zenwebp_lossy | PASS | PASS | PASS |
+
+Canonical: `/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/bigcodec/`
+(+`_MANIFEST.json` w/ per-file sha256) · R2
+`s3://zentrain/ext944-canonical-2026-08-01/bigcodec/` (50 objects) · Tower
+`/mnt/tower/output/zensim-ext944-canonical-2026-08-01/bigcodec/` — sha
+spot-verified (Tower 3/3, R2 1/1). Fleet table = part set
+`tbig-944-2026-08-02/` (parts 000-012 + selection provenance; delta parts
+011-012 shadow — read rule in DATA_PROVENANCE), triple-mirrored.
+
+### Wall time / node utilization (all household, $0 paid)
+
+| phase | wall | nodes |
+|---|---|---|
+| main tier-matched wave (490,173 cells / 5.74M rows) | **~8.6 h** (03:41→~12:15Z 99.96%) | v4: tower(24c cap)+i265+ian+jason(joined 08:20 after its other job) · v4x: lianli(+wsl container from 08:20) · neon: mac (idle-only) |
+| neon straggler fix (173 cells: stale-claim starvation) | ~2 h diagnosis+fix | mac (manual gapfix passes) |
+| vendor repair wave (83,970 cells) | **~1.9 h** (22:44→00:36Z) | amd: tower+ian · intel: i265+jason |
+| assemble fetch (490k blobs) | 62+55 min (two full passes — see below) + **12.7 min delta** | wsl |
+| 21-view join ×2 (initial + post-repair) | ~21 min each (per-dataset run-heavy, ext4-staged parts) | wsl |
+| 21 gates ×2 | ~35 min each | wsl |
+| promote + manifests | 99 s | wsl |
+| mirrors (R2 26GB+25GB, Tower 51GB) | ~75 min chunked | wsl |
+
+Throughput ~950-1,300 cells/min mid-wave across 5-7 boxes; the bf924
+precedent (~7.5 h) matched despite the extra tier partitioning.
+
+### Merge-path comparison (user directive: keyed union, not re-assembly)
+
+The vendor repair merged via **keyed delta**: 94,242 corrected picks
+(83,970 repair-extracted + 10,272 re-picks from existing multi-worker
+blobs) fetched into delta parts 011-012 in **12.7 min (124 blobs/s)**, then
+consumed by the part-set join delta-first (keep-first per encode_sha ⇒
+repaired rows shadow stale ones; zero part rewrites). The full-assemble
+alternative (re-fetch all 490,173 blobs) measured 55-62 min per pass — the
+delta path is **~4.6× faster**, and the two full passes already spent (the
+initial fetch + the post-reap restart) are exactly the cost the keyed
+design avoids. (The restart also produced the part-rolling fix — a
+harness-kill mid-write cost one footerless 23.9 GB file, quarantined .bak.)
+
+### Honest accounting
+
+- 2 fleet cells' blobs carry error records for some variants (9 error rows
+  in the main fetch + 2 in the delta, bf924-precedent class: per-variant
+  decode errors recorded honestly, never fabricated); every VIEW row is
+  backed by a real feature row (match_rate 1.0000 gates that).
+- The one genuinely-failed neon cell (o_1413.png.scale64x48, avif) was
+  re-run on the mac (`done=1`) before final selection; final selection has
+  0 missing.
+- Superseded artifacts kept as .bak: the pre-vendor-fix staged views
+  (`bigcodec_staged_prevendorfix.bak`) + the footerless first-fetch parquet.
+- jason ran another session's training until ~08:20Z (excluded till idle);
+  kids' boxes were used only while genuinely idle and their workers are
+  now disabled again (enrolled-stopped); mac worker daemon left unloaded;
+  tower container removed; all pool workers stood down at drain.
 
 ## Post-fleet pipeline (committed this session)
 

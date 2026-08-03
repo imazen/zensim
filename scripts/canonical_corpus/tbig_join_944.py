@@ -63,26 +63,33 @@ def main() -> int:
 
     feat_names = [f"f{i}" for i in range(N_FEAT)]
     fleet_cols = ["encode_sha"] + feat_names
-    # --fleet may be a single parquet, a directory of part files, or a base
+    # --fleet may be a single parquet, a directory of part files, a base
     # path whose `<stem>.part-NNN.parquet` siblings exist (the assembler's
-    # crash-safe part-rolling output).
-    fp = args.fleet
-    if os.path.isdir(fp):
-        fleet_files = sorted(
-            os.path.join(fp, f) for f in os.listdir(fp)
-            if f.endswith(".parquet") and ".bak" not in f
-        )
-    elif os.path.isfile(fp):
-        fleet_files = [fp]
-    else:
+    # crash-safe part-rolling output), or a COMMA-LIST of any of those.
+    # A comma-list is consumed IN THE GIVEN ORDER and the per-key fill is
+    # keep-FIRST — putting a delta/repair part set first makes this a keyed
+    # union where repaired rows shadow stale ones (the near-instant merge
+    # path: no full re-fetch, no part rewrite).
+    def expand(fp):
+        if os.path.isdir(fp):
+            return sorted(
+                os.path.join(fp, f) for f in os.listdir(fp)
+                if f.endswith(".parquet") and ".bak" not in f
+            )
+        if os.path.isfile(fp):
+            return [fp]
         stem = os.path.splitext(os.path.basename(fp))[0]
         d = os.path.dirname(fp)
-        fleet_files = sorted(
+        return sorted(
             os.path.join(d, f) for f in os.listdir(d)
             if f.startswith(stem + ".part-") and f.endswith(".parquet")
         )
+
+    fleet_files = []
+    for fp in args.fleet.split(","):
+        fleet_files += expand(fp)
     if not fleet_files:
-        print(f"FATAL: no fleet parquet(s) at {fp}", file=sys.stderr)
+        print(f"FATAL: no fleet parquet(s) at {args.fleet}", file=sys.stderr)
         return 1
     print(f"fleet: {len(fleet_files)} file(s)", file=sys.stderr)
     report = {"per_split": {}, "fleet": fleet_files, "views_root": root}

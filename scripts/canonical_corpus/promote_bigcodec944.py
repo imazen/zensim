@@ -100,7 +100,11 @@ def main() -> int:
             src = os.path.join(a.staged, dset, f"{split}_944.parquet")
             dst = os.path.join(od, f"{split}_944.parquet")
             print(f"install {dst}", flush=True)
-            shutil.copy2(src, dst)
+            # same filesystem: rename is instant; fall back to copy across devices
+            try:
+                os.rename(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
             import pyarrow.parquet as pq
             files[f"{dset}/{split}_944.parquet"] = {
                 "sha256": sha256_file(dst),
