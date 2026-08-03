@@ -264,6 +264,26 @@ fn slot_720(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Root-aware slot resolution for `--regime 720`-class roots. The 944 root
+/// (`ext944-canonical-2026-08-01`) carries the canonical-test-view slices
+/// `ext_nonphoto.parquet` / `ext_imazen26.parquet` (built by
+/// `scripts/canonical_corpus/build_eval_slices_944.py` per the FULL_EVAL
+/// "924-era eval slices" rule — origin-{7,9} TEST views, class-filtered);
+/// the 720 root keeps its legacy NN-joined tables. Prefer the modern name
+/// when it exists under THIS root, else fall back to the legacy filename —
+/// so one binary serves both roots and a missing corpus still fails loud
+/// downstream (never a silent skip).
+fn slot_720_file(name: &str, root: &Path) -> Option<String> {
+    let legacy = slot_720(name)?;
+    if matches!(name, "nonphoto" | "imazen26") {
+        let modern = format!("ext_{name}.parquet");
+        if root.join(&modern).exists() {
+            return Some(modern);
+        }
+    }
+    Some(legacy.to_string())
+}
+
 /// Default `--features-root` for `--regime 720`.
 const DEFAULT_FEATURES_ROOT_720: &str = "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22";
 /// Default dial + corruption grids for `--regime 720` (720-wide re-extractions).
@@ -1483,11 +1503,12 @@ fn render_corpus(
     per_pair_output: Option<&Path>,
 ) -> Result<CorpusResult, String> {
     let fname = if regime_720 {
-        slot_720(corpus.name).ok_or_else(|| format!("no 720 slot for corpus {}", corpus.name))?
+        slot_720_file(corpus.name, features_root)
+            .ok_or_else(|| format!("no 720 slot for corpus {}", corpus.name))?
     } else {
-        corpus.filename
+        corpus.filename.to_string()
     };
-    let path = features_root.join(fname);
+    let path = features_root.join(&fname);
     let g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
         .map_err(|e| format!("load {} parquet: {e}", corpus.display))?;
     let humans = g.human_scores;
@@ -1922,14 +1943,14 @@ fn main() -> ExitCode {
         // (via slot_720), NOT the 372col filename. render_corpus resolves the
         // same way — keep these two in sync.
         let cfname = if args.regime_720 {
-            match slot_720(corpus.name) {
+            match slot_720_file(corpus.name, &args.features_root) {
                 Some(f) => f,
                 None => continue, // filtered already; belt-and-braces
             }
         } else {
-            corpus.filename
+            corpus.filename.to_string()
         };
-        let cpath = args.features_root.join(cfname);
+        let cpath = args.features_root.join(&cfname);
         if !cpath.exists() {
             eprintln!(
                 "bake_verdict: MISSING corpus {} at {} — do NOT skip; restore it:\n  \
@@ -1937,7 +1958,7 @@ fn main() -> ExitCode {
                  https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com",
                 corpus.display,
                 cpath.display(),
-                Path::new(cfname).file_name().unwrap().to_string_lossy(),
+                Path::new(&cfname).file_name().unwrap().to_string_lossy(),
                 cpath.display(),
             );
             return ExitCode::from(2);

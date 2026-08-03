@@ -251,18 +251,19 @@ fn run_bake_mode(
         .expect("parse bake header")
         .n_inputs();
     // M3 supports the v1 layouts (n_in ≤ 372), the combined v1+v2 layout
-    // (720 = 372 v1 ++ 348 v2), and the folded-append 924 regime (f0-155
-    // folded basic, f156-371 STRUCTURAL ZEROS, f372-719 v2, f720-923 append).
+    // (720 = 372 v1 ++ 348 v2), the folded-append 924 regime (f0-155
+    // folded basic, f156-371 STRUCTURAL ZEROS, f372-719 v2, f720-923 append),
+    // and the folded-append2 944 regime (924 ++ f924-943 append2, SOTA-944).
     // Any other width — e.g. an ext504 bake (156 basic ++ 348 v2) — puts the
     // v2 block at a different offset, so the fold and the dropped-mass are
     // undefined for it. Skip cleanly rather than panic.
-    if n_in > 372 && n_in != 720 && n_in != 924 {
+    if n_in > 372 && n_in != 720 && n_in != 924 && n_in != 944 {
         println!(
-            "  M3 skipped: unsupported bake layout (n_inputs={n_in}; the diffmap fold supports n_inputs ≤ 372, 720, or 924)"
+            "  M3 skipped: unsupported bake layout (n_inputs={n_in}; the diffmap fold supports n_inputs ≤ 372, 720, 924, or 944)"
         );
         return;
     }
-    let folded924 = n_in == 924;
+    let folded924 = n_in == 924 || n_in == 944;
     BAKE_BYTES.set(bytes).expect("bake bytes set once");
 
     // Feature pipeline sized to the bake: basic-only bakes (n_in ≤ 156) skip the
@@ -294,14 +295,16 @@ fn run_bake_mode(
         let ds = RgbSlice::new(dist, w, h);
         #[cfg(feature = "feature-regime-v2")]
         if folded924 {
+            // 944 = the same canonical streaming extractor with the append2
+            // block toggled on (bit-identical f0..f923; the bf944 executor's
+            // exact recipe). Toggle-dependent width matches n_in below.
+            let toggles = zensim::feature_v2::V2NewFeatureToggles {
+                append2_block: n_in == 944,
+                ..Default::default()
+            };
             return z
-                .compute_folded720_append_features_streaming(
-                    &rs,
-                    &ds,
-                    zensim::feature_v2::V2NewFeatureToggles::default(),
-                    &mut v2_scratch,
-                )
-                .expect("folded-append 924 features")
+                .compute_folded720_append_features_streaming(&rs, &ds, toggles, &mut v2_scratch)
+                .expect("folded-append 924/944 features")
                 .features()
                 .to_vec();
         }
@@ -368,7 +371,7 @@ fn run_bake_mode(
             }
         };
         println!(
-            "  GRADMASS regions: basic {:.1}% | v1-pool {:.1}% | v2 {:.1}% | append {:.1}%",
+            "  GRADMASS regions: basic {:.1}% | v1-pool {:.1}% | v2 {:.1}% | append {:.1}% | append2 {:.1}%",
             mass(0..156.min(n_in)),
             if n_in > 156 {
                 mass(156..372.min(n_in))
@@ -382,6 +385,11 @@ fn run_bake_mode(
             },
             if n_in > 720 {
                 mass(720..924.min(n_in))
+            } else {
+                0.0
+            },
+            if n_in > 924 {
+                mass(924..944.min(n_in))
             } else {
                 0.0
             },
@@ -511,11 +519,18 @@ fn run_bake_mode(
         // its gradient share is a SECOND blind spot for M3, reported so a low
         // M3 on a 924 bake is read against append reliance, not miscoherence.
         if folded924 {
-            let app: f64 = s[720..924].iter().map(|v| v.abs()).sum();
+            let app: f64 = s[720..924.min(n_in)].iter().map(|v| v.abs()).sum();
             println!(
                 "  not-yet-foldable append block (f720-923) raw-|s_k| mass: {:.1}%  (no per-pixel fold for the append kernels yet; M3 is blind to it)",
                 100.0 * app / total
             );
+            if n_in > 924 {
+                let app2: f64 = s[924..n_in].iter().map(|v| v.abs()).sum();
+                println!(
+                    "  not-yet-foldable append2 block (f924-943) raw-|s_k| mass: {:.1}%  (same blind spot, BANDVIS/luma lanes)",
+                    100.0 * app2 / total
+                );
+            }
         }
     }
     let v2_grad: Option<Vec<f64>> = if n_in > 372 {

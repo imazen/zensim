@@ -24,7 +24,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-    echo "usage: run_full_eval.sh <bake.bin> <name> [regime=720|372|924]" >&2
+    echo "usage: run_full_eval.sh <bake.bin> <name> [regime=720|372|924|944]" >&2
     exit 2
 fi
 BAKE=$1
@@ -78,6 +78,20 @@ if [[ "$REGIME" == "924" ]]; then
               --corruption-grid /mnt/v/output/zensim/v2-eval-924-2026-07-27/corruption_grid_924col_2026-07-27.parquet
               --perpair-metrics /mnt/v/zen/zensim-training/kadis-924-2026-07-27/kadis700k_924.parquet
               --corpora cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25)
+fi
+# regime "944" = the SOTA-944 campaign invocation (folded+append+append2;
+# benchmarks/sota944_campaign_2026-08-03.md). Same slot map (--regime 720);
+# roots swap to the ext944 canonical set — which ALSO carries the
+# imazen26/nonphoto TEST-view slices (build_eval_slices_944.py), so those
+# corpora are back on the list (bake_verdict's slot_720_file resolves
+# ext_imazen26/ext_nonphoto under this root).
+if [[ "$REGIME" == "944" ]]; then
+    BV_REGIME=720
+    BV_EXTRA=(--features-root /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01
+              --dial-grid /mnt/v/output/zensim/v2-eval-944-2026-08-01/dial_grid_944col_2026-08-01.parquet
+              --corruption-grid /mnt/v/output/zensim/v2-eval-944-2026-08-01/corruption_grid_944col_2026-08-01.parquet
+              --perpair-metrics /mnt/v/zen/zensim-training/kadis-944-2026-08-01/kadis700k_944.parquet
+              --corpora cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25,imazen26,nonphoto)
 fi
 # Stash the previous JSON so ZENSIM_M3_REUSE=1 can carry its M3 fields after
 # bake_verdict overwrites the file (bake_verdict always emits m3=null).
