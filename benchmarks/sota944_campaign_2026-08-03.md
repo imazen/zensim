@@ -307,6 +307,80 @@ foreground-only execution (no background waiters/timers); push+verify per commit
 
 ---
 
-## Results (appended in place; grid tables + verdicts land here)
+## Results (appended in place)
 
-*(pending)*
+Artifacts: bakes + `.spec.json` under `/mnt/v/output/zensim/bakes/sota944/bakes/`
+(embedded `zentrain.repro` in every fit-chain bake), verdicts under `.../verdicts/`,
+grid TSV `/mnt/v/output/zensim/bakes/sota944/sota944_gridA.tsv`, grams (18, sha-recorded)
+under `.../grams/`. Data artifacts built this campaign: `tbig_944_200k.parquet`
+(G-T1/G-T2 row-identity to the E-M 924 slice PASS — keys + f0..f923 bitwise),
+`ext_imazen26/ext_nonphoto/ext_hfnlproxy.parquet` (+`_MANIFEST_eval_slices.json`).
+
+### Era-bridge verification (the cross-era comparability spine)
+
+`EM4_mask2_kw0.15_s42.bin` (924-width) re-scored on the ext944 root (feature
+truncation reads f0..f923, bitwise-identical by G-BF1): **cid22 0.8924 / konjnd
+0.4286 / csiq 0.7882 / live 0.8013 — exactly its 924-era numbers**, plus the new
+unified-944 instruments: **imazen26 0.9065 · nonphoto 0.9098 · sdr25 0.9556**
+(`verdicts/EM4_s42_on944root.full.json`). The 0.8924 CID22 bar and the
+0.90-class nonphoto bar are thereby calibrated on exactly the instruments this
+campaign uses.
+
+### Arm A — additive-944 (40 cells: 27 shaped + 3 raw control + 4 BVLS + 6 registered densify)
+
+Full table: `sota944_gridA.tsv`. Condensed (SROCC; hfnl = per-ref mean):
+
+| cell (best-of family) | cid22 | konjnd | sdr25 | nonphoto | hfnl |
+|---|---|---|---|---|---|
+| shaped P AM1 λ1e-3 (CID22-best shaped-P) | 0.8160 | 0.4089 | 0.7337 | 0.8060 | 0.271 |
+| shaped X AM2 λ1.8e-2 (densify; CID22-best shaped) | **0.8203** | 0.3558 | 0.9497 | 0.8221 | 0.513 |
+| shaped Bplus AM5 λ1e-2 | 0.8124 | 0.3758 | 0.9346 | 0.8181 | 0.488 |
+| raw X AM5 λ1e-2 (raw control) | 0.8142 | **0.4344** | 0.8395 | 0.8412 | 0.542 |
+| bvls P AM5 (mm01 targets) | 0.7797 | 0.4341 | 0.9587 | 0.7543 | 0.111 |
+| **bvls X AM5 — ARM-A CANDIDATE (max sdr25)** | 0.7947 | 0.3296 | **0.9746** | 0.7750 | 0.266 |
+
+Findings (arm A):
+1. **The additive class does not approach the CID22 bar at 944**: grid max 0.8203
+   vs bar >0.8924. Same story as E-LIN at 924 (max 0.8319 at full width) — the
+   spatializable slices give up a further ~0.01. CID22 still rising at the λ edge
+   (1.8e-2 > 1e-2 > 3e-3 within X-AM2), same monotone trend E-LIN recorded; grid
+   frozen at registration, trend recorded not chased.
+2. **Shaped (monotone transforms) is CID22-neutral-to-mildly-positive vs raw at
+   matched cells but costs KonJND** (raw X AM5 konjnd 0.431-0.434 vs shaped
+   0.332-0.340). The 255-feature screen switch did not unlock rank.
+3. **BANDVIS lanes (Bplus vs X, shaped)**: konjnd +0.02-0.03, cid22 ~0, sdr25 −0.01
+   — a small real near-threshold contribution from the 8 GAIN/LOSS lanes.
+4. **mm01 per-corpus targets (BVLS cells) are the sdr25/dial lever** (0.959-0.975
+   sdr25, the two grid-best) at a CID22 cost; konjnd splits P (0.434) vs X (0.330).
+5. kadid/tid guards and dial columns in the TSV; dial mono 0.93-0.99 across cells.
+
+### Arm B — B-recipe replay at 944 (kon BVLS head + cid lasso heads + 9 z-normed blends)
+
+| cell | cid22 | konjnd | sdr25 | nonphoto | hfnl |
+|---|---|---|---|---|---|
+| kon head (BVLS mm01, canonhdr15-minus-hdr weights) | 0.7465 | 0.1873 | 0.8755 | 0.7523 | 0.486 |
+| cid head λ2e-3 (AM2) | 0.8286 | **0.4355** | 0.8798 | 0.8194 | 0.464 |
+| blend λ3e-3 α0.9 (CID22-best) | **0.8327** | 0.4106 | 0.8843 | 0.8217 | **−0.262** |
+| **blend λ1e-3 α0.7 — ARM-B CANDIDATE (max sdr25)** | 0.8243 | 0.3623 | 0.9005 | 0.8118 | 0.193 |
+
+Findings (arm B):
+1. **The replay lands at CID22 0.824-0.833** — above every arm-A lasso cell, below
+   the bar by ~0.06. Without the hdr_v3mix leg (regime-absent) the blend's cid
+   side cannot reproduce B's 372-era rank contribution.
+2. **HONEST FLAG — the blends invert the HF-NL proxy** (α0.9 → −0.25 per-ref while
+   both standalone heads sit at +0.46/+0.49). This is the measured 944 analog of
+   B's original inclusive-winsor flaw (profile_b_methodology §3: bounds fit on a
+   corpus whose NL-band feature range is narrower clamp features constant there;
+   our winsor fit = safesyn-only, the registered deviation §4). The blend's
+   z-normed cancellation collapses fine near-lossless ordering that each head
+   carries alone. Recorded as the deviation's measured consequence.
+
+### Arm-candidate slate so far (selection §2 pending arm C)
+
+| arm | candidate | sdr25 | cid22 | konjnd |
+|---|---|---|---|---|
+| A | `A_bvls_X_AM5_w` | 0.9746 | 0.7947 | 0.3296 |
+| B | `B_blend_lam1e-3_a0.7_w` | 0.9005 | 0.8243 | 0.3623 |
+| C | *(8 seeds in flight)* | | | |
+
+*(arm C + selection + winner instruments + LOO + scorecard land below)*
