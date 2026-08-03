@@ -84,6 +84,7 @@ Cargo.toml.original.txt
 fuzz-*.log
 
 .workongoing
+.workongoing.*
 .session-log-*
 
 # Python
