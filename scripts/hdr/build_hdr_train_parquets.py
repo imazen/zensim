@@ -43,6 +43,10 @@ ap.add_argument("--iw-target", choices=["mix", "pure"], default=None,
                      "iw_logn = clamp(-log10(clamp(1-iw,1e-6,1))/4, 0, 1) spreads the "
                      "near-1 saturation. mix: human_score = 0.5*s2n + 0.5*iw_logn; "
                      "pure: human_score = iw_logn. iwssim-missing rows are DROPPED.")
+ap.add_argument("--features-width", type=int, default=372,
+                help="feature column count in the sidecar (944 for the SOTA-944 "
+                     "hdr_v3mix-944 leg; the split/dedup/target logic is width-"
+                     "agnostic — benchmarks/sota944_campaign_2026-08-03.md)")
 ap.add_argument("--features-name", default="zensim_features.parquet",
                 help="features sidecar filename under sidecars/<codec>/ — e.g. "
                      "zensim_features_pulinear.parquet for the v3 PU-linear regime "
@@ -128,7 +132,7 @@ for d in [a.datagen] + a.extra_datagen:
     md = pq.read_metadata(fp)
     assert md.num_rows > 0, f"IMPL BUG guard: features sidecar {fp} is EMPTY"
     fcols = sorted((c for c in t.schema.names if c.startswith("feat_")), key=lambda c: int(c.split("_")[1]))
-    assert len(fcols) == 372, f"{fp}: {len(fcols)} feature cols"
+    assert len(fcols) == a.features_width, f"{fp}: {len(fcols)} feature cols (want {a.features_width})"
     scores = load_scores(d)
     F = np.column_stack([np.asarray(t[c], dtype=float) for c in fcols])
     zs = np.asarray(t["zensim_score"], dtype=float)
@@ -179,7 +183,7 @@ if a.iw_target:
 assert feats, "no rows joined"
 F = np.vstack(feats)
 data = {k: pa.array(v) for k, v in rows.items()}
-for j in range(372):
+for j in range(a.features_width):
     data[f"f{j}"] = pa.array(F[:, j])
 full = pa.table(data)
 

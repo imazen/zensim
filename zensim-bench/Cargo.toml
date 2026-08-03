@@ -36,6 +36,11 @@ verify-jxl = ["verify-decode", "dep:zenjxl"]
 verify-webp = ["verify-decode", "dep:zenwebp"]
 verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 
+# `hdr944_extract` example (SOTA-944 hdr_v3mix amendment): decode the HDR
+# datagen's (PQ-PNG ref, .jxl dist) pairs in memory and extract the 944
+# folded+append2 HDR-PQ features — no PNG decode-cache on disk.
+hdr944-extract = ["dep:zenjxl", "dep:zenpixels", "zensim/feature-regime-v2", "zensim/custom-profiles"]
+
 [build-dependencies]
 cc = "1"
 
@@ -112,6 +117,10 @@ harness = false
 # `cargo build --example extract_features_372col` auto-enable it instead
 # of failing with unresolved-import errors (the 2026-05-28 build break).
 [[example]]
+name = "hdr944_extract"
+required-features = ["hdr944-extract"]
+
+[[example]]
 name = "extract_features_372col"
 required-features = ["training"]
 
@@ -153,6 +162,10 @@ zenjpeg = { path = "../../zenjpeg/zenjpeg" }
 # zenavif-wants-0.1.26 vs local 0.1.27). Forcing local unifies them.
 zenavif = { path = "../../zenavif" }
 zenjxl = { path = "../../zenjxl" }
+# zenjxl@HEAD consumes the UNPUBLISHED zenjxl-decoder error-taxonomy API
+# (jxl::api::ErrorClass) — patch the local sibling in (SOTA-944 hdr944
+# amendment; the "patch it in and KEEP WORKING" rule).
+zenjxl-decoder = { path = "../../zenjxl-decoder/zenjxl-decoder" }
 zencodec = { path = "../../zencodec" }
 zenpixels = { path = "../../zenpixels/zenpixels" }
 

@@ -12,10 +12,13 @@ set -euo pipefail
 SEED=${1:?usage: sota944_armC_seed.sh <seed>}
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TRAIN=${ZL_TRAIN:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/zensim_mlp_train}
-E=/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01
-T=/mnt/v/zen/zensim-training
-K=/mnt/v/zen/zensim-training/kadis-944-2026-08-01
-OUT=/mnt/v/output/zensim/bakes/sota944/bakes
+# Env-overridable data roots (fleet nodes stage locally — USER DIRECTIVE
+# 2026-08-03 "do it in parallel": same script runs on any node with staged
+# copies; defaults = the local /mnt/v canonicals).
+E=${SOTA944_E:-/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01}
+T=${SOTA944_T:-/mnt/v/zen/zensim-training}
+K=${SOTA944_K:-/mnt/v/zen/zensim-training/kadis-944-2026-08-01}
+OUT=${SOTA944_OUT:-/mnt/v/output/zensim/bakes/sota944/bakes}
 mkdir -p "$OUT"
 BAKE="$OUT/C_em944_s${SEED}.bin"
 [[ -f "$BAKE" ]] && { echo "exists: $BAKE"; exit 0; }
