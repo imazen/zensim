@@ -19,8 +19,12 @@ E=${SOTA944_E:-/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01}
 T=${SOTA944_T:-/mnt/v/zen/zensim-training}
 K=${SOTA944_K:-/mnt/v/zen/zensim-training/kadis-944-2026-08-01}
 OUT=${SOTA944_OUT:-/mnt/v/output/zensim/bakes/sota944/bakes}
+# SOTA944_TAG: bake-name tag (default em944; near-top arm uses nt944 / nt944lo).
+# SOTA944_EXTRA_GROUP: one extra --group spec appended to the recipe (the
+# near-top anchor group — amendment 2). Registered in the campaign doc.
+TAG=${SOTA944_TAG:-em944}
 mkdir -p "$OUT"
-BAKE="$OUT/C_em944_s${SEED}.bin"
+BAKE="$OUT/C_${TAG}_s${SEED}.bin"
 [[ -f "$BAKE" ]] && { echo "exists: $BAKE"; exit 0; }
 [[ -x "$TRAIN" ]] || { echo "missing $TRAIN" >&2; exit 2; }
 
@@ -65,6 +69,7 @@ exec "$TRAIN" \
   --group "tid:$E/ext_tid.parquet:0.5:1.0:rank" \
   --group "bigcodec:$T/tbig_944_200k.parquet:0.5:1.0:both" \
   --group "kadis:$K/kadis_944_ssim2_50k.parquet:0.15:1.0:both" \
+  ${SOTA944_EXTRA_GROUP:+--group "$SOTA944_EXTRA_GROUP"} \
   --n-hidden-layers 0 --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 --seed "$SEED" \
   --max-features 944 --allow-narrow-features \

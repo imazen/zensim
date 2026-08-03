@@ -688,3 +688,44 @@ lane wrapper's bake_verdict-not-found stderr is expected-by-design (verdicts
 run locally); SIX external background-task kills over the campaign — all work
 survived via setsid/container detachment, at the cost of manual re-arms.
 
+
+---
+
+## REGISTERED AMENDMENT 2 — near-top anchor arm (#50 lever; committed BEFORE any fit)
+
+The #50 diagnosis: model-raw saturates (B: knot ceiling 1.1379/raw ≈1.147 as
+perturbation → 0) because training pairs END where codecs stop producing them;
+the s31 CID22 deficit (−0.0055) concentrates in the top band. Lever = near-top
+TRAINING mass.
+
+- **Recipe**: the arm-C recipe verbatim + ONE extra group
+  `topband:/mnt/v/zen/zensim-training/topband944.parquet:W:1.0:both` —
+  33,969 rows = the bigcodec-944 TRAIN views' `score_ssim2 ≥ 91` band
+  (pool 135,874, stride 4; train origins asserted even-digit;
+  builder `scripts/canonical_corpus/build_topband944.py`, sha in its manifest).
+- **Registered DEVIATION from the supervisor's source sketch** (with reasons):
+  sdr25's q75-100 band and ext_hfnlproxy are NOT training sources — sdr25 is
+  the frozen selection oracle (training on it voids within-family selection)
+  and hfnlproxy is the HF-NL bar row built from TEST origins (training on it
+  voids the row). The multiband dial-100 anchor exists only at 372 (regime
+  purity). The bigcodec-TRAIN top band is the instrument-clean substitute and
+  is REAL near-lossless codec content. bigcodec-mass caveat (KonJND
+  anti-correlation pitfall) acknowledged → KonJND guard is a frozen endpoint.
+- **Weights**: primary W=1.0 (k=6 seeds); dose-response variant W=0.5 on the
+  first two seeds (tag `nt944lo`). Bake tags: `C_nt944_s<seed>` / `C_nt944lo_s<seed>`.
+- **Seeds (registered)**: {211, 223, 227, 229, 233, 239} (fresh; disjoint from
+  all 23 prior). Lanes: local wsl + lianli (tower skipped this wave — 90 s/ep
+  measured; staging removed).
+- **Endpoints (frozen)**: PRIMARY CID22 vs the 0.8924 bar. SECONDARY mechanism
+  checks on the within-family sdr25/best_val-selected winner: (1) issue50
+  perturbation instrument raw-span — winner vs s31 on the same grid (did the
+  saturation ceiling move / does raw spread further above the old knot zone);
+  (2) CID22 B8/B9 per-band SROCC vs s31; (3) hfnlproxy per-ref; (4) dial top
+  reach/p95; (5) **KonJND guard ≥ 0.43-class must HOLD**; (6) M3a reported.
+  Honest outcome either way: if CID22 nulls but the ceiling+top-band move,
+  that redirects the remaining gap to the M3a/coherence study (the last
+  registered systematic lever).
+
+### Near-top arm results (appended when the wave lands)
+
+*(pending)*
