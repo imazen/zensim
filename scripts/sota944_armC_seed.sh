@@ -59,20 +59,36 @@ for g in $(seq 0 11); do
   MASK2+=( "winsor_p99:$((720 + g*17 + 12)):0,0" )   # DET_DEV2
 done
 
+# Amendment-3 variant hooks (registered in the campaign doc):
+#  SOTA944_DROP_MSE_WINSOR=1  -> drop the 12 slot-9 (per-scale MSE) winsor
+#    flags from WT40 (the GRAD_MASS diagnostic's 91%-mass carriers).
+#  SOTA944_NO_TBIG=1          -> omit the bigcodec group entirely.
+#  SOTA944_EXTRA_GROUP2/3     -> additional extra groups (distillation twins).
+#  SOTA944_COARSE_DECAY       -> override the default 1e-5 decay rate.
 FT_ARGS=()
-for t in "${WT40[@]}" "${MASK2[@]}"; do FT_ARGS+=(--feature-transform "$t"); done
+MSE_IDX=" 9 22 35 48 61 74 87 100 113 126 139 152 "
+for t in "${WT40[@]}"; do
+  if [ "${SOTA944_DROP_MSE_WINSOR:-0}" = "1" ]; then
+    idx=$(echo "$t" | cut -d: -f2)
+    case "$MSE_IDX" in *" $idx "*) continue ;; esac
+  fi
+  FT_ARGS+=(--feature-transform "$t")
+done
+for t in "${MASK2[@]}"; do FT_ARGS+=(--feature-transform "$t"); done
 
 exec "$TRAIN" \
   --group "safesyn:$E/ext_safesyn_full.parquet:1.0:0.5:both" \
   --group "cid22_train:$E/ext_cid22_train201.parquet:1.0:2.0:both" \
   --group "kadid:$E/ext_kadid.parquet:0.5:1.0:rank" \
   --group "tid:$E/ext_tid.parquet:0.5:1.0:rank" \
-  --group "bigcodec:$T/tbig_944_200k.parquet:0.5:1.0:both" \
+  ${SOTA944_NO_TBIG:+ } $([ "${SOTA944_NO_TBIG:-0}" = "1" ] || echo --group "bigcodec:$T/tbig_944_200k.parquet:0.5:1.0:both") \
   --group "kadis:$K/kadis_944_ssim2_50k.parquet:0.15:1.0:both" \
   ${SOTA944_EXTRA_GROUP:+--group "$SOTA944_EXTRA_GROUP"} \
+  ${SOTA944_EXTRA_GROUP2:+--group "$SOTA944_EXTRA_GROUP2"} \
+  ${SOTA944_EXTRA_GROUP3:+--group "$SOTA944_EXTRA_GROUP3"} \
   --n-hidden-layers 0 --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 --seed "$SEED" \
   --max-features 944 --allow-narrow-features \
-  --coarse-decay 1e-5 \
+  --coarse-decay "${SOTA944_COARSE_DECAY:-1e-5}" \
   "${FT_ARGS[@]}" \
   --out "$BAKE"

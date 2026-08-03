@@ -139,6 +139,11 @@ enum Cmd {
     /// `linear_projections_2026-07-03.py` `fit` plus `finalize` for one
     /// gram/lambda, bit-exactly).
     FitLasso(Box<FitLassoArgs>),
+    /// Forward an arbitrary bake (incl. MLPs) over a feature parquet through
+    /// the PRODUCTION predictor (transform-safe) and write `ref_basename\tpred`
+    /// TSV — the teacher-labeling / preds-dump owner (SOTA-944 amendment 3
+    /// distillation arm; reuses add-spline's forward machinery).
+    Predict(PredictArgs),
     /// Blend two fit-npz heads (from `fit-lasso --emit-fit-npz`) in raw
     /// output space with per-head z-normalization over the anchor rows —
     /// the Profile-B multi-head mechanism (SOTA-944 §4). Collapses to ONE
@@ -2278,6 +2283,53 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
 }
 
 // --------------------------------------------------------------------------
+// subcommand: predict  (transform-safe bake forward over a parquet)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct PredictArgs {
+    /// Bake to forward (any ZNPR v3, incl. MLPs).
+    #[arg(long)]
+    bake: PathBuf,
+    /// Feature parquet (f0..fN / feat_0.. + ref_basename).
+    #[arg(long)]
+    corpus: PathBuf,
+    /// Output TSV path (`row_idx<TAB>pred`, file row order — positional
+    /// alignment is the join contract; raw model output, spline applied only
+    /// when the bake carries one, via the production path).
+    #[arg(long)]
+    out: PathBuf,
+}
+
+fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
+    let bytes = std::fs::read(&a.bake).map_err(|e| format!("read {:?}: {e}", a.bake))?;
+    let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
+    let n_in = model.n_inputs();
+    let g = zensim_validate::parquet_loader::load_parquet(&a.corpus, "predict", "human_score", 1.0)?;
+    let transformed = model.has_nontrivial_feature_transforms();
+    let mut predictor = zenpredict::Predictor::new(&model);
+    let mut xbuf = vec![0f32; n_in];
+    let mut out = String::with_capacity(g.feature_rows.len() * 24);
+    out.push_str("row_idx\tpred\n");
+    for (i, row) in g.feature_rows.iter().enumerate() {
+        let take = n_in.min(row.len());
+        for (d, s) in xbuf[..take].iter_mut().zip(row[..take].iter()) {
+            *d = *s as f32;
+        }
+        let p = if transformed {
+            predictor.predict_transformed(&xbuf)
+        } else {
+            predictor.predict(&xbuf)
+        }
+        .map_err(|e| format!("predictor forward: {e:?}"))?;
+        out.push_str(&format!("{i}\t{:?}\n", p[0] as f64));
+    }
+    std::fs::write(&a.out, &out).map_err(|e| format!("write {:?}: {e}", a.out))?;
+    eprintln!("predict: {} rows -> {:?} (bake n_in {n_in})", g.feature_rows.len(), a.out);
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
 // subcommand: blend-heads  (the Profile-B multi-head raw blend — SOTA-944 §4)
 // --------------------------------------------------------------------------
 
@@ -3025,6 +3077,7 @@ fn main() -> ExitCode {
         Cmd::Strip(a) => cmd_strip(a).map(|_| false),
         Cmd::FitLasso(a) => cmd_fit_lasso(a).map(|_| false),
         Cmd::Gram(a) => cmd_gram(a).map(|_| false),
+        Cmd::Predict(a) => cmd_predict(a).map(|_| false),
         Cmd::BlendHeads(a) => cmd_blend_heads(a).map(|_| false),
         Cmd::ScreenTransforms(a) => cmd_screen_transforms(a).map(|_| false),
     };

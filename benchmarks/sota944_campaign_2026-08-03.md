@@ -776,3 +776,49 @@ speaks 944.
 Wave ops: 8/8 trained (wsl + lianli; per-seed nodes above); 7th external
 task-kill absorbed (supervisor retrieved lianli's tail; ~30 min lost).
 
+
+---
+
+## REGISTERED AMENDMENT 3 — the M3a/coherence study (last registered lever; committed BEFORE any fit)
+
+Frame: the CID22 gap is neither seed-luck (23-draw null) nor top-band mass
+(amendment 2). The 0.8924 function IS representable at 944-width (EM4 evaluates
+0.8924 on the 944 root); the stabilized regime does not find it. The one
+untested systematic story is the E-M coarse-mass/coherence axis.
+
+**Diagnostic first (run before this registration): `ZENSIM_GRAD_MASS=1` on s31
+(city/q50):** basic 97.8% | v2 1.6% | append 0.6% | append2 0.0%; basic-scales
+{6.1, 12.7, 42.7, 36.3}% (79% coarse); **top-idx = the 12 per-scale MSE slots
+(f9+13k), ~91% of |s_k| — and 9 of the top-10 are exactly WT40's winsorized
+indices** (tiny p99 bounds ⇒ post-scaler amplification). The E-M6 coarse-MSE
+mechanism persists at 944, plausibly amplified by the winsor→standardize
+interaction. This diagnostic picks arm 2's configs.
+
+**Arms (k=3 seeds each = {1301, 1303, 1307}; 7 configs, 21 runs; lanes local+lianli):**
+
+| tag | arm | change vs the arm-C recipe |
+|---|---|---|
+| co1a | 1 coherence-reg | `--coarse-decay 1e-4` (10× the keeper) |
+| co1b | 1 | `--coarse-decay 1e-3` (100×) |
+| co1c | 1 | kadis kw **0.5** (the E-M2 CID22-band point) + keeper decay 1e-5 |
+| co2a | 2 data-mix (diagnostic-informed) | **NO tbig group** (drop the E-M6b-blamed slice; the 720-era row-identical rebuild is impossible — that slice has no key, documented — so the direct drop IS the registered test) |
+| co2b | 2 | **WT40 minus the 12 slot-9 (MSE) winsor flags** (the diagnostic's 91%-mass carriers; other 28 flags + mask2 kept) |
+| co3a | 3 distillation | + the 3 EM4-teacher twins (safesyn/tbig/kadis rows, `human_score` = minmax01(EM4 raw; safesyn-fit affine [−12.954, 10.061], clip frac ≤0.25%) at **w=0.5** each, `:both` |
+| co3b | 3 | same at **w=1.5** |
+
+Teacher = `EM4_mask2_kw0.15_s42.bin` forwarded over f0..f923 of the 944 rows
+(bitwise-identical features ⇒ the teacher is EM4's true function; owner =
+the new `bake_dial_refit predict` subcommand, this commit). Teacher parquets +
+manifest: `/mnt/v/output/zensim/bakes/sota944/teacher/`.
+
+**Endpoints (frozen):** PRIMARY CID22 (vs the 0.8924 bar AND vs s31 0.8869);
+M3a (arm-1's paired endpoint: ≥0.85 with CID22 ≥0.885-class); KonJND guard
+≥0.43-class; sdr25 selection WITHIN-family only; dial; full battery on any
+winner. Honest nulls CLOSE the campaign's registered-lever queue — the report
+then states the measured conclusion: the bar encodes the unstable mode's peak,
+the stabilized 944 regime's ceiling is ≈0.887, and the freeze decision (user's)
+chooses between peak-chasing and stability.
+
+### Coherence-study results (appended when the wave lands)
+
+*(pending)*
