@@ -381,6 +381,25 @@ Findings (arm B):
 |---|---|---|---|---|
 | A | `A_bvls_X_AM5_w` | 0.9746 | 0.7947 | 0.3296 |
 | B | `B_blend_lam1e-3_a0.7_w` | 0.9005 | 0.8243 | 0.3623 |
-| C | *(8 seeds in flight)* | | | |
+| C | *(8 seeds; 6 verdicted, 2 on fleet)* | | | |
 
-*(arm C + selection + winner instruments + LOO + scorecard land below)*
+### Arm C seed band (in progress; per-seed train node recorded)
+
+| seed | node | cid22 | konjnd | sdr25 | best_val |
+|---|---|---|---|---|---|
+| 13 | wsl (AMD Zen4) | 0.8615 | 0.4169 | 0.8575 | 0.3311 |
+| 42 | wsl | 0.8718 | 0.3722 | 0.9186 | 0.4683 |
+| 99 | wsl | 0.8661 | 0.3587 | 0.8929 | 0.4194 |
+| 5 | wsl | 0.8402 | 0.4444 | 0.8224 | 0.5002 |
+| 7 | wsl | 0.8785 | 0.2940 | 0.9237 | 0.5028 |
+| 17 | wsl | 0.8791 | 0.3240 | 0.9055 | 0.4867 |
+| 23 | lianli (AMD Zen4) | *(training)* | | | |
+| 31 | i265 (Intel — vendor float-path noted; lottery entry, legitimate) | *(training)* | | | |
+
+Ops incidents (recorded): two external background-task kills hit the chain/waiters
+(the kadis-incident class); the chain was relaunched `setsid`-detached (kill-proof)
+and the remaining seeds were moved to household fleet nodes per the user's
+parallelize directive — data staged node-local (LAN scp; `tbig_944_200k` has no R2
+mirror yet), trainer = the same WSL-built binary, seeds 23/31 launched idle-checked.
+
+*(selection + winner instruments + LOO + B-gap resolution + scorecard land below)*
