@@ -1073,3 +1073,114 @@ data-mix change.
 - Full-evals (9, M3a): `/mnt/v/output/zensim/reports/fulleval/C_co*.fulleval.json`
 - Tower mirror: `/mnt/tower/output/zensim-sota944-2026-08-03/`
 
+
+---
+
+## REGISTERED AMENDMENT 4 — WAVE 4: the two combinations the coherence wave pointed at
+### (committed BEFORE any fit; arms, seeds, endpoints and the single permitted follow-up cell are frozen here)
+
+**Frame.** The registered lever queue closed on three nulls (seed luck, near-top
+mass, coarse-mass/coherence). This wave adds no new mechanism story — it runs the
+two *combinations* that amendment 3's own measured findings identify, and nothing
+else. Both are data-side, matching amendment 3's finding 2 ("M3a responds to DATA
+composition instead"). Every number quoted below was re-derived from the stored
+verdict JSONs this session before registration (`rank.<corpus>.srocc`,
+`rank.hfnlproxy.per_ref_mean`, `dial.mono_pct`) and matches the published tables
+exactly.
+
+### Arm D — `co3a` seed expansion (k=9)
+
+**What.** The `co3a` config EXACTLY as registered in amendment 3 — recovered
+byte-for-byte from `C_co3a_s1301.bin.spec.json`'s embedded `zentrain.repro` argv
+(9 groups: the 6 arm-C groups + the 3 EM4-teacher twins at **w=0.5**;
+`--coarse-decay 1e-5`; WT40 + mask2; `--epochs 120 --pairs-per-epoch 50000
+--n-hidden-layers 0 --max-features 944`) — with `--seed` as the ONLY change.
+
+**Why this and not another config.** Of the 7 coherence configs, co3a has the
+highest CID22 mean (0.8852), the highest single CID22 (`C_co3a_s1301` 0.89067 —
+the closest any 944-regime model has come, short by 0.0017), the highest dial-mono
+minimum (95.4%), and the broadest passing-axis profile in the wave. Within-config
+seed spread across this campaign is ~0.005–0.01 (co3a's own three draws span
+0.8791–0.8907), so additional draws from the *same* config are the
+highest-probability route across the CID22 bar that does not require a new
+mechanism.
+
+**Seeds (frozen, 9, all distinct from 1301/1303/1307 — the next nine primes above
+1307):** `1319, 1321, 1327, 1361, 1367, 1373, 1381, 1399, 1409`.
+Bake tag stays `co3a`, so the config's seed histogram pools to **n=12**.
+
+**Registered outcomes (frozen).**
+
+- **(a) The SPECIAL CASE.** A draw clears **CID22 > 0.89238** AND **KonJND ≥ 0.43**
+  AND **nonphoto ≥ 0.90** AND **HF-NL-proxy ≥ 0.1931** AND **dial ≥93% / ≤5%** →
+  this is the registered "passes everything except M3a" case that amendment 3
+  explicitly recorded as *not* having occurred. It is reported precisely as such
+  and takes the full battery (M3a via `run_full_eval.sh`, corruption-head joint
+  report, G-RANGE attempt, LOO if it also becomes campaign winner). That isolates
+  M3a as the single remaining blocker — a materially stronger result than a fourth
+  flat null, and it is claimed ONLY on those five rows, never as "the bar passed".
+- **(b) NULL.** All 9 draws miss CID22 → publish the **co3a-config seed histogram
+  (n=12)** as the config-level distribution (mean, sd, min, max, per-seed table),
+  and state the ceiling that distribution implies. Honest null, published as such.
+
+M3a is measured for every arm-D cell with **CID22 ≥ 0.885** (the amendment-3
+threshold rule, carried verbatim) plus the arm candidate.
+
+### Arm E — the M3a cross (arm2 × arm3), k=3
+
+**What.** Amendment 3 measured the only two M3a movers **separately**: dropping the
+tbig group (`co2a`, M3a +0.033 vs s31) and distilling from EM4 at w=1.5 (`co3b`,
+M3a +0.054). Arm E crosses them in one recipe: **`SOTA944_NO_TBIG=1` (co2a's exact
+change) + the three EM4-teacher twins at w=1.5 (co3b's exact change)** — 8 groups
+(safesyn, cid22_train, kadid, tid, kadis + tsafesyn, ttbig, tkadis). Everything
+else is the arm-C recipe unchanged. Tag **`co4`**.
+
+**The one design choice, stated explicitly.** `ttbig` (the EM4-teacher twin over
+the tbig rows) is **KEPT** while the `bigcodec` group is dropped. This is the
+literal composition of the two registered changes, and it is also the mechanically
+motivated one: amendment 3 attributed co2a's single fatal cost — nonphoto
+collapsing −0.10 to 0.806 — to losing the non-photo codec-ladder rows ("tbig *is*
+the non-photo codec-ladder mass"). Keeping those rows under the EM4-teacher target
+preserves the feature coverage while removing the ssim2 target that the E-M6
+coarse-MSE story blames. **Dropping `ttbig` as well is NOT registered and will not
+be run** — recorded here so the alternative cannot be introduced post hoc.
+
+**Seeds (frozen):** `1301, 1303, 1307` — the same three as the coherence wave, so
+every arm-E cell is directly seed-matched to its `co2a` and `co3b` parents.
+
+**Registered endpoint.** **M3a ≥ 0.85 with CID22 ≥ 0.885 held.** M3a is measured
+for all 3 arm-E cells regardless of CID22 (the cross's endpoint IS M3a). If M3a
+passes but CID22 sags — the dose trade amendment 3 measured — the frontier is
+reported honestly as a frontier, not as a pass.
+
+**The ONE permitted intermediate (frozen firing condition).** If and only if
+arm E's w=1.5 cells **clear M3a ≥ 0.85 but lose CID22 (< 0.885)**, ONE registered
+intermediate cell is permitted: the same recipe at teacher **w=1.0**, k=3, same
+seeds, tag `co4m`. No other post-hoc grid growth. If arm E's w=1.5 cells miss M3a,
+no intermediate is run and the arm is a null.
+
+### Selection + bar (unchanged, inherited verbatim)
+
+The §1 bar rows and their instruments are **frozen and unchanged**. Selection is
+**WITHIN-ARM ONLY** (max sdr25, MLP tie-break higher `best_val`) — amendment 3's
+fourth reproduction of the cross-mix oracle/CID22 decoupling makes a cross-arm
+sdr25 comparison invalid, and arms D and E are different data mixes. **The raw
+CID22 leader is reported separately and explicitly**, alongside the rule-selected
+candidate, for both arms. HF-NL-proxy is read as `rank.hfnlproxy.per_ref_mean`
+(per-ref), never pooled srocc. sdr25 remains n=50/5-refs and is labelled as thin
+wherever it is used.
+
+Nothing in this wave is shipped, swapped, promoted, or published. The freeze
+decision remains the user's.
+
+### Ops (frozen)
+
+Workspace `zensim--wave4` on `main@origin`; `CARGO_TARGET_DIR=$HOME/tmp/zensimw4-target`;
+logs `~/tmp/wave4/`. Lanes: **wsl** (local) + **lianli** — the two proven lanes;
+tower is media-serving (observe-before-load) and jason/ian are the kids' Windows
+boxes, so neither is enrolled. **One trainer binary, built locally and shipped to
+the remote lane**, so both lanes run the identical program. Every run's train node
+is recorded. Bakes land on the shared campaign path
+`/mnt/v/output/zensim/bakes/sota944/bakes/`; the remote lane rsyncs each bake back
+as it lands. Verdicts via `scripts/sota944_verdict.sh` (the one frozen §0
+invocation), M3a via `run_full_eval.sh`.
