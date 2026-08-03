@@ -223,6 +223,71 @@ pub fn lasso_cd(sg: &StandardizedGram, lam: f64, n_sweeps: usize, tol: f64) -> V
     w
 }
 
+/// Box-constrained cyclic coordinate descent on the SAME standardized
+/// system as [`lasso_cd`] — the SOTA-944 owner extension for the BVLS
+/// (bounded-variable least-squares) head class (`benchmarks/
+/// sota944_campaign_2026-08-03.md` §3e/§4). Solves
+/// `min ½ wᵀ(G/W)w − (c/W)ᵀw  s.t.  lo ≤ w ≤ hi` (bounds in z-space; a
+/// raw-space sign constraint maps to the same-signed z-space bound because
+/// `w_raw = w_z / sd` with `sd > 0`).
+///
+/// Identical `Gn`/`cn`/`d` precompute and column-major update walk as
+/// `lasso_cd`; the per-coordinate update is the exact box projection
+/// `w_j ← clamp(ρ_j / d_j, lo_j, hi_j)`, which for a PSD system converges
+/// to the box-QP optimum. Deterministic (fixed sweep order, no seed).
+/// scipy `lsq_linear(method="bvls")` parity is NOT claimed — this is a
+/// fresh-fit owner, gated by its own unit tests (unconstrained ≡ λ=0
+/// lasso; active-bound fixture solved by hand).
+pub fn box_cd(
+    sg: &StandardizedGram,
+    lo: &[f64],
+    hi: &[f64],
+    n_sweeps: usize,
+    tol: f64,
+) -> Vec<f64> {
+    let n = sg.n_feat;
+    assert_eq!(lo.len(), n, "box_cd: lo bound length");
+    assert_eq!(hi.len(), n, "box_cd: hi bound length");
+    let mut gn_cols = vec![0.0f64; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            gn_cols[j * n + i] = sg.g[i * n + j] / sg.w_total;
+        }
+    }
+    let cn: Vec<f64> = sg.c.iter().map(|v| v / sg.w_total).collect();
+    let mut d: Vec<f64> = (0..n).map(|j| gn_cols[j * n + j]).collect();
+    for v in &mut d {
+        if *v < 1e-12 {
+            *v = 1e-12;
+        }
+    }
+    let mut w = vec![0.0f64; n];
+    let mut gw = vec![0.0f64; n];
+    for _ in 0..n_sweeps {
+        let mut delta = 0.0f64;
+        for j in 0..n {
+            let rho = cn[j] - gw[j] + d[j] * w[j];
+            let nw = (rho / d[j]).clamp(lo[j], hi[j]);
+            if nw != w[j] {
+                let diff = nw - w[j];
+                let col = &gn_cols[j * n..(j + 1) * n];
+                for (gwi, gnij) in gw.iter_mut().zip(col) {
+                    *gwi += gnij * diff;
+                }
+                let ad = diff.abs();
+                if ad > delta {
+                    delta = ad;
+                }
+                w[j] = nw;
+            }
+        }
+        if delta < tol {
+            break;
+        }
+    }
+    w
+}
+
 /// Single-rounding IEEE 754 f64 → binary16 conversion (round-to-nearest,
 /// ties-to-even), bit-identical to numpy's `npy_double_to_half`
 /// (`numpy/core/src/npymath/halffloat.c`, BSD-3; algorithm ported —
@@ -557,6 +622,69 @@ mod tests {
                 sg.c[i]
             );
         }
+    }
+
+    /// Unbounded box_cd must reach the same optimum as λ=0 lasso_cd (both
+    /// solve the unconstrained standardized least squares).
+    #[test]
+    fn box_cd_unbounded_matches_lam0_lasso() {
+        let x = [
+            [0.9, 0.1, -0.3],
+            [0.2, -0.7, 0.5],
+            [-0.4, 0.6, 0.8],
+            [0.1, 0.2, -0.9],
+            [-0.8, -0.5, 0.2],
+            [0.5, 0.9, 0.4],
+            [0.3, -0.2, -0.6],
+            [-0.6, 0.4, 0.1],
+        ];
+        let y = [0.7, -0.2, 0.9, -0.5, -0.6, 1.1, -0.1, 0.3];
+        let (s_mat, s_vec, q, y1, n) = moments(&x, &y);
+        let sg = standardize_gram(3, 1.0, &s_mat, &s_vec, &q, y1, n).expect("standardize");
+        let w_l = lasso_cd(&sg, 0.0, 10_000, 1e-14);
+        let w_b = box_cd(
+            &sg,
+            &[f64::NEG_INFINITY; 3],
+            &[f64::INFINITY; 3],
+            10_000,
+            1e-14,
+        );
+        for j in 0..3 {
+            assert!(
+                (w_l[j] - w_b[j]).abs() < 1e-9,
+                "box vs lasso λ=0 differ at {j}: {} vs {}",
+                w_b[j],
+                w_l[j]
+            );
+        }
+    }
+
+    /// Active lower bound: on an orthogonal design where the unconstrained
+    /// solution has w1 < 0, the [0, ∞) box must pin w1 to EXACTLY 0 and
+    /// leave the orthogonal w0 at its unconstrained value (orthogonality ⇒
+    /// no compensation).
+    #[test]
+    fn box_cd_pins_negative_coordinate_at_zero() {
+        let x = [
+            [1.0, 1.0, 0.0],
+            [1.0, -1.0, 0.0],
+            [-1.0, 1.0, 0.0],
+            [-1.0, -1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, -1.0, 0.0],
+            [-1.0, 1.0, 0.0],
+            [-1.0, -1.0, 0.0],
+        ];
+        // y = 0.8·f0 − 0.4·f1; f2 constant (sd floor path).
+        let y: Vec<f64> = x.iter().map(|r| 0.8 * r[0] - 0.4 * r[1]).collect();
+        let (s_mat, s_vec, q, y1, n) = moments(&x, &y);
+        let sg = standardize_gram(3, 1.0, &s_mat, &s_vec, &q, y1, n).expect("standardize");
+        let lo = [0.0, 0.0, 0.0];
+        let hi = [f64::INFINITY; 3];
+        let w = box_cd(&sg, &lo, &hi, 1_000, 1e-14);
+        assert!((w[0] - 0.8).abs() < 1e-12, "w0 = {}", w[0]);
+        assert_eq!(w[1], 0.0, "negative-direction weight must sit ON the bound");
+        assert_eq!(w[2], 0.0, "constant feature stays zero");
     }
 
     /// Multi-group accumulation == the standardized system of the pooled

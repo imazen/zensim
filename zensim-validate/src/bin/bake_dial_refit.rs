@@ -138,7 +138,19 @@ enum Cmd {
     /// and bake — the Rust-native BHdr fit chain (reproduces
     /// `linear_projections_2026-07-03.py` `fit` plus `finalize` for one
     /// gram/lambda, bit-exactly).
-    FitLasso(FitLassoArgs),
+    FitLasso(Box<FitLassoArgs>),
+    /// Blend two fit-npz heads (from `fit-lasso --emit-fit-npz`) in raw
+    /// output space with per-head z-normalization over the anchor rows —
+    /// the Profile-B multi-head mechanism (SOTA-944 §4). Collapses to ONE
+    /// identity-scaler linear layer (B's shipped scaler shape), f16-packs,
+    /// fits the shared spline on the packed forward, emits canonically.
+    BlendHeads(BlendHeadsArgs),
+    /// One-pass monotone-transform screen (SOTA-944 §3b): per feature ×
+    /// candidate {identity, log1p, signed_cbrt}, |Pearson r(t(x), y)| on
+    /// stride-sampled corpus rows; emits the winner-per-feature TSV
+    /// (`feat_idx`/`best_transform`/`params_csv`) consumed by
+    /// `gram --transforms-tsv` + `fit-lasso --transforms-tsv`.
+    ScreenTransforms(ScreenTransformsArgs),
     /// Build a per-corpus raw-moment feature Gram (`S = Σxxᵀ`, `s = Σx`,
     /// `q_t = Σx·y_t`, `Y1_t = Σy_t`, `n`) from a feature parquet, streamed
     /// through `parquet_loader::stream_parquet_rows` (memory-capped, f64,
@@ -905,16 +917,62 @@ struct AddWinsorArgs {
     /// If given, assert the output sha256 begins with this hex prefix.
     #[arg(long)]
     expect_sha256: Option<String>,
+    /// COMPOSE mode (SOTA-944 §3d): accept an input whose transforms are the
+    /// parameterless monotone set {identity, log1p, signed_cbrt} and emit
+    /// the winsor-composed runtime tokens (`winsor_p99` /
+    /// `winsor_then_log1p` / `winsor_then_signed_cbrt`) with RAW-space
+    /// bounds — for a monotone t, winsor-then-t with raw bounds ≡
+    /// t-then-winsor with transformed bounds, exactly. Default OFF keeps
+    /// the raw-bake byte-repro paths (B lineage) untouched.
+    #[arg(long)]
+    compose: bool,
 }
 
 fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
     let bytes = std::fs::read(&a.input).map_err(|e| format!("read {:?}: {e}", a.input))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
-    if model.metadata().iter().any(|e| e.key.contains("transform")) {
-        return Err("input already has feature transforms — winsorize a RAW bake".into());
+    let has_transforms = model.metadata().iter().any(|e| e.key.contains("transform"));
+    if has_transforms && !a.compose {
+        return Err(
+            "input already has feature transforms — winsorize a RAW bake (or pass --compose \
+             for a shaped bake with {identity, log1p, signed_cbrt} transforms)"
+                .into(),
+        );
     }
+    // Compose mode: read the existing token list (must be the parameterless
+    // monotone set) and REPLACE the transform metadata with the composed
+    // winsor forms; everything else (spline, repro, weights) is carried.
+    let compose_toks: Option<Vec<String>> = if a.compose && has_transforms {
+        let toks_txt = model
+            .metadata()
+            .iter()
+            .find(|e| e.key == zenpredict::keys::FEATURE_TRANSFORMS)
+            .and_then(|e| std::str::from_utf8(e.value).ok())
+            .ok_or("compose: input transforms metadata unreadable")?
+            .to_string();
+        let toks: Vec<String> = toks_txt.lines().map(|s| s.to_string()).collect();
+        for (j, t) in toks.iter().enumerate() {
+            if !matches!(t.as_str(), "identity" | "log1p" | "signed_cbrt") {
+                return Err(format!(
+                    "compose: feat {j} has transform {t:?} — only identity/log1p/signed_cbrt \
+                     compose with winsor"
+                ));
+            }
+        }
+        Some(toks)
+    } else {
+        None
+    };
     let lin = load_linear(&model);
     let n = lin.scaler_mean.len();
+    if let Some(toks) = &compose_toks
+        && toks.len() != n
+    {
+        return Err(format!(
+            "compose: transform count {} != n_features {n}",
+            toks.len()
+        ));
+    }
 
     // per-feature [lo_pct, hi_pct]; zero-constant features get [0, 1e-9].
     // read_features needs a target column but add-winsor uses none — point
@@ -933,13 +991,26 @@ fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
         }
     }
 
-    let transforms_txt = vec!["winsor_p99"; n].join("\n");
+    let transforms_txt = match &compose_toks {
+        None => vec!["winsor_p99"; n].join("\n"),
+        Some(toks) => toks
+            .iter()
+            .map(|t| match t.as_str() {
+                "identity" => "winsor_p99",
+                "log1p" => "winsor_then_log1p",
+                "signed_cbrt" => "winsor_then_signed_cbrt",
+                _ => unreachable!("validated above"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
     let params_txt = (0..n)
         .map(|j| format!("{},{}", lo[j], hi[j]))
         .collect::<Vec<_>>()
         .join("\n");
     // metadata order: transforms, params, then everything the raw bake had
-    // (incl. its spline) verbatim.
+    // (incl. its spline) verbatim. In compose mode the input's OWN transform
+    // entries are superseded by the composed ones — never duplicated.
     let mut metadata = vec![
         OwnedMeta {
             key: zenpredict::keys::FEATURE_TRANSFORMS.to_string(),
@@ -952,7 +1023,11 @@ fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
             value: params_txt.into_bytes(),
         },
     ];
-    metadata.extend(clone_metadata(&model));
+    metadata.extend(clone_metadata(&model).into_iter().filter(|e| {
+        !(compose_toks.is_some()
+            && (e.key == zenpredict::keys::FEATURE_TRANSFORMS
+                || e.key == zenpredict::keys::FEATURE_TRANSFORM_PARAMS))
+    }));
 
     let sz = emit_linear(
         &a.out,
@@ -1585,6 +1660,86 @@ struct FitLassoArgs {
     /// If given, assert the output sha256 begins with this hex prefix.
     #[arg(long)]
     expect_sha256: Option<String>,
+    /// Solver: `lasso` (default; L1 coordinate descent) or `bvls`
+    /// (box-constrained CD — the B kon-head class; SOTA-944 §3e/§4). With
+    /// `bvls`, `--lam` is ignored and `--bounds-tsv` supplies the box.
+    #[arg(long, default_value = "lasso")]
+    solver: String,
+    /// Sign-mask TSV for `--solver bvls` (`feat_idx`/`sign_mask` with
+    /// `pin_geq0`/`free` rows — `benchmarks/feature_sign_mask_2026-05-26.tsv`).
+    /// Features absent from the TSV (e.g. f372+ at 944) are FREE.
+    #[arg(long)]
+    bounds_tsv: Option<PathBuf>,
+    /// Also write the pre-pack fit as an npz (`w`/`bias`/`mu`/`sd`, f64) —
+    /// the head artifact `blend-heads` consumes.
+    #[arg(long)]
+    emit_fit_npz: Option<PathBuf>,
+    /// Embed a `zentrain.repro` metadata entry (argv + gram shas + code
+    /// commit) via the canonical `zenpredict_bake::append_metadata_utf8`.
+    /// OPT-IN so the byte-repro paths (BHdr `--expect-sha256`) stay
+    /// byte-identical; the SOTA-944 driver always passes it (embed failure
+    /// is fatal, exit-4 class).
+    #[arg(long)]
+    embed_repro: bool,
+}
+
+/// Load a sign-mask TSV into z-space box bounds (`pin_geq0` → [0, +inf);
+/// `free`/absent → (−inf, +inf)). Sign is preserved by standardization
+/// (`w_raw = w_z / sd`, `sd > 0`), so raw-space pins ARE z-space pins.
+fn load_sign_bounds(path: &Path, n_feat: usize) -> Result<(Vec<f64>, Vec<f64>), String> {
+    let mut lo = vec![f64::NEG_INFINITY; n_feat];
+    let hi = vec![f64::INFINITY; n_feat];
+    let mut rdr = csv::ReaderBuilder::new()
+        .delimiter(b'\t')
+        .from_path(path)
+        .map_err(|e| format!("open bounds TSV {path:?}: {e}"))?;
+    let headers = rdr
+        .headers()
+        .map_err(|e| format!("bounds TSV header: {e}"))?
+        .clone();
+    let c_idx = headers
+        .iter()
+        .position(|h| h == "feat_idx")
+        .ok_or("bounds TSV missing feat_idx")?;
+    let c_mask = headers
+        .iter()
+        .position(|h| h == "sign_mask")
+        .ok_or("bounds TSV missing sign_mask")?;
+    let mut n_pinned = 0usize;
+    for rec in rdr.records() {
+        let rec = rec.map_err(|e| format!("bounds TSV row: {e}"))?;
+        let fi: usize = rec
+            .get(c_idx)
+            .ok_or("bounds TSV row missing feat_idx")?
+            .trim()
+            .parse()
+            .map_err(|e| format!("bad feat_idx: {e}"))?;
+        if fi >= n_feat {
+            continue;
+        }
+        match rec.get(c_mask).unwrap_or("").trim() {
+            "pin_geq0" => {
+                lo[fi] = 0.0;
+                n_pinned += 1;
+            }
+            "free" | "" => {}
+            other => return Err(format!("bounds TSV feat {fi}: unknown sign_mask {other:?}")),
+        }
+    }
+    eprintln!("  bounds: {n_pinned} features pinned >= 0, rest free (of {n_feat})");
+    Ok((lo, hi))
+}
+
+/// Embed `zentrain.repro` into an emitted bake through the canonical
+/// append owner (self-checked loadable; byte/score-identity gated by
+/// zenpredict-bake's own tests). Fatal on failure — a campaign bake
+/// without embedded repro is an invalid artifact (SOTA-944 bar).
+fn embed_repro_into(out: &Path, repro_json: &str) -> Result<(), String> {
+    let bytes = std::fs::read(out).map_err(|e| format!("re-read {out:?}: {e}"))?;
+    let appended = zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.repro", repro_json)
+        .map_err(|e| format!("embed zentrain.repro FAILED (fatal): {e:?}"))?;
+    std::fs::write(out, &appended).map_err(|e| format!("write {out:?}: {e}"))?;
+    Ok(())
 }
 
 /// Parse the yeo-johnson screen TSV exactly like the Python loaders
@@ -1728,12 +1883,24 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
     }
     let sg = standardize_gram_multi(n_feat, &groups)?;
 
-    // 2. lasso coordinate descent (MixGram.lasso).
-    let w = lasso_cd(&sg, a.lam, a.n_sweeps, a.tol);
+    // 2. solver: lasso coordinate descent (MixGram.lasso) or the BVLS-class
+    // box-constrained CD (SOTA-944 §3e — sign-mask bounds).
+    let w = match a.solver.as_str() {
+        "lasso" => lasso_cd(&sg, a.lam, a.n_sweeps, a.tol),
+        "bvls" => {
+            let (lo, hi) = match &a.bounds_tsv {
+                Some(p) => load_sign_bounds(p, n_feat)?,
+                None => (vec![f64::NEG_INFINITY; n_feat], vec![f64::INFINITY; n_feat]),
+            };
+            zensim_validate::gram_lasso::box_cd(&sg, &lo, &hi, a.n_sweeps, a.tol)
+        }
+        other => return Err(format!("--solver must be lasso|bvls, got {other:?}")),
+    };
     let bias = sg.ybar;
     let n_active_pre = w.iter().filter(|v| v.abs() > 1e-7).count();
     eprintln!(
-        "lasso(lam={}) on {} gram(s) {:?} w={:?} [{} space, target {}]: W={:.0} act={n_active_pre} bias={bias:.6}",
+        "{}(lam={}) on {} gram(s) {:?} w={:?} [{} space, target {}]: W={:.0} act={n_active_pre} bias={bias:.6}",
+        a.solver,
         a.lam,
         a.gram.len(),
         a.gram,
@@ -1742,6 +1909,39 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
         a.target,
         sg.w_total
     );
+
+    // Head artifact for blend-heads: pre-pack f64 fit (w/bias/mu/sd).
+    if let Some(npz_path) = &a.emit_fit_npz {
+        use zensim_validate::npz::{NpzF64Entry, write_npz_f64};
+        let shape1 = [n_feat];
+        let bias_s = [bias];
+        write_npz_f64(
+            npz_path,
+            &[
+                NpzF64Entry {
+                    name: "w",
+                    shape: &shape1,
+                    data: &w,
+                },
+                NpzF64Entry {
+                    name: "bias",
+                    shape: &[],
+                    data: &bias_s,
+                },
+                NpzF64Entry {
+                    name: "mu",
+                    shape: &shape1,
+                    data: &sg.mu,
+                },
+                NpzF64Entry {
+                    name: "sd",
+                    shape: &shape1,
+                    data: &sg.sd,
+                },
+            ],
+        )?;
+        eprintln!("  fit npz -> {npz_path:?}");
+    }
 
     // 3. parity gate 1: bit-exact w/bias/mu/sd vs the Python fit npz.
     if let Some(pf) = &a.parity_fit {
@@ -1855,6 +2055,22 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
             if strides.contains(&0) {
                 return Err("--anchor-stride must be >= 1".into());
             }
+            // SHAPED space + raw parquet rows: the gram (and therefore the
+            // weights) live in transform space, so the anchor forward MUST
+            // apply the same per-feature transforms the runtime will (the
+            // npz-anchor path stored pre-shaped matrices; parquet rows are
+            // raw). Applied at f32 via zenpredict's own math — identical to
+            // the deployed `predict_transformed` feature path.
+            let anchor_appliers: Option<Vec<(zenpredict::FeatureTransform, Vec<f32>)>> =
+                if a.space == "shaped" {
+                    let tsv = a.transforms_tsv.as_ref().ok_or(
+                        "--transforms-tsv is required for --space shaped with --anchor-parquet \
+                         (the anchor forward must mirror the shaped gram)",
+                    )?;
+                    Some(screen_appliers(tsv, n_feat)?)
+                } else {
+                    None
+                };
             let mut xaf: Vec<f32> = Vec::new();
             let mut ya: Vec<f64> = Vec::new();
             for (path, &stride) in a.anchor_parquet.iter().zip(&strides) {
@@ -1875,7 +2091,15 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
                 while ri < g.feature_rows.len() {
                     // f32-round the features so the packed forward matches
                     // the npz-anchor numeric path (and the f32 runtime).
-                    xaf.extend(g.feature_rows[ri].iter().map(|v| *v as f32));
+                    match &anchor_appliers {
+                        Some(ap) => xaf.extend(
+                            g.feature_rows[ri]
+                                .iter()
+                                .zip(ap.iter())
+                                .map(|(v, (t, ps))| t.apply_with_params(*v as f32, ps)),
+                        ),
+                        None => xaf.extend(g.feature_rows[ri].iter().map(|v| *v as f32)),
+                    }
                     let mut y = g.human_scores[ri];
                     if let Some(clip) = a.anchor_clip_min
                         && y < clip
@@ -1962,6 +2186,29 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
     let sz = emit_linear(&a.out, &mu32, &sd32, &w32, bias as f32, &metadata)
         .map_err(|e| format!("write {:?}: {e}", a.out))?;
 
+    // Embedded repro (SOTA-944 bar): argv + per-gram sha256 + solver, via
+    // the canonical append owner. Fatal on failure.
+    if a.embed_repro {
+        let argv: Vec<String> = std::env::args().collect();
+        let mut gram_shas = Vec::with_capacity(a.gram.len());
+        for g in &a.gram {
+            let sha = zensim_validate::train_manifest::sha256_file(g)
+                .map_err(|e| format!("sha256 {g:?}: {e:?}"))?;
+            gram_shas.push(format!(
+                "{{\"gram\":{:?},\"sha256\":\"{sha}\"}}",
+                g.display().to_string()
+            ));
+        }
+        let repro = format!(
+            "{{\"tool\":\"bake_dial_refit fit-lasso\",\"solver\":{:?},\"argv\":{:?},\"grams\":[{}]}}",
+            a.solver,
+            argv,
+            gram_shas.join(",")
+        );
+        embed_repro_into(&a.out, &repro)?;
+        eprintln!("  zentrain.repro embedded ({} B)", repro.len());
+    }
+
     let out_bytes = std::fs::read(&a.out).map_err(|e| format!("re-read {:?}: {e}", a.out))?;
     let got = sha256_hex(&out_bytes);
     eprintln!(
@@ -1978,6 +2225,409 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
             return Err(format!("sha mismatch: expected {expect}, got {got}"));
         }
     }
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
+// subcommand: blend-heads  (the Profile-B multi-head raw blend — SOTA-944 §4)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct BlendHeadsArgs {
+    /// Head fit npz (`w`/`bias`/`mu`/`sd` from `fit-lasso --emit-fit-npz`).
+    /// Exactly TWO, in order: head1 (weight `--alpha`), head2 (1 − alpha).
+    #[arg(long, required = true)]
+    head: Vec<PathBuf>,
+    /// Convex blend weight of head 1 (B lineage: 0.8 · cid + 0.2 · kon).
+    #[arg(long)]
+    alpha: f64,
+    /// Anchor parquet(s) — the z-norm sample AND the dial-spline anchor
+    /// (same registered anchor as fit-lasso).
+    #[arg(long, required = true)]
+    anchor_parquet: Vec<PathBuf>,
+    #[arg(long)]
+    anchor_target: String,
+    #[arg(long, default_value_t = 1.0)]
+    anchor_scale: f64,
+    #[arg(long)]
+    anchor_stride: Vec<usize>,
+    #[arg(long, allow_negative_numbers = true)]
+    anchor_clip_min: Option<f64>,
+    /// Transform screen TSV — REQUIRED when the heads were fit on shaped
+    /// grams (the anchor forward + bake metadata must mirror the space).
+    #[arg(long)]
+    transforms_tsv: Option<PathBuf>,
+    /// Output bake path.
+    #[arg(long)]
+    out: PathBuf,
+    /// Embed zentrain.repro (argv + head shas). Fatal on failure.
+    #[arg(long)]
+    embed_repro: bool,
+}
+
+fn cmd_blend_heads(a: &BlendHeadsArgs) -> Result<(), String> {
+    use zensim_validate::gram_lasso::{f16_bits_to_f64, f64_to_f16_bits, py_repr_f64};
+    use zensim_validate::npz::Npz;
+
+    if a.head.len() != 2 {
+        return Err(format!(
+            "--head must be given exactly twice, got {}",
+            a.head.len()
+        ));
+    }
+    if !(0.0..=1.0).contains(&a.alpha) {
+        return Err(format!("--alpha must be in [0,1], got {}", a.alpha));
+    }
+
+    // 1. load heads; collapse each to raw-x space: p(x) = Σ x_j·(w_j/sd_j) + (bias − Σ μ_j·w_j/sd_j)
+    struct Head {
+        a_raw: Vec<f64>,
+        c: f64,
+    }
+    let mut heads: Vec<Head> = Vec::with_capacity(2);
+    let mut n_feat = 0usize;
+    for hp in &a.head {
+        let npz = Npz::open(hp)?;
+        let w = npz.get("w")?.f64s()?.to_vec();
+        let mu = npz.get("mu")?.f64s()?.to_vec();
+        let sd = npz.get("sd")?.f64s()?.to_vec();
+        let bias = npz.get("bias")?.scalar_f64()?;
+        if n_feat == 0 {
+            n_feat = w.len();
+        } else if w.len() != n_feat {
+            return Err(format!("head width mismatch: {} vs {n_feat}", w.len()));
+        }
+        let mut a_raw = vec![0.0f64; n_feat];
+        let mut c = bias;
+        for j in 0..n_feat {
+            if w[j] != 0.0 {
+                a_raw[j] = w[j] / sd[j];
+                c -= mu[j] * w[j] / sd[j];
+            }
+        }
+        heads.push(Head { a_raw, c });
+    }
+
+    // 2. anchor rows (f32-rounded; shaped transforms mirrored when given).
+    let anchor_appliers: Option<Vec<(zenpredict::FeatureTransform, Vec<f32>)>> =
+        match &a.transforms_tsv {
+            Some(tsv) => Some(screen_appliers(tsv, n_feat)?),
+            None => None,
+        };
+    let strides: Vec<usize> = if a.anchor_stride.is_empty() {
+        vec![1; a.anchor_parquet.len()]
+    } else if a.anchor_stride.len() == a.anchor_parquet.len() {
+        a.anchor_stride.clone()
+    } else {
+        return Err("--anchor-stride count != --anchor-parquet count".into());
+    };
+    let mut xaf: Vec<f32> = Vec::new();
+    let mut ya: Vec<f64> = Vec::new();
+    for (path, &stride) in a.anchor_parquet.iter().zip(&strides) {
+        let g = zensim_validate::parquet_loader::load_parquet(
+            path,
+            "anchor",
+            &a.anchor_target,
+            a.anchor_scale,
+        )?;
+        if g.n_features != n_feat {
+            return Err(format!(
+                "anchor parquet {path:?} width {} != head width {n_feat}",
+                g.n_features
+            ));
+        }
+        let mut ri = 0usize;
+        while ri < g.feature_rows.len() {
+            match &anchor_appliers {
+                Some(ap) => xaf.extend(
+                    g.feature_rows[ri]
+                        .iter()
+                        .zip(ap.iter())
+                        .map(|(v, (t, ps))| t.apply_with_params(*v as f32, ps)),
+                ),
+                None => xaf.extend(g.feature_rows[ri].iter().map(|v| *v as f32)),
+            }
+            let mut y = g.human_scores[ri];
+            if let Some(clip) = a.anchor_clip_min
+                && y < clip
+            {
+                y = clip;
+            }
+            ya.push(y);
+            ri += stride;
+        }
+    }
+    let rows = ya.len();
+    if rows < 50 {
+        return Err(format!("anchor has only {rows} rows — too few"));
+    }
+
+    // 3. per-head anchor preds -> z-norm moments (population sd).
+    let pred_of = |h: &Head, row: &[f32]| -> f64 {
+        let mut acc = 0.0f64;
+        for (x, aj) in row.iter().zip(&h.a_raw) {
+            if *aj != 0.0 {
+                acc += *x as f64 * *aj;
+            }
+        }
+        acc + h.c
+    };
+    let mut znorm: Vec<(f64, f64)> = Vec::with_capacity(2);
+    for h in &heads {
+        let mut s1 = 0.0f64;
+        let mut s2 = 0.0f64;
+        for r in 0..rows {
+            let p = pred_of(h, &xaf[r * n_feat..(r + 1) * n_feat]);
+            s1 += p;
+            s2 += p * p;
+        }
+        let m = s1 / rows as f64;
+        let var = (s2 / rows as f64 - m * m).max(0.0);
+        let s = var.sqrt();
+        if s < 1e-12 {
+            return Err("head has ~zero anchor-pred variance — cannot z-norm".into());
+        }
+        znorm.push((m, s));
+        eprintln!("  head z-norm: mean {m:.6} sd {s:.6}");
+    }
+
+    // 4. collapse the z-normed convex blend to ONE identity-scaler layer:
+    //    r(x) = α·(p1−m1)/s1 + (1−α)·(p2−m2)/s2
+    let (m1, s1) = znorm[0];
+    let (m2, s2) = znorm[1];
+    let mut a_blend = vec![0.0f64; n_feat];
+    for (j, ab) in a_blend.iter_mut().enumerate() {
+        *ab = a.alpha * heads[0].a_raw[j] / s1 + (1.0 - a.alpha) * heads[1].a_raw[j] / s2;
+    }
+    let c_blend = a.alpha * (heads[0].c - m1) / s1 + (1.0 - a.alpha) * (heads[1].c - m2) / s2;
+
+    // 5. f16 pack, spline on the PACKED forward (QUANTIZE-then-CALIBRATE).
+    let wp: Vec<f64> = a_blend
+        .iter()
+        .map(|v| f16_bits_to_f64(f64_to_f16_bits(*v)))
+        .collect();
+    let n_active = wp.iter().filter(|v| v.abs() > 0.0).count();
+    let mut preds = vec![0.0f64; rows];
+    for (r, pred) in preds.iter_mut().enumerate() {
+        let row = &xaf[r * n_feat..(r + 1) * n_feat];
+        let mut acc = 0.0f64;
+        for j in 0..n_feat {
+            if wp[j] != 0.0 {
+                acc += row[j] as f64 * wp[j];
+            }
+        }
+        *pred = acc + c_blend;
+    }
+    let (cx, cy) = fit_spline_knots(&preds, &ya, 18, true);
+
+    // 6. metadata (transforms when shaped, spline), identity scaler emit.
+    let mut metadata: Vec<OwnedMeta> = Vec::new();
+    if let Some(tsv) = &a.transforms_tsv {
+        let (toks, params) = load_transform_screen(tsv, n_feat)?;
+        metadata.push(OwnedMeta {
+            key: zenpredict::keys::FEATURE_TRANSFORMS.to_string(),
+            kind: MetadataType::Utf8,
+            value: toks.join("\n").into_bytes(),
+        });
+        let params_txt = params
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|p| py_repr_f64(*p))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        metadata.push(OwnedMeta {
+            key: zenpredict::keys::FEATURE_TRANSFORM_PARAMS.to_string(),
+            kind: MetadataType::Utf8,
+            value: params_txt.into_bytes(),
+        });
+    }
+    if !cx.is_empty() {
+        metadata.push(OwnedMeta {
+            key: SPLINE_KEY.to_string(),
+            kind: MetadataType::Bytes,
+            value: spline_payload(&cx, &cy),
+        });
+    }
+    let zeros = vec![0.0f32; n_feat];
+    let ones = vec![1.0f32; n_feat];
+    let w32: Vec<f32> = wp.iter().map(|v| *v as f32).collect();
+    let sz = emit_linear(&a.out, &zeros, &ones, &w32, c_blend as f32, &metadata)
+        .map_err(|e| format!("write {:?}: {e}", a.out))?;
+
+    if a.embed_repro {
+        let argv: Vec<String> = std::env::args().collect();
+        let mut head_shas = Vec::new();
+        for h in &a.head {
+            let sha = zensim_validate::train_manifest::sha256_file(h)
+                .map_err(|e| format!("sha256 {h:?}: {e:?}"))?;
+            head_shas.push(format!(
+                "{{\"head\":{:?},\"sha256\":\"{sha}\"}}",
+                h.display().to_string()
+            ));
+        }
+        let repro = format!(
+            "{{\"tool\":\"bake_dial_refit blend-heads\",\"alpha\":{},\"argv\":{:?},\"heads\":[{}]}}",
+            a.alpha,
+            argv,
+            head_shas.join(",")
+        );
+        embed_repro_into(&a.out, &repro)?;
+        eprintln!("  zentrain.repro embedded ({} B)", repro.len());
+    }
+
+    let out_bytes = std::fs::read(&a.out).map_err(|e| format!("re-read {:?}: {e}", a.out))?;
+    eprintln!(
+        "blend-heads -> {:?} ({sz} B): alpha {}, act={n_active}, {} knots, dial [{:.2},{:.2}]\n  sha256 {}",
+        a.out,
+        a.alpha,
+        cx.len(),
+        cy.first().copied().unwrap_or(f64::NAN),
+        cy.last().copied().unwrap_or(f64::NAN),
+        sha256_hex(&out_bytes)
+    );
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
+// subcommand: screen-transforms  (one-pass monotone screen — SOTA-944 §3b)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct ScreenTransformsArgs {
+    /// Fit parquet(s), stride-sampled (paired `--stride`, default 1).
+    #[arg(long, required = true)]
+    parquet: Vec<PathBuf>,
+    #[arg(long)]
+    stride: Vec<usize>,
+    #[arg(long, default_value = "human_score")]
+    target: String,
+    #[arg(long, default_value_t = 1.0)]
+    target_scale: f64,
+    #[arg(long, allow_negative_numbers = true)]
+    target_clip_min: Option<f64>,
+    /// Required |Pearson r| lift over identity to switch a feature off
+    /// identity (registered: 0.005).
+    #[arg(long, default_value_t = 0.005)]
+    switch_threshold: f64,
+    /// Output screen TSV (`feat_idx`/`best_transform`/`params_csv`).
+    #[arg(long)]
+    out: PathBuf,
+}
+
+fn cmd_screen_transforms(a: &ScreenTransformsArgs) -> Result<(), String> {
+    use zensim_validate::parquet_loader::stream_parquet_rows;
+    const CANDS: [&str; 3] = ["identity", "log1p", "signed_cbrt"];
+    let cands: Vec<zenpredict::FeatureTransform> = CANDS
+        .iter()
+        .map(|t| zenpredict::FeatureTransform::from_token(t).expect("known token"))
+        .collect();
+
+    let strides: Vec<usize> = if a.stride.is_empty() {
+        vec![1; a.parquet.len()]
+    } else if a.stride.len() == a.parquet.len() {
+        a.stride.clone()
+    } else {
+        return Err("--stride count != --parquet count".into());
+    };
+
+    let mut n_feat = 0usize;
+    // per (feature, cand): n, Σt, Σt², Σty ; plus global Σy, Σy², n.
+    let mut st: Vec<[f64; 3]> = Vec::new(); // [Σt, Σt², Σty] per (j, c)
+    let mut sy = 0.0f64;
+    let mut sy2 = 0.0f64;
+    let mut n_rows_used = 0usize;
+    for (path, &stride) in a.parquet.iter().zip(&strides) {
+        let sha = zensim_validate::train_manifest::sha256_file(path)
+            .map_err(|e| format!("sha256 {path:?}: {e:?}"))?;
+        eprintln!("screen: {path:?} stride {stride}\n  sha256 {sha}");
+        let mut global_idx = 0usize;
+        stream_parquet_rows(
+            path,
+            &[a.target.as_str()],
+            a.target_scale,
+            &mut |features, n_rows, targets| {
+                if n_feat == 0 {
+                    n_feat = features.len() / n_rows;
+                    st = vec![[0.0f64; 3]; n_feat * cands.len()];
+                } else if features.len() / n_rows != n_feat {
+                    return Err("screen: parquet width mismatch across inputs".into());
+                }
+                for r in 0..n_rows {
+                    if !global_idx.is_multiple_of(stride) {
+                        global_idx += 1;
+                        continue;
+                    }
+                    global_idx += 1;
+                    let x = &features[r * n_feat..(r + 1) * n_feat];
+                    let mut y = targets[0][r];
+                    if let Some(clip) = a.target_clip_min
+                        && y < clip
+                    {
+                        y = clip;
+                    }
+                    sy += y;
+                    sy2 += y * y;
+                    n_rows_used += 1;
+                    for (j, &xv) in x.iter().enumerate() {
+                        for (c, t) in cands.iter().enumerate() {
+                            let tv = t.apply(xv as f32) as f64;
+                            let e = &mut st[j * cands.len() + c];
+                            e[0] += tv;
+                            e[1] += tv * tv;
+                            e[2] += tv * y;
+                        }
+                    }
+                }
+                Ok(())
+            },
+        )?;
+    }
+    if n_rows_used < 100 {
+        return Err(format!("screen: only {n_rows_used} rows — too few"));
+    }
+    let n = n_rows_used as f64;
+    let var_y = (sy2 / n - (sy / n) * (sy / n)).max(0.0);
+    let mut out = String::from("feat_idx\tbest_transform\tparams_csv\tr_identity\tr_best\n");
+    let mut switched = 0usize;
+    for j in 0..n_feat {
+        let r_of = |c: usize| -> f64 {
+            let e = &st[j * cands.len() + c];
+            let var_t = (e[1] / n - (e[0] / n) * (e[0] / n)).max(0.0);
+            let cov = e[2] / n - (e[0] / n) * (sy / n);
+            if var_t <= 1e-24 || var_y <= 1e-24 {
+                0.0
+            } else {
+                cov / (var_t.sqrt() * var_y.sqrt())
+            }
+        };
+        let r_id = r_of(0);
+        let mut best_c = 0usize;
+        let mut best_r = r_id;
+        for c in 1..cands.len() {
+            let r = r_of(c);
+            if r.abs() > best_r.abs() {
+                best_r = r;
+                best_c = c;
+            }
+        }
+        // switch only on a real lift over identity (registered threshold)
+        let (tok, r_out) = if best_c != 0 && best_r.abs() >= r_id.abs() + a.switch_threshold {
+            switched += 1;
+            (CANDS[best_c], best_r)
+        } else {
+            (CANDS[0], r_id)
+        };
+        out.push_str(&format!("{j}\t{tok}\t\t{r_id:.6}\t{r_out:.6}\n"));
+    }
+    std::fs::write(&a.out, &out).map_err(|e| format!("write {:?}: {e}", a.out))?;
+    eprintln!(
+        "screen-transforms -> {:?}: {n_rows_used} rows, {n_feat} feats, {switched} switched off identity (threshold {})",
+        a.out, a.switch_threshold
+    );
     Ok(())
 }
 
@@ -2009,9 +2659,58 @@ struct GramArgs {
     /// purity guard — 924 for the folded+append campaign).
     #[arg(long)]
     expect_n_feat: Option<usize>,
+    /// Transform screen TSV (`feat_idx`/`best_transform`/`params_csv`):
+    /// apply per-feature monotone transforms DURING accumulation via
+    /// zenpredict's own `FeatureTransform` f32 apply (fit space == the f32
+    /// runtime's, zero math duplication). Use with `--space shaped`; the
+    /// SAME TSV goes to `fit-lasso --transforms-tsv` so the bake carries
+    /// the transforms (SOTA-944 §3b).
+    #[arg(long)]
+    transforms_tsv: Option<PathBuf>,
+    /// Per-corpus min-max target normalization (B's kon-head anchor-target
+    /// mechanism, `minmax01_bounds`): a first pass computes this corpus's
+    /// [q0.001, q0.999] of the (scaled) target; the accumulation pass then
+    /// uses `y' = clip((y − lo)/(hi − lo), 0, 1)`. The q/Y1 keys are stored
+    /// under `<target>__mm01`. Mutually exclusive with `--target-clip-min`.
+    #[arg(long)]
+    target_minmax01: bool,
     /// Output `.npz` path.
     #[arg(long)]
     out: PathBuf,
+}
+
+/// numpy-default (linear-interpolation) quantile on a SORTED slice —
+/// mirrors `np.quantile(x, q)` for the minmax01 bounds.
+fn np_quantile_sorted(sorted: &[f64], q: f64) -> f64 {
+    if sorted.is_empty() {
+        return f64::NAN;
+    }
+    let h = q * (sorted.len() as f64 - 1.0);
+    let lo = h.floor() as usize;
+    let hi = h.ceil() as usize;
+    if lo == hi {
+        sorted[lo]
+    } else {
+        sorted[lo] + (h - lo as f64) * (sorted[hi] - sorted[lo])
+    }
+}
+
+/// Parsed per-feature transform appliers from a screen TSV: zenpredict's
+/// own enum + f32 params, applied f32-in/f32-out exactly like the runtime.
+fn screen_appliers(
+    path: &Path,
+    n_feat: usize,
+) -> Result<Vec<(zenpredict::FeatureTransform, Vec<f32>)>, String> {
+    let (toks, params) = load_transform_screen(path, n_feat)?;
+    toks.iter()
+        .zip(&params)
+        .enumerate()
+        .map(|(i, (tok, ps))| {
+            let t = zenpredict::FeatureTransform::from_token(tok)
+                .map_err(|e| format!("screen TSV feat {i}: bad transform {tok:?}: {e:?}"))?;
+            Ok((t, ps.iter().map(|p| *p as f32).collect()))
+        })
+        .collect()
 }
 
 /// Accumulate `S = Σxxᵀ` (upper triangle + mirror), `s = Σx`,
@@ -2030,6 +2729,53 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
     eprintln!("gram: input {:?}\n  sha256 {sha}", a.parquet);
 
     let target_refs: Vec<&str> = a.targets.iter().map(|s| s.as_str()).collect();
+
+    // Per-feature shaped-space appliers (SOTA-944 §3b): zenpredict's own
+    // transform math at f32, widened back to f64 for accumulation.
+    let appliers: Option<Vec<(zenpredict::FeatureTransform, Vec<f32>)>> = None;
+    let mut appliers = appliers; // sized on first batch (needs n_feat)
+
+    // --target-minmax01 pre-pass: this corpus's own [q0.001, q0.999] of the
+    // scaled target (B's kon-head `minmax01_bounds`). One extra stream of
+    // the parquet — targets only are kept.
+    let mm01: Option<Vec<(f64, f64)>> = if a.target_minmax01 {
+        if a.target_clip_min.is_some() {
+            return Err("--target-minmax01 and --target-clip-min are mutually exclusive".into());
+        }
+        let mut collected: Vec<Vec<f64>> = vec![Vec::new(); a.targets.len()];
+        stream_parquet_rows(
+            &a.parquet,
+            &target_refs,
+            a.target_scale,
+            &mut |_f, n_rows, targets| {
+                for (t, tv) in targets.iter().enumerate() {
+                    collected[t].extend_from_slice(&tv[..n_rows]);
+                }
+                Ok(())
+            },
+        )?;
+        let mut bounds = Vec::with_capacity(a.targets.len());
+        for (t, vals) in collected.iter_mut().enumerate() {
+            vals.sort_by(f64::total_cmp);
+            let lo = np_quantile_sorted(vals, 0.001);
+            let hi = np_quantile_sorted(vals, 0.999);
+            if hi <= lo {
+                return Err(format!(
+                    "minmax01 bounds degenerate for target {} ([{lo}, {hi}])",
+                    a.targets[t]
+                ));
+            }
+            eprintln!(
+                "  minmax01 {}: [q0.001, q0.999] = [{lo:.6}, {hi:.6}]",
+                a.targets[t]
+            );
+            bounds.push((lo, hi));
+        }
+        Some(bounds)
+    } else {
+        None
+    };
+
     let mut n_feat = 0usize;
     let mut s_mat: Vec<f64> = Vec::new();
     let mut s_vec: Vec<f64> = Vec::new();
@@ -2040,6 +2786,7 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
     let mut ymax = vec![f64::NEG_INFINITY; a.targets.len()];
     let mut ysum = vec![0.0f64; a.targets.len()];
 
+    let mut shaped_row: Vec<f64> = Vec::new();
     let info = stream_parquet_rows(
         &a.parquet,
         &target_refs,
@@ -2059,9 +2806,23 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
                 s_vec = vec![0.0f64; n_feat];
                 q = vec![vec![0.0f64; n_feat]; a.targets.len()];
                 y1 = vec![0.0f64; a.targets.len()];
+                if let Some(tsv) = &a.transforms_tsv {
+                    appliers = Some(screen_appliers(tsv, n_feat)?);
+                    shaped_row = vec![0.0f64; n_feat];
+                }
             }
             for r in 0..n_rows {
-                let x = &features[r * n_feat..(r + 1) * n_feat];
+                let raw = &features[r * n_feat..(r + 1) * n_feat];
+                let x: &[f64] = if let Some(ap) = &appliers {
+                    for (dst, (src, (t, ps))) in
+                        shaped_row.iter_mut().zip(raw.iter().zip(ap.iter()))
+                    {
+                        *dst = t.apply_with_params(*src as f32, ps) as f64;
+                    }
+                    &shaped_row
+                } else {
+                    raw
+                };
                 // S upper triangle: row-sequential rank-1 update. The inner
                 // loop is contiguous over j for auto-vectorization.
                 for i in 0..n_feat {
@@ -2078,7 +2839,14 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
                 }
                 for (t, tv) in targets.iter().enumerate() {
                     let mut y = tv[r];
-                    if let Some(clip) = a.target_clip_min
+                    if let Some(bounds) = &mm01 {
+                        let (lo, hi) = bounds[t];
+                        let z = (y - lo) / (hi - lo);
+                        if !(0.0..=1.0).contains(&z) {
+                            clipped[t] += 1;
+                        }
+                        y = z.clamp(0.0, 1.0);
+                    } else if let Some(clip) = a.target_clip_min
                         && y < clip
                     {
                         y = clip;
@@ -2115,15 +2883,18 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
     let key_s = format!("{}__S", a.space);
     let key_sv = format!("{}__s", a.space);
     let key_n = format!("{}__n", a.space);
+    // minmax01 targets get a distinct key suffix so a fit can never mix a
+    // normalized q with an unnormalized one silently.
+    let tsuffix = if a.target_minmax01 { "__mm01" } else { "" };
     let key_q: Vec<String> = a
         .targets
         .iter()
-        .map(|t| format!("{}__q_{t}", a.space))
+        .map(|t| format!("{}__q_{t}{tsuffix}", a.space))
         .collect();
     let key_y1: Vec<String> = a
         .targets
         .iter()
-        .map(|t| format!("{}__Y1_{t}", a.space))
+        .map(|t| format!("{}__Y1_{t}{tsuffix}", a.space))
         .collect();
     let shape2 = [n_feat, n_feat];
     let shape1 = [n_feat];
@@ -2205,6 +2976,8 @@ fn main() -> ExitCode {
         Cmd::Strip(a) => cmd_strip(a).map(|_| false),
         Cmd::FitLasso(a) => cmd_fit_lasso(a).map(|_| false),
         Cmd::Gram(a) => cmd_gram(a).map(|_| false),
+        Cmd::BlendHeads(a) => cmd_blend_heads(a).map(|_| false),
+        Cmd::ScreenTransforms(a) => cmd_screen_transforms(a).map(|_| false),
     };
     match result {
         Ok(gate_failed) => {
