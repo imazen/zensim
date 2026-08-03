@@ -259,6 +259,10 @@ fn slot_720(name: &str) -> Option<&'static str> {
         "nonphoto" => "ext_nonphoto_720_nn_full.parquet",
         "imazen26" => "ext_imazen26_720_nn_full.parquet",
         "sdr25" => "ext_sdr25.parquet",
+        // 944-root-only (SOTA-944 §1b): the near-lossless-band TEST-view
+        // proxy; under roots without the slice the load fails loud and the
+        // corpus is skipped, same pattern as sdr25 under the 720 root.
+        "hfnlproxy" => "ext_hfnlproxy.parquet",
         // pipal, hf_nearlossless: no 720 extraction yet.
         _ => return None,
     })
@@ -430,6 +434,18 @@ const CORPORA: &[Corpus] = &[
         // (ext_sdr25.parquet); under the default root the load fails loud
         // and the corpus is skipped.
         filename: "ext_sdr25.parquet",
+        enable_per_band: false,
+    },
+    Corpus {
+        name: "hfnlproxy",
+        display: "HF-NL-proxy (944 TEST views, ssim2>=91 band)",
+        // SOTA-944 §1b registered HF-NL substitute: the true hf_nearlossless
+        // corpus exists only at 372 (bitstreams unpersisted), so the 944
+        // near-lossless axis reads the ssim2>=91 band of the held-out
+        // bigcodec TEST views, per-ref (READ per_ref_mean, NOT pooled —
+        // same confound as the hf corpus's 0.204-pooled/0.916-per-ref).
+        // 944-root-only; built by build_eval_slices_944.py.
+        filename: "ext_hfnlproxy.parquet",
         enable_per_band: false,
     },
     Corpus {

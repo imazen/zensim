@@ -1042,7 +1042,7 @@ fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
     let out_bytes = std::fs::read(&a.out).map_err(|e| format!("re-read {:?}: {e}", a.out))?;
     let got = sha256_hex(&out_bytes);
     eprintln!(
-        "winsorized {:?} -> {:?} ({sz} B); {n} winsor_p99 transforms, fit [p{},p{}]\n  sha256 {got}",
+        "winsorized {:?} -> {:?} ({sz} B); {n} winsor-guard transforms (composed when --compose), fit [p{},p{}]\n  sha256 {got}",
         a.input, a.out, a.lo_pct, a.hi_pct
     );
     if let Some(expect) = &a.expect_sha256 {

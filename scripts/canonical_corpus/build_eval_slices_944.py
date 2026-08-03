@@ -128,6 +128,21 @@ def main() -> int:
     e1 = emit("imazen26", m_all, 1.0)
     e2 = emit("nonphoto", m_np, 0.01)
 
+    # HF-NL-proxy (SOTA-944 pre-reg §1b): the near-lossless band of the SAME
+    # held-out TEST views — cells with score_ssim2 >= 91 (the 372-era hf
+    # corpus's ssim2 91..100 band), restricted to refs with >= 6 such cells
+    # so the per-ref SROCC (the registered headline, `per_ref_mean`) is
+    # well-posed. human_score = score_ssim2/100 (band convention).
+    ssim2 = np.asarray(full["score_ssim2"].combine_chunks(), dtype=np.float64)
+    m_hf = ssim2 >= 91.0
+    ref_arr = np.array(refs)
+    import collections
+    cnt = collections.Counter(ref_arr[m_hf].tolist())
+    good_refs = {r for r, c in cnt.items() if c >= 6}
+    m_hf &= np.isin(ref_arr, sorted(good_refs))
+    print(f"hfnlproxy pool: {int(m_hf.sum())} rows / {len(good_refs)} refs (>=6 cells each)")
+    e3 = emit("hfnlproxy", m_hf, 0.01)
+
     commit = subprocess.run(
         ["git", "-C", str(Path(__file__).resolve().parent.parent.parent),
          "rev-parse", "--short=12", "HEAD"],
@@ -140,7 +155,7 @@ def main() -> int:
         "build_commit": commit,
         "nonphoto_classes": sorted(NONPHOTO_CLASSES),
         "views": prov,
-        "slices": [e1, e2],
+        "slices": [e1, e2, e3],
     }
     mp = Path(a.out_root) / "_MANIFEST_eval_slices.json"
     mp.write_text(json.dumps(manifest, indent=1))

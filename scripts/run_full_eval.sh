@@ -91,7 +91,7 @@ if [[ "$REGIME" == "944" ]]; then
               --dial-grid /mnt/v/output/zensim/v2-eval-944-2026-08-01/dial_grid_944col_2026-08-01.parquet
               --corruption-grid /mnt/v/output/zensim/v2-eval-944-2026-08-01/corruption_grid_944col_2026-08-01.parquet
               --perpair-metrics /mnt/v/zen/zensim-training/kadis-944-2026-08-01/kadis700k_944.parquet
-              --corpora cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25,imazen26,nonphoto)
+              --corpora cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25,imazen26,nonphoto,hfnlproxy)
 fi
 # Stash the previous JSON so ZENSIM_M3_REUSE=1 can carry its M3 fields after
 # bake_verdict overwrites the file (bake_verdict always emits m3=null).
