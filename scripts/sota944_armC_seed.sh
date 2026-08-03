@@ -82,7 +82,7 @@ exec "$TRAIN" \
   --group "kadid:$E/ext_kadid.parquet:0.5:1.0:rank" \
   --group "tid:$E/ext_tid.parquet:0.5:1.0:rank" \
   ${SOTA944_NO_TBIG:+ } $([ "${SOTA944_NO_TBIG:-0}" = "1" ] || echo --group "bigcodec:$T/tbig_944_200k.parquet:0.5:1.0:both") \
-  --group "kadis:$K/kadis_944_ssim2_50k.parquet:0.15:1.0:both" \
+  --group "kadis:$K/kadis_944_ssim2_50k.parquet:${SOTA944_KADIS_W:-0.15}:1.0:both" \
   ${SOTA944_EXTRA_GROUP:+--group "$SOTA944_EXTRA_GROUP"} \
   ${SOTA944_EXTRA_GROUP2:+--group "$SOTA944_EXTRA_GROUP2"} \
   ${SOTA944_EXTRA_GROUP3:+--group "$SOTA944_EXTRA_GROUP3"} \
