@@ -2735,3 +2735,112 @@ Workspace `zensim--balanced` on `main@origin` (`141a9245`);
 pass). Nothing ships, swaps, promotes, or publishes; no bake enters
 `zensim/weights/`; §1 stays the freeze bar; the freeze decision remains the
 user's.
+
+### Wave-7 arm H results (2026-08-04) — the KonJND leg WORKS as a lever, the CID22 cost is CERTIFIED, no cell passes H-Q2; ensembles do not fire
+
+Corpus + arm exactly as registered (§7.1–7.2, commit `62f0bcc3`); corpus
+landed + triple-mirrored at `e03508ec`. Three seeds trained ({2501, 2503,
+2507}; s2503's first attempt was killed at epoch ~90 by a harness task-stop
+with no bake emitted — relaunched detached from scratch, same registered
+seed, completed clean; the campaign's waiter-death counter reaches 12).
+Verdicts: the frozen §0 `--regime 944` invocation. M3a: `run_full_eval` 944,
+27-pair mean. **User sign-off recorded mid-wave: the d=10 dHash flag
+(SRC0611) is RESOLVED — reviewed by user ("dhash is unreliable, ignore
+that") + supervisor (montage: categorical non-match); SRC0611 retained, no
+quarantine.**
+
+#### The full balanced-axis profile (every cell, nothing selected away)
+
+| cell | CID22 | KonJND | nonphoto | csiq | live | aic3 | aic4 | imazen26 | sdr25 | HF-NL | dial mono/tied | M3a | composite | best_val |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `H_co3abpg_s2501` | 0.87634 | **0.4564** | 0.9139 | 0.8317 | 0.8517 | 0.7931 | 0.9094 | 0.9127 | **0.9595** | +0.169 | 94.0% / 0.0% | 0.828 | 0.8479 | 0.4338 |
+| `H_co3abpg_s2503` | 0.87932 | 0.3835 | 0.9163 | 0.7353 | 0.8137 | 0.7824 | 0.9003 | 0.9122 | 0.9432 | **+0.416** | 96.4% / 0.0% | 0.774 | 0.8420 | 0.4877 |
+| `H_co3abpg_s2507` | **0.88055** | **0.4590** | **0.9164** | 0.8302 | **0.8634** | 0.7819 | 0.9051 | **0.9149** | 0.9404 | +0.182 | 94.0% / 0.0% | **0.866** | 0.8503 | 0.4969 |
+| *[ref] `C_co3a_s1301`* | 0.89067 | 0.4050 | 0.9045 | 0.8359 | 0.8393 | 0.7878 | 0.9032 | 0.9005 | 0.9282 | +0.251 | 95.9% / 0.0% | 0.760 | 0.8452 | 0.4357 |
+| *[ref] `C_em944_s31`* | 0.88692 | 0.4689 | 0.9162 | 0.7698 | 0.8117 | 0.8023 | 0.9172 | 0.9126 | 0.9521 | +0.037 | 93.4% / 0.0% | 0.793† | 0.8549 | 0.4863 |
+
+KADID/TID (train==val guards, integrity only): H cells 0.368–0.437 / 0.865–0.899.
+† s31's M3a is the campaign's previously-recorded measurement (wave-4 section).
+
+#### H-Q1 — the sharp question, answered with the paired instrument
+
+Band read: the co3a 12-seed baseline band is KonJND [0.309, 0.444] med
+0.405, CID22 [0.843, 0.891] med 0.883. The H band (3 seeds): KonJND
+{0.384, 0.456, 0.459} — **two of three seeds EXCEED the entire baseline
+band's maximum**; CID22 {0.876, 0.879, 0.881} — all below the baseline
+median, none reaching 0.885.
+
+Paired bootstrap (B=2000, seed 20260804, `wave6_paired_bootstrap.py`, same
+resampled index sets both sides; EM4's per-pair dumps re-generated this wave
+are **byte-identical** to wave 6's — instrument continuity proven):
+
+| KonJND (n=504) | median Δ | 2.5% | 97.5% | P(Δ>0) |
+|---|---|---|---|---|
+| `H2507` − EM4 | **+0.0300** | −0.0018 | +0.0605 | **0.967** |
+| `H2501` − EM4 | +0.0290 | −0.0057 | +0.0609 | 0.948 |
+| `H2507` − `C_em944_s31` | −0.0099 | −0.0522 | +0.0339 | 0.328 |
+| `H2503` − `C_em944_s31` | −0.0846 | −0.1344 | −0.0342 | 0.000 |
+
+| CID22 (n=4,292) | median Δ | 2.5% | 97.5% | P(Δ>0) |
+|---|---|---|---|---|
+| `H2507` − EM4 | −0.0118 | −0.0142 | −0.0095 | **0.000** |
+| `H2507` − `C_em944_s31` | −0.0064 | −0.0088 | −0.0040 | **0.000** |
+| `H2501` − `C_em944_s31` | −0.0107 | −0.0128 | −0.0086 | 0.000 |
+| `H2503` − `C_em944_s31` | −0.0077 | −0.0101 | −0.0052 | 0.000 |
+
+**Answer:** the reference-disjoint KonJND leg is a REAL KonJND lever — the
+kon-lifted seeds beat the bar model EM4 at P≈0.95–0.97 and sit statistically
+at par with the pool's best kon single (`C_em944_s31`) — but the CID22 cost
+is **certified, not noise** (every H−baseline CID22 CI is entirely negative).
+Direct reference-disjoint KonJND supervision at the v47 weight does NOT
+break the CID22↔KonJND trade; it reproduces, in training, the same trade
+wave 6 measured in ensemble member selection. The trade looks like a
+data-mass property of the objective, not an artifact of member choice.
+
+#### H-Q2 + the balanced-lens flag (supervisor directive, recorded mid-wave)
+
+**No cell passes the frozen primary pair (KonJND ≥ 0.43 AND CID22 ≥ 0.885):**
+s2501 and s2507 clear kon but miss CID22 by 0.009 / 0.004; s2503 misses both
+(its seed put the mass into HF-NL +0.416 and dial 96.4% instead — seed
+variance on the kon axis persists under direct supervision). Per the
+balanced-bar directive (user: "we can lower the bar to find more balanced and
+principled candidates"), the first-class combination CID22 ≥ 0.885 + KonJND
+≥ 0.43 + nonphoto ≥ 0.90 + dial pass is likewise held by **no H cell** — the
+only blocker is the same CID22 floor, by 0.0045 at best (`H_co3abpg_s2507`).
+
+**⇒ the registered W7_HE1/HE2 ensembles did NOT fire** (gated on an H-Q2
+pass) and the wave closes on §7.5's null terms. No grid growth, no weight
+retune, no extra seeds.
+
+#### What the wave leaves standing (beyond the null)
+
+1. **The corpus is real and stays**: `konjnd_bpg_{train,val}_944.parquet` —
+   the first reference-disjoint KonJND training material at any post-372
+   regime, built with zero decode steps from the distribution's own PNGs,
+   with the recovered-and-verified 372-era pair/target rule. Any future
+   arm can consume it at a different weight/mode without re-derivation.
+2. **A balanced-profile observation for the new lens**: `H_co3abpg_s2507` is
+   a genuinely broad cell — kon 0.459 / nonphoto 0.916 / live 0.863 /
+   imazen26 0.915 / M3a 0.866 (**clears the 0.85 M3a bar that no wave-4
+   co3a-family selected cell cleared**) / dial 94.0%/0.0% — beating the
+   co3a flagship on five secondary axes at a 0.010 CID22 cost. Under a
+   balanced selection rule this profile class is worth revisiting.
+3. **Selector observation**: trainer `best_val` did NOT track the KonJND bar
+   row (s2503 carries the band's second-highest best_val and its lowest kon
+   — the per-pair ssim2 rank of the val leg is not the per-ref PJND rank);
+   sdr25 again picks a kon-strong seed (leader s2501). Consistent with the
+   campaign's standing sdr25-selection rule.
+4. Instrument continuity: EM4 per-pair dumps byte-identical across waves 6→7.
+
+#### Limitations (complete)
+
+- k=3 seeds; the kon lift is 2/3 with one collapse — the band is honest but
+  thin. KonJND is n=504 |SROCC|; CIs above are the instrument's width.
+- The weight (1.2/1.5, the v47 precedent) was registered, not swept; a
+  weight sweep is a NEW registration, deliberately not run in this wave.
+- s2503's first attempt died to a harness task-stop at epoch ~90; the rerun
+  is a fresh full train of the same registered seed (trainer is
+  seed-deterministic in expectation, not bit-exact under rayon).
+- The corpus's target is metric-anchored (ssim2/100), not human PJND —
+  per-pair PJND labels for the BPG half do not exist; this is the same
+  supervision family as the 372-era dense build, by registration.
