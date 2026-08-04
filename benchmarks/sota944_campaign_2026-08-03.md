@@ -5985,3 +5985,296 @@ count how many of `f156..f371` are structurally zero in each.
   magnitude even where the sign is unambiguous. Only signs are used for the T4 rule.
 - Correcting a sign does not re-rank the campaign's *balanced* selection, which never
   scored KADID. What it changes is every narrative sentence that cited KADID.
+
+---
+
+### APPENDIX F RESULTS (2026-08-04) — outcome (b). **H2 CONFIRMED and H1 CONFIRMED; H3 FALSIFIED for the era models; H4 not supported as a re-layout.** The KADID target in the ENTIRE ext lineage (`ext720`/`ext924`/`ext944`) is `(5−dmos)/4` = **DISTORTION-oriented**, the exact inverse of the canonical `(dmos−1)/4`. So every KADID number this campaign published is sign-flipped, and the era-vs-944 story runs the OTHER WAY: the era models are near-perfect KADID rankers (+0.95/+0.82) and the 944 models are **anti-correlated** (−0.42 … −0.93), because they were TRAINED on the flipped column. TID is clean on every root.
+
+## F.R1 — T1: the roots disagree, bit-exactly (H2 rule: SUPPORTED)
+
+Row order verified against `dmos.csv` by the pre-existing `fix_kadid_tid_build_pairs.py`
+criterion (`ref_basename` sequence match, 10,125 rows) — **True for all five tables**.
+
+| KADID eval table | `max\|hs−(dmos−1)/4\|` | `max\|hs−(5−dmos)/4\|` | verdict |
+|---|--:|--:|---|
+| `2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet` | **0.000e+00** | 1.000e+00 | QUALITY-oriented |
+| `canonical-2026-05-21/train/kadid.parquet` | **0.000e+00** | 1.000e+00 | QUALITY-oriented |
+| `ext720-canonical-2026-07-22/ext_kadid.parquet` | 1.000e+00 | **0.000e+00** | **DISTORTION-oriented (INVERTED)** |
+| `ext924-canonical-2026-07-27/ext_kadid.parquet` | 1.000e+00 | **0.000e+00** | **DISTORTION-oriented (INVERTED)** |
+| `ext944-canonical-2026-08-01/ext_kadid.parquet` | 1.000e+00 | **0.000e+00** | **DISTORTION-oriented (INVERTED)** |
+
+Both residuals are **exactly zero** — this is not drift, it is two different transforms.
+The registered H2 rule (≥1 quality-oriented AND ≥1 distortion-oriented) is **SUPPORTED**.
+
+**Root cause, in source.** `scripts/canonical_corpus/build_fr_corpus_pairs.py`
+`build_kadid()` (line 113) emits `(5.0 − dmos)/4`. Its own module docstring (line 6)
+states the file's convention is *"human_score is QUALITY-oriented in [0,1] (higher =
+better). Datasets whose native label is a distortion score (DMOS higher=worse) are
+flipped to 1−norm."* — and its function docstring (line 102) calls the output
+*"quality-oriented"*. The mistake is the standard-DMOS reflex: KADID's column is
+**named** `dmos`, so it got the flip every genuinely-distortion-oriented corpus in that
+file gets (CSIQ `1−DMOS`, LIVE `1−dmos_new/100`). But KADID's `dmos` is a MOS in
+disguise — wave 9 measured it falling 4.079→2.007 across severity levels 1–5 — so the
+flip **inverts a label that was already correct**. TID in the same file uses `mos/9`
+(no flip) and is therefore unaffected.
+
+## F.R1b — GROUND TRUTH: verified against the RAW crowdsourced ratings, not against `dmos.csv`
+
+F.R1 and wave 9 both rest on `dmos.csv`. If `dmos.csv` were itself mis-oriented, they
+would be wrong together. The supervisor flagged exactly this. Closed here by going to
+the **raw per-rating file**, `/mnt/v/dataset/kadid10k/raw_crowdsource_data.csv` —
+**349,800 individual DCR ratings** over all 10,125 KADID distorted images (min 30
+ratings/image), joined per-image on `dist_url` (KADID's rows carry the `kon10k_png/`
+prefix; the file also contains a 960-image TID re-rating, filtered out).
+
+**Ground truth, from the human ratings alone:** mean raw DCR by severity level —
+L1 **4.0789**, L2 3.5175, L3 3.0589, L4 2.5034, L5 **2.0072**. DCR **falls** as
+distortion severity rises, so DCR is quality-oriented, and `dmos.csv`'s per-level means
+(4.0785 → 2.0067) reproduce it to 4 decimal places. `dmos.csv` is a faithful quality
+label.
+
+**The severity check applied directly to each stored table** — this needs no aggregation
+assumption at all, only the KADID filename's severity field:
+
+| KADID eval table | L1 | L2 | L3 | L4 | L5 | direction |
+|---|--:|--:|--:|--:|--:|---|
+| `kadid_features_372col_2026-05-15` | 0.7696 | 0.6292 | 0.5146 | 0.3757 | 0.2517 | **FALLS → QUALITY (correct)** |
+| `canonical-2026-05-21/train/kadid` | 0.7696 | 0.6292 | 0.5146 | 0.3757 | 0.2517 | **FALLS → QUALITY (correct)** |
+| `ext720…/ext_kadid` | 0.2304 | 0.3708 | 0.4854 | 0.6243 | 0.7483 | **RISES → DISTORTION (INVERTED)** |
+| `ext924…/ext_kadid` | 0.2304 | 0.3708 | 0.4854 | 0.6243 | 0.7483 | **RISES → DISTORTION (INVERTED)** |
+| `ext944…/ext_kadid` | 0.2304 | 0.3708 | 0.4854 | 0.6243 | 0.7483 | **RISES → DISTORTION (INVERTED)** |
+
+**Per-pair signed SROCC against the raw mean DCR (n = 10,125, every pair):**
+`dmos.csv` **+0.5824**; `372root` **+0.5824**; `canon-train` **+0.5824**;
+`ext720` / `ext924` / `ext944` **−0.5824**. Exact complements, sign unambiguous.
+
+*Honest caveat on the 0.58 magnitude.* An unweighted mean of the raw DCR is **not**
+KADID's published DMOS — the paper realigns per worker before averaging, and at ~30
+ratings/image that changes per-image means materially (mean\|Δ\| 0.64 on the 1–5 scale;
+restricting to untainted rows or trust-weighting moves it by <0.001, so it is not a
+filtering artifact). So +0.58 is the agreement between *raw unweighted* and *published
+realigned* aggregation, not a defect. **The orientation conclusion does not rest on that
+magnitude** — it rests on the sign (+0.58 vs −0.58, both far from 0) and on the
+per-severity table above, which is aggregation-free.
+
+**TID, same file, same question (the supervisor's ask).** The CSV's 960-image TID
+re-rating gives mean DCR L1 4.1445 → L5 2.0774 (falls). Signed SROCC vs that ground
+truth, n=960: TID published MOS **+0.9168**; and `372root` / `canon-train` / `ext720` /
+`ext944` **all +0.9168**. **Every TID root is correctly oriented**, verified against
+independent human ratings. (The +0.92 here is a cross-study agreement — a different lab
+re-rating a TID subset — which is why it is so much higher than KADID's within-study
++0.58 raw-vs-realigned number.)
+
+**The uncomfortable possibility the supervisor raised — that BOTH eras are inverted
+relative to truth and only the roots' disagreement made them look opposite — is
+MEASURED-FALSE.** Ground truth sides with the 372/canonical lineage. The era models are
+genuinely correct on KADID; the 944 models are genuinely inverted.
+
+## F.R2 — T3: the sign is a property of the TABLE, not the model (H3 falsified for era models)
+
+Same bake, same 10,125 rows, one root vs the other, `srocc_signed` from `bake_verdict
+--full-json`:
+
+| bake | root | KADID | TID | CID22 |
+|---|---|--:|--:|--:|
+| shipped **B** `b_sdr_linear_cid80_inclwinsor_dense_dial` | 372 (quality) | **+0.8201** | +0.7868 | +0.8764 |
+| shipped **B** | ext720 (inverted) | **−0.8085** | +0.7785 | +0.8821 |
+| `winner_dial_Ebothg_hfgain_winsor_dial` | 372 (quality) | **+0.9464** | +0.9577 | +0.8939 |
+| `winner_dial…` | ext720 (inverted) | **−0.9464** | +0.9577 | +0.8940 |
+
+`winner_dial`'s magnitude is **identical to four decimals** across the two roots with the
+sign flipped — the signature of a negated target (`SROCC(x,−y) = −SROCC(x,y)`) with the
+features effectively unchanged. TID and CID22 keep their sign on both roots. Per the
+registered T3 rule, each model's sign **vs true quality** is root-independent, so H2
+explains the *reporting* completely for these bakes.
+
+**And the 944 side, re-scored — not negated.** I wrote an orientation-corrected copy of
+`ext944/ext_kadid.parquet` (`human_score := (dmos−1)/4`, every other column byte-carried,
+`max|new+old−1| = 0.00e+00`) into a probe root of symlinks and re-ran `bake_verdict`
+through the owner tool:
+
+| 944 bake | on `ext944` as shipped | on the orientation-corrected root |
+|---|--:|--:|
+| `H_co3abpg_s2507` | +0.4233 | **−0.4233** |
+| `C_em944_s31` | +0.5692 | **−0.5692** |
+| `C_em944_s11` | +0.5995 | **−0.5995** |
+
+So, **against KADID's real human MOS**:
+
+| model | class | KADID **vs TRUE quality** | as published by this campaign |
+|---|---|--:|--:|
+| `winner_dial_Ebothg_hfgain_winsor_dial` | pre-ext | **+0.9464** | 0.9464 |
+| `Ebothg_scr0_5_dial` | pre-ext | **+0.9390** | 0.9390 |
+| `ADD156_safesyn_only_raw_lasso` | pre-ext | **+0.8082** | 0.8082 |
+| shipped **B** | pre-ext | **+0.8085** | 0.8085 |
+| `v47_strict_QAT_native` | pre-ext | **+0.7938** | 0.7938 |
+| `H_co3abpg_s2507` (944 incumbent) | ext-trained | **−0.4233** | 0.4233 |
+| `C_em944_s31` | ext-trained | **−0.5692** | 0.5692 |
+| `W8A_s3101` (wave-8 breadth-first) | ext-trained | **−0.9325** | 0.9325 |
+
+The campaign published every one of these as a positive magnitude. Four of the five
+era numbers happen to be right by luck (their sign is genuinely +); **every 944 number
+is wrong in sign**, and the wave-8 arms are the worst — the "KADID tripling" the wave-8
+results section called *"a FIT number"* was the model fitting a **backwards** target to
+near-perfection.
+
+## F.R3 — T4: what the 944 models actually learned (H1 confirmed, mechanism located)
+
+Per-distortion-type signed SROCC vs true quality, full 10,125 rows, forward pass via
+`predict_features_with_bake --bake-post raw`, statistics via `panel --batch --stats full`
+(pooled values reproduce `bake_verdict` to ≤0.002):
+
+| type | KADID distortion | winner_dial | shipped B | `H_co3abpg_s2507` |
+|--:|---|--:|--:|--:|
+| 9 | JPEG2000 | +0.945 | +0.938 | **+0.546** |
+| 10 | JPEG | +0.894 | +0.858 | **+0.361** |
+| 11 | white noise | +0.919 | +0.891 | **+0.290** |
+| 14 | multiplicative noise | +0.949 | +0.937 | **+0.253** |
+| 12 | white noise in colour | +0.944 | +0.927 | **+0.129** |
+| 20 | non-eccentricity patch | +0.593 | +0.417 | **+0.080** |
+| 13 | impulse noise | +0.889 | +0.777 | **+0.043** |
+| 7 | colour saturation 1 | +0.589 | +0.519 | **+0.019** |
+| 2 | lens blur | +0.920 | +0.886 | −0.208 |
+| 17 | darken | +0.912 | +0.890 | −0.236 |
+| 21 | pixelate | +0.616 | +0.411 | −0.235 |
+| 15 | denoise | +0.920 | +0.773 | −0.306 |
+| 4 | colour diffusion | +0.927 | +0.867 | −0.342 |
+| 23 | colour block | +0.530 | +0.464 | −0.347 |
+| 6 | colour quantize | +0.884 | +0.851 | −0.364 |
+| 18 | mean shift | +0.756 | +0.679 | −0.407 |
+| 22 | quantization | +0.861 | +0.767 | −0.439 |
+| 25 | contrast change | +0.700 | +0.735 | −0.447 |
+| 1 | gaussian blur | +0.956 | +0.945 | −0.524 |
+| 3 | motion blur | +0.956 | +0.950 | −0.567 |
+| 19 | jitter | +0.958 | +0.945 | −0.636 |
+| 5 | colour shift | +0.845 | +0.723 | −0.653 |
+| 16 | brighten | +0.949 | +0.911 | −0.686 |
+| 8 | colour saturation 2 | +0.946 | +0.886 | −0.691 |
+| 24 | high sharpen | +0.905 | +0.701 | −0.796 |
+| | **pooled (n=10,125)** | **+0.946** | **+0.820** | **−0.423** |
+| | **sign count** | **25/25 positive** | **25/25 positive** | **8 positive / 17 negative** |
+
+Per the registered T4 rule: winner_dial and shipped B are **uniform (25/25)**, which
+counts **AGAINST H3** — they are not selectively failing on KADID's analytic
+distortions, they rank *every one of the 25 types* correctly. H3 is falsified for the
+era models.
+
+`H_co3abpg_s2507` is **mixed**, and the split is not random: its **eight positive types
+are exactly the compression + noise family** (JPEG2000, JPEG, white noise, multiplicative
+noise, colour noise, impulse noise, and two weak ones), and **all seventeen negatives are
+the analytic non-compression types** (every blur, every colour/brightness/contrast
+manipulation, sharpen, pixelate, quantization, mean shift, jitter). That is precisely the
+shape H1 predicts: the rest of the 944 recipe (safesyn / cid22_train / bigcodec) supplies
+an enormous, correctly-oriented **compression** signal that holds those types positive,
+while the analytic types have no counterweight and follow the flipped KADID column they
+were trained on. The 944 models' inversion is **inherited from the defective training
+target**, not an independent learned failure.
+
+**Dose-response — the mechanistic confirmation.** Across the 111 board fullevals whose
+embedded `zentrain.repro.argv` parses a `--group kadid:…ext_kadid.parquet:<train_w>:…`:
+
+| KADID train weight | n bakes | mean KADID vs TRUE quality | min | max |
+|--:|--:|--:|--:|--:|
+| 0.50 | 104 | **−0.4568** | −0.7520 | +0.5919 |
+| 1.50 | 7 | **−0.9246** | −0.9372 | −0.9064 |
+
+Tripling the weight on the flipped column drives the fit from "half-inverted" to
+"almost perfectly inverted" (|SROCC| of the weight-vs-inversion relation = 0.4210,
+n=111, `zenstats`). The 1.50-weight cells are wave 8's breadth-first arms — the wave
+whose headline was *"triples KADID"*.
+
+## F.R4 — T5: **TID is CLEAN.** No inversion anywhere.
+
+| TID eval table | `max\|hs−mos/9\|` | `max\|hs−(1−mos/9)\|` | verdict |
+|---|--:|--:|---|
+| `tid_features_372col_2026-05-15.parquet` | 0.000e+00 | 9.461e-01 | QUALITY-oriented |
+| `canonical-2026-05-21/train/tid.parquet` | 0.000e+00 | 9.461e-01 | QUALITY-oriented |
+| `ext720…/ext_tid.parquet` | 0.000e+00 | 9.461e-01 | QUALITY-oriented |
+| `ext924…/ext_tid.parquet` | 0.000e+00 | 9.461e-01 | QUALITY-oriented |
+| `ext944…/ext_tid.parquet` | 0.000e+00 | 9.461e-01 | QUALITY-oriented |
+
+All five agree bit-exactly. Across all 188 board fullevals exactly **one** carries a
+negative TID `srocc_signed` (`ebothg_m504`, −0.2006) — an individual bake's behaviour,
+not a systematic orientation defect. **Every published TID magnitude is a true
+magnitude**; the answer to "does TID have the same problem" is **no**.
+
+## F.R5 — T6: H4 — the pre-registered criterion FIRES, but it was mis-specified
+
+Row-matched `f0..f371`, KADID:
+
+| comparison | max\|Δ\| | mean\|Δ\| | cols with max\|Δ\|>1e-3 |
+|---|--:|--:|--:|
+| 372 root vs ext720 | 6.15e-01 | 2.63e-03 | 156 / 372 |
+| 372 root vs ext944 | 1.33e+01 | 5.06e-02 | 345 / 372 |
+
+All-zero columns within `f156..f371`: 372 root **0/216**, ext720 **0/216**,
+ext944 **216/216**.
+
+My registered rule ("H4 SUPPORTED iff the leading blocks differ materially") **fires** on
+372-vs-ext720. **I am recording that the rule was mis-specified**, not that H4 holds: the
+156 differing columns are *scattered* (`f27`, then the `f156..f371` masked/IW pool), not a
+re-layout, and mean |Δ| is 2.6e-03 — this is extractor-version drift within the SAME v1-372
+space. The proof that it is not a space change is F.R2: `winner_dial`'s KADID |SROCC| is
+identical to four decimals across the two roots, which cannot happen if it were reading a
+different feature space. **H4 as posed (a different space) is NOT supported for
+720-vs-372.** It IS structurally true for ext944 — 216 structural zeros — but that is the
+documented folded-924 layout, by design, and it is why a 944-input bake cannot be
+cross-scored on the 372 root (the limitation registered in T3).
+
+## F.R6 — Why the split looked like "era" (and why that framing was wrong)
+
+The split is not two model families; it is **two data lineages**.
+
+- The canonical/372 lineage (`build_canonical_parquets.py`, `fix_kadid_tid_*`) is
+  quality-oriented and always was.
+- The ext lineage (`build_fr_corpus_pairs.build_kadid()` → `ext720` 2026-07-22 →
+  `ext924` 2026-07-27 → `ext944` 2026-08-01) is inverted.
+
+Every model in F.0's "era" column was **baked before the first ext root existed**
+(`winner_dial` 2026-07-18, shipped B 2026-07-07, `v47` 2026-05-27), so it trained on the
+correct column. Every 944 model trained on `ext_kadid.parquet`. The eval regime then
+inverted the era models' *reported* sign while leaving their behaviour correct, and left
+the 944 models' *reported* sign positive while their behaviour was inverted. Both halves
+were wrong, in opposite directions, which is why the magnitudes looked like a clean
+"0.946 → 0.423 regression" instead of what it is: **+0.946 → −0.423, a sign flip**.
+
+Across all 188 board fullevals, under the corrected orientation: **110 bakes are
+anti-correlated with KADID's real human MOS** (107 of them `ext_kadid`-trained) and 78 are
+correct. The board has been rendering all 188 as positive magnitudes.
+
+## F.R7 — Verdict against the registered outcomes
+
+**Outcome (b)** — H2 confirmed AND H1 live:
+- **H2 CONFIRMED** (T1 bit-exact; T3 root-independence). Every ext-lineage KADID number
+  ever published by this campaign is sign-flipped.
+- **H1 CONFIRMED** (T4 compression-vs-analytic split; the weight dose-response). The 944
+  models' real inversion is *inherited* from training on the flipped column.
+- **H3 FALSIFIED for the era models** (T4: 25/25 uniform positive). Not re-tested as an
+  *independent* mechanism for the 944 models, because H1 already explains them; a residual
+  H3 component cannot be excluded and is not claimed.
+- **H4 NOT SUPPORTED** as a re-layout (F.R5); the registered criterion is recorded as
+  mis-specified rather than quietly re-cut.
+- **TID: no defect** (T5).
+
+## F.R8 — Remediation
+
+**Canonical table.** `human_score = (dmos − 1)/4` — i.e. the 372-root and
+`canonical-2026-05-21/train/kadid.parquet` are correct; `ext720`/`ext924`/`ext944`
+`ext_kadid.parquet` are wrong and must be rebuilt with the sign fixed.
+`build_fr_corpus_pairs.build_kadid()` must change `(5.0 − dmos)/4` → `(dmos − 1.0)/4`,
+and every other corpus in that file must be re-checked against its native orientation
+(TID/CSIQ/LIVE were checked here and are correct).
+
+**What a corrected comparison looks like.** Negate `rank.kadid.srocc_signed` for any
+verdict produced against an ext-lineage root — this is an exact identity, not a
+re-measurement, because the features are unchanged and only the target was negated.
+No re-score is needed to correct a *number*.
+
+**Does any model need retraining?** For the era/pre-ext models: **no** — they were
+trained on the correct column and are correct; only their reported sign was wrong.
+For the 944 models: their KADID *behaviour* is genuinely inverted, so a KADID-competent
+944 model requires a retrain on a fixed `ext_kadid.parquet`. **But that is a
+recommendation about KADID competence only, and KADID is a `train_eq_val` guard, not a
+ship gate** — nothing in this campaign's *balanced* selection scored KADID, so no
+selection outcome changes. What must not happen is the reverse mistake: promoting a 944
+bake on a KADID number that is actually negative.
