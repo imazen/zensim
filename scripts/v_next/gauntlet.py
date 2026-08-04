@@ -141,6 +141,8 @@ def family_of(name: str) -> str:
         return "arm B"
     if n.startswith("C_em944"):
         return "arm C seeds"
+    if n.startswith("C_ensk"):
+        return "distilled"      # wave-6 arm F: single-bake students of the W5 ensembles
     if n.startswith(("C_co1", "C_co2", "C_co3", "C_co4")):
         return "coherence/W4"
     if n.startswith(("C_nt944", "nt")):
@@ -477,6 +479,73 @@ function showTip(html,ev){tt.innerHTML=html;tt.style.opacity=1;
   tt.style.left=x+'px';tt.style.top=y+'px';}
 function hideTip(){tt.style.opacity=0;}
 
+// ---- ZOOM/PAN (2026-08-04): shared viewBox-based helper for the heavyweight charts.
+// Wheel = zoom centered on the cursor (clamped 1x-20x of the base view); pointer-drag =
+// pan (only once zoomed, so clicks/tooltips at 1x are untouched); double-click or the
+// corner ⟲ button = reset. Pure viewBox math — element mousemove tooltips keep landing
+// at the cursor because showTip anchors at ev.clientX/clientY (viewport coords, which a
+// viewBox change never remaps). DOM-shim safe: listeners are BOUND at build but only run
+// on real interaction, and every pointer/rect API is typeof-guarded so the render
+// harness can never crash.
+function makeZoomable(svg,opts){
+  const vbAttr=svg&&typeof svg.getAttribute==='function'?svg.getAttribute('viewBox'):null;
+  const vb=vbAttr?String(vbAttr).split(/[ ,]+/).map(Number):[];
+  if(vb.length!==4||vb.some(v=>!isFinite(v)))return svg;   // not a chart svg — pass through
+  const base={x:vb[0],y:vb[1],w:vb[2],h:vb[3]};
+  const maxZ=(opts&&opts.maxZoom)||20;
+  let cur={x:base.x,y:base.y,w:base.w,h:base.h};
+  const wrap=el('div',{class:'zwrap'});
+  const btn=el('button',{class:'zr',title:'reset zoom (double-click the chart also resets)',text:'⟲'});
+  btn.style.display='none';
+  const zoomed=()=>cur.w<base.w*0.999;
+  const apply=()=>{svg.setAttribute('viewBox',cur.x+' '+cur.y+' '+cur.w+' '+cur.h);
+    btn.style.display=zoomed()?'':'none';};
+  const reset=()=>{cur={x:base.x,y:base.y,w:base.w,h:base.h};apply();};
+  const clamp=()=>{
+    cur.w=Math.min(base.w,Math.max(base.w/maxZ,cur.w));
+    cur.h=Math.min(base.h,Math.max(base.h/maxZ,cur.h));
+    cur.x=Math.max(base.x,Math.min(base.x+base.w-cur.w,cur.x));
+    cur.y=Math.max(base.y,Math.min(base.y+base.h-cur.h,cur.y));};
+  const rectOf=()=>(typeof svg.getBoundingClientRect==='function')
+    ?svg.getBoundingClientRect():{left:0,top:0,width:base.w,height:base.h};
+  svg.addEventListener('wheel',ev=>{
+    ev.preventDefault();                       // chart-local zoom, not page scroll
+    const r=rectOf();if(!r.width||!r.height)return;
+    const fx=(ev.clientX-r.left)/r.width,fy=(ev.clientY-r.top)/r.height;
+    const px=cur.x+fx*cur.w,py=cur.y+fy*cur.h; // data point under the cursor stays put
+    const s=Math.pow(1.0015,ev.deltaY);        // deltaY>0 = zoom out
+    cur.w*=s;cur.h*=s;
+    cur.w=Math.min(base.w,Math.max(base.w/maxZ,cur.w));
+    cur.h=Math.min(base.h,Math.max(base.h/maxZ,cur.h));
+    cur.x=px-fx*cur.w;cur.y=py-fy*cur.h;
+    clamp();apply();
+  },{passive:false});
+  let drag=null;
+  svg.addEventListener('pointerdown',ev=>{
+    if(!zoomed())return;                       // 1x: leave clicks + tooltips alone
+    drag={cx:ev.clientX,cy:ev.clientY,vx:cur.x,vy:cur.y,r:rectOf()};
+    if(typeof svg.setPointerCapture==='function'&&ev.pointerId!=null){
+      try{svg.setPointerCapture(ev.pointerId);}catch(e){}}
+    if(ev.preventDefault)ev.preventDefault();
+  });
+  svg.addEventListener('pointermove',ev=>{
+    if(!drag)return;
+    cur.x=drag.vx-(ev.clientX-drag.cx)*cur.w/(drag.r.width||1);
+    cur.y=drag.vy-(ev.clientY-drag.cy)*cur.h/(drag.r.height||1);
+    clamp();apply();
+  });
+  const endDrag=ev=>{
+    if(drag&&typeof svg.releasePointerCapture==='function'&&ev.pointerId!=null){
+      try{svg.releasePointerCapture(ev.pointerId);}catch(e){}}
+    drag=null;};
+  svg.addEventListener('pointerup',endDrag);
+  svg.addEventListener('pointercancel',endDrag);
+  svg.addEventListener('dblclick',ev=>{if(ev.preventDefault)ev.preventDefault();reset();});
+  btn.onclick=reset;
+  wrap.append(svg,btn);
+  return wrap;
+}
+
 // ---- CONTROL BAR: preset buttons + FAMILY toggles + collapsible per-bake chips +
 // reference tabs + theme. With ~160 grid cells on the board, the sticky bar leads with
 // the curated preset and family groups; individual chips live in a collapsible picker
@@ -705,7 +774,7 @@ function renderScatter(){
   [...corps,...extra].forEach(corp=>{
     host.append(el('div',{class:'corpttl',text:corp}));
     const row=el('div',{class:'scrow'});
-    bs.forEach(b=>{if(b.scatter[corp]&&b.scatter[corp][ref])row.appendChild(scatterCell(b,corp,ref));});
+    bs.forEach(b=>{if(b.scatter[corp]&&b.scatter[corp][ref])row.appendChild(makeZoomable(scatterCell(b,corp,ref)));});
     if(!row.children.length)row.appendChild(el('div',{class:'cap',text:'(no visible bake has '+ref+' here)'}));
     host.appendChild(row);
   });
@@ -743,7 +812,8 @@ function renderHeat(){
   });
   host.append(el('h2',{text:'Cross-corpus SROCC'}),
     el('div',{class:'cap',html:'Bake × corpus, SROCC (|SROCC| for JND corpora). Sequential blue: darker = higher. '
-      +'<b>⚠</b> (amber header) = KADID/TID, train==val — SROCC rewards memorization, not held-out generalization.'}),svg);
+      +'<b>⚠</b> (amber header) = KADID/TID, train==val — SROCC rewards memorization, not held-out generalization.'}),
+    makeZoomable(svg));
 }
 
 // ---- operating-point trade map: CID22 vs nonphoto and vs KonJND (labeled points)
@@ -779,8 +849,8 @@ function renderTrade(){
   host.append(el('h2',{text:'Operating-point trade map'}),
     el('div',{class:'cap',text:'Upper-right = better on both. Points are directly labeled (identity is never color-alone).'}));
   const grid=el('div',{class:'grid'});
-  grid.append(tradePanel('cid22','nonphoto','CID22 SROCC','non-photo SROCC'),
-              tradePanel('cid22','konjnd','CID22 SROCC','KonJND |SROCC|'));
+  grid.append(makeZoomable(tradePanel('cid22','nonphoto','CID22 SROCC','non-photo SROCC')),
+              makeZoomable(tradePanel('cid22','konjnd','CID22 SROCC','KonJND |SROCC|')));
   host.appendChild(grid);
 }
 
@@ -859,7 +929,7 @@ function renderMPanel(){
       });
       svg.append(S('text',{x:gx+(banded.length*9)/2,y:H-8,'text-anchor':'middle','font-size':9,fill:cssv('--text-secondary'),text:bn}));
     });
-    const bw=el('div',{style:'overflow-x:auto'});bw.append(svg);host.append(bw);
+    const bw=el('div',{style:'overflow-x:auto'});bw.append(makeZoomable(svg));host.append(bw);
     // ---- the NUMBERS behind those bars: cross-bake per-band SROCC table.
     // Columns = bands populated somewhere in this corpus (n>0); on CID22 that drops the
     // structurally-empty B0/B1. Values come straight from rank.<corpus>.bands[] — nothing
@@ -973,7 +1043,7 @@ function renderDial(){
       pl.addEventListener('mousemove',ev=>showTip('<b>'+b.name+'</b> × '+cd+(pc?'<br>mono <b>'+pct(pc.mono)+'</b> · tied '+pct(pc.tied)+' · '+pc.n_curves+' ladders':''),ev));
       pl.addEventListener('mouseleave',hideTip);svg.append(pl);
     });
-    grid.append(svg);
+    grid.append(makeZoomable(svg));
   });
   host.append(grid);
 }

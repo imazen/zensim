@@ -148,6 +148,16 @@ if (countTag('svg') < 3) fail('too few SVG charts: ' + countTag('svg'));
 const h2s = texts('h2');
 if (!h2s.includes('Scoreboard')) fail('Scoreboard heading missing (h2s: ' + h2s.join(' | ') + ')');
 
+// zoom/pan (2026-08-04): the heavyweight charts are wrapped by makeZoomable — assert the
+// wrappers + corner reset buttons exist (handlers only run on real interaction, so a
+// build-time crash in the helper would surface as a thrown render above, not here).
+if (countTag('svg') >= 3) {
+  const zwraps = registry.filter(e => classesOf(e).includes('zwrap'));
+  const zrs = registry.filter(e => classesOf(e).includes('zr'));
+  if (!zwraps.length) fail('no zoomable chart wrappers (.zwrap) rendered');
+  if (!zrs.length) fail('no zoom-reset buttons (.zr) rendered');
+}
+
 // board curation (2026-08-04): family toggles must render when bakes carry families,
 // and the registered size rule holds — non-curated cells must NOT embed scatter points.
 if (DATA && DATA.bakes.some(b => b.family)) {
