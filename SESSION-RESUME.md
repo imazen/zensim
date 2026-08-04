@@ -1,96 +1,91 @@
 # SESSION-RESUME — read this first after every compact
 
-**Last updated:** 2026-07-29 (E-M campaign: 924/v3 era + the steering pivot). **ACTIVE:
-the attribution-density steering map (task #67)** — per-pixel true-integrand density + SAT
-for O(1) arbitrary-rectangle codec queries; proven E-M9 (M2 0.999-1.000 at 16-128px while
-the signal fold inverts). Read CLAUDE.md "THE E-M CAMPAIGN" section for the era record
-(rank results, data-vs-v3 attribution, sdr25/best_val seed-selection recipe, gotchas).
-Prior era (2026-07-19, feature-v2 → optimal-model fleet) below still holds for context. Prior snapshots live
-in git history — their durable facts are in the linked docs, not here.
+**Last updated: 2026-08-04 (consolidation wave).** The current era is the
+**SOTA-944 model campaign** — pre-registered, five seed/lever waves + two
+ensemble waves, all appended in place in the one authority doc:
+[`benchmarks/sota944_campaign_2026-08-03.md`](benchmarks/sota944_campaign_2026-08-03.md).
+Everything before it (372-era, 720/924-era) is historical context, era-tagged —
+never compare numbers across eras without the doc's era-bridge notes.
 
-## ⇒ ACTIVE WORK (2026-07-19): optimal global model + feature validation + diffmap
+## Current true state (2026-08-04)
 
-**Read [`docs/V2_EXPERIMENT_PLAN_2026-07-20.md`](docs/V2_EXPERIMENT_PLAN_2026-07-20.md) (the
-E0–E10 experiment ladder: datasets, evals, gates) and
-[`docs/OPTIMAL_MODEL_PLAN_2026-07-19.md`](docs/OPTIMAL_MODEL_PLAN_2026-07-19.md) (fleet
-mechanics + methodology).** Fleet backfill of T-big/T-safe is owned by the zenmetrics
-session (40×cx43, launched 2026-07-20); local backfill leg + experiments live here.
-One-paragraph state:
+- **Regime = 944** (folded+append+append2). Canonical data roots + grids are
+  resolved by `bake_verdict --regime 944` itself (test-pinned; see entry
+  point 1). REGIME PURITY is absolute: never column-mix 944 rows with
+  720/372 parquets.
+- **Campaign standing result:** the frozen 5-row bar (CID22 > 0.8924, KonJND
+  ≥ 0.43, nonphoto ≥ 0.90, HF-NL-proxy, dial) has been cleared row-by-row but
+  **never by one artifact**. Registered levers (seed scale n=23, near-top
+  anchor, coherence, wave-4 combos) were honest nulls; the stabilized
+  single-model ceiling is **`C_co3a_s1301` CID22 0.89067** (KonJND 0.405,
+  nonphoto 0.905, HF-NL +0.251, dial 95.9%/0%).
+- **Seed ENSEMBLES moved both blockers:** wave 5 `W5_E1_k2` CID22 **0.89425**
+  (first CID22-bar pass in 64+ draws; paired bootstrap P(Δ>0)=0.968), wave 6
+  `W6_GE2_trio` KonJND **0.4543** (the KonJND blocker broken; binding row is
+  now CID22). Ensembles are evaluation functions, not shippable bakes — M3a
+  not computable for them; distillation (wave-6 arm F) is the ship route and
+  is **in flight** as of this writing.
+- **Freeze decision = the USER'S, pending:** stabilized ~0.891 with better
+  secondary axes vs. the unstable 924-era 0.8924 peak (EM4 — which fails the
+  campaign's own HF-NL row; see the doc's Corrections section). Freeze bars +
+  owner map: `freeze_check` (zensim-validate) +
+  `benchmarks/decision_surface_audit_2026-07-31.md`.
+- **G-RANGE on 944 MLPs** (2026-08-04 addendum): the gate tool now evaluates
+  every bake class, and it surfaced that no 944 MLP candidate carries an
+  output spline — dial packaging (`bake_dial_refit add-spline`) is required
+  before that bar row can be judged on a freeze candidate.
 
-The feature-v2 "perfectable features" program finished its lab-scale phase. Verdicts (all in
-`benchmarks/v2_trainability_ab_2026-07-19.md`): the append-only v1-372 ++ v2-348 = **720**
-regime is built + extractor + fleet-wired (jobexec emits 720 for `metric=zensim`). The
-**append-only decision** — "does v1 ++ post-372 beat v1?" — is seed-noisy at lab scale: robust
-= combining wins **aic3 +0.11** and improves **coherence** (ext-lumacoh = **100% spatializable**
-by deprecating v1's non-spatializable block at ~0 compression cost), loses CSIQ (general-FR);
-CID22/LIVE flip sign between seeds (epoch-0 lab-recipe instability). Runtime: v2/v1 compute
-**1.4–1.7×** (`benchmarks/v2_extraction_timing_2026-07-19.md`); the gradient **sqrt is already
-SIMD** (asm-verified). **Diffmap core landed** (`ce45a1ff`, `compute_v2_diffmap_channel_scale`,
-test-gated block-pool identity); the excluded families are computable via the per-pixel gradient
-(`Σ_k s_k·∂f_k/∂pixel`, hits M2≈1.0). Directives: **feature numbering is append-only** (v2 at
-f372+, deprecate-by-mask never renumber); transducer **luma-gate** landed as an opt-in toggle.
+## THE three entry points (a newcomer starts here)
 
-**Next step:** build the optimal global model to settle which features are load-bearing
-(marginal-at-the-optimum, not lab-seed-noise), THEN complete the diffmap for survivors. Step 1
-is the fleet blocker: **rebuild+push the CPU executor image** `zenfleet-worker:exec` (stale =
-silently emits 372 not 720). Full order + corpus + risks: the plan doc §D.
+1. **Evaluate any bake, correctly, with one command:**
+   `bake_verdict --bake X.bin --regime 944` — resolves the ext944 features
+   root, 944 dial/corruption grids, kadis-944 per-pair source, and the frozen
+   12-corpus campaign list; a bare run cannot silently omit a corpus. Add
+   `--fulleval out.json` for the schema-complete dashboard JSON, or run
+   `scripts/run_full_eval.sh <bake> <name> 944` to also measure M3/M3a.
+   (`scripts/sota944_verdict.sh` is the campaign's thin wrapper over the same
+   preset.)
+2. **See every model compared:** the summer-gauntlet board at
+   `/mnt/v/output/zensim/reports/fulleval/summer_gauntlet.html` (rebuild:
+   `scripts/v_next/bandwise_dashboard.py --fulleval-dir …/fulleval`; every
+   regen must pass `scripts/v_next/gauntlet_gates.sh <html>`).
+3. **Understand the science:** the campaign doc above (bar, arms, corrections,
+   ensemble waves, addenda) + [`docs/TOP_MODELS_COOKBOOK.md`](docs/TOP_MODELS_COOKBOOK.md)
+   (the 372-era roster + pitfall list — era banner at top).
 
 ## Reading order on resume
 
 1. **This file** (~1 min)
-2. **[`docs/TOP_MODELS_COOKBOOK.md`](docs/TOP_MODELS_COOKBOOK.md)** — the validated science +
-   exact reproduction of every top model + the new-model loop + the pitfall list. THE entry
-   point for model work.
-3. **[`docs/MODEL_SELECTION_SCORECARD.md`](docs/MODEL_SELECTION_SCORECARD.md)** — the
-   five-gate exam (RANK/DIAL/STEER/RD/TARGET), SDR + HDR, with the steer-mass pre-screen.
-4. `CLAUDE.md` — rules + methodology (note: its V0_x-era status sections are historical;
-   the cookbook supersedes them for current state).
-5. `docs/DATA_SPLITS.md` + `docs/DATASET_HISTORY.md` — corpus law + poison ledger.
-6. `benchmarks/INDEX.md` → the July-2026 docs when you need the evidence chain.
-7. `TaskList` for open work.
+2. **[`benchmarks/sota944_campaign_2026-08-03.md`](benchmarks/sota944_campaign_2026-08-03.md)** —
+   the era authority: frozen bar, every wave's results, corrections, addenda.
+3. [`docs/TOP_MODELS_COOKBOOK.md`](docs/TOP_MODELS_COOKBOOK.md) — validated
+   science + exact reproduction of the (372-era) top models + the pitfall list.
+4. [`docs/MODEL_SELECTION_SCORECARD.md`](docs/MODEL_SELECTION_SCORECARD.md) —
+   the five-gate exam (RANK/DIAL/STEER/RD/TARGET) every ship candidate takes.
+5. `CLAUDE.md` — rules + methodology (★924-parquets, ★E-M campaign, the
+   NO-DUPLICATE-IMPLEMENTATIONS owner table, tool inventory).
+6. [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) — how a number chains
+   back to bytes; [`docs/DATA_SPLITS.md`](docs/DATA_SPLITS.md) +
+   [`docs/DATASET_HISTORY.md`](docs/DATASET_HISTORY.md) — corpus law.
+7. [`benchmarks/INDEX.md`](benchmarks/INDEX.md) → prior experiments; run
+   `TaskList` for open work.
 
-**Retrospective (2026-07-26):** [`benchmarks/best_per_day_summer_2026.md`](benchmarks/best_per_day_summer_2026.md)
-maps the **best model per calendar day** (05-01 → 07-25) with verified bake paths + summer
-champions (best CID22 = winner_dial 0.894; best KonJND = cl_tfm 0.761 — first past the G5
-floor; best HF-NL/dial = Ebothg_scr0.5_dial; shipped B/A/BHdr). JSON twin:
-`/mnt/v/output/zensim/reports/best_per_day.json`.
+## Doc pointers (updated 2026-08-04)
 
-## Current state (2026-07-18)
+- Campaign era: `benchmarks/sota944_campaign_2026-08-03.md` (authority) ·
+  plan `docs/PLAN_SOTA944_CAMPAIGN_2026-08-01.md` · B lineage
+  `benchmarks/profile_b_methodology_2026-07-12.md` · era bridge + backfill
+  `benchmarks/backfill944_2026-08-01.md` + `backfill944_bigcodec_2026-08-02.md`.
+- Shipped defaults: `ZensimProfile::B` (SDR) + BHdr; the 372-era candidates
+  and their scorecards live in the cookbook; swaps remain user-gated.
+- External reads / HDR domains: `scripts/external_reads/README.md`
+  (seven-domain runner, `--from-stored` rescores in ~11 s).
+- Eval-panel law: `docs/EVAL_PANEL_REQUIREMENT.md` (rank+dial two-panel
+  mandate) · `docs/FULL_EVAL.md` (fulleval schema + 924/944-era eval slices).
+- Historical: `docs/HISTORY-2026-05-v0x-era.md` (V0_x era) ·
+  `benchmarks/best_per_day_summer_2026.md` (per-day 372-era champions) ·
+  `zenanalyze/everything.md` is frozen-HISTORICAL (its own banner).
 
-- **Shipped default = `ZensimProfile::B`** (linear-372 + dial spline; A deprecated behind
-  `deprecated-profiles`). The A↔B history: B leads human-MOS holdouts; A led ssim2-agreement
-  on codec sweeps (`benchmarks/ab_dial_monotonicity_2026-07-05.md`).
-- **Ship candidates (swap user-gated, scorecard complete):**
-  `Ebothg_scr0.5_dial` {CID22 0.879, nonphoto 0.906, **HF-NL 0.712** (best ever), LIVE 0.959,
-  dial 0.985} and `winner_dial` {CID22 0.894, best jxl RD} — both weak on KonJND (0.27–0.34
-  vs B 0.55). `ADD156` = exact-gradient/3.6KB runner-up. Verdicts:
-  `benchmarks/sdr_scorecard_2026-07-18.md` + `screen_retrain_2026-07-18.md`.
-- **The July-18 correction set** (older docs predate these — trust the cookbook):
-  additive-mislabel (`additive_vs_mlp_correction`), M2=1.0-for-all + ModelSensitivity
-  (`mlp_diffmap_coherence`), the `DiffmapResult::score()` legacy-V0_2 bug (fixed `834b4387`),
-  zenjpeg inert Zq passes (worktree q-correction), RD probe results (`rd_probe_results`),
-  LIVE-R2/CSIQ/PIPAL as first-class FR holdouts.
-- **HDR:** shipped BHdr steer-mass 0.435; hdrmix-shaped lineage is a steering dead-end;
-  steerable families exist (hdrbroadplh1 0.963, hdriwmix 0.762). Gate ≥0.5 before training
-  (`benchmarks/hdr_steer_screen_2026-07-18.md`). PU-coherence + HDR-RD legs specced, unbuilt.
-- **Feature-v2 ("perfectable features") campaign OPEN**: bound `hf_gain` at extraction, fix
-  the IW `1/n`-vs-`Σw` divergence, spatializable-by-construction redesign — versioned opt-in
-  regime, never a mutation of frozen v1 (all parquets/bakes depend on v1 byte-stability).
-- **Literature**: search `~/work/zen/zenpapers` (+ `/mnt/v/input/papers/`) before designing
-  features/metrics.
-- **Worktrees live**: `jxl-encoder--zensim-diffmap-rd` + `zenjpeg--zensim-diffmap-rd` carry
-  the RD-probe wiring (env-selectable profiles/maps, q-correction, probe binaries).
-- **Interactive summer-gauntlet dashboard** (2026-07-26): `bandwise_dashboard.py --fulleval-dir
-  /mnt/v/output/zensim/reports/fulleval --out …/summer_gauntlet.html` — one self-contained OFFLINE
-  HTML comparing ALL summer bakes: bake-toggle checkboxes, sortable scoreboard, cross-corpus SROCC
-  heatmap, trade map, and the predicted-vs-reference (MOS/JND/ssim2/butteraugli/cvvdp) scatter
-  matrix. Input contract + fixtures: `scripts/v_next/make_stub_fulleval.py` (the eval agent emits
-  the real `*.fulleval.json` + `best_per_day.json`); builder: `scripts/v_next/gauntlet.py`. Stats
-  come from the canonical `panel`, never hand-rolled. See CLAUDE.md "THE dashboard".
-
-## Standing open items (beyond TaskList)
-
-- Re-seed both codecs' legacy-V0_2 distance/starting-q tables against real scoring.
-- KonJND/PJND lever for the Eboth family (data-mass tuning provably doesn't reach it).
-- HDR G-RD + PU-coherence builds; then rank-vs-steer showdown for the steerable HDR families.
-- Full-corpus RD phase before any probe-derived constant lands in source.
+(CONTEXT-HANDOFF files are banned; durable facts live in the docs above. The
+IQA literature corpus is `~/work/zen/zenpapers` — search it before designing
+features or metrics.)

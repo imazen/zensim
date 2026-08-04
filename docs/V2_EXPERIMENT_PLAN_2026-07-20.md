@@ -1,5 +1,12 @@
 # Feature-v2 → optimal-model experiment ladder (2026-07-20)
 
+> **⚠ ERA BANNER (2026-08-04): this ladder's program CONCLUDED.** The 720 regime it
+> plans for was superseded by 924 (E-M campaign, CLAUDE.md ★-section) and then 944
+> (`benchmarks/sota944_campaign_2026-08-03.md` — the current authority, incl. the
+> fleet backfills this doc lists as in-flight, since landed). Kept for the evidence
+> trail and the experiment-design patterns; do NOT execute from here. Current entry
+> points: `SESSION-RESUME.md`.
+
 Step-by-step plan for EVERY remaining experiment in the feature-v2 program:
 datasets, evals, gates, and order. Companion to
 `docs/OPTIMAL_MODEL_PLAN_2026-07-19.md` (fleet mechanics + methodology); this

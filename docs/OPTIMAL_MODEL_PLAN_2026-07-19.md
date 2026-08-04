@@ -1,5 +1,10 @@
 # Optimal global model + feature validation + diffmap completion — plan & state (2026-07-19)
 
+> **⚠ ERA BANNER (2026-08-04): superseded as a resume point.** The 720-era program this
+> doc plans concluded; the current era + resume point is `SESSION-RESUME.md` → the
+> SOTA-944 campaign record (`benchmarks/sota944_campaign_2026-08-03.md`). Kept for the
+> methodology (marginal-at-the-optimum feature evaluation) and the evidence trail.
+
 THE forward plan after the feature-v2 program's lab-scale phase. Also the
 **post-compaction resume point** for that work (see §D). Everything measured in
 this session is preserved in the docs cited here — this file is the index + the

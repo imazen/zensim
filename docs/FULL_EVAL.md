@@ -42,17 +42,20 @@ is 27 diffmap runs per bake — re-measuring an unchanged value.
 
 | section | Rust owner | invocation |
 |---|---|---|
-| rank (Mohammadi 6-stat / corpus) | `bake_verdict` → `zensim_validate::panel` (`zenstats`) | `--full-json` |
-| dial (G1/G3 codec-target) | `bake_verdict::dial_panel` | `--full-json` (regime dial grid) |
-| corruption gate | `bake_verdict` → `eval_report::corruption_gate` | `--full-json` (regime corruption grid) |
-| per_pair (pred vs mos/jnd/ssim2/butter/cvvdp) | `bake_verdict` + `parquet_loader::load_perpair_sample` | `--full-json` |
+| rank (Mohammadi 6-stat / corpus) | `bake_verdict` → `zensim_validate::panel` (`zenstats`) | `--fulleval` |
+| dial (G1/G3 codec-target) | `bake_verdict::dial_panel` | `--fulleval` (regime dial grid) |
+| corruption gate | `bake_verdict` → `eval_report::corruption_gate` | `--fulleval` (regime corruption grid) |
+| per_pair (pred vs mos/jnd/ssim2/butter/cvvdp) | `bake_verdict` + `parquet_loader::load_perpair_sample` | `--fulleval` |
 | m3_coherence (G-STEER) | `zensim/examples/diffmap_block_coherence.rs --bake` | shell loop, jq-injected |
 
 The script builds both binaries release (`bake_verdict`; the example with
 `custom-profiles,feature-regime-v2` so a >372 bake's v2 block folds into the M3
-map — inert for a ≤372 bake), then jq sets the single top-level `m3_coherence`
-from the M3 mean. Everything else is emitted by `bake_verdict --full-json`
-directly in the target schema — `run_full_eval.sh` adds no statistic of its own.
+map — inert for a ≤372 bake), then jq sets the top-level M3 fields from the
+sweep means. Everything else is emitted by `bake_verdict --fulleval` directly
+in the target schema — since 2026-08-04 that flag emits the SCHEMA-COMPLETE
+file (all five `m3_*`/`m3a_*` slots pre-nulled; `--full-json` remains the
+m3_coherence-only legacy form), so the jq step only injects INTO existing keys
+and `run_full_eval.sh` adds no statistic of its own.
 
 ## JSON schema
 

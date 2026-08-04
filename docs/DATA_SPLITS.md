@@ -188,10 +188,16 @@ scaled alternative when a grid is big enough to warrant the job system.
 5. Audit the 16 decode-failed imazen-26 screen PNGs (or exclude them from
    training corpora).
 6. KADID/TID d≤10 flagged-pair user review (pending since 2026-05-14).
-7. **Multi-metric backfill of the 5.7M canonical corpus is IN FLIGHT
-   (2026-07-02)** — cvvdp/butteraugli/iwssim/dssim being added to the
-   2026-06-27 datasets (backfill recipe: score persisted variants via
-   `variant_r2_url`, no re-encode). When it lands: (a) it must arrive as NEW
+7. **Multi-metric backfill of the 5.7M canonical corpus — LANDED as sidecars
+   (2026-07-02; status corrected 2026-08-04, was "IN FLIGHT")** — the
+   authoritative per-encode metric sidecar is
+   `/mnt/v/datasets/fill4-6codec-2026-07-01/fill4metrics_sidecar_patched_2026-07-02.parquet`
+   (4.18M rows, 6 codecs, key=`encoded_filename`/`encode_sha`) + the JXL
+   near-lossless top-up `hqfill_7metric_sidecar_2026-07-02.parquet`; joined
+   probe table: `bigcodec_mm6_traindigits_2026-07-02.parquet` (audited
+   2026-07-16 — CLAUDE.md "RECURRING PRIORITIES" carries the paths + column
+   naming caveats). The remaining sub-items below are still open where a
+   rebuilt canonical-view parquet is what they need: (a) it must arrive as NEW
    dated files/sidecars joined on content-addressed keys, never in-place
    rewrites of files a manifest references (§1.4); (b) rebuild
    `bigcodec_multimetric_<date>.parquet` with per-zone targets — the wave-4

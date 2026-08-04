@@ -1,5 +1,17 @@
 # TOP MODELS COOKBOOK — the science + exact reproduction paths (2026-07-18)
 
+> **ERA BANNER (added 2026-08-04).** The roster, champions, and numbers below are the
+> **372-era record** (v1 feature space, 372col corpora). The current era is **944**
+> (folded+append+append2): its record — frozen bar, arm results, corrections, the
+> seed-ensemble waves, and the stabilized ceiling (`C_co3a_s1301`) — lives in
+> **`benchmarks/sota944_campaign_2026-08-03.md`**, and every new evaluation goes through
+> `bake_verdict --regime 944` (see `SESSION-RESUME.md` entry points). **Cross-era numbers
+> are NOT directly comparable**: evals are era-tagged (different feature widths, corpora
+> re-extractions, and eval slices; only CID22 val — same 4,292 pairs every era — bridges,
+> per the campaign doc's era-bridge section). The science, pitfalls, and reproduction
+> paths below remain valid FOR THEIR ERA and most transfer; the model *rankings* do not
+> automatically.
+
 **Audience: a future agent who must understand why the top models look the way they do and
 build better ones without re-learning any of it the hard way.** Read this, then
 `docs/MODEL_SELECTION_SCORECARD.md` (the five-gate exam), then the per-claim benchmark docs
