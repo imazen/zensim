@@ -189,18 +189,37 @@ committed promoter, with an `eval_annotations.json` entry (`kind=invalidated`)
 pointing the superseded numbers at this commit. Results and the full old→new
 table are in §6 below.
 
-## 5. Cost of the M3a instrument (registered §E.5)
+## 5. Cost of the M3a instrument, and the cheap-grid verdict (registered §E.5)
 
-`run-heavy`-supervised, serial, `H_co3abpg_s2507`, 27 cells:
-**66.3 s wall** (user 1 m 58 s, sys 37 s). That is **below the registered
-120 s/bake trigger**, so per the registration the **full 27-cell instrument is
-kept** and the cheap variant is not shipped as the default.
+**Cost.** `run-heavy`-supervised, serial, `H_co3abpg_s2507`, 27 cells:
+**66.3 s wall** (user 1 m 58 s, sys 37 s) — **below the registered 120 s/bake
+trigger**, so the full instrument is kept and there was never a cost case for
+the cheap variant.
 
-The registered 9-cell balanced Latin square is implemented anyway as
-`m3a_sweep.sh --grid cheap` (it was frozen in the registration before any
-agreement number existed, so it cannot be tuned to agree), and its measured
-agreement against the full grid is reported in §6 so a future session that
-does want a 3× cheaper per-seed screen starts from data rather than a guess.
+**Agreement, measured anyway.** The registered 9-cell balanced Latin square is
+a strict SUBSET of the full grid, so its value is derivable from the *same*
+per-cell measurements — no re-measurement, no run-to-run confound
+(`scripts/v_next/m3a_cheap_grid_agreement.py`). Over the full 32-bake
+population:
+
+| statistic | measured | registered gate | |
+|---|---:|---|---|
+| SROCC(cheap, full) | **0.8871** | ≥ 0.90 | **FAIL** |
+| max \|cheap − full\| | **0.1021** | ≤ 0.02 | **FAIL** |
+| mean \|cheap − full\| | 0.0193 | — | |
+
+Worst cells: `C_co3a_s1409` +0.1021, `C_co3a_s1303` −0.0508, `C_ensk2_s1301`
+−0.0328. **Both halves fail, and the magnitude is the point:** 0.1021 is more
+than **twice the whole 944-class M3a sd (0.0471)** — a cheap-grid M3a can move
+a bake further than the entire signal being selected on. The 27-cell mean is
+doing real variance reduction over a wide per-cell spread; cutting to 9 keeps
+the design's *balance* but not its *precision*.
+
+**Executed outcome:** the full instrument is the only one shipped.
+`m3a_sweep.sh --grid cheap` is a hard ERROR that prints these numbers, so the
+rejection is stated where someone would reach for it; the subset definition
+and the measurement live on in the analysis script, which derives the subset
+from full-grid TSVs and needs no support in the sweep.
 
 ## 6. Results of the full re-measurement
 

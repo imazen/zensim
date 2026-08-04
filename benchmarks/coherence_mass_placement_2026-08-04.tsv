@@ -1,4 +1,12 @@
 # coherence mass-placement table (registered appendix D)
+# AMENDED 2026-08-04 (fix 299ccc8c, appendix E1): the m3a values in the 944-WIDTH rows
+#   are PRE-FIX and are all TOO LOW. compute_attribution_density_full sliced
+#   s[720..min(len,924)], dropping the append2 block; 8 of its 20 slots are class E and
+#   were real lost coverage. All 32 944-width cells re-measured (median ~+0.05, max ~+0.10).
+#   372/720 rows are UNCHANGED, so appendix D.8's counterexamples and its FALSIFIED
+#   verdict stand; the correlation coefficients were computed on these pre-fix inputs and
+#   are not re-derived here. Corrected per-bake values: the board fullevals + 
+#   benchmarks/attribution_append2_e1_2026-08-04.md.
 # git: 73f91646
 # classification: ../benchmarks/slot_decomposability_2026-08-04.tsv
 # contrib dir: /home/lilith/tmp/coh/contrib

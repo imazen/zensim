@@ -49,7 +49,11 @@ def main() -> int:
     d = sys.argv[1]
     rows = []
     for p in sorted(glob.glob(os.path.join(d, "*.tsv"))):
-        cells = list(csv.DictReader(open(p), delimiter="\t"))
+        rd = csv.DictReader(open(p), delimiter="\t")
+        need = {"label", "content", "size", "q", "m3a"}
+        if not rd.fieldnames or not need.issubset(rd.fieldnames):
+            continue  # not a per-cell sweep TSV (e.g. a summary file)
+        cells = list(rd)
         if not cells:
             continue
         label = cells[0]["label"]

@@ -33,8 +33,9 @@
 #                      bake and corpora did not — e.g. the 2026-08-04 append2
 #                      coverage fix (299ccc8c), which moved every 944-width
 #                      M3a and nothing else. Requires the JSON to exist.
-#   ZENSIM_M3_GRID     full (default, 27 cells) | cheap (registered 9-cell
-#                      balanced Latin square — campaign appendix E.5).
+#   ZENSIM_M3_GRID     full (default, and the only accepted value — the
+#                      registered 9-cell cheap grid was MEASURED and REJECTED,
+#                      campaign appendix E.5; m3a_sweep.sh refuses it).
 #
 # Schema + rationale: docs/FULL_EVAL.md.
 set -euo pipefail

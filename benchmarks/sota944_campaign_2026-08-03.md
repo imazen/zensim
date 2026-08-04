@@ -4520,6 +4520,44 @@ carries both: `SROCC(cheap, full) ≥ 0.90` **AND** `max |cheap − full| ≤ 0.
 If either fails: report the disagreement and **keep the full instrument** —
 do not ship the cheap one.
 
+### E.5 RESULTS — the cost trigger did NOT fire, and the cheap grid FAILED its gate anyway
+
+**Cost.** `run-heavy`-supervised, serial, `H_co3abpg_s2507`, 27 cells:
+**66.3 s wall** (user 1 m 58 s, sys 37 s). That is **below the registered
+120 s/bake trigger**, so per the registration the full instrument is kept and
+the cheap variant is not the default.
+
+**Agreement — measured anyway, and decisive.** The 9-cell subset is a strict
+SUBSET of the full grid, so its value is derivable from the *same* per-cell
+measurements (`scripts/v_next/m3a_cheap_grid_agreement.py`) — no
+re-measurement, and no run-to-run confound. Over the **full 32-bake 944
+population**:
+
+| statistic | measured | registered gate | |
+|---|---:|---|---|
+| SROCC(cheap, full) | **0.8871** | ≥ 0.90 | **FAIL** |
+| max \|cheap − full\| | **0.1021** | ≤ 0.02 | **FAIL** |
+| mean \|cheap − full\| | 0.0193 | — | |
+
+Worst cells: `C_co3a_s1409` +0.1021, `C_co3a_s1303` −0.0508,
+`C_ensk2_s1301` −0.0328.
+
+**Both halves fail, and the magnitude is the point:** 0.1021 is more than
+**twice the entire 944-class M3a sd (0.0471)**. A cheap-grid M3a can move a
+bake further than the whole signal being selected on, so it cannot be used
+for selection at any cost saving. Mechanism: M3a is a per-cell SROCC averaged
+over a content × size × quality grid, and the per-cell spread is large — the
+27-cell mean is doing real variance reduction, not redundant work. Cutting it
+to 9 keeps the *balance* of the design but not the *precision*.
+
+**Registered outcome, executed:** the full instrument is kept, and the cheap
+grid is **not shipped**. `scripts/m3a_sweep.sh --grid cheap` is a hard ERROR
+printing these numbers — the rejection is stated at the point of temptation
+rather than left as a tempting flag. The subset definition and the
+measurement survive in `m3a_cheap_grid_agreement.py`, which derives the
+subset from full-grid TSVs and needs no support in the sweep script, so the
+decision is reproducible without keeping a rejected code path in tree.
+
 ### E.6 Workflow wiring (registered)
 
 - `scripts/harvest_bakes.sh` already runs `scripts/run_full_eval.sh`, which

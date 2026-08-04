@@ -13,13 +13,17 @@
 # GRIDS
 #   full   (default, 27 cells) — 3 content x 3 sizes x 3 quality. The
 #          registered instrument; `run_full_eval.sh` uses this.
-#   cheap  (9 cells) — the REGISTERED balanced Latin square
+#   cheap  (9 cells) — REGISTERED, MEASURED, and REJECTED. Kept as a hard
+#          ERROR rather than deleted, so the rejection is stated at the point
+#          of temptation. The subset was the balanced Latin square
 #          `q_index = (content_index + size_index) mod 3` over
-#          content (city, dog, girl) x size (576, 384, 256) x q (20, 50, 75).
-#          Every content, every size and every q appears exactly 3x, so it is
-#          balanced on all three axes by construction (an arbitrary 8-cell
-#          subset is not). Frozen in the campaign doc appendix E.5 BEFORE any
-#          agreement number existed, so it cannot be tuned to agree.
+#          content (city, dog, girl) x size (576, 384, 256) x q (20, 50, 75)
+#          — every content/size/q exactly 3x, balanced on all three axes by
+#          construction, frozen in campaign appendix E.5 BEFORE any agreement
+#          number existed. It FAILED both halves of its registered gate on
+#          the 32-bake 944 population (see that doc; measurement is
+#          reproducible via scripts/v_next/m3a_cheap_grid_agreement.py, which
+#          derives the subset from full-grid TSVs and needs no support here).
 #
 # USAGE
 #   scripts/m3a_sweep.sh --bake <bake.bin> [--bin <diffmap_block_coherence>]
@@ -75,12 +79,27 @@ case "$GRID" in
             CELLS+=("${CONTENT[$ci]} ${SIZES[$si]} ${QS[$qi]}")
         done; done; done ;;
     cheap)
-        # REGISTERED Latin square: q_index = (content_index + size_index) mod 3.
-        for ci in 0 1 2; do for si in 0 1 2; do
-            qi=$(( (ci + si) % 3 ))
-            CELLS+=("${CONTENT[$ci]} ${SIZES[$si]} ${QS[$qi]}")
-        done; done ;;
-    *) die "unknown --grid: $GRID (want full|cheap)" ;;
+        cat >&2 <<'REJECTED'
+m3a_sweep: --grid cheap is REGISTERED, MEASURED and REJECTED — refusing.
+
+The 9-cell balanced Latin square failed BOTH halves of its pre-registered
+agreement gate (campaign appendix E.5) on the full 32-bake 944 population,
+derived from the same per-cell measurements as the full grid:
+
+    SROCC(cheap, full) = 0.8871   gate: >= 0.90    FAIL
+    max |cheap - full| = 0.1021   gate: <= 0.02    FAIL   (mean 0.0193)
+
+0.1021 is more than TWICE the whole 944-class M3a sd (0.0471), so a cheap-grid
+M3a cannot be used for selection: it moves a bake further than the entire
+signal being selected on. The full 27-cell grid also costs only ~66 s/bake,
+below the registered 120 s trigger, so there was never a cost case either.
+
+Use --grid full. To re-examine the rejection, run
+scripts/v_next/m3a_cheap_grid_agreement.py over full-grid TSVs — it derives
+the subset itself and needs no support here.
+REJECTED
+        exit 2 ;;
+    *) die "unknown --grid: $GRID (want full)" ;;
 esac
 
 [ -n "$TSV" ] && printf 'label\tgrid\tcontent\tsize\tq\tm3\tm3a\tdropped_mass_pct\n' > "$TSV"
