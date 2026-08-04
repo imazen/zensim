@@ -5447,3 +5447,313 @@ jj workspace `../zensim--wave9` on `main@origin`;
 parked ONCE on the terminal condition rather than per bake; liveness ONLY via
 `pgrep -xc zensim_mlp_trai`. Selection reported through `freeze_check --select`.
 New bakes + verdicts Tower-mirrored with a sha spot-check.
+
+### WAVE-9 RESULTS (2026-08-04) — outcome (c): `W8C_s3101` was a SEED ARTIFACT. Its CSIQ/LIVE gain, its CID22 cost, its KonJND cost, its nonphoto cost and its KADID sign inversion ALL fail to replicate at three fresh seeds of the byte-identical recipe. The winsor-screen refit is closed as a breadth lever
+
+Seven cells trained exactly as registered (amendment 10, `0194aac3`; tool +
+screens + drivers `1bc3888f` / `2ce86679` / `e6caf4e5`). Two lanes: this box
+(`run-heavy --jobs 6 --mem 40G`) and `lianli` (24 cores, load 0.10 before
+launch — observed, not assumed). **ONE trainer binary** on both lanes, sha256
+`3e61af5d1f5592e0f90127730bdb898b34f4574d2d50bba4fc1488612a7a3800`, verified
+equal on both. The 11 training inputs sha256-verified **11/11 between the
+lanes** AND **11/11 against the incumbent bake's embedded `zentrain.repro`**.
+Harvest terminal: `COMPLETE rc=0 harvested=7 failed=0 no_m3a=0`.
+
+#### The two build gates — both PASS, before any cell trained
+
+1. **NO-REGRESSION on the selector extension.** Re-running `bake_dial_refit
+   refit-winsor` at its default (`--refit-class all`) over the registered §9.1
+   pooled corpus reproduces the committed
+   `benchmarks/wave8/refit_screen_tokens.txt` **byte-identically**. The subset
+   selector did not disturb the default path, and wave-8's screen is
+   independently re-derived (408,033 rows, peak RSS 1.84 GiB, 83 s).
+2. **SET IDENTITY.** `|degen24| = 24`, `|fold30| = 30`, `|full| = 54`. The two
+   partial screens differ from the base in **disjoint** line sets whose union is
+   **exactly** the full refit's, and every line equals either the full refit's
+   or the base's. W9-B and W9-C partition W9-A's intervention with nothing left
+   over and nothing double-counted.
+
+The partition is exactly **append-vs-fold**, which is what made it readable:
+
+| screen | indices refit | block | inherited windows kept |
+|---|---|---|---|
+| W9-A | all 54 | both | none |
+| W9-B | 731…919 (24) | append (all ≥ 720) | the 30 fold windows |
+| W9-C | 9…155 (30) | fold (all ≤ 155) | the 24 append `[0,0]` kill-windows |
+
+#### The recipe diffs — echo-verified token-for-token, not asserted
+
+`scripts/wave9_seed.sh` does not re-declare the recipe: it asks the committed
+`scripts/wave8_seed.sh C <seed>` for its argv with the screen substituted and
+replaces only the `--out` token, so identity is structural. Echoes committed at
+`benchmarks/wave9/echo_W9{A,B,C}.txt`.
+
+| comparison | the COMPLETE set of differences |
+|---|---|
+| **W9-A vs W8C at the same seed** | `--out`. **Nothing else.** |
+| **W9-B vs W9-A** | exactly **30** tokens, **all** `winsor_p99` (fold block reverts to inherited) |
+| **W9-C vs W9-A** | exactly **24** tokens, **all** `winsor_p99` (append block reverts to `0,0`) |
+| **W9-A vs the incumbent arm-H argv** | the 54 winsor windows + `--seed` + `--out`. Nothing else. |
+| **lianli vs local argv** | identical after data-path normalization |
+
+#### Endpoint table — every cell, nothing selected away
+
+| cell | CSIQ(E1) | LIVE(E1) | CID22(E2) | KADID signed† | KonJND | nonphoto | imazen26 | HF-NL per-ref | M3a | mono/tied | composite | floors |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| W9A_s3301 | 0.81062 | 0.84417 | 0.87891 | +0.3211† | 0.4921 | 0.9065 | 0.9051 | 0.1193 | 0.7815 | 0.9668 / 0 | 0.8497 | 6/8 |
+| W9A_s3303 | 0.76845 | 0.80809 | 0.86914 | +0.4012† | 0.3572 | 0.9062 | 0.9057 | 0.0264 | 0.8004 | 0.9543 / 0 | 0.8314 | 5/8 |
+| W9A_s3307 | 0.75735 | 0.83235 | 0.88469 | +0.5120† | 0.4407 | 0.9206 | 0.9170 | 0.1736 | 0.8041 | 0.9509 / 0 | 0.8523 | 6/8 |
+| W9B_s3301 | 0.81082 | 0.84236 | 0.87847 | +0.3120† | 0.3631 | 0.9127 | 0.9116 | 0.0722 | 0.7868 | 0.9547 / 0 | 0.8393 | 5/8 |
+| W9B_s3303 | 0.72624 | 0.81064 | 0.87783 | +0.4494† | 0.3905 | 0.9121 | 0.9085 | −0.0117 | 0.8369 | 0.9543 / 0 | 0.8398 | 4/8 |
+| W9B_s3307 | 0.79842 | 0.83563 | 0.87126 | +0.4284† | 0.4093 | 0.9105 | 0.9088 | 0.1622 | 0.7975 | 0.9494 / 0 | 0.8399 | 5/8 |
+| W9C_s3301 | 0.77667 | 0.79850 | 0.86131 | +0.3507† | 0.4266 | 0.9021 | 0.8985 | 0.3019 | 0.7230 | 0.9711 / 0.0002 | 0.8317 | 4/8 |
+
+Wave-8 + incumbent references (same instrument, same invocation):
+
+| cell | CSIQ | LIVE | CID22 | KADID signed† | KonJND | nonphoto | imazen26 | HF-NL per-ref | M3a | mono/tied | composite | floors |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **W8C_s3101** | **0.88692** | **0.89848** | 0.85207 | **−0.3576**† | 0.2908 | 0.8624 | 0.8618 | 0.0924 | 0.8246 | 0.9979 / 0 | 0.8010 | 5/8 |
+| H_co3abpg_s2501 | 0.83167 | 0.85173 | 0.87634 | +0.4367† | 0.4565 | 0.9139 | 0.9127 | 0.1687 | 0.8772 | 0.9396 / 0 | 0.8479 | 7/8 |
+| H_co3abpg_s2503 | 0.73527 | 0.81366 | 0.87932 | +0.3682† | 0.3835 | 0.9163 | 0.9122 | 0.4157 | 0.8190 | 0.9643 / 0 | 0.8420 | 5/8 |
+| H_co3abpg_s2507 | 0.83019 | 0.86340 | 0.88055 | +0.4233† | 0.4590 | 0.9164 | 0.9149 | 0.1820 | 0.8900 | 0.9405 / 0 | 0.8503 | 7/8 |
+
+† **KADID is train==val in EVERY cell in both tables** — every arm trains on the
+`kadid` leg (`0.5:1.0:rank`, unchanged from the incumbent), and `freeze_check`'s
+own annotation registry flags KADID/TID as 100% train==val pair-overlap. Every
+KADID number here is a **fit / integrity** number, never skill, and none may be
+compared to a held-out KADID number. **CSIQ and LIVE are trained on by no arm**
+and carry the honest breadth signal; **CID22 is held out of training in every
+arm.**
+
+#### E1 / E2
+
+| arm | E1 (CSIQ ≥ 0.85 ∧ LIVE ≥ 0.85, ≥ 2 of 3 seeds) | E2 (CID22 ≥ 0.875, diagnostic) |
+|---|---|---|
+| **W9-A** (all 54) | **FAIL — 0 of 3** | 2 of 3 (0.87891, 0.86914, 0.88469) |
+| **W9-B** (append 24) | **FAIL — 0 of 3** | 2 of 3 (0.87847, 0.87783, 0.87126) |
+| **W9-C** (fold 30, k=1) | **FAIL — 0 of 1** | 0 of 1 (0.86131) |
+
+No cell in the wave clears E1. `W8C_s3101` remains the only 944-class cell that
+ever has.
+
+**E2's 0.875 was a diagnostic threshold for this wave only. The campaign's CID22
+floor remains 0.885 and is unchanged; no wave-9 cell passes that floor, and none
+is described as doing so.**
+
+#### The replication — W8C failed to replicate on EVERY axis, gains and costs alike
+
+W9-A is W8C's recipe with only `--out` different, at three seeds W8C did not
+use. Against W8C's single cell:
+
+| axis | W8C_s3101 (k=1) | W9-A band (k=3) | incumbent band (k=3) | replicated? |
+|---|--:|--:|--:|---|
+| CSIQ | **0.8869** | 0.757 – 0.811 | 0.735 – 0.832 | **NO** — every W9-A seed is below every part of W8C |
+| LIVE | **0.8985** | 0.808 – 0.844 | 0.814 – 0.863 | **NO** |
+| CID22 | 0.8521 | 0.869 – 0.885 | 0.876 – 0.881 | **NO** (the *cost* did not replicate) |
+| KonJND | 0.2908 | 0.357 – 0.492 | 0.384 – 0.459 | **NO** (the *cost* did not replicate) |
+| nonphoto | 0.8624 | 0.906 – 0.921 | 0.914 – 0.916 | **NO** (the *cost* did not replicate) |
+| KADID sign | **−0.3576** | **+0.321 / +0.401 / +0.512** | +0.368 / +0.423 / +0.437 | **NO** — 0 of 3 invert |
+
+W9-A's band sits **inside the incumbent's own 3-seed band on every axis**. So
+the full winsor refit, priced at matched k=3, is **not a breadth lever** — it is
+approximately neutral, and slightly negative on CSIQ.
+
+This is the cleanest possible form of outcome **(c)**: not "the effect shrank",
+but "the effect is absent in both directions". W8C_s3101 was a single draw that
+was simultaneously lucky on CSIQ/LIVE and unlucky on CID22/KonJND/nonphoto/KADID
+polarity. Reporting it as a 5-axis trade was reading one sample's noise as
+structure — which is exactly what §10.0 registered the replication to test.
+
+#### The decomposition still answers its question — there is simply nothing to decompose
+
+The registered §10.4 prediction had three branches. The one that fires is the
+second, and it fires trivially because arm A carries no gain:
+
+- **W9-B ≈ the incumbent.** Unsticking the 24 force-killed append features
+  changes CSIQ/LIVE by less than the seed spread (CSIQ 0.726 – 0.811 vs the
+  incumbent's 0.735 – 0.832) and keeps CID22 (0.871 – 0.878), KonJND
+  (0.363 – 0.409) and nonphoto (0.911 – 0.913) at incumbent levels. **Reviving
+  22 dead inputs is measurably not worth anything on these axes.**
+- **W9-C (fold-only, k=1) is the weakest cell in the wave** — CSIQ 0.777,
+  LIVE 0.799, CID22 0.861 (the lowest CID22 of any wave-9 cell), M3a 0.723,
+  4/8 floors. Direction only at k=1, but it is not a hidden gain.
+- **W9-B ≈ W9-A ≈ W9-C ≈ the incumbent** on the gated axes. The two
+  interventions do not add to a gain because there is no gain.
+
+#### `freeze_check --select` over the wave-9 pool + the incumbent
+
+PRIMARY = profile floor count; TIE-BREAK = `balanced_composite + 0.15·M3a`
+(registered rule, campaign appendix E.4).
+
+| rank | bake | floors | bal_comp | M3a | sel_comp | sdr25 |
+|---:|---|---:|---:|---|---:|---:|
+| 1 | **H_co3abpg_s2507** (incumbent) | **7/8** | 0.8071 | 0.8900 | **0.9406** | 0.9404 |
+| 2 | W9A_s3301 | 6/8 | 0.8075 | 0.7815 | 0.9247 | 0.9259 |
+| 3 | W9A_s3307 | 6/8 | 0.8030 | 0.8041 | 0.9236 | 0.9358 |
+| 4 | W9B_s3307 | 5/8 | 0.8007 | 0.7975 | 0.9203 | 0.9263 |
+| 5 | W9B_s3301 | 5/8 | 0.8010 | 0.7868 | 0.9191 | 0.9517 |
+| 6 | W9A_s3303 | 5/8 | 0.7908 | 0.8004 | 0.9109 | 0.9285 |
+| 7 | W8C_s3101 | 5/8 | 0.7713 | 0.8246 | 0.8950 | 0.8700 |
+| 8 | W9B_s3303 | 4/8 | 0.7941 | 0.8369 | 0.9197 | 0.9520 |
+| 9 | W9C_s3301 | 4/8 | 0.7853 | 0.7230 | 0.8937 | 0.9306 |
+
+**SELECTED: `H_co3abpg_s2507`** — the incumbent, 7/8, 0.9406. **Every wave-9
+cell is worse than the incumbent under the balanced profile** (4/8–6/8 vs 7/8).
+Nothing here is a ship candidate and nothing is proposed as one. Note also that
+under the registered rule W8C_s3101 ranks **7th of 9** — the cell wave 8
+selected within its own pool is near the bottom once three seeds of its own
+recipe are on the board beside it.
+
+#### §10.7 — the KADID sign inversion, characterized
+
+**The precondition did not hold: the inversion did NOT replicate** (0 of 3
+W9-A seeds; all three are positive). It is therefore not a property of the
+refit screen. It was still characterized, because W8C_s3101 vs W9A_s3301 is the
+ideal control — **byte-identical recipe, different seed, opposite KADID
+polarity** — and `bake_contrib` was run on both over the same corpora **with
+kadid included**, which wave 8's contrib runs omitted (they scored csiq/live/
+cid22 only, which is why the inversion was reported but never explained).
+
+First, the sign question itself had to be settled, because two in-repo comments
+contradicted each other. Measured from `/mnt/v/dataset/kadid10k/dmos.csv`: mean
+`dmos` **falls** monotonically with distortion level — 4.0785 / 3.5169 / 3.0582
+/ 2.5028 / 2.0067 for levels 1→5 (n = 2025 each). KADID's column is *named*
+`dmos` but behaves as a MOS, and the canonical transform
+`human_score = (dmos−1)/4` preserves that orientation. **On KADID a correct
+quality model is POSITIVE-signed, so a negative signed SROCC is a genuine
+inversion.** Wave 8's framing of the sign was right. (`build_canonical_parquets
+.py`'s "DMOS (1-5, lower=better)" comment was wrong and is corrected in
+`735d6978`.) The KADID target is also the SAME VECTOR in the 720 and 944 eval
+tables — `ref_basename` order identical, `human_score` max abs diff **0.0** —
+so signed KADID SROCCs are comparable across regimes.
+
+The characterization, over the 236 inputs carrying a ΔSROCC in **both** bakes:
+
+| family | n shared | Σ ΔSROCC W8C (inverted) | Σ ΔSROCC W9A_s3301 | sign-flipped |
+|---|---:|---:|---:|---:|
+| v1fold156 | 54 | +0.0175 | −0.3086 | 42 |
+| v2-348 | 110 | −0.0366 | −1.1462 | 76 |
+| append204 | 67 | −0.1237 | +0.4130 | 58 |
+| tail20 | 5 | −0.0078 | +0.0377 | 4 |
+| **total** | **236** | | | **180 (76.3%)** |
+
+- **The inversion is global, not localized.** 180 of 236 shared top movers
+  (76.3%) flip sign, spread across **every** family — 78% of v1fold156, 69% of
+  v2-348, 87% of append204. **No feature block carries it**, so it is
+  attributable to neither the append-unstick (W9-B) nor the fold-unclip (W9-C).
+  Every family's *aggregate* KADID ΔSROCC also reverses sign between the two
+  bakes.
+- **The inverted bake is the weaker one everywhere.** Mean per-input mean|Δ|
+  over the shared set is **0.0332 (W8C) vs 0.1009 (W9A_s3301)** — the inverted
+  model's inputs each move the score ~3× less. Both bakes have **exactly 255
+  dead inputs**, so the screen did identical work in both; the entire difference
+  is learned weights.
+- **Mechanism.** Every 944-class cell on the board has a *weak* KADID ranking:
+  |SROCC| 0.312–0.512 across all ten cells (wave-9 + incumbents), with a mean
+  near 0.40. At that signal level the polarity of the fit is not determined by
+  the data, and it flips between seeds of the same recipe. **The inversion is a
+  seed-level basin property of a near-zero-signal ranking, not a defect
+  signature of the screen** — which is why it appears once in eleven cells and
+  vanishes under replication.
+
+#### An anomaly this exposed, flagged and NOT acted on
+
+Reading `srocc_signed` (rather than the `|SROCC|` the campaign usually quotes)
+out of the stored fullevals for the era references:
+
+| model | regime | KADID \|SROCC\| as cited | KADID **signed** | CID22 signed |
+|---|---|--:|--:|--:|
+| `winner_dial_Ebothg_hfgain_winsor_dial` | 720 | 0.9464 | **−0.9464** | +0.8940 |
+| `b_sdr_linear_cid80_inclwinsor_dense_dial` | 720 | 0.8085 | **−0.8085** | +0.8821 |
+
+Both are positive on CID22 and TID (quality-oriented targets, like KADID) and
+strongly negative on KADID; their fullevals were rebuilt 2026-08-04 03:41,
+after the 2026-07-15 kadid/tid integrity promotion, against the 2026-07-19
+ext720 table — so this is not a stale-table artifact, and the target vector is
+identical to the 944 one. With the orientation result above, the campaign's
+cited KADID figures for its two era references describe an **inverted** fit.
+Wave 9 records this with its evidence
+(`benchmarks/wave9/kadid_orientation_2026-08-04.md`), does not re-score those
+models, and no wave-9 gate depends on it.
+
+#### Registered outcome
+
+**(c) fires.** E1 does not replicate at k=3 — it does not replicate at k=1
+either, in any arm. `W8C_s3101` was a seed artifact, and unusually complete
+one: its gains AND its costs are all absent from three fresh seeds of the
+byte-identical recipe. **The winsor-screen refit is closed as a breadth lever**
+for the 944 class. Neither the append-unstick nor the fold-unclip is a lever
+separately, and the two together are not a lever.
+
+With wave 8's verdicts, the 944 class's remaining named hypotheses are
+unchanged and now one shorter: reintroducing f156-371 is dead (width
+discriminator), subtracting rows is dead (wave 8), and **re-fitting the winsor
+screen is dead (this wave)**. What is left is what wave 8 named — changing what
+the supervision *teaches*, the regime's extraction vintage, or *adding*
+held-out-safe human-MOS breadth — plus one new item this wave puts on the list:
+**every 944-class conclusion drawn from a k=1 cell should be assumed unproven
+until replicated**, because the within-recipe seed spread here is large enough
+(CSIQ 0.726–0.832 at fixed recipe) to manufacture a 5-axis "trade" out of noise.
+
+#### Limitations (complete)
+
+- **KADID is train==val in every arm** and is reported as a fit/integrity
+  number only. CSIQ/LIVE are trained on by no arm; CID22 is held out in all.
+- k=3 on A and B, **k=1 on C**. W9-C supports direction only and decides
+  nothing; it was registered as the first cell to drop and was not dropped.
+- W9-A replicates the **seed** axis, not the fit: it reuses wave-8's frozen
+  refit token file byte-for-byte. A wrong fit would be wrong identically in both
+  waves. The §10.2 byte-identity gate bounds that risk but does not eliminate it.
+- W9-B and W9-C partition the *windows*, not the *effect*. With no effect to
+  partition, the additivity question registered in §10.4 is untestable in this
+  wave and is not claimed either way.
+- Wave-9 cells are spline-less raw trainer output, so dial mono/tied is in RAW
+  output units (the board's standing `dial-mono-raw-unit` annotation). W9C_s3301
+  is the only cell with a nonzero tied rate (0.0002).
+- Every wave-9 verdict inherits the campaign's standing dial-grid warning (944
+  dial grid sha `0d0044ed4e86ee2a`, not the canonical `6546c43e6d9572dc`);
+  identical for the incumbents scored through the same
+  `scripts/sota944_verdict.sh`, so dial numbers stay comparable **within** the
+  campaign only.
+- M3a was measured with the coherence harness at/after `de3482dd`; wave-9 cells
+  are unpruned 944 = 944 where that fix is a no-op, so the values compare
+  directly to wave-8's.
+- One cell (A3301) was OOM-killed at epoch 0 by the run-heavy cgroup cap on its
+  first launch and was re-run to completion; the driver now bounds concurrency
+  by RAM (`--slot-limit`, `e6caf4e5`). The failure was loud — cgroup-scoped
+  kill, `.FAILED` marker, nonzero lane exit — and no cell was silently dropped.
+- The first harvest daemon was launched without `CARGO_TARGET_DIR` and failed
+  its first verdict on a missing binary. It wrote `.HARVEST_FAILED`, appended to
+  its FAILURES file and reported `failed=1` — the loud-failure design worked —
+  and was relaunched with the variable set; final terminal state
+  `COMPLETE rc=0 harvested=7 failed=0 no_m3a=0`.
+- Nothing here ships, swaps, promotes or publishes; no bake enters
+  `zensim/weights/`. The freeze decision remains the user's.
+
+#### Cross-lane determinism — wave 8's open limitation, CLOSED
+
+Arm B is split across the lanes (B3301 local, B3303/B3307 on lianli), so its
+seed band mixes lanes. Wave 8 listed exactly this as unclosed: *"the two lanes
+used the same trainer binary but different thread counts … no byte-identity
+check across lanes was run in this wave, so a cross-lane comparison rests on
+determinism that was not verified here."*
+
+Wave 9 verified it. `W9Bx_s3301` is the local `W9B_s3301` cell's argv re-run
+verbatim on lianli (`WAVE9_TAG` changes the `--out` path and nothing else),
+under a different core count and thread environment:
+
+| | local `W9B_s3301` | lianli `W9Bx_s3301` |
+|---|--:|--:|
+| exact mismatches across every rank stat (srocc, srocc_signed, plcc, krocc, z_rmse, per_ref_mean) on every corpus | — | **0** |
+| `best_val` (full f64) | 0.4351559846549526 | 0.4351559846549526 |
+| M3a | 0.78683 | 0.78683 |
+| composite | 0.8393076087941971 | 0.8393076087941971 |
+
+**Every scored quantity is exactly equal.** Whole-file byte-identity is
+impossible by construction — the mandatory embedded `zentrain.repro` carries
+each lane's paths, hostname and timestamp, which is the entire 395-byte size
+difference (511,345 vs 510,950) and the whole reason the two bake sha256s
+differ. The trainer is deterministic in its seed across lanes, so arm B's
+3-seed band is not lane-contaminated, and cross-lane pooling in this campaign
+is now verified rather than assumed. `W9Bx_s3301` is a diagnostic, not a
+registered arm, and is excluded from every arm band and from `--select`.

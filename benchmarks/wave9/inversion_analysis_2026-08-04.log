@@ -1,0 +1,42 @@
+run-heavy: mem-cap=24G (cgroup, hard) jobs=6/28 avail=53992MiB :: ./scripts/wave9_inversion.sh /mnt/v/output/zensim/bakes/sota944/bakes/W8C_s3101.bin /mnt/v/output/zensim/bakes/sota944/bakes/W9A_s3301.bin
+== bake_contrib W8C_s3101
+== bake_contrib W9A_s3301
+
+inputs with a ΔSROCC in BOTH bakes (top-mover overlap): 236 of 944
+
+### KADID ΔSROCC per input — W8C_s3101 (inverted) vs W9A_s3301
+
+A NEGATIVE ΔSROCC means ablating the input RAISES |SROCC| on KADID: the input is pushing that ranking backwards.
+
+| idx | family | ΔSROCC kadid (inverted) | ΔSROCC kadid (ref) | diff | mean|Δ| inv | mean|Δ| ref |
+|---|---|---:|---:|---:|---:|---:|
+| f798 | append204 | -0.0293 | +0.0902 | -0.1195 | 0.0942 | 0.1959 |
+| f800 | append204 | -0.0267 | +0.0655 | -0.0922 | 0.0797 | 0.1631 |
+| f499 | v2-348 | -0.0258 | +0.0797 | -0.1055 | 0.0948 | 0.2085 |
+| f498 | v2-348 | -0.0245 | +0.0462 | -0.0707 | 0.0938 | 0.0883 |
+| f849 | append204 | -0.0221 | +0.0378 | -0.0599 | 0.0824 | 0.1187 |
+| f20 | v1fold156 | -0.0207 | +0.0858 | -0.1065 | 0.0863 | 0.3036 |
+| f799 | append204 | -0.0196 | +0.0797 | -0.0993 | 0.0789 | 0.1693 |
+| f510 | v2-348 | -0.0194 | +0.0235 | -0.0429 | 0.0674 | 0.0739 |
+| f21 | v1fold156 | -0.0155 | +0.0276 | -0.0431 | 0.0491 | 0.1026 |
+| f748 | append204 | -0.0141 | +0.1050 | -0.1191 | 0.0659 | 0.3428 |
+| f585 | v2-348 | -0.0138 | -0.0270 | +0.0132 | 0.0569 | 0.1053 |
+| f411 | v2-348 | -0.0133 | -0.0066 | -0.0067 | 0.0499 | 0.1732 |
+| f506 | v2-348 | -0.0128 | +0.0219 | -0.0348 | 0.0422 | 0.1023 |
+| f749 | append204 | -0.0122 | +0.0765 | -0.0888 | 0.0382 | 0.1912 |
+| f423 | v2-348 | -0.0115 | +0.0145 | -0.0261 | 0.0446 | 0.0863 |
+| f597 | v2-348 | -0.0113 | +0.0200 | -0.0313 | 0.0462 | 0.0689 |
+| f844 | append204 | -0.0112 | +0.0246 | -0.0358 | 0.0521 | 0.1046 |
+| f492 | v2-348 | -0.0111 | -0.0138 | +0.0027 | 0.0326 | 0.0555 |
+| f37 | v1fold156 | -0.0110 | +0.0248 | -0.0358 | 0.0666 | 0.0631 |
+| f850 | append204 | -0.0109 | +0.0074 | -0.0183 | 0.0400 | 0.0919 |
+
+#### family roll-up of KADID ΔSROCC
+
+| family | n | Σ ΔSROCC inverted | Σ ΔSROCC ref | n sign-flipped |
+|---|---:|---:|---:|---:|
+| append204 | 67 | -0.1237 | +0.4130 | 58 |
+| tail20 | 5 | -0.0078 | +0.0377 | 4 |
+| v1fold156 | 54 | +0.0175 | -0.3086 | 42 |
+| v2-348 | 110 | -0.0366 | -1.1462 | 76 |
+run-heavy: done rc=0 7s | peak-RSS 0.28GiB | min-avail 53640MiB | peak-load 1.55
