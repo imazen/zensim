@@ -57,6 +57,17 @@ mod balanced {
     pub const M3A_GOLD: f64 = 0.85; // reported tier, NOT a floor
     pub const M3A_SILVER: f64 = 0.78; // ≈ measured 944-class median (26 cells, med 0.793)
     pub const HFNL_COMPARATOR: f64 = 0.1931; // reported context only
+    /// `--select` tie-break weight on M3a (campaign appendix E.4, registered
+    /// 2026-08-04 BEFORE any selection ranking existed). NOT a new weight
+    /// class: 0.15 is exactly what `balanced_composite` already gives its
+    /// breadth additions (`W_CSIQ`/`W_LIVE`/`W_BANDTAIL`) — coherence is a
+    /// product axis of that tier, material but not co-primary with CID22
+    /// (1.00). Scale check from measured spreads: 0.15 × the 944-class M3a
+    /// sd (0.0471) ≈ 0.007 of composite, so it breaks ties between SEEDS
+    /// rather than dominating; 0.15 × the observed board range
+    /// (0.199 → 0.954) = 0.113, comparable to a 0.11 CID22 swing, so it is
+    /// not decorative either.
+    pub const W_M3A: f64 = 0.15;
     // balanced_composite weights: the first six terms are `product_composite`
     // verbatim; csiq/live/band-tail are the registered additions at 0.15.
     // Corpus terms are abs SROCC; band-tail is SIGNED (collapse must hurt).
@@ -77,7 +88,15 @@ fn usage() -> ! {
          usage: freeze_check --fulleval <bake.fulleval.json> [--bar name=value]...\n\
                 freeze_check --fulleval <f> --profile balanced-2026-08-04 [--tsv]\n\
                              [--annotations <registry.json|none>]\n\
-                freeze_check --tsv-header\n\n\
+                freeze_check --select <a.fulleval.json> <b...> [--tsv]\n\
+                freeze_check --tsv-header | --select-tsv-header\n\n\
+         --select: the REGISTERED k-seed selection rule (campaign appendix\n\
+         E.4). PRIMARY = profile floor count; TIE-BREAK = balanced_composite\n\
+         + 0.15·M3a. M3a states are MEASURED / NOT COMPUTABLE (ensemble,\n\
+         ranked separately, never penalized) / UNMEASURED (listed, NOT\n\
+         selectable) — a missing measurement is never scored as zero. sdr25\n\
+         is a reported comparator, not part of the rule. Exit 1 if no\n\
+         candidate is selectable.\n\n\
          default (no --profile): the §5 freeze bar (unchanged).\n\
          --bar sets/overrides a cross-bake numeric bar for: csiq, live\n\
          (§5 only; their §5 bars are \"≥ best 924-arm\" — externally chosen, so\n\
@@ -778,6 +797,91 @@ fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
     }
 }
 
+// ── `--select`: the REGISTERED k-seed selection rule (campaign appendix
+// E.4, frozen 2026-08-04 before any ranking existed) ───────────────────────
+//
+// The campaign's k-seed rule was "train k seeds → select by sdr25 /
+// best_val". The coherence study then established that M3a is a SELECTABLE
+// trajectory property (42.3 % of 944-class M3a variance is seed noise at
+// fixed recipe; `C_co3a` k = 6 spans 0.718–0.826), so selection must account
+// for it. This is that rule, in the bar/profile owner rather than a new
+// script.
+//
+//   PRIMARY    profile floor count (`n_pass`). Coherence never overrides a
+//              bake that fails CID22 or the dial.
+//   TIE-BREAK  selection_composite = balanced_composite + W_M3A · m3a.
+//   sdr25      is NOT in the rule — it stays a reported comparator column.
+//              (Standing caveat: sdr25 has decoupled from CID22 five times;
+//              that is exactly why the primary is the floor count and not a
+//              proxy corpus.)
+//
+// This computes NO statistics: every input is a number an owning tool
+// already produced.
+
+/// The three M3a states. They are DISTINCT, and none of them is zero — a
+/// missing measurement must never score as "perfectly incoherent".
+#[derive(PartialEq, Clone, Copy)]
+enum M3aState {
+    /// A number is present: rank normally.
+    Measured(f64),
+    /// Ensemble — the coherence instrument loads ONE ZNPR, so it
+    /// structurally cannot produce a value. Ranked in a separate section on
+    /// `balanced_composite` alone; never penalized.
+    NotComputable,
+    /// Non-ensemble with no measurement: eligible to be LISTED, not to be
+    /// SELECTED. Precedent: the balanced profile already counts an absent
+    /// floor axis as not-passed — a candidate nobody measured cannot be
+    /// certified on that axis.
+    Unmeasured,
+}
+
+fn m3a_state(v: &serde_json::Value, class: &str) -> M3aState {
+    if class == "944-ensemble" {
+        return M3aState::NotComputable;
+    }
+    match f(v, &["m3a_coherence"]) {
+        Some(x) => M3aState::Measured(x),
+        None => M3aState::Unmeasured,
+    }
+}
+
+struct SelectRow {
+    name: String,
+    path: String,
+    class: &'static str,
+    n_pass: usize,
+    n_floors: usize,
+    composite: Option<f64>,
+    m3a: M3aState,
+    /// `balanced_composite + W_M3A·m3a`; None when either term is absent.
+    selection_composite: Option<f64>,
+    sdr25: Option<f64>,
+    bake: Option<String>,
+}
+
+fn m3a_cell(s: M3aState) -> String {
+    match s {
+        M3aState::Measured(x) => format!("{x:.4}"),
+        M3aState::NotComputable => "NOT COMPUTABLE".into(),
+        M3aState::Unmeasured => "UNMEASURED".into(),
+    }
+}
+
+/// Rank a pool: floor count DESC, then `selection_composite` DESC. Rows
+/// without a `selection_composite` sort last within their floor tier (they
+/// carry no comparable number) — they are listed, never selected.
+fn rank_pool(rows: &mut [&SelectRow]) {
+    rows.sort_by(|a, b| {
+        b.n_pass.cmp(&a.n_pass).then_with(|| {
+            b.selection_composite
+                .partial_cmp(&a.selection_composite)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+}
+
+const SELECT_TSV_COLS: &str = "rank\tpool\tname\tclass\tn_pass\tbal_composite\tm3a\tm3a_state\tselection_composite\tsdr25\tselectable\tpath";
+
 const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid\ttid\tspline\trepro\tfails\tn_measured\tabsent\tannotations\tblocks\tdominated_by";
 
 /// Compact carry of the promoter-injected `block_profile` (used-counts per
@@ -913,6 +1017,223 @@ fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
     .join("\t")
 }
 
+/// Annotations registry resolution: explicit `--annotations <path|none>`
+/// wins; default = `$ZENSIM_EVAL_ANNOTATIONS`, else the committed
+/// `./benchmarks/eval_annotations.json` if present, else none (noted out
+/// loud). Shared by the balanced-profile and `--select` paths.
+fn load_annotations_arg(arg: Option<&str>) -> Vec<AnnEntry> {
+    match arg {
+        Some("none") => Vec::new(),
+        Some(p) => match load_annotations(std::path::Path::new(p)) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("freeze_check: --annotations {e}");
+                std::process::exit(2);
+            }
+        },
+        None => {
+            let default = std::env::var("ZENSIM_EVAL_ANNOTATIONS")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("benchmarks/eval_annotations.json"));
+            if default.exists() {
+                match load_annotations(&default) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        eprintln!("freeze_check: default annotations {e}");
+                        std::process::exit(2);
+                    }
+                }
+            } else {
+                eprintln!(
+                    "freeze_check: note — no annotations registry at {} (pass --annotations)",
+                    default.display()
+                );
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// `--select` driver: read N fullevals, apply the registered rule, print the
+/// ranked table (+ optional TSV). Exit 0 if a selectable winner exists,
+/// 1 if none does (every candidate UNMEASURED or zero-floor), 2 on usage.
+fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool) -> i32 {
+    let mut rows: Vec<SelectRow> = Vec::new();
+    for p in paths {
+        let bytes = match std::fs::read(p) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("freeze_check --select: read {}: {e}", p.display());
+                return 2;
+            }
+        };
+        let v: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("freeze_check --select: parse {}: {e}", p.display());
+                return 2;
+            }
+        };
+        let r = eval_balanced(&v, anns);
+        let m3a = m3a_state(&v, r.class);
+        let selection_composite = match (r.composite, m3a) {
+            (Some(c), M3aState::Measured(x)) => Some(c + balanced::W_M3A * x),
+            _ => None,
+        };
+        rows.push(SelectRow {
+            name: bake_name(&v).to_string(),
+            path: p.display().to_string(),
+            class: r.class,
+            n_pass: r.floors.iter().filter(|x| x.pass).count(),
+            n_floors: r.floors.len(),
+            composite: r.composite,
+            m3a,
+            selection_composite,
+            sdr25: f(&v, &["rank", "sdr25", "srocc"]).map(f64::abs),
+            bake: v.get("bake").and_then(|x| x.as_str()).map(str::to_string),
+        });
+    }
+
+    // Two pools: ensembles rank on balanced_composite alone (their
+    // selection_composite is on a DIFFERENT scale — mixing them would be a
+    // category error), everything else on the registered rule.
+    let (ens, single): (Vec<&SelectRow>, Vec<&SelectRow>) =
+        rows.iter().partition(|r| r.m3a == M3aState::NotComputable);
+    let mut single = single;
+    let mut ens = ens;
+    rank_pool(&mut single);
+    ens.sort_by(|a, b| {
+        b.n_pass.cmp(&a.n_pass).then_with(|| {
+            b.composite
+                .partial_cmp(&a.composite)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+
+    let num = |x: Option<f64>| x.map_or("—".into(), |v| format!("{v:.4}"));
+    println!("# freeze_check --select — REGISTERED rule (campaign appendix E.4)\n");
+    println!(
+        "PRIMARY: profile floor count. TIE-BREAK: selection_composite = \
+         balanced_composite + {:.2}·M3a.\nsdr25 is a reported comparator, \
+         NOT part of the rule.\n",
+        balanced::W_M3A
+    );
+    println!("| rank | bake | class | floors | bal_comp | M3a | sel_comp | sdr25 | selectable |");
+    println!("|---:|---|---|---:|---:|---|---:|---:|---|");
+    let mut winner: Option<&SelectRow> = None;
+    for (i, r) in single.iter().enumerate() {
+        let selectable = r.m3a != M3aState::Unmeasured && r.n_pass > 0;
+        if selectable && winner.is_none() {
+            winner = Some(r);
+        }
+        println!(
+            "| {} | {} | {} | {}/{} | {} | {} | {} | {} | {} |",
+            i + 1,
+            r.name,
+            r.class,
+            r.n_pass,
+            r.n_floors,
+            num(r.composite),
+            m3a_cell(r.m3a),
+            num(r.selection_composite),
+            num(r.sdr25),
+            if selectable { "yes" } else { "NO" }
+        );
+    }
+    if !ens.is_empty() {
+        println!(
+            "\n## Ensembles — ranked SEPARATELY on balanced_composite alone\n\n\
+             M3a is NOT COMPUTABLE for an ensemble (the coherence instrument \
+             loads one ZNPR). They are never penalized for that and never \
+             mixed into the ranking above — the two composites are on \
+             different scales.\n"
+        );
+        println!("| rank | bake | floors | bal_comp | sdr25 |");
+        println!("|---:|---|---:|---:|---:|");
+        for (i, r) in ens.iter().enumerate() {
+            println!(
+                "| {} | {} | {}/{} | {} | {} |",
+                i + 1,
+                r.name,
+                r.n_pass,
+                r.n_floors,
+                num(r.composite),
+                num(r.sdr25)
+            );
+        }
+    }
+
+    let unmeasured: Vec<&&SelectRow> = single
+        .iter()
+        .filter(|r| r.m3a == M3aState::Unmeasured)
+        .collect();
+    if !unmeasured.is_empty() {
+        println!(
+            "\n## NOT SELECTABLE — {} candidate(s) have no M3a\n\n\
+             A candidate nobody measured cannot be certified on that axis \
+             (same registered rule the balanced profile applies to an absent \
+             floor). Measure, then re-run:\n",
+            unmeasured.len()
+        );
+        for r in &unmeasured {
+            match &r.bake {
+                Some(b) => println!("    scripts/run_full_eval.sh {b} {} 944", r.name),
+                None => println!(
+                    "    # {}: fulleval carries no `bake` path — re-harvest it",
+                    r.name
+                ),
+            }
+        }
+    }
+
+    match winner {
+        Some(w) => println!(
+            "\n**SELECTED: `{}`** — {}/{} floors, selection_composite {}.",
+            w.name,
+            w.n_pass,
+            w.n_floors,
+            num(w.selection_composite)
+        ),
+        None => println!("\n**NO SELECTABLE CANDIDATE** (every row is UNMEASURED or 0-floor)."),
+    }
+
+    if tsv {
+        eprintln!("{SELECT_TSV_COLS}");
+        let emit = |pool: &str, i: usize, r: &SelectRow| {
+            let selectable = r.m3a != M3aState::Unmeasured && r.n_pass > 0;
+            let n = |x: Option<f64>| x.map_or("-".into(), |v| format!("{v:.6}"));
+            eprintln!(
+                "{}\t{pool}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                i + 1,
+                r.name,
+                r.class,
+                r.n_pass,
+                n(r.composite),
+                match r.m3a {
+                    M3aState::Measured(x) => format!("{x:.6}"),
+                    _ => "-".into(),
+                },
+                match r.m3a {
+                    M3aState::Measured(_) => "measured",
+                    M3aState::NotComputable => "not-computable",
+                    M3aState::Unmeasured => "unmeasured",
+                },
+                n(r.selection_composite),
+                n(r.sdr25),
+                if selectable { "yes" } else { "no" },
+                r.path
+            );
+        };
+        for (i, r) in single.iter().enumerate() {
+            emit("single", i, r);
+        }
+        for (i, r) in ens.iter().enumerate() {
+            emit("ensemble", i, r);
+        }
+    }
+    i32::from(winner.is_none())
+}
+
 fn main() {
     let mut fulleval: Option<PathBuf> = None;
     let mut bar_csiq: Option<f64> = None;
@@ -920,13 +1241,26 @@ fn main() {
     let mut profile: Option<String> = None;
     let mut tsv = false;
     let mut annotations_arg: Option<String> = None;
+    let mut select: Vec<PathBuf> = Vec::new();
+    let mut in_select = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
+        // After `--select`, bare paths accumulate until the next flag.
+        if in_select && !a.starts_with("--") {
+            select.push(PathBuf::from(a));
+            continue;
+        }
+        in_select = false;
         match a.as_str() {
             "--fulleval" => fulleval = args.next().map(PathBuf::from),
+            "--select" => in_select = true,
             "--profile" => profile = args.next(),
             "--annotations" => annotations_arg = args.next(),
             "--tsv" => tsv = true,
+            "--select-tsv-header" => {
+                println!("{SELECT_TSV_COLS}");
+                std::process::exit(0);
+            }
             "--tsv-header" => {
                 println!("{TSV_COLS}");
                 std::process::exit(0);
@@ -961,6 +1295,21 @@ fn main() {
             std::process::exit(2);
         }
     }
+    // ── `--select` path: N fullevals in, one ranked table out ───────────
+    if !select.is_empty() {
+        if fulleval.is_some() {
+            eprintln!("freeze_check: --select and --fulleval are mutually exclusive");
+            std::process::exit(2);
+        }
+        // --select always ranks under the registered floor set; the §5 bar
+        // set has ATTACH rows and cannot rank.
+        if matches!(profile.as_deref(), Some(p) if p != "balanced-2026-08-04") {
+            eprintln!("freeze_check: --select supports only --profile balanced-2026-08-04");
+            std::process::exit(2);
+        }
+        let anns = load_annotations_arg(annotations_arg.as_deref());
+        std::process::exit(run_select(&select, &anns, tsv));
+    }
     if tsv && profile.is_none() {
         eprintln!(
             "freeze_check: --tsv requires --profile (the §5 table has ATTACH rows a TSV cannot carry)"
@@ -988,39 +1337,7 @@ fn main() {
 
     // ── Balanced profile path (AMENDMENT 8) ─────────────────────────────
     if profile.is_some() {
-        // Annotations registry: explicit --annotations <path|none> wins;
-        // default = $ZENSIM_EVAL_ANNOTATIONS, else the committed
-        // ./benchmarks/eval_annotations.json if present, else none (noted).
-        let anns: Vec<AnnEntry> = match annotations_arg.as_deref() {
-            Some("none") => Vec::new(),
-            Some(p) => match load_annotations(std::path::Path::new(p)) {
-                Ok(a) => a,
-                Err(e) => {
-                    eprintln!("freeze_check: --annotations {e}");
-                    std::process::exit(2);
-                }
-            },
-            None => {
-                let default = std::env::var("ZENSIM_EVAL_ANNOTATIONS")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| PathBuf::from("benchmarks/eval_annotations.json"));
-                if default.exists() {
-                    match load_annotations(&default) {
-                        Ok(a) => a,
-                        Err(e) => {
-                            eprintln!("freeze_check: default annotations {e}");
-                            std::process::exit(2);
-                        }
-                    }
-                } else {
-                    eprintln!(
-                        "freeze_check: note — no annotations registry at {} (pass --annotations)",
-                        default.display()
-                    );
-                    Vec::new()
-                }
-            }
-        };
+        let anns = load_annotations_arg(annotations_arg.as_deref());
         let r = eval_balanced(&v, &anns);
         let n_fail = r.floors.iter().filter(|x| !x.pass).count();
         if tsv {
@@ -1602,6 +1919,141 @@ mod tests {
         let rows2 = legacy_rows(&v, Some(0.8), None);
         assert!(rows2.iter().any(|r| matches!(r,
             Row::Eval(g, _, _, true) if g == "CSIQ SROCC (≥ best 924-arm)")));
+    }
+
+    // ── `--select` (campaign appendix E.4) ──────────────────────────────
+
+    /// Build a SelectRow the way `run_select` does, so the rule under test
+    /// is the shipped one (no second implementation of the arithmetic).
+    fn select_row(v: &serde_json::Value) -> SelectRow {
+        let r = eval_balanced(v, &[]);
+        let m3a = m3a_state(v, r.class);
+        let selection_composite = match (r.composite, m3a) {
+            (Some(c), M3aState::Measured(x)) => Some(c + balanced::W_M3A * x),
+            _ => None,
+        };
+        SelectRow {
+            name: bake_name(v).to_string(),
+            path: String::new(),
+            class: r.class,
+            n_pass: r.floors.iter().filter(|x| x.pass).count(),
+            n_floors: r.floors.len(),
+            composite: r.composite,
+            m3a,
+            selection_composite,
+            sdr25: f(v, &["rank", "sdr25", "srocc"]).map(f64::abs),
+            bake: None,
+        }
+    }
+
+    /// PRIMARY is the floor count: a bake with a higher M3a but one fewer
+    /// floor must NOT outrank one that passes more floors.
+    #[test]
+    fn select_primary_is_floor_count_not_coherence() {
+        let mut hi_m3a = passing_fixture();
+        merge(
+            &mut hi_m3a,
+            &json!({"name": "HI_M3A", "m3a_coherence": 0.99,
+                    "rank": {"cid22": {"srocc": 0.80}}}), // fails F1
+        );
+        let mut lo_m3a = passing_fixture();
+        merge(
+            &mut lo_m3a,
+            &json!({"name": "LO_M3A", "m3a_coherence": 0.20}),
+        );
+        let (a, b) = (select_row(&hi_m3a), select_row(&lo_m3a));
+        assert!(a.n_pass < b.n_pass, "fixture must differ in floor count");
+        assert!(
+            a.selection_composite > b.selection_composite,
+            "fixture must have the LOSER ahead on the tie-break, else the test is vacuous"
+        );
+        let mut pool = vec![&a, &b];
+        rank_pool(&mut pool);
+        assert_eq!(
+            pool[0].name, "LO_M3A",
+            "floor count is PRIMARY — coherence must not override a failed floor"
+        );
+    }
+
+    /// TIE-BREAK: at equal floor count, higher M3a wins, and the margin is
+    /// exactly W_M3A × ΔM3a.
+    #[test]
+    fn select_tiebreak_is_composite_plus_weighted_m3a() {
+        let mut a = passing_fixture();
+        merge(&mut a, &json!({"name": "A", "m3a_coherence": 0.90}));
+        let mut b = passing_fixture();
+        merge(&mut b, &json!({"name": "B", "m3a_coherence": 0.70}));
+        let (ra, rb) = (select_row(&a), select_row(&b));
+        assert_eq!(ra.n_pass, rb.n_pass, "same floors");
+        assert_eq!(ra.composite, rb.composite, "same balanced_composite");
+        let margin = ra.selection_composite.unwrap() - rb.selection_composite.unwrap();
+        assert!(
+            (margin - balanced::W_M3A * 0.20).abs() < 1e-12,
+            "margin {margin} must be exactly W_M3A·ΔM3a"
+        );
+        let mut pool = vec![&rb, &ra];
+        rank_pool(&mut pool);
+        assert_eq!(pool[0].name, "A");
+    }
+
+    /// The three M3a states are DISTINCT and none of them is zero.
+    #[test]
+    fn select_m3a_states_are_distinct_and_never_zero() {
+        // UNMEASURED: no m3a, non-ensemble.
+        let mut un = passing_fixture();
+        un.as_object_mut().unwrap().remove("m3a_coherence");
+        let r_un = select_row(&un);
+        assert!(matches!(r_un.m3a, M3aState::Unmeasured));
+        assert!(
+            r_un.selection_composite.is_none(),
+            "UNMEASURED must carry NO selection_composite — not a 0-valued one"
+        );
+        assert_eq!(m3a_cell(r_un.m3a), "UNMEASURED");
+
+        // NOT COMPUTABLE: ensemble, m3a null by construction.
+        let mut ens = passing_fixture();
+        merge(
+            &mut ens,
+            &json!({"name": "ENS", "model": {"kind": "ensemble"}, "m3a_coherence": null}),
+        );
+        let r_ens = select_row(&ens);
+        assert_eq!(r_ens.class, "944-ensemble");
+        assert!(matches!(r_ens.m3a, M3aState::NotComputable));
+        assert_eq!(m3a_cell(r_ens.m3a), "NOT COMPUTABLE");
+
+        // An explicitly-zero M3a is a MEASURED zero and must rank as one —
+        // distinct from both states above.
+        let mut z = passing_fixture();
+        merge(&mut z, &json!({"name": "Z", "m3a_coherence": 0.0}));
+        let r_z = select_row(&z);
+        assert!(matches!(r_z.m3a, M3aState::Measured(x) if x == 0.0));
+        assert_eq!(r_z.selection_composite, r_z.composite);
+    }
+
+    /// An UNMEASURED candidate sorts last within its floor tier and can
+    /// never be the selected winner, even when it leads on every other axis.
+    #[test]
+    fn select_unmeasured_is_listed_but_not_selectable() {
+        let mut un = passing_fixture();
+        un.as_object_mut().unwrap().remove("m3a_coherence");
+        merge(
+            &mut un,
+            &json!({"name": "UN", "rank": {"cid22": {"srocc": 0.99}}}),
+        );
+        let mut ok = passing_fixture();
+        merge(&mut ok, &json!({"name": "OK", "m3a_coherence": 0.50}));
+        let (ru, ro) = (select_row(&un), select_row(&ok));
+        assert_eq!(ru.n_pass, ro.n_pass, "same floor tier");
+        assert!(
+            ru.composite > ro.composite,
+            "UN must lead on balanced_composite, else the test is vacuous"
+        );
+        let mut pool = vec![&ru, &ro];
+        rank_pool(&mut pool);
+        assert_eq!(
+            pool[0].name, "OK",
+            "an UNMEASURED candidate must not outrank a measured one in its tier"
+        );
     }
 
     /// serde_json deep-merge helper for fixture patching.

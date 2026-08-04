@@ -22,6 +22,20 @@
 # Output: /mnt/v/output/zensim/reports/fulleval/<name>.fulleval.json
 #         (+ <name>.verdict.md — the human bake_verdict report, for reference)
 #
+# ENV MODES
+#   ZENSIM_M3_REUSE=1  carry m3_*/m3a_* from the previous JSON instead of
+#                      re-measuring (schema re-emits — the rank/dial part is a
+#                      cheap rescore, the M3 sweep is not).
+#   ZENSIM_M3_ONLY=1   the INVERSE: keep the existing JSON's rank/dial/
+#                      corruption blocks untouched (bake_verdict is NOT run)
+#                      and re-measure ONLY M3/M3a, injecting into the existing
+#                      keys. Use when the coherence INSTRUMENT changed but the
+#                      bake and corpora did not — e.g. the 2026-08-04 append2
+#                      coverage fix (299ccc8c), which moved every 944-width
+#                      M3a and nothing else. Requires the JSON to exist.
+#   ZENSIM_M3_GRID     full (default, 27 cells) | cheap (registered 9-cell
+#                      balanced Latin square — campaign appendix E.5).
+#
 # Schema + rationale: docs/FULL_EVAL.md.
 set -euo pipefail
 
@@ -93,12 +107,20 @@ if [[ "$REGIME" == "944" ]]; then
     BV_REGIME=944
     BV_EXTRA=()
 fi
+if [[ "${ZENSIM_M3_ONLY:-0}" == "1" ]]; then
+    # Instrument-changed re-measure: leave every rank/dial/corruption number
+    # exactly as the owning tool produced it, and refresh only M3/M3a.
+    [[ -f "$JSON" ]] || { echo "run_full_eval: ZENSIM_M3_ONLY=1 needs an existing $JSON" >&2; exit 3; }
+    [[ "${ZENSIM_M3_REUSE:-0}" == "1" ]] && { echo "run_full_eval: ZENSIM_M3_ONLY and ZENSIM_M3_REUSE are mutually exclusive" >&2; exit 2; }
+    echo "== ZENSIM_M3_ONLY=1 — skipping bake_verdict; re-measuring M3/M3a only ==" >&2
+else
 # Stash the previous JSON so ZENSIM_M3_REUSE=1 can carry its M3 fields after
 # bake_verdict overwrites the file (bake_verdict always emits m3=null).
 [[ "${ZENSIM_M3_REUSE:-0}" == "1" && -f "$JSON" ]] && cp "$JSON" "$JSON.pre"
 "${HEAVY[@]}" "$BV" --bake "$BAKE" --name "$NAME" --regime "$BV_REGIME" \
     "${BV_EXTRA[@]}" \
     --fulleval "$JSON" --output "$MD" >&2
+fi
 
 # ── M3 diffmap-coherence: content × size × quality sweep ──────────────────
 # ZENSIM_M3_REUSE=1: carry m3_coherence/m3_n/m3_dropped_mass_pct +
@@ -148,61 +170,45 @@ else
     M3_SIZES=(576)
 fi
 
-echo "== M3 coherence: ${#M3_CONTENT[@]} content × ${#M3_SIZES[@]} size × ${#M3_QS[@]} q ==" >&2
-M3_SUM=0; MASS_SUM=0; M3_N=0; MASS_N=0; M3A_SUM=0; M3A_N=0
-for ref in "${M3_CONTENT[@]}"; do
-    for sz in "${M3_SIZES[@]}"; do
-        if [[ "$sz" == "576" ]]; then R="$FIX/${ref}.png"; else R="$FIX/${ref}_${sz}.png"; fi
-        for q in "${M3_QS[@]}"; do
-            D="$FIX/${ref}_${sz}_q${q}.jpg"
-            [[ -f "$R" && -f "$D" ]] || { echo "   skip ${ref}/${sz}/q${q}: missing pair" >&2; continue; }
-            log="$OUTDIR/$NAME.m3.${ref}_${sz}_q${q}.log"
-            if ! "${HEAVY[@]}" "$DM" "$R" "$D" --bake "$BAKE" >"$log" 2>&1; then
-                echo "   skip ${ref}/${sz}/q${q}: diffmap_block_coherence failed" >&2
-                continue
-            fi
-            # READ + average the Rust-computed M3/M3a SROCCs + dropped-mass
-            # (never re-derive). M3a = the DEPLOYABLE attribution-density map
-            # (task #67, exact integrands + SAT); M3 = the legacy signal fold,
-            # kept for the before/after story.
-            m3=$(awk -F'=' '/^  M3 /{split($2,a," "); print a[1]; exit}' "$log")
-            m3a=$(awk -F'=' '/^  M3a /{split($2,a," "); print a[1]; exit}' "$log")
-            mass=$(grep -oE "mass: [0-9.]+" "$log" | head -1 | awk '{print $2}')
-            [[ -z "$m3" ]] && { echo "   skip ${ref}/${sz}/q${q}: no M3 line" >&2; continue; }
-            M3_SUM=$(awk -v s="$M3_SUM" -v v="$m3" 'BEGIN{printf "%.10f", s + v}')
-            M3_N=$((M3_N + 1))
-            if [[ -n "$m3a" ]]; then
-                M3A_SUM=$(awk -v s="$M3A_SUM" -v v="$m3a" 'BEGIN{printf "%.10f", s + v}')
-                M3A_N=$((M3A_N + 1))
-            fi
-            if [[ -n "$mass" ]]; then
-                MASS_SUM=$(awk -v s="$MASS_SUM" -v v="$mass" 'BEGIN{printf "%.6f", s + v}')
-                MASS_N=$((MASS_N + 1))
-            fi
-        done
-    done
-done
+# Delegate the grid loop to its OWNER (scripts/m3a_sweep.sh, extracted
+# 2026-08-04 per the no-duplication rule: one implementation, two callers —
+# this script and any impact-accounting / selection run that needs M3a
+# without the rank+dial panels). It emits key=value lines; we READ them.
+echo "== M3 coherence: delegating to scripts/m3a_sweep.sh --grid ${ZENSIM_M3_GRID:-full} ==" >&2
+"$REPO_ROOT/scripts/m3a_sweep.sh" --bake "$BAKE" --bin "$DM" \
+    --grid "${ZENSIM_M3_GRID:-full}" --label "$NAME" --logdir "$OUTDIR" \
+    --tsv "$OUTDIR/$NAME.m3a_cells.tsv" >"$OUTDIR/$NAME.m3a.kv" || true
+kv() { awk -F= -v k="$1" '$1==k{print $2; exit}' "$OUTDIR/$NAME.m3a.kv"; }
+M3_AVG=$(kv M3_MEAN);  M3_N=$(kv M3_N)
+M3A_AVG=$(kv M3A_MEAN); M3A_N=$(kv M3A_N)
+MASS_AVG=$(kv MASS_MEAN); MASS_N=$(kv MASS_N)
+M3_N=${M3_N:-0}; M3A_N=${M3A_N:-0}; MASS_N=${MASS_N:-0}
 
 if [[ "$M3_N" -gt 0 ]]; then
-    M3_AVG=$(awk -v s="$M3_SUM" -v n="$M3_N" 'BEGIN{printf "%.6f", s / n}')
     echo "== M3 mean over $M3_N pair(s) = $M3_AVG ==" >&2
     jq --argjson m3 "$M3_AVG" --argjson n "$M3_N" '.m3_coherence = $m3 | .m3_n = $n' \
         "$JSON" >"$JSON.tmp" && mv "$JSON.tmp" "$JSON"
     if [[ "$M3A_N" -gt 0 ]]; then
-        M3A_AVG=$(awk -v s="$M3A_SUM" -v n="$M3A_N" 'BEGIN{printf "%.6f", s / n}')
         echo "== M3a (attribution density) mean over $M3A_N pair(s) = $M3A_AVG ==" >&2
         jq --argjson m3a "$M3A_AVG" --argjson n "$M3A_N" \
             '.m3a_coherence = $m3a | .m3a_n = $n' "$JSON" >"$JSON.tmp" \
             && mv "$JSON.tmp" "$JSON"
+    else
+        # M3a is a first-class SELECTION input (campaign appendix E.4:
+        # freeze_check --select treats a missing M3a as UNMEASURED and
+        # therefore NOT SELECTABLE). A silent absence would quietly make a
+        # bake unselectable at the end of a wave, so say it out loud here.
+        echo "== WARNING: M3a NOT MEASURED for $NAME — this bake will be" >&2
+        echo "   UNMEASURED (and NOT SELECTABLE) under freeze_check --select ==" >&2
     fi
     if [[ "$MASS_N" -gt 0 ]]; then
-        MASS_AVG=$(awk -v s="$MASS_SUM" -v n="$MASS_N" 'BEGIN{printf "%.4f", s / n}')
         echo "== M3 dropped-f156-371 mass mean = ${MASS_AVG}% (read a low M3 against this) ==" >&2
         jq --argjson dm "$MASS_AVG" '.m3_dropped_mass_pct = $dm' "$JSON" >"$JSON.tmp" \
             && mv "$JSON.tmp" "$JSON"
     fi
 else
     echo "== M3: no successful pairs — leaving m3_coherence null ==" >&2
+    echo "== WARNING: M3a NOT MEASURED for $NAME — NOT SELECTABLE under --select ==" >&2
 fi
 
 echo "wrote $JSON" >&2

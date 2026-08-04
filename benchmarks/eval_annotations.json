@@ -16,8 +16,13 @@
     {
       "id": "dial-mono-raw-unit",
       "kind": "annotated",
-      "fields": ["dial.mono_pct", "dial.tied_pct"],
-      "scope": { "missing": "model.output_spline" },
+      "fields": [
+        "dial.mono_pct",
+        "dial.tied_pct"
+      ],
+      "scope": {
+        "missing": "model.output_spline"
+      },
       "reason": "spline-less raw heads measure dial mono/tied in RAW output units (span ~16-17), where the 0.5-score-pt materiality threshold flatters mono by ~3-6 pts vs real [0,100] dial units (packed twins dropped 94.0->91.2 / 93.4->87.7 / 95.7->91.9); strict-backwards is cal-invariant, so the drop is a unit effect, not new inversions",
       "evidence": "benchmarks/sota944_campaign_2026-08-03.md packaging-pass results (926c71f7, 3baf73ad); freeze_check raw-unit/dial-unit label 861ec096",
       "date": "2026-08-04",
@@ -26,8 +31,12 @@
     {
       "id": "hfnl-absent-not-failed",
       "kind": "absent-not-failed",
-      "fields": ["rank.hfnlproxy"],
-      "scope": { "missing": "rank.hfnlproxy" },
+      "fields": [
+        "rank.hfnlproxy"
+      ],
+      "scope": {
+        "missing": "rank.hfnlproxy"
+      },
       "reason": "the hfnlproxy corpus (ext944-canonical-2026-08-01) postdates the era-bridge fullevals; a cell nobody measured on the axis did not FAIL it — the F6 row prints '— (absent)', n/8 keeps the registered absent=not-passed rule, and the n/m-measured form is stated alongside (e.g. winner_dial_Ebothg: 5/8 registered, 5/7-measured)",
       "evidence": "benchmarks/sota944_campaign_2026-08-03.md §8 CORRECTIONS (2026-08-04); AMENDMENT 8 registration ('UNEVALUABLE counts as not-passed' stays the scoring rule)",
       "date": "2026-08-04",
@@ -36,12 +45,65 @@
     {
       "id": "kadid-tid-train-eq-val",
       "kind": "annotated",
-      "fields": ["rank.kadid.srocc", "rank.tid.srocc"],
-      "scope": { "all": true },
+      "fields": [
+        "rank.kadid.srocc",
+        "rank.tid.srocc"
+      ],
+      "scope": {
+        "all": true
+      },
       "reason": "KADID/TID are 100% train==val pair-overlap for the training-era corpora — their SROCCs reward memorization, not skill; integrity guards only, never ranking signal (already dimmed on the board; this entry formalizes it machine-readably)",
       "evidence": "docs/EVAL_PANEL_REQUIREMENT.md; CLAUDE.md TWO-PANEL EVAL section; wave-5 Finding 4 (they inflate under ensembling)",
       "date": "2026-08-04",
       "fix_path": "none — permanent caveat (structural property of the split)"
+    },
+    {
+      "id": "m3a-pre-append2-fix",
+      "kind": "invalidated",
+      "fields": [
+        "m3a_coherence",
+        "m3a_n"
+      ],
+      "scope": {
+        "names": [
+          "C_co1a_s1303",
+          "C_co1a_s1307",
+          "C_co1b_s1303",
+          "C_co1c_s1301",
+          "C_co2a_s1307",
+          "C_co2b_s1307",
+          "C_co3a_s1301",
+          "C_co3a_s1301_w4repro",
+          "C_co3a_s1303",
+          "C_co3a_s1307",
+          "C_co3a_s1307_packed",
+          "C_co3a_s1319",
+          "C_co3a_s1321",
+          "C_co3a_s1409",
+          "C_co3b_s1303",
+          "C_co4_s1301",
+          "C_co4_s1303",
+          "C_co4_s1307",
+          "C_em944_s31_packed",
+          "C_ensk2_s1301",
+          "C_ensk2_s1303",
+          "C_ensk2_s1307",
+          "C_ensk5_s1301",
+          "C_ensk5_s1303",
+          "C_ensk5_s1307",
+          "H_co3abpg_s2501",
+          "H_co3abpg_s2503",
+          "H_co3abpg_s2507",
+          "H_co3abpg_s2507_packed",
+          "sota944_C_em944_s31",
+          "sota944_nt223",
+          "sota944_winner_A_bvls_X_AM5"
+        ]
+      },
+      "reason": "INVALIDATED: the PRE-FIX m3a_coherence published for these 32 944-input cells. Before 299ccc8c (2026-08-04), compute_attribution_density_full sliced the model gradient as s[720..min(len,924)], so the append2/BANDVIS block (f924-943) never reached the attribution density -- 8 of its 20 slots (BANDVIS_GAIN/LOSS x 4 scales) are class-E mean pools and were REAL dropped coverage (the other 12 are correctly zero: reference-only, or HDR-gated on a structurally-SDR route). Every pre-fix 944 M3a is therefore too LOW. All three registered materiality thresholds fired. The value now on the board for each of these cells is the CORRECTED re-measurement with a binary at 299ccc8c, same 27 fixtures, same bake bytes (sha256-verified against the recorded bake_sha256). Do NOT compare these cells against any 944 M3a table dated before 2026-08-04, and do not cite a pre-fix number. M3 is unaffected (the legacy signal fold is untouched); 372/720/924-width bakes are unaffected by construction and are not in this entry's scope.",
+      "evidence": "benchmarks/attribution_append2_e1_2026-08-04.md (old-vs-new table, all 32 cells); registration: benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX E; fix commit 299ccc8c",
+      "date": "2026-08-04",
+      "fix_path": "RESOLVED for every cell in scope -- re-measured and re-promoted in the same pass. Any NEW 944 fulleval must be produced by a binary at or after 299ccc8c; scripts/m3a_sweep.sh is the owner of the sweep."
     }
   ]
 }

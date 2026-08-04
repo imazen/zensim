@@ -22,10 +22,11 @@ The compute was fine. The orchestration around it was the whole loss.
 4. HARVEST INLINE    setsid nohup scripts/harvest_bakes.sh --glob ... --count N
 5. ONE TERMINAL      setsid nohup scripts/await_artifacts.sh --glob ... --count N
                      ... then Monitor exactly ONE file: <heartbeat>.done
-6. ENDGAME FOREGROUND  tables, doc, gates — in the foreground, no waiting
-7. PUSH + VERIFY     jj bookmark set main -r @ && jj git push --bookmark main
+6. SELECT            freeze_check --select <every fulleval> [--tsv]
+7. ENDGAME FOREGROUND  tables, doc, gates — in the foreground, no waiting
+8. PUSH + VERIFY     jj bookmark set main -r @ && jj git push --bookmark main
                      git merge-base --is-ancestor @ main@origin
-8. CLEAN UP          workspace forget + rm -rf; drop your .workongoing line
+9. CLEAN UP          workspace forget + rm -rf; drop your .workongoing line
 ```
 
 Steps 4 and 5 are the ones that were missing. Step 4 makes a late wake-up
@@ -125,6 +126,41 @@ export CARGO_TARGET_DIR=$HOME/tmp/zensimw8-target
 
 Target dirs are cheap in time and **expensive in disk**: 28 dirs, 113.6 GB, on
 a root filesystem at 95 %. Delete yours when the wave closes.
+
+---
+
+## Step 6 — SELECT on rank + dial + COHERENCE, with the owner
+
+```bash
+freeze_check --select /mnt/v/output/zensim/reports/fulleval/C_w8_s*.fulleval.json
+```
+
+The wave's decision is not "eyeball the scoreboard". It is a **registered
+rule**, implemented in `freeze_check` (the bar/profile owner — do NOT write a
+ranking script):
+
+- **PRIMARY: profile floor count.** Coherence never overrides a bake that
+  fails CID22 or the dial.
+- **TIE-BREAK: `balanced_composite + 0.15 · M3a`.** Registered in the sota944
+  campaign doc appendix E.4. 0.15 is the same weight class
+  `balanced_composite` already gives csiq/live/band-tail.
+- **Why M3a is in the rule at all:** the coherence study (n = 50,
+  pre-registered) measured that **42.3 % of 944-class M3a variance is seed
+  noise at fixed recipe** — `C_co3a` k = 6 spans 0.718–0.826. Coherence is a
+  *selectable trajectory property*, so a k-seed wave that ignores it is
+  leaving a free 0.1 of M3a on the table.
+- **`sdr25` is NOT the primary.** It is a reported comparator column. It has
+  decoupled from CID22 five times; that is exactly why the primary is the
+  floor count.
+- **Three M3a states, none of them zero.** `MEASURED` ranks normally;
+  `NOT COMPUTABLE` (ensemble — the instrument loads one ZNPR) ranks in a
+  separate section and is never penalized; `UNMEASURED` is listed but **not
+  selectable**, and the tool prints the command to fix it.
+
+M3a comes free with harvest (`run_full_eval.sh` computes it), so by the time
+step 5 says COMPLETE the selection data already exists. If it does not,
+harvest drops a `.NO_M3A` marker next to the bake and counts it in the
+terminal line — read that before selecting.
 
 ---
 

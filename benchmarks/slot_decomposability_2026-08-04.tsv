@@ -25,6 +25,17 @@
 #                      model gradient: the block is not spatialized at all (f156-371, f924-943), or
 #                      the feature is reference-only / structurally zero in the regime.
 #
+# AMENDED 2026-08-04 (fix 299ccc8c, campaign appendix E1): the append2 block is NO LONGER
+# uniformly N. It was classified N because compute_attribution_density_full's
+# s[720..min(len,924)] slice never PASSED it in -- a property of the slice, not of the
+# features. Re-derived from the feature definitions: BANDVIS_GAIN/LOSS are class E (plain
+# means of a per-pixel bounded_excess indicator -- the exact form the v2 HF_GAIN/HF_LOSS
+# slots already carry) and are now spatialized; LUMA_MEAN_REF is N BY DEFINITION
+# (reference-only); HL_BIN1/2 are N as STRUCTURAL ZEROS on this SDR-only attribution route
+# (their form is class E, but the HDR gate makes the feature identically 0.0 here).
+# So of the block's 20 slots, 8 are E and 12 are N -- each for a stated reason rather than
+# an unreached slice bound. Record: benchmarks/attribution_append2_e1_2026-08-04.md
+#
 # LAYOUTS (column index from block base):
 #   basic    f0   + scale*39 + ch*13 + local     (13 local, 3 ch, 4 scales)
 #   v1pool   f156 + <see block rows>             (216 cols: peak 156-227, masked 228-299, IW 300-371)
@@ -99,8 +110,8 @@ append	14	GLOBAL_CGAIN	A	whole-plane variance	chain on gvar2 + assumed-fixed pol
 append	15	GLOBAL_CLOSS	A	whole-plane variance	chain on gvar2 + assumed-fixed polarity branch	all	all	feature_v2.rs:6676-6690,6545
 append	16	GRAD_SRC_MEAN	N	reference-only	integrand identically 0 ("no term")	all	all	feature_v2.rs:6691,6251
 append	ALL	append_B_scale0_cell	N	structural zero	APPEND_SKIP_B_SCALE0 - all 17 slots emit 0.0	B	0	feature_v2.rs:244,5075-5079
-append2	0	BANDVIS_GAIN	N	NOT PASSED to attribution	s[720..min(len,924)] drops f924+	Y	all	attribution.rs:817-821
-append2	1	BANDVIS_LOSS	N	NOT PASSED to attribution	s[720..min(len,924)] drops f924+	Y	all	attribution.rs:817-821
-append2	2	LUMA_MEAN_REF	N	NOT PASSED to attribution	reference-only AND dropped	Y	all	attribution.rs:817-821
-append2	3	HL_BIN1	N	NOT PASSED to attribution	s[720..min(len,924)] drops f924+	Y	all	attribution.rs:817-821
-append2	4	HL_BIN2	N	NOT PASSED to attribution	s[720..min(len,924)] drops f924+	Y	all	attribution.rs:817-821
+append2	0	BANDVIS_GAIN	E	mean of bounded_excess	-v_i/N exact (spatialized 2026-08-04, fix 299ccc8c)	Y	all	feature_v2.rs idx_append2 L447-449; derive_v2app_coeffs append2 section; attribution.rs BLOCK_END_APPEND2
+append2	1	BANDVIS_LOSS	E	mean of bounded_excess	-v_i/N exact (spatialized 2026-08-04, fix 299ccc8c)	Y	all	feature_v2.rs idx_append2 L447-449; derive_v2app_coeffs append2 section; attribution.rs BLOCK_END_APPEND2
+append2	2	LUMA_MEAN_REF	N	reference-only	integrand identically 0 BY DEFINITION (sat(mean ref Y))	Y	all	feature_v2.rs idx_append2 L~470; same footing as PJND_FRAGILITY/GRAD_SRC_MEAN
+append2	3	HL_BIN1	N	structural zero (SDR route)	class-E FORM (Sum(w*mse)/Sum(w)) but HDR-gated; attribution route is SDR (hl=false) so Sum(w)==0 => f==0.0	Y	all	feature_v2.rs attr_pass_a_kernels hl=false; idx_append2 HL_BIN1/2
+append2	4	HL_BIN2	N	structural zero (SDR route)	class-E FORM (Sum(w*mse)/Sum(w)) but HDR-gated; attribution route is SDR (hl=false) so Sum(w)==0 => f==0.0	Y	all	feature_v2.rs attr_pass_a_kernels hl=false; idx_append2 HL_BIN1/2

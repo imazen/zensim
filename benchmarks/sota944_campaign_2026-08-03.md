@@ -4091,6 +4091,25 @@ re-derives the correlation and two mass fractions independently from the TSV.
 
 ### D.8 RESULTS — the mechanism is FALSIFIED: M3a is not determined by where contribution mass sits
 
+> **AMENDED 2026-08-04 (appendix E1, fix `299ccc8c`) — the M3a INPUTS below are
+> pre-fix for the 944-width rows.** This appendix's own §D.1 classification
+> recorded that the attribution machinery drops `f924-943` because
+> `compute_attribution_density_full` slices `s[720..min(len, 924)]`. E.1
+> established that 8 of those 20 slots (`BANDVIS_GAIN`/`BANDVIS_LOSS` × 4
+> scales) are **class E** and were real dropped coverage; the fix raised M3a on
+> **all 32 of this population's 944-width bakes**. The 372/720 rows — including
+> every one of the four named counterexamples that individually break a
+> mass-placement law, and the whole 720-block comparison — are **unchanged**,
+> so the FALSIFIED verdict's structural argument stands. The *correlation
+> numbers* in the tables below were computed on the pre-fix inputs and are NOT
+> re-derived here (this appendix is the record of what was measured then).
+> Re-deriving them on the corrected M3a is registered as follow-on work; until
+> that lands, cite the counterexamples, not the coefficients. Note the
+> classification table itself is superseded by E.1 for the append2 rows: they
+> are no longer uniformly class N.
+> Detail: `benchmarks/attribution_append2_e1_2026-08-04.md`.
+
+
 Artifacts: `benchmarks/coherence_mass_placement_2026-08-04.tsv` (+ `.meta`,
 which carries the gates, the tool sha256 and every corpus sha),
 `benchmarks/slot_decomposability_2026-08-04.tsv` (the classification),

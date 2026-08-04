@@ -129,23 +129,28 @@ const BAND_ROWS: usize = 32;
 // (`attribution_covers_expected_slots_per_width`) is the anti-recurrence
 // guard: adding a block means adding a constant AND a row to that test.
 
-/// End of the basic block (`f0-155`) = start of the v1 pooled block.
-/// Not referenced by the slicing itself (the basic path bounds-checks its
-/// own lookups), but it completes the layout description and is exercised
-/// by `attribution_covers_expected_slots_per_width`.
-#[allow(dead_code)]
-pub(crate) const BLOCK_END_BASIC: usize = 156;
-/// End of the v1 peak/masked/IW pooled block (`f156-371`) = start of v2.
-/// Structurally NOT spatialized (module blind spot 1).
-pub(crate) const BLOCK_END_V1_POOLS: usize = 372;
-/// End of the v2 block (`f372-719`) = start of the append block.
-pub(crate) const BLOCK_END_V2: usize = 720;
-/// End of the append block (`f720-923`) = start of append2.
-pub(crate) const BLOCK_END_APPEND: usize = 924;
-/// End of the append2 block (`f924-943`). Anything beyond (the f944+ CSFW
-/// block) has no attribution integrand yet and is deliberately not sliced —
-/// the coverage test pins that too.
-pub(crate) const BLOCK_END_APPEND2: usize = 944;
+#[cfg(feature = "feature-regime-v2")]
+mod layout_ends {
+    /// End of the basic block (`f0-155`) = start of the v1 pooled block.
+    /// Not referenced by the slicing itself (the basic path bounds-checks its
+    /// own lookups), but it completes the layout description and is exercised
+    /// by `attribution_covers_expected_slots_per_width`.
+    #[allow(dead_code)]
+    pub(crate) const BLOCK_END_BASIC: usize = 156;
+    /// End of the v1 peak/masked/IW pooled block (`f156-371`) = start of v2.
+    /// Structurally NOT spatialized (module blind spot 1).
+    pub(crate) const BLOCK_END_V1_POOLS: usize = 372;
+    /// End of the v2 block (`f372-719`) = start of the append block.
+    pub(crate) const BLOCK_END_V2: usize = 720;
+    /// End of the append block (`f720-923`) = start of append2.
+    pub(crate) const BLOCK_END_APPEND: usize = 924;
+    /// End of the append2 block (`f924-943`). Anything beyond (the f944+ CSFW
+    /// block) has no attribution integrand yet and is deliberately not sliced —
+    /// the coverage test pins that too.
+    pub(crate) const BLOCK_END_APPEND2: usize = 944;
+}
+#[cfg(feature = "feature-regime-v2")]
+use layout_ends::*;
 
 /// Per-pixel attribution density + summed-area table.
 ///

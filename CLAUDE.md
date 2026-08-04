@@ -97,9 +97,20 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   924-era bigcodec slice lifts 720-width to 0.8837; v3-marginal ≈ +0.001. tbig_924_200k is
   the one non-row-identical slice (no join key) and drives the coarse-scale shift too.
 - **Seed selection is VALIDATED**: sdr25 (bake_verdict corpus, never trained, not a gate)
-  predicts CID22 at SROCC +0.752 over 35 bakes, rejects every collapsed seed. Ship recipe =
-  train k seeds → select by sdr25/`best_val`. Best selected: `EM4_mask2_kw0.15_s42`
-  CID22 0.8924 + KonJND 0.4286 (`coherent924_selected` on the gauntlet).
+  predicts CID22 at SROCC +0.752 over 35 bakes, rejects every collapsed seed. Best selected:
+  `EM4_mask2_kw0.15_s42` CID22 0.8924 + KonJND 0.4286 (`coherent924_selected` on the gauntlet).
+  **⇒ SUPERSEDED 2026-08-04 as the ship rule** (still true as a fact about sdr25): selection
+  is now **rank + dial + COHERENCE**, run by the OWNER —
+  **`freeze_check --select <every fulleval>`**. PRIMARY = profile floor count; TIE-BREAK =
+  `balanced_composite + 0.15·M3a`; `sdr25` is a reported comparator only, **never the
+  primary** (it has decoupled from CID22 five times). Rationale: the coherence study measured
+  **42.3% of 944-class M3a variance is seed noise at fixed recipe** (`C_co3a` k=6 spans
+  0.718-0.826), so M3a is a *selectable trajectory property* and a k-seed wave that ignores it
+  leaves ~0.1 M3a on the table. Three M3a states, **none of them zero**: MEASURED ranks;
+  NOT COMPUTABLE (ensemble — the instrument loads one ZNPR) ranks separately and is never
+  penalized; UNMEASURED is listed but **not selectable**. M3a comes free with
+  `harvest_bakes.sh` (27 cells, **66 s/bake** measured); a missing one drops a `.NO_M3A`
+  marker. Registered: campaign appendix E.4; workflow: `docs/WAVE_PLAYBOOK.md` step 6.
 - Corruption ordering breaks at 924 in ALL arms (0.03-0.17 vs 0.214@720); occlusion blamed
   DET/ART_DEV2 but **masked RETRAIN does not recover (occlusion≠ablation)** — distributional;
   mitigate with the corruption HEAD (negrich_924), not the dial.
@@ -180,6 +191,22 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   a gain sweep is future work, not claimed. Hazard noted: unknown JXL_ZENSIM_MODEL_MAP
   values fall through to baseline silently (caught in-run by a control-arm mismatch).
   `jxl-encoder/benchmarks/zensim_attr_loop69_2026-07-29.md`.
+- **★ APPEND2 COVERAGE FIX (2026-08-04, `299ccc8c`) — EVERY 944-era M3a MEASURED BEFORE THIS
+  COMMIT IS TOO LOW.** `compute_attribution_density_full` sliced `s[720..min(len,924)]`, so on
+  a **944** bake the whole append2/BANDVIS block never reached the density. Determination from
+  the feature definitions (not the slice): `BANDVIS_GAIN/LOSS` (8 slots) are **class E** —
+  plain means of a per-pixel `bounded_excess` indicator, the exact form v2 `HF_GAIN/HF_LOSS`
+  already carry — so they were **real dropped coverage**; `LUMA_MEAN_REF` (reference-only) and
+  `HL_BIN1/2` (HDR-gated on a structurally-SDR route) are **correctly zero**, now by an
+  explicit named decision instead of an unreached bound. Measured shift on the 32-bake 944
+  population: **M3a rises materially** (registered sample: +0.0236/+0.0823/+0.0263/+0.1045/
+  −0.0039; 3 of 5 change tier); M3 unchanged (the legacy fold is untouched);
+  372/720/924 unaffected by construction. Guarded by
+  `attribution_covers_expected_slots_per_width` (probes every width, so a regime bump cannot
+  silently drop a block again) + a plane-sum identity vs the production 944 features (8-9
+  digits) + per-slot FD direction. Superseded numbers are registered in
+  `benchmarks/eval_annotations.json`. Record: `benchmarks/attribution_append2_e1_2026-08-04.md`,
+  registration: campaign appendix E.
 
 ### Trainer/eval capabilities added this campaign (all on main)
 - **MANDATORY embedded repro**: every new bake carries `zentrain.repro` (inputs w/ sha256 +

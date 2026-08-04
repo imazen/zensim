@@ -80,11 +80,11 @@ rm -f "$DONE"
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 say() { printf '%s %s\n' "$(now)" "$*" | tee -a "$LOG" >&2; }
 
-STATE=RUNNING; RC=5; NOK=0; NFAIL=0
+STATE=RUNNING; RC=5; NOK=0; NFAIL=0; NO_M3A=0
 finish() {
-    printf '%s %s rc=%s harvested=%s failed=%s\n' \
-        "$(now)" "$STATE" "$RC" "$NOK" "$NFAIL" > "$DONE"
-    say "TERMINAL $STATE rc=$RC harvested=$NOK failed=$NFAIL"
+    printf '%s %s rc=%s harvested=%s failed=%s no_m3a=%s\n' \
+        "$(now)" "$STATE" "$RC" "$NOK" "$NFAIL" "$NO_M3A" > "$DONE"
+    say "TERMINAL $STATE rc=$RC harvested=$NOK failed=$NFAIL no_m3a=$NO_M3A"
     exit "$RC"
 }
 trap 'STATE=SIGNAL; RC=5; finish' TERM INT HUP
@@ -119,6 +119,28 @@ harvest_one() {
         if ! nice -n 19 ionice -c 3 "$REPO_ROOT/scripts/run_full_eval.sh" \
                 "$bake" "$stem" "$REGIME" >>"$LOG" 2>&1; then
             rc=1; say "FULLEVAL FAILED $stem"
+        fi
+    fi
+
+    # M3a coverage guard (campaign appendix E.6). M3a is now a FIRST-CLASS
+    # selection input: `freeze_check --select` treats a missing M3a as
+    # UNMEASURED and therefore NOT SELECTABLE. A bake that harvests "clean"
+    # but silently carries no M3a would drop out of selection at the end of
+    # the wave, which is the same invisible-failure class this script exists
+    # to prevent — so it is loud, on disk, next to the artifact.
+    #
+    # It is a WARNING, not a harvest failure: era-bridge widths and ensembles
+    # legitimately have no M3a (the coherence instrument loads one ZNPR), and
+    # failing those would be a false alarm.
+    if [ "$rc" = 0 ] && [ "$SKIP_FULLEVAL" = 0 ] && [ -f "$FE/$stem.fulleval.json" ]; then
+        m3a=$(jq -r '.m3a_coherence // "null"' "$FE/$stem.fulleval.json" 2>/dev/null)
+        if [ "$m3a" = "null" ] || [ -z "$m3a" ]; then
+            NO_M3A=$((NO_M3A + 1))
+            printf '%s no m3a_coherence in %s — UNMEASURED, so NOT SELECTABLE under freeze_check --select\n' \
+                "$(now)" "$stem" > "$bake.NO_M3A"
+            say "WARNING $stem — NO M3a (not selectable; see $bake.NO_M3A)"
+        else
+            rm -f "$bake.NO_M3A"
         fi
     fi
 
