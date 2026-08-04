@@ -1,0 +1,64 @@
+# coherence_mass_placement_2026-08-04 — .meta
+#
+# WHAT: per-bake contribution-mass fractions by attribution-decomposability
+#       class (E / A / N), joined to the measured M3a coherence, for every
+#       bake on the gauntlet board carrying a non-null `m3a_coherence`.
+#       Registered method: benchmarks/sota944_campaign_2026-08-03.md,
+#       "REGISTERED APPENDIX — COHERENCE MECHANISM" (appendix D), committed
+#       at 270f6ecf BEFORE any number in this TSV was computed.
+#
+# GIT (analysis):   270f6ecf  (registration commit; results commit adds this file)
+# GIT (zensim src from which the classification was derived): 28e7bd49
+# CLASSIFICATION:   benchmarks/slot_decomposability_2026-08-04.tsv
+# ANALYSIS OWNER:   scripts/v_next/coherence_mass_analysis.py
+# STATS OWNER:      scripts/lib/zen_stats -> zensim-validate `panel --batch`
+#                   (srocc_signed / plcc_raw; nothing hand-rolled)
+#
+# CONTRIBUTION TOOL: zensim-validate bin `bake_contrib` (source commit ca28e7d0;
+#   binary sha256 614b6b1e3f56a8616dc451cd866b261ba96422771b5a1a7559451357802bf456,
+#   snapshot at ~/tmp/coh/bin/bake_contrib). The only source delta between
+#   ca28e7d0 and 28e7bd49 for this bin is the `name@N` per-corpus cap syntax —
+#   the ablation math is byte-identical, and every run here used no cap.
+#
+# COMMAND (per bake, 50 bakes):
+#   bake_contrib --bake <bake.bin> --corpus cid22:<regime-native>:-:1 \
+#                --out ~/tmp/coh/contrib/<name>.tsv
+#   then:
+#   scripts/v_next/coherence_mass_analysis.py \
+#     --classification benchmarks/slot_decomposability_2026-08-04.tsv \
+#     --contrib-dir ~/tmp/coh/contrib --out <this TSV> --summary <corr.txt>
+#
+# CORPUS (regime-native cid22val, 4,292 rows each, no target column):
+#   n_inputs=944 -> /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_cid22val.parquet
+#                   22,970,406 B  sha256 162a6ba09a599605...
+#   n_inputs=924 -> /mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/ext_cid22val.parquet
+#                   22,650,066 B  sha256 c9f25741248b14f0...
+#   n_inputs=720,156 -> /mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_cid22val.parquet
+#                   25,793,385 B  sha256 ac532ccf2ad32bd2...
+#   n_inputs=372 -> /mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet
+#                   10,745,261 B  sha256 a1050ace62dca326...   (REAL pools — a folded
+#                   root zeroes f156-371 and would make the 372-era N mass artifactually 0)
+#
+# GATES (all 50 runs): parity vs bake_runtime::score_row max|diff| = 0.000e0,
+#   violations(>1e-6) = 0, on 4,292 rows x 50 runs. Structural-zero gate
+#   f156-371 PASS (delta === 0 exactly, 0 nonzero of 216) on all 32 944-width bakes.
+#
+# COLUMNS
+#   m3a, m3            read from the bake's *.fulleval.json (NOT recomputed here)
+#   exact_frac         REGISTERED PRIMARY: sum mean|delta| over class-E inputs / total
+#   approx_frac        class A / total
+#   nondecomp_frac     class N / total
+#   decomp_frac        REGISTERED SECONDARY: (E + A) / total
+#   fine_frac,s0_frac,s3_frac,mean_scale,eff_n,n_live   POST-HOC diagnostics (NOT registered)
+#   n_inputs,n_layers,depth,coarse_decay                registered confound annotations
+#                      (coarse_decay: 'unknown' where neither an embedded
+#                       zentrain.repro argv nor a .spec.json argv exists — 14 of 50)
+#   mass_total         sum mean|delta| over all inputs, score (dial) units
+#
+# HEADLINE: PRIMARY SROCC(exact_frac, m3a) = +0.0245 -> registered verdict FALSIFIED
+#           (threshold <0.40). SECONDARY SROCC(decomp_frac, m3a) = +0.4558, but that
+#           is a between-group step (pool-reading bakes vs pool-blind bakes), NOT a
+#           gradient: within the pool-blind subgroup (n=44) SROCC(exact) = -0.2408,
+#           within the pool-reading subgroup (n=6) SROCC(decomp) = -0.4286, and a
+#           family-centered within-recipe test (6 seed families, 20 bakes) gives
+#           +0.17/+0.20. Full reading in the campaign doc's results section.

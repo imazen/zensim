@@ -4088,3 +4088,167 @@ jj workspace `../zensim--coh` on `main@origin`;
 `benchmarks/` with `.meta` headers (git commit, command, corpus paths, tool
 sha256). No training in this pass. Stats via `zenstats` only. Supervisor
 re-derives the correlation and two mass fractions independently from the TSV.
+
+### D.8 RESULTS — the mechanism is FALSIFIED: M3a is not determined by where contribution mass sits
+
+Artifacts: `benchmarks/coherence_mass_placement_2026-08-04.tsv` (+ `.meta`,
+which carries the gates, the tool sha256 and every corpus sha),
+`benchmarks/slot_decomposability_2026-08-04.tsv` (the classification),
+`scripts/v_next/coherence_mass_analysis.py` (the analysis; stats via
+`zen_stats` → `panel --batch` only). **n = 50** bakes carried a measured
+`m3a_coherence`; 122 of the 172 board fullevals had none (ensembles, whose
+`m3a` is null because the coherence instrument loads one ZNPR, plus board
+cells never run through the instrument) — none was excluded by hand. Every
+bake's `.bin` was on disk. Gates: `bake_contrib` parity vs
+`bake_runtime::score_row` **max|diff| = 0.000e0, 0 violations** on
+4,292 × 50 rows; the f156-371 structural-zero gate **PASS with Δ ≡ 0 exactly**
+on all 32 944-width bakes.
+
+**Registered verdict (PRIMARY): FALSIFIED.**
+
+| statistic | SROCC | PLCC | n |
+|---|---:|---:|---:|
+| **PRIMARY `exact_mass_fraction`** | **+0.0245** | +0.2537 | 50 |
+| SECONDARY `decomposable_mass_fraction` | +0.4558 | +0.5692 | 50 |
+| `nondecomposable_fraction` | −0.4558 | −0.5692 | 50 |
+| `approx_fraction` | +0.3867 | +0.2945 | 50 |
+
+The primary lands at **+0.02**, far below the 0.40 FALSIFIED boundary. The
+pre-registered secondary lands at **+0.456**, inside the PARTIAL band — the
+registration anticipated exactly this split and said the fact itself is the
+finding. It is: **the E-vs-A boundary carries no information at all, and the
+E+A-vs-N split carries a step, not a gradient.**
+
+**The secondary's +0.456 is a between-group step, not a mass law.** The
+non-decomposable fraction in this population is bimodal, not continuous: six
+bakes read the un-spatialized v1 pools (N = 0.44–0.69), forty-four do not
+(N = 0.00–0.18). Split there and the relationship inverts or vanishes:
+
+| subgroup | n | SROCC(decomp, m3a) | SROCC(exact, m3a) | mean m3a |
+|---|---:|---:|---:|---:|
+| pool-blind (N < 0.10) | 44 | +0.2529 | **−0.2408** | 0.803 |
+| pool-reading (N ≥ 0.10) | 6 | **−0.4286** | −0.1429 | 0.520 |
+
+And holding the recipe itself fixed — 6 multi-seed families, 20 bakes,
+family-centered — mass placement explains essentially nothing:
+**SROCC(decomp) +0.170, SROCC(exact) +0.197.**
+
+**Four counterexamples that individually break a mass-placement law:**
+
+| bake | width | M3a | exact | non-decomp | what it kills |
+|---|---:|---:|---:|---:|---|
+| `bhdr_linear_shaped_cvvdpmix` | 372 lin | **0.772** | 0.283 | **0.471** | vs `v02_bvls_NO_shaping` (372 lin, N = 0.441, **M3a 0.199**): ΔN = 0.03, ΔM3a = **0.573** |
+| `sota944_winner_A_bvls_X_AM5` | 944 lin | **0.630** | 0.816 | **0.000** | zero invisible mass, high exact mass, yet below 25 bakes carrying N = 0.06–0.09 |
+| `ADD156_safesyn_only_raw_lasso` | 372 lin | **0.954** | **0.317** | 0.000 | board-best M3a with only 32 % exact mass (the v1-basic block is 4 exact slots of 13) |
+| `foldcanon_coherent` / `ideal_signedpow_p0p333` | 720 lin | 0.808 / 0.731 | **0.973 / 0.974** | 0.000 | ~97 % exact mass scoring *below* the 0.63–0.69-exact 720 MLPs (0.82–0.92) |
+
+The cleanest single comparison is the **720 block**: seven of its eight bakes
+have `nondecomp_frac` identically 0.000, their M3a spans 0.731 → 0.920, and
+`exact_frac` orders them **backwards** (the ~0.97-exact linears at the bottom,
+the 0.63–0.69-exact MLPs at the top). With the hypothesised driver held
+constant at zero, M3a still moves 0.19 — so something else is moving it.
+
+**Post-hoc axes tested and also flat** (labelled exploratory in the TSV, not
+registered): mass-weighted mean pyramid scale +0.034, fine-scale (0+1) mass
+fraction −0.076, coarsest-scale mass fraction +0.166, effective feature count
+(1/HHI) +0.065, and M3 itself +0.164. The E-M9 coarse-scale-mass mechanism
+that explains the *signal fold*'s collapse does **not** transfer to the
+attribution density — which is the expected result, since the density
+upsamples sum-preservingly instead of mass-blending, and is the reason C2a
+cured the 128 px inversion in the first place.
+
+#### What the residuals say actually drives M3a — ranked, with the cheapest discriminator
+
+1. **Seed / optimization trajectory at fixed recipe — the dominant within-era
+   driver.** At *identical* data, recipe and width, M3a spreads 0.09–0.11:
+   `C_co3a` k = 6 seeds spans 0.718–0.826 (sd 0.0395); `H_co3abpg` k = 3 spans
+   0.774–0.867 (sd 0.0467). Pooled within-family sd = **0.0307** against a
+   944-class sd of 0.0471 — **42.3 % of the entire 944-class M3a variance is
+   seed noise**, before any recipe or feature-set effect is considered. (Packed
+   twins reproduce their parent's M3a to 4 dp, so this is genuine
+   model-to-model variation, not instrument noise.) *Cheapest discriminator:
+   none needed to establish it — it is measured. The actionable test is the
+   ship move it implies (below).*
+2. **Depth, at fixed width — and in the direction opposite to the
+   hypothesis.** MLP beats linear in every folded width that has both:
+   720 mlp 0.864 vs linear 0.683 (n = 3/5), 924 mlp 0.852 vs linear 0.718
+   (n = 1/1), 944 mlp 0.796 vs linear 0.630 (n = 31/1). Linears carry *more*
+   exact mass and score *lower*. *Cheapest discriminator: one fixed data recipe,
+   a linear arm and an MLP arm at the same width, k = 3 seeds each — 6 bakes,
+   no new machinery. Pre-registerable prediction: MLP − linear ≥ +0.10 M3a with
+   the seed spreads above (0.03–0.05 sd) not overlapping the gap. If it holds
+   it is a genuine design rule, and it is in direct tension with the
+   additive-class-is-key rank finding — that tension is the thing worth
+   pricing.*
+3. **Reading a non-spatialized block *at all* — a step, worth ~0.28 M3a on
+   group means (0.803 pool-blind vs 0.520 pool-reading), but NOT a gradient.**
+   The bhdr/v02 pair above shows two bakes with the same invisible-mass
+   fraction 0.57 M3a apart. Read this as "the v1 pools are a coherence
+   liability" (which the 924/944 regimes already zero out by construction), not
+   as "invisible mass is the dial".
+
+#### The design-rule question, answered
+
+**"B-quality with spatial coherence" is not a design rule you can reach by
+steering mass — it is another search wave. But it is a cheap one**, because
+coherence turns out to be a *selectable trajectory property*: the seed spread
+at fixed recipe (0.09–0.11) is the same order as the whole 944-class range
+(0.24), and M3a is already measured by an existing instrument on every board
+bake. The registered E-M campaign already validated selection-by-held-out-proxy
+(sdr25 → CID22, SROCC +0.752 over 35 bakes). **The move is therefore to add
+`m3a_coherence` to the k-seed selection criteria alongside `sdr25`/`best_val`,
+not to build a decomposable-mass regularizer.** A regularizer penalizing
+mass on class-N inputs would be nearly a no-op on the 924/944 regimes anyway,
+where the class-N mass is already only 0.03–0.09 (structural zeros plus the
+never-passed f924-943 tail plus two reference-only slots).
+
+#### (a) The "what is this model attributing through" card
+
+| bake | M3a | exact E | approx A | non-decomp N | width | depth |
+|---|---:|---:|---:|---:|---:|---|
+| `ADD156_safesyn_only_raw_lasso` | 0.954 | 0.317 | 0.683 | 0.000 | 372 | linear |
+| `winner_dial_Ebothg_hfgain_winsor_dial` | 0.923 | 0.328 | 0.672 | 0.000 | 156 | mlp |
+| `coherent_kw125_s42` | 0.920 | 0.626 | 0.374 | 0.000 | 720 | mlp |
+| `H_co3abpg_s2507` | 0.866 | 0.506 | 0.431 | 0.064 | 944 | mlp |
+| `C_ensk2_s1303` | 0.826 | 0.499 | 0.413 | 0.088 | 944 | mlp |
+| `C_em944_s31` (`sota944_`) | 0.793 | 0.488 | 0.426 | 0.085 | 944 | mlp |
+| `C_co3a_s1301` | 0.760 | 0.503 | 0.422 | 0.075 | 944 | mlp |
+| **B** `b_sdr_linear_cid80_inclwinsor_dense_dial` | 0.597 | **0.077** | 0.436 | **0.486** | 372 | linear |
+
+B's profile is the sharpest single statement in the table: **48.6 % of its
+contribution is invisible to the steering map and only 7.7 % rides an exact
+integrand** — the §C.3 block reading (f156-371 = 45.9 %) recovered here as a
+decomposability fact, on a different corpus slice and a different aggregation.
+The two board-best coherent bakes sit at the *opposite* end of the exact axis
+(0.317 / 0.328) — which is the whole falsification in two rows.
+
+#### Limitations
+
+- Contribution mass is a **scalar-score** accounting (`Σ mean|Δ|` under exact
+  mean-ablation) while M3a scores a **spatial ranking**. The registration
+  named this bridge as a thing the test itself probes; the flat primary is
+  evidence against the hypothesis, against the bridge, or both, and this pass
+  cannot separate those two readings.
+- Corpora are regime-native (registered) rather than literally identical
+  bytes; mass fractions are within-bake normalized so this enters at second
+  order, but it is not zero.
+- `coarse_decay` is `unknown` for 14 of 50 bakes (no embedded `zentrain.repro`
+  argv and no `.spec.json` argv) — that annotation is reported, not relied on.
+  Its group means (yes 0.796 / no 0.815 / unknown 0.693) are confounded with
+  era and carry no verdict weight.
+- Group sizes for the depth finding are lopsided (944: 31 mlp vs 1 linear).
+  Driver #2 is a *ranked candidate with a registerable test*, not a result.
+
+#### Context recorded for the same appendix (from the sibling width-discriminator run)
+
+Verified from that run's committed verdicts
+(`/mnt/v/output/zensim/bakes/contrib-disc/disc372_s{31,1301}.full.json`) and
+the board fullevals: **the 944-era DATA recipe collapses breadth at BOTH
+widths.** The 372-width arms trained on the co3a recipe score CSIQ
+**0.6807 / 0.4384** and LIVE **0.6664 / 0.3000** — against B's **0.9342 /
+0.8970** and `winner_dial`'s **0.9584 / 0.9600**. So any "as good as B" recipe
+should start from the **Ebothg / winner_dial data recipe**, not the 944 one.
+Two caveats the sibling flagged and this note inherits: the discriminator is
+**k = 2 seeds**, and its own per-arm spread is large (kadid 0.5459 vs 0.6412,
+CSIQ 0.68 vs 0.44 across just those two seeds) — so it separates *recipes*,
+it does not rank *widths*, and no width claim is made here.
