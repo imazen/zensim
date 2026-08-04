@@ -3093,10 +3093,14 @@ Per-floor pass rates (the shape of the pool):
 **Every class is EMPTY at 8/8 — reported as registered; no floor moves.** The
 frontier is the 7/8 band, and it has exactly one structure:
 
-#### The structural finding — product-balance and breadth did not intersect anywhere in the pre-H pool
+#### The structural finding — product-balance and breadth did not intersect anywhere in the pre-H **944 classes** *(scope corrected 2026-08-04 — see CORRECTIONS below; the original heading said "pre-H pool", which falsely swept in the era-bridge context class)*
 
 **Zero of the 145 pre-H 944-era cells pass F1 ∧ F2 ∧ F7 simultaneously**
-(CID22 ≥ 0.885 ∧ KonJND ≥ 0.43 ∧ CSIQ/LIVE ≥ 0.83). The max CSIQ among cells
+(CID22 ≥ 0.885 ∧ KonJND ≥ 0.43 ∧ CSIQ/LIVE ≥ 0.83). **This is a 944-class
+census.** Pool-wide it is FALSE: exactly one cell in the full matrix holds the
+triple — the era-bridge `winner_dial_Ebothg_hfgain_winsor_dial` (0.894 / 0.431 /
+0.958 / 0.960, present in both stored TSVs) — see CORRECTIONS. Within the 944
+classes, the max CSIQ among cells
 holding F1 ∧ F2 was `GE1_konpair`'s **0.8271** (−0.0029, failing F6 besides);
 the only pre-H cell of any kind holding F2 ∧ F3 ∧ F7 was the distilled
 `C_ensk2_s1303` with kon at a borderline 0.4398 (the additive cells that pass
@@ -3280,8 +3284,10 @@ order, not a composite claim.
 
 The 372/720-era flagships hold breadth effortlessly — `winner_dial_Ebothg`
 csiq/live **0.958/0.960**, `v47_strict_QAT_native` 0.924/0.944, vs the 944
-frontier's 0.76–0.85 — and their CID22/KonJND pairs (0.894/0.431; 0.866/0.444)
-would clear F1/F2. But on the SAME 4,292 CID22 pairs they FAIL the tails floor
+frontier's 0.76–0.85 — and `winner_dial_Ebothg` **holds F1 ∧ F2 ∧ F7 outright**
+(0.894/0.431/0.958‑0.960 — the only cell in the whole matrix that does; 5/8
+overall, with GOLD M3a 0.9225), while `v47_strict_QAT_native` holds F2 ∧ F7 but
+not F1 (0.866). But on the SAME 4,292 CID22 pairs they FAIL the tails floor
 (B9 0.132 / 0.036 vs the 944 frontier's 0.16–0.30) and their fullevals lack
 the HF-NL instrument entirely (UNEVALUABLE = not-passed, as registered; era
 rows are context regardless). The honest era reading: **944 bought the
@@ -3294,7 +3300,7 @@ era numbers stay context, as registered — regime-incomparable.)
 
 | axis pair | measured obstruction |
 |---|---|
-| (cid22 ∧ kon) vs breadth | 0/172 cells hold F1∧F2∧F7; max csiq under F1∧F2 = 0.827 (GE1, ens) |
+| (cid22 ∧ kon) vs breadth | 0/151 **944-class** cells hold F1∧F2∧F7 (0/145 pre-H); max 944-class csiq under F1∧F2 = 0.827 (GE1, ens). Pool-wide: **1/172** — era-bridge `winner_dial_Ebothg` holds the triple at csiq 0.958 (CORRECTIONS below) |
 | kon ∧ breadth ∧ np | 4 cells only: H_s2507(+packed), H_s2501, ensk2_s1303 — all miss F1 |
 | breadth vs cid22 | breadth-passers' best CID22 = 0.8907 (`C_co3a_s1301`) — kon 0.405 is then the miss |
 | the closest single miss | `C_ensk2_s1303`, −0.0015 CID22 |
@@ -3332,3 +3338,51 @@ run in this pass (nothing here needed certification; nothing ships).
   and was never scored. H cells have no `--corruption-head` joint verdict yet.
 - H is k=3 with one kon-collapsed seed — the "family property" claim rests on
   2/3 seeds plus the packed twin; wave-7's own limitations apply verbatim.
+
+#### CORRECTIONS (2026-08-04, board-integrity pass — supervisor-falsified claim, reproduced and root-caused)
+
+**What was wrong.** The "What binds, quantified" table's first row originally
+read: *"0/172 cells hold F1∧F2∧F7; max csiq under F1∧F2 = 0.827 (GE1, ens)"* —
+and the structural-finding heading said the intersection existed *"nowhere in
+the pre-H pool"*. Both statements are FALSE at the stated scope. The stored
+final matrix (`balanced_matrix_2026-08-04_final.tsv`, sha
+`790091ea…`) itself contains one cell holding all three floors:
+`winner_dial_Ebothg_hfgain_winsor_dial` (era-bridge) — cid22 **0.89396** PASS ∧
+konjnd **0.43084** PASS ∧ csiq/live **0.95841/0.95998** PASS — at **5/8**
+overall with **GOLD M3a 0.92253**, failing only nonphoto (0.8946, −0.0054),
+HF-NL (**absent**, not measured — the instrument predates the era-bridge
+fullevals), and B9 (0.1324, −0.018). Independently re-derived 2026-08-04 with
+the committed `freeze_check --profile balanced-2026-08-04` (`5a8adee7`-era
+binary rebuilt at `7bba7553`): identical to every printed digit
+(`~/tmp/hygiene/winner_dial_repro.txt`). Pool-wide the census is **1/172**,
+and the max csiq under F1∧F2 is winner_dial's **0.958**, not GE1's 0.827.
+
+**Root cause (scope-widening during edit, not an instrument or matrix bug).**
+The instrument and both stored TSVs were always right — winner_dial's row says
+5/8 with `fails=nonphoto,hfnl,bandtail` in the final TSV. The census behind the
+claim was computed over the 944 classes only (era-bridge excluded, consistent
+with "era rows are context, never shortlisted"), and the draft results section
+correctly said *"0/145 pre-H cells"* (prior session working file,
+`results_section_draft.md`). In the final editing pass the denominator was
+updated 145 → 172 to reflect the final pool — WITHOUT re-running the census at
+the widened scope, silently converting a true 944-class statement into a false
+pool-wide one. The GE1 "max csiq 0.827" clause carried the same unstated
+944-class filter. Both in-place texts above now carry the corrected scope.
+
+**What the correction does to the narrative (restated honestly).** The
+headline "the binding axis is CLASSIC-IQA BREADTH" is a statement about the
+**944-native classes**, and survives for them: no 944-class cell holds
+(cid22 ∧ kon) with breadth, and the H arm is the first trained family to cross
+it. It is NOT a pool-wide law: the 372-era rank flagship `winner_dial_Ebothg`
+holds cid22 ∧ kon ∧ breadth simultaneously — with GOLD coherence — and its
+misses are entirely different (nonphoto −0.0054; B9 tail −0.018; HF-NL not
+measured, absent-not-failed). The breadth trade is a **944-native phenomenon**,
+not a property of the board. Era rows remain context (regime-incomparable, per
+registration), but "context" never licenses a false pool-wide census — the
+era-bridge paragraph above has been corrected from "would clear F1/F2" to the
+measured fact, and the incumbents' full rows now sit in the INCUMBENTS block
+below so shipped-default comparisons are made against printed numbers, not
+summaries. HF-NL "absent" for era cells is now formally *absent-not-failed*
+(distinct from a measured fail) in `benchmarks/eval_annotations.json`;
+winner_dial's measured record is **5/7-measured** (5/8 under the registered
+absent=not-passed rule — both forms stated per the registry convention).
