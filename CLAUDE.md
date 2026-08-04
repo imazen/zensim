@@ -341,9 +341,11 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   pairs). Read down a column, never across one: band SROCC is range-restricted.
   All values are read from `rank.<corpus>.bands[]`; nothing is recomputed.
   Plus (2026-08-04) **ENSEMBLE rows**: a fulleval JSON stamped `model.kind:"ensemble"`
-  by `scripts/promote_ensemble_fulleval.py` (which relabels a `bake_verdict --ensemble`
-  verdict onto the board and recomputes NOTHING — every stat block is asserted
-  byte-identical to the source verdict, whose path+sha256 land in `source_verdict`)
+  by `scripts/promote_fulleval.py --members` (the generalized promoter — it publishes
+  ANY verdict, single-bake or ensemble, onto the board and recomputes NOTHING — every
+  stat block is asserted byte-identical to the source verdict, whose path+sha256 land
+  in `source_verdict`; `--strip-per-pair` implements the registered board-size rule,
+  `--graft-into` folds a `*_corrjoint` verdict's corruption_head under the plain name)
   renders an `ens×k` marker wherever the bake is named, and its Model-details card
   leads with a warning that the architecture/repro shown is the ANCHOR member only;
   `m3_coherence`/`m3a_coherence` are **null** because the coherence instrument loads

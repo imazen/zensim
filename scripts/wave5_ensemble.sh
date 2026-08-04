@@ -12,7 +12,7 @@
 #
 #   $0 [e1|e2|e3|all]   run the arm(s) through bake_verdict --ensemble
 #   $0 promote          publish the ALREADY-RUN verdicts onto the gauntlet board
-#                       (scripts/promote_ensemble_fulleval.py — relabels + marks
+#                       (scripts/promote_fulleval.py --members — relabels + marks
 #                       them as ensembles + nulls the non-computable M3/M3a; it
 #                       recomputes NOTHING). Membership comes from the SAME frozen
 #                       arrays below, so the board's `ens×k` can never disagree
@@ -43,7 +43,7 @@ run_arm() {   # run_arm <stem> <member...>
 promote_arm() {   # promote_arm <stem> <member...>
     local stem=$1; shift
     local list; list=$(printf '%s\n' "$@" | paste -sd, -)
-    python3 "$REPO_ROOT/scripts/promote_ensemble_fulleval.py" \
+    python3 "$REPO_ROOT/scripts/promote_fulleval.py" \
         --verdict "$VD/$stem.full.json" --name "sota944_ens_${stem#W5_}" \
         --members "$list" ${PROMOTE_ARGS[@]+"${PROMOTE_ARGS[@]}"}
 }

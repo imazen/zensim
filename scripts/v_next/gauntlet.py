@@ -19,7 +19,7 @@ and emits ONE self-contained, offline HTML page with:
     JSON (``--loop-targeting``; counts/medians are READ, never re-derived here).
 
 ENSEMBLE rows (2026-08-04): a fulleval JSON carrying ``model.kind == "ensemble"`` (stamped by
-``scripts/promote_ensemble_fulleval.py``) renders an ``ens×k`` marker everywhere the bake is
+``scripts/promote_fulleval.py --members``) renders an ``ens×k`` marker everywhere the bake is
 named, and its Model-details card leads with a warning that the architecture/repro shown is the
 ANCHOR member. An ensemble is an evaluation FUNCTION, not a shippable artifact — its rank/dial/
 corruption numbers come from the identical verdict invocation as every single-bake row and are
@@ -353,7 +353,7 @@ const pct=v=>v==null||!isFinite(v)?'—':(v*100).toFixed(1)+'%';
 // FUNCTION, not a shippable artifact: there is no single ZNPR, so M3/M3a are
 // not computable (they render as an em-dash = NOT MEASURED, never a low score)
 // and the model-details card describes the ANCHOR member only. Flag set by
-// scripts/promote_ensemble_fulleval.py (model.kind / model.members).
+// scripts/promote_fulleval.py --members (model.kind / model.members).
 const isEns=b=>!!(b.model&&b.model.kind==='ensemble');
 const ensK=b=>(b.model&&b.model.members)||null;
 const ensTag=b=>isEns(b)?' ens×'+ensK(b):'';
