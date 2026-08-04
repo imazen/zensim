@@ -5757,3 +5757,231 @@ differ. The trainer is deterministic in its seed across lanes, so arm B's
 3-seed band is not lane-contaminated, and cross-lane pooling in this campaign
 is now verified rather than assumed. `W9Bx_s3301` is a diagnostic, not a
 registered arm, and is excluded from every arm band and from `--select`.
+
+---
+
+# REGISTERED APPENDIX F — the KADID/TID SIGN INVERSION: is `|SROCC|` on KADID a skill number at all?
+
+### (Registration written and committed BEFORE any signed-SROCC re-derivation, any
+### orientation join against the raw corpus, any per-distortion-type breakdown, and
+### before any claim in this doc was corrected. The §F.1 facts below are either prior
+### measurements already committed to origin/main or determinations read off SOURCE —
+### which makes them *inputs* to this registration, not results, the same status
+### §D.1's decomposability classification and §E.1's spatializability determination
+### carry. §F.2 discloses, in full, the two observations that TRIGGERED this
+### registration, so a reader can discount them as non-blind.)
+
+## F.0 Why this appendix exists
+
+Wave 9 §10.7 recorded, as a flagged anomaly outside its own scope, that reading
+`rank.kadid.srocc_signed` out of the stored fullevals splits **cleanly by era**:
+
+| model | class | KADID signed | CID22 signed | TID signed |
+|---|---|--:|--:|--:|
+| `winner_dial_Ebothg_hfgain_winsor_dial` | 720-eval, 156-input | **−0.9464** | +0.8940 | +0.958 |
+| `b_sdr_linear_cid80_inclwinsor_dense_dial` (shipped B) | 720-eval, 372-input | **−0.8085** | +0.8821 | +0.779 |
+| `Ebothg_scr0_5` | 720-eval | **−0.9390** | +0.879 | +0.955 |
+| `ADD156` | 720-eval | **−0.8082** | +0.863 | +0.824 |
+| `v47_strict_QAT` | 720-eval | **−0.7938** | +0.866 | +0.793 |
+| `H_co3abpg_s2507` | 944-eval | **+0.4233** | +0.8806 | +0.899 |
+| `C_em944_s31` | 944-eval | **+0.5692** | +0.887 | +0.906 |
+
+Every number this campaign has published for KADID — including the width-discriminator
+row now in `docs/DATASET_HISTORY.md` §1, the wave-8 "triples KADID" reading, and every
+"the 944 era regressed KADID" framing — is an **unsigned magnitude**. If the era models
+are anti-correlated and the 944 models are correlated, then "0.946 → 0.423" is not a
+regression from competent to weak; it is a *sign flip*, and the two halves of the
+comparison were never on the same axis. If the eval column itself is flipped, then
+neither half means what was published. Either way the campaign's KADID axis needs a
+determination before it is cited again.
+
+**This appendix does not assume which.** It registers the discriminating measurements
+and the decision rule, and commits to reporting "undetermined" if they do not separate.
+
+## F.1 Prior facts (inputs — already committed, or read off source)
+
+1. **KADID's raw label is quality-oriented despite its name.** `benchmarks/wave9/
+   kadid_orientation_2026-08-04.md` (commit `735d6978`) measured, from
+   `/mnt/v/dataset/kadid10k/dmos.csv`, that mean `dmos` FALLS monotonically with
+   distortion level (4.0785 → 2.0067 across levels 1–5, n=2025/level). KADID's `dmos`
+   column behaves as a MOS. **A correctly-oriented quality model is POSITIVE-signed
+   against `dmos`.**
+2. **The eval target vector is identical across the 720 and 944 ext roots.** Same
+   wave-9 doc: `ext720-canonical-2026-07-22/ext_kadid.parquet` and
+   `ext944-canonical-2026-08-01/ext_kadid.parquet` agree on `human_score` to max abs
+   diff **0.0**, in identical `ref_basename` order. So the era-vs-944 sign split is
+   **not** a difference between the two eval tables' targets.
+3. **The era models and the 944 models are evaluated on DIFFERENT roots.** Read from
+   the stored fullevals: `winner_dial` and `b_sdr_linear` carry `regime: 720`;
+   `H_co3abpg_s2507` carries `regime: 944`. `bake_verdict`'s `slot_720()` maps
+   `kadid → ext_kadid.parquet` for both; the default (`--regime 372`) path instead maps
+   `kadid → kadid_features_372col_2026-05-15.parquet` under a different root. **Three
+   KADID eval tables exist and only two of them have been shown to agree.**
+4. **Two in-repo transforms of KADID `dmos` exist, and they are inverses of each other.**
+   - `scripts/canonical_corpus/build_canonical_parquets.py:288` and
+     `scripts/canonical_corpus/fix_kadid_tid_build_pairs.py:15` both assert
+     `human_score = (dmos − 1)/4` for the canonical/372 lineage.
+   - `scripts/canonical_corpus/build_fr_corpus_pairs.py:113` emits
+     `human_score = (5 − dmos)/4` for the "v2 trainability A/B" lineage — under a
+     module docstring (line 6) that states the file's convention is
+     *"human_score is QUALITY-oriented in [0,1] (higher = better)"*, and a function
+     docstring (line 102) that calls its own output *"quality-oriented"*.
+   Given fact 1, exactly one of these is quality-oriented. The docstring claim and the
+   emitted arithmetic in `build_fr_corpus_pairs.build_kadid()` cannot both be true.
+5. **TID's transform in the same file is `mos/9`** (`build_fr_corpus_pairs.py`
+   `build_tid()`), and TID's `mos` is natively quality-oriented — so the same file does
+   NOT apply an inversion to TID. CSIQ (`1 − DMOS`) and LIVE (`1 − dmos_new/100`) are
+   inversions of genuinely distortion-oriented natives.
+6. **The 944 models trained on `ext_kadid.parquet`.** `H_co3abpg_s2507`'s embedded
+   `zentrain.repro.argv` contains
+   `--group kadid:/home/lilith/sota944/data/ext944/ext_kadid.parquet:1.0:…`.
+   Shipped **B**'s recorded repro lists `kadid` among `train_corpora` (its BVLS kon
+   head). `winner_dial`'s fulleval carries `repro: null` — it predates the repro
+   mandate, so its training table must be reconstructed from methodology docs and
+   trainer invocations in history, not read off the bake.
+7. **KADID/TID are already flagged `train_eq_val: true`** by `bake_verdict`
+   (`train_eq_val()`, `bake_verdict.rs:1146`) and are excluded from the balanced
+   composite. That flag is about *memorization*, and is orthogonal to *orientation*:
+   a memorized inverted target is still inverted.
+
+## F.2 DISCLOSURE — the two non-blind observations that triggered this registration
+
+Full disclosure, so nothing here reads as blind when it was not:
+
+- While reading the schema of `ext720-canonical-2026-07-22/ext_kadid.parquet` (to learn
+  its join keys), the first five `human_score` values were printed alongside the first
+  two rows of `dmos.csv`. For those two rows, `human_score` equals `(5 − dmos)/4`
+  (0.1075 = (5−4.57)/4; 0.1675 = (5−4.33)/4) and does **not** equal `(dmos−1)/4`.
+- Fact F.1.4's source contradiction was found by grepping for `dmos` in
+  `scripts/canonical_corpus/`, i.e. deliberately looking for a transform mismatch.
+
+So the leading hypothesis below (H2) was formed from a 2-row look and a source read.
+**That is why F.3 registers a full-table test with a pre-committed pass criterion
+rather than accepting the 2-row coincidence, and why F.4's decision rule requires the
+per-distortion-type and second-root checks to agree before H2 can be declared.**
+
+## F.3 Hypotheses (pre-registered; not mutually exclusive)
+
+- **H1 — Target-defect inheritance.** The era models were *trained* against a KADID
+  target whose orientation (or definition) differs from the one they are *evaluated*
+  against today, so the anti-correlation is inherited from the training column.
+  §3.1/§3.18 of `docs/DATASET_HISTORY.md` document exactly this defect class for
+  kadid/tid (`ssim2_gpu` ref-vs-ref misjoin; `iwssim` = a copy of `human_score`).
+- **H2 — Eval-table orientation.** One or more of the three KADID eval tables carries a
+  `human_score` that is distortion-oriented, so its signed SROCC is flipped relative to
+  true quality for *every* model scored on it, regardless of era.
+- **H3 — Genuine learned inversion.** The era models really did learn a KADID-inverted
+  function (e.g. from an ssim2-shaped target that anti-correlates with KADID DMOS on its
+  ~95% non-compression distortions), and the tables are all correctly oriented.
+- **H4 — Regime/feature mismatch (added by me; not in the brief).** A 156- or 372-input
+  bake reading `f0..fN` out of a 720-wide table is only meaningful if that table's
+  leading block is the same feature space the bake was fit on. If the ext roots use the
+  folded v1 layout (`f0..f155` folded basic, `f156..f371` structural zeros) while the
+  372 root uses the un-folded v1-372 space, an era bake scored under `--regime 720` is
+  reading a different space than the one it was trained on. This is a live hazard class
+  in this campaign already (§E.9, `n_inputs()` vs `caller_input_width()`).
+
+## F.4 The registered measurements + decision rules (frozen BEFORE computing)
+
+Every statistic below comes from `zenstats` via the `panel` binary or
+`scripts/lib/zen_stats.py`. No stat is hand-rolled.
+
+**T1 — Orientation of every KADID eval table against the raw corpus (decides H2).**
+For each of `kadid_features_372col_2026-05-15.parquet` (372 root),
+`ext720…/ext_kadid.parquet`, `ext924…/ext_kadid.parquet`, `ext944…/ext_kadid.parquet`,
+and `canonical-2026-05-21/train/kadid.parquet`: verify row-order alignment to
+`dmos.csv` by the pre-existing `fix_kadid_tid_build_pairs.py` criterion (`ref_basename`
+sequence must match `dmos.csv`'s `ref_img` sequence exactly, 10,125 rows), then report
+`max|human_score − (dmos−1)/4|` and `max|human_score − (5−dmos)/4|`.
+> **Rule.** A table is QUALITY-oriented iff the first residual is < 1e-6 and the second
+> is > 0.1; DISTORTION-oriented iff the reverse; **UNDETERMINED** otherwise (and then
+> the row-order premise is reported as failed and H2 is not decided from it).
+> **H2 is SUPPORTED iff at least one of the five tables is distortion-oriented AND at
+> least one is quality-oriented** — i.e. the roots genuinely disagree.
+
+**T2 — Sign re-derivation on the affected models (quantifies the blast radius).**
+For every model named in F.0 plus every board cell, recompute signed SROCC against
+BOTH orientations of the SAME rows. Since `SROCC(x, −y) = −SROCC(x, y)` exactly, the
+corrected value is the negation of the stored one for any table T1 finds inverted; this
+is an identity, not a re-measurement, and will be stated as such. The **independent**
+check is T3.
+
+**T3 — Independent re-score on a table of known orientation (decides H1 vs H3).**
+Re-run `bake_verdict` for `winner_dial`, `b_sdr_linear` and one 944 model on the
+**372 root** (`--regime 372`, `kadid_features_372col_2026-05-15.parquet`) — a different
+table, different root, whose orientation T1 establishes independently — and compare the
+sign of KADID `srocc_signed` to the 720/944 result.
+> **Rule.** If the sign of a model's KADID SROCC vs *true quality* is the SAME on both
+> roots, the model's KADID behaviour is a property of the model (H1 or H3 territory) and
+> H2 explains only the *reporting*, not the behaviour. If the signs vs true quality
+> DIFFER across roots for the same model, H4 (feature-space mismatch) is implicated and
+> is reported as such.
+> **Confound registered in advance:** the 372 root is a different feature width, so a
+> 944-input bake cannot be scored on it. For 944 models this test is limited to
+> confirming the orientation of the target column, not the model's cross-root sign.
+
+**T4 — Per-distortion-type signed SROCC (decides H3 on its own terms).**
+Using `dmos.csv`'s `dist_img` field to recover KADID's 25 distortion types, compute
+per-type signed SROCC vs **true quality** for `winner_dial` and one 944 model.
+> **Rule.** H3 is SUPPORTED iff, against a target T1 has established as
+> quality-oriented, a model's per-type signs are **mixed** (some types strongly
+> negative, some positive) — i.e. a real content-dependent failure. A uniform sign
+> across ≥23 of 25 types is the signature of a global orientation issue, not of
+> selective transfer failure, and counts AGAINST H3.
+
+**T5 — TID, run identically.** T1 and T4 repeated for TID (`mos_with_names.txt`,
+`human_score = mos/9`), to answer the brief's "does TID have the same problem".
+
+**T6 — H4 screen.** Compare, row-for-row on matched `ref_basename` order, the `f0..f371`
+block of the 372 root against the `f0..f371` block of the 720 and 944 ext roots; and
+count how many of `f156..f371` are structurally zero in each.
+> **Rule.** H4 is SUPPORTED iff the leading blocks differ materially (max abs diff on a
+> non-degenerate feature > 1e-3 after matching row order) — which would mean an era bake
+> scored under `--regime 720` is reading a different space than it was fit on.
+
+## F.5 Registered outcomes (frozen)
+
+- **(a) H2 confirmed and sufficient** — the ext-lineage table is inverted, T3 shows each
+  model's sign vs true quality is root-independent, and T4 shows a uniform per-type sign.
+  Then: every ext-lineage KADID number in this campaign is sign-flipped; the era models
+  are *competent* on KADID and the 944 models are *inverted*; the published "era → 944
+  KADID regression" is real but far worse than stated, and its direction was misread.
+- **(b) H2 confirmed but H1/H3 also live** — the table is inverted AND a model's
+  corrected sign still disagrees across roots or shows mixed per-type signs. Then both
+  the reporting and the model behaviour need separate corrections.
+- **(c) H3 only** — all tables are correctly oriented and the era models genuinely rank
+  KADID backwards. Then the campaign's magnitudes were never skill numbers and the era
+  models have a real, previously unnoticed defect.
+- **(d) H4** — the leading feature block differs across roots, so cross-root era numbers
+  were never comparable.
+- **(e) UNDETERMINED** — the tests do not separate. Then this appendix says so, names
+  the two surviving candidates, and specifies the experiment that would separate them.
+  **No story will be forced.**
+
+## F.6 What gets corrected regardless of outcome (registered deliverables)
+
+1. Every place in this doc, `docs/DATASET_HISTORY.md`, `docs/TOP_MODELS_COOKBOOK.md` and
+   the wave docs that cites a KADID (or TID) magnitude as skill gets the signed value
+   in place, with a note.
+2. `eval_annotations.json` entries so the old numbers cannot be silently re-cited.
+3. A **display fix**: signed direction must be visible wherever KADID/TID appear —
+   board column, `bake_verdict` markdown, `--tsv`, and `freeze_check` — alongside the
+   existing `train_eq_val` guard flag. KADID/TID remain unscored in the balanced
+   composite (they are guards); the requirement is that an anti-correlated model must
+   never *render* as a high scorer.
+4. If the cause is a data defect: name the canonical table, state what a corrected
+   comparison looks like, and state plainly whether any model needs retraining.
+
+## F.7 Confounds + limitations (registered before the run)
+
+- `winner_dial` has `repro: null`; its training table is reconstructed from docs and
+  history, so any H1 claim about it is weaker than for models with embedded repro.
+- KADID/TID are `train_eq_val` corpora for most of these models. A corrected-sign KADID
+  number is still not a generalization number, and this appendix will not promote one to
+  a ship gate.
+- T2 is an identity (`SROCC(x,−y) = −SROCC(x,y)`), not an independent measurement. It is
+  reported as arithmetic.
+- The per-type breakdown (T4) uses ~405 pairs/type; per-type SROCC at that n is noisy in
+  magnitude even where the sign is unambiguous. Only signs are used for the T4 rule.
+- Correcting a sign does not re-rank the campaign's *balanced* selection, which never
+  scored KADID. What it changes is every narrative sentence that cited KADID.
