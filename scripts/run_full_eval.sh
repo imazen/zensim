@@ -8,14 +8,16 @@
 #   scripts/run_full_eval.sh <bake.bin> <name> [regime=720]
 #
 # Chains the canonical Rust owners (NO Python for any statistic):
-#   1. bake_verdict --full-json  → rank (per-corpus Mohammadi) + dial
-#      (mono/tied/reach/dynamic_range) + corruption gate + a sampled multi-metric
-#      per_pair block (pred vs mos/jnd for the rank corpora; pred vs
-#      ssim2/butter/cvvdp from the KADIS-720 metric parquet).
+#   1. bake_verdict --fulleval  → the schema-complete fulleval JSON: rank
+#      (per-corpus Mohammadi) + dial (mono/tied/reach/dynamic_range) +
+#      corruption gate + a sampled multi-metric per_pair block (pred vs
+#      mos/jnd for the rank corpora; pred vs ssim2/butter/cvvdp from the
+#      KADIS metric parquet), with all five M3 slots emitted as nulls.
 #   2. diffmap_block_coherence --bake  → G-STEER coherence: M3 (legacy signal
 #      fold) AND M3a (the DEPLOYABLE attribution-density map, task #67 —
 #      exact integrands + SAT), averaged over the fixture sweep.
-#   3. jq injects the averages as top-level `m3_coherence` + `m3a_coherence`.
+#   3. jq injects the averages INTO the pre-nulled `m3_*`/`m3a_*` keys —
+#      this script's remaining role is the M3/M3a measurement, not assembly.
 #
 # Output: /mnt/v/output/zensim/reports/fulleval/<name>.fulleval.json
 #         (+ <name>.verdict.md — the human bake_verdict report, for reference)
@@ -81,26 +83,22 @@ if [[ "$REGIME" == "924" ]]; then
               --perpair-metrics /mnt/v/zen/zensim-training/kadis-924-2026-07-27/kadis700k_924.parquet
               --corpora cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25)
 fi
-# regime "944" = the SOTA-944 campaign invocation (folded+append+append2;
-# benchmarks/sota944_campaign_2026-08-03.md). Same slot map (--regime 720);
-# roots swap to the ext944 canonical set — which ALSO carries the
-# imazen26/nonphoto TEST-view slices (build_eval_slices_944.py), so those
-# corpora are back on the list (bake_verdict's slot_720_file resolves
-# ext_imazen26/ext_nonphoto under this root).
+# regime "944" = bake_verdict's own `--regime 944` preset (the SOTA-944
+# campaign invocation: ext944 roots, 944 grids, kadis-944 perpair, frozen
+# 12-corpus list — benchmarks/sota944_campaign_2026-08-03.md §0). The paths
+# and corpus list live IN the binary now (test-pinned), so this script can
+# no longer drift from them — the wrapper-drift class that produced the
+# published wrong EM4 HF-NL number (campaign doc, Corrections section).
 if [[ "$REGIME" == "944" ]]; then
-    BV_REGIME=720
-    BV_EXTRA=(--features-root /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01
-              --dial-grid /mnt/v/output/zensim/v2-eval-944-2026-08-01/dial_grid_944col_2026-08-01.parquet
-              --corruption-grid /mnt/v/output/zensim/v2-eval-944-2026-08-01/corruption_grid_944col_2026-08-01.parquet
-              --perpair-metrics /mnt/v/zen/zensim-training/kadis-944-2026-08-01/kadis700k_944.parquet
-              --corpora cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25,imazen26,nonphoto,hfnlproxy)
+    BV_REGIME=944
+    BV_EXTRA=()
 fi
 # Stash the previous JSON so ZENSIM_M3_REUSE=1 can carry its M3 fields after
 # bake_verdict overwrites the file (bake_verdict always emits m3=null).
 [[ "${ZENSIM_M3_REUSE:-0}" == "1" && -f "$JSON" ]] && cp "$JSON" "$JSON.pre"
 "${HEAVY[@]}" "$BV" --bake "$BAKE" --name "$NAME" --regime "$BV_REGIME" \
     "${BV_EXTRA[@]}" \
-    --full-json "$JSON" --output "$MD" >&2
+    --fulleval "$JSON" --output "$MD" >&2
 
 # ── M3 diffmap-coherence: content × size × quality sweep ──────────────────
 # ZENSIM_M3_REUSE=1: carry m3_coherence/m3_n/m3_dropped_mass_pct +

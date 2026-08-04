@@ -612,6 +612,14 @@ struct Args {
     /// (mono/tied/reach/dynamic_range) + corruption + a sampled multi-metric
     /// `per_pair` block. `m3_coherence` is left null for the wrapper to inject.
     full_json: Option<PathBuf>,
+    /// `--fulleval <path>`: emit the COMPLETE fulleval-schema JSON directly —
+    /// the `--full-json` content PLUS every M3 field the wrapper used to add
+    /// (`m3_coherence`/`m3_n`/`m3_dropped_mass_pct`/`m3a_coherence`/`m3a_n`)
+    /// as explicit nulls, so the emitted file IS a schema-complete
+    /// `*.fulleval.json` and `run_full_eval.sh`'s jq step only ever INJECTS
+    /// measured values into existing keys. This binary stays free of image
+    /// I/O — the M3/M3a measurement remains `diffmap_block_coherence`'s job.
+    fulleval: Option<PathBuf>,
     /// Human-readable model name embedded in `--full-json` (else the bake stem).
     name: Option<String>,
     /// Multi-metric per-pair source for `--full-json` (default [`DEFAULT_PERPAIR_METRICS`]).
@@ -669,6 +677,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut html: Option<PathBuf> = None;
     let mut json: Option<PathBuf> = None;
     let mut full_json: Option<PathBuf> = None;
+    let mut fulleval: Option<PathBuf> = None;
     let mut name: Option<String> = None;
     let mut perpair_metrics: PathBuf = PathBuf::from(DEFAULT_PERPAIR_METRICS);
     let mut perpair_cap: usize = 5000;
@@ -754,6 +763,10 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--full-json" => {
                 let v = args.next().ok_or("--full-json requires <path>")?;
                 full_json = Some(PathBuf::from(v));
+            }
+            "--fulleval" => {
+                let v = args.next().ok_or("--fulleval requires <path>")?;
+                fulleval = Some(PathBuf::from(v));
             }
             "--name" => {
                 let v = args.next().ok_or("--name requires <string>")?;
@@ -894,6 +907,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         corruption_grid,
         corruption_head,
         full_json,
+        fulleval,
         name,
         perpair_metrics,
         perpair_cap,
@@ -2773,17 +2787,24 @@ Run the dedicated q-sweep harness for those._\n",
     // mono/tied/reach/dynamic_range, the corruption gate, and a sampled
     // multi-metric `per_pair` block for the scatter panels. `m3_coherence` is
     // left null — the wrapper computes it (diffmap_block_coherence) and injects
-    // it, so this binary stays free of image I/O.
-    if let Some(json_path) = &args.full_json {
+    // it, so this binary stays free of image I/O. `--fulleval` emits the same
+    // content with ALL five M3 slots pre-nulled (schema-complete fulleval file).
+    if args.full_json.is_some() || args.fulleval.is_some() {
         use serde_json::{Map, Value, json};
         // "model": the bake's own architecture + in/out modifiers, read from the
         // loaded ZNPR (zenpredict is the single parser — no byte-poking anywhere
         // else). Structured twin of `zenpredict inspect` for the dashboard's
         // per-model details card. Head/spline extraction is a cheap re-read.
         let model_block = {
-            // `model` is member 0 (`Ensemble::primary`). In ensemble mode this
-            // block therefore describes the ANCHOR member's architecture, not a
-            // fused model — an ensemble has no single ZNPR to introspect.
+            // `model` is member 0 (`Ensemble::primary`). In ensemble mode the
+            // architecture fields therefore describe the ANCHOR member — an
+            // ensemble has no single ZNPR to introspect — and the identity
+            // fields below (`kind`/`members`/`member_names`/`anchor`) mark it
+            // as an ensemble AT THE SOURCE, so the dashboard's Model-details
+            // card cannot misattribute the anchor's architecture to the whole.
+            // Schema matches scripts/promote_ensemble_fulleval.py + the
+            // gauntlet's readers (`model.kind === 'ensemble'`, `model.members`,
+            // `model.member_names`).
             let alpha = extract_per_sample_alpha_head(model).is_some();
             let hybrid = extract_hybrid_head(model).is_some();
             let minmax = extract_minmax_head(model).is_some();
@@ -2820,7 +2841,7 @@ Run the dedicated q-sweep harness for those._\n",
                 }
                 None => Vec::new(),
             };
-            json!({
+            let mut mb = json!({
                 "n_inputs": n_inputs,
                 "n_outputs": model.n_outputs(),
                 "n_layers": model.n_layers(),
@@ -2841,7 +2862,27 @@ Run the dedicated q-sweep harness for those._\n",
                 "n_output_specs": model.output_specs().len(),
                 "n_discrete_sets": model.discrete_sets().len(),
                 "metadata_keys": model.metadata().iter().map(|e| e.key.to_string()).collect::<Vec<_>>(),
-            })
+            });
+            let o = mb.as_object_mut().expect("model block is an object");
+            if args.ensemble.is_empty() {
+                o.insert("kind".into(), json!("single"));
+            } else {
+                let stems: Vec<String> = args
+                    .ensemble
+                    .iter()
+                    .map(|p| {
+                        p.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("member")
+                            .to_string()
+                    })
+                    .collect();
+                o.insert("kind".into(), json!("ensemble"));
+                o.insert("members".into(), json!(args.ensemble.len()));
+                o.insert("member_names".into(), json!(stems));
+                o.insert("anchor".into(), json!(basename(&args.bake)));
+            }
+            mb
         };
         // Even-stride down to `cap` indices across [0,len) — keeps the scatter
         // spread across the corpus rather than truncating to a prefix.
@@ -3083,19 +3124,48 @@ Run the dedicated q-sweep harness for those._\n",
             "corruption_head": corruption_head,
             "per_pair": per_pair,
         });
-        if let Some(parent) = json_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match serde_json::to_string_pretty(&full) {
-            Ok(s) => {
-                if let Err(e) = std::fs::write(json_path, s) {
-                    eprintln!("bake_verdict: failed to write {}: {e}", json_path.display());
-                    return ExitCode::from(1);
-                }
-                eprintln!("wrote full-eval json to {}", json_path.display());
+        let write_json = |path: &Path, value: &Value, label: &str| -> bool {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
-            Err(e) => {
-                eprintln!("bake_verdict: full-json serialize failed: {e}");
+            match serde_json::to_string_pretty(value) {
+                Ok(s) => {
+                    if let Err(e) = std::fs::write(path, s) {
+                        eprintln!("bake_verdict: failed to write {}: {e}", path.display());
+                        return false;
+                    }
+                    eprintln!("wrote {label} to {}", path.display());
+                    true
+                }
+                Err(e) => {
+                    eprintln!("bake_verdict: {label} serialize failed: {e}");
+                    false
+                }
+            }
+        };
+        if let Some(json_path) = &args.full_json
+            && !write_json(json_path, &full, "full-eval json")
+        {
+            return ExitCode::from(1);
+        }
+        if let Some(fe_path) = &args.fulleval {
+            // Schema-complete fulleval: the same content with every M3 slot
+            // present as an explicit null. The M3/M3a values are measured by
+            // `diffmap_block_coherence` (image I/O — not this binary's job);
+            // run_full_eval.sh injects them INTO these keys, so a fulleval
+            // file's key set no longer depends on which wrapper produced it.
+            let mut fe = full.clone();
+            let o = fe.as_object_mut().expect("fulleval root is an object");
+            for key in [
+                "m3_coherence",
+                "m3_n",
+                "m3_dropped_mass_pct",
+                "m3a_coherence",
+                "m3a_n",
+            ] {
+                o.entry(key).or_insert(Value::Null);
+            }
+            if !write_json(fe_path, &fe, "fulleval json") {
                 return ExitCode::from(1);
             }
         }
