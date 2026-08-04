@@ -39,6 +39,19 @@ rescores. What it adds per mode:
   plain board name without losing the richer full-eval content (measured M3a, kadis
   per-pair) the plain file already carries.
 
+  Surgical modes added by the board-integrity pass (2026-08-04) — all share the same
+  everything-else-byte-identical gate:
+  * `--graft-into <board> --graft-rank <corpus>`: graft `rank.<corpus>` from a same-bake
+    verdict into a board file that lacks it (the era-bridge hfnlproxy fill); provenance in
+    `rank_graft_sources.<corpus>`.
+  * `--mark-dominated <board> --dominated-by A,B`: write `dominated_by` + `dominance`
+    provenance (strict same-class Pareto trim; empty list clears). The board renders
+    dominated cells dimmed + default-off; files are NEVER deleted.
+  * `--set-block-profile <board>`: run `bake_block_profile --json` on the fulleval's own
+    bake (sha-gated against `bake_sha256`) and store the static feature-block usage
+    fingerprint as `block_profile` (f156-371 were ZEROED by the folded regimes — slots
+    preserved per the append-only discipline, not removed).
+
 Everything that is a NUMBER is carried through byte-identically: `rank`, `dial`,
 `corruption`, `corruption_head`, `gates`, `composite`, `per_pair`, `n_inputs`, `regime`
 are re-serialized from the parsed source and asserted equal to it before writing (the
@@ -177,6 +190,112 @@ def promote(verdict: Path, name: str, members: list[str] | None, out_dir: Path,
     return out
 
 
+def _load_board(board: Path):
+    b = board.read_bytes()
+    return json.loads(b)
+
+
+def _write_board_gated(board: Path, before: dict, after: dict, allowed_keys: set[str],
+                       dry_run: bool, what: str) -> bool:
+    """Integrity gate shared by all surgical modes: every key other than
+    `allowed_keys` must be byte-identical between before/after."""
+    for k in set(before) | set(after):
+        if k in allowed_keys:
+            continue
+        if _jc(before.get(k)) != _jc(after.get(k)):
+            raise SystemExit(f"{what}: block `{k}` changed — refusing to write")
+    if dry_run:
+        print(f"[dry-run] would {what} in {board}")
+        return True
+    board.write_text(json.dumps(after))
+    print(f"{what}: wrote {board}")
+    return True
+
+
+def graft_rank_corpus(board: Path, verdict: Path, corpus: str, dry_run: bool = False) -> bool:
+    """Copy `rank.<corpus>` from a same-bake verdict into a board fulleval that
+    lacks it (the era-bridge hfnlproxy fill path, board-integrity pass
+    2026-08-04). Sha-gated; every other key byte-identical; provenance in
+    `rank_graft_sources.<corpus>`."""
+    bdoc = _load_board(board)
+    v_bytes = verdict.read_bytes()
+    v = json.loads(v_bytes)
+    blk = (v.get("rank") or {}).get(corpus)
+    if not isinstance(blk, dict):
+        raise SystemExit(f"graft-rank: {verdict} carries no rank.{corpus} block")
+    if bdoc.get("bake_sha256") != v.get("bake_sha256"):
+        raise SystemExit(f"graft-rank: bake_sha256 mismatch — {board.name} is not the same "
+                         f"bake as {verdict.name}; refusing")
+    if isinstance((bdoc.get("rank") or {}).get(corpus), dict):
+        print(f"graft-rank: {board.name} already has rank.{corpus} — unchanged")
+        return False
+    doc = copy.deepcopy(bdoc)
+    doc.setdefault("rank", {})[corpus] = blk
+    srcs = dict(doc.get("rank_graft_sources") or {})
+    srcs[corpus] = {"path": str(verdict), "sha256": hashlib.sha256(v_bytes).hexdigest(),
+                    "name": v.get("name")}
+    doc["rank_graft_sources"] = srcs
+    # rank changed only by ADDING the corpus key — assert the rest of rank.
+    for k in bdoc.get("rank") or {}:
+        if _jc((bdoc["rank"] or {}).get(k)) != _jc(doc["rank"].get(k)):
+            raise SystemExit(f"graft-rank: rank.{k} changed — refusing to write")
+    return _write_board_gated(board, bdoc, doc, {"rank", "rank_graft_sources"},
+                              dry_run, f"graft rank.{corpus} ({v.get('name')})")
+
+
+def mark_dominated(board: Path, dominated_by: list[str], rule: str,
+                   dry_run: bool = False) -> bool:
+    """Write `dominated_by` (+ `dominance` provenance) into a board fulleval —
+    the Pareto-trim mechanism (board-integrity pass 2026-08-04). NEVER deletes
+    or alters any statistic; the board renders dominated cells dimmed +
+    default-off. Empty list clears the mark."""
+    bdoc = _load_board(board)
+    doc = copy.deepcopy(bdoc)
+    if dominated_by:
+        doc["dominated_by"] = sorted(dominated_by)
+        doc["dominance"] = {"rule": rule, "date": "2026-08-04"}
+    else:
+        doc.pop("dominated_by", None)
+        doc.pop("dominance", None)
+    if _jc(bdoc.get("dominated_by")) == _jc(doc.get("dominated_by")) and \
+       _jc(bdoc.get("dominance")) == _jc(doc.get("dominance")):
+        print(f"mark-dominated: {board.name} unchanged")
+        return False
+    return _write_board_gated(board, bdoc, doc, {"dominated_by", "dominance"},
+                              dry_run, f"mark dominated_by={sorted(dominated_by)}")
+
+
+def set_block_profile(board: Path, bbp_bin: str, dry_run: bool = False) -> bool:
+    """Compute the static feature-block usage fingerprint from the fulleval's
+    own bake bytes (`bake_block_profile --json`, sha-gated against
+    `bake_sha256`) and store it as `block_profile`. Missing bake file ⇒
+    reported and skipped (block_profile stays absent — never fabricated)."""
+    import subprocess
+    bdoc = _load_board(board)
+    bake = bdoc.get("bake")
+    if not bake or not Path(bake).exists():
+        print(f"block-profile: {board.name}: bake missing on disk ({bake}) — skipped")
+        return False
+    want_sha = bdoc.get("bake_sha256")
+    got_sha = hashlib.sha256(Path(bake).read_bytes()).hexdigest()
+    if want_sha and got_sha != want_sha:
+        raise SystemExit(f"block-profile: {board.name}: bake sha mismatch on disk "
+                         f"({got_sha[:12]} != {want_sha[:12]}) — refusing")
+    r = subprocess.run([bbp_bin, "--bake", bake, "--json"], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"block-profile: {board.name}: {bbp_bin} rc={r.returncode}: "
+              f"{r.stderr.strip()} — skipped")
+        return False
+    prof = json.loads(r.stdout)
+    doc = copy.deepcopy(bdoc)
+    doc["block_profile"] = prof
+    if _jc(bdoc.get("block_profile")) == _jc(prof):
+        print(f"block-profile: {board.name} unchanged")
+        return False
+    return _write_board_gated(board, bdoc, doc, {"block_profile"}, dry_run,
+                              "set block_profile")
+
+
 def graft_corruption_head(board: Path, verdict: Path, dry_run: bool = False) -> bool:
     """Copy `corruption_head` from a corrjoint verdict into an existing board file
     (same bake only). Returns True when the file was (or would be) updated."""
@@ -217,7 +336,7 @@ def graft_corruption_head(board: Path, verdict: Path, dry_run: bool = False) -> 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--verdict", required=True, type=Path,
+    ap.add_argument("--verdict", default=None, type=Path,
                     help="the bake_verdict --full-json output to promote (or graft from)")
     ap.add_argument("--name", default=None, help="board name (fulleval JSON `name`)")
     ap.add_argument("--members", default=None,
@@ -230,19 +349,58 @@ def main(argv=None) -> int:
                     help="existing fulleval (same bake) whose measured M3/M3a fill this verdict's nulls")
     ap.add_argument("--graft-into", default=None, type=Path,
                     help="GRAFT mode: existing board fulleval to receive --verdict's corruption_head")
+    ap.add_argument("--graft-rank", default=None, metavar="CORPUS",
+                    help="with --graft-into: graft rank.<CORPUS> from --verdict instead of "
+                         "corruption_head (era-bridge hfnlproxy fill; sha-gated)")
+    ap.add_argument("--mark-dominated", default=None, type=Path, metavar="BOARD_JSON",
+                    help="DOMINANCE mode: board fulleval to receive dominated_by (see --dominated-by)")
+    ap.add_argument("--dominated-by", default="",
+                    help="comma list of same-class dominator names (empty = clear the mark)")
+    ap.add_argument("--dominance-rule", default="strict-pareto-2026-08-04",
+                    help="rule id recorded in the `dominance` provenance block")
+    ap.add_argument("--set-block-profile", default=None, type=Path, metavar="BOARD_JSON",
+                    help="BLOCK-PROFILE mode: compute the static feature-block fingerprint from "
+                         "the fulleval's bake bytes (bake_block_profile --json, sha-gated) and "
+                         "store it as `block_profile`")
+    ap.add_argument("--bbp-bin", default=None,
+                    help="bake_block_profile binary (default: $BBP_BIN or "
+                         "target/release/bake_block_profile next to this repo)")
     ap.add_argument("--out-dir", default=DEFAULT_OUT, type=Path)
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
 
-    if not a.verdict.exists():
+    if a.mark_dominated is not None:
+        if a.verdict or a.name or a.members or a.members_file:
+            ap.error("--mark-dominated takes only --dominated-by/--dominance-rule/--dry-run")
+        if not a.mark_dominated.exists():
+            raise SystemExit(f"mark-dominated: board file not found: {a.mark_dominated}")
+        dom = [x for x in a.dominated_by.split(",") if x]
+        mark_dominated(a.mark_dominated, dom, a.dominance_rule, a.dry_run)
+        return 0
+
+    if a.set_block_profile is not None:
+        if a.verdict or a.name or a.members or a.members_file:
+            ap.error("--set-block-profile takes only --bbp-bin/--dry-run")
+        if not a.set_block_profile.exists():
+            raise SystemExit(f"block-profile: board file not found: {a.set_block_profile}")
+        import os
+        bbp = a.bbp_bin or os.environ.get("BBP_BIN") or str(
+            Path(__file__).resolve().parent.parent / "target/release/bake_block_profile")
+        set_block_profile(a.set_block_profile, bbp, a.dry_run)
+        return 0
+
+    if a.verdict is None or not a.verdict.exists():
         raise SystemExit(f"promote: verdict not found: {a.verdict}")
 
     if a.graft_into is not None:
         if a.name or a.members or a.members_file or a.strip_per_pair or a.carry_coherence_from:
-            ap.error("--graft-into takes only --verdict (and --dry-run)")
+            ap.error("--graft-into takes only --verdict/--graft-rank (and --dry-run)")
         if not a.graft_into.exists():
             raise SystemExit(f"graft: board file not found: {a.graft_into}")
-        graft_corruption_head(a.graft_into, a.verdict, a.dry_run)
+        if a.graft_rank:
+            graft_rank_corpus(a.graft_into, a.verdict, a.graft_rank, a.dry_run)
+        else:
+            graft_corruption_head(a.graft_into, a.verdict, a.dry_run)
         return 0
 
     if not a.name:
