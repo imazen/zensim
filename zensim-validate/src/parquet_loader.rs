@@ -33,6 +33,58 @@ use arrow::record_batch::RecordBatch;
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
+/// Rows per transpose block (see [`load_parquet`]). 1024 × 944 columns is a
+/// ~7.7 MB f64 staging buffer — small enough to sit in L3 next to a dozen
+/// concurrent loaders, large enough that the per-block column downcast is
+/// amortized over 1024 forward-walked values.
+const TRANSPOSE_BLOCK_ROWS: usize = 1024;
+
+/// Append `block_len` values of `col` starting at `start`, widened to f64,
+/// to `out`. Accepts the dtypes zensim feature parquets actually carry:
+/// Float64/Float32 (the common case) plus the integer widths some
+/// extractors emit for count-style features (e.g. KonJND's f12).
+fn col_block_to_f64(
+    path: &Path,
+    col: &dyn Array,
+    start: usize,
+    block_len: usize,
+    out: &mut Vec<f64>,
+) -> Result<(), String> {
+    let end = start + block_len;
+    match col.data_type() {
+        DataType::Float64 => {
+            let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+            out.extend((start..end).map(|i| a.value(i)));
+        }
+        DataType::Float32 => {
+            let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+            out.extend((start..end).map(|i| a.value(i) as f64));
+        }
+        DataType::Int64 => {
+            let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+            out.extend((start..end).map(|i| a.value(i) as f64));
+        }
+        DataType::Int32 => {
+            let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+            out.extend((start..end).map(|i| a.value(i) as f64));
+        }
+        DataType::UInt64 => {
+            let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+            out.extend((start..end).map(|i| a.value(i) as f64));
+        }
+        DataType::UInt32 => {
+            let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+            out.extend((start..end).map(|i| a.value(i) as f64));
+        }
+        other => {
+            return Err(format!(
+                "{path:?}: feature column has unsupported dtype {other:?} (need Float32/Float64/Int32/Int64/UInt32/UInt64)",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Owned mirror of the trainer's `LoadedGroup` struct.
 ///
 /// The trainer (in `bin/zensim_mlp_train.rs`) defines `LoadedGroup`
@@ -204,6 +256,8 @@ pub fn load_parquet(
     // deterministic for a given file.
     let mut ref_ids: Vec<u32> = Vec::new();
     let mut ref_lookup: HashMap<String, u32> = HashMap::new();
+    // Column-major staging for one row block; reused across blocks + batches.
+    let mut per_col_scratch: Vec<f64> = Vec::with_capacity(n_features * TRANSPOSE_BLOCK_ROWS);
 
     for batch_res in reader {
         let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
@@ -274,60 +328,44 @@ pub fn load_parquet(
             }
         }
 
-        // Extract feature columns. We pre-materialize per-batch into
-        // batch-row-major Vec<Vec<f64>> to keep the per-row push hot.
-        // Materializing once per batch (not per cell) lets the loop
-        // be column-wise, which is friendlier to the columnar arrays.
-        let mut per_col_f64: Vec<Vec<f64>> = Vec::with_capacity(n_features);
-        for &pi in &proj_feature_indices {
-            let col = batch.column(pi);
-            // Feature columns may be Float64/Float32 (the common case)
-            // OR an integer type (Int32/Int64/UInt32/UInt64). Some
-            // feature extractors emit count-style features (e.g.
-            // KonJND's f12) as integers; the trainer / runtime
-            // consumes them as f64 anyway, so widen silently.
-            let v: Vec<f64> = match col.data_type() {
-                DataType::Float64 => {
-                    let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
-                    (0..n_rows).map(|i| a.value(i)).collect()
-                }
-                DataType::Float32 => {
-                    let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
-                    (0..n_rows).map(|i| a.value(i) as f64).collect()
-                }
-                DataType::Int64 => {
-                    let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
-                    (0..n_rows).map(|i| a.value(i) as f64).collect()
-                }
-                DataType::Int32 => {
-                    let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
-                    (0..n_rows).map(|i| a.value(i) as f64).collect()
-                }
-                DataType::UInt64 => {
-                    let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
-                    (0..n_rows).map(|i| a.value(i) as f64).collect()
-                }
-                DataType::UInt32 => {
-                    let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
-                    (0..n_rows).map(|i| a.value(i) as f64).collect()
-                }
-                other => {
-                    return Err(format!(
-                        "{path:?}: feature column has unsupported dtype {other:?} (need Float32/Float64/Int32/Int64/UInt32/UInt64)",
-                    ));
-                }
-            };
-            per_col_f64.push(v);
-        }
-
-        // Transpose per-column f64 vectors into row-major Vec<Vec<f64>>.
+        // Columnar -> row-major, one ROW BLOCK at a time.
+        //
+        // The column-major staging buffer is what keeps the transpose
+        // cache-friendly (each source array is walked forward once), but
+        // staging a WHOLE 16 384-row batch of 944 columns costs 124 MB of
+        // scratch per open loader — and once the corpus loop went parallel
+        // that is 12 of them at once. Blocking the transpose at
+        // [`TRANSPOSE_BLOCK_ROWS`] keeps the same forward walk with a ~7.7 MB
+        // working set that fits in L3, independent of the parquet batch size.
+        // Values, order, and the resulting `feature_rows` are unchanged.
         feature_rows.reserve(n_rows);
-        for row_i in 0..n_rows {
-            let mut row = Vec::with_capacity(n_features);
-            for col in &per_col_f64 {
-                row.push(col[row_i]);
+        let mut block_start = 0usize;
+        while block_start < n_rows {
+            let block_len = TRANSPOSE_BLOCK_ROWS.min(n_rows - block_start);
+            per_col_scratch.clear();
+            for &pi in &proj_feature_indices {
+                let col = batch.column(pi);
+                // Feature columns may be Float64/Float32 (the common case)
+                // OR an integer type (Int32/Int64/UInt32/UInt64). Some
+                // feature extractors emit count-style features (e.g.
+                // KonJND's f12) as integers; the trainer / runtime
+                // consumes them as f64 anyway, so widen silently.
+                col_block_to_f64(
+                    path,
+                    col.as_ref(),
+                    block_start,
+                    block_len,
+                    &mut per_col_scratch,
+                )?;
             }
-            feature_rows.push(row);
+            for r in 0..block_len {
+                let mut row = Vec::with_capacity(n_features);
+                for c in 0..n_features {
+                    row.push(per_col_scratch[c * block_len + r]);
+                }
+                feature_rows.push(row);
+            }
+            block_start += block_len;
         }
     }
 

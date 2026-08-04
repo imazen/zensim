@@ -20,6 +20,8 @@ pub mod mlp_train;
 pub mod npz;
 pub mod output_calibration_spline;
 pub mod panel;
+pub mod parallel;
 pub mod parquet_loader;
+pub mod perf_trace;
 pub mod simd_mlp;
 pub mod train_manifest;

@@ -970,6 +970,60 @@ fn l2_feature_mult() -> Option<std::sync::Arc<Vec<f64>>> {
     L2_FEATURE_MULT.lock().ok().and_then(|g| g.clone())
 }
 
+/// Add the layer-1 L2 gradient `scale * mult[feature] * w` into `g`,
+/// row by row.
+///
+/// **Why this is not just the obvious loop.** The obvious loop —
+/// `for (idx, (g, &w)) in g.iter_mut().zip(w.iter()).enumerate() { *g +=
+/// scale * mult[idx / n_hidden] * w }` — emits a 32-bit integer DIVIDE per
+/// weight. At 944×128 weights, applied once per pair, once per pair-draw,
+/// that is ~6 × 10⁹ divides per 50 k-pair epoch, and a 2026-08-04 `perf`
+/// profile of a live SOTA-944 training run measured **43 % of total trainer
+/// cycles inside that one loop** — more than Adam (26 %) and more than the
+/// AVX-512 forward + backprop combined (21 %). The divide is pure
+/// index arithmetic: walking `w1` as `n_hidden`-wide ROWS (which is exactly
+/// its row-major layout) removes it and hoists the per-feature multiplier
+/// out of the inner loop.
+///
+/// **Bit-identical by construction.** Rust evaluates `scale * m * w` as
+/// `(scale * m) * w`, so hoisting `sm = scale * m` per row preserves the
+/// exact association and rounding; the inner `*g += sm * w` is elementwise
+/// (no cross-lane reduction), so even if LLVM vectorizes it the result is
+/// unchanged. Gated by `l2_row_form_matches_divided_index_form_bitwise`.
+///
+/// The trap this loop is in: `--coarse-decay` alone (no `--coarse-l2-mult`)
+/// sets `L2_FEATURE_MULT` to `Some(2.0 on the coarse rows)` purely so the
+/// DECOUPLED decay gate `m > 1` engages — and thereby switches this loop
+/// onto the divide path, even though the coupled L2 multiplier is documented
+/// two functions up as "neutralized by Adam". Every campaign recipe that
+/// passes `--coarse-decay` paid for it.
+fn add_l2_grad_layer1(g: &mut [f64], w: &[f64], scale: f64, n_hidden: usize, mult: Option<&[f64]>) {
+    let n = g.len().min(w.len());
+    let (g, w) = (&mut g[..n], &w[..n]);
+    let Some(mult) = mult else {
+        for (g, &w) in g.iter_mut().zip(w.iter()) {
+            *g += scale * w;
+        }
+        return;
+    };
+    if n_hidden == 0 {
+        // Degenerate; the divided-index form would panic on `idx / 0`, so
+        // preserve that rather than inventing behaviour.
+        for (idx, (g, &w)) in g.iter_mut().zip(w.iter()).enumerate() {
+            *g += scale * mult[idx / n_hidden] * w;
+        }
+        return;
+    }
+    for (feat, (grow, wrow)) in g.chunks_mut(n_hidden).zip(w.chunks(n_hidden)).enumerate() {
+        // Indexing `mult[feat]` panics on the same feature index the
+        // divided form would have.
+        let sm = scale * mult[feat];
+        for (g, &w) in grow.iter_mut().zip(wrow.iter()) {
+            *g += sm * w;
+        }
+    }
+}
+
 /// Decoupled (AdamW-style) per-feature weight decay on layer-1 rows, applied
 /// AFTER the Adam step. Coupled L2-via-gradient is neutralized by Adam's
 /// per-parameter rescaling (measured 2026-07-29: mult 8-32 on lambda 1e-5
@@ -982,7 +1036,14 @@ fn apply_coarse_decay(w1: &mut [f64], n_hidden: usize, lr: f64, rate: f64) {
         return;
     }
     // debug telemetry (ZENSIM_DECAY_DEBUG=1): prove the decay executes + bites.
-    if std::env::var("ZENSIM_DECAY_DEBUG").as_deref() == Ok("1") {
+    // The env lookup is cached: this runs once per Adam step (50 000× per
+    // epoch at K=1), and `std::env::var` allocates a String and takes the
+    // environment lock every time.
+    fn decay_debug_on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("ZENSIM_DECAY_DEBUG").as_deref() == Ok("1"))
+    }
+    if decay_debug_on() {
         use std::sync::atomic::{AtomicU64, Ordering};
         static CALLS: AtomicU64 = AtomicU64::new(0);
         let c = CALLS.fetch_add(1, Ordering::Relaxed);
@@ -2224,10 +2285,13 @@ pub fn train_mlp_strategy(
 
             if hyperparams.l2_lambda > 0.0 {
                 let fmult = l2_feature_mult();
-                for (idx, (g, &w)) in adam.gw1.iter_mut().zip(w1.iter()).enumerate() {
-                    let m = fmult.as_ref().map_or(1.0, |v| v[idx / n_hidden]);
-                    *g += hyperparams.l2_lambda * m * w;
-                }
+                add_l2_grad_layer1(
+                    &mut adam.gw1,
+                    &w1,
+                    hyperparams.l2_lambda,
+                    n_hidden,
+                    fmult.as_ref().map(|v| v.as_slice()),
+                );
                 for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
                     *g += hyperparams.l2_lambda * w;
                 }
@@ -2430,8 +2494,12 @@ pub fn train_mlp_strategy(
             // compute SROCC against `-predictions` to surface positive
             // numbers that match V0_2's reporting convention.
             let agg_mode = hyperparams.val_aggregate;
+            // Per-group panels are independent (each reads only its own rows +
+            // the shared immutable weights) and the panel's PWRC is O(n²) on the
+            // subsample cap, so the groups run on rayon and are collected in group
+            // order — same values, same order, bit-identical.
             let group_panels: Vec<crate::panel::LightPanel> = groups
-                .iter()
+                .par_iter()
                 .enumerate()
                 .map(|(gi, g)| {
                     let preds = predict_group(
@@ -5482,10 +5550,13 @@ fn run_minibatch_with_nin(
     if l2_lambda > 0.0 && steps_added > 0 {
         let scale = l2_lambda * steps_added as f64;
         let fmult = l2_feature_mult();
-        for (idx, (g, &w)) in adam.gw1.iter_mut().zip(w1.iter()).enumerate() {
-            let m = fmult.as_ref().map_or(1.0, |v| v[idx / n_hidden]);
-            *g += scale * m * w;
-        }
+        add_l2_grad_layer1(
+            &mut adam.gw1,
+            w1,
+            scale,
+            n_hidden,
+            fmult.as_ref().map(|v| v.as_slice()),
+        );
         for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
             *g += scale * w;
         }
@@ -5541,13 +5612,39 @@ fn predict_group(
     n_hidden: usize,
     alpha: f64,
 ) -> Vec<f64> {
-    (0..n_pairs)
-        .map(|i| {
+    // Rows are INDEPENDENT — `forward` reads `std_x[i]` and the (immutable)
+    // weights and returns a value; nothing accumulates across `i`. Writing
+    // each result to its own index under rayon is therefore bit-identical to
+    // the sequential map, while the validation pass (up to ~730 k rows across
+    // 11 groups at 944 features) was the trainer's one remaining fully
+    // serial phase.
+    //
+    // Below `PREDICT_PARALLEL_MIN_ROWS` the task overhead exceeds the
+    // forward, and the small validation groups (SDR25 is 50 rows) hit that
+    // constantly.
+    const PREDICT_PARALLEL_MIN_ROWS: usize = 2048;
+    const PREDICT_CHUNK_ROWS: usize = 512;
+    let mut out = vec![0.0f64; n_pairs];
+    if n_pairs < PREDICT_PARALLEL_MIN_ROWS {
+        for (i, o) in out.iter_mut().enumerate() {
             let xi = &std_x[i * n_features..(i + 1) * n_features];
             let (y, _, _) = forward(xi, w1, b1, w2, b2, n_features, n_hidden, alpha);
-            y
-        })
-        .collect()
+            *o = y;
+        }
+        return out;
+    }
+    out.par_chunks_mut(PREDICT_CHUNK_ROWS)
+        .enumerate()
+        .for_each(|(c, dst)| {
+            let base = c * PREDICT_CHUNK_ROWS;
+            for (k, o) in dst.iter_mut().enumerate() {
+                let i = base + k;
+                let xi = &std_x[i * n_features..(i + 1) * n_features];
+                let (y, _, _) = forward(xi, w1, b1, w2, b2, n_features, n_hidden, alpha);
+                *o = y;
+            }
+        });
+    out
 }
 
 mod utils;
@@ -9962,6 +10059,100 @@ mod ref_bucket_tests {
         let ref_ids = [0u32, 0, 1]; // row 2 is a singleton -> dropped
         let rb = RefBuckets::build(&ref_ids).expect("ref 0 is usable");
         assert_eq!(rb.redraw_partner(2, 12345), 2);
+    }
+}
+
+#[cfg(test)]
+mod l2_row_form_tests {
+    use super::add_l2_grad_layer1;
+
+    /// The reference: the divided-index form this helper replaced, verbatim.
+    fn divided_index_form(
+        g: &mut [f64],
+        w: &[f64],
+        scale: f64,
+        n_hidden: usize,
+        mult: Option<&[f64]>,
+    ) {
+        for (idx, (g, &w)) in g.iter_mut().zip(w.iter()).enumerate() {
+            let m = mult.map_or(1.0, |v| v[idx / n_hidden]);
+            *g += scale * m * w;
+        }
+    }
+
+    fn pseudo(n: usize, seed: u64) -> Vec<f64> {
+        // Deterministic, wide-exponent-range values so any change in
+        // association or rounding shows up as a bit difference.
+        let mut st = seed | 1;
+        (0..n)
+            .map(|_| {
+                st ^= st << 13;
+                st ^= st >> 7;
+                st ^= st << 17;
+                let u = (st >> 11) as f64 / (1u64 << 53) as f64;
+                (u - 0.5) * 10f64.powi(((st % 13) as i32) - 6)
+            })
+            .collect()
+    }
+
+    /// BIT-identity gate for the 2026-08-04 divide-removal: the row-walked
+    /// form must reproduce the divided-index form exactly, on the real
+    /// shapes (944 features × 128 hidden) and on ragged / degenerate ones.
+    #[test]
+    fn l2_row_form_matches_divided_index_form_bitwise() {
+        for &(n_features, n_hidden) in &[
+            (944usize, 128usize),
+            (372, 128),
+            (944, 1),
+            (7, 5),
+            (1, 1),
+            (13, 4), // n = 52, exact multiple
+        ] {
+            let n = n_features * n_hidden;
+            let w = pseudo(n, 0xA5A5 ^ n as u64);
+            let g0 = pseudo(n, 0x5A5A ^ n as u64);
+            let mult: Vec<f64> = (0..n_features)
+                .map(|i| if i % 3 == 0 { 2.0 } else { 1.0 })
+                .collect();
+            for scale in [1e-5f64, 1.0, 3.7e-3] {
+                for m in [None, Some(mult.as_slice())] {
+                    let mut a = g0.clone();
+                    let mut b = g0.clone();
+                    divided_index_form(&mut a, &w, scale, n_hidden, m);
+                    add_l2_grad_layer1(&mut b, &w, scale, n_hidden, m);
+                    for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+                        assert_eq!(
+                            x.to_bits(),
+                            y.to_bits(),
+                            "n_features={n_features} n_hidden={n_hidden} scale={scale} \
+                             mult={} idx={i}: {x:e} != {y:e}",
+                            m.is_some()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `g` longer than `w` (the concat-layout case): both forms must stop
+    /// at the shorter length and leave the tail untouched.
+    #[test]
+    fn l2_row_form_respects_the_shorter_slice() {
+        let (n_features, n_hidden) = (10usize, 8usize);
+        let n = n_features * n_hidden;
+        let w = pseudo(n, 7);
+        let g0 = pseudo(n + 17, 11);
+        let mult: Vec<f64> = (0..n_features).map(|i| 1.0 + (i % 2) as f64).collect();
+        let mut a = g0.clone();
+        let mut b = g0.clone();
+        divided_index_form(&mut a, &w, 1e-5, n_hidden, Some(&mult));
+        add_l2_grad_layer1(&mut b, &w, 1e-5, n_hidden, Some(&mult));
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(b.iter()) {
+            assert_eq!(x.to_bits(), y.to_bits());
+        }
+        // Tail past `w.len()` untouched by both.
+        assert_eq!(a[n..], g0[n..]);
     }
 }
 

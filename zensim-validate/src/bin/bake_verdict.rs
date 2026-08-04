@@ -46,6 +46,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
+use rayon::prelude::*;
 use zenpredict::{Model, Predictor};
 
 use zensim_validate::eval_report;
@@ -89,20 +90,39 @@ fn ds_auc(predicted: &[f64], human: &[f64], diff_threshold: f64) -> f64 {
     let stride = (total_pairs / max_pairs).max(1);
 
     // Collect (metric_gap, is_different) labels.
-    let mut samples: Vec<(f64, bool)> = Vec::new();
-    let mut pair_idx = 0usize;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            if pair_idx.is_multiple_of(stride) {
-                let metric_gap = (predicted[i] - predicted[j]).abs();
-                let human_gap = (human[i] - human[j]).abs();
-                if metric_gap.is_finite() && human_gap.is_finite() {
-                    samples.push((metric_gap, human_gap > diff_threshold));
+    //
+    // Parallel over `i` (the outer pair index). Each `i` owns the contiguous
+    // pair-index run `[base_i, base_i + (n-1-i))`, so its stride hits are a
+    // pure function of `i` — the same pairs are selected as the sequential
+    // sweep, and concatenating the per-`i` outputs in ascending `i` rebuilds
+    // the identical `samples` vector. (It is then sorted, so even the order
+    // would not matter; keeping it identical costs nothing and keeps the
+    // tie-averaging below reading the same runs.)
+    let mut samples: Vec<(f64, bool)> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            // pair_idx of (i, i+1) = sum_{k<i} (n-1-k) = i*(2n-i-1)/2
+            let base = i * (2 * n - i - 1) / 2;
+            let mut local: Vec<(f64, bool)> = Vec::new();
+            for j in (i + 1)..n {
+                let pair_idx = base + (j - i - 1);
+                if pair_idx.is_multiple_of(stride) {
+                    let metric_gap = (predicted[i] - predicted[j]).abs();
+                    let human_gap = (human[i] - human[j]).abs();
+                    if metric_gap.is_finite() && human_gap.is_finite() {
+                        local.push((metric_gap, human_gap > diff_threshold));
+                    }
                 }
             }
-            pair_idx += 1;
-        }
-    }
+            local
+        })
+        // Collect the per-`i` runs first, then concatenate in ascending `i`.
+        // Explicit rather than `.flatten()` so the ordering guarantee is
+        // syntactic, not a property of rayon's collect.
+        .collect::<Vec<Vec<(f64, bool)>>>()
+        .into_iter()
+        .flatten()
+        .collect();
     if samples.len() < 2 {
         return f64::NAN;
     }
@@ -918,6 +938,17 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
 /// `render_corpus` / `dial_panel` use. Reused by the severity-ramp and
 /// per-zone sections so their numbers match the rest of the report
 /// exactly.
+/// Rows per rayon task in [`score_grid_one`]. Big enough that the
+/// per-chunk `Predictor::new` + scratch allocation is amortized (a
+/// 944-input forward is ~120k MACs, so 512 rows ≈ 60 MFLOP of work per
+/// task), small enough that a 12-corpus run with corpora ALSO in flight
+/// still load-balances.
+const SCORE_CHUNK_ROWS: usize = 512;
+
+/// Below this many rows the sequential path is used — spawning tasks for
+/// a 100-row grid costs more than the forward does.
+const SCORE_PARALLEL_MIN_ROWS: usize = 2048;
+
 fn score_grid_one(
     model: &Model,
     has_transforms: bool,
@@ -929,24 +960,54 @@ fn score_grid_one(
     let tanh_pin_scale = extract_tanh_output_head_scale(model);
     let output_spline = zensim_validate::output_calibration_spline::extract(model);
     let minmax_head = extract_minmax_head(model);
-    let mut predictor = Predictor::new(model);
-    let mut scratch = vec![0.0f32; n_inputs];
-    rows.iter()
-        .map(|row| match minmax_head.as_ref() {
-            // Min-max bakes REPLACE the layer forward — bypass the Predictor.
-            Some(mm) => score_row_minmax(model, mm, tanh_pin_scale, output_spline.as_ref(), row),
-            None => score_row(
-                &mut predictor,
-                has_transforms,
-                per_sample_alpha_head.as_ref(),
-                hybrid_head.as_ref(),
-                tanh_pin_scale,
-                output_spline.as_ref(),
-                &mut scratch,
-                row,
-            ),
-        })
-        .collect()
+
+    // One row's prediction reads only that row (the `Predictor`'s scratch
+    // is fully overwritten per call, and every head/spline handle above is
+    // read-only), so splitting the rows across threads and writing each
+    // result back at its own index is BIT-IDENTICAL to the sequential
+    // loop — no accumulation order changes, no shared mutable state.
+    // `scripts/verify_verdict_identity.sh` gates that claim on every
+    // numeric field of a full `--full-json`.
+    let score_range = |predictor: &mut Predictor<'_>,
+                       scratch: &mut Vec<f32>,
+                       src: &[Vec<f64>],
+                       dst: &mut [f64]| {
+        for (out, row) in dst.iter_mut().zip(src.iter()) {
+            *out = match minmax_head.as_ref() {
+                // Min-max bakes REPLACE the layer forward — bypass the Predictor.
+                Some(mm) => {
+                    score_row_minmax(model, mm, tanh_pin_scale, output_spline.as_ref(), row)
+                }
+                None => score_row(
+                    predictor,
+                    has_transforms,
+                    per_sample_alpha_head.as_ref(),
+                    hybrid_head.as_ref(),
+                    tanh_pin_scale,
+                    output_spline.as_ref(),
+                    scratch,
+                    row,
+                ),
+            };
+        }
+    };
+
+    let mut out = vec![0.0f64; rows.len()];
+    if rows.len() < SCORE_PARALLEL_MIN_ROWS || rayon::current_num_threads() <= 1 {
+        let mut predictor = Predictor::new(model);
+        let mut scratch = vec![0.0f32; n_inputs];
+        score_range(&mut predictor, &mut scratch, rows, &mut out);
+        return out;
+    }
+    zensim_validate::parallel::init();
+    out.par_chunks_mut(SCORE_CHUNK_ROWS)
+        .zip(rows.par_chunks(SCORE_CHUNK_ROWS))
+        .for_each(|(dst, src)| {
+            let mut predictor = Predictor::new(model);
+            let mut scratch = vec![0.0f32; n_inputs];
+            score_range(&mut predictor, &mut scratch, src, dst);
+        });
+    out
 }
 
 /// An equal-weight ensemble of ZNPR bakes scored as ONE model: every row's
@@ -1119,16 +1180,33 @@ fn bootstrap_srocc_ci(scores: &[f64], humans: &[f64]) -> (f64, f64) {
     }
     const N_BOOT: usize = 1000;
     let mut state: u64 = 0x9E37_79B9_7F4A_7C15 ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D);
-    let mut rs: Vec<f64> = Vec::with_capacity(N_BOOT);
-    let mut bs = vec![0.0f64; n];
-    let mut bh = vec![0.0f64; n];
-    for _ in 0..N_BOOT {
-        for k in 0..n {
-            let idx = (xs(&mut state) % n as u64) as usize;
-            bs[k] = scores[idx];
-            bh[k] = humans[idx];
+    // Draw every replicate's index set SEQUENTIALLY from the one xorshift
+    // stream — that is what makes the CI reproducible, and it is the only
+    // part that must stay serial. The `spearman` evaluations are independent
+    // per replicate, so they run on rayon and land back at their own index:
+    // same 1000 values, same order, same percentiles, bit-for-bit.
+    //
+    // Generated a BLOCK at a time so the index buffer stays ~5 MB instead of
+    // `N_BOOT × n` (45 MB on the largest corpus, ×12 corpora now that the
+    // corpus loop is parallel too).
+    const BOOT_BLOCK: usize = 128;
+    let mut rs: Vec<f64> = vec![0.0; N_BOOT];
+    let mut draws: Vec<u32> = vec![0; BOOT_BLOCK * n];
+    let mut done = 0usize;
+    while done < N_BOOT {
+        let this = BOOT_BLOCK.min(N_BOOT - done);
+        for slot in draws[..this * n].iter_mut() {
+            *slot = (xs(&mut state) % n as u64) as u32;
         }
-        rs.push(spearman(&bs, &bh).abs());
+        rs[done..done + this]
+            .par_iter_mut()
+            .zip(draws[..this * n].par_chunks(n))
+            .for_each(|(out, idxs)| {
+                let bs: Vec<f64> = idxs.iter().map(|&i| scores[i as usize]).collect();
+                let bh: Vec<f64> = idxs.iter().map(|&i| humans[i as usize]).collect();
+                *out = spearman(&bs, &bh).abs();
+            });
+        done += this;
     }
     rs.sort_by(f64::total_cmp);
     let pct = |p: f64| -> f64 {
@@ -1277,6 +1355,7 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
             DialMetrics::NAN,
         );
     }
+    let dt = zensim_validate::perf_trace::PerfTrace::new("  dial");
     let grid = match parquet_loader::load_dial_grid(&grid_path.to_path_buf()) {
         Ok(g) => g,
         Err(e) => {
@@ -1287,8 +1366,10 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
         }
     };
 
+    dt.mark("dial grid parquet load");
     // Score every grid row through the SAME dispatch path render_corpus uses.
     let scores: Vec<f64> = ens.score_rows(&grid.feature_rows);
+    dt.mark("dial MLP forward (score_rows)");
 
     // Optional per-cell prediction dump for external joins against
     // reference-metric sidecars (zone-consistency / HQ-zone instruments).
@@ -1707,12 +1788,16 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
     )
 }
 
+/// One provenance row: `(display name, resolved path, sha256, byte size)`.
+/// Named because the hashing pre-pass collects `Result<Option<_>, String>` of
+/// it across rayon, and the bare tuple in that position is unreadable.
+type CorpusProv = (String, PathBuf, String, u64);
+
 fn render_corpus(
     corpus: &Corpus,
     features_root: &Path,
     regime_720: bool,
     ens: &Ensemble,
-    per_pair_output: Option<&Path>,
 ) -> Result<CorpusResult, String> {
     let fname = if regime_720 {
         slot_720_file(corpus.name, features_root)
@@ -1721,29 +1806,34 @@ fn render_corpus(
         corpus.filename.to_string()
     };
     let path = features_root.join(&fname);
-    let g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
+    let ct = zensim_validate::perf_trace::PerfTrace::new("  corpus");
+    let mut g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
         .map_err(|e| format!("load {} parquet: {e}", corpus.display))?;
-    let humans = g.human_scores;
+    ct.mark("parquet load");
+    let humans = std::mem::take(&mut g.human_scores);
+    let ref_ids = g.ref_ids.take();
 
     // Score every row through the ensemble (k=1 ⇒ the single-bake path,
     // bit-identically). The f32 scratch buffer is reused across rows inside
     // `score_grid_one` to avoid the per-row allocation that would otherwise
     // dominate wall time on the bigger corpora (KADID has 10k rows × 372 f32s).
     let scores: Vec<f64> = ens.score_rows(&g.feature_rows);
+    // Release the feature matrix the instant the forward is done. It is by
+    // far the largest allocation in a corpus (11 356 rows × 944 f64 ≈ 86 MB
+    // on the biggest one) and NOTHING below reads it — while the stats tail
+    // that follows is the longest phase. Holding it there is what made the
+    // now-parallel corpus loop peak at 2.9 GB instead of 0.9 GB.
+    drop(g);
+    ct.mark("MLP forward (score_rows)");
 
     let n = scores.len();
 
-    // Diagnostic per-pair dump (parquet row order): `human<TAB>pred`.
-    if let Some(path) = per_pair_output {
-        let mut s = String::from("human\tpred\n");
-        for (h, p) in humans.iter().zip(scores.iter()) {
-            s.push_str(&format!("{h}\t{p}\n"));
-        }
-        std::fs::write(path, s).map_err(|e| format!("write per-pair output: {e}"))?;
-        eprintln!("  wrote per-pair predictions to {}", path.display());
-    }
+    // (The diagnostic per-pair dump moved to `main` when the corpus loop went
+    // parallel — see the `per_pair_output` block there. Same bytes, same
+    // "last corpus wins" rule, now deterministic.)
 
     let (srocc, plcc, krocc, or_, pw, z, ds) = aggregate_panel(&scores, &humans);
+    ct.mark("aggregate_panel (srocc/plcc/krocc/OR/PWRC/Z-RMSE/DS-AUC)");
     // Grouping by reference image is this binary's call; the statistic is
     // zenstats' (the canonical stats home — never re-derive it here).
     // Orientation::Auto, not the default-signed reading: `compute_panel`
@@ -1755,15 +1845,16 @@ fn render_corpus(
     // resolves polarity once from the pooled sign, so this column and the panel
     // it sits next to cannot contradict each other — while a ladder that
     // disagrees with the bake's own polarity still reports negative.
-    let per_ref = g
-        .ref_ids
+    let per_ref = ref_ids
         .as_ref()
         .and_then(|r| per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS, Orientation::Auto));
     // Signed SROCC (polarity-preserving) + marginal bootstrap CI. `aggregate_panel`
     // returns `|SROCC|`; a globally-inverted bake would hide behind that abs, so
     // keep the sign here. The CI resolves whether a 3-decimal ranking gap is real.
     let srocc_signed = spearman(&scores, &humans);
+    ct.mark("per-ref SROCC + signed SROCC");
     let srocc_ci = bootstrap_srocc_ci(&scores, &humans);
+    ct.mark("bootstrap SROCC CI (1000 resamples)");
 
     let mut body = String::new();
     body.push_str(&format!("\n## {} (n={})\n\n", corpus.display, n));
@@ -1829,7 +1920,13 @@ are excluded._\n",
         // (CID22 / KADID / TID) has human_score normalized
         // into [0, 1] per the feature-extractor convention.
         // Width-10 grid on the 0-100 scale → width-0.10 on [0, 1].
-        for band_idx in 0..10 {
+        //
+        // The 10 bands are disjoint row subsets, each running its own
+        // `aggregate_panel` (whose Kendall + PWRC are O(n_band²)) — nothing is
+        // shared, so they run on rayon and are emitted in band order below.
+        let banded: Vec<(String, BandRow)> = (0..10usize)
+            .into_par_iter()
+            .map(|band_idx| {
             let lo = band_idx as f64 * 0.10;
             let hi = lo + 0.10;
             let label = format!("B{band_idx}");
@@ -1850,24 +1947,26 @@ are excluded._\n",
                 })
                 .collect();
             if idxs.len() < 4 {
-                body.push_str(&format!(
+                let md = format!(
                     "| {label} | {range_label} | {} | n/a | n/a | n/a | n/a | n/a | n/a | n/a |\n",
                     idxs.len()
-                ));
-                band_rows.push(BandRow {
-                    band: label,
-                    lo,
-                    hi: if band_idx == 9 { 1.0 } else { hi },
-                    n: idxs.len(),
-                    srocc: f64::NAN,
-                    plcc: f64::NAN,
-                    krocc: f64::NAN,
-                    or_ratio: f64::NAN,
-                    pwrc: f64::NAN,
-                    z_rmse: f64::NAN,
-                    mae: f64::NAN,
-                });
-                continue;
+                );
+                return (
+                    md,
+                    BandRow {
+                        band: label,
+                        lo,
+                        hi: if band_idx == 9 { 1.0 } else { hi },
+                        n: idxs.len(),
+                        srocc: f64::NAN,
+                        plcc: f64::NAN,
+                        krocc: f64::NAN,
+                        or_ratio: f64::NAN,
+                        pwrc: f64::NAN,
+                        z_rmse: f64::NAN,
+                        mae: f64::NAN,
+                    },
+                );
             }
             let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
             let s_b: Vec<f64> = idxs.iter().map(|&i| scores[i]).collect();
@@ -1880,23 +1979,31 @@ are excluded._\n",
                 .sum::<f64>()
                 / idxs.len() as f64;
             let noisy = if idxs.len() < 30 { " ⚠" } else { "" };
-            body.push_str(&format!(
+            let md = format!(
                 "| {label}{noisy} | {range_label} | {} | {b_srocc:.4} | {b_plcc:.4} | {b_krocc:.4} | {b_or:.4} | {b_pwrc:.4} | {b_z:.3} | {mae:.4} |\n",
                 idxs.len()
-            ));
-            band_rows.push(BandRow {
-                band: label,
-                lo,
-                hi: if band_idx == 9 { 1.0 } else { hi },
-                n: idxs.len(),
-                srocc: b_srocc,
-                plcc: b_plcc,
-                krocc: b_krocc,
-                or_ratio: b_or,
-                pwrc: b_pwrc,
-                z_rmse: b_z,
-                mae,
-            });
+            );
+            (
+                md,
+                BandRow {
+                    band: label,
+                    lo,
+                    hi: if band_idx == 9 { 1.0 } else { hi },
+                    n: idxs.len(),
+                    srocc: b_srocc,
+                    plcc: b_plcc,
+                    krocc: b_krocc,
+                    or_ratio: b_or,
+                    pwrc: b_pwrc,
+                    z_rmse: b_z,
+                    mae,
+                },
+            )
+            })
+            .collect();
+        for (md, row) in banded {
+            body.push_str(&md);
+            band_rows.push(row);
         }
         body.push('\n');
         body.push_str(
@@ -1921,6 +2028,7 @@ read on this corpus._\n",
         ));
     }
 
+    ct.mark("10-band panel + markdown");
     Ok(CorpusResult {
         display: corpus.display,
         n,
@@ -2070,6 +2178,9 @@ fn provenance_block(bake: &Path, corpora: &[(String, PathBuf, String, u64)]) -> 
 
 fn main() -> ExitCode {
     let t0 = Instant::now();
+    // Phase timing, printed only under ZENSIM_PERF_TRACE=1 (see
+    // `zensim_validate::perf_trace`). Off by default and output-neutral.
+    let pt = zensim_validate::perf_trace::PerfTrace::new("bake_verdict");
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -2176,39 +2287,59 @@ fn main() -> ExitCode {
     // never silently drops an axis (a run that skips the non-photo corpus would hide the
     // very content-blindness this eval exists to catch). All eval corpora are mirrored to
     // s3://zentrain/eval-corpora/ — the error tells the caller how to restore them.
+    //
+    // Hashing is `rayon`-parallel across corpora and results are re-assembled
+    // in the ORIGINAL corpus order, so the provenance block is byte-identical
+    // to the sequential pass; only the wall clock changes (each hash re-reads
+    // the whole parquet off the slow 9p `/mnt/v` mount, and 12 of those
+    // serialized was 1.3 s of pure IO latency).
+    zensim_validate::parallel::init();
+    let hashed: Vec<Result<Option<CorpusProv>, String>> = args
+        .corpora
+        .par_iter()
+        .map(|corpus| {
+            // Regime-aware slot: --regime 720 loads the 720-wide ext_*.parquet
+            // (via slot_720), NOT the 372col filename. render_corpus resolves the
+            // same way — keep these two in sync.
+            let cfname = if args.regime_720 {
+                match slot_720_file(corpus.name, &args.features_root) {
+                    Some(f) => f,
+                    None => return Ok(None), // filtered already; belt-and-braces
+                }
+            } else {
+                corpus.filename.to_string()
+            };
+            let cpath = args.features_root.join(&cfname);
+            if !cpath.exists() {
+                return Err(format!(
+                    "bake_verdict: MISSING corpus {} at {} — do NOT skip; restore it:\n  \
+                     aws s3 cp s3://zentrain/eval-corpora/{} {} --endpoint-url \
+                     https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com",
+                    corpus.display,
+                    cpath.display(),
+                    Path::new(&cfname).file_name().unwrap().to_string_lossy(),
+                    cpath.display(),
+                ));
+            }
+            match zensim_validate::train_manifest::sha256_file(&cpath) {
+                Ok(sha) => {
+                    let bytes = std::fs::metadata(&cpath).map(|m| m.len()).unwrap_or(0);
+                    Ok(Some((corpus.display.to_string(), cpath, sha, bytes)))
+                }
+                Err(e) => Err(format!(
+                    "bake_verdict: cannot hash corpus {}: {e}",
+                    cpath.display()
+                )),
+            }
+        })
+        .collect();
     let mut corpus_prov: Vec<(String, PathBuf, String, u64)> = Vec::new();
-    for corpus in &args.corpora {
-        // Regime-aware slot: --regime 720 loads the 720-wide ext_*.parquet
-        // (via slot_720), NOT the 372col filename. render_corpus resolves the
-        // same way — keep these two in sync.
-        let cfname = if args.regime_720 {
-            match slot_720_file(corpus.name, &args.features_root) {
-                Some(f) => f,
-                None => continue, // filtered already; belt-and-braces
-            }
-        } else {
-            corpus.filename.to_string()
-        };
-        let cpath = args.features_root.join(&cfname);
-        if !cpath.exists() {
-            eprintln!(
-                "bake_verdict: MISSING corpus {} at {} — do NOT skip; restore it:\n  \
-                 aws s3 cp s3://zentrain/eval-corpora/{} {} --endpoint-url \
-                 https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com",
-                corpus.display,
-                cpath.display(),
-                Path::new(&cfname).file_name().unwrap().to_string_lossy(),
-                cpath.display(),
-            );
-            return ExitCode::from(2);
-        }
-        match zensim_validate::train_manifest::sha256_file(&cpath) {
-            Ok(sha) => {
-                let bytes = std::fs::metadata(&cpath).map(|m| m.len()).unwrap_or(0);
-                corpus_prov.push((corpus.display.to_string(), cpath.clone(), sha, bytes));
-            }
-            Err(e) => {
-                eprintln!("bake_verdict: cannot hash corpus {}: {e}", cpath.display());
+    for r in hashed {
+        match r {
+            Ok(Some(entry)) => corpus_prov.push(entry),
+            Ok(None) => {}
+            Err(msg) => {
+                eprintln!("{msg}");
                 return ExitCode::from(2);
             }
         }
@@ -2244,6 +2375,8 @@ fn main() -> ExitCode {
         corpus_prov.push((label, args.dial_grid.clone(), sha, bytes));
     }
 
+    pt.mark("corpus pre-pass (existence + sha256 of every input)");
+
     let mut buf = String::new();
     buf.push_str("# bake_verdict — instant V_X eval\n\n");
     buf.push_str(&provenance_block(&args.bake, &corpus_prov));
@@ -2257,23 +2390,70 @@ fn main() -> ExitCode {
         }
     ));
 
-    let mut results: Vec<CorpusResult> = Vec::new();
-    for corpus in &args.corpora {
-        // Per-pair dump only meaningful when a single corpus is selected
-        // (one output path → one corpus); pass through for all, last wins.
-        match render_corpus(
-            corpus,
-            &args.features_root,
-            args.regime_720,
-            &ens,
-            args.per_pair_output.as_deref(),
-        ) {
+    // ── Overlap the `--full-json` KADIS per-pair read with the corpora ──
+    // It is the single most expensive IO in the run (4.5 s of a 40 s
+    // baseline: a bounded window out of a 2.5 GB parquet, over the 64 KB-msize
+    // 9p `/mnt/v` mount) and it depends on NOTHING but the args, so it starts
+    // now and is joined at its use site inside the `--full-json` block. Same
+    // file, same `read_cap`, same rows, same order — pure scheduling.
+    let perpair_job: Option<
+        std::thread::JoinHandle<Result<parquet_loader::PerPairSample, String>>,
+    > = if (args.full_json.is_some() || args.fulleval.is_some()) && args.perpair_metrics.exists() {
+        let path = args.perpair_metrics.clone();
+        let read_cap = args
+            .perpair_cap
+            .saturating_mul(8)
+            .clamp(args.perpair_cap, 40_000);
+        Some(std::thread::spawn(move || {
+            let cols: Vec<&str> = PERPAIR_METRIC_COLS.iter().map(|(c, _)| *c).collect();
+            parquet_loader::load_perpair_sample(&path, &cols, read_cap)
+        }))
+    } else {
+        None
+    };
+
+    // Corpora are INDEPENDENT: each loads its own parquet, scores it, and
+    // runs its own panel — nothing crosses between them until the summary
+    // table below. Running them on rayon and re-assembling in the original
+    // `args.corpora` order therefore changes wall time only (12 serialized
+    // corpora were 31.2 s of a 40.0 s run; the two 6 s corpora dominate the
+    // parallel form). Every per-corpus number is computed by exactly the
+    // same code on exactly the same rows.
+    zensim_validate::parallel::init();
+    let rendered: Vec<Result<CorpusResult, String>> = args
+        .corpora
+        .par_iter()
+        .map(|corpus| render_corpus(corpus, &args.features_root, args.regime_720, &ens))
+        .collect();
+    let mut results: Vec<CorpusResult> = Vec::with_capacity(rendered.len());
+    for r in rendered {
+        match r {
             Ok(r) => results.push(r),
             Err(e) => {
                 eprintln!("bake_verdict: {e}");
                 return ExitCode::from(1);
             }
         }
+    }
+    pt.mark("all corpora (load+score+stats, parallel)");
+
+    // Per-pair dump. Hoisted out of `render_corpus` when the corpus loop went
+    // parallel: it is only meaningful with a single `--corpora` selection, and
+    // the previous "every corpus writes, last one wins" ordering would have
+    // become nondeterministic. Writing the LAST corpus's rows here preserves
+    // the old semantics exactly, and deterministically.
+    if let Some(path) = args.per_pair_output.as_deref()
+        && let Some(last) = results.last()
+    {
+        let mut s = String::from("human\tpred\n");
+        for (h, p) in last.humans.iter().zip(last.rescaled_scores.iter()) {
+            s.push_str(&format!("{h}\t{p}\n"));
+        }
+        if let Err(e) = std::fs::write(path, s) {
+            eprintln!("bake_verdict: write per-pair output: {e}");
+            return ExitCode::from(1);
+        }
+        eprintln!("  wrote per-pair predictions to {}", path.display());
     }
 
     // One-row summary across all corpora at the top.
@@ -2509,6 +2689,7 @@ Run the dedicated q-sweep harness for those._\n",
     // monotonicity + tied + dial range on the densified multi-codec grid.
     let (dial_md, dial_metrics) = dial_panel(&ens, &args.dial_grid);
     buf.push_str(&dial_md);
+    pt.mark("DIAL panel (grid load + score + mono/tied)");
 
     let basename = |p: &Path| -> String {
         p.file_name()
@@ -2669,6 +2850,8 @@ Run the dedicated q-sweep harness for those._\n",
     for r in &results {
         buf.push_str(&r.body);
     }
+
+    pt.mark("ramp/zone/corruption panels");
 
     // ── Related specialized evals (tracked-down historical set) ──────────
     // Everything the default eval does NOT run inline — because it needs a
@@ -3016,13 +3199,12 @@ Run the dedicated q-sweep harness for those._\n",
         // KADIS multi-metric per_pair. Read a bounded window (≤40k rows) then
         // stride to the cap for source diversity; score the bake's first
         // n_inputs features (the frozen v1 block for a 372 bake).
-        if args.perpair_metrics.exists() {
-            let read_cap = args
-                .perpair_cap
-                .saturating_mul(8)
-                .clamp(args.perpair_cap, 40_000);
-            let cols: Vec<&str> = PERPAIR_METRIC_COLS.iter().map(|(c, _)| *c).collect();
-            match parquet_loader::load_perpair_sample(&args.perpair_metrics, &cols, read_cap) {
+        if let Some(job) = perpair_job {
+            let perpair_load = job
+                .join()
+                .unwrap_or_else(|_| Err("per-pair loader thread panicked".to_string()));
+            pt.mark("--full-json kadis per-pair (join background load)");
+            match perpair_load {
                 Ok(sample) if sample.n_features >= n_inputs => {
                     let idx = stride(sample.feature_rows.len(), args.perpair_cap);
                     let rows: Vec<Vec<f64>> = idx
@@ -3221,7 +3403,17 @@ Run the dedicated q-sweep harness for those._\n",
         }
     }
 
-    eprintln!("bake_verdict: complete in {:.2}s", elapsed.as_secs_f64());
+    pt.mark("--full-json / --output / --html write");
+    pt.finish();
+    // `elapsed` is captured before the markdown tail (line ~2691) so the
+    // report's own "Wall time" row stays comparable with historical
+    // verdicts; `pt.total()` is the honest end-to-end number. They differ
+    // by the whole `--full-json` block, which is why the trace exists.
+    eprintln!(
+        "bake_verdict: complete in {:.2}s (report-timer; {:.2}s end-to-end)",
+        elapsed.as_secs_f64(),
+        pt.total()
+    );
     ExitCode::SUCCESS
 }
 

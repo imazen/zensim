@@ -1,0 +1,47 @@
+#	zensim eval + trainer performance, 2026-08-04
+#	base_commit	58ac09a3195d (main@origin at measurement time)
+#	host	lilith (WSL2) / AMD Ryzen 9 7950X / 28 vCPU visible / 58 GiB
+#	rustc	1.97.1 (8bab26f4f 2026-07-14), release profile, no target-cpu=native
+#	bake	/mnt/v/output/zensim/bakes/sota944/bakes/C_co3a_s1301.bin (944-in MLP)
+#	threads	default policy = available_parallelism() - 4 = 24 (ZENSIM_THREADS / RAYON_NUM_THREADS override)
+#	identity	every "after" row gated by scripts/verify_verdict_identity.sh (bit-identical) or scripts/verify_bake_identity.sh
+#	commands
+#	  verdict:  bake_verdict --bake <bake> --regime 944 [--corpora <c>] --name p --full-json <j> --output <m>
+#	  trainer:  scripts/wave7_armH_seed.sh argv with --epochs 11 (see ~/tmp/evalperf/real_recipe_ab.sh)
+#
+kind	case	n_rows	base_s	opt_s	speedup	base_peak_rss_mb	opt_peak_rss_mb	notes
+verdict	full12_run1	51924	39.97	9.33	4.28	728	2874	12-corpus --regime 944 (the sota944_verdict.sh path)
+verdict	full12_run2	51924	39.39	8.82	4.47	730	2480	after drop-features-early + blocked transpose
+verdict	full12_run3	51924	39.85	8.88	4.49	729	2486
+verdict	cid22_only	4292	10.39	4.56	2.28	728	951	single-corpus; --full-json kadis load now overlapped
+verdict	sdr25	50	7.45	4.16	1.79	708	857
+verdict	aic4	300	7.41	4.17	1.78	709	858
+verdict	konjnd	504	7.40	4.13	1.79	708	861
+verdict	live	779	7.47	4.14	1.80	709	865
+verdict	csiq	866	7.56	4.13	1.83	710	869
+verdict	tid	3000	8.32	4.25	1.96	710	909	per-band panel ON
+verdict	cid22	4292	8.99	4.23	2.13	710	930	per-band panel ON
+verdict	imazen26	10025	12.78	5.48	2.33	710	935	per-band panel OFF
+verdict	kadid	10125	13.25	6.26	2.12	710	1007	per-band panel ON
+verdict	hfnlproxy	11356	14.04	6.72	2.09	710	943	per-band panel OFF
+#
+#	alpha + beta*rows fit over the 10 single-corpus rows (least squares)
+fit	alpha_fixed_s	-	7.018	3.921	1.79	-	-	fixed cost: bake load + sha256 pre-pass + dial grid + corruption grid + kadis per-pair + json/html
+fit	beta_ms_per_row	-	0.5930	0.2048	2.90	-	-	R2 base 0.9862 / opt 0.8840 (opt R2 lower: per-band ON/OFF splits the slope)
+#
+#	trainer — REAL wave-7 arm-H recipe (11 groups, 944 feat, 50k pairs/epoch, --coarse-decay 1e-5),
+#	11 epochs instead of 120 so the A/B fits in one sitting. 11 train epochs + 2 validations.
+trainer	real_recipe_11ep_total	-	247.50	171.57	1.44	11915	11873	includes ~65 s of group loading, unchanged
+trainer	real_recipe_train_phase	-	182.30	96.20	1.89	-	-	t at epoch 10 (11 train epochs + 2 validations)
+trainer	real_recipe_per_train_epoch	50000	14.52	8.16	1.78	-	-	solved from (11T+2V, T+V); the L2 divide removal
+trainer	real_recipe_per_validation	730000	11.28	3.24	3.48	-	-	parallel predict_group + per-group panels
+trainer	small3_11ep_total	13991	63.03	34.34	1.84	386	338	kadid+tid+csiq, 20k pairs/epoch
+trainer	kadis50k_11ep_total	50000	10.74	7.25	1.48	1038	1038	1 group, 2k pairs/epoch (validation-dominated)
+#
+#	thread sweep, 12-corpus verdict (ZENSIM_THREADS=N)
+threads	1	51924	-	37.96	-	-	1102	serial path ~= baseline; +374 MB is the overlapped kadis read
+threads	4	51924	-	15.71	-	-	1858
+threads	8	51924	-	10.52	-	-	2163	knee
+threads	16	51924	-	9.40	-	-	2403
+threads	24	51924	-	9.22	-	-	2421	default policy
+threads	24_MALLOC_ARENA_MAX_2	51924	-	10.05	-	-	1990	-18% RSS for +9% time
