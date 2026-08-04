@@ -366,18 +366,44 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   `source_verdict` + `per_pair_stripped`); family toggles (arm A/B/C-seeds,
   coherence/W4, near-top, distilled, ensembles, era bridge, pre-944 era) + a
   collapsible per-bake picker + 'curated' preset replace the flat 160-chip bar; the
-  scoreboard still lists every cell (dimmed = hidden, click to toggle). The
-  heavyweight charts (scatter cells, dial curves, 10-band bars, heatmap, trade maps)
-  zoom (wheel, 1x-20x cursor-centered), pan (pointer drag once zoomed) and reset
-  (double-click / corner ⟲) via `makeZoomable` — viewBox math only, shim-safe
-  (listeners bound at build, pointer/rect APIs typeof-guarded in handlers).
+  scoreboard still lists every cell (dimmed = hidden, click to toggle).
   `model.feature_transforms` embeds are capped at the 48 chips the card can show
-  (`n_feature_transforms` keeps the true count). 162-bake board = 8.9 MB, gates PASS.
+  (`n_feature_transforms` keeps the true count).
+  Plus (2026-08-04, dashboard-rebuild session) **ECharts SEMANTIC zoom + real
+  sortability + regime truth**: the five heavyweight panels (scatter-matrix cells,
+  per-codec dial curves, 10-band bars, cross-corpus heatmap, trade maps) are **Apache
+  ECharts 5.6.0** (canvas renderer) — dataZoom rescales the AXES and re-plots while
+  marks/strokes/labels stay constant size; trade-map labels `labelLayout.hideOverlap`
+  (hidden at 1x, REAPPEAR zooming in); dial tooltips show p25/p50/p75 at the hovered
+  q; heatmap has a calculable visualMap; band bars show negative bands (old view
+  clamped to 0); double-click = reset. The predecessor `makeZoomable` viewBox zoom
+  (geometric — overlaps stayed overlapped at every level) is DELETED. **Vendoring:
+  the bundle is >30 KB so it is NEVER in git** — bytes at
+  `/mnt/v/zen/vendor/echarts/echarts-<ver>.min.js`, described + sha256-pinned by the
+  committed `scripts/v_next/vendor/echarts.pointer.md`; `build_html` verifies the
+  sha and fails LOUD with download instructions (env `ZEN_ECHARTS_JS` overrides the
+  path); the bundle rides its own `<script id=vendor-echarts>` ahead of the app
+  script. Charts ink from `THEME_VARS` — ONE Python dict generating both the CSS
+  custom properties and `DATA.chartThemes` (light+dark) — and rebuild on
+  prefers-color-scheme flips AND on the artifact viewer's `data-theme` attribute
+  (MutationObserver, typeof-guarded). echarts.init is guarded on a real canvas 2d
+  context + lazy on first viewport intersection, so the DOM-shim harness (no canvas)
+  still renders the page. Same session fixed the **scoreboard sort regression**
+  (th.onclick called renderTable() — which RETURNS a detached wrapper — instead of
+  mountTable(); sorted tables were built and thrown away since 62404415) and made
+  EVERY stat table sortable (`makeSortable`: Mohammadi, band, gates, loop). The
+  scoreboard/chips **regime** now shows the model's TRUE input width from `n_inputs`
+  (372/720/924/944-class) — the stored campaign flag string reads "720" cosmetically
+  on all 166 board JSONs. 166-bake board = ~10.3 MB (cap 12 MB), gates PASS.
   **Regen gates (MANDATORY, run on every emitted HTML):**
-  `scripts/v_next/gauntlet_gates.sh <html>` = `node --check` on the extracted
-  inline JS + the DOM-shim render harness (`gauntlet_render_check.js`) — committed
-  2026-08-01 (previously ad-hoc; the raw-Python-string `\'` escape class blanked
-  the page once, e7f929ca).
+  `scripts/v_next/gauntlet_gates.sh <html>` = `node --check` on EVERY extracted
+  `<script>` block + the DOM-shim render harness (`gauntlet_render_check.js`) —
+  committed 2026-08-01 (previously ad-hoc; the raw-Python-string `\'` escape class
+  blanked the page once, e7f929ca). The harness now ALSO dispatches real header
+  clicks and asserts the ATTACHED tables reorder (the sort-regression test), checks
+  ECharts mounts + built options + both chart themes, and SSR-renders one option per
+  panel kind through the real echarts (svg SSR, no canvas) so a malformed option
+  fails the gate instead of blanking the page.
 The first two modes' plots: per-bake scatter+trend, grouped 10-band SROCC bars,
 calibration curve, residual, candlestick, SROCC heatmap, 2-panel Pareto trade
 (CID22 vs nonphoto / KonJND), composite ranking bar, per-codec dial plots +
