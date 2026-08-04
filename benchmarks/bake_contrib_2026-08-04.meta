@@ -1,0 +1,32 @@
+# bake_contrib shortlist runs — 2026-08-04
+# Registered: benchmarks/sota944_campaign_2026-08-03.md "REGISTERED APPENDIX — bake_contrib" (§C.0-C.7, committed 8c2b1c98 BEFORE any run)
+# Tool commit: ca28e7d0 (zensim-validate bin bake_contrib + bake_runtime::score_from_network_output refactor)
+# Host: WSL2 dev box; binary: CARGO_TARGET_DIR=~/tmp/zensimctr-target cargo build --release -p zensim-validate --bin bake_contrib
+#
+# Command shape (per bake; corpora per §C.2, regime-native):
+#   bake_contrib --bake <bake.bin> [--packed <twin>] \
+#     --corpus cid22:<root>/ext_cid22val.parquet:human_score:100 \
+#     --corpus kadid:<root>/ext_kadid.parquet:human_score:100 \
+#     --corpus csiq:<root>/ext_csiq.parquet:human_score:100 \
+#     --corpus live:<root>/ext_live.parquet:human_score:100 \
+#     --corpus imazen26@4000:<root>/<imazen26-slice>:human_score:100 \
+#     --out <name>.tsv --dump-scores <name>.scores.tsv --summary <name>.summary.md
+#
+# Roots: 944 class -> /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01 (imazen26 = ext_imazen26.parquet)
+#        winner_dial + B-secondary -> /mnt/v/zen/zensim-training/ext720-canonical-2026-07-22 (imazen26 = ext_imazen26_720_nn_full.parquet)
+#        B-primary -> /mnt/v/zen/zensim-training/2026-05-15-full-features (cid22/kadid _372col_2026-05-15, csiq/live _372col_2026-07-18, imazen26 = imazen26_test_120k_2026-07-16.parquet)
+#
+# Bakes (sha256 prefix):
+#   H_co3abpg_s2507   9c979465a41546ec  /mnt/v/output/zensim/bakes/sota944/bakes/H_co3abpg_s2507.bin   (packed twin H_co3abpg_s2507_packed.bin, 165872 B)
+#   C_em944_s31       c35ea099a6643d6c  /mnt/v/output/zensim/bakes/sota944/bakes/C_em944_s31.bin       (packed twin C_em944_s31_packed.bin, 172067 B)
+#   C_co3a_s1301      fafaab4df2031e84  /mnt/v/output/zensim/bakes/sota944/bakes/C_co3a_s1301.bin      (no packed twin)
+#   winner_dial       8d5e4d456b29a7dd  /mnt/v/output/zensim/corr-lq/Ebothg_hfgain_winsor_dial.bin
+#   B (b_sdr)         b6fe5233ee9c752d  zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin
+#
+# Parity gate: max|decomposed - score_row| = 0.0 on every run (19,404 / 19,151 rows).
+# Structural-zero gate (944 class): PASS, Δ ≡ 0 exactly on f156-371, all 3 bakes.
+#
+# bake_contrib_kadid_types_2026-08-04.tsv: scripts/contrib_kadid_types.py over the
+# --dump-scores files (full 10,125-row kadid corpora only); row identity = the §C.0
+# verified sorted-dist_img arithmetic; stats = panel --batch via scripts/lib/zen_stats.py.
+# Full-corpus rows reproduce the bake_contrib baselines exactly (cross-check).

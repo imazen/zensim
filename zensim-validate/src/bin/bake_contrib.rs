@@ -286,6 +286,9 @@ struct CorpusSpec {
     path: PathBuf,
     target_col: Option<String>,
     target_scale: f64,
+    /// Per-corpus stride-decimation cap (`name@N` spec syntax); falls back
+    /// to the global `--rows` cap when absent.
+    cap: Option<usize>,
 }
 
 struct CorpusData {
@@ -333,8 +336,12 @@ fn main() -> ExitCode {
                     eprintln!("bad --corpus spec {spec:?} (want name:path:target_col:scale)");
                     return ExitCode::from(2);
                 }
+                let (name, cap) = match parts[0].split_once('@') {
+                    Some((n, c)) => (n.to_string(), Some(c.parse().expect("name@N cap usize"))),
+                    None => (parts[0].to_string(), None),
+                };
                 corpora.push(CorpusSpec {
-                    name: parts[0].to_string(),
+                    name,
                     path: parts[1].into(),
                     target_col: if parts[2] == "-" {
                         None
@@ -342,6 +349,7 @@ fn main() -> ExitCode {
                         Some(parts[2].to_string())
                     },
                     target_scale: parts[3].parse().expect("target_scale f64"),
+                    cap,
                 });
             }
             other => {
@@ -416,7 +424,7 @@ fn main() -> ExitCode {
             }
         };
         let idx: Vec<usize> = (0..g.feature_rows.len()).collect();
-        let (row_idx, rows, targets) = match rows_cap {
+        let (row_idx, rows, targets) = match spec.cap.or(rows_cap) {
             Some(cap) if g.feature_rows.len() > cap => (
                 stride_cap(&idx, cap),
                 stride_cap(&g.feature_rows, cap),

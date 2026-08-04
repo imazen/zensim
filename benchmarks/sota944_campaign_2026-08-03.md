@@ -3484,7 +3484,7 @@ pass).
 |---|---|
 | 944 class (s2507, s31, s1301) | ext944 root: `ext_cid22val` (4,292) + `ext_kadid` (10,125) + `ext_csiq` (866) + `ext_live` (779) + `ext_imazen26` (4,000 of 10,025) |
 | winner_dial (156-in, regime 720) | same five names under the ext720 root |
-| B (372-in) | **primary**: 372-era real-pool parquets — `cid22_features_372col_2026-05-15` + `kadid_features_372col_2026-05-15` + `csiq_features_372col_2026-07-18` + `live_features_372col_2026-07-18` + `imazen26_test_372col_2026-07-16` (stride 4,000) under `/mnt/v/zen/zensim-training/2026-05-15-full-features/`; **secondary**: the ext720 five (documents the structural constant-offset situation — under a folded-regime slice f156-371 are constants, so their std(Δ) ≡ 0 BY CONSTRUCTION and only the primary run can answer the f156-371 question) |
+| B (372-in) | **primary**: 372-era real-pool parquets — `cid22_features_372col_2026-05-15` + `kadid_features_372col_2026-05-15` + `csiq_features_372col_2026-07-18` + `live_features_372col_2026-07-18` + `imazen26_test_372col_2026-07-16` (stride 4,000) under `/mnt/v/zen/zensim-training/2026-05-15-full-features/`; **secondary**: the ext720 five (CORRECTED in the results section: the ext720 root is the PRE-fold 720 regime — real v1-372 pools ++ v2-348, NOT zeroed; pool-zeroing began with the 924 streaming fold. The secondary run therefore measures extraction-vintage robustness, not a constant-offset situation as this cell originally claimed) |
 
 csiq/live are in the slice because they are the breadth axis Amendment 8 found
 binding, and the supervisor's question names them. The overall "balanced
@@ -3752,3 +3752,210 @@ provenance live in the board fullevals' `rank_graft_sources`).
   complement.
 - Era `balanced_composite`/imazen26/nonphoto remain regime-incomparable
   context — the incumbents table prices axes, it does not rank eras.
+
+### bake_contrib RESULTS (2026-08-04) — every 944 MLP tunes out the SAME 277 inputs (216 structural + 39 never-populated + 22 winsor-recipe-killed); B's with-iw pools carry 45% ⇒ the width-discriminator trigger FIRES; KADID's collapse is broad (including KADID's own JPEG cells) and the row-mass starvation story is measured-false
+
+Tool: `bake_contrib` (commit `ca28e7d0`; TSVs
+`benchmarks/bake_contrib_*_2026-08-04.tsv` + `.meta`). Every gate registered in
+§C.1 held on every run: **parity vs `score_row` = 0.0 exactly** (19,404 /
+19,151 rows per run), **structural-zero gate PASS with Δ ≡ 0 exactly** on all
+three 944 bakes, and every baseline |SROCC| reproduces its board number to 4 dp
+(s2507 kadid 0.4233, s31 0.5692, s1301 0.3177, winner_dial 0.9464 + cid22
+0.8940 + csiq 0.9584 + live 0.9600, B-secondary kadid 0.8085). Analytic
+path-norm cross-check vs ablation: SROCC 0.94-0.96 on the 944 class, 0.9995 on
+the linear B (exact by construction up to the spline), **0.55 on winner_dial**
+— the one disagreement, driven by its output spline's nonuniform slope (the
+analytic norm is spline-blind); the dead-set conclusions don't rest on it.
+
+#### 1. What the 944 class tunes out — the dead set is IDENTICAL across seeds AND recipes (Jaccard 1.000)
+
+All three 944 MLPs (s2507=co3abpg, s31/s1301=co3a — different groups, different
+seeds) are dead on **exactly the same 277/944 inputs**, and the packed twins'
+all-zero L0 columns are **exactly the same 277** (ablation-dead ∩
+packed-all-zero = 277/277 on both twins). Decomposition, measured against the
+training tables themselves:
+
+- **216** = f156-371 structural zeros (by regime design; the built-in gate).
+- **39** = append/tail slots that are **constant-zero in the training data
+  itself** (f720, f721, the whole f754-772 block, f805/806, f822/823, f856/857,
+  f873/874, f907/908, and 8 of the tail-20: f927/928/932/933/937/938/942/943).
+  These are never-populated extraction slots (toggle-OFF / reserved class —
+  consistent with the BANDVIS extraction-stays-OFF adjudication), dead-on-
+  arrival in every 944-era table checked (safesyn, cid22_train201, cid22val).
+- **22 = the finding: features that VARY in every current training table but
+  are force-killed by inherited degenerate winsor windows.** The co3a recipe
+  carries explicit `winsor_p99:<idx>:0,0` entries — clip-to-[0,0] ⇒ transform
+  ≡ 0 ⇒ x̃ ≡ 0 ⇒ the input can never reach the network — for 11 consecutive
+  index PAIRS: (731,732) (748,749) (782,783) (799,800) (816,817) (833,834)
+  (850,851) (867,868) (884,885) (901,902) (918,919). Measured: f731/f748/f901
+  have 100k+ distinct values in `ext_safesyn_full` and full variance in
+  `tbig_944_200k` and `ext_cid22val` — these are REAL, populated append
+  features being discarded by a transform screen that predates their
+  population (s2507's bare `--feature-transform winsor` reproduces the same
+  collapse, so the degenerate windows are in the shared screen lineage, not
+  one argv). **Registered lever (cheap): refit the winsor screen on the
+  current 944 tables and retrain — 22 populated append features come back.**
+  Suggestive adjacency: the single biggest KADID-supporting input in BOTH 944
+  recipes is **f730** (removal Δ-SROCC −0.202 on s2507, −0.260 on s31), the
+  immediate neighbor of the killed (731,732) pair.
+
+Family contribution profiles (share of Σ mean|Δ|; per-corpus shares within ±2%
+of overall in every family — the 944 class's blocks are corpus-stable):
+
+| bake | v1fold156 | zeros | v2-348 | append204 | tail20 | dead |
+|---|---:|---:|---:|---:|---:|---:|
+| H_co3abpg_s2507 | 27.9% | 0 | 50.0% | 20.4% | 1.7% | 277 |
+| C_em944_s31 | 26.8% | 0 | 52.2% | 18.8% | 2.2% | 277 |
+| C_co3a_s1301 | 27.5% | 0 | 51.5% | 19.3% | 1.6% | 277 |
+
+winner_dial (156 in): **0/156 dead** — every input alive, contribution diffuse
+(top single input carries mean|Δ| 4.2 of a ~19/8.4-unit... see TSV; largest
+single-feature kadid removal cost is only −0.015: massive redundancy). B (372
+linear, lasso-class): **277/372 dead — exact zero coefficients** (95 live), the
+same count as the 944 class by coincidence of construction (lasso sparsity vs
+regime zeros + recipe kills).
+
+#### 2. Bake-size implication (arithmetic only, per §C.1)
+
+| bake | file bytes | packed twin | dead cols | freed at dead-prune (L0 rows + scaler) | note |
+|---|---:|---:|---:|---:|---|
+| H_co3abpg_s2507 | 510,262 | 165,872 | 277 | **73,128 B (44% of packed)** | f16 twin, 128-wide |
+| C_em944_s31 | 509,853* | 172,067 | 277 | **73,128 B (42% of packed)** | same |
+| C_co3a_s1301 | 509,853 | — | 277 | (73,128 B on a future f16 twin) | no packed twin |
+| B (b_sdr) | 7,325 | — | 277 | ~2,770 B (f16 rows + scaler) | already lasso-sparse + f16 |
+| winner_dial | 83,253 | — | 0 | 0 | nothing prunable |
+
+*s31 raw size read from disk; twin sizes from the runs. Prune = drop dead input
+columns (out_dim×dtype bytes + 8 B scaler each; transform/bounds entries not
+counted). `sparse_overrides`/pruned-format implementation remains FUTURE WORK —
+these are estimates of the registered arithmetic, not a shipped format. The
+944-class headline: **a 944 bake is structurally a 667-input model paying a
+944-input storage bill; ~44% of the packed encoder is dead rows.**
+
+#### 3. The f156-371 question (supervisor sharpening) — B carries 45% there; the trigger FIRES
+
+B on the real-pool 372-era corpus (primary run): f156-371 =
+**45.9% of total contribution** (peaks 17.1 + masked 19.6 + iw 9.1), and on the
+named axes: **kadid 44.9%, csiq 42.3%, live 44.9%** — every one far above the
+registered 20% trigger. 49 of B's 95 live inputs are pool features; its top
+kadid supporters include masked-pool f231/f237/f243 alongside basic f4/f30.
+winner_dial's share is structurally 0% (n_inputs=156) — and it is
+simultaneously the strongest KADID/CSIQ/LIVE bake in hand **using only the
+v1-basic block**, which upper-bounds how much of the era gap the pools alone
+can explain: the pools are *sufficient-helpful* for a 372-linear (B leans on
+them) but demonstrably *not necessary* for classic-IQA breadth (winner_dial).
+⇒ Per §C.6 the **width discriminator runs** (results in the follow-up section
+below). CORRECTION folded into §C.2: the ext720 root is the PRE-fold regime
+with REAL pools (zeroing began at the 924 streaming fold), so B's secondary
+run measures extraction-vintage robustness (kadid 0.8085 vs 0.8201 on the
+2026-05-15 extraction — the board number was never a zeroed-pool artifact).
+
+#### 4. KADID diagnosis — measured (no retrain)
+
+**Sampling-mass arithmetic (§C.0, now with the per-type data): the "kadid is
+1.4% of rows" starvation story is FALSE.** The trainer samples groups
+proportional to `train_w`, so kadid gets 13.70% of all pairs (co3a) / 7.87%
+(co3abpg) — 6,849 / 3,937 pairs per 50k-pair epoch, ~40× its row share. KADID
+is not under-SAMPLED; what it gets is rank-only pairs (loss_mode=rank,
+within_ref=false ⇒ cross-image pairs) against a 3.65-6.35-weight ocean of
+codec/teacher MSE+rank mass.
+
+**Per-type SROCC (25 types × 6 runs;
+`benchmarks/bake_contrib_kadid_types_2026-08-04.tsv`; full-corpus rows
+reproduce every baseline exactly).** The 944 collapse is BROAD — worst pooled
+family for each: s2507 noise 0.032, s31 **compression 0.032** (jpeg2000 0.121,
+jpeg 0.072!), s1301 compression 0.157. Highlights (|SROCC| per type):
+
+| type | s2507 | s31 | s1301 | winner_dial | B372 |
+|---|---:|---:|---:|---:|---:|
+| jpeg2000 | 0.55 | **0.12** | 0.18 | 0.95 | 0.94 |
+| jpeg | 0.36 | **0.07** | 0.18 | 0.89 | 0.86 |
+| lens_blur | 0.21 | 0.75 | **0.01** | 0.92 | 0.89 |
+| white_noise | 0.29 | 0.33 | 0.17 | 0.92 | 0.89 |
+| impulse_noise | **0.04** | 0.29 | 0.25 | 0.89 | 0.78 |
+| color_saturation_1 | **0.02** | 0.15 | 0.11 | 0.59 | 0.52 |
+| darken | 0.24 | **0.07** | 0.33 | 0.91 | 0.89 |
+| high_sharpen | 0.80 | 0.71 | 0.78 | 0.90 | 0.70 |
+
+Three structural facts fall out: (1) **the collapse includes KADID's own
+codec distortions** — the same models that rank real modern-codec output at
+0.90-0.92 (imazen26) rank KADID's JPEG cells at 0.07-0.55, so this is not
+"non-codec families are missing", it is "KADID's rendering of ALL its
+distortion families is unranked"; (2) **the per-type profile is seed-unstable**
+(s31 blur 0.75-0.78 but compression 0.03-0.12; s2507 nearly the reverse) —
+under this recipe the kadid ordering is a weakly-constrained side effect, not
+a learned skill; (3) **winner_dial holds 0.53-0.96 on every one of the 25
+types using ONLY the 156 v1-basic block** — nothing about kadid's distortions
+requires the pools, the v2 set, or the appends.
+
+**Contribution tie-in (§C.5).** The 944s' kadid ordering rests on a couple of
+concentrated supports — f730 (append; −0.202/−0.260 on removal) and f137
+(v1fold; −0.182/−0.168) — while several live inputs are actively
+kadid-ADVERSARIAL (removing f798 IMPROVES kadid +0.094/+0.106; f726, f499,
+f21 similar; and on s2507, removing top-mover f20 gains +0.083 kadid while
+costing csiq/live). By contrast winner_dial's kadid support is spread across
+~all 156 inputs (max single removal −0.015). Mechanism at the strength these
+measurements support: **not input starvation of the v1 block** (v1fold is
+27-28% of contribution and 0 dead in every 944 bake) but a
+**training-pressure allocation failure amplified by feature-set change**: the
+dominant codec/teacher mass shapes nearly every live feature for codec
+ranking; kadid's rank-only 8-14% pair share holds a couple of append/v2
+features as its whole foothold; and part of the append neighborhood it would
+use (the 22 winsor-killed features, incl. f730's immediate neighbors 731/732)
+is force-zeroed by the inherited screen. Whether the remaining gap is
+features-causal (the missing pools) or data-mass-causal is exactly what the
+triggered width discriminator measures.
+
+**Registered falsifiable lever (unchanged from §C.5, now sharpened):** kadid
+`train_w` 0.5→1.5 + `loss_mode` rank→both. Prediction if
+optimization-pressure-causal: the seed-unstable families (compression, blur,
+noise) recover substantially (per-type ≥0.5) at CID22 cost ≤0.005; if
+input-starvation-causal: weight moves don't fix the collapsed types and the
+lever is the winsor-screen refit + (conditionally) pool reintroduction.
+
+#### 5. Supervisor correction recorded (2026-08-04, mid-wave): reintroduction is a KEYED JOIN, not a re-extraction campaign
+
+Recorded verbatim intent: f156-371 values were never removed from the 372-era
+parquets. (1) The width-discriminator trigger + design stand unchanged. (2) IF
+the discriminator says features-causal, the next step is **join-first**: build
+`ext944iw` training views by joining old-parquet f156-371 onto the 944 tables
+by pair identity / encode_sha (legs: 372 canonical tables; bigcodec: the mm6
+1.56M-row table — tbig-944 is 5.7M keyed cells so coverage is PARTIAL and the
+join must report per-table match rates; kadis: the 372 canonical). Documented
+as a NEW named regime, never column-mixed with plain-944 rows. (3) **The
+honest caveat that survives the correction — cross-extractor drift**: the
+924/944 streaming extractor used RAW unpadded slices while the 372 era padded
+(the documented padded-width divergence behind the regime-purity rule), so
+joined f156-371 may be numerically inconsistent with a future unified runtime
+pass. Registered drift gate: if the join-trained model wins, extract a
+~200-pair sample with a unified extractor pass and measure joined-vs-unified
+drift on f156-371 BEFORE any ship claim; re-extraction enters only as the
+fallback (drift beyond tolerance, coverage gaps, eval grids). (4) Ship-decision
+facts, not blockers: runtime reintroduction re-adds the IW pool's extraction
+cost to every production compare, and the IW-explodes-on-nonphoto hazard
+(winsor guards load-bearing) applies.
+
+#### 6. Width-discriminator inputs (built + gate-verified this session)
+
+Per §C.6 the discriminator trains the co3a data recipe at 372 width on
+**row-sequence-verified twins** of the exact s31 tables (all `(ref_basename,
+human_score)` sequences checked, not assumed): ext720-root
+`ext_safesyn_full` / `ext_cid22_train201` / `ext_kadid` / `ext_tid` (all four
+sequence-equal to their ext944 counterparts, 111,068 / 17,611 / 10,125 / 3,000
+rows) + `tbig_372_200k.parquet` (built from the Tower mirror of the ext720
+bigcodec train views by EXACT KEYED JOIN on `encoded_filename` against
+`tbig_944_200k`'s 208,169 cells, emitted in the 944 slice's row order and
+G-T1 sequence-verified; the first attempt replicated `build_tbig_200k.py`'s
+stride law and was G-T1-REJECTED — the 720 views' row order differs from the
+944 views', so stride replication is order-dependent and picks different
+cells. The keyed join is the stronger construction: exact cell identity) + `kadis_372_ssim2_50k_twin.parquet`
+(keyed join of the 372-era `feat_*` from the KADIS GPU canonical onto
+`kadis_944_ssim2_50k`'s 50k cells by `(source_id, round(score_ssim2_gpu,6))`;
+0 misses / 50,000; human_score copied verbatim so targets are twin-exact; 981
+duplicate keys existed among the 700k canonical rows — ≤ a handful of same-
+source near-tie feature swaps possible, negligible for training). The
+per-slot transform list is re-fit at 372 via the trainer's winsor auto-fit
+(the s31 list indexes 944-fold slots and carries the degenerate windows —
+inheriting it would replant the §1 bug), documented as the one recipe
+substitution. k=2 seeds (31, 1301), `--max-features 372`, all other
+hyperparameters verbatim from the s31 argv.
