@@ -125,7 +125,7 @@
         "all": true
       },
       "reason": "the ext-lineage eval tables (ext720/ext924/ext944 ext_kadid.parquet) store human_score = (5-dmos)/4, the INVERSE of the canonical (dmos-1)/4 — KADID's dmos is quality-oriented (raw crowdsourced DCR falls 4.0789->2.0072 across severity levels 1-5, 349,800 ratings). Every KADID stat measured on an ext root has the WRONG SIGN vs KADID's real human MOS: negate srocc_signed to read it. Rank-order stats (srocc/krocc/pwrc) negate exactly; PLCC/Z-RMSE/OR/bands were fit against a reflected target and must be re-measured, not negated. 110 of 188 board bakes are anti-correlated with KADID's true MOS while the board renders all 188 as positive magnitudes.",
-      "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F + F.R1..F.R8 (T1 bit-exact, both residuals 0.0; T3 root cross-check; F.R1b raw-DCR ground truth); root cause scripts/canonical_corpus/build_fr_corpus_pairs.py:113; benchmarks/wave9/kadid_orientation_2026-08-04.md (735d6978)",
+      "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F + F.R1..F.R8 (T1 bit-exact, both residuals 0.0; T3 root cross-check; F.R1b raw-DCR ground truth); root cause scripts/canonical_corpus/build_fr_corpus_pairs.py:113; benchmarks/wave9/kadid_orientation_2026-08-04.md (735d6978); measurements benchmarks/kadid_orientation/",
       "date": "2026-08-04",
       "fix_path": "fix build_fr_corpus_pairs.build_kadid() to (dmos-1)/4, rebuild ext720/ext924/ext944 ext_kadid.parquet with the corpus-orientation gate (scripts/canonical_corpus/check_target_orientation.py) enforced at build time, then re-verdict. Until then: negate rank.kadid.srocc_signed; do NOT cite rank.kadid.srocc (unsigned) at all."
     },
@@ -250,7 +250,7 @@
         ]
       },
       "reason": "this bake is ANTI-CORRELATED with KADID's real human MOS (negative signed SROCC vs the corrected quality-oriented target) — its KADID number is not a weak skill number, it is a backwards one. Cause: it trained on ext_kadid.parquet, whose target is inverted, so the inversion is inherited (dose-response: kadid train weight 0.50 -> mean -0.457, weight 1.50 -> mean -0.925 across 111 fullevals). Per-type evidence: H_co3abpg_s2507 is positive on exactly the 8 compression+noise KADID types and negative on all 17 analytic types.",
-      "evidence": "benchmarks/sota944_campaign_2026-08-03.md F.R2/F.R3 (T3 orientation-corrected re-score through bake_verdict; T4 per-distortion-type via panel --batch); the per-bake list is the measured set at /home/lilith/tmp/kadid/kadid_signed_all.tsv, regenerable from the stored fullevals by negating rank.kadid.srocc_signed",
+      "evidence": "benchmarks/sota944_campaign_2026-08-03.md F.R2/F.R3 (T3 orientation-corrected re-score through bake_verdict; T4 per-distortion-type via panel --batch); the per-bake list is committed at benchmarks/kadid_orientation/kadid_signed_all_2026-08-04.tsv, regenerable from the stored fullevals by negating rank.kadid.srocc_signed",
       "date": "2026-08-04",
       "fix_path": "retrain on a corrected ext_kadid.parquet if KADID competence is wanted; KADID is a train==val guard, not a ship gate, so no selection outcome changes — but a 944 bake must never be promoted on a KADID number that is actually negative"
     },

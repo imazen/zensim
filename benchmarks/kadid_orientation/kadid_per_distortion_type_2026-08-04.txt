@@ -1,0 +1,40 @@
+T4 — per-distortion-type signed SROCC vs TRUE quality ((dmos-1)/4)
+
+type name                          n winner_dial  shippedB      H944
+1    gaussian blur               405    +0.956    +0.945    -0.524
+2    lens blur                   405    +0.920    +0.886    -0.208
+3    motion blur                 405    +0.956    +0.950    -0.567
+4    color diffusion             405    +0.927    +0.867    -0.342
+5    color shift                 405    +0.845    +0.723    -0.653
+6    color quantize              405    +0.884    +0.851    -0.364
+7    color saturation 1          405    +0.589    +0.519    +0.019
+8    color saturation 2          405    +0.946    +0.886    -0.691
+9    JPEG2000                    405    +0.945    +0.938    +0.546
+10   JPEG                        405    +0.894    +0.858    +0.361
+11   white noise                 405    +0.919    +0.891    +0.290
+12   white noise in colour       405    +0.944    +0.927    +0.129
+13   impulse noise               405    +0.889    +0.777    +0.043
+14   multiplicative noise        405    +0.949    +0.937    +0.253
+15   denoise                     405    +0.920    +0.773    -0.306
+16   brighten                    405    +0.949    +0.911    -0.686
+17   darken                      405    +0.912    +0.890    -0.236
+18   mean shift                  405    +0.756    +0.679    -0.407
+19   jitter                      405    +0.958    +0.945    -0.636
+20   non-eccentricity patch      405    +0.593    +0.417    +0.080
+21   pixelate                    405    +0.616    +0.411    -0.235
+22   quantization                405    +0.861    +0.767    -0.439
+23   colour block                405    +0.530    +0.464    -0.347
+24   high sharpen                405    +0.905    +0.701    -0.796
+25   contrast change             405    +0.700    +0.735    -0.447
+
+POOLED (all 10125)             10125    +0.946    +0.820    -0.423
+
+sign counts over the 25 types (vs TRUE quality):
+  winner_dial        positive 25/25   negative  0/25
+  shipped B          positive 25/25   negative  0/25
+  H_co3abpg_s2507    positive  8/25   negative 17/25
+
+T4 RULE: H3 is SUPPORTED iff signs are MIXED. A uniform sign across >=23/25 counts AGAINST H3.
+  winner_dial        dominant sign covers 25/25 -> UNIFORM (against H3)
+  shipped B          dominant sign covers 25/25 -> UNIFORM (against H3)
+  H_co3abpg_s2507    dominant sign covers 17/25 -> MIXED (supports H3)
