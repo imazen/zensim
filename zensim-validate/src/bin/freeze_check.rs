@@ -76,6 +76,7 @@ fn usage() -> ! {
         "freeze_check — freeze-bar / profile PASS-FAIL over a fulleval JSON\n\n\
          usage: freeze_check --fulleval <bake.fulleval.json> [--bar name=value]...\n\
                 freeze_check --fulleval <f> --profile balanced-2026-08-04 [--tsv]\n\
+                             [--annotations <registry.json|none>]\n\
                 freeze_check --tsv-header\n\n\
          default (no --profile): the §5 freeze bar (unchanged).\n\
          --bar sets/overrides a cross-bake numeric bar for: csiq, live\n\
@@ -84,9 +85,97 @@ fn usage() -> ! {
          profile's floors are REGISTERED and fixed).\n\
          --profile balanced-2026-08-04: sota944 AMENDMENT-8 floors F1..F8 +\n\
          the registered balanced_composite (campaign doc §8.1).\n\
+         --annotations: the committed invalidation/annotation registry\n\
+         (benchmarks/eval_annotations.json). Default: $ZENSIM_EVAL_ANNOTATIONS,\n\
+         else ./benchmarks/eval_annotations.json if present, else none (noted).\n\
+         `absent-not-failed` entries make an ABSENT floor axis print\n\
+         `— (absent)` — still not-passed for n/8 (registered rule), but\n\
+         distinct from a measured FAIL, and the n/m-measured form is stated.\n\
          --tsv: one machine row (columns from --tsv-header)."
     );
     std::process::exit(2);
+}
+
+// ── Annotations registry (benchmarks/eval_annotations.json; board-integrity
+// pass 2026-08-04). Machine-readable flags over fulleval cells so superseded /
+// flattered / absent-not-failed numbers are never read as clean wins. Schema
+// documented in the registry file's `_schema` header. ──────────────────────
+#[derive(Clone)]
+struct AnnEntry {
+    id: String,
+    kind: String, // "invalidated" | "annotated" | "absent-not-failed"
+    fields: Vec<String>,
+    scope: serde_json::Value,
+    reason: String,
+}
+
+/// Dot-path presence: absent key OR explicit null ⇒ not present.
+fn field_present(v: &serde_json::Value, dotpath: &str) -> bool {
+    let mut cur = v;
+    for p in dotpath.split('.') {
+        match cur.get(p) {
+            Some(x) => cur = x,
+            None => return false,
+        }
+    }
+    !cur.is_null()
+}
+
+/// Scope predicate: exactly one of missing / present / names / all.
+fn ann_matches(v: &serde_json::Value, e: &AnnEntry) -> bool {
+    if let Some(p) = e.scope.get("missing").and_then(|x| x.as_str()) {
+        return !field_present(v, p);
+    }
+    if let Some(p) = e.scope.get("present").and_then(|x| x.as_str()) {
+        return field_present(v, p);
+    }
+    if let Some(ns) = e.scope.get("names").and_then(|x| x.as_array()) {
+        let name = bake_name(v);
+        return ns.iter().any(|n| n.as_str() == Some(name));
+    }
+    e.scope
+        .get("all")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false)
+}
+
+/// An entry field covers a floor's backing path iff equal or a
+/// segment-boundary prefix (`rank.hfnlproxy` covers
+/// `rank.hfnlproxy.per_ref_mean`; `rank.hfnl` covers neither).
+fn ann_covers(entry_field: &str, floor_field: &str) -> bool {
+    floor_field == entry_field
+        || (floor_field.starts_with(entry_field)
+            && floor_field.as_bytes().get(entry_field.len()) == Some(&b'.'))
+}
+
+fn load_annotations(path: &std::path::Path) -> Result<Vec<AnnEntry>, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let v: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))?;
+    let entries = v
+        .get("entries")
+        .and_then(|e| e.as_array())
+        .ok_or_else(|| format!("{}: no `entries` array", path.display()))?;
+    let mut out = Vec::new();
+    for e in entries {
+        let s = |k: &str| e.get(k).and_then(|x| x.as_str()).map(str::to_string);
+        out.push(AnnEntry {
+            id: s("id").ok_or("entry missing `id`")?,
+            kind: s("kind").ok_or("entry missing `kind`")?,
+            fields: e
+                .get("fields")
+                .and_then(|x| x.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            scope: e.get("scope").cloned().unwrap_or(serde_json::Value::Null),
+            reason: s("reason").unwrap_or_default(),
+        });
+    }
+    Ok(out)
 }
 
 fn f(v: &serde_json::Value, path: &[&str]) -> Option<f64> {
@@ -349,16 +438,30 @@ fn balanced_composite(v: &serde_json::Value) -> Option<f64> {
 }
 
 /// One registered floor: id (TSV fail token), gate name, bar text, measured
-/// text, pass (absent axis ⇒ false, text says UNEVALUABLE).
+/// text, pass (absent axis ⇒ false, text says UNEVALUABLE). `fields` = the
+/// fulleval dot-paths backing the floor (annotation coverage); `absent` = the
+/// backing value(s) were missing; `absent_not_failed` = an
+/// `absent-not-failed` registry entry covers this absence (still not-passed
+/// for n/8 per the registered rule, but printed `— (absent)`, kept out of the
+/// measured-fails list, and counted in the n/m-measured form).
 struct Floor {
     id: &'static str,
     gate: &'static str,
     bar: String,
     measured: String,
     pass: bool,
+    fields: &'static [&'static str],
+    absent: bool,
+    absent_not_failed: bool,
 }
 
-fn floor_ge(id: &'static str, gate: &'static str, bar: f64, got: Option<f64>) -> Floor {
+fn floor_ge(
+    id: &'static str,
+    gate: &'static str,
+    bar: f64,
+    got: Option<f64>,
+    fields: &'static [&'static str],
+) -> Floor {
     match got {
         Some(x) => Floor {
             id,
@@ -366,6 +469,9 @@ fn floor_ge(id: &'static str, gate: &'static str, bar: f64, got: Option<f64>) ->
             bar: format!("≥ {bar}"),
             measured: format!("{x:.4}"),
             pass: x >= bar,
+            fields,
+            absent: false,
+            absent_not_failed: false,
         },
         None => Floor {
             id,
@@ -373,6 +479,9 @@ fn floor_ge(id: &'static str, gate: &'static str, bar: f64, got: Option<f64>) ->
             bar: format!("≥ {bar}"),
             measured: "not measured — UNEVALUABLE".into(),
             pass: false,
+            fields,
+            absent: true,
+            absent_not_failed: false,
         },
     }
 }
@@ -397,9 +506,11 @@ struct BalancedReport {
     floors: Vec<Floor>,
     info: Vec<(String, String)>,
     composite: Option<f64>,
+    /// matched registry entries: (id, kind, reason)
+    annotations: Vec<(String, String, String)>,
 }
 
-fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
+fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
     let (class, class_note) = classify(v);
     let mut floors = Vec::new();
 
@@ -409,6 +520,7 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
         "F1 CID22 SROCC",
         balanced::CID22,
         f(v, &["rank", "cid22", "srocc"]),
+        &["rank.cid22.srocc"],
     ));
     // F2 KonJND (abs)
     floors.push(floor_ge(
@@ -416,6 +528,7 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
         "F2 KonJND abs-SROCC",
         balanced::KONJND,
         f(v, &["rank", "konjnd", "srocc"]).map(f64::abs),
+        &["rank.konjnd.srocc"],
     ));
     // F3 nonphoto
     floors.push(floor_ge(
@@ -423,6 +536,7 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
         "F3 nonphoto SROCC",
         balanced::NONPHOTO,
         f(v, &["rank", "nonphoto", "srocc"]),
+        &["rank.nonphoto.srocc"],
     ));
     // F4 dial mono + tied (one row, both must hold).
     // UNIT ANNOTATION (packaging appendix, 2026-08-04): for SPLINE-LESS bakes
@@ -440,6 +554,7 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
         100.0 * balanced::DIAL_MONO,
         100.0 * balanced::DIAL_TIED
     );
+    const F4_FIELDS: &[&str] = &["dial.mono_pct", "dial.tied_pct"];
     floors.push(
         match (f(v, &["dial", "mono_pct"]), f(v, &["dial", "tied_pct"])) {
             (Some(m), Some(t)) => Floor {
@@ -452,6 +567,9 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
                     100.0 * t
                 ),
                 pass: m >= balanced::DIAL_MONO && t <= balanced::DIAL_TIED,
+                fields: F4_FIELDS,
+                absent: false,
+                absent_not_failed: false,
             },
             _ => Floor {
                 id: "dial",
@@ -459,6 +577,9 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
                 bar: dial_bar,
                 measured: "dial block missing — UNEVALUABLE".into(),
                 pass: false,
+                fields: F4_FIELDS,
+                absent: true,
+                absent_not_failed: false,
             },
         },
     );
@@ -468,6 +589,7 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
         balanced::DIAL_RANGE_MIN,
         balanced::DIAL_RANGE_MAX
     );
+    const F5_FIELDS: &[&str] = &["dial.dynamic_range"];
     floors.push(match f(v, &["dial", "dynamic_range"]) {
         Some(r) => Floor {
             id: "dialrange",
@@ -475,6 +597,9 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
             bar: range_bar,
             measured: format!("{r:.1}"),
             pass: (balanced::DIAL_RANGE_MIN..=balanced::DIAL_RANGE_MAX).contains(&r),
+            fields: F5_FIELDS,
+            absent: false,
+            absent_not_failed: false,
         },
         None => Floor {
             id: "dialrange",
@@ -482,6 +607,9 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
             bar: range_bar,
             measured: "dial block missing — UNEVALUABLE".into(),
             pass: false,
+            fields: F5_FIELDS,
+            absent: true,
+            absent_not_failed: false,
         },
     });
     // F6 HF-NL per-ref sign floor
@@ -490,8 +618,10 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
         "F6 HF-NL per-ref (sign)",
         balanced::HFNL_PERREF,
         f(v, &["rank", "hfnlproxy", "per_ref_mean"]),
+        &["rank.hfnlproxy.per_ref_mean"],
     ));
     // F7 breadth: CSIQ ∧ LIVE (one row)
+    const F7_FIELDS: &[&str] = &["rank.csiq.srocc", "rank.live.srocc"];
     floors.push(
         match (
             f(v, &["rank", "csiq", "srocc"]),
@@ -503,6 +633,9 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
                 bar: format!("both ≥ {}", balanced::CSIQ),
                 measured: format!("csiq {c:.4} / live {l:.4}"),
                 pass: c >= balanced::CSIQ && l >= balanced::LIVE,
+                fields: F7_FIELDS,
+                absent: false,
+                absent_not_failed: false,
             },
             _ => Floor {
                 id: "breadth",
@@ -510,6 +643,9 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
                 bar: format!("both ≥ {}", balanced::CSIQ),
                 measured: "csiq/live missing — UNEVALUABLE".into(),
                 pass: false,
+                fields: F7_FIELDS,
+                absent: true,
+                absent_not_failed: false,
             },
         },
     );
@@ -530,7 +666,33 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
         measured: format!("B9 {} / B3 {}", fmt_band(b9), fmt_band(b3)),
         pass: matches!((b3, b9), (Some((s3, _)), Some((s9, _)))
             if s9 >= balanced::B9 && s3 >= balanced::B3),
+        fields: &["rank.cid22.bands"],
+        absent: b3.is_none() && b9.is_none(),
+        absent_not_failed: false,
     });
+
+    // ── Registry application (annotations; board-integrity pass 2026-08-04).
+    // absent-not-failed: an ABSENT floor covered by a matched entry prints
+    // `— (absent)` and is excluded from the measured-fails list; it still
+    // counts as not-passed in n/8 (the registered rule), and the
+    // n/m-measured second form is reported alongside.
+    let matched: Vec<&AnnEntry> = anns.iter().filter(|e| ann_matches(v, e)).collect();
+    for e in &matched {
+        if e.kind != "absent-not-failed" {
+            continue;
+        }
+        for fl in floors.iter_mut() {
+            if fl.absent
+                && fl
+                    .fields
+                    .iter()
+                    .any(|ff| e.fields.iter().any(|ef| ann_covers(ef, ff)))
+            {
+                fl.absent_not_failed = true;
+                fl.measured = format!("— (absent — not measured; `{}`)", e.id);
+            }
+        }
+    }
 
     // Reported (never floors)
     let mut info: Vec<(String, String)> = Vec::new();
@@ -602,20 +764,39 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
     }
 
     let composite = balanced_composite(v);
+    let annotations = matched
+        .iter()
+        .map(|e| (e.id.clone(), e.kind.clone(), e.reason.clone()))
+        .collect();
     BalancedReport {
         class,
         class_note,
         floors,
         info,
         composite,
+        annotations,
     }
 }
 
-const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid\ttid\tspline\trepro\tfails";
+const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid\ttid\tspline\trepro\tfails\tn_measured\tabsent\tannotations";
 
 fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
     let n_pass = r.floors.iter().filter(|x| x.pass).count();
-    let fails: Vec<&str> = r.floors.iter().filter(|x| !x.pass).map(|x| x.id).collect();
+    // Measured fails only — absent-not-failed floors move to the `absent`
+    // column (distinct from a measured fail; still not-passed in n_pass).
+    let fails: Vec<&str> = r
+        .floors
+        .iter()
+        .filter(|x| !x.pass && !x.absent_not_failed)
+        .map(|x| x.id)
+        .collect();
+    let absent: Vec<&str> = r
+        .floors
+        .iter()
+        .filter(|x| x.absent_not_failed)
+        .map(|x| x.id)
+        .collect();
+    let n_measured = r.floors.iter().filter(|x| !x.absent_not_failed).count();
     let num = |o: Option<f64>| o.map(|x| format!("{x:.5}")).unwrap_or_else(|| "-".into());
     let b3 = cid22_band(v, "B3");
     let b9 = cid22_band(v, "B9");
@@ -679,6 +860,21 @@ fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
         } else {
             fails.join(",")
         },
+        format!("{n_pass}/{n_measured}"),
+        if absent.is_empty() {
+            "-".to_string()
+        } else {
+            absent.join(",")
+        },
+        if r.annotations.is_empty() {
+            "-".to_string()
+        } else {
+            r.annotations
+                .iter()
+                .map(|(id, _, _)| id.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        },
     ]
     .join("\t")
 }
@@ -689,11 +885,13 @@ fn main() {
     let mut bar_live: Option<f64> = None;
     let mut profile: Option<String> = None;
     let mut tsv = false;
+    let mut annotations_arg: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--fulleval" => fulleval = args.next().map(PathBuf::from),
             "--profile" => profile = args.next(),
+            "--annotations" => annotations_arg = args.next(),
             "--tsv" => tsv = true,
             "--tsv-header" => {
                 println!("{TSV_COLS}");
@@ -756,7 +954,40 @@ fn main() {
 
     // ── Balanced profile path (AMENDMENT 8) ─────────────────────────────
     if profile.is_some() {
-        let r = eval_balanced(&v);
+        // Annotations registry: explicit --annotations <path|none> wins;
+        // default = $ZENSIM_EVAL_ANNOTATIONS, else the committed
+        // ./benchmarks/eval_annotations.json if present, else none (noted).
+        let anns: Vec<AnnEntry> = match annotations_arg.as_deref() {
+            Some("none") => Vec::new(),
+            Some(p) => match load_annotations(std::path::Path::new(p)) {
+                Ok(a) => a,
+                Err(e) => {
+                    eprintln!("freeze_check: --annotations {e}");
+                    std::process::exit(2);
+                }
+            },
+            None => {
+                let default = std::env::var("ZENSIM_EVAL_ANNOTATIONS")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| PathBuf::from("benchmarks/eval_annotations.json"));
+                if default.exists() {
+                    match load_annotations(&default) {
+                        Ok(a) => a,
+                        Err(e) => {
+                            eprintln!("freeze_check: default annotations {e}");
+                            std::process::exit(2);
+                        }
+                    }
+                } else {
+                    eprintln!(
+                        "freeze_check: note — no annotations registry at {} (pass --annotations)",
+                        default.display()
+                    );
+                    Vec::new()
+                }
+            }
+        };
+        let r = eval_balanced(&v, &anns);
         let n_fail = r.floors.iter().filter(|x| !x.pass).count();
         if tsv {
             println!("{}", tsv_row(&v, &r));
@@ -777,8 +1008,21 @@ fn main() {
                     x.gate,
                     x.bar,
                     x.measured,
-                    if x.pass { "PASS" } else { "**FAIL**" }
+                    if x.pass {
+                        "PASS"
+                    } else if x.absent_not_failed {
+                        "ABSENT (not passed)"
+                    } else {
+                        "**FAIL**"
+                    }
                 );
+            }
+            if !r.annotations.is_empty() {
+                println!("\n| ⚠ annotation | kind | reason |");
+                println!("|---|---|---|");
+                for (id, kind, reason) in &r.annotations {
+                    println!("| `{id}` | {kind} | {reason} |");
+                }
             }
             println!("\n| reported (never floors) | value |");
             println!("|---|---|");
@@ -789,10 +1033,30 @@ fn main() {
                 Some(c) => println!("\n**balanced_composite = {c:.4}** (registered §8.1 weights)"),
                 None => println!("\nbalanced_composite: not computable (no terms present)"),
             }
-            println!(
-                "\n{} of {} floors pass{}",
+            let absent_ids: Vec<&str> = r
+                .floors
+                .iter()
+                .filter(|x| x.absent_not_failed)
+                .map(|x| x.id)
+                .collect();
+            let n_measured = r.floors.len() - absent_ids.len();
+            print!(
+                "\n{} of {} floors pass",
                 r.floors.len() - n_fail,
-                r.floors.len(),
+                r.floors.len()
+            );
+            if !absent_ids.is_empty() {
+                // Both forms, per the registry convention: n/8 keeps the
+                // registered absent=not-passed rule; n/m-measured states the
+                // measured record.
+                print!(
+                    " ({}/{n_measured}-measured; absent-not-failed: {})",
+                    r.floors.len() - n_fail,
+                    absent_ids.join(",")
+                );
+            }
+            println!(
+                "{}",
                 if n_fail == 0 {
                     " — BALANCED-PROFILE PASS"
                 } else {
@@ -880,7 +1144,7 @@ mod tests {
     #[test]
     fn balanced_floors_resolve_as_registered_and_fixture_passes() {
         let v = passing_fixture();
-        let r = eval_balanced(&v);
+        let r = eval_balanced(&v, &[]);
         assert_eq!(r.class, "944-single");
         assert_eq!(r.class_note, "shippable single bake");
         assert_eq!(r.floors.len(), 8, "eight registered floors F1..F8");
@@ -910,7 +1174,7 @@ mod tests {
         for (id, patch) in cases {
             let mut v = passing_fixture();
             merge(&mut v, &patch);
-            let r = eval_balanced(&v);
+            let r = eval_balanced(&v, &[]);
             let fl = r.floors.iter().find(|x| x.id == id).unwrap();
             assert!(!fl.pass, "floor {id} must FAIL under patch {patch}");
             assert_eq!(
@@ -928,7 +1192,7 @@ mod tests {
         ] {
             let mut v = passing_fixture();
             v["rank"]["cid22"]["bands"] = bands;
-            let r = eval_balanced(&v);
+            let r = eval_balanced(&v, &[]);
             let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
             assert!(!fl.pass);
         }
@@ -943,7 +1207,7 @@ mod tests {
             &mut v,
             &json!({"dial": {"dynamic_range": 496.6, "tied_pct": 0.156, "mono_pct": 0.937}}),
         );
-        let r = eval_balanced(&v);
+        let r = eval_balanced(&v, &[]);
         let by = |id: &str| r.floors.iter().find(|x| x.id == id).unwrap().pass;
         assert!(!by("dialrange"), "497-class span must fail F5");
         assert!(!by("dial"), "15.6% tied must fail F4");
@@ -953,28 +1217,180 @@ mod tests {
     fn missing_axis_is_unevaluable_not_passed() {
         let mut v = passing_fixture();
         v["rank"].as_object_mut().unwrap().remove("hfnlproxy");
-        let r = eval_balanced(&v);
+        let r = eval_balanced(&v, &[]);
         let fl = r.floors.iter().find(|x| x.id == "hfnl").unwrap();
         assert!(!fl.pass);
         assert!(fl.measured.contains("UNEVALUABLE"));
+    }
+
+    // ── Annotations registry (board-integrity pass 2026-08-04) ──────────
+
+    fn ann(id: &str, kind: &str, fields: &[&str], scope: serde_json::Value) -> AnnEntry {
+        AnnEntry {
+            id: id.into(),
+            kind: kind.into(),
+            fields: fields.iter().map(|s| s.to_string()).collect(),
+            scope,
+            reason: format!("test reason for {id}"),
+        }
+    }
+
+    #[test]
+    fn annotation_scope_predicates_match_as_documented() {
+        let v = passing_fixture();
+        // missing: fixture HAS rank.hfnlproxy → no match; remove → match.
+        let e = ann("x", "annotated", &[], json!({"missing": "rank.hfnlproxy"}));
+        assert!(!ann_matches(&v, &e));
+        let mut v2 = passing_fixture();
+        v2["rank"].as_object_mut().unwrap().remove("hfnlproxy");
+        assert!(ann_matches(&v2, &e));
+        // explicit null counts as missing (model.output_spline is null here).
+        let e_null = ann("x", "annotated", &[], json!({"missing": "model.output_spline"}));
+        assert!(ann_matches(&v, &e_null));
+        // present: mirror of missing.
+        let e_p = ann("x", "annotated", &[], json!({"present": "rank.hfnlproxy"}));
+        assert!(ann_matches(&v, &e_p));
+        assert!(!ann_matches(&v2, &e_p));
+        // names: exact bake-name list.
+        let e_n = ann("x", "annotated", &[], json!({"names": ["FIX_single", "other"]}));
+        assert!(ann_matches(&v, &e_n));
+        let e_n2 = ann("x", "annotated", &[], json!({"names": ["nope"]}));
+        assert!(!ann_matches(&v, &e_n2));
+        // all.
+        assert!(ann_matches(&v, &ann("x", "annotated", &[], json!({"all": true}))));
+        // empty / null scope matches nothing.
+        assert!(!ann_matches(&v, &ann("x", "annotated", &[], json!({}))));
+        // coverage: segment-boundary prefix only.
+        assert!(ann_covers("rank.hfnlproxy", "rank.hfnlproxy.per_ref_mean"));
+        assert!(ann_covers("rank.hfnlproxy", "rank.hfnlproxy"));
+        assert!(!ann_covers("rank.hfnl", "rank.hfnlproxy.per_ref_mean"));
+        assert!(!ann_covers("rank.hfnlproxy.per_ref_mean", "rank.hfnlproxy"));
+    }
+
+    #[test]
+    fn absent_axis_with_registry_entry_is_absent_not_failed_both_forms() {
+        let mut v = passing_fixture();
+        v["rank"].as_object_mut().unwrap().remove("hfnlproxy");
+        let anns = vec![ann(
+            "hfnl-absent-not-failed",
+            "absent-not-failed",
+            &["rank.hfnlproxy"],
+            json!({"missing": "rank.hfnlproxy"}),
+        )];
+        let r = eval_balanced(&v, &anns);
+        let fl = r.floors.iter().find(|x| x.id == "hfnl").unwrap();
+        // Still not-passed for n/8 (registered rule) — but ABSENT, not a
+        // measured fail, and printed as such.
+        assert!(!fl.pass);
+        assert!(fl.absent_not_failed);
+        assert!(fl.measured.contains("absent"), "got: {}", fl.measured);
+        assert_eq!(r.floors.iter().filter(|x| x.pass).count(), 7);
+        // TSV: hfnl moves from `fails` to `absent`; both n-forms carried.
+        let row = tsv_row(&v, &r);
+        let cols: Vec<&str> = row.split('\t').collect();
+        let hdr: Vec<&str> = TSV_COLS.split('\t').collect();
+        assert_eq!(cols.len(), hdr.len(), "TSV row width matches header");
+        let at = |name: &str| cols[hdr.iter().position(|h| *h == name).unwrap()];
+        assert_eq!(at("n_pass"), "7/8", "registered absent=not-passed form");
+        assert_eq!(at("n_measured"), "7/7", "measured-record form");
+        assert_eq!(at("absent"), "hfnl");
+        assert!(!at("fails").split(',').any(|x| x == "hfnl"), "fails: {}", at("fails"));
+        assert!(at("annotations").contains("hfnl-absent-not-failed"));
+    }
+
+    #[test]
+    fn measured_fail_never_becomes_absent() {
+        // A MEASURED fail (negative hfnl) is untouched even when an
+        // absent-not-failed entry matches the cell broadly (`all`) and covers
+        // the field — absence is a property of the VALUE, not the entry.
+        let mut v = passing_fixture();
+        merge(&mut v, &json!({"rank": {"hfnlproxy": {"per_ref_mean": -0.0001}}}));
+        let anns = vec![ann(
+            "hfnl-absent-not-failed",
+            "absent-not-failed",
+            &["rank.hfnlproxy"],
+            json!({"all": true}),
+        )];
+        let r = eval_balanced(&v, &anns);
+        let fl = r.floors.iter().find(|x| x.id == "hfnl").unwrap();
+        assert!(!fl.pass);
+        assert!(!fl.absent_not_failed, "measured fail must stay a fail");
+        let row = tsv_row(&v, &r);
+        let cols: Vec<&str> = row.split('\t').collect();
+        let hdr: Vec<&str> = TSV_COLS.split('\t').collect();
+        let at = |name: &str| cols[hdr.iter().position(|h| *h == name).unwrap()];
+        assert!(at("fails").split(',').any(|x| x == "hfnl"));
+        assert_eq!(at("absent"), "-");
+        assert_eq!(at("n_measured"), "7/8", "all 8 floors measured");
+    }
+
+    #[test]
+    fn annotated_kind_flags_without_changing_verdicts() {
+        // dial-mono-raw-unit shape: matches spline-less bakes, flags the dial
+        // fields, changes NO floor verdict.
+        let v = passing_fixture(); // output_spline: null → spline-less
+        let anns = vec![ann(
+            "dial-mono-raw-unit",
+            "annotated",
+            &["dial.mono_pct", "dial.tied_pct"],
+            json!({"missing": "model.output_spline"}),
+        )];
+        let r = eval_balanced(&v, &anns);
+        let r_plain = eval_balanced(&v, &[]);
+        for (a, b) in r.floors.iter().zip(r_plain.floors.iter()) {
+            assert_eq!(a.pass, b.pass, "floor {} verdict must not change", a.id);
+        }
+        assert!(r
+            .annotations
+            .iter()
+            .any(|(id, kind, _)| id == "dial-mono-raw-unit" && kind == "annotated"));
+        let row = tsv_row(&v, &r);
+        assert!(row.ends_with("dial-mono-raw-unit"), "annotations col carries the id");
+    }
+
+    #[test]
+    fn committed_registry_parses_and_seed_entries_behave() {
+        // The COMMITTED registry file must parse, and its three seed entries
+        // must do what the campaign doc says they do.
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let anns = load_annotations(&repo.join("benchmarks/eval_annotations.json"))
+            .expect("committed registry parses");
+        let ids: Vec<&str> = anns.iter().map(|e| e.id.as_str()).collect();
+        for want in ["dial-mono-raw-unit", "hfnl-absent-not-failed", "kadid-tid-train-eq-val"] {
+            assert!(ids.contains(&want), "registry missing seed entry {want}");
+        }
+        // era-bridge-shaped cell: spline present, hfnlproxy missing.
+        let mut v = passing_fixture();
+        v["rank"].as_object_mut().unwrap().remove("hfnlproxy");
+        v["model"]["output_spline"] = json!({"knots": 8});
+        let r = eval_balanced(&v, &anns);
+        let fl = r.floors.iter().find(|x| x.id == "hfnl").unwrap();
+        assert!(fl.absent_not_failed, "hfnl absence covered by the registry");
+        let matched: Vec<&str> = r.annotations.iter().map(|(i, _, _)| i.as_str()).collect();
+        assert!(matched.contains(&"hfnl-absent-not-failed"));
+        assert!(matched.contains(&"kadid-tid-train-eq-val"), "all-scope entry");
+        assert!(
+            !matched.contains(&"dial-mono-raw-unit"),
+            "spline present ⇒ raw-unit entry must NOT match"
+        );
     }
 
     #[test]
     fn ensemble_class_m3a_not_computable() {
         let mut v = passing_fixture();
         v["model"]["kind"] = json!("ensemble");
-        let r = eval_balanced(&v);
+        let r = eval_balanced(&v, &[]);
         assert_eq!(r.class, "944-ensemble");
         let (_, m3a) = r.info.iter().find(|(k, _)| k.starts_with("M3a")).unwrap();
         assert!(m3a.contains("NOT COMPUTABLE"), "got: {m3a}");
         // distilled + era-bridge classes
         let mut v = passing_fixture();
         v["name"] = json!("C_ensk2_s1303");
-        assert_eq!(eval_balanced(&v).class, "944-distilled");
+        assert_eq!(eval_balanced(&v, &[]).class, "944-distilled");
         let mut v = passing_fixture();
         v["n_inputs"] = json!(372);
         v["model"]["n_inputs"] = json!(372);
-        assert_eq!(eval_balanced(&v).class, "era-bridge");
+        assert_eq!(eval_balanced(&v, &[]).class, "era-bridge");
     }
 
     /// Packaging-appendix unit annotation: spline-less bakes' F4 numbers are
@@ -984,12 +1400,12 @@ mod tests {
     #[test]
     fn f4_dial_row_carries_unit_annotation() {
         let v = passing_fixture(); // output_spline: null
-        let r = eval_balanced(&v);
+        let r = eval_balanced(&v, &[]);
         let fl = r.floors.iter().find(|x| x.id == "dial").unwrap();
         assert!(fl.measured.contains("(raw-unit)"), "got: {}", fl.measured);
         let mut v2 = passing_fixture();
         v2["model"]["output_spline"] = json!({"n_knots": 18});
-        let r2 = eval_balanced(&v2);
+        let r2 = eval_balanced(&v2, &[]);
         let fl2 = r2.floors.iter().find(|x| x.id == "dial").unwrap();
         assert!(
             fl2.measured.contains("(dial-unit)"),
@@ -1006,7 +1422,7 @@ mod tests {
             { "band": "B3", "srocc": 0.05, "n": 12 },
             { "band": "B9", "srocc": 0.2, "n": 43 }
         ]);
-        let r = eval_balanced(&v);
+        let r = eval_balanced(&v, &[]);
         let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
         assert!(fl.measured.contains("(0.050) n=12"), "got: {}", fl.measured);
         assert!(fl.measured.contains("0.200 n=43"));
@@ -1040,22 +1456,27 @@ mod tests {
 
     #[test]
     fn tsv_row_carries_verdict_and_fails() {
+        // (2026-08-04: `fails` looked up by header name — the annotations
+        // registry appended n_measured/absent/annotations after it, so
+        // `.last()` no longer addresses it. Assertion intent unchanged.)
+        let hdr: Vec<&str> = TSV_COLS.split('\t').collect();
+        let fails_i = hdr.iter().position(|h| *h == "fails").unwrap();
         let v = passing_fixture();
-        let r = eval_balanced(&v);
+        let r = eval_balanced(&v, &[]);
         let row = tsv_row(&v, &r);
         let cols: Vec<&str> = row.split('\t').collect();
-        assert_eq!(cols.len(), TSV_COLS.split('\t').count());
+        assert_eq!(cols.len(), hdr.len());
         assert_eq!(cols[0], "FIX_single");
         assert_eq!(cols[2], "PASS");
         assert_eq!(cols[3], "8/8");
-        assert_eq!(*cols.last().unwrap(), "-");
+        assert_eq!(cols[fails_i], "-");
         let mut v2 = passing_fixture();
         merge(&mut v2, &json!({"rank": {"cid22": {"srocc": 0.80}}}));
-        let r2 = eval_balanced(&v2);
+        let r2 = eval_balanced(&v2, &[]);
         let row2 = tsv_row(&v2, &r2);
         let cols2: Vec<&str> = row2.split('\t').collect();
         assert_eq!(cols2[2], "FAIL");
-        assert!(cols2.last().unwrap().contains("cid22"));
+        assert!(cols2[fails_i].contains("cid22"));
     }
 
     /// The §5 default path is UNCHANGED by the profile addition: lock the row

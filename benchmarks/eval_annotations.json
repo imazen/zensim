@@ -1,0 +1,47 @@
+{
+  "_schema": {
+    "description": "Board-wide invalidation/annotation registry (board-integrity pass 2026-08-04). One committed, machine-readable place where superseded, flattered, or absent-not-failed numbers are FLAGGED so prior bakes/evals never sit on stolen wins. Consumers: `freeze_check --annotations` (default = this file; floor rows print '— (absent)' for absent-not-failed axes, TSV gains n_measured/absent/annotations columns) and `scripts/v_next/gauntlet.py` (warning badge + tooltip reason on affected cells/fields + caption line). Entries are append-only; never delete — supersede with a new entry and point `fix_path` at the resolution.",
+    "entry_fields": {
+      "id": "stable kebab-case identifier, referenced from docs and tooltips",
+      "kind": "one of: 'invalidated' (the number is wrong/superseded — do not cite), 'annotated' (the number is real but must be read with the stated caveat), 'absent-not-failed' (the field is missing because the instrument did not exist / was not run for this cell; absence is 'not measured', DISTINCT from a measured fail — consumers print '— (absent)' and state both n/8 (registered absent=not-passed rule) and n/m-measured forms)",
+      "fields": "list of fulleval dot-paths the entry covers; a path covers itself and any deeper subpath (segment-boundary prefix match), e.g. 'rank.hfnlproxy' covers 'rank.hfnlproxy.per_ref_mean'",
+      "scope": "predicate object selecting which fulleval cells the entry applies to; exactly one key of: {\"missing\": \"dot.path\"} (field absent or null), {\"present\": \"dot.path\"} (field present and non-null), {\"names\": [\"bake\", ...]} (exact bake-name list), {\"all\": true} (every cell)",
+      "reason": "one-sentence human reason shown in tooltips/reports",
+      "evidence": "commit sha(s) / doc section that established the finding",
+      "date": "YYYY-MM-DD the entry landed",
+      "fix_path": "what un-flags a cell (re-measure path, tooling, or 'none — permanent caveat')"
+    }
+  },
+  "entries": [
+    {
+      "id": "dial-mono-raw-unit",
+      "kind": "annotated",
+      "fields": ["dial.mono_pct", "dial.tied_pct"],
+      "scope": { "missing": "model.output_spline" },
+      "reason": "spline-less raw heads measure dial mono/tied in RAW output units (span ~16-17), where the 0.5-score-pt materiality threshold flatters mono by ~3-6 pts vs real [0,100] dial units (packed twins dropped 94.0->91.2 / 93.4->87.7 / 95.7->91.9); strict-backwards is cal-invariant, so the drop is a unit effect, not new inversions",
+      "evidence": "benchmarks/sota944_campaign_2026-08-03.md packaging-pass results (926c71f7, 3baf73ad); freeze_check raw-unit/dial-unit label 861ec096",
+      "date": "2026-08-04",
+      "fix_path": "amendment-2 near-top anchor densify + `bake_dial_refit add-spline`/`pack`, then re-measure mono in dial units (only dial-unit mono is freeze-grade)"
+    },
+    {
+      "id": "hfnl-absent-not-failed",
+      "kind": "absent-not-failed",
+      "fields": ["rank.hfnlproxy"],
+      "scope": { "missing": "rank.hfnlproxy" },
+      "reason": "the hfnlproxy corpus (ext944-canonical-2026-08-01) postdates the era-bridge fullevals; a cell nobody measured on the axis did not FAIL it — the F6 row prints '— (absent)', n/8 keeps the registered absent=not-passed rule, and the n/m-measured form is stated alongside (e.g. winner_dial_Ebothg: 5/8 registered, 5/7-measured)",
+      "evidence": "benchmarks/sota944_campaign_2026-08-03.md §8 CORRECTIONS (2026-08-04); AMENDMENT 8 registration ('UNEVALUABLE counts as not-passed' stays the scoring rule)",
+      "date": "2026-08-04",
+      "fix_path": "372-col hfnlproxy feature slice for era-bridge bakes (same cells, era-native features) + bake_verdict re-verdict; see the campaign doc's fill investigation for the measured cost"
+    },
+    {
+      "id": "kadid-tid-train-eq-val",
+      "kind": "annotated",
+      "fields": ["rank.kadid.srocc", "rank.tid.srocc"],
+      "scope": { "all": true },
+      "reason": "KADID/TID are 100% train==val pair-overlap for the training-era corpora — their SROCCs reward memorization, not skill; integrity guards only, never ranking signal (already dimmed on the board; this entry formalizes it machine-readably)",
+      "evidence": "docs/EVAL_PANEL_REQUIREMENT.md; CLAUDE.md TWO-PANEL EVAL section; wave-5 Finding 4 (they inflate under ensembling)",
+      "date": "2026-08-04",
+      "fix_path": "none — permanent caveat (structural property of the split)"
+    }
+  ]
+}
