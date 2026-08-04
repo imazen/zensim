@@ -146,9 +146,11 @@ ranking script):
   `balanced_composite` already gives csiq/live/band-tail.
 - **Why M3a is in the rule at all:** the coherence study (n = 50,
   pre-registered) measured that **42.3 % of 944-class M3a variance is seed
-  noise at fixed recipe** — `C_co3a` k = 6 spans 0.718–0.826. Coherence is a
-  *selectable trajectory property*, so a k-seed wave that ignores it is
-  leaving a free 0.1 of M3a on the table.
+  noise at fixed recipe** — at fixed data, recipe and width, `C_co3a` k = 6
+  spans **0.7367–0.8786** (0.142, on corrected post-`299ccc8c` values; the
+  study's own 0.718–0.826 was measured before the append2 coverage fix and
+  understates the spread). Coherence is a *selectable trajectory property*, so
+  a k-seed wave that ignores it leaves ~0.14 of M3a on the table for free.
 - **`sdr25` is NOT the primary.** It is a reported comparator column. It has
   decoupled from CID22 five times; that is exactly why the primary is the
   floor count.

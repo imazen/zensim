@@ -4060,6 +4060,10 @@ fn forward_one_bake_with_codec(
     // shared PCHIP spline + per-codec affine. The clamp mirrors the trainer's
     // standardize clamp so runtime scoring is bit-exact with the qualifying eval.
     if let Some(mm) = bundle.minmax_head.as_deref() {
+        // INTERNAL layer-0 width on purpose (NOT `caller_input_width()`):
+        // this path indexes the transform array by layer-0 position, so it
+        // needs the two to be equal and refuses the bake below when they are
+        // not. See campaign appendix E.9 for the distinction.
         let n = model.n_inputs();
         // The loop below indexes `transforms[i]` at layer-0 index `i`, which
         // only aligns for a 1:1 transform pipeline. A variable-arity bake

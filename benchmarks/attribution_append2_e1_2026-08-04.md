@@ -187,6 +187,34 @@ the precision cannot support one. The single clean observation is that
 `sota944_winner_A_bvls_X_AM5` — the one bake whose ΔM3a is **exactly
 0.0000** — also prints `0.0 %`; consistent with the mechanism, but one point.
 
+### The defect was materially corrupting SELECTION — a worked example
+
+M3a became a first-class selection input the same day (`92a23417`,
+`freeze_check --select`, campaign appendix E.4). Running the registered rule
+over the `C_co3a` k = 6 seed family — the campaign's own multi-seed family —
+before and after the fix **changes the winner**:
+
+| rank | bake | floors | M3a pre-fix | M3a corrected | sel_comp pre-fix | sel_comp corrected |
+|---:|---|---:|---:|---:|---:|---:|
+| — | `C_co3a_s1301` | 7/8 | 0.7598 | 0.7861 | **0.9195 (1st)** | 0.9234 (2nd) |
+| — | `C_co3a_s1307` | 7/8 | 0.7625 | 0.8670 | 0.9149 (2nd) | **0.9306 (1st)** |
+| — | `C_co3a_s1409` | 7/8 | 0.7181 | 0.7367 | 0.9076 (3rd) | 0.9104 (3rd) |
+
+`s1301` and `s1307` pass the same 7 of 8 floors, so the decision falls to the
+tie-break — and `s1307` gained **+0.1045** M3a to `s1301`'s **+0.0263**. The
+pre-fix ranking picked `s1301`; the corrected ranking picks `s1307`.
+
+Two things worth stating plainly:
+
+1. **The bug was not cosmetic.** Left in place, it would have silently biased
+   every k-seed selection from the day the rule shipped — toward whichever
+   seed happened to lean least on the block the map was discarding.
+2. **The primary still governs.** `C_co3a_s1319` has the highest corrected
+   M3a in the family (0.8786) and the second-highest `selection_composite`,
+   and still ranks **4th**, because it passes only 6 of 8 floors. Coherence
+   breaks ties; it does not override a failed floor. That is the registered
+   rule behaving as designed, on real data.
+
 ### What this does NOT invalidate
 
 - **Nothing at 372 / 720 / 924 width.** Those gradients never reach f924. The
@@ -253,4 +281,87 @@ from full-grid TSVs and needs no support in the sweep.
 
 ## 6. Results of the full re-measurement
 
-See the tables appended below by the re-measurement run.
+### 6.1 Full 944-width population — old vs new (n = 32)
+
+Every board cell at `n_inputs == 944` that carried an `m3a_coherence`. Each bake's `.bin` was on disk and its **sha256 matched the `bake_sha256` recorded in the fulleval** before scoring (32/32), so each before/after pair is the same bytes through two binaries. The NEW column is read back from the **updated board fulleval**, so this table and the board cannot disagree.
+
+| bake | M3a OLD | M3a NEW | ΔM3a | tier OLD → NEW |
+|---|---:|---:|---:|---|
+| `C_co3a_s1307` | 0.7625 | 0.8670 | +0.1045 | flagged → GOLD  **↑** |
+| `C_co3a_s1307_packed` | 0.7626 | 0.8669 | +0.1042 | flagged → GOLD  **↑** |
+| `C_co1a_s1307` | 0.7869 | 0.8893 | +0.1024 | silver → GOLD  **↑** |
+| `C_ensk2_s1301` | 0.7823 | 0.8679 | +0.0855 | silver → GOLD  **↑** |
+| `C_em944_s31_packed` | 0.7924 | 0.8750 | +0.0826 | silver → GOLD  **↑** |
+| `sota944_C_em944_s31` | 0.7926 | 0.8749 | +0.0823 | silver → GOLD  **↑** |
+| `C_ensk5_s1303` | 0.7934 | 0.8745 | +0.0811 | silver → GOLD  **↑** |
+| `C_co4_s1303` | 0.8352 | 0.8988 | +0.0636 | silver → GOLD  **↑** |
+| `C_ensk5_s1301` | 0.7849 | 0.8465 | +0.0616 | silver → silver |
+| `C_co1a_s1303` | 0.7713 | 0.8265 | +0.0551 | flagged → silver  **↑** |
+| `C_co4_s1307` | 0.8035 | 0.8581 | +0.0546 | silver → GOLD  **↑** |
+| `C_co1b_s1303` | 0.7932 | 0.8467 | +0.0535 | silver → silver |
+| `C_co3a_s1319` | 0.8259 | 0.8786 | +0.0526 | silver → GOLD  **↑** |
+| `C_co2a_s1307` | 0.8261 | 0.8785 | +0.0525 | silver → GOLD  **↑** |
+| `C_co2b_s1307` | 0.7993 | 0.8494 | +0.0502 | silver → silver |
+| `H_co3abpg_s2501` | 0.8280 | 0.8772 | +0.0492 | silver → GOLD  **↑** |
+| `C_co4_s1301` | 0.8237 | 0.8719 | +0.0482 | silver → GOLD  **↑** |
+| `C_co1c_s1301` | 0.7962 | 0.8443 | +0.0481 | silver → silver |
+| `H_co3abpg_s2503` | 0.7735 | 0.8190 | +0.0455 | flagged → silver  **↑** |
+| `C_co3b_s1303` | 0.8470 | 0.8911 | +0.0440 | silver → GOLD  **↑** |
+| `C_ensk2_s1307` | 0.8053 | 0.8430 | +0.0377 | silver → silver |
+| `C_co3a_s1303` | 0.7699 | 0.8075 | +0.0376 | flagged → silver  **↑** |
+| `C_co3a_s1301` | 0.7598 | 0.7861 | +0.0263 | flagged → silver  **↑** |
+| `C_co3a_s1301_w4repro` | 0.7598 | 0.7861 | +0.0263 | flagged → silver  **↑** |
+| `sota944_nt223` | 0.6970 | 0.7210 | +0.0240 | flagged → flagged |
+| `H_co3abpg_s2507_packed` | 0.8665 | 0.8904 | +0.0239 | GOLD → GOLD |
+| `H_co3abpg_s2507` | 0.8664 | 0.8900 | +0.0236 | GOLD → GOLD |
+| `C_co3a_s1409` | 0.7181 | 0.7367 | +0.0185 | flagged → flagged |
+| `C_co3a_s1321` | 0.8148 | 0.8325 | +0.0177 | silver → silver |
+| `C_ensk5_s1307` | 0.8077 | 0.8223 | +0.0145 | silver → silver |
+| `sota944_winner_A_bvls_X_AM5` | 0.6299 | 0.6299 | +0.0000 | flagged → flagged |
+| `C_ensk2_s1303` | 0.8262 | 0.8223 | -0.0039 | silver → silver |
+
+**Δ summary:** median **+0.0487**, min -0.0039, max **+0.1045**; 30 of 32 moved up. **19 of 32 cells change M3a tier** — 14 newly cross the **0.85 GOLD** bar and 7 newly cross the **0.78 silver** tier.
+
+**Determinism replicate.** The board values above come from a second, independent pass (`run_full_eval.sh ZENSIM_M3_ONLY=1`) over the same fixtures; the standalone sweep's earlier pass agrees **BIT-IDENTICAL** across all 32 bakes. So the instrument is exactly reproducible run-to-run, and every Δ in the table is the fix, not measurement noise.
+
+Two internal consistency checks fall out of the population and both hold: `C_co3a_s1301` and its independent training-level repro twin `C_co3a_s1301_w4repro` land on the **same** new M3a, and both packed twins reproduce their parents to ~4 dp (`C_co3a_s1307`/`_packed`, `H_co3abpg_s2507`/`_packed`) — matching the campaign's prior finding that packing is M3a-neutral.
+
+## 7. Limitations (complete)
+
+1. **The HL bins are unverified as integrands.** `HL_BIN1`/`HL_BIN2` are class N
+   here only because this attribution route is structurally SDR. Their *form*
+   is class E, so if an HDR attribution route is ever built they become real
+   dropped coverage and must be spatialized then. The coverage test pins today's
+   behaviour, not that future one.
+2. **First-order, like the rest of C2a.** The BANDVIS integrands inherit every
+   approximation the module documents — blur bleed unmodeled, finalize clamps
+   treated as inert. The exact claim is the plane-sum identity (verified to 8-9
+   significant digits at every scale); the *block* claim degrades with the
+   seam-adjacent fraction, measured at pred/true 1.02 → 3.78 from scale 0 to 3.
+3. **The FD magnitude band is factor-4.** That is wide. It catches sign errors
+   and order-of-magnitude errors, which is what it is for; it would not catch a
+   systematic 2× coefficient error. The plane-sum identity is the tight gate.
+4. **No pruned bake was exercised end-to-end.** The append2 coverage tests and
+   the pruning-width regression test both pass, but no packed-with-pruning 944
+   bake existed on disk to run the full harness against — the two fixes are
+   verified separately, not composed.
+5. **§D.8's coefficients are not re-derived.** The coherence-mechanism
+   correlations were computed on pre-fix M3a for the 944 rows. §E.8 restates the
+   *conclusions* that rest on them and flags which need re-derivation; the
+   coefficients themselves are left as the record of what was measured then.
+6. **Wave-6 arm F's paired-lift magnitudes are open.** Its "+0.023..+0.056 in
+   6/6 seed-paired draws" compares students to counterparts outside this
+   population, which were not re-measured. §E.8.5 corrects only the "max below
+   the bar" half.
+7. **The cheap-grid rejection is measured on one population.** SROCC 0.8871 /
+   max 0.1021 come from the 32 944-width board cells. A different population
+   could differ — but since the observed error already exceeds twice the class
+   sd, a re-examination would need to beat a wide margin.
+8. **`m3a_sweep.sh` has no unit test.** It is shell that shells out; it is
+   covered only by having produced every number in this document and by
+   `just lint-scripts`. The statistics it reports are computed in Rust.
+9. **Self-inflicted, recorded so the next session avoids it:** the first board
+   pass lost one bake to a syntax error because a script was edited *while a
+   loop was executing it* (bash reads a script incrementally). Do not edit
+   `run_full_eval.sh` / `m3a_sweep.sh` during a population run; the cell was
+   re-run.

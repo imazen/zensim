@@ -2579,6 +2579,9 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
         let bytes = std::fs::read(p).map_err(|e| format!("read {p:?}: {e}"))?;
         models.push(Model::from_bytes(&bytes).map_err(|e| format!("parse bake {p:?}: {e:?}"))?);
     }
+    // INTERNAL layer-0 width on purpose (NOT `caller_input_width()`): this
+    // is an ensemble arity-equality check across members, not a "how many
+    // features do I feed this" question. Campaign appendix E.9.
     let n_in = models[0].n_inputs();
     for (p, m) in members.iter().zip(models.iter()).skip(1) {
         if m.n_inputs() != n_in {

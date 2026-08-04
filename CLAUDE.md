@@ -105,7 +105,8 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   `balanced_composite + 0.15·M3a`; `sdr25` is a reported comparator only, **never the
   primary** (it has decoupled from CID22 five times). Rationale: the coherence study measured
   **42.3% of 944-class M3a variance is seed noise at fixed recipe** (`C_co3a` k=6 spans
-  0.718-0.826), so M3a is a *selectable trajectory property* and a k-seed wave that ignores it
+  0.7367-0.8786 on corrected post-299ccc8c values — the study's own 0.718-0.826 predates the
+  append2 coverage fix and understates it), so M3a is a *selectable trajectory property* and a k-seed wave that ignores it
   leaves ~0.1 M3a on the table. Three M3a states, **none of them zero**: MEASURED ranks;
   NOT COMPUTABLE (ensemble — the instrument loads one ZNPR) ranks separately and is never
   penalized; UNMEASURED is listed but **not selectable**. M3a comes free with
@@ -199,8 +200,8 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   already carry — so they were **real dropped coverage**; `LUMA_MEAN_REF` (reference-only) and
   `HL_BIN1/2` (HDR-gated on a structurally-SDR route) are **correctly zero**, now by an
   explicit named decision instead of an unreached bound. Measured shift on the 32-bake 944
-  population: **M3a rises materially** (registered sample: +0.0236/+0.0823/+0.0263/+0.1045/
-  −0.0039; 3 of 5 change tier); M3 unchanged (the legacy fold is untouched);
+  population (32 bakes): **M3a median +0.0487, max +0.1045, 30/32 up, 19/32 change tier —
+  the GOLD (≥0.85) count goes **2 → 16**.** M3 unchanged (the legacy fold is untouched);
   372/720/924 unaffected by construction. Guarded by
   `attribution_covers_expected_slots_per_width` (probes every width, so a regime bump cannot
   silently drop a block again) + a plane-sum identity vs the production 944 features (8-9

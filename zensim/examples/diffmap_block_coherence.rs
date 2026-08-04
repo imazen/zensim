@@ -247,9 +247,26 @@ fn run_bake_mode(
     use zensim::score_features_with_profile;
 
     let bytes = std::fs::read(bake_path).expect("read bake");
-    let n_in = zenpredict::Model::from_bytes(&bytes)
-        .expect("parse bake header")
-        .n_inputs();
+    let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake header");
+    // CALLER width, not `n_inputs()`. Every use of `n_in` below is
+    // caller-space: the vector handed to `score_features_with_profile`, the
+    // finite-difference gradient length, the extraction width, and the
+    // f0-155 / f156-371 / f372+ block-mass ranges. Since dead-column pruning
+    // (`ae852b1b`) a packed 944 bake is a 667-INPUT MODEL THAT STILL ACCEPTS
+    // 944 FEATURES, so `n_inputs()` (667) is not a regime and this function
+    // would take the "unsupported bake layout" path below — emitting NO M3
+    // and NO M3a, silently. That is a selection-visible failure now that a
+    // missing M3a means UNMEASURED ⇒ NOT SELECTABLE (campaign appendix E.4),
+    // so it must not be reachable for a pruned bake. Identical to
+    // `n_inputs()` on every unpruned bake (the transform array is dense).
+    // Hazard class: campaign appendix E.9.
+    let n_in = model.caller_input_width();
+    if model.n_inputs() != n_in {
+        println!(
+            "  bake is PRUNED: layer0_in_dim={}, caller feature width={n_in} (routing on the latter)",
+            model.n_inputs()
+        );
+    }
     // M3 supports the v1 layouts (n_in ≤ 372), the combined v1+v2 layout
     // (720 = 372 v1 ++ 348 v2), the folded-append 924 regime (f0-155
     // folded basic, f156-371 STRUCTURAL ZEROS, f372-719 v2, f720-923 append),

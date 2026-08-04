@@ -278,6 +278,10 @@ pub fn score_row_minmax(
     output_spline: Option<&OutputCalibrationSpline>,
     row: &[f64],
 ) -> f64 {
+    // INTERNAL layer-0 width on purpose (NOT `caller_input_width()`) — the
+    // loop below indexes transforms by layer-0 position, so this path
+    // requires the two to be equal and refuses the bake when they are not.
+    // Campaign appendix E.9.
     let n = model.n_inputs();
     if mm.n != n {
         return f64::NAN;

@@ -335,3 +335,49 @@ fn i8_layer0_refuses_constant_folding_but_allows_weight_dead() {
     assert_eq!(p.class_counts(), (2, 0));
     assert!(p.is_bit_identical());
 }
+
+/// REGRESSION (campaign appendix E.9): a pruned bake must stay ROUTABLE by
+/// its caller-facing feature-layout width.
+///
+/// Consumers that dispatch BEHAVIOUR on a bake's width — regime selection,
+/// block offsets, gradient length — are the dangerous kind, because their
+/// failure mode is emitting NOTHING rather than erroring. The coherence
+/// harness (`zensim/examples/diffmap_block_coherence.rs`) is exactly that: it
+/// picks the feature regime from the width and, on an unrecognized one, prints
+/// "M3 skipped: unsupported bake layout" and produces no M3 and no M3a. It
+/// read `n_inputs()`, so after dead-column pruning every packed bake routed to
+/// the pruned layer-0 width, matched no regime, and silently produced nothing
+/// — which since 2026-08-04 makes the bake UNMEASURED and therefore NOT
+/// SELECTABLE under `freeze_check --select`.
+///
+/// This pins the property the fix rests on: after pruning the caller width is
+/// UNCHANGED (so layout dispatch still works) while `n_inputs()` has moved
+/// (so dispatching on it is provably wrong, not merely stylistically off).
+#[test]
+fn pruned_bake_stays_routable_by_caller_feature_width() {
+    let bytes = fixture();
+    let model = Model::from_bytes(&bytes.0).expect("load fixture");
+    let plan = plan_for(&model, true);
+    let pruned = apply(&model, &plan);
+    let pruned_model = Model::from_bytes(&pruned.0).expect("load pruned");
+
+    assert_eq!(
+        pruned_model.caller_input_width(),
+        model.caller_input_width(),
+        "pruning must NOT change the caller-facing feature width — every \
+         width-dispatching consumer routes on this"
+    );
+    assert_ne!(
+        pruned_model.n_inputs(),
+        pruned_model.caller_input_width(),
+        "the fixture must actually prune, else this test is vacuous"
+    );
+    // The concrete shape of the bug: a consumer reading `n_inputs()` gets a
+    // number that is NOT the layout width it must dispatch on.
+    assert_ne!(
+        pruned_model.n_inputs(),
+        model.caller_input_width(),
+        "dispatching on n_inputs() after pruning yields a non-layout width — \
+         this inequality IS the bug that silently disabled M3/M3a"
+    );
+}
