@@ -61,8 +61,8 @@ enough = { version = "0.4.2", default-features = false, features = ["std"] }
 # zenpredict 0.2.0 publish → `cargo package -p zensim` gate → zensim
 # 0.3.0 publish → zensim-regress. zenpredict-bake is consumed only by
 # the unpublished zensim-validate, so it stays a bare git pin.
-zenpredict      = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "88410ba6246ea138d06f34a807b47e569cf86d98" }
-zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "88410ba6246ea138d06f34a807b47e569cf86d98" }
+zenpredict      = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "05de3cbc44b19d8769077d99710b0146c761d6df" }
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "05de3cbc44b19d8769077d99710b0146c761d6df" }
 
 # zenstats — canonical IQA-stats home extracted on 2026-05-26 from the
 # pre-existing `zensim-validate/src/panel.rs`. Lives in the zenmetrics
@@ -79,5 +79,5 @@ zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "88410ba
 # Bump the rev deliberately when a zenstats fix zensim needs lands.
 # 2026-07-15: bumped to 0ce69492 for `per_group_srocc` — the within-group rank
 # agreement that pooled SROCC structurally hides (bake_verdict's per-ref column).
-zenstats = { git = "https://github.com/imazen/zenmetrics", rev = "82e7fa936b400984564d4d285a782b9a80482a61", default-features = false, features = ["parallel"] }
+zenstats = { git = "https://github.com/imazen/zenmetrics", rev = "29f1d61ee8cb6d9010764512a9db79697dc23430", default-features = false, features = ["parallel"] }
 

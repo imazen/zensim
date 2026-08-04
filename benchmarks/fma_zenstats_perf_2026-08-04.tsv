@@ -1,0 +1,75 @@
+#	cross-repo FMA + zenstats performance, 2026-08-04
+#	follows benchmarks/eval_perf_2026-08-04.md — this closes its two §5 "deliberately NOT done" items
+#	host	lilith (WSL2) / AMD Ryzen 9 7950X / 28 vCPU visible / 58 GiB — SHARED with other agents, see load notes
+#	rustc	release profile, NO target-cpu=native (runtime dispatch is what ships)
+#	bake	/mnt/v/output/zensim/bakes/sota944/bakes/C_co3a_s1301.bin (944-in MLP, F32 weights)
+#	base	zensim 0ce3e2f2 + zenpredict a7d82249 + zenstats 82e7fa93
+#	opt	base + zenpredict 05de3cbc (FMA dispatch)
+#	opt2	opt + zenstats 29f1d61e (parallel O(n^2) sweeps)   [= the shipped rev-bumped state]
+#	identity	EVERY opt/opt2 row gated by scripts/verify_verdict_identity.sh -> 82433 numeric fields, PASS/bit-identical
+#	command	bake_verdict --bake <bake> --regime 944 [--corpora <c>] --name p --full-json <j> --output <m>
+#
+#	=== 1. perf record, cycle share (--corpora cid22, -F 999) ===
+phase	symbol	base_pct	after_fma_pct	note
+profile	fmaf	24.92	absent	software fused-multiply-add, out of line
+profile	compiler_builtins...fmaf_with_fma	16.47	absent	the runtime-dispatched half of the same call
+profile	zenpredict::inference::forward (self)	11.70	-	loop around the fma calls
+profile	__arcane_saxpy_matmul_f32_v3	-	4.02	the whole forward, post-change
+profile	zenstats::panel::sa_st_curve	8.99	18.32	unchanged in absolute terms; now the top symbol
+profile	zenstats (all symbols)	19.33	-	kendall_tau never exceeded 1.65% (inlined into compute_panel)
+#
+#	=== 2. zenbench: Predictor::predict, FMA dispatch off vs on ===
+#	zenpredict-bake/benches/predict.rs, 4 rounds (box shared; the sota944 row's mad is +-0.3us)
+shape	dtype	nofma_us	fma_us	speedup	throughput_after
+zensim_sota944_944_128_1	f32	210.92	8.27	25.5	14.6 GFMA/s
+zensim_v018_228_384_1	i8	156.28	8.84	17.7	-
+zenwebp_picker_51_64_24	f16	10.70	4.73	2.26	-
+#
+#	=== 3. bake_verdict --regime 944, 12 corpora (51924 rows) ===
+#	run A+B taken while the box was busy with other agents; run C on a quieter box.
+#	Compare only within a block.
+block	variant	rep	wall_s	user_s	sys_s	peak_rss_kb
+A	base	1	10.39	31.19	6.54	2481568
+A	opt	1	9.49	21.25	6.07	2463400
+A	opt2	1	8.52	22.13	6.71	2479556
+A	base	2	10.38	31.28	6.37	2492592
+A	opt	2	9.55	21.30	6.21	2464860
+A	opt2	2	8.33	22.74	6.29	2481980
+B	base	1	9.85	30.84	5.76	2480980
+B	opt	1	8.94	20.83	5.76	2470512
+C	base	1	8.95	30.03	5.54	2483672
+C	rev	1	6.84	21.68	5.55	2468256
+C	base	2	9.01	29.90	5.52	2472632
+C	rev	2	6.90	21.34	5.72	2474776
+#
+#	=== 4. single corpus (block A conditions) ===
+#	NOTE the intercept: per eval_perf_2026-08-04 §4 a single-corpus run is ~100% fixed
+#	cost (bake load, sha256 pre-pass, dial+corruption grids, KADIS window, report write)
+#	on the 9p /mnt/v mount. cid22 is entirely IO-bound, so halving its CPU moves no wall
+#	time at all — the CPU column is the honest one there.
+corpus	rows	variant	wall_s	user_s
+cid22	4292	base	4.69	4.57
+cid22	4292	opt	4.65	2.04
+cid22	4292	opt2	4.67	2.26
+kadid	10125	base	6.59	8.79
+kadid	10125	opt	6.07	5.63
+kadid	10125	opt2	5.04	5.92
+hfnlproxy	11356	base	6.93	8.89
+hfnlproxy	11356	opt	6.28	5.44
+hfnlproxy	11356	opt2	4.95	5.81
+#
+#	=== 5. headline ===
+#	12-corpus verdict (block C, base -> shipped): wall 8.98 -> 6.87 = 1.31x; user CPU 29.97 -> 21.51 = 1.39x
+#	forward kernel alone (zenbench, sota944 shape):                                             25.5x
+#	largest single corpus (hfnlproxy, block A):                          wall 6.93 -> 4.95   = 1.40x
+#	every number bit-identical: 82433/82433 numeric verdict fields match exactly
+#
+#	=== 6. final gate: both binaries built from the SAME rebased zensim tree ===
+#	the only difference is the two git revs; identity PASS on both pairs (82433 fields)
+block	variant	rep	wall_s	user_s	peak_rss_kb
+D	mainbase	1	9.75	31.44	2491440
+D	final	1	8.50	22.39	2468572
+D	mainbase	2	9.97	31.36	2502084
+D	final	2	6.78	21.79	2483012
+#	block D wall varies with co-tenant agent load; user CPU is the stable figure:
+#	31.40 -> 22.09 = 1.42x
