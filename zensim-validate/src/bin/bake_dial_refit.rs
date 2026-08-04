@@ -1921,7 +1921,11 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
     let slice_idx: Option<Vec<usize>> = match &a.slice_file {
         Some(p) => {
             let idx = load_slice_file(p, n_feat)?;
-            eprintln!("  slice: {} of {n_feat} coordinates active ({:?})", idx.len(), p);
+            eprintln!(
+                "  slice: {} of {n_feat} coordinates active ({:?})",
+                idx.len(),
+                p
+            );
             Some(idx)
         }
         None => None,
@@ -2305,7 +2309,8 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
     let bytes = std::fs::read(&a.bake).map_err(|e| format!("read {:?}: {e}", a.bake))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
     let n_in = model.n_inputs();
-    let g = zensim_validate::parquet_loader::load_parquet(&a.corpus, "predict", "human_score", 1.0)?;
+    let g =
+        zensim_validate::parquet_loader::load_parquet(&a.corpus, "predict", "human_score", 1.0)?;
     let transformed = model.has_nontrivial_feature_transforms();
     let mut predictor = zenpredict::Predictor::new(&model);
     let mut xbuf = vec![0f32; n_in];
@@ -2325,7 +2330,11 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
         out.push_str(&format!("{i}\t{:?}\n", p[0] as f64));
     }
     std::fs::write(&a.out, &out).map_err(|e| format!("write {:?}: {e}", a.out))?;
-    eprintln!("predict: {} rows -> {:?} (bake n_in {n_in})", g.feature_rows.len(), a.out);
+    eprintln!(
+        "predict: {} rows -> {:?} (bake n_in {n_in})",
+        g.feature_rows.len(),
+        a.out
+    );
     Ok(())
 }
 
