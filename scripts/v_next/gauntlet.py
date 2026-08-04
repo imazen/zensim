@@ -60,6 +60,9 @@ REF_LABELS = {"mos": "MOS (human)", "jnd": "JND (human)", "ssim2": "SSIMULACRA2"
 # scoreboard columns beyond CID22: (key, header, higher_is_better, fmt)
 CORP_ORDER = ["cid22", "nonphoto", "konjnd", "aic3", "aic4", "live", "csiq", "kadid", "tid"]
 SCATTER_MAX = 500  # subsample dense per_pair for embedding — keeps the offline file responsive
+MODEL_TRANSFORMS_EMBED = 48  # Model-details shows at most 48 transform chips (+ "+N more");
+                             # embedding more per bake (944 on the A-arm lasso cells) is payload
+                             # the page cannot display — the fulleval JSON on disk keeps them all
 
 # ---- JXL loop-targeting (2/3-shot) summary — produced by the jxl-encoder repo's exact
 # 2/3-shot sweep (raw cells: benchmarks/zensim_loop_23shot_2026-08-01.tsv there; doc:
@@ -290,6 +293,12 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                              "n": stats.get("n", len(pts))}
             if cell:
                 scatter_out[corp] = cell
+        model = o.get("model") or {}
+        ft = model.get("feature_transforms")
+        if isinstance(ft, list) and len(ft) > MODEL_TRANSFORMS_EMBED:
+            model = dict(model)
+            model["n_feature_transforms"] = len(ft)   # true count for the card
+            model["feature_transforms"] = ft[:MODEL_TRANSFORMS_EMBED]
         bakes.append({
             "name": name, "regime": o.get("regime", "?"),
             "curated": curated, "family": family_of(name),
@@ -299,7 +308,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
             "gates": o.get("gates") or {},
-            "model": o.get("model") or {},
+            "model": model,
             "repro": o.get("repro"),
             "scatter": scatter_out, "is_stub": bool(o.get("_stub")),
         })
@@ -1144,6 +1153,9 @@ function renderLoop(){
 }
 
 // ---- MODEL DETAILS (architecture + in/out modifiers per bake, from the ZNPR itself)
+// n_feature_transforms = the TRUE transform count (the embed is capped at 48 chips —
+// MODEL_TRANSFORMS_EMBED in the builder; the fulleval JSON on disk keeps the full list).
+const nft=m=>(m.n_feature_transforms!=null?m.n_feature_transforms:(m.feature_transforms||[]).length);
 function renderModels(){
   const host=$('#models');if(!host)return;host.innerHTML='';
   const bs=visBakes().filter(b=>b.model&&b.model.layers);
@@ -1198,7 +1210,7 @@ function renderModels(){
       ['arch', arch+(nparams?'  ·  '+(nparams>=1000?(nparams/1000).toFixed(1)+'k':nparams)+' params':'')],
       ['size / ZNPR', kb+' · v'+(m.znpr_version||'?')],
       ['inputs', m.n_inputs+' feats · scaler '+(m.scaler&&m.scaler.present?('z-norm ('+m.scaler.n+')'):'none')],
-      ['in-mods', (m.feature_transforms&&m.feature_transforms.length?m.feature_transforms.length+' transforms':'none')
+      ['in-mods', (m.feature_transforms&&m.feature_transforms.length?nft(m)+' transforms':'none')
         +' · '+(m.n_feature_bounds||0)+' winsor bounds'],
       ['heads', ['per_sample_alpha','hybrid','minmax'].filter(k=>m.heads&&m.heads[k]).join(', ')
         +((m.heads&&m.heads.tanh_pin_scale!=null)?' tanh-pin '+m.heads.tanh_pin_scale:'')||'none'],
@@ -1222,7 +1234,7 @@ function renderModels(){
         ch.addEventListener('mouseleave',hideTip);
         chips.append(ch);
       });
-      if(m.feature_transforms.length>48)chips.append(el('span',{style:'font-size:9.5px;opacity:.6',text:'+'+(m.feature_transforms.length-48)+' more'}));
+      if(nft(m)>48)chips.append(el('span',{style:'font-size:9.5px;opacity:.6',text:'+'+(nft(m)-48)+' more'}));
       card.append(chips);
     }
     // Reproduction provenance: source badge + seed/commit + input-parquet
