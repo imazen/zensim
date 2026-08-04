@@ -42,7 +42,7 @@ registered caveat: the KADIS %10==9 safety grid is in-sample for these bakes.
 | nonphoto | **≥ 0.90-class** | NEW `ext_nonphoto.parquet` slice = bigcodec-944 TEST views filtered to non-photo content classes (imazen26_manifest.tsv), target ssim2 — the FULL_EVAL "924-era eval slices" rule carried to 944 (the 720 NN tables cannot cross regimes) |
 | HF-NL | **not below B's 0.614** | ⚠ NOT DIRECTLY EVALUABLE at 944 — see §1b. Registered substitute row: winner HF-NL-proxy ≥ the arm-B (B-replay-at-944) candidate's HF-NL-proxy. Era-tagged 0.614 reported as context, marked not comparable |
 | dial | mono **≥ 93%**, tied **≤ 5%** | bake_verdict dial section on dial_grid_944col |
-| M3a | **≥ 0.85** | run_full_eval (944 regime) attribution-density coherence, 27-pair mean |
+| M3a | **≥ 0.85** | run_full_eval (944 regime) attribution-density coherence, 27-pair mean. ⚠ **EVERY M3a NUMBER IN THIS DOCUMENT DATED BEFORE 2026-08-04 IS TOO LOW** — the instrument dropped the append2 block (fix `299ccc8c`). The bar is unchanged; the measurements are not. **Read §E.8 RESTATEMENT before citing any M3a conclusion here** — on corrected values this bar goes from *never met* to met by **16 of 32** cells, and the joint (M3a ∧ CID22) endpoint from **0 to 9**. |
 | G-RANGE | clean (PASS) | `bake_dial_refit gate` on ext_cid22val, default range_frac 1e-4 |
 | corruption | via companion HEAD (report dial-alone for honesty) | `bake_verdict --corruption-head <head944.bin>` joint report on corruption_grid_944col |
 | repro | embedded `zentrain.repro` | trainer-native for MLP; fit-chain extension for additive/BVLS bakes (exit-4-class on embed failure) |
@@ -4575,3 +4575,169 @@ Workspace `../zensim--attrfix` on `main@origin`; `CARGO_TARGET_DIR=
 $HOME/tmp/zensimattr-target`; builds through `~/work/zen/scripts/run-heavy
 --jobs 6`; logs `~/tmp/attrfix/`. Full test suite + clippy green before each
 push.
+
+
+---
+
+## E.8 RESTATEMENT — the M3a-dependent conclusions under CORRECTED values
+
+The append2 coverage fix (`299ccc8c`, §E.1–E.3) raised M3a on all 32 944-width
+board cells (median +0.049, max +0.105). The measurements above stay on the
+record as what was measured then — this section restates the **conclusions**
+that rested on them, because leaving the old framing in place would be the
+mirror image of the "stolen wins" problem the annotation registry exists to
+prevent: conclusions resting on numbers now known to be understated.
+
+Every number below is the corrected measurement joined to the bake's
+**unchanged** CID22 (the fix touches only M3a). Source:
+`benchmarks/attribution_append2_e1_m3a_2026-08-04.tsv` + the board fullevals.
+
+### E.8.1 The central claim — "M3a ≥ 0.85 is unmet by every 944-trained candidate" — is FALSIFIED
+
+| | pre-fix | corrected |
+|---|---:|---:|
+| cells with M3a ≥ 0.85 (of 32) | **2** | **16** |
+| cells meeting the JOINT endpoint M3a ≥ 0.85 **and** CID22 ≥ 0.885 | **0** | **9** |
+
+The nine joint passers (M3a / CID22): `C_co3a_s1319` 0.8786 / 0.8885 ·
+`C_co2a_s1307` 0.8785 / 0.8887 · `C_em944_s31_packed` 0.8750 / 0.8869 ·
+`sota944_C_em944_s31` 0.8749 / 0.8869 · `C_co4_s1301` 0.8719 / 0.8855 ·
+`C_ensk2_s1301` 0.8679 / 0.8910 · `C_co3a_s1307` 0.8670 / 0.8857 ·
+`C_co3a_s1307_packed` 0.8669 / 0.8857 · `C_co4_s1307` 0.8581 / 0.8855.
+
+So the campaign's repeated framing — "**M3a as the single remaining
+blocker**", "M3a and CID22 never passed together", "M3a ≥0.85 unmet by every
+944-trained candidate" (§1, §P0 scorecard, amendment 3's shortlist, the lever
+ledger, wave 4) — **does not survive the corrected inputs.** The bar itself is
+untouched; what changed is that the instrument was under-reading it.
+
+### E.8.2 Wave 4 arm E — the registered endpoint was MET, and a registered follow-on SHOULD have fired
+
+Arm E's endpoint was "**M3a ≥ 0.85 with CID22 ≥ 0.885**". Measured then:
+0.8237 / 0.8352 / 0.8035 — "M3a never cleared 0.85". Corrected:
+
+| cell | M3a pre-fix | M3a corrected | CID22 | endpoint |
+|---|---:|---:|---:|---|
+| `C_co4_s1301` | 0.8237 | **0.8719** | 0.8855 | **MET** |
+| `C_co4_s1303` | 0.8352 | **0.8988** | 0.8785 | M3a yes, CID22 no |
+| `C_co4_s1307` | 0.8035 | **0.8581** | 0.8855 | **MET** |
+
+Two of three cells meet the full endpoint. And `C_co4_s1303` clears M3a while
+losing CID22 — **exactly the registered firing condition for the `co4m`
+w=1.0 intermediate** ("clears M3a ≥ 0.85 but loses CID22"). That follow-on was
+recorded as not-fired *because M3a never cleared 0.85*. On corrected values it
+would have fired. It is registered here as an un-run, still-open arm; it is
+**not** claimed to have been run.
+
+### E.8.3 The M3a cross is no longer cleanly "anti-additive" — one of two seed-matched pairs flips sign
+
+| seed | parent | parent M3a (corrected) | cross `co4` M3a (corrected) | Δ |
+|---|---|---:|---:|---:|
+| s1307 | `C_co2a_s1307` | 0.8785 | 0.8581 | **−0.0204** (still anti-additive) |
+| s1303 | `C_co3b_s1303` | 0.8911 | 0.8988 | **+0.0077** (was −0.0118 pre-fix — SIGN FLIPPED) |
+
+The wave-4 conclusion "crossing them makes M3a *worse than either parent*"
+holds for one seed-matched pair and reverses for the other. Downgrade to:
+**mixed at n = 2 seed-matched pairs, no direction established** — which is
+consistent with E.8.4.
+
+### E.8.4 The seed-noise conclusion STRENGTHENS
+
+Within-config M3a spread at fixed recipe (`co3a`, k = 6, everything else held):
+
+| | pre-fix | corrected |
+|---|---:|---:|
+| span | 0.7181 – 0.8259 (**0.1078**) | 0.7367 – 0.8786 (**0.1419**) |
+
+The corrected spread is **larger**. Wave 4's "no lever has been shown to move
+M3a beyond its seed noise, and any future M3a claim needs k ≥ 3 seeds" and the
+coherence study's "42.3 % of 944-class M3a variance is seed noise at fixed
+recipe" both survive — indeed the bar for a credible M3a lever is now higher.
+
+### E.8.5 Wave 6 arm F (distillation) — the "below the bar" half is FALSE; the paired-lift half needs re-derivation
+
+Recorded: "M3a rises in 6/6 seed-paired draws (+0.023..+0.056), **max 0.8262
+< the 0.85 bar**". Corrected, the six arm-F students span 0.8223 – **0.8745**
+and **two clear the 0.85 bar** (`C_ensk5_s1303` 0.8745, `C_ensk2_s1301`
+0.8679; the latter is also a joint passer at CID22 0.8910). The "max below the
+bar" statement is therefore **false on corrected values**.
+
+The **paired-lift** claim (student − non-distilled counterpart, 6/6 positive)
+is **NOT restated here**: the counterparts moved too, and re-deriving the six
+paired deltas needs their corrected M3a, which is a re-measure of cells outside
+this population. Flagged as **open**, not overturned — do not cite the
+"+0.023..+0.056 in 6/6" magnitudes without redoing them.
+
+### E.8.6 The one place the old conclusion survives EXACTLY — and why it is informative
+
+§P0 registered a supervisor hypothesis that the P0 winner's M3a shortfall was a
+COVERAGE artifact, and recorded it **REFUTED for that candidate**. That verdict
+is **confirmed, not overturned**: `sota944_winner_A_bvls_X_AM5` is the only
+cell in the population whose ΔM3a is **exactly 0.0000** (0.6299 → 0.6299), and
+the instrument reports **0.0 % raw-|s_k| mass** on f924-943 for it — it is a
+linear bake that does not read the append2 block at all, so no amount of
+append2 coverage could have moved it.
+
+The hypothesis was right in general and was tested on the one bake for which it
+was false. The generalisation drawn from it — that coverage blind spots are
+"numerically negligible" for the 944 class — is **falsified for the other 31**.
+
+### E.8.7 What is NOT affected
+
+No rank, dial, corruption, breadth, HF-NL or G-RANGE number anywhere in this
+document changes: the fix touches the attribution density only. `M3` (the
+legacy signal fold) is byte-identical on all 32 cells. Every 372 / 720 / 924
+width bake is unaffected by construction. No `freeze_check --profile
+balanced-2026-08-04` PASS/FAIL verdict changes, because M3a is a *reported
+tier* in that profile and not one of its floors — but the §1 freeze-bar M3a
+row IS a bar, and `freeze_check --select`'s tie-break now consumes corrected
+values.
+
+---
+
+## E.9 A REGISTERED HAZARD CLASS — `n_inputs()` vs `caller_input_width()` after dead-column pruning
+
+Recorded because it is a *class*, and because it silently disables a gate that
+now has a selection consequence.
+
+`ae852b1b` (dead-column pruning) made a packed 944-input bake into a
+**667-input model that still accepts 944 features** (`FeatureTransform::Drop`
+on the dead raw lines). So `Model::n_inputs()` (667, the internal layer-0
+width) and `Model::caller_input_width()` (944, the feature width the caller
+feeds) **diverge**, and every site that means "how wide is the feature vector I
+hand this bake" must read the latter.
+
+**The hazard is not a crash — it is a silent skip.** The coherence harness
+dispatches its feature regime off the bake's width and, on an unrecognized
+width, prints `M3 skipped: unsupported bake layout` and emits **no M3 and no
+M3a**. Reading `n_inputs()` there routes every pruned bake to 667, which is not
+a regime, so the harness quietly produced nothing. Since 2026-08-04 M3a is a
+first-class SELECTION input (§E.4: a missing M3a is `UNMEASURED` ⇒ **NOT
+SELECTABLE**), so the effect of that silence is that **every packed/pruned bake
+would drop out of wave selection without any error anywhere.**
+
+**Audit performed (read each call site, not grep-and-assume).** Across
+`zensim/`, `zensim-validate/` and `zensim-experimental/` the gap is **exactly
+one site** — `zensim/examples/diffmap_block_coherence.rs` — now fixed. The
+other readers are correct as-is and are commented to say why:
+
+- `zensim/src/metric.rs` and `zensim-validate/src/bake_runtime.rs` — the
+  min-max-head paths deliberately compare `n_inputs()` against
+  `caller_input_width()` and **refuse** a variable-arity bake rather than
+  mis-index a 1:1 transform array.
+- `bake_verdict.rs` (`PRUNED: layer0_in_dim=`), `bake_dial_refit.rs` (ensemble
+  member arity equality), `prune_classes.rs`, `prune_forward_bench.rs`,
+  `l0_per_block_compare.rs` — all genuinely want the internal layer-0 width.
+
+**Why the swap is provably safe on existing bakes:** `caller_input_width()`
+returns `feature_transforms.len()`, and that Vec is **dense** — one entry per
+caller feature (parse-time check enforces the parallel transforms/params arrays
+and sums per-feature arities to the first-layer `in_dim`). The sparse
+`[{idx: 9, …}]` shape in a fulleval JSON is only the emitter showing
+non-Identity entries. So on every unpruned bake `caller_input_width() ==
+n_inputs()` and the change is a no-op.
+
+**Standing rule for this campaign:** any new site that asks "how many features
+does this bake take" reads `caller_input_width()`. A site that dispatches
+BEHAVIOUR on width (regime selection, block offsets, gradient length) is the
+dangerous kind, because its failure mode is *emitting nothing*, not erroring.

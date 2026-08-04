@@ -162,11 +162,30 @@ the 0.005 threshold; two bakes cross the **0.85** gold bar; two cross the
 
 **So yes — the campaign's published 944 M3a values shift, and they shift
 upward.** Every 944-width M3a measured before this commit understates the
-model's true attribution coherence, because ~4 % of the 944 layout (and, per
-the E-M9/C2a finding, a disproportionate share of the *coarse-scale* signal —
-which is exactly where the 128 px inversion lived) was being discarded before
-the map was built. The direction is not a surprise; the magnitude (up to
-+0.10, more than twice the 944-class sd of 0.0471) is.
+model's true attribution coherence, because the 8 spatializable slots — just
+**0.85 % of the 944 layout** — were being discarded before the map was built.
+The direction is not a surprise; the magnitude (up to +0.10, more than twice
+the 944-class M3a sd of 0.0471) is.
+
+### The block's gradient mass does not explain the size of the shift
+
+`diffmap_block_coherence` prints each bake's raw-`|s_k|` mass on the append2
+block. Across all 32 bakes it is **≤ 0.4 %** (the instrument prints one
+decimal), yet ΔM3a reaches **+0.10**. So a block carrying well under one
+percent of the model's gradient mass was, by itself, worth up to a tenth of
+the coherence statistic.
+
+That is not a surprise in this codebase — it is the same shape C2a measured
+when the append block alone cured the 128 px inversion ("the 0.5 %-mass
+append block was the whole coarse signal"). It is also a third, independent
+line of support for §D.8's falsification: **where a bake's contribution mass
+sits does not determine its coherence.**
+
+**Do NOT read a mass → ΔM3a relationship out of this.** The printed mass has
+one decimal, and several bakes that print `0.0 %` moved by +0.05 to +0.10, so
+the precision cannot support one. The single clean observation is that
+`sota944_winner_A_bvls_X_AM5` — the one bake whose ΔM3a is **exactly
+0.0000** — also prints `0.0 %`; consistent with the mechanism, but one point.
 
 ### What this does NOT invalidate
 
@@ -179,15 +198,26 @@ the map was built. The direction is not a surprise; the magnitude (up to
   the balanced profile, not one of its floors (`M3A_GOLD`/`M3A_SILVER` are
   explicitly "reported tier, NOT a floor"). No `freeze_check --profile
   balanced-2026-08-04` PASS/FAIL verdict changes as a result of this fix.
-  It DOES change the §5 freeze-bar M3a row, which is a bar.
+  It DOES change the §5 freeze-bar M3a row (which IS a bar), and — because
+  M3a entered the selection rule the same day (appendix E.4) — it changes
+  `freeze_check --select` tie-breaks. Both consume the corrected values.
 
 ### Re-measurement of the full population
 
-Per the registration's MATERIAL branch, every 944-width board cell carrying an
-M3a is re-measured with the fixed binary and its fulleval updated through the
-committed promoter, with an `eval_annotations.json` entry (`kind=invalidated`)
-pointing the superseded numbers at this commit. Results and the full old→new
-table are in §6 below.
+Per the registration's MATERIAL branch, **every 944-width board cell carrying
+an M3a was re-measured with the fixed binary and its fulleval updated in
+place**, through the committed owner rather than a hand-rolled injector:
+`run_full_eval.sh` gained `ZENSIM_M3_ONLY=1` (the inverse of the existing
+`ZENSIM_M3_REUSE`) which skips `bake_verdict` entirely and refreshes only the
+M3/M3a keys. Verified on a scratch copy before the pass: exactly four keys
+change (`m3_coherence`, `m3_n`, `m3a_coherence`, `m3a_n`) and all 17 other
+top-level keys are byte-identical, so no rank/dial/corruption number is
+touched. `promote_fulleval.py`'s "carry m3a where measured" rule then
+preserves the corrected value through any later re-promotion.
+`benchmarks/eval_annotations.json` carries the `kind=invalidated` entry
+`m3a-pre-append2-fix`, scoped BY NAME to exactly these 32 cells — not to
+every `m3a_coherence` on the board, which would have falsely flagged the
+unaffected 372/720/924 values. Results and the full old→new table: §6.
 
 ## 5. Cost of the M3a instrument, and the cheap-grid verdict (registered §E.5)
 

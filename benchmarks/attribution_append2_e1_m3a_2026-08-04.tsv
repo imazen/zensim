@@ -1,0 +1,42 @@
+# M3a old-vs-new over the full 32-bake 944-width board population.
+# old_m3a  = the value published before the append2 coverage fix (299ccc8c).
+# new_m3a  = re-measured with the fixed binary, SAME 27 fixtures, SAME bake bytes
+#            (each bake's sha256 verified against the fulleval's bake_sha256 first).
+# new_m3   = the legacy signal fold, for the record: unchanged by the fix.
+# Per-cell (27 cells/bake) TSVs + the population manifest:
+#   /mnt/v/output/zensim/attribution-append2-e1-2026-08-04/
+# Method + verdict: benchmarks/attribution_append2_e1_2026-08-04.md
+# Registration: benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX E
+name	old_m3a	new_m3a	new_m3
+C_co1a_s1303	0.771333	0.826463	0.263430
+C_co1a_s1307	0.786881	0.889285	0.254274
+C_co1b_s1303	0.793189	0.846674	0.249793
+C_co1c_s1301	0.796237	0.844311	0.318011
+C_co2a_s1307	0.826052	0.878544	0.043467
+C_co2b_s1307	0.799259	0.849448	0.186904
+C_co3a_s1301	0.759778	0.786074	0.079019
+C_co3a_s1301_w4repro	0.759778	0.786074	0.079019
+C_co3a_s1303	0.769907	0.807544	0.228815
+C_co3a_s1307	0.762467	0.866978	0.251648
+C_co3a_s1307_packed	0.762641	0.866870	0.251600
+C_co3a_s1319	0.825922	0.878567	0.177844
+C_co3a_s1321	0.814778	0.832500	0.297004
+C_co3a_s1409	0.718141	0.736689	0.175633
+C_co3b_s1303	0.847015	0.891052	0.268815
+C_co4_s1301	0.823652	0.871900	0.234215
+C_co4_s1303	0.835237	0.898811	0.307222
+C_co4_s1307	0.803522	0.858141	0.170115
+C_em944_s31_packed	0.792356	0.874978	0.206474
+C_ensk2_s1301	0.782333	0.867859	0.203859
+C_ensk2_s1303	0.826226	0.822296	0.002515
+C_ensk2_s1307	0.805311	0.843015	0.090585
+C_ensk5_s1301	0.7849	0.846467	0.059293
+C_ensk5_s1303	0.793385	0.874493	0.055863
+C_ensk5_s1307	0.807733	0.822278	0.100137
+H_co3abpg_s2501	0.827985	0.877196	0.206052
+H_co3abpg_s2503	0.773519	0.819011	0.060252
+H_co3abpg_s2507	0.866393	0.889959	0.219096
+H_co3abpg_s2507_packed	0.866515	0.890378	0.219170
+sota944_C_em944_s31	0.792589	0.874867	0.206222
+sota944_nt223	0.696967	0.721004	0.195033
+sota944_winner_A_bvls_X_AM5	0.629885	0.629885	0.436193
