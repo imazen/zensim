@@ -352,6 +352,27 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   one ZNPR, and null renders as an em-dash (NOT MEASURED — never shaded or displayed
   as a measured zero). Wave-5's six arms are promoted by `scripts/wave5_ensemble.sh
   promote`, which reuses the same frozen membership arrays it scored with.
+  Plus (2026-08-04) **FULL-GRID COVERAGE + curation + zoom/pan**: every sota944
+  campaign verdict cell is on the board (162 bakes; `scripts/promote_sota944_board.py`
+  — a caller of the generalized `promote_fulleval.py` — with a COVERAGE GATE: every
+  non-excluded verdict must map to a board file; mapping index
+  `fulleval/_sota944_board_map.tsv`; excluded = LOO/REPROCHK/XBUILDCHK/GATE/recheck/
+  SMOKE instrument duplicates; `*_corrjoint` fold under the plain name as sha-gated
+  corruption_head grafts). Presentation is two-tier so the grid doesn't drown a fresh
+  reader: `gauntlet.py CURATED_BOARD` (29 names — era flagships + every arm-candidate/
+  named leader + the ensembles) is the default-visible set AND the only set with
+  embedded per-pair scatter (registered size rule; grid-interior cells keep every
+  scalar stat, their full per-pair stays in the source verdict, recorded via
+  `source_verdict` + `per_pair_stripped`); family toggles (arm A/B/C-seeds,
+  coherence/W4, near-top, distilled, ensembles, era bridge, pre-944 era) + a
+  collapsible per-bake picker + 'curated' preset replace the flat 160-chip bar; the
+  scoreboard still lists every cell (dimmed = hidden, click to toggle). The
+  heavyweight charts (scatter cells, dial curves, 10-band bars, heatmap, trade maps)
+  zoom (wheel, 1x-20x cursor-centered), pan (pointer drag once zoomed) and reset
+  (double-click / corner ⟲) via `makeZoomable` — viewBox math only, shim-safe
+  (listeners bound at build, pointer/rect APIs typeof-guarded in handlers).
+  `model.feature_transforms` embeds are capped at the 48 chips the card can show
+  (`n_feature_transforms` keeps the true count). 162-bake board = 8.9 MB, gates PASS.
   **Regen gates (MANDATORY, run on every emitted HTML):**
   `scripts/v_next/gauntlet_gates.sh <html>` = `node --check` on the extracted
   inline JS + the DOM-shim render harness (`gauntlet_render_check.js`) — committed
