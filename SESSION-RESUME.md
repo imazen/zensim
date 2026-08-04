@@ -34,6 +34,14 @@ never compare numbers across eras without the doc's era-bridge notes.
   every bake class, and it surfaced that no 944 MLP candidate carries an
   output spline — dial packaging (`bake_dial_refit add-spline`) is required
   before that bar row can be judged on a freeze candidate.
+- **Selection frame = the BALANCED profile (user-directed, 2026-08-04):** the
+  user lowered the bar to surface candidates balanced across bands, datasets
+  and uses — registered as `freeze_check --profile balanced-2026-08-04`
+  (campaign doc AMENDMENT 8: floors, composite, classes, and the full
+  pass/frontier results; §1 stays the freeze bar). Headline: 0/145 cells pass
+  all 8 floors — classic-IQA breadth (CSIQ/LIVE ≥ 0.83) is the 944 era's
+  binding balance axis, and wave-7's arm H is the first cell family to cross
+  it while holding KonJND.
 
 ## THE three entry points (a newcomer starts here)
 

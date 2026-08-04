@@ -424,7 +424,17 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
         balanced::NONPHOTO,
         f(v, &["rank", "nonphoto", "srocc"]),
     ));
-    // F4 dial mono + tied (one row, both must hold)
+    // F4 dial mono + tied (one row, both must hold).
+    // UNIT ANNOTATION (packaging appendix, 2026-08-04): for SPLINE-LESS bakes
+    // the mono/tied stats are measured on RAW outputs (span ~16-17), where the
+    // 0.5-score-pt materiality threshold flatters mono vs the real [0,100]
+    // dial (span ~63-67 after add-spline+pack; strict-backwards is
+    // cal-invariant, so the drop is a unit effect, not new inversions). The
+    // floor itself is unchanged — this labels which unit the number is in.
+    let dial_unit = match v.get("model").and_then(|m| m.get("output_spline")) {
+        Some(s) if !s.is_null() => "dial-unit",
+        _ => "raw-unit",
+    };
     let dial_bar = format!(
         "mono ≥ {:.0}% ∧ tied ≤ {:.0}%",
         100.0 * balanced::DIAL_MONO,
@@ -436,7 +446,11 @@ fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
                 id: "dial",
                 gate: "F4 dial mono/tied",
                 bar: dial_bar,
-                measured: format!("mono {:.1}% / tied {:.1}%", 100.0 * m, 100.0 * t),
+                measured: format!(
+                    "mono {:.1}% / tied {:.1}% ({dial_unit})",
+                    100.0 * m,
+                    100.0 * t
+                ),
                 pass: m >= balanced::DIAL_MONO && t <= balanced::DIAL_TIED,
             },
             _ => Floor {
@@ -961,6 +975,28 @@ mod tests {
         v["n_inputs"] = json!(372);
         v["model"]["n_inputs"] = json!(372);
         assert_eq!(eval_balanced(&v).class, "era-bridge");
+    }
+
+    /// Packaging-appendix unit annotation: spline-less bakes' F4 numbers are
+    /// raw-unit (unit-flattered); spline-bearing bakes are dial-unit. The
+    /// floor logic itself is identical in both cases (registered floors do
+    /// not move — this is a label).
+    #[test]
+    fn f4_dial_row_carries_unit_annotation() {
+        let v = passing_fixture(); // output_spline: null
+        let r = eval_balanced(&v);
+        let fl = r.floors.iter().find(|x| x.id == "dial").unwrap();
+        assert!(fl.measured.contains("(raw-unit)"), "got: {}", fl.measured);
+        let mut v2 = passing_fixture();
+        v2["model"]["output_spline"] = json!({"n_knots": 18});
+        let r2 = eval_balanced(&v2);
+        let fl2 = r2.floors.iter().find(|x| x.id == "dial").unwrap();
+        assert!(
+            fl2.measured.contains("(dial-unit)"),
+            "got: {}",
+            fl2.measured
+        );
+        assert_eq!(fl.pass, fl2.pass, "annotation never changes the verdict");
     }
 
     #[test]
