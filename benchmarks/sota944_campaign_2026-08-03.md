@@ -2585,3 +2585,153 @@ before staging), detached chains, ONE waiter writing timestamped progress to
 `~/tmp/wave7/waiter.log`, liveness via `pgrep -xc zensim_mlp_trai` only.
 Nothing ships, swaps, promotes, or publishes; no bake enters
 `zensim/weights/`; the freeze decision remains the user's.
+
+---
+
+## REGISTERED AMENDMENT 8 — THE BALANCED-SELECTION PASS
+### (user-directed policy change; the profile, floors, composite, classes and wait-bound are all frozen in this commit, BEFORE any per-cell pass/fail, composite, or ranking is computed)
+
+### 8.0 The sanctioned policy change (verbatim)
+
+Six waves optimized a single number — the CID22 peak 0.8923796503 — and produced
+four honest training-side nulls, one function-only crossing (wave 5), and a
+KonJND repair that trades the peak away (wave 6). The user has changed the
+selection policy:
+
+> "we can lower the bar to find more balanced and principled candidates that
+> work better across bands and datasets and uses."
+
+This amendment is that change made concrete. **§1 (the frozen SOTA bar) is NOT
+edited** — it remains the campaign's freeze bar and every wave's verdict against
+it stands unchanged. This is a SECOND registered decision surface: a *selection
+profile* for balance across AXES (rank / dial / steering / corruption /
+breadth), across DATASETS (incl. the CSIQ/LIVE classic-IQA breadth the campaign
+reported but never gated), across CID22's quality BANDS (the tails, not just the
+aggregate), and across USES (a ranker, a dial, a steering map and a corruption
+detector are different products; an ensemble and a single bake are different
+artifacts). Floors are frozen at this commit and DO NOT move after scoring
+begins. If a floor empties a class, the empty class + a nearest-miss table are
+published — the floor still does not move.
+
+### 8.1 The profile — `freeze_check --profile balanced-2026-08-04` (owner extension)
+
+`freeze_check` is the bar owner, so the profile lands there — never a side
+script. The default (no `--profile`) §5 path is byte-unchanged and test-locked.
+A `--tsv` row mode feeds the pool matrix; the driver
+(`scripts/sota944_balanced_matrix.sh`) only loops and collates — it computes
+nothing.
+
+**Floors — ALL must hold to pass.** A floor axis absent from the fulleval is
+UNEVALUABLE and counts as not-passed (a candidate nobody measured on an axis
+cannot be certified balanced on it); the row says so explicitly.
+
+| # | axis (fulleval field) | floor | rationale / provenance |
+|---|---|---|---|
+| F1 | CID22 (`rank.cid22.srocc`) | ≥ 0.885 | one within-config sd below the §1 bar source: arm-D measured the bar config's within-config sd at 0.01246 (n=12), and 0.8924 − 0.0124 = 0.880 < 0.885; also exactly wave-7's registered H-Q2 CID22 level (§7.3) — no new number invented |
+| F2 | KonJND (`rank.konjnd.srocc`, abs) | ≥ 0.43 | §1 row verbatim (unchanged) |
+| F3 | nonphoto (`rank.nonphoto.srocc`) | ≥ 0.90 | §1 row verbatim (unchanged) |
+| F4 | dial (`dial.mono_pct`, `dial.tied_pct`) | mono ≥ 0.93 AND tied ≤ 0.05 | §1 dial row verbatim (G3) |
+| F5 | dial span (`dial.dynamic_range`) | 1.0 ≤ span ≤ 120.0 | operationalizes "sane dynamic range". The dial contract is a bounded [0,100] surface (+ the registered negative tail); a per-grid span > 120 cannot be a bounded dial. The pathological class this catches is real and named: `cl_tfm_corruption_LQ_MLP_s13` spans 497 while ranking high (and tying 15.6%); the largest legitimate calibrated span on the board is 98. Span < 1 is flat — not a dial |
+| F6 | HF-NL per-ref (`rank.hfnlproxy.per_ref_mean`) | ≥ 0.0 | sign floor only: not NEGATIVE on the near-lossless zone. The instrument's volatility is documented (wave-5 limitations: −0.115..+0.211 across arms, unrelated to k), so the old 0.1931 arm-B comparator stays REPORTED as context, never a floor |
+| F7 | CSIQ + LIVE (`rank.csiq.srocc`, `rank.live.srocc`) | both ≥ 0.83 | breadth floors at the 944-class level (57/145 pool cells hold both — a real cut, not empty-by-construction). The 372-era ships hold 0.93+ here; that era gap stays REPORTED as context (regime-incomparable), but a 944 candidate that collapses on classic-IQA breadth is not balanced |
+| F8 | CID22 band tails (`rank.cid22.bands[]`, signed) | B9 ≥ 0.15 AND B3 ≥ 0.0 | band-profile non-collapse on the two discriminating tails (B0–B2 are structurally near-empty on CID22; B4–B8 are the mass the aggregate already covers). B3 n=57, B9 n=43 — n is printed on the row, any band n<30 renders parenthesized (board convention), and band SROCC is range-restricted (never compared across bands, only across bakes) |
+
+**Reported on every row, NEVER floors:**
+
+- **M3a, tiered**: **gold ≥ 0.85** (the §1 bar) / **silver ≥ 0.78** (≈ the
+  measured 944-class median: 26 measured cells, med 0.793, p75 0.815, max 0.847)
+  / **flagged** < 0.78. Not a floor because nothing balanced passes 0.85 today
+  and the user wants candidates surfaced, not an empty set — but the tier prints
+  on every row so coherence is never silently dropped. Ensembles: **NOT
+  COMPUTABLE** (§5.6 — the coherence instrument loads one ZNPR), stated per row.
+  Cells without the fulleval M3a injection: NOT MEASURED (em-dash, never a zero).
+- **corruption**: head-owned `corruption_head.pass_q20`/`pass_q10` where present
+  (the §1 corruption owner); dial-alone printed for honesty exactly as §1 does.
+- **KADID/TID**: printed dimmed as `t=v` integrity guards; never scored, never
+  in the composite (wave-5 Finding 4: they inflate under ensembling).
+- **sdr25**: printed; within-family selector ONLY (the §SELECTION oracle
+  finding: not cross-family comparable) — not in the composite.
+- **packaging**: `model.output_spline` present/absent — the C-class 944 bakes
+  are spline-less raw heads (ADDENDUM), so a shortlisted spline-less candidate
+  additionally needs `bake_dial_refit add-spline` + rank-invariance verification
+  before G-RANGE is even defined for it. Stated on the trade card.
+- **repro**: embedded `zentrain.repro` present / anchor-only (ensembles) / absent.
+- The §1 `composite` (product_composite) prints beside the new composite.
+
+**The registered ranking composite** — passers are ranked within class by
+`balanced_composite`, descending:
+
+```
+balanced_composite = Σ wᵢ·xᵢ / Σ wᵢ   over the terms present
+```
+
+| term | xᵢ | wᵢ |
+|---|---|---|
+| CID22 | abs SROCC | 1.00 |
+| imazen26 (real-codec) | abs SROCC | 0.50 |
+| nonphoto | abs SROCC | 0.30 |
+| KonJND | abs SROCC | 0.20 |
+| CSIQ | abs SROCC | **0.15 (new)** |
+| LIVE | abs SROCC | **0.15 (new)** |
+| CID22 band-tail = (B3 + B9)/2 | **signed** | **0.15 (new)** |
+| AIC-3 | abs SROCC | 0.10 |
+| AIC-4 | abs SROCC | 0.05 |
+
+The first six non-new terms are the canonical `product_composite` verbatim
+(same weights, KADID/TID already excluded there); the three NEW terms add
+breadth + tail balance at 0.15 each — deliberately between AIC-3 (0.10) and
+KonJND (0.20), so breadth/tails matter without swamping the product axes. The
+band-tail term is SIGNED (a negative tail must hurt; abs would reward
+collapse). Absent terms drop from numerator and denominator (owner rule).
+`freeze_check` computes it from the same fulleval fields the floors read;
+nothing is re-derived elsewhere.
+
+**Classes (scored separately — their USES differ):**
+
+| class | membership rule | standing note printed on every row |
+|---|---|---|
+| 944-single | n_inputs = 944, not distilled/ensemble | shippable single bake |
+| 944-distilled | name `C_ensk*` (wave-6 arm F students) | shippable; the M3a-mover class |
+| 944-ensemble | `model.kind == "ensemble"` | **k× scoring cost; NOT a shippable artifact; M3a NOT COMPUTABLE** |
+| era-bridge | n_inputs ≠ 944 | context only, NEVER shortlisted (regime-incomparable) |
+
+**Outputs**: the full pass/fail matrix (all fulleval cells + arm H when its
+verdicts land), the per-class ranked shortlist, one trade card per shortlisted
+candidate (best-at / costs / per-band profile / packaging state), nearest-miss
+tables for any empty class. Full TSV to
+`/mnt/v/output/zensim/reports/balanced/` (pointer here); doc carries the tables.
+
+**Arm-H inclusion (bounded wait, registered):** wave 7's `H_co3abpg_s{2501,2503,2507}`
+verdicts are scored under this same profile from their `.full.json` (M3a
+degrades to NOT MEASURED — not a floor, so every floor stays evaluable). Poll
+`/mnt/v/output/zensim/bakes/sota944/verdicts/`; **hard cap 08:53Z 2026-08-04**
+(2.5 h from this pass's start, 06:23Z). On expiry: publish with H marked
+pending; do not block.
+
+### 8.2 Calibration disclosure (what was consulted BEFORE this freeze)
+
+Per the wave-7 §7.3 precedent (measured baselines recorded at registration so a
+pass is read honestly), the following was read before freezing, and nothing
+else: (i) per-axis DISTRIBUTIONS of the 145-cell 944 pool (min/percentiles for
+cid22 / konjnd / nonphoto / csiq / live / hfnl-per-ref / B3 / B9 / m3a, and the
+dial `dynamic_range` distribution incl. the 497 outlier and the 98 legitimate
+max); (ii) coarse intersection COUNTS on the three §1-inherited rows only
+(CID22 ≥ 0.885: 25 cells; ∧ KonJND ≥ 0.43: 9; ∧ nonphoto ≥ 0.90: 9 — counts,
+not identities) plus the single count "57/145 hold csiq ∧ live ≥ 0.83"; the
+breadth floor's intersection with the other floors was deliberately NOT
+computed; (iii) the supervisor's direct reads named in the tasking (s31,
+co3a_s1307, ensk2_s1303, GE2_trio, GE4_konfloor5) — to be independently
+re-derived, listed here so a later reader can judge selection-bias risk. No
+per-cell pass/fail matrix, no composite value, and no ranking existed before
+this commit.
+
+### 8.3 Ops (frozen)
+
+Workspace `zensim--balanced` on `main@origin` (`141a9245`);
+`CARGO_TARGET_DIR=$HOME/tmp/zensimbal-target`; builds via
+`~/work/zen/scripts/run-heavy --jobs 6` (wave-7 trains on this box); logs
+`~/tmp/balanced/`. The fulleval dir + `gauntlet.py` are another agent's surface
+— read-only here (board integration of this pass comes later, not in this
+pass). Nothing ships, swaps, promotes, or publishes; no bake enters
+`zensim/weights/`; §1 stays the freeze bar; the freeze decision remains the
+user's.
