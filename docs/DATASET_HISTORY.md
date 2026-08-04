@@ -70,7 +70,7 @@ Shipped today (verified in `zensim/src/profile.rs`): **A** = `v47_strict_qat_nat
 | **konjnd-dense** | 20,160 rows (active-mix target) + 1,008-ref val (PJND) | A (modest), B kon head (**≈wash**) | **HELPED (A) / NEUTRAL (B)** | for B the KonJND skill is the **BVLS sign-mask, not the corpus** (`canonkjhdr15`≈`canonhdr15`) | `linear_projections_2026-07-03.md` round-2 |
 | **inclusive-winsor corpus** | 10,810 = hdr_v3mix + zenjxl near-lossless SDR sweep; fits B's winsor bounds only | B calibration | **HELPED (user-caught fix)** | frees 245/372 clamped-constant features → near-lossless dial 91.5→96.1 at ~0 MOS cost | `profile_b_methodology §3` (commit `aaa1ecac`) |
 | **cvvdp_iwssim_LARGE** | 73,300 rows, `mix_cv40_iw60` target, **300 feats** | PreviewV0_5Balanced (V_22, not a current Profile) | **HELPED (V_22 era)** | +0.068 KADID/+0.087 TID; "marginal value is in content types not in training" | `v22_mix_LARGE_iwssim_methodology_2026-05-18.md` |
-| **bigcodec / imazen-26** (canonical-picker) | 2.9–5.7M ssim2-normalized real-codec cells, 414 imazen-26 origins | MLP recipes (w≈0.25, later 0.5); **EXCLUDED from linear B** | **⚠ RE-FRAMED 2026-08-04 — the exclusion was RIGHT and its MLP carve-out was NEVER VALIDATED.** Original: "EXCLUDED from linear — poisons CID22 (0.65–0.76); MLPs absorb it via capacity" | a 372→1 linear head gets pulled to the ssim2 multi-codec regime. **"MLPs absorb it" was tested on CID22 ONLY. Measured 2026-08-04: at ~78% of row mass (bigcodec + its distillation teachers) the 944-era recipe collapses classic-IQA breadth AND KADID at EVERY feature width — 372-width arms on the 944 data score CSIQ 0.681/0.438, LIVE 0.666/0.300, KADID 0.546/0.641 vs B 0.934/0.897/0.809 and winner_dial 0.958/0.960/0.946. MLPs did not absorb it; they inherited it on the axes nobody re-checked.** Why it stayed invisible: KADID/TID were classified "integrity guard, never a scoreboard" (row above), and CSIQ/LIVE did not exist as corpora until `ac787382` (2026-07-18), AFTER the MLP recipes were set — so no gate in force at the time could fail. | `linear_projections_2026-07-03.md` Falsified #1; commit `c7900d53`; falsification: `sota944_campaign_2026-08-03.md` width-discriminator (k=2/arm — seed spread too wide to rank widths; the breadth/KADID collapse is robust to that limitation) |
+| **bigcodec / imazen-26** (canonical-picker) | 2.9–5.7M ssim2-normalized real-codec cells, 414 imazen-26 origins | MLP recipes (w≈0.25, later 0.5); **EXCLUDED from linear B** | **⚠ RE-FRAMED 2026-08-04 — the exclusion was RIGHT and its MLP carve-out was NEVER VALIDATED.** Original: "EXCLUDED from linear — poisons CID22 (0.65–0.76); MLPs absorb it via capacity" | a 372→1 linear head gets pulled to the ssim2 multi-codec regime. **"MLPs absorb it" was tested on CID22 ONLY. Measured 2026-08-04: at ~78% of row mass (bigcodec + its distillation teachers) the 944-era recipe collapses classic-IQA breadth AND KADID at EVERY feature width — 372-width arms on the 944 data score CSIQ 0.681/0.438, LIVE 0.666/0.300, KADID 0.546/0.641 vs B 0.934/0.897/0.809 and winner_dial 0.958/0.960/0.946. MLPs did not absorb it; they inherited it on the axes nobody re-checked.** **⚠ KADID FIGURES CORRECTED 2026-08-04 (§3.20): the ext-lineage tables store KADID's target INVERTED, so every KADID number in this row was published as an unsigned magnitude of a SIGNED quantity. Against KADID's real human MOS the 372-width-on-944-data arms are **−0.546 / −0.641** (anti-correlated), B is **+0.809** and winner_dial **+0.946**. The row's CONCLUSION is unchanged and in fact understated — the 944 recipe does not merely weaken KADID, it INVERTS it. CSIQ/LIVE/CID22 in this row are unaffected (those corpora are correctly oriented on every root).** Why it stayed invisible: KADID/TID were classified "integrity guard, never a scoreboard" (row above), and CSIQ/LIVE did not exist as corpora until `ac787382` (2026-07-18), AFTER the MLP recipes were set — so no gate in force at the time could fail. | `linear_projections_2026-07-03.md` Falsified #1; commit `c7900d53`; falsification: `sota944_campaign_2026-08-03.md` width-discriminator (k=2/arm — seed spread too wide to rank widths; the breadth/KADID collapse is robust to that limitation) |
 | **KADIS-700k** | 700k analytic-distortion cells on 140k Pixabay refs; GPU-metric targets, no human labels | negative-region calibration; the §8.32-8.33 MLP-neg prototype (not shipped) | **EXCLUDED for shipped fit; diagnostic/negatives only** | cvvdp-scalar target falsified (V41); analytic + more-photographic bias | `DATA_SPLITS.md §2b`; `project_profile_b_hdr.md §8.31-8.33` |
 | **kadis-hdr** | 11,400 PQ-domain synthetic HDR cells, 1,140 imazen-26 refs | BHdr breadth retrain | **EXCLUDED — falsified on UPIQ** | synthetic HDR breadth does not transfer to human-MOS HDR (linear family) | `bhdr_improvement_split_lineage §8.8-8.15` |
 | **CID22-49 / AIC-3 / AIC-4 / UPIQ-HDR / JPEG-AI-SDR25** | human-MOS holdouts | **HOLDOUT-ONLY** | **EXCLUDED (sacred)** | the only held-out human generalization gates; UPIQ-380 now BURNED (~21 looks) | `CLAUDE.md` "CID22 is VALIDATION-ONLY"; `DATA_SPLITS.md §3` |
@@ -109,6 +109,41 @@ The most important section. Each: **thought-why → actual-why**, when discovere
 shipped-bake impact. All shipped bakes were verified *unaffected* except where noted.
 
 ### Tier 1 — highest consequence
+
+**3.20 The ext-lineage KADID TARGET IS INVERTED — `(5−dmos)/4` instead of `(dmos−1)/4`
+(discovered 2026-08-04, Tier 1).**
+*Thought:* KADID SROCC magnitudes were comparable across the 372/canonical era and the
+720/924/944 ext era, so "era 0.946 → 944 0.423" read as a competence regression.
+*Actual:* the two lineages store **opposite orientations of the same label**, and every
+KADID number ever published from an ext root is **sign-flipped**.
+`scripts/canonical_corpus/build_fr_corpus_pairs.py` `build_kadid()` (line 113) emits
+`human_score = (5 − dmos)/4` — the standard invert-a-DMOS reflex that CSIQ (`1−DMOS`) and
+LIVE (`1−dmos_new/100`) correctly need — but **KADID's `dmos` column is a MOS in
+disguise**: raw crowdsourced DCR (349,800 ratings, `raw_crowdsource_data.csv`) falls
+4.0789 → 2.0072 across severity levels 1–5, so it was already quality-oriented and the
+flip inverts it. The canonical lineage (`build_canonical_parquets.py:288`,
+`fix_kadid_tid_build_pairs.py:15`) uses the correct `(dmos−1)/4`. Both residuals are
+**exactly 0.0** — two transforms, not drift.
+**Consequences.** (i) Every `ext720`/`ext924`/`ext944` KADID SROCC is the negative of the
+true-quality value; **110 of 188 board bakes are anti-correlated with KADID's real human
+MOS** while the board renders all 188 as positive magnitudes. (ii) Every 944-era model
+**trained** on the flipped column (`--group kadid:…ext_kadid.parquet`), so its KADID
+inversion is real and inherited — dose-response over 111 fullevals: train weight 0.50 →
+mean −0.457, weight 1.50 → mean −0.925. (iii) The wave-8 **E1 gate ("KADID ≥ 0.70")** was
+passed by the three most-inverted arms (−0.93) and failed by `W8C_s3101`, the only
+wave-8 arm whose KADID was correctly oriented (+0.358). (iv) The pre-ext era models are
+**unaffected in behaviour** — winner_dial is +0.9464 and shipped **B** +0.8201/+0.8085,
+positive on **25/25** KADID distortion types; only their reported sign was wrong.
+**TID is CLEAN on every root** (verified against the same raw ratings, +0.9168, n=960);
+so are CSIQ and LIVE (their natives genuinely are distortion-oriented).
+**Status: eval reporting INVALIDATED for ext-lineage KADID; the 944 models' KADID
+behaviour is a real defect requiring a retrain on a fixed table if KADID competence is
+wanted. Shipped bakes (B/BHdr/A) unaffected — all pre-date the ext lineage and trained on
+the correct column.** Cite: `benchmarks/sota944_campaign_2026-08-03.md` REGISTERED
+APPENDIX F + F.R1..F.R8; `benchmarks/wave9/kadid_orientation_2026-08-04.md` (which
+measured the orientation and flagged the anomaly one day earlier);
+`benchmarks/eval_annotations.json` entries `kadid-ext-root-inverted` +
+`kadid-ext-trained-inverted-model`.
 
 **3.1 kadid/tid canonical `ssim2_gpu` = ref-vs-ref MISJOIN; `iwssim` = human-score copy.**
 *Thought:* KADID/TID carried real IW-SSIM + SSIMULACRA2 columns → multi-target training was

@@ -1,3 +1,21 @@
+> **⚠ CORRECTED 2026-08-04 — the KADID column below is SIGN-FLIPPED.** The ext-lineage
+> eval tables (`ext720`/`ext924`/`ext944`) store KADID's target as `(5−dmos)/4`, the
+> inverse of the canonical `(dmos−1)/4`; KADID's `dmos` is quality-oriented (raw DCR
+> falls 4.079→2.007 with severity). **Negate every KADID number in this file to read it
+> against KADID's real human MOS.** Determination + evidence:
+> `benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F (§F.R1–F.R8).
+> CSIQ / LIVE / CID22 / KonJND / nonphoto / TID are unaffected — correctly oriented on
+> every root.
+
+> **What that means for wave 8 specifically.** The registered **E1 gate was
+> `KADID ≥ 0.70` on an unsigned magnitude**, so it was *passed* by `W8A/W8B/W8D`
+> (−0.906 … −0.937 vs true quality — near-perfect inversions) and *failed* by
+> `W8C_s3101`, whose **+0.358 is the only correctly-oriented KADID in the wave** —
+> and which is also the only arm with CSIQ 0.887 / LIVE 0.898. The "triples KADID"
+> headline was the model fitting a BACKWARDS target harder (its `--group kadid`
+> train weight is 1.50 vs 0.50 elsewhere; see the F.R3 dose-response). **E1 as
+> written did not measure KADID competence and cannot be cited as if it did.**
+
 #### Endpoint table — every cell, nothing selected away
 
 | cell | KADID(E1) | CSIQ(E2) | LIVE(E2) | CID22(E3) | KonJND | nonphoto | HF-NL | mono/tied | M3a | composite | best_val |

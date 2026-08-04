@@ -68,3 +68,34 @@ inverted** fit, not a competent one, and every place the campaign uses them as
 the "KADID is achievable" reference rests on an unsigned magnitude. This is
 recorded as an observation with its evidence; wave 9 does not act on it, does
 not re-score those models, and no wave-9 gate depends on it.
+
+
+---
+
+## RESOLVED 2026-08-04 (same day) — the flagged anomaly has a cause: the ext-lineage TABLE is inverted
+
+The anomaly recorded above was carried into a full determination in
+`benchmarks/sota944_campaign_2026-08-03.md` **REGISTERED APPENDIX F**. Outcome: the
+models are not the problem, **the eval table is**.
+
+- `ext720`/`ext924`/`ext944` `ext_kadid.parquet` store `human_score = (5 − dmos)/4`;
+  the 372 root and `canonical-2026-05-21/train/kadid.parquet` store `(dmos − 1)/4`.
+  Both residuals are **exactly 0.0** — two transforms, not drift. Source:
+  `scripts/canonical_corpus/build_fr_corpus_pairs.py:113`.
+- This doc's cross-regime check ("the KADID target is the SAME VECTOR in the 720-regime
+  and 944-regime eval tables, max abs diff 0.0") **stands and was correct** — the two
+  ext roots do agree with each other. What it could not see is that they *both* disagree
+  with the canonical lineage, because it never compared an ext root to a 372 root.
+- The orientation determination in this doc — KADID `dmos` is quality-oriented, so
+  positive is correct — **stands**, and was independently re-verified from the 349,800
+  raw crowdsourced DCR ratings (F.R1b), which reproduce this doc's per-level means.
+- Therefore the reading of the anomaly table above inverts: `winner_dial` and
+  `b_sdr_linear` are **+0.9464 / +0.8085 vs true quality** (competent, positive on 25/25
+  KADID distortion types), and `H_co3abpg_s2507` is **−0.4233** (inverted). `W8C_s3101`'s
+  −0.3576 is **+0.3576** — the one correctly-oriented wave-8 cell.
+
+The sentence above — *"the campaign's cited KADID figures of 0.9464 and 0.80848 for those
+two models describe a near-perfectly inverted fit, not a competent one"* — is **the one
+claim in this doc that is now known to be wrong**, and it is left in place rather than
+edited so the reasoning chain stays legible. Those two models are competent; the models
+that describe a near-perfectly inverted fit are the 944-era ones.

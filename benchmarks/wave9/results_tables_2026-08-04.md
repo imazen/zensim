@@ -1,3 +1,22 @@
+> **⚠ CORRECTED 2026-08-04 — the KADID column below is SIGN-FLIPPED.** The ext-lineage
+> eval tables (`ext720`/`ext924`/`ext944`) store KADID's target as `(5−dmos)/4`, the
+> inverse of the canonical `(dmos−1)/4`; KADID's `dmos` is quality-oriented (raw DCR
+> falls 4.079→2.007 with severity). **Negate every KADID number in this file to read it
+> against KADID's real human MOS.** Determination + evidence:
+> `benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F (§F.R1–F.R8).
+> CSIQ / LIVE / CID22 / KonJND / nonphoto / TID are unaffected — correctly oriented on
+> every root.
+
+> **What that means for wave 9 specifically.** The `KADID signed†` column is signed
+> against the INVERTED ext target, so its signs read backwards: `W8C_s3101`'s −0.3576
+> is **+0.3576 vs true quality (correct)**, and every W9A/W9B/W9C replication's
+> +0.31…+0.51 is **−0.31…−0.51 (inverted)**. So wave 9's finding is *strengthened, with
+> its direction corrected*: W8C's distinguishing KADID behaviour was that it was the one
+> cell oriented the RIGHT way, and the three fresh seeds did not reproduce that — they
+> reverted to the inverted fit. The wave-9 verdict (W8C was a seed artifact) stands; the
+> phrase "KADID sign inversion" in the results header describes W8C's *correctness*, not
+> a defect.
+
 | cell | CSIQ(E1) | LIVE(E1) | CID22(E2) | KADID signed† | KonJND | nonphoto | imazen26 | HF-NL per-ref | M3a | mono/tied | composite | floors |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | W9A_s3301 | 0.81062 | 0.84417 | 0.87891 | 0.3211† | 0.4921 | 0.9065 | 0.9051 | 0.1193 | 0.7815 | 0.9668 / 0 | 0.8497 | 6/8 |

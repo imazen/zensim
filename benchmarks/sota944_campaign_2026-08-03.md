@@ -3753,7 +3753,7 @@ provenance live in the board fullevals' `rank_graft_sources`).
 - Era `balanced_composite`/imazen26/nonphoto remain regime-incomparable
   context — the incumbents table prices axes, it does not rank eras.
 
-### bake_contrib RESULTS (2026-08-04) — every 944 MLP tunes out the SAME 277 inputs (216 structural + 39 never-populated + 22 winsor-recipe-killed); B's with-iw pools carry 45% ⇒ the width-discriminator trigger FIRES; KADID's collapse is broad (including KADID's own JPEG cells) and the row-mass starvation story is measured-false
+### bake_contrib RESULTS (2026-08-04) — every 944 MLP tunes out the SAME 277 inputs (216 structural + 39 never-populated + 22 winsor-recipe-killed); B's with-iw pools carry 45% ⇒ the width-discriminator trigger FIRES; KADID's collapse is broad (including KADID's own JPEG cells) and the row-mass starvation story is measured-false **[⚠ KADID SIGN CORRECTED 2026-08-04 — APPENDIX F: the 'collapse' is an INVERSION, not a weakening; the ext-lineage KADID target is stored backwards, so every KADID magnitude in this section is the negative of the true-quality value. The section's conclusions about WHICH inputs are tuned out are unaffected.]**
 
 Tool: `bake_contrib` (commit `ca28e7d0`; TSVs
 `benchmarks/bake_contrib_*_2026-08-04.tsv` + `.meta`). Every gate registered in
@@ -4894,7 +4894,7 @@ Report ALL; **gate on the first three**:
 
 | # | endpoint | bar | incumbent (`H_co3abpg_s2507`) |
 |---|---|---|---|
-| E1 | KADID | ≥ 0.70 | 0.437 (H band 0.368–0.437; 944-class best ≈ 0.46; era models 0.79–0.95) |
+| E1 | KADID | ≥ 0.70 | 0.437 (H band 0.368–0.437; 944-class best ≈ 0.46; era models 0.79–0.95) **⚠ INVALID AS WRITTEN — CORRECTED 2026-08-04 (APPENDIX F):** this bar is on an UNSIGNED magnitude of a signed quantity, and the ext-lineage KADID target is inverted. The true-quality values are H **−0.437…−0.368** and era models **+0.79…+0.95**. As written E1 was passed by the three most-inverted wave-8 arms (−0.906…−0.937) and failed by the only correctly-oriented one (`W8C_s3101`, +0.358). **Do not re-use this gate without a signed bar on a corrected table.** |
 | E2 | CSIQ **and** LIVE | both ≥ 0.85 | 0.8302 / 0.8634 |
 | E3 | CID22 held | ≥ 0.885 | 0.88055 |
 | R1 | KonJND | reported | 0.4590 |
@@ -4959,7 +4959,7 @@ Tower-mirrored with a sha spot-check. Nothing ships, swaps, promotes, or
 publishes; no bake enters `zensim/weights/`; the freeze decision remains the
 user's.
 
-### WAVE-8 RESULTS (2026-08-04) — outcome (c): the breadth-first recipe is FALSIFIED as a breadth lever. It triples KADID (a FIT number) while CSIQ/LIVE COLLAPSE by 0.36-0.56, and the 2×2 pins that collapse on the MIX at both screens. The only breadth GAIN in the wave is the winsor-screen REFIT, which buys the first CSIQ+LIVE ≥0.85 in the 944 class at a CID22 and KonJND cost
+### WAVE-8 RESULTS (2026-08-04) — outcome (c): the breadth-first recipe is FALSIFIED as a breadth lever. It triples KADID (a FIT number — **⚠ CORRECTED 2026-08-04 (APPENDIX F): a fit to a BACKWARDS target. The tripled 0.91–0.94 is −0.91…−0.94 against KADID's real human MOS; the arm that did NOT triple it, `W8C_s3101`, is the only one oriented correctly at +0.358**) while CSIQ/LIVE COLLAPSE by 0.36-0.56, and the 2×2 pins that collapse on the MIX at both screens. The only breadth GAIN in the wave is the winsor-screen REFIT, which buys the first CSIQ+LIVE ≥0.85 in the 944 class at a CID22 and KonJND cost
 
 Eight cells trained exactly as registered (amendment 9, `4668f712`; tool +
 driver + frozen screens, `58f18867`). Two lanes: this box (up to 4 concurrent
