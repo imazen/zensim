@@ -1146,6 +1146,40 @@ fn train_eq_val(name: &str) -> bool {
     matches!(name, "kadid" | "tid")
 }
 
+/// Corpora whose `human_score` is QUALITY-oriented, so a NEGATIVE signed SROCC is a
+/// genuine ranking inversion and must never render as a high score.
+///
+/// **Why this exists (2026-08-04).** The report printed `|SROCC|` for every corpus. On
+/// 2026-08-04 the ext-lineage KADID eval tables were found to store `human_score =
+/// (5−dmos)/4` — the inverse of the canonical `(dmos−1)/4` — so 110 of 188 board bakes
+/// were anti-correlated with KADID's real human MOS while every one of them rendered as
+/// a positive magnitude, and a wave-8 gate (`KADID ≥ 0.70`) was passed by the three
+/// most-inverted arms. An unsigned display cannot show that. See
+/// `benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F.
+///
+/// `konjnd` is deliberately EXCLUDED: its validation target is a mean-PJND threshold, so
+/// its SROCC is *structurally* negative on at-PJND pairs and `|SROCC|` is the correct
+/// reading there (see the project memory note on konjnd's two `human_score` meanings).
+/// Everything else in `CORPORA` is quality-oriented.
+fn sign_is_meaningful(name: &str) -> bool {
+    !matches!(name, "konjnd")
+}
+
+/// Rendered SROCC cell: the SIGNED value on quality-oriented corpora (with a loud
+/// inversion marker when negative), `|SROCC|` on `konjnd` where the sign carries no
+/// meaning. The JSON keeps both `srocc` and `srocc_signed` unchanged — this is the
+/// human-facing surface only.
+fn srocc_cell(name: &str, srocc: f64, srocc_signed: f64) -> String {
+    if !sign_is_meaningful(name) {
+        return format!("{srocc:.4}");
+    }
+    if srocc_signed < 0.0 {
+        format!("**{srocc_signed:+.4} ⛔INVERTED**")
+    } else {
+        format!("{srocc_signed:+.4}")
+    }
+}
+
 /// JSON-safe float: non-finite → `None` (serialized as null) so NaN band/dial
 /// stats can't produce invalid JSON or a silent 0.
 fn nan_null(v: f64) -> Option<f64> {
@@ -1845,9 +1879,23 @@ fn render_corpus(
     // resolves polarity once from the pooled sign, so this column and the panel
     // it sits next to cannot contradict each other — while a ladder that
     // disagrees with the bake's own polarity still reports negative.
-    let per_ref = ref_ids
-        .as_ref()
-        .and_then(|r| per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS, Orientation::Auto));
+    let per_ref = ref_ids.as_ref().and_then(|r| {
+        // Orientation::Auto infers polarity from the POOLED sign, so on a corpus
+        // where the bake is globally inverted it silently re-points the per-ref
+        // stat at the inversion and prints "+0.95 / 0% backwards" — which reads as
+        // "every ladder correct" when every ladder is backwards. On a
+        // quality-oriented corpus the truth direction is KNOWN, so pin it: an
+        // inverted bake then shows a negative per-ref mean and a high %bwd, which
+        // is the whole point of the stat. `konjnd` keeps Auto — its validation
+        // target is a PJND threshold whose sign is structurally negative.
+        // (2026-08-04, benchmarks/sota944_campaign_2026-08-03.md APPENDIX F.)
+        let orient = if sign_is_meaningful(corpus.name) {
+            Orientation::HigherIsBetter
+        } else {
+            Orientation::Auto
+        };
+        per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS, orient)
+    });
     // Signed SROCC (polarity-preserving) + marginal bootstrap CI. `aggregate_panel`
     // returns `|SROCC|`; a globally-inverted bake would hide behind that abs, so
     // keep the sign here. The CI resolves whether a 3-decimal ranking gap is real.
@@ -2480,15 +2528,28 @@ fn main() -> ExitCode {
         };
         // Mark train==val corpora (KADID/TID): their SROCC rewards memorization,
         // not held-out skill, so it must not be read as a generalization number.
-        let disp = if train_eq_val(r.name) {
+        let mut disp = if train_eq_val(r.name) {
             format!("{} ⚠t=v", r.display)
         } else {
             r.display.to_string()
         };
+        if sign_is_meaningful(r.name) && r.srocc_signed < 0.0 {
+            disp.push_str(" ⛔INV");
+        }
         buf.push_str(&format!(
-            "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} | {:.4} | {:.4} | {} | {} |\n",
-            disp, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse, r.ds_auc, g3,
-            pr, bwd
+            "| {} | {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} | {:.4} | {:.4} | {} | {} |\n",
+            disp,
+            r.n,
+            srocc_cell(r.name, r.srocc, r.srocc_signed),
+            r.plcc,
+            r.krocc,
+            r.or_ratio,
+            r.pwrc,
+            r.z_rmse,
+            r.ds_auc,
+            g3,
+            pr,
+            bwd
         ));
     }
     buf.push('\n');
@@ -2498,16 +2559,29 @@ whose distortion ladder is ranked BACKWARDS. Read them against the pooled SROCC:
 gap means the pooled number is carried by cross-image scale rather than ranking (the \
 AIC-3 0.79-pooled / 0.93-per-ref confound). A high `%bwd` next to a healthy SROCC is the \
 failure §8.39 found and no pooled or per-band stat can see. `—` = corpus carries no ref \
-identity. **⚠t=v** marks KADID/TID, whose 100% train==val pair-overlap makes their SROCC \
+identity. The SROCC column is **SIGNED** on every quality-oriented corpus and \
+**⛔INVERTED** marks a bake that is ANTI-CORRELATED with that corpus's human labels — a \
+backwards ranker, never a high scorer (`konjnd` alone prints |SROCC|, whose sign is \
+structurally negative on at-PJND pairs). **⚠t=v** marks KADID/TID, whose 100% train==val pair-overlap makes their SROCC \
 a memorization number — not held-out generalization; do not rank a bake by them._\n",
     );
     // Per-corpus SROCC at a glance (inline-SVG; renders in the HTML report).
     if !results.is_empty() {
         let labels: Vec<String> = results.iter().map(|r| r.display.to_string()).collect();
-        let sroccs: Vec<f64> = results.iter().map(|r| 100.0 * r.srocc).collect();
+        let sroccs: Vec<f64> = results
+            .iter()
+            .map(|r| {
+                100.0
+                    * if sign_is_meaningful(r.name) {
+                        r.srocc_signed
+                    } else {
+                        r.srocc
+                    }
+            })
+            .collect();
         buf.push('\n');
         buf.push_str(&eval_report::svg_bars(
-            "Per-corpus SROCC ×100 (rank agreement with human MOS)",
+            "Per-corpus SIGNED SROCC ×100 (rank agreement with human MOS; negative = INVERTED)",
             &labels,
             &sroccs,
             0.0,
@@ -3426,6 +3500,44 @@ Run the dedicated q-sweep harness for those._\n",
 
 #[cfg(test)]
 mod tests {
+    /// An ANTI-CORRELATED bake must never RENDER as a high scorer.
+    ///
+    /// Regression gate for the 2026-08-04 finding (campaign APPENDIX F): the ext-lineage
+    /// KADID eval tables stored `human_score` inverted, so 110 of 188 board bakes were
+    /// backwards on KADID while every report printed a positive magnitude. `|SROCC|`
+    /// display is what made that invisible for six weeks.
+    #[test]
+    fn inverted_corpus_renders_as_inverted_not_as_a_high_score() {
+        // quality-oriented corpus, bake is backwards on it
+        let cell = srocc_cell("kadid", 0.9464, -0.9464);
+        assert!(
+            cell.contains("-0.9464"),
+            "signed value must be shown, got {cell}"
+        );
+        assert!(
+            cell.contains("INVERTED"),
+            "inversion must be marked, got {cell}"
+        );
+        assert!(
+            !cell.starts_with("0.9"),
+            "an inverted bake must not render as a bare positive magnitude: {cell}"
+        );
+        // same corpus, correct direction
+        let ok = srocc_cell("kadid", 0.9464, 0.9464);
+        assert_eq!(ok, "+0.9464");
+        assert!(!ok.contains("INVERTED"));
+        // konjnd's SROCC is STRUCTURALLY negative (validation target is a PJND
+        // threshold) — |SROCC| is correct there and must NOT be flagged.
+        let jnd = srocc_cell("konjnd", 0.4308, -0.4308);
+        assert_eq!(
+            jnd, "0.4308",
+            "konjnd must keep |SROCC| with no inversion marker"
+        );
+        assert!(!sign_is_meaningful("konjnd"));
+        assert!(sign_is_meaningful("kadid") && sign_is_meaningful("tid"));
+        assert!(sign_is_meaningful("cid22") && sign_is_meaningful("csiq"));
+    }
+
     use super::*;
 
     /// A verdict must name its inputs by CONTENT, not by path.

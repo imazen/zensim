@@ -6278,3 +6278,64 @@ recommendation about KADID competence only, and KADID is a `train_eq_val` guard,
 ship gate** — nothing in this campaign's *balanced* selection scored KADID, so no
 selection outcome changes. What must not happen is the reverse mistake: promoting a 944
 bake on a KADID number that is actually negative.
+
+
+## F.R9 — The display fix + the orientation gate (shipped this pass)
+
+**The display defect was the enabling condition.** `|SROCC|` display is *why* an
+inverted target survived six weeks: nothing an operator looked at could show a backwards
+ranker. Every surface that renders a corpus SROCC now shows the SIGN.
+
+| surface | before | after |
+|---|---|---|
+| `bake_verdict` markdown summary | `KADIK10k ⚠t=v \| 0.9464` | `KADIK10k ⚠t=v ⛔INV \| **-0.9464 ⛔INVERTED**` |
+| `bake_verdict` per-ref / %bwd | `+0.9527 / 0%` (Orientation::Auto re-pointed at the inversion) | `-0.9527 / 100%` (`Orientation::HigherIsBetter` pinned) |
+| `bake_verdict` SVG bar chart | `|SROCC|` bars | signed bars, title says so |
+| `freeze_check` guard row | `kadid 0.9464 / tid 0.9577 — never scored` | `kadid -0.9464 INVERTED / tid +0.9577 — never scored` |
+| `freeze_check --tsv` | `kadid`, `tid` (unsigned) | `kadid_signed`, `tid_signed` |
+| board scoreboard (`rs()`) | `r.srocc` | `sgn(c, r)` — signed, `konjnd` keeps abs |
+| board cross-corpus heatmap | `|SROCC|`, visualMap `[0.4, 1]` | signed, diverging visualMap `[-1, 1]`, `⛔ INVERTED` in the tooltip |
+| board reject gate + composite fallback | `abs(cid22) < 0.84` | `cid22 < 0.84` — an inverted bake can no longer clear a gate on the strength of its inversion |
+
+**KADID/TID remain UNSCORED** — they are `train_eq_val` guards and stay out of the
+balanced composite, exactly as before. The requirement this satisfies is only that they
+be *readable* as inverted. `konjnd` is the one deliberate exception everywhere
+(`sign_is_meaningful()` in Rust, `SIGN_ABS_CORPORA` in Python/JS): its validation target
+is a mean-PJND threshold, so its SROCC is structurally negative and `|SROCC|` is correct
+there.
+
+Regression gate: `inverted_corpus_renders_as_inverted_not_as_a_high_score`
+(`bake_verdict.rs` tests) asserts an anti-correlated bake cannot render as a bare
+positive magnitude, and that `konjnd` is not flagged. Board regenerated (188 bakes,
+11.0 MB); **both `gauntlet_gates.sh` gates PASS**.
+
+**The orientation gate — so a join cannot silently flip a target again.**
+`scripts/canonical_corpus/check_target_orientation.py` asserts
+`sign(SROCC(table.human_score, raw_human_ground_truth)) > 0` for every corpus with a
+recoverable ground truth (KADID: 349,800 raw DCR ratings; TID: published MOS), sweeps all
+five known eval roots with `--all-roots`, and exits nonzero on any inversion. It is a
+SIGN test by design — it does not care which normalization a builder picked, only that
+the table is not backwards. Corpora with no recoverable raw ground truth report
+**SKIPPED**, which means "not checked", never "passed". Current verdict:
+
+```
+OK        kadid   2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet  +0.582360
+OK        kadid   canonical-2026-05-21/train/kadid.parquet                           +0.582360
+INVERTED  kadid   ext720-canonical-2026-07-22/ext_kadid.parquet                      -0.582360
+INVERTED  kadid   ext924-canonical-2026-07-27/ext_kadid.parquet                      -0.582360
+INVERTED  kadid   ext944-canonical-2026-08-01/ext_kadid.parquet                      -0.582360
+OK        tid     (all five roots)                                                   +1.000000
+exit 1
+```
+
+**The builder is fixed**: `build_fr_corpus_pairs.build_kadid()` now emits `(dmos−1)/4`,
+with the trap documented at the call site (a column NAMED `dmos` is not automatically
+distortion-oriented) and the module's convention note amended to require checking the
+native orientation against raw human labels before choosing a transform.
+
+**The ext tables are deliberately NOT regenerated here.** Rebuilding them changes the
+target ~110 existing bakes were trained against, so it is a conscious act — rebuild,
+re-verdict, re-annotate — not a side effect of this fix. Until then the annotation
+registry carries it: `kadid-ext-root-inverted` (invalidated, all cells),
+`kadid-ext-trained-inverted-model` (annotated, the 110 measured-inverted bakes),
+`kadid-e1-gate-unsigned` (invalidated, the 8 wave-8 cells).

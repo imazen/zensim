@@ -749,14 +749,23 @@ fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
             None => "not measured".into(),
         },
     ));
-    let guard = |c: &str| match f(v, &["rank", c, "srocc"]) {
-        Some(x) => format!("{x:.4}"),
+    // SIGNED, always. These are quality-oriented corpora, so a negative SROCC is a
+    // genuine ranking INVERSION, and an unsigned guard row hides it — which is exactly
+    // how 110 of 188 board bakes sat on the board anti-correlated with KADID's real
+    // human MOS while every one of them displayed a positive magnitude
+    // (`benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F, 2026-08-04).
+    // Guards stay UNSCORED — the requirement is only that they be READABLE as inverted.
+    let guard = |c: &str| match f(v, &["rank", c, "srocc_signed"])
+        .or_else(|| f(v, &["rank", c, "srocc"]))
+    {
+        Some(x) if x < 0.0 => format!("{x:+.4} INVERTED"),
+        Some(x) => format!("{x:+.4}"),
         None => "—".into(),
     };
     info.push((
-        "KADID/TID (t=v integrity guards, dimmed)".into(),
+        "KADID/TID (t=v integrity guards, dimmed; SIGNED)".into(),
         format!(
-            "kadid {} / tid {} — never scored",
+            "kadid {} / tid {} — never scored; negative = ANTI-CORRELATED with the corpus's human labels",
             guard("kadid"),
             guard("tid")
         ),
@@ -882,7 +891,7 @@ fn rank_pool(rows: &mut [&SelectRow]) {
 
 const SELECT_TSV_COLS: &str = "rank\tpool\tname\tclass\tn_pass\tbal_composite\tm3a\tm3a_state\tselection_composite\tsdr25\tselectable\tpath";
 
-const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid\ttid\tspline\trepro\tfails\tn_measured\tabsent\tannotations\tblocks\tdominated_by";
+const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid_signed\ttid_signed\tspline\trepro\tfails\tn_measured\tabsent\tannotations\tblocks\tdominated_by";
 
 /// Compact carry of the promoter-injected `block_profile` (used-counts per
 /// family, `f0_155/f156_371/f372_719/f720_943`) — computed by
@@ -980,8 +989,10 @@ fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
         num(r.composite),
         num(f(v, &["composite"])),
         num(f(v, &["rank", "sdr25", "srocc"])),
-        num(f(v, &["rank", "kadid", "srocc"])),
-        num(f(v, &["rank", "tid", "srocc"])),
+        // SIGNED (2026-08-04, APPENDIX F): an unsigned kadid/tid column cannot show an
+        // anti-correlated bake, and the ext-lineage KADID target was found inverted.
+        num(f(v, &["rank", "kadid", "srocc_signed"]).or_else(|| f(v, &["rank", "kadid", "srocc"]))),
+        num(f(v, &["rank", "tid", "srocc_signed"]).or_else(|| f(v, &["rank", "tid", "srocc"]))),
         spline.to_string(),
         repro.to_string(),
         if fails.is_empty() {

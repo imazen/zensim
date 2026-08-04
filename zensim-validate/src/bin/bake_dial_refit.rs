@@ -3448,7 +3448,9 @@ fn winsor_window(sorted: &[f64], lo_pct: f64, hi_pct: f64) -> (f64, f64) {
 fn parse_ft_token(line: &str) -> Result<(String, usize, String), String> {
     let mut it = line.splitn(3, ':');
     let tok = it.next().unwrap_or_default().to_string();
-    let idx_s = it.next().ok_or_else(|| format!("token {line:?}: missing :<idx>"))?;
+    let idx_s = it
+        .next()
+        .ok_or_else(|| format!("token {line:?}: missing :<idx>"))?;
     let idx: usize = idx_s
         .trim()
         .parse()
@@ -3470,7 +3472,9 @@ fn select_refit_indices(
 ) -> Result<std::collections::HashSet<usize>, String> {
     let explicit = explicit.map(str::trim).filter(|s| !s.is_empty());
     if explicit.is_some() && class != RefitClass::All {
-        return Err("--refit-indices and a non-default --refit-class are mutually exclusive".into());
+        return Err(
+            "--refit-indices and a non-default --refit-class are mutually exclusive".into(),
+        );
     }
     if let Some(csv) = explicit {
         let mut set = std::collections::HashSet::new();
@@ -3524,7 +3528,11 @@ fn select_refit_indices(
     if set.is_empty() {
         return Err(format!(
             "--refit-class {} selected no indices",
-            if want_deg { "degenerate" } else { "nondegenerate" }
+            if want_deg {
+                "degenerate"
+            } else {
+                "nondegenerate"
+            }
         ));
     }
     Ok(set)
@@ -3571,7 +3579,12 @@ fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
 
     // Which indices the fit is APPLIED to (amendment 10 §10.2). The fit below
     // always covers every winsor index; this only decides emission.
-    let selected = select_refit_indices(&entries, &winsor_idx, a.refit_class, a.refit_indices.as_deref())?;
+    let selected = select_refit_indices(
+        &entries,
+        &winsor_idx,
+        a.refit_class,
+        a.refit_indices.as_deref(),
+    )?;
     eprintln!(
         "refit-winsor: applying the fit to {} of {} winsor indices",
         selected.len(),
@@ -3587,35 +3600,41 @@ fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
         let sha = zensim_validate::train_manifest::sha256_file(path)
             .map_err(|e| format!("sha256 {path:?}: {e:?}"))?;
         let mut n_rows_here = 0usize;
-        stream_parquet_rows(path, &[a.target.as_str()], 1.0, &mut |features,
-                                                                   n_rows,
-                                                                   _targets| {
-            let n_feat = features.len() / n_rows;
-            if n_feat_seen == 0 {
-                n_feat_seen = n_feat;
-                if let Some(&bad) = winsor_idx.iter().find(|&&i| i >= n_feat) {
+        stream_parquet_rows(
+            path,
+            &[a.target.as_str()],
+            1.0,
+            &mut |features, n_rows, _targets| {
+                let n_feat = features.len() / n_rows;
+                if n_feat_seen == 0 {
+                    n_feat_seen = n_feat;
+                    if let Some(&bad) = winsor_idx.iter().find(|&&i| i >= n_feat) {
+                        return Err(format!(
+                            "winsor index {bad} >= feature width {n_feat} in {path:?}"
+                        ));
+                    }
+                } else if n_feat != n_feat_seen {
                     return Err(format!(
-                        "winsor index {bad} >= feature width {n_feat} in {path:?}"
+                        "feature width {n_feat} in {path:?} != {n_feat_seen} from earlier input"
                     ));
                 }
-            } else if n_feat != n_feat_seen {
-                return Err(format!(
-                    "feature width {n_feat} in {path:?} != {n_feat_seen} from earlier input"
-                ));
-            }
-            for r in 0..n_rows {
-                let row = &features[r * n_feat..(r + 1) * n_feat];
-                for (slot, &j) in winsor_idx.iter().enumerate() {
-                    vals[slot].push(row[j]);
+                for r in 0..n_rows {
+                    let row = &features[r * n_feat..(r + 1) * n_feat];
+                    for (slot, &j) in winsor_idx.iter().enumerate() {
+                        vals[slot].push(row[j]);
+                    }
                 }
-            }
-            n_rows_here += n_rows;
-            Ok(())
-        })?;
+                n_rows_here += n_rows;
+                Ok(())
+            },
+        )?;
         eprintln!("refit-winsor: {path:?} rows {n_rows_here}\n  sha256 {sha}");
         n_rows_total += n_rows_here;
     }
-    eprintln!("refit-winsor: pooled {n_rows_total} rows, width {n_feat_seen}, {} winsor indices", winsor_idx.len());
+    eprintln!(
+        "refit-winsor: pooled {n_rows_total} rows, width {n_feat_seen}, {} winsor indices",
+        winsor_idx.len()
+    );
 
     // Windows.
     let mut new_win: Vec<(f64, f64)> = Vec::with_capacity(winsor_idx.len());
@@ -4220,8 +4239,14 @@ mod tests {
         let (_, _, p) = parse_ft_token("winsor_p99:731:0,0").unwrap();
         let nums: Vec<f64> = p.split(',').map(|s| s.parse().unwrap()).collect();
         assert_eq!(nums, vec![0.0, 0.0]);
-        assert!(parse_ft_token("winsor_p99").is_err(), "missing idx must error");
-        assert!(parse_ft_token("winsor_p99:xx:0,0").is_err(), "bad idx must error");
+        assert!(
+            parse_ft_token("winsor_p99").is_err(),
+            "missing idx must error"
+        );
+        assert!(
+            parse_ft_token("winsor_p99:xx:0,0").is_err(),
+            "bad idx must error"
+        );
     }
 
     /// The wave-9 window-subset selector (amendment 10 §10.2). Classification
@@ -4265,7 +4290,9 @@ mod tests {
         // the registered identity: disjoint, and their union is `all`
         assert!(deg.is_disjoint(&non), "classes must not overlap");
         assert_eq!(
-            deg.union(&non).copied().collect::<std::collections::HashSet<_>>(),
+            deg.union(&non)
+                .copied()
+                .collect::<std::collections::HashSet<_>>(),
             all,
             "degenerate + nondegenerate must exactly cover all"
         );
@@ -4290,8 +4317,12 @@ mod tests {
         );
         // an unparseable inherited window has no defined class — error, never
         // a silent landing in the complement.
-        let bad: Vec<(String, String, usize, String)> =
-            vec![("winsor_p99:9:junk".into(), "winsor_p99".into(), 9, "junk".into())];
+        let bad: Vec<(String, String, usize, String)> = vec![(
+            "winsor_p99:9:junk".into(),
+            "winsor_p99".into(),
+            9,
+            "junk".into(),
+        )];
         assert!(
             select_refit_indices(&bad, &[9], RefitClass::Degenerate, None).is_err(),
             "unparseable params must error under a class selector"

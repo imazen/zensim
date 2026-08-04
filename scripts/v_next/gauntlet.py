@@ -279,6 +279,31 @@ def _panel_srocc_plcc(pred, ref):
     return {"srocc": round(abs(p["srocc"]), 4), "plcc": round(p["plcc"], 4), "n": int(p["n"])}
 
 
+
+# Corpora whose SROCC sign carries no meaning: `konjnd`'s validation target is a
+# mean-PJND threshold, so its SROCC is STRUCTURALLY negative on at-PJND pairs and
+# |SROCC| is the correct reading. Everything else is quality-oriented — a negative
+# there is a genuine ranking INVERSION and must not earn credit anywhere.
+# Added 2026-08-04 after the ext-lineage KADID eval target was found stored inverted
+# (benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F): the board was
+# rendering 110 anti-correlated bakes as positive magnitudes.
+SIGN_ABS_CORPORA = {"konjnd"}
+
+
+def _signed(rank, corpus):
+    """Signed SROCC for `corpus` out of a fulleval `rank` block; |SROCC| for JND corpora.
+
+    Prefers `srocc_signed` (emitted by `bake_verdict` since 2026-07) and falls back to
+    `srocc` for older JSONs, which is the only sign information those carry."""
+    r = rank.get(corpus) or {}
+    v = r.get("srocc_signed")
+    if v is None:
+        v = r.get("srocc")
+    if v is None:
+        return None
+    return abs(v) if corpus in SIGN_ABS_CORPORA else v
+
+
 def _composite(rank):
     """FALLBACK ONLY (pre-2026-07-26 JSONs). The canonical composite is the Rust
     `product_composite`, emitted as `composite` in the fulleval JSON; `load_fulleval`
@@ -288,7 +313,7 @@ def _composite(rank):
     {corpus: {srocc,...}} with srocc already
     polarity-corrected (abs for JND corpora), per the fulleval schema."""
     def g(c):
-        v = rank.get(c, {}).get("srocc")
+        v = _signed(rank, c)
         return float(v) if v is not None and np.isfinite(v) else 0.0
     try:
         import blend_lib as B
@@ -380,9 +405,14 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         emitted = o.get("composite")
         if emitted is not None:
             comp = round(float(emitted), 4)
-            cid = rank.get("cid22", {}).get("srocc")
-            nph = rank.get("nonphoto", {}).get("srocc")
-            reject = (cid is None or abs(cid) < 0.84) or (nph is not None and abs(nph) < 0.80)
+            # SIGNED (2026-08-04, APPENDIX F): `abs()` here let an ANTI-CORRELATED
+            # bake clear the reject gate on the strength of its inversion. CID22 and
+            # nonphoto are quality-oriented, so a negative is a backwards ranker and
+            # must reject. (konjnd is the only corpus whose sign is structurally
+            # negative; it is not part of this gate.)
+            cid = _signed(rank, "cid22")
+            nph = _signed(rank, "nonphoto")
+            reject = (cid is None or cid < 0.84) or (nph is not None and nph < 0.80)
         else:
             comp, reject = _composite(rank)
         scatter_out = {}
@@ -854,7 +884,18 @@ const COLS=[
   ['cid22_ci','CID22 95%CI±',false,b=>{const r=b.rank.cid22;return r&&r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;}],
   ['cid22_bwd','CID22 %bwd',false,b=>{const r=b.rank.cid22;return r&&r.frac_negative!=null?r.frac_negative:null;}],
 ];
-const rs=(b,c)=>{const r=b.rank[c];return r?r.srocc:null;};
+// SIGNED SROCC accessor (2026-08-04). `konjnd`'s validation target is a mean-PJND
+// threshold, so its SROCC is STRUCTURALLY negative and |SROCC| is the correct reading
+// there; every other corpus is quality-oriented, so a negative is a genuine ranking
+// INVERSION and must never render as a high score. This became load-bearing when the
+// ext-lineage KADID eval target was found stored inverted — 110 of 188 board bakes were
+// anti-correlated with KADID's real human MOS while the board drew all 188 as positive
+// magnitudes (benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F).
+const SIGN_ABS_CORPORA=new Set(['konjnd']);
+const sgn=(c,r)=>{if(!r)return null;
+  if(SIGN_ABS_CORPORA.has(c))return r.srocc!=null?Math.abs(r.srocc):null;
+  return r.srocc_signed!=null?r.srocc_signed:(r.srocc!=null?r.srocc:null);};
+const rs=(b,c)=>sgn(c,b.rank[c]);
 // ---- JXL loop-targeting join (2/3-shot). LT is the jxl-encoder sweep summary (READ, not
 // re-derived). Scoreboard shows the mapped bake's emit-best cells; full detail (emit-last,
 // outer arms, ssim2) lives in the JXL loop targeting section.
@@ -1026,15 +1067,16 @@ function heatOpt(bs,corps,TVSET){
   const t=TH();
   const names=bs.map(b=>b.name+ensTag(b));
   const data=[];
-  bs.forEach((b,i)=>corps.forEach((c,j)=>{const r=b.rank[c];
-    if(r&&r.srocc!=null&&isFinite(r.srocc)){
-      const v=+(+r.srocc).toFixed(4);
-      data.push({value:[j,i,v],_n:r.n,
-        label:{color:(v-.4)/.6>.55?'#fff':t['text-secondary']}});
+  bs.forEach((b,i)=>corps.forEach((c,j)=>{const r=b.rank[c];const sv=sgn(c,r);
+    if(sv!=null&&isFinite(sv)){
+      const v=+(+sv).toFixed(4);
+      data.push({value:[j,i,v],_n:r.n,_inv:v<0,
+        label:{color:Math.abs(v)>.72?'#fff':t['text-secondary']}});
     }}));
   return{animation:false,
     tooltip:Object.assign(ttStyle(),{formatter:p=>'<b>'+names[p.value[1]]+'</b> × '+corps[p.value[0]]
-      +'<br>SROCC <b>'+f3(p.value[2])+'</b>'+(p.data&&p.data._n!=null?' · n='+p.data._n:'')}),
+      +'<br>signed SROCC <b>'+f3(p.value[2])+'</b>'+(p.data&&p.data._inv?' <b>⛔ INVERTED</b>':'')
+      +(p.data&&p.data._n!=null?' · n='+p.data._n:'')}),
     grid:{left:250,right:26,top:56,bottom:48},
     xAxis:{type:'category',position:'top',data:corps.map(c=>TVSET.has(c)?c+' ⚠':c),
       axisLine:{show:false},axisTick:{show:false},
@@ -1043,9 +1085,11 @@ function heatOpt(bs,corps,TVSET){
       data:names.map(n=>n.length>38?n.slice(0,37)+'…':n),
       axisLine:{show:false},axisTick:{show:false},
       axisLabel:{fontSize:10,color:t['text-primary']}},
-    visualMap:{min:0.4,max:1,calculable:true,orient:'horizontal',left:'center',bottom:4,
+    // SIGNED scale (2026-08-04): spans [-1,1] so an ANTI-CORRELATED bake reads as the
+    // cold/serious end instead of drawing a hot cell off |SROCC|. Diverging at 0.
+    visualMap:{min:-1,max:1,calculable:true,orient:'horizontal',left:'center',bottom:4,
       precision:2,itemHeight:110,itemWidth:11,
-      inRange:{color:[t['seq-lo'],t['seq-hi']]},
+      inRange:{color:[t.serious||'#b4413f',t['seq-lo'],t['seq-hi']]},
       textStyle:{color:t.muted,fontSize:9}},
     dataZoom:[{type:'inside',yAxisIndex:0,filterMode:'filter',
                zoomOnMouseWheel:'shift',moveOnMouseWheel:true},
