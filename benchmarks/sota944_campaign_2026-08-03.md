@@ -1608,3 +1608,215 @@ logs `~/tmp/wave5/`. Scoring is seconds per bake per corpus ⇒ **foreground onl
 local wsl lane, no fleet. Verdicts via `scripts/sota944_verdict.sh` (the one frozen
 §0 invocation) with `--ensemble` passed through. Nothing is shipped, swapped, or
 promoted; the freeze decision remains the user's.
+
+### Wave-5 results (2026-08-04) — the CID22 bar is CLEARED for the first time; the full bar is NOT
+
+**Headline.** Three of the six registered arms clear the campaign's primary
+endpoint — **`W5_E1_k2` CID22 0.89425** vs the bar 0.8923796503, the first
+944-regime model in **64 prior draws + 5 waves** to do so, and **+0.0036 over the
+stabilized ceiling** (`C_co3a_s1301` 0.89067) that four registered levers could
+not move. **No arm clears the full five-row bar**, so the registered distillation
+follow-on does **not** fire. Both facts are the result; neither cancels the other.
+
+#### The gate (run and passed BEFORE any multi-member number was read)
+
+`--ensemble C_co3a_s1301.bin` (k=1) vs the committed `C_co3a_s1301.full.json`:
+**62,457 numeric fields compared, 0 mismatches; 0 non-numeric diffs** (paths,
+names and timing fields excluded). That is far stronger than the registered
+headline-field list — the entire verdict JSON, including every per-band row and
+every dial curve point, is bit-identical. The k=1 short-circuit means this is the
+same instruction stream, not a coincidence of rounding. **Gate PASS.**
+
+#### The six-arm grid
+
+Every cell is the frozen §0 invocation (`scripts/sota944_verdict.sh` +
+`--ensemble`), so these rows are directly comparable to all 64 single-bake cells
+above. HF-NL is `rank.hfnlproxy.per_ref_mean`. `t=v` marks the train==val guards.
+
+| cell | k | CID22 | KonJND | nonphoto | HF-NL | sdr25 | dial mono | tied | composite |
+|---|---:|---|---|---|---|---|---|---|---|
+| `W5_E1_k2` | 2 | **0.89425** | 0.3495 | 0.8735 | −0.104 | 0.9561 | 95.1% | 0.0% | 0.8306 |
+| `W5_E1_k3` | 3 | **0.89397** | 0.3742 | 0.8988 | +0.170 | 0.9489 | 95.3% | 0.0% | 0.8420 |
+| `W5_E1_k5` | 5 | **0.89329** | 0.4037 | 0.9128 | +0.119 | 0.9527 | 95.3% | 0.0% | 0.8499 |
+| `W5_E1_k8` | 8 | 0.89220 | 0.4058 | 0.9174 | −0.115 | 0.9452 | 95.3% | 0.0% | 0.8514 |
+| `W5_E2_diverse5` | 5 | 0.89223 | 0.3734 | 0.9137 | **+0.211** | 0.9560 | 95.8% | 0.0% | 0.8463 |
+| `W5_E3_all51` | 51 | 0.88586 | 0.3735 | **0.9270** | +0.124 | 0.9343 | 95.5% | 0.0% | 0.8488 |
+| *[ref] `C_co3a_s1301`* | 1 | 0.89067 | 0.4050 | 0.9045 | +0.251 | 0.9282 | 95.9% | 0.0% | 0.8452 |
+| *[ref] EM4 = the bar* | 1 | 0.89238 | 0.4286 | 0.9098 | +0.132 | 0.9556 | 94.7% | 0.0% | 0.8511 |
+
+Secondary corpora (same runs):
+
+| cell | csiq | live | aic3 | aic4 | imazen26 | kadid `t=v` | tid `t=v` |
+|---|---|---|---|---|---|---|---|
+| `W5_E1_k2` | 0.8448 | 0.8427 | 0.7861 | 0.9128 | 0.8708 | 0.5086 | 0.9176 |
+| `W5_E1_k3` | 0.8199 | 0.8433 | 0.7883 | 0.9104 | 0.8952 | 0.5266 | 0.9174 |
+| `W5_E1_k5` | 0.8088 | 0.8445 | 0.7932 | 0.9109 | 0.9089 | 0.5667 | 0.9215 |
+| `W5_E1_k8` | 0.8172 | 0.8495 | 0.7938 | 0.9098 | 0.9140 | 0.5548 | 0.9217 |
+| `W5_E2_diverse5` | 0.8008 | 0.8340 | 0.7906 | 0.9093 | 0.9082 | 0.5648 | 0.9227 |
+| `W5_E3_all51` | 0.8135 | 0.8476 | 0.7916 | 0.9080 | 0.9235 | 0.6105 | 0.9287 |
+| *[ref] `C_co3a_s1301`* | 0.8359 | 0.8393 | 0.7878 | 0.9032 | 0.9005 | 0.3177 | 0.8818 |
+
+#### The bar verdict — CID22 cleared, full bar NOT cleared
+
+| axis | bar | E1 k2 | E1 k3 | E1 k5 | E1 k8 | E2 | E3 |
+|---|---|---|---|---|---|---|---|
+| CID22 | > 0.89238 | **PASS** | **PASS** | **PASS** | FAIL | FAIL | FAIL |
+| KonJND | ≥ 0.43 | FAIL | FAIL | FAIL | FAIL | FAIL | FAIL |
+| nonphoto | ≥ 0.90 | FAIL | FAIL | PASS | PASS | PASS | PASS |
+| HF-NL-proxy | ≥ 0.1931 | FAIL | FAIL | FAIL | FAIL | **PASS** | FAIL |
+| dial mono/tied | ≥93% / ≤5% | PASS | PASS | PASS | PASS | PASS | PASS |
+| **rows passed** | 5 | 2/5 | 2/5 | **3/5** | 2/5 | **3/5** | 2/5 |
+| M3a | ≥ 0.85 | n/a | n/a | n/a | n/a | n/a | n/a |
+| G-RANGE | clean | n/a | n/a | n/a | n/a | n/a | n/a |
+
+`M3a` = **NOT COMPUTABLE** for a raw ensemble (§5.6 — stated, not skipped).
+`G-RANGE` = NOT EVALUABLE (inherited MLP tool gap, `bake_dial_refit.rs:182`).
+
+**The registered §5.7 firing condition requires all five rows on one arm. No arm
+meets it, so the distillation follow-on was NOT run** — the same discipline wave 4
+applied to `co4m`. Best bar-row coverage is **3/5**, which does **not** beat wave
+3's 4/5 (`C_co3a_s1307`). **KonJND is the binding blocker on every arm**
+(max 0.4058, E1-k8), and ensembling does not repair it.
+
+#### Is the crossing real? The PAIRED bootstrap (the right instrument)
+
+Marginal per-cell CIs overlap heavily (`W5_E1_k2` CID22 CI [0.88776, 0.90006]
+contains the bar) — but a marginal CI is the wrong test for two models scored on
+the **same 4,292 pairs**. Paired bootstrap, B=2000, **the same resampled index
+sets applied to both sides**, computed by `panel --batch` (the canonical stats
+owner in its registered paired-bootstrap shape; the caller keeps the RNG, seed
+20260804 — `scipy`-in-a-loop is the banned pattern this replaces). Per-pair
+predictions came from `bake_verdict --per-pair-output`, and the `human` column
+was asserted byte-identical across all five series before any Δ was taken.
+
+| comparison | median Δ | 2.5% | 97.5% | P(Δ>0) |
+|---|---|---|---|---|
+| E1 top-2 − **EM4 (the bar)** | **+0.00188** | −0.00011 | +0.00378 | **0.968** |
+| E1 top-5 − EM4 | +0.00088 | −0.00086 | +0.00269 | 0.843 |
+| E2 diverse-5 − EM4 | −0.00016 | −0.00230 | +0.00191 | 0.439 |
+| E1 top-2 − **best single** (`C_co3a_s1301`) | **+0.00353** | **+0.00159** | +0.00548 | **1.000** |
+| E1 top-5 − best single | +0.00257 | +0.00056 | +0.00465 | 0.994 |
+| E2 diverse-5 − best single | +0.00152 | −0.00058 | +0.00376 | 0.923 |
+| **E1 top-5 − E2 diverse-5** *(arm contrast)* | **+0.00104** | **+0.00046** | +0.00168 | **1.000** |
+
+Read honestly, two different strengths of claim:
+
+1. **The ensemble gain over the best single 944 model is REAL and resolved** —
+   +0.0035 with a paired 95% CI that excludes zero and P(Δ>0)=1.000. Averaging
+   the two best models beats the best model, on the same pairs, without ambiguity.
+2. **The crossing of the BAR itself is at the edge of resolution** — +0.0019,
+   P(Δ>0)=0.968, and the paired 95% CI's lower bound is **−0.00011**, i.e. it
+   *just* includes zero. The point estimate clears the bar; a conventional
+   two-sided 95% paired test does not certify it. **Stated as such, not rounded
+   up to "beat the bar".**
+
+#### Finding 1 — decorrelation is FALSIFIED as the mechanism
+
+E2 was designed as the controlled contrast: same k=5, four shared members,
+config-DIVERSE (one per family) instead of config-homogeneous (E1-k5 is 3/5
+co3-family). If decorrelation-across-configs were the mechanism, E2 should win.
+**It loses, decisively: −0.00104 [−0.00168, −0.00046], P=1.000 against it**, and
+E2 is the one k=5 arm that fails to clear the bar. Swapping the 5th-ranked member
+(`C_em944_s31`, CID22 0.88692) for a family-diverse one (`C_nt944lo_s211`, 0.87647)
+costs more than family diversity buys. **The mechanism is not config decorrelation
+— it is averaging away seed noise among the strongest models.** Member *quality*
+dominates member *diversity* over this pool.
+
+#### Finding 2 — a clean, monotone k dose-response, and it is a TRADE
+
+| k | 2 | 3 | 5 | 8 | 51 |
+|---|---|---|---|---|---|
+| CID22 | 0.89425 | 0.89397 | 0.89329 | 0.89220 | 0.88586 |
+| nonphoto | 0.8735 | 0.8988 | 0.9128 | 0.9174 | 0.9270 |
+| imazen26 | 0.8708 | 0.8952 | 0.9089 | 0.9140 | 0.9235 |
+
+**CID22 falls monotonically in k while non-photo content rises monotonically in
+k** — across five values of k, with no exception in either direction. Small
+ensembles buy human-MOS rank; large ensembles buy content breadth. This is the
+first lever in the campaign that moves CID22 and nonphoto in *opposite* directions
+under a single continuous knob, and it means "how many models to average" is a
+product decision, not a tuning detail. E3 (k=51) is the nonphoto/imazen26 champion
+of the entire campaign (0.9270 / 0.9235) at the cost of 0.008 CID22.
+
+#### Finding 3 — averaging did NOT break the dial (the registered risk did not fire)
+
+The registration flagged ensemble dial monotonicity as a *disqualifying* outcome
+if it broke: averaging models with different dial shapes is exactly the operation
+that could produce a non-monotone dial. It did not. Every arm sits at
+**95.1–95.8% mono / 0.0% tied**, inside the single-bake band (92.5–96.2%) and
+above the 93% bar, at k=2 and at k=51 alike. Dial p95/reach actually *widen*
+slightly with ensembling (reach 20.2–22.2 vs 20.6 single, 17.9 EM4). Recorded as
+a measured negative — the risk was real enough to register and did not materialize.
+
+#### Finding 4 — the train==val guards inflate with k (read them as such)
+
+KADID rises 0.3177 (single) → 0.5086 (k=2) → 0.6105 (k=51); TID 0.8818 → 0.9287.
+These corpora are **100% train==val pair-overlap** and were never ranking signal.
+Averaging models that each memorized the same pairs compounds the memorization,
+so the guards move most. This is a caution for anyone reading a composite: the
+`composite` column rises with k (0.8306 → 0.8514) partly on guard inflation.
+
+#### Limitations (complete)
+
+- **M3a is NOT COMPUTABLE for any arm.** `diffmap_block_coherence` consumes one
+  ZNPR bake; an ensemble is a function, not an artifact. No proxy or
+  member-average was substituted. The only route to an M3a number is distillation
+  (§5.7), which did not fire. **This means the arms are un-judged on the bar row
+  that every 944-trained candidate has failed** — the CID22 crossing does not
+  speak to coherence at all.
+- **An ensemble is not a shippable artifact.** Nothing here can enter
+  `zensim/weights/`, be swapped, or be published as a model. Even had the full
+  bar been cleared, the deliverable would have been a *function* pending
+  distillation.
+- **The bar crossing is not certified at 95%** (paired P=0.968, CI lower bound
+  −0.00011). Point estimate only.
+- **G-RANGE remains NOT EVALUABLE** (MLP tool gap, unchanged).
+- **HF-NL-proxy is unstable across arms** (−0.115 … +0.211 with no relation to k),
+  re-confirming the campaign's reading of that instrument as noisy; E2's PASS on
+  it should not be over-read.
+- **No new training was done**, by design — so this wave says nothing about
+  whether a *trained* model can reach the bar, only that the average of existing
+  ones does on the point estimate.
+- Registered grid honored exactly: k ∈ {2,3,5,8} only. No k=4/6/10 was run; the
+  monotone trend is reported, not chased.
+- Cost, for the record: k=2..8 arms ≈ 4m35s total, E2 ≈ 45s, E3 (k=51) ≈ 7m57s,
+  all foreground on wsl. The lever's compute cost is ~0 next to a training wave.
+
+#### What wave 5 adds to the campaign's standing conclusion
+
+| lever | wave | result |
+|---|---|---|
+| seed luck (across configs) | n=23 | NULL — max 0.8869 |
+| near-top training mass | n=8 | NULL on rank |
+| coarse-mass / coherence | n=21 | NULL — max 0.8907 |
+| seed depth in the best config + M3a cross | n=12 | NULL — max 0.88851 |
+| **seed ENSEMBLE (no training)** | **wave 5, 6 arms** | **CID22 bar CLEARED (0.89425, 3 arms); full bar NOT cleared; KonJND binding** |
+
+The standing reading — *the 0.8924 bar encodes a single pre-stabilizer draw's
+unstable peak, and the stabilized regime's reliable ceiling is ≈0.887–0.891* —
+needs one amendment: **the stabilized regime CAN reach the bar, just not with one
+model.** The peak that four training-side levers could not find is recoverable
+for free by averaging two models the campaign already trained. That reframes the
+peak-vs-stability freeze choice the user owns: it is no longer "reliable 0.891 or
+unstable 0.8924", because a k=2 ensemble of stabilized models is *both* reliable
+(every member is a stabilized draw, no collapsed seeds) and at the bar — while
+still failing KonJND, and still needing distillation to become an artifact at all.
+
+**The single most actionable open item this wave produces**: distil `W5_E1_k2`
+even though the follow-on did not fire, to learn whether a student retains
++0.0035 over the best single model **and** what its M3a is. That is a registered
+*follow-up*, not a claim, and it was not run here because the registration's
+firing condition is the registration's to honor.
+
+#### Artifacts (wave 5)
+
+- Verdicts (6 arms + the k=1 gate): `/mnt/v/output/zensim/bakes/sota944/verdicts/W5_*.full.json`,
+  `W5GATE_k1_co3a_s1301.full.json` (+ `.verdict.md` each)
+- Frozen E3 membership: `benchmarks/wave5_e3_members.txt`
+- Driver: `scripts/wave5_ensemble.sh` (arms named, membership read from the committed list)
+- Paired-bootstrap inputs/outputs + per-pair dumps: `~/tmp/wave5/`
+  (`perpair/*.tsv`, `paired_boot2.tsv`, `paired_boot2_out.tsv`)
+- Owner extension: `bake_verdict --ensemble` (`zensim-validate/src/bin/bake_verdict.rs`)
+
+Nothing is shipped, swapped, promoted, or published. No default changed, no bake
+entered `zensim/weights/`. The freeze decision remains the user's.
