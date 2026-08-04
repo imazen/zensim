@@ -37,11 +37,14 @@ never compare numbers across eras without the doc's era-bridge notes.
 - **Selection frame = the BALANCED profile (user-directed, 2026-08-04):** the
   user lowered the bar to surface candidates balanced across bands, datasets
   and uses — registered as `freeze_check --profile balanced-2026-08-04`
-  (campaign doc AMENDMENT 8: floors, composite, classes, and the full
-  pass/frontier results; §1 stays the freeze bar). Headline: 0/145 cells pass
-  all 8 floors — classic-IQA breadth (CSIQ/LIVE ≥ 0.83) is the 944 era's
-  binding balance axis, and wave-7's arm H is the first cell family to cross
-  it while holding KonJND.
+  (campaign doc AMENDMENT 8 + its RESULTS section: floors, composite, classes,
+  full pass matrix, frontier, trade cards; §1 stays the freeze bar). Headline:
+  **0/172 board cells pass all 8 floors** — classic-IQA breadth (CSIQ/LIVE ≥
+  0.83) is the 944 era's binding balance axis; wave-7's `H_co3abpg_s2507` is
+  the frontier-top single (kon 0.459 ∧ breadth ∧ nonphoto ∧ M3a 0.866 GOLD,
+  missing only CID22 by 0.0045), and the packaging pass showed all raw-unit
+  dial-mono numbers are unit-flattered (no packaged cell holds ≥93% in dial
+  units — see the doc's unit caveat).
 
 ## THE three entry points (a newcomer starts here)
 

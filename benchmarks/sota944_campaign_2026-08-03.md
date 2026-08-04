@@ -3045,3 +3045,290 @@ number re-derives from the committed binaries + the mirrored artifacts.
   at 944.
 - KonJND is n=504 |SROCC|; deltas of 3e-5 are far inside instrument width —
   the claim is "no measurable cost", not "identical ranks".
+
+---
+
+### AMENDMENT 8 RESULTS — the balanced-selection pass (2026-08-04) — ZERO 8/8 passers in every class; the binding axis is CLASSIC-IQA BREADTH; arm H is the first trained family to cross it, and the packaging pass re-prices the dial floor
+
+**The registered §8.1 run, verbatim.** Instrument: `freeze_check --profile
+balanced-2026-08-04 --tsv` (commit `5a8adee7`; §5 path byte-identical vs the
+pre-change binary on `C_co3a_s1301`, test-locked; `861ec096` adds the F4
+raw-unit/dial-unit annotation — a label, verdict-invariant, test-locked).
+Driver: `scripts/sota944_balanced_matrix.sh` (loops the owner; computes
+nothing). Two matrix snapshots, both at
+`/mnt/v/output/zensim/reports/balanced/`:
+
+- `balanced_matrix_2026-08-04.tsv` — the pre-H pool, 166 cells, sha256
+  `72000891bfb3ae0bd8b99647ac3e85ebb0f5934e41579fcc8b4c278dc76e6e24`
+- `balanced_matrix_2026-08-04_final.tsv` — the full 172-cell board (adds the
+  3 wave-7 `H_co3abpg_*` fullevals and the 3 packaging-pass `*_packed` cells),
+  sha256 `790091ead4558f01426fc943c768cadfc61002a899598c1ca03e723c59e4fce8`
+
+No floor moved after scoring began. The supervisor's five sanity reads
+(s31 / co3a_s1307 / ensk2_s1303 / GE2_trio / GE4_konfloor5) all re-derived
+EXACTLY, every axis to the printed digit.
+
+#### The pass matrix summary (final, 172 cells)
+
+| class | n | 8/8 PASS | 7/8 | 6/8 | ≤5/8 |
+|---|---:|---:|---:|---:|---:|
+| 944-single | 134 | **0** | 7¹ | 13 | 114 |
+| 944-distilled | 6 | **0** | 1 | 0 | 5 |
+| 944-ensemble | 11 | **0** | 2 | 6 | 3 |
+| era-bridge (context) | 21 | 0 | 0 | 1² | 20 |
+
+¹ incl. the `C_co3a_s1301_w4repro` instrument duplicate (deduped from every
+table below). ² the 6/8 era cell is `sota944_EM4_s42_on944root_hfnl` — **the
+§1 bar source itself scores 6/8 under the balanced profile** (konjnd −0.0014,
+breadth: csiq 0.788 / live 0.801, both < 0.83).
+
+Per-floor pass rates (the shape of the pool):
+
+| class | F1 cid22 | F2 kon | F3 np | F4 dial | F5 span | F6 hfnl | F7 breadth | F8 tails |
+|---|---|---|---|---|---|---|---|---|
+| 944-single (134) | 14 | 19 | 60 | 116 | 134 | 107 | 58 | 84 |
+| 944-distilled (6) | 2 | 1 | 4 | 5 | 6 | 5 | 1 | 5 |
+| 944-ensemble (11) | 11 | 5 | 9 | 11 | 11 | 6 | 1 | 11 |
+
+**Every class is EMPTY at 8/8 — reported as registered; no floor moves.** The
+frontier is the 7/8 band, and it has exactly one structure:
+
+#### The structural finding — product-balance and breadth did not intersect anywhere in the pre-H pool
+
+**Zero of the 145 pre-H 944-era cells pass F1 ∧ F2 ∧ F7 simultaneously**
+(CID22 ≥ 0.885 ∧ KonJND ≥ 0.43 ∧ CSIQ/LIVE ≥ 0.83). The max CSIQ among cells
+holding F1 ∧ F2 was `GE1_konpair`'s **0.8271** (−0.0029, failing F6 besides);
+the only pre-H cell of any kind holding F2 ∧ F3 ∧ F7 was the distilled
+`C_ensk2_s1303` with kon at a borderline 0.4398 (the additive cells that pass
+kon ∧ breadth collapse nonphoto to 0.75–0.84 and CID22 to 0.78–0.83). Every
+7/8 cell misses on exactly one of three axes — **breadth** (s31, co3a_s1307,
+GE2, GE3), **KonJND** (co3a_s1301, co3a_s1409), or **CID22** (ensk2_s1303,
+and now both strong H seeds). This is the third measured trade-pair of the
+campaign: wave 5 = CID22↔nonphoto, wave 6 = CID22↔KonJND (both resolvable by
+ensemble member choice), this pass = (CID22+KonJND)↔breadth — which member
+choice does NOT resolve over this pool.
+
+**F5 (dial-span sanity) works as designed**: every 944-class cell passes it
+(raw heads span 13–20; the packed cells' real dials span 63–67, inside the
+registered ≤120); the one hit in the whole 172-cell matrix is exactly the
+registered pathological class (`cl_tfm_corruption_LQ_MLP_s13`, span 497,
+era-bridge — which also fails F4 at 15.6% tied).
+
+#### Arm H under the profile — the balance mechanism the pool lacked
+
+Scored from the board fullevals (M3a measured by wave-7's `run_full_eval`).
+Wave-7's own endpoints (H-Q1/H-Q2, the certified CID22 cost, the null close)
+are that amendment's section above; this table is the balanced lens only:
+
+| cell | n | bal | fails (Δ) | cid22 | kon | np | csiq/live | HF-NL | B3/B9 | dial (raw-unit) | M3a |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `H_co3abpg_s2507` | **7/8** | **0.8071** | cid22 (−0.0045) | 0.8806 | 0.4590 | 0.9164 | **0.830/0.863** | +0.182 | 0.046/0.171 | 94.0%/0.0% | **0.8664 GOLD** |
+| `H_co3abpg_s2501` | **7/8** | 0.8070 | cid22 (−0.0087) | 0.8763 | 0.4565 | 0.9139 | **0.832/0.852** | +0.169 | 0.058/0.247 | 94.0%/0.0% | 0.8280 silver |
+| `H_co3abpg_s2503` | 5/8 | 0.7919 | cid22, konjnd (−0.047), breadth (csiq −0.095) | 0.8793 | 0.3835 | 0.9163 | 0.735/0.814 | **+0.416** | 0.040/0.176 | 96.4%/0.0% | 0.7735 flagged |
+
+Three balanced-lens facts the wave-7 endpoints don't state:
+
+1. **The kon∧breadth∧np combination now exists in trained singles.** Final
+   pool census: exactly four cells hold F2 ∧ F3 ∧ F7 — `H_s2507`, `H_s2501`
+   (+ the s2507 packed twin), and the borderline distilled `C_ensk2_s1303`.
+   Two of three H seeds land it reproducibly at kon 0.456–0.459; no other
+   trained single in 134 does. The reference-disjoint KonJND leg didn't just
+   lift the kon number — it reshaped the whole balance profile.
+2. **The two strong H seeds are the top of the 7/8 frontier by the registered
+   composite** (0.8071 / 0.8070), and `H_s2507` carries the only GOLD M3a of
+   any frontier cell (0.8664 — clearing the 0.85 coherence bar that no
+   selected 944 cell had cleared).
+3. **The frontier's obstruction moved.** Pre-H: (cid22+kon)↔breadth with no
+   path. Post-H: the strong seeds' single miss is CID22 (−0.0045 at best) —
+   the same floor the campaign's stabilized-ceiling discussion already owns.
+   (One seed of three collapsed kon to 0.384 while pushing HF-NL to +0.416,
+   the frontier's highest — seed variance on the kon axis persists under
+   direct supervision, exactly as wave-7 recorded.)
+
+#### The dial-mono UNIT caveat (packaging pass `926c71f7`/`3baf73ad`, folded in per supervisor directive)
+
+**The campaign's F4 numbers for SPLINE-LESS bakes are raw-unit and
+unit-flattered.** The 0.5-score-pt materiality threshold operates in OUTPUT
+units; raw heads span ~16–17, so near-tie backwards steps fall below
+materiality. After `add-spline` + `pack` the same models measure on a real
+[0,100] dial (span 63–67) and mono drops — with **strict-backwards
+(cal-invariant) bit-identical** on s31 (0.1931) and s1307 (0.1699), +0.0002 on
+H (two f16 near-tie flips): a re-scaled threshold, NOT new inversions. The
+three packaged twins are the only dial-unit data points, and **no packaged
+cell passes the ≥93% floor in dial units**:
+
+| cell (packed twin) | raw-unit mono (parent) | **dial-unit mono** | F4 verdict (packed) | G-RANGE | size |
+|---|---|---|---|---|---|
+| `H_co3abpg_s2507_packed` | 94.0% | **91.2%** | FAIL | FAIL (4/4292 above-knot, 0.093%) | 166 KB |
+| `C_em944_s31_packed` | 93.4% | **87.7%** | FAIL | FAIL (24/4292, 0.559%) | 172 KB |
+| `C_co3a_s1307_packed` | 95.7% | **91.9%** | FAIL | **PASS 0/0** | 180 KB |
+
+Treatment, per the registration + the supervisor's directive: the floors do
+NOT move and the pool is NOT retroactively re-scored (only these 3 cells have
+packed dials); every F4 row now carries a `(raw-unit)`/`(dial-unit)` label in
+the owner (`861ec096`), the packed twins are scored as their own rows
+(6/8 each: the F1/F7 misses inherit from the parents — every rank axis is
+packaging-neutral ≤0.0005 — plus the dial-unit F4 FAIL), and raw-unit F4
+passes elsewhere in this section should be read with this caveat. The
+registered fix path if a candidate needs the row clean in dial units is the
+**amendment-2 near-top anchor densification** — the same lever the G-RANGE
+above-knot FAILs point at (issue-50 near-top saturation; both are
+anchor-domain properties, deliberately not applied post-hoc in the packaging
+pass).
+
+#### The ranked nearest-miss frontier (the de-facto balanced shortlist; 0 passers, so ranked 7/8 → notable 6/8 by `balanced_composite`)
+
+`bal` = the registered balanced_composite; `Δ` = signed margin on the failing
+floor; F4 numbers raw-unit unless noted. Deduped: `C_co3a_s1301_w4repro`
+(instrument duplicate) and the `*_packed` twins (packaging variants of their
+parents, tabled above) are counted in class totals but not listed as separate
+candidates.
+
+**944-single:**
+
+| rank | cell | n | bal | fails (Δ) | cid22 | kon | np | csiq/live | HF-NL | B3/B9 | M3a | corr q20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | `H_co3abpg_s2507` | 7/8 | 0.8071 | cid22 (−0.0045) | 0.8806 | 0.4590 | 0.9164 | 0.830/0.863 | +0.182 | 0.046/0.171 | **0.8664 GOLD** | — |
+| 2 | `H_co3abpg_s2501` | 7/8 | 0.8070 | cid22 (−0.0087) | 0.8763 | 0.4565 | 0.9139 | 0.832/0.852 | +0.169 | 0.058/0.247 | 0.8280 silver | — |
+| 3 | `C_em944_s31` | 7/8 | 0.8058 | breadth (csiq −0.060, live −0.018) | 0.8869 | **0.4689** | 0.9162 | 0.770/0.812 | +0.037 | 0.001/0.263 | 0.7926 silver | 79.3% |
+| 4 | `C_co3a_s1301` | 7/8 | 0.8055 | konjnd (−0.025) | **0.8907** | 0.4050 | 0.9045 | 0.836/0.839 | **+0.251** | 0.077/0.268 | 0.7598 flagged | 79.3% |
+| 5 | `C_co3a_s1307` | 7/8 | 0.8006 | breadth (csiq −0.068) | 0.8857 | 0.4330 | 0.9123 | 0.762/0.817 | +0.233 | 0.018/0.242 | 0.7625 flagged | — |
+| 6 | `C_co3a_s1409` | 7/8 | 0.7999 | konjnd (−0.060) | 0.8857 | 0.3703 | 0.9096 | 0.845/0.845 | +0.130 | 0.038/0.164 | 0.7181 flagged | — |
+| — | `C_co2b_s1307` | 6/8 | **0.8104** | cid22 (−0.0014), konjnd (−0.016) | 0.8836 | 0.4139 | 0.9107 | 0.847/0.861 | +0.127 | **0.125/0.303** | 0.7993 silver | — |
+| — | `C_co4_s1307` | 6/8 | 0.8094 | hfnl (−0.002), breadth (csiq −0.025) | 0.8856 | **0.4725** | 0.9031 | 0.805/0.858 | −0.002 | 0.103/0.297 | 0.8035 silver | 79.3% |
+
+**944-distilled:**
+
+| rank | cell | n | bal | fails (Δ) | notes |
+|---|---|---|---|---|---|
+| 1 | `C_ensk2_s1303` | 7/8 | 0.8049 | cid22 (**−0.0015** — the closest miss in the entire pool) | kon 0.4398, breadth PASS 0.833/0.851, M3a 0.8262 silver, HF-NL +0.011 (barely positive), B9 0.228 |
+
+(The other five students sit at ≤5/8 — the k2/k5 teacher profiles' KonJND /
+nonphoto / breadth weaknesses transfer, exactly as wave 6 measured.)
+
+**944-ensemble** (every row: k× scoring cost; NOT a shippable artifact; M3a
+NOT COMPUTABLE — §5.6):
+
+| rank | cell | k | n | bal | fails (Δ) | cid22 | kon | np | csiq/live | HF-NL |
+|---|---|---:|---|---|---|---|---|---|---|---|
+| 1 | `GE2_trio` | 3 | 7/8 | 0.8126* | breadth (csiq −0.020) | 0.8919 | 0.4543 | 0.9203 | 0.810/0.845 | +0.163 |
+| 2 | `GE3_balanced5` | 5 | 7/8 | 0.8110 | breadth (csiq −0.028) | 0.8909 | 0.4530 | 0.9184 | 0.802/0.849 | +0.145 |
+| — | `GE1_konpair` | 2 | 6/8 | 0.8126* | hfnl (−0.112), breadth (csiq −0.003) | 0.8905 | 0.4517 | 0.9097 | **0.827**/0.860 | −0.112 |
+| — | `GE4_konfloor5` | 5 | 6/8 | 0.8106 | hfnl (−0.043), breadth | 0.8883 | **0.4711** | 0.9152 | 0.786/0.852 | −0.043 |
+
+\* `GE2_trio` and `GE1_konpair` tie on balanced_composite at 5 printed dp
+(0.81263); GE2 is listed first on floor coverage (7/8 vs 6/8) — a presentation
+order, not a composite claim.
+
+#### Trade cards (one per shortlisted candidate)
+
+- **`H_co3abpg_s2507`** (single, 7/8, frontier-top composite) — *the balanced
+  star, and the only GOLD-coherence frontier cell.* Holds the combination no
+  other trained single has: KonJND 0.459 ∧ nonphoto 0.916 ∧ breadth
+  0.830/0.863 ∧ tails ∧ HF-NL +0.182 ∧ M3a **0.8664** (the 0.85 bar, cleared).
+  Costs: CID22 0.8806 (−0.0045, and wave-7 certified the H-family CID22 cost
+  as real, not noise); csiq clears the floor by only 0.0002; B9 0.171 is
+  frontier-low; dial-unit mono 91.2% (packed twin — below the 93% floor in
+  dial units, the unit caveat above); G-RANGE FAIL 0.093% above-knot pending
+  the amendment-2 densify. Packaging: SOLVED — the 166 KB `_packed` twin is
+  rank-identical (≤0.0001) with M3a 0.8665. Uses: the steering+JND+breadth
+  single; the strongest "balanced across uses" artifact the campaign has.
+- **`H_co3abpg_s2501`** (single, 7/8) — *s2507's replication.* Same shape one
+  seed over: kon 0.456, breadth 0.832/0.852, B9 0.247 (better tail than
+  s2507), M3a 0.828 silver; CID22 0.8763 (−0.0087, the deeper miss). Its
+  existence is what makes the H profile a FAMILY property rather than a lucky
+  draw; sdr25 0.9595 makes it wave-7's within-family selector pick.
+- **`C_em944_s31`** (single, 7/8) — *the product-axes flagship.* Best
+  KonJND+CID22 pair of the pre-H singles (0.4689 / 0.8869), nonphoto 0.916,
+  head corruption 79.3% q20. Costs: the worst breadth hole in the frontier
+  (0.770/0.812 — both sides fail), B3 0.001 barely non-negative, HF-NL +0.04,
+  and the packaging pass prices its dial honestly: **87.7% dial-unit mono**
+  (worst of the three packed) + G-RANGE 0.559% above-knot. Use as: rank+JND
+  single where classic-IQA breadth and dial packaging don't matter.
+- **`C_co3a_s1301`** (single, 7/8) — *the rank flagship, breadth-clean.* The
+  only pre-H 7/8 single that PASSES breadth (0.836/0.839); best stabilized
+  CID22 (0.8907); frontier-best HF-NL (+0.251); B9 0.268. Costs: KonJND 0.405
+  (−0.025, its one miss) and flagged M3a 0.7598. The wave-6/7 ensemble anchor.
+- **`C_co3a_s1307`** (single, 7/8) — *wave-3's 4/5-bar cell re-framed.* Passes
+  the §1-inherited trio (cid22/kon/np) AND hfnl (+0.233) — the §1-bar frontier
+  holder — but the breadth floor exposes it hardest (csiq 0.762, −0.068, the
+  biggest single-axis gap on the shortlist). Its packed twin is the one 944
+  MLP with a **clean G-RANGE (PASS 0/0)** — the most ship-packaged cell of the
+  frontier (180 KB, dial-unit mono 91.9%).
+- **`C_co2b_s1307`** (single, 6/8, **top balanced_composite of all singles
+  0.8104**) — *the balanced lens's genuine find.* Uniformly good with NO
+  broken axis: breadth 0.847/0.861, the best band-tails in the frontier
+  (B3 0.125 / B9 0.303), silver M3a 0.7993, HF-NL +0.127 — floor-short only on
+  the two hardest axes, by small margins (cid22 −0.0014, kon −0.016). The
+  composite ranks it above every 7/8 single; the floors say why it still isn't
+  a passer. A co2b-config seed wave would be the cheapest test of whether the
+  two margins close (NOT run — no registered lever remains in this pass).
+- **`C_ensk2_s1303`** (distilled, 7/8) — *the distilled coherence candidate.*
+  Misses the pool's hardest floor by 0.0015 of CID22 and passes everything
+  else, with M3a 0.8262 silver — wave 6's "distillation moves coherence"
+  survives the balanced lens as this class's reason to exist (though
+  `H_s2507` now beats it on coherence outright, 0.866 vs 0.826, trained
+  directly). Fragile HF-NL (+0.011). Shippable k=1 artifact, spline-less.
+- **`GE2_trio`** (ensemble k=3, 7/8) — *the function frontier.* Campaign-best
+  §1 composite (0.8571), top balanced_composite (0.8126); clears
+  cid22+kon+np+hfnl+tails+dial together — the only cell class that does — and
+  misses ONLY breadth (csiq 0.810). Costs: 3× scoring, not shippable, M3a not
+  computable, and wave 6 measured that distillation does not retain its rank
+  gain. Use as: the reference function for what the 944 era can express.
+
+#### Era-bridge context (never shortlisted; the era gap runs in both directions)
+
+The 372/720-era flagships hold breadth effortlessly — `winner_dial_Ebothg`
+csiq/live **0.958/0.960**, `v47_strict_QAT_native` 0.924/0.944, vs the 944
+frontier's 0.76–0.85 — and their CID22/KonJND pairs (0.894/0.431; 0.866/0.444)
+would clear F1/F2. But on the SAME 4,292 CID22 pairs they FAIL the tails floor
+(B9 0.132 / 0.036 vs the 944 frontier's 0.16–0.30) and their fullevals lack
+the HF-NL instrument entirely (UNEVALUABLE = not-passed, as registered; era
+rows are context regardless). The honest era reading: **944 bought the
+high-band tail, the HF-NL instrumentation, and (per the H arm) the
+kon∧breadth∧np combination — and pays for it at the CID22 peak and classic-IQA
+breadth.** The balance frontier MOVED; it did not simply shrink. (The 0.93+
+era numbers stay context, as registered — regime-incomparable.)
+
+#### What binds, quantified (final pool)
+
+| axis pair | measured obstruction |
+|---|---|
+| (cid22 ∧ kon) vs breadth | 0/172 cells hold F1∧F2∧F7; max csiq under F1∧F2 = 0.827 (GE1, ens) |
+| kon ∧ breadth ∧ np | 4 cells only: H_s2507(+packed), H_s2501, ensk2_s1303 — all miss F1 |
+| breadth vs cid22 | breadth-passers' best CID22 = 0.8907 (`C_co3a_s1301`) — kon 0.405 is then the miss |
+| the closest single miss | `C_ensk2_s1303`, −0.0015 CID22 |
+| the §1 bar source | EM4 = 6/8 under this profile (kon −0.0014, breadth csiq −0.041) |
+
+Margins this small sit inside documented noise (within-config CID22 sd
+0.01246 n=12; wave-5/6/7 paired-bootstrap CI half-widths ~0.002 on CID22) —
+the floors are point-estimate gates exactly like every §1 row, and no
+statistical-resolution claim is made for any single margin. No bootstrap was
+run in this pass (nothing here needed certification; nothing ships).
+
+#### Limitations (complete)
+
+- **M3a coverage is 32/151 non-ensemble cells** — the tier column is honest
+  (NOT MEASURED em-dashes elsewhere), but coherence comparison is limited to
+  measured cells; it is not a floor, so no verdict depends on the gap.
+- **The dial-unit re-pricing covers 3 cells** (the packaged twins). Every
+  other F4 number in the matrix is raw-unit and, per the packaging finding,
+  flattered by roughly the observed 2.8–5.7-pt drops; the pool was NOT
+  retroactively re-scored (per directive — only 3 cells have packed dials).
+  Any future freeze candidate must be judged on its DIAL-UNIT mono.
+- **balanced_composite discriminates weakly within the frontier** (0.79–0.81
+  across 7/8+6/8 cells; one 5-dp tie) — the floors do the selecting, the
+  composite only orders survivors; values quoted at the owner's 5 dp.
+- **The profile scores the stored fulleval/verdict numbers as-is** — no
+  re-verdicts, no re-stats; anything wrong upstream is wrong here identically
+  (by design: one owner per number). H-cell rows come from the board
+  fullevals (M3a measured); the packed twins carry the packaging pass's
+  measured M3a.
+- KADID/TID printed dimmed, never scored; sdr25 reported, never ranked-on
+  (within-family only). `C_co3a_s1301_w4repro` + the `*_packed` twins counted
+  in class totals but deduped from candidate tables.
+- The corruption column is head-owned (`corrhead944_s13`, q20 79.3% where
+  joint verdicts exist); dial-alone corruption stays broken-by-design at 944
+  and was never scored. H cells have no `--corruption-head` joint verdict yet.
+- H is k=3 with one kon-collapsed seed — the "family property" claim rests on
+  2/3 seeds plus the packed twin; wave-7's own limitations apply verbatim.
