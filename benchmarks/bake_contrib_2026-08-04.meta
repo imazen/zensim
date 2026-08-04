@@ -30,3 +30,9 @@
 # --dump-scores files (full 10,125-row kadid corpora only); row identity = the §C.0
 # verified sorted-dist_img arithmetic; stats = panel --batch via scripts/lib/zen_stats.py.
 # Full-corpus rows reproduce the bake_contrib baselines exactly (cross-check).
+#
+# Width-discriminator twin inputs (results §6; builder committed at
+# scripts/canonical_corpus/build_contrib_372_twins.py):
+#   tbig_372_200k.parquet            b1cc2257364a574d  (keyed join vs tbig_944_200k, G-T1 PASS 0 mismatches)
+#   kadis_372_ssim2_50k_twin.parquet cf119c05059daf62  (keyed join vs kadis_944_ssim2_50k, 0 misses)
+# Discriminator bakes land in /mnt/v/output/zensim/bakes/contrib-disc/.

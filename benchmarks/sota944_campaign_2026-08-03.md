@@ -3954,8 +3954,14 @@ cells. The keyed join is the stronger construction: exact cell identity) + `kadi
 0 misses / 50,000; human_score copied verbatim so targets are twin-exact; 981
 duplicate keys existed among the 700k canonical rows — ≤ a handful of same-
 source near-tie feature swaps possible, negligible for training). The
-per-slot transform list is re-fit at 372 via the trainer's winsor auto-fit
-(the s31 list indexes 944-fold slots and carries the degenerate windows —
-inheriting it would replant the §1 bug), documented as the one recipe
-substitution. k=2 seeds (31, 1301), `--max-features 372`, all other
-hyperparameters verbatim from the s31 argv.
+per-slot transform list CANNOT transfer (measured: the s31 screen's <372
+entries index the FOLD-regime f0-155 distributions — wrong clip windows for
+real v1 features — and its >=720 entries carry the degenerate (0,0) windows;
+the mainline trainer has no global winsor auto-fit token). Design therefore:
+**no-transform arms at 372 width (seeds 31, 1301) + a 944-width no-transform
+CONTROL twin (seed 31)** so the feature-space axis is isolated with the
+transform axis held fixed; the existing s31 bake supplies the
+(944, s31-screen) corner. `--max-features 372` / `944`, all other
+hyperparameters verbatim from the s31 argv. Eval: `bake_verdict --regime 720`
+(real-pool root) for the 372 arms, `--regime 944` for the control, corpora
+cid22,kadid,csiq,live,konjnd.
