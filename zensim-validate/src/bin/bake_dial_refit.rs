@@ -34,11 +34,15 @@
 //!   feature-transform guards computed as per-feature `[p_lo, p_hi]` on a
 //!   fit corpus (identity within bounds ⇒ rank-invariant on in-distribution
 //!   rows, bounds the extrapolating tail).
-//! * `gate` — reproduces `bake_outlier_gate.py`: the HARD **G-RANGE** gate
-//!   (fraction of raw preds outside the spline knot domain — the tail
-//!   detector SROCC is blind to) + advisory Z-RMSE / outlier-ratio / SROCC
-//!   vs a reference column. Computes NO PWRC (the `zenstats` `sa_st_curve`
-//!   O(n²) allocation OOMs broad corpora — see the module's PWRC note).
+//! * `gate` — the HARD **G-RANGE** gate (fraction of raw preds outside the
+//!   spline knot domain — the tail detector SROCC is blind to) + advisory
+//!   Z-RMSE / outlier-ratio / SROCC vs a reference column. Originally a
+//!   linear-only port of `bake_outlier_gate.py`; since 2026-08-04 the
+//!   forward routes through the shared `bake_runtime` production dispatch,
+//!   so it is evaluable for EVERY bake class (MLPs, α/hybrid heads,
+//!   min-max) — closing the campaign-long "G-RANGE NOT EVALUABLE" gap on
+//!   MLP candidates. Computes NO PWRC (the `zenstats` `sa_st_curve` O(n²)
+//!   allocation OOMs broad corpora — see the module's PWRC note).
 //! * `pack` — reproduces `pack_and_calibrate.py` (the STANDARD non-QAT
 //!   packing path): per-layer zerobias (`--protect-last` exempts the final
 //!   layer, keeping it f32) + dtype quantization, then refit the output
@@ -1083,17 +1087,52 @@ struct GateArgs {
 }
 
 fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
+    use zensim_validate::bake_runtime::{
+        extract_hybrid_head, extract_minmax_head, extract_per_sample_alpha_head,
+        extract_tanh_output_head_scale, score_row, score_row_minmax,
+    };
     let bytes = std::fs::read(&a.bake).map_err(|e| format!("read {:?}: {e}", a.bake))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
-    let lin = load_linear(&model);
-    let n = lin.scaler_mean.len();
-    let ops = build_fw_ops(&model, n)?;
+    let n = model.n_inputs();
     let sp = spline::extract(&model).ok_or("bake has no output_calibration_spline")?;
     let klo = sp.xs[0];
     let khi = sp.xs[sp.xs.len() - 1];
 
     let (feats, refv) = read_features(&a.corpus, &a.feat_prefix, n, &a.ref_col);
-    let raw: Vec<f64> = feats.iter().map(|r| forward_raw(r, &ops, &lin)).collect();
+
+    // Forward through the SHARED production scoring path (`bake_runtime` —
+    // the same per-sample-α / hybrid / min-max / tanh-pin dispatch
+    // bake_verdict uses), with the output spline DISABLED so `raw` is
+    // exactly the value the spline maps (post-head, post-tanh-pin). This
+    // makes the gate evaluable for EVERY bake class. It replaces a
+    // linear-only local forward that asserted `n_layers == 1` — the reason
+    // G-RANGE read "NOT EVALUABLE (inherited MLP tool gap)" for every MLP
+    // candidate of the SOTA-944 campaign.
+    let per_sample_alpha = extract_per_sample_alpha_head(&model);
+    let hybrid = extract_hybrid_head(&model);
+    let minmax = extract_minmax_head(&model);
+    let tanh_pin = extract_tanh_output_head_scale(&model);
+    let has_transforms = model.has_nontrivial_feature_transforms();
+    let mut predictor = zenpredict::Predictor::new(&model);
+    let mut scratch = vec![0f32; n];
+    let raw: Vec<f64> = feats
+        .iter()
+        .map(|row| match minmax.as_ref() {
+            // Min-max bakes REPLACE the layer forward — bypass the Predictor
+            // (same branch shape as bake_verdict::score_grid_one).
+            Some(mm) => score_row_minmax(&model, mm, tanh_pin, None, row),
+            None => score_row(
+                &mut predictor,
+                has_transforms,
+                per_sample_alpha.as_ref(),
+                hybrid.as_ref(),
+                tanh_pin,
+                None,
+                &mut scratch,
+                row,
+            ),
+        })
+        .collect();
     let dial: Vec<f64> = raw.iter().map(|&r| spline::apply(r, &sp)).collect();
     let ntotal = raw.len();
 
@@ -2327,13 +2366,13 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
                 .ok_or("predict needs --bake or --ensemble".to_string())?,
         ]
     } else {
-        if let Some(b) = a.bake.as_ref() {
-            if !a.ensemble.contains(b) {
-                return Err(format!(
-                    "--bake {} is not one of the --ensemble members; omit --bake",
-                    b.display()
-                ));
-            }
+        if let Some(b) = a.bake.as_ref()
+            && !a.ensemble.contains(b)
+        {
+            return Err(format!(
+                "--bake {} is not one of the --ensemble members; omit --bake",
+                b.display()
+            ));
         }
         a.ensemble.clone()
     };
@@ -3476,5 +3515,168 @@ mod tests {
         assert_eq!(round_6dec(-1e-7), 0.0); // "-0.000000" parses to -0.0 == 0.0
         assert_eq!(round_6dec(97.5), 97.5);
         assert!(round_6dec(f64::NAN).is_nan());
+    }
+
+    // ── gate: MLP-capable forward (the SOTA-944 "G-RANGE NOT EVALUABLE" fix) ──
+
+    /// A 2-layer MLP bake (3→2 LeakyReLU, 2→1 identity) CARRYING an output
+    /// spline — the bake class `gate` used to panic on (`load_linear`
+    /// asserts single-layer). All-ones layer-0 weights + 0.5 layer-1 weights
+    /// make the forward weight-layout-independent: for rows `[t,t,t]` with
+    /// `t ≥ 0`, both hidden units are `3t` (LeakyReLU passthrough) and
+    /// `raw = 0.5·3t + 0.5·3t = 3t`.
+    fn two_layer_bake_with_spline(knots: &[(f32, f32)]) -> Vec<u8> {
+        let mut payload = (knots.len() as u32).to_le_bytes().to_vec();
+        for (x, y) in knots {
+            payload.extend_from_slice(&x.to_le_bytes());
+            payload.extend_from_slice(&y.to_le_bytes());
+        }
+        let w0 = [1.0f32; 6];
+        let b0 = [0.0f32; 2];
+        let w1 = [0.5f32; 2];
+        let b1 = [0.0f32];
+        let meta = [BakeMetadataEntry {
+            key: SPLINE_KEY,
+            kind: MetadataType::Bytes,
+            value: &payload,
+        }];
+        bake(&BakeRequest {
+            schema_hash: 0,
+            flags: 0,
+            scaler_mean: &[0.0; 3],
+            scaler_scale: &[1.0; 3],
+            layers: &[
+                BakeLayer {
+                    in_dim: 3,
+                    out_dim: 2,
+                    activation: Activation::LeakyRelu,
+                    dtype: WeightDtype::F32,
+                    weights: &w0,
+                    biases: &b0,
+                },
+                BakeLayer {
+                    in_dim: 2,
+                    out_dim: 1,
+                    activation: Activation::Identity,
+                    dtype: WeightDtype::F32,
+                    weights: &w1,
+                    biases: &b1,
+                },
+            ],
+            feature_bounds: &[],
+            metadata: &meta,
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
+        })
+        .unwrap()
+    }
+
+    /// 8-row corpus parquet `[t,t,t]` for `t = 0.1·(i+1)` with a correlated
+    /// `human_score` (= t), under the `f<i>` prefix `read_features` expects.
+    fn write_gate_corpus(path: &Path) {
+        use std::sync::Arc;
+
+        use arrow::array::ArrayRef;
+        use arrow::datatypes::{DataType, Field, Schema};
+        use parquet::arrow::ArrowWriter;
+
+        let ts: Vec<f64> = (0..8).map(|i| 0.1 * (i + 1) as f64).collect();
+        let fields = vec![
+            Field::new("human_score", DataType::Float64, false),
+            Field::new("f0", DataType::Float64, false),
+            Field::new("f1", DataType::Float64, false),
+            Field::new("f2", DataType::Float64, false),
+        ];
+        let schema = Arc::new(Schema::new(fields));
+        let cols: Vec<ArrayRef> = vec![
+            Arc::new(Float64Array::from(ts.clone())),
+            Arc::new(Float64Array::from(ts.clone())),
+            Arc::new(Float64Array::from(ts.clone())),
+            Arc::new(Float64Array::from(ts)),
+        ];
+        let batch = RecordBatch::try_new(schema.clone(), cols).unwrap();
+        let f = File::create(path).unwrap();
+        let mut w = ArrowWriter::try_new(f, schema, None).unwrap();
+        w.write(&batch).unwrap();
+        w.close().unwrap();
+    }
+
+    fn gate_args(bake: PathBuf, corpus: PathBuf) -> GateArgs {
+        GateArgs {
+            bake,
+            corpus,
+            ref_col: "human_score".into(),
+            feat_prefix: "f".into(),
+            range_frac: 1e-4,
+        }
+    }
+
+    /// `gate` on a 2-layer MLP — the invocation that used to PANIC in
+    /// `load_linear` ("expects a single-layer linear bake"), which is why
+    /// G-RANGE read "NOT EVALUABLE (inherited MLP tool gap)" for every MLP
+    /// candidate of the SOTA-944 campaign. Wide knots → every raw pred
+    /// (3t ∈ [0.3, 2.4]) in-domain → PASS; narrow knots [1.0, 1.5] → 6/8
+    /// rows extrapolate → FAIL. Both verdicts prove the forward is real,
+    /// not a degenerate all-inside path.
+    #[test]
+    fn gate_evaluates_two_layer_mlp_bakes() {
+        let dir = std::env::temp_dir().join("zensim_gate_mlp_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let corpus = dir.join("gate_fixture.parquet");
+        write_gate_corpus(&corpus);
+
+        let wide = dir.join("mlp_wide.bin");
+        std::fs::write(
+            &wide,
+            two_layer_bake_with_spline(&[(-10.0, 0.0), (10.0, 100.0)]),
+        )
+        .unwrap();
+        let failed = cmd_gate(&gate_args(wide, corpus.clone()))
+            .expect("gate must run on a 2-layer MLP bake (panicked before the bake_runtime fix)");
+        assert!(
+            !failed,
+            "raw preds 0.3..2.4 all inside [-10,10] — must PASS"
+        );
+
+        let narrow = dir.join("mlp_narrow.bin");
+        std::fs::write(
+            &narrow,
+            two_layer_bake_with_spline(&[(1.0, 20.0), (1.5, 80.0)]),
+        )
+        .unwrap();
+        let failed = cmd_gate(&gate_args(narrow, corpus)).expect("gate runs");
+        assert!(
+            failed,
+            "6/8 raw preds extrapolate outside [1.0, 1.5] — must FAIL"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The linear class still gates correctly through the shared path
+    /// (continuity for every pre-fix caller: raw = 1.25·t stays inside wide
+    /// knots → PASS; a narrow domain above the range → FAIL).
+    #[test]
+    fn gate_still_evaluates_linear_bakes() {
+        let dir = std::env::temp_dir().join("zensim_gate_linear_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let corpus = dir.join("gate_fixture.parquet");
+        write_gate_corpus(&corpus);
+
+        // tiny_bake weights [1.0, 0.5, -0.25] → raw = 1.25·t ∈ [0.125, 1.0].
+        let wide = dir.join("lin_wide.bin");
+        std::fs::write(&wide, tiny_bake(&[(-100.0, 0.0), (100.0, 100.0)])).unwrap();
+        let failed = cmd_gate(&gate_args(wide, corpus.clone())).expect("gate runs");
+        assert!(!failed, "linear raw preds inside [-100,100] — must PASS");
+
+        let above = dir.join("lin_above.bin");
+        std::fs::write(&above, tiny_bake(&[(5.0, 0.0), (10.0, 100.0)])).unwrap();
+        let failed = cmd_gate(&gate_args(above, corpus)).expect("gate runs");
+        assert!(failed, "all linear raw preds below knot 5.0 — must FAIL");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
