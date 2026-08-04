@@ -4252,3 +4252,80 @@ Two caveats the sibling flagged and this note inherits: the discriminator is
 **k = 2 seeds**, and its own per-arm spread is large (kadid 0.5459 vs 0.6412,
 CSIQ 0.68 vs 0.44 across just those two seeds) — so it separates *recipes*,
 it does not rank *widths*, and no width claim is made here.
+%%%%%%% diff from: vnzxuuoo 453e3e3a "chore(contrib): commit the 372-twin builders (keyed tbig join G-T1-verified + kadis keyed join) + twin sha256s in the .meta — discriminator inputs get a committed owner" (parents of rebased revision)
+\\\\\\\        to: uwsynsot a64faae2 "research(contrib): width-discriminator RESULTS — reintroduction DEAD as a kadid/breadth lever (944 beats 372 by +0.188 kadid at matched transform state; the 372 arms USE the pools at 64% of contribution and still do not recover), and the 944-no-tf control confirms the 22 winsor-killed features EXACTLY (258 vs 277 dead; recovered set == the predicted list bit-for-bit)" (rebased revision)
++
++### Width-discriminator RESULTS (2026-08-04) — REINTRODUCTION IS DEAD as a KADID/breadth lever (no recovery at 372; the 944 width is BETTER on kadid at matched transform state), and the control CONFIRMS the 22 winsor-killed features EXACTLY
++
++Three arms trained (chain 53 min, bakes + verdict JSONs in
++`/mnt/v/output/zensim/bakes/contrib-disc/`, shas in the `.meta`, all three
++carry embedded `zentrain.repro`), all sharing the co3a data recipe verbatim
++from the s31 argv, all no-transform (the s31 screen cannot transfer to 372 —
++its <372 entries index FOLD-regime distributions and its ≥720 entries carry
++the degenerate windows — so the transform axis is held FIXED at "none" across
++widths, with the 944 no-tf control isolating it against the shipped screen):
++
++| arm | width | transforms | cid22 | **kadid** | csiq | live | konjnd |
++|---|---:|---|---:|---:|---:|---:|---:|
++| disc372_s31 | 372 | none | 0.8792 | **0.5459** | 0.6807 | 0.6664 | 0.2699 |
++| disc372_s1301 | 372 | none | 0.8822 | **0.6412** | 0.4384 | 0.3000 | 0.1870 |
++| **disc944notf_s31 (CONTROL)** | 944 | none | 0.8762 | **0.7341** | 0.6813 | 0.7597 | 0.3034 |
++| C_em944_s31 (reference) | 944 | s31 screen | 0.8869 | 0.5692 | 0.7698 | 0.8117 | 0.4689 |
++| C_co3a_s1301 (reference) | 944 | s31 screen | 0.8907 | 0.3177 | 0.8359 | 0.8393 | 0.4050 |
++| B (reference) | 372 | winsor | 0.8821 | 0.8085 | 0.9342 | 0.8970 | 0.5186 |
++| winner_dial (reference) | 156 | winsor | 0.8940 | 0.9464 | 0.9584 | 0.9600 | 0.4308 |
++
++**The registered verdict: NO RECOVERY ⇒ the f156-371 block is not the KADID/
++breadth lever, and join-first reintroduction is DEAD for this purpose.** The
++width comparison at matched transform state and matched seed (31, no-tf) runs
++the *wrong way* for the reintroduction hypothesis: **944 beats 372 on kadid by
+++0.188** (0.7341 vs 0.5459), ties csiq (0.681 both) and wins live (+0.093).
++Nothing at either width, on the 944-era data recipe, approaches B's 0.809 or
++winner_dial's 0.946. And the 372 arms are not ignoring the restored pools —
++`bake_contrib` measures them **using** the pools heavily: peaks+masked+iw =
++**64.2% / 63.6%** of total contribution with only **2/372 dead**. The features
++are present, live, and load-bearing, and kadid still does not come back.
++Per-type (`benchmarks/bake_contrib_kadid_types_discriminator_2026-08-04.tsv`),
++**compression stays catastrophic in every co3a-recipe arm** — 0.032 (944+screen)
++/ 0.287 (944 no-tf) / 0.042 (372 no-tf s31) / 0.258 (372 no-tf s1301) against
++winner_dial's 0.937 — so neither width nor transforms restore the family that
++should be this metric's home turf. ⇒ The KADID gap is **data-recipe-causal**,
++confirming §4's mechanism reading; the registered kadid weight/loss-mode lever
++(train_w 0.5→1.5, rank→both) remains the live experiment, and the §5 join-first
++reintroduction path is retired for kadid/breadth (it may still be motivated by
++some other axis, but nothing measured here supports it).
++
++**The control also settles the §1 winsor finding EXACTLY.** `bake_contrib` on
++disc944notf_s31: **258 dead vs 277** with the screen, and the difference is
++**precisely the predicted 22** — the recovered set is bit-for-bit
++`{731,732, 748,749, 782,783, 799,800, 816,817, 833,834, 850,851, 867,868,
++884,885, 901,902, 918,919}`, exactly the 11 index pairs carrying
++`winsor_p99:idx:0,0`. Meanwhile the still-dead ≥372 set is **exactly the 39
++never-populated slots**, and the 216 structural zeros gate PASS again. So the
++three-way decomposition of the 277 is now *experimentally* confirmed, not
++inferred: 216 structural + 39 never-populated + 22 recipe-killed. The three new
++dead in the no-tf arm (f38, f77, f129 — all v1fold, all with x̃ nonzero on
++100% of rows) are genuine gradient-descent deselections, a different and
++benign class.
++
++**The screen's price, measured (seed 31, 944 width, one seed):** adding the s31
++winsor screen costs **kadid −0.165** (0.734 → 0.569) and buys **konjnd +0.166**
++(0.303 → 0.469), **csiq +0.089**, **live +0.052**, **cid22 +0.011**. So the
++inherited screen is not simply a bug to delete — it is a real trade the campaign
++has been buying blind, with a self-inflicted component (the 22 zero-window
++kills) that a screen refit should recover *without* paying the kadid price.
++**Registered next lever, sharpened by this measurement:** refit the winsor
++screen on the current 944 tables (fixing the degenerate windows), retrain, and
++check whether the konjnd/breadth gain survives while the kadid loss shrinks.
++
++**Limitations (complete).** k=2 seeds at 372 and **k=1 at 944 no-tf** — the
++seed spread is enormous (kadid 0.546↔0.641 at 372; 0.318↔0.569 across the two
++screened 944 references), so the ±0.19 width gap is one seed-pair's worth of
++evidence and the arms are NOT ranked against each other beyond the coarse
++"neither reaches 0.81" claim, which is robust to the full observed spread. The
++372 arms train on the ext720 real-pool root (pre-fold regime) while the control
++trains on ext944 — regime-native by construction and never column-mixed, but it
++means "width" and "extraction vintage" are not fully separable in this design
++(the tbig/kadis legs ARE keyed twins of the same cells, so that part is
++matched). No-transform arms are not ship candidates and were never evaluated as
++such. konjnd here is the `ext_konjnd_jpeg_val` slot under each regime's root.

@@ -36,3 +36,13 @@
 #   tbig_372_200k.parquet            b1cc2257364a574d  (keyed join vs tbig_944_200k, G-T1 PASS 0 mismatches)
 #   kadis_372_ssim2_50k_twin.parquet cf119c05059daf62  (keyed join vs kadis_944_ssim2_50k, 0 misses)
 # Discriminator bakes land in /mnt/v/output/zensim/bakes/contrib-disc/.
+#
+# Width-discriminator arms (trained 2026-08-04, chain ~53 min, this box):
+#   trainer: zensim_mlp_train (built from ca28e7d0-era tree), co3a recipe verbatim from the
+#   C_em944_s31 argv MINUS --feature-transform (no-transform arms by design; see results §7),
+#   --epochs 120 --pairs-per-epoch 50000 --coarse-decay 1e-5 --n-hidden-layers 0
+#   disc372_s31     seed 31   --max-features 372 (ext720 real-pool root + tbig_372_200k + kadis twin)  cb4555de3e0147f1
+#   disc372_s1301   seed 1301 --max-features 372 (same tables)                                          4ae1061abcdf56ba
+#   disc944notf_s31 seed 31   --max-features 944 (ext944 root + tbig_944_200k + kadis_944_ssim2_50k)    6ceeb7f07e37764e  = the CONTROL
+# Bakes + verdict JSONs: /mnt/v/output/zensim/bakes/contrib-disc/ (all carry embedded zentrain.repro)
+# Eval: bake_verdict --regime 720 (372 arms) / --regime 944 (control), corpora cid22,kadid,csiq,live,konjnd
