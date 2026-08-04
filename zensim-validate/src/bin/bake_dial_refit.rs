@@ -3399,12 +3399,36 @@ struct RefitWinsorArgs {
     #[arg(long)]
     out_tokens: PathBuf,
     /// Audit TSV (idx / token / old_lo / old_hi / new_lo / new_hi / n /
-    /// degenerate_old / degenerate_new / changed).
+    /// degenerate_old / degenerate_new / changed / fit_lo / fit_hi / selected).
+    /// `new_*` is the EMITTED window (= inherited when the index is not
+    /// selected); `fit_*` is always what the pooled fit produced.
     #[arg(long)]
     out_tsv: PathBuf,
     /// Target column name — needed only to drive the streaming loader.
     #[arg(long, default_value = "human_score")]
     target: String,
+    /// Which winsor indices the newly-fit window is APPLIED to, classified by
+    /// the INHERITED window (`degenerate` == `old_lo == old_hi`). Indices that
+    /// are not selected keep their inherited window and are emitted
+    /// byte-verbatim from `--base-tokens`. The fit itself always covers every
+    /// winsor index, so `fit_lo`/`fit_hi` are recorded either way.
+    /// (SOTA-944 wave 9, amendment 10 §10.2.)
+    #[arg(long, value_enum, default_value_t = RefitClass::All)]
+    refit_class: RefitClass,
+    /// Explicit comma-separated index subset to apply the fit to. Mutually
+    /// exclusive with a non-default `--refit-class`.
+    #[arg(long)]
+    refit_indices: Option<String>,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, clap::ValueEnum)]
+enum RefitClass {
+    /// Every winsor index (the default; wave-8 behaviour).
+    All,
+    /// Only indices whose inherited window is degenerate (`old_lo == old_hi`).
+    Degenerate,
+    /// Only indices whose inherited window is non-degenerate.
+    Nondegenerate,
 }
 
 /// `add-winsor`'s window rule, factored out so both callers share it:
@@ -3430,6 +3454,80 @@ fn parse_ft_token(line: &str) -> Result<(String, usize, String), String> {
         .parse()
         .map_err(|e| format!("token {line:?}: bad idx {idx_s:?}: {e}"))?;
     Ok((tok, idx, it.next().unwrap_or("").to_string()))
+}
+
+/// Decide which winsor indices the newly-fit window is APPLIED to
+/// (amendment 10 §10.2). Pure: no I/O, no fit — it reads only the inherited
+/// token list, so the classification is a property of the base screen.
+///
+/// `entries` are `(original_line, token, idx, params_csv)` in file order;
+/// `winsor_idx` is the `winsor_p99` index list in first-appearance order.
+fn select_refit_indices(
+    entries: &[(String, String, usize, String)],
+    winsor_idx: &[usize],
+    class: RefitClass,
+    explicit: Option<&str>,
+) -> Result<std::collections::HashSet<usize>, String> {
+    let explicit = explicit.map(str::trim).filter(|s| !s.is_empty());
+    if explicit.is_some() && class != RefitClass::All {
+        return Err("--refit-indices and a non-default --refit-class are mutually exclusive".into());
+    }
+    if let Some(csv) = explicit {
+        let mut set = std::collections::HashSet::new();
+        for part in csv.split(',') {
+            let p = part.trim();
+            if p.is_empty() {
+                continue;
+            }
+            let i: usize = p
+                .parse()
+                .map_err(|e| format!("--refit-indices: bad index {p:?}: {e}"))?;
+            if !winsor_idx.contains(&i) {
+                return Err(format!("--refit-indices: {i} is not a winsor_p99 index"));
+            }
+            set.insert(i);
+        }
+        if set.is_empty() {
+            return Err("--refit-indices selected nothing".into());
+        }
+        return Ok(set);
+    }
+    if class == RefitClass::All {
+        return Ok(winsor_idx.iter().copied().collect());
+    }
+    let want_deg = class == RefitClass::Degenerate;
+    let mut set = std::collections::HashSet::new();
+    for (line, tok, idx, params) in entries {
+        if tok != "winsor_p99" {
+            continue;
+        }
+        // A class selector needs a well-defined inherited window; an
+        // unparseable one would silently land in the complement.
+        let old: Vec<f64> = params
+            .split(',')
+            .map(|s| {
+                s.trim().parse::<f64>().map_err(|e| {
+                    format!("token {line:?}: --refit-class needs 2 numeric params: {e}")
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        if old.len() != 2 {
+            return Err(format!(
+                "token {line:?}: --refit-class needs exactly 2 params, got {}",
+                old.len()
+            ));
+        }
+        if (old[0] == old[1]) == want_deg {
+            set.insert(*idx);
+        }
+    }
+    if set.is_empty() {
+        return Err(format!(
+            "--refit-class {} selected no indices",
+            if want_deg { "degenerate" } else { "nondegenerate" }
+        ));
+    }
+    Ok(set)
 }
 
 fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
@@ -3470,6 +3568,15 @@ fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
         .enumerate()
         .map(|(s, &i)| (i, s))
         .collect();
+
+    // Which indices the fit is APPLIED to (amendment 10 §10.2). The fit below
+    // always covers every winsor index; this only decides emission.
+    let selected = select_refit_indices(&entries, &winsor_idx, a.refit_class, a.refit_indices.as_deref())?;
+    eprintln!(
+        "refit-winsor: applying the fit to {} of {} winsor indices",
+        selected.len(),
+        winsor_idx.len()
+    );
 
     // Pool the requested columns only — full-width rows are streamed and
     // dropped, so peak memory is one batch plus |winsor_idx| columns.
@@ -3522,7 +3629,7 @@ fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
     let mut tsv = format!(
         "# refit-winsor  lo_pct={} hi_pct={}  pooled_rows={n_rows_total}  width={n_feat_seen}\n\
          # inputs: {}\n\
-         idx\ttoken\told_lo\told_hi\tnew_lo\tnew_hi\tn\tdegenerate_old\tdegenerate_new\tchanged\n",
+         idx\ttoken\told_lo\told_hi\tnew_lo\tnew_hi\tn\tdegenerate_old\tdegenerate_new\tchanged\tfit_lo\tfit_hi\tselected\n",
         a.lo_pct,
         a.hi_pct,
         a.parquet
@@ -3539,7 +3646,7 @@ fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
             continue;
         }
         let slot = slot_of[idx];
-        let (lo, hi) = new_win[slot];
+        let (flo, fhi) = new_win[slot];
         let old: Vec<f64> = params
             .split(',')
             .filter_map(|s| s.trim().parse::<f64>().ok())
@@ -3549,28 +3656,39 @@ fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
         } else {
             (f64::NAN, f64::NAN)
         };
+        // Not selected ⇒ the inherited line is emitted BYTE-VERBATIM, so an
+        // inherited window can never be silently reformatted.
+        let is_sel = selected.contains(idx);
+        let (lo, hi) = if is_sel { (flo, fhi) } else { (olo, ohi) };
         let deg_old = olo == ohi;
         let deg_new = lo == hi;
         let changed = !(olo == lo && ohi == hi);
         n_deg_old += usize::from(deg_old);
         n_deg_new += usize::from(deg_new);
         n_changed += usize::from(changed);
-        out_tok.push_str(&format!("winsor_p99:{idx}:{lo:e},{hi:e}\n"));
+        if is_sel {
+            out_tok.push_str(&format!("winsor_p99:{idx}:{lo:e},{hi:e}\n"));
+        } else {
+            out_tok.push_str(line);
+            out_tok.push('\n');
+        }
         tsv.push_str(&format!(
-            "{idx}\t{tok}\t{olo:e}\t{ohi:e}\t{lo:e}\t{hi:e}\t{}\t{}\t{}\t{}\n",
+            "{idx}\t{tok}\t{olo:e}\t{ohi:e}\t{lo:e}\t{hi:e}\t{}\t{}\t{}\t{}\t{flo:e}\t{fhi:e}\t{}\n",
             vals[slot].len(),
             u8::from(deg_old),
             u8::from(deg_new),
             u8::from(changed),
+            u8::from(is_sel),
         ));
     }
     std::fs::write(&a.out_tokens, &out_tok)
         .map_err(|e| format!("write {:?}: {e}", a.out_tokens))?;
     std::fs::write(&a.out_tsv, &tsv).map_err(|e| format!("write {:?}: {e}", a.out_tsv))?;
     eprintln!(
-        "refit-winsor: {} tokens ({} winsor) -> {:?}; changed {n_changed}, degenerate old {n_deg_old} new {n_deg_new}; audit {:?}",
+        "refit-winsor: {} tokens ({} winsor, {} applied) -> {:?}; changed {n_changed}, degenerate old {n_deg_old} new {n_deg_new}; audit {:?}",
         entries.len(),
         winsor_idx.len(),
+        selected.len(),
         a.out_tokens,
         a.out_tsv,
     );
@@ -4104,6 +4222,89 @@ mod tests {
         assert_eq!(nums, vec![0.0, 0.0]);
         assert!(parse_ft_token("winsor_p99").is_err(), "missing idx must error");
         assert!(parse_ft_token("winsor_p99:xx:0,0").is_err(), "bad idx must error");
+    }
+
+    /// The wave-9 window-subset selector (amendment 10 §10.2). Classification
+    /// is by the INHERITED window, so it is a property of the base screen and
+    /// never of the fit — which is what makes `degenerate ⊎ nondegenerate =
+    /// all` a checkable identity rather than a hope.
+    #[test]
+    fn refit_class_partitions_by_inherited_window() {
+        // A miniature of the real screen: 2 degenerate append-ish indices, 3
+        // non-degenerate fold-ish ones, and a parameterless passthrough.
+        let lines = [
+            "winsor_p99:9:2.5e-16,6.6e-05",
+            "signed_cbrt:61:",
+            "winsor_p99:731:0,0",
+            "winsor_p99:155:1.1e-09,0.1638",
+            "winsor_p99:748:0,0",
+            "winsor_p99:100:1.46128e-06,0.000106967",
+        ];
+        let entries: Vec<(String, String, usize, String)> = lines
+            .iter()
+            .map(|l| {
+                let (t, i, p) = parse_ft_token(l).unwrap();
+                (l.to_string(), t, i, p)
+            })
+            .collect();
+        let widx: Vec<usize> = entries
+            .iter()
+            .filter(|(_, t, _, _)| t == "winsor_p99")
+            .map(|(_, _, i, _)| *i)
+            .collect();
+        assert_eq!(widx, vec![9, 731, 155, 748, 100]);
+
+        let sel = |c, e| select_refit_indices(&entries, &widx, c, e).unwrap();
+        let all = sel(RefitClass::All, None);
+        let deg = sel(RefitClass::Degenerate, None);
+        let non = sel(RefitClass::Nondegenerate, None);
+
+        assert_eq!(all.len(), 5, "All selects every winsor index");
+        assert_eq!(deg, [731usize, 748].into_iter().collect());
+        assert_eq!(non, [9usize, 155, 100].into_iter().collect());
+        // the registered identity: disjoint, and their union is `all`
+        assert!(deg.is_disjoint(&non), "classes must not overlap");
+        assert_eq!(
+            deg.union(&non).copied().collect::<std::collections::HashSet<_>>(),
+            all,
+            "degenerate + nondegenerate must exactly cover all"
+        );
+
+        // explicit subset
+        assert_eq!(
+            sel(RefitClass::All, Some(" 731 , 100 ")),
+            [731usize, 100].into_iter().collect()
+        );
+        // and its guards
+        assert!(
+            select_refit_indices(&entries, &widx, RefitClass::Degenerate, Some("731")).is_err(),
+            "--refit-indices with a non-default class must be rejected"
+        );
+        assert!(
+            select_refit_indices(&entries, &widx, RefitClass::All, Some("61")).is_err(),
+            "a non-winsor index must be rejected, not silently ignored"
+        );
+        assert!(
+            select_refit_indices(&entries, &widx, RefitClass::All, Some("9999")).is_err(),
+            "an absent index must be rejected"
+        );
+        // an unparseable inherited window has no defined class — error, never
+        // a silent landing in the complement.
+        let bad: Vec<(String, String, usize, String)> =
+            vec![("winsor_p99:9:junk".into(), "winsor_p99".into(), 9, "junk".into())];
+        assert!(
+            select_refit_indices(&bad, &[9], RefitClass::Degenerate, None).is_err(),
+            "unparseable params must error under a class selector"
+        );
+        // An empty class is an error too: a screen with no degenerate windows
+        // asked for `degenerate` is a user mistake, not an empty refit.
+        let nodeg: Vec<(String, String, usize, String)> = vec![(
+            "winsor_p99:9:1,2".into(),
+            "winsor_p99".into(),
+            9,
+            "1,2".into(),
+        )];
+        assert!(select_refit_indices(&nodeg, &[9], RefitClass::Degenerate, None).is_err());
     }
 
     #[test]

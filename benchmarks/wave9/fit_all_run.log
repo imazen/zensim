@@ -1,0 +1,17 @@
+refit-winsor: applying the fit to 54 of 54 winsor indices
+refit-winsor: "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_safesyn_full.parquet" rows 111068
+  sha256 cab92322156e72a9c78c5db00c2dacb565ab850922c90323abfb63ce056277bb
+refit-winsor: "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_cid22_train201.parquet" rows 17611
+  sha256 5abe28a099ac5f086d6db33fce3f3740d96a7d013634b169c49ae39abc6a0c8b
+refit-winsor: "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_kadid.parquet" rows 10125
+  sha256 4dde6be26d3c50dca21fdee834f95bd692afa2c65b2d4f6f8a886d105553ca08
+refit-winsor: "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_tid.parquet" rows 3000
+  sha256 7efce8f2a8d459d111f2bfe7699c91abc94fdb377ec7dff9e9a3df0a1ce62c50
+refit-winsor: "/mnt/v/zen/zensim-training/tbig_944_200k.parquet" rows 208169
+  sha256 190cb9161e392984b751c7b1bd99a62ddbbad4f42d17c8b16d14a6748cb250aa
+refit-winsor: "/mnt/v/zen/zensim-training/kadis-944-2026-08-01/kadis_944_ssim2_50k.parquet" rows 50000
+  sha256 0ac7c889bdf1a7289afce3d90719b0c2ed58d0418b052cedf2a3740e5dc31012
+refit-winsor: "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/konjnd_bpg_train_944.parquet" rows 8060
+  sha256 c87d8f268d0f9a89f6e6d0dec40b949d944c11070dd43fe04e4a6afd2487df9e
+refit-winsor: pooled 408033 rows, width 944, 54 winsor indices
+refit-winsor: 64 tokens (54 winsor, 54 applied) -> "/home/lilith/tmp/wave9/w9_all_screen_tokens.txt"; changed 54, degenerate old 24 new 0; audit "/home/lilith/tmp/wave9/w9_all_audit.tsv"
