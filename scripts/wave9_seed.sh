@@ -30,7 +30,10 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TRAIN=${ZL_TRAIN:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/zensim_mlp_train}
 OUT=${SOTA944_OUT:-/mnt/v/output/zensim/bakes/sota944/bakes}
 mkdir -p "$OUT"
-BAKE="$OUT/W9${ARM}_s${SEED}.bin"
+# WAVE9_TAG renames the OUTPUT only — the argv is otherwise byte-identical, so
+# it is how a cross-lane twin of an existing cell is produced without colliding
+# with it. It never changes what is trained.
+BAKE="$OUT/${WAVE9_TAG:-W9${ARM}_s${SEED}}.bin"
 [[ -f "$BAKE" ]] && { echo "exists: $BAKE"; exit 0; }
 
 # The three frozen screens (§10.2). All three come from ONE pooled fit over the
