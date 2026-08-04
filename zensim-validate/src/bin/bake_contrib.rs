@@ -558,7 +558,9 @@ fn main() -> ExitCode {
     let dead: Vec<bool> = (0..n_inputs)
         .map(|k| mean_abs[k] < DEAD_MEAN_ABS && p95_abs[k] < DEAD_P95)
         .collect();
-    let rank_dead: Vec<bool> = (0..n_inputs).map(|k| std_delta[k] < RANK_DEAD_STD).collect();
+    let rank_dead: Vec<bool> = (0..n_inputs)
+        .map(|k| std_delta[k] < RANK_DEAD_STD)
+        .collect();
 
     // ---- analytic cross-check ------------------------------------------
     // g = |W|-chain back-propagated ones from the output to hidden-0.
@@ -582,7 +584,11 @@ fn main() -> ExitCode {
         let var = (xt_sumsq[k] / n_rows_f - m * m).max(0.0);
         let sd = var.sqrt();
         let row = &layers[0].w[k * layers[0].out_dim..(k + 1) * layers[0].out_dim];
-        let l2: f64 = row.iter().map(|&w| (w as f64) * (w as f64)).sum::<f64>().sqrt();
+        let l2: f64 = row
+            .iter()
+            .map(|&w| (w as f64) * (w as f64))
+            .sum::<f64>()
+            .sqrt();
         let l2p: f64 = row
             .iter()
             .zip(&g)
@@ -662,9 +668,7 @@ fn main() -> ExitCode {
                         WeightStorage::I8 { .. } => 1,
                     };
                     let ablation_dead = dead.iter().filter(|&&d| d).count();
-                    let both = (0..n_inputs)
-                        .filter(|&k| dead[k] && frac[k] == 1.0)
-                        .count();
+                    let both = (0..n_inputs).filter(|&k| dead[k] && frac[k] == 1.0).count();
                     let _ = writeln!(
                         packed_report,
                         "packed twin: {} ({} bytes). all-zero L0 columns: {all_zero}/{n_inputs}; \
@@ -719,7 +723,9 @@ fn main() -> ExitCode {
 
     // ---- TSV ------------------------------------------------------------
     if let Some(op) = &out_tsv {
-        let mut s = String::from("idx\tfamily\tfrac_rows_nonzero_xt\tmean_abs\tp95_abs\tstd\tsign_cons\tanalytic_simple\tanalytic_path\tpacked_zero_frac\tdead\trank_dead");
+        let mut s = String::from(
+            "idx\tfamily\tfrac_rows_nonzero_xt\tmean_abs\tp95_abs\tstd\tsign_cons\tanalytic_simple\tanalytic_path\tpacked_zero_frac\tdead\trank_dead",
+        );
         for c in &data {
             let _ = write!(s, "\tmean_abs_{}", c.name);
         }
@@ -746,11 +752,11 @@ fn main() -> ExitCode {
                 dead[k] as u8,
                 rank_dead[k] as u8,
             );
-            for ci in 0..n_corpora {
-                let _ = write!(s, "\t{:.6e}", per_corpus_mean_abs[k][ci]);
+            for v in &per_corpus_mean_abs[k][..n_corpora] {
+                let _ = write!(s, "\t{v:.6e}");
             }
-            for ci in 0..n_corpora {
-                match dsrocc[k][ci] {
+            for d in &dsrocc[k][..n_corpora] {
+                match d {
                     Some(v) => {
                         let _ = write!(s, "\t{v:.6}");
                     }
@@ -796,7 +802,11 @@ fn main() -> ExitCode {
         let _ = writeln!(
             md,
             "structural-zero gate f156-371: {} — {} nonzero of 216",
-            if bad.is_empty() { "PASS (Δ ≡ 0 exactly)" } else { "FAIL" },
+            if bad.is_empty() {
+                "PASS (Δ ≡ 0 exactly)"
+            } else {
+                "FAIL"
+            },
             bad.len()
         );
     }
@@ -815,11 +825,7 @@ fn main() -> ExitCode {
             .collect::<Vec<_>>()
             .join(" | ")
     );
-    let _ = writeln!(
-        md,
-        "|---|---:|---:|---:|---:|{}",
-        "---:|".repeat(n_corpora)
-    );
+    let _ = writeln!(md, "|---|---:|---:|---:|---:|{}", "---:|".repeat(n_corpora));
     let total_mean_abs: f64 = mean_abs.iter().sum();
     let per_corpus_total: Vec<f64> = (0..n_corpora)
         .map(|ci| (0..n_inputs).map(|k| per_corpus_mean_abs[k][ci]).sum())
@@ -916,13 +922,15 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenpredict::{WeightDtype, Model};
+    use zenpredict::{Model, WeightDtype};
     use zenpredict_bake::{BakeLayer, BakeRequest, bake};
 
     /// 3-input fixture: input 1 has an all-zero W0 column ⇒ known-dead.
     /// Layer0 3→2 LeakyRelu, layer1 2→1 Identity.
     fn fixture_bytes() -> Vec<u8> {
-        let w0 = [0.5f32, -0.3, /* input1: */ 0.0, 0.0, /* input2: */ 0.8, 0.1];
+        let w0 = [
+            0.5f32, -0.3, /* input1: */ 0.0, 0.0, /* input2: */ 0.8, 0.1,
+        ];
         let b0 = [0.1f32, -0.2];
         let w1 = [1.0f32, -0.7];
         let b1 = [0.05f32];
@@ -1035,8 +1043,7 @@ mod tests {
                 layer0_preact(&layers[0], &xt_abl, &mut z0);
                 let (mut h, mut o) = (Vec::new(), Vec::new());
                 forward_from_z0(&layers, &z0, &mut h, &mut o);
-                let full =
-                    score_from_network_output(&o, None, None, None, None);
+                let full = score_from_network_output(&o, None, None, None, None);
                 let mut z0_base = vec![0.0f32; 2];
                 layer0_preact(&layers[0], &xt, &mut z0_base);
                 let (mut h2, mut o2) = (Vec::new(), Vec::new());
