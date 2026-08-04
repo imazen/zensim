@@ -5197,3 +5197,253 @@ what the data teaches, or adding data — not subtracting it.
   seeded and its pair draw is deterministic in the seed, but no byte-identity
   check across lanes was run in this wave, so a cross-lane comparison rests on
   determinism that was not verified here.
+
+---
+
+## REGISTERED AMENDMENT 10 — WAVE 9: replicate the screen refit, then DECOMPOSE it
+
+### (committed BEFORE any fit, any training run, and any wave-9 number exists. Every §10.0 fact is a prior measurement already committed to this doc or to origin/main; the §10.1 index partition is read off the already-committed wave-8 audit TSV, which makes it an INPUT to this registration, not a result.)
+
+### 10.0 Why this wave exists
+
+Wave 8 (`af58048b`) fired outcome (c) for its own hypothesis — the
+breadth-first mix is a breadth *collapse*, at both screens, at all six breadth
+seeds. But it left one cell that the wave under-weighted, because it was
+registered as a control rather than as a lever:
+
+| cell | CSIQ | LIVE | CID22 | KADID (signed) | KonJND | nonphoto | floors |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| **W8C_s3101** (incumbent mix + REFIT screen) | **0.88692** | **0.89848** | 0.85207 | **−0.3576** | 0.29079 | 0.86238 | 5/8 |
+| `H_co3abpg_s2507` (incumbent) | 0.83019 | 0.86340 | 0.88055 | +0.42329 | 0.45897 | 0.91635 | 7/8 |
+| `b_sdr_linear_cid80_…_dense_dial` (era ref) | 0.93421 | 0.89703 | 0.88209 | +0.80848 | 0.51859 | 0.89898 | — |
+
+`W8C_s3101` is **the only cell the 944 class has ever produced that clears
+CSIQ ≥ 0.85 AND LIVE ≥ 0.85**, and its LIVE exceeds the era reference's. The
+screen refit alone bought CSIQ +0.057 and LIVE +0.035 at a fixed mix. It also
+cost CID22 −0.028, KonJND |SROCC| −0.168, nonphoto −0.054, and it **inverted
+the sign of KADID** (+0.423 → −0.358), which is the only sign inversion in the
+wave-8 table.
+
+Two things are therefore open, and this wave closes both:
+
+1. **Replication.** `W8C_s3101` is **k=1**. The campaign's measured
+   within-config seed spread on this architecture is large — CID22 ≈ 0.01 and
+   M3a ≈ 0.03–0.04 within a fixed recipe, and the incumbent's own three seeds
+   span CSIQ 0.735–0.832 / LIVE 0.814–0.863. A CSIQ swing of 0.057 sits inside
+   that spread's neighbourhood, so a single seed cannot distinguish "the refit
+   is a breadth lever" from "seed 3101 was a good draw".
+2. **Decomposition.** The refit changed **all 54 winsor windows at once**, and
+   wave 8 measured that those 54 split into two mechanically distinct groups
+   (`benchmarks/wave8/refit_winsor_audit_2026-08-04.tsv`):
+   - **24 windows were degenerate `[0,0]`** in the inherited screen — a window
+     that clips a feature to the constant 0, i.e. force-kills it. All 24 are in
+     the **append block**. Refitting them revived 22 real features (f765/f766
+     land on the owner's `[0,1e-9]` guard: the never-populated class).
+     `bake_contrib` confirmed the revival inside the models — dead inputs 277 →
+     255.
+   - **30 windows were non-degenerate** and all 30 are in the **fold block**.
+     Their inherited bounds are 2–4 orders of magnitude TIGHTER than the
+     current data's p99 (f155 hi 0.164 → 849.0, f129 0.204 → 1093.7, f90 0.443
+     → 1113.0), so refitting them un-clips the fold block wholesale.
+
+   Those are different interventions with different stories, and wave 8 bought
+   them as a bundle. Nothing in the wave-8 data says which one paid.
+
+### 10.1 The index partition (READ from the committed wave-8 audit, not fit here)
+
+From `benchmarks/wave8/refit_winsor_audit_2026-08-04.tsv`, column
+`degenerate_old`, over the 54 `winsor_p99` indices of the inherited WT40+MASK2
+screen:
+
+- **DEGENERATE-24 (the append block)**: `731 732 748 749 765 766 782 783 799
+  800 816 817 833 834 850 851 867 868 884 885 901 902 918 919` — min 731, max
+  919, every one ≥ 720.
+- **NON-DEGENERATE-30 (the fold block)**: `9 12 35 48 51 64 74 77 87 90 95 96
+  100 102 103 113 116 118 119 126 129 133 134 135 139 141 142 144 152 155` —
+  min 9, max 155, every one ≤ 155.
+
+The partition is exactly append-vs-fold. That is a measured property of the
+inherited screen, not a design choice of this wave, and it is what makes the
+decomposition interpretable: **W9-B is "unstick the 24 killed append
+features", W9-C is "un-clip the 30 fold-block windows".**
+
+The 10 `signed_cbrt` tokens carry no params and pass through byte-unchanged in
+every arm, exactly as in wave 8.
+
+### 10.2 The screens — frozen build rule
+
+**ONE fit, three applications.** All three wave-9 screens come from the SAME
+pooled fit as wave 8's: the identical 7-table, 408,033-row registered corpus of
+§9.1, the identical rule (`percentile_linear` at `[0.1, 99.9]` + the
+`[0,0] → [0,1e-9]` guard), the identical owner
+(`bake_dial_refit refit-winsor`). Only the **subset of indices to which the
+newly-fit window is APPLIED** differs:
+
+| screen | windows replaced | windows inherited verbatim | used by |
+|---|---|---|---|
+| `refit_screen_tokens.txt` (wave-8's, reused byte-for-byte) | all 54 | 0 | **W9-A** |
+| `w9_degen24_screen_tokens.txt` | the 24 append | the 30 fold | **W9-B** |
+| `w9_fold30_screen_tokens.txt` | the 30 fold | the 24 append (stay `0,0`) | **W9-C** |
+
+Because the fit is shared, the three screens are exact set-complements over
+one window vector: **W9-B's replaced set ⊎ W9-C's replaced set = W9-A's
+replaced set, disjointly.** This wave REGISTERS that as a checkable identity
+and will report it as a gate: line-by-line, `W9-B ∪ W9-C = W9-A` and
+`W9-B ∩ W9-C = the base screen`, verified by direct file comparison against
+the already-committed `benchmarks/wave8/{base,refit}_screen_tokens.txt`.
+
+**Owner extension (registered, before it is written):** `refit-winsor` has no
+window-subset selector. One is ADDED to that binary — not scripted around it —
+as `--refit-class {all|degenerate|nondegenerate}` (classified by the
+INHERITED window, `old_lo == old_hi`) plus a general `--refit-indices <csv>`.
+Non-selected `winsor_p99` lines are emitted **byte-verbatim from the base
+token file**, so an inherited window cannot be silently reformatted. The audit
+TSV gains three trailing columns (`fit_lo`, `fit_hi`, `selected`) so that what
+the fit produced is recorded for every index whether or not it was applied;
+the existing ten columns keep their positions and meanings, with
+`new_lo`/`new_hi` now denoting the EMITTED window. Tests cover the selector
+and the verbatim pass-through.
+
+**Registered no-regression gate on the extension:** re-running the tool at its
+default (`--refit-class all`) over the registered corpus must reproduce the
+committed `benchmarks/wave8/refit_screen_tokens.txt` **byte-identically**. That
+is both the proof the extension did not disturb the default path and an
+independent re-derivation of wave-8's screen. It is reported pass or fail.
+
+### 10.3 The arms (frozen)
+
+Base recipe = **wave-8 arm C**, which is itself the incumbent arm-H argv
+verbatim except the screen. The wave-9 driver `scripts/wave9_seed.sh` does not
+re-declare the recipe: it invokes the committed `scripts/wave8_seed.sh C
+<seed>` in echo mode with the screen substituted, and replaces only the `--out`
+token. Token-for-token identity with W8C is therefore structural, and is
+echo-verified and reported anyway.
+
+| arm | screen | mix / kadid leg / everything else | k | seeds |
+|---|---|---|---:|---|
+| **W9-A** | wave-8 refit (all 54) | wave-8 arm C, unchanged | 3 | 3301, 3303, 3307 |
+| **W9-B** | refit the 24 append only | wave-8 arm C, unchanged | 3 | 3301, 3303, 3307 |
+| **W9-C** | refit the 30 fold only | wave-8 arm C, unchanged | 1 | 3301 |
+
+Seeds 3301/3303/3307 are new to this campaign (verified: zero occurrences in
+this document before this commit). Tags `W9A_s<seed>`, `W9B_s<seed>`,
+`W9C_s3301`. `W9C` is k=1 by registration and is the first cell to drop if
+compute binds; if it is dropped, that is reported explicitly.
+
+`W8C_s3101` is a fourth member of arm A's seed family in everything but its
+tag — same recipe, same screen, different seed — so arm A is reported as
+**k=4 (3 new + W8C_s3101)** wherever a band is quoted, with the wave-8 cell
+always labelled.
+
+### 10.4 Registered prediction (recorded before the runs)
+
+Written down so it can be wrong:
+
+- If the CSIQ/LIVE gain is the **unsticking** of the 24 killed append
+  features, then **W9-B ≈ W9-A** on CSIQ/LIVE, at a **smaller** CID22 and
+  KonJND cost (the fold block's inherited clipping — which is what the
+  incumbent's CID22/KonJND competence was fit under — is left in place).
+- If the gain is the **fold-block re-tuning**, then **W9-B ≈ the incumbent**
+  and W9-C carries the CSIQ/LIVE gain together with the CID22/KonJND cost.
+- If neither arm reproduces its share, the two interventions **interact**, and
+  the refit is not decomposable into these parts.
+
+### 10.5 Endpoints (frozen)
+
+Report ALL; **gate on the first two**.
+
+| # | endpoint | bar | `W8C_s3101` | incumbent `H_co3abpg_s2507` |
+|---|---|---|--:|--:|
+| **E1** | CSIQ ≥ 0.85 **and** LIVE ≥ 0.85, **held in ≥ 2 of 3 seeds** | pass/fail | 0.88692 / 0.89848 (k=1) | 0.83019 / 0.86340 |
+| **E2** | CID22 ≥ **0.875** | pass/fail | 0.85207 | 0.88055 |
+| R1 | KADID **signed** | reported | −0.3576 | +0.42329 |
+| R2 | KonJND | reported | 0.29079 | 0.45897 |
+| R3 | nonphoto | reported | 0.86238 | 0.91635 |
+| R4 | M3a (post-`299ccc8c` values only) | reported | 0.82463 | 0.88996 |
+| R5 | dial mono / tied | reported | 0.99787 / 0 | 0.94045 / 0 |
+| R6 | `freeze_check --profile balanced-2026-08-04` floor count | reported | 5/8 | 7/8 |
+| R7 | `freeze_check --select` rank vs the incumbent | reported | — | 7/8, sel_comp 0.9406 |
+
+**E2's 0.875 is a DIAGNOSTIC threshold registered for this wave only.** The
+campaign's CID22 floor is 0.885 and is NOT changed, relaxed, or reinterpreted
+by this wave. 0.875 is set deliberately below the floor to answer a different
+question — whether the refit's CID22 cost is *recoverable* (a cell landing at
+0.876 says "close, seed-dependent"; a cell landing at 0.852 like W8C says
+"structural") — and no wave-9 cell may be described as passing the campaign's
+CID22 floor on the strength of E2.
+
+KADID is reported **signed** because the alarming wave-8 observation is an
+inversion, not a weak fit: a metric that ranks a corpus backwards is a defect
+signature. **Every wave-9 arm trains on kadid** (the arm-C leg,
+`0.5:1.0:rank`), so every KADID number here is a **fit / integrity** number on
+a corpus `freeze_check`'s own annotation registry flags as 100% train==val
+pair-overlap. No wave-9 KADID number is skill, and none may be compared to a
+held-out KADID number. CSIQ and LIVE are trained on by **no** arm and carry the
+honest breadth signal; CID22 is held out of training in every arm here.
+
+### 10.6 Registered outcomes (frozen)
+
+- **(a)** a cell holds E1 (≥ 2 of 3 seeds) with CID22 ≥ 0.875 and **no KADID
+  sign inversion** ⇒ the screen is a real breadth lever and this is the
+  campaign's first genuine 944 breadth advance. Report it as such and run the
+  winner battery.
+- **(b)** E1 replicates but the costs are intrinsic (CID22 < 0.875, or the
+  inversion persists, in every cell that holds E1) ⇒ report the frontier and
+  state which axis pair is irreconcilable.
+- **(c)** E1 does not replicate at k=3 ⇒ `W8C_s3101` was a seed artifact; say
+  so plainly and close the screen-refit lever.
+
+Outcome assignment uses each arm's cells individually, with every cell's number
+printed. A k=1 cell (W9-C) supports direction only and can never decide an
+outcome by itself.
+
+### 10.7 The sign-inversion characterization (required deliverable, not optional)
+
+If the KADID inversion replicates in arm A, this wave **must** characterize it
+rather than merely report it: `bake_contrib` on a wave-9 inverted cell against
+the incumbent, same tool and same corpora, identifying which inputs flipped
+sign or changed magnitude, and whether those inputs are the revived append
+features (which would tie the inversion to the 24-window unsticking) or the
+fold block (which would tie it to the un-clipping). The W9-A/W9-B/W9-C split
+is what makes that attributable, since the two candidate causes are in
+different arms.
+
+### 10.8 Confounds + limitations (registered before the run)
+
+- **Arm A's replication is not a fresh replication of W8C's *screen*.** It
+  reuses wave-8's frozen refit token file byte-for-byte (a re-fit is run only
+  as the no-regression gate of §10.2). So arm A replicates the *seed* axis,
+  not the fit; a fit that is itself wrong would be wrong identically in both
+  waves. The §10.2 byte-identity gate is what bounds that risk.
+- k=3 on A and B, k=1 on C. The campaign's within-config seed spread is large,
+  so a 3-seed band is a band and not a point estimate, and a single-seed cell
+  is direction only.
+- **KADID is train==val in every arm** (see §10.5). Flagged in every table.
+- W9-B and W9-C partition the *windows*, not the *effect*: if the two
+  interventions interact, their individual effects need not sum to arm A's.
+  §10.4 registers that as the third possible answer rather than treating
+  additivity as an assumption.
+- Wave-9 cells are spline-less raw trainer output, so dial mono/tied is
+  measured in RAW output units — the board's standing `dial-mono-raw-unit`
+  annotation.
+- Every wave-9 verdict inherits the campaign's standing dial-grid warning (the
+  944 dial grid at `/mnt/v/output/zensim/v2-eval-944-2026-08-01/` has sha
+  `0d0044ed4e86ee2a`, not the canonical `6546c43e6d9572dc`). Identical for the
+  incumbents scored through the same `scripts/sota944_verdict.sh`, so dial
+  numbers stay comparable WITHIN the campaign only.
+- M3a is measured with the coherence harness at or after `de3482dd` (the
+  `caller_input_width` fix). Wave-9 cells are unpruned 944 = 944, where that
+  fix is a no-op, so their values are directly comparable to wave-8's.
+- Nothing in this wave ships, swaps, promotes, publishes, or enters
+  `zensim/weights/`. The freeze decision remains the user's.
+
+### 10.9 Ops (frozen)
+
+jj workspace `../zensim--wave9` on `main@origin`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimw9-target`, deleted at wave end (root fs at
+90%); heavy steps through `~/work/zen/scripts/run-heavy --jobs 6`; logs
+`~/tmp/wave9/`; scratch never in `/tmp`. Per-bake harvest through the committed
+`scripts/harvest_bakes.sh`; waiting ONLY through `scripts/await_artifacts.sh`,
+parked ONCE on the terminal condition rather than per bake; liveness ONLY via
+`pgrep -xc zensim_mlp_trai`. Selection reported through `freeze_check --select`.
+New bakes + verdicts Tower-mirrored with a sha spot-check.
