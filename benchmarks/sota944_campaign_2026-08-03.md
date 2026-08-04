@@ -1184,3 +1184,271 @@ is recorded. Bakes land on the shared campaign path
 `/mnt/v/output/zensim/bakes/sota944/bakes/`; the remote lane rsyncs each bake back
 as it lands. Verdicts via `scripts/sota944_verdict.sh` (the one frozen §0
 invocation), M3a via `run_full_eval.sh`.
+
+### Wave-4 results (2026-08-04) — BOTH ARMS NULL; the registered intermediate does NOT fire
+
+**Ops.** 12/12 trained, 12/12 verdicts, 6 full-evals (M3a), 4 corruption-joint
+reports. Lanes: **wsl** (`~/work/zen/zensim--wave4`) = co4 ×3 + co3a s{1319,1321,
+1327}, 21:37:57Z→00:03:31Z; **lianli** (`~/sota944`) = co3a s{1361,1367,1373,1381,
+1399,1409}, 21:37:23Z→23:50:36Z. Both lanes ran **one binary built once locally and
+shipped** (sha256 `bb37a063…`); lianli's bakes were rsynced onto the shared campaign
+path by a detached puller as each landed (6/6 retrieved). Every run carries
+`zentrain.repro` (`source: embedded`). The registered configs are structurally
+confirmed from the embedded repro: **9 groups for co3a** (6 arm-C + 3 EM4-teacher
+twins at w=0.5, `--coarse-decay 1e-5`) and **8 groups for co4** (no `bigcodec`, 3
+teacher twins at **w=1.5**) — exactly as pre-registered. The `hostname` field is
+still empty on all 12 (wave-3's recorded trainer defect, unfixed here; node is
+recoverable from `cwd`).
+
+#### Provenance gates run BEFORE any result was read
+
+| gate | result |
+|---|---|
+| trainer **source** identity, wave-3 build commit `3d834f8a` → wave-4 `29d728e3` | `git diff` over `zensim_mlp_train.rs` + `zensim-train-core/` + `zensim/src/` + `parquet_loader.rs` + `Cargo.lock` is **EMPTY** — same program source; only docs/`.gitignore` differ |
+| trainer **binary** bytes | **DIFFERENT** (wave-3 `9509ea52…`, wave-4 `bb37a063…`) — separately compiled from identical source, differing in embedded build paths. Recorded honestly, then settled by measurement (below) |
+| **TRAINING-level repro** (new this wave): co3a **seed 1301 retrained** under the wave-4 binary as `C_co3arepro_s1301` | **PASS.** `best_val` bit-identical (0.43568973825371526 both) and **every verdict field identical to 15 decimals** across 13 corpora + dial + composite (cid22 0.890669759641727, konjnd 0.405035116686307, nonphoto 0.904486343150615, sdr25 0.928163265306122, csiq, live, aic3, aic4, imazen26, kadid, tid, HF-NL 0.250843186672593, dial 0.958740961293067, composite 0.845218670897050). The bake **file** sha differs (`fafaab4d…` vs `1a09ff27…`) only because `zentrain.repro` embeds the binary path + timestamp; the **model** is identical. ⇒ the n=12 co3a seed histogram below is **proven homogeneous**, not assumed |
+| `bake_verdict` reproduction (`C_co3a_s1301` re-run under the wave-4 build) | **BIT-IDENTICAL** on cid22 0.890669760, konjnd 0.405035117, nonphoto 0.904486343, sdr25 0.928163265, HF-NL-proxy 0.250843187, composite 0.8452186708970505 |
+| `diffmap_block_coherence` / M3a reproduction (same bake) | **BIT-IDENTICAL**: M3a 0.759778, M3 0.079019, n=27, dropped-mass 0 |
+
+So wave-4 numbers are directly comparable to every earlier arm in this document.
+
+#### The full 12-cell grid
+
+HF-NL-proxy is `rank.hfnlproxy.per_ref_mean` (per-ref, §1b). M3a "—" = not measured
+under the registered rule (arm-D cells below CID22 0.885 that are not the arm
+candidate).
+
+| bake | cid22 | konjnd | nonphoto | sdr25 | HF-NL-proxy | dial mono | tied | M3a | best_val | node |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `C_co3a_s1319` | 0.88851 | 0.4053 | 0.9141 | 0.9316 | +0.2501 | 95.6% | 0.0% | 0.8259 | 0.4603 | wsl |
+| `C_co3a_s1321` | 0.88523 | 0.3295 | 0.9155 | 0.9644 | +0.0270 | 96.2% | 0.0% | 0.8148 | 0.4499 | wsl |
+| `C_co3a_s1327` | 0.88072 | 0.4437 | 0.9055 | 0.9365 | −0.0525 | 95.5% | 0.0% | — | 0.3909 | wsl |
+| `C_co3a_s1361` | 0.87623 | 0.4138 | 0.9117 | 0.8945 | +0.1384 | 96.1% | 0.0% | — | 0.4263 | lianli |
+| `C_co3a_s1367` | 0.84272 | 0.3089 | 0.8989 | 0.8747 | +0.2011 | 96.8% | 0.0% | — | 0.4684 | lianli |
+| `C_co3a_s1373` | 0.88280 | 0.4158 | 0.9153 | 0.9309 | −0.0761 | 93.5% | 0.0% | — | 0.4184 | lianli |
+| `C_co3a_s1381` | 0.88381 | 0.3548 | 0.9071 | 0.8873 | +0.1665 | 94.8% | 0.0% | — | 0.4384 | lianli |
+| `C_co3a_s1399` | 0.87871 | 0.3880 | 0.9160 | 0.9550 | +0.1343 | 94.6% | 0.0% | — | 0.4744 | lianli |
+| `C_co3a_s1409` | 0.88572 | 0.3703 | 0.9096 | 0.9421 | +0.1296 | 94.2% | 0.0% | 0.7181 | 0.4853 | lianli |
+| `C_co4_s1301` | 0.88555 | 0.4574 | 0.9020 | 0.9151 | +0.0543 | **92.5%** | 0.0% | 0.8237 | 0.4948 | wsl |
+| `C_co4_s1303` | 0.87849 | 0.4203 | 0.9079 | 0.9193 | −0.0443 | **91.3%** | 0.0% | 0.8352 | 0.4661 | wsl |
+| `C_co4_s1307` | 0.88555 | **0.4725** | 0.9031 | 0.9175 | −0.0023 | 93.1% | 0.0% | 0.8035 | 0.4955 | wsl |
+
+#### ARM D — registered outcome **(b): NULL**. The co3a config seed histogram, n=12
+
+**No draw clears CID22.** Best wave-4 draw `C_co3a_s1319` **0.88851** (bar short by
+**0.0039**); the config's max is still wave-3's `C_co3a_s1301` **0.89067**, so this
+wave did **not** move the campaign's stabilized ceiling. The registered SPECIAL CASE
+(a) did **not** occur — it required CID22 > 0.89238 as its first condition.
+
+| rank | bake | CID22 | wave |
+|---|---|---|---|
+| 1 | `C_co3a_s1301` | 0.89067 | 3 |
+| 2 | `C_co3a_s1319` | 0.88851 | 4 |
+| 3 | `C_co3a_s1409` | 0.88572 | 4 |
+| 4 | `C_co3a_s1307` | 0.88571 | 3 |
+| 5 | `C_co3a_s1321` | 0.88523 | 4 |
+| 6 | `C_co3a_s1381` | 0.88381 | 4 |
+| 7 | `C_co3a_s1373` | 0.88280 | 4 |
+| 8 | `C_co3a_s1327` | 0.88072 | 4 |
+| 9 | `C_co3a_s1303` | 0.87909 | 3 |
+| 10 | `C_co3a_s1399` | 0.87871 | 4 |
+| 11 | `C_co3a_s1361` | 0.87623 | 4 |
+| 12 | `C_co3a_s1367` | 0.84272 | 4 |
+
+**n=12 · mean 0.87999 · sd 0.01246 · median 0.88330 · min 0.84272 · max 0.89067.**
+Cleared the 0.89238 bar: **0/12**. ≥0.885: 5/12. ≥0.880: 8/12.
+
+The distribution is the result. Twelve draws of the campaign's best-CID22 config
+sit a mean **0.0124 below** the bar, and the single best of twelve is **0.0017**
+below it — the same 0.0017 wave 3 reported from three draws. Nine additional draws
+did not produce a better one. Read against the registration's own rationale
+(within-config spread ~0.005–0.01 ⇒ more draws is the highest-probability route),
+the measured sd of 0.01246 is at the top of that range but the *mean* is too far
+below the bar for the tail to reach it reliably: on these 12 samples the bar sits
+**+1.0 sd** above the mean, and the observed maximum of 12 draws still fell short.
+**Seed expansion is now falsified as a route across this bar** — the third
+independent seed-scale null in this campaign (n=23, then n=8, now n=12 within the
+best config), and the most direct one, because it holds the config fixed.
+
+#### ARM E — **NULL** on its registered endpoint; the intermediate does NOT fire
+
+Endpoint was **M3a ≥ 0.85 with CID22 ≥ 0.885**. Measured M3a: **0.8237 / 0.8352 /
+0.8035** (max 0.8352, short by **0.0148**). Two of three cells hold CID22 ≥ 0.885,
+so the CID22 half of the endpoint is met — the M3a half is not.
+
+**The registered firing condition for the w=1.0 intermediate was "clears M3a ≥ 0.85
+but loses CID22". M3a never cleared 0.85, so the condition is not met and `co4m`
+was NOT run.** The registration is honored as written.
+
+**The cross is ANTI-ADDITIVE — the wave's main scientific result.** Amendment 3
+measured the two M3a movers separately; crossing them makes M3a *worse than either
+parent alone*, and both comparisons are **seed-matched**:
+
+| seed | parent | parent M3a | cross (`co4`) M3a | Δ |
+|---|---|---|---|---|
+| 1303 | `C_co3b_s1303` (distill w=1.5) | 0.8470 | 0.8352 | **−0.0118** |
+| 1307 | `C_co2a_s1307` (no tbig) | 0.8261 | 0.8035 | **−0.0225** |
+
+Both deltas are negative and in the same direction. The implicit additivity behind
+arm E ("+0.033 and +0.054 should compose") is **falsified**: the two data-side
+changes are not independent contributions to coherence.
+
+**The one registered design prediction was CONFIRMED.** The pre-registration kept
+`ttbig` while dropping `bigcodec`, predicting that co2a's nonphoto collapse was
+caused by losing the non-photo codec-ladder rows rather than by their target. At
+matched seed 1307, **nonphoto 0.8078 → 0.9031 (+0.0953)** — the collapse is fully
+recovered by keeping the same rows under the EM4-teacher target. That isolates the
+cause of the co2a nonphoto failure to *row coverage*, not to the ssim2 target, and
+it is a reusable result: the tbig rows can be retained for non-photo coverage while
+their ssim2 target is replaced.
+
+**The cost the cross imposes is the dial.** Two of three co4 cells break dial
+monotonicity (**92.5%**, **91.3%** vs the ≥93% bar), inheriting co3b's 92.5%. The
+w=1.5 distillation dose damages the dial regardless of the mix change.
+
+**Arm E's real win is KonJND**: 0.4574 / 0.4203 / **0.4725**. `C_co4_s1307`'s 0.4725
+is the **best KonJND of any cell in this campaign's C-family**, and it clears the
+0.43 bar together with nonphoto 0.9031 and dial 93.1%.
+
+#### M3a has large WITHIN-config seed variance — this qualifies amendment 3's finding 2
+
+M3a is now measured on **five** cells of the *same* co3a config:
+
+| bake | M3a |
+|---|---|
+| `C_co3a_s1319` | 0.8259 |
+| `C_co3a_s1321` | 0.8148 |
+| `C_co3a_s1307` | 0.7625 |
+| `C_co3a_s1301` | 0.7598 |
+| `C_co3a_s1409` | 0.7181 |
+
+**Range 0.7181–0.8259, spread 0.1078, sd 0.0441 — with the config, data mix and
+trainer all held fixed.** Amendment 3 concluded that "M3a responds to DATA
+composition instead" of regularization, on the strength of two cross-config deltas
+of **+0.033** (no tbig) and **+0.054** (distill w=1.5), each from a **single**
+measured cell per config. Both of those deltas are **smaller than one within-config
+sd** measured here, and both fall well inside this config's own range.
+
+This does not overturn amendment 3's arm-1 null (coarse-decay moved M3a by ≈0.001,
+an order of magnitude below the noise floor either way — that null is *strengthened*
+by knowing the noise floor is 0.044). It does mean **the positive half of finding 2
+is not established**: the two data-side "movers" are within seed noise of the
+baseline, and this wave's seed-matched crosses moved M3a *down* by comparable
+amounts. The honest statement is that **no lever tested in this campaign has been
+shown to move M3a beyond its seed noise**, and any future M3a claim needs k≥3 seeds
+per config, not one.
+
+#### Selection (frozen rule, WITHIN-ARM only) + the raw CID22 leaders reported separately
+
+| arm | candidate (max sdr25) | sdr25 | cid22 | konjnd | nonphoto | HF-NL | dial mono | M3a |
+|---|---|---|---|---|---|---|---|---|
+| D (co3a, 9 new seeds) | `C_co3a_s1321` | 0.9644 | 0.88523 | 0.3295 | 0.9155 | +0.0270 | 96.2% | 0.8148 |
+| E (co4 cross, 3) | `C_co4_s1303` | 0.9193 | 0.87849 | 0.4203 | 0.9079 | −0.0443 | 91.3% | 0.8352 |
+
+- **Raw CID22 leader, arm D** = `C_co3a_s1319` **0.888513** (the arm's best cell on
+  the primary endpoint; the sdr25 rule picked a *different* cell).
+- **Raw CID22 leader, arm E** = `C_co4_s1307` **0.885549** — ahead of `C_co4_s1301`
+  **0.885546** by 2.8e-6, a difference far below anything this instrument resolves;
+  treat them as tied and prefer s1307 on its other rows (KonJND 0.4725, dial 93.1%).
+
+**The oracle/CID22 decoupling reproduces a fifth time, and now WITHIN a single
+config.** Arm D holds config, data mix, and trainer fixed across nine seeds — the
+one setting where sdr25 should be a clean oracle — and it still selects `s1321`
+(CID22 0.88523, KonJND 0.3295, HF-NL +0.027) over `s1319` (CID22 0.88851, HF-NL
++0.2501). Across the nine arm-D cells, the sdr25 maximum is simply not the CID22
+maximum. Combined with the structural point wave 3 recorded (sdr25 is **n=50 pairs
+over 5 references**, so its Spearman is coarse and exact ties are expected), this
+is now strong evidence that **sdr25 must not be the selection rule for the next
+campaign — not even within a fixed mix.**
+
+#### The bar verdict — HONEST NULL (fourth consecutive)
+
+Bar CID22 = **0.8923796503** (EM4 on the 944 root). HF-NL bar = **0.19310280**
+(the arm-B candidate `B_blend_lam1e-3_a0.7_w`, re-derived from its verdict JSON
+this session).
+
+| axis | bar | `C_co3a_s1319` (D CID22 leader) | `C_co3a_s1321` (D candidate) | `C_co4_s1307` (E CID22 leader) | `C_co4_s1303` (E candidate) |
+|---|---|---|---|---|---|
+| CID22 | > 0.89238 | 0.88851 **FAIL** (−0.0039) | 0.88523 **FAIL** | 0.88555 **FAIL** | 0.87849 **FAIL** |
+| KonJND | ≥ 0.43 | 0.4053 **FAIL** | 0.3295 **FAIL** | **0.4725 PASS** | 0.4203 **FAIL** |
+| nonphoto | ≥ 0.90 | 0.9141 PASS | 0.9155 PASS | 0.9031 PASS | 0.9079 PASS |
+| HF-NL-proxy | ≥ 0.1931 | **+0.2501 PASS** | +0.0270 **FAIL** | −0.0023 **FAIL** | −0.0443 **FAIL** |
+| dial mono / tied | ≥93% / ≤5% | 95.6% / 0.0% PASS | 96.2% / 0.0% PASS | 93.1% / 0.0% PASS | **91.3% FAIL** / 0.0% |
+| M3a | ≥ 0.85 | 0.8259 **FAIL** | 0.8148 **FAIL** | 0.8035 **FAIL** | 0.8352 **FAIL** |
+| G-RANGE | clean | **NOT EVALUABLE** (inherited tool gap) | NOT EVALUABLE | NOT EVALUABLE | NOT EVALUABLE |
+| corruption (HEAD) | via companion head | **0.79315 pass_q20** (dial-alone 0.0893) | 0.79315 (0.1131) | 0.79315 (0.0655) | 0.79315 (0.0387) |
+| embedded repro | present | PASS | PASS | PASS | PASS |
+
+**No candidate passes the frozen bar; not one of the 12 clears CID22.** Best bar-row
+coverage over the five rows evaluable for every cell is **3/5** (`C_co3a_s1319`,
+`C_co3a_s1327`, `C_co4_s1307` and four other co3a cells) — **worse than wave 3's
+best of 4/5** (`C_co3a_s1307`). Wave 4 did not improve coverage, did not improve the
+config maximum, and did not reach either arm's endpoint.
+
+The corruption row again returns **byte-identical** head numbers across all four
+candidates (pass_q20 0.79315476, pass_q10 0.92559524, n=672) with head
+`corrhead944_s13`, while their dial-alone corruption spans 0.0387–0.1131 —
+re-confirming, on four fresh bakes, that the head is the corruption owner
+independent of the dial bake.
+
+`bake_dial_refit gate` still asserts a single-layer linear bake and panics on a
+2-layer MLP (`bake_dial_refit.rs:182`), so **G-RANGE is NOT EVALUABLE** for every
+cell here. Inherited from wave 3, not re-measured, reported as a gap and never as a
+PASS.
+
+#### What wave 4 adds to the campaign's standing conclusion
+
+Four registered levers, four measured nulls:
+
+| lever | wave | result |
+|---|---|---|
+| seed luck (across configs) | seed-scale, n=23 | NULL — 0.8726 ± 0.0136, max 0.8869 |
+| near-top training mass | amendment 2, n=8 | NULL on rank — family max 0.8752 |
+| coarse-mass / coherence | amendment 3, n=21 | NULL — max 0.8907, M3a max 0.8470 |
+| **seed depth within the best config + the M3a cross** | **wave 4, n=12** | **NULL — max 0.88851; M3a max 0.8352; cross is anti-additive** |
+
+The stabilized-944 ceiling is unchanged at **0.89067** (`C_co3a_s1301`, wave 3),
+now measured across **64 independent draws** (23 + 8 + 21 + 12). What wave 4 adds is
+that the shortfall is **not a sampling problem**: holding the best config fixed for
+twelve draws puts the bar a full standard deviation above the mean and the best of
+twelve still misses by 0.0017. Combined with three falsified mechanisms, the reading
+that **the 0.8924 bar encodes a single pre-stabilizer draw's unstable peak** now
+rests on the strongest evidence the campaign has produced.
+
+Nothing here is shipped, swapped, promoted, or published. No default changed, no
+bake entered `zensim/weights/`. The peak-vs-stability freeze decision remains the
+user's.
+
+#### Honest losses / gaps in this wave
+
+- **M3a not measured on 6 of 9 arm-D cells** (registered rule: CID22 ≥ 0.885 or arm
+  candidate). The within-config M3a variance finding therefore rests on n=5, not 12.
+- **`zentrain.repro.hostname` is still empty** on all 12 — wave 3 flagged it as a
+  trainer defect to fix "before the next wave"; it was not fixed, and this wave
+  inherited the same gap. Node recovered from `cwd` again.
+- **G-RANGE NOT EVALUABLE** (MLP, `bake_dial_refit gate` tool gap) — unchanged.
+- **HF-NL remains a proxy**, not the true 372-era corpus (§1b gap, unchanged).
+- **sdr25 selection is thin** (n=50 pairs / 5 refs) and now demonstrably decoupled
+  from CID22 even within a fixed mix. Used as registered; flagged as unfit for
+  future campaigns.
+- **No tower / jason / ian lane.** Tower was media-serving (load 2.4, Plex + the
+  \*arr stack) and the kids' boxes are Windows by default; observe-before-load said
+  skip, so only wsl + lianli ran. Not a limitation on the result — the registered
+  12 cells all completed.
+
+#### Artifacts (wave 4)
+
+- Bakes + specs (12 + the repro cell):
+  `/mnt/v/output/zensim/bakes/sota944/bakes/C_co4_s{1301,1303,1307}.bin`,
+  `.../C_co3a_s{1319,1321,1327,1361,1367,1373,1381,1399,1409}.bin`,
+  `.../C_co3arepro_s1301.bin`
+- Verdicts (12 + 4 corrjoint + `C_co3arepro_s1301` + `C_co3a_s1301_w4repro`):
+  `/mnt/v/output/zensim/bakes/sota944/verdicts/`
+- Full-evals (6 M3a + the repro gate):
+  `/mnt/v/output/zensim/reports/fulleval/C_co4_s130{1,3,7}.fulleval.json`,
+  `.../C_co3a_s{1319,1321,1409}.fulleval.json`,
+  `.../C_co3a_s1301_w4repro.fulleval.json`
+- Tower mirror: `/mnt/tower/output/zensim-sota944-2026-08-03/{bakes,verdicts,fulleval}/`
+  — 12/12 wave-4 bakes present, 3 sha256 spot-checks PASS.
+- Lane logs: `~/tmp/wave4/` (local lane, lianli lane pulled, puller, verdict + M3a
+  daemons, repro cell).
