@@ -2393,3 +2393,195 @@ or the distilled `C_ensk2_s1303`-class trade (CID22 0.8835, M3a 0.826,
 KonJND 0.44), and the choice between them — and whether the un-shippable
 ensemble function is worth operationalizing at all — is the user's freeze
 decision. Nothing here is shipped, swapped, promoted, or published.
+
+---
+
+## REGISTERED AMENDMENT 7 — WAVE 7: arm H, the reference-disjoint KonJND training leg
+### (committed BEFORE any corpus parquet is written and BEFORE any training; the premise measurements below are pre-registration facts, not arm results)
+
+The supervisor re-opened wave 6's G-R with the observation that an EXTERNAL
+one-time BPG decode (libbpg's `bpgdec`) is the standard corpus-construction
+move — the pipeline needs pixels, not an in-crate decoder. Following that to
+the disk produced something stronger than the amendment asked for: **three of
+wave 6's G0 claims are corrected by measurement below, and no decoder of any
+kind is needed.**
+
+### 7.0 The premise corrections (measured 2026-08-04, before this registration)
+
+1. **"zensim has no BPG decoder ⇒ G-R structurally blocked" — RETRACTED.**
+   Two independent errors compounded. (a) The framing conflated "no in-crate
+   decoder" with "no path to pixels" — external decode was always legitimate.
+   (b) The stronger fact nobody checked: **there are no `.bpg` bitstreams in
+   the corpus at all** (`find /mnt/v/datasets/KonJND-1k -iname '*.bpg'` = 0).
+   `/mnt/v/datasets/KonJND-1k/KonJND-1k/bpg/` holds **25,704 valid PNGs**
+   (504 refs × 51 QP levels, 640×480 8-bit RGB, upstream mtimes 2021-02-24) —
+   the KonJND-1k distribution ships the BPG half **pre-decoded**, which is how
+   the crowdsourced study displayed them (browsers render PNG, not BPG). The
+   supervisor's libbpg build + decode steps (task steps 1–2) are therefore
+   **closed as unnecessary**: there is nothing for `bpgdec` to decode, and no
+   `bpg_decoded_2026-08-04/` duplicate dir is created (duplicating an
+   already-decoded distribution would be an ML-discipline §8 defect). The
+   ext944 manifest's "(BPG half: no decoder)" note was written from the
+   assumption, not the disk.
+2. **The 372-era pipeline already consumed these exact pixels.** konjnd-dense
+   (20,160 × f0..f371) contains **10,080 BPG-half rows** (ref_basename ≥
+   SRC0505, measured), and `konjnd_full_scored.csv` carries GPU
+   ssim2/butteraugli/dssim for **all 25,704 BPG pairs** — the extraction and
+   metric pipelines read `bpg/*.png` in May 2026. "Cannot be extracted at any
+   post-372 regime" was false the day it was written.
+3. **"The 372 build's pair list and active-mix target are unrecoverable from
+   any committed artifact" — FALSIFIED constructively.** Recovered exactly
+   from `/mnt/v/datasets/KonJND-1k/konjnd_full_scored.csv` (sha256
+   `5749ed6a1ed63eef5204389d15b1ca3249e2b52c75371b17fd8fac6f2434a72f`, 76,104
+   pair rows): per source, the 20 dense rows are the **rank-evenly-spaced
+   picks `idx = round(i·(N−1)/19)`, i = 0..19, over the source's ladder sorted
+   by `gpu_ssimulacra2`** (N = 100 JPEG / 51 BPG), and konjnd-dense
+   `human_score` == that pair's raw `gpu_ssimulacra2` — verified **1008/1008
+   sources exact** (<1e-9). `konjnd-dense-norm` (the v47 ship-recipe input) is
+   the global min-max of that column to [0,1] (verified row-exact, i.e. a
+   positive-affine, rank-preserving transform).
+
+What SURVIVES of G0 unchanged: the eval leg `ext_konjnd_jpeg_val.parquet` is
+exactly the JPEG 504 (measured again this wave: ref set == SRC0001–SRC0504;
+∩ BPG 504 = 0), so the BPG 504 remain the only reference-disjoint KonJND
+training mass — and they are buildable today. `docs/DATA_SPLITS.md` is
+corrected in this wave's corpus commit ("blocked in-crate; resolved 2026-08-04
+— the distribution ships the BPG half pre-decoded as PNG; wave-7 leg built
+from those pixels"; the supervisor's suggested "external bpgdec decode"
+wording is adjusted to match the measured reality).
+
+### 7.1 The corpus — `konjnd_bpg_{train,val}_944.parquet` (frozen build rule)
+
+- **Refs**: the BPG 504 (SRC0505–SRC1008). Reference-disjoint from the bar's
+  KonJND instrument by construction (measured ∩ = 0).
+- **Pairs**: the recovered 372 rule VERBATIM — per ref, sort the 51 BPG
+  variants by `gpu_ssimulacra2` ascending, pick `idx = round(i·50/19)`,
+  i = 0..19 → 20 pairs/ref, 10,080 total.
+- **Target**: `human_score = gpu_ssimulacra2 / 100` (no clip; BPG-half range
+  [−0.6493, +0.9615]). This is the 944-era sibling ssim2-target scale
+  (safesyn [−7.39, 0.976], kadis [−1, 1]) and is within-corpus
+  rank-equivalent to the 372-era min-max norm; /100 is registered over
+  min-max because it bakes in no data-fitted constants. Train mix lands in
+  [0,1]-family per `feedback_konjnd_human_score_two_columns`; PJND stays the
+  eval leg's own column, untouched.
+- **Split** (reference-disjoint within the leg): `int(SRCnnnn) % 10 ∈ {8,9}`
+  → **val** (101 refs, 2,020 rows); else **train** (403 refs, 8,060 rows).
+  The KADIS §2b modulo precedent from `docs/DATA_SPLITS.md`. train ∩ val
+  refs = 0 asserted at build; both halves ∩ eval-leg refs = 0 asserted.
+- **Extraction**: the frozen P1 backfill invocation — `v2_ab_extract`,
+  `ZENSIM_AB_MODE=foldapp2`, codec_target profile, default toggles (bandvis
+  dst-activity **OFF**), 946-col CSV → parquet `f0..f943` + `ref_basename` +
+  `human_score`, zstd, landed at the ext944 root beside the other legs.
+  Extractor built in workspace `zensim--wave7` at `main@origin` = `a465c0ec`.
+- **Validity gates (run BEFORE this registration; results recorded here)**:
+  - *Extraction self-consistency*: 8 eval-leg pairs re-extracted with this
+    binary+invocation vs the stored canonical `ext_konjnd_jpeg_val.parquet`:
+    **7,552/7,552 feature cells exact-equal** (plus human_score ≤1e-9). This
+    closes the `ec3bdd6a → a465c0ec` extractor-drift window directly, and
+    agrees with `4c383163`'s F10 byte-stability hard gate (toggle-off
+    foldapp2 byte-identical 5/5).
+  - *CID22 contamination screen*: all 504 BPG sources vs the CID22-49 refs,
+    dHash-64 d≤10 (`check_holdout_overlap`): **one flag, exactly d=10** —
+    `SRC0611.png` vs `3653963.png`. Montage saved for user adjudication
+    (`/mnt/v/output/zensim/wave7/dhash_d10_SRC0611_vs_3653963_montage.png`,
+    gallery `http://localhost:3300/zensim/wave7/…`): visually a **blue
+    glass-skyscraper upward shot vs a waterfall** — categorically different
+    scenes, the documented gradient-sky false-positive class of the
+    2026-05-14 threshold revert. Per the no-auto-quarantine rule SRC0611 is
+    **retained** (it is one train ref, 20 of 8,060 rows); the pair is
+    surfaced for user sign-off, and the recorded cost of an overturn is
+    dropping those 20 rows + retraining affected cells. Every other source:
+    d > 10.
+- **Provenance**: `_MANIFEST.json` with build_commit (zensim HEAD used),
+  input CSV sha256, per-file parquet sha256 + rows, the build rule above,
+  and the two gate results. Triple-mirror: local ext944 root + Tower
+  (+ R2 `s3://zentrain` if creds at hand). `DATA_PROVENANCE.md` +
+  `DATA_SPLITS.md` updated in the same commit. No corpus bytes in git.
+
+### 7.2 Arm H — co3a + the konjnd_bpg leg (k=3, frozen)
+
+The `C_co3a` argv VERBATIM (from `C_co3a_s1301.bin.spec.json`: 9 groups, 64
+feature-transforms, `--n-hidden-layers 0 --target-column human_score
+--target-scale 100 --epochs 120 --pairs-per-epoch 50000 --max-features 944
+--allow-narrow-features --coarse-decay 1e-5`) with EXACTLY two group
+additions and nothing else changed:
+
+```
+--group konjnd_bpg:<ext944root>/konjnd_bpg_train_944.parquet:1.2:0.0:both
+--group konjnd_bpg_val:<ext944root>/konjnd_bpg_val_944.parquet:0.0:1.5
+```
+
+- **Weight provenance**: the only ship-grade konjnd-dense weighting precedent
+  is the v47 recipe (`zensim/weights/manifests/v47_strict_qat.toml`):
+  `konjnd_dense train_w = 1.2, val_w = 1.5` against `safesyn 1.0` — co3a's
+  safesyn is also 1.0, so the ratio transfers unchanged. The val weight
+  rides on the NEW reference-disjoint val leg (train-only groups keep
+  val_w 0), so `best_val` gains a real held-out KonJND term instead of a
+  train==val echo.
+- **Seeds**: {2501, 2503, 2507} — distinct from every seed used anywhere in
+  the campaign (bakes-dir enumeration: prior seeds are the 1301–1409 family
+  + {3,5,7,11,13,17,19,23,29,31,37,42,43,53,61,71,79,99,101,127,199,211,223,
+  227,229,233,239,256,512}).
+- **Tags**: `H_co3abpg_s<seed>`; bakes to the shared
+  `/mnt/v/output/zensim/bakes/sota944/bakes/`; verdicts through
+  `scripts/sota944_verdict.sh` (= the frozen §0 `bake_verdict --regime 944`).
+
+### 7.3 Endpoints (frozen; supervisor's wording verbatim + the measured baseline)
+
+**Primary (per cell): KonJND ≥ 0.43 AND CID22 ≥ 0.885.** Secondary reported,
+never gated silently: nonphoto ≥ 0.90, M3a, dial mono/tied, sdr25, composite,
+HF-NL-proxy.
+
+**Measured baseline recorded at registration so a pass is read honestly**: the
+literal primary pair is ALREADY held by four pool singles — `C_em944_s31`
+0.88692/0.4689, `C_co3a_s1307` 0.88571/0.4330, `C_co4_s1307` 0.88555/0.4725,
+`C_co4_s1301` 0.88555/0.4574. (The supervisor's "the pair no single model
+has" is true at bar-level CID22: above 0.89 the best KonJND is `C_co3a_s1301`'s
+0.4050, and EM4 = 0.89238/0.4286 misses kon by 0.0014.) The arm's registered
+questions are therefore:
+
+- **H-Q1 (the sharp one)**: does the reference-disjoint leg LIFT the co3a
+  family's KonJND band (9-seed co3a band: 0.33–0.44, median ≈0.40) at held
+  CID22 — read as the 3-seed H band vs the 9-seed co3a band, plus a
+  paired-by-pairs bootstrap (B=2000, seed 20260804,
+  `scripts/wave6_paired_bootstrap.py` — the wave-6 instrument verbatim) of
+  the selected H cell vs `C_em944_s31` (the strongest baseline pair-holder)
+  and vs EM4 (the bar source), on KonJND and CID22.
+- **H-Q2**: the frozen primary pair, per cell.
+- **Selection among multiple passers**: highest **sdr25** (the validated
+  never-trained selector; NEVER selected on KonJND itself — that is endpoint
+  selection bias).
+
+### 7.4 The ensemble follow-on (fires ONLY on an H-Q2-passing cell)
+
+- **W7_HE1** (k=4): `W6_GE2_trio` members + the selected H cell —
+  {`C_co3a_s1301`, `C_co3a_s1307`, `C_em944_s31`, H_sel}.
+- **W7_HE2** (k=3): the trio with its kon-carrier swapped —
+  {`C_co3a_s1301`, `C_co3a_s1307`, H_sel} — the direct "is H_sel a better
+  KonJND member than C_em944_s31" read.
+
+Both through the frozen §0 invocation + `--ensemble`. **Endpoint: the FULL
+five-row bar verbatim** (CID22 > 0.8923796503, KonJND ≥ 0.43, nonphoto ≥
+0.90, HF-NL-proxy ≥ 0.1931, dial ≥93%/≤5%). M3a NOT COMPUTABLE for raw
+ensembles (§5.6, inherited, stated never proxied). If a cell clears all five,
+the registered next step is the G-F distillation machinery — NOT run inside
+this wave unless that firing condition is met. If no H cell passes H-Q2, the
+ensembles do NOT run.
+
+### 7.5 The null close (registered)
+
+If no cell passes H-Q2: the wave closes honestly with the 3-seed H band, the
+H-Q1 paired comparison, and the corpus itself as the shipped asset (the leg
+is real and reference-disjoint regardless of arm outcome). No grid growth, no
+weight retuning, no seed additions beyond the frozen three.
+
+### 7.6 Ops (frozen)
+
+Workspace `zensim--wave7` on `main@origin` (`a465c0ec`);
+`CARGO_TARGET_DIR=$HOME/tmp/zensimw7-target`; logs `~/tmp/wave7/`; heavy
+steps under `~/work/zen/scripts/run-heavy`; training fleet-parallel across
+genuinely-free lanes only (observe-before-load; lianli checked immediately
+before staging), detached chains, ONE waiter writing timestamped progress to
+`~/tmp/wave7/waiter.log`, liveness via `pgrep -xc zensim_mlp_trai` only.
+Nothing ships, swaps, promotes, or publishes; no bake enters
+`zensim/weights/`; the freeze decision remains the user's.
