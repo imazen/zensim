@@ -18,6 +18,15 @@ and emits ONE self-contained, offline HTML page with:
     (emit-last detail, outer arms, ssim2), fed verbatim by the jxl-encoder sweep summary
     JSON (``--loop-targeting``; counts/medians are READ, never re-derived here).
 
+ENSEMBLE rows (2026-08-04): a fulleval JSON carrying ``model.kind == "ensemble"`` (stamped by
+``scripts/promote_ensemble_fulleval.py``) renders an ``ens×k`` marker everywhere the bake is
+named, and its Model-details card leads with a warning that the architecture/repro shown is the
+ANCHOR member. An ensemble is an evaluation FUNCTION, not a shippable artifact — its rank/dial/
+corruption numbers come from the identical verdict invocation as every single-bake row and are
+directly comparable, but ``m3_coherence``/``m3a_coherence`` are **null** because the coherence
+instrument loads one ZNPR. Null renders as an em-dash (NOT MEASURED) and is excluded from column
+shading and min/max — it is never displayed or shaded as a measured zero.
+
 NO external requests: all CSS/JS/data are inlined (no CDN, no web fonts) so the file opens
 offline. NO hand-rolled statistics: every SROCC/PLCC comes from the canonical ``panel`` (via the
 fulleval JSON's precomputed ``scatter`` block, or computed at build through
@@ -340,6 +349,27 @@ const f3=v=>v==null||!isFinite(v)?'—':(+v).toFixed(3);
 const f2=v=>v==null||!isFinite(v)?'—':(+v).toFixed(2);
 const pct=v=>v==null||!isFinite(v)?'—':(v*100).toFixed(1)+'%';
 
+// ---- ENSEMBLE marker. An equal-weight ensemble of k bakes is an evaluation
+// FUNCTION, not a shippable artifact: there is no single ZNPR, so M3/M3a are
+// not computable (they render as an em-dash = NOT MEASURED, never a low score)
+// and the model-details card describes the ANCHOR member only. Flag set by
+// scripts/promote_ensemble_fulleval.py (model.kind / model.members).
+const isEns=b=>!!(b.model&&b.model.kind==='ensemble');
+const ensK=b=>(b.model&&b.model.members)||null;
+const ensTag=b=>isEns(b)?' ens×'+ensK(b):'';
+const ensBadge=b=>isEns(b)?el('span',{style:'font-size:9px;font-weight:700;letter-spacing:.03em;'
+  +'padding:0 4px;margin-left:5px;border-radius:7px;vertical-align:1px;white-space:nowrap;'
+  +'background:color-mix(in srgb, var(--warn) 34%, var(--surface-1));border:1px solid var(--border)',
+  title:'equal-weight ensemble of '+ensK(b)+' bakes — an evaluation function, not a single '
+    +'shippable bake; M3/M3a not computable',text:'ens×'+ensK(b)}):null;
+// swatch + name (+ ens badge) cell content, shared by every table that names a bake
+function nameInto(node,b,suffix){
+  node.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),
+    document.createTextNode(b.name+(suffix||'')));
+  const bd=ensBadge(b);if(bd)node.append(bd);
+  return node;
+}
+
 // ---- tooltip
 const tt=$('#tt');
 function showTip(html,ev){tt.innerHTML=html;tt.style.opacity=1;
@@ -352,11 +382,12 @@ function renderBar(){
   const bar=$('#bar');bar.innerHTML='';
   DATA.bakes.forEach(b=>{
     const on=state.visible.has(b.name);
-    const chip=el('label',{class:'chip'+(on?'':' off'),title:b.regime+(b.is_stub?' (stub)':'')});
+    const chip=el('label',{class:'chip'+(on?'':' off'),
+      title:b.regime+(b.is_stub?' (stub)':'')+(isEns(b)?' · ensemble of '+ensK(b)+' bakes':'')});
     const cb=el('input',{type:'checkbox'});cb.checked=on;
     cb.onchange=()=>{on?state.visible.delete(b.name):state.visible.add(b.name);rerender();renderBar();};
     chip.append(cb, el('span',{class:'sw',style:'background:'+color(b)}),
-      el('span',{text:b.name}), el('span',{class:'cap',text:b.regime}));
+      el('span',{text:b.name}), el('span',{class:'cap',text:b.regime+ensTag(b)}));
     bar.appendChild(chip);
   });
   const mk=(t,fn)=>{const x=el('button',{class:'btn',text:t});x.onclick=fn;return x;};
@@ -433,7 +464,13 @@ function renderTable(){
     +'not re-derived. <b>CID22 95%CI±</b> = bootstrap half-width; bakes with overlapping CIs are a statistical '
     +'TIE, not an ordering. <b>CID22 %bwd</b> = share of reference ladders ranked BACKWARDS (no pooled stat sees '
     +'it). <b>M3a-attr</b> = the DEPLOYABLE attribution-density steering map vs \u0394S (exact integrands + SAT, task #67 \u2014 the map codecs query); <b>M3-coh</b> = the legacy signal fold, kept for the before/after story (the 128px fold inversion the attribution map cures). <b>M3 drop%</b> = f156-371 mass the FOLD cannot spatialize — read a low M3 against it (high drop% '
-    +'= M3 structurally capped, not incoherent). Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80).'
+    +'= M3 structurally capped, not incoherent). An <b>em-dash in any cell means NOT MEASURED</b> — never a '
+    +'measured zero. Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80). '
+    +'<b>ens×k</b> = an equal-weight ENSEMBLE of k bakes, scored through the identical verdict invocation '
+    +'as every single-bake row: rank/dial/corruption numbers are directly comparable, but an ensemble is an '
+    +'<b>evaluation function, not a shippable artifact</b> — there is no single ZNPR, so <b>M3a/M3 are not '
+    +'computable for it</b> (the coherence instrument loads one bake) and its Model-details card describes '
+    +'the ANCHOR member only. Distillation to a single bake is pending.'
     +(LT?' <b>2shot/3shot ±2</b> = JXL loop targeting: cells (of '+ltN()+') where the DECODED-judged score lands '
     +'within ±2 of target in the bake’s own units at encode budget k=2/3, emit-best (emit-last + outer arms: '
     +'see the JXL loop targeting section).':'')});
@@ -460,7 +497,7 @@ function renderTable(){
     COLS.forEach(c=>{
       const v=c[3](b);
       const td=el('td',{class:(c[0]==='name'||c[0]==='regime')?'lbl':'',text:fmtCell(c[0],v)});
-      if(c[0]==='name'){td.textContent='';td.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),document.createTextNode(b.name+(b.is_stub?' ✳':'')));}
+      if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
       if(c[0]!=='name'&&c[0]!=='regime'&&v!=null&&isFinite(v)){
         const[lo,hi]=ranges[c[0]];let t=hi===lo?.5:(v-lo)/(hi-lo);
         // invert shading where lower is better (tied dead-zone, CI width,
@@ -511,7 +548,7 @@ function scatterCell(b,corp,ref){
     svg.append(S('line',{x1:SX(fx0),y1:SY(fy0),x2:SX(fx1),y2:SY(fy1),stroke:c,'stroke-width':2,'stroke-opacity':.9,'stroke-linecap':'round'}));}
   // title (own line) + stats (own line) — two lines so a long bake name never collides with ρ/r
   svg.append(S('text',{x:mL,y:12,'font-size':10.5,'font-weight':600,fill:cssv('--text-primary'),
-    text:b.name.length>29?b.name.slice(0,28)+'…':b.name}));
+    text:(b.name.length>29?b.name.slice(0,28)+'…':b.name)+ensTag(b)}));
   svg.append(S('text',{x:mL,y:25,'font-size':9.5,fill:cssv('--text-secondary'),
     text:'ρ '+f3(cell.srocc)+'   r '+f3(cell.plcc)+'   n='+cell.n}));
   return svg;
@@ -552,7 +589,7 @@ function renderHeat(){
     fill:TVSET.has(c)?cssv('--warn'):cssv('--text-secondary'),transform:`rotate(-32 ${mL+j*cw+cw/2} ${mT-6})`,
     text:TVSET.has(c)?c+' ⚠':c})));
   bs.forEach((b,i)=>{
-    svg.append(S('text',{x:mL-6,y:mT+i*rh+rh/2+3,'text-anchor':'end','font-size':10,fill:cssv('--text-primary'),text:b.name}));
+    svg.append(S('text',{x:mL-6,y:mT+i*rh+rh/2+3,'text-anchor':'end','font-size':10,fill:cssv('--text-primary'),text:b.name+ensTag(b)}));
     svg.append(S('rect',{x:mL-16,y:mT+i*rh+rh/2-5,width:10,height:10,rx:2,fill:color(b)}));
     corps.forEach((c,j)=>{
       const r=b.rank[c];const v=r?r.srocc:null;
@@ -596,7 +633,7 @@ function tradePanel(xc,yc,xl,yl){
   pts.forEach(p=>{const cx=SX(p.x),cy=SY(p.y);
     svg.append(S('circle',{cx,cy,r:5,fill:color(p.b),stroke:cssv('--surface-1'),'stroke-width':1.2}));
     const right=cx>mL+(W-mL-mR)*0.6;                       // flip label left near the right edge so it doesn't clip
-    svg.append(S('text',{x:right?cx-8:cx+8,y:cy+3,'text-anchor':right?'end':'start','font-size':9.5,fill:cssv('--text-primary'),text:p.b.name}));});
+    svg.append(S('text',{x:right?cx-8:cx+8,y:cy+3,'text-anchor':right?'end':'start','font-size':9.5,fill:cssv('--text-primary'),text:p.b.name+ensTag(p.b)}));});
   return svg;
 }
 function renderTrade(){
@@ -646,10 +683,7 @@ function renderMPanel(){
     const sroccs=(r.srocc_signed!=null?r.srocc_signed:r.srocc);
     const ciw=r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;
     const tr=el('tr',{});
-    const nameTd=el('td',{class:'lbl'});
-    nameTd.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),
-      document.createTextNode(b.name));
-    tr.append(nameTd);
+    tr.append(nameInto(el('td',{class:'lbl'}),b));
     const cells=[
       r.n!=null?String(r.n):'—',
       (sroccs!=null?(sroccs>=0?'+':'')+sroccs.toFixed(4):'—')+(ciw!=null?' ±'+ciw.toFixed(3):''),
@@ -731,10 +765,7 @@ function renderMPanel(){
       const bb=el('tbody',{});
       banded.forEach(b=>{
         const tr=el('tr',{});
-        const nm=el('td',{class:'lbl'});
-        nm.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),
-          document.createTextNode(b.name));
-        tr.append(nm);
+        tr.append(nameInto(el('td',{class:'lbl'}),b));
         cols.forEach(i=>{
           const r=b.rank[c].bands[i],v=bandS(b,i),noisy=!r||r.n==null||r.n<30;
           const td=el('td',{text:v==null?'—':(noisy?'('+v.toFixed(3)+')':v.toFixed(3))});
@@ -828,9 +859,7 @@ function renderGates(){
   const tb=el('tbody',{});
   bs.sort((a,b)=>(b.gates.weighted_goal||0)-(a.gates.weighted_goal||0)).forEach(b=>{
     const tr=el('tr',{});
-    const nameTd=el('td',{class:'lbl'});
-    nameTd.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),document.createTextNode(b.name));
-    tr.append(nameTd);
+    tr.append(nameInto(el('td',{class:'lbl'}),b));
     KEYS.forEach(([k])=>{
       const v=b.gates[k];
       const td=el('td',{text:v!=null?v.toFixed(2):'—'});
@@ -922,10 +951,31 @@ function renderModels(){
     const m=b.model;
     const card=el('div',{style:'border:1px solid var(--border);border-radius:8px;padding:10px 12px;'
       +'background:var(--surface-1);min-width:300px;max-width:360px;flex:1 1 300px'});
-    const hd=el('div',{style:'display:flex;align-items:center;gap:6px;margin-bottom:6px'});
+    const hd=el('div',{style:'display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap'});
     hd.append(el('span',{class:'sw',style:'display:inline-block;background:'+color(b)}),
       el('b',{text:b.name}));
+    const hbd=ensBadge(b);if(hbd)hd.append(hbd);
     card.append(hd);
+    // An ensemble has no single ZNPR: everything below (arch, size, transforms,
+    // repro, spline) is the ANCHOR member. Say so before the numbers, not after.
+    if(isEns(b)){
+      const mem=(m.member_names||[]);
+      const note=el('div',{style:'font-size:10px;line-height:1.4;margin:-2px 0 7px;padding:5px 7px;'
+        +'border-radius:5px;background:color-mix(in srgb, var(--warn) 16%, var(--surface-1));'
+        +'border:1px solid var(--border)'});
+      note.append(el('b',{text:'Equal-weight ensemble of '+ensK(b)+' bakes.'}),
+        document.createTextNode(' Not a shippable artifact — the fields below describe the '
+          +'ANCHOR member '+(m.anchor||'?')+' only, and M3/M3a are NOT COMPUTABLE for an ensemble '
+          +'(the coherence instrument loads one ZNPR). Distillation to a single bake is pending.'));
+      if(mem.length){
+        const det=el('details',{style:'margin-top:4px'});
+        det.append(el('summary',{style:'font-size:9.5px;cursor:pointer;opacity:.75',
+          text:'members ('+mem.length+')'}),
+          el('div',{style:'font-size:9px;word-break:break-all;opacity:.85',text:mem.join(', ')}));
+        note.append(det);
+      }
+      card.append(note);
+    }
     // Full dim chain with hidden sizes: "720 → 128 (LeakyRelu) → 1", trainer-log style.
     // Identity on the last layer is the plain linear output head — omit the label.
     const L=m.layers||[];

@@ -340,6 +340,16 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   top band B9 is a real discriminator while the low bands rest on a few dozen
   pairs). Read down a column, never across one: band SROCC is range-restricted.
   All values are read from `rank.<corpus>.bands[]`; nothing is recomputed.
+  Plus (2026-08-04) **ENSEMBLE rows**: a fulleval JSON stamped `model.kind:"ensemble"`
+  by `scripts/promote_ensemble_fulleval.py` (which relabels a `bake_verdict --ensemble`
+  verdict onto the board and recomputes NOTHING — every stat block is asserted
+  byte-identical to the source verdict, whose path+sha256 land in `source_verdict`)
+  renders an `ens×k` marker wherever the bake is named, and its Model-details card
+  leads with a warning that the architecture/repro shown is the ANCHOR member only;
+  `m3_coherence`/`m3a_coherence` are **null** because the coherence instrument loads
+  one ZNPR, and null renders as an em-dash (NOT MEASURED — never shaded or displayed
+  as a measured zero). Wave-5's six arms are promoted by `scripts/wave5_ensemble.sh
+  promote`, which reuses the same frozen membership arrays it scored with.
   **Regen gates (MANDATORY, run on every emitted HTML):**
   `scripts/v_next/gauntlet_gates.sh <html>` = `node --check` on the extracted
   inline JS + the DOM-shim render harness (`gauntlet_render_check.js`) — committed

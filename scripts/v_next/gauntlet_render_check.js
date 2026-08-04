@@ -4,7 +4,12 @@
  * gate 1 is `node --check` on the extracted inline JS — both are wired in
  * gauntlet_gates.sh, which the regen MUST run before shipping the HTML).
  *
- * Usage: node gauntlet_render_check.js <summer_gauntlet.html>
+ * Usage: node gauntlet_render_check.js <summer_gauntlet.html> [--dump-row <bake-name>]
+ *
+ * `--dump-row` prints the RENDERED scoreboard row (header -> displayed cell text) for one
+ * bake after the assertions pass. It exists so a reviewer can spot-check what the page
+ * actually shows against the source verdict JSON without opening a browser — the numbers on
+ * the board and the numbers in the verdict must be the same numbers.
  *
  * Why: the client JS lives inside a RAW Python string template in gauntlet.py. A raw
  * string turns \' into literal backslash+quote and one bad escape kills the entire
@@ -161,6 +166,33 @@ if (DATA && DATA.loopTargeting && DATA.loopTargeting.models && Object.keys(DATA.
 }
 
 if (failed) process.exit(1);
+
+// ---------------------------------------------------------------- --dump-row ----------
+if (process.argv.includes('--dump-row')) {
+  const want = process.argv[process.argv.indexOf('--dump-row') + 1];
+  if (!want) { console.error('--dump-row needs a bake name'); process.exit(2); }
+  // text as DISPLAYED: td.textContent when set directly, else the concatenated
+  // descendant text (the name cell builds swatch + text node + optional ens badge).
+  const cellText = (e) => {
+    if (!e) return '';
+    if (e.nodeType === 3) return String(e.textContent || '');
+    if (e.textContent) return String(e.textContent);
+    return (e.childNodes || []).map(cellText).join('');
+  };
+  // Locate the scoreboard by its header, not by #table: rerender() re-mounts the wrapper
+  // and the shim's query() returns the FIRST id match (the empty placeholder from layout()).
+  const rowsOf = (t) => { const acc = []; (function walk(e) { if (!e || !e.children) return; if (e.tagName === 'TR') acc.push(e); e.children.forEach(walk); })(t); return acc; };
+  const boards = registry.filter(e => e.tagName === 'TABLE').map(rowsOf)
+    .filter(rs => rs.length && (() => { const h = rs[0].children.map(cellText); return h.includes('bake') && h.includes('composite'); })());
+  if (!boards.length) { console.error('--dump-row: scoreboard table not found'); process.exit(1); }
+  const trs = boards[boards.length - 1];      // the last render wins
+  const head = trs[0].children.map(cellText);
+  const row = trs.slice(1).find(tr => tr.children.length && cellText(tr.children[0]).trim().startsWith(want));
+  if (!row) { console.error('--dump-row: no scoreboard row starting with ' + want); process.exit(1); }
+  console.log('--- rendered scoreboard row: ' + want + ' ---');
+  row.children.forEach((td, i) => console.log((head[i] || ('col' + i)).padEnd(16) + '  ' + cellText(td).trim()));
+}
+
 console.log('render OK: ' + nBakes + ' bakes, ' + panelsEl.children.length + ' sections, '
   + tables + ' tables, ' + rows + ' rows, ' + countTag('svg') + ' svgs'
   + (DATA && DATA.loopTargeting ? ', loop panel: ' + Object.keys(DATA.loopTargeting.models || {}).length + ' models' : ', no loop panel'));
