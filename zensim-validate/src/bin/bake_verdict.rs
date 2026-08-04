@@ -310,6 +310,51 @@ const PERPAIR_METRIC_COLS: &[(&str, &str)] = &[
     ("score_cvvdp_cpu_imazen_v0_1_0", "cvvdp"),
 ];
 
+// ============================================================================
+// `--regime 944` — the SOTA-944 campaign invocation as ONE preset
+// ============================================================================
+//
+// The SOTA-944 campaign (benchmarks/sota944_campaign_2026-08-03.md §0) ran
+// every cell through one frozen bake_verdict invocation: the ext944 canonical
+// feature root, the 944 dial + corruption grids, and a 12-corpus list. That
+// invocation was assembled BY HAND in two places (scripts/sota944_verdict.sh
+// and scripts/run_full_eval.sh), and a third hand-assembled wrapper with a
+// SHORTER `--corpora` list is exactly how the published `EM4_mask2_kw0.15_s42`
+// HF-NL number came to be wrong (the corpus was silently absent from that
+// run, see the campaign doc's "Corrections" section). This preset makes the
+// bare invocation correct: `bake_verdict --bake X --regime 944` resolves
+// everything below, and a corpus can only be dropped by an EXPLICIT
+// `--corpora` override.
+//
+// The 944 regime shares the `--regime 720` slot mechanics (`slot_720_file`
+// resolves the modern `ext_imazen26`/`ext_nonphoto` TEST-view slices under
+// this root); only the data roots, the per-pair source, the default corpus
+// list, and the reported regime label differ.
+
+/// Default `--features-root` for `--regime 944` (the ext944 canonical legs +
+/// TEST-view eval slices; `_MANIFEST.json` carries per-file sha256s).
+const DEFAULT_FEATURES_ROOT_944: &str = "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01";
+/// Default dial + corruption grids for `--regime 944`.
+const DEFAULT_DIAL_GRID_944: &str =
+    "/mnt/v/output/zensim/v2-eval-944-2026-08-01/dial_grid_944col_2026-08-01.parquet";
+const DEFAULT_CORRUPTION_GRID_944: &str =
+    "/mnt/v/output/zensim/v2-eval-944-2026-08-01/corruption_grid_944col_2026-08-01.parquet";
+/// Default multi-metric per-pair source for `--regime 944` (`--full-json`
+/// scatter block): the kadis-944 sibling of [`DEFAULT_PERPAIR_METRICS`].
+/// The 720-wide default cannot serve a 944 bake (n_features < n_inputs ⇒ the
+/// block is skipped with a warning), which is why run_full_eval.sh's 944 case
+/// swapped it explicitly. Overridable; a non-existent path skips the block.
+const DEFAULT_PERPAIR_METRICS_944: &str =
+    "/mnt/v/zen/zensim-training/kadis-944-2026-08-01/kadis700k_944.parquet";
+/// The FROZEN SOTA-944 campaign corpus list, in the campaign's report order —
+/// what `scripts/sota944_verdict.sh` passed on every one of the campaign's
+/// cells. This is the default `--corpora` under `--regime 944`, so a bare
+/// invocation cannot silently omit a corpus (the wrong-published-numbers
+/// class). Changing this list is a CONSCIOUS act: the
+/// `regime_944_default_corpora_match_the_frozen_campaign_list` test pins it.
+const SOTA944_CORPORA: &str =
+    "cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25,imazen26,nonphoto,hfnlproxy";
+
 const CORPORA: &[Corpus] = &[
     Corpus {
         name: "cid22",
@@ -513,8 +558,14 @@ struct Args {
     output: Option<PathBuf>,
     features_root: PathBuf,
     /// `feature-regime-v2`: score the 720-wide bake against 720-wide corpora
-    /// (via [`slot_720`]). Selected by `--regime 720`.
+    /// (via [`slot_720`]). Selected by `--regime 720` (and by `--regime 944`,
+    /// which shares the slot mechanics).
     regime_720: bool,
+    /// `--regime 944`: the SOTA-944 campaign preset — same slot mechanics as
+    /// 720, but the defaults resolve to the ext944 roots/grids/per-pair source
+    /// and the frozen campaign corpus list (see [`SOTA944_CORPORA`]). Only
+    /// affects DEFAULTS + the reported regime label; explicit flags win.
+    regime_944: bool,
     /// Diagnostic: dump per-row `human<TAB>pred` (parquet row order) to this
     /// path. Used by the AIC-3 CVVDP-feature spike to compute per-ref SROCC
     /// (which the aggregate panel does not split out).
@@ -590,11 +641,26 @@ DEFAULTS:\n\
     --compare       none (per-zone dial-agreement vs a reference bake)\n\
     --corruption-grid canonical grid (negative-tail gate; auto if present)\n\
     --corruption-head none (companion head bake scored on the corruption grid)\n\
-    --features-root /mnt/v/zen/zensim-training/2026-05-15-full-features\n"
+    --features-root /mnt/v/zen/zensim-training/2026-05-15-full-features\n\
+\n\
+REGIMES (--regime 372|720|944):\n\
+    372  (default) v1 feature space, 372col corpora\n\
+    720  folded+append feature space; swaps unset root/grid defaults to the\n\
+         720-wide variants and keeps only corpora with a 720 extraction\n\
+    944  THE SOTA-944 campaign invocation as one preset: ext944 root, 944\n\
+         dial/corruption grids, kadis-944 per-pair source, and the frozen\n\
+         12-corpus campaign list — a bare `--bake X --regime 944` is the\n\
+         complete, correct evaluation. Explicit flags override the preset.\n"
     );
 }
 
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+/// Testable core of [`parse_args`]: same semantics, arguments injected. The
+/// `--regime 944` preset-resolution tests drive this directly.
+fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut bake: Option<PathBuf> = None;
     let mut ensemble: Vec<PathBuf> = Vec::new();
     let mut corpora: Option<Vec<&'static Corpus>> = None;
@@ -621,13 +687,16 @@ fn parse_args() -> Result<Args, String> {
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(CANONICAL_DIAL_GRID));
-    // `--regime 720` swaps the three defaults below to their 720-wide variants,
-    // but only when the user did not set them explicitly (tracked here).
+    // `--regime 720`/`--regime 944` swap the defaults below to their wide
+    // variants, but only when the user did not set them explicitly (tracked
+    // here) — explicit flags always win over the preset.
     let mut regime_720 = false;
+    let mut regime_944 = false;
     let mut features_root_set = false;
     let mut dial_grid_set = std::env::var("ZENSIM_DIAL_GRID").is_ok();
     let mut corruption_grid_set = std::env::var("ZENSIM_CORRUPTION_GRID").is_ok();
-    let mut args = std::env::args().skip(1);
+    let mut perpair_metrics_set = false;
+    let mut args = args;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--bake" => {
@@ -648,11 +717,21 @@ fn parse_args() -> Result<Args, String> {
                 features_root_set = true;
             }
             "--regime" => {
-                let v = args.next().ok_or("--regime requires 372|720")?;
+                let v = args.next().ok_or("--regime requires 372|720|944")?;
                 match v.as_str() {
-                    "372" => regime_720 = false,
-                    "720" => regime_720 = true,
-                    other => return Err(format!("--regime must be 372|720, got {other:?}")),
+                    "372" => {
+                        regime_720 = false;
+                        regime_944 = false;
+                    }
+                    "720" => {
+                        regime_720 = true;
+                        regime_944 = false;
+                    }
+                    "944" => {
+                        regime_720 = true;
+                        regime_944 = true;
+                    }
+                    other => return Err(format!("--regime must be 372|720|944, got {other:?}")),
                 }
             }
             "--dial-grid" => {
@@ -683,6 +762,7 @@ fn parse_args() -> Result<Args, String> {
             "--perpair-metrics" => {
                 let v = args.next().ok_or("--perpair-metrics requires <path>")?;
                 perpair_metrics = PathBuf::from(v);
+                perpair_metrics_set = true;
             }
             "--perpair-cap" => {
                 let v = args.next().ok_or("--perpair-cap requires <n>")?;
@@ -751,8 +831,30 @@ fn parse_args() -> Result<Args, String> {
             .cloned()
             .ok_or("--bake is required (path to ZNPR v3 bake)")?,
     };
-    // --regime 720: swap unset defaults to the 720-wide variants.
-    if regime_720 {
+    // --regime 944: the SOTA-944 campaign preset. Everything the campaign
+    // invocation needed resolves here so a bare run cannot silently omit a
+    // corpus/grid; each piece yields to an explicit flag.
+    if regime_944 {
+        if !features_root_set {
+            features_root = PathBuf::from(DEFAULT_FEATURES_ROOT_944);
+        }
+        if !dial_grid_set {
+            dial_grid = PathBuf::from(DEFAULT_DIAL_GRID_944);
+        }
+        if !corruption_grid_set {
+            corruption_grid = PathBuf::from(DEFAULT_CORRUPTION_GRID_944);
+        }
+        if !perpair_metrics_set {
+            perpair_metrics = PathBuf::from(DEFAULT_PERPAIR_METRICS_944);
+        }
+        if corpora.is_none() {
+            corpora = Some(
+                parse_corpora_arg(SOTA944_CORPORA)
+                    .expect("SOTA944_CORPORA names only registered corpora (test-pinned)"),
+            );
+        }
+    } else if regime_720 {
+        // --regime 720: swap unset defaults to the 720-wide variants.
         if !features_root_set {
             features_root = PathBuf::from(DEFAULT_FEATURES_ROOT_720);
         }
@@ -782,6 +884,7 @@ fn parse_args() -> Result<Args, String> {
         output,
         features_root,
         regime_720,
+        regime_944,
         per_pair_output,
         dial_grid,
         html,
@@ -2757,7 +2860,13 @@ Run the dedicated q-sweep harness for those._\n",
                 .unwrap_or("bake")
                 .to_string()
         });
-        let regime = if args.regime_720 { "720" } else { "372" };
+        let regime = if args.regime_944 {
+            "944"
+        } else if args.regime_720 {
+            "720"
+        } else {
+            "372"
+        };
 
         // rank: { "<corpus>": {n, srocc, plcc, krocc, or, pwrc, z_rmse} }
         let mut rank = Map::new();
@@ -3231,6 +3340,152 @@ mod tests {
         assert!(
             auc.is_nan(),
             "no different-pairs should give NaN, got {auc}"
+        );
+    }
+
+    // ── --regime 944 preset (the one-command SOTA-944 evaluation) ──────────
+
+    fn parse(argv: &[&str]) -> Args {
+        parse_args_from(argv.iter().map(|s| s.to_string())).expect("parse")
+    }
+
+    /// A bare `--bake X --regime 944` must resolve the ENTIRE campaign
+    /// invocation — roots, grids, per-pair source, and the corpus list. The
+    /// class of error this kills: a wrapper (or a bare run) with a shorter
+    /// corpus list silently producing no number for an axis, which is how the
+    /// published `EM4_mask2_kw0.15_s42` HF-NL cell came to be wrong (see the
+    /// campaign doc's Corrections section — `rank.hfnlproxy` was null because
+    /// the corpus was never in that run's `--corpora`).
+    #[test]
+    fn regime_944_preset_resolves_the_full_campaign_invocation() {
+        let a = parse(&["--bake", "/x/b.bin", "--regime", "944"]);
+        assert!(a.regime_720, "944 shares the 720 slot mechanics");
+        assert!(a.regime_944);
+        assert_eq!(a.features_root, PathBuf::from(DEFAULT_FEATURES_ROOT_944));
+        assert_eq!(a.dial_grid, PathBuf::from(DEFAULT_DIAL_GRID_944));
+        assert_eq!(
+            a.corruption_grid,
+            PathBuf::from(DEFAULT_CORRUPTION_GRID_944)
+        );
+        assert_eq!(
+            a.perpair_metrics,
+            PathBuf::from(DEFAULT_PERPAIR_METRICS_944)
+        );
+        let names: Vec<&str> = a.corpora.iter().map(|c| c.name).collect();
+        let expected: Vec<&str> = SOTA944_CORPORA.split(',').collect();
+        assert_eq!(
+            names, expected,
+            "the bare 944 invocation must evaluate exactly the frozen campaign corpus list"
+        );
+    }
+
+    /// The default 944 corpus list IS the frozen campaign list — spelled out
+    /// literally here so neither the const nor the corpus registry can drift
+    /// without a conscious edit to this test (and to the campaign doc, which
+    /// this list mirrors: scripts/sota944_verdict.sh's §0 invocation).
+    #[test]
+    fn regime_944_default_corpora_match_the_frozen_campaign_list() {
+        assert_eq!(
+            SOTA944_CORPORA,
+            "cid22,kadid,tid,konjnd,aic3,aic4,csiq,live,sdr25,imazen26,nonphoto,hfnlproxy",
+            "SOTA944_CORPORA changed. That list is the campaign's frozen §0 invocation \
+             (benchmarks/sota944_campaign_2026-08-03.md); update the campaign doc's repro \
+             note in the same commit or revert."
+        );
+        // Every name must resolve a 720-slot file (the mechanism 944 rides on),
+        // so none of the preset corpora can be silently dropped by the
+        // slot-filter belt-and-braces.
+        for name in SOTA944_CORPORA.split(',') {
+            assert!(
+                slot_720(name).is_some(),
+                "preset corpus {name:?} has no slot_720 entry — it would be silently \
+                 filtered out of every --regime 944 run"
+            );
+        }
+    }
+
+    /// Explicit flags override every piece of the preset, exactly as
+    /// `--regime 720` behaves.
+    #[test]
+    fn regime_944_respects_explicit_overrides() {
+        let a = parse(&[
+            "--bake",
+            "/x/b.bin",
+            "--regime",
+            "944",
+            "--features-root",
+            "/tmp/other-root",
+            "--dial-grid",
+            "/tmp/dial.parquet",
+            "--corruption-grid",
+            "/tmp/corr.parquet",
+            "--perpair-metrics",
+            "/tmp/pp.parquet",
+            "--corpora",
+            "cid22,konjnd",
+        ]);
+        assert_eq!(a.features_root, PathBuf::from("/tmp/other-root"));
+        assert_eq!(a.dial_grid, PathBuf::from("/tmp/dial.parquet"));
+        assert_eq!(a.corruption_grid, PathBuf::from("/tmp/corr.parquet"));
+        assert_eq!(a.perpair_metrics, PathBuf::from("/tmp/pp.parquet"));
+        let names: Vec<&str> = a.corpora.iter().map(|c| c.name).collect();
+        assert_eq!(names, vec!["cid22", "konjnd"]);
+    }
+
+    /// `--regime 720` behavior is unchanged by the 944 addition: 720 defaults,
+    /// no 944 label, filtered all-corpora default.
+    #[test]
+    fn regime_720_defaults_unchanged() {
+        let a = parse(&["--bake", "/x/b.bin", "--regime", "720"]);
+        assert!(a.regime_720);
+        assert!(!a.regime_944);
+        assert_eq!(a.features_root, PathBuf::from(DEFAULT_FEATURES_ROOT_720));
+        assert_eq!(a.dial_grid, PathBuf::from(DEFAULT_DIAL_GRID_720));
+        assert_eq!(
+            a.corruption_grid,
+            PathBuf::from(DEFAULT_CORRUPTION_GRID_720)
+        );
+        // Default per-pair source stays the kadis-720 one under --regime 720.
+        assert_eq!(a.perpair_metrics, PathBuf::from(DEFAULT_PERPAIR_METRICS));
+        // Default corpora = every corpus with a 720 slot.
+        let names: Vec<&str> = a.corpora.iter().map(|c| c.name).collect();
+        let expected: Vec<&str> = CORPORA
+            .iter()
+            .filter(|c| slot_720(c.name).is_some())
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(names, expected);
+    }
+
+    /// Preset path/corpus resolution against the REAL data roots: every file
+    /// the bare `--regime 944` invocation would read must exist. Runs only
+    /// where the canonical roots are mounted (CI has no /mnt/v — same skip
+    /// convention as `canonical_dial_grid_is_the_quarantined_v2_grid`).
+    #[test]
+    fn regime_944_preset_files_exist_on_canonical_roots() {
+        let root = Path::new(DEFAULT_FEATURES_ROOT_944);
+        if !root.exists() {
+            eprintln!("skip: {DEFAULT_FEATURES_ROOT_944} not on this host (CI has no /mnt/v)");
+            return;
+        }
+        let a = parse(&["--bake", "/x/b.bin", "--regime", "944"]);
+        for c in &a.corpora {
+            let fname = slot_720_file(c.name, &a.features_root)
+                .unwrap_or_else(|| panic!("no slot for preset corpus {}", c.name));
+            let p = a.features_root.join(&fname);
+            assert!(
+                p.exists(),
+                "preset corpus {} resolves to {} which does not exist — the bare \
+                 --regime 944 invocation would fail loud on it (fix the root or the slot)",
+                c.name,
+                p.display()
+            );
+        }
+        assert!(a.dial_grid.exists(), "944 dial grid missing");
+        assert!(a.corruption_grid.exists(), "944 corruption grid missing");
+        assert!(
+            a.perpair_metrics.exists(),
+            "kadis-944 per-pair source missing"
         );
     }
 }
