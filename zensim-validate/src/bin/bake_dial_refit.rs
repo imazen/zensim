@@ -2292,9 +2292,23 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
 
 #[derive(Args)]
 struct PredictArgs {
-    /// Bake to forward (any ZNPR v3, incl. MLPs).
+    /// Bake to forward (any ZNPR v3, incl. MLPs). With `--ensemble` this is
+    /// optional; when both are given it must name one of the members.
     #[arg(long)]
-    bake: PathBuf,
+    bake: Option<PathBuf>,
+    /// Comma-separated ZNPR bakes scored as ONE equal-weight ensemble: every
+    /// row's prediction is the arithmetic mean of the members' raw predictions.
+    ///
+    /// This mirrors `bake_verdict`'s `Ensemble::score_rows` contract exactly —
+    /// same averaging order (after each member's own output spline, i.e. in
+    /// each member's score units), same k=1 short-circuit (one member runs the
+    /// byte-for-byte single-bake path, no `0.0 + x` / `x / 1.0` rounding
+    /// surface), same loud failure when members disagree on `n_inputs`.
+    /// Averaging TSVs in a script instead is the duplication CLAUDE.md bans:
+    /// the teacher a distillation trains against must come from the same
+    /// forward the evaluation used.
+    #[arg(long, value_delimiter = ',')]
+    ensemble: Vec<PathBuf>,
     /// Feature parquet (f0..fN / feat_0.. + ref_basename).
     #[arg(long)]
     corpus: PathBuf,
@@ -2306,32 +2320,83 @@ struct PredictArgs {
 }
 
 fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
-    let bytes = std::fs::read(&a.bake).map_err(|e| format!("read {:?}: {e}", a.bake))?;
-    let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
-    let n_in = model.n_inputs();
+    let members: Vec<PathBuf> = if a.ensemble.is_empty() {
+        vec![
+            a.bake
+                .clone()
+                .ok_or("predict needs --bake or --ensemble".to_string())?,
+        ]
+    } else {
+        if let Some(b) = a.bake.as_ref() {
+            if !a.ensemble.contains(b) {
+                return Err(format!(
+                    "--bake {} is not one of the --ensemble members; omit --bake",
+                    b.display()
+                ));
+            }
+        }
+        a.ensemble.clone()
+    };
+
+    let mut models: Vec<Model> = Vec::with_capacity(members.len());
+    for p in &members {
+        let bytes = std::fs::read(p).map_err(|e| format!("read {p:?}: {e}"))?;
+        models.push(Model::from_bytes(&bytes).map_err(|e| format!("parse bake {p:?}: {e:?}"))?);
+    }
+    let n_in = models[0].n_inputs();
+    for (p, m) in members.iter().zip(models.iter()).skip(1) {
+        if m.n_inputs() != n_in {
+            return Err(format!(
+                "ensemble member {p:?} has n_inputs={} but member 0 has {n_in} — \
+                 averaging across feature regimes is the column-mixing this repo bans",
+                m.n_inputs()
+            ));
+        }
+    }
     let g =
         zensim_validate::parquet_loader::load_parquet(&a.corpus, "predict", "human_score", 1.0)?;
-    let transformed = model.has_nontrivial_feature_transforms();
-    let mut predictor = zenpredict::Predictor::new(&model);
-    let mut xbuf = vec![0f32; n_in];
-    let mut out = String::with_capacity(g.feature_rows.len() * 24);
+
+    // Per-member forward over every row. k=1 takes exactly the original path
+    // (single accumulator, single divide-by-one is skipped below).
+    let k = models.len();
+    let mut acc = vec![0f64; g.feature_rows.len()];
+    for model in &models {
+        let transformed = model.has_nontrivial_feature_transforms();
+        let mut predictor = zenpredict::Predictor::new(model);
+        let mut xbuf = vec![0f32; n_in];
+        for (i, row) in g.feature_rows.iter().enumerate() {
+            let take = n_in.min(row.len());
+            for (d, s) in xbuf[..take].iter_mut().zip(row[..take].iter()) {
+                *d = *s as f32;
+            }
+            let p = if transformed {
+                predictor.predict_transformed(&xbuf)
+            } else {
+                predictor.predict(&xbuf)
+            }
+            .map_err(|e| format!("predictor forward: {e:?}"))?;
+            if k == 1 {
+                acc[i] = p[0] as f64;
+            } else {
+                acc[i] += p[0] as f64;
+            }
+        }
+    }
+    if k > 1 {
+        let kf = k as f64;
+        for v in acc.iter_mut() {
+            *v /= kf;
+        }
+    }
+
+    let mut out = String::with_capacity(acc.len() * 24);
     out.push_str("row_idx\tpred\n");
-    for (i, row) in g.feature_rows.iter().enumerate() {
-        let take = n_in.min(row.len());
-        for (d, s) in xbuf[..take].iter_mut().zip(row[..take].iter()) {
-            *d = *s as f32;
-        }
-        let p = if transformed {
-            predictor.predict_transformed(&xbuf)
-        } else {
-            predictor.predict(&xbuf)
-        }
-        .map_err(|e| format!("predictor forward: {e:?}"))?;
-        out.push_str(&format!("{i}\t{:?}\n", p[0] as f64));
+    for (i, v) in acc.iter().enumerate() {
+        out.push_str(&format!("{i}\t{v:?}\n"));
     }
     std::fs::write(&a.out, &out).map_err(|e| format!("write {:?}: {e}", a.out))?;
     eprintln!(
-        "predict: {} rows -> {:?} (bake n_in {n_in})",
+        "predict: {} rows x k={k} -> {:?} (n_in {n_in})",
         g.feature_rows.len(),
         a.out
     );
