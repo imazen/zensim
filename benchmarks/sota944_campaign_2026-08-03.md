@@ -4741,3 +4741,220 @@ n_inputs()` and the change is a no-op.
 does this bake take" reads `caller_input_width()`. A site that dispatches
 BEHAVIOUR on width (regime selection, block offsets, gradient length) is the
 dangerous kind, because its failure mode is *emitting nothing*, not erroring.
+
+---
+
+## REGISTERED AMENDMENT 9 — WAVE 8: the unrun experiment — 944 features on a BREADTH-FIRST data recipe
+### (committed BEFORE any screen fit, any training run, and any wave-8 number exists. The §9.0 facts are prior measurements already committed to this doc or to origin/main; the §9.1 convention determinations are derived from SOURCE and from the inherited argv, which makes them *inputs* to this registration, not results — the same status §D.1's classification and §E.1's spatializability determination carry.)
+
+### 9.0 Why this wave exists (all facts measured BEFORE this registration)
+
+1. **The 944 feature block is not the problem.** The width discriminator
+   (results section above, `a64faae2`) measured, at matched transform state
+   (none) and matched seed (31), **944 beating 372 on KADID by +0.188**
+   (0.7341 vs 0.5459), tying CSIQ and winning LIVE by +0.093. The 372 arms
+   are not ignoring the restored f156-371 pools — `bake_contrib` measures
+   them consuming those pools at **64.2% / 63.6%** of total contribution with
+   2/372 dead — and KADID still does not come back (0.546 / 0.641 vs
+   winner_dial's 0.9464). Reintroduction is retired as a breadth lever.
+2. **The data recipe is the remaining suspect, and it is a monoculture.**
+   Every 944-width bake on the board descends from the same small family of
+   recipes rooted in the 2026-07-03 bigcodec carve-out (`docs/DATASET_HISTORY.md`,
+   `73f91646`). In the arm-H argv the ssim2-mass legs — `bigcodec` (208,169
+   rows), `kadis` (50,000) and the three teacher twins (369,237, whose targets
+   are themselves model predictions distilled from that same lineage) — carry
+   **627,406 of 777,270 = 80.7%** of training rows, and by the trainer's
+   weight-proportional sampling law (§C.0) **2.15/6.35 = 33.9%** of drawn pairs
+   per epoch. The two breadth legs the classic-IQA corpora most resemble get
+   0.5/6.35 = **7.87% each**.
+3. **Breadth is the binding axis and it is failing at every width on this
+   recipe.** Under the balanced profile the 944 family's CSIQ is the floor
+   that binds (`H_co3abpg_s2507`: CSIQ 0.8302 vs the F7 floor 0.83, LIVE
+   0.8634), while the 372-era ships hold 0.93+; the no-transform discriminator
+   arms on the 944 recipe score CSIQ 0.681 / 0.438 and LIVE 0.666 / 0.300
+   against B's 0.934 / 0.897 and winner_dial's 0.958 / 0.960. KADID on the
+   944 recipe runs 0.318–0.734 against 0.809 (B) / 0.946 (winner_dial).
+4. **Two registered cheap levers are outstanding and neither has been run.**
+   (a) The kadid weight/loss lever — `train_w` 0.5 → 1.5 with `loss_mode`
+   `rank` → `both` (registered in §C.5, sharpened in the discriminator
+   results). (b) The winsor-screen refit — the inherited screen force-kills
+   22 populated append features through `winsor_p99:<idx>:0,0` windows
+   (experimentally confirmed bit-for-bit by the no-transform control: 258 dead
+   vs 277, difference exactly the 11 predicted index pairs), and independently
+   **costs KADID −0.165 while buying KonJND +0.166 / CSIQ +0.089 / LIVE
+   +0.052 / CID22 +0.011** (seed 31, 944 width, k=1) — a real trade the
+   campaign has been buying blind.
+
+Wave 8 runs the experiment nobody has run: **the 944 feature set on a
+breadth-first mix, with a screen refit on current data.**
+
+### 9.1 The refit screen — frozen build rule (ONE screen, shared by every arm)
+
+**What "refit" means here, exactly (frozen):** the token→feature ASSIGNMENT of
+the inherited 64-flag WT40+MASK2 screen is held FIXED (which index carries
+`winsor_p99`, which carries `signed_cbrt`); only the **winsor windows** are
+re-fit. Re-*selecting* transforms (a fresh greedy Pearson screen) is a
+different and larger change and is explicitly OUT of scope for this wave.
+
+**Fit rule (frozen; it is the in-repo owner's rule, not a new one):** for each
+of the 54 indices carrying `winsor_p99` in the inherited screen,
+`lo = percentile_linear(col, 0.1)`, `hi = percentile_linear(col, 99.9)`, with
+the owner's degenerate guard `if lo == 0 && hi == 0 { hi = 1e-9 }` — i.e.
+exactly `bake_dial_refit add-winsor`'s defaults (`--lo-pct 0.1 --hi-pct 99.9`)
+and exactly its `percentile_linear` definition. Determined from source at
+`0ce3e2f2` BEFORE registering; nothing is tuned to a result. The 10
+`signed_cbrt` entries pass through byte-unchanged (they carry no params).
+
+**Fit corpus (frozen):** the pooled union, equal weight per ROW, of every
+DISTINCT feature table that any wave-8 arm uses as a *training* leg:
+
+| table | rows |
+|---|---:|
+| `ext944/ext_safesyn_full.parquet` | 111,068 |
+| `ext944/ext_cid22_train201.parquet` | 17,611 |
+| `ext944/ext_kadid.parquet` | 10,125 |
+| `ext944/ext_tid.parquet` | 3,000 |
+| `tbig_944_200k.parquet` | 208,169 |
+| `kadis-944-2026-08-01/kadis_944_ssim2_50k.parquet` | 50,000 |
+| `ext944/konjnd_bpg_train_944.parquet` | 8,060 |
+| **total** | **408,033** |
+
+The three teacher twins are EXCLUDED because they carry their base table's
+feature rows verbatim (only `human_score` is replaced —
+`scripts/canonical_corpus/build_teacher944.py`); including them would only
+re-weight rows already present. This claim is VERIFIED before the fit (feature
+columns of `safesyn_teacher944` vs `ext_safesyn_full`) and the verification is
+reported. `konjnd_bpg_val` is excluded: it is a validation leg (`train_w 0.0`),
+and fitting clip windows on it would touch held-out data.
+
+Fitting on the union of ALL arms' tables — rather than per-arm — is deliberate:
+it makes the screen a single CONTROLLED object, so W8-A vs W8-C isolates the
+mix and W8-C vs the incumbent isolates the screen. The cost is stated honestly:
+W8-A's windows are influenced by rows W8-A does not train on. Wider populations
+give WIDER (more conservative, less clipping) windows, so the direction of that
+influence is toward less intervention, not more.
+
+**Owner (frozen):** the fit is implemented as a new `bake_dial_refit
+refit-winsor` subcommand — the same binary that already owns "fit winsor
+bounds from a corpus" (`add-winsor`) and "emit a transform screen TSV"
+(`screen-transforms`), reusing `percentile_linear` and the streaming parquet
+loader. No Python computes a percentile in this wave. It emits (i) the refit
+token list in the inherited screen's ORDER, so the training argv diffs
+token-for-token against the incumbent driver, and (ii) an audit TSV carrying
+old window, new window, n, and a degenerate flag per index.
+
+**Registered reporting (before the numbers exist):** how many of the 24
+`:0,0` indices come back with a non-degenerate window; any index whose refit
+window is still degenerate (`new_lo == new_hi`) and why; and the magnitude of
+the change on the f0-155 fold block — a pre-registration measurement already
+shows the inherited windows there are ~750× TIGHTER than the current data's
+p99 (e.g. f155 inherited hi 0.1638 vs safesyn p99 121.8), so this refit is
+**not** a cosmetic fix to 24 flags: it materially re-opens the fold block too.
+That is precisely why W8-C and W8-D exist.
+
+### 9.2 The arms (frozen)
+
+Base recipe = the arm-H argv recovered from `H_co3abpg_s2507.bin.spec.json`'s
+embedded `zentrain.repro`, driven by `scripts/wave7_armH_seed.sh`. The wave-8
+driver `scripts/wave8_seed.sh` reproduces it token-for-token under
+`WAVE8_ECHO=1` and changes ONLY the fields each arm names. **The 11 input
+parquets were sha256-verified against the stored `zentrain.repro` inputs
+before this registration: 11/11 MATCH.**
+
+| arm | mix | kadid leg | screen | k | seeds |
+|---|---|---|---|---:|---|
+| **W8-A** | DROP `bigcodec`, `kadis`, `tsafesyn`, `ttbig`, `tkadis`; KEEP `safesyn`, `cid22_train`, `kadid`, `tid` | `train_w` 0.5→**1.5**, `rank`→**both** | **refit** | 3 | 3101, 3103, 3107 |
+| **W8-B** | W8-A + the `konjnd_bpg` train/val legs at wave-7's registered weights (1.2:0.0 / 0.0:1.5) | same as W8-A | **refit** | 3 | 3101, 3103, 3107 |
+| **W8-C** | base recipe UNCHANGED (all 11 groups) | UNCHANGED (0.5, rank) | **refit** | 1 | 3101 |
+| **W8-D** | W8-B's mix (breadth + konjnd) | same as W8-A/B | **inherited** | 1 | 3101 |
+
+Everything else — `--n-hidden-layers 0 --target-column human_score
+--target-scale 100 --epochs 120 --pairs-per-epoch 50000 --max-features 944
+--allow-narrow-features --coarse-decay 1e-5` — is verbatim from the incumbent
+argv in every cell.
+
+**W8-D is an addition by this wave's agent, not a substitution**, and it is
+registered here with its rationale: A/B/C alone confound the screen with the
+mix, because the only (mix, screen) corners they populate are (base, refit),
+(breadth, refit) and — via the incumbent `H_co3abpg_s250{1,3,7}` — (base,
+inherited). W8-D fills (breadth, inherited) and completes the 2×2, so
+"screen at fixed mix" and "mix at fixed screen" both become single-factor
+reads. It is k=1 and is the first cell to drop if compute binds. W8-A and W8-B
+still bundle two registered levers (mix + kadid weight/loss) with the screen;
+that bundling is inherited from the task's arm definition and is stated as a
+limitation rather than silently unpicked.
+
+Seeds 3101/3103/3107 are new to this campaign (verified: zero occurrences in
+this doc before this commit). Tags: `W8A_s<seed>`, `W8B_s<seed>`,
+`W8C_s3101`, `W8D_s3101`.
+
+### 9.3 Endpoints (frozen; the supervisor's wording, with the measured incumbent beside each)
+
+Report ALL; **gate on the first three**:
+
+| # | endpoint | bar | incumbent (`H_co3abpg_s2507`) |
+|---|---|---|---|
+| E1 | KADID | ≥ 0.70 | 0.437 (H band 0.368–0.437; 944-class best ≈ 0.46; era models 0.79–0.95) |
+| E2 | CSIQ **and** LIVE | both ≥ 0.85 | 0.8302 / 0.8634 |
+| E3 | CID22 held | ≥ 0.885 | 0.88055 |
+| R1 | KonJND | reported | 0.4590 |
+| R2 | nonphoto | reported | 0.9164 |
+| R3 | HF-NL per-ref | reported | +0.182 |
+| R4 | dial mono / tied | reported | 94.0% / 0.0% |
+| R5 | M3a | reported (post-`299ccc8c` values only) | 0.866 |
+| R6 | `freeze_check --profile balanced-2026-08-04` floor count | reported | 7/8 |
+
+E1–E3 are pass/fail as written and are NOT relaxable by this wave. R5: a bake
+whose M3a is missing is UNMEASURED, never zero (§E.4).
+
+### 9.4 Registered outcomes (frozen, verbatim from the wave brief)
+
+- **(a)** any cell clears KADID + breadth (E1 ∧ E2) with CID22 held (E3) ⇒
+  the data recipe is confirmed causal, and that cell is the new 944 baseline —
+  reported as the campaign's answer to "can 944 be made to work".
+- **(b)** breadth recovers (E2) but CID22 drops below 0.885 ⇒ the trade is
+  intrinsic to the mix; report the frontier honestly, no cherry-pick.
+- **(c)** no recovery ⇒ the collapse is NOT the ssim2-mass block, which
+  falsifies today's leading explanation — say so plainly and name what is left.
+
+Outcome assignment uses the arm's BEST cell per endpoint, with every cell's
+number printed; k=3 gives a band, not a point, and the band is what is
+reported.
+
+### 9.5 Confounds + limitations (registered before the run)
+
+- W8-A/W8-B change three things at once (mix, kadid weight, kadid loss mode).
+  W8-C/W8-D decompose the screen from the rest; the kadid-lever axis is NOT
+  separately decomposed in this wave and no cell may be described as isolating
+  it.
+- k=3 (A, B) and k=1 (C, D). The campaign's measured seed spread on this
+  architecture is large (KADID 0.318↔0.569 across two screened 944 references;
+  0.546↔0.641 at 372), so a k=1 cell supports direction, never a ranking.
+- Dropping bigcodec/kadis/teachers removes ~82% of training rows; the arms are
+  therefore trained on ~142k (A) / ~150k (B) rows against ~769k. Epochs and
+  pairs-per-epoch are held fixed, so W8-A/B see the same 6M pair draws over a
+  smaller pool — more repetition per row. This is a real difference from the
+  incumbent and is not corrected for.
+- KADID is an E1 gate here while remaining a train==val integrity guard
+  elsewhere in this campaign: W8-A/B/C/D all TRAIN on kadid, so E1 is a
+  *fit* measurement on that corpus, not a generalization measurement. It is
+  gated anyway because the supervisor's question is whether the recipe can
+  make the metric competent on classic IQA at all — but no wave-8 KADID number
+  may be compared against a held-out KADID number, and CSIQ/LIVE (trained on
+  by NO arm) carry the honest breadth signal.
+- The refit screen changes the fold block materially (§9.1), so W8-A/B are not
+  "the incumbent with a different mix"; they are a two-factor change whose
+  factors W8-C/W8-D price separately.
+
+### 9.6 Ops (frozen)
+
+jj workspace `../zensim--wave8` on `main@origin`; `CARGO_TARGET_DIR=
+$HOME/tmp/zensimw8-target` (deleted at wave end — root fs at 91%); heavy steps
+through `~/work/zen/scripts/run-heavy --jobs 6`; logs `~/tmp/wave8/`; scratch
+never in `/tmp`. Per-bake harvest through the committed
+`scripts/harvest_bakes.sh` as each bake lands; waiting ONLY through
+`scripts/await_artifacts.sh`; liveness ONLY via `pgrep -xc zensim_mlp_trai`.
+Selection reported through `freeze_check --select`. New bakes + verdicts
+Tower-mirrored with a sha spot-check. Nothing ships, swaps, promotes, or
+publishes; no bake enters `zensim/weights/`; the freeze decision remains the
+user's.
