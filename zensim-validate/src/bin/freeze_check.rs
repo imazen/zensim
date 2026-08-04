@@ -13,9 +13,19 @@
 //! `scripts/run_full_eval.sh` injects `m3a_coherence`); a raw `--full-json`
 //! also works, with the injected rows degrading to ATTACH.
 //!
+//! Named profiles (`--profile`): a profile is a REGISTERED floor set — a
+//! second decision surface that never edits the default §5 bars. The one
+//! profile today is `balanced-2026-08-04` (sota944 campaign AMENDMENT 8, the
+//! user-directed balanced-selection pass: floors F1–F8 + the registered
+//! `balanced_composite`, frozen in `benchmarks/sota944_campaign_2026-08-03.md`
+//! §8.1 BEFORE any scoring). `--tsv` / `--tsv-header` emit the machine row for
+//! the pool matrix driver (`scripts/sota944_balanced_matrix.sh`).
+//!
 //! Exit: 0 = every evaluable row passes; 1 = at least one FAIL; 2 = usage /
 //! parse error. ATTACH rows never fail the exit — they are pending evidence,
-//! and the table says so out loud.
+//! and the table says so out loud. In the balanced profile, a floor axis
+//! ABSENT from the fulleval counts as not-passed (a candidate nobody measured
+//! cannot be certified balanced on that axis).
 
 use std::path::PathBuf;
 
@@ -29,13 +39,52 @@ const BAR_M3A: f64 = 0.85;
 const BAR_DIAL_MONO: f64 = 0.93; // G3, TWO-PANEL eval mandate
 const BAR_DIAL_TIED: f64 = 0.05; // G3 (upper bound)
 
+// ── AMENDMENT-8 registered floors (sota944 campaign doc §8.1, frozen
+// 2026-08-04 BEFORE any scoring; do not edit after scoring begins) ─────────
+mod balanced {
+    pub const CID22: f64 = 0.885; // F1: one within-config sd (0.01246, arm-D n=12) below the §1 bar; == wave-7 H-Q2 level
+    pub const KONJND: f64 = 0.43; // F2: §1 verbatim (abs)
+    pub const NONPHOTO: f64 = 0.90; // F3: §1 verbatim
+    pub const DIAL_MONO: f64 = 0.93; // F4: §1 dial verbatim
+    pub const DIAL_TIED: f64 = 0.05; // F4 upper bound
+    pub const DIAL_RANGE_MIN: f64 = 1.0; // F5: flat-dial guard
+    pub const DIAL_RANGE_MAX: f64 = 120.0; // F5: bounded-[0,100]-dial sanity (catches the dyn-range-497 class)
+    pub const HFNL_PERREF: f64 = 0.0; // F6: sign floor only (0.1931 stays a reported comparator)
+    pub const CSIQ: f64 = 0.83; // F7: 944-class breadth
+    pub const LIVE: f64 = 0.83; // F7
+    pub const B9: f64 = 0.15; // F8: high-tail non-collapse (signed)
+    pub const B3: f64 = 0.0; // F8: low-tail non-collapse (signed)
+    pub const M3A_GOLD: f64 = 0.85; // reported tier, NOT a floor
+    pub const M3A_SILVER: f64 = 0.78; // ≈ measured 944-class median (26 cells, med 0.793)
+    pub const HFNL_COMPARATOR: f64 = 0.1931; // reported context only
+    // balanced_composite weights: the first six terms are `product_composite`
+    // verbatim; csiq/live/band-tail are the registered additions at 0.15.
+    // Corpus terms are abs SROCC; band-tail is SIGNED (collapse must hurt).
+    pub const W_CID22: f64 = 1.00;
+    pub const W_IMAZEN26: f64 = 0.50;
+    pub const W_NONPHOTO: f64 = 0.30;
+    pub const W_KONJND: f64 = 0.20;
+    pub const W_CSIQ: f64 = 0.15;
+    pub const W_LIVE: f64 = 0.15;
+    pub const W_BANDTAIL: f64 = 0.15;
+    pub const W_AIC3: f64 = 0.10;
+    pub const W_AIC4: f64 = 0.05;
+}
+
 fn usage() -> ! {
     eprintln!(
-        "freeze_check — §5 freeze-bar PASS/FAIL over a fulleval JSON\n\n\
-         usage: freeze_check --fulleval <bake.fulleval.json> [--bar name=value]...\n\n\
+        "freeze_check — freeze-bar / profile PASS-FAIL over a fulleval JSON\n\n\
+         usage: freeze_check --fulleval <bake.fulleval.json> [--bar name=value]...\n\
+                freeze_check --fulleval <f> --profile balanced-2026-08-04 [--tsv]\n\
+                freeze_check --tsv-header\n\n\
+         default (no --profile): the §5 freeze bar (unchanged).\n\
          --bar sets/overrides a cross-bake numeric bar for: csiq, live\n\
-         (their §5 bars are \"≥ best 924-arm\" — externally chosen, so they\n\
-         stay ATTACH rows unless a value is supplied)."
+         (§5 only; their §5 bars are \"≥ best 924-arm\" — externally chosen, so\n\
+         they stay ATTACH rows unless a value is supplied. The balanced\n\
+         profile's floors are REGISTERED and fixed).\n\
+         --profile balanced-2026-08-04: sota944 AMENDMENT-8 floors F1..F8 +\n\
+         the registered balanced_composite (campaign doc §8.1).\n\
+         --tsv: one machine row (columns from --tsv-header)."
     );
     std::process::exit(2);
 }
@@ -57,56 +106,10 @@ enum Row {
     Info(String, String),
 }
 
-fn main() {
-    let mut fulleval: Option<PathBuf> = None;
-    let mut bar_csiq: Option<f64> = None;
-    let mut bar_live: Option<f64> = None;
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--fulleval" => fulleval = args.next().map(PathBuf::from),
-            "--bar" => {
-                let kv = match args.next() {
-                    Some(v) => v,
-                    None => usage(),
-                };
-                let (k, v) = match kv.split_once('=') {
-                    Some(p) => p,
-                    None => usage(),
-                };
-                let val: f64 = match v.parse() {
-                    Ok(x) => x,
-                    Err(_) => usage(),
-                };
-                match k {
-                    "csiq" => bar_csiq = Some(val),
-                    "live" => bar_live = Some(val),
-                    _ => usage(),
-                }
-            }
-            "-h" | "--help" => usage(),
-            _ => usage(),
-        }
-    }
-    let path = match fulleval {
-        Some(p) => p,
-        None => usage(),
-    };
-    let bytes = match std::fs::read(&path) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("freeze_check: read {}: {e}", path.display());
-            std::process::exit(2);
-        }
-    };
-    let v: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("freeze_check: parse {}: {e}", path.display());
-            std::process::exit(2);
-        }
-    };
-
+/// The §5 rows, verbatim (moved out of main 2026-08-04 so the balanced
+/// profile could land WITHOUT touching this path; row order, names and bar
+/// semantics are test-locked below).
+fn legacy_rows(v: &serde_json::Value, bar_csiq: Option<f64>, bar_live: Option<f64>) -> Vec<Row> {
     let mut rows: Vec<Row> = Vec::new();
     let ge = |name: &str, bar: f64, got: Option<f64>, absent: &str| -> Row {
         match got {
@@ -123,13 +126,13 @@ fn main() {
     rows.push(ge(
         "CID22 SROCC (selected seed)",
         BAR_CID22,
-        f(&v, &["rank", "cid22", "srocc"]),
+        f(v, &["rank", "cid22", "srocc"]),
         "cid22 missing — run bake_verdict with the cid22 corpus",
     ));
     rows.push(ge(
         "KonJND abs-SROCC",
         BAR_KONJND,
-        f(&v, &["rank", "konjnd", "srocc"]).map(f64::abs),
+        f(v, &["rank", "konjnd", "srocc"]).map(f64::abs),
         "konjnd missing — run bake_verdict with the konjnd corpus",
     ));
 
@@ -137,19 +140,19 @@ fn main() {
     // E-M fulleval instruments — not computed by bake_verdict (which owns the
     // detection-rate gate). Report the head's detection numbers as context and
     // keep ordering as an ATTACH row.
-    match f(&v, &["corruption_head", "pass_q20"]) {
+    match f(v, &["corruption_head", "pass_q20"]) {
         Some(q20) => rows.push(Row::Info(
             "Corruption head detection (context)".into(),
             format!(
                 "head `{}` pass_q20 {:.1}% / pass_q10 {:.1}%",
                 v["corruption_head"]["head"].as_str().unwrap_or("?"),
                 100.0 * q20,
-                100.0 * f(&v, &["corruption_head", "pass_q10"]).unwrap_or(f64::NAN)
+                100.0 * f(v, &["corruption_head", "pass_q10"]).unwrap_or(f64::NAN)
             ),
         )),
         None => rows.push(Row::Info(
             "Corruption head detection (context)".into(),
-            match f(&v, &["corruption", "pass_q20"]) {
+            match f(v, &["corruption", "pass_q20"]) {
                 Some(d) => format!(
                     "no head given — dial-alone pass_q20 {:.1}% (broken-by-design at 924); \
                      rerun bake_verdict with --corruption-head",
@@ -169,7 +172,7 @@ fn main() {
         ("CSIQ SROCC", bar_csiq, "csiq"),
         ("LIVE SROCC", bar_live, "live"),
     ] {
-        match (bar, f(&v, &["rank", key, "srocc"])) {
+        match (bar, f(v, &["rank", key, "srocc"])) {
             (Some(b), Some(x)) => rows.push(Row::Eval(
                 format!("{name} (≥ best 924-arm)"),
                 format!("≥ {b}"),
@@ -203,11 +206,11 @@ fn main() {
     rows.push(ge(
         "M3a coherence (EM2-class)",
         BAR_M3A,
-        f(&v, &["m3a_coherence"]),
+        f(v, &["m3a_coherence"]),
         "not injected — this is the raw --full-json; run scripts/run_full_eval.sh",
     ));
 
-    match f(&v, &["dial", "mono_pct"]) {
+    match f(v, &["dial", "mono_pct"]) {
         Some(m) => rows.push(Row::Eval(
             "Dial monotonicity".into(),
             format!("≥ {:.0}%", 100.0 * BAR_DIAL_MONO),
@@ -220,7 +223,7 @@ fn main() {
             "dial block missing — bake_verdict needs the dial grid".into(),
         )),
     }
-    match f(&v, &["dial", "tied_pct"]) {
+    match f(v, &["dial", "tied_pct"]) {
         Some(t) => rows.push(Row::Eval(
             "Dial tied rate".into(),
             format!("≤ {:.0}%", 100.0 * BAR_DIAL_TIED),
@@ -233,7 +236,7 @@ fn main() {
             "dial block missing".into(),
         )),
     }
-    match f(&v, &["composite"]) {
+    match f(v, &["composite"]) {
         Some(c) => rows.push(Row::Info("product_composite".into(), format!("{c:.4}"))),
         None => rows.push(Row::Info(
             "product_composite".into(),
@@ -268,12 +271,528 @@ fn main() {
         "≤ 0".into(),
         "extractor-side LOO instrument (gaps-doc §0)".into(),
     ));
+    rows
+}
 
-    // ── Render ──────────────────────────────────────────────────────────
-    let bake = v["name"]
+// ── Balanced profile (AMENDMENT 8) ─────────────────────────────────────────
+
+/// The four registered classes — their USES differ, so they are scored as
+/// separate pools (campaign doc §8.1).
+fn classify(v: &serde_json::Value) -> (&'static str, &'static str) {
+    let kind = v
+        .get("model")
+        .and_then(|m| m.get("kind"))
+        .and_then(|k| k.as_str());
+    if kind == Some("ensemble") {
+        return (
+            "944-ensemble",
+            "k× scoring cost; NOT a shippable artifact; M3a NOT COMPUTABLE",
+        );
+    }
+    let ni = f(v, &["n_inputs"])
+        .or_else(|| f(v, &["model", "n_inputs"]))
+        .map(|x| x as i64);
+    if ni != Some(944) {
+        return (
+            "era-bridge",
+            "context only — regime-incomparable, never shortlisted",
+        );
+    }
+    if bake_name(v).starts_with("C_ensk") {
+        return (
+            "944-distilled",
+            "shippable; the M3a-mover class (wave-6 arm F)",
+        );
+    }
+    ("944-single", "shippable single bake")
+}
+
+fn bake_name(v: &serde_json::Value) -> &str {
+    v["name"]
         .as_str()
         .or_else(|| v["bake"].as_str())
-        .unwrap_or("?");
+        .unwrap_or("?")
+}
+
+/// CID22 band srocc + n by band label ("B3"/"B9"), SIGNED per registration.
+fn cid22_band(v: &serde_json::Value, band: &str) -> Option<(f64, i64)> {
+    let bands = v.get("rank")?.get("cid22")?.get("bands")?.as_array()?;
+    let b = bands.iter().find(|b| b["band"].as_str() == Some(band))?;
+    Some((b["srocc"].as_f64()?, b["n"].as_i64().unwrap_or(0)))
+}
+
+/// The registered ranking composite (§8.1): product_composite's six terms
+/// verbatim + csiq/live/band-tail at 0.15. Corpus terms are abs SROCC (owner
+/// convention); band-tail is SIGNED. Absent terms drop from num AND den.
+fn balanced_composite(v: &serde_json::Value) -> Option<f64> {
+    let corpus = |c: &str| f(v, &["rank", c, "srocc"]).map(f64::abs);
+    let bandtail = match (cid22_band(v, "B3"), cid22_band(v, "B9")) {
+        (Some((b3, _)), Some((b9, _))) => Some((b3 + b9) / 2.0),
+        _ => None,
+    };
+    let terms: [(Option<f64>, f64); 9] = [
+        (corpus("cid22"), balanced::W_CID22),
+        (corpus("imazen26"), balanced::W_IMAZEN26),
+        (corpus("nonphoto"), balanced::W_NONPHOTO),
+        (corpus("konjnd"), balanced::W_KONJND),
+        (corpus("csiq"), balanced::W_CSIQ),
+        (corpus("live"), balanced::W_LIVE),
+        (bandtail, balanced::W_BANDTAIL),
+        (corpus("aic3"), balanced::W_AIC3),
+        (corpus("aic4"), balanced::W_AIC4),
+    ];
+    let (num, den) = terms
+        .iter()
+        .filter_map(|(x, w)| x.map(|x| (x * w, *w)))
+        .fold((0.0f64, 0.0f64), |(n, d), (x, w)| (n + x, d + w));
+    if den > 0.0 { Some(num / den) } else { None }
+}
+
+/// One registered floor: id (TSV fail token), gate name, bar text, measured
+/// text, pass (absent axis ⇒ false, text says UNEVALUABLE).
+struct Floor {
+    id: &'static str,
+    gate: &'static str,
+    bar: String,
+    measured: String,
+    pass: bool,
+}
+
+fn floor_ge(id: &'static str, gate: &'static str, bar: f64, got: Option<f64>) -> Floor {
+    match got {
+        Some(x) => Floor {
+            id,
+            gate,
+            bar: format!("≥ {bar}"),
+            measured: format!("{x:.4}"),
+            pass: x >= bar,
+        },
+        None => Floor {
+            id,
+            gate,
+            bar: format!("≥ {bar}"),
+            measured: "not measured — UNEVALUABLE".into(),
+            pass: false,
+        },
+    }
+}
+
+fn m3a_tier(v: &serde_json::Value, class: &str) -> String {
+    if class == "944-ensemble" {
+        return "NOT COMPUTABLE (ensemble — the coherence instrument loads one ZNPR)".into();
+    }
+    match f(v, &["m3a_coherence"]) {
+        Some(x) if x >= balanced::M3A_GOLD => format!("{x:.4} — GOLD (≥ {})", balanced::M3A_GOLD),
+        Some(x) if x >= balanced::M3A_SILVER => {
+            format!("{x:.4} — silver (≥ {})", balanced::M3A_SILVER)
+        }
+        Some(x) => format!("{x:.4} — FLAGGED (< {})", balanced::M3A_SILVER),
+        None => "— (NOT MEASURED)".into(),
+    }
+}
+
+struct BalancedReport {
+    class: &'static str,
+    class_note: &'static str,
+    floors: Vec<Floor>,
+    info: Vec<(String, String)>,
+    composite: Option<f64>,
+}
+
+fn eval_balanced(v: &serde_json::Value) -> BalancedReport {
+    let (class, class_note) = classify(v);
+    let mut floors = Vec::new();
+
+    // F1 CID22
+    floors.push(floor_ge(
+        "cid22",
+        "F1 CID22 SROCC",
+        balanced::CID22,
+        f(v, &["rank", "cid22", "srocc"]),
+    ));
+    // F2 KonJND (abs)
+    floors.push(floor_ge(
+        "konjnd",
+        "F2 KonJND abs-SROCC",
+        balanced::KONJND,
+        f(v, &["rank", "konjnd", "srocc"]).map(f64::abs),
+    ));
+    // F3 nonphoto
+    floors.push(floor_ge(
+        "nonphoto",
+        "F3 nonphoto SROCC",
+        balanced::NONPHOTO,
+        f(v, &["rank", "nonphoto", "srocc"]),
+    ));
+    // F4 dial mono + tied (one row, both must hold)
+    let dial_bar = format!(
+        "mono ≥ {:.0}% ∧ tied ≤ {:.0}%",
+        100.0 * balanced::DIAL_MONO,
+        100.0 * balanced::DIAL_TIED
+    );
+    floors.push(
+        match (f(v, &["dial", "mono_pct"]), f(v, &["dial", "tied_pct"])) {
+            (Some(m), Some(t)) => Floor {
+                id: "dial",
+                gate: "F4 dial mono/tied",
+                bar: dial_bar,
+                measured: format!("mono {:.1}% / tied {:.1}%", 100.0 * m, 100.0 * t),
+                pass: m >= balanced::DIAL_MONO && t <= balanced::DIAL_TIED,
+            },
+            _ => Floor {
+                id: "dial",
+                gate: "F4 dial mono/tied",
+                bar: dial_bar,
+                measured: "dial block missing — UNEVALUABLE".into(),
+                pass: false,
+            },
+        },
+    );
+    // F5 dial dynamic-range sanity
+    let range_bar = format!(
+        "{} ≤ span ≤ {}",
+        balanced::DIAL_RANGE_MIN,
+        balanced::DIAL_RANGE_MAX
+    );
+    floors.push(match f(v, &["dial", "dynamic_range"]) {
+        Some(r) => Floor {
+            id: "dialrange",
+            gate: "F5 dial span sanity",
+            bar: range_bar,
+            measured: format!("{r:.1}"),
+            pass: (balanced::DIAL_RANGE_MIN..=balanced::DIAL_RANGE_MAX).contains(&r),
+        },
+        None => Floor {
+            id: "dialrange",
+            gate: "F5 dial span sanity",
+            bar: range_bar,
+            measured: "dial block missing — UNEVALUABLE".into(),
+            pass: false,
+        },
+    });
+    // F6 HF-NL per-ref sign floor
+    floors.push(floor_ge(
+        "hfnl",
+        "F6 HF-NL per-ref (sign)",
+        balanced::HFNL_PERREF,
+        f(v, &["rank", "hfnlproxy", "per_ref_mean"]),
+    ));
+    // F7 breadth: CSIQ ∧ LIVE (one row)
+    floors.push(
+        match (
+            f(v, &["rank", "csiq", "srocc"]),
+            f(v, &["rank", "live", "srocc"]),
+        ) {
+            (Some(c), Some(l)) => Floor {
+                id: "breadth",
+                gate: "F7 breadth CSIQ ∧ LIVE",
+                bar: format!("both ≥ {}", balanced::CSIQ),
+                measured: format!("csiq {c:.4} / live {l:.4}"),
+                pass: c >= balanced::CSIQ && l >= balanced::LIVE,
+            },
+            _ => Floor {
+                id: "breadth",
+                gate: "F7 breadth CSIQ ∧ LIVE",
+                bar: format!("both ≥ {}", balanced::CSIQ),
+                measured: "csiq/live missing — UNEVALUABLE".into(),
+                pass: false,
+            },
+        },
+    );
+    // F8 band tails (signed; n printed, n<30 parenthesized per board convention)
+    let fmt_band = |b: Option<(f64, i64)>| -> String {
+        match b {
+            Some((s, n)) if n < 30 => format!("({s:.3}) n={n}"),
+            Some((s, n)) => format!("{s:.3} n={n}"),
+            None => "missing".into(),
+        }
+    };
+    let b3 = cid22_band(v, "B3");
+    let b9 = cid22_band(v, "B9");
+    floors.push(Floor {
+        id: "bandtail",
+        gate: "F8 CID22 band tails",
+        bar: format!("B9 ≥ {} ∧ B3 ≥ {}", balanced::B9, balanced::B3),
+        measured: format!("B9 {} / B3 {}", fmt_band(b9), fmt_band(b3)),
+        pass: matches!((b3, b9), (Some((s3, _)), Some((s9, _)))
+            if s9 >= balanced::B9 && s3 >= balanced::B3),
+    });
+
+    // Reported (never floors)
+    let mut info: Vec<(String, String)> = Vec::new();
+    info.push(("M3a (tiered, reported)".into(), m3a_tier(v, class)));
+    info.push((
+        "Corruption (head-owned)".into(),
+        match f(v, &["corruption_head", "pass_q20"]) {
+            Some(q20) => format!(
+                "head `{}` pass_q20 {:.1}% / pass_q10 {:.1}%",
+                v["corruption_head"]["head"].as_str().unwrap_or("?"),
+                100.0 * q20,
+                100.0 * f(v, &["corruption_head", "pass_q10"]).unwrap_or(f64::NAN)
+            ),
+            None => match f(v, &["corruption", "pass_q20"]) {
+                Some(d) => format!(
+                    "no head — dial-alone pass_q20 {:.1}% (broken-by-design post-720)",
+                    100.0 * d
+                ),
+                None => "no corruption grid".into(),
+            },
+        },
+    ));
+    info.push((
+        "HF-NL 0.1931 comparator (context)".into(),
+        match f(v, &["rank", "hfnlproxy", "per_ref_mean"]) {
+            Some(x) => format!(
+                "{} the arm-B comparator ({x:.4} vs {})",
+                if x >= balanced::HFNL_COMPARATOR {
+                    "at/above"
+                } else {
+                    "below"
+                },
+                balanced::HFNL_COMPARATOR
+            ),
+            None => "not measured".into(),
+        },
+    ));
+    let guard = |c: &str| match f(v, &["rank", c, "srocc"]) {
+        Some(x) => format!("{x:.4}"),
+        None => "—".into(),
+    };
+    info.push((
+        "KADID/TID (t=v integrity guards, dimmed)".into(),
+        format!(
+            "kadid {} / tid {} — never scored",
+            guard("kadid"),
+            guard("tid")
+        ),
+    ));
+    info.push(("sdr25 (within-family selector only)".into(), guard("sdr25")));
+    info.push((
+        "packaging".into(),
+        match v.get("model").and_then(|m| m.get("output_spline")) {
+            Some(s) if !s.is_null() => "output spline present".into(),
+            _ => "spline-less raw head — needs `bake_dial_refit add-spline` \
+                  (+ rank-invariance check) before G-RANGE is defined"
+                .into(),
+        },
+    ));
+    let repro = match (v.get("repro").map(|r| !r.is_null()).unwrap_or(false), class) {
+        (true, "944-ensemble") => "anchor-member only (ensemble)",
+        (true, _) => "present",
+        (false, _) => "absent",
+    };
+    info.push(("repro".into(), repro.into()));
+    match f(v, &["composite"]) {
+        Some(c) => info.push(("product_composite (§1)".into(), format!("{c:.4}"))),
+        None => info.push(("product_composite (§1)".into(), "null".into())),
+    }
+
+    let composite = balanced_composite(v);
+    BalancedReport {
+        class,
+        class_note,
+        floors,
+        info,
+        composite,
+    }
+}
+
+const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid\ttid\tspline\trepro\tfails";
+
+fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
+    let n_pass = r.floors.iter().filter(|x| x.pass).count();
+    let fails: Vec<&str> = r.floors.iter().filter(|x| !x.pass).map(|x| x.id).collect();
+    let num = |o: Option<f64>| o.map(|x| format!("{x:.5}")).unwrap_or_else(|| "-".into());
+    let b3 = cid22_band(v, "B3");
+    let b9 = cid22_band(v, "B9");
+    let m3a = f(v, &["m3a_coherence"]);
+    let tier: String = if r.class == "944-ensemble" {
+        "not-computable".into()
+    } else {
+        match m3a {
+            Some(x) if x >= balanced::M3A_GOLD => "gold".into(),
+            Some(x) if x >= balanced::M3A_SILVER => "silver".into(),
+            Some(_) => "flagged".into(),
+            None => "-".into(),
+        }
+    };
+    let spline = match v.get("model").and_then(|m| m.get("output_spline")) {
+        Some(s) if !s.is_null() => "present",
+        _ => "none",
+    };
+    let repro = match (
+        v.get("repro").map(|x| !x.is_null()).unwrap_or(false),
+        r.class,
+    ) {
+        (true, "944-ensemble") => "anchor-only",
+        (true, _) => "present",
+        (false, _) => "absent",
+    };
+    [
+        bake_name(v).to_string(),
+        r.class.to_string(),
+        if n_pass == r.floors.len() {
+            "PASS".to_string()
+        } else {
+            "FAIL".to_string()
+        },
+        format!("{n_pass}/{}", r.floors.len()),
+        num(f(v, &["rank", "cid22", "srocc"])),
+        num(f(v, &["rank", "konjnd", "srocc"]).map(f64::abs)),
+        num(f(v, &["rank", "nonphoto", "srocc"])),
+        num(f(v, &["rank", "csiq", "srocc"])),
+        num(f(v, &["rank", "live", "srocc"])),
+        num(f(v, &["rank", "hfnlproxy", "per_ref_mean"])),
+        num(b3.map(|x| x.0)),
+        b3.map(|x| x.1.to_string()).unwrap_or_else(|| "-".into()),
+        num(b9.map(|x| x.0)),
+        b9.map(|x| x.1.to_string()).unwrap_or_else(|| "-".into()),
+        num(f(v, &["dial", "mono_pct"])),
+        num(f(v, &["dial", "tied_pct"])),
+        num(f(v, &["dial", "dynamic_range"])),
+        num(m3a),
+        tier,
+        num(f(v, &["corruption_head", "pass_q20"])),
+        num(r.composite),
+        num(f(v, &["composite"])),
+        num(f(v, &["rank", "sdr25", "srocc"])),
+        num(f(v, &["rank", "kadid", "srocc"])),
+        num(f(v, &["rank", "tid", "srocc"])),
+        spline.to_string(),
+        repro.to_string(),
+        if fails.is_empty() {
+            "-".to_string()
+        } else {
+            fails.join(",")
+        },
+    ]
+    .join("\t")
+}
+
+fn main() {
+    let mut fulleval: Option<PathBuf> = None;
+    let mut bar_csiq: Option<f64> = None;
+    let mut bar_live: Option<f64> = None;
+    let mut profile: Option<String> = None;
+    let mut tsv = false;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--fulleval" => fulleval = args.next().map(PathBuf::from),
+            "--profile" => profile = args.next(),
+            "--tsv" => tsv = true,
+            "--tsv-header" => {
+                println!("{TSV_COLS}");
+                std::process::exit(0);
+            }
+            "--bar" => {
+                let kv = match args.next() {
+                    Some(v) => v,
+                    None => usage(),
+                };
+                let (k, v) = match kv.split_once('=') {
+                    Some(p) => p,
+                    None => usage(),
+                };
+                let val: f64 = match v.parse() {
+                    Ok(x) => x,
+                    Err(_) => usage(),
+                };
+                match k {
+                    "csiq" => bar_csiq = Some(val),
+                    "live" => bar_live = Some(val),
+                    _ => usage(),
+                }
+            }
+            "-h" | "--help" => usage(),
+            _ => usage(),
+        }
+    }
+    match profile.as_deref() {
+        None | Some("balanced-2026-08-04") => {}
+        Some(other) => {
+            eprintln!("freeze_check: unknown profile `{other}` (known: balanced-2026-08-04)");
+            std::process::exit(2);
+        }
+    }
+    if tsv && profile.is_none() {
+        eprintln!(
+            "freeze_check: --tsv requires --profile (the §5 table has ATTACH rows a TSV cannot carry)"
+        );
+        std::process::exit(2);
+    }
+    let path = match fulleval {
+        Some(p) => p,
+        None => usage(),
+    };
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("freeze_check: read {}: {e}", path.display());
+            std::process::exit(2);
+        }
+    };
+    let v: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("freeze_check: parse {}: {e}", path.display());
+            std::process::exit(2);
+        }
+    };
+
+    // ── Balanced profile path (AMENDMENT 8) ─────────────────────────────
+    if profile.is_some() {
+        let r = eval_balanced(&v);
+        let n_fail = r.floors.iter().filter(|x| !x.pass).count();
+        if tsv {
+            println!("{}", tsv_row(&v, &r));
+        } else {
+            let bake = bake_name(&v);
+            println!("# Balanced-selection profile `balanced-2026-08-04` — `{bake}`\n");
+            println!(
+                "Class: **{}** — {}. Floors: sota944 campaign AMENDMENT 8 (§8.1, \
+                 registered 2026-08-04 BEFORE scoring; user-directed policy). §1 \
+                 stays the freeze bar — this is the balanced SELECTION surface.\n",
+                r.class, r.class_note
+            );
+            println!("| floor | bar | measured | verdict |");
+            println!("|---|---|---|:--:|");
+            for x in &r.floors {
+                println!(
+                    "| {} | {} | {} | {} |",
+                    x.gate,
+                    x.bar,
+                    x.measured,
+                    if x.pass { "PASS" } else { "**FAIL**" }
+                );
+            }
+            println!("\n| reported (never floors) | value |");
+            println!("|---|---|");
+            for (k, val) in &r.info {
+                println!("| {k} | {val} |");
+            }
+            match r.composite {
+                Some(c) => println!("\n**balanced_composite = {c:.4}** (registered §8.1 weights)"),
+                None => println!("\nbalanced_composite: not computable (no terms present)"),
+            }
+            println!(
+                "\n{} of {} floors pass{}",
+                r.floors.len() - n_fail,
+                r.floors.len(),
+                if n_fail == 0 {
+                    " — BALANCED-PROFILE PASS"
+                } else {
+                    ""
+                }
+            );
+        }
+        std::process::exit(if n_fail > 0 { 1 } else { 0 });
+    }
+
+    // ── §5 default path (unchanged) ─────────────────────────────────────
+    let rows = legacy_rows(&v, bar_csiq, bar_live);
+
+    let bake = bake_name(&v);
     println!("# Freeze-bar summary — `{bake}`\n");
     println!(
         "Bars: zenpapers final-metric plan §5 (2026-07-31). Owners: \
@@ -307,4 +826,268 @@ fn main() {
         n_fail, n_attach
     );
     std::process::exit(if n_fail > 0 { 1 } else { 0 });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A fixture that passes every registered floor exactly at/above the line.
+    fn passing_fixture() -> serde_json::Value {
+        json!({
+            "name": "FIX_single",
+            "n_inputs": 944,
+            "model": { "n_inputs": 944, "output_spline": null },
+            "repro": { "seed": 1 },
+            "composite": 0.85,
+            "m3a_coherence": 0.80,
+            "rank": {
+                "cid22": { "srocc": 0.885, "bands": [
+                    { "band": "B3", "srocc": 0.0, "n": 57 },
+                    { "band": "B9", "srocc": 0.15, "n": 43 }
+                ]},
+                "konjnd": { "srocc": -0.43 },
+                "nonphoto": { "srocc": 0.90 },
+                "csiq": { "srocc": 0.83 },
+                "live": { "srocc": 0.83 },
+                "imazen26": { "srocc": 0.91 },
+                "aic3": { "srocc": 0.79 },
+                "aic4": { "srocc": 0.91 },
+                "sdr25": { "srocc": 0.93 },
+                "kadid": { "srocc": 0.32 },
+                "tid": { "srocc": 0.88 },
+                "hfnlproxy": { "srocc": 0.5, "per_ref_mean": 0.0 }
+            },
+            "dial": { "mono_pct": 0.93, "tied_pct": 0.05, "dynamic_range": 15.0 }
+        })
+    }
+
+    #[test]
+    fn balanced_floors_resolve_as_registered_and_fixture_passes() {
+        let v = passing_fixture();
+        let r = eval_balanced(&v);
+        assert_eq!(r.class, "944-single");
+        assert_eq!(r.class_note, "shippable single bake");
+        assert_eq!(r.floors.len(), 8, "eight registered floors F1..F8");
+        for x in &r.floors {
+            assert!(
+                x.pass,
+                "floor {} should pass at the registered edge: {}",
+                x.id, x.measured
+            );
+        }
+        // Each floor flips to FAIL just below its registered line.
+        let cases: Vec<(&str, serde_json::Value)> = vec![
+            ("cid22", json!({"rank": {"cid22": {"srocc": 0.8849}}})),
+            ("konjnd", json!({"rank": {"konjnd": {"srocc": 0.4299}}})),
+            ("nonphoto", json!({"rank": {"nonphoto": {"srocc": 0.8999}}})),
+            ("dial", json!({"dial": {"mono_pct": 0.9299}})),
+            ("dial", json!({"dial": {"tied_pct": 0.0501}})),
+            ("dialrange", json!({"dial": {"dynamic_range": 120.1}})),
+            ("dialrange", json!({"dial": {"dynamic_range": 0.9}})),
+            (
+                "hfnl",
+                json!({"rank": {"hfnlproxy": {"per_ref_mean": -0.0001}}}),
+            ),
+            ("breadth", json!({"rank": {"csiq": {"srocc": 0.8299}}})),
+            ("breadth", json!({"rank": {"live": {"srocc": 0.8299}}})),
+        ];
+        for (id, patch) in cases {
+            let mut v = passing_fixture();
+            merge(&mut v, &patch);
+            let r = eval_balanced(&v);
+            let fl = r.floors.iter().find(|x| x.id == id).unwrap();
+            assert!(!fl.pass, "floor {id} must FAIL under patch {patch}");
+            assert_eq!(
+                r.floors.iter().filter(|x| !x.pass).count(),
+                1,
+                "exactly one floor fails for patch on {id}"
+            );
+        }
+        // band-tail floor: B9 below 0.15 fails; B3 below 0.0 fails.
+        for bands in [
+            json!([{ "band": "B3", "srocc": 0.0, "n": 57 },
+                   { "band": "B9", "srocc": 0.1499, "n": 43 }]),
+            json!([{ "band": "B3", "srocc": -0.001, "n": 57 },
+                   { "band": "B9", "srocc": 0.2, "n": 43 }]),
+        ] {
+            let mut v = passing_fixture();
+            v["rank"]["cid22"]["bands"] = bands;
+            let r = eval_balanced(&v);
+            let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
+            assert!(!fl.pass);
+        }
+    }
+
+    #[test]
+    fn dyn_range_497_class_fails_on_range_and_tied() {
+        // The named pathological cell class: dynamic_range 497, tied 15.6%,
+        // mono 93.7% — ranks high, broken dial. F5 + F4 must both catch it.
+        let mut v = passing_fixture();
+        merge(
+            &mut v,
+            &json!({"dial": {"dynamic_range": 496.6, "tied_pct": 0.156, "mono_pct": 0.937}}),
+        );
+        let r = eval_balanced(&v);
+        let by = |id: &str| r.floors.iter().find(|x| x.id == id).unwrap().pass;
+        assert!(!by("dialrange"), "497-class span must fail F5");
+        assert!(!by("dial"), "15.6% tied must fail F4");
+    }
+
+    #[test]
+    fn missing_axis_is_unevaluable_not_passed() {
+        let mut v = passing_fixture();
+        v["rank"].as_object_mut().unwrap().remove("hfnlproxy");
+        let r = eval_balanced(&v);
+        let fl = r.floors.iter().find(|x| x.id == "hfnl").unwrap();
+        assert!(!fl.pass);
+        assert!(fl.measured.contains("UNEVALUABLE"));
+    }
+
+    #[test]
+    fn ensemble_class_m3a_not_computable() {
+        let mut v = passing_fixture();
+        v["model"]["kind"] = json!("ensemble");
+        let r = eval_balanced(&v);
+        assert_eq!(r.class, "944-ensemble");
+        let (_, m3a) = r.info.iter().find(|(k, _)| k.starts_with("M3a")).unwrap();
+        assert!(m3a.contains("NOT COMPUTABLE"), "got: {m3a}");
+        // distilled + era-bridge classes
+        let mut v = passing_fixture();
+        v["name"] = json!("C_ensk2_s1303");
+        assert_eq!(eval_balanced(&v).class, "944-distilled");
+        let mut v = passing_fixture();
+        v["n_inputs"] = json!(372);
+        v["model"]["n_inputs"] = json!(372);
+        assert_eq!(eval_balanced(&v).class, "era-bridge");
+    }
+
+    #[test]
+    fn band_n_below_30_renders_parenthesized() {
+        let mut v = passing_fixture();
+        v["rank"]["cid22"]["bands"] = json!([
+            { "band": "B3", "srocc": 0.05, "n": 12 },
+            { "band": "B9", "srocc": 0.2, "n": 43 }
+        ]);
+        let r = eval_balanced(&v);
+        let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
+        assert!(fl.measured.contains("(0.050) n=12"), "got: {}", fl.measured);
+        assert!(fl.measured.contains("0.200 n=43"));
+    }
+
+    #[test]
+    fn composite_matches_registered_weights() {
+        let v = passing_fixture();
+        // Hand-computed with the §8.1 table (abs corpus terms; signed band-tail):
+        let bandtail = (0.0 + 0.15) / 2.0;
+        let num = 1.00 * 0.885
+            + 0.50 * 0.91
+            + 0.30 * 0.90
+            + 0.20 * 0.43
+            + 0.15 * 0.83
+            + 0.15 * 0.83
+            + 0.15 * bandtail
+            + 0.10 * 0.79
+            + 0.05 * 0.91;
+        let den = 1.00 + 0.50 + 0.30 + 0.20 + 0.15 + 0.15 + 0.15 + 0.10 + 0.05;
+        let expect = num / den;
+        let got = balanced_composite(&v).unwrap();
+        assert!((got - expect).abs() < 1e-12, "got {got}, expect {expect}");
+        // absent term drops from num AND den
+        let mut v2 = passing_fixture();
+        v2["rank"].as_object_mut().unwrap().remove("aic4");
+        let got2 = balanced_composite(&v2).unwrap();
+        let expect2 = (num - 0.05 * 0.91) / (den - 0.05);
+        assert!((got2 - expect2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn tsv_row_carries_verdict_and_fails() {
+        let v = passing_fixture();
+        let r = eval_balanced(&v);
+        let row = tsv_row(&v, &r);
+        let cols: Vec<&str> = row.split('\t').collect();
+        assert_eq!(cols.len(), TSV_COLS.split('\t').count());
+        assert_eq!(cols[0], "FIX_single");
+        assert_eq!(cols[2], "PASS");
+        assert_eq!(cols[3], "8/8");
+        assert_eq!(*cols.last().unwrap(), "-");
+        let mut v2 = passing_fixture();
+        merge(&mut v2, &json!({"rank": {"cid22": {"srocc": 0.80}}}));
+        let r2 = eval_balanced(&v2);
+        let row2 = tsv_row(&v2, &r2);
+        let cols2: Vec<&str> = row2.split('\t').collect();
+        assert_eq!(cols2[2], "FAIL");
+        assert!(cols2.last().unwrap().contains("cid22"));
+    }
+
+    /// The §5 default path is UNCHANGED by the profile addition: lock the row
+    /// count, order, gate names and bar semantics of `legacy_rows` (this is
+    /// the pre-existing behavior, transcribed — not new policy).
+    #[test]
+    fn legacy_rows_unchanged_by_profile_addition() {
+        let v = passing_fixture();
+        let rows = legacy_rows(&v, None, None);
+        let names: Vec<String> = rows
+            .iter()
+            .map(|r| match r {
+                Row::Eval(g, ..) => format!("E:{g}"),
+                Row::Attach(g, ..) => format!("A:{g}"),
+                Row::Info(g, ..) => format!("I:{g}"),
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "E:CID22 SROCC (selected seed)",
+                "E:KonJND abs-SROCC",
+                "I:Corruption head detection (context)",
+                "A:Corruption ORDERING via head",
+                "A:CSIQ SROCC (≥ best 924-arm)",
+                "A:LIVE SROCC (≥ best 924-arm)",
+                "A:UPIQ pooled (V1-HDR)",
+                "A:Korshunov hold (V1-HDR)",
+                "E:M3a coherence (EM2-class)",
+                "E:Dial monotonicity",
+                "E:Dial tied rate",
+                "I:product_composite",
+                "E:Byte-repro (embedded zentrain.repro)",
+                "A:Perf SDR",
+                "A:Perf HDR (PU path)",
+                "A:LOO (append2 family)",
+            ]
+        );
+        // §5 bar semantics spot-checks: 0.885 fails the §5 0.89 bar; M3a 0.80
+        // fails 0.85; the dial rows pass at the same G3 lines.
+        let get = |g: &str| {
+            rows.iter()
+                .find_map(|r| match r {
+                    Row::Eval(name, _, _, ok) if name == g => Some(*ok),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert!(!get("CID22 SROCC (selected seed)"));
+        assert!(get("KonJND abs-SROCC"));
+        assert!(!get("M3a coherence (EM2-class)"));
+        assert!(get("Dial monotonicity"));
+        assert!(get("Dial tied rate"));
+        // csiq/live stay ATTACH without --bar, Eval with it.
+        let rows2 = legacy_rows(&v, Some(0.8), None);
+        assert!(rows2.iter().any(|r| matches!(r,
+            Row::Eval(g, _, _, true) if g == "CSIQ SROCC (≥ best 924-arm)")));
+    }
+
+    /// serde_json deep-merge helper for fixture patching.
+    fn merge(dst: &mut serde_json::Value, patch: &serde_json::Value) {
+        match (dst, patch) {
+            (serde_json::Value::Object(d), serde_json::Value::Object(p)) => {
+                for (k, v) in p {
+                    merge(d.entry(k.clone()).or_insert(serde_json::Value::Null), v);
+                }
+            }
+            (d, p) => *d = p.clone(),
+        }
+    }
 }
