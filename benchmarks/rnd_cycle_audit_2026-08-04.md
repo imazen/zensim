@@ -243,7 +243,35 @@ what actually costs.
 
 ---
 
-## 8. Fixes landed with this audit
+## 8. Compute-bound vs orchestration-bound — what each fix buys
+
+Sized so the two workstreams can be compared rather than confused. A sibling
+agent is separately optimizing `bake_verdict` (35 s full panel) and the trainer
+(~35 min/seed, validation-dominated); those are the inputs to the right-hand
+column.
+
+| pool | size today | which fix moves it |
+|---|---|---|
+| dead wall-clock (unharvested + unqueued) | **6.77 h** | orchestration — this audit |
+| cache re-charge from idle | **$395.24 / 13.9 %** | orchestration — this audit |
+| `bake_verdict` wall-clock (162 logged runs, mean 36.4 s) | **1.64 h** | perf (sibling) **and** orchestration (below) |
+| trainer + lane job-hours (49 `run-heavy` jobs; overlapping lanes, so job-hours not wall-clock) | **13.33 h** | perf (sibling) |
+| compute-bound idle wall-clock | **8.03 h** | perf (sibling) |
+| `cargo` wall-clock, all agents | **23.0 min** | nothing — §5 |
+
+Artifacts produced in the window: 106 bakes, 118 `full.json`, 114 `verdict.md`,
+172 fullevals.
+
+**The two workstreams compose, and one number belongs to both.** The 1.64 h of
+`bake_verdict` was spent *serially, after* training finished — 21 coherence
+verdicts run in a block at 20:53Z, wave-4's `verdict_daemon` after the lane. Run
+inline via `harvest_bakes.sh`, that same work overlaps the *next* seed's
+training and disappears from the critical path entirely. So harvest-inline buys
+~1.6 h of compute-bound time on top of the 6.77 h of dead time — without making
+`bake_verdict` one millisecond faster. Halving `bake_verdict` on top of that
+saves ~0.8 h; the two are additive and neither substitutes for the other.
+
+## 9. Fixes landed with this audit
 
 | fix | addresses | evidence it addresses |
 |---|---|---|
