@@ -400,6 +400,12 @@ pub(crate) const C_HL: f64 = 0.32;
 /// design, so a channel axis would be 2/3 structural zeros.
 pub const APPEND2_PER_SCALE: usize = 5;
 
+/// The one channel the append2 block is computed on (Y). The block has no
+/// channel axis in its LAYOUT (see [`APPEND2_PER_SCALE`]), but its signals
+/// are accumulated from the Y-channel kernels, so the attribution density
+/// contributes on this channel only.
+pub(crate) const APPEND2_CHANNEL: usize = 1;
+
 /// Named local offsets within one scale's append2 block (all Y-only).
 pub mod idx_append2 {
     /// BANDVIS banding-visibility GAIN (gaps-doc §6b design, 2026-07-27;
@@ -6546,6 +6552,10 @@ struct V2AppCoeffs {
     gmean_d: f64,
     // edge-width: coefficient × (|∇d| − |∇s|).
     c_edgew: f64,
+    // append2 BANDVIS pair (f924+, Y-only): coefficient × the per-pixel
+    // FR-excess indicator. Mean pools like the v2 hf pair — `−s_k/N`.
+    c_bv_gain: f64,
+    c_bv_loss: f64,
     inv_n: f64,
 }
 
@@ -6553,6 +6563,7 @@ struct V2AppCoeffs {
 fn derive_v2app_coeffs(
     s_v2: &[f64],
     s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
     scale: usize,
     ch: usize,
     cell: &AttrCellSums,
@@ -6595,6 +6606,45 @@ fn derive_v2app_coeffs(
         c_edgew: edgew_coeff,
         ..Default::default()
     };
+
+    // ── append2 (f924-943; `idx_append2`), Y-only, no channel axis ────────
+    // Layout `f924 + scale*APPEND2_PER_SCALE + local`. Registered
+    // per-slot decomposability (campaign appendix E.1 / the
+    // `slot_decomposability` TSV) — the block splits, it is not uniform:
+    //
+    //  * BANDVIS_GAIN / BANDVIS_LOSS — class **E**. Plain mean over the
+    //    plane of a per-pixel `bounded_excess_pair` indicator, i.e. the
+    //    exact pooling form of the v2 HF_GAIN/HF_LOSS/HF_MAG_LOSS slots:
+    //    `(δf)_i = −v_i/N`. Spatialized below.
+    //  * LUMA_MEAN_REF — class **N by definition**: `sat(mean(ref Y))` is
+    //    REFERENCE-ONLY, so `∂f/∂(distorted) ≡ 0` and a zero density is the
+    //    exactly-correct answer (same footing as v2 `PJND_FRAGILITY` and
+    //    append `GRAD_SRC_MEAN`, which also carry no term here).
+    //  * HL_BIN1 / HL_BIN2 — class **N (structural zero) on this route**.
+    //    Their form (`Σw·mse_i/Σw`, reference-side w) IS class-E, identical
+    //    to the append luminance bins — but they are computed only under the
+    //    HDR const-generic `HL`, and this attribution path is structurally
+    //    SDR (`attr_pass_a_kernels` passes `hl = false`; both sides come
+    //    through the SDR `prepare_v2_reference_impl`). On the SDR route
+    //    `Σw ≡ 0` ⇒ `WeightedSum::finish() ≡ 0` ⇒ the feature is identically
+    //    0.0 ⇒ `Δf ≡ 0` for any probed gradient — the same footing as the
+    //    X/B transducer slots and the `APPEND_SKIP_B_SCALE0` cell.
+    //
+    // So exactly 2 of the 5 local slots carry a term, and the other 3 are
+    // deliberately, explicitly zero rather than silently unreached.
+    if ch == APPEND2_CHANNEL {
+        let ap2b = scale * APPEND2_PER_SCALE;
+        let gap2 = |slot: usize| -> f64 {
+            s_append2
+                .and_then(|s| s.get(ap2b + slot))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        c.c_bv_gain = -gap2(idx_append2::BANDVIS_GAIN) * inv_n;
+        c.c_bv_loss = -gap2(idx_append2::BANDVIS_LOSS) * inv_n;
+        // idx_append2::LUMA_MEAN_REF / HL_BIN1 / HL_BIN2: no term, by the
+        // classification above. Deliberate omission, not an oversight.
+    }
 
     // Weighted pools: density += s_k · (−w_i·v_i/Σw). Σw is shared per
     // family (same weight for all 4 members).
@@ -6914,12 +6964,15 @@ fn attr_pass_b_rows(
         }
     }
 
-    // Gradient family: gms / ringing / banding / gms-dev / edge-width.
+    // Gradient family: gms / ringing / banding / gms-dev / edge-width /
+    // append2 BANDVIS.
+    let need_bandvis = co.c_bv_gain != 0.0 || co.c_bv_loss != 0.0;
     let need_grad = co.c_gms != 0.0
         || co.c_ringing != 0.0
         || co.c_banding != 0.0
         || co.gd_gms.0 != 0.0
-        || co.c_edgew != 0.0;
+        || co.c_edgew != 0.0
+        || need_bandvis;
     if need_grad {
         for y in y0..y1 {
             let row = y * width;
@@ -6929,11 +6982,19 @@ fn attr_pass_b_rows(
                 let i = row + x;
                 let xl = x.saturating_sub(1);
                 let xr = (x + 1).min(width - 1);
-                let gx_s = src[row + xr] as f64 - src[row + xl] as f64;
-                let gy_s = src[y_dn * width + x] as f64 - src[y_up * width + x] as f64;
+                let sxl = src[row + xl] as f64;
+                let sxr = src[row + xr] as f64;
+                let syu = src[y_up * width + x] as f64;
+                let syd = src[y_dn * width + x] as f64;
+                let dxl = dst[row + xl] as f64;
+                let dxr = dst[row + xr] as f64;
+                let dyu = dst[y_up * width + x] as f64;
+                let dyd = dst[y_dn * width + x] as f64;
+                let gx_s = sxr - sxl;
+                let gy_s = syd - syu;
                 let gmag_s = (gx_s * gx_s + gy_s * gy_s).sqrt();
-                let gx_d = dst[row + xr] as f64 - dst[row + xl] as f64;
-                let gy_d = dst[y_dn * width + x] as f64 - dst[y_up * width + x] as f64;
+                let gx_d = dxr - dxl;
+                let gy_d = dyd - dyu;
                 let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
                 let g = 1.0 - bounded_sim(gmag_s, gmag_d, C_GMS);
                 let mut acc = co.c_gms * g;
@@ -6954,6 +7015,34 @@ fn attr_pass_b_rows(
                     let edge_excess = bounded_excess(gmag_d, gmag_s, C_BAND_DST);
                     let src_smooth = 1.0 - saturate(gmag_s, C_BAND_SRC);
                     acc += co.c_banding * (edge_excess * src_smooth);
+                }
+                if need_bandvis {
+                    // append2 BANDVIS (`idx_append2::BANDVIS_GAIN/LOSS`) —
+                    // the OFF-toggle production form (`append2_dst_activity`
+                    // is default-OFF and adjudicated OFF for every
+                    // production extraction, and this path fixes toggles to
+                    // `V2NewFeatureToggles::default()`). Second differences
+                    // reuse the four neighbour loads the gradient family
+                    // already performs, so the terms are near-free and the
+                    // neighbour convention (x: clamp, y: reflect_101 via the
+                    // production halo rows) matches the kernel exactly.
+                    let s_c = src[i] as f64;
+                    let d_c = dst[i] as f64;
+                    let d2x_src = sxl + sxr - 2.0 * s_c;
+                    let d2y_src = syu + syd - 2.0 * s_c;
+                    let curv_src = (d2x_src * d2x_src + d2y_src * d2y_src).sqrt();
+                    let d2x_dst = dxl + dxr - 2.0 * d_c;
+                    let d2y_dst = dyu + dyd - 2.0 * d_c;
+                    let curv_dst = (d2x_dst * d2x_dst + d2y_dst * d2y_dst).sqrt();
+                    let flat = 1.0 - saturate(planes.act[i] as f64, C_ACTIVITY);
+                    let band = |g: f64| -> f64 {
+                        saturate(g, BV_DELTA_LO_SDR as f64)
+                            * (1.0 - saturate(g, BV_DELTA_HI_SDR as f64))
+                    };
+                    let b_src = band(curv_src) * flat;
+                    let b_dst = band(curv_dst) * flat;
+                    let (gain_i, loss_i) = bounded_excess_pair(b_dst, b_src, C_BV);
+                    acc += co.c_bv_gain * gain_i + co.c_bv_loss * loss_i;
                 }
                 // Edge-width: coefficient × (|∇d| − |∇s|) — the per-pixel
                 // change of this scale's mean distorted gradient under
@@ -7009,15 +7098,19 @@ fn attr_pass_b_blockiness(
 ///
 /// `s_v2` = raw `∂score/∂f` for the v2 block (`f372..720` layout,
 /// `scale*87 + ch*29 + slot`, up to 348 entries); `s_append` likewise for
-/// the append block (`f720..924`, `scale*51 + ch*17 + slot`, 204 entries).
-/// Toggles are fixed to `V2NewFeatureToggles::default()` — the 924-regime
-/// canon. See the section comment above for integrand classes and the
-/// documented approximations.
+/// the append block (`f720..924`, `scale*51 + ch*17 + slot`, 204 entries);
+/// `s_append2` for the append2 block (`f924..944`, `scale*5 + slot`, 20
+/// entries, Y-only — see `derive_v2app_coeffs`'s append2 section for which
+/// of the 5 local slots carry a term and why the other three are exactly
+/// zero). Toggles are fixed to `V2NewFeatureToggles::default()` — the
+/// 924/944-regime canon. See the section comment above for integrand
+/// classes and the documented approximations.
 pub(crate) fn compute_v2_append_attribution(
     reference: &impl ImageSource,
     distorted: &impl ImageSource,
     s_v2: &[f64],
     s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
     max_pixels: Option<usize>,
     parallel: bool,
 ) -> Result<V2AppendAttribution, ZensimError> {
@@ -7283,6 +7376,7 @@ pub(crate) fn compute_v2_append_attribution(
             let co = derive_v2app_coeffs(
                 s_v2,
                 s_append,
+                s_append2,
                 scale,
                 ch,
                 &cells[scale][ch],
@@ -11436,9 +11530,16 @@ mod tests {
 
         let s_zero_v2 = vec![0.0f64; 348];
         let s_zero_app = vec![0.0f64; 204];
-        let attr =
-            compute_v2_append_attribution(&sref, &dref, &s_zero_v2, Some(&s_zero_app), None, false)
-                .unwrap();
+        let attr = compute_v2_append_attribution(
+            &sref,
+            &dref,
+            &s_zero_v2,
+            Some(&s_zero_app),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
         assert_eq!(attr.v2_features.len(), 348);
         assert_eq!(attr.append_features.len(), 204);
         let mut worst = 0.0f64;
@@ -11491,9 +11592,16 @@ mod tests {
         let pf = prod.features();
 
         let run = |sv2: Vec<f64>, sap: Option<Vec<f64>>| -> f64 {
-            let attr =
-                compute_v2_append_attribution(&sref, &dref, &sv2, sap.as_deref(), None, false)
-                    .unwrap();
+            let attr = compute_v2_append_attribution(
+                &sref,
+                &dref,
+                &sv2,
+                sap.as_deref(),
+                None,
+                None,
+                false,
+            )
+            .unwrap();
             attr.density.iter().sum()
         };
 
@@ -11553,7 +11661,8 @@ mod tests {
         // Soft-peak: full-image sum is identically 0 (Σ w(v)(f−v) = 0).
         let mut sv2 = vec![0.0f64; 348];
         sv2[29 + idx::SSIM_SOFT_PEAK] = -1.0;
-        let attr = compute_v2_append_attribution(&sref, &dref, &sv2, None, None, false).unwrap();
+        let attr =
+            compute_v2_append_attribution(&sref, &dref, &sv2, None, None, None, false).unwrap();
         let total: f64 = attr.density.iter().sum();
         let mass: f64 = attr.density.iter().map(|v| v.abs()).sum();
         // 1e-4·mass: the identity Σw(v)·v = f·Σw(v) is exact only when `f`
@@ -11566,6 +11675,213 @@ mod tests {
             "soft-peak density must sum to 0: total {total}, |mass| {mass}"
         );
         assert!(mass > 0.0, "soft-peak density must be non-trivial");
+    }
+
+    // ── append2 (f924-943) attribution gates — campaign appendix E ────────
+    //
+    // The block was silently dropped by `compute_attribution_density_full`'s
+    // `s[720..min(len, 924)]` slice until 2026-08-04. These three gates pin
+    // the registered per-slot determination: BANDVIS_GAIN/LOSS are class-E
+    // mean pools (spatialized, sum-identity + FD-direction verified), and
+    // LUMA_MEAN_REF / HL_BIN1 / HL_BIN2 are exactly zero BY DEFINITION
+    // (reference-only; HDR-gated on an SDR-only route) rather than by an
+    // unreached slice bound.
+
+    /// Plane-sum identity for the append2 BANDVIS pair against the
+    /// PRODUCTION 944-regime features, plus the exactly-zero gate for the
+    /// three non-decomposable slots. Same 1e-5 class as
+    /// `v2_append_attr_sum_identities` (pass B re-derives in f64 over
+    /// f32-lane-pooled kernels).
+    #[test]
+    fn append2_attr_sum_identities_and_zero_slots() {
+        let (w, h) = (150usize, 170usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let prod = z.compute_folded720_append2_features(&sref, &dref).unwrap();
+        let app2 = prod.append2_features().unwrap().to_vec();
+        let n_scales = prod.n_scales();
+
+        let run = |sap2: Vec<f64>| -> f64 {
+            let attr =
+                compute_v2_append_attribution(&sref, &dref, &[], None, Some(&sap2), None, false)
+                    .unwrap();
+            attr.density.iter().sum()
+        };
+
+        // BANDVIS is a COARSE-scale detector (its own doc: expect ~0 at
+        // scale 0/1). Gate every scale where the production feature is
+        // non-trivial, and require that at least one such scale exists —
+        // so a fixture that stopped exercising BANDVIS fails loudly rather
+        // than vacuously passing.
+        let mut checked = 0usize;
+        for scale in 0..n_scales {
+            for local in [idx_append2::BANDVIS_GAIN, idx_append2::BANDVIS_LOSS] {
+                let k = scale * APPEND2_PER_SCALE + local;
+                let expect = app2[k];
+                if expect <= 1e-6 {
+                    continue;
+                }
+                let mut sap2 = vec![0.0f64; n_scales * APPEND2_PER_SCALE];
+                sap2[k] = -1.0;
+                let sum = run(sap2);
+                assert!(
+                    (sum - expect).abs() <= 1e-5 * expect.max(1e-9),
+                    "append2 slot (scale {scale}, local {local}): density sum {sum} vs \
+                     production feature {expect}"
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 0,
+            "fixture must exercise at least one BANDVIS slot (production app2 = {app2:?})"
+        );
+
+        // The three registered class-N slots: the machinery must emit
+        // EXACTLY zero density for any gradient on them, at every scale.
+        for scale in 0..n_scales {
+            for local in [
+                idx_append2::LUMA_MEAN_REF,
+                idx_append2::HL_BIN1,
+                idx_append2::HL_BIN2,
+            ] {
+                let mut sap2 = vec![0.0f64; n_scales * APPEND2_PER_SCALE];
+                sap2[scale * APPEND2_PER_SCALE + local] = -1.0;
+                let attr = compute_v2_append_attribution(
+                    &sref,
+                    &dref,
+                    &[],
+                    None,
+                    Some(&sap2),
+                    None,
+                    false,
+                )
+                .unwrap();
+                let mass: f64 = attr.density.iter().map(|v| v.abs()).sum();
+                assert_eq!(
+                    mass, 0.0,
+                    "append2 slot (scale {scale}, local {local}) is class N — the density must \
+                     be identically 0, got |mass| {mass}"
+                );
+            }
+        }
+    }
+
+    /// FD DIRECTION gate for the two new append2 integrands (the C2a
+    /// precedent — an FD direction test is what caught the edge-width
+    /// sign bug before it landed). Refining a block toward the reference
+    /// must move the production feature by the amount the density's
+    /// rectangle sum predicts, in SIGN and order of magnitude.
+    #[test]
+    fn append2_attr_bandvis_fd_direction() {
+        let (w, h) = (160usize, 160usize);
+        let src = textured_image(w, h, 11);
+        // A posterizing distortion is what BANDVIS exists to see.
+        let mut dst = src.clone();
+        for p in dst.iter_mut() {
+            for c in p.iter_mut() {
+                *c = (*c / 24) * 24;
+            }
+        }
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let base = z.compute_folded720_append2_features(&sref, &dref).unwrap();
+        let a0 = base.append2_features().unwrap().to_vec();
+        let n_scales = base.n_scales();
+
+        // Refine the LEFT HALF to the reference. A half-plane is the
+        // minimum-seam region for its area: one interior seam of `h` pixels
+        // (the other three sides are image edges, which reflect-pad rather
+        // than abut unrefined content). That matters because the integrand
+        // is exact only for pixels whose 3-tap curvature stencil stays
+        // inside the refined set, and the seam-contaminated fraction grows
+        // as `2^scale` up the pyramid — a compact block leaves 17 % of its
+        // scale-2 pixels seam-adjacent (measured: it flips the LOSS sign
+        // there), a half-plane leaves 5 %. See `benchmarks/
+        // attribution_append2_e1_2026-08-04.md` for the measured comparison.
+        let (bx, by, bw, bh) = (0usize, 0usize, w / 2, h);
+        let mut refined = dst.clone();
+        for y in by..by + bh {
+            for x in bx..bx + bw {
+                refined[y * w + x] = src[y * w + x];
+            }
+        }
+        let rref = RgbSlice::new(&refined, w, h);
+        let after = z.compute_folded720_append2_features(&sref, &rref).unwrap();
+        let a1 = after.append2_features().unwrap().to_vec();
+
+        let mut checked = 0usize;
+        for scale in 0..n_scales {
+            for local in [idx_append2::BANDVIS_GAIN, idx_append2::BANDVIS_LOSS] {
+                let k = scale * APPEND2_PER_SCALE + local;
+                let true_delta = a1[k] - a0[k];
+                // Only gate slots the refinement actually moves; a slot that
+                // does not move carries no direction to check.
+                if true_delta.abs() <= 1e-4 {
+                    continue;
+                }
+                let mut sap2 = vec![0.0f64; n_scales * APPEND2_PER_SCALE];
+                sap2[k] = 1.0; // raw ∂score/∂f = +1 ⇒ density = (δf)_i
+                let attr = compute_v2_append_attribution(
+                    &sref,
+                    &dref,
+                    &[],
+                    None,
+                    Some(&sap2),
+                    None,
+                    false,
+                )
+                .unwrap();
+                let pred: f64 = (by..by + bh)
+                    .flat_map(|y| (bx..bx + bw).map(move |x| (y, x)))
+                    .map(|(y, x)| attr.density[y * attr.width + x])
+                    .sum();
+                // EXACTNESS (valid at every scale, no finite-removal caveat):
+                // the whole-plane density sum IS the production feature. This
+                // is the class-E claim itself; measured agreement is 8-9
+                // significant digits on this fixture.
+                let whole: f64 = attr.density.iter().sum();
+                assert!(
+                    (whole + a0[k]).abs() <= 1e-5 * a0[k].abs().max(1e-9),
+                    "append2 plane-sum identity (scale {scale}, local {local}): Σdensity \
+                     {whole} vs −feature {}",
+                    -a0[k]
+                );
+                assert!(
+                    pred.signum() == true_delta.signum(),
+                    "append2 FD direction (scale {scale}, local {local}): predicted {pred} vs \
+                     true Δf {true_delta} — SIGN MISMATCH"
+                );
+                // Order of magnitude. This is a FIRST-ORDER integrand asked
+                // to predict a HALF-PLANE finite removal, and the seam +
+                // pyramid coupling grow with scale, so the honest bound is a
+                // factor-4 band (same shape as the C2a FD gates). Measured
+                // pred/true on this fixture, 2026-08-04:
+                //   scale 0  gain 1.02  loss 1.02
+                //   scale 1  gain 1.14  loss 1.12
+                //   scale 2  gain 1.50  loss 1.26
+                //   scale 3  gain 3.78  loss 2.38   ← the finite-removal floor
+                // The monotone drift up the pyramid is the documented
+                // approximation, not a formula error: a formula error shows
+                // up as a SIGN flip or an order-of-magnitude miss, and the
+                // exact plane-sum identity above holds at every scale.
+                let ratio = pred.abs() / true_delta.abs();
+                assert!(
+                    (0.25..=4.0).contains(&ratio),
+                    "append2 FD magnitude (scale {scale}, local {local}): predicted {pred} vs \
+                     true Δf {true_delta} (ratio {ratio})"
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 0,
+            "refinement must move at least one BANDVIS slot (a0 {a0:?} a1 {a1:?})"
+        );
     }
 
     /// Global-slot integrand sanity: refining a block moves GLOBAL_DMEAN's
@@ -11618,8 +11934,8 @@ mod tests {
         let mut sap = vec![0.0f64; 204];
         sap[FEATURES_PER_CHANNEL_APPEND + idx_append::GLOBAL_DMEAN] = 1.0; // s_k = +1
         let sv2 = vec![0.0f64; 348];
-        let attr =
-            compute_v2_append_attribution(&sref, &dref, &sv2, Some(&sap), None, false).unwrap();
+        let attr = compute_v2_append_attribution(&sref, &dref, &sv2, Some(&sap), None, None, false)
+            .unwrap();
         // density block sum ≈ s_k · Δf = true_delta (s_k = 1).
         let mut block_sum = 0.0f64;
         for y in by0..by0 + bs {
@@ -11703,9 +12019,16 @@ mod tests {
             if true_delta.abs() < 1e-7 {
                 return;
             }
-            let attr =
-                compute_v2_append_attribution(&sref, &dref, &sv2, sap.as_deref(), None, false)
-                    .unwrap();
+            let attr = compute_v2_append_attribution(
+                &sref,
+                &dref,
+                &sv2,
+                sap.as_deref(),
+                None,
+                None,
+                false,
+            )
+            .unwrap();
             let mut block_sum = 0.0f64;
             for y in by0..by0 + bs {
                 for x in bx0..bx0 + bs {

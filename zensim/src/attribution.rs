@@ -117,6 +117,36 @@ use archmage::autoversion;
 /// with the production feature extractor).
 const BAND_ROWS: usize = 32;
 
+// ── Feature-layout block boundaries (half-open ends) ─────────────────────
+//
+// These name the `s`-slice bounds that
+// [`crate::Zensim::compute_attribution_density_full`] cuts the model
+// gradient on. They exist because the append2 block (`f924-943`) was
+// silently dropped for ten months by a hard-coded `min(len, 924)` bound —
+// found 2026-08-04 by the coherence study, and the reason the block was
+// classified "non-decomposable" when 8 of its 20 slots are exactly
+// decomposable. A named bound plus the per-width coverage test
+// (`attribution_covers_expected_slots_per_width`) is the anti-recurrence
+// guard: adding a block means adding a constant AND a row to that test.
+
+/// End of the basic block (`f0-155`) = start of the v1 pooled block.
+/// Not referenced by the slicing itself (the basic path bounds-checks its
+/// own lookups), but it completes the layout description and is exercised
+/// by `attribution_covers_expected_slots_per_width`.
+#[allow(dead_code)]
+pub(crate) const BLOCK_END_BASIC: usize = 156;
+/// End of the v1 peak/masked/IW pooled block (`f156-371`) = start of v2.
+/// Structurally NOT spatialized (module blind spot 1).
+pub(crate) const BLOCK_END_V1_POOLS: usize = 372;
+/// End of the v2 block (`f372-719`) = start of the append block.
+pub(crate) const BLOCK_END_V2: usize = 720;
+/// End of the append block (`f720-923`) = start of append2.
+pub(crate) const BLOCK_END_APPEND: usize = 924;
+/// End of the append2 block (`f924-943`). Anything beyond (the f944+ CSFW
+/// block) has no attribution integrand yet and is deliberately not sliced —
+/// the coverage test pins that too.
+pub(crate) const BLOCK_END_APPEND2: usize = 944;
+
 /// Per-pixel attribution density + summed-area table.
 ///
 /// Produced by [`crate::Zensim::compute_attribution_density`]. See the
@@ -782,19 +812,28 @@ impl crate::metric::Zensim {
     }
 
     /// FULL-coverage attribution density (task #67 C2a): the BASIC block
-    /// density plus exact-integrand densities for the v2 (`f372-719`) and —
-    /// when `s` extends past 720 — append (`f720-923`) blocks, built by
+    /// density plus exact-integrand densities for the v2 (`f372-719`),
+    /// append (`f720-923`) and append2 (`f924-943`) blocks — each included
+    /// when `s` extends that far — built by
     /// [`crate::feature_v2::compute_v2_append_attribution`]'s replication of
     /// the production kernels. `s` is the raw full-layout gradient
-    /// (`∂score/∂f_k`, 720- or 924-wide; the `f156-371` peak/masked/iw block
-    /// is not spatializable and is ignored, as in the harness's
-    /// structural-zero handling).
+    /// (`∂score/∂f_k`; 372-, 720-, 924- or 944-wide). The `f156-371`
+    /// peak/masked/iw block is not spatializable and is ignored, as in the
+    /// harness's structural-zero handling.
+    ///
+    /// Block bounds are the named [`BLOCK_END_*`](BLOCK_END_BASIC) constants
+    /// so a future regime bump cannot silently drop a block the way the
+    /// hard-coded `924` bound dropped append2 (found 2026-08-04; campaign
+    /// appendix E). `attribution_covers_expected_slots_per_width` is the
+    /// guard that fails if the covered slot set ever drifts.
     ///
     /// Remaining documented approximations: first-order integrands
     /// throughout, blur bleed unmodeled, finalize clamps treated as inert,
     /// blockiness steps split 50/50 across their pixel pair, reference-only
-    /// slots (fragility, grad-src-mean) exactly zero. See the module docs
-    /// here and the `feature_v2` attribution section.
+    /// slots (fragility, grad-src-mean, append2 luma-mean-ref) exactly zero,
+    /// and the append2 HDR highlight bins structurally zero on this SDR
+    /// route. See the module docs here and the `feature_v2` attribution
+    /// section.
     ///
     /// # Errors
     ///
@@ -809,22 +848,25 @@ impl crate::metric::Zensim {
         validate_pair(source, distorted)?;
         let precomputed = self.precompute_reference(source)?;
         let (mut canvas, width, height) = self.basic_canvas_trimmed(&precomputed, distorted, s)?;
-        let s_v2: &[f64] = if s.len() > 372 {
-            &s[372..s.len().min(720)]
-        } else {
-            &[]
+        // Half-open [start, end) slice of `s` for one block, empty when `s`
+        // does not reach the block. One helper for all three so a new block
+        // is one more line, not one more chance to mistype a bound.
+        let block = |start: usize, end: usize| -> Option<&[f64]> {
+            (s.len() > start).then(|| &s[start..s.len().min(end)])
         };
-        let s_append: Option<&[f64]> = if s.len() > 720 {
-            Some(&s[720..s.len().min(924)])
-        } else {
-            None
-        };
-        if !s_v2.is_empty() || s_append.is_some() {
+        // NB: the v2 slice starts at the END of the v1 pooled block (372),
+        // not at the end of the basic block — `f156-371` is skipped, not
+        // spatialized.
+        let s_v2: &[f64] = block(BLOCK_END_V1_POOLS, BLOCK_END_V2).unwrap_or(&[]);
+        let s_append: Option<&[f64]> = block(BLOCK_END_V2, BLOCK_END_APPEND);
+        let s_append2: Option<&[f64]> = block(BLOCK_END_APPEND, BLOCK_END_APPEND2);
+        if !s_v2.is_empty() || s_append.is_some() || s_append2.is_some() {
             let v2a = crate::feature_v2::compute_v2_append_attribution(
                 source,
                 distorted,
                 s_v2,
                 s_append,
+                s_append2,
                 self.max_pixels(),
                 self.parallel(),
             )?;
@@ -1168,6 +1210,7 @@ mod tests {
             &s[372..720],
             Some(&s[720..924]),
             None,
+            None,
             false,
         )
         .unwrap();
@@ -1179,6 +1222,113 @@ mod tests {
                 "pixel {i}: full {got} vs basic+v2app {expect}"
             );
         }
+    }
+
+    /// ANTI-RECURRENCE GUARD (campaign appendix E.2): the full-coverage
+    /// density must cover exactly the intended slot set at every supported
+    /// gradient width. The append2 block (`f924-943`) was silently dropped
+    /// for the whole 944 era by a hard-coded `min(len, 924)` bound with no
+    /// test standing between the regime bump and the loss — this is that
+    /// test. Adding a block means adding a `BLOCK_END_*` constant AND a row
+    /// here.
+    ///
+    /// Each probe sets ONE slot's gradient and asserts the density is
+    /// non-zero (block reached, slot decomposable) or identically zero
+    /// (block not reached at this width, or the slot is registered class N).
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn attribution_covers_expected_slots_per_width() {
+        use crate::feature_v2::{APPEND2_PER_SCALE, idx_append2};
+        let (w, h) = (96usize, 80usize);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+
+        // |density| mass for a unit gradient on exactly one slot.
+        let mass_at = |width: usize, k: usize| -> f64 {
+            let mut s = vec![0.0f64; width];
+            s[k] = -1.0;
+            let d = z.compute_attribution_density_full(&rs, &ds, &s).unwrap();
+            d.density().iter().map(|v| v.abs() as f64).sum()
+        };
+
+        // Representative decomposable slot per block, and the registered
+        // class-N probes. (scale 0, ch Y where the block has a channel axis.)
+        let basic_y = 13; // scale 0, ch Y, ssim mean
+        let v1_pool = BLOCK_END_BASIC + 3; // f156-371: never spatialized
+        let v2_y = BLOCK_END_V1_POOLS + 29 + 3; // v2 ART, scale 0, ch Y
+        let append_y = BLOCK_END_V2 + 17 + 9; // append TEXTURE_DISSIM, scale 0, Y
+        // append2 is Y-only with no channel axis; BANDVIS is a COARSE-scale
+        // detector, so probe the coarsest scale (scale 3) where it fires.
+        let app2 =
+            |scale: usize, local: usize| BLOCK_END_APPEND + scale * APPEND2_PER_SCALE + local;
+
+        // (width, slot, must_be_nonzero, why)
+        let cases: &[(usize, usize, bool, &str)] = &[
+            // 372: basic reached; v1 pools never; nothing above exists.
+            (372, basic_y, true, "372: basic block"),
+            (372, v1_pool, false, "372: f156-371 is never spatialized"),
+            // 720: v2 reached, append does not exist at this width.
+            (720, basic_y, true, "720: basic block"),
+            (720, v1_pool, false, "720: f156-371 is never spatialized"),
+            (720, v2_y, true, "720: v2 block"),
+            // 924: append reached, append2 does not exist at this width.
+            (924, v2_y, true, "924: v2 block"),
+            (924, append_y, true, "924: append block"),
+            // 944: append2 reached — the block the old slice dropped.
+            (944, append_y, true, "944: append block still reached"),
+            (
+                944,
+                app2(3, idx_append2::BANDVIS_GAIN),
+                true,
+                "944: append2 BANDVIS_GAIN is class E and MUST be covered",
+            ),
+            (
+                944,
+                app2(3, idx_append2::BANDVIS_LOSS),
+                true,
+                "944: append2 BANDVIS_LOSS is class E and MUST be covered",
+            ),
+            (
+                944,
+                app2(3, idx_append2::LUMA_MEAN_REF),
+                false,
+                "944: LUMA_MEAN_REF is reference-only — class N by definition",
+            ),
+            (
+                944,
+                app2(3, idx_append2::HL_BIN1),
+                false,
+                "944: HL_BIN1 is HDR-gated — structural zero on the SDR route",
+            ),
+            (
+                944,
+                app2(3, idx_append2::HL_BIN2),
+                false,
+                "944: HL_BIN2 is HDR-gated — structural zero on the SDR route",
+            ),
+        ];
+        for &(width, k, want_nonzero, why) in cases {
+            let m = mass_at(width, k);
+            if want_nonzero {
+                assert!(m > 0.0, "{why}: expected non-zero density, got |mass| {m}");
+            } else {
+                assert_eq!(
+                    m, 0.0,
+                    "{why}: expected identically-zero density, got |mass| {m}"
+                );
+            }
+        }
+
+        // Beyond append2 (the f944+ CSFW block) there is no integrand yet —
+        // deliberately not sliced. Pinned so a CSFW regime bump has to come
+        // here and decide, rather than silently inheriting zero.
+        let m = mass_at(BLOCK_END_APPEND2 + 12, BLOCK_END_APPEND2 + 3);
+        assert_eq!(
+            m, 0.0,
+            "f944+ (CSFW) has no attribution integrand yet — must be exactly 0, got {m}"
+        );
     }
 
     /// C3a golden gate 1: the fused compare's SCORE is bit-identical to the

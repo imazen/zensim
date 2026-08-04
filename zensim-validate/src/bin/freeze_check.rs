@@ -789,7 +789,10 @@ fn blocks_summary(v: &serde_json::Value) -> String {
             .map(|x| format!("{}", x as i64))
             .unwrap_or_else(|| "·".into())
     };
-    if v.get("block_profile").map(|b| !b.is_null()).unwrap_or(false) {
+    if v.get("block_profile")
+        .map(|b| !b.is_null())
+        .unwrap_or(false)
+    {
         format!(
             "{}/{}/{}/{}",
             fam("f0_155"),
@@ -1276,19 +1279,32 @@ mod tests {
         v2["rank"].as_object_mut().unwrap().remove("hfnlproxy");
         assert!(ann_matches(&v2, &e));
         // explicit null counts as missing (model.output_spline is null here).
-        let e_null = ann("x", "annotated", &[], json!({"missing": "model.output_spline"}));
+        let e_null = ann(
+            "x",
+            "annotated",
+            &[],
+            json!({"missing": "model.output_spline"}),
+        );
         assert!(ann_matches(&v, &e_null));
         // present: mirror of missing.
         let e_p = ann("x", "annotated", &[], json!({"present": "rank.hfnlproxy"}));
         assert!(ann_matches(&v, &e_p));
         assert!(!ann_matches(&v2, &e_p));
         // names: exact bake-name list.
-        let e_n = ann("x", "annotated", &[], json!({"names": ["FIX_single", "other"]}));
+        let e_n = ann(
+            "x",
+            "annotated",
+            &[],
+            json!({"names": ["FIX_single", "other"]}),
+        );
         assert!(ann_matches(&v, &e_n));
         let e_n2 = ann("x", "annotated", &[], json!({"names": ["nope"]}));
         assert!(!ann_matches(&v, &e_n2));
         // all.
-        assert!(ann_matches(&v, &ann("x", "annotated", &[], json!({"all": true}))));
+        assert!(ann_matches(
+            &v,
+            &ann("x", "annotated", &[], json!({"all": true}))
+        ));
         // empty / null scope matches nothing.
         assert!(!ann_matches(&v, &ann("x", "annotated", &[], json!({}))));
         // coverage: segment-boundary prefix only.
@@ -1325,7 +1341,11 @@ mod tests {
         assert_eq!(at("n_pass"), "7/8", "registered absent=not-passed form");
         assert_eq!(at("n_measured"), "7/7", "measured-record form");
         assert_eq!(at("absent"), "hfnl");
-        assert!(!at("fails").split(',').any(|x| x == "hfnl"), "fails: {}", at("fails"));
+        assert!(
+            !at("fails").split(',').any(|x| x == "hfnl"),
+            "fails: {}",
+            at("fails")
+        );
         assert!(at("annotations").contains("hfnl-absent-not-failed"));
     }
 
@@ -1335,7 +1355,10 @@ mod tests {
         // absent-not-failed entry matches the cell broadly (`all`) and covers
         // the field — absence is a property of the VALUE, not the entry.
         let mut v = passing_fixture();
-        merge(&mut v, &json!({"rank": {"hfnlproxy": {"per_ref_mean": -0.0001}}}));
+        merge(
+            &mut v,
+            &json!({"rank": {"hfnlproxy": {"per_ref_mean": -0.0001}}}),
+        );
         let anns = vec![ann(
             "hfnl-absent-not-failed",
             "absent-not-failed",
@@ -1371,15 +1394,19 @@ mod tests {
         for (a, b) in r.floors.iter().zip(r_plain.floors.iter()) {
             assert_eq!(a.pass, b.pass, "floor {} verdict must not change", a.id);
         }
-        assert!(r
-            .annotations
-            .iter()
-            .any(|(id, kind, _)| id == "dial-mono-raw-unit" && kind == "annotated"));
+        assert!(
+            r.annotations
+                .iter()
+                .any(|(id, kind, _)| id == "dial-mono-raw-unit" && kind == "annotated")
+        );
         let row = tsv_row(&v, &r);
         let hdr: Vec<&str> = TSV_COLS.split('\t').collect();
         let cols: Vec<&str> = row.split('\t').collect();
         let ann_i = hdr.iter().position(|h| *h == "annotations").unwrap();
-        assert_eq!(cols[ann_i], "dial-mono-raw-unit", "annotations col carries the id");
+        assert_eq!(
+            cols[ann_i], "dial-mono-raw-unit",
+            "annotations col carries the id"
+        );
     }
 
     #[test]
@@ -1390,7 +1417,11 @@ mod tests {
         let anns = load_annotations(&repo.join("benchmarks/eval_annotations.json"))
             .expect("committed registry parses");
         let ids: Vec<&str> = anns.iter().map(|e| e.id.as_str()).collect();
-        for want in ["dial-mono-raw-unit", "hfnl-absent-not-failed", "kadid-tid-train-eq-val"] {
+        for want in [
+            "dial-mono-raw-unit",
+            "hfnl-absent-not-failed",
+            "kadid-tid-train-eq-val",
+        ] {
             assert!(ids.contains(&want), "registry missing seed entry {want}");
         }
         // era-bridge-shaped cell: spline present, hfnlproxy missing.
@@ -1402,7 +1433,10 @@ mod tests {
         assert!(fl.absent_not_failed, "hfnl absence covered by the registry");
         let matched: Vec<&str> = r.annotations.iter().map(|(i, _, _)| i.as_str()).collect();
         assert!(matched.contains(&"hfnl-absent-not-failed"));
-        assert!(matched.contains(&"kadid-tid-train-eq-val"), "all-scope entry");
+        assert!(
+            matched.contains(&"kadid-tid-train-eq-val"),
+            "all-scope entry"
+        );
         assert!(
             !matched.contains(&"dial-mono-raw-unit"),
             "spline present ⇒ raw-unit entry must NOT match"
