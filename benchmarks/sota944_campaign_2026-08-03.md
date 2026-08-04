@@ -3386,3 +3386,174 @@ summaries. HF-NL "absent" for era cells is now formally *absent-not-failed*
 (distinct from a measured fail) in `benchmarks/eval_annotations.json`;
 winner_dial's measured record is **5/7-measured** (5/8 under the registered
 absent=not-passed rule — both forms stated per the registry convention).
+
+---
+
+## REGISTERED APPENDIX — `bake_contrib`: per-input contribution accounting + the KADID diagnosis
+### (committed BEFORE any shortlist bake is scored by the tool; §C.0 facts were measured during tool design, before any contribution or per-type number existed)
+
+Two user asks drive this appendix: (1) *"do we have a way of detecting what
+inputs are basically not contributing anything to outcomes in a given bake —
+mathematically — so we can look at a bake and know what it is tuning out — and
+perhaps later optimize bake sizes"*; (2) *"why are we struggling on kadid evals
+if we are training on it?"* Plus one supervisor sharpening (recorded verbatim in
+§C.6): report the f156-371 block's contribution share for the era-bridge bakes,
+with a pre-registered conditional width-discriminator.
+
+### C.0 Pre-registration facts (measured before any contribution run)
+
+- **KADID row identity is SOLVED, exactly, for every era parquet.**
+  `kadid_features_372col_2026-05-15.parquet` is in sorted-`dist_img` order with
+  quality-shaped `human_score = (dmos−1)/4`: 0/10,125 mismatches vs
+  `/mnt/v/dataset/kadid10k/dmos.csv`. The modern legs
+  (`ext720-canonical-2026-07-22`, `ext924-canonical-2026-07-27`,
+  `ext944-canonical-2026-08-01` — all three `ext_kadid.parquet` row orders are
+  IDENTICAL) are in the same sorted-`dist_img` order with **flipped polarity**
+  `human_score = 1−(dmos−1)/4`: 0/10,125 mismatches. So
+  `dist_type = (row_idx % 125) / 5 + 1`, `level = row_idx % 5 + 1` (0-based row
+  within each 125-row ref block), verified against source, both eras. A
+  score-multiset join was evaluated and REJECTED (dmos quantization → 6,415
+  cross-type collisions).
+- **The trainer's group-sampling law is weight-proportional, NOT
+  row-proportional** (`mlp_train/mod.rs` CDF: `cum += train_weight; cum /
+  train_total`, uniform within group absent q-boosts). From the embedded
+  repros: co3a class (C_em944_s31) total train_w = 1.0+1.0+0.5+0.5+0.5+0.15 =
+  3.65 → kadid pair share = 0.5/3.65 = **13.70%** of 50k pairs/epoch = 6,849
+  pairs/epoch; H_co3abpg_s2507 total = 6.35 → **7.87%** = 3,937 pairs/epoch.
+  The "kadid is only 1.4% of rows" starvation arithmetic in the task premise is
+  therefore measured-FALSE at the sampler level; the diagnosis must look at
+  loss_mode (kadid trains `rank`, cross-image, within_ref=false) and at the
+  feature mechanism (§C.5).
+- **Shortlist architecture + regimes** (from board fullevals + spec.jsons):
+  H_co3abpg_s2507 / C_em944_s31 / C_co3a_s1301 = 944→128 LeakyRelu →1, f32,
+  winsor-family transforms, no heads/pin/spline, regime 944.
+  winner_dial_Ebothg_hfgain_winsor_dial = **156-input** →128→1 + spline,
+  regime 720. b_sdr_linear_cid80_inclwinsor_dense_dial = 372→1 linear f16 +
+  spline, regime-720 board eval. KADID board SROCCs: winner_dial 0.9464, B
+  0.8085, s2507 0.4233.
+- **Packed twins on disk**: `H_co3abpg_s2507_packed.bin`,
+  `C_em944_s31_packed.bin`. C_co3a_s1301, B, winner_dial have no packed twin —
+  reported as such; no new packing in this pass.
+
+### C.1 The tool (owner extension: `zensim-validate` bin `bake_contrib`)
+
+**Method — exact standardized-zero mean-ablation.** For input k, set the
+standardized post-transform input `x̃_k = (t_k − mean_k)/scale_k` to 0 (= raw
+value at the scaler mean in transform space) and recompute the score. The only
+`x̃_k`-dependence in the network is layer 0's pre-activation, so the ablation
+is a rank-1 update: `z0' = z0 − x̃_k·W0[k,:]`, then re-apply activation, the
+remaining layers, head dispatch, tanh pin, output spline — **exact** for any
+depth (fp subtract-out error O(ulp·|z0|) ≈ 1e-6, one order below the dead
+threshold). Baseline scores must match `bake_runtime::score_row` to ≤1e-6 per
+row (parity gate, counted and reported); head/pin/spline application is
+factored out of `score_row` into a shared `score_from_network_output` (bit-
+exact refactor) so the tool cannot fork the math. Min-max-head and
+expander-transform bakes are out of scope (loud bail; none in the shortlist).
+
+**Per-input reports**: mean|Δ|, p95|Δ|, std(Δ) (the rank-relevant measure — a
+constant Δ is a pure offset carrying zero rank information; matters exactly
+when a data slice zeroes pools an old-era bake reads), sign-consistency
+(majority-sign fraction over nonzero Δ), per-corpus mean|Δ|, and Δ-SROCC
+(|SROCC| after − before) for the **top-64 movers** by overall mean|Δ| per
+corpus with a target. **Analytic cross-check**: `std(x̃_k)·‖W0[k,:]‖₂`
+(simple) and the layer-magnitude-propagated variant `std(x̃_k)·‖W0[k,:]∘g‖₂`
+(g = |W|-chain back-propagated ones); report Spearman(analytic, mean|Δ|) —
+agreement expected on the dead set, disagreement is the interesting signal.
+
+**Registered dead thresholds**: **dead ⟺ mean|Δ| < 1e-4 score units AND
+p95|Δ| < 1e-3**; **rank-dead ⟺ std(Δ) < 1e-4** (superset of dead). Score
+units are the bake's post-spline dial units (all shortlist bakes ~[0,100]).
+
+**Built-in correctness gates**: (a) on 944 bakes the structural-zero block
+f156-371 MUST come out exactly dead (data ≡ 0 and trainer scaler mean on an
+all-zero column ≡ 0 ⇒ x̃ ≡ 0 ⇒ Δ ≡ 0 — any nonzero is a bug in tool or bake);
+(b) a hand-built 3-input fixture with a known-dead input (unit test); (c)
+ablation-vs-analytic agreement bound on the fixture; (d) the score_row parity
+gate above.
+
+**Pack stats**: per input, fraction of exactly-zero layer-0 weights in the
+packed twin (f16 bit-pattern ±0, i8 == 0); per-column all-zero ⇒ free pruning
+candidate. Bake-size implication is **arithmetic only** (dead-column count →
+removable L0 rows × out_dim × dtype bytes + 8B scaler + transform entry;
+sparse_overrides/pruning implementation is explicitly future work, not this
+pass).
+
+### C.2 Registered corpora (regime-native per bake; no cross-era column mixing)
+
+| bake | corpus slice (all full-corpus except imazen26 stride-sample to 4,000 rows) |
+|---|---|
+| 944 class (s2507, s31, s1301) | ext944 root: `ext_cid22val` (4,292) + `ext_kadid` (10,125) + `ext_csiq` (866) + `ext_live` (779) + `ext_imazen26` (4,000 of 10,025) |
+| winner_dial (156-in, regime 720) | same five names under the ext720 root |
+| B (372-in) | **primary**: 372-era real-pool parquets — `cid22_features_372col_2026-05-15` + `kadid_features_372col_2026-05-15` + `csiq_features_372col_2026-07-18` + `live_features_372col_2026-07-18` + `imazen26_test_372col_2026-07-16` (stride 4,000) under `/mnt/v/zen/zensim-training/2026-05-15-full-features/`; **secondary**: the ext720 five (documents the structural constant-offset situation — under a folded-regime slice f156-371 are constants, so their std(Δ) ≡ 0 BY CONSTRUCTION and only the primary run can answer the f156-371 question) |
+
+csiq/live are in the slice because they are the breadth axis Amendment 8 found
+binding, and the supervisor's question names them. The overall "balanced
+slice" for cross-bake family profiles = cid22 + imazen26 halves; kadid/csiq/
+live columns are reported per-corpus.
+
+### C.3 Family aggregation keys
+
+944: v1-fold f0-155 (sub-split 13 slots × 3ch × 4 scales), STRUCTURAL-ZEROS
+f156-371, v2-348 f372-719, append-204 f720-923, tail-20 f924-943. 372-era:
+basic f0-155 / peaks f156-227 / masked f228-299 / IW f300-371. 156: v1-basic
+only. Deliverables: per-bake family contribution shares (Σ mean|Δ| within
+family / total), dead counts per family, the cross-bake dead-set overlap
+(Jaccard + per-family), and the size table (packed bytes now → estimated at
+dead-column prune).
+
+### C.4 KADID per-type breakdown (measured, no retrain)
+
+Per-row baseline scores from `bake_contrib --dump-scores` (the same forward as
+everything else) for s31, s2507, s1301, B, winner_dial on their regime-native
+kadid parquet; join `dist_type` by the §C.0 verified row arithmetic; per-type
+|SROCC| over 405 rows (81 refs × 5 levels) via the canonical stats owner
+(`zenstats` through `scripts/lib/zen_stats.py` / `panel --batch`); KADID's 25
+published types grouped: blurs 1-3, color 4-8, compression 9-10, noise 11-15,
+brightness 16-18, spatial 19-21, sharpness/contrast 22-25. Deliverable: the
+per-type table strong-vs-weak, which families collapse for the 944 class, and
+whether the collapse concentrates in non-codec families.
+
+### C.5 Mechanism tie-in + registered lever (no retrain in this pass beyond §C.6)
+
+Cross the per-type collapse with the contribution profiles: are the features
+carrying B's/winner_dial's kadid strength (their top kadid movers) dead in the
+944 class? State the mechanism at measured strength only. **Registered
+falsifiable lever (future work)**: kadid `train_w` 0.5→1.5 + `loss_mode`
+rank→both (or an `--also`-style kadid boost). Predicted effect IF the
+mechanism is optimization pressure: per-type recovery on the collapsed
+families with CID22 cost ≤0.005. Predicted non-effect IF the mechanism is
+input starvation (kadid-relevant features dead/absent at 944): weight moves
+don't recover the collapsed families — the lever is then feature
+reintroduction, not weight.
+
+### C.6 Supervisor conditional (recorded 2026-08-04, pre-registered trigger)
+
+Directive: for the era-bridge bakes (B, winner_dial), report the f156-371
+block's share of total contribution explicitly — overall AND on kadid +
+csiq/live. Note a structural fact visible pre-run: **winner_dial has
+n_inputs=156** — it consumes NO f156-371 input by construction, so its share
+is identically 0% and it cannot fire the trigger; it is nonetheless the
+strongest kadid bake in hand (0.9464), which itself bounds how much of the
+kadid gap the with-iw pools can explain. The trigger therefore binds on B.
+
+**Trigger**: IF f156-371 carries ≥20% of B's (or winner_dial's) total
+contribution share on the kadid or csiq/live scoring runs (primary, real-pool
+corpus; share = family Σ mean|Δ| / total Σ mean|Δ| on that corpus) THEN run
+the width discriminator: the co3a data recipe from the s31 repro (same
+groups/weights/loss-modes) trained at 372 width on 372-col twins of the same
+tables, k=2 seeds (31, 1301), endpoints = kadid + csiq/live + cid22 + konjnd
+vs the 944 twins; substitutions documented in the results section (944-only
+tables with no 372-col view get dropped-and-documented). Outcome
+interpretation (frozen): 372-width-on-944-era-data recovers kadid/breadth ⇒
+the block is load-bearing ⇒ reintroduction (a NEW regime filling the zero
+slots via re-extraction — never column-mixed, per regime purity) becomes the
+registered next lever; no recovery ⇒ data mass is the cause and
+reintroduction is dead. IF the trigger does not fire, say so and skip.
+
+### C.7 Ops (frozen)
+
+Tool + tests land before any shortlist run; TSVs to `benchmarks/` with .meta
+headers (git commit, command, corpus paths+shas where recorded); results
+appended to this doc; jj workspace `../zensim--contrib`; builds via run-heavy;
+logs `~/tmp/contrib/`. Stats never hand-rolled (zenstats only). Supervisor
+re-derives spot values from the TSVs.
