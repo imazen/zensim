@@ -2844,3 +2844,91 @@ retune, no extra seeds.
 - The corpus's target is metric-anchored (ssim2/100), not human PJND —
   per-pair PJND labels for the BPG half do not exist; this is the same
   supervision family as the 372-era dense build, by registration.
+
+---
+
+## REGISTERED APPENDIX — the packaging pass (dial + pack) on the balanced-shortlist singles
+### (committed BEFORE any spline fit, pack, or packed-cell verdict; a scoped follow-through of the G-RANGE ADDENDUM's packaging-decision note)
+
+**Why.** The user asked why campaign bakes are ~510 KB. Answer: every MLP cell
+ships as a raw-f32 EXPERIMENT artifact — 2-layer 944→128→1 f32 (~508–510 KB),
+QAT deliberately not used (opt-in per the 2026-05-27 standard; its KonJND trade
+is documented at 372), `bake_dial_refit pack` never applied, and spline-less
+(the ADDENDUM's structural G-RANGE gap). This pass closes that packaging gap
+for the three balanced-shortlist singles ONLY and MEASURES what packaging
+costs on every axis. Nothing ships, swaps, or is selected here.
+
+**Targets (frozen).** `/mnt/v/output/zensim/bakes/sota944/bakes/`:
+`H_co3abpg_s2507.bin` (510,262 B — primary: the balanced star, KonJND 0.4590 +
+M3a 0.866), `C_em944_s31.bin` (508,482 B), `C_co3a_s1307.bin` (509,853 B).
+All 2-layer 944-input raw-f32 spline-less, `feature_bounds` empty,
+`zentrain.feature_transforms` carried (winsor_p99/signed_cbrt entries).
+
+**The anchor (frozen).** The shipped-B/v47 dial anchor
+(`multiband_anchor_dial100.parquet`, `pack`'s default) exists only at 372 —
+a REGIME VIOLATION at 944 (amendment 2). The registered same-role anchor is
+the §3d E-LIN anchor, FIXED for every arm-A/B cell of this campaign:
+safesyn_full stride 139 + cid22_train201 stride 44 + kadid stride 25 + tid
+stride 7, y = human_score ×100 clip-min −100, 18 knots. It exists only as
+fit-chain flags, so it is materialized ONCE as
+`ext944-canonical-2026-08-01/anchor944_dial.parquet` by the committed
+`scripts/canonical_corpus/build_anchor944_dial.py` (zstd; `._MANIFEST.json`
+with per-leg sha256 + build_commit) — both packaging steps then consume the
+identical bytes through the tools' existing single-anchor interface (zero
+tool changes; `read_features` indexes columns by name, so the provenance
+column is inert).
+
+**The chain per bake (frozen; owners only, no Python bake editing).**
+1. `bake_dial_refit add-spline --in <raw> --out <stem>_dial.bin --anchor
+   anchor944_dial.parquet --target-col target_score` — the ADDENDUM's
+   dial-packaging step (add-spline, NOT shared-anchor: shared-anchor refits
+   bakes that already carry a spline; add-spline is the owner for spline-less
+   bakes and forwards through the production `predict_transformed`).
+2. G-RANGE on the dial bake: `bake_dial_refit gate --corpus ext_cid22val.parquet`
+   (frozen §1 instrument, default range_frac 1e-4) — record below/above-knot
+   fractions. First-ever G-RANGE numbers on the 944 MLP class.
+3. `bake_dial_refit pack --in <stem>_dial.bin --out <stem>_packed.bin
+   --neg-tail` (defaults f16 + zerobias-bulk 0.005) with `--anchor
+   anchor944_dial.parquet --target-col target_score --verify
+   ext_cid22val.parquet --verify-col human_score --verify-scale 100` —
+   QUANTIZE-then-CALIBRATE (spline refit ON the packed net, the load-bearing
+   standard). Record size.
+4. Packed-cell verdicts: `run_full_eval.sh <packed> <stem>_packed 944` (board
+   fulleval + measured M3a, plain-name convention) then
+   `sota944_verdict.sh <packed> <stem>_packed` (campaign verdict record), then
+   `gate` on the packed bake. Board promotion via the committed
+   `promote_sota944_board.py` (coverage gate must pass; packed rows are
+   ADDITIONAL cells — parents stay on the board).
+5. Dial-intermediate rank-invariance check (instrument, NOT a campaign cell —
+   its full.json goes to `~/tmp/shippack/`, not the verdicts dir): the frozen
+   expectation is rank rows IDENTICAL to raw (monotone spline ⇒ SROCC
+   invariant; the 372-era add-spline validation measured exactly that on 10
+   corpora). Any rank delta at the dial step = a defect; STOP and report.
+
+**Comparability gate (run BEFORE any packed number is read).** This
+workspace's `bake_verdict` build must reproduce the committed
+`C_co3a_s1307.full.json` on the raw bake — numeric-field diff, wave-6
+precedent (62,433 fields, 0 mismatches). The packed deltas are then read
+against baselines re-derived by the SAME binary.
+
+**Endpoints (frozen).** Per-axis deltas raw-f32 → packed on CID22, KonJND,
+nonphoto, HF-NL-proxy, dial mono/tied, M3a, sdr25 (secondary: csiq, live,
+aic3, aic4, imazen26). Honest framing, stated up front: pack is EXPECTED
+SROCC-neutral (v47 precedent: CID22 0.8564 ≈ f32) and the spline is
+rank-invariant by construction — but **post-hoc f16+zerobias on a
+KonJND-strong bake has never been measured** (372-era QAT's f16 cost KonJND
+0.485→0.418, a different mechanism in the same precision family). That is
+the open question of this pass, especially for s2507.
+
+**Contingency (frozen).** If |ΔKonJND(raw→packed)| > 0.01 on
+`H_co3abpg_s2507`: additionally produce a `--dtype f32` pack variant
+(zerobias-only compression) `H_co3abpg_s2507_packedf32.bin` and report its
+size + full axis row alongside the f16 row. NO winner is picked — both are
+presented; the choice is the user's.
+
+**Ops (frozen).** Workspace `zensim--shippack` @ `db40de3f`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimpack-target`; builds via run-heavy --jobs 6;
+logs `~/tmp/shippack/`; foreground-only. Artifacts land beside the parents
+(`_dial`/`_packed` names + `.spec.json` chain sidecars with parent/anchor
+shas + exact invocations). Tower-mirror packed bakes + verdicts under the
+campaign mirror, sha spot-check. Results appended below this registration.
