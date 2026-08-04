@@ -1808,6 +1808,15 @@ even though the follow-on did not fire, to learn whether a student retains
 *follow-up*, not a claim, and it was not run here because the registration's
 firing condition is the registration's to honor.
 
+#### Final-binary reproduction (run after a post-hoc clippy cleanup)
+
+The published numbers were produced before a clippy `needless_borrow` cleanup in
+`bake_verdict`'s `--full-json` model block. Both the gate and the headline arm
+were then **re-run under the final committed binary** and are **bit-identical on
+all 62,457 numeric fields** (`W5GATE_k1_recheck`, `W5_E1_k2_recheck`;
+E1-k2 CID22 = 0.8942475800247324 both times). No published number depends on the
+pre-cleanup build.
+
 #### Artifacts (wave 5)
 
 - Verdicts (6 arms + the k=1 gate): `/mnt/v/output/zensim/bakes/sota944/verdicts/W5_*.full.json`,

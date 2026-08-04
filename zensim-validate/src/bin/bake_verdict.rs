@@ -2678,11 +2678,14 @@ Run the dedicated q-sweep harness for those._\n",
         // else). Structured twin of `zenpredict inspect` for the dashboard's
         // per-model details card. Head/spline extraction is a cheap re-read.
         let model_block = {
-            let alpha = extract_per_sample_alpha_head(&model).is_some();
-            let hybrid = extract_hybrid_head(&model).is_some();
-            let minmax = extract_minmax_head(&model).is_some();
-            let tanh = extract_tanh_output_head_scale(&model);
-            let spline = zensim_validate::output_calibration_spline::extract(&model);
+            // `model` is member 0 (`Ensemble::primary`). In ensemble mode this
+            // block therefore describes the ANCHOR member's architecture, not a
+            // fused model — an ensemble has no single ZNPR to introspect.
+            let alpha = extract_per_sample_alpha_head(model).is_some();
+            let hybrid = extract_hybrid_head(model).is_some();
+            let minmax = extract_minmax_head(model).is_some();
+            let tanh = extract_tanh_output_head_scale(model);
+            let spline = zensim_validate::output_calibration_spline::extract(model);
             let layers: Vec<Value> = model
                 .layers()
                 .map(|l| {
