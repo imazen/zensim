@@ -395,6 +395,29 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   scoreboard/chips **regime** now shows the model's TRUE input width from `n_inputs`
   (372/720/924/944-class) — the stored campaign flag string reads "720" cosmetically
   on all 166 board JSONs. 166-bake board = ~10.3 MB (cap 12 MB), gates PASS.
+  Plus (2026-08-04, board-integrity pass) **the annotations-registry + dominance +
+  block-usage layer**: `benchmarks/eval_annotations.json` = ONE committed
+  machine-readable registry of invalidated/annotated/absent-not-failed numbers
+  (schema in its `_schema` header; append-only), consumed by `freeze_check
+  --annotations` (absent axes print `— (absent)` DISTINCT from measured fails;
+  n/8 keeps the registered absent=not-passed rule AND the n/m-measured form is
+  stated; TSV +n_measured/absent/annotations/blocks/dominated_by) and by the
+  board (⚠ badges + hover reasons, caption line, `DATA.annRegistry`).
+  `dominated_by` marks = strict same-class Pareto (`scripts/sota944_dominance.py`
+  rule strict-pareto-2026-08-04 + `promote_fulleval.py --mark-dominated`;
+  17 trims, all 944-single) — dominated cells render dimmed + default-off behind
+  a "dominated" chip, files NEVER deleted. Scoreboard gained **HF-NL/ref**
+  (hfnlproxy per-ref mean; the era incumbents were FILLED by
+  `derive_hfnlproxy_372.py` — exact-key join, identity-gated vs the 944 slice —
+  and grafted sha-gated via `promote_fulleval.py --graft-rank`; era per-ref
+  0.64-0.83 ≫ the 944 frontier's 0.13-0.42). **Feature-block-usage filter**:
+  `bake_block_profile` (via `zenpredict::Model`; no new wire code) →
+  `block_profile` injected into all fullevals (`--set-block-profile`, sha-gated);
+  "uses f156-371" chip + per-family used/total on the Model-details card —
+  f156-371 were ZEROED by the folded regimes (slots preserved per the
+  append-only discipline, not removed); 944 MLPs zero them exactly (216/216),
+  B uses 49/216. §8's falsified pool-wide census was corrected in place
+  (campaign doc CORRECTIONS + BOARD-INTEGRITY PASS sections).
   **Regen gates (MANDATORY, run on every emitted HTML):**
   `scripts/v_next/gauntlet_gates.sh <html>` = `node --check` on EVERY extracted
   `<script>` block + the DOM-shim render harness (`gauntlet_render_check.js`) —

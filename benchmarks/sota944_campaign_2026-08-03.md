@@ -3557,3 +3557,198 @@ headers (git commit, command, corpus paths+shas where recorded); results
 appended to this doc; jj workspace `../zensim--contrib`; builds via run-heavy;
 logs `~/tmp/contrib/`. Stats never hand-rolled (zenstats only). Supervisor
 re-derives spot values from the TSVs.
+
+## BOARD-INTEGRITY PASS (2026-08-04) — registry, era hfnl FILL, dominance trim, incumbents under the balanced frame
+
+User-directed four-part pass (supervisor tasking): flag invalidated/superseded
+numbers machine-readably, Pareto-trim strictly-worse cells after revalidation,
+surface the shipped default + era incumbents under the balanced frame, and
+reconcile the falsified §8 census (the CORRECTIONS subsection above, commit
+`8924328a` — reproduced digit-for-digit, root-caused to a denominator widened
+145→172 in the final edit without re-running the census).
+
+### 1. The invalidation/annotation registry — `benchmarks/eval_annotations.json`
+
+ONE committed machine-readable registry (schema in its `_schema` header; entries
+append-only) so flattered/superseded/absent numbers can never be read as clean
+wins. Seed entries: `dial-mono-raw-unit` (annotated — spline-less raw-unit mono
+flattered ~3-6 pts vs dial units, packaging-pass evidence), `hfnl-absent-not-
+failed` (absence of `rank.hfnlproxy` = NOT MEASURED, distinct from a measured
+fail), `kadid-tid-train-eq-val` (formalizes the standing train==val caveat).
+Consumers (both landed + test-locked):
+
+- **`freeze_check --annotations`** (default = the committed file): scope
+  predicates (`missing`/`present`/`names`/`all`), segment-boundary field
+  coverage; an absent-not-failed floor prints `— (absent)` with verdict
+  `ABSENT (not passed)` — **still not-passed for n/8 (the registered rule
+  does NOT move)** — and both forms are stated (`5 of 8 floors pass
+  (5/7-measured; absent-not-failed: hfnl)`). TSV gains
+  `n_measured`/`absent`/`annotations` (+`blocks`/`dominated_by`, §4/§5 below);
+  absent-not-failed floors leave the measured `fails` list. 5 new tests
+  (predicates, both-forms counting, measured-fail-never-becomes-absent,
+  annotated-kind verdict-neutrality, committed-registry parse+behavior).
+- **`gauntlet.py`**: ⚠ badges + hover reasons on affected cells (raw-unit dial
+  mono; the new HF-NL/ref scoreboard column renders `— (absent)` on
+  registry-covered cells), registry ids in the bake-picker tooltips, and a
+  scoreboard caption line. The registry embeds as `DATA.annRegistry`.
+
+### 2. The era-bridge hfnlproxy FILL — cheaply derived, gates all green
+
+The hfnlproxy corpus (944-root-only) postdated every era-bridge fulleval. A
+372-col era-native slice was **derived, not extracted**
+(`scripts/canonical_corpus/derive_hfnlproxy_372.py`): the 944 TEST views carry
+`encoded_filename`, and the canonical-picker-2026-06-27 TEST splits carry the
+SAME cells (row counts equal per view; sampled keys 5000/5000 hits) with
+`feat_0..feat_371` — the v1-372 space every n_inputs≤372 era bake natively
+reads. Gates (all hard): selection identity vs the committed 944 slice
+(11,356 rows, refs + human_score float-exact, row-for-row), join completeness,
+per-row `score_ssim2` float-exact on both sides. Output:
+`ext720-canonical-2026-07-22/ext_hfnlproxy.parquet` + manifest (source shas).
+Scored via `bake_verdict --regime 720 --corpora hfnlproxy`, grafted into the
+board fullevals by the new sha-gated `promote_fulleval.py --graft-rank
+hfnlproxy` (provenance in `rank_graft_sources`):
+
+| era cell | HF-NL/ref (was absent) | n/8 before → after |
+|---|---|---|
+| `b_sdr_linear…dense_dial` (**B**, shipped default) | **+0.8252** | 4/8 → **5/8** |
+| `Ebothg_scr0_5_dial` | **+0.8292** | 4/8 → **5/8** |
+| `v47_strict_QAT_native` | +0.7248 | 5/8 → **6/8** |
+| `winner_dial_Ebothg_hfgain_winsor_dial` | +0.6437 | 5/8 → **6/8** |
+
+**Substantive finding:** the era incumbents measure FAR above the 944 frontier
+(+0.13..+0.42) and the 0.1931 comparator on the SAME cells — the hf-trained
+372-era lineage is genuinely strong in the near-lossless band. The other 16
+era cells stay absent (n_inputs>372 or unfilled) — now honestly labeled
+absent-not-failed by the registry, never counted as measured fails.
+
+### 3. Fresh matrix + revalidation
+
+`scripts/sota944_balanced_matrix.sh` re-run over the CURRENT 172-cell fulleval
+dir with the extended owner:
+`balanced_matrix_2026-08-04_integrity.tsv` (sha256 `2968b71bd1c96810…`), which
+supersedes `_final.tsv` as the live snapshot. Diff vs the stored final matrix:
+**every changed cell is explained** — the 4 fill cells (n_pass/hfnl/fails) and
+16 era cells whose `hfnl` token moved from `fails` to the new `absent` column.
+Zero unexplained numeric drift; the supervisor-falsified census row was
+re-derived from this snapshot (1/172 pool-wide holds F1∧F2∧F7 = winner_dial).
+
+### 4. Dominance trim (strict same-class Pareto; nothing deleted)
+
+`scripts/sota944_dominance.py` (rule `strict-pareto-2026-08-04`, documented in
+the script header): D dominates C within a class iff D covers every axis
+MEASURED on C and is ≥ on all (≤ tied), > on ≥1, over the 8 floor axes +
+`balanced_composite`; absent axes never dominate and are never dominated
+(coverage requirement); F4 compares only within the same dial-unit annotation
+status (packaging twins are structurally insulated from their parents'
+raw-unit numbers); F5 compares as the owner's pass token; B3/B9 signed.
+Marks written into the fullevals via `promote_fulleval.py --mark-dominated`
+(`dominated_by` + `dominance` provenance; the board renders them dimmed +
+default-off behind a "dominated" chip — files NEVER deleted).
+
+**Result: 17 dominated, all 944-single; 0 in distilled/ensemble/era-bridge.**
+Survivors: 117/134 singles (every frontier cell survives — H seeds, co3a
+family, em944_s31, co2b_s1307, all ensembles, all incumbents). Trimmed (with
+dominators recorded per cell): `C_co2a_s1307`, `sota944_A_bvls_P_AM5_w`,
+`sota944_A_shaped_P_AM1_lam1e-2_w`, `sota944_B2_addX_AM5hdr_lam3e-3_w`,
+`sota944_C_co1b_s1301/s1307`, `sota944_C_co1c_s1303`,
+`sota944_C_co2a_s1301/s1303`, `sota944_C_co3a_s1367`,
+`sota944_C_em944_s29/s99`, `sota944_C_nt944_s211/s239`,
+`sota944_C_nt944lo_s223`, `sota944_nt223`, `sota944_winner_A_bvls_X_AM5`.
+Spot-verified (supervisor-style): `C_co2a_s1307` loses to `C_co3a_s1301` on
+all 12 compared subaxes.
+
+### 5. Feature-block-usage filter (user ask, folded in)
+
+`bake_block_profile` (new zensim-validate bin; reads via `zenpredict::Model` —
+no new wire code, handles v3.1 compression + f16/i8): per-family
+(f0-155 / **f156-371, the block ZEROED by the folded regimes — slots
+preserved per the append-only discipline, not removed** / f372-719 /
+f720-943) count of encoder columns with nonzero norm.
+`promote_fulleval.py --set-block-profile` injected it into **all 172**
+fullevals (bake files all present, sha-verified). MEASURED shape: 944 MLPs
+zero the whole f156-371 block EXACTLY (216/216) and prune 61/224 of the
+append block; **B genuinely uses 49/216 of the block** (sparse 372 linear:
+46+49 of 372 slots); v47 uses 179/216; ADD156 bakes don't carry the slots at
+all. Board: a "uses f156-371" filter chip (tooltip says it mostly separates
+eras), per-family counts in the Model-details card (`blocks` row, ensembles
+anchor-only), `blocks` column in the matrix TSV. This is the STRUCTURAL
+complement to the corpus-based contribution study registered above (§C).
+
+### 6. INCUMBENTS under the balanced frame (the shortlist addition)
+
+Every number from `balanced_matrix_2026-08-04_integrity.tsv` (the owner);
+era rows remain **context — regime-incomparable, never shortlisted** (their
+imazen26/nonphoto slices are era-native tables), but the shipped default must
+be answerable axis-by-axis. `— (absent)` = absent-not-failed.
+
+| axis | **B** (shipped default) | `winner_dial_Ebothg` | `Ebothg_scr0_5` | `v47_QAT` (era ctx) | `H_co3abpg_s2507` (944 frontier-top) | `GE2_trio` (ens k=3) |
+|---|---|---|---|---|---|---|
+| n/8 (floors) | 5/8 | **6/8** | 5/8 | 6/8 | 7/8 | 7/8 |
+| balanced_composite | 0.81035 | 0.81818 | **0.82070** | 0.80773 | 0.80710 | 0.81263 |
+| F1 CID22 | 0.88209 ✗(−0.0029) | **0.89396 ✓** | 0.87939 ✗ | 0.86597 ✗ | 0.88055 ✗(−0.0045) | 0.89187 ✓ |
+| F2 KonJND | **0.51859 ✓ (pool-best)** | 0.43084 ✓ | 0.41144 ✗ | 0.44448 ✓ | 0.45897 ✓ | 0.45434 ✓ |
+| F3 nonphoto | 0.89898 ✗(−0.001) | 0.89460 ✗(−0.0054) | **0.92560 ✓** | 0.91131 ✓ | 0.91635 ✓ | 0.92032 ✓ |
+| F7 csiq/live | 0.93421/0.89703 ✓ | **0.95841/0.95998 ✓** | 0.95745/0.95935 ✓ | 0.92413/0.94378 ✓ | 0.83019/0.86340 ✓ | 0.80979/0.84532 ✗ |
+| F6 HF-NL/ref | **+0.8252 ✓ (pool-best)** | +0.6437 ✓ | +0.8292 ✓ | +0.7248 ✓ | +0.1820 ✓ | +0.1633 ✓ |
+| F8 B3 / B9 | 0.067 / 0.035 ✗(B9) | 0.148 / 0.132 ✗(B9 −0.018) | 0.123 / 0.135 ✗(B9) | 0.179 / 0.036 ✗(B9) | 0.046 / **0.171 ✓** | 0.014 / **0.276 ✓** |
+| F4 dial (unit) | **97.6%/0.0 ✓ (dial-unit, real spline)** | 97.6%/0.0 ✓ (dial-unit) | 98.1%/0.0 ✓ (dial-unit) | 97.5%/0.0 ✓ (dial-unit) | 94.0%/0.0 ✓ (raw-unit ⚠; packed twin 91.2% FAIL) | 95.2%/0.0 ✓ (raw-unit ⚠) |
+| F5 span | 85.8 ✓ | 80.4 ✓ | 79.0 ✓ | 79.5 ✓ | 17.0 ✓ | 15.3 ✓ |
+| M3a (reported) | 0.597 flagged | **0.9225 GOLD** | 0.9124 GOLD | 0.633 flagged | 0.8664 GOLD | not computable (ens) |
+| corr-head q20 | — (no head verdict) | — | — | — | — | — |
+| kadid (guard, dimmed) | 0.8085 | 0.9464 | (t=v) | (t=v) | (t=v) | (t=v) |
+| repro / spline | present / **present** | absent / present | absent / present | absent / present | present / none | anchor-only / none |
+| blocks (used/slots) | 46/156 + **49/216** | 156-only (ADD156) | 156-only | 106/156 + 179/216 | 156+0+348+163 | anchor = s-member |
+
+**The at-a-glance answer ("does anything beat the shipped default?"): NO cell
+beats B axis-by-axis** — B survives the dominance pass un-dominated, holding
+the pool-best KonJND (0.519) AND pool-best HF-NL/ref (+0.825) AND breadth AND
+the only repro+spline-complete packaging row; its costs are three small floor
+misses (cid22 −0.0029, nonphoto −0.001, B9 0.035) and the flagged M3a 0.597
+(the era coherence gap is real). What DOES beat B per-axis: `H_s2507` on
+CID22-band tails + M3a + n/8; `winner_dial` on CID22 + breadth + M3a (GOLD)
+while losing kon/hfnl/B3; `GE2_trio` on cid22+tails at 3× cost, not shippable.
+The 944 frontier's wins over the incumbents are the high-band tail (B9
+0.17-0.28 vs 0.03-0.14) and coherence-at-944-width; the incumbents' wins are
+KonJND depth, classic-IQA breadth, near-lossless per-ref, and REAL dials.
+`winner_dial_Ebothg` at 6/8 with GOLD M3a is the strongest single-bake row on
+the whole board by floor count among spline-complete cells — the balanced
+frame does NOT retire the era incumbents; it prices exactly what the 944 era
+has and hasn't bought. (Era `balanced_composite` values carry the standing
+regime caveat: their imazen26/nonphoto terms come from era-native eval
+tables.)
+
+### Post-fill note on the CORRECTIONS subsection
+
+The corrections text above states winner_dial's record AT the falsified
+matrix snapshot (5/8, hfnl absent, 5/7-measured). After the §2 fill its F6 is
+MEASURED PASS (+0.6437), making it **6/8 measured-on-8** — fails only
+nonphoto (−0.0054) and B9 (−0.018). Both statements are true of their
+respective snapshots; the live snapshot is `_integrity.tsv`.
+
+### Ops + artifacts
+
+Workspace `../zensim--hygiene` on `main@origin`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimhyg-target`; builds via `run-heavy --jobs 6`;
+logs `~/tmp/hygiene/`. Board regenerated (172 bakes, 10.3 MB) with BOTH gates
+PASS (`gauntlet_gates.sh`: node --check 2 blocks + DOM-shim render, 9
+sections / 31 tables / 444 rows). Matrix snapshots:
+`/mnt/v/output/zensim/reports/balanced/balanced_matrix_2026-08-04_integrity.tsv`
+(sha `2968b71b…`; the earlier `_hygiene.tsv` was the pre-blocks-column run —
+zero value drift between them). hfnl fill verdicts:
+`~/tmp/hygiene/hfnl_fill/*.full.json` (transient; the grafted numbers +
+provenance live in the board fullevals' `rank_graft_sources`).
+
+### Limitations (this pass)
+
+- The fill covers the 4 named incumbents; 16 era cells remain absent-not-failed
+  (12 are n_inputs>372 and need a wider-regime slice; the rest were out of the
+  directive's scope). The registry labels them honestly.
+- Dominance uses point estimates (like every floor); margins inside documented
+  noise (CID22 sd 0.0125) can flip marks on re-measurement — marks are
+  reversible (`--dominated-by ""` clears) and recomputable from any fresh
+  matrix.
+- `block_profile` for ensembles describes the ANCHOR member's bake (stated on
+  the card); the corpus-based contribution study (§C) is the effective-usage
+  complement.
+- Era `balanced_composite`/imazen26/nonphoto remain regime-incomparable
+  context — the incumbents table prices axes, it does not rank eras.

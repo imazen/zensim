@@ -778,7 +778,29 @@ fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
     }
 }
 
-const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid\ttid\tspline\trepro\tfails\tn_measured\tabsent\tannotations";
+const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid\ttid\tspline\trepro\tfails\tn_measured\tabsent\tannotations\tblocks\tdominated_by";
+
+/// Compact carry of the promoter-injected `block_profile` (used-counts per
+/// family, `f0_155/f156_371/f372_719/f720_943`) — computed by
+/// `bake_block_profile`, never here. "-" when the fulleval has none.
+fn blocks_summary(v: &serde_json::Value) -> String {
+    let fam = |name: &str| {
+        f(v, &["block_profile", "families", name, "used"])
+            .map(|x| format!("{}", x as i64))
+            .unwrap_or_else(|| "·".into())
+    };
+    if v.get("block_profile").map(|b| !b.is_null()).unwrap_or(false) {
+        format!(
+            "{}/{}/{}/{}",
+            fam("f0_155"),
+            fam("f156_371"),
+            fam("f372_719"),
+            fam("f720_943")
+        )
+    } else {
+        "-".into()
+    }
+}
 
 fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
     let n_pass = r.floors.iter().filter(|x| x.pass).count();
@@ -874,6 +896,15 @@ fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
                 .map(|(id, _, _)| id.as_str())
                 .collect::<Vec<_>>()
                 .join(",")
+        },
+        blocks_summary(v),
+        match v.get("dominated_by").and_then(|d| d.as_array()) {
+            Some(a) if !a.is_empty() => a
+                .iter()
+                .filter_map(|x| x.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            _ => "-".to_string(),
         },
     ]
     .join("\t")
@@ -1345,7 +1376,10 @@ mod tests {
             .iter()
             .any(|(id, kind, _)| id == "dial-mono-raw-unit" && kind == "annotated"));
         let row = tsv_row(&v, &r);
-        assert!(row.ends_with("dial-mono-raw-unit"), "annotations col carries the id");
+        let hdr: Vec<&str> = TSV_COLS.split('\t').collect();
+        let cols: Vec<&str> = row.split('\t').collect();
+        let ann_i = hdr.iter().position(|h| *h == "annotations").unwrap();
+        assert_eq!(cols[ann_i], "dial-mono-raw-unit", "annotations col carries the id");
     }
 
     #[test]

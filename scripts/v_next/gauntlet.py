@@ -305,6 +305,43 @@ def _composite(rank):
         return round(score, 4), bool(reject)
 
 
+def load_annotations_registry():
+    """The committed invalidation/annotation registry (board-integrity pass
+    2026-08-04): benchmarks/eval_annotations.json. Returns (entries, meta) where
+    meta = {id: {kind, reason}} for tooltip embedding. Missing file -> ([], {})
+    with a loud note (the board then renders no badges — never fabricated ones)."""
+    p = Path(__file__).resolve().parents[2] / "benchmarks" / "eval_annotations.json"
+    if not p.exists():
+        print(f"NOTE: annotations registry not found at {p} — no ⚠ badges", file=sys.stderr)
+        return [], {}
+    reg = json.loads(p.read_text())
+    entries = reg.get("entries", [])
+    meta = {e["id"]: {"kind": e.get("kind", ""), "reason": e.get("reason", "")}
+            for e in entries if "id" in e}
+    return entries, meta
+
+
+def _ann_field_present(o, dotpath):
+    cur = o
+    for part in dotpath.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return False
+        cur = cur[part]
+    return cur is not None
+
+
+def _ann_matches(o, entry):
+    """Mirror of freeze_check's scope predicates (missing/present/names/all)."""
+    scope = entry.get("scope") or {}
+    if "missing" in scope:
+        return not _ann_field_present(o, scope["missing"])
+    if "present" in scope:
+        return _ann_field_present(o, scope["present"])
+    if "names" in scope:
+        return o.get("name") in (scope["names"] or [])
+    return bool(scope.get("all"))
+
+
 def load_fulleval(fulleval_dir, best_per_day=None):
     """Read every *.fulleval.json; order by best_per_day date when available. Returns the list of
     bake dicts prepared for embedding (subsampled scatter points + fit lines + composite)."""
@@ -328,6 +365,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                             if o.get("name") in CURATED
                             else (1, len(CURATED_BOARD), str(o.get("name", "")).lower())))
 
+    ann_entries, _ann_meta = load_annotations_registry()
     rng = np.random.RandomState(0)
     bakes = []
     for ci, o in enumerate(raw):
@@ -381,6 +419,16 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             model = dict(model)
             model["n_feature_transforms"] = len(ft)   # true count for the card
             model["feature_transforms"] = ft[:MODEL_TRANSFORMS_EMBED]
+        # board-integrity pass (2026-08-04): registry annotations, dominance
+        # marks and the static block-usage fingerprint ride into the embed.
+        matched_ann = [e["id"] for e in ann_entries if "id" in e and _ann_matches(o, e)]
+        blocks = None
+        bp = o.get("block_profile")
+        if isinstance(bp, dict):
+            fams = bp.get("families") or {}
+            blocks = {"uses156": bool(bp.get("uses_f156_371")),
+                      "fams": {k: [v.get("used"), v.get("cols")]
+                               for k, v in fams.items() if isinstance(v, dict)}}
         bakes.append({
             "name": name, "regime": regime_of(o), "regime_flag": o.get("regime", "?"),
             "curated": curated, "family": family_of(name),
@@ -392,6 +440,9 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "gates": o.get("gates") or {},
             "model": model,
             "repro": o.get("repro"),
+            "annotations": matched_ann,
+            "dominated_by": o.get("dominated_by") or [],
+            "blocks": blocks,
             "scatter": scatter_out, "is_stub": bool(o.get("_stub")),
         })
     return bakes
@@ -466,9 +517,11 @@ svg{display:block;max-width:100%;height:auto}
 
 def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=None):
     ech_js, ech_ver = _load_echarts()
+    _, ann_meta = load_annotations_registry()
     data = {"bakes": bakes, "palette": PALETTE, "references": REFERENCES,
             "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
             "chartThemes": THEME_VARS, "echartsVersion": ech_ver,
+            "annRegistry": ann_meta,
             "loopTargeting": loop_targeting}
     any_stub = any(b.get("is_stub") for b in bakes)
     stub_note = ("<span class='stub'>STUB DATA</span> — synthesized fixtures "
@@ -527,7 +580,13 @@ const S=(t,a={},k=[])=>el('svg:'+t,a,k);
 // Default-visible = the CURATED headline set (era flagships + campaign arm candidates/
 // leaders + ensembles — flagged at build from gauntlet.py CURATED_BOARD). The full grid
 // stays one toggle away; payloads without curated flags fall back to all-visible.
-const CURATED=DATA.bakes.filter(b=>b.curated).map(b=>b.name);
+// Board-integrity pass (2026-08-04): DOMINATED cells (strict same-class Pareto,
+// promote_fulleval.py --mark-dominated) are additionally default-OFF + dimmed; the
+// annotations registry (benchmarks/eval_annotations.json) feeds the ⚠ badges.
+const DOM=b=>!!(b.dominated_by&&b.dominated_by.length);
+const ANN=(b,id)=>!!(b.annotations&&b.annotations.indexOf(id)>=0);
+const annReason=id=>(DATA.annRegistry&&DATA.annRegistry[id]&&DATA.annRegistry[id].reason)||id;
+const CURATED=DATA.bakes.filter(b=>b.curated&&!DOM(b)).map(b=>b.name);
 const state={visible:new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name)),
   ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false};
 function effTheme(){const dt=document.documentElement.getAttribute('data-theme');
@@ -559,11 +618,21 @@ const ensBadge=b=>isEns(b)?el('span',{style:'font-size:9px;font-weight:700;lette
   +'background:color-mix(in srgb, var(--warn) 34%, var(--surface-1));border:1px solid var(--border)',
   title:'equal-weight ensemble of '+ensK(b)+' bakes — an evaluation function, not a single '
     +'shippable bake; M3/M3a not computable',text:'ens×'+ensK(b)}):null;
-// swatch + name (+ ens badge) cell content, shared by every table that names a bake
+// DOMINATED marker (board-integrity pass 2026-08-04): strictly beaten by a same-class
+// sibling on every measured floor axis + composite. Cells stay on the board (never
+// deleted) but render dimmed, default-off, behind the 'dominated' chip.
+const domBadge=b=>DOM(b)?el('span',{style:'font-size:9px;font-weight:700;letter-spacing:.03em;'
+  +'padding:0 4px;margin-left:5px;border-radius:7px;vertical-align:1px;white-space:nowrap;'
+  +'opacity:.75;background:color-mix(in srgb, var(--muted) 22%, var(--surface-1));border:1px solid var(--border)',
+  title:'DOMINATED (strict-pareto-2026-08-04) by: '+b.dominated_by.join(', ')
+    +' — beaten on every measured floor axis + composite within its class; kept for the record, default-off',
+  text:'dom'}):null;
+// swatch + name (+ ens/dom badges) cell content, shared by every table that names a bake
 function nameInto(node,b,suffix){
   node.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),
     document.createTextNode(b.name+(suffix||'')));
   const bd=ensBadge(b);if(bd)node.append(bd);
+  const dd=domBadge(b);if(dd)node.append(dd);
   return node;
 }
 
@@ -654,6 +723,35 @@ function renderBar(){
       rerender();renderBar();};
     bar.appendChild(chip);
   });
+  // ---- board-integrity chips (2026-08-04): dominated + block-usage filters.
+  const domCells=DATA.bakes.filter(DOM);
+  if(domCells.length){
+    const on=domCells.filter(b=>state.visible.has(b.name)).length,full=on===domCells.length;
+    const chip=el('span',{class:'gchip'+(on?'':' off'),
+      title:(full?'hide':'show')+' the '+domCells.length+' DOMINATED cells — strictly beaten by a '
+        +'same-class sibling on every measured floor axis + composite (strict-pareto-2026-08-04; '
+        +'files kept, marks via promote_fulleval.py --mark-dominated). Default-off so trimmed '
+        +'cells never sit on stolen wins.'});
+    chip.append(el('b',{text:'dominated'}),el('span',{class:'cap',text:' '+on+'/'+domCells.length}));
+    chip.onclick=()=>{domCells.forEach(b=>full?state.visible.delete(b.name):state.visible.add(b.name));
+      rerender();renderBar();};
+    bar.appendChild(chip);
+  }
+  const blkCells=DATA.bakes.filter(b=>b.blocks&&b.blocks.uses156);
+  if(blkCells.length){
+    const on=blkCells.filter(b=>state.visible.has(b.name)).length,full=on===blkCells.length;
+    const chip=el('span',{class:'gchip'+(on?'':' off'),
+      title:(full?'hide':'show')+' the '+blkCells.length+' bakes with STRUCTURAL use of f156-371 — '
+        +'the block ZEROED by the folded 924/944 regimes (slots preserved per the append-only '
+        +'discipline, not removed). Mostly separates eras: 944-class bakes are structurally zero '
+        +'there by construction; 372-wide era bakes carry real IW-pool weight; ADD156 bakes do not '
+        +'even carry the slots. Static fingerprint from bake bytes (bake_block_profile) — the '
+        +'corpus-based contribution measure is the sibling instrument.'});
+    chip.append(el('b',{text:'uses f156-371'}),el('span',{class:'cap',text:' '+on+'/'+blkCells.length}));
+    chip.onclick=()=>{blkCells.forEach(b=>full?state.visible.delete(b.name):state.visible.add(b.name));
+      rerender();renderBar();};
+    bar.appendChild(chip);
+  }
   // per-bake chips (collapsible picker; open-state survives re-renders)
   const det=el('details',{class:'allbakes'});
   if(state.chipsOpen)det.setAttribute('open','');
@@ -667,7 +765,9 @@ function renderBar(){
       title:b.regime+' inputs'
         +(b.regime_flag&&b.regime_flag!==b.regime?' (recorded flag: '+b.regime_flag+')':'')
         +(b.family?' · '+b.family:'')+(b.curated?' · curated':'')
-        +(b.is_stub?' (stub)':'')+(isEns(b)?' · ensemble of '+ensK(b)+' bakes':'')});
+        +(b.is_stub?' (stub)':'')+(isEns(b)?' · ensemble of '+ensK(b)+' bakes':'')
+        +(DOM(b)?' · DOMINATED by '+b.dominated_by.join(', '):'')
+        +(b.annotations&&b.annotations.length?' · ⚠ '+b.annotations.join(', '):'')});
     const cb=el('input',{type:'checkbox'});cb.checked=on;
     cb.onchange=()=>{on?state.visible.delete(b.name):state.visible.add(b.name);rerender();renderBar();};
     chip.append(cb, el('span',{class:'sw',style:'background:'+color(b)}),
@@ -744,6 +844,7 @@ const COLS=[
   ['aic3','AIC-3',false,b=>rs(b,'aic3')],
   ['live','LIVE',false,b=>rs(b,'live')],
   ['csiq','CSIQ',false,b=>rs(b,'csiq')],
+  ['hfnl','HF-NL/ref',false,b=>b.rank.hfnlproxy&&b.rank.hfnlproxy.per_ref_mean!=null?b.rank.hfnlproxy.per_ref_mean:null],
   ['dial_mono','dial-mono',false,b=>b.dial.mono_pct],
   ['dial_tied','tied',false,b=>b.dial.tied_pct],
   ['m3a','M3a-attr',false,b=>b.m3a],
@@ -796,7 +897,14 @@ function renderTable(){
     +'the ANCHOR member only. Distillation to a single bake is pending. '
     +'Rows list EVERY promoted cell (dimmed = hidden from charts; click a row to toggle it). '
     +'Hidden-by-default grid cells carry the same scalar stats as curated ones — only embedded '
-    +'scatter data is curated-set-only (see the scatter section).'
+    +'scatter data is curated-set-only (see the scatter section). '
+    +'<b>⚠ = registry annotation</b> (benchmarks/eval_annotations.json, hover for the reason): '
+    +'dial-mono on spline-less bakes is RAW-UNIT (flattered ~3-6 pts vs real dial units); '
+    +'<b>HF-NL/ref</b> = hfnlproxy per-reference mean SROCC — “— (absent)” on cells that predate '
+    +'the instrument is <b>absent-not-failed</b> (not measured ≠ measured fail); KADID/TID stay '
+    +'train==val integrity guards everywhere. <b>dom</b>-tagged rows are DOMINATED (strictly '
+    +'beaten by a same-class sibling on every measured floor axis + composite) — kept on the '
+    +'board, dimmed + default-off behind the “dominated” chip; nothing is deleted.'
     +(LT?' <b>2shot/3shot ±2</b> = JXL loop targeting: cells (of '+ltN()+') where the DECODED-judged score lands '
     +'within ±2 of target in the bake’s own units at encode budget k=2/3, emit-best (emit-last + outer arms: '
     +'see the JXL loop targeting section).':'')});
@@ -823,10 +931,22 @@ function renderTable(){
   rows.forEach(b=>{
     const tr=el('tr',{class:b.reject?'reject':''});
     if(!state.visible.has(b.name))tr.style.opacity=.45;
+    if(DOM(b))tr.style.opacity=Math.min(tr.style.opacity||1,.35);
     COLS.forEach(c=>{
       const v=c[3](b);
       const td=el('td',{class:(c[0]==='name'||c[0]==='regime')?'lbl':'',text:fmtCell(c[0],v)});
       if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
+      // ⚠ registry badges (benchmarks/eval_annotations.json):
+      if((c[0]==='dial_mono'||c[0]==='dial_tied')&&ANN(b,'dial-mono-raw-unit')&&v!=null){
+        td.append(el('span',{style:'margin-left:3px;cursor:help',title:'⚠ raw-unit (dial-mono-raw-unit): '
+          +annReason('dial-mono-raw-unit'),text:'⚠'}));
+      }
+      if(c[0]==='hfnl'&&v==null&&ANN(b,'hfnl-absent-not-failed')){
+        td.textContent='— (absent)';
+        td.setAttribute('title','⚠ absent-not-failed (hfnl-absent-not-failed): '
+          +annReason('hfnl-absent-not-failed'));
+        td.style.cursor='help';
+      }
       if(c[0]!=='name'&&c[0]!=='regime'&&v!=null&&isFinite(v)){
         const[lo,hi]=ranges[c[0]];let t=hi===lo?.5:(v-lo)/(hi-lo);
         // invert shading where lower is better (tied dead-zone, CI width,
@@ -1373,6 +1493,19 @@ function renderModels(){
         +(m.n_output_specs?(' · '+m.n_output_specs+' output_specs'):'')
         +(m.n_discrete_sets?(' · '+m.n_discrete_sets+' discrete'):'')],
     ];
+    // block usage (static fingerprint from bake bytes — bake_block_profile;
+    // f156-371 were ZEROED by the folded 924/944 regimes, slots preserved per
+    // the append-only discipline, not removed). used/total encoder columns
+    // with nonzero norm per family; ensembles: the ANCHOR member's bake.
+    if(b.blocks&&b.blocks.fams){
+      const ord=['f0_155','f156_371','f372_719','f720_943'];
+      const parts=ord.filter(k=>b.blocks.fams[k]).map(k=>{
+        const uc=b.blocks.fams[k];
+        return k.replace('_','-')+' '+uc[0]+'/'+uc[1]+(k==='f156_371'&&uc[0]===0?' (zeroed)':'');
+      });
+      lines.push(['blocks', parts.join(' · ')+(isEns(b)?'  (anchor member)':'')
+        +(b.blocks.uses156?'  · USES f156-371':'')]);
+    }
     const tb=el('table',{style:'font-size:11px;width:100%'});
     lines.forEach(([k,v])=>{const tr=el('tr',{});
       tr.append(el('td',{class:'lbl',style:'opacity:.65;padding-right:8px;white-space:nowrap',text:k}),
