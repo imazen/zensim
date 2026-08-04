@@ -3965,3 +3965,126 @@ transform axis held fixed; the existing s31 bake supplies the
 hyperparameters verbatim from the s31 argv. Eval: `bake_verdict --regime 720`
 (real-pool root) for the 372 arms, `--regime 944` for the control, corpora
 cid22,kadid,csiq,live,konjnd.
+
+## REGISTERED APPENDIX — COHERENCE MECHANISM: is M3a determined by WHERE a bake's contribution mass sits?
+### (written and committed BEFORE any mass fraction or correlation was computed; the classification in §D.1 was derived from source first, which is an input to the registration, not a result)
+
+Supervisor hypothesis, tested here: **a bake's M3a (attribution-density block
+coherence) is largely determined by the fraction of its contribution mass that
+sits on features the attribution machinery can honestly attribute to a
+rectangle — not by capacity, depth, era, or coherence regularization.** If
+true, "B-quality with spatial coherence" is a *design rule* (steer mass onto
+decomposable features) rather than another search wave.
+
+### D.1 The decomposability classification (derived from source, committed as a table)
+
+`benchmarks/slot_decomposability_2026-08-04.tsv` classifies **every** slot the
+attribution machinery can produce a density for, with per-row source line
+references (`zensim/src/attribution.rs`, `zensim/src/feature_v2.rs`,
+`zensim/src/metric.rs`, at git `28e7bd49`). Three classes, frozen here:
+
+- **E — exact.** The per-pixel integrand is the exact linear decomposition of
+  the pooled feature; the full-plane sum reproduces the feature (or its exact
+  first-order removal effect) with no allocation choice and no assumed-fixed
+  nonlinear state. (basic mean slots 0/3/6/9; the v2 mean pools; the v2
+  masked/IW *reference-weighted* pools — `−w_i·v_i/Σw` is exact; the append
+  mean slots + luminance bins.)
+- **A — approximate.** A true per-pixel integrand exists but embeds a
+  documented approximation: nonlinear-pool first order (basic p2/p4 roots, the
+  v2/append deviation pools, the self-weighted soft peaks), a clamp or
+  saturation state assumed fixed at the POOLED level (basic hf slots 10-12, the
+  append globals), an allocation choice (v2 BLOCKINESS 50/50 across the step
+  pair), or a scale-level rather than per-pixel chain (v2 EDGE_WIDTH_CHANGE).
+- **N — non-decomposable.** The machinery emits **exactly zero density**
+  regardless of the model gradient. Three sources: (i) **f156-371** — the v1
+  peak / masked / IW pools are not spatialized at all
+  (`attribution.rs` blind spot 1); (ii) **f924-943** — the append2 tail is
+  never passed in (`compute_attribution_density_full` slices
+  `s[720..min(len, 924)]`, `attribution.rs:817-821`); (iii) reference-only or
+  structurally-zero slots (v2 `PJND_FRAGILITY`, append `GRAD_SRC_MEAN`, the
+  append X/B cells of `XMASK`/`LUM_TRANSDUCER`, the whole append (B, scale 0)
+  cell under `APPEND_SKIP_B_SCALE0`).
+
+Note the classification is a property of the **machinery**, not of the feature's
+statistical merit: an IW pool is a perfectly good feature that happens to be
+invisible to the map.
+
+### D.2 The statistic
+
+Mass measure = the §C.3 convention, `Σ mean|Δ|` over the inputs in a class
+(exact standardized-zero mean-ablation, `bake_contrib`), normalized by the
+bake's total `Σ mean|Δ|`:
+
+- **PRIMARY: `exact_mass_fraction` = Σ_E / (Σ_E + Σ_A + Σ_N).** This is
+  literally the quantity the hypothesis names.
+- **SECONDARY (pre-registered, reported alongside):
+  `decomposable_mass_fraction` = (Σ_E + Σ_A) / total** — i.e.
+  `1 − nondecomposable_fraction`. Reported so the verdict cannot rest on the
+  E-vs-A boundary calls (hf slots, globals, blockiness). If PRIMARY and
+  SECONDARY bracket different verdicts, that fact is reported as the finding.
+
+### D.3 Population + corpus (frozen)
+
+- **Population**: every `*.fulleval.json` in
+  `/mnt/v/output/zensim/reports/fulleval/` carrying a non-null
+  `m3a_coherence`. Ensembles are excluded automatically — the coherence
+  instrument loads one ZNPR, so ensemble rows have `m3a_coherence: null`; the
+  excluded count is reported. Bakes whose `.bin` is missing on disk are
+  reported and dropped.
+- **Corpus**: `cid22val` for every bake — ONE corpus name, taken at each bake's
+  **regime-native** root, because a folded slice zeroes f156-371 by
+  construction and would make a 372-era bake's non-decomposable mass
+  artifactually 0 (the §C.2 correction). Mapping by `n_inputs`:
+  944 → `ext944-canonical-2026-08-01/ext_cid22val.parquet`;
+  924 → `ext924-canonical-2026-07-27/...`;
+  720 and 156 → `ext720-canonical-2026-07-22/...`;
+  372 → `2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet`
+  (real pools). `target_col = human_score`, scale 100.
+- Mass fractions are within-bake normalized, so the cross-regime corpus
+  difference enters only at second order; it is stated as a limitation, not
+  corrected for.
+
+### D.4 Decision thresholds (frozen BEFORE computing)
+
+On the PRIMARY statistic, over the full population, using the canonical stats
+owner only (`zenstats` via `panel` / `scripts/lib/zen_stats.py` — never
+hand-rolled):
+
+| |SROCC(m3a, exact_mass_fraction)| | verdict | consequence |
+|---|---|---|
+| **≥ 0.7** | **SUPPORTED** | mass placement is the lever; a decomposable-mass regularizer is the principled next step, designed in the report |
+| **0.4 – 0.7** | **PARTIAL** | contributing factor with other drivers present; the residuals must NAME the other drivers, ranked |
+| **< 0.4** | **FALSIFIED** | coherence comes from training dynamics, not mass placement; the design-rule path is killed and the ranked alternatives are delivered instead |
+
+Also reported: PLCC, n, the scatter, and the same statistics on the SECONDARY.
+
+### D.5 Confounds (annotated, reported, not modelled)
+
+Each point carries: era (`n_inputs` ∈ {156, 372, 720, 924, 944}), depth
+(`n_layers`; 1 = linear/additive vs ≥2 = MLP), and whether the recipe used
+`--coarse-decay` (read from the embedded `zentrain.repro` argv where present,
+`spec.json` argv otherwise, `unknown` when neither exists — counted honestly).
+Within-group relationships are reported **descriptively only**; n per group is
+small and no group-wise model is fitted. A relationship that exists only
+between eras and vanishes within every era is reported as such.
+
+### D.6 What would falsify / weaken the SUPPORTED verdict
+
+- `exact_mass_fraction` is collinear with era (944 vs 372) and the correlation
+  vanishes within both eras ⇒ the finding is "era", not "mass".
+- The two highest-M3a bakes are 156-input, where `exact_mass_fraction` is
+  mechanically bounded — if dropping the 156 class kills the correlation, say
+  so.
+- Contribution mass is a *scalar-score* accounting (`Σ mean|Δ|` under
+  mean-ablation) while M3a scores a *spatial ranking*. The hypothesis assumes
+  these share a denominator; a strong correlation is evidence for that
+  assumption, a weak one is evidence against the hypothesis OR against the
+  bridge. Both readings are stated.
+
+### D.7 Ops (frozen)
+
+jj workspace `../zensim--coh` on `main@origin`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimcoh-target`; logs `~/tmp/coh/`; TSVs to
+`benchmarks/` with `.meta` headers (git commit, command, corpus paths, tool
+sha256). No training in this pass. Stats via `zenstats` only. Supervisor
+re-derives the correlation and two mass fractions independently from the TSV.

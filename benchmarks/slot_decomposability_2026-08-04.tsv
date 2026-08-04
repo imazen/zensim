@@ -1,0 +1,106 @@
+# slot_decomposability_2026-08-04.tsv
+# Decomposability classification of every feature slot the zensim attribution
+# machinery can (or cannot) lay down a per-pixel density for.
+#
+# DERIVED FROM SOURCE (not from prior docs) at git 28e7bd49 / workspace ../zensim--coh:
+#   zensim/src/attribution.rs           module docs L30-99 (integrand table + blind spots),
+#                                       L756-838 (entry points; s[720..min(len,924)] slice at L817-821)
+#   zensim/src/feature_v2.rs            L6225-6260 (integrand-class section comment),
+#                                       L6490-6550 (V2AppCoeffs — one field per contributing slot),
+#                                       L6641-6693 (append coefficient builder; `cross`=ch==1 gate,
+#                                       GRAD_SRC_MEAN "no term" L6691), L5075-5079 (append_cell_active
+#                                       / APPEND_SKIP_B_SCALE0), L1412 (PJND_FRAGILITY zeroed integrand),
+#                                       L91-137 (idx), L235-323 (idx_append), L398-465 (idx_append2)
+#   zensim/src/metric.rs                L1286-1290 (v1 372 layout: 156..228 peak / 228..300 masked / 300..372 IW)
+#
+# CLASSES (registered in benchmarks/sota944_campaign_2026-08-03.md appendix "COHERENCE MECHANISM"):
+#   E = exact          per-pixel integrand is the exact linear decomposition of the pooled feature;
+#                      full-plane sum reproduces the feature (or its exact first-order removal
+#                      effect) with no allocation choice and no assumed-fixed nonlinear state.
+#   A = approximate    a true per-pixel integrand exists but embeds a documented approximation:
+#                      nonlinear-pool first order (p-root / central moment / self-weighted soft peak),
+#                      clamp-or-saturation state assumed fixed at the POOLED level, an allocation
+#                      choice (blockiness 50/50), or a scale-level (not per-pixel) chain (edge width).
+#   N = non-decomposable   the machinery emits exactly ZERO density for the slot regardless of the
+#                      model gradient: the block is not spatialized at all (f156-371, f924-943), or
+#                      the feature is reference-only / structurally zero in the regime.
+#
+# LAYOUTS (column index from block base):
+#   basic    f0   + scale*39 + ch*13 + local     (13 local, 3 ch, 4 scales)
+#   v1pool   f156 + <see block rows>             (216 cols: peak 156-227, masked 228-299, IW 300-371)
+#   v2       f372 + scale*87 + ch*29 + local     (29 local, 3 ch, 4 scales)
+#   append   f720 + scale*51 + ch*17 + local     (17 local, 3 ch, 4 scales)
+#   append2  f924 + scale*5  + local             (5 local, Y-only, 4 scales)
+#   ch index: 0=X 1=Y 2=B
+#
+block	local	name	class	pooling_form	integrand	channels	scales	source_ref
+basic	0	ssim_mean	E	mean	v_i/N exact	all	all	attribution.rs:44-45
+basic	1	ssim_p4	A	p4 root	(1/p)(v^p/N)M^((1-p)/p) first-order	all	all	attribution.rs:46-56
+basic	2	ssim_p2	A	p2 root	(1/p)(v^p/N)M^((1-p)/p) first-order	all	all	attribution.rs:46-56
+basic	3	art_mean	E	mean	v_i/N exact	all	all	attribution.rs:44-45
+basic	4	art_p4	A	p4 root	first-order removal-consistent	all	all	attribution.rs:46-56
+basic	5	art_p2	A	p2 root	first-order removal-consistent	all	all	attribution.rs:46-56
+basic	6	det_mean	E	mean	v_i/N exact	all	all	attribution.rs:44-45
+basic	7	det_p4	A	p4 root	first-order removal-consistent	all	all	attribution.rs:46-56
+basic	8	det_p2	A	p2 root	first-order removal-consistent	all	all	attribution.rs:46-56
+basic	9	mse	E	mean	v_i/N exact	all	all	attribution.rs:44-45
+basic	10	hf_energy_loss	A	clamped ratio	e_i/sum(e_src^2); clamp state assumed fixed	all	all	attribution.rs:57-65,95-96
+basic	11	hf_mag_loss	A	clamped ratio	(|s-mu1|-|d-mu2|)/sum|s-mu1|; clamp fixed	all	all	attribution.rs:57-65,95-96
+basic	12	hf_energy_gain	A	clamped ratio	-e_i/sum(e_src^2); clamp state assumed fixed	all	all	attribution.rs:57-65,95-96
+v1pool	156-227	v1_peak_block	N	hard max / p95	NOT SPATIALIZED - zero density	all	all	attribution.rs:78-80; metric.rs:1288
+v1pool	228-299	v1_masked_block	N	flatness-weighted pool	NOT SPATIALIZED - zero density	all	all	attribution.rs:78-80; metric.rs:1289
+v1pool	300-371	v1_iw_block	N	texture-weighted pool	NOT SPATIALIZED - zero density	all	all	attribution.rs:78-80; metric.rs:1290
+v2	0	SSIM_MEAN	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6492
+v2	1	SSIM_DEV2	A	central 2nd moment	(2*mu*v-v^2)/(2f*N) chain, signed	all	all	feature_v2.rs:6244-6247,6525
+v2	2	SSIM_DEV4	A	central 4th moment	raw-moment chain, signed	all	all	feature_v2.rs:6244-6247,6526
+v2	3	ART	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6493
+v2	4	DET	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6494
+v2	5	MSE	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6495
+v2	6	HF_GAIN	E	mean of bounded_excess	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6496
+v2	7	HF_LOSS	E	mean of bounded_excess	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6497
+v2	8	HF_MAG_LOSS	E	mean of bounded_excess	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6498
+v2	9	SSIM_SOFT_PEAK	A	self-weighted soft peak	w(v_i)(f-v_i)/W signed; plane sum = 0	all	all	feature_v2.rs:6242-6243,6516
+v2	10	ART_SOFT_PEAK	A	self-weighted soft peak	w(v_i)(f-v_i)/W signed; plane sum = 0	all	all	feature_v2.rs:6242-6243,6517
+v2	11	DET_SOFT_PEAK	A	self-weighted soft peak	w(v_i)(f-v_i)/W signed; plane sum = 0	all	all	feature_v2.rs:6242-6243,6518
+v2	12	MASKED_SSIM	E	reference-weighted pool	-w_i*v_i/sum(w) exact (w reference-side)	all	all	feature_v2.rs:6240-6241,6507
+v2	13	MASKED_ART	E	reference-weighted pool	-w_i*v_i/sum(w) exact	all	all	feature_v2.rs:6240-6241,6508
+v2	14	MASKED_DET	E	reference-weighted pool	-w_i*v_i/sum(w) exact	all	all	feature_v2.rs:6240-6241,6509
+v2	15	MASKED_MSE	E	reference-weighted pool	-w_i*v_i/sum(w) exact	all	all	feature_v2.rs:6240-6241,6510
+v2	16	IW_SSIM	E	reference-weighted pool	-w_i*v_i/sum(w) exact	all	all	feature_v2.rs:6240-6241,6511
+v2	17	IW_ART	E	reference-weighted pool	-w_i*v_i/sum(w) exact	all	all	feature_v2.rs:6240-6241,6512
+v2	18	IW_DET	E	reference-weighted pool	-w_i*v_i/sum(w) exact	all	all	feature_v2.rs:6240-6241,6513
+v2	19	IW_MSE	E	reference-weighted pool	-w_i*v_i/sum(w) exact	all	all	feature_v2.rs:6240-6241,6514
+v2	20	PJND_TRANSDUCER	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6499
+v2	21	PJND_FRAGILITY	N	reference-only	integrand identically 0	all	all	feature_v2.rs:6251,1412
+v2	22	GMS	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6502
+v2	23	PJND_TRANSDUCER_LOW_K	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6500
+v2	24	PJND_TRANSDUCER_HIGH_K	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6501
+v2	25	BLOCKINESS	A	lattice step pairs	step term split 50/50 across the pixel pair	all	all	feature_v2.rs:6248,6969-6976
+v2	26	RINGING	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6503
+v2	27	BANDING	E	mean	-v_i/N exact	all	all	feature_v2.rs:6238-6239,6504
+v2	28	EDGE_WIDTH_CHANGE	A	two-scale gradient ratio	scale-level chain rule - the one non-per-pixel v2 slot	all	all	feature_v2.rs:6249-6250,6548; idx doc L133-136
+append	0	XMASK_TRANSDUCER	E	mean (Y only)	-v_i/N exact on Y; X/B features are structural 0	Y	all	feature_v2.rs:6642-6644,6528
+append	0	XMASK_TRANSDUCER	N	structural zero	feature identically 0 on X/B	X,B	all	feature_v2.rs:6642 (cross = ch==1)
+append	1	LUM_TRANSDUCER	E	mean (Y only)	-v_i/N exact on Y	Y	all	feature_v2.rs:6642-6644,6529
+append	1	LUM_TRANSDUCER	N	structural zero	feature identically 0 on X/B	X,B	all	feature_v2.rs:6642 (cross = ch==1)
+append	2	LUM_DARK_ERR	E	reference-weighted bin	-w_i*mse_i/sum(w) exact	all	all	feature_v2.rs:6240-6241,6650-6652
+append	3	LUM_MID_ERR	E	reference-weighted bin	-w_i*mse_i/sum(w) exact	all	all	feature_v2.rs:6653-6656
+append	4	LUM_BRIGHT_ERR	E	reference-weighted bin	-w_i*mse_i/sum(w) exact	all	all	feature_v2.rs:6657-6659
+append	5	MSCN_DIFF_MEAN	E	mean	-v_i/N exact	all	all	feature_v2.rs:6645,6530
+append	6	MSCN_DIFF_L2	E	mean	-v_i/N exact	all	all	feature_v2.rs:6646,6531
+append	7	CONTRAST_GAIN	E	mean	-v_i/N exact	all	all	feature_v2.rs:6647,6532
+append	8	CONTRAST_LOSS	E	mean	-v_i/N exact	all	all	feature_v2.rs:6648,6533
+append	9	TEXTURE_DISSIM	E	mean	-v_i/N exact	all	all	feature_v2.rs:6649,6534
+append	10	GMS_DEV2	A	deviation (std) pool	central-moment chain, signed	all	all	feature_v2.rs:6660-6668,6540
+append	11	ART_DEV2	A	deviation (std) pool	central-moment chain, signed	all	all	feature_v2.rs:6660-6669,6541
+append	12	DET_DEV2	A	deviation (std) pool	central-moment chain, signed	all	all	feature_v2.rs:6660-6670,6542
+append	13	GLOBAL_DMEAN	A	whole-plane mean	chain through a POOLED saturation, signed	all	all	feature_v2.rs:6671-6675,6544
+append	14	GLOBAL_CGAIN	A	whole-plane variance	chain on gvar2 + assumed-fixed polarity branch	all	all	feature_v2.rs:6676-6690,6545
+append	15	GLOBAL_CLOSS	A	whole-plane variance	chain on gvar2 + assumed-fixed polarity branch	all	all	feature_v2.rs:6676-6690,6545
+append	16	GRAD_SRC_MEAN	N	reference-only	integrand identically 0 ("no term")	all	all	feature_v2.rs:6691,6251
+append	ALL	append_B_scale0_cell	N	structural zero	APPEND_SKIP_B_SCALE0 - all 17 slots emit 0.0	B	0	feature_v2.rs:244,5075-5079
+append2	0	BANDVIS_GAIN	N	NOT PASSED to attribution	s[720..min(len,924)] drops f924+	Y	all	attribution.rs:817-821
+append2	1	BANDVIS_LOSS	N	NOT PASSED to attribution	s[720..min(len,924)] drops f924+	Y	all	attribution.rs:817-821
+append2	2	LUMA_MEAN_REF	N	NOT PASSED to attribution	reference-only AND dropped	Y	all	attribution.rs:817-821
+append2	3	HL_BIN1	N	NOT PASSED to attribution	s[720..min(len,924)] drops f924+	Y	all	attribution.rs:817-821
+append2	4	HL_BIN2	N	NOT PASSED to attribution	s[720..min(len,924)] drops f924+	Y	all	attribution.rs:817-821
