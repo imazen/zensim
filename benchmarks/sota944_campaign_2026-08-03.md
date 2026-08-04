@@ -4958,3 +4958,242 @@ Selection reported through `freeze_check --select`. New bakes + verdicts
 Tower-mirrored with a sha spot-check. Nothing ships, swaps, promotes, or
 publishes; no bake enters `zensim/weights/`; the freeze decision remains the
 user's.
+
+### WAVE-8 RESULTS (2026-08-04) — outcome (c): the breadth-first recipe is FALSIFIED as a breadth lever. It triples KADID (a FIT number) while CSIQ/LIVE COLLAPSE by 0.36-0.56, and the 2×2 pins that collapse on the MIX at both screens. The only breadth GAIN in the wave is the winsor-screen REFIT, which buys the first CSIQ+LIVE ≥0.85 in the 944 class at a CID22 and KonJND cost
+
+Eight cells trained exactly as registered (amendment 9, `4668f712`; tool +
+driver + frozen screens, `58f18867`). Two lanes: this box (up to 4 concurrent
+single-threaded trainers under `run-heavy --jobs 4`) and `lianli`, whose staged
+copies of all 11 parquets were sha256-verified identical to the local ones AND
+to the incumbent bake's embedded `zentrain.repro` (11/11 MATCH, both lanes).
+**ONE trainer binary** (sha256 `48b294b8b4aafcaa…`) on both lanes, so no cell
+differs by build.
+
+#### The recipe diff per arm — echo-verified token-for-token (`benchmarks/wave8/echo_*.txt`)
+
+| comparison | the COMPLETE set of differences |
+|---|---|
+| **W8-C vs the incumbent arm-H argv** | the 54 winsor windows + `--out`. Nothing else. |
+| **W8-D vs W8-B** | the 54 winsor windows + `--out`. Nothing else. |
+| **W8-A vs the incumbent** | kadid `0.5:1.0:rank` → `1.5:1.0:both`; the 5 ssim2-mass groups dropped; the 2 konjnd legs dropped; screen; `--out` |
+| **W8-B vs W8-A** | the 2 `konjnd_bpg` legs added. Nothing else. |
+
+#### The shared refit screen — 24 degenerate windows → 0
+
+`bake_dial_refit refit-winsor` over the registered pooled fit corpus: **408,033
+rows**, exactly the §9.1 table. 54/54 winsor windows changed; **degenerate
+windows 24 → 0**. 22 recover real windows; f765 + f766 land on the owner's
+`[0, 1e-9]` guard — precisely the never-populated slot class, so the recovery
+count is the predicted 22, not 24. The fold block also moves by 2-4 orders of
+magnitude (f155 hi 0.164 → 849.0, f129 0.204 → 1093.7, f90 0.443 → 1113.0), so
+this is not a 24-flag cosmetic fix, exactly as §9.1 registered in advance.
+
+`bake_contrib` confirms the recovery inside the models: the refit cells carry
+**255 dead inputs vs the incumbent's 277**, and 255 = 216 structural zeros +
+39 never-populated. Every one of the 22 recipe-killed features is alive.
+Artifacts: `benchmarks/wave8/refit_winsor_audit_2026-08-04.tsv` (+ `.meta`).
+
+#### Endpoint table — every cell, nothing selected away
+
+| cell | KADID(E1) | CSIQ(E2) | LIVE(E2) | CID22(E3) | KonJND | nonphoto | HF-NL | mono/tied | M3a | composite | best_val |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| W8A_s3101 | 0.93252 | 0.13637 | 0.39589 | 0.87858 | 0.24233 | 0.74926 | 0.20221 | 0.93067 / 0 | 0.89196 | 0.76143 | 0.90945 |
+| W8A_s3103 | 0.93722 | 0.1856 | 0.38561 | 0.88192 | 0.29517 | 0.76111 | 0.36227 | 0.93131 / 0 | 0.88719 | 0.77345 | 0.91985 |
+| W8A_s3107 | 0.93143 | 0.20033 | 0.29655 | 0.88611 | 0.26798 | 0.77445 | 0.42459 | 0.93003 / 0 | 0.87136 | 0.77895 | 0.91302 |
+| W8B_s3101 | 0.91768 | 0.32684 | 0.52552 | 0.87839 | 0.35057 | 0.80837 | 0.0988 | 0.93173 / 0 | 0.77973 | 0.79572 | 0.91605 |
+| W8B_s3103 | 0.9064 | 0.39618 | 0.49496 | 0.88381 | 0.32026 | 0.77983 | 0.12215 | 0.94811 / 0 | 0.82376 | 0.7845 | 0.90885 |
+| W8B_s3107 | 0.91691 | 0.33617 | 0.53689 | 0.87699 | 0.27125 | 0.79836 | 0.21942 | 0.93811 / 0 | 0.73036 | 0.78218 | 0.92189 |
+| W8C_s3101 | 0.3576 | 0.88692 | 0.89848 | 0.85207 | 0.29079 | 0.86238 | 0.09235 | 0.99787 / 0 | 0.82463 | 0.801 | 0.48886 |
+| W8D_s3101 | 0.93038 | 0.28321 | 0.46644 | 0.88492 | 0.29137 | 0.80684 | -0.01282 | 0.92216 / 0 | 0.822 | 0.79227 | 0.92267 |
+
+Incumbent + era references (same instrument, same invocation):
+
+| cell | KADID(E1) | CSIQ(E2) | LIVE(E2) | CID22(E3) | KonJND | nonphoto | HF-NL | mono/tied | M3a | composite | best_val |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| H_co3abpg_s2501 | 0.43665 | 0.83167 | 0.85173 | 0.87634 | 0.45645 | 0.91385 | 0.16874 | 0.9396 / 0 | 0.8772 | 0.84788 | 0.43381 |
+| H_co3abpg_s2503 | 0.3682 | 0.73527 | 0.81366 | 0.87932 | 0.3835 | 0.91626 | 0.41572 | 0.96427 / 0 | 0.81901 | 0.84199 | 0.48772 |
+| H_co3abpg_s2507 | 0.42329 | 0.83019 | 0.8634 | 0.88055 | 0.45897 | 0.91635 | 0.18203 | 0.94045 / 0 | 0.88996 | 0.85029 | 0.49692 |
+| C_co3a_s1301 | 0.31769 | 0.83592 | 0.83928 | 0.89067 | 0.40504 | 0.90449 | 0.25084 | 0.95874 / 0 | 0.78607 | 0.84522 | 0.43569 |
+| winner_dial_Ebothg_hfgain_winsor_dial | 0.9464 | 0.95841 | 0.95998 | 0.89396 | 0.43084 | 0.8946 | 0.64366 | 0.97639 / 0 | 0.92253 | 0.84582 | — |
+| b_sdr_linear_cid80_inclwinsor_dense_dial | 0.80848 | 0.93421 | 0.89703 | 0.88209 | 0.51859 | 0.89898 | 0.82523 | 0.97597 / 0 | 0.59681 | 0.84865 | — |
+
+#### Signed SROCC (sign matters: a negative rank is an inversion, not a weak fit)
+
+| cell | cid22 | kadid | csiq | live | konjnd | nonphoto |
+|---|---|---|---|---|---|---|
+| W8A_s3101 | +0.8786 | +0.9325 | +0.1364 | +0.3959 | -0.2423 | +0.7493 |
+| W8A_s3103 | +0.8819 | +0.9372 | +0.1856 | +0.3856 | -0.2952 | +0.7611 |
+| W8A_s3107 | +0.8861 | +0.9314 | +0.2003 | +0.2966 | -0.2680 | +0.7744 |
+| W8B_s3101 | +0.8784 | +0.9177 | +0.3268 | +0.5255 | -0.3506 | +0.8084 |
+| W8B_s3103 | +0.8838 | +0.9064 | +0.3962 | +0.4950 | -0.3203 | +0.7798 |
+| W8B_s3107 | +0.8770 | +0.9169 | +0.3362 | +0.5369 | -0.2713 | +0.7984 |
+| W8C_s3101 | +0.8521 | -0.3576 | +0.8869 | +0.8985 | -0.2908 | +0.8624 |
+| W8D_s3101 | +0.8849 | +0.9304 | +0.2832 | +0.4664 | -0.2914 | +0.8068 |
+| H_co3abpg_s2507 | +0.8806 | +0.4233 | +0.8302 | +0.8634 | -0.4590 | +0.9164 |
+
+#### freeze_check --profile balanced-2026-08-04 floor counts
+
+| cell | floors |
+|---|---|
+| W8A_s3101 | 3/8 |
+| W8A_s3103 | 4/8 |
+| W8A_s3107 | 4/8 |
+| W8B_s3101 | 4/8 |
+| W8B_s3103 | 4/8 |
+| W8B_s3107 | 4/8 |
+| W8C_s3101 | 5/8 |
+| W8D_s3101 | 2/8 |
+
+#### freeze_check --select over the wave-8 pool
+
+# freeze_check --select — REGISTERED rule (campaign appendix E.4)
+
+PRIMARY: profile floor count. TIE-BREAK: selection_composite = balanced_composite + 0.15·M3a.
+sdr25 is a reported comparator, NOT part of the rule.
+
+| rank | bake | class | floors | bal_comp | M3a | sel_comp | sdr25 | selectable |
+|---:|---|---|---:|---:|---|---:|---:|---|
+| 1 | W8C_s3101 | 944-single | 5/8 | 0.7713 | 0.8246 | 0.8950 | 0.8700 | yes |
+| 2 | W8B_s3101 | 944-single | 4/8 | 0.7153 | 0.7797 | 0.8323 | 0.9125 | yes |
+| 3 | W8B_s3103 | 944-single | 4/8 | 0.7080 | 0.8238 | 0.8315 | 0.8889 | yes |
+| 4 | W8A_s3103 | 944-single | 4/8 | 0.6794 | 0.8872 | 0.8124 | 0.8462 | yes |
+| 5 | W8B_s3107 | 944-single | 4/8 | 0.7028 | 0.7304 | 0.8123 | 0.8647 | yes |
+| 6 | W8A_s3107 | 944-single | 4/8 | 0.6785 | 0.8714 | 0.8092 | 0.8570 | yes |
+| 7 | W8A_s3101 | 944-single | 3/8 | 0.6634 | 0.8920 | 0.7972 | 0.9307 | yes |
+| 8 | W8D_s3101 | 944-single | 2/8 | 0.7075 | 0.8220 | 0.8308 | 0.9086 | yes |
+
+**SELECTED: `W8C_s3101`** — 5/8 floors, selection_composite 0.8950.
+
+#### The 2×2 — which factor moves what (the reason W8-D was registered)
+
+The incumbent supplies the (base mix, inherited screen) corner; wave 8 supplies
+the other three, so each factor reads as a single-factor difference.
+
+**MIX effect** (screen held fixed, breadth − base):
+
+- at the **inherited** screen, `W8D_s3101` − `H_co3abpg_s2507`:
+  **CSIQ −0.547** (0.2832 vs 0.8302), **LIVE −0.397** (0.4664 vs 0.8634),
+  KADID +0.507, CID22 +0.004, nonphoto −0.110.
+- at the **refit** screen, each `W8B` seed − `W8C_s3101`:
+  **CSIQ −0.560 / −0.491 / −0.551**, **LIVE −0.373 / −0.404 / −0.362**,
+  KADID +1.27 (a sign flip plus magnitude), CID22 +0.026 / +0.032 / +0.025.
+
+**SCREEN effect** (mix held fixed, refit − inherited):
+
+- at the **base** mix, `W8C_s3101` − `H_co3abpg_s2507`:
+  **CSIQ +0.057** (0.8869 vs 0.8302), **LIVE +0.035** (0.8985 vs 0.8634),
+  CID22 −0.028, nonphoto −0.054, KonJND |SROCC| 0.459 → 0.291, and KADID
+  **+0.4233 → −0.3576** — a genuine sign inversion, the only one in the wave.
+- at the **breadth** mix, `W8B_s3101` − `W8D_s3101`: CSIQ +0.044, LIVE +0.059,
+  CID22 −0.007, KADID −0.013 — same direction on CSIQ/LIVE, an order of
+  magnitude smaller than the mix effect.
+
+The two factors separate cleanly, and neither behaves as the wave's hypothesis
+predicted:
+
+- **The CSIQ/LIVE collapse is the MIX.** It is 0.36–0.56 SROCC, it reproduces
+  at both screens and at all six breadth seeds, and it dwarfs every screen
+  effect. Dropping the ssim2-mass block does not free the model to learn
+  breadth — it removes the supervision that was *carrying* breadth.
+- **The only breadth GAIN in the wave is the SCREEN.** `W8C_s3101` (base mix +
+  refit screen) is the sole cell in the entire 944 class to clear **CSIQ ≥ 0.85
+  AND LIVE ≥ 0.85** (0.8869 / 0.8985) — above every 944-width incumbent. It
+  pays CID22 (0.8521, −0.028), KonJND |SROCC| (−0.168), and it inverts KADID.
+
+(Note on sign: KonJND is negative-signed for **every** cell here *including the
+incumbent* (−0.4590) — that is this corpus's known target orientation, not an
+inversion, and the campaign reports |SROCC|. KADID's negative sign on
+`W8C_s3101` **is** an inversion: every other cell in the table, incumbent
+included, is positive.)
+
+#### Mechanism (measured, not inferred)
+
+`bake_contrib` on the two arms, same corpora and tool: the breadth arm's top
+movers carry **mean|Δ| ≈ 0.65–0.75 score units** against the base-mix arm's
+**≈ 0.10–0.12** — ~6× the per-input gain, with a single v2 input (f415) worth
+ΔSROCC −0.319 on LIVE by itself. Dropping ~82% of the training rows at fixed
+epochs and pairs-per-epoch yields a model that concentrates enormous weight on
+a few inputs, which is the classic profile of a model that fails on corpora it
+never saw. The collapse is a genuine rank failure, not dial saturation: raw
+score ranges on CSIQ are near-identical across arms (W8A min/max −12.9/+13.5
+vs W8C −13.7/+7.3), and the breadth arms' `best_val` is *higher* than the base
+mix's (0.909–0.922 vs 0.489) — they fit their own validation mixture better
+while generalizing worse, which is what over-concentration looks like.
+
+#### Registered outcome
+
+**(c) fires for the wave's hypothesis.** The breadth-first mix produced no
+breadth recovery — it produced a large, seed-stable breadth *collapse* at both
+screens (arm A: CSIQ 0.136–0.200, LIVE 0.297–0.396; arm B: CSIQ 0.327–0.396,
+LIVE 0.495–0.537; against the incumbent's 0.830 / 0.863). The leading
+explanation — that the ssim2-mass block starves classic-IQA breadth — is
+**falsified and inverted**: that block is what supplies CSIQ/LIVE competence to
+the 944 class. Together with the width discriminator (reintroducing f156-371 is
+dead), **neither the feature block nor the row mix is the KADID/breadth
+lever.**
+
+**No cell satisfies (a).** E1 ∧ E2 ∧ E3 is met by nothing: the six breadth
+cells clear E1 (KADID 0.906–0.937) and one clears E3 (`W8A_s3107`, CID22
+0.88611) but every one of them fails E2 by 0.45–0.71; `W8C_s3101` clears E2
+alone. And the E1 passes are **fit** numbers — every arm trains on kadid, and
+arms A/B/D additionally triple its weight and switch it to `both`, so a KADID
+of 0.93 measures optimizer pressure at a train==val corpus, not skill.
+
+**(b) fires, but for the SCREEN rather than the mix**, in a form the
+registration did not anticipate: breadth *does* recover to the E2 bar — from
+the winsor-screen refit alone, at the base mix — and CID22 drops below 0.885
+(0.8521). The trade is real, priced at k=1, and belongs to the screen.
+
+**Balanced frame: every wave-8 cell is worse than the incumbent.** Floor
+counts run 2/8–5/8 against `H_co3abpg_s2507`'s 7/8, and `freeze_check --select`
+over the wave-8 pool picks `W8C_s3101` (5/8, selection_composite 0.8950) —
+still well below the incumbent's 7/8 / 0.9406. Nothing here is a ship
+candidate, and nothing is proposed as one.
+
+**What is left, named plainly.** Removing data is now measured-dead as a lever
+and so is restoring the f156-371 block. The live hypotheses for the 944 class's
+classic-IQA gap are (i) the *supervision targets* rather than the row mix —
+every dense leg is ssim2- or teacher-shaped, while CSIQ/LIVE are human-MOS
+corpora with distortion families no ssim2 leg covers; (ii) the regime's
+*extraction vintage*, since the two models that hold 0.93+ on CSIQ/LIVE
+(`b_sdr_linear…` 0.934/0.897, `winner_dial…` 0.958/0.960) are both pre-fold
+era-bridge models; and (iii) *adding* held-out-safe human-MOS breadth
+supervision, which no 944 recipe has ever had. The remaining moves are changing
+what the data teaches, or adding data — not subtracting it.
+
+#### Limitations (complete)
+
+- **E1 (KADID) is a FIT measurement, not generalization.** Every wave-8 arm
+  trains on kadid, and `freeze_check`'s own annotation registry flags
+  KADID/TID as 100% train==val pair-overlap. W8-A/B additionally raise its
+  weight 3× and switch it to `both`. A KADID number produced this way measures
+  how hard the optimizer was pushed at that corpus, not skill. CSIQ and LIVE
+  are trained on by NO arm and carry the honest breadth signal.
+- k=3 on A and B, k=1 on C and D. The k=1 cells support direction, never a
+  ranking.
+- A/B bundle three changes (mix, kadid weight, kadid loss mode). C and D
+  isolate the screen; the kadid-lever axis is NOT separately decomposed and no
+  cell here isolates it.
+- Dropping the ssim2-mass block removes ~82% of training rows at fixed
+  epochs/pairs-per-epoch, so A/B see the same 6M pair draws over a much
+  smaller pool — more repetition per row. Not corrected for.
+- Wave-8 cells are spline-less raw heads, so their dial mono/tied is measured
+  in RAW output units (the board's standing `dial-mono-raw-unit` annotation).
+
+- Every wave-8 verdict carries the campaign's standing dial-grid warning (the
+  944 dial grid at `/mnt/v/output/zensim/v2-eval-944-2026-08-01/` has sha
+  `0d0044ed4e86ee2a`, not the canonical `6546c43e6d9572dc`). This is inherited
+  and identical for the incumbents scored through the same
+  `scripts/sota944_verdict.sh`, so dial numbers stay comparable WITHIN the
+  campaign and should not be compared to any out-of-campaign dial number.
+- M3a for every wave-8 cell was measured with the coherence harness as of
+  `58f18867`. The sibling fix `de3482dd` that landed during this wave re-routes
+  that harness on `caller_input_width` and changes results only where
+  `n_inputs() != caller_input_width()` — i.e. PRUNED bakes. Wave-8 cells are
+  direct trainer output at 944 = 944 and are unpruned, so the values are
+  unaffected; no wave-8 M3a was re-measured after the fix.
+- The two lanes used the same trainer binary but different thread counts
+  (local `run-heavy --jobs 4`, lianli `RAYON_NUM_THREADS=8/16`). The trainer is
+  seeded and its pair draw is deterministic in the seed, but no byte-identity
+  check across lanes was run in this wave, so a cross-lane comparison rests on
+  determinism that was not verified here.
