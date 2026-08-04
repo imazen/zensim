@@ -2224,3 +2224,172 @@ documented 2026-05-27 `bake_verdict` numbers for that bake exactly, i.e. the
 shared-path forward reproduces the canonical scoring bit-for-practical-bit.
 Log: `~/tmp/consolidate/grange-firstmeasure.log` (transient); the runs
 re-derive from the committed binaries + canonical corpora in seconds.
+
+### Wave-6 arm F results (2026-08-04) — distillation is an honest null on rank retention, and the first lever that MOVES M3a
+
+#### Provenance gates (all run BEFORE the relevant measurement; all PASS)
+
+1. **Teacher-forward gate (a), k=1 identity**: `bake_dial_refit predict
+   --ensemble X.bin` == `predict --bake X.bin` — **BYTE-IDENTICAL** TSV, 4,292
+   cid22 rows.
+2. **Teacher-forward gate (b), k=2 mean identity**: `max|ens − mean(s₁,s₂)| =
+   0.0` exactly.
+3. **Teacher target-rule gate**: the reconstructed amendment-3 rule
+   (`affine = (q0.001, q0.999)` of teacher raw on the safesyn twin;
+   `human_score = clip((raw−lo)/(hi−lo),0,1)`) reproduces **all three committed
+   EM4 teacher target columns bit-exactly** (`max|rule−stored| = 0.0` over
+   369,237 rows) and the stored affine `[−12.95392379951477, 10.061253767967228]`.
+4. **Verdict-binary provenance gate**: the wave-6 build reproduces the committed
+   `C_co3a_s1301.full.json` on **62,433 numeric fields, 0 mismatches** — every
+   wave-6 number is directly comparable to all prior cells.
+
+Teachers built by the committed `scripts/canonical_corpus/build_teacher944.py`
+(pointer: `benchmarks/wave6_teachers_2026-08-04.pointer.md`; ensk2 affine
+`[−19.7548, 12.4132]`, ensk5 `[−15.5756, 11.5668]`; clip ≤0.21% per twin).
+Teacher rank-agreement vs the EM4 teacher — safesyn 0.986/0.992, tbig
+0.930/0.972, kadis 0.733/0.790 (ensk2/ensk5) — so the teacher swap is a
+modest perturbation on the dominant twin and a large one only on kadis.
+
+#### The six students (co3a recipe verbatim; only seed + teacher-twin paths vary)
+
+| cell | CID22 | KonJND | nonphoto | HF-NL | dial mono | tied | sdr25 | **M3a** | best_val* | rows |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `C_ensk2_s1301` | 0.89099 | 0.3661 | 0.8867 | −0.0665 | 96.4% | 0.0% | 0.9486 | **0.7823** | 0.6017 | 1/5 |
+| `C_ensk2_s1303` | 0.88354 | 0.4398 | 0.9042 | +0.0115 | 93.9% | 0.0% | 0.9520 | **0.8262** | 0.6083 | 3/5 |
+| `C_ensk2_s1307` | 0.88550 | 0.3597 | 0.8934 | +0.2264 | 95.7% | 0.0% | 0.9472 | **0.8053** | 0.5749 | 2/5 |
+| `C_ensk5_s1301` | 0.87680 | 0.3731 | 0.9195 | +0.1323 | 94.3% | 0.0% | 0.9407 | **0.7849** | 0.5644 | 2/5 |
+| `C_ensk5_s1303` | 0.88464 | 0.4111 | 0.9202 | +0.2165 | **92.5%** | 0.0% | 0.9641 | **0.7934** | 0.5359 | 2/5 |
+| `C_ensk5_s1307` | 0.88012 | 0.3741 | 0.9042 | +0.0132 | 94.6% | 0.0% | 0.9298 | **0.8077** | 0.5506 | 2/5 |
+| *[ref] `C_co3a_s1301` (EM4 teacher, same seed)* | 0.89067 | 0.4050 | 0.9045 | +0.2508 | 95.9% | 0.0% | 0.9282 | 0.7598 | 0.4357 | 3/5 |
+| *[ref] `C_co3a_s1303`* | 0.87909 | 0.4135 | 0.9106 | −0.0815 | 95.4% | 0.0% | 0.9328 | 0.7699 | 0.4869 | 2/5 |
+| *[ref] `C_co3a_s1307`* | 0.88571 | 0.4330 | 0.9123 | +0.2327 | 95.7% | 0.0% | 0.9184 | 0.7625 | 0.4347 | 4/5 |
+| *[ref] `W5_E1_k2` = F1 TEACHER* | 0.89425 | 0.3495 | 0.8735 | −0.1037 | 95.1% | 0.0% | 0.9561 | n/a | — | 2/5 |
+| *[ref] `W5_E1_k5` = F2 TEACHER* | 0.89329 | 0.4037 | 0.9128 | +0.1188 | 95.3% | 0.0% | 0.9527 | n/a | — | 3/5 |
+| *[ref] EM4 = the bar* | 0.89238 | 0.4286 | 0.9098 | +0.1320 | 94.7% | 0.0% | 0.9556 | (0.852 @924-era) | — | 3/5 |
+
+\* the teacher twins change the trainer's val composite, so student `best_val`
+(0.54–0.61) is NOT comparable to the co3a siblings' (0.43–0.49) — the amendment-3
+`best_val` caveat applies verbatim. Embedded `zentrain.repro` present on all six
+(schema 1, 9 groups, correct `teacher_ensk{2,5}` paths, seed as registered);
+nodes: ensk2 ×3 = lianli (`argv[0]` `~/sota944/zensim_mlp_train_w6`, sha-verified
+`c1904058…` = the wsl build), ensk5 ×3 = wsl. The repro `hostname` field is still
+empty (inherited trainer defect, third wave running).
+
+#### Endpoint 1 — rank retention: HONEST NULL, and it is RESOLVED, not ambiguous
+
+Arm-F candidates (max CID22 per teacher): **F1 = `C_ensk2_s1301`** (0.89099),
+**F2 = `C_ensk5_s1303`** (0.88464). Paired bootstrap on the same 4,292 CID22
+pairs (B=2000, seed 20260804, `panel --batch` via `panel_batch_indexed`, human
+column asserted identical):
+
+| comparison | median Δ | 2.5% | 97.5% | P(Δ>0) |
+|---|---|---|---|---|
+| **student − best single** (`C_ensk2_s1301` − `C_co3a_s1301`) | **+0.00031** | −0.00225 | +0.00295 | 0.591 |
+| **student − its TEACHER** (`C_ensk2_s1301` − `W5_E1_k2`) | **−0.00326** | **−0.00485** | **−0.00162** | **0.000** |
+| teacher − best single (`W5_E1_k2` − `C_co3a_s1301`) | +0.00358 | +0.00164 | +0.00559 | 1.000 |
+| student − the bar (EM4) | −0.00141 | −0.00346 | +0.00073 | 0.104 |
+
+**The registered retention endpoint is NOT met by any student.** The best
+student is statistically indistinguishable from the best single model
+(+0.0003, P=0.591) and **resolvably below its own teacher** (−0.0033 with a CI
+excluding zero) — the ensemble's +0.0036 gain (re-confirmed on the same draws,
+P=1.000) is lost in distillation almost entirely (retained ≈ 9% of the delta,
+indistinguishable from 0). Profile SHAPE, by contrast, transfers visibly: the
+k2 students inherit the k2 teacher's KonJND/nonphoto/HF-NL weaknesses, and the
+k5 students inherit k5's nonphoto breadth (0.90-0.92 across all three). The
+one-line mechanism reading: **what the ensemble adds over its members is
+exactly the part a single student of member capacity cannot absorb** — the
+teacher's profile it can copy; the variance-cancellation it cannot.
+
+#### Endpoint 2 — M3a: the first lever in the campaign that MOVES it, in 6/6 draws
+
+| student | M3a | seed-matched sibling | lift |
+|---|---|---|---|
+| `C_ensk2_s1301` | 0.7823 | 0.7598 | +0.0226 |
+| `C_ensk2_s1303` | **0.8262** | 0.7699 | **+0.0563** |
+| `C_ensk2_s1307` | 0.8053 | 0.7625 | +0.0428 |
+| `C_ensk5_s1301` | 0.7849 | 0.7598 | +0.0251 |
+| `C_ensk5_s1303` | 0.7934 | 0.7699 | +0.0235 |
+| `C_ensk5_s1307` | 0.8077 | 0.7625 | +0.0453 |
+
+**All six students land above their seed-matched sibling** (mean +0.036, range
++0.023..+0.056). Honest read against the wave-4 noise measurement (within-config
+M3a sd 0.0441, n=5): no individual lift is resolved beyond one sd, but a 6/6
+sign-consistent shift across two teacher configs and three seeds is the
+strongest M3a-direction evidence this campaign has produced — where amendment
+3's claimed data-side movers were single cells later shown to sit inside seed
+noise, this is a seed-PAIRED comparison with the recipe held fixed. It is still
+insufficient: max 0.8262 vs the 0.85 bar, and the M3a-best student
+(`C_ensk2_s1303`) costs −0.007 CID22 vs its sibling. `C_ensk5_s1303` also
+reproduces the **seed-1303 × distillation-mass dial break** (92.5% mono —
+exactly co3b_s1303's number, the third occurrence of that seed breaking the
+dial under heavy teacher mass).
+
+**Both arm-F endpoints answered: the distilled artifact is a WORSE ranker than
+the best single model it was meant to package (null), and distillation
+nonetheless moves coherence in the right direction with unprecedented
+consistency (positive finding, below the bar).** No G-E arm passed five rows,
+so no `C_ensG` student was owed and none was trained.
+
+#### The wave-6 bar verdict — no new bar pass; the frontier after both arms
+
+| axis | bar | best wave-6 value | where |
+|---|---|---|---|
+| CID22 | > 0.8923796503 | 0.89187 **FAIL** (−0.0005) | `W6_GE2_trio` |
+| KonJND | ≥ 0.43 | **0.4711 PASS** | `W6_GE4_konfloor5` (all 5 G-E arms pass) |
+| nonphoto | ≥ 0.90 | **0.9203 PASS** | `W6_GE2_trio` |
+| HF-NL-proxy | ≥ 0.1931 | +0.2264 **PASS** | `C_ensk2_s1307` (G-E max +0.163 FAIL) |
+| dial | ≥93%/≤5% | 96.4%/0.0% PASS | `C_ensk2_s1301` |
+| M3a | ≥ 0.85 | 0.8262 **FAIL** (−0.024) | `C_ensk2_s1303` |
+
+No single configuration reaches all five evaluable rows (G-E best 3/5,
+students best 3/5, wave-3's `C_co3a_s1307` 4/5 still stands). The campaign-wide
+structure after six waves: **CID22-at-the-bar, KonJND≥0.43 and M3a≥0.85 have
+each been reached separately, and no pair of them has been reached together.**
+
+G-RANGE, per the concurrent ADDENDUM above (`b8954423` closed the MLP tool
+gap): the six students are the same spline-less raw-head class as every C-arm
+bake (`model.output_spline: null` verified on the student verdicts), so
+G-RANGE remains **structurally undefined for them pending `add-spline` dial
+packaging** — the addendum's packaging-decision note applies to arm F
+verbatim, and no G-RANGE PASS is claimed here.
+
+#### Ops / provenance notes (wave 6)
+
+- **Waiter-death provenance**: the session's consolidated terminal waiter died
+  silently mid-watch (the marker froze at `fullevals=5/6`, 03:06Z) — the NINTH
+  external background-task kill of the campaign. All work survived because
+  every producer (both lanes, puller, verdict+M3a processor) ran
+  `setsid`-detached and idempotent; the endgame was run foreground on
+  supervisor re-arm. The standing mitigation (detached daemons + artifact-based
+  re-arm) held; agent-side waiters remain unreliable on this box.
+- Lanes: lianli ensk2 ×3 (~30 min/seed), wsl ensk5 ×3 (~35 min/seed), zero
+  retries; teacher parquets staged to lianli over LAN (~10 s at 180 MB/s).
+- Artifacts: bakes+specs `/mnt/v/output/zensim/bakes/sota944/bakes/C_ens*`,
+  verdicts `.../verdicts/C_ens*` + `W6_GE*` + `W6GATE_k1_co3a_s1301`, fullevals
+  `/mnt/v/output/zensim/reports/fulleval/C_ens*.fulleval.json`, teachers
+  `.../teacher_ensk{2,5}/`, bootstrap inputs/outputs `~/tmp/wave6/` (per-pair
+  dumps regenerable from the committed verdict invocation). Tower mirror synced
+  + sha spot-checked this session.
+
+#### What wave 6 adds to the campaign's standing conclusion
+
+| lever | wave | result |
+|---|---|---|
+| seed luck | n=23 | NULL |
+| near-top mass | n=8 | NULL on rank |
+| coherence | n=21 | NULL |
+| seed depth + M3a cross | n=12 | NULL |
+| seed ENSEMBLE | wave 5 | CID22 bar CLEARED (function only); KonJND binding |
+| **KonJND-aware ensemble** | **wave 6 G-E, 5 arms** | **KonJND 0.43 bar cleared on every arm (max 0.4711); CID22 −0.0005; campaign-best composite 0.8571; no 5-row pass** |
+| **ensemble distillation** | **wave 6 F, n=6** | **rank retention NULL (student ≈ best single, resolvably below teacher); M3a +0.023..+0.056 in 6/6 seed-paired draws — the first consistent M3a mover; max 0.826 < 0.85** |
+
+The ensemble-era reading is now complete on both sides: **averaging buys a
+real rank gain that no single student of member capacity retains, and the
+KonJND axis is reachable by member choice at a small CID22 cost.** The
+artifact question stays open exactly where the M3a row left it: the best
+shippable single model remains `C_co3a_s1301`-class (CID22 0.8907, M3a 0.76)
+or the distilled `C_ensk2_s1303`-class trade (CID22 0.8835, M3a 0.826,
+KonJND 0.44), and the choice between them — and whether the un-shippable
+ensemble function is worth operationalizing at all — is the user's freeze
+decision. Nothing here is shipped, swapped, promoted, or published.
