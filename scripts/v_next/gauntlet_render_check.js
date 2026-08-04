@@ -38,17 +38,35 @@ function classesOf(e) {
   return String(c).split(/\s+/).filter(Boolean);
 }
 
+// Tree-FIRST lookup (2026-08-04): a real document.querySelector only sees the attached
+// tree, and the sort fix depends on that — mountTable() replaces the CURRENT #table
+// wrapper, so resolving #table to the first-ever-created (now detached) node would
+// re-mount into nowhere and falsely fail the click test. Walk the attached tree from
+// the root; fall back to the registry for detached lookups.
+let rootEl = null; // assigned after the skeleton is built below
+function treeFind(pred) {
+  let out = null;
+  (function walk(e) {
+    if (out || !e || !e.children) return;
+    if (pred(e)) { out = e; return; }
+    e.children.forEach(walk);
+  })(rootEl);
+  return out;
+}
 function query(sel) {
   if (sel.startsWith('#')) {
     const id = sel.slice(1);
-    return registry.find(e => e.id === id || (e.attrs && e.attrs.id === id)) || null;
+    const pred = e => e.id === id || (e.attrs && e.attrs.id === id);
+    return treeFind(pred) || registry.find(pred) || null;
   }
   if (sel.startsWith('.')) {
     const cl = sel.slice(1);
-    return registry.find(e => classesOf(e).includes(cl)) || null;
+    const pred = e => classesOf(e).includes(cl);
+    return treeFind(pred) || registry.find(pred) || null;
   }
   const tag = sel.toUpperCase();
-  return registry.find(e => e.tagName === tag) || null;
+  const pred = e => e.tagName === tag;
+  return treeFind(pred) || registry.find(pred) || null;
 }
 
 function mkEl(tag) {
@@ -96,6 +114,7 @@ const documentShim = {
 
 // The static skeleton the HTML provides before the script runs.
 const root = mkEl('div'); root.setAttribute('class', 'viz-root');
+rootEl = root;
 const barEl = mkEl('div'); barEl.setAttribute('id', 'bar'); barEl.setAttribute('class', 'bar');
 const panelsEl = mkEl('div'); panelsEl.setAttribute('id', 'panels');
 const ttEl = mkEl('div'); ttEl.setAttribute('id', 'tt'); ttEl.setAttribute('class', 'tt');
@@ -136,6 +155,34 @@ const nBakes = DATA ? DATA.bakes.length : 0;
 
 const countTag = (tag) => registry.filter(e => e.tagName === tag.toUpperCase()).length;
 const texts = (tag) => registry.filter(e => e.tagName === tag.toUpperCase()).map(e => e.textContent);
+
+// ---- shared table helpers (used by the sortability tests AND --dump-row) -------------
+// text as DISPLAYED: td.textContent when set directly, else the concatenated
+// descendant text (the name cell builds swatch + text node + optional ens badge).
+const cellText = (e) => {
+  if (!e) return '';
+  if (e.nodeType === 3) return String(e.textContent || '');
+  if (e.textContent) return String(e.textContent);
+  return (e.childNodes || []).map(cellText).join('');
+};
+const rowsOf = (t) => { const acc = []; (function walk(e) { if (!e || !e.children) return; if (e.tagName === 'TR') acc.push(e); e.children.forEach(walk); })(t); return acc; };
+// ATTACHED tables only (walked from #panels): a detached rebuild must not count — that
+// is exactly the sortability bug shape (built the sorted table, never mounted it).
+const attachedTables = (headerPred) => {
+  const acc = [];
+  (function walk(e) {
+    if (!e || !e.children) return;
+    if (e.tagName === 'TABLE') {
+      const rs = rowsOf(e);
+      if (rs.length) {
+        const h = rs[0].children.map(cellText).map(s => String(s).trim());
+        if (headerPred(h)) acc.push(rs);
+      }
+    }
+    e.children.forEach(walk);
+  })(panelsEl);
+  return acc;
+};
 
 if (panelsEl.children.length < 8) fail('panels not populated: ' + panelsEl.children.length + ' sections (< 8)');
 const chips = registry.filter(e => e.tagName === 'LABEL' && classesOf(e).includes('chip'));
@@ -189,23 +236,88 @@ if (DATA && DATA.loopTargeting && DATA.loopTargeting.models && Object.keys(DATA.
   if (h) fail('no loopTargeting payload but the section rendered anyway');
 }
 
+// ---- SORTABILITY (2026-08-04 regression tests) ---------------------------------------
+// User report 2026-08-04: "scoreboard is also not sortable". Root cause: th.onclick
+// called renderTable() — which RETURNS a detached wrapper — instead of mountTable(),
+// so the sorted table was built and thrown away (bug present since 62404415; nothing
+// ever click-tested a header). These tests dispatch real header clicks and assert the
+// ATTACHED tables re-order. All stat tables must sort: the scoreboard (state-based
+// full re-render) and the makeSortable tables (Mohammadi panel, band, gates, loop).
+const nondecr = a => a.every((v, i) => i === 0 || a[i - 1] <= v);
+const nonincr = a => a.every((v, i) => i === 0 || a[i - 1] >= v);
+const namesByLen = DATA ? DATA.bakes.map(b => b.name).sort((a, b) => b.length - a.length) : [];
+const bakeOfRow = (tr) => {
+  const t = cellText(tr.children[0]).trim();
+  return namesByLen.find(n => t.startsWith(n)) || null;
+};
+
+if (DATA) (function scoreboardSortTest() {
+  const isBoard = h => h.includes('bake') && h.includes('composite');
+  const boards = attachedTables(isBoard);
+  if (boards.length !== 1) { fail('sort test: expected exactly 1 attached scoreboard, got ' + boards.length); return; }
+  const compsOf = rs => rs.slice(1).map(tr => {
+    const b = DATA.bakes.find(x => x.name === bakeOfRow(tr));
+    return b && b.composite != null && isFinite(b.composite) ? b.composite : -1e9;
+  });
+  const head0 = boards[0][0].children.map(cellText).map(s => String(s).trim());
+  const ci = head0.indexOf('composite');
+  const before = compsOf(boards[0]);
+  if (before.length < 3) { fail('sort test: too few scoreboard rows to test (' + before.length + ')'); return; }
+  if (!nonincr(before)) fail('sort test: default scoreboard order is not composite-descending');
+  const th1 = boards[0][0].children[ci];
+  if (typeof th1.onclick !== 'function') { fail('SORT REGRESSION: scoreboard header has no click handler'); return; }
+  th1.onclick();     // composite is the default sort key -> this click flips to ascending
+  const after1 = attachedTables(isBoard);
+  if (after1.length !== 1) { fail('sort test: after click, attached scoreboards = ' + after1.length); return; }
+  const a1 = compsOf(after1[0]);
+  if (!nondecr(a1) || (new Set(a1).size > 1 && nonincr(a1)))
+    fail('SORT REGRESSION: clicking the composite header did not re-sort the ATTACHED scoreboard '
+      + '(expected ascending; first=' + a1[0] + ' last=' + a1[a1.length - 1] + ')');
+  const th2 = after1[0][0].children[ci];
+  if (typeof th2.onclick === 'function') th2.onclick();  // flip back to descending
+  const after2 = attachedTables(isBoard);
+  const a2 = after2.length ? compsOf(after2[0]) : [];
+  if (!a2.length || !nonincr(a2))
+    fail('SORT REGRESSION: second composite click did not restore descending order');
+})();
+
+if (DATA) (function statTableSortTest() {
+  // Mohammadi panel (PLCC column) + gate scorecard (weighted column) exercise the
+  // shared makeSortable path; the band + loop tables use the identical helper.
+  const cases = [];
+  if (DATA.bakes.some(b => b.rank && Object.keys(b.rank).length))
+    cases.push({ label: 'Mohammadi panel', pred: h => h.includes('PLCC') && h.includes('KROCC'), col: 'PLCC' });
+  if (DATA.bakes.some(b => b.gates && Object.keys(b.gates).length))
+    cases.push({ label: 'gate scorecard', pred: h => h.includes('weighted') && h.includes('G1 range'), col: 'weighted' });
+  cases.forEach(cs => {
+    const tabs = attachedTables(cs.pred);
+    if (!tabs.length) { fail('sort test: ' + cs.label + ' table not found'); return; }
+    const rs = tabs[0];
+    const head = rs[0].children.map(cellText).map(s => String(s).trim());
+    const ci = head.indexOf(cs.col);
+    const th = rs[0].children[ci];
+    if (!th || typeof th.onclick !== 'function') { fail('SORT REGRESSION: ' + cs.label + ' header "' + cs.col + '" has no click handler'); return; }
+    th.onclick();
+    const now = attachedTables(cs.pred)[0];
+    const vals = now.slice(1).map(tr => {
+      const t = cellText(tr.children[ci]).trim().replace(/[%±()]/g, ' ');
+      const m = t.match(/-?\d+(?:\.\d+)?/);
+      return m ? parseFloat(m[0]) : null;
+    }).filter(v => v != null);
+    if (vals.length >= 2 && !nonincr(vals))
+      fail('SORT REGRESSION: ' + cs.label + ' did not sort descending on "' + cs.col + '" after a header click');
+  });
+})();
+
 if (failed) process.exit(1);
 
 // ---------------------------------------------------------------- --dump-row ----------
 if (process.argv.includes('--dump-row')) {
   const want = process.argv[process.argv.indexOf('--dump-row') + 1];
   if (!want) { console.error('--dump-row needs a bake name'); process.exit(2); }
-  // text as DISPLAYED: td.textContent when set directly, else the concatenated
-  // descendant text (the name cell builds swatch + text node + optional ens badge).
-  const cellText = (e) => {
-    if (!e) return '';
-    if (e.nodeType === 3) return String(e.textContent || '');
-    if (e.textContent) return String(e.textContent);
-    return (e.childNodes || []).map(cellText).join('');
-  };
-  // Locate the scoreboard by its header, not by #table: rerender() re-mounts the wrapper
-  // and the shim's query() returns the FIRST id match (the empty placeholder from layout()).
-  const rowsOf = (t) => { const acc = []; (function walk(e) { if (!e || !e.children) return; if (e.tagName === 'TR') acc.push(e); e.children.forEach(walk); })(t); return acc; };
+  // Locate the scoreboard by its header (helpers hoisted above). Registry scan, not
+  // attachedTables: after the sort tests the board is sorted descending again, and the
+  // last registry render is the live one either way.
   const boards = registry.filter(e => e.tagName === 'TABLE').map(rowsOf)
     .filter(rs => rs.length && (() => { const h = rs[0].children.map(cellText); return h.includes('bake') && h.includes('composite'); })());
   if (!boards.length) { console.error('--dump-row: scoreboard table not found'); process.exit(1); }

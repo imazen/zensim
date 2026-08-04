@@ -177,6 +177,22 @@ def load_loop_targeting(path=None):
             "models": models, "bakeMap": bake_map, "modelBake": model_bake}
 
 
+def regime_of(o):
+    """Displayed regime = the model's TRUE input width (372/720/924/944-class), derived
+    from n_inputs read out of the ZNPR itself. The stored `regime` flag string is
+    cosmetic on the sota944 campaign verdicts (every one of the 166 board JSONs says
+    "720" while n_inputs spans 156/372/504/720/924/944) — so the flag is only the
+    fallback when no width is recorded. For an ensemble the width shown is the ANCHOR
+    member's (the model block describes the anchor; the scoreboard caption says so)."""
+    m = o.get("model") or {}
+    n = m.get("n_inputs") or o.get("n_inputs")
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = None
+    return str(n) if n else str(o.get("regime", "?"))
+
+
 def _fit_line(x, y):
     """OLS endpoints [x0,y0,x1,y1] for the display trend (a fit aid, not a stat)."""
     x = np.asarray(x, float); y = np.asarray(y, float)
@@ -300,7 +316,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             model["n_feature_transforms"] = len(ft)   # true count for the card
             model["feature_transforms"] = ft[:MODEL_TRANSFORMS_EMBED]
         bakes.append({
-            "name": name, "regime": o.get("regime", "?"),
+            "name": name, "regime": regime_of(o), "regime_flag": o.get("regime", "?"),
             "curated": curated, "family": family_of(name),
             "date": o.get("date", ""), "colorIndex": ci,
             "rank": rank, "dial": o.get("dial", {}), "m3": o.get("m3_coherence"),
@@ -619,6 +635,45 @@ function renderBar(){
   bar.appendChild(th);
 }
 
+// ---- generic table sorting (2026-08-04). The scoreboard sorts through state + a full
+// re-render (mountTable); every OTHER stat table (Mohammadi, per-band, gates, loop) gets
+// THIS: click a header, rows re-order in place by that column's displayed value —
+// numeric when the column parses numeric (first click = best/descending), string
+// otherwise (first click = ascending); an em-dash (NOT MEASURED) always sinks to the
+// bottom. Values are read from the rendered cells, so nothing is recomputed. Shim-safe:
+// rows re-attach via innerHTML='' + appendChild (a bare appendChild move would duplicate
+// entries in the render-harness DOM shim), and only Array.from/getAttribute are used.
+const deepText=n=>n==null?'':(n.nodeType===3?String(n.textContent||''):
+  (n.textContent?String(n.textContent):Array.from(n.childNodes||[]).map(deepText).join('')));
+function cellNum(t){const m=String(t).replace(/[,%±()]/g,' ').match(/-?\d+(?:\.\d+)?(?:[eE]-?\d+)?/);
+  return m?parseFloat(m[0]):null;}
+function makeSortable(tbl){
+  const thead=Array.from(tbl.children||[])[0],tb=Array.from(tbl.children||[])[1];
+  const hrow=thead&&Array.from(thead.children||[])[0];
+  if(!hrow||!tb)return tbl;
+  const ths=Array.from(hrow.children||[]);
+  ths.forEach((th,ci)=>{
+    th.onclick=()=>{
+      const rows=Array.from(tb.children||[]);
+      const vals=rows.map(r=>{const td=Array.from(r.children||[])[ci];const t=deepText(td).trim();
+        return {r,t,n:(t===''||t==='—')?null:cellNum(t)};});
+      const seen=vals.filter(v=>v.t!==''&&v.t!=='—');
+      const numeric=seen.length>0&&seen.every(v=>v.n!=null);
+      const dir=(tbl._sk===ci)?-(tbl._sd||1):(numeric?-1:1);
+      tbl._sk=ci;tbl._sd=dir;
+      vals.sort((a,b)=>{
+        if(numeric){const an=a.n==null,bn=b.n==null;
+          if(an&&bn)return 0;if(an)return 1;if(bn)return -1;return dir*(a.n-b.n);}
+        return dir*String(a.t).localeCompare(String(b.t));});
+      tb.innerHTML='';vals.forEach(v=>tb.appendChild(v.r));
+      ths.forEach((h,k)=>{const c=String((h.getAttribute&&h.getAttribute('class'))||'')
+        .replace(/\s*\b(sorted|asc)\b/g,'');
+        h.setAttribute('class',c+(k===ci?' sorted'+(dir>0?' asc':''):''));});
+    };
+  });
+  return tbl;
+}
+
 // ---- SCOREBOARD TABLE (sortable). columns = derived metrics per bake.
 const COLS=[
   ['name','bake',true,b=>b.name],
@@ -665,7 +720,10 @@ function fmtCell(key,v){
 function renderTable(){
   const wrap=el('div',{});
   const cap=el('div',{class:'cap',html:'Sortable scoreboard — click a header. SROCC is polarity-corrected '
-    +'(|SROCC| for JND corpora). <b>composite</b> = the Rust <code>product_composite</code> (CID22·1.0 + '
+    +'(|SROCC| for JND corpora). <b>regime</b> = the model’s TRUE input width, derived from the ZNPR’s '
+    +'<code>n_inputs</code> (372/720/924/944-class) — NOT the recorded flag string, which reads “720” '
+    +'cosmetically on the campaign verdicts (the flag shows in the bake-picker tooltip when it differs; for an '
+    +'ens×k row the width is the anchor member’s). <b>composite</b> = the Rust <code>product_composite</code> (CID22·1.0 + '
     +'imazen26·0.5 + nonphoto·0.3 + KonJND·0.2 + AIC·0.15; KADID/TID excluded, train==val), READ from the JSON '
     +'not re-derived. <b>CID22 95%CI±</b> = bootstrap half-width; bakes with overlapping CIs are a statistical '
     +'TIE, not an ordering. <b>CID22 %bwd</b> = share of reference ladders ranked BACKWARDS (no pooled stat sees '
@@ -687,7 +745,10 @@ function renderTable(){
   const thead=el('tr',{});
   COLS.forEach(c=>{const th=el('th',{class:(c[0]==='name'||c[0]==='regime'?'lbl':'')
       +(state.sortKey===c[0]?' sorted'+(state.sortDir>0?' asc':''):''),text:c[1]});
-    th.onclick=()=>{if(state.sortKey===c[0])state.sortDir*=-1;else{state.sortKey=c[0];state.sortDir=c[2]?1:-1;}renderTable();};
+    // mountTable, NOT renderTable: renderTable RETURNS a detached wrapper — calling it
+    // from the click handler built the sorted table and threw it away, so the visible
+    // scoreboard never re-sorted (2026-08-04 user report; bug present since 62404415).
+    th.onclick=()=>{if(state.sortKey===c[0])state.sortDir*=-1;else{state.sortKey=c[0];state.sortDir=c[2]?1:-1;}mountTable();};
     thead.appendChild(th);});
   tbl.appendChild(el('thead',{},thead));
   // column min/max for shading (numeric cols only), across ALL bakes
@@ -877,7 +938,7 @@ function renderMPanel(){
     +'better</b>; OR is a catastrophe gate, not a ranker. <b>SROCC</b> is signed (a negative = globally '
     +'inverted bake) with the bootstrap 95% CI half-width. <b>per-ref / %bwd</b> = within-image mean SROCC '
     +'and share of reference ladders ranked backwards (— when the corpus carries no ref identity). '
-    +'⚠ = train==val (KADID/TID: memorization, not held-out skill).'}));
+    +'⚠ = train==val (KADID/TID: memorization, not held-out skill). Click a header to sort.'}));
   const sel=el('div',{class:'bar',style:'margin:6px 0 10px'});
   corps.forEach(c=>{
     const b=el('button',{class:'btn',text:(TV.has(c)?c+' ⚠':c)});
@@ -912,6 +973,7 @@ function renderMPanel(){
     tb.append(tr);
   });
   tbl.append(tb);
+  makeSortable(tbl);
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
   // 10-band SROCC grouped bars for the selected corpus (when the corpus is banded).
   const banded=rows.filter(b=>b.rank[c]&&b.rank[c].bands);
@@ -991,6 +1053,7 @@ function renderMPanel(){
         bb.append(tr);
       });
       bt.append(bb);
+      makeSortable(bt);
       const btw=el('div',{style:'overflow-x:auto'});btw.append(bt);host.append(btw);
       host.append(el('div',{class:'cap',style:'margin-top:3px',html:
         'Read DOWN a column (which bake wins that band), never ACROSS one: band SROCC is '
@@ -1065,7 +1128,8 @@ function renderGates(){
   host.append(el('h2',{text:'Gate scorecard'}));
   host.append(el('div',{class:'cap',html:'CODEC_TARGET_GOALS soft-gates (1.00 = full pass). <b>weighted</b> = the '
     +'shippability gate (G1·3 + G8·2.5 + G5·1.5 + G9·1 + G-IM26·1 + G-NP·1 + G7·0.5 + G-OR·0.5) — a DIFFERENT '
-    +'question from the ranking composite. G-OR is the catastrophe floor (worst-corpus outlier ratio).'}));
+    +'question from the ranking composite. G-OR is the catastrophe floor (worst-corpus outlier ratio). '
+    +'Click a header to sort.'}));
   const KEYS=[['g1_dynamic_range','G1 range'],['g5_hf_rank','G5 HF'],['g7_cid22','G7 CID22'],['g8_zrmse','G8 Z-RMSE'],
     ['g9_ds_auc','G9 DS-AUC'],['g_np_nonphoto','G-NP'],['g_im26_realcodec','G-IM26'],['g_or_catastrophe','G-OR'],['weighted_goal','weighted']];
   const tbl=el('table',{});
@@ -1087,6 +1151,7 @@ function renderGates(){
     tb.append(tr);
   });
   tbl.append(tb);
+  makeSortable(tbl);
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
 }
 
@@ -1148,6 +1213,7 @@ function renderLoop(){
     tb.append(tr);
   });
   tbl.append(tb);
+  makeSortable(tbl);
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
   if(meta.notes)host.append(el('div',{class:'cap',text:'notes: '+meta.notes}));
 }
