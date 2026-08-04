@@ -595,6 +595,22 @@ infra + era-bridge · `27b7fb60` fit-chain owners · `8123313e` slices ·
 `2b1fab2a` hdr amendment infra · `3f84d549` arm C 6/8 + fleet record ·
 `b26736cb` hdr leg · `0eb35d74` B-gap resolution · (this commit) endgame.
 
+**Repro note (2026-08-04 consolidation).** The one-shot arm/grid drivers
+(`sota944_gridA.sh`, `sota944_gridB.sh`, `sota944_gridB2.sh`,
+`sota944_armC_seed.sh`, `sota944_armC_chain.sh`,
+`sota944_corruption_head.sh`) were DELETED after the campaign closed — git
+history preserves them at the driver commits above (`3b1856ef`, `3f84d549`,
+`2b1fab2a`); their frozen inputs (`scripts/sota944/slice_*.txt`,
+`screen944_monotone.tsv` — the §3a/§3b registered artifacts) stay in-tree.
+`scripts/sota944_verdict.sh` remains, reduced to a thin wrapper over
+`bake_verdict --regime 944`: the entire frozen §0 invocation (roots, grids,
+12-corpus list, kadis-944 per-pair) now lives IN the binary, test-pinned
+(`regime_944_*` tests), so no wrapper can drift corpora again — the drift
+class behind the corrected EM4 HF-NL cell. Wrapper⇄preset equivalence was
+verified on `C_co3a_s1301`: full.json byte-identical except the honest
+`regime: "944"` label (the preset also restores the kadis per-pair scatter
+block that the old wrapper skipped; verdict numbers unaffected).
+
 ---
 
 ## REGISTERED AMENDMENT — seed-scale wave (2026-08-03, committed BEFORE any new seed)
