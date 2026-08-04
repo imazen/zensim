@@ -451,7 +451,7 @@ fn evaluate_bake(
 ) -> BakeReport {
     let bake_bytes = std::fs::read(bake_path).expect("read bake");
     let model = Model::from_bytes(&bake_bytes).expect("parse ZNPR");
-    let n_inputs = model.n_inputs();
+    let n_inputs = model.caller_input_width();
     let has_transforms = model.has_nontrivial_feature_transforms();
     let per_sample_alpha = extract_per_sample_alpha_head(&model);
     let hybrid = extract_hybrid_head(&model);

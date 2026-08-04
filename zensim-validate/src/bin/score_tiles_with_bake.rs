@@ -72,7 +72,7 @@ fn main() -> ExitCode {
 
     let bake_bytes = std::fs::read(&bake).expect("read bake");
     let model = Model::from_bytes(&bake_bytes).expect("parse bake");
-    let n_inputs = model.n_inputs();
+    let n_inputs = model.caller_input_width();
     let has_tx = model.has_nontrivial_feature_transforms();
     let psa = extract_per_sample_alpha_head(&model);
     let hyb = extract_hybrid_head(&model);

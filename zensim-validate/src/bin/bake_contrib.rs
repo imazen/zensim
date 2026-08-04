@@ -390,7 +390,13 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     if model.has_expander_feature_transforms() {
-        eprintln!("expander-transform bakes are out of scope for bake_contrib (registered §C.1)");
+        // Includes PRUNED bakes (FeatureTransform::Drop). Their contribution
+        // report is the un-pruned parent's, minus the dropped columns — run
+        // this against the pre-pack bake.
+        eprintln!(
+            "expander/drop-transform bakes are out of scope for bake_contrib \
+             (registered §C.1); for a pruned bake, report on its pre-pack parent"
+        );
         return ExitCode::from(2);
     }
     let n_inputs = model.n_inputs();

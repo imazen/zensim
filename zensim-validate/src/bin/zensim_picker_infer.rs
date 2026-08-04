@@ -60,7 +60,7 @@ fn main() -> Result<()> {
         std::fs::read(&args.bake).with_context(|| format!("read bake {:?}", args.bake))?;
     let model = Model::from_bytes(&bake_bytes).map_err(|e| anyhow!("load bake: {e:?}"))?;
     let mut predictor = Predictor::new(&model);
-    let n_in = predictor.n_inputs();
+    let n_in = predictor.model().caller_input_width();
     eprintln!("loaded bake, n_inputs={}", n_in);
 
     let t_values: Vec<f32> = args

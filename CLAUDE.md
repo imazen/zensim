@@ -933,6 +933,58 @@ The V39-era workflow regressed on packing (V39 ships raw F32 257 KB); re-pack
 existing `zensim/weights/` F32 bakes through this path when rotating each
 profile (SROCC-neutral by construction).
 
+#### DEAD-COLUMN PRUNING — automatic, on by default (2026-08-04)
+
+`pack` now drops layer-0 inputs that **cannot** change a prediction, in the
+same pass as zerobias + dtype + spline refit. Order is **zerobias → PRUNE →
+quantize → spline** (zerobias is what creates most dead columns; the spline
+still lands last on the final packed net, so QUANTIZE-then-CALIBRATE holds).
+
+**The caller's feature width never changes.** A pruned bake declares
+`FeatureTransform::Drop` (zenpredict, landed 2026-08-04) on the dead raw lines,
+so it still takes 944 features and internally forwards 667. Consequently
+`Model::n_inputs()` (667) ≠ `Model::caller_input_width()` (944) — **size every
+feature vector by `caller_input_width()`.** Mis-sizing fails loud
+(`FeatureLenMismatch`); it never scores a prefix.
+
+**Three classes of "dead", only two prunable** — the whole correctness story,
+enforced in `zensim-validate/src/prune.rs` + `tests/prune_classes.rs`:
+
+| class | test | prunable |
+|---|---|---|
+| 1 weight-dead | `W0[k,:]` exactly zero | **yes — BIT-identical** |
+| 2 transform-forced-constant | the bake's OWN transform pins input `k` (winsor family, `lo >= hi`) | **yes** — contribution folded into `b0`; exact in real arithmetic, not bit-identical (the fold reorders one f32 sum) |
+| 3 inert on a corpus | `bake_contrib` says mean\|Δ\|≈0 but the weight is live and no transform pins it | **NO** — the corpus merely never exercised it |
+
+Class 3 is the trap: it is indistinguishable from class 1 in any corpus report
+and is *not* mathematically dead. `prune::plan()` takes **no corpus statistic
+as input**, which makes class 3 structurally unreachable rather than merely
+discouraged. Class 2 is refused outright on an i8 layer 0 (removing a nonzero
+row can move the per-output max-abs quantization scale).
+
+**Identity gate runs on every pack.** Pre- vs post-prune scores over the anchor
+corpus must be bit-identical when only class 1 fired, else within
+`--prune-identity-tol` (default 1e-4). Fails loud and refuses to write.
+
+Flags: `--no-prune` (off; restores byte-exact reproduction of pre-2026-08-04
+bakes), `--no-prune-constants` (class 1 only ⇒ bit-identical for every input
+including NaN), `--prune-identity-tol`.
+
+MEASURED on the three sota944 ship candidates
+(`benchmarks/dead_column_pruning_2026-08-04.md`): **944 → 667 layer-0 inputs,
+all 277 class 1, identity gate bit-identical on 2035 anchor rows, verdicts
+byte-identical.** File size barely moves (−382 B, 0.2%) — LZ4 was already
+squeezing the zero rows — so **the win is inference and decompressed
+footprint, not bytes**: 29.3% fewer layer-0 rows, a zenbench-measured
+**−25.4% forward time** (71.6 → 53.4 ms / 256 rows, 95% CI [−29.6%, −19.1%];
+4-round result on a busy box), and −73,128 B resident. The
+`bake_contrib` "73 KB = 44% of the packed encoder" figure was a *decompressed*
+measurement; do not quote it as a file-size saving.
+
+**`--no-prune` is required to reproduce a historical bake byte-for-byte** —
+verified: `pack --no-prune` on `C_em944_s31_dial.bin` reproduces the shipped
+`C_em944_s31_packed.bin` sha256 `5870046d…` exactly.
+
 ### Bake evaluation (per-bake instant verdict from parquet sidecars)
 **`bake_verdict` binary** at
 `/home/lilith/work/zen/zensim/zensim-validate/src/bin/bake_verdict.rs`.
@@ -1050,10 +1102,13 @@ bake_dial_refit add-winsor --in <raw.bin> --out <out.bin> --fit-corpus <parquet>
 # G-RANGE tail gate (below/above-knot raw-pred fraction) + Z-RMSE/OR/SROCC,
 # NO PWRC (OOM-safe). The 3rd eval panel SROCC is blind to.
 bake_dial_refit gate --bake <bin> --corpus <parquet> [--ref-col human_score]
-# STANDARD non-QAT packing: per-layer zerobias + dtype, spline refit ON THE
-# PACKED net (BYTE-IDENTICAL to pack_and_calibrate.py + the shipped packed30k)
+# STANDARD non-QAT packing: per-layer zerobias + DEAD-COLUMN PRUNING + dtype,
+# spline refit ON THE PACKED net. Pruning is ON by default (944 -> 667 on the
+# sota944 bakes, bit-identical); --no-prune restores the pre-2026-08-04
+# BYTE-IDENTICAL reproduction of pack_and_calibrate.py + the shipped packed30k
 bake_dial_refit pack --in <f32.bin> --out <out.bin> [--neg-tail] \
-    [--dtype f16] [--zerobias-bulk 0.005] [--protect-last]
+    [--dtype f16] [--zerobias-bulk 0.005] [--protect-last] \
+    [--no-prune] [--no-prune-constants] [--prune-identity-tol 1e-4]
 # drop one metadata entry, rest verbatim (BYTE-IDENTICAL to the deleted
 # strip_spline_metadata.py on both MLP and linear fixtures)
 bake_dial_refit strip --in <bake> --out <out> [--key zentrain.output_calibration_spline]

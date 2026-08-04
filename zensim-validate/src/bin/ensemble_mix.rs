@@ -61,7 +61,7 @@ fn load_csv(path: &PathBuf) -> std::io::Result<(Vec<f64>, Vec<Vec<f32>>)> {
 
 fn predict_all(bake_bytes: &[u8], features: &[Vec<f32>]) -> Result<Vec<f64>, String> {
     let model = Model::from_bytes(bake_bytes).map_err(|e| format!("{:?}", e))?;
-    let n_inputs = model.n_inputs();
+    let n_inputs = model.caller_input_width();
     // V_20+ bakes carry feature_transforms metadata; dispatch accordingly.
     // predict_transformed is a no-op overhead for bakes without transforms.
     let needs_transforms = model.has_nontrivial_feature_transforms();

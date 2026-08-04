@@ -57,7 +57,7 @@ fn load_csv(path: &PathBuf) -> std::io::Result<(Vec<f64>, Vec<Vec<f32>>)> {
 
 fn predict_all(bake: &[u8], features: &[Vec<f32>]) -> Result<Vec<f64>, String> {
     let model = Model::from_bytes(bake).map_err(|e| format!("{:?}", e))?;
-    let n_inputs = model.n_inputs();
+    let n_inputs = model.caller_input_width();
     let mut predictor = Predictor::new(&model);
     let mut preds = Vec::with_capacity(features.len());
     for row in features {

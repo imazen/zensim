@@ -282,6 +282,14 @@ pub fn score_row_minmax(
     if mm.n != n {
         return f64::NAN;
     }
+    // The loop below applies `transforms[i]` at layer-0 index `i`, which is
+    // only the same index when the pipeline is 1:1. A variable-arity bake
+    // (Sinusoidal expander, or a pruned bake carrying `drop`) breaks that
+    // alignment — and the scalar `apply_with_params` panics on those
+    // variants. Refuse rather than mis-index.
+    if model.caller_input_width() != n {
+        return f64::NAN;
+    }
     let transforms = model.feature_transforms();
     let params = model.feature_transform_params();
     let mean = model.scaler_mean();

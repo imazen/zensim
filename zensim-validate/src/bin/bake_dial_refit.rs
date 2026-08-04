@@ -86,6 +86,7 @@ use zenpredict::{Activation, MetadataType, Model, WeightDtype, WeightStorage, f1
 use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 use zensim_validate::output_calibration_spline as spline;
 use zensim_validate::panel::{outlier_ratio, rescale_logistic, spearman, z_rmse};
+use zensim_validate::prune;
 // Dial-spline fitting lives in the shared `dial_spline` module (2026-07-16) so
 // this linear tool AND the min-max bake path fit the [0,100] dial identically.
 use zensim_validate::dial_spline::{fit_spline_knots, percentile_linear, spline_payload};
@@ -94,6 +95,10 @@ use zensim_validate::dial_spline::{fit_spline_knots, percentile_linear, spline_p
 /// the private `KEY` in `output_calibration_spline` (which does not
 /// re-export it) and `zenpredict::keys::FEATURE_TRANSFORM*`.
 const SPLINE_KEY: &str = "zentrain.output_calibration_spline";
+use zenpredict::keys::{
+    FEATURE_TRANSFORM_PARAMS as FEATURE_TRANSFORM_PARAMS_KEY,
+    FEATURE_TRANSFORMS as FEATURE_TRANSFORMS_KEY,
+};
 
 #[derive(Parser)]
 #[command(
@@ -663,7 +668,7 @@ fn cmd_add_spline(a: &AddSplineArgs) -> Result<(), String> {
             model.feature_bounds().len()
         ));
     }
-    let n_in = model.n_inputs();
+    let n_in = model.caller_input_width();
 
     // Forward the anchor through the PRODUCTION predictor (transform-safe).
     let (feats, tgt) = read_features(&a.anchor, &a.feat_prefix, n_in, &a.target_col);
@@ -1093,7 +1098,7 @@ fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
     };
     let bytes = std::fs::read(&a.bake).map_err(|e| format!("read {:?}: {e}", a.bake))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
-    let n = model.n_inputs();
+    let n = model.caller_input_width();
     let sp = spline::extract(&model).ok_or("bake has no output_calibration_spline")?;
     let klo = sp.xs[0];
     let khi = sp.xs[sp.xs.len() - 1];
@@ -1244,6 +1249,25 @@ struct PackArgs {
     /// If given, assert the output sha256 begins with this hex prefix.
     #[arg(long)]
     expect_sha256: Option<String>,
+    /// Skip dead-column pruning (on by default). Pruning drops layer-0
+    /// inputs whose weight row is exactly zero, and inputs the bake's own
+    /// transform pins to a constant, declaring `drop` on those raw lines so
+    /// the CALLER's feature width is unchanged. Pass this to reproduce a
+    /// pre-2026-08-04 bake byte-for-byte.
+    #[arg(long)]
+    no_prune: bool,
+    /// Restrict pruning to class 1 (exactly-zero weight rows), which is
+    /// bit-identical for every input including NaN. Without this, class 2
+    /// (transform-forced-constant, folded into the layer-0 bias) is also
+    /// pruned — exact in real arithmetic, but a NaN feature on such a
+    /// column no longer propagates to the output.
+    #[arg(long)]
+    no_prune_constants: bool,
+    /// Max allowed |Δ| between pre- and post-prune anchor scores. Class-1
+    /// pruning is asserted BIT-identical regardless of this; the tolerance
+    /// only applies once class-2 bias folding is in play.
+    #[arg(long, default_value_t = 1e-4)]
+    prune_identity_tol: f64,
 }
 
 /// One packed layer, owned (weights dequantized to f32).
@@ -1382,7 +1406,9 @@ fn forward_scored_6dec(bytes: &[u8], feats: &[Vec<f64>]) -> Result<Vec<f64>, Str
         score_with_bake_alloc,
     };
     let model = Model::from_bytes(bytes).map_err(|e| format!("parse packed bake: {e:?}"))?;
-    let n_inputs = model.n_inputs();
+    // Caller width, NOT n_inputs(): a pruned bake's layer-0 in_dim is
+    // smaller than the vector its callers hand it.
+    let n_inputs = model.caller_input_width();
     let has_transforms = model.has_nontrivial_feature_transforms();
     let psa = extract_per_sample_alpha_head(&model);
     let hyb = extract_hybrid_head(&model);
@@ -1421,6 +1447,93 @@ fn round_6dec(y: f64) -> f64 {
     format!("{y:.6}").parse().unwrap_or(y)
 }
 
+/// Replace (or append) a UTF-8 metadata entry, preserving the position
+/// of an existing key so the metadata blob's order is otherwise stable.
+fn set_meta_utf8(md: &mut Vec<OwnedMeta>, key: &str, value: Vec<u8>) {
+    match md.iter_mut().find(|m| m.key == key) {
+        Some(slot) => {
+            slot.kind = MetadataType::Utf8;
+            slot.value = value;
+        }
+        None => md.push(OwnedMeta {
+            key: key.to_string(),
+            kind: MetadataType::Utf8,
+            value,
+        }),
+    }
+}
+
+/// THE identity gate. Pruning is only ever allowed to be a storage +
+/// inference optimization, so the pre- and post-prune networks must
+/// score the anchor corpus the same. Two strictnesses:
+///
+/// * **class 1 only** ⇒ demand exact equality of every score. The
+///   dropped rows are exactly zero, so `fma(x, 0, acc) == acc` and the
+///   bits cannot move.
+/// * **class 2 present** ⇒ the constant fold reorders one `f32` sum, so
+///   demand `|Δ| <= --prune-identity-tol` and report the worst case.
+///
+/// Fails loud either way. A pruner that quietly changes predictions is
+/// the exact failure this whole module exists to make impossible.
+fn check_prune_identity(
+    plan: &prune::PrunePlan,
+    reference: &[f64],
+    pruned: &[f64],
+    a: &PackArgs,
+) -> Result<(), String> {
+    if reference.len() != pruned.len() {
+        return Err(format!(
+            "prune identity gate: score-count mismatch {} vs {}",
+            reference.len(),
+            pruned.len()
+        ));
+    }
+    let mut worst = 0f64;
+    let mut worst_at = 0usize;
+    let mut n_diff = 0usize;
+    for (i, (&r, &p)) in reference.iter().zip(pruned.iter()).enumerate() {
+        if r.to_bits() != p.to_bits() {
+            n_diff += 1;
+            let d = (r - p).abs();
+            if d > worst {
+                worst = d;
+                worst_at = i;
+            }
+        }
+    }
+    if plan.is_bit_identical() {
+        if n_diff != 0 {
+            return Err(format!(
+                "PRUNE IDENTITY GATE FAILED: {n_diff}/{} anchor scores changed under \
+                 class-1-only pruning, which MUST be bit-identical (worst |Δ|={worst:.6e} \
+                 at row {worst_at}). Refusing to write the bake.",
+                reference.len()
+            ));
+        }
+        eprintln!(
+            "prune identity gate: PASS — all {} anchor scores BIT-identical (class 1 only)",
+            reference.len()
+        );
+        return Ok(());
+    }
+    if worst > a.prune_identity_tol {
+        return Err(format!(
+            "PRUNE IDENTITY GATE FAILED: worst |Δ|={worst:.6e} at anchor row {worst_at} \
+             exceeds --prune-identity-tol {:.1e} ({n_diff}/{} scores moved). Refusing to \
+             write the bake; re-run with --no-prune-constants for the bit-identical subset.",
+            a.prune_identity_tol,
+            reference.len()
+        ));
+    }
+    eprintln!(
+        "prune identity gate: PASS — {n_diff}/{} anchor scores moved, worst |Δ|={worst:.3e} \
+         (<= {:.1e}); class-2 bias folding reorders one f32 sum",
+        reference.len(),
+        a.prune_identity_tol
+    );
+    Ok(())
+}
+
 fn cmd_pack(a: &PackArgs) -> Result<(), String> {
     let dtype = match a.dtype.as_str() {
         "f16" => WeightDtype::F16,
@@ -1451,7 +1564,7 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
         );
     }
 
-    let (packed, counts) = pack_layers(&model, dtype, a.zerobias_bulk, a.protect_last)?;
+    let (mut packed, counts) = pack_layers(&model, dtype, a.zerobias_bulk, a.protect_last)?;
     eprintln!(
         "per-layer zerobias (zeroed/total): {}",
         counts
@@ -1463,22 +1576,97 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
 
     // metadata = input order minus the spline; the refit spline is appended
     // at the END (matches the Python's `md2 = md + [spline]`).
-    let md_nospline: Vec<OwnedMeta> = clone_metadata(&model)
+    let mut md_nospline: Vec<OwnedMeta> = clone_metadata(&model)
         .into_iter()
         .filter(|m| m.key != SPLINE_KEY)
         .collect();
 
-    // 1. packed network WITHOUT spline -> its raw (tanh-pin) outputs.
-    let nospline_bytes = emit_packed(
+    // The un-pruned packed network — kept as the identity-gate reference
+    // even when pruning fires, so the gate compares like for like (both
+    // sides post-zerobias, pre-spline).
+    let mut scaler_mean = model.scaler_mean().to_vec();
+    let mut scaler_scale = model.scaler_scale().to_vec();
+    let reference_bytes = emit_packed(
         model.schema_hash(),
-        model.scaler_mean(),
-        model.scaler_scale(),
+        &scaler_mean,
+        &scaler_scale,
         &packed,
         &md_nospline,
     );
-    let n_in = model.n_inputs();
+
+    // Caller width never changes — pruning is invisible to callers, which
+    // is the entire contract. Read the anchor at this width both times.
+    let n_in = model.caller_input_width();
     let (feats, tgt) = read_features(&a.anchor, &a.feat_prefix, n_in, &a.target_col);
-    let preds = forward_scored_6dec(&nospline_bytes, &feats)?;
+    let reference_preds = forward_scored_6dec(&reference_bytes, &feats)?;
+
+    // ── dead-column pruning (zerobias → PRUNE → dtype/quantize → spline) ──
+    //
+    // Zerobias is what creates most weight-dead columns, so the plan is
+    // built on the POST-zerobias weights. The spline still lands last, on
+    // the final packed net, preserving QUANTIZE-then-CALIBRATE.
+    let plan = if a.no_prune {
+        None
+    } else {
+        let l0 = prune::Layer0View {
+            in_dim: packed[0].in_dim,
+            out_dim: packed[0].out_dim,
+            weights: &packed[0].weights,
+            biases: &packed[0].biases,
+            is_i8: matches!(packed[0].dtype, WeightDtype::I8),
+        };
+        let p = prune::plan(&model, &l0, !a.no_prune_constants).map_err(|e| e.to_string())?;
+        if p.is_noop() { None } else { Some(p) }
+    };
+
+    if let Some(p) = &plan {
+        // WeightDtype is #[non_exhaustive]; a future dtype falls back to
+        // f32 sizing, which only affects the reported byte count.
+        let dtype_bytes = match packed[0].dtype {
+            WeightDtype::F16 => 2,
+            WeightDtype::I8 => 1,
+            _ => 4,
+        };
+        eprint!("{}", p.report(packed[0].out_dim, dtype_bytes));
+
+        let out_dim = packed[0].out_dim;
+        packed[0].weights = prune::prune_layer0_weights(p, &packed[0].weights, out_dim);
+        packed[0].biases = prune::prune_layer0_biases(p, &packed[0].biases);
+        packed[0].in_dim = p.n_inputs_after;
+        scaler_mean = prune::prune_input_array(p, &scaler_mean);
+        scaler_scale = prune::prune_input_array(p, &scaler_scale);
+
+        // Rewrite the two line-aligned transform metadata entries in place
+        // (or append them when the bake carried none).
+        let (t_txt, p_txt) = prune::transform_metadata(p);
+        set_meta_utf8(&mut md_nospline, FEATURE_TRANSFORMS_KEY, t_txt.into_bytes());
+        set_meta_utf8(
+            &mut md_nospline,
+            FEATURE_TRANSFORM_PARAMS_KEY,
+            p_txt.into_bytes(),
+        );
+    } else if !a.no_prune {
+        eprintln!("prune: no dead columns found (every layer-0 input has a live weight)");
+    }
+
+    // 1. packed network WITHOUT spline -> its raw (tanh-pin) outputs.
+    // With no plan the reference IS the packed net, so reuse it rather than
+    // re-baking and re-forwarding identical bytes.
+    let preds = match &plan {
+        Some(p) => {
+            let bytes = emit_packed(
+                model.schema_hash(),
+                &scaler_mean,
+                &scaler_scale,
+                &packed,
+                &md_nospline,
+            );
+            let scored = forward_scored_6dec(&bytes, &feats)?;
+            check_prune_identity(p, &reference_preds, &scored, a)?;
+            scored
+        }
+        None => reference_preds,
+    };
     let pmin = preds.iter().copied().fold(f64::INFINITY, f64::min);
     let pmax = preds.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     eprintln!(
@@ -1504,8 +1692,8 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
     });
     let final_bytes = emit_packed(
         model.schema_hash(),
-        model.scaler_mean(),
-        model.scaler_scale(),
+        &scaler_mean,
+        &scaler_scale,
         &packed,
         &md_final,
     );

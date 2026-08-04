@@ -228,7 +228,7 @@ fn load_bake_for_profile(entry: &ProfileEntry) -> Result<LoadedBake, String> {
     let hybrid_head = extract_hybrid_head(&model);
     let tanh_pin_scale = extract_tanh_output_head_scale(&model);
     let output_spline = output_calibration_spline::extract(&model);
-    let n_inputs = model.n_inputs();
+    let n_inputs = model.caller_input_width();
     Ok(LoadedBake {
         label: entry.label,
         model,

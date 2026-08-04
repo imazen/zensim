@@ -345,7 +345,7 @@ fn score_corpus(bake: &LoadedBake, feature_rows: &[Vec<f64>]) -> Result<Vec<f64>
     let model = Model::from_bytes(&bake.bytes)
         .map_err(|e| format!("parse bake {} during scoring: {e:?}", bake.label))?;
     let has_transforms = model.has_nontrivial_feature_transforms();
-    let n_inputs = model.n_inputs();
+    let n_inputs = model.caller_input_width();
     let per_sample_alpha_head = extract_per_sample_alpha_head(&model);
     let hybrid_head = extract_hybrid_head(&model);
     let mut predictor = Predictor::new(&model);

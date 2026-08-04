@@ -91,7 +91,7 @@ fn main() -> Result<(), String> {
     let parquet = parquet.ok_or("--parquet required")?;
     let bytes = std::fs::read(&bake).map_err(|e| format!("read {bake:?}: {e}"))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("model parse: {e}"))?;
-    let n_inputs = model.n_inputs();
+    let n_inputs = model.caller_input_width();
     let has_transforms = model.has_nontrivial_feature_transforms();
     let per_sample = extract_per_sample_alpha(&model);
     let hybrid = if per_sample.is_some() {

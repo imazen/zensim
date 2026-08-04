@@ -4023,7 +4023,13 @@ fn forward_one_bake_with_codec(
     let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
         reason: "Model::from_bytes failed to parse the bake header or layer table",
     })?;
-    let n_inputs = model.n_inputs();
+    // Caller-facing width, NOT `n_inputs()`. They differ on any bake with
+    // variable-arity `feature_transforms`: a DEAD-COLUMN-PRUNED bake (one
+    // carrying `FeatureTransform::Drop`) stores fewer layer-0 rows than the
+    // feature vector its callers hand it, and `n_inputs()` is that smaller
+    // internal width. Sizing by `n_inputs()` here would send a pruned bake
+    // down the `n_inputs < features.len()` PREFIX branch below.
+    let n_inputs = model.caller_input_width();
     let mut predictor = crate::mlp::Predictor::new(&model);
     let needs_transforms = model.has_nontrivial_feature_transforms();
 
@@ -4055,7 +4061,11 @@ fn forward_one_bake_with_codec(
     // standardize clamp so runtime scoring is bit-exact with the qualifying eval.
     if let Some(mm) = bundle.minmax_head.as_deref() {
         let n = model.n_inputs();
-        if mm.n != n || features.len() != n {
+        // The loop below indexes `transforms[i]` at layer-0 index `i`, which
+        // only aligns for a 1:1 transform pipeline. A variable-arity bake
+        // (expander, or pruned with `drop`) breaks the alignment AND panics
+        // in the scalar `apply_with_params`; refuse instead.
+        if mm.n != n || features.len() != n || model.caller_input_width() != n {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "min-max head n does not match bake n_inputs / feature length",
             });

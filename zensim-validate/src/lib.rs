@@ -23,5 +23,6 @@ pub mod panel;
 pub mod parallel;
 pub mod parquet_loader;
 pub mod perf_trace;
+pub mod prune;
 pub mod simd_mlp;
 pub mod train_manifest;

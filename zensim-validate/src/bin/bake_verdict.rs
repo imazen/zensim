@@ -2230,11 +2230,11 @@ fn main() -> ExitCode {
     // Members must agree on input width — averaging predictions from models
     // that read different feature regimes is the column-mixing failure mode
     // this repo bans outright, so it fails loud rather than truncating.
-    let n_inputs = models[0].n_inputs();
+    let n_inputs = models[0].caller_input_width();
     if let Some((p, m)) = members
         .iter()
         .zip(models.iter())
-        .find(|(_, m)| m.n_inputs() != n_inputs)
+        .find(|(_, m)| m.caller_input_width() != n_inputs)
     {
         eprintln!(
             "bake_verdict: ensemble member {} has n_inputs={} but member 0 has {} — \
@@ -2258,7 +2258,14 @@ fn main() -> ExitCode {
     let has_per_sample_alpha = extract_per_sample_alpha_head(model).is_some();
     let has_hybrid_head = extract_hybrid_head(model).is_some();
     eprintln!(
-        "bake: n_inputs={n_inputs}  feature_transforms={}  per_sample_alpha_head={}  hybrid_head={}",
+        "bake: n_inputs={n_inputs}{}  feature_transforms={}  per_sample_alpha_head={}  hybrid_head={}",
+        // A dead-column-PRUNED bake forwards fewer layer-0 rows than the
+        // feature width it accepts; surface both so the reader can see it.
+        if model.n_inputs() != n_inputs {
+            format!(" (PRUNED: layer0_in_dim={})", model.n_inputs())
+        } else {
+            String::new()
+        },
         if has_transforms { "yes" } else { "no" },
         if has_per_sample_alpha { "yes" } else { "no" },
         if has_hybrid_head { "yes" } else { "no" }
@@ -2742,7 +2749,7 @@ Run the dedicated q-sweep harness for those._\n",
                     Ok(grid) => {
                         let cand = ens.score_rows(&grid.feature_rows);
                         let ref_tf = ref_model.has_nontrivial_feature_transforms();
-                        let ref_n = ref_model.n_inputs();
+                        let ref_n = ref_model.caller_input_width();
                         let refs = score_grid_one(&ref_model, ref_tf, ref_n, &grid.feature_rows);
                         let zone = eval_report::zone_buckets(&cand, &refs, 5.0);
                         buf.push_str(&eval_report::zone_bucket_section(
@@ -2805,9 +2812,9 @@ Run the dedicated q-sweep harness for those._\n",
                         .map_err(|e| e.to_string())
                         .and_then(|b| Model::from_bytes(&b).map_err(|e| format!("{e:?}")))
                     {
-                        Ok(head) if head.n_inputs() == grid.n_features => {
+                        Ok(head) if head.caller_input_width() == grid.n_features => {
                             let head_tf = head.has_nontrivial_feature_transforms();
-                            let head_n = head.n_inputs();
+                            let head_n = head.caller_input_width();
                             let scores = score_grid_one(&head, head_tf, head_n, &grid.feature_rows);
                             let stats = eval_report::corruption_gate(&grid.label, &scores);
                             buf.push_str(&eval_report::corruption_gate_section(
@@ -2826,7 +2833,7 @@ Run the dedicated q-sweep harness for those._\n",
                             args.corruption_grid.display(),
                             grid.n_features,
                             head_path.display(),
-                            head.n_inputs()
+                            head.caller_input_width()
                         )),
                         Err(e) => buf.push_str(&format!(
                             "\n## Corruption gate (head) — ⚠ FAILED to load `{}`\n\n`{e}`\n",
