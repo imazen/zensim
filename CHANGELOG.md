@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **SOTA-944 packaging pass (registered appendix)** — the three balanced-shortlist singles (`H_co3abpg_s2507`, `C_em944_s31`, `C_co3a_s1307`) dial-packaged (`bake_dial_refit add-spline` on the materialized §3d anchor — new committed builder `scripts/canonical_corpus/build_anchor944_dial.py`, the 372 multiband anchor being a regime violation at 944) and packed (`pack --neg-tail`, f16+zerobias): 510 KB → 166–180 KB with **every rank/steer axis neutral ≤0.0005 (KonJND −0.00003 on the primary; the registered f32-pack contingency did not fire) and M3a ±0.0002**; first G-RANGE numbers on the 944 MLP class (s1307 PASS clean; H 0.093% / s31 0.559% above-knot = issue-50 near-top saturation made visible); the one mover is dial-mono, proven a UNIT effect (strict-backwards bit-identical; the 0.5-pt materiality threshold now operates on a ~4× wider dial scale — the campaign's raw-unit mono rows were unit-flattered). Gauntlet `family_of` gained the missing `H_*` branch (wave-7 cells had been falling into "pre-944 era"). `benchmarks/sota944_campaign_2026-08-03.md` §REGISTERED APPENDIX (this)
+
 ### Fixed
 - **Gauntlet scoreboard sort regression** — header clicks built the sorted table and threw it away (renderTable returns a detached wrapper; the click never re-mounted), broken since the first gauntlet commit; click now re-mounts, EVERY stat table sorts (Mohammadi/band/gates/loop via `makeSortable`), and the render harness dispatches real header clicks and fails when the ATTACHED table does not reorder (e0ebfc90)
 

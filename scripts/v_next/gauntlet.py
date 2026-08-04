@@ -214,6 +214,8 @@ def family_of(name: str) -> str:
         return "coherence/W4"
     if n.startswith(("C_nt944", "nt")):
         return "near-top"
+    if n.startswith("H_"):
+        return "arm H (konjnd leg)"   # wave-7 cells + their packaged forms
     if n.startswith("EM4_"):
         return "era bridge"
     return "pre-944 era"

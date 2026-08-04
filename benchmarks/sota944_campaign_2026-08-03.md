@@ -2932,3 +2932,116 @@ logs `~/tmp/shippack/`; foreground-only. Artifacts land beside the parents
 (`_dial`/`_packed` names + `.spec.json` chain sidecars with parent/anchor
 shas + exact invocations). Tower-mirror packed bakes + verdicts under the
 campaign mirror, sha spot-check. Results appended below this registration.
+
+### Packaging-pass results (2026-08-04) — packaging is FREE on every rank/steer axis; the dial-unit re-scale is the one honest mover
+
+**Comparability gate: PASS.** The workspace build reproduces the committed
+`C_co3a_s1307.full.json` on **62,432 shared numeric fields, 0 mismatches**
+(the only-fresh fields are exactly the kadis per-pair block the `--regime 944`
+preset restores — the documented wrapper-vs-preset difference). Every delta
+below is same-binary.
+
+**The anchor, as built.** `anchor944_dial.parquet` = 2,035 rows
+(safesyn_full 800 + cid22_train201 401 + kadid 405 + tid 429), target
+[−100.0, 95.6], sha `d74d36ef…`, manifest beside it. One registered-protocol
+correction, recorded: the spline injector for spline-less bakes is
+`add-spline` (the ADDENDUM's step), not `shared-anchor` — shared-anchor's
+semantics are the refit of an EXISTING spline; add-spline's own precondition
+error documents the split. Anchor recipe unchanged from §3d.
+
+**Sizes (the user's 510 KB question, answered in bytes).**
+
+| bake | raw f32 | + spline (`_dial`) | packed (`_packed`, f16+zb0.005) | ratio | zerobias (L0 of 120,832 / L1 of 128) |
+|---|--:|--:|--:|--:|---|
+| `H_co3abpg_s2507` | 510,262 | 390,507 | **165,872** | 3.08× | 59,429 / 84 |
+| `C_em944_s31` | 508,482 | 389,764 | **172,067** | 2.96× | 54,722 / 75 |
+| `C_co3a_s1307` | 509,853 | 390,392 | **180,446** | 2.83× | 47,079 / 45 |
+
+(The 510 KB was a raw-f32 2-layer 944→128→1 experiment artifact + embedded
+repro metadata; f32 MLP weights barely compress. QAT — the trainer-native
+~27 KB path — remains deliberately unused: opt-in by standard, documented
+KonJND trade at 372, and a retrain is out of this pass's scope.)
+
+**G-RANGE — first measurements on the 944 MLP class** (ext_cid22val, frozen
+range_frac 1e-4; identical dial vs packed):
+
+| bake | below-knot | above-knot | verdict |
+|---|--:|--:|---|
+| `H_co3abpg_s2507` | 0 | 4/4292 (0.093%) | **FAIL** |
+| `C_em944_s31` | 0 | 24/4292 (0.559%) | **FAIL** |
+| `C_co3a_s1307` | 0 | 0 | **PASS** (ship-eligible on the row) |
+
+The FAILs are the issue-50 near-top saturation made visible: cid22val's
+top-quality pairs predict above the anchor's top knot (H: raw 12.09 vs knot
+11.976). Runtime upper extrapolation is capped at ≤100 (the 5d4978db
+contract), so the effect is bounded; the registered fix path, if a freeze
+candidate needs the row clean, is the amendment-2 near-top anchor
+densification (sdr25-leg) — deliberately NOT applied post-hoc in this pass.
+
+**The per-axis delta table (raw-f32 → packed; committed baselines,
+same-binary).** Verdicts `<stem>_packed.full.json`; M3a from
+`run_full_eval` 944 (27-pair mean).
+
+| axis | H_s2507 raw→packed | s31 raw→packed | s1307 raw→packed |
+|---|---|---|---|
+| CID22 | 0.8806 → 0.8806 (+0.0000) | 0.8869 → 0.8869 (−0.0000) | 0.8857 → 0.8857 (+0.0000) |
+| KonJND | 0.4590 → 0.4590 (**−0.00003**) | 0.4689 → 0.4686 (−0.0003) | 0.4330 → 0.4330 (+0.00003) |
+| nonphoto | 0.9164 → 0.9163 (−0.0000) | 0.9162 → 0.9162 (+0.0000) | 0.9123 → 0.9123 (+0.0000) |
+| HF-NL per-ref | +0.1820 → +0.1820 (+0.00001) | +0.0373 → +0.0378 (+0.0005) | +0.2327 → +0.2327 (+0.0001) |
+| sdr25 | 0.9404 → 0.9406 (+0.0002) | 0.9521 → 0.9521 (+0.0000) | 0.9184 → 0.9184 (+0.0000) |
+| M3a | 0.8664 → **0.8665** (+0.0001) | 0.7926 → 0.7924 (−0.0002) | 0.7625 → 0.7626 (+0.0002) |
+| csiq / live / aic3 / aic4 / imazen26 | all \|Δ\| ≤ 0.0001 | all \|Δ\| ≤ 0.0004 | all \|Δ\| ≤ 0.0001 |
+| composite | 0.8503 → 0.8503 | 0.8549 → 0.8548 | 0.8489 → 0.8489 |
+| dial p5 / p95 | −4.8/12.3 → **30.3/93.0** | −4.6/11.5 → **30.6/94.4** | −6.0/10.6 → **26.1/92.7** |
+| dial dynamic range | 17.0 → 62.8 | 16.1 → 63.8 | 16.6 → 66.6 |
+| dial mono (0.5-pt material) | 94.0% → 91.2% | 93.4% → 87.7% | 95.7% → 91.9% |
+| dial strict-backwards (cal-invariant) | 0.1708 → 0.1710 | 0.1931 → 0.1931 | 0.1699 → 0.1699 |
+
+**The contingency does NOT fire.** |ΔKonJND| on `H_co3abpg_s2507` is
+0.00003 ≪ the 0.01 trigger, so no `--dtype f32` pack variant is owed. The
+registered open question is answered: **post-hoc f16+zerobias is
+KonJND-free on kon-strong 944 MLPs** (worst case −0.0003, on s31). The
+372-era QAT KonJND cost (0.485→0.418) does not transfer to post-hoc
+packing — QAT retrains under quantization; pack only rounds a trained net.
+M3a is likewise untouched (±0.0002): the attribution-density map survives
+f16+zerobias intact.
+
+**The one honest mover: dial-mono, and it is a UNIT effect, not new
+inversions.** The strict-backwards rate — invariant under any monotone
+recalibration — is bit-identical raw→packed on s31 (0.1931) and s1307
+(0.1699), and +0.0002 on H (f16 flipping two near-tie steps). What moves is
+which backwards steps count as MATERIAL: the gate's 0.5-score-pt threshold
+operates in OUTPUT units, and packaging widens the output scale ~4× (dynamic
+range 16–17 → 63–67). The raw cells' 93–96% mono rows across this whole
+campaign are therefore unit-flattered relative to the dial-bar's semantics;
+the packaged numbers (91.2% / 87.7% / 91.9%) are the honest product-facing
+dial-mono, and **no packaged candidate passes the ≥93% dial bar as-is**
+(s31 is worst at 87.7%). This is the ideal_clean_model finding (strict-bwd
+as the cal-invariant read) reproduced on the 944 class. Dial-step rank
+invariance held everywhere else: rank rows identical to raw at ≥7
+significant digits (sub-1e-6 tie-granularity wiggle on 4 corpora from the
+spline's flat-bottom region mapping nearby raws to equal dial values).
+
+**Artifacts + board.** 6 bakes + 6 `.spec.json` chain sidecars beside the
+parents (shas in the sidecars; anchor sha `d74d36ef…`); verdicts
+`<stem>_packed.{full.json,verdict.md}`; fullevals + measured M3a on the
+board under plain names (`*_packed`), grid-interior (family = parent's;
+`family_of` gained the missing `H_*` branch — the wave-7 cells had been
+falling into "pre-944 era"); board regen 172 bakes, both regen gates PASS;
+`_sota944_board_map.tsv` carries the three new rows (coverage gate PASS).
+Tower mirror synced + sha spot-checked 3/3 (bakes, verdicts, fullevals,
+anchor under the campaign mirror). Logs `~/tmp/shippack/` (transient); every
+number re-derives from the committed binaries + the mirrored artifacts.
+
+**Limitations (complete).**
+- G-RANGE FAIL on the two kon-strong cells is real and NOT resolved by
+  packaging — it is an anchor-domain property (near-top mass), with the
+  amendment-2 densify as the registered lever, untested here by scope.
+- All three packaged cells sit below the ≥93% dial-mono bar in dial units;
+  the raw-unit numbers that passed were not measuring the bar's semantics.
+- The pass packages 3 of the campaign's ~150 cells (the balanced shortlist
+  singles only, by registration).
+- No QAT arm (retrain out of scope); the ~27 KB QAT form remains unmeasured
+  at 944.
+- KonJND is n=504 |SROCC|; deltas of 3e-5 are far inside instrument width —
+  the claim is "no measurable cost", not "identical ranks".
