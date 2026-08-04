@@ -2165,3 +2165,46 @@ relaxed and is reported as a FAIL.
 - **G-R not built**, for the measured structural reason above — not for time.
 - KonJND is n=504 and read as |SROCC|; the bootstrap CIs above are the honest
   width of that instrument.
+
+---
+
+## ADDENDUM — G-RANGE tool gap closed; first gate runs on the 944 MLP class (2026-08-04)
+
+The campaign-long "G-RANGE NOT EVALUABLE (inherited MLP tool gap,
+`bake_dial_refit.rs:182`)" row is resolved: `bake_dial_refit gate` no longer
+carries a linear-only forward. It now routes through the shared
+`zensim_validate::bake_runtime` production dispatch (the same per-sample-α /
+hybrid / min-max / tanh-pin path `bake_verdict` scores with, spline step
+disabled so `raw` is exactly the value the knot-domain test is defined on), so
+the gate is evaluable for every bake class. Commit `b8954423`; 2-layer fixture
+tests (fails-before verified: the pre-fix binary panics verbatim
+`"expects a single-layer linear bake (got 2 layers)"` on `C_co3a_s1301`).
+
+First measurements (corpus `ext_cid22val.parquet` at the 944 root, default
+`range_frac 1e-4` — the frozen §1 instrument):
+
+| bake | pre-fix | post-fix result |
+|---|---|---|
+| `C_co3a_s1301` | panic (tool gap) | **precondition error: `bake has no output_calibration_spline`** |
+| `C_em944_s31` | panic (tool gap) | **precondition error: `bake has no output_calibration_spline`** |
+
+**The honest reading: the tool gap was MASKING a second, structural gap.** The
+`load_linear` panic fired before the spline check, so it was never visible that
+the 944 MLP candidates ship as RAW heads — none of the `C_*` bakes carries an
+output-calibration spline (`model.output_spline: null` in every C-arm
+fulleval), so G-RANGE (fraction of raw preds outside the spline knot domain)
+is structurally undefined for them until they are dial-packaged
+(`bake_dial_refit add-spline`, the scorecard-P1 step that gave the Ebothg
+winner its dial). The freeze-bar's G-RANGE row therefore needs the dial
+packaging step on any 944 MLP freeze candidate before it can ever be judged —
+a packaging decision, recorded here, not taken unilaterally.
+
+That the gate itself is now sound on the MLP class is cross-checked on the
+committed production 2-layer QAT MLP (`zensim/weights/
+v47_strict_qat_native_2026-05-27.bin`, its native 372 corpus): G-RANGE
+**PASS** (0 below / 0 above, knot domain [47.830, 48.156], raw range
+[47.91, 48.16]) with advisory G-SROCC 0.8657 / G-ZRMSE 0.512 — matching the
+documented 2026-05-27 `bake_verdict` numbers for that bake exactly, i.e. the
+shared-path forward reproduces the canonical scoring bit-for-practical-bit.
+Log: `~/tmp/consolidate/grange-firstmeasure.log` (transient); the runs
+re-derive from the committed binaries + canonical corpora in seconds.
