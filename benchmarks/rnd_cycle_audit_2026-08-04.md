@@ -14,8 +14,24 @@ running the builds, not estimated.
 Scope: `2026-08-03T00:00Z → 2026-08-04T10:20Z` (34.3 h). All times UTC; the box
 is `America/Denver` (MDT, UTC−6) and lianli renders mtimes in the same zone.
 
-Reproduce: `~/tmp/cycle/{analyze_tokens.py,attribute.py,waves2.py}` (audit
-scratch; the numbers below are the committed record).
+**Reproduce** — `scripts/cycle_audit.py` is the committed owner of this
+measurement:
+
+```bash
+python3 scripts/cycle_audit.py builds --since 2026-08-03
+python3 scripts/cycle_audit.py idle   --since 2026-08-03 \
+    --remote '2026-08-03T19:11:30Z=C_co2b_s1307 lianli' \
+    --remote '2026-08-03T23:50:36Z=C_co3a_s1409 lianli' \
+    --remote '2026-08-04T02:55:19Z=C_ensk2_s1307 lianli'
+python3 scripts/cycle_audit.py tokens --since 2026-08-03
+```
+
+`builds` and `idle` reproduce §2/§5 exactly (23.0 min; 14.80 h / 8.03 h /
+6.77 h). **`tokens` will read slightly higher than §4** — every figure there is
+a snapshot at `2026-08-04T10:20Z` and the session kept running: at 10:36Z the
+same command reported 3,988 turns / $400.63 waste against the 3,779 turns /
+$395.24 recorded below. The ratios are stable (13.7 % vs 13.9 % of session
+cost; 55.3 % vs 55.7 % of all cache writes), which is the claim that matters.
 
 ---
 
