@@ -1452,3 +1452,159 @@ user's.
   — 12/12 wave-4 bakes present, 3 sha256 spot-checks PASS.
 - Lane logs: `~/tmp/wave4/` (local lane, lianli lane pulled, puller, verdict + M3a
   daemons, repro cell).
+
+---
+
+## REGISTERED AMENDMENT 5 — WAVE 5: the seed-ENSEMBLE lever
+### (committed BEFORE any ensemble score is computed; instrument, arms, members, endpoints and the follow-on are frozen here)
+
+**Frame.** Four registered levers, four measured nulls, **64 independent draws**
+(seed luck n=23 · near-top mass n=8 · coherence n=21 · co3a seed expansion + M3a
+cross n=12). Every one of those draws was a **single** model. Averaging
+decorrelated models is the standard variance-reduction move in exactly this
+setting and **this campaign has never tried it**. The 64 trained 944-regime MLP
+bakes already on disk make it free: **zero training**, scoring only.
+
+This wave adds **no new mechanism story and no new training run** (unless the bar
+is cleared — see the follow-on). It asks one question: *does the average of
+already-measured models rank better than the best of them?*
+
+### 5.1 The instrument — `bake_verdict --ensemble` (owner extension, this commit)
+
+Per CLAUDE.md "one owner per task", the ensemble is **not** a script that averages
+per-pair dumps. `bake_verdict` — the owner of bake evaluation — gains
+`--ensemble a.bin,b.bin,…`, which scores every row as the **equal-weight
+arithmetic mean of the members' raw predictions** and then runs the *entire
+existing pipeline* unchanged: the Mohammadi rank panel, per-reference SROCC, the
+DIAL grid panel, corruption. Reasons this is the owner extension and not a
+sidecar:
+
+- **The per-pair route cannot reach two frozen bar rows.** `--per-pair-output`
+  emits `human<TAB>pred` in parquet row order (`bake_verdict.rs`), which
+  reconstructs the rank panel but carries **no `ref_id`** (⇒ no HF-NL per-ref
+  mean, the §1b registered form) and the **dial grid has no `human` column** at
+  all (⇒ no mono/tied). An ensemble evaluated on fewer axes than a single bake
+  would not be comparable to the 64 draws it is being judged against.
+- **Zero new stat math.** Every number comes from the same `zenstats` calls the
+  single-bake path already makes.
+
+**Averaging order (registered):** members are averaged **after** each member's own
+output spline, i.e. in each member's own score units. Each member's spline is
+monotone, so it cannot alter that member's ranking; the mean is then taken in a
+comparable unit. A single shared recalibration of the ensemble is a *packaging*
+step (`bake_dial_refit`), and SROCC is invariant to it — so it is not owed by
+this evaluation. This is the same QUANTIZE-then-CALIBRATE ordering discipline the
+repo already applies to packing, read in the direction ensembling requires.
+
+**k=1 identity is structural:** `Ensemble::score_rows` short-circuits to the
+original single-model call for one member — no `0.0 + x`, no `x / 1.0` — so a
+one-member ensemble is the *same instructions*, not merely the same value.
+
+**Members must agree on `n_inputs`** or the run fails loud (exit 2). Averaging
+across feature regimes is the column-mixing this repo bans.
+
+### 5.2 THE GATE — run and reported BEFORE any multi-member number is read
+
+`--ensemble C_co3a_s1301.bin` (single member) must reproduce
+`C_co3a_s1301.full.json` — the committed wave-3 verdict, itself already
+bit-reproduced twice under two builds (wave-4 provenance gates) — **bit-identically
+on every headline field** (cid22 0.890669759641727, konjnd 0.405035116686307,
+nonphoto 0.904486343150615, sdr25 0.928163265306122, HF-NL-proxy
+0.250843186672593, dial mono 0.958740961293067, composite 0.845218670897050).
+**If the gate fails, the wave stops and reports the gate failure.** No ensemble
+number is read before it passes.
+
+### 5.3 The member pool (frozen, 64 bakes)
+
+Every 944-regime MLP bake on the campaign path: `C_em944_s*` (23) · `C_co{1a,1b,
+1c,2a,2b,3a,3b,4}_s*` (33) · `C_nt944{,lo}_s*` (8). **Dedup rule, registered:**
+the seven `*_corrjoint` verdicts are re-runs of bakes already in the pool and the
+`C_co3arepro_s1301` retrain was **proven bit-identical** to `C_co3a_s1301` (wave-4
+gate) — both classes are EXCLUDED so no model is double-weighted. Ranking is by
+the **published** CID22 SROCC in each bake's stored verdict JSON; no new scoring
+was done to build these lists.
+
+### 5.4 Arms (frozen membership — the exact lists, not a rule to be re-derived later)
+
+**E1 — top-k by CID22**, k ∈ {2, 3, 5, 8}, taken in published-CID22 order:
+
+| # | bake | published CID22 |
+|---|---|---|
+| 1 | `C_co3a_s1301` | 0.89067 |
+| 2 | `C_co2a_s1307` | 0.88873 |
+| 3 | `C_co3a_s1319` | 0.88851 |
+| 4 | `C_co1b_s1303` | 0.88703 |
+| 5 | `C_em944_s31` | 0.88692 |
+| 6 | `C_co1a_s1303` | 0.88621 |
+| 7 | `C_co3a_s1409` | 0.88572 |
+| 8 | `C_co3a_s1307` | 0.88571 |
+
+E1-k2 = rows 1-2, E1-k3 = 1-3, E1-k5 = 1-5, E1-k8 = 1-8. No CID22 ties occur in
+the top 8, so no tie-break is needed.
+
+**E2 — diverse-5** (k=5, one per config FAMILY, each family's CID22-best):
+`C_co3a_s1301` (co3) · `C_co2a_s1307` (co2) · `C_co1b_s1303` (co1) ·
+`C_em944_s31` (em944) · `C_nt944lo_s211` (nt944, 0.87647).
+**Registered exclusion:** the `co4` family is NOT in E2 — the arm is defined as
+the five families named in the wave brief, and recording the exclusion here stops
+a sixth member being introduced post hoc. E1-k5 and E2 are both k=5 and share
+four members, so **E1-k5 vs E2 is the arm's controlled contrast**: if
+decorrelation is the mechanism, the config-diverse set should beat the
+config-homogeneous one (E1-k5 is 3/5 co3-family). That contrast is the finding
+either way.
+
+**E3 — all-944-MLP above a CID22 floor of 0.87**: **n=51** members (the floor
+excludes 13 of 64). Full list frozen in `benchmarks/wave5_e3_members.txt`,
+committed with this registration.
+
+### 5.5 Endpoints (frozen; inherited from §1 verbatim, nothing relaxed)
+
+| axis | bar | note |
+|---|---|---|
+| CID22 | **> 0.8923796503** | PRIMARY |
+| KonJND | ≥ 0.43 | abs-SROCC |
+| nonphoto | ≥ 0.90 | |
+| HF-NL-proxy | ≥ 0.19310280 | `rank.hfnlproxy.per_ref_mean`, per-ref (§1b) |
+| dial | mono ≥ 93% / tied ≤ 5% | computed ON THE ENSEMBLE. **A monotonicity break is a disqualifying finding and is reported as one** — averaging models with different dial shapes is exactly the operation that could produce it |
+| sdr25 | **reported only, NEVER a selection rule** | the oracle/CID22 decoupling reproduced FIVE times in this campaign, including within a fixed config (wave 4). Wave 5 does not select on it |
+| **M3a** | **NOT COMPUTABLE** | stated, not skipped — see 5.6 |
+
+### 5.6 The M3a limitation, stated up front
+
+`diffmap_block_coherence` (the M3a owner) consumes **one ZNPR bake** and runs the
+attribution-density extractor through it. A raw ensemble is a *function*, not a
+ZNPR artifact — there is no bake to hand it. **M3a is therefore NOT COMPUTABLE
+for any arm in this wave**, and no substitute, proxy, or member-average of M3a is
+reported in its place. The only route to an M3a number is to distil the ensemble
+into a single bake (5.7) and measure *that*. This is registered as a limitation of
+the lever, not an omission of the measurement.
+
+The same distinction governs the whole wave: **an ensemble that clears the bar is
+a SOTA-candidate *function*, not a shippable artifact.** Nothing here can be
+promoted, swapped, or shipped as-is.
+
+### 5.7 Follow-on (fires only on a bar-clearing arm)
+
+If any arm clears **CID22 > 0.89238 AND KonJND ≥ 0.43 AND nonphoto ≥ 0.90 AND
+HF-NL-proxy ≥ 0.1931 AND dial ≥93%/≤5%**, the distillation follow-on runs
+immediately, using the machinery amendment 3 already built (co3a/co3b distilled
+from EM4; only the teacher changes):
+
+- Teacher = the winning **ensemble's** raw scores over the same three teacher
+  twins (`tsafesyn` / `ttbig` / `tkadis`), emitted with `bake_dial_refit predict`
+  in ensemble mode, min-max'd exactly as the EM4 teacher was.
+- Student = the **co3a recipe verbatim** (the config the teacher machinery was
+  registered against), k=3 seeds `{1301, 1303, 1307}`, tag `C_ens<arm>_s<seed>`.
+- Reported: does the student retain the ensemble's gain? Full battery on the best
+  student (M3a becomes computable there, and only there).
+
+If no arm clears the bar, the follow-on does **not** run and the wave is an honest
+null with the ensemble table published in full.
+
+### 5.8 Ops (frozen)
+
+Workspace `zensim--wave5` on `main@origin`; `CARGO_TARGET_DIR=$HOME/tmp/zensimw5-target`;
+logs `~/tmp/wave5/`. Scoring is seconds per bake per corpus ⇒ **foreground only**,
+local wsl lane, no fleet. Verdicts via `scripts/sota944_verdict.sh` (the one frozen
+§0 invocation) with `--ensemble` passed through. Nothing is shipped, swapped, or
+promoted; the freeze decision remains the user's.

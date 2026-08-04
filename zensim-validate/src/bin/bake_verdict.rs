@@ -501,6 +501,14 @@ fn parse_corpora_arg(arg: &str) -> Result<Vec<&'static Corpus>, String> {
 
 struct Args {
     bake: PathBuf,
+    /// `--ensemble a.bin,b.bin,...`: score an equal-weight ENSEMBLE of bakes as
+    /// one model (mean of the members' raw predictions per row) through every
+    /// panel this binary reports — rank, per-reference, dial, corruption. Empty
+    /// = plain single-bake mode. When given, `--bake` defaults to member 0 (the
+    /// provenance anchor); an explicit `--bake` must be one of the members.
+    ///
+    /// See [`Ensemble`] for the averaging contract and the k=1 identity.
+    ensemble: Vec<PathBuf>,
     corpora: Vec<&'static Corpus>,
     output: Option<PathBuf>,
     features_root: PathBuf,
@@ -588,6 +596,7 @@ DEFAULTS:\n\
 
 fn parse_args() -> Result<Args, String> {
     let mut bake: Option<PathBuf> = None;
+    let mut ensemble: Vec<PathBuf> = Vec::new();
     let mut corpora: Option<Vec<&'static Corpus>> = None;
     let mut output: Option<PathBuf> = None;
     let mut per_pair_output: Option<PathBuf> = None;
@@ -698,6 +707,20 @@ fn parse_args() -> Result<Args, String> {
                 let v = args.next().ok_or("--corruption-head requires <bake.bin>")?;
                 corruption_head = Some(PathBuf::from(v));
             }
+            "--ensemble" => {
+                let v = args
+                    .next()
+                    .ok_or("--ensemble requires a comma-separated list")?;
+                ensemble = v
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from)
+                    .collect();
+                if ensemble.is_empty() {
+                    return Err("--ensemble list is empty".to_string());
+                }
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -707,7 +730,27 @@ fn parse_args() -> Result<Args, String> {
             }
         }
     }
-    let bake = bake.ok_or("--bake is required (path to ZNPR v3 bake)")?;
+    // `--ensemble` supplies its own provenance anchor when `--bake` is absent.
+    // An explicit `--bake` alongside `--ensemble` must name a member, so the
+    // report's provenance header can never describe a bake that is not in the
+    // scored function.
+    if let Some(b) = &bake
+        && !ensemble.is_empty()
+        && !ensemble.contains(b)
+    {
+        return Err(format!(
+            "--bake {} is not one of the --ensemble members; omit --bake to use member 0 \
+             as the provenance anchor",
+            b.display()
+        ));
+    }
+    let bake = match bake {
+        Some(b) => b,
+        None => ensemble
+            .first()
+            .cloned()
+            .ok_or("--bake is required (path to ZNPR v3 bake)")?,
+    };
     // --regime 720: swap unset defaults to the 720-wide variants.
     if regime_720 {
         if !features_root_set {
@@ -734,6 +777,7 @@ fn parse_args() -> Result<Args, String> {
     }
     Ok(Args {
         bake,
+        ensemble,
         corpora,
         output,
         features_root,
@@ -757,7 +801,12 @@ fn parse_args() -> Result<Args, String> {
 /// `render_corpus` / `dial_panel` use. Reused by the severity-ramp and
 /// per-zone sections so their numbers match the rest of the report
 /// exactly.
-fn score_grid(model: &Model, has_transforms: bool, n_inputs: usize, rows: &[Vec<f64>]) -> Vec<f64> {
+fn score_grid_one(
+    model: &Model,
+    has_transforms: bool,
+    n_inputs: usize,
+    rows: &[Vec<f64>],
+) -> Vec<f64> {
     let per_sample_alpha_head = extract_per_sample_alpha_head(model);
     let hybrid_head = extract_hybrid_head(model);
     let tanh_pin_scale = extract_tanh_output_head_scale(model);
@@ -781,6 +830,67 @@ fn score_grid(model: &Model, has_transforms: bool, n_inputs: usize, rows: &[Vec<
             ),
         })
         .collect()
+}
+
+/// An equal-weight ensemble of ZNPR bakes scored as ONE model: every row's
+/// prediction is the arithmetic mean of the members' RAW predictions.
+///
+/// Why it lives here rather than in a script (CLAUDE.md "one owner per task"):
+/// every endpoint this binary reports — the Mohammadi panel, per-reference
+/// SROCC, the dial mono/tied panel, corruption — must come from the SAME code
+/// path for an ensemble as for a single bake, or the two are not comparable.
+/// Averaging per-pair dumps outside the binary can reproduce the rank panel but
+/// **cannot** reach the dial grid (no `human` column) or the per-reference
+/// grouping (no `ref_id` in the dump), which are frozen bar rows.
+///
+/// **Raw-then-recalibrate order.** Members are averaged AFTER each member's own
+/// output spline is applied (`score_grid_one` is the full shipped forward), i.e.
+/// in each member's score units. That is the sound order for a *rank* endpoint:
+/// each member's spline is monotone, so it cannot change that member's own
+/// ranking, and the mean is taken in a common, comparable unit. A single shared
+/// recalibration of the ensemble is the packaging step (`bake_dial_refit`),
+/// not something this evaluation needs — SROCC is invariant to it.
+///
+/// **Single-member identity is structural**: `score_rows` short-circuits to
+/// exactly `score_grid_one` for k=1, so a 1-member ensemble reproduces a plain
+/// `--bake` run bit-for-bit (no `0.0 + x`, no `x / 1.0` rounding surface).
+struct Ensemble {
+    models: Vec<Model>,
+    /// Per-member `has_nontrivial_feature_transforms()` — members are allowed
+    /// to differ here; the dispatch is per-member, never the primary's.
+    has_transforms: Vec<bool>,
+    n_inputs: usize,
+}
+
+impl Ensemble {
+    /// Member 0 — the provenance anchor + the bake whose architecture the
+    /// report's metadata blocks describe.
+    fn primary(&self) -> &Model {
+        &self.models[0]
+    }
+
+    fn len(&self) -> usize {
+        self.models.len()
+    }
+
+    /// Mean of the members' raw predictions, row by row.
+    fn score_rows(&self, rows: &[Vec<f64>]) -> Vec<f64> {
+        if self.models.len() == 1 {
+            // Bit-identical to the single-bake path by construction.
+            return score_grid_one(&self.models[0], self.has_transforms[0], self.n_inputs, rows);
+        }
+        let mut acc = vec![0.0f64; rows.len()];
+        for (m, &tf) in self.models.iter().zip(self.has_transforms.iter()) {
+            for (a, v) in acc
+                .iter_mut()
+                .zip(score_grid_one(m, tf, self.n_inputs, rows))
+            {
+                *a += v;
+            }
+        }
+        let k = self.models.len() as f64;
+        acc.iter().map(|a| a / k).collect()
+    }
 }
 
 // ============================================================================
@@ -1035,12 +1145,7 @@ impl DialMetrics {
     };
 }
 
-fn dial_panel(
-    model: &Model,
-    has_transforms: bool,
-    n_inputs: usize,
-    grid_path: &Path,
-) -> (String, DialMetrics) {
+fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
     if !grid_path.exists() {
         return (
             format!(
@@ -1066,31 +1171,7 @@ fn dial_panel(
     };
 
     // Score every grid row through the SAME dispatch path render_corpus uses.
-    let per_sample_alpha_head = extract_per_sample_alpha_head(model);
-    let hybrid_head = extract_hybrid_head(model);
-    let tanh_pin_scale = extract_tanh_output_head_scale(model);
-    let output_spline = zensim_validate::output_calibration_spline::extract(model);
-    let minmax_head = extract_minmax_head(model);
-    let mut predictor = Predictor::new(model);
-    let mut scratch = vec![0.0f32; n_inputs];
-    let scores: Vec<f64> = grid
-        .feature_rows
-        .iter()
-        .map(|row| match minmax_head.as_ref() {
-            // Min-max bakes REPLACE the layer forward — bypass the Predictor.
-            Some(mm) => score_row_minmax(model, mm, tanh_pin_scale, output_spline.as_ref(), row),
-            None => score_row(
-                &mut predictor,
-                has_transforms,
-                per_sample_alpha_head.as_ref(),
-                hybrid_head.as_ref(),
-                tanh_pin_scale,
-                output_spline.as_ref(),
-                &mut scratch,
-                row,
-            ),
-        })
-        .collect();
+    let scores: Vec<f64> = ens.score_rows(&grid.feature_rows);
 
     // Optional per-cell prediction dump for external joins against
     // reference-metric sidecars (zone-consistency / HQ-zone instruments).
@@ -1513,9 +1594,7 @@ fn render_corpus(
     corpus: &Corpus,
     features_root: &Path,
     regime_720: bool,
-    has_transforms: bool,
-    n_inputs: usize,
-    model: &Model,
+    ens: &Ensemble,
     per_pair_output: Option<&Path>,
 ) -> Result<CorpusResult, String> {
     let fname = if regime_720 {
@@ -1528,35 +1607,12 @@ fn render_corpus(
     let g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
         .map_err(|e| format!("load {} parquet: {e}", corpus.display))?;
     let humans = g.human_scores;
-    let per_sample_alpha_head = extract_per_sample_alpha_head(model);
-    let hybrid_head = extract_hybrid_head(model);
-    let tanh_pin_scale = extract_tanh_output_head_scale(model);
-    let output_spline = zensim_validate::output_calibration_spline::extract(model);
-    let minmax_head = extract_minmax_head(model);
-    let mut predictor = Predictor::new(model);
 
-    // Score every row. f32 scratch buffer reused across all rows
-    // to avoid the per-row allocation that would otherwise dominate
-    // wall time on the bigger corpora (KADID has 10k rows × 372 f32s).
-    let mut scratch = vec![0.0f32; n_inputs];
-    let scores: Vec<f64> = g
-        .feature_rows
-        .iter()
-        .map(|row| match minmax_head.as_ref() {
-            // Min-max bakes REPLACE the layer forward — bypass the Predictor.
-            Some(mm) => score_row_minmax(model, mm, tanh_pin_scale, output_spline.as_ref(), row),
-            None => score_row(
-                &mut predictor,
-                has_transforms,
-                per_sample_alpha_head.as_ref(),
-                hybrid_head.as_ref(),
-                tanh_pin_scale,
-                output_spline.as_ref(),
-                &mut scratch,
-                row,
-            ),
-        })
-        .collect();
+    // Score every row through the ensemble (k=1 ⇒ the single-bake path,
+    // bit-identically). The f32 scratch buffer is reused across rows inside
+    // `score_grid_one` to avoid the per-row allocation that would otherwise
+    // dominate wall time on the bigger corpora (KADID has 10k rows × 372 f32s).
+    let scores: Vec<f64> = ens.score_rows(&g.feature_rows);
 
     let n = scores.len();
 
@@ -1916,33 +1972,83 @@ fn main() -> ExitCode {
             .join(",")
     );
 
-    let bake_bytes = match std::fs::read(&args.bake) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!(
-                "bake_verdict: failed to read bake {}: {e}",
-                args.bake.display()
-            );
-            return ExitCode::from(1);
-        }
+    // Member list: `--ensemble` when given, else the single `--bake`. k=1 runs
+    // the byte-for-byte original path (see [`Ensemble::score_rows`]).
+    let members: Vec<PathBuf> = if args.ensemble.is_empty() {
+        vec![args.bake.clone()]
+    } else {
+        args.ensemble.clone()
     };
-    let model = match Model::from_bytes(&bake_bytes) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("bake_verdict: failed to parse ZNPR bake: {e:?}");
-            return ExitCode::from(1);
+    let mut models: Vec<Model> = Vec::with_capacity(members.len());
+    for p in &members {
+        let bytes = match std::fs::read(p) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("bake_verdict: failed to read bake {}: {e}", p.display());
+                return ExitCode::from(1);
+            }
+        };
+        match Model::from_bytes(&bytes) {
+            Ok(m) => models.push(m),
+            Err(e) => {
+                eprintln!(
+                    "bake_verdict: failed to parse ZNPR bake {}: {e:?}",
+                    p.display()
+                );
+                return ExitCode::from(1);
+            }
         }
+    }
+    // Members must agree on input width — averaging predictions from models
+    // that read different feature regimes is the column-mixing failure mode
+    // this repo bans outright, so it fails loud rather than truncating.
+    let n_inputs = models[0].n_inputs();
+    if let Some((p, m)) = members
+        .iter()
+        .zip(models.iter())
+        .find(|(_, m)| m.n_inputs() != n_inputs)
+    {
+        eprintln!(
+            "bake_verdict: ensemble member {} has n_inputs={} but member 0 has {} — \
+             refusing to average across feature regimes",
+            p.display(),
+            m.n_inputs(),
+            n_inputs
+        );
+        return ExitCode::from(2);
+    }
+    let ens = Ensemble {
+        has_transforms: models
+            .iter()
+            .map(|m| m.has_nontrivial_feature_transforms())
+            .collect(),
+        n_inputs,
+        models,
     };
-    let n_inputs = model.n_inputs();
-    let has_transforms = model.has_nontrivial_feature_transforms();
-    let has_per_sample_alpha = extract_per_sample_alpha_head(&model).is_some();
-    let has_hybrid_head = extract_hybrid_head(&model).is_some();
+    let model = ens.primary();
+    let has_transforms = ens.has_transforms[0];
+    let has_per_sample_alpha = extract_per_sample_alpha_head(model).is_some();
+    let has_hybrid_head = extract_hybrid_head(model).is_some();
     eprintln!(
         "bake: n_inputs={n_inputs}  feature_transforms={}  per_sample_alpha_head={}  hybrid_head={}",
         if has_transforms { "yes" } else { "no" },
         if has_per_sample_alpha { "yes" } else { "no" },
         if has_hybrid_head { "yes" } else { "no" }
     );
+    if ens.len() > 1 {
+        eprintln!(
+            "ENSEMBLE: {} members, equal weight, mean of raw predictions:\n  {}",
+            ens.len(),
+            members
+                .iter()
+                .map(|p| p
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| p.display().to_string()))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+    }
 
     // PRE-PASS: resolve, existence-check, and HASH every corpus before any
     // scoring. Two reasons it runs first rather than inside the scoring loop:
@@ -2042,9 +2148,7 @@ fn main() -> ExitCode {
             corpus,
             &args.features_root,
             args.regime_720,
-            has_transforms,
-            n_inputs,
-            &model,
+            &ens,
             args.per_pair_output.as_deref(),
         ) {
             Ok(r) => results.push(r),
@@ -2286,7 +2390,7 @@ Run the dedicated q-sweep harness for those._\n",
     // ── DIAL panel (codec-target G1/G3) — runs every time, native Rust ──
     // The second mandatory half of the eval (docs/EVAL_PANEL_REQUIREMENT.md):
     // monotonicity + tied + dial range on the densified multi-codec grid.
-    let (dial_md, dial_metrics) = dial_panel(&model, has_transforms, n_inputs, &args.dial_grid);
+    let (dial_md, dial_metrics) = dial_panel(&ens, &args.dial_grid);
     buf.push_str(&dial_md);
 
     let basename = |p: &Path| -> String {
@@ -2299,7 +2403,7 @@ Run the dedicated q-sweep harness for those._\n",
     if let Some(ramp_path) = &args.ramp_grid {
         match parquet_loader::load_ramp_grid(ramp_path) {
             Ok(grid) if grid.n_features == n_inputs => {
-                let dial = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
+                let dial = ens.score_rows(&grid.feature_rows);
                 let images: Vec<String> =
                     grid.image.iter().map(|p| basename(Path::new(p))).collect();
                 let stats = eval_report::severity_ramp(&images, &grid.q, &dial, 0.5);
@@ -2338,10 +2442,10 @@ Run the dedicated q-sweep harness for those._\n",
             Ok(ref_model) if args.dial_grid.exists() => {
                 match parquet_loader::load_dial_grid(&args.dial_grid) {
                     Ok(grid) => {
-                        let cand = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
+                        let cand = ens.score_rows(&grid.feature_rows);
                         let ref_tf = ref_model.has_nontrivial_feature_transforms();
                         let ref_n = ref_model.n_inputs();
-                        let refs = score_grid(&ref_model, ref_tf, ref_n, &grid.feature_rows);
+                        let refs = score_grid_one(&ref_model, ref_tf, ref_n, &grid.feature_rows);
                         let zone = eval_report::zone_buckets(&cand, &refs, 5.0);
                         buf.push_str(&eval_report::zone_bucket_section(
                             &zone,
@@ -2376,7 +2480,7 @@ Run the dedicated q-sweep harness for those._\n",
         match parquet_loader::load_labeled_grid(&args.corruption_grid) {
             Ok(grid) => {
                 if grid.n_features == n_inputs {
-                    let dial = score_grid(&model, has_transforms, n_inputs, &grid.feature_rows);
+                    let dial = ens.score_rows(&grid.feature_rows);
                     let stats = eval_report::corruption_gate(&grid.label, &dial);
                     buf.push_str(&eval_report::corruption_gate_section(
                         &stats,
@@ -2406,7 +2510,7 @@ Run the dedicated q-sweep harness for those._\n",
                         Ok(head) if head.n_inputs() == grid.n_features => {
                             let head_tf = head.has_nontrivial_feature_transforms();
                             let head_n = head.n_inputs();
-                            let scores = score_grid(&head, head_tf, head_n, &grid.feature_rows);
+                            let scores = score_grid_one(&head, head_tf, head_n, &grid.feature_rows);
                             let stats = eval_report::corruption_gate(&grid.label, &scores);
                             buf.push_str(&eval_report::corruption_gate_section(
                                 &stats,
@@ -2772,7 +2876,7 @@ Run the dedicated q-sweep harness for those._\n",
                         .iter()
                         .map(|&i| sample.feature_rows[i][..n_inputs].to_vec())
                         .collect();
-                    let pred = score_grid(&model, has_transforms, n_inputs, &rows);
+                    let pred = ens.score_rows(&rows);
                     let mut obj = Map::new();
                     obj.insert("pred".into(), json!(pred));
                     for (col, key) in PERPAIR_METRIC_COLS {
