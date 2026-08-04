@@ -11,7 +11,7 @@ Layout:
   train/konjnd-dense.parquet      - 20,160 rows x 372 features, mix targets + pjnd_target
   train/cvvdp_iwssim_LARGE.parquet - 73,300 rows x 300 features, cvvdp + iwssim + mix_cv40_iw60
   val/cid22.parquet               - 4,292 rows x 372 features, human MCOS
-  val/kadid.parquet               - 10,125 rows x 372 features, KADID DMOS
+  val/kadid.parquet               - 10,125 rows x 372 features, KADID MOS-like (higher = better)
   val/tid.parquet                 - 3,000 rows x 372 features, TID MOS
   val/konjnd.parquet              - 1,008 rows x 372 features, KonJND PJND anchor
   val/aic3.parquet                - 600 rows x 372 features, AIC-3 CTC JND
@@ -22,7 +22,7 @@ Layout:
 
 CANONICAL SCHEMA (training parquets):
   ref_basename:str       - source image identifier
-  human_score:f64        - per-corpus native anchor (kadid DMOS / tid MOS / mix synthetic target)
+  human_score:f64        - per-corpus native anchor, ALWAYS quality-oriented (kadid (dmos-1)/4 / tid mos/9 / mix synthetic target)
   cvvdp_score:f64        - CVVDP raw score (null if not available)
   cvvdp_log_norm:f64     - CVVDP log-normalized
   iwssim:f64             - IW-SSIM raw
@@ -285,7 +285,11 @@ def build_validations():
     build_val_corpus("cid22", feats / "cid22_features_372col_2026-05-15.parquet",
                      "human_score = MCOS / 100 (CID22 paper). Gold-standard cross-band evaluation corpus.")
     build_val_corpus("kadid", feats / "kadid_features_372col_2026-05-15.parquet",
-                     "human_score = DMOS (1-5, lower=better). Same images as train/kadid.parquet — kept here for integrity audit.")
+                     "human_score = (dmos-1)/4, QUALITY-oriented (higher = better). KADID's column "
+                     "is NAMED dmos but behaves as a MOS: mean dmos falls 4.079 -> 2.007 across "
+                     "distortion levels 1..5 (n=2025/level, /mnt/v/dataset/kadid10k/dmos.csv), "
+                     "measured 2026-08-04. A correct quality model is POSITIVE-signed on KADID. "
+                     "Same images as train/kadid.parquet — kept here for integrity audit.")
     build_val_corpus("tid", feats / "tid_features_372col_2026-05-15.parquet",
                      "human_score = MOS (0-9, higher=better). Same images as train/tid.parquet — kept for integrity audit.")
     build_val_corpus("konjnd", feats / "konjnd_features_372col_2026-05-15.parquet",
