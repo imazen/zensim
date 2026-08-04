@@ -1,0 +1,25 @@
+# SOTA-944 wave 8 (amendment 9 §9.1) — the ONE shared refit-winsor screen.
+# registration commit: 4668f712   host: lilith   utc: 2026-08-04T13:01:06Z
+# command:
+#   bake_dial_refit refit-winsor \
+#     --parquet ext944/ext_safesyn_full.parquet --parquet ext944/ext_cid22_train201.parquet \
+#     --parquet ext944/ext_kadid.parquet --parquet ext944/ext_tid.parquet \
+#     --parquet tbig_944_200k.parquet --parquet kadis-944-2026-08-01/kadis_944_ssim2_50k.parquet \
+#     --parquet ext944/konjnd_bpg_train_944.parquet \
+#     --base-tokens benchmarks/wave8/base_screen_tokens.txt \
+#     --out-tokens benchmarks/wave8/refit_screen_tokens.txt \
+#     --out-tsv benchmarks/wave8/refit_winsor_audit_2026-08-04.tsv
+# fit rule: percentile_linear at [0.1, 99.9] + add-winsor's [0,0] -> [0,1e-9] guard
+#           (shared fn winsor_window — add-winsor now calls it too, so the two cannot diverge)
+# pooled rows: 408033 — matches the registered §9.1 table EXACTLY; width 944; 54 winsor indices
+# RESULT: 54/54 windows changed; degenerate windows 24 -> 0 (22 recovered to real windows;
+#         f765 + f766 land on the guard [0,1e-9] = the never-populated slot class).
+# input sha256 (from the run log; all 11 arm-H inputs sha-MATCH the incumbent bake's
+# embedded zentrain.repro, 11/11, verified before registration):
+#   ext_safesyn_full      cab92322156e72a9c78c5db00c2dacb565ab850922c90323abfb63ce056277bb
+#   ext_cid22_train201    5abe28a099ac5f086d6db33fce3f3740d96a7d013634b169c49ae39abc6a0c8b
+#   ext_kadid             4dde6be26d3c50dca21fdee834f95bd692afa2c65b2d4f6f8a886d105553ca08
+#   ext_tid               7efce8f2a8d459d111f2bfe7699c91abc94fdb377ec7dff9e9a3df0a1ce62c50
+#   tbig_944_200k         190cb9161e392984b751c7b1bd99a62ddbbad4f42d17c8b16d14a6748cb250aa
+#   kadis_944_ssim2_50k   0ac7c889bdf1a7289afce3d90719b0c2ed58d0418b052cedf2a3740e5dc31012
+#   konjnd_bpg_train_944  c87d8f268d0f9a89f6e6d0dec40b949d944c11070dd43fe04e4a6afd2487df9e

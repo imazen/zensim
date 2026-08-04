@@ -165,6 +165,15 @@ enum Cmd {
     /// (`feat_idx`/`best_transform`/`params_csv`) consumed by
     /// `gram --transforms-tsv` + `fit-lasso --transforms-tsv`.
     ScreenTransforms(ScreenTransformsArgs),
+    /// REFIT the winsor windows of an EXISTING `--feature-transform` token
+    /// list on current data, holding the token→feature ASSIGNMENT fixed
+    /// (SOTA-944 wave 8, amendment 9 §9.1). Reuses this binary's
+    /// `add-winsor` fit rule verbatim — `percentile_linear` at
+    /// `[--lo-pct, --hi-pct]` (owner defaults 0.1 / 99.9) plus the same
+    /// `lo == hi == 0 → hi = 1e-9` degenerate guard — over the POOLED rows
+    /// of every `--parquet`. Emits the refit token list in the input's
+    /// order (so a training argv diffs token-for-token) plus an audit TSV.
+    RefitWinsor(RefitWinsorArgs),
     /// Build a per-corpus raw-moment feature Gram (`S = Σxxᵀ`, `s = Σx`,
     /// `q_t = Σx·y_t`, `Y1_t = Σy_t`, `n`) from a feature parquet, streamed
     /// through `parquet_loader::stream_parquet_rows` (memory-capped, f64,
@@ -998,11 +1007,11 @@ fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
     for j in 0..n {
         let mut col: Vec<f64> = feats.iter().map(|r| r[j]).collect();
         col.sort_by(f64::total_cmp);
-        lo[j] = percentile_linear(&col, a.lo_pct);
-        hi[j] = percentile_linear(&col, a.hi_pct);
-        if lo[j] == 0.0 && hi[j] == 0.0 {
-            hi[j] = 1e-9;
-        }
+        // Shared with `refit-winsor` so the two windows rules cannot diverge
+        // (arithmetic byte-identical to the inlined form it replaced).
+        let (l, h) = winsor_window(&col, a.lo_pct, a.hi_pct);
+        lo[j] = l;
+        hi[j] = h;
     }
 
     let transforms_txt = match &compose_toks {
@@ -3365,6 +3374,206 @@ fn sha256_hex(bytes: &[u8]) -> String {
     s
 }
 
+// --------------------------------------------------------------------------
+// subcommand: refit-winsor  (SOTA-944 wave 8, amendment 9 §9.1)
+// --------------------------------------------------------------------------
+
+#[derive(Args)]
+struct RefitWinsorArgs {
+    /// Fit parquet(s). Rows are POOLED with equal per-row weight.
+    #[arg(long, required = true)]
+    parquet: Vec<PathBuf>,
+    /// The inherited token list: one `--feature-transform` VALUE per line,
+    /// i.e. `<token>:<idx>[:<params_csv>]`, in the order the trainer
+    /// receives them. Blank lines and `#` comments are ignored.
+    #[arg(long)]
+    base_tokens: PathBuf,
+    #[arg(long, default_value_t = 0.1)]
+    lo_pct: f64,
+    #[arg(long, default_value_t = 99.9)]
+    hi_pct: f64,
+    /// Refit token list — same order, non-winsor lines byte-verbatim.
+    #[arg(long)]
+    out_tokens: PathBuf,
+    /// Audit TSV (idx / token / old_lo / old_hi / new_lo / new_hi / n /
+    /// degenerate_old / degenerate_new / changed).
+    #[arg(long)]
+    out_tsv: PathBuf,
+    /// Target column name — needed only to drive the streaming loader.
+    #[arg(long, default_value = "human_score")]
+    target: String,
+}
+
+/// `add-winsor`'s window rule, factored out so both callers share it:
+/// linear-interpolated percentiles plus the degenerate `[0,0] → [0,1e-9]`
+/// guard. `sorted` must be ascending.
+fn winsor_window(sorted: &[f64], lo_pct: f64, hi_pct: f64) -> (f64, f64) {
+    let lo = percentile_linear(sorted, lo_pct);
+    let mut hi = percentile_linear(sorted, hi_pct);
+    if lo == 0.0 && hi == 0.0 {
+        hi = 1e-9;
+    }
+    (lo, hi)
+}
+
+/// Split a `--feature-transform` value into `(token, idx, params_csv)`.
+/// `signed_cbrt:61:` → `("signed_cbrt", 61, "")`.
+fn parse_ft_token(line: &str) -> Result<(String, usize, String), String> {
+    let mut it = line.splitn(3, ':');
+    let tok = it.next().unwrap_or_default().to_string();
+    let idx_s = it.next().ok_or_else(|| format!("token {line:?}: missing :<idx>"))?;
+    let idx: usize = idx_s
+        .trim()
+        .parse()
+        .map_err(|e| format!("token {line:?}: bad idx {idx_s:?}: {e}"))?;
+    Ok((tok, idx, it.next().unwrap_or("").to_string()))
+}
+
+fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
+    use zensim_validate::parquet_loader::stream_parquet_rows;
+
+    let txt = std::fs::read_to_string(&a.base_tokens)
+        .map_err(|e| format!("read {:?}: {e}", a.base_tokens))?;
+    // (original line, token, idx, old params) in file order.
+    let mut entries: Vec<(String, String, usize, String)> = Vec::new();
+    for raw in txt.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (tok, idx, params) = parse_ft_token(line)?;
+        entries.push((line.to_string(), tok, idx, params));
+    }
+    if entries.is_empty() {
+        return Err(format!("{:?} contains no transform tokens", a.base_tokens));
+    }
+
+    // The winsor indices, in first-appearance order; duplicates are an error
+    // (the trainer would silently keep the last).
+    let mut winsor_idx: Vec<usize> = Vec::new();
+    for (line, tok, idx, _) in &entries {
+        if tok == "winsor_p99" {
+            if winsor_idx.contains(idx) {
+                return Err(format!("duplicate winsor index {idx} ({line:?})"));
+            }
+            winsor_idx.push(*idx);
+        }
+    }
+    if winsor_idx.is_empty() {
+        return Err("no winsor_p99 tokens to refit".into());
+    }
+    let slot_of: std::collections::HashMap<usize, usize> = winsor_idx
+        .iter()
+        .enumerate()
+        .map(|(s, &i)| (i, s))
+        .collect();
+
+    // Pool the requested columns only — full-width rows are streamed and
+    // dropped, so peak memory is one batch plus |winsor_idx| columns.
+    let mut vals: Vec<Vec<f64>> = vec![Vec::new(); winsor_idx.len()];
+    let mut n_feat_seen = 0usize;
+    let mut n_rows_total = 0usize;
+    for path in &a.parquet {
+        let sha = zensim_validate::train_manifest::sha256_file(path)
+            .map_err(|e| format!("sha256 {path:?}: {e:?}"))?;
+        let mut n_rows_here = 0usize;
+        stream_parquet_rows(path, &[a.target.as_str()], 1.0, &mut |features,
+                                                                   n_rows,
+                                                                   _targets| {
+            let n_feat = features.len() / n_rows;
+            if n_feat_seen == 0 {
+                n_feat_seen = n_feat;
+                if let Some(&bad) = winsor_idx.iter().find(|&&i| i >= n_feat) {
+                    return Err(format!(
+                        "winsor index {bad} >= feature width {n_feat} in {path:?}"
+                    ));
+                }
+            } else if n_feat != n_feat_seen {
+                return Err(format!(
+                    "feature width {n_feat} in {path:?} != {n_feat_seen} from earlier input"
+                ));
+            }
+            for r in 0..n_rows {
+                let row = &features[r * n_feat..(r + 1) * n_feat];
+                for (slot, &j) in winsor_idx.iter().enumerate() {
+                    vals[slot].push(row[j]);
+                }
+            }
+            n_rows_here += n_rows;
+            Ok(())
+        })?;
+        eprintln!("refit-winsor: {path:?} rows {n_rows_here}\n  sha256 {sha}");
+        n_rows_total += n_rows_here;
+    }
+    eprintln!("refit-winsor: pooled {n_rows_total} rows, width {n_feat_seen}, {} winsor indices", winsor_idx.len());
+
+    // Windows.
+    let mut new_win: Vec<(f64, f64)> = Vec::with_capacity(winsor_idx.len());
+    for col in vals.iter_mut() {
+        col.sort_by(f64::total_cmp);
+        new_win.push(winsor_window(col, a.lo_pct, a.hi_pct));
+    }
+
+    // Emit tokens (input order) + audit TSV.
+    let mut out_tok = String::new();
+    let mut tsv = format!(
+        "# refit-winsor  lo_pct={} hi_pct={}  pooled_rows={n_rows_total}  width={n_feat_seen}\n\
+         # inputs: {}\n\
+         idx\ttoken\told_lo\told_hi\tnew_lo\tnew_hi\tn\tdegenerate_old\tdegenerate_new\tchanged\n",
+        a.lo_pct,
+        a.hi_pct,
+        a.parquet
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    let (mut n_changed, mut n_deg_old, mut n_deg_new) = (0usize, 0usize, 0usize);
+    for (line, tok, idx, params) in &entries {
+        if tok != "winsor_p99" {
+            out_tok.push_str(line);
+            out_tok.push('\n');
+            continue;
+        }
+        let slot = slot_of[idx];
+        let (lo, hi) = new_win[slot];
+        let old: Vec<f64> = params
+            .split(',')
+            .filter_map(|s| s.trim().parse::<f64>().ok())
+            .collect();
+        let (olo, ohi) = if old.len() == 2 {
+            (old[0], old[1])
+        } else {
+            (f64::NAN, f64::NAN)
+        };
+        let deg_old = olo == ohi;
+        let deg_new = lo == hi;
+        let changed = !(olo == lo && ohi == hi);
+        n_deg_old += usize::from(deg_old);
+        n_deg_new += usize::from(deg_new);
+        n_changed += usize::from(changed);
+        out_tok.push_str(&format!("winsor_p99:{idx}:{lo:e},{hi:e}\n"));
+        tsv.push_str(&format!(
+            "{idx}\t{tok}\t{olo:e}\t{ohi:e}\t{lo:e}\t{hi:e}\t{}\t{}\t{}\t{}\n",
+            vals[slot].len(),
+            u8::from(deg_old),
+            u8::from(deg_new),
+            u8::from(changed),
+        ));
+    }
+    std::fs::write(&a.out_tokens, &out_tok)
+        .map_err(|e| format!("write {:?}: {e}", a.out_tokens))?;
+    std::fs::write(&a.out_tsv, &tsv).map_err(|e| format!("write {:?}: {e}", a.out_tsv))?;
+    eprintln!(
+        "refit-winsor: {} tokens ({} winsor) -> {:?}; changed {n_changed}, degenerate old {n_deg_old} new {n_deg_new}; audit {:?}",
+        entries.len(),
+        winsor_idx.len(),
+        a.out_tokens,
+        a.out_tsv,
+    );
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result: Result<bool, String> = match &cli.cmd {
@@ -3381,6 +3590,7 @@ fn main() -> ExitCode {
         Cmd::Predict(a) => cmd_predict(a).map(|_| false),
         Cmd::BlendHeads(a) => cmd_blend_heads(a).map(|_| false),
         Cmd::ScreenTransforms(a) => cmd_screen_transforms(a).map(|_| false),
+        Cmd::RefitWinsor(a) => cmd_refit_winsor(a).map(|_| false),
     };
     match result {
         Ok(gate_failed) => {
@@ -3848,6 +4058,51 @@ mod tests {
     /// The linear class still gates correctly through the shared path
     /// (continuity for every pre-fix caller: raw = 1.25·t stays inside wide
     /// knots → PASS; a narrow domain above the range → FAIL).
+    #[test]
+    fn winsor_window_matches_owner_rule_and_degenerate_guard() {
+        // percentile_linear semantics on a known ladder.
+        let v: Vec<f64> = (0..=100).map(f64::from).collect();
+        let (lo, hi) = winsor_window(&v, 0.1, 99.9);
+        assert!((lo - 0.1).abs() < 1e-12, "lo {lo}");
+        assert!((hi - 99.9).abs() < 1e-12, "hi {hi}");
+        // all-zero column → the [0,0] guard fires, and NOT to a plain [0,0].
+        let z = vec![0.0f64; 32];
+        assert_eq!(winsor_window(&z, 0.1, 99.9), (0.0, 1e-9));
+        // constant-nonzero stays degenerate (guard is [0,0]-only) — the
+        // refit reports it rather than silently widening it.
+        let c = vec![7.0f64; 32];
+        assert_eq!(winsor_window(&c, 0.1, 99.9), (7.0, 7.0));
+        // a column that is 99.9%+ zeros still collapses — the honest
+        // outcome the refit must REPORT, not hide.
+        let mut sparse = vec![0.0f64; 10_000];
+        sparse[9_999] = 5.0;
+        let (slo, shi) = winsor_window(&sparse, 0.1, 99.9);
+        assert_eq!((slo, shi), (0.0, 1e-9));
+    }
+
+    #[test]
+    fn ft_token_round_trip() {
+        assert_eq!(
+            parse_ft_token("winsor_p99:100:1.46128e-06,0.000106967").unwrap(),
+            (
+                "winsor_p99".to_string(),
+                100,
+                "1.46128e-06,0.000106967".to_string()
+            )
+        );
+        // trailing-colon parameterless form (the signed_cbrt shape)
+        assert_eq!(
+            parse_ft_token("signed_cbrt:61:").unwrap(),
+            ("signed_cbrt".to_string(), 61, String::new())
+        );
+        // degenerate zero window parses as two params, not as "no params"
+        let (_, _, p) = parse_ft_token("winsor_p99:731:0,0").unwrap();
+        let nums: Vec<f64> = p.split(',').map(|s| s.parse().unwrap()).collect();
+        assert_eq!(nums, vec![0.0, 0.0]);
+        assert!(parse_ft_token("winsor_p99").is_err(), "missing idx must error");
+        assert!(parse_ft_token("winsor_p99:xx:0,0").is_err(), "bad idx must error");
+    }
+
     #[test]
     fn gate_still_evaluates_linear_bakes() {
         let dir = std::env::temp_dir().join("zensim_gate_linear_test");
