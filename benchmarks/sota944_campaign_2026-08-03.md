@@ -4329,3 +4329,192 @@ it does not rank *widths*, and no width claim is made here.
 +(the tbig/kadis legs ARE keyed twins of the same cells, so that part is
 +matched). No-transform arms are not ship candidates and were never evaluated as
 +such. konjnd here is the `ext_konjnd_jpeg_val` slot under each regime's root.
+
+## REGISTERED APPENDIX E — the attribution append2 slice (f924-943), and COHERENCE as a first-class selection criterion
+### (committed BEFORE any M3a was re-measured and BEFORE any selection ranking was produced. §E.1's spatializability determination is derived from SOURCE — like §D.1's classification it is an *input* to the registration, not a result.)
+
+Two user-directed items, in dependency order: E1 changes M3a numbers, E2 consumes them.
+
+### E.1 What f924-943 ARE, and whether each slot is spatializable (derived from source at `408dd3c0`)
+
+`benchmarks/slot_decomposability_2026-08-04.tsv` classifies the whole append2
+block **N** with the reason `NOT PASSED to attribution —
+s[720..min(len,924)] drops f924+` (`attribution.rs:817-821`). That reason is a
+property of the *slice*, not of the features. The registration therefore asks
+the prior question — **what would an honest per-pixel integrand for each slot
+be?** — and answers it from the production kernels, not from the slice.
+
+Layout: `f924 + scale*APPEND2_PER_SCALE + local`, `APPEND2_PER_SCALE = 5`,
+4 scales, **Y-only** (no channel axis), = 20 slots. Definitions:
+`feature_v2.rs` `idx_append2` (L404-465), accumulation L2662-2715 (scalar) /
+L2780-2810 (SIMD) + L3252-3265 & L3300-3311 (append kernel), finalize
+L5988-6005.
+
+| local | slot | production pooling | spatializable? | registered class |
+|---|---|---|---|---|
+| 0 | `BANDVIS_GAIN` | `clamp01( Σ_i gain_i / N )`, `gain_i = bounded_excess_pair(b_dst, b_src, C_BV).0`, `b_x = band(curv_x)·flat` — a **per-pixel** FR-excess indicator, **plain mean** over the plane | **YES** | **E** — exact `−v_i/N`, the identical pooling form the v2 `HF_GAIN`/`HF_LOSS`/`HF_MAG_LOSS` slots already carry as class E ("mean of bounded_excess") |
+| 1 | `BANDVIS_LOSS` | same, `.1` of the pair | **YES** | **E** |
+| 2 | `LUMA_MEAN_REF` | `sat( mean(ref Y), C_LUM_T )` — **reference-only** (`ay.sum_s`) | **NO** | **N *by definition*** — `∂f/∂(distorted) ≡ 0`, exactly like v2 `PJND_FRAGILITY` and append `GRAD_SRC_MEAN`. Zero density is the CORRECT answer, not a gap |
+| 3 | `HL_BIN1` | `Σw·mse_i / Σw`, `w = sat(max(y_ref − HL1_Y_ANCHOR, 0), C_HL)` — reference-weighted bin, the exact form of append `LUM_DARK/MID/BRIGHT_ERR` (class E) | form: YES. **route: NO** — computed only under the HDR const-generic `HL`; the attribution path is structurally SDR (`attr_pass_a_kernels` passes `false /* hl (append2) — not part of the 924 regime */`, and `compute_v2_append_attribution` prepares both sides through the SDR `prepare_v2_reference_impl`), so `Σw ≡ 0` ⇒ `WeightedSum::finish() ≡ 0` ⇒ the feature is identically 0.0 | **N (structural zero) in the SDR attribution route** — same class as the `APPEND_SKIP_B_SCALE0` cell and the X/B transducer slots: `Δf ≡ 0` regardless of the probed gradient |
+| 4 | `HL_BIN2` | same, `HL2_Y_ANCHOR` | same | same |
+
+**Registered conclusion: the slice is BOTH a genuine defect AND correct —
+per slot.** 8 of the 20 slots (`BANDVIS_GAIN`/`BANDVIS_LOSS` × 4 scales) are
+mean-pooled per-pixel signals the machinery was silently dropping: a real
+coverage defect. The other 12 (`LUMA_MEAN_REF` × 4 reference-only; `HL_BIN1/2`
+× 4 scales HDR-gated) are correctly zero — but *silently* so, by a slice bound
+rather than by an integrand. Both halves get fixed: the first by construction,
+the second by explicit naming.
+
+### E.2 What will change (registered before writing any of it)
+
+1. **`compute_attribution_density_full` gains an `s_append2` slice**
+   (`s[924..min(len, 944)]`), threaded into `compute_v2_append_attribution`
+   as a fourth gradient slice.
+2. **Integrands, mirroring C2a — no new approximation class is invented:**
+   - `BANDVIS_GAIN/LOSS` → `c_bv_gain/c_bv_loss` coefficients in `V2AppCoeffs`
+     (`s_k · (−1/N)`, the existing mean-pool convention), applied in the pass-B
+     **gradient family** loop against per-pixel `gain_i`/`loss_i` recomputed in
+     f64 from the same cached planes. The second differences reuse the four
+     neighbour loads the gradient loop already performs
+     (`d2x = x_l + x_r − 2·x`), so the terms are near-free and, critically,
+     bit-compatible with the production neighbour convention (x: clamp; y:
+     `reflect_101`, matching the production halo rows).
+   - Y-channel only (`ch == 1`) and only when `s_append2` is present.
+   - `LUMA_MEAN_REF`, `HL_BIN1`, `HL_BIN2` → **explicitly zero**, via a named
+     constant + comment citing which slots and why. Not "not passed in".
+3. **Named width constants** replace the magic `720`/`924` bounds so the next
+   regime bump cannot silently drop a block.
+4. **Tests (all three are new gates):**
+   - **Coverage test**: for each supported width (372 / 720 / 924 / 944) assert
+     the density covers *exactly* the intended slot set — probe each slot with
+     a unit gradient and assert the density is non-zero exactly where the
+     registered table says it must be, and zero where it says N. This is the
+     anti-recurrence guard.
+   - **Plane-sum test** (the strongest available check for a class-E mean
+     pool): the full-plane density sum for a unit `s_k` on a BANDVIS slot
+     equals `−feature_k` to recompute noise, where `feature_k` is the
+     PRODUCTION 944-regime feature from `compute_folded720_append2_features`.
+   - **FD direction test per new slot** (the C2a precedent that caught the
+     edge-width sign bug): perturb a rectangle toward the reference and assert
+     the density's rectangle sum agrees in SIGN and order of magnitude with the
+     finite-difference score change attributable to that slot.
+5. `benchmarks/slot_decomposability_2026-08-04.tsv` is updated so the append2
+   rows carry their **by-definition** class and reason, not the slice
+   side-effect. §D's *results* are NOT restated or re-derived — the D.8
+   verdict was computed against the classification as it stood, and that stays
+   the record; the amendment is annotated in place.
+
+### E.3 Impact accounting — registered sample, statistic and thresholds
+
+M3a = the mean of `diffmap_block_coherence --bake`'s per-cell M3a over
+`run_full_eval.sh`'s 27-cell grid (3 content × 3 sizes × 3 q). Any change to
+the density changes M3a for every **944-width** bake (720/924/372 bakes are
+untouched by construction — their `s` never reaches 924, which the coverage
+test now asserts).
+
+**Registered sample (5 bakes, named before measuring):** `H_co3abpg_s2507`,
+`C_em944_s31`, `C_co3a_s1301`, `C_co3a_s1307`, `C_ensk2_s1303`.
+
+**Method:** the same 27 fixtures scored twice — once with the binary built at
+the parent commit (OLD), once with the fix (NEW). Same fixtures, same bake
+bytes, same machine, serial.
+
+**Registered materiality thresholds (frozen before any number exists).**
+The change is **MATERIAL** if ANY of:
+- `max |ΔM3a| ≥ 0.005` over the 5 bakes (the campaign reports M3a to 3 dp;
+  0.005 is the half-ulp of the reported precision), OR
+- any bake crosses the **0.85** M3a bar (`BAR_M3A` / `M3A_GOLD`), OR
+- any bake crosses the **0.78** silver tier (`M3A_SILVER`).
+
+**If MATERIAL:** re-measure **every 944-width board cell carrying an M3a**
+(the §D.8 population lists 32 of the 50), update the fullevals through the
+committed promoter (`scripts/promote_fulleval.py`) so the board and
+`freeze_check` read corrected values, and file an `eval_annotations.json`
+entry `kind=invalidated` pointing the superseded numbers at this fix.
+**If NOT material:** say so, with the five before/after numbers in the table.
+
+Reported either way: the old and new M3a per bake to 4 dp, ΔM3a, and whether
+any tier or bar assignment moves.
+
+### E.4 Item 2 — the REGISTERED selection rule (coherence becomes selectable)
+
+§D.8 established that **42.3 % of 944-class M3a variance is seed noise at
+fixed recipe** and that **MLPs beat linears on M3a at every folded width**.
+M3a is therefore a *selectable trajectory property*, and the campaign's k-seed
+rule ("train k seeds → select by sdr25 / `best_val`") must account for it.
+
+**Owner: `freeze_check` gains `--select`** (it is already the bar/profile owner
+and already tier-reports M3a; a new script would violate the no-duplication
+rule). It computes NO statistics — it reads what the owning tools produced.
+
+`freeze_check --select <a.fulleval.json> <b...> [--profile P]` emits a ranked
+TSV + human table under this rule, frozen here:
+
+1. **PRIMARY — profile floor count** (`n_pass` under the active profile;
+   default `balanced-2026-08-04`). More floors passed wins. This preserves the
+   existing balanced-selection semantics exactly; coherence does not get to
+   override a bake that fails CID22 or the dial.
+2. **TIE-BREAK — `selection_composite = balanced_composite + W_M3A · m3a`,
+   `W_M3A = 0.15`.** The weight is not new: 0.15 is the registered weight class
+   the balanced composite already gives its breadth additions
+   (`W_CSIQ`/`W_LIVE`/`W_BANDTAIL`). Coherence is a product axis of that tier —
+   material, not co-primary with CID22 (1.00). Sanity of the scale, from
+   measured spreads: 0.15 × the 944-class M3a sd (0.0471) ≈ 0.007 of composite,
+   so coherence **breaks ties between seeds** rather than dominating; 0.15 ×
+   the full observed board range (0.199→0.954) = 0.113, comparable to a 0.11
+   CID22 swing, so it is not decorative either.
+3. **`sdr25` is NOT in the rule.** It stays a reported comparator column. The
+   standing caveat (sdr25 has decoupled from CID22 five times) is exactly why
+   the primary is the floor count, not a proxy corpus.
+
+**Missing-value handling — the three states are distinct and never conflated
+with zero:**
+
+| state | condition | treatment |
+|---|---|---|
+| `MEASURED` | `m3a_coherence` is a number | ranked by `selection_composite` |
+| `NOT_COMPUTABLE` | `m3a_coherence` null AND `model.kind == "ensemble"` | the instrument structurally cannot produce it (it loads one ZNPR). Ranked in a **separate section** on `balanced_composite` alone; **never** penalized, **never** treated as 0, and never mixed into the measured ranking (the two composites are on different scales) |
+| `UNMEASURED` | absent, non-ensemble | listed with its floor count, but **NOT eligible to be the selected winner**, and the tool prints the exact command to measure it. Precedent: the balanced profile already counts an ABSENT floor axis as not-passed — "a candidate nobody measured cannot be certified on that axis" |
+
+A missing M3a therefore *blocks selection* rather than silently scoring 0 —
+which is the whole point of making coherence first-class.
+
+### E.5 Cheap-M3a — registered definition + agreement gate (conditional)
+
+**First measure the cost** of the 27-cell instrument on one 944 bake
+(wall-clock, `run-heavy`, serial, reported with peak RSS). Registered
+trigger: if the 27-cell M3a costs **> 120 s/bake**, implement the cheap
+variant (at k = 6 seeds × several arms per wave, > 2 min/bake is enough to
+discourage per-seed use). Otherwise keep the full instrument and say so.
+
+**Registered cheap variant (frozen now, so it cannot be tuned to agree):** a
+**9-cell balanced subset** of the 3 × 3 × 3 grid — the Latin square
+`q_index = (content_index + size_index) mod 3` over
+`content ∈ (city, dog, girl)`, `size ∈ (576, 384, 256)`, `q ∈ (20, 50, 75)`.
+Every content appears 3×, every size 3×, every q 3× — balanced on all three
+axes, 3× cheaper. (A 9-cell balanced square is preferred over an arbitrary
+8-cell subset precisely because it is balanced by construction.)
+
+**Registered agreement gate**, over every bake in the E.3 population that
+carries both: `SROCC(cheap, full) ≥ 0.90` **AND** `max |cheap − full| ≤ 0.02`.
+If either fails: report the disagreement and **keep the full instrument** —
+do not ship the cheap one.
+
+### E.6 Workflow wiring (registered)
+
+- `scripts/harvest_bakes.sh` already runs `scripts/run_full_eval.sh`, which
+  already computes M3/M3a — so selection data exists by the end of a wave **by
+  construction**. What is registered here is the *guard*: harvest must make a
+  MISSING M3a loud, in harvest's own philosophy (a hook whose failure is
+  invisible manufactures false confidence).
+- `docs/WAVE_PLAYBOOK.md` + `CLAUDE.md` selection guidance updated so the next
+  wave selects on **rank + dial + coherence** by default, via
+  `freeze_check --select`.
+
+### E.7 Ops
+
+Workspace `../zensim--attrfix` on `main@origin`; `CARGO_TARGET_DIR=
+$HOME/tmp/zensimattr-target`; builds through `~/work/zen/scripts/run-heavy
+--jobs 6`; logs `~/tmp/attrfix/`. Full test suite + clippy green before each
+push.
