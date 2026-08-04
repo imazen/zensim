@@ -86,6 +86,70 @@ LOOP_BAKE_MAP = {
 }
 
 
+# ---- BOARD CURATION (registered rule 2026-08-04, dashboard-overhaul session) ----------
+# The full sota944 campaign grid (~160 cells) lives on the board so that every number
+# cited in any report is findable here. Two-tier presentation keeps that from drowning
+# a fresh reader:
+#   * CURATED (this list) = the era flagships + every arm-candidate / named leader from
+#     benchmarks/sota944_campaign_2026-08-03.md + the six wave-5 ensembles + the wave-6
+#     arm-G candidate. These are DEFAULT-VISIBLE and keep embedded per-pair scatter.
+#   * Everything else = grid-interior: default-hidden (one family-toggle away), every
+#     scalar stat present (scoreboard/heatmap/Mohammadi/bands/dial/gates), no embedded
+#     scatter points (per_pair is skipped at build even when the JSON carries it; the
+#     full data stays in the source verdict — `source_verdict` in each fulleval JSON).
+# This list is THE owner of curation: scripts/promote_sota944_board.py imports it to
+# decide --strip-per-pair at promotion time.
+CURATED_BOARD = [
+    # era flagships (pre-944 eras)
+    "winner_dial_Ebothg_hfgain_winsor_dial", "Ebothg_scr0_5_dial",
+    "ADD156_safesyn_only_raw_lasso", "b_sdr_linear_cid80_inclwinsor_dense_dial",
+    "v47_strict_QAT_native", "coherent924_selected", "bhdr_linear_shaped_cvvdpmix",
+    "v02_bvls_NO_shaping",
+    # the 944 era-bridge (EM4 evaluated on the 944 root = the bar source, 0.8923796503)
+    "sota944_EM4_s42_on944root",
+    # campaign arm candidates + named leaders (benchmarks/sota944_campaign_2026-08-03.md)
+    "sota944_winner_A_bvls_X_AM5",       # arm A candidate = campaign winner (§SELECTION)
+    "sota944_B_blend_lam1e-3_a0.7_w",    # arm B candidate
+    "sota944_C_em944_s31",               # arm C candidate; closest-to-bar single bake
+    "C_co1a_s1307",                      # amendment-3 arm-1 candidate
+    "C_co2a_s1307",                      # arm-2 candidate + coherence-wave winner-by-rule
+    "C_co3b_s1303",                      # arm-3 candidate + raw M3a leader (0.8470)
+    "C_co3a_s1301",                      # wave-3 raw CID22 leader (0.89067)
+    "C_co3a_s1307",                      # best bar coverage (4/5 rows)
+    "C_co3a_s1319",                      # wave-4 arm-D CID22 leader (0.88851)
+    "C_co3a_s1321",                      # wave-4 arm-D candidate
+    "C_co4_s1303",                       # wave-4 arm-E candidate
+    "C_co4_s1307",                       # arm-E CID22 leader + KonJND leader (0.4725)
+    "sota944_nt223",                     # near-top arm selected (amendment 2)
+    # the six wave-5 seed-ensembles (amendment 5)
+    "sota944_ens_E1_k2", "sota944_ens_E1_k3", "sota944_ens_E1_k5", "sota944_ens_E1_k8",
+    "sota944_ens_E2_diverse5", "sota944_ens_E3_all51",
+    # wave-6 arm-G candidate (highest composite in the campaign; CID22 −0.00051 vs bar)
+    "sota944_ens_GE2_trio",
+]
+CURATED = set(CURATED_BOARD)
+
+
+def family_of(name: str) -> str:
+    """Control-bar family grouping (group toggles). Input = the board name."""
+    n = name[len("sota944_"):] if name.startswith("sota944_") else name
+    if n.startswith(("ens_", "W5_", "W6_")):
+        return "ensembles"
+    if n.startswith(("winner_A_", "A_")):
+        return "arm A"
+    if n.startswith(("B_", "B2_")):
+        return "arm B"
+    if n.startswith("C_em944"):
+        return "arm C seeds"
+    if n.startswith(("C_co1", "C_co2", "C_co3", "C_co4")):
+        return "coherence/W4"
+    if n.startswith(("C_nt944", "nt")):
+        return "near-top"
+    if n.startswith("EM4_"):
+        return "era bridge"
+    return "pre-944 era"
+
+
 def load_loop_targeting(path=None):
     """Read the Part-A machine summary JSON (jxl-encoder sweep). Returns the embed dict
     {meta, models, bakeMap, modelBake} or None (missing file -> section omitted, loud note).
@@ -171,10 +235,17 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             pass
     raw = [json.loads(f.read_text()) for f in files]
     raw.sort(key=lambda o: order.get(o.get("name"), (o.get("date", ""), 99)))
+    # Curated-first presentation order (stable): flagships/candidates lead the chip list
+    # and the scatter columns; grid-interior cells follow alphabetically.
+    raw.sort(key=lambda o: ((0, CURATED_BOARD.index(o.get("name")), "")
+                            if o.get("name") in CURATED
+                            else (1, len(CURATED_BOARD), str(o.get("name", "")).lower())))
 
     rng = np.random.RandomState(0)
     bakes = []
     for ci, o in enumerate(raw):
+        name = o.get("name", f"bake{ci}")
+        curated = name in CURATED
         rank = o.get("rank", {})
         # Prefer the Rust-emitted `composite` (product_composite is the single
         # source — stats review Rec-7); the dashboard READS it rather than
@@ -190,7 +261,10 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         else:
             comp, reject = _composite(rank)
         scatter_out = {}
-        pp = o.get("per_pair", {})
+        # Registered board-size rule (2026-08-04): scatter embeds for the CURATED set
+        # only. Grid-interior cells keep every scalar stat; their per-pair data stays in
+        # the source verdict (never deleted) — the charts degrade gracefully without it.
+        pp = o.get("per_pair", {}) if curated else {}
         sc_json = o.get("scatter", {})
         for corp, cols in pp.items():
             pred = cols.get("pred")
@@ -215,7 +289,8 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             if cell:
                 scatter_out[corp] = cell
         bakes.append({
-            "name": o.get("name", f"bake{ci}"), "regime": o.get("regime", "?"),
+            "name": name, "regime": o.get("regime", "?"),
+            "curated": curated, "family": family_of(name),
             "date": o.get("date", ""), "colorIndex": ci,
             "rank": rank, "dial": o.get("dial", {}), "m3": o.get("m3_coherence"),
             "m3a": o.get("m3a_coherence"),
@@ -262,6 +337,18 @@ code{background:var(--surface-1);border:1px solid var(--border);padding:.05rem .
       border-radius:1rem;cursor:pointer;user-select:none;background:var(--surface-1);font-size:12px;white-space:nowrap}
 .chip input{margin:0;cursor:pointer}
 .chip.off{opacity:.4}
+.gchip{display:inline-flex;align-items:center;gap:.25rem;padding:.2rem .5rem;border:1px dashed var(--border);
+       border-radius:.4rem;cursor:pointer;user-select:none;background:var(--surface-1);font-size:11.5px;white-space:nowrap}
+.gchip.off{opacity:.45}
+.gchip:hover{border-color:var(--muted)}
+.allbakes{flex:1 1 100%}
+.allbakes summary{cursor:pointer}
+.chipwrap{display:flex;flex-wrap:wrap;gap:.4rem;max-height:180px;overflow-y:auto;padding:.35rem 0}
+.zr{position:absolute;top:4px;right:4px;z-index:3;width:22px;height:22px;line-height:1;padding:0;
+    border:1px solid var(--border);border-radius:50%;background:var(--surface-1);color:var(--text-primary);
+    cursor:pointer;opacity:.85;font-size:13px}
+.zr:hover{opacity:1;border-color:var(--muted)}
+.zwrap{position:relative;display:inline-block;max-width:100%}
 .sw{width:11px;height:11px;border-radius:50%;flex:0 0 auto;border:1px solid var(--border)}
 .btn{padding:.24rem .6rem;border:1px solid var(--border);border-radius:.35rem;background:var(--surface-1);
      color:var(--text-primary);cursor:pointer;font-size:12px}
@@ -298,12 +385,20 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     stub_note = ("<span class='stub'>STUB DATA</span> — synthesized fixtures "
                  "(<code>make_stub_fulleval.py</code>); drop the eval agent's real "
                  "<code>*.fulleval.json</code> in and re-run. " if any_stub else "")
+    n_cur = sum(1 for b in bakes if b.get("curated"))
+    coverage = (
+        "This board carries <b>every promoted evaluation cell</b> (" + str(len(bakes)) + " bakes, "
+        "including the full sota944 campaign grid) — any number cited in a report is findable "
+        "here. The <b>default view shows the " + str(n_cur) + "-bake curated set</b> (era "
+        "flagships + campaign arm candidates/leaders + ensembles); use the family toggles or "
+        "<i>all</i> to reach every grid cell. " if n_cur else "")
     head = (
         "<h1>" + title + "</h1>"
-        "<p class='sub'>" + stub_note +
+        "<p class='sub'>" + stub_note + coverage +
         "Toggle bakes below to compare them across every chart; click a table header to sort. "
         "The scatter matrix shows <b>predicted vs each reference</b> (MOS, JND, SSIMULACRA2, "
         "butteraugli, ColorVideoVDP) per corpus, with an OLS fit and canonical SROCC/PLCC. "
+        "Charts zoom (wheel), pan (drag) and reset (double-click or ⟲). "
         "All data, styles and scripts are inlined — this page opens offline. "
         "By <code>scripts/v_next/bandwise_dashboard.py --fulleval-dir</code>.</p>"
     )
@@ -332,7 +427,12 @@ const el=(t,a={},kids=[])=>{const e=document.createElementNS(t.startsWith('svg:'
   (Array.isArray(kids)?kids:[kids]).forEach(c=>c&&e.appendChild(c));return e;};
 const S=(t,a={},k=[])=>el('svg:'+t,a,k);
 
-const state={visible:new Set(DATA.bakes.map(b=>b.name)), ref:null, sortKey:'composite', sortDir:-1, mcorp:null};
+// Default-visible = the CURATED headline set (era flagships + campaign arm candidates/
+// leaders + ensembles — flagged at build from gauntlet.py CURATED_BOARD). The full grid
+// stays one toggle away; payloads without curated flags fall back to all-visible.
+const CURATED=DATA.bakes.filter(b=>b.curated).map(b=>b.name);
+const state={visible:new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name)),
+  ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false};
 function effTheme(){const dt=document.documentElement.getAttribute('data-theme');
   return dt||((window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light');}
 const pal=()=>DATA.palette[effTheme()==='dark'?'dark':'light'];
@@ -377,25 +477,53 @@ function showTip(html,ev){tt.innerHTML=html;tt.style.opacity=1;
   tt.style.left=x+'px';tt.style.top=y+'px';}
 function hideTip(){tt.style.opacity=0;}
 
-// ---- CONTROL BAR: bake chips + select buttons + reference tabs + theme
+// ---- CONTROL BAR: preset buttons + FAMILY toggles + collapsible per-bake chips +
+// reference tabs + theme. With ~160 grid cells on the board, the sticky bar leads with
+// the curated preset and family groups; individual chips live in a collapsible picker
+// (scoreboard rows also toggle visibility on click).
 function renderBar(){
   const bar=$('#bar');bar.innerHTML='';
-  DATA.bakes.forEach(b=>{
-    const on=state.visible.has(b.name);
-    const chip=el('label',{class:'chip'+(on?'':' off'),
-      title:b.regime+(b.is_stub?' (stub)':'')+(isEns(b)?' · ensemble of '+ensK(b)+' bakes':'')});
-    const cb=el('input',{type:'checkbox'});cb.checked=on;
-    cb.onchange=()=>{on?state.visible.delete(b.name):state.visible.add(b.name);rerender();renderBar();};
-    chip.append(cb, el('span',{class:'sw',style:'background:'+color(b)}),
-      el('span',{text:b.name}), el('span',{class:'cap',text:b.regime+ensTag(b)}));
-    bar.appendChild(chip);
-  });
-  const mk=(t,fn)=>{const x=el('button',{class:'btn',text:t});x.onclick=fn;return x;};
+  const mk=(t,fn,title)=>{const x=el('button',{class:'btn',text:t});if(title)x.setAttribute('title',title);x.onclick=fn;return x;};
   bar.append(
+    mk('curated',()=>{state.visible=new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name));rerender();renderBar();},
+      'the default set: era flagships + campaign arm candidates/leaders + ensembles'),
     mk('all',()=>{DATA.bakes.forEach(b=>state.visible.add(b.name));rerender();renderBar();}),
     mk('none',()=>{state.visible.clear();rerender();renderBar();}),
     mk('top 6',()=>{const s=[...DATA.bakes].sort((a,b)=>b.composite-a.composite).slice(0,6).map(b=>b.name);
       state.visible=new Set(s);rerender();renderBar();}));
+  // family toggles: click = show the whole family (or hide it when fully shown)
+  const fams=[];DATA.bakes.forEach(b=>{if(b.family&&fams.indexOf(b.family)<0)fams.push(b.family);});
+  fams.forEach(f=>{
+    const members=DATA.bakes.filter(b=>b.family===f);
+    const on=members.filter(b=>state.visible.has(b.name)).length;
+    const full=on===members.length;
+    const chip=el('span',{class:'gchip'+(on?'':' off'),
+      title:(full?'hide':'show')+' all '+members.length+' “'+f+'” bakes'});
+    chip.append(el('b',{text:f}),el('span',{class:'cap',text:' '+on+'/'+members.length}));
+    chip.onclick=()=>{members.forEach(b=>full?state.visible.delete(b.name):state.visible.add(b.name));
+      rerender();renderBar();};
+    bar.appendChild(chip);
+  });
+  // per-bake chips (collapsible picker; open-state survives re-renders)
+  const det=el('details',{class:'allbakes'});
+  if(state.chipsOpen)det.setAttribute('open','');
+  det.addEventListener('toggle',()=>{state.chipsOpen=!!det.open;});
+  det.append(el('summary',{class:'cap',
+    text:'pick individual bakes — '+state.visible.size+' of '+DATA.bakes.length+' visible (scoreboard rows toggle too)'}));
+  const wrap=el('div',{class:'chipwrap'});
+  DATA.bakes.forEach(b=>{
+    const on=state.visible.has(b.name);
+    const chip=el('label',{class:'chip'+(on?'':' off'),
+      title:b.regime+(b.family?' · '+b.family:'')+(b.curated?' · curated':'')
+        +(b.is_stub?' (stub)':'')+(isEns(b)?' · ensemble of '+ensK(b)+' bakes':'')});
+    const cb=el('input',{type:'checkbox'});cb.checked=on;
+    cb.onchange=()=>{on?state.visible.delete(b.name):state.visible.add(b.name);rerender();renderBar();};
+    chip.append(cb, el('span',{class:'sw',style:'background:'+color(b)}),
+      el('span',{text:b.name}), el('span',{class:'cap',text:b.regime+ensTag(b)}));
+    wrap.appendChild(chip);
+  });
+  det.append(wrap);
+  bar.appendChild(det);
   // reference tabs
   const tabs=el('span',{class:'tabs'});
   tabs.append(el('span',{class:'cap',text:'reference:',style:'align-self:center'}));
@@ -470,7 +598,10 @@ function renderTable(){
     +'as every single-bake row: rank/dial/corruption numbers are directly comparable, but an ensemble is an '
     +'<b>evaluation function, not a shippable artifact</b> — there is no single ZNPR, so <b>M3a/M3 are not '
     +'computable for it</b> (the coherence instrument loads one bake) and its Model-details card describes '
-    +'the ANCHOR member only. Distillation to a single bake is pending.'
+    +'the ANCHOR member only. Distillation to a single bake is pending. '
+    +'Rows list EVERY promoted cell (dimmed = hidden from charts; click a row to toggle it). '
+    +'Hidden-by-default grid cells carry the same scalar stats as curated ones — only embedded '
+    +'scatter data is curated-set-only (see the scatter section).'
     +(LT?' <b>2shot/3shot ±2</b> = JXL loop targeting: cells (of '+ltN()+') where the DECODED-judged score lands '
     +'within ±2 of target in the bake’s own units at encode budget k=2/3, emit-best (emit-last + outer arms: '
     +'see the JXL loop targeting section).':'')});
@@ -558,9 +689,15 @@ function renderScatter(){
   const host=$('#scatter');if(!host)return;host.innerHTML='';
   const ref=state.ref;const bs=visBakes();
   host.append(el('h2',{text:'Correlation scatter matrix — predicted vs '+(DATA.refLabels[ref]||ref)}));
+  const nSc=bs.filter(b=>Object.keys(b.scatter).length).length;
   host.append(el('div',{class:'cap',html:'One clean scatter per (bake × corpus) for the selected reference; '
     +'bakes sit side by side per corpus so you can compare fits. ρ = canonical SROCC, r = PLCC. '
-    +'Switch reference in the bar above; toggle bakes to add/remove columns.'}));
+    +'Switch reference in the bar above; toggle bakes to add/remove columns. '
+    +'<b>Scatter data is embedded for the curated headline set only</b> (registered size rule — '
+    +'the offline file stays openable); '+nSc+' of '+bs.length+' visible bakes carry it here. '
+    +'Grid-interior cells keep every scalar stat in the sections above, and their full '
+    +'per-pair data lives in the source verdict recorded in each fulleval JSON '
+    +'(<code>source_verdict</code> / <code>per_pair_stripped</code>).'}));
   if(!bs.length){host.append(el('p',{class:'sub',text:'no bakes selected.'}));return;}
   // corpora that carry this reference for any visible bake
   const corps=DATA.corpOrder.filter(c=>bs.some(b=>b.scatter[c]&&b.scatter[c][ref]));

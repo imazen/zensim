@@ -148,6 +148,20 @@ if (countTag('svg') < 3) fail('too few SVG charts: ' + countTag('svg'));
 const h2s = texts('h2');
 if (!h2s.includes('Scoreboard')) fail('Scoreboard heading missing (h2s: ' + h2s.join(' | ') + ')');
 
+// board curation (2026-08-04): family toggles must render when bakes carry families,
+// and the registered size rule holds — non-curated cells must NOT embed scatter points.
+if (DATA && DATA.bakes.some(b => b.family)) {
+  const gchips = registry.filter(e => e.tagName === 'SPAN' && classesOf(e).includes('gchip'));
+  if (!gchips.length) fail('bakes carry family but no family toggles (.gchip) rendered');
+}
+if (DATA && DATA.bakes.some(b => b.curated)) {
+  const leak = DATA.bakes.filter(b => !b.curated && b.scatter && Object.keys(b.scatter).length);
+  if (leak.length) fail('size rule violated — non-curated bakes embed scatter: '
+    + leak.slice(0, 5).map(b => b.name).join(', ') + (leak.length > 5 ? ' …' : ''));
+  const nVis = DATA.bakes.filter(b => b.curated).length;
+  if (!nVis) fail('curated flags present but zero curated bakes');
+}
+
 // loop-targeting section: required iff the payload carries it
 if (DATA && DATA.loopTargeting && DATA.loopTargeting.models && Object.keys(DATA.loopTargeting.models).length) {
   const nModels = Object.keys(DATA.loopTargeting.models).length;
