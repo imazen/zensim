@@ -145,4 +145,17 @@ w[156:]=0 constraint). **B:** `benchmarks/profile_b_methodology_2026-07-12.md`.
 inert zenjpeg passes · legacy-seeded codec tables · SROCC-only verdicts · train==val KADID/TID
 · dial-grid quarantine (`_quarantined_v2`) · hf_gain unbounded · IW 1/n-vs-Σw · bigcodec mass
 poisons LINEAR CID22 (MLP absorbs it) · KonJND anti-correlates with bigcodec mass in this
-family.
+family · **ext-lineage KADID target stored INVERTED** (below).
+
+> **⛔ KADID orientation (2026-08-04) — read before any recipe that touches a `kadid` group
+> or cites a KADID number.** `ext720`/`ext924`/`ext944` `ext_kadid.parquet` store
+> `human_score = (5−dmos)/4`, the INVERSE of the canonical `(dmos−1)/4`. Training on an
+> ext root teaches the model to rank KADID **backwards** (measured dose-response: train
+> weight 0.50 → mean −0.457 vs true quality, 1.50 → −0.925), and every SROCC measured on
+> an ext root is sign-flipped. **The recipe above is SAFE — `$C` is
+> `canonical-2026-05-21/train`, which is correctly oriented** — and that is exactly why
+> `winner_dial` is **+0.9464** on KADID rather than the −0.9464 the board used to print.
+> Gate any new corpus table with
+> `scripts/canonical_corpus/check_target_orientation.py` before training on it.
+> Full determination: `benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F;
+> ledger `docs/DATASET_HISTORY.md` §3.20.

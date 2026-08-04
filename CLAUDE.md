@@ -12,7 +12,26 @@ implements its A1-A5/A9 candidates.
 
 ## Known Bugs
 
-_(none open)_
+- **⛔ THE ext-LINEAGE KADID TARGET IS STORED INVERTED — every KADID number published from
+  a 720/924/944 root is SIGN-FLIPPED (found 2026-08-04, OPEN).** `ext720`/`ext924`/`ext944`
+  `ext_kadid.parquet` carry `human_score = (5−dmos)/4`; the canonical `(dmos−1)/4` is
+  correct because **KADID's `dmos` is a MOS in disguise** (raw crowdsourced DCR falls
+  4.0789 → 2.0072 across severity levels 1–5, 349,800 ratings).
+  `build_fr_corpus_pairs.build_kadid()` applied the invert-a-DMOS reflex that CSIQ/LIVE
+  genuinely need to a column that was already quality-oriented. **Consequences:** every
+  campaign KADID figure is the negative of the true-quality value; **110 of 188 board
+  bakes are ANTI-CORRELATED with KADID's real human MOS**; the 944 models *trained* on
+  the flipped column, so their inversion is real and inherited (train weight 0.50 → mean
+  −0.457, 1.50 → −0.925); the era models are fine (`winner_dial` **+0.9464**, shipped
+  **B** **+0.8201**, positive on 25/25 distortion types). **TID is CLEAN on every root.**
+  **Read `rank.kadid.srocc_signed` and NEGATE it for any ext-root verdict; never cite
+  `rank.kadid.srocc`.** Builder fixed + `scripts/canonical_corpus/check_target_orientation.py`
+  gates it, but **the ext tables are NOT yet rebuilt** — that changes the target ~110
+  bakes trained against and needs a conscious rebuild + re-verdict + re-annotate.
+  Determination: `benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F
+  (+ F.R1..F.R9); ledger: `docs/DATASET_HISTORY.md` §3.20; registry:
+  `benchmarks/eval_annotations.json` (`kadid-ext-root-inverted`,
+  `kadid-ext-trained-inverted-model`, `kadid-e1-gate-unsigned`).
 
 ### Resolved
 
