@@ -1829,3 +1829,192 @@ pre-cleanup build.
 
 Nothing is shipped, swapped, promoted, or published. No default changed, no bake
 entered `zensim/weights/`. The freeze decision remains the user's.
+
+---
+
+## REGISTERED AMENDMENT 6 — WAVE 6: ensemble DISTILLATION (arm F) + the KonJND blocker (arm G)
+### (committed BEFORE any teacher is emitted, any student is trained, and any wave-6 score is read)
+
+**Frame.** Wave 5 crossed the CID22 bar for the first time in the campaign — by
+**averaging already-trained bakes** (`W5_E1_k2` 0.89425 vs bar 0.8923796503;
+paired-bootstrap vs the best single **+0.0035 [0.0016, 0.0055], P=1.000** — real
+and resolved; vs the bar +0.0019, P=0.968 — a point crossing, not 95%-certified).
+It left exactly two things undone, and this wave is those two things:
+
+1. **An ensemble is a function, not a shippable artifact**, and **M3a is not
+   computable for one** (`diffmap_block_coherence` consumes one ZNPR bake). The
+   registered §5.7 follow-on — *distil the ensemble into a single bake* — did not
+   fire because the firing condition is all five rows. **Arm F runs it anyway, as
+   the registered follow-UP wave 5 named**, because the artifact question and the
+   M3a question are both unanswerable without it.
+2. **KonJND is the binding blocker on every ensemble arm** (max 0.4058 vs the 0.43
+   bar; wave-5 arms reach 3/5 rows, worse than wave 3's 4/5). **Arm G attacks that
+   row.**
+
+Nothing in this amendment relaxes a bar row, changes an instrument, or alters the
+frozen §0 verdict invocation. Nothing ships; the freeze decision stays the user's.
+
+### 6.1 Arm F — ensemble distillation (the artifact question)
+
+**Teacher machinery = amendment 3's verbatim, with ONLY the teacher swapped.**
+The EM4-teacher chain is fully specified by the committed artifacts, and its
+construction rule was **re-derived and verified exactly** before this
+registration: applying `affine = (q0.001, q0.999)` of the teacher's raw
+predictions **on the safesyn twin**, then `human_score = clip((raw − lo)/(hi − lo),
+0, 1)`, reproduces the committed
+`teacher/_MANIFEST.json` affine `[−12.95392379951477, 10.061253767967228]` and
+the stored safesyn teacher mean `0.6142450490816594` **to the printed digit**
+(total clip fraction 0.2017% ≤ the recorded 0.25%). That rule is therefore frozen
+here and applied identically to the ensemble teachers.
+
+- **Twins (unchanged, same three parquets' feature rows):** `tsafesyn`
+  (111,068 rows), `ttbig` (208,169), `tkadis` (50,000). One affine, fit on
+  safesyn, applied to all three (as the EM4 chain did).
+- **Teacher raw scores** come from the SAME averaging contract wave 5 measured:
+  equal-weight arithmetic mean of the members' raw predictions, each member
+  forwarded through the production transform-safe path. Owner extension, this
+  commit: **`bake_dial_refit predict --ensemble a.bin,b.bin,…`** — the `predict`
+  subcommand is the owner of "bake forward over a parquet"; the ensemble contract
+  mirrors `bake_verdict`'s `Ensemble::score_rows` exactly (k=1 short-circuits to
+  the single-bake call; members must agree on `n_inputs` or it fails loud).
+  A script that averages TSVs is the duplication this repo bans.
+- **The two teachers (frozen):**
+  - **F1** teacher = `W5_E1_k2` = mean{`C_co3a_s1301`, `C_co2a_s1307`} — the
+    highest-CID22 arm (0.89425).
+  - **F2** teacher = `W5_E1_k5` = mean{`C_co3a_s1301`, `C_co2a_s1307`,
+    `C_co3a_s1319`, `C_co1b_s1303`, `C_em944_s31`} — the best KonJND (0.4037)
+    among the bar-clearing arms, and better nonphoto (0.9128 vs 0.8735).
+- **Student = the co3a recipe VERBATIM**, argv read from
+  `C_co3a_s1301.bin.spec.json` → `zentrain.repro.argv`: 9 groups
+  (safesyn 1.0:0.5:both · cid22_train 1.0:2.0:both · kadid 0.5:1.0:rank ·
+  tid 0.5:1.0:rank · bigcodec 0.5:1.0:both · kadis 0.15:1.0:both ·
+  tsafesyn/ttbig/tkadis 0.5:1.0:both), `--n-hidden-layers 0 --target-column
+  human_score --target-scale 100 --epochs 120 --pairs-per-epoch 50000
+  --max-features 944 --allow-narrow-features --coarse-decay 1e-5`, the 40 WT
+  transform flags and the 24 mask2 `winsor_p99:IDX:0,0` flags — **byte-identical
+  except**: `--seed`, `--out`, and the three teacher-twin parquet PATHS.
+- **Seeds: k=3 `{1301, 1303, 1307}`** — the registered co3a triple, so every
+  student has a same-seed co3a sibling already measured (`C_co3a_s130*`) and the
+  teacher swap is the only difference. Tags `C_ensk2_s<seed>` / `C_ensk5_s<seed>`.
+
+**THE TEACHER GATE (run and reported BEFORE any student is trained).** Two checks
+on `bake_dial_refit predict --ensemble`:
+(a) **k=1 identity** — `--ensemble X.bin` must equal `--bake X.bin` byte-for-byte
+on the emitted TSV;
+(b) **k=2 mean identity** — the 2-member ensemble TSV must equal the elementwise
+mean of the two single-member TSVs to ≤ 1e-12 max abs.
+If either fails the arm stops and reports the gate failure.
+
+**Endpoints (frozen, nothing relaxed; §1 verbatim plus the two comparison rows
+this arm exists to answer):**
+
+| endpoint | bar / reference |
+|---|---|
+| CID22 | **> 0.8923796503** (the bar) **AND** vs **0.89067** (`C_co3a_s1301`, best single) **AND** vs the teacher's own arm (0.89425 / 0.89329) — *does the student retain the ensemble's +0.0035?* |
+| KonJND | ≥ 0.43 |
+| nonphoto | ≥ 0.90 |
+| HF-NL-proxy | ≥ 0.19310280 (`rank.hfnlproxy.per_ref_mean`) |
+| dial | mono ≥ 93% / tied ≤ 5% |
+| **M3a** | **≥ 0.85 — THE row an ensemble cannot be judged on, and the reason this arm exists.** Measured on every F cell (n=6), not a subset |
+| embedded repro | `zentrain.repro` present (trainer-native; exit-4 on failure) |
+| G-RANGE | inherited tool gap (`bake_dial_refit.rs:182` panics on a 2-layer MLP) — reported as NOT EVALUABLE, never as PASS |
+
+**Selection (frozen):** **sdr25 is NOT a selection rule in this wave.** The
+oracle/CID22 decoupling has now reproduced five times, including within a fixed
+config (wave 4), and wave 5 already dropped it. The arm-F candidate per teacher =
+**max CID22** (the arm's primary endpoint), ties broken by higher `best_val`. All
+six cells are published in full regardless; sdr25 and `best_val` are reported for
+the record only.
+
+### 6.2 Arm G — the KonJND blocker
+
+#### G0 — the structural finding, MEASURED BEFORE ANY FIT (this is a result, not a preamble)
+
+The supervisor's arm-G sketch is *"the co3a / co4 recipe + the konjnd-dense
+training group"*. **That group does not exist in a form this campaign may train
+on.** Two facts, both measured this session:
+
+1. **There is no 944-regime konjnd-dense leg.** The only KonJND parquet in the
+   ext944 root is `ext_konjnd_jpeg_val.parquet` (504 rows) — which *is* the bar's
+   KonJND instrument. The dense corpus exists only at **372**
+   (`/mnt/v/zen/zensim-training/canonical-2026-05-18/train/konjnd-dense.parquet`,
+   20,160 rows × f0..f371). Using it at 944 is the column-mixing this repo bans
+   absolutely.
+2. **Even re-extracted at 944 it would void the bar row.** Its 1,008 references
+   are a strict superset of the eval leg's: **intersect = 504 / 504, val-only = 0**
+   (measured on `ref_basename`). Training on it makes KonJND reference-level
+   train==val — exactly the KADID/TID guard status this campaign disqualifies from
+   ranking signal. `docs/DATA_SPLITS.md:105` already records the same fact
+   ("same 1,008 refs both sides → ref-level train==val; treat KonJND eval as
+   guard+anchor, not holdout").
+
+**⇒ G1/G2 as sketched are NOT EXECUTABLE without either a regime violation or a
+bar violation. They are therefore not attempted, and this is registered as the
+finding rather than silently substituted.**
+
+#### G-R — the reference-disjoint route (registered, conditional on faithful reconstruction)
+
+504 of the dense corpus's 1,008 refs are **not** in the eval leg, so a
+reference-disjoint `konjnd_dense_train944` leg (≈10,080 pairs) is legitimate in
+principle. Building it faithfully requires recovering (a) the exact 20-rows-per-
+reference pair list and (b) the per-pair active-mix target that the 372 build
+used — neither is carried in the parquet (it has `ref_basename` only, no paths).
+**Registered as conditional**: attempted only if the pair list + target rule can
+be reconstructed *exactly* from committed provenance; a reconstruction that has
+to guess the target is a fabricated corpus and will not be built. Honest not-run
+with the blocker named is the alternative outcome, and is an acceptable one.
+
+#### G-E — KonJND-aware ensembling (the executable arm)
+
+Wave 5's arms were ranked **by CID22 only**, which is why every one of them is
+KonJND-poor: the pool's KonJND-strong bakes were never members. This arm asks the
+supervisor's direct question — *is there any configuration that reaches all five
+rows* — with the cheapest discriminating instrument available (scoring only, zero
+training), through the same frozen §0 invocation + `--ensemble`.
+
+**Pool = wave 5's frozen 64-bake 944-MLP pool** (`C_*`), unchanged, so every cell
+stays comparable to wave 5's. The additive/BVLS `A_*`/`B_*` bakes are 944-wide and
+would be legal members, but they are **excluded by registration** to keep the pool
+identical to wave 5's.
+
+Frozen membership (exact lists, not rules; published numbers from the stored
+verdict JSONs):
+
+| arm | k | members |
+|---|---:|---|
+| **G-E1** kon-pair | 2 | `C_co3a_s1301` (CID22 leader 0.89067) + `C_co4_s1307` (KonJND leader among CID22 ≥ 0.885: 0.4725) |
+| **G-E2** trio | 3 | `C_co3a_s1301` + `C_co3a_s1307` (the 4/5-row cell: kon 0.4330, HF-NL +0.2327) + `C_em944_s31` (kon 0.4689) |
+| **G-E3** bar-balanced | 5 | `C_co3a_s1301`, `C_co3a_s1319`, `C_co3a_s1307`, `C_em944_s31`, `C_co4_s1307` |
+| **G-E4** KonJND-floor | 5 | every pool member with published **KonJND ≥ 0.43 AND CID22 ≥ 0.87**: `C_em944_s31`, `C_co3a_s1307`, `C_co4_s1307`, `C_co4_s1301`, `C_co3a_s1327` |
+| **G-E5** wave-5 + kon | 8 | the five `W5_E1_k5` members + `C_co3a_s1307`, `C_co4_s1307`, `C_em944_s127` — the direct test of *"does adding KonJND-strong members to wave 5's best arm repair the row without losing CID22?"* |
+
+**Registered hazard, stated up front:** these lists are *constructed from published
+eval-set rankings*, so a five-row pass is a demonstration that such a function
+**exists in the pool**, not an out-of-sample claim. Wave 5's E1 arms had the same
+property (top-k by published CID22); this wave states it explicitly rather than
+leaving it implicit. The only thing that converts an existence demonstration into
+an artifact is distillation — which is why G-F below is registered.
+
+**Endpoints:** the five bar rows verbatim + sdr25/composite reported. **M3a is NOT
+COMPUTABLE for any G-E arm** (§5.6, inherited and unchanged) — stated, never
+proxied. G-RANGE NOT EVALUABLE (inherited tool gap).
+
+#### G-F — the follow-on (fires only on a five-row G-E arm)
+
+If any G-E arm clears **CID22 > 0.89238 AND KonJND ≥ 0.43 AND nonphoto ≥ 0.90 AND
+HF-NL-proxy ≥ 0.1931 AND dial ≥ 93% / ≤ 5%**, it is distilled immediately through
+the arm-F machinery (same twins, same affine rule, same co3a student, seeds
+{1301, 1303, 1307}, tag `C_ensG_s<seed>`), and the best student takes the full
+battery **including M3a** — the row the ensemble itself cannot be judged on. If no
+arm clears all five, G-F does not run and the wave reports the honest null with the
+full grid.
+
+### 6.3 Ops (frozen)
+
+Workspace `zensim--wave6` on `main@origin`; `CARGO_TARGET_DIR=$HOME/tmp/zensimw6-target`;
+logs `~/tmp/wave6/`; every heavy step under `~/work/zen/scripts/run-heavy`; verdicts
+through `scripts/sota944_verdict.sh` (the one frozen §0 invocation). Training is
+fleet-parallel across lanes that are **genuinely free** (observe-before-load: tower
+serves media, the kids' boxes default to Windows). Scoring arms are foreground.
+Nothing is shipped, swapped, promoted, or published; no default changes; no bake
+enters `zensim/weights/`. The freeze decision remains the user's.
