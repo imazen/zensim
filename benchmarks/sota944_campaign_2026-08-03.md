@@ -2018,3 +2018,150 @@ fleet-parallel across lanes that are **genuinely free** (observe-before-load: to
 serves media, the kids' boxes default to Windows). Scoring arms are foreground.
 Nothing is shipped, swapped, promoted, or published; no default changes; no bake
 enters `zensim/weights/`. The freeze decision remains the user's.
+
+### Wave-6 arm G results (2026-08-04) — the KonJND blocker is BROKEN; the bar's binding row moves to CID22
+
+#### G0 — the structural finding (measured, and it is now COMPLETE)
+
+The registration recorded that the supervisor's literal arm G (co3a/co4 + a
+konjnd-dense training group) is not executable. Following it to the bottom
+produced a definitive answer, not just a blocker:
+
+| fact | measurement |
+|---|---|
+| no 944-regime konjnd-dense exists | ext944 root carries exactly one KonJND parquet: `ext_konjnd_jpeg_val.parquet`, **504 rows** — the bar's own instrument. The dense corpus is 372-only (20,160 × f0..f371) |
+| the 372 dense corpus contains the whole eval leg | `ref_basename` intersect = **504 / 504**, val-only = **0** ⇒ training on it (at any width) makes the KonJND bar row reference-level train==val, the KADID/TID guard status this campaign disqualifies from ranking signal (`docs/DATA_SPLITS.md:105` records the same) |
+| the reference-disjoint half is EXACTLY the BPG half | KonJND-1k splits **504 JPEG refs ∪ 504 BPG refs, intersection 0** (from `konjnd_full_scored.csv`). Verified set-identities: eval leg **== the JPEG 504**; `dense − eval` **== the BPG 504**; `dense == JPEG ∪ BPG` |
+| and the BPG half cannot be extracted at 944 | **zensim has no BPG decoder** — the ext944 manifest already says so (`"KonJND-1k validation split, JPEG half (BPG half: no decoder)"`) |
+
+**⇒ G-R is structurally blocked, definitively: the only reference-disjoint
+KonJND training mass that exists is behind a codec zensim cannot decode.** This
+is not "did not get to it" — there is no faithful path to a legitimate
+konjnd-dense-944 training leg without either (a) a BPG decode path, or (b)
+re-encoding the BPG-half references with a supported codec, which changes the
+distortion type and therefore voids the PJND targets those references carry.
+Recorded as the wave's answer to the training route, and as a concrete,
+narrow future lever (a). No corpus was fabricated; the pair list and the
+per-pair active-mix target of the 372 build are not recoverable from any
+committed artifact (the parquet carries `ref_basename` only — no paths, no
+ladder index), and the registration forbade guessing them.
+
+#### G-E — KonJND-aware ensembling (5 frozen arms, all run)
+
+Every cell is the frozen §0 invocation + `--ensemble`, directly comparable to
+all 64 single-bake cells and wave 5's six arms. HF-NL is
+`rank.hfnlproxy.per_ref_mean`.
+
+| cell | k | CID22 | KonJND | nonphoto | HF-NL | dial mono | tied | sdr25 | composite | rows |
+|---|---:|---|---|---|---|---|---|---|---|---|
+| `W6_GE1_konpair` | 2 | 0.89048 | 0.4517 | 0.9097 | −0.112 | 94.9% | 0.0% | 0.9248 | 0.8517 | 3/5 |
+| **`W6_GE2_trio`** | 3 | **0.89187** | **0.4543** | **0.9203** | +0.163 | 95.2% | 0.0% | 0.9385 | **0.8571** | **3/5** |
+| `W6_GE3_balanced5` | 5 | 0.89093 | 0.4530 | 0.9184 | +0.145 | 95.1% | 0.0% | 0.9337 | 0.8555 | 3/5 |
+| `W6_GE4_konfloor5` | 5 | 0.88827 | **0.4711** | 0.9152 | −0.043 | 94.5% | 0.0% | 0.9309 | 0.8549 | 3/5 |
+| `W6_GE5_w5plus3` | 8 | 0.88985 | 0.4373 | 0.9158 | −0.041 | 95.3% | 0.0% | 0.9339 | 0.8524 | 3/5 |
+| *[ref] `W5_E1_k5`* | 5 | 0.89329 | 0.4037 | 0.9128 | +0.119 | 95.3% | 0.0% | 0.9527 | 0.8499 | 3/5 |
+| *[ref] EM4 = the bar* | 1 | 0.89238 | 0.4286 | 0.9098 | +0.132 | 94.7% | 0.0% | 0.9556 | 0.8511 | 3/5 |
+| *[ref] `C_co3a_s1301`* | 1 | 0.89067 | 0.4050 | 0.9045 | +0.251 | 95.9% | 0.0% | 0.9282 | 0.8452 | 3/5 |
+
+Secondary corpora (same runs): csiq 0.786–0.827 · live 0.845–0.860 · aic3
+0.789–0.797 · aic4 0.898–0.913 · imazen26 0.907–0.917 · kadid `t=v` 0.38–0.53 ·
+tid `t=v` 0.90–0.92. Dial reach 22.1–24.1 (vs 20.6 single, 17.9 EM4); corruption
+dial-alone 0.051–0.060 (the head remains the corruption owner).
+
+#### Finding G-1 — KonJND is no longer the blocker, and the gain is RESOLVED
+
+**All five G-E arms clear the 0.43 KonJND bar (0.4373–0.4711).** No ensemble in
+wave 5 did (max 0.4058, and that was the row the whole wave stalled on). The
+mechanism is exactly what it looks like: wave 5's arms were ranked *by CID22
+only*, so the pool's KonJND-strong bakes were never members.
+
+Paired bootstrap (B=2000, seed 20260804, the same resampled index sets applied
+to both sides, computed by `panel --batch` through
+`scripts/lib/zen_stats.panel_batch_indexed`; the `human` column was asserted
+identical across all four series before any Δ was taken; per-pair predictions
+from `bake_verdict --per-pair-output`):
+
+| KonJND comparison (n=504) | median Δ | 2.5% | 97.5% | P(Δ>0) |
+|---|---|---|---|---|
+| **`W6_GE2_trio` − `W5_E1_k5`** | **+0.0506** | **+0.0317** | +0.0701 | **1.000** |
+| `W6_GE2_trio` − EM4 (the bar) | +0.0251 | −0.0054 | +0.0567 | 0.944 |
+| EM4 − `W5_E1_k5` | +0.0253 | −0.0019 | +0.0538 | 0.964 |
+| `C_co3a_s1301` − `W5_E1_k5` | +0.0007 | −0.0276 | +0.0302 | 0.515 |
+
+The KonJND gain over wave 5's best arm is **real and resolved at 95%**. Against
+the bar's own source model it is +0.025 at P=0.944 — a point win, not certified.
+
+#### Finding G-2 — the binding row MOVED, and the new one is 0.0005 wide
+
+`W6_GE2_trio` misses CID22 by **0.00051** (0.891868 vs the 0.8923796503 bar).
+Paired bootstrap on the same 4,292 pairs:
+
+| CID22 comparison (n=4,292) | median Δ | 2.5% | 97.5% | P(Δ>0) |
+|---|---|---|---|---|
+| `W6_GE2_trio` − EM4 (the bar) | −0.00052 | −0.00225 | +0.00127 | 0.287 |
+| `W6_GE2_trio` − `C_co3a_s1301` (best single) | +0.00120 | −0.00057 | +0.00303 | 0.896 |
+| `W5_E1_k5` − EM4 | +0.00089 | −0.00077 | +0.00265 | 0.852 |
+| `W5_E1_k5` − `C_co3a_s1301` | +0.00261 | +0.00056 | +0.00476 | 0.994 |
+
+(The two `W5_E1_k5` rows re-derive wave 5's published +0.00088 / +0.00257 to
+within bootstrap noise on independent draws — a free cross-wave consistency
+check on the instrument.)
+
+So `W6_GE2_trio` is **statistically indistinguishable from the bar on CID22**
+(P=0.287 against, CI straddling zero) while beating it on KonJND at P=0.944.
+It is not a bar pass — the point estimate is below — and it is reported as
+exactly that.
+
+#### Finding G-3 — the wave-5 CID22↔breadth trade re-appears as CID22↔KonJND
+
+Wave 5 found CID22 falling monotonically in k while non-photo rose. Wave 6 finds
+the same *shape* on a different axis: every KonJND-strong member added costs
+CID22. `W6_GE5_w5plus3` is the cleanest read — it is `W5_E1_k5` **plus** three
+KonJND-strong members, and it moves KonJND 0.4037 → 0.4373 while CID22 goes
+0.89329 → 0.88985 (−0.0034). The two rows are not independently reachable by
+member selection over this pool; **that, and not KonJND alone, is what now
+blocks the five-row bar.**
+
+`W6_GE2_trio` also carries the **highest `composite` of any cell in the entire
+campaign** (0.8571 vs wave 5's best 0.8514 and EM4's 0.8511) — read with the
+wave-5 caution that the composite includes the train==val guards.
+
+#### The bar verdict — no arm clears all five rows; G-F does NOT fire
+
+| axis | bar | GE1 | GE2 | GE3 | GE4 | GE5 |
+|---|---|---|---|---|---|---|
+| CID22 | > 0.8923796503 | FAIL | FAIL (−0.0005) | FAIL | FAIL | FAIL |
+| KonJND | ≥ 0.43 | **PASS** | **PASS** | **PASS** | **PASS** | **PASS** |
+| nonphoto | ≥ 0.90 | PASS | PASS | PASS | PASS | PASS |
+| HF-NL-proxy | ≥ 0.1931 | FAIL | FAIL | FAIL | FAIL | FAIL |
+| dial mono / tied | ≥93% / ≤5% | PASS | PASS | PASS | PASS | PASS |
+| **rows passed** | 5 | 3/5 | **3/5** | 3/5 | 3/5 | 3/5 |
+| M3a | ≥ 0.85 | n/a | n/a | n/a | n/a | n/a |
+| G-RANGE | clean | n/a | n/a | n/a | n/a | n/a |
+
+M3a is **NOT COMPUTABLE** for a raw ensemble (§5.6, inherited — stated, never
+proxied). G-RANGE NOT EVALUABLE (the `bake_dial_refit.rs:182` MLP tool gap).
+**The registered G-F firing condition requires all five rows on one arm. None
+meets it, so G-F was NOT run** — the same discipline wave 4 applied to `co4m`
+and wave 5 to its own §5.7.
+
+Context worth stating for the HF-NL column: the campaign has already recorded
+that **EM4 — the model the CID22 bar is taken from — fails this row itself**
+(0.132 < 0.1931), and that the proxy is unstable across arms with no relation to
+k. Every G-E arm failing it is consistent with that reading. The row was not
+relaxed and is reported as a FAIL.
+
+#### Limitations of arm G (complete)
+
+- **The G-E member lists are constructed from published eval-set rankings**, as
+  registered. A pass would demonstrate that such a function *exists in the
+  pool*, not an out-of-sample claim. Nothing here is out-of-sample.
+- **The grid was frozen at registration and not grown.** Trends visible in the
+  table (e.g. that the CID22↔KonJND trade might have a better k=2 point among
+  the high-HF-NL co3a members) are *recorded, not chased* — the campaign's
+  standing rule.
+- **M3a un-judged** for every arm — the same limitation wave 5 recorded, and the
+  reason arm F exists.
+- **G-R not built**, for the measured structural reason above — not for time.
+- KonJND is n=504 and read as |SROCC|; the bootstrap CIs above are the honest
+  width of that instrument.
