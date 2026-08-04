@@ -38,8 +38,10 @@ the commit); identity is never color-alone — every series is labeled and the t
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -54,6 +56,68 @@ PALETTE = {
     "light": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"],
     "dark":  ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
 }
+# ONE source for the page's CSS custom properties AND the ECharts option colors
+# (DATA.chartThemes): the charts must ink from the same tokens as the page in both
+# modes, and generating both from this dict makes drift impossible. Values are the
+# dataviz-validated ones the CSS carried before the ECharts migration.
+THEME_VARS = {
+    "light": {
+        "surface-1": "#fcfcfb", "plane": "#f9f9f7", "text-primary": "#0b0b0b",
+        "text-secondary": "#52514e", "muted": "#898781", "grid": "#e1e0d9",
+        "axis": "#c3c2b7", "border": "rgba(11,11,11,.10)",
+        "good": "#0ca30c", "warn": "#fab219", "serious": "#ec835a", "critical": "#d03b3b",
+        "seq-lo": "#cde2fb", "seq-hi": "#104281",
+    },
+    "dark": {
+        "surface-1": "#1a1a19", "plane": "#0d0d0d", "text-primary": "#fff",
+        "text-secondary": "#c3c2b7", "muted": "#898781", "grid": "#2c2c2a",
+        "axis": "#383835", "border": "rgba(255,255,255,.10)",
+        "good": "#0ca30c", "warn": "#fab219", "serious": "#ec835a", "critical": "#d03b3b",
+        "seq-lo": "#0d366b", "seq-hi": "#cde2fb",
+    },
+}
+
+# ---- vendored Apache ECharts (semantic zoom for the heavyweight panels) --------------
+# The bundle is >30 KB so it is NEVER in git: scripts/v_next/vendor/echarts.pointer.md
+# records version + block-storage path + sha256, and the build verifies + inlines it
+# (the page allows no external requests). env ZEN_ECHARTS_JS overrides the file path.
+ECHARTS_POINTER = Path(__file__).resolve().parent / "vendor" / "echarts.pointer.md"
+
+
+def _load_echarts():
+    """Return (bundle_js, version) for the sha256-verified vendored ECharts bundle.
+    LOUD failure with download instructions when the bundle is missing or mismatched —
+    a silently chartless page would be worse than no page."""
+    meta = {}
+    try:
+        for ln in ECHARTS_POINTER.read_text().splitlines():
+            m = re.match(r"^-\s+(\w+):\s+(.+?)\s*$", ln)
+            if m:
+                meta[m.group(1)] = m.group(2)
+    except FileNotFoundError:
+        raise SystemExit(f"ECharts pointer missing: {ECHARTS_POINTER} — restore it from git "
+                         "(it names the vendored bundle + sha256)")
+    path = Path(os.environ.get("ZEN_ECHARTS_JS") or meta.get("file", ""))
+    want = (meta.get("sha256") or "").lower()
+    if not path.is_file():
+        raise SystemExit(
+            f"vendored ECharts bundle NOT FOUND at {path}\n"
+            f"Download it once (full instructions in {ECHARTS_POINTER}):\n"
+            f"  mkdir -p {path.parent}\n"
+            f"  curl -sL -o {path} {meta.get('upstream', '<upstream url in the pointer>')}\n"
+            f"  sha256sum {path}   # must print {want}"
+        )
+    data = path.read_bytes()
+    got = hashlib.sha256(data).hexdigest()
+    if got != want:
+        raise SystemExit(
+            f"vendored ECharts sha256 MISMATCH at {path}\n  pointer: {want}\n  actual:  {got}\n"
+            f"Re-download per {ECHARTS_POINTER}, or update the pointer deliberately (version bump)."
+        )
+    js = data.decode("utf-8")
+    if "</script" in js.lower():
+        raise SystemExit("vendored ECharts contains '</script' — cannot be inlined safely")
+    return js, meta.get("version", "?")
 REFERENCES = ["mos", "jnd", "ssim2", "butter", "cvvdp"]
 REF_LABELS = {"mos": "MOS (human)", "jnd": "JND (human)", "ssim2": "SSIMULACRA2",
               "butter": "butteraugli (↑=better)", "cvvdp": "ColorVideoVDP"}
@@ -332,25 +396,23 @@ def load_fulleval(fulleval_dir, best_per_day=None):
 
 
 # ------------------------------------------------------------------ HTML assembly ------------
+def _css_vars(mode):
+    """One CSS custom-property run generated from THEME_VARS (same dict the charts ink from)."""
+    return " ".join(f"--{k}:{v};" for k, v in THEME_VARS[mode].items())
+
+
 _CSS = """
 :root{color-scheme:light dark}
 .viz-root{
-  --surface-1:#fcfcfb; --plane:#f9f9f7; --text-primary:#0b0b0b; --text-secondary:#52514e;
-  --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
-  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --critical:#d03b3b;
-  --seq-lo:#cde2fb; --seq-hi:#104281;
+  /*__LIGHT_VARS__*/
   color:var(--text-primary); background:var(--plane);
   font:13px system-ui,-apple-system,"Segoe UI",sans-serif;
 }
 @media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])) .viz-root{
-  --surface-1:#1a1a19; --plane:#0d0d0d; --text-primary:#fff; --text-secondary:#c3c2b7;
-  --muted:#898781; --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
-  --seq-lo:#0d366b; --seq-hi:#cde2fb;
+  /*__DARK_VARS__*/
 }}
 :root[data-theme="dark"] .viz-root{
-  --surface-1:#1a1a19; --plane:#0d0d0d; --text-primary:#fff; --text-secondary:#c3c2b7;
-  --muted:#898781; --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
-  --seq-lo:#0d366b; --seq-hi:#cde2fb;
+  /*__DARK_VARS__*/
 }
 .viz-root{margin:0;padding:1.1rem 1.3rem 4rem}
 h1{font-size:1.32rem;margin:.1rem 0 .2rem}
@@ -371,11 +433,7 @@ code{background:var(--surface-1);border:1px solid var(--border);padding:.05rem .
 .allbakes{flex:1 1 100%}
 .allbakes summary{cursor:pointer}
 .chipwrap{display:flex;flex-wrap:wrap;gap:.4rem;max-height:180px;overflow-y:auto;padding:.35rem 0}
-.zr{position:absolute;top:4px;right:4px;z-index:3;width:22px;height:22px;line-height:1;padding:0;
-    border:1px solid var(--border);border-radius:50%;background:var(--surface-1);color:var(--text-primary);
-    cursor:pointer;opacity:.85;font-size:13px}
-.zr:hover{opacity:1;border-color:var(--muted)}
-.zwrap{position:relative;display:inline-block;max-width:100%}
+.echart{flex:0 0 auto}
 .sw{width:11px;height:11px;border-radius:50%;flex:0 0 auto;border:1px solid var(--border)}
 .btn{padding:.24rem .6rem;border:1px solid var(--border);border-radius:.35rem;background:var(--surface-1);
      color:var(--text-primary);cursor:pointer;font-size:12px}
@@ -405,8 +463,10 @@ svg{display:block;max-width:100%;height:auto}
 
 
 def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=None):
+    ech_js, ech_ver = _load_echarts()
     data = {"bakes": bakes, "palette": PALETTE, "references": REFERENCES,
             "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
+            "chartThemes": THEME_VARS, "echartsVersion": ech_ver,
             "loopTargeting": loop_targeting}
     any_stub = any(b.get("is_stub") for b in bakes)
     stub_note = ("<span class='stub'>STUB DATA</span> — synthesized fixtures "
@@ -422,23 +482,31 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     head = (
         "<h1>" + title + "</h1>"
         "<p class='sub'>" + stub_note + coverage +
-        "Toggle bakes below to compare them across every chart; click a table header to sort. "
+        "Toggle bakes below to compare them across every chart; click any table header to sort. "
         "The scatter matrix shows <b>predicted vs each reference</b> (MOS, JND, SSIMULACRA2, "
         "butteraugli, ColorVideoVDP) per corpus, with an OLS fit and canonical SROCC/PLCC. "
-        "Charts zoom (wheel), pan (drag) and reset (double-click or ⟲). "
+        "Charts are Apache ECharts " + ech_ver + " (inlined — still fully offline) with "
+        "<b>semantic zoom</b>: wheel/drag and the sliders rescale the AXES and re-plot the data "
+        "while marks, line widths and labels stay constant size (crowded labels de-overlap as "
+        "you zoom in); double-click a chart to reset. "
         "All data, styles and scripts are inlined — this page opens offline. "
         "By <code>scripts/v_next/bandwise_dashboard.py --fulleval-dir</code>.</p>"
     )
     payload = json.dumps(data, separators=(",", ":"))
+    css = (_CSS.replace("/*__LIGHT_VARS__*/", _css_vars("light"))
+               .replace("/*__DARK_VARS__*/", _css_vars("dark")))
     html = (
         "<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>" + title + "</title>"
-        "<style>" + _CSS + "</style>"
+        "<style>" + css + "</style>"
         "<div class='viz-root'>" + head +
         "<div id='bar' class='bar'></div>"
         "<div id='panels'></div>"
         "<div id='tt' class='tt'></div>"
         "</div>"
+        # vendored ECharts rides its OWN script tag ahead of the app script (the gates
+        # extract + node --check every block; the render harness runs only the app one).
+        "<script id='vendor-echarts'>\n" + ech_js + "\n</script>"
         "<script>\nconst DATA=" + payload + ";\n" + _JS + "\n</script>"
     )
     Path(out_path).write_text(html)
@@ -504,71 +572,57 @@ function showTip(html,ev){tt.innerHTML=html;tt.style.opacity=1;
   tt.style.left=x+'px';tt.style.top=y+'px';}
 function hideTip(){tt.style.opacity=0;}
 
-// ---- ZOOM/PAN (2026-08-04): shared viewBox-based helper for the heavyweight charts.
-// Wheel = zoom centered on the cursor (clamped 1x-20x of the base view); pointer-drag =
-// pan (only once zoomed, so clicks/tooltips at 1x are untouched); double-click or the
-// corner ⟲ button = reset. Pure viewBox math — element mousemove tooltips keep landing
-// at the cursor because showTip anchors at ev.clientX/clientY (viewport coords, which a
-// viewBox change never remaps). DOM-shim safe: listeners are BOUND at build but only run
-// on real interaction, and every pointer/rect API is typeof-guarded so the render
-// harness can never crash.
-function makeZoomable(svg,opts){
-  const vbAttr=svg&&typeof svg.getAttribute==='function'?svg.getAttribute('viewBox'):null;
-  const vb=vbAttr?String(vbAttr).split(/[ ,]+/).map(Number):[];
-  if(vb.length!==4||vb.some(v=>!isFinite(v)))return svg;   // not a chart svg — pass through
-  const base={x:vb[0],y:vb[1],w:vb[2],h:vb[3]};
-  const maxZ=(opts&&opts.maxZoom)||20;
-  let cur={x:base.x,y:base.y,w:base.w,h:base.h};
-  const wrap=el('div',{class:'zwrap'});
-  const btn=el('button',{class:'zr',title:'reset zoom (double-click the chart also resets)',text:'⟲'});
-  btn.style.display='none';
-  const zoomed=()=>cur.w<base.w*0.999;
-  const apply=()=>{svg.setAttribute('viewBox',cur.x+' '+cur.y+' '+cur.w+' '+cur.h);
-    btn.style.display=zoomed()?'':'none';};
-  const reset=()=>{cur={x:base.x,y:base.y,w:base.w,h:base.h};apply();};
-  const clamp=()=>{
-    cur.w=Math.min(base.w,Math.max(base.w/maxZ,cur.w));
-    cur.h=Math.min(base.h,Math.max(base.h/maxZ,cur.h));
-    cur.x=Math.max(base.x,Math.min(base.x+base.w-cur.w,cur.x));
-    cur.y=Math.max(base.y,Math.min(base.y+base.h-cur.h,cur.y));};
-  const rectOf=()=>(typeof svg.getBoundingClientRect==='function')
-    ?svg.getBoundingClientRect():{left:0,top:0,width:base.w,height:base.h};
-  svg.addEventListener('wheel',ev=>{
-    ev.preventDefault();                       // chart-local zoom, not page scroll
-    const r=rectOf();if(!r.width||!r.height)return;
-    const fx=(ev.clientX-r.left)/r.width,fy=(ev.clientY-r.top)/r.height;
-    const px=cur.x+fx*cur.w,py=cur.y+fy*cur.h; // data point under the cursor stays put
-    const s=Math.pow(1.0015,ev.deltaY);        // deltaY>0 = zoom out
-    cur.w*=s;cur.h*=s;
-    cur.w=Math.min(base.w,Math.max(base.w/maxZ,cur.w));
-    cur.h=Math.min(base.h,Math.max(base.h/maxZ,cur.h));
-    cur.x=px-fx*cur.w;cur.y=py-fy*cur.h;
-    clamp();apply();
-  },{passive:false});
-  let drag=null;
-  svg.addEventListener('pointerdown',ev=>{
-    if(!zoomed())return;                       // 1x: leave clicks + tooltips alone
-    drag={cx:ev.clientX,cy:ev.clientY,vx:cur.x,vy:cur.y,r:rectOf()};
-    if(typeof svg.setPointerCapture==='function'&&ev.pointerId!=null){
-      try{svg.setPointerCapture(ev.pointerId);}catch(e){}}
-    if(ev.preventDefault)ev.preventDefault();
-  });
-  svg.addEventListener('pointermove',ev=>{
-    if(!drag)return;
-    cur.x=drag.vx-(ev.clientX-drag.cx)*cur.w/(drag.r.width||1);
-    cur.y=drag.vy-(ev.clientY-drag.cy)*cur.h/(drag.r.height||1);
-    clamp();apply();
-  });
-  const endDrag=ev=>{
-    if(drag&&typeof svg.releasePointerCapture==='function'&&ev.pointerId!=null){
-      try{svg.releasePointerCapture(ev.pointerId);}catch(e){}}
-    drag=null;};
-  svg.addEventListener('pointerup',endDrag);
-  svg.addEventListener('pointercancel',endDrag);
-  svg.addEventListener('dblclick',ev=>{if(ev.preventDefault)ev.preventDefault();reset();});
-  btn.onclick=reset;
-  wrap.append(svg,btn);
-  return wrap;
+// ---- ECharts mount layer (2026-08-04). The five heavyweight panels (scatter matrix,
+// dial curves, 10-band bars, cross-corpus heatmap, trade maps) render through Apache
+// ECharts (vendored + inlined, canvas renderer) for SEMANTIC zoom: dataZoom rescales
+// the AXES and re-plots into the new domain while symbol sizes, stroke widths and label
+// fonts stay constant — the predecessor viewBox zoom scaled the whole picture, so
+// overlapping labels stayed overlapping at every zoom level (2026-08-04 user report).
+// Shim/canvas-less safety: every mount ALWAYS builds its option (pure data — stashed on
+// host._chartOption for the render harness) and only calls echarts.init when a real
+// canvas 2d context exists; charts lazy-init on first viewport intersection so a
+// ~160-cell board doesn't pay for offscreen canvases. Double-click = reset (restore).
+const CANVAS_OK=(()=>{try{const c=document.createElement&&document.createElement('canvas');
+  return !!(c&&typeof c.getContext==='function'&&c.getContext('2d'));}catch(e){return false;}})();
+const HAS_ECH=typeof echarts!=='undefined'&&echarts&&typeof echarts.init==='function';
+let CHARTS=[],IOS=[];
+function disposeCharts(){CHARTS.forEach(c=>{try{c.dispose();}catch(e){}});CHARTS=[];
+  IOS.forEach(o=>{try{o.disconnect();}catch(e){}});IOS=[];}
+function TH(){return DATA.chartThemes[effTheme()==='dark'?'dark':'light'];}
+function axStyle(name){const t=TH();return{
+  type:'value',scale:true,name:name||'',nameLocation:'middle',nameGap:24,
+  nameTextStyle:{color:t['text-secondary'],fontSize:10},
+  axisLine:{lineStyle:{color:t.axis}},axisTick:{lineStyle:{color:t.axis}},
+  axisLabel:{color:t.muted,fontSize:9},
+  splitLine:{show:true,lineStyle:{color:t.grid,width:0.6}}};}
+function ttStyle(){const t=TH();return{backgroundColor:t['surface-1'],borderColor:t.muted,
+  borderWidth:1,padding:[4,7],confine:true,
+  textStyle:{color:t['text-primary'],fontSize:11},
+  extraCssText:'box-shadow:0 2px 8px rgba(0,0,0,.18)'};}
+function dzSlider(extra){const t=TH();return Object.assign({type:'slider',height:12,bottom:4,
+  borderColor:t.axis,fillerColor:'rgba(128,128,128,.18)',handleSize:'90%',
+  dataBackground:{lineStyle:{color:t.axis,width:.5},areaStyle:{color:t.grid,opacity:.4}},
+  selectedDataBackground:{lineStyle:{color:t.muted,width:.5},areaStyle:{color:t.grid}},
+  moveHandleSize:0,brushSelect:false,textStyle:{color:t.muted,fontSize:8}},extra||{});}
+function mountChart(kind,w,h,option){
+  const host=el('div',{class:'echart','data-kind':kind,
+    style:'width:'+w+'px;height:'+h+'px;max-width:100%;background:var(--surface-1);'
+      +'border:1px solid var(--border);border-radius:6px'});
+  host._chartOption=option;                       // pure data — the render harness checks it
+  if(CANVAS_OK&&HAS_ECH){
+    const init=()=>{if(host._chart)return;
+      const c=echarts.init(host,null,{renderer:'canvas',width:w,height:h});
+      c.setOption(option);
+      if(typeof host.addEventListener==='function')
+        host.addEventListener('dblclick',()=>{try{c.dispatchAction({type:'restore'});}catch(e){}});
+      host._chart=c;CHARTS.push(c);};
+    if(typeof IntersectionObserver==='function'){
+      const io=new IntersectionObserver(es=>{es.forEach(x=>{if(x.isIntersecting){init();io.disconnect();}});},
+        {rootMargin:'250px'});
+      io.observe(host);IOS.push(io);
+    }else init();
+  }
+  return host;
 }
 
 // ---- CONTROL BAR: preset buttons + FAMILY toggles + collapsible per-bake chips +
@@ -608,7 +662,9 @@ function renderBar(){
   DATA.bakes.forEach(b=>{
     const on=state.visible.has(b.name);
     const chip=el('label',{class:'chip'+(on?'':' off'),
-      title:b.regime+(b.family?' · '+b.family:'')+(b.curated?' · curated':'')
+      title:b.regime+' inputs'
+        +(b.regime_flag&&b.regime_flag!==b.regime?' (recorded flag: '+b.regime_flag+')':'')
+        +(b.family?' · '+b.family:'')+(b.curated?' · curated':'')
         +(b.is_stub?' (stub)':'')+(isEns(b)?' · ensemble of '+ensK(b)+' bakes':'')});
     const cb=el('input',{type:'checkbox'});cb.checked=on;
     cb.onchange=()=>{on?state.visible.delete(b.name):state.visible.add(b.name);rerender();renderBar();};
@@ -631,7 +687,8 @@ function renderBar(){
   bar.appendChild(tabs);
   const th=el('button',{class:'btn',text:'◐ theme'});
   th.onclick=()=>{const cur=document.documentElement.getAttribute('data-theme');
-    document.documentElement.setAttribute('data-theme',cur==='dark'?'light':(cur==='light'?'dark':'light'));rerender();};
+    document.documentElement.setAttribute('data-theme',cur==='dark'?'light':(cur==='light'?'dark':'light'));
+    renderBar();rerender();};
   bar.appendChild(th);
 }
 
@@ -787,41 +844,32 @@ function renderTable(){
   return wrap;
 }
 
-// ---- generic SVG scatter cell: pred (x) vs reference (y)
-function scatterCell(b,corp,ref){
-  const cell=b.scatter[corp]&&b.scatter[corp][ref];
-  const W=214,H=200,mL=34,mR=8,mT=34,mB=26;
-  const svg=S('svg',{viewBox:`0 0 ${W} ${H}`,width:W,height:H,
-    style:'background:var(--surface-1);border:1px solid var(--border);border-radius:5px'});
-  if(!cell||!cell.pts.length){svg.append(S('text',{x:W/2,y:H/2,'text-anchor':'middle',
-    fill:cssv('--muted'),'font-size':10,text:'no '+ref}));return svg;}
-  const pts=cell.pts;const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);
-  let x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
-  const px=(x1-x0)*.04||1,py=(y1-y0)*.04||1;x0-=px;x1+=px;y0-=py;y1+=py;
-  const SX=v=>mL+(v-x0)/(x1-x0)*(W-mL-mR),SY=v=>H-mB-(v-y0)/(y1-y0)*(H-mT-mB);
-  // grid + axes
-  const g=cssv('--grid'),ax=cssv('--axis'),mu=cssv('--muted');
-  for(let i=0;i<=3;i++){const gy=mT+i/3*(H-mT-mB);svg.append(S('line',{x1:mL,y1:gy,x2:W-mR,y2:gy,stroke:g,'stroke-width':.6}));}
-  svg.append(S('line',{x1:mL,y1:mT,x2:mL,y2:H-mB,stroke:ax,'stroke-width':1}));
-  svg.append(S('line',{x1:mL,y1:H-mB,x2:W-mR,y2:H-mB,stroke:ax,'stroke-width':1}));
-  // y ticks (ref) + x ticks (pred)
-  [y0,(y0+y1)/2,y1].forEach(v=>svg.append(S('text',{x:mL-3,y:SY(v)+3,'text-anchor':'end','font-size':8,fill:mu,text:(Math.abs(v)>=100?v.toFixed(0):v.toFixed(1))})));
-  [x0,x1].forEach(v=>svg.append(S('text',{x:SX(v),y:H-mB+10,'text-anchor':'middle','font-size':8,fill:mu,text:v.toFixed(1)})));
-  // points
-  const c=color(b);
-  pts.forEach(p=>{const cx=SX(p[0]),cy=SY(p[1]);
-    const dot=S('circle',{cx,cy,r:2.2,fill:c,'fill-opacity':.5,stroke:cssv('--surface-1'),'stroke-width':.4});
-    dot.addEventListener('mousemove',ev=>showTip('pred <b>'+p[0].toFixed(3)+'</b><br>'+ref+' <b>'+p[1].toFixed(3)+'</b>',ev));
-    dot.addEventListener('mouseleave',hideTip);svg.append(dot);});
-  // fit line
-  if(cell.fit){const[fx0,fy0,fx1,fy1]=cell.fit;
-    svg.append(S('line',{x1:SX(fx0),y1:SY(fy0),x2:SX(fx1),y2:SY(fy1),stroke:c,'stroke-width':2,'stroke-opacity':.9,'stroke-linecap':'round'}));}
-  // title (own line) + stats (own line) — two lines so a long bake name never collides with ρ/r
-  svg.append(S('text',{x:mL,y:12,'font-size':10.5,'font-weight':600,fill:cssv('--text-primary'),
-    text:(b.name.length>29?b.name.slice(0,28)+'…':b.name)+ensTag(b)}));
-  svg.append(S('text',{x:mL,y:25,'font-size':9.5,fill:cssv('--text-secondary'),
-    text:'ρ '+f3(cell.srocc)+'   r '+f3(cell.plcc)+'   n='+cell.n}));
-  return svg;
+// ---- scatter-matrix cell (ECharts): pred (x) vs reference (y), OLS fit as a line
+// series, dataZoom inside (both axes) + x slider, constant symbol size at any zoom.
+function scatterOpt(b,corp,ref,cell){
+  const t=TH();const c=color(b);
+  const refLab=DATA.refLabels[ref]||ref;
+  const series=[{type:'scatter',name:b.name,data:cell.pts,symbolSize:6,
+    itemStyle:{color:c,opacity:.55},emphasis:{itemStyle:{opacity:1}},z:2}];
+  if(cell.fit)series.push({type:'line',silent:true,symbol:'none',z:3,
+    data:[[cell.fit[0],cell.fit[1]],[cell.fit[2],cell.fit[3]]],
+    lineStyle:{color:c,width:2,opacity:.9}});
+  return{animation:false,
+    title:{text:(b.name.length>30?b.name.slice(0,29)+'…':b.name)+ensTag(b),
+      subtext:'ρ '+f3(cell.srocc)+'   r '+f3(cell.plcc)+'   n='+cell.n,
+      top:2,left:8,itemGap:1,
+      textStyle:{color:t['text-primary'],fontSize:10.5,fontWeight:600},
+      subtextStyle:{color:t['text-secondary'],fontSize:9.5}},
+    tooltip:Object.assign(ttStyle(),{trigger:'item',formatter:p=>
+      p.seriesType==='scatter'
+        ?('<b>'+b.name+'</b><br>pred <b>'+f3(p.value[0])+'</b><br>'+refLab+' <b>'+f3(p.value[1])+'</b>')
+        :('OLS fit')}),
+    grid:{left:42,right:10,top:38,bottom:42},
+    xAxis:axStyle(),yAxis:axStyle(),
+    dataZoom:[{type:'inside',xAxisIndex:0,filterMode:'none'},
+              {type:'inside',yAxisIndex:0,filterMode:'none'},
+              dzSlider({xAxisIndex:0,filterMode:'none'})],
+    series};
 }
 
 function renderScatter(){
@@ -844,13 +892,47 @@ function renderScatter(){
   [...corps,...extra].forEach(corp=>{
     host.append(el('div',{class:'corpttl',text:corp}));
     const row=el('div',{class:'scrow'});
-    bs.forEach(b=>{if(b.scatter[corp]&&b.scatter[corp][ref])row.appendChild(makeZoomable(scatterCell(b,corp,ref)));});
+    bs.forEach(b=>{const cell=b.scatter[corp]&&b.scatter[corp][ref];
+      if(cell&&cell.pts.length)row.appendChild(mountChart('scatter',238,252,scatterOpt(b,corp,ref,cell)));});
     if(!row.children.length)row.appendChild(el('div',{class:'cap',text:'(no visible bake has '+ref+' here)'}));
     host.appendChild(row);
   });
 }
 
-// ---- cross-corpus SROCC heatmap (sequential ramp; visible bakes only)
+// ---- cross-corpus SROCC heatmap (ECharts heatmap + visualMap; visible bakes only)
+function heatOpt(bs,corps,TVSET){
+  const t=TH();
+  const names=bs.map(b=>b.name+ensTag(b));
+  const data=[];
+  bs.forEach((b,i)=>corps.forEach((c,j)=>{const r=b.rank[c];
+    if(r&&r.srocc!=null&&isFinite(r.srocc)){
+      const v=+(+r.srocc).toFixed(4);
+      data.push({value:[j,i,v],_n:r.n,
+        label:{color:(v-.4)/.6>.55?'#fff':t['text-secondary']}});
+    }}));
+  return{animation:false,
+    tooltip:Object.assign(ttStyle(),{formatter:p=>'<b>'+names[p.value[1]]+'</b> × '+corps[p.value[0]]
+      +'<br>SROCC <b>'+f3(p.value[2])+'</b>'+(p.data&&p.data._n!=null?' · n='+p.data._n:'')}),
+    grid:{left:250,right:26,top:56,bottom:48},
+    xAxis:{type:'category',position:'top',data:corps.map(c=>TVSET.has(c)?c+' ⚠':c),
+      axisLine:{show:false},axisTick:{show:false},
+      axisLabel:{fontSize:9.5,rotate:32,color:v=>String(v).includes('⚠')?t.warn:t['text-secondary']}},
+    yAxis:{type:'category',inverse:true,
+      data:names.map(n=>n.length>38?n.slice(0,37)+'…':n),
+      axisLine:{show:false},axisTick:{show:false},
+      axisLabel:{fontSize:10,color:t['text-primary']}},
+    visualMap:{min:0.4,max:1,calculable:true,orient:'horizontal',left:'center',bottom:4,
+      precision:2,itemHeight:110,itemWidth:11,
+      inRange:{color:[t['seq-lo'],t['seq-hi']]},
+      textStyle:{color:t.muted,fontSize:9}},
+    dataZoom:[{type:'inside',yAxisIndex:0,filterMode:'filter',
+               zoomOnMouseWheel:'shift',moveOnMouseWheel:true},
+              {type:'inside',xAxisIndex:0,filterMode:'filter',zoomOnMouseWheel:'shift'}],
+    series:[{type:'heatmap',data,
+      label:{show:true,fontSize:9,formatter:p=>f3(p.value[2]).replace('0.','.')},
+      itemStyle:{borderColor:t.plane,borderWidth:1.5,borderRadius:3},
+      emphasis:{itemStyle:{shadowBlur:6,shadowColor:'rgba(0,0,0,.35)'}}}]};
+}
 function renderHeat(){
   const host=$('#heat');if(!host)return;host.innerHTML='';
   const bs=visBakes();if(!bs.length){return;}
@@ -859,69 +941,51 @@ function renderHeat(){
   // their SROCC is not read as held-out skill (stats review Rec-6).
   const TVSET=new Set();
   DATA.bakes.forEach(b=>Object.entries(b.rank||{}).forEach(([c,r])=>{if(r&&r.train_eq_val)TVSET.add(c);}));
-  const cw=62,rh=22,mL=140,mT=52;const W=mL+corps.length*cw+8,Ht=mT+bs.length*rh+8;
-  const svg=S('svg',{viewBox:`0 0 ${W} ${Ht}`,width:W,height:Ht});
-  corps.forEach((c,j)=>svg.append(S('text',{x:mL+j*cw+cw/2,y:mT-6,'text-anchor':'end','font-size':9.5,
-    fill:TVSET.has(c)?cssv('--warn'):cssv('--text-secondary'),transform:`rotate(-32 ${mL+j*cw+cw/2} ${mT-6})`,
-    text:TVSET.has(c)?c+' ⚠':c})));
-  bs.forEach((b,i)=>{
-    svg.append(S('text',{x:mL-6,y:mT+i*rh+rh/2+3,'text-anchor':'end','font-size':10,fill:cssv('--text-primary'),text:b.name+ensTag(b)}));
-    svg.append(S('rect',{x:mL-16,y:mT+i*rh+rh/2-5,width:10,height:10,rx:2,fill:color(b)}));
-    corps.forEach((c,j)=>{
-      const r=b.rank[c];const v=r?r.srocc:null;
-      const x=mL+j*cw,y=mT+i*rh;
-      let fill=cssv('--surface-1');
-      if(v!=null&&isFinite(v)){const t=Math.max(0,Math.min(1,(v-.4)/.6));
-        fill='color-mix(in srgb, var(--seq-hi) '+Math.round(t*100)+'%, var(--seq-lo))';}
-      const rect=S('rect',{x:x+1,y:y+1,width:cw-2,height:rh-2,rx:3,fill});
-      rect.addEventListener('mousemove',ev=>showTip('<b>'+b.name+'</b> × '+c+'<br>SROCC <b>'+f3(v)+'</b>'+(r?' · n='+r.n:''),ev));
-      rect.addEventListener('mouseleave',hideTip);svg.append(rect);
-      svg.append(S('text',{x:x+cw/2,y:y+rh/2+3,'text-anchor':'middle','font-size':9,
-        fill:(v!=null&&isFinite(v)&&(v-.4)/.6>.55)?'#fff':cssv('--text-secondary'),text:v==null?'':f3(v).replace('0.','.')}));
-    });
-  });
+  const W=250+corps.length*64+40,Ht=Math.max(220,120+bs.length*22+40);
   host.append(el('h2',{text:'Cross-corpus SROCC'}),
-    el('div',{class:'cap',html:'Bake × corpus, SROCC (|SROCC| for JND corpora). Sequential blue: darker = higher. '
-      +'<b>⚠</b> (amber header) = KADID/TID, train==val — SROCC rewards memorization, not held-out generalization.'}),
-    makeZoomable(svg));
+    el('div',{class:'cap',html:'Bake × corpus, SROCC (|SROCC| for JND corpora). Sequential blue: darker = higher '
+      +'(drag the visualMap handles to range-filter cells). <b>⚠</b> (amber header) = KADID/TID, train==val — '
+      +'SROCC rewards memorization, not held-out generalization. Shift+wheel zooms rows/columns; '
+      +'wheel scrolls rows when many bakes are visible; double-click resets.'}));
+  const wrap=el('div',{style:'overflow-x:auto'});
+  wrap.append(mountChart('heat',W,Ht,heatOpt(bs,corps,TVSET)));
+  host.append(wrap);
 }
 
-// ---- operating-point trade map: CID22 vs nonphoto and vs KonJND (labeled points)
-function tradePanel(xc,yc,xl,yl){
-  const bs=visBakes();const W=340,H=270,mL=44,mR=12,mT=16,mB=34;
-  const svg=S('svg',{viewBox:`0 0 ${W} ${H}`,width:W,height:H,style:'background:var(--surface-1);border:1px solid var(--border);border-radius:6px'});
-  const pts=bs.map(b=>({b,x:rs(b,xc),y:rs(b,yc)})).filter(p=>p.x!=null&&p.y!=null&&isFinite(p.x)&&isFinite(p.y));
-  if(!pts.length){svg.append(S('text',{x:W/2,y:H/2,'text-anchor':'middle',fill:cssv('--muted'),'font-size':11,text:'no data'}));return svg;}
-  const xr=[Math.min(...pts.map(p=>p.x)),Math.max(...pts.map(p=>p.x))];
-  const yr=[Math.min(...pts.map(p=>p.y)),Math.max(...pts.map(p=>p.y))];
-  const pad=(r)=>{const d=(r[1]-r[0])*.12||.02;return [r[0]-d,r[1]+d];};
-  const[X0,X1]=pad(xr),[Y0,Y1]=pad(yr);
-  const SX=v=>mL+(v-X0)/(X1-X0)*(W-mL-mR),SY=v=>H-mB-(v-Y0)/(Y1-Y0)*(H-mT-mB);
-  const g=cssv('--grid'),ax=cssv('--axis'),mu=cssv('--muted');
-  for(let i=0;i<=4;i++){const gx=mL+i/4*(W-mL-mR),gy=mT+i/4*(H-mT-mB);
-    svg.append(S('line',{x1:gx,y1:mT,x2:gx,y2:H-mB,stroke:g,'stroke-width':.5}));
-    svg.append(S('line',{x1:mL,y1:gy,x2:W-mR,y2:gy,stroke:g,'stroke-width':.5}));}
-  svg.append(S('line',{x1:mL,y1:mT,x2:mL,y2:H-mB,stroke:ax,'stroke-width':1}));
-  svg.append(S('line',{x1:mL,y1:H-mB,x2:W-mR,y2:H-mB,stroke:ax,'stroke-width':1}));
-  [X0,X1].forEach(v=>svg.append(S('text',{x:SX(v),y:H-mB+12,'text-anchor':'middle','font-size':9,fill:mu,text:f3(v)})));
-  [Y0,Y1].forEach(v=>svg.append(S('text',{x:mL-4,y:SY(v)+3,'text-anchor':'end','font-size':9,fill:mu,text:f3(v)})));
-  svg.append(S('text',{x:(mL+W-mR)/2,y:H-4,'text-anchor':'middle','font-size':10,fill:cssv('--text-secondary'),text:xl}));
-  svg.append(S('text',{x:12,y:(mT+H-mB)/2,'text-anchor':'middle','font-size':10,fill:cssv('--text-secondary'),transform:`rotate(-90 12 ${(mT+H-mB)/2})`,text:yl}));
-  pts.forEach(p=>{const cx=SX(p.x),cy=SY(p.y);
-    svg.append(S('circle',{cx,cy,r:5,fill:color(p.b),stroke:cssv('--surface-1'),'stroke-width':1.2}));
-    const right=cx>mL+(W-mL-mR)*0.6;                       // flip label left near the right edge so it doesn't clip
-    svg.append(S('text',{x:right?cx-8:cx+8,y:cy+3,'text-anchor':right?'end':'start','font-size':9.5,fill:cssv('--text-primary'),text:p.b.name+ensTag(p.b)}));});
-  return svg;
+// ---- operating-point trade map (ECharts scatter, labeled points, dataZoom). Labels
+// auto-hide on overlap and REAPPEAR as you zoom in (labelLayout re-runs per zoom — the
+// semantic-zoom fix for label pile-ups; every point still names itself in the tooltip).
+function tradeOpt(xc,yc,xl,yl,pts){
+  const t=TH();
+  return{animation:false,
+    tooltip:Object.assign(ttStyle(),{formatter:p=>'<b>'+p.data.name+'</b><br>'
+      +xl+' <b>'+f3(p.value[0])+'</b><br>'+yl+' <b>'+f3(p.value[1])+'</b>'}),
+    grid:{left:52,right:16,top:14,bottom:46},
+    xAxis:Object.assign(axStyle(xl),{nameGap:26}),
+    yAxis:Object.assign(axStyle(yl),{nameGap:36}),
+    dataZoom:[{type:'inside',xAxisIndex:0,filterMode:'none'},
+              {type:'inside',yAxisIndex:0,filterMode:'none'}],
+    series:[{type:'scatter',symbolSize:10,
+      data:pts.map(p=>({value:[p.x,p.y],name:p.b.name+ensTag(p.b),
+        itemStyle:{color:color(p.b),borderColor:t['surface-1'],borderWidth:1.2}})),
+      label:{show:true,position:'right',distance:5,fontSize:9.5,color:t['text-primary'],
+        formatter:p=>p.data.name},
+      labelLayout:{hideOverlap:true},
+      emphasis:{label:{fontWeight:700},itemStyle:{shadowBlur:5,shadowColor:'rgba(0,0,0,.3)'}}}]};
 }
 function renderTrade(){
   const host=$('#trade');if(!host)return;host.innerHTML='';
-  if(!visBakes().length)return;
+  const bs=visBakes();if(!bs.length)return;
   host.append(el('h2',{text:'Operating-point trade map'}),
-    el('div',{class:'cap',text:'Upper-right = better on both. Points are directly labeled (identity is never color-alone).'}));
+    el('div',{class:'cap',text:'Upper-right = better on both. Points are directly labeled (identity is never '
+      +'color-alone); overlapping labels hide at 1x and re-appear as you zoom (wheel/drag; double-click resets).'}));
   const grid=el('div',{class:'grid'});
-  grid.append(makeZoomable(tradePanel('cid22','nonphoto','CID22 SROCC','non-photo SROCC')),
-              makeZoomable(tradePanel('cid22','konjnd','CID22 SROCC','KonJND |SROCC|')));
-  host.appendChild(grid);
+  [['cid22','nonphoto','CID22 SROCC','non-photo SROCC'],
+   ['cid22','konjnd','CID22 SROCC','KonJND |SROCC|']].forEach(([xc,yc,xl,yl])=>{
+    const pts=bs.map(b=>({b,x:rs(b,xc),y:rs(b,yc)})).filter(p=>p.x!=null&&p.y!=null&&isFinite(p.x)&&isFinite(p.y));
+    if(pts.length)grid.append(mountChart('trade',390,300,tradeOpt(xc,yc,xl,yl,pts)));
+  });
+  if(grid.children.length)host.appendChild(grid);
 }
 
 // ---- FULL MOHAMMADI PANEL (all six stats per corpus, per visible bake)
@@ -981,26 +1045,33 @@ function renderMPanel(){
     host.append(el('h3',{text:'10-band SROCC — '+c}));
     host.append(el('div',{class:'cap',html:'Per-band SROCC across the quality range (B0 worst → B9 best). '
       +'Dimmed = n&lt;30 (noisy; CI &gt; ±0.3 — do not rank bakes on those bands). Band SROCC is '
-      +'range-restricted — B0/B9 values run low by construction; compare bakes, not bands.'}));
+      +'range-restricted — B0/B9 values run low by construction; compare bakes, not bands. Negative bands '
+      +'now draw below the axis (the old view clamped them to 0); wheel/slider zooms the band axis.'}));
     const bands=banded[0].rank[c].bands.map(x=>x.band);
-    const W=Math.max(560,bands.length*(banded.length*9+16)+70),H=210,mL=38,mB=26,mT=10;
-    const svg=S('svg',{viewBox:`0 0 ${W} ${H}`,width:W,height:H,style:'max-width:100%'});
-    const Y0=-0.2,Y1=1.0,SY=v=>mT+(Y1-Math.max(Y0,Math.min(Y1,v)))/(Y1-Y0)*(H-mT-mB);
-    [0,0.25,0.5,0.75,1].forEach(g=>{svg.append(S('line',{x1:mL,y1:SY(g),x2:W-6,y2:SY(g),stroke:cssv('--grid'),'stroke-width':.5}));
-      svg.append(S('text',{x:mL-4,y:SY(g)+3,'text-anchor':'end','font-size':8.5,fill:cssv('--muted'),text:g.toFixed(2)}));});
-    svg.append(S('line',{x1:mL,y1:SY(0),x2:W-6,y2:SY(0),stroke:cssv('--axis'),'stroke-width':1}));
-    bands.forEach((bn,bi)=>{
-      const gx=mL+8+bi*(banded.length*9+16);
-      banded.forEach((b,k)=>{
-        const row=b.rank[c].bands[bi];if(!row||row.srocc==null)return;
-        const x=gx+k*9,y=SY(Math.max(0,row.srocc)),y0=SY(0);
-        const r=S('rect',{x,y:Math.min(y,y0),width:7,height:Math.abs(y0-y)||1,fill:color(b),opacity:row.n<30?0.35:0.95});
-        r.addEventListener('mousemove',ev=>showTip('<b>'+b.name+'</b> '+bn+' n='+row.n+'<br>SROCC <b>'+f3(row.srocc)+'</b> · PLCC '+f3(row.plcc)+' · PWRC '+f3(row.pwrc)+' · Z-RMSE '+(row.z_rmse!=null?row.z_rmse.toFixed(2):'—'),ev));
-        r.addEventListener('mouseleave',hideTip);svg.append(r);
-      });
-      svg.append(S('text',{x:gx+(banded.length*9)/2,y:H-8,'text-anchor':'middle','font-size':9,fill:cssv('--text-secondary'),text:bn}));
-    });
-    const bw=el('div',{style:'overflow-x:auto'});bw.append(makeZoomable(svg));host.append(bw);
+    const t=TH();
+    const bseries=banded.map(b=>({type:'bar',name:b.name,
+      barGap:'20%',barCategoryGap:'25%',
+      data:b.rank[c].bands.map(row=>({
+        value:row&&row.srocc!=null?row.srocc:null,
+        _n:row?row.n:null,_plcc:row?row.plcc:null,_pwrc:row?row.pwrc:null,
+        _z:row&&row.z_rmse!=null?row.z_rmse:null,
+        itemStyle:{color:color(b),opacity:(row&&row.n!=null&&row.n<30)?0.35:0.95}}))}));
+    const bandOption={animation:false,
+      tooltip:Object.assign(ttStyle(),{trigger:'item',formatter:p=>{
+        const d=p.data||{};
+        return'<b>'+p.seriesName+'</b> '+p.name+' n='+(d._n!=null?d._n:'?')
+          +'<br>SROCC <b>'+f3(d.value)+'</b> · PLCC '+f3(d._plcc)+' · PWRC '+f3(d._pwrc)
+          +' · Z-RMSE '+(d._z!=null?(+d._z).toFixed(2):'—');}}),
+      grid:{left:46,right:10,top:12,bottom:44},
+      xAxis:{type:'category',data:bands,
+        axisLine:{lineStyle:{color:t.axis}},axisTick:{alignWithLabel:true,lineStyle:{color:t.axis}},
+        axisLabel:{color:t['text-secondary'],fontSize:9.5}},
+      yAxis:Object.assign(axStyle(),{scale:false,min:-0.2,max:1}),
+      dataZoom:[{type:'inside',xAxisIndex:0},dzSlider({xAxisIndex:0})],
+      series:bseries};
+    const bw=el('div',{style:'overflow-x:auto'});
+    bw.append(mountChart('band',Math.max(680,Math.min(1250,bands.length*(banded.length*8+22)+90)),240,bandOption));
+    host.append(bw);
     // ---- the NUMBERS behind those bars: cross-bake per-band SROCC table.
     // Columns = bands populated somewhere in this corpus (n>0); on CID22 that drops the
     // structurally-empty B0/B1. Values come straight from rank.<corpus>.bands[] — nothing
@@ -1093,29 +1164,45 @@ function renderDial(){
   host.append(el('h2',{text:'Per-codec dial curves'}));
   host.append(el('div',{class:'cap',html:'Median dial score vs grid quality per codec family (across each family\u2019s '
     +'image ladders on the densified grid; jxl x-axis = butteraugli-distance mapped to q-equiv). A good dial rises '
-    +'monotonically and spans low→high. The per-codec mono% is in the tooltip — a family can be broken while the '
-    +'pooled headline stays green.'}));
+    +'monotonically and spans low→high. Hover for each bake’s <b>p25 / p50 / p75</b> at that q plus the '
+    +'per-codec mono%/tied% — a family can be broken while the pooled headline stays green. Wheel/slider zooms '
+    +'the axes (marks stay constant size); double-click resets.'}));
   const codecs=[...new Set(bs.flatMap(b=>Object.keys(b.dial.curves)))].sort();
   const grid=el('div',{style:'display:flex;flex-wrap:wrap;gap:10px'});
   codecs.forEach(cd=>{
-    const W=330,H=240,mL=38,mB=28,mT=24,mR=8;
-    const svg=S('svg',{viewBox:`0 0 ${W} ${H}`,width:W,height:H,style:'background:var(--surface-1);border:1px solid var(--border);border-radius:6px'});
-    let xmin=1e9,xmax=-1e9,ymin=0,ymax=100;
-    bs.forEach(b=>{const cv=b.dial.curves[cd];if(cv)cv.forEach(p=>{if(p[0]<xmin)xmin=p[0];if(p[0]>xmax)xmax=p[0];});});
-    if(xmax<=xmin)return;
-    const SX=v=>mL+(v-xmin)/(xmax-xmin)*(W-mL-mR),SY=v=>mT+(ymax-Math.max(ymin,Math.min(ymax,v)))/(ymax-ymin)*(H-mT-mB);
-    [0,25,50,75,100].forEach(g=>{svg.append(S('line',{x1:mL,y1:SY(g),x2:W-mR,y2:SY(g),stroke:cssv('--grid'),'stroke-width':.5}));
-      svg.append(S('text',{x:mL-4,y:SY(g)+3,'text-anchor':'end','font-size':8.5,fill:cssv('--muted'),text:String(g)}));});
-    svg.append(S('text',{x:mL+4,y:14,'font-size':11,'font-weight':700,fill:cssv('--text-primary'),text:cd}));
-    [xmin,xmax].forEach(v=>svg.append(S('text',{x:SX(v),y:H-8,'text-anchor':'middle','font-size':8.5,fill:cssv('--muted'),text:v.toFixed(0)})));
+    const t=TH();
+    const meta={};    // bake name -> per-codec mono/tied/ladders for the tooltip
+    const dseries=[];
     bs.forEach(b=>{
       const cv=b.dial.curves[cd];if(!cv||cv.length<2)return;
       const pc=(b.dial.per_codec||[]).find(x=>x.codec===cd);
-      const pl=S('polyline',{points:cv.map(p=>SX(p[0])+','+SY(p[2])).join(' '),fill:'none',stroke:color(b),'stroke-width':1.7,opacity:.9});
-      pl.addEventListener('mousemove',ev=>showTip('<b>'+b.name+'</b> × '+cd+(pc?'<br>mono <b>'+pct(pc.mono)+'</b> · tied '+pct(pc.tied)+' · '+pc.n_curves+' ladders':''),ev));
-      pl.addEventListener('mouseleave',hideTip);svg.append(pl);
+      if(pc)meta[b.name]='mono '+pct(pc.mono)+' · tied '+pct(pc.tied)+' · '+pc.n_curves+' ladders';
+      dseries.push({type:'line',name:b.name,showSymbol:false,symbol:'circle',symbolSize:6,
+        lineStyle:{width:2,color:color(b),opacity:.9},itemStyle:{color:color(b)},
+        emphasis:{focus:'series'},
+        data:cv.map(p=>({value:[p[0],p[2]],p25:p[1],p75:p[3]}))});
     });
-    grid.append(makeZoomable(svg));
+    if(!dseries.length)return;
+    const dialOption={animation:false,
+      title:{text:cd,top:4,left:10,textStyle:{color:t['text-primary'],fontSize:11,fontWeight:700}},
+      tooltip:Object.assign(ttStyle(),{trigger:'axis',
+        axisPointer:{type:'cross',label:{backgroundColor:t['surface-1'],color:t['text-primary'],fontSize:9},
+          crossStyle:{color:t.muted},lineStyle:{color:t.muted}},
+        formatter:ps=>{if(!ps||!ps.length)return'';
+          let s='<b>'+cd+'</b> q='+f2(ps[0].axisValue);
+          ps.forEach(p=>{const d=p.data||{};
+            s+='<br>'+(p.marker||'')+p.seriesName+' p50 <b>'+f2(d.value?d.value[1]:null)+'</b>'
+              +' <span style="opacity:.75">[p25 '+f2(d.p25)+' · p75 '+f2(d.p75)+']</span>'
+              +(meta[p.seriesName]?'<br><span style="opacity:.6;font-size:10px">'+meta[p.seriesName]+'</span>':'');});
+          return s;}}),
+      grid:{left:44,right:12,top:30,bottom:44},
+      xAxis:Object.assign(axStyle(),{name:''}),
+      yAxis:Object.assign(axStyle(),{scale:false,min:0,max:100}),
+      dataZoom:[{type:'inside',xAxisIndex:0,filterMode:'none'},
+                {type:'inside',yAxisIndex:0,filterMode:'none'},
+                dzSlider({xAxisIndex:0,filterMode:'none'})],
+      series:dseries};
+    grid.append(mountChart('dial',360,285,dialOption));
   });
   host.append(grid);
 }
@@ -1373,10 +1460,20 @@ function layout(){
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
-function rerender(){mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderGates();renderModels();renderTrade();renderScatter();}
+function rerender(){disposeCharts();state.renderedTheme=effTheme();
+  mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderGates();renderModels();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
+// Theme reactivity: charts (and everything else) rebuild with the other theme's option
+// variant on (a) an OS prefers-color-scheme flip when no explicit data-theme is set, and
+// (b) the artifact viewer stamping data-theme on <html> — watched via MutationObserver
+// (typeof-guarded: the DOM-shim harness has none). state.renderedTheme dedupes the manual
+// theme button, which sets the attribute and re-renders synchronously itself.
 if(window.matchMedia)matchMedia('(prefers-color-scheme:dark)').addEventListener('change',()=>{if(!document.documentElement.getAttribute('data-theme'))rerender();});
+if(typeof MutationObserver==='function'&&document.documentElement){
+  try{new MutationObserver(()=>{if(effTheme()!==state.renderedTheme){renderBar();rerender();}})
+    .observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});}catch(e){}
+}
 """
 
 

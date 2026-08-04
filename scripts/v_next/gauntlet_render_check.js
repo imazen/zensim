@@ -26,9 +26,14 @@ const vm = require('vm');
 const htmlPath = process.argv[2];
 if (!htmlPath) { console.error('usage: gauntlet_render_check.js <summer_gauntlet.html>'); process.exit(2); }
 const html = fs.readFileSync(htmlPath, 'utf8');
-const m = html.match(/<script>([\s\S]*)<\/script>/);
-if (!m) { console.error('FAIL: no <script> block in ' + htmlPath); process.exit(1); }
-const js = m[1];
+// The page carries multiple <script> blocks since the ECharts migration (vendored
+// bundle first, app script second). The harness executes only the APP block — the
+// vendor bundle is parse-checked by gate 1, and the app's echarts init is guarded, so
+// running it without the vendor (HAS_ECH false) exercises exactly the canvas-less path.
+const blocks = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(x => x[1]);
+if (!blocks.length) { console.error('FAIL: no <script> block in ' + htmlPath); process.exit(1); }
+const js = blocks.find(b => b.includes('const DATA='));
+if (!js) { console.error('FAIL: no app <script> block (const DATA=) in ' + htmlPath); process.exit(1); }
 
 // ---------------------------------------------------------------- minimal DOM shim ----
 const registry = []; // every element ever created, in creation order (query scans this)
@@ -75,6 +80,10 @@ function mkEl(tag) {
     children: [], childNodes: [], attrs: {}, style: {}, _listeners: {},
     id: undefined, className: '', textContent: '', _innerHTML: '', parentNode: null,
     offsetWidth: 100,
+    // canvas-less environment: a canvas element exists but yields NO 2d context —
+    // the app's CANVAS_OK probe stays false (echarts.init skipped) and zrender's
+    // measureText takes its estimation fallback during the SSR option check.
+    getContext() { return null; },
     get innerHTML() { return this._innerHTML; },
     set innerHTML(v) { this._innerHTML = String(v); this.children.length = 0; this.childNodes.length = 0; },
     setAttribute(k, v) {
@@ -126,19 +135,35 @@ const matchMediaShim = () => ({ matches: false, addEventListener() {}, removeEve
 // cross-realm bugs; Array.isArray etc. are realm-safe as provided).
 const sandbox = {
   document: documentShim,
-  window: { matchMedia: matchMediaShim },
-  matchMedia: matchMediaShim,
   getComputedStyle: () => ({ getPropertyValue: () => '' }),
   innerWidth: 1280,
   innerHeight: 900,
+  setTimeout, clearTimeout,        // zrender scheduling (SSR flushes synchronously)
   console,
 };
 
 let failed = false;
 const fail = (msg) => { console.error('FAIL: ' + msg); failed = true; };
 
+// Run the VENDORED ECharts bundle in the same realm first (when present) so the app
+// script sees the real `echarts` global. ORDER MATTERS: the bundle loads while the
+// realm has NO `window`, so its environment sniff takes the Node/SSR branch (a window
+// without navigator/real DOM would send it down the browser branch and crash);
+// `window` is attached only afterwards, for the app script. With no canvas in this
+// shim the app's CANVAS_OK guard keeps echarts.init un-called during render — the SSR
+// option check below drives echarts explicitly through its Node SSR path instead.
+const vendorJs = blocks.find(b => !b.includes('const DATA=') && /apache/i.test(b.slice(0, 2000)));
 try {
   vm.createContext(sandbox);
+  if (vendorJs) vm.runInContext(vendorJs, sandbox, { filename: 'vendor-echarts.js', timeout: 60000 });
+} catch (err) {
+  console.error('FAIL: vendored ECharts bundle threw at load:');
+  console.error(err && err.stack || err);
+  process.exit(1);
+}
+sandbox.window = { matchMedia: matchMediaShim };
+sandbox.matchMedia = matchMediaShim;
+try {
   vm.runInContext(js, sandbox, { filename: 'gauntlet-inline.js', timeout: 60000 });
 } catch (err) {
   console.error('FAIL: page script threw during render:');
@@ -191,18 +216,72 @@ const tables = countTag('table');
 if (tables < 2) fail('expected >= 2 tables (scoreboard + Mohammadi), got ' + tables);
 const rows = countTag('tr');
 if (rows < nBakes + 2) fail('too few table rows: ' + rows);
-if (countTag('svg') < 3) fail('too few SVG charts: ' + countTag('svg'));
+if (countTag('svg') < 1) fail('no SVG mini-plots at all (model spline/calibration should remain SVG)');
 const h2s = texts('h2');
 if (!h2s.includes('Scoreboard')) fail('Scoreboard heading missing (h2s: ' + h2s.join(' | ') + ')');
 
-// zoom/pan (2026-08-04): the heavyweight charts are wrapped by makeZoomable — assert the
-// wrappers + corner reset buttons exist (handlers only run on real interaction, so a
-// build-time crash in the helper would surface as a thrown render above, not here).
-if (countTag('svg') >= 3) {
-  const zwraps = registry.filter(e => classesOf(e).includes('zwrap'));
-  const zrs = registry.filter(e => classesOf(e).includes('zr'));
-  if (!zwraps.length) fail('no zoomable chart wrappers (.zwrap) rendered');
-  if (!zrs.length) fail('no zoom-reset buttons (.zr) rendered');
+// ---- ECharts panels (2026-08-04 migration): the five heavyweight panels mount as
+// .echart divs whose OPTION is always built (pure data, stashed on ._chartOption) even
+// when no canvas exists — echarts.init itself is guarded, which is exactly the path this
+// canvas-less shim exercises. Assert: vendor bundle inlined, mounts exist per panel kind
+// the data implies, every mount carries a series-bearing option, and both chart theme
+// variants ship (light + dark), plus the data-theme MutationObserver hookup in source.
+if (!/<script id=['"]vendor-echarts['"]>/.test(html)) fail('vendored ECharts <script id=vendor-echarts> block missing');
+if (!vendorJs || vendorJs.length < 500000) fail('vendored ECharts bundle missing or implausibly small');
+if (DATA) {
+  const mounts = registry.filter(e => classesOf(e).includes('echart'));
+  if (!mounts.length) fail('no ECharts mounts (.echart) rendered');
+  const badOpt = mounts.filter(e => !e._chartOption || !Array.isArray(e._chartOption.series)
+    || !e._chartOption.series.length);
+  if (badOpt.length) fail(badOpt.length + ' .echart mounts lack a built option with series');
+  const kinds = {};
+  mounts.forEach(e => { const k = (e.attrs && e.attrs['data-kind']) || '?'; kinds[k] = (kinds[k] || 0) + 1; });
+  const visible = DATA.bakes.filter(b => !DATA.bakes.some(x => x.curated) || b.curated);
+  const expect = [];
+  if (visible.some(b => b.rank && Object.keys(b.rank).length)) expect.push('heat', 'trade');
+  if (visible.some(b => b.dial && b.dial.curves && Object.keys(b.dial.curves).length)) expect.push('dial');
+  if (visible.some(b => b.rank && Object.values(b.rank).some(r => r && r.bands))) expect.push('band');
+  if (visible.some(b => b.scatter && Object.keys(b.scatter).length)) expect.push('scatter');
+  expect.forEach(k => { if (!kinds[k]) fail('expected an ECharts "' + k + '" mount, none rendered (kinds: ' + JSON.stringify(kinds) + ')'); });
+  if (kinds.trade && kinds.trade !== 2) fail('expected 2 trade-map charts, got ' + kinds.trade);
+  const th = DATA.chartThemes;
+  if (!th || !th.light || !th.dark) fail('DATA.chartThemes must carry light + dark variants');
+  else ['surface-1', 'text-primary', 'seq-lo', 'seq-hi'].forEach(k => {
+    if (!th.light[k] || !th.dark[k]) fail('chartThemes.' + k + ' missing in a variant');
+  });
+  if (!js.includes('MutationObserver') || !js.includes('data-theme'))
+    fail('data-theme MutationObserver hookup missing from the app script');
+
+  // ---- SSR option check: the shim proves options are BUILT; this proves the real
+  // ECharts ACCEPTS them. One option per panel kind is rendered through echarts' Node
+  // SSR path (svg renderer, no canvas needed) — a malformed option (bad series type,
+  // broken dataZoom/visualMap config) throws or yields a trivial document here while
+  // every purely-structural assert above would still pass.
+  (function ssrCheck() {
+    let ech = null;
+    try { ech = vm.runInContext('typeof echarts!=="undefined"?echarts:null', sandbox); } catch (e) { ech = null; }
+    if (!ech || typeof ech.init !== 'function') { fail('SSR check: no echarts global after vendor load'); return; }
+    const seen = new Set(); const ok = [];
+    mounts.forEach(m => {
+      const k = (m.attrs && m.attrs['data-kind']) || '?';
+      if (seen.has(k) || !m._chartOption) return;
+      seen.add(k);
+      try {
+        const chart = ech.init(null, null, { renderer: 'svg', ssr: true, width: 520, height: 400 });
+        chart.setOption(m._chartOption);
+        const svg = chart.renderToSVGString();
+        chart.dispose();
+        if (!svg || svg.length < 2000 || svg.indexOf('<svg') < 0)
+          fail('SSR check: kind "' + k + '" rendered a trivial document (' + (svg ? svg.length : 0) + ' bytes)');
+        else ok.push(k);
+      } catch (err) {
+        fail('SSR check: echarts rejected the "' + k + '" option: ' + (err && err.message || err));
+      }
+    });
+    if (!seen.size) fail('SSR check: no chart options reached echarts');
+    else if (ok.length === seen.size)
+      console.log('SSR check OK: ' + ok.sort().join(', ') + ' options render through ECharts');
+  })();
 }
 
 // board curation (2026-08-04): family toggles must render when bakes carry families,
