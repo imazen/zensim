@@ -212,6 +212,55 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
 - Trainer-bin globals must be set BEFORE the training call — the best_val relocation
   silently moved the regularizer setup post-training (caught by the decay-debug counter).
 
+## LATENCY + TOKEN DISCIPLINE — idle waiting is re-charged, not cached (2026-08-04)
+
+**MEASURED, `benchmarks/rnd_cycle_audit_2026-08-04.md`.** Over the 2026-08-03/04
+campaign (34.3 h, 11 waves): **14.80 h of whole-session idle, 6.77 h of it dead**
+(nothing computing, or finished work sitting unharvested), and **$395.24 —
+13.9 % of the $2,837.34 session — spent re-creating prompt cache that idle
+waiting had expired.** The mechanism: cache entries are `ephemeral_5m`, read at
+0.1× and written at 1.25×, so **any gap over 5 minutes converts the whole
+prefix from a 0.1× read to a 1.25× write — a 12.5× multiplier** on 500–800 k
+tokens. 138 turns (3.7 % of all turns) carried 22.9 M re-created tokens =
+**55.7 % of every cache-write token spent that day**. One agent idled 7.92 h of
+its 11.69 h span and alone burned 12.15 M cache-write tokens; its worst single
+turn re-created **779,717 tokens after a 141-minute gap**.
+
+Rules, all load-bearing:
+
+- **Do NOT park on short-interval polls.** Polling is not what costs — the polls
+  read a warm cache (57 wait-turns = 626 k write vs 21.2 M read). The **wake-up
+  after a long silence** is what costs. So the fix is never "poll less often";
+  it is "do not be idle-attached at all".
+- **Arm ONE terminal condition, then go do other work.** `Monitor` a file that
+  appears exactly once — `scripts/await_artifacts.sh --heartbeat X` writes
+  `X.done` on **every** exit path (COMPLETE / TIMEOUT / SIGNAL + rc). Never
+  `Monitor` a `tail -f` (loses the file on rotation) and never hand-roll a
+  `while sleep` waiter: the two worst events of the day, **125.6 min** and
+  **80.6 min** of dead wall-clock, were both a bespoke waiter that stopped
+  without leaving evidence.
+- **Supervisors must not idle-wait on delegated work.** A supervisor watching a
+  subagent ages *two* prefixes, so one event re-charges both. Do independent
+  work; let artifacts be the channel.
+- **Make a late wake-up free.** Harvest on completion — `scripts/harvest_bakes.sh`
+  verdicts + fullevals each bake as it lands, so results are already on disk
+  when anyone next looks. A post-bake hook MUST fail loud: the coherence wave's
+  hook exited 2 nine times into an unread log and silently voided a 3 h 24 min
+  lane (21 verdicts re-run by hand, 804 s).
+- **Batch status into one report.** Do not emit a turn per artifact; one report
+  per terminal event.
+
+Wave skeleton + the priced anti-pattern table: [`docs/WAVE_PLAYBOOK.md`](docs/WAVE_PLAYBOOK.md).
+
+**Not a cause, measured and rejected:** per-agent `CARGO_TARGET_DIR` cold
+rebuilds. Total `cargo` wall-clock across every agent all day was **23.0 min**
+(91 builds; cold `bake_verdict` = 72 s / 221 crates), while a second concurrent
+`cargo` on a *shared* target dir **blocks 31.8 s** on the build lock. Keep
+per-agent target dirs; agents that only consume binaries should build nothing
+and use the `ZL_BV` / `ZL_TRAIN` / `CARGO_TARGET_DIR` pointers the drivers
+already honour. The real target-dir cost is disk — 28 dirs, 113.6 GB, root at
+95 % — so delete yours when a wave closes.
+
 ## ⇒ POST-COMPACT / NEW SESSION: read [`SESSION-RESUME.md`](SESSION-RESUME.md) FIRST
 
 Then return here. `SESSION-RESUME.md` is the canonical entry point —
