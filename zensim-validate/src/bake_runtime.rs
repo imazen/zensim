@@ -367,10 +367,33 @@ pub fn score_row(
     } else {
         predictor.predict(f32_features)
     };
-    let y_pre = match result {
-        Ok(out) => apply_head_dispatch(out, per_sample_alpha_head, hybrid_head),
-        Err(_) => f64::NAN,
-    };
+    match result {
+        Ok(out) => score_from_network_output(
+            out,
+            per_sample_alpha_head,
+            hybrid_head,
+            tanh_pin_scale,
+            output_spline,
+        ),
+        Err(_) => apply_post_dispatch(f64::NAN, tanh_pin_scale, output_spline),
+    }
+}
+
+/// Apply the post-network dispatch — head (per-sample-α / hybrid /
+/// first-output fallback), tanh pin, output spline — to a network
+/// output vector. This is the tail of [`score_row`], factored out so
+/// diagnostic tooling that recomputes the network forward itself
+/// (e.g. `bake_contrib`'s exact mean-ablation, which edits layer-0
+/// pre-activations) applies the IDENTICAL head/pin/spline math with
+/// no possibility of a fork. Bit-exact: [`score_row`] delegates here.
+pub fn score_from_network_output(
+    out: &[f32],
+    per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
+    hybrid_head: Option<&HybridHeadDispatch>,
+    tanh_pin_scale: Option<f64>,
+    output_spline: Option<&OutputCalibrationSpline>,
+) -> f64 {
+    let y_pre = apply_head_dispatch(out, per_sample_alpha_head, hybrid_head);
     apply_post_dispatch(y_pre, tanh_pin_scale, output_spline)
 }
 
