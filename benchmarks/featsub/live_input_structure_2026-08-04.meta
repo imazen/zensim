@@ -41,3 +41,23 @@
 # would consume them at eval time while K667's zeroed rows cannot. Whatever the
 # K667-vs-K944 delta turns out to be, it is that effect, and it is reported as
 # measured rather than assumed.
+#
+# MEASURED 2026-08-04 on the appendix-J baseline K944_s2501 (the recipe with NO
+# subset flag): `bake_contrib --live-mask` reports 667 of 944 layer-0 rows live,
+# and the 277 exactly-zero rows are BIT-for-BIT the same index set as the
+# incumbent's contribution dead set (set equality, 0 symmetric difference).
+# So the 944 recipe ALREADY self-prunes to 667 with no flag, and the K667 arm
+# pins rows the fit zeroes on its own.
+#
+# Mechanism (follows from the code, consistent with the measurement): a column
+# that is constant on the training set standardizes to exactly 0.0, its layer-1
+# loss-gradient is therefore exactly 0.0, and the only force left on that row is
+# the coupled L2 term g = lambda*w. Under Adam that is a pure geometric decay,
+# and 120 epochs x 50,000 pairs = 6e6 steps of geometric decay underflows f64 to
+# exactly 0.0. Nothing in the trainer special-cases constant columns; the zeros
+# are an emergent property of the step count.
+#
+# Consequence for reading the K sweep: the honest full-width baseline is 667
+# LIVE inputs, not 944, and `bake_dial_refit pack` would already narrow the
+# stock recipe's bake without any of this appendix's machinery. K < 667 is
+# where the actual question lives.

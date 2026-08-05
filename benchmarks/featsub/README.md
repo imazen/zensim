@@ -23,3 +23,16 @@ Tools (all owner extensions — no new trainer, no Python fit):
 
 Bakes live at `/mnt/v/output/zensim/bakes/featsub/`; verdicts share the campaign
 store `/mnt/v/output/zensim/bakes/sota944/verdicts/` with an `FS_` stem prefix.
+
+## A note on the dropped columns' scaler entries
+
+`--keep-features` zeroes a dropped column's raw value *after* the recipe's
+feature transforms run, so the scaler sees a constant-zero column: `mean = 0`
+and `std` floored to `1e-8`. At inference the un-pruned bake therefore
+standardizes a dropped input to `t(x)/1e-8` — a large but finite number — and
+multiplies it by a weight row that is exactly zero. `x * 0.0 == 0.0` for every
+finite `x`, so the contribution is exactly zero, which is what the pack
+identity gate demonstrates empirically: 2,035 anchor scores came out
+**bit-identical** between the un-pruned K64 net and its pruned twin. After
+`bake_dial_refit pack` the columns carry `FeatureTransform::Drop` and are never
+read at all, so the shipping artifact does not depend on that argument.
