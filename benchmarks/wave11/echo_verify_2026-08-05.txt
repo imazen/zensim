@@ -1,0 +1,30 @@
+# WAVE 11 echo-verification (appendix K.1) — 2026-08-05T04:08:11Z
+# Repo state: parent = main d869a186 (registration commit follows this artifact)
+
+## Diff 1: W11 s4101 vs W10 L9 s4101 (same seed) — expect ONLY the --out value
+167c167
+< /mnt/v/output/zensim/bakes/sota944/bakes/W11_s4101.bin
+---
+> /mnt/v/output/zensim/bakes/sota944/bakes/W10L9_s4101.bin
+
+## Diff 2: W11 s4101 vs W10 L9 s4001 (the committed wave-10 cell; wave-10 echo re-outed to scratch
+## because the real s4001 bake exists and trips its idempotence check) — expect ONLY --seed and --out values
+32c32
+< 4101
+---
+> 4001
+167c167
+< /mnt/v/output/zensim/bakes/sota944/bakes/W11_s4101.bin
+---
+> /home/lilith/tmp/wave11/echo-scratch/W10L9_s4001.bin
+
+## Token counts (identical argv shape)
+W11 s4101:    167 tokens
+W10 L9 s4001: 167 tokens
+
+## tkadis absence check (0 expected)
+W11 s4101 tkadis tokens: 0
+
+## kadid table (corrected) in the W11 argv + its sha256
+kadid:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_kadid.parquet:0.5:1.0:rank
+286f1b239d88c483e215da6be2d1a16337ac0ae0548bff34ff6c32e0da033cf4  /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_kadid.parquet

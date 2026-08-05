@@ -7357,3 +7357,216 @@ renormalizes all others (+0.7–3.5 pp shares, table in §H.2), so each Δ is
 6. `eval_annotations.json` — DONE (`kadid-ext-root-corrected-2026-08-05`; `kadid-ext-root-inverted` scope narrowed to the 188 pre-correction verdicts).
 7. `docs/DATA_SPLITS.md` §1.4 + `~/work/zen/DATA_PROVENANCE.md` — DONE.
 8. Outcomes: **(a) fired (`tkadis`), (c) fired (CSIQ/LIVE/AIC-3), (b) holds for 111/120 cells.** Nothing ships; the freeze decision is the user's.
+
+---
+
+# REGISTERED APPENDIX K — WAVE 11: THE CORRECTED-MIX RECIPE AT SEED DEPTH + THE FIRST FULL WINNER BATTERY (2026-08-05)
+
+Registered and pushed BEFORE any wave-11 fit exists. Nothing below is chosen after
+seeing a wave-11 number.
+
+## K.0 Why this wave exists
+
+Wave 10 (H.R) produced the campaign's best cells from arm **L9** — the incumbent arm-H
+recipe with the orientation-corrected KADID table and `tkadis` dropped. From the
+committed `benchmarks/wave10/wave10_cells_2026-08-05.tsv` (the frozen wave-10 record;
+all values freeze_check/fulleval-read):
+
+| cell | cid22 | konjnd | nonphoto | csiq | live | m3a | sdr25 | hfnl/ref | mono | floors |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `W10L9_s4001` | 0.88903 | 0.42389 | 0.93032 | 0.94888 | 0.96526 | 0.80797 | 0.95717 | 0.6212 | 99.53% | 7/8 |
+| `W10L9_s4003` | 0.88671 | 0.49879 | 0.92514 | 0.93303 | 0.96081 | 0.86259 | 0.95275 | 0.73334 | 99.66% | 7/8 |
+
+That puts a 944 single at-or-past shipped-B territory on LIVE/dial-mono and near it on
+HF-NL, while beating B on CID22 — but it is **k = 2**, and the campaign's own record
+says never trust k ≤ 2 (W8C was a five-axis "winner" that dissolved as a k=1 seed
+artifact). Wave 11 answers exactly one question — **does the corrected-mix recipe hold
+at seed depth?** — and, on the family's selected candidate, runs the full winner
+battery that has been registered winner-only all campaign and has never fired.
+
+## K.1 Recipe (frozen) — W11 = wave-10 L9, no re-declaration
+
+The driver `scripts/wave11_seed.sh` obtains its argv from
+`WAVE10_ECHO=1 scripts/wave10_seed.sh L9 <seed>` and replaces exactly ONE token — the
+`--out` value (`W10L9_s<seed>.bin` → `W11_s<seed>.bin`). Token-for-token identity with
+the L9 driver is **structural**, and is additionally echo-verified and committed:
+`benchmarks/wave11/echo_verify_2026-08-05.txt` shows (diff 1, same seed) only the
+`--out` value differing, and (diff 2, vs the committed `W10L9_s4001` argv) only the
+`--seed` and `--out` values differing; 167 tokens each; 0 `tkadis` tokens; the `kadid`
+leg pointing at the corrected table, sha256 `286f1b239d88c483…` re-verified in the
+artifact.
+
+**Trainer**: the current-main **flat-buffer** build (`031bd261` lineage), one binary
+per lane with its sha256 recorded in the results. Wave-10's cells were trained on the
+pre-flat-buffer build (`e5db2498…`); pooling the two builds into one family is
+registered as valid on the strength of the committed cross-build identity gate
+(`d869a186`: same seed re-trained on the new build gives f64-exact equal `best_val`
+and a payload sha256-IDENTICAL after stripping the provenance metadata entry — the
+wave-9 395-byte precedent, extended through the trainer's proximal path). Seeds are
+the only variation; the trainer is deterministic in seed across lanes and builds, so
+node assignment is not a confound (per-seed node recorded anyway).
+
+## K.2 Seeds + the family (frozen)
+
+Six NEW seeds: **{4101, 4103, 4105, 4107, 4109, 4111}** — disjoint from every seed
+family used anywhere in this campaign (1301–1409, 2501–2507, 3101–3107, 3301–3307,
+wave-10's 4001/4003/4007, the E-M era {5,7,13,17,23,31,42,99} + seed-scale
+{3…512}, corrhead s13/s42). Grepped against this document before registration; the
+only textual hit for any of them is a coincidental `0.4111` KonJND value.
+
+**The family = pooled k = 8**: the six wave-11 cells + `W10L9_s4001` + `W10L9_s4003`.
+Pooling is valid per K.1 (build-identity gate); the two wave-10 cells enter with their
+committed verdicts/fullevals unchanged.
+
+## K.3 Endpoints + instruments (frozen — owners only, nothing new)
+
+Per cell, exactly the H.3 endpoint set, produced by the standing owners:
+`scripts/harvest_bakes.sh` per bake as it lands (= `sota944_verdict.sh` → `bake_verdict
+--regime 944` + `run_full_eval.sh <bake> <stem> 944` including **M3a on the
+post-`299ccc8c` instrument**), then `freeze_check --profile balanced-2026-08-04
+[--annotations]` + `freeze_check --select` over the pooled 8. `best_val` is reported,
+never an endpoint (all 8 cells share one objective, but the H.3 rule stands).
+
+**Instrument-comparability gate (before any pooled statement is read):** this
+workspace's `bake_verdict` build must numerically reproduce the committed
+`W10L9_s4001.full.json` on the raw wave-10 bake (wave-6 / packaging-pass precedent —
+numeric field diff, tolerance 0 beyond float formatting). Mismatch ⇒ STOP, report,
+no pooled table.
+
+## K.4 Bands + the k=8 read (frozen)
+
+Noise bands: **H.4 unchanged** (the larger of historical spread and the incumbent
+arm-H 3-seed range, floors at 0.010). The wave's registered aggregation is per-axis
+**median + [min, max] over the pooled k = 8**, read against two frozen references:
+the **L9 pair range** [min, max of the two wave-10 cells] and the **incumbent arm-H
+k=3 mean** per axis. Headline axes (the wave-10 rationale set): **CID22, KonJND,
+LIVE, HF-NL per-ref, dial mono**. All other H.3 axes are reported with the same
+median/range treatment. No CI is claimed at k = 8.
+
+## K.5 Registered outcomes (frozen; per-axis calls, then the wave call)
+
+Per headline axis, classify the pooled median m (all axes higher-better here):
+
+- **HOLDS** — m inside the L9 pair's range. (The pair range can be narrower than the
+  H.4 band — CID22's is 0.0023 vs band 0.010 — so this is the STRICT read.)
+- **HOLDS-WITHIN-NOISE** — m outside the pair range but within band(axis) of it.
+  Counts toward outcome (b)'s "survives" set, stated as such.
+- **REGRESSION** — m more than band(axis) outside the pair range, toward the
+  incumbent; survives iff m still beats the incumbent k=3 mean by > band(axis).
+- **COLLAPSE** — m worse than the incumbent k=3 mean by > band(axis) (the recipe
+  loses even the wave-10 baseline gains on that axis at seed depth).
+
+Wave outcomes (not mutually exclusive; the per-axis table is the deliverable):
+- **(a)** All five headline medians HOLD ⇒ the corrected-mix recipe is the campaign's
+  ship-candidate recipe; present the freeze decision surface to the user. **NOTHING
+  ships or swaps — the freeze decision is the user's.**
+- **(b)** One or more headline axes regress (incl. holds-within-noise) ⇒ wave-10's L9
+  pair was partly seed luck; quantify exactly how much survives (which axes remain
+  outside the incumbent band, at what medians).
+- **(c)** Any axis COLLAPSES ⇒ said plainly, with the cells shown.
+
+## K.6 Selection + the winner battery (frozen — first full run)
+
+**Selection**: `freeze_check --select` over the pooled 8 fullevals (registered E.4
+rule: PRIMARY = balanced-profile floor count; TIE-BREAK = balanced_composite +
+0.15·M3a; UNMEASURED M3a = not selectable — harvest guards this per cell). The
+selected candidate takes the battery:
+
+1. **Packaging** (the 2026-08-04 packaging-pass chain, owners only):
+   `bake_dial_refit add-spline --anchor anchor944_dial.parquet --target-col
+   target_score` → **G-RANGE** `gate` on ext_cid22val (frozen range_frac 1e-4) →
+   `pack --neg-tail` (defaults f16 + zerobias 0.005; dead-column pruning ON per the
+   2026-08-04 standard) with `--anchor … --verify ext_cid22val.parquet --verify-col
+   human_score --verify-scale 100`. Dial-step rank-invariance is checked (instrument
+   JSON to `~/tmp/wave11/`, NOT the verdicts dir; any rank delta at the dial step =
+   defect ⇒ STOP). The packed twin is harvested as `<stem>_packed` (an ADDITIONAL
+   cell; the parent stays). Expectations from the packaging precedent: per-axis
+   |Δ| ≤ ~0.0005; report size + both G-RANGE rows. **Contingency (inherited
+   verbatim): if |ΔKonJND(raw→packed)| > 0.01, additionally produce a `--dtype f32`
+   pack variant and report both rows; no winner is picked between them.**
+2. **M3a**: the winner's fulleval M3a (post-`299ccc8c`) against the 0.85 GOLD bar +
+   the family's 8-cell M3a spread.
+3. **Corruption joint**: `sota944_verdict.sh <winner> <stem>_corrjoint
+   --corruption-head corrhead944_s13.bin` — report `pass_q20`/`pass_q10` + the
+   dial-alone row for honesty (the 944 dial's own corruption ordering is broken by
+   design; the head is the owner).
+4. **LOO ×2** (§7 pattern, occlusion-not-ablation caveat carried): `bake_verdict
+   --regime 944 --features-root loo_bandvis_root` and `… loo_append2_root` (the
+   frozen masked-root instruments already committed under
+   `/mnt/v/output/zensim/bakes/sota944/`), Δ read on cid22 / konjnd / sdr25 /
+   nonphoto / hfnl-per-ref vs the winner's plain rescore **by the same binary**.
+   Acceptance frame unchanged: family Σ(drop−full) ≤ ~0 keeps the block.
+5. **`freeze_check --fulleval`** on the winner (full §5 bar incl. ATTACH rows,
+   `--annotations` registry) + the **era-tagged scorecard** vs B (shipped) /
+   winner_dial / EM4_mask2_kw0.15_s42 / C_em944_s31 / GE2_trio (their committed
+   fullevals; cross-era rows labeled non-comparable exactly as the §"Scorecard"
+   precedent).
+
+## K.7 The corrected-eval caveat (registered; costs no training)
+
+Every pre-correction verdict's KADID cell was measured against the INVERTED table —
+the annotation registry scopes this (`kadid-ext-root-inverted`, 188 verdicts;
+`kadid-e1-gate-unsigned`). Therefore: **KADID comparisons in this wave's tables are
+made ONLY within same-eval-table cohorts.** The k=8 family is all-corrected (safe
+in-family); the era-scorecard comparators (B / winner_dial / EM4 / s31 / GE2_trio)
+are all pre-correction, so the scorecard's KADID row reports the W11 winner's signed
+value alone and marks the era cells NON-COMPARABLE (their stored `rank.kadid` axes
+read against different bytes). KADID remains a `train_eq_val` guard, not a gate
+(H.3), and its signed value is reported wherever it appears.
+
+## K.8 Ops (frozen)
+
+Workspace `../zensim--wave11` (jj `wave11`), parent `d869a186`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimw11-target`; builds + local lane via `run-heavy`;
+logs `~/tmp/wave11/`; never `/tmp`. Lanes: **local ≤ 2 trainers concurrent** (the
+concurrent featsub session holds 2 of the box's registered combined-≤5 trainer cap;
+liveness by `pgrep -xc zensim_mlp_trai` before each launch) and **lianli 2
+concurrent** (observed idle before staging: load 0.00, 0 trainers, 28 GiB free;
+staged root `~/sota944/data` ALREADY carries the corrected kadid — sha
+`286f1b23…` verified over ssh before registration). Per-seed node recorded.
+`harvest_bakes.sh` per bake; ONE `await_artifacts.sh` waiter parked on the terminal
+condition (6 fullevals), setsid-detached; endgame FOREGROUND one pass. Doc append +
+push with pasted `merge-base --is-ancestor` verification; Tower mirror + sha
+spot-check; full cleanup (workspace, `$HOME/tmp/zensimw11-target`, lianli staging
+additions, `.workongoing` lines). **No gate is relaxed; honest nulls stand; nothing
+ships or swaps — the freeze decision is the user's.**
+
+## K.9 Confounds + limitations (registered before the run)
+
+1. **k = 8 is still small.** Medians/ranges only; no variance claim. The strict
+   HOLDS read against a k=2 pair range is deliberately conservative and can fail by
+   luck on razor-thin ranges (CID22's 0.0023) — that is why HOLDS-WITHIN-NOISE is a
+   registered distinct tier, not a post-hoc rescue.
+2. **The pooled family mixes two trainer builds** (2 old + 6 flat-buffer), justified
+   by the d869a186 identity gate; if any wave-11 cell's `best_val`/live-count
+   behavior contradicts the gate's prediction, that is reported before pooling.
+3. **The L9 pair's k=2 range understates within-recipe spread** on axes where
+   wave-10's own bands were near-uninformative (CSIQ 0.096, M3a 0.092, HF-NL 0.247,
+   KonJND 0.076) — a k=8 median outside a k=2 range is EXPECTED behavior on those
+   axes, which the outcome tiers encode.
+4. **Selection-then-battery is one more selection event**: the battery results
+   describe the SELECTED cell, and k=8 selection optimism is not corrected for.
+   The family table publishes all 8 rows so the selection lift is visible.
+5. **LOO ×2 on an MLP is occlusion, not ablation** (E-M4 lesson, §7 caveat carried).
+   A masked retrain is NOT owed by this wave unless the family's selected candidate
+   becomes a freeze candidate AND the user asks.
+6. **KADID/TID remain train_eq_val guards** (memorization-rewarding); reported
+   signed, never gates, per H.3 + K.7.
+
+## K.10 Deliverables (frozen)
+
+1. `scripts/wave11_seed.sh` + `scripts/wave11_lane.sh` + the committed echo-verify
+   artifact (`benchmarks/wave11/echo_verify_2026-08-05.txt`) — THIS COMMIT, pushed
+   before any fit.
+2. `benchmarks/wave11/` — the k=8 family table (TSV + `.meta`, freeze_check-read
+   scalars in the wave-10 matrix discipline: no statistic computed outside owners;
+   the only arithmetic is the registered median/range and band comparisons) +
+   per-axis outcome calls + the `--select` output.
+3. Winner battery artifacts: packed twin (+ sizes, G-RANGE rows, rank-invariance
+   check), corrjoint verdict, LOO ×2 table, `freeze_check --fulleval` output,
+   era-tagged scorecard.
+4. Which registered outcome fired, stated explicitly + the freeze decision surface
+   presented to the user (user-gated; nothing ships).
+5. Results appended HERE (K.R) + commit shas with pasted push verification; Tower
+   mirror + sha spot-check.
+
