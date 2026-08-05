@@ -1390,7 +1390,10 @@ campaign — not even within a fixed mix.**
 
 Bar CID22 = **0.8923796503** (EM4 on the 944 root). HF-NL bar = **0.19310280**
 (the arm-B candidate `B_blend_lam1e-3_a0.7_w`, re-derived from its verdict JSON
-this session).
+this session). ⚠ O.R0 (2026-08-05): that verdict predates the orientation pin
+and arm-B's true pinned value is **−0.19310280** — every candidate quoted below
+passes the row under the corrected reference; comparisons vs 0.193 are
+conservative-only.
 
 | axis | bar | `C_co3a_s1319` (D CID22 leader) | `C_co3a_s1321` (D candidate) | `C_co4_s1307` (E CID22 leader) | `C_co4_s1303` (E candidate) |
 |---|---|---|---|---|---|
@@ -1589,7 +1592,7 @@ committed with this registration.
 | CID22 | **> 0.8923796503** | PRIMARY |
 | KonJND | ≥ 0.43 | abs-SROCC |
 | nonphoto | ≥ 0.90 | |
-| HF-NL-proxy | ≥ 0.19310280 | `rank.hfnlproxy.per_ref_mean`, per-ref (§1b) |
+| HF-NL-proxy | ≥ 0.19310280 ⚠ O.R0: arm-B true value −0.193; ≥0.193 kept as the conservative bar | `rank.hfnlproxy.per_ref_mean`, per-ref (§1b) |
 | dial | mono ≥ 93% / tied ≤ 5% | computed ON THE ENSEMBLE. **A monotonicity break is a disqualifying finding and is reported as one** — averaging models with different dial shapes is exactly the operation that could produce it |
 | sdr25 | **reported only, NEVER a selection rule** | the oracle/CID22 decoupling reproduced FIVE times in this campaign, including within a fixed config (wave 4). Wave 5 does not select on it |
 | **M3a** | **NOT COMPUTABLE** | stated, not skipped — see 5.6 |
@@ -1938,7 +1941,7 @@ this arm exists to answer):**
 | CID22 | **> 0.8923796503** (the bar) **AND** vs **0.89067** (`C_co3a_s1301`, best single) **AND** vs the teacher's own arm (0.89425 / 0.89329) — *does the student retain the ensemble's +0.0035?* |
 | KonJND | ≥ 0.43 |
 | nonphoto | ≥ 0.90 |
-| HF-NL-proxy | ≥ 0.19310280 (`rank.hfnlproxy.per_ref_mean`) |
+| HF-NL-proxy | ≥ 0.19310280 (`rank.hfnlproxy.per_ref_mean`) ⚠ O.R0: reference value was flipped; kept as conservative bar |
 | dial | mono ≥ 93% / tied ≤ 5% |
 | **M3a** | **≥ 0.85 — THE row an ensemble cannot be judged on, and the reason this arm exists.** Measured on every F cell (n=6), not a subset |
 | embedded repro | `zentrain.repro` present (trainer-native; exit-4 on failure) |
