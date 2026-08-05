@@ -63,3 +63,103 @@ Main CI has had **no successful run since 2026-07-16** (windows red since
 per the table). "CI green" has been unverifiable for ~3 weeks; the golden
 regressions above were invisible inside that. Worth a standing rule: a red
 window platform must not be left to mask new red on the primary platforms.
+
+---
+
+# ADDENDUM — the decisive experiments (board-hygiene / rsqrt-investigation lane, 2026-08-05)
+
+Run after this doc landed, using CI itself as the failing environment
+(probe PRs #57/#58/#59, closed unmerged) plus the log archaeology below.
+Every §3 "decisive next experiment" was run; two of this doc's readings are
+CORRECTED by the results.
+
+## A1. The archmage/magetypes lock movement is EXONERATED for the golden
+
+`aaf9b808` did move the LOCK 0.9.26 → 0.9.28 (archmage, archmage-macros,
+magetypes — verified in its `Cargo.lock` hunks; the manifest stayed 0.9.23).
+But the golden was already red at 0.9.26 on fixed-Intel hardware:
+`Test (macos-15-intel)` fails BOTH golden tests with the SAME 241/372
+signature at `bb5373a4` (08-03 05:01, the EARLIEST completed run containing
+the golden), `ab6c8991`, `5a8adee7`, and `926c71f7` — all four with
+`archmage = 0.9.26` in their committed lock. A dependency bump cannot
+explain failures that predate it.
+
+## A2. The "ubuntu flip window" was runner-CPU lottery, and the 07-19 green was vacuous
+
+* Probe PRs #57 (05739a53 verbatim) and #58 (lock pinned back to 0.9.26)
+  ran the golden 4× each, twice (16 draws total), logging `/proc/cpuinfo`:
+  **every draw landed on AMD EPYC (7763 Zen3 / 9V74 Zen4) and every draw
+  PASSED — both arms, both feature configs.** The ubuntu-latest fleet mixes
+  vendors; a per-run verdict is a per-run CPU draw.
+* The 08-04 ubuntu-latest red (run 30919484848): its printed drift values
+  are **bit-identical, line for line, to macos-15-intel's in the same run**
+  (first 20 divergent features compared exactly). The ubuntu red was an
+  Intel-class draw exhibiting the same phenomenon as the Intel Macs —
+  glibc vs Apple libm producing IDENTICAL drift also eliminates libm as
+  the mechanism for THIS divergence (it is instruction-level,
+  vendor-dependent — the estimate-instruction class is the standing
+  candidate; the precise op is NOT yet pinned).
+* `v1_golden_bytes.rs` landed `f247746f` (07-18 23:39). `7d32671b` —
+  the "passed 07-19, only windows failed" run this doc leaned on — is
+  07-18 18:18, i.e. **before the golden existed**. There is no pre-08-03
+  Intel-green observation; between 07-19 and 08-03 05:01 the push train
+  cancelled every run.
+
+**Corrected reading: the golden has NEVER been observed green on an
+Intel-identified machine.** It was born environment-classed at capture
+(07-18, AMD Zen4 / WSL): AMD x86 passes everywhere it has been tried
+(Zen3 EPYC, Zen4 EPYC, Zen4 dev box, glibc 2.35/2.36/2.39); Intel x86
+(mac + the identified ubuntu draws) fails by ~1e-10 on 241/372; ARM
+classes fail in their own patterns (mac-ARM 246/372; windows-11-arm fails
+both goldens; the M4 fails back to 07-19 — consistent, since there was
+never an ARM-green either). One windows-latest x64 run at 05739a53 passed
+the golden on an unidentified-CPU draw (that fleet is mixed too).
+
+## A3. The LOCAL rsqrt-kernel failure has a DIFFERENT root — and there the lock bump IS the breaker
+
+`rsqrt_path_precision_vs_scalar` (the opt-in rsqrt Adam kernel's precision
+gate, AVX-512-only) was measured in a four-cell A/B on the Zen4 dev box:
+
+| kernel | @0.9.26 | @0.9.28 |
+|---|---|---|
+| pre-repair (`_approx` + 1 hand-NR) | **PASS 1.117e-12** | FAIL 1.6653e-5 |
+| repaired `22e37ce3` (`rsqrt()`/`recip()`) | FAIL 1.6653e-5 | **PASS 1.117e-12** |
+
+The two diagonals are BIT-identical because the expression trees coincide
+(0.9.27's archmage `34f34b2` moved one Newton step across the API line:
+`_approx` went refined→raw, `rsqrt()`/`recip()` went ~28-bit→full). So the
+local failure began exactly at `aaf9b808` and is fixed by `22e37ce3` +
+the `Cargo.toml` 0.9.28 minimum. **Joint determination: the local rsqrt
+failure and the CI golden drift are DISTINCT roots under one theme —
+exact-f64 expectations crossing a (CPU-vendor × libm × dependency-semantics)
+class boundary.**
+
+## A4. Windows red, itemized (the red-masking-red picture)
+
+* `windows-latest` (x64) at 05739a53 fails exactly ONE test:
+  `tests::corpus_slots_are_relative_or_declared_pinned` — a stale
+  exemption: "hf_nearlossless is declared pinned-outside-features-root but
+  its slot is relative now. Remove the stale exemption." (bake_verdict.rs
+  slot audit; fires on Windows path semantics). The golden PASSED there.
+* `windows-11-arm` at 05739a53 fails the two golden tests (the ARM class,
+  per A2).
+* Main CI: no successful run since 2026-07-16; nearly every 07-19..08-03
+  run was cancelled by the push train's concurrency group, which is what
+  made the golden's birth-state unobservable for two weeks.
+
+## A5. Remedy options (USER decision per the never-relax rule — presented, not picked)
+
+1. **Per-environment-class goldens** — capture one golden per
+   (CPU-vendor × libm) class the matrix runs; exact-f64 holds within class.
+2. **Tolerance-class gate cross-class** — exact on the capture class,
+   bounded-relative elsewhere (observed drift ≤ ~1e-9): codifies that
+   byte-identity never held cross-vendor.
+3. **Pin the golden to the capture class** — run it only on
+   AMD-x86-identified runners (or a self-hosted runner); other platforms get
+   a visible SKIPPED-by-policy row, never a silent green.
+4. **Make the pipeline vendor-invariant** — hunt the divergent op(s)
+   (estimate-instruction class) and replace with IEEE-exact equivalents;
+   the only option that makes one golden legitimately universal, at a perf
+   and investigation cost.
+
+Probe hygiene: PRs #57/#58/#59 closed unmerged, probe branches deleted.

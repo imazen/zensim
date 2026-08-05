@@ -156,20 +156,64 @@ packs **5 lanes with worst-case-simultaneous peaks, 6 with staggered starts**
 5-6 — a 23-run wave at ~17.4 min/run drops from ~2.3 h on 3 lanes to ~1.2 h
 on 6.
 
-**Next lever (documented, not taken):** have `parquet_loader::load_parquet`
-emit the flat buffer directly. That removes both the per-group
-rows+flat flatten transient (the current peak) and the loader's per-row
-allocations entirely, putting the peak at the matrix itself (~6.2 GB → 7
-lanes). It touches a loader with 10+ consumer binaries (bake_verdict,
-train_minmax, bake_dial_refit, picker tools …), each with its own identity
-surface — a separate pass with its own gates.
+**Next lever — TAKEN 2026-08-05 (`d9e336ec`): the loader emits flat.**
+`load_parquet_impl` = one shared scan behind two shapes: `load_parquet`
+(per-row `Vec<Vec<f64>>`, unchanged signature and values — the compat shape
+every non-trainer consumer keeps) and the new `load_parquet_flat` →
+`OwnedLoadedGroupFlat` (ONE row-major buffer, pre-reserved exactly from the
+parquet footer's `num_rows` so it is allocated once and never
+realloc-copied). The trainer's parquet branch adopts the flat shape;
+`From<OwnedLoadedGroupFlat>` is a field move, so the per-group rows+flat
+flatten transient (this file's remaining peak) no longer exists.
+
+Gates, measured on the **wave-11 recipe** (seed-4101 argv extracted from the
+production bake's embedded `zentrain.repro`: 10 groups, 729,290 rows × 944,
+120 epochs — wave-10 L9 with the corrected KADID table and `tkadis`
+dropped), same methodology as the table above (same binary path, same
+`--out` path, both runs from one workspace state; quiet box):
+
+```
+# scripts/verify_bake_identity.sh w11_old.bin w11_new.bin
+model bytes (outside zentrain.repro): IDENTICAL (502471 bytes)
+repro non-volatile fields: IDENTICAL (ignored provenance keys that differ: ['timestamp_epoch'])
+best_val: 0.9197662869686666 vs 0.9197662869686666 -> SAME
+RESULT: PASS — same model
+```
+
+The new arm's bake also matches the LIVE wave-11 production bake
+`W11_s4101.bin` byte-for-byte outside provenance (1 byte at offset 68 = the
+documented section-length shift from different `--out` argv lengths, plus
+`trainer_head_at_train`; `best_val` bit-identical) — the loader change
+reproduces what the wave actually shipped. Loader-level bit-identity is
+separately gated by `tests/parquet_flat_equivalence.rs` (`to_bits` equality
+on every element; generated fixture + TID 3,000×372 + ext944 KADID
+10,125×944 all bit-identical).
+
+| arm | peak RSS (`time -v`) | wall |
+|---|---|---|
+| rows loader (`22e37ce3`, pre-change) | 8.12 GiB (8,510,208 kB) | 11:58.79 |
+| **flat loader (`d9e336ec`, shipped)** | **7.10 GiB (7,442,616 kB)** | 12:17.05 |
+
+**−1.02 GiB (−12.5%).** The earlier ~6.2 GB estimate was optimistic: with
+the load transient gone the peak moves to the training steady state itself
+(standardized matrix + eval scratch — the ~7.4-7.5 GB regime the phase
+attribution above measured for L0; wave-11's smaller mix lands at 7.10),
+which the loader cannot reduce further. Wall-clock delta (+18 s) is within
+single-run noise. Consumers other than the trainer keep the per-row shape
+and are byte-unchanged.
 
 ## Not changed
 
 - No change to the Adam kernel, the SIMD paths, the RNG, the sampler, or any
   hyperparameter. The `rsqrt` Adam substitution stays opt-in and unused.
   (`rsqrt_path_precision_vs_scalar` fails identically at `ae2a3838` and on
-  this change — pre-existing, untouched by this work.)
+  this change — pre-existing, untouched by this work. *Resolved 2026-08-05,
+  `22e37ce3`: the failure began at `aaf9b808`'s archmage/magetypes lock
+  movement 0.9.26→0.9.28, whose 0.9.27 reciprocal-contract change turned the
+  kernel's `_approx`+1-NR shape from ~full precision into ~28-bit; the kernel
+  was repaired to the new `rsqrt()`/`recip()` contract and the bound was NOT
+  moved — measured 1.117e-12 vs the 1e-9 gate, with the 0.9.26/0.9.28 A/B
+  matrix in the `chore: archmage/magetypes minimum 0.9.28` commit.*)
 - `parquet_loader::load_parquet` still returns per-row `Vec`s — it has many
   non-trainer consumers (bake_verdict and friends); the trainer bin flattens
   at its own `LoadedGroup` boundary. Anchor / pjnd / konjnd-aggregation /
