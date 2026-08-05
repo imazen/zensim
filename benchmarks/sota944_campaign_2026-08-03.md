@@ -6797,3 +6797,192 @@ These are not mutually exclusive. (b) and (c) can both fire.
 
 **Nothing ships and nothing swaps.** The freeze decision is the user's. No gate is
 relaxed; honest nulls stand as results.
+
+---
+
+## REGISTERED APPENDIX J — IS 944 TOO MANY? the feature-subset ablation
+### (committed BEFORE any fit in this pass; user hypothesis: *"the sheer quantity of input features might be making optimization impossible — can we ... ablate features and find the subset that enables the best results"*)
+
+Two phases, run in this order. **Phase A** ranks inputs by measured
+contribution on the incumbent and retrains at top-K. **Phase B** makes the
+trainer *learn* the subset in one run via a group-lasso penalty over input
+columns, which is the principled answer to Phase A's built-in bias.
+
+### J.0 Prior facts (measured before this registration; each verifiable from the cited artifact)
+
+- **The best models in hand use far fewer inputs than 944.** Shipped default
+  **B** (`b_sdr_linear_cid80_inclwinsor_dense_dial`) is 372-wide with 277
+  lasso-zeroed coefficients ⇒ **95 live**. **`winner_dial`**
+  (`Ebothg_hfgain_winsor_dial`) is **156-input** by construction. The 944 MLP
+  class is **667 live / 277 dead** — re-derived this pass from
+  `benchmarks/bake_contrib_H_co3abpg_s2507_2026-08-04.tsv` (944 rows;
+  `dead` column, registered thresholds mean|Δ| < 1e-4 ∧ p95|Δ| < 1e-3).
+- **REFINEMENT of the "277 dead" framing, measured this pass and registered
+  here because it changes what Phase A can conclude:** all **277/277** dead
+  inputs have `frac_rows_nonzero_xt == 0.0000` — their *standardized* value is
+  zero on **every row** of the ranking corpus. So the dead set is not "944
+  inputs of which the model chose to ignore 277"; it is "944 columns of which
+  277 carry no variation at all after transform" (216 structural zeros
+  f156-371 + 61 never-populated/winsor-collapsed). **A model cannot use a
+  constant.** The live question is therefore entirely about the **667**.
+- **Contribution among the 667 is diffuse, not concentrated** (same TSV,
+  `mean_abs`, share of total): top-16 = 9.50%, top-64 = 27.97%, top-128 =
+  45.29%, top-256 = 68.59%, top-512 = 93.58%. Family shares: v2-348 50.01%,
+  v1fold156 27.89%, append204 20.44%, tail20 1.67%, zeros156-371 0.00%.
+- **Seed spread within a fixed config is large** — the pooled n=12 co3a
+  histogram in this document: CID22 mean 0.87999, **sd 0.01246**. Any
+  subset-vs-full claim must clear a band derived from that kind of spread,
+  which is why Phase A carries a k=3 same-recipe baseline.
+- **The shipping path for a subset already exists**: `FeatureTransform::Drop`
+  + `Model::caller_input_width()` (zenanalyze `88410ba6`) + `bake_dial_refit
+  pack`'s automatic all-zero-column pruning (`ae852b1b`). A learned subset
+  bakes and runs at reduced width with identical predictions — so a positive
+  result here is a shipping artifact, not a research curio.
+
+### J.1 The trainer extensions (written BEFORE any fit; owner-extension, no new trainer)
+
+Both land in the ONE trainer (`zensim_mlp_train` + `zensim-validate/src/mlp_train/`),
+per the no-duplication rule. Neither is a new binary or a Python fit.
+
+- **`--keep-features SPEC`** (Phase A). SPEC = inline `0,5,17` or a file of
+  indices. The bin zeroes the **raw** column of every dropped input before the
+  scaler runs; a constant-zero column standardizes to exactly `0.0`, whose
+  layer-1 gradient is exactly `0.0` forever, so pinning the matching `W1` rows
+  to `0.0` **once at init** (`INPUT_KEEP_MASK` → `zero_masked_w1_rows`) makes
+  the run an *exact* K-wide fit at **zero per-step cost**, and the baked rows
+  come out exactly zero ⇒ prunable. Because the trainer's init RNG and sampler
+  RNG are separate by design, a K-arm draws **the same init normals for kept
+  rows and the same training pairs** as the full-width run at that seed — the
+  arms differ in the dropped columns and nothing else.
+- **`--group-l1 LAMBDA`** (Phase B). Penalty `λ · Σ_k ‖W1[k,:]‖₂` applied as a
+  **decoupled proximal block-soft-threshold after each Adam step** (threshold
+  `τ = lr·λ`; `‖w‖₂ ≤ τ ⇒ w := 0`, else `w := w(1 − τ/‖w‖₂)`). Two reasons it
+  is proximal and not a gradient penalty, both already paid for in this
+  campaign: a coupled penalty is **neutralized by Adam's per-parameter
+  rescaling** (the `--coarse-l2-mult` finding), and a subgradient can never
+  reach *exact* zero — it shrinks asymptotically, every column stays alive at
+  1e-12, and nothing is prunable.
+- **Gates that ship with them** (`mod group_l1_tests`): exact-zero on
+  sub-threshold rows (bit-compared against `0.0f64.to_bits()`, and `-0.0` is
+  rejected), the closed-form shrinkage `‖w'‖ = ‖w‖ − τ`, at-threshold death,
+  all-zero rows stay zero (so the prox cannot resurrect a pinned row via a 0/0
+  factor), **λ=0 is a bit-identical no-op** (every historical recipe keeps
+  reproducing), and the mask pins exactly the dropped rows leaving kept rows
+  bit-untouched.
+- **Both flags hard-error** on `--pool-head` / `--hybrid-head` /
+  `--per-sample-alpha-head` / `--n-hidden-layers ≥ 2` / `--gpu-runtime`, whose
+  layer-1 weights live in a different owner and would silently ignore them.
+- The bin reports and records **live width** (`live_l0_rows` in `.spec.json`,
+  counted from the produced bake's exactly-zero layer-1 rows) plus
+  `keep_features_n` / `group_l1`, so no cell can claim a subset it did not
+  train.
+
+### J.2 Phase A — contribution-ranked top-K (frozen)
+
+**Ranking (frozen):** `benchmarks/bake_contrib_H_co3abpg_s2507_2026-08-04.tsv`,
+column **`mean_abs`** (exact mean-ablation |Δscore| pooled over the registered
+5-corpus slice: ext944 cid22val + kadid + csiq + live + imazen26@4000),
+descending, ties broken by ascending index. This column is **target-independent**
+— it is a mean absolute score displacement, no SROCC and no `human_score` — so
+the wave-10 KADID polarity fix does not touch it. Emitted by
+`scripts/featsub/topk_from_contrib.py` (the only new script; it writes index
+files and nothing else).
+
+**Arms:** K ∈ **{64, 128, 256, 512, 667}** × seeds **{2501, 2503}**, plus the
+full-944 baseline at seeds **{2501, 2503, 2507}** = **13 runs**. K=667 is
+exactly the non-dead set — the "drop only what is provably constant" arm.
+
+**Recipe (frozen):** the `H_co3abpg_s2507` argv verbatim (11 groups with their
+weights + loss modes, 64 feature transforms, `--n-hidden-layers 0`,
+`--epochs 120`, `--pairs-per-epoch 50000`, `--coarse-decay 1e-5`,
+`--max-features 944 --allow-narrow-features`, `--target-column human_score
+--target-scale 100`), local table paths, **only `--seed` and `--keep-features`
+vary**.
+
+**Registered deviation from the incumbent's inputs:** the local
+`ext_kadid.parquet` is the **wave-10 corrected** table (polarity fixed,
+`176c4268`), not the inverted table the published `H_co3abpg_s2507` numbers
+were trained on. Every one of the 13 runs uses it, so the sweep is internally
+consistent; published incumbent numbers are **not** comparable to this
+baseline and will not be quoted as such.
+
+**Endpoints (frozen):** `scripts/sota944_verdict.sh` = `bake_verdict --regime
+944` (the campaign's ONE invocation), reporting the bar axes it owns: **CID22,
+KonJND, nonphoto, HF-NL-proxy, sdr25, dial mono/tied**, plus KADID + CSIQ +
+LIVE for breadth. M3a is NOT part of Phase A's decision rule (the coherence
+instrument is a separate, slower tool); it is measured only on a Phase-A/B
+winner if one exists.
+
+**Noise band (frozen BEFORE any run):** per axis, `sd₉₄₄` = the sample sd over
+the k=3 full-944 baseline seeds; the band is **±2·sd₉₄₄**. A K-arm's statistic
+is its **2-seed mean**. A delta counts as **OUTSIDE noise** only if BOTH
+(i) |mean_K − mean_944| > 2·sd₉₄₄ **and** (ii) both K-seeds fall on the same
+side of the baseline mean. Anything else is INSIDE noise and **will not be
+reported as a finding** — including a delta that "looks big".
+
+**Registered outcomes (frozen):**
+- **(a) OVER-PARAMETERIZED** — some K beats 944 outside noise on ≥1 axis with
+  no axis regressing outside noise ⇒ hypothesis confirmed; report the K and
+  the subset.
+- **(b) FREE SIZE/LATENCY WIN** — the profile holds flat (every axis INSIDE
+  noise) down to some K ⇒ no quality change but a smaller/faster bake; report
+  the smallest K that holds.
+- **(c) FALSIFIED** — monotone degradation as K falls ⇒ the features are
+  earning their keep; say so plainly.
+(Outcomes are not exclusive across axes; the report states which fired and where.)
+
+**Registered caveat (stated up front, per the task):** the ranking is measured
+**on a 944-trained model**, so it inherits that model's biases — an input this
+model ignores might be useful to a model trained without the others. Phase A
+alone can therefore support (b) and (c) strongly but supports (a) only weakly.
+Phase B exists to address exactly this.
+
+### J.3 Phase B — learn the subset (group-lasso), frozen
+
+1. **Calibration pilot** (registered as calibration, NOT a result): short runs
+   (≤12 epochs, seed 2501) over a coarse λ ladder to locate the range spanning
+   "few columns dropped" → "aggressive". Pilot numbers are reported as
+   calibration only and never as an axis finding. Rationale for the expected
+   scale, recorded before running: Adam's update magnitude is ≈ `lr` per step
+   regardless of gradient size, and the prox threshold is `lr·λ`, so λ ~ O(1)
+   is where the penalty is comparable to the gradient step.
+2. **Sweep**: the 4 λ values the pilot identifies × seeds {2501, 2503} = 8
+   runs, same frozen recipe otherwise.
+3. **Stability selection** (the robust answer given the measured seed noise):
+   an input is **selected** iff it survives (layer-1 row not exactly zero) in
+   **≥ 80%** of the λ×seed runs. Reported alongside per-λ live counts.
+4. **Ship-path verification**: bake the best subset through `bake_dial_refit
+   pack`, and report (i) **prediction identity** on a held slice — max |Δscore|
+   between the pruned bake and its parent, which must be **0.0** for the pinned
+   arms because the pruned rows were exactly zero — (ii) **bake size** before
+   vs after, and (iii) **inference latency** measured with **zenbench** (never
+   criterion, never a hand-rolled timer).
+5. **Cross-phase check**: |top-K ∩ learned subset| / |union| at matched size,
+   plus the family mix of each. Agreement is evidence for both; disagreement is
+   itself informative and will be reported without spin.
+
+### J.4 What this appendix CANNOT conclude (registered before running)
+
+- It cannot settle whether a **different feature set** (new extraction) beats
+  944 — only whether a **subset of these 944 columns** does.
+- It cannot attribute a win to "optimization got easier" versus "the dropped
+  columns were actively harmful". Both produce the same axis deltas here;
+  distinguishing them needs a training-dynamics instrument that is not in this
+  pass.
+- The 216 structural zeros are **not** evidence about feature value: they are
+  empty by regime construction. Any "K < 944 works" statement must be read
+  against 667, not 944, to avoid claiming credit for dropping nothing.
+- Phase B's group-lasso biases toward **correlated-group** selection: among
+  near-duplicate inputs it keeps an arbitrary representative. Stability
+  selection over seeds mitigates but does not remove this.
+
+### J.5 Ops (frozen)
+
+jj workspace `../zensim--featsub` on `main@origin`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimfs-target`; heavy work via
+`~/work/zen/scripts/run-heavy --jobs 6`; logs `~/tmp/featsub/`; bakes to
+`/mnt/v/output/zensim/bakes/featsub/`; per-bake harvest via
+`scripts/harvest_bakes.sh`, ONE parked waiter via `scripts/await_artifacts.sh`.
+TSVs land in `benchmarks/featsub/` with `.meta` sidecars (git commit, command,
+input paths + shas). Stats are never hand-rolled — `bake_verdict` / `zenstats`
+only. **Nothing ships and nothing swaps**; the freeze decision is the user's.

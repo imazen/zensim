@@ -1070,6 +1070,112 @@ fn coarse_decay_rate() -> f64 {
     COARSE_DECAY_RATE.lock().map(|g| *g).unwrap_or(0.0)
 }
 
+/// Group-lasso (group-L1) strength over layer-1 **input columns** — set by
+/// the bin (0.0 = off). See [`apply_group_l1`].
+pub static GROUP_L1_LAMBDA: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
+
+fn group_l1_lambda() -> f64 {
+    GROUP_L1_LAMBDA.lock().map(|g| *g).unwrap_or(0.0)
+}
+
+/// Decoupled **group-lasso** (a.k.a. group-L1 / block-ℓ2,1) proximal step on
+/// layer-1 input rows, applied AFTER the Adam step.
+///
+/// The penalty is `λ · Σ_k ‖W1[k, :]‖₂` — the ℓ2 norm of each input's whole
+/// outgoing weight row, summed over inputs. Unlike elementwise L1 this drives
+/// a *whole input column* to exactly zero, so the fit **learns which inputs to
+/// keep** instead of ranking them post-hoc.
+///
+/// **Why proximal and not a gradient penalty.** A coupled penalty (adding
+/// `λ ∂‖W‖/∂W` to the gradient) is neutralized by Adam's per-parameter
+/// rescaling — measured on this trainer for L2 (2026-07-29: mult 8-32 on
+/// λ=1e-5 produced byte-different but functionally identical bakes), which is
+/// why `--coarse-decay` is decoupled. Worse, a coupled subgradient can never
+/// reach *exact* zero: it shrinks asymptotically and every column stays alive
+/// at 1e-12, so nothing is prunable. The proximal operator has a hard
+/// threshold and lands on exact 0.0.
+///
+/// Block soft-threshold, per input row `w = W1[k, :]` with `τ = lr · λ`:
+/// - `‖w‖₂ ≤ τ` ⇒ `w := 0` (every element exactly `0.0`)
+/// - else `w := w · (1 − τ/‖w‖₂)`
+///
+/// Rows already exactly zero stay zero (`‖w‖ = 0 ≤ τ`), so this composes with
+/// the [`INPUT_KEEP_MASK`] pinning without fighting it.
+fn apply_group_l1(w1: &mut [f64], n_hidden: usize, lr: f64, lambda: f64) {
+    if lambda <= 0.0 || n_hidden == 0 {
+        return;
+    }
+    let tau = lr * lambda;
+    if tau <= 0.0 {
+        return;
+    }
+    for row in w1.chunks_mut(n_hidden) {
+        let norm = row.iter().map(|&w| w * w).sum::<f64>().sqrt();
+        if norm <= tau {
+            for w in row.iter_mut() {
+                *w = 0.0;
+            }
+        } else {
+            let f = 1.0 - tau / norm;
+            for w in row.iter_mut() {
+                *w *= f;
+            }
+        }
+    }
+}
+
+/// Post-Adam decoupled penalties on layer-1 weights, in a fixed order:
+/// coarse-scale decay (per-feature, `--coarse-decay`) then the group-lasso
+/// proximal step (`--group-l1`). Both are no-ops at their default 0.0, so
+/// this is bit-identical to the historical `apply_coarse_decay` call when
+/// neither flag is passed.
+fn apply_post_adam_penalties(w1: &mut [f64], n_hidden: usize, lr: f64) {
+    apply_coarse_decay(w1, n_hidden, lr, coarse_decay_rate());
+    apply_group_l1(w1, n_hidden, lr, group_l1_lambda());
+}
+
+/// Per-input keep mask (`true` = the input participates) — set by the bin
+/// from `--keep-features` (`None` = every input participates).
+///
+/// The bin zeroes the **raw** feature values of dropped columns before
+/// training, which makes their standardized value exactly `0.0` (the scaler
+/// sees a constant-zero column: `mean = 0`, `std` floored, `(0−0)/s = 0`).
+/// A zero standardized input contributes exactly `0.0` to every layer-1
+/// gradient, so once the corresponding `W1` rows are zeroed at init they can
+/// never move again (L2 adds `λ·0`, coarse decay scales `0`, the group-lasso
+/// prox keeps `0`). Training is therefore *exactly* a K-wide fit, and the
+/// baked layer-1 rows are exactly zero ⇒ prunable by `bake_dial_refit pack`.
+pub static INPUT_KEEP_MASK: std::sync::Mutex<Option<Vec<bool>>> = std::sync::Mutex::new(None);
+
+fn input_keep_mask() -> Option<Vec<bool>> {
+    INPUT_KEEP_MASK.lock().ok().and_then(|g| g.clone())
+}
+
+/// Zero the layer-1 rows of every masked-out input, once, right after init.
+/// Returns the number of rows zeroed (0 when no mask is set).
+///
+/// Safe to call exactly once: dropped inputs are standardized-zero, so their
+/// gradients are exactly `0.0` for the rest of training and the rows stay at
+/// `0.0` without any per-step cost.
+fn zero_masked_w1_rows(w1: &mut [f64], n_hidden: usize, mask: Option<&[bool]>) -> usize {
+    let Some(mask) = mask else {
+        return 0;
+    };
+    if n_hidden == 0 {
+        return 0;
+    }
+    let mut zeroed = 0usize;
+    for (k, row) in w1.chunks_mut(n_hidden).enumerate() {
+        if !mask.get(k).copied().unwrap_or(true) {
+            for w in row.iter_mut() {
+                *w = 0.0;
+            }
+            zeroed += 1;
+        }
+    }
+    zeroed
+}
+
 fn record_best_val(v: f64) {
     if let Ok(mut g) = LAST_BEST_VAL.lock() {
         *g = Some(v);
@@ -1877,6 +1983,34 @@ pub fn train_mlp_strategy(
         .collect::<Vec<_>>();
     let mut b2 = vec![0.0f64; n_outputs];
 
+    // Feature-subset pinning (`--keep-features`): zero the layer-1 rows of
+    // dropped inputs once. Their standardized values are exactly 0.0 (the bin
+    // zeroed the raw column), so the rows can never move again — this is an
+    // exact K-wide fit with the SAME init draws and the SAME sampled pairs as
+    // the full-width run at this seed (init and sampler RNGs are separate by
+    // design, see above), which is what makes the K-sweep a controlled
+    // ablation rather than a re-roll.
+    let masked_rows = zero_masked_w1_rows(&mut w1, n_hidden, input_keep_mask().as_deref());
+    if masked_rows > 0 {
+        log_line(
+            &format!(
+                "[keep-features] pinned {masked_rows} of {n_features} layer-1 input rows to 0 \
+                 (effective width {})",
+                n_features - masked_rows
+            ),
+            log,
+        );
+    }
+    if group_l1_lambda() > 0.0 {
+        log_line(
+            &format!(
+                "[group-l1] decoupled group-lasso prox ON: lambda {} (threshold lr*lambda per step)",
+                group_l1_lambda()
+            ),
+            log,
+        );
+    }
+
     let mut adam = AdamState::new(w1.len(), b1.len(), w2.len(), b2.len());
 
     // 4. Training loop.
@@ -2098,7 +2232,7 @@ pub fn train_mlp_strategy(
                     n_steps += steps_added;
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                        apply_post_adam_penalties(&mut w1, n_hidden, lr);
                     }
                 }
                 continue;
@@ -2136,7 +2270,7 @@ pub fn train_mlp_strategy(
                     n_steps += steps_added;
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                        apply_post_adam_penalties(&mut w1, n_hidden, lr);
                     }
                 }
                 continue;
@@ -2301,7 +2435,7 @@ pub fn train_mlp_strategy(
             // K>1 sequential → step once per K accumulated pairs.
             if k == 1 || steps_since_adam >= k as u64 {
                 adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                apply_post_adam_penalties(&mut w1, n_hidden, lr);
                 steps_since_adam = 0;
             }
 
@@ -2396,7 +2530,7 @@ pub fn train_mlp_strategy(
                     if k == 1 || tv_steps_since_adam >= k as u64 || is_last_tv {
                         if tv_steps_since_adam > 0 {
                             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                            apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                            apply_post_adam_penalties(&mut w1, n_hidden, lr);
                         }
                         tv_steps_since_adam = 0;
                     }
@@ -2410,7 +2544,7 @@ pub fn train_mlp_strategy(
         // (steps_since_adam resets to 0 after each Adam call).
         if k > 1 && !parallel && steps_since_adam > 0 {
             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-            apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+            apply_post_adam_penalties(&mut w1, n_hidden, lr);
         }
         // T8.2 final-flush for parallel buffer: handle the partial
         // batch at epoch end if pairs_per_epoch % K != 0. Buffer is
@@ -2449,7 +2583,7 @@ pub fn train_mlp_strategy(
                     n_steps += steps_added;
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                        apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                        apply_post_adam_penalties(&mut w1, n_hidden, lr);
                     }
                 }
                 parallel_batch_buffer.clear();
@@ -2476,7 +2610,7 @@ pub fn train_mlp_strategy(
                 n_steps += steps_added;
                 if steps_added > 0 {
                     adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
-                    apply_coarse_decay(&mut w1, n_hidden, lr, coarse_decay_rate());
+                    apply_post_adam_penalties(&mut w1, n_hidden, lr);
                 }
             }
         }
@@ -10153,6 +10287,118 @@ mod l2_row_form_tests {
         }
         // Tail past `w.len()` untouched by both.
         assert_eq!(a[n..], g0[n..]);
+    }
+}
+
+/// Gates for the feature-subset machinery: the group-lasso proximal step
+/// (`--group-l1`) and the keep-mask row pinning (`--keep-features`).
+/// Registered in `benchmarks/sota944_campaign_2026-08-03.md` appendix J.
+#[cfg(test)]
+mod group_l1_tests {
+    use super::{apply_group_l1, zero_masked_w1_rows};
+
+    fn row_norm(w1: &[f64], k: usize, n_hidden: usize) -> f64 {
+        w1[k * n_hidden..(k + 1) * n_hidden]
+            .iter()
+            .map(|&w| w * w)
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// THE property the whole Phase-B design rests on: a row whose ℓ2 norm is
+    /// at or below the threshold `lr·λ` becomes **exactly** 0.0 in every slot
+    /// — not 1e-18, not denormal. Only exact zeros are prunable by
+    /// `bake_dial_refit pack`, and only an exact zero is a *learned drop*.
+    #[test]
+    fn group_l1_drives_whole_rows_to_exact_zero() {
+        let (n_features, n_hidden) = (6usize, 4usize);
+        // Row k has every element = 0.1·(k+1) ⇒ ‖row‖ = 0.2·(k+1) at n_hidden=4.
+        let mut w1: Vec<f64> = (0..n_features)
+            .flat_map(|k| std::iter::repeat_n(0.1 * (k + 1) as f64, n_hidden))
+            .collect();
+        let (lr, lambda) = (0.5f64, 1.0f64); // τ = 0.5 ⇒ rows 0,1 (norms 0.2,0.4) die
+        apply_group_l1(&mut w1, n_hidden, lr, lambda);
+        for k in 0..2 {
+            for j in 0..n_hidden {
+                let v = w1[k * n_hidden + j];
+                assert_eq!(v.to_bits(), 0.0f64.to_bits(), "row {k} slot {j} = {v:e}");
+            }
+        }
+        // Row 2 has norm exactly 0.6 > τ ⇒ survives, shrunk by (1 − τ/‖w‖).
+        let expect = 0.3 * (1.0 - 0.5 / 0.6);
+        assert!(
+            (w1[2 * n_hidden] - expect).abs() < 1e-15,
+            "{}",
+            w1[2 * n_hidden]
+        );
+        // Shrinkage is exactly the block soft-threshold: ‖w'‖ = ‖w‖ − τ.
+        for k in 2..n_features {
+            let before = 0.2 * (k + 1) as f64;
+            assert!(
+                (row_norm(&w1, k, n_hidden) - (before - 0.5)).abs() < 1e-12,
+                "row {k}"
+            );
+        }
+    }
+
+    /// A row exactly at the threshold dies (`‖w‖ ≤ τ`), and an all-zero row
+    /// stays all-zero — so the prox composes with `--keep-features` pinning
+    /// instead of resurrecting pinned rows via a 0/0 shrink factor.
+    #[test]
+    fn group_l1_boundary_and_zero_rows() {
+        let n_hidden = 3usize;
+        let mut w1 = vec![0.0f64; 2 * n_hidden];
+        // Row 0: all zeros. Row 1: norm exactly τ.
+        let tau = 0.5f64 * 2.0; // lr·λ
+        let v = tau / (n_hidden as f64).sqrt();
+        for j in 0..n_hidden {
+            w1[n_hidden + j] = v;
+        }
+        apply_group_l1(&mut w1, n_hidden, 0.5, 2.0);
+        for (i, &w) in w1.iter().enumerate() {
+            assert_eq!(w.to_bits(), 0.0f64.to_bits(), "slot {i} = {w:e}");
+            assert!(!w.is_sign_negative(), "slot {i} became -0.0");
+        }
+    }
+
+    /// λ = 0 (the default) is a strict no-op — bit-identical weights, so
+    /// every historical recipe keeps reproducing byte-identically.
+    #[test]
+    fn group_l1_lambda_zero_is_bit_identical_noop() {
+        let mut w1: Vec<f64> = (0..64).map(|i| (i as f64 - 32.0) * 1e-3).collect();
+        let before = w1.clone();
+        apply_group_l1(&mut w1, 8, 1e-3, 0.0);
+        apply_group_l1(&mut w1, 8, 0.0, 5.0); // lr = 0 ⇒ τ = 0 ⇒ no-op too
+        for (a, b) in before.iter().zip(w1.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
+
+    /// The keep-mask pins exactly the dropped rows and leaves kept rows
+    /// bit-untouched — the property that makes a K-arm differ from the
+    /// full-width run in the dropped columns ONLY.
+    #[test]
+    fn keep_mask_pins_only_dropped_rows() {
+        let (n_features, n_hidden) = (5usize, 3usize);
+        let mut w1: Vec<f64> = (0..n_features * n_hidden).map(|i| 0.5 - i as f64).collect();
+        let before = w1.clone();
+        let mask = vec![true, false, true, false, false];
+        let zeroed = zero_masked_w1_rows(&mut w1, n_hidden, Some(&mask));
+        assert_eq!(zeroed, 3);
+        for k in 0..n_features {
+            for j in 0..n_hidden {
+                let idx = k * n_hidden + j;
+                if mask[k] {
+                    assert_eq!(w1[idx].to_bits(), before[idx].to_bits(), "kept row {k}");
+                } else {
+                    assert_eq!(w1[idx].to_bits(), 0.0f64.to_bits(), "dropped row {k}");
+                }
+            }
+        }
+        // No mask set ⇒ no rows touched.
+        let mut w2 = before.clone();
+        assert_eq!(zero_masked_w1_rows(&mut w2, n_hidden, None), 0);
+        assert_eq!(w2, before);
     }
 }
 

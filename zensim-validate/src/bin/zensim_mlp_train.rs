@@ -233,6 +233,32 @@ struct Args {
     #[arg(long, default_value_t = false)]
     allow_narrow_features: bool,
 
+    /// FEATURE-SUBSET ablation: restrict the fit to this set of input
+    /// indices. Everything else is dropped — its raw column is zeroed
+    /// before the scaler runs (so its standardized value is exactly 0.0)
+    /// and its layer-1 row is pinned to 0.0 at init, which makes the run an
+    /// *exact* K-wide fit that still draws the same pairs and the same init
+    /// normals as the full-width run at the same seed. The baked layer-1
+    /// rows come out exactly zero ⇒ prunable by `bake_dial_refit pack` into
+    /// a genuinely narrower, faster bake with identical predictions.
+    ///
+    /// SPEC is either an inline comma-separated list (`0,5,17`) or a path to
+    /// a file of whitespace/comma-separated indices (`#` comments allowed).
+    /// Indices must be `< --max-features`; duplicates are collapsed.
+    #[arg(long, value_name = "SPEC")]
+    keep_features: Option<String>,
+
+    /// GROUP-LASSO (group-L1 / ℓ2,1) strength over layer-1 input columns:
+    /// penalty `λ · Σ_k ‖W1[k,:]‖₂`, applied as a DECOUPLED proximal
+    /// block-soft-threshold after each Adam step (threshold `lr·λ`). Drives
+    /// whole input columns to EXACTLY zero, so the fit *learns* its own
+    /// feature subset in one run instead of ranking post-hoc. A coupled
+    /// subgradient would be both neutralized by Adam's rescaling and unable
+    /// to reach exact zero — see `apply_group_l1`. 0.0 = off (bit-identical
+    /// to every historical recipe).
+    #[arg(long, default_value_t = 0.0, value_name = "LAMBDA")]
+    group_l1: f64,
+
     /// TV-regularizer pair indices TSV. Two columns: lo_trainer_idx,
     /// hi_trainer_idx. Indices reference rows in the concatenated
     /// trainer-feature space (group 0 first, then group 1, etc.).
@@ -1116,6 +1142,64 @@ impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
             source_sha256: String::new(),
         }
     }
+}
+
+/// Parse `--keep-features SPEC` into a sorted, de-duplicated index list.
+///
+/// SPEC is either an inline comma-separated list (`0,5,17`) or a path to a
+/// file of whitespace/comma-separated indices; `#` starts a line comment.
+/// Every index must be `< n_features`. An empty set is an error (it would
+/// train a constant model, silently).
+fn parse_keep_features(spec: &str, n_features: usize) -> Result<Vec<usize>, String> {
+    let text = if std::path::Path::new(spec).is_file() {
+        std::fs::read_to_string(spec).map_err(|e| format!("cannot read {spec:?}: {e}"))?
+    } else {
+        spec.to_string()
+    };
+    let mut idx: Vec<usize> = Vec::new();
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or("");
+        for tok in line.split([',', ' ', '\t']).filter(|t| !t.is_empty()) {
+            let v: usize = tok
+                .trim()
+                .parse()
+                .map_err(|_| format!("bad index {tok:?} (want a non-negative integer)"))?;
+            if v >= n_features {
+                return Err(format!(
+                    "index {v} >= --max-features {n_features}; the subset must live inside the \
+                     declared feature width"
+                ));
+            }
+            idx.push(v);
+        }
+    }
+    idx.sort_unstable();
+    idx.dedup();
+    if idx.is_empty() {
+        return Err("empty index set — refusing to train a zero-input model".into());
+    }
+    Ok(idx)
+}
+
+/// Count layer-1 input rows that are **exactly** zero in a baked model, i.e.
+/// inputs the fit dropped (pinned by `--keep-features`, or learned away by
+/// `--group-l1`). Exact zeros are what `bake_dial_refit pack` prunes, so this
+/// is the honest "live width" of the bake. Returns `(live, dead)`.
+fn count_live_l0_rows(bake: &[u8]) -> Option<(usize, usize)> {
+    let model = zenpredict::Model::from_bytes(bake).ok()?;
+    let l = model.layer(0);
+    let (in_dim, out_dim) = (l.in_dim, l.out_dim);
+    let is_zero = |i: usize| -> bool {
+        (0..out_dim).all(|j| match &l.weights {
+            zenpredict::WeightStorage::F32(w) => w[i * out_dim + j] == 0.0,
+            zenpredict::WeightStorage::F16(w) => {
+                zenpredict::f16_bits_to_f32(w[i * out_dim + j]) == 0.0
+            }
+            zenpredict::WeightStorage::I8 { weights, .. } => weights[i * out_dim + j] == 0,
+        })
+    };
+    let dead = (0..in_dim).filter(|&i| is_zero(i)).count();
+    Some((in_dim - dead, dead))
 }
 
 /// Dispatch to the right loader based on file extension. `.parquet` ->
@@ -2426,6 +2510,47 @@ fn main() {
         )
     };
 
+    // FEATURE-SUBSET ablation (`--keep-features`): zero the raw values of
+    // every dropped column, in every loaded group, BEFORE the scaler is
+    // computed. A constant-zero column standardizes to exactly 0.0
+    // (`mean = 0`, `(0 − 0)/s = 0`), which makes its layer-1 gradient
+    // exactly 0.0 for the whole run; the trainer core pins the matching
+    // layer-1 rows to 0.0 once at init (`INPUT_KEEP_MASK`). Net effect: an
+    // exact K-wide fit, at zero per-step cost, with exactly-zero baked rows.
+    let keep_mask: Option<Vec<bool>> = match args.keep_features.as_deref() {
+        None => None,
+        Some(spec) => {
+            let idx = match parse_keep_features(spec, args.max_features) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("FATAL: --keep-features: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let mut mask = vec![false; args.max_features];
+            for &i in &idx {
+                mask[i] = true;
+            }
+            let n_keep = mask.iter().filter(|&&k| k).count();
+            println!(
+                "keep_features: {n_keep} of {} inputs kept ({} dropped)",
+                args.max_features,
+                args.max_features - n_keep
+            );
+            for g in &mut loaded {
+                for row in &mut g.feature_rows {
+                    for (d, keep) in mask.iter().enumerate() {
+                        if !keep && d < row.len() {
+                            row[d] = 0.0;
+                        }
+                    }
+                }
+            }
+            *zensim_validate::mlp_train::INPUT_KEEP_MASK.lock().unwrap() = Some(mask.clone());
+            Some(mask)
+        }
+    };
+
     // Build TrainingGroups (borrows feature rows from `loaded`).
     let feat_refs: Vec<Vec<&[f64]>> = loaded
         .iter()
@@ -3037,6 +3162,35 @@ fn main() {
             args.coarse_l2_mult
         );
     }
+    if args.group_l1 > 0.0 {
+        *zensim_validate::mlp_train::GROUP_L1_LAMBDA.lock().unwrap() = args.group_l1;
+        println!("[group-l1] group-lasso prox ON: lambda {}", args.group_l1);
+    }
+    // Both feature-subset knobs are wired ONLY on the plain
+    // `n_features → n_hidden → 1` strategy path (the one every 944-regime
+    // recipe uses). The head architectures keep their layer-1 weights in a
+    // different owner (`pool_head` / `hybrid_head` / `per_sample_alpha_head`)
+    // and would silently ignore the flag — fail loud instead of shipping a
+    // bake whose spec claims a subset it never trained.
+    if args.keep_features.is_some() || args.group_l1 > 0.0 {
+        let unsupported = [
+            (args.pool_head, "--pool-head"),
+            (args.hybrid_head, "--hybrid-head"),
+            (args.per_sample_alpha_head, "--per-sample-alpha-head"),
+            (args.n_hidden_layers >= 2, "--n-hidden-layers >= 2"),
+            (want_gpu, "--gpu-runtime"),
+        ];
+        for (hit, name) in unsupported {
+            if hit {
+                eprintln!(
+                    "FATAL: --keep-features / --group-l1 are implemented on the plain \
+                     n_features→n_hidden→1 path only; {name} routes layer-1 weights through a \
+                     different owner and would silently ignore them."
+                );
+                std::process::exit(1);
+            }
+        }
+    }
 
     let bake_bytes = if want_gpu {
         if !args.per_sample_alpha_head {
@@ -3273,6 +3427,23 @@ fn main() {
         )
     };
 
+    // Honest live width of what we just trained: how many layer-1 input rows
+    // are EXACTLY zero. `--keep-features` pins them; `--group-l1` learns them
+    // away. Exact zeros are what `bake_dial_refit pack` prunes, so this is
+    // the number that turns into a narrower, faster shipping bake.
+    let live_l0_rows: Option<usize> = match count_live_l0_rows(&bake_bytes) {
+        Some((live, dead)) => {
+            if keep_mask.is_some() || args.group_l1 > 0.0 {
+                println!(
+                    "[live-width] layer-1 inputs: {live} live, {dead} exactly-zero \
+                     (prunable by `bake_dial_refit pack`)"
+                );
+            }
+            Some(live)
+        }
+        None => None,
+    };
+
     // ── MANDATORY reproduction provenance ──────────────────────────────
     // Assembled BEFORE baking, embedded INTO the bake bytes as the
     // `zentrain.repro` metadata entry at the single write choke-point below
@@ -3331,6 +3502,8 @@ fn main() {
             "target_column": args.target_column,
             "target_scale": args.target_scale,
             "max_features": args.max_features,
+            "keep_features_n": keep_mask.as_ref().map(|m| m.iter().filter(|&&k| k).count()),
+            "group_l1": args.group_l1,
             "algorithm": "RankNet pairwise (+per-group loss modes; see argv for full hyperparams)",
             // Content-addressed inputs: the canonical reproduction identity.
             "inputs": inputs,
@@ -3402,6 +3575,9 @@ fn main() {
                 "rows": g.human_scores.len(),
             })).collect::<Vec<_>>(),
             "seed": args.seed,
+            "keep_features_n": keep_mask.as_ref().map(|m| m.iter().filter(|&&k| k).count()),
+            "group_l1": args.group_l1,
+            "live_l0_rows": live_l0_rows,
             "best_val": *zensim_validate::mlp_train::LAST_BEST_VAL.lock().unwrap(),
             "repro_embedded": true,
             "argv": std::env::args().collect::<Vec<String>>(),
