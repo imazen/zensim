@@ -7928,3 +7928,151 @@ nulls stand; nothing ships or swaps — the freeze decision is the user's.**
    registered outcome fired.
 6. The results section appended to this appendix. If G-L1 kills the leg: items
    1–2 plus the recorded null replace 3–5.
+
+
+## L.R — RESULTS (2026-08-05; gates, build, and all 4 probe cells; no gate relaxed)
+
+### L.R0 Execution record
+
+**Gates ran in the registered order, before any extraction or fit** (audit commit
+`7ed6ac4b`, builder `e31de496`, build `e73d07f3`):
+
+- **G-L1 (Konstanz/KonJND) CLEAN PASS + G-L2 (T0 screens) CLEAN PASS.** Exact
+  decoded-pixel screen: 0 hits in all five sets. dHash-64 (`check_holdout_overlap`,
+  threshold 10): **zero d ≤ 10 flags anywhere; the global minimum Hamming distance
+  is 17** (SRC01 vs KonJND SRC0614) — even the d ≤ 16 screening-for-eyes band is
+  empty, so no montages and no user-review queue exist. 10/10 sources survive; the
+  DATA_SPLITS "dHash spot-audit pending" item is now RUN. Record + per-set minima:
+  `benchmarks/konfig/audit_2026-08-05.meta.md` (KonJND 17, CID22 20, CSIQ 18,
+  LIVE 19, AIC-3 24). Contact sheet for the user (informational, no flags):
+  `http://localhost:3300/zensim/konfig944/audit/konfig_10refs_contactsheet.png`.
+- **G-L4 orientation OK**: signed SROCC **+0.564482** vs the per-stimulus mean of
+  the 75,519 raw EXP_III DCR votes (n=850 PartA rows; measured quality, declared
+  quality; registry + keyed checker committed). The first gate run returned n=950
+  and exposed a join defect — PartB rows at level ≤ 12 falsely matched PartA
+  motionblur DCR keys — fixed to exclude by part BEFORE any table was consumed
+  (the gate did its job on its first run). Cross-foot: `scores.csv` re-derives
+  from raw 910/910 with zero mean/n mismatches; DCR rises with level in 70/70
+  ladders.
+- **Build**: the frozen enumeration+dedup reproduced the July multiset EXACTLY
+  (1,220 → 1,090; formula Δ 0.0); **G-L5** re-extraction of 8 konjnd_bpg pairs at
+  the build rev = **7552/7552 feature cells exact-equal** vs stored canonical.
+  `konfig_944.parquet` (sha `a5bde4d0…`) + origin-split views promoted,
+  triple-mirrored (R2 + Tower), sha round-trip-verified. **G-L3**: C4 leakage OK
+  across all 15 eval corpora (single-table `--leak-eval-root` mode added to the
+  owner); A1/A2/A5/B1/B4/C1 OK; the B2 FINDING (39 constants outside the
+  structural block) is **dispositioned by measurement** — the identical 39-column
+  set is constant in canonical `konjnd_bpg_train_944.parquet` (the appendix-G
+  never-populated SDR-route class); the FINDING stands, nothing relaxed.
+- **Mid-program discovery + fix, disclosed**: `diffmap_block_coherence` (the M3a
+  instrument) did not COMPILE on main — `031bd261` (trainer flat-buffer) made the
+  example's `feats_of` closure FnMut without the binding; the example only builds
+  under `custom-profiles,feature-regime-v2`, so nothing default-built caught it,
+  and **every `run_full_eval` invocation since was failing at compile** (wave-11's
+  `W11_s*.bin.HARVEST_FAILED` markers and this session's first pair-harvest rc=6
+  are the same defect). Fixed in `3db5a215` (one line, no behavior change).
+- **Probe execution**: 4 cells (`KFG25/KFG75 × s4101/s4103`), 2 at a time,
+  census-gated (peak 3 trainers box-wide incl. featsub's; K.8 cap honored),
+  `run-heavy --mem 14G --jobs 8` per cell, ~17 min/pair; all 4 harvested clean
+  (`no_m3a=0`). Driver `scripts/konfig_probe_seed.sh` + lane
+  `scripts/konfig_probe_lane.sh`; echo-verify committed
+  (`benchmarks/konfig/echo_verify_2026-08-05.txt`: vs L9 exactly the appended
+  `konfig:…:{0.25|0.75}:0.0:rank` pair + the `--out` value; 167 → 169 tokens).
+  Loss-mode `rank` follows the kadid/tid human-label convention (the JND unit is
+  not the score unit); the L.7 registration wrote the group token without the
+  loss-mode field, so this is a stated interpretation, committed before any fit.
+- **Trainer/instrument consistency**: the probe trainer was built from a tree with
+  **zero `.rs` diffs** vs wave-11's build point (`git diff d869a186..e73d07f3 --
+  '*.rs'` = empty); binary sha256 differs from wave-11's recorded binary by
+  path-embedding only (mine `ea295ffb…`, theirs `f24b7ee1…`; determinism-in-seed
+  across builds is the committed `d869a186` gate). Instrument-comparability gate
+  re-run with THIS session's `bake_verdict`: **82,156 numeric fields vs the
+  committed `W10L9_s4001.full.json`, 0 mismatches**, only the documented
+  sdr25 mos→jnd key rename.
+- **Baselines**: `W11_s4101`/`W11_s4103` (final bakes, written once) were
+  verdicted + fullevaled by THIS session's gate-passed instruments into an
+  isolated dir (`/mnt/v/output/zensim/konfig944/pairharvest/`) because wave-11's
+  own harvests were blocked on the compile defect at the time. Both carry full
+  M3a (0.828/0.834, n=27). The shared-dir `W11_s410{1,3}.full.json` created as a
+  side effect are instrument-identical and are disclosed here.
+- **Launch-condition deviation, disclosed**: the registered queue condition was
+  wave-11's six-FULLEVAL sentinel; the actual launch condition was **all six W11
+  bakes closed (their training lane free) + trainer census ≤ 3**, because the
+  fulleval sentinel was blocked on the compile defect this session had just fixed
+  — waiting on it would have waited on no trainer contention (the queue's
+  registered purpose). The census gate and the ≤2-lane were honored throughout.
+
+### L.R1 The paired Δ matrix — outcome (b) fires at w=0.25; no outcome fires at w=0.75; NO WEIGHT IS RECOMMENDED
+
+Full matrix: `benchmarks/konfig/konfig_probe_matrix_2026-08-05.tsv` (+ cells +
+w11-family TSVs). The §L.8 rule over 24 (dose × banded-axis) cells: **23 inside
+noise, 1 OUTSIDE** —
+
+| dose | axis | Δ(s4101) | Δ(s4103) | mean Δ | band | call |
+|---|---|--:|--:|--:|--:|---|
+| **w=0.75** | **imazen26** | −0.0083 | −0.0134 | **−0.0109** | 0.010 | **OUTSIDE (damage, 1.09× band)** |
+
+- **(a) helps — NOT fired**: zero outside-noise positives at either dose.
+- **(b) inert — FIRES at w=0.25**: all 12 banded axes inside noise at 4.10 % share.
+- **(c) hurts — NOT fired as registered** (it requires outside-noise damage at
+  BOTH doses; the imazen26 dent is w=0.75-only).
+- **Conclusion: no KonFiG weight is recommended.** The leg is measured-inert at
+  4.1 % pair share, and at 11.4 % share it buys nothing outside noise while
+  denting imazen26 (an ssim2 north-star axis) just past the band. The honest
+  null stands as the result.
+
+### L.R2 Inside-noise directions, reported as directions (the H.R4 discipline)
+
+- **The thesis axes moved thesis-positive at BOTH doses with seed
+  sign-agreement, inside their (registered-widest) bands**: KonJND +0.032 /
+  +0.039 (band 0.076) and HF-NL per-ref **+0.145 / +0.202** (band 0.247). In
+  absolutes every probe cell's HF-NL per-ref (0.662–0.800) exceeds both
+  baselines (0.546/0.617), and two single-seed Δs (+0.254, +0.244) sit at or
+  past the band alone. H.4 registered exactly these bands as
+  near-uninformative at k=2; per the rule these are directions, not findings.
+  The only continuation this pass would justify — and does NOT run or schedule
+  — is a registered k ≥ 4 wave at w ≈ 0.25–0.5 asking whether the HF-NL
+  direction resolves without the w=0.75 cost pattern.
+- **The cost side at w=0.75 is a coherent broad-small-damage pattern**:
+  sign-consistent negatives on cid22 −0.0089 (0.89× band), nonphoto −0.0099
+  (0.99×), live −0.0080, with imazen26 outside — the high dose spends broad
+  in-distribution skill on a 10-source corpus.
+- `best_val` (comparable within this sixsome — konfig enters at `val_w 0.0`, so
+  the validation objective is IDENTICAL to W11's): all four probe cells sit
+  below both baselines (0.91598–0.91901 vs 0.91977/0.91984) — the rank-mode
+  konfig draws displace in-distribution training signal slightly and buy the
+  val objective nothing. KADID signed (guard only): 0.906–0.926 vs 0.929.
+
+### L.R3 The select read-out (ranking, not a decision)
+
+`freeze_check --select` (registered E.4 rule) over the 8 available fullevals —
+4 probe cells + the 2 same-instrument W11 baselines + the committed W10L9 pair
+(`~/tmp` copy at `benchmarks/konfig/` — table in `select_rank.txt` form):
+**`KFG25_s4103` ranks #1 with the set's only 8/8 balanced floors** (sel_comp
+0.9585)… and its seed-sibling `KFG25_s4101` ranks **last** (6/8). The same
+recipe spans the entire ranking across two seeds — the coherence-study
+seed-noise result restated at probe scale, and the reason the paired-band
+matrix (L.R1), not the select table, is this appendix's decision instrument.
+Context caveat: wave-11's own k=8 family table (appendix K) was mid-recovery at
+write time; this select is over the listed 8 only.
+
+### L.R4 Deliverables (L.12) — status
+
+1. Audit TSVs + meta record — committed `7ed6ac4b` (no flags ⇒ no montage queue).
+2. Orientation determination + registry + gate output — `7ed6ac4b`/`e73d07f3`.
+3. Leg + views + manifest, triple-mirrored + sha-verified; DATA_SPLITS +
+   DATA_PROVENANCE — `e73d07f3`.
+4. Driver + echo verification — `e73d07f3`; lane driver + matrix tool — this
+   commit.
+5. 4 cells + verdicts/fullevals (standard dirs) + the Δ matrix + family
+   reference TSVs — this commit.
+6. This section. **Registered outcome: (b) at w=0.25; nothing fires at w=0.75;
+   no weight recommended; the leg stays OUT of every recipe.** Nothing ships,
+   nothing swaps; the freeze decision is the user's.
+
+### L.R5 Limitations honored
+
+All of §L.11 stands as written, plus: the w11-family dispersion TSV reflects the
+four pre-fix stale W11 fullevals available at write time (s4105/s4111 pending
+their session's recovery) — context only, no rule consumed it; and the select
+table's 8/8-floor cell is a k=1 observation by construction.
