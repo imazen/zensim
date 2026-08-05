@@ -1,0 +1,2 @@
+OK        konfig  /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/konfig_944.parquet
+          signed SROCC +0.564482 vs raw EXP_III DCR vote mean over 75519 ratings (PartA stimuli), negated to quality orientation; PartB rows have no DCR and are excluded (n=850); measured quality, declared quality

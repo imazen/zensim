@@ -1,0 +1,22 @@
+== echo-verify: KONFIG_ECHO w25 s4101 vs WAVE10_ECHO L9 s4101 (token diff) ==
+165a166,167
+> --group
+> konfig:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/konfig_944.parquet:0.25:0.0:rank
+167c169
+< /mnt/v/output/zensim/bakes/sota944/bakes/W10L9_s4101.bin
+---
+> /mnt/v/output/zensim/bakes/sota944/bakes/KFG25_s4101.bin
+rc=1
+
+== w75 s4103 diff ==
+165a166,167
+> --group
+> konfig:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/konfig_944.parquet:0.75:0.0:rank
+167c169
+< /mnt/v/output/zensim/bakes/sota944/bakes/W10L9_s4103.bin
+---
+> /mnt/v/output/zensim/bakes/sota944/bakes/KFG75_s4103.bin
+rc=1
+
+== token counts ==
+L9: 167  KFG: 169

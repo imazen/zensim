@@ -306,6 +306,13 @@ def konfig_ground_truth_keyed(hs: np.ndarray):
             raise ValueError(
                 f"row {i}: pairs human_score {r['human_score']} != table "
                 f"{hs[i]}; positional identity broken")
+        # EXP_III keys are PartA stimuli. A PartB row at level<=12 would FALSELY
+        # match PartA's motionblur key (same level index, DIFFERENT stimulus:
+        # q = level*0.1 vs level*0.25) — so PartB is excluded by PART, not by
+        # key-miss. Caught on the first gate run: n came back 950, not 850.
+        if r["part"] != "PartA":
+            gt.append(np.nan)
+            continue
         key = (r["source"], r["distortion"], int(r["level"]))
         m = mean_dcr.get(key)
         gt.append(np.nan if m is None else -m)  # quality-oriented

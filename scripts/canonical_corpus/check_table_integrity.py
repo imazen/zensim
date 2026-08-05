@@ -611,6 +611,10 @@ def main() -> int:
             results.append(audit_table(p, g["name"], guarded, g["loss_mode"],
                                        do_dups=not args.no_dups))
     elif args.parquet:
+        # Single-table mode also feeds the C4 leakage check (2026-08-05,
+        # Appendix L): a NEW training leg is exactly the case where "this one
+        # table vs every eval corpus" must be answerable without a bake spec.
+        paths_by_name[args.name or Path(args.parquet).stem] = args.parquet
         results.append(audit_table(args.parquet, args.name or Path(args.parquet).stem,
                                    set(), "both", do_dups=not args.no_dups))
     else:
