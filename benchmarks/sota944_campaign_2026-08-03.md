@@ -8250,3 +8250,15 @@ finding, corrjoint, LOO ×2, freeze surfaces, era scorecard) — THIS COMMIT +
 `/mnt/v/output/zensim/bakes/sota944/`. 4. Outcome: **(b)-mild, everything survives;
 per-axis calls above**; freeze surface presented — the decision is the user's.
 5. Push verification + Tower mirror + sha spot-check recorded in the ops log below.
+
+**K.R5 ops record.** Commits (all verified `merge-base --is-ancestor` against
+`origin/main` at push time): registration `532e3a1f` (pre-fit), instruments+gate
+`9066fe73`, results `78418478`, this ops record. Trainer sha `f24b7ee1…` both lanes
+(per-seed node in each bake's embedded repro). Tower mirror:
+`/mnt/tower/output/zensim/bakes/sota944-wave11-2026-08-05/` (14 bake files + verdicts
++ fullevals + the benchmarks/wave11 set, 33 MB; sha spot-check 3/3 MATCH —
+`W11_s4103.bin` `3401d438…`, `W10L9_s4003_packed.bin` `1a2c8d52…` = the pack tool's
+own reported sha, `W11_s4111.fulleval.json` `b7feb57e…`). Cleanup executed same-pass:
+lianli `~/sota944/w11/` staging removed (base `~/sota944/data/` staging predates this
+wave and stays), `~/tmp/zensimw11-target` deleted, workspace `../zensim--wave11`
+forgotten+removed, wave-11 `.workongoing` lines cleared.
