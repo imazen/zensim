@@ -17,17 +17,31 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$HOME/tmp/zensimfs-target}
 LOG=${FEATSUB_LOG:-$HOME/tmp/featsub}
 LOCKS=$LOG/locks
 MIN_AVAIL=${FEATSUB_MIN_AVAIL_MB:-14000}
+# Max OTHER-plus-own trainers already running before we add ours (so the box
+# never exceeds MAX_TRAINERS+1 concurrent runs of this recipe).
+MAX_TRAINERS=${FEATSUB_MAX_TRAINERS:-3}
 WHO=${FEATSUB_WORKER:-w$$}
 mkdir -p "$LOG" "$LOCKS"
 Q="$LOG/queue.log"
 say() { echo "$(date -u +%H:%M:%S) [$WHO] $*" | tee -a "$Q"; }
 
-wait_for_ram() {
+# Two conditions, both necessary. MemAvailable alone is not enough: the box
+# holds 4 concurrent runs of this recipe (~11.6 GB each on 58 GB) and not 5,
+# and OTHER agents' lanes appear between our check and our launch. Measured
+# 2026-08-04: 5 concurrent runs took MemAvailable to 134 MB, pushed the box
+# into swap, and left a run stuck at epoch 0 thrashing. So we also cap the
+# GLOBAL trainer count — every zensim_mlp_train on the box, not just ours.
+wait_for_slot() {
   local waited=0
   while true; do
-    local avail; avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
-    [[ $avail -ge $MIN_AVAIL ]] && { [[ $waited -gt 0 ]] && say "RAM ok (${avail}MB) after ${waited}s"; return 0; }
-    [[ $((waited % 600)) -eq 0 ]] && say "waiting for RAM (${avail}MB < ${MIN_AVAIL}MB)"
+    local avail nproc_t
+    avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+    nproc_t=$(pgrep -xc zensim_mlp_trai 2>/dev/null || echo 0)
+    if [[ $avail -ge $MIN_AVAIL && $nproc_t -le $MAX_TRAINERS ]]; then
+      [[ $waited -gt 0 ]] && say "slot ok (${avail}MB avail, ${nproc_t} trainers) after ${waited}s"
+      return 0
+    fi
+    [[ $((waited % 600)) -eq 0 ]] &&       say "waiting for a slot (${avail}MB avail / need ${MIN_AVAIL}; ${nproc_t} trainers / need <= ${MAX_TRAINERS})"
     sleep 30; waited=$((waited+30))
   done
 }
@@ -46,7 +60,7 @@ for cell in "$@"; do
   # process's working set materializes, so the NEXT worker's check sees
   # reality rather than the pre-launch number.
   while ! mkdir "$LOCKS/.start" 2>/dev/null; do sleep 10; done
-  wait_for_ram
+  wait_for_slot
   say "START $cell"
   ( sleep "${FEATSUB_START_HOLD:-180}"; rmdir "$LOCKS/.start" 2>/dev/null ) &
   t0=$SECONDS
