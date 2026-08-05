@@ -308,7 +308,7 @@ fn run_bake_mode(
     //  - otherwise: extended (+v2 concat for a >372 combined bake).
     #[cfg(feature = "feature-regime-v2")]
     let mut v2_scratch = zensim::feature_v2::V2Scratch::new();
-    let feats_of = |dist: &[[u8; 3]]| -> Vec<f64> {
+    let mut feats_of = |dist: &[[u8; 3]]| -> Vec<f64> {
         let ds = RgbSlice::new(dist, w, h);
         #[cfg(feature = "feature-regime-v2")]
         if folded924 {
