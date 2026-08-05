@@ -1,306 +1,53 @@
+# CI-PROBE branch workflow — replaces the full matrix for the golden-flip
+# experiment (benchmarks/v1_golden_env_triage_2026-08-05.md). DO NOT MERGE.
+#
+# Runs ONLY the v1 golden byte-identity test, 4 repeats on ubuntu-latest,
+# logging the runner CPU per repeat: the ubuntu-latest fleet mixes Intel
+# Xeon and AMD EPYC hosts and the flip is CPU-vendor-sensitive, so a
+# single run proves nothing — read each repeat's verdict AGAINST its
+# logged CPU. Checkout pins the PR HEAD sha (never the merge ref: the
+# probe must test the 05739a53-era tree, not tip-merged code).
 name: CI
-
 on:
-  push:
-    branches: [main]
   pull_request:
 
 env:
   CARGO_TERM_COLOR: always
 
-# Superseded runs only waste runner queue — particularly the macOS
-# jobs, which wait on GitHub's scarcest pool. Only the newest
-# commit's run matters per ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: probe-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  fmt:
-    name: Format
+  golden-probe:
+    name: golden-probe (rep ${{ matrix.rep }})
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all --check
-
-  # Catches scripts that cannot possibly run: pinned to a deleted sibling
-  # worktree, shelling to a deleted script, or a README indexing a file that is
-  # gone. On 2026-07-15, 68 of 316 were in that state — some for months —
-  # because nothing ever asked. Cheap (no toolchain, no deps, ~1 s) and it only
-  # inspects paths, so it is safe to gate every push on.
-  lint-scripts:
-    name: Lint scripts
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - run: python3 scripts/lint_scripts.py
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets --all-features --exclude zensim-wasm-tests -- -D warnings
-
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - ubuntu-24.04-arm
-          - windows-latest
-          - windows-11-arm
-          - macos-latest
-          - macos-15-intel
-          - macos-26-intel
-    env:
-      REGRESS_MANIFEST_PATH: test-manifest.tsv
+        rep: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: runner CPU identity
+        run: |
+          grep -m1 'model name' /proc/cpuinfo
+          grep -qo avx512f /proc/cpuinfo && echo "avx512f: yes" || echo "avx512f: no"
+          grep -m1 'vendor_id' /proc/cpuinfo
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --exclude zensim-wasm-tests -- --nocapture
-      - name: Upload test manifest
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-manifest-${{ matrix.os }}
-          path: test-manifest.tsv
-          if-no-files-found: ignore
+      - name: archmage/magetypes lock versions (the experiment variable)
+        run: grep -A1 'name = "archmage"' Cargo.lock | head -2; grep -A1 'name = "magetypes"' Cargo.lock | head -2
+      # The golden tests are behind `--features training` (#![cfg(feature =
+      # "training")]) — without it the target builds ZERO tests and green-lies.
+      # The `running 2 tests` grep makes a silent no-op FAIL the probe.
+      - name: v1 golden byte-identity (training feature)
+        run: |
+          cargo test -p zensim --features training --test v1_golden_bytes -- --nocapture 2>&1 | tee golden.log
+          grep -q "running 2 tests" golden.log
+      - name: v1 golden byte-identity (all features)
         if: always()
-
-  test-all-features:
-    name: Test all features
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      # --all-features would hardwire zensim-train-gpu's tests to the CUDA
-      # backend (hosted runners have no GPU). The gpu crates run with the
-      # CubeCL CPU backend instead — their aux kernels are still executed,
-      # and the CUDA/WGPU backends are compile-checked by the Clippy job.
-      - run: cargo test --workspace --all-features --exclude zensim-wasm-tests --exclude zensim-validate --exclude zensim-train-gpu -- --nocapture
-      - run: cargo test -p zensim-validate -p zensim-train-gpu --features zensim-validate/gpu-cpu,zensim-train-gpu/gpu-cpu -- --nocapture
-
-  feature-matrix:
-    name: Feature permutations
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Check all feature permutations
         run: |
-          set -e
-          features_list=(
-            ""
-            "avx512"
-            "imgref"
-            "training"
-            "classification"
-            "zenpixels"
-            "avx512,imgref"
-            "avx512,training"
-            "avx512,classification"
-            "avx512,zenpixels"
-            "imgref,training"
-            "imgref,classification"
-            "imgref,zenpixels"
-            "training,classification"
-            "avx512,imgref,training"
-            "avx512,imgref,classification"
-            "avx512,imgref,zenpixels"
-            "avx512,training,classification"
-            "imgref,training,classification"
-            "avx512,imgref,training,classification"
-            "avx512,imgref,training,classification,zenpixels"
-            "imgref,classification"
-          )
-          for features in "${features_list[@]}"; do
-            if [ -z "$features" ]; then
-              label="none"
-              flags="--no-default-features"
-            else
-              label="$features"
-              flags="--no-default-features --features $features"
-            fi
-            echo "::group::Clippy + test: $label"
-            cargo clippy -p zensim $flags --lib -- -D warnings
-            cargo test -p zensim $flags --lib -- --nocapture
-            echo "::endgroup::"
-          done
-
-  corpus-tests:
-    name: Corpus ICC tests
-    runs-on: ubuntu-latest
-    env:
-      REGRESS_REFERENCE_URL: https://imageflow-resources.s3.amazonaws.com/test_inputs
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p zensim --test corpus_icc -- --ignored --nocapture
-
-  wasm:
-    name: WASM SIMD128
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip1
-      - uses: Swatinem/rust-cache@v2
-      - uses: bytecodealliance/actions/wasmtime/setup@v1
-      - name: Test under wasmtime
-        run: |
-          cargo test --target wasm32-wasip1 -p zensim-wasm-tests -- --nocapture
-        env:
-          CARGO_TARGET_WASM32_WASIP1_RUNNER: "wasmtime run --dir=. --"
-          RUSTFLAGS: "-C target-feature=+simd128"
-
-  msrv:
-    name: MSRV
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@cargo-hack
-      - uses: Swatinem/rust-cache@v2
-      - name: Check MSRV
-        run: cargo hack check --rust-version --workspace --exclude zensim-validate --exclude zensim-wasm-tests
-
-  no-leakage:
-    name: zensim-regress public API leakage check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-public-api
-      - name: Forbid zen-ecosystem types in zensim-regress public API
-        run: |
-          set -euo pipefail
-          # Capture the full public API surface (including pub re-exports
-          # and reachable trait bounds).
-          api=$(cargo public-api -p zensim-regress)
-          echo "$api"
-          # Forbidden type prefixes — these crates would force a downstream
-          # consumer of zensim-regress to share the same major (or 0.x) version
-          # we depend on, breaking any project that pins a different version.
-          # `zensim::` is intentionally allowed: zensim-regress is the regression
-          # layer for zensim and shares its semver lifecycle.
-          forbidden=(
-            "zenpixels::"
-            "zenresize::"
-            "zenpng::"
-            "zenblend::"
-            "enough::"
-            "imgref::"
-            "rgb::Rgba"
-            "rgb::Rgb"
-            "bytemuck::"
-            " image::"
-            "linear_srgb::"
-          )
-          fail=0
-          for f in "${forbidden[@]}"; do
-            if echo "$api" | grep -qF -- "$f"; then
-              echo "::error::Forbidden type prefix '$f' appears in zensim-regress public API"
-              echo "$api" | grep -F -- "$f" || true
-              fail=1
-            fi
-          done
-          if [ "$fail" -ne 0 ]; then
-            echo "::error::zensim-regress is leaking zen-ecosystem types in its public API."
-            echo "Wrap such types behind the crate-internal pixel_ops module (see CLAUDE.md)."
-            exit 1
-          fi
-
-  metric-census:
-    name: Metric-column corruption census
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install census deps
-        run: pip install --quiet "pyarrow>=15" "numpy>=1.26" "pandas>=2"
-      - name: Census must FAIL on the known-corrupt fixtures
-        run: |
-          set +e
-          python3 scripts/canonical_corpus/audit_metric_columns.py \
-            --fail-on-corruption \
-            --paths \
-              scripts/canonical_corpus/test_fixtures/corrupt_human_copy.parquet \
-              scripts/canonical_corpus/test_fixtures/corrupt_ref_misjoin.parquet
-          rc=$?
-          if [ "$rc" -eq 0 ]; then
-            echo "::error::census did NOT detect corruption in the known-corrupt fixtures"
-            exit 1
-          fi
-          echo "census correctly flagged the corrupt fixtures (exit $rc)"
-      - name: Census must PASS on the clean fixture
-        run: |
-          python3 scripts/canonical_corpus/audit_metric_columns.py \
-            --fail-on-corruption \
-            --paths scripts/canonical_corpus/test_fixtures/clean.parquet
-      - name: Census of canonical train parquets (if mounted)
-        run: |
-          # CI runners do NOT have /mnt/v or R2 — this gate runs against the
-          # committed fixtures above. When the canonical parquets ARE present
-          # (e.g. a self-hosted runner with /mnt/v mounted), also census them.
-          CANON=/mnt/v/zen/zensim-training/canonical-2026-05-21/train
-          if [ -d "$CANON" ]; then
-            python3 scripts/canonical_corpus/audit_metric_columns.py \
-              --fail-on-corruption --root "$CANON"
-          else
-            echo "canonical train parquets not mounted ($CANON) — fixture gate only."
-          fi
-
-  join-safety:
-    name: join_safety unit tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install deps
-        run: pip install --quiet "pyarrow>=15" "numpy>=1.26" "pandas>=2"
-      - name: Run join_safety self-tests
-        run: python3 scripts/canonical_corpus/test_join_safety.py
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
-      # Same gpu-backend split as test-all-features (hosted runners have no
-      # GPU); coverage accumulates across the two runs via --no-report.
-      - run: cargo llvm-cov --no-report --workspace --all-features --exclude zensim-wasm-tests --exclude zensim-validate --exclude zensim-train-gpu
-      - run: cargo llvm-cov --no-report -p zensim-validate -p zensim-train-gpu --features zensim-validate/gpu-cpu,zensim-train-gpu/gpu-cpu
-      - run: cargo llvm-cov report --lcov --output-path lcov.info
-      - uses: codecov/codecov-action@v5
-        with:
-          files: lcov.info
-          fail_ci_if_error: false
+          cargo test -p zensim --all-features --test v1_golden_bytes -- --nocapture 2>&1 | tee golden_all.log
+          grep -q "running 2 tests" golden_all.log
