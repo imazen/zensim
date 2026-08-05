@@ -9531,3 +9531,172 @@ compare and the probe remain above the class):
    — but the loop no longer pays the fused price per iteration, which was the
    bar's product intent; the stale single-pass endpoint delivers it
    loop-side.
+
+## Q.R — RESULTS (2026-08-05; all gates run, 4 candidates trained + evaluated, no gate relaxed, no protocol deviation)
+
+Everything below was produced by the Q.5 ops exactly as frozen. Artifacts:
+`/mnt/v/output/zensim/bakes/hdrp1/` (bakes + `SHA256SUMS.txt` + per-candidate
+`upiq_panel_*.txt` + `extreads_*.json`), verdicts at
+`/mnt/v/output/zensim/bakes/sota944/verdicts/Q_*.full.json`, logs
+`~/tmp/hdrp1/`, Tower mirror `zensim-hdrp1-2026-08-05/`.
+
+### Q.R1 Data gates (all four PASS; recorded in the leg `_MANIFEST.json`)
+
+- **G-Q1 orientation: OK.** In-table sign test vs carried JOD: train
+  **+0.849426** (n=7,410), val **+0.860629** (n=3,900), both measured
+  quality-oriented as declared. Selftest: good fixture OK, inverted fixture
+  INVERTED (the gate catches the Appendix-F class).
+- **G-Q2 integrity: PASS with recorded findings, adjudicated against the SDR
+  canonical baseline** (same checker on `ext_safesyn_full`): B2 — 35 (train)
+  / 32 (val) constant columns outside the structural-zero block; the 720-block
+  members (720/721/751/754..772/805/806) are the same class the accepted SDR
+  legs carry (safesyn: 39 incl. 805/806/822); the leg-specific extras
+  (f25/f64/f751) are corpus-inert columns, harmless to training and removable
+  at pack time by dead-column pruning. B4 — ONE untransformed heavy tail
+  (f77, max/p99 = 140×) vs the accepted baseline's TEN (up to 1,080×). No
+  recipe change (frozen).
+- **G-Q3 split honesty: PASS.** 38 train / 20 val origins, overlap **0**;
+  `origin_split.split_of` agrees on 870/870 refs.
+- **G-Q4 eval-source disjointness: PASS.** The leg's 58 origins are zfold7
+  2026-03 personal captures; every eval source (UPIQ narwaria/korshunov,
+  SI-HDR, HDR-VDC, AVT, CHUG, Rousselot) is 2012–2021 published external
+  content — authorship + temporal disjointness, and 0 id-containment hits.
+
+Tower mirror of the leg sha-verified (`a7f28118…`/`9dda1572…` match the
+manifest). DATA_SPLITS row landed (`a7caccd5`).
+
+### Q.R2 Cells (trainer sha256 `9b83cd2cfbc2…`, head-at-train `a7caccd5`; repro embedded per the mandatory-embed rule — argv + 12 input sha256s + seed + best_val verified in `zenpredict inspect`)
+
+| cell | seed | best_val (geomean3) | wall | notes |
+|---|--:|--:|--:|---|
+| `Q_hdr944_s6101` | 6101 | 0.92424 | 957 s | peak RSS 7.10 GiB |
+| `Q_hdr944_s6103` | 6103 | 0.92211 | ~960 s | |
+| `Q_hdr944_s6107` | 6107 | 0.92243 | ~960 s | |
+| `Q_lin944_hdr` | — (deterministic) | — | ~10 s | BVLS, 640/944 active, f16, no spline (rank-invariant for every Q.3 read) |
+
+The echo-diff verify artifact (`benchmarks/hdrp1/echo_verify_2026-08-05.txt`,
+committed `553ac0d8`) shows exactly the two registered `--group` pairs + the
+`--out` value differing from the L9 owner (167 → 171 tokens).
+
+### Q.R3 In-domain val (Q.3.1; cvvdp-mix val split, n=3,900)
+
+| candidate | SROCC | PLCC | Z-RMSE |
+|---|--:|--:|--:|
+| `Q_hdr944_s6101` | 0.9342 | 0.9319 | 0.3628 |
+| `Q_hdr944_s6103` | 0.9374 | 0.9413 | 0.3376 |
+| `Q_hdr944_s6107` | **0.9431** | 0.9387 | 0.3447 |
+| `Q_lin944_hdr` | 0.8670 | 0.9415 | 0.3370 |
+
+Depth wins the domain decisively (+0.067..+0.076 SROCC over the linear on the
+same data).
+
+### Q.R4 UPIQ — THE gate (Q.3.2; the registered instrument: extended `upiq_panel.py`, candidate on the stored 944 table, BHdr on pulinear-372, 10k paired bootstrap; |SROCC| convention; BHdr's recorded triplet reproduced inside every run)
+
+| candidate | pooled | narwaria | korshunov | Δpooled | p(A≤B) | per-cell call |
+|---|--:|--:|--:|--:|--:|---|
+| `Q_hdr944_s6101` | 0.0510 | 0.2103 | 0.0005 | **−0.7026** | 1.0000 | **LOSS** (reverse-significant) |
+| `Q_hdr944_s6103` | **0.7327** | 0.5808 | **0.8993** | −0.0209 | 0.7338 | not significant |
+| `Q_hdr944_s6107` | 0.7066 | 0.4954 | 0.8954 | −0.0470 | 0.9275 | not significant |
+| `Q_lin944_hdr` | 0.5188 | 0.4682 | 0.7090 | −0.2348 | 1.0000 | **LOSS** |
+| **BHdr (incumbent)** | **0.7536** | **0.7834** | **0.9175** | — | — | — |
+
+Per-stratum bootstraps: korshunov is at STATISTICAL PARITY for s6103/s6107
+(Δ −0.0182/−0.0221, p 0.7278/0.7887); **narwaria is significantly behind for
+every candidate** (Δ −0.2026..−0.5731, p ≥ 0.9945). s6107's PLCC collapses
+(0.1594) while its SROCC holds — raw-scale distortion, rank intact.
+
+**UPIQ burn ledger: +4 looks as budgeted (→ ~26 total).** No iteration
+followed the batch.
+
+**Instrument-convention note (measured, both stated):** the descriptive
+external-reads rows (Q.R5) post-process differently (`predict_features_with_
+bake` default `clamp`, signed SROCC) than the registered panel (the
+`bake_verdict` dial-grid pred path, |SROCC|): e.g. s6103 korshunov reads
++0.7611 there vs 0.8993 here. Both are honest instruments; the REGISTERED one
+(this table) governs Q.4. The mechanism hypothesis (not adjudicated): tie
+structure from clamping far-OOD raw outputs differs between the two paths.
+s6101's collapse is real in both conventions.
+
+### Q.R5 External reads (Q.3.3; descriptive, signed SROCC, stored tables)
+
+| read | s6101 | s6103 | s6107 | lin944_hdr |
+|---|--:|--:|--:|--:|
+| upiq pooled | +0.008 | +0.610 | +0.560 | +0.502 |
+| sihdr pooled | +0.052 | −0.114 | −0.193 | +0.001 |
+| hdrvdc iii | +0.627 | +0.321 | +0.359 | +0.438 |
+| avt pooled | +0.407 | −0.163 | −0.183 | +0.491 |
+| chug pooled | +0.298 | +0.132 | +0.103 | +0.280 |
+| rousselot hddtb / k4dtb | +0.644 / +0.596 | +0.688 / +0.640 | +0.664 / +0.600 | +0.125 / +0.570 |
+
+Notable: the UPIQ-collapsed s6101 is the BEST cell on hdrvdc-iii/avt/chug —
+the seeds trade transfer targets, another face of the same instability.
+
+### Q.R6 SDR regression panel (Q.3.4; `bake_verdict --regime 944` preset; report-both, no bar)
+
+| bake | CID22 | KonJND | CSIQ | LIVE | nonphoto | imazen26 | sdr25 (signed) | KADID (signed) | dial mono / tied |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `Q_hdr944_s6101` | 0.8786 | 0.5258 | 0.9596 | 0.9620 | 0.9247 | 0.9268 | −0.9689 | +0.9035 | 99.72% / 0% |
+| `Q_hdr944_s6103` | 0.8815 | 0.4540 | 0.9605 | 0.9665 | 0.9283 | 0.9296 | −0.9671 | +0.9160 | 99.81% / 0% |
+| `Q_hdr944_s6107` | 0.8828 | 0.4021 | 0.9535 | 0.9653 | 0.9273 | 0.9299 | −0.9692 | +0.9257 | 99.62% / 0% |
+| `Q_lin944_hdr` | 0.2870 | 0.1989 | 0.6642 | 0.7411 | 0.4397 | 0.4912 | +0.0859 | +0.5170 | 99.72% / 0% |
+
+**The hdr leg at 17.0% pair share cost the SDR panel essentially nothing**:
+CID22 0.8786–0.8828 (W10L9 pair: 0.8867/0.8890 — within the family band a
+touch under), KonJND 0.40–0.53 (pair: 0.42/0.50), CSIQ/LIVE/nonphoto/imazen26
+at full wave-11 class, KADID correctly oriented (+0.90..+0.93 signed), sdr25
+correctly distortion-oriented. The hdr-only linear is SDR-collapsed as
+expected (trained on nothing SDR).
+
+### Q.R7 THE REGISTERED OUTCOME: **(b) PARITY** — with the axes named
+
+Formally: 0 per-cell WINs (not (a)); 1 of 3 MLP cells is a per-cell LOSS
+(not (c) — needs ≥2). The honest read:
+
+1. **No candidate beats BHdr on UPIQ.** The two healthy MLP cells sit at
+   statistical parity pooled (−0.021/−0.047, ns at n=380) with **korshunov at
+   parity and narwaria significantly behind** — narwaria is THE moved axis
+   (−0.20..−0.29). BHdr stays the HDR champion.
+2. **Attribution (the control did its job):** at 944, hdr-only linear is a
+   significant loss everywhere (pooled 0.5188); the co-trained MLPs recover
+   korshunov to parity and most of pooled. So depth + SDR-co-training carry
+   the recovery, and the residual narwaria gap is consistent with the B-gap
+   resolution's front-end/regime attribution — plus a supervision hypothesis:
+   hdr_v3mix is zenjxl-only while narwaria is JPEG/JPEG-XT-class; the prior
+   recorded extreads smoke of the SDR-mix `lin944` twin (+0.7979 signed
+   pooled, clamp convention — NOT panel-comparable) suggests the 944 feature
+   space can express UPIQ-transferable quality; what's missing is likely
+   supervision breadth, not representational capacity.
+3. **Seed instability on transfer is the phase-1 discovery**: in-domain val
+   spans 0.9342–0.9431 (tight) while UPIQ pooled spans **0.051–0.733** —
+   confound 5 materialized. `best_val` (even with hdr_val at weight 2.0)
+   CANNOT see transfer collapse, and UPIQ must not become a selection
+   instrument. Phase 2 needs a transfer-sensitive, non-burned selection read
+   before any k-scale wave (options, unregistered: a held-out hdr content
+   family carved from new data; a dedicated never-reported HDR probe corpus).
+4. **What one recipe now provably does** (new capability, outcome-(b) grade):
+   a single 944 bake at full wave-11 SDR strength that simultaneously scores
+   HDR content at korshunov-parity with the dedicated HDR linear — the
+   first SDR+HDR single-model data point at the current regime. Routing
+   (B/BHdr-style) remains the ship architecture until phase 2 re-litigates.
+
+### Q.R8 Registered gaps — status at close (Q.6 restated with results)
+
+- **Q-G1 HDR attribution/M3a: UNBUILT (unchanged).** No HDR coherence number
+  exists for any candidate; the SDR-content M3a diagnostic stayed deferred
+  (main's `v1_golden_bytes` CI red was under another lane's bisection through
+  this wave's window). Build item stands as registered.
+- **Q-G2 AIC-HDR2025: still unreleased** (live-checked at registration,
+  2026-08-05). Acquisition list unchanged.
+- **Q-G3/P2a CSFW-at-HDR, Q-G4/P2b screen-on-hdr-leg, Q-P2c weight/pure-HDR
+  ablations, Q-G5 HDR dial grid: untouched, as scoped.** Given (b), the
+  priority order suggested by the data is: supervision breadth (multi-codec
+  HDR encodes — the narwaria lever) ≥ P2b (shaped screen on the hdr leg)
+  > P2a (CSFW) > P2c; a transfer-sensitive selection instrument is a
+  prerequisite for ANY k-scale wave (Q.R7.3).
+- **Q-G6 training-data breadth: CONFIRMED as the binding constraint.**
+  hdr_v3mix (zenjxl-only, metric-teacher) trains korshunov-parity models but
+  not narwaria; real human-anchored HDR training data still does not exist
+  locally. The phase-1 "honest stop" clause is in force for the data axis:
+  foundation + gates + candidates shipped; further HDR progress is
+  data-acquisition-bound (multi-codec HDR sweep = buildable locally; AIC-HDR
+  = release-bound; UPIQ stays holdout).

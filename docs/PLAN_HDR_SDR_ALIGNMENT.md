@@ -82,7 +82,8 @@ be a monotone, domain-blind function of JND-from-reference.
   narwaria 140 + korshunov 240 (HDR). We have only ever extracted the HDR
   380. ⚠ tid2013 overlaps training (integrity-guard grade); **live(779) is
   clean** of our corpora. HDR-380 remains confirmation-only (burn ledger
-  ~22 looks).
+  ~26 looks — ~22 + the 4 registered Appendix Q phase-1 candidate looks,
+  2026-08-05; see `sota944_campaign_2026-08-03.md` Q.R4).
 - Dial grids (densified), bake_verdict rank panel, upiq_panel (--strata,
   --compare, regime-warned), KonJND PJND anchor.
 - Corpora: jxl-HDR (PU-linear), kadis-hdr (both regimes now), UltraHDR/HEIC
