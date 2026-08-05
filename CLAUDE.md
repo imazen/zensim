@@ -12,6 +12,18 @@ implements its A1-A5/A9 candidates.
 
 ## Known Bugs
 
+- **⛔ THE v1 GOLDEN BYTE-IDENTITY GATE IS ENVIRONMENT-FRAGILE — main CI red, OPEN
+  (triaged 2026-08-05).** `zensim/tests/v1_golden_bytes.rs` drifts ~1e-10 on 241-246/372
+  features (from f0) on CI ubuntu-latest (flipped green→red inside `926c71f7..05739a53`),
+  CI macos/arm, and a native M4/macOS-26 — while every AMD-linux environment
+  (glibc 2.35/2.36/2.39, rustc 1.97.1, same lock) passes both window endpoints.
+  Vendor/libm-class numerics; prime suspect = the `aaf9b808` archmage/magetypes
+  0.9.26→0.9.28 lock bump (rsqrt/reduction-shape class); needs an Intel box to bisect.
+  ALSO: windows CI red since ≥07-18 on unrelated tests, and **no successful main CI run
+  since 2026-07-16** — red masking red. Full triage + decisive next experiments:
+  `benchmarks/v1_golden_env_triage_2026-08-05.md`. Owner lane: board-hygiene
+  "rsqrt-investigation".
+
 - **⛔ ext-LINEAGE KADID TARGET WAS STORED INVERTED (found 2026-08-04; TABLES REBUILT
   2026-08-05, wave 10 — pre-2026-08-05 numbers remain sign-flipped).** `ext720`/`ext924`/`ext944`
   `ext_kadid.parquet` carry `human_score = (5−dmos)/4`; the canonical `(dmos−1)/4` is
