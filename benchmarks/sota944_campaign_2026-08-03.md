@@ -6986,3 +6986,210 @@ jj workspace `../zensim--featsub` on `main@origin`;
 TSVs land in `benchmarks/featsub/` with `.meta` sidecars (git commit, command,
 input paths + shas). Stats are never hand-rolled — `bake_verdict` / `zenstats`
 only. **Nothing ships and nothing swaps**; the freeze decision is the user's.
+
+---
+
+# REGISTERED APPENDIX I — JPEG-AI-SDR25: CAN IT BE MIXED IN? (2026-08-04)
+
+### (This appendix records a **Phase-1 determination**, not a fit. The task that
+### opened it directed a 4-weight × 2-seed training sweep with SDR25 as a new
+### training leg. No such sweep was run, and no bake was trained. The escape
+### hatch the task itself registered — *"Report anything that makes it unsuitable
+### BEFORE extraction; an honest 'this dataset can't support a training target
+### because X' is a valid outcome"* — fired on four independent grounds, three of
+### which are prior REGISTERED rules and one of which is a new measurement.
+### Every §I.1 fact is either read off source, read off an already-committed
+### artifact, or measured here and shown with its command. Nothing in this
+### appendix is a model result.)
+
+## I.0 Why this appendix exists
+
+The brief asked for "the optimal way to mix in JPEG-AI-SDR25", motivated by two
+real problems: (a) Appendix G's finding that 9 of 11 mix legs carry targets no
+external ground truth can check, and (b) the HF/near-lossless zone being covered
+only by `hfnlproxy`, an ssim2-derived proxy. JPEG-AI-SDR25 is human-labelled and
+sits at q75-100, so on its face it fixes both.
+
+It does not, and the reasons are worth writing down, because the brief's premise
+came from a CLAUDE.md line ("95k triplets, q75-100") that is true but easy to
+misread: **95k is the raw triplet-RESPONSE count, not the scoreable-stimulus
+count.** The scoreable stimulus count is 50.
+
+## I.1 Prior facts (inputs — read off source or already committed)
+
+| # | Fact | Where |
+|---|---|---|
+| 1 | SDR25 is registered **T0 SACRED human holdout — "Eval-only, never train"** | `docs/DATA_SPLITS.md:108` (+ the T0 tier definition at :28-30) |
+| 2 | Scoreable subset is **5 src × 10 levels = 50**; the other 66 reconstructed stimuli have no pixels in the public zip | `docs/DATA_SPLITS.md:108` |
+| 3 | SDR25 is the campaign's **seed-selection oracle**: SROCC(sdr25 → CID22 outcome) = **+0.752** over 35 bakes; "never trained, not a gate" | `benchmarks/coherent089_seeded_frontier_2026-07-27.md:210-216` |
+| 4 | `ext_sdr25.parquet` = **50 rows**, 5 refs, at both the 924 and 944 roots | measured, this pass |
+| 5 | Incumbent arm-H group weights sum to **Σ train_w = 6.35** | `H_co3abpg_s2507.bin.spec.json` embedded repro |
+| 6 | The sampler is weight-proportional and **independent of row count** (pair share = `train_w / Σ train_w`) | Appendix G F-2 |
+
+## I.2 The determination — four independent blockers, each sufficient
+
+**B1 — It is a registered T0 eval-only holdout.** Fact 1. Training on it is
+prohibited by the same registered rule that protects CID22. No measurement can
+override a registration; only the user can.
+
+**B2 — It IS the seed-selection instrument.** Fact 3. The whole point of the
+oracle is that it is neither a training group nor a product gate, which is what
+lets it arbitrate between seeds that all look alike on the gates. **You cannot
+select on what you trained on.** Wave 10's leave-one-out sweep and every arm
+selection in this campaign currently rest on it. Consuming it as a training leg
+to gain ≤50 rows would spend the campaign's only independent selection signal.
+
+**B3 — 50 rows over 5 references, at 3.8-24.0% of all training pairs.** With
+Σ train_w = 6.35, the brief's registered weights give pair shares
+`w/(6.35+w)`:
+
+| `train_w` | pair share | pairs drawn over 120 epochs × 50k | draws per row |
+|---|---|---|---|
+| 0.25 | **3.79 %** | 227,000 | ~4,500 |
+| 0.5  | **7.30 %** | 438,000 | ~8,800 |
+| 1.0  | **13.61 %** | 817,000 | ~16,300 |
+| 2.0  | **23.95 %** | 1,437,000 | ~28,700 |
+
+(The brief's own estimates were 3.8 / 7.4 / 13.6 / 24.0 %, so the shares were
+never in dispute — what was missing is that the denominator behind them is
+**5 images**. Within-reference pairing over 5 refs × C(10,2) yields **225
+distinct pairs**.) At w=2.0 the model would draw ~1.44M samples from 225 distinct
+pairs on 5 photographs. That is not a mixing weight, it is a memorization
+schedule.
+
+**B4 — the stored target is DISTORTION-oriented** (§I.3). Mixed in as-is at any
+weight, it trains the model to **anti-correlate with quality** — the exact
+failure Appendix F spent this campaign's credibility on.
+
+## I.3 NEW FINDING — SDR25's target is a distortion distance, not a quality score
+
+`ext_sdr25.parquet` stores `human_score = q_jnd`. Three independent lines of
+evidence, none of which depends on the others:
+
+1. **From source.** `scripts/v_next/reconstruct_sdr25_jnd.py` defines the latent
+   as a distortion magnitude with "the original pinned at 0", and the response as
+   naming the **more distorted** side (trap-verified: under a "closer" reading
+   383 of 386 workers fail the traps).
+2. **From the raw ladder.** In the reconstruction, `q_jnd` rises monotonically
+   with `dlevel` — JPEG-XL on image 00002: dlevel 2 → 1.59, 4 → 3.82, 7 → 5.04,
+   8 → 5.34.
+3. **From the board, and from raw votes.** All **171** board fullevals carrying
+   sdr25 report `srocc_signed` **negative** (−0.91 … −0.97). And measured fresh
+   this pass against the **raw crowd votes** (67,714 BTC+PTC responses, traps and
+   bias triplets excluded, no reconstruction involved):
+   **signed SROCC = −0.9757**.
+
+**This is NOT a defect and the column MUST NOT be flipped.** `q_jnd` is the
+honest native unit of a JND triplet study, the oracle consumes `|SROCC|`, and
+flipping it would silently invert the seed-selection instrument mid-campaign. It
+is a **naming/convention hazard**: benign today, a landmine the moment anyone
+adds it as a training leg — which is precisely what this task asked for, so the
+landmine was live.
+
+### I.3b The finding generalizes — orientation tracks the LABEL FAMILY
+
+Tallying `rank.<corpus>.srocc_signed` across all 188 board fullevals:
+
+| corpus | negative | positive | reading |
+|---|---|---|---|
+| aic4 | **188** | 0 | distortion-oriented (`q_jnd`, same reconstruction family) |
+| konjnd | **187** | 1 | distortion-oriented (PJND threshold; `freeze_check` already takes `|SROCC|`) |
+| sdr25 | **171** | 0 | distortion-oriented (this finding) |
+| kadid | 78 | 110 | the Appendix F inversion (fixed by wave 10) |
+| cid22 / aic3 / imazen26 / nonphoto | 0 | 187-188 | quality-oriented |
+| csiq / live / tid | 1-2 | 186-187 | quality-oriented |
+| hfnlproxy | 80 | 92 | **mixed — no consistent direction** |
+
+**Three of twelve eval corpora are distortion-oriented, and they are exactly the
+JND/threshold-scaled ones.** Orientation is a property of the label family
+(JND distance vs MOS), not of any individual builder's mistake. KADID was the
+anomaly *because* it was a MOS that had been inverted; these three are correct
+in their own units. (`hfnlproxy`'s 80/92 split is not an orientation question —
+it is a corpus with no stable rank signal, noted here only because the tally
+surfaces it.)
+
+## I.4 The redirect — is there ANY untapped trainable HF human corpus locally?
+
+Priced against: scoreable stimulus count, protocol, target derivability +
+orientation, reference-disjointness, and whether already spoken for.
+
+| candidate | scoreable | refs | protocol | trainable? |
+|---|---|---|---|---|
+| **JPEG-AI-SDR25** | 50 | 5 | BTC+PTC triplets → JND | **No** — T0; the oracle; distortion-oriented |
+| **AIC-3 raw triplets** | 250 per view | **the same 5** (00002/6/7/9/10) | BTC+PTC, 5 anchor codecs × 10 levels | **No** — T0, and see below |
+| **AIC-4 public sample** | 300 | the same 5 | union of the above | **No** — T0, already extracted as `ext_aic4` |
+| **AIC-HDR2025** | **0 — NOT PRESENT** | — | — | **No** — local dir is README-only; release pending post-QoMEX 2025 |
+| **KonJND-1k JPEG half** | 504 | 504 | PJND | **No** — it IS `ext_konjnd_jpeg_val`; the disjoint BPG half is already the wave-7 training leg |
+| **KonFiG-IQA** | 1,090 | 20 | boosted triplets on a calibrated JND design grid | **Yes** — registered **T2**, and in NO recipe |
+
+Two structural findings fell out of this survey:
+
+- **SDR25 ⊂ AIC-4, exactly.** All **50/50** SDR25 feature vectors are present in
+  `ext_aic4.parquet` (matched on `ref_basename` + f0..f5 to 9 dp). SDR25 is the
+  JPEG-AI codec subset of the same 300-row, same-5-crop material. They are **not
+  independent eval corpora** — the board scores both, and a reader comparing
+  "sdr25" against "aic4" is comparing a set with its own subset.
+- **The anchor-codec pixels SDR25 "lacks" are on disk after all** — in the AIC-3
+  package (`test-images/{BTC,PTC}_images.zip`, 261 files each = 5 refs ×
+  {AVIF, JPEG-1, JPEG-2000, JPEG-XL, VVC} × 10 levels + refs). `DATA_SPLITS.md:108`'s
+  "anchor codecs not in the public zip" is true of the *JPEG-AI* zip only. This
+  does not create a training leg (still 5 refs, still T0), and the union is
+  already extracted as `ext_aic4` — so the practical consequence is only that the
+  50-vs-300 relationship above should be stated where both are scored.
+
+**Recommendation: build nothing from the AIC family. The one candidate worth
+pricing further is KonFiG-IQA** — 1,090 rows over 20 refs, human, JND-unit,
+**correctly quality-oriented** (`human_score` = 1 − q_jnd/3.2, measured range
+[0.0625, 1.0]), registered T2-trainable, present locally at 372, and absent from
+every sota944 recipe. It is a modest lever (20 refs, ~1.5% of safesyn's mass) and
+would need a 944 re-extraction. **Two gates before any such build**, neither run
+here: (i) KonFiG's sources are the Konstanz set and so is KonJND-1k's — a
+reference-overlap audit against `ext_konjnd_jpeg_val` (504 refs) is mandatory,
+since konjnd is simultaneously a training leg (BPG half) and an eval leg (JPEG
+half); (ii) `DATA_SPLITS.md` records KonFiG's dHash audit vs T0 refs as
+**pending**.
+
+**The honest headline: there is no untapped, trainable, HF/near-lossless HUMAN
+corpus of meaningful size on this box.** Every high-fidelity human dataset here
+is either T0-holdout (the whole AIC family, on 5-10 references), already spoken
+for (KonJND, both halves), not yet released (AIC-HDR2025), or small (KonFiG,
+20 refs). The HF gap is a **data-collection problem, not a mixing problem** —
+which is a more useful answer than any weight would have been.
+
+## I.5 Deliverables landed this pass
+
+1. **`check_target_orientation.py` extended** — sdr25 is now CHECKED, not SKIPPED,
+   against a **raw-vote** ground truth (67,714 triplet responses; joined on
+   `q_jnd`, verified 50/50 with zero misses). The gate was also **redesigned**:
+   it no longer asks "is the sign positive?" but "does the table match the
+   orientation it DECLARES?", via a new `EXPECTED_ORIENTATION` registry covering
+   all 12 eval corpora with the measured evidence inline. A distortion-oriented
+   corpus that declares itself distortion-oriented is **OK**; a mismatch is
+   INVERTED. Distortion-oriented tables additionally emit a `training_warning`.
+   This is the durable guard: the convention becomes machine-checkable, and a
+   future training-leg builder must confront the sign.
+2. **`bake_verdict.rs`** — `sdr25` added to `jnd_prefixes`, so its per-pair axis is
+   labelled JND rather than MOS. (Pre-existing board JSONs keep `mos`; the
+   dashboard resolves either.)
+3. **`docs/DATA_SPLITS.md:108`** — orientation recorded, SDR25 ⊂ AIC-4 recorded,
+   the anchor-codec-pixels correction recorded.
+4. This appendix.
+
+**Nothing was trained, no lane was taken, and the stored column was not flipped.**
+
+## I.6 Limitations, stated
+
+- The raw-vote ground truth is a **sign test, not a scale**: each stimulus meets
+  different opponents, so the more-distorted rate is not an interval measure. It
+  is sufficient for orientation (−0.9757 is not a near-tie) and nothing more is
+  claimed of it.
+- The SDR25 ⊂ AIC-4 check matched `ref_basename` + f0..f5 at 9 dp, not the full
+  944-vector. A 6-feature prefix collision across 300 rows is implausible but not
+  impossible; the claim is "same stimuli", verified to that precision.
+- **KonFiG-IQA was priced from its manifest and a schema read, NOT measured.** No
+  extraction, no training, no SROCC. Its two gates (§I.4) are unrun. It is a
+  recommendation to *evaluate*, not a validated lever.
+- The board tally reads the 188 committed fulleval JSONs as-is. `sdr25` is absent
+  from 17 of them (171 carry it), which is why its denominator differs.
+- No claim is made that SDR25 would *fail* to help if the blockers did not exist.
+  That experiment was not run, because running it is what the blockers forbid.

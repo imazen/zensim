@@ -3264,7 +3264,13 @@ Run the dedicated q-sweep harness for those._\n",
 
         // per_pair: {corpus: {pred, <mos|jnd>}} for the rank corpora + a
         // {kadis: {pred, ssim2, butter, cvvdp}} block from the metric parquet.
-        let jnd_prefixes = ["aic3", "aic4", "konjnd"];
+        // `sdr25` added 2026-08-04 (campaign Appendix I): its target is `q_jnd`,
+        // a JND distance from the pristine original, so the per-pair axis is JND
+        // and was being labelled "MOS (human)" on the dashboard scatter. The
+        // dashboard resolves whichever key a bake carries (gauntlet.py
+        // REFERENCES), so board JSONs emitted BEFORE this fix still carry sdr25
+        // under "mos" and render fine — only newly-emitted ones are relabelled.
+        let jnd_prefixes = ["aic3", "aic4", "konjnd", "sdr25"];
         let mut per_pair = Map::new();
         for r in &results {
             let idx = stride(r.rescaled_scores.len(), args.perpair_cap);

@@ -58,6 +58,53 @@ from scripts.lib.zen_stats import panel  # noqa: E402
 KADID_RAW = "/mnt/v/dataset/kadid10k/raw_crowdsource_data.csv"
 KADID_DMOS = "/mnt/v/dataset/kadid10k/dmos.csv"
 TID_MOS = "/mnt/v/dataset/tid2013/mos_with_names.txt"
+SDR25_RESP = "/mnt/v/datasets/jpeg-ai-sdr25/JPEG_AI_SDR_subjective_data"
+SDR25_RECON = ("/mnt/v/output/zensim-multicodec-probe/"
+               "sdr25_jnd_reconstructed_2026-07-02.parquet")
+
+# ---------------------------------------------------------------------------
+# DECLARED TARGET ORIENTATION per eval corpus.
+#
+# Added 2026-08-04 after the JPEG-AI-SDR25 determination (campaign Appendix I).
+# The KADID bug taught "a table can be backwards"; SDR25 taught the harder
+# lesson: **"backwards" is only meaningful relative to a DECLARED convention.**
+#
+# `ext_sdr25.parquet` stores `human_score = q_jnd`, a JND *distance* from the
+# pristine original (original pinned at 0, rising with distortion). That is not
+# a defect — it is the honest native unit of a triplet-comparison JND study, and
+# the seed-selection oracle consumes |SROCC|, so it works correctly today. It is
+# a LANDMINE only for a future training leg, which would fit the model to
+# anti-correlate with quality — precisely the KADID failure.
+#
+# So this gate does NOT ask "is the sign positive?". It asks "does the table
+# match the orientation it declares?" A `distortion` corpus reading
+# distortion-oriented is OK. A corpus reading the OPPOSITE of its declaration is
+# INVERTED. That makes the convention a machine-checkable fact rather than tribal
+# knowledge, and it forces anyone adding a training leg to confront the sign.
+#
+# MEASURED across the 188 board fullevals (`rank.<corpus>.srocc_signed`), which
+# is what makes these declarations empirical rather than assumed:
+#   distortion-oriented : aic4 188/188 neg, sdr25 171/171 neg, konjnd 187/188 neg
+#   quality-oriented    : cid22/aic3/imazen26/nonphoto 0 neg, csiq/live/tid 1-2 neg
+#   kadid               : 78 neg / 110 pos — the Appendix F inversion, now fixed
+# The three distortion-oriented corpora are exactly the JND/threshold-scaled
+# ones. Orientation tracks the LABEL FAMILY (JND distance vs MOS), not the corpus.
+# ---------------------------------------------------------------------------
+QUALITY, DISTORTION = "quality", "distortion"
+EXPECTED_ORIENTATION = {
+    "kadid": QUALITY,      # (dmos-1)/4 over a MOS-in-disguise; Appendix F
+    "tid": QUALITY,        # published MOS
+    "csiq": QUALITY,       # 1 - DMOS
+    "live": QUALITY,       # 1 - dmos_new/100
+    "cid22": QUALITY,      # MCOS/100
+    "aic3": QUALITY,       # stored quality-oriented (188/188 positive)
+    "imazen26": QUALITY,   # score_ssim2
+    "nonphoto": QUALITY,   # score_ssim2
+    "hfnlproxy": QUALITY,  # score_ssim2 band
+    "sdr25": DISTORTION,   # q_jnd — JND distance from the original
+    "aic4": DISTORTION,    # q_jnd, same reconstruction family as sdr25
+    "konjnd": DISTORTION,  # PJND threshold; freeze_check already takes |SROCC|
+}
 
 # Known eval roots for --all-roots. (root, {corpus: filename})
 KNOWN_ROOTS = [
@@ -69,9 +116,11 @@ KNOWN_ROOTS = [
     ("/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22",
      {"kadid": "ext_kadid.parquet", "tid": "ext_tid.parquet"}),
     ("/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27",
-     {"kadid": "ext_kadid.parquet", "tid": "ext_tid.parquet"}),
+     {"kadid": "ext_kadid.parquet", "tid": "ext_tid.parquet",
+      "sdr25": "ext_sdr25.parquet"}),
     ("/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01",
-     {"kadid": "ext_kadid.parquet", "tid": "ext_tid.parquet"}),
+     {"kadid": "ext_kadid.parquet", "tid": "ext_tid.parquet",
+      "sdr25": "ext_sdr25.parquet"}),
 ]
 
 
@@ -138,7 +187,74 @@ def tid_ground_truth():
     return np.array(mos), "published TID MOS (mos_with_names.txt)", n
 
 
+def sdr25_ground_truth_keyed(hs: np.ndarray):
+    """RAW-VOTE ground truth for JPEG-AI-SDR25, keyed on `human_score` (= q_jnd).
+
+    Positional joins are unsafe here (the table carries only `ref_basename` +
+    `human_score`, 10 rows per ref), so we key on the q_jnd value, which is
+    unique per stimulus and matches the reconstruction parquet exactly — VERIFIED
+    50/50 with zero misses, codec id 6 = JPEG-AI, dlevels 1..10 x 5 refs.
+
+    The ground truth itself is the RAW crowd votes, never the reconstructed
+    scale: for each stimulus, the fraction of head-to-head appearances in which
+    workers named it the MORE DISTORTED side (the response reading the
+    reconstruction script verified against the traps — under a 'closer' reading
+    383 of 386 workers fail them). Trap and bias triplets are excluded: traps
+    pair the pristine original against a heavy distortion and bias triplets show
+    the same stimulus twice, so neither carries stimulus-ordering signal.
+
+    Returned as a QUALITY-oriented quantity (`-distortion_rate`) so the caller's
+    sign convention is uniform across corpora. This is a crude scale — each
+    stimulus meets different opponents, so the rate is not an interval measure —
+    but a SIGN test needs only the ordering direction, and it is the rawest
+    human signal the corpus can produce.
+    """
+    if not os.path.isdir(SDR25_RESP) or not os.path.exists(SDR25_RECON):
+        raise FileNotFoundError("SDR25 raw responses or reconstruction absent")
+    rec = pq.read_table(SDR25_RECON).to_pydict()
+    by_q = {round(q, 9): (rec["img_num"][i], str(rec["codec"][i]), rec["dlevel"][i])
+            for i, q in enumerate(rec["q_jnd"])}
+
+    seen = collections.defaultdict(int)   # stimulus -> appearances
+    named = collections.defaultdict(int)  # stimulus -> times named more-distorted
+    n_rows = 0
+    for method in ("BTC", "PTC"):
+        f = f"{SDR25_RESP}/JPEG_AIC_SDR_{method}_JPEG_AI_responses_2025.02.28_v1.csv"
+        if not os.path.exists(f):
+            continue
+        for r in csv.DictReader(open(f)):
+            if r["response"] not in ("left", "right"):
+                continue
+            if r.get("is_trap") == "1" or r.get("is_bias") == "1":
+                continue
+            n_rows += 1
+            img = int(r["img_num"])
+            for side in ("left", "right"):
+                s = (img, r[f"codec_{side}"], int(r[f"dlevel_{side}"]))
+                if s[1] == "0" and s[2] == 0:
+                    continue  # the pristine original is not a stimulus
+                seen[s] += 1
+                if r["response"] == side:
+                    named[s] += 1
+
+    gt, missing = [], 0
+    for h in hs:
+        s = by_q.get(round(float(h), 9))
+        if s is None or seen.get(s, 0) == 0:
+            gt.append(np.nan)
+            missing += 1
+        else:
+            gt.append(-(named[s] / seen[s]))  # quality-oriented
+    if missing:
+        raise ValueError(f"{missing} of {len(hs)} rows had no raw-vote ground truth")
+    note = (f"raw more-distorted vote rate over {n_rows} BTC+PTC triplet responses "
+            f"(traps/bias excluded), negated to quality orientation")
+    return np.asarray(gt, float), note
+
+
 GROUND_TRUTH = {"kadid": kadid_ground_truth, "tid": tid_ground_truth}
+# Corpora whose ground truth must be joined on a key rather than row position.
+KEYED_GROUND_TRUTH = {"sdr25": sdr25_ground_truth_keyed}
 
 # ---------------------------------------------------------------------------
 # TARGET PROVENANCE of every leg in the SOTA-944 training mix, and therefore
@@ -189,7 +305,7 @@ def provenance_report() -> list[dict]:
 
 def guess_corpus(path: str) -> str | None:
     b = os.path.basename(path).lower()
-    for c in GROUND_TRUTH:
+    for c in list(GROUND_TRUTH) + list(KEYED_GROUND_TRUTH):
         if re.search(rf"(^|[_/]){c}([_.]|$)", b):
             return c
     return None
@@ -197,19 +313,34 @@ def guess_corpus(path: str) -> str | None:
 
 def check(path: str, corpus: str | None = None) -> dict:
     corpus = corpus or guess_corpus(path)
-    out = {"path": path, "corpus": corpus}
-    if corpus not in GROUND_TRUTH:
+    expect = EXPECTED_ORIENTATION.get(corpus, QUALITY)
+    out = {"path": path, "corpus": corpus, "expected_orientation": expect}
+    if corpus not in GROUND_TRUTH and corpus not in KEYED_GROUND_TRUTH:
         out.update(verdict="SKIPPED", reason="no recoverable ground truth for this corpus")
         return out
-    gt, note, n_gt = GROUND_TRUTH[corpus]()
     hs = np.asarray(pq.read_table(path, columns=["human_score"])["human_score"].to_pylist(), float)
-    if len(hs) != n_gt:
-        out.update(verdict="SKIPPED",
-                   reason=f"row count {len(hs)} != ground truth {n_gt}; positional join unsafe")
-        return out
+    if corpus in KEYED_GROUND_TRUTH:
+        try:
+            gt, note = KEYED_GROUND_TRUTH[corpus](hs)
+        except (FileNotFoundError, ValueError, KeyError) as e:
+            out.update(verdict="SKIPPED", reason=f"keyed ground truth unavailable: {e}")
+            return out
+    else:
+        gt, note, n_gt = GROUND_TRUTH[corpus]()
+        if len(hs) != n_gt:
+            out.update(verdict="SKIPPED",
+                       reason=f"row count {len(hs)} != ground truth {n_gt}; positional join unsafe")
+            return out
     s = _signed_srocc(hs, gt)
-    out.update(verdict="OK" if s > 0 else "INVERTED", signed_srocc=round(s, 6),
+    # `gt` is always quality-oriented, so s > 0 means the TABLE is quality-oriented.
+    measured = QUALITY if s > 0 else DISTORTION
+    out.update(verdict="OK" if measured == expect else "INVERTED",
+               signed_srocc=round(s, 6), measured_orientation=measured,
                n=len(hs), ground_truth=note)
+    if measured == DISTORTION:
+        out["training_warning"] = (
+            "target is DISTORTION-oriented: negate before any training use, or the "
+            "model learns to anti-correlate with quality (campaign Appendix F/I)")
     return out
 
 
@@ -257,13 +388,21 @@ def main() -> int:
     else:
         for r in results:
             mark = {"OK": "OK      ", "INVERTED": "INVERTED", "SKIPPED": "SKIPPED "}[r["verdict"]]
-            extra = (f"signed SROCC {r['signed_srocc']:+.6f} vs {r['ground_truth']} (n={r['n']})"
-                     if r["verdict"] != "SKIPPED" else r["reason"])
+            if r["verdict"] == "SKIPPED":
+                extra = r["reason"]
+            else:
+                extra = (f"signed SROCC {r['signed_srocc']:+.6f} vs {r['ground_truth']} "
+                         f"(n={r['n']}); measured {r['measured_orientation']}, "
+                         f"declared {r['expected_orientation']}")
             print(f"{mark}  {r.get('corpus') or '?':6s}  {r['path']}\n          {extra}")
+            if r.get("training_warning"):
+                print(f"          NOTE: {r['training_warning']}")
     bad = [r for r in results if r["verdict"] == "INVERTED"]
     if bad:
-        print(f"\nFAIL — {len(bad)} table(s) store human_score BACKWARDS vs the corpus's "
-              f"human labels. Fix the builder's transform; do NOT flip it at read time.",
+        print(f"\nFAIL — {len(bad)} table(s) store human_score in the OPPOSITE orientation "
+              f"to the one declared in EXPECTED_ORIENTATION. Either the builder's transform "
+              f"is backwards (fix the builder; do NOT flip it at read time) or the "
+              f"declaration is wrong (fix the declaration, with evidence).",
               file=sys.stderr)
         return 1
     return 0
