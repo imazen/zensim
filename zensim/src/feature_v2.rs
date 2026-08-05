@@ -5745,17 +5745,33 @@ pub(crate) fn compute_folded944_streaming_with_retention(
     ))
 }
 
+/// Reusable f32 pass-B scratch for the fused retention path (appendix P
+/// lever 1): plane-sized buffers kept across compares in the
+/// [`crate::Fused944Session`] so per-iteration callers pay no allocation /
+/// page-fault cost.
+#[derive(Default)]
+pub(crate) struct PassBScratchF32 {
+    pub(crate) canvas: Vec<f32>,
+    pub(crate) scale_density: Vec<f32>,
+    pub(crate) win_plane: Vec<f32>,
+    pub(crate) spread_tmp: Vec<f32>,
+    pub(crate) spread_out: Vec<f32>,
+}
+
 /// The v2/append/append2 attribution density built from walk RETENTION
 /// (appendix N): coefficients derived from the EXACT streaming
 /// accumulators + finalize mean-gradients, pass B over the retained
-/// planes — sharing [`attr_pass_b_for_scale`] / [`attr_ew_coeff`]
-/// verbatim with the standalone [`compute_v2_append_attribution`]. The
-/// retained planes are bitwise the standalone's `AttrChPlanes` (producer
-/// gate + same blur chain), so the densities differ ONLY by the
-/// coefficient inputs (exact accums vs the standalone's 1e-9-parity
-/// pass-A replication) — measured well inside the C3a tolerance class
-/// (G-N2 gate). The returned `v2_features`/`append_features` audit fields
-/// are empty: the fused caller owns the REAL extraction features.
+/// planes — sharing the coefficient derivation ([`derive_v2app_coeffs`] /
+/// [`attr_ew_coeff`]) verbatim with the standalone
+/// [`compute_v2_append_attribution`], with the f32 combine kernels
+/// (appendix P lever 1: `attr_pass_b_rows_f32` — the standalone keeps the
+/// strict f64 pass B). The retained planes are bitwise the standalone's
+/// `AttrChPlanes` (producer gate + same blur chain), so the densities
+/// differ ONLY by the coefficient inputs (exact accums vs the standalone's
+/// 1e-9-parity pass-A replication) and the f32 combine — measured inside
+/// the C3a tolerance class (G-N2/G-P2 gate). Returns the TRIMMED f32
+/// density at `orig_w × orig_h` (the fused caller adds it into the f32
+/// basic canvas; features stay owned by the real extraction).
 pub(crate) fn compute_v2_append_attribution_from_retention(
     ret: &FoldRetention,
     s_v2: &[f64],
@@ -5764,16 +5780,18 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
     parallel: bool,
     orig_w: usize,
     orig_h: usize,
-) -> V2AppendAttribution {
+    scratch: &mut PassBScratchF32,
+) -> Vec<f32> {
     let n_scales = ret.dims.len();
     let (w0, h0) = ret.dims[0];
     let want_append = s_append.is_some();
-    let mut canvas = vec![0.0f64; w0 * h0];
-    let mut scale_density = vec![0.0f64; w0 * h0];
-    let mut win_plane = vec![0.0f64; w0 * h0];
-    let mut spread_tmp: Vec<f64> = Vec::new();
+    let n0 = w0 * h0;
+    scratch.canvas.clear();
+    scratch.canvas.resize(n0, 0.0);
+    scratch.scale_density.resize(n0, 0.0);
+    scratch.win_plane.resize(n0, 0.0);
     for scale in 0..n_scales {
-        attr_pass_b_for_scale(
+        attr_pass_b_for_scale_f32(
             scale,
             [
                 &ret.pyr_src[scale][0],
@@ -5797,28 +5815,22 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
             parallel,
             w0,
             h0,
-            &mut scale_density,
-            &mut win_plane,
-            &mut canvas,
-            &mut spread_tmp,
+            &mut scratch.scale_density,
+            &mut scratch.win_plane,
+            &mut scratch.canvas,
+            &mut scratch.spread_tmp,
+            &mut scratch.spread_out,
         );
     }
     // Trim the (possibly reflect-padded sub-64) canvas to the original.
-    let density = if orig_w == w0 && orig_h == h0 {
-        canvas
+    if orig_w == w0 && orig_h == h0 {
+        scratch.canvas.clone()
     } else {
         let mut out = Vec::with_capacity(orig_w * orig_h);
         for y in 0..orig_h.min(h0) {
-            out.extend_from_slice(&canvas[y * w0..y * w0 + orig_w.min(w0)]);
+            out.extend_from_slice(&scratch.canvas[y * w0..y * w0 + orig_w.min(w0)]);
         }
         out
-    };
-    V2AppendAttribution {
-        density,
-        width: orig_w,
-        height: orig_h,
-        v2_features: Vec::new(),
-        append_features: Vec::new(),
     }
 }
 
@@ -7379,6 +7391,951 @@ fn attr_pass_b_blockiness(
     }
 }
 
+/// f32 coefficient pack for the FUSED pass-B kernel (appendix P lever 1):
+/// [`V2AppCoeffs`] with the dev-pool / gdp guards PRE-FOLDED into
+/// polynomial coefficients so the pixel loop is branch-free, and the
+/// cross/lum-transducer terms zeroed for non-Y channels (the f64 kernel's
+/// `cross_on` branch, folded into coefficients). Serves the fused
+/// folded-944 entry ONLY — the standalone f64 pass-B and its strict tests
+/// are untouched (the C3a precedent).
+#[derive(Clone, Copy)]
+struct V2AppCoeffsF32 {
+    c_ssim: f32,
+    c_art: f32,
+    c_det: f32,
+    c_mse: f32,
+    c_hf_gain: f32,
+    c_hf_loss: f32,
+    c_hf_mag: f32,
+    c_pjnd: f32,
+    c_pjnd_lo: f32,
+    c_pjnd_hi: f32,
+    c_gms: f32,
+    c_ringing: f32,
+    c_banding: f32,
+    c_blockiness: f32,
+    c_mask_ssim: f32,
+    c_mask_art: f32,
+    c_mask_det: f32,
+    c_mask_mse: f32,
+    c_iw_ssim: f32,
+    c_iw_art: f32,
+    c_iw_det: f32,
+    c_iw_mse: f32,
+    sp_ssim: (f32, f32),
+    sp_art: (f32, f32),
+    sp_det: (f32, f32),
+    /// ssim-`d` dev-pool polynomial (dev2 + dev4 folded, guards applied at
+    /// fold time): `pd1·d + pd2·d² + pd3·d³ + pd4·d⁴` added to the window
+    /// class.
+    pd1: f32,
+    pd2: f32,
+    pd3: f32,
+    pd4: f32,
+    c_xmask: f32,
+    c_lumt: f32,
+    c_mscn: f32,
+    c_mscn2: f32,
+    c_cgain: f32,
+    c_closs: f32,
+    c_tex: f32,
+    c_dark: f32,
+    c_mid: f32,
+    c_bright: f32,
+    /// gdp pools as lin/quad pairs: `lin·v + quad·v²` (guards folded).
+    ga_lin: f32,
+    ga_quad: f32,
+    gd_lin: f32,
+    gd_quad: f32,
+    gg_lin: f32,
+    gg_quad: f32,
+    g_dmean: f32,
+    g_var: f32,
+    gmean_d: f32,
+    c_edgew: f32,
+    c_bv_gain: f32,
+    c_bv_loss: f32,
+}
+
+/// Fold a derived [`V2AppCoeffs`] into the f32 pack. `cross_on` = the f64
+/// kernel's `cross.is_some()` (Y channel): when false, the lum-transducer
+/// and cross-mask terms are zeroed exactly as the f64 branch skips them.
+fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
+    // dev2: s·(2μd − d²) / (2·f2·N)  →  lin/quad in d.
+    let (mut pd1, mut pd2, mut pd3, mut pd4) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    if co.s_dev2 != 0.0 && co.dev_f2 > 1e-12 {
+        let k = co.s_dev2 * co.inv_n / (2.0 * co.dev_f2);
+        pd1 += k * 2.0 * co.dev_mu;
+        pd2 += -k;
+    }
+    // dev4: k4·dm4 with dm4 = −d⁴ + 4d·raw3 + 4μd³ − 12μd·raw2 − 6μ²d² + 12μ³d.
+    if co.s_dev4 != 0.0 && co.dev_f4 > 1e-12 {
+        let k4 = co.s_dev4 * co.inv_n / (4.0 * co.dev_f4.powi(3));
+        let mu = co.dev_mu;
+        pd1 += k4 * (4.0 * co.dev_raw3 - 12.0 * mu * co.dev_raw2 + 12.0 * mu.powi(3));
+        pd2 += k4 * (-6.0) * mu * mu;
+        pd3 += k4 * 4.0 * mu;
+        pd4 += -k4;
+    }
+    let gdp_lq = |g: (f64, f64, f64)| -> (f32, f32) {
+        let (sk, m, f) = g;
+        if sk != 0.0 && f > 1e-12 {
+            let k = sk * co.inv_n / (2.0 * f);
+            ((k * 2.0 * m) as f32, (-k) as f32)
+        } else {
+            (0.0, 0.0)
+        }
+    };
+    let (ga_lin, ga_quad) = gdp_lq(co.gd_art);
+    let (gd_lin, gd_quad) = gdp_lq(co.gd_det);
+    let (gg_lin, gg_quad) = gdp_lq(co.gd_gms);
+    V2AppCoeffsF32 {
+        c_ssim: co.c_ssim as f32,
+        c_art: co.c_art as f32,
+        c_det: co.c_det as f32,
+        c_mse: co.c_mse as f32,
+        c_hf_gain: co.c_hf_gain as f32,
+        c_hf_loss: co.c_hf_loss as f32,
+        c_hf_mag: co.c_hf_mag as f32,
+        c_pjnd: co.c_pjnd as f32,
+        c_pjnd_lo: co.c_pjnd_lo as f32,
+        c_pjnd_hi: co.c_pjnd_hi as f32,
+        c_gms: co.c_gms as f32,
+        c_ringing: co.c_ringing as f32,
+        c_banding: co.c_banding as f32,
+        c_blockiness: co.c_blockiness as f32,
+        c_mask_ssim: co.c_mask_ssim as f32,
+        c_mask_art: co.c_mask_art as f32,
+        c_mask_det: co.c_mask_det as f32,
+        c_mask_mse: co.c_mask_mse as f32,
+        c_iw_ssim: co.c_iw_ssim as f32,
+        c_iw_art: co.c_iw_art as f32,
+        c_iw_det: co.c_iw_det as f32,
+        c_iw_mse: co.c_iw_mse as f32,
+        sp_ssim: (co.sp_ssim.0 as f32, co.sp_ssim.1 as f32),
+        sp_art: (co.sp_art.0 as f32, co.sp_art.1 as f32),
+        sp_det: (co.sp_det.0 as f32, co.sp_det.1 as f32),
+        pd1: pd1 as f32,
+        pd2: pd2 as f32,
+        pd3: pd3 as f32,
+        pd4: pd4 as f32,
+        c_xmask: if cross_on { co.c_xmask as f32 } else { 0.0 },
+        c_lumt: if cross_on { co.c_lumt as f32 } else { 0.0 },
+        c_mscn: co.c_mscn as f32,
+        c_mscn2: co.c_mscn2 as f32,
+        c_cgain: co.c_cgain as f32,
+        c_closs: co.c_closs as f32,
+        c_tex: co.c_tex as f32,
+        c_dark: co.c_dark as f32,
+        c_mid: co.c_mid as f32,
+        c_bright: co.c_bright as f32,
+        ga_lin,
+        ga_quad,
+        gd_lin,
+        gd_quad,
+        gg_lin,
+        gg_quad,
+        g_dmean: co.g_dmean as f32,
+        g_var: co.g_var as f32,
+        gmean_d: co.gmean_d as f32,
+        c_edgew: co.c_edgew as f32,
+        c_bv_gain: co.c_bv_gain as f32,
+        c_bv_loss: co.c_bv_loss as f32,
+    }
+}
+
+/// Scalar per-pixel MAIN-sweep integrand of the f32 fused pass-B — shared
+/// by the SIMD kernel's row tail and the sub-8-wide fallback, so there is
+/// exactly ONE formula source. Returns `(id_add, win_add)` (`id` carries
+/// the pixel + residual classes, `win` the window class).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_main_px(
+    s: f32,
+    dd: f32,
+    m1: f32,
+    m2: f32,
+    sq: f32,
+    s12v: f32,
+    act: f32,
+    b2v: f32,
+    axv: f32,
+    abv: f32,
+    ry: f32,
+    co: &V2AppCoeffsF32,
+) -> (f32, f32) {
+    const C1: f32 = C1_V2 as f32;
+    const C2: f32 = C2_V2 as f32;
+    const CE: f32 = C_EDGE as f32;
+    const CM: f32 = C_MSE as f32;
+    const CH: f32 = C_HF as f32;
+    const CPC: f32 = C_PJND_CLAMP as f32;
+    const KP: f32 = K_PJND_MASK as f32;
+    const KPL: f32 = K_PJND_MASK_LOW as f32;
+    const KPH: f32 = K_PJND_MASK_HIGH as f32;
+    const CA: f32 = C_ACTIVITY as f32;
+    const IWF: f32 = IW_WEIGHT_FLOOR as f32;
+    const CPK: f32 = C_PEAK as f32;
+    const CMV: f32 = C_MSCN_VAR as f32;
+    const CMA: f32 = C_MSCN_ABS as f32;
+    const CMS: f32 = C_MSCN_SQ as f32;
+    const CC: f32 = C_CONTRAST as f32;
+    const CLT: f32 = C_LUM_T as f32;
+    const KLA_OVER_KP: f32 = (K_LUM_ADAPT / K_PJND_MASK) as f32;
+    const KX_OVER_KP: f32 = (K_XCH / K_PJND_MASK) as f32;
+    let sat = |x: f32, c: f32| -> f32 {
+        let x = x.max(0.0);
+        x / (x + c)
+    };
+    let pjnd = |x: f32, act: f32, k: f32| -> f32 { x / (x + CPC * (1.0 + k * act)) };
+    let mut a_id = 0.0f32;
+    let mut a_win = 0.0f32;
+    let mut a_res = 0.0f32;
+    // Dense family.
+    let na = 2.0 * m1 * m2 + C1;
+    let nb = m1 * m1 + m2 * m2 + C1;
+    let cov = s12v - m1 * m2;
+    let nc = 2.0 * cov + C2;
+    let nd = sq - m1 * m1 - m2 * m2 + C2;
+    let d = (1.0 - (na * nc) / (nb * nd)).max(0.0);
+    let diff_src = (s - m1).abs();
+    let diff_dst = (dd - m2).abs();
+    let edge_dissim =
+        1.0 - (2.0 * diff_src * diff_dst + CE) / (diff_src * diff_src + diff_dst * diff_dst + CE);
+    let art_i = if diff_dst > diff_src {
+        edge_dissim
+    } else {
+        0.0
+    };
+    let det_i = if diff_dst < diff_src {
+        edge_dissim
+    } else {
+        0.0
+    };
+    let raw_diff = s - dd;
+    let raw_abs_err = raw_diff.abs();
+    let mse_i = sat(raw_diff * raw_diff, CM);
+    a_win += co.c_ssim * d;
+    a_res += co.c_art * art_i + co.c_det * det_i;
+    a_id += co.c_mse * mse_i;
+    let hf_src = s - m1;
+    let hf_dst = dd - m2;
+    let (hf_gain_i, hf_loss_i) = {
+        let a2 = hf_dst * hf_dst;
+        let b2 = hf_src * hf_src;
+        let r = 1.0 / (a2 + b2 + CH);
+        ((a2 - b2).max(0.0) * r, (b2 - a2).max(0.0) * r)
+    };
+    a_res += co.c_hf_gain * hf_gain_i + co.c_hf_loss * hf_loss_i;
+    a_res += co.c_hf_mag * {
+        let a = hf_src.abs();
+        let b = hf_dst.abs();
+        (a - b).max(0.0) / (a + b + CH)
+    };
+    a_id += co.c_pjnd * pjnd(raw_abs_err, act, KP);
+    a_id += co.c_pjnd_lo * pjnd(raw_abs_err, act, KPL);
+    a_id += co.c_pjnd_hi * pjnd(raw_abs_err, act, KPH);
+    // Weighted pools.
+    let sat_act = sat(act, CA);
+    let mask_w = 1.0 - sat_act;
+    let iw_w = sat_act + IWF;
+    a_win += mask_w * (co.c_mask_ssim * d) + iw_w * (co.c_iw_ssim * d);
+    a_res += mask_w * (co.c_mask_art * art_i + co.c_mask_det * det_i)
+        + iw_w * (co.c_iw_art * art_i + co.c_iw_det * det_i);
+    a_id += mask_w * (co.c_mask_mse * mse_i) + iw_w * (co.c_iw_mse * mse_i);
+    // Soft-peak.
+    a_win += co.sp_ssim.0 * sat(d, CPK) * (co.sp_ssim.1 - d);
+    a_res += co.sp_art.0 * sat(art_i, CPK) * (co.sp_art.1 - art_i);
+    a_res += co.sp_det.0 * sat(det_i, CPK) * (co.sp_det.1 - det_i);
+    // Dev polynomial: pd1·d + pd2·d² + pd3·d³ + pd4·d⁴.
+    let dsq = d * d;
+    a_win += (co.pd1 + co.pd3 * dsq) * d + (co.pd2 + co.pd4 * dsq) * dsq;
+    // Append block.
+    let var1 = (b2v - m1 * m1).max(0.0);
+    let var2 = ((sq - b2v) - m2 * m2).max(0.0);
+    let n1 = (s - m1) / (var1 + CMV).sqrt();
+    let n2 = (dd - m2) / (var2 + CMV).sqrt();
+    let dn = n1 - n2;
+    a_res += co.c_mscn * sat(dn.abs(), CMA);
+    a_res += co.c_mscn2 * sat(dn * dn, CMS);
+    let (cg, cl) = {
+        let r = 1.0 / (var2 + var1 + CC);
+        ((var2 - var1).max(0.0) * r, (var1 - var2).max(0.0) * r)
+    };
+    a_win += co.c_cgain * cg + co.c_closs * cl;
+    a_win += co.c_tex * (1.0 - (2.0 * var1 * var2 + CC) / (var1 * var1 + var2 * var2 + CC));
+    // Luminance transducer + cross-mask (coefficients zero off-Y).
+    let t = sat(ry, CLT);
+    if co.c_lumt != 0.0 {
+        a_id += co.c_lumt * pjnd(raw_abs_err, act + t * KLA_OVER_KP, KP);
+    }
+    if co.c_xmask != 0.0 {
+        let act_c = axv + abv;
+        a_id += co.c_xmask * pjnd(raw_abs_err, act + act_c * KX_OVER_KP, KP);
+    }
+    // Luminance bins.
+    let one_mt = 1.0 - t;
+    let wd = one_mt * one_mt;
+    let wb = t * t;
+    let wm = 1.0 - wd - wb;
+    a_id += (co.c_dark * wd + co.c_mid * wm + co.c_bright * wb) * mse_i;
+    // gdp pools (art/det).
+    a_res += (co.ga_lin + co.ga_quad * art_i) * art_i;
+    a_res += (co.gd_lin + co.gd_quad * det_i) * det_i;
+    // Globals (factored g_var form).
+    a_id += co.g_dmean * raw_diff;
+    a_id += co.g_var * raw_diff * ((s + dd) - 2.0 * co.gmean_d);
+    (a_id + a_res, a_win)
+}
+
+/// SIMD main sweep of the f32 fused pass-B — generic over any
+/// [`F32x8Backend`] token, 8 pixels per step with the scalar
+/// [`attr_pass_b_main_px`] tail. Same formulas lane-for-lane (selects via
+/// [`GenericF32x8::blend`]); the auto-vectorizer refused the 55-constant
+/// monolith (measured scalar `divss` codegen — appendix P lever 1), so
+/// this is the explicit magetypes port, the same §A.14 pattern as
+/// `dense_block_kernel_generic`.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
+    token: T,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    act_p: &[f32],
+    bs2: &[f32],
+    ax: &[f32],
+    ab: &[f32],
+    ref_y: &[f32],
+    co: &V2AppCoeffsF32,
+    width: usize,
+    y0: usize,
+    y1: usize,
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    let zero = V8::<T>::zero(token);
+    let one = V8::<T>::splat(token, 1.0);
+    let sp = |v: f32| V8::<T>::splat(token, v);
+    let c1 = sp(C1_V2 as f32);
+    let c2 = sp(C2_V2 as f32);
+    let c_edge = sp(C_EDGE as f32);
+    let c_mse = sp(C_MSE as f32);
+    let c_hf = sp(C_HF as f32);
+    let c_pjnd_clamp = sp(C_PJND_CLAMP as f32);
+    let k_mid = sp(K_PJND_MASK as f32);
+    let k_lo = sp(K_PJND_MASK_LOW as f32);
+    let k_hi = sp(K_PJND_MASK_HIGH as f32);
+    let c_activity = sp(C_ACTIVITY as f32);
+    let iw_floor = sp(IW_WEIGHT_FLOOR as f32);
+    let c_peak = sp(C_PEAK as f32);
+    let c_mscn_var = sp(C_MSCN_VAR as f32);
+    let c_mscn_abs = sp(C_MSCN_ABS as f32);
+    let c_mscn_sq = sp(C_MSCN_SQ as f32);
+    let c_contrast = sp(C_CONTRAST as f32);
+    let c_lum_t = sp(C_LUM_T as f32);
+    let kla = sp((K_LUM_ADAPT / K_PJND_MASK) as f32);
+    let kx = sp((K_XCH / K_PJND_MASK) as f32);
+    let sat_v = |x: V8<T>, c: V8<T>| -> V8<T> {
+        let x = x.max(zero);
+        x / (x + c)
+    };
+    let has_lumt = co.c_lumt != 0.0;
+    let has_xmask = co.c_xmask != 0.0;
+    let out_off = y0 * width;
+    let width8 = width - (width % 8);
+    for y in y0..y1 {
+        let row = y * width;
+        let orow = row - out_off;
+        let mut x = 0usize;
+        while x < width8 {
+            let i = row + x;
+            macro_rules! ld {
+                ($plane:expr) => {
+                    V8::<T>::from_array(token, $plane[i..i + 8].try_into().unwrap())
+                };
+            }
+            let s = ld!(src);
+            let dd = ld!(dst);
+            let m1 = ld!(mu1);
+            let m2 = ld!(mu2);
+            let sq = ld!(ssq);
+            let act = ld!(act_p);
+            let mut a_id = zero;
+            let mut a_win = zero;
+            let mut a_res = zero;
+            // Dense family.
+            let d = ssim_d_local_v(token, m1, m2, ld!(s12), sq, c1, c2);
+            let diff_src = (s - m1).abs();
+            let diff_dst = (dd - m2).abs();
+            let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
+            let art_i = V8::<T>::blend(diff_dst.simd_gt(diff_src), edge_dissim, zero);
+            let det_i = V8::<T>::blend(diff_dst.simd_lt(diff_src), edge_dissim, zero);
+            let raw_diff = s - dd;
+            let raw_abs_err = raw_diff.abs();
+            let mse_i = sat_v(raw_diff * raw_diff, c_mse);
+            a_win += sp(co.c_ssim) * d;
+            a_res += sp(co.c_art) * art_i + sp(co.c_det) * det_i;
+            a_id += sp(co.c_mse) * mse_i;
+            let hf_src = s - m1;
+            let hf_dst = dd - m2;
+            let (hf_gain_i, hf_loss_i) =
+                bounded_excess_pair_v(token, hf_dst * hf_dst, hf_src * hf_src, c_hf);
+            a_res += sp(co.c_hf_gain) * hf_gain_i + sp(co.c_hf_loss) * hf_loss_i;
+            a_res += sp(co.c_hf_mag) * bounded_excess_v(token, hf_src.abs(), hf_dst.abs(), c_hf);
+            a_id += sp(co.c_pjnd) * pjnd_transducer_v(token, raw_abs_err, act, k_mid, c_pjnd_clamp);
+            a_id +=
+                sp(co.c_pjnd_lo) * pjnd_transducer_v(token, raw_abs_err, act, k_lo, c_pjnd_clamp);
+            a_id +=
+                sp(co.c_pjnd_hi) * pjnd_transducer_v(token, raw_abs_err, act, k_hi, c_pjnd_clamp);
+            // Weighted pools.
+            let sat_act = sat_v(act, c_activity);
+            let mask_w = one - sat_act;
+            let iw_w = sat_act + iw_floor;
+            a_win += mask_w * (sp(co.c_mask_ssim) * d) + iw_w * (sp(co.c_iw_ssim) * d);
+            a_res += mask_w * (sp(co.c_mask_art) * art_i + sp(co.c_mask_det) * det_i)
+                + iw_w * (sp(co.c_iw_art) * art_i + sp(co.c_iw_det) * det_i);
+            a_id += mask_w * (sp(co.c_mask_mse) * mse_i) + iw_w * (sp(co.c_iw_mse) * mse_i);
+            // Soft-peak.
+            a_win += sp(co.sp_ssim.0) * sat_v(d, c_peak) * (sp(co.sp_ssim.1) - d);
+            a_res += sp(co.sp_art.0) * sat_v(art_i, c_peak) * (sp(co.sp_art.1) - art_i);
+            a_res += sp(co.sp_det.0) * sat_v(det_i, c_peak) * (sp(co.sp_det.1) - det_i);
+            // Dev polynomial.
+            let dsq = d * d;
+            a_win += (sp(co.pd1) + sp(co.pd3) * dsq) * d + (sp(co.pd2) + sp(co.pd4) * dsq) * dsq;
+            // Append block.
+            let b2v = ld!(bs2);
+            let var1 = (b2v - m1 * m1).max(zero);
+            let var2 = ((sq - b2v) - m2 * m2).max(zero);
+            let n1 = (s - m1) / (var1 + c_mscn_var).sqrt();
+            let n2 = (dd - m2) / (var2 + c_mscn_var).sqrt();
+            let dn = n1 - n2;
+            a_res += sp(co.c_mscn) * sat_v(dn.abs(), c_mscn_abs);
+            a_res += sp(co.c_mscn2) * sat_v(dn * dn, c_mscn_sq);
+            let (cg, cl) = bounded_excess_pair_v(token, var2, var1, c_contrast);
+            a_win += sp(co.c_cgain) * cg + sp(co.c_closs) * cl;
+            a_win += sp(co.c_tex) * (one - bounded_sim_v(token, var1, var2, c_contrast));
+            // Luminance transducer + cross-mask (Y only; uniform branches).
+            let ry = ld!(ref_y);
+            let t = sat_v(ry, c_lum_t);
+            if has_lumt {
+                a_id += sp(co.c_lumt)
+                    * pjnd_transducer_v(token, raw_abs_err, act + t * kla, k_mid, c_pjnd_clamp);
+            }
+            if has_xmask {
+                let act_c = ld!(ax) + ld!(ab);
+                a_id += sp(co.c_xmask)
+                    * pjnd_transducer_v(token, raw_abs_err, act + act_c * kx, k_mid, c_pjnd_clamp);
+            }
+            // Luminance bins.
+            let one_mt = one - t;
+            let wd = one_mt * one_mt;
+            let wb = t * t;
+            let wm = one - wd - wb;
+            a_id += (sp(co.c_dark) * wd + sp(co.c_mid) * wm + sp(co.c_bright) * wb) * mse_i;
+            // gdp pools.
+            a_res += (sp(co.ga_lin) + sp(co.ga_quad) * art_i) * art_i;
+            a_res += (sp(co.gd_lin) + sp(co.gd_quad) * det_i) * det_i;
+            // Globals (factored g_var form).
+            a_id += sp(co.g_dmean) * raw_diff;
+            a_id += sp(co.g_var) * raw_diff * ((s + dd) - sp(2.0 * co.gmean_d));
+            let o = orow + x;
+            let id_new =
+                V8::<T>::from_array(token, id_plane[o..o + 8].try_into().unwrap()) + a_id + a_res;
+            id_plane[o..o + 8].copy_from_slice(&id_new.to_array());
+            let win_new =
+                V8::<T>::from_array(token, win_plane[o..o + 8].try_into().unwrap()) + a_win;
+            win_plane[o..o + 8].copy_from_slice(&win_new.to_array());
+            x += 8;
+        }
+        // Scalar tail — the shared per-pixel formula.
+        for x in width8..width {
+            let i = row + x;
+            let (id_add, win_add) = attr_pass_b_main_px(
+                src[i], dst[i], mu1[i], mu2[i], ssq[i], s12[i], act_p[i], bs2[i], ax[i], ab[i],
+                ref_y[i], co,
+            );
+            id_plane[orow + x] += id_add;
+            win_plane[orow + x] += win_add;
+        }
+    }
+}
+
+/// Tiered magetypes entry for the pass-B main sweep.
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_main_entry(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    act_p: &[f32],
+    bs2: &[f32],
+    ax: &[f32],
+    ab: &[f32],
+    ref_y: &[f32],
+    co: &V2AppCoeffsF32,
+    width: usize,
+    y0: usize,
+    y1: usize,
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    attr_pass_b_main_kernel_generic(
+        token, src, dst, mu1, mu2, ssq, s12, act_p, bs2, ax, ab, ref_y, co, width, y0, y1,
+        id_plane, win_plane,
+    );
+}
+
+/// f32 twin of [`attr_pass_b_rows`] (appendix P lever 1): the SIMD main
+/// sweep ([`attr_pass_b_main_entry`], magetypes-tiered) plus the gradient
+/// family sweep ([`attr_pass_b_grad_rows_f32`], `#[autoversion]` — its
+/// smaller body auto-vectorizes). Same integrand formulas as the f64
+/// kernel; the dev/gdp pools are pre-folded polynomials and the `g_var`
+/// global uses the factored `(s−d)·((s+d) − 2·gmean_d)` form
+/// (algebraically identical, f32-stable). Cross activity slices are
+/// dummies (== `ref_y`) for non-Y channels — their coefficients are
+/// zeroed at fold time. Precision class: the fused entry's C3a tolerance
+/// (G-P2), NOT the standalone's strict identities.
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_rows_f32(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    act_p: &[f32],
+    bs2: &[f32],
+    ax: &[f32],
+    ab: &[f32],
+    ref_y: &[f32],
+    co: V2AppCoeffsF32,
+    y0: usize,
+    y1: usize,
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    incant!(
+        attr_pass_b_main_entry(
+            src, dst, mu1, mu2, ssq, s12, act_p, bs2, ax, ab, ref_y, &co, width, y0, y1, id_plane,
+            win_plane
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    );
+    attr_pass_b_grad_rows_f32(src, dst, width, height, act_p, co, y0, y1, id_plane);
+}
+
+/// Scalar per-pixel gradient-family integrand of the f32 fused pass-B —
+/// shared by the SIMD kernel's edge/tail pixels (ONE formula source).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_grad_px(
+    s_c: f32,
+    d_c: f32,
+    act_i: f32,
+    sxl: f32,
+    sxr: f32,
+    syu: f32,
+    syd: f32,
+    dxl: f32,
+    dxr: f32,
+    dyu: f32,
+    dyd: f32,
+    co: &V2AppCoeffsF32,
+    need_bandvis: bool,
+) -> f32 {
+    const CA: f32 = C_ACTIVITY as f32;
+    const CG: f32 = C_GMS as f32;
+    const CRE: f32 = C_RING_ERR as f32;
+    const CRG: f32 = C_RING_EDGE as f32;
+    const CBD: f32 = C_BAND_DST as f32;
+    const CBS: f32 = C_BAND_SRC as f32;
+    const CBV: f32 = C_BV as f32;
+    let sat = |x: f32, c: f32| -> f32 {
+        let x = x.max(0.0);
+        x / (x + c)
+    };
+    let gx_s = sxr - sxl;
+    let gy_s = syd - syu;
+    let gmag_s = (gx_s * gx_s + gy_s * gy_s).sqrt();
+    let gx_d = dxr - dxl;
+    let gy_d = dyd - dyu;
+    let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
+    let g = 1.0 - (2.0 * gmag_s * gmag_d + CG) / (gmag_s * gmag_s + gmag_d * gmag_d + CG);
+    let mut acc = co.c_gms * g;
+    acc += (co.gg_lin + co.gg_quad * g) * g;
+    if co.c_ringing != 0.0 {
+        let err_b = sat((s_c - d_c).abs(), CRE);
+        let act_b = sat(act_i, CA);
+        let edge_r = sat(gmag_s, CRG);
+        acc += co.c_ringing * (err_b * act_b * (1.0 - edge_r));
+    }
+    if co.c_banding != 0.0 {
+        let edge_excess = (gmag_d - gmag_s).max(0.0) / (gmag_d + gmag_s + CBD);
+        let src_smooth = 1.0 - sat(gmag_s, CBS);
+        acc += co.c_banding * (edge_excess * src_smooth);
+    }
+    if need_bandvis {
+        let d2x_src = sxl + sxr - 2.0 * s_c;
+        let d2y_src = syu + syd - 2.0 * s_c;
+        let curv_src = (d2x_src * d2x_src + d2y_src * d2y_src).sqrt();
+        let d2x_dst = dxl + dxr - 2.0 * d_c;
+        let d2y_dst = dyu + dyd - 2.0 * d_c;
+        let curv_dst = (d2x_dst * d2x_dst + d2y_dst * d2y_dst).sqrt();
+        let flat = 1.0 - sat(act_i, CA);
+        let band = |g: f32| -> f32 { sat(g, BV_DELTA_LO_SDR) * (1.0 - sat(g, BV_DELTA_HI_SDR)) };
+        let b_src = band(curv_src) * flat;
+        let b_dst = band(curv_dst) * flat;
+        let (gain_i, loss_i) = {
+            let r = 1.0 / (b_dst + b_src + CBV);
+            ((b_dst - b_src).max(0.0) * r, (b_src - b_dst).max(0.0) * r)
+        };
+        acc += co.c_bv_gain * gain_i + co.c_bv_loss * loss_i;
+    }
+    acc + co.c_edgew * (gmag_d - gmag_s)
+}
+
+/// SIMD gradient-family sweep — generic over any [`F32x8Backend`] token;
+/// interior pixels 8-wide with unaligned ±1 neighbor loads, x-edges and
+/// the sub-8 tail through the scalar [`attr_pass_b_grad_px`].
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
+    token: T,
+    src: &[f32],
+    dst: &[f32],
+    act_p: &[f32],
+    co: &V2AppCoeffsF32,
+    width: usize,
+    height: usize,
+    y0: usize,
+    y1: usize,
+    id_plane: &mut [f32],
+) {
+    let need_bandvis = co.c_bv_gain != 0.0 || co.c_bv_loss != 0.0;
+    let has_ringing = co.c_ringing != 0.0;
+    let has_banding = co.c_banding != 0.0;
+    let zero = V8::<T>::zero(token);
+    let one = V8::<T>::splat(token, 1.0);
+    let two = V8::<T>::splat(token, 2.0);
+    let sp = |v: f32| V8::<T>::splat(token, v);
+    let c_gms = sp(C_GMS as f32);
+    let c_activity = sp(C_ACTIVITY as f32);
+    let c_ring_err = sp(C_RING_ERR as f32);
+    let c_ring_edge = sp(C_RING_EDGE as f32);
+    let c_band_dst = sp(C_BAND_DST as f32);
+    let c_band_src = sp(C_BAND_SRC as f32);
+    let c_bv = sp(C_BV as f32);
+    let bv_lo = sp(BV_DELTA_LO_SDR);
+    let bv_hi = sp(BV_DELTA_HI_SDR);
+    let sat_v = |x: V8<T>, c: V8<T>| -> V8<T> {
+        let x = x.max(zero);
+        x / (x + c)
+    };
+    let out_off = y0 * width;
+    for y in y0..y1 {
+        let row = y * width;
+        let ru = reflect_101(y as isize - 1, height) * width;
+        let rd = reflect_101(y as isize + 1, height) * width;
+        if width == 1 {
+            let i = row;
+            id_plane[i - out_off] += attr_pass_b_grad_px(
+                src[i],
+                dst[i],
+                act_p[i],
+                src[i],
+                src[i],
+                src[ru],
+                src[rd],
+                dst[i],
+                dst[i],
+                dst[ru],
+                dst[rd],
+                co,
+                need_bandvis,
+            );
+            continue;
+        }
+        // x = 0 (xl clamps to 0).
+        {
+            let i = row;
+            id_plane[i - out_off] += attr_pass_b_grad_px(
+                src[i],
+                dst[i],
+                act_p[i],
+                src[i],
+                src[i + 1],
+                src[ru],
+                src[rd],
+                dst[i],
+                dst[i + 1],
+                dst[ru],
+                dst[rd],
+                co,
+                need_bandvis,
+            );
+        }
+        // Interior [1, width−1): 8-wide chunks + scalar remainder.
+        let interior_end = width - 1;
+        let mut x = 1usize;
+        while x + 8 <= interior_end {
+            let i = row + x;
+            macro_rules! ldo {
+                ($plane:expr, $off:expr) => {
+                    V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+                };
+            }
+            let s_c = ldo!(src, i);
+            let d_c = ldo!(dst, i);
+            let sxl = ldo!(src, i - 1);
+            let sxr = ldo!(src, i + 1);
+            let syu = ldo!(src, ru + x);
+            let syd = ldo!(src, rd + x);
+            let dxl = ldo!(dst, i - 1);
+            let dxr = ldo!(dst, i + 1);
+            let dyu = ldo!(dst, ru + x);
+            let dyd = ldo!(dst, rd + x);
+            let gx_s = sxr - sxl;
+            let gy_s = syd - syu;
+            let gmag_s = (gx_s * gx_s + gy_s * gy_s).sqrt();
+            let gx_d = dxr - dxl;
+            let gy_d = dyd - dyu;
+            let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
+            let g = one - bounded_sim_v(token, gmag_s, gmag_d, c_gms);
+            let mut acc = sp(co.c_gms) * g;
+            acc += (sp(co.gg_lin) + sp(co.gg_quad) * g) * g;
+            if has_ringing {
+                let err_b = sat_v((s_c - d_c).abs(), c_ring_err);
+                let act_b = sat_v(ldo!(act_p, i), c_activity);
+                let edge_r = sat_v(gmag_s, c_ring_edge);
+                acc += sp(co.c_ringing) * (err_b * act_b * (one - edge_r));
+            }
+            if has_banding {
+                let edge_excess = bounded_excess_v(token, gmag_d, gmag_s, c_band_dst);
+                let src_smooth = one - sat_v(gmag_s, c_band_src);
+                acc += sp(co.c_banding) * (edge_excess * src_smooth);
+            }
+            if need_bandvis {
+                let d2x_src = sxl + sxr - two * s_c;
+                let d2y_src = syu + syd - two * s_c;
+                let curv_src = (d2x_src * d2x_src + d2y_src * d2y_src).sqrt();
+                let d2x_dst = dxl + dxr - two * d_c;
+                let d2y_dst = dyu + dyd - two * d_c;
+                let curv_dst = (d2x_dst * d2x_dst + d2y_dst * d2y_dst).sqrt();
+                let flat = one - sat_v(ldo!(act_p, i), c_activity);
+                let b_src = sat_v(curv_src, bv_lo) * (one - sat_v(curv_src, bv_hi)) * flat;
+                let b_dst = sat_v(curv_dst, bv_lo) * (one - sat_v(curv_dst, bv_hi)) * flat;
+                let (gain_i, loss_i) = bounded_excess_pair_v(token, b_dst, b_src, c_bv);
+                acc += sp(co.c_bv_gain) * gain_i + sp(co.c_bv_loss) * loss_i;
+            }
+            acc += sp(co.c_edgew) * (gmag_d - gmag_s);
+            let o = i - out_off;
+            let id_new = V8::<T>::from_array(token, id_plane[o..o + 8].try_into().unwrap()) + acc;
+            id_plane[o..o + 8].copy_from_slice(&id_new.to_array());
+            x += 8;
+        }
+        while x < interior_end {
+            let i = row + x;
+            id_plane[i - out_off] += attr_pass_b_grad_px(
+                src[i],
+                dst[i],
+                act_p[i],
+                src[i - 1],
+                src[i + 1],
+                src[ru + x],
+                src[rd + x],
+                dst[i - 1],
+                dst[i + 1],
+                dst[ru + x],
+                dst[rd + x],
+                co,
+                need_bandvis,
+            );
+            x += 1;
+        }
+        // x = width−1 (xr clamps to width−1).
+        {
+            let x = width - 1;
+            let i = row + x;
+            id_plane[i - out_off] += attr_pass_b_grad_px(
+                src[i],
+                dst[i],
+                act_p[i],
+                src[i - 1],
+                src[i],
+                src[ru + x],
+                src[rd + x],
+                dst[i - 1],
+                dst[i],
+                dst[ru + x],
+                dst[rd + x],
+                co,
+                need_bandvis,
+            );
+        }
+    }
+}
+
+/// Tiered magetypes entry for the pass-B gradient sweep.
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_grad_entry(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    act_p: &[f32],
+    co: &V2AppCoeffsF32,
+    width: usize,
+    height: usize,
+    y0: usize,
+    y1: usize,
+    id_plane: &mut [f32],
+) {
+    attr_pass_b_grad_kernel_generic(token, src, dst, act_p, co, width, height, y0, y1, id_plane);
+}
+
+/// Gradient-family sweep of the f32 fused pass-B (gms / gms-dev / ringing
+/// / banding / BANDVIS / edge-width) — magetypes-tiered dispatch; skipped
+/// entirely when every gradient-family coefficient is zero.
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_grad_rows_f32(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    act_p: &[f32],
+    co: V2AppCoeffsF32,
+    y0: usize,
+    y1: usize,
+    id_plane: &mut [f32],
+) {
+    let need_bandvis = co.c_bv_gain != 0.0 || co.c_bv_loss != 0.0;
+    let need_grad = co.c_gms != 0.0
+        || co.c_ringing != 0.0
+        || co.c_banding != 0.0
+        || co.gg_lin != 0.0
+        || co.gg_quad != 0.0
+        || co.c_edgew != 0.0
+        || need_bandvis;
+    if !need_grad {
+        return;
+    }
+    incant!(
+        attr_pass_b_grad_entry(src, dst, act_p, &co, width, height, y0, y1, id_plane),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    );
+}
+
+/// f32 twin of [`attr_pass_b_blockiness`] (serial — the horizontal family
+/// writes the row above).
+fn attr_pass_b_blockiness_f32(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    c_blockiness: f32,
+    id_plane: &mut [f32],
+) {
+    const CB: f32 = C_BLOCK as f32;
+    if c_blockiness != 0.0 {
+        for y in 0..height {
+            let row = y * width;
+            let mut x = BLOCK_LATTICE;
+            while x < width {
+                let i = row + x;
+                let step_dst = (dst[i] - dst[i - 1]).abs();
+                let step_src = (src[i] - src[i - 1]).abs();
+                let v =
+                    c_blockiness * ((step_dst - step_src).max(0.0) / (step_dst + step_src + CB));
+                id_plane[i] += 0.5 * v;
+                id_plane[i - 1] += 0.5 * v;
+                x += BLOCK_LATTICE;
+            }
+            if y % BLOCK_LATTICE == 0 && y > 0 {
+                for x in 0..width {
+                    let i = row + x;
+                    let i_up = i - width;
+                    let step_dst = (dst[i] - dst[i_up]).abs();
+                    let step_src = (src[i] - src[i_up]).abs();
+                    let v = c_blockiness
+                        * ((step_dst - step_src).max(0.0) / (step_dst + step_src + CB));
+                    id_plane[i] += 0.5 * v;
+                    id_plane[i_up] += 0.5 * v;
+                }
+            }
+        }
+    }
+}
+
+/// f32 twin of [`attr_pass_b_channel`]: row-banded parallel main+gradient
+/// sweeps into f32 id/win planes; blockiness serial.
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_channel_f32(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    planes: &AttrChPlanes,
+    cross: Option<(&[f32], &[f32])>,
+    ref_y: &[f32],
+    co: V2AppCoeffsF32,
+    parallel: bool,
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    const BAND: usize = 64;
+    let (ax, ab) = cross.unwrap_or((ref_y, ref_y));
+    let run = |y0: usize, y1: usize, id_rows: &mut [f32], win_rows: &mut [f32]| {
+        attr_pass_b_rows_f32(
+            src,
+            dst,
+            width,
+            height,
+            &planes.mu1,
+            &planes.mu2,
+            &planes.ssq,
+            &planes.s12,
+            &planes.act,
+            &planes.bs2,
+            ax,
+            ab,
+            ref_y,
+            co,
+            y0,
+            y1,
+            id_rows,
+            win_rows,
+        );
+    };
+    #[cfg(feature = "threads")]
+    if parallel && height > BAND {
+        use rayon::prelude::*;
+        id_plane[..width * height]
+            .par_chunks_mut(BAND * width)
+            .zip(win_plane[..width * height].par_chunks_mut(BAND * width))
+            .enumerate()
+            .for_each(|(band, (id_rows, win_rows))| {
+                let y0 = band * BAND;
+                let y1 = (y0 + BAND).min(height);
+                run(y0, y1, id_rows, win_rows);
+            });
+        attr_pass_b_blockiness_f32(src, dst, width, height, co.c_blockiness, id_plane);
+        return;
+    }
+    let _ = parallel;
+    run(0, height, id_plane, win_plane);
+    attr_pass_b_blockiness_f32(src, dst, width, height, co.c_blockiness, id_plane);
+}
+
 /// Edge-width pass-B coefficient for one (scale `u`, `ch`) — a free fn
 /// (extracted 2026-08-05, appendix N) so the fused folded-944 path, which
 /// derives its inputs from walk RETENTION instead of the attr pass-A
@@ -7541,6 +8498,96 @@ fn attr_pass_b_for_scale(
             }
         }
     }
+}
+
+/// f32 twin of [`attr_pass_b_for_scale`] (appendix P lever 1) — the FUSED
+/// entry's per-scale pass B: f64 coefficient derivation (identical inputs),
+/// folded to the f32 pack, f32 combine kernels, window spread fused with
+/// the window→identity merge ([`crate::blur::box_spread_merge_f32`]), f32
+/// sum-preserving footprint upsample into the f32 canvas.
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_for_scale_f32(
+    scale: usize,
+    rplanes: [&[f32]; 3],
+    dplanes: [&[f32]; 3],
+    planes: &[AttrChPlanes; 3],
+    cells: &[[AttrCellSums; 3]],
+    mg: &[[(f64, f64); 3]],
+    dims: &[(usize, usize)],
+    n_scales: usize,
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    want_append: bool,
+    parallel: bool,
+    w0: usize,
+    h0: usize,
+    scale_density: &mut [f32],
+    win_plane: &mut [f32],
+    canvas: &mut [f32],
+    spread_tmp: &mut Vec<f32>,
+    spread_out: &mut Vec<f32>,
+) {
+    let tpb = std::time::Instant::now();
+    let (ws, hs) = dims[scale];
+    let n = ws * hs;
+    scale_density[..n].fill(0.0);
+    win_plane[..n].fill(0.0);
+    for ch in 0..3 {
+        let append_active = append_cell_active(want_append, ch, scale);
+        let cross: Option<(&[f32], &[f32])> = if ch == 1 {
+            Some((&planes[0].act, &planes[2].act))
+        } else {
+            None
+        };
+        let co = derive_v2app_coeffs(
+            s_v2,
+            s_append,
+            s_append2,
+            scale,
+            ch,
+            &cells[scale][ch],
+            append_active,
+            ch == 1,
+            attr_ew_coeff(s_v2, mg, dims, n_scales, scale, ch),
+        );
+        let co32 = v2app_coeffs_fold_f32(&co, cross.is_some());
+        attr_pass_b_channel_f32(
+            rplanes[ch],
+            dplanes[ch],
+            ws,
+            hs,
+            &planes[ch],
+            cross,
+            rplanes[1],
+            co32,
+            parallel,
+            &mut scale_density[..n],
+            &mut win_plane[..n],
+        );
+    }
+    // Window spread fused with the window→identity merge (value-exact vs
+    // spread-then-add; parallel is bitwise-invariant per its gate).
+    crate::blur::box_spread_merge_f32(
+        &mut win_plane[..n],
+        &mut scale_density[..n],
+        ws,
+        hs,
+        BLUR_RADIUS,
+        spread_tmp,
+        spread_out,
+        parallel && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+    );
+    PERF_PASSB.with(|c| c.set(c.get() + tpb.elapsed().as_secs_f64()));
+    crate::attribution::upsample_add_sum_preserving_f32(
+        &scale_density[..n],
+        ws,
+        hs,
+        canvas,
+        w0,
+        h0,
+        1usize << scale,
+    );
 }
 
 /// Build the v2 (+ optional append) attribution density for a pair.

@@ -109,6 +109,39 @@ fn main() {
         .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
         .unwrap();
 
+    // G-N2/G-P2 measured deviations (not just PASS): fused vs standalone
+    // density, per-pixel and block-sums(16), reported against the gate
+    // bounds (3e-5·max_abs + 1e-9 per pixel; 1e-4·bmax per block).
+    {
+        let std_attr = z.compute_attribution_density_full(&rs, &ds, &s944).unwrap();
+        let (_r, _v2, fused_attr) = z
+            .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
+            .unwrap();
+        let max_abs = std_attr
+            .density()
+            .iter()
+            .fold(0.0f32, |m, v| m.max(v.abs()));
+        let mut max_px = 0.0f32;
+        for (a, b) in fused_attr.density().iter().zip(std_attr.density().iter()) {
+            max_px = max_px.max((a - b).abs());
+        }
+        let bs_f = fused_attr.block_sums(16);
+        let bs_s = std_attr.block_sums(16);
+        let bmax = bs_s.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        let mut max_bs = 0.0f64;
+        for (a, b) in bs_f.iter().zip(bs_s.iter()) {
+            max_bs = max_bs.max((a - b).abs());
+        }
+        println!(
+            "F944DEV per-pixel max |Δ| {max_px:.3e} (bound {:.3e}, {:.4}x of bound) | \
+             block-sums(16) max |Δ| {max_bs:.3e} (bound {:.3e}, {:.4}x of bound)",
+            3e-5 * max_abs + 1e-9,
+            max_px / (3e-5 * max_abs + 1e-9),
+            1e-4 * bmax,
+            max_bs / (1e-4 * bmax),
+        );
+    }
+
     let mut t1 = Vec::new();
     let mut t2 = Vec::new();
     let mut t3 = Vec::new();

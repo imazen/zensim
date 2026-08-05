@@ -1991,7 +1991,9 @@ fn hf_src_sums(src: &[f32], mu1: &[f32]) -> (f64, f64) {
 }
 
 /// f32 twin of [`upsample_add_sum_preserving`] for the fused canvas.
-fn upsample_add_sum_preserving_f32(
+/// `pub(crate)`: also the fused folded-944 pass-B upsample (appendix P
+/// lever 1, `feature_v2::attr_pass_b_for_scale_f32`).
+pub(crate) fn upsample_add_sum_preserving_f32(
     scale_plane: &[f32],
     sw: usize,
     sh: usize,
@@ -2204,6 +2206,10 @@ impl FusedBasicCanvas {
 pub struct Fused944Session {
     scratch: crate::feature_v2::V2Scratch,
     retention: crate::feature_v2::FoldRetention,
+    /// f32 pass-B scratch (appendix P lever 1) — plane-sized buffers
+    /// reused across compares so per-iteration callers pay no
+    /// allocation / page-fault cost.
+    pass_b: crate::feature_v2::PassBScratchF32,
 }
 
 #[cfg(feature = "feature-regime-v2")]
@@ -2731,6 +2737,9 @@ impl crate::metric::Zensim {
         ZensimError,
     > {
         validate_pair(source, distorted)?;
+        // ZENSIM_ATTR_PERF=1: coarse section timing (perf lever triage).
+        let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
+        let t0 = std::time::Instant::now();
         // 1) Folded-944 extraction with retention — exact features.
         let v2res = crate::feature_v2::compute_folded944_streaming_with_retention(
             source,
@@ -2740,8 +2749,11 @@ impl crate::metric::Zensim {
             &mut session.scratch,
             &mut session.retention,
         )?;
+        let t_extract = t0.elapsed();
         // 2) Fused v1 walk — basic-block canvas + the map-profile result.
+        let t1 = std::time::Instant::now();
         let fb = self.fused_basic_canvas(precomputed, distorted, s, None)?;
+        let t_v1 = t1.elapsed();
         let width = distorted.width();
         let height = distorted.height();
         // 3) v2/append/append2 density from retention (same block slicing
@@ -2752,11 +2764,11 @@ impl crate::metric::Zensim {
         let s_v2: &[f64] = block(BLOCK_END_V1_POOLS, BLOCK_END_V2).unwrap_or(&[]);
         let s_append: Option<&[f64]> = block(BLOCK_END_V2, BLOCK_END_APPEND);
         let s_append2: Option<&[f64]> = block(BLOCK_END_APPEND, BLOCK_END_APPEND2);
-        let mut canvas: Vec<f64> = fb
-            .trim_to(width, height)
-            .iter()
-            .map(|&v| v as f64)
-            .collect();
+        // Appendix P lever 1: fully-f32 canvas assembly — the f32 basic
+        // canvas plus the f32 pass-B retention density, one f64 conversion
+        // at the SAT build (`from_density`, the C3a entry's own shape).
+        let t2 = std::time::Instant::now();
+        let mut canvas: Vec<f32> = fb.trim_to(width, height);
         if !s_v2.is_empty() || s_append.is_some() || s_append2.is_some() {
             let v2a = crate::feature_v2::compute_v2_append_attribution_from_retention(
                 &session.retention,
@@ -2766,16 +2778,25 @@ impl crate::metric::Zensim {
                 self.parallel(),
                 width,
                 height,
+                &mut session.pass_b,
             );
-            debug_assert_eq!((v2a.width, v2a.height), (width, height));
-            for (c, v) in canvas.iter_mut().zip(v2a.density.iter()) {
+            debug_assert_eq!(v2a.len(), width * height);
+            for (c, v) in canvas.iter_mut().zip(v2a.iter()) {
                 *c += *v;
             }
         }
-        Ok((
-            fb.result,
-            v2res,
-            AttributionResult::from_f64_canvas(canvas, width, height),
-        ))
+        let t_pass_b = t2.elapsed();
+        let t3 = std::time::Instant::now();
+        let out = AttributionResult::from_density(canvas, width, height);
+        if perf_log {
+            eprintln!(
+                "ATTRPERF fused944: extraction+retention {:.1} ms | v1 walk+basic {:.1} ms | pass-B f32 {:.1} ms | trim+SAT {:.1} ms",
+                t_extract.as_secs_f64() * 1e3,
+                t_v1.as_secs_f64() * 1e3,
+                t_pass_b.as_secs_f64() * 1e3,
+                t3.elapsed().as_secs_f64() * 1e3,
+            );
+        }
+        Ok((fb.result, v2res, out))
     }
 }
