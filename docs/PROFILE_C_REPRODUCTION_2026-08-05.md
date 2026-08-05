@@ -289,7 +289,11 @@ committed `W10L9_s4003_packed.full.json` — the wave-11 instrument gate
 diffed **82,385 numeric fields with 0 mismatches** across builds
 (`benchmarks/wave11/comparability_gate_2026-08-05.txt` — method: flatten
 both `--full-json` outputs, compare every numeric leaf at tolerance 0 beyond
-float formatting).
+float formatting). **Ship-day confirmation (2026-08-05):** `bake_verdict`
+built from the Profile C ship commits, run on the in-repo
+`zensim/weights/c_sdr_mlp944_corrmix_2026-08-05.bin`, reproduces the
+committed verdict on **82,675 shared numeric fields with 0 mismatches and
+0 field-set differences** (5.8 s, 51,934 pair rows, 12 corpora).
 
 ```sh
 # M3a coherence (the run_full_eval harness measures M3 + M3a and emits the board fulleval)
@@ -399,6 +403,19 @@ Expected head-joint pass_q20 0.79315 / pass_q10 0.92560 (head:
    extraction (`feature-regime-v2`) + `score_features_with_profile`, or the
    fused `compute_folded944_score_and_attribution` entry. HDR content is
    out of domain (route to `BHdr`).
+10. **CI platform-test jobs on `main` are red for a PRE-EXISTING, tracked
+    reason** (issue #55: `v1_golden_bytes` is single-tier-calibrated —
+    fails on every non-AVX-512 runner since it landed; also #56, MSCN
+    rsqrt vendor-nondeterminism). Verified at ship time: the identical
+    failure signature (241/372 golden divergence) appears on the run for
+    the pre-ship `main` head, and zero of the last 100 `main` CI runs were
+    green. The Profile C ship's own gates — Format, Clippy (all-features,
+    `-D warnings`), Feature permutations, MSRV, WASM SIMD128, join-safety,
+    corruption census, API-leakage — all PASS on the ship commits, and the
+    full workspace suite + all-features clippy are green locally
+    (AVX-512 box). A latent `diff_cli` fixture race (masked for days
+    behind the golden gate's fail-fast) was found and fixed during this
+    ship.
 
 ---
 
