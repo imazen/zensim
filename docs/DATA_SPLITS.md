@@ -48,6 +48,49 @@ VALIDATION-ONLY", contamination rules).
 7. **Contamination audits.** Any new training corpus is dHash-64-audited
    against every T0 holdout's references at d≤10 (strict) before first use;
    the d≤16 tail is screening-only (flat/graphic content false-positives).
+8. **Target ORIENTATION is gated at build time.** Every table with recoverable
+   human labels must satisfy `sign(SROCC(human_score, raw_human_truth)) > 0`
+   before it is trained or evaluated on, via
+   `scripts/canonical_corpus/check_target_orientation.py` (`--all-roots` sweeps
+   every known root). A corpus with no recoverable raw truth reports SKIPPED,
+   which means "not checked", never "passed". Added 2026-08-05 after the ext
+   lineage carried an inverted KADID target for six weeks (campaign appendix F).
+
+### 1.4 — the ONE registered exception to frozen inputs (2026-08-05)
+
+Principle 4 says a file referenced by a ship manifest is immutable. The
+2026-08-05 KADID orientation correction **rewrote `ext_kadid.parquet` in place**
+at all three ext roots, which is a deviation from the letter of that rule. It is
+recorded here rather than buried, because a locked rule that gets quietly bent is
+worse than one that gets openly amended.
+
+**What the rule exists to prevent, and whether it happened.** Principle 4 was
+written after the 2026-05-28 konjnd in-place rewrite *destroyed byte-provenance
+across all three mirrors* — the old bytes were simply gone. That did **not**
+happen here: the inverted originals are preserved as
+`ext_kadid_INVERTED_2026-08-04.parquet` in **all three mirrors** (local
+`/mnt/v`, `s3://zentrain/<root>/`, `/mnt/tower/output/zensim-<root>/`), each
+sha256-recorded in the root `_MANIFEST.json`, and the ext944 preserved sha
+(`4dde6be2…`) is byte-for-byte the sha every affected bake's embedded
+`zentrain.repro` already carries for that input. No provenance was lost.
+
+**Why the canonical name, and not a new dated file.** A new dated file leaves
+`ext_kadid.parquet` — the name every recipe, driver and manifest already points
+at — permanently inverted, so the orientation gate can never exit 0 and every
+future recipe has to *remember* to override the path. That is precisely the
+failure mode that let this defect live six weeks. The correction is worth more
+at the canonical name than the immutability is worth on a file that was wrong.
+
+**The hazard this creates, stated plainly.** Re-running any pre-2026-08-05
+bake's embedded `zentrain.repro` argv **verbatim** now trains against the
+corrected bytes and will **NOT** reproduce that bake. The `sha256` field in the
+repro is the discriminator; substitute `ext_kadid_INVERTED_2026-08-04.parquet`
+to reproduce. Registry entry: `kadid-ext-root-corrected-2026-08-05` in
+`benchmarks/eval_annotations.json`.
+
+**Scope.** This exception covers exactly the three `ext_kadid.parquet` files and
+nothing else. Principle 4 is otherwise unchanged: any FUTURE schema addition,
+row change, or target change creates a new dated file.
 
 ---
 

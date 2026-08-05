@@ -1,0 +1,98 @@
+{
+  "tool": "fix_ext_kadid_orientation.py",
+  "registration": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX H, H.1",
+  "transform": "human_score := 1 - human_score  (== (dmos-1)/4 given the stored (5-dmos)/4)",
+  "utc": "2026-08-05T01:12:16Z",
+  "roots": [
+    {
+      "root": "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22",
+      "table": "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_kadid.parquet",
+      "rows": 10125,
+      "cols": 722,
+      "row_groups": 1,
+      "compression": "ZSTD",
+      "target_range_before": [
+        0.01750000000000007,
+        1.0
+      ],
+      "target_range_after": [
+        0.0,
+        0.9824999999999999
+      ],
+      "cross_check_vs_canonical": {
+        "available": true,
+        "path": "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/kadid.parquet",
+        "max_abs_diff": 5.551115123125783e-17,
+        "bit_identical": false
+      },
+      "preserved": "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_kadid_INVERTED_2026-08-04.parquet",
+      "inverted_sha256": "e0fd550764f3ab4a100722fb8db205606207b77bb44b2605054dd094e070f7a7",
+      "corrected_sha256": "170d55a0ac89320c1ae7e468954d52a9febcfad4f4ef56cebfbec2871cef0f42",
+      "readback_target_exact": true,
+      "readback_refs_identical": true,
+      "readback_schema_identical": true,
+      "other_columns_changed": [],
+      "status": "OK"
+    },
+    {
+      "root": "/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27",
+      "table": "/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/ext_kadid.parquet",
+      "rows": 10125,
+      "cols": 926,
+      "row_groups": 1,
+      "compression": "ZSTD",
+      "target_range_before": [
+        0.01750000000000007,
+        1.0
+      ],
+      "target_range_after": [
+        0.0,
+        0.9824999999999999
+      ],
+      "cross_check_vs_canonical": {
+        "available": true,
+        "path": "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/kadid.parquet",
+        "max_abs_diff": 5.551115123125783e-17,
+        "bit_identical": false
+      },
+      "preserved": "/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/ext_kadid_INVERTED_2026-08-04.parquet",
+      "inverted_sha256": "9f9249a45e424ba98f6ed0b1bf832f988c6bc9d2870bd881a7cb2b5ad3141fbe",
+      "corrected_sha256": "33042e5751d7afdb8e17ec27c239565cb19e5569c6e1d652d4925416c191068f",
+      "readback_target_exact": true,
+      "readback_refs_identical": true,
+      "readback_schema_identical": true,
+      "other_columns_changed": [],
+      "status": "OK"
+    },
+    {
+      "root": "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01",
+      "table": "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_kadid.parquet",
+      "rows": 10125,
+      "cols": 946,
+      "row_groups": 1,
+      "compression": "ZSTD",
+      "target_range_before": [
+        0.01750000000000007,
+        1.0
+      ],
+      "target_range_after": [
+        0.0,
+        0.9824999999999999
+      ],
+      "cross_check_vs_canonical": {
+        "available": true,
+        "path": "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/kadid.parquet",
+        "max_abs_diff": 5.551115123125783e-17,
+        "bit_identical": false
+      },
+      "preserved": "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_kadid_INVERTED_2026-08-04.parquet",
+      "inverted_sha256": "4dde6be26d3c50dca21fdee834f95bd692afa2c65b2d4f6f8a886d105553ca08",
+      "corrected_sha256": "286f1b239d88c483e215da6be2d1a16337ac0ae0548bff34ff6c32e0da033cf4",
+      "readback_target_exact": true,
+      "readback_refs_identical": true,
+      "readback_schema_identical": true,
+      "other_columns_changed": [],
+      "status": "OK"
+    }
+  ]
+}

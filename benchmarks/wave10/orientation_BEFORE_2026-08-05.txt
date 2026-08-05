@@ -1,0 +1,23 @@
+
+FAIL — 3 table(s) store human_score BACKWARDS vs the corpus's human labels. Fix the builder's transform; do NOT flip it at read time.
+OK        kadid   /mnt/v/zen/zensim-training/2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet
+          signed SROCC +0.582360 vs raw crowdsourced DCR, 349800 ratings (n=10125)
+OK        tid     /mnt/v/zen/zensim-training/2026-05-15-full-features/tid_features_372col_2026-05-15.parquet
+          signed SROCC +1.000000 vs published TID MOS (mos_with_names.txt) (n=3000)
+OK        kadid   /mnt/v/zen/zensim-training/canonical-2026-05-21/train/kadid.parquet
+          signed SROCC +0.582360 vs raw crowdsourced DCR, 349800 ratings (n=10125)
+OK        tid     /mnt/v/zen/zensim-training/canonical-2026-05-21/train/tid.parquet
+          signed SROCC +1.000000 vs published TID MOS (mos_with_names.txt) (n=3000)
+INVERTED  kadid   /mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_kadid.parquet
+          signed SROCC -0.582360 vs raw crowdsourced DCR, 349800 ratings (n=10125)
+OK        tid     /mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_tid.parquet
+          signed SROCC +1.000000 vs published TID MOS (mos_with_names.txt) (n=3000)
+INVERTED  kadid   /mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/ext_kadid.parquet
+          signed SROCC -0.582360 vs raw crowdsourced DCR, 349800 ratings (n=10125)
+OK        tid     /mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/ext_tid.parquet
+          signed SROCC +1.000000 vs published TID MOS (mos_with_names.txt) (n=3000)
+INVERTED  kadid   /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_kadid.parquet
+          signed SROCC -0.582360 vs raw crowdsourced DCR, 349800 ratings (n=10125)
+OK        tid     /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_tid.parquet
+          signed SROCC +1.000000 vs published TID MOS (mos_with_names.txt) (n=3000)
+exit=1

@@ -1,0 +1,12 @@
+kadid            rows=   10125
+   OK       A1_target_finite         nan=0 inf=0
+   OK       A2_target_range          [0.0175, 1.0000]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+   OK       A5_target_ties           pair_tie_prob=0.876% (row_tie_rate=99.60%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+   OK       B1_feature_finite        all finite
+   FINDING  B2_constant_columns      255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+   OK       B4_unguarded_tails       0 columns with max/p99 > 100.0 and NO declared transform
+   OK       B4b_inert_guards         0 declared transforms target columns that are CONSTANT here (inert): []
+   OK       C1_duplicate_rows        243 duplicate rows / 10125 (2.40%); 9882 unique; max multiplicity 4
+
+TOTAL FINDINGS: 1
+exit=1
