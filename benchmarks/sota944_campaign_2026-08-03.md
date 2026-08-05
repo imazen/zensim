@@ -8317,3 +8317,143 @@ compare is the registered future lever if the k3 profile motivates loop use.
 W10L9_s4003_packed`; `DEFAULT_LOOP_TARGETING` → the 2026-08-05 summary (carries
 every 2026-08-01 entry probe-verified, plus the candidate); the candidate joins
 `CURATED_BOARD` (wave-11 named candidate; its fulleval carries per-pair).
+
+# REGISTERED APPENDIX N — THE FUSED FOLDED-944 SCORE+ATTRIBUTION COMPARE (2026-08-05, pre-registered before landing)
+
+## N.0 Why this exists
+
+Two facts from appendix M close the loop on this lever:
+
+1. **M.3**: the 944 candidate pays **51.8 ms/compare vs v47A 34.6** (1.50×) because
+   the folded route runs a structural SECOND pass — the v1 diffmap walk for the
+   redistribution map plus the 944 streaming extraction for the score. "A fused
+   folded-class compare is the registered future lever."
+2. **M.2 guard 3**: `JXL_ZENSIM_MODEL_MAP` on a folded-class bake **panics** — the
+   372-class fused compare (C3a) cannot serve it. The candidate's M3a-gold
+   attribution map (appendix E: 0.85-class post-`299ccc8c`) — its unique advantage
+   over shipped B — **cannot drive the loop at all**.
+
+This appendix pre-registers the fused folded-944 entry that removes both, and the
+payoff experiment that prices the candidate's OWN map as a steering signal.
+
+## N.1 Design (frozen)
+
+One public zensim entry (name-class `compute_folded944_score_and_attribution`,
+session-reusing), producing from ONE folded-944 extraction pass + ONE v1 walk:
+
+- **Features/score**: the CANONICAL streaming folded-944 extraction
+  (`Folded720Append2`, C5 streaming walk) — **untouched accumulation**, with
+  RETENTION HOOKS that copy, per (scale, ch) as strips emit: the pyramid core rows
+  (src/dst) and the phase-A planes (mu1/mu2/ssq/s12/act/bs2), plus the exact
+  per-(scale,ch) accumulators and mean-gradients at finalize. The caller forwards
+  `features()` through `score_features_with_profile` exactly as today.
+- **v2/append/append2 density**: pass-B replication (`attr_pass_b_*`) over the
+  RETAINED planes, coefficients derived from the EXACT walk accumulators (the
+  standalone derives them from its own 1e-9-parity pass-A replication — the fused
+  coefficients are marginally MORE exact). Eliminates the standalone's duplicate
+  prep (4.3 ms) + blur+cache (22.2 ms) + pass-A kernels (5.5 ms) at 576².
+- **Basic-block density**: the C3a fused v1 machinery (f32 banded combine +
+  window spread on the score walk's retained planes) — the same walk also yields
+  the map-profile `ZensimResult` the loop reads `approx_butteraugli` from.
+- **Sum** → one `AttributionResult` (f64 SAT). SDR route only (the 944 set is
+  SDR-by-design; HDR fused is future work). Gradient `s` is the raw 944-wide
+  caller-layout gradient; shorter widths (720/924) slice per the named
+  `BLOCK_END_*` bounds exactly like the standalone.
+
+**The pruned-bake rule holds everywhere**: the candidate is caller-944/internal-667
+(`FeatureTransform::Drop`); every vector is sized by `caller_input_width()` — the
+extraction emits 944 and the forward consumes 944 (bug-class #1-#4 all previously
+mis-sized this).
+
+## N.2 Parity gates (frozen)
+
+- **G-N1 (bit-identity, the C3a gate pattern)**: fused-entry features BITWISE equal
+  `compute_folded720_append2_features` on the gate fixtures (all 944 slots,
+  `to_bits`) ⇒ the forward score is bit-identical to the standalone 944 score path
+  by construction; asserted on the score too.
+- **G-N2 (density parity)**: fused density vs `compute_attribution_density_full`
+  per-pixel ≤ `3e-5·max_abs + 1e-9`, block-sums(16) ≤ `1e-4·bmax` — the C3a
+  tolerance class (`fused_matches_standalone_attribution`).
+- **G-N3 (coverage)**: `attribution_covers_expected_slots_per_width` EXTENDED to
+  probe the fused entry with the same per-width table (incl. the class-N zeros:
+  LUMA_MEAN_REF, HL bins on SDR, f156-371 never spatialized, f944+ pinned zero).
+- **G-N4 (jxl substrate)**: the 27-cell exact-match substrate probe stays
+  bit-exact for the ≤372 arms through the wiring change (the M.2 R0-identity
+  pattern).
+
+## N.3 Perf bars (frozen) + the measured component floor
+
+Measured 2026-08-05 (`zensim/examples/fused944_probe.rs`, 576² textured synthetic,
+serial, medians of 9 — the loop shape):
+
+| component | ms |
+|---|--:|
+| v1 walk score-only | 15.7 |
+| v1 walk + Trained diffmap (loop's map call today) | 17.1 |
+| folded-944 extraction (loop's score call today) | 19.5 |
+| standalone full density, 944-wide s | 162.3 |
+| — of which: v2app prep / blur+cache / pass-A kernels / pass-B combine | 4.3 / 22.2 / 5.5 / 65.5 |
+| — of which: C1 f64 basic canvas | 53.6 |
+| C3a fused v1 score+map (basic-map cost class) | 27.1 |
+| loop today, candidate baseline (map call + score call) | 36.6 |
+| naive unfused model-map floor (extraction + standalone density) | 181.8 |
+
+- **B-N1 (registered)**: fused marginal map cost ≤ **1.1×** over score-only
+  (score-only := folded-944 extraction + forward, serial 576²). NOTE the
+  structural read from the table: the fresh-fused floor is
+  extraction + retention + pass-B + basic ≈ 19.5 + ~3 + 65.5 + ~27 ≈ 115 ms
+  as-is, so B-N1 is NOT reachable by fusion alone at f64 pass-B — the C-series
+  precedent (C1 2.4-3.4× vs ≤1.1×; C2b 8.3×; C3a floor 5.7×) is that this bar
+  prices the STALE/in-strip endpoint, not the fresh entry. Report the measured
+  ratio; rank the levers (f32 pass-B — the C3a v1 precedent took the basic
+  combine 53.6 → ~3 ms; in-strip stale fold, #70 analog; basic-from-folded-planes,
+  a semantics change that needs its own M3a re-certification).
+- **B-N2 (registered, the product bar)**: end-to-end in the jxl loop, the
+  candidate's fused model-map compare lands **from 51.8 ms toward the v47A-class
+  34.6 ms** at 576² — measured BOTH by zenbench (fused-entry marginal) and by the
+  loop's own per-compare timing, reported side by side. The fused H3 arm needs NO
+  Trained-fold call (H3 redistribution is map-only), so its per-compare floor is
+  the fused entry alone.
+
+## N.4 The payoff experiment (frozen): H3-own-map on the 2/3-shot grid
+
+Loop69 established H3 magnitude steering as the ONE loop rule with measured value
+(372-class). The question the whole coherence program predicts an answer to: does
+the candidate's OWN M3a-gold map beat the generic Trained-fold redistribution in
+its OWN loop?
+
+- **Arms**: `W10L9_base` = candidate + generic Trained-fold map (appendix M
+  numbers, CARRIED — same cells, same analyze owner) vs `W10L9_h3own` = candidate
+  + `JXL_ZENSIM_MODEL_MAP=h3-mag` through the fused folded-944 compare, own-map
+  gradient probed numerically at the first compare's folded features (the
+  372-class probe pattern at 944 width). Same 9-ref × {70,80,88} × k∈{2,3} grid,
+  ±2.0 own-units, decoded-judged, emit-best; `analyze_23shot.py` stays the stats
+  owner (`--extra-arm`).
+- **Registered outcomes**:
+  - **(a) own-map wins** — beats the carried baseline on 2/3-shot ±2 census or
+    the near-lossless band (t88) ⇒ the M3a investment pays in the product loop;
+    the finding the coherence program predicts.
+  - **(b) parity** ⇒ the map is exchangeable; M3a is diagnostic-only in this
+    loop design.
+  - **(c) worse** ⇒ record it — loop69 already showed allocation×controller
+    interactions can defeat good maps.
+- If results land, the loop summary JSON + board panel update per the appendix M
+  convention (LOOP_BAKE_MAP entry for the new arm, summary regenerated by the
+  owner script, board reads counts/medians — never re-derives).
+
+## N.5 Confounds + limitations (registered)
+
+1. The basic-block density rides the V1 pipeline (the standalone's documented
+   approximation) — the folded f0-155 the bake actually consumes are the FOLDED
+   v1-basic; the truer basic-from-folded-planes integrand is a registered future
+   lever, NOT this deliverable (it would change the certified M3a instrument).
+2. ZENSIM_H3_GAIN stays at the registered default 10.0 — unswept for the 944
+   class; a gain sweep is future work, not claimed.
+3. n=9 refs/cell class limits per M; t=92-class clamp saturation and controller
+   overshoot caveats carry from C3b/#69.
+4. The fresh-fused entry is the deliverable; the ≤1.1× endpoint (stale in-strip
+   fold) is priced but not built here.
+5. Retention memory is O(sum of scale planes) ≈ 8 planes × 3 ch × 1.33 × n₀ f32
+   (~42 MB at 576²) — a documented memory-class change vs the score-only walk
+   (the standalone density pays the same class via its own materialized pyramids
+   + plane sets).

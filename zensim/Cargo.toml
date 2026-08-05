@@ -161,6 +161,11 @@ required-features = ["custom-profiles"]
 name = "v2_bounds_smoke"
 required-features = ["feature-regime-v2"]
 
+# Fused-944 component-cost probe (campaign appendix N).
+[[example]]
+name = "fused944_probe"
+required-features = ["custom-profiles", "feature-regime-v2"]
+
 [[example]]
 name = "gen_jpeg_distortion"
 required-features = ["feature-regime-v2"]
