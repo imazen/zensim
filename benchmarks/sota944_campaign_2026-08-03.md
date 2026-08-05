@@ -8670,3 +8670,143 @@ Artifacts: bakes + spec sidecars `/mnt/v/output/zensim/bakes/featsub/` (28
 cells); verdicts `FS_*` in the campaign store; tables + index files
 `benchmarks/featsub/`; masks + packed twins `~/tmp/featsub/` (scratch, packed
 winners re-derivable from committed inputs by the commands in the TSV metas).
+
+# REGISTERED APPENDIX O — THE HF-NL-PROXY AXIS UNDER THE MICROSCOPE: RELIABILITY, CEILING, RANGE-RESTRICTION, AND THE REPORT (2026-08-05, pre-registered)
+
+## O.0 Why this exists
+
+User report (verbatim): "everyone is bombing HF-NL pretty badly compared to other
+graphs, look at the distributions of hf-nl and lmk if it's just a graph axis
+problem or if all models suck at it. I think a better report is needed" + "k128
+isn't that bad". The question decomposes into: (a) is the axis RELIABLE (does a
+per_ref_mean difference of 0.05/0.15/0.30 mean anything?); (b) what is the
+attainable CEILING (no reference scorer has ever been verdicted on this corpus);
+(c) how much of the low-number landscape is RANGE RESTRICTION by construction
+(~15 pairs/ref inside a 9-ssim2-point band); (d) is the sparse-tops/MLP-middle
+family pattern real under (a); (e) K128's precise standing. No number in this
+appendix existed when it was frozen; board facts below were verified read-only.
+
+## O.1 Pinned corpus + board facts (verified 2026-08-05, pre-registration)
+
+- `ext_hfnlproxy.parquet` (944 root): **11,356 pairs, 772 distinct refs, 757
+  scoreable groups** (per_group_srocc drops groups <3 rows or without spread);
+  target = `score_ssim2/100` ∈ [0.91, 1.0]; registered headline =
+  `rank.hfnlproxy.per_ref_mean` (§1b).
+- Board: **233 fulleval cells carry per_ref_mean**; span **−0.263 → +0.848**,
+  median **+0.193**. Top-5 = FS_PILOT1_s2501 0.8476, FS_GL0p3_s2503 0.8431,
+  Ebothg_scr0_5_dial 0.8292, b_sdr(...)_dense_dial 0.8252, FS_GL2_s2503 0.8219.
+  Pooled-vs-per-ref divergence is large (B: 0.503 pooled / 0.825 per-ref;
+  W10L9_s4003_packed: 0.431 pooled / 0.733 per-ref).
+- Selection reproduction (this session): the §1b mask (4 lossy TEST views in
+  VIEWS order, ssim2 ≥ 91, refs ≥ 6 cells, stride 4) reproduces the committed
+  slice **row-for-row float-exact** and recovers `encoded_filename` per row.
+- Codec mix of the slice: **avif 8,360 (73.6%) / jpeg 1,664 / webp 696 / jxl 636**.
+- Reference-metric sidecar (`fill4metrics_sidecar_patched_2026-07-02.parquet`,
+  key `encoded_filename`; carries score_cvvdp/butteraugli/dssim/iwssim):
+  covers **2,977/11,356 pairs — avif 0/8,360, jpeg 1,660/1,664, jxl 627/636,
+  webp 690/696**; refs with ≥6 covered cells: **118 (2,410 pairs)**; 4 NaN cvvdp
+  rows (known NaN investigation). No butteraugli/cvvdp exists anywhere for the
+  avif cells (canonical avif test view carries ssim2+zensim only) — the
+  reference ceiling is therefore computable ONLY on the non-avif subset.
+
+## O.2 Design (frozen)
+
+**Owner rule:** every SROCC in this appendix comes from zenstats via `panel
+--batch --stats srocc` (`srocc_signed`, the pre-abs midrank form) or from
+`bake_verdict` itself; means/percentiles over zenstats-produced per-ref values
+are plain arithmetic (exactly what `per_group_srocc` does with them).
+Orientation is pinned HigherIsBetter (= bake_verdict's registered convention
+for hfnlproxy); reference distance metrics (butteraugli, dssim) are read
+LowerIsBetter (sign applied once, a-priori, never per-group).
+
+1. **Per-pair acquisition = the owner, minimally extended.** `bake_verdict`
+   gains an additive flag `--per-pair-refs`: with it, `--per-pair-output`
+   writes `human\tpred\tref` (3 cols) instead of `human\tpred`. Default output
+   unchanged (three committed consumers 2-tuple-unpack the current format).
+   One unit test. 944-class bakes run `--regime 944 --corpora hfnlproxy`; era
+   bakes (n_inputs ≤ 372) run `--regime 720` against the derived
+   `ext720.../ext_hfnlproxy.parquet` (same pairs by its committed identity
+   gate; that is exactly how their board numbers were produced).
+2. **Reproduction gate (per model, hard):** mean over my per-ref SROCC vector
+   (after replicating the owner filter: groups ≥3 rows + spread both sides)
+   must equal the fulleval `rank.hfnlproxy.per_ref_mean` to ≤ 1e-9. A model
+   failing the gate is excluded and the failure reported.
+3. **Model set (frozen).** Representative six: `b_sdr_linear_cid80_inclwinsor_
+   dense_dial` (B), `W10L9_s4003_packed` (C), the `sota944_C_em944_s*` seed
+   whose per_ref_mean is nearest the C_em944-family median (data-derived, named
+   in O.R), `sota944_FS_K128_s2501` (+ s2503 as its seed pair), `sota944_
+   FS_GL0p3_s2503`, `winner_dial_Ebothg_hfgain_winsor_dial`. Distribution set =
+   the six ∪ every CURATED_BOARD single bake with an on-disk `bake` path ∪
+   {FS_K64_s2501, FS_K256_s2501, FS_PILOT1_s2501, the board-min cell
+   sota944_B_blend_lam3e-3_a0.9_w}. Ensembles carry no per-ref vector (the
+   instrument loads one ZNPR) — listed as NOT COMPUTABLE, never penalized.
+4. **Reliability (registered procedures).**
+   a. *Split-half:* 20 shuffles (seed 4242) of the scoreable refs; odd/even
+      split; per model per half = mean per-ref SROCC; per shuffle = Pearson AND
+      Spearman correlation of the model vectors across halves (over the
+      distribution set); report mean ± sd and Spearman–Brown full-length
+      r_SB = 2r/(1+r). Per-model |half1−half2| distribution reported alongside.
+   b. *Bootstrap:* B = 10,000 ref resamples (seed 777), index sets SHARED
+      across models (the registered paired shape). Per model: percentile 95% CI
+      of per_ref_mean. Per model pair: 95% CI of Δ(per_ref_mean) from the same
+      resamples (paired).
+   c. **The registered axis LSD** = the MEDIAN over all distribution-set pairs
+      of the paired 95% Δ half-width, reported with its p10/p90; the
+      conservative read is p90. A specific named comparison always uses ITS OWN
+      paired CI where computed. Published-Δ audits use the p90 LSD.
+5. **Ceiling + independent references.**
+   a. *ssim2-self sanity row:* the target column against itself through the
+      identical per-ref machinery (expected ≈ +1.0 by construction — computed,
+      not asserted).
+   b. *Reference rows on the REGISTERED SUBSET* (refs with ≥6 sidecar-covered
+      cells; n=118 refs / 2,410 pairs; cvvdp drops its 4 NaN rows pairwise):
+      per-ref SROCC of cvvdp (higher-better), iwssim (higher-better),
+      butteraugli (lower-better), dssim (lower-better) vs the ssim2 target.
+   c. *Matched-model rows:* every distribution-set model recomputed on the SAME
+      subset pairs — subset comparisons are within-subset only. The subset is
+      0% avif vs the axis's 73.6% avif; it is NEVER quoted as the axis
+      headline.
+6. **Range restriction.** Per scoreable ref: target span (ssim2 points) + n.
+   Per model: SROCC(per-ref span, per-ref SROCC) via the owner. Secondary
+   REGISTERED-AS-SECONDARY view: per_ref_mean over refs with span ≥ the median
+   span, next to the all-refs value.
+7. **Family table (board-wide, all 233 cells).** per_ref_mean median/IQR/n by
+   class; classes assigned from the model block + name rules, stated in O.R
+   (era-linear/additive, era-MLP, 944-MLP single, 944 featsub input-restricted,
+   944 BVLS/blend heads, distilled, ensembles). K128 verdict: paired Δ + CI vs
+   C, vs the mid-944 cell, vs the 944-MLP class median; its board rank with CI.
+8. **Registered calls.**
+   - CALL 1 (axis trustworthy): split-half model-ranking r_SB ≥ 0.9 ⇒ reliable;
+     0.7–0.9 ⇒ usable with the LSD stated next to every Δ; < 0.7 ⇒ the axis is
+     flagged on the freeze surface (freeze_check annotation + board caption).
+   - CALL 2 (K128): "isn't that bad" is CONFIRMED iff K128 is not significantly
+     below the 944-MLP class median under its paired CI; its Δ vs C is reported
+     with CI regardless.
+   - CALL 3 (models vs axis): if the best learned models reach the
+     reference-metric band (within LSD, matched subset) the story is "axis
+     difficulty"; if reference metrics ALSO sit low, the axis is intrinsically
+     range-restricted and the report must say so; Q6 quantifies.
+9. **Deliverables.** (a) `benchmarks/hfnl_axis_report_2026-08-05.md` (the
+   better report: distributions, reliability, ceiling rows, family finding,
+   K128, "how to read this axis"); (b) a dedicated HF-NL gauntlet panel fed by
+   a committed compact JSON (`benchmarks/hfnl_axis_2026-08-05.json`, ≤30 KB:
+   per-model per-ref histograms + means/CIs + context rows + LSD) via a
+   `--hfnl-axis` input following the loop-targeting pattern (values READ, never
+   re-derived; both `gauntlet_gates.sh` gates must pass); full per-ref matrix
+   TSV to `/mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/` + pointer;
+   (c) `eval_annotations.json` entries for any published reading that loses
+   (or needs) reliability context under the p90 LSD — candidates to audit:
+   the nt-arm "hfnlproxy 0.037 → 0.69-0.80" jump (expected to SURVIVE), the
+   wave-5 "−0.115..+0.211 arm volatility" F6 note, the appendix-J "K128
+   concedes hfnl −0.57 vs C" read; (d) O.R results here.
+10. **Confounds registered before any number.** (i) The target is ssim2-derived
+    — this axis measures agreement with ssim2 inside its top band, not human
+    truth; sdr25 is the human check elsewhere. (ii) The gauntlet's hfnlproxy
+    scatter cell plots a 5,000-pair subsample of a range-restricted pooled
+    cloud — visually terrible even for a good per-ref model; part of the
+    user-visible "bombing" may be presentation (assessed in O.R). (iii) The
+    subset rows exclude avif entirely. (iv) ~15 pairs/ref ⇒ per-ref SROCC is
+    quantized (Spearman on n≈15 has coarse support); the split-half + LSD
+    absorb this into the stated uncertainty rather than pretending precision.
+
+## O.R — RESULTS (to be appended; nothing above this line changes after push)
