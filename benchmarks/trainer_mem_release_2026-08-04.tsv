@@ -1,0 +1,10 @@
+# trainer_mem_release_2026-08-04.tsv — full-data A/B/C for the dead-raw-copy removal
+# host=lilith (WSL2, 7950X, 28c, 58GiB, shared with live wave-10 lanes; runs serialized)
+# recipe=wave-10 L0 (WAVE10_ECHO=1 scripts/wave10_seed.sh L0 4001): 11 groups, 779290 rows x 944 feat, 120 epochs, seed 4001
+# baseline commit=ae2a3838; shipped commit=<this commit>; binary=release, no target-cpu=native
+# gate=scripts/verify_bake_identity.sh, same binary path + same --out path all arms; all pairs PASS (502471 model bytes identical, best_val 0.7363318750190634 all arms)
+# peak_rss = /usr/bin/time -v "Maximum resident set size"; epoch0_rss = /proc sampler at first epoch line; s_per_epoch = (t_last - t_0)/119 from trainer log
+arm	peak_rss_kb	peak_rss_gib	epoch0_rss_gb	s_per_epoch	wall	gate_vs_base
+base_ae2a3838	11935940	11.38	11.33	8.57	18:18.90	-
+attempt1_per_row_free	11504800	10.97	10.88	7.97	17:20.84	PASS
+flat_inplace_shipped	8514140	8.12	7.46	8.04	17:21.93	PASS

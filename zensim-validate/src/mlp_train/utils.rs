@@ -17,28 +17,36 @@ pub use crate::panel::spearman as spearman_correlation;
 /// post-transform features propagates to the scaler (poisoning mean/std),
 /// the forward pass (NaN activations), and the loss (NaN gradients) —
 /// the entire training run is unrecoverable.
-pub fn sweep_nan_inf(
-    rows: &[Vec<f64>],
+/// Rows are any iterator of row slices, so both storage shapes share this
+/// one owner: per-row tables pass `rows.iter().map(|r| r.as_slice())`, the
+/// trainer's flat per-group buffers pass `flat.chunks(n_features)`. Single
+/// pass over the rows (the historical per-feature outer loop re-walked the
+/// table once per non-identity transform); per-feature counts and their
+/// report order are unchanged.
+pub fn sweep_nan_inf<'r>(
+    rows: impl IntoIterator<Item = &'r [f64]>,
     transforms: &[FeatureTransform],
     source_name: &str,
 ) -> Result<(), String> {
     let n_features = transforms.len();
-    let mut poisoned: Vec<(usize, usize, &str)> = Vec::new();
-    for fi in 0..n_features {
-        let t = transforms[fi];
-        if matches!(t, FeatureTransform::Identity) {
-            continue;
-        }
-        let mut bad = 0usize;
+    let checked: Vec<usize> = (0..n_features)
+        .filter(|&fi| !matches!(transforms[fi], FeatureTransform::Identity))
+        .collect();
+    let mut bad = vec![0usize; n_features];
+    if !checked.is_empty() {
         for row in rows {
-            if fi < row.len() && !row[fi].is_finite() {
-                bad += 1;
+            for &fi in &checked {
+                if fi < row.len() && !row[fi].is_finite() {
+                    bad[fi] += 1;
+                }
             }
         }
-        if bad > 0 {
-            poisoned.push((fi, bad, t.as_token()));
-        }
     }
+    let poisoned: Vec<(usize, usize, &str)> = checked
+        .into_iter()
+        .filter(|&fi| bad[fi] > 0)
+        .map(|fi| (fi, bad[fi], transforms[fi].as_token()))
+        .collect();
     if poisoned.is_empty() {
         Ok(())
     } else {

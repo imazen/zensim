@@ -1104,7 +1104,17 @@ struct LoadedGroup {
     train_w: f64,
     val_w: f64,
     human_scores: Vec<f64>,
-    feature_rows: Vec<Vec<f64>>,
+    /// ONE flat row-major buffer per group (`n_rows × n_features`,
+    /// `n_rows == human_scores.len()`), NOT per-row `Vec`s. Deliberate, and
+    /// load-bearing for memory: the trainer takes this buffer and
+    /// standardizes it in place (`FeatureRows::Releasable`), so a lane
+    /// never holds two copies of the feature matrix — and per-row `Vec`s
+    /// measurably defeat that, because 779k ~7.5 KB chunks freed out of the
+    /// loaders' interleaved arenas never return to the OS (full-recipe RSS
+    /// moved only ~0.4 GB when a first version freed rows individually).
+    /// One large buffer per group frees for real. See
+    /// `benchmarks/trainer_mem_release_2026-08-04.md`.
+    feature_rows: Vec<f64>,
     metric_sigmas: Option<Vec<f64>>,
     n_features: usize,
     /// Dense per-row ref identity from the parquet loader; `None` for
@@ -1125,14 +1135,38 @@ struct LoadedGroup {
     source_sha256: String,
 }
 
+/// Flatten a per-row table into one row-major buffer, dropping each row
+/// `Vec` as it is consumed. Values and their order are identical to the
+/// per-row form (`flat[i * width + d] == rows[i][d]` for `d < width`).
+///
+/// `width` must be ≤ every row's length; rows longer than `width` are
+/// truncated (this is where the old per-row `row.truncate(cap)` semantics
+/// live now). Dropping rows as we go matters: the freed same-size chunks
+/// are immediately reused by the NEXT group's loader rows, so the per-row
+/// stage's footprint stays bounded by one group instead of the whole
+/// dataset.
+fn flatten_rows(rows: Vec<Vec<f64>>, width: usize) -> Vec<f64> {
+    let mut flat: Vec<f64> = Vec::with_capacity(rows.len() * width);
+    for row in rows {
+        assert!(
+            row.len() >= width,
+            "flatten_rows: row has {} features, need ≥ {width}",
+            row.len()
+        );
+        flat.extend_from_slice(&row[..width]);
+    }
+    flat
+}
+
 impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
     fn from(o: zensim_validate::parquet_loader::OwnedLoadedGroup) -> Self {
+        let width = o.n_features;
         Self {
             name: o.name,
             train_w: o.train_w,
             val_w: o.val_w,
             human_scores: o.human_scores,
-            feature_rows: o.feature_rows,
+            feature_rows: flatten_rows(o.feature_rows, width),
             metric_sigmas: o.metric_sigmas,
             n_features: o.n_features,
             ref_ids: o.ref_ids,
@@ -1471,7 +1505,7 @@ fn load_csv_sequential(
         train_w: 0.0,
         val_w: 0.0,
         human_scores,
-        feature_rows,
+        feature_rows: flatten_rows(feature_rows, n_features),
         metric_sigmas: None,
         n_features,
         ref_ids: None,
@@ -1665,7 +1699,7 @@ pub(crate) fn load_csv(
         train_w: 0.0,
         val_w: 0.0,
         human_scores,
-        feature_rows,
+        feature_rows: flatten_rows(feature_rows, n_features),
         metric_sigmas: None,
         n_features,
         ref_ids: None,
@@ -2292,9 +2326,15 @@ fn main() {
         g.loss_mode = loss_mode;
         let cap = args.max_features;
         if g.n_features > cap {
-            for row in &mut g.feature_rows {
-                row.truncate(cap);
+            // Narrow the flat buffer to the first `cap` features of each
+            // row — same kept values as the old per-row `row.truncate(cap)`.
+            let old_nf = g.n_features;
+            let n_rows = g.human_scores.len();
+            let mut narrowed: Vec<f64> = Vec::with_capacity(n_rows * cap);
+            for r in 0..n_rows {
+                narrowed.extend_from_slice(&g.feature_rows[r * old_nf..r * old_nf + cap]);
             }
+            g.feature_rows = narrowed;
             g.n_features = cap;
         }
         if n_features == 0 {
@@ -2488,17 +2528,23 @@ fn main() {
             .join(", ");
         println!("feature_transforms: {summary}");
         for g in &mut loaded {
-            for row in &mut g.feature_rows {
+            let nf = g.n_features;
+            for row in g.feature_rows.chunks_mut(nf) {
                 for (i, t) in transforms.iter().enumerate() {
                     if *t != zenpredict::FeatureTransform::Identity {
                         row[i] = t.apply_with_params(row[i] as f32, &params[i]) as f64;
                     }
                 }
             }
-            let refs: Vec<Vec<f64>> = g.feature_rows.to_vec();
-            if let Err(e) =
-                mlp_train::sweep_nan_inf(&refs, &transforms, &format!("group '{}'", g.name))
-            {
+            // `sweep_nan_inf` only reads — hand it row views of the flat
+            // buffer (the `.to_vec()` that used to be here deep-cloned the
+            // whole group, up to ~1.6 GB on the largest wave-10 leg, for a
+            // checker that never mutates).
+            if let Err(e) = mlp_train::sweep_nan_inf(
+                g.feature_rows.chunks(nf),
+                &transforms,
+                &format!("group '{}'", g.name),
+            ) {
                 eprintln!("FATAL: {e}");
                 std::process::exit(1);
             }
@@ -2538,7 +2584,7 @@ fn main() {
                 args.max_features - n_keep
             );
             for g in &mut loaded {
-                for row in &mut g.feature_rows {
+                for row in g.feature_rows.chunks_mut(g.n_features) {
                     for (d, keep) in mask.iter().enumerate() {
                         if !keep && d < row.len() {
                             row[d] = 0.0;
@@ -2550,32 +2596,6 @@ fn main() {
             Some(mask)
         }
     };
-
-    // Build TrainingGroups (borrows feature rows from `loaded`).
-    let feat_refs: Vec<Vec<&[f64]>> = loaded
-        .iter()
-        .map(|g| g.feature_rows.iter().map(|r| r.as_slice()).collect())
-        .collect();
-    let groups: Vec<TrainingGroup> = loaded
-        .iter()
-        .zip(feat_refs.iter())
-        .map(|(g, fr)| TrainingGroup {
-            name: g.name.clone(),
-            human_scores: &g.human_scores,
-            features: fr.as_slice(),
-            metric_sigmas: g.metric_sigmas.as_deref(),
-            train_weight: g.train_w,
-            validation_weight: g.val_w,
-            // Only surface ref ids when the group opted in: `Some` IS the
-            // within-ref switch in the trainer core.
-            loss_mode: g.loss_mode,
-            ref_ids: if g.within_ref {
-                g.ref_ids.as_deref()
-            } else {
-                None
-            },
-        })
-        .collect();
 
     let out_dtype = match args.out_dtype.to_ascii_lowercase().as_str() {
         "f32" => zenpredict::WeightDtype::F32,
@@ -2699,7 +2719,7 @@ fn main() {
 
     println!(
         "Training: {} groups, {n_features} features, {hyperparams:?}",
-        groups.len()
+        loaded.len()
     );
 
     // Build optional TV regularizer: load pairs file, concatenate
@@ -2711,8 +2731,8 @@ fn main() {
         // Concatenate features in group order to build the flat feature index.
         let mut all_features: Vec<Vec<f64>> = Vec::new();
         for g in &loaded {
-            for row in &g.feature_rows {
-                all_features.push(row.clone());
+            for row in g.feature_rows.chunks(g.n_features) {
+                all_features.push(row.to_vec());
             }
         }
         // Load pairs file.
@@ -2830,7 +2850,9 @@ fn main() {
                     }
                 }
             }
-            if let Err(e) = mlp_train::sweep_nan_inf(&feat, ts, "anchor parquet") {
+            if let Err(e) =
+                mlp_train::sweep_nan_inf(feat.iter().map(|r| r.as_slice()), ts, "anchor parquet")
+            {
                 eprintln!("FATAL: {e}");
                 std::process::exit(1);
             }
@@ -2999,7 +3021,11 @@ fn main() {
                     }
                 }
             }
-            if let Err(e) = mlp_train::sweep_nan_inf(&feat, ts, "pjnd-passthrough parquet") {
+            if let Err(e) = mlp_train::sweep_nan_inf(
+                feat.iter().map(|r| r.as_slice()),
+                ts,
+                "pjnd-passthrough parquet",
+            ) {
                 eprintln!("FATAL: {e}");
                 std::process::exit(1);
             }
@@ -3077,9 +3103,11 @@ fn main() {
                         }
                     }
                 }
-                if let Err(e) =
-                    mlp_train::sweep_nan_inf(&pool.feature_rows, ts, "konjnd-aggregation parquet")
-                {
+                if let Err(e) = mlp_train::sweep_nan_inf(
+                    pool.feature_rows.iter().map(|r| r.as_slice()),
+                    ts,
+                    "konjnd-aggregation parquet",
+                ) {
                     eprintln!("FATAL: {e}");
                     std::process::exit(1);
                 }
@@ -3192,6 +3220,38 @@ fn main() {
         }
     }
 
+    // Build TrainingGroups. This MOVES the raw feature rows under a mutable
+    // borrow of `loaded`: the trainer releases each row as it standardizes
+    // it (see `TrainingGroup::features`), which is what keeps a lane's RSS
+    // at one copy of the features instead of two. Constructed last, and
+    // immediately before the training call, so every reader of `loaded`
+    // above — the TV concatenation, the provenance/spec blocks — still sees
+    // the rows; the borrow ends at the call and `loaded`'s metadata is
+    // readable again for the repro sidecars below.
+    let mut groups: Vec<TrainingGroup> = loaded
+        .iter_mut()
+        .map(|g| TrainingGroup {
+            name: g.name.clone(),
+            human_scores: &g.human_scores,
+            features: mlp_train::FeatureRows::Releasable {
+                n_rows: g.human_scores.len(),
+                n_features: g.n_features,
+                data: &mut g.feature_rows,
+            },
+            metric_sigmas: g.metric_sigmas.as_deref(),
+            train_weight: g.train_w,
+            validation_weight: g.val_w,
+            // Only surface ref ids when the group opted in: `Some` IS the
+            // within-ref switch in the trainer core.
+            loss_mode: g.loss_mode,
+            ref_ids: if g.within_ref {
+                g.ref_ids.as_deref()
+            } else {
+                None
+            },
+        })
+        .collect();
+
     let bake_bytes = if want_gpu {
         if !args.per_sample_alpha_head {
             eprintln!(
@@ -3257,13 +3317,18 @@ fn main() {
             "GPU trainer: runtime={gpu_runtime_str:?} hparams={gpu_hp:?}"
         ));
         // Remap `mlp_train::TrainingGroup` to `zensim_train_core::TrainingGroup`
-        // (same shape, different type identity per crate boundary).
+        // (same shape, different type identity per crate boundary). The core
+        // type still takes a borrowed row table, so materialize one here —
+        // 16 B/row, and only on the GPU path.
+        let core_feat_refs: Vec<Vec<&[f64]>> =
+            groups.iter().map(|g| g.features.iter().collect()).collect();
         let core_groups: Vec<zensim_train_core::TrainingGroup<'_>> = groups
             .iter()
-            .map(|g| zensim_train_core::TrainingGroup {
+            .zip(core_feat_refs.iter())
+            .map(|(g, fr)| zensim_train_core::TrainingGroup {
                 name: g.name.clone(),
                 human_scores: g.human_scores,
-                features: g.features,
+                features: fr.as_slice(),
                 metric_sigmas: g.metric_sigmas,
                 train_weight: g.train_weight,
                 validation_weight: g.validation_weight,
@@ -3414,7 +3479,7 @@ fn main() {
                 _ => None,
             };
         train_mlp_strategy(
-            &groups,
+            &mut groups,
             n_features,
             &hyperparams,
             &mut log,
@@ -3742,7 +3807,7 @@ mod csv_load_equivalence_tests {
         assert_eq!(
             par.feature_rows.len(),
             seq.feature_rows.len(),
-            "feature_rows len"
+            "feature_rows len (flat)"
         );
 
         // Bit-identical scalar comparison. fast_float2 advertises
@@ -3764,24 +3829,24 @@ mod csv_load_equivalence_tests {
                 b
             );
         }
-        for (i, (ra, rb)) in par
+        // feature_rows is one flat row-major buffer per group; compare
+        // element-wise (index / n_features recovers the row for messages).
+        let nf = par.n_features.max(1);
+        for (idx, (a, b)) in par
             .feature_rows
             .iter()
             .zip(seq.feature_rows.iter())
             .enumerate()
         {
-            assert_eq!(ra.len(), rb.len(), "feature_row[{}] length", i);
-            for (j, (a, b)) in ra.iter().zip(rb.iter()).enumerate() {
-                assert_eq!(
-                    a.to_bits(),
-                    b.to_bits(),
-                    "feature_row[{}][{}] differs: parallel={} sequential={}",
-                    i,
-                    j,
-                    a,
-                    b
-                );
-            }
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "feature_row[{}][{}] differs: parallel={} sequential={}",
+                idx / nf,
+                idx % nf,
+                a,
+                b
+            );
         }
     }
 

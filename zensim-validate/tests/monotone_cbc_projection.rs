@@ -24,7 +24,7 @@
 
 use zenpredict::{Model, WeightStorage};
 use zensim_validate::mlp_train::{
-    GroupLossMode, MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp,
+    FeatureRows, GroupLossMode, MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp,
 };
 
 fn synthetic_group<'a>(
@@ -51,7 +51,7 @@ fn synthetic_group<'a>(
     TrainingGroup {
         name: "synth_monotone".to_string(),
         human_scores: scores_buf,
-        features: feat_refs,
+        features: FeatureRows::Borrowed(feat_refs),
         metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 1.0,
@@ -70,7 +70,7 @@ fn run_train(monotone_cbc: bool) -> Vec<u8> {
     let mut features_buf: Vec<Vec<f64>> = Vec::with_capacity(n_rows);
     let mut scores_buf: Vec<f64> = Vec::with_capacity(n_rows);
     let mut feat_refs: Vec<&[f64]> = Vec::with_capacity(n_rows);
-    let group = synthetic_group(
+    let mut group = synthetic_group(
         n_rows,
         n_features,
         &mut features_buf,
@@ -97,7 +97,7 @@ fn run_train(monotone_cbc: bool) -> Vec<u8> {
     };
 
     let mut log: Vec<String> = Vec::new();
-    train_mlp(std::slice::from_ref(&group), n_features, &hp, &mut log)
+    train_mlp(std::slice::from_mut(&mut group), n_features, &hp, &mut log)
 }
 
 #[test]

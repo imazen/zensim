@@ -1198,6 +1198,96 @@ pub fn pwrc_pair_weight(a: f64, b: f64, band_weights: Option<&[f64]>) -> f64 {
     }
 }
 
+/// The RAW (unstandardized) feature rows of a [`TrainingGroup`], in one of
+/// two ownership shapes.
+///
+/// **Why two.** Raw features are read exactly twice per run — by
+/// [`compute_scaler_from_groups`], then by
+/// [`standardize_groups_releasing_raw`]. After that they are dead:
+/// everything downstream reads the standardized buffer, and of the raw
+/// table only [`len`] (the row count the pair sampler draws against) is
+/// ever consulted again.
+///
+/// At production scale that dead copy is half the trainer's memory. Wave 10
+/// loads 779,290 rows × 944 features: the raw rows are 5.91 GB, the
+/// standardized copy another 5.89 GB, together the whole of a lane's
+/// ~11.9 GB RSS — which capped this 28-core box at 3 concurrent trainers
+/// while it sat CPU-idle. [`FeatureRows::Releasable`] hands the trainer the
+/// raw buffer ITSELF: standardization takes it and transforms it in place,
+/// so the run never materializes a second copy at all.
+///
+/// The shape is one flat row-major buffer per group, not per-row `Vec`s,
+/// and that is load-bearing: a first version of this optimization freed
+/// each row `Vec` after copying it out, which emptied the Vecs but moved
+/// peak RSS by only ~0.4 GB on the full wave-10 recipe — the ~7.5 KB row
+/// chunks were interleaved across glibc arenas by the loaders and became
+/// interior free-list holes that never return to the OS, while the
+/// standardized buffers were fresh mmaps that could not reuse them. One
+/// flat buffer per group is a single large mapping, and taking it in place
+/// means there is nothing to give back. Method + full-data bit-identity
+/// gate: `benchmarks/trainer_mem_release_2026-08-04.md`
+/// (accounting: `benchmarks/trainer_perf_2026-08-04.md` §2).
+///
+/// [`len`]: FeatureRows::len
+#[derive(Debug)]
+pub enum FeatureRows<'a> {
+    /// A read-only row table. The trainer copies out of it and leaves it
+    /// intact, so the caller may reuse the rows afterwards (train twice off
+    /// one dataset, assert on the inputs, …). Nothing is consumed — use this
+    /// when the rows are small or still needed.
+    Borrowed(&'a [&'a [f64]]),
+    /// One flat row-major buffer (`n_rows × n_features`) the trainer MAY
+    /// TAKE during standardization.
+    ///
+    /// [`standardize_groups_releasing_raw`] moves the buffer out
+    /// (`std::mem::take`) and standardizes it in place — same expression,
+    /// same element order, so the bake is bit-identical to the
+    /// [`FeatureRows::Borrowed`] copy path. **Treat the buffer as
+    /// moved-from once a `train_mlp*` call returns.** [`FeatureRows::len`]
+    /// reports `n_rows` (cached here, not derived from the buffer), so the
+    /// hot loop's `g.features.len()` stays correct after the take;
+    /// [`FeatureRows::row`] is only valid BEFORE standardization.
+    Releasable {
+        /// Flat row-major values; `data.len() == n_rows * n_features`
+        /// until taken, `0` after.
+        data: &'a mut Vec<f64>,
+        n_rows: usize,
+        n_features: usize,
+    },
+}
+
+impl<'a> FeatureRows<'a> {
+    /// Number of rows. Cached at construction for [`Self::Releasable`], so
+    /// it stays correct after standardization takes the buffer.
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Borrowed(r) => r.len(),
+            Self::Releasable { n_rows, .. } => *n_rows,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Row `i`'s raw values. Only valid BEFORE standardization — a taken
+    /// [`Self::Releasable`] buffer panics here (nothing calls this after
+    /// standardization; the panic is the guard that keeps it that way).
+    pub fn row(&self, i: usize) -> &[f64] {
+        match self {
+            Self::Borrowed(r) => r[i],
+            Self::Releasable {
+                data, n_features, ..
+            } => &data[i * n_features..(i + 1) * n_features],
+        }
+    }
+
+    /// Iterate the raw rows. Same validity window as [`Self::row`].
+    pub fn iter(&self) -> impl Iterator<Item = &[f64]> {
+        (0..self.len()).map(move |i| self.row(i))
+    }
+}
+
 /// One named slice of training/validation data.
 ///
 /// Multi-group training resolves V0_2's "synthetic dominates by 15×"
@@ -1211,7 +1301,9 @@ pub fn pwrc_pair_weight(a: f64, b: f64, band_weights: Option<&[f64]>) -> f64 {
 pub struct TrainingGroup<'a> {
     pub name: String,
     pub human_scores: &'a [f64],
-    pub features: &'a [&'a [f64]],
+    /// RAW (unstandardized) feature rows. See [`FeatureRows`] for the two
+    /// ownership shapes and which one releases memory.
+    pub features: FeatureRows<'a>,
     /// Per-row metric-disagreement σ (from parquet_loader's
     /// auto-computation). When present and σ-weighted MSE is enabled,
     /// the MSE loss divides by max(σ, ε) per pair — errors on
@@ -1524,7 +1616,7 @@ pub struct EquivPairs<'a> {
 ///
 /// Returns the bytes of the best-validation checkpoint (ZNPK v1).
 pub fn train_mlp(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -1579,7 +1671,7 @@ impl TvRegularizer {
 
 /// Internal entry point that accepts an optional TV regularizer.
 pub fn train_mlp_with_tv(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -1601,7 +1693,7 @@ pub fn train_mlp_with_tv(
 /// tuner-specific). Trainer prints a warning if anchor data is supplied
 /// but the per-sample-α path isn't active.
 pub fn train_mlp_with_tv_anchored(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -1624,7 +1716,7 @@ pub fn train_mlp_with_tv_anchored(
 /// For every other head this argument is currently ignored (equiv
 /// wiring is per-sample-α-specific, like anchor).
 pub fn train_mlp_with_tv_anchored_equiv(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -1661,7 +1753,7 @@ pub fn train_mlp_with_tv_anchored_equiv(
 /// elsewhere (with a warning).
 #[allow(clippy::too_many_arguments)] // one optional research-pool input per aux loss
 pub fn train_mlp_with_tv_anchored_equiv_pjnd(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -1689,7 +1781,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
 /// optional raw-human-triplet pool for the ordered-probit NLL loss.
 #[allow(clippy::too_many_arguments)]
 pub fn train_mlp_strategy(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -1811,7 +1903,7 @@ pub fn train_mlp_strategy(
     let n_hidden = hyperparams.n_hidden;
 
     assert!(!groups.is_empty(), "need at least one training group");
-    for g in groups {
+    for g in groups.iter() {
         assert_eq!(
             g.human_scores.len(),
             g.features.len(),
@@ -1923,18 +2015,8 @@ pub fn train_mlp_strategy(
     //    inner loop just slice into a flat f64 buffer per group.
     //    Group g's standardized features live in std_features[g], shape
     //    (n_pairs[g] × n_features).
-    let std_features: Vec<Vec<f64>> = groups
-        .iter()
-        .map(|g| {
-            let mut buf = vec![0.0f64; g.features.len() * n_features];
-            for (i, &f) in g.features.iter().enumerate() {
-                for d in 0..n_features {
-                    buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
-                }
-            }
-            buf
-        })
-        .collect();
+    let std_features =
+        standardize_groups_releasing_raw(groups, n_features, &scaler_mean, &scaler_scale);
 
     // Standardize TV-regularizer features using the same scaler, in
     // their flat (n_rows × n_features) form. The TV pairs reference
@@ -2779,7 +2861,7 @@ pub fn train_mlp_strategy(
 ///   sequential code skips TV. V_22-mix-LARGE doesn't use TV so this
 ///   is a no-op for the head-to-head comparison.
 fn train_mlp_pool_head_with_tv(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -2791,7 +2873,7 @@ fn train_mlp_pool_head_with_tv(
     let alpha = hyperparams.leaky_alpha;
 
     assert!(!groups.is_empty(), "need at least one training group");
-    for g in groups {
+    for g in groups.iter() {
         assert_eq!(
             g.human_scores.len(),
             g.features.len(),
@@ -2866,18 +2948,8 @@ fn train_mlp_pool_head_with_tv(
     let (scaler_mean, scaler_scale) =
         compute_scaler_from_groups(groups, &train_indices, n_features);
 
-    let std_features: Vec<Vec<f64>> = groups
-        .iter()
-        .map(|g| {
-            let mut buf = vec![0.0f64; g.features.len() * n_features];
-            for (i, &f) in g.features.iter().enumerate() {
-                for d in 0..n_features {
-                    buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
-                }
-            }
-            buf
-        })
-        .collect();
+    let std_features =
+        standardize_groups_releasing_raw(groups, n_features, &scaler_mean, &scaler_scale);
 
     let tv_std: Option<Vec<f64>> = tv.map(|t| {
         assert_eq!(
@@ -3605,7 +3677,7 @@ fn predict_group_pool_head(
 /// Final flush + early-stop semantics match pool-head trainer.
 #[allow(clippy::too_many_arguments)]
 fn train_mlp_hybrid_head_with_tv(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -3617,7 +3689,7 @@ fn train_mlp_hybrid_head_with_tv(
     let leaky = hyperparams.leaky_alpha;
 
     assert!(!groups.is_empty(), "need at least one training group");
-    for g in groups {
+    for g in groups.iter() {
         assert_eq!(
             g.human_scores.len(),
             g.features.len(),
@@ -3699,18 +3771,8 @@ fn train_mlp_hybrid_head_with_tv(
     let (scaler_mean, scaler_scale) =
         compute_scaler_from_groups(groups, &train_indices, n_features);
 
-    let std_features: Vec<Vec<f64>> = groups
-        .iter()
-        .map(|g| {
-            let mut buf = vec![0.0f64; g.features.len() * n_features];
-            for (i, &f) in g.features.iter().enumerate() {
-                for d in 0..n_features {
-                    buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
-                }
-            }
-            buf
-        })
-        .collect();
+    let std_features =
+        standardize_groups_releasing_raw(groups, n_features, &scaler_mean, &scaler_scale);
 
     let tv_std: Option<Vec<f64>> = tv.map(|t| {
         assert_eq!(
@@ -5133,6 +5195,72 @@ pub fn bake_two_layer_znpr_v3(
     .expect("v3 bake of 2-layer MLP")
 }
 
+/// Standardize every group's features up-front into one flat
+/// `(n_rows × n_features)` f64 buffer per group, **reusing the raw buffer
+/// itself when the caller allows it**.
+///
+/// Standardizing here rather than inside the per-step inner loop lets that
+/// loop just slice into a flat buffer. Group `g`'s standardized features
+/// live in `out[g]` with row `i` at `[i * n_features .. (i+1) * n_features]`.
+///
+/// The four trainer heads (plain / pool / hybrid / per-sample-α) each ran a
+/// byte-identical copy of this loop; they now share this one. For
+/// [`FeatureRows::Releasable`] the raw flat buffer is TAKEN and standardized
+/// in place — same expression, same element order, only the destination
+/// changes (each element is read before it is overwritten), so bakes are
+/// bit-identical to the [`FeatureRows::Borrowed`] copy path and to the
+/// pre-refactor trainer.
+///
+/// MEMORY (the reason `groups` is `&mut`): the raw rows and the standardized
+/// copy are the same size, and the raw ones are dead as soon as they are
+/// standardized. Standardizing in place means the run never holds two copies
+/// of the feature matrix — which is what caps how many trainers fit on a
+/// box. See the [`FeatureRows`] note and
+/// `benchmarks/trainer_mem_release_2026-08-04.md`.
+fn standardize_groups_releasing_raw(
+    groups: &mut [TrainingGroup<'_>],
+    n_features: usize,
+    scaler_mean: &[f64],
+    scaler_scale: &[f64],
+) -> Vec<Vec<f64>> {
+    groups
+        .iter_mut()
+        .map(|g| match &mut g.features {
+            FeatureRows::Borrowed(rows) => {
+                let mut buf = vec![0.0f64; rows.len() * n_features];
+                for (i, f) in rows.iter().enumerate() {
+                    for d in 0..n_features {
+                        buf[i * n_features + d] =
+                            (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                    }
+                }
+                buf
+            }
+            FeatureRows::Releasable {
+                data,
+                n_rows,
+                n_features: nf,
+            } => {
+                assert_eq!(*nf, n_features, "Releasable width / trainer width");
+                assert_eq!(data.len(), *n_rows * n_features, "Releasable buffer size");
+                // Take the raw buffer and standardize IN PLACE: the raw
+                // value is read, transformed, and written back to the same
+                // element, so no second copy of the feature matrix ever
+                // exists. `g.features.len()` keeps reporting n_rows (cached
+                // in the enum), which is all the hot loop reads.
+                let mut buf = std::mem::take(*data);
+                for i in 0..*n_rows {
+                    for d in 0..n_features {
+                        let idx = i * n_features + d;
+                        buf[idx] = (buf[idx] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                    }
+                }
+                buf
+            }
+        })
+        .collect()
+}
+
 fn compute_scaler_from_groups(
     groups: &[TrainingGroup<'_>],
     train_indices: &[usize],
@@ -5141,7 +5269,7 @@ fn compute_scaler_from_groups(
     let mut count = 0u64;
     let mut mean = vec![0.0f64; n_features];
     for &gi in train_indices {
-        for f in groups[gi].features {
+        for f in groups[gi].features.iter() {
             for d in 0..n_features {
                 mean[d] += f[d];
             }
@@ -5154,7 +5282,7 @@ fn compute_scaler_from_groups(
     }
     let mut var = vec![0.0f64; n_features];
     for &gi in train_indices {
-        for f in groups[gi].features {
+        for f in groups[gi].features.iter() {
             for d in 0..n_features {
                 let dx = f[d] - mean[d];
                 var[d] += dx * dx;
@@ -5953,7 +6081,7 @@ type StdTvUnpacked = (Vec<Vec<f64>>, Vec<(usize, usize)>, f64, usize, f64);
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)] // one optional research-pool input per aux loss
 fn train_mlp_per_sample_alpha_head(
-    groups: &[TrainingGroup<'_>],
+    groups: &mut [TrainingGroup<'_>],
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
@@ -5970,7 +6098,7 @@ fn train_mlp_per_sample_alpha_head(
     let leaky = hyperparams.leaky_alpha;
 
     assert!(!groups.is_empty(), "need at least one training group");
-    for g in groups {
+    for g in groups.iter() {
         assert_eq!(
             g.human_scores.len(),
             g.features.len(),
@@ -6297,18 +6425,8 @@ fn train_mlp_per_sample_alpha_head(
     let (scaler_mean, scaler_scale) =
         compute_scaler_from_groups(groups, &train_indices, n_features);
 
-    let std_features: Vec<Vec<f64>> = groups
-        .iter()
-        .map(|g| {
-            let mut buf = vec![0.0f64; g.features.len() * n_features];
-            for (i, &f) in g.features.iter().enumerate() {
-                for d in 0..n_features {
-                    buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
-                }
-            }
-            buf
-        })
-        .collect();
+    let std_features =
+        standardize_groups_releasing_raw(groups, n_features, &scaler_mean, &scaler_scale);
 
     // Per-epoch group-eval SAMPLING (2026-07-02, iteration-speed fix).
     // The per-epoch diagnostics/selection forward EVERY row of EVERY group
@@ -10440,7 +10558,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -10459,7 +10577,7 @@ mod tests {
             ..Default::default()
         };
         let mut log = Vec::new();
-        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+        let bytes = train_mlp(&mut [group], n_features, &hyper, &mut log);
 
         let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
         let model = Model::from_bytes(leaked).expect("bake should load");
@@ -10506,11 +10624,11 @@ mod tests {
         let val_scores: Vec<f64> = val_features.iter().map(|f| f.iter().sum::<f64>()).collect();
         let val_refs: Vec<&[f64]> = val_features.iter().map(|v| v.as_slice()).collect();
 
-        let groups = vec![
+        let mut groups = vec![
             TrainingGroup {
                 name: "train".to_string(),
                 human_scores: &train_scores,
-                features: &train_refs,
+                features: FeatureRows::Borrowed(&train_refs),
                 metric_sigmas: None,
                 train_weight: 1.0,
                 validation_weight: 0.0,
@@ -10520,7 +10638,7 @@ mod tests {
             TrainingGroup {
                 name: "val".to_string(),
                 human_scores: &val_scores,
-                features: &val_refs,
+                features: FeatureRows::Borrowed(&val_refs),
                 metric_sigmas: None,
                 train_weight: 0.0,
                 validation_weight: 1.0,
@@ -10540,7 +10658,7 @@ mod tests {
             ..Default::default()
         };
         let mut log = Vec::new();
-        let bytes = train_mlp(&groups, n_features, &hyper, &mut log);
+        let bytes = train_mlp(&mut groups, n_features, &hyper, &mut log);
 
         let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
         let model = Model::from_bytes(leaked).expect("bake should load");
@@ -10602,7 +10720,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "boost-test".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -10628,9 +10746,19 @@ mod tests {
         };
 
         let mut log_u = Vec::new();
-        let bytes_uniform = train_mlp(&[group_factory()], n_features, &hyper_uniform, &mut log_u);
+        let bytes_uniform = train_mlp(
+            &mut [group_factory()],
+            n_features,
+            &hyper_uniform,
+            &mut log_u,
+        );
         let mut log_b = Vec::new();
-        let bytes_boosted = train_mlp(&[group_factory()], n_features, &hyper_boosted, &mut log_b);
+        let bytes_boosted = train_mlp(
+            &mut [group_factory()],
+            n_features,
+            &hyper_boosted,
+            &mut log_b,
+        );
 
         // The two bakes must differ — if boost had no effect, this
         // would be a regression in the per-row CDF wiring.
@@ -10655,7 +10783,12 @@ mod tests {
             ..Default::default()
         };
         let mut log_d = Vec::new();
-        let bytes_default = train_mlp(&[group_factory()], n_features, &hyper_default, &mut log_d);
+        let bytes_default = train_mlp(
+            &mut [group_factory()],
+            n_features,
+            &hyper_default,
+            &mut log_d,
+        );
         assert_eq!(
             bytes_uniform, bytes_default,
             "explicit low_q_boost=1.0 produced different bake than default — \
@@ -10686,6 +10819,104 @@ mod tests {
         (features, targets)
     }
 
+    /// [`FeatureRows::Releasable`] MUST train to bit-identical bake bytes
+    /// against [`FeatureRows::Borrowed`], and MUST actually hand the rows
+    /// back.
+    ///
+    /// This is the gate for the 2026-08-04 memory change: the trainer frees
+    /// each raw row as it standardizes it, which halves a lane's peak RSS
+    /// (`benchmarks/trainer_mem_release_2026-08-04.md`). That is only
+    /// legitimate because releasing a row changes no arithmetic — this test
+    /// is what keeps it that way. The full-data version of this comparison
+    /// ran on the 11-group / 779,290-row wave-10 recipe; this one runs it in
+    /// CI on every commit.
+    #[test]
+    fn releasable_rows_train_identically_to_borrowed_and_are_released() {
+        let n_features = 12;
+        let (features_owned, targets) = make_synth_dataset(2026, 200, n_features);
+
+        let hyper = MlpHyperparams {
+            n_hidden: 8,
+            n_epochs: 25,
+            pairs_per_epoch: 800,
+            initial_lr: 0.005,
+            seed: 7,
+            log_every: 100,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            ..Default::default()
+        };
+
+        // Arm A: borrowed rows — nothing is released.
+        let borrowed_rows = features_owned.clone();
+        let feats_ref: Vec<&[f64]> = borrowed_rows.iter().map(|v| v.as_slice()).collect();
+        let mut log_a = Vec::new();
+        let bake_borrowed = train_mlp(
+            &mut [TrainingGroup {
+                name: "synth".to_string(),
+                human_scores: &targets,
+                features: FeatureRows::Borrowed(&feats_ref),
+                metric_sigmas: None,
+                train_weight: 1.0,
+                validation_weight: 1.0,
+                ref_ids: None,
+                loss_mode: GroupLossMode::default(),
+            }],
+            n_features,
+            &hyper,
+            &mut log_a,
+        );
+        drop(feats_ref);
+        assert!(
+            borrowed_rows.iter().all(|r| r.len() == n_features),
+            "Borrowed rows must survive the call untouched"
+        );
+
+        // Arm B: releasable flat buffer — same values, same row-major order,
+        // taken and standardized in place.
+        let n_rows = features_owned.len();
+        let mut flat: Vec<f64> = Vec::with_capacity(n_rows * n_features);
+        for r in &features_owned {
+            flat.extend_from_slice(r);
+        }
+        let mut log_b = Vec::new();
+        let bake_releasable = train_mlp(
+            &mut [TrainingGroup {
+                name: "synth".to_string(),
+                human_scores: &targets,
+                features: FeatureRows::Releasable {
+                    data: &mut flat,
+                    n_rows,
+                    n_features,
+                },
+                metric_sigmas: None,
+                train_weight: 1.0,
+                validation_weight: 1.0,
+                ref_ids: None,
+                loss_mode: GroupLossMode::default(),
+            }],
+            n_features,
+            &hyper,
+            &mut log_b,
+        );
+
+        assert_eq!(
+            bake_borrowed, bake_releasable,
+            "in-place standardization of the taken raw buffer changed the \
+             bake — the memory optimization is NOT numerically inert"
+        );
+        assert!(
+            flat.is_empty(),
+            "the Releasable buffer was NOT taken — the run held two copies \
+             of the feature matrix and the memory win is not happening"
+        );
+        // len() must keep reporting n_rows after the take (it is what the
+        // hot loop's `g.features.len()` reads), which is asserted where it
+        // matters: inside the trainer the post-standardization epoch loop
+        // sampled pairs from this group for 25 epochs — impossible if the
+        // cached length had collapsed to 0 with the buffer.
+    }
+
     /// `--minibatch-size 1` MUST produce bit-identical bake bytes to a
     /// `MlpHyperparams::default()` call (which leaves `minibatch_size`
     /// at 1). This is the legacy-compatibility guarantee for T8.1.
@@ -10698,7 +10929,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -10720,7 +10951,7 @@ mod tests {
 
         // Default trainer (legacy code path; minibatch_size left at default 1).
         let mut log_a = Vec::new();
-        let bake_default = train_mlp(&[group_factory()], n_features, &base, &mut log_a);
+        let bake_default = train_mlp(&mut [group_factory()], n_features, &base, &mut log_a);
 
         // Explicit minibatch_size = 1 — must match.
         let hyper_explicit_1 = MlpHyperparams {
@@ -10729,7 +10960,7 @@ mod tests {
         };
         let mut log_b = Vec::new();
         let bake_explicit_1 = train_mlp(
-            &[group_factory()],
+            &mut [group_factory()],
             n_features,
             &hyper_explicit_1,
             &mut log_b,
@@ -10750,7 +10981,7 @@ mod tests {
         };
         let mut log_c = Vec::new();
         let bake_parallel_k1 = train_mlp(
-            &[group_factory()],
+            &mut [group_factory()],
             n_features,
             &hyper_parallel_k1,
             &mut log_c,
@@ -10777,7 +11008,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -10806,7 +11037,7 @@ mod tests {
                 .expect("build rayon pool");
             pool.install(|| {
                 let mut log = Vec::new();
-                train_mlp(&[group_factory()], n_features, &hyper, &mut log)
+                train_mlp(&mut [group_factory()], n_features, &hyper, &mut log)
             })
         };
 
@@ -10847,7 +11078,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -10881,7 +11112,7 @@ mod tests {
 
         // K=1 baseline.
         let mut log_1 = Vec::new();
-        let bake_k1 = train_mlp(&[group_factory()], n_features, &base, &mut log_1);
+        let bake_k1 = train_mlp(&mut [group_factory()], n_features, &base, &mut log_1);
         let srocc_k1 = eval_srocc(&bake_k1);
 
         // K=64 sequential.
@@ -10890,7 +11121,12 @@ mod tests {
             ..base.clone()
         };
         let mut log_2 = Vec::new();
-        let bake_k64_seq = train_mlp(&[group_factory()], n_features, &hyper_k64_seq, &mut log_2);
+        let bake_k64_seq = train_mlp(
+            &mut [group_factory()],
+            n_features,
+            &hyper_k64_seq,
+            &mut log_2,
+        );
         let srocc_k64_seq = eval_srocc(&bake_k64_seq);
 
         // K=64 parallel.
@@ -10900,7 +11136,12 @@ mod tests {
             ..base.clone()
         };
         let mut log_3 = Vec::new();
-        let bake_k64_par = train_mlp(&[group_factory()], n_features, &hyper_k64_par, &mut log_3);
+        let bake_k64_par = train_mlp(
+            &mut [group_factory()],
+            n_features,
+            &hyper_k64_par,
+            &mut log_3,
+        );
         let srocc_k64_par = eval_srocc(&bake_k64_par);
 
         // The model must learn the ranking in all three modes.
@@ -10958,7 +11199,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "synth".to_string(),
             human_scores: &scaled_targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -10979,7 +11220,7 @@ mod tests {
         };
 
         let mut log_a = Vec::new();
-        let bake_default = train_mlp(&[group_factory()], n_features, &base, &mut log_a);
+        let bake_default = train_mlp(&mut [group_factory()], n_features, &base, &mut log_a);
 
         // Explicit pwrc_pair_weight=false — must match.
         let hyper_explicit_off = MlpHyperparams {
@@ -10990,7 +11231,7 @@ mod tests {
         };
         let mut log_b = Vec::new();
         let bake_explicit_off = train_mlp(
-            &[group_factory()],
+            &mut [group_factory()],
             n_features,
             &hyper_explicit_off,
             &mut log_b,
@@ -11011,7 +11252,7 @@ mod tests {
             ..base.clone()
         };
         let mut log_c = Vec::new();
-        let bake_on = train_mlp(&[group_factory()], n_features, &hyper_on, &mut log_c);
+        let bake_on = train_mlp(&mut [group_factory()], n_features, &hyper_on, &mut log_c);
         assert_ne!(
             bake_default, bake_on,
             "pwrc_pair_weight=true produced byte-identical bake to off — \
@@ -11034,9 +11275,9 @@ mod tests {
         };
         let mut log_d = Vec::new();
         let mut log_e = Vec::new();
-        let bake_k8 = train_mlp(&[group_factory()], n_features, &hyper_k8, &mut log_d);
+        let bake_k8 = train_mlp(&mut [group_factory()], n_features, &hyper_k8, &mut log_d);
         let bake_k8_off = train_mlp(
-            &[group_factory()],
+            &mut [group_factory()],
             n_features,
             &hyper_k8_pwrc_off,
             &mut log_e,
@@ -11112,7 +11353,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11135,7 +11376,7 @@ mod tests {
             ..Default::default()
         };
         let mut log_no_drop = Vec::new();
-        let bake_no_drop = train_mlp(&[group_factory()], n_features, &base, &mut log_no_drop);
+        let bake_no_drop = train_mlp(&mut [group_factory()], n_features, &base, &mut log_no_drop);
 
         // Heavy threshold: drop pairs within 50 MOS units.
         let hyper_drop = MlpHyperparams {
@@ -11143,7 +11384,12 @@ mod tests {
             ..base.clone()
         };
         let mut log_drop = Vec::new();
-        let bake_drop = train_mlp(&[group_factory()], n_features, &hyper_drop, &mut log_drop);
+        let bake_drop = train_mlp(
+            &mut [group_factory()],
+            n_features,
+            &hyper_drop,
+            &mut log_drop,
+        );
 
         assert_ne!(
             bake_no_drop, bake_drop,
@@ -11168,7 +11414,7 @@ mod tests {
         };
         let mut log_drop_all = Vec::new();
         let bake_drop_all = train_mlp(
-            &[group_factory()],
+            &mut [group_factory()],
             n_features,
             &hyper_drop_all,
             &mut log_drop_all,
@@ -11245,7 +11491,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "lowq".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11273,7 +11519,7 @@ mod tests {
             ..base.clone()
         };
         let mut log_w1 = Vec::new();
-        let _bake_w1 = train_mlp(&[group_factory()], n_features, &hyper_w1, &mut log_w1);
+        let _bake_w1 = train_mlp(&mut [group_factory()], n_features, &hyper_w1, &mut log_w1);
 
         // Weight 10.0 in band 0.
         let mut bands_hi = vec![1.0; 10];
@@ -11283,7 +11529,7 @@ mod tests {
             ..base.clone()
         };
         let mut log_w10 = Vec::new();
-        let _bake_w10 = train_mlp(&[group_factory()], n_features, &hyper_w10, &mut log_w10);
+        let _bake_w10 = train_mlp(&mut [group_factory()], n_features, &hyper_w10, &mut log_w10);
 
         // The per-epoch loss line should reflect higher loss
         // magnitude at weight=10 (since loss is scaled by weight).
@@ -11354,7 +11600,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &scaled,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11376,7 +11622,7 @@ mod tests {
             ..Default::default()
         };
         let mut log = Vec::new();
-        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+        let bytes = train_mlp(&mut [group], n_features, &hyper, &mut log);
 
         let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
         let model = Model::from_bytes(leaked).expect("bake should load");
@@ -11409,7 +11655,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11431,7 +11677,7 @@ mod tests {
 
         // K=1 default (legacy code path; both NiN and minibatch off).
         let mut log_a = Vec::new();
-        let bake_default = train_mlp(&[group_factory()], n_features, &base, &mut log_a);
+        let bake_default = train_mlp(&mut [group_factory()], n_features, &base, &mut log_a);
 
         // Explicit norm_in_norm_weight=0.0 — must match.
         let hyper_explicit_off = MlpHyperparams {
@@ -11442,7 +11688,7 @@ mod tests {
         };
         let mut log_b = Vec::new();
         let bake_explicit_off = train_mlp(
-            &[group_factory()],
+            &mut [group_factory()],
             n_features,
             &hyper_explicit_off,
             &mut log_b,
@@ -11465,7 +11711,7 @@ mod tests {
             ..base.clone()
         };
         let mut log_c = Vec::new();
-        let bake_k64_legacy = train_mlp(&[group_factory()], n_features, &hyper_k64, &mut log_c);
+        let bake_k64_legacy = train_mlp(&mut [group_factory()], n_features, &hyper_k64, &mut log_c);
 
         let hyper_k64_nin_off = MlpHyperparams {
             norm_in_norm_weight: 0.0,
@@ -11473,7 +11719,7 @@ mod tests {
         };
         let mut log_d = Vec::new();
         let bake_k64_nin_off = train_mlp(
-            &[group_factory()],
+            &mut [group_factory()],
             n_features,
             &hyper_k64_nin_off,
             &mut log_d,
@@ -11502,7 +11748,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11538,7 +11784,7 @@ mod tests {
 
         // RankNet-only baseline at the same K.
         let mut log_rn = Vec::new();
-        let bake_rn = train_mlp(&[group_factory()], n_features, &base, &mut log_rn);
+        let bake_rn = train_mlp(&mut [group_factory()], n_features, &base, &mut log_rn);
         let srocc_rn = eval_srocc(&bake_rn);
 
         // Hybrid β=0.1, p=1, q=2 (paper-recommended).
@@ -11549,7 +11795,7 @@ mod tests {
             ..base.clone()
         };
         let mut log_h = Vec::new();
-        let bake_h = train_mlp(&[group_factory()], n_features, &hybrid, &mut log_h);
+        let bake_h = train_mlp(&mut [group_factory()], n_features, &hybrid, &mut log_h);
         let srocc_h = eval_srocc(&bake_h);
 
         // Both must learn the ranking; hybrid is within 0.1 of RN.
@@ -11605,7 +11851,7 @@ mod tests {
         let group_factory = || TrainingGroup {
             name: "calib".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11634,9 +11880,9 @@ mod tests {
         };
 
         let mut log_rn = Vec::new();
-        let bake_rn = train_mlp(&[group_factory()], n_features, &base, &mut log_rn);
+        let bake_rn = train_mlp(&mut [group_factory()], n_features, &base, &mut log_rn);
         let mut log_h = Vec::new();
-        let bake_h = train_mlp(&[group_factory()], n_features, &hybrid, &mut log_h);
+        let bake_h = train_mlp(&mut [group_factory()], n_features, &hybrid, &mut log_h);
 
         let preds = |bake: &[u8]| -> Vec<f64> {
             let leaked: &'static [u8] = Box::leak(bake.to_vec().into_boxed_slice());
@@ -11699,7 +11945,7 @@ mod tests {
         let group = TrainingGroup {
             name: "tiny".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11720,7 +11966,7 @@ mod tests {
             ..Default::default()
         };
         let mut log = Vec::new();
-        let _ = train_mlp(&[group], n_features, &hyper, &mut log);
+        let _ = train_mlp(&mut [group], n_features, &hyper, &mut log);
     }
 
     /// EX-2 prod wire-in smoke test: pool_head=true on a synthetic
@@ -11735,7 +11981,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11756,7 +12002,7 @@ mod tests {
             ..Default::default()
         };
         let mut log = Vec::new();
-        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+        let bytes = train_mlp(&mut [group], n_features, &hyper, &mut log);
         // Smoke: pool_head metadata present.
         let needle = b"zentrain.pool_head_reducer";
         assert!(
@@ -11779,7 +12025,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11800,7 +12046,7 @@ mod tests {
             ..Default::default()
         };
         let mut log = Vec::new();
-        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+        let bytes = train_mlp(&mut [group], n_features, &hyper, &mut log);
         assert_eq!(&bytes[..4], b"ZNPR");
     }
 
@@ -11814,7 +12060,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11837,7 +12083,7 @@ mod tests {
             ..Default::default()
         };
         let mut log = Vec::new();
-        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+        let bytes = train_mlp(&mut [group], n_features, &hyper, &mut log);
         // Smoke: NiN-composed pool-head bake still has the pool_head metadata.
         let needle = b"zentrain.pool_head_reducer";
         assert!(
@@ -11859,7 +12105,7 @@ mod tests {
         let group = TrainingGroup {
             name: "tiny".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11878,7 +12124,7 @@ mod tests {
             ..Default::default()
         };
         let mut log = Vec::new();
-        let _ = train_mlp(&[group], n_features, &hyper, &mut log);
+        let _ = train_mlp(&mut [group], n_features, &hyper, &mut log);
     }
 
     #[test]
@@ -11893,7 +12139,7 @@ mod tests {
         let group = TrainingGroup {
             name: "tiny".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -11918,7 +12164,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let _ = train_mlp_strategy(
-            &[group],
+            &mut [group],
             n_features,
             &hyper,
             &mut log,
@@ -12044,10 +12290,10 @@ mod tests {
             primary_scores.push(0.5 + 0.5 * (-1.0 + 2.0 * frac));
         }
         let primary_refs: Vec<&[f64]> = primary_features.iter().map(|r| r.as_slice()).collect();
-        let groups = [TrainingGroup {
+        let mut groups = [TrainingGroup {
             name: "synthetic_primary".to_string(),
             human_scores: &primary_scores,
-            features: &primary_refs,
+            features: FeatureRows::Borrowed(&primary_refs),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
@@ -12080,7 +12326,7 @@ mod tests {
         hp.validation_policy = ValidationPolicy::Min;
         let mut log: Vec<String> = Vec::new();
         let bake_bytes = train_mlp_with_tv_anchored_equiv_pjnd(
-            &groups,
+            &mut groups,
             KAH_N_FEATURES,
             &hp,
             &mut log,
@@ -12161,10 +12407,10 @@ mod tests {
             .collect();
         let primary_scores: Vec<f64> = primary_features.iter().map(|r| 0.5 + 0.5 * r[1]).collect();
         let primary_refs: Vec<&[f64]> = primary_features.iter().map(|r| r.as_slice()).collect();
-        let groups = [TrainingGroup {
+        let mut groups = [TrainingGroup {
             name: "primary_disabled".to_string(),
             human_scores: &primary_scores,
-            features: &primary_refs,
+            features: FeatureRows::Borrowed(&primary_refs),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
@@ -12187,7 +12433,7 @@ mod tests {
         };
         let mut log: Vec<String> = Vec::new();
         let bake = train_mlp_with_tv_anchored_equiv_pjnd(
-            &groups,
+            &mut groups,
             KAH_N_FEATURES,
             &hp,
             &mut log,
@@ -12480,7 +12726,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -12489,7 +12735,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
-            &[group],
+            &mut [group],
             n_features,
             &MlpHyperparams {
                 n_hidden: 16,
@@ -12523,7 +12769,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -12532,7 +12778,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
-            &[group],
+            &mut [group],
             n_features,
             &MlpHyperparams {
                 n_hidden: 8,
@@ -12573,7 +12819,9 @@ mod tests {
             FeatureTransform::Identity,
         ];
         // No NaN expected with identity transforms.
-        assert!(sweep_nan_inf(&rows, &transforms, "test-clean").is_ok());
+        assert!(
+            sweep_nan_inf(rows.iter().map(|r| r.as_slice()), &transforms, "test-clean").is_ok()
+        );
 
         // Manually poison a feature to simulate log(0) = -inf.
         let mut poisoned_rows = rows.clone();
@@ -12584,7 +12832,11 @@ mod tests {
             FeatureTransform::Log,
             FeatureTransform::Log,
         ];
-        let result = sweep_nan_inf(&poisoned_rows, &transforms_with_log, "test-poison");
+        let result = sweep_nan_inf(
+            poisoned_rows.iter().map(|r| r.as_slice()),
+            &transforms_with_log,
+            "test-poison",
+        );
         assert!(result.is_err(), "sweep should catch NaN/inf");
         let msg = result.unwrap_err();
         assert!(msg.contains("f1"), "should identify feature f1: {msg}");
@@ -12599,7 +12851,7 @@ mod tests {
         let group = TrainingGroup {
             name: "konjnd_test".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -12608,7 +12860,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
-            &[group],
+            &mut [group],
             n_features,
             &MlpHyperparams {
                 n_hidden: 8,
@@ -12645,7 +12897,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -12654,7 +12906,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let _bake = train_mlp_per_sample_alpha_head(
-            &[group],
+            &mut [group],
             n_features,
             &MlpHyperparams {
                 n_hidden: 8,
@@ -12690,7 +12942,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -12699,7 +12951,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
-            &[group],
+            &mut [group],
             n_features,
             &MlpHyperparams {
                 n_hidden: 16,
@@ -12734,7 +12986,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -12743,7 +12995,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
-            &[group],
+            &mut [group],
             n_features,
             &MlpHyperparams {
                 n_hidden: 16,
@@ -12774,7 +13026,7 @@ mod tests {
         let group = TrainingGroup {
             name: "synth".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -12783,7 +13035,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
-            &[group],
+            &mut [group],
             n_features,
             &MlpHyperparams {
                 n_hidden: 16,
@@ -12818,7 +13070,7 @@ mod tests {
         let group = TrainingGroup {
             name: "sigma_test".to_string(),
             human_scores: &targets,
-            features: &feats_ref,
+            features: FeatureRows::Borrowed(&feats_ref),
             metric_sigmas: Some(&sigmas),
             train_weight: 1.0,
             validation_weight: 1.0,
@@ -12827,7 +13079,7 @@ mod tests {
         };
         let mut log = Vec::new();
         let bake = train_mlp_per_sample_alpha_head(
-            &[group],
+            &mut [group],
             n_features,
             &MlpHyperparams {
                 n_hidden: 8,
@@ -12871,11 +13123,11 @@ mod tests {
         let sigmas: Vec<f64> = (0..n)
             .map(|i| 0.05 + 0.1 * ((i % 7) as f64) / 7.0)
             .collect();
-        let groups = [
+        let mut groups = [
             TrainingGroup {
                 name: "syn_a".to_string(),
                 human_scores: &scores,
-                features: &refs,
+                features: FeatureRows::Borrowed(&refs),
                 metric_sigmas: Some(&sigmas),
                 train_weight: 1.0,
                 validation_weight: 1.0,
@@ -12885,7 +13137,7 @@ mod tests {
             TrainingGroup {
                 name: "syn_b".to_string(),
                 human_scores: &scores,
-                features: &refs,
+                features: FeatureRows::Borrowed(&refs),
                 metric_sigmas: None,
                 train_weight: 0.5,
                 validation_weight: 0.0,
@@ -12938,7 +13190,7 @@ mod tests {
         };
         let mut log: Vec<String> = Vec::new();
         let bake = train_mlp_strategy(
-            &groups,
+            &mut groups,
             NF,
             &hp,
             &mut log,
@@ -12965,7 +13217,7 @@ mod tests {
         // determinism: same seed -> byte-identical bake
         let mut log2: Vec<String> = Vec::new();
         let bake2 = train_mlp_strategy(
-            &groups,
+            &mut groups,
             NF,
             &hp,
             &mut log2,

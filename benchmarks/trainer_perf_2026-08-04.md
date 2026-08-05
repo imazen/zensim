@@ -127,6 +127,19 @@ Two routes, neither landed here (see "not done"):
   the parquet column is `Float32` (widening f32→f64 is exact); needs a dtype guard, and
   `std_features` must stay f64 since the standardized value is an f64 division result.
 
+> **LANDED 2026-08-04 — and route 1 above was tried first and MEASURED-DEFEATED.**
+> Freeing each row `Vec` as it is standardized empties the rows at the Rust level but
+> moved full-recipe peak RSS only 11.94 → 10.97 GB: the ~7.5 KB row chunks are allocated
+> interleaved across the loaders' glibc arenas, and once freed they become interior
+> free-list holes that never return to the OS (the standardized buffers are fresh mmaps
+> that cannot reuse them). What shipped instead: the trainer bin flattens each group to
+> ONE row-major `Vec<f64>` at the loader boundary, and standardization TAKES that buffer
+> and transforms it in place — the run never materializes a second copy at all, and no
+> row-count vector was needed (`FeatureRows` caches `n_rows`, which is all
+> `g.features.len()` reads). Full method, both attempts' measurements, and the full-data
+> bit-identity gate:
+> [`trainer_mem_release_2026-08-04.md`](trainer_mem_release_2026-08-04.md).
+
 ### 3. PWRC is O(n²) and runs every epoch
 
 `sa_st_curve` is 7.19 % of cycles. It is computed per epoch per validation group and
@@ -206,12 +219,14 @@ lianli's 24 cores are worth only 2 lanes and why (1) is worth more than any node
   traffic, changes every published number.
 - **No K default change.** Measured at 3.63× and proven to change the model; that is a
   science call.
-- **The dead-copy removal was not landed.** It touches `g.features.len()` in the hot
-  loop of four trainer variants across a 12,738-line module, and it needed to land with
-  a full-data identity gate. Wave 10 was mid-sweep on both lanes, so a full-data A/B
-  could not be run cleanly, and shipping an invasive refactor to a 12 k-line trainer
-  without its own gate is exactly the failure mode this repo's rules exist to prevent.
-  It is written up above with the two viable routes and is the highest-value next task.
+- **The dead-copy removal was not landed *in this pass*.** It touches `g.features.len()`
+  in the hot loop of four trainer variants across a 12,738-line module, and it needed to
+  land with a full-data identity gate. Wave 10 was mid-sweep on both lanes, so a
+  full-data A/B could not be run cleanly, and shipping an invasive refactor to a 12 k-line
+  trainer without its own gate is exactly the failure mode this repo's rules exist to
+  prevent. **Landed later the same day with that gate** —
+  [`trainer_mem_release_2026-08-04.md`](trainer_mem_release_2026-08-04.md); see the
+  correction note in §2 (freeing *after* standardization would not have moved the peak).
 - **`apply_coarse_decay` fusion into the Adam loop** (2.78 %, and it would be
   bit-identical since per-element order is preserved) was scoped and dropped: it adds a
   range test to the hottest loop in the trainer to chase 2.78 %, and the fused branch

@@ -165,11 +165,18 @@ These are the docs to read first for a given purpose:
 
 **If you want to make TRAINING faster** (read this before re-profiling the trainer):
 1. [`trainer_perf_2026-08-04.md`](trainer_perf_2026-08-04.md) — fresh profile: Adam 44 % (divider-bound,
-   irreducible at fixed math), the trainer is RAM-bound not FLOP-bound, half of every lane's 11.88 GB is
-   dead after standardization, `--minibatch-size 32` = 3.63× but changes the bake (gated + measured).
+   irreducible at fixed math), the trainer is RAM-bound not FLOP-bound, half of every lane's 11.88 GB was
+   dead after standardization (fixed — see 2 below), `--minibatch-size 32` = 3.63× but changes the bake
+   (gated + measured).
    Also: lianli is a same-ISA-tier drop-in node, tower is AVX2-only; zenfleet training not worth it
    below ~60–80 runs/wave.
-2. [`trainer_perf_2026-08-04.tsv`](trainer_perf_2026-08-04.tsv) — raw counters, K-scan, gate output
+2. [`trainer_mem_release_2026-08-04.md`](trainer_mem_release_2026-08-04.md) — the dead copy, REMOVED:
+   each group is one flat buffer that standardization takes and transforms in place, so a lane holds
+   one copy of the features, not two. Full-data (11-group, 779k-row) bit-identity gate. Includes the
+   measured failure of the obvious fix — freeing per-row `Vec`s moved full-recipe peak RSS only
+   ~0.4 GB, because scattered ~7.5 KB chunks freed out of interleaved glibc arenas never return to
+   the OS. Gate memory claims on the real process, not an allocator probe.
+3. [`trainer_perf_2026-08-04.tsv`](trainer_perf_2026-08-04.tsv) — raw counters, K-scan, gate output
 
 **If you want to investigate the IW path**:
 1. [`v0_20a_path_a_falsification_2026-05-14.md`](v0_20a_path_a_falsification_2026-05-14.md) — original V_20a falsification (SROCC-gated)

@@ -23,7 +23,7 @@
 
 use zenpredict::{Model, Predictor};
 use zensim_validate::mlp_train::{
-    GroupLossMode, MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp,
+    FeatureRows, GroupLossMode, MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp,
 };
 // Stat math lives in zenstats -- never re-rolled locally, not even in a test.
 use zenstats::panel::spearman;
@@ -52,10 +52,10 @@ fn synth_rows() -> (Vec<Vec<f64>>, Vec<f64>) {
 fn train(mode: GroupLossMode, mse_weight: f64) -> Vec<u8> {
     let (feats, scores) = synth_rows();
     let refs: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
-    let group = TrainingGroup {
+    let mut group = TrainingGroup {
         name: "synth".to_string(),
         human_scores: &scores,
-        features: &refs,
+        features: FeatureRows::Borrowed(&refs),
         metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 1.0,
@@ -76,7 +76,7 @@ fn train(mode: GroupLossMode, mse_weight: f64) -> Vec<u8> {
         ..Default::default()
     };
     let mut log = Vec::new();
-    train_mlp(std::slice::from_ref(&group), N_FEATURES, &hp, &mut log)
+    train_mlp(std::slice::from_mut(&mut group), N_FEATURES, &hp, &mut log)
 }
 
 fn predictions(bake: &[u8]) -> Vec<f64> {
