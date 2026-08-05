@@ -404,6 +404,11 @@ pub const APPEND2_PER_SCALE: usize = 5;
 /// channel axis in its LAYOUT (see [`APPEND2_PER_SCALE`]), but its signals
 /// are accumulated from the Y-channel kernels, so the attribution density
 /// contributes on this channel only.
+///
+/// Layout metadata, so it stays compiled in every configuration — but its
+/// only non-test reader is the `custom-profiles`-gated attribution-density
+/// cluster, hence the targeted dead-code allowance.
+#[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
 pub(crate) const APPEND2_CHANNEL: usize = 1;
 
 /// Named local offsets within one scale's append2 block (all Y-only).
@@ -5701,6 +5706,11 @@ pub(crate) fn compute_folded720_append2_hdr_streaming_impl(
 /// extraction (G-N1 gate). SDR route only for now: HDR-declared inputs get
 /// [`ZensimError::HdrInputRequiresPuPath`] (the 944 set is SDR-by-design;
 /// an HDR fused route is registered future work).
+///
+/// Gated on `custom-profiles`: the fused entry ([`crate::Fused944Session`])
+/// lives in the `attribution` module, which only exists under that feature —
+/// same both-features rule as the `Fused944Session` re-export (af4417f8).
+#[cfg(feature = "custom-profiles")]
 pub(crate) fn compute_folded944_streaming_with_retention(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -5749,6 +5759,10 @@ pub(crate) fn compute_folded944_streaming_with_retention(
 /// lever 1): plane-sized buffers kept across compares in the
 /// [`crate::Fused944Session`] so per-iteration callers pay no allocation /
 /// page-fault cost.
+///
+/// `custom-profiles`-gated with the rest of the fused-retention cluster: its
+/// only consumer is the `attribution` module (af4417f8 rule).
+#[cfg(feature = "custom-profiles")]
 #[derive(Default)]
 pub(crate) struct PassBScratchF32 {
     pub(crate) canvas: Vec<f32>,
@@ -5772,6 +5786,13 @@ pub(crate) struct PassBScratchF32 {
 /// the C3a tolerance class (G-N2/G-P2 gate). Returns the TRIMMED f32
 /// density at `orig_w × orig_h` (the fused caller adds it into the f32
 /// basic canvas; features stay owned by the real extraction).
+///
+/// `custom-profiles`-gated: the f32 pass B below reaches into
+/// `crate::attribution` for its upsample kernel, and that module is
+/// configured out without the feature — a `feature-regime-v2`-only build
+/// failed with E0433 here until this gate (the 87c5e9ef note; same
+/// both-features rule as the `Fused944Session` re-export, af4417f8).
+#[cfg(feature = "custom-profiles")]
 pub(crate) fn compute_v2_append_attribution_from_retention(
     ret: &FoldRetention,
     s_v2: &[f64],
@@ -6580,6 +6601,7 @@ thread_local! {
 }
 
 /// Output of [`compute_v2_append_attribution`].
+#[cfg(feature = "custom-profiles")]
 pub(crate) struct V2AppendAttribution {
     /// Full-resolution density (f64, `width × height`, trimmed to the
     /// original image), in score units per pixel.
@@ -6600,6 +6622,12 @@ pub(crate) struct V2AppendAttribution {
 }
 
 /// Per-(scale, channel) pass-A pooled state.
+///
+/// Stays compiled in every configuration (it is a [`FoldRetention`] field
+/// type, and the walk's retention hooks write it), but its fields are only
+/// READ by the `custom-profiles`-gated attribution-density cluster — hence
+/// the targeted dead-code allowance.
+#[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
 #[derive(Default, Clone, Copy)]
 struct AttrCellSums {
     dense: DenseAccum,
@@ -6636,6 +6664,7 @@ impl AttrChPlanes {
 /// Blur + cache one (scale, channel): materialized strip walk
 /// (`gather_strip_halo` + `run_blur_pass_strip` + the `stream_phase_a`
 /// σ-split chain for `bs2`), core rows copied into `planes`.
+#[cfg(feature = "custom-profiles")]
 fn attr_blur_cache_channel(
     src: &[f32],
     dst: &[f32],
@@ -6706,6 +6735,7 @@ fn attr_blur_cache_channel(
 /// Pass A kernels for one (scale, channel) over cached planes: production
 /// dense/gradient/append kernels in kernel-strip order + canonical
 /// blockiness. `cross` = `(act_x, act_b)` full planes for the Y channel.
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_a_kernels(
     src: &[f32],
@@ -6789,6 +6819,7 @@ fn attr_pass_a_kernels(
 /// the raw gradients and the pass-A pooled sums. Field semantics: each is
 /// the multiplier on the named per-pixel term in the pass-B combine (the
 /// `s_k` sign fold and `1/N` already applied).
+#[cfg(feature = "custom-profiles")]
 #[derive(Default, Clone, Copy)]
 struct V2AppCoeffs {
     // v2 mean-pool slots: coefficient × per-pixel value.
@@ -6856,6 +6887,7 @@ struct V2AppCoeffs {
     inv_n: f64,
 }
 
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn derive_v2app_coeffs(
     s_v2: &[f64],
@@ -7055,6 +7087,7 @@ fn derive_v2app_coeffs(
 /// REGRESSED all 8 gate cells (−0.01..−0.08); the pure `I − K` adjoint for
 /// residual signals allocates zero net mass and is structurally wrong for
 /// removal semantics — both recorded in the C2b benchmark section.
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_channel(
     src: &[f32],
@@ -7072,7 +7105,9 @@ fn attr_pass_b_channel(
     // Row-banded parallel main+gradient sweeps (C2b Part 2): each band
     // writes only its own rows of id/win (disjoint), reads shared planes
     // (gradient reads ±1 row of src/dst — immutable). Blockiness stays
-    // serial (it writes the row ABOVE at lattice rows).
+    // serial (it writes the row ABOVE at lattice rows). Only the rayon arm
+    // bands, so the const is `threads`-gated with it.
+    #[cfg(feature = "threads")]
     const BAND: usize = 64;
     #[cfg(feature = "threads")]
     if parallel && height > BAND {
@@ -7100,6 +7135,7 @@ fn attr_pass_b_channel(
 
 /// Rows `[y0, y1)` of the main + gradient sweeps; `id_rows`/`win_rows` are
 /// the band-local output slices (row `y` writes at `(y − y0) * width`).
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_rows(
     src: &[f32],
@@ -7355,6 +7391,7 @@ fn attr_pass_b_rows(
 /// dies only when BOTH pixels are refined; halving allocates the mass
 /// consistently when a partition boundary splits the pair). Serial — the
 /// horizontal family writes the row above.
+#[cfg(feature = "custom-profiles")]
 fn attr_pass_b_blockiness(
     src: &[f32],
     dst: &[f32],
@@ -7398,6 +7435,7 @@ fn attr_pass_b_blockiness(
 /// `cross_on` branch, folded into coefficients). Serves the fused
 /// folded-944 entry ONLY — the standalone f64 pass-B and its strict tests
 /// are untouched (the C3a precedent).
+#[cfg(feature = "custom-profiles")]
 #[derive(Clone, Copy)]
 struct V2AppCoeffsF32 {
     c_ssim: f32,
@@ -7460,6 +7498,7 @@ struct V2AppCoeffsF32 {
 /// Fold a derived [`V2AppCoeffs`] into the f32 pack. `cross_on` = the f64
 /// kernel's `cross.is_some()` (Y channel): when false, the lum-transducer
 /// and cross-mask terms are zeroed exactly as the f64 branch skips them.
+#[cfg(feature = "custom-profiles")]
 fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
     // dev2: s·(2μd − d²) / (2·f2·N)  →  lin/quad in d.
     let (mut pd1, mut pd2, mut pd3, mut pd4) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
@@ -7548,6 +7587,7 @@ fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
 /// by the SIMD kernel's row tail and the sub-8-wide fallback, so there is
 /// exactly ONE formula source. Returns `(id_add, win_add)` (`id` carries
 /// the pixel + residual classes, `win` the window class).
+#[cfg(feature = "custom-profiles")]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_main_px(
@@ -7695,6 +7735,7 @@ fn attr_pass_b_main_px(
 /// monolith (measured scalar `divss` codegen — appendix P lever 1), so
 /// this is the explicit magetypes port, the same §A.14 pattern as
 /// `dense_block_kernel_generic`.
+#[cfg(feature = "custom-profiles")]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
@@ -7865,6 +7906,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
 }
 
 /// Tiered magetypes entry for the pass-B main sweep.
+#[cfg(feature = "custom-profiles")]
 #[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_main_entry(
@@ -7903,6 +7945,7 @@ fn attr_pass_b_main_entry(
 /// dummies (== `ref_y`) for non-Y channels — their coefficients are
 /// zeroed at fold time. Precision class: the fused entry's C3a tolerance
 /// (G-P2), NOT the standalone's strict identities.
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_rows_f32(
     src: &[f32],
@@ -7936,6 +7979,7 @@ fn attr_pass_b_rows_f32(
 
 /// Scalar per-pixel gradient-family integrand of the f32 fused pass-B —
 /// shared by the SIMD kernel's edge/tail pixels (ONE formula source).
+#[cfg(feature = "custom-profiles")]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_grad_px(
@@ -8007,6 +8051,7 @@ fn attr_pass_b_grad_px(
 /// SIMD gradient-family sweep — generic over any [`F32x8Backend`] token;
 /// interior pixels 8-wide with unaligned ±1 neighbor loads, x-edges and
 /// the sub-8 tail through the scalar [`attr_pass_b_grad_px`].
+#[cfg(feature = "custom-profiles")]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
@@ -8186,6 +8231,7 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
 }
 
 /// Tiered magetypes entry for the pass-B gradient sweep.
+#[cfg(feature = "custom-profiles")]
 #[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_grad_entry(
@@ -8206,6 +8252,7 @@ fn attr_pass_b_grad_entry(
 /// Gradient-family sweep of the f32 fused pass-B (gms / gms-dev / ringing
 /// / banding / BANDVIS / edge-width) — magetypes-tiered dispatch; skipped
 /// entirely when every gradient-family coefficient is zero.
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_grad_rows_f32(
     src: &[f32],
@@ -8237,6 +8284,7 @@ fn attr_pass_b_grad_rows_f32(
 
 /// f32 twin of [`attr_pass_b_blockiness`] (serial — the horizontal family
 /// writes the row above).
+#[cfg(feature = "custom-profiles")]
 fn attr_pass_b_blockiness_f32(
     src: &[f32],
     dst: &[f32],
@@ -8278,6 +8326,7 @@ fn attr_pass_b_blockiness_f32(
 
 /// f32 twin of [`attr_pass_b_channel`]: row-banded parallel main+gradient
 /// sweeps into f32 id/win planes; blockiness serial.
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_channel_f32(
     src: &[f32],
@@ -8292,6 +8341,8 @@ fn attr_pass_b_channel_f32(
     id_plane: &mut [f32],
     win_plane: &mut [f32],
 ) {
+    // Band size for the rayon arm below; `threads`-gated with it.
+    #[cfg(feature = "threads")]
     const BAND: usize = 64;
     let (ax, ab) = cross.unwrap_or((ref_y, ref_y));
     let run = |y0: usize, y1: usize, id_rows: &mut [f32], win_rows: &mut [f32]| {
@@ -8345,6 +8396,7 @@ fn attr_pass_b_channel_f32(
 /// of E(n−2) so its gradient weight folds into E(n−2)'s. δmgd per
 /// refined pixel = −(|∇d|−|∇s|)_i/N on BOTH terms (sign FD-gate-verified
 /// in C2a). `dims[u]` are scale `u`'s plane dims.
+#[cfg(feature = "custom-profiles")]
 fn attr_ew_coeff(
     s_v2: &[f64],
     mg: &[[(f64, f64); 3]],
@@ -8410,6 +8462,7 @@ fn attr_ew_coeff(
 /// folded-944 retention path. `rplanes`/`dplanes` are the scale's pyramid
 /// planes, `dims` the per-scale plane dims, `(w0, h0)` the scale-0
 /// (canvas) dims.
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_for_scale(
     scale: usize,
@@ -8505,6 +8558,11 @@ fn attr_pass_b_for_scale(
 /// folded to the f32 pack, f32 combine kernels, window spread fused with
 /// the window→identity merge ([`crate::blur::box_spread_merge_f32`]), f32
 /// sum-preserving footprint upsample into the f32 canvas.
+///
+/// `custom-profiles`-gated: calls `crate::attribution::
+/// upsample_add_sum_preserving_f32`, which does not exist without that
+/// feature (the fused-entry cluster; af4417f8 rule).
+#[cfg(feature = "custom-profiles")]
 #[allow(clippy::too_many_arguments)]
 fn attr_pass_b_for_scale_f32(
     scale: usize,
@@ -8601,6 +8659,16 @@ fn attr_pass_b_for_scale_f32(
 /// zero). Toggles are fixed to `V2NewFeatureToggles::default()` — the
 /// 924/944-regime canon. See the section comment above for integrand
 /// classes and the documented approximations.
+///
+/// The whole attribution-density cluster (this entry, its pass A/B helpers,
+/// and the f32 fused twins above) is `custom-profiles`-gated: every non-test
+/// consumer lives in `crate::attribution`, which only exists under that
+/// feature — the same both-features rule af4417f8 applied to the
+/// `Fused944Session` re-export. Without the gates, a
+/// `feature-regime-v2`-only build failed to COMPILE (E0433 on
+/// `crate::attribution` in the f32 pass B; flagged in 87c5e9ef) and, once
+/// that was gated, dead-coded the remaining 27 items of the cluster.
+#[cfg(feature = "custom-profiles")]
 pub(crate) fn compute_v2_append_attribution(
     reference: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -8722,6 +8790,10 @@ pub(crate) fn compute_v2_append_attribution(
         };
         #[cfg(not(feature = "threads"))]
         let did_parallel = false;
+        // `parallel` is only consulted by the rayon arm above; consume it on
+        // no-`threads` builds (same idiom as `attr_pass_b_channel`).
+        #[cfg(not(feature = "threads"))]
+        let _ = parallel;
         if !did_parallel {
             for ch in 0..3 {
                 attr_blur_cache_channel(
@@ -12898,6 +12970,8 @@ mod tests {
     /// pooled scalars every coefficient derives from are
     /// production-arithmetic. Compared against the canonical folded-append
     /// STREAMING extractor (what the 924 bakes were trained on).
+    // Exercises the custom-profiles-gated attribution-density cluster.
+    #[cfg(feature = "custom-profiles")]
     #[test]
     fn v2_append_attr_features_match_production() {
         let (w, h) = (150usize, 170usize);
@@ -12962,6 +13036,8 @@ mod tests {
     /// per-pixel signals in f64 while the kernels pooled f32-lane values —
     /// a documented recompute-precision gap, NOT a pooling mismatch (that
     /// is gated at 1e-9 by `v2_append_attr_features_match_production`).
+    // Exercises the custom-profiles-gated attribution-density cluster.
+    #[cfg(feature = "custom-profiles")]
     #[test]
     fn v2_append_attr_sum_identities() {
         let (w, h) = (150usize, 170usize);
@@ -13082,6 +13158,8 @@ mod tests {
     /// three non-decomposable slots. Same 1e-5 class as
     /// `v2_append_attr_sum_identities` (pass B re-derives in f64 over
     /// f32-lane-pooled kernels).
+    // Exercises the custom-profiles-gated attribution-density cluster.
+    #[cfg(feature = "custom-profiles")]
     #[test]
     fn append2_attr_sum_identities_and_zero_slots() {
         let (w, h) = (150usize, 170usize);
@@ -13165,6 +13243,8 @@ mod tests {
     /// sign bug before it landed). Refining a block toward the reference
     /// must move the production feature by the amount the density's
     /// rectangle sum predicts, in SIGN and order of magnitude.
+    // Exercises the custom-profiles-gated attribution-density cluster.
+    #[cfg(feature = "custom-profiles")]
     #[test]
     fn append2_attr_bandvis_fd_direction() {
         let (w, h) = (160usize, 160usize);
@@ -13277,6 +13357,8 @@ mod tests {
     /// Global-slot integrand sanity: refining a block moves GLOBAL_DMEAN's
     /// density block-sum onto the TRUE feature delta (first-order; the
     /// global slots have no blur bleed, so the agreement is tight).
+    // Exercises the custom-profiles-gated attribution-density cluster.
+    #[cfg(feature = "custom-profiles")]
     #[test]
     fn v2_append_attr_global_dmean_matches_true_delta() {
         let (w, h) = (128usize, 128usize);
@@ -13347,6 +13429,8 @@ mod tests {
     /// FINITE removal — magnitude agreement is loose by nature (blur bleed
     /// alone moves mass across the block border) — but the SIGN and the
     /// gross magnitude must agree, or a chain-rule sign error exists.
+    // Exercises the custom-profiles-gated attribution-density cluster.
+    #[cfg(feature = "custom-profiles")]
     #[test]
     fn v2_append_attr_signed_integrand_directions() {
         let (w, h) = (128usize, 128usize);

@@ -127,6 +127,15 @@ jobs:
             "avx512,imgref,training,classification"
             "avx512,imgref,training,classification,zenpixels"
             "imgref,classification"
+            # custom-profiles/feature-regime-v2 axes — absent from this list
+            # until 2026-08-05, which is why the feature-regime-v2-only
+            # E0433 (feature_v2.rs referencing the custom-profiles-gated
+            # attribution module; flagged in 87c5e9ef) shipped uncaught.
+            # Three points cover the interaction class: each feature alone,
+            # and the fused-entry pair (af4417f8's both-features rule).
+            "custom-profiles"
+            "feature-regime-v2"
+            "custom-profiles,feature-regime-v2"
           )
           for features in "${features_list[@]}"; do
             if [ -z "$features" ]; then
