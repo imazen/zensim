@@ -9118,3 +9118,313 @@ lever — no guessing, no unregistered lever landing.
    map compound its shape; G-P5's decoded-judged A/B is the arbiter.
 3. The one-time iter-0 gradient probe (299.9 ms) is NOT in scope; it is a
    registered residual (batched forward probing is a future lever).
+
+# REGISTERED APPENDIX Q — HDR-NATIVE PHASE 1: FIRST 944-ROUTE CANDIDATES VS BHdr (2026-08-05, pre-registered)
+
+Registered and pushed BEFORE any gate run, tool extension, or fit. Nothing below
+is chosen after seeing a phase-1 number. Everything in Q.0 is an on-disk /
+committed fact verified during the 2026-08-05 inventory; none is a result of
+this appendix.
+
+## Q.0 Why this exists + the inventory (facts, not results)
+
+**The user's directive: "we need to work on an hdr model."** BHdr
+(`zensim/weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin`, sha `7d7f2123…`,
+372-input linear, v3 PU-linear regime) is the incumbent HDR ship: UPIQ pooled
+|SROCC| **0.7536**, narwaria **0.7834**, korshunov **0.9175**
+(`upiq_panel.py` recorded run, pulinear features). No HDR-native model has ever
+been trained at the current HDR extraction regime. This appendix registers the
+first candidates.
+
+**Regime decision (the design section): phase 1 trains at `Folded720Append2`
+(944) on the chunk-2 HDR route — no new `FeatureRegime`, no new slots.**
+Rationale from the inventory:
+
+- The chunk-2 streaming PU-XYB front-end is **the ONE HDR extraction regime**
+  (user directive `f6db340e`; gates in
+  `benchmarks/hdr_streaming_gates_2026-07-27.md`: SDR byte-stability PASS,
+  robustness PASS, cross-route consistency 0.987, UPIQ 0.7145 read-through,
+  perf +17% attributed). Entry: `Zensim::compute_folded720_append2_features_hdr`
+  (`HdrEncoding::{Linear,Pq,Hlg}`). The append2 block (f924..943) carries the
+  HDR-specific slots — `HL_BIN1/2` (PU anchors at 100/1000 cd/m²) fire on the
+  HDR route only (33,020 nonzero entries in the hdr944 leg, per its manifest).
+- The f944+ CSFW block (12 lanes, `Folded720Csfw` = 956) EXISTS but **failed
+  its SDR G6 LOO** (`benchmarks/csfw_g6_loo_2026-07-29.md`: Σ +0.0608, lanes
+  default-OFF); its cross-route commensurability claim is explicitly
+  unadjudicated in the HDR regime (that doc's consequence 2). Building MORE
+  HDR slots (chroma tiers f956..f979) before the first HDR-native model exists
+  would be design-before-measurement. So: 944 now; CSFW-at-HDR and chroma
+  tiers are registered phase-2 items (Q.6), not phase-1 scope.
+- **Extractor + data already exist and are gated** — phase-1 scope items
+  "extractor implementation" and "data build" were completed by prior waves:
+  the hdr944 leg (`/mnt/v/output/zensim/hdr944-leg/`, `_MANIFEST.json`
+  build_commit `b464855ab528`) holds hdr_v3mix at 944: train 7,410 rows
+  (== the 2026-07-03 v3 corpus exactly; targets carried 7,386 bitwise + 24 at
+  ≤1.2e-7, mechanism proven), val 3,900 rows; f156..371 structural zeros
+  verified; validator PASS. Target = cvvdp-mix
+  `0.5·clip01(ssim2/100) + 0.5·clip01((JOD−6)/4)` — the proven winner (the
+  ledger's "most load-bearing" row; cvvdp-SCALAR is a registered dead end).
+- **The eval estate already exists at 944**: `scripts/external_reads/`
+  (stored tables, sha-pinned): UPIQ HDR 380×944 (`upiq_hdr_944.csv`,
+  `d3958cada8d8bbf8`), SI-HDR 2,172×944, HDR-VDC 580×944, AVT 195×944, CHUG,
+  Rousselot 2×96×944; `--scorer bake:<bin>` forwards any 944-contract bake
+  over all of them in ~11 s. The SDR panel exists via `bake_verdict --regime
+  944` on `ext944-canonical-2026-08-01`.
+- **What the B-gap amendment already measured** (this doc, "B-gap
+  resolution"): the hdr944 leg as a LINEAR arm-B training leg does NOT close
+  the SDR 944 linear-class gap; the leg lifts the kon head + repairs HF-NL
+  inversion at canonhdr15 weight. It did NOT train an HDR-purpose model or
+  evaluate on UPIQ. Its registered open lever (shaped screen fit ON the hdr
+  leg) stays open (Q.6).
+- **AIC-HDR2025 is still NOT RELEASED upstream** — live-checked 2026-08-05
+  (github.com/jpeg-aic/AIC-HDR2025 README still says "publicly released after
+  QoMEX 2025"; the conference ended 2025-10-02, ten months ago). Local dir
+  remains README-only. Acquisition list: Q.6.
+- **M3a / attribution is structurally SDR** (this doc §4387-class facts: the
+  attribution route prepares both sides through the SDR
+  `prepare_v2_reference_impl` and passes `hl=false`, so HL bins are
+  identically 0; appendix N: "SDR-by-design; HDR fused is future work").
+  **No HDR coherence number exists or can be produced today — phase-1 states
+  this as a registered gap with a build item (Q.6), it does not fake one.**
+- Routing design fact: `is_hdr + LinearF32Rgba + Opaque` pairs auto-route on
+  the plain streaming entries; PQ/HLG code-value containers declare
+  `HdrEncoding` at the entry. Production profile routing (a B/BHdr-style
+  descriptor flip at 944) is phase-2+; phase-1 candidates are evaluated as
+  bakes, not wired into a profile.
+
+## Q.1 Data gates (run BEFORE any fit; all four must pass; results in Q.R)
+
+- **G-Q1 target orientation** — extend the owner
+  (`scripts/canonical_corpus/check_target_orientation.py`) with an
+  `hdr_v3mix` corpus: assert `sign(SROCC(human_score, score_cvvdp)) > 0` on
+  both hdr944 parquets. Declared orientation registered here: cvvdp JOD is
+  QUALITY-oriented (10 = imperceptible, higher = better); ssim2
+  quality-oriented; the mix of two quality-oriented clips is
+  quality-oriented. Honesty caveat registered: human_score derives 50% from
+  score_cvvdp, so this is a mix-vs-raw-JOD consistency sign test (it catches
+  a stored inversion of the mix column — the exact APPENDIX F defect class),
+  not an independent-label test. Verdict recorded into the leg's
+  `_MANIFEST.json` (`target_orientation` key, the script's convention).
+- **G-Q2 table integrity** —
+  `scripts/canonical_corpus/check_table_integrity.py` on both hdr944
+  parquets (A1/A2/A5/B1/B2/C1 as applicable; B2 must classify f156..371
+  against the structural-zero block).
+- **G-Q3 split honesty** — train∩val origin overlap = ∅ on the leading
+  numeric stem (the imazen-26 origin rule used by the builder;
+  `origin_split.split_of`). Any overlap ⇒ STOP.
+- **G-Q4 eval-source disjointness** — the hdr944 leg's reference sources
+  (imazen-26 HDR grid) vs every eval source this appendix reads: UPIQ
+  (narwaria/korshunov), SI-HDR, HDR-VDC, AVT, CHUG, Rousselot. By
+  construction these are different photographic sources; G-Q4 verifies the
+  ref inventories are disjoint (no shared source identity) and records the
+  check. Any hit ⇒ STOP, report.
+
+A FINDING on any gate stops the wave before training; fixes land + re-gate
+before any fit.
+
+## Q.2 Candidates (frozen)
+
+**MLP cells, k=3.** Recipe = the wave-11 corrected-mix argv (K.1: `WAVE10_ECHO=1
+scripts/wave10_seed.sh L9 <seed>`) **+ exactly two added `--group` tokens,
+nothing else changed** (echo-diff committed as the verify artifact, the K.1
+pattern):
+
+```
+--group hdr:/mnt/v/output/zensim/hdr944-leg/hdr_v3mix944_traindigits_2026-08-03.parquet:1.2:0.0:both
+--group hdr_val:/mnt/v/output/zensim/hdr944-leg/hdr_v3mix944_valdigits_2026-08-03.parquet:0.0:2.0:both
+```
+
+This mirrors the committed konjnd_bpg / konjnd_bpg_val pattern (train leg with
+val_w 0, dedicated val-only leg). Pair sampling is **weight-proportional across
+groups** (verified in `zensim-train-core/src/hybrid_head.rs` — `weight_cdf`
+normalizes `train_weight` alone; rows do not enter). The registered share
+table (Σw = 7.05):
+
+| group | train_w | pair share |
+|---|--:|--:|
+| hdr | 1.2 | **17.02%** |
+| konjnd_bpg | 1.2 | 17.02% |
+| safesyn | 1.0 | 14.18% |
+| cid22_train | 1.0 | 14.18% |
+| kadid | 0.5 | 7.09% |
+| tid | 0.5 | 7.09% |
+| bigcodec | 0.5 | 7.09% |
+| tsafesyn | 0.5 | 7.09% |
+| ttbig | 0.5 | 7.09% |
+| kadis | 0.15 | 2.13% |
+
+Weight rationale (registered before any fit): 1.2 = the konjnd_bpg precedent
+for a purpose-leg voice — large enough to drive HDR behavior, small enough
+that the SDR mass (~83%) keeps the shared structure PLAN_HDR step 5 called
+for. `hdr_val` at val_w 2.0 ties cid22_train as the strongest best-val voice,
+so checkpoint selection hears HDR validation. Pure-HDR training (7,410 rows,
+MLP class) is registered as rejected for phase 1: the MLP family's documented
+collapse modes + the tiny corpus make it a phase-2 ablation
+(`Q-P2c`), not the first read.
+
+Seeds **{6101, 6103, 6107}** — grepped clean against this document (6105 was
+excluded for two coincidental textual hits). Trainer = current-main
+flat-buffer build; binary sha256 recorded in Q.R (no pooling with any prior
+wave is claimed, so no cross-build identity gate is required; the L9-argv
+echo-diff is the recipe-identity instrument). Bakes:
+`/mnt/v/output/zensim/bakes/hdrp1/Q_hdr944_s{6101,6103,6107}.bin`.
+
+**Linear control (the BHdr-family baseline at 944), 1 cell.** The pinned
+deterministic instrument, exactly the LOO-wave pattern
+(`bandvis-loo-2026-07-28/harness/run_twin944.py`):
+`scripts/v_next/linear_projections_2026-07-03.py` loaded verbatim,
+`ZLIN_NFEAT=944`, `ZLIN_SCREEN=screen_720_merged_safe.tsv` (f720+ identity),
+BVLS, shipped v1 sign mask, tau 0, no ridge — mix = **the hdr leg only**
+(`hdr944 train`, human_score, weight 1.0), the BHdr shape (BHdr was fit on
+hdr_v3mix alone). Bake: `Q_lin944_hdr.bin`. Deterministic (no seed). Its role
+is ATTRIBUTION: if MLP cells beat it, depth matters at 944-HDR; if it beats
+BHdr, the regime alone carries; if both lose, the regime is the suspect.
+
+## Q.3 Evaluation protocol (frozen; owners only)
+
+1. **In-domain val (selection + sanity, unlimited looks):**
+   `predict_features_with_bake` over `hdr_v3mix944_valdigits` →
+   `scripts/lib/zen_stats.panel` SROCC/PLCC vs human_score (the mix target).
+   No UPIQ involvement in any selection or iteration decision.
+2. **UPIQ (THE gate; burn-limited):** extend the owner
+   (`scripts/hdr/upiq_panel.py`) with a per-side features flag so the paired
+   bootstrap can compare bakes with DIFFERENT feature contracts on the same
+   380 conditions: candidate side = the stored 944 extraction
+   (`hdr-dmean-2026-07-29/upiq_hdr_944.csv`, chunk-2 route, condition_id-
+   aligned to the JOD csv), BHdr side = `upiq_features_372_pulinear.parquet`
+   (its production regime — the docstring's regime warning). Stats stay in
+   `zen_stats.panel_batch` (rng 20260714, unchanged draw order); the
+   recorded BHdr numbers must reproduce in the same run (0.7536/0.7834/
+   0.9175) or the run is invalid. Per candidate: pooled + per-stratum
+   Δ|SROCC| with 10k paired bootstrap, p = fraction of resamples where BHdr
+   ≥ candidate.
+   **UPIQ look budget = exactly 4** (3 MLP cells + 1 linear control), all
+   scored in one batch after training completes, no iteration afterward
+   regardless of outcome. Burn ledger: UPIQ-380 stood at ~22 looks
+   (`bhdr_improvement_split_lineage` §; PLAN_HDR_SDR_ALIGNMENT §2); Q.R
+   records the +4. BHdr's re-forward is a reproduction, not a look.
+3. **External reads (descriptive, not gates):**
+   `run_external_reads.py --scorer bake:<bin>` per candidate → SI-HDR,
+   HDR-VDC, AVT, CHUG, Rousselot + the UPIQ probe-side rows, from stored
+   tables.
+4. **SDR regression panel (report-both, not a bar):** `bake_verdict
+   --regime 944` on the canonical corpora (cid22, kadid, tid, csiq, live,
+   konjnd, aic3, aic4, nonphoto, imazen26) + the dial grid — an HDR model
+   must not be shipped-blind on SDR behavior; phase 1 reports it, no SDR bar
+   is set for an HDR-purpose candidate.
+5. **M3a:** NOT COMPUTABLE for the HDR route (Q.0). The SDR-content M3a
+   diagnostic on these bakes is OPTIONAL and deferred while main's
+   `v1_golden_bytes` CI red (under bisection by another lane at registration
+   time) is open — the M3a instrument re-extracts; everything else in this
+   appendix reads stored features and is unaffected. If run later it is
+   labeled "SDR-content M3a (diagnostic)" and never presented as HDR
+   coherence.
+
+## Q.4 Registered outcomes (frozen; per the phase-1 brief)
+
+Per-cell WIN = pooled Δ|SROCC| > 0 with p ≤ 0.05 (10k paired bootstrap).
+Per-cell LOSS = pooled Δ|SROCC| < 0 with the reverse p ≤ 0.05.
+
+- **(a) BEAT** — ≥2 of the 3 MLP cells are per-cell WINs ⇒ the HDR-native
+  944 program's phase 2 (scale + battery: seed depth, weight/recipe
+  ablations Q-P2a..d, dial instrument) is justified. NOTHING ships — BHdr
+  stays the ship until a user-gated freeze decision.
+- **(b) PARITY** — neither (a) nor (c) ⇒ report exactly which axes moved
+  (strata, external rows, in-domain val), and whether the linear control's
+  position attributes the residual to regime vs architecture. Phase-2 case
+  rests on the moved axes, argued honestly.
+- **(c) LOSS** — ≥2 of 3 MLP cells are per-cell LOSSes ⇒ the linear family
+  stays HDR champion; said plainly; phase-2 pivots to the registered levers
+  (Q-P2b screen-on-hdr-leg, Q-P2a CSFW-at-HDR) instead of MLP scale.
+
+Strata are reported alongside pooled in every case (pooled UPIQ mixes two
+studies' scales — the §8.1 caveat); a pooled WIN with a reverse-significant
+stratum LOSS is reported as such, not silently pooled away.
+
+## Q.5 Ops (frozen)
+
+- Workspace `../zensim--hdrp1` on main@origin; `CARGO_TARGET_DIR=$HOME/tmp/
+  zensimhdr-target`; every heavy step under `run-heavy --jobs 6`; logs
+  `~/tmp/hdrp1/`; trainer cells SERIALIZED (one at a time, `await_artifacts`
+  heartbeat + `.done` markers; the loop-perf lane shares the box).
+- Artifacts: `/mnt/v/output/zensim/bakes/hdrp1/` (bakes + verdict JSONs +
+  upiq panel outputs + echo-diff verify). Tower mirror: the hdr944-leg dir
+  (currently unmirrored — closed as part of this wave) +
+  `zensim-hdrp1-2026-08-05/` for the bake dir. sha256 manifest per the ML
+  data rules.
+- Doc registrations in the same wave: DATA_SPLITS row for the hdr944 digit
+  split (currently absent — only UPIQ has an HDR row); DATASET_HISTORY entry
+  for the leg's phase-1 use; burn-ledger +4 note.
+- Tool extensions land with their parity evidence BEFORE first use:
+  upiq_panel.py extension must reproduce the recorded BHdr triplet through
+  the NEW code path on the OLD default table before any candidate is scored;
+  check_target_orientation.py hdr_v3mix mode lands with a synthetic
+  inverted-fixture test.
+
+## Q.6 Registered gaps + phase-2 items (stated before any result)
+
+- **Q-G1 HDR attribution/M3a (build item):** an HDR-route attribution entry —
+  prepare both sides through the PU front-end, pass `hl=true` into
+  `attr_pass_a_kernels`, extend the fused-944 session per appendix N's "HDR
+  fused is future work". Until it lands, no HDR candidate can take the M3a
+  coherence gate; MLP-class is still preferred for coherence on the SDR
+  evidence (MLPs beat linears on M3a at every measured width).
+- **Q-G2 AIC-HDR2025:** unreleased upstream (live-checked 2026-08-05).
+  Acquisition list: re-check the repo periodically; author contact is a
+  user-gated option; SI-HDR / HDR-VDC / AVT / CHUG / Rousselot stored reads
+  partially substitute for external HDR validation breadth. The ordered-
+  probit reconstruction plan (PLAN_HDR step 3a) stays parked until release.
+- **Q-G3 / Q-P2a CSFW-at-HDR adjudication:** extract hdr_v3mix at 956 (HDR
+  route), adjudicate the 12 CSFW lanes where their claimed value lives (the
+  G6 verdict's consequence 2) — LOO or paired cells. Phase 2.
+- **Q-G4 / Q-P2b shaped screen fit ON the hdr leg** (the B-gap open lever) —
+  phase 2, benefits both the linear family and MLP transforms.
+- **Q-P2c pure-HDR and weight-sweep MLP ablations** (hdr train_w ∈ {0.6,
+  2.4, pure}) — phase 2, only if (a) or (b) fires.
+- **Q-G5 HDR dial instrument:** no HDR-native densified dial grid exists at
+  944 (PLAN_HDR step 4 predates the regime); G1/G3 dial gates cannot run on
+  HDR content. Phase-2 build item (the SDR dial-grid recipe over the
+  imazen-26-hdr ladder).
+- **Q-G6 training-data breadth:** hdr_v3mix is zenjxl-only, imazen-26-source,
+  metric-teacher-labeled. Real human-anchored HDR *training* data does not
+  exist locally (UPIQ is holdout; AIC-HDR2025 unreleased; kadis-hdr
+  synthetic breadth is measured-dead). The honest phase-1 stop (brief item
+  5) is therefore partially in force regardless of outcome: candidates can
+  be trained and gated, but human-anchored HDR training remains
+  data-acquisition-blocked.
+
+## Q.7 Confounds + limitations (registered)
+
+1. **UPIQ n=380, ~22 prior looks** — a degraded holdout; outcome (a) is
+   phase-2 justification, never ship evidence on its own.
+2. **Regime asymmetry in the comparison** — candidates read chunk-2-route
+   944 features, BHdr reads its own pulinear-372; this is inherent to
+   comparing end-to-end systems across regimes (the V4 gate compared the
+   same way). The paired bootstrap pairs by condition, which is
+   regime-independent.
+3. **The mix target is metric-derived** — winning the in-domain val split
+   proves teacher fit, not human validity; that is exactly why UPIQ is the
+   only gate.
+4. **k=3 seeds, no CI** — median + range reported; the campaign's own
+   coherence study showed large seed variance on some axes; (a)'s ≥2-of-3
+   rule is the seed-robustness floor, not a significance claim.
+5. **best_val is a blended voice** — hdr_val shares checkpoint selection
+   with SDR val groups; a cell could checkpoint at an SDR-favorable epoch.
+   Registered as recipe-inherent for the co-trained design.
+6. **CI red on main at registration** (`v1_golden_bytes` divergence, another
+   lane bisecting) — all phase-1 reads use stored features; the trainer does
+   not extract; the only deferred item is the optional SDR-M3a diagnostic.
+7. **UPIQ HDR-380's extraction encoding** — the stored 944 table was
+   extracted by the hdr-dmean wave from the UPIQ EXR/PNG chain
+   (`HdrEncoding::Linear` class); the hdr944 training leg is PQ-decoded.
+   Both are the same PU front-end after decode (the chunk-2 contract); the
+   difference is the container, not the route. Stated for the record.
+
+## Q.8 Deliverables
+
+Q.R results section (gates → cells → candidate table vs BHdr with the UPIQ
+verdict + which outcome fired); the two tool extensions with parity evidence;
+committed echo-diff verify artifact; verdict/panel JSONs under the artifact
+dir with sha256 manifest + Tower mirror; DATA_SPLITS + DATASET_HISTORY +
+burn-ledger registrations; CLAUDE.md/SESSION-RESUME pointer updates if the
+outcome changes standing guidance.
