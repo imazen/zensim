@@ -280,18 +280,52 @@ def _panel_srocc_plcc(pred, ref):
 
 
 
-# Corpora whose SROCC sign carries no meaning: `konjnd`'s validation target is a
-# mean-PJND threshold, so its SROCC is STRUCTURALLY negative on at-PJND pairs and
-# |SROCC| is the correct reading. Everything else is quality-oriented — a negative
-# there is a genuine ranking INVERSION and must not earn credit anywhere.
-# Added 2026-08-04 after the ext-lineage KADID eval target was found stored inverted
-# (benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F): the board was
-# rendering 110 anti-correlated bakes as positive magnitudes.
-SIGN_ABS_CORPORA = {"konjnd"}
+# Corpus label ORIENTATION — read from THE registry, never hardcoded here.
+#
+# The owner is `EXPECTED_ORIENTATION` in
+# scripts/canonical_corpus/check_target_orientation.py (campaign Appendix I,
+# 2026-08-04): three eval corpora — aic4 (188/188 board fullevals negative),
+# sdr25 (171/171), konjnd (187/188) — carry DISTORTION-oriented JND-family
+# labels (`q_jnd` distance / PJND threshold), so their signed SROCC is negative
+# BY CONVENTION and |SROCC| is the correct magnitude reading. Everything
+# quality-oriented keeps its sign: a negative there is a genuine ranking
+# INVERSION (the Appendix F failure mode) and must not earn credit anywhere.
+# A POSITIVE signed SROCC on a distortion-oriented corpus is the same defect
+# mirrored — an orientation MISMATCH against the declared convention.
+#
+# We AST-parse the owner instead of importing it (its module imports pyarrow +
+# reads corpus paths at import time) and instead of copying the set (which is
+# how display code drifts from the registry). Parse failure fails the BUILD:
+# a board that silently mis-renders orientation is worse than no board.
+def _load_expected_orientation():
+    import ast
+    p = Path(__file__).resolve().parents[2] / "scripts" / "canonical_corpus" / \
+        "check_target_orientation.py"
+    tree = ast.parse(p.read_text())
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "EXPECTED_ORIENTATION"
+                        for t in node.targets)
+                and isinstance(node.value, ast.Dict)):
+            names = {"QUALITY": "quality", "DISTORTION": "distortion"}
+            out = {}
+            for k, v in zip(node.value.keys, node.value.values):
+                if isinstance(k, ast.Constant) and isinstance(v, ast.Name) and v.id in names:
+                    out[k.value] = names[v.id]
+            if out:
+                return out
+    raise SystemExit(f"EXPECTED_ORIENTATION not parseable from {p} — the board must not "
+                     "guess corpus orientation; fix the registry (or this parser).")
+
+
+EXPECTED_ORIENTATION = _load_expected_orientation()
+SIGN_ABS_CORPORA = {c for c, o in EXPECTED_ORIENTATION.items() if o == "distortion"}
 
 
 def _signed(rank, corpus):
-    """Signed SROCC for `corpus` out of a fulleval `rank` block; |SROCC| for JND corpora.
+    """Signed SROCC for `corpus` out of a fulleval `rank` block; |SROCC| for the
+    JND↓ corpora in SIGN_ABS_CORPORA (distortion-oriented per EXPECTED_ORIENTATION —
+    negative signed SROCC is their declared convention, not an inversion).
 
     Prefers `srocc_signed` (emitted by `bake_verdict` since 2026-07) and falls back to
     `srocc` for older JSONs, which is the only sign information those carry."""
@@ -552,6 +586,7 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
             "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
             "chartThemes": THEME_VARS, "echartsVersion": ech_ver,
             "annRegistry": ann_meta,
+            "orientation": EXPECTED_ORIENTATION,
             "loopTargeting": loop_targeting}
     any_stub = any(b.get("is_stub") for b in bakes)
     stub_note = ("<span class='stub'>STUB DATA</span> — synthesized fixtures "
@@ -616,6 +651,26 @@ const S=(t,a={},k=[])=>el('svg:'+t,a,k);
 const DOM=b=>!!(b.dominated_by&&b.dominated_by.length);
 const ANN=(b,id)=>!!(b.annotations&&b.annotations.indexOf(id)>=0);
 const annReason=id=>(DATA.annRegistry&&DATA.annRegistry[id]&&DATA.annRegistry[id].reason)||id;
+// Corpus label ORIENTATION (2026-08-05) — from the EXPECTED_ORIENTATION registry in
+// scripts/canonical_corpus/check_target_orientation.py (AST-read at build time; campaign
+// Appendix I). A corpus declared "distortion" carries a JND-family label (q_jnd distance /
+// PJND threshold): its signed SROCC is negative BY CONVENTION, |SROCC| is the magnitude
+// reading, and a POSITIVE signed value there is an orientation MISMATCH — the defect and
+// the convention are exact mirrors of the quality-oriented case. Fallback (payloads built
+// before the registry rode along): konjnd only, the pre-registry behavior.
+const ORIENT=DATA.orientation||{konjnd:"distortion"};
+const JND_CORPORA=new Set(Object.keys(ORIENT).filter(c=>ORIENT[c]==="distortion"));
+const JND_TIP=c=>c+": distortion-oriented JND-family label (EXPECTED_ORIENTATION registry, "
+  +"campaign Appendix I) — signed SROCC is negative BY CONVENTION and is displayed as |SROCC|. "
+  +"A positive signed value here would be an orientation MISMATCH, not a win.";
+// sdr25 ⊂ aic4 (Appendix I structural finding; registry id sdr25-subset-of-aic4): the 50
+// sdr25 stimuli are all contained in aic4's 300 — the two are not independent corpora.
+const corpMark=c=>c+(JND_CORPORA.has(c)?" JND↓":"")+(c==="sdr25"?" ⊂aic4":"");
+const corpTitle=(node,c)=>{const t=[];
+  if(JND_CORPORA.has(c))t.push(JND_TIP(c));
+  if(c==="sdr25")t.push("⊂ aic4: "+annReason("sdr25-subset-of-aic4"));
+  if(t.length)node.setAttribute("title",t.join(" | "));
+  return node;};
 const CURATED=DATA.bakes.filter(b=>b.curated&&!DOM(b)).map(b=>b.name);
 const state={visible:new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name)),
   ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false};
@@ -884,17 +939,20 @@ const COLS=[
   ['cid22_ci','CID22 95%CI±',false,b=>{const r=b.rank.cid22;return r&&r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;}],
   ['cid22_bwd','CID22 %bwd',false,b=>{const r=b.rank.cid22;return r&&r.frac_negative!=null?r.frac_negative:null;}],
 ];
-// SIGNED SROCC accessor (2026-08-04). `konjnd`'s validation target is a mean-PJND
-// threshold, so its SROCC is STRUCTURALLY negative and |SROCC| is the correct reading
-// there; every other corpus is quality-oriented, so a negative is a genuine ranking
-// INVERSION and must never render as a high score. This became load-bearing when the
-// ext-lineage KADID eval target was found stored inverted — 110 of 188 board bakes were
-// anti-correlated with KADID's real human MOS while the board drew all 188 as positive
-// magnitudes (benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F).
-const SIGN_ABS_CORPORA=new Set(['konjnd']);
+// SIGNED SROCC accessor (2026-08-04; registry-driven 2026-08-05). JND↓ corpora
+// (JND_CORPORA, from the EXPECTED_ORIENTATION registry — aic4/konjnd/sdr25) carry
+// distortion-oriented labels: their signed SROCC is negative BY CONVENTION, so the
+// magnitude reading is |SROCC|. Every quality-oriented corpus keeps its sign — a
+// negative there is a genuine ranking INVERSION and must never render as a high
+// score. This became load-bearing when the ext-lineage KADID eval target was found
+// stored inverted — 110 of 188 board bakes were anti-correlated with KADID's real
+// human MOS while the board drew all 188 as positive magnitudes
+// (benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F).
+const SIGN_ABS_CORPORA=JND_CORPORA;
+const rawSigned=r=>r?(r.srocc_signed!=null?r.srocc_signed:(r.srocc!=null?r.srocc:null)):null;
 const sgn=(c,r)=>{if(!r)return null;
-  if(SIGN_ABS_CORPORA.has(c))return r.srocc!=null?Math.abs(r.srocc):null;
-  return r.srocc_signed!=null?r.srocc_signed:(r.srocc!=null?r.srocc:null);};
+  if(SIGN_ABS_CORPORA.has(c)){const v=rawSigned(r);return v!=null?Math.abs(v):null;}
+  return rawSigned(r);};
 const rs=(b,c)=>sgn(c,b.rank[c]);
 // ---- JXL loop-targeting join (2/3-shot). LT is the jxl-encoder sweep summary (READ, not
 // re-derived). Scoreboard shows the mapped bake's emit-best cells; full detail (emit-last,
@@ -951,8 +1009,11 @@ function renderTable(){
     +'see the JXL loop targeting section).':'')});
   const tbl=el('table',{});
   const thead=el('tr',{});
-  COLS.forEach(c=>{const th=el('th',{class:(c[0]==='name'||c[0]==='regime'?'lbl':'')
-      +(state.sortKey===c[0]?' sorted'+(state.sortDir>0?' asc':''):''),text:c[1]});
+  COLS.forEach(c=>{const jnd=JND_CORPORA.has(c[0]);
+    const th=el('th',{class:(c[0]==='name'||c[0]==='regime'?'lbl':'')
+      +(state.sortKey===c[0]?' sorted'+(state.sortDir>0?' asc':''):''),
+      text:c[1]+(jnd?' JND↓':'')});
+    if(jnd)th.setAttribute('title',JND_TIP(c[0]));
     // mountTable, NOT renderTable: renderTable RETURNS a detached wrapper — calling it
     // from the click handler built the sorted table and threw it away, so the visible
     // scoreboard never re-sorted (2026-08-04 user report; bug present since 62404415).
@@ -1053,7 +1114,7 @@ function renderScatter(){
   const corps=DATA.corpOrder.filter(c=>bs.some(b=>b.scatter[c]&&b.scatter[c][ref]));
   const extra=[...new Set(bs.flatMap(b=>Object.keys(b.scatter)))].filter(c=>!DATA.corpOrder.includes(c)&&bs.some(b=>b.scatter[c]&&b.scatter[c][ref]));
   [...corps,...extra].forEach(corp=>{
-    host.append(el('div',{class:'corpttl',text:corp}));
+    host.append(corpTitle(el('div',{class:'corpttl',text:corpMark(corp)}),corp));
     const row=el('div',{class:'scrow'});
     bs.forEach(b=>{const cell=b.scatter[corp]&&b.scatter[corp][ref];
       if(cell&&cell.pts.length)row.appendChild(mountChart('scatter',238,252,scatterOpt(b,corp,ref,cell)));});
@@ -1070,15 +1131,24 @@ function heatOpt(bs,corps,TVSET){
   bs.forEach((b,i)=>corps.forEach((c,j)=>{const r=b.rank[c];const sv=sgn(c,r);
     if(sv!=null&&isFinite(sv)){
       const v=+(+sv).toFixed(4);
-      data.push({value:[j,i,v],_n:r.n,_inv:v<0,
+      const raw=rawSigned(r);const jnd=JND_CORPORA.has(c);
+      // Defect flag is ORIENTATION-AWARE: a quality corpus is inverted when
+      // signed < 0; a JND↓ corpus is inverted (orientation MISMATCH) when
+      // signed > 0 — negative there is its declared convention, not a defect.
+      const bad=raw!=null&&(jnd?raw>0:raw<0);
+      data.push({value:[j,i,v],_n:r.n,_raw:raw,_jnd:jnd,_bad:bad,
         label:{color:Math.abs(v)>.72?'#fff':t['text-secondary']}});
     }}));
   return{animation:false,
-    tooltip:Object.assign(ttStyle(),{formatter:p=>'<b>'+names[p.value[1]]+'</b> × '+corps[p.value[0]]
-      +'<br>signed SROCC <b>'+f3(p.value[2])+'</b>'+(p.data&&p.data._inv?' <b>⛔ INVERTED</b>':'')
-      +(p.data&&p.data._n!=null?' · n='+p.data._n:'')}),
+    tooltip:Object.assign(ttStyle(),{formatter:p=>{const d=p.data||{};const c=corps[p.value[0]];
+      let s='<b>'+names[p.value[1]]+'</b> × '+c+'<br>'
+        +(d._jnd?'|SROCC| <b>'+f3(p.value[2])+'</b> (signed '+f3(d._raw)+' — JND↓ convention)'
+                :'signed SROCC <b>'+f3(p.value[2])+'</b>');
+      if(d._bad)s+=' <b>⛔ '+(d._jnd?'ORIENTATION MISMATCH (positive on a JND↓ corpus)':'INVERTED')+'</b>';
+      if(c==='sdr25')s+='<br>⊂ aic4 — the 50 sdr25 stimuli are a subset of aic4 (not independent)';
+      return s+(d._n!=null?' · n='+d._n:'');}}),
     grid:{left:250,right:26,top:56,bottom:48},
-    xAxis:{type:'category',position:'top',data:corps.map(c=>TVSET.has(c)?c+' ⚠':c),
+    xAxis:{type:'category',position:'top',data:corps.map(c=>corpMark(c)+(TVSET.has(c)?' ⚠':'')),
       axisLine:{show:false},axisTick:{show:false},
       axisLabel:{fontSize:9.5,rotate:32,color:v=>String(v).includes('⚠')?t.warn:t['text-secondary']}},
     yAxis:{type:'category',inverse:true,
@@ -1109,9 +1179,14 @@ function renderHeat(){
   DATA.bakes.forEach(b=>Object.entries(b.rank||{}).forEach(([c,r])=>{if(r&&r.train_eq_val)TVSET.add(c);}));
   const W=250+corps.length*64+40,Ht=Math.max(220,120+bs.length*22+40);
   host.append(el('h2',{text:'Cross-corpus SROCC'}),
-    el('div',{class:'cap',html:'Bake × corpus, SROCC (|SROCC| for JND corpora). Sequential blue: darker = higher '
-      +'(drag the visualMap handles to range-filter cells). <b>⚠</b> (amber header) = KADID/TID, train==val — '
-      +'SROCC rewards memorization, not held-out generalization. Shift+wheel zooms rows/columns; '
+    el('div',{class:'cap',html:'Bake × corpus, SROCC (<b>|SROCC| for JND↓ corpora</b> — aic4/konjnd/sdr25 carry '
+      +'distortion-oriented JND-family labels per the EXPECTED_ORIENTATION registry, so negative signed SROCC '
+      +'is their declared CONVENTION, shown as magnitude; a positive signed value there would be an '
+      +'orientation mismatch and is ⛔-flagged in the tooltip, exactly mirroring a negative on a '
+      +'quality-oriented corpus). <b>sdr25 ⊂ aic4</b>: all 50 sdr25 stimuli are contained in aic4&#39;s 300 '
+      +'(Appendix I) — read them as one instrument, not two corroborating corpora. Sequential blue: darker = '
+      +'higher (drag the visualMap handles to range-filter cells). <b>⚠</b> (amber header) = KADID/TID, '
+      +'train==val — SROCC rewards memorization, not held-out generalization. Shift+wheel zooms rows/columns; '
       +'wheel scrolls rows when many bakes are visible; double-click resets.'}));
   const wrap=el('div',{style:'overflow-x:auto'});
   wrap.append(mountChart('heat',W,Ht,heatOpt(bs,corps,TVSET)));
@@ -1165,13 +1240,16 @@ function renderMPanel(){
   host.append(el('h2',{text:'Full Mohammadi panel'}));
   host.append(el('div',{class:'cap',html:'All six stats (Mohammadi 2025): SROCC/KROCC on raw ranks; '
     +'PLCC, OR, PWRC, Z-RMSE on the 4-param-logistic-rescaled prediction. <b>OR + Z-RMSE: lower is '
-    +'better</b>; OR is a catastrophe gate, not a ranker. <b>SROCC</b> is signed (a negative = globally '
-    +'inverted bake) with the bootstrap 95% CI half-width. <b>per-ref / %bwd</b> = within-image mean SROCC '
+    +'better</b>; OR is a catastrophe gate, not a ranker. <b>SROCC</b> is signed, with the bootstrap 95% '
+    +'CI half-width: on a quality-oriented corpus a negative = globally inverted bake; on a <b>JND↓</b> '
+    +'corpus (aic4/konjnd/sdr25 — distortion-oriented labels per the EXPECTED_ORIENTATION registry) '
+    +'negative is the declared CONVENTION and a POSITIVE would be the defect — row shading follows the '
+    +'orientation, not the bare sign. <b>per-ref / %bwd</b> = within-image mean SROCC '
     +'and share of reference ladders ranked backwards (— when the corpus carries no ref identity). '
     +'⚠ = train==val (KADID/TID: memorization, not held-out skill). Click a header to sort.'}));
   const sel=el('div',{class:'bar',style:'margin:6px 0 10px'});
   corps.forEach(c=>{
-    const b=el('button',{class:'btn',text:(TV.has(c)?c+' ⚠':c)});
+    const b=corpTitle(el('button',{class:'btn',text:corpMark(c)+(TV.has(c)?' ⚠':'')}),c);
     if(state.mcorp===c)b.style.cssText='font-weight:700;outline:2px solid var(--seq-hi)';
     b.onclick=()=>{state.mcorp=c;renderMPanel();};
     sel.append(b);
@@ -1185,21 +1263,26 @@ function renderMPanel(){
   tbl.append(el('thead',{},thead));
   const tb=el('tbody',{});
   const rows=bs.filter(b=>b.rank[c]).sort((a,b)=>(b.rank[c].srocc||0)-(a.rank[c].srocc||0));
+  const cJnd=JND_CORPORA.has(c);
   rows.forEach(b=>{
     const r=b.rank[c];
-    const sroccs=(r.srocc_signed!=null?r.srocc_signed:r.srocc);
+    const sroccs=rawSigned(r);
     const ciw=r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;
     const tr=el('tr',{});
     tr.append(nameInto(el('td',{class:'lbl'}),b));
     const cells=[
       r.n!=null?String(r.n):'—',
-      (sroccs!=null?(sroccs>=0?'+':'')+sroccs.toFixed(4):'—')+(ciw!=null?' ±'+ciw.toFixed(3):''),
+      (sroccs!=null?(sroccs>=0?'+':'')+sroccs.toFixed(4):'—')+(ciw!=null?' ±'+ciw.toFixed(3):'')
+        +(cJnd&&sroccs!=null&&sroccs<0?' (JND↓)':''),
       f3(r.plcc), f3(r.krocc), r.or!=null?r.or.toFixed(4):'—', f3(r.pwrc),
       r.z_rmse!=null?r.z_rmse.toFixed(3):'—',
       r.per_ref_mean!=null?(r.per_ref_mean>=0?'+':'')+r.per_ref_mean.toFixed(4):'—',
       r.frac_negative!=null?pct(r.frac_negative):'—'];
     cells.forEach(v=>tr.append(el('td',{text:v})));
-    if(sroccs!=null&&sroccs<0)tr.style.background='color-mix(in srgb, var(--serious) 18%, transparent)';
+    // Orientation-aware defect shading: bare sign on a quality corpus,
+    // MIRRORED sign on a JND↓ corpus (negative there is the convention).
+    if(sroccs!=null&&(cJnd?sroccs>0:sroccs<0))
+      tr.style.background='color-mix(in srgb, var(--serious) 18%, transparent)';
     tb.append(tr);
   });
   tbl.append(tb);

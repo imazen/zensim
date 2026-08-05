@@ -82,6 +82,26 @@ mod balanced {
     pub const W_AIC4: f64 = 0.05;
 }
 
+// ── Corpus label ORIENTATION (2026-08-05) ──────────────────────────────────
+// THE OWNER is `EXPECTED_ORIENTATION` in
+// `scripts/canonical_corpus/check_target_orientation.py` (campaign REGISTERED
+// APPENDIX I): three eval corpora carry DISTORTION-oriented JND-family labels
+// (q_jnd distance / PJND threshold) — their signed SROCC is negative BY
+// CONVENTION (measured: aic4 188/188 board fullevals negative, sdr25 171/171,
+// konjnd 187/188), so |SROCC| is the magnitude reading and a POSITIVE signed
+// value is the defect (orientation mismatch). Quality-oriented corpora are the
+// mirror: negative = genuine inversion (the Appendix F failure).
+//
+// This Rust list is a GATED MIRROR of the Python registry (freeze_check can't
+// import Python): `distortion_oriented_mirror_matches_python_registry` parses
+// the owner file and fails the build's test run on ANY drift — extend the
+// registry there first, then this list.
+const DISTORTION_ORIENTED: [&str; 3] = ["aic4", "konjnd", "sdr25"];
+
+fn is_distortion_oriented(corpus: &str) -> bool {
+    DISTORTION_ORIENTED.contains(&corpus)
+}
+
 fn usage() -> ! {
     eprintln!(
         "freeze_check — freeze-bar / profile PASS-FAIL over a fulleval JSON\n\n\
@@ -749,15 +769,28 @@ fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
             None => "not measured".into(),
         },
     ));
-    // SIGNED, always. These are quality-oriented corpora, so a negative SROCC is a
-    // genuine ranking INVERSION, and an unsigned guard row hides it — which is exactly
-    // how 110 of 188 board bakes sat on the board anti-correlated with KADID's real
-    // human MOS while every one of them displayed a positive magnitude
-    // (`benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F, 2026-08-04).
-    // Guards stay UNSCORED — the requirement is only that they be READABLE as inverted.
+    // SIGNED, always — read AGAINST each corpus's DECLARED orientation
+    // (`EXPECTED_ORIENTATION`, see `DISTORTION_ORIENTED` above). On a
+    // quality-oriented corpus a negative SROCC is a genuine ranking INVERSION,
+    // and an unsigned guard row hides it — which is exactly how 110 of 188
+    // board bakes sat anti-correlated with KADID's real human MOS while every
+    // one displayed a positive magnitude
+    // (`benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F).
+    // On a DISTORTION-oriented JND-family corpus the convention is mirrored:
+    // negative is its declared native direction (labelled, never flagged), and
+    // a POSITIVE signed value is the defect. A guard that yelled INVERTED at
+    // the convention (as this one did for sdr25 until 2026-08-05) is a
+    // standing false alarm that teaches readers to ignore the row. Guards stay
+    // UNSCORED — the requirement is only that defect vs convention be READABLE.
     let guard = |c: &str| match f(v, &["rank", c, "srocc_signed"])
         .or_else(|| f(v, &["rank", c, "srocc"]))
     {
+        Some(x) if is_distortion_oriented(c) && x > 0.0 => {
+            format!("{x:+.4} ORIENTATION MISMATCH (positive on a JND\u{2193} corpus)")
+        }
+        Some(x) if is_distortion_oriented(c) => {
+            format!("{x:+.4} (JND\u{2193} convention; |SROCC| {:.4})", x.abs())
+        }
         Some(x) if x < 0.0 => format!("{x:+.4} INVERTED"),
         Some(x) => format!("{x:+.4}"),
         None => "—".into(),
@@ -770,7 +803,10 @@ fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
             guard("tid")
         ),
     ));
-    info.push(("sdr25 (within-family selector only)".into(), guard("sdr25")));
+    info.push((
+        "sdr25 (within-family selector only; \u{2282} aic4 — Appendix I)".into(),
+        guard("sdr25"),
+    ));
     info.push((
         "packaging".into(),
         match v.get("model").and_then(|m| m.get("output_spline")) {
@@ -1472,6 +1508,58 @@ fn main() {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// `DISTORTION_ORIENTED` is a gated mirror of the Python
+    /// `EXPECTED_ORIENTATION` registry (the owner —
+    /// `scripts/canonical_corpus/check_target_orientation.py`). Parse the
+    /// owner file and fail on ANY drift, in either direction. The parse is
+    /// deliberately dumb (line-based over the literal dict block) so it
+    /// breaks LOUDLY if the registry's shape changes, rather than silently
+    /// matching nothing.
+    #[test]
+    fn distortion_oriented_mirror_matches_python_registry() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../scripts/canonical_corpus/check_target_orientation.py"
+        );
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("owner registry {path} must exist in-repo: {e}"));
+        let start = text
+            .find("EXPECTED_ORIENTATION = {")
+            .expect("EXPECTED_ORIENTATION dict literal not found in the owner file");
+        let block = &text[start..];
+        let end = block.find('}').expect("registry dict literal never closes");
+        let block = &block[..end];
+        let mut dist: Vec<String> = Vec::new();
+        let mut n_quality = 0usize;
+        for line in block.lines() {
+            let line = line.split('#').next().unwrap_or("");
+            if let Some((k, val)) = line.split_once(':') {
+                let key = k.trim().trim_matches('"').trim_matches('\'');
+                if key.is_empty() {
+                    continue;
+                }
+                match val.trim().trim_end_matches(',').trim() {
+                    "DISTORTION" => dist.push(key.to_string()),
+                    "QUALITY" => n_quality += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            n_quality >= 5,
+            "parse sanity: expected several QUALITY entries, parsed {n_quality} — \
+             did the registry's literal format change?"
+        );
+        dist.sort();
+        let mut mirror: Vec<String> = DISTORTION_ORIENTED.iter().map(|s| s.to_string()).collect();
+        mirror.sort();
+        assert_eq!(
+            mirror, dist,
+            "freeze_check's DISTORTION_ORIENTED mirror drifted from the Python \
+             EXPECTED_ORIENTATION registry — update the mirror (the registry is the owner)"
+        );
+    }
 
     /// A fixture that passes every registered floor exactly at/above the line.
     fn passing_fixture() -> serde_json::Value {

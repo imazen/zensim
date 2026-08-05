@@ -479,6 +479,21 @@
       "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX H H.1; scripts/canonical_corpus/fix_ext_kadid_orientation.py + annotate_kadid_orientation_manifests.py; benchmarks/wave10/orientation_{BEFORE,AFTER}_2026-08-05.txt (INVERTED -0.582360 -> OK +0.582360, exit 1 -> 0); benchmarks/wave10/kadid_orientation_fix_2026-08-05.json (corrected ext944 sha256 286f1b239d88c483e215da6be2d1a16337ac0ae0548bff34ff6c32e0da033cf4)",
       "date": "2026-08-05",
       "fix_path": "none — this entry records a RESOLUTION, not a defect; it stays as the pointer between the two eras"
+    },
+    {
+      "id": "sdr25-subset-of-aic4",
+      "kind": "annotated",
+      "fields": [
+        "rank.sdr25",
+        "rank.aic4"
+      ],
+      "scope": {
+        "present": "rank.sdr25"
+      },
+      "reason": "sdr25 is not independent of aic4: all 50 sdr25 stimuli are contained in aic4's 300 (the JPEG-AI codec subset of the same 5-crop material; matched on ref_basename + f0..f5 at 9 dp) — reading them as two corroborating corpora double-counts one instrument, and comparing 'sdr25 vs aic4' compares a set with its own subset",
+      "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX I §I.4 (structural findings); docs/DATA_SPLITS.md:108",
+      "date": "2026-08-05",
+      "fix_path": "none — permanent structural caveat (the containment is a property of the corpora)"
     }
   ]
 }
