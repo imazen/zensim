@@ -199,14 +199,18 @@ These are real and unfixed. Nothing below is claimed to work.
    each cited by 1–4 benchmark docs, so they must be *migrated*, not deleted.
 3. **Two CID22 val parquets** (§2.1). Measured identical, but they must be kept
    in sync by hand and `bake_verdict` defaults to the non-canonical one.
-4. **Our eval corpora are split across two roots.** `hf_nearlossless` lives in
-   `canonical-2026-07-15/`; everything else in `2026-05-15-full-features/`. So
-   one slot must be absolute, which opts it out of `--features-root`. It is now
-   declared in `PINNED_OUTSIDE_FEATURES_ROOT` with a reason and gated by
-   `corpus_slots_are_relative_or_declared_pinned`, and the provenance block
-   prints every resolved path — but the real fix is **one canonical eval root**,
-   after which that list should be empty. (`nonphoto` was the same hazard for no
-   benefit — its file was in the default root all along; fixed 2026-07-15.)
+4. **Eval-root split: RESOLVED at the slot layer 2026-08-05.** The
+   `hf_nearlossless` canonical bytes still live in `canonical-2026-07-15/`,
+   but its slot is now root-relative via a symlink in
+   `2026-05-15-full-features/` (sha-verified identical; same pattern as the
+   720 root's nonphoto/imazen26 slots), so **every** slot obeys
+   `--features-root` and `PINNED_OUTSIDE_FEATURES_ROOT` is empty — the goal
+   state. The audit test also judges absoluteness platform-independently now
+   (Windows called the old `/mnt/v/...` pin "relative" and fired the
+   staleness half — the sole windows-x64 CI red for weeks). A root without
+   the file hard-errors with the R2 restore command. (`nonphoto` was the
+   same hazard for no benefit — its file was in the default root all along;
+   fixed 2026-07-15.)
 5. **~40 tracked scripts are referenced by nothing.** "Unreferenced" is not
    "dead" — one of them is six hours old. Each needs the §3 treatment.
 

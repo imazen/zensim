@@ -244,18 +244,18 @@ const CANONICAL_DIAL_GRID_SHA256: &str =
 /// `--features-root`. Each needs a reason; the test below rejects any absolute
 /// slot that is not listed here.
 ///
-/// This list should shrink to empty. It is non-empty only because our eval
-/// corpora are scattered across roots — `hf_nearlossless` lives in the
-/// canonical-2026-07-15 set while the rest live in 2026-05-15-full-features.
-/// The right fix is one canonical eval root (tracked in
-/// `docs/REPRODUCIBILITY.md` §4), not more absolute paths.
-#[allow(dead_code)] // consumer lost in an eval-root refactor; kept as the documented pin until docs/REPRODUCIBILITY.md §4 unifies the roots
-const PINNED_OUTSIDE_FEATURES_ROOT: &[(&str, &str)] = &[(
-    "hf_nearlossless",
-    "lives in the canonical-2026-07-15 set, not the 2026-05-15-full-features \
-     root the other corpora use; pinned so the near-lossless axis cannot be \
-     silently dropped while the eval roots are still split",
-)];
+/// EMPTY since 2026-08-05 — the goal state its own doc always named. The
+/// last entry was `hf_nearlossless`, pinned because its parquet lives in the
+/// canonical-2026-07-15 set rather than the 2026-05-15-full-features root.
+/// Its slot is now root-relative like every other corpus: the parquet is
+/// symlinked into the default root (the same pattern the 720 root uses for
+/// the nonphoto/imazen26 NN-joined evals), a missing file is a HARD error
+/// with a restore command (never a silent drop), and the 944-era HF-NL axis
+/// has its own root-relative corpus (`hfnlproxy`, SOTA-944 §1b) — so nothing
+/// the pin protected is unguarded. Keep the machinery: any future absolute
+/// slot must be declared here with a reason.
+#[allow(dead_code)] // test-only consumer (the slot audit below); empty in the goal state
+const PINNED_OUTSIDE_FEATURES_ROOT: &[(&str, &str)] = &[];
 
 /// 720-regime (`feature-regime-v2`) feature-parquet slot for a corpus: the
 /// v1-372 space (`f0..f371`) ++ the appended v2-348 block (`f372..f719`).
@@ -531,7 +531,14 @@ const CORPORA: &[Corpus] = &[
         // 50 refs x 6 distortions, ref-level split (the 150 train refs are
         // disjoint), so this is honest holdout for a bake trained on
         // hf_nearlossless_train.parquet.
-        filename: "/mnt/v/zen/zensim-training/canonical-2026-07-15/train/hf_nearlossless_val.parquet",
+        //
+        // Root-relative since 2026-08-05 (was the last absolute slot — see
+        // PINNED_OUTSIDE_FEATURES_ROOT). The canonical bytes stay in
+        // canonical-2026-07-15/train/; the default root reaches them via a
+        // symlink (sha-verified identical), same pattern as the 720 root's
+        // nonphoto/imazen26 slots. A root without the file fails LOUD with
+        // the R2 restore command — the axis cannot be silently dropped.
+        filename: "hf_nearlossless_val.parquet",
         // Everything here lives in ssim2 91..100, i.e. one width-10 band. A
         // 10-band split would put all 300 rows in B9 and report nine empties.
         enable_per_band: false,
@@ -3682,11 +3689,23 @@ mod tests {
     /// Absolute is still allowed where the corpus genuinely lives in another
     /// root, but it must be declared with a reason. Undeclared absolute slots
     /// fail here.
+    ///
+    /// Absoluteness is judged platform-independently: slots point into the
+    /// dev box's `/mnt/v` world, and `Path::is_absolute()` calls a rooted,
+    /// prefix-less `/...` string RELATIVE on Windows. That asymmetry is what
+    /// made the 2026-07..08 windows-x64 CI red unique: the then-pinned
+    /// `hf_nearlossless` slot counted as absolute on Unix (both halves
+    /// pass) but as relative on Windows, so ONLY windows fired the
+    /// stale-exemption half against a pin that was load-bearing everywhere
+    /// else. `slot_is_absolute` closes that hole for good.
     #[test]
     fn corpus_slots_are_relative_or_declared_pinned() {
+        fn slot_is_absolute(slot: &str) -> bool {
+            Path::new(slot).is_absolute() || slot.starts_with('/')
+        }
         let undeclared: Vec<_> = CORPORA
             .iter()
-            .filter(|c| Path::new(c.filename).is_absolute())
+            .filter(|c| slot_is_absolute(c.filename))
             .filter(|c| {
                 !PINNED_OUTSIDE_FEATURES_ROOT
                     .iter()
@@ -3713,7 +3732,7 @@ mod tests {
                 panic!("PINNED_OUTSIDE_FEATURES_ROOT names {name}, which is not a corpus")
             });
             assert!(
-                Path::new(c.filename).is_absolute(),
+                slot_is_absolute(c.filename),
                 "{name} is declared pinned-outside-features-root but its slot is relative now. \
                  Remove the stale exemption — leaving it lets a future absolute slot pass unnoticed."
             );
