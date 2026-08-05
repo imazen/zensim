@@ -5084,6 +5084,107 @@ fn append_cell_active(append_on: bool, ch: usize, scale: usize) -> bool {
     append_on && !(APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0)
 }
 
+/// Retained per-(scale, channel) state from ONE streaming folded walk —
+/// the extractor-side hooks of the fused folded-944 score+attribution
+/// compare (campaign appendix N). Holds full-image copies of the pyramid
+/// core rows and the phase-A V-blur planes — BITWISE the values the walk
+/// computed (the C1 producer gate holds strip windows byte-equal to the
+/// materialized pyramids, and phase A is the same blur chain
+/// `attr_blur_cache_channel` replicates) — plus the EXACT per-cell pooled
+/// accumulators and mean-gradients captured at finalize. Buffers are
+/// reused across calls (`ensure`); every retained row a fused compare
+/// later reads is written each walk, and the only conditionally-computed
+/// plane (`bs2` where the append kernel is inactive — the
+/// `APPEND_SKIP_B_SCALE0` cell) is zero-filled explicitly so session
+/// reuse is deterministic. Memory: 8 planes × 3 ch × Σ scale sizes
+/// (~42 MB at 576²) — the same class the standalone attribution's
+/// materialized pyramids + plane sets pay.
+pub(crate) struct FoldRetention {
+    dims: Vec<(usize, usize)>,
+    /// `[scale][ch]` source-side pyramid planes (core rows).
+    pyr_src: Vec<[Vec<f32>; 3]>,
+    /// `[scale][ch]` distorted-side pyramid planes (core rows).
+    pyr_dst: Vec<[Vec<f32>; 3]>,
+    /// `[scale][ch]` phase-A V-blur planes (mu1/mu2/ssq/s12/act/bs2).
+    planes: Vec<[AttrChPlanes; 3]>,
+    /// `[scale][ch]` exact pooled cells (walk accumulators + blockiness).
+    cells: Vec<[AttrCellSums; 3]>,
+    /// `[scale][ch]` (mean grad src, mean grad dst) from finalize.
+    mg: Vec<[(f64, f64); 3]>,
+}
+
+impl Default for FoldRetention {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FoldRetention {
+    pub(crate) fn new() -> Self {
+        Self {
+            dims: Vec::new(),
+            pyr_src: Vec::new(),
+            pyr_dst: Vec::new(),
+            planes: Vec::new(),
+            cells: Vec::new(),
+            mg: Vec::new(),
+        }
+    }
+
+    /// Size every buffer for the walk's scale dims (no-op when unchanged;
+    /// cells/mg/planes are fully rewritten by each retaining walk).
+    fn ensure(&mut self, dims: &[(usize, usize)]) {
+        if self.dims.as_slice() == dims {
+            return;
+        }
+        self.dims = dims.to_vec();
+        let mk = |n: usize| -> [Vec<f32>; 3] { std::array::from_fn(|_| vec![0.0f32; n]) };
+        self.pyr_src = dims.iter().map(|&(w, h)| mk(w * h)).collect();
+        self.pyr_dst = dims.iter().map(|&(w, h)| mk(w * h)).collect();
+        self.planes = dims
+            .iter()
+            .map(|&(w, h)| std::array::from_fn(|_| AttrChPlanes::new(w * h)))
+            .collect();
+        self.cells = vec![[AttrCellSums::default(); 3]; dims.len()];
+        self.mg = vec![[(0.0, 0.0); 3]; dims.len()];
+    }
+
+    /// Copy one (strip, channel)'s core rows out of the walk: pyramid
+    /// windows + phase-A planes. Pure copies — the walk's own accumulation
+    /// is untouched (G-N1 rests on this).
+    fn copy_strip(
+        &mut self,
+        info: &crate::feature_v2_stream::StripInfo,
+        ch: usize,
+        scr: &ScratchV2Strip,
+        src_win: &[f32],
+        dst_win: &[f32],
+        want_bs2: bool,
+    ) {
+        let w = info.plane_w;
+        let off = HALO_P * w;
+        let n = w * info.strip_h;
+        let out = info.y0 * w;
+        let scale = info.scale;
+        self.pyr_src[scale][ch][out..out + n].copy_from_slice(&src_win[off..off + n]);
+        self.pyr_dst[scale][ch][out..out + n].copy_from_slice(&dst_win[off..off + n]);
+        let p = &mut self.planes[scale][ch];
+        p.mu1[out..out + n].copy_from_slice(&scr.mu1[off..off + n]);
+        p.mu2[out..out + n].copy_from_slice(&scr.mu2[off..off + n]);
+        p.ssq[out..out + n].copy_from_slice(&scr.ssq[off..off + n]);
+        p.s12[out..out + n].copy_from_slice(&scr.s12[off..off + n]);
+        p.act[out..out + n].copy_from_slice(&scr.activity[off..off + n]);
+        if want_bs2 {
+            p.bs2[out..out + n].copy_from_slice(&scr.bs2[off..off + n]);
+        } else {
+            // Never computed for this cell (`APPEND_SKIP_B_SCALE0`) — its
+            // pass-B terms carry zero coefficients, but zero the plane so
+            // reuse across pairs is deterministic.
+            p.bs2[out..out + n].fill(0.0);
+        }
+    }
+}
+
 /// One (strip, channel)'s wide input windows: zero-copy slices of the
 /// producer's rolling planes for interior strips, or the scratch
 /// `src_wide`/`dst_wide` buffers filled via `fill_wide` when the strip
@@ -5485,6 +5586,7 @@ pub(crate) fn compute_folded720_streaming_impl(
             toggles,
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
+            None,
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -5494,6 +5596,7 @@ pub(crate) fn compute_folded720_streaming_impl(
         toggles,
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
+        None,
     ))
 }
 
@@ -5550,10 +5653,11 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
             toggles,
             front_end,
             scratch,
+            None,
         ));
     }
     Ok(foldapp_streaming_walk(
-        source, distorted, parallel, toggles, front_end, scratch,
+        source, distorted, parallel, toggles, front_end, scratch, None,
     ))
 }
 
@@ -5587,6 +5691,135 @@ pub(crate) fn compute_folded720_append2_hdr_streaming_impl(
     compute_folded720_hdr_streaming_impl(
         source, distorted, encoding, max_pixels, parallel, toggles, scratch,
     )
+}
+
+/// Streaming folded-944 extraction WITH attribution retention — the fused
+/// compare's extractor-side hooks (campaign appendix N). Identical
+/// validation + sub-64 reflect-pad to [`compute_folded720_streaming_impl`],
+/// `append_block` + `append2_block` forced on, accumulation UNTOUCHED (the
+/// hooks only copy), so the output features are BITWISE the canonical 944
+/// extraction (G-N1 gate). SDR route only for now: HDR-declared inputs get
+/// [`ZensimError::HdrInputRequiresPuPath`] (the 944 set is SDR-by-design;
+/// an HDR fused route is registered future work).
+pub(crate) fn compute_folded944_streaming_with_retention(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    scratch: &mut V2Scratch,
+    retention: &mut FoldRetention,
+) -> Result<ZensimV2Result, ZensimError> {
+    crate::metric::validate_pair_dims(source, distorted)?;
+    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    if source.is_hdr() || distorted.is_hdr() {
+        return Err(ZensimError::HdrInputRequiresPuPath);
+    }
+    let toggles = V2NewFeatureToggles {
+        append_block: true,
+        append2_block: true,
+        ..V2NewFeatureToggles::default()
+    };
+    if source.width() < crate::metric::MIN_PYRAMID_DIM
+        || source.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded_src = crate::metric::reflect_pad_to_min(source);
+        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
+        return Ok(foldapp_streaming_walk(
+            &padded_src,
+            &padded_dst,
+            parallel,
+            toggles,
+            crate::feature_v2_stream::FrontEnd::Sdr,
+            scratch,
+            Some(retention),
+        ));
+    }
+    Ok(foldapp_streaming_walk(
+        source,
+        distorted,
+        parallel,
+        toggles,
+        crate::feature_v2_stream::FrontEnd::Sdr,
+        scratch,
+        Some(retention),
+    ))
+}
+
+/// The v2/append/append2 attribution density built from walk RETENTION
+/// (appendix N): coefficients derived from the EXACT streaming
+/// accumulators + finalize mean-gradients, pass B over the retained
+/// planes — sharing [`attr_pass_b_for_scale`] / [`attr_ew_coeff`]
+/// verbatim with the standalone [`compute_v2_append_attribution`]. The
+/// retained planes are bitwise the standalone's `AttrChPlanes` (producer
+/// gate + same blur chain), so the densities differ ONLY by the
+/// coefficient inputs (exact accums vs the standalone's 1e-9-parity
+/// pass-A replication) — measured well inside the C3a tolerance class
+/// (G-N2 gate). The returned `v2_features`/`append_features` audit fields
+/// are empty: the fused caller owns the REAL extraction features.
+pub(crate) fn compute_v2_append_attribution_from_retention(
+    ret: &FoldRetention,
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    parallel: bool,
+    orig_w: usize,
+    orig_h: usize,
+) -> V2AppendAttribution {
+    let n_scales = ret.dims.len();
+    let (w0, h0) = ret.dims[0];
+    let want_append = s_append.is_some();
+    let mut canvas = vec![0.0f64; w0 * h0];
+    let mut scale_density = vec![0.0f64; w0 * h0];
+    let mut win_plane = vec![0.0f64; w0 * h0];
+    let mut spread_tmp: Vec<f64> = Vec::new();
+    for scale in 0..n_scales {
+        attr_pass_b_for_scale(
+            scale,
+            [
+                &ret.pyr_src[scale][0],
+                &ret.pyr_src[scale][1],
+                &ret.pyr_src[scale][2],
+            ],
+            [
+                &ret.pyr_dst[scale][0],
+                &ret.pyr_dst[scale][1],
+                &ret.pyr_dst[scale][2],
+            ],
+            &ret.planes[scale],
+            &ret.cells,
+            &ret.mg,
+            &ret.dims,
+            n_scales,
+            s_v2,
+            s_append,
+            s_append2,
+            want_append,
+            parallel,
+            w0,
+            h0,
+            &mut scale_density,
+            &mut win_plane,
+            &mut canvas,
+            &mut spread_tmp,
+        );
+    }
+    // Trim the (possibly reflect-padded sub-64) canvas to the original.
+    let density = if orig_w == w0 && orig_h == h0 {
+        canvas
+    } else {
+        let mut out = Vec::with_capacity(orig_w * orig_h);
+        for y in 0..orig_h.min(h0) {
+            out.extend_from_slice(&canvas[y * w0..y * w0 + orig_w.min(w0)]);
+        }
+        out
+    };
+    V2AppendAttribution {
+        density,
+        width: orig_w,
+        height: orig_h,
+        v2_features: Vec::new(),
+        append_features: Vec::new(),
+    }
 }
 
 /// Folded-720+append+append2+CSFW pair entry (956; [`FeatureRegime::
@@ -5655,6 +5888,12 @@ pub(crate) fn compute_folded720_append_streaming_impl(
 }
 
 /// The streaming walk body (inputs already validated + ≥ 64px).
+/// `retention`: the fused compare's extractor-side hooks (appendix N) —
+/// `Some` copies per-strip planes + finalize accumulators into the
+/// [`FoldRetention`]; `None` (every pre-existing caller) is the untouched
+/// walk. The hooks only COPY: accumulation, kernels, and finalize are
+/// identical either way, so retained and plain walks emit bitwise-equal
+/// features (G-N1).
 fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     source: &S,
     distorted: &D,
@@ -5662,6 +5901,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     toggles: V2NewFeatureToggles,
     front_end: crate::feature_v2_stream::FrontEnd,
     scratch: &mut V2Scratch,
+    mut retention: Option<&mut FoldRetention>,
 ) -> ZensimV2Result {
     use crate::feature_v2_stream::StripPlaneProducer;
     let fold_v1 = true;
@@ -5733,6 +5973,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 
     let mut accums: [StreamChannelAccums; 3] =
         std::array::from_fn(|_| StreamChannelAccums::new(n_scales));
+    if let Some(ret) = retention.as_deref_mut() {
+        ret.ensure(&dims);
+    }
     // BANDVIS dst self-mask live: phase A additionally produces the Y
     // channel's dst-activity plane (and ONLY the Y channel's — the block
     // is Y-only, so X/B never pay the chain).
@@ -5780,6 +6023,21 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     );
                 });
             let scratches: &[ScratchV2Strip; 3] = scratch_strips;
+            // Retention hooks (appendix N): serial copies between the two
+            // fan-outs — pure reads of the phase-A scratches + windows.
+            if let Some(ret) = retention.as_deref_mut() {
+                for (ch, scr) in scratches.iter().enumerate() {
+                    let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
+                    ret.copy_strip(
+                        &info,
+                        ch,
+                        scr,
+                        src_win,
+                        dst_win,
+                        append_cell_active(append_on, ch, scale),
+                    );
+                }
+            }
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
                 let (src_win, dst_win) =
                     stream_windows_shared(&producer, &info, ch, &scratches[ch]);
@@ -5846,6 +6104,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     stash[..strip_n].copy_from_slice(&scr.activity[off..off + strip_n]);
                 }
                 let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
+                if let Some(ret) = retention.as_deref_mut() {
+                    ret.copy_strip(&info, ch, scr, src_win, dst_win, active);
+                }
                 stream_phase_b(
                     scr,
                     src_win,
@@ -5872,6 +6133,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     None
                 };
                 let (src_win, dst_win) = stream_windows_shared(&producer, &info, 1, scr);
+                if let Some(ret) = retention.as_deref_mut() {
+                    ret.copy_strip(&info, 1, scr, src_win, dst_win, y_active);
+                }
                 stream_phase_b(
                     scr,
                     src_win,
@@ -5952,6 +6216,27 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 );
             }
             apply_transducer_luma_gate(out, ch, toggles);
+        }
+
+        // Retention hooks (appendix N): the EXACT pooled cells + the
+        // mean-gradients this finalize just derived — the fused compare's
+        // coefficient inputs (the standalone derives them from its own
+        // 1e-9-parity pass-A replication instead).
+        if let Some(ret) = retention.as_deref_mut() {
+            for (ch, acc) in accums.iter().enumerate() {
+                ret.cells[scale][ch] = AttrCellSums {
+                    dense: acc.dense[scale],
+                    grad: acc.grad[scale],
+                    app: acc.app[scale],
+                    blockiness: if toggles.blockiness {
+                        acc.block[scale].0 + acc.block[scale].1
+                    } else {
+                        0.0
+                    },
+                    n,
+                };
+                ret.mg[scale][ch] = grads[ch];
+            }
         }
 
         if fold_v1 {
@@ -7094,6 +7379,170 @@ fn attr_pass_b_blockiness(
     }
 }
 
+/// Edge-width pass-B coefficient for one (scale `u`, `ch`) — a free fn
+/// (extracted 2026-08-05, appendix N) so the fused folded-944 path, which
+/// derives its inputs from walk RETENTION instead of the attr pass-A
+/// replication, shares the exact formula. Contributions from E(t) at
+/// t = u (denominator role of the decay ratio) and t = u−1 (numerator
+/// role); E(t) = 1 − bounded_sim(a, b); the LAST scale's slot is a copy
+/// of E(n−2) so its gradient weight folds into E(n−2)'s. δmgd per
+/// refined pixel = −(|∇d|−|∇s|)_i/N on BOTH terms (sign FD-gate-verified
+/// in C2a). `dims[u]` are scale `u`'s plane dims.
+fn attr_ew_coeff(
+    s_v2: &[f64],
+    mg: &[[(f64, f64); 3]],
+    dims: &[(usize, usize)],
+    n_scales: usize,
+    u: usize,
+    ch: usize,
+) -> f64 {
+    if n_scales < 2 {
+        return 0.0;
+    }
+    let mut coeff = 0.0f64;
+    let n_u = (dims[u].0 * dims[u].1) as f64;
+    let s_at = |t: usize| -> f64 {
+        let v2b = t * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+        let mut sk = s_v2
+            .get(v2b + idx::EDGE_WIDTH_CHANGE)
+            .copied()
+            .unwrap_or(0.0);
+        if t == n_scales - 2 {
+            let lb = (n_scales - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
+            sk += s_v2
+                .get(lb + idx::EDGE_WIDTH_CHANGE)
+                .copied()
+                .unwrap_or(0.0);
+        }
+        sk
+    };
+    // (−∂bs/∂b, pgd, gd) for E(t).
+    let de_db_at = |t: usize| -> (f64, f64, f64) {
+        let (pgs, pgd) = mg[t][ch];
+        let (gs, gd) = mg[t + 1][ch];
+        let a = gs / (pgs + C_GRAD_DECAY);
+        let b = gd / (pgd + C_GRAD_DECAY);
+        let den = a * a + b * b + C_EDGEWIDTH;
+        let dbs_db = (2.0 * a * den - (2.0 * a * b + C_EDGEWIDTH) * 2.0 * b) / (den * den);
+        (-dbs_db, pgd, gd)
+    };
+    // E(u): scale u is the DENOMINATOR (mgd_t) of b.
+    if u + 1 < n_scales {
+        let sk = s_at(u);
+        if sk != 0.0 {
+            let (de_db, pgd, gd) = de_db_at(u);
+            coeff +=
+                sk * de_db * (-gd / ((pgd + C_GRAD_DECAY) * (pgd + C_GRAD_DECAY))) * (-1.0 / n_u);
+        }
+    }
+    // E(u−1): scale u is the NUMERATOR (mgd_{t+1}) of b.
+    if u >= 1 {
+        let sk = s_at(u - 1);
+        if sk != 0.0 {
+            let (de_db, pgd, _gd) = de_db_at(u - 1);
+            coeff += sk * de_db * (1.0 / (pgd + C_GRAD_DECAY)) * (-1.0 / n_u);
+        }
+    }
+    coeff
+}
+
+/// Pass B for one scale (combine → spread window mass → upsample into the
+/// full-res canvas) — a free fn (extracted 2026-08-05, appendix N) shared
+/// verbatim by the standalone attribution pipeline and the fused
+/// folded-944 retention path. `rplanes`/`dplanes` are the scale's pyramid
+/// planes, `dims` the per-scale plane dims, `(w0, h0)` the scale-0
+/// (canvas) dims.
+#[allow(clippy::too_many_arguments)]
+fn attr_pass_b_for_scale(
+    scale: usize,
+    rplanes: [&[f32]; 3],
+    dplanes: [&[f32]; 3],
+    planes: &[AttrChPlanes; 3],
+    cells: &[[AttrCellSums; 3]],
+    mg: &[[(f64, f64); 3]],
+    dims: &[(usize, usize)],
+    n_scales: usize,
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    want_append: bool,
+    parallel: bool,
+    w0: usize,
+    h0: usize,
+    scale_density: &mut [f64],
+    win_plane: &mut [f64],
+    canvas: &mut [f64],
+    spread_tmp: &mut Vec<f64>,
+) {
+    let tpb = std::time::Instant::now();
+    let (ws, hs) = dims[scale];
+    let n = ws * hs;
+    scale_density[..n].fill(0.0);
+    win_plane[..n].fill(0.0);
+    for ch in 0..3 {
+        let append_active = append_cell_active(want_append, ch, scale);
+        let cross: Option<(&[f32], &[f32])> = if ch == 1 {
+            Some((&planes[0].act, &planes[2].act))
+        } else {
+            None
+        };
+        let co = derive_v2app_coeffs(
+            s_v2,
+            s_append,
+            s_append2,
+            scale,
+            ch,
+            &cells[scale][ch],
+            append_active,
+            ch == 1,
+            attr_ew_coeff(s_v2, mg, dims, n_scales, scale, ch),
+        );
+        attr_pass_b_channel(
+            rplanes[ch],
+            dplanes[ch],
+            ws,
+            hs,
+            &planes[ch],
+            cross,
+            rplanes[1],
+            &co,
+            parallel,
+            &mut scale_density[..n],
+            &mut win_plane[..n],
+        );
+    }
+    crate::blur::box_spread_sum_preserving(&mut win_plane[..n], ws, hs, BLUR_RADIUS, spread_tmp);
+    for (d, s) in scale_density[..n].iter_mut().zip(win_plane[..n].iter()) {
+        *d += *s;
+    }
+    PERF_PASSB.with(|c| c.set(c.get() + tpb.elapsed().as_secs_f64()));
+    // Sum-preserving footprint upsample (the v2 pyramid floor-halves,
+    // so footprints are full 2^s × 2^s blocks; ÷4^s is exact).
+    let factor = 1usize << scale;
+    if factor == 1 {
+        for (c, &v) in canvas.iter_mut().zip(scale_density[..n].iter()) {
+            *c += v;
+        }
+    } else {
+        let inv_area = 1.0 / ((factor * factor) as f64);
+        for sy in 0..hs {
+            let y0 = sy * factor;
+            let y1 = (y0 + factor).min(h0);
+            for sx in 0..ws {
+                let v = scale_density[sy * ws + sx] * inv_area;
+                let x0 = sx * factor;
+                let x1 = (x0 + factor).min(w0);
+                for row in canvas[y0 * w0..].chunks_mut(w0).take(y1.saturating_sub(y0)) {
+                    for slot in &mut row[x0..x1] {
+                        *slot += v;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Build the v2 (+ optional append) attribution density for a pair.
 ///
 /// `s_v2` = raw `∂score/∂f` for the v2 block (`f372..720` layout,
@@ -7291,67 +7740,11 @@ pub(crate) fn compute_v2_append_attribution(
         PERF_KERN.with(|c| c.set(c.get() + tk.elapsed().as_secs_f64()));
     }
 
-    // ── Edge-width pass-B coefficient for one (scale u, ch). ──
-    // Contributions from E(t) at t = u (denominator role of the decay
-    // ratio) and t = u−1 (numerator role); E(t) = 1 − bounded_sim(a, b);
-    // the LAST scale's slot is a copy of E(n−2) so its gradient weight
-    // folds into E(n−2)'s. δmgd per refined pixel = −(|∇d|−|∇s|)_i/N on
-    // BOTH terms (sign FD-gate-verified in C2a).
-    let ew_coeff = |u: usize, ch: usize, mg: &[[(f64, f64); 3]]| -> f64 {
-        if n_scales < 2 {
-            return 0.0;
-        }
-        let mut coeff = 0.0f64;
-        let n_u = (rprep.scales[u].1 * rprep.scales[u].2) as f64;
-        let s_at = |t: usize| -> f64 {
-            let v2b = t * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-            let mut sk = s_v2
-                .get(v2b + idx::EDGE_WIDTH_CHANGE)
-                .copied()
-                .unwrap_or(0.0);
-            if t == n_scales - 2 {
-                let lb = (n_scales - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
-                    + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
-                sk += s_v2
-                    .get(lb + idx::EDGE_WIDTH_CHANGE)
-                    .copied()
-                    .unwrap_or(0.0);
-            }
-            sk
-        };
-        // (−∂bs/∂b, pgd, gd) for E(t).
-        let de_db_at = |t: usize| -> (f64, f64, f64) {
-            let (pgs, pgd) = mg[t][ch];
-            let (gs, gd) = mg[t + 1][ch];
-            let a = gs / (pgs + C_GRAD_DECAY);
-            let b = gd / (pgd + C_GRAD_DECAY);
-            let den = a * a + b * b + C_EDGEWIDTH;
-            let dbs_db = (2.0 * a * den - (2.0 * a * b + C_EDGEWIDTH) * 2.0 * b) / (den * den);
-            (-dbs_db, pgd, gd)
-        };
-        // E(u): scale u is the DENOMINATOR (mgd_t) of b.
-        if u + 1 < n_scales {
-            let sk = s_at(u);
-            if sk != 0.0 {
-                let (de_db, pgd, gd) = de_db_at(u);
-                coeff += sk
-                    * de_db
-                    * (-gd / ((pgd + C_GRAD_DECAY) * (pgd + C_GRAD_DECAY)))
-                    * (-1.0 / n_u);
-            }
-        }
-        // E(u−1): scale u is the NUMERATOR (mgd_{t+1}) of b.
-        if u >= 1 {
-            let sk = s_at(u - 1);
-            if sk != 0.0 {
-                let (de_db, pgd, _gd) = de_db_at(u - 1);
-                coeff += sk * de_db * (1.0 / (pgd + C_GRAD_DECAY)) * (-1.0 / n_u);
-            }
-        }
-        coeff
-    };
-
-    // ── Pass B for one scale (combine → spread window mass → upsample). ──
+    // ── Pass B (combine → spread → upsample): the shared free fn
+    //    `attr_pass_b_for_scale` (+ `attr_ew_coeff` inside it) — extracted
+    //    2026-08-05 (appendix N) so the fused folded-944 retention path
+    //    shares them verbatim. Behavior here is unchanged. ──
+    let dims: Vec<(usize, usize)> = rprep.scales.iter().map(|s| (s.1, s.2)).collect();
     let pass_b_scale = |scale: usize,
                         planes: &[AttrChPlanes; 3],
                         cells: &[[AttrCellSums; 3]],
@@ -7360,79 +7753,29 @@ pub(crate) fn compute_v2_append_attribution(
                         win_plane: &mut Vec<f64>,
                         canvas: &mut Vec<f64>,
                         spread_tmp: &mut Vec<f64>| {
-        let tpb = std::time::Instant::now();
-        let (ref rplanes, ws, hs) = rprep.scales[scale];
+        let (ref rplanes, _, _) = rprep.scales[scale];
         let dplanes = &dprep.scales[scale].0;
-        let n = ws * hs;
-        scale_density[..n].fill(0.0);
-        win_plane[..n].fill(0.0);
-        for ch in 0..3 {
-            let append_active = append_cell_active(want_append, ch, scale);
-            let cross: Option<(&[f32], &[f32])> = if ch == 1 {
-                Some((&planes[0].act, &planes[2].act))
-            } else {
-                None
-            };
-            let co = derive_v2app_coeffs(
-                s_v2,
-                s_append,
-                s_append2,
-                scale,
-                ch,
-                &cells[scale][ch],
-                append_active,
-                ch == 1,
-                ew_coeff(scale, ch, mg),
-            );
-            attr_pass_b_channel(
-                &rplanes[ch],
-                &dplanes[ch],
-                ws,
-                hs,
-                &planes[ch],
-                cross,
-                &rplanes[1],
-                &co,
-                parallel,
-                &mut scale_density[..n],
-                &mut win_plane[..n],
-            );
-        }
-        crate::blur::box_spread_sum_preserving(
-            &mut win_plane[..n],
-            ws,
-            hs,
-            BLUR_RADIUS,
+        attr_pass_b_for_scale(
+            scale,
+            [&rplanes[0], &rplanes[1], &rplanes[2]],
+            [&dplanes[0], &dplanes[1], &dplanes[2]],
+            planes,
+            cells,
+            mg,
+            &dims,
+            n_scales,
+            s_v2,
+            s_append,
+            s_append2,
+            want_append,
+            parallel,
+            w0,
+            h0,
+            scale_density,
+            win_plane,
+            canvas,
             spread_tmp,
         );
-        for (d, s) in scale_density[..n].iter_mut().zip(win_plane[..n].iter()) {
-            *d += *s;
-        }
-        PERF_PASSB.with(|c| c.set(c.get() + tpb.elapsed().as_secs_f64()));
-        // Sum-preserving footprint upsample (the v2 pyramid floor-halves,
-        // so footprints are full 2^s × 2^s blocks; ÷4^s is exact).
-        let factor = 1usize << scale;
-        if factor == 1 {
-            for (c, &v) in canvas.iter_mut().zip(scale_density[..n].iter()) {
-                *c += v;
-            }
-        } else {
-            let inv_area = 1.0 / ((factor * factor) as f64);
-            for sy in 0..hs {
-                let y0 = sy * factor;
-                let y1 = (y0 + factor).min(h0);
-                for sx in 0..ws {
-                    let v = scale_density[sy * ws + sx] * inv_area;
-                    let x0 = sx * factor;
-                    let x1 = (x0 + factor).min(w0);
-                    for row in canvas[y0 * w0..].chunks_mut(w0).take(y1.saturating_sub(y0)) {
-                        for slot in &mut row[x0..x1] {
-                            *slot += v;
-                        }
-                    }
-                }
-            }
-        }
     };
 
     // ── Pipeline: A(s); once A(s) exists, fill the cross-scale edge-width

@@ -1257,6 +1257,18 @@ mod tests {
             let d = z.compute_attribution_density_full(&rs, &ds, &s).unwrap();
             d.density().iter().map(|v| v.abs() as f64).sum()
         };
+        // Same probe through the FUSED folded-944 entry (G-N3, appendix N):
+        // the fused map must cover exactly the same slot set.
+        let pre = z.precompute_reference(&rs).unwrap();
+        let mut sess = Fused944Session::new();
+        let mut mass_at_fused = |width: usize, k: usize| -> f64 {
+            let mut s = vec![0.0f64; width];
+            s[k] = -1.0;
+            let (_, _, d) = z
+                .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s, &mut sess)
+                .unwrap();
+            d.density().iter().map(|v| v.abs() as f64).sum()
+        };
 
         // Representative decomposable slot per block, and the registered
         // class-N probes. (scale 0, ch Y where the block has a channel axis.)
@@ -1316,12 +1328,21 @@ mod tests {
         ];
         for &(width, k, want_nonzero, why) in cases {
             let m = mass_at(width, k);
+            let m_f = mass_at_fused(width, k);
             if want_nonzero {
                 assert!(m > 0.0, "{why}: expected non-zero density, got |mass| {m}");
+                assert!(
+                    m_f > 0.0,
+                    "{why} (FUSED): expected non-zero density, got |mass| {m_f}"
+                );
             } else {
                 assert_eq!(
                     m, 0.0,
                     "{why}: expected identically-zero density, got |mass| {m}"
+                );
+                assert_eq!(
+                    m_f, 0.0,
+                    "{why} (FUSED): expected identically-zero density, got |mass| {m_f}"
                 );
             }
         }
@@ -1333,6 +1354,11 @@ mod tests {
         assert_eq!(
             m, 0.0,
             "f944+ (CSFW) has no attribution integrand yet — must be exactly 0, got {m}"
+        );
+        let m_f = mass_at_fused(BLOCK_END_APPEND2 + 12, BLOCK_END_APPEND2 + 3);
+        assert_eq!(
+            m_f, 0.0,
+            "f944+ (CSFW) has no FUSED attribution integrand yet — must be exactly 0, got {m_f}"
         );
     }
 
@@ -1412,6 +1438,151 @@ mod tests {
                 (a - b).abs() <= 1e-4 * bmax.max(1e-12),
                 "block {i}: fused {a} vs standalone {b}"
             );
+        }
+    }
+
+    /// Appendix N G-N1: the fused folded-944 entry's features are BITWISE
+    /// the canonical 944 extraction's (the retention hooks only copy —
+    /// accumulation is untouched), so the standalone 944 score path
+    /// (`score_features_with_profile` over the features) is bit-identical
+    /// too — asserted through a shipped profile's forward.
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn fused944_features_bitwise_and_score_match_standalone() {
+        let (w, h) = (150, 170);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let std_v2 = z.compute_folded720_append2_features(&rs, &ds).unwrap();
+        let mut s = vec![0.0f64; 944];
+        for (k, v) in s.iter_mut().enumerate() {
+            *v = if k % 3 == 0 { -1.0 } else { -0.25 } * (1.0 + (k % 7) as f64 * 0.1);
+        }
+        let mut sess = Fused944Session::new();
+        let (_res, fused_v2, attr) = z
+            .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s, &mut sess)
+            .unwrap();
+        assert_eq!(fused_v2.features().len(), 944);
+        assert_eq!(std_v2.features().len(), 944);
+        for (k, (a, b)) in fused_v2
+            .features()
+            .iter()
+            .zip(std_v2.features().iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "feature {k}: fused {a} vs standalone {b}"
+            );
+        }
+        // The forward over the features (the loop's score step) — the
+        // caller-width prefix branch accepts the 944 vector.
+        let sf = crate::score_features_with_profile(
+            crate::ZensimProfile::B,
+            fused_v2.features(),
+            w as u32,
+            h as u32,
+        )
+        .unwrap();
+        let ss = crate::score_features_with_profile(
+            crate::ZensimProfile::B,
+            std_v2.features(),
+            w as u32,
+            h as u32,
+        )
+        .unwrap();
+        assert_eq!(
+            sf.to_bits(),
+            ss.to_bits(),
+            "forward score: fused {sf} vs standalone {ss}"
+        );
+        assert_eq!((attr.width(), attr.height()), (w, h));
+        assert!(attr.density().iter().all(|v| v.is_finite()));
+    }
+
+    /// Appendix N G-N2: the fused folded-944 density equals the standalone
+    /// `compute_attribution_density_full` within the C3a tolerance class —
+    /// the deltas are the f32 basic combine (C3a-gated) and the coefficient
+    /// inputs (exact walk accumulators vs the standalone's 1e-9-parity
+    /// pass-A replication); the retained planes are bitwise-equal.
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn fused944_density_matches_standalone_full() {
+        let (w, h) = (150, 170);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let mut s = vec![0.0f64; 944];
+        for (k, v) in s.iter_mut().enumerate() {
+            // Mixed-sign, all-slot gradient exercising every integrand in
+            // every block (the C3a gate's pattern, extended to 944).
+            *v = if k % 3 == 0 { -1.0 } else { -0.25 } * (1.0 + (k % 7) as f64 * 0.1);
+        }
+        let std_attr = z.compute_attribution_density_full(&rs, &ds, &s).unwrap();
+        let mut sess = Fused944Session::new();
+        let (_res, _v2, fused_attr) = z
+            .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s, &mut sess)
+            .unwrap();
+        let max_abs = std_attr
+            .density()
+            .iter()
+            .fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(max_abs > 0.0);
+        for (i, (a, b)) in fused_attr
+            .density()
+            .iter()
+            .zip(std_attr.density().iter())
+            .enumerate()
+        {
+            assert!(
+                (a - b).abs() <= 3e-5 * max_abs + 1e-9,
+                "pixel {i}: fused {a} vs standalone {b} (max_abs {max_abs})"
+            );
+        }
+        let bs_f = fused_attr.block_sums(16);
+        let bs_s = std_attr.block_sums(16);
+        let bmax = bs_s.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        for (i, (a, b)) in bs_f.iter().zip(bs_s.iter()).enumerate() {
+            assert!(
+                (a - b).abs() <= 1e-4 * bmax.max(1e-12),
+                "block {i}: fused {a} vs standalone {b}"
+            );
+        }
+    }
+
+    /// Fused-944 session reuse is pure buffer reuse: a second call with the
+    /// same inputs through the SAME session reproduces features and density
+    /// bitwise (no cross-compare numeric state, unlike AttributionSession).
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn fused944_session_reuse_is_deterministic() {
+        let (w, h) = (150, 96);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let mut s = vec![0.0f64; 944];
+        for (k, v) in s.iter_mut().enumerate() {
+            *v = -0.5 - (k % 5) as f64 * 0.1;
+        }
+        let mut sess = Fused944Session::new();
+        let (_r1, v1, a1) = z
+            .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s, &mut sess)
+            .unwrap();
+        let (_r2, v2, a2) = z
+            .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s, &mut sess)
+            .unwrap();
+        for (a, b) in v1.features().iter().zip(v2.features().iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "session reuse changed features");
+        }
+        for (a, b) in a1.density().iter().zip(a2.density().iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "session reuse changed density");
         }
     }
 
@@ -1990,6 +2161,59 @@ impl AttributionSession {
     }
 }
 
+/// The fused v1 walk core's output (appendix N refactor): the compare
+/// result + the UNTRIMMED f32 basic-block attribution canvas at compute
+/// dims, with the walk timings the ATTRPERF diagnostic reports.
+struct FusedBasicCanvas {
+    result: crate::metric::ZensimResult,
+    canvas: Vec<f32>,
+    comp_pw: usize,
+    comp_h: usize,
+    t_pipe_ms: f64,
+    combine_ms: f64,
+}
+
+impl FusedBasicCanvas {
+    /// Trim the compute-dims canvas to the logical image (top-left).
+    fn trim_to(&self, width: usize, height: usize) -> Vec<f32> {
+        if self.comp_pw == width && self.comp_h == height {
+            self.canvas.clone()
+        } else {
+            let mut out = Vec::with_capacity(width * height);
+            for y in 0..height.min(self.comp_h) {
+                out.extend_from_slice(
+                    &self.canvas[y * self.comp_pw..y * self.comp_pw + width.min(self.comp_pw)],
+                );
+            }
+            out
+        }
+    }
+}
+
+/// Reusable state for the fused folded-944 compare
+/// ([`crate::Zensim::compute_folded944_score_and_attribution`]): the
+/// streaming extraction's scratch + the walk retention (planes, pyramid
+/// copies, exact accumulators). One session per encode loop; reuse across
+/// compares avoids re-allocating ~42 MB (at 576²) of retained planes per
+/// call. Unlike [`AttributionSession`] there is no cross-compare numeric
+/// state — every retained value is rewritten by each call — so reuse
+/// cannot change any output (gated by
+/// `fused944_session_reuse_is_deterministic`).
+#[cfg(feature = "feature-regime-v2")]
+#[derive(Default)]
+pub struct Fused944Session {
+    scratch: crate::feature_v2::V2Scratch,
+    retention: crate::feature_v2::FoldRetention,
+}
+
+#[cfg(feature = "feature-regime-v2")]
+impl Fused944Session {
+    /// Empty session — buffers grow on first use.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 impl crate::metric::Zensim {
     /// **The fused compare (task #67 C3a)**: scalar score + attribution
     /// steering map from ONE plane pipeline — the codec-loop call shape.
@@ -2037,8 +2261,40 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
-        mut prime: Option<&mut AttributionSession>,
+        prime: Option<&mut AttributionSession>,
     ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        let fb = self.fused_basic_canvas(precomputed, distorted, s, prime)?;
+        let width = distorted.width();
+        let height = distorted.height();
+        let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
+        let t_sat0 = std::time::Instant::now();
+        let trimmed = fb.trim_to(width, height);
+        let attr = AttributionResult::from_density(trimmed, width, height);
+        if perf_log {
+            eprintln!(
+                "ATTRPERF fused: pipeline {:.1} ms (combine/spread/upsample {:.1} ms → retention+stats {:.1} ms) | trim+SAT {:.1} ms",
+                fb.t_pipe_ms,
+                fb.combine_ms,
+                fb.t_pipe_ms - fb.combine_ms,
+                t_sat0.elapsed().as_secs_f64() * 1e3,
+            );
+        }
+        Ok((fb.result, attr))
+    }
+
+    /// The fused v1 walk core (appendix N refactor of the pre-existing
+    /// fused pipeline, numerically unchanged): one score walk with
+    /// attribution-plane retention → the compare's [`crate::metric::ZensimResult`]
+    /// plus the UNTRIMMED f32 basic-block canvas at compute dims. The C3a
+    /// entry trims + SATs it directly; the fused folded-944 entry sums the
+    /// v2/append/append2 retention density into it first.
+    fn fused_basic_canvas(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        mut prime: Option<&mut AttributionSession>,
+    ) -> Result<FusedBasicCanvas, ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
         if distorted.width() == 0 || distorted.height() == 0 {
@@ -2063,7 +2319,6 @@ impl crate::metric::Zensim {
         let height = distorted.height();
         let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
 
-        let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
         let t_all = std::time::Instant::now();
         let combine_ms = std::cell::Cell::new(0.0f64);
         let mut canvas = vec![0.0f32; comp_pw * comp_h];
@@ -2204,27 +2459,14 @@ impl crate::metric::Zensim {
         )?;
 
         let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
-        let t_sat0 = std::time::Instant::now();
-        let trimmed = if comp_pw == width && comp_h == height {
-            canvas
-        } else {
-            let mut out = Vec::with_capacity(width * height);
-            for y in 0..height.min(comp_h) {
-                out.extend_from_slice(&canvas[y * comp_pw..y * comp_pw + width.min(comp_pw)]);
-            }
-            out
-        };
-        let attr = AttributionResult::from_density(trimmed, width, height);
-        if perf_log {
-            eprintln!(
-                "ATTRPERF fused: pipeline {:.1} ms (combine/spread/upsample {:.1} ms → retention+stats {:.1} ms) | trim+SAT {:.1} ms",
-                t_pipe,
-                combine_ms.get(),
-                t_pipe - combine_ms.get(),
-                t_sat0.elapsed().as_secs_f64() * 1e3,
-            );
-        }
-        Ok((result, attr))
+        Ok(FusedBasicCanvas {
+            result,
+            canvas,
+            comp_pw,
+            comp_h,
+            t_pipe_ms: t_pipe,
+            combine_ms: combine_ms.get(),
+        })
     }
 
     /// **Stale-scalar single-pass fused compare (task #70; C3a ranked
@@ -2433,5 +2675,107 @@ impl crate::metric::Zensim {
             );
         }
         Ok((result, attr))
+    }
+
+    /// **The fused folded-944 compare (campaign appendix N)**: canonical
+    /// streaming folded-944 extraction + FULL-coverage attribution
+    /// steering map from ONE extraction pass plus one v1 walk — the
+    /// 944-class codec-loop call shape.
+    ///
+    /// Returns, in order:
+    /// 1. the v1 walk's [`crate::metric::ZensimResult`] under `self`'s
+    ///    profile (the loop reads `approx_butteraugli` from it — its score
+    ///    is NOT the 944 model's score);
+    /// 2. the [`crate::feature_v2::ZensimV2Result`] carrying the 944
+    ///    features, BITWISE identical to
+    ///    [`compute_folded720_append2_features`](Self::compute_folded720_append2_features)
+    ///    (G-N1 — the retention hooks only copy; accumulation is
+    ///    untouched). The caller forwards `features()` through
+    ///    [`crate::score_features_with_profile`] exactly as the unfused
+    ///    score path does — a PRUNED bake (caller 944 / internal 667)
+    ///    consumes the full caller-width vector;
+    /// 3. the [`AttributionResult`]: basic block (f0-155) from the C3a
+    ///    fused v1 machinery + v2/append/append2 (f372-943) from pass-B
+    ///    over the walk retention, coefficients derived from the EXACT
+    ///    extraction accumulators. Matches the standalone
+    ///    [`compute_attribution_density_full`](Self::compute_attribution_density_full)
+    ///    within the C3a tolerance class (G-N2); per-width slot coverage
+    ///    is pinned by the shared coverage gate (G-N3).
+    ///
+    /// `source` must be the SAME image `precomputed` was built from (the
+    /// usual `*_with_ref` caller contract; dims are validated, content
+    /// cannot be). `s` is the raw caller-layout gradient (944-wide for the
+    /// 944 class; shorter widths slice per the named `BLOCK_END_*`
+    /// bounds). SDR route only: HDR-declared inputs get
+    /// [`ZensimError::HdrInputRequiresPuPath`].
+    ///
+    /// # Errors
+    ///
+    /// The C3a fused contract (all-basic-features profile,
+    /// `blur_passes == 1`, matching pair dims) plus the folded
+    /// extraction's own validations.
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded944_score_and_attribution(
+        &self,
+        source: &impl ImageSource,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        session: &mut Fused944Session,
+    ) -> Result<
+        (
+            crate::metric::ZensimResult,
+            crate::feature_v2::ZensimV2Result,
+            AttributionResult,
+        ),
+        ZensimError,
+    > {
+        validate_pair(source, distorted)?;
+        // 1) Folded-944 extraction with retention — exact features.
+        let v2res = crate::feature_v2::compute_folded944_streaming_with_retention(
+            source,
+            distorted,
+            self.max_pixels(),
+            self.parallel(),
+            &mut session.scratch,
+            &mut session.retention,
+        )?;
+        // 2) Fused v1 walk — basic-block canvas + the map-profile result.
+        let fb = self.fused_basic_canvas(precomputed, distorted, s, None)?;
+        let width = distorted.width();
+        let height = distorted.height();
+        // 3) v2/append/append2 density from retention (same block slicing
+        //    as `compute_attribution_density_full`).
+        let block = |start: usize, end: usize| -> Option<&[f64]> {
+            (s.len() > start).then(|| &s[start..s.len().min(end)])
+        };
+        let s_v2: &[f64] = block(BLOCK_END_V1_POOLS, BLOCK_END_V2).unwrap_or(&[]);
+        let s_append: Option<&[f64]> = block(BLOCK_END_V2, BLOCK_END_APPEND);
+        let s_append2: Option<&[f64]> = block(BLOCK_END_APPEND, BLOCK_END_APPEND2);
+        let mut canvas: Vec<f64> = fb
+            .trim_to(width, height)
+            .iter()
+            .map(|&v| v as f64)
+            .collect();
+        if !s_v2.is_empty() || s_append.is_some() || s_append2.is_some() {
+            let v2a = crate::feature_v2::compute_v2_append_attribution_from_retention(
+                &session.retention,
+                s_v2,
+                s_append,
+                s_append2,
+                self.parallel(),
+                width,
+                height,
+            );
+            debug_assert_eq!((v2a.width, v2a.height), (width, height));
+            for (c, v) in canvas.iter_mut().zip(v2a.density.iter()) {
+                *c += *v;
+            }
+        }
+        Ok((
+            fb.result,
+            v2res,
+            AttributionResult::from_f64_canvas(canvas, width, height),
+        ))
     }
 }

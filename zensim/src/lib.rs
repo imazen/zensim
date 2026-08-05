@@ -314,6 +314,8 @@ pub use source::{
     StridedBytes,
 };
 
+#[cfg(feature = "feature-regime-v2")]
+pub use attribution::Fused944Session;
 #[cfg(feature = "custom-profiles")]
 pub use attribution::{AttributionResult, AttributionSession};
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};

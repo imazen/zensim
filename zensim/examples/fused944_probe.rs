@@ -84,12 +84,13 @@ fn main() {
         *v = if k % 3 == 0 { -1.0 } else { -0.25 } * (1.0 + (k % 7) as f64 * 0.1);
     }
     let mut scratch = zensim::feature_v2::V2Scratch::new();
-    let toggles944 = {
-        let mut t = zensim::feature_v2::V2NewFeatureToggles::default();
-        t.append_block = true;
-        t.append2_block = true;
-        t
+    let toggles944 = zensim::feature_v2::V2NewFeatureToggles {
+        append_block: true,
+        append2_block: true,
+        ..Default::default()
     };
+
+    let mut fsess = zensim::Fused944Session::new();
 
     // Warm-up every arm once.
     let _ = z.compute_with_ref(&pre, &ds).unwrap();
@@ -104,6 +105,9 @@ fn main() {
         .compute_with_ref_score_and_attribution(&pre, &ds, &s156)
         .unwrap();
     let _ = z.compute_attribution_density(&rs, &ds, &s156).unwrap();
+    let _ = z
+        .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
+        .unwrap();
 
     let mut t1 = Vec::new();
     let mut t2 = Vec::new();
@@ -111,6 +115,7 @@ fn main() {
     let mut t4 = Vec::new();
     let mut t5 = Vec::new();
     let mut t6 = Vec::new();
+    let mut t7 = Vec::new();
     for _ in 0..iters {
         let t = std::time::Instant::now();
         let r = z.compute_with_ref(&pre, &ds).unwrap();
@@ -147,25 +152,39 @@ fn main() {
         let a = z.compute_attribution_density(&rs, &ds, &s156).unwrap();
         t6.push(t.elapsed().as_secs_f64() * 1e3);
         std::hint::black_box(a.query_rect(0, 0, 32, 32));
+
+        let t = std::time::Instant::now();
+        let (r, v2, a) = z
+            .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
+            .unwrap();
+        t7.push(t.elapsed().as_secs_f64() * 1e3);
+        std::hint::black_box((r.score(), v2.features()[943], a.query_rect(0, 0, 32, 32)));
     }
 
+    let (m1, m2, m3, m4, m5, m6, m7) = (
+        median_ms(t1),
+        median_ms(t2),
+        median_ms(t3),
+        median_ms(t4),
+        median_ms(t5),
+        median_ms(t6),
+        median_ms(t7),
+    );
     println!(
         "F944PROBE {w}x{h} serial (iters {iters}) medians:\n\
-         \x20 1. v1 score-only                 {:.1} ms\n\
-         \x20 2. v1 + Trained diffmap          {:.1} ms   <- loop pays today (map+discarded score)\n\
-         \x20 3. folded-944 extraction         {:.1} ms   <- loop pays today (score)\n\
-         \x20 4. standalone full density (944) {:.1} ms   <- the unaffordable map\n\
-         \x20 5. C3a fused v1 score+map        {:.1} ms\n\
-         \x20 6. C1 f64 basic density          {:.1} ms\n\
+         \x20 1. v1 score-only                 {m1:.1} ms\n\
+         \x20 2. v1 + Trained diffmap          {m2:.1} ms   <- loop pays today (map+discarded score)\n\
+         \x20 3. folded-944 extraction         {m3:.1} ms   <- loop pays today (score)\n\
+         \x20 4. standalone full density (944) {m4:.1} ms   <- the unaffordable map\n\
+         \x20 5. C3a fused v1 score+map        {m5:.1} ms\n\
+         \x20 6. C1 f64 basic density          {m6:.1} ms\n\
+         \x20 7. FUSED-944 score+map (N)       {m7:.1} ms\n\
          \x20 loop today (2+3):                {:.1} ms\n\
-         \x20 naive fused floor (3+4):         {:.1} ms",
-        median_ms(t1.clone()),
-        median_ms(t2.clone()),
-        median_ms(t3.clone()),
-        median_ms(t4.clone()),
-        median_ms(t5.clone()),
-        median_ms(t6),
-        median_ms(t2) + median_ms(t3.clone()),
-        median_ms(t3) + median_ms(t4),
+         \x20 naive unfused model-map (3+4):   {:.1} ms\n\
+         \x20 B-N1 marginal map (7-3):         {:.1} ms = {:.2}x over score-only (bar <=1.10x)",
+        m2 + m3,
+        m3 + m4,
+        m7 - m3,
+        m7 / m3,
     );
 }

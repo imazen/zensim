@@ -218,6 +218,12 @@ required-features = ["feature-regime-v2"]
 name = "pu21_bench"
 harness = false
 
+# Appendix N B-N1: fused folded-944 vs score-only, paired/interleaved.
+[[bench]]
+name = "fused944_bench"
+harness = false
+required-features = ["custom-profiles", "feature-regime-v2"]
+
 [[bench]]
 name = "v2_speed_baseline"
 harness = false
