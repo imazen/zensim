@@ -1,0 +1,55 @@
+#	zensim trainer performance measurements, 2026-08-04
+#	host=lilith (WSL2, AMD Ryzen 9 7950X, 28 cores visible, 58 GiB)	commit=8099ea562c64
+#	binary=zensim_mlp_train release, no -C target-cpu=native
+#	profile source: perf record -F 499 -g -p <live wave10 trainer>, 35 s, 21632 samples, event cycles:Pu
+#	kscan grid: groups kadid(10125)+tid(3000)+konjnd_val(2020, val-only), 944 feat, arch 944->128->1,
+#	            pairs_per_epoch=50000, seed=4001, coarse-decay=1e-5, epochs in {3,9}
+#	per-epoch time derived as (wall_9ep - wall_3ep)/6 so dataset load + bake are excluded
+section	key	value	unit	note
+profile	adam_simd::adam_update_inner_v4	44.39	pct_cycles	AVX-512 f64x8 Adam, called once per PAIR (minibatch K=1)
+profile	simd_mlp::forward_avx512	23.57	pct_cycles	f64 forward, 944x128
+profile	mlp_train::train_mlp_strategy	10.66	pct_cycles	pair draw + loss + orchestration
+profile	simd_mlp::backprop_avx512	8.05	pct_cycles
+profile	zenstats::panel::sa_st_curve	7.19	pct_cycles	PWRC, O(n^2), per-epoch per val group
+profile	mlp_train::apply_coarse_decay	2.78	pct_cycles	separate full pass over w1
+profile	zenstats::panel::run_lm	1.17	pct_cycles
+profile	zenstats::panel::rescale_logistic	0.58	pct_cycles
+adam_kernel	vsqrtpd_stall	15.62	pct_of_kernel	skid-attributed to following vaddpd
+adam_kernel	vdivpd_stall	37.83	pct_of_kernel	skid-attributed to following w-load vmovupd
+adam_kernel	sqrt_plus_div_total	53.45	pct_of_kernel	= 23.7 pct of whole-trainer cycles
+adam_kernel	g_zero_store	10.97	pct_of_kernel	vmovups zero -> g
+adam_kernel	w_store	9.09	pct_of_kernel
+adam_kernel	g_load	8.10	pct_of_kernel
+adam_kernel	mv_stores	4.61	pct_of_kernel
+hwcounter	cycles	101109912970	count	20 s window on live trainer
+hwcounter	instructions	147913706061	count
+hwcounter	ipc	1.46	ratio
+hwcounter	L1_dcache_loads	106301856998	count
+hwcounter	L1_dcache_load_misses	18581300408	count	17.48 pct miss rate
+hwcounter	cache_references	38273813260	count
+hwcounter	cache_misses	1158228290	count	3.03 pct of refs -> ~3.7 GB/s DRAM
+memory	train_rows_total	779290	rows	sum of 11 wave10 groups
+memory	n_features	944	count
+memory	raw_VecVecf64	5.91	GB	dead after standardization: only .len() read afterwards
+memory	std_features_flat_f64	5.89	GB	live for the whole run
+memory	predicted_total	11.80	GB
+memory	measured_RSS	11.88	GB	/proc/<pid>/smaps_rollup, 0 kB swapped
+kscan	K1_wall_3ep	31.046084	s
+kscan	K1_wall_9ep	80.240993	s
+kscan	K1_per_epoch	8.199	s	baseline (default minibatch_size=1)
+kscan	K8_wall_3ep	13.235219	s
+kscan	K8_wall_9ep	35.194208	s
+kscan	K8_per_epoch	3.660	s	2.24x vs K=1
+kscan	K32_wall_3ep	11.184178	s
+kscan	K32_wall_9ep	24.731948	s
+kscan	K32_per_epoch	2.258	s	3.63x vs K=1
+kscan	load_startup_K1	6.4	s	wall_3ep - 3*per_epoch
+gate	GATE1_same_recipe_twice	PASS	-	492125 model bytes IDENTICAL, only timestamp_epoch differs
+gate	GATE1_best_val	0.9589293024724657	-	identical across both runs
+gate	GATE2_K1_vs_K32	FAIL	-	EXPECTED: 352829 model bytes differ
+gate	GATE2_best_val_K1	0.9589293024724657	-
+gate	GATE2_best_val_K32	0.966021854333742	-	K>1 is a RECIPE change, not a free speedup
+fleet	wsl_7950X	28	cores	58 GiB; AVX-512; 3 lanes live, ~4 max by memory
+fleet	lianli_7900X	24	cores	29 GiB total / 7 GiB free when probed; AVX-512 = SAME dispatch tier as wsl
+fleet	tower_2950X	32	cores	62 GiB / 34 GiB avail; avx512f=0, avx2=32 -> DIFFERENT tier; Docker-only; media priority
+fleet	lane_memory_cost	11.88	GB	per full-data training lane

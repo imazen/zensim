@@ -163,6 +163,14 @@ These are the docs to read first for a given purpose:
 2. [`iw_perf_hotspots_2026-05-15.md`](iw_perf_hotspots_2026-05-15.md) — where the time goes
 3. CLAUDE.md "Performance Optimization" — archmage SIMD patterns
 
+**If you want to make TRAINING faster** (read this before re-profiling the trainer):
+1. [`trainer_perf_2026-08-04.md`](trainer_perf_2026-08-04.md) — fresh profile: Adam 44 % (divider-bound,
+   irreducible at fixed math), the trainer is RAM-bound not FLOP-bound, half of every lane's 11.88 GB is
+   dead after standardization, `--minibatch-size 32` = 3.63× but changes the bake (gated + measured).
+   Also: lianli is a same-ISA-tier drop-in node, tower is AVX2-only; zenfleet training not worth it
+   below ~60–80 runs/wave.
+2. [`trainer_perf_2026-08-04.tsv`](trainer_perf_2026-08-04.tsv) — raw counters, K-scan, gate output
+
 **If you want to investigate the IW path**:
 1. [`v0_20a_path_a_falsification_2026-05-14.md`](v0_20a_path_a_falsification_2026-05-14.md) — original V_20a falsification (SROCC-gated)
 2. [`v0_20_l0_norms_2026-05-15.md`](v0_20_l0_norms_2026-05-15.md) — GD-selection confirmation across 4 bakes
