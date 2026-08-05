@@ -136,7 +136,11 @@ MODEL_TRANSFORMS_EMBED = 48  # Model-details shows at most 48 transform chips (+
 # not in this map (the outer arms + ssim2, which are not bakes) render only in the
 # section's own table; bakes without loop data render an em-dash.
 DEFAULT_LOOP_TARGETING = (
-    "/home/lilith/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-01.json"
+    # 2026-08-05: the sota944-candidate panel (jxl-encoder
+    # benchmarks/zensim_loop_23shot_sota944_2026-08-05.md) — supersedes the
+    # 2026-08-01 file by carrying every entry from it (probe-verified) plus
+    # W10L9_base. Split verdict recorded there: (c)@k2, (b)-plus@k3.
+    "/home/lilith/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-05.json"
 )
 LOOP_BAKE_MAP = {
     # loop-model key (summary JSON `models` key, = the sweep TSV run prefix)
@@ -148,6 +152,9 @@ LOOP_BAKE_MAP = {
     "B_base": "b_sdr_linear_cid80_inclwinsor_dense_dial",
     "bvls_base": "v02_bvls_NO_shaping",
     "outer_zensimA": "v47_strict_QAT_native",
+    # sota944 wave-11 candidate (2026-08-05 panel): 944-class PRUNED bake,
+    # folded-class loop route — k3 emit-best 15/27 (ties B, best inner median).
+    "W10L9_base": "W10L9_s4003_packed",
     # blend2L_base's bake (mlp_2L_diverse_H128) has no fulleval JSON on the board —
     # its row shows the bake filename from the summary JSON; map it when one lands.
 }
@@ -193,6 +200,9 @@ CURATED_BOARD = [
     "sota944_ens_E2_diverse5", "sota944_ens_E3_all51",
     # wave-6 arm-G candidate (highest composite in the campaign; CID22 −0.00051 vs bar)
     "sota944_ens_GE2_trio",
+    # wave-11 battery-selected candidate (k=8-confirmed recipe; entered the jxl
+    # 2/3-shot loop panel 2026-08-05 — the first new-era model with loop columns)
+    "W10L9_s4003_packed",
 ]
 CURATED = set(CURATED_BOARD)
 

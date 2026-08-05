@@ -8262,3 +8262,58 @@ own reported sha, `W11_s4111.fulleval.json` `b7feb57e…`). Cleanup executed sam
 lianli `~/sota944/w11/` staging removed (base `~/sota944/data/` staging predates this
 wave and stays), `~/tmp/zensimw11-target` deleted, workspace `../zensim--wave11`
 forgotten+removed, wave-11 `.workongoing` lines cleared.
+
+# REGISTERED APPENDIX M — THE 2/3-SHOT LOOP-TARGETING PANEL: THE LAST "USES" AXIS (2026-08-05)
+
+**Pointer appendix — the study, its pre-registration, per-cell data, and stats owner
+live in jxl-encoder:** `benchmarks/zensim_loop_23shot_sota944_2026-08-05.md` (+
+`.tsv` + `zensim_loop_23shot_summary_2026-08-05.json`; runner
+`scripts/zensim-loop-eff/run_23shot_sota944.sh`, stats owner `analyze_23shot.py`
+extended with `--extra-arm`, byte-reproduction of the 2026-08-01 summary gated).
+jxl-encoder commits: pre-registration `792378e1`, results `1f89dc66` (both
+merge-base-verified on origin/main). Substrate: zensim `17770775`.
+
+No new-era model had ever entered a loop-targeting study (the campaign review's
+abandoned axis). The wave-11 candidate `W10L9_s4003_packed` (944-class PRUNED,
+caller 944 / internal 667) ran as arm `W10L9_base` — same 9-ref × {70,80,88}
+matrix, ±2.0 own-units, decoded-judged, controls carried behind a 27/27-cell +
+108/108-trace exact substrate probe.
+
+**M.1 Result — split verdict, registered outcomes (c)@k2 / (b)-plus@k3:**
+
+| arm (emit-best) | k2 ±2 | k2 med | k3 ±2 | k3 med |
+|---|--:|--:|--:|--:|
+| v47A_base ᶜ | 12/27 | 3.04 | 13/27 | 2.28 |
+| B_base ᶜ | **14/27** | 1.94 | 15/27 | 1.89 |
+| W10L9_base | 10/27 | 2.63 | **15/27** | **1.82** |
+
+At budget 2 the candidate is below both incumbents — the 2-shot recommendation
+stays with shippedB. At budget 3 it ties B's census with the best inner-arm
+median, LEADS at k3 emit-last (15/27 vs B 14/27), and carries the best photo
+census (14/18) and the best near-lossless-band census of any inner arm
+(t88 7/9 vs B 4/9 / v47A 5/9) — the k3 strength lands exactly in the HF weak
+zone this campaign targets. Nothing ships or swaps on this study alone.
+
+**M.2 The caller-width hazard was real (checked FIRST, as directed):** the loop's
+pre-existing width probe (`[372, 300, 228, 156]`) returns 0 for the pruned bake
+and the pre-existing mount would then have silently emitted seed-quality
+bitstreams through the loop's compare-error swallow. Fixed (smallest-first probe
+incl. 720/924/944, sized by caller width) + three loud guards landed: unmountable
+bake panics at mount; unknown `JXL_ZENSIM_MODEL_MAP` panics (the loop69
+silent-fallback hazard); map-steering arms on a folded-class bake panic
+(372-class fused only — registered limitation). The substrate probe doubles as
+the R0-identity gate: the 372-class loop is bit-identical through the
+integration change.
+
+**M.3 Loop cost (measured, same-session):** candidate 51.8 ms/compare vs v47A
+34.6 (576², k3 medians) = **1.50× per compare, 1.38× whole-encode**. The folded
+route pays a structural second pass (v1 diffmap walk for the map + 944 streaming
+extraction for the score; no fused folded-class compare exists) and still lands
+at 1.5× — extraction, not the MLP forward, is the per-compare cost, so the
+forward-perf/pruning wins do not dominate end-to-end. A fused folded-class
+compare is the registered future lever if the k3 profile motivates loop use.
+
+**M.4 Board wiring:** gauntlet `LOOP_BAKE_MAP` += `W10L9_base →
+W10L9_s4003_packed`; `DEFAULT_LOOP_TARGETING` → the 2026-08-05 summary (carries
+every 2026-08-01 entry probe-verified, plus the candidate); the candidate joins
+`CURATED_BOARD` (wave-11 named candidate; its fulleval carries per-pair).

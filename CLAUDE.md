@@ -432,9 +432,11 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   section table (all loop models incl. emit-last, the outer arms and ssim2, which
   are not bakes), fed by the jxl-encoder sweep summary via `--loop-targeting`
   (default = the committed
-  `~/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-01.json`;
-  section omitted with a loud note when absent). Counts/medians are READ from that
-  JSON, never re-derived (the jxl-encoder analyze script is the owner).
+  `~/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-05.json`,
+  which carries every 2026-08-01 entry probe-verified PLUS the sota944 candidate
+  `W10L9_base` — campaign appendix M; section omitted with a loud note when
+  absent). Counts/medians are READ from that JSON, never re-derived (the
+  jxl-encoder analyze script is the owner).
   Plus (2026-08-03) the **cross-bake per-band SROCC table** under the Mohammadi
   panel's 10-band bars: rows = visible bakes (same order + color), columns = the
   bands that carry pairs (n=0 bands are dropped — CID22's B0/B1 are structurally
