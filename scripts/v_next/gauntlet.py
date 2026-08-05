@@ -231,6 +231,24 @@ def family_of(name: str) -> str:
     return "pre-944 era"
 
 
+DEFAULT_HFNL_AXIS = str(
+    Path(__file__).resolve().parent.parent.parent / "benchmarks" / "hfnl_axis_2026-08-05.json")
+
+
+def load_hfnl_axis(path=None):
+    """Read the committed appendix-O HF-NL axis study JSON (per-model per-ref
+    histograms + means/CIs, reference/ceiling rows, the registered axis LSD,
+    split-half reliability). Values are READ verbatim, never re-derived here —
+    the owner is the appendix-O battery (`panel --batch` over the per-pair-refs
+    dumps; benchmarks/hfnl_axis_report_2026-08-05.md). Missing file -> the
+    HF-NL panel is omitted with a loud note (loop-targeting pattern)."""
+    p = Path(path or DEFAULT_HFNL_AXIS)
+    if not p.exists():
+        print(f"NOTE: hfnl axis JSON not found at {p} — HF-NL panel omitted", file=sys.stderr)
+        return None
+    return json.loads(p.read_text())
+
+
 def load_loop_targeting(path=None):
     """Read the Part-A machine summary JSON (jxl-encoder sweep). Returns the embed dict
     {meta, models, bakeMap, modelBake} or None (missing file -> section omitted, loud note).
@@ -589,7 +607,8 @@ svg{display:block;max-width:100%;height:auto}
 """
 
 
-def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=None):
+def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=None,
+               hfnl_axis=None):
     ech_js, ech_ver = _load_echarts()
     _, ann_meta = load_annotations_registry()
     data = {"bakes": bakes, "palette": PALETTE, "references": REFERENCES,
@@ -597,7 +616,8 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
             "chartThemes": THEME_VARS, "echartsVersion": ech_ver,
             "annRegistry": ann_meta,
             "orientation": EXPECTED_ORIENTATION,
-            "loopTargeting": loop_targeting}
+            "loopTargeting": loop_targeting,
+            "hfnlAxis": hfnl_axis}
     any_stub = any(b.get("is_stub") for b in bakes)
     stub_note = ("<span class='stub'>STUB DATA</span> — synthesized fixtures "
                  "(<code>make_stub_fulleval.py</code>); drop the eval agent's real "
@@ -1009,7 +1029,9 @@ function renderTable(){
     +'scatter data is curated-set-only (see the scatter section). '
     +'<b>⚠ = registry annotation</b> (benchmarks/eval_annotations.json, hover for the reason): '
     +'dial-mono on spline-less bakes is RAW-UNIT (flattered ~3-6 pts vs real dial units); '
-    +'<b>HF-NL/ref</b> = hfnlproxy per-reference mean SROCC — “— (absent)” on cells that predate '
+    +'<b>HF-NL/ref</b> = hfnlproxy per-reference mean signed SROCC (quality-oriented; per-ref, '
+    +'never pooled — hover the header; Δ under the ~0.04 axis LSD is noise; 80 pre-pin cells were '
+    +'sign-flipped and are REPAIRED per appendix O — see the HF-NL axis panel) — “— (absent)” on cells that predate '
     +'the instrument is <b>absent-not-failed</b> (not measured ≠ measured fail); KADID/TID stay '
     +'train==val integrity guards everywhere. <b>dom</b>-tagged rows are DOMINATED (strictly '
     +'beaten by a same-class sibling on every measured floor axis + composite) — kept on the '
@@ -1024,6 +1046,11 @@ function renderTable(){
       +(state.sortKey===c[0]?' sorted'+(state.sortDir>0?' asc':''):''),
       text:c[1]+(jnd?' JND↓':'')});
     if(jnd)th.setAttribute('title',JND_TIP(c[0]));
+    if(c[0]==='hfnl')th.setAttribute('title','hfnlproxy per-REFERENCE mean signed SROCC '
+      +'(quality-oriented, pin 730a386e): + = orders each near-lossless ladder like ssim2, '
+      +'- = inverted. NOT the pooled SROCC (range-restricted). Differences under the axis LSD '
+      +(HA&&HA._meta&&HA._meta.axis_lsd?'~'+(+HA._meta.axis_lsd.median).toFixed(3)+' (p90 '+(+HA._meta.axis_lsd.p90).toFixed(3)+') ':'~0.04 ')
+      +'are ref-sampling noise. See the HF-NL axis panel below.');
     // mountTable, NOT renderTable: renderTable RETURNS a detached wrapper — calling it
     // from the click handler built the sorted table and threw it away, so the visible
     // scoreboard never re-sorted (2026-08-04 user report; bug present since 62404415).
@@ -1564,6 +1591,93 @@ function renderLoop(){
   if(meta.notes)host.append(el('div',{class:'cap',text:'notes: '+meta.notes}));
 }
 
+// ---- HF-NL AXIS PANEL (appendix O, 2026-08-05). HA is the committed axis-study JSON:
+// per-model per-reference SROCC histograms + means/CIs, the reference/ceiling context
+// rows, and the registered axis LSD. Every value is READ verbatim from the JSON —
+// nothing is recomputed here (owner: the appendix-O battery over panel --batch).
+const HA=DATA.hfnlAxis||null;
+function renderHfnl(){
+  const host=$('#hfnlsec');if(!host)return;host.innerHTML='';
+  if(!HA||!HA.models||!HA.models.length)return;
+  const meta=HA._meta||{};const lsd=meta.axis_lsd||{};const edges=meta.hist_edges||[];
+  host.append(el('h2',{text:'HF-NL axis — per-reference SROCC distributions'}));
+  host.append(el('div',{class:'cap',html:'Each row is one model: the shaded strip is its distribution of '
+    +'per-reference signed SROCC over the '+(HA.models[0].n_groups||757)+' hfnlproxy references (bar height ∝ '
+    +'√count per 0.05 bin), the tick + whisker its mean and 95% bootstrap CI, the small open circle its mean on '
+    +'the <b>sidecar subset</b> (118 non-avif refs) where the dashed reference lines live — subset marks compare '
+    +'to subset lines only. <b>Axis LSD '+(lsd.median!=null?(+lsd.median).toFixed(3):'—')+'</b> (p90 '
+    +(lsd.p90!=null?(+lsd.p90).toFixed(3):'—')+', drawn bottom-right): mean differences under it are '
+    +'ref-sampling noise. Split-half model-ranking reliability SROCC '
+    +(meta.split_half&&meta.split_half.srocc_mean!=null?(+meta.split_half.srocc_mean).toFixed(3):'—')
+    +' (Spearman–Brown '+(meta.split_half&&meta.split_half.srocc_sb!=null?(+meta.split_half.srocc_sb).toFixed(3):'—')
+    +') — the axis ordering is reliable. Ensembles carry corrected scoreboard means but no distribution here '
+    +'(the instrument loads one ZNPR). 80 pre-pin board cells were sign-flipped and are REPAIRED '
+    +'(registry id hfnl-preauto-orientation-flip-REPAIRED). Study: '
+    +'<code>benchmarks/hfnl_axis_report_2026-08-05.md</code>.'}));
+  const ms=HA.models.slice().sort((a,b)=>b.per_ref_mean-a.per_ref_mean);
+  const vis=new Set(visBakes().map(b=>b.name));
+  const W=980,rowH=24,padL=252,padR=26,padT=40,padB=46;
+  const H=padT+ms.length*rowH+padB;
+  const x=v=>padL+(Math.max(-1,Math.min(1,v))+1)/2*(W-padL-padR);
+  const svg=el('svg:svg',{viewBox:'0 0 '+W+' '+H,style:'width:100%;max-width:'+W+'px;height:auto;display:block'});
+  // grid + axis labels
+  [-1,-0.5,0,0.5,1].forEach(v=>{
+    svg.append(el('svg:line',{x1:x(v),x2:x(v),y1:padT-6,y2:H-padB+4,
+      stroke:'var(--grid, #8884)','stroke-width':v===0?1.4:0.6,'stroke-dasharray':v===0?'':'3 3'}));
+    svg.append(el('svg:text',{x:x(v),y:H-padB+18,'text-anchor':'middle',fill:'var(--muted)','font-size':11,
+      text:(v>0?'+':'')+v}));});
+  svg.append(el('svg:text',{x:(padL+W-padR)/2,y:H-padB+34,'text-anchor':'middle',fill:'var(--muted)',
+    'font-size':11,text:'per-reference signed SROCC vs the ssim2 target (quality-oriented; + = orders ladders like ssim2)'}));
+  // reference/ceiling context lines (SUBSET values)
+  (HA.reference_rows||[]).forEach((r,i)=>{
+    const dash=r.kind==='ceiling'?'':'5 4';
+    svg.append(el('svg:line',{x1:x(r.mean),x2:x(r.mean),y1:padT-6,y2:H-padB+4,
+      stroke:'var(--accent, #b8860b)','stroke-width':1,'stroke-dasharray':dash,opacity:0.75}));
+    svg.append(el('svg:text',{x:x(r.mean),y:padT-10-(i%2)*11,'text-anchor':'middle',
+      fill:'var(--accent, #b8860b)','font-size':10,text:r.display+' '+(+r.mean).toFixed(2)}));});
+  // rows
+  ms.forEach((m,i)=>{
+    const cy=padT+i*rowH+rowH/2;
+    const bk=DATA.bakes.find(b=>b.name===m.name);
+    const col=bk?color(bk):'var(--muted)';
+    const dim=bk&&!vis.has(m.name);
+    const g=el('svg:g',{opacity:dim?0.35:1});
+    if(i%2)g.append(el('svg:rect',{x:padL,y:cy-rowH/2,width:W-padL-padR,height:rowH,
+      fill:'var(--surface-1, #8881)',opacity:0.5}));
+    const mx=Math.max.apply(null,m.hist.concat([1]));
+    m.hist.forEach((c,bi)=>{if(!c||bi+1>=edges.length)return;
+      const x0=x(edges[bi]),x1=x(edges[bi+1]);
+      const h=Math.max(2,Math.sqrt(c/mx)*(rowH-8));
+      g.append(el('svg:rect',{x:x0,y:cy-h/2,width:Math.max(1,x1-x0-0.6),height:h,fill:col,opacity:0.5}));});
+    if(m.ci)g.append(el('svg:line',{x1:x(m.ci[0]),x2:x(m.ci[1]),y1:cy,y2:cy,stroke:col,'stroke-width':2}));
+    g.append(el('svg:line',{x1:x(m.per_ref_mean),x2:x(m.per_ref_mean),y1:cy-rowH/2+3,y2:cy+rowH/2-3,
+      stroke:col,'stroke-width':2.5}));
+    if(m.subset_mean!=null)g.append(el('svg:circle',{cx:x(m.subset_mean),cy:cy,r:3.2,fill:'none',
+      stroke:col,'stroke-width':1.4}));
+    g.append(el('svg:text',{x:padL-8,y:cy+4,'text-anchor':'end',fill:'var(--ink, currentColor)','font-size':11.5,
+      text:(m.display||m.name)+'  '+(m.per_ref_mean>=0?'+':'')+(+m.per_ref_mean).toFixed(3)}));
+    const hit=el('svg:rect',{x:0,y:cy-rowH/2,width:W,height:rowH,fill:'transparent'});
+    const tip='<b>'+m.name+'</b>'+(m.family?' · '+m.family:'')
+      +'<br>per-ref mean <b>'+(m.per_ref_mean>=0?'+':'')+(+m.per_ref_mean).toFixed(4)+'</b>'
+      +(m.ci?' [CI '+(+m.ci[0]).toFixed(3)+', '+(+m.ci[1]).toFixed(3)+']':'')
+      +'<br>'+m.n_groups+' refs · '+Math.round((m.frac_negative||0)*100)+'% refs backwards'
+      +(m.subset_mean!=null?'<br>subset (non-avif, vs reference lines): '+(m.subset_mean>=0?'+':'')+(+m.subset_mean).toFixed(3):'')
+      +(m.wide_band_mean!=null?'<br>wide-band refs only: '+(m.wide_band_mean>=0?'+':'')+(+m.wide_band_mean).toFixed(3):'');
+    hit.addEventListener('mousemove',ev=>showTip(tip,ev));hit.addEventListener('mouseleave',hideTip);
+    g.append(hit);
+    svg.append(g);
+  });
+  // LSD scale bar (bottom right)
+  if(lsd.median!=null){
+    const y0=H-10;const x1=W-padR,x0=x1-(lsd.median/2)*(W-padL-padR);
+    svg.append(el('svg:line',{x1:x0,x2:x1,y1:y0,y2:y0,stroke:'var(--ink, currentColor)','stroke-width':2}));
+    [x0,x1].forEach(xx=>svg.append(el('svg:line',{x1:xx,x2:xx,y1:y0-4,y2:y0+4,
+      stroke:'var(--ink, currentColor)','stroke-width':1.2})));
+    svg.append(el('svg:text',{x:x0-6,y:y0+4,'text-anchor':'end',fill:'var(--muted)','font-size':10,
+      text:'axis LSD '+(+lsd.median).toFixed(3)+' (p90 '+(+lsd.p90).toFixed(3)+')'}));}
+  const wrap=el('div',{style:'overflow-x:auto'});wrap.append(svg);host.append(wrap);
+}
+
 // ---- MODEL DETAILS (architecture + in/out modifiers per bake, from the ZNPR itself)
 // n_feature_transforms = the TRUE transform count (the embed is capped at 48 chips —
 // MODEL_TRANSFORMS_EMBED in the builder; the fulleval JSON on disk keeps the full list).
@@ -1728,12 +1842,12 @@ function renderModels(){
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'gates'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
 function rerender(){disposeCharts();state.renderedTheme=effTheme();
-  mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderGates();renderModels();renderTrade();renderScatter();}
+  mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderHfnl();renderGates();renderModels();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 // Theme reactivity: charts (and everything else) rebuild with the other theme's option
@@ -1756,8 +1870,11 @@ if __name__ == "__main__":
     ap.add_argument("--best-per-day", default=None)
     ap.add_argument("--loop-targeting", default=DEFAULT_LOOP_TARGETING,
                     help="jxl-encoder 2/3-shot loop-targeting summary JSON (section omitted if absent)")
+    ap.add_argument("--hfnl-axis", default=DEFAULT_HFNL_AXIS,
+                    help="appendix-O HF-NL axis study JSON (panel omitted if absent)")
     ap.add_argument("--out", default="/mnt/v/output/zensim/reports/summer_gauntlet.html")
     a = ap.parse_args()
     bakes = load_fulleval(a.fulleval_dir, a.best_per_day)
-    out, size = build_html(bakes, a.out, loop_targeting=load_loop_targeting(a.loop_targeting))
+    out, size = build_html(bakes, a.out, loop_targeting=load_loop_targeting(a.loop_targeting),
+                           hfnl_axis=load_hfnl_axis(a.hfnl_axis))
     print(f"wrote {out}  ({size // 1024} KB)  {len(bakes)} bakes")
