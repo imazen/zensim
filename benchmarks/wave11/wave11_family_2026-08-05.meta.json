@@ -1,0 +1,61 @@
+{
+  "generated_utc": "2026-08-05T05:47:35+00:00",
+  "registration": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX K",
+  "family": [
+    "W11_s4101",
+    "W11_s4103",
+    "W11_s4105",
+    "W11_s4107",
+    "W11_s4109",
+    "W11_s4111",
+    "W10L9_s4001",
+    "W10L9_s4003"
+  ],
+  "l9_pair": [
+    "W10L9_s4001",
+    "W10L9_s4003"
+  ],
+  "incumbent": [
+    "H_co3abpg_s2501",
+    "H_co3abpg_s2503",
+    "H_co3abpg_s2507"
+  ],
+  "bands_H4": {
+    "cid22": 0.01,
+    "konjnd_abs": 0.076,
+    "nonphoto": 0.01,
+    "csiq": 0.096,
+    "live": 0.05,
+    "m3a": 0.092,
+    "sdr25": 0.02,
+    "aic3": 0.011,
+    "aic4": 0.01,
+    "imazen26": 0.01,
+    "hfnl_perref": 0.247,
+    "mono": 0.024
+  },
+  "headline_axes": [
+    "cid22",
+    "konjnd_abs",
+    "live",
+    "hfnl_perref",
+    "mono"
+  ],
+  "rule_K5": "HOLDS iff median in pair range; WITHIN-NOISE iff dist<=band; COLLAPSE iff median < incumbent_mean - band; REGRESSION else (survives iff median > incumbent_mean + band)",
+  "stat_source": "freeze_check --tsv + fulleval rank.*.srocc + repro.best_val; median/min/max is the registered K.4 aggregation",
+  "headline_calls": {
+    "cid22": "HOLDS-WITHIN-NOISE",
+    "konjnd_abs": "HOLDS",
+    "nonphoto": "HOLDS",
+    "csiq": "HOLDS",
+    "live": "HOLDS",
+    "m3a": "HOLDS",
+    "sdr25": "HOLDS-WITHIN-NOISE",
+    "aic3": "HOLDS",
+    "aic4": "HOLDS-WITHIN-NOISE",
+    "imazen26": "HOLDS",
+    "hfnl_perref": "HOLDS",
+    "mono": "HOLDS-WITHIN-NOISE"
+  },
+  "commit": null
+}

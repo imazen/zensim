@@ -1,0 +1,24 @@
+# Freeze-bar summary — `W10L9_s4003`
+
+Bars: zenpapers final-metric plan §5 (2026-07-31). Owners: benchmarks/decision_surface_audit_2026-07-31.md. ATTACH rows need evidence from their named owner — they gate the freeze too.
+
+| gate | bar | measured / evidence | verdict |
+|---|---|---|:--:|
+| CID22 SROCC (selected seed) | ≥ 0.89 | 0.8867 | **FAIL** |
+| KonJND abs-SROCC | ≥ 0.4 | 0.4988 | PASS |
+| Corruption head detection (context) | — | no head given — dial-alone pass_q20 18.8% (broken-by-design at 924); rerun bake_verdict with --corruption-head | info |
+| Corruption ORDERING via head | ≥ 0.214 (720 parity) | the E-M corruption-ordering instrument, evaluated on the HEAD bake | ATTACH |
+| CSIQ SROCC (≥ best 924-arm) | cross-bake | measured 0.9330; supply --bar csiq=<best-arm> to gate | ATTACH |
+| LIVE SROCC (≥ best 924-arm) | cross-bake | measured 0.9608; supply --bar live=<best-arm> to gate | ATTACH |
+| UPIQ pooled (V1-HDR) | > 0.7536 | scripts/hdr/upiq_panel.py (Python owner) | ATTACH |
+| Korshunov hold (V1-HDR) | ≥ 0.93 | seven-domain external-read runner (must be committed before Phase 4) | ATTACH |
+| M3a coherence (EM2-class) | ≥ 0.85 | 0.8626 | PASS |
+| Dial monotonicity | ≥ 93% | 99.7% | PASS |
+| Dial tied rate | ≤ 5% | 0.0% | PASS |
+| product_composite | — | 0.8602 | info |
+| Byte-repro (embedded zentrain.repro) | present | present | PASS |
+| Perf SDR | ≤ +2% vs 944 baseline | zenbench compare/extractor benches | ATTACH |
+| Perf HDR (PU path) | ≤ +5% | zenbench; the V5 lever list | ATTACH |
+| LOO (append2 family) | ≤ 0 | extractor-side LOO instrument (gaps-doc §0) | ATTACH |
+
+1 evaluable FAIL(s); 8 row(s) awaiting attached evidence. Freeze requires zero FAILs AND every ATTACH row's evidence in hand.

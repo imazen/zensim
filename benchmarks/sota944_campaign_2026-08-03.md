@@ -8076,3 +8076,177 @@ All of §L.11 stands as written, plus: the w11-family dispersion TSV reflects th
 four pre-fix stale W11 fullevals available at write time (s4105/s4111 pending
 their session's recovery) — context only, no rule consumed it; and the select
 table's 8/8-floor cell is a k=1 observation by construction.
+
+## K.R — WAVE 11 RESULTS (2026-08-05; k=8 family complete, battery run, no gate relaxed)
+
+### K.R0 Execution record (including the instrument-break window)
+
+6/6 cells trained first-attempt (local s4101/s4103/s4105 under `run-heavy --mem 24G`,
+≤2 concurrent, box-wide trainer census ≤5 honored throughout; lianli s4107/s4109/s4111,
+2 concurrent, observed idle before staging). One trainer binary both lanes, sha256
+`f24b7ee1…` (flat-buffer `031bd261` lineage), staged sha-verified to lianli. Per-cell
+wall ~14 min local / ~28 min lianli.
+
+**The instrument-break window (the wave's one incident, fail-loud by design):**
+`diffmap_block_coherence` — the M3a instrument inside `run_full_eval.sh` — did not
+COMPILE from `031bd261` (trainer flat-buffer made its `feats_of` closure `FnMut`
+without a `mut` binding) until the KonFiG session's one-line fix `3db5a215`. The
+example only builds under `custom-profiles,feature-regime-v2`, so wave-11's
+registration-time prebuild (default features) and CI caught nothing; **every
+`run_full_eval` in the window failed at compile — loud** (`W11_s*.bin.HARVEST_FAILED`
+markers + harvest rc=6; zero silent data). All six verdicts succeeded in-window (the
+verdict half never compiles the example); all six fullevals were re-harvested
+foreground post-fix at `1ed606e5`. Ops lesson recorded: this session's wake conditions
+watched trainer-lane failures and terminal sentinels but not `.HARVEST_FAILED`
+markers — the supervisor woke it; the markers are now a registered wake condition for
+future waves.
+
+**Instrument gates, re-run at the post-fix build:** comparability gate PASS twice
+(registration build: 82,385 numeric fields vs committed `W10L9_s4001.full.json`,
+0 mismatches; post-fix rebuild at `1ed606e5`: same 82,385 / 0 — the parquet-loader
+flat-emission change is verdict-inert; only the documented sdr25 `mos`→`jnd` key
+rename, payload 50/50 identical). **KonFiG reconciliation (K.R note per its L.R0):**
+its in-window harvest of `W11_s4101`/`W11_s4103` is reproduced by this session's
+re-harvest **exactly — 82,441 numeric fields each, 0 mismatches, M3a bit-identical**
+(0.828152 / 0.833526). No discrepancy finding.
+(`benchmarks/wave11/{comparability_gate,konfig_reconcile}_2026-08-05.txt`.)
+
+### K.R1 The k=8 family — outcome (b) fires in its mildest registered form
+
+Full tables: `benchmarks/wave11/wave11_{cells,family_summary}_2026-08-05.tsv` (+ meta).
+Per-axis K.5 calls on the pooled k=8 medians:
+
+| headline axis | fam median [min, max] | L9 pair range | incumbent mean | call |
+|---|---|---|---|---|
+| CID22 | 0.88412 [0.87477, 0.88903] | [0.88671, 0.88903] | 0.87874 | **HOLDS-WITHIN-NOISE** (−0.0026 vs pair-lo, band 0.010) |
+| KonJND | 0.46604 [0.41035, 0.50741] | [0.42389, 0.49879] | 0.43297 | **HOLDS** |
+| LIVE | 0.96389 [0.96081, 0.96770] | [0.96081, 0.96526] | 0.84293 | **HOLDS** |
+| HF-NL per-ref | 0.66308 [0.46789, 0.74993] | [0.62120, 0.73334] | 0.25550 | **HOLDS** |
+| dial mono | 99.52% [98.85%, 99.72%] | [99.53%, 99.66%] | 94.81% | **HOLDS-WITHIN-NOISE** (−0.0001 vs pair-lo, band 0.024) |
+
+Non-headline: nonphoto/csiq/m3a/aic3/imazen26 **HOLDS**; sdr25/aic4
+**HOLDS-WITHIN-NOISE**. **Zero REGRESSION calls, zero COLLAPSE calls, on any axis.**
+
+Strict outcome (a) — all five headline medians inside the k=2 pair range — misses on
+exactly the two razor-thin ranges the K.9.1 confound predicted (CID22 pair width
+0.0023, mono width 0.13 pp), by 0.0026 and 0.01 pp respectively. So **outcome (b)
+fires in its mildest form, and everything survives**: every headline median beats the
+incumbent k=3 mean by more than its band on LIVE (+0.121), HF-NL (+0.408), and mono
+(+4.7 pp), with CID22 +0.005 and KonJND +0.033 directionally up inside their bands.
+The wave-10 L9 pair was **mildly seed-lucky on CID22 point estimates** (its two draws
+are the family's #1 and #3 of 8) **and not at all lucky on the structural gains**:
+breadth (CSIQ 0.944 median vs incumbent 0.799, LIVE 0.964 vs 0.843), HF-NL, and dial
+mono are properties of the corrected mix, reproduced across all 8 seeds. The
+corrected-mix recipe is **confirmed as the campaign's ship-candidate recipe at seed
+depth**, with the honest caveat that its CID22 median (0.884) sits ~0.003 under the
+pair's showcase draws — inside noise.
+
+six-of-eight floor note: the family's two 6/8 cells (s4105, s4109) both fail F8
+band-tails + the CID22 floor; the other six are 7/8 blocked on F8 or KonJND-floor —
+the F8 B9 tail (≥0.15) is the class's persistent miss (winner B9 0.139).
+
+### K.R2 Selection over the pooled 8 + the winner battery
+
+`freeze_check --select` (E.4 rule; `benchmarks/wave11/wave11_select_2026-08-05.txt`):
+**SELECTED `W10L9_s4003`** — 7/8 floors, sel_comp 0.9579 (M3a 0.8626 GOLD tie-break);
+best wave-11 draw `W11_s4111` ranks #2 at 0.9531. All 8 selectable (M3a measured on
+every cell — the harvest guard held).
+
+**The full winner battery (registered winner-only all campaign; FIRST full run):**
+
+1. **Packaging** (`_dial` 390,449 B → `_packed` **165,696 B**, 3.08× vs raw 509,913 B;
+   zerobias L0 59,777/120,832, L1 84/128; **prune 944→667 layer-0 inputs, all 277
+   class-1, identity gate BIT-identical on 2,035 anchor rows**; verify SROCC 0.8867).
+   Per-axis raw→packed deltas reproduce the packaging-pass precedent — **packaging is
+   FREE**: |Δ| ≤ 0.0004 on every rank axis (CID22 +0.00001, KonJND **+0.00004** — the
+   f32-pack contingency does NOT fire), M3a 0.86259→0.86238 (−0.0002, stays GOLD).
+   **Dial-unit re-pricing: dynamic range 22.4→67.6, and packed dial-mono lands at
+   99.32% — the FIRST packaged 944 cell to hold the ≥93% dial bar in dial units**
+   (precedent cells: 91.2/87.7/91.9%). Packed twin harvested as `W10L9_s4003_packed`
+   (additional cell; parent stays canonical).
+2. **G-RANGE: FAIL, honestly, at both ends.** Dial bake: 0 below-knot, 192/4292
+   (**4.473%**) above-knot on cid22val (gate <0.010%); packed twin 4.497%. The worst
+   G-RANGE the class has posted (prior worst 0.559%) — the issue-50 near-top
+   saturation at larger mass. **Dial-step rank-invariance NOT certified on
+   csiq/live**: the K.6 STOP fired and the mechanism was measured
+   (`benchmarks/wave11/dial_step_rank_check_2026-08-05.txt`) — the spline's
+   flat-bottom segment (bottom knot −13.25 → y 5.420) collapses the 68/866 csiq +
+   70/779 live below-knot pairs into one tie group (max wiggle: csiq KROCC 1.7e-3;
+   cid22 rank rows BIT-identical, 0 ties). Same mechanism the packaging pass
+   documented at sub-1e-6, at ~8-9% tie mass here because this bake's raw range
+   ([−22.4, 14.5] on csiq, [−27.7, 13.7] on live) exceeds the frozen §3d anchor's
+   domain at BOTH ends. Registered lever: amendment-2 anchor densification (near-top
+   AND near-bottom), deliberately not applied post-hoc.
+3. **Corruption joint** (`W10L9_s4003_corrjoint`): head `corrhead944_s13` pass_q20
+   **0.79315** / pass_q10 **0.92560** (head-intrinsic, equal to the registered head
+   numbers); dial-alone 0.1875/0.0625 reported for honesty.
+4. **LOO ×2** (masked-root occlusion, same-binary plain reference; occlusion ≠
+   ablation caveat carried):
+
+   | mask | Δcid22 | Δkonjnd | Δsdr25 | Δnonphoto | Δhfnl | family Σ(|full|−|drop|) |
+   |---|--:|--:|--:|--:|--:|--:|
+   | BANDVIS lanes | −0.0026 | −0.0196 | −0.0017 | −0.0065 | +0.0037 | **+0.0266 (helps → KEEP)** |
+   | append2 block | −0.0115 | −0.0304 | −0.0117 | −0.0198 | −0.0148 | **+0.0882 (helps → KEEP)** |
+
+   Both blocks KEEP, stronger than the s31 precedent (+0.0257/+0.0552); the winner
+   draws on append2 on **all five** axes.
+5. **Freeze surfaces** (`benchmarks/wave11/winner_freeze_{balanced,bar}_2026-08-05.txt`):
+   balanced 7/8 (F8 B9 0.139 vs 0.15 the only miss); §5 bar — the ONE evaluable FAIL
+   is CID22 0.8867 vs ≥0.89; KonJND/M3a/dial-mono/tied/repro PASS; this battery now
+   supplies evidence for three ATTACH rows (corruption head joint, LOO append2 ≤0
+   test — which it PASSES in the keep direction, CSIQ/LIVE cross-bake values);
+   UPIQ/Korshunov/perf remain externally-owned ATTACH rows, not run here.
+
+### K.R3 Era-tagged scorecard (cross-era rows labeled; KADID under the K.7 cohort rule)
+
+`benchmarks/wave11/era_scorecard_2026-08-05.tsv` (freeze_check-read, one row per
+committed fulleval; era-bridge rows are NOT same-instrument comparable):
+
+| model | class | cid22 | konjnd | nonphoto | csiq | live | HF-NL | mono | M3a |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| B (shipped) | era-bridge | 0.8821 | **0.5186** | 0.8990 | 0.9342 | 0.8970 | **0.8252** | 97.6% | 0.597 |
+| winner_dial | era-bridge | 0.8940 | 0.4308 | 0.8946 | 0.9584 | 0.9600 | 0.6437 | 97.6% | **0.923** |
+| EM4_s42 | era-bridge | 0.8924 | 0.4286 | 0.9098 | 0.7882 | 0.8013 | — | 94.7% | — |
+| C_em944_s31 | 944-single | 0.8869 | 0.4689 | 0.9162 | 0.7698 | 0.8117 | 0.037 | 93.4% | 0.875 |
+| GE2_trio | 944-ensemble | 0.8919 | 0.4543 | 0.9203 | 0.8098 | 0.8453 | 0.163 | 95.2% | n/c |
+| **W10L9_s4003** | 944-single | 0.8867 | 0.4988 | **0.9251** | 0.9330 | **0.9608** | 0.7333 | **99.7%** | 0.863 |
+| W10L9_s4003_packed | 944-single | 0.8867 | 0.4988 | 0.9251 | 0.9331 | 0.9604 | 0.7334 | **99.3% (dial-unit)** | 0.862 |
+
+KADID row (K.7): the five era comparators' stored `rank.kadid` read against the
+INVERTED table (annotation `kadid-ext-root-inverted`) — NON-COMPARABLE; the winner's
+corrected-cohort signed KADID is **+0.9133** (train_eq_val guard, not a gate).
+Within the unified-944 class the winner strictly dominates s31 on 7 of 8 rows
+(−0.0002 CID22) and posts the class's first ≥0.93/≥0.96 CSIQ/LIVE breadth pair with
+an HF-NL (0.733) that approaches shipped-B's 0.825 — the axis no prior 944 cell got
+within 0.4 of. Against shipped B the honest read: B keeps KonJND (+0.020) and HF-NL
+(+0.092); the winner takes CID22 (+0.005), nonphoto (+0.026), LIVE (+0.064), dial
+mono (+2.1 pp incl. packaged-unit), M3a (+0.266), and carries the corruption HEAD.
+
+### K.R4 The freeze decision surface (presented; NOTHING ships or swaps — user-gated)
+
+The corrected-mix recipe (arm-H + corrected KADID + `tkadis` dropped) is the
+campaign's **ship-candidate recipe**, k=8-confirmed. The candidate = `W10L9_s4003`
+(packed twin `W10L9_s4003_packed`, 165,696 B, verdict-identical, dial-unit mono
+99.3%). For the user's decision, the complete honest state:
+
+- **FOR**: 7/8 balanced floors; breadth (CSIQ 0.933 / LIVE 0.961) at zero CID22 cost —
+  the axis the 944 class could never reach pre-fix; HF-NL 0.733 (class record; B is
+  0.825); dial mono 99.3% in dial units (first packaged 944 pass); M3a GOLD 0.863;
+  corruption via head 0.793; LOO keeps both feature blocks; full battery + repro
+  chain committed; packaging free.
+- **AGAINST**: §5 CID22 bar 0.8867 < 0.89 (the family's k=8 median is 0.884; the bar
+  has been cleared only by W5_E1_k2 0.89425, an ensemble); F8 B9 band-tail 0.139 <
+  0.15; G-RANGE FAIL at 4.47% above-knot + flat-bottom tie mass on csiq/live (both
+  ends = anchor-domain mismatch; lever registered, untested); KonJND 0.499 is below
+  shipped-B's 0.519; UPIQ/Korshunov/perf ATTACH rows not yet supplied.
+- **Not claimed**: SOTA (the registered §5 bar stands unmet); any ideal-mix statement
+  (LOO marginals only); ablation-true LOO (occlusion only).
+
+### K.R5 Deliverables checklist (K.10)
+
+1. Drivers + echo-verify — committed pre-fit (`532e3a1f`). 2. Family tables + select +
+meta — THIS COMMIT. 3. Battery artifacts (packed twin + sizes + G-RANGE + rank-check
+finding, corrjoint, LOO ×2, freeze surfaces, era scorecard) — THIS COMMIT +
+`/mnt/v/output/zensim/bakes/sota944/`. 4. Outcome: **(b)-mild, everything survives;
+per-axis calls above**; freeze surface presented — the decision is the user's.
+5. Push verification + Tower mirror + sha spot-check recorded in the ops log below.

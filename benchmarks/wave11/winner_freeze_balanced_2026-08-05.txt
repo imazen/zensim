@@ -1,0 +1,35 @@
+# Balanced-selection profile `balanced-2026-08-04` — `W10L9_s4003`
+
+Class: **944-single** — shippable single bake. Floors: sota944 campaign AMENDMENT 8 (§8.1, registered 2026-08-04 BEFORE scoring; user-directed policy). §1 stays the freeze bar — this is the balanced SELECTION surface.
+
+| floor | bar | measured | verdict |
+|---|---|---|:--:|
+| F1 CID22 SROCC | ≥ 0.885 | 0.8867 | PASS |
+| F2 KonJND abs-SROCC | ≥ 0.43 | 0.4988 | PASS |
+| F3 nonphoto SROCC | ≥ 0.9 | 0.9251 | PASS |
+| F4 dial mono/tied | mono ≥ 93% ∧ tied ≤ 5% | mono 99.7% / tied 0.0% (raw-unit) | PASS |
+| F5 dial span sanity | 1 ≤ span ≤ 120 | 22.4 | PASS |
+| F6 HF-NL per-ref (sign) | ≥ 0 | 0.7333 | PASS |
+| F7 breadth CSIQ ∧ LIVE | both ≥ 0.83 | csiq 0.9330 / live 0.9608 | PASS |
+| F8 CID22 band tails | B9 ≥ 0.15 ∧ B3 ≥ 0 | B9 0.139 n=43 / B3 0.135 n=57 | **FAIL** |
+
+| ⚠ annotation | kind | reason |
+|---|---|---|
+| `dial-mono-raw-unit` | annotated | spline-less raw heads measure dial mono/tied in RAW output units (span ~16-17), where the 0.5-score-pt materiality threshold flatters mono by ~3-6 pts vs real [0,100] dial units (packed twins dropped 94.0->91.2 / 93.4->87.7 / 95.7->91.9); strict-backwards is cal-invariant, so the drop is a unit effect, not new inversions |
+| `kadid-tid-train-eq-val` | annotated | KADID/TID are 100% train==val pair-overlap for the training-era corpora — their SROCCs reward memorization, not skill; integrity guards only, never ranking signal (already dimmed on the board; this entry formalizes it machine-readably) |
+| `kadid-ext-root-corrected-2026-08-05` | annotated | As of 2026-08-05 the ext-lineage ext_kadid.parquet stores the CORRECT quality-oriented target ((dmos-1)/4); the orientation gate reports +0.582360 on all three roots. A verdict produced from this date forward therefore carries a real, correctly-signed KADID number — kadid-ext-root-inverted does NOT apply to it. KADID remains a train==val guard (kadid-tid-train-eq-val still applies) and is NOT a ship gate. REPRO HAZARD: the corrected table took the canonical NAME, so re-running any pre-2026-08-05 bake's embedded zentrain.repro argv verbatim now trains against corrected bytes and will NOT reproduce that bake; the preserved original is ext_kadid_INVERTED_2026-08-04.parquet in the same directory (ext944 sha256 4dde6be26d3c50dca21fdee834f95bd692afa2c65b2d4f6f8a886d105553ca08, which is the sha every affected repro lists). Existing bakes are NOT retrained and NOT re-verdicted. |
+
+| reported (never floors) | value |
+|---|---|
+| M3a (tiered, reported) | 0.8626 — GOLD (≥ 0.85) |
+| Corruption (head-owned) | no head — dial-alone pass_q20 18.8% (broken-by-design post-720) |
+| HF-NL 0.1931 comparator (context) | at/above the arm-B comparator (0.7333 vs 0.1931) |
+| KADID/TID (t=v integrity guards, dimmed; SIGNED) | kadid +0.9133 / tid +0.9326 — never scored; negative = ANTI-CORRELATED with the corpus's human labels |
+| sdr25 (within-family selector only; ⊂ aic4 — Appendix I) | -0.9527 (JND↓ convention; |SROCC| 0.9527) |
+| packaging | spline-less raw head — needs `bake_dial_refit add-spline` (+ rank-invariance check) before G-RANGE is defined |
+| repro | present |
+| product_composite (§1) | 0.8602 |
+
+**balanced_composite = 0.8285** (registered §8.1 weights)
+
+7 of 8 floors pass

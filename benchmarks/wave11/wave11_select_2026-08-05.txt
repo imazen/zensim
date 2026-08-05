@@ -1,0 +1,17 @@
+# freeze_check --select — REGISTERED rule (campaign appendix E.4)
+
+PRIMARY: profile floor count. TIE-BREAK: selection_composite = balanced_composite + 0.15·M3a.
+sdr25 is a reported comparator, NOT part of the rule.
+
+| rank | bake | class | floors | bal_comp | M3a | sel_comp | sdr25 | selectable |
+|---:|---|---|---:|---:|---|---:|---:|---|
+| 1 | W10L9_s4003 | 944-single | 7/8 | 0.8285 | 0.8626 | 0.9579 | 0.9527 | yes |
+| 2 | W11_s4111 | 944-single | 7/8 | 0.8257 | 0.8495 | 0.9531 | 0.9425 | yes |
+| 3 | W11_s4107 | 944-single | 7/8 | 0.8302 | 0.8138 | 0.9522 | 0.9524 | yes |
+| 4 | W11_s4103 | 944-single | 7/8 | 0.8270 | 0.8335 | 0.9520 | 0.9390 | yes |
+| 5 | W11_s4101 | 944-single | 7/8 | 0.8269 | 0.8282 | 0.9512 | 0.9578 | yes |
+| 6 | W10L9_s4001 | 944-single | 7/8 | 0.8279 | 0.8080 | 0.9490 | 0.9572 | yes |
+| 7 | W11_s4105 | 944-single | 6/8 | 0.8218 | 0.8736 | 0.9528 | 0.9428 | yes |
+| 8 | W11_s4109 | 944-single | 6/8 | 0.8178 | 0.8611 | 0.9470 | 0.9498 | yes |
+
+**SELECTED: `W10L9_s4003`** — 7/8 floors, selection_composite 0.9579.

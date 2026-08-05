@@ -1,0 +1,8 @@
+{
+  "generated_utc": "2026-08-05T05:55:59Z",
+  "registration": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX K (K.6.5, K.7)",
+  "stat_source": "freeze_check --fulleval <f> --profile balanced-2026-08-04 --tsv per committed fulleval; NO statistic computed here",
+  "freeze_check_build": "1ed606e5 workspace, CARGO_TARGET_DIR=~/tmp/zensimw11-target",
+  "rows": ["b_sdr_linear_cid80_inclwinsor_dense_dial", "winner_dial_Ebothg_hfgain_winsor_dial", "sota944_EM4_s42_on944root", "sota944_C_em944_s31", "sota944_ens_GE2_trio", "W10L9_s4003", "W10L9_s4003_packed"],
+  "caveats": ["era-bridge rows are NOT same-instrument comparable (labeled by freeze_check class)", "KADID excluded per K.7: the five era comparators' stored kadid read against the INVERTED table (kadid-ext-root-inverted); winner corrected-cohort kadid_signed +0.9133 reported in K.R3"]
+}

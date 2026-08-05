@@ -1,0 +1,30 @@
+# WAVE 11 winner battery — dial-step rank-invariance check (K.6.1) — 2026-08-05
+# Registered rule: any rank delta at the dial step = defect => STOP and report.
+# The check FIRED; this is the stop-and-report, with the mechanism measured.
+#
+# W10L9_s4003_dial.bin (add-spline, anchor944_dial, 16 knots) vs the committed raw
+# W10L9_s4003.full.json, same binary (gate2-passed instrument):
+#   28 of the rank-stat cells differ. Max |delta|: csiq krocc 1.7e-3; csiq srocc 6.4e-5;
+#   live same class; hfnlproxy srocc 3e-8; cid22 rank rows BIT-IDENTICAL.
+#
+# MECHANISM (measured from the two verdicts' per_pair blocks, no new tooling):
+#   corpus     n    dup-raw  dup-dial  at-floor(5.420)   raw range
+#   csiq       866  1        68        68                [-22.41, 14.46]
+#   live       779  16       81        70                [-27.71, 13.73]
+#   cid22      4292 0        0         0                 [-4.84, 14.94]
+#   hfnlproxy  5000 87       90        (4 at cap 100.0)  [-4.41, 18.70]
+# The spline's flat-bottom segment (bottom knot x=-13.247, y=5.420) maps every
+# below-knot raw to exactly 5.420: 68 csiq + 70 live pairs collapse into one tie
+# group, which moves midrank SROCC/KROCC by up to 1.7e-3. Zero rank error where no
+# tie forms (cid22 identical, 0 dups). This is the SAME mechanism the packaging
+# pass documented ("sub-1e-6 tie-granularity wiggle ... flat-bottom region"), at
+# larger mass because THIS bake's negative tail extends ~9-14 raw units below the
+# anchor's bottom knot.
+#
+# DISPOSITION: dial-step rank-invariance is NOT certified for W10L9_s4003 on
+# csiq/live (tie-mass 7.9%/9.0%); certified bit-identical on cid22. Together with
+# the G-RANGE FAIL (4.47% above-knot on cid22val), both ends measure the same
+# anchor-domain property: this bake's raw range exceeds the frozen S3d anchor's
+# domain top AND bottom. Registered lever = amendment-2 near-top (and now
+# near-bottom) anchor densification — deliberately NOT applied post-hoc in this
+# wave. No gate relaxed; the packaged twin's numbers are reported with this flag.

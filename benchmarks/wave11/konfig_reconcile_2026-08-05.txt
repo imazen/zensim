@@ -1,0 +1,14 @@
+# WAVE 11 x KonFiG reconciliation (supervisor-directed; appendix K.R note) — 2026-08-05T05:48Z
+# During the diffmap_block_coherence compile-break window (031bd261..3db5a215), the KonFiG
+# session harvested W11_s4101/W11_s4103 with its own gate-passed instruments into
+# /mnt/v/output/zensim/konfig944/pairharvest/ (disclosed in its L.R0). After the fix, wave-11's
+# own foreground re-harvest (rebuilt instruments at 1ed606e5 + gate2 PASS: 82,385 fields
+# 0 mismatches vs committed W10L9_s4001.full.json) reproduced both cells:
+#
+#   W11_s4101.fulleval.json: 82,441 numeric fields compared, 0 mismatches, 0 non-numeric,
+#                            0 key diffs; m3a_coherence 0.828152 == 0.828152
+#   W11_s4103.fulleval.json: 82,441 numeric fields compared, 0 mismatches, 0 non-numeric,
+#                            0 key diffs; m3a_coherence 0.833526 == 0.833526
+#
+# VERDICT: instrument-identical across the two sessions; no discrepancy finding. The shared-dir
+# fullevals (this session's) are the family-table inputs.
