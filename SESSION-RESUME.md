@@ -9,6 +9,15 @@ never compare numbers across eras without the doc's era-bridge notes.
 
 ## Current true state (2026-08-04)
 
+- **★ 2026-08-05: Profile `C` SHIPPED (user-gated)** — the wave-11
+  battery-selected `W10L9_s4003_packed` (k=8-confirmed corrected-mix recipe,
+  appendix K.R) is `ZensimProfile::C` (`zensim-c`), weight
+  `zensim/weights/c_sdr_mlp944_corrmix_2026-08-05.bin` (sha `1a2c8d52…`,
+  first PRUNED shipped bake, caller 944 / internal 667). **`B` remains the
+  default** — C-vs-B is a stated trade (C: CID22/LIVE/CSIQ/nonphoto/dial-mono/
+  M3a + corruption head; B: KonJND + HF-NL). No crates.io publish (separately
+  gated). Repro + provenance: `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`;
+  distribution `s3://zentrain/profiles/C-2026-08-05/` + Tower.
 - **Regime = 944** (folded+append+append2). Canonical data roots + grids are
   resolved by `bake_verdict --regime 944` itself (test-pinned; see entry
   point 1). REGIME PURITY is absolute: never column-mix 944 rows with

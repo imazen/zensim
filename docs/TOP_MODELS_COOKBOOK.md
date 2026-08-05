@@ -82,6 +82,14 @@ encode); measured loop targeting = residual 0.84 in 4 passes vs one-shot 4.33 in
 
 ## 2. The top models (2026-07-18) and what each is FOR
 
+> **2026-08-05 — Profile `C` shipped (SOTA-944 era; supersedes this table's
+> frontier for the 944 class).** `ZensimProfile::C` = `W10L9_s4003_packed`
+> (944-regime corrected-mix, k=8-confirmed; CID22 0.8867, LIVE 0.9604, CSIQ
+> 0.9331, HF-NL per-ref 0.7334, dial mono 99.32% dial-units, M3a 0.862 GOLD,
+> corruption head). `B` remains the default — the C-vs-B trade + full
+> provenance/repro: `docs/PROFILE_C_REPRODUCTION_2026-08-05.md` + campaign
+> appendix K.R. The table below is the 2026-07-18 (372/156-era) record.
+
 | bake | arch | headline | weakness | role |
 |---|---|---|---|---|
 | **`Ebothg_scr0.5_dial`** | 156→128→1 MLP + winsor + spline | CID22 0.879 · nonphoto 0.906 · **HF-NL 0.712** (best ever) · LIVE 0.959 · dial 0.985 | KonJND 0.271 | best all-around candidate |

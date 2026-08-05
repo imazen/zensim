@@ -1,8 +1,14 @@
 # Codec-target metric — integration guide
 
-> **⚠ STALE — REWRITE PENDING (banner 2026-07-18):** `codec_target()` returns **`ZensimProfile::B`** since 2026-07-12 (NOT A/V39 as stated below), and the 'three production trails' framing predates A/B. Trust `zensim/src/profile.rs` + `docs/MODEL_SELECTION_SCORECARD.md`; the alias table below is broken.
+> **⚠ STALE — REWRITE PENDING (banner 2026-07-18):** the integration-guide
+> prose below predates the A→B default flip and the 'three production
+> trails' framing predates A/B. Trust `zensim/src/profile.rs` +
+> `docs/MODEL_SELECTION_SCORECARD.md` for anything outside the mapping
+> table. **The mapping table itself was refreshed 2026-08-05** (Profile C
+> ship) and is verified against `profile.rs` as of that date.
 
-**Stable alias:** `ZensimProfile::codec_target()` → `ZensimProfile::A`.
+**Stable alias:** `ZensimProfile::codec_target()` → `ZensimProfile::B`
+(since 2026-07-12; generation-A is deprecated).
 
 ## Variant → backing bake mapping (THE single source of truth)
 
@@ -12,9 +18,17 @@ on every rotation — never inline bake identity into variant rustdocs).
 
 | External variant (`name()`) | Backing bake (internal) | Methodology |
 |---|---|---|
-| `A` (`zensim-a`) — general default; `codec_target()`/`latest()` | `zensim/weights/v39_v32plus_spline_seed17_2026-05-25.bin` (exp **V39**) | `benchmarks/v5_vs_v03_comparison_2026-05-25.md` |
-| `A_Phone` (`zensim-a-phone`) — modern OLED phone (~110 PPD, CVVDP-trained) | `zensim/weights/zensim_b_phone_oled_2026-05-26.bin` | `benchmarks/zensim_b_phone_oled_methodology_2026-05-26.md` |
-| `PreviewV0_3` (`zensim-preview-v0.3`) — **deprecated alias of `A`** | same as `A` | — |
+| `B` (`zensim-b`) — **default**; `codec_target()`/`latest_preview()` | `zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin` (`ens-Pline-cid80` inclusive-winsor dense-dial, sha `b6fe5233…`) | `benchmarks/profile_b_methodology_2026-07-12.md` |
+| `BHdr` (`zensim-b-hdr`) — HDR (absolute-nits) route | `zensim/weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin` (`hdrmix-lasso0.0003-shaped`, sha `7d7f2123…`) | `benchmarks/bhdr_improvement_split_lineage_2026-07-12.md` §7 |
+| `C` (`zensim-c`) — SOTA-944 wave-11 candidate; 944-regime scoring contract (folded-944 features + `score_features_with_profile`) | `zensim/weights/c_sdr_mlp944_corrmix_2026-08-05.bin` (`W10L9_s4003_packed`, sha `1a2c8d52…`, PRUNED caller 944 / internal 667) | `docs/PROFILE_C_REPRODUCTION_2026-08-05.md` |
+| `A` (`zensim-a`) — **deprecated** since 0.3.0; behind default-on `deprecated-profiles` | `zensim/weights/v47_strict_qat_native_2026-05-27.bin` (`v47-strict-QAT`, rotated 2026-05-27 from V39) | `benchmarks/v0_qat_native_methodology_2026-05-27.md` |
+| `PreviewV0_1` / `PreviewV0_2` — historical linear profiles | in-source weight arrays (`WEIGHTS_PREVIEW_V0_1` / `_V0_2`), no bake file | README "v0.2" section |
+
+Removed variants (no longer in the enum): `A_Phone` (manifest
+`weights/manifests/zensim_b_phone_oled_2026-05-26.toml` +
+`benchmarks/zensim_b_phone_oled_methodology_2026-05-26.md` remain; the
+`.bin` is no longer in-tree); `PreviewV0_3` (was a deprecated alias of
+`A`; V39 bytes preserved in `zensim-experimental`). |
 
 Prior bakes (`v_tuner_v11_2026-05-24.bin`, V_18 lineage, etc.) are kept
 on disk under `zensim/weights/archive/` for reproducibility but are no
