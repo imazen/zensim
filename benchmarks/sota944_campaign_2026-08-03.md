@@ -7570,3 +7570,361 @@ ships or swaps — the freeze decision is the user's.**
 5. Results appended HERE (K.R) + commit shas with pasted push verification; Tower
    mirror + sha spot-check.
 
+
+
+---
+
+# REGISTERED APPENDIX L — THE KonFiG-IQA TRAINING LEG: OVERLAP GATES, 944 BUILD, WEIGHT PROBE (2026-08-05)
+
+Registered and pushed BEFORE the overlap audit is run, before any extraction, any
+table build, and any fit. The only KonFiG numbers that exist anywhere are the
+appendix-I manifest pricing (`def25d3b`) and the 2026-07-02 372-era ingestion facts,
+both cited as priors below. This appendix executes the appendix-I recommendation
+("the one candidate worth pricing further is KonFiG-IQA") through its two registered
+gates, and — only if they pass — builds the 944 leg and runs a registered weight
+probe against wave-11's corrected-mix family. **A gate failure is a deliverable, not
+a detour: if KonFiG shares references with KonJND's eval refs, the leg is DEAD and
+the recorded null is the result.**
+
+## L.0 Priors (on-disk / committed facts; none is a result of this appendix)
+
+- **The dataset is local**: `/mnt/v/dataset/konfig-iqa/KonFiG-IQA/` (Men, Lin,
+  Jenadeleh, Saupe 2021, arXiv:2108.00201, "Subjective Image Quality Assessment
+  with Boosted Triplet Comparisons"; Konstanz). **10 source images** (SRC01, 03,
+  06, 07, 09, 17, 28, 31, 45, 50 — numbering into a 50-candidate pool), all
+  384×512. Stimuli: PartA = 7 distortions (colordiffusion, highsharpen, jitter,
+  jpeg2000, lensblur, motionblur, multinoise) × 13 levels at 0.25-JND design
+  spacing (q_jnd 0..3.0); PartB = motionblur × 31 levels at 0.1-JND spacing.
+  1,220 stimulus files on disk.
+- **Correction to the appendix-I survey row**: "20 refs" counts `ref_basename`
+  part-views (`SRCnn_PartA` / `SRCnn_PartB`), not distinct images — there are
+  **10 physical sources**; PartA and PartB reuse the same 10 references. Every
+  disjointness statement in this appendix is made at the SOURCE level, and the
+  split unit is the source (both parts of a source always travel together).
+- **Prior ingestion (372 era)**: `konfig_train_2026-07-02.parquet`
+  (`/mnt/v/output/zensim-multicodec-probe/`), 1,090 rows after identity+content
+  dedup (per source: 85 PartA + 24 PartB), `human_score = 1 − q_jnd/3.2` ∈
+  [0.0625, 1.0], native `q_jnd` column. Registered T2 in `docs/DATA_SPLITS.md:152`
+  as all-train (v53 replicate-axis era); in NO sota944 recipe; its row says the
+  dHash spot-audit is **pending**. This appendix runs that audit; the 372 table is
+  regime-incompatible with 944 work and is used only as a row-multiset
+  reproduction gate (L.6).
+- **Raw human ground truth**: EXP_III = 75,519 DCR ratings (`DATA/EXP_III/
+  data3.csv`, per-vote rows keyed Source × Distortion × Level, PartA's 910
+  stimuli), aggregated by the distribution itself in `scores.csv` (mean_dcr,
+  n_ratings ≈ 83/stimulus). EXP_I/EXP_II are the 1.05M triplet responses that
+  calibrated the design grid.
+- **KonJND-1k geometry** (the corpus the mandatory gate defends): 1,008 sources
+  `SRC0001..SRC1008`, 640×480, at `/mnt/v/datasets/KonJND-1k/KonJND-1k/
+  source_image/`. JPEG half SRC0001–0504 = the eval leg `ext_konjnd_jpeg_val`
+  (504 refs); BPG half SRC0505–1008 = the wave-7 training leg (403 train refs) +
+  `konjnd_bpg_val` (101 val refs). Both KonFiG and KonJND draw from Konstanz
+  pools, so shared content is a live possibility, and KonJND is simultaneously a
+  training leg, a validation leg, and an eval axis — the exact axis (near-threshold
+  human signal) a KonFiG leg exists to help. Note the dimension mismatch
+  (384×512 portrait vs 640×480 landscape): any overlap would be a crop/rescale
+  relationship, not byte identity — which constrains what the screens can see
+  (L.2 method + L.11.8).
+- **ssim2 disclosure** (DATA_SPLITS:159): KonFiG-IQA is in SSIMULACRA2's own
+  tuning set. It is therefore never a ssim2-comparison corpus, and 9 of the 11
+  incumbent mix legs carry ssim2-derived targets — recorded as confound L.11.4.
+- **The corrected-mix context**: wave-10 (appendix H.R) measured `tkadis` as the
+  one negative-marginal leg and L9 (drop it) as the best arm family; wave-11
+  (appendix K, pushed `532e3a1f`) is running that recipe at seeds
+  {4101,4103,4105,4107,4109,4111} with a pooled k=8 family. The probe below is
+  paired against wave-11's cells by seed — no baseline is retrained.
+
+## L.1 The question, and the shape of the answer
+
+**Is 1,090 rows of correctly-quality-oriented, JND-unit, near/supra-threshold
+human-calibrated signal over 10 references worth a mix slot?** Thesis axes:
+KonJND (near-threshold human signal — KonFiG's design grid spans exactly
+0–3 JND) and HF-NL per-ref (the registered product weak zone lives in the same
+high-fidelity band). Possible answers, all registered as acceptable results:
+DEAD-BY-LEAK (G-L1 fails — the null is the deliverable), helps (recommend a
+weight), inert (honest null), hurts (drop). Nothing ships or swaps from this
+appendix; the freeze decision is the user's.
+
+## L.2 GATE G-L1 — the Konstanz reference-overlap audit (MANDATORY, BLOCKS EVERYTHING)
+
+**Method (frozen), all three screens over the 10 KonFiG references:**
+
+1. **Exact screen**: decoded-RGB8 sha256 of each KonFiG reference vs all 1,008
+   KonJND sources (dims differ, so exact hits are not expected; the screen exists
+   so "no byte-identity" is a measured fact, not an assumption).
+2. **Perceptual screen**: `check_holdout_overlap` (THE canonical dHash-64 owner,
+   `zensim-validate`) with `--cid22-refs` pointed at the KonJND source dir
+   (1,008 refs), `--training-csv` a 10-row CSV of the KonFiG reference paths,
+   `--threshold 10`. Per-KonFiG-ref minimum Hamming distance is the decision
+   quantity. Additionally the d ≤ 16 rows of the same TSV are read as
+   SCREENING-FOR-EYES ONLY (2026-05-14 revert discipline: d ≤ 16 is a review
+   threshold, never a quarantine basis).
+3. **Montage + user review**: every d ≤ 10 pair gets a side-by-side montage under
+   `/mnt/v/output/zensim/konfig944/audit/` (browser:
+   `http://localhost:3300/zensim/konfig944/audit/`). **dHash flags are screening
+   for eyes; the USER reviews montages; auto-quarantine is banned.** The wave-7
+   precedent applies: a d=10 flag whose montage shows categorical content
+   non-match (SRC0611-vs-3653963) proceeds with the flag recorded pending user
+   sign-off in the manifest.
+
+**Decision rule (frozen):**
+
+- Confirmed same-content overlap (exact hit, or a montage that shows the same
+  scene) between any KonFiG source and the **JPEG-half 504** (`ext_konjnd_jpeg_val`
+  refs) or the **konjnd_bpg_val 101** ⇒ **the leg is DEAD as training data.**
+  Record the null in this appendix + `docs/DATA_SPLITS.md`, build nothing, stop.
+  (Both ref sets steer evaluation — the JPEG half is the KonJND eval axis, the
+  BPG val split steers epoch selection.)
+- Confirmed same-content overlap with konjnd_bpg **train**-half refs only ⇒ not
+  an eval leak (train-train content duplication); recorded with the affected
+  sources named; the build proceeds and the manifest carries the finding.
+- d ≤ 10 flags with categorical-non-match montages ⇒ proceed, flags recorded
+  pending user sign-off (wave-7 pattern); montage paths reported to the user.
+- Ambiguous montage (not clearly same-scene, not clearly different) ⇒ treated as
+  confirmed overlap for the decision rule (conservative), pending user override.
+
+## L.3 GATE G-L2 — T0-holdout perceptual screens (the DATA_SPLITS "pending" audit)
+
+Same three-screen method vs each holdout reference set on disk:
+**CID22-49** (`/mnt/v/dataset/cid22/CID22_validation_set/original`), **CSIQ**
+source refs (`/mnt/v/dataset/csiq`, 30), **LIVE** release-2 refs
+(`/mnt/v/datasets/LIVE/databaserelease2` refimgs, 29), and the **AIC-3/AIC-4/SDR25
+5 crops** (the aic3 package originals — one screen covers all three corpora, which
+share the same 5 references per appendix I).
+
+**Decision rule (frozen):** confirmed same-content overlap with any T0 eval ref ⇒
+**per-source excision** (that source's entire 109-row block, both parts, is
+excluded) + recorded. If more than 2 of 10 sources are excised the leg is not
+built (registered threshold: proceed only with ≥ 8 surviving sources).
+d ≤ 10 categorical-non-match flags: proceed-with-record, as in L.2.
+
+**Scope honesty, registered now:** imazen26 / nonphoto / hfnlproxy origins have no
+canonical reference-image directory registered in this repo's corpus map, so they
+get the **name-identity leakage check only** (G-L3) — no pixel screen. This
+matches every prior leg build (wave-7 screened CID22-49 only; this appendix
+already extends the screened set by four corpora plus the mandatory KonJND gate).
+KonFiG sources are KonIQ-10k-pool photographs, structurally disjoint from
+screenshot/nonphoto material; that argument is stated, not proven.
+
+## L.4 GATE G-L3 — table-level leakage + integrity (`check_table_integrity.py`)
+
+After the build (L.6), the built table must pass:
+- **C4 leakage** via `--leak-eval-root /mnt/v/zen/zensim-training/
+  ext944-canonical-2026-08-01`: zero reference-identity overlap between the
+  KonFiG leg and every `ext_*` eval corpus (incl. imazen26, nonphoto, sdr25,
+  aic3, aic4, cid22val, csiq, live, tid, kadid, konjnd_jpeg_val, hfnlproxy).
+- **A1/A2/A5/B1/B2/B4/C1** single-table checks, all PASS. C1 (duplicate
+  944-vectors) doubles as the dedup-correctness proof: the L.6 dedup must leave
+  zero content-duplicate rows or the build aborts.
+
+## L.5 GATE G-L4 — target orientation, determined from the raw ratings
+
+**The aic4/sdr25 lesson, applied at build time**: KonFiG's label family is a
+JND-unit design grid (JND family ⇒ distortion-oriented by convention), but the
+stored target `human_score = 1 − q_jnd/3.2` has already been converted to quality
+orientation. That conversion is VERIFIED against raw human votes, not assumed:
+
+- **Ground truth**: per-stimulus mean of the 75,519 raw EXP_III DCR votes
+  (`data3.csv`, keyed Source × Distortion × Level). DCR here is a degradation
+  scale (rises with distortion level — verified in the data before use, and
+  cross-footed against the distribution's own `scores.csv` aggregation:
+  mean_dcr + n_ratings must re-derive exactly).
+- **Join**: per-row stimulus identity comes from the build's pairs TSV (the
+  extractor preserves input row order; the join is validated by per-row
+  `human_score` equality between TSV and table). EXP_III covers PartA only, so
+  the check runs on the kept PartA rows (850 of 1,090); PartB shares the identical
+  target formula (registered inference, limitation L.11.5).
+- **Expected**: signed SROCC(`human_score`, mean DCR) **< 0** (quality vs
+  degradation) ⇒ the table measures QUALITY-oriented, matching its declaration.
+- **Registration (code, same pass)**: `check_target_orientation.py` gains
+  `EXPECTED_ORIENTATION["konfig"] = QUALITY`, a keyed ground-truth checker for the
+  konfig table (join per above), a `KNOWN_ROOTS` entry for the ext944 root, and
+  `MIX_TARGET_PROVENANCE["konfig"] = ("human", "JND design grid calibrated by
+  boosted triplet comparisons (Men 2021); orientation cross-checked vs 75,519 raw
+  EXP_III DCR votes")` — making KonFiG the third externally-checkable leg in the
+  mix (after kadid/tid). Gate output committed; INVERTED ⇒ STOP (that would mean
+  the formula or the join is wrong — no table lands until resolved).
+
+## L.6 The 944 build (runs only after G-L1, G-L2 pass; G-L3/G-L4 gate the result)
+
+- **Pair enumeration (frozen)**: per source — PartA distortions alphabetical ×
+  levels 0..12 ascending, then PartB levels 0..30 ascending. `ref_path` = the
+  source reference staged per part (`SRCnn_PartA.png` / `SRCnn_PartB.png`, so
+  `ref_basename` reproduces the July convention); `human_score = 1 − q_jnd/3.2`
+  with q_jnd = level×0.25 (PartA) / level×0.1 (PartB).
+- **Dedup (frozen)**: within each SOURCE (across both parts), key = sha256 of the
+  decoded RGB8 pixels of the distorted file; keep the first occurrence in
+  enumeration order. Predicted from the July structure: 85 PartA + 24 PartB rows
+  per source = **1,090** (level-0 identity files collapse to one row per source;
+  PartB's 0.5-JND-multiple levels reproduce PartA motionblur design points).
+  **Reproduction gate**: the resulting (ref_basename, q_jnd) multiset must EQUAL
+  the 2026-07-02 parquet's exactly. Mismatch ⇒ STOP, diagnose against the July
+  bytes, record what the actual July rule was, and amend this section with a
+  dated correction before proceeding.
+- **Extraction**: the frozen wave-7 P1 invocation — `ZENSIM_AB_MODE=foldapp2
+  v2_ab_extract <pairs.tsv> <out.csv>` (Folded720Append2 streaming, 944 features,
+  codec_target profile, default toggles), built `--release --features
+  feature-regime-v2,threads` at a recorded commit.
+- **GATE G-L5, extraction self-consistency (the wave-7 pattern)**: 8 pairs from
+  the committed konjnd_bpg pair list re-extracted at this rev vs the stored
+  canonical `konjnd_bpg_train_944.parquet` rows — **all 944 feature cells
+  exact-equal**, or STOP (the extractor rev is not feature-equivalent to the
+  canonical root and must not write into it).
+- **Promote**: `konfig_944.parquet` (ref_basename, human_score, q_jnd,
+  f0..f943; 1,090 rows; zstd; the loader skips non-feature columns — q_jnd is
+  carried as the July table did) at
+  `/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/`, plus origin-split
+  views `konfig_originsplit_{train,val,test}_944.parquet` computed by THE
+  canonical splitter (`zenmetrics/scripts/picker/origin_split.py::split_of` on
+  the numeric source id — SRC prefix stripped so the id leads, per that module's
+  contract): train {06,28,50} = 327 rows, val {01,03,31,45} = 436, test
+  {07,09,17} = 327. `_MANIFEST_konfig.json` with build_commit, input shas
+  (scores.csv, data3.csv, per-stimulus manifest sha), audit verdicts (G-L1/G-L2
+  flags + montage paths + review status), gate outputs, per-file sha256.
+  Triple-mirror (local root + R2 `s3://zentrain/ext944-canonical-2026-08-01/` +
+  Tower) with sha spot-check; `docs/DATA_SPLITS.md` §update +
+  `~/work/zen/DATA_PROVENANCE.md` note.
+- **REGISTERED DESIGN DECISION — the probe leg is the FULL 1,090-row table (all
+  10 surviving sources), not the origin-split train view.** Reasons, stated
+  before any number exists: (i) the split's protective purpose — rendition
+  leakage across a train/eval boundary *inside* a corpus — has no instance here:
+  KonFiG funds no eval axis and 10 sources never can; external-eval safety is
+  owned by G-L1..G-L3. (ii) A 3-source train view at the registered weights
+  reaches ~92–253× pair-share oversampling (the mix's historical extreme is
+  tid's 20.4×) — content starvation, not discipline. (iii) The split views +
+  per-source assignment are built and recorded anyway, so any future
+  within-KonFiG instrument starts split-clean — with the stated consequence that
+  models trained on the full leg foreclose those views as eval FOR THOSE MODELS.
+  This re-makes the July all-train choice with the reasoning written down.
+
+## L.7 The registered weight probe (paired with wave-11; queued behind it)
+
+- **Base recipe** = the corrected mix = wave-10 arm L9 — the SAME recipe wave-11
+  runs. The driver `scripts/konfig_probe_seed.sh <w25|w75> <seed>` obtains L9's
+  argv from `WAVE10_ECHO=1 scripts/wave10_seed.sh L9 <seed>`, **appends exactly
+  one token pair** `--group konfig:<ext944-root>/konfig_944.parquet:<w>:0.0`
+  immediately before `--out`, and replaces the `--out` value. Echo-verified and
+  committed: the token diff vs the L9 echo shows exactly those two differences
+  (`benchmarks/konfig/echo_verify_2026-08-05.txt`).
+- **Cells (4)**: w ∈ {0.25, 0.75} × seeds {4101, 4103} →
+  `KFG25_s4101, KFG25_s4103, KFG75_s4101, KFG75_s4103` at the standard
+  `SOTA944_OUT`. Seeds are wave-11's first two, so every comparison is **paired
+  by seed against W11_s4101 / W11_s4103** (identical recipe, identical seeds,
+  zero KonFiG). **No baseline is retrained.** Fallback, registered: if wave-11
+  terminally fails to produce s4101/s4103, train exactly those two L9 cells with
+  the same binary and use them; never train a baseline that duplicates a live
+  wave-11 cell.
+- **Trainer binary**: the SAME flat-buffer-lineage binary family as wave-11
+  (their K.1 registration), sha256-recorded per cell; `val_w = 0.0` keeps the
+  validation objective IDENTICAL to W11's (best_val is comparable within this
+  sixsome; reported with that note, still never an endpoint).
+- **Dose arithmetic (registered INPUT, not a result)** — L9 Σw = 5.85:
+
+  | arm | Σw | konfig pair share | surviving legs scale by | konfig oversample (share ÷ 0.1497% row share) |
+  |---|--:|--:|--:|--:|
+  | w = 0.25 | 6.10 | **4.10 %** | ×0.959 | ~27× |
+  | w = 0.75 | 6.60 | **11.36 %** | ×0.886 | ~76× |
+
+  (Row share = 1,090 / 728,360 mix rows. konjnd_bpg's precedent is 18.3×; tid's
+  20.4×. w=0.75 is knowingly the most-oversampled leg the mix has ever carried —
+  the probe brackets; production would interpolate, never ship 0.75 blind.)
+- **Endpoints**: the full §H.3 profile per cell, produced by the standing owners
+  (`harvest_bakes.sh` → `sota944_verdict.sh` → `bake_verdict --regime 944` +
+  `run_full_eval.sh <bake> <stem> 944` incl. post-`299ccc8c` M3a), with special
+  attention to **KonJND** and **HF-NL per-ref** (the thesis axes, L.1).
+  `freeze_check --select` re-ranked over wave-11's pooled family + the 4 probe
+  cells, reported as a ranking.
+- **Instrument comparability**: the same gate wave-11 registered (K.3) — this
+  workspace's `bake_verdict` must reproduce the committed `W10L9_s4001` fulleval
+  numerically before any paired table is read.
+
+## L.8 Noise bands + decision rules (frozen)
+
+Bands: **§H.4 unchanged** (CID22 0.010, KonJND 0.076, nonphoto 0.010, CSIQ 0.096,
+LIVE 0.050, M3a 0.092, sdr25 0.020, aic3 0.011, aic4 0.010, imazen26 0.010,
+HF-NL 0.247, dial mono 2.4 pp; KADID signed report-only).
+
+**Paired rule (the §H.5 form, sign reversed to ADDITION):** for dose w, seed s,
+axis a: `Δ_{w,s}(a) = value(KFG_w, s, a) − value(W11, s, a)` — the effect of
+ADDING the leg at dose w. OUTSIDE NOISE iff `|mean_s Δ_{w,s}(a)| > band(a)` AND
+both seeds agree in sign. Everything else is INSIDE NOISE and is reported as
+such. The wave-11 pooled k=8 per-axis [min, max] is additionally reported as a
+dispersion reference next to every Δ (context, not a rule change). No CI is
+claimed at k=2.
+
+## L.9 Registered outcomes (frozen; not mutually exclusive)
+
+- **(DEAD)** G-L1 fails ⇒ the leg is dead as training data; the recorded null is
+  the deliverable. No build, no probe.
+- **(a) helps** — ≥1 cared-about axis OUTSIDE-NOISE positive at either dose with
+  NO cared-about axis OUTSIDE-NOISE negative at that dose ⇒ recommend a KonFiG
+  weight (with the caveat: 2 doses × 2 seeds is direction-grade; the
+  recommendation is "evaluate at k ≥ 4 in the next mix wave", never a ship
+  change).
+- **(b) inert** — all cells inside noise at both doses ⇒ honest null: KonFiG is
+  not a lever at ≤ 11.4 % share; record it, do not fish for sub-band effects.
+- **(c) hurts** — any cared-about axis OUTSIDE-NOISE negative at both doses ⇒
+  drop the leg; record.
+- Dose-dependent mixtures ((a) at one dose, (c) at the other) are reported as
+  dose-dependent with no recommendation without user review.
+
+## L.10 Ops (frozen)
+
+Workspace `../zensim--konfig` (jj `konfig`), branched from `532e3a1f`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimkf-target`; heavy builds via `run-heavy
+--jobs 6`; logs `~/tmp/konfig/`; never `/tmp`; root fs ~91 % — target dir deleted
+at wave close. **Lane discipline**: the audits + extraction are lane-free (no
+trainer, minutes of CPU) and run immediately. The 4 probe cells QUEUE: ONE
+detached `await_artifacts.sh` waiter parked on wave-11's terminal condition (its
+six fullevals), then launch gated on the box trainer census (`pgrep -xc
+zensim_mlp_trai`) against the registered combined cap (K.8: featsub 2 + wave-11
+local 2 ≤ 5) and on featsub's lock-dir convention (`~/tmp/featsub/locks/`) —
+my lane is **≤ 2 trainers concurrent**, `run-heavy`-wrapped. Park once; never
+per-cell. Doc append + push with pasted `merge-base --is-ancestor` verification
+per commit; Tower mirror + sha spot-check; full cleanup (workspace forgotten,
+target dir deleted, `.workongoing` lines removed). **No gate is relaxed; honest
+nulls stand; nothing ships or swaps — the freeze decision is the user's.**
+
+## L.11 Confounds + limitations (registered before any number)
+
+1. **k=2 × 2 doses is direction-only** (H.7.1 verbatim); the sign-consistency
+   rule is a guard, not a test.
+2. **Adding a group renormalizes every share** (L.7 table): each Δ is "KonFiG
+   added AND the rest scaled down ×0.959/×0.886", never a clean single-factor
+   effect.
+3. **Content diversity is 10 images.** 1,090 rows re-use 10 sources at ~109
+   stimuli each; any win could be content-specific. This is why outcome (a)
+   yields a re-evaluation recommendation, not a weight change.
+4. **ssim2 entanglement** (L.0): KonFiG is in ssim2's tuning set and 9/11 legs
+   carry ssim2-derived targets — a KonFiG win partially measures "more
+   ssim2-tuning-distribution human data", not purely new signal. Disclosed; not
+   correctable at this corpus size.
+5. **PartB orientation is inferred** from the shared formula; EXP_III covers
+   PartA only (850 of 1,090 rows externally checked).
+6. **DCR ground truth is ordinal** (0–4 category means) — orientation-grade,
+   not interval; the gate claims a sign, nothing more.
+7. **best_val comparability** holds only within {KFG cells, W11 cells} (identical
+   val legs); never across other campaign cells.
+8. **dHash-64 does not catch crops**, and the KonFiG↔KonJND geometry (384×512
+   portrait vs 640×480 landscape) means a shared-pool relationship would present
+   as crop/rescale. Mitigations: the d≤16 screening read, montages, and the user's
+   eyes on the 10-ref contact sheet; a sliding-window stage-2 is NOT run (the
+   stage-2 binary exists but has never been part of a leg gate — scope stated).
+9. **The July dedup rule is reproduced, not copied** — if the multiset gate
+   (L.6) fails, the build stops until the divergence is understood; the 372-era
+   table is never column-mixed with 944 work (regime purity).
+
+## L.12 Deliverables
+
+1. G-L1/G-L2 audit TSVs + montages + the user-review list (flags with paths) —
+   `benchmarks/konfig/` + `/mnt/v/output/zensim/konfig944/audit/`.
+2. Orientation determination + `check_target_orientation.py` registration +
+   committed gate output (G-L4).
+3. If gates pass: `konfig_944.parquet` + origin-split views + manifest,
+   triple-mirrored; DATA_SPLITS + DATA_PROVENANCE entries; G-L3/G-L5 outputs.
+4. `scripts/konfig_probe_seed.sh` + committed echo verification.
+5. 4 probe cells + verdicts/fullevals + the paired Δ table vs bands with
+   INSIDE/OUTSIDE calls + the wave-11 k=8 dispersion reference + which
+   registered outcome fired.
+6. The results section appended to this appendix. If G-L1 kills the leg: items
+   1–2 plus the recorded null replace 3–5.
