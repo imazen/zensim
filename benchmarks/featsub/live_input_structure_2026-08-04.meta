@@ -1,0 +1,29 @@
+# Live-input structure across model classes — appendix J.0 prior facts
+# Registered: benchmarks/sota944_campaign_2026-08-03.md "REGISTERED APPENDIX J"
+# Source: the bake_contrib TSVs committed 2026-08-04 (benchmarks/bake_contrib_*.tsv);
+#         `dead` = the registered mean|Δ| < 1e-4 AND p95|Δ| < 1e-3 verdict,
+#         frac_rows_nonzero_xt = fraction of corpus rows where the STANDARDIZED
+#         post-transform input is nonzero (0.0 => the column is constant there).
+# Derived by scripts/featsub/ analysis in this pass; no statistic recomputed.
+#
+# THE FINDING this table exists for: `n_dead_but_varying` is the honest measure
+# of "inputs the model chose to ignore". The 944 MLP class ignores ZERO varying
+# inputs — all 277 of its dead inputs are constant columns (216 structural
+# zeros f156-371 + 61 never-populated/winsor-collapsed). B, the shipped default
+# and the model nothing beats axis-by-axis under the balanced frame, ignores
+# 277 of 372 VARYING inputs (74%). So the sparsity gap between the two classes
+# is not a rounding difference in how "dead" is defined: one class learned a
+# subset, the other kept everything it was given.
+#
+# Cross-model ranking agreement (same tool, same method, computed this pass):
+#   * B's 46 live inputs inside the shared v1-basic block f0..f155 sit at a
+#     MEDIAN rank of 338/944 in the 944 model's contribution order. The 944
+#     top-64 captures 3 of them (7%); top-256 captures 22 (48%).
+#   * SROCC(winner_dial's contribution rank, the 944 model's contribution rank)
+#     over the 156 shared v1-basic inputs = 0.3588 (zensim-validate `panel`,
+#     n=156, PLCC 0.4436, KROCC 0.2412).
+# Two good models disagree substantially about which of the SAME inputs matter.
+# That is the registered J.2 caveat, measured: a contribution ranking is a
+# property of the model it was measured on, which is why Phase A alone can
+# support "flat" or "degrades" strongly but supports "a subset is BETTER" only
+# weakly, and why Phase B learns the subset instead of ranking it.

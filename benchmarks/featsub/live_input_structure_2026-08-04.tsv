@@ -1,0 +1,6 @@
+bake	class	n_inputs	n_dead	n_live	n_constant_cols	n_dead_but_varying
+H_co3abpg_s2507	944 MLP (incumbent)	944	277	667	277	0
+C_em944_s31	944 MLP	944	277	667	277	0
+C_co3a_s1301	944 MLP	944	277	667	277	0
+b_sdr_linear (B)	372 linear/BVLS, shipped default	372	277	95	0	277
+winner_dial_Ebothg	156 MLP	156	0	156	0	0
