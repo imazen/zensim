@@ -516,7 +516,13 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   (hfnlproxy per-ref mean; the era incumbents were FILLED by
   `derive_hfnlproxy_372.py` — exact-key join, identity-gated vs the 944 slice —
   and grafted sha-gated via `promote_fulleval.py --graft-rank`; era per-ref
-  0.64-0.83 ≫ the 944 frontier's 0.13-0.42). **Feature-block-usage filter**:
+  0.64-0.83 ≫ the 944 frontier's 0.13-0.42 — ⚠ 2026-08-05 appendix O: **80
+  pre-orientation-pin board cells were per-ref SIGN-FLIPPED and are repaired**
+  (`--repair-rank-orientation`); corrected 944 singles reach 0.73-0.80
+  (nt223/W10L9/KFG75), axis LSD ≈0.04, sparsity-TRAINED cells (GL/pilot-λ,
+  era-additive) 0.70-0.85 vs mid-MLP ~0.09 — see
+  `benchmarks/hfnl_axis_report_2026-08-05.md` + the gauntlet HF-NL panel).
+  **Feature-block-usage filter**:
   `bake_block_profile` (via `zenpredict::Model`; no new wire code) →
   `block_profile` injected into all fullevals (`--set-block-profile`, sha-gated);
   "uses f156-371" chip + per-family used/total on the Model-details card —

@@ -1035,6 +1035,15 @@ be compared to the others'. `best_val` remains valid only as the registered
 
 #### Corrections to this document's earlier ENDGAME scorecard
 
+> ⚠ **SUPERSEDED IN PART BY APPENDIX O.R0 (2026-08-05):** every HF-NL-proxy
+> number in this document taken from a verdict produced before 2026-08-04
+> 16:49 (`730a386e`) whose pooled signed SROCC was negative is SIGN-FLIPPED —
+> 80 board cells, repaired in place; the arm-B "+0.19310280" bar value is
+> truly **−0.19310280** and the "EM4 fails the HF-NL row" conclusion below is
+> REVERSED. Roster: `.../hfnl-axis-2026-08-05/flipaudit_table.tsv`; registry
+> id `hfnl-preauto-orientation-flip-REPAIRED`. The two corrections in THIS
+> section (s31 0.03726, EM4 0.13195) are positives and stand.
+
 Re-derived from the verdict JSONs this session; both prior cells are wrong and
 neither reconciles with any field in the file it cites.
 
@@ -8810,3 +8819,188 @@ LowerIsBetter (sign applied once, a-priori, never per-group).
     absorb this into the stated uncertainty rather than pretending precision.
 
 ## O.R — RESULTS (to be appended; nothing above this line changes after push)
+
+### O.R0 — UNREGISTERED DISCOVERY, caught by the O.2.2 reproduction gate: 80 board cells carried a SIGN-FLIPPED per-ref mean (REPAIRED 2026-08-05)
+
+The gate (my per-ref vector's mean must equal the board `per_ref_mean` to ≤1e-9)
+passed at float precision for 21 of 24 gate-eligible models and failed with an
+**exact negation** for 8. Diagnosis, then the definitive audit:
+
+- **Mechanism.** `per_group_srocc`'s `Orientation::Auto` resolves per-ref
+  polarity from the POOLED signed SROCC. The orientation pin
+  (`sign_is_meaningful` → `HigherIsBetter`, commit **`730a386e`**, 2026-08-04
+  16:49) postdates most of the campaign's verdicts. On hfnlproxy the pooled
+  sign is exactly the statistic §1b documents as untrustworthy — cross-image
+  scale dominates a 9-ssim2-point band, so pooled sits at noise level
+  (|pooled| < 0.26 on every affected cell) and its SIGN is a coin flip. Every
+  pre-pin verdict with pooled < 0 therefore stored
+  `per_ref_mean = −(true pinned value)` (and a complemented `frac_negative`).
+- **Audit.** All 91 board cells with `rank.hfnlproxy.srocc_signed < 0` were
+  re-verdicted with the pinned binary (86 single bakes + the 5 negative-pooled
+  wave-5/6 ensembles via their frozen member lists). Pooled `srocc_signed`
+  reproduced **bit-identically on all 91** (same forwards, orientation-only
+  change). **80 were exact sign flips** (75 single + all 5 ensembles); the 11
+  non-flips are exactly the post-pin verdicts (W10 lane 2026-08-04 20:34+, all
+  FS cells). Cells with pooled ≥ 0 are structurally unaffected (Auto ≡ pin).
+  Roster + values: `/mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/flipaudit_table.tsv`.
+- **Repair.** All 80 board fullevals were corrected in place via the new
+  sha-gated `promote_fulleval.py --repair-rank-orientation hfnlproxy` (refuses
+  unless every orientation-independent field is float-identical and
+  `per_ref_mean` is an exact sign flip; superseded value kept in
+  `rank_graft_sources.hfnlproxy.superseded_per_ref_mean`; repair verdicts at
+  `.../hfnl-axis-2026-08-05/flipaudit/`). Post-repair scan: **233/233 board
+  cells match the pinned convention**. Registry:
+  `benchmarks/eval_annotations.json` `hfnl-preauto-orientation-flip-REPAIRED`.
+
+**Corrections to THIS DOCUMENT's published HF-NL quotes** (rule: any HF-NL
+number printed from a verdict produced before 2026-08-04 16:49 whose pooled
+signed SROCC was negative is the NEGATED value; the flipaudit table is the
+authoritative roster). The load-bearing ones:
+
+1. **The arm-B candidate `sota944_B_blend_lam1e-3_a0.7_w`: +0.19310280 →
+   −0.19310280.** Arm B is hfnl-INVERTED. This value is the §SELECTION
+   "registered substitute row" reference and the K-appendix battery bar
+   ("HF-NL bar = 0.19310280", also quoted at K.4/K.6). The bar row's
+   *intent* (winner ≥ the B-replay-at-944 candidate) now reads: any
+   non-inverted candidate passes it; W10L9's +0.733 passes it under either
+   reading, so **no wave-10/11 battery call changes** — but the bar value
+   itself was anchored on a flipped number.
+2. **"EM4 fails this campaign's HF-NL row (0.132 < the 0.193 arm-B
+   reference)" is REVERSED**: EM4's +0.13195 (true-positive, never flipped)
+   vs arm-B's true −0.1931 ⇒ **EM4 PASSES the substitute row**. (The
+   2026-08-03 correction that produced 0.13195 was itself correct.)
+3. **The 21-cell coherence grid HF-NL column: 8 of 21 cells negate** —
+   C_co1a_s1303 +0.0618→−0.0618, C_co1a_s1307 +0.2617→−0.2617, C_co1b_s1303
+   −0.0090→+0.0090, C_co1c_s1303 +0.2422→−0.2422, C_co1c_s1307
+   −0.0279→+0.0279, C_co2a_s1303 −0.0185→+0.0185, C_co2a_s1301
+   +0.0553→−0.0553 (plus every other flipaudit-listed C_co*/C_em944 cell in
+   later tables). C_co1a_s1307 — a curated arm candidate — is actually
+   hfnl-inverted at −0.26.
+4. **Wave-8/9 tables' HF-NL columns**: W8A_s3101/s3103/s3107 +0.20/+0.36/+0.42
+   → −0.20/−0.36/−0.42 (W8A is hfnl-inverted, consistent with its bigcodec-
+   mass recipe), W8B/W8C/W9A/W9B/W9C positives similarly negate per the
+   roster. Wave-10/11 and appendix-J numbers are post-pin and UNAFFECTED
+   (K64's −0.135 mean is the true pinned value).
+5. **The wave-5 "HF-NL volatility −0.115 … +0.211 across arms" (W5
+   limitations + F6) SHRINKS to +0.041 … +0.211 all-positive**: the negative
+   end was entirely flips (E1_k2 −0.104→+0.104, E1_k8 −0.115→+0.115, GE1
+   −0.112→+0.112, GE4 −0.043→+0.043, GE5 −0.041→+0.041). The F6 "sign floor
+   ≥ 0.0" row becomes *passable in truth* for the W5/W6 family; its
+   "volatility, unrelated to k" caveat stands but at half the claimed span.
+6. The nt-arm "hfnlproxy 0.037 → 0.69-0.80" mechanism win: **unaffected**
+   (all positives, post-hoc re-verified; the Δ is ~15× the axis LSD below).
+
+### O.R1 — Reliability (CALL 1: the axis is RELIABLE — the numbers were the problem, not the instrument)
+
+30-model per-ref matrix (the 29 registered + `sota944_C_em944_s71`, the
+C_em944 corrected-median cell), 755 common scoreable refs, every SROCC from
+`panel --batch` (`srocc_signed`), owner filter replicated, reproduction gate
+≤1e-15 against the (repaired) board on every gate-eligible model:
+
+| statistic | value |
+|---|---|
+| split-half model-ranking SROCC (20 shuffles, seed 4242) | **0.9919 ± 0.0028** → Spearman–Brown **0.996** |
+| split-half model-ranking PLCC | 0.9983 ± 0.0008 → SB 0.9991 |
+| per-model \|half₁−half₂\| gap | median 0.026, p90 0.034, max 0.042 |
+| marginal 95% CI half-width (B=10,000 ref bootstrap, seed 777, shared) | 0.023 – 0.047 per model |
+| **AXIS LSD** (paired 95% Δ half-width, all 435 pairs) | **median 0.039** (p10 0.022, p90 0.047) |
+
+**CALL 1 = PASS at the ≥0.9 tier.** Rule of thumb now registered: a
+per_ref_mean Δ under ~0.04 is noise; ≥ ~0.05 (the p90 LSD) is essentially
+always real. Full-set vs common-755 means differ ≤ 0.0031 (largest model).
+
+### O.R2 — Ceiling + independent references (CALL 3: axis difficulty is real, and the top models already sit AT the independent-metric band)
+
+Registered subset (sidecar-covered pairs; **0% avif** vs the axis's 73.6%
+avif — within-subset reads only): 118 refs / 2,410 pairs, ≥6 covered cells
+each; identical pairs for every row; cvvdp drops its 4 NaN rows.
+
+| row | per-ref mean (subset) |
+|---|---|
+| ssim2-self (trivial ceiling) | **+1.0000** (computed, 118/118 groups) |
+| dssim (lower-better, negated) | **+0.786** |
+| iwssim | +0.655 |
+| cvvdp | +0.549 |
+| butteraugli (lower-better, negated) | +0.420 |
+| best learned (FS_GL0p3_s2503 / FS_PILOT1_s2501 / v47 / ADD156) | +0.734 / +0.729 / +0.707 / +0.703 |
+| B (b_sdr…dense_dial) / winner_dial / W10L9 | +0.687 / +0.650 / +0.620 |
+| mid-944 cells (C_em944_s71 / C_co1a_s1307 …) | +0.11 – +0.25 |
+
+Reading: **independent strong perceptual metrics agree with ssim2's
+near-lossless ordering at only 0.42–0.79 per-ref** — the axis is intrinsically
+hard, and the top learned models (0.70-0.73) are INSIDE that band, above
+cvvdp/iwssim/butteraugli and ~0.05 under dssim (dssim is the target's nearest
+kin — SSIM-family agreement with SSIMULACRA2 is expected to be the highest
+non-self row; it is). "Everyone is bombing HF-NL" is FALSE for the
+sparse/era/lasso class; it is TRUE for the mid-944 MLP mass, whose deficit vs
+the reference band is real model behavior, not instrument artifact.
+
+### O.R3 — Range restriction: real, modest, not the story
+
+Per-ref target span median **3.68 ssim2 pts** (p10 1.74, p90 5.08, max 7.51);
+pairs/ref median 11 (min 3, max 221). SROCC(per-ref span, per-ref SROCC)
+across the 30 models: **median +0.121**, range −0.098…+0.314 — weak-to-modest.
+REGISTERED-SECONDARY wide-band view (span ≥ median, 378 refs): means rise
++0.05–0.07 uniformly (B 0.825→0.873, W10L9 0.733→0.801, K128 0.172→0.261,
+s71 0.091→0.159) without reordering models. Range restriction depresses the
+absolute level of every row ~uniformly; it does not explain the family gap.
+
+### O.R4 — The family pattern (corrected board, all 233 cells)
+
+| class | n | median | IQR | max | flipped |
+|---|--:|--:|---|--:|--:|
+| era linear/additive (Ebothg, B, winner_dial) | 3 | **+0.825** | [+0.734, +0.827] | +0.829 | 0 |
+| era MLP (v47) | 1 | +0.725 | — | +0.725 | 0 |
+| 944 BVLS/blend heads | 63 | +0.415 | [+0.083, +0.507] | +0.611 | 17 |
+| 944 featsub (input-restricted MLP) | 23 | +0.216 | [+0.151, +0.816] | +0.848 | 0 |
+| era bridge (EM4 at 944 root) | 1 | +0.132 | — | +0.132 | 0 |
+| ensembles | 11 | +0.119 | [+0.108, +0.154] | +0.211 | 5 |
+| 944-MLP single | 125 | **+0.093** | [−0.041, +0.272] | +0.800 | 53 |
+| distilled (ens students) | 6 | −0.012 | [−0.103, +0.047] | +0.217 | 5 |
+
+Corrected board: span −0.4856 … +0.8476, median +0.168 (the pre-repair read
+"−0.263…+0.848 median +0.193" mixed 80 negated cells). New board minimum =
+`sota944_B_konhead_w` at −0.486 (previously displayed +0.486!).
+
+**The featsub class is BIMODAL and the split is the finding**: post-hoc top-K
+contribution masks (K64…K944: −0.17…+0.22) behave like ordinary 944-MLPs,
+while sparsity-TRAINED cells (group-lasso GL*, pilot-λ) sit at 0.71–0.85 with
+a clean λ gradient (PILOT0 +0.21 → 0p01 +0.44 → 0p1 +0.81 → 1 +0.85; GL0p3
+0.82–0.84). Sparsity *pressure during training* — not input-count — is what
+preserves near-lossless ordering; consistent with the era-linear/additive top
+of the board and with §J's K-sweep reading.
+
+### O.R5 — K128 (CALL 2: the user is right)
+
+- K128_s2501 **+0.1735** [CI +0.134, +0.209], s2503 +0.1451 — corrected board
+  ranks 114/233 and 124/233; 27 board cells sit inside s2501's CI band.
+- vs the 944-MLP-single median cell (s71, +0.0930): **Δ +0.081
+  [+0.058, +0.105] — significantly ABOVE the class median** (s2503: +0.052
+  [+0.026, +0.078], also significant). "K128 isn't that bad" = **CONFIRMED**:
+  it is a slightly-better-than-typical 944-MLP on this axis.
+- vs C (W10L9_s4003_packed +0.7334): **Δ −0.561 [−0.597, −0.526]** — the
+  appendix-J "concedes hfnl −0.57 vs C" read is correct and ~12× the LSD.
+  Both statements are true at once: K128 is fine *for its class*; the class
+  (excluding the sparse-trained outliers) is the weak population.
+
+### O.R6 — Deliverables + limitations
+
+Shipped: `benchmarks/hfnl_axis_report_2026-08-05.md` (the better report);
+`benchmarks/hfnl_axis_2026-08-05.json` + the gauntlet **HF-NL axis panel**
+(`--hfnl-axis`, loop-targeting pattern: values READ never re-derived; both
+regen gates pass); scoreboard HF-NL/ref header tooltip now states the
+convention + LSD; `bake_verdict --per-pair-refs`;
+`promote_fulleval.py --repair-rank-orientation`; the 80-cell board repair;
+2 annotation-registry entries; full per-ref matrix + provenance at
+`/mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/` (pointer file in
+`benchmarks/`).
+
+Limitations (registered O.2.10 confounds all bit): the target is ssim2-derived
+(this axis = ssim2-band agreement, not human truth — sdr25 is the human
+check); the reference-ceiling subset excludes avif entirely; per-ref SROCC on
+~11 pairs is coarsely quantized (absorbed into the LSD, not hidden); the
+gauntlet's hfnlproxy pooled scatter cell remains visually terrible for GOOD
+models (range restriction) — the new panel, not that cell, is the readable
+view of this axis. The era models' hfnl numbers ride the 372-slice
+(`derive_hfnlproxy_372`) whose row-identity gate to the 944 slice is exact;
+era-vs-944 comparability is by-construction on identical pairs/targets.
