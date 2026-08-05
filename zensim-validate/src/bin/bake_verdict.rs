@@ -590,6 +590,14 @@ struct Args {
     /// path. Used by the AIC-3 CVVDP-feature spike to compute per-ref SROCC
     /// (which the aggregate panel does not split out).
     per_pair_output: Option<PathBuf>,
+    /// With `--per-pair-output`: append a third `ref` column (the loader's
+    /// interned per-reference group id) so per-ref statistics can be computed
+    /// downstream without re-deriving grouping from row order. Additive and
+    /// opt-in — the 2-column default is exact-unpacked by three committed
+    /// consumers (metric_compare_report / bake_report / bandwise_dashboard).
+    /// Fails loud if the dumped corpus carries no ref identity.
+    /// (SOTA-944 appendix O, 2026-08-05.)
+    per_pair_refs: bool,
     /// DIAL-panel grid parquet (`image_id, codec, q, f0..f371`). Default
     /// is the canonical densified multi-codec grid; override with
     /// `--dial-grid` or `ZENSIM_DIAL_GRID`. When the file is absent the
@@ -694,6 +702,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut corpora: Option<Vec<&'static Corpus>> = None;
     let mut output: Option<PathBuf> = None;
     let mut per_pair_output: Option<PathBuf> = None;
+    let mut per_pair_refs = false;
     let mut html: Option<PathBuf> = None;
     let mut json: Option<PathBuf> = None;
     let mut full_json: Option<PathBuf> = None;
@@ -771,6 +780,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--per-pair-output" => {
                 let v = args.next().ok_or("--per-pair-output requires <path>")?;
                 per_pair_output = Some(PathBuf::from(v));
+            }
+            "--per-pair-refs" => {
+                per_pair_refs = true;
             }
             "--html" => {
                 let v = args.next().ok_or("--html requires <path>")?;
@@ -919,6 +931,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         regime_720,
         regime_944,
         per_pair_output,
+        per_pair_refs,
         dial_grid,
         html,
         json,
@@ -1105,6 +1118,10 @@ struct CorpusResult {
     humans: Vec<f64>,
     /// Per-reference SROCC summary, when the corpus carries ref identity.
     per_ref: Option<PerGroupSrocc>,
+    /// Interned per-reference group id per row (aligned 1:1 with
+    /// `rescaled_scores`/`humans`), kept solely for the opt-in
+    /// `--per-pair-refs` dump. `None` when the corpus has no ref identity.
+    ref_ids: Option<Vec<u32>>,
     /// 10-band panel rows (`None` when per-band doesn't apply to the corpus).
     /// Captured alongside the markdown table so `--full-json` can carry the
     /// band structure the interactive dashboard renders (bands used to live
@@ -2094,8 +2111,34 @@ read on this corpus._\n",
         name: corpus.name,
         humans: humans.clone(),
         per_ref,
+        ref_ids,
         body,
     })
+}
+
+/// Render the `--per-pair-output` TSV. 2 columns by default; `refs`
+/// (the loader's interned group ids, aligned 1:1) appends the third `ref`
+/// column for downstream per-ref statistics (`--per-pair-refs`).
+/// Factored out of `main` so the format is unit-testable.
+fn format_per_pair(humans: &[f64], preds: &[f64], refs: Option<&[u32]>) -> String {
+    let mut s = String::from(if refs.is_some() {
+        "human\tpred\tref\n"
+    } else {
+        "human\tpred\n"
+    });
+    match refs {
+        Some(r) => {
+            for ((h, p), g) in humans.iter().zip(preds.iter()).zip(r.iter()) {
+                s.push_str(&format!("{h}\t{p}\t{g}\n"));
+            }
+        }
+        None => {
+            for (h, p) in humans.iter().zip(preds.iter()) {
+                s.push_str(&format!("{h}\t{p}\n"));
+            }
+        }
+    }
+    s
 }
 
 /// Soft gate: linear ramp from `floor` (score 0.0) to `target` (score 1.0).
@@ -2500,10 +2543,21 @@ fn main() -> ExitCode {
     if let Some(path) = args.per_pair_output.as_deref()
         && let Some(last) = results.last()
     {
-        let mut s = String::from("human\tpred\n");
-        for (h, p) in last.humans.iter().zip(last.rescaled_scores.iter()) {
-            s.push_str(&format!("{h}\t{p}\n"));
-        }
+        let refs = if args.per_pair_refs {
+            match last.ref_ids.as_deref() {
+                Some(r) => Some(r),
+                None => {
+                    eprintln!(
+                        "bake_verdict: --per-pair-refs but corpus '{}' carries no ref identity",
+                        last.name
+                    );
+                    return ExitCode::from(1);
+                }
+            }
+        } else {
+            None
+        };
+        let s = format_per_pair(&last.humans, &last.rescaled_scores, refs);
         if let Err(e) = std::fs::write(path, s) {
             eprintln!("bake_verdict: write per-pair output: {e}");
             return ExitCode::from(1);
@@ -3506,6 +3560,23 @@ Run the dedicated q-sweep harness for those._\n",
 
 #[cfg(test)]
 mod tests {
+    /// `--per-pair-refs` (appendix O): the 2-column default is byte-stable
+    /// (three committed consumers exact-unpack it) and the opt-in 3-column
+    /// form appends the interned ref id, aligned 1:1.
+    #[test]
+    fn per_pair_format_default_two_columns_refs_opt_in_three() {
+        let humans = [0.91_f64, 0.99];
+        let preds = [88.5_f64, 97.25];
+        assert_eq!(
+            super::format_per_pair(&humans, &preds, None),
+            "human\tpred\n0.91\t88.5\n0.99\t97.25\n"
+        );
+        assert_eq!(
+            super::format_per_pair(&humans, &preds, Some(&[7u32, 7])),
+            "human\tpred\tref\n0.91\t88.5\t7\n0.99\t97.25\t7\n"
+        );
+    }
+
     /// An ANTI-CORRELATED bake must never RENDER as a high scorer.
     ///
     /// Regression gate for the 2026-08-04 finding (campaign APPENDIX F): the ext-lineage
