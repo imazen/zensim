@@ -157,7 +157,7 @@ pub enum ZensimProfile {
     ///
     /// Full provenance, training data shas, exact reproduction chain
     /// and verification gates: `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`
-    /// + the mapping table in `docs/CODEC_TARGET_METRIC.md`.
+    /// and the mapping table in `docs/CODEC_TARGET_METRIC.md`.
     C,
     /// **Externally-defined profile** — an escape hatch for profiles
     /// constructed outside this crate (for example the unpublished
@@ -1072,7 +1072,7 @@ static PROFILE_B_HDR: ProfileParams = ProfileParams {
 /// metadata. Selection: `freeze_check --select` over the k=8 family
 /// (7/8 floors, sel_comp 0.9579, M3a 0.8626 GOLD tie-break).
 /// Records: campaign appendix K (`benchmarks/sota944_campaign_2026-08-03.md`)
-/// + `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`. The pinning test
+/// and `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`. The pinning test
 /// `profile_c_tests::weight_sha256_pinned` fails loud on any silent
 /// byte swap of this file.
 pub(crate) fn mlp_bake_c_corrmix_944() -> &'static [u8] {
@@ -2024,7 +2024,7 @@ mod profile_c_tests {
         // a sanity bound against sign flips / garbage forwards, not a
         // calibration claim.
         assert!(
-            s_iden >= 80.0 && s_iden <= 100.0 + 1e-9,
+            (80.0..=100.0 + 1e-9).contains(&s_iden),
             "identical-pair 944 features must land in the sane high band, got {s_iden}"
         );
         assert!(
