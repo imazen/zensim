@@ -9428,3 +9428,37 @@ committed echo-diff verify artifact; verdict/panel JSONs under the artifact
 dir with sha256 manifest + Tower mirror; DATA_SPLITS + DATASET_HISTORY +
 burn-ledger registrations; CLAUDE.md/SESSION-RESUME pointer updates if the
 outcome changes standing guidance.
+
+## P.R1 — LEVER 1 RESULTS (f32 pass-B; landed `471ce401`, gates green first run)
+
+**Gates — all PASS, no tolerance touched:**
+
+| gate | result |
+|---|---|
+| G-P1 score bit-identity | PASS — `fused944_features_bitwise_and_score_match_standalone` (all 944 slots `to_bits`-equal; forward score bit-identical) |
+| G-P2 density tolerance | PASS — `fused944_density_matches_standalone_full` (C3a class). **Measured deviations** (576² probe pair): per-pixel max \|Δ\| **1.388e-9 = 0.176×** of the 3e-5·max_abs+1e-9 bound; block-sums(16) max \|Δ\| **2.581e-7 = 0.119×** of the 1e-4·bmax bound |
+| G-P3 per-width coverage | PASS — `attribution_covers_expected_slots_per_width` through the fused entry |
+| G-P4 M3a 3-bake stability | PASS — **EXACT match to all printed digits** on all 3 registered bakes (instrument routes the untouched standalone f64 path): W10L9_s4003_packed M3a 0.862381/M3 0.156163; H_co3abpg_s2507 0.889959/0.219096; C_co3a_s1301 0.786074/0.079019 — identical to the stored corrected post-`299ccc8c` fulleval values |
+| lib suite / lint | 194/194 pass; session-reuse bitwise determinism holds; clippy + fmt clean |
+
+**Perf (576² serial).** The first f32 cut (straight transliteration under
+`#[autoversion]`) did NOT vectorize — measured 23 scalar `divss`, 0 vector
+div in the v4 body (the ~55 live coefficient constants blow the
+auto-vectorizer's model, the same §A.14 register-pressure class) — pass-B
+65 → only 44 ms. The landed form is the explicit magetypes port
+(`attr_pass_b_main_entry` + `attr_pass_b_grad_entry`, v4x/v4/v3/neon/
+wasm128/scalar): v4 main kernel 23 `vdivps ymm`/0 calls, grad kernel 13
+`vdivps ymm` + 4 `vsqrtps ymm`/0 calls.
+
+| measure | before (N.R) | after lever 1 |
+|---|--:|--:|
+| pass-B section (ATTRPERF) | ~65 ms (f64) | **7.3 ms** |
+| fused entry, probe median | 124.9 ms | **61.4 ms** |
+| fused entry, zenbench | 150.4 ±2.8 ms | **62.0 ±6.5 ms** |
+| score-only, zenbench | 25.6 ±0.1 ms | 22.8 ±2.0 ms |
+| B-N1 marginal ratio | 5.87× | **~2.7×** (probe 2.92×) |
+
+Decomposition after: extraction+retention 23.5 | v1 walk+basic 28.0 |
+pass-B f32 7.3 | trim+SAT 0.3 ms. zenbench run was on a busy box (4 clean
+rounds, drift-flagged) — the probe medians are the steadier instrument this
+round; both agree at ~62 ms.
