@@ -1,0 +1,26 @@
+# Group-lasso lambda CALIBRATION (appendix J.3 step 1) — 12-epoch pilots, seed 2501
+# Registered as calibration, NOT a result: these numbers select the sweep ladder
+# and nothing else is concluded from them.
+# live_l0_rows = layer-1 input rows that are NOT exactly zero in the produced bake
+# (trainer-recorded, cross-checked by `bake_contrib --live-mask`).
+# Reference: the same recipe at lambda=0 and FULL 120 epochs (K944_s2501) = 667 live.
+lambda	live_l0_rows	varying_inputs_killed	best_val
+0.3	667	0	0.5206
+1.0	458	209	0.4859
+4.0	202	465	0.4978
+16.0	0	667	0.0000
+#
+# The 667 baseline is the number to subtract from: 277 of the 944 columns are
+# constant and the recipe zeroes them on its own (see live_input_structure meta).
+#
+# LADDER SELECTED for the registered sweep: lambda in {0.3, 1.0, 2.0, 4.0} x
+# seeds {2501, 2503}. 0.3 is the "few dropped" end (0 varying inputs killed at
+# 12 epochs), 4.0 the aggressive end (465 of 667 killed), 16.0 is past collapse
+# (every row zero, best_val 0.0) and is excluded.
+#
+# Note on step count: the proximal threshold is lr*lambda per step and Adam's
+# update magnitude is ~lr per step regardless of gradient size, so the survival
+# balance is lambda vs 1 PER STEP — more epochs give more time to REACH the
+# equilibrium, they do not move it. 12 epochs = 600k steps is already deep into
+# that regime, which is why a 1/10-length pilot is informative here. Whether the
+# full-length live counts match the pilot's is reported as measured.
