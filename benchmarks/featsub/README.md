@@ -1,0 +1,25 @@
+# `benchmarks/featsub/` — appendix-J feature-subset ablation
+
+Registered protocol: `benchmarks/sota944_campaign_2026-08-03.md`, **REGISTERED
+APPENDIX J — IS 944 TOO MANY?** (committed before any fit in the pass).
+
+| file | what it is |
+|---|---|
+| `idx/ranked.tsv` | the frozen contribution ranking of all 944 inputs (`mean_abs` desc, ties by idx asc) from `bake_contrib_H_co3abpg_s2507_2026-08-04.tsv` |
+| `idx/top{64,128,256,512,667}.idx` | the `--keep-features` index files the K arms train on |
+| `live_input_structure_2026-08-04.tsv` | live/dead/constant-column counts per model class + the cross-model ranking-agreement numbers (in the `.meta`) |
+
+Tools (all owner extensions — no new trainer, no Python fit):
+
+- `zensim_mlp_train --keep-features SPEC` — exact K-wide fit
+- `zensim_mlp_train --group-l1 LAMBDA` — decoupled group-lasso proximal step
+- `bake_contrib --live-mask TSV` — structural per-input live/dead dump
+- `scripts/featsub/topk_from_contrib.py` — ranking → index files
+- `scripts/featsub/featsub_seed.sh` — one cell, argv inherited from `wave7_armH_seed.sh`
+- `scripts/featsub/featsub_queue2.sh` — N-worker cell runner (per-cell locks, RAM gate, start mutex)
+- `scripts/featsub/featsub_verdicts.sh` — the campaign's ONE verdict invocation over these bakes
+- `scripts/featsub/featsub_table.py` — the K sweep against the frozen ±2·sd band
+- `scripts/featsub/featsub_stability.py` — stability selection over the λ×seed grid
+
+Bakes live at `/mnt/v/output/zensim/bakes/featsub/`; verdicts share the campaign
+store `/mnt/v/output/zensim/bakes/sota944/verdicts/` with an `FS_` stem prefix.

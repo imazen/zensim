@@ -27,3 +27,17 @@
 # property of the model it was measured on, which is why Phase A alone can
 # support "flat" or "degrades" strongly but supports "a subset is BETTER" only
 # weakly, and why Phase B learns the subset instead of ranking it.
+#
+# DERIVED PREDICTION recorded before the K sweep was read (it follows from the
+# J.1 mechanism, so it is a consistency gate, not a new hypothesis):
+# K667 drops exactly the 277 columns that are constant ON THE TRAINING SET, and
+# a constant column already standardizes to 0.0, so in the K944 baseline those
+# weight rows receive zero loss-gradient and never touch the forward. K667 and
+# K944 at the same seed should therefore agree very closely. They can still
+# differ where a column is constant in TRAINING but varies in EVAL: 216 of the
+# 277 are structural zeros (identically 0 in the 944 regime) and 24 more are
+# winsored to [0,0] by the recipe's own transforms, but the remaining ~37 are
+# merely never-populated in training, and K944's non-zero (init-drifted) rows
+# would consume them at eval time while K667's zeroed rows cannot. Whatever the
+# K667-vs-K944 delta turns out to be, it is that effect, and it is reported as
+# measured rather than assumed.
