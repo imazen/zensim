@@ -529,6 +529,61 @@ origins). It fixes both gaps at once (content diversity + real codec distortions
 - **Winsorize before the scaler on any bigcodec/imazen-26 train** (combined `[p0.1,p99.9]`,
   baked as `WinsorP99` transforms) — de-poisons the IW-block extraction garbage (§3.4-family). §8.35.
 - **Never MSE-regress a log-expanded target** (e.g. `cvvdp_log_norm`) — use raw or a rank loss. §3.17.
+- **Run `check_table_integrity.py` on any mix before training it** (added 2026-08-04) — the
+  structural gate the project went two years without. Covers target finiteness/range/degeneracy,
+  feature finiteness + constant columns + unguarded tails, duplicate rows, teacher-twin row
+  correspondence + agreement, and eval leakage by reference identity. `--mix-from-spec <bake>.
+  bin.spec.json` audits a whole recipe from its embedded repro. §3.18.
+
+### §3.18 — the SOTA-944 mix data-integrity audit (2026-08-04)
+
+Report: `benchmarks/data_integrity_audit_2026-08-04.md`. Plan:
+`benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX G.
+
+**Thought-why:** after the KADID inversion (Appendix F) — found by the project's FIRST
+orientation gate, on its first run, six weeks late — the open question was whether the rest of
+the mix hid similar defects, and whether the mix had ever been chosen on evidence.
+
+**Actual-why / what was found:** the mix is clean where it would have been catastrophic and
+dirty where nobody was looking.
+
+- **Eval leakage is ZERO** — 10 training legs × 10 eval corpora, every pair empty. CID22
+  explicitly: `cid22_train`'s 201 references ∩ the `cid22val` 49-reference holdout = ∅, and
+  `cid22_train`'s target is `ssim2_gpu`, never human MOS. The VALIDATION-ONLY rule holds at both
+  the reference and the target level.
+- **Content-dedup WAS applied** — max duplicate-row mass 3.66% (bigcodec), far below the 22.2%
+  documented pre-dedup rate. The mandate in the content-dedup section is being honored.
+- **`tkadis` is a training-signal conflict** — the kadis teacher twin ranks its own rows at
+  signed SROCC **+0.2485** vs the base kadis target, with a systematic +0.579 median offset, at
+  **7.87% of sampling mass against the base leg's 2.36%**. The clip/affine explanation is
+  FALSIFIED (0.05% clipped; SROCC identical on the unclipped subset; SROCC is affine-invariant).
+  It is a genuine teacher generalization failure on the KADIS distortion distribution.
+- **Effective sampling mass is ~uncorrelated with row count** and had never been written down.
+  The trainer picks a group by `train_w / Σ train_w` then draws rows uniformly *within* it, so
+  pair share is **independent of row count**: `konjnd_bpg` is 1.03% of rows → **18.90%** of
+  pairs; `bigcodec` is 26.71% of rows → 7.87%. **The weights ARE the mix.** Table:
+  `benchmarks/data_integrity_sampling_mass_2026-08-04.tsv`.
+- **9 of 11 legs cannot be orientation-checked against humans at all** — they carry metric
+  (ssim2) or teacher targets. KADID's inversion was catchable *because KADID is one of only two
+  legs where an external check was ever possible*. `check_target_orientation.py --provenance`
+  now reports this explicitly so the gap cannot be mistaken for a clean bill of health.
+- **The canonical promotion drops the quality key**, so ladder monotonicity is unauditable for
+  safesyn / cid22_train / konjnd_bpg (17.5% of rows). Where the key survived, monotonicity
+  PASSES cleanly (bigcodec: 9,228 ladders, median SROCC(q, target) +0.963; kadis: per-source
+  median −1.000 against severity). **Carry the quality key into every canonical table.**
+- **The 39 never-populated feature slots are an EXTRACTOR property, not a data gap** — zero
+  slots are constant in only *some* groups. Independently reproduces `bake_contrib`'s count and
+  classifies it. Prune candidates only (the `n_inputs()` vs `caller_input_width()` hazard, E.9).
+
+**Two audit-side errors caught before publication, recorded so they are not repeated:**
+`pair_tie_prob ≠ row_tie_rate` (KADID reads 99.60% by the wrong one, 0.876% by the right one —
+the trainer drops *pairs*), and `signed_cbrt` is a tail guard just like `winsor_p99` (f38's 776×
+excursion is guarded, not unguarded). Both are now encoded in the gate.
+
+**Registered non-conclusion:** no check disqualified the mix, therefore **the mix-composition
+question is UNANSWERED**. Absence of defects is not evidence of optimality; establishing an
+optimum needs a weight sweep with held-out scoring, which this audit did not run. Do not cite
+this audit as evidence that the mix is good — only that it is not broken.
 
 ---
 

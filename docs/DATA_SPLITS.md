@@ -158,6 +158,45 @@ T0.)
 
 ---
 
+## 5b. The weights ARE the mix — pair share is INDEPENDENT of row count (measured 2026-08-04)
+
+Read from the trainer source (`zensim-validate/src/mlp_train/mod.rs:1892-2062`), not from
+intuition: a training step picks a **group** by `train_weight / Σ train_weight`, then draws
+two row indices **uniformly inside that group**. So a group's expected share of the epoch's
+pairs is `train_w / Σ train_w` and **does not depend on how many rows it has.**
+
+Measured on the incumbent SOTA-944 recipe (`H_co3abpg_s2507`), full table in
+`benchmarks/data_integrity_sampling_mass_2026-08-04.tsv`:
+
+| group | rows | row share | **pair share** | ratio |
+|---|---:|---:|---:|---:|
+| konjnd_bpg | 8,060 | 1.03% | **18.90%** | 18.3× |
+| tid | 3,000 | 0.39% | 7.86% | 20.4× |
+| cid22_train | 17,611 | 2.26% | 15.75% | 7.0× |
+| bigcodec | 208,169 | 26.71% | 7.87% | **0.29×** |
+| kadis | 50,000 | 6.42% | 2.36% | **0.37×** |
+
+The extremes are 70× apart. `bigcodec`'s 208k rows are covered only ~4.5 times across a
+whole 120-epoch run; `tid`'s 3,000 rows are re-covered ~2.6 times *per epoch*.
+
+**Consequences for anyone writing or reading a recipe:**
+
+1. **Never reason about a mix by row counts.** "bigcodec dominates the mix" is false — it
+   is 26.7% of the rows and 7.9% of the gradient.
+2. **Quote the pair share, not the row count**, whenever a recipe's composition is
+   discussed in a doc or a commit message.
+3. Two small corrections that fall out of the same source read: `ia == ib` is a *wasted*
+   draw (`continue`), not a redraw; and a `rank`-mode group additionally drops
+   **exactly-target-tied** pairs. Both are negligible here (kadid loses 0.9% of its share,
+   tid 0.15%) — but the quantity that governs the drop is the **pair-collision
+   probability** `Σ (n_v/N)²`, *not* the fraction of rows sharing a value. KADID reads
+   99.60% by the wrong statistic and 0.876% by the right one.
+4. **The weights have never been swept.** No measurement in the campaign varied them
+   against held-out score. Until one does, no claim that the mix is well-balanced is
+   supported — see `benchmarks/data_integrity_audit_2026-08-04.md` §7.
+
+---
+
 ## 6. Remote training (Hetzner) — HETZNER-FIRST for all slow work
 
 Per user 2026-07-02 (twice): **ALL slow work runs on Hetzner train boxes by
@@ -188,6 +227,24 @@ scaled alternative when a grid is big enough to warrant the job system.
 5. Audit the 16 decode-failed imazen-26 screen PNGs (or exclude them from
    training corpora).
 6. KADID/TID d≤10 flagged-pair user review (pending since 2026-05-14).
+7. **Carry the quality/severity key into every canonical table** (opened by the
+   2026-08-04 integrity audit, F-5). `bigcodec` kept `encoded_filename` and
+   `kadis` kept `source_id`+`score_ssim2_gpu`, and both proved ladder
+   monotonicity cleanly; `safesyn`, `cid22_train`, and `konjnd_bpg` carry only
+   `ref_basename` + `human_score`, so 17.5% of the mix's rows have no auditable
+   ladder at all. This is a promotion-script change, not a re-extraction.
+8. **Sweep the 11 mix weights against held-out score** (F-2). Pair share is
+   independent of row count (§5b), so the weights *are* the mix, and they have
+   never been varied experimentally. Highest-leverage knobs the audit surfaced:
+   `konjnd_bpg` (18.9% of pairs off 1.03% of rows), `bigcodec`+`ttbig` (53.4% of
+   rows, 15.7% of pairs), `tkadis` (item 9).
+9. **Resolve the `tkadis` conflict** (F-1). The kadis teacher twin ranks its own
+   rows at ρ=0.25 vs the base leg while outweighing it 3.3×; the clip/affine
+   explanation is falsified. Either zero its weight or rebuild it from a teacher
+   that generalizes to the KADIS distribution.
+10. **Give the 9 metric/teacher-target legs an internal-consistency gate.** They
+    cannot be orientation-checked against humans (F-3), so A4 ladder monotonicity
+    is their only handle — and item 7 is its prerequisite.
 7. **Multi-metric backfill of the 5.7M canonical corpus — LANDED as sidecars
    (2026-07-02; status corrected 2026-08-04, was "IN FLIGHT")** — the
    authoritative per-encode metric sidecar is
