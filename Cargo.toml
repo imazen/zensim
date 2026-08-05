@@ -26,8 +26,17 @@ opt-level = 2
 [workspace.dependencies]
 zensim = { version = "0.3.0", path = "zensim", default-features = false }
 zensim-regress = { version = "0.4.0", path = "zensim-regress", default-features = false }
-archmage = { version = "0.9.23", features = ["macros", "avx512"] }
-magetypes = { version = "0.9.23", features = ["avx512"] }
+# MINIMUM 0.9.28 is load-bearing for numeric semantics (2026-08-05): the
+# 0.9.27 release (archmage 34f34b2) redefined the reciprocal contract —
+# rsqrt_approx/rcp_approx became the RAW hardware estimate and rsqrt()/recip()
+# became true full precision (raw + 2 Newton-Raphson). The opt-in rsqrt Adam
+# kernel (zensim-validate/src/adam_simd.rs) is written against the NEW
+# contract; under 0.9.26 its rsqrt()/recip() collapse to ~28-bit and
+# rsqrt_path_precision_vs_scalar fails at max_rel 1.67e-5 (measured A/B,
+# 2026-08-05 — the same movement is the prime suspect for the CI v1-golden
+# flip, benchmarks/v1_golden_env_triage_2026-08-05.md). Do not lower.
+archmage = { version = "0.9.28", features = ["macros", "avx512"] }
+magetypes = { version = "0.9.28", features = ["avx512"] }
 bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 thiserror = "2"
 image = "0.25"
