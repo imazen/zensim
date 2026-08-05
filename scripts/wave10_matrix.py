@@ -220,6 +220,36 @@ def main() -> int:
                     f"{min(H):.6g}\t{max(H):.6g}\t{d:+.6g}\t"
                     f"{'' if band is None else f'{band:g}'}\t{overlap}\t{call}\n")
 
+    # ---- markdown: the matrix as it goes into the campaign doc -----------
+    key_axes = ["cid22", "konjnd_abs", "nonphoto", "csiq", "live", "m3a",
+                "sdr25", "aic3", "aic4", "imazen26", "hfnl_perref", "mono"]
+    by = {(r["arm"], r["axis"]): r for r in rows}
+    md = ["### Marginal-value matrix — Δ(axis) from DROPPING each leg, paired by seed\n",
+          "Δ = mean over the two shared seeds of `arm − L0` **at the same seed**. A leg's",
+          "marginal value is **−Δ** (a leg whose removal hurts has positive value).",
+          "**Bold** = OUTSIDE NOISE by the §H.5 rule (|Δ| > band AND both seeds agree in sign);",
+          "everything else is inside the frozen band and is reported as inside noise.\n",
+          "| dropped leg | " + " | ".join(key_axes) + " |",
+          "|---|" + "---|" * len(key_axes)]
+    for arm, drop in ARMS[1:]:
+        cs = []
+        for ax in key_axes:
+            r = by.get((arm, ax))
+            if not r or r.get("delta_mean") is None:
+                cs.append("—"); continue
+            t = f"{r['delta_mean']:+.4f}"
+            cs.append(f"**{t}**" if r["call"] == "OUTSIDE NOISE" else
+                      (f"{t}~" if r["call"].startswith("inside noise (seeds") else t))
+        md.append(f"| `{drop}` ({arm}) | " + " | ".join(cs) + " |")
+    md.append("| **band (§H.4)** | " +
+              " | ".join(f"±{BANDS[a][0]:g}" for a in key_axes) + " |")
+    md.append("\n`~` = |Δ| exceeded the band but the two seeds moved in OPPOSITE directions, "
+              "which the registered rule counts as inside noise.\n")
+    n_out = sum(1 for r in rows if r["call"] == "OUTSIDE NOISE")
+    md.append(f"\n**{n_out} of {len([r for r in rows if r.get('band')])} "
+              f"(leg × banded-axis) cells are outside noise.**\n")
+    (outd / "wave10_matrix_2026-08-05.md").write_text("\n".join(md) + "\n")
+
     meta = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "registration": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX H",
@@ -231,6 +261,38 @@ def main() -> int:
         "cells_found": sorted(cells),
         "cells_missing": [n for n in names + INCUMBENT if n not in cells],
     }
+    # One `.meta` sidecar per TSV (appendix H deliverable 5), each naming the
+    # generating command, the repo commit, the host, and what the file holds.
+    # jj FIRST: a jj workspace has no `.git`, so plain `git rev-parse` there
+    # silently yields "unknown" and the sidecar loses its provenance link.
+    commit = "unknown"
+    for cmd in (["jj", "--no-pager", "log", "--no-graph", "-r", "@-",
+                 "-T", "commit_id", "--ignore-working-copy"],
+                ["git", "-C", str(REPO), "rev-parse", "HEAD"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO))
+            if r.returncode == 0 and r.stdout.strip():
+                commit = r.stdout.strip().split()[0]
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    meta["repo_commit"] = commit
+    meta["hostname"] = os.uname().nodename
+    meta["argv"] = sys.argv
+    for stem, what in [
+        ("wave10_cells_2026-08-05.tsv",
+         "one row per trained cell (23 wave-10 + the 3 incumbent arm-H seeds): every "
+         "appendix-H endpoint, read from freeze_check --tsv / the fulleval JSON"),
+        ("wave10_marginal_matrix_2026-08-05.tsv",
+         "the LOO marginal-value matrix: per (dropped leg x axis), the seed-paired "
+         "delta vs L0, both individual seed deltas, the frozen H.4 band, the leg's "
+         "marginal value (-delta), and the H.5 INSIDE/OUTSIDE call"),
+        ("wave10_l0_vs_incumbent_2026-08-05.tsv",
+         "L0 (corrected KADID, k=3) vs the incumbent arm-H 3-seed band (inverted "
+         "KADID, k=3) — UNPAIRED (disjoint seed families), H.5 range-overlap rule"),
+    ]:
+        (outd / (stem + ".meta")).write_text(
+            json.dumps({**meta, "file": stem, "contents": what}, indent=2) + "\n")
     (outd / "wave10_matrix_2026-08-05.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     print(f"wrote {outd}/wave10_{{cells,marginal_matrix,l0_vs_incumbent}}_2026-08-05.tsv")
     print(f"cells found {len(cells)} / {len(names) + len(INCUMBENT)}; "
