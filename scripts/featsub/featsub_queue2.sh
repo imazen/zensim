@@ -64,10 +64,21 @@ for cell in "$@"; do
   say "START $cell"
   ( sleep "${FEATSUB_START_HOLD:-180}"; rmdir "$LOCKS/.start" 2>/dev/null ) &
   t0=$SECONDS
-  ~/work/zen/scripts/run-heavy --mem 24G --jobs 6 -- \
-      "$REPO_ROOT/scripts/featsub/featsub_seed.sh" "$arm" "$seed" \
-      > "$LOG/${arm}_s${seed}.log" 2>&1
-  rc=$?; dt=$((SECONDS-t0))
+  # One in-place retry. The failure this absorbs is an ENOMEM inside the
+  # parquet reader when several agents' loads overlap (measured 2026-08-04:
+  # "Cannot allocate memory (os error 12)" at 12 GB MemAvailable, peak RSS
+  # 5.65 GiB — the LOAD phase, not the training phase, is the spike). Retrying
+  # after a wait costs ~70 s; dropping the cell costs a whole lane.
+  rc=1
+  for attempt in 1 2; do
+    ~/work/zen/scripts/run-heavy --mem 24G --jobs 6 -- \
+        "$REPO_ROOT/scripts/featsub/featsub_seed.sh" "$arm" "$seed" \
+        > "$LOG/${arm}_s${seed}.log" 2>&1
+    rc=$?
+    [[ $rc -eq 0 && -f "$out" ]] && break
+    [[ $attempt -eq 1 ]] && { say "RETRY $cell (rc=$rc)"; sleep 120; wait_for_slot; }
+  done
+  dt=$((SECONDS-t0))
   if [[ $rc -eq 0 && -f "$out" ]]; then
     say "DONE  $cell rc=$rc ${dt}s $(stat -c%s "$out")B"
   else
