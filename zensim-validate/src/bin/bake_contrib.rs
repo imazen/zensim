@@ -317,6 +317,7 @@ fn main() -> ExitCode {
     let mut out_tsv: Option<PathBuf> = None;
     let mut dump_scores: Option<PathBuf> = None;
     let mut summary_path: Option<PathBuf> = None;
+    let mut live_mask: Option<PathBuf> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -329,6 +330,7 @@ fn main() -> ExitCode {
             "--out" => out_tsv = Some(args.next().expect("--out PATH").into()),
             "--dump-scores" => dump_scores = Some(args.next().expect("--dump-scores PATH").into()),
             "--summary" => summary_path = Some(args.next().expect("--summary PATH").into()),
+            "--live-mask" => live_mask = Some(args.next().expect("--live-mask PATH").into()),
             "--corpus" => {
                 let spec = args.next().expect("--corpus name:path:target:scale");
                 let parts: Vec<&str> = spec.split(':').collect();
@@ -366,8 +368,8 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     };
-    if corpora.is_empty() {
-        eprintln!("at least one --corpus required");
+    if corpora.is_empty() && live_mask.is_none() {
+        eprintln!("at least one --corpus required (or --live-mask for the structural dump)");
         return ExitCode::from(2);
     }
 
@@ -406,6 +408,44 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
     let any_i8 = layers.iter().any(|l| l.was_i8);
+
+    // `--live-mask`: the STRUCTURAL per-input dump — is this input's layer-0
+    // weight row exactly zero? That is the question `--group-l1` and
+    // `--keep-features` answer, and it needs no corpus: an exactly-zero row
+    // contributes exactly nothing for every conceivable input, which is
+    // strictly stronger than the corpus-relative `dead` verdict below (an
+    // input can be corpus-inert here and live elsewhere — class 3 in the
+    // pruner's taxonomy). Emitted from the SAME dequantized layer-0 the
+    // ablation uses, so the two reports cannot disagree about the weights.
+    if let Some(path) = &live_mask {
+        let l0 = &layers[0];
+        let mut out =
+            String::from("# bake\tidx\tlive\t(live = layer-0 weight row is not exactly zero)\n");
+        let name = bake_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "bake".into());
+        let mut n_live = 0usize;
+        for i in 0..l0.in_dim {
+            let row = &l0.w[i * l0.out_dim..(i + 1) * l0.out_dim];
+            let live = row.iter().any(|&w| w != 0.0);
+            n_live += usize::from(live);
+            let _ = writeln!(out, "{name}\t{i}\t{}", u8::from(live));
+        }
+        if let Err(e) = fs::write(path, out) {
+            eprintln!("write {}: {e}", path.display());
+            return ExitCode::from(1);
+        }
+        println!(
+            "live-mask: {n_live} of {} layer-0 inputs live -> {}",
+            l0.in_dim,
+            path.display()
+        );
+        if corpora.is_empty() {
+            return ExitCode::SUCCESS;
+        }
+    }
+
     let psa = extract_per_sample_alpha_head(&model);
     let hybrid = extract_hybrid_head(&model);
     let pin = extract_tanh_output_head_scale(&model);
