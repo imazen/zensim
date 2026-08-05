@@ -9,9 +9,7 @@ name: Join-Safety Gate
 # Adoption history + new-helper additions: CLAUDE.md "Investigation Notes".
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:  # ci-probe: pull_request trigger disabled on probe branches
 
 permissions:
   contents: read
