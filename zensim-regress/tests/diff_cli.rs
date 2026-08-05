@@ -12,15 +12,24 @@ fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_zensim-diff")
 }
 
-fn tmpdir() -> PathBuf {
-    let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("diff_cli");
+/// Per-TEST scratch dir. The tests in this file run on concurrent
+/// threads; a shared `diff_cli/expected.png` was a write/read race — one
+/// test's `zensim-diff` subprocess read the fixture while another test
+/// re-wrote the same path, intermittently observing a truncated PNG
+/// ("not a PNG file", surfaced on CI 2026-08-05 once the runner got past
+/// the #55 golden-gate fail-fast). Unique-per-test dirs make the fixture
+/// race-free; every assertion is unchanged.
+fn tmpdir(tag: &str) -> PathBuf {
+    let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("diff_cli")
+        .join(tag);
     std::fs::create_dir_all(&d).unwrap();
     d
 }
 
 /// Deterministic gradient pair with a visible perturbation block.
-fn write_test_pair() -> (PathBuf, PathBuf) {
-    let d = tmpdir();
+fn write_test_pair(tag: &str) -> (PathBuf, PathBuf) {
+    let d = tmpdir(tag);
     let (w, h) = (96u32, 96u32);
     let mut exp = Bitmap::new(w, h);
     let mut act = Bitmap::new(w, h);
@@ -48,8 +57,8 @@ fn write_test_pair() -> (PathBuf, PathBuf) {
 
 #[test]
 fn montage_mode_writes_png_and_scores() {
-    let (e, a) = write_test_pair();
-    let out = tmpdir().join("montage.png");
+    let (e, a) = write_test_pair("montage");
+    let out = tmpdir("montage").join("montage.png");
     let st = Command::new(bin())
         .args([
             e.to_str().unwrap(),
@@ -77,9 +86,9 @@ fn montage_mode_writes_png_and_scores() {
 
 #[test]
 fn pixel_and_structural_modes_write_same_size_diffs() {
-    let (e, a) = write_test_pair();
+    let (e, a) = write_test_pair("modes");
     for mode in ["pixel", "structural"] {
-        let out = tmpdir().join(format!("{mode}.png"));
+        let out = tmpdir("modes").join(format!("{mode}.png"));
         let st = Command::new(bin())
             .args([
                 e.to_str().unwrap(),
@@ -103,7 +112,7 @@ fn pixel_and_structural_modes_write_same_size_diffs() {
 
 #[test]
 fn spatial_mode_json_localizes_the_perturbed_block() {
-    let (e, a) = write_test_pair();
+    let (e, a) = write_test_pair("spatial");
     let st = Command::new(bin())
         .args([
             e.to_str().unwrap(),
@@ -156,8 +165,8 @@ fn spatial_mode_json_localizes_the_perturbed_block() {
 
 #[test]
 fn mismatched_dims_rejected_outside_montage() {
-    let (e, _) = write_test_pair();
-    let d = tmpdir();
+    let (e, _) = write_test_pair("mismatch");
+    let d = tmpdir("mismatch");
     let small = d.join("small.png");
     Bitmap::new(32, 32).save(&small).unwrap();
     let st = Command::new(bin())
