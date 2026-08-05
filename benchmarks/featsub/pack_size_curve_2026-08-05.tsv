@@ -1,0 +1,19 @@
+# Packed-bake size + prune identity per K arm (appendix J ship-path chain)
+# bake_dial_refit pack, anchor = anchor944_dial.parquet (2035 rows), f16 +
+# zerobias 0.005 + neg-tail; prune identity gate result quoted verbatim.
+# The unpacked trainer output is ~510 KB (f32 + embedded repro) for every arm.
+arm	l0_inputs_after_prune	packed_bytes	identity_gate
+K64_s2501	64	11142	BIT-identical (2035/2035)
+K128_s2501	128	21465	BIT-identical (2035/2035)
+K256_s2503	256	72083	BIT-identical (2035/2035)
+K667_s2501	667	49101	BIT-identical (2035/2035)
+K944_s2501	667	49062	BIT-identical (2035/2035)
+K64_s2501 (--no-prune twin)	944	12649	n/a (the unpruned reference for the latency A/B)
+#
+# NOTE the non-monotonicity (K256 packs LARGER than K667): packed size is
+# f16+LZ4 entropy, and the K256 net's live rows carry higher-entropy weights
+# than the 944/667 nets' (whose bulk is closer to zerobias). Size is reported
+# as measured; the monotone win is the LATENCY curve, not bytes.
+# Latency (zenbench, 256 rows, prune_forward_bench, measured under a 2-lane
+# training load — relative delta is the meaningful number):
+#   K64 pruned 2.2 ms vs its unpruned twin 21.1 ms  (95% CI [-93.4%,-86.2%])

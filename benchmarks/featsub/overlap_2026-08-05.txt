@@ -1,0 +1,6 @@
+selected |S|=57  top-57 by contribution
+|A∩B|=17  |A∪B|=97  Jaccard=0.1753  overlap@k=0.2982
+top-57 family mix : append204:9 tail20:1 v1fold156:18 v2-348:29
+selected family mix: append204:13 tail20:5 v1fold156:19 v2-348:20
+only-in-topK   : append204:7 v1fold156:12 v2-348:21
+only-in-selected: append204:11 tail20:4 v1fold156:13 v2-348:12

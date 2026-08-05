@@ -1,0 +1,12 @@
+# Phase-A K sweep — appendix J.2 (registered) final table
+# Generated: scripts/featsub/featsub_table.py --arms K64,K128,K256,K512,K667
+# Inputs: bake_verdict --regime 944 full-JSONs FS_K*_s{2501,2503,2507}.full.json
+#   (campaign verdict store /mnt/v/output/zensim/bakes/sota944/verdicts/)
+# Baseline: K944 seeds {2501,2503,2507} (n=3); arms: 2 seeds each.
+# Band rule (frozen J.2): outside <=> |mean_K - mean_944| > 2*sd_944 AND both
+#   K seeds on the same side. Stats read from verdicts; nothing recomputed.
+# Trainer builds: pre-crash cells at 62ad6a49-era build, recovery cells at
+#   031bd261; cross-build identity gated (xbuild_identity_2026-08-05.meta).
+# All cells trained on the wave-10 CORRECTED ext_kadid (176f-fix lineage);
+#   KADID numbers are NOT comparable to pre-wave-10 incumbents.
+# Registered-outcome reads + interpretation: campaign doc APPENDIX J RESULTS.
