@@ -1,0 +1,11 @@
+training_source	dhash	nearest_cid22_ref	nearest_dhash	hamming
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC01_0.png	6bb494cc1475d416	manfishing.png	c81cd8c8b849edf6	26
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC03_0.png	9f52f8746c4cf9e3	statue.png	8e4e5864c4717961	19
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC06_0.png	5486aa1bbbb8f472	carnivaldolls.png	06370b1f2b3b32e6	23
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC07_0.png	818080c44f27118e	building2.png	240415456776194d	22
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC09_0.png	1b494a29b8d2633a	monarch.png	9accb223f0753333	23
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC17_0.png	11b16732b8c29230	churchandcapitol.png	94307cb83a3c9418	25
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC28_0.png	9ac8cb871d0bc6d8	sailing1.png	97cfc3a3efa0e0fc	24
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC31_0.png	581d9d161480acd4	sailing2.png	c8a8cc5a3ca6cce0	23
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC45_0.png	20a442c0d11140af	paintedhouse.png	64e5e3e7656b63cf	25
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC50_0.png	93d43f2b3136d402	churchandcapitol.png	94307cb83a3c9418	23

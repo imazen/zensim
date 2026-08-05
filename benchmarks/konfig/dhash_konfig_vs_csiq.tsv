@@ -1,0 +1,11 @@
+training_source	dhash	nearest_cid22_ref	nearest_dhash	hamming
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC01_0.png	6bb494cc1475d416	monument.png	7070f4e4657f7c3c	23
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC03_0.png	9f52f8746c4cf9e3	rushmore.png	965ee9ac6c8e8c64	22
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC06_0.png	5486aa1bbbb8f472	child_swimming.png	46523c1898a2c4e2	22
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC07_0.png	818080c44f27118e	swarm.png	ede89c64458d292c	24
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC09_0.png	1b494a29b8d2633a	cactus.png	1159181119ac6680	25
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC17_0.png	11b16732b8c29230	bridge.png	b179e364f8f4f4f4	23
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC28_0.png	9ac8cb871d0bc6d8	geckos.png	8a8cf3c3883ae8d8	19
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC31_0.png	581d9d161480acd4	shroom.png	6809b3721c9afcdc	18
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC45_0.png	20a442c0d11140af	trolley.png	c8696040703b4838	24
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC50_0.png	93d43f2b3136d402	native_american.png	933e3f131b9edcf9	22

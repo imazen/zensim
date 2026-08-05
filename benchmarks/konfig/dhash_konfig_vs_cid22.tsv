@@ -1,0 +1,11 @@
+training_source	dhash	nearest_cid22_ref	nearest_dhash	hamming
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC01_0.png	6bb494cc1475d416	2775196.png	0f07074e0745d83a	24
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC03_0.png	9f52f8746c4cf9e3	792079.png	dedcd8c4c0ccccc9	22
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC06_0.png	5486aa1bbbb8f472	1544947.png	13838a8c98d3ec71	24
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC07_0.png	818080c44f27118e	1025469.png	b9f8d09029280000	26
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC09_0.png	1b494a29b8d2633a	1544947.png	13838a8c98d3ec71	22
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC17_0.png	11b16732b8c29230	7062219.png	989036969c8c9292	20
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC28_0.png	9ac8cb871d0bc6d8	2670327.png	72e2d2c3c598d2da	23
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC31_0.png	581d9d161480acd4	pexels-photo-1933873.png	189acec6c68284ec	22
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC45_0.png	20a442c0d11140af	2190188.png	a04a4ed21a89c88f	22
+/mnt/v/dataset/konfig-iqa/KonFiG-IQA/IMAGES/reference_images/SRC50_0.png	93d43f2b3136d402	1044329.png	83c4c9b3236cdc9d	24

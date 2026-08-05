@@ -61,6 +61,9 @@ TID_MOS = "/mnt/v/dataset/tid2013/mos_with_names.txt"
 SDR25_RESP = "/mnt/v/datasets/jpeg-ai-sdr25/JPEG_AI_SDR_subjective_data"
 SDR25_RECON = ("/mnt/v/output/zensim-multicodec-probe/"
                "sdr25_jnd_reconstructed_2026-07-02.parquet")
+KONFIG_RAW = ("/mnt/v/dataset/konfig-iqa/KonFiG-IQA/DATA/EXP_III/data3.csv")
+KONFIG_PAIRS = os.environ.get(
+    "KONFIG_PAIRS", "/mnt/v/output/zensim/konfig944/build/konfig_pairs.tsv")
 
 # ---------------------------------------------------------------------------
 # DECLARED TARGET ORIENTATION per eval corpus.
@@ -104,6 +107,13 @@ EXPECTED_ORIENTATION = {
     "sdr25": DISTORTION,   # q_jnd — JND distance from the original
     "aic4": DISTORTION,    # q_jnd, same reconstruction family as sdr25
     "konjnd": DISTORTION,  # PJND threshold; freeze_check already takes |SROCC|
+    # konfig (added 2026-08-05, campaign Appendix L §L.5): the LABEL FAMILY is a
+    # JND design grid (distortion family), but the STORED target is the already-
+    # converted `human_score = 1 - q_jnd/3.2` — quality-oriented BY TRANSFORM.
+    # The aic4/sdr25 lesson applied at build time: the declaration names what the
+    # table STORES, and the keyed checker verifies it against the 75,519 raw
+    # EXP_III DCR votes (degradation-oriented, rises with level in 70/70 ladders).
+    "konfig": QUALITY,
 }
 
 # Known eval roots for --all-roots. (root, {corpus: filename})
@@ -120,7 +130,7 @@ KNOWN_ROOTS = [
       "sdr25": "ext_sdr25.parquet"}),
     ("/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01",
      {"kadid": "ext_kadid.parquet", "tid": "ext_tid.parquet",
-      "sdr25": "ext_sdr25.parquet"}),
+      "sdr25": "ext_sdr25.parquet", "konfig": "konfig_944.parquet"}),
 ]
 
 
@@ -252,9 +262,63 @@ def sdr25_ground_truth_keyed(hs: np.ndarray):
     return np.asarray(gt, float), note
 
 
+def konfig_ground_truth_keyed(hs: np.ndarray):
+    """RAW-VOTE ground truth for KonFiG-IQA (campaign Appendix L §L.5).
+
+    Ground truth = per-stimulus mean of the 75,519 raw EXP_III DCR votes
+    (`data3.csv`, keyed Source x Distortion x Level; Answer in [0,4], a
+    degradation scale — verified rising with level in 70/70 ladders, and the
+    distribution's own `scores.csv` aggregation re-derives from it 910/910 with
+    zero mismatches). Negated to quality orientation (sdr25 convention).
+
+    Join: `human_score` is NOT unique per stimulus (37 distinct values over
+    1,090 rows), so per-row stimulus identity comes from the build's pairs TSV
+    (KONFIG_PAIRS, env-overridable) — valid because `v2_ab_extract` preserves
+    input row order and the canonical-corpus promote preserves CSV order. The
+    join is VALIDATED per row: the TSV's human_score must equal the table's
+    exactly (all KonFiG targets are exact binary fractions: 1 - 5k/64 for
+    PartA, 1 - k/32 for PartB, so byte-level round-trips are lossless).
+
+    EXP_III covers PartA only (910 stimuli); PartB rows get NaN and are dropped
+    by the caller with the count reported — the registered "850 of 1,090
+    externally checked" scope (Appendix L §L.5, limitation L.11.5).
+    """
+    if not os.path.exists(KONFIG_RAW):
+        raise FileNotFoundError(f"KonFiG raw votes absent: {KONFIG_RAW}")
+    if not os.path.exists(KONFIG_PAIRS):
+        raise FileNotFoundError(
+            f"KonFiG pairs TSV absent: {KONFIG_PAIRS} (set KONFIG_PAIRS)")
+    acc = collections.defaultdict(list)
+    with open(KONFIG_RAW, newline="") as f:
+        for r in csv.DictReader(f):
+            key = (r["Source"], r["Distortion Type"], int(r["Distortion Level"]))
+            acc[key].append(float(r["Answer"]))
+    n_votes = sum(len(v) for v in acc.values())
+    mean_dcr = {k: sum(v) / len(v) for k, v in acc.items()}
+    rows = list(csv.DictReader(open(KONFIG_PAIRS), delimiter="\t"))
+    if len(rows) != len(hs):
+        raise ValueError(
+            f"pairs TSV rows {len(rows)} != table rows {len(hs)}; "
+            f"positional identity broken")
+    gt = []
+    for i, r in enumerate(rows):
+        if abs(float(r["human_score"]) - float(hs[i])) > 0.0:
+            raise ValueError(
+                f"row {i}: pairs human_score {r['human_score']} != table "
+                f"{hs[i]}; positional identity broken")
+        key = (r["source"], r["distortion"], int(r["level"]))
+        m = mean_dcr.get(key)
+        gt.append(np.nan if m is None else -m)  # quality-oriented
+    note = (f"raw EXP_III DCR vote mean over {n_votes} ratings (PartA stimuli), "
+            f"negated to quality orientation; PartB rows have no DCR and are "
+            f"excluded")
+    return np.asarray(gt, float), note
+
+
 GROUND_TRUTH = {"kadid": kadid_ground_truth, "tid": tid_ground_truth}
 # Corpora whose ground truth must be joined on a key rather than row position.
-KEYED_GROUND_TRUTH = {"sdr25": sdr25_ground_truth_keyed}
+KEYED_GROUND_TRUTH = {"sdr25": sdr25_ground_truth_keyed,
+                      "konfig": konfig_ground_truth_keyed}
 
 # ---------------------------------------------------------------------------
 # TARGET PROVENANCE of every leg in the SOTA-944 training mix, and therefore
@@ -288,6 +352,10 @@ MIX_TARGET_PROVENANCE = {
     "tsafesyn":       ("teacher", "teacher model forward over the safesyn rows"),
     "ttbig":          ("teacher", "teacher model forward over the bigcodec rows"),
     "tkadis":         ("teacher", "teacher model forward over the kadis rows"),
+    "konfig":         ("human", "JND design grid calibrated by boosted triplet "
+                                "comparisons (Men 2021, 1.05M responses); "
+                                "orientation cross-checked vs 75,519 raw EXP_III "
+                                "DCR votes (Appendix L)"),
 }
 
 
@@ -331,12 +399,21 @@ def check(path: str, corpus: str | None = None) -> dict:
             out.update(verdict="SKIPPED",
                        reason=f"row count {len(hs)} != ground truth {n_gt}; positional join unsafe")
             return out
-    s = _signed_srocc(hs, gt)
+    # Keyed ground truths may mark rows with no external signal as NaN (e.g.
+    # konfig's PartB rows, which EXP_III does not cover). Drop them from the
+    # sign test and report the checked subset size — a NaN row is out-of-scope,
+    # never silently counted.
+    gt = np.asarray(gt, float)
+    keep = ~np.isnan(gt)
+    n_dropped = int((~keep).sum())
+    s = _signed_srocc(hs[keep], gt[keep])
     # `gt` is always quality-oriented, so s > 0 means the TABLE is quality-oriented.
     measured = QUALITY if s > 0 else DISTORTION
     out.update(verdict="OK" if measured == expect else "INVERTED",
                signed_srocc=round(s, 6), measured_orientation=measured,
-               n=len(hs), ground_truth=note)
+               n=int(keep.sum()), ground_truth=note)
+    if n_dropped:
+        out["n_no_ground_truth"] = n_dropped
     if measured == DISTORTION:
         out["training_warning"] = (
             "target is DISTORTION-oriented: negate before any training use, or the "
