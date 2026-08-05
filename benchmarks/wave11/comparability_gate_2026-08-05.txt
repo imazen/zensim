@@ -1,0 +1,20 @@
+# WAVE 11 instrument-comparability gate (appendix K.3) — 2026-08-05T04:20Z
+# This workspace's bake_verdict (built at registration commit 532e3a1f,
+# CARGO_TARGET_DIR=~/tmp/zensimw11-target) re-verdicted the committed wave-10
+# bake W10L9_s4001.bin via the frozen invocation (--regime 944) and was
+# numeric-field-diffed against the committed
+# /mnt/v/output/zensim/bakes/sota944/verdicts/W10L9_s4001.full.json
+# (wave-6 / packaging-pass precedent; paths/names/timing excluded).
+
+numeric fields compared: 82385
+mismatches:              0
+non-numeric diffs:       0
+
+Structural key difference (exactly one, documented): the committed verdict
+carries per_pair/sdr25/mos; the fresh verdict carries per_pair/sdr25/jnd —
+the appendix-I schema-label rename (def25d3b: ext_sdr25 human_score is q_jnd,
+a JND distance; the per-pair label now says so). The 50-element payload under
+the renamed key is IDENTICAL (list equality True).
+
+VERDICT: GATE PASS — wave-11 cells verdicted by this binary are directly
+comparable to the committed wave-10 cells.
