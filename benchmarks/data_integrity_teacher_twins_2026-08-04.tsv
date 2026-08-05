@@ -1,0 +1,4 @@
+teacher	base	rows	ref_sequence_identical	srocc_signed	mean_abs_delta	median_delta	frac_abs_delta_gt_0p5	max_abs_delta	teacher_frac_clipped	base_frac_negative	srocc_unclipped	effective_pair_share_pct
+tsafesyn	safesyn	111068	1	0.9742	0.0975	-0.0270	0.03160	7.5505	0.00202	0.05490	0.9740	7.8739
+ttbig	bigcodec	208169	1	0.9153	0.1021	-0.0052	0.00367	0.7406	0.00246	0.00000	0.9150	7.8740
+tkadis	kadis	50000	1	0.2485	0.5973	0.5788	0.55050	2.0000	0.00052	0.50930	0.2485	7.8739

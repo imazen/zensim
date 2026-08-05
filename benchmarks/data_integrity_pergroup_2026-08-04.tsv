@@ -1,0 +1,96 @@
+group	rows	check	verdict	detail
+safesyn	111068	A1_target_finite	PASS	nan=0 inf=0
+safesyn	111068	A2_target_range	PASS	[-7.3904, 0.9762]; 13 rows (0.012%) below advisory -1.0; they carry 0.27% of the group's squared-error mass
+safesyn	111068	A5_target_ties	PASS	pair_tie_prob=0.001% (row_tie_rate=0.00%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+safesyn	111068	B1_feature_finite	PASS	all finite
+safesyn	111068	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+safesyn	111068	B4_unguarded_tails	FINDING	3 columns with max/p99 > 100.0 and NO declared transform; worst: f25=677x, f751=186x, f802=130x
+safesyn	111068	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+safesyn	111068	C1_duplicate_rows	PASS	0 duplicate rows / 111068 (0.00%); 111068 unique; max multiplicity 1
+cid22_train	17611	A1_target_finite	PASS	nan=0 inf=0
+cid22_train	17611	A2_target_range	PASS	[0.0301, 0.9415]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+cid22_train	17611	A5_target_ties	PASS	pair_tie_prob=0.006% (row_tie_rate=0.08%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+cid22_train	17611	B1_feature_finite	PASS	all finite
+cid22_train	17611	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+cid22_train	17611	B4_unguarded_tails	PASS	0 columns with max/p99 > 100.0 and NO declared transform
+cid22_train	17611	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+cid22_train	17611	C1_duplicate_rows	PASS	0 duplicate rows / 17611 (0.00%); 17611 unique; max multiplicity 1
+kadid	10125	A1_target_finite	PASS	nan=0 inf=0
+kadid	10125	A2_target_range	PASS	[0.0175, 1.0000]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+kadid	10125	A5_target_ties	PASS	pair_tie_prob=0.876% (row_tie_rate=99.60%, 241 distinct / 10125 rows); rank-mode DROPS tied pairs
+kadid	10125	B1_feature_finite	PASS	all finite
+kadid	10125	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+kadid	10125	B4_unguarded_tails	PASS	0 columns with max/p99 > 100.0 and NO declared transform
+kadid	10125	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+kadid	10125	C1_duplicate_rows	PASS	243 duplicate rows / 10125 (2.40%); 9882 unique; max multiplicity 4
+tid	3000	A1_target_finite	PASS	nan=0 inf=0
+tid	3000	A2_target_range	PASS	[0.0269, 0.8016]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+tid	3000	A5_target_ties	PASS	pair_tie_prob=0.116% (row_tie_rate=75.67%, 1457 distinct / 3000 rows); rank-mode DROPS tied pairs
+tid	3000	B1_feature_finite	PASS	all finite
+tid	3000	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+tid	3000	B4_unguarded_tails	PASS	0 columns with max/p99 > 100.0 and NO declared transform
+tid	3000	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+tid	3000	C1_duplicate_rows	PASS	0 duplicate rows / 3000 (0.00%); 3000 unique; max multiplicity 1
+bigcodec	208169	A1_target_finite	PASS	nan=0 inf=0
+bigcodec	208169	A2_target_range	PASS	[0.0000, 0.9840]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+bigcodec	208169	A5_target_ties	PASS	pair_tie_prob=0.500% (row_tie_rate=13.64%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+bigcodec	208169	B1_feature_finite	PASS	all finite
+bigcodec	208169	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+bigcodec	208169	B4_unguarded_tails	FINDING	3 columns with max/p99 > 100.0 and NO declared transform; worst: f916=162x, f603=106x, f690=106x
+bigcodec	208169	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+bigcodec	208169	C1_duplicate_rows	PASS	7623 duplicate rows / 208169 (3.66%); 200546 unique; max multiplicity 5
+kadis	50000	A1_target_finite	PASS	nan=0 inf=0
+kadis	50000	A2_target_range	PASS	[-1.0000, 0.9999]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+kadis	50000	A5_target_ties	PASS	pair_tie_prob=0.007% (row_tie_rate=2.12%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+kadis	50000	B1_feature_finite	PASS	all finite
+kadis	50000	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+kadis	50000	B4_unguarded_tails	PASS	0 columns with max/p99 > 100.0 and NO declared transform
+kadis	50000	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+kadis	50000	C1_duplicate_rows	PASS	12 duplicate rows / 50000 (0.02%); 49988 unique; max multiplicity 3
+tsafesyn	111068	A1_target_finite	PASS	nan=0 inf=0
+tsafesyn	111068	A2_target_range	PASS	[0.0000, 1.0000]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+tsafesyn	111068	A5_target_ties	PASS	pair_tie_prob=0.001% (row_tie_rate=0.36%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+tsafesyn	111068	B1_feature_finite	PASS	all finite
+tsafesyn	111068	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+tsafesyn	111068	B4_unguarded_tails	FINDING	3 columns with max/p99 > 100.0 and NO declared transform; worst: f25=677x, f751=186x, f802=130x
+tsafesyn	111068	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+tsafesyn	111068	C1_duplicate_rows	PASS	0 duplicate rows / 111068 (0.00%); 111068 unique; max multiplicity 1
+ttbig	208169	A1_target_finite	PASS	nan=0 inf=0
+ttbig	208169	A2_target_range	PASS	[0.0000, 1.0000]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+ttbig	208169	A5_target_ties	PASS	pair_tie_prob=0.001% (row_tie_rate=7.40%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+ttbig	208169	B1_feature_finite	PASS	all finite
+ttbig	208169	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+ttbig	208169	B4_unguarded_tails	FINDING	3 columns with max/p99 > 100.0 and NO declared transform; worst: f916=162x, f603=106x, f690=106x
+ttbig	208169	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+ttbig	208169	C1_duplicate_rows	PASS	7623 duplicate rows / 208169 (3.66%); 200546 unique; max multiplicity 5
+tkadis	50000	A1_target_finite	PASS	nan=0 inf=0
+tkadis	50000	A2_target_range	PASS	[0.0000, 1.0000]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+tkadis	50000	A5_target_ties	PASS	pair_tie_prob=0.002% (row_tie_rate=0.16%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+tkadis	50000	B1_feature_finite	PASS	all finite
+tkadis	50000	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+tkadis	50000	B4_unguarded_tails	PASS	0 columns with max/p99 > 100.0 and NO declared transform
+tkadis	50000	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+tkadis	50000	C1_duplicate_rows	PASS	12 duplicate rows / 50000 (0.02%); 49988 unique; max multiplicity 3
+konjnd_bpg	8060	A1_target_finite	PASS	nan=0 inf=0
+konjnd_bpg	8060	A2_target_range	PASS	[-0.6493, 0.9615]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+konjnd_bpg	8060	A5_target_ties	PASS	pair_tie_prob=0.012% (row_tie_rate=0.00%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+konjnd_bpg	8060	B1_feature_finite	PASS	all finite
+konjnd_bpg	8060	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+konjnd_bpg	8060	B4_unguarded_tails	PASS	0 columns with max/p99 > 100.0 and NO declared transform
+konjnd_bpg	8060	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+konjnd_bpg	8060	C1_duplicate_rows	PASS	0 duplicate rows / 8060 (0.00%); 8060 unique; max multiplicity 1
+konjnd_bpg_val	2020	A1_target_finite	PASS	nan=0 inf=0
+konjnd_bpg_val	2020	A2_target_range	PASS	[-0.6406, 0.9540]; 0 rows (0.000%) below advisory -1.0; they carry 0.00% of the group's squared-error mass
+konjnd_bpg_val	2020	A5_target_ties	PASS	pair_tie_prob=0.050% (row_tie_rate=0.00%); loss_mode=both carries an MSE term so tied pairs are NOT dropped
+konjnd_bpg_val	2020	B1_feature_finite	PASS	all finite
+konjnd_bpg_val	2020	B2_constant_columns	FINDING	255 constant total; 216 are the structural-zero block f156..f371 (by design); 39 OUTSIDE it: [720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 805, 806, 822]
+konjnd_bpg_val	2020	B4_unguarded_tails	FINDING	1 columns with max/p99 > 100.0 and NO declared transform; worst: f734=141x
+konjnd_bpg_val	2020	B4b_inert_guards	FINDING	2 declared transforms target columns that are CONSTANT here (inert): [765, 766]
+konjnd_bpg_val	2020	C1_duplicate_rows	PASS	0 duplicate rows / 2020 (0.00%); 2020 unique; max multiplicity 1
+tsafesyn~safesyn	-1	A6_twin_row_correspondence	PASS	ref_basename sequence identical row-for-row
+tsafesyn~safesyn	-1	A7_twin_target_agreement	FINDING	srocc=+0.9742 mean|d|=0.0975 median_d=-0.0270 frac|d|>0.5=3.160%
+ttbig~bigcodec	-1	A6_twin_row_correspondence	PASS	ref_basename sequence identical row-for-row
+ttbig~bigcodec	-1	A7_twin_target_agreement	FINDING	srocc=+0.9153 mean|d|=0.1021 median_d=-0.0052 frac|d|>0.5=0.367%
+tkadis~kadis	-1	A6_twin_row_correspondence	PASS	ref_basename sequence identical row-for-row
+tkadis~kadis	-1	A7_twin_target_agreement	FINDING	srocc=+0.2485 mean|d|=0.5973 median_d=+0.5788 frac|d|>0.5=55.050%
+tkadis~kadis	-1	no	PASS	training reference appears in any of 10 eval corpora (0 pairs skipped: self / colliding namespace)

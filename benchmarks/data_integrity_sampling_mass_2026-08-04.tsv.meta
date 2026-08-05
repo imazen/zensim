@@ -1,0 +1,13 @@
+{
+ "description": "Appendix G check D \u2014 EFFECTIVE per-group sampling mass, derived FROM the trainer source (zensim-validate/src/mlp_train/mod.rs), not guessed. The group CDF is train_weight / sum(train_weight) and rows are drawn uniformly WITHIN the chosen group, so expected pair share is INDEPENDENT of row count. Two draws are wasted rather than redrawn: ia==ib (prob 1/n), and for rank-mode groups a target-tied pair. This table had never been written down.",
+ "generated_utc": "2026-08-05T00:43:35.421576+00:00",
+ "repo_commit": "366c8225445ec728c328c4c45d59bd3ca34d9047",
+ "host": "lilith",
+ "command": "python3 relations.py (Appendix G section D)",
+ "audit": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX G",
+ "report": "benchmarks/data_integrity_audit_2026-08-04.md",
+ "mix_source": "/mnt/v/output/zensim/bakes/sota944/bakes/H_co3abpg_s2507.bin.spec.json",
+ "pairs_per_epoch_total": 50000,
+ "epochs": 120,
+ "sampler_law": "expected pair share = train_w / sum(train_w)"
+}

@@ -140,6 +140,52 @@ def tid_ground_truth():
 
 GROUND_TRUTH = {"kadid": kadid_ground_truth, "tid": tid_ground_truth}
 
+# ---------------------------------------------------------------------------
+# TARGET PROVENANCE of every leg in the SOTA-944 training mix, and therefore
+# WHICH legs an external orientation check can reach at all.
+#
+# This map exists because the 2026-08-04 data-integrity audit (campaign Appendix
+# G) established a structural fact that had never been written down: of the 11
+# groups in the incumbent mix, only TWO carry human labels. The other nine carry
+# a METRIC-derived target (ssim2, or a teacher model's prediction), so there is
+# no human ground truth to point them at, and `sign(SROCC(target, humans)) > 0`
+# is not a question that can be asked of them.
+#
+# The consequence is worth stating plainly: KADID's six-week-old inversion was
+# found because KADID is one of the only two legs where an external check was
+# ever possible. The other nine are not known-good; they are UNCHECKED, and no
+# amount of running this gate will change that. Internal consistency (a target
+# falling monotonically along a known quality ladder) is the only handle those
+# legs have — see `check_table_integrity.py` and Appendix G check A4.
+# ---------------------------------------------------------------------------
+MIX_TARGET_PROVENANCE = {
+    "kadid":          ("human", "mean DCR over 349,800 raw crowdsourced ratings"),
+    "tid":            ("human", "published TID2013 MOS"),
+    "safesyn":        ("metric", "ssim2-anchored synthetic sweep"),
+    "cid22_train":    ("metric", "ssim2_gpu; CID22 human MOS is VALIDATION-ONLY and "
+                                 "is never a training target (zensim/CLAUDE.md)"),
+    "bigcodec":       ("metric", "ssim2-anchored multi-codec sweep"),
+    "kadis":          ("metric", "score_ssim2_gpu over the KADIS-700k distortion grid"),
+    "konjnd_bpg":     ("metric", "gpu_ssimulacra2/100 over the KonJND BPG ladder; the "
+                                 "corpus's human PJND is NOT carried into the table"),
+    "konjnd_bpg_val": ("metric", "same as konjnd_bpg (validation split)"),
+    "tsafesyn":       ("teacher", "teacher model forward over the safesyn rows"),
+    "ttbig":          ("teacher", "teacher model forward over the bigcodec rows"),
+    "tkadis":         ("teacher", "teacher model forward over the kadis rows"),
+}
+
+
+def provenance_report() -> list[dict]:
+    """Which mix legs an external orientation check can reach, and which it cannot."""
+    out = []
+    for g, (kind, note) in sorted(MIX_TARGET_PROVENANCE.items()):
+        out.append({
+            "group": g, "target_kind": kind, "note": note,
+            "externally_checkable": kind == "human",
+            "verdict": "CHECKABLE" if kind == "human" else "NOT-CHECKABLE",
+        })
+    return out
+
 
 def guess_corpus(path: str) -> str | None:
     b = os.path.basename(path).lower()
@@ -173,8 +219,27 @@ def main() -> int:
     ap.add_argument("parquet", nargs="?")
     ap.add_argument("--corpus")
     ap.add_argument("--all-roots", action="store_true")
+    ap.add_argument("--provenance", action="store_true",
+                    help="report which SOTA-944 mix legs an external orientation check "
+                         "can reach at all (2 of 11) and which carry metric/teacher "
+                         "targets with no human ground truth to check against")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.provenance:
+        rep = provenance_report()
+        if a.json:
+            print(json.dumps(rep, indent=2))
+        else:
+            n_ok = sum(r["externally_checkable"] for r in rep)
+            print(f"SOTA-944 mix target provenance — {n_ok} of {len(rep)} legs carry "
+                  f"human labels and can be orientation-checked externally:\n")
+            for r in rep:
+                mark = "CHECKABLE   " if r["externally_checkable"] else "NOT-CHECKABLE"
+                print(f"  {mark}  {r['group']:16s} [{r['target_kind']:7s}] {r['note']}")
+            print("\nA NOT-CHECKABLE leg is UNCHECKED, not known-good. Internal "
+                  "consistency (check_table_integrity.py, Appendix G A4) is the only\n"
+                  "handle those legs have.")
+        return 0
     results = []
     if a.all_roots:
         for root, files in KNOWN_ROOTS:

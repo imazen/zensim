@@ -1,0 +1,11 @@
+{
+ "description": "Appendix G checks A6/A7/E1 \u2014 the three distillation-teacher twins against the legs they twin. A6 (row correspondence) PASSES for all three. A7 (target agreement) FAILS for tkadis at signed SROCC +0.2485 with a systematic +0.579 median offset and 55% of rows past |delta|>0.5, while consuming 7.87% of the mix's sampling mass. The clip hypothesis is FALSIFIED: only 0.05% of tkadis rows are clipped and SROCC is identical on the unclipped subset, so the disagreement is a genuine RANK disagreement, not an affine/clipping artifact.",
+ "generated_utc": "2026-08-05T00:43:35.421576+00:00",
+ "repo_commit": "366c8225445ec728c328c4c45d59bd3ca34d9047",
+ "host": "lilith",
+ "command": "check_table_integrity.py --twin ... ; followup.py section 1",
+ "audit": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX G",
+ "report": "benchmarks/data_integrity_audit_2026-08-04.md",
+ "mix_source": "/mnt/v/output/zensim/bakes/sota944/bakes/H_co3abpg_s2507.bin.spec.json",
+ "clip_hypothesis": "FALSIFIED (0.05% clipped, srocc_unclipped == srocc_all)"
+}

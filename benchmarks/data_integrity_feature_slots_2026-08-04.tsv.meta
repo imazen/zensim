@@ -1,0 +1,17 @@
+{
+ "description": "Appendix G check B2/B3 \u2014 the 39 feature slots that are CONSTANT in every one of the 11 mix tables, outside the f156..f371 structural-zero block. Zero slots are constant in only SOME groups, so all 39 are an EXTRACTOR property (class ii of the registered taxonomy), not a data gap in this mix (class iii = empty). This independently reproduces the 39 never-populated slots bake_contrib measured.",
+ "generated_utc": "2026-08-05T00:43:35.421576+00:00",
+ "repo_commit": "366c8225445ec728c328c4c45d59bd3ca34d9047",
+ "host": "lilith",
+ "command": "python3 followup.py (Appendix G section 3)",
+ "audit": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX G",
+ "report": "benchmarks/data_integrity_audit_2026-08-04.md",
+ "mix_source": "/mnt/v/output/zensim/bakes/sota944/bakes/H_co3abpg_s2507.bin.spec.json",
+ "n_never_populated": 39,
+ "n_structural_zero_block": 216,
+ "class_iii_data_gaps": [],
+ "inert_guards": [
+  765,
+  766
+ ]
+}

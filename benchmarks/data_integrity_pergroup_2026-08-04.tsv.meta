@@ -1,0 +1,12 @@
+{
+ "description": "Per-group x per-check verdict table for the 11-group SOTA-944 training mix (Appendix G checks A1/A2/A5/B1/B2/B4/B4b/C1 per table, A6/A7 per teacher twin).",
+ "generated_utc": "2026-08-05T00:43:35.421576+00:00",
+ "repo_commit": "366c8225445ec728c328c4c45d59bd3ca34d9047",
+ "host": "lilith",
+ "command": "scripts/canonical_corpus/check_table_integrity.py --mix-from-spec <spec> --twin tsafesyn=safesyn --twin ttbig=bigcodec --twin tkadis=kadis --leak-eval-root <ext944 root>",
+ "audit": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX G",
+ "report": "benchmarks/data_integrity_audit_2026-08-04.md",
+ "mix_source": "/mnt/v/output/zensim/bakes/sota944/bakes/H_co3abpg_s2507.bin.spec.json",
+ "n_rows": 95,
+ "verdict_convention": "PASS / FINDING / NOT-CHECKABLE; a NOT-CHECKABLE is a reported gap, never a pass"
+}

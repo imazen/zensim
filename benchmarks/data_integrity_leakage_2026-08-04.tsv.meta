@@ -1,0 +1,13 @@
+{
+ "description": "Appendix G checks C4/C5 \u2014 eval leakage by REFERENCE IDENTITY (ref_basename set intersection), not filename equality. Result: ZERO shared references across all 10 training legs x 10 eval corpora, including the load-bearing CID22 case (cid22_train 201 refs vs the cid22val 49-ref holdout, intersection 0). CAVEAT: this tests identity, NOT perceptual near-duplication; a dHash audit at d<=10 with montage review is a separate, user-gated procedure and was NOT run.",
+ "generated_utc": "2026-08-05T00:43:35.421576+00:00",
+ "repo_commit": "366c8225445ec728c328c4c45d59bd3ca34d9047",
+ "host": "lilith",
+ "command": "check_table_integrity.py --leak-eval-root <ext944 root>",
+ "audit": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX G",
+ "report": "benchmarks/data_integrity_audit_2026-08-04.md",
+ "mix_source": "/mnt/v/output/zensim/bakes/sota944/bakes/H_co3abpg_s2507.bin.spec.json",
+ "cid22_train_x_cid22val": 0,
+ "total_pairs_tested": 100,
+ "not_checked": "perceptual near-duplicate leakage (dHash) \u2014 out of scope"
+}
