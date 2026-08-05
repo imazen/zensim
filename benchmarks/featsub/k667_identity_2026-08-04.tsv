@@ -1,0 +1,28 @@
+# K667 vs K944 at seed 2501 — the registered consistency check (appendix J, README note)
+# K667 = --keep-features top667.idx = exactly the complement of the 277 constant columns.
+# Both cells: same recipe, same seed, same data. Numbers read from the bake_verdict
+# --regime 944 full-JSONs; nothing recomputed.
+axis	K667_s2501	K944_s2501	delta
+best_val	0.757393	0.757393	0.000000
+cid22	0.879894	0.879894	0.000000
+konjnd	0.489118	0.489118	0.000000
+nonphoto	0.920459	0.920459	0.000000
+kadid	0.807722	0.807722	0.000000
+csiq	0.904388	0.904388	0.000000
+live	0.940967	0.940967	0.000000
+tid	0.935649	0.935649	0.000000
+sdr25	0.940264	0.940264	0.000000
+composite	0.8550645742444466	0.8550645742444466	0.0
+live_l0_rows	667	667	0
+#
+# EXACT agreement on every axis, and bit-identical composite. The prediction
+# recorded before the run was "should agree closely, and may differ on the ~37
+# columns that are constant in TRAINING but might vary in EVAL". They do not
+# differ at all: those columns' weight rows are already exactly zero in the
+# unflagged baseline (the recipe self-prunes them, see live_input_structure),
+# so pinning them changes nothing a scorer can observe.
+#
+# Reading: dropping 277 of 944 inputs is FREE and provably a no-op — the purest
+# form of registered outcome (b). It is also not an achievement of this appendix:
+# the stock recipe already zeroes those rows, so `bake_dial_refit pack` would
+# narrow the shipped bake to 667 today.
