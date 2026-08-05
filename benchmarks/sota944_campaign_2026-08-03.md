@@ -9013,3 +9013,108 @@ models (range restriction) — the new panel, not that cell, is the readable
 view of this axis. The era models' hfnl numbers ride the 372-slice
 (`derive_hfnlproxy_372`) whose row-identity gate to the 944 slice is exact;
 era-vs-944 comparability is by-construction on identical pairs/targets.
+
+# REGISTERED APPENDIX P — THE STEERED-COMPARE PERF PROGRAM (2026-08-05, pre-registered before landing)
+
+## P.0 Mandate + starting point
+
+User directive: "improving our jxl-loop performance above all" — take the
+steered 944-class compares from the appendix-N measured 141.5/129.1/123.5 ms
+(k3 iters 1–3, 576²) toward the ~34.6 ms v47A class. Appendix N's measured
+decomposition of the fresh fused entry (150.4 ms zenbench): **pass-B f64
+combine ~65 ms** + fused v1 walk ~27 + extraction ~20 + retention ~3; N.3's
+ranked levers are (1) f32 pass-B (C3a precedent: the identical lever took the
+v1 combine 53.6 → 3.0 ms), (2) the stale/single-pass endpoint (C3b measured
+`attr-stale ≈ attr`, so semantic viability is established), (3) ref-side
+caches / in-kernel mean slots. Levers land IN ORDER, each with its own gates,
+none of which may be relaxed for a perf number.
+
+## P.1 Lever 1 (frozen): f32 pass-B combine — FUSED ENTRY ONLY
+
+**Design.** f32 twins of the pass-B kernels (`attr_pass_b_rows` /
+`attr_pass_b_blockiness` / the per-scale driver): per-(scale, ch) coefficient
+derivation stays f64 (`derive_v2app_coeffs` untouched), then folds into an
+f32 coefficient pack in which the dev-pool/gdp guards are PRECOMPUTED
+polynomial coefficients (branch-free pixel loop; the `g_var` global uses the
+factored `(s−d)·((s+d) − 2·gmean_d)` form — algebraically identical, f32-
+stable). f32 scale-density/win planes; window spread via the existing
+`box_spread_merge_f32` (bitwise-gated parallel twin); f32 sum-preserving
+upsample (`upsample_add_sum_preserving_f32` class); the fused entry's final
+canvas = f32 basic + f32 v2app, converted ONCE to f64 for the SAT. **The
+standalone `compute_attribution_density_full` / `compute_v2_append_attribution`
+stay f64 exactly as-is** (the C3a precedent: the f32 kernel serves the fused
+entry only) — the M3a certification instrument (`diffmap_block_coherence`)
+routes the standalone path and is structurally untouched.
+
+**Gates (frozen).**
+- **G-P1** (score bit-identity): G-N1 re-run untouched —
+  `fused944_features_bitwise_and_score_match_standalone` (the f32 change is
+  density-side only; features/score computed on the extraction side).
+- **G-P2** (density tolerance): G-N2 re-run —
+  `fused944_density_matches_standalone_full` at the C3a class (per-pixel ≤
+  3e-5·max_abs + 1e-9, block-sums(16) ≤ 1e-4·bmax); ALSO report the measured
+  max per-pixel and block-sum deviations, not just PASS.
+- **G-P3** (coverage): `attribution_covers_expected_slots_per_width` re-run —
+  every width through the fused entry, class-N zeros + f944+ pin intact.
+- **G-P4** (M3a stability): `diffmap_block_coherence` re-run on the 3
+  registered bakes (C = W10L9_s4003_packed, s2507, co3a_s1301); M3a must stay
+  within instrument noise of their corrected post-`299ccc8c` values.
+  Expected: byte-identical (the instrument routes the standalone f64 path);
+  any material move = STOP and report, no landing.
+- **Perf**: zenbench `fused944_bench` before/after on the same box, paired;
+  report the new fused ms + marginal ratio vs score-only (B-N1 restated).
+
+## P.2 Lever 2 (frozen): stale-map single-pass in the loop
+
+**Design.** `JXL_ZENSIM_SINGLEPASS=1` gains its folded-class meaning (the
+appendix-N registered limitation is lifted): the FIRST steered iteration
+calls the fused folded-944 entry (score + map; map cached); every later
+steered iteration calls the **score-only** canonical folded extraction +
+forward (`compute_folded720_append{2,}_features` per rd_n_in — the identical
+score route the baseline folded arm uses) and steers with the CACHED map —
+no fused call, no v1 walk, marginal map cost ≈ 0 for iterations ≥ 2. Map
+sequence M1, M1, M1 … (vs fresh M1, M2, M3): the H3 rule + shared
+sum-renormalization keep LEVEL control in the damped controller, so
+staleness affects allocation SHAPE only — exactly what G-P5 prices. Default
+OFF unchanged (fresh fused per iteration); 372-class SINGLEPASS semantics
+unchanged; `h3-mag-stale` (lagged-fresh, the #69 G4 pricing arm) unchanged.
+
+**Gates (frozen).**
+- **G-P5** (A/B, the payoff gate): re-run the h3own phase with
+  `JXL_ZENSIM_SINGLEPASS=1` (arm label `W10L9_h3ownsp`) on the SAME 27-cell
+  grid × {k2, k3} × {last, best}, decoded-judged, `analyze_23shot.py` stats
+  owner. Census/medians must hold within the study's own convention vs the
+  COMMITTED fresh h3own rows (`zensim_loop_h3own_sota944_2026-08-05.tsv`).
+  If they regress materially, report and keep fresh-map as the default —
+  the lever is then priced, not shipped.
+- **G-P6** (engagement): the h3own phase's own probe-line/trace-row count
+  gates (27·K attr lines, 27·(K+1) trace rows), plus per-iteration compare
+  ms recorded from the trace.
+
+## P.3 Lever 3 (frozen): ZENSIM_H3_GAIN sweep
+
+`ZENSIM_H3_GAIN ∈ {5, 10, 20, 40}` × the k3 grid (27 cells, emit-best,
+fused h3own arm, gain 10 = the committed h3own rows). Report the |err|
+median + census curve per gain; recommend a default or keep 10. Registered
+as a SWEEP — no default change ships without the curve, and any change is
+a recommendation to the user, not a silent flip.
+
+## P.4 End-to-end honest table (the report contract)
+
+Per lever: measured delta + gate outputs verbatim. Final: per-iter steered
+compare ms (k3, iters 1–3) + iter-0 probe ms + whole-encode wall + the loop
+panel numbers, before vs after each lever, against the 34.6 ms v47A-class
+target. Loop summary JSON regenerated by the analyze owner; the board loop
+panel reads it (never re-derives). If after levers 1+2 the steered compare
+is still > 1.3× the v47A class: `perf record` decomposition + ranked next
+lever — no guessing, no unregistered lever landing.
+
+## P.5 Registered risks
+
+1. f32 pass-B tolerance: the C3a class bounds the fused-vs-standalone gap;
+   if G-P2 fails, the fallback is term-selective f64 (keep the failing
+   integrand family in f64) — a report-first decision, not a silent tol bump.
+2. Frozen-map compounding (lever 2): successive H3 redistributions with one
+   map compound its shape; G-P5's decoded-judged A/B is the arbiter.
+3. The one-time iter-0 gradient probe (299.9 ms) is NOT in scope; it is a
+   registered residual (batched forward probing is a future lever).
