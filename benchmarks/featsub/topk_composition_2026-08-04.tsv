@@ -1,0 +1,17 @@
+# Family + scale composition of the frozen top-K subsets (appendix J.2)
+# Source: benchmarks/featsub/idx/ranked.tsv (mean_abs desc, ties by idx asc)
+# 944 layout: v1fold f0-155 (39/scale) | structural zeros f156-371 |
+#             v2-348 f372-719 (87/scale) | append-204 f720-923 (51/scale) | tail-20 f924-943
+K	v1fold156	v2_348	append204	tail20	v1_by_scale_s0..s3	v2_by_scale_s0..s3	append_by_scale_s0..s3	cum_contrib_share
+64	20	33	10	1	9,2,5,4	21,6,3,3	7,2,1,0	0.2797
+128	41	62	23	2	16,9,6,10	38,14,6,4	11,9,2,1	0.4529
+256	80	124	47	5	26,23,15,16	59,33,17,15	17,15,8,7	0.6859
+512	133	262	109	8	-	-	-	0.9358
+667	156	348	151	12	-	-	-	1.0000
+#
+# READING: the ranking is fine-scale-skewed. In top-64, 21 of the 33 v2 inputs
+# and 9 of the 20 v1 inputs are scale-0 (finest); the coarsest scale contributes
+# 3 v2 inputs and 0 append inputs. That is the same direction as the campaign's
+# --coarse-decay result (coarse-scale mass is the symptom the E-M6 remedy
+# targets), arrived at independently: mean-ablation contribution, not gradient
+# mass.
