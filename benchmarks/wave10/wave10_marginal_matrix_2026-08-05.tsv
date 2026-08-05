@@ -1,0 +1,191 @@
+arm	dropped_leg	axis	n_seeds	delta_mean	delta_s4001	delta_s4003	band	marginal_value	call
+L1	safesyn	cid22	2	+0.001595	+0.00312	+7e-05	0.01	-0.001595	inside noise
+L1	safesyn	konjnd_abs	2	-0.00392	-0.01354	+0.0057	0.076	+0.00392	inside noise
+L1	safesyn	nonphoto	2	+0.005745	+0.00564	+0.00585	0.01	-0.005745	inside noise
+L1	safesyn	csiq	2	-0.006105	+0.00191	-0.01412	0.096	+0.006105	inside noise
+L1	safesyn	live	2	+0.03654	+0.00335	+0.06973	0.05	-0.03654	inside noise
+L1	safesyn	m3a	2	+0.02446	-0.02907	+0.07799	0.092	-0.02446	inside noise
+L1	safesyn	sdr25	2	-0.009795	-0.00134	-0.01825	0.02	+0.009795	inside noise
+L1	safesyn	aic3	2	-0.00344561	-0.000351764	-0.00653946	0.011	+0.00344561	inside noise
+L1	safesyn	aic4	2	-0.0100061	-0.00409827	-0.015914	0.01	+0.0100061	OUTSIDE NOISE
+L1	safesyn	imazen26	2	+0.00540809	+0.00506259	+0.00575358	0.01	-0.00540809	inside noise
+L1	safesyn	hfnl_perref	2	-0.15604	-0.02762	-0.28446	0.247	+0.15604	inside noise
+L1	safesyn	mono	2	-0.014675	-0.01021	-0.01914	0.024	+0.014675	inside noise
+L1	safesyn	kadid_signed	2	+0.014065	+0.01432	+0.01381		-0.014065	NO BAND (reported only)
+L1	safesyn	tid_signed	2	+0.00196	+0.00435	-0.00043		-0.00196	NO BAND (reported only)
+L1	safesyn	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L1	safesyn	n_pass	2	+0	+1	-1		-0	NO BAND (reported only)
+L1	safesyn	bal_composite	2	+0.001805	+0.00159	+0.00202		-0.001805	NO BAND (reported only)
+L1	safesyn	product_composite	2	+0.002045	+0.00204	+0.00205		-0.002045	NO BAND (reported only)
+L1	safesyn	best_val	2	+0.00263669	+0.00985306	-0.00457967		-0.00263669	NO BAND (reported only)
+L2	cid22_train	cid22	2	-0.01794	-0.01279	-0.02309	0.01	+0.01794	OUTSIDE NOISE
+L2	cid22_train	konjnd_abs	2	-0.06231	-0.01511	-0.10951	0.076	+0.06231	inside noise
+L2	cid22_train	nonphoto	2	+0.0044	+0.0013	+0.0075	0.01	-0.0044	inside noise
+L2	cid22_train	csiq	2	-0.006155	+0.00347	-0.01578	0.096	+0.006155	inside noise
+L2	cid22_train	live	2	+0.038645	+0.00916	+0.06813	0.05	-0.038645	inside noise
+L2	cid22_train	m3a	2	+0.00924	-0.00624	+0.02472	0.092	-0.00924	inside noise
+L2	cid22_train	sdr25	2	-0.00461	+0.00317	-0.01239	0.02	+0.00461	inside noise
+L2	cid22_train	aic3	2	-0.0063418	-0.00185932	-0.0108243	0.011	+0.0063418	inside noise
+L2	cid22_train	aic4	2	-0.0245309	-0.0166286	-0.0324332	0.01	+0.0245309	OUTSIDE NOISE
+L2	cid22_train	imazen26	2	+0.00444476	+0.0013969	+0.00749261	0.01	-0.00444476	inside noise
+L2	cid22_train	hfnl_perref	2	+0.058095	+0.02104	+0.09515	0.247	-0.058095	inside noise
+L2	cid22_train	mono	2	+0.003935	+0.0134	-0.00553	0.024	-0.003935	inside noise
+L2	cid22_train	kadid_signed	2	+0.02675	+0.01152	+0.04198		-0.02675	NO BAND (reported only)
+L2	cid22_train	tid_signed	2	+0.008705	+0.00491	+0.0125		-0.008705	NO BAND (reported only)
+L2	cid22_train	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L2	cid22_train	n_pass	2	-1.5	-1	-2		+1.5	NO BAND (reported only)
+L2	cid22_train	bal_composite	2	-0.01002	-0.00632	-0.01372		+0.01002	NO BAND (reported only)
+L2	cid22_train	product_composite	2	-0.013355	-0.00732	-0.01939		+0.013355	NO BAND (reported only)
+L2	cid22_train	best_val	2	+0.0162895	+0.0169632	+0.0156158		-0.0162895	NO BAND (reported only)
+L3	kadid	cid22	2	-0.0004	+0.01749	-0.01829	0.01	+0.0004	inside noise
+L3	kadid	konjnd_abs	2	-0.037635	-0.00808	-0.06719	0.076	+0.037635	inside noise
+L3	kadid	nonphoto	2	-0.005245	-0.00736	-0.00313	0.01	+0.005245	inside noise
+L3	kadid	csiq	2	-0.01834	-0.00696	-0.02972	0.096	+0.01834	inside noise
+L3	kadid	live	2	+0.014825	-0.02503	+0.05468	0.05	-0.014825	inside noise
+L3	kadid	m3a	2	-0.02358	-0.02676	-0.0204	0.092	+0.02358	inside noise
+L3	kadid	sdr25	2	+0.014215	+0.0218	+0.00663	0.02	-0.014215	inside noise
+L3	kadid	aic3	2	-0.00985273	-0.000281411	-0.0194241	0.011	+0.00985273	inside noise
+L3	kadid	aic4	2	-0.0116032	+0.00351382	-0.0267203	0.01	+0.0116032	inside noise (seeds disagree)
+L3	kadid	imazen26	2	-0.00461083	-0.00774938	-0.00147228	0.01	+0.00461083	inside noise
+L3	kadid	hfnl_perref	2	+0.04594	+0.12461	-0.03273	0.247	-0.04594	inside noise
+L3	kadid	mono	2	+0.013505	+0.0168	+0.01021	0.024	-0.013505	inside noise
+L3	kadid	kadid_signed	2	-0.34733	-0.33992	-0.35474		+0.34733	NO BAND (reported only)
+L3	kadid	tid_signed	2	-0.01366	-0.01737	-0.00995		+0.01366	NO BAND (reported only)
+L3	kadid	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L3	kadid	n_pass	2	-0.5	+1	-2		+0.5	NO BAND (reported only)
+L3	kadid	bal_composite	2	-0.00738	+0.00158	-0.01634		+0.00738	NO BAND (reported only)
+L3	kadid	product_composite	2	-0.00622	+0.00462	-0.01706		+0.00622	NO BAND (reported only)
+L3	kadid	best_val	2	+0.0139898	+0.0378543	-0.0098748		-0.0139898	NO BAND (reported only)
+L4	tid	cid22	2	+0.00017	+0.00621	-0.00587	0.01	-0.00017	inside noise
+L4	tid	konjnd_abs	2	-0.021035	-0.01661	-0.02546	0.076	+0.021035	inside noise
+L4	tid	nonphoto	2	+0.003805	+0.00241	+0.0052	0.01	-0.003805	inside noise
+L4	tid	csiq	2	-0.023805	-0.00375	-0.04386	0.096	+0.023805	inside noise
+L4	tid	live	2	+0.02674	-0.00172	+0.0552	0.05	-0.02674	inside noise
+L4	tid	m3a	2	+0.029415	-0.00855	+0.06738	0.092	-0.029415	inside noise
+L4	tid	sdr25	2	-0.001295	+0.00202	-0.00461	0.02	+0.001295	inside noise
+L4	tid	aic3	2	-0.00866511	-0.00326303	-0.0140672	0.011	+0.00866511	inside noise
+L4	tid	aic4	2	-0.00738764	+0.0062134	-0.0209887	0.01	+0.00738764	inside noise
+L4	tid	imazen26	2	+0.00359298	+0.00234149	+0.00484446	0.01	-0.00359298	inside noise
+L4	tid	hfnl_perref	2	-0.08812	+0.00461	-0.18085	0.247	+0.08812	inside noise
+L4	tid	mono	2	+0.013075	+0.00446	+0.02169	0.024	-0.013075	inside noise
+L4	tid	kadid_signed	2	+0.032555	+0.02464	+0.04047		-0.032555	NO BAND (reported only)
+L4	tid	tid_signed	2	-0.11137	-0.10844	-0.1143		+0.11137	NO BAND (reported only)
+L4	tid	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L4	tid	n_pass	2	-0.5	+0	-1		+0.5	NO BAND (reported only)
+L4	tid	bal_composite	2	-0.00051	+0.00133	-0.00235		+0.00051	NO BAND (reported only)
+L4	tid	product_composite	2	-0.001085	+0.00222	-0.00439		+0.001085	NO BAND (reported only)
+L4	tid	best_val	2	-0.0113692	+0.0117836	-0.034522		+0.0113692	NO BAND (reported only)
+L5	bigcodec	cid22	2	-0.000945	+0.00164	-0.00353	0.01	+0.000945	inside noise
+L5	bigcodec	konjnd_abs	2	+0.00411	+0.01907	-0.01085	0.076	-0.00411	inside noise
+L5	bigcodec	nonphoto	2	-0.018645	-0.02067	-0.01662	0.01	+0.018645	OUTSIDE NOISE
+L5	bigcodec	csiq	2	-0.011925	-0.01981	-0.00404	0.096	+0.011925	inside noise
+L5	bigcodec	live	2	+0.030205	-0.00985	+0.07026	0.05	-0.030205	inside noise
+L5	bigcodec	m3a	2	+0.03591	+0.02466	+0.04716	0.092	-0.03591	inside noise
+L5	bigcodec	sdr25	2	-0.00744	+0.00135	-0.01623	0.02	+0.00744	inside noise
+L5	bigcodec	aic3	2	-0.00358464	-0.00175547	-0.00541381	0.011	+0.00358464	inside noise
+L5	bigcodec	aic4	2	-0.00402649	-0.00152268	-0.00653029	0.01	+0.00402649	inside noise
+L5	bigcodec	imazen26	2	-0.0148849	-0.0159683	-0.0138016	0.01	+0.0148849	OUTSIDE NOISE
+L5	bigcodec	hfnl_perref	2	-0.251195	-0.19723	-0.30516	0.247	+0.251195	OUTSIDE NOISE
+L5	bigcodec	mono	2	-0.00925	+0.01042	-0.02892	0.024	+0.00925	inside noise
+L5	bigcodec	kadid_signed	2	-0.00536	-0.01774	+0.00702		+0.00536	NO BAND (reported only)
+L5	bigcodec	tid_signed	2	-0.00312	-0.00179	-0.00445		+0.00312	NO BAND (reported only)
+L5	bigcodec	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L5	bigcodec	n_pass	2	-1	-1	-1		+1	NO BAND (reported only)
+L5	bigcodec	bal_composite	2	-0.00261	-0.00344	-0.00178		+0.00261	NO BAND (reported only)
+L5	bigcodec	product_composite	2	-0.00638	-0.00418	-0.00858		+0.00638	NO BAND (reported only)
+L5	bigcodec	best_val	2	+0.00124429	+0.00347493	-0.000986341		-0.00124429	NO BAND (reported only)
+L6	kadis	cid22	2	-0.00337	+0.00395	-0.01069	0.01	+0.00337	inside noise
+L6	kadis	konjnd_abs	2	-0.02679	-0.01623	-0.03735	0.076	+0.02679	inside noise
+L6	kadis	nonphoto	2	+0.003985	+0.00247	+0.0055	0.01	-0.003985	inside noise
+L6	kadis	csiq	2	+0.007805	+0.02347	-0.00786	0.096	-0.007805	inside noise
+L6	kadis	live	2	+0.04081	+0.01437	+0.06725	0.05	-0.04081	inside noise
+L6	kadis	m3a	2	+0.058995	+0.03482	+0.08317	0.092	-0.058995	inside noise
+L6	kadis	sdr25	2	+0.002355	+0.00797	-0.00326	0.02	-0.002355	inside noise
+L6	kadis	aic3	2	-0.00621784	-0.00364829	-0.00878739	0.011	+0.00621784	inside noise
+L6	kadis	aic4	2	-0.00302759	+0.00358493	-0.00964011	0.01	+0.00302759	inside noise
+L6	kadis	imazen26	2	+0.00385024	+0.000434329	+0.00726616	0.01	-0.00385024	inside noise
+L6	kadis	hfnl_perref	2	-0.080725	+0.02436	-0.18581	0.247	+0.080725	inside noise
+L6	kadis	mono	2	+0.00085	+0.00574	-0.00404	0.024	-0.00085	inside noise
+L6	kadis	kadid_signed	2	-0.00321	-0.02148	+0.01506		+0.00321	NO BAND (reported only)
+L6	kadis	tid_signed	2	+0.00087	-0.00216	+0.0039		-0.00087	NO BAND (reported only)
+L6	kadis	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L6	kadis	n_pass	2	+0	+1	-1		-0	NO BAND (reported only)
+L6	kadis	bal_composite	2	+0.000765	+0.00225	-0.00072		-0.000765	NO BAND (reported only)
+L6	kadis	product_composite	2	-0.002965	+0.00069	-0.00662		+0.002965	NO BAND (reported only)
+L6	kadis	best_val	2	+0.00904066	+0.00772797	+0.0103534		-0.00904066	NO BAND (reported only)
+L7	tsafesyn	cid22	2	-0.00359	+0.00139	-0.00857	0.01	+0.00359	inside noise
+L7	tsafesyn	konjnd_abs	2	-0.03901	-0.076	-0.00202	0.076	+0.03901	inside noise
+L7	tsafesyn	nonphoto	2	+0.0072	+0.00427	+0.01013	0.01	-0.0072	inside noise
+L7	tsafesyn	csiq	2	-0.009055	+0.00418	-0.02229	0.096	+0.009055	inside noise
+L7	tsafesyn	live	2	+0.03225	-0.00395	+0.06845	0.05	-0.03225	inside noise
+L7	tsafesyn	m3a	2	+0.055185	+0.0424	+0.06797	0.092	-0.055185	inside noise
+L7	tsafesyn	sdr25	2	-0.000865	+0.01335	-0.01508	0.02	+0.000865	inside noise
+L7	tsafesyn	aic3	2	-0.00755789	+0.00107539	-0.0161912	0.011	+0.00755789	inside noise
+L7	tsafesyn	aic4	2	-0.00263603	+0.000418227	-0.00569029	0.01	+0.00263603	inside noise
+L7	tsafesyn	imazen26	2	+0.00715271	+0.00370709	+0.0105983	0.01	-0.00715271	inside noise
+L7	tsafesyn	hfnl_perref	2	-0.18863	-0.11633	-0.26093	0.247	+0.18863	inside noise
+L7	tsafesyn	mono	2	+0.0067	+0.01659	-0.00319	0.024	-0.0067	inside noise
+L7	tsafesyn	kadid_signed	2	+0.018995	+0.01144	+0.02655		-0.018995	NO BAND (reported only)
+L7	tsafesyn	tid_signed	2	+0.000525	-0.00357	+0.00462		-0.000525	NO BAND (reported only)
+L7	tsafesyn	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L7	tsafesyn	n_pass	2	-1	-1	-1		+1	NO BAND (reported only)
+L7	tsafesyn	bal_composite	2	-0.000205	-0.00323	+0.00282		+0.000205	NO BAND (reported only)
+L7	tsafesyn	product_composite	2	-0.00304	-0.0049	-0.00118		+0.00304	NO BAND (reported only)
+L7	tsafesyn	best_val	2	+0.00598007	+0.0127007	-0.000740591		-0.00598007	NO BAND (reported only)
+L8	ttbig	cid22	2	-0.00508	-0.00225	-0.00791	0.01	+0.00508	inside noise
+L8	ttbig	konjnd_abs	2	-0.057035	-0.06484	-0.04923	0.076	+0.057035	inside noise
+L8	ttbig	nonphoto	2	-0.006345	-0.00951	-0.00318	0.01	+0.006345	inside noise
+L8	ttbig	csiq	2	-0.01774	+0.00218	-0.03766	0.096	+0.01774	inside noise
+L8	ttbig	live	2	+0.02583	-0.00346	+0.05512	0.05	-0.02583	inside noise
+L8	ttbig	m3a	2	+0.03618	+0.0346	+0.03776	0.092	-0.03618	inside noise
+L8	ttbig	sdr25	2	+0.002355	+0.01287	-0.00816	0.02	-0.002355	inside noise
+L8	ttbig	aic3	2	-0.00989629	-0.00524295	-0.0145496	0.011	+0.00989629	inside noise
+L8	ttbig	aic4	2	-0.00194135	+0.00574362	-0.00962633	0.01	+0.00194135	inside noise
+L8	ttbig	imazen26	2	-0.00878203	-0.0123854	-0.00517861	0.01	+0.00878203	inside noise
+L8	ttbig	hfnl_perref	2	-0.23056	-0.13933	-0.32179	0.247	+0.23056	inside noise
+L8	ttbig	mono	2	+0.01797	+0.02531	+0.01063	0.024	-0.01797	inside noise
+L8	ttbig	kadid_signed	2	+0.022305	+0.01295	+0.03166		-0.022305	NO BAND (reported only)
+L8	ttbig	tid_signed	2	+0.001735	-0.00326	+0.00673		-0.001735	NO BAND (reported only)
+L8	ttbig	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L8	ttbig	n_pass	2	-1.5	-1	-2		+1.5	NO BAND (reported only)
+L8	ttbig	bal_composite	2	-0.008295	-0.00948	-0.00711		+0.008295	NO BAND (reported only)
+L8	ttbig	product_composite	2	-0.011105	-0.0114	-0.01081		+0.011105	NO BAND (reported only)
+L8	ttbig	best_val	2	-0.0191637	+0.0033543	-0.0416817		+0.0191637	NO BAND (reported only)
+L9	tkadis	cid22	2	+0.00229	+0.00675	-0.00217	0.01	-0.00229	inside noise
+L9	tkadis	konjnd_abs	2	-0.04176	-0.06048	-0.02304	0.076	+0.04176	inside noise
+L9	tkadis	nonphoto	2	+0.008685	+0.00913	+0.00824	0.01	-0.008685	inside noise
+L9	tkadis	csiq	2	+0.03154	+0.04472	+0.01836	0.096	-0.03154	inside noise
+L9	tkadis	live	2	+0.06113	+0.02959	+0.09267	0.05	-0.06113	OUTSIDE NOISE
+L9	tkadis	m3a	2	+0.05106	+0.01127	+0.09085	0.092	-0.05106	inside noise
+L9	tkadis	sdr25	2	+0.006295	+0.01518	-0.00259	0.02	-0.006295	inside noise
+L9	tkadis	aic3	2	-0.0044607	+0.00233839	-0.0112598	0.011	+0.0044607	inside noise
+L9	tkadis	aic4	2	-0.00572473	+0.00260092	-0.0140504	0.01	+0.00572473	inside noise
+L9	tkadis	imazen26	2	+0.00803577	+0.0097001	+0.00637143	0.01	-0.00803577	inside noise
+L9	tkadis	hfnl_perref	2	+0.463915	+0.4587	+0.46913	0.247	-0.463915	OUTSIDE NOISE
+L9	tkadis	mono	2	+0.04296	+0.05274	+0.03318	0.024	-0.04296	OUTSIDE NOISE
+L9	tkadis	kadid_signed	2	+0.11496	+0.10334	+0.12658		-0.11496	NO BAND (reported only)
+L9	tkadis	tid_signed	2	+0.003425	+0.00592	+0.00093		-0.003425	NO BAND (reported only)
+L9	tkadis	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L9	tkadis	n_pass	2	-0.5	+0	-1		+0.5	NO BAND (reported only)
+L9	tkadis	bal_composite	2	+0.004695	+0.00559	+0.0038		-0.004695	NO BAND (reported only)
+L9	tkadis	product_composite	2	-8e-05	+0.00121	-0.00137		+8e-05	NO BAND (reported only)
+L9	tkadis	best_val	2	+0.181509	+0.18662	+0.176397		-0.181509	NO BAND (reported only)
+L10	konjnd_bpg	cid22	2	+0.002625	+0.00731	-0.00206	0.01	-0.002625	inside noise
+L10	konjnd_bpg	konjnd_abs	2	-0.037135	-0.02202	-0.05225	0.076	+0.037135	inside noise
+L10	konjnd_bpg	nonphoto	2	+0.002815	-0.0007	+0.00633	0.01	-0.002815	inside noise
+L10	konjnd_bpg	csiq	2	-0.00717	-0.00302	-0.01132	0.096	+0.00717	inside noise
+L10	konjnd_bpg	live	2	+0.03031	-0.00583	+0.06645	0.05	-0.03031	inside noise
+L10	konjnd_bpg	m3a	2	+0.01306	+0.01613	+0.00999	0.092	-0.01306	inside noise
+L10	konjnd_bpg	sdr25	2	+0.00769	+0.01691	-0.00153	0.02	-0.00769	inside noise
+L10	konjnd_bpg	aic3	2	-0.00943732	-0.00496824	-0.0139064	0.011	+0.00943732	inside noise
+L10	konjnd_bpg	aic4	2	-0.0011989	+0.00355915	-0.00595696	0.01	+0.0011989	inside noise
+L10	konjnd_bpg	imazen26	2	+0.00401626	+0.000493767	+0.00753876	0.01	-0.00401626	inside noise
+L10	konjnd_bpg	hfnl_perref	2	-0.157715	-0.12118	-0.19425	0.247	+0.157715	inside noise
+L10	konjnd_bpg	mono	2	-0.007875	-0.00022	-0.01553	0.024	+0.007875	inside noise
+L10	konjnd_bpg	kadid_signed	2	+0.01778	+0.00295	+0.03261		-0.01778	NO BAND (reported only)
+L10	konjnd_bpg	tid_signed	2	-0.001645	-0.00692	+0.00363		+0.001645	NO BAND (reported only)
+L10	konjnd_bpg	tied	2	+0	+0	+0		-0	NO BAND (reported only)
+L10	konjnd_bpg	n_pass	2	+0.5	+1	+0		-0.5	NO BAND (reported only)
+L10	konjnd_bpg	bal_composite	2	-0.00156	-0.00063	-0.00249		+0.00156	NO BAND (reported only)
+L10	konjnd_bpg	product_composite	2	-0.00137	+0.00122	-0.00396		+0.00137	NO BAND (reported only)
+L10	konjnd_bpg	best_val	2	+0.0186111	+0.020426	+0.0167961		-0.0186111	NO BAND (reported only)

@@ -12,8 +12,8 @@ implements its A1-A5/A9 candidates.
 
 ## Known Bugs
 
-- **⛔ THE ext-LINEAGE KADID TARGET IS STORED INVERTED — every KADID number published from
-  a 720/924/944 root is SIGN-FLIPPED (found 2026-08-04, OPEN).** `ext720`/`ext924`/`ext944`
+- **⛔ ext-LINEAGE KADID TARGET WAS STORED INVERTED (found 2026-08-04; TABLES REBUILT
+  2026-08-05, wave 10 — pre-2026-08-05 numbers remain sign-flipped).** `ext720`/`ext924`/`ext944`
   `ext_kadid.parquet` carry `human_score = (5−dmos)/4`; the canonical `(dmos−1)/4` is
   correct because **KADID's `dmos` is a MOS in disguise** (raw crowdsourced DCR falls
   4.0789 → 2.0072 across severity levels 1–5, 349,800 ratings).
@@ -26,8 +26,16 @@ implements its A1-A5/A9 candidates.
   **B** **+0.8201**, positive on 25/25 distortion types). **TID is CLEAN on every root.**
   **Read `rank.kadid.srocc_signed` and NEGATE it for any ext-root verdict; never cite
   `rank.kadid.srocc`.** Builder fixed + `scripts/canonical_corpus/check_target_orientation.py`
-  gates it, but **the ext tables are NOT yet rebuilt** — that changes the target ~110
-  bakes trained against and needs a conscious rebuild + re-verdict + re-annotate.
+  gates it; **the ext tables WERE rebuilt 2026-08-05 (campaign APPENDIX H part 1,
+  `176c4268`)**: `human_score := 1 − human_score` at all three ext roots, gate now OK
+  +0.582360 on every root, originals preserved as
+  `ext_kadid_INVERTED_2026-08-04.parquet` (triple-mirrored, sha-recorded — ext944
+  inverted sha `4dde6be2…` = the sha in every affected repro). REPRO HAZARD: re-running
+  a pre-2026-08-05 repro argv verbatim now trains on corrected bytes; substitute the
+  `_INVERTED_` file to reproduce. Existing bakes stay annotated, NOT retrained.
+  Measured value of the fix (wave 10 L0 vs incumbent, k=3 each): CSIQ +0.115, LIVE
+  +0.073, AIC-3 +0.016 (all outside noise), KADID signed +0.40, first-ever 8/8
+  balanced-floor cells.
   Determination: `benchmarks/sota944_campaign_2026-08-03.md` REGISTERED APPENDIX F
   (+ F.R1..F.R9); ledger: `docs/DATASET_HISTORY.md` §3.20; registry:
   `benchmarks/eval_annotations.json` (`kadid-ext-root-inverted`,

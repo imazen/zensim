@@ -7191,3 +7191,169 @@ which is a more useful answer than any weight would have been.
   from 17 of them (171 carry it), which is why its denominator differs.
 - No claim is made that SDR25 would *fail* to help if the blockers did not exist.
   That experiment was not run, because running it is what the blockers forbid.
+
+
+## H.R — WAVE 10 RESULTS (2026-08-05; all 23 cells, no gate relaxed)
+
+### H.R0 Execution record
+
+23/23 cells trained and fullevaled: local lane 13 (3 concurrent under `run-heavy
+--mem 44G`), lianli 10 (2 concurrent, load 0.01 observed before launch). One trainer
+binary, sha256 `e5db2498…`, both lanes. Per-cell wall ~14 min; the full 11-group mix
+peaks at **~11.3 GiB RSS per trainer** (measured; this is what sets lane width — 4
+concurrent OOM'd three cells at rc=137 before width was cut, and those cells were
+cleanly re-run).
+
+Two execution incidents, both recovered with zero data loss, both recorded because
+they will recur if unwritten: (1) at 01:56Z two `bake_verdict` calls died on
+`Cannot allocate memory` — **box contention across three concurrent agent sessions**
+(5 trainers × 11.3 GiB on a 58 GiB box; this wave's lane was at its 3-cap). Bakes were
+never at risk; harvesting was deferred behind training and re-run. (2) The Claude host
+process itself then died of the same pressure, killing the waiters; the compute
+survived intact (23/23 bakes) and the one missing verdict (`W10L3_s4001`) was
+harvested foreground after recovery, with the SAME binaries as the other 22 (instrument
+consistency; the flat-buffer trainer fix landed on main mid-wave and was deliberately
+NOT picked up mid-instrument).
+
+KADID/TID in every wave-10 verdict are measured on the CORRECTED table
+(`kadid` input sha `286f1b23…` in every embedded repro — checked) and remain
+`train_eq_val` guards, not gates.
+
+### H.R1 — Outcome (c) FIRES: the KADID fix alone moves three axes outside noise
+
+L0 (incumbent recipe, corrected KADID, k=3) vs the incumbent arm-H band (k=3,
+inverted KADID). Unpaired (§H.5): OUTSIDE requires |Δmean| > band AND
+non-overlapping 3-seed ranges.
+
+| axis | incumbent (min–max) | L0 (min–max) | Δmean | band | call |
+|---|---|---|--:|--:|---|
+| **CSIQ** | 0.735–0.832 | 0.904–0.925 | **+0.115** | 0.096 | **OUTSIDE** |
+| **LIVE** | 0.814–0.863 | 0.868–0.943 | **+0.073** | 0.050 | **OUTSIDE** |
+| **AIC-3** | 0.782–0.793 | 0.795–0.808 | **+0.016** | 0.011 | **OUTSIDE** |
+| CID22 | 0.876–0.881 | 0.882–0.889 | +0.008 | 0.010 | inside (ranges disjoint) |
+| KonJND | 0.384–0.459 | 0.484–0.522 | +0.066 | 0.076 | inside (ranges disjoint) |
+| nonphoto | 0.914–0.916 | 0.917–0.924 | +0.005 | 0.010 | inside |
+| M3a | 0.819–0.890 | 0.772–0.806 | −0.070 | 0.092 | inside |
+| KADID signed | +0.368–+0.437 | **+0.787–+0.824** | +0.401 | — | definitional (the target changed) |
+| balanced floors | 5–7 / 8 | 7–8 / 8 | — | — | see H.R3 |
+
+The breadth axes the 944 class could never reach — wave 8 measured only ONE cell
+in the class ever clearing CSIQ ≥ 0.85 ∧ LIVE ≥ 0.85, at a −0.028 CID22 cost —
+are now cleared by **every L0 seed at zero CID22 cost** (CID22's worst L0 seed
+exceeds the incumbent's best). The wave-9 question "is the screen refit a breadth
+lever?" has its real answer: **the breadth ceiling was substantially the inverted
+7.87 %-of-pairs KADID signal**, and removing the inversion buys breadth without the
+refit's CID22/KonJND/nonphoto costs. CID22 and KonJND also both sit just inside
+their bands with fully disjoint ranges — reported as inside noise per the rule,
+directionally positive.
+
+(Confound, registered in H.7.5 and honored here: L0 differs from the incumbent
+ONLY in the kadid table bytes, so this contrast attributes cleanly to the fix;
+`best_val` is not part of the comparison — the kadid val leg's objective changed.)
+
+### H.R2 — Outcome (a) FIRES: `tkadis` has clearly-negative marginal value
+
+The §H.5 paired rule (|Δmean| > band AND both seeds same sign) over 10 arms × 12
+banded axes = 120 cells: **9 outside noise** (matrix:
+`benchmarks/wave10/wave10_marginal_matrix_2026-08-05.tsv`, rendered in
+`wave10_matrix_2026-08-05.md`). They concentrate on four legs:
+
+**`tkadis` (L9) — dropping it IMPROVES three axes outside noise, and costs nothing
+outside noise.** The audit's F-1 finding (its target contradicts its own base leg at
+ρ = +0.2485 while outweighing it 3.3×) is now confirmed by held-out measurement:
+
+| axis | L0 (s4001/s4003) | L9 = drop tkadis | Δ | band |
+|---|---|---|--:|--:|
+| **HF-NL per-ref** | 0.163 / 0.264 | **0.621 / 0.733** | **+0.464** | 0.247 |
+| **LIVE** | 0.936 / 0.868 | 0.965 / 0.961 | **+0.061** | 0.050 |
+| **dial mono** | 94.3 % / 96.3 % | **99.5 % / 99.7 %** | **+4.3 pp** | 2.4 pp |
+| CID22 | 0.882 / 0.889 | 0.889 / 0.887 | +0.002 | 0.010 |
+| KonJND | 0.484 / 0.522 | 0.424 / 0.499 | −0.042 | 0.076 |
+
+The HF-NL move is the campaign's largest on that axis by any single intervention —
+and HF near-lossless is the registered product weak zone. The one directionally
+negative axis (KonJND) is inside its band with seeds disagreeing in magnitude.
+
+**Positive-marginal-value legs (their removal hurts, outside noise):**
+- `cid22_train` (L2): CID22 −0.018, AIC-4 −0.025. Earns its 15.75 %.
+- `bigcodec` (L5): nonphoto −0.019, imazen26 −0.015, **HF-NL −0.251** — the ssim2
+  north-star axes plus the HQ zone. Earns its 7.87 % despite 0.29× undersampling.
+- `safesyn` (L1): AIC-4 −0.01001 vs band 0.010 — **boundary-grade** (outside by
+  1e-5); reported as outside per the strict rule, flagged as at-the-line.
+
+### H.R3 — the selection read-out: the first 8/8-floor cells the 944 class has produced
+
+`freeze_check --select` over all 23 (registered E.4 rule; full table committed at
+`benchmarks/wave10/wave10_select_2026-08-05.txt`): **six cells reach 8/8 balanced
+floors** — the incumbent's best was 7/8, always blocked on CID22 —
+`W10L6_s4001` (SELECTED, sel_comp 0.9492), `W10L10_s4001`, `W10L0_s4003`,
+`W10L10_s4003`, `W10L3_s4001`, `W10L1_s4001`. Every 8/8 cell carries the corrected
+KADID base; they span five different arms, so 8/8 is a property of the FIX, not of
+any particular drop. Mean floors: incumbent 6.33 → L0 7.33.
+
+**Nothing ships and nothing swaps** (registered H.8): the LOO arms are diagnostic
+instruments at k=2, and the ranking is reported as a ranking. The freeze decision is
+the user's.
+
+### H.R4 — Outcome (b) holds for the rest of the matrix
+
+111 of 120 (leg × axis) cells are **inside noise** — including every remaining leg
+(`kadid`, `tid`, `kadis`, `tsafesyn`, `ttbig`, `konjnd_bpg`) on every axis. Two
+observations stated as inside-noise direction, not findings:
+
+- **`konjnd_bpg` at 18.90 % of pairs is not detectably load-bearing at k=2**: L10
+  drops it and still posts KonJND 0.462/0.470 (Δ −0.037 vs band 0.076) — and BOTH
+  L10 cells are among the six 8/8s. The wave-7 kon lever is not contradicted (its
+  paired instrument measured a different contrast at k=3×9); what k=2 says is only
+  that the LOO effect is inside a wide band.
+- KonJND's Δ is negative for 9 of 10 dropped legs — the direction pattern says
+  KonJND benefits diffusely from mix mass rather than from one leg — but no single
+  cell clears the band.
+
+CSIQ, M3a and HF-NL bands (0.096 / 0.092 / 0.247) were registered as
+near-uninformative at k=2, and were: only effects ≥ 2× a plausible seed draw
+(tkadis HF-NL +0.464, L0-vs-incumbent CSIQ +0.115) cleared them.
+
+### H.R5 — the evidence-based mix proposal (explicitly NOT an ideal-mix claim)
+
+1. **Drop `tkadis` to 0** (keep `kadis`). Held-out LOO now agrees with audit F-1's
+   structural evidence; the measured cost is nil at this operating point.
+2. **Keep `cid22_train`, `bigcodec`, `safesyn` at their weights** — the only legs
+   with measured positive marginal value.
+3. Everything else: **insensitive at k=2** — weight changes there are not
+   evidence-backed either way; a finer instrument (more seeds, or weight-halving
+   rather than removal) is required before touching them.
+
+Caveats, registered in H.7 and binding: LOO measures marginals **at the current
+operating point**, not an optimum; ten one-leg deltas do not compose (wave 8 proved
+five drops at once collapse axes no single drop predicts); dropping a leg
+renormalizes all others (+0.7–3.5 pp shares, table in §H.2), so each Δ is
+"leg removed AND rest scaled up".
+
+### H.R6 — limitations + two side-observations
+
+- k=2 on the LOO arms is direction-only; every arm claim above is a banded
+  direction, not a CI. L0-vs-incumbent is unpaired across seed families.
+- `best_val` is non-comparable across arms (val objective changes with the mix) and
+  was used for nothing.
+- The M3a −0.070 (inside noise) on L0 vs incumbent is worth one more look at k>3
+  before any freeze that leans on M3a GOLD.
+- Side-observation (builder-documented, no defect claim): `aic4` and `sdr25` carry
+  signed-JND targets whose builders document an |SROCC| convention
+  (`build_fr_corpus_pairs.py`); their `srocc_signed` is negative in 188/188 and
+  171/171 stored fullevals respectively. A future orientation-provenance pass should
+  either pin their sign convention machine-readably or normalize at build, so the
+  "ALL NEGATIVE = suspect the table" heuristic from appendix F stays usable.
+- The three OOM'd-then-rerun verdicts and the host crash did not touch bake bytes
+  (bakes are written once by the trainer and sha-recorded in their spec.json).
+
+### H.R7 — deliverables checklist (H.8)
+
+1. Corrected tables + preserved originals, triple-mirrored, sha round-trip-verified — DONE (`176c4268`).
+2. Orientation gate INVERTED → OK committed — DONE (`benchmarks/wave10/orientation_{BEFORE,AFTER}_2026-08-05.txt`).
+3. Integrity gate before/after (one-line diff, no new finding) — DONE.
+4. `scripts/wave10_seed.sh` echo-verified (L0 vs arm H differs in `--out` alone; each L-arm drops exactly one `--group` pair, asserted in-driver) — DONE.
+5. Matrix TSVs + `.meta` sidecars + this section — THIS COMMIT.
+6. `eval_annotations.json` — DONE (`kadid-ext-root-corrected-2026-08-05`; `kadid-ext-root-inverted` scope narrowed to the 188 pre-correction verdicts).
+7. `docs/DATA_SPLITS.md` §1.4 + `~/work/zen/DATA_PROVENANCE.md` — DONE.
+8. Outcomes: **(a) fired (`tkadis`), (c) fired (CSIQ/LIVE/AIC-3), (b) holds for 111/120 cells.** Nothing ships; the freeze decision is the user's.
