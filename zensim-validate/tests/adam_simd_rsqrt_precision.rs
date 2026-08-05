@@ -91,7 +91,29 @@ fn rsqrt_path_precision_vs_scalar() {
         "rsqrt-vs-scalar: max_rel={:.3e} mean_rel={:.3e} at i={} (v={:e})",
         max_rel, mean_rel, max_idx, va[max_idx]
     );
-    // Loose gate — 1e-9 relative is well within RankNet's loss precision.
+    // Gate derivation (2026-08-05, unchanged at 1e-9 — the kernel was
+    // repaired to meet it, the bound was not moved):
+    //
+    //   * The kernel consumes magetypes' full-precision `rsqrt()`/`recip()`
+    //     (raw 14-bit hardware estimate + 2 Newton-Raphson steps each,
+    //     ~52-53 bits, precision-tested inside magetypes), so the update
+    //     STEP `lr·m_hat/(sqrt(v_hat)+eps)` carries ~1-2 ULP ≈ 2e-16..5e-16
+    //     relative error vs the scalar sqrt+div formula.
+    //   * This metric is relative to `w_new = w - step`, which AMPLIFIES the
+    //     step error by |step|/|w_new| wherever the step nearly cancels w.
+    //     On this fixed seed the worst amplification is ~2e3 (i=35921,
+    //     v≈2.4e-8), giving an expected max_rel ~1e-12 and a measured
+    //     max_rel of ~2e-13..1e-12 / mean_rel ~1e-14 on Zen 4.
+    //   * 1e-9 therefore has ~3 orders of headroom against rounding-level
+    //     jitter, while still failing LOUDLY on the known regression shape:
+    //     magetypes' `_approx` contract change (34f34b2, 2026-06-20) turned
+    //     the kernel's old hand-rolled single-NR refinement into a ~28-bit
+    //     (~1e-8 step error) path, which this test reported as
+    //     max_rel = 1.6653e-5 through the same ~2e3 amplification.
+    //
+    // On hardware without AVX-512, `adam_update_rsqrt_v4` falls back to the
+    // scalar reference and this test passes with max_rel = 0 — the gate only
+    // exercises the real kernel where X64V4Token summons (e.g. Zen 4).
     assert!(
         max_rel < 1e-9,
         "rsqrt path drifted too far: max_rel={max_rel:e} at i={max_idx}"

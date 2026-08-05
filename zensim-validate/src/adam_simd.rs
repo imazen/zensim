@@ -208,21 +208,43 @@ fn adam_update_inner_v4(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'
 }
 
 // =============================================================================
-// Alternative AVX-512 path: VRSQRT14PD + 2× Newton-Raphson refinement +
-// VRCP14PD + 1 NR to break the sqrt/div latency chain. Provides higher
-// throughput on Zen 4 at the cost of f64 precision: relative error
-// typically ~1e-14 to ~1e-15 (within 1 ULP). NOT bit-identical to
-// scalar but well within the trainer's RankNet loss precision budget.
-// Exposed as `adam_update_rsqrt_v4` for benchmarking + opt-in use.
+// Alternative AVX-512 path: reciprocal-estimate based, to break the
+// sqrt/div latency chain — no VSQRTPD / VDIVPD is issued. Provides higher
+// throughput where the FP divide/sqrt port is the bottleneck, at the cost
+// of bit-identity: relative error of the update step is ~1-2 ULP
+// (~1e-15), NOT bit-identical to scalar but far inside the trainer's
+// RankNet loss precision budget. Exposed as `adam_update_rsqrt_v4` for
+// benchmarking + opt-in use (not shipped: measured slower than
+// vsqrtpd+vdivpd on Zen 4).
 //
 // Math:
-//   denom = sqrt(v) + eps
+//   denom = sqrt(v_hat) + eps
 //   1/denom computed via:
-//     r = rsqrt(v)              [VRSQRT14PD + 2 NR → f64-precise]
-//     sqrt_v = v * r            [exact in f64 if r is precise]
+//     r = v_hat.rsqrt()         [VRSQRT14PD + 2 NR inside magetypes → ~52-53 bits]
+//     sqrt_v = v_hat * r        [FMA-fused with the +eps]
 //     denom = sqrt_v + eps
-//     rd = 1/denom              [VRCP14PD + 1 NR → ~28 bits + 1 NR → f64]
+//     rd = denom.recip()        [VRCP14PD + 2 NR inside magetypes → ~52-53 bits]
 //   w -= (lr * m_hat) * rd
+//
+// PRECISION PROVENANCE (do not re-learn — this failed for six weeks):
+// magetypes' `rsqrt_approx()`/`rcp_approx()` changed meaning in archmage
+// commit 34f34b2 (2026-06-20, released in the 0.9.2x line): they went from
+// "hardware estimate + 1 Newton-Raphson (~28 bits)" to the RAW 14-bit
+// hardware estimate, with the refined versions moving to `rsqrt()`/`recip()`
+// (2 NR steps, precision-tested by magetypes/tests/reciprocal_precision.rs).
+// This kernel was written 2026-05-17 against the OLD contract and hand-rolled
+// ONE extra NR step on top of each `_approx`, targeting ~56 bits. After the
+// contract change the same code silently topped out at ~28 bits (~1e-8 step
+// error), which `rsqrt_path_precision_vs_scalar` catches as max_rel 1.7e-5
+// (the ~1e-8 step error is amplified ~2e3× by cancellation at indices where
+// `w - step` lands near zero). Fix: consume the full-precision `rsqrt()` /
+// `recip()` and let magetypes own the refinement. If you ever swap these
+// back to `_approx` + hand-rolled NR, re-derive the step-error budget first.
+//
+// Domain note (pre-existing, unchanged): `rsqrt(0)` is Inf/NaN-producing —
+// the sqrt-based paths survive v_hat == 0 via `sqrt(0) + eps`, this one does
+// not. Fine for Adam (v is an EMA of g² with positive init in every caller),
+// but do not lift this kernel into a context where v_hat can be exactly 0.
 
 #[cfg(target_arch = "x86_64")]
 #[arcane]
@@ -236,9 +258,6 @@ pub fn adam_update_inner_v4_rsqrt(token: archmage::X64V4Token, args: &mut AdamUp
     let lr_v = f64x8::splat(token, args.lr);
     let eps_v = f64x8::splat(token, args.eps);
     let zero_v = f64x8::zero(token);
-    let half = f64x8::splat(token, 0.5);
-    let three = f64x8::splat(token, 3.0);
-    let two = f64x8::splat(token, 2.0);
 
     let n = args.w.len();
     let tail_len = n % 8;
@@ -265,23 +284,18 @@ pub fn adam_update_inner_v4_rsqrt(token: archmage::X64V4Token, args: &mut AdamUp
         let m_hat = m_new * inv_bc1_v;
         let v_hat = v_new * inv_bc2_v;
 
-        // rsqrt(v_hat) — VRSQRT14PD + 1 NR baked into rsqrt_approx →
-        // ~28 bits. Apply a SECOND NR iteration for ~56 bits (exceeds
-        // f64 mantissa).
-        let r0 = v_hat.rsqrt_approx();
-        let r0sq = r0 * r0;
-        let three_minus = three - v_hat * r0sq;
-        let r1 = (half * r0) * three_minus;
-        // r1 is now precise to ~56 bits.
+        // Full-precision reciprocal sqrt: VRSQRT14PD + 2 Newton-Raphson
+        // steps inside magetypes' `rsqrt()` (~52-53 bits — see the
+        // PRECISION PROVENANCE block above; `rsqrt_approx()` is the RAW
+        // 14-bit estimate since magetypes 0.9.2x and must not be used
+        // here with fewer than 2 refinement steps).
+        let r1 = v_hat.rsqrt();
 
-        // sqrt(v_hat) = v_hat * rsqrt(v_hat). Then + eps.
+        // sqrt(v_hat) = v_hat * rsqrt(v_hat), fused with the + eps.
         let denom = v_hat.mul_add(r1, eps_v);
 
-        // 1/denom — VRCP14PD + 1 NR baked into rcp_approx → ~28 bits.
-        // One more NR for f64 precision.
-        let rd0 = denom.rcp_approx();
-        let two_minus = two - denom * rd0;
-        let rd = rd0 * two_minus;
+        // Full-precision reciprocal: VRCP14PD + 2 NR inside `recip()`.
+        let rd = denom.recip();
 
         let w_new = w - (lr_v * m_hat) * rd;
 
