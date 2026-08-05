@@ -148,7 +148,9 @@ fn flat_matches_rows_on_generated_parquet() {
         .collect();
     let f3: Vec<i32> = (0..n_rows).map(|_| (lcg(&mut st) * 255.0) as i32).collect();
     let f4: Vec<u64> = (0..n_rows).map(|_| (lcg(&mut st) * 1e9) as u64).collect();
-    let f5: Vec<u32> = (0..n_rows).map(|_| (lcg(&mut st) * 4096.0) as u32).collect();
+    let f5: Vec<u32> = (0..n_rows)
+        .map(|_| (lcg(&mut st) * 4096.0) as u32)
+        .collect();
     let f6: Vec<f64> = (0..n_rows).map(|_| lcg(&mut st) * 1e-6).collect();
     let target: Vec<f64> = (0..n_rows).map(|_| lcg(&mut st) * 100.0).collect();
     let refs: Vec<String> = (0..n_rows).map(|i| format!("ref_{:03}", i % 37)).collect();
