@@ -1,0 +1,14 @@
+# appendix Q echo-verify (2026-08-05): hdrp1_seed.sh vs the L9 owner, seed 6101
+# diff 1: HDRP1 argv vs WAVE10_ECHO L9 argv (same seed) — expect ONLY the two added --group pairs + the --out value
+20a21,24
+> --group
+> hdr:/mnt/v/output/zensim/hdr944-leg/hdr_v3mix944_traindigits_2026-08-03.parquet:1.2:0.0:both
+> --group
+> hdr_val:/mnt/v/output/zensim/hdr944-leg/hdr_v3mix944_valdigits_2026-08-03.parquet:0.0:2.0:both
+167c171
+< /home/lilith/tmp/hdrp1/echo-scratch/W10L9_s6101.bin
+---
+> /mnt/v/output/zensim/bakes/hdrp1/Q_hdr944_s6101.bin
+# token counts:
+L9: 167
+hdrp1: 171
