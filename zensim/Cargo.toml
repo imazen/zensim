@@ -26,6 +26,7 @@ include = [
     "weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin",
     "weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin",
     "weights/b_sdr_linear_cid80_anchored_2026-07-04.bin",
+    "weights/c_sdr_mlp944_corrmix_2026-08-05.bin",
     "weights/manifests/v47_strict_qat.toml",
 ]
 
@@ -136,6 +137,9 @@ zenpng = { workspace = true }
 zenpixels = { workspace = true }
 zenresize = { workspace = true }
 zenjpeg = { version = "0.8.4", default-features = false, features = ["decoder"] }
+# Pins the shipped Profile C weight bytes (profile_c_tests::weight_sha256_pinned).
+# Same version zensim-validate already uses in this workspace.
+sha2 = "0.11.0"
 
 [lints.clippy]
 uninlined_format_args = "allow"

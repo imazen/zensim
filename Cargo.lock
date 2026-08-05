@@ -5754,6 +5754,7 @@ dependencies = [
  "rayon",
  "rgb",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror",
  "zenbench",
  "zenjpeg",

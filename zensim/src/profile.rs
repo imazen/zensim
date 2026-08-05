@@ -114,6 +114,51 @@ pub enum ZensimProfile {
     /// (rank agreement 0.72, unbounded extrapolation); route SDR to
     /// [`ZensimProfile::B`] / [`ZensimProfile::A`].
     BHdr,
+    /// **`C` — generation-C SDR profile (external name `zensim-c`), the
+    /// SOTA-944 campaign's wave-11 ship candidate.** A 944-input MLP
+    /// (folded-720+append+append2 feature regime) from the k=8-confirmed
+    /// corrected-mix recipe — the first shipped bake trained after the
+    /// KADID orientation fix and the first shipped **dead-column-pruned**
+    /// bake (caller width 944, internal layer-0 width 667 via
+    /// `FeatureTransform::Drop`; the runtime sizes feature vectors by
+    /// `Model::caller_input_width()`, never `n_inputs()`).
+    ///
+    /// Headline panel (bake_verdict `--regime 944`, committed verdict):
+    /// CID22 0.8867, KonJND |0.4988|, LIVE 0.9604, CSIQ 0.9331, nonphoto
+    /// 0.9251, imazen26 0.9215, HF-NL per-ref 0.7334, dial monotonicity
+    /// 99.32% / 0.0% tied **in dial units** (the first packaged 944 cell
+    /// to hold the ≥93% dial bar), M3a coherence 0.862 (GOLD ≥0.85),
+    /// corruption via the *companion head* `corrhead944_s13` (pass_q20
+    /// 0.793 — the 944 dial's own corruption ordering is broken by
+    /// design; the head is the owner). Balanced-profile floors 7/8 (the
+    /// miss: CID22 B9 band tail 0.139 vs ≥0.15). vs [`Self::B`]: `C`
+    /// takes CID22/nonphoto/LIVE/dial-mono/M3a and carries the
+    /// corruption head; `B` keeps KonJND (0.519 vs 0.499) and HF-NL
+    /// per-ref (0.825 vs 0.733). **`B` remains the default /
+    /// [`Self::codec_target`].** Known honest caveat: G-RANGE FAILs on
+    /// the CID22-val anchor domain (4.50% above-knot raw mass; near-top
+    /// saturation — anchor-densification lever registered, untested).
+    ///
+    /// **944-regime scoring contract.** `C` consumes the folded-944
+    /// feature layout, which the standard 372-feature
+    /// [`Zensim::compute`](crate::Zensim::compute) pipeline does not
+    /// produce — `compute` on a non-identical pair returns
+    /// [`ModelForwardFailed`](crate::ZensimError::ModelForwardFailed)
+    /// (byte-identical pairs still short-circuit to 100). Score `C` by
+    /// extracting folded-944 features and forwarding them, exactly as
+    /// the eval/loop tooling does:
+    /// `Zensim::compute_folded720_append2_features` (or the fused
+    /// `compute_folded944_score_and_attribution` session entry), both
+    /// behind the `feature-regime-v2` feature, then
+    /// [`crate::score_features_with_profile`]`(ZensimProfile::C, …)`.
+    /// **SDR content only** — `C` is structurally SDR (its HDR-gated
+    /// append2 slots are pruned); route HDR content to
+    /// [`Self::BHdr`] explicitly.
+    ///
+    /// Full provenance, training data shas, exact reproduction chain
+    /// and verification gates: `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`
+    /// + the mapping table in `docs/CODEC_TARGET_METRIC.md`.
+    C,
     /// **Externally-defined profile** — an escape hatch for profiles
     /// constructed outside this crate (for example the unpublished
     /// `zensim-experimental` crate, which preserves the historical
@@ -254,6 +299,7 @@ impl ZensimProfile {
             Self::PreviewV0_2 => "zensim-preview-v0.2",
             Self::B => "zensim-b",
             Self::BHdr => "zensim-b-hdr",
+            Self::C => "zensim-c",
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
             // Experimental / historical profiles live in `zensim-experimental`
@@ -274,8 +320,11 @@ impl ZensimProfile {
     /// (e.g. peak-nits thresholds) would flip models across a threshold
     /// with ~5-10pt cross-model per-pair scatter — a visible seam
     /// (measured 2026-07-04, benchmarks/provenance_best_results doc).
-    /// `A` and `BHdr` are unrouted (A has one bake; BHdr is the explicit
-    /// HDR handle for callers who want no routing).
+    /// `A`, `BHdr` and `C` are unrouted (A has one bake; BHdr is the
+    /// explicit HDR handle for callers who want no routing; `C` is
+    /// structurally SDR-only — on the PU path its 944-wide bake cannot
+    /// consume the 372-wide PU features, so scoring fails loud instead
+    /// of silently borrowing another generation's HDR weights).
     pub(crate) fn params_pu_linear(&self) -> &'static ProfileParams {
         match self {
             Self::B => &PROFILE_B_HDR,
@@ -293,6 +342,7 @@ impl ZensimProfile {
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
             Self::B => &PROFILE_B,
             Self::BHdr => &PROFILE_B_HDR,
+            Self::C => &PROFILE_C,
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
             // Experimental / historical profiles carry their own
@@ -1003,6 +1053,60 @@ static PROFILE_B_HDR: ProfileParams = ProfileParams {
     extended_features: true,
     compute_iw_features: true,
     soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// `ZensimProfile::C` bake bytes — internal `W10L9_s4003_packed`
+/// (`c_sdr_mlp944_corrmix_2026-08-05.bin`, 165,696 B, sha256
+/// `1a2c8d522fed8034b279ff018aa052f19d0b9f419f12cf22cca303a0b4abb7f4`).
+/// The SOTA-944 wave-11 battery-selected cell: 944 → 128 → 1 MLP
+/// (f16 + zerobias-0.005, LeakyReLU), trained seed 4003 on the 10-group
+/// corrected mix (corrected `ext_kadid`, KonJND-BPG leg, teacher tables,
+/// `tkadis` dropped), dial-packaged (`bake_dial_refit add-spline` on
+/// `anchor944_dial.parquet`) then packed with dead-column pruning
+/// (944 caller lines → 667 internal; 277 all-class-1 drops, identity
+/// gate BIT-identical on 2,035 anchor rows). Carries its full
+/// `zentrain.repro` (input shas + seed + argv) embedded in the bake
+/// metadata. Selection: `freeze_check --select` over the k=8 family
+/// (7/8 floors, sel_comp 0.9579, M3a 0.8626 GOLD tie-break).
+/// Records: campaign appendix K (`benchmarks/sota944_campaign_2026-08-03.md`)
+/// + `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`. The pinning test
+/// `profile_c_tests::weight_sha256_pinned` fails loud on any silent
+/// byte swap of this file.
+pub(crate) fn mlp_bake_c_corrmix_944() -> &'static [u8] {
+    include_bytes!("../weights/c_sdr_mlp944_corrmix_2026-08-05.bin")
+}
+
+/// Generation-C SDR profile params. The bake is a 944-input (pruned to
+/// 667 internal) MLP over the folded-720+append+append2 feature regime —
+/// NOT the 372-feature v1 pipeline — so the `extended_features` /
+/// `compute_iw_features` flags below only shape the legacy `compute()`
+/// path's extraction (whose 372-wide vector the 944 bake refuses,
+/// failing loud). Full-fidelity scoring goes through the folded-944
+/// extraction + [`crate::score_features_with_profile`]; see the
+/// [`ZensimProfile::C`] docs for the contract.
+static PROFILE_C: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    // The bake carries its own monotone PCHIP dial spline
+    // (`zentrain.output_calibration_spline`, refit on the packed net);
+    // raw output is dial-honest after the spline applies.
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_c_corrmix_944),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    // Negative dial tail is part of the contract (pack --neg-tail):
+    // worse-than-worst-codec inputs score below 0 instead of tying at 0.
     extrapolate_score: true,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
@@ -1770,5 +1874,162 @@ mod linearf32_sdr_not_hdr_tests {
                 .score();
             assert!((s - 100.0).abs() < 1e-9);
         }
+    }
+}
+
+#[cfg(test)]
+mod profile_c_tests {
+    use super::*;
+    use crate::source::RgbSlice;
+    use crate::{Zensim, ZensimError};
+
+    /// Deterministic SDR test pair: a structured gradient+texture image
+    /// and a distorted copy (every 7th byte attenuated). Same shape as
+    /// the sibling profile test fixtures.
+    fn sdr_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+        let mut src = vec![[0u8; 3]; w * h];
+        for (i, px) in src.iter_mut().enumerate() {
+            let x = i % w;
+            let y = i / w;
+            px[0] = ((x * 255) / w.max(1)) as u8;
+            px[1] = ((y * 255) / h.max(1)) as u8;
+            px[2] = (((x ^ y) * 7) % 256) as u8;
+        }
+        let mut dst = src.clone();
+        for (i, px) in dst.iter_mut().enumerate() {
+            if i % 7 == 0 {
+                px[0] = (px[0] as u16 * 3 / 4) as u8;
+                px[1] = px[1].saturating_add(9);
+            }
+        }
+        (src, dst)
+    }
+
+    /// The shipped `C` weight file is pinned by sha256 — a silent byte
+    /// swap of `c_sdr_mlp944_corrmix_2026-08-05.bin` fails this test
+    /// loudly. Expected digest = the wave-11 battery's committed
+    /// `W10L9_s4003_packed.bin` (campaign appendix K.R, verdict
+    /// `bake_sha256`, Tower-mirror spot-check — all the same bytes).
+    #[test]
+    fn weight_sha256_pinned() {
+        use sha2::{Digest, Sha256};
+        let bytes = mlp_bake_c_corrmix_944();
+        assert_eq!(bytes.len(), 165_696, "C weight byte length changed");
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let digest = hasher.finalize();
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex, "1a2c8d522fed8034b279ff018aa052f19d0b9f419f12cf22cca303a0b4abb7f4",
+            "C weight bytes do not match the pinned wave-11 W10L9_s4003_packed sha256"
+        );
+    }
+
+    /// `C` is the first PRUNED shipped bake: the caller-facing width is
+    /// 944 (the folded-944 feature layout) while the internal layer-0
+    /// width is 667 (`FeatureTransform::Drop` on the dead raw lines).
+    /// The runtime MUST size feature vectors by `caller_input_width()`,
+    /// never `n_inputs()` (metric.rs fix `ae852b1b`).
+    #[test]
+    fn bake_loads_caller_width_944_internal_667() {
+        let model = crate::mlp::Model::from_bytes(mlp_bake_c_corrmix_944())
+            .expect("shipped C bake must parse");
+        assert_eq!(model.caller_input_width(), 944, "caller-facing width");
+        assert_eq!(model.n_inputs(), 667, "internal (pruned) layer-0 width");
+        assert_eq!(model.n_outputs(), 1);
+        assert_eq!(model.n_layers(), 2);
+    }
+
+    /// Standard identity fixture: byte-identical inputs score exactly
+    /// 100 through the `is_identical` short-circuit (profile-independent
+    /// contract; mirrors the B/BHdr identity tests).
+    #[test]
+    fn identity_fixture_scores_100() {
+        let (src, _) = sdr_pair(64, 64);
+        let z = Zensim::new(ZensimProfile::C);
+        let score = z
+            .compute(&RgbSlice::new(&src, 64, 64), &RgbSlice::new(&src, 64, 64))
+            .expect("identity compute")
+            .score();
+        assert!(
+            (score - 100.0).abs() < 1e-9,
+            "identity must score 100, got {score}"
+        );
+    }
+
+    /// Pin the documented limitation: the standard 372-feature
+    /// `compute()` pipeline cannot feed the 944-wide `C` bake, so a
+    /// non-identical pair fails LOUD (`ModelForwardFailed`) instead of
+    /// silently scoring a prefix. Full-fidelity scoring goes through the
+    /// folded-944 extraction + `score_features_with_profile` (see the
+    /// `ZensimProfile::C` docs).
+    #[test]
+    fn compute_on_non_identical_pair_fails_loud() {
+        let (src, dst) = sdr_pair(64, 64);
+        let z = Zensim::new(ZensimProfile::C);
+        let err = z
+            .compute(&RgbSlice::new(&src, 64, 64), &RgbSlice::new(&dst, 64, 64))
+            .expect_err("372-wide extraction must not silently feed a 944 bake");
+        assert!(
+            matches!(err, ZensimError::ModelForwardFailed { .. }),
+            "expected ModelForwardFailed, got {err:?}"
+        );
+    }
+
+    /// Default-build forward smoke over the real shipped bytes: a
+    /// caller-width (944) vector loads, transforms (winsor / signed-cbrt
+    /// / 277 Drop lines), standardizes, forwards, and lands on the dial
+    /// spline — finite output, capped at ≤100 by the product runtime.
+    #[test]
+    fn forward_zero_vector_is_finite() {
+        let features = vec![0.0f64; 944];
+        let score = crate::score_features_with_profile(ZensimProfile::C, &features, 64, 64)
+            .expect("caller-width vector must forward");
+        assert!(score.is_finite(), "got {score}");
+        assert!(score <= 100.0 + 1e-9, "runtime caps at 100, got {score}");
+    }
+
+    /// End-to-end 944-regime sanity on the real extraction: identical
+    /// pair scores high (>= 90) and strictly above a visibly distorted
+    /// pair. This is the profile's actual scoring contract (folded-944
+    /// features -> score_features_with_profile), the same call shape
+    /// bake_verdict / the jxl loop use.
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn folded944_end_to_end_scores_sanely() {
+        let (src, dst) = sdr_pair(128, 128);
+        let z = Zensim::new(ZensimProfile::C);
+        let same = RgbSlice::new(&src, 128, 128);
+        let iden = z
+            .compute_folded720_append2_features(&same, &same)
+            .expect("folded-944 extraction (identical)");
+        assert_eq!(iden.features().len(), 944);
+        let s_iden =
+            crate::score_features_with_profile(ZensimProfile::C, iden.features(), 128, 128)
+                .expect("forward identical");
+        let distorted = RgbSlice::new(&dst, 128, 128);
+        let dist = z
+            .compute_folded720_append2_features(&same, &distorted)
+            .expect("folded-944 extraction (distorted)");
+        let s_dist =
+            crate::score_features_with_profile(ZensimProfile::C, dist.features(), 128, 128)
+                .expect("forward distorted");
+        assert!(s_iden.is_finite() && s_dist.is_finite());
+        // The folded-944 regime carries REFERENCE-ONLY conditioner slots
+        // (content descriptors), so an identical pair is NOT the zero
+        // vector and the MLP reads content-conditioned quality: on this
+        // deliberately off-manifold synthetic xor-texture the identical
+        // pair measures 87.87 (real-content identity sits near the dial
+        // top; dial p95 = 96.7 on the 944 dial grid). The floor below is
+        // a sanity bound against sign flips / garbage forwards, not a
+        // calibration claim.
+        assert!(
+            s_iden >= 80.0 && s_iden <= 100.0 + 1e-9,
+            "identical-pair 944 features must land in the sane high band, got {s_iden}"
+        );
+        assert!(
+            s_dist < s_iden,
+            "distorted must score below identical ({s_dist} !< {s_iden})"
+        );
     }
 }

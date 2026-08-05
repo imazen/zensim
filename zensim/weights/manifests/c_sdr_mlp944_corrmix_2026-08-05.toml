@@ -1,0 +1,47 @@
+# Manifest for the shipped `zensim-c` (SDR, 944-regime) bake — the SOTA-944
+# wave-11 battery-selected cell, internal `W10L9_s4003_packed`.
+# Schema: zensim/weights/manifests/README.md
+#
+# NOTE ON SCOPE — no [training] section is transcribed here, deliberately.
+# C *is* a `zensim_mlp_train` run, but its exact recipe (10 groups with
+# per-group loss modes + 82 --feature-transform flags + seed 4003) is
+# EMBEDDED IN THE BAKE ITSELF as the mandatory `zentrain.repro` metadata
+# (input paths + sha256s + row counts + full argv + best_val), and is
+# additionally committed as the sidecar
+# /mnt/v/output/zensim/bakes/sota944/bakes/W10L9_s4003.bin.spec.json
+# (R2: s3://zentrain/profiles/C-2026-08-05/W10L9_s4003.bin.spec.json).
+# Re-typing 170 argv tokens into TOML would create a second copy that can
+# drift from the authoritative embedded one — the exact incident class the
+# manifest system exists to prevent. The [reproduce] section points at the
+# recipe of record; docs/PROFILE_C_REPRODUCTION_2026-08-05.md walks it.
+
+[bake]
+name               = "zensim-c"
+internal_version   = "W10L9_s4003_packed (sota944 wave-11 corrected-mix, seed 4003)"
+file               = "../c_sdr_mlp944_corrmix_2026-08-05.bin"
+sha256             = "1a2c8d522fed8034b279ff018aa052f19d0b9f419f12cf22cca303a0b4abb7f4"
+file_bytes         = 165696
+n_inputs           = 944
+arch               = "MLP 944 -> 128 -> 1 (LeakyReLU, f16 + zerobias-0.005) over the folded-720+append+append2 regime; DEAD-COLUMN-PRUNED: caller width 944 / internal layer-0 width 667 (277 FeatureTransform::Drop lines, all class-1); monotone PCHIP dial spline refit on the packed net (add-spline then pack --neg-tail, QUANTIZE-then-CALIBRATE)."
+output_disposition = "extrapolate_score"        # neg-tail open below 0; runtime caps at 100 above the top knot
+date               = "2026-08-05"
+
+[reproduce]
+command   = "see docs/PROFILE_C_REPRODUCTION_2026-08-05.md section 4 (train seed 4003 -> add-spline -> pack --neg-tail)"
+asserts   = "raw 6b483280… (509,913 B) -> dial 411d6db5… (390,449 B) -> packed 1a2c8d52… (165,696 B); best_val 0.9226384934404903 f64-exact; verify via scripts/verify_bake_identity.sh (whole-file cmp needs the same --out string)"
+requires  = "the 10-group corrected mix (ext944-canonical-2026-08-01 legs incl. CORRECTED ext_kadid 286f1b23… + konjnd_bpg legs; tbig_944_200k; kadis_944_ssim2_50k; safesyn/tbig teacher tables — NO tkadis) + anchor944_dial.parquet d74d36ef…; R2 URLs in the repro doc section 3"
+lineage   = "wave-10 arm L9 (corrected KADID + tkadis dropped, 176c4268/177ce09c) --k=8 seed depth + freeze_check --select--> W10L9_s4003 (78418478) --add-spline(anchor944_dial)--> _dial --pack --neg-tail (prune 944->667)--> SHIPPED"
+entrypoint = "zensim_mlp_train (recipe of record = the bake's embedded zentrain.repro; zenpredict inspect <bake> | metadata key zentrain.repro) + zensim-validate bake_dial_refit (add-spline | pack)"
+
+[docs]
+methodology = "docs/PROFILE_C_REPRODUCTION_2026-08-05.md"
+campaign    = "benchmarks/sota944_campaign_2026-08-03.md"   # appendices H (wave 10), K/K.R (wave 11 + battery), N (loop)
+wave_tables = "benchmarks/wave11/wave11_cells_2026-08-05.tsv"
+selection   = "benchmarks/wave11/wave11_select_2026-08-05.txt"
+
+# Verdict at ship time (bake_verdict --regime 944 on the packed bytes;
+# committed W10L9_s4003_packed.full.json). Cited, not re-derived here.
+[eval]
+cid22_srocc  = 0.88672
+konjnd_srocc = 0.49883
+notes = "LIVE 0.96043, CSIQ 0.93312, nonphoto 0.92512, imazen26 0.92147, HF-NL per-ref 0.7334, dial mono 99.32%/0.0% tied in DIAL units, M3a 0.86238 GOLD (post-299ccc8c), corruption via companion head corrhead944_s13 pass_q20 0.79315, balanced floors 7/8 (F8 B9 tail 0.139 < 0.15 the only miss). C-vs-B is a TRADE: C takes CID22/nonphoto/LIVE/dial-mono/M3a + the corruption head; B keeps KonJND (0.5186) and HF-NL per-ref (0.8252). B remains the default."
