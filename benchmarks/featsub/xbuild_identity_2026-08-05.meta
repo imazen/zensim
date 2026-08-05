@@ -1,0 +1,16 @@
+# Cross-build identity gate — appendix J recovery (2026-08-05)
+# The OOM crash killed the queue mid-sweep; the trainer was rebuilt at main
+# 031bd261 (trainperf flat-buffer memory fix, ~11.3 GB -> ~7.0 GB/lane measured
+# here via /proc VmRSS). Before mixing builds inside one sweep, PILOT1:2501
+# (12-epoch group-L1 pilot, lambda=1) was re-trained on the NEW build:
+#   best_val: 0.4859376119031136 == old   (exact f64 equality)
+#   live_l0_rows: 458 == old
+#   whole-file sha: DIFFERS (expected: embedded zentrain.repro carries argv
+#     --out path, cwd, timestamp — the wave-9 395-byte provenance precedent)
+#   after `bake_dial_refit strip --key zentrain.repro` on BOTH:
+#     sha256 4b1e82aa212d3ca360e0... == 4b1e82aa212d3ca360e0...
+#     -> WEIGHT PAYLOAD BYTE-IDENTICAL ACROSS BUILDS
+# So pre-crash and post-crash cells are one homogeneous population, including
+# through the group-L1 proximal path (not just the plain path the trainperf
+# gate covered). Bakes: /mnt/v/output/zensim/bakes/featsub/PILOT1_s2501.bin
+# (old build) vs ~/tmp/featsub/xbuild/PILOT1_s2501.bin (new build, scratch).
