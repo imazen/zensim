@@ -6522,3 +6522,278 @@ quietly dropped later)
 
 Statistics come from `zenstats` via `scripts/lib/zen_stats` only — no stat math is
 implemented in the audit tooling (no-duplication rule).
+
+
+# REGISTERED APPENDIX H — WAVE 10: FIX THE INVERTED KADID TARGET, THEN LEAVE-ONE-OUT THE MIX (2026-08-05)
+
+### (committed and PUSHED BEFORE any table is rebuilt, any trainer is launched, and any wave-10 number exists. Every §H.1 prior fact is already committed to `origin/main` — Appendix F, Appendix G, and `benchmarks/data_integrity_audit_2026-08-04.md` — which makes those facts INPUTS to this registration, not results of it.)
+
+## H.0 Why this wave exists
+
+Two committed measurements, neither acted on:
+
+1. **The KADID target is inverted in the whole ext lineage** (Appendix F, commit
+   `730a386e`). `ext_kadid.parquet` stores `human_score = (5 − dmos)/4`; the canonical
+   root stores `(dmos − 1)/4`; the 349,800 raw crowdsourced DCR ratings say the latter
+   is correct. So **7.87 % of every epoch's pairs currently teach a backwards signal**,
+   with a measured dose–response (wave-8: kadid weight 0.5 → signed SROCC −0.457 at
+   1.5 → −0.925). Appendix F deliberately stopped short of rebuilding the table,
+   registering it as a conscious act. **This wave is that act.**
+
+2. **The weights ARE the mix, and the mix has never been varied.** Appendix G / the
+   integrity audit derived from the trainer source
+   (`zensim-validate/src/mlp_train/mod.rs`) that the group CDF is
+   `train_w / Σ train_w` and both row indices are then drawn **uniformly within the
+   chosen group** — so expected pair share is **independent of row count**. The
+   incumbent's ten training legs therefore consume:
+
+   | leg | rows | row share | **pair share** | ratio |
+   |---|---:|---:|---:|---:|
+   | konjnd_bpg | 8,060 | 1.03 % | **18.90 %** | 18.3× |
+   | cid22_train | 17,611 | 2.26 % | **15.75 %** | 7.0× |
+   | safesyn | 111,068 | 14.25 % | 15.75 % | 1.1× |
+   | tid | 3,000 | 0.39 % | 7.86 % | **20.4×** |
+   | kadid | 10,125 | 1.30 % | 7.80 % | 6.0× |
+   | bigcodec | 208,169 | 26.71 % | 7.87 % | **0.29×** |
+   | ttbig | 208,169 | 26.71 % | 7.87 % | **0.29×** |
+   | tsafesyn | 111,068 | 14.25 % | 7.87 % | 0.55× |
+   | tkadis | 50,000 | 6.42 % | 7.87 % | 1.23× |
+   | kadis | 50,000 | 6.42 % | 2.36 % | 0.37× |
+
+   The extremes are **70× apart** in oversampling. **These ten numbers have never been
+   varied against held-out score anywhere in this campaign.** Appendix G closed on
+   registered outcome G.3.5 — *"the mix-composition question is UNANSWERED and needs a
+   weight sweep"*.
+
+3. **`tkadis` contradicts its own base leg** (audit F-1): signed SROCC **+0.2485** with
+   its `kadis` twin over identical feature rows, **55.05 %** of rows past |Δ| > 0.5,
+   while outweighing that base leg **3.3×**. The two benign explanations (clip damage;
+   the shared affine) were falsified in the audit.
+
+4. **Bulk removal is measured-bad.** Wave 8 dropped five legs at once and collapsed
+   CSIQ/LIVE at all six breadth seeds (outcome (c), `af58048b`). Whatever the mix
+   answer is, it has to be found **one leg at a time**.
+
+## H.1 PART 1 — the KADID target correction (registered before it is built)
+
+**The transform.** For the ext lineage only, `human_score := 1 − human_score`. This is
+an exact algebraic identity, not a re-derivation: `1 − (5 − dmos)/4 = (dmos − 1)/4`.
+Features are **untouched**; only the target column changes. Every other column
+(`ref_basename`, `f0..fN`) is carried through byte-identically, same dtype (`double`),
+same single row group, same ZSTD codec.
+
+**Which roots.** All three ext roots — `ext720-canonical-2026-07-22`,
+`ext924-canonical-2026-07-27`, `ext944-canonical-2026-08-01`. All three carry the
+identical schema (`ref_basename`, `human_score`, `f0..fN`, all `double`, ZSTD, 1 row
+group, 10,125 rows), so the transform is trivially the same for all three; only the 944
+root is used by this wave's training.
+
+**File placement, and the hazard it creates (registered, not discovered later).** The
+corrected table takes the canonical name `ext_kadid.parquet`; the inverted original is
+**preserved, never deleted**, as `ext_kadid_INVERTED_2026-08-04.parquet` in the same
+directory, byte-identical (sha256 recorded in the manifest and equal to the sha in every
+affected bake's embedded `zentrain.repro`).
+
+Registered rationale: a gate nobody can turn green is a gate that gets ignored — leaving
+`ext_kadid.parquet` inverted means every future recipe must *remember* to override the
+path, which is precisely the failure mode that let this bug live six weeks.
+
+Registered hazard, stated up front: **re-running any pre-2026-08-05 bake's embedded
+repro argv verbatim will now train against the CORRECTED table and will NOT reproduce
+that bake.** The repro's `sha256` field is the discriminator, and the substitution
+needed (`ext_kadid.parquet` → `ext_kadid_INVERTED_2026-08-04.parquet`) is recorded in
+the dir manifest, in `eval_annotations.json`, and in `docs/DATA_SPLITS.md`.
+
+**Gate.** `scripts/canonical_corpus/check_target_orientation.py` must flip that root's
+kadid row from `INVERTED −0.582360` to `OK +0.582360` — the same magnitude with the
+sign reversed is the expected result, because negating a target exactly negates a
+Spearman correlation. `check_table_integrity.py` must report the rebuilt table PASS on
+A1/A2/A5/B1/B2/B4/C1 with **no new** finding relative to the pre-rebuild run.
+
+**What is NOT done (registered so it cannot be quietly done anyway).** No existing bake
+is retrained, re-baked, re-verdicted with a corrected number, or removed from the board.
+Bakes trained on the inverted column **stay as they are and are annotated**. This
+changes the target for FUTURE training only.
+
+## H.2 PART 2 — the leave-one-out sweep (design frozen)
+
+**Base recipe** = the incumbent arm-H recipe, taken from `H_co3abpg_s2507.bin.spec.json`'s
+embedded `zentrain.repro` **with the corrected KADID table substituted and nothing else
+changed**. The driver (`scripts/wave10_seed.sh`) obtains its argv by asking the committed
+`scripts/wave7_armH_seed.sh` for arm H's argv (`WAVE7_ECHO=1`) and then editing exactly
+two things: the `kadid` group's table path, and `--out`. Token-for-token identity with
+arm H is therefore **structural**, and is additionally **echo-verified and recorded** —
+the registered pre-flight is a token diff of `L0` against `wave7_armH_seed.sh` showing
+exactly those two differences and no others.
+
+| arm | drops | seeds | k |
+|---|---|---|---|
+| **L0** | — (baseline, corrected KADID) | 4001, 4003, 4007 | 3 |
+| L1 | `safesyn` | 4001, 4003 | 2 |
+| L2 | `cid22_train` | 4001, 4003 | 2 |
+| L3 | `kadid` | 4001, 4003 | 2 |
+| L4 | `tid` | 4001, 4003 | 2 |
+| L5 | `bigcodec` | 4001, 4003 | 2 |
+| L6 | `kadis` | 4001, 4003 | 2 |
+| L7 | `tsafesyn` | 4001, 4003 | 2 |
+| L8 | `ttbig` | 4001, 4003 | 2 |
+| L9 | `tkadis` | 4001, 4003 | 2 |
+| L10 | `konjnd_bpg` | 4001, 4003 | 2 |
+
+**23 runs.** Seeds `{4001, 4003, 4007}` are a fresh family, disjoint from every seed used
+anywhere in this campaign (1301–1409, 2501–2507, 3101–3107, 3301–3307). Seeds are
+**shared across arms**, which makes every LOO comparison **paired by seed**.
+
+"Drop" means the whole `--group` token is removed. `konjnd_bpg_val` (`train_w = 0.0`)
+is a validation-only leg and is present in **every** arm including L10; it is not a
+droppable leg and is not one of the ten.
+
+**Renormalization is inherent and is reported, not corrected for.** Removing a leg
+re-normalizes every surviving leg's pair share. The exact per-arm share table is frozen
+here, computed from the registered weights (Σ`train_w` = 6.35 in L0):
+
+| arm | dropped | Σw | safesyn | cid22_train | kadid | tid | bigcodec | kadis | tsafesyn | ttbig | tkadis | konjnd_bpg |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| L0 | — | 6.35 | 15.75 | 15.75 | 7.87 | 7.87 | 7.87 | 2.36 | 7.87 | 7.87 | 7.87 | 18.90 |
+| L1 | safesyn | 5.35 | — | 18.69 | 9.35 | 9.35 | 9.35 | 2.80 | 9.35 | 9.35 | 9.35 | 22.43 |
+| L2 | cid22_train | 5.35 | 18.69 | — | 9.35 | 9.35 | 9.35 | 2.80 | 9.35 | 9.35 | 9.35 | 22.43 |
+| L3 | kadid | 5.85 | 17.09 | 17.09 | — | 8.55 | 8.55 | 2.56 | 8.55 | 8.55 | 8.55 | 20.51 |
+| L4 | tid | 5.85 | 17.09 | 17.09 | 8.55 | — | 8.55 | 2.56 | 8.55 | 8.55 | 8.55 | 20.51 |
+| L5 | bigcodec | 5.85 | 17.09 | 17.09 | 8.55 | 8.55 | — | 2.56 | 8.55 | 8.55 | 8.55 | 20.51 |
+| L6 | kadis | 6.20 | 16.13 | 16.13 | 8.06 | 8.06 | 8.06 | — | 8.06 | 8.06 | 8.06 | 19.35 |
+| L7 | tsafesyn | 5.85 | 17.09 | 17.09 | 8.55 | 8.55 | 8.55 | 2.56 | — | 8.55 | 8.55 | 20.51 |
+| L8 | ttbig | 5.85 | 17.09 | 17.09 | 8.55 | 8.55 | 8.55 | 2.56 | 8.55 | — | 8.55 | 20.51 |
+| L9 | tkadis | 5.85 | 17.09 | 17.09 | 8.55 | 8.55 | 8.55 | 2.56 | 8.55 | 8.55 | — | 20.51 |
+| L10 | konjnd_bpg | 5.15 | 19.42 | 19.42 | 9.71 | 9.71 | 9.71 | 2.91 | 9.71 | 9.71 | 9.71 | — |
+
+(All values are % of drawn pairs. They are arithmetic from the registered weights, so
+this table is an INPUT, not a result.)
+
+## H.3 Endpoints — the full profile, no single-axis gating
+
+Every arm reports, from `bake_verdict --regime 944` + `run_full_eval` (the frozen §0
+invocations, unchanged):
+
+`cid22` · `konjnd` · `nonphoto` · `csiq` · `live` · `aic3` · `aic4` · `imazen26` ·
+`sdr25` · **`kadid` SIGNED** · `tid` signed · HF-NL per-ref · dial `mono_pct` /
+`tied_pct` · `m3a_coherence` · `freeze_check --profile balanced-2026-08-04` floor count
+· `freeze_check --select` rank · `best_val`.
+
+**KADID is now a meaningful signed number for the first time** (its target is no longer
+backwards) — but it remains a `train_eq_val` guard and is **flagged as such** wherever
+it appears. It is NOT promoted to a ship gate by this wave.
+
+**`best_val` is reported and explicitly NOT used as an endpoint or a selection
+criterion.** Dropping a leg with `val_w > 0` changes the validation objective itself, so
+`best_val` is not comparable across arms. Every endpoint above is measured on **fixed
+external corpora** that no arm's training touches, which is what makes them comparable.
+
+## H.4 Noise bands — FROZEN NOW, before any wave-10 number exists
+
+Two sources, and the **larger is used** per axis:
+(i) the campaign's historical within-config seed spread (CID22 ≈ 0.01, M3a ≈ 0.03–0.04,
+KonJND ≈ 0.05); (ii) the **observed full range of the incumbent arm-H's own three
+seeds** (`H_co3abpg_s2501/2503/2507`, the committed table in the wave-7 results section)
+— the only same-recipe, same-architecture within-config evidence that exists.
+
+| axis | historical | arm-H 3-seed range | **REGISTERED band** |
+|---|---|---:|---:|
+| CID22 | ~0.010 | 0.0042 | **0.010** |
+| KonJND | ~0.050 | 0.0755 | **0.076** |
+| nonphoto | — | 0.0025 | **0.010** (floor) |
+| CSIQ | — | 0.0964 | **0.096** |
+| LIVE | — | 0.0497 | **0.050** |
+| M3a | ~0.035 | 0.0920 | **0.092** |
+| sdr25 | — | 0.0191 | **0.020** |
+| aic3 | — | 0.0112 | **0.011** |
+| aic4 | — | 0.0091 | **0.010** (floor) |
+| imazen26 | — | 0.0027 | **0.010** (floor) |
+| HF-NL | — | 0.2470 | **0.247** |
+| dial mono | — | 2.4 pp | **2.4 pp** |
+| KADID signed | — | n/a (its target changes this wave) | report only, no band |
+
+The 0.010 floor exists so a band can never be narrower than the campaign's smallest
+credible seed spread; three axes whose arm-H range happened to be tiny take it.
+
+**CSIQ (0.096), M3a (0.092), KonJND (0.076) and HF-NL (0.247) have bands wider than most
+plausible effects.** That is registered as an expected property of this design, not a
+disappointment discovered afterwards: at k=2 those four axes are near-uninformative, and
+any wave-10 statement about them will say so.
+
+## H.5 Decision rules (frozen)
+
+**Paired LOO delta.** For arm `L_i`, seed `s ∈ {4001, 4003}`, axis `a`:
+`Δ_{i,s}(a) = value(L_i, s, a) − value(L0, s, a)` — the effect of **DROPPING** leg `i`.
+The leg's **marginal value** is `−mean_s Δ_{i,s}(a)`: a leg whose removal HURTS an axis
+has positive marginal value on it.
+
+An arm's effect on an axis is **OUTSIDE NOISE** iff **both** hold:
+1. `|mean_s Δ_{i,s}(a)| > band(a)` (from §H.4), and
+2. `sign(Δ_{i,4001}) == sign(Δ_{i,4003})` — both seeds move the same way.
+
+Anything failing either test is **INSIDE NOISE** and is reported as inside noise. No
+arm is called a finding on one seed.
+
+**L0 vs incumbent** (the value of the KADID fix alone) is **unpaired** — different seed
+families. It is OUTSIDE NOISE on axis `a` iff `|mean(L0) − mean(H)| > band(a)` **and**
+the two 3-seed ranges do not overlap.
+
+**Selection.** `freeze_check --select` over all 23 fullevals, the registered E.4 rule
+(PRIMARY = balanced-profile floor count; TIE-BREAK = selection composite). Reported as a
+ranking, not as a ship decision.
+
+## H.6 Registered outcomes (frozen)
+
+- **(a)** One or more legs show a clearly-outside-noise **negative** marginal value on
+  axes we care about ⇒ name them, propose the corrected mix, and state the caveat that
+  LOO measures **marginals at the current operating point, not an optimum**.
+- **(b)** All marginals inside noise ⇒ the mix is **insensitive at k=2** and the honest
+  read is that **weights are not the lever** — say exactly that, do not go fishing for a
+  sub-band effect.
+- **(c)** L0 vs incumbent moves axes outside noise ⇒ report **separately**; it is the
+  cheapest result in the wave and it belongs to Part 1, not to the LOO.
+
+These are not mutually exclusive. (b) and (c) can both fire.
+
+## H.7 Confounds and limitations (registered before the run)
+
+1. **k = 2 on the LOO arms is direction-only.** Two seeds cannot estimate a variance;
+   the sign-consistency rule is a guard, not a test. Every LOO statement is a direction
+   with a band, never a confidence interval.
+2. **LOO ≠ optimum.** A marginal at the current operating point does not identify the
+   best weight for a leg, and does not compose: ten one-leg deltas do not add up to the
+   effect of a ten-leg change (wave 8 is the proof — five drops at once collapsed axes
+   that no single drop is predicted to).
+3. **Renormalization is inherent.** Dropping a leg raises every other leg's share; a
+   measured Δ is "this leg removed AND the rest scaled up", never a clean single-factor
+   effect. The §H.2 share table is what makes it attributable.
+4. **`best_val` is not comparable across arms** (§H.3), including the epoch it selects.
+   Epoch selection differing between arms is part of the arm's effect, not a bug — and
+   it means a Δ can be an epoch-selection artifact. Reported, not corrected for.
+5. **The KADID fix and the LOO are confounded by design in the base.** Every wave-10 arm
+   uses the corrected table, so no wave-10 number is directly comparable to a pre-wave-10
+   bake except through the L0-vs-incumbent contrast, which is itself unpaired (§H.5).
+6. **KADID becomes `train_eq_val` in a new way.** With the sign fixed, the KADID guard
+   number will move a lot; that is expected and is not evidence about generalization.
+7. **Wall-clock heterogeneity.** Arms will be trained across two lanes (this box and any
+   genuinely-free fleet node). One trainer binary, sha-recorded, on every lane; the
+   trainer is deterministic in its seed across lanes (wave 9 closed this — `W9B_s3301`
+   vs `W9Bx_s3301` differed only in the 395-byte provenance block).
+
+## H.8 Deliverables (frozen)
+
+1. Corrected `ext_kadid.parquet` at all three ext roots + preserved
+   `ext_kadid_INVERTED_2026-08-04.parquet`, each with sha256 in the dir `_MANIFEST.json`,
+   triple-mirrored (local + R2 + Tower) with a sha spot-check.
+2. `check_target_orientation.py --all-roots` output showing INVERTED → OK, committed.
+3. `check_table_integrity.py` verdict on the rebuilt table, committed.
+4. `scripts/wave10_seed.sh` — the driver, echo-verified against `wave7_armH_seed.sh`.
+5. `benchmarks/wave10/` — per-arm verdicts + the **marginal-value matrix**
+   (Δ per axis per dropped leg, with the band and the INSIDE/OUTSIDE call), as TSV with
+   `.meta` sidecars, plus the results section in this document.
+6. `eval_annotations.json` entry for the table substitution hazard (§H.1).
+7. `docs/DATA_SPLITS.md` + `~/work/zen/DATA_PROVENANCE.md` notes.
+8. Which registered outcome(s) fired, stated explicitly.
+
+**Nothing ships and nothing swaps.** The freeze decision is the user's. No gate is
+relaxed; honest nulls stand as results.
