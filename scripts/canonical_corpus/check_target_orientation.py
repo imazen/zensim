@@ -114,6 +114,16 @@ EXPECTED_ORIENTATION = {
     # table STORES, and the keyed checker verifies it against the 75,519 raw
     # EXP_III DCR votes (degradation-oriented, rises with level in 70/70 ladders).
     "konfig": QUALITY,
+    # hdr_v3mix (added 2026-08-05, campaign Appendix Q §Q.1 G-Q1): the target is
+    # the cvvdp-mix teacher `0.5·clip01(ssim2/100) + 0.5·clip01((JOD−6)/4)` — a
+    # mix of two QUALITY-oriented quantities (cvvdp JOD: 10 = imperceptible,
+    # higher = better; ssim2 higher = better), so the stored column is
+    # quality-oriented by construction. The check is IN-TABLE (vs the carried
+    # `score_cvvdp` JOD column): a consistency sign test that catches a stored
+    # inversion of the mix column (the Appendix F defect class), NOT an
+    # independent-label test — human_score derives 50% from score_cvvdp. The
+    # registered caveat lives in Appendix Q §Q.1.
+    "hdr_v3mix": QUALITY,
 }
 
 # Known eval roots for --all-roots. (root, {corpus: filename})
@@ -322,10 +332,34 @@ def konfig_ground_truth_keyed(hs: np.ndarray):
     return np.asarray(gt, float), note
 
 
+def hdr_v3mix_ground_truth_intable(path: str, hs: np.ndarray):
+    """IN-TABLE ground truth for the hdr_v3mix cvvdp-mix legs (Appendix Q G-Q1).
+
+    Ground truth = the table's own carried `score_cvvdp` column (JOD,
+    quality-oriented: 10 = imperceptible). This is deliberately weaker than the
+    external checks above and is declared as such: `human_score` derives 50% of
+    its mass from `score_cvvdp`, so the sign test verifies mix-vs-raw-JOD
+    CONSISTENCY (it catches a stored inversion of the mix column — the exact
+    Appendix F failure class), not agreement with an independent label. The
+    independent HDR label sources (UPIQ JOD, AIC-HDR2025) are HOLDOUT / not
+    released, and must never become training-table ground truth here.
+    """
+    t = pq.read_table(path, columns=["score_cvvdp"])
+    gt = np.asarray(t["score_cvvdp"].to_pylist(), float)
+    if len(gt) != len(hs):
+        raise ValueError(f"score_cvvdp rows {len(gt)} != human_score rows {len(hs)}")
+    note = ("in-table score_cvvdp (JOD, quality-oriented) — mix-vs-JOD consistency "
+            "sign test, NOT independent (50% of the mix IS the JOD term; Appendix Q G-Q1)")
+    return gt, note
+
+
 GROUND_TRUTH = {"kadid": kadid_ground_truth, "tid": tid_ground_truth}
 # Corpora whose ground truth must be joined on a key rather than row position.
 KEYED_GROUND_TRUTH = {"sdr25": sdr25_ground_truth_keyed,
                       "konfig": konfig_ground_truth_keyed}
+# Corpora whose only recoverable ground truth is a column carried in the SAME
+# table (declared-weaker consistency checks; loader takes (path, hs)).
+INTABLE_GROUND_TRUTH = {"hdr_v3mix": hdr_v3mix_ground_truth_intable}
 
 # ---------------------------------------------------------------------------
 # TARGET PROVENANCE of every leg in the SOTA-944 training mix, and therefore
@@ -363,6 +397,10 @@ MIX_TARGET_PROVENANCE = {
                                 "comparisons (Men 2021, 1.05M responses); "
                                 "orientation cross-checked vs 75,519 raw EXP_III "
                                 "DCR votes (Appendix L)"),
+    "hdr":            ("metric", "cvvdp-mix teacher 0.5·clip01(ssim2/100)+"
+                                 "0.5·clip01((JOD−6)/4); in-table score_cvvdp enables "
+                                 "a mix-vs-JOD consistency sign check only — 50% of "
+                                 "the mix IS the JOD term (Appendix Q G-Q1)"),
 }
 
 
@@ -380,8 +418,8 @@ def provenance_report() -> list[dict]:
 
 def guess_corpus(path: str) -> str | None:
     b = os.path.basename(path).lower()
-    for c in list(GROUND_TRUTH) + list(KEYED_GROUND_TRUTH):
-        if re.search(rf"(^|[_/]){c}([_.]|$)", b):
+    for c in list(GROUND_TRUTH) + list(KEYED_GROUND_TRUTH) + list(INTABLE_GROUND_TRUTH):
+        if re.search(rf"(^|[_/]){c}([_.0-9]|$)", b):
             return c
     return None
 
@@ -390,11 +428,18 @@ def check(path: str, corpus: str | None = None) -> dict:
     corpus = corpus or guess_corpus(path)
     expect = EXPECTED_ORIENTATION.get(corpus, QUALITY)
     out = {"path": path, "corpus": corpus, "expected_orientation": expect}
-    if corpus not in GROUND_TRUTH and corpus not in KEYED_GROUND_TRUTH:
+    if (corpus not in GROUND_TRUTH and corpus not in KEYED_GROUND_TRUTH
+            and corpus not in INTABLE_GROUND_TRUTH):
         out.update(verdict="SKIPPED", reason="no recoverable ground truth for this corpus")
         return out
     hs = np.asarray(pq.read_table(path, columns=["human_score"])["human_score"].to_pylist(), float)
-    if corpus in KEYED_GROUND_TRUTH:
+    if corpus in INTABLE_GROUND_TRUTH:
+        try:
+            gt, note = INTABLE_GROUND_TRUTH[corpus](path, hs)
+        except (FileNotFoundError, ValueError, KeyError) as e:
+            out.update(verdict="SKIPPED", reason=f"in-table ground truth unavailable: {e}")
+            return out
+    elif corpus in KEYED_GROUND_TRUTH:
         try:
             gt, note = KEYED_GROUND_TRUTH[corpus](hs)
         except (FileNotFoundError, ValueError, KeyError) as e:
@@ -439,7 +484,30 @@ def main() -> int:
                          "can reach at all (2 of 11) and which carry metric/teacher "
                          "targets with no human ground truth to check against")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--selftest", action="store_true",
+                    help="synthetic-fixture test of the hdr_v3mix in-table mode: a "
+                         "correctly-oriented fixture must read OK and an inverted "
+                         "fixture must read INVERTED (exit 1 on any miss)")
     a = ap.parse_args()
+    if a.selftest:
+        import tempfile
+        import pyarrow as pa
+        import pyarrow.parquet as pqw
+        rng = np.random.default_rng(20260805)
+        jod = rng.uniform(6.0, 10.0, 500)
+        mix = 0.5 * np.clip(rng.uniform(0, 1, 500), 0, 1) + 0.5 * np.clip((jod - 6) / 4, 0, 1)
+        ok = True
+        with tempfile.TemporaryDirectory() as td:
+            for name, hs_col, want in (("good", mix, "OK"), ("bad", 1.0 - mix, "INVERTED")):
+                p = os.path.join(td, f"hdr_v3mix_{name}.parquet")
+                pqw.write_table(pa.table({"human_score": hs_col, "score_cvvdp": jod}), p)
+                r = check(p, "hdr_v3mix")
+                got = r["verdict"]
+                print(f"selftest {name}: want {want}, got {got} "
+                      f"(signed_srocc={r.get('signed_srocc')})")
+                ok &= got == want
+        print("selftest:", "PASS" if ok else "FAIL")
+        return 0 if ok else 1
     if a.provenance:
         rep = provenance_report()
         if a.json:

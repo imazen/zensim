@@ -20,6 +20,19 @@ prefix (`n-…` narwaria, `k-…` korshunov), not hardcoded row ranges.
 the per-stratum paired bootstrap on Δ|SROCC| (resampling pairs within the
 stratum, `--boot` resamples): p = fraction of resamples where OTHER ≥ bake.
 
+--features-b F2 (2026-08-05, campaign Appendix Q §Q.3): a features table for
+the --compare bake, so bakes with DIFFERENT feature contracts compare on the
+same 380 conditions (e.g. a 944-regime candidate vs the 372 pulinear BHdr).
+Both tables must resolve to the same condition set; the paired bootstrap pairs
+by condition, which is regime-independent. Feature tables may be the classic
+372 `feat_*` parquet (row-aligned to the JOD csv, unchanged behavior) or an
+external-reads CSV (`condition_id,dataset,is_hdr,jod,score228,f0..fN` —
+reordered to the JOD csv by condition_id, with per-row jod agreement
+asserted). With --compare, a POOLED paired bootstrap over all 380 conditions
+is reported alongside the per-stratum ones (its index draws come AFTER the
+stratum draws, so previously recorded per-stratum outputs reproduce
+bit-for-bit).
+
 Stats provenance (migrated 2026-07-31, decision_surface_audit_2026-07-31.md
 gap 4): every correlation comes from the canonical Rust `panel` binary via
 `scripts/lib/zen_stats` — |SROCC| is the batch `srocc` column (tie-correct
@@ -52,37 +65,84 @@ ap.add_argument("--features", default="/mnt/v/output/zensim-multicodec-probe/upi
 ap.add_argument("--jod", default="/mnt/v/output/zenmetrics/upiq-pu/upiq_cid_jod.csv")
 ap.add_argument("--strata", action="store_true")
 ap.add_argument("--compare", default=None, help="second bake for paired per-stratum bootstrap")
+ap.add_argument("--features-b", default=None,
+                help="features table for the --compare bake (its OWN regime; default: "
+                     "--features). Parquet feat_* or external-reads CSV f0..fN.")
 ap.add_argument("--boot", type=int, default=10000)
 ap.add_argument("--verify-scipy", action="store_true",
                 help="cross-check every printed stat against scipy to <=1e-9 (needs scipy)")
 a = ap.parse_args()
 
-t = pq.read_table(a.features)
-n = t.num_rows
-fcols = sorted((c for c in t.schema.names if c.startswith("feat_")), key=lambda c: int(c.split("_")[1]))
-assert len(fcols) == 372 and n > 0, f"bad features table: {n} rows, {len(fcols)} fcols"
-
 lines = [l for l in open(a.jod).read().splitlines() if l.strip()]
 jod = np.array([float(l.split(",")[1]) for l in lines])
 pair_ids = [l.split(",")[0] for l in lines]
-assert len(jod) == n, f"jod {len(jod)} != features {n}"
+n = len(jod)
 STUDY = {"n": "narwaria", "k": "korshunov"}
 strata = np.array([STUDY[p.split("-")[0]] for p in pair_ids])
 
-# Shape as a dial grid: one 'codec ladder' per row so the pred dump's
-# (group-ordinal, local-index) re-keying is trivially invertible by q.
-data = {
-    "ref_basename": pa.array([f"upiq{i}" for i in range(n)]),
-    "human_score": pa.array([0.5] * n),
-    "image_path": pa.array([f"upiq{i}" for i in range(n)]),
-    "image_id": pa.array(["upiq"] * n),
-    "codec": pa.array(["upiq"] * n),
-    "q": pa.array([float(i) for i in range(n)]),
-    "knob_tuple_json": pa.array(["{}"] * n),
-}
-for i, c in enumerate(fcols):
-    data[f"f{i}"] = t[c]
-grid = pa.table(data)
+
+def load_features_table(path: str) -> np.ndarray:
+    """(n, W) feature matrix row-aligned to the JOD csv order.
+
+    Two accepted shapes (Appendix Q §Q.3):
+    - parquet with `feat_*` columns: the classic upiq extraction, stored in JOD
+      csv row order (row-count asserted — unchanged original behavior);
+    - external-reads CSV (`condition_id,dataset,is_hdr,jod,score228,f0..fN`,
+      e.g. hdr-dmean-2026-07-29/upiq_hdr_944.csv): reordered to the JOD csv by
+      condition_id, with exact id-set equality and per-row jod agreement
+      (<=1e-6) asserted — a hard alignment pin, not a trust-the-order join.
+    """
+    if path.endswith(".csv"):
+        import csv as _csv
+        with open(path, newline="") as f:
+            rdr = _csv.reader(f)
+            header = next(rdr)
+            assert header[0] == "condition_id" and header[3] == "jod", header[:5]
+            f0 = header.index("f0")
+            by_id = {}
+            for r in rdr:
+                by_id[r[0]] = (float(r[3]), np.array(r[f0:], dtype=np.float64))
+        missing = [p for p in pair_ids if p not in by_id]
+        extra = [k for k in by_id if k not in set(pair_ids)]
+        assert not missing and not extra, (
+            f"{path}: condition set mismatch vs {a.jod} "
+            f"(missing {len(missing)}, extra {len(extra)})")
+        rows = []
+        for i, p in enumerate(pair_ids):
+            j, feats = by_id[p]
+            assert abs(j - jod[i]) <= 1e-6, f"{p}: csv jod {j} != jod csv {jod[i]}"
+            rows.append(feats)
+        return np.vstack(rows)
+    t = pq.read_table(path)
+    fcols = sorted((c for c in t.schema.names if c.startswith("feat_")),
+                   key=lambda c: int(c.split("_")[1]))
+    assert len(fcols) > 0 and t.num_rows == n, \
+        f"bad features table: {t.num_rows} rows (want {n}), {len(fcols)} fcols"
+    return np.column_stack([np.asarray(t[c].to_pylist(), dtype=np.float64) for c in fcols])
+
+
+def build_grid(feats: np.ndarray) -> pa.Table:
+    """Shape as a dial grid: one 'codec ladder' per row so the pred dump's
+    (group-ordinal, local-index) re-keying is trivially invertible by q."""
+    data = {
+        "ref_basename": pa.array([f"upiq{i}" for i in range(n)]),
+        "human_score": pa.array([0.5] * n),
+        "image_path": pa.array([f"upiq{i}" for i in range(n)]),
+        "image_id": pa.array(["upiq"] * n),
+        "codec": pa.array(["upiq"] * n),
+        "q": pa.array([float(i) for i in range(n)]),
+        "knob_tuple_json": pa.array(["{}"] * n),
+    }
+    for i in range(feats.shape[1]):
+        data[f"f{i}"] = pa.array(feats[:, i])
+    return pa.table(data)
+
+
+grid = build_grid(load_features_table(a.features))
+grid_b = None
+if a.compare:
+    grid_b = grid if a.features_b in (None, a.features) \
+        else build_grid(load_features_table(a.features_b))
 
 
 def score_bake(bake_path: str, grid_parquet: str) -> np.ndarray:
@@ -141,7 +201,11 @@ with tempfile.TemporaryDirectory() as td:
     preds_a = score_bake(a.bake, gp)
     report(os.path.basename(a.bake), preds_a)
     if a.compare:
-        preds_b = score_bake(a.compare, gp)
+        gpb = gp
+        if grid_b is not grid:
+            gpb = os.path.join(td, "upiq_grid_b.parquet")
+            pq.write_table(grid_b, gpb, compression="zstd")
+        preds_b = score_bake(a.compare, gpb)
         report(os.path.basename(a.compare), preds_b)
         rng = np.random.default_rng(20260714)
         print(f"paired bootstrap Δ|SROCC| (A − B), {a.boot} resamples, within stratum:")
@@ -168,6 +232,17 @@ with tempfile.TemporaryDirectory() as td:
                 jobs.append((f"a_{tag}_{i}", f"A{tag}", f"J{tag}", idx))
                 jobs.append((f"b_{tag}_{i}", f"B{tag}", f"J{tag}", idx))
             stratum_meta.append((s, tag, da, db, dj, idx_sets))
+        # POOLED paired bootstrap over all n conditions (Appendix Q §Q.3/Q.4).
+        # Draws come AFTER the per-stratum draws so the per-stratum outputs
+        # above reproduce previously recorded numbers bit-for-bit.
+        bases["Ap"], bases["Bp"], bases["Jp"] = preds_a, preds_b, jod
+        jobs.append(("pt_a_p", "Ap", "Jp", None))
+        jobs.append(("pt_b_p", "Bp", "Jp", None))
+        pooled_idx = [rng.integers(0, n, n) for _ in range(a.boot)]
+        for i, idx in enumerate(pooled_idx):
+            jobs.append((f"a_p_{i}", "Ap", "Jp", idx))
+            jobs.append((f"b_p_{i}", "Bp", "Jp", idx))
+        stratum_meta.append(("pooled", "p", preds_a, preds_b, jod, pooled_idx))
         rows = {r["label"]: r["srocc"] for r in
                 zen_stats.panel_batch_indexed(bases, jobs, stats="srocc")}
         for s, tag, da, db, dj, idx_sets in stratum_meta:
@@ -176,7 +251,7 @@ with tempfile.TemporaryDirectory() as td:
                 _scipy_check(da, dj, rows[f"pt_a_{tag}"])
                 _scipy_check(db, dj, rows[f"pt_b_{tag}"])
             wins = 0
-            for i in range(a.boot):
+            for i in range(len(idx_sets)):
                 d = rows[f"a_{tag}_{i}"] - rows[f"b_{tag}_{i}"]
                 if d <= 0:
                     wins += 1

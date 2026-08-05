@@ -106,3 +106,6 @@ AGENT_COORDINATION_NOTE.md
 /zensim-picker-prep/Cargo.lock
 /zensim-target/Cargo.lock
 apidoc/target/
+
+# workspace-local target symlink (CARGO_TARGET_DIR redirect)
+/target
