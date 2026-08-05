@@ -308,6 +308,10 @@ fn run_bake_mode(
     //  - otherwise: extended (+v2 concat for a >372 combined bake).
     #[cfg(feature = "feature-regime-v2")]
     let mut v2_scratch = zensim::feature_v2::V2Scratch::new();
+    // `mut` is load-bearing only when the v2 branch (below) captures
+    // `v2_scratch` mutably; without the feature the closure is Fn and
+    // clippy flags the mut — cfg the allow, not the mut.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
     let mut feats_of = |dist: &[[u8; 3]]| -> Vec<f64> {
         let ds = RgbSlice::new(dist, w, h);
         #[cfg(feature = "feature-regime-v2")]
