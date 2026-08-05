@@ -6339,3 +6339,186 @@ re-verdict, re-annotate — not a side effect of this fix. Until then the annota
 registry carries it: `kadid-ext-root-inverted` (invalidated, all cells),
 `kadid-ext-trained-inverted-model` (annotated, the 110 measured-inverted bakes),
 `kadid-e1-gate-unsigned` (invalidated, the 8 wave-8 cells).
+
+
+# REGISTERED APPENDIX G — THE DATA-INTEGRITY AUDIT OF THE SOTA-944 TRAINING MIX (2026-08-04)
+
+**Registered BEFORE any check is run.** Every threshold, decision rule, and
+finding-class below is frozen at commit time; the results appendix
+(`benchmarks/data_integrity_audit_2026-08-04.md`) reports against this list and
+nothing else.
+
+## G.0 Why this exists
+
+The question that triggered it: *did we ever find an ideal data mix, and did we
+sanity-check it for outliers and other problems affecting training?*
+
+The honest answer is **no on both halves**, and Appendix F is the existence proof.
+`scripts/canonical_corpus/check_target_orientation.py` (commit `730a386e`) is the
+FIRST orientation gate this project has ever had, and it found a genuinely inverted
+target — `ext_kadid.human_score = (5 − dmos)/4` instead of `(dmos − 1)/4` — on its
+first run, six weeks after the table shipped. One gate, written once, one real defect.
+That is not evidence the rest of the data is clean; it is evidence that **nothing had
+been looking**.
+
+This appendix sweeps the remaining defect classes across every group in the incumbent
+mix. It is a MEASUREMENT pass, not a remediation pass. Trivially and safely fixable
+things get fixed; everything else is registered with evidence and a severity.
+
+**Anti-goal, stated up front:** this audit will NOT produce an "ideal mix" claim.
+Establishing an optimal mix requires a sweep over weights with held-out scoring, which
+is a different (and much more expensive) experiment. What an audit CAN establish is
+whether any group is *disqualified* or *mis-weighted on evidence*. Anything beyond
+that is out of scope and will be reported as "needs a sweep", not guessed at.
+
+## G.1 The mix under audit (frozen)
+
+Source of truth: the embedded `zentrain.repro` of `H_co3abpg_s2507.bin`, the current
+incumbent. Reproduced verbatim (11 groups; `train_w:val_w:loss_mode`):
+
+| group | rows | train_w | val_w | loss_mode | table |
+|---|---:|---:|---:|---|---|
+| safesyn | 111,068 | 1.0 | 0.5 | both | `ext944-canonical-2026-08-01/ext_safesyn_full.parquet` |
+| cid22_train | 17,611 | 1.0 | 2.0 | both | `ext944…/ext_cid22_train201.parquet` |
+| kadid | 10,125 | 0.5 | 1.0 | **rank** | `ext944…/ext_kadid.parquet` |
+| tid | 3,000 | 0.5 | 1.0 | **rank** | `ext944…/ext_tid.parquet` |
+| bigcodec | 208,169 | 0.5 | 1.0 | both | `zensim-training/tbig_944_200k.parquet` |
+| kadis | 50,000 | 0.15 | 1.0 | both | `kadis-944-2026-08-01/kadis_944_ssim2_50k.parquet` |
+| tsafesyn | 111,068 | 0.5 | 1.0 | both | `bakes/sota944/teacher/safesyn_teacher944.parquet` |
+| ttbig | 208,169 | 0.5 | 1.0 | both | `bakes/sota944/teacher/tbig_teacher944.parquet` |
+| tkadis | 50,000 | 0.5 | 1.0 | both | `bakes/sota944/teacher/kadis_teacher944.parquet` |
+| konjnd_bpg | 8,060 | 1.2 | 0.0 | both | `ext944…/konjnd_bpg_train_944.parquet` |
+| konjnd_bpg_val | 2,020 | 0.0 | 1.5 | both | `ext944…/konjnd_bpg_val_944.parquet` |
+
+Other frozen recipe facts: `--n-hidden-layers 0` (no head flag ⇒ the standard
+`train_mlp_strategy` path), `--target-column human_score --target-scale 100`,
+`--epochs 120 --pairs-per-epoch 50000 --seed 2507`, `--max-features 944`,
+`--coarse-decay 1e-5`, 64 `--feature-transform` entries (winsor_p99 + signed_cbrt).
+
+**Byte-identity precondition (already satisfied at registration time).** All 11
+`sha256` values in the repro were recomputed against the local canonical files and
+match. The teacher tables resolve to `bakes/sota944/teacher/` (the single-teacher EM4
+chain), NOT `teacher_ensk2`/`teacher_ensk5` — those two have different shas and were
+NOT the incumbent's inputs. Any check below runs on the exact trained-on bytes.
+
+## G.2 Checks, thresholds, and what counts as a finding
+
+Every check emits one of three verdicts per group: **PASS**, **FINDING**, or
+**NOT-CHECKABLE**. A NOT-CHECKABLE is a *reported gap*, never a pass — same
+convention as the orientation gate's SKIPPED.
+
+### A. Target integrity
+
+| id | check | threshold / rule | finding if |
+|---|---|---|---|
+| A1 | `human_score` finiteness | zero NaN, zero ±inf | any non-finite value |
+| A2 | `human_score` range | the trainer multiplies by `--target-scale 100`, so a `[0,1]` table is the documented convention; the negative dial tail is a deliberate exception (`kadis_negrich`) | any value outside `[−1, 2]`, or a table whose span implies a different unit than its siblings (e.g. `[0,100]` where the mix expects `[0,1]`) |
+| A3 | orientation vs EXTERNAL ground truth | `sign(SROCC(human_score, gt_quality)) > 0`. Ground truths: kadid = mean DCR over 349,800 raw ratings; tid = published MOS; cid22_train = CID22 source MOS; konjnd_bpg = KonJND PJND | sign < 0 |
+| A4 | INTERNAL monotonicity (metric-derived targets, no external truth) | within a source reference, target must fall as encoder quality falls / severity rises. Measured as per-source SROCC(target, quality_key), pooled median | pooled median SROCC < 0 (inverted), or < 0.5 with no explanation |
+| A5 | target degeneracy | fraction of rows sharing their exact target value with ≥1 other row | tie-rate > 20% in a `rank`-mode group (those pairs are DROPPED — see D2) |
+| A6 | teacher row-correspondence | `ref_basename` sequence of `t<x>` byte-identical to base `<x>`, row for row | any mismatch ⇒ join error, all downstream teacher numbers void |
+| A7 | teacher-vs-base agreement | SROCC(teacher_target, base_target) per table | SROCC < 0.5, or > 1% of rows with \|teacher − base\| > 0.5 in `[0,1]` units |
+
+A3's ground truths are the raw human labels wherever they exist. A corpus with no
+recoverable external truth reports NOT-CHECKABLE for A3 and is carried by A4.
+
+### B. Feature integrity
+
+| id | check | threshold / rule | finding if |
+|---|---|---|---|
+| B1 | non-finite features | per-column NaN + ±inf counts | any non-finite value in any feature column |
+| B2 | constant columns | `min == max` over the group's rows | a column constant in a group but NOT in the structural-zero block `f156..f371` |
+| B3 | the 39 never-populated slots | `bake_contrib` measured 39 slots that never receive contribution; identify them BY INDEX and classify each as (i) structural-zero block, (ii) constant in the EXTRACTOR (all groups), or (iii) constant only in THESE rows (a data gap, not an extractor property) | any slot in class (iii) — a feature the extractor can populate but this mix never exercises |
+| B4 | tail heaviness vs winsor coverage | per column, `max / p99` (and `\|min\| / \|p1\|`). The 64 registered `--feature-transform` entries are the mix's declared guard set | a column with `max/p99 > 100` that carries NO winsor_p99 guard — an unguarded heavy tail |
+| B5 | cross-group range consistency | per column, compare `[p1, p99]` across groups | a group whose p99 exceeds every other group's max by >10× — an out-of-distribution leg |
+
+B4 deliberately measures RAW tail heaviness rather than post-transform \|z\|: the
+transforms exist to clip these tails, so measuring after them would hide exactly the
+thing being audited. Re-implementing the transform pipeline in the audit would also be
+a duplicate of the trainer (no-duplication rule). The actionable question is
+"which heavy tails are UNGUARDED", and B4 answers it directly.
+
+### C. Duplicates + leakage
+
+| id | check | threshold / rule | finding if |
+|---|---|---|---|
+| C1 | exact-duplicate feature rows WITHIN a group | sha256 of the 944-vector's raw bytes | duplicate mass > 5% of the group |
+| C2 | exact-duplicate feature rows ACROSS groups | same hash space | any cross-group duplicate outside the intended teacher/base twin relationship |
+| C3 | content-dedup actually applied | `DATASET_HISTORY` §content-dedup records 22.2% of raw canonical rows as byte-identical knob-no-ops and says dedup is mandatory | measured duplicate mass ≳ the documented pre-dedup rate ⇒ dedup was NOT applied to this table |
+| C4 | **CID22 leakage** | reference identity (`ref_basename`), not filename equality: does any training row's reference appear in the CID22 49-ref holdout (`ext_cid22val.parquet`)? | **any single hit** — this is the project's most load-bearing rule (`CLAUDE.md` "CID22 is VALIDATION-ONLY") |
+| C5 | other eval leakage | same reference-identity test against konjnd eval, imazen26, nonphoto, csiq, live, aic3, aic4, sdr25 | any hit; severity scaled by how load-bearing the corpus is as a gate |
+
+C4/C5 use `ref_basename` set intersection plus the origin-split rule
+(`zenmetrics/scripts/picker/origin_split.py`) where a split key exists. Filename
+equality alone is explicitly NOT sufficient and is not the test.
+
+### D. Effective sampling mass
+
+| id | check | rule |
+|---|---|---|
+| D1 | nominal share | derived FROM SOURCE (`zensim-validate/src/mlp_train/mod.rs`), not guessed: the group CDF is built from `train_weight / Σ train_weight` and a pair is drawn uniformly within the chosen group ⇒ **expected pair share = `train_w / Σ train_w`, independent of row count** |
+| D2 | effective share | subtract the wasted draws the source performs: `ia == ib` (`continue`, prob `1/n`) and, for `rank`-mode groups, target-tied pairs (`want_rank == false`, `want_mse == false` ⇒ `continue`). Effective share = nominal × (1 − 1/n) × (1 − P(tie)) for rank groups |
+| D3 | rows-per-epoch coverage | expected distinct rows touched per epoch vs group size — how many times the mix "sees" a small group vs a large one |
+
+D is not pass/fail; it is a **table that has never been written down**. It becomes a
+FINDING only where effective share diverges from nominal by >20% relative (D2), which
+means a declared weight is not the weight the model actually got.
+
+### E. Label-noise / target conflict
+
+| id | check | rule | finding if |
+|---|---|---|---|
+| E1 | twin disagreement | for each (base, teacher) pair covering identical feature rows, the distribution of `teacher − base` in `[0,1]` units | mean \|Δ\| > 0.1, or a systematic bias (median Δ) > 0.05 — the student is being taught two different answers for the same input |
+| E2 | conflict-weighted mass | E1's disagreement × D2's effective share | the product identifies which conflict actually reaches the model |
+
+## G.3 Registered outcomes
+
+Frozen before running:
+
+1. **If C4 fires (any CID22 holdout reference in any training group):** that is a
+   ship-blocking finding. Every CID22 number in the campaign becomes an
+   `eval_annotations.json` INVALIDATED entry, and the recommendation is a corpus
+   rebuild, not a weight change.
+2. **If A3 fires on a group other than the already-known kadid:** same treatment as
+   Appendix F — annotate the affected bakes, fix the builder, do NOT silently
+   regenerate the table.
+3. **If A6 fires (teacher row-correspondence broken):** the three teacher legs are
+   1.5/6.35 = 23.6% of the mix's sampling mass; a join error there invalidates every
+   944 bake trained with them.
+4. **If B3 finds class-(iii) slots:** those are features the model has a weight for
+   and no signal on — report them as prune candidates, do NOT prune in this pass
+   (`n_inputs()` vs `caller_input_width()` is a registered hazard class, E.9).
+5. **If nothing fires:** the registered conclusion is "the mix is structurally sound
+   and the mix-composition question is UNANSWERED and needs a weight sweep" — NOT
+   "the mix is ideal". Absence of defects is not evidence of optimality.
+
+## G.4 What this audit CANNOT check (registered before running, so it can't be
+quietly dropped later)
+
+- **Whether the mix is optimal.** No held-out scoring is run here. Out of scope.
+- **Feature CORRECTNESS.** The audit checks distributional sanity (finite, non-constant,
+  bounded tails). It cannot tell whether `f412` computes what its name says — that needs
+  the extractor's own gates.
+- **Target correctness where no external ground truth exists.** safesyn, bigcodec, and
+  kadis carry metric-derived targets (ssim2/zensim). A4 checks internal consistency;
+  nothing here can validate the metric itself against human opinion.
+- **Perceptual near-duplicate leakage.** C4/C5 test reference identity. A dHash-style
+  perceptual audit is a separate, user-gated procedure (`CLAUDE.md` dHash threshold
+  section, d ≤ 10 + montage review) and is NOT run here.
+- **Row-order-dependent effects.** The sampler draws uniformly, so row order should not
+  matter; the audit does not verify that claim empirically.
+
+## G.5 Deliverables (frozen)
+
+1. `benchmarks/data_integrity_audit_2026-08-04.md` — per-group × per-check verdict
+   table + ranked findings (severity × row mass touched).
+2. Per-check TSVs with `.meta` headers under `benchmarks/`.
+3. Every check that generalizes folded into a committed gate in
+   `scripts/canonical_corpus/` — a finding that can recur silently is not closed by
+   documenting it.
+4. `eval_annotations.json` entries for anything that invalidates published numbers.
+5. An evidence-based mix RECOMMENDATION, explicitly not an ideal-mix claim.
+6. `docs/DATASET_HISTORY.md` + `docs/DATA_SPLITS.md` updated with anything durable.
+
+Statistics come from `zenstats` via `scripts/lib/zen_stats` only — no stat math is
+implemented in the audit tooling (no-duplication rule).
