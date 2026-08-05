@@ -1158,15 +1158,18 @@ fn flatten_rows(rows: Vec<Vec<f64>>, width: usize) -> Vec<f64> {
     flat
 }
 
-impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
-    fn from(o: zensim_validate::parquet_loader::OwnedLoadedGroup) -> Self {
-        let width = o.n_features;
+impl From<zensim_validate::parquet_loader::OwnedLoadedGroupFlat> for LoadedGroup {
+    /// The zero-copy conversion: the loader already emitted the flat
+    /// row-major buffer this struct stores, so the ~1.9 GB rows+flat
+    /// flatten transient of the `OwnedLoadedGroup` path never exists.
+    /// See `benchmarks/trainer_mem_release_2026-08-04.md` ("next lever").
+    fn from(o: zensim_validate::parquet_loader::OwnedLoadedGroupFlat) -> Self {
         Self {
             name: o.name,
             train_w: o.train_w,
             val_w: o.val_w,
             human_scores: o.human_scores,
-            feature_rows: flatten_rows(o.feature_rows, width),
+            feature_rows: o.features_flat,
             metric_sigmas: o.metric_sigmas,
             n_features: o.n_features,
             ref_ids: o.ref_ids,
@@ -1251,7 +1254,10 @@ fn load_group_dispatch(
         .map(|s| s.eq_ignore_ascii_case("parquet"))
         .unwrap_or(false);
     if is_parquet {
-        zensim_validate::parquet_loader::load_parquet(path, name, target_column, target_scale)
+        // Flat emission: the loader fills ONE pre-reserved row-major buffer,
+        // so the per-row stage (and the rows+flat flatten transient) never
+        // exists. `From<OwnedLoadedGroupFlat>` is a field move.
+        zensim_validate::parquet_loader::load_parquet_flat(path, name, target_column, target_scale)
             .map(LoadedGroup::from)
     } else {
         load_csv(path, name, target_column, target_scale)

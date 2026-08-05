@@ -15,7 +15,15 @@
 //! anywhere else (in Rust or Python) on the way to training/eval — if
 //! this can't express what you need, extend it here.
 //!
-//! Wired into the trainer binary via `From<OwnedLoadedGroup> for
+//! Two materializing shapes over ONE shared scan ([`load_parquet_impl`]):
+//! [`load_parquet`] emits per-row `Vec`s ([`OwnedLoadedGroup`] — the
+//! compat shape every non-trainer consumer keeps), and
+//! [`load_parquet_flat`] emits one flat row-major buffer
+//! ([`OwnedLoadedGroupFlat`] — the memory-shaped variant the trainer
+//! adopts; see its doc for the ~1.9 GB load-transient rationale). Values
+//! are bit-identical between the shapes (`tests/parquet_flat_equivalence.rs`).
+//!
+//! Wired into the trainer binary via `From<OwnedLoadedGroupFlat> for
 //! LoadedGroup`. Equivalence to the sequential CSV loader is verified by
 //! `tests/parquet_load_equivalence.rs`; ref-identity + prefix handling by
 //! `tests/within_ref_pairing.rs`.
@@ -125,6 +133,54 @@ pub struct OwnedLoadedGroup {
     pub ref_ids: Option<Vec<u32>>,
 }
 
+/// [`OwnedLoadedGroup`] with the features as ONE flat row-major buffer
+/// instead of per-row `Vec`s — the memory-shaped variant for consumers
+/// (the trainer) that flatten anyway.
+///
+/// `features_flat[i * n_features + d]` is feature `d` of row `i`;
+/// `n_rows == human_scores.len()`. Values and their order are IDENTICAL
+/// to [`OwnedLoadedGroup::feature_rows`] for the same file
+/// (`features_flat[i * n_features + d] == feature_rows[i][d]`, bit for
+/// bit) — asserted by `tests/parquet_flat_equivalence.rs`.
+///
+/// Why this exists (`benchmarks/trainer_mem_release_2026-08-04.md`, "next
+/// lever"): the per-row shape costs a load transient — the largest group
+/// exists as ~7.5 KB row chunks AND as the trainer's flat copy during
+/// flattening (~1.9 GB extra peak on the wave-10/11 recipes), and the
+/// freed row chunks are interior free-list holes glibc cannot return.
+/// Emitting flat at the loader means the matrix is the only allocation:
+/// pre-reserved once from the parquet footer's row count, filled in
+/// place, never copied.
+#[derive(Debug)]
+pub struct OwnedLoadedGroupFlat {
+    pub name: String,
+    pub train_w: f64,
+    pub val_w: f64,
+    pub human_scores: Vec<f64>,
+    /// Row-major `n_rows × n_features`, tightly packed.
+    pub features_flat: Vec<f64>,
+    pub n_features: usize,
+    /// See [`OwnedLoadedGroup::metric_sigmas`].
+    pub metric_sigmas: Option<Vec<f64>>,
+    /// See [`OwnedLoadedGroup::ref_ids`].
+    pub ref_ids: Option<Vec<u32>>,
+}
+
+/// Feature-matrix destination for [`load_parquet_impl`] — same scan, same
+/// per-block transpose walk, two emission shapes.
+enum FeatureStore {
+    Rows(Vec<Vec<f64>>),
+    Flat(Vec<f64>),
+}
+
+/// Fields shared by both loader shapes (everything except the features).
+struct LoadedCommon {
+    human_scores: Vec<f64>,
+    n_features: usize,
+    metric_sigmas: Option<Vec<f64>>,
+    ref_ids: Option<Vec<u32>>,
+}
+
 /// Load a zensim training feature parquet file.
 ///
 /// Reads the `target_column` (multiplied by `target_scale` to match the
@@ -146,11 +202,68 @@ pub fn load_parquet(
     target_column: &str,
     target_scale: f64,
 ) -> Result<OwnedLoadedGroup, String> {
+    let (common, store) = load_parquet_impl(path, name, target_column, target_scale, false)?;
+    let feature_rows = match store {
+        FeatureStore::Rows(rows) => rows,
+        FeatureStore::Flat(_) => unreachable!("load_parquet_impl(flat=false) must emit Rows"),
+    };
+    Ok(OwnedLoadedGroup {
+        name: name.to_string(),
+        train_w: 0.0,
+        val_w: 0.0,
+        human_scores: common.human_scores,
+        feature_rows,
+        n_features: common.n_features,
+        metric_sigmas: common.metric_sigmas,
+        ref_ids: common.ref_ids,
+    })
+}
+
+/// [`load_parquet`], emitting the features as ONE flat row-major buffer
+/// (see [`OwnedLoadedGroupFlat`] for why). Identical column conventions,
+/// identical values in identical order, identical error phrasing — the
+/// only difference is the feature-matrix shape and its allocation
+/// profile (one pre-reserved buffer instead of `n_rows` row `Vec`s).
+pub fn load_parquet_flat(
+    path: &PathBuf,
+    name: &str,
+    target_column: &str,
+    target_scale: f64,
+) -> Result<OwnedLoadedGroupFlat, String> {
+    let (common, store) = load_parquet_impl(path, name, target_column, target_scale, true)?;
+    let features_flat = match store {
+        FeatureStore::Flat(flat) => flat,
+        FeatureStore::Rows(_) => unreachable!("load_parquet_impl(flat=true) must emit Flat"),
+    };
+    Ok(OwnedLoadedGroupFlat {
+        name: name.to_string(),
+        train_w: 0.0,
+        val_w: 0.0,
+        human_scores: common.human_scores,
+        features_flat,
+        n_features: common.n_features,
+        metric_sigmas: common.metric_sigmas,
+        ref_ids: common.ref_ids,
+    })
+}
+
+/// Shared body of [`load_parquet`] / [`load_parquet_flat`]. One scan, one
+/// per-block transpose walk; `flat` selects the emission shape.
+fn load_parquet_impl(
+    path: &PathBuf,
+    name: &str,
+    target_column: &str,
+    target_scale: f64,
+    flat: bool,
+) -> Result<(LoadedCommon, FeatureStore), String> {
     let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
     let schema = builder.schema().clone();
     let parquet_schema = builder.parquet_schema().clone();
+    // Total row count from the parquet footer — used to pre-reserve the
+    // flat feature buffer in one allocation.
+    let total_rows_meta = builder.metadata().file_metadata().num_rows().max(0) as usize;
 
     // Build a (leaf-index, column-name) view for projection + dispatch.
     // We use the Arrow `schema` for top-level names (these match the
@@ -251,7 +364,19 @@ pub fn load_parquet(
     });
 
     let mut human_scores: Vec<f64> = Vec::new();
-    let mut feature_rows: Vec<Vec<f64>> = Vec::new();
+    // Flat: pre-reserve the whole matrix from the parquet footer's row
+    // count, so the buffer is allocated ONCE and never realloc-copied —
+    // at 944 features × 200k+ rows a growth-doubling realloc would
+    // transiently hold ~1.5× the matrix, which defeats the point of the
+    // flat shape. (The count is a hint: if a corrupt footer under-reports,
+    // the Vec still grows correctly.)
+    let mut store = if flat {
+        FeatureStore::Flat(Vec::with_capacity(
+            total_rows_meta.saturating_mul(n_features),
+        ))
+    } else {
+        FeatureStore::Rows(Vec::new())
+    };
     // Dense ref numbering, assigned in first-seen order so the ids are
     // deterministic for a given file.
     let mut ref_ids: Vec<u32> = Vec::new();
@@ -337,8 +462,13 @@ pub fn load_parquet(
         // that is 12 of them at once. Blocking the transpose at
         // [`TRANSPOSE_BLOCK_ROWS`] keeps the same forward walk with a ~7.7 MB
         // working set that fits in L3, independent of the parquet batch size.
-        // Values, order, and the resulting `feature_rows` are unchanged.
-        feature_rows.reserve(n_rows);
+        // Values, order, and the resulting features are unchanged — and
+        // identical between the two emission shapes: both walk
+        // `(r, c) -> per_col_scratch[c * block_len + r]` in the same order,
+        // so `flat[i * n_features + d] == rows[i][d]` bit for bit.
+        if let FeatureStore::Rows(rows) = &mut store {
+            rows.reserve(n_rows);
+        }
         let mut block_start = 0usize;
         while block_start < n_rows {
             let block_len = TRANSPOSE_BLOCK_ROWS.min(n_rows - block_start);
@@ -358,12 +488,23 @@ pub fn load_parquet(
                     &mut per_col_scratch,
                 )?;
             }
-            for r in 0..block_len {
-                let mut row = Vec::with_capacity(n_features);
-                for c in 0..n_features {
-                    row.push(per_col_scratch[c * block_len + r]);
+            match &mut store {
+                FeatureStore::Rows(rows) => {
+                    for r in 0..block_len {
+                        let mut row = Vec::with_capacity(n_features);
+                        for c in 0..n_features {
+                            row.push(per_col_scratch[c * block_len + r]);
+                        }
+                        rows.push(row);
+                    }
                 }
-                feature_rows.push(row);
+                FeatureStore::Flat(flat_buf) => {
+                    for r in 0..block_len {
+                        for c in 0..n_features {
+                            flat_buf.push(per_col_scratch[c * block_len + r]);
+                        }
+                    }
+                }
             }
             block_start += block_len;
         }
@@ -471,20 +612,19 @@ pub fn load_parquet(
         }
     );
 
-    Ok(OwnedLoadedGroup {
-        name: name.to_string(),
-        train_w: 0.0,
-        val_w: 0.0,
-        human_scores,
-        feature_rows,
-        n_features,
-        metric_sigmas,
-        ref_ids: if ref_ids.is_empty() {
-            None
-        } else {
-            Some(ref_ids)
+    Ok((
+        LoadedCommon {
+            human_scores,
+            n_features,
+            metric_sigmas,
+            ref_ids: if ref_ids.is_empty() {
+                None
+            } else {
+                Some(ref_ids)
+            },
         },
-    })
+        store,
+    ))
 }
 
 /// Batch callback for [`stream_parquet_rows`]: `(features_row_major,
