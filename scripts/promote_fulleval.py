@@ -243,6 +243,63 @@ def graft_rank_corpus(board: Path, verdict: Path, corpus: str, dry_run: bool = F
                               dry_run, f"graft rank.{corpus} ({v.get('name')})")
 
 
+def repair_rank_orientation(board: Path, verdict: Path, corpus: str,
+                            dry_run: bool = False) -> bool:
+    """Replace `rank.<corpus>` with a fresh same-bake verdict's block when the
+    stored block was produced BEFORE the per-ref orientation pin (`730a386e`,
+    2026-08-04 16:49) and the bake's pooled signed SROCC is negative — the
+    Orientation::Auto pooled-sign flip (SOTA-944 appendix O finding: 80 board
+    cells carried `per_ref_mean`/`frac_negative` sign-flipped vs the pinned
+    quality-orientation convention).
+
+    This is a CORRECTION, not a re-measurement, and the gates enforce that:
+    the fresh block must reproduce every orientation-INDEPENDENT field of the
+    stored block to exact float equality (srocc, srocc_signed, plcc, krocc,
+    or, pwrc, z_rmse, n, per_ref_n, srocc_ci, ...); only `per_ref_mean` and
+    `frac_negative` (the per_group_srocc orientation-dependent outputs) may
+    differ, and `per_ref_mean` must be an exact sign flip. Provenance lands in
+    `rank_graft_sources.<corpus>` with the superseded value."""
+    ORIENT_DEP = {"per_ref_mean", "frac_negative"}
+    bdoc = _load_board(board)
+    v_bytes = verdict.read_bytes()
+    v = json.loads(v_bytes)
+    blk = (v.get("rank") or {}).get(corpus)
+    if not isinstance(blk, dict):
+        raise SystemExit(f"repair-rank: {verdict} carries no rank.{corpus} block")
+    if bdoc.get("bake_sha256") != v.get("bake_sha256"):
+        raise SystemExit(f"repair-rank: bake_sha256 mismatch — {board.name} is not the same "
+                         f"bake as {verdict.name}; refusing")
+    old = (bdoc.get("rank") or {}).get(corpus)
+    if not isinstance(old, dict):
+        raise SystemExit(f"repair-rank: {board.name} has no rank.{corpus} to repair "
+                         f"(use --graft-rank for the fill path)")
+    for k in set(old) | set(blk):
+        if k in ORIENT_DEP:
+            continue
+        if _jc(old.get(k)) != _jc(blk.get(k)):
+            raise SystemExit(f"repair-rank: rank.{corpus}.{k} differs between stored and fresh "
+                             f"verdict — this is not an orientation-only correction; refusing")
+    o, n = old.get("per_ref_mean"), blk.get("per_ref_mean")
+    if o is None or n is None or abs(n + o) > 1e-9 or abs(n - o) <= 1e-12:
+        raise SystemExit(f"repair-rank: per_ref_mean stored={o} fresh={n} is not an exact sign "
+                         f"flip; refusing (nothing to repair, or a different defect)")
+    doc = copy.deepcopy(bdoc)
+    doc["rank"][corpus] = blk
+    srcs = dict(doc.get("rank_graft_sources") or {})
+    srcs[corpus] = {"path": str(verdict), "sha256": hashlib.sha256(v_bytes).hexdigest(),
+                    "name": v.get("name"),
+                    "repair": "per-ref-orientation-pin-730a386e",
+                    "superseded_per_ref_mean": o,
+                    "superseded_frac_negative": old.get("frac_negative")}
+    doc["rank_graft_sources"] = srcs
+    for k in bdoc.get("rank") or {}:
+        if k != corpus and _jc((bdoc["rank"] or {}).get(k)) != _jc(doc["rank"].get(k)):
+            raise SystemExit(f"repair-rank: rank.{k} changed — refusing to write")
+    return _write_board_gated(board, bdoc, doc, {"rank", "rank_graft_sources"},
+                              dry_run, f"repair rank.{corpus} orientation ({v.get('name')}: "
+                                       f"{o:+.4f} -> {n:+.4f})")
+
+
 def mark_dominated(board: Path, dominated_by: list[str], rule: str,
                    dry_run: bool = False) -> bool:
     """Write `dominated_by` (+ `dominance` provenance) into a board fulleval —
@@ -352,6 +409,11 @@ def main(argv=None) -> int:
     ap.add_argument("--graft-rank", default=None, metavar="CORPUS",
                     help="with --graft-into: graft rank.<CORPUS> from --verdict instead of "
                          "corruption_head (era-bridge hfnlproxy fill; sha-gated)")
+    ap.add_argument("--repair-rank-orientation", default=None, metavar="CORPUS",
+                    help="with --graft-into: replace a PRE-orientation-pin rank.<CORPUS> block "
+                         "with --verdict's pinned block (sha-gated; every orientation-independent "
+                         "field must be float-identical and per_ref_mean an exact sign flip; "
+                         "appendix O per-ref flip repair)")
     ap.add_argument("--mark-dominated", default=None, type=Path, metavar="BOARD_JSON",
                     help="DOMINANCE mode: board fulleval to receive dominated_by (see --dominated-by)")
     ap.add_argument("--dominated-by", default="",
@@ -394,10 +456,15 @@ def main(argv=None) -> int:
 
     if a.graft_into is not None:
         if a.name or a.members or a.members_file or a.strip_per_pair or a.carry_coherence_from:
-            ap.error("--graft-into takes only --verdict/--graft-rank (and --dry-run)")
+            ap.error("--graft-into takes only --verdict/--graft-rank/--repair-rank-orientation "
+                     "(and --dry-run)")
+        if a.graft_rank and a.repair_rank_orientation:
+            ap.error("--graft-rank and --repair-rank-orientation are mutually exclusive")
         if not a.graft_into.exists():
             raise SystemExit(f"graft: board file not found: {a.graft_into}")
-        if a.graft_rank:
+        if a.repair_rank_orientation:
+            repair_rank_orientation(a.graft_into, a.verdict, a.repair_rank_orientation, a.dry_run)
+        elif a.graft_rank:
             graft_rank_corpus(a.graft_into, a.verdict, a.graft_rank, a.dry_run)
         else:
             graft_corruption_head(a.graft_into, a.verdict, a.dry_run)
