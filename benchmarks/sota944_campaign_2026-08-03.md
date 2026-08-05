@@ -8923,8 +8923,14 @@ each; identical pairs for every row; cvvdp drops its 4 NaN rows.
 | cvvdp | +0.549 |
 | butteraugli (lower-better, negated) | +0.420 |
 | best learned (FS_GL0p3_s2503 / FS_PILOT1_s2501 / v47 / ADD156) | +0.734 / +0.729 / +0.707 / +0.703 |
-| B (b_sdr…dense_dial) / winner_dial / W10L9 | +0.687 / +0.650 / +0.620 |
-| mid-944 cells (C_em944_s71 / C_co1a_s1307 …) | +0.11 – +0.25 |
+| winner_dial / W10L9 / B (b_sdr…dense_dial) | +0.650 / +0.620 / +0.607 |
+| mid-944 cells (C_co1a_s1307 … C_co2a_s1307) | +0.11 – +0.49 |
+
+Side observation (within-subset): mid-944 cells score noticeably HIGHER on the
+non-avif subset than on the full corpus (s71 +0.093 full → +0.270 subset;
+C_co2a_s1307 −0.012 → +0.493) while the era/sparse class barely moves — the
+944-MLP deficit is concentrated in the avif cells, 73.6% of the axis. A codec-
+stratified per-ref view is a natural follow-up instrument (not registered here).
 
 Reading: **independent strong perceptual metrics agree with ssim2's
 near-lossless ordering at only 0.42–0.79 per-ref** — the axis is intrinsically

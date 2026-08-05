@@ -96,8 +96,14 @@ identical pairs; within-subset reads only, never the axis headline.
 | ColorVideoVDP | +0.549 |
 | butteraugli (negated) | +0.420 |
 | best learned: FS_GL0p3 / FS_PILOT1 / v47 / ADD156 | **+0.734 / +0.729 / +0.707 / +0.703** |
-| B / winner_dial / C(W10L9) | +0.687 / +0.650 / +0.620 |
-| mid-944 MLP cells | +0.11 … +0.25 |
+| winner_dial / C(W10L9) / B | +0.650 / +0.620 / +0.607 |
+| mid-944 MLP cells | +0.11 … +0.49 |
+
+Side observation: mid-944 cells do noticeably better on this non-avif subset than
+on the full corpus (mid-944 median cell +0.093 full → +0.270 subset) while the
+era/sparse class barely moves — **the 944-MLP deficit concentrates in the avif
+cells**, which are 73.6% of the axis. A codec-stratified per-ref view is the
+natural follow-up instrument.
 
 Reading: **even strong independent perceptual metrics agree with ssim2's
 near-lossless ordering at only 0.42–0.79 per-ref.** The axis is intrinsically hard.
