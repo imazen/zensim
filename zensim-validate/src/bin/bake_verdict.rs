@@ -664,6 +664,14 @@ struct Args {
     perpair_metrics: PathBuf,
     /// Max rows sampled per corpus for the `per_pair` block (default 5000).
     perpair_cap: usize,
+    /// `--cross-regime`: override the wrong-regime refusal. By default a bake
+    /// that structurally uses f156-371 is REFUSED at the `--regime 944` root,
+    /// because the folded ext944 extraction feeds that block as structural
+    /// zeros and the resulting numbers are plausible-looking garbage (the
+    /// `ebothg_m504` board row; appendix U.R0's shipped-B 0.3862-vs-0.8764).
+    /// Passing this flag states the cross-regime read is intentional; the
+    /// report banner records it.
+    cross_regime: bool,
 }
 
 fn print_usage() {
@@ -694,7 +702,12 @@ REGIMES (--regime 372|720|944):\n\
     944  THE SOTA-944 campaign invocation as one preset: ext944 root, 944\n\
          dial/corruption grids, kadis-944 per-pair source, and the frozen\n\
          12-corpus campaign list — a bare `--bake X --regime 944` is the\n\
-         complete, correct evaluation. Explicit flags override the preset.\n"
+         complete, correct evaluation. Explicit flags override the preset.\n\
+\n\
+    A bake that structurally USES f156-371 is REFUSED at `--regime 944`\n\
+    (the folded root zeroes that block; the numbers would be garbage —\n\
+    score it at `--regime 372` instead). `--cross-regime` overrides after\n\
+    stating the read is intentional.\n"
     );
 }
 
@@ -738,6 +751,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     // here) — explicit flags always win over the preset.
     let mut regime_720 = false;
     let mut regime_944 = false;
+    let mut cross_regime = false;
     let mut features_root_set = false;
     let mut dial_grid_set = std::env::var("ZENSIM_DIAL_GRID").is_ok();
     let mut corruption_grid_set = std::env::var("ZENSIM_CORRUPTION_GRID").is_ok();
@@ -839,6 +853,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--corruption-head" => {
                 let v = args.next().ok_or("--corruption-head requires <bake.bin>")?;
                 corruption_head = Some(PathBuf::from(v));
+            }
+            "--cross-regime" => {
+                cross_regime = true;
             }
             "--ensemble" => {
                 let v = args
@@ -952,6 +969,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         name,
         perpair_metrics,
         perpair_cap,
+        cross_regime,
     })
 }
 
@@ -2387,6 +2405,39 @@ fn main() -> ExitCode {
             n_inputs
         );
         return ExitCode::from(2);
+    }
+    // C2 wrong-regime guard (appendix W): the `--regime 944` root is a FOLDED
+    // extraction whose f156-371 block is structural zeros. A bake that
+    // structurally uses that block would score to plausible-looking garbage
+    // (ebothg_m504; appendix U.R0's shipped-B CID22 0.3862 vs true 0.8764) —
+    // refuse, unless `--cross-regime` states the read is intentional.
+    if args.regime_944 && !args.cross_regime {
+        for (p, m) in members.iter().zip(models.iter()) {
+            match zensim_validate::block_profile::folded_root_conflict(m) {
+                Ok(None) => {}
+                Ok(Some(why)) => {
+                    eprintln!(
+                        "bake_verdict: REFUSING wrong-regime read of {}: {why}.\n\
+                         Score this bake at its native root (`--regime 372`), or pass \
+                         `--cross-regime` if feeding zeros to that block is intentional.",
+                        p.display()
+                    );
+                    return ExitCode::from(2);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "bake_verdict: cannot block-profile {} for the wrong-regime \
+                         guard (malformed transform table?): {e}",
+                        p.display()
+                    );
+                    return ExitCode::from(2);
+                }
+            }
+        }
+    } else if args.regime_944 && args.cross_regime {
+        eprintln!(
+            "bake_verdict: --cross-regime set — wrong-regime refusal disabled by caller"
+        );
     }
     let ens = Ensemble {
         has_transforms: models
@@ -3892,6 +3943,18 @@ mod tests {
 
     fn parse(argv: &[&str]) -> Args {
         parse_args_from(argv.iter().map(|s| s.to_string())).expect("parse")
+    }
+
+    /// C2 wrong-regime guard (appendix W): the refusal is the DEFAULT and the
+    /// override is an explicit, greppable flag. The behavioral half lives in
+    /// `tests/cross_regime_guard.rs` against
+    /// `block_profile::folded_root_conflict`.
+    #[test]
+    fn cross_regime_defaults_off_and_parses_on() {
+        let a = parse(&["--bake", "x.bin", "--regime", "944"]);
+        assert!(!a.cross_regime, "the refusal must be the default");
+        let a = parse(&["--bake", "x.bin", "--regime", "944", "--cross-regime"]);
+        assert!(a.cross_regime);
     }
 
     /// A bare `--bake X --regime 944` must resolve the ENTIRE campaign

@@ -200,6 +200,138 @@ impl BlockProfile {
     }
 }
 
+/// C2 wrong-regime guard (opus-review, campaign appendix W): does this bake
+/// structurally use the f156-371 block that the FOLDED roots (the ext944 /
+/// 924 extractions) feed as STRUCTURAL ZEROS?
+///
+/// A bake that uses that block scored at a folded root reads plausible-looking
+/// garbage with no error — the class has two published instances: the
+/// `ebothg_m504` board row (wrong-root read) and appendix U.R0 (shipped B
+/// reads CID22 0.3862 at the 944 root against its true 0.8764 at 372).
+/// Scorers targeting a folded root call this and REFUSE on `Some(..)` unless
+/// the caller explicitly opts into the cross-regime read.
+///
+/// Returns `Ok(None)` when the read is safe (block unused — true for every
+/// genuine folded-regime bake, which trained on those zeros, and for f0-155 /
+/// ≤156-input bakes), `Ok(Some(reason))` when it is not, and `Err` only for a
+/// malformed bake (same contract as [`profile`]).
+pub fn folded_root_conflict(model: &Model) -> Result<Option<String>, String> {
+    let p = profile(model)?;
+    if !p.uses_f156_371 {
+        return Ok(None);
+    }
+    let used = p
+        .families
+        .iter()
+        .find(|f| f.label == "f156_371")
+        .map(|f| f.used)
+        .unwrap_or(0);
+    Ok(Some(format!(
+        "bake structurally uses {used} caller line(s) in f156-371, a block this folded \
+         root feeds as STRUCTURAL ZEROS — the scored numbers would be plausible-looking \
+         garbage (the ebothg_m504 / appendix-U.R0 wrong-regime class)"
+    )))
+}
+
+/// Fold per-INTERNAL-column values back to CALLER lines via the bake's
+/// declared transform arities — the same walk [`profile`] and
+/// `Model::caller_input_width` perform. `fold` reduces one caller line's
+/// internal-column slice (empty for a `Drop`ped line) to its caller value.
+/// Returns `(per-caller values, n_dropped)`; errors on a malformed arity
+/// table exactly as [`profile`] does.
+fn fold_cols_to_caller(
+    model: &Model,
+    col_vals: &[f64],
+    fold: impl Fn(&[f64]) -> f64,
+) -> Result<(Vec<f64>, usize), String> {
+    let in_dim = col_vals.len();
+    match model.feature_transforms() {
+        None => Ok((col_vals.to_vec(), 0)),
+        Some(ts) => {
+            let params = model.feature_transform_params();
+            if let Some(p) = params
+                && p.len() != ts.len()
+            {
+                return Err(format!(
+                    "feature_transform_params has {} entries for {} transforms — malformed bake",
+                    p.len(),
+                    ts.len()
+                ));
+            }
+            let mut out = Vec::with_capacity(ts.len());
+            let mut dropped = 0usize;
+            let mut cur = 0usize;
+            for (k, t) in ts.iter().enumerate() {
+                let pk: &[f32] = params.map(|p| p[k].as_slice()).unwrap_or(&[]);
+                if *t == FeatureTransform::Drop {
+                    dropped += 1;
+                }
+                let arity = t.output_arity(pk);
+                let end = cur + arity;
+                if end > in_dim {
+                    return Err(format!(
+                        "feature_transform arities overrun layer 0 (need ≥ {end} columns, have {in_dim}) — malformed bake"
+                    ));
+                }
+                out.push(fold(&col_vals[cur..end]));
+                cur = end;
+            }
+            if cur != in_dim {
+                return Err(format!(
+                    "feature_transform arities cover {cur} layer-0 columns but layer 0 has {in_dim} — malformed bake"
+                ));
+            }
+            Ok((out, dropped))
+        }
+    }
+}
+
+/// C8 pack-default probe (opus-review, campaign appendix W): how many LIVE
+/// layer-0 caller lines would a per-layer zerobias at `tau` kill OUTRIGHT
+/// (every weight of the line `|w| < tau`)?
+///
+/// Returns `(killed, live)`. A high killed/live ratio means the flat zerobias
+/// is miscalibrated for this bake: the tau was tuned for 100-500 KB dense
+/// MLPs where sub-tau weights are noise, but on a sparse fit every surviving
+/// coefficient is signal — measured damage: `--zerobias-bulk 0.005` cost
+/// ADD156 −0.0069 CID22 (T.R11, 13 of 26 live lines killed) and wiped the
+/// appendix-J group-lasso cell GL4_s2501 from 57 live rows to 3 (J.R3).
+/// `bake_dial_refit pack` uses this to default zerobias to 0 on the sparse
+/// class instead of repeating the incident.
+pub fn zerobias_line_kill_fraction(model: &Model, tau: f64) -> Result<(usize, usize), String> {
+    let layer = model.layer(0);
+    let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
+    let colmax = |get: &dyn Fn(usize, usize) -> f64| -> Vec<f64> {
+        (0..in_dim)
+            .map(|i| {
+                (0..out_dim)
+                    .map(|o| get(i, o).abs())
+                    .fold(0.0f64, f64::max)
+            })
+            .collect()
+    };
+    let col_max: Vec<f64> = match &layer.weights {
+        WeightStorage::F32(w) => {
+            let w = *w;
+            colmax(&move |i, o| w[i * out_dim + o] as f64)
+        }
+        WeightStorage::F16(w) => {
+            let w = *w;
+            colmax(&move |i, o| f16_bits_to_f32(w[i * out_dim + o]) as f64)
+        }
+        WeightStorage::I8 { weights, scales } => {
+            let (w, s) = (*weights, *scales);
+            colmax(&move |i, o| w[i * out_dim + o] as f64 * s[o] as f64)
+        }
+    };
+    let (line_max, _) = fold_cols_to_caller(model, &col_max, |sl| {
+        sl.iter().cloned().fold(0.0f64, f64::max)
+    })?;
+    let live = line_max.iter().filter(|&&m| m > 0.0).count();
+    let killed = line_max.iter().filter(|&&m| m > 0.0 && m < tau).count();
+    Ok((killed, live))
+}
+
 /// Compute the caller-space block profile of a loaded model.
 ///
 /// Errors (rather than mis-reporting) on a malformed bake whose declared
@@ -237,51 +369,15 @@ pub fn profile(model: &Model) -> Result<BlockProfile, String> {
     // (one entry per caller line) defines the mapping: transform k consumes
     // `output_arity` internal columns, in caller order — the same walk
     // `Model::caller_input_width` / the predict pipeline perform.
-    let (caller_sq, n_dropped) = match model.feature_transforms() {
-        None => (col_sq, 0usize),
-        Some(ts) => {
-            let params = model.feature_transform_params();
-            if let Some(p) = params
-                && p.len() != ts.len()
-            {
-                return Err(format!(
-                    "feature_transform_params has {} entries for {} transforms — malformed bake",
-                    p.len(),
-                    ts.len()
-                ));
-            }
-            let mut out = Vec::with_capacity(ts.len());
-            let mut dropped = 0usize;
-            let mut cur = 0usize;
-            for (k, t) in ts.iter().enumerate() {
-                let pk: &[f32] = params.map(|p| p[k].as_slice()).unwrap_or(&[]);
-                if *t == FeatureTransform::Drop {
-                    dropped += 1;
-                }
-                let arity = t.output_arity(pk);
-                let end = cur + arity;
-                if end > in_dim {
-                    return Err(format!(
-                        "feature_transform arities overrun layer 0 (need ≥ {end} columns, have {in_dim}) — malformed bake"
-                    ));
-                }
-                // A dropped line's slice is empty, and the empty f64 sum is
-                // `-0.0` (the additive identity), which sqrt/max would
-                // propagate into a "-0.000000e0" in the JSON — pin every
-                // zero to +0.0 so a pruned family's stats byte-match its
-                // unpruned parent's.
-                let sq: f64 = col_sq[cur..end].iter().sum();
-                out.push(if sq == 0.0 { 0.0 } else { sq });
-                cur = end;
-            }
-            if cur != in_dim {
-                return Err(format!(
-                    "feature_transform arities cover {cur} layer-0 columns but layer 0 has {in_dim} — malformed bake"
-                ));
-            }
-            (out, dropped)
-        }
-    };
+    let (caller_sq, n_dropped) = fold_cols_to_caller(model, &col_sq, |sl| {
+        // A dropped line's slice is empty, and the empty f64 sum is
+        // `-0.0` (the additive identity), which sqrt/max would
+        // propagate into a "-0.000000e0" in the JSON — pin every
+        // zero to +0.0 so a pruned family's stats byte-match its
+        // unpruned parent's.
+        let sq: f64 = sl.iter().sum();
+        if sq == 0.0 { 0.0 } else { sq }
+    })?;
     let caller_width = model.caller_input_width();
     if caller_sq.len() != caller_width {
         return Err(format!(

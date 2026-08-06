@@ -84,6 +84,7 @@ use clap::{Args, Parser, Subcommand};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use zenpredict::{Activation, MetadataType, Model, WeightDtype, WeightStorage, f16_bits_to_f32};
 use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
+use zensim_validate::block_profile;
 use zensim_validate::output_calibration_spline as spline;
 use zensim_validate::panel::{outlier_ratio, rescale_logistic, spearman, z_rmse};
 use zensim_validate::prune;
@@ -1220,8 +1221,12 @@ struct PackArgs {
     #[arg(long, default_value = "f16")]
     dtype: String,
     /// Zero every bulk-layer weight with |w| < tau (per-layer zerobias).
-    #[arg(long = "zerobias-bulk", default_value_t = 0.005)]
-    zerobias_bulk: f64,
+    /// Default: 0.005 for dense MLPs — but 0 when a SPARSE-CLASS bake is
+    /// detected (the flat 0.005 would kill >10% of its live layer-0 lines
+    /// outright; it cost ADD156 −0.0069 CID22 and wiped GL4_s2501 57→3 live
+    /// rows). Pass a value explicitly to override the detection either way.
+    #[arg(long = "zerobias-bulk")]
+    zerobias_bulk: Option<f64>,
     /// Exempt the LAST layer from zerobias AND keep it f32 (identity-
     /// critical layers, e.g. the per-sample-alpha passthrough, are tiny in
     /// bytes but precision-sensitive).
@@ -1543,6 +1548,35 @@ fn check_prune_identity(
     Ok(())
 }
 
+/// The dense-MLP zerobias default `pack` has always shipped (v47 / packed30k
+/// provenance — byte-repro of those bakes relies on this value resolving when
+/// no explicit tau is given and the bake is dense).
+const ZEROBIAS_DENSE_DEFAULT: f64 = 0.005;
+/// Sparse-class trigger: auto-default tau to 0 when the dense default would
+/// kill MORE than this fraction of live layer-0 lines. Measured population
+/// (2026-08-06): dense MLPs (v47 76.6% live, C/EM4 ~71% live) kill ~0 whole
+/// lines; ADD156 kills 13/26 = 50%; GL4_s2501 killed 54/57 = 95%.
+const SPARSE_KILL_FRAC: f64 = 0.10;
+
+/// C8 default resolution (appendix W): explicit flag always wins; otherwise
+/// dense default, downgraded to 0 for the sparse class. Second return =
+/// "auto-sparse fired" (for the loud note).
+fn resolve_zerobias(explicit: Option<f64>, killed: usize, live: usize) -> (f64, bool) {
+    if let Some(v) = explicit {
+        return (v, false);
+    }
+    let frac = if live == 0 {
+        0.0
+    } else {
+        killed as f64 / live as f64
+    };
+    if frac > SPARSE_KILL_FRAC {
+        (0.0, true)
+    } else {
+        (ZEROBIAS_DENSE_DEFAULT, false)
+    }
+}
+
 fn cmd_pack(a: &PackArgs) -> Result<(), String> {
     let dtype = match a.dtype.as_str() {
         "f16" => WeightDtype::F16,
@@ -1573,7 +1607,25 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
         );
     }
 
-    let (mut packed, counts) = pack_layers(&model, dtype, a.zerobias_bulk, a.protect_last)?;
+    // C8 sparse-class default (appendix W): the flat 0.005 zerobias is
+    // calibrated for dense 100-500 KB MLPs. On a sparse fit it kills whole
+    // live lines — measured twice (T.R11: ADD156 −0.0069 CID22; J.R3:
+    // GL4_s2501 wiped 57→3 rows) — so when no explicit tau is given, probe
+    // what 0.005 WOULD kill and default to 0 on the sparse class.
+    let (killed, live) = block_profile::zerobias_line_kill_fraction(&model, ZEROBIAS_DENSE_DEFAULT)?;
+    let (zerobias_bulk, auto_sparse) = resolve_zerobias(a.zerobias_bulk, killed, live);
+    eprintln!(
+        "zerobias line-kill preview @ {ZEROBIAS_DENSE_DEFAULT}: {killed}/{live} live layer-0 lines"
+    );
+    if auto_sparse {
+        eprintln!(
+            "pack: SPARSE-CLASS bake — the default zerobias {ZEROBIAS_DENSE_DEFAULT} would kill \
+             {killed} of {live} live layer-0 lines outright; defaulting --zerobias-bulk to 0 \
+             (measured damage on this class: T.R11 −0.0069 CID22, J.R3 57→3 rows). \
+             Pass --zerobias-bulk {ZEROBIAS_DENSE_DEFAULT} explicitly to override."
+        );
+    }
+    let (mut packed, counts) = pack_layers(&model, dtype, zerobias_bulk, a.protect_last)?;
     eprintln!(
         "per-layer zerobias (zeroed/total): {}",
         counts
@@ -3750,6 +3802,25 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C8 (appendix W): explicit tau always wins; auto-default is 0.005 for
+    /// dense bakes and 0 for the sparse class (kill fraction > 10%). The
+    /// measured population anchoring the threshold: dense MLPs ≈0%, ADD156
+    /// 50% (13/26), GL4_s2501 95% (54/57).
+    #[test]
+    fn zerobias_default_resolves_dense_vs_sparse() {
+        // explicit flag wins, both directions, regardless of kill stats
+        assert_eq!(resolve_zerobias(Some(0.005), 54, 57), (0.005, false));
+        assert_eq!(resolve_zerobias(Some(0.0), 0, 300), (0.0, false));
+        // dense: essentially no whole-line kills → historical default
+        assert_eq!(resolve_zerobias(None, 0, 285), (ZEROBIAS_DENSE_DEFAULT, false));
+        assert_eq!(resolve_zerobias(None, 28, 285), (ZEROBIAS_DENSE_DEFAULT, false));
+        // sparse: ADD156- and GL-class kill fractions → auto 0, loudly
+        assert_eq!(resolve_zerobias(None, 13, 26), (0.0, true));
+        assert_eq!(resolve_zerobias(None, 54, 57), (0.0, true));
+        // degenerate: no live lines cannot divide-by-zero
+        assert_eq!(resolve_zerobias(None, 0, 0), (ZEROBIAS_DENSE_DEFAULT, false));
+    }
 
     /// Build a tiny 3→1 identity f16 bake with a monotone spline. No
     /// feature transforms (all-identity), scaler is identity.
