@@ -10271,3 +10271,197 @@ sha256s + per-arm row counts + absent-not-failed records; triple mirror (local +
 R2 + Tower) with a sha manifest; `DATA_SPLITS` + `DATASET_HISTORY` +
 `DATA_PROVENANCE` registrations; and the orientation-gate verdict for both
 splits.
+
+# REGISTERED APPENDIX T — THE ADD156 RE-VALIDATION + THE ADDITIVE FEATURE-POOL QUESTION (2026-08-06, pre-registered before any pool fit)
+
+## T.0 Why this exists
+
+`ADD156_safesyn_only_raw_lasso` (2026-07-18) is the board's best
+f156-371-**independent** additive model and its only genuinely-additive
+basic-156 cell: CID22 0.8633, KonJND 0.535, **M3a 0.954 (board best)**, LIVE
+0.960, nonphoto 0.897, HF-NL per-ref 0.831 — on **28 live coefficients**
+(`block_profile`: 28 of f0-155 used, 128 exact-zero there, **all 216 of
+f156-371 exact-zero**). It predates every process correction landed since
+2026-07-18 and was never re-validated against them. Three questions, in order:
+
+1. **Do today's corrections invalidate it?** Specifically the KADID target
+   inversion (appendix F), the HF-NL per-ref orientation flip (appendix O),
+   the append2 attribution coverage fix (`299ccc8c`), the sdr25/aic4 corpus
+   dependency + JND-convention pin, the dial-units correction, `--regime`
+   presets, and `pack`'s automatic dead-column pruning (`eb8edf3c`).
+2. **Is it reproducible from its recipe?** It was built by a `scripts/v_next`
+   Python probe, before the `zentrain.repro` embed mandate.
+3. **Does ANY feature above f155 earn its place in an ADDITIVE model?** The
+   2026-07-18 correction doc asserted additive-372 B (0.876) > additive-156
+   (0.863) "so f156-371 add ~0.013-0.02" — but B is a *different recipe on a
+   different mix*, so that comparison confounds pool with recipe. Nobody has
+   ever run the same additive recipe at several pool widths.
+
+## T.1 Priors — facts on disk, established BEFORE this appendix (not results)
+
+- **Recipe, fully recovered** from `scripts/v_next/additive_basic156_probe.py`
+  + `linear_projections_2026-07-03.py` (`MixGram`/`bake_candidate`) and the
+  three 2026-07-18 commits (`08884613` built it, `b1c956e0` measured its
+  diffmap, `bd6ea881` scorecarded it): mix = **safesyn ONLY** at weight 1.0,
+  target `human_score`; **raw** feature space (no transform screen); lasso
+  coordinate descent **lam 2e-3** on the mean-loss scale, 400 sweeps, tol
+  1e-10; coordinates restricted to **f0..155** (slicing the standardized Gram
+  to its leading 156x156 block IS the `w[156:]=0`-constrained solve), padded
+  to 372; **tau 0**, **f16** pack, output spline fit on the PACKED forward over
+  `linear-probe/val/anchor.npz`; one identity layer.
+- **Frozen inputs still exist, untouched**: gram
+  `/mnt/v/output/zensim-multicodec-probe/linear-probe/grams/safesyn.npz`
+  (2026-07-03, W=196,086, ybar 0.76805), anchor `.../val/anchor.npz`
+  (2026-07-14, i.e. before the bake).
+- **KADID is NOT in ADD156's training mix.** `safesyn_only` is literally
+  `[("safesyn", 1.0, "human_score")]`; the *other* six ADD156 variants use a
+  `cidmix` that includes kadid at 0.5, but the promoted one does not. So the
+  appendix-F inversion cannot have entered its weights. (Its *reported* KADID
+  number is still an ext-root read and still needs the F rule.)
+- **Its board fulleval already carries the corrected HF-NL graft**
+  (`rank_graft_sources.hfnlproxy`, sha `1b610c04…`, landed by the sibling fill
+  lane today) and the post-`299ccc8c` M3a 0.953967. `repro` is **null** —
+  confirmed absent, as expected for its era.
+- **GATE G-T0 (already run, zero degrees of freedom — a sha match is
+  pass/fail).** `bake_dial_refit fit-lasso` (the Rust owner, a wholly separate
+  implementation) re-run on the frozen gram + anchor with the recipe above
+  reproduced the artifact **BYTE-IDENTICALLY**: sha256
+  `51437a34f04887ce850b25eff4f72a6bcd12926873ce060a12878d558a7517db`, and
+  `--parity-fit` reported w/bias/mu/sd **bit-exact** vs the era's
+  `fits/ADD156_safesyn_only_raw_lasso.npz`. Reproduction class = **EXACT**.
+  Recorded here as a prior because it gates the rest; it is not a finding with
+  a tunable outcome.
+
+## T.2 The pool experiment (frozen)
+
+**One recipe, several pools.** Everything except the coordinate slice is held
+at ADD156's values: safesyn-only, raw space, `human_score`, lasso, tau 0, f16,
+spline on the packed forward. Solver is **deterministic coordinate descent** —
+there is no RNG anywhere in the chain, so **k-seed replication does not apply
+and is not run**; the same inputs give the same bytes (G-T0 proves it across
+19 days and two languages).
+
+**Two roots, because pool width and extraction regime are different things.**
+
+| root | gram | rows / W | pools (coordinate slices) |
+|---|---|---|---|
+| **A** = the ADD156-era v1-372 root (`canonical-2026-05-21/train/safesyn.parquet`) | frozen `linear-probe/grams/safesyn.npz` | W 196,086 | **T-a** f0-155 (= ADD156) · **T-b** f0-371 |
+| **B** = the current 944 root (`ext944-canonical-2026-08-01/ext_safesyn_full.parquet`) | `add156repro/grams/e944_safesyn.npz`, built 2026-08-06 by `bake_dial_refit gram --space raw --expect-n-feat 944 --target-clip-min -100`, sha `e78a5bdd…` | 111,068 | **T-a944** f0-155 · **T-b944** f0-371 · **T-c944** f0-719 · **T-d944** f0-943 |
+
+Root A answers the *original* question in ADD156's own regime (does the v1
+peak/max/masked/IW block f156-371 earn its place). Root B answers the *current*
+one (do v2-348 and append-224/append2-20 earn theirs). **T-a vs T-a944 is the
+bridge cell**: identical pool, different root, so it prices how much of any
+cross-root difference is regime rather than features.
+
+**Registered structural prediction (gate, not a finding).** At root B the
+folded regimes zero f156-371 by construction, so **T-b944 must be
+byte-identical to T-a944**. If it is not, the 944 root is not what the
+regime doc says and everything downstream is suspect — STOP and report.
+
+**Lambda.** Primary grid = ADD156's **lam 2e-3** everywhere. Because L1
+strength interacts with pool width, a wider pool could look worthless merely
+because it is over-penalized; so every pool also runs the registered sweep
+**lam ∈ {3e-4, 1e-3, 2e-3, 5e-3}** (the linear924 grid's span, trimmed to 4).
+A pool's value is read at its OWN best lam as well as at the shared 2e-3, and
+both are reported. 4 lams x 6 pools = 24 fits.
+
+**Evaluation.** Every cell goes through the owners only: `run_full_eval.sh
+<bake> <name> 944` (board fulleval; `--regime 944` presets — ADD156-class
+bakes are 372-input models scored off the 944-root legs, which is exactly how
+the board already scores it) and `freeze_check --profile balanced-2026-08-04
+--annotations benchmarks/eval_annotations.json`. Statistics are never
+re-derived: `panel`/`zenstats` own them.
+
+**Named-survivor reporting.** For each pool, the surviving >f155 coordinates
+are decoded by the committed `scripts/featsub/k128_stage_map.py` (block /
+scale / channel / local / extraction pass). "How many survive" without names
+is not an answer.
+
+## T.3 Noise bands + decision rule (frozen BEFORE any number)
+
+The fit is deterministic, so fit noise is **exactly zero** and the only noise
+is **eval-sampling** noise. Registered instrument: **paired bootstrap over
+eval pairs** — resample the corpus's pairs with replacement, recompute BOTH
+models' SROCC on the SAME resample, take Δ; 2,000 resamples; the RNG lives in
+the caller and the statistic in `panel --batch` (indexed mode), per the
+one-owner rule. Seeded `numpy.random.default_rng(20260806)` so the interval is
+itself reproducible.
+
+A per-axis delta is a **FINDING** only if BOTH hold:
+
+1. the 95% percentile CI of Δ SROCC **excludes 0**, and
+2. |Δ| ≥ the axis floor: **CID22 0.005** (2x the campaign's registered
+   within-config seed sd 0.0025), **KonJND / HF-NL-per-ref 0.039** (appendix
+   O's measured axis LSD), **every other rank axis 0.010**.
+
+Anything failing either test is reported as **INSIDE NOISE** and explicitly
+does not support a claim. A delta that is statistically real but below the
+floor is reported as "detectable, below the practical floor" — it is not a
+finding either.
+
+## T.4 Registered outcomes (frozen; exactly one fires per root, plus the mixed case)
+
+- **(a) SURVIVE-AND-BUY** — >f155 coordinates survive the lasso AND buy at
+  least one axis outside noise ⇒ **name them** (index, block, scale, channel,
+  local, extraction pass) and state which axes they buy and at what cost. This
+  is a real finding about what the wider regimes contribute to an additive
+  model.
+- **(b) BASIC-156 PHENOMENON** — all >f155 coordinates zero out, OR they
+  survive but buy nothing outside noise on any axis ⇒ the additive class is a
+  **basic-156 phenomenon**, and a large body of speculation about the wide
+  pools' additive value is retired.
+- **(c) MIXED BY AXIS** — some axes gain outside noise, others lose outside
+  noise ⇒ report the **per-axis map**, no aggregate verdict.
+
+Additionally, and independent of (a)/(b)/(c): if the reproduced ADD156's
+modern-battery numbers differ from the 2026-07-18-era published numbers on any
+axis, the difference is attributed **explicitly** to a named correction
+(KADID orientation / HF-NL orientation / append2 coverage / dial units /
+corpus dependency) or reported as unexplained. "It moved" is not an
+attribution.
+
+## T.5 The modern battery (frozen; run on the reproduced ADD156 and on the best pool cell)
+
+1. `freeze_check --profile balanced-2026-08-04 --annotations …` — floor count
+   n/8 with absent-vs-failed distinguished.
+2. **M3a** on the corrected instrument (post-`299ccc8c`), via
+   `run_full_eval.sh` (measured, never carried).
+3. **Dial in DIAL UNITS** after the registered packaging chain —
+   `add-spline --anchor anchor944_dial.parquet --target-col target_score` then
+   `pack` (pruning ON, the default since `eb8edf3c`). The 2026-07-18 era
+   reported raw-unit dials; **the packaged number is the honest one**.
+4. **G-RANGE** — `bake_dial_refit gate --corpus ext_cid22val.parquet`.
+5. **corruption** — from the fulleval (dial-alone stated for honesty; the
+   924/944 dial's own ordering is broken by design and the head is the owner).
+6. **HF-NL per-ref** — consumed from the sibling fill lane's graft, never
+   recomputed here.
+7. Era-tagged scorecard vs **ADD156-original**, **B**, **C**, **winner_dial**.
+
+## T.6 Ops (frozen)
+
+Workspace `../zensim--add156repro`, `CARGO_TARGET_DIR=$HOME/tmp/zensimar-target`,
+`run-heavy --jobs 6`, ≤3 concurrent fits (other lanes live), logs
+`~/tmp/add156repro/`, artifacts `/mnt/v/output/zensim/bakes/add156repro/`,
+Tower mirror for new bakes. Nothing ships, swaps, or is selected here.
+
+## T.7 Confounds + limitations (registered before any number)
+
+- **Roots A and B are different row populations** (196,086 vs 111,068) as well
+  as different extraction regimes. The bridge cell prices the total root
+  effect; it cannot decompose it into "rows" vs "regime". Cross-root pool
+  deltas are therefore never quoted as feature effects.
+- **safesyn-only is ADD156's mix, and it is a narrow one.** A >f155 feature
+  that is worthless on safesyn may be valuable on a wider mix. The finding is
+  scoped to this recipe and says so.
+- **lam is on the mean-loss scale**, which depends on the target's variance;
+  root B's target carries a negative tail (min −7.39) that root A's does not,
+  so equal lam is not equal shrinkage across roots. Within a root it is exact.
+- **KADID and TID rows are ext-root reads** and inherit the appendix-F
+  inversion: this appendix reads `rank.kadid.srocc_signed` **negated** and
+  never cites `rank.kadid.srocc`.
+- **The eval corpora are shared across cells**, so the paired bootstrap
+  measures the right thing (same pairs, both models) but all cells' CIs are
+  correlated; no multiplicity correction is applied and none is claimed.
+- **M3a is measured per bake and is itself an instrument**; ensembles are not
+  in scope here (every cell is a single ZNPR).
