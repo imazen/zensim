@@ -80,37 +80,69 @@ real, §4); (iii) presentation: the gauntlet's hfnlproxy *pooled scatter* cell i
 range-restricted and looks like a shotgun blast even for a per-ref-excellent model —
 use the new HF-NL panel instead.
 
-## 3. The ceiling: what a strong metric can even get here
+## 3. The ceiling: what a strong metric can even get here — CORRECTED 2026-08-05 (full coverage)
 
-The target is ssim2-derived, so ssim2-vs-itself is +1.0 by construction (computed,
-118/118 groups: +1.0000). Independent references exist only for the non-avif cells
-(fill4 sidecar; avif has no butteraugli/cvvdp anywhere). Registered subset = refs
-with ≥6 covered cells: **118 refs / 2,410 pairs, 0% avif** — every row below on
-identical pairs; within-subset reads only, never the axis headline.
+> **COVERAGE CORRECTION (2026-08-05, user-prompted).** The first version of this
+> section claimed "avif has no butteraugli/cvvdp anywhere" and computed the
+> reference ceiling on a 118-ref / 2,410-pair non-avif subset. The data-location
+> audit confirmed the avif 4-metric fleet fill (`fill-avif-b0..b7[-cpu]`,
+> `s3://codec-corpus/jobs/`) was queued 2026-07-02 and **descoped by user
+> directive the same day** at ~0.2% done (PLAN_BEAT_A amendment) — so no
+> sidecar covered avif. The slice's own cells were then backfilled **locally**
+> (no fleet spend, no re-encode): 8,360 avif members ranged-GET sha-verified
+> from the mandfix4 box tars + 23 residual non-avif gaps, scored with the fill4
+> metric implementations (0 failures). **Slice 4-metric coverage: 26.2% →
+> 100.0% (11,356/11,356).** Agreement gates: bit-identical vs the 17
+> Jul-2-fleet blob cells that did run (butteraugli 6e-8); the 4 old cvvdp
+> mode-B NaN cells re-scored non-null. Sidecar (+R2+Tower):
+> `fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05.parquet`
+> (sha `64ce4278…`). Campaign: APPENDIX O.R7; registry:
+> `hfnl-ceiling-subset-superseded-fullcorpus`.
 
-| row (subset, per-ref mean) | value |
-|---|---|
-| ssim2-self (trivial ceiling) | +1.000 |
-| **dssim** (negated) | **+0.786** |
-| IW-SSIM | +0.655 |
-| ColorVideoVDP | +0.549 |
-| butteraugli (negated) | +0.420 |
-| best learned: FS_GL0p3 / FS_PILOT1 / v47 / ADD156 | **+0.734 / +0.729 / +0.707 / +0.703** |
-| winner_dial / C(W10L9) / B | +0.650 / +0.620 / +0.607 |
-| mid-944 MLP cells | +0.11 … +0.49 |
+The target is ssim2-derived, so ssim2-vs-itself is +1.0 by construction. With
+full coverage the reference rows are computed on the **same footing as every
+model's axis number** — per-ref signed SROCC, the axis min-3 rule, all 757
+scoreable refs — so reference rows and model `per_ref_mean`s compare directly.
+The pre-fill registered subset values (118 non-avif refs; within-subset reads
+only) are preserved in the second column and in the JSON as `subset_mean`.
 
-Side observation: mid-944 cells do noticeably better on this non-avif subset than
-on the full corpus (mid-944 median cell +0.093 full → +0.270 subset) while the
-era/sparse class barely moves — **the 944-MLP deficit concentrates in the avif
-cells**, which are 73.6% of the axis. A codec-stratified per-ref view is the
-natural follow-up instrument.
+| row (per-ref mean) | FULL corpus (757 refs) | old subset (118 refs, 0% avif) |
+|---|---|---|
+| ssim2-self (trivial ceiling) | +1.000 | +1.000 |
+| **dssim** (negated) | **+0.833** | +0.786 |
+| IW-SSIM | +0.763 | +0.655 |
+| butteraugli (negated) | +0.733 | +0.420 |
+| ColorVideoVDP | +0.660 | +0.549 |
+| best learned: ADD156 / Ebothg / b_sdr / GL λ=1 | **+0.831 / +0.829 / +0.825 / +0.85** | (subset: +0.70–0.73 band) |
+| winner_dial / C(W10L9) / v47 | +0.644 / +0.733 / +0.725 | +0.650 / +0.620 / +0.707 |
+| mid-944 MLP single (class median, §4) | **+0.093** [IQR −0.04, +0.27] | +0.11 … +0.49 (subset flattered them) |
 
-Reading: **even strong independent perceptual metrics agree with ssim2's
-near-lossless ordering at only 0.42–0.79 per-ref.** The axis is intrinsically hard.
-The top learned models are *inside* the independent-metric band — above cvvdp,
-IW-SSIM and butteraugli, ~0.05 under dssim (the target's nearest kin, expected to be
-the top non-self row). "All models suck at it" is false; the mid-944-MLP deficit
-below that band is real model behavior.
+Codec-stratified reference rows (min-3 rule per stratum; read within a column —
+per-stratum ladders differ in length and range restriction):
+
+| codec (share of pairs) | n refs | dssim(neg) | iwssim | butter(neg) | cvvdp |
+|---|--:|--:|--:|--:|--:|
+| zenavif (73.6%) | 757 | **+0.828** | **+0.762** | **+0.740** | **+0.657** |
+| zenjpeg (14.7%) | 173 | +0.797 | +0.440 | +0.446 | +0.514 |
+| zenjxl (5.6%) | 51 | +0.699 | +0.667 | +0.510 | +0.514 |
+| zenwebp (6.1%) | 71 | +0.429 | +0.396 | +0.232 | +0.297 |
+
+Two corrected readings:
+
+1. **The independent-metric band is 0.66–0.83, not 0.42–0.79** — the old subset
+   dramatically understated it (butteraugli +0.42 → +0.73) because the non-avif
+   subset is the *hard* part of the corpus. **The era-additive top models
+   (ADD156 +0.831, Ebothg +0.829, b_sdr +0.825) and the sparsity-trained GL
+   cells (+0.81–0.85) sit AT the dssim row (+0.833) — within the axis LSD
+   (~0.039) of the best independent reference.** The top learned models are not
+   merely "inside the band"; they match its ceiling.
+2. **The avif majority is the EASIEST stratum for every reference metric** (all
+   four stratified rows peak at avif; webp is hardest for everyone). So the
+   mid-944-MLP deficit that concentrates in the avif cells (§1's occlusion
+   finding, confirmed here) is unambiguously **model behavior** — independent
+   metrics order avif near-lossless ladders *better* than the ladders the
+   subset measured. "The axis is intrinsically hard" survives only in the weak
+   form: even dssim tops out at ~0.83 per-ref against an ssim2-derived target.
 
 ## 4. The family pattern (corrected board, 233 cells)
 
@@ -169,19 +201,27 @@ coarsely quantized — that granularity is what the LSD absorbs.
    this convention (pin `730a386e`).
 3. **The LSD.** Treat Δ < 0.04 as noise, Δ ≥ 0.05 as real (median/p90 paired
    bootstrap; per-model CIs ±0.02–0.05).
-4. **The ceiling is ~0.79-0.85, not 1.0.** Independent metrics reach 0.42–0.79 on
-   matched pairs; era-additive/GL cells reach 0.83-0.85 on the full corpus. Read
-   0.7+ as "excellent", 0.4-0.7 as "useful", |x| < 0.15 as "no reliable ladder
+4. **The ceiling is ~0.83, not 1.0.** Independent metrics reach 0.66–0.83 on the
+   full corpus (2026-08-05 coverage fill; dssim tops the band) and the
+   era-additive/GL cells sit AT that ceiling (0.83-0.85). Read 0.7+ as
+   "excellent", 0.4-0.7 as "useful", |x| < 0.15 as "no reliable ladder
    signal", ≤ −0.15 as "inverted — dial hazard in the HF zone".
 5. **It is an ssim2-agreement axis**, not human truth: the human check for the HF
    zone is JPEG-AI-SDR25.
 
 ## 8. Limitations
 
-Registered confounds (O.2.10) all apply: ssim2-derived target; reference-ceiling
-subset excludes avif (73.6% of the axis's pairs) entirely; ~11 pairs/ref
-quantization; era models ride the exact-row-identity 372 slice
-(`derive_hfnlproxy_372.py`). Ensemble cells have corrected scalar means but no
-per-ref distribution here (the instrument loads one ZNPR per member; distributions
-computable via `--ensemble` re-runs if ever needed). The `--per-pair-refs` dump +
-this study's manifests make the whole analysis re-runnable in ~5 minutes.
+Registered confounds (O.2.10), post-correction status: ssim2-derived target
+(still applies); ~11 pairs/ref quantization (still applies); era models ride the
+exact-row-identity 372 slice (`derive_hfnlproxy_372.py`; still applies). The
+"reference-ceiling subset excludes avif entirely" confound is **RESOLVED** by
+the 2026-08-05 coverage fill — reference rows are now full-corpus (757 refs,
+100.0% pair coverage on all four metrics); the subset values remain in the JSON
+as `subset_mean` for within-subset reads. New caveat: the codec-stratified rows
+have per-stratum range restriction (shorter within-stratum ladders for
+jpeg/jxl/webp) — read within a column. Ensemble cells have corrected scalar
+means but no per-ref distribution here (the instrument loads one ZNPR per
+member; distributions computable via `--ensemble` re-runs if ever needed). The
+`--per-pair-refs` dump + this study's manifests + `hfnl_metrics_full.parquet`
+(the merged 4-metric slice table in the report dir) make the whole analysis
+re-runnable in ~5 minutes.

@@ -1604,8 +1604,10 @@ function renderHfnl(){
   host.append(el('div',{class:'cap',html:'Each row is one model: the shaded strip is its distribution of '
     +'per-reference signed SROCC over the '+(HA.models[0].n_groups||757)+' hfnlproxy references (bar height ∝ '
     +'√count per 0.05 bin), the tick + whisker its mean and 95% bootstrap CI, the small open circle its mean on '
-    +'the <b>sidecar subset</b> (118 non-avif refs) where the dashed reference lines live — subset marks compare '
-    +'to subset lines only. <b>Axis LSD '+(lsd.median!=null?(+lsd.median).toFixed(3):'—')+'</b> (p90 '
+    +'the historical <b>118-ref non-avif subset</b> (the pre-2026-08-05 sidecar coverage). The dashed reference '
+    +'lines are <b>full-corpus</b> per-ref means (avif reference-metric coverage was backfilled 2026-08-05 — '
+    +'compare them to the ticks directly; the old subset values are retained in the JSON as subset_mean). '
+    +'<b>Axis LSD '+(lsd.median!=null?(+lsd.median).toFixed(3):'—')+'</b> (p90 '
     +(lsd.p90!=null?(+lsd.p90).toFixed(3):'—')+', drawn bottom-right): mean differences under it are '
     +'ref-sampling noise. Split-half model-ranking reliability SROCC '
     +(meta.split_half&&meta.split_half.srocc_mean!=null?(+meta.split_half.srocc_mean).toFixed(3):'—')

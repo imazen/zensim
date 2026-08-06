@@ -9013,13 +9013,76 @@ convention + LSD; `bake_verdict --per-pair-refs`;
 
 Limitations (registered O.2.10 confounds all bit): the target is ssim2-derived
 (this axis = ssim2-band agreement, not human truth — sdr25 is the human
-check); the reference-ceiling subset excludes avif entirely; per-ref SROCC on
+check); the reference-ceiling subset excludes avif entirely (⇒ **RESOLVED in
+O.R7**); per-ref SROCC on
 ~11 pairs is coarsely quantized (absorbed into the LSD, not hidden); the
 gauntlet's hfnlproxy pooled scatter cell remains visually terrible for GOOD
 models (range restriction) — the new panel, not that cell, is the readable
 view of this axis. The era models' hfnl numbers ride the 372-slice
 (`derive_hfnlproxy_372`) whose row-identity gate to the 944 slice is exact;
 era-vs-944 comparability is by-construction on identical pairs/targets.
+
+### O.R7 — COVERAGE CORRECTION (2026-08-05, user-prompted): the avif reference-metric gap is CLOSED for this slice; the ceiling band was UNDERSTATED
+
+O.R2's ceiling was subset-only because the avif 73.6% of the axis had no
+cvvdp/butteraugli/dssim/iwssim scores anywhere: the 2026-07-02 avif 4-metric
+fleet fill (`fill-avif-b0..b7` + `fill-avif-cpu-b0..b7`,
+`s3://codec-corpus/jobs/`) was **descoped by user directive the same day**
+(PLAN_BEAT_A amendment: "I don't want avif") after ~0.2% of jobs ran (251
+blobs). The user's 2026-08-05 correction request ("we should have 100%
+reference metric coverage … some were backfilled but separate") re-opened it;
+the data-location audit found the fleet's partial blobs + the descoping record
+— and the SLICE's own cells were then backfilled **locally** (no fleet spend,
+no re-encode): 8,360 avif members ranged-GET sha256-verified from the 8
+`mandfix4-zenavif-1782593621` box tars + 23 residual non-avif gaps (19
+wholly-missing + the 4 cvvdp mode-B NaN cells, all of which re-scored
+non-null), scored with the fill4 metric implementations (butteraugli-gpu /
+dssim-gpu / iwssim-gpu / cvvdp-CPU; zenmetrics `sweep,gpu,gpu-cuda`, RTX 5070;
+~17 min GPU + ~9 min cvvdp, 0 failures). **Coverage 2,977/11,356 (26.2%) →
+11,356/11,356 (100.0%) on all four metrics.** Agreement gates: bit-identical
+vs the 17 shared Jul-2 fleet-blob cells (cvvdp/dssim/iwssim exact, butteraugli
+6e-8); fill4 doubly-scored cells max |Δ| 2.1e-3 (butteraugli), <4e-6 (others);
+ssim2-self +1.0000.
+
+Full-corpus reference rows — per-ref signed SROCC, **the axis's own min-3
+rule, all 757 scoreable refs = the models' exact footing** (subset values
+preserved as `subset_mean`):
+
+| row | O.R2 subset (118 refs) | FULL corpus (757 refs) |
+|---|---|---|
+| dssim (negated) | +0.786 | **+0.833** |
+| IW-SSIM | +0.655 | **+0.763** |
+| butteraugli (negated) | +0.420 | **+0.733** |
+| ColorVideoVDP | +0.549 | **+0.660** |
+
+Codec-stratified (min-3 per stratum; within-column reads): zenavif is the
+**easiest** stratum for every reference metric (dssim +0.828, iwssim +0.762,
+butter +0.740, cvvdp +0.657; n=757) and zenwebp the hardest (+0.43/+0.40/
++0.23/+0.30; n=71); zenjpeg +0.80/+0.44/+0.45/+0.51 (n=173), zenjxl
++0.70/+0.67/+0.51/+0.51 (n=51).
+
+Two O.R2 readings are corrected: (1) the independent band is **0.66–0.83**,
+not 0.42–0.79 — the subset was the hard, avif-free part of the corpus — and
+the era-additive/GL top (ADD156 +0.831, Ebothg +0.829, b_sdr +0.825, GL λ=1
++0.85) sits **AT the dssim ceiling, within the axis LSD**, not "~0.05 under";
+(2) the O.R2 side observation is upgraded to a finding: independent metrics
+order avif ladders BETTER than the rest, so the mid-944-MLP avif-concentrated
+deficit (class median +0.093) is unambiguously **model behavior**, not
+intrinsic avif-ladder difficulty. O.R2's numbers remain valid within-subset
+reads; they must no longer be cited as the axis ceiling (registry:
+`hfnl-ceiling-subset-superseded-fullcorpus`).
+
+Artifacts: sidecar
+`fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05.parquet`
+(local + R2 canonical/ + Tower, sha `64ce4278…`, fill4-compatible schema —
+includes fresh non-null cvvdp for fill4's 4 in-slice mode-B NaN cells);
+merged slice table `hfnl_metrics_full.parquet` + `ceiling_full.json` + run
+logs in the report dir; `benchmarks/hfnl_axis_2026-08-05.json`
+`reference_rows` now carry full-corpus means (+ `subset_mean`,
+`full_min6_mean`, `reference_by_codec`); the gauntlet HF-NL panel caption
+updated (reference lines are now full-corpus, directly comparable to the mean
+ticks). The full 1.51M-cell avif fleet fill REMAINS descoped — this was a
+slice-scoped local fill (8,383 cells, ~$0 marginal).
 
 # REGISTERED APPENDIX P — THE STEERED-COMPARE PERF PROGRAM (2026-08-05, pre-registered before landing)
 

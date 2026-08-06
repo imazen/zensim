@@ -115,6 +115,10 @@ something that can replicate and surpass ssim2, integrating [KonFiG-IQA]."
 - **avif 4-metric fill: DESCOPED.** Runs `fill-avif-cpu-b0..b7` are paused
   (manifests + indexes + partial blobs preserved on R2; resumable via
   `hetzner_scorefile_launch.sh` if ever wanted). No fleet spend on avif.
+  *(2026-08-05: the HF-NL-proxy slice's 8,360 avif cells + 23 gaps were
+  backfilled LOCALLY — no fleet — for the appendix-O ceiling correction;
+  sidecar `fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05
+  .parquet`. The 1.51M-cell fleet fill itself remains descoped.)*
 - **The v53 program — replicate ssim2's tuning recipe, then surpass it:**
   ssim2 was Nelder-Mead-tuned on CID22-201 + TID2013 + KADID-10k + KonFiG-IQA.
   We now hold all four locally. v53 trains on:

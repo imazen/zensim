@@ -523,6 +523,21 @@
    "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md (30-model per-ref matrix, B=10000 paired bootstrap seed 777, 20-shuffle split-half seed 4242); benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R",
    "date": "2026-08-05",
    "fix_path": "none needed \u2014 cite deltas with the LSD; the gauntlet HF-NL panel draws it"
+  },
+  {
+   "id": "hfnl-ceiling-subset-superseded-fullcorpus",
+   "kind": "annotated",
+   "fields": [
+    "reference_rows (hfnl axis JSON)",
+    "hfnl_axis_report \u00a73 subset ceiling"
+   ],
+   "scope": {
+    "note": "the appendix-O O.R2 reference-ceiling values computed on the 118-ref / 2,410-pair non-avif sidecar subset (dssim +0.786, iwssim +0.655, cvvdp +0.549, butteraugli +0.420) and the 'independent metrics reach 0.42-0.79' band reading"
+   },
+   "reason": "SUPERSEDED AS THE AXIS CEILING 2026-08-05: the avif 73.6% of the slice had no reference-metric coverage (the 2026-07-02 fill-avif fleets were user-descoped at ~0.2%); the slice was backfilled locally (8,360 avif + 23 gap cells, fill4 implementations, 0 failures, bit-identical vs the 17 fleet blobs that ran) giving 100.0% coverage on all four metrics. Full-corpus rows on the models' exact footing (757 refs, min-3 rule): dssim +0.833, iwssim +0.763, butteraugli +0.733, cvvdp +0.660 \u2014 the band is 0.66-0.83, the era-additive/GL top sits AT the dssim ceiling, and avif is the EASIEST stratum for every reference metric (the mid-944 avif deficit is model behavior). The subset values remain valid WITHIN-SUBSET reads (kept as subset_mean); never cite them as the axis ceiling.",
+   "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md \u00a73 (corrected) + benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R7; sidecar fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05.parquet sha 64ce4278c35a2f90d1b8cf85da337ce95418b2ce572769be0318e15e98f6922a; merged table + ceiling_full.json in /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/",
+   "date": "2026-08-05",
+   "fix_path": "benchmarks/hfnl_axis_2026-08-05.json reference_rows[].mean = full-corpus (subset preserved as subset_mean); board panel reference lines now full-corpus"
   }
  ]
 }
