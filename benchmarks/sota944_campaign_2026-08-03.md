@@ -12052,8 +12052,22 @@ So **no n rescues a narrow band**, and neither floor substitutes for the other:
 n-only admits CID22's quantile bands (429 pairs each, spans 0.024–0.066, none
 discriminating); span-only admits `B3` (span 0.096, n=57, `r_SB` 0.26).
 
-**Estimability is not the binding condition.** Discrimination is. The 0.90
-`r_SB` bar is bracketed by n=768 (0.877) and n=1024 (0.918) at span 0.10, and
+**Estimability is not the binding condition.** Discrimination is — the two bars
+sit ~10× apart in n. Three of CID22's old bands show it directly: `B4` (266),
+`B5` (615) and `B6` (836) are all comfortably estimable (half-widths ≈0.10 /
+0.07 / 0.06 against the 0.20 bar) and rank models at `r_SB` 0.441 / 0.650 /
+0.778.
+
+**Correction filed against my own first write-up:** I initially used `B9` as
+that example, quoting appendix U's "marginal bootstrap sd 0.178" as if it were a
+CI half-width. It is a standard deviation. Measured directly (B=10,000, 15
+models), **`B9`'s half-width is 0.334** — ×1.96 of U's sd, as expected — so `B9`
+fails estimability as well, i.e. **all three conditions**, not two. The
+conclusion about which condition binds is unchanged (it rests on the curves);
+the illustration was wrong and is corrected in
+`benchmarks/band_minimum_n_2026-08-06.md`.
+
+The 0.90 `r_SB` bar is bracketed by n=768 (0.877) and n=1024 (0.918) at span 0.10, and
 CID22's REAL bands at that span agree independently: `B7` (1092) → **0.900**,
 `B8` (1382) → 0.949, then 836 → 0.778, 615 → 0.650, 266 → 0.441, 57 → 0.260.
 

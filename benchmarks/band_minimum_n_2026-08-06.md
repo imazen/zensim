@@ -72,8 +72,21 @@ n = 16 — so the theory is a usable predictor here, and the two agree that
 **estimability is cheap**: the 0.20 bar is crossed between n = 64 and n = 96.
 
 **Estimability is therefore NOT the binding condition**, which is the single
-most useful thing this table says. CID22's `B9` has a half-width of 0.178 — it
-*passes* condition 1 — and is still worthless, because it fails the other two.
+most useful thing this table says. Three of CID22's old bands prove it directly:
+`B4` (n=266), `B5` (615) and `B6` (836) all sit comfortably inside the 0.20 bar
+(half-widths ≈0.10 / 0.07 / 0.06) and rank models at `r_SB` 0.441 / 0.650 /
+0.778 — estimable, and unable to gate anything.
+
+> **Correction, filed against an earlier revision of this document.** `B9` was
+> first used as that example, on the strength of a "marginal bootstrap sd 0.178"
+> quoted from appendix U. That is a standard DEVIATION, not a CI half-width, and
+> repeating it as one was my error. Measured here directly at B=10,000 over 15
+> models, **`B9`'s marginal 95 % CI half-width is 0.334** (reference-clustered
+> 0.310) — ×1.96 of U's sd, as it should be. So `B9` does not "pass estimability
+> and fail the rest": **it fails all three conditions.** The argument that
+> estimability is not the binding constraint is unaffected — it rests on the
+> curves above and the discrimination surface in §4, where the bars are crossed
+> ~10× apart in n — but the illustration was wrong and is replaced.
 
 ## 2. Instrument B — the pure-span curve (n held fixed at 200)
 
@@ -166,6 +179,9 @@ n = 120 models, 20 shuffles, 30 model pairs × B = 2,000 for the LSD:
 | B7 | 1092 | 0.100 | **0.900** | 0.024 | 0.290 | 0.379 | 0.398 | 4.60 |
 | B8 | 1382 | 0.100 | **0.949** | 0.016 | 0.393 | 0.461 | 0.488 | 6.12 |
 | **B9** | **43** | **0.019** | **0.711** | **0.132** | **−0.263** | **−0.187** | **−0.015** | 1.88 |
+
+`B9`'s marginal 95 % CI half-width is **0.334** (reference-clustered 0.310) —
+it fails the estimability bar too, so it fails all three conditions.
 
 Only **two of ten** bands discriminate. And note `B3`: DR = 1.09 clears
 condition 3 while `r_SB` = 0.26 fails condition 2 — so condition 3 is not

@@ -61,9 +61,17 @@
 /// Discrimination, not estimability, is what binds. A band is *estimable* far
 /// sooner — at span 0.10 the marginal 95 % CI half-width crosses 0.20 between
 /// n=64 (0.209) and n=96 (0.168) — but an estimable band that ranks models
-/// inconsistently cannot gate anything, which is the job. CID22's old `B9` was
-/// exactly that: half-width 0.178 (inside the estimability bar) with
-/// `r_SB` 0.753 and a model population running −0.263 … −0.015.
+/// inconsistently cannot gate anything, which is the job. Three of CID22's old
+/// bands were exactly that: `B4` (n=266, half-width ≈0.10) `r_SB` 0.441, `B5`
+/// (615) 0.650, `B6` (836) 0.778 — all comfortably estimable, none able to rank.
+///
+/// CID22's old `B9` is NOT that example: it fails every condition, including
+/// estimability. Its measured marginal 95 % CI half-width is **0.334**
+/// (reference-clustered 0.310) against the 0.20 bar, alongside `r_SB` 0.711 and
+/// a model population running −0.263 … −0.015. (Appendix U's widely-quoted
+/// "0.178" for this band is a bootstrap standard DEVIATION, not a half-width;
+/// ×1.96 recovers ≈0.35, which is what is measured here. An earlier revision of
+/// this comment repeated it as a half-width and drew the wrong conclusion.)
 pub const N_MIN: usize = 1000;
 
 /// Minimum target span for a band to be usable (appendix V).
