@@ -10416,6 +10416,52 @@ R2 + Tower) with a sha manifest; `DATA_SPLITS` + `DATASET_HISTORY` +
 `DATA_PROVENANCE` registrations; and the orientation-gate verdict for both
 splits.
 
+## S.A1 AMENDMENT (2026-08-06, build lane `claude-hdrcorpus2`) — blockers resolved; two registered method changes; the build is live
+
+**Blockers.** B1+B3+B4 landed zenmetrics `d7318527`, B2 (the Diffmap executor)
+`9093cc23`, B7 = images `ghcr.io/imazen/zenfleet-worker:exec-hdr-9093cc23` /
+`:exec-gpu-hdr-9093cc23` (pins: zenav1-svt `4c5c1324`, ultrahdr `73ab3d27`).
+`JobKind::Encode`/`Diffmap` gained `hdr` with the ScoreFile append-only serde
+contract — a golden test proves every pre-existing encode job id (including the
+live avifgen ledger) byte-stable. Run `jobs/hdrgrid-enc-20260806` declared:
+**102,600 encode jobs** (1,140 sources × 3 arms × the registered 30-q grid),
+all `hdr:true`, 34,200/arm.
+
+**Method change 1 — the gainmap arm does NOT use ultrahdr's built-in HDR-only
+encode path.** Building B4 exposed a round-trip defect in `ultrahdr-rs`
+(filed **imazen/ultrahdr#33**): gain-map bytes are quantized against the
+CONFIG boost range while the stored metadata declares the content-derived
+ACTUAL range, so every conformant reader — including the crate's own
+`decode_hdr` at full weight — reconstructs under-boosted. Measured on a
+2000-nit PQ ramp: decoded peak 732 nits; the byte math reproduces the number
+exactly. The arm instead composes the crate's public primitives (its own
+`tonemap_image_to_srgb8` + `compute_gainmap` + `Encoder` assembly) and
+rewrites the per-channel metadata min/max to the grid the bytes were actually
+quantized on (the libultrahdr convention) — interop-correct files, measured
+reconstruction 1916.7/2000 nits, gated by a round-trip test whose >812-nit
+assertion also pins the decode-back boost constant. The svt arm is exactly the
+budget-harness shape (BT.2020nc limited 10-bit 4:2:0, `try_encode_frame_420_hbd`
+still CQP, zenavif-serialize mux, nclx {src primaries, 16, 9, limited});
+decode-back reuses the ordinary AVIF path unchanged, round-trip gated <10%
+mean relative luma error at q85.
+
+**Method change 2 — diffmap scope.** The Diffmap executor produces per-pixel
+maps for **butteraugli** (CPU reference crate) and **cvvdp** (in-tree port),
+each with the SAME feeding its recorded scalar uses (butter: linear at
+1.0==intensity_target=1000; cvvdp: `DisplayModel` y_peak=1000
+STANDARD_HDR_LINEAR), persisted as gzip'd PFM blobs (exact f32,
+self-describing dims). **ssim2 has no per-pixel map API in-tree — its diffmap
+is recorded absent-not-failed** (the executor refuses the name with that
+wording rather than approximating a map); this narrows S.5's "every perceptual
+metric" to the two map-owning metrics, honestly.
+
+**Coordination facts.** The avifgen campaign (appendix Z) owns the GPU score
+queue ≈33 h from 2026-08-06 20:00Z; this corpus's GPU score declares queue
+behind it (encode + diffmap + cvvdp waves are CPU and unaffected). The encode
+wave runs lease+snapshot claiming (its images predate the epoch-shard landing
+`ad1dd3a0`); epoch-shard is the candidate for the score wave's rebuilt image.
+S.R records gate outcomes and actuals.
+
 # REGISTERED APPENDIX T — THE ADD156 RE-VALIDATION + THE ADDITIVE FEATURE-POOL QUESTION (2026-08-06, pre-registered before any pool fit)
 
 ## T.0 Why this exists
