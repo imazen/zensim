@@ -63,19 +63,6 @@ implements its A1-A5/A9 candidates.
   numbers need the ext504 tables. Not fixed here (it is another lane's model);
   flagged so nobody ranks against that row.
 
-
-- **⛔ THE v1 GOLDEN BYTE-IDENTITY GATE IS ENVIRONMENT-FRAGILE — main CI red, OPEN
-  (triaged 2026-08-05).** `zensim/tests/v1_golden_bytes.rs` drifts ~1e-10 on 241-246/372
-  features (from f0) on CI ubuntu-latest (flipped green→red inside `926c71f7..05739a53`),
-  CI macos/arm, and a native M4/macOS-26 — while every AMD-linux environment
-  (glibc 2.35/2.36/2.39, rustc 1.97.1, same lock) passes both window endpoints.
-  Vendor/libm-class numerics; prime suspect = the `aaf9b808` archmage/magetypes
-  0.9.26→0.9.28 lock bump (rsqrt/reduction-shape class); needs an Intel box to bisect.
-  ALSO: windows CI red since ≥07-18 on unrelated tests, and **no successful main CI run
-  since 2026-07-16** — red masking red. Full triage + decisive next experiments:
-  `benchmarks/v1_golden_env_triage_2026-08-05.md`. Owner lane: board-hygiene
-  "rsqrt-investigation".
-
 - **⛔ ext-LINEAGE KADID TARGET WAS STORED INVERTED (found 2026-08-04; TABLES REBUILT
   2026-08-05, wave 10 — pre-2026-08-05 numbers remain sign-flipped).** `ext720`/`ext924`/`ext944`
   `ext_kadid.parquet` carry `human_score = (5−dmos)/4`; the canonical `(dmos−1)/4` is
@@ -114,6 +101,22 @@ implements its A1-A5/A9 candidates.
   `kadid-ext-trained-inverted-model`, `kadid-e1-gate-unsigned`).
 
 ### Resolved
+
+- **v1 golden byte-identity gate environment fragility — CLOSED-BY-POLICY 2026-08-05.**
+  USER RULING (verbatim): *"the golden-gate policy is tiny tolerances, not per-class
+  exactness; and full-precision fallbacks are acceptable only if runtime-optional via
+  generics — prefer archmage's precision-TIERED variants."* The exact-f64 golden never
+  held cross-vendor (goldens = AMD Zen 4; every non-AMD class diverges on 241-246/372
+  features, all producing ONE shared alternative result set). Converted
+  `zensim/tests/v1_golden_bytes.rs` to `|Δ| <= max(1e-6 abs, 1e-5·scale)` — derived
+  16-17× above the MEASURED full-372 cross-class spread (max abs 6.00e-8 at f62-real;
+  max rel 6.06e-7 among ≥1e-2-scale features; the triage doc's "~1e-10 rel" was the
+  abs-delta column misread) — and added `v1_same_class_determinism_bitexact` (two
+  same-box computes must stay bit-exact; determinism survives the conversion). The
+  companion rsqrt Adam kernel got runtime-selectable precision tiers
+  (`RsqrtPrecisionTier`: full/nr1/estimate, full default). Record + measurement:
+  `benchmarks/v1_golden_env_triage_2026-08-05.md` §RESOLUTION; tier costs:
+  `benchmarks/adam_rsqrt_tiers_2026-08-05.md`.
 
 - **Validate-side output-spline upper extrapolation diverged from the product
   runtime — RESOLVED 2026-07-04 (`5d4978db`).** `output_calibration_spline::

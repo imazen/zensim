@@ -1,4 +1,5 @@
-//! Phase-3 byte-identity gate for v1's 372-feature extraction.
+//! Phase-3 golden gate for v1's 372-feature extraction: TINY-TOLERANCE
+//! cross-environment, EXACT same-class determinism.
 //!
 //! **This is the gate, not a nice-to-have.** Per the phase-3 brief: "The
 //! existing invariant suite is necessary but NOT sufficient — the golden
@@ -22,18 +23,37 @@
 //! `compute_iw_features` all `true` — the same config phase-2's speed
 //! baseline uses as "v1 372-feature").
 //!
-//! **Comparison is EXACT bit-for-bit (`==` on `f64`), not tolerance-based.**
-//! v1 has zero tolerance per the phase-3 brief ("v1's 372-feature output
-//! must remain BYTE-IDENTICAL"); v2 gets the 1e-5-relative tolerance
-//! allowance, v1 does not. A single-ULP drift anywhere is a FAIL.
+//! ## Comparison policy (revised 2026-08-05, USER RULING)
 //!
-//! To regenerate (ONLY when a v1 change is deliberately, explicitly
-//! approved to shift output — which per the brief should never happen
-//! silently): `cargo run --release -p zensim --features training --example
-//! capture_v1_golden`, paste the new arrays in below, and say so explicitly
-//! in the commit message. Regenerating this file to make a failing test
-//! pass without that explicit approval defeats the entire point of the
-//! gate.
+//! The original gate was EXACT bit-for-bit (`==` on `f64` everywhere).
+//! That exactness never held across (CPU-vendor × libm) classes: the
+//! goldens were captured on AMD Zen 4, and every non-AMD environment ever
+//! observed (Intel x86 macOS 15/26 + Intel ubuntu-latest draws + Windows
+//! x64 Intel draws; ARM across macOS/Linux/Windows) diverges on 241-246
+//! of 372 features — all non-AMD classes producing BIT-IDENTICAL divergent
+//! values (one common alternative result set; instruction-level vendor
+//! dependence, not libm). Full forensics:
+//! `benchmarks/v1_golden_env_triage_2026-08-05.md`.
+//!
+//! Per the user ruling (2026-08-05): **"the golden-gate policy is tiny
+//! tolerances, not per-class exactness"**. So:
+//!
+//! - `v1_*_fixture_matches_golden` compare against the golden with a tiny
+//!   tolerance derived from the MEASURED cross-class drift (derivation on
+//!   [`assert_golden_close`]) — these must pass on EVERY runner class.
+//! - `v1_same_class_determinism_bitexact` keeps byte-exactness as a
+//!   SAME-CLASS property: two computes on the same machine must agree
+//!   bit-for-bit. Determinism was not lost in the conversion — only the
+//!   false claim that one vendor's bits are portable.
+//!
+//! To regenerate the golden values (ONLY when a v1 change is deliberately,
+//! explicitly approved to shift output — which per the brief should never
+//! happen silently): `cargo run --release -p zensim --features training
+//! --example capture_v1_golden`, paste the new arrays in below, and say so
+//! explicitly in the commit message. Regenerating this file to make a
+//! failing test pass without that explicit approval defeats the entire
+//! point of the gate. Note the capture machine's CPU class in the commit
+//! message (these arrays: AMD Zen 4 / WSL2 glibc 2.35 / rustc 1.97.1).
 
 #![cfg(feature = "training")]
 #![allow(clippy::excessive_precision, clippy::unreadable_literal)]
@@ -80,18 +100,57 @@ fn load_png_rgb8(path: &std::path::Path) -> (Vec<[u8; 3]>, usize, usize) {
     (rgb, w, h)
 }
 
-/// Assert exact bit-for-bit equality; on mismatch, report every diverging
-/// index (not just the first) so a refactor's blast radius is visible at a
-/// glance.
-fn assert_golden_exact(name: &str, got: &[f64], golden: &[f64]) {
+/// Tiny-tolerance cross-environment comparator (2026-08-05 user ruling:
+/// "tiny tolerances, not per-class exactness").
+///
+/// PASS iff, per feature: `|got - golden| <= max(ABS_FLOOR, REL_TOL *
+/// max(|got|, |golden|))`. NaN anywhere fails (NaN never satisfies `<=`).
+///
+/// ## Bound derivation (MEASURED, 2026-08-05)
+///
+/// The cross-class drift was measured over the FULL 372-feature vectors on
+/// the non-AMD class (Apple M4 native run of `capture_v1_golden` at main
+/// `7577dfa6`, diffed against these AMD-Zen4-captured goldens; CI logs
+/// confirm Intel x86 + Windows/Linux ARM print bit-identical divergent
+/// values — one shared non-AMD result set, run 31048977926):
+///
+/// - GOLDEN_SYNTHETIC: 246/372 divergent; max |Δ| = 2.09e-8 (f102),
+///   max rel = 6.06e-7 (f89, |golden| 2.7e-2)
+/// - GOLDEN_REAL: 241/372 divergent; max |Δ| = 6.00e-8 (f62),
+///   max rel = 2.76e-4 (also f62 — its |golden| is only 2.2e-4)
+///
+/// The drift is ABSOLUTE-shaped (per-pixel op divergence pooling into
+/// means, |Δ| <= 6e-8 at every feature regardless of scale); large
+/// relative drift appears only on tiny-magnitude features. Hence a
+/// two-term bound:
+///
+/// - `ABS_FLOOR = 1e-6`: 16.7x above the measured max |Δ| (6.00e-8).
+/// - `REL_TOL  = 1e-5`: 16.5x above the measured max relative drift among
+///   features with |golden| >= 1e-2 (6.06e-7); binds only above ~0.1
+///   magnitude, and equals the relative allowance v2 features have always
+///   had — v1 cross-class now gets the same tiny relative budget plus the
+///   absolute floor.
+///
+/// (The 2026-08-05 triage doc's original "~1e-10 relative" figure was the
+/// abs-delta column of the panic printout misread as relative — the
+/// measured relative spread reaches 2.76e-4. The bound above is derived
+/// from the actual full-vector measurement, not that figure.)
+///
+/// On mismatch, reports every out-of-bound index (not just the first) so
+/// a refactor's blast radius is visible at a glance.
+fn assert_golden_close(name: &str, got: &[f64], golden: &[f64]) {
+    const ABS_FLOOR: f64 = 1e-6;
+    const REL_TOL: f64 = 1e-5;
     assert_eq!(got.len(), golden.len(), "{name}: length mismatch");
     let mut mismatches = Vec::new();
     for (i, (&g, &e)) in got.iter().zip(golden.iter()).enumerate() {
-        // NaN-safe: NaN != NaN under `==`, but a golden should never BE NaN
-        // (v1's tests already assert finiteness elsewhere); if got is NaN
-        // where golden isn't (or vice versa), that IS a real mismatch and
-        // must fail loud, not be swallowed by a permissive comparator.
-        if g.to_bits() != e.to_bits() && !(g.is_nan() && e.is_nan()) {
+        let allowed = ABS_FLOOR.max(REL_TOL * g.abs().max(e.abs()));
+        // `!(x <= y)` (rather than `x > y`) so NaN in either value fails.
+        // The negation is the point — clippy's suggested `>` would swallow
+        // NaN (NaN > allowed is false), turning a poisoned feature into a
+        // silent pass.
+        #[allow(clippy::neg_cmp_op_on_partial_ord)]
+        if !((g - e).abs() <= allowed) {
             mismatches.push((i, g, e));
         }
     }
@@ -107,7 +166,7 @@ fn assert_golden_exact(name: &str, got: &[f64], golden: &[f64]) {
             })
             .collect();
         panic!(
-            "{name}: {} of {} features diverged from the golden (v1 byte-identity gate FAILED):\n{}{}",
+            "{name}: {} of {} features exceeded the golden tolerance (|delta| <= max({ABS_FLOOR:.0e}, {REL_TOL:.0e}*scale); v1 golden gate FAILED):\n{}{}",
             mismatches.len(),
             got.len(),
             preview.join("\n"),
@@ -127,7 +186,7 @@ fn v1_synthetic_fixture_matches_golden() {
     let dist_px = common::generators::distort_block_artifacts(&ref_px, w, h);
     let result =
         compute_zensim_with_config(&ref_px, &dist_px, w, h, v1_config()).expect("v1 compute");
-    assert_golden_exact("GOLDEN_SYNTHETIC", result.features(), &GOLDEN_SYNTHETIC);
+    assert_golden_close("GOLDEN_SYNTHETIC", result.features(), &GOLDEN_SYNTHETIC);
 }
 
 #[test]
@@ -138,7 +197,41 @@ fn v1_real_fixture_matches_golden() {
     assert_eq!((rw, rh), (dw, dh), "fixture dimension mismatch");
     let result =
         compute_zensim_with_config(&ref_px, &dist_px, rw, rh, v1_config()).expect("v1 compute");
-    assert_golden_exact("GOLDEN_REAL", result.features(), &GOLDEN_REAL);
+    assert_golden_close("GOLDEN_REAL", result.features(), &GOLDEN_REAL);
+}
+
+/// Byte-exactness, preserved as a SAME-CLASS property (the half of the old
+/// exact gate that was ever true): on ONE machine, two independent computes
+/// of the same fixture must agree bit-for-bit on all 372 features. Catches
+/// nondeterminism (thread-order-dependent reductions, uninitialized reads,
+/// iteration-order dependence) on every runner class, without asserting the
+/// vendor-portability the exact golden falsely claimed. Runs BOTH fixtures.
+#[test]
+fn v1_same_class_determinism_bitexact() {
+    let compare_bits = |name: &str, a: &[f64], b: &[f64]| {
+        assert_eq!(a.len(), b.len(), "{name}: length mismatch between runs");
+        for (i, (&x, &y)) in a.iter().zip(b.iter()).enumerate() {
+            assert!(
+                x.to_bits() == y.to_bits(),
+                "{name}: f{i} differs between two same-box runs: {x:.17e} vs {y:.17e} — v1 extraction is nondeterministic"
+            );
+        }
+    };
+
+    let (w, h) = (64, 64);
+    let ref_px = common::generators::gen_value_noise(w, h, 0xC0FFEE);
+    let dist_px = common::generators::distort_block_artifacts(&ref_px, w, h);
+    let r1 = compute_zensim_with_config(&ref_px, &dist_px, w, h, v1_config()).expect("run 1");
+    let r2 = compute_zensim_with_config(&ref_px, &dist_px, w, h, v1_config()).expect("run 2");
+    compare_bits("SYNTHETIC determinism", r1.features(), r2.features());
+
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let (ref_px, rw, rh) = load_png_rgb8(&manifest.join("tests/fixtures/v1_golden_real_ref.png"));
+    let (dist_px, dw, dh) = load_png_rgb8(&manifest.join("tests/fixtures/v1_golden_real_dist.png"));
+    assert_eq!((rw, rh), (dw, dh), "fixture dimension mismatch");
+    let r1 = compute_zensim_with_config(&ref_px, &dist_px, rw, rh, v1_config()).expect("run 1");
+    let r2 = compute_zensim_with_config(&ref_px, &dist_px, rw, rh, v1_config()).expect("run 2");
+    compare_bits("REAL determinism", r1.features(), r2.features());
 }
 
 // ============================================================================

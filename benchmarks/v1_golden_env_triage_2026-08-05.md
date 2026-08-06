@@ -163,3 +163,60 @@ class boundary.**
    and investigation cost.
 
 Probe hygiene: PRs #57/#58/#59 closed unmerged, probe branches deleted.
+
+---
+
+# RESOLUTION — CLOSED BY POLICY (tolgold lane, 2026-08-05)
+
+**USER RULING (verbatim): "the golden-gate policy is tiny tolerances, not
+per-class exactness; and full-precision fallbacks are acceptable only if
+runtime-optional via generics — prefer archmage's precision-TIERED
+variants."** This is §A5 remedy 2 (tolerance-class gate) as a decision, not
+an option list. Implemented in the same change that records this section.
+
+## R1. Correction: the drift is ~6e-8 ABSOLUTE / up to 2.8e-4 relative — not "~1e-10 relative"
+
+This doc's §"What fails" figure ("~1e-10..1e-12-relative drift") was the
+panic printout's **abs-delta column misread as relative**. The full
+372-feature cross-class drift was measured for the tolerance derivation
+(Apple M4 native `capture_v1_golden` at main `7577dfa6` vs the AMD-Zen4
+goldens; CI run 31048977926 logs confirm Intel x86 + Windows/Linux ARM
+print bit-identical divergent values — ONE shared non-AMD result set):
+
+| fixture | divergent | max abs delta | max relative |
+|---|---|---|---|
+| GOLDEN_SYNTHETIC | 246/372 | 2.09e-8 (f102) | 6.06e-7 (f89, scale 2.7e-2) |
+| GOLDEN_REAL | 241/372 | 6.00e-8 (f62) | 2.76e-4 (f62 — its scale is only 2.2e-4) |
+
+The drift is ABSOLUTE-shaped (≤6e-8 at every feature regardless of scale);
+big relative numbers appear only on tiny-magnitude features.
+
+## R2. The converted gate (zensim/tests/v1_golden_bytes.rs)
+
+- `v1_*_fixture_matches_golden`: `|Δ| <= max(1e-6, 1e-5·scale)` per
+  feature. ABS floor 1e-6 = 16.7× above measured max abs (6.00e-8);
+  REL 1e-5 = 16.5× above measured max relative among features ≥1e-2 scale
+  (6.06e-7), and equals the relative allowance v2 has always had. Full
+  derivation lives on `assert_golden_close` in the test file.
+- `v1_same_class_determinism_bitexact` (NEW): byte-exactness retained as a
+  SAME-CLASS property — two computes on one machine must agree bit-for-bit
+  on all 372 features, every runner class. Determinism was not lost in the
+  conversion; only the false cross-vendor-portability claim was.
+
+## R3. Companion: the rsqrt Adam kernel is now precision-TIERED
+
+Per the same ruling's second clause, `22e37ce3`'s unconditional
+full-precision repair was restructured: `adam_simd.rs` gained
+`RsqrtPrecisionTier` (generic, monomorphized) with `RsqrtFull` (2 NR,
+default — the only tier production would use), `RsqrtNr1` (1 NR, the
+pre-repair expression tree as a NAMED tier), and `RsqrtEstimate` (raw
+14-bit), runtime-selected via `adam_update_rsqrt_v4_tiered`. Measured
+per-tier max w-relative error on the precision fixture (Zen 4): full
+1.117e-12 (gate 1e-9), nr1 1.665e-5 (gate 1e-3), estimate 1.116e-1
+(gate 1e0) — `tests/adam_simd_rsqrt_precision.rs` carries the
+derivations; tier costs: `benchmarks/adam_rsqrt_tiers_2026-08-05.md`.
+
+Status: **CLOSED-BY-POLICY.** The un-pinned vendor-divergent op hunt (§A5
+remedy 4) remains NOT pursued — the tolerance gate makes it unnecessary for
+CI health; reopen only if a product need for cross-vendor bit-identity
+appears.

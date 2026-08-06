@@ -1435,7 +1435,7 @@ fn apply_transducer_luma_gate(out: &mut [f64], ch: usize, toggles: V2NewFeatureT
 /// `compute_v2_features_impl_with_toggles` invocation before this change, 9
 /// after (one-time, at the scratch's construction). Pure memory-management
 /// change: does not alter any arithmetic or its order, so it carries zero
-/// numerical risk (and zero risk to v1's byte-identity gate, since v1 never
+/// numerical risk (and zero risk to v1's golden gate, since v1 never
 /// calls into this module).
 ///
 /// Phase-5 (§A.15) RESIZED: was sized for the FULL channel-scale plane
