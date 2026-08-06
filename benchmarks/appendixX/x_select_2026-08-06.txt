@@ -1,0 +1,17 @@
+# freeze_check --select — REGISTERED rule (campaign appendix E.4)
+
+PRIMARY: profile floor count. TIE-BREAK: selection_composite = balanced_composite + 0.15·M3a.
+sdr25 is a reported comparator, NOT part of the rule.
+
+| rank | bake | class | floors | bal_comp | M3a | sel_comp | sdr25 | selectable |
+|---:|---|---|---:|---:|---|---:|---:|---|
+| 1 | X_c944_Mt_mm_lam1e-2 | 944-single | 7/8 | 0.8080 | 0.6494 | 0.9054 | 0.9692 | yes |
+| 2 | ADD156_safesyn_only_raw_lasso | era-bridge | 6/8 | 0.8361 | 0.9540 | 0.9792 | — | yes |
+| 3 | X_c944_Ms_mm_lam5e-3 | 944-single | 6/8 | 0.8097 | 0.9816 | 0.9570 | 0.9755 | yes |
+| 4 | X_cb944_Ms_mm_lam1e-2 | 944-single | 6/8 | 0.8051 | 0.9875 | 0.9532 | 0.9721 | yes |
+| 5 | X_cb944_Ms_mm_lam5e-3 | 944-single | 6/8 | 0.8008 | 0.9896 | 0.9493 | 0.9771 | yes |
+| 6 | X_a944_Ms_mm_lam5e-3 | 944-single | 6/8 | 0.7960 | 0.9598 | 0.9399 | 0.9873 | yes |
+| 7 | X_a944_Ms_mm_lam2e-3 | 944-single | 6/8 | 0.7914 | 0.9696 | 0.9369 | 0.9664 | yes |
+| 8 | X_a944_Ms_mm_lam1e-2 | 944-single | 6/8 | 0.7916 | 0.9501 | 0.9341 | 0.9791 | yes |
+
+**SELECTED: `X_c944_Mt_mm_lam1e-2`** — 7/8 floors, selection_composite 0.9054.

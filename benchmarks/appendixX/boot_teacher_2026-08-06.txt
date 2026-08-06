@@ -1,0 +1,36 @@
+== cid22
+[cid22] n=4292 stat=srocc series=['X_c944_Ms_mm_lam1e-2', 'X_ADD156repro', 'X_c944_Mt_mm_lam1e-2'] (human column identical across all)
+  X_c944_Mt_mm_lam1e-2 0.887384
+X_c944_Mt_mm_lam1e-2           +0.88738   +0.88044   +0.89385    0.00339
+X_c944_Mt_mm_lam1e-2 - X_c944_Ms_mm_lam1e-2   +0.03624   +0.03177   +0.04077    1.000
+X_c944_Mt_mm_lam1e-2 - X_ADD156repro   +0.02406   +0.01783   +0.03058    1.000
+== konjnd
+[konjnd] n=504 stat=srocc series=['X_c944_Ms_mm_lam1e-2', 'X_ADD156repro', 'X_c944_Mt_mm_lam1e-2'] (human column identical across all)
+  X_c944_Mt_mm_lam1e-2 0.431968
+X_c944_Mt_mm_lam1e-2           +0.43197   +0.35740   +0.50759    0.03811
+X_c944_Mt_mm_lam1e-2 - X_c944_Ms_mm_lam1e-2   -0.08080   -0.11487   -0.04691    0.000
+X_c944_Mt_mm_lam1e-2 - X_ADD156repro   -0.10398   -0.15982   -0.05092    0.000
+== nonphoto
+[nonphoto] n=10037 stat=srocc series=['X_c944_Ms_mm_lam1e-2', 'X_ADD156repro', 'X_c944_Mt_mm_lam1e-2'] (human column identical across all)
+  X_c944_Mt_mm_lam1e-2 0.805158
+X_c944_Mt_mm_lam1e-2           +0.80516   +0.79504   +0.81520    0.00519
+X_c944_Mt_mm_lam1e-2 - X_c944_Ms_mm_lam1e-2   -0.02891   -0.03230   -0.02565    0.000
+X_c944_Mt_mm_lam1e-2 - X_ADD156repro   -0.04177   -0.04594   -0.03771    0.000
+== imazen26
+[imazen26] n=10025 stat=srocc series=['X_c944_Ms_mm_lam1e-2', 'X_ADD156repro', 'X_c944_Mt_mm_lam1e-2'] (human column identical across all)
+  X_c944_Mt_mm_lam1e-2 0.813635
+X_c944_Mt_mm_lam1e-2           +0.81363   +0.80342   +0.82354    0.00505
+X_c944_Mt_mm_lam1e-2 - X_c944_Ms_mm_lam1e-2   -0.03138   -0.03454   -0.02811    0.000
+X_c944_Mt_mm_lam1e-2 - X_ADD156repro   -0.04052   -0.04423   -0.03667    0.000
+== csiq
+[csiq] n=866 stat=srocc series=['X_c944_Ms_mm_lam1e-2', 'X_ADD156repro', 'X_c944_Mt_mm_lam1e-2'] (human column identical across all)
+  X_c944_Mt_mm_lam1e-2 0.848921
+X_c944_Mt_mm_lam1e-2           +0.84892   +0.83109   +0.86428    0.00828
+X_c944_Mt_mm_lam1e-2 - X_c944_Ms_mm_lam1e-2   +0.00173   -0.00567   +0.00954    0.677
+X_c944_Mt_mm_lam1e-2 - X_ADD156repro   -0.05333   -0.06973   -0.03570    0.000
+== live
+[live] n=779 stat=srocc series=['X_c944_Ms_mm_lam1e-2', 'X_ADD156repro', 'X_c944_Mt_mm_lam1e-2'] (human column identical across all)
+  X_c944_Mt_mm_lam1e-2 0.930761
+X_c944_Mt_mm_lam1e-2           +0.93076   +0.92084   +0.93901    0.00471
+X_c944_Mt_mm_lam1e-2 - X_c944_Ms_mm_lam1e-2   -0.00070   -0.00496   +0.00406    0.377
+X_c944_Mt_mm_lam1e-2 - X_ADD156repro   -0.02955   -0.03893   -0.02066    0.000
