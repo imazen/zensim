@@ -330,5 +330,15 @@ Board recut (no rescore): `promote_fulleval.py --rebuild-bands <cell.fulleval.js
 `0.0` across every band and every field on `E1_baseline_s42`). That is what
 makes the 120-cell recut equivalent to 120 re-verdicts for the band block.
 
+**Methodological caveat worth stating**: the (n, span) surfaces were measured on
+CENTRED slices of CID22's dense middle (MOS median ≈ 0.72), while the bands that
+matter sit at the ends. Both constants therefore rest on a mechanism argument
+PLUS a corroboration, and the corroboration is what makes them credible —
+CID22's REAL bands at span ≈ 0.10 land on the same `r_SB` curve as the centred
+slices (1092 → 0.900, 1382 → 0.949, against the slices' 0.918 @1024), and the
+resulting merged bands then pass the rule they were derived from. A tail slice
+with a different reference mix could still behave differently; that is not
+measured here.
+
 Artifacts: `benchmarks/appendixV/`. Board backup before the recut:
 `/mnt/v/output/zensim/reports/fulleval.pre-appendixV-2026-08-06.bak`.

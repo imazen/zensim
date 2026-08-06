@@ -12194,5 +12194,14 @@ band and every field). Backup before the recut:
    handled where it matters most — the F8 floor uses the conservative
    reference-clustered bootstrap — but the `r_SB` figures are pair-level and are
    therefore slightly optimistic.
+6. **The (n, span) surfaces were measured on CENTRED slices of CID22's dense
+   middle** (around the MOS median ≈ 0.72), while the bands that matter sit at
+   the ends. Both constants therefore rest on a mechanism argument plus a
+   corroboration, not on the surface alone — and the corroboration is what makes
+   them credible: CID22's REAL bands at span ≈ 0.10 land on the same `r_SB`
+   curve as the centred slices (1092 → 0.900 and 1382 → 0.949 against the
+   slices' 0.918 @1024), and the real merged bands then pass the rule they were
+   derived from. A tail slice with a different reference mix could still behave
+   differently, and that is not measured here.
 6. **No model, bake, or training recipe changed.** This appendix changed how an
    evaluation slice is cut and read.
