@@ -163,7 +163,7 @@ Krasula AUC ladder to match: PU-PieAPP 0.92 > PU-FSIM 0.83 > HDR-VDP-2 0.71.
 |---|---|---|---|---|
 | **UPIQ** (Narwaria+Korshunov) | **380 / 30 ref** — EXR inside `/mnt/v/datasets/upiq_dataset.zip` (2.4 GB, unextracted); scores in `/mnt/v/datasets/upiq/` | JPEG-MSE/SSIM, JPEG-XT A/B/C | JOD | **held-out HDR validation + JOD calibration** |
 | UPIQ SDR (TID2013+LIVE) | 3779 / 54 | synthetic + codec | JOD | SDR train / scale-anchor |
-| **AIC-HDR2025** (Jenadeleh/Sneyers 2025, arXiv 2506.12505) | **0 — not released** (README-only at `/mnt/v/datasets/aic-hdr2025/`) | JXL/AVIF/JPEG-AI/JPEG-XT, **PQ** | JND | ideal compression-HDR train+val once released — re-check `github.com/jpeg-aic/AIC-HDR2025` |
+| **AIC-HDR2025** (Jenadeleh/Sneyers 2025, arXiv 2506.12505) | **0 — UNOBTAINABLE (user ruling 2026-08-05): never released, authors unresponsive; STOP live-checking** (README-only at `/mnt/v/datasets/aic-hdr2025/`) | JXL/AVIF/JPEG-AI/JPEG-XT, **PQ** | JND | dropped from the anchor plan permanently |
 | TMIQD | unopened zip | tone-mapping (not codec) | MOS | low priority |
 
 380 HDR codec pairs is **validation, not training**. To *train* `PreviewV0_5Hdr`:

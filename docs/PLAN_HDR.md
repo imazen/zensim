@@ -22,11 +22,10 @@ registration in the same commit as first use.
 ## Ground state (surveyed 2026-07-03)
 
 - **UPIQ baseline reproduced**: 0.694 (task #1 done) — the legacy HDR anchor.
-- **AIC-HDR2025: README only — data NOT YET RELEASED upstream** (checked
-  2026-07-03: the jpeg-aic/AIC-HDR2025 repo still says "will be released
-  after QoMEX 2025"). Until it lands, T0 = UPIQ + the paper's published
-  numbers; re-check the repo periodically. When released, our ordered-probit
-  reconstruction applies with a loader swap.
+- **AIC-HDR2025: UNOBTAINABLE (user ruling 2026-08-05) — data was never
+  released; authors unresponsive; STOP live-checking the repo.** T0 = UPIQ +
+  the paper's published numbers, permanently. (Historical: README-only since
+  2026-07-03; the ordered-probit loader-swap plan is moot.)
 - **HDR codec corpus: FAR further along than the task list said.** The
   76-source rendition grid EXISTS (1,140 PQ-PNGs at
   `/mnt/v/output/imazen-26-hdr-grid-2026-06-14`; user: imazen-26 HDR subset

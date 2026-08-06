@@ -77,6 +77,8 @@ Shipped today (verified in `zensim/src/profile.rs`): **A** = `v47_strict_qat_nat
 
 **Superseded / unverified-ship:** hdr_v3 (pure-ssim2, prior BHdr `anchored2`); e1-fill/zenjpeg-420-e1 (V0_7 line, built ~85%, **no promoted-bake trail** → UNVERIFIED); KonFiG-IQA (v53 group, **no shipped-bake trail** → UNVERIFIED); cvvdp-only LARGE (falsified, craters KonJND); dssim co-train (falsified, see §2). Pre-`VALIDATION-ONLY`-era weights (Nelder-Mead `ae28074`, CMA-ES) trained on {KADIK, CID22, TID} *including CID22* — any CID22 SROCC from that era is **contaminated**, archaeology only.
 
+**AIC-HDR2025: UNOBTAINABLE (user ruling 2026-08-05)** — the dataset was never publicly released (README-only clone at `/mnt/v/datasets/aic-hdr2025/`) and the authors are unresponsive; STOP live-checking `github.com/jpeg-aic/AIC-HDR2025`. Removed from the HDR anchor plans; it can never enter train or eval.
+
 ---
 
 ## 2. What didn't work — falsification ledger (verdict strength matters)
