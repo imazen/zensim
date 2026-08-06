@@ -1,0 +1,3 @@
+git_commit: 22095fe6 (bench binary built at db14c177 tree)
+command: prune_forward_bench W10L9_s4003_packed.bin R1_GL2_s2503_packed.bin 256  (zenbench interleaved A/B; arm labels are the tool's, the bakes are C-packed vs GL2-packed)
+caveat: BUSY BOX (3 trainer lanes + harvest concurrent; 119 noisy rounds discarded, 4 clean rounds) — J.R6 measured C_packed at 19.6 ms/256 on a quieter box, so ABSOLUTE numbers here are load-inflated; the paired DELTA is the citable number (same-rows interleaved): GL2_packed −56% mean, 95% CI [−70.1%, −42.4%] vs C_packed.
