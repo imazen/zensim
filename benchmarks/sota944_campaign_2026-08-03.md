@@ -13453,3 +13453,204 @@ without the delta-q channel's structural handicaps.
 Caveats: n=3 images × 2 q; one policy; ladder-interpolated matched-rate
 (no per-arm dense ladders); 576² only. Worktrees removed after the patch
 was preserved; zenavif/ravif primaries untouched (appendix-Z pin intact).
+
+---
+
+# APPENDIX X RESULTS (X.R, 2026-08-06) — measured against the frozen X/X.A1 rules; no gate relaxed; honest nulls stand
+
+Artifacts: bakes + fit-npz + verdicts + fullevals + per-pair dumps under
+`/mnt/v/output/zensim/bakes/linbandvis/`; grid TSV + bootstrap outputs
+committed at `benchmarks/appendixX/`; the BANDVIS-ON experiment root at
+`/mnt/v/zen/zensim-training/ext944-dstact-2026-08-06/` (NOT canonical — see
+its `_MANIFEST.json` regime warning). Binaries built at `71ceec78`+X-I1;
+fits deterministic (no seeds, per registration); trainer sha recorded in the
+XMLP argv artifacts.
+
+## X.R1 — Thread 1: the ADD156 recount (the directive's first question)
+
+**ADD156 reaches 6 of 8 floors under the new banding** (was 5/8): F8 now
+PASSES on the signed merged band (B8-B9 +0.435, n=1425 — vs the retired
+degenerate B9's 0.031) with `BAND_HIGH = 0.09` FINAL. Remaining fails: F1
+CID22 0.8633 < 0.885, F3 nonphoto 0.8968 < 0.90. balanced_composite 0.8361,
+M3a 0.954 GOLD, G-RANGE PASS 0/0 on the same instrument as every X cell.
+
+## X.R2 — Thread 1: the grid (57 deterministic cells + X-T1)
+
+`benchmarks/appendixX/x_grid_2026-08-06.tsv`. Headline structure:
+
+- **Bridges exact**: my gram is byte-identical to appendix T's frozen
+  `e944_safesyn_mm01.npz`; `X_c944_Ms@5e-3` CID22 0.85545 vs T's 400-sweep
+  0.85544; the sota944-era gram differs only in `q` by ≤9.3e-10 (older rev).
+- **The λ extension closed its question**: c944-Ms turns over AT 5e-3
+  (1e-2 gives 0.8510 < 0.8554) — T's edge was the optimum, not a wall.
+- **Sweep cross-check**: 400-sweep twins agree with converged cells to
+  ≤0.002 on every axis on every finalist stem — nothing sweep-dependent.
+- **The corrected 4-corpus mix BREAKS the additive class under BOTH target
+  conventions** — the registered dual-convention family caught a real
+  divergence: mm01-M4 collapses KonJND (0.12–0.42 vs Ms 0.45–0.52, root A
+  and root B alike) while raw-×100-M4 holds KonJND 0.49–0.51 and CID22
+  0.831–0.842 but collapses LIVE 0.715–0.737 (F7 fail). No M4 additive cell
+  is guard-clean at any λ. The corrected kadid leg itself trains fine
+  (kadid_signed 0.845–0.877 in-mix) — the damage is cross-corpus
+  interference, not the fixed table. **This is the class-boundary finding:
+  the mix correction that lifted the MLP class (K.R breadth) has no clean
+  additive counterpart.**
+- **BVLS** (sign-mask, mm01): below the lasso counterparts on CID22
+  (0.799/0.796); sdr25 0.864/0.936; not competitive here.
+- **Six finalists at 6/8 floors, all safesyn-only root-B**; every one GOLD
+  M3a; `X_cb944_Ms@5e-3` posts **M3a 0.9896 — the highest yet measured on
+  any bake** (cb@1e-2 0.9875, c944@5e-3 0.9816).
+- **Named survivors** reproduce T.R8 at convergence (c944@5e-3: 4 basic +
+  {HF_MAG_LOSS s0X/s0B, ART_SOFT_PEAK s0Y/s1Y, IW_ART s1Y/s2Y, GMS s1Y,
+  ART/MASKED_ART s2Y, BLOCKINESS s2Y, BANDING s2Y}).
+- **U's BANDING@s0 candidate does not survive a free re-solve**: the free
+  lasso picks s2-BANDING (f602) at Ms and drops s0 entirely at productive λ
+  — consistent with W's corrected baseline (base+BANDING sits below ADD156;
+  the U gain was over the arm-B base, never over ADD156).
+
+## X.R3 — Thread 1: selection + bootstrap + battery
+
+`freeze_check --select` over the six + ADD156 + the X-T1 cell
+(`benchmarks/appendixX/x_select_2026-08-06.txt`):
+
+| rank | cell | floors | bal_comp | M3a | sel_comp |
+|---:|---|---:|---:|---:|---:|
+| 1 | **X_c944_Mt_mm_lam1e-2** (X-T1 teacher) | **7/8** | 0.8080 | 0.6494 FLAGGED | 0.9054 |
+| 2 | ADD156 | 6/8 | 0.8361 | 0.9540 | 0.9792 |
+| 3 | X_c944_Ms@5e-3 | 6/8 | 0.8097 | 0.9816 | 0.9570 |
+| 4-8 | cb944/a944 Ms cells | 6/8 | 0.79–0.81 | 0.95–0.99 | 0.93–0.95 |
+
+**The original registered grid fires outcome (b) — PARITY.** No original
+cell beats ADD156's floor count or composite, and the paired bootstrap
+(B=2000, seed 20260806, `benchmarks/appendixX/boot_vs_add156_2026-08-06.txt`)
+confirms ADD156's rank edge is real outside noise: vs `c944_Ms@5e-3` CID22
+−0.0078 [−0.0124, −0.0027], KonJND −0.048, CSIQ −0.054, LIVE −0.029; the
+only cell-side GAIN anywhere is a944@5e-3's CSIQ +0.017. ADD156's sdr25 at
+this root is 0.9797 — above every finalist. **ADD156 remains the additive
+class champion, now validated under the corrected mix, the new banding, the
+converged solver, and the modern battery.**
+
+**The X.A1 teacher arm (X-T1) is the exception that needs its own
+paragraph.** Distilling the C-teacher's labels (the committed
+`safesyn_teacher944` leg) into the SAME informed pool at λ=1e-2 produces the
+**first additive cell to clear the F1 CID22 floor** (0.8874 ≥ 0.885; 16
+coefficients; CID22 +0.0362 [+0.0318, +0.0408] over its human-labeled twin,
++0.0241 [+0.0178, +0.0306] over ADD156 — both P(d>0)=1.000) and **7/8
+floors, which wins the E.4 selection outright** (floors are primary).
+The costs are equally real: KonJND −0.104, nonphoto −0.042, imazen26
+−0.041, CSIQ −0.053, LIVE −0.030 vs ADD156 (all CIs exclude 0) and **M3a
+collapses 0.98 → 0.6494 (FLAGGED)** — the teacher target transfers its
+CID22 structure but not its spatializable coherence, on the identical
+coordinate pool whose human-labeled twin is the M3a record holder. So
+coherence is a property of WHAT the weights fit, not just where they live —
+a new fact the E-M mechanism story did not contain. Registered outcome (a)
+is therefore **blocked by its own guard clause** (regressions outside
+noise): X-T1 is reported as a measured lever and a **user-gated candidate**,
+not a champion. Note for the selection rule's owner: floors-primary ranks a
+FLAGGED-M3a cell above five GOLD ones here — E.4 behaving as specified, but
+worth seeing once.
+Direction note vs W's R.R2 (breadth-at-CID22-cost): on THIS substrate the
+teacher moves CID22 up with breadth ~flat — the direction is
+substrate-dependent, not universal.
+
+**G-RANGE fails every root-B finalist** — 7.9–8.7% above-knot (raw and
+packed identically; ADD156 passes 0/0 on the same corpus) — the K.R2
+anchor-domain-mismatch class: `anchor944_dial`'s raw-pred span under
+safesyn-only additive models tops at 0.942 while cid22val pushes 0.99. The
+registered lever (anchor densification) is NOT applied post-hoc; a root-B
+additive candidate is not ship-eligible until it is. (`anchor944_dial`'s
+manifest carries an empty build_commit and possibly pre-fix kadid rows —
+monotone spline ⇒ rank axes invariant; flagged for the anchor's owner.)
+
+**Packing** (`pack --neg-tail --zerobias-bulk 0`, per T.R11/P5): prune
+944→15/11/16 layer-0 inputs, identity BIT-identical on all 2035 anchor
+rows, verify rank-exact (0.8555/0.8523/0.8874), ~3.6 KB class. Corruption:
+dial-alone 0.146/0.061 (broken by design at this width); the head-joint on
+the selected cell is head-intrinsic 0.7932/0.9256 (the head is the owner).
+
+## X.R4 — Thread 2: the BANDVIS-ON adjudication — outcome (b), INERT; the toggle stays OFF
+
+**X-E1/X-G1.** All 13 legs extracted ON (149k+10k pairs, ~75 min at 6
+threads; one cache-pressure OOM on the first attempt — page cache charged to
+the 24G cgroup — clean at 40G) and **X-G1 PASSED at corpus scale**: every
+non-GAIN column bitwise-identical to canonical row-for-row on every leg;
+the four GAIN slots moved on ~100% of rows (safesyn 111,068/111,068 on
+f924/f929). The kadid leg carries the wave-10 orientation fix applied at
+promote (its pairs TSV predates the fix; gated equal to the corrected
+canonical). This also discharges LYB reuse gate (ii); gate (i) — the stored
+P1.5 arm masters differ in exactly {f924,f929,f934,f939}, 960/960 — passed
+first.
+
+**X-A1 additive arms: structurally INERT.** At every productive λ the GAIN
+lanes earn zero weight in BOTH definitions — 3 of 4 strong-λ pairs are
+score-BIT-IDENTICAL; the fourth (Ms@5e-3) takes one tiny ON-GAIN coordinate
+(+0.0017) and drops CID22 −0.005. At weak λ the ON definition does not earn
+more GAIN mass than OFF (Ms@3e-4: |0.016| vs |0.025|). The mechanism was
+visible in Thread 1: **the additive class runs on BANDVIS_LOSS@s0 (f925),
+which the toggle does not move by construction.**
+
+**X-A2 MLP paired arms (k=2 × 2): NO axis passes the registered
+both-signs + floor rule** — every candidate axis flips sign across seeds:
+
+| axis | Δ(ON−OFF) s6101 | s6103 | mean | verdict |
+|---|--:|--:|--:|---|
+| CID22 | −0.0021 | +0.0025 | +0.0002 | signs disagree — inert |
+| KonJND | **+0.0561** | −0.0040 | +0.0261 | signs disagree — NOT a finding |
+| nonphoto | −0.0115 | −0.0044 | −0.0080 | same sign, below 0.010 floor |
+| CSIQ | −0.0042 | −0.0093 | −0.0067 | same sign, below floor |
+| LIVE | +0.0009 | +0.0127 | +0.0068 | signs same, below floor |
+| sdr25 | +0.0051 | −0.0092 | −0.0021 | signs disagree |
+| HF-NL/ref | −0.0366 | **+0.2497** | +0.1066 | signs disagree (axis LSD 0.039; the s6103 OFF draw 0.306 is a low outlier — seed noise dominates) |
+| M3a (matched-def via X-I1) | −0.0606 | −0.0315 | **−0.046** | same sign, below the 0.10 floor; ON cells 0.849/0.878 vs OFF 0.909/0.910 — one ON cell dips under GOLD |
+
+Matched-definition evaluation throughout (`--features-root` +
+`ZENSIM_APPEND2_DSTACT=1` for the ON arm's M3a; the 4-column mismatch read
+costs ~0.002 CID22 / ~0.009 KonJND and is reported, not used). Recipe =
+wave-10 L9 restricted to its six local legs, token-paired argv (only the
+root remap + `--out` differ; committed as `XMLP_*.argv`). Side observation
+(not a toggle result): the L9-LOCAL baseline scores CID22 0.886–0.891 —
+above the full-L9 family median — while KonJND (0.39–0.43) and nonphoto
+(0.84) collapse vs full-L9: the fleet legs buy near-threshold + nonphoto,
+not CID22.
+
+**X-L1 LYB model read: INERT.** Both arms, both seeds, rank LYB MOS at
+≈zero (SROCC 0.014–0.058 per-video, n=120); paired deltas −0.004
+[−0.038, +0.032] and +0.037 [−0.098, +0.107]. This recipe's models do not
+transfer to AV1-video banding regardless of toggle — the P1.5
+feature-level GAIN improvement does not surface at model level here.
+(Observation only: ON's PLCC is higher in all four cells, 0.22–0.23 vs
+0.12–0.14; PLCC was not the registered read.)
+
+**X-C1 CPU delta: +4.08%** median paired ratio over the 4 stable-load
+rounds of 14 (the P1.5 stable-load filter — all four measurements < 80
+ms/pair; the box was shared at load ~25 all session, contaminated rounds
+shown in `xc1_rounds`); consistent with P1.5's loaded-box +3.1% and the
+recorded ≈+5% estimate; under the registered ≤+5% bar — which outcome (b)
+never invokes.
+
+**VERDICT: registered outcome (b) fires — the toggle stays OFF and the
+question closes with data.** The GAIN-only combine's feature-level LYB win
+does not translate into trained-model value on either arm class: the
+additive class cannot see it (LOSS-lane structural), and the MLP class's
+k=2 paired deltas are seed noise on every axis with a consistent-sign but
+sub-floor M3a cost. No re-extraction is recommended; the would-have-been
+cost that outcome (a) needed to justify: local legs ~75 min (6-thread),
+plus bigcodec 5.7M + kadis 700k ≈ 46× the local mass (fleet-scale, order
+days), plus eval grids.
+
+## X.R5 — Limitations (beyond the registered X.7)
+
+1. Thread-2's MLP evidence is k=2 — the weakest registered instrument; its
+   verdict is "no evidence at k=2", not "proven zero". The additive arms'
+   structural argument is the stronger half of (b).
+2. The X-T1 teacher arm is 3 cells at one mix; its M3a collapse is measured
+   at one λ (the selected cell) — the λ-dependence of the collapse is
+   unmeasured.
+3. The LYB read is one recipe class on 120 videos; a recipe with video-adjacent
+   training mass could read differently.
+4. X-C1's clean-round count is 4 (shared box); a dedicated quiet-box pass
+   remains the standard before any future flip ships (moot under (b)).
+5. The G-RANGE anchor-domain failure blocks every root-B additive candidate
+   including X-T1; the registered densification lever is untested here.
+6. Nothing here ships, swaps, flips a toggle, or enters the board; the X-T1
+   candidate and the E.4 floors-primary observation are the user's calls.
