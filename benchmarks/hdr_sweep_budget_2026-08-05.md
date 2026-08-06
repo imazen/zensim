@@ -208,6 +208,69 @@ Findings:
   is dominated by CPU-side prep (PNG16 decode + linear/PU feeding), not the
   kernel — so cvvdp scoring parallelizes across CPU fleet workers at the
   same per-pair cost; the 5070 is NOT the only place cvvdp can run.
+
+> **ANNOTATION 2026-08-05 (hdr-corpus lane) — this row was CHALLENGED and is
+> UPHELD; but the general silent-fallback hazard behind the challenge is REAL
+> and is a defect.** Appended, not rewritten; the numbers above stand as
+> measured.
+>
+> **The challenge.** cvvdp can silently fall back to CPU when the GPU is
+> unavailable, so "cvvdp-gpu == cvvdp-CPU" might have been CPU-vs-CPU — which
+> would make the equality vacuous and the 283→396 source uplift unfounded.
+>
+> **Verdict: the measurement above is GENUINELY GPU.** Independently re-run on
+> 2026-08-05 with `nvidia-smi` sampled at 100 ms through each scoring run
+> (RTX 5070, ~7.4 GB free). `cvvdp-gpu` allocates real device memory above
+> baseline and shows nonzero GPU utilization at every size; `cvvdp` (CPU) shows
+> a perfectly flat allocation. Both this doc's runs and the re-run passed
+> `--gpu-runtime cuda`, which is an **explicit** backend request — and the code
+> refuses to fall back on those (see below). Raw:
+> `~/tmp/hdrcorpus/cvvdp_probe/results.tsv`.
+>
+> | metric | 0.79 MP | 3.15 MP | 7.08 MP |
+> |---|---|---|---|
+> | `cvvdp-gpu` Δ device mem | 321 MiB | 865 MiB | **1569 MiB** |
+> | `cvvdp-gpu` peak GPU util | 2 % | 8 % | 10 % |
+> | `ssim2-gpu` Δ device mem | 449 MiB | 1217 MiB | **2466 MiB** |
+> | `ssim2-gpu` peak GPU util | 6 % | 13 % | 24 % |
+> | `cvvdp` (CPU) Δ device mem | 0 MiB | 0 MiB | 0 MiB |
+>
+> **The mechanism is now measured, which strengthens the row's conclusion:**
+> cvvdp-gpu peaks at only **2–10 % GPU utilization**. The device is nearly idle
+> during a "GPU" cvvdp pair, which is exactly what CPU-prep-bound means. Routing
+> cvvdp to CPU workers therefore remains sound.
+>
+> **Per-pair GPU memory ceiling (the operationally useful number).** Scaling is
+> ~222 MiB/MP for cvvdp-gpu and ~348 MiB/MP for ssim2-gpu. At the corpus's
+> largest tier (7.08 MP) that is ~1.6 GB and ~2.5 GB respectively, so **every
+> size in the ladder fits on the 8 GB fleet cards** with headroom. No size tier
+> is excluded from GPU scoring, and one pair of both metrics resident together
+> (~4 GB) still fits.
+>
+> **THE REAL DEFECT — silent CPU fallback under the DEFAULT runtime.** With the
+> GPU hidden (`CUDA_VISIBLE_DEVICES=""`):
+>
+> | invocation | exit | stdout |
+> |---|---|---|
+> | `--metric cvvdp-gpu --gpu-runtime cuda` | **1** | *(nothing)* — refuses, loudly |
+> | `--metric cvvdp-gpu` (runtime defaults to `auto`) | **0** | `metric=cvvdp-gpu cvvdp_imazen_v0_0_1=10.000000` |
+>
+> The explicit path is safe and says so itself: *"explicit backend requests
+> never fall back; use Backend::Auto for fallback"*. **But the default is
+> `auto`**, and in `auto` a CPU-computed value is emitted under the **GPU column
+> name** `cvvdp_imazen_v0_0_1` with exit 0 — indistinguishable downstream from a
+> real GPU measurement. A sidecar built that way silently mislabels CPU numbers
+> as GPU.
+>
+> **Standing rule for every scoring run and every fleet job: pass
+> `--gpu-runtime cuda` explicitly.** Never rely on the default when the column
+> is going to be recorded. Worth fixing in zenmetrics so the fallback can never
+> be silent (either log the runtime actually used, or stamp the mode into the
+> emitted column/row); until then the explicit flag is the mitigation.
+>
+> Caveat on the re-run: its wall times include process startup (~0.3–1.0 s) and
+> so are NOT comparable to this table's marginal per-pair figures. It measured
+> **mode and memory**, not cost — the cost table above is unchanged.
 - ssim2 HDR remains GPU-only (no CPU HDR dispatch — the PLAN_HDR gap), so
   ssim2-gpu is the one metric pinned to the GPU box.
 - iwssim requires min(W,H) >= 176: the 64x64 tier (and any tier below

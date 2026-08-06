@@ -1,0 +1,19 @@
+metric	scale	rc	wall_s	peak_gpu_util_pct	peak_gpu_mem_MiB	base_gpu_mem_MiB
+cvvdp-gpu	768x1024	0	1.19	2	5134	4813
+cvvdp	768x1024	0	0.38	1	4813	4813
+ssim2-gpu	768x1024	0	1.04	6	5262	4813
+cvvdp-gpu	1536x2048	0	2.01	8	5678	4813
+cvvdp	1536x2048	0	1.38	0	4813	4813
+ssim2-gpu	1536x2048	0	1.99	13	6030	4813
+cvvdp-gpu	2304x3072	0	3.79	10	6382	4813
+cvvdp	2304x3072	0	3.20	0	4813	4813
+ssim2-gpu	2304x3072	0	4.19	24	7279	4813
+# probe: does --metric cvvdp-gpu actually execute on the GPU, or silently fall back to CPU?
+# host RTX 5070 12227MiB (~4813MiB already resident from another process); driver 596.21
+# binary: zenmetrics-cli 0.6.0 built --features hdr,gpu-cvvdp,gpu-ssim2,gpu-butteraugli,gpu-cuda
+# method: nvidia-smi sampled every 100ms for the duration of each scoring run; (ref,ref) HDR PQ PNG pair
+# source: /mnt/v/output/imazen-26-hdr-grid-2026-06-14 1069_..._illuminated-castle-night
+# wall_s INCLUDES process startup -- NOT comparable to marginal per-pair cost in hdr_sweep_budget_2026-08-05.md
+# VERDICT: cvvdp-gpu genuinely runs on GPU (device mem rises above base, util nonzero); CPU metric flat at base.
+# SEPARATE DEFECT: with GPU hidden, --gpu-runtime cuda exits 1 (safe); the DEFAULT auto exits 0 and emits the
+#   GPU column name from a CPU computation. Always pass --gpu-runtime cuda explicitly when recording a column.
