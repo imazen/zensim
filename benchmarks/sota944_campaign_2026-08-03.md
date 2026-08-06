@@ -10884,3 +10884,346 @@ source table.
   extraction), and no corruption grid. Those are ABSENT, and `freeze_check`
   prints them as such rather than as failures.
 - Nothing here shipped, swapped, or was selected.
+
+---
+
+# REGISTERED APPENDIX U — ADD156 + PAIRS: CAN A CONSTRAINED FEATURE ADDITION BUY THE HIGH-FIDELITY BAND? (2026-08-06, pre-registered before any candidate fit)
+
+## U.0 Why this exists
+
+User question, verbatim: *"what if you take add156's feature set and add pairs of
+features to it that might help in the high-fidelity band?"*
+
+`ADD156_safesyn_only_raw_lasso` is the board's best f156-371-**independent**
+additive model on **28 live coefficients**, and appendix T proved it
+**byte-reproducible EXACT** from `bake_dial_refit fit-lasso`. Its solver is
+deterministic coordinate descent — **no RNG, so no seeds** — which makes it an
+unusually clean substrate for a selection experiment: every cell is exactly
+reproducible and fit noise is identically zero.
+
+It is 5/8 on the balanced floors, and **its one blocking high-fidelity axis is
+CID22 band B9** (F8). It is simultaneously **strong on the other** HF axis
+(HF-NL per-ref +0.8306, above shipped B's 0.8252). So there are two
+high-fidelity targets and ADD156 is worst-in-class on one and near-best on the
+other — which is itself the first question this appendix has to answer: are
+they the same problem?
+
+Appendix T established that a **free** lasso over a wider pool spends 50-78% of
+its budget above f155 regardless of what it buys, so re-fitting wide answers
+nothing about any individual feature. This appendix therefore runs a
+**constrained addition**: hold ADD156's live coordinate SET as the base, offer
+the solver exactly one or two extra coordinates, and re-solve.
+
+## U.1 Priors — facts on disk, established BEFORE any candidate fit (not results)
+
+**P1 — the toolchain gate, replicated independently of appendix T.** Re-running
+the recovered recipe (frozen gram `linear-probe/grams/safesyn.npz`, anchor
+`linear-probe/val/anchor.npz`, raw space, `human_score`, lasso lam 2e-3, 400
+sweeps, tol 1e-10, tau 0, coordinate slice f0..155) emits sha256
+`51437a34f04887ce850b25eff4f72a6bcd12926873ce060a12878d558a7517db` — the
+shipped `ADD156_safesyn_only_raw_lasso.bin` byte for byte. This appendix's
+chain is the same chain.
+
+**P2 — ADD156's 28-coefficient support is a 400-SWEEP TRUNCATION, not the
+lasso optimum.** At the *same* lambda and the *same* pool, raising the sweep cap
+(2,000 / 20,000 / 200,000 all agree; CD breaks early on `tol`, so the cap costs
+no wall-clock) converges to **26** coefficients. Two of ADD156's 28 vanish:
+
+| dropped at convergence | block | scale | ch | local | w @400 sweeps |
+|---|---|---|---|---|---|
+| **f121** | v1basic156 | 3 | X | `art_p4` | −3.266e−03 |
+| **f137** | v1basic156 | 3 | Y | `det_p4` | −9.582e−03 |
+
+`max|w_conv − w_400| = 2.077e−02`, i.e. **55 % of the largest coefficient in the
+model** (0.0379). Objective at 400 sweeps is worse by 4.99e−08 — the valley is
+extremely flat, which is exactly why a large weight displacement costs almost no
+loss. This is a conditioning fact about a correlated 156-column Gram, not a
+solver defect; `lasso_cd_slice` is the same code that reproduces the artifact
+bit-exactly.
+
+**P3 — the KKT no-op theorem, and its consequence for what this appendix CAN
+test.** For a lasso at fixed λ with solution `w*` over pool `P`, and any
+`Q` with `supp(w*) ⊆ Q ⊆ P`, `w*|_Q` satisfies the `Q`-problem's KKT conditions
+— so the restricted re-solve returns the *same* solution. **Every candidate
+drawn from inside f0..155 is therefore a provable no-op at ADD156's own λ**, and
+the experiment has degrees of freedom only ABOVE f155. This is verified, not
+assumed: at convergence the support restricted to ADD156's 28 coordinates is
+**identical** to the support of the full f0..155 solve (both 26, same indices).
+Registered as gate **G-U1**.
+
+**P4 — B9 barely resolves, and this bounds every claim below.** Marginal
+bootstrap (B=4,000, seed 20260806, `panel --batch` indexed) of the base model's
+own CID22 B9:
+
+| band | n | point (signed) | 95 % CI | bootstrap sd |
+|---|---|---|---|---|
+| **B9** | **43** | **−0.0346** | **[−0.3897, +0.3008]** | **0.1779** |
+| B8 | 1,382 | +0.4315 | [+0.3894, +0.4709] | 0.0210 |
+
+**F8 gates a statistic whose 95 % interval is ±0.35 wide at a bar of 0.15.** B9
+is 8.5× noisier than the band immediately below it. Paired comparisons will be
+far tighter than this marginal interval (shared rows), but the *absolute* F8
+verdict on any single model is not statistically separable from its neighbours.
+
+**P5 — the reported band SROCC is an ABSOLUTE value, and F8's "signed" contract
+is not implemented.** `zenstats::panel` computes
+`let srocc = spearman(humans, scores).abs()` (panel.rs:1013 / :1138), and
+`bake_verdict`'s per-band rows come from that same `aggregate_panel`. Verified
+on ADD156's own per-pair dump:
+
+| slice | n | `srocc` (what the board + F8 read) | `srocc_signed` (truth) |
+|---|---|---|---|
+| CID22 all | 4,292 | +0.863238 | +0.863238 |
+| **CID22 B9** | **43** | **+0.034582** | **−0.034582** |
+| CID22 B8 | 1,382 | +0.431490 | +0.431490 |
+
+**ADD156's top band is mildly INVERTED, and the board reports it as positive.**
+Two consequences, both registered before any candidate is fit:
+
+1. `freeze_check`'s F8 half-test `B3 ≥ 0.0` is **structurally vacuous** — an
+   absolute value is always ≥ 0, so that clause can never fail. Its source
+   comment ("band-tail is SIGNED (collapse must hurt)") states an intent the
+   data does not carry.
+2. The `B9 ≥ 0.15` half **cannot distinguish a well-ordered top band from an
+   inverted one**: a model whose B9 is signed −0.50 reports +0.50 and PASSES.
+
+⇒ **This appendix's primary objective is SIGNED B9.** The absolute value is
+reported alongside it, because that is what the gate consumes, but a "gain" that
+is really a deeper inversion is a **failure**, not a finding. No gate is relaxed
+here and none is edited; the defect is reported to its owner.
+
+**P6 — base readings on THIS instrument** (`bake_verdict --regime 944`, the
+944-root read the board itself uses for this 372-input bake). Every Δ below is
+computed inside this instrument; nothing is compared across instruments.
+
+| axis | base |
+|---|---|
+| CID22 | 0.86324 |
+| **CID22 B9 (signed / abs)** | **−0.03458 / +0.03458** |
+| **HF-NL per-ref** | **+0.83067** |
+| KonJND | 0.53630 |
+| nonphoto | 0.84700 |
+| CSIQ | 0.90173 |
+| LIVE | 0.96030 |
+| imazen26 | 0.85400 |
+| dial mono | 0.99596 |
+
+The board's stored ADD156 fulleval reads CID22 0.863297 and B9 0.030504 on the
+same bytes — a **+0.0041 B9 offset** vs this instrument. Cross-instrument
+offsets of that size on a statistic with sd 0.178 are unremarkable; they are the
+reason all comparisons here are within-instrument.
+
+## U.2 The operator (frozen)
+
+**base** = ADD156's live coordinate set, the 28 indices
+`{6, 8, 11, 14, 17, 19, 22, 24, 26, 34, 37, 89, 91, 93, 94, 116, 120, 121, 122,
+124, 128, 136, 137, 138, 140, 146, 150, 155}`.
+
+**cell(C)** = the same lasso re-solved with the coordinate slice `base ∪ C`,
+where `C` is a **singleton** or a **pair**. Everything else is held at ADD156's
+recipe: safesyn-only weight 1.0, raw space, `human_score`, tau 0, f16,
+output spline fit on the packed forward over the frozen anchor.
+
+Note the base coefficient VALUES are re-solved, not pinned — pinning would make
+the added coordinate fit a residual rather than compete, which is not the
+lasso's own answer to "does this feature earn its place".
+
+**Sweep setting.** PRIMARY = **converged** (`--n-sweeps 200000`; CD exits on
+`tol` so this costs the same 0.05 s as 400). Rationale: base has 28 coordinates
+and a pair cell has 30, so at a truncated 400 sweeps the two sides converge to
+*different depths* and a Δ could be pure differential truncation — a confound
+indistinguishable from a feature effect (P2 shows the truncation moves weights
+by 55 % of the largest coefficient). CROSS-CHECK = **400 sweeps**, the
+recipe-faithful setting in which base ≡ the shipped ADD156 bytes; run on the
+base and on every finalist. If the two settings disagree on a finding, the
+finding is reported as **sweep-dependent** and does not stand.
+
+**Lambda.** PRIMARY λ = **2e-3** (ADD156's own). SENSITIVITY λ = **1e-3**, run
+over the whole grid, because appendix T's own limitation applies here: a
+candidate can look worthless merely because it is over-penalized. Each λ carries
+its own base control.
+
+**Two arms, because the candidate blocks live at different roots** (appendix T's
+root split, T.R4 licenses the f0..155 index mapping between them — the folded
+regime's basic block IS the v1 basic block, agreeing to ≤0.0008 on every
+shared-row axis):
+
+| arm | root | gram | candidate pool | bake width | eval |
+|---|---|---|---|---|---|
+| **A** | v1-372 | frozen `linear-probe/grams/safesyn.npz` | **f156..371** — peak72 / masked72 / iw72 | 372 | `--regime 944` |
+| **B** | ext944, mm01 target | `add156repro/grams/e944_safesyn_mm01.npz` (T.A1's recipe-faithful arm) | **f372..943** — v2-348 / append-204 / append2-20 | 944 | `--regime 944` |
+
+Arm B's base is the same 28 indices at the 944 root; its base is therefore *not*
+ADD156's bytes and its own base control is the comparator for every arm-B cell.
+
+## U.3 The candidate pool, ranked by HF plausibility (with reasons)
+
+**Nothing is excluded a priori** — every one of the 216 (arm A) + 572 (arm B)
+candidate slots gets a singleton cell. The ranking below decides only where the
+denser *pair* enumeration is spent, and it is stated before any number.
+
+| rank | candidates | why high-fidelity |
+|---|---|---|
+| **1** | **near-threshold / JND**: v2 `PJND_TRANSDUCER`, `PJND_FRAGILITY`, `PJND_TRANSDUCER_LOW_K`, `PJND_TRANSDUCER_HIGH_K` | At high fidelity every distortion is *near the visibility threshold*; a transducer is the one family whose nonlinearity is defined there. KonJND is the metric's standing weak zone and these are its designed slots. Appendix T saw `PJND_FRAGILITY` enter the root-B survivor set as λ loosened |
+| **2** | **codec-artifact detectors with no v1 counterpart**: v2 `BANDING`, `BLOCKINESS`, `RINGING`, `EDGE_WIDTH_CHANGE` | These are what remains *visible* once everything else is invisible — banding in smooth gradients and blocking on flat edges are the classic near-lossless failure modes. Appendix T found `BLOCKINESS` + `BANDING` among the root-B survivors and specifically noted they have no v1 analogue, so ADD156 is structurally blind to them |
+| **3** | **`BANDVIS_GAIN` / `BANDVIS_LOSS`** (append2, Y-only, 4 scales) | Band-visibility, the append2 pair whose coverage the `299ccc8c` fix restored; class-E bounded-excess indicators, the same form as v2 `HF_GAIN/HF_LOSS`. Banding is *the* near-lossless artifact |
+| **4** | **gain/loss partners**: v2 `HF_GAIN`/`HF_LOSS`/`HF_MAG_LOSS`, append `CONTRAST_GAIN`/`CONTRAST_LOSS` | ADD156 already leans on v1 `hf_mag_loss` (5 of its 28 coefficients) but barely on `hf_gain`/`hf_loss`. Gain and loss are *signed opposites of one mechanism* — the pairing hypothesis in its purest form: neither alone identifies the direction of the error, the two together do |
+| **5** | **soft-peak family**: v2 `SSIM_SOFT_PEAK`, `ART_SOFT_PEAK`, `DET_SOFT_PEAK` | Worst-region pooling. At high fidelity the *mean* error is near zero and the decision is carried by the few worst blocks; a soft peak is the differentiable form of that. Appendix T: `ART_SOFT_PEAK` survived at two scales |
+| **6** | **v1 peak72 / masked72 / iw72** (all of arm A) | The same worst-region and masking logic in the v1 layout. Appendix T measured this block buying KonJND +0.084 and CSIQ +0.021 — the only block that bought the near-threshold axis — **but collapsing M3a 0.954 → 0.626**. High prior on the objective, high prior on the guard failing: the M3a guard is therefore mandatory for every arm-A finalist |
+| **7** | **finest scale (s0) generally** | Scale 0 carries 75 % of the pixels and all of the high-frequency content; the HF band is where fine-scale detail is the only thing left to see. Not a family but a weighting: the dense within-cell enumeration is spent at s0/s1 |
+| **8** | everything else in v2-348 and append-204 | Singleton coverage only. Appendix T measured the append block earning nothing on any axis in a free fit, so it gets structural pairs but not dense ones |
+
+## U.4 Pair enumeration (frozen, systematic)
+
+Four rules, applied mechanically. **Singletons are the control that makes
+"pair" a testable claim**: a pair is only interesting if it beats *both* of its
+members alone.
+
+| code | rule | arm A | arm B |
+|---|---|---|---|
+| **S** | singleton — every candidate slot | 216 | 572 |
+| **W** | within-cell: all pairs of locals inside one (block, scale, channel) | all: C(6,2)=15 × 36 cells = **540** | HF-priority only: C(14,2)=91 over the rank-1/2/4/5 locals × (s0,s1) × 3 ch = **546** |
+| **C** | cross-channel: same (block, scale, local), the 3 channel pairs | 3 × 72 = **216** | v2 348 + append 204 = **552** |
+| **Z** | cross-scale-adjacent: same (block, channel, local), scales (0,1)(1,2)(2,3) | 3 × 54 = **162** | v2 261 + append 153 + append2 15 = **429** |
+| **G** | family/gain-loss partners inside a cell | (covered by W) | HF triple 36 + soft-peak triple 36 + PJND quad 72 + artifact quad 72 + CONTRAST 12 + LUM triple 36 + BANDVIS 4 = **268** |
+| | **total per (λ, sweep setting)** | **1,134** | **2,367** |
+
+**Cost control — the no-op filter.** A cell whose candidate coefficients all
+come out zero is, by construction, the base model. Those are detected from the
+fit npz (0.05 s) and **are not evaluated**; they are reported as
+`ZERO — did not earn entry at this λ`, which is a real negative result about the
+feature, not a gap.
+
+**Registered structural predictions (STOP gates — free, and they prove "no-op"
+means what this appendix says it means):**
+
+- **G-U1** — any candidate drawn from f0..155 is a no-op (P3). Run on a sample
+  of 12 such cells; all must return base's weights exactly.
+- **G-U2** — at root B, any candidate in f156..371 is a no-op (folded structural
+  zeros; replicates T.R5).
+- **G-U3** — append (scale 0, channel B) slots **f754..f770** are wired zeros in
+  the shipped extractor (`APPEND_SKIP_B_SCALE0`) ⇒ no-ops.
+- **G-U4** — append2 `LUMA_MEAN_REF` (reference-only) and `HL_BIN1`/`HL_BIN2`
+  (HDR-gated, on a structurally-SDR route) ⇒ no-ops. Only `BANDVIS_GAIN` /
+  `BANDVIS_LOSS` can enter from append2.
+
+If any G-U gate fails, STOP and report — the pool is not what the layout doc
+says it is.
+
+## U.5 Objectives, guards, and the decision rule (frozen BEFORE any number)
+
+**PRIMARY objective — CID22 B9, SIGNED** (per P5). Reported with its paired
+bootstrap CI and alongside the absolute value the gate consumes.
+
+**SECONDARY objective — HF-NL per-ref**, floor **0.039** (appendix O's measured
+axis LSD; a sub-LSD gain is explicitly NOT a finding).
+
+**GUARDS — any regression outside noise disqualifies the pair:**
+
+| guard | floor | source |
+|---|---|---|
+| CID22 aggregate | 0.005 | campaign within-config seed sd × 2 |
+| KonJND | 0.039 | appendix O axis LSD (ADD156's pool-best asset at 0.5363) |
+| nonphoto | 0.010 | registered other-rank-axis floor |
+| CSIQ | 0.010 | " |
+| LIVE | 0.010 | " |
+| imazen26 | 0.010 | " |
+| **dial mono, in DIAL UNITS after packaging** | must not fall below base | `pack --neg-tail --zerobias-bulk 0` per T.R11 |
+| **M3a** | must not fall below **0.85** (GOLD) | appendix T measured the arm-A block collapsing 0.954 → 0.626; **mandatory for every arm-A finalist** |
+
+**Noise instrument** — paired bootstrap over eval pairs, B=2,000 (B=4,000 on
+B9), seed 20260806, resampling the SAME index sets for both models; the RNG
+lives in the caller and every statistic in `panel --batch` indexed mode via
+`scripts/wave6_paired_bootstrap.py` (extended this pass with `--band-lo/--band-hi`
+and `--signed`; no stat math is written here). A delta is a **FINDING** only if
+its 95 % percentile CI excludes 0 **AND** |Δ| ≥ the axis floor. Statistically
+real but sub-floor is reported as "detectable, below the practical floor" and is
+not a finding.
+
+**B9's floor is MEASURED, not assumed.** Its paired-bootstrap Δ distribution
+under the null is established from the base-vs-base-equivalent cells produced by
+the no-op filter (identical models ⇒ Δ ≡ 0) and from the marginal sd in P4; the
+floor is set at **2 × the paired Δ sd** measured across the live grid and is
+stated in the results before any cell is called a winner.
+
+**Multiplicity is real and is not corrected away.** ~3,500 cells × 2 λ against a
+statistic with sd 0.178 will produce large B9 deltas by chance alone. Two
+defences, both registered now: (i) any B9 winner must ALSO hold at the λ=1e-3
+sensitivity setting and at the 400-sweep cross-check; (ii) the *expected* number
+of false positives at the chosen floor is computed from the null and reported
+next to the observed count. A winner that is not distinguishable from the
+expected false-positive yield is reported as such.
+
+## U.6 Registered outcomes (frozen; exactly one fires)
+
+- **(a) A PAIR BUYS B9** — signed B9 rises outside its measured floor, with no
+  guard regression outside noise, holding at both λ and both sweep settings ⇒
+  ADD156+pair reaches 6/8 and becomes the outright best f156-371-independent
+  all-rounder. Full battery + report as a candidate. **User-gated; nothing
+  ships from this appendix.**
+- **(b) HF-NL MOVES BUT B9 DOES NOT** (or vice versa) ⇒ report which features
+  serve which HF axis. The two high-fidelity axes are then **different
+  problems**, and the appendix says so with the per-feature map.
+- **(c) NOTHING OUTSIDE NOISE** ⇒ the additive class's B9 ceiling is
+  **structural**. Appendix T noted F8 fails for *every* additive cell it ran;
+  this would confirm it under a constrained addition where nothing else can be
+  blamed. The appendix must then **characterize WHY**, not merely report the
+  null:
+  1. **Is B9 learnable at all?** Fit an unpenalized least-squares model on the
+     B9 rows alone and report its in-sample SROCC — an upper bound on what any
+     additive function of these features can do in that band.
+  2. **Is the tail even represented in safesyn?** Report the safesyn training
+     target's density above 0.90 against CID22 B9's. If safesyn has no
+     high-fidelity mass, the failure is a DATA problem, not a feature problem.
+
+- **(c)-follow-on, registered now so it is not a post-hoc rescue:** if (c)
+  fires AND the density check shows safesyn is thin above 0.90, run ONE arm
+  adding the HF-dense corpus (`canonical-2026-07-15/train/hf_nearlossless_train.parquet`)
+  to the mix at weight **1.0** against safesyn's 1.0, base pool unchanged. That
+  is a single cell and it separates "these features cannot express B9" from
+  "this corpus never showed it B9".
+
+Independently of (a)/(b)/(c): **whether pairing beat singletons** is reported as
+its own answer. If every pair's effect is bounded by the better of its two
+members, the pairing hypothesis is falsified and the appendix says so.
+
+## U.7 Ops (frozen)
+
+Workspace `../zensim--add156pairs`, `CARGO_TARGET_DIR=$HOME/tmp/zensimap-target`,
+`run-heavy --jobs 6` with ≤5 concurrent verdicts (measured 2.48 GB peak RSS
+each; other lanes are live), logs `~/tmp/add156pairs/`, artifacts
+`/mnt/v/output/zensim/bakes/add156pairs/`. Packaging for finalists uses
+`pack --zerobias-bulk 0` — T.R11 measured the 0.005 default costing this sparse
+class −0.0069 CID22 to buy 192 bytes. Owners only: `bake_dial_refit fit-lasso`
+fits and bakes, `bake_verdict` evaluates, `panel --batch` +
+`wave6_paired_bootstrap.py` own every statistic, `run_full_eval.sh` owns M3a.
+**Nothing ships, swaps, or is selected here.**
+
+## U.8 Confounds + limitations (registered before any number)
+
+- **B9 has n=43 and a marginal sd of 0.178.** This is the dominant limitation of
+  the entire appendix and it is not fixable from here. Every B9 statement
+  carries its CI, and no B9 point estimate is quoted without one.
+- **The multiplicity is severe** (~7,000 cells against a noisy statistic). The
+  two-λ / two-sweep replication requirement and the reported expected
+  false-positive yield are the only defences; no formal correction is applied
+  and none is claimed.
+- **`base ∪ pair` re-solves the base coefficients.** A cell's Δ is therefore the
+  effect of *offering* the pair, not of adding it at frozen base weights. That is
+  the lasso's own question and it is the registered operator, but it means a
+  pair can act by displacing base mass rather than by adding information.
+- **Scoped to ADD156's recipe and mix** — safesyn-only, raw space, lasso. A
+  feature worthless on safesyn may be valuable on a wider mix (appendix T's same
+  caveat). The (c)-follow-on is the one probe of this.
+- **Arms A and B sit at different roots on different row populations** (196,086
+  vs 111,068 rows, different target conventions). Cross-arm comparisons are never
+  quoted as feature effects; T.R4's bridge prices the root, not the blocks
+  against each other.
+- **KADID rows are ext-root reads.** Per T.R3 the appendix-F negation rule is
+  **verdict-era-scoped**: verdicts produced after the wave-10 rebuild read
+  `srocc_signed` correctly and must NOT be negated.
+- **Arm-A cells have no sdr25 axis at the 372 root**, but every cell here is
+  evaluated at `--regime 944`, so both HF-NL and sdr25 are present for both arms.
+- **M3a is measured only on finalists** (66 s/bake); the screen does not carry it,
+  so a screen-stage "winner" is not a candidate until its M3a is measured.
+- Nothing here ships, swaps, or is selected.

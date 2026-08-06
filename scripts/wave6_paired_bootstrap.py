@@ -46,6 +46,19 @@ def main() -> int:
     )
     ap.add_argument("--b", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=20260804)
+    ap.add_argument(
+        "--band-lo", type=float, default=None,
+        help="restrict to rows with human >= this (bake_verdict's 10-band cuts are "
+             "width-0.10 on the [0,1] human scale, so B9 is --band-lo 0.90)")
+    ap.add_argument(
+        "--band-hi", type=float, default=None,
+        help="restrict to rows with human < this (band B9 is closed at 1.00, so omit "
+             "--band-hi for it; bake_verdict's B0..B8 are half-open [lo, hi))")
+    ap.add_argument(
+        "--signed", action="store_true",
+        help="report SROCC with its sign (panel's `srocc_signed`) instead of |SROCC|. "
+             "REQUIRED for band tails: freeze_check's F8 gate is signed, because a "
+             "band whose ordering COLLAPSES must be able to score below zero.")
     a = ap.parse_args()
 
     human = None
@@ -59,8 +72,26 @@ def main() -> int:
             return 2
         preds[s] = p
     assert human is not None
+
+    # Band restriction is applied to the SHARED human column, so every series
+    # keeps the same rows and the pairing the whole instrument rests on holds.
+    band = ""
+    if a.band_lo is not None or a.band_hi is not None:
+        keep = np.ones(len(human), dtype=bool)
+        if a.band_lo is not None:
+            keep &= human >= a.band_lo
+        if a.band_hi is not None:
+            keep &= human < a.band_hi
+        if not keep.any():
+            print("FATAL: band selection is empty", file=sys.stderr)
+            return 2
+        human = human[keep]
+        preds = {s: p[keep] for s, p in preds.items()}
+        band = f" band=[{a.band_lo}, {a.band_hi})"
+    stat = "srocc_signed" if a.signed else "srocc"
     n = len(human)
-    print(f"[{a.corpus}] n={n} series={a.series} (human column identical across all)")
+    print(f"[{a.corpus}]{band} n={n} stat={stat} series={a.series} "
+          f"(human column identical across all)")
 
     bases = {"HUMAN": human.tolist()}
     for s in a.series:
@@ -74,13 +105,22 @@ def main() -> int:
         for s in a.series:
             jobs.append((f"{s}_{b}", s, "HUMAN", ix))
     rows = panel_batch_indexed(bases, jobs, stats="srocc", timeout=7200.0)
-    by = {r["label"]: float(r["srocc"]) for r in rows}
+    by = {r["label"]: float(r[stat]) for r in rows}
 
-    print(f"\npoint estimates (|SROCC|, {a.corpus}):")
+    print(f"\npoint estimates ({'SROCC' if a.signed else '|SROCC|'}, {a.corpus}{band}):")
     for s in a.series:
         print(f"  {s:6s} {by[s + '_full']:.6f}")
 
     boot = {s: np.array([by[f"{s}_{b}"] for b in range(a.b)]) for s in a.series}
+    # Per-series MARGINAL interval: how well the axis resolves at all. On a thin
+    # band this is the number that decides whether any delta could ever clear a
+    # floor, so it is printed before the deltas rather than inferred from them.
+    print(f"\nmarginal bootstrap interval per series (B={a.b}, NOT a comparison):")
+    print(f"{'series':28s} {'point':>10s} {'2.5%':>10s} {'97.5%':>10s} {'sd':>10s}")
+    for s in a.series:
+        v = boot[s]
+        print(f"{s:28s} {by[s + '_full']:+10.5f} {np.quantile(v, 0.025):+10.5f} "
+              f"{np.quantile(v, 0.975):+10.5f} {v.std(ddof=1):10.5f}")
     print(f"\npaired bootstrap B={a.b} seed={a.seed} (same index sets on both sides):")
     print(f"{'comparison':28s} {'median d':>10s} {'2.5%':>10s} {'97.5%':>10s} {'P(d>0)':>8s}")
     for ref in a.ref:
