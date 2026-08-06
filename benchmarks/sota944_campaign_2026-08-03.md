@@ -9879,3 +9879,73 @@ twins `/mnt/v/output/zensim/bakes/sota944/teacher_csparse/` (+ `_MANIFEST
 mirror; stats never hand-rolled. Nothing ships; the freeze decision is the
 user's. Results append below as R.R; nothing above this line changes after
 the registration push.
+
+## R.R — RESULTS
+
+### R.R0 SUPERVISOR VERIFICATION NOTE (2026-08-05, folded in BEFORE any R2 number was read; binds everything below)
+
+The R1 close initially framed `R1_GL2_s2503_packed`'s one-artifact-bar pass as
+a candidate. Supervisor verification (numbers re-checked against the verdict
+JSONs, exact) corrects the framing, and the rules below are REGISTERED for the
+rest of this appendix:
+
+1. **The GL2 bar pass is a k=1-UNREPLICATED lottery draw, not a candidate
+   claim.** `FS_GL2_s2503` CID22 0.90096 vs seed sibling `FS_GL2_s2501`
+   **0.80711** — within-config spread **0.0938, the campaign's widest**; the
+   GL/PILOT family spans 0.8005-0.9010 (dead λ=16 cell excluded). Appendix J's
+   both-seeds noise rule correctly withheld this cell as a finding; the
+   `W8C_s3101` precedent (the 5-axis k=1 artifact of wave 8) applies here at
+   higher amplitude. Every statement of the bar pass below carries the sibling
+   value beside it.
+2. **Registered replication requirement for any follow-on:** k ≥ 4 fresh seeds
+   of the GL2 recipe; given the measured bimodality (0.807/0.901 with no
+   middle), report the FULL distribution — never a median or a best.
+3. **Specialist framing:** even if replicated, the cell fails KonJND 0.329 /
+   nonphoto 0.835 / csiq 0.801 — a CID22+HF-NL **specialist** under the
+   balanced profile, not a general candidate.
+4. **R2 inherits the volatility:** the teacher-swap cells below are read with
+   the same distribution framing; any R2 outlier crossing of the bar takes the
+   same k-replication gate before it is called anything.
+
+**What stands as the wave's FIRM finding regardless of seeds: the R1 dial
+mechanism.** Add-spline + pack `--zerobias-bulk 0` recovers the lasso dial
+mechanically (range 5.7-7.0 → 45-63 dial units, mono ≥ 99.8%, tied ≤ 0.7%)
+with every rank axis and HF-NL-proxy held EXACTLY (raw == dial == packed to
+4 decimals on all 12 corpora, all 4 cells) — a property of the packaging
+chain, k-independent. The J.R3 "the shrunken fits do not dial" blocker is
+CLOSED: the collapse was raw-unit range compression, not a rank defect.
+
+### R.R1 — arm R1 tables (final; committed `f4df3cb8`)
+
+`benchmarks/sparsehf/r1_dial_recovery_2026-08-05.tsv` (raw → dial → packed per
+cell) + `r1_grange_2026-08-05.tsv` (G-RANGE record). Headline rows (packed):
+
+| cell | cid22 | konjnd | nonphoto | hfnl/ref | mono | tied | range | M3a | bytes | one-artifact bar |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R1_GL0p3_s2503_packed | 0.8474 | 0.4285 | 0.8665 | 0.8431 | 99.89% | 0% | 60.9 | 0.9733 | 182,344 | FAIL (cid22) |
+| R1_GL1_s2503_packed | 0.8711 | 0.3472 | 0.8590 | 0.8471 | 99.96% | 0% | 50.3 | 0.9417 | 182,313 | FAIL (cid22, −0.004) |
+| R1_GL2_s2503_packed | 0.9010 ⚠k=1 (sibling s2501: 0.8071) | 0.3294 | 0.8351 | 0.8219 | 99.87% | 0% | 45.3 | 0.8491 | 105,855 | PASS ⚠k=1-UNREPLICATED (R.R0) |
+| R1_PILOT1_s2501_packed (instrument) | 0.8005 | 0.3262 | 0.8691 | 0.8476 | 99.77% | 0.7% | 63.2 | 0.9482 | 125,353 | FAIL (cid22) |
+
+- Packaging is FREE on every rank axis (all 12 corpora identical to 4dp raw →
+  packed; hfnl EXACT on every cell). M3a on the packed sparse cells is
+  0.849-0.973 — the two milder-λ cells sit far above the 0.85 GOLD line.
+- **Registered-expectation deviation, mechanism verified:** the frozen R.2
+  expectation "rank rows IDENTICAL at the dial step" did NOT hold exactly on
+  3 of 4 cells (max |Δsrocc| 3.1e-03, on `live`; cid22/konjnd/nonphoto/hfnl
+  bit-stable or ≤1e-6). Mechanism (measured, not assumed): the monotone-repair
+  PCHIP produces flat segments where anchor percentile-bin means locally
+  invert, and dense pred clusters tie inside them — unique predictions drop
+  live 763→680, tid 3000→2909, kadid 4908→4797, cid22 4292→4292 (untouched).
+  This is a property of `fit_spline_knots` on the shrunken-output class, NOT a
+  chain defect (GL0p3, whose bins are cleanly monotone, is exactly invariant).
+  Recorded, not relaxed: the STOP fired, the mechanism was isolated, and the
+  deltas are bounded well under any decision threshold in this appendix.
+- **G-RANGE (record row):** GL class 2.8-9.3% above-knot on ext_cid22val vs
+  incumbents 0-0.6% (only s1307 passes) — the issue-50 near-top saturation,
+  amplified because the sparse nets rank cid22val's near-lossless pairs above
+  the anchor's top percentile. Fix path remains the amendment-2 near-top
+  anchor densification; deliberately not applied post-hoc here.
+- Forward-cost note: C_packed vs R1_GL2_s2503_packed zenbench A/B (busy box,
+  interleaved — delta is the reliable number): see
+  `benchmarks/sparsehf/forward_bench_2026-08-05.tsv`.
