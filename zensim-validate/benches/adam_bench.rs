@@ -16,9 +16,9 @@
 #[path = "../src/adam_simd.rs"]
 mod adam_simd;
 
-#[cfg(target_arch = "x86_64")]
-use adam_simd::adam_update_rsqrt_v4;
 use adam_simd::{AdamUpdateArgs, adam_update, adam_update_scalar_ref};
+#[cfg(target_arch = "x86_64")]
+use adam_simd::{RsqrtPrecision, adam_update_rsqrt_v4, adam_update_rsqrt_v4_tiered};
 use zenbench::black_box;
 
 const N_W1: usize = 47_616;
@@ -180,17 +180,39 @@ zenbench::main!(|suite| {
             })
         });
 
-        // rsqrt + NR variant — DOES NOT BEAT vsqrtpd+vdivpd on Zen 4.
-        // The extra 2 NR iterations on rsqrt + 1 NR on rcp add more
-        // cycles than the hardware sqrt/div latency saves. Kept in the
-        // bench as a witness — if Zen 5 or Intel Sapphire Rapids changes
-        // the FP-unit balance, rerun and reassess. Documented in
-        // benchmarks/adam_simd_methodology_2026-05-17.md.
+        // rsqrt variants, one arm per precision tier (full = 2 NR steps,
+        // nr1 = 1 NR step, estimate = raw 14-bit VRSQRT14PD/VRCP14PD).
+        // The FULL tier historically DOES NOT BEAT vsqrtpd+vdivpd on
+        // Zen 4 — the 2 NR iterations on rsqrt + 2 NR on rcp add more
+        // cycles than the hardware sqrt/div latency saves. The lower
+        // tiers exist per the 2026-08-05 tiered-precision ruling; their
+        // costs are recorded in benchmarks/adam_rsqrt_tiers_2026-08-05.md.
+        // If Zen 5 or Intel Sapphire Rapids changes the FP-unit balance,
+        // rerun and reassess (methodology:
+        // benchmarks/adam_simd_methodology_2026-05-17.md).
         #[cfg(target_arch = "x86_64")]
-        group.bench("simd_rsqrt_lose", |b| {
+        group.bench("simd_rsqrt_full", |b| {
             b.with_input(|| make_state(N_W1)).run(|mut s| {
                 let mut a = args_for(&mut s.0, &mut s.1, &mut s.2, &mut s.3);
                 adam_update_rsqrt_v4(&mut a);
+                black_box(s)
+            })
+        });
+
+        #[cfg(target_arch = "x86_64")]
+        group.bench("simd_rsqrt_nr1", |b| {
+            b.with_input(|| make_state(N_W1)).run(|mut s| {
+                let mut a = args_for(&mut s.0, &mut s.1, &mut s.2, &mut s.3);
+                adam_update_rsqrt_v4_tiered(&mut a, RsqrtPrecision::Nr1);
+                black_box(s)
+            })
+        });
+
+        #[cfg(target_arch = "x86_64")]
+        group.bench("simd_rsqrt_estimate", |b| {
+            b.with_input(|| make_state(N_W1)).run(|mut s| {
+                let mut a = args_for(&mut s.0, &mut s.1, &mut s.2, &mut s.3);
+                adam_update_rsqrt_v4_tiered(&mut a, RsqrtPrecision::Estimate);
                 black_box(s)
             })
         });

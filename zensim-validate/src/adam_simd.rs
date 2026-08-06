@@ -211,20 +211,37 @@ fn adam_update_inner_v4(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'
 // Alternative AVX-512 path: reciprocal-estimate based, to break the
 // sqrt/div latency chain — no VSQRTPD / VDIVPD is issued. Provides higher
 // throughput where the FP divide/sqrt port is the bottleneck, at the cost
-// of bit-identity: relative error of the update step is ~1-2 ULP
-// (~1e-15), NOT bit-identical to scalar but far inside the trainer's
-// RankNet loss precision budget. Exposed as `adam_update_rsqrt_v4` for
-// benchmarking + opt-in use (not shipped: measured slower than
-// vsqrtpd+vdivpd on Zen 4).
+// of bit-identity to the scalar reference. Exposed for benchmarking +
+// opt-in use (not shipped: measured slower than vsqrtpd+vdivpd on Zen 4).
 //
-// Math:
+// Math (shared by every tier):
 //   denom = sqrt(v_hat) + eps
 //   1/denom computed via:
-//     r = v_hat.rsqrt()         [VRSQRT14PD + 2 NR inside magetypes → ~52-53 bits]
-//     sqrt_v = v_hat * r        [FMA-fused with the +eps]
+//     r = P::rsqrt(v_hat)        [VRSQRT14PD + 0..2 NR steps, tier-selected]
+//     sqrt_v = v_hat * r         [FMA-fused with the +eps]
 //     denom = sqrt_v + eps
-//     rd = denom.recip()        [VRCP14PD + 2 NR inside magetypes → ~52-53 bits]
+//     rd = P::recip(denom)       [VRCP14PD + 0..2 NR steps, tier-selected]
 //   w -= (lr * m_hat) * rd
+//
+// PRECISION IS A TIER, NOT A CONSTANT (2026-08-05 user ruling): "full-
+// precision fallbacks are acceptable only if runtime-optional via generics —
+// prefer archmage's precision-TIERED variants." The kernel body is generic
+// over [`RsqrtPrecisionTier`]; the DEFAULT (and the only tier any production
+// caller uses) is [`RsqrtFull`], but [`RsqrtNr1`] / [`RsqrtEstimate`] are
+// selectable at runtime via [`adam_update_rsqrt_v4_tiered`] for callers that
+// can trade update-step precision for throughput. Per-tier error bounds are
+// measured + gated in `tests/adam_simd_rsqrt_precision.rs`.
+//
+// magetypes 0.9.28 ships exactly two f64 precision tiers per op —
+// `rsqrt_approx()`/`rcp_approx()` (RAW 14-bit hardware estimate) and
+// `rsqrt()`/`recip()` (2 Newton-Raphson steps, ~52-53 bits; the f32-only
+// `_portable`/`_newton` families do not exist for f64) — so the middle tier
+// here hand-rolls ONE NR step using the SAME step formulas magetypes' full
+// path uses internally (recip: r·(2−a·r); rsqrt: 0.5·y·(3−a·y·y); see
+// magetypes/src/simd/impls/x86_v4.rs). NR1 output is therefore exactly
+// "full minus one step" — the same expression tree the pre-repair kernel
+// accidentally computed after the 0.9.27 `_approx` contract change, whose
+// error was measured at max_rel 1.6653e-5 on the precision-test fixture.
 //
 // PRECISION PROVENANCE (do not re-learn — this failed for six weeks):
 // magetypes' `rsqrt_approx()`/`rcp_approx()` changed meaning in archmage
@@ -237,18 +254,144 @@ fn adam_update_inner_v4(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'
 // contract change the same code silently topped out at ~28 bits (~1e-8 step
 // error), which `rsqrt_path_precision_vs_scalar` catches as max_rel 1.7e-5
 // (the ~1e-8 step error is amplified ~2e3× by cancellation at indices where
-// `w - step` lands near zero). Fix: consume the full-precision `rsqrt()` /
-// `recip()` and let magetypes own the refinement. If you ever swap these
-// back to `_approx` + hand-rolled NR, re-derive the step-error budget first.
+// `w - step` lands near zero). The repair (`22e37ce3`) consumed the
+// full-precision `rsqrt()`/`recip()`; the tier mechanism now makes that
+// hand-rolled-NR shape a NAMED, boundedly-tested tier instead of an
+// accident. If magetypes' `_approx` contract moves again, the per-tier
+// precision gates fail loudly instead of silently degrading.
 //
 // Domain note (pre-existing, unchanged): `rsqrt(0)` is Inf/NaN-producing —
 // the sqrt-based paths survive v_hat == 0 via `sqrt(0) + eps`, this one does
 // not. Fine for Adam (v is an EMA of g² with positive init in every caller),
 // but do not lift this kernel into a context where v_hat can be exactly 0.
 
+/// Precision tier for the estimate-based reciprocal ops in the rsqrt Adam
+/// kernel (AVX-512-only — AVX2 has no f64 reciprocal estimate; magetypes'
+/// f64x4 `rsqrt()`/`recip()` are exact `sqrt`/`div` there, so tiering below
+/// v4 would be a no-op).
+///
+/// Implementations are zero-sized selector types, monomorphized into the
+/// kernel body — tier selection costs nothing inside the loop. Runtime
+/// selection happens once per call in [`adam_update_rsqrt_v4_tiered`].
 #[cfg(target_arch = "x86_64")]
-#[arcane]
-pub fn adam_update_inner_v4_rsqrt(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'_>) {
+pub trait RsqrtPrecisionTier {
+    /// Reciprocal square root of `v` at this tier's precision.
+    fn rsqrt(
+        token: archmage::X64V4Token,
+        v: f64x8<archmage::X64V4Token>,
+    ) -> f64x8<archmage::X64V4Token>;
+    /// Reciprocal of `d` at this tier's precision.
+    fn recip(
+        token: archmage::X64V4Token,
+        d: f64x8<archmage::X64V4Token>,
+    ) -> f64x8<archmage::X64V4Token>;
+}
+
+/// Full precision: magetypes `rsqrt()`/`recip()` = VRSQRT14PD/VRCP14PD + 2
+/// Newton-Raphson steps each, ~52-53 bits. Step error vs the scalar
+/// sqrt+div formula: ~1-2 ULP (~2e-16..5e-16 relative). **The default tier.**
+#[cfg(target_arch = "x86_64")]
+pub struct RsqrtFull;
+
+#[cfg(target_arch = "x86_64")]
+impl RsqrtPrecisionTier for RsqrtFull {
+    #[inline(always)]
+    fn rsqrt(
+        _token: archmage::X64V4Token,
+        v: f64x8<archmage::X64V4Token>,
+    ) -> f64x8<archmage::X64V4Token> {
+        v.rsqrt()
+    }
+    #[inline(always)]
+    fn recip(
+        _token: archmage::X64V4Token,
+        d: f64x8<archmage::X64V4Token>,
+    ) -> f64x8<archmage::X64V4Token> {
+        d.recip()
+    }
+}
+
+/// One Newton-Raphson step from the raw 14-bit estimate: ~28 bits (~1e-8
+/// relative step error). Mirrors magetypes' internal NR step formulas
+/// exactly, so this tier reproduces the pre-`22e37ce3` kernel's arithmetic
+/// bit-for-bit (measured max w-relative error 1.6653e-5 on the precision
+/// fixture through ~2e3× cancellation amplification — see the test).
+#[cfg(target_arch = "x86_64")]
+pub struct RsqrtNr1;
+
+#[cfg(target_arch = "x86_64")]
+impl RsqrtPrecisionTier for RsqrtNr1 {
+    #[inline(always)]
+    fn rsqrt(
+        token: archmage::X64V4Token,
+        v: f64x8<archmage::X64V4Token>,
+    ) -> f64x8<archmage::X64V4Token> {
+        // y ← 0.5·y·(3 − v·y·y), one step from the raw estimate — the same
+        // (unfused) step magetypes' full rsqrt applies twice.
+        let half = f64x8::splat(token, 0.5);
+        let three = f64x8::splat(token, 3.0);
+        let y = v.rsqrt_approx();
+        (half * y) * (three - v * (y * y))
+    }
+    #[inline(always)]
+    fn recip(
+        token: archmage::X64V4Token,
+        d: f64x8<archmage::X64V4Token>,
+    ) -> f64x8<archmage::X64V4Token> {
+        // r ← r·(2 − d·r), one step from the raw estimate.
+        let two = f64x8::splat(token, 2.0);
+        let r = d.rcp_approx();
+        r * (two - d * r)
+    }
+}
+
+/// Raw hardware estimate, no refinement: VRSQRT14PD/VRCP14PD alone. The
+/// AVX-512 spec bounds the estimate's relative error at 2^-14 ≈ 6.1e-5 per
+/// op. Cheapest possible tier; only for callers that can absorb ~1e-4-class
+/// relative error in the update step.
+#[cfg(target_arch = "x86_64")]
+pub struct RsqrtEstimate;
+
+#[cfg(target_arch = "x86_64")]
+impl RsqrtPrecisionTier for RsqrtEstimate {
+    #[inline(always)]
+    fn rsqrt(
+        _token: archmage::X64V4Token,
+        v: f64x8<archmage::X64V4Token>,
+    ) -> f64x8<archmage::X64V4Token> {
+        v.rsqrt_approx()
+    }
+    #[inline(always)]
+    fn recip(
+        _token: archmage::X64V4Token,
+        d: f64x8<archmage::X64V4Token>,
+    ) -> f64x8<archmage::X64V4Token> {
+        d.rcp_approx()
+    }
+}
+
+/// Runtime-selectable precision tier for [`adam_update_rsqrt_v4_tiered`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target constructs a subset of variants
+pub enum RsqrtPrecision {
+    /// ~52-53 bits (2 NR steps) — the default; bounded at 1e-9 w-relative.
+    #[default]
+    Full,
+    /// ~28 bits (1 NR step) — bounded at 1e-3 w-relative on the fixture.
+    Nr1,
+    /// Raw 14-bit estimate — bounded at 1e0 w-relative on the fixture.
+    Estimate,
+}
+
+/// Generic kernel body — precision tier is a monomorphized type parameter,
+/// so each `#[arcane]` wrapper below compiles a straight-line loop with the
+/// tier's op sequence inlined (no per-lane or per-iteration branching).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn adam_update_inner_v4_rsqrt_body<P: RsqrtPrecisionTier>(
+    token: archmage::X64V4Token,
+    args: &mut AdamUpdateArgs<'_>,
+) {
     let beta1_v = f64x8::splat(token, args.beta1);
     let beta2_v = f64x8::splat(token, args.beta2);
     let one_minus_b1_v = f64x8::splat(token, 1.0 - args.beta1);
@@ -284,18 +427,14 @@ pub fn adam_update_inner_v4_rsqrt(token: archmage::X64V4Token, args: &mut AdamUp
         let m_hat = m_new * inv_bc1_v;
         let v_hat = v_new * inv_bc2_v;
 
-        // Full-precision reciprocal sqrt: VRSQRT14PD + 2 Newton-Raphson
-        // steps inside magetypes' `rsqrt()` (~52-53 bits — see the
-        // PRECISION PROVENANCE block above; `rsqrt_approx()` is the RAW
-        // 14-bit estimate since magetypes 0.9.2x and must not be used
-        // here with fewer than 2 refinement steps).
-        let r1 = v_hat.rsqrt();
+        // Tier-selected reciprocal sqrt (see the tier docs above).
+        let r1 = P::rsqrt(token, v_hat);
 
         // sqrt(v_hat) = v_hat * rsqrt(v_hat), fused with the + eps.
         let denom = v_hat.mul_add(r1, eps_v);
 
-        // Full-precision reciprocal: VRCP14PD + 2 NR inside `recip()`.
-        let rd = denom.recip();
+        // Tier-selected reciprocal.
+        let rd = P::recip(token, denom);
 
         let w_new = w - (lr_v * m_hat) * rd;
 
@@ -323,14 +462,50 @@ pub fn adam_update_inner_v4_rsqrt(token: archmage::X64V4Token, args: &mut AdamUp
     }
 }
 
-/// Bench-only entry-point — runs the rsqrt-based v4 kernel directly,
-/// skipping the dispatch wrapper to isolate kernel cost.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+pub fn adam_update_inner_v4_rsqrt(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'_>) {
+    adam_update_inner_v4_rsqrt_body::<RsqrtFull>(token, args);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+pub fn adam_update_inner_v4_rsqrt_nr1(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'_>) {
+    adam_update_inner_v4_rsqrt_body::<RsqrtNr1>(token, args);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+pub fn adam_update_inner_v4_rsqrt_estimate(
+    token: archmage::X64V4Token,
+    args: &mut AdamUpdateArgs<'_>,
+) {
+    adam_update_inner_v4_rsqrt_body::<RsqrtEstimate>(token, args);
+}
+
+/// Bench-only entry-point — runs the rsqrt-based v4 kernel directly at the
+/// DEFAULT (full-precision) tier, skipping the dispatch wrapper to isolate
+/// kernel cost. Equivalent to
+/// `adam_update_rsqrt_v4_tiered(args, RsqrtPrecision::Full)`.
 #[cfg(target_arch = "x86_64")]
 #[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
 pub fn adam_update_rsqrt_v4(args: &mut AdamUpdateArgs<'_>) {
+    adam_update_rsqrt_v4_tiered(args, RsqrtPrecision::Full);
+}
+
+/// Runtime-tier-selected rsqrt Adam kernel. Falls back to the scalar
+/// reference when AVX-512 is unavailable (every tier degrades to EXACT
+/// there — the fallback is full precision by construction).
+#[cfg(target_arch = "x86_64")]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+pub fn adam_update_rsqrt_v4_tiered(args: &mut AdamUpdateArgs<'_>, tier: RsqrtPrecision) {
     use archmage::SimdToken;
     if let Some(token) = <archmage::X64V4Token as SimdToken>::summon() {
-        adam_update_inner_v4_rsqrt(token, args);
+        match tier {
+            RsqrtPrecision::Full => adam_update_inner_v4_rsqrt(token, args),
+            RsqrtPrecision::Nr1 => adam_update_inner_v4_rsqrt_nr1(token, args),
+            RsqrtPrecision::Estimate => adam_update_inner_v4_rsqrt_estimate(token, args),
+        }
     } else {
         adam_update_scalar_ref(args);
     }
