@@ -710,11 +710,12 @@ def main():
         import os as _os
         import sys as _sys
         _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-        from gauntlet import build_html, load_fulleval, load_loop_targeting
+        from gauntlet import build_html, load_fulleval, load_hfnl_axis, load_loop_targeting
         out = a.out or "/mnt/v/output/zensim/reports/summer_gauntlet.html"
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         gbakes = load_fulleval(a.fulleval_dir, a.best_per_day)
-        _p, size = build_html(gbakes, out, loop_targeting=load_loop_targeting(a.loop_targeting))
+        _p, size = build_html(gbakes, out, loop_targeting=load_loop_targeting(a.loop_targeting),
+                              hfnl_axis=load_hfnl_axis())
         print(f"wrote {out}  ({size // 1024} KB)  {len(gbakes)} bakes (interactive gauntlet)\n  view: "
               + out.replace("/mnt/v/output/", "http://localhost:3300/"))
         return
