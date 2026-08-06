@@ -82,8 +82,13 @@ def main() -> int:
         say(f"| {ax} | {v.size} | {v.mean():+.6f} | {v.std(ddof=1):.6f} | "
             f"{np.quantile(v, 0.025):+.6f} | {np.quantile(v, 0.975):+.6f} | "
             f"{np.abs(v).max():.6f} |")
-    say("\nThe null is the appendix's floor instrument: a cell must clear it AND "
-        "the registered axis floor to be a finding.")
+    say("\nThe null is the appendix's floor instrument. When it comes out EXACTLY "
+        "zero, as it does here, that is itself the result: a cell whose candidate "
+        "coefficients are 0.0 scores bit-identically to base through the whole "
+        "fit -> pack -> spline -> score chain, so the LIVE/ZERO split is exact and "
+        "NONE of the spread below is fit noise. It also means the null supplies no "
+        "usable floor, so the REGISTERED axis floors govern (U.5) and the paired "
+        "bootstrap owns the remaining eval-sampling noise.")
 
     # ---------------- 2. distribution of the primary objective --------------
     say("\n## 2. Primary objective — signed CID22 B9\n")
@@ -158,9 +163,14 @@ def main() -> int:
         if r["n_cand"] == "1" and r["status"] in ("LIVE", "ZERO"):
             single[(r["arm"], r["indices"])] = r
     say("| axis | pairs with both members measured | pair > max(member) | "
-        "pair > max(member) by > null sd | best excess |")
+        "pair > max(member) by > floor | best excess |")
     say("|---|--:|--:|--:|--:|")
+    say("(the 'by > floor' column uses max(2 x null sd, the registered axis floor) "
+        "— with a zero null that is the registered floor)")
+    FLOOR = {"hfnl_perref": HFNL_FLOOR, **GUARDS,
+             "b9_signed": 0.0}   # B9 has no registered floor; see U.R4
     for ax in ("b9_signed", "hfnl_perref", "cid22"):
+        thr = max(2.0 * nullsd.get(ax, 0.0), FLOOR.get(ax, 0.010))
         n = beat = beat_n = 0
         best = (None, -9.0)
         for r in rows:
@@ -179,12 +189,12 @@ def main() -> int:
             mx = max(d1, d2)
             if dp > mx:
                 beat += 1
-                if dp - mx > nullsd.get(ax, 0.0):
+                if dp - mx > thr:
                     beat_n += 1
                 if dp - mx > best[1]:
                     best = (r, dp - mx)
         b = f"{best[1]:+.4f} ({best[0]['names']})" if best[0] else "-"
-        say(f"| {ax} | {n} | {beat} | {beat_n} | {b} |")
+        say(f"| {ax} (floor {thr:.4f}) | {n} | {beat} | {beat_n} | {b} |")
     say("\nA pair that never exceeds the better of its two members is an additive "
         "combination of effects already available singly — the pairing hypothesis "
         "predicts SUPER-additivity, and this table is its test.")
