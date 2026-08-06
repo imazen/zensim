@@ -615,6 +615,20 @@
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md APPENDIX V confound 4 + V.R; scripts/promote_fulleval.py rebuild_bands per-pair-vs-rank.n guard",
    "date": "2026-08-06",
    "fix_path": "emit full-corpus per-pair for kadid, or re-verdict the cell with a current `bake_verdict` (which cuts the bands at source)"
+  },
+  {
+   "id": "f8-legacy-bands-not-measured",
+   "kind": "absent-not-failed",
+   "fields": [
+    "rank.cid22.bands"
+   ],
+   "scope": {
+    "missing": "rank.cid22.band_scheme"
+   },
+   "reason": "This cell's bands were cut on the pre-2026-08-06 fixed deciles, so F8's current bar has NOT BEEN MEASURED on it — that is absence, not a measured fail. F8 now reads the SIGNED top and bottom USABLE bands of scheme `merged-decile-2026-08-06`; the legacy `B9` is a different quantity (43 pairs from 11 of 49 refs spanning 0.0194 MOS, published as an ABSOLUTE value), and scoring the new bar against it would compare two different measurements. The cell still counts as NOT-PASSED in n/8 per the registered absent=not-passed rule; the n/m-measured form reports it alongside. To MEASURE it: `promote_fulleval.py --rebuild-bands <cell>` if the cell still carries per-pair (gated bit-identical to a re-verdict), else re-verdict with a current `bake_verdict`.",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX V.5 + V.R5; zensim-validate/src/bin/freeze_check.rs band_scheme()/band_tails(); 160 of 280 board cells are in this state (per-pair stripped by the board-size rule)",
+   "date": "2026-08-06",
+   "fix_path": "`promote_fulleval.py --rebuild-bands`, or a re-verdict when per-pair was stripped"
   }
  ]
 }
