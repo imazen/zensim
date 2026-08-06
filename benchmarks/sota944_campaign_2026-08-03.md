@@ -10019,3 +10019,212 @@ cell) + `r1_grange_2026-08-05.tsv` (G-RANGE record). Headline rows (packed):
 - Forward-cost note: C_packed vs R1_GL2_s2503_packed zenbench A/B (busy box,
   interleaved — delta is the reliable number): see
   `benchmarks/sparsehf/forward_bench_2026-08-05.tsv`.
+
+# REGISTERED APPENDIX S — HDR PHASE 2: THE MULTI-CODEC HDR CORPUS (2026-08-05, pre-registered before any scaled run)
+
+Closes the gap Appendix Q registered as **Q-G6**: the HDR training leg
+`hdr_v3mix` is **single-codec** (zenjxl only), so every model trained on it is
+codec-blind on HDR. This appendix pre-registers the grid, the persistence
+contract, the gates, and — honestly — the blockers that bound what can actually
+be built today.
+
+Pre-registered **before** any scaled run, per the campaign's standing rule.
+Nothing below is a result; the results section is `S.R`.
+
+## S.1 What is being built
+
+HDR sources × **multiple codecs** × a sweep-discipline quality/size grid, scored
+to cvvdp-mix targets, fleet-parallel. The output is a new training leg at the
+current 944 regime, joinable to `hdr_v3mix` by origin (same source estate) but
+**never column-mixed** with SDR canonicals.
+
+## S.2 Sources — fixed, and already size-dense
+
+`/mnt/v/output/imazen-26-hdr-grid-2026-06-14/` — **1,140 HDR reference PNGs =
+76 origins × 15 aspect-preserving scales**, 7.8 GB, 16-bit PQ, cICP {1,16,0,1}.
+
+The scale ladder spans ~`96x128` (≈12 kpx) to `3072x2304` (≈7.08 MP). **This
+already satisfies the sweep discipline's size axis including the tiny bucket, so
+no new resampling is introduced** — a deliberate choice, because resampling
+would fork the source estate and break the join to `hdr_v3mix`.
+
+Content classes by origin: nature 47, interiors 20, general 6, food 3. The
+imbalance is inherent to the estate and is **registered as a limitation**, not
+corrected by reweighting.
+
+Split: **origin-digit split via `origin_split.split_of`**, identical to the
+`hdr_v3mix` @944 leg (38 train / 20 val origins there). Reusing the same split
+function on the same origins is what keeps the two legs comparable and
+leak-free.
+
+## S.3 Codec arms — and the honest status of each
+
+| arm | intent | status |
+|---|---|---|
+| **zenjxl-HDR** | the incumbent; the only wired HDR encode path with a precedent corpus | **READY** — `sweep/hdr.rs::encode_jxl_hdr`, knobs `lossless/distance/noise/effort` |
+| **zenav1-svt 10-bit PQ** | the AV1 leg, via the byte-gated pure-Rust SVT-AV1 port | **NOT WIRED into zenmetrics** — see S.6 B3 |
+| **JPEG-gainmap via ultrahdr** | the gain-map leg | **DECODE-ONLY today** — no encoder in any sweep path; see S.6 B4 |
+| *(zenavif / rav1e 10-bit PQ)* | the already-wired AVIF HDR path | **wired, but user-halted** — see S.6 B5 |
+
+**Registered decision rule:** ship what is buildable rather than stalling the
+whole corpus on the weakest arm. If an arm is still blocked when the fleet is
+otherwise ready, the corpus is built with the arms that are ready, the missing
+arm is recorded in the manifest as absent-not-failed, and the leg is extended
+later (append-only — new arms EXTEND the corpus, never renumber or replace it).
+
+## S.4 Grid
+
+- **Quality: 30 points**, dense at **both** ends per the sweep discipline —
+  step 5 across `q0..q70`, step 2 across `q70..q100`. A grid denser at high q
+  than low q is a defect; the low-q regime is where structural problems hide.
+  For distance-parameterised encoders the analogous distance grid is used, since
+  `CellId.q` is `i64` and cannot carry a float.
+- **Sizes: all 15** ladder steps (no subsetting) — the intercept term dominates
+  at thumbnail sizes and is exactly what a corpus built only at large sizes
+  would miss.
+- **Preset: the QUALITY tier**, i.e. the budget lane's `svt-p6 / jxl-e7 /
+  uhdr` arm rather than its fastest `p13/e1` tier. **Rationale, recorded because
+  it is counter-intuitive:** the fastest tier is 4.6× cheaper in encode
+  (70 s/source vs 324 s/source), but the sweep is **metric-bound in every
+  scenario** the budget evaluated, so the encode saving buys nothing in wall
+  clock. The budget doc's own recommendation is to run the quality tier unless
+  encode moves to billed-per-CPU-hour infrastructure. Consumed from
+  `benchmarks/hdr_sweep_budget_2026-08-05.{md,tsv}` (`044c1142`).
+
+## S.5 Metrics, targets, and the persistence contract
+
+**Metrics per cell:** `cvvdp` + `ssim2` are the minimum set (they define the
+target); `butteraugli` max+pnorm3 come from one compute and are therefore
+recorded too, per the persistence discipline's "save all cheap variants" rule.
+`iwssim` is recorded only where `min(W,H) ≥ 176` — **the four smallest ladder
+steps structurally cannot carry it**, and that absence is recorded as
+absent-not-failed rather than null-with-no-explanation.
+
+**Target:** the cvvdp-mix carried from `hdr_v3mix`,
+`0.5·clip01(ssim2/100) + 0.5·clip01((JOD−6)/4)` — quality-oriented. Note
+`cvvdp-mix` is **not** a metric in zenmetrics and is not being added as one; it
+is computed downstream from the two recorded columns, which keeps the raw
+metrics independently re-mixable.
+
+**Orientation gate (blocking):** `scripts/canonical_corpus/check_target_orientation.py`
+must PASS with `declared: quality` on both splits before the leg is used for any
+training. This is non-negotiable — the campaign is still carrying an inverted
+KADID target whose sign error propagated into ~110 board bakes precisely because
+this gate did not exist at the time.
+
+**Persistence (hard workspace rule, gated):**
+1. **encoded bytes** content-addressed to R2,
+2. **per-pixel diffmaps** for every perceptual metric computed,
+3. **all metric variants**, not just the scalar the target needs.
+
+**G-S1 — FIRST-CELL PERSISTENCE GATE.** After the first cell completes and
+**before the fleet is scaled**, the R2 artifact prefix is listed and all three
+classes above are confirmed present. If any is missing: **stop the launch, fix
+the runner, rebuild the image, relaunch.** No box-minutes are spent on a sweep
+that is silently losing data.
+
+## S.6 Registered blockers (measured, not speculative)
+
+**B1 — zenfleet has no HDR ENCODE job.** `JobKind::Encode { codec, q, knobs }`
+(`crates/zenfleet-core/src/job.rs:113-117`) has no HDR flag; `hdr`/`hdr_transfer`
+exist only on `ScoreFile` (`:145-153`). HDR encode lives only behind
+`zenmetrics sweep --hdr`, and `jobexec`'s encode path is hardcoded SDR
+(`jobexec.rs:1228`, `decode_image_to_rgb8`). **Extension required**, per the
+mandate to extend zenfleet rather than bypass it.
+
+**B2 — artifact persistence is not satisfied by the scoring path.** A `Metric`
+job writes the encode to a temp file, decodes it, and **unlinks it**
+(`jobexec.rs:1233-1249`) — only a byte *count* survives. `JobKind::Diffmap`
+exists in the enum but **no executor implements it** (`jobexec.rs:1296`,
+unhandled). The worker contract is one-blob-per-job by construction
+(`zenfleet-worker/src/lib.rs:529`). **The two-stage shape is the fix and is
+already supported:** declared `Encode` jobs (whose output blob IS the encoded
+bytes, so they persist content-addressed) followed by `ScoreFile` jobs over
+those shas. Diffmaps still need an executor.
+
+**B3 — no `zenav1-svt` codec in zenmetrics.** `codec_from_name`
+(`jobexec.rs:62-71`) knows only `zenpng|zenjpeg|zenwebp|zenavif|zenjxl`, and the
+HDR sweep gates on `CodecKind::{Zenjxl,Zenavif}` (`sweep/hdr.rs:115`). The
+encoder itself is ready — the port is byte-gated at 10-bit on real photographs
+across presets 0-13 (191/191 cells) — so this is an integration gap, not a
+codec-capability gap.
+
+**B4 — JPEG-gainmap is decode-only.** `hdr.rs` decodes Ultra HDR JPEG under the
+opt-in `hdr-gainmap` feature, but there is **no gain-map encoder** in any sweep
+or jobexec path (`sweep/hdr.rs:190-199` has two arms).
+
+**B5 — the AVIF arm is user-halted.** A standing user directive (2026-07-13)
+halts AVIF datagen while zenavif is mid-migration, and requires an explicit
+settle-check plus user confirmation before any AVIF sweep. Checked 2026-08-05:
+zenavif carries a stale `.workongoing`, an uncommitted `Cargo.lock`, and a
+**conflicted `hdr-mdcv-st2086-fix` bookmark** — i.e. **not settled**. The AVIF
+arm therefore stays out pending user confirmation; it is not silently
+substituted for the zenav1-svt arm.
+
+**B6 — ⚠ THE FLEET CANNOT GUARANTEE GPU SCORING.** `jobexec` hardcodes
+`GpuRuntime::Auto` at four call sites (`jobexec.rs:126-132`, `:965`, `:1494`,
+`:1596`) with no flag or env override, and the `auto` ladder ends in a CPU rung
+whose failure strings are dropped on success — so a GPU-unavailable or
+OOM condition yields **a CPU number recorded under the GPU column name, exit 0,
+no log line**. Demonstrated end-to-end 2026-08-05 (`--gpu-runtime cuda` exits 1
+and refuses; bare `auto` exits 0 and emits `cvvdp_imazen_v0_0_1` from a CPU
+computation). Evidence + the smallest identified fix (gate `auto_order()`'s CPU
+rung behind `ZENMETRICS_REQUIRE_GPU`, which covers all three entry points at
+once) are annotated into `benchmarks/hdr_sweep_budget_2026-08-05.md` with raw
+data in `benchmarks/cvvdp_gpu_mode_probe_2026-08-05.tsv`.
+
+**This is a blocking prerequisite for the metric half of the corpus**: without
+it, "scored on GPU" is unfalsifiable, and a silently-CPU-scored leg would be
+indistinguishable from a correct one after the fact.
+
+**B7 — executor image gate.** HDR manifests require an executor built with the
+`hdr` feature (and `png` for PQ-PNG refs). Canonical image names only, new
+variants as TAGS not new packages, bake-everything, no apt-at-boot.
+
+## S.7 Fleet design — sized against the metric queue, not encode
+
+Measured inversion from the budget lane: the full 76-source 3-arm encode is
+**6.9 CPU-h ⇒ 3-5 minutes of wall** once fanned out, against **11.5-16.1 GPU-h**
+of scoring that does not distribute past the available GPUs. **The sweep's wall
+clock IS the metric queue.**
+
+Consequences, registered so they are not re-litigated:
+- Encode fans across all CPU-capable nodes; adding encode capacity buys
+  approximately nothing.
+- **GPU metric scoring runs on `node-2` and `lianli`** (user directive). Both
+  are 8 GB cards.
+- **Every ladder size fits those cards.** Measured per-pair device memory scales
+  ~222 MiB/MP (cvvdp-gpu) and ~348 MiB/MP (ssim2-gpu); at the 7.08 MP top tier
+  that is ~1.6 GB and ~2.5 GB, ~4 GB co-resident — comfortably inside 8 GB. **No
+  size tier is excluded from GPU scoring**, which was the open question B6 was
+  raised against.
+- cvvdp peaks at only **2-10 % GPU utilization** — it is genuinely CPU-prep-
+  bound, so routing cvvdp to CPU workers is sound and is the lever that lifts
+  throughput, *provided* B6 is fixed so the routing is a deliberate choice
+  rather than a silent accident.
+
+## S.8 Confounds + limitations (registered)
+
+1. **Content imbalance** — 47/76 origins are nature; conclusions about screen or
+   line-art HDR content are not supported by this corpus.
+2. **Targets are metric-derived, not human.** Winning an in-domain split proves
+   teacher fit, not human validity. Real human-anchored HDR training data does
+   not exist locally (UPIQ is holdout, AIC-HDR2025 unreleased) — Q-G6's
+   data-acquisition block is **not** lifted by this appendix; only the
+   codec-breadth half of it is.
+3. **Single source estate.** All 76 origins are one photographer, one 2026-03
+   capture window. Codec breadth improves; source breadth does not.
+4. **The arms are not equalised.** Different codecs at "the same q" are not at
+   the same quality; comparisons across arms must go through the measured
+   metric, never the q label.
+5. **Regime purity.** 944-class, HDR route. Never column-mix with the SDR
+   canonicals or the v3 pu-linear 372 corpus.
+
+## S.9 Deliverables
+
+`S.R` results section; the zenfleet extensions with parity evidence; the
+first-cell gate artifact; `_MANIFEST.json` carrying `build_commit` + input
+sha256s + per-arm row counts + absent-not-failed records; triple mirror (local +
+R2 + Tower) with a sha manifest; `DATA_SPLITS` + `DATASET_HISTORY` +
+`DATA_PROVENANCE` registrations; and the orientation-gate verdict for both
+splits.
