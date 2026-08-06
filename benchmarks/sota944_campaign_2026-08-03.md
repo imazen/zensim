@@ -12101,6 +12101,13 @@ equal-population bands reaches the 0.90 bar**: widest 0.859, the eight interior
 ones 0.349–0.592 on spans 0.024–0.066. The intuitive repair for "the band is too
 small" makes the actual problem strictly worse.
 
+**Fixed quintiles — the registered "maybe ten is just too many" null — also
+fail**: on CID22 they give n = 0 / 58 / 881 / 1928 / 1425 with `r_SB` — /
+0.361 / 0.864 / 0.969 / 0.949, i.e. two of five pass, one is still EMPTY and one
+still rests on 58 pairs. **Band count is not the variable.** A fixed grid, coarse
+or fine, cannot know where a corpus's mass is; only a scheme that reads the
+target distribution adapts.
+
 A pairwise "merge the worst band into its smaller neighbour" greedy was tried
 and rejected as myopic: on TID it spent `B4` (677) on the already-satisfied `B5`
 (705), stranded `B6-B9` (877), and collapsed the corpus to one band where the

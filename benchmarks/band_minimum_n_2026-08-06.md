@@ -198,6 +198,19 @@ reaches the 0.90 discrimination bar**, the widest getting 0.859. Equalising
 counts is the intuitive fix and it makes the range-restriction problem *worse*:
 it takes the corpus's densest regions and slices them thinnest.
 
+**Fixed quintiles are not enough either** — the registered "maybe ten is simply
+too many" null. Coarsening the same fixed grid to five bands on CID22:
+
+| band | B0 | B1 | B2 | B3 | B4 |
+|---|--:|--:|--:|--:|--:|
+| n | **0** | 58 | 881 | 1928 | 1425 |
+| `r_SB` | — | **0.361** | **0.864** | 0.969 | 0.949 |
+
+Two of five pass, one is still **empty**, and one still rests on 58 pairs. Band
+*count* is not the variable: the problem is that a FIXED grid cannot know where
+a corpus's mass actually is. Only a scheme that reads the target distribution
+adapts — which is the argument for merging over any fixed grid, coarse or fine.
+
 **The shipped scheme** (`zensim_validate::bands`, `merged-decile-2026-08-06`):
 sweep the fixed deciles low→high, close a band the moment it clears both floors,
 fold a deficient remainder into the band before it. Deterministic in the target
