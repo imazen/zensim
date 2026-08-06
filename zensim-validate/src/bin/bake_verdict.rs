@@ -1144,6 +1144,15 @@ struct BandRow {
     hi: f64,
     n: usize,
     srocc: f64,
+    /// The band's Spearman WITH ITS SIGN. `srocc` above is `.abs()` (the
+    /// polarity-tolerant aggregate convention), which on a band tail hides the
+    /// one thing the tail is asked about: a band whose ordering has COLLAPSED
+    /// scores identically to one that is correctly ordered, and a band that is
+    /// more deeply INVERTED scores HIGHER. `freeze_check`'s F8 documents itself
+    /// as signed ("collapse must hurt") and its `B3 >= 0.0` clause is only
+    /// meaningful against a signed value. Emitted additively so no existing
+    /// consumer of `srocc` changes.
+    srocc_signed: f64,
     plcc: f64,
     krocc: f64,
     or_ratio: f64,
@@ -2031,6 +2040,7 @@ are excluded._\n",
                         hi: if band_idx == 9 { 1.0 } else { hi },
                         n: idxs.len(),
                         srocc: f64::NAN,
+                        srocc_signed: f64::NAN,
                         plcc: f64::NAN,
                         krocc: f64::NAN,
                         or_ratio: f64::NAN,
@@ -2051,9 +2061,14 @@ are excluded._\n",
                 .sum::<f64>()
                 / idxs.len() as f64;
             let noisy = if idxs.len() < 30 { " ⚠" } else { "" };
+            // The band table renders the SIGNED Spearman through the same
+            // `srocc_cell` surface the aggregate row uses, so an inverted tail
+            // is loud instead of indistinguishable from a healthy one.
+            let b_srocc_signed = zensim_validate::panel::spearman(&h_b, &s_b);
             let md = format!(
-                "| {label}{noisy} | {range_label} | {} | {b_srocc:.4} | {b_plcc:.4} | {b_krocc:.4} | {b_or:.4} | {b_pwrc:.4} | {b_z:.3} | {mae:.4} |\n",
-                idxs.len()
+                "| {label}{noisy} | {range_label} | {} | {} | {b_plcc:.4} | {b_krocc:.4} | {b_or:.4} | {b_pwrc:.4} | {b_z:.3} | {mae:.4} |\n",
+                idxs.len(),
+                srocc_cell(corpus.name, b_srocc, b_srocc_signed)
             );
             (
                 md,
@@ -2063,6 +2078,7 @@ are excluded._\n",
                     hi: if band_idx == 9 { 1.0 } else { hi },
                     n: idxs.len(),
                     srocc: b_srocc,
+                    srocc_signed: b_srocc_signed,
                     plcc: b_plcc,
                     krocc: b_krocc,
                     or_ratio: b_or,
@@ -3263,7 +3279,9 @@ Run the dedicated q-sweep harness for those._\n",
                     // via serde_json's f64 handling for bands with n < 4.
                     "bands": r.bands.as_ref().map(|bs| bs.iter().map(|b| json!({
                         "band": b.band, "lo": b.lo, "hi": b.hi, "n": b.n,
-                        "srocc": nan_null(b.srocc), "plcc": nan_null(b.plcc),
+                        "srocc": nan_null(b.srocc),
+                        "srocc_signed": nan_null(b.srocc_signed),
+                        "plcc": nan_null(b.plcc),
                         "krocc": nan_null(b.krocc), "or": nan_null(b.or_ratio),
                         "pwrc": nan_null(b.pwrc), "z_rmse": nan_null(b.z_rmse),
                         "mae": nan_null(b.mae),
@@ -3964,5 +3982,39 @@ mod tests {
             a.perpair_metrics.exists(),
             "kadis-944 per-pair source missing"
         );
+    }
+
+    /// A band whose ordering is INVERTED must be distinguishable from one that
+    /// is correctly ordered. `srocc` cannot do it — the panel convention takes
+    /// `.abs()`, so both read the same and a DEEPER inversion reads HIGHER.
+    /// This is exactly what `freeze_check`'s F8 band-tail gate consumes, while
+    /// documenting itself as signed ("collapse must hurt") and carrying a
+    /// `B3 >= 0.0` clause that an absolute value can never fail.
+    ///
+    /// Fails without the `srocc_signed` band field.
+    #[test]
+    fn band_srocc_signed_separates_inverted_from_healthy_tails() {
+        let humans = [0.91_f64, 0.93, 0.95, 0.97, 0.99];
+        let healthy = [10.0_f64, 20.0, 30.0, 40.0, 50.0]; // rank-aligned
+        let inverted = [50.0_f64, 40.0, 30.0, 20.0, 10.0]; // exactly reversed
+
+        let h_signed = zensim_validate::panel::spearman(&humans, &healthy);
+        let i_signed = zensim_validate::panel::spearman(&humans, &inverted);
+        assert!((h_signed - 1.0).abs() < 1e-12, "healthy signed = {h_signed}");
+        assert!((i_signed + 1.0).abs() < 1e-12, "inverted signed = {i_signed}");
+
+        // The abs'd form the board and F8 read is IDENTICAL for the two.
+        let (h_abs, ..) = aggregate_panel(&healthy, &humans);
+        let (i_abs, ..) = aggregate_panel(&inverted, &humans);
+        assert!(
+            (h_abs - i_abs).abs() < 1e-12,
+            "the abs'd band srocc cannot tell them apart ({h_abs} vs {i_abs}) — \
+             which is the whole reason srocc_signed exists"
+        );
+
+        // ...and the rendered cell must flag the inversion loudly.
+        let cell = srocc_cell("cid22", i_abs, i_signed);
+        assert!(cell.contains("INVERTED"), "inverted band rendered as {cell:?}");
+        assert!(!srocc_cell("cid22", h_abs, h_signed).contains("INVERTED"));
     }
 }
