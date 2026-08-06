@@ -31,7 +31,9 @@ use zensim::{RgbSlice, Zensim, ZensimProfile};
 static BAKE_BYTES: OnceLock<Vec<u8>> = OnceLock::new();
 
 fn bake_bytes() -> &'static [u8] {
-    BAKE_BYTES.get().expect("bake bytes loaded before profile use")
+    BAKE_BYTES
+        .get()
+        .expect("bake bytes loaded before profile use")
 }
 
 fn main() {
@@ -107,7 +109,10 @@ fn main() {
     let s = zensim::score_features_fd_gradient_with_profile(profile, feats, w as u32, h as u32)
         .expect("FD gradient");
     let n_nonzero = s.iter().filter(|&&g| g != 0.0).count();
-    assert!(n_nonzero > 0, "gradient identically zero — probe never engaged");
+    assert!(
+        n_nonzero > 0,
+        "gradient identically zero — probe never engaged"
+    );
 
     // 3) Full attribution density under that gradient.
     let attr = z

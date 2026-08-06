@@ -170,6 +170,11 @@ required-features = ["feature-regime-v2"]
 name = "fused944_probe"
 required-features = ["custom-profiles", "feature-regime-v2"]
 
+# AVIF per-superblock steering signal (campaign appendix Y, A-Y4).
+[[example]]
+name = "avif_sb_hints"
+required-features = ["custom-profiles", "feature-regime-v2"]
+
 [[example]]
 name = "gen_jpeg_distortion"
 required-features = ["feature-regime-v2"]
