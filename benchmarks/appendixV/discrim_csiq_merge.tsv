@@ -1,0 +1,2 @@
+scheme	band	lo	hi	n	span	sd	r_halves	r_sd	r_sb	spread_p10	spread_p50	spread_p90	lsd	dr	n_models
+merge	B0-B9	-inf	inf	866	1.0000	0.2627	0.9909	0.0025	0.9954	0.7344	0.8462	0.9479	0.0205	10.389	120
