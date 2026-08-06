@@ -229,6 +229,11 @@ harness = false
 required-features = ["custom-profiles", "feature-regime-v2"]
 
 [[bench]]
+name = "tenx_bar_bench"
+harness = false
+required-features = ["custom-profiles", "feature-regime-v2"]
+
+[[bench]]
 name = "v2_speed_baseline"
 harness = false
 required-features = ["training", "feature-regime-v2"]
