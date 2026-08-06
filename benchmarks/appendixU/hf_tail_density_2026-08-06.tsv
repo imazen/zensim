@@ -1,0 +1,4 @@
+table	path	n	mean	n_ge_090	pct_ge_090	p99	max	span_above_090
+safesyn_rootA_ADD156_mix	/mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet	196086	0.600005	24332	12.4088	0.958862	0.98704	0.08704
+safesyn_rootB_ext944	/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_safesyn_full.parquet	111068	0.595221	9397	8.4606	0.94153	0.976212	0.076212
+cid22val_eval_target	/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_cid22val.parquet	4292	0.714696	43	1.0019	0.899849	0.919438	0.019438
