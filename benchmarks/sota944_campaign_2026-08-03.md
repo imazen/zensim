@@ -13267,3 +13267,85 @@ No training-value claim, no picker-retrain claim, no RD-vs-other-codec claim —
 follow-up work over the delivered corpus. This is a data-production campaign; its deliverable
 is the corpus + manifest + gates, and Z.R will record actuals (cells done, wall clocks,
 storage, gate outcomes) against the estimates above.
+
+## Y.R0 — PART-0 PRELIMINARY (2026-08-06; CONTENDED BOX — ratios usable, absolute ms provisional; the frozen bar lands in Y.R0-final on a quiet window)
+
+Instrument committed: `zensim/benches/tenx_bar_bench.rs` (`c0174dc6`). First
+ST sweep ran with THREE sibling lanes live (load 17–34: `v2_ab_extract` 245%,
+`diffmap_block_coherence` 217%, squintly-score 115%) — zenbench flagged
+drift/CV on most arms (576² 4 clean rounds; 1MP CV 27–64%; 4K 2 rounds).
+Paired-interleave RATIOS survive contention; absolute ms are inflated
+~1.3–1.8× vs the historical quiet-box instruments (extraction 29.0 here vs
+22.8–23.5 quiet; fused 108.6 vs ~62). Numbers below are therefore the
+PROVISIONAL shape, not the frozen bar:
+
+| ST (RAYON=1, serial) | 576² | 1MP | 4K (8.29 MP) |
+|---|--:|--:|--:|
+| butter_oneshot | 46.7 ±3.0 | 752.7 ±63.7 | 3010 ±50 |
+| butter_warm | 28.0 ±2.9 | 341.1 ±49.9 | 1370 ±40 |
+| z_extract944 | 29.0 ±0.7 | 422.3 ±87.0 | 2490 ±100 |
+| z_score944 (extract+forward) | 32.7 ±5.9 | 407.4 ±82.7 | 2600 ±30 |
+| z_fused_score_map | 108.6 ±4.8 | 893.4 ±202.0 | 6320 ±80 |
+| z_v1_score (372-class) | 20.2 ±2.5 | 161.2 ±9.9 | 1200 ±70 |
+| z_v1_fused_score_map | 28.9 ±0.7 | 241.9 ±93.2 | 2200 ±30 |
+
+**The honest preliminary read — the 10× bar is NOT met anywhere on CPU
+today, and the historical hint overstated the gap.** butter_oneshot/10 at
+576² ≈ 4.7 ms vs zensim score-only 32.7 (folded-944) / 20.2 (372-class):
+~4–7× ABOVE the bar. zensim score-only is 1.4–2.3× faster than butteraugli
+one-shot (and ~par with butter WARM — butteraugli's warm-reference loop shape
+is a strong comparator the hint ignored). The 944 extraction scales
+SUPERLINEARLY (87 → 300 ms/MP busy, 576²→4K) — cache-spill class, a real 4K
+finding to re-verify quiet. The sweep-budget TSV's 215–240 ms/MP butteraugli
+figure reproduces only at the 4K size class (butter one-shot ≈ 363 ms/MP
+busy here); at 576² butteraugli is ~140 ms/MP — the historical comparison
+mixed size classes. MT config + quiet-window ST re-run pending; the frozen
+per-size bar table is deferred to Y.R0-final rather than frozen on a
+drift-flagged run (registered deviation: freezing on this data would violate
+the bench's own flags).
+
+## Y.R1 — L-Y1 RESULTS (batched FD probe; zensim `636ddbfe` + jxl `eb80d522`; all gates green first run, no tolerance touched)
+
+**zensim side.** `score_features_fd_gradient_with_profile` — ONE
+`Model::from_bytes` + ONE `Predictor` (+ one reused f32 buffer) for all 2·N
+central-difference forwards; the per-forward arithmetic is the SHARED
+canonical path (`bake_dispatch_one` / `prep_bake_input_f32` /
+`dispose_mlp_raw` extracted verbatim from `forward_one_bake_with_codec` /
+`apply_mlp_scoring_with_codec`, so the paths cannot drift). Exact-zero
+shortcuts skip both forwards where the component is provably bitwise 0.0:
+`FeatureTransform::Drop` columns (the pruned candidate: 277 of 944) and
+prefix tails. Root cause removed (recon-measured): the sequential recipe
+re-parsed the WHOLE bake (`Model::from_bytes` heap copy) + re-allocated a
+`Predictor` (5 vecs) + cloned the 944-f64 feature vector into a
+`ZensimResult` per forward — 1,888×.
+
+- **G-Y1 (bitwise)**: `fd_gradient_bitwise_matches_sequential` +
+  `fd_gradient_prefix_width_matches_sequential` — every component
+  `to_bits`-equal vs the sequential recipe. PASS.
+- **Suite/lints**: zensim 283/0 with `custom-profiles,feature-regime-v2`;
+  clippy 0 warnings; fmt clean.
+- **G-Y2 (27-cell A/B, k3 emit-best, candidate bake, h3-mag)**:
+  `JXL_ZENSIM_FDPROBE=seq` vs batched — all 27 cells IDENTICAL on every
+  non-ms column (achieved_inloop/iters_used/achieved_decoded/abs_err/bytes),
+  108/108 trace rows identical, attr-probe lines identical.
+- **Substrate probe**: PASS twice (post-wiring, post-arms) — 27/27 cells +
+  108/108 traces bit-exact. **Bonus finding for the open `v1_golden_bytes`
+  triage: the archmage 0.9.27→0.9.28 lock bump (forced in jxl by zensim
+  main) leaves the 372-class loop BIT-EXACT on this AMD box** — consistent
+  with the triage's AMD-passes observation; the CI divergence remains
+  vendor-class, not archmage-on-AMD.
+- **Endpoint (same contended box, paired same-session runs)**: iter-0 trace
+  median **498.8 → 249.9 ms** (min 458.8→200.2, max 725.4→377.4, n=27);
+  iters 1–3 medians unchanged-class (173.0/119.4/125.7 → 166.1/118.6/117.7).
+  Probe component ≈ 379 → ~130 ms (subtracting the ~120 ms fused compare
+  this box shows). **The registered target (probe ≤ 20% of k3 loop wall) is
+  approximately met at median** (~130 of ~652 ms ≈ 20%); the stretch (≤ one
+  fused compare) is met. Remaining probe cost is now the FORWARD MATH itself
+  (~0.10 ms × 1,334 live-column forwards) — ranked next levers: a zenpredict
+  multi-row GEMM forward (tolerance-class gate needed if accumulation
+  reorders), or probing a top-|weight| column subset (semantics change,
+  needs its own registered study).
+
+Deviation note vs Y.2's "through the fused session" phrasing: the entry is
+profile-level (serves 372-class and folded-class arms uniformly); the fused
+session is untouched. Equivalent function, smaller surface.
