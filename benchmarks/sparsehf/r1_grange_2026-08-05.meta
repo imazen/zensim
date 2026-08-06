@@ -2,3 +2,4 @@ git_commit:
 command: bake_dial_refit gate --bake R1_<cell>_dial.bin --corpus ext_cid22val.parquet (frozen range_frac 1e-4)
 context: appendix R.2 step 2 RECORD row. Incumbent reference (same instrument, §3d): H_s2507 0.093% FAIL, s31 0.559% FAIL, s1307 0 PASS.
 note: G-RANGE FAIL = the issue-50 near-top saturation, amplified on the GL class (sparse nets rank cid22val's near-lossless pairs above the anchor's top percentile); registered fix path = amendment-2 near-top anchor densification, deliberately not applied post-hoc.
+git_commit_note: the original produce wrote git_commit EMPTY (git rev-parse fails in a secondary jj workspace, no .git there; C5 fix in sparsehf_tables.py makes that a hard error) — produced by the sparsehf lane at the 6958ff25-era tree, 2026-08-05/06

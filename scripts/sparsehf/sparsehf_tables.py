@@ -16,6 +16,7 @@ Emits:
 No statistic is recomputed; every number is read from a stored JSON.
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -104,89 +105,150 @@ def fmt(v):
     return str(v)
 
 
-def emit(path, header, rows, meta_cmd):
+def repo_commit():
+    """The working-copy parent commit, jj-workspace-aware — NEVER silently empty.
+
+    C5 (opus-review appendix W): the original `git rev-parse --short HEAD`
+    returned "" in a secondary jj workspace (no `.git` there), and the .meta
+    was written with `git_commit: ` — provenance silently lost on 3 of 4
+    appendix-R sidecars. Try git, then jj (`@-` = the last committed change),
+    and refuse to emit anything rather than write an empty field.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    r = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=here,
+    )
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip()
+    r = subprocess.run(
+        ["jj", "--ignore-working-copy", "log", "--no-graph", "-r", "@-",
+         "-T", "commit_id.short()"],
+        capture_output=True, text=True, cwd=here,
+    )
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip()
+    sys.exit(
+        "sparsehf_tables: cannot resolve the working-copy commit via git OR jj — "
+        "refusing to write a .meta with empty provenance (C5: fail loud, never blank)"
+    )
+
+
+def emit(path, header, rows, meta_cmd, missing_rows):
+    """Write table + .meta. FAIL LOUD when the sources were absent.
+
+    C5 (opus-review appendix W): the appendix-R endgame once ran this before
+    the CS verdicts were harvested; every source `j()` returned None, all 16
+    data rows emitted as em-dashes, rc stayed 0, and the empty skeleton was
+    committed as the R2 record while the populated regeneration later sat
+    uncommitted in the lane workspace. A table whose rows are ALL missing is
+    refused outright; ANY missing source row exits nonzero after writing, so
+    a driver's `|| rc=1` actually fires.
+    """
+    if rows and missing_rows == len(rows):
+        sys.exit(
+            f"sparsehf_tables: REFUSING to write {path} — all {len(rows)} rows have "
+            "missing sources (verdicts not harvested yet?). Run after the harvest."
+        )
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as fh:
         fh.write("\t".join(header) + "\n")
         for r in rows:
             fh.write("\t".join(fmt(x) for x in r) + "\n")
-    commit = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
-        cwd=os.path.dirname(os.path.abspath(__file__)),
-    ).stdout.strip()
     with open(path.replace(".tsv", ".meta"), "w") as fh:
         fh.write(
-            f"git_commit: {commit}\ncommand: {meta_cmd}\n"
+            f"git_commit: {repo_commit()}\ncommand: {meta_cmd}\n"
             f"inputs: verdicts {VD}/(FS_*|R1_*|CS*).full.json, fullevals {FE}/*.fulleval.json,"
             f" instrument dial verdicts {INSTR}/R1_*_dial.full.json (not campaign cells)\n"
             "stats: none recomputed — all fields read from bake_verdict/run_full_eval outputs\n"
+            f"missing_source_rows: {missing_rows}\n"
         )
-    print(f"wrote {path}")
+    print(f"wrote {path}" + (f"  ({missing_rows} rows MISSING SOURCE)" if missing_rows else ""))
+    return missing_rows
 
 
 def main():
-    today = date.today().isoformat()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--only", choices=["r1", "r2"], default=None,
+                    help="emit just one table (regeneration after a partial failure)")
+    ap.add_argument("--date", default=date.today().isoformat(),
+                    help="date suffix for the output filenames (default today; pass the "
+                         "cells' production date when regenerating a committed table)")
+    a = ap.parse_args()
+    today = a.date
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "benchmarks", "sparsehf")
     out_dir = os.path.normpath(out_dir)
+    total_missing = 0
 
     # ---- R1: raw -> dial -> packed ----
-    cols = ["cell", "stage", "cid22", "konjnd", "nonphoto", "hfnl_ref", "mono", "tied",
-            "range", "p5", "p95", "composite", "m3a", "bytes", "bar", "bar_miss"]
-    rows = []
-    for c in R1_CELLS:
-        stages = [
-            ("raw", j(f"{VD}/FS_{c}.full.json"), None, None),
-            ("dial", j(f"{INSTR}/R1_{c}_dial.full.json"), None, f"{BK}/R1_{c}_dial.bin"),
-            ("packed", j(f"{VD}/R1_{c}_packed.full.json"), j(f"{FE}/R1_{c}_packed.fulleval.json"),
-             f"{BK}/R1_{c}_packed.bin"),
-        ]
-        for name, d, fe, bake in stages:
-            r = row(d, fe, None, bake)
-            if r is None:
-                rows.append([c, name] + ["—"] * (len(cols) - 2))
-                continue
-            ok, miss = bar(r) if name == "packed" else (None, [])
-            rows.append([c, name, r["cid22"], r["konjnd"], r["nonphoto"], r["hfnl_ref"],
-                         r["mono"], r["tied"], r["range"], r["p5"], r["p95"], r["composite"],
-                         r.get("m3a"), r.get("bytes"),
-                         ("PASS" if ok else "FAIL") if ok is not None else "—",
-                         ",".join(miss) if miss else "—"])
-    emit(f"{out_dir}/r1_dial_recovery_{today}.tsv", cols, rows, "sparsehf_tables.py (R1)")
-
-    # ---- R2: CS cells + matched GL siblings ----
-    cols2 = ["cell", "stage", "cid22", "konjnd", "nonphoto", "hfnl_ref", "kadid", "csiq",
-             "live", "tid", "sdr25", "mono", "tied", "range", "composite", "live_l0",
-             "m3a", "bytes", "bar", "bar_miss",
-             "d_cid22_vs_GL", "d_hfnl_vs_GL", "d_konjnd_vs_GL", "d_nonphoto_vs_GL", "d_composite_vs_GL"]
-    rows2 = []
-    for lam in R2_LAMBDAS:
-        for s in SEEDS:
-            cs = f"CS{lam}_s{s}"
-            gl = j(f"{VD}/FS_GL{lam}_s{s}.full.json")
-            glr = row(gl)
-            for name, d, fe, spec, bake in [
-                ("raw", j(f"{VD}/{cs}.full.json"), j(f"{FE}/{cs}.fulleval.json"),
-                 j(f"{BK}/{cs}.bin.spec.json"), f"{BK}/{cs}.bin"),
-                ("packed", j(f"{VD}/R1_{cs}_packed.full.json"), j(f"{FE}/R1_{cs}_packed.fulleval.json"),
-                 None, f"{BK}/R1_{cs}_packed.bin"),
-            ]:
-                r = row(d, fe, spec, bake)
+    if a.only in (None, "r1"):
+        cols = ["cell", "stage", "cid22", "konjnd", "nonphoto", "hfnl_ref", "mono", "tied",
+                "range", "p5", "p95", "composite", "m3a", "bytes", "bar", "bar_miss"]
+        rows = []
+        miss_n = 0
+        for c in R1_CELLS:
+            stages = [
+                ("raw", j(f"{VD}/FS_{c}.full.json"), None, None),
+                ("dial", j(f"{INSTR}/R1_{c}_dial.full.json"), None, f"{BK}/R1_{c}_dial.bin"),
+                ("packed", j(f"{VD}/R1_{c}_packed.full.json"), j(f"{FE}/R1_{c}_packed.fulleval.json"),
+                 f"{BK}/R1_{c}_packed.bin"),
+            ]
+            for name, d, fe, bake in stages:
+                r = row(d, fe, None, bake)
                 if r is None:
-                    rows2.append([cs, name] + ["—"] * (len(cols2) - 2))
+                    rows.append([c, name] + ["—"] * (len(cols) - 2))
+                    miss_n += 1
                     continue
                 ok, miss = bar(r) if name == "packed" else (None, [])
-                deltas = ["—"] * 5
-                if glr is not None and name == "raw":
-                    deltas = [r["cid22"] - glr["cid22"], r["hfnl_ref"] - glr["hfnl_ref"],
-                              r["konjnd"] - glr["konjnd"], r["nonphoto"] - glr["nonphoto"],
-                              r["composite"] - glr["composite"]]
-                rows2.append([cs, name, r["cid22"], r["konjnd"], r["nonphoto"], r["hfnl_ref"],
-                              r["kadid"], r["csiq"], r["live"], r["tid"], r["sdr25"],
-                              r["mono"], r["tied"], r["range"], r["composite"], r.get("live_l0"),
-                              r.get("m3a"), r.get("bytes"),
-                              ("PASS" if ok else "FAIL") if ok is not None else "—",
-                              ",".join(miss) if miss else "—"] + deltas)
-    emit(f"{out_dir}/r2_ladder_{today}.tsv", cols2, rows2, "sparsehf_tables.py (R2)")
+                rows.append([c, name, r["cid22"], r["konjnd"], r["nonphoto"], r["hfnl_ref"],
+                             r["mono"], r["tied"], r["range"], r["p5"], r["p95"], r["composite"],
+                             r.get("m3a"), r.get("bytes"),
+                             ("PASS" if ok else "FAIL") if ok is not None else "—",
+                             ",".join(miss) if miss else "—"])
+        total_missing += emit(f"{out_dir}/r1_dial_recovery_{today}.tsv", cols, rows,
+                              "sparsehf_tables.py (R1)", miss_n)
+
+    # ---- R2: CS cells + matched GL siblings ----
+    if a.only in (None, "r2"):
+        cols2 = ["cell", "stage", "cid22", "konjnd", "nonphoto", "hfnl_ref", "kadid", "csiq",
+                 "live", "tid", "sdr25", "mono", "tied", "range", "composite", "live_l0",
+                 "m3a", "bytes", "bar", "bar_miss",
+                 "d_cid22_vs_GL", "d_hfnl_vs_GL", "d_konjnd_vs_GL", "d_nonphoto_vs_GL", "d_composite_vs_GL"]
+        rows2 = []
+        miss2_n = 0
+        for lam in R2_LAMBDAS:
+            for s in SEEDS:
+                cs = f"CS{lam}_s{s}"
+                gl = j(f"{VD}/FS_GL{lam}_s{s}.full.json")
+                glr = row(gl)
+                for name, d, fe, spec, bake in [
+                    ("raw", j(f"{VD}/{cs}.full.json"), j(f"{FE}/{cs}.fulleval.json"),
+                     j(f"{BK}/{cs}.bin.spec.json"), f"{BK}/{cs}.bin"),
+                    ("packed", j(f"{VD}/R1_{cs}_packed.full.json"), j(f"{FE}/R1_{cs}_packed.fulleval.json"),
+                     None, f"{BK}/R1_{cs}_packed.bin"),
+                ]:
+                    r = row(d, fe, spec, bake)
+                    if r is None:
+                        rows2.append([cs, name] + ["—"] * (len(cols2) - 2))
+                        miss2_n += 1
+                        continue
+                    ok, miss = bar(r) if name == "packed" else (None, [])
+                    deltas = ["—"] * 5
+                    if glr is not None and name == "raw":
+                        deltas = [r["cid22"] - glr["cid22"], r["hfnl_ref"] - glr["hfnl_ref"],
+                                  r["konjnd"] - glr["konjnd"], r["nonphoto"] - glr["nonphoto"],
+                                  r["composite"] - glr["composite"]]
+                    rows2.append([cs, name, r["cid22"], r["konjnd"], r["nonphoto"], r["hfnl_ref"],
+                                  r["kadid"], r["csiq"], r["live"], r["tid"], r["sdr25"],
+                                  r["mono"], r["tied"], r["range"], r["composite"], r.get("live_l0"),
+                                  r.get("m3a"), r.get("bytes"),
+                                  ("PASS" if ok else "FAIL") if ok is not None else "—",
+                                  ",".join(miss) if miss else "—"] + deltas)
+        total_missing += emit(f"{out_dir}/r2_ladder_{today}.tsv", cols2, rows2,
+                              "sparsehf_tables.py (R2)", miss2_n)
+    if total_missing:
+        print(f"sparsehf_tables: {total_missing} row(s) MISSING SOURCE — exiting nonzero "
+              "so the driver notices", file=sys.stderr)
+        return 4
     return 0
 
 

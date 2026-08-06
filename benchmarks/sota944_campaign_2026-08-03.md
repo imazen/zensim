@@ -10112,6 +10112,52 @@ cell) + `r1_grange_2026-08-05.tsv` (G-RANGE record). Headline rows (packed):
   interleaved — delta is the reliable number): see
   `benchmarks/sparsehf/forward_bench_2026-08-05.tsv`.
 
+### R.R2 — arm R2 resolution (written 2026-08-06 by the appendix-W review lane; the numbers are the R lane's own artifacts, recovered)
+
+**Process finding first, because it is why this section did not exist:** the R
+lane committed `benchmarks/sparsehf/r2_ladder_2026-08-05.tsv` (`22095fe6`,
+02:05Z) with **every data cell an em-dash** — the endgame's tables step first
+ran before the CS verdicts were harvested (02:34Z), the emitter treated 16
+missing sources as formatting, exited 0, and the skeleton shipped as the R2
+record. The endgame's own re-run at ~03:11Z regenerated the POPULATED table
+into the `../zensim--sparsehf` workspace, where it sat **uncommitted**; R.3's
+registered outcome never resolved anywhere. The review lane re-derived the
+ladder independently from the 16 on-disk verdicts, confirmed it IDENTICAL to
+the recovered workspace copy, committed it (same filename — git history keeps
+the empty artifact), and fixed the emitter class (`sparsehf_tables.py`:
+all-rows-missing ⇒ REFUSE; any missing source ⇒ nonzero exit; `.meta`
+`git_commit` is now jj-workspace-aware and refuses to write blank — 3 of 4
+appendix-R sidecars had silently lost provenance to that).
+
+**The bar: 0 of 8 packed CS cells meet it** — every cell fails
+`cid22 ≥ 0.875` (best `R1_CS4_s2503_packed` 0.8562) — so **outcome (a) does
+NOT fire**. Registered outcome **(c) ("the teacher adds nothing over plain
+lasso") is REFUTED** under its own frozen test (2-seed mean vs the matched GL
+sibling, outside ±2·sd₉₄₄ with both seeds on the same side):
+
+| axis (2-seed mean Δ, CS−GL) | λ=0.3 | λ=1 | λ=2 | λ=4 | verdict |
+|---|--:|--:|--:|--:|---|
+| **csiq** (2·sd 0.0202) | **+0.0364\*** | +0.0720 (split) | **+0.1244\*** | **+0.1548\*** | OUTSIDE-BETTER 3/4 λ |
+| **live** (2·sd 0.0082) | **+0.0228\*** | **+0.0525\*** | **+0.0953\*** | **+0.0391\*** | OUTSIDE-BETTER 4/4 λ |
+| cid22 (2·sd 0.0044) | −0.0073 (split) | **−0.0303\*** | −0.0264 (split) | **−0.0541\*** | OUTSIDE-WORSE 2/4 λ |
+| hfnl/ref (2·sd 0.178) | +0.006 | +0.008 | +0.022 | +0.006 | inside noise everywhere |
+| konjnd (2·sd 0.0332) | split | split | **+0.1230\*** | split | one λ better |
+
+**What distilling C into the sparse class actually transfers is classic-IQA
+BREADTH**: the packed CS cells post CSIQ 0.929-0.955 and LIVE 0.930-0.963 —
+era-class values, exactly the axes where the 944 frontier is weakest (C itself:
+csiq 0.770, live 0.811) — at CID22 cost, with HF-NL held (0.80-0.85
+everywhere). The teacher's kon signal survives partially (λ=2 both seeds
+better). λ=4 keeps J's seed instability (cid22 0.7395 vs 0.8562 across seeds).
+
+**The R1 dial mechanism replicates on all 8 CS cells** (range 8.4 raw → 50-65
+dial units packed, mono ≥ 99.7%, tied ≤ 0.7%), and M3a on the packed cells is
+**0.87-0.99** — so the wave's k-independent mechanical finding holds on a
+second model family. Table: `benchmarks/sparsehf/r2_ladder_2026-08-05.tsv`
+(regenerated + populated). Nothing here is a candidate (the bar failed); the
+breadth-transfer observation is a lead for a registered follow-on, not a
+claim.
+
 # REGISTERED APPENDIX S — HDR PHASE 2: THE MULTI-CODEC HDR CORPUS (2026-08-05, pre-registered before any scaled run)
 
 Closes the gap Appendix Q registered as **Q-G6**: the HDR training leg

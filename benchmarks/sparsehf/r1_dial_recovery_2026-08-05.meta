@@ -2,3 +2,4 @@ git_commit:
 command: sparsehf_tables.py (R1)
 inputs: verdicts /mnt/v/output/zensim/bakes/sota944/verdicts/(FS_*|R1_*|CS*).full.json, fullevals /mnt/v/output/zensim/reports/fulleval/*.fulleval.json, instrument dial verdicts /home/lilith/tmp/sparsehf/R1_*_dial.full.json (not campaign cells)
 stats: none recomputed — all fields read from bake_verdict/run_full_eval outputs
+git_commit_note: the original produce wrote git_commit EMPTY (git rev-parse fails in a secondary jj workspace, no .git there; C5 fix in sparsehf_tables.py makes that a hard error) — produced by the sparsehf lane at the 6958ff25-era tree, 2026-08-05/06
