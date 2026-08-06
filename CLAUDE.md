@@ -12,34 +12,34 @@ implements its A1-A5/A9 candidates.
 
 ## Known Bugs
 
-- **⛔ THE CID22 B9 BAND IS DEGENERATE AND F8 READS AN ABSOLUTE VALUE — every
-  published B9 number is |SROCC|, and on the 944-era board the sign is NEGATIVE
-  (found 2026-08-06, OPEN — no gate changed, the decision is the user's).**
-  Three compounding facts, all measured (appendix U, `benchmarks/appendixU/`):
-  (1) `zenstats::panel` returns `spearman(..).abs()` (panel.rs:1013), so
-  `rank.<corpus>.bands[].srocc` — the field `freeze_check`'s **F8** consumes and
-  the dashboard prints — is an ABSOLUTE value, while F8 documents itself as
-  signed ("collapse must hurt") and carries a `B3 >= 0.0` clause that an
-  absolute value can never fail. (2) **B9 is not a decile**: `bake_verdict` cuts
-  bands at width 0.10 but CID22's MOS stops at **0.9194**, so `[0.90, 1.00]`
-  holds **43 pairs from 11 of 49 references spanning 0.0194 MOS** — a target sd
-  4.4× tighter than every other band, a marginal bootstrap sd of **0.178**
-  (B8's is 0.021), and models whose own prediction spread there is **4.7–10.9×**
-  the target's. (3) Consequently **32 of 32 sampled board bakes have signed
-  B9 < 0** (median −0.219); **25 of them PASS** `B9 >= 0.15` on the absolute
-  value and **0 of 32** pass on the signed one, and since |·| is monotone in the
-  depth of an inversion **F8 ranks models by how backwards their top band is** —
-  B9 correlates **−0.674** with the CID22 aggregate. **It is an artifact, not a
-  model property**: widening the slice two MOS points flips every model positive
-  and it rises monotonically (ADD156 −0.031 → +0.436 at ≥0.80; C_co4_s1301
-  −0.320 → +0.432). At **≥0.80** (n=1425, span 0.119) the axis is stable and
-  correlates **+0.796** with the aggregate — that is the honest high-fidelity
-  read, and on it shipped **B is best of the era models (+0.507)** while F8
-  scores it +0.010. **Do not cite `bands[].srocc` as a signed quantity; read
-  `srocc_signed` (emitted since `5504b9fb`) and state n + the slice's MOS span
-  beside it.** `freeze_check` now prints ⛔INVERTED next to a band it passed.
-  Record: campaign appendix U + `benchmarks/appendixU/{board_b9_signed,
-  b9_slice_width_sweep,hf_tail_density}_2026-08-06.tsv`.
+- **✅ RESOLVED 2026-08-06 (appendix V) — THE CID22 B9 BAND WAS DEGENERATE AND
+  F8 READ AN ABSOLUTE VALUE.** Kept here because **every per-band number
+  published before 2026-08-06 is still wrong** and 160 board cells still carry
+  the old bands. What was measured (appendix U found it, appendix V G-V1
+  re-verified it on 120 cells — a different population, a different code path):
+  `zenstats::panel` returns `spearman(..).abs()` (panel.rs:1013), so
+  `rank.<corpus>.bands[].srocc` was an ABSOLUTE value — **120 of 120 stored
+  values equal |recomputed signed| exactly** — while **109 of 120 (90.8%) were
+  NEGATIVE** and `|B9| >= 0.15` passed **82** where signed passed **2**. Since
+  |·| is monotone in the depth of an inversion, the column ranked models by how
+  backwards their top band was: the published leader `coherent924_selected`
+  (|B9| 0.4493) is the population's most anti-correlated model at −0.4493. The
+  band was also degenerate — 43 pairs from 11 of 49 refs spanning 0.0194 MOS,
+  split-half r_SB 0.711 against a 0.90 bar — and CID22 B0/B1 were structurally
+  EMPTY, B2 held one pair, TID B9 zero and B8 one, and the bottom band closed at
+  0.0 so LIVE's 21 sub-zero DMOS pairs fell out of every band (its rows summed
+  to 758 of 779). **Fixed:** band edges now have ONE owner
+  (`zensim_validate::bands`, scheme `merged-decile-2026-08-06`) which merges
+  deciles until every band clears **n ≥ 1000 AND span ≥ 0.08**; bands are open
+  at both ends; an unusable band is **NOT-MEASURED** with a reason, never a
+  zero; F8 reads SIGNED usable tails with a DERIVED floor (0.09 = the band's
+  reference-clustered CI half-width). **Still live for readers:** do NOT cite
+  any pre-2026-08-06 per-band value, and never `bands[].srocc` — read
+  `srocc_signed` and state `n` + `span` beside it. Registry entries:
+  `band-srocc-absolute-fixed-decile`, `f8-b9-abs-bar-superseded`,
+  `balanced-composite-bandtail-abs`, `kadid-bands-half-corpus-subsample`.
+  Record: campaign appendices U + V, `benchmarks/band_minimum_n_2026-08-06.md`,
+  `benchmarks/appendixV/`.
 
 - **⚠ `--regime 944` SILENTLY MIS-SCORES a 372-input bake that uses f156-371**
   (found 2026-08-06 the hard way, OPEN). The folded regimes zero f156-371, so a
@@ -509,20 +509,21 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   `W10L9_base` — campaign appendix M; section omitted with a loud note when
   absent). Counts/medians are READ from that JSON, never re-derived (the
   jxl-encoder analyze script is the owner).
-  Plus (2026-08-03) the **cross-bake per-band SROCC table** under the Mohammadi
-  panel's 10-band bars: rows = visible bakes (same order + color), columns = the
-  bands that carry pairs (n=0 bands are dropped — CID22's B0/B1 are structurally
-  empty), header shows each band's n, cells with n&lt;30 render parenthesized +
-  dimmed, and a JS-computed **band-profile line** names the leader in the highest
-  and lowest populated band (on CID22 the two ends have DIFFERENT leaders).
-  Read down a column, never across one: band SROCC is range-restricted.
-  All values are read from `rank.<corpus>.bands[]`; nothing is recomputed.
-  ⚠ **CORRECTED 2026-08-06**: this paragraph used to claim "the top band B9 is a
-  real discriminator while the low bands rest on a few dozen pairs". **B9 is the
-  band that rests on a few dozen pairs** (n=43, 11 of 49 refs, MOS span 0.0194)
-  and it is **not** a discriminator — it correlates **−0.674** with the CID22
-  aggregate over a 36-bake sample, i.e. backwards. See the Known Bug below
-  before reading any B9 column.
+  Plus (2026-08-03, **REBUILT 2026-08-06 by appendix V**) the **cross-bake
+  per-band SROCC table** under the Mohammadi panel's band bars. Bands are now
+  cut by `zensim_validate::bands` (scheme `merged-decile-2026-08-06`) — fixed
+  deciles merged until every band holds **n ≥ 1000 pairs spanning ≥ 0.08** — so
+  CID22 shows THREE bands (`B0-B6` / `B7` / `B8-B9`), TID two, and CSIQ + LIVE
+  one NOT-MEASURED band each because they are too small to band at all. Values
+  are **SIGNED** (`srocc_signed`): a negative band draws below the axis and
+  renders red, instead of being hidden by an absolute value that used to make a
+  more deeply inverted band score HIGHER. Headers carry each band's `n` AND its
+  `span`; a NOT-MEASURED band renders as an em-dash with its reason on hover —
+  never as a zero. Cells cut on the pre-2026-08-06 fixed deciles are EXCLUDED
+  with a visible count (their `B9` is a different quantity), and cells whose
+  band edges disagree are refused. Read down a column, never across one: band
+  SROCC is range-restricted. All values are read from `rank.<corpus>.bands[]`;
+  nothing is recomputed.
   Plus (2026-08-04) **ENSEMBLE rows**: a fulleval JSON stamped `model.kind:"ensemble"`
   by `scripts/promote_fulleval.py --members` (the generalized promoter — it publishes
   ANY verdict, single-bake or ensemble, onto the board and recomputes NOTHING — every

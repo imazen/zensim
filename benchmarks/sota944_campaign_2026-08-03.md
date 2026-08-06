@@ -2646,7 +2646,22 @@ cannot be certified balanced on it); the row says so explicitly.
 | F5 | dial span (`dial.dynamic_range`) | 1.0 ≤ span ≤ 120.0 | operationalizes "sane dynamic range". The dial contract is a bounded [0,100] surface (+ the registered negative tail); a per-grid span > 120 cannot be a bounded dial. The pathological class this catches is real and named: `cl_tfm_corruption_LQ_MLP_s13` spans 497 while ranking high (and tying 15.6%); the largest legitimate calibrated span on the board is 98. Span < 1 is flat — not a dial |
 | F6 | HF-NL per-ref (`rank.hfnlproxy.per_ref_mean`) | ≥ 0.0 | sign floor only: not NEGATIVE on the near-lossless zone. The instrument's volatility is documented (wave-5 limitations: −0.115..+0.211 across arms, unrelated to k), so the old 0.1931 arm-B comparator stays REPORTED as context, never a floor |
 | F7 | CSIQ + LIVE (`rank.csiq.srocc`, `rank.live.srocc`) | both ≥ 0.83 | breadth floors at the 944-class level (57/145 pool cells hold both — a real cut, not empty-by-construction). The 372-era ships hold 0.93+ here; that era gap stays REPORTED as context (regime-incomparable), but a 944 candidate that collapses on classic-IQA breadth is not balanced |
-| F8 | CID22 band tails (`rank.cid22.bands[]`, signed) | B9 ≥ 0.15 AND B3 ≥ 0.0 | band-profile non-collapse on the two discriminating tails (B0–B2 are structurally near-empty on CID22; B4–B8 are the mass the aggregate already covers). B3 n=57, B9 n=43 — n is printed on the row, any band n<30 renders parenthesized (board convention), and band SROCC is range-restricted (never compared across bands, only across bakes) |
+| F8 ⛔SUPERSEDED 2026-08-06 (appendix V) | CID22 band tails (`rank.cid22.bands[]`, signed) | ~~B9 ≥ 0.15 AND B3 ≥ 0.0~~ → **top usable band ≥ 0.09 AND lowest usable band ≥ 0.0, SIGNED** | band-profile non-collapse on the two discriminating tails (B0–B2 are structurally near-empty on CID22; B4–B8 are the mass the aggregate already covers). B3 n=57, B9 n=43 — n is printed on the row, any band n<30 renders parenthesized (board convention), and band SROCC is range-restricted (never compared across bands, only across bakes) |
+
+
+> **⛔ F8 AS WRITTEN ABOVE IS SUPERSEDED — every F8 PASS/FAIL in this document
+> that predates 2026-08-06 was computed on it, and is invalidated.** The bar was
+> applied to an ABSOLUTE value (`zenstats::panel` returns `spearman(..).abs()`),
+> so a collapsed band scored like a healthy one and a more deeply INVERTED band
+> scored HIGHER; `|B3| ≥ 0.0` was unfalsifiable. Measured board-wide: the old bar
+> passed **167 of 280** cells; of the 120 checkable against a signed
+> recomputation, **82 passed while only 2 were positive**. `B9` was also
+> degenerate (43 pairs, 11 of 49 refs, span 0.0194, split-half r_SB 0.711).
+> Replaced by the SIGNED usable tails of scheme `merged-decile-2026-08-06` with a
+> DERIVED floor. Registry: `f8-b9-abs-bar-superseded`. Full record: **APPENDIX V**
+> + `benchmarks/band_minimum_n_2026-08-06.md`. Historical F8 numbers below are
+> left AS MEASURED — they record what the gate said at the time — but must not be
+> cited as facts about a model.
 
 **Reported on every row, NEVER floors:**
 
@@ -11984,3 +11999,191 @@ Independently of A/B/C, two further outcomes are registered and may co-fire:
    F8 / composite), with tests.
 5. Board recompute + `gauntlet_gates.sh` PASS on the regenerated HTML.
 6. `eval_annotations.json` entries for every superseded number.
+
+## V.R — RESULTS (2026-08-06; every registered gate ran, one registration error reported)
+
+### V.R0 — GATE G-V1: appendix U's sign claim is CONFIRMED, harder than U reported
+
+Re-measured from an independent population (the **120** board cells that still
+carry per-pair, not U's 32-cell stratified sample) and an independent code path
+(recompute from stored `per_pair` through `panel --batch`; U's TSV was never
+read). All three registered calls fire CONFIRMED:
+
+| call | bar | result |
+|---|---|---|
+| **G-V1a** identity | stored `srocc` == \|recomputed signed\| on ≥95% | **120/120 = 100.0%** |
+| **G-V1b** sign census | ≥80% negative ⇒ CONFIRMED | **109/120 = 90.8% NEGATIVE** |
+| **G-V1c** gate consequence | abs-pass exceeds signed-pass by ≥20 | **82 vs 2, delta 80** |
+
+G-V1a is the fact that makes the defect auditable rather than inferred: the
+board's band column is not merely *computed from* an absolute value in source —
+cell for cell, it **is** the absolute value.
+
+Two details sharper than U's sample showed. The board's published
+"best high-fidelity band" cell, `coherent924_selected` at \|B9\| **0.4493**, is
+the population's **most anti-correlated model** at **−0.4493**. And the 11
+positives are all additive/linear/era-class (`CS*`, `b_sdr`, `v47_strict`,
+`bhdr`, `v02_bvls`, `ebothg_m504`) — **every 944 MLP in the population is
+inverted in that band.**
+
+Board-wide, the old F8 (`|B9| ≥ 0.15 ∧ |B3| ≥ 0.0`) passed **167 of 280** cells
+— independently reproducing the count the supervisor measured.
+
+### V.R1 — The minimum, derived
+
+Full derivation + every table: **`benchmarks/band_minimum_n_2026-08-06.md`**.
+The registered three-condition criterion resolves, on this project's corpora, to
+
+> **n ≥ 1000 pairs AND target span ≥ 0.08.**
+
+**The two floors bind through different mechanisms, and that is the finding.**
+
+* **n binds through the NOISE.** The measured 95% CI half-width tracks
+  Bonett–Wright to within 3% above n=16 and crosses the 0.20 estimability bar
+  between n=64 and n=96.
+* **span binds through the SIGNAL.** At fixed n=200 the half-width moves only
+  0.140 → 0.086 across spans 0.02 → 0.20 while the correlation moves
+  **0.056 → 0.632**. Thorndike case-II predicts it closely (0.081 / 0.346 /
+  0.612 vs measured 0.056 / 0.370 / 0.632). Below span 0.03 the SNR is **under
+  1** — the band cannot establish its correlation is nonzero — *while its CI
+  half-width still "passes" the estimability bar.*
+
+So **no n rescues a narrow band**, and neither floor substitutes for the other:
+n-only admits CID22's quantile bands (429 pairs each, spans 0.024–0.066, none
+discriminating); span-only admits `B3` (span 0.096, n=57, `r_SB` 0.26).
+
+**Estimability is not the binding condition.** Discrimination is. The 0.90
+`r_SB` bar is bracketed by n=768 (0.877) and n=1024 (0.918) at span 0.10, and
+CID22's REAL bands at that span agree independently: `B7` (1092) → **0.900**,
+`B8` (1382) → 0.949, then 836 → 0.778, 615 → 0.650, 266 → 0.441, 57 → 0.260.
+
+**REGISTRATION ERROR, reported not hidden.** V.3 said `SPAN_MIN` would be read
+off the CI curve. It cannot be: the CI is nearly span-independent, so *every*
+span "passes" the estimability bar. The corrected derivation is the
+discrimination surface — below span 0.08 the bar is unreachable at any n CID22
+can supply (best 0.659 @0.06, 0.407 @0.04, 0.298 @0.02). Stated plainly in the
+constant's doc: **0.08 was not itself observed clearing the bar** (its trend
+0.762 @384 → 0.854 @768 heads for it near n≈1200), so it sits one grid step
+below the lowest span where the bar *was* seen. It also has a structural
+ceiling — a fixed decile's realised span is always just under 0.10, so any floor
+at 0.10+ merges away every decile.
+
+### V.R2 — The scheme, and the falsification of the intuitive alternative
+
+Shipped: `merged-decile-2026-08-06` in **`zensim_validate::bands`**, THE owner.
+Fixed deciles swept low→high, a band closed the moment it clears both floors, a
+deficient remainder folded into the band before it. It takes **no predictions**,
+so "every model on a corpus gets identical bands" is structural, not a
+convention.
+
+| corpus | bands |
+|---|---|
+| **cid22** | `B0-B6` (1775) · `B7` (1092) · **`B8-B9` (1425, span 0.119, all 49 refs)** |
+| **tid** | `B0-B4` (1418) · `B5-B9` (1582) |
+| **kadid** | `B0-B1` · `B2-B3` · `B4-B5` · `B6` · `B7` · `B8-B9` |
+| **csiq** | `B0-B9` (866) — NOT-MEASURED, too small to band |
+| **live** | `B0-B9` (779) — NOT-MEASURED, too small to band |
+
+Two things worth keeping. The mechanical rule lands on **≥0.80** for CID22's top
+band — the exact slice U had already found by hand as the honest high-fidelity
+read; two methods, same edge. And **CSIQ and LIVE cannot be banded at all** at
+this bar, and now say so instead of publishing ten bands of 19–213 pairs.
+
+Does the scheme pass its own rule? On CID22, every band, every condition:
+`r_SB` **0.954 / 0.900 / 0.949**, DR **7.15 / 4.66 / 5.60**, and every model
+**positive in every band** — against the old grid's 2-of-10 discriminating with
+one running backwards for the entire population. TID replicates: **0.988 /
+0.990**, DR 7.4 / 12.1. Registered outcomes **(A)** and **(E)** fire.
+
+**QUANTILE BANDING IS FALSIFIED — the counterintuitive result.** It guarantees
+n by construction and destroys span, and **not one of CID22's ten
+equal-population bands reaches the 0.90 bar**: widest 0.859, the eight interior
+ones 0.349–0.592 on spans 0.024–0.066. The intuitive repair for "the band is too
+small" makes the actual problem strictly worse.
+
+A pairwise "merge the worst band into its smaller neighbour" greedy was tried
+and rejected as myopic: on TID it spent `B4` (677) on the already-satisfied `B5`
+(705), stranded `B6-B9` (877), and collapsed the corpus to one band where the
+sweep finds two clean ones. Sweeping high→low gives identical bands on all five
+corpora (gated by a test), so the direction is not a free parameter.
+
+### V.R3 — Two defects the recut exposed, neither anticipated
+
+1. **The bottom band silently dropped rows.** The fixed grid closed at `0.0`, so
+   LIVE's 21 sub-zero DMOS pairs fell out of every band — its published band
+   rows summed to **758 of 779**. Bands are now open at BOTH ends and a
+   partition test asserts every row lands in exactly one band.
+2. **KADID's stored per-pair is a 5,000-row subsample** of its 10,125, and the
+   subsample differs per cell (3 distinct target vectors across the 120). It is
+   SKIPPED by a guard comparing per-pair length to `rank.n`, rather than
+   publishing bands over half a corpus under a header claiming all of it. This
+   is orthogonal to the OPEN ext-lineage KADID target inversion (appendix F) —
+   a KADID band number is currently unusable for two independent reasons.
+
+### V.R4 — F8's re-point, and an honest statement of what it now does
+
+F8 reads the SIGNED top and bottom USABLE bands in each corpus's DECLARED
+orientation (mirroring `is_distortion_oriented`, not special-casing names). The
+floor is **derived**: F8's job is non-collapse, so the bar is the band's own
+marginal 95% CI half-width, measured at B=10,000 over a stratified 25-model
+probe — **0.0407** pair-bootstrap, **0.0866** reference-clustered. The
+reference-clustered figure GOVERNS per registered confound 2 (CID22's pairs
+cluster by reference, up to 61 in this band), so `ceil`-2dp gives
+**`BAND_HIGH = 0.09`**. `BAND_LOW` stays 0.0, which against a *signed* value is
+a real bar for the first time (`|x| ≥ 0.0` was unfalsifiable, so F8 was
+effectively one-sided).
+
+**REGISTERED-PENDING-USER-ACK** — it governs 166+ published cells.
+
+**And the honest part: the new F8 has NO discriminating power on today's
+board.** All 120 recut cells pass; the top band's population runs **+0.262 …
++0.514 with zero negatives**. Nothing on the board collapses in the
+high-fidelity region. That is correct behaviour for a non-collapse floor, and
+F8 is now a **regression guard, not a selector**. Its predecessor only appeared
+to discriminate (167/280) because it was ranking models by the depth of an
+inversion.
+
+The same defect was ALSO in the ranking composite, which V.1's prior P5 surfaced
+and no prior appendix had stated: `balanced_composite`'s band-tail term was
+`(|B3| + |B9|)/2` at weight **0.15** — the absolute-valued 43-pair tail was
+feeding SELECTION, not merely a PASS/FAIL cell. It now takes the signed usable
+tails, and drops from numerator and denominator on a legacy cell.
+
+### V.R5 — Blast radius: what was corrected, and what was not
+
+| item | disposition |
+|---|---|
+| 280 board cells' per-band numbers | **120 RECUT** from stored per-pair; 160 keep legacy bands (per-pair stripped) and F8 reports them ABSENT |
+| F8 PASS/FAIL statements | invalidated board-wide (`f8-b9-abs-bar-superseded`); old bar passed 167/280 |
+| `balanced_composite` band term | invalidated on legacy cells (`balanced-composite-bandtail-abs`) |
+| gauntlet band panel + cross-bake table | rewritten: SIGNED, span beside n, NOT-MEASURED as em-dash with reason, legacy cells excluded with a count |
+| `benchmarks/eval_annotations.json` | 4 append-only entries, verified rendering through `freeze_check --annotations` |
+| `blend_lib.BANDS` | **flagged, not changed** — a third band-cut implementation on an AUTO-STRETCHED axis, so its `B9` is "top tenth of the observed range", not "target ≥ 0.90". Re-pointing it changes what a live dashboard's columns mean; that is a decision, not a refactor |
+| board HTML | regenerated, `gauntlet_gates.sh` **PASS** on both gates (280 bakes, 572 ⚠-badged cells) |
+
+**The recut is equivalent to a re-verdict, and that is gated**: recutting
+`E1_baseline_s42`'s bands from its own stored per-pair reproduces what
+`bake_verdict` emits **bit-identically** (max abs difference `0.0` across every
+band and every field). Backup before the recut:
+`/mnt/v/output/zensim/reports/fulleval.pre-appendixV-2026-08-06.bak`.
+
+### V.R6 — Limitations (beyond the nine registered)
+
+1. **The 120-cell population over-represents flagships** (it is the curated +
+   recent set that kept per-pair). Every `r_SB`, LSD, DR and spread here is a
+   statement about that population. The 160 stripped cells are not assumed to
+   behave the same — they are annotated, not extrapolated over.
+2. **`SPAN_MIN = 0.08` is the one constant that is not a direct observation**
+   (V.R1). It is a boundary below the lowest span where the bar was seen.
+3. **`H ≤ 0.20` never binds** in the shipped rule. It was registered as a real
+   condition, and the honest outcome is that discrimination dominates it
+   everywhere in the measured range; it is retained because it would bind for a
+   corpus with far larger model spread.
+4. **KADID and TID remain train==val**; their band panels are scheme
+   replication, never evidence about model quality.
+5. **The split-half splits PAIRS, not references.** Reference clustering is
+   handled where it matters most — the F8 floor uses the conservative
+   reference-clustered bootstrap — but the `r_SB` figures are pair-level and are
+   therefore slightly optimistic.
+6. **No model, bake, or training recipe changed.** This appendix changed how an
+   evaluation slice is cut and read.

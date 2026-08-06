@@ -1,5 +1,18 @@
 # Profile C — provenance + exact reproduction (2026-08-05)
 
+> **⛔ F8 SUPERSEDED 2026-08-06 (campaign appendix V).** Every `F8 CID22 B9 band
+> tail` figure in this document (0.139 vs ≥ 0.15, n=43) was computed on an
+> ABSOLUTE-valued statistic over a degenerate band — 43 pairs from 11 of 49
+> references spanning 0.0194 MOS, split-half reliability 0.711 against a 0.90
+> bar — and its SIGN was negative for 109 of the 120 board cells that could be
+> re-checked. The `7 of 8 floors` counts below are therefore stale: F8 now reads
+> the SIGNED top/bottom USABLE bands of scheme `merged-decile-2026-08-06` with a
+> derived floor of 0.09, and on the recut board every cell passes it. Re-run
+> `freeze_check` after `promote_fulleval.py --rebuild-bands` for a current count.
+> Record: `benchmarks/band_minimum_n_2026-08-06.md`; registry entry
+> `f8-b9-abs-bar-superseded`.
+
+
 **`ZensimProfile::C`** (`zensim-c`) ships the SOTA-944 campaign's wave-11
 battery-selected cell, internal name **`W10L9_s4003_packed`**, as
 `zensim/weights/c_sdr_mlp944_corrmix_2026-08-05.bin` —
