@@ -11,7 +11,9 @@ re-encoding — so any model rescores against the identical features.
 ### 1. RANK panel — `bake_verdict`
 Full Mohammadi 2025 statistics (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE) per
 corpus on the 6 canonical val parquets (CID22, KADID, TID, KonJND, AIC-3, AIC-4),
-aggregate + 10-band. **Caveat baked into interpretation:** KADID and TID are
+aggregate + per-band (scheme `merged-decile-2026-08-06` since 2026-08-06 —
+**not** the old fixed [0,1] deciles; see campaign appendix V and
+`benchmarks/band_minimum_n_2026-08-06.md`). **Caveat baked into interpretation:** KADID and TID are
 100% train==val pair-overlap — a bake trained on them shows memorization there,
 not held-out skill. The genuinely held-out corpora are **CID22 + AIC-3 + AIC-4**
 (+ KonJND, semi-held-out). Rank a bake on those; treat KADID/TID as integrity
@@ -105,7 +107,9 @@ assets, no scripts. `just metric-eval <bake> [ref] [ramp-grid]` wraps it.
 
 Sections (each auto-skips with a loud note when its data is absent):
 
-- **RANK panel** — per-corpus Mohammadi 6-stat + DS-AUC, aggregate + 10-band,
+- **RANK panel** — per-corpus Mohammadi 6-stat + DS-AUC, aggregate + per-band
+  (bands merged until each holds n ≥ 1000 spanning ≥ 0.08; an unusable band is
+  NOT-MEASURED, never a zero; band SROCC is SIGNED),
   **plus the legacy 4-band CID22 Table-5 cuts** on the CID22 corpus.
 - **DIAL panel** — the 5-bucket codec-target monotonicity / G1 / G3 (above).
 - **Severity-ramp monotonicity** (`--ramp-grid <parquet>`) — per (ref,dist_type)
