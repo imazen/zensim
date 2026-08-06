@@ -36,8 +36,16 @@ implements its A1-A5/A9 candidates.
   the flipped column, so their inversion is real and inherited (train weight 0.50 → mean
   −0.457, 1.50 → −0.925); the era models are fine (`winner_dial` **+0.9464**, shipped
   **B** **+0.8201**, positive on 25/25 distortion types). **TID is CLEAN on every root.**
-  **Read `rank.kadid.srocc_signed` and NEGATE it for any ext-root verdict; never cite
-  `rank.kadid.srocc`.** Builder fixed + `scripts/canonical_corpus/check_target_orientation.py`
+  **Read `rank.kadid.srocc_signed`, and NEGATE it only for a verdict produced BEFORE the
+  2026-08-05 rebuild; never cite `rank.kadid.srocc`.** The rule is **verdict-era-scoped,
+  not root-scoped** — negating a post-rebuild verdict re-introduces the inversion
+  (independently re-confirmed 2026-08-06, campaign appendix T.R3: the orientation gate
+  returns **+0.582360 on BOTH** the ext944 `ext_kadid.parquet` and the 372-root
+  `kadid_features_372col`, and a fresh ADD156 verdict reads `+0.8082` on each root while
+  its pre-rebuild board row reads `−0.8082`). `freeze_check --annotations` encodes the
+  same split as `kadid-ext-root-inverted` (scope: the 188 pre-rebuild verdicts) vs
+  `kadid-ext-root-corrected-2026-08-05`.
+  Builder fixed + `scripts/canonical_corpus/check_target_orientation.py`
   gates it; **the ext tables WERE rebuilt 2026-08-05 (campaign APPENDIX H part 1,
   `176c4268`)**: `human_score := 1 − human_score` at all three ext roots, gate now OK
   +0.582360 on every root, originals preserved as
@@ -1032,6 +1040,17 @@ measurement; do not quote it as a file-size saving.
 **`--no-prune` is required to reproduce a historical bake byte-for-byte** —
 verified: `pack --no-prune` on `C_em944_s31_dial.bin` reproduces the shipped
 `C_em944_s31_packed.bin` sha256 `5870046d…` exactly.
+
+**SPARSE ADDITIVE bakes: pass `--zerobias-bulk 0`.** The 0.005 default is
+calibrated for 100-500 KB MLPs, where 0.5 % of the bulk weight magnitude is
+noise. On a lasso-sparse additive head every surviving coefficient is signal, and
+the default measurably costs rank: MEASURED 2026-08-06 on ADD156
+(28 coefficients) **−0.0069 CID22** and on the appendix-T `T_b_lam1e-3` cell
+(40 coefficients) **−0.0083**, to buy 192 / 334 bytes. With
+`--zerobias-bulk 0` the pack is **rank-EXACT** (0.8634 and 0.8695, unchanged
+to 4 dp) and dead-column pruning alone still gives 3,575 → **837 B** (4.3×,
+372 → 28 layer-0 inputs, identity gate BIT-identical on all 2,035 anchor rows).
+Record: `benchmarks/sota944_campaign_2026-08-03.md` APPENDIX T.R11.
 
 ### Bake evaluation (per-bake instant verdict from parquet sidecars)
 **`bake_verdict` binary** at
