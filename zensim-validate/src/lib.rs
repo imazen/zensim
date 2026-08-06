@@ -12,6 +12,7 @@
 
 pub mod adam_simd;
 pub mod bake_runtime;
+pub mod bands;
 pub mod block_profile;
 pub mod dial_spline;
 pub mod eval_report;
