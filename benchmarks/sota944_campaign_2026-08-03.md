@@ -10064,7 +10064,7 @@ leak-free.
 | **zenjxl-HDR** | the incumbent; the only wired HDR encode path with a precedent corpus | **READY** — `sweep/hdr.rs::encode_jxl_hdr`, knobs `lossless/distance/noise/effort` |
 | **zenav1-svt 10-bit PQ** | the AV1 leg, via the byte-gated pure-Rust SVT-AV1 port | **NOT WIRED into zenmetrics** — see S.6 B3 |
 | **JPEG-gainmap via ultrahdr** | the gain-map leg | **DECODE-ONLY today** — no encoder in any sweep path; see S.6 B4 |
-| *(zenavif / rav1e 10-bit PQ)* | the already-wired AVIF HDR path | **wired, but user-halted** — see S.6 B5 |
+| *(zenavif / rav1e 10-bit PQ)* | the already-wired AVIF HDR path | **REGISTERED-BUT-HALTED — excluded from this build** by user directive; addable later as a pure addition, see S.6 B5 |
 
 **Registered decision rule:** ship what is buildable rather than stalling the
 whole corpus on the weakest arm. If an arm is still blocked when the fleet is
@@ -10153,13 +10153,26 @@ codec-capability gap.
 opt-in `hdr-gainmap` feature, but there is **no gain-map encoder** in any sweep
 or jobexec path (`sweep/hdr.rs:190-199` has two arms).
 
-**B5 — the AVIF arm is user-halted.** A standing user directive (2026-07-13)
-halts AVIF datagen while zenavif is mid-migration, and requires an explicit
-settle-check plus user confirmation before any AVIF sweep. Checked 2026-08-05:
-zenavif carries a stale `.workongoing`, an uncommitted `Cargo.lock`, and a
-**conflicted `hdr-mdcv-st2086-fix` bookmark** — i.e. **not settled**. The AVIF
-arm therefore stays out pending user confirmation; it is not silently
-substituted for the zenav1-svt arm.
+**B5 — the AVIF arm is REGISTERED-BUT-HALTED (decision with the user).** A
+standing user directive (2026-07-13) halts AVIF datagen while zenavif is
+mid-migration, and requires an explicit settle-check plus user confirmation
+before any AVIF sweep. Checked 2026-08-05: zenavif carries a stale
+`.workongoing`, an uncommitted `Cargo.lock`, and a **conflicted
+`hdr-mdcv-st2086-fix` bookmark** — i.e. **not settled**.
+
+**Ruling (2026-08-05): the corpus is built WITHOUT the AVIF arm**, and the
+grid is structured so AVIF can later be added as a **pure addition** — no
+re-encode of any other arm, no schema change — if the user releases the halt.
+Three properties make that hold, and they are gates on the build, not
+aspirations:
+1. **Per-arm cells are independent rows** keyed by `(origin, scale, codec, q)`;
+   adding a codec adds rows and touches none.
+2. **No arm-relative normalisation** anywhere in the corpus. Nothing is scaled
+   to "best arm" or to a per-cell arm mean, so no stored value depends on which
+   arms exist.
+3. **The manifest records AVIF as absent-not-failed**, so a later reader can
+   tell "not built yet" from "built and failed" without archaeology.
+It is NOT silently substituted for the zenav1-svt arm.
 
 **B6 — ⚠ THE FLEET CANNOT GUARANTEE GPU SCORING.** `jobexec` hardcodes
 `GpuRuntime::Auto` at four call sites (`jobexec.rs:126-132`, `:965`, `:1494`,
@@ -10176,6 +10189,36 @@ data in `benchmarks/cvvdp_gpu_mode_probe_2026-08-05.tsv`.
 **This is a blocking prerequisite for the metric half of the corpus**: without
 it, "scored on GPU" is unfalsifiable, and a silently-CPU-scored leg would be
 indistinguishable from a correct one after the fact.
+
+**RESOLVED 2026-08-05 — `ZENMETRICS_REQUIRE_GPU` + a recorded `runtime`
+column.** Two halves, because they protect different people:
+- **`ZENMETRICS_REQUIRE_GPU=1` drops the CPU rung from the `Auto` ladder** in
+  `metrics/mod.rs::auto_order()`. Verified that **all six** ladder sites route
+  through that one function — `run_gpu_via_umbrella`, both sweep-cache sites,
+  `butter_pnorm3`, the typed `CvvdpBatchScorer` (the score-pairs path), and
+  `hdr.rs` — so the single gate covers the hand-run path, the sweep cache, and
+  `jobexec` (the fleet path, which cannot pass `--gpu-runtime` at all). Failure
+  is loud: nonzero exit, nothing on stdout, and an error naming
+  `ZENMETRICS_REQUIRE_GPU` as the reason so it is not mistaken for a broken
+  build. Measured on all three arms: gate off + GPU hidden ⇒ exit 0 via CPU
+  (the hazard, preserved as the default so no existing caller changes); gate on
+  + GPU hidden ⇒ exit 1; gate on + GPU present ⇒ exit 0.
+- **A `runtime` column** (`cuda`/`wgpu`/`hip`/`cpu`) is now emitted per row in
+  the score-pairs parquet, recorded from the rung that actually executed.
+  This is the durable half: the env var protects *future runs*, the column
+  protects *future readers*, who otherwise must infer the backend from a column
+  name that lies when `Auto` degraded. `MetricKind::backend()` cannot serve —
+  it returns a static string from the enum variant and reports "GPU" for a
+  fallen-back run. Thread-local, because score-pairs scores in parallel and a
+  process-wide cell would attribute one thread's runtime to another's row.
+
+**The gate is SET for the corpus build**, so the whole run is covered.
+Adjacent hazard recorded but out of scope: `zenmetrics-api`'s
+`capability::resolve_auto_backend()` is a second, independent `Backend::Auto`
+→ CPU ladder. It is **not reachable from this corpus path** — the CLI passes a
+concrete backend everywhere and uses `Backend::Auto` only as a display label —
+but it would need its own gate if the orchestrator path is ever used for a
+recorded run.
 
 **B7 — executor image gate.** HDR manifests require an executor built with the
 `hdr` feature (and `png` for PQ-PNG refs). Canonical image names only, new
