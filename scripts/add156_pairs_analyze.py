@@ -214,6 +214,44 @@ def main() -> int:
             f"{max(d9g):+.4f} | {med('hfnl_perref')} | {med('cid22')} | "
             f"{med('konjnd')} |")
 
+    # ---------------- 7. by candidate FAMILY (the brief's HF-plausibility ranks)
+    say("\n## 7. By candidate family — did the HF-plausibility ranking predict anything?\n")
+    import re
+    FAMILIES = [
+        ("1 near-threshold/JND", r"PJND"),
+        ("2 artifact: BANDING", r"BANDING"),
+        ("2 artifact: BLOCKINESS", r"BLOCKINESS"),
+        ("2 artifact: RINGING", r"RINGING"),
+        ("2 artifact: EDGE_WIDTH", r"EDGE_WIDTH_CHANGE"),
+        ("3 BANDVIS (append2)", r"BANDVIS"),
+        ("4 HF gain/loss (v2)", r"HF_GAIN|HF_LOSS|HF_MAG_LOSS"),
+        ("4 CONTRAST gain/loss", r"CONTRAST_GAIN|CONTRAST_LOSS"),
+        ("5 soft-peak", r"SOFT_PEAK"),
+        ("6 v1 peak72", r"_max@|_p95@"),
+        ("6 v1 masked72", r"masked_"),
+        ("6 v1 iw72", r"iw_"),
+        ("7 scale-0 only", r"@s0"),
+    ]
+    say("| family (brief rank) | n LIVE | med dB9 | max dB9 | med dHFNL | max dHFNL | "
+        "med dCID22 | max dCID22 | n cells with dCID22 > +0.005 |")
+    say("|---|--:|--:|--:|--:|--:|--:|--:|--:|")
+    for label, pat in FAMILIES:
+        g = [r for r in lives if re.search(pat, r["names"])]
+        if not g:
+            say(f"| {label} | 0 | — | — | — | — | — | — | — |")
+            continue
+        def st(k, fn):
+            v = [r[f"d_{k}"] for r in g if r.get(f"d_{k}") is not None]
+            return f"{fn(v):+.4f}" if v else "—"
+        ncid = sum(1 for r in g if (r.get("d_cid22") or -9) > 0.005)
+        say(f"| {label} | {len(g)} | {st('b9_signed', np.median)} | {st('b9_signed', max)} | "
+            f"{st('hfnl_perref', np.median)} | {st('hfnl_perref', max)} | "
+            f"{st('cid22', np.median)} | {st('cid22', max)} | {ncid} |")
+    say("\nThe HF-plausibility ranking was frozen in U.3 BEFORE any fit. This table is "
+        "its scorecard: a family that was ranked high and moves nothing is a "
+        "falsified prior, and one ranked low that moves an axis is a finding the "
+        "ranking missed.")
+
     a.out.write_text("\n".join(out) + "\n")
     print(f"\nwrote {a.out}")
     return 0
