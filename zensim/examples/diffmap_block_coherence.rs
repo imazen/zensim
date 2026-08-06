@@ -319,8 +319,18 @@ fn run_bake_mode(
             // 944 = the same canonical streaming extractor with the append2
             // block toggled on (bit-identical f0..f923; the bf944 executor's
             // exact recipe). Toggle-dependent width matches n_in below.
+            // ZENSIM_APPEND2_DSTACT=1 (appendix X, X-I1): honor the BANDVIS
+            // dst-activity toggle exactly as `v2_ab_extract` does, so an
+            // ON-definition arm's M3a is measured on ON-definition features.
+            // Default (env unset) is byte-stable OFF — identical toggles to
+            // before this change.
+            let dstact_on = n_in == 944
+                && std::env::var("ZENSIM_APPEND2_DSTACT")
+                    .map(|v| v == "1")
+                    .unwrap_or(false);
             let toggles = zensim::feature_v2::V2NewFeatureToggles {
                 append2_block: n_in == 944,
+                append2_dst_activity: dstact_on,
                 ..Default::default()
             };
             return z
