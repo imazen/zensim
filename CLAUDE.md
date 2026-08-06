@@ -51,6 +51,17 @@ implements its A1-A5/A9 candidates.
   exists for this; the invocation looks safe precisely on the bakes that are
   immune. **Check `bake_block_profile` before choosing `--regime` for any
   <944-input bake**, and treat a large 372-vs-944 gap as this bug, not a finding.
+  **A CONCRETE INSTANCE IS ON THE BOARD**: `ebothg_m504` (`model.n_inputs` 504,
+  `block_profile.uses_f156_371` true) publishes CID22 **0.4045** with EVERY axis
+  collapsed (aic3 0.11, nonphoto 0.14, imazen26 0.15, kadid 0.18, aic4 0.19,
+  tid 0.20, konjnd 0.25, csiq 0.32, live 0.40) — which is not how a promoted
+  top-5 model behaves. Its `.spec.json` argv shows it was trained on the
+  **ext504** root (`/mnt/v/zen/zensim-training/ext504-basic-v2-2026-07-23/`),
+  but its fulleval is stamped `regime: "720"`; re-scoring reproduces the board
+  at `--regime 720` (0.4045) and gives 0.6915 at `--regime 944`. **Neither is
+  its native root**, so the published row is a wrong-root read and its true
+  numbers need the ext504 tables. Not fixed here (it is another lane's model);
+  flagged so nobody ranks against that row.
 
 
 - **⛔ THE v1 GOLDEN BYTE-IDENTITY GATE IS ENVIRONMENT-FRAGILE — main CI red, OPEN
