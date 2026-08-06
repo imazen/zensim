@@ -442,11 +442,38 @@ fn bake_name(v: &serde_json::Value) -> &str {
         .unwrap_or("?")
 }
 
-/// CID22 band srocc + n by band label ("B3"/"B9"), SIGNED per registration.
+/// CID22 band srocc + n by band label ("B3"/"B9").
+///
+/// **`srocc` here is an ABSOLUTE value** — `zenstats::panel` computes
+/// `spearman(..).abs()` and `bake_verdict`'s per-band rows come from it — even
+/// though F8 is specified as signed. The pass/fail arithmetic below still reads
+/// this field (changing it would move verdicts for every published board cell,
+/// which is a user decision, not a refactor); [`cid22_band_signed`] exists so
+/// the report can SHOW when the two disagree.
 fn cid22_band(v: &serde_json::Value, band: &str) -> Option<(f64, i64)> {
     let bands = v.get("rank")?.get("cid22")?.get("bands")?.as_array()?;
     let b = bands.iter().find(|b| b["band"].as_str() == Some(band))?;
     Some((b["srocc"].as_f64()?, b["n"].as_i64().unwrap_or(0)))
+}
+
+/// The band's SIGNED Spearman, when the fulleval carries it (emitted since the
+/// 2026-08-06 `srocc_signed` band field; older JSONs return `None`).
+///
+/// Why this matters, measured on a 32-cell stratified board sample
+/// (`benchmarks/appendixU/board_b9_signed_2026-08-06.tsv`): **32 of 32 had a
+/// NEGATIVE B9** — their high-fidelity band is ordered backwards — while 25 of
+/// them PASS the `B9 >= 0.15` bar on the absolute value. Because |·| is monotone
+/// in the depth of an inversion, the bar as implemented ranks those models by how
+/// WRONG their top band is. The band is also degenerate (43 pairs, 11 of 49 refs,
+/// MOS span 0.0194, marginal bootstrap sd 0.178), and widening the slice by two
+/// MOS points flips every model positive.
+fn cid22_band_signed(v: &serde_json::Value, band: &str) -> Option<f64> {
+    let bands = v.get("rank")?.get("cid22")?.get("bands")?.as_array()?;
+    bands
+        .iter()
+        .find(|b| b["band"].as_str() == Some(band))?
+        .get("srocc_signed")?
+        .as_f64()
 }
 
 /// The registered ranking composite (§8.1): product_composite's six terms
@@ -698,11 +725,22 @@ fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
     };
     let b3 = cid22_band(v, "B3");
     let b9 = cid22_band(v, "B9");
+    // Show the signed value when it disagrees with the abs'd one the gate reads.
+    // Display only — `pass` below is unchanged.
+    let inv = |band: &str| -> String {
+        match cid22_band_signed(v, band) {
+            Some(s) if s < 0.0 => format!(" ⛔INVERTED signed {s:+.3}"),
+            _ => String::new(),
+        }
+    };
     floors.push(Floor {
         id: "bandtail",
         gate: "F8 CID22 band tails",
         bar: format!("B9 ≥ {} ∧ B3 ≥ {}", balanced::B9, balanced::B3),
-        measured: format!("B9 {} / B3 {}", fmt_band(b9), fmt_band(b3)),
+        measured: format!(
+            "B9 {}{} / B3 {}{}",
+            fmt_band(b9), inv("B9"), fmt_band(b3), inv("B3")
+        ),
         pass: matches!((b3, b9), (Some((s3, _)), Some((s9, _)))
             if s9 >= balanced::B9 && s3 >= balanced::B3),
         fields: &["rank.cid22.bands"],
@@ -2165,5 +2203,48 @@ mod tests {
             }
             (d, p) => *d = p.clone(),
         }
+    }
+
+    /// F8's `measured` string must SAY when the band it just passed is ordered
+    /// backwards. The gate's arithmetic is deliberately untouched — it still
+    /// reads the abs'd `srocc`, because changing that moves verdicts for every
+    /// published board cell — so the report is the only place a reader can see
+    /// that `B9 0.320` means "anti-correlated at −0.320".
+    ///
+    /// Fails without the `inv()` annotation.
+    #[test]
+    fn f8_reports_an_inverted_band_it_still_passes() {
+        let mut v = passing_fixture();
+        v["rank"]["cid22"]["bands"] = serde_json::json!([
+            { "band": "B3", "srocc": 0.18, "srocc_signed": 0.18, "n": 57 },
+            { "band": "B9", "srocc": 0.3204, "srocc_signed": -0.3204, "n": 43 },
+        ]);
+        let r = eval_balanced(&v, &[]);
+        let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
+        assert!(fl.pass, "arithmetic is unchanged: abs 0.3204 >= 0.15 still passes");
+        assert!(
+            fl.measured.contains("INVERTED"),
+            "a passing-but-inverted band must be flagged; got {:?}",
+            fl.measured
+        );
+        assert!(fl.measured.contains("-0.320"), "the signed value must be shown: {:?}", fl.measured);
+
+        // A healthy band carries no marker.
+        v["rank"]["cid22"]["bands"] = serde_json::json!([
+            { "band": "B3", "srocc": 0.18, "srocc_signed": 0.18, "n": 57 },
+            { "band": "B9", "srocc": 0.3204, "srocc_signed": 0.3204, "n": 43 },
+        ]);
+        let r = eval_balanced(&v, &[]);
+        let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
+        assert!(!fl.measured.contains("INVERTED"), "false positive: {:?}", fl.measured);
+
+        // An OLD fulleval (no srocc_signed) must not be annotated at all.
+        v["rank"]["cid22"]["bands"] = serde_json::json!([
+            { "band": "B3", "srocc": 0.18, "n": 57 },
+            { "band": "B9", "srocc": 0.3204, "n": 43 },
+        ]);
+        let r = eval_balanced(&v, &[]);
+        let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
+        assert!(fl.pass && !fl.measured.contains("INVERTED"));
     }
 }
