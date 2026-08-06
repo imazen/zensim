@@ -262,11 +262,49 @@ Findings:
 > real GPU measurement. A sidecar built that way silently mislabels CPU numbers
 > as GPU.
 >
-> **Standing rule for every scoring run and every fleet job: pass
-> `--gpu-runtime cuda` explicitly.** Never rely on the default when the column
-> is going to be recorded. Worth fixing in zenmetrics so the fallback can never
-> be silent (either log the runtime actually used, or stamp the mode into the
-> emitted column/row); until then the explicit flag is the mitigation.
+> **Standing rule for every scoring run: pass `--gpu-runtime cuda`
+> explicitly.** Never rely on the default when the column is going to be
+> recorded. Explicit collapses the candidate list to `[Cuda]` with no CPU rung
+> reachable; it is the only correct-by-construction path today.
+>
+> **⚠ BUT THE FLEET EXECUTOR CANNOT DO THIS — open blocker.** A companion
+> code audit found `jobexec` hardcodes `GpuRuntime::Auto` at four call sites
+> (`crates/zenmetrics-cli/src/jobexec.rs:126-132`, `:965`, `:1494`, `:1596`),
+> with **no flag or env var to override it**. So every `ScoreFile`/`Metric`
+> job run through `zenmetrics jobexec` — i.e. all zenfleet scoring — takes the
+> `auto` ladder and is exposed to exactly the silent CPU fallback demonstrated
+> above, recording CPU numbers under GPU column names. The mitigation that
+> works for a hand-run `score-pairs` **does not reach the fleet path.**
+>
+> Mechanism detail from the audit, worth knowing before relying on GPU scoring:
+> - `auto_order()` ends its ladder in `GpuRuntime::Cpu`
+>   (`crates/zenmetrics-cli/src/metrics/mod.rs:304-311`), and the per-runtime
+>   failure strings are collected into a local vec that is **dropped on the
+>   first success** (`:457-519`) — the degradation logs nothing at any level.
+>   The same dropped-errors pattern repeats in `metrics/cache.rs:647-671` and
+>   `metrics/cvvdp_gpu.rs:207-227`.
+> - **Nothing anywhere reports the backend actually used** — no log line, no
+>   `--verbose`, and no backend column in the score-pairs parquet schema
+>   (`main.rs:1735-1744`). `MetricKind::backend()` returns a *static* string
+>   from the enum variant, so it reports "GPU" for a run that fell back.
+> - `score-pairs --metric cvvdp-gpu` goes through the typed `CvvdpBatchScorer`,
+>   which has **no VRAM pre-flight** and **skips the liveness probe**
+>   (`metrics/cvvdp_gpu.rs:395` never calls `verify_gpu_backend_operational`).
+> - Smallest real fix identified: gate `auto_order()`'s final CPU rung behind a
+>   `ZENMETRICS_REQUIRE_GPU` env var using the `AtomicBool`-plus-setter pattern
+>   already at `metrics/mod.rs:363-372`. One function; it covers the hand-run
+>   path, the sweep cache, **and** jobexec, because all three call
+>   `auto_order()`. Secondary: log the runtime whenever the successful rung is
+>   not the first. Tertiary: add a `backend` column so parquets are
+>   self-describing and past runs can be re-validated.
+>
+> Also note `--metric cvvdp` (unsuffixed) is the **CPU** metric and silently
+> ignores `--gpu-runtime` entirely. This table's two cvvdp rows use the correct
+> distinct names, so they are not affected — but a run that asked for
+> `--gpu-runtime cuda --metric cvvdp` measured CPU by design, with no warning.
+> `sweep --hdr` already rejects `auto` outright
+> (`crates/zenmetrics-cli/src/sweep/hdr.rs:630-637`) — that refusal is the
+> model the other entry points should copy.
 >
 > Caveat on the re-run: its wall times include process startup (~0.3–1.0 s) and
 > so are NOT comparable to this table's marginal per-pair figures. It measured
