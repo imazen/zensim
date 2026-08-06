@@ -1,0 +1,4 @@
+git_commit: 
+command: sparsehf_tables.py (R1)
+inputs: verdicts /mnt/v/output/zensim/bakes/sota944/verdicts/(FS_*|R1_*|CS*).full.json, fullevals /mnt/v/output/zensim/reports/fulleval/*.fulleval.json, instrument dial verdicts /home/lilith/tmp/sparsehf/R1_*_dial.full.json (not campaign cells)
+stats: none recomputed — all fields read from bake_verdict/run_full_eval outputs

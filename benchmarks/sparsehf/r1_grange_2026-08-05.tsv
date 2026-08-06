@@ -1,0 +1,5 @@
+cell	below_n	below_pct	above_n	above_pct	knot_lo	knot_hi	pred_lo	pred_hi	verdict
+GL0p3_s2503	0	0.000	119	2.773	-5.426	1.862	-2.55	2.61	FAIL
+GL1_s2503	0	0.000	304	7.083	-3.434	2.597	-1.50	3.65	FAIL
+GL2_s2503	0	0.000	400	9.320	-2.949	2.474	-1.14	3.24	FAIL
+PILOT1_s2501	0	0.000	121	2.819	-3.760	3.739	-1.49	4.58	FAIL
