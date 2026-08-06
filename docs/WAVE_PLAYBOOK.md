@@ -17,20 +17,25 @@ The compute was fine. The orchestration around it was the whole loss.
 
 ```
 1. PRE-REGISTER      arms, seeds, gates, decision rule -> commit BEFORE launching
+                     ... INCLUDING scripts/endgame_<wave>.sh (committed, idempotent)
 2. BUILD ONCE        build the binaries; export ZL_* pointers for every consumer
 3. LAUNCH DETACHED   setsid nohup <driver>            (one lane per executor)
 4. HARVEST INLINE    setsid nohup scripts/harvest_bakes.sh --glob ... --count N
-5. ONE TERMINAL      setsid nohup scripts/await_artifacts.sh --glob ... --count N
-                     ... then Monitor exactly ONE file: <heartbeat>.done
+5. ONE TERMINAL      setsid nohup scripts/await_artifacts.sh --glob ... --count N \
+       + ENDGAME         --then 'scripts/endgame_<wave>.sh'
+                     ... then Monitor exactly ONE file: <heartbeat>.endgame.done
 6. SELECT            freeze_check --select <every fulleval> [--tsv]
-7. ENDGAME FOREGROUND  tables, doc, gates — in the foreground, no waiting
+                     (the endgame script runs this — see below)
+7. REVIEW FOREGROUND read the endgame's tables + doc DRAFT; judge; finalize
 8. PUSH + VERIFY     jj bookmark set main -r @ && jj git push --bookmark main
                      git merge-base --is-ancestor @ main@origin
 9. CLEAN UP          workspace forget + rm -rf; drop your .workongoing line
 ```
 
-Steps 4 and 5 are the ones that were missing. Step 4 makes a late wake-up
-**free**; step 5 makes a dead waiter **visible**.
+Steps 4 and 5 make a late wake-up **free** and a dead waiter **visible**. The
+`--then` endgame (added 2026-08-05) makes the wake-up itself **optional**: the
+detached driver executes the endgame, so a lost notification costs review
+latency only — never recompute, never a stalled wave.
 
 ---
 
@@ -71,10 +76,12 @@ ls  /mnt/v/.../bakes/*.HARVEST_FAILED 2>/dev/null   # empty = clean
 setsid nohup scripts/await_artifacts.sh \
     --glob '/mnt/v/output/zensim/reports/fulleval/C_w8_s*.fulleval.json' \
     --count 12 --label 'wave-8 fullevals' \
+    --then 'scripts/endgame_w8.sh' \
     --heartbeat ~/tmp/wave8/await --timeout 14400 >/dev/null 2>&1 &
 ```
 
-Then arm **one** `Monitor` on `~/tmp/wave8/await.done` and go do other work.
+Then arm **one** `Monitor` on `~/tmp/wave8/await.endgame.done` (the chain's
+true terminal — artifacts *and* endgame) and go do other work.
 
 `await_artifacts.sh` guarantees the sentinel is written on **every** exit path —
 COMPLETE, TIMEOUT (rc 3), or SIGNAL (rc 5) — via an `EXIT` trap, and it sleeps
@@ -93,6 +100,8 @@ by it still has 35 s × N of eval to run serially in the foreground.
 | anti-pattern | measured cost | do this instead |
 |---|---|---|
 | Hand-rolled `while sleep` / `tail -f` waiter that exits without a trace | the day's two worst events: **125.6 min** + **80.6 min** dead | `await_artifacts.sh` — sentinel on every exit path |
+| Endgame armed as an **agent wake** (Monitor/notification → agent runs tables) | 2026-08-05: FOUR orphaned lanes in one day, each stalled on a human nudge — wakes don't survive a host restart | `await_artifacts.sh --then 'scripts/endgame_<wave>.sh'` — the driver runs it |
+| Re-messaging a closed agent lane ("did you finish?") | each message = ≥1 more wake+stop+tick; ~10 residual ticks observed on one lane | read its sentinels/artifacts from disk; let queues drain |
 | `Monitor` armed on `tail -f <log>` | loses the file on rotation/truncate, then waits forever | `Monitor` a file that appears **exactly once** (`<hb>.done`) |
 | Batching verdicts+fullevals at the end of the wave | a late wake-up costs its own delay **plus** the whole eval chain | `harvest_bakes.sh` inline |
 | A post-bake hook whose failure is non-fatal | **13.4 min** recompute + a 3 h 24 min lane silently voided | fail loud: marker file + failures file + nonzero exit |
@@ -166,12 +175,123 @@ terminal line — read that before selecting.
 
 ---
 
-## Endgame in the foreground
+## The restart-proof endgame — the DRIVER runs it, never a wake (2026-08-05)
 
-Once `<heartbeat>.done` says COMPLETE, everything left is bounded: read the
-fullevals (already computed), build the tables, write the doc, run the gates,
+**Incident of record (2026-08-05, four orphans in one day):** the featsub,
+wave-11, hygiene2, and HDR lanes each finished their compute while no agent
+wake arrived. Every one recovered **losslessly** — per-bake harvest + `.done`
+sentinels had all state on disk — but every one needed a **manual supervisor
+nudge** to run its endgame, because the thing that was supposed to wake an
+agent was gone. Agent wake-chains live inside the Claude Code host process;
+the compute does not.
+
+**What actually survives a Claude Code host restart (verified Aug 2026):**
+
+| mechanism | survives restart? | evidence |
+|---|---|---|
+| `setsid` OS process + sentinel files | **yes** | OS-owned; indifferent to the CLI ([durable-execution surveys](https://www.inngest.com/blog/durable-execution-key-to-harnessing-ai-agents) all land here: state on disk + idempotent reconciler) |
+| `settings.json` hooks | **yes** (re-evaluated each session; `SessionStart` fires with `source: resume`) | [hooks docs](https://code.claude.com/docs/en/hooks.md) — but **no hook event fires on background-task completion**, so hooks cannot replace the driver |
+| cloud Routines / scheduled agents | yes, but each trigger is a **fresh session** — no cross-invocation state, min 1 h cadence | [routines docs](https://code.claude.com/docs/en/routines.md) |
+| in-session `/loop` scheduled task | partial (restored on `--resume` if ≤ 7 d) | [scheduled-tasks docs](https://code.claude.com/docs/en/scheduled-tasks.md) |
+| background Bash / `Monitor` watches | **no — "never restored on resume"** | [scheduled-tasks docs, Limitations](https://code.claude.com/docs/en/scheduled-tasks.md#limitations) |
+| subagent completion notifications | **no**, and buggy even in-session (zombie "running" tasks, duplicate ticks) | [#65925](https://github.com/anthropics/claude-code/issues/65925), [#58637](https://github.com/anthropics/claude-code/issues/58637), [#47930](https://github.com/anthropics/claude-code/issues/47930) |
+
+Conclusion, and the registered design: **the "what happens next" logic must
+live in the detached OS layer, not in any agent's pending wake.** The wave's
+endgame is a committed script, executed by the driver the moment the terminal
+condition is met:
+
+```bash
+scripts/await_artifacts.sh ... --then 'scripts/endgame_w8.sh'
+```
+
+- `--then` runs on COMPLETE (add `--then-always` to also draft a partial wave
+  on TIMEOUT; a deliberate SIGNAL kill never triggers it).
+- The driver writes `<heartbeat>.endgame.done` on **every** endgame exit path
+  (COMPLETE / FAILED rc / SIGNAL) — the same no-silent-death contract as the
+  watch sentinel. Endgame stdout+stderr land in `<heartbeat>.then.log`; a
+  failed endgame makes the await exit 7.
+- An agent that never wakes costs nothing but review latency. An agent that
+  wakes late (or a human running `claude -r` tomorrow) finds tables + doc
+  draft already on disk.
+
+**The per-wave `endgame_<wave>.sh` contract** — committed BEFORE launch (it is
+part of pre-registration; an uncommitted endgame is the wave-6 `process.sh`
+failure class and `--then` warns on `~/tmp` paths), **idempotent** (re-runs
+must be safe — the driver may re-run it), and it does the *bounded, judgment-
+free* tail only:
+
+```bash
+#!/usr/bin/env bash
+# endgame_w8.sh — wave-8 endgame: runs IN THE DRIVER on chain completion.
+set -euo pipefail
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+W=~/tmp/wave8; FE=/mnt/v/output/zensim/reports/fulleval
+FC=${ZL_FC:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/freeze_check}
+# 1. selection table (the registered rule, run by the owner)
+"$FC" --select "$FE"/C_w8_s*.fulleval.json --tsv > "$W/select.tsv"
+# 2. doc-append DRAFT (never touches the campaign doc itself)
+{ echo "## WAVE 8 RESULTS (DRAFT $(date -u +%FT%TZ) — review before folding in)";
+  column -t -s$'\t' "$W/select.tsv"; } > "$W/doc_append.draft.md"
+# 3. anything else bounded: gates, per-arm medians, tarball of evidence
+```
+
+The reviewer (agent or human) then does only judgment + landing: read the
+draft, fold into the campaign doc, commit tables under `benchmarks/`, push,
+verify, clean up. **The driver never commits or pushes** — landing needs
+review by construction.
+
+**Why not a "native" mechanism instead (evaluated 2026-08-05):** hooks have no
+background-completion event to fire on; Routines are fresh-session cloud runs
+that can't see the box's `/mnt/v` state mid-wave; `/loop` dies with the
+session ≥ half the time we care about. The one native piece that IS worth
+using is `SessionStart` (it fires on `claude -r` resume): wire
+`scripts/wave_resume_probe.sh` as a SessionStart hook and every resumed
+session opens already knowing what finished, failed, is live, or died
+silently — no human nudge needed to *orient*. User-side snippet (optional, in
+`~/.claude/settings.json`; the probe also works run by hand):
+
+```json
+"SessionStart": [{ "matcher": "*", "hooks": [{ "type": "command",
+  "command": "bash /home/lilith/work/zen/zensim/scripts/wave_resume_probe.sh" }] }]
+```
+
+## Residual notification ticks from closed lanes — determination (2026-08-05)
+
+Observed: a closed agent lane re-woken ~10× by empty queue drains. Local
+investigation found **no repairable state** — no stale `/loop` cron entries,
+no persisted Monitor state (Monitors are in-process only), and the on-disk
+`~/.claude/tasks/*` files are the TaskList board, not a notification queue.
+The mechanism is **harness-internal**: a task-notification fires **every**
+time a background lane stops with no live children — not once per lifetime —
+and anything delivered into a finished lane (a `SendMessage` nudge, a queued
+message drain, a resume) runs it again, so it stops again, so it ticks again.
+This is the documented bug class:
+[#65925](https://github.com/anthropics/claude-code/issues/65925) (zombie
+"running" tasks; `TaskStop` → "No task found"),
+[#47930](https://github.com/anthropics/claude-code/issues/47930) (idle-
+notification loops burning 13–22 % of lead-session input tokens),
+[#58637](https://github.com/anthropics/claude-code/issues/58637).
+
+Mitigation (behavioral — there is nothing to fix locally):
+
+1. **Never message a lane after its terminal report.** Each message to a
+   closed lane buys ≥ 1 more wake+stop+tick. If you need its artifacts, read
+   them from disk — files are the channel.
+2. **Treat every tick as level-triggered, not edge-triggered.** A tick means
+   "go look at the sentinels", never "new event happened". Idempotent
+   handling (read `.done` / `.endgame.done`, act only on state you haven't
+   acted on) makes duplicate ticks free.
+3. **Let queues drain.** After a wave closes, expect a few residual ticks;
+   answer them with a sentinel glance and silence, not with replies into the
+   dead lane (which re-arm the loop).
+
+## Review in the foreground
+
+Once `<heartbeat>.endgame.done` says COMPLETE, everything left is judgment:
+read the draft + tables (already computed), decide, fold into the doc,
 commit, push, verify, clean up. **Do not arm another waiter for a bounded
-endgame** — run it inline. The audit's `A8 balanced-selection` pass shows what
+review** — run it inline. The audit's `A8 balanced-selection` pass shows what
 an unbounded endgame costs: a 15-minute tail on a pass whose compute was done.
 
 Terminal checklist:
@@ -192,5 +312,8 @@ jj workspace forget <name> && rm -rf <path>    # mandatory on merge
    run the eval myself after I wake?
 3. Is there **exactly one** file whose appearance means "done", and is
    something watching it that leaves evidence if it dies?
-4. Am I about to wait, or about to **work on something else**? Waiting attached
+4. If no wake ever arrives, will the endgame still have run? It must: the
+   driver owns it (`--then`), not a notification. A wake you *need* is a
+   single point of failure that a host restart deletes.
+5. Am I about to wait, or about to **work on something else**? Waiting attached
    is what costs $395/day.
