@@ -70,8 +70,10 @@ mod balanced {
     /// ABSOLUTE value; it cannot be carried over, because the quantity it
     /// bounded no longer exists.
     ///
-    /// REGISTERED-PENDING-USER-ACK: this changes a gate governing 166+
-    /// published board cells.
+    /// FINAL — USER-APPROVED 2026-08-06 (registered pending-user-ack in
+    /// appendix V.R4, acked the same day): this gate governs 166+ published
+    /// board cells. No arithmetic changed at finalization, only the
+    /// registration state.
     pub const BAND_HIGH: f64 = 0.09;
     /// F8 low-tail non-collapse, SIGNED, on the lowest USABLE band. Zero is a
     /// real bar on a signed value (it was unfalsifiable against the absolute

@@ -11886,7 +11886,7 @@ A band that fails the usability criterion is emitted as **NOT-MEASURED** — an
 explicit null with a reason string — never silently dropped, never dimmed-but-
 rankable, and never rendered as a measured zero.
 
-## V.5 F8's re-point (a gate change; registered-pending-user-ack)
+## V.5 F8's re-point (a gate change; registered-pending-user-ack → ACKED, see V.R4 — FINAL 2026-08-06)
 
 F8 currently reads `|B9| ≥ 0.15 ∧ |B3| ≥ 0.0` and governs 166+ published board
 cells plus, through `W_BANDTAIL`, the balanced ranking composite. Per the user
@@ -12154,7 +12154,11 @@ cluster by reference, up to 61 in this band), so `ceil`-2dp gives
 a real bar for the first time (`|x| ≥ 0.0` was unfalsifiable, so F8 was
 effectively one-sided).
 
-**REGISTERED-PENDING-USER-ACK** — it governs 166+ published cells.
+**FINAL — USER-APPROVED 2026-08-06** (registered pending-user-ack above; the ack
+came the same day, verbatim "yes, do those") — it governs 166+ published cells.
+`BAND_HIGH = 0.09` / `BAND_LOW = 0.0` are the shipped floors in
+`freeze_check --profile balanced-2026-08-04`; no arithmetic changed at
+finalization, only the registration state.
 
 **And the honest part: the new F8 has NO discriminating power on today's
 board.** All 120 recut cells pass; the top band's population runs **+0.262 …
