@@ -1,0 +1,31 @@
+# appendix U — the one guard-clean gainer, and the pairing falsification
+# base = ADD156's 28 coordinates re-solved at root B (ext944 mm01); cells add BANDING (v2 local 27) at scale 0.
+# b428 = BANDING@s0Y ; b399 = BANDING@s0X ; b457 = BANDING@s0B ; b399428/b428457 = the pairs.
+# B=2000, seed 20260806, paired (same index sets both sides); panel --batch owns the statistic.
+
+[cid22] n=4292 stat=srocc_signed series=['bBASE', 'b428', 'b399428', 'b428457', 'b399', 'b457'] (human column identical across all)
+
+point estimates (SROCC, cid22):
+  bBASE  0.820922
+  b428   0.847437
+  b399428 0.845021
+  b428457 0.846513
+  b399   0.817077
+  b457   0.819019
+
+marginal bootstrap interval per series (B=2000, NOT a comparison):
+series                            point       2.5%      97.5%         sd
+bBASE                          +0.82092   +0.80959   +0.83153    0.00558
+b428                           +0.84744   +0.83799   +0.85643    0.00471
+b399428                        +0.84502   +0.83530   +0.85400    0.00476
+b428457                        +0.84651   +0.83699   +0.85552    0.00473
+b399                           +0.81708   +0.80555   +0.82775    0.00567
+b457                           +0.81902   +0.80750   +0.82968    0.00563
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+b428 - bBASE                   +0.02646   +0.02371   +0.02944    1.000
+b399428 - bBASE                +0.02406   +0.02142   +0.02690    1.000
+b428457 - bBASE                +0.02554   +0.02290   +0.02846    1.000
+b399 - bBASE                   -0.00384   -0.00450   -0.00327    0.000
+b457 - bBASE                   -0.00190   -0.00231   -0.00153    0.000
