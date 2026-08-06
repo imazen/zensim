@@ -500,6 +500,161 @@ pub fn score_features_with_profile_and_codec(
     Ok(result.score())
 }
 
+/// Batched central-difference gradient of the profile's score at `base`
+/// (campaign appendix Y, L-Y1 — the jxl-loop iteration-0 probe owner).
+///
+/// Semantics are EXACTLY the sequential recipe of calling
+/// [`score_features_with_profile`] `2·N` times with the loop's probe rule:
+///
+/// ```text
+/// eps_k   = max(|base[k]| · 1e-3, 1e-5)
+/// grad[k] = (score(base + eps_k·e_k) − score(base − eps_k·e_k)) / (2·eps_k)
+///           (0.0 when either forward is non-finite or errors)
+/// ```
+///
+/// but the bake is parsed ONCE and one `Predictor` (+ one f32 input
+/// buffer) serves every forward — removing the per-forward
+/// `Model::from_bytes` re-parse, `Predictor::new` allocations, and the
+/// `ZensimResult` feature-vector clone that made the sequential recipe
+/// ~65% of the jxl k3 loop wall. Each forward's arithmetic is identical
+/// to the canonical path (shared [`bake_dispatch_one`] +
+/// [`prep_bake_input_f32`] + [`dispose_mlp_raw`]), so the gradient is
+/// **bitwise-equal** to the sequential recipe — gated by
+/// `fd_gradient_bitwise_matches_sequential`.
+///
+/// Two exact-zero shortcuts (both bitwise-equal to running the forwards):
+/// dead-column-pruned bakes (`FeatureTransform::Drop`) and prefix-sized
+/// bakes never read the affected column, so `up == dn` bitwise and the
+/// component is exactly `0.0` — the forwards are skipped.
+///
+/// Profiles outside the fast path (linear / ensemble-routed / b3-mixed /
+/// min-max-head) fall back to the per-probe canonical path — same
+/// result, sequential cost.
+///
+/// # Errors
+///
+/// [`ZensimError::ModelLoadFailed`] if the bake bytes fail to parse (the
+/// sequential recipe would instead return an all-zero gradient through
+/// per-call NaN; callers that want that behavior can map the error to
+/// `vec![0.0; base.len()]`).
+pub fn score_features_fd_gradient_with_profile(
+    profile: crate::profile::ZensimProfile,
+    base: &[f64],
+    width: u32,
+    height: u32,
+) -> Result<Vec<f64>, ZensimError> {
+    let params = profile.params();
+    let n = base.len();
+    let mut probe = base.to_vec();
+
+    // Sequential fallback: the canonical per-probe path, verbatim.
+    let seq_fallback = |probe: &mut Vec<f64>| -> Vec<f64> {
+        let sf =
+            |f: &[f64]| score_features_with_profile(profile, f, width, height).unwrap_or(f64::NAN);
+        let mut grad = vec![0.0f64; n];
+        for (k, gk) in grad.iter_mut().enumerate() {
+            let eps = (base[k].abs() * 1e-3).max(1e-5);
+            probe[k] = base[k] + eps;
+            let up = sf(probe);
+            probe[k] = base[k] - eps;
+            let dn = sf(probe);
+            probe[k] = base[k];
+            *gk = if up.is_finite() && dn.is_finite() {
+                (up - dn) / (2.0 * eps)
+            } else {
+                0.0
+            };
+        }
+        grad
+    };
+
+    // Fast path: single-bake MLP profiles (no ensemble classifier, no b3
+    // secondary, no min-max head — those route through the fallback).
+    let fast_bytes: Option<&[u8]> = match (
+        params.mlp_bytes,
+        params.ensemble_classifier_bytes,
+        params.mlp_bytes_b3,
+    ) {
+        (Some(loader), None, None) => Some(loader()),
+        _ => None,
+    };
+    let Some(bytes) = fast_bytes else {
+        return Ok(seq_fallback(&mut probe));
+    };
+    let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
+        reason: "Model::from_bytes failed to parse the bake header or layer table",
+    })?;
+    let bundle = cached_bake_metadata(bytes, &model);
+    if bundle.minmax_head.is_some() {
+        return Ok(seq_fallback(&mut probe));
+    }
+    let n_inputs = model.caller_input_width();
+    let needs_transforms = model.has_nontrivial_feature_transforms();
+    let mut predictor = crate::mlp::Predictor::new(&model);
+    let per_sample_alpha = bundle.per_sample_alpha.as_deref();
+    let hybrid_head = bundle.hybrid_head.as_deref();
+    let tanh_pin_scale = bundle.tanh_pin_scale;
+    let output_spline = bundle.output_spline.as_deref();
+    // This entry takes no codec hint (mirrors the loop's probe closure,
+    // which calls the hint-less `score_features_with_profile`).
+    let per_codec_affine: Option<(f32, f32)> = None;
+
+    // Dropped raw columns (dead-column-pruned bakes): valid only when the
+    // transform table indexes the same positions the caller probes.
+    let drop_mask: Option<&[zenpredict::FeatureTransform]> = if n_inputs == n {
+        model.feature_transforms()
+    } else {
+        None
+    };
+
+    let mut f32buf: Vec<f32> = Vec::with_capacity(n_inputs.max(n));
+    let mut grad = vec![0.0f64; n];
+    for k in 0..n {
+        // Prefix-sized bake: columns past `n_inputs` never enter the
+        // forward — `up == dn` bitwise, component exactly 0.0.
+        if n_inputs < n && k >= n_inputs {
+            continue;
+        }
+        // Dropped column: the transform removes it before layer 0 —
+        // `up == dn` bitwise, component exactly 0.0.
+        if let Some(ts) = drop_mask
+            && matches!(ts[k], zenpredict::FeatureTransform::Drop)
+        {
+            continue;
+        }
+        let eps = (base[k].abs() * 1e-3).max(1e-5);
+        let mut fwd = |probe: &[f64], p: &mut crate::mlp::Predictor<'_>| -> f64 {
+            if prep_bake_input_f32(probe, n_inputs, width, height, &mut f32buf).is_err() {
+                return f64::NAN;
+            }
+            match bake_dispatch_one(
+                p,
+                &f32buf,
+                needs_transforms,
+                per_sample_alpha,
+                hybrid_head,
+                tanh_pin_scale,
+                output_spline,
+                per_codec_affine,
+            ) {
+                Ok(raw) => dispose_mlp_raw(raw, params),
+                Err(_) => f64::NAN,
+            }
+        };
+        probe[k] = base[k] + eps;
+        let up = fwd(&probe, &mut predictor);
+        probe[k] = base[k] - eps;
+        let dn = fwd(&probe, &mut predictor);
+        probe[k] = base[k];
+        grad[k] = if up.is_finite() && dn.is_finite() {
+            (up - dn) / (2.0 * eps)
+        } else {
+            0.0
+        };
+    }
+    Ok(grad)
+}
+
 /// Pre-compute reference with a custom number of pyramid scales.
 ///
 /// Use this when calling [`compute_zensim_with_ref_and_config`] with a non-default
@@ -3173,48 +3328,56 @@ pub(crate) fn apply_mlp_scoring_with_codec(
             }
         };
 
-        let pre_bound = if params.skip_score_mapping {
-            // The bake is already MCOS-calibrated (V0_8+); the raw
-            // output IS the final score. Skipping the
-            // `100 − A·d^B` transform avoids producing garbage
-            // (e.g. raw=90 → mapped=-374).
-            raw
-        } else {
-            distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
-        };
-        // Bound the score to [0, 100] before handing it back. Two
-        // policies exist:
-        //   - Hard clamp (default, legacy): out-of-range outputs pin
-        //     to 0 or 100. Cheap, MCOS-natural. Tie blocks at the
-        //     boundary collapse SROCC to 0 on affected bands when
-        //     many pairs extrapolate (multi-bake V_20 IS regime).
-        //   - Soft clamp (V_20+ multi-bake): logistic squash through
-        //     `100 / (1 + exp(-(raw - 50) / 20))`. The output deviates
-        //     from `raw` by < 1.5 units in the [5, 95] interior so
-        //     interior calibration is unchanged; only the tails are
-        //     reshaped. Preserves rank ordering at the extremes
-        //     (no ties → SROCC stays defined). Costs one `exp` per
-        //     score (~1 ns).
-        // The choice is per-profile via `ProfileParams::soft_clamp_score`.
-        // PreviewV0_4 (V_18 + V_20 IS multi-bake) sets `true`;
-        // the V_18 ship single-bake and earlier set `false`.
-        //
-        // EXP-CROSS-CODEC-V10 (2026-05-20): `extrapolate_score` overrides
-        // both hard- and soft-clamp paths. The PCHIP spline's linear
-        // extrapolation past its endpoint knots flows through, so
-        // "pathological" codec output (worst codec at q=0, butter > 12)
-        // maps to a negative score instead of collapsing to a tie at 0.
-        // V10 profiles (BalancedV3 / CompressionV3 / TunerV4) set this.
-        let score = if params.extrapolate_score {
-            pre_bound
-        } else if params.soft_clamp_score {
-            soft_clamp_score(pre_bound)
-        } else {
-            pre_bound.clamp(0.0, 100.0)
-        };
+        let score = dispose_mlp_raw(raw, params);
         result.set_mlp_score(raw, score);
     }
     Ok(())
+}
+
+/// Post-forward score disposition shared by [`apply_mlp_scoring_with_codec`]
+/// and the batched FD-gradient entry
+/// ([`score_features_fd_gradient_with_profile`]) — extracted verbatim so the
+/// two paths cannot drift (campaign appendix Y, L-Y1).
+pub(crate) fn dispose_mlp_raw(raw: f64, params: &crate::profile::ProfileParams) -> f64 {
+    let pre_bound = if params.skip_score_mapping {
+        // The bake is already MCOS-calibrated (V0_8+); the raw
+        // output IS the final score. Skipping the
+        // `100 − A·d^B` transform avoids producing garbage
+        // (e.g. raw=90 → mapped=-374).
+        raw
+    } else {
+        distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
+    };
+    // Bound the score to [0, 100] before handing it back. Two
+    // policies exist:
+    //   - Hard clamp (default, legacy): out-of-range outputs pin
+    //     to 0 or 100. Cheap, MCOS-natural. Tie blocks at the
+    //     boundary collapse SROCC to 0 on affected bands when
+    //     many pairs extrapolate (multi-bake V_20 IS regime).
+    //   - Soft clamp (V_20+ multi-bake): logistic squash through
+    //     `100 / (1 + exp(-(raw - 50) / 20))`. The output deviates
+    //     from `raw` by < 1.5 units in the [5, 95] interior so
+    //     interior calibration is unchanged; only the tails are
+    //     reshaped. Preserves rank ordering at the extremes
+    //     (no ties → SROCC stays defined). Costs one `exp` per
+    //     score (~1 ns).
+    // The choice is per-profile via `ProfileParams::soft_clamp_score`.
+    // PreviewV0_4 (V_18 + V_20 IS multi-bake) sets `true`;
+    // the V_18 ship single-bake and earlier set `false`.
+    //
+    // EXP-CROSS-CODEC-V10 (2026-05-20): `extrapolate_score` overrides
+    // both hard- and soft-clamp paths. The PCHIP spline's linear
+    // extrapolation past its endpoint knots flows through, so
+    // "pathological" codec output (worst codec at q=0, butter > 12)
+    // maps to a negative score instead of collapsing to a tie at 0.
+    // V10 profiles (BalancedV3 / CompressionV3 / TunerV4) set this.
+    if params.extrapolate_score {
+        pre_bound
+    } else if params.soft_clamp_score {
+        soft_clamp_score(pre_bound)
+    } else {
+        pre_bound.clamp(0.0, 100.0)
+    }
 }
 
 // ============================================================================
@@ -4104,72 +4267,47 @@ fn forward_one_bake_with_codec(
     }
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
-        let out = if needs_transforms {
-            p.predict_transformed(x)
-                .map_err(|_| ZensimError::ModelForwardFailed {
-                    reason: "Predictor::predict_transformed failed",
-                })?
-        } else {
-            p.predict(x).map_err(|_| ZensimError::ModelForwardFailed {
-                reason: "Predictor::predict failed",
-            })?
-        };
-        let y_pre = if let Some(meta) = per_sample_alpha {
-            // `out` is the hidden vector h (n_hidden floats). Apply
-            // the per-sample-α runtime formula.
-            if out.len() != meta.rank_w.len() {
-                // Shape mismatch between metadata's declared n_hidden
-                // and bake's n_outputs — bake is malformed.
-                return Err(ZensimError::ModelForwardFailed {
-                    reason: "per-sample-α metadata n_hidden does not match bake output length",
-                });
-            }
-            apply_per_sample_alpha_runtime(out, meta)
-        } else if let Some(meta) = hybrid_head {
-            // `out` is the hidden vector h. Apply the scalar-α
-            // hybrid runtime formula.
-            if out.len() != meta.rank_w.len() {
-                return Err(ZensimError::ModelForwardFailed {
-                    reason: "hybrid-head metadata n_hidden does not match bake output length",
-                });
-            }
-            apply_hybrid_head_runtime(out, meta)
-        } else {
-            out[0] as f64
-        };
-        let y_after_pin = if let Some(scale) = tanh_pin_scale {
-            apply_tanh_output_pin(y_pre, scale)
-        } else {
-            y_pre
-        };
-        let y_after_spline = if let Some(spline) = output_spline {
-            apply_output_calibration_spline(y_after_pin, spline)
-        } else {
-            y_after_pin
-        };
-        // EXP-CROSS-CODEC-V11-E: per-codec post-spline affine. When
-        // the metadata is present AND the caller supplied a known
-        // codec hint, pull the per-codec output toward consensus.
-        // Otherwise pass through unchanged. The affine is monotone
-        // (beta > 0 by parse) so within-codec rank ordering is
-        // preserved bit-exact.
-        Ok(if let Some((alpha, beta)) = per_codec_affine {
-            (alpha as f64) + (beta as f64) * y_after_spline
-        } else {
-            y_after_spline
-        })
+        bake_dispatch_one(
+            p,
+            x,
+            needs_transforms,
+            per_sample_alpha,
+            hybrid_head,
+            tanh_pin_scale,
+            output_spline,
+            per_codec_affine,
+        )
     };
+    let mut f32_features: Vec<f32> = Vec::new();
+    prep_bake_input_f32(features, n_inputs, width, height, &mut f32_features)?;
+    dispatch(&mut predictor, &f32_features)
+}
+
+/// Size a caller feature vector to a bake's declared input width and
+/// convert to f32 into `out` (cleared first). Extracted from
+/// [`forward_one_bake_with_codec`] so the batched FD-gradient entry
+/// reuses the identical sizing semantics without a per-forward
+/// allocation (campaign appendix Y, L-Y1). Branches:
+/// exact width / +4 size-axes / prefix / loud mismatch.
+fn prep_bake_input_f32(
+    features: &[f64],
+    n_inputs: usize,
+    width: u32,
+    height: u32,
+    out: &mut Vec<f32>,
+) -> Result<(), ZensimError> {
+    out.clear();
     if n_inputs == features.len() {
-        let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
-        dispatch(&mut predictor, &f32_features)
+        out.extend(features.iter().map(|&v| v as f32));
+        Ok(())
     } else if n_inputs == features.len() + 4 {
         let mut augmented = features.to_vec();
         append_mlp_size_axes(&mut augmented, width, height);
-        let f32_features: Vec<f32> = augmented.iter().map(|&v| v as f32).collect();
-        dispatch(&mut predictor, &f32_features)
+        out.extend(augmented.iter().map(|&v| v as f32));
+        Ok(())
     } else if n_inputs < features.len() {
-        let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
-        dispatch(&mut predictor, &f32_features)
+        out.extend(features[..n_inputs].iter().map(|&v| v as f32));
+        Ok(())
     } else {
         // n_inputs > features.len() + 4 — bake expects more features than
         // the caller supplied, including the optional 4 size axes. This
@@ -4178,6 +4316,79 @@ fn forward_one_bake_with_codec(
             reason: "bake declares more input features than the caller supplied",
         })
     }
+}
+
+/// The per-forward post-network dispatch shared by
+/// [`forward_one_bake_with_codec`] and the batched FD-gradient entry
+/// ([`score_features_fd_gradient_with_profile`]) — extracted verbatim
+/// from the former's closure so the two paths cannot drift (campaign
+/// appendix Y, L-Y1). `x` must already be sized to the bake's input
+/// width (see [`prep_bake_input_f32`]).
+#[allow(clippy::too_many_arguments)]
+fn bake_dispatch_one(
+    p: &mut crate::mlp::Predictor<'_>,
+    x: &[f32],
+    needs_transforms: bool,
+    per_sample_alpha: Option<&PerSampleAlphaMeta>,
+    hybrid_head: Option<&HybridHeadMeta>,
+    tanh_pin_scale: Option<f64>,
+    output_spline: Option<&OutputCalibrationSpline>,
+    per_codec_affine: Option<(f32, f32)>,
+) -> Result<f64, ZensimError> {
+    let out = if needs_transforms {
+        p.predict_transformed(x)
+            .map_err(|_| ZensimError::ModelForwardFailed {
+                reason: "Predictor::predict_transformed failed",
+            })?
+    } else {
+        p.predict(x).map_err(|_| ZensimError::ModelForwardFailed {
+            reason: "Predictor::predict failed",
+        })?
+    };
+    let y_pre = if let Some(meta) = per_sample_alpha {
+        // `out` is the hidden vector h (n_hidden floats). Apply
+        // the per-sample-α runtime formula.
+        if out.len() != meta.rank_w.len() {
+            // Shape mismatch between metadata's declared n_hidden
+            // and bake's n_outputs — bake is malformed.
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "per-sample-α metadata n_hidden does not match bake output length",
+            });
+        }
+        apply_per_sample_alpha_runtime(out, meta)
+    } else if let Some(meta) = hybrid_head {
+        // `out` is the hidden vector h. Apply the scalar-α
+        // hybrid runtime formula.
+        if out.len() != meta.rank_w.len() {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "hybrid-head metadata n_hidden does not match bake output length",
+            });
+        }
+        apply_hybrid_head_runtime(out, meta)
+    } else {
+        out[0] as f64
+    };
+    let y_after_pin = if let Some(scale) = tanh_pin_scale {
+        apply_tanh_output_pin(y_pre, scale)
+    } else {
+        y_pre
+    };
+    let y_after_spline = if let Some(spline) = output_spline {
+        apply_output_calibration_spline(y_after_pin, spline)
+    } else {
+        y_after_pin
+    };
+    // EXP-CROSS-CODEC-V11-E: per-codec post-spline affine. When
+    // the metadata is present AND the caller supplied a known
+    // codec hint, pull the per-codec output toward consensus.
+    // Otherwise pass through unchanged. The affine is monotone
+    // (beta > 0 by parse) so within-codec rank ordering is
+    // preserved bit-exact.
+    Ok(if let Some((alpha, beta)) = per_codec_affine {
+        (alpha as f64) + (beta as f64) * y_after_spline
+    } else {
+        y_after_spline
+    })
 }
 
 /// Append `(log2(pixels), log2(min_dim), log2(max_dim), signed

@@ -333,7 +333,10 @@ pub use streaming::{PrecomputedReference, ZensimScratch};
 /// tanh-pin, PCHIP spline, per-codec affine, clamp / soft-clamp /
 /// extrapolate disposition) — same dispatch the canonical
 /// `Zensim::compute(...)` flow applies after feature extraction.
-pub use metric::{score_features_with_profile, score_features_with_profile_and_codec};
+pub use metric::{
+    score_features_fd_gradient_with_profile, score_features_with_profile,
+    score_features_with_profile_and_codec,
+};
 
 /// Training/research API — requires `features = ["training"]`.
 ///
