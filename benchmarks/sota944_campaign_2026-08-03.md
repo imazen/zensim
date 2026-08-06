@@ -9700,3 +9700,182 @@ Formally: 0 per-cell WINs (not (a)); 1 of 3 MLP cells is a per-cell LOSS
   foundation + gates + candidates shipped; further HDR progress is
   data-acquisition-bound (multi-codec HDR sweep = buildable locally; AIC-HDR
   = release-bound; UPIQ stays holdout).
+
+# REGISTERED APPENDIX R — THE SPARSE-HF ONE-ARTIFACT WAVE: FIX THE LASSO DIAL, THEN DISTILL C INTO IT (2026-08-06, pre-registered before any packaging step or fit)
+
+## R.0 Why this exists + the aim (frozen)
+
+Appendix J's Phase-B surfaced the campaign's most promising NEW lever and left
+it unusable: **every group-lasso cell posts HF-NL-proxy per-ref 0.77-0.85**
+(the metric's registered weak zone, where the incumbents sit at C 0.7333 /
+B 0.825-class) **while its dial collapses** (dynamic_range 2.2-11.9 vs the
+944 baseline's ~19-22 raw) and CID22 mostly sits below the flagship class.
+J.R7 explicitly queued "a registered wave that fixes the dial collapse …
+before any claim". This is that wave, with one addition: a **sparse
+distillation of C** (never tried — verified: no prior teacher-swap cell
+carries `--group-l1`, and no GL cell carries a C teacher).
+
+**The aim is ONE artifact that carries both strengths** (HF-NL-zone rank AND
+the flagship's CID22/dial), per the user's directive for this wave: *"we have
+struggled with disjoint families and ensembles have limits"* — so a
+family-patchwork or an ensemble is NOT an acceptable endpoint here. Either a
+single ZNPR meets the whole bar, or the frontier is mapped and the trade is
+stated plainly.
+
+## R.1 Prior facts (verified from CURRENT artifacts before this registration; all post-flip-audit)
+
+Values read from `/mnt/v/output/zensim/bakes/sota944/verdicts/*.full.json`
+on 2026-08-06 (appendix-O's board repair postdates the appendix-J doc table,
+so the JSONs — not the doc table — are the source of truth; the two agree on
+these cells):
+
+| cell | cid22 | konjnd | nonphoto | hfnl/ref | dial mono (raw) | dial range (raw) | composite |
+|---|---|---|---|---|---|---|---|
+| FS_GL0p3_s2503 | 0.8474 | 0.4285 | 0.8665 | 0.8431 | 99.98% | 5.88 | 0.8139 |
+| FS_GL1_s2503 | 0.8711 | 0.3472 | 0.8590 | **0.8471** | 99.98% | 5.71 | 0.8145 |
+| FS_GL2_s2503 | **0.9010** | 0.3294 | 0.8351 | 0.8219 | 100% | 4.72 | 0.8198 |
+| FS_PILOT1_s2501 (12-epoch pilot) | 0.8005 | 0.3262 | 0.8691 | **0.8476** | 99.96% | 6.99 | 0.7807 |
+| `W10L9_s4003` (= C, raw) | 0.8867 | 0.4988 | 0.9251 | 0.7333 | 99.66% | 22.39 | 0.8602 |
+| `W10L9_s4003_packed` (= C shipped) | 0.8867 | 0.4988 | 0.9251 | 0.7334 | 99.32% (dial-unit) | 67.64 (dial-unit; p5 29.1, p95 96.7) | 0.8602 |
+
+- **The GL "dial collapse" is a RANGE collapse, not a monotonicity failure**:
+  every GL cell already posts raw mono ≥99.9%. Range is exactly what the
+  §3d add-spline packaging re-maps (monotone PCHIP raw→dial-units onto the
+  anchor's [−100, 95.6] target), so R1 is a measurement of the registered
+  §3d chain on the lasso class, not a new mechanism.
+- **Task-brief cell check (the brief said "verify from appendix J"):** the
+  brief named FS_GL0p3_s2503 + FS_PILOT1_s2501. Verified: PILOT1_s2501 is
+  indeed the hfnl/ref top (0.8476) but is a **registered calibration-only
+  cell** (12 epochs; J.3 froze pilots as "never a result"), so it runs
+  through R1 as an INSTRUMENT row only and is not profile-eligible.
+  FS_GL1_s2503 (hfnl 0.8471, the full-length top) and FS_GL2_s2503 (cid22
+  0.9010, the only GL cell above the 0.875 bar) are added as the verified
+  full-length bests. R1 set = {GL0p3_s2503, GL1_s2503, GL2_s2503} candidates
+  + {PILOT1_s2501} instrument.
+- The hfnlproxy axis itself was stress-tested in appendix O (reliability +
+  range-restriction) and survived; per-ref mean is the registered statistic.
+- All appendix-J cells AND all wave-10+ cells (including C) trained on the
+  wave-10 corrected `ext_kadid`; the R population is internally comparable.
+- **Packing trap (J.R3, frozen here as protocol):** lasso bakes MUST pack
+  with `--zerobias-bulk 0` (default 0.005 wiped GL4_s2501 57→3 live rows).
+  Dial spline is fit AFTER packing per QUANTIZE-then-CALIBRATE.
+
+## R.2 Arm R1 (frozen) — the §3d packaging chain on the lasso class
+
+Chain per cell, owners only (verbatim §3d ADDENDUM steps, with the one
+registered GL deviation in step 3):
+
+1. `bake_dial_refit add-spline --in <raw> --out <stem>_dial.bin --anchor
+   ext944-canonical-2026-08-01/anchor944_dial.parquet --target-col target_score`
+2. `bake_dial_refit gate --corpus ext_cid22val.parquet` on the dial bake
+   (G-RANGE record; single-layer nets, so the tool applies).
+3. `bake_dial_refit pack --in <stem>_dial.bin --out <stem>_packed.bin
+   --neg-tail --zerobias-bulk 0 --anchor anchor944_dial.parquet --target-col
+   target_score --verify ext_cid22val.parquet --verify-col human_score
+   --verify-scale 100` (f16 default; prune ON — GL zero rows are class-1
+   exact zeros, bit-identical to drop).
+4. `scripts/harvest_bakes.sh --bake <packed>` (verdict via the ONE
+   `--regime 944` invocation + fulleval w/ M3a), stems `R1_<cell>_packed`.
+
+**Comparability gate (before any packed number is read):** this workspace's
+`bake_verdict` build must reproduce the committed `FS_GL2_s2503.full.json`
+headline fields on the raw bake (wave-6 precedent).
+
+**R1 endpoints (frozen):**
+- **Dial recovered** := dial-unit mono ≥ 93% ∧ tied ≤ 5% ∧ dynamic_range ≥ 30
+  dial-units (packed-C class is 67.6; the collapsed raw class is 2.2-12).
+  Range 30-40 is reported as "partially recovered scale"; the mono/tied bar
+  is the brief's own.
+- **HF-NL holds** := packed hfnl/ref ≥ 0.75 AND |Δ(raw→packed)| ≤ 0.02
+  (add-spline is rank-invariant by construction; pack's f16 is the only
+  mover, v47/§3d precedent SROCC-neutral).
+- Rank rows (cid22/konjnd/nonphoto/breadth) expected IDENTICAL at the dial
+  step (monotone spline); any rank delta at step 1 = defect, STOP.
+- If all three candidate cells recover: **the first sparse profile-candidates
+  exist**; report sizes + the full battery row each.
+
+## R.3 Arm R2 (frozen) — sparse distillation of C (group-lasso student, teacher-swap)
+
+**Design = the wave-6 arm-F teacher machinery VERBATIM with only the teacher
+swapped (EM4 → C), composed with appendix J's `--group-l1`.** Structurally:
+the arm-H/appendix-J recipe already carries the three teacher twins via
+`SOTA944_TEACHER`; R2 points that env at C-teacher twins. Every other token
+of the argv is byte-identical to the appendix-J GL cells — so each R2 cell
+has a **matched λ×seed GL sibling whose only difference is the teacher**,
+and outcome (c) is a paired comparison, not a cross-recipe guess.
+
+- **Teacher = `W10L9_s4003.bin` (C's selected raw cell)**, k=1 through the
+  committed owner chain `scripts/canonical_corpus/build_teacher944.py
+  --tag csparse --members .../W10L9_s4003.bin` (forward via `bake_dial_refit
+  predict`; ONE safesyn-fit affine (q0.001, q0.999), `human_score =
+  clip((raw−lo)/(hi−lo),0,1)` applied to all three twins). Raw (not packed)
+  teacher, matching the EM4 chain — the packed twin's f16+spline is a
+  packaging warp, not the function.
+- **TEACHER GATE (run + recorded BEFORE any student trains):**
+  (a) machinery audit — re-derive the EM4 affine from the committed
+  `teacher/safesyn_teacher.tsv`: must reproduce `[−12.95392379951477,
+  10.061253767967228]` and clipped mean `0.6142450490816594` to the printed
+  digit (clip 0.2017%);
+  (b) k=1 predict identity — `predict --ensemble W10L9_s4003.bin` TSV
+  byte-equal to `predict --bake` on one twin;
+  (c) teacher-vs-base sanity — SROCC(teacher raw, twin `human_score`) on the
+  safesyn twin reported (C is a strong model; a near-zero or negative value
+  = wiring defect, STOP). Gate failure stops the arm.
+- **Cells:** λ ∈ **{0.3, 1, 2, 4}** (the appendix-J calibrated band; 16 is
+  dead — 0 live) × seeds **{2501, 2503}** = **8 runs**, tags `CS<λtag>_s<seed>`,
+  epochs 120 (full-length; no pilots — the band is already calibrated).
+- **Packaging:** every R2 cell then takes the R1 chain (add-spline → pack
+  `--neg-tail --zerobias-bulk 0`) and is judged PACKED.
+
+**R2 endpoints — the one-artifact bar (frozen, judged on the packed bake):**
+- **HF-NL/ref ≥ 0.75** ∧ **CID22 ≥ 0.875** ∧ **dial mono ≥ 93% ∧ tied ≤ 5%
+  (dial units) ∧ range ≥ 30**;
+- reported alongside (not bar): KonJND (0.43-class desirable), nonphoto,
+  breadth (kadid/csiq/live/aic3/aic4/imazen26/sdr25), composite, live width,
+  packed size, and **M3a on every bar-meeting cell** (single ZNPR ⇒
+  measurable; never penalized when merely unmeasured on non-candidates).
+
+**Registered outcomes (frozen; per the wave brief):**
+- **(a)** ≥1 packed cell meets the whole bar ⇒ **a genuine C-sibling exists**
+  — full battery + report as a profile candidate (ship is user-gated, as
+  always).
+- **(b)** HF-NL and CID22/dial trade irreconcilably across the ladder ⇒ map
+  the frontier (per-λ table), state plainly that the sparse-HF strength
+  cannot yet coexist with the dial, close the lever.
+- **(c)** the teacher adds nothing over plain lasso (matched-pair deltas
+  ≈ 0 / inside the J noise band ±2·sd₉₄₄ per axis on every λ) ⇒ report as a
+  real finding about what C knows that the mix does not already teach.
+(Non-exclusive across axes; the report states which fired where.)
+
+## R.4 Confounds + limitations (registered)
+
+- **n=2 seeds per λ** and J measured severe seed instability at λ=4 (21/57/97
+  live overlap) — per-cell claims at the aggressive end are weak; the bar
+  decision is per-cell (a candidate must MEET the bar), but λ-level
+  generalizations from k=2 will be flagged as such.
+- The J noise band (±2·sd₉₄₄, K944 n=3) is a full-width-baseline band; using
+  it for GL-vs-CS paired deltas is a reference, not an exact test.
+- The teacher is C's RAW function; a dial-unit teacher (packed C) was not
+  run — if (c) fires this does not rule out a spline-space teacher.
+- hfnlproxy remains an ssim2-derived proxy (appendix O's registered caveat);
+  a bar-meeting cell is a candidate, not a shipped claim about human HF-NL.
+- The GL sweep's cid22-strong cells are all s2503 — with k=2 we cannot
+  distinguish "λ≥2 enables 0.90 cid22" from seed luck; R2's ladder carries
+  the same limitation and it is stated up front.
+- PILOT1_s2501 (12-epoch) results are instrument-only per J.3's freeze.
+
+## R.5 Ops (frozen)
+
+jj workspace `../zensim--sparsehf` @ `7577dfa6`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimsh-target`; trainer lanes via
+`scripts/featsub/`-style serial queues under `run-heavy --jobs 6`, combined
+trainer lanes ≤ 4 box-wide (checked against `.workongoing`); logs
+`~/tmp/sparsehf/`; bakes `/mnt/v/output/zensim/bakes/sparsehf/`; teacher
+twins `/mnt/v/output/zensim/bakes/sota944/teacher_csparse/` (+ `_MANIFEST
+.json` w/ shas); per-bake harvest `scripts/harvest_bakes.sh`; ONE parked
+`scripts/await_artifacts.sh` waiter, endgame foreground; verdicts via
+`scripts/sota944_verdict.sh` stems `CS*`/`R1_*`; TSV tables →
+`benchmarks/sparsehf/` with `.meta` sidecars; Tower mirror under the campaign
+mirror; stats never hand-rolled. Nothing ships; the freeze decision is the
+user's. Results append below as R.R; nothing above this line changes after
+the registration push.
