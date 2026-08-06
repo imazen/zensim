@@ -1,0 +1,102 @@
+########## cid22 (root B mm01, regime 944) ##########
+  T_a944m_lam5e-3 0.811069
+  T_c944m_lam5e-3 0.855445
+  T_d944m_lam5e-3 0.825996
+  T_a944m_lam2e-3 0.808743
+  T_c944m_lam2e-3 0.847345
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+T_c944m_lam5e-3 - T_a944m_lam5e-3   +0.04434   +0.03810   +0.05077    1.000
+T_d944m_lam5e-3 - T_a944m_lam5e-3   +0.01502   +0.00871   +0.02171    1.000
+T_a944m_lam2e-3 - T_a944m_lam5e-3   -0.00229   -0.00545   +0.00050    0.048
+T_c944m_lam2e-3 - T_a944m_lam5e-3   +0.03623   +0.02969   +0.04316    1.000
+T_a944m_lam5e-3 - T_c944m_lam5e-3   -0.04434   -0.05077   -0.03810    0.000
+T_d944m_lam5e-3 - T_c944m_lam5e-3   -0.02928   -0.03377   -0.02517    0.000
+T_a944m_lam2e-3 - T_c944m_lam5e-3   -0.04670   -0.05396   -0.03973    0.000
+T_c944m_lam2e-3 - T_c944m_lam5e-3   -0.00806   -0.01024   -0.00603    0.000
+########## konjnd (root B mm01, regime 944) ##########
+  T_a944m_lam5e-3 0.510191
+  T_c944m_lam5e-3 0.485929
+  T_d944m_lam5e-3 0.451162
+  T_a944m_lam2e-3 0.486599
+  T_c944m_lam2e-3 0.499928
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+T_c944m_lam5e-3 - T_a944m_lam5e-3   -0.02410   -0.05639   +0.00671    0.063
+T_d944m_lam5e-3 - T_a944m_lam5e-3   -0.05989   -0.10466   -0.01421    0.004
+T_a944m_lam2e-3 - T_a944m_lam5e-3   -0.02369   -0.04067   -0.00721    0.002
+T_c944m_lam2e-3 - T_a944m_lam5e-3   -0.01011   -0.04449   +0.02530    0.286
+T_a944m_lam5e-3 - T_c944m_lam5e-3   +0.02410   -0.00671   +0.05639    0.937
+T_d944m_lam5e-3 - T_c944m_lam5e-3   -0.03502   -0.06777   -0.00360    0.015
+T_a944m_lam2e-3 - T_c944m_lam5e-3   +0.00066   -0.03561   +0.03665    0.514
+T_c944m_lam2e-3 - T_c944m_lam5e-3   +0.01403   +0.00100   +0.02748    0.982
+########## nonphoto (root B mm01, regime 944) ##########
+  T_a944m_lam5e-3 0.843974
+  T_c944m_lam5e-3 0.844575
+  T_d944m_lam5e-3 0.833624
+  T_a944m_lam2e-3 0.845014
+  T_c944m_lam2e-3 0.842370
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+T_c944m_lam5e-3 - T_a944m_lam5e-3   +0.00060   -0.00153   +0.00283    0.704
+T_d944m_lam5e-3 - T_a944m_lam5e-3   -0.01038   -0.01296   -0.00758    0.000
+T_a944m_lam2e-3 - T_a944m_lam5e-3   +0.00108   -0.00042   +0.00260    0.919
+T_c944m_lam2e-3 - T_a944m_lam5e-3   -0.00157   -0.00403   +0.00092    0.108
+T_a944m_lam5e-3 - T_c944m_lam5e-3   -0.00060   -0.00283   +0.00153    0.296
+T_d944m_lam5e-3 - T_c944m_lam5e-3   -0.01096   -0.01258   -0.00930    0.000
+T_a944m_lam2e-3 - T_c944m_lam5e-3   +0.00049   -0.00218   +0.00294    0.639
+T_c944m_lam2e-3 - T_c944m_lam5e-3   -0.00221   -0.00313   -0.00129    0.000
+########## imazen26 (root B mm01, regime 944) ##########
+  T_a944m_lam5e-3 0.853275
+  T_c944m_lam5e-3 0.853963
+  T_d944m_lam5e-3 0.846424
+  T_a944m_lam2e-3 0.853311
+  T_c944m_lam2e-3 0.851856
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+T_c944m_lam5e-3 - T_a944m_lam5e-3   +0.00070   -0.00112   +0.00242    0.772
+T_d944m_lam5e-3 - T_a944m_lam5e-3   -0.00681   -0.00906   -0.00466    0.000
+T_a944m_lam2e-3 - T_a944m_lam5e-3   +0.00003   -0.00114   +0.00120    0.514
+T_c944m_lam2e-3 - T_a944m_lam5e-3   -0.00142   -0.00339   +0.00060    0.093
+T_a944m_lam5e-3 - T_c944m_lam5e-3   -0.00070   -0.00242   +0.00112    0.228
+T_d944m_lam5e-3 - T_c944m_lam5e-3   -0.00752   -0.00898   -0.00610    0.000
+T_a944m_lam2e-3 - T_c944m_lam5e-3   -0.00068   -0.00261   +0.00136    0.244
+T_c944m_lam2e-3 - T_c944m_lam5e-3   -0.00210   -0.00293   -0.00131    0.000
+########## csiq (root B mm01, regime 944) ##########
+  T_a944m_lam5e-3 0.919263
+  T_c944m_lam5e-3 0.847939
+  T_d944m_lam5e-3 0.800609
+  T_a944m_lam2e-3 0.889496
+  T_c944m_lam2e-3 0.789737
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+T_c944m_lam5e-3 - T_a944m_lam5e-3   -0.07132   -0.08159   -0.06175    0.000
+T_d944m_lam5e-3 - T_a944m_lam5e-3   -0.11869   -0.13416   -0.10367    0.000
+T_a944m_lam2e-3 - T_a944m_lam5e-3   -0.02973   -0.03771   -0.02301    0.000
+T_c944m_lam2e-3 - T_a944m_lam5e-3   -0.12961   -0.14689   -0.11272    0.000
+T_a944m_lam5e-3 - T_c944m_lam5e-3   +0.07132   +0.06175   +0.08159    1.000
+T_d944m_lam5e-3 - T_c944m_lam5e-3   -0.04718   -0.05604   -0.03893    0.000
+T_a944m_lam2e-3 - T_c944m_lam5e-3   +0.04148   +0.03201   +0.05205    1.000
+T_c944m_lam2e-3 - T_c944m_lam5e-3   -0.05797   -0.06863   -0.04840    0.000
+########## live (root B mm01, regime 944) ##########
+  T_a944m_lam5e-3 0.948743
+  T_c944m_lam5e-3 0.931432
+  T_d944m_lam5e-3 0.914668
+  T_a944m_lam2e-3 0.943825
+  T_c944m_lam2e-3 0.920485
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+T_c944m_lam5e-3 - T_a944m_lam5e-3   -0.01727   -0.02383   -0.01143    0.000
+T_d944m_lam5e-3 - T_a944m_lam5e-3   -0.03401   -0.04257   -0.02623    0.000
+T_a944m_lam2e-3 - T_a944m_lam5e-3   -0.00485   -0.00758   -0.00266    0.000
+T_c944m_lam2e-3 - T_a944m_lam5e-3   -0.02824   -0.03645   -0.02058    0.000
+T_a944m_lam5e-3 - T_c944m_lam5e-3   +0.01727   +0.01143   +0.02383    1.000
+T_d944m_lam5e-3 - T_c944m_lam5e-3   -0.01675   -0.02105   -0.01287    0.000
+T_a944m_lam2e-3 - T_c944m_lam5e-3   +0.01235   +0.00749   +0.01789    1.000
+T_c944m_lam2e-3 - T_c944m_lam5e-3   -0.01089   -0.01415   -0.00811    0.000

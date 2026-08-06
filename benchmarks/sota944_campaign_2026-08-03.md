@@ -10542,3 +10542,345 @@ Tower mirror for new bakes. Nothing ships, swaps, or is selected here.
   correlated; no multiplicity correction is applied and none is claimed.
 - **M3a is measured per bake and is itself an instrument**; ensembles are not
   in scope here (every cell is a single ZNPR).
+
+## T.A1 — AMENDMENT (2026-08-06, after the first 24 cells, before any root-B conclusion)
+
+Root B's first gram used the **raw** `human_score`. ADD156's own gram does not:
+`linear_projections_2026-07-03.cmd_gram` min-max-normalizes each corpus's target
+(`y' = clip((y − q0.001)/(q0.999 − q0.001), 0, 1)`), which is why the frozen
+root-A gram carries `ybar 0.76805` while safesyn's raw `human_score` averages
+0.600. So the raw-target root-B arm was **not recipe-faithful**, and worse, its
+least squares is dominated by a handful of catastrophic-tail rows (safesyn's
+target reaches **−7.39**, ~60× a typical row's squared error).
+
+Fix: a second root-B arm on a `gram --target-minmax01` build
+(`e944_safesyn_mm01.npz`, ybar **0.7699** — matching root A's 0.76805). Pools
+`a944m` / `c944m` / `d944m`. **BOTH arms are kept and reported**; the mm01 arm is
+the recipe-faithful one, the raw arm is the E-LIN linear924 convention, and
+agreement between them is itself the robustness check. `b944m` is not run: the
+structural gate below already proved f156-371 cannot enter at this root.
+
+## T.R — RESULTS (2026-08-06; every registered gate held, nothing relaxed)
+
+### T.R1 — Provenance: what was recoverable, and what was not
+
+| item | status |
+|---|---|
+| fit chain | **RECOVERED** — `scripts/v_next/additive_basic156_probe.py` → `linear_projections_2026-07-03.MixGram` + `bake_candidate` |
+| corpus / mix | **RECOVERED** — `safesyn` ONLY, weight 1.0, target `human_score`, from `canonical-2026-05-21/train/safesyn.parquet` |
+| feature space | **RECOVERED** — `raw` (no transform screen; the shaped variants are the other six ADD156 cells) |
+| solver + lambda | **RECOVERED** — lasso coordinate descent, **lam 2e-3**, 400 sweeps, tol 1e-10, coordinates f0..155, padded to 372 |
+| packaging | **RECOVERED** — tau 0, f16, output spline fit on the PACKED forward over `linear-probe/val/anchor.npz`, one identity layer |
+| frozen inputs | **INTACT** — gram `safesyn.npz` (2026-07-03, W 196,086), anchor `anchor.npz` (2026-07-14, i.e. predating the bake) |
+| embedded `zentrain.repro` | **ABSENT** (`repro: null`) — as expected: the embed mandate postdates it by 10 days. Its provenance is recoverable only because the probe script, the frozen gram, and the frozen anchor all survived; nothing *in the artifact* records them |
+| `.spec.json` sidecar | **ABSENT** |
+
+**Nothing about the recipe was unrecoverable.** The one thing that is
+irretrievably not in the artifact is the artifact's own claim to that recipe —
+which is exactly the gap the repro mandate closed.
+
+### T.R2 — Reproduction class: **EXACT (byte-identical)**
+
+`bake_dial_refit fit-lasso` — a Rust re-implementation with no shared code with
+the Python probe — re-fit the recipe on the frozen gram + anchor and emitted
+
+```
+sha256 51437a34f04887ce850b25eff4f72a6bcd12926873ce060a12878d558a7517db
+```
+
+which is the shipped `ADD156_safesyn_only_raw_lasso.bin` **byte for byte**
+(3,575 B, 28 active coefficients, 18 spline knots). `--parity-fit` additionally
+reported `w`/`bias`/`mu`/`sd` **bit-exact** against the era's
+`fits/ADD156_safesyn_only_raw_lasso.npz`. Axis-by-axis comparison is therefore
+vacuous by construction — same bytes, same numbers — so the interesting question
+is not "does it reproduce" but "do today's corrections change what its numbers
+MEAN". That is T.R3.
+
+### T.R3 — The corrections audit (the actual re-validation)
+
+| correction | does it touch ADD156? | evidence |
+|---|---|---|
+| **KADID target inversion** (appendix F) | **NO on the training side.** `safesyn_only` is literally `[("safesyn", 1.0, "human_score")]` — KADID never enters its weights. (The *other* six ADD156 variants use a `cidmix` that includes kadid at 0.5; the promoted one does not.) | recipe, T.R1 |
+| — its **eval** side | **YES, and it is already fixed at the source.** The board fulleval carries `rank.kadid.srocc_signed = −0.8082`, an inverted-table read, so the published magnitude needs the F negation → true **+0.8082**. But the ext roots were REBUILT with the corrected target (wave 10, `176c4268`), and a **fresh** verdict on either root now reads `srocc_signed = +0.8082` directly. `check_target_orientation.py` returns **+0.582360 vs the raw crowdsourced DCR on BOTH** the ext944 `ext_kadid.parquet` and the 372-root `kadid_features_372col`. **⇒ the appendix-F negation rule is VERDICT-ERA-scoped, not root-scoped** — negating a post-2026-08-05 verdict re-introduces the very inversion F fixed. `freeze_check`'s registry says the same thing under `kadid-ext-root-corrected-2026-08-05`; this appendix confirms it against the tables. ADD156's true KADID is **+0.8082** by both routes, which agree |
+| **HF-NL per-ref orientation flip** (appendix O) | **YES, consumed not recomputed.** The sibling fill lane's graft is already on the board (`rank_graft_sources.hfnlproxy`, sha `1b610c04…`): per-ref **+0.8306**, F6 PASS, at/above the arm-B 0.1931 comparator and inside the era band (0.64–0.83) rather than the 944 frontier's 0.13–0.42 | board JSON |
+| **append2 attribution coverage** (`299ccc8c`) | **YES, and it is why ADD156 is the board's steer leader.** M3a **0.953967** (GOLD, ≥0.85) against the legacy signal fold's M3 0.564641 | board JSON |
+| **sdr25 + hfnlproxy corpus dependency** | **Structural ABSENCE, not a failure.** Neither corpus has a 372 extraction (they exist only as ext720/ext944 tables), so `--regime 372`'s default corpus list cannot be satisfied at the 372 root. Root-A cells name the 12 corpora the 372 root has; sdr25 + HF-NL are ABSENT there and are read from the 944 root instead |
+| **dial units** | **Already dial-unit in its era** — ADD156 was baked WITH the output spline (18 knots), so its 2026-07-18 `9.5 / 95.1` numbers were calibrated, not raw. The modern step it never had is `pack`; see T.R7 |
+| **`--regime` preset** | cosmetic only. `n_inputs` is **372**; the board's `regime: "720"` string is the campaign flag, and the scorer reads the bake's own width (CLAUDE.md board note). The 944-root read reproduces the board to 4 dp (T.R4) |
+| **`pack` dead-column pruning** (`eb8edf3c`) | **YES, and it is a large win with one trap** — see T.R7 |
+
+### T.R4 — The regime bridge: the folded f0-155 block IS the v1-372 f0-155 block
+
+The **same bytes** scored at both roots (`--regime 372` vs `--regime 944`):
+
+| corpus | 372 root | 944 root | Δ |
+|---|---|---|---|
+| CID22 | 0.8634 | 0.8632 | **−0.0001** |
+| CSIQ | 0.9024 | 0.9017 | −0.0008 |
+| LIVE | 0.9602 | 0.9603 | +0.0000 |
+| AIC-3 | 0.7773 | 0.7770 | −0.0003 |
+| AIC-4 | 0.9325 | 0.9331 | +0.0006 |
+| KADID (signed, both corrected) | 0.8082 | 0.8081 | −0.0002 |
+| TID | 0.8235 | 0.8237 | +0.0002 |
+| KonJND | 0.4462 (n=1008) | 0.5363 (n=504) | +0.0900 — **different corpus slice**, not a feature effect |
+| nonphoto | 0.8628 (n=10000) | 0.8470 | −0.0158 — **different eval slice** (924-era slices come from the bigcodec 944 TEST views, per `docs/FULL_EVAL.md`) |
+| imazen26 | 0.8451 | 0.8540 | +0.0089 — same cause |
+
+Every axis whose corpus is the *same* rows agrees to **≤0.0008**. So for an
+f0-155-only additive model the folded regime's basic block is numerically the v1
+block, and the board's ADD156 row (CID22 0.8633) is reproduced to 4 dp. The three
+axes that move are all corpus-slice changes with documented causes.
+
+**Consequence for the pool study:** any root-A-vs-root-B difference below is a
+TRAINING-side effect (the ext944 safesyn leg is 111,068 rows vs the v1 root's
+196,086, with a different target convention), never a claim about the features.
+
+### T.R5 — GATE: the f156-371 block is structurally unreachable at the 944 root
+
+Registered as a STOP gate. `T-b944` (pool f0-371) came out **byte-identical to
+`T-a944`** (pool f0-155) at all four lambdas — `max|Δw| = 0.000e+00`, same sha256
+(`5669bba3…`, `08ec51c5…`, `b02928f3…`, `a599c673…`). The folded regime zeros
+that block exactly as documented. **PASS.**
+
+### T.R6 — The pool grid (36 cells; `benchmarks/appendixT/pool_grid_2026-08-06.tsv`)
+
+Survivor census — how many coordinates above f155 the lasso keeps:
+
+| pool | root | lam 3e-4 | 1e-3 | 2e-3 | 5e-3 |
+|---|---|---|---|---|---|
+| **a** f0-155 | A | 57 / 0 | 35 / 0 | **28 / 0** | 17 / 0 |
+| **b** f0-371 | A | 113 / **65** | 40 / **22** | 24 / **15** | 21 / **14** |
+| **a944**, **b944** f0-155/f0-371 | B | 75 / 0 | 47 / 0 | 38 / 0 | 16 / 0 |
+| **c944** f0-719 | B | 126 / **84** | 61 / **40** | 42 / **27** | 27 / **16** |
+| **d944** f0-943 | B | 141 / **110** | 84 / **66** | 46 / **35** | 30 / **23** |
+| **a944m** f0-155 | B-mm01 | 62 / 0 | 35 / 0 | 24 / 0 | 14 / 0 |
+| **c944m** f0-719 | B-mm01 | 96 / **63** | 45 / **31** | 30 / **19** | 16 / **12** |
+| **d944m** f0-943 | B-mm01 | 123 / **98** | 50 / **39** | 34 / **26** | 18 / **14** |
+
+(`n_active / n_active above f155`. `T-a` at lam 2e-3 is 28 active — ADD156.)
+
+**So the "do they survive" half of the question is answered loudly: YES,
+everywhere the block is reachable.** Wherever the lasso is offered coordinates
+above f155 it spends **50-78% of its budget** on them. Survival is not the
+discriminator; value is.
+
+### T.R7 — What they BUY (paired bootstrap, B=2000, seed 20260806, T.3 rule)
+
+A delta counts only if the 95% CI excludes 0 **and** |Δ| clears the registered
+floor (CID22 0.005, KonJND/HF-NL 0.039, other rank axes 0.010).
+
+**Root A — the v1 peak/masked/IW block (f156-371), `b` vs `a`:**
+
+| axis | Δ @ shared lam 2e-3 [95% CI] | verdict | Δ @ own-best (b 1e-3 − a 2e-3) [95% CI] | verdict |
+|---|---|---|---|---|
+| CID22 | +0.0028 [+0.0001, +0.0053] | detectable, **below floor** | **+0.0062** [+0.0038, +0.0084] | **GAIN** |
+| KonJND | +0.0312 [+0.0189, +0.0431] | detectable, **below floor** | **+0.0843** [+0.0719, +0.0977] | **GAIN** |
+| CSIQ | **+0.0301** [+0.0249, +0.0361] | **GAIN** | **+0.0212** [+0.0168, +0.0263] | **GAIN** |
+| imazen26 | −0.0096 [−0.0111, −0.0081] | below floor (just) | **−0.0139** [−0.0156, −0.0124] | **LOSS** |
+| nonphoto | −0.0055 [−0.0070, −0.0041] | below floor | −0.0095 [−0.0111, −0.0079] | below floor |
+| LIVE | −0.0003 [−0.0023, +0.0018] | **inside noise** | −0.0037 [−0.0057, −0.0017] | below floor |
+
+**Root B — v2-348 (f372-719), `c944m` vs `a944m` @ lam 5e-3** (raw-target arm in
+brackets, as the robustness check):
+
+| axis | Δ [95% CI] | verdict | raw-arm Δ |
+|---|---|---|---|
+| CID22 | **+0.0443** [+0.0381, +0.0508] | **GAIN (large)** | +0.0469 |
+| CSIQ | **−0.0713** [−0.0816, −0.0618] | **LOSS (large)** | −0.0778 |
+| LIVE | **−0.0173** [−0.0238, −0.0114] | **LOSS** | −0.0168 |
+| KonJND | −0.0241 [−0.0564, +0.0067] | **inside noise** | −0.0241 (inside noise) |
+| nonphoto | +0.0006 [−0.0015, +0.0028] | **inside noise** | — |
+| imazen26 | +0.0007 [−0.0011, +0.0024] | **inside noise** | — |
+
+**Root B — append-224 + append2-20 (f720-943), `d944m` vs `c944m` @ lam 5e-3:**
+
+| axis | Δ [95% CI] | verdict |
+|---|---|---|
+| CID22 | **−0.0293** [−0.0338, −0.0252] | **LOSS** |
+| CSIQ | **−0.0472** [−0.0560, −0.0389] | **LOSS** |
+| LIVE | **−0.0168** [−0.0211, −0.0129] | **LOSS** |
+| nonphoto | **−0.0110** [−0.0126, −0.0093] | **LOSS** |
+| KonJND | −0.0350 [−0.0678, −0.0036] | below floor (raw arm −0.0435, above floor) |
+| imazen26 | −0.0075 [−0.0090, −0.0061] | below floor |
+
+The two root-B arms — different target conventions, different shrinkage — agree
+on every sign and to within 0.007 on every magnitude. The pool answer is robust
+to the T.A1 confound.
+
+### T.R8 — The named survivors
+
+**Root A, pool `b` @ lam 1e-3 (22 coordinates above f155)** — decoded by
+`k128_stage_map.py --layout v1_372` (the layout added this pass):
+**12 masked72, 5 iw72, 5 peak72**; 14 of 22 on **Y**; scale spread 7/3/4/8.
+Named: `162-164` peak s0-Y `ssim_max`/`art_max`/`det_max`, `217` peak s3-Y
+`art_max`, `224` peak s3-B `det_max`; `237` masked s0-Y `art_4th`; `252/254/255`
+masked s1-Y `ssim_p1`/`ssim_p2`/`art_4th`; `270/272/274` masked s2-Y; `285/286/287`
+masked s3-X `art_4th`/`det_4th`/`mse`; `292` masked s3-Y `det_4th`; `298` masked
+s3-B `det_4th`; `304` iw s0-X `det_4th`; `311` iw s0-Y `mse`; `315` iw s0-B
+`art_4th`; `345` iw s2-Y `art_4th`; `368` iw s3-B `ssim_p2`.
+Full TSV: `benchmarks/appendixT/survivors_rootA_b_lam1e-3.tsv`.
+
+**Root B, pool `c944m` @ lam 5e-3 (12 coordinates, all v2-348):**
+`380` s0-X `HF_MAG_LOSS`, `411` s0-Y `ART_SOFT_PEAK`, `438` s0-B `HF_MAG_LOSS`,
+`441` s0-B `DET_SOFT_PEAK`, `498` s1-Y `ART_SOFT_PEAK`, `505` s1-Y `IW_ART`,
+`510` s1-Y `GMS`, `578` s2-Y `ART`, `588` s2-Y `MASKED_ART`, `592` s2-Y `IW_ART`,
+`600` s2-Y `BLOCKINESS`, `602` s2-Y `BANDING`. At lam 2e-3 the set grows to 19 and
+adds three `PJND_FRAGILITY` slots. **Nine of twelve are Y-channel; the recurring
+motifs are the ART family (soft-peak / IW / masked), `HF_MAG_LOSS`, and the two
+grad/block-pass detectors `BLOCKINESS` + `BANDING` — features with no v1
+counterpart at all.**
+
+**Root B, pool `d944m` @ lam 5e-3 (14 coordinates):** 6 v2-348, 7 append204
+(`CONTRAST_GAIN` ×2, `MSCN_DIFF_L2` ×2, `GMS_DEV2`, `ART_DEV2`, …), 1 append2-20.
+They survive, and per T.R7 they make every measured axis worse.
+
+### T.R9 — Registered outcome: **(c) MIXED BY AXIS**, on both roots, with the same shape
+
+Outcome **(a)** and **(b)** are both refused by the data. The per-axis map:
+
+| block | buys | costs | inside noise |
+|---|---|---|---|
+| **v1 peak/masked/IW** f156-371 (root A) | CID22 +0.006, **KonJND +0.084**, CSIQ +0.021 | imazen26 −0.014 | LIVE; nonphoto below floor |
+| **v2-348** f372-719 (root B) | **CID22 +0.044** | **CSIQ −0.071**, LIVE −0.017 | KonJND, nonphoto, imazen26 |
+| **append-224 + append2** f720-943 (root B) | *nothing* | CID22 −0.029, CSIQ −0.047, LIVE −0.017, nonphoto −0.011 | imazen26 below floor |
+
+Three statements this licenses, and one it does not:
+
+1. **The additive class is NOT a basic-156 phenomenon** — outcome (b) is
+   falsified. On both roots the wider pools change measured behaviour far outside
+   noise. What is *true* about ADD156's 28-coefficient basic-only shape is not
+   that f156+ is worthless; it is that **f156+ trades one axis family against
+   another**, and ADD156's mix happens to sit at the corner that keeps the
+   classic-IQA breadth and the steer map.
+2. **The trade has a consistent direction per block.** The v1 peak/masked/IW
+   block is the only one that buys the *near-threshold* axis (KonJND +0.084, the
+   metric's standing weak zone) — and it buys it while also buying CSIQ. The
+   v2-348 block buys CID22 hard and sells CSIQ/LIVE harder; that is the same
+   breadth-vs-CID22 tension the 944 frontier shows on the board (era models CSIQ
+   0.90-0.96 / LIVE 0.90-0.96 vs the 944 singles' 0.77-0.83 / 0.81-0.86), now
+   reproduced in a 30-coefficient additive model where nothing else can be
+   blamed.
+3. **The append block earns nothing here.** Every measured axis is neutral or
+   worse. Scoped to this recipe (see T.R11).
+4. **NOT licensed:** any claim that root A's block is "better" than root B's.
+   They live at different roots on different rows; the bridge (T.R4) prices the
+   root, not the blocks against each other.
+
+### T.R10 — The fourth axis: **STEER (M3a) splits the two blocks in opposite directions**
+
+M3a measured on the corrected instrument (post-`299ccc8c`), 27-cell grid, via
+`run_full_eval.sh` — not carried, not reused:
+
+| cell | pool | M3a | tier | legacy M3 |
+|---|---|---|---|---|
+| **ADD156** (= T-a @2e-3) | f0-155 | **0.9540** | GOLD | 0.5646 |
+| **T-b @1e-3** (root A, + v1 peak/masked/IW) | f0-371 | **0.6256** | **FLAGGED** (<0.78) | −0.0091 |
+| **T-c944m @5e-3** (root B, + v2-348) | f0-719 | **0.9806** | GOLD | 0.6653 |
+
+This is the sharpest per-axis split in the whole appendix, and it runs *opposite*
+to the rank story:
+
+- Adding the **v1 peak/masked/IW block collapses steer coherence** 0.954 → 0.626
+  (and the legacy fold to ≈0). That block is the *known* unspatializable mass —
+  the 2026-07-18 diffmap work attributed B's structural 0.66 ceiling to exactly
+  its 38% peak/max/IW weight — but that was an argument about a different bake's
+  weight mass. Here it is a **controlled measurement**: same recipe, same corpus,
+  same solver, one pool wider, 15-22 of ~24-40 coefficients land in that block,
+  and the deployable map goes from board-best to flagged.
+- Adding the **v2-348 block RAISES it** to 0.9806 — the highest M3a this session
+  measured on any bake. The append2 coverage fix and the C2a exact-integrand work
+  cover the v2 slots, so v2 mass is spatializable in a way v1's peak/masked/IW
+  mass is not.
+
+**So the honest per-axis map has four columns, not three**, and the f156-371
+block that buys KonJND +0.084 and CSIQ +0.021 pays for it with **−0.33 M3a**.
+For a metric whose product is a closed loop, that is the expensive column.
+
+### T.R11 — The modern battery
+
+`freeze_check --profile balanced-2026-08-04 --annotations benchmarks/eval_annotations.json`:
+
+| candidate | class | floors | fails | balanced_composite | M3a |
+|---|---|---|---|---|---|
+| **ADD156** (repro ≡ original) | era-bridge | **5/8** | F1 CID22 0.8633<0.885, F3 nonphoto 0.8968<0.90, F8 B9 0.031<0.15 | **0.8098** | 0.9540 GOLD |
+| T-b @1e-3 | era-bridge | 4/8 (4/7 measured) | F1 0.8695, F3 0.8533, F8 B9 0.063 · F6 **ABSENT** (no 372 HF-NL corpus) | 0.7915 | 0.6256 FLAGGED |
+| T-c944m @5e-3 | 944-single | 5/8 | F1 0.8554, F3 0.8446, F8 B9 0.015 | 0.7859 | 0.9806 GOLD |
+
+**G-RANGE** (`bake_dial_refit gate`, cid22 372col, n=4292): **PASS on every
+variant** — below-knot 0 (0.000%), above-knot 0 (0.000%), gate <0.010%.
+Z-RMSE 0.505 (ADD156) / 0.497 (T-b).
+
+**Corruption:** no corruption grid at the 372 root, so the ordering axis is
+**ABSENT** for the root-A cells (not failed); the 924/944 dial's own corruption
+ordering is broken by design and the head is its owner, so no dial-alone number
+is quoted as a result.
+
+**Dial in DIAL UNITS after packaging** — and this is a finding, not a formality:
+
+| bake | packing | bytes | layer-0 inputs | CID22 (post-spline, cid22-372col) | dial |
+|---|---|---|---|---|---|
+| ADD156 | f32-era f16 bake (as shipped) | 3,575 | 372 | 0.8634 | mono 0.985, p5 9.5, p95 95.1 |
+| ADD156 | `pack --neg-tail --zerobias-bulk 0` | **837** | **28** | **0.8634** (rank-EXACT) | y-range [0.0, 95.8] |
+| ADD156 | `pack --neg-tail` (**default** zerobias 0.005) | 645 | 28 | **0.8565 (−0.0069)** | y-range [0.0, 95.8] |
+| T-b @1e-3 | `pack --neg-tail --zerobias-bulk 0` | 1,033 | 40 | **0.8695** (rank-EXACT) | — |
+| T-b @1e-3 | `pack --neg-tail` (default) | 699 | 40 | 0.8612 (−0.0083) | — |
+
+Dead-column pruning drops **344 of 372** layer-0 inputs on ADD156 with the
+identity gate **BIT-identical on all 2,000 anchor rows** (class 1 only; 14
+class-3 corpus-inert-but-live columns correctly RETAINED). 3,575 → 837 B, 4.3×,
+for free.
+
+**But `pack`'s default `--zerobias-bulk 0.005` costs a genuinely-sparse additive
+bake −0.0069 CID22 (−0.0083 on T-b) to buy 192 bytes.** That default is
+calibrated for 100-500 KB MLPs where 0.5% of the bulk magnitude is noise; on a
+28-coefficient additive model every coefficient is signal. Recommendation for
+this class: **`pack --zerobias-bulk 0` — pruning alone is rank-exact and still
+4.3×.** (Not shipped, not swapped; recorded for whoever packages an additive
+bake next.)
+
+### T.R12 — Era-tagged scorecard
+
+Rows marked ᴬ are 372-root reads, ⁹ are 944-root reads. Cross-root rank rows
+whose corpus slices differ (nonphoto, imazen26, KonJND) are NOT comparable
+across the marker — see T.R4.
+
+| bake | n_in | CID22 | KonJND | nonphoto | imazen26 | CSIQ | LIVE | AIC-3 | AIC-4 | HF-NL/ref | M3a | mono | bytes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **ADD156-original ≡ repro** ⁹ | 372 | 0.8633 | 0.5350 | 0.8968 | 0.8941 | 0.9024 | 0.9602 | 0.7773 | 0.9325 | **0.8306** | **0.9540** | 0.981 | 3,575 |
+| ADD156 ᴬ (same bytes) | 372 | 0.8634 | 0.4462 | 0.8628 | 0.8451 | 0.9024 | 0.9602 | 0.7773 | 0.9325 | absent | — | 0.985 | 3,575 |
+| T-b @1e-3 ᴬ | 372 | **0.8695** | 0.5306 | 0.8533 | 0.8311 | 0.9237 | 0.9566 | 0.7748 | 0.9126 | absent | 0.6256 | 0.975 | 3,793 |
+| T-c944m @5e-3 ⁹ | 944 | 0.8554 | 0.4859 | 0.8446 | 0.8540 | 0.8479 | 0.9314 | 0.7653 | 0.9212 | 0.8084 | **0.9806** | 0.999 | 6,286 |
+| **B** (shipped) ⁹ | 372 | 0.8821 | 0.5186 | 0.8990 | 0.8961 | 0.9342 | 0.8970 | 0.7650 | 0.8906 | 0.8252 | 0.5968 | 0.976 | 7,325 |
+| **winner_dial** ⁹ | 156 | **0.8940** | 0.4308 | 0.8946 | 0.8872 | **0.9584** | 0.9600 | **0.8041** | 0.9195 | 0.6437 | 0.9225 | 0.976 | 83,253 |
+| **C_em944_s31_packed** ⁹ | 944 | 0.8869 | 0.4686 | **0.9162** | **0.9126** | 0.7697 | 0.8113 | 0.8022 | 0.9171 | 0.0378 | 0.8750 | 0.877 | 172,067 |
+| H_co3abpg_s2507 ⁹ | 944 | 0.8806 | 0.4590 | 0.9164 | 0.9149 | 0.8302 | 0.8634 | 0.7818 | 0.9051 | 0.1820 | 0.8900 | 0.940 | 510,262 |
+
+**ADD156's position is unchanged by every correction landed since 2026-07-18**:
+still the board's best f156-371-independent additive model, still the M3a leader
+among the era models (0.954 vs winner_dial 0.923, B 0.597), still the smallest
+(3,575 B, and 837 B packed rank-exact), still 5/8 balanced floors. Its published
+2026-07-18 rank numbers are the same numbers; the only published figure that was
+*wrong* was its KADID sign, and that has an era-scoped rule and a corrected
+source table.
+
+### T.R13 — Limitations (beyond the registered T.7)
+
+- **Scoped to ADD156's recipe** — safesyn-only, raw space, lasso. A block that
+  earns nothing on safesyn may earn on a wider mix; the E-LIN linear924 grid's
+  best 944-linear (M5, four corpora + kadis + negrich) reaches CID22 0.8319
+  against my safesyn-only 0.8554, so mix matters more than pool at that root.
+- **No k-seed replication, by construction** — the solver has no RNG. Every
+  number here is exactly reproducible from the frozen grams; the ONLY noise
+  modelled is eval sampling, and that is what the bootstrap measures.
+- **The lam grid is 4 points.** "Own-best lam" is best-of-4, not an optimum, and
+  the b-vs-a own-best comparison therefore has a mild selection bias in favour of
+  the wider pool (more coordinates → more chance one lam lands well). The
+  shared-lam column is the unbiased one, and it is the one where CID22 and
+  KonJND fall *below* the practical floor.
+- **F8's band tails fail for every cell here**, including ADD156 — the additive
+  class does not hold the CID22 B9 tail. Not new, not caused by anything in this
+  appendix, and not investigated here.
+- **The root-A cells have no HF-NL and no sdr25 axis at all** (no 372
+  extraction), and no corruption grid. Those are ABSENT, and `freeze_check`
+  prints them as such rather than as failures.
+- Nothing here shipped, swapped, or was selected.

@@ -1,0 +1,13 @@
+feat_idx	block	scale	channel	local	pass	mean_abs
+380	v2_348	0	X	HF_MAG_LOSS	dense	-
+411	v2_348	0	Y	ART_SOFT_PEAK	dense	-
+438	v2_348	0	B	HF_MAG_LOSS	dense	-
+441	v2_348	0	B	DET_SOFT_PEAK	dense	-
+498	v2_348	1	Y	ART_SOFT_PEAK	dense	-
+505	v2_348	1	Y	IW_ART	dense	-
+510	v2_348	1	Y	GMS	grad	-
+578	v2_348	2	Y	ART	dense	-
+588	v2_348	2	Y	MASKED_ART	dense	-
+592	v2_348	2	Y	IW_ART	dense	-
+600	v2_348	2	Y	BLOCKINESS	block	-
+602	v2_348	2	Y	BANDING	grad	-
