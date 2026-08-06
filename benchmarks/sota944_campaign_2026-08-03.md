@@ -11227,3 +11227,411 @@ fits and bakes, `bake_verdict` evaluates, `panel --batch` +
 - **M3a is measured only on finalists** (66 s/bake); the screen does not carry it,
   so a screen-stage "winner" is not a candidate until its M3a is measured.
 - Nothing here ships, swaps, or is selected.
+## U.R — RESULTS (2026-08-06; every registered gate ran, none relaxed)
+
+### U.R0 — RETRACTION, filed first
+
+Commit `b3088d9b`'s slice-width table carried a row labelled `B_shipped` at
+B9 +0.068 / ≥0.80 +0.142 — the weakest row in it. **That row is retracted.** B
+is a 372-input model that genuinely uses the f156-371 block (49 of 216 slots),
+and I scored it at `--regime 944`, where that block is structural zeros. It
+reads CID22 **0.3862** there against its true **0.8764** at `--regime 372`.
+
+This is the exact trap T.2 built the root split to avoid, and I walked into it
+because ADD156 — f0..155-only, bridge verified to ≤0.0008 by T.R4 — scores
+identically at either root, so the invocation *looked* safe. Corrected in
+`b6b190d7`; every row now carries an explicit `eval_regime`. The correction
+**reverses** the conclusion for B: on the honest high-fidelity axis B is the
+**best** of the era models, not the worst (U.R4(v)).
+
+
+### U.R1 — The structural gates
+
+| gate | prediction | result |
+|---|---|---|
+| **G-U1** candidates inside f0..155 are no-ops | 12 cells ZERO | **PASS 12/12** — the KKT restriction argument holds empirically |
+| **G-U2** candidates in f156..371 at root B are folded structural zeros | 12 cells ZERO | **PASS 12/12** (replicates T.R5) |
+| **G-U3** append (s0, B) slots f754..770 are wired zeros (`APPEND_SKIP_B_SCALE0`) | ZERO | **PASS 21/21** |
+| **G-U4a** append2 `HL_BIN1`/`HL_BIN2` are HDR-gated ⇒ dead on the SDR route | ZERO | **PASS 14/14** |
+| **G-U4b** append2 `LUMA_MEAN_REF` is "reference-only" ⇒ dead | ZERO | **FAIL 0/7 — MY REGISTRATION WAS WRONG** |
+
+**G-U4b is a registration error, corrected by the data and reported as such.**
+`LUMA_MEAN_REF` is reference-only in the *attribution* sense — its per-pixel
+density contribution is zero because it does not depend on the distorted image —
+which is not the same as its VALUE being zero. It is the reference's mean luma, a
+perfectly ordinary nonzero feature, and the lasso gives it weight **−1.6722e−3**
+at every scale (s0 −1.672161e−3, s1 −1.671946e−3, s2 −1.672212e−3, s3
+−1.672753e−3 — agreeing to 4 significant figures because mean luma is nearly
+scale-invariant, which is itself a sanity check on the layout decode). I
+conflated "zero attribution" with "zero feature value" when freezing U.4; the
+gate caught me, not the pool.
+
+### U.R2 — The classifier had to be rebuilt mid-flight (reported, because it changes what "no-op" means)
+
+The first LIVE/ZERO pass tested the **bake sha** against base, on the reasoning
+that a candidate pinned to zero leaves the weight vector untouched. It called
+**7 of the 12 G-U1 cells LIVE** — cells the KKT argument says are provably
+no-ops. Diagnosis: offering the solver one extra coordinate changes the
+coordinate-descent *path*, so the candidate lands at exactly `-0.0` while the
+other 26 weights move by **~5e-11** — below the 1e-10 `tol`, above the f16 pack's
+resolution in a few slots. The bake bytes differ; the model does not.
+
+The test is now `any(w[i] != 0 for i in C)` read from the fit npz. The separation
+is unambiguous: `max |Δw_base|` is **≤ 1.1e-09** (median 2.1e-11) across the 1,427
+ZERO cells and **median 5.1e-03** (max 1.1e-01) across the 1,990 LIVE ones — five
+to eight orders of magnitude apart, with nothing in between.
+
+The upside is that the ZERO cells became the appendix's **measured null**: a
+genuinely null intervention that still went through the identical
+fit → pack → spline → score chain, so the spread of *their* deltas is an
+empirical noise floor rather than a floor borrowed from another study.
+
+### U.R3 — The survivor census: candidates above f155 enter freely
+
+Of 3,417 cells (1,146 arm A + 2,271 arm B), the lasso at ADD156's own λ=2e-3
+spent budget on the offered candidate in:
+
+| arm | pool | LIVE | ZERO | live rate |
+|---|---|--:|--:|--:|
+| **A** | f156-371 (v1 peak72 / masked72 / iw72) | **304** | 842 | 27 % |
+| **B** | f372-943 (v2-348 / append-204 / append2-20) | **1,686** | 585 | 74 % |
+
+Consistent with appendix T's free-pool finding (50-78 % of budget above f155
+wherever the block is reachable): *survival is not the discriminator*. Arm B's
+candidates in particular are accepted three times out of four. The question is
+never whether the solver will take a wider feature — it is whether taking it
+buys anything.
+
+### U.R4 — THE PRIMARY OBJECTIVE IS DEGENERATE, AND MEASURING IT WAS THE MAIN RESULT
+
+This is the appendix's largest finding and it was not anticipated by the
+registration; U.1's prior P4 saw the symptom (a ±0.35-wide statistic) and this
+section establishes the cause and its consequences.
+
+**(i) B9 is not a decile — it is CID22's residual tail.** `bake_verdict` cuts
+bands at width 0.10 on the [0,1] human scale, but CID22's MOS distribution stops
+at **0.9194**, so `[0.90, 1.00]` contains only the first 19 % of its nominal
+width:
+
+| band | n | distinct refs (of 49) | MOS range | MOS sd | max pairs from one ref |
+|---|--:|--:|---|--:|--:|
+| B3 | 57 | 31 | 0.3034 – 0.3990 | 0.0257 | 7 |
+| B4 | 266 | 48 | 0.4005 – 0.4995 | 0.0273 | 17 |
+| B5 | 615 | 49 | 0.5004 – 0.6000 | 0.0280 | 27 |
+| B6 | 836 | 49 | 0.6001 – 0.7000 | 0.0291 | 29 |
+| B7 | 1092 | 49 | 0.7002 – 0.7999 | 0.0290 | 31 |
+| B8 | 1382 | 49 | 0.8000 – 0.8998 | 0.0276 | 59 |
+| **B9** | **43** | **11** | **0.9000 – 0.9194** | **0.0063** | **11** |
+
+B9 draws on 11 of 49 references, spans **0.0194** of MOS, and has a target sd
+**4.4× tighter** than every other populated band. One reference supplies 11 of
+its 43 pairs.
+
+**(ii) Every model's prediction spread swamps the target's, only in B9.** Dial
+units of prediction range per unit of MOS range:
+
+| band | ADD156 | C_co4_s1301 | C_em944_s31 |
+|---|--:|--:|--:|
+| B3 – B8 | 3.2 – 4.8× | 0.7 – 1.5× | 0.5 – 1.2× |
+| **B9** | **10.9×** | **4.8×** | **4.7×** |
+
+Inside B9 the models vary 5–11× more than the quantity they are being ranked
+against. The correlation there is mostly model variation against rater noise,
+which is why its marginal bootstrap sd is **0.178** (B8's is 0.021).
+
+**(iii) The training data is NOT the bottleneck** — the registered
+(c)-follow-on's premise is measured **false**, so that arm was not run:
+
+| table | n | ≥ 0.90 | share | max |
+|---|--:|--:|--:|--:|
+| safesyn, root A (ADD156's whole mix) | 196,086 | **24,332** | **12.41 %** | 0.9870 |
+| safesyn, root B (ext944) | 111,068 | 9,397 | 8.46 % | 0.9762 |
+| **CID22 val (the eval target)** | 4,292 | **43** | **1.00 %** | **0.9194** |
+
+ADD156 trains on **24,332 rows** in exactly the region B9 asks about — 566× more
+rows than the band contains. Adding an HF-dense corpus cannot fix an evaluation
+band that its own corpus barely reaches. (`benchmarks/appendixU/hf_tail_density_2026-08-06.tsv`)
+
+**(iv) 32 of 32 sampled board bakes are INVERTED in B9, and F8 ranks them by how
+inverted they are.** Re-scoring a stratified sample of the board through the new
+`srocc_signed` field (`benchmarks/appendixU/board_b9_signed_2026-08-06.tsv`):
+
+- signed B9 ranges **−0.0234 to −0.3204**, median **−0.2193**; **32/32 negative**.
+- **25 of 32 PASS** F8's `B9 ≥ 0.15` as implemented. **0 of 32** pass it on the
+  signed value the gate documents.
+- The reported |B9| is monotone in the depth of the inversion, so the board's
+  "best high-fidelity band" cell (`C_co4_s1301`, published +0.3204) is the **most
+  anti-correlated model in the sample**.
+- The sample spans the campaign's families — 944 MLPs (`C_*`), 944 linears
+  (`A_*`), blends (`B_*`), wave arms (`W*`).
+- The two pre-944 era models measured are the only weakly-POSITIVE ones
+  (v47A +0.079, shipped B +0.068) — i.e. the gate ranks the only correctly-ordered
+  top bands last.
+
+**(v) The sign is a RANGE-RESTRICTION artifact, not a model property.** The
+decisive test: widen the top slice and the ordering recovers, monotonically, for
+every model (`benchmarks/appendixU/b9_slice_width_sweep_2026-08-06.tsv`):
+
+| threshold | ≥0.90 (=B9) | ≥0.88 | ≥0.86 | ≥0.84 | ≥0.82 | ≥0.80 | ≥0.75 | ≥0.70 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| n | 43 | 305 | 628 | 933 | 1193 | 1425 | 2014 | 2517 |
+| MOS span | 0.019 | 0.039 | 0.059 | 0.079 | 0.099 | 0.119 | 0.169 | 0.219 |
+| **ADD156** | −0.031 | +0.109 | +0.088 | +0.231 | +0.349 | **+0.435** | +0.586 | +0.669 |
+| C_co4_s1301 | −0.320 | +0.037 | −0.004 | +0.190 | +0.334 | +0.432 | +0.605 | +0.703 |
+| C_em944_s31 | −0.263 | +0.072 | +0.099 | +0.270 | +0.392 | **+0.484** | +0.632 | +0.715 |
+| v47A_era | +0.079 | +0.187 | +0.137 | +0.302 | +0.409 | **+0.488** | +0.624 | +0.685 |
+| B_shipped | +0.068 | +0.019 | +0.032 | +0.108 | +0.133 | **+0.142** | +0.167 | +0.217 |
+
+Two MOS points of extra width flips every model positive. **The models order the
+high-fidelity region perfectly well; B9 simply does not give them enough range to
+order.** At ≥0.80 (n=1425, span 0.119) the axis is stable *and* discriminating —
+ADD156 +0.435, C_em944 +0.484, v47A +0.488, C_co4 +0.432, shipped B **+0.142** —
+which is what an honest high-fidelity gate would read, and it says something
+useful (B is dramatically the worst of the five in the high-fidelity region).
+
+Signs were triple-checked before any of this was written: `zenstats::panel`'s
+`srocc_signed`, `scipy.stats.spearmanr`, and a hand-rolled midrank Pearson agree
+to 4 dp on both a positive and a negative case.
+
+**Consequence for this appendix's own primary objective.** "Raise ADD156's B9
+past 0.15" is not a well-posed engineering target: the quantity is dominated by
+selection noise, its sign is an artifact of the slice width, and the models that
+score best on it are the ones ordering that region backwards. B9 deltas are
+still reported below exactly as registered — with the measured null beside them,
+so their size can be read against what a null intervention produces — and the
+**≥0.80 wide-slice axis is reported alongside as the honest high-fidelity read**.
+The wide-slice axis is a POST-HOC addition, motivated by the degeneracy measured
+here; it does not replace the registered objective and is labelled everywhere it
+appears.
+
+### U.R5 — The grid (2,150 evaluated cells: 1,990 LIVE + 158 NULL)
+
+Full table: `benchmarks/appendixU/grid_analysis_2026-08-06.md`; per-cell TSV at
+`/mnt/v/output/zensim/bakes/add156pairs/grid_2e3s200000.tsv`.
+
+**The measured null is EXACTLY zero on all 8 axes** (158 cells, sd 0.000000). A
+cell whose candidate coefficients are 0.0 scores bit-identically to base through
+the entire fit → pack → spline → score chain, so the LIVE/ZERO split is exact
+and **none of the spread below is fit noise**. It also means the null supplies no
+usable floor, so the registered axis floors govern and the paired bootstrap owns
+the remaining eval-sampling noise.
+
+**Secondary objective — HF-NL per-ref: 0 of 1,990 cells clear the 0.039 axis
+LSD.** Max +0.0250, mean −0.0050. On the high-fidelity axis that is *reliable*,
+not one cell is a finding.
+
+**The two high-fidelity axes are unrelated** — rank correlation of `d_b9_signed`
+against `d_hfnl_perref` across 1,990 cells is **+0.0092**. Registered outcome
+**(b)**: B9 and HF-NL per-ref are different problems, and the features that touch
+one do not touch the other.
+
+**F8 exposure inside this grid**: 15 cells reach *signed* B9 ≥ 0.15, and **21
+cells reach |B9| ≥ 0.15 while INVERTED** — i.e. 21 cells this appendix produced
+would pass F8 as implemented with a top band ordered backwards.
+
+**The frozen HF-plausibility ranking, graded** (U.3 fixed it before any fit):
+
+| family (U.3 rank) | n LIVE | med ΔB9 | med ΔHF-NL | max ΔHF-NL | med ΔCID22 | max ΔCID22 |
+|---|--:|--:|--:|--:|--:|--:|
+| 1 near-threshold / JND | 372 | +0.0088 | −0.0005 | +0.0234 | −0.0017 | **+0.0603** |
+| 2 BANDING | 114 | −0.0007 | −0.0019 | +0.0234 | −0.0002 | **+0.0603** |
+| 2 BLOCKINESS | 100 | +0.0000 | −0.0001 | +0.0219 | +0.0006 | +0.0531 |
+| 2 RINGING | 117 | +0.0054 | −0.0009 | +0.0197 | −0.0019 | +0.0531 |
+| 2 EDGE_WIDTH_CHANGE | 89 | −0.0015 | +0.0008 | +0.0197 | −0.0018 | +0.0503 |
+| **3 BANDVIS (append2)** | 18 | **+0.0413** | **−0.0580** | −0.0145 | **−0.0304** | +0.0042 |
+| 4 HF gain/loss (v2) | 281 | +0.0021 | −0.0012 | +0.0225 | −0.0002 | +0.0532 |
+| 4 CONTRAST gain/loss | 57 | +0.0000 | −0.0011 | +0.0019 | −0.0000 | +0.0030 |
+| 5 soft-peak | 303 | +0.0000 | +0.0001 | +0.0191 | −0.0010 | +0.0531 |
+| 6 v1 peak72 | 153 | +0.0222 | −0.0022 | +0.0047 | +0.0001 | +0.0033 |
+| 6 v1 masked72 | 142 | +0.0000 | −0.0008 | +0.0107 | −0.0003 | +0.0214 |
+| 6 v1 iw72 | 9 | −0.0063 | +0.0035 | +0.0035 | −0.0054 | −0.0054 |
+
+The ranking is **wrong about the axis and partly right about the features**. Not
+one family moves HF-NL past its LSD. But the rank-2 codec-artifact detectors —
+picked precisely because they have **no v1 counterpart**, so ADD156 is
+structurally blind to them — turn out to move the **CID22 aggregate** hard. And
+**rank 3 (BANDVIS) is falsified outright**: it posts the grid's largest B9 gain
+(+0.2335) while destroying HF-NL (−0.418) and CID22 (−0.092) — a textbook case of
+the degenerate objective rewarding a broken model.
+
+### U.R5b — What actually survives: 41 clean gainers, and the one that matters
+
+**1,218 of 1,990 LIVE cells regress no guard outside its floor. 41 of those gain
+on a reliable axis: 26 on CID22, 4 on KonJND, 0 on HF-NL.** The head of the list
+is one feature and its two pairs:
+
+| cell | ΔCID22 | ΔKonJND | ΔHF-NL | ΔCSIQ | ΔB9 | guards |
+|---|--:|--:|--:|--:|--:|---|
+| **`BANDING`@s0-Y (f428) alone** | **+0.0265** | −0.0035 | +0.0089 | **−0.0113** | −0.0492 | **CSIQ FAILS by 0.0013** |
+| `BANDING`@s0-Y + `BANDING`@s0-B | +0.0256 | −0.0071 | +0.0099 | −0.0056 | −0.0532 | CLEAN |
+| `BANDING`@s0-X + `BANDING`@s0-Y | +0.0241 | −0.0084 | +0.0055 | −0.0044 | −0.0456 | CLEAN |
+| `BLOCKINESS`@s0-Y + `BANDING`@s0-Y | +0.0228 | +0.0040 | +0.0136 | −0.0038 | −0.0282 | CLEAN |
+
+Paired bootstrap on CID22 (B=2,000, seed 20260806;
+`benchmarks/appendixU/banding_s0y_pairing_2026-08-06.txt`):
+
+```
+b428     BANDING@s0Y        +0.02646  [+0.02371, +0.02944]   P(d>0)=1.000
+b428457  BANDING@s0Y+@s0B   +0.02554  [+0.02290, +0.02846]
+b399428  BANDING@s0X+@s0Y   +0.02406  [+0.02142, +0.02690]
+b399     BANDING@s0X         -0.00384  [-0.00450, -0.00327]
+b457     BANDING@s0B         -0.00190  [-0.00231, -0.00153]
+```
+
+The gain is unambiguous — five times the 0.005 floor, `P(d>0) = 1.000` — and it
+is carried **entirely by the Y channel at scale 0**. Both partners are slightly
+*negative* on their own.
+
+**And here the pairing question gets its most interesting answer.** On the
+objective, the pair does **not** beat the singleton (+0.0256 vs +0.0265). What
+the pair buys is **guard compliance**: the singleton's CSIQ cost is
+**−0.0113 [−0.0143, −0.0087]**, past the 0.010 floor, while the pair's is
+**−0.0056 [−0.0083, −0.0033]**, comfortably inside it. Adding the second channel
+**halves the collateral damage for 0.0009 of the gain**. That is a real effect
+and it is not the super-additivity the pairing hypothesis predicted — it is
+variance reduction.
+
+Scale matters and the guards enforce it: `BANDING` also gains CID22 at s1/s2/s3
+(+0.0531 / +0.0400 / +0.0211) but pays KonJND **−0.092 / −0.171 / −0.106**,
+far outside its 0.039 floor. **Only the scale-0 cells survive.**
+
+### U.R5c — The pairing verdict, in full
+
+| axis | pairs with both members measured | pair > max(member) | by more than the floor | best excess |
+|---|--:|--:|--:|---|
+| HF-NL per-ref (floor 0.039) | 875 | 81 | **0** | +0.0159 |
+| CID22 (floor 0.005) | 875 | 66 | **12** | +0.0201 (`GMS_DEV2`@s3-Y+@s3-B) |
+
+Super-additivity **exists** on CID22 — 12 of 875 pairs beat the better of their
+members by more than the floor — but **not one of the 12 is guard-clean**. Every
+one pays CSIQ (−0.019 to −0.072), KonJND, LIVE or nonphoto past a floor. On
+HF-NL, zero pairs clear the bar at all.
+
+**So: pairing produces no usable super-additive gain anywhere in this grid. Its
+one demonstrated value is defensive** — the `BANDING` case, where the partner
+halves a guard regression rather than adding to the objective.
+
+### U.R5d — λ sensitivity (registered; run on a 63-cell shortlist, not the full grid)
+
+The registered plan swept λ ∈ {2e-3, 1e-3} over the whole grid. **Deviation:**
+after the primary grid measured the objective to be degenerate (U.R4), a second
+full 2,150-cell pass was not worth ~90 minutes of compute, so λ=1e-3 was
+evaluated on the 63-cell shortlist (top-25 by B9, top-15 by HF-NL, 25 random
+LIVE) plus both bases. Stated as a deviation, not hidden.
+
+It answers the registered concern — "a candidate could look worthless merely
+because it is over-penalized" — **negatively and cleanly**:
+
+| axis | max Δ @ λ=2e-3 | max Δ @ λ=1e-3 | rank correlation across λ |
+|---|--:|--:|--:|
+| B9 signed | +0.2187 | +0.2726 | **+0.967** |
+| HF-NL per-ref | +0.0248 | +0.0362 | **+0.946** |
+| CID22 | +0.0417 | +0.0302 | **+0.951** |
+| KonJND | +0.0757 | +0.0983 | **+0.953** |
+
+Cell ordering is essentially λ-invariant (ρ ≥ 0.946 on every axis), and **HF-NL
+clears its LSD at neither λ** (0 of 63 at both). Halving the shrinkage does not
+reveal a hidden candidate.
+
+### U.R6 — The decisive measurement: the B9 "winners" damage the region they appear to buy
+
+The four best B9-gaining cells, paired bootstrap against base (B=2,000, seed
+20260806, same resampled index sets both sides; `panel --batch` owns every
+statistic). Median Δ, `*` = 95 % CI excludes 0
+(`benchmarks/appendixU/b9_winners_vs_honest_axis_2026-08-06.txt`):
+
+| slice of the SAME high-fidelity region | n | c162163 | c163165 | c156162 | c160166 |
+|---|--:|--:|--:|--:|--:|
+| **≥0.90 (= B9, the registered objective)** | 43 | **+0.216\*** | **+0.216\*** | **+0.186\*** | **+0.134\*** |
+| ≥0.84 | 933 | +0.004 | −0.006 | +0.003 | +0.014 |
+| ≥0.80 | 1425 | −0.019 | **−0.032\*** | −0.017 | +0.003 |
+| **≥0.75** | 2014 | **−0.026\*** | **−0.040\*** | **−0.022\*** | +0.000 |
+
+`c162163` = `ssim_max`@s0-Y + `art_max`@s0-Y · `c163165` = `art_max`@s0-Y +
+`ssim_p95`@s0-Y · `c156162` = `ssim_max`@s0-X + `ssim_max`@s0-Y ·
+`c160166` = `det_p95`@s0-X + `art_p95`@s0-Y.
+
+**These are not different axes trading off — they are one region measured at four
+widths, and the narrow read has the opposite sign.** Every cell that "wins" B9
+by +0.13 to +0.22 with a CI excluding zero is flat by ≥0.84 and *significantly
+negative* by ≥0.75. `c163165` has the second-largest B9 gain and the largest
+honest-axis loss, −0.040 [−0.059, −0.023].
+
+And what F8 would have been told: the best cell's own B9 is **+0.188 with a 95 %
+CI of [−0.170, +0.496]**. It cannot be said to clear the 0.15 bar — or to be
+positive at all.
+
+### U.R7 — Registered outcome
+
+**(c) NOTHING OUTSIDE NOISE fires on the reliable axes; (b) fires between the
+two high-fidelity axes.** Taken together the appendix's answer to the user's
+question is:
+
+> **No pair of features added to ADD156's set buys the high-fidelity band —
+> and the reason is not the features, the recipe, or the training data. The
+> band being optimised is not a measurable quantity.**
+
+The four supporting facts, each with its own instrument:
+
+1. **HF-NL per-ref — the reliable HF axis — moves for nobody.** 0 of 1,990 LIVE
+   cells clear the registered 0.039 axis LSD; the best is +0.0250 and the mean
+   is −0.0050. Not one cell is a finding on the axis where a finding would have
+   been trustworthy — and λ=1e-3 does not change that (U.R5d).
+2. **CID22 B9 moves a lot, and it is the axis that cannot be trusted** (U.R4).
+   Its "winners" are peak72 scale-0-Y cells that simultaneously regress CID22
+   aggregate, CSIQ, nonphoto and imazen26 — i.e. they buy a degenerate statistic
+   by damaging the axes that resolve.
+3. **The two HF axes are essentially uncorrelated across cells** (ρ = +0.0092
+   over 1,990 cells) — registered outcome **(b)**. B9 and HF-NL per-ref are
+   different problems, and the features that touch one do not touch the other.
+4. **PAIRING is falsified as a gain mechanism.** On HF-NL, 0 of 875 pairs exceed
+   the better of their members by more than the floor. On CID22, 12 do — and
+   **none of the 12 is guard-clean**. Its one demonstrated value is defensive:
+   in the `BANDING`@s0 case the partner halves a CSIQ regression rather than
+   adding to the objective (U.R5b).
+
+**And there IS something worth taking away, on a different axis than the one
+asked about.** `BANDING`@scale-0 — a codec-artifact detector with no v1
+counterpart, which ADD156 is structurally blind to — is worth **+0.0265 CID22
+aggregate** (5× the floor, CI [+0.0237, +0.0294]) as a single added coordinate,
+and **+0.0256 guard-clean** when paired with its s0-B partner. It does not buy
+the high-fidelity band (ΔB9 −0.049, ΔHF-NL +0.009, both nothing). Nothing is
+shipped or selected here; it is registered as a candidate for whoever next
+builds an additive model.
+
+### U.R8 — What this implies for F8 (recommendations; NOTHING is changed here)
+
+All three are user decisions — F8's definition governs 166+ published board
+cells and the campaign's selection rule. This appendix measured; it did not
+edit any gate's arithmetic.
+
+1. **Make F8 read `srocc_signed`.** The field now exists (`bake_verdict`,
+   2026-08-06) and `freeze_check` already prints an ⛔INVERTED marker beside a
+   band it passed. Consuming it would flip 25 of the 32 sampled cells from PASS
+   to FAIL, so it is a re-verdict of the board, not a bug-fix in place. Note the
+   `B3 ≥ 0.0` half is currently unfalsifiable — an absolute value is always ≥ 0 —
+   so today F8 is effectively a one-sided test.
+
+2. **Widen the high-fidelity band, or define it by count rather than by a fixed
+   MOS cut.** `[0.90, 1.00]` is a *nominal* decile that CID22 populates to 19 %
+   of its width with 43 pairs from 11 of 49 references. Every alternative
+   measured is better behaved: at **≥0.80** the slice holds 1,425 pairs spanning
+   0.119 MOS, every model is positive, and the axis correlates **+0.796** with
+   the CID22 aggregate — versus B9's **−0.674**, i.e. B9 currently runs
+   *backwards* to overall model quality, and the two "high-fidelity" reads
+   correlate with each other at only −0.387. A top-quartile-by-count definition
+   would also self-adjust to whatever corpus it is applied to.
+
+3. **Whatever replaces it, report `n` and the slice's target span next to the
+   statistic.** Both failures here were invisible in the number alone: a band
+   whose sd is 4.4× tighter than its neighbours, and an SROCC whose sign is
+   opposite to the value printed.
+
+A fourth, smaller item, outside F8: **`--regime` is a footgun for 372-input
+models that use f156-371.** Scoring shipped B at `--regime 944` silently returns
+CID22 **0.3862** against its true **0.8764**, because the folded regime zeroes
+exactly the block it relies on — no warning, just a plausible-looking number
+half a point low. ADD156 is immune only because it is f0..155-only. A width
+check (does this bake put weight on a block the target regime zeroes? → refuse,
+or warn loudly) would have caught it. I hit this myself mid-appendix; the
+retraction is U.R0.
