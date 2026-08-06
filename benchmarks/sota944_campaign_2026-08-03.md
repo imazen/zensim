@@ -12712,3 +12712,147 @@ nothing ships, swaps, or flips — every ship/flip decision is the user's.**
    floor table. If the gate moves mid-appendix, every floor count is re-read at
    the final build before any conclusion is stated.
 10. Nothing here ships, swaps, flips a toggle, or enters the board.
+
+# REGISTERED APPENDIX Y — THE 10×-BUTTERAUGLI PROGRAM: THE HONEST BAR, THE RANKED RUNTIME LEVERS, AND THE NEXT LOOP MODELS (2026-08-06, pre-registered before any measurement)
+
+User directive, verbatim: "figure out more effective diffmap loop models and
+runtime optimizations - we must be 10x faster than butter at minimum and more
+effective working with jxl and avif." Scope spans zensim + jxl-encoder
+(+ zenavif read/integration). Registered and pushed before the Part-0
+measurement runs; nothing below is chosen after seeing a Part-0 number.
+
+## Y.0 Starting state (measured facts, cited — not results of this appendix)
+
+From N.R + P.R1–P.R4 (576² serial unless stated): score-only folded-944
+extraction 22.8 ±2.0 ms zenbench (probe ~19.5–23.5); fused score+map entry
+62.0 ±6.5 ms zenbench / 61.4 probe (decomposition: extraction+retention 23.5 |
+v1 walk+basic 28.0 | pass-B f32 7.3 | trim+SAT 0.3); loop steered compares
+k3 iters 1–3 = ~103 / 41.4–42.7 / 39.7–41.1 ms, median steered 42.7 ms;
+iter-0 probe ~370 ms one-time (baseline compare + 1,888 numeric-gradient
+forwards) ≈ 65% of k3 loop wall; v47A-class compare 34.6 ms; candidate
+unsteered 51.8 ms. Historical butteraugli hint (sweep-budget TSV):
+~1.5–1.7 s/cell at 7.08 MP ≈ 215–240 ms/MP CPU — a hint only; Part 0
+measures the denominator honestly on this box.
+
+## Y.1 PART 0 — the bar (frozen protocol; nothing else proceeds until Y.R0 lands)
+
+**Instrument**: NEW committed zenbench bench `zensim/benches/tenx_bar_bench.rs`
+(`--features custom-profiles,feature-regime-v2`), paired/interleaved, plain
+release (NO `-C target-cpu=native`), reference-side precompute OUTSIDE the
+timed region for the warm arms (both metrics get the same courtesy).
+
+**Comparator = the CPU butteraugli port, crates.io 0.9.3** — already zensim's
+dev-dep and the version zenavif deploys. The local `~/work/butteraugli` is
+0.9.4-unpublished whose changelog is additive API only (memory introspection,
+cancellation) — no kernel/perf deltas vs 0.9.3, so 0.9.3 represents the port.
+The zenmetrics butteraugli is the CubeCL GPU implementation — different device
+class, excluded from a CPU bar (stated, not measured here).
+
+**Arms** (each size × each config):
+1. `butter_oneshot` — `butteraugli()` default params (intensity 80,
+   diffmap ON — the deployed jxl-AQ comparator shape).
+2. `butter_warm` — `ButteraugliReference::new` outside timing, `.compare()`
+   timed (the codec-loop shape; the fair denominator for loop compares).
+3. `z_extract944` — canonical streaming folded-944 extraction (score features).
+4. `z_score944` — extraction + MLP forward of the wave-11 packed candidate
+   (`W10L9_s4003_packed.bin`, caller-944/internal-667; canonical path, env
+   `ZENSIM_BENCH_BAKE` override, FAIL-LOUD if absent) = the honest score-only.
+5. `z_fused_score_map` — `compute_folded944_score_and_attribution` + forward
+   + one `query_rect` (the steered-compare kernel).
+6. `z_v1_score` — the 372-class v1 walk score-only (the v47A-class score row).
+7. `z_v1_fused_score_map` — the C3a 372-class fused score+map.
+
+**Sizes**: 576×576 (0.332 MP), 1024×1024 (1.049 MP), 3840×2160 (8.294 MP,
+"4K"). **Content**: the deterministic textured synthetic pair family already
+used by `fused944_bench` (registered limitation: synthetic; both pipelines are
+fixed-flow per pixel, weak content dependence; no early-outs on either side).
+
+**Configs**: ST = `RAYON_NUM_THREADS=1` + zensim `with_parallel(false)`;
+MT = `run-heavy --jobs 6` (`RAYON_NUM_THREADS=6`) + `with_parallel(true)`.
+Two invocations of the same binary; the config is printed into the output.
+Rounds: zenbench adaptive, max_rounds 200/60/20 at 576²/1MP/4K.
+
+**The bar (frozen formula)**: per (size, config),
+`bar_ms = butter_oneshot_ms / 10` and `bar_warm_ms = butter_warm_ms / 10`.
+Y.R0 freezes the measured ms numbers as THE program bar. Standing = each
+zensim arm's ratio vs both butteraugli arms. Loop-side steered-compare numbers
+(42.7 ms median etc.) are cited at 576² from the P.R4 trace instrument (its
+owner) — not re-measured by this bench; no loop numbers exist at 1MP/4K
+(the 27-cell grid is 576²) and none are invented.
+
+## Y.2 PART 1 — runtime levers (frozen order = measured-residual order; each lands separately with its own gates; no gate may be relaxed for a perf number)
+
+**L-Y1 — batched FD probe (top residual: iter-0 ~370 ms, 1,888 forwards).**
+Replace the loop's sequential per-feature central-difference forwards with a
+batched multi-probe forward (the batched-GEMM shape the trainer already
+proved; zenpredict's forward is the owner — extend the owner if a batch entry
+is absent, never a parallel implementation). Gates:
+- **G-Y1 (gradient equivalence)**: the batched FD gradient vs the sequential
+  FD gradient on the same feature vector — bitwise if the batched path keeps
+  per-row dot order; else ≤ 1e-12 rel per component AND the resulting H3 map
+  within the C3a tolerance class; measured deviation reported either way.
+- **G-Y2 (substrate)**: the 27-cell probe-line/trace-row count gates hold; the
+  h3own k3 census/medians reproduce vs the committed rows (same class as G-P5).
+- **Endpoint**: iter-0 probe ms before/after (registered target: probe ≤ 20%
+  of k3 loop wall; stretch ≤ one fused compare).
+**L-Y2 — shared front-end for the fused compare (~103 ms residual class).**
+Extraction+retention (23.5) and the v1 walk (28.0) each run their own color
+transform + pyramid on the SAME pair; the C3a ref-side-caching precedent
+applies. Reuse the fused session's retained planes so the pair is transformed
+once. Gates: G-P1/G-P2/G-P3/G-P4 re-run verbatim (score bit-identity;
+density C3a class with measured deviations; per-width coverage; M3a 3-bake
+stability — expected byte-identical, any material move = STOP). Standalone
+paths stay untouched. Endpoint: fused-entry ms + B-N1 marginal restated.
+**L-Y3 — SIMD coverage of remaining scalar segments.** Guided by the standing
+per-stage instruments (`v2_stage_profile`, the ATTRPERF decomposition, the
+K128 stage map): candidates inside extraction 23.5 / v1 walk+basic 28.0.
+Each kernel port lands with the applicable bitwise-or-C3a-class gate (the
+P.R1 magetypes precedent). Endpoint: stage medians before/after.
+
+## Y.3 PART 2 — next loop models (frozen arms; env-gated, default OFF; 27-cell k3 emit-best grid; `analyze_23shot.py` stays the stats owner via `--extra-arm`; nothing ships or swaps on these studies)
+
+- **A-Y1 adaptive H3 gain** (P.R3 measured flat 5↔10, decline above): two
+  cheap shapes, (i) per-iteration decay `gain_i = 10·0.5^i`, (ii)
+  error-proportional `gain_i = 10·min(1, |err_i|/err_0)`. Readout: census +
+  |err| medians vs the committed h3own rows.
+- **A-Y2 controller revisit** (the k2 weakness t70 2/9 + nonphoto-overshoot
+  cells are controller-clamp territory per C3b/#69): sweep the loop's damping
+  + clamp constants (values read from code and registered in the results
+  section before the sweep runs; 2–3 values per knob, k2+k3). SWEEP — curve
+  is the deliverable; no default change without the curve + user.
+- **A-Y3 EMA map blend** (P proved stale ≈ fresh): `map_i = α·fresh_i +
+  (1−α)·map_{i−1}`, α = 0.5, vs the existing endpoints (fresh = α 1, sp-stale
+  = α 0). Value question first; lagged-cheap variant only if it wins.
+- **A-Y4 AVIF rect-query steering (the avif directive).** zenavif/zenrav1e
+  read-FIRST (the datagen halt is for datagen, not engineering integration;
+  any settle-state issue found is reported, not forced). Registered
+  deliverable: the SAT rect-query steering interface (per-block weights from
+  `AttributionResult::query_rect` at AV1 partition geometry 4–128 px) + a
+  measured single-image RD probe in the `rd_block_selection` family (judge =
+  independent metrics dssim/ssim2, NEVER the steering metric). A full in-loop
+  zenavif integration lands only if the encode path admits a per-block hook
+  without destabilizing its settle-state; else the interface + probe IS the
+  registered deliverable.
+- **Registered outcomes per arm**: (a) census/median win vs committed rows /
+  (b) parity / (c) worse — all recorded; defaults unchanged in every case
+  (recommendation to the user only).
+
+## Y.4 Ops (frozen)
+
+Workspace `../zensim--tenx` on main@origin; jxl-encoder in-place with its own
+marker claim; zenavif read-first. `CARGO_TARGET_DIR=$HOME/tmp/zensimtx-target`;
+heavy steps under `run-heavy --jobs 6`; logs `~/tmp/tenx/`; zenbench only;
+push + `merge-base --is-ancestor` verification per repo per commit; Tower
+mirror for new artifacts; benchmarks TSVs committed with .meta provenance.
+
+## Y.5 Registered risks + confounds
+
+1. Busy shared box (three sibling lanes live) — paired/interleaved zenbench +
+   probe-median cross-checks; drift flags reported.
+2. Synthetic bench content (stated above).
+3. n=27 loop cells; t92-class clamp saturation caveats carry from C3b/#69.
+4. L-Y1 may reorder FD accumulation (G-Y1 prices it); L-Y2 touches retained
+   planes feeding certified instruments (standalone untouched + G-P4).
+5. The avif encode path may not admit a per-block hook in its settle state
+   (fallback deliverable registered).
+6. Loop-side numbers exist at 576² only; the bar at 1MP/4K is zensim-side.
