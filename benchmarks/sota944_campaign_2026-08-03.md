@@ -12219,3 +12219,149 @@ band and every field). Backup before the recut:
    differently, and that is not measured here.
 6. **No model, bake, or training recipe changed.** This appendix changed how an
    evaluation slice is cut and read.
+
+---
+
+# REGISTERED APPENDIX W — THE OPUS-ERA DEEP REVIEW (2026-08-06, scope + method pre-registered before any verdict)
+
+User directive, verbatim: *"review our work that happened under opus for
+mistakes and how to make them structurally unlikely to happen again, improving
+our tools and cli ux as needed … question assumptions, and review the details,
+refactor in ways that can eliminate categories of bugs and errors in our
+research"*.
+
+**Window:** 2026-08-05 ~19:00Z → 2026-08-06 (52 main commits, `7577dfa6..b3dbfc4e`):
+appendices R / S(prep) / T / U / V, the fleet+budget work (`044c1142`,
+`00fe3a51`), the CI fixes (`15ad06a8`, `c083e72e`), the HF coverage fill
+(`fceb2a05`, `58fdea33`, `7cfb1aa5`), the K128/slot forensics (`682cf55f`,
+`841af10f`), and the C-adjacent post-ship changes in the window.
+
+**Stance (frozen):** the session's own record already contains FOUR
+orientation-family defects, one orphan-push, one committed conflict artifact,
+one wrong-regime published read (U.R0), one wrong-root board row
+(`ebothg_m504`), and several self-corrected agent errors — every one caught by
+*verification, not prose review*. So this review re-derives; it does not
+re-read. Nothing below this registration changes after the push; results
+append as W.R.
+
+## W.1 Method — five instruments
+
+1. **Re-derivation table** — per appendix, 2-4 load-bearing numbers recomputed
+   from committed artifacts through the canonical owners
+   (`bake_verdict` / `panel --batch` / `bake_dial_refit` / stored JSON+TSV);
+   each row reports claim → recomputed → MATCH/MISMATCH.
+2. **Assumption audit** — the specific assumptions each conclusion rests on,
+   tested where cheap (list frozen in W.3).
+3. **Zenpapers grounding** — the corpus is searched for the methodology we now
+   use routinely (range restriction / Thorndike case II, minimum-n for
+   correlation stability, split-half + Spearman-Brown, multiplicity control
+   incl. the repo's Westfall-Young precedent, JND-scale conventions); each
+   verdict states canonical / divergent-justified / divergent-fix, with
+   citations.
+4. **Category-eliminating refactors** — per defect CLASS, a structural fix
+   with disposition LANDED (with tests) / DESIGNED (insertion point named) /
+   PROPOSED (user decision). Class list frozen in W.4.
+5. **CLI/tool UX** — the session's friction points fixed at the tool
+   (list in W.4; overlaps 4 deliberately).
+
+## W.2 Re-derivation targets (frozen per appendix)
+
+- **R**: (r1) `R1_GL2_s2503_packed` headline row (0.9010 / 0.8219 / mono
+  99.87% / range 45.3 / M3a 0.8491 / 105,855 B) + the s2501 sibling 0.8071,
+  from the verdict JSONs; (r2) "raw == dial == packed to 4dp on all 12
+  corpora" re-checked on ≥1 cell; (r3) **arm R2 resolution**: the registered
+  outcome (a)/(b)/(c) of R.3 from the 16 existing `CS*`/`R1_CS*` verdicts.
+- **S**: (s1) the B6 claim "all six `Auto`-ladder sites route through
+  `auto_order()`" re-read in zenmetrics source (read-only); (s2) the budget
+  inversion (encode 6.9 CPU-h vs 11.5-16.1 GPU-h metric) against the
+  committed TSV; (s3) fleet-node reachability re-probe (node-2 / lianli,
+  read-only).
+- **T**: (t1) the byte-exact repro — re-run `fit-lasso` on the frozen gram,
+  expect sha `51437a34…`; (t2) ONE registered bootstrap row (root-A own-best
+  CID22 +0.0062 [+0.0038, +0.0084]) recomputed through the owners; (t3) the
+  pack-default cost (−0.0069 CID22) re-run.
+- **U**: (u1) B9 corpus facts (n=43, 11 refs, span 0.0194) from the stored
+  target column; (u2) `BANDING`@s0-Y +0.0265 [+0.0237, +0.0294] recomputed;
+  (u3) the "measured null is EXACTLY zero" claim spot-checked on ≥3 null
+  cells.
+- **V**: (v1) G-V1's three counts (120/120, 109/120, 82-vs-2) recomputed from
+  stored per-pair through `panel --batch`; (v2) the r_SB corroboration pair
+  (B7 → 0.900, B8 → 0.949) recomputed; (v3) `BAND_HIGH` derivation re-read
+  (ref-clustered 0.0866 → 0.09).
+- **HF fill**: (h1) the avif sidecar (sha `64ce4278…`) coverage 26.2% → 100%
+  re-joined; (h2) the corrected ceiling band 0.66-0.83 re-derived from the
+  sidecar.
+- **K128/slots**: (k1) the pass-marginal component close (2.62+2.81+2.05+2.03
+  on 30.50 ms, closes to 0.1 ms) re-read from the committed TSV; (k2) 2-3 of
+  the 39 slot classifications re-verified from source.
+- **CI fixes**: (c1) `15ad06a8`'s exemption retirement carries a gate; (c2)
+  the "8 jobs fail ONLY on pre-existing v1_golden_bytes" CI verdict re-read
+  from the actual runs.
+- **C post-ship**: (p1) enumerate every window change touching profile C's
+  published row/artifacts and verify each against its stated gate (incl.
+  `pack --no-prune` byte-repro sha `5870046d…` if touched in-window).
+
+## W.3 Assumption audits (frozen list)
+
+1. **Truncation inheritance (T ← U.P2).** U discovered ADD156's 28-coeff
+   support is a 400-sweep truncation artifact and made U's PRIMARY setting
+   *converged* precisely because truncated pools of different width converge
+   to different depths — "a confound indistinguishable from a feature
+   effect". **Appendix T's pool grid ran at 400 sweeps with pool widths 156 →
+   943 and predates that insight.** Audit: re-fit T's decision-bearing cells
+   at convergence, re-read the T.R7 deltas, report which T findings survive.
+2. **U's bootstrap shape.** Verify the claimed registered paired shape
+   (shared index sets, seed 20260806, B as stated per use, RNG in caller,
+   stats in `panel --batch` indexed) is what the committed scripts do; and
+   whether U.5's registered defence (ii) — the expected-false-positive yield
+   — was actually reported.
+3. **V's edge choice cannot leak model information.** Verify
+   `zensim_validate::bands` edges are a function of the target column only
+   (code + a test that predictions cannot move edges).
+4. **Fleet "verified up" states.** Re-probe; a state recorded yesterday is a
+   claim, not a fact.
+5. **Mid-correction training inputs.** The ext_kadid rebuild (`176c4268`)
+   landed mid-window relative to several trained cells (8× CS, appendix-Q
+   cells). Check every window-trained bake's embedded `zentrain.repro` input
+   shas against the corrected/inverted table shas (`4dde6be2…` = inverted).
+6. **Guard completeness on U's takeaway.** U registered an M3a≥0.85 guard for
+   finalists; the `BANDING`@s0 candidate was registered as a takeaway without
+   a measured M3a. Measure it (66 s) and report whether the takeaway's guard
+   row is complete.
+
+## W.4 Defect-class census (from this session's record) + the structural fix per class
+
+| # | class (instances) | structural fix | target disposition |
+|---|---|---|---|
+| C1 | **silent orientation loss** (KADID target; HF-NL per-ref; sdr25 convention; B9/F8 abs-band) | signed end-to-end; \|·\| only at declared consumption points tied to EXPECTED_ORIENTATION; audit every `.abs()` in the stats/eval path; `SignedStat` design for zenstats (cross-repo ⇒ PROPOSED) | audit + design; land what is zensim-local **without touching freeze_check** (gates3 owns it this hour) |
+| C2 | **wrong-regime/root reads** (`ebothg_m504`, U.R0 — plausible numbers, silent) | `bake_verdict` computes the bake's used-slot mask and REFUSES when it overlaps the target regime's structural-zero block, unless `--cross-regime` | LAND + tests |
+| C3 | **era-ambiguous data corrections** (ext_kadid rebuild repro hazard) | manifest-level `corrected_from` chain + verdicts stamp the table-era they read | design; land the light half if scope allows |
+| C4 | **sub-agent report drift** ("verified pushed" that wasn't; overstated commit messages) | `scripts/verify_push.sh` emits a machine-checkable line (sha + `merge-base --is-ancestor` verdict) that reports must paste verbatim | LAND |
+| C5 | **fail-silent emitters** (the committed all-placeholder `r2_ladder` TSV; 3 of 4 sparsehf `.meta` sidecars with empty `git_commit`; the coherence wave's exit-2 hook precedent) | table emitters fail loud when fields resolve empty above a threshold; `.meta` writers refuse an empty `git_commit`; regenerate the R2 ladder from the existing verdicts and resolve R.R2 | LAND (fix + regenerate + R.R2) |
+| C6 | **substring identity lookups** (`W10L9_s4003` ⊂ `_packed` promoter/board traps) | exact-match (or delimiter-anchored) lookups in the promoter/harvest path; audit for further substring matches | audit + LAND where found |
+| C7 | **process-matching footguns** (`pgrep -f` self-match bit an agent again) | `scripts/lib/proc.sh`: `pgrep -x` wrappers, PID-file helpers, sentinel-wait | LAND |
+| C8 | **calibration-blind defaults** (`--zerobias-bulk 0.005` cost a sparse bake twice) | `pack` detects the sparse-additive class and defaults zerobias to 0 with a loud note; explicit flag overrides | LAND + test |
+| C9 | **under-reporting instruments** (`bake_verdict` timer, fixed; siblings unaudited) | audit sibling tools' self-timing / progress claims | audit |
+
+## W.5 Scope-time observations (facts noted while framing; verdicts deferred to W.R)
+
+- `benchmarks/sparsehf/r2_ladder_2026-08-05.tsv` is committed with every data
+  cell an em-dash while all 16 `CS*` / `R1_CS*_packed` verdict JSONs exist
+  with real numbers; no `R.R2` section exists in this doc, so R.3's
+  registered outcome never fired anywhere.
+- `r2_ladder`/`r1_dial_recovery`/`r1_grange` `.meta` sidecars carry
+  `git_commit:` EMPTY (the forward-bench one is populated).
+- V.R6 numbers two items "6" (doc nit).
+- W's own review is subject to the same rules: owners only, nothing ships,
+  every landed refactor carries a test, findings append as W.R.
+
+## W.6 Ops (frozen)
+
+jj workspace `../zensim--opusreview` @ `b3dbfc4e`;
+`CARGO_TARGET_DIR=$HOME/tmp/zensimor-target`; `run-heavy --jobs 6` for
+anything heavy; logs `~/tmp/opusreview/`; artifacts that matter →
+`benchmarks/opusreview/` with `.meta` sidecars; stats via owners only;
+coordination: gates3 is live on freeze_check + workflows — this lane rebases
+and does not touch either; every commit pushed + `merge-base --is-ancestor`
+verified. Nothing ships, swaps, or is selected here; gate changes, if any
+fall out, are REGISTERED-PENDING-USER-ACK per V.5's precedent.
