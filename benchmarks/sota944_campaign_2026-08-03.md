@@ -11635,3 +11635,352 @@ half a point low. ADD156 is immune only because it is f0..155-only. A width
 check (does this bake put weight on a block the target regime zeroes? → refuse,
 or warn loudly) would have caught it. I hit this myself mid-appendix; the
 retraction is U.R0.
+
+---
+
+# REGISTERED APPENDIX V — HOW WIDE MUST A BAND BE? THE MINIMUM-USABLE-n RULE, THE BANDING REDESIGN, AND F8's RE-POINT (2026-08-06, pre-registered before any model number is computed)
+
+## V.0 Why this exists
+
+User directive, verbatim: **"widen band 9, we can figure out what is
+statistically usable minimum band sizes"**.
+
+Appendix U measured that CID22's B9 — the band F8 gates on — is degenerate: 43
+pairs from 11 of 49 references spanning 0.0194 MOS, marginal bootstrap sd 0.178
+against a 0.15 floor. This appendix does not re-litigate that. It answers the
+engineering question the directive asks: **what makes a band statistically
+usable, what is the minimum, and what banding scheme satisfies it** — then
+re-points F8 at a band that meets the bar and re-derives that gate's floor from
+data, because the current 0.15 was set against a statistic that cannot support
+a floor.
+
+The scope is deliberately wider than B9. The same fixed-decile scheme leaves
+CID22 B0/B1 structurally empty and B2 at n=1, TID B9 at n=0 and B8 at n=1. A
+fix that only widens one band on one corpus would leave the same defect class
+live everywhere else.
+
+## V.1 Priors — on-disk facts, established BEFORE this protocol was frozen
+
+None of these is a result of this appendix. Each is a source read or a property
+of a corpus's target column (identical for every model, so measurable without
+scoring anything).
+
+**P1 — the band statistic published as `srocc` is an ABSOLUTE value.**
+`zenstats::panel::compute_panel` (`zenmetrics/crates/zenstats/src/panel.rs:1013`)
+computes `let srocc = spearman(humans, scores).abs();`, and `bake_verdict`'s
+per-band rows come from that function. The module header states the convention
+openly ("SROCC / KROCC / PWRC are taken `.abs()` at the aggregate level because
+bake outputs can be distance- or score-shaped"). It is a deliberate
+polarity-tolerance convention at the *aggregate* level, inherited by the bands.
+
+**P2 — the band edges are fixed [0,1] deciles, with an open top.**
+`bake_verdict.rs:2008-2029`: `lo = band_idx * 0.10`, `hi = lo + 0.10`, membership
+`h >= lo && h < hi` except `band_idx == 9` which takes `h >= 0.90` with no upper
+bound. Bands with `idxs.len() < 4` emit `n/a` / NaN. `n < 30` is marked `⚠` in
+the markdown and dimmed on the board.
+
+**P3 — `srocc_signed` already exists per band** (`BandRow.srocc_signed`,
+emitted 2026-08-06 by the appendix-U lane, via a direct
+`zensim_validate::panel::spearman` call). `freeze_check::cid22_band()` reads
+`srocc` (absolute) for the pass/fail arithmetic; `cid22_band_signed()` exists
+and feeds a display-only ⛔INVERTED marker.
+
+**P4 — F8's bars**: `balanced::B9 = 0.15`, `balanced::B3 = 0.0`
+(`freeze_check.rs:55-56`), gate text "F8 CID22 band tails", bar
+`B9 ≥ 0.15 ∧ B3 ≥ 0.0`. Because the value consumed is an absolute value, the
+`B3 ≥ 0.0` half is **unfalsifiable as implemented**.
+
+**P5 — bands also enter the RANKING composite, not just the floor.**
+`balanced_composite()` (`freeze_check.rs:482-504`) takes
+`bandtail = (cid22_band("B3") + cid22_band("B9")) / 2` at weight
+`W_BANDTAIL = 0.15` — again from the absolute-valued accessor. So a redesign
+touches selection arithmetic, not only a PASS/FAIL cell. `product_composite`
+does not carry a band term.
+
+**P6 — five corpora emit bands** (`enable_per_band: true`): cid22, csiq, kadid,
+live, tid.
+
+**P7 — measured occupancy under the current scheme** (recomputed here from the
+stored per-pair targets; every model on a corpus sees identical bands, so this is
+a corpus property):
+
+| corpus | B0 | B1 | B2 | B3 | B4 | B5 | B6 | B7 | B8 | B9 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| **cid22** (n=4292) | 0 | 0 | **1** | 57 | 266 | 615 | 836 | 1092 | 1382 | **43** |
+| **csiq** (866) | 19 | 36 | 56 | 66 | 79 | 92 | 108 | 94 | 103 | 213 |
+| **kadid** (10031) | 486 | 1699 | 985 | 936 | 910 | 998 | 1291 | 1029 | 992 | 705 |
+| **live** (779) | 51 | 40 | 77 | 88 | 85 | 100 | 85 | 89 | 93 | 50 |
+| **tid** (3000) | 29 | 34 | 185 | 493 | 677 | 705 | 809 | 67 | **1** | **0** |
+
+CID22's target range is [0.2773, 0.9194]; TID's is [0.0269, 0.8016]. **Both
+corpora's extreme bands are residual tails of a distribution that stops short of
+the nominal edge** — the defect is not CID22-specific.
+
+**P8 — CID22 band spans and target sd under the current scheme** (same source):
+
+| band | n | span | sd |
+|---|--:|--:|--:|
+| B3 | 57 | 0.0956 | 0.0255 |
+| B4 | 266 | 0.0990 | 0.0272 |
+| B5 | 615 | 0.0996 | 0.0280 |
+| B6 | 836 | 0.0999 | 0.0291 |
+| B7 | 1092 | 0.0997 | 0.0290 |
+| B8 | 1382 | 0.0998 | 0.0276 |
+| **B9** | **43** | **0.0194** | **0.0062** |
+
+**P9 — the recomputation population.** 120 of the 280 board `*.fulleval.json`
+files carry `per_pair.cid22` with the full 4,292 (`mos`, `pred`) pairs; the other
+160 had per-pair stripped by the registered board-size rule. Bands for any scheme
+can therefore be recomputed for those 120 **without re-running a single verdict**
+— the scheme is a function of the target column and the stored predictions only.
+CSIQ / LIVE / TID / (subsampled) KADID per-pair are present on the same cells.
+
+**P10 — the established reliability instrument in this repo** is appendix O's:
+split-half model-ranking SROCC with Spearman-Brown correction, marginal bootstrap
+95% CI half-widths, and a paired 95% Δ half-width read as the axis LSD
+(`benchmarks/hfnl_axis_report_2026-08-05.md` §2; registered CALL-1 threshold
+`r_SB ≥ 0.9 ⇒ reliable`). This appendix reuses that instrument per band rather
+than inventing a new one, so the band answer is on the same footing as the
+axis answer.
+
+## V.2 GATE G-V1 — independent re-verification of appendix U's sign claim (MANDATORY; blocks everything below)
+
+U.R4(iv) reports that 32 of 32 sampled board bakes are inverted in B9 and 25 of
+them pass F8 on the absolute value. That claim is load-bearing for this
+appendix's entire premise **and for whether any published band number is
+retractable**, and it rests on a field (`srocc_signed`) that did not exist when
+the board files were written. It is re-verified here from an independent
+population and an independent code path before anything else runs.
+
+**Procedure.** For each of the P9 cells, recompute the CID22 B9 Spearman from the
+stored `per_pair.cid22` through `panel --batch` (`--stats srocc`, which emits
+`srocc` and `srocc_signed` from the canonical owner). No new stat math; no scipy.
+
+**Frozen predictions** (all three must be checked and reported, pass or fail):
+
+* **G-V1a** — the stored `rank.cid22.bands[B9].srocc` equals `|recomputed
+  signed|` to ≤ 1e-6 on ≥ 95% of cells. This is what establishes that the
+  published field is an absolute value *in the board data*, not merely in the
+  source. Cells failing the identity are reported individually (a mismatch would
+  mean the stored value came from somewhere else and would itself be a finding).
+* **G-V1b** — the sign census: the count and fraction of the 120 with
+  `srocc_signed < 0`. U's sample says essentially all. **Registered call:
+  CONFIRMED if ≥ 80% are negative; PARTIAL if 50–80%; REFUTED if < 50%.**
+* **G-V1c** — the gate consequence: the count passing `|B9| ≥ 0.15` versus the
+  count passing `srocc_signed ≥ 0.15`, on the same 120 cells. **Registered call:
+  CONFIRMED if the abs-pass count exceeds the signed-pass count by ≥ 20
+  cells.**
+
+**If G-V1 REFUTES U** — the redesign below still runs (the degeneracy of a
+43-pair / 0.019-span band is a corpus fact independent of any sign), but the
+F8 re-point drops its sign component and U.R4(iv) is filed for correction.
+
+## V.3 The minimum usable band size — the derivation (the core deliverable)
+
+The criterion must be a function of **both** n **and the band's target span**,
+because U measured that a band can have adequate n and still be unusable when
+its span is tiny. The two are separated experimentally by construction:
+
+**Instrument A — the pure-n curve (span held fixed).** Subsample *within* a
+wide, well-populated donor band to n ∈ {8, 12, 16, 24, 32, 43, 64, 96, 128, 192,
+256, 384, 512, 768, 1024} (capped at the donor's n), and bootstrap the band
+Spearman at each n. Subsampling within a band leaves the span essentially
+unchanged, so the resulting curve is the effect of n alone. Donors: CID22 B7 and
+B8 (spans ≈ 0.10), plus KADID B6 and CSIQ B9 for cross-corpus replication.
+
+**Instrument B — the pure-span curve (n held fixed).** From a wide donor region,
+take centred sub-slices of the target at spans ∈ {0.02, 0.03, 0.04, 0.06, 0.08,
+0.10, 0.15, 0.20}, and subsample each to a COMMON n (the largest n all spans can
+supply). The resulting curve is the effect of span alone.
+
+**Instrument C — the joint surface.** The (n, span) grid, reported as the
+iso-contour of constant CI half-width. This is what the rule is stated on.
+
+**Instrument D — theory cross-check, not a substitute.** Two closed forms are
+computed alongside and reported as *predictions*, so the empirical curve can be
+seen to agree or not:
+* Fisher-z SE for Spearman (Bonett–Wright): `SE_z ≈ sqrt((1 + r²/2)/(n − 3))`.
+* Thorndike case-II range restriction:
+  `r_band ≈ r_full · u / sqrt(1 + r_full²(u² − 1))` with `u = sd_band / sd_full`.
+  This predicts that **no n rescues a band whose span → 0** — the signal is
+  attenuated while the noise is not — which is the quantitative form of the claim
+  that widening, not more pairs, is the fix. If the empirical curve contradicts
+  it, the empirical curve wins and the contradiction is reported.
+
+**Instrument E — discrimination (does the band rank models?).** Estimability is
+necessary but not sufficient: a band that estimates a stable number which is the
+same for every model cannot gate anything. Per band, over the P9 population:
+* split-half model-ranking SROCC with Spearman–Brown correction (20 shuffles,
+  seed 4242 — appendix O's registered constants), splitting the band's **pairs**
+  into halves, ranking models on each half;
+* the paired 95% Δ half-width across all model pairs = the **band LSD**;
+* the model spread on the band (IQR and p10–p90 of the band statistic across the
+  population).
+
+**FROZEN criterion (stated before any number).** A band is **USABLE** iff all
+three hold:
+
+1. **ESTIMABLE** — marginal 95% CI half-width `H ≤ 0.20`. Rationale, registered
+   now: SROCC lives on [−1, 1]; `H = 0.20` pins the value to a ±0.2 window,
+   which is the coarsest read that can still separate "strong" from "weak" and
+   still establish the sign for a moderate true value. This is a **bar**, not a
+   measurement; the full H-vs-n curve is reported so the user can move it and
+   read off the consequence.
+2. **DISCRIMINATING** — split-half model-ranking `r_SB ≥ 0.90`, the threshold
+   registered in appendix O for the HF-NL axis, reused verbatim rather than
+   re-picked here.
+3. **RESOLVING** — model spread on the band (p10–p90) exceeds the band LSD, i.e.
+   the population differs by more than the noise. Reported as the ratio
+   `DR = (p90 − p10) / LSD`; the bar is `DR ≥ 1`.
+
+`n_min` is then **the smallest n at which (1) holds at the median populated-band
+span**, and the (n, span) contour is reported so a narrow band's requirement can
+be read off directly. Conditions (2) and (3) are reported per band and per
+candidate scheme; a scheme is only preferred if its high-quality band satisfies
+all three.
+
+**Registered honesty clause.** If no scheme's high-quality band satisfies all
+three on CID22, that is the finding, and F8's high-tail half is recommended for
+removal rather than re-pointed. This is a real possible outcome — it is not
+assumed away.
+
+## V.4 The banding schemes to be compared (frozen)
+
+All four keep edges that are a function of the corpus target column only, so
+**every model on a corpus gets identical bands** and cross-bake tables stay
+meaningful. That is a hard requirement, not an evaluation axis.
+
+* **S0 FIXED10** — the status quo: fixed [0,1] deciles, open top.
+* **S1 QUANTILE10** — equal-population deciles per corpus (edges = the corpus's
+  own target deciles).
+* **S2 MERGE** — start from S0's fixed deciles, then greedily merge adjacent
+  bands inward from both ends until every surviving band satisfies `n ≥ n_min`
+  **and** `span ≥ span_min`, where both constants come from V.3. Labels report
+  the merge (`B8-B9`) and the realised edges.
+* **S3 FIXED5** — fixed quintiles (a coarser fixed grid; the null hypothesis
+  that the problem is just "ten is too many").
+
+**Evaluated on** (per corpus, per band): n, span, marginal H, r_SB, LSD, DR, and
+the count of NOT-MEASURED bands. **Chosen by**: the scheme whose bands are
+usable on the most corpora, with ties broken toward the scheme that keeps a
+fixed, corpus-independent interpretation of "which quality region is this".
+
+**Reporting requirements (all schemes, non-negotiable, per U.R8(3)):** the
+emitted JSON records the scheme name, every band's realised `lo`/`hi`, and `n`.
+A band that fails the usability criterion is emitted as **NOT-MEASURED** — an
+explicit null with a reason string — never silently dropped, never dimmed-but-
+rankable, and never rendered as a measured zero.
+
+## V.5 F8's re-point (a gate change; registered-pending-user-ack)
+
+F8 currently reads `|B9| ≥ 0.15 ∧ |B3| ≥ 0.0` and governs 166+ published board
+cells plus, through `W_BANDTAIL`, the balanced ranking composite. Per the user
+directive it is re-pointed at the widened / merged high-quality band from V.4.
+Three components, each derived, none assumed:
+
+1. **The band** — the chosen scheme's highest usable band on CID22.
+2. **The statistic** — `srocc_signed`, with the orientation convention declared.
+   Corpora whose targets are distortion-oriented keep their convention by
+   **mirroring `freeze_check`'s existing orientation logic** (the
+   EXPECTED_ORIENTATION registry), never by special-casing a corpus name.
+3. **The floor** — re-derived, because 0.15 was set against a degenerate
+   statistic. **Frozen derivation rule:** F8's stated job is *non-collapse*, so
+   the floor is the smallest value at which a model's band ordering is
+   **significantly positive** — i.e. `floor = ceil_to_2dp(H)`, the new band's own
+   marginal 95% CI half-width. Reported alongside: (a) the era incumbents'
+   values on the new band, (b) the board population's distribution, (c) the
+   pass-count at the derived floor and at ±1 reasonable alternative, so the user
+   can see the consequence of the number before acking it.
+
+**Nothing is auto-acked.** The floor and the band change ship as a registered
+proposal with the pass/fail delta computed; the campaign's selection rule and
+166+ published cells are the user's call, exactly as U.R8 states.
+
+## V.6 Blast radius (frozen list; every item is checked and reported)
+
+1. Every published per-band number on the board (280 cells; 120 recomputable
+   from stored per-pair, 160 not — the split is reported, and the 160 are
+   annotated rather than silently left stale).
+2. The campaign doc's per-band sections and any F8 PASS/FAIL statement.
+3. The gauntlet's 10-band bar panel and its cross-bake per-band SROCC table
+   (`scripts/v_next/gauntlet.py`, which reads `rank.<corpus>.bands[].srocc` —
+   the absolute field).
+4. `best_per_day.json` if it carries a band term.
+5. `freeze_check`'s TSV `b3`/`b3_n`/`b9`/`b9_n` columns and the F8 row.
+6. `balanced_composite`'s `bandtail` term (P5) — the composite is recomputed and
+   the rank churn reported.
+7. `benchmarks/eval_annotations.json` — an append-only entry for every
+   superseded band number and for the F8 statements that rested on them.
+
+## V.7 Ops (frozen)
+
+Workspace `../zensim--bands`, `CARGO_TARGET_DIR=$HOME/tmp/zensimbd-target`,
+`run-heavy --jobs 6`, logs under `~/tmp/bands/`. **Every statistic in this
+appendix comes from `zenstats` via `panel --batch` or `bake_verdict`** — the
+registered owners. No hand-rolled Spearman, no scipy, in Rust or Python. Where
+an owner lacks a capability the owner is extended with a test, per the
+no-duplication rule.
+
+## V.8 Registered outcomes (frozen; exactly one of A/B/C fires for the scheme choice)
+
+* **(A) A SCHEME QUALIFIES.** At least one of S1/S2/S3 produces a CID22
+  high-quality band satisfying all three usability conditions. F8 is re-pointed
+  at it with a derived floor; the board is recomputed; the blast radius is
+  corrected.
+* **(B) A SCHEME QUALIFIES ON ESTIMABILITY BUT NOT DISCRIMINATION.** The band
+  can be measured but cannot rank models (r_SB < 0.90 or DR < 1). Then the band
+  is reported as a *descriptive* statistic and F8's high-tail half is
+  recommended for **removal from the gate**, not re-pointing — a gate that
+  cannot discriminate is worse than no gate.
+* **(C) NOTHING QUALIFIES ON CID22.** No banding of CID22's target distribution
+  yields a usable high-quality band. Then the finding is that CID22 cannot
+  support a high-fidelity band gate at all, F8's high-tail half is recommended
+  for removal, and the HF-NL per-ref axis (already measured reliable, appendix O)
+  is named as the axis that should carry the high-fidelity question.
+
+Independently of A/B/C, two further outcomes are registered and may co-fire:
+
+* **(D) THE SIGN DEFECT IS CONFIRMED** (G-V1) — band statistics consumed by
+  gates move to `srocc_signed`, and the superseded numbers are registered.
+* **(E) THE DEFECT IS CROSS-CORPUS** — if TID (B8 n=1, B9 n=0) and/or LIVE fail
+  the same criterion under S0, the redesign is reported as a scheme-level fix
+  rather than a CID22 patch.
+
+## V.9 Confounds + limitations (registered before any number)
+
+1. **The 120-cell recomputation population is not the board.** It is the subset
+   that kept per-pair (curated + recent), which over-represents flagships. Every
+   population statistic (r_SB, LSD, DR, spread) is therefore a statement about
+   *that* population; it is labelled as such and the 160 stripped cells are not
+   silently assumed to behave the same.
+2. **Subsampling within a band preserves the reference structure** — CID22's
+   pairs are clustered by reference (one ref supplies 11 of B9's 43). A
+   pair-level bootstrap therefore *understates* uncertainty relative to a
+   reference-level one. Both are computed for the chosen band; the more
+   conservative is used for the floor.
+3. **The split-half in Instrument E splits pairs, not references**, for the same
+   reason and with the same caveat; a reference-level split is run as a
+   cross-check on the chosen band only (cost).
+4. **KADID's stored per-pair is a 5,000-row subsample** of its 10,031 banded
+   rows, so KADID band recomputations from per-pair are on the subsample and are
+   labelled; CID22 / CSIQ / LIVE / TID per-pair are complete.
+5. **KADID and TID are train==val** on this project's recipes (existing
+   campaign-wide caveat) — they are used here as *scheme* replication, never as
+   evidence about model quality.
+6. **`H ≤ 0.20` is a chosen bar, not a discovery.** It is registered before the
+   numbers precisely so it cannot be tuned to make a preferred scheme pass, and
+   the full curve is published so the choice is auditable.
+7. This appendix changes **no model, no bake, and no training recipe**. It
+   changes how an evaluation slice is cut and read.
+
+## V.10 Deliverables
+
+1. `benchmarks/band_minimum_n_2026-08-06.md` — the derivation: pure-n curve,
+   pure-span curve, joint contour, theory cross-check, discrimination table, and
+   the stated rule.
+2. The scheme comparison table across all five banded corpora.
+3. The G-V1 re-verification table.
+4. Implementation in the owners (`bake_verdict` band emission + `freeze_check`
+   F8 / composite), with tests.
+5. Board recompute + `gauntlet_gates.sh` PASS on the regenerated HTML.
+6. `eval_annotations.json` entries for every superseded number.
