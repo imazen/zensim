@@ -12923,6 +12923,39 @@ nothing ships, swaps, or flips — every ship/flip decision is the user's.**
    the final build before any conclusion is stated.
 10. Nothing here ships, swaps, flips a toggle, or enters the board.
 
+## X.A1 — AMENDMENT (2026-08-06, supervisor-directed, registered after the
+## thread-1 grid ran but BEFORE its results section is written; folds appendix
+## W's corrections into this appendix's priors and adds ONE arm)
+
+Appendix W (`16d55fa4`) landed three corrections that bind X.1's priors:
+
+1. **P1's root-A CID22 claim is corrected at source**: T.R9's "v1 block buys
+   CID22 +0.006" is RETRACTED at convergence (+0.00487, below the 0.005
+   floor; the imazen26/nonphoto costs cross into loss) — only KonJND +0.077
+   and CSIQ +0.029 survive (`benchmarks/opusreview/tconv_convergence_audit_
+   2026-08-06.tsv`). This appendix's grid ran at convergence from the start
+   (X.2), so its own root-A cells ARE the corrected instrument; X.R cites the
+   converged table only.
+2. **P2's BANDING prior is corrected**: U's +0.0265 was measured against the
+   ARM-B base (0.8209), not shipped ADD156 — base+BANDING sits −0.0158 BELOW
+   ADD156 on the same instrument. The prior stands only as "worth testing
+   in-mix" (which this grid does, free-solve); W adds the missing guard: the
+   pair's M3a is 0.9637 GOLD.
+3. **One added arm — X-T1, the C-teacher additive probe** (W's R.R2 measured
+   the C teacher transferring classic-IQA BREADTH into sparse students at
+   CID22 cost; breadth is exactly where this grid's root-B additive cells are
+   weak). Cells: pool c944 × the committed teacher-safesyn leg
+   (`/mnt/v/output/zensim/bakes/sota944/teacher/safesyn_teacher944.parquet`,
+   teacher predictions stored under `human_score`; mm01 gram) × λ ∈
+   {2e-3, 5e-3, 1e-2}, same chain, same instrument, deterministic. Registered
+   read: Δ(breadth csiq/live) and ΔCID22 vs the c944-Ms twin at matched λ,
+   same noise rule as X.3.
+
+Also folded: `pack` now auto-defaults zerobias to 0 on sparse bakes (this
+appendix's packs already passed `--zerobias-bulk 0` explicitly); `bake_verdict`
+now refuses wrong-regime reads (every eval here was already right-regime;
+re-runs after a rebuild inherit the guard).
+
 # REGISTERED APPENDIX Y — THE 10×-BUTTERAUGLI PROGRAM: THE HONEST BAR, THE RANKED RUNTIME LEVERS, AND THE NEXT LOOP MODELS (2026-08-06, pre-registered before any measurement)
 
 User directive, verbatim: "figure out more effective diffmap loop models and
