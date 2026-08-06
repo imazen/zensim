@@ -12240,6 +12240,25 @@ mod tests {
         );
         assert!(app2[idx_append2::HL_BIN1] > 1e-3, "HL1 should fire");
         assert!(app2[idx_append2::HL_BIN2] > 1e-3, "HL2 should fire");
+        // Slot-forensics F-4 coverage (benchmarks/extractor_slot_forensics_
+        // 2026-08-05.md): the 8 HL slots (f927/932/937/942 + f928/933/938/943)
+        // are the ONLY route-gated members of the audit's 39 never-populated
+        // set — prove every one of them populates on the HDR route, not just
+        // scale 0 (the highlight region survives every downscale, so all 4
+        // per-scale kernels must accumulate mass).
+        for scale in 0..4 {
+            let b = scale * APPEND2_PER_SCALE;
+            assert!(
+                app2[b + idx_append2::HL_BIN1] > 1e-3,
+                "HL1 must fire at scale {scale} on the HDR route (f{})",
+                924 + b + idx_append2::HL_BIN1
+            );
+            assert!(
+                app2[b + idx_append2::HL_BIN2] > 1e-3,
+                "HL2 must fire at scale {scale} on the HDR route (f{})",
+                924 + b + idx_append2::HL_BIN2
+            );
+        }
 
         // SDR-range HDR content (≤80 nits): bins exactly 0.
         let sdr_ramp: Vec<[f32; 3]> = ramp

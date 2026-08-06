@@ -3794,6 +3794,13 @@ training tables themselves:
   These are never-populated extraction slots (toggle-OFF / reserved class —
   consistent with the BANDVIS extraction-stays-OFF adjudication), dead-on-
   arrival in every 944-era table checked (safesyn, cid22_train201, cid22val).
+  **[MECHANISM CORRECTED 2026-08-05 — `benchmarks/extractor_slot_forensics_
+  2026-08-05.md`: none of the 39 is toggle-OFF or reserved. 31 are
+  deprecate-by-absence design zeros (Y-only transducers on X/B + the
+  `APPEND_SKIP_B_SCALE0` cell) and 8 are the HDR-route-gated HL bins, which
+  DO populate on the declared-HDR route (per-scale firing test added). The
+  BANDVIS adjudication is unrelated — the BANDVIS GAIN/LOSS lanes are live.
+  The dead-on-arrival observation itself is unaffected.]**
 - **22 = the finding: features that VARY in every current training table but
   are force-killed by inherited degenerate winsor windows.** The co3a recipe
   carries explicit `winsor_p99:<idx>:0,0` entries — clip-to-[0,0] ⇒ transform

@@ -161,6 +161,11 @@ Per registered outcome 4 these are **prune candidates, not pruned in this pass**
 `n_inputs()` vs `caller_input_width()` after dead-column pruning is a registered hazard
 class (campaign appendix E.9).
 
+*(2026-08-05 follow-up: `benchmarks/extractor_slot_forensics_2026-08-05.md` classifies
+all 39 from source — 31 wired-to-zero by design, 8 HDR-route-gated HL bins that DO
+populate on the declared-HDR route (per-scale firing proof added), 0 bugs. The 8 HL
+slots must not be pruned from any HDR-route model's input contract.)*
+
 ### F-5 · MEDIUM · the canonical promotion drops the quality key, making ladder monotonicity unauditable for 3 legs
 
 A4 asks whether the target falls as encoder quality falls, within a reference. That
