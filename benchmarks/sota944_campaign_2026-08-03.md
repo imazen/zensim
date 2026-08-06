@@ -12159,6 +12159,8 @@ tails, and drops from numerator and denominator on a legacy cell.
 | gauntlet band panel + cross-bake table | rewritten: SIGNED, span beside n, NOT-MEASURED as em-dash with reason, legacy cells excluded with a count |
 | `benchmarks/eval_annotations.json` | 4 append-only entries, verified rendering through `freeze_check --annotations` |
 | `blend_lib.BANDS` | **flagged, not changed** — a third band-cut implementation on an AUTO-STRETCHED axis, so its `B9` is "top tenth of the observed range", not "target ≥ 0.90". Re-pointing it changes what a live dashboard's columns mean; that is a decision, not a refactor |
+| `best_per_day.json` | **checked, nothing to correct** — it carries no per-band value (only a `hdr_band_srocc` label and one prose caveat naming the "Mohammadi 10-band" regime); it is a champion-ordering retrospective, not a stats table |
+| legacy cells' F8 verdict | reported **ABSENT (not passed)**, not FAIL, via `f8-legacy-bands-not-measured` — the bar was never measured on them, and this appendix's own NOT-MEASURED discipline applies to its own gate |
 | board HTML | regenerated, `gauntlet_gates.sh` **PASS** on both gates (280 bakes, 572 ⚠-badged cells) |
 
 **The recut is equivalent to a re-verdict, and that is gated**: recutting
