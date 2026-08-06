@@ -263,7 +263,15 @@ def load_konjnd_cvvdp() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 10-band logic mirroring bake_verdict.rs
+# 10-band logic that USED to mirror bake_verdict.rs — it no longer does.
+#
+# THE owner of band edges is `zensim_validate::bands` (campaign appendix V,
+# 2026-08-06), which merges fixed deciles until every band clears n >= 1000 AND
+# span >= 0.08, and reports an unusable band as NOT-MEASURED rather than
+# publishing a statistic for it. The fixed width-0.10 grid below is the OLD
+# scheme, kept only because this is a dated May-2026 baseline artifact whose
+# output was produced under it. Do not treat its bands as comparable to a
+# current verdict's, and do not copy this function.
 # ---------------------------------------------------------------------------
 
 
