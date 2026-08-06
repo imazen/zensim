@@ -3709,10 +3709,7 @@ pub(crate) fn checked_padded_plane_len(
 /// the vertical pass. `tmp` must be `width` long; `plane` is modified in
 /// place.
 #[cfg_attr(
-    not(any(
-        all(feature = "custom-profiles", feature = "feature-regime-v2"),
-        test
-    )),
+    not(any(all(feature = "custom-profiles", feature = "feature-regime-v2"), test)),
     allow(dead_code)
 )] // f64 attribution-density pass B (needs BOTH features since the cluster
 // was custom-profiles-gated, matching af4417f8) + tests
