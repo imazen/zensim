@@ -8,6 +8,7 @@ APPENDIX J — IS 944 TOO MANY?** (committed before any fit in the pass).
 | `idx/ranked.tsv` | the frozen contribution ranking of all 944 inputs (`mean_abs` desc, ties by idx asc) from `bake_contrib_H_co3abpg_s2507_2026-08-04.tsv` |
 | `idx/top{64,128,256,512,667}.idx` | the `--keep-features` index files the K arms train on |
 | `live_input_structure_2026-08-04.tsv` | live/dead/constant-column counts per model class + the cross-model ranking-agreement numbers (in the `.meta`) |
+| `k128_stage_map_2026-08-05.tsv` | every K128 index decoded to (block, scale, channel, local, producing pass) — the extraction-stage map (`benchmarks/k128_stage_map_2026-08-05.md`; generator `scripts/featsub/k128_stage_map.py`) |
 
 Tools (all owner extensions — no new trainer, no Python fit):
 

@@ -92,119 +92,127 @@ fn main() {
 
     let mut fsess = zensim::Fused944Session::new();
 
+    // ZENSIM_FOLDSTAGE=only: skip the main component loop + G-N2 block and
+    // run only the extraction pass-marginal arms below (fast re-runs while
+    // measuring stage marginals; `1` appends them to the full probe).
+    let foldstage = std::env::var("ZENSIM_FOLDSTAGE").ok();
+    let foldstage_only = foldstage.as_deref() == Some("only");
+
     // Warm-up every arm once.
-    let _ = z.compute_with_ref(&pre, &ds).unwrap();
-    let _ = z
-        .compute_with_ref_and_diffmap(&pre, &ds, DiffmapWeighting::Trained)
-        .unwrap();
-    let _ = z
-        .compute_folded720_features_streaming(&rs, &ds, toggles944, &mut scratch)
-        .unwrap();
-    let _ = z.compute_attribution_density_full(&rs, &ds, &s944).unwrap();
-    let _ = z
-        .compute_with_ref_score_and_attribution(&pre, &ds, &s156)
-        .unwrap();
-    let _ = z.compute_attribution_density(&rs, &ds, &s156).unwrap();
-    let _ = z
-        .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
-        .unwrap();
-
-    // G-N2/G-P2 measured deviations (not just PASS): fused vs standalone
-    // density, per-pixel and block-sums(16), reported against the gate
-    // bounds (3e-5·max_abs + 1e-9 per pixel; 1e-4·bmax per block).
-    {
-        let std_attr = z.compute_attribution_density_full(&rs, &ds, &s944).unwrap();
-        let (_r, _v2, fused_attr) = z
-            .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
-            .unwrap();
-        let max_abs = std_attr
-            .density()
-            .iter()
-            .fold(0.0f32, |m, v| m.max(v.abs()));
-        let mut max_px = 0.0f32;
-        for (a, b) in fused_attr.density().iter().zip(std_attr.density().iter()) {
-            max_px = max_px.max((a - b).abs());
-        }
-        let bs_f = fused_attr.block_sums(16);
-        let bs_s = std_attr.block_sums(16);
-        let bmax = bs_s.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        let mut max_bs = 0.0f64;
-        for (a, b) in bs_f.iter().zip(bs_s.iter()) {
-            max_bs = max_bs.max((a - b).abs());
-        }
-        println!(
-            "F944DEV per-pixel max |Δ| {max_px:.3e} (bound {:.3e}, {:.4}x of bound) | \
-             block-sums(16) max |Δ| {max_bs:.3e} (bound {:.3e}, {:.4}x of bound)",
-            3e-5 * max_abs + 1e-9,
-            max_px / (3e-5 * max_abs + 1e-9),
-            1e-4 * bmax,
-            max_bs / (1e-4 * bmax),
-        );
-    }
-
-    let mut t1 = Vec::new();
-    let mut t2 = Vec::new();
-    let mut t3 = Vec::new();
-    let mut t4 = Vec::new();
-    let mut t5 = Vec::new();
-    let mut t6 = Vec::new();
-    let mut t7 = Vec::new();
-    for _ in 0..iters {
-        let t = std::time::Instant::now();
-        let r = z.compute_with_ref(&pre, &ds).unwrap();
-        t1.push(t.elapsed().as_secs_f64() * 1e3);
-        std::hint::black_box(r.score());
-
-        let t = std::time::Instant::now();
-        let r = z
+    if !foldstage_only {
+        let _ = z.compute_with_ref(&pre, &ds).unwrap();
+        let _ = z
             .compute_with_ref_and_diffmap(&pre, &ds, DiffmapWeighting::Trained)
             .unwrap();
-        t2.push(t.elapsed().as_secs_f64() * 1e3);
-        std::hint::black_box(r.diffmap()[0]);
-
-        let t = std::time::Instant::now();
-        let v2 = z
+        let _ = z
             .compute_folded720_features_streaming(&rs, &ds, toggles944, &mut scratch)
             .unwrap();
-        t3.push(t.elapsed().as_secs_f64() * 1e3);
-        std::hint::black_box(v2.features()[943]);
-
-        let t = std::time::Instant::now();
-        let a = z.compute_attribution_density_full(&rs, &ds, &s944).unwrap();
-        t4.push(t.elapsed().as_secs_f64() * 1e3);
-        std::hint::black_box(a.query_rect(0, 0, 32, 32));
-
-        let t = std::time::Instant::now();
-        let (r, a) = z
+        let _ = z.compute_attribution_density_full(&rs, &ds, &s944).unwrap();
+        let _ = z
             .compute_with_ref_score_and_attribution(&pre, &ds, &s156)
             .unwrap();
-        t5.push(t.elapsed().as_secs_f64() * 1e3);
-        std::hint::black_box((r.score(), a.query_rect(0, 0, 32, 32)));
-
-        let t = std::time::Instant::now();
-        let a = z.compute_attribution_density(&rs, &ds, &s156).unwrap();
-        t6.push(t.elapsed().as_secs_f64() * 1e3);
-        std::hint::black_box(a.query_rect(0, 0, 32, 32));
-
-        let t = std::time::Instant::now();
-        let (r, v2, a) = z
+        let _ = z.compute_attribution_density(&rs, &ds, &s156).unwrap();
+        let _ = z
             .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
             .unwrap();
-        t7.push(t.elapsed().as_secs_f64() * 1e3);
-        std::hint::black_box((r.score(), v2.features()[943], a.query_rect(0, 0, 32, 32)));
-    }
 
-    let (m1, m2, m3, m4, m5, m6, m7) = (
-        median_ms(t1),
-        median_ms(t2),
-        median_ms(t3),
-        median_ms(t4),
-        median_ms(t5),
-        median_ms(t6),
-        median_ms(t7),
-    );
-    println!(
-        "F944PROBE {w}x{h} serial (iters {iters}) medians:\n\
+        // G-N2/G-P2 measured deviations (not just PASS): fused vs standalone
+        // density, per-pixel and block-sums(16), reported against the gate
+        // bounds (3e-5·max_abs + 1e-9 per pixel; 1e-4·bmax per block).
+        {
+            let std_attr = z.compute_attribution_density_full(&rs, &ds, &s944).unwrap();
+            let (_r, _v2, fused_attr) = z
+                .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
+                .unwrap();
+            let max_abs = std_attr
+                .density()
+                .iter()
+                .fold(0.0f32, |m, v| m.max(v.abs()));
+            let mut max_px = 0.0f32;
+            for (a, b) in fused_attr.density().iter().zip(std_attr.density().iter()) {
+                max_px = max_px.max((a - b).abs());
+            }
+            let bs_f = fused_attr.block_sums(16);
+            let bs_s = std_attr.block_sums(16);
+            let bmax = bs_s.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+            let mut max_bs = 0.0f64;
+            for (a, b) in bs_f.iter().zip(bs_s.iter()) {
+                max_bs = max_bs.max((a - b).abs());
+            }
+            println!(
+                "F944DEV per-pixel max |Δ| {max_px:.3e} (bound {:.3e}, {:.4}x of bound) | \
+             block-sums(16) max |Δ| {max_bs:.3e} (bound {:.3e}, {:.4}x of bound)",
+                3e-5 * max_abs + 1e-9,
+                max_px / (3e-5 * max_abs + 1e-9),
+                1e-4 * bmax,
+                max_bs / (1e-4 * bmax),
+            );
+        }
+
+        let mut t1 = Vec::new();
+        let mut t2 = Vec::new();
+        let mut t3 = Vec::new();
+        let mut t4 = Vec::new();
+        let mut t5 = Vec::new();
+        let mut t6 = Vec::new();
+        let mut t7 = Vec::new();
+        for _ in 0..iters {
+            let t = std::time::Instant::now();
+            let r = z.compute_with_ref(&pre, &ds).unwrap();
+            t1.push(t.elapsed().as_secs_f64() * 1e3);
+            std::hint::black_box(r.score());
+
+            let t = std::time::Instant::now();
+            let r = z
+                .compute_with_ref_and_diffmap(&pre, &ds, DiffmapWeighting::Trained)
+                .unwrap();
+            t2.push(t.elapsed().as_secs_f64() * 1e3);
+            std::hint::black_box(r.diffmap()[0]);
+
+            let t = std::time::Instant::now();
+            let v2 = z
+                .compute_folded720_features_streaming(&rs, &ds, toggles944, &mut scratch)
+                .unwrap();
+            t3.push(t.elapsed().as_secs_f64() * 1e3);
+            std::hint::black_box(v2.features()[943]);
+
+            let t = std::time::Instant::now();
+            let a = z.compute_attribution_density_full(&rs, &ds, &s944).unwrap();
+            t4.push(t.elapsed().as_secs_f64() * 1e3);
+            std::hint::black_box(a.query_rect(0, 0, 32, 32));
+
+            let t = std::time::Instant::now();
+            let (r, a) = z
+                .compute_with_ref_score_and_attribution(&pre, &ds, &s156)
+                .unwrap();
+            t5.push(t.elapsed().as_secs_f64() * 1e3);
+            std::hint::black_box((r.score(), a.query_rect(0, 0, 32, 32)));
+
+            let t = std::time::Instant::now();
+            let a = z.compute_attribution_density(&rs, &ds, &s156).unwrap();
+            t6.push(t.elapsed().as_secs_f64() * 1e3);
+            std::hint::black_box(a.query_rect(0, 0, 32, 32));
+
+            let t = std::time::Instant::now();
+            let (r, v2, a) = z
+                .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s944, &mut fsess)
+                .unwrap();
+            t7.push(t.elapsed().as_secs_f64() * 1e3);
+            std::hint::black_box((r.score(), v2.features()[943], a.query_rect(0, 0, 32, 32)));
+        }
+
+        let (m1, m2, m3, m4, m5, m6, m7) = (
+            median_ms(t1),
+            median_ms(t2),
+            median_ms(t3),
+            median_ms(t4),
+            median_ms(t5),
+            median_ms(t6),
+            median_ms(t7),
+        );
+
+        println!(
+            "F944PROBE {w}x{h} serial (iters {iters}) medians:\n\
          \x20 1. v1 score-only                 {m1:.1} ms\n\
          \x20 2. v1 + Trained diffmap          {m2:.1} ms   <- loop pays today (map+discarded score)\n\
          \x20 3. folded-944 extraction         {m3:.1} ms   <- loop pays today (score)\n\
@@ -215,9 +223,67 @@ fn main() {
          \x20 loop today (2+3):                {:.1} ms\n\
          \x20 naive unfused model-map (3+4):   {:.1} ms\n\
          \x20 B-N1 marginal map (7-3):         {:.1} ms = {:.2}x over score-only (bar <=1.10x)",
-        m2 + m3,
-        m3 + m4,
-        m7 - m3,
-        m7 / m3,
-    );
+            m2 + m3,
+            m3 + m4,
+            m7 - m3,
+            m7 / m3,
+        );
+    }
+
+    // ZENSIM_FOLDSTAGE=1|only: extraction pass-marginal arms (K128 stage-
+    // map, benchmarks/k128_stage_map_2026-08-05.md). Same interleaved-
+    // medians methodology as the main loop — under multi-agent box load
+    // the zenbench `folded_stage_*` groups' load gate discards rounds and
+    // the 3-15% marginals drown; medians over interleaved arms survive it
+    // (the appendix-N precedent). Default OFF: probe output above is
+    // unchanged. (`only` additionally skips the main component loop —
+    // handled at the top of `main`.)
+    if matches!(foldstage.as_deref(), Some("1") | Some("only")) {
+        use zensim::feature_v2::V2NewFeatureToggles;
+        let t720 = V2NewFeatureToggles::default();
+        let t924 = V2NewFeatureToggles {
+            append_block: true,
+            ..Default::default()
+        };
+        let t944_nograd = V2NewFeatureToggles {
+            gradient_features: false,
+            ..toggles944
+        };
+        let t944_noblock = V2NewFeatureToggles {
+            blockiness: false,
+            ..toggles944
+        };
+        let arms: &[(&str, V2NewFeatureToggles)] = &[
+            ("folded720", t720),
+            ("folded924", t924),
+            ("folded944", toggles944),
+            ("f944_nograd", t944_nograd),
+            ("f944_noblock", t944_noblock),
+        ];
+        let mut ts: Vec<Vec<f64>> = vec![Vec::new(); arms.len()];
+        // 2x the main iters: the deltas of interest are small.
+        for _ in 0..(iters * 2) {
+            for (k, (_, tg)) in arms.iter().enumerate() {
+                let t = std::time::Instant::now();
+                let v2 = z
+                    .compute_folded720_features_streaming(&rs, &ds, *tg, &mut scratch)
+                    .unwrap();
+                ts[k].push(t.elapsed().as_secs_f64() * 1e3);
+                std::hint::black_box(v2.features()[0]);
+            }
+        }
+        let med: Vec<f64> = ts.into_iter().map(median_ms).collect();
+        println!("FOLDSTAGE {w}x{h} serial (iters {}) medians:", iters * 2);
+        for (k, (name, _)) in arms.iter().enumerate() {
+            println!("  {name:<13} {:.2} ms", med[k]);
+        }
+        println!(
+            "  marginals: append(924-720) {:.2} ms | append2(944-924) {:.2} ms | \
+             grad(944-nograd) {:.2} ms | block(944-noblock) {:.2} ms",
+            med[1] - med[0],
+            med[2] - med[1],
+            med[2] - med[3],
+            med[2] - med[4],
+        );
+    }
 }

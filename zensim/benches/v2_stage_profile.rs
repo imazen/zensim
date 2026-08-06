@@ -52,6 +52,84 @@ fn cfg_plus_iw() -> ZensimConfig {
     cfg
 }
 
+/// Folded-regime (f0..f943 streaming walk) pass-marginal arms — the
+/// appendix-J K128 stage-map question "what fraction of the folded-944
+/// extraction cost could a K-subset skip" needs per-PASS costs on the
+/// CANONICAL streaming path, which the v1-path arms above cannot supply.
+/// Marginals by toggle deltas (same harness idea as the arms above):
+///   folded924 − folded720          = append-kernel pass (11 cells)
+///   folded944 − folded924          = append2 marginal (BANDVIS lanes + finalize)
+///   folded944 − folded944_nograd   = gradient-kernel pass (all 12 cells)
+///   folded944 − folded944_noblock  = blockiness pass (all 12 cells)
+/// Serial (`with_parallel(false)`), scratch reused — the jxl-loop shape
+/// appendix N measured (score-only 25.6 ms at 576²).
+fn bench_folded_stages(suite: &mut Suite) {
+    use zensim::RgbSlice;
+    use zensim::feature_v2::{V2NewFeatureToggles, V2Scratch};
+
+    let (r_px, rw, rh) = zen_io::decode_rgb8(std::path::Path::new(REF_PATH));
+    let (d_px, dw, dh) = zen_io::decode_rgb8(std::path::Path::new(DIST_PATH));
+    let z: &'static zensim::Zensim = Box::leak(Box::new(
+        zensim::Zensim::new(zensim::ZensimProfile::codec_target()).with_parallel(false),
+    ));
+
+    let t720 = V2NewFeatureToggles::default();
+    let t924 = V2NewFeatureToggles {
+        append_block: true,
+        ..Default::default()
+    };
+    let t944 = V2NewFeatureToggles {
+        append_block: true,
+        append2_block: true,
+        ..Default::default()
+    };
+    let t944_nograd = V2NewFeatureToggles {
+        gradient_features: false,
+        ..t944
+    };
+    let t944_noblock = V2NewFeatureToggles {
+        blockiness: false,
+        ..t944
+    };
+    let arms: &[(&str, V2NewFeatureToggles)] = &[
+        ("folded720", t720),
+        ("folded924_append", t924),
+        ("folded944_full", t944),
+        ("folded944_nograd", t944_nograd),
+        ("folded944_noblock", t944_noblock),
+    ];
+
+    for &size in &[576usize, 1024] {
+        let rs: Arc<Vec<[u8; 3]>> = Arc::new(zen_io::resize_rgb8(&r_px, rw, rh, size, size));
+        let ds: Arc<Vec<[u8; 3]>> = Arc::new(zen_io::resize_rgb8(&d_px, dw, dh, size, size));
+        suite.compare(format!("folded_stage_{size}x{size}"), |group| {
+            // The marginals of interest are 3-15% of a ~26 ms call; on a
+            // shared box the default 10 s budget stops at ~4 rounds (CV
+            // 20-30%, useless). Force enough rounds for the paired deltas.
+            group
+                .config()
+                .max_rounds(160)
+                .min_rounds(40)
+                .max_time(std::time::Duration::from_secs(90));
+            for &(name, toggles) in arms {
+                let (rs, ds) = (Arc::clone(&rs), Arc::clone(&ds));
+                group.bench(name, move |b| {
+                    let (rs, ds) = (Arc::clone(&rs), Arc::clone(&ds));
+                    let mut scratch = V2Scratch::new();
+                    b.iter(move || {
+                        let rsv = RgbSlice::new(&rs, size, size);
+                        let dsv = RgbSlice::new(&ds, size, size);
+                        let v2 = z
+                            .compute_folded720_features_streaming(&rsv, &dsv, toggles, &mut scratch)
+                            .unwrap();
+                        zenbench::black_box(v2.features()[0]);
+                    })
+                });
+            }
+        });
+    }
+}
+
 fn bench_stages(suite: &mut Suite) {
     let (r_px, rw, rh) = zen_io::decode_rgb8(std::path::Path::new(REF_PATH));
     let (d_px, dw, dh) = zen_io::decode_rgb8(std::path::Path::new(DIST_PATH));
@@ -112,4 +190,4 @@ fn bench_stages(suite: &mut Suite) {
     }
 }
 
-zenbench::main!(bench_stages);
+zenbench::main!(bench_stages, bench_folded_stages);
