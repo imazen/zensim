@@ -12,6 +12,47 @@ implements its A1-A5/A9 candidates.
 
 ## Known Bugs
 
+- **⛔ THE CID22 B9 BAND IS DEGENERATE AND F8 READS AN ABSOLUTE VALUE — every
+  published B9 number is |SROCC|, and on the 944-era board the sign is NEGATIVE
+  (found 2026-08-06, OPEN — no gate changed, the decision is the user's).**
+  Three compounding facts, all measured (appendix U, `benchmarks/appendixU/`):
+  (1) `zenstats::panel` returns `spearman(..).abs()` (panel.rs:1013), so
+  `rank.<corpus>.bands[].srocc` — the field `freeze_check`'s **F8** consumes and
+  the dashboard prints — is an ABSOLUTE value, while F8 documents itself as
+  signed ("collapse must hurt") and carries a `B3 >= 0.0` clause that an
+  absolute value can never fail. (2) **B9 is not a decile**: `bake_verdict` cuts
+  bands at width 0.10 but CID22's MOS stops at **0.9194**, so `[0.90, 1.00]`
+  holds **43 pairs from 11 of 49 references spanning 0.0194 MOS** — a target sd
+  4.4× tighter than every other band, a marginal bootstrap sd of **0.178**
+  (B8's is 0.021), and models whose own prediction spread there is **4.7–10.9×**
+  the target's. (3) Consequently **32 of 32 sampled board bakes have signed
+  B9 < 0** (median −0.219); **25 of them PASS** `B9 >= 0.15` on the absolute
+  value and **0 of 32** pass on the signed one, and since |·| is monotone in the
+  depth of an inversion **F8 ranks models by how backwards their top band is** —
+  B9 correlates **−0.674** with the CID22 aggregate. **It is an artifact, not a
+  model property**: widening the slice two MOS points flips every model positive
+  and it rises monotonically (ADD156 −0.031 → +0.436 at ≥0.80; C_co4_s1301
+  −0.320 → +0.432). At **≥0.80** (n=1425, span 0.119) the axis is stable and
+  correlates **+0.796** with the aggregate — that is the honest high-fidelity
+  read, and on it shipped **B is best of the era models (+0.507)** while F8
+  scores it +0.010. **Do not cite `bands[].srocc` as a signed quantity; read
+  `srocc_signed` (emitted since `5504b9fb`) and state n + the slice's MOS span
+  beside it.** `freeze_check` now prints ⛔INVERTED next to a band it passed.
+  Record: campaign appendix U + `benchmarks/appendixU/{board_b9_signed,
+  b9_slice_width_sweep,hf_tail_density}_2026-08-06.tsv`.
+
+- **⚠ `--regime 944` SILENTLY MIS-SCORES a 372-input bake that uses f156-371**
+  (found 2026-08-06 the hard way, OPEN). The folded regimes zero f156-371, so a
+  root-A model with weight there gets structural zeros for exactly the block it
+  relies on — and gets a plausible-looking number back, with no warning:
+  **shipped B reads CID22 0.3862 at `--regime 944` against its true 0.8764 at
+  `--regime 372`** (v47A −0.005; ADD156 ±0.0001, immune because it is
+  f0..155-only, which is what T.R4's bridge measured). Appendix T's root split
+  exists for this; the invocation looks safe precisely on the bakes that are
+  immune. **Check `bake_block_profile` before choosing `--regime` for any
+  <944-input bake**, and treat a large 372-vs-944 gap as this bug, not a finding.
+
+
 - **⛔ THE v1 GOLDEN BYTE-IDENTITY GATE IS ENVIRONMENT-FRAGILE — main CI red, OPEN
   (triaged 2026-08-05).** `zensim/tests/v1_golden_bytes.rs` drifts ~1e-10 on 241-246/372
   features (from f0) on CI ubuntu-latest (flipped green→red inside `926c71f7..05739a53`),
@@ -462,10 +503,15 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   bands that carry pairs (n=0 bands are dropped — CID22's B0/B1 are structurally
   empty), header shows each band's n, cells with n&lt;30 render parenthesized +
   dimmed, and a JS-computed **band-profile line** names the leader in the highest
-  and lowest populated band (on CID22 the two ends have DIFFERENT leaders — the
-  top band B9 is a real discriminator while the low bands rest on a few dozen
-  pairs). Read down a column, never across one: band SROCC is range-restricted.
+  and lowest populated band (on CID22 the two ends have DIFFERENT leaders).
+  Read down a column, never across one: band SROCC is range-restricted.
   All values are read from `rank.<corpus>.bands[]`; nothing is recomputed.
+  ⚠ **CORRECTED 2026-08-06**: this paragraph used to claim "the top band B9 is a
+  real discriminator while the low bands rest on a few dozen pairs". **B9 is the
+  band that rests on a few dozen pairs** (n=43, 11 of 49 refs, MOS span 0.0194)
+  and it is **not** a discriminator — it correlates **−0.674** with the CID22
+  aggregate over a 36-bake sample, i.e. backwards. See the Known Bug below
+  before reading any B9 column.
   Plus (2026-08-04) **ENSEMBLE rows**: a fulleval JSON stamped `model.kind:"ensemble"`
   by `scripts/promote_fulleval.py --members` (the generalized promoter — it publishes
   ANY verdict, single-bake or ensemble, onto the board and recomputes NOTHING — every
