@@ -13349,3 +13349,48 @@ re-parsed the WHOLE bake (`Model::from_bytes` heap copy) + re-allocated a
 Deviation note vs Y.2's "through the fused session" phrasing: the entry is
 profile-level (serves 372-class and folded-class arms uniformly); the fused
 session is untouched. Equivalent function, smaller surface.
+
+## Y.R2 — PART-2 ARM TABLE (2026-08-06; jxl `eb80d522` arms + `5f277073` results; 18 runs × 27 cells; stats = the owner's `analyze_23shot.cells_stats`, paired cells added; value columns are load-immune)
+
+TSV: jxl `benchmarks/zensim_loop_ctrl_arms_2026-08-06.tsv` (+ `.meta`).
+Grid: the 27-cell 9-ref × {70,80,88} matrix, 576², candidate bake
+(`W10L9_s4003_packed`), h3-mag own-map arms (+ baseline controls),
+emit-best, no early stop. Baselines same-substrate/same-session.
+
+| arm (k3 unless noted) | ±2 census | med \|err\| | t70/t80/t88 | paired vs its base | bytes |
+|---|--:|--:|---|---|--:|
+| k3 fixed (h3own base) | 17/27 | 1.659 | 5/9 5/9 7/9 | — | — |
+| A-Y1 decay | 18/27 | 1.787 | 5/9 5/9 8/9 | 12W/13L/2T | 1.0034 |
+| A-Y1 err-gain | 16/27 | 1.798 | 5/9 5/9 6/9 | 11W/10L/6T | 1.0023 |
+| A-Y3 EMA α=0.5 | 16/27 | 1.806 | 5/9 5/9 6/9 | 13W/10L/4T | 0.9985 |
+| A-Y2 exp 0.45 | 13/27 | 2.534 | 4/9 5/9 4/9 | 2W/22L/3T | 0.9922 |
+| A-Y2 exp 0.8 | 18/27 | 1.033 | 5/9 5/9 8/9 | **21W/2L/4T** | 1.0093 |
+| **A-Y2 exp 1.0** | **20/27** | **0.564** | 5/9 **7/9 8/9** | **20W/3L/4T** | 1.0150 |
+| A-Y2 exp 1.2 | 20/27 | 0.693 | 5/9 7/9 8/9 | 27W/0L/0T vs fix-base | 1.0010 |
+| A-Y2 clamp 1.2 | 15/27 | 1.655 | 5/9 5/9 5/9 | 2W/12L/13T | 1.0046 |
+| A-Y2 clamp 1.6 | 17/27 | 1.729 | 5/9 5/9 7/9 | 5W/1L/21T | 0.9952 |
+| k2 fixed (base) | 10/27 | 2.399 | 3/9 4/9 3/9 | — | — |
+| A-Y2 exp 0.8 @k2 | 16/27 | 1.917 | 5/9 5/9 6/9 | 20W/2L/5T | 1.0053 |
+| **A-Y2 exp 1.0 @k2** | **17/27** | 1.395 | 5/9 5/9 7/9 | **20W/2L/5T** | 1.0130 |
+
+**Attribution controls (k3, exp 1.0):** baseline-no-map fixed 15/27 med
+1.816 → baseline-no-map exp1.0 **17/27 med 0.834** (19W/4L/4T — the
+controller alone carries most of the med gain) → h3own exp1.0 **20/27 med
+0.564** (the OWN MAP adds +3 census + t80 5/9→7/9 on top, at bytes 0.9948
+vs the unsteered fixed base — the map redistribution pays back the bytes
+the stronger controller adds).
+
+**Registered outcomes:** A-Y2 = **(a) WIN, decisive** — monotone
+dose-response 0.45 ≪ 0.6 < 0.8 < 1.0 ≥ 1.2 at BOTH budgets; peak at
+exp ≈ 1.0 (pure proportional loss-ratio correction, clamp 1.35 unchanged —
+the clamp arms show 1.35 rarely binds). Paired 20-21W/2-3L (sign-test
+p < 1e-4 each; two budgets + a control arm concordant). Census 20/27 is the
+best inner census recorded on this grid (prior best 17/27); **k2+exp1.0
+equals the k3-fixed census — one whole compare of budget bought by one
+constant**. Mechanism: the shipped 0.6 damping was calibrated when the
+loop's scalar tracked decode worse; the fused scalar (C3b) made stronger
+correction safe — exactly the registered A-Y2 hypothesis. A-Y1 decay =
+census +1 with worse median (mixed, (b)); A-Y1 err-gain / A-Y3 EMA =
+parity (b). **No default changes; exp 1.0 is the recommendation to the
+user** (n=27 caveat; the grid is campaign-reused — pre-registration + the
+dose-response + controls are the defense).
