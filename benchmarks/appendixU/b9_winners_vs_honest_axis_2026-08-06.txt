@@ -1,0 +1,104 @@
+# appendix U — paired bootstrap: the B9 'winners' vs the honest high-fidelity slice
+# B=2000, seed 20260806, same resampled index sets on both sides; panel --batch owns every statistic.
+# cells: c162163 = ssim_max@s0Y + art_max@s0Y ; c163165 = art_max@s0Y + ssim_p95@s0Y ;
+#        c156162 = ssim_max@s0X + ssim_max@s0Y ; c160166 = det_p95@s0X + art_p95@s0Y ; cBASE = ADD156's 28 coords
+
+===== slice human >= 0.90 =====
+[cid22] band=[0.9, None) n=43 stat=srocc_signed series=['cBASE', 'c162163', 'c163165', 'c156162', 'c160166'] (human column identical across all)
+
+point estimates (SROCC, cid22 band=[0.9, None)):
+  cBASE  -0.030504
+  c162163 0.188161
+  c163165 0.185593
+  c156162 0.157354
+  c160166 0.107822
+
+marginal bootstrap interval per series (B=2000, NOT a comparison):
+series                            point       2.5%      97.5%         sd
+cBASE                          -0.03050   -0.39254   +0.30158    0.17893
+c162163                        +0.18816   -0.17011   +0.49641    0.17393
+c163165                        +0.18559   -0.16288   +0.48295    0.16518
+c156162                        +0.15735   -0.20875   +0.47192    0.17762
+c160166                        +0.10782   -0.25925   +0.43052    0.17847
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+c162163 - cBASE                +0.21556   +0.09030   +0.34221    1.000
+c163165 - cBASE                +0.21602   +0.00937   +0.41555    0.981
+c156162 - cBASE                +0.18566   +0.07140   +0.30540    0.999
+c160166 - cBASE                +0.13448   +0.03100   +0.24762    0.995
+
+===== slice human >= 0.84 =====
+[cid22] band=[0.84, None) n=933 stat=srocc_signed series=['cBASE', 'c162163', 'c163165', 'c156162', 'c160166'] (human column identical across all)
+
+point estimates (SROCC, cid22 band=[0.84, None)):
+  cBASE  0.231423
+  c162163 0.235441
+  c163165 0.225526
+  c156162 0.234102
+  c160166 0.244976
+
+marginal bootstrap interval per series (B=2000, NOT a comparison):
+series                            point       2.5%      97.5%         sd
+cBASE                          +0.23142   +0.17089   +0.29141    0.03069
+c162163                        +0.23544   +0.17638   +0.29364    0.03030
+c163165                        +0.22553   +0.16602   +0.28369    0.03038
+c156162                        +0.23410   +0.17496   +0.29321    0.03035
+c160166                        +0.24498   +0.18470   +0.30307    0.02996
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+c162163 - cBASE                +0.00389   -0.02023   +0.02865    0.624
+c163165 - cBASE                -0.00618   -0.03427   +0.02348    0.359
+c156162 - cBASE                +0.00264   -0.01892   +0.02496    0.596
+c160166 - cBASE                +0.01356   -0.00891   +0.03725    0.877
+
+===== slice human >= 0.80 =====
+[cid22] band=[0.8, None) n=1425 stat=srocc_signed series=['cBASE', 'c162163', 'c163165', 'c156162', 'c160166'] (human column identical across all)
+
+point estimates (SROCC, cid22 band=[0.8, None)):
+  cBASE  0.434860
+  c162163 0.415426
+  c163165 0.402900
+  c156162 0.417794
+  c160166 0.438253
+
+marginal bootstrap interval per series (B=2000, NOT a comparison):
+series                            point       2.5%      97.5%         sd
+cBASE                          +0.43486   +0.39461   +0.47644    0.02104
+c162163                        +0.41543   +0.37285   +0.45836    0.02160
+c163165                        +0.40290   +0.36029   +0.44603    0.02200
+c156162                        +0.41779   +0.37551   +0.45984    0.02153
+c160166                        +0.43825   +0.39745   +0.47944    0.02084
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+c162163 - cBASE                -0.01925   -0.04056   +0.00199    0.034
+c163165 - cBASE                -0.03169   -0.05631   -0.00769    0.004
+c156162 - cBASE                -0.01702   -0.03573   +0.00194    0.036
+c160166 - cBASE                +0.00335   -0.01521   +0.02211    0.649
+
+===== slice human >= 0.75 =====
+[cid22] band=[0.75, None) n=2014 stat=srocc_signed series=['cBASE', 'c162163', 'c163165', 'c156162', 'c160166'] (human column identical across all)
+
+point estimates (SROCC, cid22 band=[0.75, None)):
+  cBASE  0.586355
+  c162163 0.560605
+  c163165 0.546093
+  c156162 0.564298
+  c160166 0.586951
+
+marginal bootstrap interval per series (B=2000, NOT a comparison):
+series                            point       2.5%      97.5%         sd
+cBASE                          +0.58636   +0.55662   +0.61353    0.01444
+c162163                        +0.56061   +0.52979   +0.58794    0.01500
+c163165                        +0.54609   +0.51432   +0.57461    0.01537
+c156162                        +0.56430   +0.53343   +0.59166    0.01488
+c160166                        +0.58695   +0.55844   +0.61337    0.01409
+
+paired bootstrap B=2000 seed=20260806 (same index sets on both sides):
+comparison                     median d       2.5%      97.5%   P(d>0)
+c162163 - cBASE                -0.02569   -0.04193   -0.01104    0.001
+c163165 - cBASE                -0.04021   -0.05918   -0.02280    0.000
+c156162 - cBASE                -0.02197   -0.03643   -0.00841    0.001
+c160166 - cBASE                +0.00033   -0.01402   +0.01408    0.514
