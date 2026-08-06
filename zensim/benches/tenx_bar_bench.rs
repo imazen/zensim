@@ -131,15 +131,15 @@ fn main() {
         .with_parallel(mt),
     ));
 
-    // (label, w, h, max_rounds)
-    let sizes: &[(&str, usize, usize, usize)] = &[
-        ("576", 576, 576, 200),
-        ("1mp", 1024, 1024, 60),
-        ("4k", 3840, 2160, 20),
+    // (label, w, h, max_rounds, min_rounds, max_time_s)
+    let sizes: &[(&str, usize, usize, usize, usize, u64)] = &[
+        ("576", 576, 576, 200, 30, 150),
+        ("1mp", 1024, 1024, 60, 15, 300),
+        ("4k", 3840, 2160, 20, 8, 480),
     ];
 
     let result = zenbench::run(|suite| {
-        for &(label, w, h, rounds) in sizes {
+        for &(label, w, h, rounds, min_rounds, max_time_s) in sizes {
             let (src, dst) = test_pair(w, h);
             let src_static: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
             let dst_static: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
@@ -168,7 +168,11 @@ fn main() {
             };
 
             suite.compare(format!("tenx_bar_{label}"), move |group| {
-                group.config().max_rounds(rounds);
+                group
+                    .config()
+                    .max_rounds(rounds)
+                    .min_rounds(min_rounds)
+                    .max_time(std::time::Duration::from_secs(max_time_s));
 
                 group.bench("butter_oneshot", move |b| {
                     b.iter(move || {

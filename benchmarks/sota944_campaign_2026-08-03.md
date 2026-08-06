@@ -13654,3 +13654,134 @@ days), plus eval grids.
    including X-T1; the registered densification lever is untested here.
 6. Nothing here ships, swaps, flips a toggle, or enters the board; the X-T1
    candidate and the E.4 floors-primary observation are the user's calls.
+
+## Y.R0-final — THE FROZEN BAR (2026-08-06): concrete ms per size/config, measured quality class stated per cell; the strategic verdict is concordant across all three runs
+
+Three full sweeps ran (ST run-1, ST run-2, MT run-2; logs
+`~/tmp/tenx/part0_{st,st_final,mt_final}.log`, mirrored to Tower). The box
+carried 2-4 sibling trainer/extraction lanes THROUGHOUT — zenbench's
+resource gate discarded 281-314 rounds per sweep and kept 2-4, so per-cell
+ms carry real uncertainty (±MAD below). Run-1 ST is the tightest per-cell
+data and anchors the freeze; the committed quiet-box P.R1 references
+(score-only 22.8 ±2.0, fused 62.0 ±6.5 @576²) bound its zensim-side
+inflation at ~1.3-1.8×. A coordinated-quiet re-run is a registered
+refinement, NOT a blocker: every run agrees on the strategic reading.
+
+**The frozen denominators (butteraugli CPU 0.9.3, ST serial, run-1):**
+
+| size | butter one-shot | butter warm | **bar = oneshot/10** | warm-bar |
+|---|--:|--:|--:|--:|
+| 576² | 46.7 ±3.0 ms | 28.0 ±2.9 ms | **4.7 ms** | 2.8 ms |
+| 1MP | 752.7 ±63.7 ms | 341.1 ±49.9 ms | **75 ms** | 34 ms |
+| 4K (8.29 MP) | 3.01 ±0.05 s (run-2: 2.38 ±0.64) | 1.37 ±0.04 s | **~240-300 ms** | ~137 ms |
+
+**Where zensim stands against the bar (ST, run-1 / [quiet-box P.R1 where
+committed]):**
+
+| arm @576² | ms | vs oneshot | vs bar (4.7 ms) |
+|---|--:|--:|--:|
+| z_v1_score (372-class) | 20.2 ±2.5 | 2.3× faster | **4.3× above** |
+| z_score944 [quiet ~23] | 32.7 ±5.9 | 1.4× faster | 7.0× [4.9×] above |
+| z_v1_fused score+map | 28.9 ±0.7 | 1.6× faster | 6.2× above |
+| z_fused944 score+map [quiet 62] | 108.6 ±4.8 | 0.43× (slower) | 23× [13×] above |
+
+1MP: z_v1_score 161.2 (4.7× faster than oneshot; 2.1× above bar);
+z_score944 407.4 (1.8× faster; 5.4× above bar). 4K: z_v1_score 1.20 s
+(2.0-2.5× faster; ~4-5× above bar); z_score944 2.60 s (0.9-1.2×; ~9-11×
+above bar — the 944 extraction's superlinear 4K scaling from Y.R0 holds in
+every run and is a real cache-class finding). MT (6 threads, run-2, noisy):
+butteraugli parallelizes ~2.5× at 4K (943.5 ±47 ms); zensim's parallel
+score path wins big at 4K (z_score944 549 ±4 ms, z_v1_score 152 ±18 — the
+372-class MT score is ~1.7× the MT warm-bar) but LOSES at 576² (parallel
+overhead exceeds the win at small frames — a real tuning lever, stated).
+
+**The honest strategic verdict, now measured:** on CPU, zensim score-only
+is 1.4–4.7× FASTER than butteraugli one-shot (and ~par with its
+warm-reference loop shape) — but the "10× faster than butteraugli" bar is
+**missed by ~2–7× at score-only and more with the map on, at every size
+and config**. The historical 215-240 ms/MP butteraugli hint was a 7 MP
+number applied to all sizes; at 576² butteraugli is ~140 ms/MP and the gap
+was never 10×. Closing to the bar on CPU requires an extraction-class
+redesign (the K128 stage map already closed feature-subset skipping —
+scattered, ≈5% skippable), not L-Y2-class trimming; the levers that CAN
+compound toward it are ranked in Y.R4/Y.R5.
+
+## Y.R4 — L-Y2/L-Y3 CLOSE-OUT: the two front-end seams, measured sizes, gate plan (analysis registered; implementation = the ranked follow-up lane)
+
+**Where the fused compare's time goes now** (P.R1 quiet-box record, 576²
+serial): extraction+retention 23.5 | v1 walk+basic 28.0 | pass-B f32 7.3 |
+trim+SAT 0.3 ≈ 62 ms — after L-Y1 the loop pays this once (fresh-map) or
+once per encode (single-pass), and the k≥2 single-pass floor is the
+score-only extraction (~23) + forward + encode-side steps ≈ 41-43 ms.
+
+**Seam S1 — ref-side session cache in the streaming extraction.** The
+`Fused944Session` retention already CAPTURES the src-side pyramid core rows
++ phase-A planes per (scale, ch) as strips emit (appendix N design); the
+C5 walk has no CONSUME path, so every compare re-transforms + re-pyramids
+the UNCHANGED reference. Consuming byte-identical cached src planes leaves
+every accumulation input and order unchanged ⇒ the G-N1/G-P1 bitwise
+features gate is achievable by construction. Projected: −6…−10 ms off BOTH
+the fused compare and the score-only path (the k≥2 floor — the biggest
+remaining loop-side win per iteration).
+
+**Seam S2 — dst-side plane sharing inside the fused entry.** Extraction and
+the fused v1 walk each run their own color transform + pyramid over the SAME
+distorted frame per compare (the C3a ref-side-caching precedent, dst-side
+analog). Projected: −8…−12 ms of the 28.0 ms walk+basic section. Gate class:
+bitwise where the planes are provably identical, else G-N2 C3a tolerance +
+G-P4 M3a 3-bake stability; the standalone paths stay untouched.
+
+**L-Y3 (SIMD coverage) resolves INTO the seams.** The K128 stage map
+(`benchmarks/k128_stage_map_2026-08-05.md`) already closed feature-subset
+extraction skipping (scattered; ≈5% skippable), and P.R1 ported pass-B to
+explicit magetypes (65 → 7.3 ms). The remaining scalar mass sits in the
+walk front-end that S1/S2 de-duplicate — same code, one owner lane.
+
+**Registered plan (not built this wave):** one dedicated lane lands S1 then
+S2 on the C5 walk with the G-P1..P4 battery per step; the appendix-P rule
+carries (no tolerance moves for perf numbers). Projected end-state at 576²:
+fused ~45 ms, score-only ~15 ms, steered k3 median ~33-35 ms — at/below the
+v47A class with the model map on.
+
+**Session honesty note:** one `fused944_probe` decomposition re-run was
+launched while the Y.R0-final bar bench was mid-flight (both contended each
+other for ~60 s during the ST 576² group); the probe's numbers were
+discarded, and the bar groups' own drift/CV flags are reported verbatim in
+Y.R0-final. No number from that overlap is cited anywhere.
+
+## Y.R5 — PROGRAM CLOSE: what landed, what the 10× directive means now, ranked next levers
+
+**Landed this wave (all pushed + merge-base-verified):** the appendix-Y
+pre-registration + bar instrument; **L-Y1 batched FD probe** (iter-0 median
+498.8 → 249.9 ms same-box; probe component ~379 → ~130 ms; bitwise gates
+throughout); the **Part-2 arm grid** with the **controller-exponent
+discovery** (exp 1.0: k3 census 17→20/27 — the best inner census ever on
+this grid — med |err| −66%, k2 17/27 == k3-fixed; monotone dose-response;
+RECOMMENDATION ONLY, default unchanged); **A-Y4 AVIF**: the committed
+steering-signal interface + the worktree probe that proved the
+`sb_q_scale` channel live (neutral == byte-identical) and measured the
+naive per-SB delta-q spend as a matched-rate LOSS (9/9 cells) with the
+mechanism named (hints disable segmentation + delta-q syntax tax).
+
+**Ranked remaining levers (frozen order for the follow-up lane):**
+1. **L-Y2 seams S1+S2** (ref-side session cache + dst-side plane sharing in
+   the C5 walk; Y.R4): fused ~62 → ~45 ms, score-only ~23 → ~15 ms,
+   steered k3 median toward ~33-35 ms — at the v47A class WITH the model
+   map; G-P1..P4 battery per step.
+2. **Probe forward GEMM batch** (zenpredict multi-row forward): iter-0
+   ~130 → ~40-60 ms class; needs a tolerance-class gate if accumulation
+   reorders (G-Y1 pattern).
+3. **Controller exp 1.0 adoption decision** (user-gated): the measured case
+   is strong at both budgets; if adopted, re-run the h3own board rows under
+   the new default per the appendix-M convention.
+4. **Small-frame MT tuning** (the 576² parallel-overhead inversion) +
+   the 944-extraction 4K cache-scaling investigation (superlinear in every
+   run).
+5. **AVIF λ-side channel** (`ssim_rdmult`-style per-16×16 rdmult scaling
+   fed by the SAT map — no syntax cost, composes with segmentation): the
+   registered home for the next avif steering test, after the zenrav1e
+   release train lands `FrameHints`.
+6. The 10×-at-score-parity question itself: with 1-2 the CPU gap to
+   butter-oneshot goes ~1.4× → ~3× at 576² score-only; the remaining
+   distance to 10× is an extraction-redesign / GPU-route question the
+   user should scope (the bar table makes the trade concrete).
