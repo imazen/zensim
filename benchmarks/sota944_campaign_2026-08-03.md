@@ -10072,9 +10072,15 @@ rest of this appendix:
 **What stands as the wave's FIRM finding regardless of seeds: the R1 dial
 mechanism.** Add-spline + pack `--zerobias-bulk 0` recovers the lasso dial
 mechanically (range 5.7-7.0 → 45-63 dial units, mono ≥ 99.8%, tied ≤ 0.7%)
-with every rank axis and HF-NL-proxy held EXACTLY (raw == dial == packed to
-4 decimals on all 12 corpora, all 4 cells) — a property of the packaging
-chain, k-independent. The J.R3 "the shrunken fits do not dial" blocker is
+with the decision axes held EXACTLY (cid22 / konjnd / nonphoto / hfnl
+bit-stable or ≤ 1e-6, raw == dial == packed, all 4 cells) — a property of the
+packaging chain, k-independent. *[CORRECTED by the appendix-W review,
+2026-08-06: this sentence originally claimed "to 4 decimals on ALL 12
+corpora", which contradicts R.R1's own recorded deviation — live/tid/kadid
+move up to 3.1e-3 through the flat-segment PCHIP ties on 3 of 4 cells
+(re-measured by the review: GL2 live Δ = 3.14e-3). R.R1's version was always
+the accurate one; the deltas are bounded far under every decision threshold.]*
+The J.R3 "the shrunken fits do not dial" blocker is
 CLOSED: the collapse was raw-unit range compression, not a rank defect.
 
 ### R.R1 — arm R1 tables (final; committed `f4df3cb8`)
@@ -12416,6 +12422,150 @@ and does not touch either; every commit pushed + `merge-base --is-ancestor`
 verified. Nothing ships, swaps, or is selected here; gate changes, if any
 fall out, are REGISTERED-PENDING-USER-ACK per V.5's precedent.
 
+## W.R — RESULTS (2026-08-06; every W.2 target re-derived, every W.3 audit run or explicitly deferred)
+
+### W.R1 — the re-derivation table (claim → recomputed through owners → verdict)
+
+| # | claim | recomputed | verdict |
+|---|---|---|---|
+| r1 | R.R1's 4 packed rows + both GL2 seeds (cid22/konjnd/nonphoto/hfnl/mono/tied/range/M3a/bytes) | all values from the verdict+fulleval JSONs | **MATCH, every field** (incl. sibling 0.80711) |
+| r2 | R.R0: rank axes "raw==dial==packed to 4dp on ALL 12 corpora" | GL2 `live` raw→packed Δ = **3.14e-3**; tid/kadid similar on 3/4 cells | **CONTRADICTED — R.R1's own deviation record was right**; R.R0 corrected in place above |
+| r3 | R.3's registered outcome (never resolved) | R.R2 written from the 16 on-disk verdicts | **RESOLVED**: 0/8 bar, (c) REFUTED, breadth-transfer finding |
+| s1 | B6: "all six Auto-ladder sites route through `auto_order()`" | exhaustive `git grep GpuRuntime::Auto` at zenmetrics `5f6f06f4` (on master, ancestry-verified) | **TRUE** — 6 production expansions, all `auto_order()`; api-crate `resolve_auto_backend` residual accurately disclosed in S itself |
+| s2 | budget: 324/70 s per source, 6.9 CPU-h vs 11.5-16.1 GPU-h, ~222/~348 MiB/MP | recomputed from the committed TSVs (Σ 6·α+β·11.26 MP over 21 q) | **MATCH** (324.2 / 69.9 / 6.84 h / 16.11 h / 221.6 / 348.3) |
+| s3 | fleet "verified up" | live re-probe | **both GPU nodes UP** (3070/8GB, 2080/8GB) — but **node-2's host key is STALE** (BatchMode SSH fails; unreported) and the budget doc's "flipped back to Windows" note is stale vs NODES |
+| t1 | ADD156 byte-exact repro sha `51437a34…` | fresh `fit-lasso` in this workspace | **EXACT** (third independent reproduction) |
+| t2 | T.R7 own-best CID22 +0.0062 [+0.0038, +0.0084] | committed `bootstrap_rootA` log | **MATCH** (+0.00619 [+0.00382, +0.00841]) — but see W.R2 |
+| t3 | pack default costs ADD156 −0.0069 (837 B vs 645 B) | both packs re-run | **EXACT** (0.8634/837 vs 0.8565/645) |
+| u1 | B9 = 43 pairs, 11 refs, span 0.0194, sd 0.0063, max-from-one-ref 11 | ext_cid22val target column | **EXACT** |
+| u2 | `BANDING`@s0-Y +0.0265 [+0.0237, +0.0294] | cell re-scored + paired bootstrap | **arithmetic EXACT** (0.84744 vs arm-B base 0.82092) — **FRAMING DEFECT**: see W.R3.6 |
+| u3 | "measured null EXACTLY zero, 158 cells" | grid TSV: 158 evaluated ZERO cells, max\|d\| = 0.0 on all 8 axes; LIVE census 304/1686 | **EXACT** |
+| v1 | G-V1: 120/120 identity, 109/120 negative, 82-vs-2 | recomputed from the pre-V backup through `panel --batch` | **EXACT, all three counts** |
+| v2 | r_SB corroboration B7 → 0.900, B8 → 0.949 | independent split-half implementation (same owner for every Spearman) | **MATCH within shuffle noise** (0.899 ± .026, 0.952 ± .011) |
+| v3 | `BAND_HIGH = 0.09` from ref-clustered hw 0.0866 | f8_floor TSV: 25 models, median pair-hw 0.0407, ref-clust 0.0866 | **VERIFIED** (ceil-2dp rule reproduces 0.09) |
+| h1 | avif sidecar sha `64ce4278…`, coverage 26.2% → 100% | sha256 re-hashed EXACT; merged table 11,356/11,356 non-null ×4 metrics | **EXACT** |
+| h2 | full-corpus ceiling rows +0.833/+0.763/+0.733/+0.660 (band 0.66-0.83) | per-ref signed SROCC re-derived over 757 refs via `panel --batch` | **EXACT to 3dp, all four rows** |
+| k1 | K128 skippable ≈1.6 ms = 5.2-6.5%; component model closes ≤0.1 ms | arithmetic re-run from the committed table | **VERIFIED** (0.21+0.64+0.05+0.69 = 1.59; note the doc's "predicts 27.77/30.58" line is +0.08 off what its own rounded components sum to — 27.69/30.50, which closes *tighter*; rounding residue, headline unaffected) |
+| k2 | 39 slots = 31 wired-by-design + 8 HDR-gated + 0 bugs | count identities re-checked (8+6+17=31; 2×4 HL bins) | **CONSISTENT** (kernel-level wiring not independently re-traced — see W.R7) |
+| c1 | `15ad06a8` carries a gate for the retired exemption | commit read | **VERIFIED** (`corpus_slots_are_relative_or_declared_pinned`, platform-independent absolutness check, both halves) |
+| c2 | "8 jobs fail ONLY on pre-existing v1_golden_bytes" | last completed run 31100812543 | **TRUE among what runs** — but cargo fail-fast means zensim-validate/-regress/-train-core targets NEVER EXECUTE on the 8 red platforms, and every newer run is concurrency-cancelled, so the current tip has **no completed CI verdict** (gates3's `--no-fail-fast` is the right fix and was already in flight) |
+| p1 | C's post-ship row state | board JSON | hfnl per-ref **0.7334** (flip-repaired, = R.1's table), bands recut to the merged signed scheme (all positive), forward-bench TSV reproduces −56.2% (42.18 → 18.46 ms) |
+
+Also verified in passing: `a559bc9a`/`00fe3a51` are **not** duplicates (parent+child with distinct content) — but they share a verbatim subject line, a
+descriptive-commit-message violation of the same reporting-hygiene class as C4.
+
+### W.R2 — the truncation-inheritance audit (W.3.1): T's root-A CID22 gain does not survive convergence
+
+Appendix T's pool grid ran at the recipe-faithful **400 sweeps**; appendix U
+then proved that truncation moves weights by 55% of the largest coefficient
+and made *converged* its own primary precisely because truncated pools of
+different width converge to different depths. Applying U's discipline BACK to
+T (re-fit the decision cells at `--n-sweeps 200000`, same frozen grams, same
+registered bootstrap, B=2000 seed 20260806;
+`benchmarks/opusreview/tconv_convergence_audit_2026-08-06.tsv`):
+
+- **Root B is truncation-IMMUNE**: every c944m/d944m delta reproduces to
+  ≤0.0005 (e.g. c−a CID22 +0.0443 → +0.0443, CSIQ −0.0713 → −0.0715). Every
+  root-B conclusion in T.R9 stands unchanged.
+- **Root A is not.** The own-best CID22 gain **+0.0062 → +0.00487 — BELOW the
+  registered 0.005 floor**: T.R9's "v1 peak/masked/IW buys CID22 +0.006"
+  column entry does not survive the converged solver and is **retracted to
+  "detectable, below floor"**. Two costs *strengthen* past their floors:
+  imazen26 @ shared λ (−0.0096 → −0.01012, now a LOSS) and nonphoto @
+  own-best (−0.0095 → −0.01090, now a LOSS). **KonJND (+0.0843 → +0.0772) and
+  CSIQ (+0.0301 → +0.0288 shared; +0.0212 → +0.0199 own-best) hold** — the
+  block's real purchases were never the CID22 point.
+- **M3a**: the T.R10 collapse direction HOLDS at convergence — T-b@1e-3
+  0.626 → **0.717, still FLAGGED** (<0.78); ADD156-conv 0.958 GOLD; c944m-conv
+  0.982 GOLD. The sharpest T claim survives with a −0.24 (not −0.33) magnitude.
+- Appendix X is structurally protected (it registered converged-primary from
+  U's P3 before this audit ran); T.R9's table now carries this correction by
+  reference.
+
+### W.R3 — assumption audits (W.3.2-W.3.6)
+
+1. W.3.1 → W.R2. 2. **U's bootstrap shape**: verified in code —
+`wave6_paired_bootstrap.py` shares index sets, keeps the RNG in the caller,
+and reduces through `panel --batch` indexed; the `--band-lo/--signed`
+extensions add no stat math. **But U.5's registered defence (ii) — the
+expected-false-positive yield "computed from the null and reported next to
+the observed count" — was NOT executed in its registered form**: the measured
+null came out degenerate (exactly zero), U.R5 substituted the registered axis
+floors, and no expected-FP count for the eval-sampling multiplicity was ever
+reported. The λ-replication defence (i) ran as registered. 3. **V's edge
+choice cannot leak model information — structural**: `bands::merged_bands`
+takes the target column ONLY (no prediction argument exists to misuse), as
+V.R2 claimed. 4. Fleet → W.R1 s3. 5. **Mid-correction training inputs:
+CLEAN** — the ext_kadid rebuild (`176c4268`) landed 2026-08-05T01:24Z, before
+the window; all 8 CS cells and all 3 appendix-Q cells embed the CORRECTED
+table sha (`286f1b23…`), none the inverted `4dde6be2…`. 6. **The `BANDING`
+takeaway's missing guard row is now measured**: M3a(`BANDING`@s0-Y+s0-B) =
+**0.9637 GOLD** — the U.R7 candidate passes the one guard U never ran on it
+(consistent with T.R10's v2-mass-raises-M3a finding).
+
+### W.R4 — zenpapers grounding (corpus-searched; the general-statistics primary sources are NOT IN CORPUS and are answered from knowledge, labeled)
+
+| practice | verdict | anchor |
+|---|---|---|
+| Thorndike case II for MOS-cut bands | **DIVERGENT-JUSTIFIED** — case II is the right case (explicit selection on one of the two correlated variables); the Spearman transfer is a known approximation. V used it as prediction-only cross-check, which is exactly the sanctioned use; never invert it to publish "corrected" band SROCCs | Mohammadi 2025 (arXiv:2509.13150) caveats HF attenuation, corrects nothing |
+| reliability-based minimum-n (r_SB ≥ 0.90) | **DIVERGENT-JUSTIFIED** — Schönbrodt-style n≈250 is an estimation criterion; ranking near-tied models is harder, and 0.90 is the classical psychometric floor for consequential decisions; no ITU minimum-pairs-per-stratum rule exists | VQEG sampling papers (arXiv:2311.06093) size budgets the same way |
+| split-half + Spearman-Brown on model rankings | **DIVERGENT-JUSTIFIED + two fixes**: random pair-splits share references, so S-B *overestimates* — split by reference (V.R6's own caveat, now literature-backed) and average ≥100 splits rather than 20 | (knowledge; corpus has only the inter-lab parallel-forms analogue, ACM MM'23 10.1145/3581783.3613835) |
+| multiplicity: expected-FP + replication, no formal correction | **DIVERGENT-JUSTIFIED for screens** (empirical-null / screen-then-confirm family; already stricter than the IQA field norm, which corrects nothing) — **one fix**: a cell PROMOTED from a screen needs a confirmation-stage estimate on data the screen never touched (winner's curse), or the repo's existing Westfall-Young maxT; appendix X's independent measurement of `BANDING` at its own root is exactly such a stage | Mohammadi 2025 runs uncorrected significance matrices |
+| declared-orientation registry + \|SROCC\| by convention | **registry CANONICAL** (every JND scale in the literature carries a declared axis; none uses abs-everywhere) — prefer signed-vs-declared everywhere; keep \|·\| only as a printed-beside display | KonJND-1k (TCSVT 10.1109/TCSVT.2022.3163860); AIC-3 DCC'25 |
+| refusing the 43-pair/0.019-span B9 gate | **CANONICAL** — rating-scale MOS is documented unable to discriminate near-lossless (inter-lab r drops to ~0.65-0.68; AIC-2A "not able to discriminate"; the field's answer is boosted forced-choice protocols + uncertainty-normalized criteria, not thin-band rank gates) | ACM MM'23; QoMEX'25 10.1109/QoMEX65720.2025.11219975 |
+
+### W.R5 — defect-class dispositions (the heart of the directive)
+
+| # | class | disposition |
+|---|---|---|
+| C1 | silent orientation loss | **AUDITED + PARTIAL**: zensim-side `.abs()` census — remaining sites are (a) the documented aggregate convention in `panel.rs` (signed twin now emitted everywhere), (b) the aggregate bootstrap-CI resample (`bake_verdict.rs:1306`, convention-consistent; folded-near-zero caveat noted — immaterial for aggregate corpus values), (c) declared display points (freeze_check JND line prints signed AND \|·\| together). `SignedStat` for zenstats = **PROPOSED** (cross-repo): a `#[must_use] SignedStat(f64)` whose `Display` is signed and whose `.display_abs()` is the only abs, making every silent `\|·\|` greppable; migration = mechanical since `srocc_signed` already flows |
+| C2 | wrong-regime reads | **LANDED** (`e39448c2`): `folded_root_conflict` + `bake_verdict --regime 944` REFUSAL, `--cross-regime` override with banner; smoke-verified on the b_sdr class (refused), ADD156 (passes), override (proceeds); 4+1 new tests |
+| C3 | era-ambiguous corrections | **HALF EXISTS, HALF DESIGNED**: verdicts ALREADY stamp per-corpus table sha256s (the provenance table in every verdict — this is how W.3.5 was checkable). Missing half: a manifest-level `corrected_from` chain (`_MANIFEST.json` gains `{sha, corrected_from: <old sha>, reason, date}`) + a `check_table_era <sha>` helper answering "pre- or post-correction" in one call. Designed, not landed (data-side manifests + one small tool) |
+| C4 | sub-agent report drift | **LANDED**: `scripts/verify_push.sh` — fetch + ancestry + ONE verbatim-pastable line (`VERIFY-PUSH OK <sha> is-ancestor-of <ref> checked=<ts>`), git path in the primary, jj fallback in workspaces (where `git rev-parse` silently fails — the same failure that blanked the .meta provenance); FAIL exits 1. Both paths smoke-verified. Supervisors: require the line, then re-run the command yourself |
+| C5 | fail-silent emitters | **LANDED** (`84c91c6b`): all-rows-missing ⇒ REFUSE; any-missing ⇒ nonzero + `missing_source_rows` in the .meta; `repo_commit()` git→jj→HARD-ERROR (never blank); `--only/--date` for targeted regen; the R2 ladder regenerated (identical to the recovered workspace copy) + R.R2 resolved |
+| C6 | substring identity lookups | **AUDITED — owners clean**: promoter/board/dominance/gauntlet lookups are exact dict/set membership or intended prefix-taxonomy; the `W10L9_s4003 ⊂ _packed` trap lives in ad-hoc `--glob`/grep — use anchored patterns (`.../W10L9_s4003.bin`, never `*W10L9_s4003*`) |
+| C7 | pgrep -f self-match | **LANDED**: `scripts/lib/proc.sh` — exact-name helpers with the 15-char comm truncation handled loudly, PID-wait, completion-marker wait, and a `proc_kill_exact` that REFUSES -f-shaped patterns |
+| C8 | calibration-blind defaults | **LANDED** (`e39448c2`): `pack` probes what tau=0.005 would kill and auto-defaults to 0 above 10% live-line kill; measured on the population (dense 0/667 → keeps 0.005; ADD156 14/28 and GL4 54/57 → auto-0); auto output byte-identical to explicit `--zerobias-bulk 0`; every pack now prints the kill preview |
+| C9 | under-reporting instruments | **AUDITED**: `bake_verdict` dual-timer landed earlier in the window; freeze_check/panel/bake_dial_refit print no self-timers (nothing to under-report); `pack`'s new kill-preview adds affirmative telemetry |
+
+### W.R6 — process findings not covered above
+
+1. **R.R2 did not exist**: a registered arm's outcome was never resolved; the
+   populated table sat uncommitted in the abandoned lane workspace while the
+   committed file was em-dashes (C5's instance; now resolved + the emitter
+   class fixed). The recovered numbers contain a real unreported finding
+   (teacher-swap breadth transfer, R.R2).
+2. **Two commits share a verbatim subject** with different content
+   (`a559bc9a`/`00fe3a51`) — same hygiene class as C4; cheap fix is refusing
+   to reuse the previous commit's exact subject in drivers that template
+   messages.
+3. **The doc numbered two V.R6 items "6"** (nit, left as-is — renumbering a
+   pushed appendix is churn).
+4. **"C" is overloaded on the board**: R.1 calls `W10L9_s4003_packed` "C
+   shipped" while T.R12's scorecard row is `C_em944_s31_packed` (the EM-era
+   flagship). Both are labeled explicitly in context, but a reader grepping
+   "C" will conflate them; profile-C claims should name the stem.
+5. Both local primary checkouts (zensim @ `db14c177`, zenmetrics @
+   `d439318e`) trail their remotes — the audited deliverables are INVISIBLE
+   in the working trees; verify against `origin/main`/`master`, never the
+   checkout (this is why W.6 pinned the workspace to `main@origin`).
+
+### W.R7 — what this review did NOT get to (honest list)
+
+- `SignedStat` implementation (cross-repo, zenstats) — proposed only.
+- C3's manifest `corrected_from` chain + `check_table_era` — designed only.
+- k2's kernel-level wiring re-trace (counts + doc citations verified; the
+  extractor source was not independently re-walked).
+- U's λ-sensitivity full-grid deviation and the U.R5d shortlist were not
+  re-litigated; the B9-winner damage table (U.R6) was not recomputed (its
+  inputs are the same dumps u2 verified).
+- Appendix Q (in-window but outside the directed scope) — only its training
+  inputs were audited (clean, W.R3.5).
+- The two legacy r1 `.meta` sidecars with blank `git_commit` are annotated,
+  not regenerable (the instrument verdicts lived in `~/tmp` and are gone —
+  itself an argument for the C5 fix).
+- No board regeneration was run (nothing here changed a published number;
+  the R.R0 correction + R.R2 are doc-level).
 
 ---
 

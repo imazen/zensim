@@ -1,0 +1,5 @@
+git_commit: 84c91c6b (fits + evals at the e39448c2-era tree)
+command: appendix-W W.3.1 truncation-inheritance audit — bake_dial_refit fit-lasso with --n-sweeps 200000 (vs T's registered 400) on the same frozen grams/anchors; bake_verdict --regime 372/944 --full-json; wave6_paired_bootstrap.py --b 2000 --seed 20260806 (per-pair from full.json, nonphoto/imazen26 n=5000 stored subsample vs T's 10000-row dumps)
+inputs: linear-probe/grams/safesyn.npz, add156repro/grams/e944_safesyn_mm01.npz, anchors per add156_pools.sh; trunc400 columns transcribed from T.R7 / benchmarks/appendixT/bootstrap_*.log (their own committed artifacts)
+stats: none hand-rolled — panel --batch via zen_stats owns every Spearman
+conclusion: root-B deltas are truncation-IMMUNE (agree to <=0.0005); root-A own-best CID22 gain falls below the 0.005 floor at convergence; imazen26@shared and nonphoto@own-best cross their floors into LOSS findings; KonJND + CSIQ gains hold; M3a: ADD156conv 0.958, T-b@1e-3conv 0.717 (collapse direction holds, magnitude -0.24 not -0.33), c944mconv 0.982
