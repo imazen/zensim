@@ -40,7 +40,7 @@
    "reason": "the hfnlproxy corpus (ext944-canonical-2026-08-01) postdates the era-bridge fullevals; a cell nobody measured on the axis did not FAIL it \u2014 the F6 row prints '\u2014 (absent)', n/8 keeps the registered absent=not-passed rule, and the n/m-measured form is stated alongside (e.g. winner_dial_Ebothg: 5/8 registered, 5/7-measured)",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md \u00a78 CORRECTIONS (2026-08-04); AMENDMENT 8 registration ('UNEVALUABLE counts as not-passed' stays the scoring rule)",
    "date": "2026-08-04",
-   "fix_path": "372-col hfnlproxy feature slice for era-bridge bakes (same cells, era-native features) + bake_verdict re-verdict; see the campaign doc's fill investigation for the measured cost"
+   "fix_path": "EXERCISED for the \u2264372-wide era-bridge cells: scripts/canonical_corpus/derive_hfnlproxy_372.py builds the 372-col slice (SAME 11,356 cells / 772 refs / SAME target as the committed 944 slice, identity-gated row-for-row float-exact), then `bake_verdict --regime 720 --corpora hfnlproxy` + `promote_fulleval.py --graft-rank hfnlproxy` (sha-gated). Filled 2026-08-04: winner_dial, v47, B, Ebothg_scr0_5. Filled 2026-08-06: ADD156_safesyn_only_raw_lasso (+0.8306), v02_bvls_NO_shaping (+0.7874), bhdr_linear_shaped_cvvdpmix (+0.6343), cl_tfm_corruption_LQ_MLP_s13 (+0.0540) \u2014 each 4/8\u21925/8 (3\u21924 for cl_tfm, 2\u21923 for v02). The 12 cells still absent are 504/720/924-wide and CANNOT use this slice: they need a >372-wide hfnlproxy extraction, which does not exist yet."
   },
   {
    "id": "kadid-tid-train-eq-val",
@@ -538,6 +538,23 @@
    "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md \u00a73 (corrected) + benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R7; sidecar fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05.parquet sha 64ce4278c35a2f90d1b8cf85da337ce95418b2ce572769be0318e15e98f6922a; merged table + ceiling_full.json in /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/",
    "date": "2026-08-05",
    "fix_path": "benchmarks/hfnl_axis_2026-08-05.json reference_rows[].mean = full-corpus (subset preserved as subset_mean); board panel reference lines now full-corpus"
+  },
+  {
+   "id": "r1-gl2-cid22-k1-unreplicated",
+   "kind": "annotated",
+   "fields": [
+    "rank.cid22",
+    "composite"
+   ],
+   "scope": {
+    "names": [
+     "R1_GL2_s2503_packed"
+    ]
+   },
+   "reason": "R.R0: this cell's CID22 0.90096 is a k=1 UNREPLICATED lottery draw, NOT a candidate claim \u2014 its seed sibling measures 0.80711 on the same recipe (now on the board beside it as `sota944_FS_GL2_s2501` \u2014 compare the two rows directly), a within-config spread of 0.0938 (the campaign's widest), and the GL/PILOT family spans 0.8005-0.9010 with no middle (measured bimodality; dead lam=16 cell excluded). Appendix J's both-seeds noise rule withheld this cell as a finding and the W8C_s3101 precedent applies here at higher amplitude, so the composite it drives is flattered by the same draw. Any follow-on takes the REGISTERED replication gate first: k >= 4 fresh seeds of the GL2 recipe reporting the FULL distribution \u2014 never a median or a best. Even if replicated it is a CID22+HF-NL SPECIALIST, not a general candidate: it fails KonJND 0.329 / nonphoto 0.835 / csiq 0.801 under the balanced profile. What stands k-independently from arm R1 is the DIAL MECHANISM (add-spline + pack --zerobias-bulk 0 recovers the lasso dial, range 5.7-7.0 -> 45-63 dial units, mono >= 99.8%, tied <= 0.7%, every rank axis held exactly), not this seed's rank number.",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX R, R.R0 supervisor verification note + the R.R1 headline table (commits 22095fe6, 8cf106e8, f4df3cb8); sibling value re-verified from the source verdicts this pass (FS_GL2_s2501.full.json rank.cid22.srocc = 0.80711, FS_GL2_s2503.full.json = 0.90096)",
+   "date": "2026-08-06",
+   "fix_path": "k >= 4 fresh seeds of the GL2 recipe with the FULL distribution reported (R.R0 rule 2); until then the number is context, never a shortlist entry"
   }
  ]
 }

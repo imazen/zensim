@@ -3985,6 +3985,83 @@ hyperparameters verbatim from the s31 argv. Eval: `bake_verdict --regime 720`
 (real-pool root) for the 372 arms, `--regime 944` for the control, corpora
 cid22,kadid,csiq,live,konjnd.
 
+### 6. FOLLOW-UP (2026-08-06) — the ≤372 hfnl fill COMPLETED, R1 promoted, and the ⚠ badge made generic
+
+Three loose ends from §2/§3 closed in one pass. Nothing was re-measured that
+already existed; every number below is a fresh `bake_verdict` run or a
+byte-identity-gated promotion.
+
+**(a) The era hfnl FILL is now complete for every cell it can reach.** §2 filled
+4 incumbents; a board scan found **16** cells still missing `rank.hfnlproxy`, of
+which **4 are ≤372-wide** and therefore fillable with the SAME 372-col slice
+(`ext720-canonical-2026-07-22/ext_hfnlproxy.parquet`, sha256 `ae60be7c…`, 11,356
+rows / 772 refs). The identity gate was re-run against the current committed 944
+slice (`ext944-canonical-2026-08-01/ext_hfnlproxy.parquet`, sha256 `19af9674…`)
+this pass and PASSES: ref_basename sequence identical, `human_score` float-exact.
+**Neither slice was touched by `fceb2a05`** — that commit corrected the
+reference-metric CEILING coverage (the avif dssim/iwssim/butteraugli/cvvdp gap,
+26.2% → 100%), not the eval slice; both shas still match their manifests.
+
+| cell (all n_inputs=372) | hfnl per-ref | floors before → after |
+|---|---|---|
+| `ADD156_safesyn_only_raw_lasso` | **+0.8306** | 4/8 → **5/8** |
+| `v02_bvls_NO_shaping` | +0.7874 | 2/8 → 3/8 |
+| `bhdr_linear_shaped_cvvdpmix` | +0.6343 | 4/8 → 5/8 |
+| `cl_tfm_corruption_LQ_MLP_s13` | +0.0540 | 3/8 → 4/8 |
+
+ADD156 is now the **highest era-lineage HF-NL number on the board** (above the
+§2 incumbents B +0.8252 and Ebothg +0.8292, though inside the ~0.039 axis LSD of
+both — `hfnl-axis-lsd`), and it sits AT the O.R7 full-corpus dssim ceiling
+(+0.833). It is genuinely f156-371-independent: `block_profile` reports 216/216
+of f156-371 EXACTLY zero, and only 28 of 156 f0-155 columns live.
+`cl_tfm_corruption_LQ_MLP_s13` at +0.054 (per_ref_n 679, not 757 — degenerate
+refs) is the honest read of a corruption specialist on a near-lossless axis.
+
+**Chains to APPENDIX T:** the bake this HF-NL was measured on is
+`bake_sha256 51437a34…` — byte-identical to T's G-T0 reproduction sha, so the
++0.8306 sits on the exact artifact T proved reproducible-EXACT from its recipe,
+and T's "does any feature above f155 earn its place in an additive model"
+question has this cell's answer already on the board: it uses **0 of 216**
+f156-371 columns and 28 of 156 below, and still tops the era HF-NL lineage.
+
+**The remaining 12 absent cells are 504/720/924-wide and CANNOT use this slice** —
+they need a >372-wide hfnlproxy extraction, which does not exist. That is now
+written into `hfnl-absent-not-failed.fix_path` so the next session does not
+re-derive it.
+
+**(b) Arm-R1 cells promoted, and the k=1 sibling put beside them.** The four R1
+cells (`R1_{GL0p3,GL1,GL2}_s2503_packed`, `R1_PILOT1_s2501_packed`) plus the
+eight R2/CS cells had native fullevals but no promotion provenance. All twelve
+were re-promoted through `promote_fulleval.py` (`--strip-per-pair` per the
+registered size rule + `--carry-coherence-from` so the measured M3a survives —
+the verdicts carry none). `promote_sota944_board.py` then promoted **8 campaign
+cells that had never reached the board at all**, including — usefully —
+**`sota944_FS_GL2_s2501`, the 0.80711 seed sibling of GL2's 0.90096**. The two
+now sit in the same table, which makes R.R0's point visible without a tooltip.
+Coverage gate PASSES; board = **278 cells**.
+
+**(c) The ⚠ badge is now driven by the registry's `fields`, not per-entry JS.**
+R.R0's caveat had to land on GL2's CID22 number, and the only generic surface
+was the chip-picker tooltip — easy to miss on the number itself; the two
+existing badges were hand-written `if (ANN(b,'<literal-id>'))` rules. `gauntlet.py`
+now maps each scoreboard column to its fulleval dot-path (`COL_FIELD`) and badges
+any cell an entry's `fields` cover, using the same segment-boundary rule as
+`freeze_check`'s `ann_covers`. **A new registry entry now needs no JS.** Entry
+`r1-gl2-cid22-k1-unreplicated` (annotated; fields `rank.cid22` + `composite`;
+scope = GL2 only) carries R.R0 rules 1-3 verbatim, so the 0.901 renders with ⚠
+and the sibling value in the tooltip. Side effect, correct: the 32 cells in
+`m3a-pre-append2-fix` now badge their M3a column too.
+
+Gate added, and it bit twice while being written: `gauntlet_render_check.js`
+asserts every registry-covered scoreboard cell carries ⚠ (412 cells on the
+current board). Both first failures were defects **in the test**, and both are
+worth recording because they are the standing traps in this harness — (i)
+`cellText()` returns `td.textContent` and STOPS, so it cannot see an appended
+child badge (deep text is required); (ii) board names NEST
+(`W10L9_s4003` ⊂ `W10L9_s4003_packed`), so a `startsWith` row lookup silently
+tests the wrong twin — the longest-name match (`namesByLen`, what the sort tests
+already use) is the only safe disambiguation.
+
 ## REGISTERED APPENDIX — COHERENCE MECHANISM: is M3a determined by WHERE a bake's contribution mass sits?
 ### (written and committed BEFORE any mass fraction or correlation was computed; the classification in §D.1 was derived from source first, which is an input to the registration, not a result)
 

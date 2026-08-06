@@ -390,6 +390,74 @@ if (DATA) (function statTableSortTest() {
 
 if (failed) process.exit(1);
 
+// ------------------------------------------------- registry ⚠ badge on the number -----
+// The annotations registry (benchmarks/eval_annotations.json) exists so a flattered or
+// superseded number is never read clean. Before 2026-08-06 the only GENERIC surface was
+// the chip-picker tooltip — easy to miss on the number itself — so an entry could not
+// caveat the cell it was written for without a hand-added JS rule. gauntlet.py now maps
+// each scoreboard column to its fulleval dot-path (COL_FIELD) and badges any cell an
+// entry's `fields` cover. This asserts that path end-to-end on real payload data: pick
+// the entries that actually cover a rendered column, and require a ⚠ in that cell.
+(function badgeTest() {
+  if (!DATA || !DATA.annRegistry) return;                 // nothing to assert
+  const COL_FIELD = { composite: 'composite', cid22: 'rank.cid22', nonphoto: 'rank.nonphoto',
+    konjnd: 'rank.konjnd', aic3: 'rank.aic3', live: 'rank.live', csiq: 'rank.csiq',
+    hfnl: 'rank.hfnlproxy.per_ref_mean', 'dial-mono': 'dial.mono_pct', tied: 'dial.tied_pct',
+    'M3a-attr': 'm3a_coherence', 'M3-coh': 'm3_coherence' };
+  const HEAD = { composite: 'composite', cid22: 'CID22', nonphoto: 'nonphoto', konjnd: 'KonJND',
+    aic3: 'AIC-3', live: 'LIVE', csiq: 'CSIQ', hfnl: 'HF-NL/ref', 'dial-mono': 'dial-mono',
+    tied: 'tied', 'M3a-attr': 'M3a-attr', 'M3-coh': 'M3-coh' };
+  const covers = (ef, cf) => cf === ef || (cf.indexOf(ef) === 0 && cf.charAt(ef.length) === '.');
+  // cellText() returns td.textContent when set and STOPS — it cannot see an appended
+  // child (the badge is a child <span>, exactly like the ens/dom badges). Deep text =
+  // own textContent + every descendant's, which is what a reader actually sees.
+  const deepText = (e) => {
+    if (!e) return '';
+    if (e.nodeType === 3) return String(e.textContent || '');
+    let s = String(e.textContent || '');
+    (e.childNodes || e.children || []).forEach(c => { s += deepText(c); });
+    return s;
+  };
+  const boards = attachedTables(h => h.includes('bake') && h.includes('composite'));
+  if (boards.length !== 1) { fail('badge test: expected exactly 1 attached scoreboard, got ' + boards.length); return; }
+  const trs = boards[0], head = trs[0].children.map(cellText).map(s => String(s).trim());
+  // Row -> bake by LONGEST-name match (namesByLen, same disambiguation the sort tests
+  // use): board names nest — "W10L9_s4003" is a prefix of "W10L9_s4003_packed", and a
+  // plain startsWith would test the packed twin's cell against the raw twin's entry.
+  const rowByBake = Object.create(null);
+  for (const tr of trs.slice(1)) {
+    if (!tr.children.length) continue;
+    const nm = cellText(tr.children[0]).trim();
+    const hit = namesByLen.find(n => nm.startsWith(n));
+    if (hit && !rowByBake[hit]) rowByBake[hit] = tr;
+  }
+  let checked = 0;
+  for (const b of DATA.bakes) {
+    for (const id of (b.annotations || [])) {
+      const meta = DATA.annRegistry[id];
+      if (!meta || !meta.fields) continue;
+      for (const key of Object.keys(COL_FIELD)) {
+        if (!meta.fields.some(ef => covers(ef, COL_FIELD[key]))) continue;
+        const ci = head.indexOf(HEAD[key]);
+        if (ci < 0) continue;                              // column not on this board
+        const row = rowByBake[b.name];
+        if (!row || !row.children[ci]) continue;           // bake not rendered / short row
+        const txt = deepText(row.children[ci]).trim();
+        if (!txt || txt === '—' || txt === '— (absent)') continue;  // null cells: own rule
+        if (txt.indexOf('⚠') < 0) {
+          fail('BADGE REGRESSION: `' + id + '` covers ' + COL_FIELD[key] + ' on bake "'
+            + b.name + '" but the rendered ' + HEAD[key] + ' cell carries no ⚠ (got "' + txt + '")');
+          return;
+        }
+        checked++;
+      }
+    }
+  }
+  if (!checked) { fail('badge test: no registry entry covered any rendered scoreboard column — '
+    + 'the generic annotation-badge path is untested by this payload'); return; }
+  console.log('badge check OK: ' + checked + ' registry-annotated scoreboard cells carry ⚠');
+})();
+
 // ---------------------------------------------------------------- --dump-row ----------
 if (process.argv.includes('--dump-row')) {
   const want = process.argv[process.argv.indexOf('--dump-row') + 1];

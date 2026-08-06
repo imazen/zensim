@@ -403,7 +403,11 @@ def load_annotations_registry():
         return [], {}
     reg = json.loads(p.read_text())
     entries = reg.get("entries", [])
-    meta = {e["id"]: {"kind": e.get("kind", ""), "reason": e.get("reason", "")}
+    # `fields` rides along so the page can badge the SPECIFIC scoreboard column an
+    # entry covers (COL_FIELD + annForCol below), instead of needing a hand-written
+    # JS rule per entry id.
+    meta = {e["id"]: {"kind": e.get("kind", ""), "reason": e.get("reason", ""),
+                      "fields": list(e.get("fields") or [])}
             for e in entries if "id" in e}
     return entries, meta
 
@@ -681,6 +685,27 @@ const S=(t,a={},k=[])=>el('svg:'+t,a,k);
 const DOM=b=>!!(b.dominated_by&&b.dominated_by.length);
 const ANN=(b,id)=>!!(b.annotations&&b.annotations.indexOf(id)>=0);
 const annReason=id=>(DATA.annRegistry&&DATA.annRegistry[id]&&DATA.annRegistry[id].reason)||id;
+const annKind=id=>(DATA.annRegistry&&DATA.annRegistry[id]&&DATA.annRegistry[id].kind)||'annotated';
+// Scoreboard column -> the fulleval dot-path it displays. This is what lets a registry
+// entry badge the SPECIFIC number it caveats: an entry whose `fields` cover a column's
+// path renders ⚠ on that cell, so a new entry needs NO new JS (2026-08-06 — added with
+// r1-gl2-cid22-k1-unreplicated, which had to reach the CID22 cell; before this the only
+// generic surface was the chip-picker tooltip, easy to miss on the number itself).
+const COL_FIELD={composite:'composite',cid22:'rank.cid22',nonphoto:'rank.nonphoto',
+  konjnd:'rank.konjnd',aic3:'rank.aic3',live:'rank.live',csiq:'rank.csiq',
+  hfnl:'rank.hfnlproxy.per_ref_mean',dial_mono:'dial.mono_pct',dial_tied:'dial.tied_pct',
+  m3a:'m3a_coherence',m3:'m3_coherence',m3_mass:'m3_dropped_mass_pct',
+  cid22_ci:'rank.cid22.srocc_ci',cid22_bwd:'rank.cid22.frac_negative'};
+// Segment-boundary prefix match — the exact rule freeze_check's ann_covers uses:
+// `rank.hfnlproxy` covers `rank.hfnlproxy.per_ref_mean`; `rank.hfnl` covers neither.
+const annCovers=(entryField,colField)=>colField===entryField
+  ||(colField.indexOf(entryField)===0&&colField.charAt(entryField.length)==='.');
+function annForCol(b,colKey){
+  const f=COL_FIELD[colKey];if(!f||!b.annotations||!b.annotations.length)return [];
+  return b.annotations.filter(id=>{
+    const m=DATA.annRegistry&&DATA.annRegistry[id];
+    return m&&(m.fields||[]).some(ef=>annCovers(ef,f));});
+}
 // Corpus label ORIENTATION (2026-08-05) — from the EXPECTED_ORIENTATION registry in
 // scripts/canonical_corpus/check_target_orientation.py (AST-read at build time; campaign
 // Appendix I). A corpus declared "distortion" carries a JND-family label (q_jnd distance /
@@ -1027,8 +1052,11 @@ function renderTable(){
     +'Rows list EVERY promoted cell (dimmed = hidden from charts; click a row to toggle it). '
     +'Hidden-by-default grid cells carry the same scalar stats as curated ones — only embedded '
     +'scatter data is curated-set-only (see the scatter section). '
-    +'<b>⚠ = registry annotation</b> (benchmarks/eval_annotations.json, hover for the reason): '
+    +'<b>⚠ = registry annotation</b> (benchmarks/eval_annotations.json — the badge sits on '
+    +'the exact number the entry caveats; hover for the reason): '
     +'dial-mono on spline-less bakes is RAW-UNIT (flattered ~3-6 pts vs real dial units); '
+    +'a k=1 CID22 draw whose seed sibling lands ~0.09 lower is flagged UNREPLICATED (context, '
+    +'never a candidate claim — R.R0); '
     +'<b>HF-NL/ref</b> = hfnlproxy per-reference mean signed SROCC (quality-oriented; per-ref, '
     +'never pooled — hover the header; Δ under the ~0.04 axis LSD is noise; 80 pre-pin cells were '
     +'sign-flipped and are REPAIRED per appendix O — see the HF-NL axis panel) — “— (absent)” on cells that predate '
@@ -1075,10 +1103,17 @@ function renderTable(){
       const v=c[3](b);
       const td=el('td',{class:(c[0]==='name'||c[0]==='regime')?'lbl':'',text:fmtCell(c[0],v)});
       if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
-      // ⚠ registry badges (benchmarks/eval_annotations.json):
-      if((c[0]==='dial_mono'||c[0]==='dial_tied')&&ANN(b,'dial-mono-raw-unit')&&v!=null){
-        td.append(el('span',{style:'margin-left:3px;cursor:help',title:'⚠ raw-unit (dial-mono-raw-unit): '
-          +annReason('dial-mono-raw-unit'),text:'⚠'}));
+      // ⚠ registry badges (benchmarks/eval_annotations.json). GENERIC (2026-08-06):
+      // any matched entry whose `fields` cover this column's dot-path badges this cell,
+      // so adding a registry entry is sufficient — no per-id JS. Only on a rendered
+      // value; the null/absent case is the dedicated block below (it rewrites the text).
+      if(v!=null){
+        const ids=annForCol(b,c[0]);
+        if(ids.length){
+          td.append(el('span',{style:'margin-left:3px;cursor:help',
+            title:ids.map(id=>'⚠ '+annKind(id)+' ('+id+'): '+annReason(id)).join('\n\n'),
+            text:'⚠'}));
+        }
       }
       if(c[0]==='hfnl'&&v==null&&ANN(b,'hfnl-absent-not-failed')){
         td.textContent='— (absent)';
