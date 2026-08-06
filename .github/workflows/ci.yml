@@ -69,7 +69,13 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --exclude zensim-wasm-tests -- --nocapture
+      # --no-fail-fast (2026-08-06, user-approved): run EVERY test target even
+      # when one fails. Without it, cargo stops at the first failing target —
+      # for three weeks the v1 golden pair's failure on non-AMD runners meant
+      # zensim-validate's (and every later crate's) suites never executed on
+      # those platforms, so red masked red and the true per-platform failure
+      # inventory was unknown.
+      - run: cargo test --workspace --no-fail-fast --exclude zensim-wasm-tests -- --nocapture
       - name: Upload test manifest
         uses: actions/upload-artifact@v7
         with:
@@ -89,8 +95,11 @@ jobs:
       # backend (hosted runners have no GPU). The gpu crates run with the
       # CubeCL CPU backend instead — their aux kernels are still executed,
       # and the CUDA/WGPU backends are compile-checked by the Clippy job.
-      - run: cargo test --workspace --all-features --exclude zensim-wasm-tests --exclude zensim-validate --exclude zensim-train-gpu -- --nocapture
-      - run: cargo test -p zensim-validate -p zensim-train-gpu --features zensim-validate/gpu-cpu,zensim-train-gpu/gpu-cpu -- --nocapture
+      # --no-fail-fast on both halves (2026-08-06, user-approved) — same
+      # rationale as the test job: a first-target failure must not hide the
+      # rest of the suite from the per-platform inventory.
+      - run: cargo test --workspace --no-fail-fast --all-features --exclude zensim-wasm-tests --exclude zensim-validate --exclude zensim-train-gpu -- --nocapture
+      - run: cargo test --no-fail-fast -p zensim-validate -p zensim-train-gpu --features zensim-validate/gpu-cpu,zensim-train-gpu/gpu-cpu -- --nocapture
 
   feature-matrix:
     name: Feature permutations
