@@ -10805,9 +10805,17 @@ They survive, and per T.R7 they make every measured axis worse.
 
 Outcome **(a)** and **(b)** are both refused by the data. The per-axis map:
 
+> *[APPENDIX-W CORRECTION, 2026-08-06 (W.R2): re-fit at CONVERGENCE — the
+> setting appendix U later made primary because 400-sweep truncation is a
+> cross-pool confound — the root-A row changes: CID22 +0.006 falls to +0.0049,
+> BELOW its 0.005 floor (retracted to "detectable, below floor"); imazen26
+> (shared λ) and nonphoto (own-best) cross INTO loss findings; KonJND +0.077
+> and CSIQ +0.029/+0.020 hold. Root-B rows are truncation-immune (≤0.0005).
+> `benchmarks/opusreview/tconv_convergence_audit_2026-08-06.tsv`.]*
+
 | block | buys | costs | inside noise |
 |---|---|---|---|
-| **v1 peak/masked/IW** f156-371 (root A) | CID22 +0.006, **KonJND +0.084**, CSIQ +0.021 | imazen26 −0.014 | LIVE; nonphoto below floor |
+| **v1 peak/masked/IW** f156-371 (root A) | ~~CID22 +0.006~~ (below floor at convergence, see above), **KonJND +0.084**, CSIQ +0.021 | imazen26 −0.014 | LIVE; nonphoto below floor |
 | **v2-348** f372-719 (root B) | **CID22 +0.044** | **CSIQ −0.071**, LIVE −0.017 | KonJND, nonphoto, imazen26 |
 | **append-224 + append2** f720-943 (root B) | *nothing* | CID22 −0.029, CSIQ −0.047, LIVE −0.017, nonphoto −0.011 | imazen26 below floor |
 
@@ -11664,7 +11672,12 @@ aggregate** (5× the floor, CI [+0.0237, +0.0294]) as a single added coordinate,
 and **+0.0256 guard-clean** when paired with its s0-B partner. It does not buy
 the high-fidelity band (ΔB9 −0.049, ΔHF-NL +0.009, both nothing). Nothing is
 shipped or selected here; it is registered as a candidate for whoever next
-builds an additive model.
+builds an additive model. *[APPENDIX-W CONTEXT, 2026-08-06 (W.R1 u2): the
++0.0265 is vs the ARM-B base, whose CID22 is 0.8209 on this instrument — the
+base+BANDING package scores 0.8474, i.e. −0.0158 [−0.0202, −0.0113] BELOW
+shipped ADD156's 0.8632 on the same instrument. The delta is real within the
+arm; it is NOT additive onto ADD156's own number. The pair's M3a, unmeasured
+here, is 0.9637 GOLD (W.R3.6).]*
 
 ### U.R8 — What this implies for F8 (recommendations; NOTHING is changed here)
 
@@ -12520,7 +12533,7 @@ takeaway's missing guard row is now measured**: M3a(`BANDING`@s0-Y+s0-B) =
 |---|---|---|
 | C1 | silent orientation loss | **AUDITED + PARTIAL**: zensim-side `.abs()` census — remaining sites are (a) the documented aggregate convention in `panel.rs` (signed twin now emitted everywhere), (b) the aggregate bootstrap-CI resample (`bake_verdict.rs:1306`, convention-consistent; folded-near-zero caveat noted — immaterial for aggregate corpus values), (c) declared display points (freeze_check JND line prints signed AND \|·\| together). `SignedStat` for zenstats = **PROPOSED** (cross-repo): a `#[must_use] SignedStat(f64)` whose `Display` is signed and whose `.display_abs()` is the only abs, making every silent `\|·\|` greppable; migration = mechanical since `srocc_signed` already flows |
 | C2 | wrong-regime reads | **LANDED** (`e39448c2`): `folded_root_conflict` + `bake_verdict --regime 944` REFUSAL, `--cross-regime` override with banner; smoke-verified on the b_sdr class (refused), ADD156 (passes), override (proceeds); 4+1 new tests |
-| C3 | era-ambiguous corrections | **HALF EXISTS, HALF DESIGNED**: verdicts ALREADY stamp per-corpus table sha256s (the provenance table in every verdict — this is how W.3.5 was checkable). Missing half: a manifest-level `corrected_from` chain (`_MANIFEST.json` gains `{sha, corrected_from: <old sha>, reason, date}`) + a `check_table_era <sha>` helper answering "pre- or post-correction" in one call. Designed, not landed (data-side manifests + one small tool) |
+| C3 | era-ambiguous corrections | **LANDED-LIGHT**: both halves turn out to exist or now do — verdicts ALREADY stamp per-corpus table sha256s (how W.3.5 was checkable), and the H-part-1 rebuild ALREADY wrote a full `target_orientation` correction block into the ext manifests (`corrected_sha256` + `preserved_inverted_sha256` + transform + repro hazard). The missing one-call reader is now `scripts/check_table_era.py <sha>`: CURRENT (rc 0) / SUPERSEDED with the hazard text (rc 3) / UNKNOWN (rc 4), scanning every `_MANIFEST.json` under the canonical roots, with a generic `*_sha256` scan so future correction-block shapes are found without editing the tool. Verified on both kadid shas + a garbage sha |
 | C4 | sub-agent report drift | **LANDED**: `scripts/verify_push.sh` — fetch + ancestry + ONE verbatim-pastable line (`VERIFY-PUSH OK <sha> is-ancestor-of <ref> checked=<ts>`), git path in the primary, jj fallback in workspaces (where `git rev-parse` silently fails — the same failure that blanked the .meta provenance); FAIL exits 1. Both paths smoke-verified. Supervisors: require the line, then re-run the command yourself |
 | C5 | fail-silent emitters | **LANDED** (`84c91c6b`): all-rows-missing ⇒ REFUSE; any-missing ⇒ nonzero + `missing_source_rows` in the .meta; `repo_commit()` git→jj→HARD-ERROR (never blank); `--only/--date` for targeted regen; the R2 ladder regenerated (identical to the recovered workspace copy) + R.R2 resolved |
 | C6 | substring identity lookups | **AUDITED — owners clean**: promoter/board/dominance/gauntlet lookups are exact dict/set membership or intended prefix-taxonomy; the `W10L9_s4003 ⊂ _packed` trap lives in ad-hoc `--glob`/grep — use anchored patterns (`.../W10L9_s4003.bin`, never `*W10L9_s4003*`) |
@@ -12553,7 +12566,8 @@ takeaway's missing guard row is now measured**: M3a(`BANDING`@s0-Y+s0-B) =
 ### W.R7 — what this review did NOT get to (honest list)
 
 - `SignedStat` implementation (cross-repo, zenstats) — proposed only.
-- C3's manifest `corrected_from` chain + `check_table_era` — designed only.
+- C3's remaining tail: adopting correction blocks for *future* correction
+  classes beyond target-orientation (the tool already scans generically).
 - k2's kernel-level wiring re-trace (counts + doc citations verified; the
   extractor source was not independently re-walked).
 - U's λ-sensitivity full-grid deviation and the U.R5d shortlist were not

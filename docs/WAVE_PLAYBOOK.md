@@ -28,9 +28,18 @@ The compute was fine. The orchestration around it was the whole loss.
                      (the endgame script runs this — see below)
 7. REVIEW FOREGROUND read the endgame's tables + doc DRAFT; judge; finalize
 8. PUSH + VERIFY     jj bookmark set main -r @ && jj git push --bookmark main
-                     git merge-base --is-ancestor @ main@origin
+                     scripts/verify_push.sh <sha>   # paste its OK line VERBATIM
 9. CLEAN UP          workspace forget + rm -rf; drop your .workongoing line
 ```
+
+`scripts/verify_push.sh` (appendix W, C4) is the required form of step 8's
+verification: it fetches, ancestry-tests, and prints ONE line
+(`VERIFY-PUSH OK <full-sha> is-ancestor-of origin/main checked=<ts>`) that a
+sub-agent's report must paste verbatim and a supervisor re-runs — it works
+from secondary jj workspaces too, where bare `git` silently fails. "The agent
+said it pushed" is not evidence; this line is. For process waits, source
+`scripts/lib/proc.sh` (C7) instead of hand-rolling pgrep — `pgrep -f`
+self-matches your own wrapper shell and has burned multi-hour waits twice.
 
 Steps 4 and 5 make a late wake-up **free** and a dead waiter **visible**. The
 `--then` endgame (added 2026-08-05) makes the wake-up itself **optional**: the
@@ -299,7 +308,7 @@ Terminal checklist:
 ```bash
 just lint-scripts                              # any script you added
 jj bookmark set main -r @ && jj git push --bookmark main
-git -C /home/lilith/work/zen/zensim merge-base --is-ancestor @ main@origin
+scripts/verify_push.sh <sha>                   # paste the VERIFY-PUSH OK line
 jj workspace forget <name> && rm -rf <path>    # mandatory on merge
 ```
 
