@@ -12369,3 +12369,346 @@ coordination: gates3 is live on freeze_check + workflows — this lane rebases
 and does not touch either; every commit pushed + `merge-base --is-ancestor`
 verified. Nothing ships, swaps, or is selected here; gate changes, if any
 fall out, are REGISTERED-PENDING-USER-ACK per V.5's precedent.
+
+
+---
+
+# REGISTERED APPENDIX X — THE LINEAR REVISIT + THE BANDVIS-ON ADJUDICATION (2026-08-06, pre-registered before any fit or extraction)
+
+(Appendix W = the concurrent opus-era deep-review lane, registered minutes
+before this one; this lane was directed to register as X.)
+
+User directive: **"revisit linear models and bandvis inclusion"** — two
+threads, each with fresh evidence behind it since its last adjudication.
+
+## X.0 Why this exists
+
+**Thread 1 (linear).** The additive/linear class looks stronger after this
+week's corrections than its era reputation: ADD156 is byte-reproducible EXACT
+(T.R2), the board's steer leader (M3a 0.954), 837 B packed rank-exact, and its
+one *spurious* floor fail (F8 on the degenerate B9) was retired by appendix V's
+banding redesign. Appendix T mapped per-block VALUE for additive models —
+knowledge no prior linear campaign had. Appendix U found `BANDING`@s0 worth
++0.0265 CID22 as a single coordinate, guard-clean with its s0-B partner. And
+every prior wide-mix linear result (E-LIN max 0.8319; sota944 arm A max 0.8203)
+was fit on the **INVERTED KADID leg** (appendix F; fixed 2026-08-05 `176c4268`)
+and without T's pool map. Nobody has fit the best-informed additive candidate.
+
+**Thread 2 (BANDVIS).** The P1.5 adjudication (2026-08-02) left the
+`append2_dst_activity` toggle **OFF** for all canonical extraction — both
+*masking* arms failed their suppression gates — but the SHIPPED GAIN-only
+combine (arm-2 pooling weight on GAIN, LOSS bit-identical) **passed its LYB
+external read** (GAIN-vs-MOS SROCC up at every scale, 2× pooled) and was left
+as "the P3/LOO research surface at zero re-implementation cost". Since then:
+the append2 coverage fix (`299ccc8c`) made BANDVIS_GAIN/LOSS spatializable
+class-E slots with exact integrands; the campaign winner `W10L9_s4003`'s LOO
+measured the BANDVIS lanes **KEEP (+0.0266)** and the append2 block KEEP
+(+0.0882) — the winner genuinely uses these lanes, so §7.3's "moot if ~0
+weight" clause does NOT fire; and appendix U's BANDING finding is adjacent
+evidence that banding-family signal carries real CID22 value. The training-side
+half of the acceptance (does the ON *definition* make a better trained model?)
+has never been run. This appendix runs it.
+
+## X.1 Priors — facts on disk, established BEFORE this protocol (cited, not re-measured)
+
+- **P1 (T.R6-T.R10, the pool map):** v1 peak/masked/IW (f156-371, root A) buys
+  KonJND +0.084 + CSIQ +0.021 but **collapses M3a 0.954 → 0.626**; v2-348
+  (f372-719, root B) buys CID22 +0.044 and RAISES M3a to 0.981, selling CSIQ
+  −0.071 / LIVE −0.017; append-224+append2 (f720-943) as a free block buys
+  nothing. λ band {3e-4, 1e-3, 2e-3, 5e-3}, root-B best AT the 5e-3 edge.
+- **P2 (U.R5b):** `BANDING`@s0-Y (f428) singleton = +0.0265 CID22
+  (CI [+0.0237, +0.0294], 5× floor) with CSIQ −0.0113 (past floor); paired
+  with @s0-B (f457) = +0.0256 guard-CLEAN. Only scale 0 survives the guards.
+- **P3 (U P2/U.2):** ADD156's 28-coefficient support is a 400-sweep truncation;
+  converged support is 26. Differential truncation across pool sizes is a
+  confound ⇒ converged sweeps are the clean primary for pool comparisons.
+- **P4 (V.R2/V.R4):** the banding owner is `zensim_validate::bands`
+  (`merged-decile-2026-08-06`); CID22's top usable band is `B8-B9` (n=1425,
+  span 0.119); F8 reads SIGNED usable tails, floor **BAND_HIGH = 0.09
+  FINAL** (user ack 2026-08-06, landed `117ed5db` concurrently with this
+  registration; floors here are read with that `freeze_check` and the build
+  commit is recorded).
+- **P5 (T.R11):** `pack --zerobias-bulk 0` is the sparse-additive packing rule
+  (default 0.005 costs −0.0069 CID22 on a 28-coefficient bake); pruning alone
+  is rank-exact and 4.3×.
+- **P6 (K.R2/K.R3):** the campaign incumbent is `W10L9_s4003` (7/8 floors,
+  CID22 0.8867, KonJND 0.4988, CSIQ 0.9330, LIVE 0.9608, HF-NL 0.7333, M3a
+  0.8626); its BANDVIS-lane LOO is KEEP +0.0266, append2 KEEP +0.0882.
+- **P7 (P1.5 record `bandvis_dst_activity_2026-08-02.md`):** the toggle is
+  `V2NewFeatureToggles::append2_dst_activity` (driver env
+  `ZENSIM_APPEND2_DSTACT=1`; requires `append2_block`). ON moves ONLY the four
+  BANDVIS_GAIN slots {f924, f929, f934, f939}; LOSS is bit-identical by
+  construction; toggle-OFF is byte-stable (F10 5/5 + LYB 960-pair
+  byte-identity). Perf ON: +3.1% median paired (loaded box), ≈+5% recorded
+  estimate; heap +2.37 MB. LYB read ON: GAIN-vs-MOS SROCC −0.113/−0.164/
+  −0.235/−0.245 per scale vs OFF −0.023/−0.094/−0.123/−0.163; LOSS untouched.
+- **P8 (extraction economics, measured 2026-07-27 run log):** the full 11-leg
+  canonical extraction at 924 took **34.5 min** wall (safesyn 111,068 pairs =
+  30.2 min); 944 is +1.79%. konjnd_bpg pairs TSVs exist
+  (`/mnt/v/output/zensim/wave7/konjnd_bpg_{train,val}_pairs.tsv`).
+- **P9 (instrument state, verified in source today):** `v2_ab_extract` honors
+  `ZENSIM_APPEND2_DSTACT` on every append2-bearing mode;
+  `diffmap_block_coherence` does NOT (it constructs default toggles) — an
+  owner extension is required for ON-arm M3a and is registered as work item
+  X-I1. `bake_verdict --features-root` exists (the LOO-root mechanism).
+- **P10 (gram state):** the sota944 `grams/kadid_*.npz` were built 2026-08-03
+  from the INVERTED table — every kadid-bearing gram used here is REBUILT from
+  the corrected `ext_kadid.parquet` (sha `286f1b23…` re-verified before
+  building). Root-A grams (`linear-probe/grams/*.npz`, 2026-07-03) are from
+  the correctly-oriented 372-root tables (T.R3) and are reused frozen; root-A
+  `cmd_gram` min-max-normalized targets per corpus, so root-A grams are
+  mm01-convention by construction.
+
+## X.2 Thread 1 — the best-informed additive/linear grid (frozen)
+
+**One recipe held at ADD156's values** (raw feature space, lasso CD, tau 0,
+f16 pack, spline fit on the packed forward), varied on exactly four registered
+axes. The solver is deterministic coordinate descent — **no RNG anywhere, so
+k-seed replication does not apply and is not run**; fit noise is identically
+zero and the only modelled noise is eval sampling (T.2/T.3 precedent).
+
+**Pools (coordinate-slice files, committed):**
+
+| pool | root | slice | why (the T/U-informed prior) |
+|---|---|---|---|
+| `a944` | B | f0-155 | control (ADD156 pool at the 944 root) |
+| `c944` | B | f0-719 | **the informed pool**: v2-348 YES (CID22 + M3a), append NO; BANDING@s0 pair (f428/f457, in-slice) available |
+| `cb944` | B | f0-719 ∪ {f924,925,929,930,934,935,939,940} | c944 + the 8 BANDVIS lanes (arm-A B+ precedent: KonJND +0.02-0.03); doubles as Thread 2's additive OFF-arm |
+| `a` | A | f0-155 | control (= ADD156 exactly, at its own root) |
+| `b` | A | f0-371 | the v1 KonJND lever (+0.084), **M3a-gated** — kept only if coherence survives; T measured collapse in the free fit, this re-asks under the wider mix |
+
+**Mixes (per-corpus mass weights in the standardized MixGram):**
+
+| mix | composition | targets |
+|---|---|---|
+| `Ms` | safesyn 1.0 | ADD156's own mix — control/bridge to T |
+| `M4` | safesyn 1.0 + cid22t201 1.0 + kadid 0.5 + tid 0.5 | the AM1-class 4-corpus mix, **corrected kadid** — the registered "post-KADID 4-corpus" question |
+
+Target convention: **mm01 primary** (recipe-faithful — ADD156's lineage
+min-max-normalizes per corpus; T.A1). One **raw-×100-clip−100 robustness
+family** at (c944 × M4 × all λ), mirroring T.A1's dual-arm practice: agreement
+between conventions is the robustness check, disagreement is reported.
+
+**λ ∈ {3e-4, 1e-3, 2e-3, 5e-3, 1e-2}** — T's calibrated band plus ONE
+registered extension point (1e-2), because T's root-B best sat at its 5e-3 grid
+edge (P1); the extension exists to see the turnover, and no further post-hoc λ
+growth is permitted.
+
+**Sweeps: PRIMARY = converged (`--n-sweeps 200000`, CD exits on tol; P3).**
+The 400-sweep recipe-faithful setting is run as a cross-check on the two base
+pools and every finalist; a finding that does not hold at both settings is
+reported sweep-dependent and does not stand (U's rule).
+
+**BVLS arm (the directive's second solver):** 2 cells — pool c944 × {Ms, M4},
+`--solver bvls --bounds-tsv benchmarks/feature_sign_mask_2026-05-26.tsv`,
+mm01 targets (B's kon-head mechanism), λ-free. Deterministic; same eval.
+
+**Cell count:** root-B lasso 3×2×5 = 30, root-A lasso 2×2×5 = 20, raw-arm 5,
+BVLS 2 ⇒ **57 fits** (+ 400-sweep cross-checks). Anchors: root B =
+`anchor944_dial.parquet` (`--anchor-target target_score`; T/K convention —
+NOTE registered: if its kadid rows predate the wave-10 rebuild the spline
+absorbs inverted-y rows; the spline is monotone so every RANK axis is
+invariant, only dial-unit values could shift, and the same anchor is used for
+every cell so comparisons are internal); root A = the frozen
+`linear-probe/val/anchor.npz`.
+
+**Evaluation (owners only):** `bake_verdict --full-json` per cell — root-A
+cells at `--regime 372` with T's explicit corpora list (sdr25/hfnl ABSENT
+there, reported absent, never failed); root-B at `--regime 944`. Grid TSV in
+the T format + `kadid_signed`. KADID is read as `srocc_signed`, un-negated
+(post-rebuild verdicts, T.R3's era-scope rule); KADID/TID remain train==val
+guards, never gates.
+
+## X.3 Thread 1 — noise bands, selection, outcomes (frozen BEFORE any number)
+
+**Noise instrument:** paired bootstrap over eval pairs (B=2,000; B=4,000 on
+band tails), seed 20260806, both models on the SAME resampled index sets,
+statistics from `panel --batch` via `scripts/wave6_paired_bootstrap.py`. A
+delta is a FINDING only if the 95% CI excludes 0 AND |Δ| ≥ the axis floor:
+**CID22 0.005, KonJND / HF-NL-per-ref 0.039, every other rank axis 0.010**
+(T.3's registered floors, unchanged). Comparator for every "vs ADD156" claim =
+the byte-identical repro `T_a_lam2e-3` (sha `51437a34…`).
+
+**Selection:** screen all cells by balanced floor count (post-gates3
+`freeze_check`, new banding) then `balanced_composite`; the top 6 get fulleval
+(incl. measured M3a, never carried); `freeze_check --select` over those 6 +
+the ADD156 repro picks the winner (E.4 rule: floors, tie-break composite +
+0.15·M3a; UNMEASURED M3a not selectable).
+
+**Winner battery (T.5 pattern):** floors n/8 under the NEW banding with
+absent-vs-failed distinguished; M3a (post-`299ccc8c`); G-RANGE on ext_cid22val;
+`pack --neg-tail --zerobias-bulk 0` (P5) with dial-unit mono + rank-exactness
+check; corruption from the fulleval (dial-alone honesty row; the 944 head
+`corrhead944_s13` joint for root-B winners); steering note (additive class =
+exact fixed gradient; M3a is the steer read). Era-tagged scorecard vs
+**ADD156-repro, B (shipped), winner_dial, C_em944_s31_packed, W10L9_s4003**
+(cross-era rows labeled, K.7's KADID cohort rule).
+
+**The ADD156 recount (the directive's explicit question):** `freeze_check`
+(post-gates3) on ADD156's recut board fulleval AND on the repro's fresh
+fulleval — does retiring the degenerate B9 lift it from 5/8 to 6/8? Answer
+stated either way with the failing floors named.
+
+**Registered outcomes (exactly one fires):**
+
+- **(a) NEW BEST-LINEAR** — some cell beats the ADD156 repro's floor count, or
+  ties it and beats its `balanced_composite`, with no guard regression outside
+  noise ⇒ candidate report, **user-gated; nothing ships**.
+- **(b) PARITY** — no cell does ⇒ ADD156 remains the class champion, now
+  validated under the corrected mix + modern process; say so.
+- **(c) CLASS BOUNDARY** — the additions that helped the MLP class (corrected
+  4-corpus mix; wider pools) HURT the additive class outside noise ⇒ state the
+  boundary finding with the per-axis map.
+
+Independent of (a)/(b)/(c): the per-axis, per-block map is always reported
+(T.R9's four-column discipline, M3a included), and the BANDING@s0 pair's
+behaviour inside the informed pool is reported against U's constrained-addition
+prior.
+
+## X.4 Thread 2 — the BANDVIS-ON paired arms (frozen)
+
+**The question:** should canonical extraction flip `append2_dst_activity` ON
+(the shipped GAIN-only combine)? This is the training-side half of the P1.5
+acceptance, never run. A flip is a **REGIME event** (full re-extraction of
+every canonical table); the decision is the user's — this appendix produces
+the paired evidence.
+
+**X-E1 Extraction (the registered slice = the full 11-leg local canon +
+konjnd_bpg):** re-extract with `ZENSIM_APPEND2_DSTACT=1 ZENSIM_AB_MODE=foldapp2`
+via the committed driver (same pairs TSVs as `extract_944_canonical.sh` + the
+two konjnd_bpg TSVs) into `/mnt/v/zen/zensim-training/ext944-dstact-2026-08-06/`
+(promoted parquets mirroring the canonical layout + `_MANIFEST.json` with
+`build_commit`; Tower mirror). Cost ≈ 40 min (P8). **REGIME PURITY: ON rows
+are a different feature definition for GAIN — never column-mixed into any
+canonical table; the ON root exists only for this appendix's paired arms.**
+
+**GATE X-G1 (lanes-only at corpus scale; STOP gate):** per leg, every column
+except {f924, f929, f934, f939} must be value-identical to the stored
+canonical parquet row-for-row, and the four GAIN columns must differ on >0
+rows. This replicates P1.5's lanes proof at full-corpus scale and
+simultaneously proves row alignment. Any other column moving ⇒ STOP (either
+the toggle leaks or the environment drifts — both invalidate the arms).
+
+**X-A1 Additive paired arms (deterministic, no seeds — free inference):**
+pool `cb944` × mixes {Ms, M4} × the 5-λ grid, fit identically on the OFF grams
+(Thread 1's) and on ON grams built from the ON tables with the same commands.
+Reads: (i) GAIN-lane weight census per definition; (ii) per-axis paired
+bootstrap Δ(ON−OFF) at matched (mix, λ) — valid because X-G1 proves identical
+row sets; each arm is evaluated on its own definition's feature tables.
+
+**X-A2 MLP paired arms (k=2 × 2 arms = 4 trainer cells):** recipe = the
+wave-10 L9 argv (`WAVE10_ECHO=1` extraction) restricted to its six local legs
+— safesyn, cid22_train, kadid, tid, konjnd_bpg, konjnd_bpg_val — dropping
+bigcodec / kadis / the two teacher legs (not ON-extractable at experiment
+cost; the drop is IDENTICAL across arms so the paired Δ stays internally
+valid; stated as the scope limit). Seeds {6101, 6103} (grepped disjoint from
+every campaign family). Arm OFF trains on the canonical root, arm ON on the
+dstact root; same trainer binary, sha recorded. Local, `run-heavy`, ≤2
+concurrent, box trainer census ≤4 combined checked before each launch.
+
+**Evaluation of arms:** each cell `bake_verdict --regime 944 --features-root
+<matching-definition root>` + fulleval (`ZENSIM_FULLEVAL_OUT` = this
+appendix's dir — experiment cells do NOT enter the board). The ON root
+symlinks the bigcodec-derived slices (nonphoto / imazen26 / hfnlproxy) and the
+dial grid from canonical — those axes carry a **4-column mismatch caveat** for
+ON cells, bounded by the model's GAIN-lane weight share (reported per cell).
+Per-band rows come from the appendix-V owner automatically. M3a: via X-I1
+(below) with the env set for ON cells.
+
+**X-I1 Owner extension (committed with a test):** `diffmap_block_coherence`
+honors `ZENSIM_APPEND2_DSTACT=1` exactly as `v2_ab_extract` does (P9), so
+ON-arm M3a is measured on ON-definition features. OFF behaviour byte-stable
+(default unchanged).
+
+**X-L1 The LYB model-level read:** forward each MLP arm (and the best additive
+pair) over the 960-pair LYB features of its OWN definition (the P1.5 pipeline's
+arm CSVs if still on disk, else re-extracted from the Tower videos by the
+committed pipeline); per-video mean prediction → SROCC vs MOS over the 120
+distorted videos, computed through `panel`/`zen_stats`. Registered read:
+Δ(ON−OFF) with a paired bootstrap CI over videos; n=120, so this is
+SUPPORTING evidence — no magnitude floor is claimed for it.
+
+**X-C1 CPU delta (quiet-box):** interleaved ABBA 1-thread compute-only rounds
+(≥6) on aic3-100, foldapp2 OFF vs ON, run when the box trainer census is 0;
+report the median paired ratio beside P1.5's loaded-box +3.1% and the recorded
+≈+5% estimate. **Registered acceptability bar for outcome (a): quiet-box
+median ≤ +5%.**
+
+## X.5 Thread 2 — noise bands + outcomes (frozen BEFORE any number)
+
+- **Additive arms:** T.3 floors + paired bootstrap (X.3's instrument),
+  B=2,000, seed 20260806.
+- **MLP arms (k=2, paired by seed):** a per-axis finding requires BOTH seeds'
+  Δ(ON−OFF) to share a sign AND |mean Δ| ≥ the axis floor (CID22 0.005,
+  KonJND / HF-NL 0.039, other rank axes 0.010, **M3a 0.10** — conservative:
+  the coherence study measured ~42% of M3a variance as seed noise, k=6 span
+  ≈0.14, so a k=2 M3a delta under 0.10 is not evidence). k=2 supports only
+  this weak claim and the appendix says so; the deterministic additive arms
+  carry the precise inference.
+- **Primary axes for the toggle question:** CID22, KonJND, nonphoto, sdr25,
+  HF-NL-per-ref, M3a, the LYB model read. **Guards:** every other rank axis +
+  dial mono (must not regress outside floor).
+- **If the additive and MLP reads disagree, the MLP read governs the
+  recommendation** (production models are MLP-class); the disagreement itself
+  is reported. Registered now so it is not a post-hoc choice.
+
+**Registered outcomes (exactly one fires):**
+
+- **(a) FLIP RECOMMENDED** — ON wins outside noise on ≥1 primary axis, no
+  guard regression outside noise, and the X-C1 bar holds ⇒ recommend flipping
+  the canonical toggle as a REGISTERED DECISION FOR THE USER, with the full
+  re-extraction cost stated from measured rates (all canonical legs + bigcodec
+  5.7M + kadis 700k + eval grids). Nothing is flipped by this appendix.
+- **(b) INERT** — nothing outside noise on any primary axis in either arm
+  class ⇒ the toggle stays OFF and the question closes with data.
+- **(c) MIXED** — gains and losses both outside noise ⇒ report the trade
+  per-axis; the toggle stays OFF pending the user's read.
+
+## X.6 Ops (frozen)
+
+Workspace `../zensim--linbandvis` (jj `linbandvis`),
+`CARGO_TARGET_DIR=$HOME/tmp/zensimlb-target`, `run-heavy --jobs 6` for every
+heavy step, logs `~/tmp/linbandvis/`, never `/tmp`. Artifacts
+`/mnt/v/output/zensim/bakes/linbandvis/` (+ ON root above); fullevals in the
+appendix dir, NOT the board. Trainer cells coordinate with live lanes (≤4
+combined, census-checked). `harvest_bakes.sh` per MLP bake; ONE
+`await_artifacts.sh` waiter on the terminal condition; endgame foreground.
+Sparse packs use `--zerobias-bulk 0` (P5). Deterministic fits carry
+`--emit-fit-npz` + embedded repro where the chain supports it. Push + PASTE
+`merge-base --is-ancestor` verification per commit; Tower mirror + sha
+spot-check for the ON root and any battery bakes; full cleanup (workspace,
+target dir, `.workongoing` lines). **No gate is relaxed; honest nulls stand;
+nothing ships, swaps, or flips — every ship/flip decision is the user's.**
+
+## X.7 Confounds + limitations (registered before any number)
+
+1. **Thread 1's M4 mix is AM1-class, not the full corrected mix** — no
+   bigcodec/kadis mass (pitfall list: bigcodec poisons linear CID22, cited not
+   re-measured). A linear cell's gap to the MLP incumbent partly reflects that
+   scope, and the report says so.
+2. **Root A and root B remain different row populations** (T.7); cross-root
+   deltas are never quoted as feature effects; the bridge cells price the root.
+3. **λ is on the mean-loss scale** — equal λ is not equal shrinkage across
+   target conventions; the dual-convention family exists precisely to check
+   sensitivity, and per-convention bests are reported.
+4. **Thread 2's MLP arms are k=2** — the weakest instrument here, and the one
+   closest to production. The paired-by-seed design (same seed, same argv, same
+   binary, data differing in exactly 4 columns) removes recipe noise but not
+   seed×data interaction; the registered both-signs rule is the defence.
+5. **The ON arm's bigcodec-derived eval axes carry a 4-column feature
+   mismatch** (bounded by the reported GAIN weight share) — those axes are
+   secondary for the toggle read.
+6. **The LYB read is 120 videos** of one genre family, frame-sampled FR — the
+   P1.5 caveat carries; supporting evidence only.
+7. **The corruption axis is not a paired-arm endpoint** (head + grid are
+   OFF-definition instruments); the winner-battery corruption rows in Thread 1
+   are reported as usual.
+8. **Multiplicity:** Thread 1 evaluates ~60 cells against shared eval corpora;
+   CIs are correlated and no formal correction is applied (T.7's statement
+   carries). The two-convention and two-sweep replication requirements are the
+   defence.
+9. Floors are read at the **post-gates3 `freeze_check`** (BAND_HIGH finalize
+   is landing concurrently); the gate build/commit is recorded next to every
+   floor table. If the gate moves mid-appendix, every floor count is re-read at
+   the final build before any conclusion is stated.
+10. Nothing here ships, swaps, flips a toggle, or enters the board.
