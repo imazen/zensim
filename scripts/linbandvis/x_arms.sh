@@ -56,7 +56,8 @@ cmd_onroot() {
 
 # --------------------------------------------------------------- ongrams ----
 build_on_gram() {  # $1 name  $2 parquet
-    local name=$1 pq=$2 out="$G/xon_${name}_mm.npz"
+    local name=$1 pq=$2
+    local out="$G/xon_${name}_mm.npz"
     [[ -f $out ]] && { echo "[ongram] $name cached"; return; }
     echo "== ongram $name =="
     "${NI[@]}" "$BDR" gram --parquet "$pq" --target human_score --target-minmax01 \

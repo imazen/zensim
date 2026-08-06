@@ -1,0 +1,5 @@
+appendix X Thread-1 grid + paired bootstrap.
+git build commit: 2812e3f818bcb3b1a9ed557e3778d59ba6c09d86
+fits: bake_dial_refit fit-lasso, converged sweeps 200000, deterministic (no seeds)
+grid: scripts/linbandvis/x_pools.sh; bootstrap: wave6_paired_bootstrap.py B=2000 seed 20260806
+bakes+verdicts+fit-npz: /mnt/v/output/zensim/bakes/linbandvis/

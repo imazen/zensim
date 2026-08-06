@@ -1,0 +1,30 @@
+== cid22
+comparison                     median d       2.5%      97.5%   P(d>0)
+X_c944_Ms_mm_lam5e-3 - X_ADD156repro   -0.00783   -0.01241   -0.00271    0.000
+X_cb944_Ms_mm_lam1e-2 - X_ADD156repro   -0.01089   -0.01664   -0.00483    0.000
+X_a944_Ms_mm_lam5e-3 - X_ADD156repro   -0.05213   -0.05818   -0.04621    0.000
+== konjnd
+comparison                     median d       2.5%      97.5%   P(d>0)
+X_c944_Ms_mm_lam5e-3 - X_ADD156repro   -0.04824   -0.09092   -0.00951    0.007
+X_cb944_Ms_mm_lam1e-2 - X_ADD156repro   -0.02649   -0.07224   +0.01568    0.119
+X_a944_Ms_mm_lam5e-3 - X_ADD156repro   -0.02620   -0.04770   -0.00365    0.009
+== nonphoto
+comparison                     median d       2.5%      97.5%   P(d>0)
+X_c944_Ms_mm_lam5e-3 - X_ADD156repro   -0.00231   -0.00492   +0.00031    0.047
+X_cb944_Ms_mm_lam1e-2 - X_ADD156repro   -0.01657   -0.01941   -0.01361    0.000
+X_a944_Ms_mm_lam5e-3 - X_ADD156repro   -0.00303   -0.00503   -0.00104    0.002
+== imazen26
+comparison                     median d       2.5%      97.5%   P(d>0)
+X_c944_Ms_mm_lam5e-3 - X_ADD156repro   +0.00008   -0.00219   +0.00227    0.527
+X_cb944_Ms_mm_lam1e-2 - X_ADD156repro   -0.01106   -0.01348   -0.00870    0.000
+X_a944_Ms_mm_lam5e-3 - X_ADD156repro   -0.00069   -0.00245   +0.00095    0.203
+== csiq
+comparison                     median d       2.5%      97.5%   P(d>0)
+X_c944_Ms_mm_lam5e-3 - X_ADD156repro   -0.05418   -0.07015   -0.03690    0.000
+X_cb944_Ms_mm_lam1e-2 - X_ADD156repro   -0.06331   -0.07945   -0.04635    0.000
+X_a944_Ms_mm_lam5e-3 - X_ADD156repro   +0.01708   +0.00494   +0.03102    0.996
+== live
+comparison                     median d       2.5%      97.5%   P(d>0)
+X_c944_Ms_mm_lam5e-3 - X_ADD156repro   -0.02866   -0.03788   -0.02083    0.000
+X_cb944_Ms_mm_lam1e-2 - X_ADD156repro   -0.03095   -0.04081   -0.02274    0.000
+X_a944_Ms_mm_lam5e-3 - X_ADD156repro   -0.01143   -0.01590   -0.00760    0.000

@@ -63,7 +63,8 @@ build_slices() {
 # ---------------------------------------------------------------- grams -----
 # Root-B grams from the canonical tables (mm01 + raw conventions).
 build_gram() {  # $1 name  $2 parquet  $3 conv(mm|rw)
-    local name=$1 pq=$2 conv=$3 out="$G/xg_${name}_${conv}.npz"
+    local name=$1 pq=$2 conv=$3
+    local out="$G/xg_${name}_${conv}.npz"
     [[ -f $out ]] && { echo "[gram] $name/$conv cached"; return; }
     local args=(gram --parquet "$pq" --target human_score --space raw
                 --expect-n-feat 944 --out "$out")
@@ -198,7 +199,8 @@ cmd_eval() {
 # ------------------------------------------------------------------ dump ----
 read -r -a BOOT_CORPORA <<<"${ZL_BOOT_CORPORA:-cid22 konjnd nonphoto imazen26 csiq live}"
 do_dump() {  # $1 stem  $2 root  $3 corpus
-    local stem=$1 root=$2 corpus=$3 f="$DUMP/${stem}_${corpus}.tsv"
+    local stem=$1 root=$2 corpus=$3
+    local f="$DUMP/${stem}_${corpus}.tsv"
     [[ -f $f ]] && return
     local regime=944 extra=()
     [[ $root == A ]] && regime=372
