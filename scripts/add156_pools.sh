@@ -60,10 +60,21 @@ pool_spec() {
         b944) echo "B 944 371" ;;
         c944) echo "B 944 719" ;;
         d944) echo "B 944 943" ;;
+        # AMENDMENT T.A1 (2026-08-06, after the first 24 cells): root B's first
+        # gram used the RAW target, but ADD156's own gram normalizes the target
+        # per corpus with minmax01 (`y' = clip((y-q0.001)/(q0.999-q0.001),0,1)`,
+        # ybar 0.768) — so the raw-target root-B arm was NOT recipe-faithful and
+        # its least squares is dominated by a handful of catastrophic-tail rows
+        # (safesyn's target reaches -7.39). The `m` pools re-run root B on a
+        # `gram --target-minmax01` build (ybar 0.770, matching root A). BOTH arms
+        # are kept and reported; neither replaces the other.
+        a944m) echo "M 944 155" ;;
+        c944m) echo "M 944 719" ;;
+        d944m) echo "M 944 943" ;;
         *) echo "unknown pool $1" >&2; exit 2 ;;
     esac
 }
-POOLS=(a b a944 b944 c944 d944)
+POOLS=(a b a944 b944 c944 d944 a944m c944m d944m)
 
 slice_file() {   # $1 = pool ; emits path (built on demand, never for a full pool)
     local pool=$1; read -r _root width hi <<<"$(pool_spec "$pool")"
@@ -79,16 +90,18 @@ do_fit() {
     local stem="T_${pool}_lam${lam}"
     local bin="$B/$stem.bin" npz="$B/$stem.fit.npz"
     [[ -f $bin ]] && { echo "[fit] $stem cached"; return; }
-    local args=(fit-lasso --space raw --target human_score --lam "$lam" --tau 0
+    local tgt=human_score; [[ $root == M ]] && tgt=human_score__mm01
+    local args=(fit-lasso --space raw --target "$tgt" --lam "$lam" --tau 0
                 --n-sweeps 400 --tol 1e-10 --emit-fit-npz "$npz" --out "$bin")
     local sf; sf=$(slice_file "$pool")
     [[ -n $sf ]] && args+=(--slice-file "$sf")
-    if [[ $root == A ]]; then
-        args+=(--gram "$LP/grams/safesyn.npz" --weight 1.0 --anchor "$LP/val/anchor.npz")
-    else
-        args+=(--gram "$G/e944_safesyn.npz" --weight 1.0
-               --anchor-parquet "$E944/anchor944_dial.parquet" --anchor-target target_score)
-    fi
+    case $root in
+        A) args+=(--gram "$LP/grams/safesyn.npz" --weight 1.0 --anchor "$LP/val/anchor.npz") ;;
+        B) args+=(--gram "$G/e944_safesyn.npz" --weight 1.0
+                  --anchor-parquet "$E944/anchor944_dial.parquet" --anchor-target target_score) ;;
+        M) args+=(--gram "$G/e944_safesyn_mm01.npz" --weight 1.0
+                  --anchor-parquet "$E944/anchor944_dial.parquet" --anchor-target target_score) ;;
+    esac
     echo "== fit $stem =="
     "${NI[@]}" "$BDR" "${args[@]}" 2>&1 | tee "$LOG/$stem.fit.log"
 }
@@ -99,7 +112,7 @@ do_eval() {
     local stem="T_${pool}_lam${lam}"
     local bin="$B/$stem.bin" vj="$VD/$stem.full.json"
     [[ -f $vj ]] && { echo "[eval] $stem cached"; return; }
-    local regime=372; [[ $root == B ]] && regime=944
+    local regime=372; [[ $root == B || $root == M ]] && regime=944
     local extra=()
     # The 372 root predates the sdr25 + hfnlproxy corpora (they exist only as
     # ext720/ext944 extractions), and `--regime 372`'s default list now asks
@@ -123,13 +136,16 @@ cmd_eval() { for p in "${POOLS[@]}"; do for l in "${LAMS[@]}"; do do_eval "$p" "
 # registered paired-bootstrap instrument) reduces the dumps through
 # `panel --batch`.
 DUMP=$OUT/perpair
-BOOT_CORPORA_A=${BOOT_CORPORA_A:-cid22 konjnd nonphoto imazen26 csiq live}
-BOOT_CORPORA_B=${BOOT_CORPORA_B:-cid22 konjnd nonphoto imazen26 csiq live}
+# Arrays, not strings: `${VAR:-a b c}` inside "${VAR[@]}" would expand to ONE
+# element containing the whole list (and bake_verdict would be handed a single
+# bogus corpus name). Override with e.g. ZL_BOOT_CORPORA_A="cid22 csiq".
+read -r -a BOOT_CORPORA_A <<<"${ZL_BOOT_CORPORA_A:-cid22 konjnd nonphoto imazen26 csiq live}"
+read -r -a BOOT_CORPORA_B <<<"${ZL_BOOT_CORPORA_B:-cid22 konjnd nonphoto imazen26 csiq live}"
 
 do_dump() {   # $1 = cell stem (T_<pool>_lam<l>) ; $2 = pool ; $3 = corpus
     local stem=$1 pool=$2 corpus=$3
     read -r root _w _hi <<<"$(pool_spec "$pool")"
-    local regime=372; [[ $root == B ]] && regime=944
+    local regime=372; [[ $root == B || $root == M ]] && regime=944
     local f="$DUMP/${stem}_${corpus}.tsv"
     [[ -f $f ]] && return
     "${NI[@]}" "$BV" --bake "$B/$stem.bin" --regime "$regime" --corpora "$corpus" \
@@ -143,7 +159,7 @@ cmd_dump() {
     for spec in $cells; do
         local pool=${spec%%:*} lam=${spec##*:}
         read -r root _w _hi <<<"$(pool_spec "$pool")"
-        local list=("${BOOT_CORPORA_A[@]}"); [[ $root == B ]] && list=("${BOOT_CORPORA_B[@]}")
+        local list=("${BOOT_CORPORA_A[@]}"); [[ $root == B || $root == M ]] && list=("${BOOT_CORPORA_B[@]}")
         for c in "${list[@]}"; do
             echo "== dump T_${pool}_lam${lam} / $c =="
             do_dump "T_${pool}_lam${lam}" "$pool" "$c"
@@ -153,10 +169,10 @@ cmd_dump() {
 
 cmd_tsv() {
     local tsv=$OUT/pool_grid.tsv
-    { printf 'pool\troot\tregime\tlam\tn_active\tn_active_gt155\tcid22\tkonjnd\tnonphoto\timazen26\tcsiq\tlive\taic3\taic4\thfnl_perref\tkadid_true\ttid\tdial_mono\tdial_span\tbytes\tsha12\n'
+    { printf 'pool\troot\tregime\tlam\tn_active\tn_active_gt155\tcid22\tkonjnd\tnonphoto\timazen26\tcsiq\tlive\taic3\taic4\thfnl_perref\tkadid_signed\ttid\tdial_mono\tdial_span\tbytes\tsha12\n'
       for p in "${POOLS[@]}"; do
         read -r root _w _hi <<<"$(pool_spec "$p")"
-        local regime=372; [[ $root == B ]] && regime=944
+        local regime=372; [[ $root == B || $root == M ]] && regime=944
         for l in "${LAMS[@]}"; do
           local stem="T_${p}_lam${l}" vj="$VD/T_${p}_lam${l}.full.json" bin="$B/T_${p}_lam${l}.bin"
           [[ -f $vj ]] || continue
@@ -176,7 +192,7 @@ PY
              g("cid22";"srocc"), g("konjnd";"srocc"), g("nonphoto";"srocc"),
              g("imazen26";"srocc"), g("csiq";"srocc"), g("live";"srocc"),
              g("aic3";"srocc"), g("aic4";"srocc"), g("hfnlproxy";"per_ref_mean"),
-             ((.rank.kadid.srocc_signed // 0) * -1 | tostring), g("tid";"srocc"),
+             g("kadid";"srocc_signed"), g("tid";"srocc"),
              (.dial.mono_pct // "" | tostring), (.dial.dynamic_range // "" | tostring),
              $sz, $sha] | @tsv' "$vj"
         done

@@ -73,6 +73,38 @@ A2_PASS = {0: "grad", 1: "grad", 2: "a2final", 3: "append", 4: "append"}
 
 CH = ["X", "Y", "B"]
 
+# --- the OTHER live layout: v1-372 (the pre-fold `compute_extended_features`
+# vector the 372-era corpora and bakes use). Verified against
+# `zensim/src/metric.rs` passes 1-4 (2026-08-06): the f156-371 block that the
+# folded regimes zero is REAL here, and it is three 72-wide sub-blocks, each
+# 6 locals/channel/scale (base = off + scale*18 + ch*6). Appendix T needs this
+# to NAME the survivors of a 372-root additive fit; the folded decoder above
+# would mislabel every one of them as a structural zero.
+V1_PEAK_LOCALS = ["ssim_max", "art_max", "det_max", "ssim_p95", "art_p95", "det_p95"]
+V1_MASK_LOCALS = ["masked_ssim_p1", "masked_ssim_p4", "masked_ssim_p2",
+                  "masked_art_4th", "masked_det_4th", "masked_mse"]
+V1_IW_LOCALS = ["iw_ssim_p1", "iw_ssim_p4", "iw_ssim_p2",
+                "iw_art_4th", "iw_det_4th", "iw_mse"]
+
+
+def decode_v1_372(i: int):
+    """v1-372 layout -> (block, scale, ch, local_name, pass)."""
+    if i < 156:
+        s, r = divmod(i, 39)
+        c, l = divmod(r, 13)
+        return ("v1basic156", s, CH[c], V1_LOCALS[l], "v1basic")
+    for off, blk, locals_, pas in (
+        (156, "peak72", V1_PEAK_LOCALS, "peak"),
+        (228, "masked72", V1_MASK_LOCALS, "masked"),
+        (300, "iw72", V1_IW_LOCALS, "iwpool"),
+    ):
+        if i < off + 72:
+            j = i - off
+            s, r = divmod(j, 18)
+            c, l = divmod(r, 6)
+            return (blk, s, CH[c], locals_[l], pas)
+    raise ValueError(f"index {i} out of 372 range")
+
 
 def decode(i: int):
     """-> (block, scale, ch, local_name, pass) — ch is None for append2/zero."""
@@ -121,14 +153,17 @@ def main():
     ap.add_argument("idx_file")
     ap.add_argument("--ranked", default=None, help="ranked.tsv for mean_abs weights")
     ap.add_argument("--out", default=None, help="write per-index TSV here")
+    ap.add_argument("--layout", default="folded944", choices=("folded944", "v1_372"),
+                    help="feature layout of the model whose indices these are")
     args = ap.parse_args()
+    dec = decode if args.layout == "folded944" else decode_v1_372
 
     ids = load_idx(args.idx_file)
     weights = load_ranked(args.ranked) if args.ranked else {}
 
     rows = []
     for i in ids:
-        blk, s, c, name, pas = decode(i)
+        blk, s, c, name, pas = dec(i)
         rows.append((i, blk, s, c, name, pas, weights.get(i)))
 
     out = open(args.out, "w") if args.out else sys.stdout
@@ -154,6 +189,13 @@ def main():
     emit("by pass", lambda b, s, c, p: p)
     emit("by (scale, channel)", lambda b, s, c, p: (s, c))
     emit("by (pass, scale, channel)", lambda b, s, c, p: (p, s, c))
+
+    # The extraction-skip analysis below is folded-944-SPECIFIC (its pass
+    # universe and the APPEND_SKIP_B_SCALE0 carve-out are that layout's). It is
+    # meaningless for --layout v1_372, whose passes are v1basic/peak/masked/
+    # iwpool, so it is skipped rather than printed wrong.
+    if args.layout != "folded944":
+        return
 
     # untouched (pass, scale, ch) cells over the full ACTIVE grid.
     # append (0, B) is excluded: APPEND_SKIP_B_SCALE0 already skips it in
