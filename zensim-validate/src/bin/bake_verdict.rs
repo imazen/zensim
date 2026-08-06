@@ -49,6 +49,7 @@ use std::time::Instant;
 use rayon::prelude::*;
 use zenpredict::{Model, Predictor};
 
+use zensim_validate::bands;
 use zensim_validate::eval_report;
 use zensim_validate::panel::{
     Orientation, PerGroupSrocc, compute_panel, per_group_srocc, rescale_logistic, spearman,
@@ -1143,6 +1144,19 @@ struct BandRow {
     lo: f64,
     hi: f64,
     n: usize,
+    /// Realised target span (max − min) of the rows inside the band. Published
+    /// beside `n` because both failures the fixed-decile grid produced were
+    /// invisible in the statistic alone: a band whose target sd was 4.4× tighter
+    /// than its neighbours, and an SROCC whose sign was opposite to the value
+    /// printed. Range restriction attenuates a band's correlation toward zero
+    /// while leaving its noise alone, so a band's number cannot be read without
+    /// its span.
+    span: f64,
+    /// `Some(reason)` when the band does not clear
+    /// [`zensim_validate::bands`]'s usability floors. A NOT-MEASURED band
+    /// publishes NO statistics (every stat field is NaN → null) — it is never a
+    /// measured zero, and it is never silently dropped.
+    not_measured_reason: Option<String>,
     srocc: f64,
     /// The band's Spearman WITH ITS SIGN. `srocc` above is `.abs()` (the
     /// polarity-tolerant aggregate convention), which on a band tail hides the
@@ -1992,53 +2006,63 @@ are excluded._\n",
     if corpus.enable_per_band {
         body.push('\n');
         body.push_str(&format!(
-            "### {} 10-band full Mohammadi panel (PRIMARY release gate)\n\n",
+            "### {} per-band full Mohammadi panel (PRIMARY release gate)\n\n",
             corpus.display
         ));
-        body.push_str("| Band | range | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | MAE |\n");
-        body.push_str("|---|---|--:|---:|---:|---:|---:|---:|---:|---:|\n");
-        // Per-band cuts: every corpus that hits this branch
-        // (CID22 / KADID / TID) has human_score normalized
-        // into [0, 1] per the feature-extractor convention.
-        // Width-10 grid on the 0-100 scale → width-0.10 on [0, 1].
+        body.push_str(
+            "| Band | range | n | span | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | MAE |\n",
+        );
+        body.push_str("|---|---|--:|--:|---:|---:|---:|---:|---:|---:|---:|\n");
+        // Per-band cuts: every corpus that hits this branch has human_score
+        // normalized into [0, 1] per the feature-extractor convention.
         //
-        // The 10 bands are disjoint row subsets, each running its own
+        // The edges come from `zensim_validate::bands` — the single owner —
+        // and are a function of the TARGET column alone, so every model
+        // evaluated on a corpus gets identical bands and the cross-bake band
+        // table stays comparable. See that module for why the fixed-decile
+        // grid was replaced (campaign appendix V).
+        //
+        // Bands are disjoint row subsets, each running its own
         // `aggregate_panel` (whose Kendall + PWRC are O(n_band²)) — nothing is
         // shared, so they run on rayon and are emitted in band order below.
-        let banded: Vec<(String, BandRow)> = (0..10usize)
-            .into_par_iter()
-            .map(|band_idx| {
-            let lo = band_idx as f64 * 0.10;
-            let hi = lo + 0.10;
-            let label = format!("B{band_idx}");
-            let range_label = if band_idx == 9 {
-                format!("[{:.2}, 1.00]", lo)
+        let band_defs = bands::merged_bands(&humans);
+        let banded: Vec<(String, BandRow)> = band_defs
+            .par_iter()
+            .map(|bd| {
+            let label = bd.label.clone();
+            let range_label = bd.range_label();
+            let idxs = bd.members(&humans);
+            let span = if idxs.is_empty() {
+                0.0
             } else {
-                format!("[{:.2}, {:.2})", lo, hi)
+                let (mut mn, mut mx) = (f64::INFINITY, f64::NEG_INFINITY);
+                for &i in &idxs {
+                    mn = mn.min(humans[i]);
+                    mx = mx.max(humans[i]);
+                }
+                mx - mn
             };
-            let idxs: Vec<usize> = humans
-                .iter()
-                .enumerate()
-                .filter_map(|(i, &h)| {
-                    if band_idx == 9 {
-                        (h >= lo).then_some(i)
-                    } else {
-                        (h >= lo && h < hi).then_some(i)
-                    }
-                })
-                .collect();
-            if idxs.len() < 4 {
+            // NOT-MEASURED is an explicit state with a reason, never a
+            // silently dropped row and never a measured zero: a band that
+            // cannot resolve must not be rankable by anything downstream.
+            let reason = bands::not_measured_reason(idxs.len(), span);
+            if reason.is_some() || idxs.len() < 4 {
+                let why = reason.clone().unwrap_or_else(|| {
+                    format!("n={}: too few pairs for a panel", idxs.len())
+                });
                 let md = format!(
-                    "| {label} | {range_label} | {} | n/a | n/a | n/a | n/a | n/a | n/a | n/a |\n",
+                    "| {label} | {range_label} | {} | {span:.4} | NOT-MEASURED ({why}) | | | | | | |\n",
                     idxs.len()
                 );
                 return (
                     md,
                     BandRow {
                         band: label,
-                        lo,
-                        hi: if band_idx == 9 { 1.0 } else { hi },
+                        lo: bd.lo,
+                        hi: bd.hi,
                         n: idxs.len(),
+                        span,
+                        not_measured_reason: Some(why),
                         srocc: f64::NAN,
                         srocc_signed: f64::NAN,
                         plcc: f64::NAN,
@@ -2060,13 +2084,12 @@ are excluded._\n",
                 .map(|(r, h)| (r - h).abs())
                 .sum::<f64>()
                 / idxs.len() as f64;
-            let noisy = if idxs.len() < 30 { " ⚠" } else { "" };
             // The band table renders the SIGNED Spearman through the same
             // `srocc_cell` surface the aggregate row uses, so an inverted tail
             // is loud instead of indistinguishable from a healthy one.
             let b_srocc_signed = zensim_validate::panel::spearman(&h_b, &s_b);
             let md = format!(
-                "| {label}{noisy} | {range_label} | {} | {} | {b_plcc:.4} | {b_krocc:.4} | {b_or:.4} | {b_pwrc:.4} | {b_z:.3} | {mae:.4} |\n",
+                "| {label} | {range_label} | {} | {span:.4} | {} | {b_plcc:.4} | {b_krocc:.4} | {b_or:.4} | {b_pwrc:.4} | {b_z:.3} | {mae:.4} |\n",
                 idxs.len(),
                 srocc_cell(corpus.name, b_srocc, b_srocc_signed)
             );
@@ -2074,9 +2097,11 @@ are excluded._\n",
                 md,
                 BandRow {
                     band: label,
-                    lo,
-                    hi: if band_idx == 9 { 1.0 } else { hi },
+                    lo: bd.lo,
+                    hi: bd.hi,
                     n: idxs.len(),
+                    span,
+                    not_measured_reason: None,
                     srocc: b_srocc,
                     srocc_signed: b_srocc_signed,
                     plcc: b_plcc,
@@ -2095,12 +2120,16 @@ are excluded._\n",
         }
         body.push('\n');
         body.push_str(
-            "_⚠ marks bands with n < 30 — point estimates are noisy (CI widths \
-exceed ±0.3 SROCC at n<30; rankings between bakes are not statistically \
-distinguishable). MAE / Z-RMSE computed after 4-parameter logistic rescale \
-per Mohammadi 2025._\n",
+            "_Bands are cut by `zensim_validate::bands` (scheme \
+`merged-decile-2026-08-06`): fixed deciles accumulated into the finest \
+partition whose every band holds n ≥ 1000 pairs spanning ≥ 0.08 of target. \
+A band that cannot clear both floors is NOT-MEASURED with its reason — read \
+that as 'not measured', never as zero. **Read a band with its `span`**: range \
+restriction attenuates a narrow band's correlation toward 0 while leaving its \
+noise alone, so band values are not comparable ACROSS bands. SROCC is signed. \
+MAE / Z-RMSE computed after 4-parameter logistic rescale per Mohammadi 2025._\n",
         );
-        // Legacy 4-band CID22 Table-5 cuts alongside the 10-band grid
+        // Legacy 4-band CID22 Table-5 cuts alongside the per-band grid
         // (CLAUDE.md per-band mandate: report both on the CID22 corpus).
         if corpus.name == "cid22" {
             body.push_str(&eval_report::four_band_section(&scores, &humans));
@@ -3278,7 +3307,13 @@ Run the dedicated q-sweep harness for those._\n",
                     // 10-band panel (null for JND/step-grid corpora). NaN → null
                     // via serde_json's f64 handling for bands with n < 4.
                     "bands": r.bands.as_ref().map(|bs| bs.iter().map(|b| json!({
-                        "band": b.band, "lo": b.lo, "hi": b.hi, "n": b.n,
+                        "band": b.band,
+                        // `hi` is +inf on the top band; JSON has no infinity, so
+                        // it serialises as null and MUST be read as "unbounded
+                        // above", never as a missing value.
+                        "lo": b.lo, "hi": nan_null(b.hi),
+                        "n": b.n, "span": b.span,
+                        "not_measured_reason": b.not_measured_reason,
                         "srocc": nan_null(b.srocc),
                         "srocc_signed": nan_null(b.srocc_signed),
                         "plcc": nan_null(b.plcc),
@@ -3286,6 +3321,20 @@ Run the dedicated q-sweep harness for those._\n",
                         "pwrc": nan_null(b.pwrc), "z_rmse": nan_null(b.z_rmse),
                         "mae": nan_null(b.mae),
                     })).collect::<Vec<_>>()),
+                    // The scheme that cut those bands, so a reader never has to
+                    // guess where the edges came from or why a band is absent.
+                    // Edges are a function of the corpus target column alone —
+                    // identical for every model — which is what makes the
+                    // cross-bake band table comparable.
+                    "band_scheme": r.bands.as_ref().map(|_| json!({
+                        "name": "merged-decile-2026-08-06",
+                        "base_bands": bands::BASE_BANDS,
+                        "n_min": bands::N_MIN,
+                        "span_min": bands::SPAN_MIN,
+                        "doc": "campaign appendix V: fixed deciles accumulated \
+                                into the finest partition whose every band has \
+                                n >= n_min AND target span >= span_min",
+                    })),
                 }),
             );
         }
@@ -4000,8 +4049,14 @@ mod tests {
 
         let h_signed = zensim_validate::panel::spearman(&humans, &healthy);
         let i_signed = zensim_validate::panel::spearman(&humans, &inverted);
-        assert!((h_signed - 1.0).abs() < 1e-12, "healthy signed = {h_signed}");
-        assert!((i_signed + 1.0).abs() < 1e-12, "inverted signed = {i_signed}");
+        assert!(
+            (h_signed - 1.0).abs() < 1e-12,
+            "healthy signed = {h_signed}"
+        );
+        assert!(
+            (i_signed + 1.0).abs() < 1e-12,
+            "inverted signed = {i_signed}"
+        );
 
         // The abs'd form the board and F8 read is IDENTICAL for the two.
         let (h_abs, ..) = aggregate_panel(&healthy, &humans);
@@ -4014,7 +4069,10 @@ mod tests {
 
         // ...and the rendered cell must flag the inversion loudly.
         let cell = srocc_cell("cid22", i_abs, i_signed);
-        assert!(cell.contains("INVERTED"), "inverted band rendered as {cell:?}");
+        assert!(
+            cell.contains("INVERTED"),
+            "inverted band rendered as {cell:?}"
+        );
         assert!(!srocc_cell("cid22", h_abs, h_signed).contains("INVERTED"));
     }
 }

@@ -126,47 +126,39 @@ def scheme_quantile(target: np.ndarray, k: int):
 
 
 def scheme_merge(target: np.ndarray, n_min: int, span_min: float, k: int = 10):
-    """Fixed deciles, then merge inward from both ends until every surviving
-    band satisfies n >= n_min AND span >= span_min.
+    """Fixed deciles accumulated into the finest partition whose every band
+    satisfies n >= n_min AND span >= span_min.
 
-    Merging is greedy and symmetric: repeatedly take the worst offending
-    band and fold it into its neighbour with the smaller n, so the merge
-    is a deterministic function of the target column alone.
+    MUST stay in lockstep with `zensim_validate::bands::merged_bands` (the
+    owner); `tests/band_scheme_parity.rs` gates the two against each other on
+    every banded corpus. See that module for why a pairwise "merge the worst
+    into its smaller neighbour" greedy was rejected.
     """
-    bands = [[i, i] for i in range(k)]  # inclusive decile index ranges
-
-    def stats(b):
-        lo = b[0] / k
-        hi = math.inf if b[1] == k - 1 else (b[1] + 1) / k
+    def occ(lo, hi):
         sel = target[(target >= lo) & (target < hi)]
-        if sel.size == 0:
-            return 0, 0.0
-        return sel.size, float(sel.max() - sel.min())
+        return (0, 0.0) if sel.size == 0 else (sel.size, float(sel.max() - sel.min()))
 
-    while len(bands) > 1:
-        bad = [i for i, b in enumerate(bands)
-               if (lambda n, s: n < n_min or s < span_min)(*stats(b))]
-        if not bad:
-            break
-        # worst = smallest n, tie-broken by smallest span
-        i = min(bad, key=lambda j: (stats(bands[j])[0], stats(bands[j])[1]))
-        if i == 0:
-            j = 1
-        elif i == len(bands) - 1:
-            j = len(bands) - 2
+    def edge(i):
+        return i / k
+
+    def top(j):
+        return math.inf if j == k - 1 else (j + 1) / k
+
+    groups, start = [], 0
+    for i in range(k):
+        n, span = occ(edge(start), top(i))
+        if n >= n_min and span >= span_min:
+            groups.append([start, i])
+            start = i + 1
+    if start <= k - 1:
+        if groups:
+            groups[-1][1] = k - 1
         else:
-            j = i - 1 if stats(bands[i - 1])[0] <= stats(bands[i + 1])[0] else i + 1
-        lo_i, hi_i = min(i, j), max(i, j)
-        bands[lo_i] = [bands[lo_i][0], bands[hi_i][1]]
-        del bands[hi_i]
+            groups = [[0, k - 1]]
 
-    out = []
-    for b in bands:
-        lo = b[0] / k
-        hi = math.inf if b[1] == k - 1 else (b[1] + 1) / k
-        label = f"B{b[0]}" if b[0] == b[1] else f"B{b[0]}-B{b[1]}"
-        out.append((label, lo, hi))
-    return out
+    return [
+        (f"B{a}" if a == b else f"B{a}-B{b}", edge(a), top(b)) for a, b in groups
+    ]
 
 
 def band_members(target: np.ndarray, lo: float, hi: float) -> np.ndarray:
@@ -521,6 +513,137 @@ def cmd_discrim2d(a):
     _emit(a.out, "\n".join(rows) + "\n")
 
 
+PARITY_FIXTURE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "benchmarks", "appendixV", "band_scheme_parity.tsv",
+)
+
+
+def _parity_corpus(counts, top_span):
+    v = []
+    for d, n in enumerate(counts):
+        lo = d / 10.0
+        width = top_span if (d == len(counts) - 1 and top_span is not None) else 0.0999
+        for i in range(n):
+            f = 0.0 if n == 1 else i / (n - 1)
+            v.append(lo + width * f)
+    return np.asarray(v, dtype=float)
+
+
+def cmd_selfcheck(a):
+    """Assert this file's `scheme_merge` matches the OWNER's committed contract.
+
+    The owner is `zensim_validate::bands::merged_bands`; this function is the
+    mirror's half of the gate (`zensim-validate/tests/band_scheme_parity.rs` is
+    the owner's half). Both read the same fixture, so they cannot drift.
+    """
+    n_min = span_min = None
+    checked = failed = 0
+    with open(PARITY_FIXTURE) as fh:
+        for line in fh:
+            if line.startswith("# floors:"):
+                for tok in line.split():
+                    if tok.startswith("n_min="):
+                        n_min = int(tok.split("=")[1])
+                    elif tok.startswith("span_min="):
+                        span_min = float(tok.split("=")[1])
+            if line.startswith("#") or not line.strip():
+                continue
+            name, counts, top, expect = line.rstrip("\n").split("\t")
+            counts = [int(x) for x in counts.split(",")]
+            t = _parity_corpus(counts, None if top == "-" else float(top))
+            got = ",".join(b[0] for b in scheme_merge(t, n_min, span_min))
+            checked += 1
+            if got != expect:
+                failed += 1
+                print(f"MISMATCH {name}: mirror={got} owner={expect}")
+    if n_min is None or span_min is None:
+        raise SystemExit("fixture must record `# floors: n_min=.. span_min=..`")
+    print(
+        f"band-scheme parity: {checked - failed}/{checked} rows match the owner "
+        f"(n_min={n_min}, span_min={span_min})"
+    )
+    if failed:
+        raise SystemExit(f"{failed} row(s) diverge from the owner")
+
+
+def cmd_floor(a):
+    """Derive F8's floor on the chosen band, and price it against the board.
+
+    Registered rule (appendix V.5): F8's job is NON-COLLAPSE, so the floor is
+    the smallest value at which a model's band ordering is significantly
+    positive -- the band's own marginal 95 % CI half-width. Per confound 2 the
+    CONSERVATIVE (reference-clustered) bootstrap governs, because CID22's pairs
+    are clustered by reference and a pair-level resample understates the
+    uncertainty.
+    """
+    cells = load_board(a.board, a.corpus)
+    target = cells[0][1]
+    refs = None
+    if a.refs:
+        refs = np.loadtxt(a.refs, delimiter=",", dtype=int)
+        if refs.size != target.size:
+            raise SystemExit(f"--refs has {refs.size} ids, corpus has {target.size} rows")
+    bands = schemes_for(target, a.n_min, a.span_min)["merge"]
+    label, lo, hi = bands[-1] if a.band is None else next(
+        b for b in bands if b[0] == a.band
+    )
+    idxs = band_members(target, lo, hi)
+
+    per = zen_stats.panel_batch(
+        [(f"m{i}", c[2][idxs], target[idxs]) for i, c in enumerate(cells)], stats="srocc"
+    )
+    vals = {c[0]: r["srocc_signed"] for c, r in zip(cells, per)}
+
+    rows = [f"# F8 floor derivation on {a.corpus} band {label} = [{lo:.2f}, {hi})",
+            f"# n={idxs.size} pairs, span={float(target[idxs].max()-target[idxs].min()):.4f}, "
+            f"refs={len(set(refs[idxs])) if refs is not None else '?'}, "
+            f"models={len(cells)}, B={a.boot}, seed={a.seed}",
+            "name\tsrocc_signed\tci_hw_pair\tci_hw_refclust"]
+    hw_pair, hw_ref = [], []
+    # The half-width is a property of the band, not of one model; a stratified
+    # subset keeps this affordable while spanning the population's range.
+    order = sorted(range(len(cells)), key=lambda i: vals[cells[i][0]])
+    probe = sorted({order[int(round(q * (len(order) - 1) / (a.probe - 1)))]
+                    for q in range(a.probe)})
+    for i in probe:
+        name, _, pred, _ = cells[i]
+        hp, _, _ = marginal_ci(pred, target, idxs, a.boot, a.seed)
+        hr = float("nan")
+        if refs is not None:
+            hr, _, _ = marginal_ci(pred, target, idxs, a.boot, a.seed, cluster=refs)
+        hw_pair.append(hp)
+        if math.isfinite(hr):
+            hw_ref.append(hr)
+        rows.append(f"{name}\t{vals[name]:.4f}\t{hp:.4f}\t{hr:.4f}")
+
+    med_pair = float(np.median(hw_pair))
+    med_ref = float(np.median(hw_ref)) if hw_ref else float("nan")
+    governing = med_ref if math.isfinite(med_ref) else med_pair
+    floor = math.ceil(governing * 100.0) / 100.0
+    v = np.array(list(vals.values()))
+    rows += [
+        "",
+        f"# marginal 95% CI half-width  pair-bootstrap median  = {med_pair:.4f}",
+        f"# marginal 95% CI half-width  ref-clustered   median = {med_ref:.4f}"
+        "   <- GOVERNING (confound 2)",
+        f"# DERIVED FLOOR = ceil_2dp(governing) = {floor:.2f}",
+        "",
+        "# board population on this band:",
+        f"#   min {v.min():+.4f}  p10 {np.percentile(v,10):+.4f}  median "
+        f"{np.median(v):+.4f}  p90 {np.percentile(v,90):+.4f}  max {v.max():+.4f}",
+        f"#   negative: {(v < 0).sum()}/{v.size}",
+        "",
+        "# pass-count at candidate floors (signed):",
+    ]
+    for f in sorted({round(floor - 0.05, 2), round(floor - 0.02, 2), floor,
+                     round(floor + 0.05, 2), 0.15}):
+        if f < 0:
+            continue
+        rows.append(f"#   floor {f:.2f} -> {(v >= f).sum():3d}/{v.size} pass")
+    _emit(a.out, "\n".join(rows) + "\n")
+
+
 def cmd_schemes(a):
     rows = ["corpus\tscheme\tband\tlo\thi\tn\tspan\tsd\tsd_ratio\tusable_n\tusable_span"]
     for corpus in a.corpora:
@@ -611,6 +734,20 @@ def main():
     d2.add_argument("--span-grid", type=_floats,
                     default=[0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20])
     d2.set_defaults(fn=cmd_discrim2d)
+
+    sc = sub.add_parser("selfcheck")
+    sc.set_defaults(fn=cmd_selfcheck)
+
+    fl = sub.add_parser("floor")
+    fl.add_argument("--corpus", default="cid22")
+    fl.add_argument("--band", default=None, help="default = the top merged band")
+    fl.add_argument("--refs", default="benchmarks/appendixV/cid22_ref_ids.csv",
+                    help="per-pair reference ids for the conservative "
+                         "reference-clustered bootstrap")
+    fl.add_argument("--boot", type=int, default=10000)
+    fl.add_argument("--probe", type=int, default=25,
+                    help="stratified models to bootstrap the half-width on")
+    fl.set_defaults(fn=cmd_floor)
 
     s = sub.add_parser("schemes")
     s.add_argument("--corpora", type=lambda x: x.split(","),

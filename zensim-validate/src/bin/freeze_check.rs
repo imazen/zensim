@@ -52,8 +52,31 @@ mod balanced {
     pub const HFNL_PERREF: f64 = 0.0; // F6: sign floor only (0.1931 stays a reported comparator)
     pub const CSIQ: f64 = 0.83; // F7: 944-class breadth
     pub const LIVE: f64 = 0.83; // F7
-    pub const B9: f64 = 0.15; // F8: high-tail non-collapse (signed)
-    pub const B3: f64 = 0.0; // F8: low-tail non-collapse (signed)
+    /// F8 high-tail non-collapse, SIGNED, on the top USABLE band of the
+    /// appendix-V scheme (CID22 `B8-B9` = `[0.80, →)`, n=1425, span 0.119,
+    /// all 49 references).
+    ///
+    /// DERIVED, not chosen: F8's job is non-collapse, so the floor is the
+    /// smallest value at which a band ordering is significantly positive —
+    /// the band's own marginal 95 % CI half-width. Measured over a stratified
+    /// 25-model probe of the board at B=10,000: **0.0407** pair-bootstrap,
+    /// **0.0866** reference-clustered. The reference-clustered figure GOVERNS
+    /// (CID22's pairs cluster by reference — up to 61 in this band — so a
+    /// pair-level resample understates the uncertainty), and `ceil` to 2 dp
+    /// gives 0.09. `benchmarks/appendixV/f8_floor_2026-08-06.tsv`.
+    ///
+    /// The predecessor 0.15 was set against the fixed-decile `B9` — 43 pairs
+    /// from 11 of 49 references spanning 0.0194 MOS — and consumed as an
+    /// ABSOLUTE value; it cannot be carried over, because the quantity it
+    /// bounded no longer exists.
+    ///
+    /// REGISTERED-PENDING-USER-ACK: this changes a gate governing 166+
+    /// published board cells.
+    pub const BAND_HIGH: f64 = 0.09;
+    /// F8 low-tail non-collapse, SIGNED, on the lowest USABLE band. Zero is a
+    /// real bar on a signed value (it was unfalsifiable against the absolute
+    /// one): it fails a model whose low-quality region is ordered backwards.
+    pub const BAND_LOW: f64 = 0.0;
     pub const M3A_GOLD: f64 = 0.85; // reported tier, NOT a floor
     pub const M3A_SILVER: f64 = 0.78; // ≈ measured 944-class median (26 cells, med 0.793)
     pub const HFNL_COMPARATOR: f64 = 0.1931; // reported context only
@@ -442,38 +465,96 @@ fn bake_name(v: &serde_json::Value) -> &str {
         .unwrap_or("?")
 }
 
-/// CID22 band srocc + n by band label ("B3"/"B9").
+/// The band scheme a fulleval's bands were cut on, `None` for anything written
+/// before the appendix-V redesign (2026-08-06).
+///
+/// Load-bearing: a legacy cell's `B9` is a 43-pair / 0.019-span residual tail
+/// whose statistic is dominated by selection noise and whose SIGN is an artifact
+/// of the slice width. Reading a current floor against it would be comparing two
+/// different measurements. F8 therefore reports legacy cells as ABSENT rather
+/// than scoring them.
+fn band_scheme(v: &serde_json::Value) -> Option<&str> {
+    v.get("rank")?
+        .get("cid22")?
+        .get("band_scheme")?
+        .get("name")?
+        .as_str()
+}
+
+/// One usable band's SIGNED Spearman, read in the corpus's declared
+/// orientation, plus its `n` and target span.
+struct BandTail {
+    label: String,
+    signed: f64,
+    n: i64,
+    span: f64,
+}
+
+/// The lowest and highest USABLE bands of a corpus (`None` when the fulleval
+/// carries no band block, or every band is NOT-MEASURED).
+///
+/// "Usable" is the emitting side's judgement, carried in the band row as
+/// `not_measured_reason`: a band that could not clear the count/span floors
+/// publishes no statistics and must never be scored, ranked, or shown as a
+/// measured zero. Rows are read in DECLARED orientation — the same
+/// `is_distortion_oriented` convention the guard rows use, mirrored rather than
+/// special-cased by corpus name — so "higher is better ordering" holds on every
+/// corpus.
+fn band_tails(v: &serde_json::Value, corpus: &str) -> Option<(BandTail, BandTail)> {
+    let bands = v.get("rank")?.get(corpus)?.get("bands")?.as_array()?;
+    let flip = if is_distortion_oriented(corpus) {
+        -1.0
+    } else {
+        1.0
+    };
+    let mut usable: Vec<BandTail> = bands
+        .iter()
+        .filter(|b| {
+            b.get("not_measured_reason")
+                .map(|r| r.is_null())
+                .unwrap_or(false)
+        })
+        .filter_map(|b| {
+            Some(BandTail {
+                label: b["band"].as_str()?.to_string(),
+                signed: b.get("srocc_signed")?.as_f64()? * flip,
+                n: b["n"].as_i64().unwrap_or(0),
+                span: b.get("span").and_then(|s| s.as_f64()).unwrap_or(f64::NAN),
+            })
+        })
+        .collect();
+    if usable.is_empty() {
+        return None;
+    }
+    let hi = usable.pop()?;
+    let lo = if usable.is_empty() {
+        BandTail {
+            label: hi.label.clone(),
+            signed: hi.signed,
+            n: hi.n,
+            span: hi.span,
+        }
+    } else {
+        usable.remove(0)
+    };
+    Some((lo, hi))
+}
+
+/// CID22 band srocc + n by band label ("B3"/"B9") — the LEGACY fixed-decile
+/// accessor, kept only to read pre-2026-08-06 board files.
 ///
 /// **`srocc` here is an ABSOLUTE value** — `zenstats::panel` computes
-/// `spearman(..).abs()` and `bake_verdict`'s per-band rows come from it — even
-/// though F8 is specified as signed. The pass/fail arithmetic below still reads
-/// this field (changing it would move verdicts for every published board cell,
-/// which is a user decision, not a refactor); [`cid22_band_signed`] exists so
-/// the report can SHOW when the two disagree.
+/// `spearman(..).abs()` and `bake_verdict`'s per-band rows came from it — even
+/// though F8 was specified as signed. Measured consequence on the 120 board
+/// cells that still carry per-pair (campaign appendix V, G-V1): the stored
+/// `srocc` equals `|recomputed signed|` on **120 of 120**, **109 of 120** are
+/// NEGATIVE in `B9`, and **82** pass `|B9| ≥ 0.15` where **2** pass it signed.
+/// Because `|·|` is monotone in the depth of an inversion, that column ranked
+/// models by how backwards their top band was.
 fn cid22_band(v: &serde_json::Value, band: &str) -> Option<(f64, i64)> {
     let bands = v.get("rank")?.get("cid22")?.get("bands")?.as_array()?;
     let b = bands.iter().find(|b| b["band"].as_str() == Some(band))?;
     Some((b["srocc"].as_f64()?, b["n"].as_i64().unwrap_or(0)))
-}
-
-/// The band's SIGNED Spearman, when the fulleval carries it (emitted since the
-/// 2026-08-06 `srocc_signed` band field; older JSONs return `None`).
-///
-/// Why this matters, measured on a 32-cell stratified board sample
-/// (`benchmarks/appendixU/board_b9_signed_2026-08-06.tsv`): **32 of 32 had a
-/// NEGATIVE B9** — their high-fidelity band is ordered backwards — while 25 of
-/// them PASS the `B9 >= 0.15` bar on the absolute value. Because |·| is monotone
-/// in the depth of an inversion, the bar as implemented ranks those models by how
-/// WRONG their top band is. The band is also degenerate (43 pairs, 11 of 49 refs,
-/// MOS span 0.0194, marginal bootstrap sd 0.178), and widening the slice by two
-/// MOS points flips every model positive.
-fn cid22_band_signed(v: &serde_json::Value, band: &str) -> Option<f64> {
-    let bands = v.get("rank")?.get("cid22")?.get("bands")?.as_array()?;
-    bands
-        .iter()
-        .find(|b| b["band"].as_str() == Some(band))?
-        .get("srocc_signed")?
-        .as_f64()
 }
 
 /// The registered ranking composite (§8.1): product_composite's six terms
@@ -481,9 +562,16 @@ fn cid22_band_signed(v: &serde_json::Value, band: &str) -> Option<f64> {
 /// convention); band-tail is SIGNED. Absent terms drop from num AND den.
 fn balanced_composite(v: &serde_json::Value) -> Option<f64> {
     let corpus = |c: &str| f(v, &["rank", c, "srocc"]).map(f64::abs);
-    let bandtail = match (cid22_band(v, "B3"), cid22_band(v, "B9")) {
-        (Some((b3, _)), Some((b9, _))) => Some((b3 + b9) / 2.0),
-        _ => None,
+    // Band-tail term: the mean of the lowest and highest USABLE bands, SIGNED
+    // (the corpus term above keeps the owner's abs convention; a band tail must
+    // not, or a collapsed tail scores like a healthy one and a more deeply
+    // inverted one scores HIGHER). Legacy fixed-decile cells contribute
+    // nothing — the term drops from BOTH numerator and denominator, exactly as
+    // any other absent axis does — rather than feeding an absolute-valued
+    // 43-pair statistic into the ranking.
+    let bandtail = match band_scheme(v) {
+        Some(_) => band_tails(v, "cid22").map(|(lo, hi)| (lo.signed + hi.signed) / 2.0),
+        None => None,
     };
     let terms: [(Option<f64>, f64); 9] = [
         (corpus("cid22"), balanced::W_CID22),
@@ -715,36 +803,48 @@ fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
             },
         },
     );
-    // F8 band tails (signed; n printed, n<30 parenthesized per board convention)
-    let fmt_band = |b: Option<(f64, i64)>| -> String {
-        match b {
-            Some((s, n)) if n < 30 => format!("({s:.3}) n={n}"),
-            Some((s, n)) => format!("{s:.3} n={n}"),
-            None => "missing".into(),
-        }
-    };
-    let b3 = cid22_band(v, "B3");
-    let b9 = cid22_band(v, "B9");
-    // Show the signed value when it disagrees with the abs'd one the gate reads.
-    // Display only — `pass` below is unchanged.
-    let inv = |band: &str| -> String {
-        match cid22_band_signed(v, band) {
-            Some(s) if s < 0.0 => format!(" ⛔INVERTED signed {s:+.3}"),
-            _ => String::new(),
-        }
+    // F8 band tails — SIGNED, on the lowest and highest USABLE bands of the
+    // appendix-V scheme. A fulleval cut on the legacy fixed-decile grid is
+    // reported ABSENT, not scored: its `B9` is a different quantity (43 pairs,
+    // span 0.019, absolute-valued), so a current bar against it would be
+    // meaningless. `--annotations` carries the reason.
+    let legacy_b9 = cid22_band(v, "B9");
+    let tails = band_tails(v, "cid22");
+    let scheme = band_scheme(v);
+    let fmt_tail =
+        |t: &BandTail| format!("{} {:+.3} n={} span={:.3}", t.label, t.signed, t.n, t.span);
+    let (measured, pass, absent) = match (&tails, scheme) {
+        (Some((lo, hi)), Some(s)) => (
+            format!("[{s}] high {} / low {}", fmt_tail(hi), fmt_tail(lo)),
+            hi.signed >= balanced::BAND_HIGH && lo.signed >= balanced::BAND_LOW,
+            false,
+        ),
+        // Bands present but no scheme stamp ⇒ pre-appendix-V fixed deciles.
+        (_, None) if legacy_b9.is_some() => (
+            format!(
+                "LEGACY fixed-decile bands (no band_scheme) — B9 was 43 pairs / span \
+                 0.019 / ABSOLUTE-valued; stored |B9| {:.3}. Not scored under the \
+                 current bar; re-verdict to measure.",
+                legacy_b9.map(|x| x.0).unwrap_or(f64::NAN)
+            ),
+            false,
+            true,
+        ),
+        (None, _) => ("— (no usable band)".into(), false, true),
+        (Some(_), None) => ("— (bands present, scheme unknown)".into(), false, true),
     };
     floors.push(Floor {
         id: "bandtail",
         gate: "F8 CID22 band tails",
-        bar: format!("B9 ≥ {} ∧ B3 ≥ {}", balanced::B9, balanced::B3),
-        measured: format!(
-            "B9 {}{} / B3 {}{}",
-            fmt_band(b9), inv("B9"), fmt_band(b3), inv("B3")
+        bar: format!(
+            "top usable band ≥ {} ∧ lowest usable band ≥ {} (SIGNED)",
+            balanced::BAND_HIGH,
+            balanced::BAND_LOW
         ),
-        pass: matches!((b3, b9), (Some((s3, _)), Some((s9, _)))
-            if s9 >= balanced::B9 && s3 >= balanced::B3),
+        measured,
+        pass,
         fields: &["rank.cid22.bands"],
-        absent: b3.is_none() && b9.is_none(),
+        absent,
         absent_not_failed: false,
     });
 
@@ -965,7 +1065,7 @@ fn rank_pool(rows: &mut [&SelectRow]) {
 
 const SELECT_TSV_COLS: &str = "rank\tpool\tname\tclass\tn_pass\tbal_composite\tm3a\tm3a_state\tselection_composite\tsdr25\tselectable\tpath";
 
-const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tb3\tb3_n\tb9\tb9_n\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid_signed\ttid_signed\tspline\trepro\tfails\tn_measured\tabsent\tannotations\tblocks\tdominated_by";
+const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tband_scheme\tband_lo\tband_lo_n\tband_hi\tband_hi_label\tband_hi_n\tband_hi_span\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid_signed\ttid_signed\tspline\trepro\tfails\tn_measured\tabsent\tannotations\tblocks\tdominated_by";
 
 /// Compact carry of the promoter-injected `block_profile` (used-counts per
 /// family, `f0_155/f156_371/f372_719/f720_943`) — computed by
@@ -1010,8 +1110,9 @@ fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
         .collect();
     let n_measured = r.floors.iter().filter(|x| !x.absent_not_failed).count();
     let num = |o: Option<f64>| o.map(|x| format!("{x:.5}")).unwrap_or_else(|| "-".into());
-    let b3 = cid22_band(v, "B3");
-    let b9 = cid22_band(v, "B9");
+    // SIGNED band tails on the appendix-V scheme (see `band_tails`). Legacy
+    // fixed-decile cells emit `-` rather than an absolute-valued 43-pair `B9`.
+    let tails = band_scheme(v).and_then(|_| band_tails(v, "cid22"));
     let m3a = f(v, &["m3a_coherence"]);
     let tier: String = if r.class == "944-ensemble" {
         "not-computable".into()
@@ -1050,10 +1151,22 @@ fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
         num(f(v, &["rank", "csiq", "srocc"])),
         num(f(v, &["rank", "live", "srocc"])),
         num(f(v, &["rank", "hfnlproxy", "per_ref_mean"])),
-        num(b3.map(|x| x.0)),
-        b3.map(|x| x.1.to_string()).unwrap_or_else(|| "-".into()),
-        num(b9.map(|x| x.0)),
-        b9.map(|x| x.1.to_string()).unwrap_or_else(|| "-".into()),
+        band_scheme(v).unwrap_or("legacy-fixed-decile").to_string(),
+        num(tails.as_ref().map(|(lo, _)| lo.signed)),
+        tails
+            .as_ref()
+            .map(|(lo, _)| lo.n.to_string())
+            .unwrap_or_else(|| "-".into()),
+        num(tails.as_ref().map(|(_, hi)| hi.signed)),
+        tails
+            .as_ref()
+            .map(|(_, hi)| hi.label.clone())
+            .unwrap_or_else(|| "-".into()),
+        tails
+            .as_ref()
+            .map(|(_, hi)| hi.n.to_string())
+            .unwrap_or_else(|| "-".into()),
+        num(tails.as_ref().map(|(_, hi)| hi.span)),
         num(f(v, &["dial", "mono_pct"])),
         num(f(v, &["dial", "tied_pct"])),
         num(f(v, &["dial", "dynamic_range"])),
@@ -1599,6 +1712,21 @@ mod tests {
         );
     }
 
+    /// A CID22 band block in the CURRENT (appendix-V) scheme: three usable
+    /// bands, each stamped `not_measured_reason: null`, plus the `band_scheme`
+    /// marker that tells `freeze_check` these are current-scheme bands and not
+    /// pre-2026-08-06 fixed deciles. `lo`/`hi` are the SIGNED tails.
+    fn bands_v(lo: f64, hi: f64) -> serde_json::Value {
+        json!([
+            { "band": "B0-B6", "lo": 0.0, "hi": 0.7, "n": 1775, "span": 0.4227,
+              "not_measured_reason": null, "srocc": lo.abs(), "srocc_signed": lo },
+            { "band": "B7", "lo": 0.7, "hi": 0.8, "n": 1092, "span": 0.0997,
+              "not_measured_reason": null, "srocc": 0.36, "srocc_signed": 0.36 },
+            { "band": "B8-B9", "lo": 0.8, "hi": null, "n": 1425, "span": 0.1194,
+              "not_measured_reason": null, "srocc": hi.abs(), "srocc_signed": hi },
+        ])
+    }
+
     /// A fixture that passes every registered floor exactly at/above the line.
     fn passing_fixture() -> serde_json::Value {
         json!({
@@ -1609,10 +1737,10 @@ mod tests {
             "composite": 0.85,
             "m3a_coherence": 0.80,
             "rank": {
-                "cid22": { "srocc": 0.885, "bands": [
-                    { "band": "B3", "srocc": 0.0, "n": 57 },
-                    { "band": "B9", "srocc": 0.15, "n": 43 }
-                ]},
+                "cid22": { "srocc": 0.885,
+                    "band_scheme": { "name": "merged-decile-2026-08-06",
+                                     "n_min": 1000, "span_min": 0.08 },
+                    "bands": bands_v(balanced::BAND_LOW, balanced::BAND_HIGH) },
                 "konjnd": { "srocc": -0.43 },
                 "nonphoto": { "srocc": 0.90 },
                 "csiq": { "srocc": 0.83 },
@@ -1671,12 +1799,13 @@ mod tests {
                 "exactly one floor fails for patch on {id}"
             );
         }
-        // band-tail floor: B9 below 0.15 fails; B3 below 0.0 fails.
+        // band-tail floor: the SIGNED top band below its derived floor fails,
+        // and the SIGNED low band below 0.0 fails. The second case is the one
+        // the absolute-valued predecessor could not express at all: |x| >= 0.0
+        // is unfalsifiable, so an inverted low band always passed.
         for bands in [
-            json!([{ "band": "B3", "srocc": 0.0, "n": 57 },
-                   { "band": "B9", "srocc": 0.1499, "n": 43 }]),
-            json!([{ "band": "B3", "srocc": -0.001, "n": 57 },
-                   { "band": "B9", "srocc": 0.2, "n": 43 }]),
+            bands_v(balanced::BAND_LOW, balanced::BAND_HIGH - 0.0001),
+            bands_v(-0.001, balanced::BAND_HIGH),
         ] {
             let mut v = passing_fixture();
             v["rank"]["cid22"]["bands"] = bands;
@@ -1937,24 +2066,71 @@ mod tests {
         assert_eq!(fl.pass, fl2.pass, "annotation never changes the verdict");
     }
 
+    /// A NOT-MEASURED band must never be scored, ranked, or read as zero — it
+    /// is excluded from the tails and from the composite entirely. This is the
+    /// replacement for the old "n<30 renders parenthesized" convention: a band
+    /// under the floors no longer reaches the gate as a value at all.
     #[test]
-    fn band_n_below_30_renders_parenthesized() {
+    fn a_not_measured_band_is_never_scored() {
         let mut v = passing_fixture();
         v["rank"]["cid22"]["bands"] = json!([
-            { "band": "B3", "srocc": 0.05, "n": 12 },
-            { "band": "B9", "srocc": 0.2, "n": 43 }
+            { "band": "B0-B8", "lo": 0.0, "hi": 0.9, "n": 4249, "span": 0.62,
+              "not_measured_reason": null, "srocc": 0.5, "srocc_signed": 0.5 },
+            // the degenerate tail, as the emitter now reports it
+            { "band": "B9", "lo": 0.9, "hi": null, "n": 43, "span": 0.0194,
+              "not_measured_reason": "n=43 < 1000: too few pairs to rank models",
+              "srocc": null, "srocc_signed": null },
         ]);
         let r = eval_balanced(&v, &[]);
         let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
-        assert!(fl.measured.contains("(0.050) n=12"), "got: {}", fl.measured);
-        assert!(fl.measured.contains("0.200 n=43"));
+        assert!(
+            fl.measured.contains("B0-B8") && !fl.measured.contains("B9"),
+            "the unusable band must not appear as a tail: {}",
+            fl.measured
+        );
+        assert!(fl.pass, "the usable band clears both bars: {}", fl.measured);
+        // ...and it must not enter the ranking composite either.
+        let (lo, hi) = band_tails(&v, "cid22").unwrap();
+        assert_eq!(lo.label, "B0-B8");
+        assert_eq!(hi.label, "B0-B8", "one usable band ⇒ it is both tails");
+    }
+
+    /// A fulleval cut on the pre-appendix-V fixed deciles must be reported
+    /// ABSENT, never scored against the current bar: its `B9` is a different
+    /// quantity (43 pairs, span 0.019, absolute-valued).
+    #[test]
+    fn legacy_fixed_decile_bands_are_absent_not_scored() {
+        let mut v = passing_fixture();
+        v["rank"]["cid22"]
+            .as_object_mut()
+            .unwrap()
+            .remove("band_scheme");
+        v["rank"]["cid22"]["bands"] = json!([
+            { "band": "B3", "srocc": 0.18, "n": 57 },
+            { "band": "B9", "srocc": 0.3204, "n": 43 },
+        ]);
+        let r = eval_balanced(&v, &[]);
+        let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
+        assert!(
+            fl.absent,
+            "legacy bands are not measured under the current bar"
+        );
+        assert!(!fl.pass, "and absence is never a pass");
+        assert!(fl.measured.contains("LEGACY"), "got: {}", fl.measured);
+        // The ranking composite must not eat the legacy value either.
+        assert!(balanced_composite(&v).is_some());
+        let with_scheme = passing_fixture();
+        assert!(
+            balanced_composite(&v).unwrap() != balanced_composite(&with_scheme).unwrap(),
+            "dropping the band term must change the composite, else the test is vacuous"
+        );
     }
 
     #[test]
     fn composite_matches_registered_weights() {
         let v = passing_fixture();
         // Hand-computed with the §8.1 table (abs corpus terms; signed band-tail):
-        let bandtail = (0.0 + 0.15) / 2.0;
+        let bandtail = (balanced::BAND_LOW + balanced::BAND_HIGH) / 2.0;
         let num = 1.00 * 0.885
             + 0.50 * 0.91
             + 0.30 * 0.90
@@ -2205,46 +2381,44 @@ mod tests {
         }
     }
 
-    /// F8's `measured` string must SAY when the band it just passed is ordered
-    /// backwards. The gate's arithmetic is deliberately untouched — it still
-    /// reads the abs'd `srocc`, because changing that moves verdicts for every
-    /// published board cell — so the report is the only place a reader can see
-    /// that `B9 0.320` means "anti-correlated at −0.320".
+    /// An inverted top band must FAIL F8 — the whole point of the re-point.
     ///
-    /// Fails without the `inv()` annotation.
+    /// Measured on the 120 board cells that still carry per-pair (appendix V,
+    /// G-V1): under the predecessor bar, `|B9| >= 0.15` PASSED 82 of them while
+    /// only 2 were positive, because `|·|` is monotone in the depth of an
+    /// inversion. The published top cell of that column was the population's
+    /// most anti-correlated model.
     #[test]
-    fn f8_reports_an_inverted_band_it_still_passes() {
+    fn f8_fails_an_inverted_top_band() {
         let mut v = passing_fixture();
-        v["rank"]["cid22"]["bands"] = serde_json::json!([
-            { "band": "B3", "srocc": 0.18, "srocc_signed": 0.18, "n": 57 },
-            { "band": "B9", "srocc": 0.3204, "srocc_signed": -0.3204, "n": 43 },
-        ]);
+        // The exact shape that used to pass: a large magnitude, wrong sign.
+        v["rank"]["cid22"]["bands"] = bands_v(0.18, -0.3204);
         let r = eval_balanced(&v, &[]);
         let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
-        assert!(fl.pass, "arithmetic is unchanged: abs 0.3204 >= 0.15 still passes");
         assert!(
-            fl.measured.contains("INVERTED"),
-            "a passing-but-inverted band must be flagged; got {:?}",
+            !fl.pass,
+            "an inverted top band must fail, got PASS on {:?}",
             fl.measured
         );
-        assert!(fl.measured.contains("-0.320"), "the signed value must be shown: {:?}", fl.measured);
-
-        // A healthy band carries no marker.
-        v["rank"]["cid22"]["bands"] = serde_json::json!([
-            { "band": "B3", "srocc": 0.18, "srocc_signed": 0.18, "n": 57 },
-            { "band": "B9", "srocc": 0.3204, "srocc_signed": 0.3204, "n": 43 },
-        ]);
+        assert!(
+            fl.measured.contains("-0.320"),
+            "the signed value must be shown: {:?}",
+            fl.measured
+        );
+        // Same magnitude, correct sign: passes.
+        v["rank"]["cid22"]["bands"] = bands_v(0.18, 0.3204);
         let r = eval_balanced(&v, &[]);
         let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
-        assert!(!fl.measured.contains("INVERTED"), "false positive: {:?}", fl.measured);
-
-        // An OLD fulleval (no srocc_signed) must not be annotated at all.
-        v["rank"]["cid22"]["bands"] = serde_json::json!([
-            { "band": "B3", "srocc": 0.18, "n": 57 },
-            { "band": "B9", "srocc": 0.3204, "n": 43 },
-        ]);
-        let r = eval_balanced(&v, &[]);
-        let fl = r.floors.iter().find(|x| x.id == "bandtail").unwrap();
-        assert!(fl.pass && !fl.measured.contains("INVERTED"));
+        assert!(fl.pass, "a healthy band of the same magnitude must pass");
+        // And the ranking composite must move the same direction, not just
+        // the floor — an inverted tail may not score like a healthy one.
+        let mut inv = passing_fixture();
+        inv["rank"]["cid22"]["bands"] = bands_v(0.18, -0.3204);
+        let mut good = passing_fixture();
+        good["rank"]["cid22"]["bands"] = bands_v(0.18, 0.3204);
+        assert!(
+            balanced_composite(&inv).unwrap() < balanced_composite(&good).unwrap(),
+            "inverted tail must score BELOW the healthy one in the composite"
+        );
     }
 }

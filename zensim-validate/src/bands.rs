@@ -30,8 +30,13 @@
 //! |---|--:|--:|--:|--:|--:|--:|
 //! | split-half `r_SB` | 0.31 | 0.35 | 0.67 | 0.76 | **0.90** | 0.96 |
 //!
-//! [`SPAN_MIN`] is set from the pure-span curve at fixed n, where the CI
-//! half-width crosses the registered 0.20 estimability bar.
+//! [`SPAN_MIN`] is set from the same surface, at the span below which the bar
+//! is unreachable at ANY n the corpus can supply. Note what span does NOT do:
+//! it barely moves the confidence interval. At a fixed n of 200 the marginal
+//! 95 % CI half-width runs 0.140 → 0.086 across spans 0.02 → 0.20 while the
+//! correlation itself runs 0.056 → 0.632. **Span binds through the SIGNAL, not
+//! the noise** — which is why an estimability bar alone would have passed
+//! CID22's degenerate top band, and why both floors are needed.
 //!
 //! [`merged_bands`] starts from the fixed deciles — so a band still names a
 //! fixed quality region and stays comparable across corpora — and merges
@@ -49,17 +54,42 @@
 ///
 /// Set from the split-half discrimination curve at ~constant span 0.10, where
 /// `r_SB` crosses the 0.90 threshold registered in appendix O for the HF-NL
-/// axis. Below this a band may still be *estimable* — its confidence interval
-/// can be narrow enough to report — while being unable to rank models
-/// consistently, which is what a gate needs it to do.
+/// axis: measured 0.877 at n=768 and 0.918 at n=1024 on centred slices, and
+/// corroborated by CID22's REAL bands at the same span — B7 (n=1092) 0.897,
+/// B8 (n=1382) 0.955.
+///
+/// Discrimination, not estimability, is what binds. A band is *estimable* far
+/// sooner — at span 0.10 the marginal 95 % CI half-width crosses 0.20 between
+/// n=64 (0.209) and n=96 (0.168) — but an estimable band that ranks models
+/// inconsistently cannot gate anything, which is the job. CID22's old `B9` was
+/// exactly that: half-width 0.178 (inside the estimability bar) with
+/// `r_SB` 0.753 and a model population running −0.263 … −0.015.
 pub const N_MIN: usize = 1000;
 
 /// Minimum target span for a band to be usable (appendix V).
 ///
-/// Set from the pure-span curve at fixed n: below this the marginal 95 % CI
-/// half-width crosses the registered 0.20 estimability bar no matter how many
-/// pairs the band holds, because range restriction attenuates the signal while
-/// leaving the noise alone.
+/// Set from the measured discrimination surface, as the span below which
+/// `r_SB ≥ 0.90` is unreachable at ANY n CID22 can supply — at span 0.06 the
+/// best observed is 0.659 (n=512, the largest that fits), at 0.04 it is 0.407,
+/// at 0.02 it is 0.298. The bar IS reached at 0.10 / 0.15 / 0.20 (n ≈ 1024 /
+/// 1024 / 768). 0.08 is the boundary between the two regimes: the trend there
+/// (0.762 @384, 0.812 @512, 0.854 @768) is heading for the bar at n ≈ 1200 but
+/// was not directly observed clearing it, so this constant sits one grid step
+/// BELOW the lowest span where the bar was actually seen — stated plainly
+/// because it is the one number here that is not a direct observation.
+///
+/// The value also has a hard structural upper limit: a fixed decile's realised
+/// span is always slightly under 0.10 (CID22's are 0.0956–0.0999), so any floor
+/// at 0.10 or above would merge away every single decile on every corpus and
+/// the scheme would degenerate to a handful of very wide bands.
+///
+/// The registered rationale for this constant was WRONG in mechanism and is
+/// corrected here: V.3 said span would bind through the estimability bar. It
+/// does not — at fixed n the CI half-width is nearly span-independent
+/// (0.140 → 0.086 across spans 0.02 → 0.20 at n=200, i.e. every span "passes"
+/// `H ≤ 0.20`). Span binds through the attenuated SIGNAL instead, exactly as
+/// Thorndike case-II predicts (predicted 0.081 / 0.346 / 0.612 at spans
+/// 0.02 / 0.10 / 0.20 against measured 0.056 / 0.370 / 0.632).
 pub const SPAN_MIN: f64 = 0.08;
 
 /// Number of fixed deciles the merge starts from (the historical grid).
@@ -152,20 +182,31 @@ pub fn not_measured_reason(n: usize, span: f64) -> Option<String> {
     None
 }
 
-/// The appendix-V scheme: fixed deciles merged inward until every surviving
-/// band clears both floors.
+/// The appendix-V scheme: fixed deciles accumulated into the FINEST partition
+/// whose every band clears both floors.
 ///
-/// Deterministic in `targets` alone. The merge repeatedly takes the worst
-/// offending band — smallest `n`, ties broken by smallest span — and folds it
-/// into whichever neighbour has the smaller `n`, so a sparse tail is absorbed by
-/// the adjacent tail rather than by the dense middle. It stops when every band
-/// is usable or only one band remains (a corpus too small to band at all, which
-/// the caller then reports as a single NOT-MEASURED row).
+/// Deterministic in `targets` alone (it takes no predictions, so band edges
+/// cannot depend on the model being evaluated). Sweeping low→high and closing a
+/// band the moment it becomes usable is optimal for maximising the number of
+/// bands: both floors are monotone under adding another decile, so closing as
+/// early as possible leaves the most material for the bands that follow. A
+/// deficient remainder at the top is folded into the band before it — the only
+/// repair the sweep needs.
+///
+/// A pairwise "merge the worst band into its smaller neighbour" greedy was
+/// tried first and REJECTED: it is myopic and strands bands. On TID it spent
+/// B4 (677) on the already-satisfied B5 (705), which left B6-B9 (877) with no
+/// deficient neighbour, and the corpus collapsed to a single band — where this
+/// sweep finds two clean ones (1418 / 1582). Sweeping high→low instead gives
+/// identical bands on all five banded corpora, so the direction is not
+/// load-bearing.
+///
+/// When even the whole corpus cannot clear the floors the result is a single
+/// band, which the caller reports as one NOT-MEASURED row. That is the honest
+/// answer for CSIQ (866 pairs) and LIVE (779): they are too small to band at
+/// the discrimination bar at all.
 pub fn merged_bands(targets: &[f64]) -> Vec<BandDef> {
     let k = BASE_BANDS;
-    // Inclusive decile index ranges, e.g. [3, 5] == deciles B3..=B5.
-    let mut spans: Vec<(usize, usize)> = (0..k).map(|i| (i, i)).collect();
-
     let edge = |i: usize| i as f64 / k as f64;
     let top = |j: usize| {
         if j == k - 1 {
@@ -175,42 +216,26 @@ pub fn merged_bands(targets: &[f64]) -> Vec<BandDef> {
         }
     };
 
-    while spans.len() > 1 {
-        let stat = |s: &(usize, usize)| occupancy(targets, edge(s.0), top(s.1));
-        let worst = spans
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| {
-                let (n, sp) = stat(s);
-                n < N_MIN || sp < SPAN_MIN
-            })
-            // smallest n, then smallest span; index breaks remaining ties so the
-            // result never depends on iteration order
-            .min_by(|(ia, a), (ib, b)| {
-                let (na, sa) = stat(a);
-                let (nb, sb) = stat(b);
-                na.cmp(&nb)
-                    .then(sa.total_cmp(&sb))
-                    .then(ia.cmp(ib))
-            })
-            .map(|(i, _)| i);
-        let Some(i) = worst else { break };
-
-        let j = if i == 0 {
-            1
-        } else if i == spans.len() - 1 {
-            spans.len() - 2
-        } else if stat(&spans[i - 1]).0 <= stat(&spans[i + 1]).0 {
-            i - 1
-        } else {
-            i + 1
-        };
-        let (a, b) = (i.min(j), i.max(j));
-        spans[a] = (spans[a].0, spans[b].1);
-        spans.remove(b);
+    // Inclusive decile index ranges, e.g. (3, 5) == deciles B3..=B5.
+    let mut groups: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0usize;
+    for i in 0..k {
+        let (n, span) = occupancy(targets, edge(start), top(i));
+        if n >= N_MIN && span >= SPAN_MIN {
+            groups.push((start, i));
+            start = i + 1;
+        }
+    }
+    if start < k {
+        // Deficient remainder: fold it into the previous band, or — if nothing
+        // ever closed — the corpus is one band.
+        match groups.last_mut() {
+            Some(last) => last.1 = k - 1,
+            None => groups.push((0, k - 1)),
+        }
     }
 
-    spans
+    groups
         .iter()
         .map(|&(a, b)| BandDef {
             label: if a == b {
@@ -228,23 +253,37 @@ pub fn merged_bands(targets: &[f64]) -> Vec<BandDef> {
 mod tests {
     use super::*;
 
-    /// CID22's actual MOS shape: nothing below 0.277, nothing above 0.9194,
-    /// mass concentrated in 0.5..0.9.
-    fn cid22_like() -> Vec<f64> {
+    /// Build a corpus with a given per-decile occupancy, each decile filled
+    /// across (almost) its whole width so realised spans match the real ones.
+    fn corpus(counts: [usize; 10]) -> Vec<f64> {
         let mut v = Vec::new();
-        let mut push = |lo: f64, hi: f64, n: usize| {
+        for (d, &n) in counts.iter().enumerate() {
+            let lo = d as f64 / 10.0;
             for i in 0..n {
-                v.push(lo + (hi - lo) * (i as f64) / (n as f64));
+                let f = if n == 1 {
+                    0.0
+                } else {
+                    i as f64 / (n - 1) as f64
+                };
+                v.push(lo + 0.0999 * f);
             }
-        };
-        push(0.30, 0.399, 57);
-        push(0.40, 0.499, 266);
-        push(0.50, 0.599, 615);
-        push(0.60, 0.699, 836);
-        push(0.70, 0.799, 1092);
-        push(0.80, 0.899, 1382);
-        push(0.900, 0.9194, 43);
+        }
         v
+    }
+
+    /// CID22's measured decile occupancy (n=4292): B0/B1 empty, B2 = 1 pair,
+    /// top band 43 pairs spanning 0.0194.
+    fn cid22_like() -> Vec<f64> {
+        let mut v = corpus([0, 0, 1, 57, 266, 615, 836, 1092, 1382, 0]);
+        for i in 0..43 {
+            v.push(0.9000 + 0.0194 * (i as f64) / 42.0);
+        }
+        v
+    }
+
+    /// TID's measured decile occupancy (n=3000): B8 = 1 pair, B9 empty.
+    fn tid_like() -> Vec<f64> {
+        corpus([29, 34, 185, 493, 677, 705, 809, 67, 1, 0])
     }
 
     #[test]
@@ -264,7 +303,10 @@ mod tests {
         let t = cid22_like();
         let bands = merged_bands(&t);
         let top = bands.last().unwrap();
-        assert_eq!(top.label, "B8-B9", "B9 must be absorbed by B8, got {bands:?}");
+        assert_eq!(
+            top.label, "B8-B9",
+            "B9 must be absorbed by B8, got {bands:?}"
+        );
         assert!(top.hi.is_infinite());
         let m = top.members(&t);
         let span = t[*m.last().unwrap()] - t[m[0]];
@@ -273,9 +315,102 @@ mod tests {
         assert!(not_measured_reason(m.len(), span).is_none());
     }
 
+    /// TID is the case the rejected pairwise greedy collapsed to one band: it
+    /// spent B4 on the already-satisfied B5 and stranded B6-B9 (877). The
+    /// sweep must find two clean bands.
+    #[test]
+    fn tid_does_not_collapse_and_its_empty_top_is_absorbed() {
+        let t = tid_like();
+        let bands = merged_bands(&t);
+        assert!(
+            bands.len() >= 2,
+            "TID must support >= 2 bands, got {bands:?}"
+        );
+        assert_eq!(bands.last().unwrap().label, "B5-B9");
+        assert!(bands.last().unwrap().members(&t).len() >= N_MIN);
+    }
+
+    /// A corpus smaller than the count floor cannot be banded at all, and must
+    /// say so as ONE band rather than pretending to ten. CSIQ (866) / LIVE
+    /// (779) are the real instances.
+    #[test]
+    fn a_corpus_below_the_count_floor_collapses_to_one_band() {
+        let t = corpus([19, 36, 56, 66, 79, 92, 108, 94, 103, 213]); // CSIQ shape
+        let bands = merged_bands(&t);
+        assert_eq!(bands.len(), 1, "got {bands:?}");
+        assert_eq!(bands[0].label, "B0-B9");
+        let m = bands[0].members(&t);
+        assert_eq!(m.len(), t.len(), "the single band must hold every pair");
+        assert!(
+            not_measured_reason(m.len(), 1.0).is_some(),
+            "and be NOT-MEASURED"
+        );
+    }
+
+    /// Sweeping high→low must give the same bands as low→high on every real
+    /// corpus shape — if it did not, the direction would be a free parameter
+    /// and the scheme would need a justification it does not have.
+    #[test]
+    fn sweep_direction_is_not_load_bearing() {
+        fn rtl(targets: &[f64]) -> Vec<(usize, usize)> {
+            let k = BASE_BANDS;
+            let edge = |i: usize| i as f64 / k as f64;
+            let top = |j: usize| {
+                if j == k - 1 {
+                    f64::INFINITY
+                } else {
+                    (j + 1) as f64 / k as f64
+                }
+            };
+            let mut groups: Vec<(usize, usize)> = Vec::new();
+            let mut end = k as isize - 1;
+            for i in (0..k).rev() {
+                if end < i as isize {
+                    continue;
+                }
+                let (n, span) = occupancy(targets, edge(i), top(end as usize));
+                if n >= N_MIN && span >= SPAN_MIN {
+                    groups.push((i, end as usize));
+                    end = i as isize - 1;
+                }
+            }
+            if end >= 0 {
+                match groups.last_mut() {
+                    Some(last) => last.0 = 0,
+                    None => groups.push((0, k - 1)),
+                }
+            }
+            groups.reverse();
+            groups
+        }
+        for t in [
+            cid22_like(),
+            tid_like(),
+            corpus([19, 36, 56, 66, 79, 92, 108, 94, 103, 213]),
+        ] {
+            let ltr: Vec<(usize, usize)> = merged_bands(&t)
+                .iter()
+                .map(|b| {
+                    let a = (b.lo * 10.0).round() as usize;
+                    let z = if b.hi.is_infinite() {
+                        BASE_BANDS - 1
+                    } else {
+                        (b.hi * 10.0).round() as usize - 1
+                    };
+                    (a, z)
+                })
+                .collect();
+            assert_eq!(ltr, rtl(&t), "sweep direction changed the bands");
+        }
+    }
+
     #[test]
     fn every_surviving_band_is_usable_or_the_scheme_collapsed_to_one() {
-        for t in [cid22_like(), (0..3000).map(|i| i as f64 / 3000.0).collect()] {
+        for t in [
+            cid22_like(),
+            tid_like(),
+            (0..30000).map(|i| i as f64 / 30000.0).collect(),
+        ] {
             let bands = merged_bands(&t);
             if bands.len() == 1 {
                 continue;
@@ -313,7 +448,10 @@ mod tests {
     /// Bands must partition: every row lands in exactly one band.
     #[test]
     fn bands_partition_the_corpus() {
-        for t in [cid22_like(), (0..500).map(|i| i as f64 / 499.0).collect::<Vec<_>>()] {
+        for t in [
+            cid22_like(),
+            (0..500).map(|i| i as f64 / 499.0).collect::<Vec<_>>(),
+        ] {
             for bands in [fixed_bands(), merged_bands(&t)] {
                 let mut seen = vec![0usize; t.len()];
                 for b in &bands {
@@ -345,7 +483,11 @@ mod tests {
     fn not_measured_reasons_are_distinct_and_specific() {
         assert!(not_measured_reason(0, 0.0).unwrap().starts_with("empty"));
         assert!(not_measured_reason(43, 0.019).unwrap().contains("AND"));
-        assert!(not_measured_reason(57, 0.10).unwrap().contains("too few pairs"));
+        assert!(
+            not_measured_reason(57, 0.10)
+                .unwrap()
+                .contains("too few pairs")
+        );
         assert!(
             not_measured_reason(2000, 0.02)
                 .unwrap()

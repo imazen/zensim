@@ -1,0 +1,43 @@
+# F8 floor derivation on cid22 band B8-B9 = [0.80, inf)
+# n=1425 pairs, span=0.1194, refs=49, models=120, B=10000, seed=4242
+name	srocc_signed	ci_hw_pair	ci_hw_refclust
+CS0p3_s2503	0.4098	0.0433	0.0962
+CS2_s2501	0.3819	0.0443	0.0974
+C_co1a_s1307	0.4382	0.0410	0.0833
+C_co1c_s1301	0.4321	0.0417	0.0912
+C_co2a_s1307	0.4802	0.0394	0.0825
+C_co3a_s1301	0.4466	0.0416	0.0960
+C_co4_s1307	0.4419	0.0418	0.0866
+C_ensk2_s1301	0.4699	0.0404	0.0880
+C_ensk5_s1303	0.4779	0.0394	0.0832
+H_co3abpg_s2503	0.4646	0.0407	0.0912
+H_co3abpg_s2507	0.4724	0.0401	0.0858
+T_appT_c944m_lam5e-3	0.4479	0.0398	0.0730
+W10L10_s4001	0.4929	0.0385	0.0822
+W10L1_s4001	0.4866	0.0388	0.0867
+W10L3_s4003	0.4581	0.0413	0.0943
+W8D_s3101	0.4664	0.0404	0.0852
+W9A_s3307	0.4500	0.0416	0.0839
+W9B_s3307	0.4569	0.0410	0.0876
+ebothg_m504	0.2621	0.0472	0.0667
+foldMLP_bigcodec_KADIS_E_K5	0.4357	0.0417	0.0863
+foldcanon_coherent	0.3505	0.0456	0.0868
+sota944_ens_E1_k3	0.4761	0.0397	0.0841
+sota944_ens_GE2_trio	0.4741	0.0404	0.0889
+v47_strict_QAT_native	0.4612	0.0403	0.0887
+winner_dial_Ebothg_hfgain_winsor_dial	0.5142	0.0368	0.0790
+
+# marginal 95% CI half-width  pair-bootstrap median  = 0.0407
+# marginal 95% CI half-width  ref-clustered   median = 0.0866   <- GOVERNING (confound 2)
+# DERIVED FLOOR = ceil_2dp(governing) = 0.09
+
+# board population on this band:
+#   min +0.2621  p10 +0.3910  median +0.4581  p90 +0.4844  max +0.5142
+#   negative: 0/120
+
+# pass-count at candidate floors (signed):
+#   floor 0.04 -> 120/120 pass
+#   floor 0.07 -> 120/120 pass
+#   floor 0.09 -> 120/120 pass
+#   floor 0.14 -> 120/120 pass
+#   floor 0.15 -> 120/120 pass
