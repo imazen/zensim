@@ -13394,3 +13394,62 @@ census +1 with worse median (mixed, (b)); A-Y1 err-gain / A-Y3 EMA =
 parity (b). **No default changes; exp 1.0 is the recommendation to the
 user** (n=27 caveat; the grid is campaign-reused — pre-registration + the
 dose-response + controls are the defense).
+
+## Y.R3 — A-Y4 AVIF RECT-QUERY STEERING (2026-08-06): the channel is LIVE end-to-end; the naive per-SB delta-q spend is a measured matched-rate LOSS — registered outcome (c) with mechanism
+
+**Interface (committed):** zensim `avif_sb_hints` example (`9ed79f97`) —
+(ref, dist) → folded-944 features → the bake's batched FD gradient (L-Y1) →
+`compute_attribution_density_full` → per-64px-SB mean grid TSV
+(`AttributionResult::block_sums`; `query_rect` serves arbitrary 4–128 px
+partitions). Policy (weight→`sb_q_scale`) deliberately consumer-side.
+
+**Channel (worktree-local probe, NOTHING pushed to zenavif/ravif):** recon
+found the full hook already exists — zenrav1e `FrameHints::sb_q_scale`
+(per-SB AC-q scale → real delta_q syntax + RDO distortion follow) + zenavif
+`EncoderConfig.sb_q_scale` + the two-pass driver — dead behind
+`zenravif::FRAME_HINTS_LIVE = false` awaiting the zenrav1e >0.1.4 release
+train (~15 release-gated items). Probe worktrees (`ravif--tenxprobe` @
+`680ca56`, `zenavif--tenxprobe` @ `66e3c41` = the appendix-Z datagen pin)
+applied the documented unblock: gate flip + hinted send + zenrav1e path dep
+(local 0.2.0-unreleased) + 5 neutral `EncoderConfig` fields +
+`with_sb_q_scale` builder + `sb_hints_cell` example. Full patch preserved:
+`benchmarks/avif_sb_probe_worktree_2026-08-06.patch`.
+
+- **M1 gate PASS: neutral map (all 1.0) is BYTE-IDENTICAL to single-pass**
+  (city 576², q60 s6: 41,045 B both) — the chain is live and correctly
+  neutral, matching zenrav1e's own `frame_hints_sb_q_scale_still_picture`
+  contract.
+- Maps engage: hinted arms show real per-SB spread (q_scale 0.50–2.00).
+
+**RD probe (3 imgs × q{45,60} × strength{1,2}, speed 6, 444; judges
+fast-ssim2 + dssim — never the steering metric; single-pass ladder q40–75
+as the matched-rate reference):** `benchmarks/avif_sb_probe_2026-08-06.tsv`.
+**Every in-ladder hinted point sits BELOW the single-pass RD curve**: Δssim2
+at matched bytes −0.51…−4.07 (9/9 cells), Δdssim worse-or-neutral (8/9
+worse, 1 neutral). Strength 2 on dog is strictly dominated (fewer quality
+at more bytes than strength 1). The zensim-map-guided per-SB delta-q loses
+at matched rate — the SAME directional verdict the butteraugli-guided
+two-pass got (its DROP record), now measured for the model-aligned map.
+
+**Mechanism (why this is a CHANNEL result, not a map-quality result):**
+1. `apply_sb_q_scale_hints` **disables segmentation** when hints activate
+   (zenrav1e `encoder.rs:2334`, deliberate — seg+delta-q composition
+   unvalidated) ⇒ the hinted arm loses the encoder's own k-means ALT_Q
+   adaptation. A big structural handicap shared by ANY map source.
+2. delta_q syntax overhead + per-SB q discontinuities tax spatial
+   prediction; bits added at low q in damaged SBs buy less metric than the
+   encoder's own allocation at a globally lower q.
+3. The mapping policy (geomean-normalized, exp −s/2, clamp [0.5,2]) is
+   first-try uncalibrated; no policy sweep was in scope.
+
+**Ranked next lever (registered, not built):** ride the λ-side channel
+instead — zenrav1e's per-16×16 `ssim_rdmult` scaling
+(`compute_ssim_rdmult_factors` / `ssim_rdmult_scale_at`) already does
+arbitrary-bsize geomean pooling, has NO syntax cost, and composes with
+segmentation; one `FrameHints` field would let an external SAT map replace
+its variance heuristic. That is where the zensim map's shape can be tested
+without the delta-q channel's structural handicaps.
+
+Caveats: n=3 images × 2 q; one policy; ladder-interpolated matched-rate
+(no per-arm dense ladders); 576² only. Worktrees removed after the patch
+was preserved; zenavif/ravif primaries untouched (appendix-Z pin intact).

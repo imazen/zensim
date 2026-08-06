@@ -1,0 +1,11 @@
+# Appendix Y A-Y4 avif per-SB steering probe — 2026-08-06
+# zensim signal side: avif_sb_hints example @ zensim 9ed79f97 (committed)
+# encoder side: WORKTREE-LOCAL probe (never pushed) — ravif @ 680ca56 + zenavif @ 66e3c41
+#   with the .patch file here applied (FRAME_HINTS_LIVE=true, hinted send uncommented,
+#   zenrav1e path dep -> local 0.2.0-unreleased, 5 neutral EncoderConfig fields,
+#   with_sb_q_scale builder + sb_hints_cell example)
+# gates: neutral-map == single-pass BYTE-IDENTICAL (city q60 s6, 41045 B both)
+# judges: fast-ssim2-cli (fast-ssim2 repo build) + dssim 3.x (~/.cargo/bin)
+# policy: q_sb = clamp((mean_density/geomean)^(-strength/2), 0.5, 2.0)
+# verdict: registered outcome (c) at matched rate — see campaign appendix Y.R3
+# confound: sb_q_scale hints DISABLE zenrav1e segmentation (enable_segmentation=false)

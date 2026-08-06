@@ -1,0 +1,384 @@
+diff --git a/ravif/Cargo.toml b/ravif/Cargo.toml
+index b12f596..919be2a 100644
+--- a/ravif/Cargo.toml
++++ b/ravif/Cargo.toml
+@@ -16,7 +16,7 @@ rust-version = "1.93"
+ [dependencies]
+ zenavif-serialize = { version = "0.2.0" }  # set_gain_map_alt_icc; supplied by [patch.crates-io] until 0.2.0 publishes
+ imgref = "1.12.0"
+-zenrav1e = { version = "0.1.4", default-features = false }
++zenrav1e = { path = "../../zenrav1e", default-features = false }
+ rayon = { version = "1.11.0", optional = true }
+ rgb = { version = "0.8", default-features = false }
+ loop9 = "0.1.5"
+@@ -25,7 +25,7 @@ whereat = "0.1.5"
+ almost-enough = { version = "0.4.3", optional = true, default-features = false, features = ["alloc"] }
+ 
+ [target.'cfg(target = "wasm32-unknown-unknown")'.dependencies]
+-zenrav1e = { version = "0.1.4", default-features = false, features = ["wasm"] }
++zenrav1e = { path = "../../zenrav1e", default-features = false, features = ["wasm"] }
+ 
+ [features]
+ default = ["asm", "threading"]
+diff --git a/ravif/src/animated.rs b/ravif/src/animated.rs
+index da536b0..df5e8e4 100644
+--- a/ravif/src/animated.rs
++++ b/ravif/src/animated.rs
+@@ -291,6 +291,11 @@ fn encode_sequence_av1<P: Pixel + Default>(
+     };
+ 
+     let config = EncoderConfig {
++            variance_boost_strength: None,
++            variance_boost_deep: None,
++            quant_rounding_bias: None,
++            ssim_rdmult_strength: None,
++            coeff_rd_stack: None, // TENXPROBE: five 0.2.0 fields, neutral
+         width,
+         height,
+         time_base: Rational::new(1, 1000),
+@@ -397,6 +402,11 @@ fn make_sequence_header<P: Pixel + Default>(
+     let speed = SpeedTweaks::from_my_preset(enc.speed, quantizer, width.max(height));
+ 
+     let config = EncoderConfig {
++            variance_boost_strength: None,
++            variance_boost_deep: None,
++            quant_rounding_bias: None,
++            ssim_rdmult_strength: None,
++            coeff_rd_stack: None, // TENXPROBE: five 0.2.0 fields, neutral
+         width,
+         height,
+         time_base: Rational::new(1, 1000),
+diff --git a/ravif/src/av1encoder.rs b/ravif/src/av1encoder.rs
+index cefa71f..cca9874 100644
+--- a/ravif/src/av1encoder.rs
++++ b/ravif/src/av1encoder.rs
+@@ -2389,6 +2389,11 @@ fn rav1e_config(p: &Av1EncodeConfig) -> Config {
+     let speed_settings = p.speed.speed_settings();
+     let cfg = Config::new()
+         .with_encoder_config(EncoderConfig {
++            variance_boost_strength: None,
++            variance_boost_deep: None,
++            quant_rounding_bias: None,
++            ssim_rdmult_strength: None,
++            coeff_rd_stack: None, // TENXPROBE: five 0.2.0 fields, neutral
+         width: p.width,
+         height: p.height,
+         time_base: Rational::new(1, 1),
+@@ -2684,7 +2689,7 @@ fn init_frame_1<P: zenrav1e::Pixel + Default>(
+ /// dep bump: flip to `true` and uncomment the hinted-send block in
+ /// `encode_to_av1`.
+ #[cfg(feature = "imazen")]
+-pub const FRAME_HINTS_LIVE: bool = false;
++pub const FRAME_HINTS_LIVE: bool = true; // TENXPROBE worktree-local flip
+ 
+ #[inline(never)]
+ fn encode_to_av1<P: zenrav1e::Pixel>(
+@@ -2735,19 +2740,26 @@ fn encode_to_av1<P: zenrav1e::Pixel>(
+     // zenrav1e > 0.1.4 (master `c4047cec`). At the dep bump: flip
+     // `FRAME_HINTS_LIVE` to true and swap the plain send below for the
+     // commented hinted send.
++    // TENXPROBE: hinted send live (worktree-local).
+     #[cfg(feature = "imazen")]
+-    if FRAME_HINTS_LIVE && p.frame_hints_sb_q_scale.is_some() {
+-        // let hints = FrameHints::new()
+-        //     .with_sb_q_scale(p.frame_hints_sb_q_scale.clone().unwrap());
+-        // let params = FrameParameters {
+-        //     frame_hints: Some(std::sync::Arc::new(hints)),
+-        //     ..Default::default()
+-        // };
+-        // ctx.send_frame((std::sync::Arc::new(frame), params))
+-        //     .map_err(|e| at!(Error::from(e)))?;
+-        unreachable!("FRAME_HINTS_LIVE requires the zenrav1e dep bump (uncomment the hinted send)");
+-    }
+-    ctx.send_frame(frame).map_err(|e| at!(Error::from(e)))?;
++    let hinted = FRAME_HINTS_LIVE && p.frame_hints_sb_q_scale.is_some();
++    #[cfg(not(feature = "imazen"))]
++    let hinted = false;
++    if hinted {
++        #[cfg(feature = "imazen")]
++        {
++            let hints = zenrav1e::data::FrameHints::new()
++                .with_sb_q_scale(p.frame_hints_sb_q_scale.clone().unwrap());
++            let params = zenrav1e::data::FrameParameters {
++                frame_hints: Some(std::sync::Arc::new(hints)),
++                ..Default::default()
++            };
++            ctx.send_frame((std::sync::Arc::new(frame), params))
++                .map_err(|e| at!(Error::from(e)))?;
++        }
++    } else {
++        ctx.send_frame(frame).map_err(|e| at!(Error::from(e)))?;
++    }
+     ctx.flush();
+ 
+     let mut out = Vec::new();
+diff --git a/Cargo.lock b/Cargo.lock
+index cd6afdc..5b4f779 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2064,7 +2064,7 @@ dependencies = [
+  "whereat",
+  "zenavif-parse 0.6.2",
+  "zenpixels-convert",
+- "zenrav1e",
++ "zenrav1e 0.1.4",
+ ]
+ 
+ [[package]]
+@@ -2127,6 +2127,7 @@ dependencies = [
+ name = "zenpredict"
+ version = "0.2.0"
+ dependencies = [
++ "archmage",
+  "bytemuck",
+  "libm",
+  "lz4_flex",
+@@ -2137,6 +2138,35 @@ name = "zenrav1e"
+ version = "0.1.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3c2f798defdace5a2d991e4f679697768cf256a3cef130bfa2d84702cebf3a76"
++dependencies = [
++ "aligned-vec",
++ "arbitrary",
++ "arg_enum_proc_macro",
++ "arrayvec",
++ "av1-grain",
++ "bitstream-io",
++ "built",
++ "cfg-if",
++ "interpolate_name",
++ "itertools",
++ "libfuzzer-sys",
++ "log",
++ "maybe-rayon",
++ "noop_proc_macro",
++ "num-derive",
++ "num-traits",
++ "pastey",
++ "profiling",
++ "rand",
++ "rand_chacha",
++ "simd_helpers",
++ "thiserror",
++ "v_frame 0.3.9",
++]
++
++[[package]]
++name = "zenrav1e"
++version = "0.2.0"
+ dependencies = [
+  "aligned-vec",
+  "arbitrary",
+@@ -2169,6 +2199,7 @@ dependencies = [
+  "thiserror",
+  "v_frame 0.3.9",
+  "wasm-bindgen",
++ "whereat",
+ ]
+ 
+ [[package]]
+@@ -2183,7 +2214,7 @@ dependencies = [
+  "rgb",
+  "whereat",
+  "zenavif-serialize",
+- "zenrav1e",
++ "zenrav1e 0.2.0",
+ ]
+ 
+ [[package]]
+diff --git a/Cargo.toml b/Cargo.toml
+index 876ea12..1e5b90b 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -43,7 +43,7 @@ bytemuck = { version = "1.25.0", default-features = false, features = ["derive"]
+ thiserror = { version = "2.0.18", default-features = false }
+ whereat = { version = "0.1.5"}
+ log = "0.4.29"
+-ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", default-features = false, optional = true, features = ["stop"] }
++ravif = { package = "zenravif", version = "0.2.0", path = "../ravif--tenxprobe/ravif", default-features = false, optional = true, features = ["stop"] }
+ # Optional target-quality deps — encode->decode->score convergence loop
+ # (`target-quality` feature). Same versions as the dev-dependency copies.
+ fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"] }
+@@ -267,6 +267,10 @@ rustdoc-args = ["--generate-link-to-definition"]
+ name = "two_pass_cell"
+ required-features = ["two-pass-butteraugli"]
+ 
++[[example]]
++name = "sb_hints_cell"
++required-features = ["two-pass-butteraugli"]
++
+ # Gain-map / HDR re-encode harnesses (auto-discovered before this entry
+ # existed, which broke default-feature `cargo test` — they call encode APIs).
+ [[example]]
+diff --git a/src/encoder.rs b/src/encoder.rs
+index adaa56d..d05f987 100644
+--- a/src/encoder.rs
++++ b/src/encoder.rs
+@@ -694,6 +694,16 @@ impl EncoderConfig {
+         self
+     }
+ 
++    /// TENXPROBE (worktree-local): externally-supplied per-64×64-superblock
++    /// AC quantizer scale map (`ceil(w/64) × ceil(h/64)`, row-major; the
++    /// grid `FrameHints::sb_q_scale` expects). Composes with nothing else —
++    /// the two-pass driver overwrites it when used.
++    #[cfg(feature = "two-pass-butteraugli")]
++    pub fn with_sb_q_scale(mut self, map: Option<Box<[f32]>>) -> Self {
++        self.sb_q_scale = map;
++        self
++    }
++
+     /// Override CDEF on/off (None = use speed preset default).
+     #[cfg(feature = "encode-imazen")]
+     pub fn with_cdef(mut self, enable: Option<bool>) -> Self {
+=== NEW FILE: examples/sb_hints_cell.rs ===
+//! TENXPROBE (campaign appendix Y, A-Y4; worktree-local): single-image RD
+//! probe cell for EXTERNAL per-superblock steering — encodes one PNG either
+//! plain or with a `sb_q_scale` map derived from a zensim attribution-density
+//! grid (`zensim avif_sb_hints` TSV), decodes the result, and prints a stats
+//! line. The zensim→q_scale POLICY lives here (probe-side):
+//!
+//!   w_sb  = max(mean_density_sb, eps)         (positive = damaged)
+//!   q_sb  = clamp((w_sb / geomean)^(-strength/2), lo, hi)
+//!
+//! geomean normalization ⇒ log-mean-zero map (≈rate-neutral); damaged
+//! blocks get q_scale < 1 (finer quantization, more bits).
+//!
+//! Usage:
+//!   sb_hints_cell <in.png> <out_prefix> <quality> <speed> single
+//!   sb_hints_cell <in.png> <out_prefix> <quality> <speed> neutral
+//!   sb_hints_cell <in.png> <out_prefix> <quality> <speed> hinted <hints.tsv> [strength] [lo] [hi]
+//!
+//! Writes `<out_prefix>.avif` + `<out_prefix>.png` (decoded). Stdout:
+//!   mode<TAB>bytes<TAB>enc_ms<TAB>map_min<TAB>map_max
+
+use almost_enough::{StopToken, Unstoppable};
+use imgref::ImgVec;
+use rgb::Rgb;
+use zenavif::{EncoderConfig, encode_rgb8};
+
+fn load_png_rgb(path: &std::path::Path) -> ImgVec<Rgb<u8>> {
+    let img = image::open(path)
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()))
+        .to_rgb8();
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    let pixels: Vec<Rgb<u8>> = img
+        .pixels()
+        .map(|p| Rgb {
+            r: p.0[0],
+            g: p.0[1],
+            b: p.0[2],
+        })
+        .collect();
+    ImgVec::new(pixels, w, h)
+}
+
+/// Parse the `avif_sb_hints` TSV → per-SB mean densities + grid dims.
+fn load_hints(path: &str) -> (Vec<f64>, usize, usize, usize, usize, usize) {
+    let text = std::fs::read_to_string(path).expect("read hints tsv");
+    let mut lines = text.lines();
+    let header = lines.next().expect("header");
+    let h: Vec<usize> = header
+        .trim_start_matches('#')
+        .split_whitespace()
+        .map(|t| t.parse().expect("header num"))
+        .collect();
+    let (w, ih, block, cols, rows) = (h[0], h[1], h[2], h[3], h[4]);
+    let mut vals = Vec::with_capacity(cols * rows);
+    for line in lines {
+        for tok in line.split('\t') {
+            vals.push(tok.parse::<f64>().expect("density"));
+        }
+    }
+    assert_eq!(vals.len(), cols * rows, "grid size mismatch");
+    (vals, w, ih, block, cols, rows)
+}
+
+fn map_to_q_scale(means: &[f64], strength: f64, lo: f64, hi: f64) -> Box<[f32]> {
+    let max_m = means.iter().cloned().fold(0.0f64, f64::max);
+    let eps = (max_m * 1e-4).max(1e-30);
+    let w: Vec<f64> = means.iter().map(|&m| m.max(eps)).collect();
+    let log_gm = w.iter().map(|v| v.ln()).sum::<f64>() / w.len() as f64;
+    let gm = log_gm.exp();
+    w.iter()
+        .map(|&v| ((v / gm).powf(-strength / 2.0).clamp(lo, hi)) as f32)
+        .collect::<Vec<f32>>()
+        .into_boxed_slice()
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 6 {
+        eprintln!(
+            "usage: sb_hints_cell <in.png> <out_prefix> <quality> <speed> \
+             single|neutral|hinted [hints.tsv] [strength] [lo] [hi]"
+        );
+        std::process::exit(2);
+    }
+    let input = std::path::Path::new(&args[1]);
+    let out_prefix = &args[2];
+    let quality: f32 = args[3].parse().expect("quality");
+    let speed: u8 = args[4].parse().expect("speed");
+    let mode = args[5].as_str();
+
+    let img = load_png_rgb(input);
+    let (w, h) = (img.width(), img.height());
+    let sb_cols = w.div_ceil(64);
+    let sb_rows = h.div_ceil(64);
+
+    let (map, mmin, mmax): (Option<Box<[f32]>>, f32, f32) = match mode {
+        "single" => (None, 1.0, 1.0),
+        "neutral" => (
+            Some(vec![1.0f32; sb_cols * sb_rows].into_boxed_slice()),
+            1.0,
+            1.0,
+        ),
+        "hinted" => {
+            let hints_path = args.get(6).expect("hinted needs hints.tsv");
+            let strength: f64 = args.get(7).map(|s| s.parse().unwrap()).unwrap_or(1.0);
+            let lo: f64 = args.get(8).map(|s| s.parse().unwrap()).unwrap_or(0.5);
+            let hi: f64 = args.get(9).map(|s| s.parse().unwrap()).unwrap_or(2.0);
+            let (means, hw, hh, block, cols, rows) = load_hints(hints_path);
+            assert_eq!((hw, hh), (w, h), "hints/image size mismatch");
+            assert_eq!(block, 64, "SB hints must be 64px grid");
+            assert_eq!((cols, rows), (sb_cols, sb_rows), "grid mismatch");
+            let q = map_to_q_scale(&means, strength, lo, hi);
+            let mn = q.iter().cloned().fold(f32::INFINITY, f32::min);
+            let mx = q.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            (Some(q), mn, mx)
+        }
+        other => panic!("unknown mode {other}"),
+    };
+
+    let config = EncoderConfig::new()
+        .quality(quality)
+        .speed(speed)
+        .bit_depth(zenavif::EncodeBitDepth::Eight)
+        .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv444)
+        .with_sb_q_scale(map);
+    let stop = StopToken::new(Unstoppable);
+
+    let t0 = std::time::Instant::now();
+    let enc = encode_rgb8(img.as_ref(), &config, stop).expect("encode");
+    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let avif_path = format!("{out_prefix}.avif");
+    std::fs::write(&avif_path, &enc.avif_file).expect("write avif");
+
+    // Decode round-trip for the independent judges.
+    let decoded = zenavif::decode(&enc.avif_file).expect("decode");
+    let dec_img = decoded
+        .try_as_imgref::<Rgb<u8>>()
+        .expect("decoded as RGB8 imgref");
+    let mut png = image::RgbImage::new(w as u32, h as u32);
+    for (y, row) in dec_img.rows().enumerate() {
+        for (x, px) in row.iter().enumerate() {
+            png.put_pixel(x as u32, y as u32, image::Rgb([px.r, px.g, px.b]));
+        }
+    }
+    png.save(format!("{out_prefix}.png")).expect("write png");
+
+    println!(
+        "{mode}\t{}\t{ms:.1}\t{mmin:.4}\t{mmax:.4}",
+        enc.avif_file.len()
+    );
+}
