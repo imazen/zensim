@@ -13052,3 +13052,171 @@ mirror for new artifacts; benchmarks TSVs committed with .meta provenance.
 5. The avif encode path may not admit a per-block hook in its settle state
    (fallback deliverable registered).
 6. Loop-side numbers exist at 576² only; the bar at 1MP/4K is zensim-side.
+
+# REGISTERED APPENDIX Z — SDR AVIF DATAGEN ON THE HOUSEHOLD FLEET (2026-08-06, pre-registered before launch)
+
+**Owner lane:** `claude-avifgen`. **Living status:** `zenmetrics/docs/status/avif-datagen-2026-08.md`.
+**Registered BEFORE any fleet launch** — grid, gates, ETA, and persistence contract frozen here.
+
+## Z.0 The halt is LIFTED (user directive, 2026-08-06)
+
+The 2026-07-13 avif-datagen halt (`feedback_zenavif_in_flux_no_datagen`: user halted
+avif-HDR datagen until zenavif settles) is **lifted by user directive** for this campaign,
+verbatim: *"you can fleet up avif datagen, remember to use gpu machines for metrics and
+funnel encodes from the whole fleet, since they can be slow - specialize the gpu machines.
+have an agent handle it and edit zenmetrics repo as needed."* The memory entry is annotated
+with the lift in the same push. Scope of the lift as exercised here: **SDR** AVIF datagen
+at a PINNED zenavif build (below). The HDR-corpus lane's B5 (AVIF arm of the HDR grid)
+remains that lane's decision; this campaign does not add an HDR AVIF arm.
+
+**zenavif unsettled-state facts found 2026-08-06 (reported, not touched):**
+- `.workongoing` stale since 2026-08-01 (`claude-avifmem-agent2 ci-green-awaiting-linku-corpus`).
+- Working copy = main + a modified `Cargo.lock` ONLY (source tree byte-identical to main tip).
+- Conflicted bookmark `hdr-mdcv-st2086-fix` (2004bf76 vs hidden b0c753d6) — HDR-side, does not
+  touch this campaign's SDR encode path.
+
+**THE PIN: zenavif `66e3c417b43ff950323d402824aeb1ecbbc7f683`**
+(main tip, "feat(encode): memory-adaptive concurrency"). zenmetrics builds zenavif via
+`path = "../zenavif"`; the checkout's source tree == this commit's tree (only Cargo.lock
+differs, irrelevant under the zenmetrics workspace lock). Every fleet binary/image for this
+campaign is built from this checkout state; the sha lands in `_MANIFEST.json` and every
+worker image tag. RD curves shift between codec revs — this corpus must never be
+mix-and-matched with the 2026-06-23 avif encodes (zenavif June rev) at the RD level.
+
+## Z.1 Why this campaign (the gap)
+
+The current-era SDR training estate has **no AVIF arm**: bigcodec mm6 = 6 codecs, NO avif
+(`zensim/CLAUDE.md` RECURRING ASSETS); the June 2026-06-24 GPU set covered avif on only
+229/1482 images (78% of those scored) before the vast balance died; the 2026-06-24-cpu pass
+covered avif fully but with ssim2+zensim only, at a June-era zenavif. This campaign produces
+the canonical fresh-pin SDR AVIF corpus: full source coverage, dense-q, knob axes, GPU
+perceptual metrics, 944-regime features, content-addressed persistence.
+
+## Z.2 Sources (established datagen corpus, reused verbatim)
+
+`train_renditions_2026-06-14` — 1,482 SDR renditions of imazen-26-family origins,
+32px→11,648px, already mirrored at `s3://codec-corpus/picker-sweep-2026-06-22/datagen-2026-06-23/ref/`
+(the June datagen ref corpus; workers resolve `image_path` = basename against that prefix).
+Local: `/mnt/v/output/imazen-26-features/train_renditions_2026-06-14/`. Identity and joins
+are the June estate's: `(image_path, codec, q, knob_tuple_json)` + `encode_sha`, so every
+row joins the mm6 / June sidecars by cell identity — same refs, NEW encodes (pin above).
+Splits follow the origin even/odd-digit rule (`origin_split.py`): split on origin number
+(filename prefix), never per-rendition.
+
+**Pixel estate (drives all budget math):** 1,489.2 MP total; tiny(≤0.02MP) n=1,261 = 13.1 MP;
+small(≤0.3) n=47 = 6.1; med(≤2) n=65 = 63.3; large(≤8) n=52 = 240.4; huge 8–16MP n=30 = 320;
+**monster >16MP n=27 = 846 MP (up to 101.8 MP) — EXCLUDED** (June precedent "outside the MLP
+range"; ssim2-gpu ~348 MiB/MP would blow the 8 GB fleet cards above ~20 MP; recorded, not silent).
+
+## Z.3 The grid (frozen; planner-audited 2026-08-06)
+
+Quality grid, all legs (30 points, dense at both ends + step-2 JND zone per the sweep
+discipline): `1,5,10,…,70` (step 5) + `72,74,…,100` (step 2). Planner = `zenmetrics sweep
+--codec zenavif --plan … --dry-run --emit-cells` at zenavif 66e3c417 (fingerprints bind the
+executing build to the same rev — the id-grammar tripwire fails closed on drift).
+
+| leg | sources | plan | strata × q | cells/rend | cells | audit |
+|---|---|---|---|---|---|---|
+| **main** | 1,313 rend (tiny 1,261 + large 52) | `rd_core --plan-budget 360` | 12 × 30 | 360 | **472,680** | budget dropped ONE axis value: bit_depth Ten (kept Auto/8-bit); speeds{4,6,2}×qm{on,off}×subsampling{444,420} survive intact |
+| **probe** | 112 rend (med 65 + small 47) | `modes_full --max-deviations 1` | 27 × 30 | 810 | **90,720** | 51,360 aliases fingerprint-merged, 1,664 invalid strata skipped; carries the deep-knob probes (cdef/rdotx/sgr/segcx/bup/tune/lrf/fdb/partition), the vaq⊎seg 8-pt scalar ladder, speed 8, RGB color model, trellis, bit-depth-10 as dev-1 strata |
+| **huge** | 30 rend (8–16MP) | `rd_core --max-deviations 0` | 1 × 30 | 30 | **900** | default stratum (s4, qm-on, 4:4:4, 8-bit) × dense q — the top-size anchor for the α/β intercept discipline |
+| **TOTAL** | 1,455 rend | | | | **564,300** | |
+
+Rationale for the stratification (the combined-budget rule): the GPU metric queue is the
+binding constraint (the hdr_sweep_budget inversion, re-derived below for SDR), and the
+budget rule says reduce representative-image count / axis density on the costly tier before
+thinning q. Knob probes therefore live on the cheap med/small tier at FULL dense-q; the
+large tier carries the full rd_core RD backbone; huge carries dense-q on the default
+stratum. q-density is never thinned anywhere.
+
+## Z.4 ETA + budget (from `benchmarks/hdr_sweep_budget_2026-08-05.md` α/β, stated before launch)
+
+Budget-doc AVIF numbers (HDR 4:4:4, RTX-5070-adjacent 7950X): zenavif default s4 β=3,568
+ms/MP (α≈551 ms), s10 β=365 ms/MP. SDR 8-bit/420 strata are cheaper; s4-HDR β is used as the
+conservative bound. Metric per-pair (5070): ssim2-gpu ~390 ms/MP, butteraugli-gpu ~400 ms/MP
+(max+pnorm3 from one compute), cvvdp CPU==GPU ~320 ms/MP (CPU-prep-bound → routed to CPU
+workers, the budget doc's own validated routing).
+
+MP-cells: main 91.3k + probe 56.2k + huge 9.6k = **157.1k MP-cells**.
+
+- **Encode ≈ 157.1k MP × ~4 s/MP (speed-mixed) + 564,300 × ~0.55 s α ≈ 260 CPU-h** → on the
+  ~70–90 effective household cores (node-3, i265, ryzen5800xt, tower capped, + GPU boxes
+  until scoring starts): **~6–10 h wall**. Encodes fan out wide — exactly why the whole
+  fleet takes them.
+- **GPU queue (ssim2-gpu + butteraugli-gpu) ≈ 43 5070-GPU-h**; household cards (3070 +
+  2080 ≈ 1.5× slower) 2-way ≈ **~32 h wall ≈ 1.5 days**. THE campaign bound, by design.
+- **CPU metric queue**: cvvdp ~14 CPU-h + zensim-foldapp2 944 features ~40–60 CPU-h —
+  absorbed by the CPU fleet after encodes drain.
+- **Storage ≈ ~30 GB R2** (bytes ≈ bpp·px/8 ≈ 20 GB + 564k × ~15 KB container floor).
+
+dssim-gpu + iwssim-gpu (iwssim min-dim≥176 only) are REGISTERED FOLLOW-UP declares over the
+same persisted encodes (ledger converges; adds ~0.3–0.5 s/MP each on the GPU queue) — run
+after the core set lands, budget permitting. Their absence from wave 1 is a stated scope
+cut, not a silent drop.
+
+## Z.5 Fleet architecture (the user's design)
+
+- **Encodes: the WHOLE fleet** — node-3, i265, ryzen5800xt, tower (Docker-only,
+  `--cpuset` capped, media-first, observe-before-load), node-2 + lianli **only until metric
+  work is declared**. zenfleet job system ONLY (Encode jobs, content-addressed, chunked
+  claims ~300 s).
+- **GPU machines SPECIALIZE in metrics**: node-2 (RTX 3070 8 GB) + lianli (RTX 2080 8 GB)
+  run the ScoreFile GPU queue and take NO encode jobs while metric work is queued —
+  enforced by capability routing (`gpu` class workers on those boxes, encode jobs are
+  CpuHeavy class).
+- **`ZENMETRICS_REQUIRE_GPU=1` on every GPU-scoring worker** (the B6 gate, 5f6f06f4): a
+  fallen-back box fails LOUD; the `runtime` column records the rung that executed. The
+  first-cell score gate asserts `runtime=="cuda"` before any scale-up.
+- Feature extraction (zensim-foldapp2, 944) runs on CPU workers in SIMD-TIER-MATCHED pools
+  (v4 vs v4x vs neon runlists — the bf944 G-BF1 rule), never tier-mixed.
+
+## Z.6 Persistence contract (HARD, per the ML-pipeline discipline)
+
+1. **Encoded bytes**: every Encode job's output content-addressed to
+   `s3://zentrain/<run>/blobs/<sha256>` by the worker (the standard path); ledger row keys
+   `(job_id, cell identity, output_sha=encode_sha)`. Nothing is unlinked.
+2. **All metric variants**: butteraugli max+pnorm3 both persisted; every ScoreFile JSONL row
+   lands in `jobs/<run>/blobs/`; write-back to combined parquet via `writeback_scores.py`.
+3. **Diffmaps**: `JobKind::Diffmap` has NO executor today (HDR-corpus lane blocker B2 — their
+   registered build). This campaign does NOT duplicate their build. Mitigation that keeps the
+   discipline honest: encodes are PERSISTED (1.), so diffmaps are computable without
+   re-encoding; when the diffmap executor lands (theirs or, if their lane stays idle, built
+   here and coordinated via their status doc), a Diffmap follow-up declare runs over the same
+   cells. Registered as an open follow-up, not silently skipped.
+4. **Scoped R2 creds only** on workers (r2-credentials.md; minted per-run, TTL-capped;
+   root key never leaves the workstation).
+5. **First-cell gate before ANY scale-up** (encode AND score phases separately): verify
+   blobs + ledger row + (score phase) all metric columns + runtime provenance on R2, else
+   STOP and fix the runner.
+6. **`_MANIFEST.json`** at the corpus root with: `build_commit` (zenmetrics), the zenavif pin
+   `66e3c417…`, all sibling-crate HEAD shas baked into the executor image, image tags, grid
+   spec + plan.json shas, cells.jsonl shas, source corpus provenance, split rule.
+7. **DATA_PROVENANCE.md + DATA_SPLITS.md entries** on completion; **target orientation gate**
+   (`check_target_orientation.py`-class check: metric direction vs q monotonicity spot-audit)
+   before any training use — the appendix-F lesson.
+8. Local mirror `/mnt/v/output/avifgen-2026-08-06/` + Tower mirror before any cleanup.
+
+## Z.7 Gates (pass/fail, frozen)
+
+- **G-Z1 (pin integrity)**: executor image built from zenavif 66e3c417 source tree; declare
+  fingerprints verify against the executing build (resolve_verified) — any mismatch is a
+  deterministic FAILED row, and >0.1% fp-mismatch rows = STOP.
+- **G-Z2 (first-cell encode)**: after the first chunk on ONE box: encode blob exists on R2,
+  sha256(blob) == ledger output_sha, byte length sane (>container floor), decode-back of the
+  blob succeeds locally. PASS required before >1 box.
+- **G-Z3 (first-cell score)**: first ScoreFile chunk on ONE GPU box with
+  ZENMETRICS_REQUIRE_GPU=1: rows carry runtime=="cuda" (or the typed-cuda equivalent), both
+  butteraugli variants present, ssim2 finite, feature row 944-wide on the CPU pass. PASS
+  required before the second GPU box joins.
+- **G-Z4 (coverage)**: campaign closes only at ≥99.5% ledger DONE per leg (gap re-declares
+  converge the tail); the residue is enumerated in the manifest, never silent.
+- **G-Z5 (orientation/sanity)**: on the final table, per-rendition Spearman(q, ssim2) > 0
+  for ≥99% of (rendition × stratum) ladders on the default stratum; violations enumerated.
+  944-regime purity: features never column-mixed with 372/720-era tables.
+
+## Z.8 What this appendix does NOT claim
+
+No training-value claim, no picker-retrain claim, no RD-vs-other-codec claim — those are
+follow-up work over the delivered corpus. This is a data-production campaign; its deliverable
+is the corpus + manifest + gates, and Z.R will record actuals (cells done, wall clocks,
+storage, gate outcomes) against the estimates above.
