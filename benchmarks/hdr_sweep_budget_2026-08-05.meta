@@ -1,0 +1,61 @@
+# hdr_sweep_budget_2026-08-05 — provenance
+
+host: WSL2 dev box, AMD Ryzen 9 7950X (28 threads visible, ~59 GiB), NO -C target-cpu=native (runtime SIMD dispatch)
+date: 2026-08-05 (UTC 2026-08-06 01:30-04:30)
+sources: /mnt/v/output/imazen-26-hdr-grid-2026-06-14 (16-bit PQ PNG, cICP {1,16,0,1}; the PLAN_HDR 76-source rendition grid)
+  - 1069_general_illuminated-castle-night (portrait; night, extreme dynamic range)
+  - 1233_interiors_cathedral-ceiling-interior (landscape; interior, blown windows)
+  - 1493_nature_sunset-over-sea (landscape; smooth sky gradient + sun)
+size ladder (64-aligned, native pyramid levels + one real-pixel 64x64 center crop of the 0.2 MP level):
+  64x64 (4,096 px) | 192x256 (49,152) | 384x512 (196,608) | 768x1024 (786,432) | 1536x2048 (3,145,728) | 2304x3072 (7,077,888)
+quality grids (21 points each):
+  zenav1-svt  CQP qp 1,4,7,...,60,63 (qp0=lossless is refused by the port)
+  zenjxl / zenavif / uhdr  generic quality 0,5,10,...,100
+preset/effort axis (extended 2026-08-05 to the FASTEST tier per user directive):
+  zenav1-svt presets 6 (quality), 10, 13 (fastest; SpeedConfig max) + a 2-size x 5-qp HdrFork spot check
+  zenjxl effort 7 (crate default) + effort 1 (fastest)
+  zenavif rav1e speed 4 (adapter default) + speed 10 (fastest)
+  uhdr base-JPEG quality is the swept knob; gainmap q85 / scale 4 fixed (crate defaults)
+coverage: 18 (source,size) cells per fit for all 7 primary arms; zenrav1e-sdefault 16-18
+  (truncated: sources 1+2 complete, source 3 small tiers only — superseded mid-run by the
+  speed-10 arm when the preset axis was extended); svt-p6-fork 2 (spot check). Per-row n_points
+  is carried in the committed TSV.
+reps: 64x64 ->5, <=0.79MP ->3, >=3.1MP ->2; median per cell; untimed warmup per (bin,size) at median q
+threading: RAYON_NUM_THREADS=1; cpu_ms/wall ratio recorded per cell (all arms ~=1.0 => single-threaded)
+harness: ~/tmp scratch workspace `hdrbench` (4 bins calling the real encoder APIs in-process; the
+  jxl/avif bins mirror zenmetrics-cli sweep/hdr.rs encode_jxl_hdr/encode_avif_hdr verbatim; the svt bin
+  feeds try_encode_frame_420_hbd with BT.2020nc limited-range 10-bit 4:2:0 converted from the PQ code values)
+metric timing: zenmetrics score-pairs --hdr --gpu-runtime cuda on (ref,ref) same-dims pairs,
+  1-row vs 9-row invocations; marginal = (wall9-wall1)/8; GPU = RTX 5070
+
+encoder commits (local worktrees at measurement time):
+  zenav1-svt  4c5c13246c53  (origin/main tip, jj working copy on top)
+  zenjxl      5a92f93692c0
+  jxl-encoder dc6c48b20db1  (path-patched into zenjxl per zenjxl's own [patch])
+  zenavif     66e3c417b43f
+  ravif(zenravif) 680ca56d84b1
+  zenrav1e    7ad868442180
+  ultrahdr    73ab3d27dff7
+  zenmetrics  29f1d61ee8cb  (prebuilt release binary of 2026-08-01, sweep+hdr+gpu-cuda features)
+zensim base for this commit: main@origin 1bbf0d9f
+lianli capacity probe: Ryzen 9 7900X, 24 threads, 29 GiB (roster: zenmetrics/NODES.md)
+
+committed here: hdr_sweep_budget_2026-08-05.tsv = the per-(codec,q) FIT table
+  (codec/q/n_points/alpha_ms/beta_ms_per_mp/r2/alpha_bytes/bpp/cpu_wall_ratio_med)
+  sha256 a1c0fefc45e86c048f8893a2aa51e87234ee45e1554093aaac3f137f4ae3a21c
+
+raw per-cell data (NOT committed — >30 KB; block storage per the ML-pipeline rule),
+at /mnt/v/output/zensim/hdrbudget-2026-08-05/ :
+  cells_all.tsv       merged per-cell rows, all local streams (9,054 cells)  f7822750d7188d8f932bd31c426909fc4bf420a9ea04cb1b85ffb04c074b5780
+  grid_main.tsv       svt-p6/p10 + jxl-e7 + uhdr + fork spot               e56c0113ad0a053d0253c21bb8bda92b71cfba6f1d198a717bec7539281afbd3
+  grid_fast.tsv       fastest tier: svt-p13 + jxl-e1 + avif-s10            ecfc4f109a0b73025984f45bbe8e9edf9b6ab263131ae72f7a99e22ff048c2c2
+  grid_avif.tsv       zenavif rav1e-speed-4 arm (truncated, see coverage)  7e623d02c392141f490472c5f2891dfa85de229d557a3c068b59e27f749e23fa
+  metrics_timing.tsv  score-pairs --hdr 1-row vs 9-row wall/user/sys/rss   80da6ec5317c6576d5d41bf57d9eac5d068a54bbed45ddaac9c412186851a50f
+  fit_all.tsv         identical to the committed TSV                        a1c0fefc45e86c048f8893a2aa51e87234ee45e1554093aaac3f137f4ae3a21c
+  fleet_budget.txt    fleet-aggregate arithmetic (fleet work descoped)      03ddcf8886f3bed2d699c26a801ca71144d9cefe76e201e395087c3ef53253f0
+  nodes/              per-node fits measured before the fleet descope — ARCHIVE, not a deliverable
+  harness/            the 4 bench bins' sources + run/fit/budget scripts
+per-cell TSV columns: codec/tag/w/h/pixels/q/rep/setup_ms/encode_ms/cpu_ms/bytes
+fit: OLS total_ms = alpha + beta*pixels per (codec,q); cell statistic = MIN across reps
+  (additive-noise-robust under a shared box); per-size medians reported alongside because
+  the OLS alpha is dominated by the large-size residuals

@@ -145,6 +145,17 @@ These are the docs to read first for a given purpose:
 
 - [`jsmlp_codec_sweep_verify_2026-05-12.md`](jsmlp_codec_sweep_verify_2026-05-12.md) — JS MLP codec sweep verification.
 
+## Sweep budgeting (cost before you launch)
+
+- [`hdr_sweep_budget_2026-08-05.md`](hdr_sweep_budget_2026-08-05.md) + [`.tsv`](hdr_sweep_budget_2026-08-05.tsv) —
+  multi-codec **HDR** sweep budget: measured `alpha + beta*pixels` per (codec, preset, quality)
+  for zenav1-svt (p6/p10/p13 + HdrFork), zenjxl (e7/e1), jpeg+gainmap (ultrahdr), and zenavif
+  (speed 4/10) on real 10-bit PQ sources across a 64x64 -> 7.08 MP ladder, plus per-pair GPU/CPU
+  metric cost. **Headline: encode is minutes, scoring is hours** — the 76-source corpus encodes in
+  6.9 CPU-h (~3-5 min of distributed wall) but takes 11.5-16.1 GPU-h to score, so sweep wall-clock
+  is the metric queue and the QUALITY presets are effectively free. Weekend N = 283 (all-GPU
+  metrics) to ~800 (cvvdp-on-CPU + ssim2 only).
+
 ## Reading order suggestions
 
 **If you want to ship a new bake**:
