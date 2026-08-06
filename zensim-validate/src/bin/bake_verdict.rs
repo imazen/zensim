@@ -3308,10 +3308,11 @@ Run the dedicated q-sweep harness for those._\n",
                     // via serde_json's f64 handling for bands with n < 4.
                     "bands": r.bands.as_ref().map(|bs| bs.iter().map(|b| json!({
                         "band": b.band,
-                        // `hi` is +inf on the top band; JSON has no infinity, so
-                        // it serialises as null and MUST be read as "unbounded
-                        // above", never as a missing value.
-                        "lo": b.lo, "hi": nan_null(b.hi),
+                        // `lo` is −inf on the bottom band and `hi` +inf on the
+                        // top; JSON has no infinity, so an open end serialises
+                        // as null and MUST be read as "unbounded", never as a
+                        // missing value.
+                        "lo": nan_null(b.lo), "hi": nan_null(b.hi),
                         "n": b.n, "span": b.span,
                         "not_measured_reason": b.not_measured_reason,
                         "srocc": nan_null(b.srocc),

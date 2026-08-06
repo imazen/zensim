@@ -162,7 +162,7 @@ def panel(
 # ----------------------------------------------------------------------
 
 _BATCH_FULL_COLS = ("n", "n_dropped", "srocc", "srocc_signed", "plcc",
-                    "plcc_raw", "krocc", "or", "pwrc", "z_rmse")
+                    "plcc_raw", "krocc", "or", "pwrc", "z_rmse", "mae")
 _BATCH_SROCC_COLS = ("n", "n_dropped", "srocc", "srocc_signed")
 
 

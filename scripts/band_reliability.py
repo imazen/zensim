@@ -139,7 +139,9 @@ def scheme_merge(target: np.ndarray, n_min: int, span_min: float, k: int = 10):
         return (0, 0.0) if sel.size == 0 else (sel.size, float(sel.max() - sel.min()))
 
     def edge(i):
-        return i / k
+        # Bottom band open below, mirroring the owner: LIVE's DMOS reaches
+        # -0.1177 and a floor at 0.0 silently drops those rows.
+        return -math.inf if i == 0 else i / k
 
     def top(j):
         return math.inf if j == k - 1 else (j + 1) / k

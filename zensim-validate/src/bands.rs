@@ -95,9 +95,14 @@ pub const SPAN_MIN: f64 = 0.08;
 /// Number of fixed deciles the merge starts from (the historical grid).
 pub const BASE_BANDS: usize = 10;
 
-/// One band: a label and a half-open `[lo, hi)` target interval. The top band
-/// carries `hi = f64::INFINITY` so a target above the nominal 1.0 (LIVE's DMOS
-/// reaches 1.026) is never silently dropped.
+/// One band: a label and a half-open `[lo, hi)` target interval.
+///
+/// Both ends of the range can be open. The top band carries
+/// `hi = f64::INFINITY` and the bottom band `lo = f64::NEG_INFINITY`, so a
+/// target outside the nominal `[0, 1]` still lands in exactly one band. LIVE's
+/// DMOS runs −0.1177 … 1.0264 and the fixed-decile grid, closed at 0.0, dropped
+/// its 21 sub-zero pairs out of every band — its published rows summed to 758
+/// of 779.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BandDef {
     pub label: String,
@@ -115,13 +120,20 @@ impl BandDef {
             .collect()
     }
 
-    /// Human-readable interval, matching the historical markdown rendering.
+    /// Human-readable interval; an infinite end renders as an arrow so an open
+    /// band is never mistaken for a bounded one.
     pub fn range_label(&self) -> String {
-        if self.hi.is_infinite() {
-            format!("[{:.2}, →)", self.lo)
+        let lo = if self.lo.is_infinite() {
+            "(←".to_string()
         } else {
-            format!("[{:.2}, {:.2})", self.lo, self.hi)
-        }
+            format!("[{:.2}", self.lo)
+        };
+        let hi = if self.hi.is_infinite() {
+            "→)".to_string()
+        } else {
+            format!("{:.2})", self.hi)
+        };
+        format!("{lo}, {hi}")
     }
 }
 
@@ -207,7 +219,18 @@ pub fn not_measured_reason(n: usize, span: f64) -> Option<String> {
 /// the discrimination bar at all.
 pub fn merged_bands(targets: &[f64]) -> Vec<BandDef> {
     let k = BASE_BANDS;
-    let edge = |i: usize| i as f64 / k as f64;
+    // The BOTTOM band is open below, symmetric with the top being open above.
+    // The fixed-decile grid closed it at 0.0 and silently dropped everything
+    // beneath: LIVE's DMOS reaches −0.1177, and 21 of its 779 pairs fell out of
+    // every band — the published `live` band rows summed to 758. A row that
+    // exists must land in exactly one band.
+    let edge = |i: usize| {
+        if i == 0 {
+            f64::NEG_INFINITY
+        } else {
+            i as f64 / k as f64
+        }
+    };
     let top = |j: usize| {
         if j == k - 1 {
             f64::INFINITY
@@ -445,14 +468,23 @@ mod tests {
         assert_eq!(a, b, "band edges must not depend on row order");
     }
 
-    /// Bands must partition: every row lands in exactly one band.
+    /// Bands must partition: every row lands in exactly one band — INCLUDING
+    /// targets outside [0, 1]. LIVE's DMOS runs −0.1177 … 1.0264, and under the
+    /// fixed-decile grid its 21 sub-zero pairs fell out of every band, so its
+    /// published band rows summed to 758 of 779. `merged_bands` must not do
+    /// that; `fixed_bands` is the frozen historical grid and is not asserted
+    /// here (reproducing history is its whole job, defect included).
     #[test]
     fn bands_partition_the_corpus() {
         for t in [
             cid22_like(),
             (0..500).map(|i| i as f64 / 499.0).collect::<Vec<_>>(),
+            // LIVE-shaped: mass below 0 and above 1.
+            (0..1500)
+                .map(|i| -0.12 + 1.15 * i as f64 / 1499.0)
+                .collect::<Vec<_>>(),
         ] {
-            for bands in [fixed_bands(), merged_bands(&t)] {
+            for bands in [merged_bands(&t)] {
                 let mut seen = vec![0usize; t.len()];
                 for b in &bands {
                     for i in b.members(&t) {

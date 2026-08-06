@@ -280,7 +280,24 @@ def forward(p, X):
     return (h @ p["W1"].T + p["b1"]).ravel()
 
 
-BANDS = [(i * 10, i * 10 + 10) for i in range(10)]  # B0..B9 on a 0..100 MOS scale
+# B0..B9 on a 0..100 MOS scale.
+#
+# NOT the board's bands, and deliberately still here. THE owner of band edges is
+# `zensim_validate::bands` (campaign appendix V), which cuts on the ABSOLUTE
+# [0, 1] target and merges deciles until every band clears a count floor
+# (n >= 1000) and a span floor (>= 0.08). These cuts are on an axis
+# AUTO-STRETCHED to the corpus min/max (`band_scale`), so `B9` here is "the top
+# tenth of the observed range", not "target >= 0.90" — a different slice with a
+# different n.
+#
+# Not migrated in the appendix-V pass because re-pointing it would silently
+# change what this dashboard's columns mean, which is a bigger decision than a
+# refactor. Two known consequences while it stands: (1) these bands can be
+# degenerate exactly the way the board's were — the `restrict` column below is
+# the tell, and the srocc_lowtail/hightail 30% tails above exist because of it;
+# (2) `_srocc` is scipy, not `zenstats`, so this whole panel is a pre-existing
+# stats fork (benchmarks/duplication_audit_2026-07-15.md). Do not add callers.
+BANDS = [(i * 10, i * 10 + 10) for i in range(10)]
 
 
 def _srocc(a, b):

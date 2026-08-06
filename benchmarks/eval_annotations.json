@@ -1,15 +1,15 @@
 {
  "_schema": {
-  "description": "Board-wide invalidation/annotation registry (board-integrity pass 2026-08-04). One committed, machine-readable place where superseded, flattered, or absent-not-failed numbers are FLAGGED so prior bakes/evals never sit on stolen wins. Consumers: `freeze_check --annotations` (default = this file; floor rows print '\u2014 (absent)' for absent-not-failed axes, TSV gains n_measured/absent/annotations columns) and `scripts/v_next/gauntlet.py` (warning badge + tooltip reason on affected cells/fields + caption line). Entries are append-only; never delete \u2014 supersede with a new entry and point `fix_path` at the resolution.",
+  "description": "Board-wide invalidation/annotation registry (board-integrity pass 2026-08-04). One committed, machine-readable place where superseded, flattered, or absent-not-failed numbers are FLAGGED so prior bakes/evals never sit on stolen wins. Consumers: `freeze_check --annotations` (default = this file; floor rows print '— (absent)' for absent-not-failed axes, TSV gains n_measured/absent/annotations columns) and `scripts/v_next/gauntlet.py` (warning badge + tooltip reason on affected cells/fields + caption line). Entries are append-only; never delete — supersede with a new entry and point `fix_path` at the resolution.",
   "entry_fields": {
    "id": "stable kebab-case identifier, referenced from docs and tooltips",
-   "kind": "one of: 'invalidated' (the number is wrong/superseded \u2014 do not cite), 'annotated' (the number is real but must be read with the stated caveat), 'absent-not-failed' (the field is missing because the instrument did not exist / was not run for this cell; absence is 'not measured', DISTINCT from a measured fail \u2014 consumers print '\u2014 (absent)' and state both n/8 (registered absent=not-passed rule) and n/m-measured forms)",
+   "kind": "one of: 'invalidated' (the number is wrong/superseded — do not cite), 'annotated' (the number is real but must be read with the stated caveat), 'absent-not-failed' (the field is missing because the instrument did not exist / was not run for this cell; absence is 'not measured', DISTINCT from a measured fail — consumers print '— (absent)' and state both n/8 (registered absent=not-passed rule) and n/m-measured forms)",
    "fields": "list of fulleval dot-paths the entry covers; a path covers itself and any deeper subpath (segment-boundary prefix match), e.g. 'rank.hfnlproxy' covers 'rank.hfnlproxy.per_ref_mean'",
    "scope": "predicate object selecting which fulleval cells the entry applies to; exactly one key of: {\"missing\": \"dot.path\"} (field absent or null), {\"present\": \"dot.path\"} (field present and non-null), {\"names\": [\"bake\", ...]} (exact bake-name list), {\"all\": true} (every cell)",
    "reason": "one-sentence human reason shown in tooltips/reports",
    "evidence": "commit sha(s) / doc section that established the finding",
    "date": "YYYY-MM-DD the entry landed",
-   "fix_path": "what un-flags a cell (re-measure path, tooling, or 'none \u2014 permanent caveat')"
+   "fix_path": "what un-flags a cell (re-measure path, tooling, or 'none — permanent caveat')"
   }
  },
  "entries": [
@@ -37,10 +37,10 @@
    "scope": {
     "missing": "rank.hfnlproxy"
    },
-   "reason": "the hfnlproxy corpus (ext944-canonical-2026-08-01) postdates the era-bridge fullevals; a cell nobody measured on the axis did not FAIL it \u2014 the F6 row prints '\u2014 (absent)', n/8 keeps the registered absent=not-passed rule, and the n/m-measured form is stated alongside (e.g. winner_dial_Ebothg: 5/8 registered, 5/7-measured)",
-   "evidence": "benchmarks/sota944_campaign_2026-08-03.md \u00a78 CORRECTIONS (2026-08-04); AMENDMENT 8 registration ('UNEVALUABLE counts as not-passed' stays the scoring rule)",
+   "reason": "the hfnlproxy corpus (ext944-canonical-2026-08-01) postdates the era-bridge fullevals; a cell nobody measured on the axis did not FAIL it — the F6 row prints '— (absent)', n/8 keeps the registered absent=not-passed rule, and the n/m-measured form is stated alongside (e.g. winner_dial_Ebothg: 5/8 registered, 5/7-measured)",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md §8 CORRECTIONS (2026-08-04); AMENDMENT 8 registration ('UNEVALUABLE counts as not-passed' stays the scoring rule)",
    "date": "2026-08-04",
-   "fix_path": "EXERCISED for the \u2264372-wide era-bridge cells: scripts/canonical_corpus/derive_hfnlproxy_372.py builds the 372-col slice (SAME 11,356 cells / 772 refs / SAME target as the committed 944 slice, identity-gated row-for-row float-exact), then `bake_verdict --regime 720 --corpora hfnlproxy` + `promote_fulleval.py --graft-rank hfnlproxy` (sha-gated). Filled 2026-08-04: winner_dial, v47, B, Ebothg_scr0_5. Filled 2026-08-06: ADD156_safesyn_only_raw_lasso (+0.8306), v02_bvls_NO_shaping (+0.7874), bhdr_linear_shaped_cvvdpmix (+0.6343), cl_tfm_corruption_LQ_MLP_s13 (+0.0540) \u2014 each 4/8\u21925/8 (3\u21924 for cl_tfm, 2\u21923 for v02). The 12 cells still absent are 504/720/924-wide and CANNOT use this slice: they need a >372-wide hfnlproxy extraction, which does not exist yet."
+   "fix_path": "EXERCISED for the ≤372-wide era-bridge cells: scripts/canonical_corpus/derive_hfnlproxy_372.py builds the 372-col slice (SAME 11,356 cells / 772 refs / SAME target as the committed 944 slice, identity-gated row-for-row float-exact), then `bake_verdict --regime 720 --corpora hfnlproxy` + `promote_fulleval.py --graft-rank hfnlproxy` (sha-gated). Filled 2026-08-04: winner_dial, v47, B, Ebothg_scr0_5. Filled 2026-08-06: ADD156_safesyn_only_raw_lasso (+0.8306), v02_bvls_NO_shaping (+0.7874), bhdr_linear_shaped_cvvdpmix (+0.6343), cl_tfm_corruption_LQ_MLP_s13 (+0.0540) — each 4/8→5/8 (3→4 for cl_tfm, 2→3 for v02). The 12 cells still absent are 504/720/924-wide and CANNOT use this slice: they need a >372-wide hfnlproxy extraction, which does not exist yet."
   },
   {
    "id": "kadid-tid-train-eq-val",
@@ -52,10 +52,10 @@
    "scope": {
     "all": true
    },
-   "reason": "KADID/TID are 100% train==val pair-overlap for the training-era corpora \u2014 their SROCCs reward memorization, not skill; integrity guards only, never ranking signal (already dimmed on the board; this entry formalizes it machine-readably)",
+   "reason": "KADID/TID are 100% train==val pair-overlap for the training-era corpora — their SROCCs reward memorization, not skill; integrity guards only, never ranking signal (already dimmed on the board; this entry formalizes it machine-readably)",
    "evidence": "docs/EVAL_PANEL_REQUIREMENT.md; CLAUDE.md TWO-PANEL EVAL section; wave-5 Finding 4 (they inflate under ensembling)",
    "date": "2026-08-04",
-   "fix_path": "none \u2014 permanent caveat (structural property of the split)"
+   "fix_path": "none — permanent caveat (structural property of the split)"
   },
   {
    "id": "m3a-pre-append2-fix",
@@ -313,10 +313,10 @@
      "winner_dial_Ebothg_hfgain_winsor_dial"
     ]
    },
-   "reason": "the ext-lineage eval tables (ext720/ext924/ext944 ext_kadid.parquet) store human_score = (5-dmos)/4, the INVERSE of the canonical (dmos-1)/4 \u2014 KADID's dmos is quality-oriented (raw crowdsourced DCR falls 4.0789->2.0072 across severity levels 1-5, 349,800 ratings). Every KADID stat measured on an ext root has the WRONG SIGN vs KADID's real human MOS: negate srocc_signed to read it. Rank-order stats (srocc/krocc/pwrc) negate exactly; PLCC/Z-RMSE/OR/bands were fit against a reflected target and must be re-measured, not negated. 110 of 188 board bakes are anti-correlated with KADID's true MOS while the board renders all 188 as positive magnitudes. SCOPE NARROWED 2026-08-05: the ext roots were rebuilt with the corrected target (appendix H part 1), so this entry's blanket scope was replaced by the exact list of the 188 verdicts that existed at rebuild time \u2014 every one of them measured KADID on the inverted table. Verdicts produced after the rebuild measure it correctly and are covered by kadid-ext-root-corrected-2026-08-05. Nothing about the finding changed; only the predicate became precise, because leaving it at `all` would have rendered a FALSE 'inverted' badge on correctly-measured cells.",
+   "reason": "the ext-lineage eval tables (ext720/ext924/ext944 ext_kadid.parquet) store human_score = (5-dmos)/4, the INVERSE of the canonical (dmos-1)/4 — KADID's dmos is quality-oriented (raw crowdsourced DCR falls 4.0789->2.0072 across severity levels 1-5, 349,800 ratings). Every KADID stat measured on an ext root has the WRONG SIGN vs KADID's real human MOS: negate srocc_signed to read it. Rank-order stats (srocc/krocc/pwrc) negate exactly; PLCC/Z-RMSE/OR/bands were fit against a reflected target and must be re-measured, not negated. 110 of 188 board bakes are anti-correlated with KADID's true MOS while the board renders all 188 as positive magnitudes. SCOPE NARROWED 2026-08-05: the ext roots were rebuilt with the corrected target (appendix H part 1), so this entry's blanket scope was replaced by the exact list of the 188 verdicts that existed at rebuild time — every one of them measured KADID on the inverted table. Verdicts produced after the rebuild measure it correctly and are covered by kadid-ext-root-corrected-2026-08-05. Nothing about the finding changed; only the predicate became precise, because leaving it at `all` would have rendered a FALSE 'inverted' badge on correctly-measured cells.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F + F.R1..F.R8 (T1 bit-exact, both residuals 0.0; T3 root cross-check; F.R1b raw-DCR ground truth); root cause scripts/canonical_corpus/build_fr_corpus_pairs.py:113; benchmarks/wave9/kadid_orientation_2026-08-04.md (735d6978); measurements benchmarks/kadid_orientation/",
    "date": "2026-08-04",
-   "fix_path": "DONE 2026-08-05 (appendix H part 1): build_fr_corpus_pairs.build_kadid() was fixed to (dmos-1)/4 on 2026-08-04, and the three ext roots were rebuilt by scripts/canonical_corpus/fix_ext_kadid_orientation.py; check_target_orientation.py --all-roots now exits 0 (+0.582360 on every root). The 188 verdicts listed here are NOT re-measured \u2014 they stay flagged. See kadid-ext-root-corrected-2026-08-05."
+   "fix_path": "DONE 2026-08-05 (appendix H part 1): build_fr_corpus_pairs.build_kadid() was fixed to (dmos-1)/4 on 2026-08-04, and the three ext roots were rebuilt by scripts/canonical_corpus/fix_ext_kadid_orientation.py; check_target_orientation.py --all-roots now exits 0 (+0.582360 on every root). The 188 verdicts listed here are NOT re-measured — they stay flagged. See kadid-ext-root-corrected-2026-08-05."
   },
   {
    "id": "kadid-ext-trained-inverted-model",
@@ -438,10 +438,10 @@
      "sota944_nt223"
     ]
    },
-   "reason": "this bake is ANTI-CORRELATED with KADID's real human MOS (negative signed SROCC vs the corrected quality-oriented target) \u2014 its KADID number is not a weak skill number, it is a backwards one. Cause: it trained on ext_kadid.parquet, whose target is inverted, so the inversion is inherited (dose-response: kadid train weight 0.50 -> mean -0.457, weight 1.50 -> mean -0.925 across 111 fullevals). Per-type evidence: H_co3abpg_s2507 is positive on exactly the 8 compression+noise KADID types and negative on all 17 analytic types.",
+   "reason": "this bake is ANTI-CORRELATED with KADID's real human MOS (negative signed SROCC vs the corrected quality-oriented target) — its KADID number is not a weak skill number, it is a backwards one. Cause: it trained on ext_kadid.parquet, whose target is inverted, so the inversion is inherited (dose-response: kadid train weight 0.50 -> mean -0.457, weight 1.50 -> mean -0.925 across 111 fullevals). Per-type evidence: H_co3abpg_s2507 is positive on exactly the 8 compression+noise KADID types and negative on all 17 analytic types.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md F.R2/F.R3 (T3 orientation-corrected re-score through bake_verdict; T4 per-distortion-type via panel --batch); the per-bake list is committed at benchmarks/kadid_orientation/kadid_signed_all_2026-08-04.tsv, regenerable from the stored fullevals by negating rank.kadid.srocc_signed",
    "date": "2026-08-04",
-   "fix_path": "retrain on a corrected ext_kadid.parquet if KADID competence is wanted; KADID is a train==val guard, not a ship gate, so no selection outcome changes \u2014 but a 944 bake must never be promoted on a KADID number that is actually negative"
+   "fix_path": "retrain on a corrected ext_kadid.parquet if KADID competence is wanted; KADID is a train==val guard, not a ship gate, so no selection outcome changes — but a 944 bake must never be promoted on a KADID number that is actually negative"
   },
   {
    "id": "kadid-e1-gate-unsigned",
@@ -462,7 +462,7 @@
     ]
    },
    "reason": "wave 8's registered E1 endpoint was 'KADID >= 0.70' on an UNSIGNED magnitude of a signed quantity measured on the inverted ext table: it was PASSED by the three most-inverted arms (W8A/W8B/W8D at -0.906..-0.937 vs true quality) and FAILED by W8C_s3101, the only wave-8 cell whose KADID was correctly oriented (+0.358). The gate did not measure KADID competence.",
-   "evidence": "benchmarks/sota944_campaign_2026-08-03.md \u00a79.3 (corrected in place) + APPENDIX F results; benchmarks/wave8/results_tables_2026-08-04.md correction banner",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md §9.3 (corrected in place) + APPENDIX F results; benchmarks/wave8/results_tables_2026-08-04.md correction banner",
    "date": "2026-08-04",
    "fix_path": "re-express any KADID endpoint as a SIGNED bar on a corrected table (e.g. srocc_signed >= +0.70); an unsigned KADID bar is never valid"
   },
@@ -475,10 +475,10 @@
    "scope": {
     "all": true
    },
-   "reason": "As of 2026-08-05 the ext-lineage ext_kadid.parquet stores the CORRECT quality-oriented target ((dmos-1)/4); the orientation gate reports +0.582360 on all three roots. A verdict produced from this date forward therefore carries a real, correctly-signed KADID number \u2014 kadid-ext-root-inverted does NOT apply to it. KADID remains a train==val guard (kadid-tid-train-eq-val still applies) and is NOT a ship gate. REPRO HAZARD: the corrected table took the canonical NAME, so re-running any pre-2026-08-05 bake's embedded zentrain.repro argv verbatim now trains against corrected bytes and will NOT reproduce that bake; the preserved original is ext_kadid_INVERTED_2026-08-04.parquet in the same directory (ext944 sha256 4dde6be26d3c50dca21fdee834f95bd692afa2c65b2d4f6f8a886d105553ca08, which is the sha every affected repro lists). Existing bakes are NOT retrained and NOT re-verdicted.",
+   "reason": "As of 2026-08-05 the ext-lineage ext_kadid.parquet stores the CORRECT quality-oriented target ((dmos-1)/4); the orientation gate reports +0.582360 on all three roots. A verdict produced from this date forward therefore carries a real, correctly-signed KADID number — kadid-ext-root-inverted does NOT apply to it. KADID remains a train==val guard (kadid-tid-train-eq-val still applies) and is NOT a ship gate. REPRO HAZARD: the corrected table took the canonical NAME, so re-running any pre-2026-08-05 bake's embedded zentrain.repro argv verbatim now trains against corrected bytes and will NOT reproduce that bake; the preserved original is ext_kadid_INVERTED_2026-08-04.parquet in the same directory (ext944 sha256 4dde6be26d3c50dca21fdee834f95bd692afa2c65b2d4f6f8a886d105553ca08, which is the sha every affected repro lists). Existing bakes are NOT retrained and NOT re-verdicted.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX H H.1; scripts/canonical_corpus/fix_ext_kadid_orientation.py + annotate_kadid_orientation_manifests.py; benchmarks/wave10/orientation_{BEFORE,AFTER}_2026-08-05.txt (INVERTED -0.582360 -> OK +0.582360, exit 1 -> 0); benchmarks/wave10/kadid_orientation_fix_2026-08-05.json (corrected ext944 sha256 286f1b239d88c483e215da6be2d1a16337ac0ae0548bff34ff6c32e0da033cf4)",
    "date": "2026-08-05",
-   "fix_path": "none \u2014 this entry records a RESOLUTION, not a defect; it stays as the pointer between the two eras"
+   "fix_path": "none — this entry records a RESOLUTION, not a defect; it stays as the pointer between the two eras"
   },
   {
    "id": "sdr25-subset-of-aic4",
@@ -490,10 +490,10 @@
    "scope": {
     "present": "rank.sdr25"
    },
-   "reason": "sdr25 is not independent of aic4: all 50 sdr25 stimuli are contained in aic4's 300 (the JPEG-AI codec subset of the same 5-crop material; matched on ref_basename + f0..f5 at 9 dp) \u2014 reading them as two corroborating corpora double-counts one instrument, and comparing 'sdr25 vs aic4' compares a set with its own subset",
-   "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX I \u00a7I.4 (structural findings); docs/DATA_SPLITS.md:108",
+   "reason": "sdr25 is not independent of aic4: all 50 sdr25 stimuli are contained in aic4's 300 (the JPEG-AI codec subset of the same 5-crop material; matched on ref_basename + f0..f5 at 9 dp) — reading them as two corroborating corpora double-counts one instrument, and comparing 'sdr25 vs aic4' compares a set with its own subset",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX I §I.4 (structural findings); docs/DATA_SPLITS.md:108",
    "date": "2026-08-05",
-   "fix_path": "none \u2014 permanent structural caveat (the containment is a property of the corpora)"
+   "fix_path": "none — permanent structural caveat (the containment is a property of the corpora)"
   },
   {
    "id": "hfnl-preauto-orientation-flip-REPAIRED",
@@ -503,9 +503,9 @@
     "rank.hfnlproxy.frac_negative"
    ],
    "scope": {
-    "note": "the 80 board cells verdicted BEFORE the per-ref orientation pin (730a386e, 2026-08-04 16:49) whose pooled hfnlproxy srocc_signed < 0 \u2014 75 single bakes (every pre-pin C_co*/C_em944/C_ensk/W8/W9/B_blend/B2_*/konhead cell with negative pooled) + 5 wave-5/6 ensembles; full roster: /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/flipaudit_table.tsv"
+    "note": "the 80 board cells verdicted BEFORE the per-ref orientation pin (730a386e, 2026-08-04 16:49) whose pooled hfnlproxy srocc_signed < 0 — 75 single bakes (every pre-pin C_co*/C_em944/C_ensk/W8/W9/B_blend/B2_*/konhead cell with negative pooled) + 5 wave-5/6 ensembles; full roster: /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/flipaudit_table.tsv"
    },
-   "reason": "Orientation::Auto resolved per-ref polarity from the POOLED sign; on the range-restricted hfnlproxy corpus the pooled sign is dominated by cross-image scale and is noise-level for mid models, so every pre-pin cell with pooled<0 stored per_ref_mean = -(true pinned value) \u2014 including the arm-B candidate whose +0.19310280 was the campaign's registered HF-NL bar (true value -0.1931: arm B is hfnl-INVERTED). BOARD FILES ARE REPAIRED IN PLACE (sha-gated repair-rank-orientation grafts; superseded value kept in rank_graft_sources.hfnlproxy.superseded_per_ref_mean); any COPY of the old numbers in docs/tables published before 2026-08-05 is the negated value.",
+   "reason": "Orientation::Auto resolved per-ref polarity from the POOLED sign; on the range-restricted hfnlproxy corpus the pooled sign is dominated by cross-image scale and is noise-level for mid models, so every pre-pin cell with pooled<0 stored per_ref_mean = -(true pinned value) — including the arm-B candidate whose +0.19310280 was the campaign's registered HF-NL bar (true value -0.1931: arm B is hfnl-INVERTED). BOARD FILES ARE REPAIRED IN PLACE (sha-gated repair-rank-orientation grafts; superseded value kept in rank_graft_sources.hfnlproxy.superseded_per_ref_mean); any COPY of the old numbers in docs/tables published before 2026-08-05 is the negated value.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R (86 single re-runs + 5 ensemble re-runs, pooled srocc_signed bit-identical on all, per_ref_mean exact negation on 80); repair verdicts /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/flipaudit/",
    "date": "2026-08-05",
    "fix_path": "repaired 2026-08-05 via promote_fulleval.py --repair-rank-orientation hfnlproxy; doc-level quotes corrected in the campaign CORRECTIONS entry (appendix O.R)"
@@ -522,20 +522,20 @@
    "reason": "registered axis LSD (appendix O): a per_ref_mean difference below ~0.039 (median paired-bootstrap 95% half-width over 435 model pairs; p90 0.047) is not distinguishable from ref-sampling noise; differences >= ~0.05 are essentially always real. The axis ORDERING itself is highly reliable (split-half model-ranking SROCC 0.992, Spearman-Brown 0.996). Read per-model means with ~+/-0.03-0.04 marginal CI half-widths.",
    "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md (30-model per-ref matrix, B=10000 paired bootstrap seed 777, 20-shuffle split-half seed 4242); benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R",
    "date": "2026-08-05",
-   "fix_path": "none needed \u2014 cite deltas with the LSD; the gauntlet HF-NL panel draws it"
+   "fix_path": "none needed — cite deltas with the LSD; the gauntlet HF-NL panel draws it"
   },
   {
    "id": "hfnl-ceiling-subset-superseded-fullcorpus",
    "kind": "annotated",
    "fields": [
     "reference_rows (hfnl axis JSON)",
-    "hfnl_axis_report \u00a73 subset ceiling"
+    "hfnl_axis_report §3 subset ceiling"
    ],
    "scope": {
     "note": "the appendix-O O.R2 reference-ceiling values computed on the 118-ref / 2,410-pair non-avif sidecar subset (dssim +0.786, iwssim +0.655, cvvdp +0.549, butteraugli +0.420) and the 'independent metrics reach 0.42-0.79' band reading"
    },
-   "reason": "SUPERSEDED AS THE AXIS CEILING 2026-08-05: the avif 73.6% of the slice had no reference-metric coverage (the 2026-07-02 fill-avif fleets were user-descoped at ~0.2%); the slice was backfilled locally (8,360 avif + 23 gap cells, fill4 implementations, 0 failures, bit-identical vs the 17 fleet blobs that ran) giving 100.0% coverage on all four metrics. Full-corpus rows on the models' exact footing (757 refs, min-3 rule): dssim +0.833, iwssim +0.763, butteraugli +0.733, cvvdp +0.660 \u2014 the band is 0.66-0.83, the era-additive/GL top sits AT the dssim ceiling, and avif is the EASIEST stratum for every reference metric (the mid-944 avif deficit is model behavior). The subset values remain valid WITHIN-SUBSET reads (kept as subset_mean); never cite them as the axis ceiling.",
-   "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md \u00a73 (corrected) + benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R7; sidecar fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05.parquet sha 64ce4278c35a2f90d1b8cf85da337ce95418b2ce572769be0318e15e98f6922a; merged table + ceiling_full.json in /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/",
+   "reason": "SUPERSEDED AS THE AXIS CEILING 2026-08-05: the avif 73.6% of the slice had no reference-metric coverage (the 2026-07-02 fill-avif fleets were user-descoped at ~0.2%); the slice was backfilled locally (8,360 avif + 23 gap cells, fill4 implementations, 0 failures, bit-identical vs the 17 fleet blobs that ran) giving 100.0% coverage on all four metrics. Full-corpus rows on the models' exact footing (757 refs, min-3 rule): dssim +0.833, iwssim +0.763, butteraugli +0.733, cvvdp +0.660 — the band is 0.66-0.83, the era-additive/GL top sits AT the dssim ceiling, and avif is the EASIEST stratum for every reference metric (the mid-944 avif deficit is model behavior). The subset values remain valid WITHIN-SUBSET reads (kept as subset_mean); never cite them as the axis ceiling.",
+   "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md §3 (corrected) + benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R7; sidecar fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05.parquet sha 64ce4278c35a2f90d1b8cf85da337ce95418b2ce572769be0318e15e98f6922a; merged table + ceiling_full.json in /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/",
    "date": "2026-08-05",
    "fix_path": "benchmarks/hfnl_axis_2026-08-05.json reference_rows[].mean = full-corpus (subset preserved as subset_mean); board panel reference lines now full-corpus"
   },
@@ -551,10 +551,70 @@
      "R1_GL2_s2503_packed"
     ]
    },
-   "reason": "R.R0: this cell's CID22 0.90096 is a k=1 UNREPLICATED lottery draw, NOT a candidate claim \u2014 its seed sibling measures 0.80711 on the same recipe (now on the board beside it as `sota944_FS_GL2_s2501` \u2014 compare the two rows directly), a within-config spread of 0.0938 (the campaign's widest), and the GL/PILOT family spans 0.8005-0.9010 with no middle (measured bimodality; dead lam=16 cell excluded). Appendix J's both-seeds noise rule withheld this cell as a finding and the W8C_s3101 precedent applies here at higher amplitude, so the composite it drives is flattered by the same draw. Any follow-on takes the REGISTERED replication gate first: k >= 4 fresh seeds of the GL2 recipe reporting the FULL distribution \u2014 never a median or a best. Even if replicated it is a CID22+HF-NL SPECIALIST, not a general candidate: it fails KonJND 0.329 / nonphoto 0.835 / csiq 0.801 under the balanced profile. What stands k-independently from arm R1 is the DIAL MECHANISM (add-spline + pack --zerobias-bulk 0 recovers the lasso dial, range 5.7-7.0 -> 45-63 dial units, mono >= 99.8%, tied <= 0.7%, every rank axis held exactly), not this seed's rank number.",
+   "reason": "R.R0: this cell's CID22 0.90096 is a k=1 UNREPLICATED lottery draw, NOT a candidate claim — its seed sibling measures 0.80711 on the same recipe (now on the board beside it as `sota944_FS_GL2_s2501` — compare the two rows directly), a within-config spread of 0.0938 (the campaign's widest), and the GL/PILOT family spans 0.8005-0.9010 with no middle (measured bimodality; dead lam=16 cell excluded). Appendix J's both-seeds noise rule withheld this cell as a finding and the W8C_s3101 precedent applies here at higher amplitude, so the composite it drives is flattered by the same draw. Any follow-on takes the REGISTERED replication gate first: k >= 4 fresh seeds of the GL2 recipe reporting the FULL distribution — never a median or a best. Even if replicated it is a CID22+HF-NL SPECIALIST, not a general candidate: it fails KonJND 0.329 / nonphoto 0.835 / csiq 0.801 under the balanced profile. What stands k-independently from arm R1 is the DIAL MECHANISM (add-spline + pack --zerobias-bulk 0 recovers the lasso dial, range 5.7-7.0 -> 45-63 dial units, mono >= 99.8%, tied <= 0.7%, every rank axis held exactly), not this seed's rank number.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX R, R.R0 supervisor verification note + the R.R1 headline table (commits 22095fe6, 8cf106e8, f4df3cb8); sibling value re-verified from the source verdicts this pass (FS_GL2_s2501.full.json rank.cid22.srocc = 0.80711, FS_GL2_s2503.full.json = 0.90096)",
    "date": "2026-08-06",
    "fix_path": "k >= 4 fresh seeds of the GL2 recipe with the FULL distribution reported (R.R0 rule 2); until then the number is context, never a shortlist entry"
+  },
+  {
+   "id": "band-srocc-absolute-fixed-decile",
+   "kind": "invalidated",
+   "fields": [
+    "rank.cid22.bands",
+    "rank.csiq.bands",
+    "rank.kadid.bands",
+    "rank.live.bands",
+    "rank.tid.bands"
+   ],
+   "scope": {
+    "missing": "rank.cid22.band_scheme"
+   },
+   "reason": "Every per-band `srocc` published before 2026-08-06 is an ABSOLUTE value cut on fixed [0,1] deciles, and on the tail bands that combination is not a usable statistic. RE-VERIFIED INDEPENDENTLY (appendix V, G-V1) over the 120 board cells that still carry per-pair, recomputed from stored per_pair through `panel --batch`: the stored `rank.cid22.bands[B9].srocc` equals |recomputed signed| on 120 of 120 (100.0%); 109 of 120 (90.8%) are NEGATIVE, i.e. their top band is ordered BACKWARDS; and 82 of 120 pass F8's `|B9| >= 0.15` where 2 pass it signed. Because |.| is monotone in the depth of an inversion, the column ranked models by how wrong their top band was -- the published leader `coherent924_selected` (|B9| 0.4493) is the population's MOST anti-correlated model at -0.4493. The band itself is degenerate independently of the sign: 43 pairs from 11 of 49 references spanning 0.0194 MOS, split-half r_SB 0.711 (bar 0.90), model population -0.263..-0.015. Two further defects in the same grid: CID22 B0/B1 were structurally EMPTY and B2 held one pair (TID B9 empty, B8 one pair), and the bottom band closed at 0.0 so LIVE's 21 sub-zero DMOS pairs fell out of every band (its published rows summed to 758 of 779). DO NOT CITE any pre-2026-08-06 per-band value, and never the `srocc` field on any band. `freeze_check` reports these cells' F8 as ABSENT rather than scoring them.",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX V (+ V.R); benchmarks/band_minimum_n_2026-08-06.md; benchmarks/appendixV/gv1_b9_sign_2026-08-06.tsv (120 cells); benchmarks/appendixU/board_b9_signed_2026-08-06.tsv (the 32-cell prior); appendix U U.R4",
+   "date": "2026-08-06",
+   "fix_path": "`promote_fulleval.py --rebuild-bands <cell.fulleval.json>` recuts from the cell's own stored per-pair (gated bit-identical to a re-verdict); cells whose per-pair was stripped need a re-verdict with a current `bake_verdict`"
+  },
+  {
+   "id": "f8-b9-abs-bar-superseded",
+   "kind": "invalidated",
+   "fields": [
+    "gates"
+   ],
+   "scope": {
+    "all": true
+   },
+   "reason": "Every F8 PASS/FAIL statement made before 2026-08-06 used `|B9| >= 0.15 AND |B3| >= 0.0` on CID22's fixed-decile bands. Both halves were defective: the bar was applied to an ABSOLUTE value (so a collapsed band scored like a healthy one and a more deeply inverted band scored HIGHER), and `|B3| >= 0.0` is unfalsifiable against an absolute value, making F8 a one-sided test in practice. MEASURED board-wide: 167 of 280 cells PASSED the old bar; of the 120 that can be checked against a signed recomputation, 82 passed while only 2 were positive. F8 now reads the SIGNED top and bottom USABLE bands of the appendix-V scheme with a DERIVED floor (`BAND_HIGH = 0.09` = the new band's reference-clustered marginal 95% CI half-width 0.0866, ceil-2dp; `BAND_LOW = 0.0`, now a real bar). REGISTERED-PENDING-USER-ACK. Note the honest consequence: on the recut board all 120 cells pass (top-band population +0.262..+0.514, zero negatives), so F8 is now a REGRESSION GUARD with no discriminating power on this population -- its predecessor only appeared to discriminate because it was ranking inversions.",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md APPENDIX V.5 + V.R; benchmarks/appendixV/f8_floor_2026-08-06.tsv (B=10,000, 25-model stratified probe, pair vs reference-clustered); zensim-validate/src/bin/freeze_check.rs balanced::BAND_HIGH/BAND_LOW",
+   "date": "2026-08-06",
+   "fix_path": "re-run `freeze_check --profile balanced-2026-08-04` on a recut cell; user ack required before the new floor governs a ship decision"
+  },
+  {
+   "id": "balanced-composite-bandtail-abs",
+   "kind": "invalidated",
+   "fields": [
+    "composite"
+   ],
+   "scope": {
+    "missing": "rank.cid22.band_scheme"
+   },
+   "reason": "`balanced_composite`'s band-tail term was `(|B3| + |B9|)/2` at weight 0.15 -- so the absolute-valued 43-pair CID22 tail was feeding the campaign's RANKING composite, not merely a PASS/FAIL cell. This was not previously stated anywhere and is the part of the defect with selection consequences. The term is now the mean of the SIGNED lowest and highest USABLE bands; on a legacy cell it is absent and drops from both numerator and denominator, exactly as any other absent axis does. A `balanced_composite` computed for a cell that still carries legacy bands is therefore NOT comparable to one computed for a recut cell.",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md APPENDIX V priors P5 + V.R; zensim-validate/src/bin/freeze_check.rs balanced_composite",
+   "date": "2026-08-06",
+   "fix_path": "recut the cell's bands (`--rebuild-bands`), then recompute the composite"
+  },
+  {
+   "id": "kadid-bands-half-corpus-subsample",
+   "kind": "absent-not-failed",
+   "fields": [
+    "rank.kadid.bands"
+   ],
+   "scope": {
+    "all": true
+   },
+   "reason": "KADID cannot be recut under the appendix-V scheme from the board, because its stored `per_pair.kadid` is a 5,000-row SUBSAMPLE of the corpus's 10,125 (and the subsample differs per cell -- the 120 per-pair-carrying cells fall into 3 distinct target vectors). Recutting would publish bands over half a corpus under a header claiming all of it, so the rebuild SKIPS kadid and leaves its legacy fixed-decile bands in place; those are covered by `band-srocc-absolute-fixed-decile` and must not be cited. Separately, KADID's legacy band rows already summed to 10,031 of 10,125. Note this is orthogonal to the OPEN ext-lineage KADID target-inversion bug (campaign appendix F) -- a KADID band number is currently unusable for two independent reasons.",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md APPENDIX V confound 4 + V.R; scripts/promote_fulleval.py rebuild_bands per-pair-vs-rank.n guard",
+   "date": "2026-08-06",
+   "fix_path": "emit full-corpus per-pair for kadid, or re-verdict the cell with a current `bake_verdict` (which cuts the bands at source)"
   }
  ]
 }

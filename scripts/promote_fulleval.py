@@ -74,6 +74,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -300,6 +301,140 @@ def repair_rank_orientation(board: Path, verdict: Path, corpus: str,
                                        f"{o:+.4f} -> {n:+.4f})")
 
 
+def rebuild_bands(board: Path, corpora: list[str], dry_run: bool = False) -> bool:
+    """Recut `rank.<corpus>.bands` under the current band scheme, from the
+    cell's OWN stored per-pair (campaign appendix V).
+
+    This is a RE-CUT, not a re-measurement: the predictions and the human
+    targets are the ones the cell was published with, so nothing is re-scored
+    and no bake is loaded. Only where the cuts fall changes — and with it the
+    per-band statistics, which are computed by the canonical `panel --batch`
+    owner (zero stat math here).
+
+    Only cells that still carry per-pair can be recut. A cell whose per-pair was
+    stripped by the board-size rule keeps its legacy bands and is reported as
+    such; `freeze_check` prints those as ABSENT rather than scoring them, and
+    `benchmarks/eval_annotations.json` carries the reason.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.band_reliability import scheme_merge, band_members  # noqa: E402
+    from scripts.lib import zen_stats  # noqa: E402
+    import numpy as np  # noqa: E402
+
+    # Floors + scheme name come from the OWNER's committed parity fixture, so a
+    # rebuild can never be cut on constants that differ from what ships.
+    fixture = Path(__file__).resolve().parent.parent / "benchmarks/appendixV/band_scheme_parity.tsv"
+    n_min = span_min = None
+    for line in fixture.read_text().splitlines():
+        if line.startswith("# floors:"):
+            for tok in line.split():
+                if tok.startswith("n_min="):
+                    n_min = int(tok.split("=")[1])
+                elif tok.startswith("span_min="):
+                    span_min = float(tok.split("=")[1])
+    if n_min is None or span_min is None:
+        raise SystemExit("rebuild-bands: floors not found in the parity fixture")
+    scheme_name = "merged-decile-2026-08-06"
+
+    bdoc = _load_board(board)
+    doc = copy.deepcopy(bdoc)
+    touched, skipped = [], []
+    for corpus in corpora:
+        blk = (doc.get("rank") or {}).get(corpus)
+        if not isinstance(blk, dict) or not blk.get("bands"):
+            continue
+        pp = (doc.get("per_pair") or {}).get(corpus)
+        tkey = next((k for k in ("mos", "jnd") if pp and pp.get(k)), None) if pp else None
+        if not tkey or not pp.get("pred"):
+            continue  # per-pair stripped: leave the legacy bands in place
+        t = np.asarray(pp[tkey], dtype=float)
+        p = np.asarray(pp["pred"], dtype=float)
+        if t.shape != p.shape:
+            raise SystemExit(f"rebuild-bands: {board.name} {corpus} per-pair shape mismatch")
+        # The recut must cover the SAME rows the corpus aggregate covers, or the
+        # band n's and `rank.<c>.n` describe different populations. KADID's
+        # stored per-pair is a 5,000-row subsample of its 10,125 — recutting it
+        # would publish bands on half the corpus under a header claiming all of
+        # it. Skipped and annotated instead (appendix V confound 4).
+        n_corpus = blk.get("n")
+        if isinstance(n_corpus, int) and n_corpus != int(t.size):
+            skipped.append(f"{corpus}(per-pair {t.size} != rank.n {n_corpus})")
+            continue
+
+        defs = scheme_merge(t, n_min, span_min)
+        jobs, meta = [], []
+        for label, lo, hi in defs:
+            idx = band_members(t, lo, hi)
+            span = float(t[idx].max() - t[idx].min()) if idx.size else 0.0
+            span = span if math.isfinite(span) else 0.0
+            meta.append((label, lo, hi, idx, span))
+            if idx.size >= 4:
+                jobs.append((label.replace("-", "_"), p[idx], t[idx]))
+        stats = {r["label"]: r for r in zen_stats.panel_batch(jobs, stats="full")} if jobs else {}
+
+        rows = []
+        for label, lo, hi, idx, span in meta:
+            n = int(idx.size)
+            reason = _not_measured_reason(n, span, n_min, span_min)
+            # JSON has no infinity: an open end serialises as null and MUST be
+            # read as "unbounded", never as a missing value. (Python's json
+            # module would otherwise emit bare `-Infinity`, which is not JSON
+            # and which the Rust reader rejects outright.)
+            row = {
+                "band": label,
+                "lo": None if math.isinf(lo) else lo,
+                "hi": None if math.isinf(hi) else hi,
+                "n": n,
+                "span": span,
+                "not_measured_reason": reason,
+            }
+            st = stats.get(label.replace("-", "_"))
+            keys = ("srocc", "srocc_signed", "plcc", "krocc", "or", "pwrc", "z_rmse", "mae")
+            if reason is None and st is not None:
+                row.update({k: (None if not math.isfinite(st[k]) else st[k])
+                            for k in keys})
+            else:
+                row.update({k: None for k in keys})
+            rows.append(row)
+        blk["bands"] = rows
+        blk["band_scheme"] = {
+            "name": scheme_name,
+            "base_bands": 10,
+            "n_min": n_min,
+            "span_min": span_min,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest "
+                   "partition whose every band has n >= n_min AND target span >= span_min",
+            "recut_from": "stored per_pair (no rescore; predictions unchanged)",
+        }
+        touched.append(f"{corpus}:{len(rows)}")
+
+    if skipped:
+        print(f"rebuild-bands: {board.name} — SKIPPED {'; '.join(skipped)} "
+              "(legacy bands kept; freeze_check reports them ABSENT)")
+    if not touched:
+        print(f"rebuild-bands: {board.name} — no recuttable corpus (per-pair stripped?)")
+        return False
+    return _write_board_gated(board, bdoc, doc, {"rank"}, dry_run,
+                              f"recut bands [{','.join(touched)}]")
+
+
+def _not_measured_reason(n: int, span: float, n_min: int, span_min: float):
+    """Mirror of `zensim_validate::bands::not_measured_reason` (the owner).
+    Kept string-identical so a recut cell reads the same as a freshly emitted
+    one; the parity fixture gates the EDGES, this gates the wording."""
+    if n == 0:
+        return "empty: no pairs in this target range"
+    if n < n_min and span < span_min:
+        return (f"n={n} < {n_min} and span={span:.4f} < {span_min}: "
+                "too few pairs AND too narrow to resolve")
+    if n < n_min:
+        return f"n={n} < {n_min}: too few pairs to rank models"
+    if span < span_min:
+        return (f"span={span:.4f} < {span_min}: range-restricted, "
+                "correlation attenuated toward 0")
+    return None
+
+
 def mark_dominated(board: Path, dominated_by: list[str], rule: str,
                    dry_run: bool = False) -> bool:
     """Write `dominated_by` (+ `dominance` provenance) into a board fulleval —
@@ -420,6 +555,12 @@ def main(argv=None) -> int:
                     help="comma list of same-class dominator names (empty = clear the mark)")
     ap.add_argument("--dominance-rule", default="strict-pareto-2026-08-04",
                     help="rule id recorded in the `dominance` provenance block")
+    ap.add_argument("--rebuild-bands", default=None, type=Path, metavar="BOARD_JSON",
+                    help="recut rank.<corpus>.bands under the current band scheme "
+                         "from the cell's own stored per-pair (campaign appendix V); "
+                         "no rescore, no bake load")
+    ap.add_argument("--band-corpora", default="cid22,csiq,kadid,live,tid",
+                    help="with --rebuild-bands: which banded corpora to recut")
     ap.add_argument("--set-block-profile", default=None, type=Path, metavar="BOARD_JSON",
                     help="BLOCK-PROFILE mode: compute the static feature-block fingerprint from "
                          "the fulleval's bake bytes (bake_block_profile --json, sha-gated) and "
@@ -438,6 +579,14 @@ def main(argv=None) -> int:
             raise SystemExit(f"mark-dominated: board file not found: {a.mark_dominated}")
         dom = [x for x in a.dominated_by.split(",") if x]
         mark_dominated(a.mark_dominated, dom, a.dominance_rule, a.dry_run)
+        return 0
+
+    if a.rebuild_bands is not None:
+        if a.verdict or a.name or a.members or a.members_file:
+            ap.error("--rebuild-bands takes only --band-corpora/--dry-run")
+        if not a.rebuild_bands.exists():
+            raise SystemExit(f"rebuild-bands: board file not found: {a.rebuild_bands}")
+        rebuild_bands(a.rebuild_bands, a.band_corpora.split(","), a.dry_run)
         return 0
 
     if a.set_block_profile is not None:

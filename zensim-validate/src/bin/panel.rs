@@ -750,7 +750,7 @@ struct BatchRow {
     n_dropped: usize,
     srocc: f64,
     srocc_signed: f64,
-    full: Option<(PanelStats, f64)>, // (compute_panel stats, plcc_raw)
+    full: Option<(PanelStats, f64, f64)>, // (compute_panel stats, plcc_raw, mae)
 }
 
 fn compute_batch_row(x: &[f64], y: &[f64], srocc_only: bool) -> BatchRow {
@@ -776,7 +776,22 @@ fn compute_batch_row(x: &[f64], y: &[f64], srocc_only: bool) -> BatchRow {
         // raw (un-rescaled) Pearson via panel.rs:72 `pearson`.
         let stats = panel::compute_panel(&xf, &yf);
         let plcc_raw = panel::pearson(&xf, &yf);
-        Some((stats, plcc_raw))
+        // MAE after the owner's 4-parameter logistic rescale (Mohammadi 2025
+        // convention) — the same quantity `bake_verdict`'s per-band rows
+        // publish, computed by the same owner call, so a band recomputed
+        // through this binary carries every field the emitter does.
+        let rescaled = panel::rescale_logistic(&xf, &yf);
+        let mae = if rescaled.is_empty() {
+            f64::NAN
+        } else {
+            rescaled
+                .iter()
+                .zip(yf.iter())
+                .map(|(r, t)| (r - t).abs())
+                .sum::<f64>()
+                / rescaled.len() as f64
+        };
+        Some((stats, plcc_raw, mae))
     };
     BatchRow {
         n: xf.len(),
@@ -823,7 +838,7 @@ fn run_batch(input: &BatchInput, srocc_only: bool) -> String {
         out.push_str("label\tn\tn_dropped\tsrocc\tsrocc_signed\n");
     } else {
         out.push_str(
-            "label\tn\tn_dropped\tsrocc\tsrocc_signed\tplcc\tplcc_raw\tkrocc\tor\tpwrc\tz_rmse\n",
+            "label\tn\tn_dropped\tsrocc\tsrocc_signed\tplcc\tplcc_raw\tkrocc\tor\tpwrc\tz_rmse\tmae\n",
         );
     }
     for ((label, _), r) in input.jobs.iter().zip(&rows) {
@@ -834,15 +849,16 @@ fn run_batch(input: &BatchInput, srocc_only: bool) -> String {
             fmt_batch_f(r.srocc),
             fmt_batch_f(r.srocc_signed)
         ));
-        if let Some((p, plcc_raw)) = &r.full {
+        if let Some((p, plcc_raw, mae)) = &r.full {
             out.push_str(&format!(
-                "\t{}\t{}\t{}\t{}\t{}\t{}",
+                "\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 fmt_batch_f(p.plcc),
                 fmt_batch_f(*plcc_raw),
                 fmt_batch_f(p.krocc),
                 fmt_batch_f(p.or_ratio),
                 fmt_batch_f(p.pwrc),
-                fmt_batch_f(p.z_rmse)
+                fmt_batch_f(p.z_rmse),
+                fmt_batch_f(*mae)
             ));
         }
         out.push('\n');
@@ -1201,7 +1217,7 @@ mod tests {
         let tgt: Vec<f64> = vec![80.0, 85.0, 40.0, 55.0, 92.0, 20.0, 60.0, 70.0];
         let r = compute_batch_row(&pred, &tgt, false);
         let agg = report_group("t", &pred, &tgt, None);
-        let (p, plcc_raw) = r.full.as_ref().unwrap();
+        let (p, plcc_raw, _mae) = r.full.as_ref().unwrap();
         assert_eq!(p.srocc, agg.panel.srocc);
         assert_eq!(p.plcc, agg.panel.plcc);
         assert_eq!(p.krocc, agg.panel.krocc);

@@ -1360,34 +1360,60 @@ function renderMPanel(){
   tbl.append(tb);
   makeSortable(tbl);
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
-  // 10-band SROCC grouped bars for the selected corpus (when the corpus is banded).
-  const banded=rows.filter(b=>b.rank[c]&&b.rank[c].bands);
+  // Per-band SROCC grouped bars for the selected corpus (when the corpus is banded).
+  // ONLY cells cut on the current band scheme are shown: a legacy fixed-decile cell's
+  // B9 is a different quantity (on CID22, 43 pairs spanning 0.019 MOS, published as an
+  // ABSOLUTE value), so mixing the two in one table would compare two measurements.
+  const bandedAll=rows.filter(b=>b.rank[c]&&b.rank[c].bands);
+  const banded=bandedAll.filter(b=>b.rank[c].band_scheme);
+  const bandLegacy=bandedAll.length-banded.length;
   if(banded.length){
-    host.append(el('h3',{text:'10-band SROCC — '+c}));
-    host.append(el('div',{class:'cap',html:'Per-band SROCC across the quality range (B0 worst → B9 best). '
-      +'Dimmed = n&lt;30 (noisy; CI &gt; ±0.3 — do not rank bakes on those bands). Band SROCC is '
-      +'range-restricted — B0/B9 values run low by construction; compare bakes, not bands. Negative bands '
-      +'now draw below the axis (the old view clamped them to 0); wheel/slider zooms the band axis.'}));
+    const schemeName=banded[0].rank[c].band_scheme.name;
+    const bmin=banded[0].rank[c].band_scheme.n_min,bspan=banded[0].rank[c].band_scheme.span_min;
+    host.append(el('h3',{text:'Per-band SROCC — '+c}));
+    host.append(el('div',{class:'cap',html:'SIGNED per-band SROCC across the quality range '
+      +'(low quality → high). Scheme <code>'+schemeName+'</code>: fixed deciles accumulated into '
+      +'the finest partition whose every band holds n&nbsp;≥&nbsp;'+bmin+' pairs spanning '
+      +'≥&nbsp;'+bspan+' of target. A band that cannot clear both floors is <b>NOT-MEASURED</b> — '
+      +'it publishes no statistic and draws nothing; that is "not measured", never zero. '
+      +'Values are SIGNED, so an inverted band draws BELOW the axis instead of being hidden by '
+      +'|·| (which used to make a more deeply inverted band score HIGHER). Band SROCC is still '
+      +'range-restricted, so compare bakes, not bands. Wheel/slider zooms the band axis.'
+      +(bandLegacy?' <b>'+bandLegacy+'</b> visible bake'+(bandLegacy===1?'':'s')
+        +' cut on the pre-2026-08-06 fixed deciles '+(bandLegacy===1?'is':'are')
+        +' EXCLUDED here (re-verdict or recut to include).':'')}));
     const bands=banded[0].rank[c].bands.map(x=>x.band);
+    // Every shown cell must carry identical edges, or the columns lie.
+    const bandMismatch=banded.filter(b=>b.rank[c].bands.map(x=>x.band).join(',')!==bands.join(','));
+    if(bandMismatch.length){
+      host.append(el('div',{class:'cap',html:'<b>⚠ '+bandMismatch.length+'</b> bake(s) carry '
+        +'different band edges and are excluded from the bars/table below: '
+        +bandMismatch.map(b=>b.name).join(', ')}));
+      bandMismatch.forEach(b=>{const i=banded.indexOf(b);if(i>=0)banded.splice(i,1);});
+    }
     const t=TH();
     const bseries=banded.map(b=>({type:'bar',name:b.name,
       barGap:'20%',barCategoryGap:'25%',
       data:b.rank[c].bands.map(row=>({
-        value:row&&row.srocc!=null?row.srocc:null,
+        value:row&&row.srocc_signed!=null?row.srocc_signed:null,
         _n:row?row.n:null,_plcc:row?row.plcc:null,_pwrc:row?row.pwrc:null,
+        _span:row?row.span:null,_nm:row?row.not_measured_reason:null,
         _z:row&&row.z_rmse!=null?row.z_rmse:null,
-        itemStyle:{color:color(b),opacity:(row&&row.n!=null&&row.n<30)?0.35:0.95}}))}));
+        itemStyle:{color:color(b),opacity:0.95}}))}));
     const bandOption={animation:false,
       tooltip:Object.assign(ttStyle(),{trigger:'item',formatter:p=>{
         const d=p.data||{};
-        return'<b>'+p.seriesName+'</b> '+p.name+' n='+(d._n!=null?d._n:'?')
+        const head='<b>'+p.seriesName+'</b> '+p.name+' n='+(d._n!=null?d._n:'?')
+          +(d._span!=null?' span='+(+d._span).toFixed(3):'');
+        if(d._nm)return head+'<br><b>NOT MEASURED</b> — '+d._nm;
+        return head
           +'<br>SROCC <b>'+f3(d.value)+'</b> · PLCC '+f3(d._plcc)+' · PWRC '+f3(d._pwrc)
           +' · Z-RMSE '+(d._z!=null?(+d._z).toFixed(2):'—');}}),
       grid:{left:46,right:10,top:12,bottom:44},
       xAxis:{type:'category',data:bands,
         axisLine:{lineStyle:{color:t.axis}},axisTick:{alignWithLabel:true,lineStyle:{color:t.axis}},
         axisLabel:{color:t['text-secondary'],fontSize:9.5}},
-      yAxis:Object.assign(axStyle(),{scale:false,min:-0.2,max:1}),
+      yAxis:Object.assign(axStyle(),{scale:false,min:-1,max:1}),
       dataZoom:[{type:'inside',xAxisIndex:0},dzSlider({xAxisIndex:0})],
       series:bseries};
     const bw=el('div',{style:'overflow-x:auto'});
@@ -1398,7 +1424,10 @@ function renderMPanel(){
     // structurally-empty B0/B1. Values come straight from rank.<corpus>.bands[] — nothing
     // is recomputed here (the fulleval JSON, i.e. zenstats, owns every statistic).
     const bandN=i=>Math.max(...banded.map(b=>{const r=b.rank[c].bands[i];return r&&r.n!=null?r.n:0;}));
-    const bandS=(b,i)=>{const r=b.rank[c].bands[i];return r&&r.srocc!=null?r.srocc:null;};
+    const bandSpan=i=>{const r=banded[0].rank[c].bands[i];return r&&r.span!=null?r.span:null;};
+    const bandNM=i=>{const r=banded[0].rank[c].bands[i];return r?r.not_measured_reason:null;};
+    // SIGNED — the whole point of the re-cut. |.| hid inversions and rewarded them.
+    const bandS=(b,i)=>{const r=b.rank[c].bands[i];return r&&r.srocc_signed!=null?r.srocc_signed:null;};
     const cols=bands.map((_,i)=>i).filter(i=>bandN(i)>0);
     const scored=cols.filter(i=>banded.some(b=>bandS(b,i)!=null));
     if(cols.length&&scored.length){
@@ -1429,7 +1458,11 @@ function renderMPanel(){
       const bh=el('tr',{});
       bh.append(el('th',{class:'lbl',text:'bake'}));
       cols.forEach(i=>{const t=el('th',{text:bands[i]});
-        t.append(el('div',{style:'font-weight:400;font-size:9px;color:var(--muted)',text:'n='+bandN(i)}));
+        const sp=bandSpan(i);
+        t.append(el('div',{style:'font-weight:400;font-size:9px;color:var(--muted)',
+          text:'n='+bandN(i)+(sp!=null?' · span '+(+sp).toFixed(3):'')}));
+        if(bandNM(i))t.append(el('div',{style:'font-weight:400;font-size:9px;color:var(--muted)',
+          text:'NOT MEASURED'}));
         bh.append(t);});
       bt.append(el('thead',{},bh));
       const bb=el('tbody',{});
@@ -1437,9 +1470,12 @@ function renderMPanel(){
         const tr=el('tr',{});
         tr.append(nameInto(el('td',{class:'lbl'}),b));
         cols.forEach(i=>{
-          const r=b.rank[c].bands[i],v=bandS(b,i),noisy=!r||r.n==null||r.n<30;
-          const td=el('td',{text:v==null?'—':(noisy?'('+v.toFixed(3)+')':v.toFixed(3))});
-          if(noisy)td.style.color='var(--muted)';
+          const r=b.rank[c].bands[i],v=bandS(b,i);
+          const nm=r?r.not_measured_reason:null;
+          const td=el('td',{text:v==null?'—':(v>=0?'+':'')+v.toFixed(3)});
+          if(v==null){td.style.color='var(--muted)';
+            td.title=nm?('NOT MEASURED — '+nm):'not measured';}
+          else if(v<0)td.style.color='var(--danger, #c0392b)';
           tr.append(td);
         });
         bb.append(tr);
@@ -1450,9 +1486,10 @@ function renderMPanel(){
       host.append(el('div',{class:'cap',style:'margin-top:3px',html:
         'Read DOWN a column (which bake wins that band), never ACROSS one: band SROCC is '
         +'range-restricted, so every value runs low by construction and bands are not comparable '
-        +'to each other. Parenthesized + dimmed = n&lt;30, which is noise (CI &gt; ±0.3) — do not '
-        +'rank on it. Empty bands are omitted; on CID22 the low bands are structurally near-empty '
-        +'(B0/B1 hold no pairs at all), so the low-end signal rests on a few dozen pairs.'}));
+        +'to each other. Values are SIGNED — a red negative is a band ordered BACKWARDS, which the '
+        +'previous absolute-valued column could not show (it ranked models by how inverted their '
+        +'top band was). An em-dash is NOT MEASURED, with the reason on hover: that band could not '
+        +'clear the count/span floors, so it publishes no statistic. It is not a zero.'}));
     }
   }
   // Calibration curve (binned pred → mean target) for MOS corpora from per_pair.
