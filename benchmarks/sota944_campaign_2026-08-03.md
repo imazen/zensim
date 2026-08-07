@@ -14070,3 +14070,70 @@ adopted).
   land ≈ 91 for t70 targets — no controller can close that in 2 steps).
 - **AB.5 Board**: gauntlet loop-panel default moves to the 2026-08-07 summary;
   `LOOP_BAKE_MAP` gains `W10L9_h3ctrl2` as the candidate bake's primary row.
+
+# REGISTERED APPENDIX AC — WAVE-12: THE AVIF ARM RETRAIN + THE AVIF LOOP (2026-08-07, pre-registered before data-gate or any training)
+
+**User directive:** *"do it"* on the two-part plan: a C-successor search armed with
+the fresh AVIF corpus, and an AVIF target-hitting loop ("for an avif loop").
+**Registered BEFORE the avifgen final manifest lands** — nothing here trains,
+gates, or selects until that manifest + training view exist.
+
+## AC.1 Data (the gate before anything trains)
+
+Source: the avifgen corpus (appendix Z; encode 100% closed at 562,860 unique
+jobs, SCORE_FINAL 2026-08-07 10:24Z, gpu=54,327 cpu=45,129). Consumed ONLY
+after the owner lane lands: score-joined 564,300-cell table + final
+`_MANIFEST.json` (build_commit + shas + duplicate/OOM-retry provenance) +
+**orientation gate** (every score column RISES with q within config — the
+appendix-F defect class structurally checked at birth) + the training view at
+`/mnt/v/zen/zensim-training/avif944-2026-08-07/{train,validate,test}_944.parquet`
+split by the origin even/odd-digit rule (`origin_split.py`; the corpus reused
+the June-estate identity; the 4 byte-identical rendition pairs are train/train
+— audited, split-safe).
+
+## AC.2 The wave-12 recipe (frozen)
+
+- Base: the wave-10 **L9 mix** exactly as wave-11 ran it (corrected
+  `ext_kadid`, KonJND-BPG leg, teacher tables, tkadis dropped) + ONE new leg:
+  **avif944** (train view above), target = `score_ssim2_gpu` (the codec-leg
+  convention; north-star coverage — the corpus's other metrics ride along for
+  eval, not as targets), weight set by the bigcodec-leg row-count convention
+  at view-build time and recorded in every run's embedded `zentrain.repro`.
+- Seeds: **k = 6** (battery), same trainer flags as wave-11 (registered in
+  the runs' spec.json; no new architecture axes — this wave isolates the DATA
+  lever).
+- Selection: the E.4 rule — `freeze_check --select` over the battery
+  (profile-floor count PRIMARY, `balanced_composite + 0.15·M3a` tie-break),
+  M3a measured via `harvest_bakes.sh` for every candidate. NOT selectable
+  without M3a.
+
+## AC.3 Registered outcomes + gates
+
+- **G-AC1 (data)**: manifest + orientation gate + view shas verified before
+  the first seed trains. Any orientation failure ⇒ STOP (appendix-F class).
+- **G-AC2 (the C bar)**: the winner must match-or-beat shipped C on the
+  balanced floors (7/8, F8 the known miss) with CID22 within seed noise
+  (±0.004) or better, AND strictly improve at least one AVIF-facing axis:
+  the AVIF dial ladder (mono % / tied % on the corpus's dense-q default
+  stratum, derived as an eval grid from the same table — held-out split) or
+  the AVIF loop census (AC.4). No winner ⇒ honest null; C stands.
+- **G-AC3 (no-regression)**: KonJND, LIVE, CSIQ, nonphoto, HF-NL per-ref
+  each within the wave-11 battery's observed seed spread of C; M3a ≥ 0.78
+  tier (C: 0.862 GOLD).
+- Outcome (a) a seed passes G-AC2+G-AC3 ⇒ candidate advances to the AVIF
+  loop study as the model arm (C = control) and to the user as a ship
+  proposal — **user-gated**, never auto-shipped. (b) parity ⇒ the AVIF arm
+  becomes a standing mix leg for future waves; C stands. (c) regression ⇒
+  the leg weight is the suspect (register a half-weight follow-up, one
+  seed, before abandoning the leg).
+
+## AC.4 The AVIF loop (parallel lane, harness-first)
+
+A `zensim_cq_rd` harness in zenavif mirroring the beats-butter shape
+(pre-registered there as `benchmarks/zensim_avif_loop_2026-08-07.md`):
+adopted controller template (exp 1.0 / clamp 2.0), h3-mag per-64px-superblock
+steering from `compute_folded944_score_and_attribution_binned` (bin=8 —
+sb rects bin-exact), outer zensim-judged CQ bisection as the comparator,
+engagement + one-cell smoke gates THIS session; the full matrix runs when
+wave-12's candidate lands (C as control either way). The zenavif primary
+checkout stays at the appendix-Z pin; work in a sibling workspace.
