@@ -14031,3 +14031,42 @@ was never stalled.
 5. zenavif auto-measured clli for the LIBRARY encode path (when the caller
    supplies none) is a possible future additive feature; the example is the
    corrected reference shape.
+
+# REGISTERED APPENDIX AB — LOOP CONSOLIDATION: L2 BINNED ATTRIBUTION + THE BEATS-BUTTER ADOPTION (2026-08-07)
+
+**Owner:** the supervisor session (user directive: *"integrate fully with and
+iterate towards a jxl perfect model better than the butter loop"*). **Evidence
+of record:** jxl-encoder `benchmarks/zensim_loop_beatbutter_2026-08-07.{md,tsv}`
+(pre-registered gates, 405 fresh rows) + `zensim_loop_23shot_summary_2026-08-07.json`
+(analyze-owner regenerated; priors byte-reproduced). Commits: zensim `8f3ec1f7`
+(L1 binned subsampling) + `d0f624eb` (L2 bin-side accumulation — no full-res
+canvas anywhere in a binned compute; fused/stale/944 sessions gain `_binned`
+entries; scores + 944 features BIT-identical, gated); jxl-encoder `646967a3`
+(integration bin=8 default + registration) + `810a330b` (results + defaults
+adopted).
+
+- **AB.1 Binned integration is decision-identical**: G-BB2 exact — bin=8
+  reproduces bin=1 census/median/bytes at both budgets (the loop reads the map
+  only via 8-px-aligned `query_rect`, which bin=8 answers exactly). Retained
+  map per compare drops 64×; the time win is the large-image regime (12 MP
+  e2e −19% measured on the zensim side).
+- **AB.2 The frontier arm** `W10L9_h3ctrl2` = the wave-11 candidate
+  (`W10L9_s4003_packed`, Profile C's bake) + OWN-map h3-mag steering through
+  the fused folded-944 compare + `CTRL_EXP 1.0` + `CTRL_CLAMP 2.00` (the
+  previously-untested exp×clamp cell; dose-response peaks interior at 2.0):
+  **k2 18/27 med 1.19 · k3 24/27 med 0.54** — beats the butter comparator
+  (`outer_zensimA`: j2 12/27 med 3.08, j3 14/27 med 1.94) at BOTH budgets, at
+  inner-compare cost vs one full butteraugli-driven encode per outer step, and
+  beats every other arm in the series. Nonphoto census 3/9 → 7/9 (k3), photo
+  unchanged.
+- **AB.3 Defaults ADOPTED** (jxl `810a330b`): `JXL_ZENSIM_CTRL_EXP` 0.6 → 1.0,
+  `JXL_ZENSIM_CTRL_CLAMP` 1.35 → 2.00; evidence covers the steered arm at both
+  budgets AND the controller-only path (baseline arm 17 → 20/27). h3-mag
+  steering stays opt-in — flipping the silent product default was explicitly
+  not claimed.
+- **AB.4 Residue (verified per-cell)**: k3 misses = cid1418519/t70 +
+  sc_wiki/sc_gui t80 (2.4-3.1); k2 = the screen t70/t80 class at 2-step
+  budget. Registered next lever: content-aware SEED distance (screen seeds
+  land ≈ 91 for t70 targets — no controller can close that in 2 steps).
+- **AB.5 Board**: gauntlet loop-panel default moves to the 2026-08-07 summary;
+  `LOOP_BAKE_MAP` gains `W10L9_h3ctrl2` as the candidate bake's primary row.

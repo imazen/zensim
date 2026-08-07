@@ -136,17 +136,21 @@ MODEL_TRANSFORMS_EMBED = 48  # Model-details shows at most 48 transform chips (+
 # not in this map (the outer arms + ssim2, which are not bakes) render only in the
 # section's own table; bakes without loop data render an em-dash.
 DEFAULT_LOOP_TARGETING = (
-    # 2026-08-05: the sota944-candidate panel (jxl-encoder
-    # benchmarks/zensim_loop_23shot_sota944_2026-08-05.md) — supersedes the
-    # 2026-08-01 file by carrying every entry from it (probe-verified) plus
-    # W10L9_base. Split verdict recorded there: (c)@k2, (b)-plus@k3.
-    "/home/lilith/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-05.json"
+    # 2026-08-07: the BEATS-BUTTER panel (jxl-encoder
+    # benchmarks/zensim_loop_beatbutter_2026-08-07.md) — supersedes the
+    # 2026-08-05 file by carrying every entry (analyze-owner regenerated,
+    # priors byte-reproduced) plus W10L9_h3ctrl2, the ADOPTED-DEFAULTS
+    # frontier arm (candidate + h3-mag own-map + CTRL exp 1.0 / clamp 2.0 +
+    # binned attribution): k2 18/27 med 1.19, k3 24/27 med 0.54 — beats the
+    # butter comparator (outer_zensimA 12/27 j2, 14/27 j3) at both budgets.
+    "/home/lilith/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-07.json"
 )
 LOOP_BAKE_MAP = {
     # loop-model key (summary JSON `models` key, = the sweep TSV run prefix)
     #   ->  bake `name` on the gauntlet board (fulleval JSON `name`).
     # Order matters: the FIRST model mapping to a bake is that bake's scoreboard
-    # primary (v47A_base before the h3 variant and the outer arm).
+    # primary — the adopted frontier arm leads for the sota944 candidate.
+    "W10L9_h3ctrl2": "W10L9_s4003_packed",
     "v47A_base": "v47_strict_QAT_native",
     "v47A_h3g20c135": "v47_strict_QAT_native",
     "B_base": "b_sdr_linear_cid80_inclwinsor_dense_dial",
