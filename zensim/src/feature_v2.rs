@@ -5803,12 +5803,75 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
     orig_h: usize,
     scratch: &mut PassBScratchF32,
 ) -> Vec<f32> {
+    let (w0, h0) = ret.dims[0];
+    let n0 = w0 * h0;
+    scratch.canvas.clear();
+    scratch.canvas.resize(n0, 0.0);
+    let mut canvas = std::mem::take(&mut scratch.canvas);
+    retention_pass_b_all_scales(
+        ret,
+        s_v2,
+        s_append,
+        s_append2,
+        parallel,
+        scratch,
+        &mut crate::attribution::AttrSinkF32::Canvas(&mut canvas),
+    );
+    // Trim the (possibly reflect-padded sub-64) canvas to the original.
+    let out = if orig_w == w0 && orig_h == h0 {
+        canvas.clone()
+    } else {
+        let mut out = Vec::with_capacity(orig_w * orig_h);
+        for y in 0..orig_h.min(h0) {
+            out.extend_from_slice(&canvas[y * w0..y * w0 + orig_w.min(w0)]);
+        }
+        out
+    };
+    scratch.canvas = canvas;
+    out
+}
+
+/// Level-2 sibling of
+/// [`compute_v2_append_attribution_from_retention`]: pass B folds each
+/// scale straight into the caller's [`BinAccum`](crate::attribution::BinAccum)
+/// — the session's full-resolution pass-B canvas stays untouched (and
+/// unallocated on binned-only sessions), and no trimmed clone is made.
+#[cfg(feature = "custom-profiles")]
+pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
+    ret: &FoldRetention,
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    parallel: bool,
+    scratch: &mut PassBScratchF32,
+    accum: &mut crate::attribution::BinAccum,
+) {
+    retention_pass_b_all_scales(
+        ret,
+        s_v2,
+        s_append,
+        s_append2,
+        parallel,
+        scratch,
+        &mut crate::attribution::AttrSinkF32::Bins(accum),
+    );
+}
+
+/// Shared per-scale pass-B loop over the retention for both sinks.
+#[cfg(feature = "custom-profiles")]
+fn retention_pass_b_all_scales(
+    ret: &FoldRetention,
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    parallel: bool,
+    scratch: &mut PassBScratchF32,
+    sink: &mut crate::attribution::AttrSinkF32<'_>,
+) {
     let n_scales = ret.dims.len();
     let (w0, h0) = ret.dims[0];
     let want_append = s_append.is_some();
     let n0 = w0 * h0;
-    scratch.canvas.clear();
-    scratch.canvas.resize(n0, 0.0);
     scratch.scale_density.resize(n0, 0.0);
     scratch.win_plane.resize(n0, 0.0);
     for scale in 0..n_scales {
@@ -5838,20 +5901,10 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
             h0,
             &mut scratch.scale_density,
             &mut scratch.win_plane,
-            &mut scratch.canvas,
+            sink,
             &mut scratch.spread_tmp,
             &mut scratch.spread_out,
         );
-    }
-    // Trim the (possibly reflect-padded sub-64) canvas to the original.
-    if orig_w == w0 && orig_h == h0 {
-        scratch.canvas.clone()
-    } else {
-        let mut out = Vec::with_capacity(orig_w * orig_h);
-        for y in 0..orig_h.min(h0) {
-            out.extend_from_slice(&scratch.canvas[y * w0..y * w0 + orig_w.min(w0)]);
-        }
-        out
     }
 }
 
@@ -8482,7 +8535,7 @@ fn attr_pass_b_for_scale(
     h0: usize,
     scale_density: &mut [f64],
     win_plane: &mut [f64],
-    canvas: &mut [f64],
+    sink: &mut crate::attribution::AttrSinkF64<'_>,
     spread_tmp: &mut Vec<f64>,
 ) {
     let tpb = std::time::Instant::now();
@@ -8530,25 +8583,32 @@ fn attr_pass_b_for_scale(
     // Sum-preserving footprint upsample (the v2 pyramid floor-halves,
     // so footprints are full 2^s × 2^s blocks; ÷4^s is exact).
     let factor = 1usize << scale;
-    if factor == 1 {
-        for (c, &v) in canvas.iter_mut().zip(scale_density[..n].iter()) {
-            *c += v;
-        }
-    } else {
-        let inv_area = 1.0 / ((factor * factor) as f64);
-        for sy in 0..hs {
-            let y0 = sy * factor;
-            let y1 = (y0 + factor).min(h0);
-            for sx in 0..ws {
-                let v = scale_density[sy * ws + sx] * inv_area;
-                let x0 = sx * factor;
-                let x1 = (x0 + factor).min(w0);
-                for row in canvas[y0 * w0..].chunks_mut(w0).take(y1.saturating_sub(y0)) {
-                    for slot in &mut row[x0..x1] {
-                        *slot += v;
+    match sink {
+        crate::attribution::AttrSinkF64::Canvas(canvas) => {
+            if factor == 1 {
+                for (c, &v) in canvas.iter_mut().zip(scale_density[..n].iter()) {
+                    *c += v;
+                }
+            } else {
+                let inv_area = 1.0 / ((factor * factor) as f64);
+                for sy in 0..hs {
+                    let y0 = sy * factor;
+                    let y1 = (y0 + factor).min(h0);
+                    for sx in 0..ws {
+                        let v = scale_density[sy * ws + sx] * inv_area;
+                        let x0 = sx * factor;
+                        let x1 = (x0 + factor).min(w0);
+                        for row in canvas[y0 * w0..].chunks_mut(w0).take(y1.saturating_sub(y0)) {
+                            for slot in &mut row[x0..x1] {
+                                *slot += v;
+                            }
+                        }
                     }
                 }
             }
+        }
+        crate::attribution::AttrSinkF64::Bins(accum) => {
+            accum.add_scale_plane_f64(&scale_density[..n], ws, hs, factor);
         }
     }
 }
@@ -8582,7 +8642,7 @@ fn attr_pass_b_for_scale_f32(
     h0: usize,
     scale_density: &mut [f32],
     win_plane: &mut [f32],
-    canvas: &mut [f32],
+    sink: &mut crate::attribution::AttrSinkF32<'_>,
     spread_tmp: &mut Vec<f32>,
     spread_out: &mut Vec<f32>,
 ) {
@@ -8637,15 +8697,22 @@ fn attr_pass_b_for_scale_f32(
         parallel && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
     );
     PERF_PASSB.with(|c| c.set(c.get() + tpb.elapsed().as_secs_f64()));
-    crate::attribution::upsample_add_sum_preserving_f32(
-        &scale_density[..n],
-        ws,
-        hs,
-        canvas,
-        w0,
-        h0,
-        1usize << scale,
-    );
+    match sink {
+        crate::attribution::AttrSinkF32::Canvas(canvas) => {
+            crate::attribution::upsample_add_sum_preserving_f32(
+                &scale_density[..n],
+                ws,
+                hs,
+                canvas,
+                w0,
+                h0,
+                1usize << scale,
+            );
+        }
+        crate::attribution::AttrSinkF32::Bins(accum) => {
+            accum.add_scale_plane_f32(&scale_density[..n], ws, hs, 1usize << scale);
+        }
+    }
 }
 
 /// Build the v2 (+ optional append) attribution density for a pair.
@@ -8678,6 +8745,62 @@ pub(crate) fn compute_v2_append_attribution(
     max_pixels: Option<usize>,
     parallel: bool,
 ) -> Result<V2AppendAttribution, ZensimError> {
+    let (density, v2_features, append_features) = compute_v2_append_attribution_impl(
+        reference, distorted, s_v2, s_append, s_append2, max_pixels, parallel, None,
+    )?;
+    Ok(V2AppendAttribution {
+        density: density.expect("canvas arm always yields a density"),
+        width: reference.width(),
+        height: reference.height(),
+        v2_features,
+        append_features,
+    })
+}
+
+/// Level-2 sibling: the per-scale v2/append mass folds straight into the
+/// caller's [`BinAccum`](crate::attribution::BinAccum) — no full-resolution
+/// v2 density plane, no trim copy. Returns `(v2_features, append_features)`
+/// (the pass-A audit surface).
+#[cfg(feature = "custom-profiles")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_v2_append_attribution_into_bins(
+    reference: &impl ImageSource,
+    distorted: &impl ImageSource,
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    accum: &mut crate::attribution::BinAccum,
+) -> Result<(Vec<f64>, Vec<f64>), ZensimError> {
+    let (_, v2_features, append_features) = compute_v2_append_attribution_impl(
+        reference,
+        distorted,
+        s_v2,
+        s_append,
+        s_append2,
+        max_pixels,
+        parallel,
+        Some(accum),
+    )?;
+    Ok((v2_features, append_features))
+}
+
+/// Shared core of the two entries above: `bins == None` reproduces the
+/// pre-Level-2 canvas path byte-identically (alloc → accumulate → trim);
+/// `Some(accum)` folds per scale into the bins and allocates no canvas.
+#[cfg(feature = "custom-profiles")]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn compute_v2_append_attribution_impl(
+    reference: &impl ImageSource,
+    distorted: &impl ImageSource,
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    bins: Option<&mut crate::attribution::BinAccum>,
+) -> Result<(Option<Vec<f64>>, Vec<f64>, Vec<f64>), ZensimError> {
     // ZENSIM_ATTR_PERF=1: coarse section timing to stderr (perf lever triage).
     let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
     let t0 = std::time::Instant::now();
@@ -8723,7 +8846,16 @@ pub(crate) fn compute_v2_append_attribution(
     };
     // (mean grad src, mean grad dst) per (scale, ch) for edge-width.
     let mut mg = vec![[(0.0f64, 0.0f64); 3]; n_scales];
-    let mut canvas = vec![0.0f64; w0 * h0];
+    let want_canvas = bins.is_none();
+    let mut canvas = if want_canvas {
+        vec![0.0f64; w0 * h0]
+    } else {
+        Vec::new()
+    };
+    let mut sink = match bins {
+        Some(accum) => crate::attribution::AttrSinkF64::Bins(accum),
+        None => crate::attribution::AttrSinkF64::Canvas(&mut canvas),
+    };
     let mut scale_density = vec![0.0f64; w0 * h0];
     let mut win_plane = vec![0.0f64; w0 * h0];
     let mut spread_tmp: Vec<f64> = Vec::new();
@@ -8870,7 +9002,7 @@ pub(crate) fn compute_v2_append_attribution(
                         mg: &[[(f64, f64); 3]],
                         scale_density: &mut Vec<f64>,
                         win_plane: &mut Vec<f64>,
-                        canvas: &mut Vec<f64>,
+                        sink: &mut crate::attribution::AttrSinkF64<'_>,
                         spread_tmp: &mut Vec<f64>| {
         let (ref rplanes, _, _) = rprep.scales[scale];
         let dplanes = &dprep.scales[scale].0;
@@ -8892,7 +9024,7 @@ pub(crate) fn compute_v2_append_attribution(
             h0,
             scale_density,
             win_plane,
-            canvas,
+            sink,
             spread_tmp,
         );
     };
@@ -8947,7 +9079,7 @@ pub(crate) fn compute_v2_append_attribution(
                 &mg,
                 &mut scale_density,
                 &mut win_plane,
-                &mut canvas,
+                &mut sink,
                 &mut spread_tmp,
             );
         }
@@ -8961,7 +9093,7 @@ pub(crate) fn compute_v2_append_attribution(
             &mg,
             &mut scale_density,
             &mut win_plane,
-            &mut canvas,
+            &mut sink,
             &mut spread_tmp,
         );
     }
@@ -8979,24 +9111,24 @@ pub(crate) fn compute_v2_append_attribution(
         PERF_PASSB.with(|c| c.set(0.0));
     }
 
-    // Trim the (possibly reflect-padded sub-64) canvas to the original.
-    let (ow, oh) = (reference.width(), reference.height());
-    let density = if ow == w0 && oh == h0 {
-        canvas
+    // (The sink's borrow of `canvas` ends with its last use above.)
+    // Trim the (possibly reflect-padded sub-64) canvas to the original
+    // (canvas arm only; the bins arm clipped at fold time).
+    let density = if want_canvas {
+        let (ow, oh) = (reference.width(), reference.height());
+        Some(if ow == w0 && oh == h0 {
+            canvas
+        } else {
+            let mut out = Vec::with_capacity(ow * oh);
+            for y in 0..oh.min(h0) {
+                out.extend_from_slice(&canvas[y * w0..y * w0 + ow.min(w0)]);
+            }
+            out
+        })
     } else {
-        let mut out = Vec::with_capacity(ow * oh);
-        for y in 0..oh.min(h0) {
-            out.extend_from_slice(&canvas[y * w0..y * w0 + ow.min(w0)]);
-        }
-        out
+        None
     };
-    Ok(V2AppendAttribution {
-        density,
-        width: ow,
-        height: oh,
-        v2_features,
-        append_features,
-    })
+    Ok((density, v2_features, append_features))
 }
 
 // ============================================================================

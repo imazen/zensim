@@ -258,6 +258,11 @@ impl AttributionResult {
     /// `f32` density holds bin MEANS over each bin's *real* pixel count
     /// (edge bins are clipped), keeping the exported view in per-pixel
     /// units so visualization scales are comparable across `bin` choices.
+    /// Level-1 reference implementation (fold an existing full-resolution
+    /// canvas): production paths now accumulate bin-side (Level 2), so this
+    /// survives as the independent reference the `binned_l2_matches_l1_fold`
+    /// equivalence gates compare against.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn from_f64_canvas_binned(canvas: Vec<f64>, width: usize, height: usize, bin: usize) -> Self {
         assert!(bin > 0, "bin must be non-zero");
         if bin == 1 {
@@ -274,6 +279,16 @@ impl AttributionResult {
                 *cell += chunk.iter().sum::<f64>();
             }
         }
+        Self::from_bin_sums(sums, width, height, bin)
+    }
+
+    /// Internal: build directly from bin SUMS (the Level-2 sink product) —
+    /// SAT over sums, `f32` view = bin means over real clipped pixel counts.
+    fn from_bin_sums(sums: Vec<f64>, width: usize, height: usize, bin: usize) -> Self {
+        debug_assert!(bin > 0);
+        let grid_w = width.div_ceil(bin);
+        let grid_h = height.div_ceil(bin);
+        debug_assert_eq!(sums.len(), grid_w * grid_h);
         let sat = build_sat(|i| sums[i], grid_w, grid_h);
         let density = sums
             .iter()
@@ -601,6 +616,153 @@ fn merge_acc(a: &mut StripChannelAccum, b: &StripChannelAccum) {
     a.edge_det_max = a.edge_det_max.max(b.edge_det_max);
 }
 
+/// Level-2 bin accumulator: the `bin × bin` grid the per-scale attribution
+/// mass folds into DIRECTLY, so the full-resolution canvas (and its trim
+/// copy) never exists for `bin > 1`. Bins are defined over the LOGICAL image
+/// — mass landing in the padded-compute margin is clipped at fold time,
+/// reproducing the old canvas-trim semantics exactly.
+///
+/// Sums here differ from the Level-1 fold-of-full-canvas only by float
+/// reassociation (each coarse footprint's per-bin overlap is applied as one
+/// multiply instead of per-fine-pixel adds) — gated at 1e-9 rel by the
+/// `binned_l2_matches_l1_fold` tests. `bin == 1` callers never construct
+/// this type: the per-pixel paths are byte-identical to the pre-Level-2 code.
+pub(crate) struct BinAccum {
+    bins: Vec<f64>,
+    bin: usize,
+    gw: usize,
+    width: usize,
+    height: usize,
+}
+
+impl BinAccum {
+    pub(crate) fn new(width: usize, height: usize, bin: usize) -> Self {
+        assert!(bin > 0, "bin must be non-zero");
+        let gw = width.div_ceil(bin);
+        let gh = height.div_ceil(bin);
+        Self {
+            bins: vec![0.0; gw * gh],
+            bin,
+            gw,
+            width,
+            height,
+        }
+    }
+
+    /// Fold one scale plane (coarse dims `sw × sh`, sum-preserving upsample
+    /// factor `factor = 2^scale`) into the bins, clipped to the logical
+    /// image. Each coarse pixel's mass spreads uniformly over its
+    /// `factor × factor` fine footprint; a bin receives
+    /// `value / factor² × |footprint ∩ bin ∩ image|`.
+    fn add_scale_plane(&mut self, plane: PlaneRef<'_>, sw: usize, sh: usize, factor: usize) {
+        if factor == 1 {
+            // Fast path: row fold with logical clip (sw ≥ width when padded).
+            debug_assert!(sw >= self.width && sh >= self.height);
+            for y in 0..self.height {
+                let row_bins =
+                    &mut self.bins[(y / self.bin) * self.gw..(y / self.bin + 1) * self.gw];
+                let base = y * sw;
+                for (cell, x0) in row_bins.iter_mut().zip((0..self.width).step_by(self.bin)) {
+                    let x1 = (x0 + self.bin).min(self.width);
+                    let mut run = 0.0f64;
+                    for x in x0..x1 {
+                        run += plane.get(base + x);
+                    }
+                    *cell += run;
+                }
+            }
+            return;
+        }
+        let inv_area = 1.0 / ((factor * factor) as f64);
+        for sy in 0..sh {
+            let y0 = sy * factor;
+            if y0 >= self.height {
+                break;
+            }
+            let y1 = (y0 + factor).min(self.height);
+            let base = sy * sw;
+            for sx in 0..sw {
+                let x0 = sx * factor;
+                if x0 >= self.width {
+                    break;
+                }
+                let x1 = (x0 + factor).min(self.width);
+                let v = plane.get(base + sx) * inv_area;
+                if v == 0.0 {
+                    continue;
+                }
+                let mut by = y0 / self.bin;
+                while by * self.bin < y1 {
+                    let oy = (y1.min((by + 1) * self.bin) - y0.max(by * self.bin)) as f64;
+                    let mut bx = x0 / self.bin;
+                    while bx * self.bin < x1 {
+                        let ox = (x1.min((bx + 1) * self.bin) - x0.max(bx * self.bin)) as f64;
+                        self.bins[by * self.gw + bx] += v * (oy * ox);
+                        bx += 1;
+                    }
+                    by += 1;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn add_scale_plane_f64(
+        &mut self,
+        plane: &[f64],
+        sw: usize,
+        sh: usize,
+        factor: usize,
+    ) {
+        self.add_scale_plane(PlaneRef::F64(plane), sw, sh, factor);
+    }
+
+    pub(crate) fn add_scale_plane_f32(
+        &mut self,
+        plane: &[f32],
+        sw: usize,
+        sh: usize,
+        factor: usize,
+    ) {
+        self.add_scale_plane(PlaneRef::F32(plane), sw, sh, factor);
+    }
+
+    fn into_result(self) -> AttributionResult {
+        AttributionResult::from_bin_sums(self.bins, self.width, self.height, self.bin)
+    }
+}
+
+/// Source-plane dtype adapter for [`BinAccum`] — one fold algorithm for the
+/// f64 (standalone) and f32 (fused) accumulation pipelines.
+#[derive(Clone, Copy)]
+enum PlaneRef<'a> {
+    F64(&'a [f64]),
+    F32(&'a [f32]),
+}
+
+impl PlaneRef<'_> {
+    #[inline(always)]
+    fn get(&self, i: usize) -> f64 {
+        match self {
+            PlaneRef::F64(p) => p[i],
+            PlaneRef::F32(p) => p[i] as f64,
+        }
+    }
+}
+
+/// Where per-scale attribution mass lands: the full-resolution canvas
+/// (per-pixel results — the pre-Level-2 code path, byte-identical) or the
+/// Level-2 bin accumulator (`bin > 1`).
+pub(crate) enum AttrSinkF64<'a> {
+    Canvas(&'a mut [f64]),
+    Bins(&'a mut BinAccum),
+}
+
+/// f32 twin of [`AttrSinkF64`] for the fused pipelines.
+pub(crate) enum AttrSinkF32<'a> {
+    Canvas(&'a mut [f32]),
+    Bins(&'a mut BinAccum),
+}
+
 /// Sum-preserving power-of-2 upsample-add: each scale pixel's value spreads
 /// uniformly over its `factor × factor` footprint ÷ area. With floor-halved
 /// pyramid dims the footprint never exceeds the canvas, so rectangle sums
@@ -784,7 +946,7 @@ fn basic_combine_channel(
 /// sum-preservation tests.
 fn build_attribution_canvas(
     pyramid: &PrecomputedReference,
-    mut dst_planes: [Vec<f32>; 3],
+    dst_planes: [Vec<f32>; 3],
     comp_pw: usize,
     comp_h: usize,
     num_scales: usize,
@@ -792,8 +954,38 @@ fn build_attribution_canvas(
     parallel: bool,
     s: &[f64],
 ) -> (Vec<f64>, Vec<f64>) {
-    const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
     let mut canvas = vec![0.0f64; comp_pw * comp_h];
+    let own_features = build_attribution_into_sink(
+        pyramid,
+        dst_planes,
+        comp_pw,
+        comp_h,
+        num_scales,
+        radius,
+        parallel,
+        s,
+        &mut AttrSinkF64::Canvas(&mut canvas),
+    );
+    (canvas, own_features)
+}
+
+/// [`build_attribution_canvas`] generalized over the mass sink: the Canvas
+/// arm is the byte-identical pre-Level-2 path; the Bins arm folds each
+/// scale's density straight into the Level-2 accumulator so no
+/// full-resolution canvas exists.
+#[allow(clippy::too_many_arguments)]
+fn build_attribution_into_sink(
+    pyramid: &PrecomputedReference,
+    mut dst_planes: [Vec<f32>; 3],
+    comp_pw: usize,
+    comp_h: usize,
+    num_scales: usize,
+    radius: usize,
+    parallel: bool,
+    s: &[f64],
+    sink: &mut AttrSinkF64<'_>,
+) -> Vec<f64> {
+    const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
     let mut own_features = Vec::with_capacity(num_scales * FPC * 3);
     let n0 = comp_pw * comp_h;
     let mut bufs3: [ChannelBuffers; 3] = [
@@ -887,15 +1079,20 @@ fn build_attribution_canvas(
             *d += *s;
         }
 
-        upsample_add_sum_preserving(
-            &scale_density[..n],
-            sw,
-            sh,
-            &mut canvas,
-            comp_pw,
-            comp_h,
-            1usize << scale,
-        );
+        match sink {
+            AttrSinkF64::Canvas(canvas) => upsample_add_sum_preserving(
+                &scale_density[..n],
+                sw,
+                sh,
+                canvas,
+                comp_pw,
+                comp_h,
+                1usize << scale,
+            ),
+            AttrSinkF64::Bins(accum) => {
+                accum.add_scale_plane_f64(&scale_density[..n], sw, sh, 1usize << scale)
+            }
+        }
 
         if scale + 1 < num_scales {
             let (nw, nh) = downscale_3_planes(&mut dst_planes, w, h, parallel);
@@ -903,7 +1100,7 @@ fn build_attribution_canvas(
             h = nh;
         }
     }
-    (canvas, own_features)
+    own_features
 }
 
 impl crate::metric::Zensim {
@@ -1002,10 +1199,14 @@ impl crate::metric::Zensim {
         s: &[f64],
         bin: usize,
     ) -> Result<AttributionResult, ZensimError> {
-        let (canvas, width, height) = self.basic_canvas_trimmed(precomputed, distorted, s)?;
-        Ok(AttributionResult::from_f64_canvas_binned(
-            canvas, width, height, bin,
-        ))
+        assert!(bin > 0, "bin must be non-zero");
+        if bin == 1 {
+            let (canvas, width, height) = self.basic_canvas_trimmed(precomputed, distorted, s)?;
+            return Ok(AttributionResult::from_f64_canvas(canvas, width, height));
+        }
+        Ok(self
+            .basic_bins(precomputed, distorted, s, bin)?
+            .into_result())
     }
 
     /// FULL-coverage attribution density (task #67 C2a): the BASIC block
@@ -1065,9 +1266,9 @@ impl crate::metric::Zensim {
         s: &[f64],
         bin: usize,
     ) -> Result<AttributionResult, ZensimError> {
+        assert!(bin > 0, "bin must be non-zero");
         validate_pair(source, distorted)?;
         let precomputed = self.precompute_reference(source)?;
-        let (mut canvas, width, height) = self.basic_canvas_trimmed(&precomputed, distorted, s)?;
         // Half-open [start, end) slice of `s` for one block, empty when `s`
         // does not reach the block. One helper for all three so a new block
         // is one more line, not one more chance to mistype a bound.
@@ -1080,8 +1281,34 @@ impl crate::metric::Zensim {
         let s_v2: &[f64] = block(BLOCK_END_V1_POOLS, BLOCK_END_V2).unwrap_or(&[]);
         let s_append: Option<&[f64]> = block(BLOCK_END_V2, BLOCK_END_APPEND);
         let s_append2: Option<&[f64]> = block(BLOCK_END_APPEND, BLOCK_END_APPEND2);
-        if !s_v2.is_empty() || s_append.is_some() || s_append2.is_some() {
-            let v2a = crate::feature_v2::compute_v2_append_attribution(
+        let want_v2 = !s_v2.is_empty() || s_append.is_some() || s_append2.is_some();
+
+        if bin == 1 {
+            let (mut canvas, width, height) =
+                self.basic_canvas_trimmed(&precomputed, distorted, s)?;
+            if want_v2 {
+                let v2a = crate::feature_v2::compute_v2_append_attribution(
+                    source,
+                    distorted,
+                    s_v2,
+                    s_append,
+                    s_append2,
+                    self.max_pixels(),
+                    self.parallel(),
+                )?;
+                debug_assert_eq!((v2a.width, v2a.height), (width, height));
+                for (c, v) in canvas.iter_mut().zip(v2a.density.iter()) {
+                    *c += *v;
+                }
+            }
+            return Ok(AttributionResult::from_f64_canvas(canvas, width, height));
+        }
+
+        // Level-2: one BinAccum receives BOTH blocks' per-scale mass — no
+        // full-resolution basic canvas, v2 density plane, or trim copies.
+        let mut accum = self.basic_bins(&precomputed, distorted, s, bin)?;
+        if want_v2 {
+            crate::feature_v2::compute_v2_append_attribution_into_bins(
                 source,
                 distorted,
                 s_v2,
@@ -1089,25 +1316,22 @@ impl crate::metric::Zensim {
                 s_append2,
                 self.max_pixels(),
                 self.parallel(),
+                &mut accum,
             )?;
-            debug_assert_eq!((v2a.width, v2a.height), (width, height));
-            for (c, v) in canvas.iter_mut().zip(v2a.density.iter()) {
-                *c += *v;
-            }
         }
-        Ok(AttributionResult::from_f64_canvas_binned(
-            canvas, width, height, bin,
-        ))
+        Ok(accum.into_result())
     }
 
-    /// Shared basic-block canvas builder (f64, trimmed to the logical
-    /// image): the C1 path and the full-coverage path both start here.
-    fn basic_canvas_trimmed(
+    /// Shared validation + input prep for the basic attribution builders:
+    /// pair checks, blur-config gate, XYB conversion of the distorted at
+    /// padded-compute dims. Returns
+    /// `(dst_planes, comp_pw, comp_h, num_scales, radius, width, height)`.
+    #[allow(clippy::type_complexity)]
+    fn basic_attr_prep(
         &self,
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
-        s: &[f64],
-    ) -> Result<(Vec<f64>, usize, usize), ZensimError> {
+    ) -> Result<([Vec<f32>; 3], usize, usize, usize, usize, usize, usize), ZensimError> {
         let params = self.profile().params();
         if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
@@ -1125,7 +1349,7 @@ impl crate::metric::Zensim {
         let height = distorted.height();
         // Compute dims come from the (possibly reflect-padded) reference
         // pyramid; a sub-64px distorted is reflect-padded to match, and the
-        // original image stays in the top-left for the trim below.
+        // original image stays in the top-left for the trim/clip below.
         let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
         let dst_planes = if width < MIN_PYRAMID_DIM || height < MIN_PYRAMID_DIM {
             let padded = reflect_pad_to_min(distorted);
@@ -1133,15 +1357,35 @@ impl crate::metric::Zensim {
         } else {
             convert_source_to_xyb(distorted, comp_pw, self.parallel())
         };
-
         let num_scales = config.num_scales.min(precomputed.scales.len());
+        Ok((
+            dst_planes,
+            comp_pw,
+            comp_h,
+            num_scales,
+            config.blur_radius,
+            width,
+            height,
+        ))
+    }
+
+    /// Shared basic-block canvas builder (f64, trimmed to the logical
+    /// image): the C1 path and the full-coverage path both start here.
+    fn basic_canvas_trimmed(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+    ) -> Result<(Vec<f64>, usize, usize), ZensimError> {
+        let (dst_planes, comp_pw, comp_h, num_scales, radius, width, height) =
+            self.basic_attr_prep(precomputed, distorted)?;
         let (canvas, _own_features) = build_attribution_canvas(
             precomputed,
             dst_planes,
             comp_pw,
             comp_h,
             num_scales,
-            config.blur_radius,
+            radius,
             self.parallel(),
             s,
         );
@@ -1157,6 +1401,35 @@ impl crate::metric::Zensim {
             out
         };
         Ok((trimmed, width, height))
+    }
+
+    /// Level-2 sibling of [`basic_canvas_trimmed`](Self::basic_canvas_trimmed):
+    /// the per-scale mass folds straight into a [`BinAccum`] — no
+    /// full-resolution canvas, no trim copy (the fold clips to the logical
+    /// image). Only called with `bin > 1`.
+    fn basic_bins(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        bin: usize,
+    ) -> Result<BinAccum, ZensimError> {
+        debug_assert!(bin > 1);
+        let (dst_planes, comp_pw, comp_h, num_scales, radius, width, height) =
+            self.basic_attr_prep(precomputed, distorted)?;
+        let mut accum = BinAccum::new(width, height, bin);
+        build_attribution_into_sink(
+            precomputed,
+            dst_planes,
+            comp_pw,
+            comp_h,
+            num_scales,
+            radius,
+            self.parallel(),
+            s,
+            &mut AttrSinkF64::Bins(&mut accum),
+        );
+        Ok(accum)
     }
 }
 
@@ -1457,6 +1730,243 @@ mod tests {
                 "full-coverage full image",
             );
         }
+    }
+
+    /// Level-2 vs Level-1: the sink accumulation (no full-res canvas) must
+    /// agree with folding the full-res canvas, on EVERY bin cell — the
+    /// difference is float reassociation only.
+    #[test]
+    fn binned_l2_matches_l1_fold() {
+        let (w, h) = (96, 80);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let s = vec![-0.5f64; 156];
+        let bin = 8;
+        // L1 reference: full canvas, then fold.
+        let pre = z.precompute_reference(&rs).unwrap();
+        let (canvas, cw, chh) = z.basic_canvas_trimmed(&pre, &ds, &s).unwrap();
+        let l1 = AttributionResult::from_f64_canvas_binned(canvas, cw, chh, bin);
+        // L2: sink accumulation through the public entry.
+        let l2 = z
+            .compute_attribution_density_binned(&rs, &ds, &s, bin)
+            .unwrap();
+        assert_eq!(
+            (l2.grid_width(), l2.grid_height()),
+            (l1.grid_width(), l1.grid_height())
+        );
+        for by in 0..l1.grid_height() {
+            for bx in 0..l1.grid_width() {
+                let (x0, y0) = (bx * bin, by * bin);
+                let a = l2.query_rect(x0, y0, x0 + bin, y0 + bin);
+                let b = l1.query_rect(x0, y0, x0 + bin, y0 + bin);
+                assert!(
+                    (a - b).abs() <= 1e-9 * b.abs().max(1e-9),
+                    "bin ({bx},{by}): L2 {a} vs L1 {b}"
+                );
+            }
+        }
+        // The _full path: both blocks into one accumulator vs the L1 merge.
+        #[cfg(feature = "feature-regime-v2")]
+        {
+            let s944 = vec![-0.05f64; 944];
+            let l1f = {
+                let f = z.compute_attribution_density_full(&rs, &ds, &s944).unwrap();
+                // Fold the per-pixel result's density (f32 view) is lossy;
+                // rebuild the L1 reference through the canvas path instead.
+                let (mut canvas, cw, chh) = z.basic_canvas_trimmed(&pre, &ds, &s944).unwrap();
+                let v2a = crate::feature_v2::compute_v2_append_attribution(
+                    &rs,
+                    &ds,
+                    &s944[372..720],
+                    Some(&s944[720..924]),
+                    Some(&s944[924..944]),
+                    None,
+                    false,
+                )
+                .unwrap();
+                for (c, v) in canvas.iter_mut().zip(v2a.density.iter()) {
+                    *c += *v;
+                }
+                drop(f);
+                AttributionResult::from_f64_canvas_binned(canvas, cw, chh, bin)
+            };
+            let l2f = z
+                .compute_attribution_density_full_binned(&rs, &ds, &s944, bin)
+                .unwrap();
+            for by in 0..l1f.grid_height() {
+                for bx in 0..l1f.grid_width() {
+                    let (x0, y0) = (bx * bin, by * bin);
+                    let a = l2f.query_rect(x0, y0, x0 + bin, y0 + bin);
+                    let b = l1f.query_rect(x0, y0, x0 + bin, y0 + bin);
+                    assert!(
+                        (a - b).abs() <= 1e-9 * b.abs().max(1e-9),
+                        "full bin ({bx},{by}): L2 {a} vs L1 {b}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Fused binned: score BIT-identical to the per-pixel fused entry; map
+    /// agrees on every bin cell within the f32 cross-scale accumulation
+    /// class (the binned path accumulates cross-scale in f64 — slightly
+    /// more precise than the f32 canvas).
+    #[test]
+    fn fused_binned_score_bitwise_and_map_close() {
+        let (w, h) = (96, 80);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let s = vec![-0.5f64; 156];
+        let bin = 8;
+        let pre = z.precompute_reference(&rs).unwrap();
+        let (res_full, attr_full) = z
+            .compute_with_ref_score_and_attribution(&pre, &ds, &s)
+            .unwrap();
+        let (res_bin, attr_bin) = z
+            .compute_with_ref_score_and_attribution_binned(&pre, &ds, &s, bin)
+            .unwrap();
+        assert_eq!(
+            res_full.score(),
+            res_bin.score(),
+            "score must be bit-identical"
+        );
+        assert_eq!(attr_bin.bin(), bin);
+        for by in 0..attr_bin.grid_height() {
+            for bx in 0..attr_bin.grid_width() {
+                let (x0, y0) = (bx * bin, by * bin);
+                let a = attr_bin.query_rect(x0, y0, x0 + bin, y0 + bin);
+                let b = attr_full.query_rect(x0, y0, x0 + bin, y0 + bin);
+                assert!(
+                    (a - b).abs() <= 1e-5 * b.abs().max(1e-6),
+                    "fused bin ({bx},{by}): binned {a} vs full {b}"
+                );
+            }
+        }
+    }
+
+    /// Stale binned: the priming call matches the fresh binned entry; the
+    /// second same-pair call is exactly reproducible; the session's
+    /// full-resolution canvas is never allocated on a binned-only session.
+    #[test]
+    fn stale_binned_reuse_and_no_canvas() {
+        let (w, h) = (96, 80);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let s = vec![-0.5f64; 156];
+        let bin = 8;
+        let pre = z.precompute_reference(&rs).unwrap();
+        let mut sess = AttributionSession::new();
+        let (_r1, a1) = z
+            .compute_with_ref_score_and_attribution_stale_binned(&pre, &ds, &s, &mut sess, bin)
+            .unwrap();
+        // Priming call == the fresh binned entry (same code path).
+        let (_rf, af) = z
+            .compute_with_ref_score_and_attribution_binned(&pre, &ds, &s, bin)
+            .unwrap();
+        for by in 0..a1.grid_height() {
+            for bx in 0..a1.grid_width() {
+                let (x0, y0) = (bx * bin, by * bin);
+                assert_eq!(
+                    a1.query_rect(x0, y0, x0 + bin, y0 + bin),
+                    af.query_rect(x0, y0, x0 + bin, y0 + bin),
+                    "prime bin ({bx},{by})"
+                );
+            }
+        }
+        // Second call (single-pass stale) — deterministic across repeats.
+        let (_r2, a2) = z
+            .compute_with_ref_score_and_attribution_stale_binned(&pre, &ds, &s, &mut sess, bin)
+            .unwrap();
+        let (_r3, a3) = z
+            .compute_with_ref_score_and_attribution_stale_binned(&pre, &ds, &s, &mut sess, bin)
+            .unwrap();
+        for by in 0..a2.grid_height() {
+            for bx in 0..a2.grid_width() {
+                let (x0, y0) = (bx * bin, by * bin);
+                assert_eq!(
+                    a2.query_rect(x0, y0, x0 + bin, y0 + bin),
+                    a3.query_rect(x0, y0, x0 + bin, y0 + bin),
+                    "stale repeat bin ({bx},{by})"
+                );
+            }
+        }
+        assert!(
+            sess.canvas.is_empty(),
+            "binned-only session must never allocate the full-res canvas"
+        );
+    }
+
+    /// Fused-944 binned: score + 944 features bit-identical to the
+    /// per-pixel entry; map agrees on every bin cell (f32 class).
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn fused944_binned_matches_per_pixel() {
+        let (w, h) = (96, 80);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let s = vec![-0.05f64; 944];
+        let bin = 8;
+        let pre = z.precompute_reference(&rs).unwrap();
+        let mut sess_a = Fused944Session::new();
+        let mut sess_b = Fused944Session::new();
+        let (r1, f1, a1) = z
+            .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s, &mut sess_a)
+            .unwrap();
+        let (r2, f2, a2) = z
+            .compute_folded944_score_and_attribution_binned(&rs, &pre, &ds, &s, &mut sess_b, bin)
+            .unwrap();
+        assert_eq!(r1.score(), r2.score(), "944 score must be bit-identical");
+        assert_eq!(
+            f1.features(),
+            f2.features(),
+            "944 features must be bit-identical"
+        );
+        for by in 0..a2.grid_height() {
+            for bx in 0..a2.grid_width() {
+                let (x0, y0) = (bx * bin, by * bin);
+                let a = a2.query_rect(x0, y0, x0 + bin, y0 + bin);
+                let b = a1.query_rect(x0, y0, x0 + bin, y0 + bin);
+                assert!(
+                    (a - b).abs() <= 1e-5 * b.abs().max(1e-6),
+                    "944 bin ({bx},{by}): binned {a} vs full {b}"
+                );
+            }
+        }
+    }
+
+    /// Manual END-TO-END perf/memory probe at 12 MP (run `--ignored` in
+    /// release mode, under `/usr/bin/time -v` for peak RSS;
+    /// `ZENSIM_L2_PROBE_BIN` selects the arm — 1 = per-pixel, 8 = Level-2).
+    #[test]
+    #[ignore = "manual perf/memory probe — run in release mode"]
+    fn l2_end_to_end_probe() {
+        let bin: usize = std::env::var("ZENSIM_L2_PROBE_BIN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8);
+        let (w, h) = (4000, 3000);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let s = vec![-0.5f64; 156];
+        let t = std::time::Instant::now();
+        let r = z
+            .compute_attribution_density_binned(&rs, &ds, &s, bin)
+            .unwrap();
+        let el = t.elapsed();
+        eprintln!(
+            "L2 e2e 12MP bin={bin}: {el:?}, retained {} KB",
+            (r.density.len() * 4 + r.sat.len() * 8) / 1024
+        );
     }
 
     /// Manual perf/memory probe (run `--ignored` in release mode):
@@ -2702,6 +3212,43 @@ impl crate::metric::Zensim {
         self.fused_score_attr_fresh(precomputed, distorted, s, None)
     }
 
+    /// [`compute_with_ref_score_and_attribution`](Self::compute_with_ref_score_and_attribution)
+    /// with a Level-2 binned map: the per-scale mass folds straight into a
+    /// `bin × bin` grid — no full-resolution canvas, trim copy, density
+    /// plane, or full-resolution SAT exist at any point. The **score is
+    /// bit-identical to every other compare path** (the sink only receives
+    /// map mass; the stats pipeline is untouched). `bin == 1` delegates to
+    /// the per-pixel entry point bit-identically.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bin == 0`.
+    ///
+    /// # Errors
+    ///
+    /// Same contract as the per-pixel fused entry.
+    pub fn compute_with_ref_score_and_attribution_binned(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        bin: usize,
+    ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        assert!(bin > 0, "bin must be non-zero");
+        if bin == 1 {
+            return self.compute_with_ref_score_and_attribution(precomputed, distorted, s);
+        }
+        let mut accum = BinAccum::new(distorted.width(), distorted.height(), bin);
+        let (result, _, _) = self.fused_basic_into(
+            precomputed,
+            distorted,
+            s,
+            None,
+            &mut AttrSinkF32::Bins(&mut accum),
+        )?;
+        Ok((result, accum.into_result()))
+    }
+
     /// The fresh fused pipeline (the pre-#70 body of
     /// [`compute_with_ref_score_and_attribution`](Self::compute_with_ref_score_and_attribution),
     /// unchanged numerically). When `prime` is `Some`, additionally record
@@ -2744,8 +3291,42 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
-        mut prime: Option<&mut AttributionSession>,
+        prime: Option<&mut AttributionSession>,
     ) -> Result<FusedBasicCanvas, ZensimError> {
+        let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
+        let mut canvas = vec![0.0f32; comp_pw * comp_h];
+        let (result, t_pipe_ms, combine_ms) = self.fused_basic_into(
+            precomputed,
+            distorted,
+            s,
+            prime,
+            &mut AttrSinkF32::Canvas(&mut canvas),
+        )?;
+        Ok(FusedBasicCanvas {
+            result,
+            canvas,
+            comp_pw,
+            comp_h,
+            t_pipe_ms,
+            combine_ms,
+        })
+    }
+
+    /// [`fused_basic_canvas`](Self::fused_basic_canvas) generalized over
+    /// the mass sink (Level 2): the Canvas arm is the byte-identical
+    /// pre-Level-2 fused path (incl. the scale-0 direct spread-into-canvas
+    /// fusion); the Bins arm folds every scale's plane straight into the
+    /// accumulator — no full-resolution canvas exists at all (the scale-0
+    /// spread merges into the already-allocated id plane instead, then
+    /// folds). Returns `(result, t_pipe_ms, combine_ms)`.
+    fn fused_basic_into(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        mut prime: Option<&mut AttributionSession>,
+        sink: &mut AttrSinkF32<'_>,
+    ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
         if distorted.width() == 0 || distorted.height() == 0 {
@@ -2772,7 +3353,6 @@ impl crate::metric::Zensim {
 
         let t_all = std::time::Instant::now();
         let combine_ms = std::cell::Cell::new(0.0f64);
-        let mut canvas = vec![0.0f32; comp_pw * comp_h];
         let mut id_plane = vec![0.0f32; comp_pw * comp_h];
         let mut win_plane = vec![0.0f32; comp_pw * comp_h];
         let mut spread_tmp: Vec<f32> = Vec::new();
@@ -2841,51 +3421,72 @@ impl crate::metric::Zensim {
             }
             // Window-class spread (C2b-final allocation) fused with the
             // window→identity merge, f32 fast path (#70 lever 1:
-            // parallel, bitwise-invariant to banding). At scale 0 the
-            // upsample is elementwise, so the spread merges directly into
-            // the canvas — skipping a full id-plane store+reload; this is
-            // value-exact: `(0+a)+b` and `0+(a+b)` round identically
-            // (the first add is exact, signed zeros included).
-            if scale == 0 {
-                upsample_add_sum_preserving_f32(
-                    &id_plane[..n],
-                    sw,
-                    sh,
-                    &mut canvas,
-                    comp_pw,
-                    comp_h,
-                    1,
-                );
-                crate::blur::box_spread_merge_f32(
-                    &mut win_plane[..n],
-                    &mut canvas[..n],
-                    sw,
-                    sh,
-                    config.blur_radius,
-                    &mut spread_tmp,
-                    &mut spread_out,
-                    config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
-                );
-            } else {
-                crate::blur::box_spread_merge_f32(
-                    &mut win_plane[..n],
-                    &mut id_plane[..n],
-                    sw,
-                    sh,
-                    config.blur_radius,
-                    &mut spread_tmp,
-                    &mut spread_out,
-                    config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
-                );
-                upsample_add_sum_preserving_f32(
-                    &id_plane[..n],
-                    sw,
-                    sh,
-                    &mut canvas,
-                    comp_pw,
-                    comp_h,
-                    1usize << scale,
-                );
+            // parallel, bitwise-invariant to banding). Canvas arm at
+            // scale 0: the upsample is elementwise, so the spread merges
+            // directly into the canvas — skipping a full id-plane
+            // store+reload; this is value-exact: `(0+a)+b` and `0+(a+b)`
+            // round identically (the first add is exact, signed zeros
+            // included). Bins arm: no canvas exists — the spread merges
+            // into the (already allocated) id plane at every scale, then
+            // the id plane folds into the accumulator (reassociation-class
+            // difference, gated by the L2-vs-L1 tests).
+            match &mut *sink {
+                AttrSinkF32::Canvas(canvas) => {
+                    if scale == 0 {
+                        upsample_add_sum_preserving_f32(
+                            &id_plane[..n],
+                            sw,
+                            sh,
+                            canvas,
+                            comp_pw,
+                            comp_h,
+                            1,
+                        );
+                        crate::blur::box_spread_merge_f32(
+                            &mut win_plane[..n],
+                            &mut canvas[..n],
+                            sw,
+                            sh,
+                            config.blur_radius,
+                            &mut spread_tmp,
+                            &mut spread_out,
+                            config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                        );
+                    } else {
+                        crate::blur::box_spread_merge_f32(
+                            &mut win_plane[..n],
+                            &mut id_plane[..n],
+                            sw,
+                            sh,
+                            config.blur_radius,
+                            &mut spread_tmp,
+                            &mut spread_out,
+                            config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                        );
+                        upsample_add_sum_preserving_f32(
+                            &id_plane[..n],
+                            sw,
+                            sh,
+                            canvas,
+                            comp_pw,
+                            comp_h,
+                            1usize << scale,
+                        );
+                    }
+                }
+                AttrSinkF32::Bins(accum) => {
+                    crate::blur::box_spread_merge_f32(
+                        &mut win_plane[..n],
+                        &mut id_plane[..n],
+                        sw,
+                        sh,
+                        config.blur_radius,
+                        &mut spread_tmp,
+                        &mut spread_out,
+                        config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                    );
+                    accum.add_scale_plane_f32(&id_plane[..n], sw, sh, 1usize << scale);
+                }
             }
             combine_ms.set(combine_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
         };
@@ -2910,14 +3511,7 @@ impl crate::metric::Zensim {
         )?;
 
         let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
-        Ok(FusedBasicCanvas {
-            result,
-            canvas,
-            comp_pw,
-            comp_h,
-            t_pipe_ms: t_pipe,
-            combine_ms: combine_ms.get(),
-        })
+        Ok((result, t_pipe, combine_ms.get()))
     }
 
     /// **Stale-scalar single-pass fused compare (task #70; C3a ranked
@@ -2957,6 +3551,52 @@ impl crate::metric::Zensim {
         s: &[f64],
         session: &mut AttributionSession,
     ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        self.stale_core(precomputed, distorted, s, session, None)
+    }
+
+    /// [`compute_with_ref_score_and_attribution_stale`](Self::compute_with_ref_score_and_attribution_stale)
+    /// with a Level-2 binned map (same one-iterate-stale semantics, same
+    /// bit-identical score): the in-strip fold's per-scale planes fold
+    /// straight into the `bin × bin` grid — the session's full-resolution
+    /// canvas is never allocated, and the per-iteration trim + SAT build
+    /// shrink by `bin²`. `bin == 1` delegates to the per-pixel stale entry
+    /// bit-identically. The priming call (first through the session, or
+    /// after `reset`/size/gradient change) also returns a binned map.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bin == 0`.
+    ///
+    /// # Errors
+    ///
+    /// Same contract as the per-pixel stale entry.
+    pub fn compute_with_ref_score_and_attribution_stale_binned(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        session: &mut AttributionSession,
+        bin: usize,
+    ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        assert!(bin > 0, "bin must be non-zero");
+        if bin == 1 {
+            return self.stale_core(precomputed, distorted, s, session, None);
+        }
+        let accum = BinAccum::new(distorted.width(), distorted.height(), bin);
+        self.stale_core(precomputed, distorted, s, session, Some(accum))
+    }
+
+    /// Shared core of the two stale entries: `bins == None` is the
+    /// byte-identical pre-Level-2 canvas path; `Some(accum)` folds into the
+    /// bins (no session canvas, no trim, tiny SAT).
+    fn stale_core(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        session: &mut AttributionSession,
+        mut bins: Option<BinAccum>,
+    ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
         if distorted.width() == 0 || distorted.height() == 0 {
@@ -2986,7 +3626,19 @@ impl crate::metric::Zensim {
             session.width = width;
             session.height = height;
             session.s_saved = s.to_vec();
-            return self.fused_score_attr_fresh(precomputed, distorted, s, Some(session));
+            return match bins {
+                None => self.fused_score_attr_fresh(precomputed, distorted, s, Some(session)),
+                Some(mut accum) => {
+                    let (result, _, _) = self.fused_basic_into(
+                        precomputed,
+                        distorted,
+                        s,
+                        Some(session),
+                        &mut AttrSinkF32::Bins(&mut accum),
+                    )?;
+                    Ok((result, accum.into_result()))
+                }
+            };
         }
 
         let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
@@ -2995,10 +3647,13 @@ impl crate::metric::Zensim {
         let tail_ms = std::cell::Cell::new(0.0f64);
         // Session-owned scratch: no per-iteration allocation/page-fault
         // cost on the single-pass path. The canvas accumulates across
-        // scales, so it is re-zeroed here.
+        // scales, so it is re-zeroed here — Canvas arm only; the bins arm
+        // never allocates it.
         let comp_n = comp_pw * comp_h;
-        session.canvas.resize(comp_n, 0.0);
-        session.canvas.fill(0.0);
+        if bins.is_none() {
+            session.canvas.resize(comp_n, 0.0);
+            session.canvas.fill(0.0);
+        }
         session.id_plane.resize(comp_n, 0.0);
         session.win_plane.resize(comp_n, 0.0);
         let mut canvas = std::mem::take(&mut session.canvas);
@@ -3023,42 +3678,68 @@ impl crate::metric::Zensim {
             let t_c = std::time::Instant::now();
             let n = sw * sh;
             let n_f = n as f64;
-            // Post-scale tail — IDENTICAL code to the fresh path (same
-            // fused spread+merge, same scale-0 canvas-target fusion, same
-            // upsample ⇒ bitwise-equal maps when the coefficient packs
-            // coincide).
-            if scale == 0 {
-                upsample_add_sum_preserving_f32(&idp[..n], sw, sh, &mut canvas, comp_pw, comp_h, 1);
-                crate::blur::box_spread_merge_f32(
-                    &mut winp[..n],
-                    &mut canvas[..n],
-                    sw,
-                    sh,
-                    config.blur_radius,
-                    &mut spread_tmp,
-                    &mut spread_out,
-                    config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
-                );
-            } else {
-                crate::blur::box_spread_merge_f32(
-                    &mut winp[..n],
-                    &mut idp[..n],
-                    sw,
-                    sh,
-                    config.blur_radius,
-                    &mut spread_tmp,
-                    &mut spread_out,
-                    config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
-                );
-                upsample_add_sum_preserving_f32(
-                    &idp[..n],
-                    sw,
-                    sh,
-                    &mut canvas,
-                    comp_pw,
-                    comp_h,
-                    1usize << scale,
-                );
+            // Post-scale tail — Canvas arm IDENTICAL to the fresh path
+            // (same fused spread+merge, same scale-0 canvas-target fusion,
+            // same upsample ⇒ bitwise-equal maps when the coefficient
+            // packs coincide). Bins arm mirrors the fresh binned path:
+            // spread merges into the walk's id plane, then folds.
+            match bins.as_mut() {
+                None => {
+                    if scale == 0 {
+                        upsample_add_sum_preserving_f32(
+                            &idp[..n],
+                            sw,
+                            sh,
+                            &mut canvas,
+                            comp_pw,
+                            comp_h,
+                            1,
+                        );
+                        crate::blur::box_spread_merge_f32(
+                            &mut winp[..n],
+                            &mut canvas[..n],
+                            sw,
+                            sh,
+                            config.blur_radius,
+                            &mut spread_tmp,
+                            &mut spread_out,
+                            config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                        );
+                    } else {
+                        crate::blur::box_spread_merge_f32(
+                            &mut winp[..n],
+                            &mut idp[..n],
+                            sw,
+                            sh,
+                            config.blur_radius,
+                            &mut spread_tmp,
+                            &mut spread_out,
+                            config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                        );
+                        upsample_add_sum_preserving_f32(
+                            &idp[..n],
+                            sw,
+                            sh,
+                            &mut canvas,
+                            comp_pw,
+                            comp_h,
+                            1usize << scale,
+                        );
+                    }
+                }
+                Some(accum) => {
+                    crate::blur::box_spread_merge_f32(
+                        &mut winp[..n],
+                        &mut idp[..n],
+                        sw,
+                        sh,
+                        config.blur_radius,
+                        &mut spread_tmp,
+                        &mut spread_out,
+                        config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
+                    );
+                    accum.add_scale_plane_f32(&idp[..n], sw, sh, 1usize << scale);
+                }
             }
             // Derive the NEXT call's packs from THIS compare's pooled
             // scalars + the cached reference-side hf sums.
@@ -3096,27 +3777,39 @@ impl crate::metric::Zensim {
 
         let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
         let t_sat0 = std::time::Instant::now();
-        // Trim into the recycled density buffer (fresh alloc when the
-        // caller never recycles — identical behavior, just re-allocating).
-        let mut trimmed = std::mem::take(&mut session.density_scratch);
-        trimmed.clear();
-        if comp_pw == width && comp_h == height {
-            trimmed.extend_from_slice(&canvas);
-        } else {
-            trimmed.reserve(width * height);
-            for y in 0..height.min(comp_h) {
-                trimmed.extend_from_slice(&canvas[y * comp_pw..y * comp_pw + width.min(comp_pw)]);
+        let attr = match bins {
+            None => {
+                // Trim into the recycled density buffer (fresh alloc when
+                // the caller never recycles — identical behavior, just
+                // re-allocating).
+                let mut trimmed = std::mem::take(&mut session.density_scratch);
+                trimmed.clear();
+                if comp_pw == width && comp_h == height {
+                    trimmed.extend_from_slice(&canvas);
+                } else {
+                    trimmed.reserve(width * height);
+                    for y in 0..height.min(comp_h) {
+                        trimmed.extend_from_slice(
+                            &canvas[y * comp_pw..y * comp_pw + width.min(comp_pw)],
+                        );
+                    }
+                }
+                let sat_scratch = std::mem::take(&mut session.sat_scratch);
+                AttributionResult::from_density_with_sat_scratch(
+                    trimmed,
+                    width,
+                    height,
+                    sat_scratch,
+                )
             }
-        }
-        let sat_scratch = std::mem::take(&mut session.sat_scratch);
+            Some(accum) => accum.into_result(),
+        };
         // Return the scratch to the session for the next iteration.
         session.canvas = canvas;
         session.id_plane = id_plane;
         session.win_plane = win_plane;
         session.spread_tmp = spread_tmp;
         session.spread_out = spread_out;
-        let attr =
-            AttributionResult::from_density_with_sat_scratch(trimmed, width, height, sat_scratch);
         if perf_log {
             eprintln!(
                 "ATTRPERF stale: pipeline {:.1} ms (spread/upsample/derive tail {:.1} ms; in-strip fold inside walk) | trim+SAT {:.1} ms",
@@ -3243,5 +3936,87 @@ impl crate::metric::Zensim {
             );
         }
         Ok((fb.result, v2res, out))
+    }
+
+    /// [`compute_folded944_score_and_attribution`](Self::compute_folded944_score_and_attribution)
+    /// with a Level-2 binned map: both the fused v1 basic mass and the
+    /// retention pass-B v2/append/append2 mass fold straight into ONE
+    /// `bin × bin` grid — no full-resolution basic canvas, session pass-B
+    /// canvas, trimmed clones, or full-resolution SAT. Score and 944
+    /// features are bit-identical to the per-pixel entry (the sinks only
+    /// receive map mass). `bin == 1` delegates to the per-pixel entry
+    /// bit-identically.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bin == 0`.
+    ///
+    /// # Errors
+    ///
+    /// Same contract as the per-pixel folded-944 entry.
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_folded944_score_and_attribution_binned(
+        &self,
+        source: &impl ImageSource,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        session: &mut Fused944Session,
+        bin: usize,
+    ) -> Result<
+        (
+            crate::metric::ZensimResult,
+            crate::feature_v2::ZensimV2Result,
+            AttributionResult,
+        ),
+        ZensimError,
+    > {
+        assert!(bin > 0, "bin must be non-zero");
+        if bin == 1 {
+            return self.compute_folded944_score_and_attribution(
+                source,
+                precomputed,
+                distorted,
+                s,
+                session,
+            );
+        }
+        validate_pair(source, distorted)?;
+        let v2res = crate::feature_v2::compute_folded944_streaming_with_retention(
+            source,
+            distorted,
+            self.max_pixels(),
+            self.parallel(),
+            &mut session.scratch,
+            &mut session.retention,
+        )?;
+        let width = distorted.width();
+        let height = distorted.height();
+        let mut accum = BinAccum::new(width, height, bin);
+        let (result, _, _) = self.fused_basic_into(
+            precomputed,
+            distorted,
+            s,
+            None,
+            &mut AttrSinkF32::Bins(&mut accum),
+        )?;
+        let block = |start: usize, end: usize| -> Option<&[f64]> {
+            (s.len() > start).then(|| &s[start..s.len().min(end)])
+        };
+        let s_v2: &[f64] = block(BLOCK_END_V1_POOLS, BLOCK_END_V2).unwrap_or(&[]);
+        let s_append: Option<&[f64]> = block(BLOCK_END_V2, BLOCK_END_APPEND);
+        let s_append2: Option<&[f64]> = block(BLOCK_END_APPEND, BLOCK_END_APPEND2);
+        if !s_v2.is_empty() || s_append.is_some() || s_append2.is_some() {
+            crate::feature_v2::compute_v2_append_attribution_from_retention_into_bins(
+                &session.retention,
+                s_v2,
+                s_append,
+                s_append2,
+                self.parallel(),
+                &mut session.pass_b,
+                &mut accum,
+            );
+        }
+        Ok((result, v2res, accum.into_result()))
     }
 }
