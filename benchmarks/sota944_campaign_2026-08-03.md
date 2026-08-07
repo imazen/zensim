@@ -13955,3 +13955,79 @@ grid, Encoder default) also landed — the S gainmap ENCODE arm composes
 primitives directly and pins image `…-9093cc23`, so the running encode is
 UNAFFECTED; if the arm is ever rebuilt, `set_content_fit_grid(false)` /
 the composed path preserve byte-stability.
+
+## AA.R — CLOSE-OUT: the full audit table, what shipped, what was deliberately not switched (2026-08-07)
+
+**Repos landed + verified (`git merge-base --is-ancestor` against the tracked
+remote, each pasted in-session):** zenmetrics `6471f4d7` (master), ultrahdr
+`0e9945e2` (main), zenjpeg `572f9741` (main, + `d697b3e3` style-only), zenavif
+`5fe50853` (main), zensim = this doc's AA commits. zenpixels: NO code change —
+the main-branch owner surface (`zenpixels_convert::hdr::measure::CllMeasure`:
+`measure_max` production default + `measure_percentile`/`measure_histogram`
+policy calls, `LightLevelMethod::{MaxRgb, LuminanceBt2020}`,
+`DiffuseWhite` anchor; strided `PixelSlice` input) covered every caller need,
+so no extension was required. Consumers opt into the `hdr-experimental`
+feature (stable math; the gate covers pre-0.3.0 surface churn).
+
+### Audit table (site → class → action)
+
+Classes: **(a)** declared-by-necessity (interop/convention — leave, document) ·
+**(b)** SHOULD-MEASURE (switched to zenpixels-measured) · **(c)** already
+measures (verified owner / migrated local math).
+
+| repo | site | class | action |
+|---|---|---|---|
+| zenmetrics | `hdr.rs` cvvdp-gpu `DisplayTarget::hdr(1000)` + planes `/1000` clip | (b) | SWITCHED — measured ref peak (`measured_display_peak_nits`, clamp [203,10000]) |
+| zenmetrics | `hdr.rs` butteraugli `intensity_target = 1000` via `HdrScorer::new` | (b) | SWITCHED — `HdrScorer::new_with_display_peak(shell=1000, display=measured)` |
+| zenmetrics | `hdr.rs` `to_cvvdp_rgb8` per-image local `max_luma` (BT.2020-luma reimpl) | (c-dup)+(b) | local math DELETED → zenpixels MaxRGB; u8 shell now REFERENCE-anchored both sides (`measured_cvvdp_u8_peak`) |
+| zenmetrics | `jobexec.rs` Diffmap executor butter+cvvdp HDR arms static 1000 | (b) | SWITCHED — measured ref peak (maps match scalars) |
+| zenmetrics | `main.rs` score-pairs / `score` / `batch --hdr` blocks (3× fallback + 2× faithful) | (b) | SWITCHED — per-pair measured ref peak, scorer rebuilt on peak change |
+| zenmetrics | `sweep/hdr.rs` inline scorer static 1000; TSV tag `pq1000` | (b) | SWITCHED — peak measured once per `HdrRef` decode; tag → `pq-mcll` (never mix silently with static-1000 rows) |
+| zenmetrics | `to_sdr_rgb8` PU-rescale shell peak + iwssim float-PU rescale (1000) | (a)-regime | KEPT — feeding definition; zensim v1 HDR u8-shell FEATURE regime purity (AA.0 guard); a measured variant would be a NEW opt-in regime |
+| zenmetrics | SDR cvvdp/butter default displays (standard_4k / 80 cd/m²) | (a) | SDR content is display-relative — metric convention (covers avifgen appendix Z) |
+| zenmetrics | S-corpus gainmap ENCODE arm config grid + svt arm nclx | (b)-deferred / (a) | NOT touched — registered arm mid-corpus (image-pinned); content-fit available on any future rebuild (AA.1-LANDED) |
+| zenmetrics-api | `HdrScorer` LinearPlanes normalization peak | (b) | SWITCHED — display/shell peak roles split (additive API; `new` behavior unchanged) |
+| ultrahdr | `Encoder` grid top `= target_display_peak/203` (10k default) | (b) | SWITCHED — `compute_gainmap_content_fit` default: grid = measured content gain range, config = outer bound; `set_content_fit_grid(false)` reproduces old bytes |
+| ultrahdr | #33 declared grid == CONFIG quantization grid | (a)-boundary | KEPT — interop-mandated (AA.0); content-fit narrows the grid, the invariant holds by construction |
+| ultrahdr | decode-side tonemap peak measurement (`measure_max`) | (c) | verified — already the owner |
+| zenjpeg | `decode_reconstruct_hdr` envelope CLL from DECLARED gain-map capacity | (b) | SWITCHED — CLL measured from reconstructed pixels (MaxFALL filled); f16 output falls back declared; mastering-display peak stays capacity-derived (capability, class (a)) |
+| zenjpeg | `encode_ultrahdr_luma` `Bt2446C::new(1000, 203)` | (b)+units | constants → FACTS (per-transfer row-convention input scale 203/10000/1 + calibrated 100-nit SDR ref). BYTE-NEUTRAL today: published zentone 0.1.0 RESERVES both params (input-relative curve); `bt2446c_params_inert_at_zentone_0_1` fails loudly when a zentone bump makes them live |
+| zenjpeg | fused-path declared-range metadata basis | out of scope | zenjpeg#193's owner (comment posted with the content-fit pointer) |
+| zenjpeg | HLG rows `hlg_eotf(·, 1000)` | (a) | BT.2100 reference-display OOTF |
+| zenavif | `hdr_encode_cell` example hardcoded `clli(1000, 250)` | (b) | SWITCHED — measured via owner (PQ EOTF → cd/m², MaxRGB); non-PQ writes NO clli; self-check asserts container echoes measured; smoke-passed on a 12MP imazen-26 PQ image |
+| zenavif | library clli/mdcv setters | (a) | caller-supplied passthrough; nothing invented when absent |
+| zensim | `compute_pu_linear` / PU21 front-end | (c) | absolute-nits native — no display-peak parameter exists to misconfigure |
+| zensim | hdr944 leg `HdrEncoding::Pq { peak_nits: 10_000 }` | (a)/(c) | spec-peak = UNCAPPED decode — passes the pixels' own measured luminance through (a 1000 here WOULD clamp; the leg chose not to) |
+| zensim | HLG leg peak/ambient; `srgb_to_pq_png.py` 203 anchor; external-read `peak_nits` columns | (a)/(c) | format conventions / generation anchors / recorded per-row provenance |
+| jxl-encoder | `intensity_target`/`min_nits` codestream fields; `from_sdr` boost target; `hlg_ootf_gamma`; cvvdp-loop Phone/Tv display presets | (a) | declared codestream metadata / generation knob / libjxl CMS parity / deliberate viewing-condition selectors — NO code change |
+
+### Coordination outcome (AA.1)
+
+The S owner READ the flag and held the cvvdp/butter score+diffmap declares
+(`9206528d` "appendix AA hold") BEFORE any HDR cell was scored; the fix landed
+directly on top (`6471f4d7`) and AA.1-LANDED records the phase-2
+image-rebuild + declare-wording ask. **The forbidden outcome
+(half-static/half-measured corpus scores) cannot now occur.** The avifgen
+lane (appendix Z) is SDR — class (a), unaffected, no ask. The S ENCODE wave
+was never stalled.
+
+### Limitations / follow-ups (honest list)
+
+1. zenjpeg's tone-curve constants are semantically correct but INERT until a
+   zentone ≥0.2 publish (params reserved at 0.1.0); the version-pin test
+   forces conscious re-verification at that bump. The fused path's
+   per-transfer row-unit inconsistency (PQ rows 1.0=10k, linear rows
+   1.0=203, HLG rows nits) is now documented but flows into #193's
+   territory with the metadata-basis fix.
+2. zenjpeg f16 ReconstructHdr output keeps capacity-derived CLL (the owner
+   measures f32 only).
+3. GPU-path runtime verification (cvvdp-gpu / butteraugli-gpu measured-peak
+   arms) is compile-checked + parity-locked on the shared layer but not
+   GPU-executed in-session (no CUDA run here); the S phase-2 smoke is the
+   natural first live check.
+4. The u8/PU-shell measured-peak variant (a NEW feature regime) is
+   deliberately NOT built — it would redefine stored HDR features; requires
+   a registered dataset rebuild if ever wanted.
+5. zenavif auto-measured clli for the LIBRARY encode path (when the caller
+   supplies none) is a possible future additive feature; the example is the
+   corrected reference shape.
