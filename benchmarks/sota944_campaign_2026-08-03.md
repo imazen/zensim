@@ -13831,3 +13831,90 @@ mechanism named (hints disable segmentation + delta-q syntax tax).
    butter-oneshot goes ~1.4× → ~3× at 576² score-only; the remaining
    distance to 10× is an extraction-redesign / GPU-route question the
    user should scope (the bar table makes the trade concrete).
+
+# REGISTERED APPENDIX AA — MEASURED-NITS AUDIT: HDR CONSUMERS MEASURE CONTENT LIGHT VIA ZENPIXELS, NOT CONFIG (2026-08-07, pre-registered before any switch lands)
+
+**Owner lane:** `claude-nitsaudit`. **User directive (verbatim):** "change all
+callers in all repos to measure nits with main branch zenpixels methods when
+doing hdr instead of config which is usually wrong."
+
+## AA.0 Principle + scope
+
+Configured/declared luminance (encode-config boost ranges, mastering metadata,
+hardcoded 203/1000/2000/10000-nit assumptions) is usually wrong about actual
+content: a 2000-nit-configured encode whose content peaks at 800 nits
+mis-parameterizes every consumer that trusts the config. Anything that
+MEASURES content — metrics, corpus targets, HDR routing, PU encoding ranges,
+boost-range selection where the encoder chooses — must measure actual nits
+from pixels, via the zenpixels-main measurement owner.
+
+**The measurement owner** (inventoried 2026-08-07, zenpixels main @
+`78400122`, = released 0.2.16): `zenpixels_convert::hdr::measure::CllMeasure`
+on `zenpixels::hdr::ContentLightLevel` — `measure_max(px, white, method)`
+(production default; SIMD ≥1 Gpix/s; CTA-861.3 literal max + MaxFALL mean),
+`measure_percentile`/`measure_robust`/`measure_histogram` (policy callers),
+`LightLevelMethod::{MaxRgb, LuminanceBt2020}`, anchored by
+`zenpixels::hdr::DiffuseWhite` (BT2408 = 203). Input contract:
+relative-linear RgbF32/RgbaF32 `PixelSlice` (strided OK); absolute-nits
+buffers measure with `DiffuseWhite::new(1.0)`. The deprecated
+`ContentLightLevel::measure` 2-arg method and every LOCAL luminance-max
+reimplementation (e.g. `zenmetrics-cli hdr.rs NitsImage::max_luma`) are
+non-owners — the no-duplication rule applies to luminance math.
+
+**Audit classification, per site:**
+- **(a) declared-by-necessity** — interop-mandated declared values (leave,
+  document). REGISTERED BOUNDARY: ultrahdr#33's fix (`a09478f0`) — the
+  gain-map QUANTIZATION GRID is declared as the CONFIG grid (libultrahdr
+  convention; streaming hands out bytes before content range is known). That
+  invariant STAYS. Where an encoder SELECTS its config range, selecting from
+  measured content IS in scope; the declared-grid==quantization-basis
+  invariant is not.
+- **(b) SHOULD-MEASURE** — consumes a config/static value where measured
+  content nits is correct → switch to zenpixels, with a synthetic test whose
+  actual peak ≠ configured peak asserting the measured value is used.
+- **(c) already measures** — verify it uses the zenpixels owner, not a local
+  reimplementation; migrate the math if local.
+
+**Regime-purity guard (registered):** the zensim HDR *feature* shell
+(`to_sdr_rgb8` PU-rescale at peak 1000 → the v1 u8-shell HDR feature regime)
+is a MODEL INPUT definition. Stored HDR feature tables + trained bakes were
+extracted at peak=1000; an in-place swap to measured peak would silently
+redefine features. Any measured-peak change on a feature-extraction path
+ships as a NEW opt-in regime/knob with the default preserved, never an
+in-place swap. Reference-metric scoring params (cvvdp y_peak, butter
+intensity_target) are targets, not model inputs — changing them changes fresh
+scores only; stored numbers keep their as-run provenance.
+
+## AA.1 COORDINATION — the two live score waves (flagged 2026-08-07 ~01:2xZ, before their score declares)
+
+- **Appendix S (HDR corpus, lane `claude-hdrcorpus2`):** S.A1 method change 2
+  registers the score/diffmap feedings at STATIC config values — cvvdp
+  `DisplayModel y_peak=1000` + `to_cvvdp_linear_planes` (content >1000 nits
+  CLIPS before the metric sees it), butter `intensity_target=1000`
+  (`jobexec.rs:1316/1346`, `hdr.rs HDR_DISPLAY_PEAK_NITS`). This is exactly
+  class (b): 1,140 sources whose measured peaks straddle 1000 get clipped
+  highlights (>1000) or wrong display adaptation (≪1000). **Ask to the S
+  owner:** hold the cvvdp/butter score + diffmap declares until the
+  measured-ref-peak fix lands (this lane, ETA hours; flagged in both repos'
+  `.workongoing`), or re-register static-1000 as an explicit known-config
+  choice and accept the re-score risk. The ENCODE wave is unaffected either
+  way — no stall requested. Scoring the corpus half-static/half-measured is
+  the one forbidden outcome.
+- **Appendix Z (avifgen, lane `claude-avifgen`):** SDR datagen — SDR content
+  is display-relative by definition; an SDR cvvdp display model is a metric
+  convention = class (a), no measured-nits question. Their declared sf-gpu
+  runs are unaffected. Verified in the audit table; no ask.
+
+## AA.2 Pre-registered deliverables
+
+1. Full audit table (site → class → action) across zensim, zenmetrics,
+   ultrahdr, zenjpeg, jxl-encoder, zenavif (+ zenpixels extensions if the
+   owner API lacks something callers need).
+2. Class-(b) switches with per-site synthetic tests (actual ≠ configured
+   peak); class-(c) migrations to the owner; class-(a) sites documented
+   in-place.
+3. Per-repo: tests+clippy green, CHANGELOG entries, push +
+   `merge-base --is-ancestor` verification pasted in the close-out.
+4. Close-out amendment AA.R with the audit table + what was NOT switched and
+   why (regime purity, interop boundaries, owner-gated re-registrations).
+
