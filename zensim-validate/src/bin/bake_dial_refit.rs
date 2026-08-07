@@ -1612,7 +1612,8 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
     // live lines — measured twice (T.R11: ADD156 −0.0069 CID22; J.R3:
     // GL4_s2501 wiped 57→3 rows) — so when no explicit tau is given, probe
     // what 0.005 WOULD kill and default to 0 on the sparse class.
-    let (killed, live) = block_profile::zerobias_line_kill_fraction(&model, ZEROBIAS_DENSE_DEFAULT)?;
+    let (killed, live) =
+        block_profile::zerobias_line_kill_fraction(&model, ZEROBIAS_DENSE_DEFAULT)?;
     let (zerobias_bulk, auto_sparse) = resolve_zerobias(a.zerobias_bulk, killed, live);
     eprintln!(
         "zerobias line-kill preview @ {ZEROBIAS_DENSE_DEFAULT}: {killed}/{live} live layer-0 lines"
@@ -3813,13 +3814,22 @@ mod tests {
         assert_eq!(resolve_zerobias(Some(0.005), 54, 57), (0.005, false));
         assert_eq!(resolve_zerobias(Some(0.0), 0, 300), (0.0, false));
         // dense: essentially no whole-line kills → historical default
-        assert_eq!(resolve_zerobias(None, 0, 285), (ZEROBIAS_DENSE_DEFAULT, false));
-        assert_eq!(resolve_zerobias(None, 28, 285), (ZEROBIAS_DENSE_DEFAULT, false));
+        assert_eq!(
+            resolve_zerobias(None, 0, 285),
+            (ZEROBIAS_DENSE_DEFAULT, false)
+        );
+        assert_eq!(
+            resolve_zerobias(None, 28, 285),
+            (ZEROBIAS_DENSE_DEFAULT, false)
+        );
         // sparse: ADD156- and GL-class kill fractions → auto 0, loudly
         assert_eq!(resolve_zerobias(None, 13, 26), (0.0, true));
         assert_eq!(resolve_zerobias(None, 54, 57), (0.0, true));
         // degenerate: no live lines cannot divide-by-zero
-        assert_eq!(resolve_zerobias(None, 0, 0), (ZEROBIAS_DENSE_DEFAULT, false));
+        assert_eq!(
+            resolve_zerobias(None, 0, 0),
+            (ZEROBIAS_DENSE_DEFAULT, false)
+        );
     }
 
     /// Build a tiny 3→1 identity f16 bake with a monotone spline. No

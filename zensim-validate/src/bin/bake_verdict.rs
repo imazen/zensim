@@ -2435,9 +2435,7 @@ fn main() -> ExitCode {
             }
         }
     } else if args.regime_944 && args.cross_regime {
-        eprintln!(
-            "bake_verdict: --cross-regime set — wrong-regime refusal disabled by caller"
-        );
+        eprintln!("bake_verdict: --cross-regime set — wrong-regime refusal disabled by caller");
     }
     let ens = Ensemble {
         has_transforms: models

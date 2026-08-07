@@ -303,11 +303,7 @@ pub fn zerobias_line_kill_fraction(model: &Model, tau: f64) -> Result<(usize, us
     let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
     let colmax = |get: &dyn Fn(usize, usize) -> f64| -> Vec<f64> {
         (0..in_dim)
-            .map(|i| {
-                (0..out_dim)
-                    .map(|o| get(i, o).abs())
-                    .fold(0.0f64, f64::max)
-            })
+            .map(|i| (0..out_dim).map(|o| get(i, o).abs()).fold(0.0f64, f64::max))
             .collect()
     };
     let col_max: Vec<f64> = match &layer.weights {
