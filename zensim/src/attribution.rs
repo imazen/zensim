@@ -152,7 +152,7 @@ mod layout_ends {
 #[cfg(feature = "feature-regime-v2")]
 use layout_ends::*;
 
-/// Per-pixel attribution density + summed-area table.
+/// Per-pixel (or binned) attribution density + summed-area table.
 ///
 /// Produced by [`crate::Zensim::compute_attribution_density`]. See the
 /// [module docs](self) for the mechanism and the steering contract.
@@ -162,14 +162,39 @@ use layout_ends::*;
 /// [`query_rect`](Self::query_rect) sums are `f64`-accurate. A result built
 /// via [`from_density`](Self::from_density) instead derives the SAT from the
 /// given `f32` values.
+///
+/// # Subsampled (binned) results
+///
+/// The `*_binned` compute entry points fold the per-pixel accumulation into a
+/// `bin × bin` grid before the SAT and `f32` view are built, shrinking
+/// *retained* memory and SAT-build cost by `bin²` (the transient full-
+/// resolution `f64` accumulation canvas still exists during the compute — the
+/// per-pixel integrands are exact either way). Because every steering
+/// consumer reads *integrals* (rect sums), binning does not approximate the
+/// queries codec partitions actually make: [`query_rect`](Self::query_rect)
+/// stays **exact** for bin-aligned rectangles (and at image edges), and
+/// [`block_sums`](Self::block_sums) stays exact whenever `bin` divides the
+/// block size. Unaligned interior rectangles are answered by area-weighted
+/// interpolation (mass within a bin treated as uniform) — a first-order
+/// approximation whose error is bounded by the mass in the partially-covered
+/// boundary bins. Pick `bin` as a power of two that divides the codec's
+/// partition alignment (4/8/16 for AV1, 8 for JXL var-DCT) and every real
+/// query stays exact.
 #[non_exhaustive]
 pub struct AttributionResult {
+    /// Grid-resolution signed density, row-major `grid_w × grid_h`, in
+    /// per-pixel units (each value is its bin's mean; for `bin == 1` this is
+    /// the per-pixel density unchanged).
     density: Vec<f32>,
-    /// Summed-area table, `(width+1) × (height+1)`, `sat[y*(w+1)+x]` =
-    /// Σ density over `[0,x) × [0,y)`.
+    /// Summed-area table over bin SUMS, `(grid_w+1) × (grid_h+1)`,
+    /// `sat[v*(grid_w+1)+u]` = Σ density-mass over grid `[0,u) × [0,v)`.
     sat: Vec<f64>,
     width: usize,
     height: usize,
+    /// Grid step in pixels (`1` = per-pixel, the default construction).
+    bin: usize,
+    grid_w: usize,
+    grid_h: usize,
 }
 
 impl AttributionResult {
@@ -202,6 +227,9 @@ impl AttributionResult {
             sat: sat_scratch,
             width,
             height,
+            bin: 1,
+            grid_w: width,
+            grid_h: height,
         }
     }
 
@@ -215,11 +243,63 @@ impl AttributionResult {
             sat,
             width,
             height,
+            bin: 1,
+            grid_w: width,
+            grid_h: height,
         }
     }
 
-    /// The signed per-pixel density, row-major `width × height`.
-    /// Positive = refining here is predicted to raise the scalar score.
+    /// Internal: fold the f64 accumulation canvas into a `bin × bin` grid,
+    /// then build the SAT + `f32` view at grid resolution. `bin == 1`
+    /// delegates to [`from_f64_canvas`](Self::from_f64_canvas) so the
+    /// per-pixel construction stays bit-identical to the unbinned path.
+    ///
+    /// The SAT holds bin SUMS (integrals are what queries consume); the
+    /// `f32` density holds bin MEANS over each bin's *real* pixel count
+    /// (edge bins are clipped), keeping the exported view in per-pixel
+    /// units so visualization scales are comparable across `bin` choices.
+    fn from_f64_canvas_binned(canvas: Vec<f64>, width: usize, height: usize, bin: usize) -> Self {
+        assert!(bin > 0, "bin must be non-zero");
+        if bin == 1 {
+            return Self::from_f64_canvas(canvas, width, height);
+        }
+        debug_assert_eq!(canvas.len(), width * height);
+        let grid_w = width.div_ceil(bin);
+        let grid_h = height.div_ceil(bin);
+        let mut sums = vec![0.0f64; grid_w * grid_h];
+        for y in 0..height {
+            let row = &canvas[y * width..(y + 1) * width];
+            let grid_row = &mut sums[(y / bin) * grid_w..(y / bin + 1) * grid_w];
+            for (cell, chunk) in grid_row.iter_mut().zip(row.chunks(bin)) {
+                *cell += chunk.iter().sum::<f64>();
+            }
+        }
+        let sat = build_sat(|i| sums[i], grid_w, grid_h);
+        let density = sums
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                let real_w = bin.min(width - (i % grid_w) * bin);
+                let real_h = bin.min(height - (i / grid_w) * bin);
+                (v / (real_w * real_h) as f64) as f32
+            })
+            .collect();
+        Self {
+            density,
+            sat,
+            width,
+            height,
+            bin,
+            grid_w,
+            grid_h,
+        }
+    }
+
+    /// The signed density in per-pixel units, row-major
+    /// [`grid_width()`](Self::grid_width) `×` [`grid_height()`](Self::grid_height)
+    /// (`== width × height` for the default `bin == 1`; one value per bin —
+    /// the bin's mean — for binned results). Positive = refining here is
+    /// predicted to raise the scalar score.
     pub fn density(&self) -> &[f32] {
         &self.density
     }
@@ -234,21 +314,81 @@ impl AttributionResult {
         self.height
     }
 
-    /// Sum of the density over the half-open rectangle `[x0, x1) × [y0, y1)`,
-    /// in O(1) via the summed-area table. Coordinates are clamped to the
-    /// image; empty or inverted rectangles return `0.0`.
+    /// Grid step in pixels: `1` for per-pixel results, the requested bin for
+    /// results from the `*_binned` entry points.
+    pub fn bin(&self) -> usize {
+        self.bin
+    }
+
+    /// Width of the stored grid (`ceil(width / bin)`).
+    pub fn grid_width(&self) -> usize {
+        self.grid_w
+    }
+
+    /// Height of the stored grid (`ceil(height / bin)`).
+    pub fn grid_height(&self) -> usize {
+        self.grid_h
+    }
+
+    /// Sum of the density over the half-open PIXEL rectangle
+    /// `[x0, x1) × [y0, y1)`, in O(1) via the summed-area table. Coordinates
+    /// are clamped to the image; empty or inverted rectangles return `0.0`.
     ///
     /// For a codec partition block `B`, this is the first-order prediction of
     /// the scalar-score gain from re-encoding `B` at reference quality (see
     /// the [module docs](self) for the exact semantics and approximations).
+    ///
+    /// On a binned result the answer is exact when the rectangle's edges are
+    /// bin-aligned or clamped at the image boundary; unaligned interior edges
+    /// are answered by area-weighted interpolation (uniform-mass-within-bin —
+    /// see the [struct docs](Self)).
     pub fn query_rect(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
         let x1 = x1.min(self.width);
         let y1 = y1.min(self.height);
         let x0 = x0.min(x1);
         let y0 = y0.min(y1);
-        let w1 = self.width + 1;
-        self.sat[y1 * w1 + x1] - self.sat[y0 * w1 + x1] - self.sat[y1 * w1 + x0]
-            + self.sat[y0 * w1 + x0]
+        if self.bin == 1 {
+            let w1 = self.grid_w + 1;
+            return self.sat[y1 * w1 + x1] - self.sat[y0 * w1 + x1] - self.sat[y1 * w1 + x0]
+                + self.sat[y0 * w1 + x0];
+        }
+        let u0 = self.grid_coord(x0, self.width, self.grid_w);
+        let u1 = self.grid_coord(x1, self.width, self.grid_w);
+        let v0 = self.grid_coord(y0, self.height, self.grid_h);
+        let v1 = self.grid_coord(y1, self.height, self.grid_h);
+        self.sat_at(u1, v1) - self.sat_at(u0, v1) - self.sat_at(u1, v0) + self.sat_at(u0, v0)
+    }
+
+    /// Pixel coordinate → (grid node index, fractional advance into the next
+    /// cell). The fraction is measured against the cell's REAL pixel extent
+    /// (edge cells are clipped), so `x == limit` lands exactly on the last
+    /// node and full-image / edge-clamped queries stay exact.
+    fn grid_coord(&self, x: usize, limit: usize, grid: usize) -> (usize, f64) {
+        if x >= limit {
+            return (grid, 0.0);
+        }
+        let idx = x / self.bin;
+        let start = idx * self.bin;
+        let real = self.bin.min(limit - start);
+        (idx, (x - start) as f64 / real as f64)
+    }
+
+    /// Continuous SAT lookup at fractional grid coordinates via bilinear
+    /// interpolation of the four surrounding nodes. For a piecewise-constant
+    /// (per-cell-uniform) density this is *exactly* the integral over
+    /// `[0, u) × [0, v)`; a zero fraction reproduces the node value exactly
+    /// (`a + 0.0 * (b - a) == a`, signed zeros included).
+    fn sat_at(&self, (ix, fx): (usize, f64), (iy, fy): (usize, f64)) -> f64 {
+        let w1 = self.grid_w + 1;
+        let xa = (ix + 1).min(self.grid_w);
+        let ya = (iy + 1).min(self.grid_h);
+        let s00 = self.sat[iy * w1 + ix];
+        let s10 = self.sat[iy * w1 + xa];
+        let s01 = self.sat[ya * w1 + ix];
+        let s11 = self.sat[ya * w1 + xa];
+        let top = s00 + fx * (s10 - s00);
+        let bot = s01 + fx * (s11 - s01);
+        top + fy * (bot - top)
     }
 
     /// Per-block density sums on a fixed `block × block` grid (row-major,
@@ -256,6 +396,11 @@ impl AttributionResult {
     /// layout as the `diffmap_block_coherence` harness. Convenience over
     /// [`query_rect`](Self::query_rect); arbitrary partitions should query
     /// their own rectangles.
+    ///
+    /// On a binned result these sums are exact whenever
+    /// [`bin()`](Self::bin) divides `block` (every interior boundary is
+    /// bin-aligned; edge blocks clamp at the image boundary, which is always
+    /// exact).
     ///
     /// # Panics
     ///
@@ -812,8 +957,55 @@ impl crate::metric::Zensim {
         distorted: &impl ImageSource,
         s: &[f64],
     ) -> Result<AttributionResult, ZensimError> {
+        self.compute_attribution_density_with_ref_binned(precomputed, distorted, s, 1)
+    }
+
+    /// [`compute_attribution_density`](Self::compute_attribution_density)
+    /// with the result folded to a `bin × bin` grid — `bin²` less retained
+    /// memory and SAT-build work, exact for bin-aligned queries (see the
+    /// [`AttributionResult`] subsampling docs). `bin == 1` is bit-identical
+    /// to the per-pixel entry point.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bin == 0`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`compute_attribution_density`](Self::compute_attribution_density).
+    pub fn compute_attribution_density_binned(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        bin: usize,
+    ) -> Result<AttributionResult, ZensimError> {
+        validate_pair(source, distorted)?;
+        let precomputed = self.precompute_reference(source)?;
+        self.compute_attribution_density_with_ref_binned(&precomputed, distorted, s, bin)
+    }
+
+    /// [`compute_attribution_density_with_ref`](Self::compute_attribution_density_with_ref)
+    /// with the result folded to a `bin × bin` grid (the encoder-loop form).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bin == 0`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`compute_attribution_density`](Self::compute_attribution_density).
+    pub fn compute_attribution_density_with_ref_binned(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        bin: usize,
+    ) -> Result<AttributionResult, ZensimError> {
         let (canvas, width, height) = self.basic_canvas_trimmed(precomputed, distorted, s)?;
-        Ok(AttributionResult::from_f64_canvas(canvas, width, height))
+        Ok(AttributionResult::from_f64_canvas_binned(
+            canvas, width, height, bin,
+        ))
     }
 
     /// FULL-coverage attribution density (task #67 C2a): the BASIC block
@@ -850,6 +1042,29 @@ impl crate::metric::Zensim {
         distorted: &impl ImageSource,
         s: &[f64],
     ) -> Result<AttributionResult, ZensimError> {
+        self.compute_attribution_density_full_binned(source, distorted, s, 1)
+    }
+
+    /// [`compute_attribution_density_full`](Self::compute_attribution_density_full)
+    /// with the result folded to a `bin × bin` grid (see the
+    /// [`AttributionResult`] subsampling docs). `bin == 1` is bit-identical
+    /// to the per-pixel entry point.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bin == 0`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`compute_attribution_density`](Self::compute_attribution_density).
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn compute_attribution_density_full_binned(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        bin: usize,
+    ) -> Result<AttributionResult, ZensimError> {
         validate_pair(source, distorted)?;
         let precomputed = self.precompute_reference(source)?;
         let (mut canvas, width, height) = self.basic_canvas_trimmed(&precomputed, distorted, s)?;
@@ -880,7 +1095,9 @@ impl crate::metric::Zensim {
                 *c += *v;
             }
         }
-        Ok(AttributionResult::from_f64_canvas(canvas, width, height))
+        Ok(AttributionResult::from_f64_canvas_binned(
+            canvas, width, height, bin,
+        ))
     }
 
     /// Shared basic-block canvas builder (f64, trimmed to the logical
@@ -1033,6 +1250,234 @@ mod tests {
         let full = attr.query_rect(0, 0, usize::MAX, usize::MAX);
         let total: f64 = density.iter().map(|&v| v as f64).sum();
         assert!((full - total).abs() <= 1e-6 * total.abs().max(1.0));
+    }
+
+    /// Deterministic signed f64 canvas for the binning tests.
+    fn synth_canvas(w: usize, h: usize) -> Vec<f64> {
+        let mut seed = 0xD1B54A32D192ED03u64;
+        (0..w * h)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                (seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+            })
+            .collect()
+    }
+
+    /// `bin == 1` through the binned constructor is bit-identical to the
+    /// per-pixel constructor (delegation, not reimplementation).
+    #[test]
+    fn binned_bin1_delegates_bit_identical() {
+        let (w, h) = (97, 61);
+        let canvas = synth_canvas(w, h);
+        let a = AttributionResult::from_f64_canvas(canvas.clone(), w, h);
+        let b = AttributionResult::from_f64_canvas_binned(canvas, w, h, 1);
+        assert_eq!(a.bin(), b.bin());
+        assert_eq!(a.density(), b.density());
+        assert_eq!(a.sat, b.sat);
+        for &(x0, y0, x1, y1) in &[
+            (0usize, 0usize, 97usize, 61usize),
+            (3, 5, 42, 37),
+            (13, 1, 14, 60),
+        ] {
+            assert_eq!(a.query_rect(x0, y0, x1, y1), b.query_rect(x0, y0, x1, y1));
+        }
+    }
+
+    /// Binned results answer bin-aligned and edge-clamped queries exactly
+    /// (f64 reassociation only), including `block_sums` when bin | block —
+    /// the queries codec partitions actually make.
+    #[test]
+    fn binned_aligned_and_edge_queries_exact() {
+        let (w, h) = (97, 61); // non-multiples of bin: clipped edge bins
+        let bin = 8;
+        let canvas = synth_canvas(w, h);
+        let full = AttributionResult::from_f64_canvas(canvas.clone(), w, h);
+        let binned = AttributionResult::from_f64_canvas_binned(canvas, w, h, bin);
+        assert_eq!(binned.bin(), bin);
+        assert_eq!((binned.grid_width(), binned.grid_height()), (13, 8));
+        assert_eq!(binned.density().len(), 13 * 8);
+        assert_eq!(binned.sat.len(), 14 * 9);
+        let close = |a: f64, b: f64, what: &str| {
+            assert!(
+                (a - b).abs() <= 1e-9 * b.abs().max(1e-9),
+                "{what}: binned {a} vs full {b}"
+            );
+        };
+        // Full image (both edges clamp past the clipped bins).
+        close(
+            binned.query_rect(0, 0, usize::MAX, usize::MAX),
+            full.query_rect(0, 0, usize::MAX, usize::MAX),
+            "full image",
+        );
+        // Bin-aligned interior rects + rects clamped at the ragged edge.
+        for &(x0, y0, x1, y1) in &[
+            (0usize, 0usize, 32usize, 32usize),
+            (8, 16, 96, 56),
+            (16, 8, 24, 16),
+            (80, 40, 97, 61),
+            (0, 56, 97, 61),
+        ] {
+            close(
+                binned.query_rect(x0, y0, x1, y1),
+                full.query_rect(x0, y0, x1, y1),
+                &format!("aligned rect ({x0},{y0})..({x1},{y1})"),
+            );
+        }
+        // block_sums exact for bin | block.
+        for block in [16usize, 32] {
+            let got = binned.block_sums(block);
+            let want = full.block_sums(block);
+            assert_eq!(got.len(), want.len());
+            for (i, (g, wv)) in got.iter().zip(want.iter()).enumerate() {
+                close(*g, *wv, &format!("block_sums({block})[{i}]"));
+            }
+        }
+    }
+
+    /// Unaligned interior queries are area-weighted approximations whose
+    /// error is bounded by the |mass| in partially-covered boundary bins.
+    #[test]
+    fn binned_unaligned_query_bounded() {
+        let (w, h) = (96, 64);
+        let bin = 8;
+        let canvas = synth_canvas(w, h);
+        let full = AttributionResult::from_f64_canvas(canvas.clone(), w, h);
+        let binned = AttributionResult::from_f64_canvas_binned(canvas.clone(), w, h, bin);
+        for &(x0, y0, x1, y1) in &[
+            (3usize, 5usize, 42usize, 37usize),
+            (10, 2, 61, 59),
+            (17, 23, 30, 31),
+        ] {
+            let exact = full.query_rect(x0, y0, x1, y1);
+            let approx = binned.query_rect(x0, y0, x1, y1);
+            // Bound: total |mass| of bins the rect intersects but does not
+            // fully contain.
+            let mut bound = 0.0f64;
+            for by in y0 / bin..h.div_ceil(bin).min(y1.div_ceil(bin)) {
+                for bx in x0 / bin..w.div_ceil(bin).min(x1.div_ceil(bin)) {
+                    let (px0, py0) = (bx * bin, by * bin);
+                    let (px1, py1) = ((px0 + bin).min(w), (py0 + bin).min(h));
+                    let contained = px0 >= x0 && px1 <= x1 && py0 >= y0 && py1 <= y1;
+                    if !contained {
+                        for y in py0..py1 {
+                            for x in px0..px1 {
+                                bound += canvas[y * w + x].abs();
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(
+                (approx - exact).abs() <= bound + 1e-9,
+                "unaligned ({x0},{y0})..({x1},{y1}): |{approx} - {exact}| > ring bound {bound}"
+            );
+        }
+    }
+
+    /// The exported `f32` view is the bin MEAN over each bin's REAL pixel
+    /// count (per-pixel units; edge bins clipped).
+    #[test]
+    fn binned_density_is_real_pixel_mean() {
+        let (w, h) = (97, 61);
+        let bin = 8;
+        let canvas = synth_canvas(w, h);
+        let binned = AttributionResult::from_f64_canvas_binned(canvas.clone(), w, h, bin);
+        let gw = binned.grid_width();
+        // Interior bin (2,3) and the bottom-right clipped bin (12,7): 1×5 px.
+        for (bx, by) in [(2usize, 3usize), (12, 7)] {
+            let (px0, py0) = (bx * bin, by * bin);
+            let (px1, py1) = ((px0 + bin).min(w), (py0 + bin).min(h));
+            let mut sum = 0.0f64;
+            for y in py0..py1 {
+                for x in px0..px1 {
+                    sum += canvas[y * w + x];
+                }
+            }
+            let mean = (sum / ((px1 - px0) * (py1 - py0)) as f64) as f32;
+            let got = binned.density()[by * gw + bx];
+            assert!(
+                (got - mean).abs() <= 1e-6 * mean.abs().max(1e-9),
+                "bin ({bx},{by}): density {got} vs real-pixel mean {mean}"
+            );
+        }
+    }
+
+    /// End-to-end: the binned entry points against the real pipeline —
+    /// bit-identity at bin=1, aligned-query equality at bin=8.
+    #[test]
+    fn binned_entry_points_match_per_pixel() {
+        let (w, h) = (96, 80);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let s = vec![-0.5f64; 156];
+        let full = z.compute_attribution_density(&rs, &ds, &s).unwrap();
+        let b1 = z
+            .compute_attribution_density_binned(&rs, &ds, &s, 1)
+            .unwrap();
+        assert_eq!(full.density(), b1.density());
+        assert_eq!(
+            full.query_rect(3, 7, 51, 33),
+            b1.query_rect(3, 7, 51, 33),
+            "bin=1 entry point must be bit-identical"
+        );
+        let b8 = z
+            .compute_attribution_density_binned(&rs, &ds, &s, 8)
+            .unwrap();
+        assert_eq!((b8.width(), b8.height()), (w, h));
+        assert_eq!((b8.grid_width(), b8.grid_height()), (12, 10));
+        let close = |a: f64, b: f64, what: &str| {
+            assert!(
+                (a - b).abs() <= 1e-9 * b.abs().max(1e-9),
+                "{what}: binned {a} vs full {b}"
+            );
+        };
+        close(
+            b8.query_rect(0, 0, w, h),
+            full.query_rect(0, 0, w, h),
+            "full image",
+        );
+        let (got, want) = (b8.block_sums(16), full.block_sums(16));
+        assert_eq!(got.len(), want.len());
+        for (i, (g, wv)) in got.iter().zip(want.iter()).enumerate() {
+            close(*g, *wv, &format!("block_sums(16)[{i}]"));
+        }
+        #[cfg(feature = "feature-regime-v2")]
+        {
+            let f8 = z
+                .compute_attribution_density_full_binned(&rs, &ds, &s, 8)
+                .unwrap();
+            let f1 = z.compute_attribution_density_full(&rs, &ds, &s).unwrap();
+            close(
+                f8.query_rect(0, 0, w, h),
+                f1.query_rect(0, 0, w, h),
+                "full-coverage full image",
+            );
+        }
+    }
+
+    /// Manual perf/memory probe (run `--ignored` in release mode):
+    /// construction cost + retained bytes, per-pixel vs `bin = 8`, 12 MP.
+    #[test]
+    #[ignore = "manual perf probe — run in release mode"]
+    fn binned_construction_perf_probe() {
+        let (w, h) = (4000, 3000);
+        let canvas = synth_canvas(w, h);
+        let t = std::time::Instant::now();
+        let full = AttributionResult::from_f64_canvas(canvas.clone(), w, h);
+        let t_full = t.elapsed();
+        let t = std::time::Instant::now();
+        let binned = AttributionResult::from_f64_canvas_binned(canvas, w, h, 8);
+        let t_bin = t.elapsed();
+        let bytes = |r: &AttributionResult| r.density.len() * 4 + r.sat.len() * 8;
+        eprintln!(
+            "12MP construction: full {t_full:?} ({} MB retained) vs bin=8 {t_bin:?} ({} KB retained)",
+            bytes(&full) / (1024 * 1024),
+            bytes(&binned) / 1024
+        );
     }
 
     /// block_sums must equal the harness-style naive block partition.
