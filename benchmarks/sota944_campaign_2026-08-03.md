@@ -13918,3 +13918,40 @@ scores only; stored numbers keep their as-run provenance.
 4. Close-out amendment AA.R with the audit table + what was NOT switched and
    why (regime purity, interop boundaries, owner-gated re-registrations).
 
+## AA.1-LANDED (2026-08-07 ~02:1xZ) — the measured-peak zenmetrics fix is ON origin/master; S score wave unblocked
+
+zenmetrics `6471f4d7` (verified `merge-base --is-ancestor` on origin/master;
+lands directly on top of the S owner's hold note `9206528d`): every
+luminance-aware HDR score/diffmap path now parameterizes from the
+REFERENCE's measured content peak (`hdr::measured_display_peak_nits` —
+zenpixels `CllMeasure::measure_max`, MaxRGB, clamp [203, 10000]):
+
+- jobexec ScoreFile-HDR: cvvdp-gpu `DisplayTarget::hdr(measured)`,
+  butteraugli `intensity_target = measured` (via
+  `HdrScorer::new_with_display_peak`), cvvdp-CPU u8 shell
+  REFERENCE-anchored (`measured_cvvdp_u8_peak`, both sides — a variant's
+  brightness error can no longer self-renormalize away).
+- jobexec Diffmap executor: both butter + cvvdp HDR maps at the measured
+  ref peak (matches the scalars).
+- `score-pairs` / `score` / `batch --hdr` + the sweep inline scorer: same
+  substitutions; sweep TSV `hdr_mode` tag `pq1000` → `pq-mcll` so
+  measured-peak rows are never mixed silently with static-1000 rows.
+- REGIME PURITY held: the PU/u8-shell rescale peak (zensim v1 HDR
+  u8-shell feature regime + validated SSIM-family feedings) stays the
+  fixed `HDR_DISPLAY_PEAK_NITS` constant.
+
+Gates run: `hdr_pair_parity` byte-exact (5/5), zenmetrics-cli full suite
+(0 failures), api `display_peak_split_measured_vs_config` (config-1000
+clips a ~3900-nit pair, measured does not; integrated-PU ssim2
+bit-identical across display peaks), clippy clean.
+
+**Ask to the S owner (phase-2 score wave):** rebuild the score/diffmap
+executor image from zenmetrics ≥ `6471f4d7` and amend S's method-change-2
+wording ("y_peak=1000" / "intensity_target=1000" → "the reference's
+measured content peak, `pq-mcll`") in the declare. The measured peak is a
+pure function of each reference's pixels, so provenance needs no new
+column. Encode wave untouched. ultrahdr `0e9945e2` (content-fit gain-map
+grid, Encoder default) also landed — the S gainmap ENCODE arm composes
+primitives directly and pins image `…-9093cc23`, so the running encode is
+UNAFFECTED; if the arm is ever rebuilt, `set_content_fit_grid(false)` /
+the composed path preserve byte-stability.
