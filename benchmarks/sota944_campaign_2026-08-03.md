@@ -14137,3 +14137,43 @@ sb rects bin-exact), outer zensim-judged CQ bisection as the comparator,
 engagement + one-cell smoke gates THIS session; the full matrix runs when
 wave-12's candidate lands (C as control either way). The zenavif primary
 checkout stays at the appendix-Z pin; work in a sibling workspace.
+
+## AC.R1 — DATA-GATE FIRED: silent GPU-score corruption caught at birth; wave-12 HELD; split-structure amendments (2026-08-08)
+
+**The G-AC1 orientation gate did its job.** The avifgen lane's default-stratum
+monotonicity bar (0.9876 < 0.99) exposed a **zero-tolerance defect**: silent
+GPU-metric corruption from the VRAM-pressure window (pre-hint OOM era) —
+processes that did not crash scored effectively identical/zeroed buffers.
+**Census, independently re-verified by the supervisor from
+`unified/scores.parquet`: 2,169 impossible-class cells** (ssim2_gpu == 100 AND
+butteraugli_max_gpu == 0 AND q ≤ 70; exact-saturation is a LOWER bound), 100%
+in med/large renditions across 99 renditions — the OOM-window population.
+`cvvdp` (CPU queue, zero failures) rises monotonically through the same
+ladders, and the 944 features are CLEAN (separate queue). Had the gate not
+been registered at birth (AC.1), these rows would have entered wave-12
+training exactly the way the inverted KADID target entered the 944 era.
+
+- **Hold:** wave-12 does NOT launch on the current `scores.parquet`.
+  Remediation (lane-owned, verified live by the supervisor: both GPU boxes
+  claiming `avifgen-sf-gpu-rescue-20260808`, hinted ≤2/box): re-score of ALL
+  40,466 pairs of the 99 affected renditions + a **2,000-pair stratified
+  verification sample of the untouched population**. Decision rule
+  (registered by the lane, adopted here): sample matches stored (|Δssim2| ≤
+  0.5 outside the saturation class) ⇒ corruption confined ⇒ rescue rows win,
+  re-gate, manifest; sample mismatches ⇒ FULL GPU re-score before any
+  manifest.
+- **Split-structure finding (lane):** the corpus is **train-split-only by
+  construction** — every origin ends 0/2/4/6/8 (the June-estate even/odd
+  rule puts all of it train-side), so `validate/test` views are structurally
+  empty. AC.2 amendments, registered now:
+  1. The `avif944` leg enters the trainer as a TRAIN-ONLY group (val weight
+     0); rank validation stays the existing held-out estate (CID22 etc.) —
+     unchanged from every codec leg before it.
+  2. **Leg-side eval holdout:** renditions of origins ending in **8** are
+     EXCLUDED from the training view and reserved as the AVIF instrument
+     population (dial ladders + any AVIF-facing gate), so the G-AC2 AVIF
+     dial axis is measured on rows the candidate never trained on. The view
+     builder emits `train_944` (origins 0/2/4/6) + `eval8_944` (origins 8)
+     accordingly; shas in the view manifest.
+  3. The AVIF loop study cells (zenavif harness) are unaffected — its corpus
+     is the 9-ref fixture set, disjoint from avifgen renditions.
