@@ -29,7 +29,6 @@ pub enum CrossAlign {
 
 /// How an image leaf scales into its allotted rect — CSS `object-fit`.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[allow(clippy::enum_variant_names)]
 pub enum Fit {
     /// Place at original size, top-left aligned, clipped if larger
     /// (CSS `none` with `object-position: 0 0`).

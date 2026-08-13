@@ -379,7 +379,6 @@ pub fn backprop_heads_kernel(
 
 /// W1 + B1 backprop — outer product. Each thread (i, j) owns gw1[i, j].
 #[cube(launch)]
-#[allow(clippy::too_many_arguments)]
 pub fn backprop_w1_kernel(
     x_batch: &Array<f32>,
     dh_pre: &Array<f32>,
@@ -420,7 +419,6 @@ pub fn backprop_w1_kernel(
 
 /// Adam step — plain (non-atomic) gradient.
 #[cube(launch)]
-#[allow(clippy::too_many_arguments)]
 pub fn adam_step_kernel(
     w: &mut Array<f32>,
     g: &mut Array<f32>,
@@ -454,7 +452,6 @@ pub fn adam_step_kernel(
 
 /// Adam step — atomic gradient (loads via Atomic::load).
 #[cube(launch)]
-#[allow(clippy::too_many_arguments)]
 pub fn adam_step_atomic_grad_kernel(
     w: &mut Array<f32>,
     g: &mut Array<Atomic<f32>>,
@@ -553,7 +550,6 @@ pub fn l2_add_atomic_kernel(grad: &mut Array<Atomic<f32>>, weight: &Array<f32>, 
 /// Chained through optional tanh-pin: `dL/dy_pre = dL/dy_score · dy/dy_pre`
 /// where `dy/dy_pre = (100/scale) · σ · (1 - σ)` and `σ = y_score / 100`.
 #[cube(launch)]
-#[allow(clippy::too_many_arguments)]
 pub fn anchor_loss_kernel(
     y_score: &Array<f32>,
     target_score: &Array<f32>,

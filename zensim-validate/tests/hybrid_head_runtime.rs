@@ -106,7 +106,6 @@ fn extract_hybrid_head(model: &Model) -> Option<HybridHeadPayload> {
     Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn score_row_hybrid(
     predictor: &mut Predictor<'_>,
     has_transforms: bool,

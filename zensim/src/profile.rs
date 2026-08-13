@@ -1117,7 +1117,6 @@ static PROFILE_C: ProfileParams = ProfileParams {
 /// Preview v0.1 linear weights (344k synthetic pairs, 5-fold CV SROCC=0.9936).
 /// 228 entries = 4 scales × 3 channels × 19 features. The canonical V0.1
 /// coefficient vector backing [`ZensimProfile::PreviewV0_1`].
-#[allow(clippy::excessive_precision)]
 pub static WEIGHTS_PREVIEW_V0_1: [f64; 228] = [
     // --- Basic features (13/ch × 3ch × 4 scales = 156) ---
     0.0000000000,
@@ -1355,7 +1354,6 @@ pub static WEIGHTS_PREVIEW_V0_1: [f64; 228] = [
 /// SROCC = 0.9942 on full 344k synthetic dataset.
 /// Raw distance SROCC: TID2013=0.8427, KADIK10k=0.8192, CID22=0.8676.
 /// Layout: 4 scales × 3 channels × (13 basic + 6 peak) features = 228.
-#[allow(clippy::excessive_precision)]
 pub static WEIGHTS_PREVIEW_V0_2: [f64; 228] = [
     // --- Basic features (13/ch × 3ch × 4 scales = 156) ---
     0.0000000000,

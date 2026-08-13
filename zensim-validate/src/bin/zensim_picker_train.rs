@@ -386,7 +386,6 @@ impl Mlp3 {
     }
 
     /// Forward pass returning y plus the activation buffers needed for backprop.
-    #[allow(clippy::type_complexity)]
     fn forward(&self, x: &[f64], alpha: f64) -> (f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
         debug_assert_eq!(x.len(), self.n_in);
         // h1_pre = b1 + w1 * x

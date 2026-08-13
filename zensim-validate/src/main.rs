@@ -3590,7 +3590,6 @@ fn print_weights(weights: &[f64], log: &mut Vec<String>) {
 
 /// Train weights on multiple datasets, maximizing blended Spearman.
 /// Uses Spearman on subsampled datasets for training, validates on full data per restart.
-#[allow(clippy::type_complexity)]
 fn train_weights_multi(
     datasets: &[DatasetGroup],
     n_features: usize,

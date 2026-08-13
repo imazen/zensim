@@ -46,7 +46,6 @@
 
 #![allow(unsafe_code)]
 #![allow(clippy::too_many_arguments)]
-#![allow(clippy::needless_range_loop)]
 // SIMD loops index parallel arrays
 // Some intrinsics (set1_pd, setzero_pd) are marked safe; others
 // (loadu_pd, storeu_pd) are unsafe. We wrap all intrinsic calls in

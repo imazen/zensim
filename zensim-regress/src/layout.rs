@@ -60,7 +60,6 @@
 //! | Modifier nodes + `LayoutMod` trait | [`modifiers`] |
 //! | `LabelStyle` / `LabelSegment` strip builders | [`label`] |
 
-#![allow(clippy::too_many_arguments)]
 // Many `pub` items in this module exist for external callers gated by
 // the `_internal_api` feature (the layout_gallery example). When the
 // feature is off, those items appear unused — silence the noise.

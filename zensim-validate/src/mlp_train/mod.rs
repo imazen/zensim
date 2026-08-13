@@ -3675,7 +3675,6 @@ fn predict_group_pool_head(
 /// - gb2: `[rank_b, reducer_b]` sized 2
 ///
 /// Final flush + early-stop semantics match pool-head trainer.
-#[allow(clippy::too_many_arguments)]
 fn train_mlp_hybrid_head_with_tv(
     groups: &mut [TrainingGroup<'_>],
     n_features: usize,

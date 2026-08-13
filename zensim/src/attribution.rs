@@ -806,7 +806,6 @@ fn upsample_add_sum_preserving(
 /// whole-plane fused H-blur, then per-32-row-band fused V-blur + feature
 /// accumulation with `±blur_radius` overlap slices. Fills `sd`/`mu1`/`mu2`
 /// (full scale planes) and returns the merged accumulator.
-#[allow(clippy::too_many_arguments)]
 fn process_channel_banded(
     src_c: &[f32],
     dst_c: &[f32],

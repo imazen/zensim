@@ -80,7 +80,6 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleHeadPayload> 
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn score_row_per_sample_alpha(
     predictor: &mut Predictor<'_>,
     has_transforms: bool,

@@ -1670,7 +1670,6 @@ fn box_blur_h_into_abs_diff_inner(
 /// Fused horizontal blur for means: computes blur(src) and blur(dst) in a single pass.
 /// Reads each pixel of src/dst exactly once, replacing two separate box_blur_h calls.
 /// Used for edge-only channels that need mu1/mu2 but not sigma planes.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn fused_blur_h_mu(
     src: &[f32],
     dst: &[f32],

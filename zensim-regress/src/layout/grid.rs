@@ -220,7 +220,6 @@ pub fn grid() -> Grid {
 /// unbounded (e.g., the root render's `u32::MAX/2` for the vertical
 /// axis), Fr tracks fall back to [`Track::Auto`] semantics rather
 /// than expanding to fill an effectively infinite axis.
-#[allow(clippy::manual_checked_ops)]
 fn solve_tracks(tracks: &[Track], available: u32, auto_size: impl Fn(u32) -> u32) -> Vec<u32> {
     let mut sizes = vec![0u32; tracks.len()];
     let mut consumed = 0u32;

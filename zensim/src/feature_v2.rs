@@ -2003,7 +2003,6 @@ impl DenseAccum {
 /// higher-arithmetic-intensity part) vectorized while removing the 22
 /// accumulators that were the dominant register-pressure source.
 #[inline]
-#[allow(clippy::too_many_arguments)]
 fn weighted_pool_accumulate_scalar(
     acc: &mut DenseAccum,
     d: f64,
@@ -3917,7 +3916,6 @@ const V1_BAND_OVERLAP: usize = 5;
 /// halo_offset`): the strip path passes the scratch H-planes + halo
 /// buffers; the whole-plane path passes the full-plane H-planes + the
 /// real src/dst planes with `strip_y0 = halo_offset = 0`.
-#[allow(clippy::too_many_arguments)]
 fn fold_v1_basic_bands(
     width: usize,
     rows: core::ops::Range<usize>,
@@ -5492,7 +5490,6 @@ fn stream_phase_b(
 /// (a per-strip partial would reassociate: `(Σ strip0) + (Σ strip1)` ≠
 /// one running sum — measured as a 1-ULP BLOCKINESS divergence when this
 /// function briefly returned partials).
-#[allow(clippy::too_many_arguments)]
 fn blockiness_sparse_strip_wide(
     src_wide: &[f32],
     dst_wide: &[f32],

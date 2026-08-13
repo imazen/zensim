@@ -10,8 +10,6 @@
 //! optimizer (momentum/variance accumulators), which can stay f64 if
 //! needed via mixed-precision training.
 
-#![allow(clippy::needless_range_loop)]
-
 use archmage::{incant, magetypes};
 use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16 as GenericF32x16};
 

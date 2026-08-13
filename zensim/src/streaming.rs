@@ -1142,7 +1142,6 @@ pub(crate) fn convert_source_to_xyb_into(
 /// sources never consult it. (The v1 streaming-strip path predates this
 /// parameter and passes 0 — its subset conversions keep their historical
 /// subset-local phase.)
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_source_to_xyb_into_slices(
     source: &impl ImageSource,
     p0: &mut [f32],
@@ -2621,7 +2620,6 @@ fn process_scale_bands_into_accum(
     let band_aux: Vec<(Option<AttrBandSlices<'_>>, Option<AttrFoldBand<'_>>)> =
         band_rets.into_iter().zip(band_folds).collect();
 
-    #[allow(clippy::redundant_closure)]
     let band_results: Vec<_> = {
         // Per-rayon-worker scratch — first band on each worker grows
         // ScaleBuffers to max_strip_n; subsequent bands reuse with
@@ -4055,7 +4053,6 @@ fn compute_diffmap_from_xyb(
 /// `on_scale(scale, stats, src_planes, dst_planes, retention, w, h)` runs
 /// once per processed scale, BEFORE the dst pyramid is downscaled for the
 /// next scale.
-#[allow(clippy::too_many_arguments)]
 #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))] // attribution-only walker
 pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
     precomputed: &PrecomputedReference,
