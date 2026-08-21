@@ -14177,3 +14177,84 @@ training exactly the way the inverted KADID target entered the 944 era.
      accordingly; shas in the view manifest.
   3. The AVIF loop study cells (zenavif harness) are unaffected — its corpus
      is the 9-ref fixture set, disjoint from avifgen renditions.
+
+# APPENDIX Z RESULTS (Z.R, 2026-08-21) — measured against the frozen Z/AC.R1 rules; includes the honest 13-day-stall record
+
+## Z.R0 How this closed (the stall, stated first because it is the biggest finding)
+
+The close-out chain registered in AC.R1 stalled for **13 days** (2026-08-08 22:00Z →
+2026-08-21). Root causes, all measured at revival (full chronology: zenmetrics
+`docs/status/avif-datagen-2026-08.md` "THE 13-DAY STALL + REVIVAL"):
+
+- The rescue-drain waiter was the **recurring silent-waiter class**: its
+  `compact_ledgers.py` call ran under `timeout 560` while the ledger read had grown to
+  a measured **768 s** (~10k sidecars); every cycle from 21:57Z was killed, the parse
+  emitted `done=fail` with stderr masked, and the owning session died in harness
+  restarts minutes later. Nothing watched the watcher.
+- **The fleet itself did not fail.** Workers drained on for 2.5 more days to
+  **8,361/8,623** union jobs and stopped at scoped-cred expiry 2026-08-11 09:37Z (last
+  sidecar 09:36Z). The ex-lianli box (r7900x, then carrying the RTX 2080) did the bulk;
+  node-2 dropped out 08-08 on repeated `status=137` worker kills, then crash-looped
+  loudly on the expired cred for days (restart #246) with nobody listening.
+- Revival completed the drain and the chain under the **LAN-only user directive**
+  (mid-revival): one documented R2 salvage read (10,306 ledger sidecars / 82 MB +
+  8,590 score blobs / 60 MB + 1,545 residue encode blobs / 379 MB, all `--size-only`),
+  then the 172-job residue re-declared and drained on the **LAN store**
+  (`jobs/avifgen-sf-gpu-rescue2-lan-20260821`, node-2/RTX 3070, pinned image with the
+  two allow_http hunks rebuilt from the pinned tree — metric code untouched), zero R2
+  writes. Mirrors: /mnt/v + Tower only (the registered R2 mirror path is superseded by
+  the directive).
+
+## Z.R1 Delivery vs registration
+
+| registered | actual |
+|---|---|
+| 564,300 cells (3 legs) | 564,300 cells declared = **562,860 unique content jobs** (4 byte-identical rendition pairs, 1,440 dup declares; all train/train, zero split leakage) — every cell present in the final tables via sha fan-out |
+| encode ETA ~6-10 h fleet wall | ~9 h wall to 100% incl. a 3.6x re-work era (fixed mid-run) + a 3-cell transient gapfill |
+| GPU score ~32 h wall (the bound) | ~2 h to 85.7% + OOM-storm recovery + the AC.R1 rescue; the 30 h estimate was ~10x conservative (tiny-pair-dominated corpus, cards at near-5070 parity). The rescue itself then took 13 days of wall-clock — none of it compute (see Z.R0) |
+| CPU metric pass ~4-7 h | zero-failure 45,129/45,129 |
+| persistence contract | encodes content-addressed + full ledgers + all metric variants + 944 features; diffmaps remain the registered open follow-up (executor unbuilt; coordinate with the HDR lane) |
+| G-Z2/G-Z3 first-cell gates | PASSED (G-Z2 caught the two-bucket cred gap pre-scale; G-Z3 proved REQUIRE_GPU refusal) |
+| G-Z4 >=99.5% | PASSED at 100% of unique jobs (encode) and 100% of unique pairs (both score queues, after an 18-pair manual closure + the corruption rescue union drained COMPLETE at 8,623/8,623 jobs; pair-level coverage 534,464/534,464 unique pairs, both queues) |
+| G-Z5 orientation | The FIRST run FAILED (0.9876 vs 0.99) and correctly exposed the silent VRAM-era GPU-score corruption (2,169 impossible cells, 99 renditions — appendix AC.R1). After the rescue-wins rebuild: **PASSED — default-stratum ssim2 pass rate 0.999313 (bar 0.99)** |
+
+## Z.R2 The AC.R1 decision rule, executed as registered
+
+- **Sample verdict: RESCUE-WINS.** 2,000/2,000 stratified sample pairs
+  compared against stored values: **3 mismatches, rate
+  0.0015** (threshold 0.005 ⇒ full re-score; not triggered). The
+  3 mismatching pairs are additional VRAM-era corruption OUTSIDE
+  the exact-saturation census (the census was registered as a lower bound) — all in
+  med/large renditions, all cured by the same rescue overlay.
+- **Rebuild:** rescue rows overlaid onto `unified/scores.parquet` (deterministic
+  rescue-wins; 74,241 cells patched), pre-rescue table preserved as
+  `scores.pre-rescue.bak.parquet`. Features untouched (CPU queue, clean).
+- **Re-gate (G-Z5 re-run on the rebuilt scores):** PASSED. Default-stratum ssim2 0.999313 (first run 0.987629; bar 0.99). Per-column ladder pass rates over all 19,146 (rendition x stratum) ladders: ssim2 0.9975 (was 0.9913), cvvdp 0.9979 (unchanged — CPU queue was never corrupt), butteraugli_max 0.9950 (was 0.9889), butteraugli_pnorm3 0.9954 (was 0.9894). Post-rebuild census: the impossible class (ssim2==100 & butter==0 & q<=70) is 3 cells, all rendition 7048.scale1024x1024 / cell s4-noqm / q 1,5,30 — NOT corruption: the rescue re-scored those exact pairs on a clean single-job window and reproduced 100/0 (pixel-identical decode; flat content where these knobs are effectively lossless). The other 2,143 census pairs all received non-saturated rescue values.
+
+## Z.R3 What the campaign found beyond the data (all fixed/committed in zenmetrics)
+
+1. Two-bucket corpus creds not threaded into objstore (jobexec.rs:202) — refs re-hosted; error also misclassified `encoder_panic`.
+2. Single-run workers never consumed the ledger snapshot (`--ledger-in`) — the empty-view re-work tax, measured live at 3.6x; fixed `92432e37`.
+3. BoxBudget has no VRAM dimension — 10,291 ScoreFile jobs OOM'd; declare-side ResourceHints added, retry verified at <=2 concurrent/box; proportional per-MP hints (`1406f59c`) cured the two-big-pair livelock.
+4. VRAM-pressure survivors produced SILENT garbage (ssim2=100/butter=0) — caught by G-Z5, cured by the rescue; cross-queue redundancy (CPU cvvdp) made it diagnosable in-table. The verification sample found the census undercounted by 3 pairs in 2,000 (~0.15%) — exact-saturation is indeed a lower bound.
+5. `ZEN_MAX_MIN` is pool-mode-only (the "25-min" gate worker ran ~6 h).
+6. Measured handicaps: encode zenavif per-box + CPU-metric rows; **gpu_metric rows landed 2026-08-21** from the clean rescue window (`fleet/handicap_gpu_rescue_2026-08-21.md`, zenmetrics `c3ea0fef`): 3070 = 0.61x the RTX 2080 in 9 concurrent same-queue buckets (host-stall-dominated — a BOX number); r7900x excluded after the 2080 left the box.
+7. train_renditions_2026-06-14 is train-split-only by construction (all origins end 0/2/4/6/8) + contains 4 byte-identical rendition pairs.
+8. **The waiter class strikes again (the stall's own finding):** a count-loop whose
+   failure mode is a masked parse is not a waiter, it is a time bomb. The replacement
+   daemon captures the counter's stderr into the log on every failure and hard-fails
+   with a STALLED flag after 3 strikes. Any future waiter that cannot show the
+   evidence of its last failure is out of contract.
+
+## Z.R4 Deliverables (all on /mnt/v + Tower; NO R2 copies — LAN-only directive)
+
+- `/mnt/v/output/avifgen-2026-08-06/unified/{scores,features}.parquet` — 564,300 cells x (4 metrics + 944 feats); read-verified end-to-end (zero nulls/NaN) on 2026-08-21 (the local-ext4 zero-holes bug does not touch these /mnt/v artifacts)
+- FINAL `/mnt/v/output/avifgen-2026-08-06/_MANIFEST.json` (sha256 1cc507693f66bc7d76620c09237a36182a445076637c68e85a5623e1e6224397) — corruption census + rescue truth + sample verdict + stall provenance embedded
+- views (AC.R1 amendment 2) `/mnt/v/zen/zensim-training/avif944-2026-08-07/`:
+  - `train_944.parquet` — 459,780 rows, 873 origins (ending 0/2/4/6), sha256 fa35d5cbb4c84e35d16c9341f6fce87a43b38eeea1055c8bcf59762fe15c77c8
+  - `eval8_944.parquet` — 104,520 rows, 209 origins (ending 8; leg-side eval holdout), sha256 e47091fa24d953d87a0b16c70ea6bb1235ef59d7d4070172d3e8b02493d97724
+  - `_MANIFEST.json` (shas + build_commit + split rule); the pre-amendment train/validate/test views are preserved as `*.pre-rescue.bak` and must not be trained on
+- Tower mirrors: `/mnt/tower/output/avifgen-2026-08-06/` + `/mnt/tower/output/zensim-avif944-2026-08-07/` (sha spot-verified)
+- wave-12 consumption note: 944 features AVX2-tier-pure; no zensim_score column (foldapp2 = features-only); score columns: ssim2_gpu (the registered leg target), butteraugli_max_gpu, butteraugli_pnorm3_gpu, cvvdp_cpu_imazen_v0_1_0
+
+**WAVE-12 DATA GATE: OPEN**
