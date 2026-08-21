@@ -14357,6 +14357,19 @@ twin iff (mono_cand > mono_C AND tied_cand ≤ tied_C) OR (tied_cand < tied_C
 AND mono_cand ≥ mono_C) — weak Pareto with at least one strict, on this
 instrument's population.
 
+*Amendment (2026-08-21, instrument validation run on the C CONTROLS ONLY —
+no W12 candidate number existed): the instrument measured a unit confound
+this rule's first draft ignored. The dial spline's flat segments create
+ties, so dial-unit mono is structurally below raw-unit mono on the SAME
+model (C raw `W10L9_s4003`: mono 0.953192 / tied 0.000000; C packed:
+mono 0.923972 / tied 0.001246 — 249 curves, 7,221 pairs each). Comparing a
+RAW W12 candidate against the PACKED C would therefore inflate the
+candidate's axis for free. Registered fix, on unit-consistency grounds:
+the G-AC2 axis call is made LIKE-FOR-LIKE — candidate (raw) vs C raw
+(0.953192 / 0.000000) at selection; if the winner is packaged, the packed
+winner is additionally compared vs C packed (0.923972 / 0.001246) in the
+winner battery as confirmation. The Pareto rule itself is unchanged.*
+
 ## AD.6 Selection + gates (inherited, arithmetic frozen)
 
 - Selection: `freeze_check --select` over the battery's fullevals (E.4 rule:
