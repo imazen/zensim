@@ -1,0 +1,38 @@
+== wave12 echo verify 2026-08-21T06:27:12Z ==
+-- diff 1: WAVE12_ECHO vs WAVE11_ECHO, same seed 4201 (expect: +2 tokens --group avif944:..., --out value) --
+20a21,22
+> --group
+> avif944:/mnt/v/zen/zensim-training/avif944-2026-08-07/avif944_leg_944.parquet:1.1043:0.0:both
+167c169
+< /home/lilith/tmp/wave12/echo-scratch/W11_s4201.bin
+---
+> /mnt/v/output/zensim/bakes/sota944/bakes/W12_s4201.bin
+-- token counts --
+w11: 167  w12: 169
+-- diff 2: w12 s4201 vs committed W10L9_s4001 argv (expect: seed, out, +avif944 group) --
+-safesyn:/home/lilith/sota944/data/ext944/ext_safesyn_full.parquet:1.0:0.5:both
++safesyn:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_safesyn_full.parquet:1.0:0.5:both
+-cid22_train:/home/lilith/sota944/data/ext944/ext_cid22_train201.parquet:1.0:2.0:both
++cid22_train:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_cid22_train201.parquet:1.0:2.0:both
+-kadid:/home/lilith/sota944/data/ext944/ext_kadid.parquet:0.5:1.0:rank
++kadid:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_kadid.parquet:0.5:1.0:rank
+-tid:/home/lilith/sota944/data/ext944/ext_tid.parquet:0.5:1.0:rank
++tid:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_tid.parquet:0.5:1.0:rank
+-bigcodec:/home/lilith/sota944/data/tbig_944_200k.parquet:0.5:1.0:both
++bigcodec:/mnt/v/zen/zensim-training/tbig_944_200k.parquet:0.5:1.0:both
+-kadis:/home/lilith/sota944/data/kadis944/kadis_944_ssim2_50k.parquet:0.15:1.0:both
++kadis:/mnt/v/zen/zensim-training/kadis-944-2026-08-01/kadis_944_ssim2_50k.parquet:0.15:1.0:both
+-tsafesyn:/home/lilith/sota944/data/teacher/safesyn_teacher944.parquet:0.5:1.0:both
++tsafesyn:/mnt/v/output/zensim/bakes/sota944/teacher/safesyn_teacher944.parquet:0.5:1.0:both
+-ttbig:/home/lilith/sota944/data/teacher/tbig_teacher944.parquet:0.5:1.0:both
++ttbig:/mnt/v/output/zensim/bakes/sota944/teacher/tbig_teacher944.parquet:0.5:1.0:both
+-konjnd_bpg:/home/lilith/sota944/data/ext944/konjnd_bpg_train_944.parquet:1.2:0.0:both
++konjnd_bpg:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/konjnd_bpg_train_944.parquet:1.2:0.0:both
+-konjnd_bpg_val:/home/lilith/sota944/data/ext944/konjnd_bpg_val_944.parquet:0.0:1.5:both
++konjnd_bpg_val:/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/konjnd_bpg_val_944.parquet:0.0:1.5:both
++--group
++avif944:/mnt/v/zen/zensim-training/avif944-2026-08-07/avif944_leg_944.parquet:1.1043:0.0:both
+-4001
++4201
+-/home/lilith/sota944/w10/W10L9_s4001.bin
++/mnt/v/output/zensim/bakes/sota944/bakes/W12_s4201.bin

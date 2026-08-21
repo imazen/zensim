@@ -14258,3 +14258,131 @@ The close-out chain registered in AC.R1 stalled for **13 days** (2026-08-08 22:0
 - wave-12 consumption note: 944 features AVX2-tier-pure; no zensim_score column (foldapp2 = features-only); score columns: ssim2_gpu (the registered leg target), butteraugli_max_gpu, butteraugli_pnorm3_gpu, cvvdp_cpu_imazen_v0_1_0
 
 **WAVE-12 DATA GATE: OPEN**
+
+# REGISTERED APPENDIX AD — WAVE-12 EXECUTION PLAN (2026-08-21, committed BEFORE any fit)
+
+Executes appendix AC exactly as amended by AC.R1; frozen HERE before the first
+seed trains. Lane: `claude-wave12-avif944` (this session). Everything below is
+either inherited verbatim from AC/AC.R1/K, or a determination derived from
+source/committed artifacts and registered now as an *input* (the §9.0-style
+status), never chosen after seeing a wave-12 number.
+
+## AD.1 Data (G-AC1 re-verified this session)
+
+- `train_944.parquet` sha256 **re-verified** `fa35d5cb…15c77c8` (459,780 rows,
+  873 origins) and `eval8_944.parquet` **re-verified** `e47091fa…3d97724`
+  (104,520 rows, 209 origins) — both match the Z.R registration byte-for-byte.
+- Corpus `_MANIFEST.json` sha `1cc50769…` carries the G-Z5 PASS (0.999313,
+  bar 0.99) on the rescue-rebuilt scores. G-AC1: **OPEN, confirmed.**
+- The pre-rescue `*.pre-rescue.bak` views are NOT consumed by anything here.
+
+## AD.2 The leg (AC.2 + AC.R1 amendment 1, mechanics registered)
+
+- The trainer has NO per-group target column (`parse_group_spec` =
+  `NAME:PATH:TRAIN_W:VAL_W[:flags]`, source-read this session), and the view
+  carries no `human_score`. The codec-leg convention (cid22_train / konjnd_bpg
+  / kadis precedents) is target-stored-as-`human_score` = ssim2/100. So the
+  leg = `avif944_leg_944.parquet` built by the committed
+  `scripts/canonical_corpus/build_avif944_leg.py`: input sha-gated to the
+  registered view, `human_score = ssim2_gpu/100` appended (construction-
+  identity-gated), all other columns untouched, manifest fragment
+  `_MANIFEST_avif944_leg.json` with output sha + build_commit. Orientation
+  ownership stays with the corpus-level G-Z5 gate (already PASSED); the
+  builder does not re-implement it.
+- **Leg weight — the "bigcodec-leg row-count convention" (AC.2), computed:**
+  the sampler's pair share is `train_w / Σ train_w`, independent of row count
+  (DATA_SPLITS §5b, source-read). The registered interpretation, stated
+  before any fit: **equal per-row train mass to the bigcodec leg** —
+  `w = 0.5 × rows_avif / rows_bigcodec = 0.5 × 459,780 / 208,169 =
+  1.104343… → argv value 1.1043`. Recorded in the leg manifest fragment and
+  (via the trainer's mandatory embedded repro) in every run's spec.
+- Group spec: `avif944:<leg>:1.1043:0.0:both` — TRAIN-ONLY (val weight 0.0,
+  the konjnd_bpg-precedent mechanism; rank validation stays the held-out T0
+  estate per AC.R1 amendment 1). Loss mode `both`, the codec-leg convention.
+
+## AD.3 Recipe + seeds (frozen)
+
+- Driver `scripts/wave12_seed.sh` (committed with this registration):
+  obtains wave-11's argv via `WAVE11_ECHO=1 wave11_seed.sh <seed>` and
+  changes exactly TWO things — inserts the ONE avif944 `--group` pair after
+  the last existing group, and rewrites `--out` to `W12_s<seed>.bin`.
+  Structural identity with the wave-11 recipe; echo diff committed to
+  `benchmarks/wave12/echo_verify_2026-08-21.txt` before the first fit.
+- Seeds (k=6 battery): **{4201, 4203, 4205, 4207, 4209, 4211}** — the wave-11
+  numbering convention advanced one century block; grep-verified disjoint
+  from every prior seed family (the doc's `4203` hits are coincidental
+  `0.4203` KonJND values — same class as K.2's `0.4111` note). The battery
+  tolerates seed loss down to **k=4** before it is a registered deviation.
+- Trainer: rebuilt from current main (`fb731572` lineage; wave-11's binary
+  was cleaned up per K.R5). Binary sha256 recorded in the results. The K.3
+  instrument-comparability gate (this workspace's `bake_verdict` must
+  numerically reproduce the committed `W10L9_s4001.full.json`) runs BEFORE
+  any pooled statement; a trainer-side cross-build identity spot-check
+  (re-train one wave-11 seed, compare `best_val` f64-exact per the d869a186
+  precedent) is NOT registered here — wave-12 compares candidates to C via
+  the *instruments*, not via `best_val`, and AC.2 registers flags-identity,
+  not binary-identity. `best_val` is reported, never an endpoint.
+
+## AD.4 Per-seed endpoints (K.3 inherited verbatim)
+
+`scripts/harvest_bakes.sh` per bake as it lands (= `sota944_verdict.sh` →
+`bake_verdict --regime 944` + `run_full_eval.sh` incl. M3a on the
+post-`299ccc8c` instrument; `.HARVEST_FAILED` markers are a registered wake
+condition). NOT selectable without measured M3a.
+
+## AD.5 The G-AC2 AVIF dial instrument (new, registered before any read)
+
+Builder `scripts/canonical_corpus/build_avif_dial8_grid.py` (committed with
+this registration): `eval8_944.parquet` (sha-gated) restricted to the
+**default stratum** — knob cell `s4`, plan `rd_core` (the stratum the G-Z5
+bar is defined on) — reshaped to the canonical dial-grid schema
+(`load_dial_grid`: image_id/codec/q/codec_param/param_kind/f0..f943).
+Expected shape asserted exactly: **269 renditions × 30 q = 8,070 rows**
+(q = 1, 5..70 step 5, 72..100 step 2), per-rendition ladder completeness
+asserted. Output `avif_dial8_944col_2026-08-21.parquet` + manifest fragment.
+Measurement: `bake_verdict --regime 944 --dial-grid <grid>` — the SAME
+`dial_panel` owner computes mono/tied; nothing is forked. Extraction +
+tabulation: `scripts/endgame_wave12.sh` (committed), keys `dial.mono_pct` /
+`dial.tied_pct`, one row per W12 bake + shipped C (`W10L9_s4003` raw AND
+`_packed` twins as controls).
+
+**Registered improvement rule for the axis (stated before any number is
+read):** the candidate strictly improves the AVIF dial axis vs C's packed
+twin iff (mono_cand > mono_C AND tied_cand ≤ tied_C) OR (tied_cand < tied_C
+AND mono_cand ≥ mono_C) — weak Pareto with at least one strict, on this
+instrument's population.
+
+## AD.6 Selection + gates (inherited, arithmetic frozen)
+
+- Selection: `freeze_check --select` over the battery's fullevals (E.4 rule:
+  profile-floor count PRIMARY, `balanced_composite + 0.15·M3a` tie-break);
+  C's fullevals ride along as labeled comparators.
+- **G-AC2**: winner floors match-or-beat C (7/8; F8 the known allowed miss);
+  CID22 ≥ **0.88272** (= C's 0.88672 − 0.004) or better; AND strict
+  improvement on ≥1 AVIF-facing axis (AD.5 rule, or the AC.4 loop census).
+- **G-AC3** (bands = the wave-11 pooled k=8 observed [min, max] from
+  `benchmarks/wave11/wave11_family_summary_2026-08-05.tsv`, frozen here):
+  KonJND [0.41035, 0.50741]; LIVE [0.96081, 0.96770]; CSIQ
+  [0.93303, 0.95996]; nonphoto [0.92442, 0.93054]; HF-NL per-ref
+  [0.46789, 0.74993]; M3a ≥ 0.78 (C: 0.86259 GOLD). A winner axis below the
+  band lo = regression for that gate.
+- Outcomes (a)/(b)/(c) per AC.3 verbatim; (a) advances to the AC.4 loop
+  matrix + a ship PROPOSAL (user-gated, never auto-shipped); (c) registers
+  the half-weight follow-up (one seed, w = 0.5522) before abandoning.
+
+## AD.7 Ops (frozen)
+
+- LAN-only (user directive): no R2 reads or writes anywhere in this wave.
+- **Box note, measured this session:** the WSL box now reports **23 GiB
+  total RAM** (post-resize; the wave-11-era capacity assumption does not
+  hold). The trainer's flat buffer is f64 (~9 GB data resident at wave-12's
+  ~1.19 M rows), so lanes are SERIALIZED — one trainer at a time under
+  `run-heavy --mem 18G`, `free -h` checked before each launch; a second lane
+  is permitted only if the first lane's measured peak RSS ≤ 8 GB.
+- Harvest inline (`harvest_bakes.sh --glob 'W12_s*.bin' --count 6`), one
+  terminal condition (`await_artifacts.sh --then scripts/endgame_wave12.sh`),
+  push via `verify_push.sh` (merge-base-verified), Tower mirror of the wave
+  artifacts at close, `.workongoing` maintained throughout.
+
+Results append below as **AD.R** when the battery completes.
+
