@@ -14337,9 +14337,14 @@ this registration): `eval8_944.parquet` (sha-gated) restricted to the
 **default stratum** — knob cell `s4`, plan `rd_core` (the stratum the G-Z5
 bar is defined on) — reshaped to the canonical dial-grid schema
 (`load_dial_grid`: image_id/codec/q/codec_param/param_kind/f0..f943).
-Expected shape asserted exactly: **269 renditions × 30 q = 8,070 rows**
+Expected shape asserted exactly: **249 renditions × 30 q = 7,470 rows**
 (q = 1, 5..70 step 5, 72..100 step 2), per-rendition ladder completeness
-asserted. Output `avif_dial8_944col_2026-08-21.parquet` + manifest fragment.
+asserted. *(Amended same-day BEFORE any model number was read: the
+registration's first-draft arithmetic said 269×30=8,070 — a census error
+that counted the 600 `s4`/`modes_full` probe rows the registered rule
+itself excludes (the rule named plan `rd_core`); the builder's own
+plan-purity gate caught it on the first build. Rule unchanged; counts
+corrected.)* Output `avif_dial8_944col_2026-08-21.parquet` + manifest fragment.
 Measurement: `bake_verdict --regime 944 --dial-grid <grid>` — the SAME
 `dial_panel` owner computes mono/tied; nothing is forked. Extraction +
 tabulation: `scripts/endgame_wave12.sh` (committed), keys `dial.mono_pct` /

@@ -1,0 +1,22 @@
+# WAVE 12 instrument-comparability gate (appendix K.3 inherited via AD.3) — 2026-08-21T06:31:17+00:00
+# ref: committed /mnt/v/output/zensim/bakes/sota944/verdicts/W10L9_s4001.full.json
+# new: this workspace's bake_verdict (main @ 299a68f6 lineage) --regime 944 on W10L9_s4001.bin
+
+numeric fields compared: 81922
+mismatches:              0
+non-numeric diffs:       0
+structural diffs:        19  (classified below)
+
+Documented evolution 1 — appendix I sdr25 mos->jnd key rename (2 diffs;
+  the SAME diff wave-11's gate documented): 50-element payload identity = True
+Documented evolution 2 — appendix V band-owner rebuild (17 diffs):
+  the committed ref (2026-08-04) predates appendix V (2026-08-06); its 10-band
+  arrays are the RETIRED defective quantity (CLAUDE.md Known Bugs: never cite
+  pre-2026-08-06 per-band values). The fresh verdict carries the corrected
+  merged-decile-2026-08-06 scheme + band_scheme labels. No AD gate reads the
+  ref's bands; the winner's F8 floor is read from its OWN new-scheme fulleval.
+
+VERDICT: GATE PASS — 81,922/81,922 shared numeric fields identical; every
+structural diff is one of the two documented instrument evolutions. Wave-12
+cells verdicted by this binary are directly comparable to the committed
+wave-10/11 cells on every scalar axis the AD gates consume.

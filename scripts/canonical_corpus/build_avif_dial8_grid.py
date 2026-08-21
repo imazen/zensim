@@ -13,11 +13,15 @@ computed by bake_verdict's own dial_panel — no stat code here, per the
 no-duplication rule); it only derives the ladder VIEW.
 
 Derivation (registered):
-  - rows: knob_tuple_json.cell == "s4" exactly (fp varies per rendition —
-    zenavif sizes some knobs to the input; the ladder key is (rendition,
-    cell), matching the corpus's 19,146-(rendition x stratum)-ladder gate)
-  - expected shape: 269 renditions x 30 q (q = 1,5..70 step5 + 72..100 step2)
-    = 8,070 rows, asserted exactly, per-rendition ladder completeness asserted
+  - rows: knob_tuple_json.cell == "s4" AND plan == "rd_core" exactly (fp
+    varies per rendition — zenavif sizes some knobs to the input; the ladder
+    key is (rendition, cell), matching the corpus's 19,146-(rendition x
+    stratum)-ladder gate). The 600 s4/modes_full probe rows are EXCLUDED per
+    the registered rule (AD.5 names plan rd_core); the first build's own gate
+    caught the AD.5 shape arithmetic over-counting them (269x30) before any
+    number was read — corrected here + amended in AD.5.
+  - expected shape: 249 renditions x 30 q (q = 1,5..70 step5 + 72..100 step2)
+    = 7,470 rows, asserted exactly, per-rendition ladder completeness asserted
   - image_id = image_path verbatim; codec = "zenavif_s4"; codec_param = q;
     param_kind = "q"; f<i> = feat_<i> (f64)
 
@@ -42,8 +46,8 @@ IN_SHA = "e47091fa24d953d87a0b16c70ea6bb1235ef59d7d4070172d3e8b02493d97724"
 OUT_DIR = Path("/mnt/v/output/zensim/v2-eval-944-2026-08-01")
 OUT_PATH = OUT_DIR / "avif_dial8_944col_2026-08-21.parquet"
 MANIFEST_FRAG = OUT_DIR / "_MANIFEST_avif_dial8.json"
-EXPECT_ROWS = 8_070
-EXPECT_RENDITIONS = 269
+EXPECT_ROWS = 7_470
+EXPECT_RENDITIONS = 249
 EXPECT_Q = sorted(list(range(5, 71, 5)) + [1] + list(range(72, 101, 2)))
 CELL = "s4"
 
@@ -70,12 +74,12 @@ def main() -> int:
     plans = set()
     for k in knobs:
         d = json.loads(k)
-        hit = d.get("cell") == CELL
-        mask.append(hit)
-        if hit:
+        cell_hit = d.get("cell") == CELL
+        if cell_hit:
             plans.add(d.get("plan"))
+        mask.append(cell_hit and d.get("plan") == "rd_core")
     sel = t.filter(pa.array(mask))
-    if plans != {"rd_core"}:
+    if not plans <= {"rd_core", "modes_full"}:
         print(f"ABORT: unexpected plans in {CELL}: {plans}", file=sys.stderr)
         return 1
     if sel.num_rows != EXPECT_ROWS:
