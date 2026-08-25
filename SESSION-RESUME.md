@@ -85,11 +85,13 @@ Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sh
   trade with C (worse CSIQ/KonJND/nonphoto), G-AC3 not met, C still selected. avif944 adopted as a
   standing mix leg @ w≈0.55. zensim `AD.R`/`AD.R.1` (`bf15ed9e`,`1ad91786`). HDR models: NOT started
   (needs the HDR corpus, criterion 2).
-- **C4 LOOPS (jxl secant): DELIVERED for jxl.** `JXL_ZENSIM_SECANT` implemented + min-|Δln L| guard +
-  27-cell A/B: beats the power-law controller on median error (−49% k2-best/−31% k3) + k2 census (+1),
-  no regression, default OFF. jxl `8404cd12`; `benchmarks/zensim_secant_2026-08-25.md`. TODO: decoded-
-  judged A/B on the frontier C-bake; the OTHER encoders (zenjpeg/zenwebp/zenavif/svt/aom/gainmap) loops
-  + zenpredict autotune — NOT started.
+- **C4 LOOPS: secant delivered for 4+ encoders.** (1) jxl in-loop `JXL_ZENSIM_SECANT` + min-|Δln L|
+  guard: on the SHIPPED C recipe **+3 k2 census, −55%/−71% median error** (jxl `1ed4ee72`;
+  `benchmarks/zensim_secant_2026-08-25.md`). (2) outer `zensim-target` bracket-safeguarded secant
+  `ZENSIM_TARGET_SECANT` (serves zenjpeg/zenwebp/zenavif): demo_matrix **median 4 vs 5 iters, faster
+  17/36** (zensim `7e17945e`; plan §5 C9 RESULT; unblocked a stale [patch]). Both default OFF. TODO:
+  decoded-judged jxl A/B; svt/aom/gainmap loops (not in zensim-target CodecKind); zenpredict autotune
+  per encoder; Illinois stall-fix for the outer secant's 1 q-ceiling edge cell.
 - **C5 PERF (x86 SIMD): CLOSED.** Survey: jxl+zenrav1e already dual-arch; only zenavif `unpremultiply8`
   was NEON-only → AVX2 tier shipped (bit-identical + ~3.3-3.6×). zenavif `b92880e3`, zensim `9afa10f8`,
   `benchmarks/simd_x86_gap_survey_2026-08-25.md`.
