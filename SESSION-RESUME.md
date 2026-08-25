@@ -76,6 +76,33 @@ never compare numbers across eras without the doc's era-bridge notes.
   steering** moves to the λ-side (rdmult) channel across zenrav1e /
   zenav1-svt / zenav1-aom behind one harness — plan §6.
 
+## ⇒ 2026-08-25 GOAL RUN progress (docs/GOAL_PRODUCTION_READINESS_2026-08-25.md)
+
+Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sha> origin/<branch>` to verify):
+- **C3 MODELS (SDR): CONVERGED.** Wave-12 (avif944 leg) run to completion — Profile C stands 8/8;
+  best full-weight seed 7/8 (F1 CID22). The registered half-weight (w=0.5522) follow-up found the
+  first 8/8 wave-12 seed (`W12hw_s4203`: CID22 0.8881>C, AVIF-dial 0.9673, M3a 0.8836) — a LATERAL
+  trade with C (worse CSIQ/KonJND/nonphoto), G-AC3 not met, C still selected. avif944 adopted as a
+  standing mix leg @ w≈0.55. zensim `AD.R`/`AD.R.1` (`bf15ed9e`,`1ad91786`). HDR models: NOT started
+  (needs the HDR corpus, criterion 2).
+- **C4 LOOPS (jxl secant): DELIVERED for jxl.** `JXL_ZENSIM_SECANT` implemented + min-|Δln L| guard +
+  27-cell A/B: beats the power-law controller on median error (−49% k2-best/−31% k3) + k2 census (+1),
+  no regression, default OFF. jxl `8404cd12`; `benchmarks/zensim_secant_2026-08-25.md`. TODO: decoded-
+  judged A/B on the frontier C-bake; the OTHER encoders (zenjpeg/zenwebp/zenavif/svt/aom/gainmap) loops
+  + zenpredict autotune — NOT started.
+- **C5 PERF (x86 SIMD): CLOSED.** Survey: jxl+zenrav1e already dual-arch; only zenavif `unpremultiply8`
+  was NEON-only → AVX2 tier shipped (bit-identical + ~3.3-3.6×). zenavif `b92880e3`, zensim `9afa10f8`,
+  `benchmarks/simd_x86_gap_survey_2026-08-25.md`.
+- **C2 DATA: imazen-26 ID audit CLEAN + committed** (`78b60142`, scripts/canonical_corpus/
+  audit_imazen26_holdout.py) — no held-out id in any imazen-26-derived view. TODO: dHash+eye cross-corpus
+  follow-up; HDR corpus (hdrgrid) encode/score/harvest (NOT on Tower/LAN — needs a fleet lane); curation.
+- **C7 DOCS:** jxl comment + zenmetrics SeaweedFS doc-truth fixed; plan/survey/campaign records current.
+- **C1 FLEET: at zero** (A1 enroll-script LAN fix pending; A3 cred distribution user-gated). **C6 BROWSER:**
+  located (`~/work/coefficient/viewer`), not extended. **C8 ZENPICKER:** blocked on C4 per-codec completion.
+
+Next: A1 fleet enroll fix → HDR corpus lane → other-encoder loops. Repo gotchas: zenmetrics=`master`;
+verify pushes with `origin/<branch>` (git) not `main@origin` (jj). Full plan: docs/PLAN + this session's memory.
+
 ## THE three entry points (a newcomer starts here)
 
 1. **Evaluate any bake, correctly, with one command:**
