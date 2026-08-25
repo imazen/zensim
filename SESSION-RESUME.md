@@ -55,6 +55,25 @@ never compare numbers across eras without the doc's era-bridge notes.
   dial-mono numbers are unit-flattered (no packaged cell holds ≥93% in dial
   units — see the doc's unit caveat).
 
+## ⇒ 2026-08-25: LAN era + the refinement plan (read after this file)
+
+- **Fleet + storage are LAN-local** (user directive 2026-08-08; store =
+  SeaweedFS on tower, `ZEN_STORE` defaults to LAN since 08-10, buckets keep
+  their R2 names, R2 = cold/user-gated rundown). The operator cheat-sheet,
+  the discrepancy list (production enroll script still R2-pinned; `fleet
+  status` reads 0 on LAN — use `pool_progress.py`) and the program order live in
+  [`docs/PLAN_LAN_ERA_REFINEMENT_2026-08-25.md`](docs/PLAN_LAN_ERA_REFINEMENT_2026-08-25.md).
+- **Wave-12 (appendix AD, 2026-08-21) is pre-registered, data-gate OPEN, and
+  was never launched** — no `W12_s*` bake exists. It is the first compute to
+  start (plan §4 B1; amend AD.7 by measurement — the box is 60 GiB again).
+- **HDR phase-2 corpus (appendix S)**: encode drained 99.888 % on 08-07, score
+  waves declared on R2 and never harvested, orientation gate PENDING
+  (`/mnt/v/output/hdrgrid-2026-08-06/_MANIFEST.json`). Plan §4 B4.
+- **jxl loop has NO secant controller** (power law exp 1.0 / clamp 2.0, k2
+  18/27 · k3 24/27); the secant/bracket/per-tile arms are plan §5. **AV1
+  steering** moves to the λ-side (rdmult) channel across zenrav1e /
+  zenav1-svt / zenav1-aom behind one harness — plan §6.
+
 ## THE three entry points (a newcomer starts here)
 
 1. **Evaluate any bake, correctly, with one command:**
