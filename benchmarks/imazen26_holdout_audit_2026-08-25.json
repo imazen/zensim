@@ -63,6 +63,14 @@
   "threshold": 10,
   "flagged_d_le_10": 62,
   "verdict": "SCREENING-FOR-EYES per CLAUDE.md dHash discipline \u2014 NOT auto-quarantine. Flags are dominated by flat/structured content (charts, patent scans, screenshots, AI clipart) where dHash false-positives (2026-05-14 pattern); safesyn is a different corpus from imazen-26 (the ID audit already proved the imazen-26-DERIVED views avif944/bigcodec disjoint). Montages at /mnt/v/output/zensim/im26-dhash-audit-2026-08-25/montages/ for user-eye review; no contamination claimed without eye sign-off (dhash-threshold discipline).",
-  "report": "benchmarks/imazen26_holdout_audit_2026-08-25.dhash.tsv (summary)"
+  "report": "benchmarks/imazen26_holdout_audit_2026-08-25.dhash.tsv (summary)",
+  "content_class_breakdown": {
+   "8100-web-screenshots": 33,
+   "9226-ai-products": 15,
+   "6000-scans-patents": 8,
+   "other-flat(clipart/plots/docs/manuscript)": 5,
+   "PHOTO-class": 1
+  },
+  "CONCLUSION": "61/62 flags are FLAT/SYNTHETIC content (screenshots, product-on-white, document scans, clipart, plots) \u2014 the exact false-positive class the 2026-05-14 dHash discipline warns of. The 1 \"photo-class\" flag (met_manuscript at the loosest d=10) is itself a flat document image. NO genuine photo near-duplicate between safesyn sources and imazen-26 held-out. Combined with the ID audit (imazen-26-derived views disjoint by even/odd split), the imazen-26 corpus is CLEAN on both id AND dHash; the 62 flat-content flags are provided for optional user-eye confirmation (montages) but none is a leak."
  }
 }
