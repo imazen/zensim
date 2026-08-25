@@ -63,6 +63,8 @@ never compare numbers across eras without the doc's era-bridge notes.
   the discrepancy list (production enroll script still R2-pinned; `fleet
   status` reads 0 on LAN — use `pool_progress.py`) and the program order live in
   [`docs/PLAN_LAN_ERA_REFINEMENT_2026-08-25.md`](docs/PLAN_LAN_ERA_REFINEMENT_2026-08-25.md).
+  **The DONE test for the whole program** (user directive 2026-08-25, <4k chars):
+  [`docs/GOAL_PRODUCTION_READINESS_2026-08-25.md`](docs/GOAL_PRODUCTION_READINESS_2026-08-25.md).
 - **Wave-12 (appendix AD, 2026-08-21) is pre-registered, data-gate OPEN, and
   was never launched** — no `W12_s*` bake exists. It is the first compute to
   start (plan §4 B1; amend AD.7 by measurement — the box is 60 GiB again).
