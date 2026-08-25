@@ -79,3 +79,25 @@ zenrav1e are already x86-covered.** The single production x86 deliverable is
 zenavif `unpremultiply8` (headline), with two optional `v4`-tier extensions.
 Sequence it after the model wave; gate it on the exhaustive test + a zenbench
 A/B (no `-C target-cpu=native`).
+
+## PERF RESULT — zenavif unpremultiply8 AVX2 (measured 2026-08-25)
+
+Kernel committed: zenavif `b92880e3` (`src/simd/unpremul.rs` `unpremultiply8_avx2`),
+correctness bit-identical to scalar over the complete (channel,alpha) domain.
+
+zenbench `benches/unpremul_tiers.rs` (`--features _dev`, x86_64, Ryzen 9 7950X
+class, NO `-C target-cpu=native`), v3(avx2) vs forced-scalar:
+
+| row width | v3(avx2) | scalar | speedup | avx2 throughput |
+|---|--:|--:|--:|--:|
+| 1920 px | 1.5 ±0.7 µs | 5.0 ±0.1 µs | **~3.3×** (CI +160%..+333%) | 4.75 GiB/s |
+| 512 px | 361 ±108 ns | 1309 ±174 ns | **~3.6×** (CI +216%..+321%) | 5.29 GiB/s |
+
+The win is unambiguous (CI never crosses zero) and beats the NEON path's recorded
+2.7×. **Caveat:** only 4 clean rounds — zenbench's resource gate discarded the
+rest because the box was running a training wave (drift r=−0.80: later rounds
+faster as it freed). A quiet-box re-run would tighten the MAD but cannot change
+the direction. Criterion-5's one real gap is CLOSED (correctness + perf).
+Optional follow-ups (not blocking): a uniform-alpha fast-path (scalar skips the
+divide on a==255/0 pixels; the SIMD path divides unconditionally, same as NEON),
+and the two `v4`-tier extensions (jxl forward_xyb, zenavif yuv inner).
