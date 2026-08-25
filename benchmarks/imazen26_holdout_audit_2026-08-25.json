@@ -55,5 +55,14 @@
  ],
  "LEAKAGE": false,
  "_": "Goal criterion 2 (user 2026-08-25: verify imazen-26 images don't include test/eval ids). ID audit: NO imazen-26 held-out id in any imazen-26-derived training view. avif944+bigcodec are 100% imazen-26-derived and disjoint from held-out by the even/odd split (row-verified). kadis 341 numeric matches are COINCIDENTAL collisions with KADIS-700k ids (different corpus). FOLLOW-UP (registered, not this pass): dHash+eye cross-corpus check for indirect perceptual near-duplicates of imazen-26 held-out images in OTHER corpora (check_holdout_overlap d<=10 + user review).",
- "tool": "scripts/canonical_corpus/audit_imazen26_holdout.py"
+ "tool": "scripts/canonical_corpus/audit_imazen26_holdout.py",
+ "dhash_pass": {
+  "tool": "check_holdout_overlap (dHash-64)",
+  "holdout": "imazen-26 validate+test v3 pngs (978/1076 linked)",
+  "training": "synthetic-v2 safesyn sources (3218 distinct)",
+  "threshold": 10,
+  "flagged_d_le_10": 62,
+  "verdict": "SCREENING-FOR-EYES per CLAUDE.md dHash discipline \u2014 NOT auto-quarantine. Flags are dominated by flat/structured content (charts, patent scans, screenshots, AI clipart) where dHash false-positives (2026-05-14 pattern); safesyn is a different corpus from imazen-26 (the ID audit already proved the imazen-26-DERIVED views avif944/bigcodec disjoint). Montages at /mnt/v/output/zensim/im26-dhash-audit-2026-08-25/montages/ for user-eye review; no contamination claimed without eye sign-off (dhash-threshold discipline).",
+  "report": "benchmarks/imazen26_holdout_audit_2026-08-25.dhash.tsv (summary)"
+ }
 }
