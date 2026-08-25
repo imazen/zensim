@@ -559,3 +559,27 @@ bracket-safeguard. Net: a real speedup with one documented hard-cell edge.
 Registered refinement: an Illinois/Pegasus stall-fix (or accept the edge) —
 re-run the demo. Default OFF; a per-codec production census + the ship decision
 are user-gated. This serves zenjpeg/zenwebp/zenavif's loops at once (criterion 4).
+
+## §3 A1/A3 RESULT (2026-08-25) — LAN enrollment + cred distribution PROVEN on r7900x
+
+With the A1 fix (745f1d68) + the user's "distribute any creds needed": ran
+`enroll_running_node.sh --start r7900x` (ZEN_STORE default=lan). **Verified: r7900x's
+`/etc/zen-node/worker.env` carries `ZEN_R2_ENDPOINT=http://<lan>:3900` + `ZEN_BUCKET=zentrain`
++ the LAN `AWS_ACCESS_KEY_ID` — cred distribution works end-to-end.** The worker then
+empty-pool restart-looped (`s3://zentrain/jobs/_pool944v4/` does not exist on the LAN store —
+no job declared), so it was stopped + left ENROLLED-READY (config + cred present, unit disabled).
+The 4 boxes (r7900x/i265/r3500/r5900xt) are all up + reachable; enroll the rest the same way
+once a job/pool exists. **Criterion 1 is now: enrollment + cred path PROVEN; the remaining is a
+DECLARED JOB (the HDR corpus below) to make the fleet busy + the GPU-only scoring gate on a real run.**
+
+## §4 B4 HDR CORPUS LANE (authorized 2026-08-25 "generate and curate hdr as needed")
+
+State: the appendix-S hdrgrid corpus (1,140 sources × 3 arms × 30 q = 102,600 cells) ENCODED
+99.9% on 08-07, its score waves were R2-declared + never harvested, and nothing landed on
+Tower/LAN. HDR source is present: `/mnt/v/output/imazen-26-hdr-grid-2026-06-14/` (1,140 HDR PNGs)
++ imazen-26 `hdr-grid-15scale@` variant sets. The lane (big, first-cell-gated): (1) salvage the
+R2 encode blobs → LAN store OR regenerate (authorized); (2) declare ScoreFile jobs on the LAN
+store — ssim2+butteraugli GPU-only (`ZENMETRICS_REQUIRE_GPU=1`), cvvdp+features on CPU; (3) enroll
+the GPU box(es) pointed at the pool; (4) first-cell gate → scale → harvest → writeback → manifest
++ orientation gate + Tower mirror; (5) then the HDR model wave (Q recipe + the multi-codec leg vs
+BHdr). zenavif HDR arm: authorized per the SDR-lift extension (the halt is lifted).
