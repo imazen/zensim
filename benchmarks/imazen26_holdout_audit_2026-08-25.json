@@ -1,0 +1,59 @@
+{
+ "heldout_ids": 1076,
+ "all_imazen26_ids": 2160,
+ "views": [
+  {
+   "view": "avif944",
+   "distinct_source_ids": 873,
+   "imazen26_derived_ids": 873,
+   "derived_fraction": 1.0,
+   "is_imazen26_derived": true,
+   "HELDOUT_numeric_matches": 0,
+   "REAL_LEAK_ids": [],
+   "verdict": "clean(imazen26-derived, train-only \u2014 disjoint from held-out)"
+  },
+  {
+   "view": "bigcodec",
+   "distinct_source_ids": 212,
+   "imazen26_derived_ids": 212,
+   "derived_fraction": 1.0,
+   "is_imazen26_derived": true,
+   "HELDOUT_numeric_matches": 0,
+   "REAL_LEAK_ids": [],
+   "verdict": "clean(imazen26-derived, train-only \u2014 disjoint from held-out)"
+  },
+  {
+   "view": "ext_safesyn",
+   "distinct_source_ids": 150,
+   "imazen26_derived_ids": 0,
+   "derived_fraction": 0.0,
+   "is_imazen26_derived": false,
+   "HELDOUT_numeric_matches": 0,
+   "REAL_LEAK_ids": [],
+   "verdict": "clean(different id namespace)"
+  },
+  {
+   "view": "ext_cid22",
+   "distinct_source_ids": 148,
+   "imazen26_derived_ids": 0,
+   "derived_fraction": 0.0,
+   "is_imazen26_derived": false,
+   "HELDOUT_numeric_matches": 0,
+   "REAL_LEAK_ids": [],
+   "verdict": "clean(different id namespace)"
+  },
+  {
+   "view": "kadis",
+   "distinct_source_ids": 43416,
+   "imazen26_derived_ids": 698,
+   "derived_fraction": 0.0161,
+   "is_imazen26_derived": false,
+   "HELDOUT_numeric_matches": 341,
+   "REAL_LEAK_ids": [],
+   "verdict": "clean(different corpus; 341 coincidental numeric id-collisions with imazen-26, NOT leakage)"
+  }
+ ],
+ "LEAKAGE": false,
+ "_": "Goal criterion 2 (user 2026-08-25: verify imazen-26 images don't include test/eval ids). ID audit: NO imazen-26 held-out id in any imazen-26-derived training view. avif944+bigcodec are 100% imazen-26-derived and disjoint from held-out by the even/odd split (row-verified). kadis 341 numeric matches are COINCIDENTAL collisions with KADIS-700k ids (different corpus). FOLLOW-UP (registered, not this pass): dHash+eye cross-corpus check for indirect perceptual near-duplicates of imazen-26 held-out images in OTHER corpora (check_holdout_overlap d<=10 + user review).",
+ "tool": "scripts/canonical_corpus/audit_imazen26_holdout.py"
+}
