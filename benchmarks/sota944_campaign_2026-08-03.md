@@ -14404,3 +14404,43 @@ winner battery as confirmation. The Pareto rule itself is unchanged.*
 
 Results append below as **AD.R** when the battery completes.
 
+
+## AD.R — WAVE-12 RESULTS (2026-08-25; endgame COMPLETE rc=0, every registered gate ran, none relaxed)
+
+Battery k=6 {4201,4203,4205,4207,4209,4211} trained on the AC.R1-amended views
+(G-AC1 PASS: `train_944` sha `fa35d5cb…`, `eval8_944` sha `e47091fa…`, leg
+`avif944_leg_944` sha `289a510d…` w=1.1043; dial8 grid sha `d1081e8a…`,
+7,470 rows = 249×30 as registered). Tables: `benchmarks/wave12/wave12_select_*.tsv`
++ `wave12_avifdial_*.tsv` (endgame-emitted; DATE label 2026-08-21 is cosmetic,
+the run was 2026-08-25). Peak RSS 11.5 GiB/seed → AD.7 amended to conc-2 on the
+60 GiB box (measured, not the stale 23 GiB assumption).
+
+**Selection (freeze_check --select, E.4 rule): `W10L9_s4003` (Profile C) — 8/8
+floors, sel_composite 0.9842.** No wave-12 seed is selectable over C: every W12
+seed is **7/8**, and the missed floor is **F1 (CID22 ≥ 0.885)**, NOT the allowed
+F8 (F8 PASSES on all). Best W12 CID22 = s4203 0.8845 (< 0.885; C 0.8867).
+
+**G-AC2: does NOT fire (outcome (a) rejected).** The gate needs floors
+match-or-beat C (7/8, F8 the allowed miss) — but the W12 miss is F1, a real
+floor. The looser CID22 clause (≥ 0.88272) IS met by s4203/s4209/s4207
+(0.8845/0.8819/0.8812), and the **AVIF-dial axis strictly improves on ALL six
+seeds** (like-for-like raw-vs-raw per the AD.5 amendment: mono 0.9536–0.9607 vs
+C-raw 0.9532, tied 0.0 = 0.0) — the avif944 leg did calibrate AVIF content
+better. But conjunct-1 fails, so no advance.
+
+**G-AC3: a consistent nonphoto REGRESSION (all six seeds).** F3 nonphoto drops
+to 0.9118–0.9150 vs C 0.9251 and **below the wave-11 band [0.92442, 0.93054]**
+on every seed (−0.011 mean). Other axes hold: KonJND 0.457–0.514 (in band),
+CSIQ 0.940–0.962 (in/above), LIVE 0.964–0.966 (in/above), HF-NL 0.745–0.757
+(above), M3a 0.791–0.878 (≥ 0.78, and s4205 0.8775 > C 0.8626). So the leg buys
+AVIF-dial + sdr25 (s4205 0.9573 > C 0.9527) at the cost of nonphoto + a hair of
+CID22.
+
+**REGISTERED OUTCOME: (c) — the leg weight is the suspect.** Per AC.3(c),
+register the half-weight follow-up: **one seed, `avif944:…:0.5522:0.0:both`**
+(half of 1.1043), to test whether half weight recovers nonphoto/F1 while
+keeping the AVIF-dial gain. If it does → avif944 becomes a standing mix leg at
+w≈0.55 (outcome b for future waves); if not → abandon the leg. **Profile C
+stands as the incumbent; wave-12 ships nothing.** The AVIF loop study (AC.4)
+proceeds with C as the model arm (the avif944 leg was a training-data lever, not
+a loop lever — the loop uses whatever model ships).
