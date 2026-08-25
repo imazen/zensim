@@ -14444,3 +14444,34 @@ w≈0.55 (outcome b for future waves); if not → abandon the leg. **Profile C
 stands as the incumbent; wave-12 ships nothing.** The AVIF loop study (AC.4)
 proceeds with C as the model arm (the avif944 leg was a training-data lever, not
 a loop lever — the loop uses whatever model ships).
+
+### AD.R.1 — HALF-WEIGHT FOLLOW-UP RESOLVED (2026-08-25; the registered outcome-(c) action)
+
+`W12hw_s4203` = seed 4203 re-trained with `avif944` at **w=0.5522** (half of
+1.1043; `AVIF944_W` override, commit `b6ec1428`). Clean weight-isolation A/B vs
+the full-weight `W12_s4203`.
+
+**Half weight RECOVERS the floors and CID22** (full-weight was 7/8, F1 FAIL):
+`W12hw_s4203` is **8/8 balanced floors** — F1 CID22 **0.8881** (> the 0.885 floor
+AND > C's 0.8867), F3 nonphoto 0.9200 (up from full's 0.9144), KonJND 0.4304
+(clears F2 by a hair), CSIQ 0.9248, LIVE 0.9628, HF-NL 0.7527, M3a **0.8836**
+(> C 0.8626).
+
+**G-AC2 passes** (8/8 matches C; CID22 above the 0.88272 bar and above C; AVIF
+dial mono **0.9673** ≫ C-raw 0.9532, tied 0.0 — the biggest dial improvement of
+any wave-12 seed). **But G-AC3 FAILS: two axes below the wave-11 band** — CSIQ
+0.9248 < [0.933, 0.960] and nonphoto 0.9200 < [0.92442, 0.93054]. And the
+selection tie-break composite (bal_comp + 0.15·M3a) is **0.9846 < C's 0.9896**,
+so freeze_check still selects **C**.
+
+**DETERMINATION (resolves outcome (c) → (b)):** at half weight the avif944 leg
+produces a **valid 8/8 model** — it is not the full-weight regression. But it is
+a **lateral trade** with C (better CID22 / AVIF-dial / M3a / LIVE; worse
+CSIQ / KonJND / nonphoto), not a strict win, and C still ranks first on the
+composite. **avif944 is adopted as a standing mix leg at w≈0.55 for future
+waves** (it yields floor-passing candidates and strongly improves AVIF-dial
+calibration); **Profile C stands as the incumbent**; a ship swap is NOT proposed
+(G-AC3 not met) and remains user-gated. The AVIF loop study (AC.4) uses C.
+Caveat: KonJND 0.4304 is near the F2 floor — a single (seed × weight) draw;
+KonJND is seed-noisy, so treat the w≈0.55 adoption as recipe-level, not this
+exact bake.
