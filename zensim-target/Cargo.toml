@@ -67,6 +67,7 @@ path = "src/bin/zensim_target.rs"
 # lower). A dependency's own patch table is ignored — only a workspace
 # ROOT's applies, and this crate is now its own root, so declare them here.
 [patch.crates-io]
+zenavif-serialize = { path = "../../zenavif/zenavif-serialize" }
 jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../../zenjpeg/zenjpeg" }
 

@@ -518,7 +518,7 @@ power-law fallback. `cum_log_s` tracks the controller g-product; the redistribut
 if it leaks scale the secant model is off). Correctness is behavioral → gated by the
 27-cell k2/k3 A/B (analyze_23shot), NOT unit-testable; do not ship without it.
 
-## §5 C9 UPDATE (2026-08-25) — outer zensim-target secant IMPLEMENTED, UNTESTED (crate dep-drift)
+## §5 C9 UPDATE (2026-08-25) — outer zensim-target secant IMPLEMENTED + TESTED (measured speedup)
 
 `zensim-target::target_search` gained a bracket-safeguarded two-point secant
 (regula-falsi shape): env-gated `ZENSIM_TARGET_SECANT` (default OFF = pure
@@ -535,3 +535,27 @@ zensim-target's Cargo.toml (align every codec-crate version/feature to current),
 33/36-within-±1.5 baseline) to confirm the outer secant like the jxl one.** The
 code is reviewable by eye (bracket-safeguarded interpolation); default-off means
 it cannot regress the shipped bisection.
+
+### C9 RESULT (2026-08-25, after the dep-refresh)
+
+Build unblocked with ONE `[patch.crates-io]` (zenavif-serialize 0.2.0 is an
+unpublished zenavif workspace member; zenavif's own patch doesn't apply when
+zensim-target builds it as a path dep) — NOT a deep dep-drift after all. The
+`demo_matrix` 36-cell A/B (`cargo run --release --example demo_matrix`,
+bisection vs `ZENSIM_TARGET_SECANT=1`):
+
+| | bisection | secant |
+|---|--:|--:|
+| converged / 36 | 32 | 31 |
+| median iters (converged) | 5 | **4** |
+| total iters | 173 | **164** |
+| faster / slower / same cells | — | **17 / 8 / 11** |
+
+**The outer secant converges FASTER (median 4 vs 5 iters, faster on 17/36).**
+It flipped ONE cell (gb82-sc gui screen / zenavif / target 30) converged →
+non-converged — a codec q-ceiling case (README limitation: screen at low targets
+hits the q-ceiling; bisection struggles there too), damage bounded by the
+bracket-safeguard. Net: a real speedup with one documented hard-cell edge.
+Registered refinement: an Illinois/Pegasus stall-fix (or accept the edge) —
+re-run the demo. Default OFF; a per-codec production census + the ship decision
+are user-gated. This serves zenjpeg/zenwebp/zenavif's loops at once (criterion 4).
