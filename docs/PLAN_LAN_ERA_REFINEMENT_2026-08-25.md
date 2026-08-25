@@ -517,3 +517,21 @@ power-law fallback. `cum_log_s` tracks the controller g-product; the redistribut
 (:1484-1592) is sum-preserving so it does not move global scale (VERIFY in the A/B —
 if it leaks scale the secant model is off). Correctness is behavioral → gated by the
 27-cell k2/k3 A/B (analyze_23shot), NOT unit-testable; do not ship without it.
+
+## §5 C9 UPDATE (2026-08-25) — outer zensim-target secant IMPLEMENTED, UNTESTED (crate dep-drift)
+
+`zensim-target::target_search` gained a bracket-safeguarded two-point secant
+(regula-falsi shape): env-gated `ZENSIM_TARGET_SECANT` (default OFF = pure
+bisection, no API change, no default flip), accepted only when the interpolated
+knob lands strictly inside the live [q_lo,q_hi] bracket — so it can only converge
+faster, never break the bisection guarantee. Serves zenjpeg/zenwebp/zenavif (all
+use this loop). **NOT YET TESTED: zensim-target is an EXCLUDED workspace member
+with pre-existing dependency drift that blocks its build** — stale `zenjpeg`
+`decoder` feature (FIXED this pass: the feature was removed; encode+decode are
+ungated now) AND `zenavif-serialize ^0.2.0` version conflict (and likely more
+codec-dep pins behind it). **Registered next: (1) a dep-refresh pass on
+zensim-target's Cargo.toml (align every codec-crate version/feature to current),
+(2) then the 36-cell demo A/B (bisection vs `ZENSIM_TARGET_SECANT=1`, README's
+33/36-within-±1.5 baseline) to confirm the outer secant like the jxl one.** The
+code is reviewable by eye (bracket-safeguarded interpolation); default-off means
+it cannot regress the shipped bisection.

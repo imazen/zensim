@@ -44,7 +44,7 @@ zenpixels = { version = "0.2.10", default-features = false }
 
 # Codec deps — path refs to sibling worktrees per workspace policy.
 # All AGPL-3.0-only OR Imazen commercial.
-zenjpeg = { path = "../../zenjpeg/zenjpeg", optional = true, default-features = false, features = ["decoder"] }
+zenjpeg = { path = "../../zenjpeg/zenjpeg", optional = true, default-features = false }
 zenwebp = { path = "../../zenwebp",          optional = true, default-features = false, features = ["std"] }
 zenavif = { path = "../../zenavif",          optional = true, default-features = false, features = ["encode"] }
 zenjxl  = { path = "../../zenjxl",           optional = true, default-features = false, features = ["encode", "decode", "zencodec"] }

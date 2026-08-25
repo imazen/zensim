@@ -185,8 +185,40 @@ pub fn target_search(
     let mut best_idx: Option<usize> = None;
     let mut best_encoded: Vec<u8> = Vec::new();
 
+    // Bracket-safeguarded secant (zensim goal criterion 4 / plan §5 C9; the
+    // README's requested "secant or Brent's-method update"). Env-gated,
+    // default OFF ⇒ pure bisection, unchanged. The secant interpolates the two
+    // most-recent probes toward f(q)=achieved−target=0 but is ACCEPTED only
+    // when it lands strictly inside the live [q_lo,q_hi] bracket — so it can
+    // only converge faster, never escape the bisection guarantees.
+    let use_secant = std::env::var("ZENSIM_TARGET_SECANT")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let mut sec_a: Option<(f32, f32)> = None; // (q, f=achieved−target), older
+    let mut sec_b: Option<(f32, f32)> = None; // newer
+
     for iter in 0..spec.max_iterations {
-        let q_mid = (q_lo + q_hi) * 0.5;
+        let q_bisect = (q_lo + q_hi) * 0.5;
+        let q_mid = if use_secant {
+            if let (Some((qa, fa)), Some((qb, fb))) = (sec_a, sec_b) {
+                let denom = fb - fa;
+                if denom.abs() > 1e-6 {
+                    let qs = qb - fb * (qb - qa) / denom;
+                    let (blo, bhi) = (q_lo.min(q_hi), q_lo.max(q_hi));
+                    if qs.is_finite() && qs > blo && qs < bhi {
+                        qs
+                    } else {
+                        q_bisect
+                    }
+                } else {
+                    q_bisect
+                }
+            } else {
+                q_bisect
+            }
+        } else {
+            q_bisect
+        };
         let (encoded, decoded_rgb) = backend
             .encode_decode(rgb, width, height, q_mid)
             .with_context(|| format!("codec {codec:?} encode/decode at knob {q_mid:.3}"))?;
@@ -204,6 +236,10 @@ pub fn target_search(
             .compute(&scratch_src, &dst)
             .with_context(|| format!("zensim compute on iter {iter}"))?;
         let achieved = result.score() as f32;
+        if use_secant {
+            sec_a = sec_b;
+            sec_b = Some((q_mid, achieved - spec.target));
+        }
 
         probes.push(ProbeRecord {
             iteration: iter,
