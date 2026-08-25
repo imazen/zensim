@@ -590,7 +590,7 @@ BHdr). zenavif HDR arm: authorized per the SDR-lift extension (the halt is lifte
 |---|---|---|---|
 | jxl-encoder | YES (in-encoder diffmap `vardct/zensim_loop.rs`) | YES `JXL_ZENSIM_SECANT`, now **default ON** (7155083e) | ✓ done |
 | zenavif | YES (`target_quality.rs` `encode_rgb8_with_target`) | YES bracketed secant + bisection fallback, **default** (line 566) | ✓ done |
-| zenwebp | YES (`ZensimTarget`, sweep.rs `target_zensim`) | q-seed interp; secant NOT confirmed | ⧗ add/confirm secant in-crate |
+| zenwebp | PARTIAL (`ZensimTarget` config + a parameter-grid sweep in sweep.rs; NOT a clear encode-score-adjust secant target-loop like zenavif) | no own secant | ⧗ add an own secant target-loop in-crate |
 | zenjpeg | **NO zensim target loop** | — | ✗ GAP — add a per-codec loop+secant (zenjpeg deps zensim) |
 | zenav1-svt | no zensim loop | — | ✗ GAP |
 | zenav1-aom | no zensim loop | — | ✗ GAP |
