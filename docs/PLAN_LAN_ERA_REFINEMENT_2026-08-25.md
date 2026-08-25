@@ -583,3 +583,21 @@ store — ssim2+butteraugli GPU-only (`ZENMETRICS_REQUIRE_GPU=1`), cvvdp+feature
 the GPU box(es) pointed at the pool; (4) first-cell gate → scale → harvest → writeback → manifest
 + orientation gate + Tower mirror; (5) then the HDR model wave (Q recipe + the multi-codec leg vs
 BHdr). zenavif HDR arm: authorized per the SDR-lift extension (the halt is lifted).
+
+## §5 PER-CODEC LOOP-OWNERSHIP MAP (2026-08-25; user directive "each codec owns its diffmap secant and loop code")
+
+| codec | owns loop? | secant? | status |
+|---|---|---|---|
+| jxl-encoder | YES (in-encoder diffmap `vardct/zensim_loop.rs`) | YES `JXL_ZENSIM_SECANT`, now **default ON** (7155083e) | ✓ done |
+| zenavif | YES (`target_quality.rs` `encode_rgb8_with_target`) | YES bracketed secant + bisection fallback, **default** (line 566) | ✓ done |
+| zenwebp | YES (`ZensimTarget`, sweep.rs `target_zensim`) | q-seed interp; secant NOT confirmed | ⧗ add/confirm secant in-crate |
+| zenjpeg | **NO zensim target loop** | — | ✗ GAP — add a per-codec loop+secant (zenjpeg deps zensim) |
+| zenav1-svt | no zensim loop | — | ✗ GAP |
+| zenav1-aom | no zensim loop | — | ✗ GAP |
+| gainmap | no zensim loop | — | ✗ GAP |
+
+The central `zensim-target` secant (7e17945e) is the SHARED-ALGORITHM reference; per the directive the
+loop ownership lives per-codec (jxl+zenavif already do). Remaining C4 code: zenjpeg loop+secant (in
+zenjpeg), confirm/add zenwebp's secant, and svt/aom/gainmap loops (each in its own crate). Then the
+per-encoder 27-cell k2/k3 census + zenpredict Zq autotune per encoder. Every new per-codec loop reuses
+the bracket-safeguarded secant shape (bisection fallback), default budget-optimal (ON), env-off escape.
