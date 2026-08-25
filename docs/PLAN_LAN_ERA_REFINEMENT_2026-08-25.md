@@ -503,3 +503,17 @@ No cloud burst (vast/Hetzner stay parked behind `ZEN_STORE=r2`); no new fleet
 or sweep system (zenfleet only); no zenavif svt/aom backend wiring before a
 channel wins at matched rate; no CID22 MOS in any training mix, ever; no
 per-band number cited from before 2026-08-06; no cross-era ranking claims.
+
+## §5.1 IMPL NOTE (locked 2026-08-25, from reading zensim_loop.rs)
+
+Controller at `jxl-encoder/src/vardct/zensim_loop.rs:1600-1610`; loop `for iter in
+0..iters+1` at :902; state (`best_score/best_iter/compares_used`) declared ~:776-813
+(add secant trackers there: `prev_log_l`, `prev_log_s`, `cum_log_s=0`). Env knob
+parses ~:787-810 (add `JXL_ZENSIM_SECANT`). **SIGN (do not get wrong): higher
+`quant_field_float` = MORE bits = LESS loss, so ε̂ = dlogL/dlogS is NEGATIVE.**
+Secant `g = exp((ln L_t − ln L_i)/ε̂)` then clamp; VALID only when ε̂ < 0 (guard),
+`prev_log_l` finite (not iter 0), and `|cum_log_s − prev_log_s| > eps` — else the
+power-law fallback. `cum_log_s` tracks the controller g-product; the redistribution
+(:1484-1592) is sum-preserving so it does not move global scale (VERIFY in the A/B —
+if it leaks scale the secant model is off). Correctness is behavioral → gated by the
+27-cell k2/k3 A/B (analyze_23shot), NOT unit-testable; do not ship without it.
