@@ -28,9 +28,9 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TRAIN=${ZL_TRAIN:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/zensim_mlp_train}
 OUT=${SOTA944_OUT:-/mnt/v/output/zensim/bakes/sota944/bakes}
 LEG=${AVIF944_LEG:-/mnt/v/zen/zensim-training/avif944-2026-08-07/avif944_leg_944.parquet}
-LEG_W=1.1043
+LEG_W=${AVIF944_W:-1.1043}          # AD.R outcome (c): half-weight follow-up = AVIF944_W=0.5522
 mkdir -p "$OUT"
-BAKE="$OUT/W12_s${SEED}.bin"
+BAKE="$OUT/W12${WAVE12_TAG:-}_s${SEED}.bin"  # WAVE12_TAG=hw -> W12hw_s<seed>.bin (weight-variant, no collision)
 [[ -f "$BAKE" ]] && { echo "exists: $BAKE"; exit 0; }
 
 # Wave-11's own --out short-circuit must never fire on a real W11 bake; point
