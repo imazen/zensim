@@ -1119,3 +1119,16 @@ progress heartbeat; (2) diffmap-kind cost model must reflect measured cell
 cost; (3) surface failing-cell stderr at a cadence. The 15-min post-cap
 checker's chunk-count verdict is therefore PESSIMISTIC-ONLY — real health =
 child lifetimes (minutes, not 5 s) + GPU utilization.
+
+**MECHANISM CONFIRMED by single-cell repro (2026-08-26T19:4xZ)**: the same
+butteraugli-hdr diffmap cell that the fleet loops on **succeeds standalone**
+(rc=0, 2.74 MB diffmap, same image/env/box) — the mass 3-5 s deaths are a
+**CUDA context/alloc storm**: ~6 concurrent children each attempt GPU
+context+workspace on the 8 GB 3070 (NVRM ctxBufPool NV_ERR_NO_MEMORY), dying
+at GPU-init after their CPU decode. can_admit tracks a VRAM estimate but the
+diffmap kind's estimate admits far too many. MITIGATION: serial per-cell path
+(`ZEN_CHUNK_WALL_SEC=0`, launcher now forwards it). OWNER FIX QUEUED:
+VRAM-aware admission floor for GPU diffmap kinds (+ the visibility defects
+recorded above). Repro hygiene note: `sudo -n docker` DROPS sourced creds —
+the first repro's `source_fetch: AWS_ACCESS_KEY_ID unset` was the probe's own
+env bug; use --env-file (0600), never -e passthrough under sudo.
