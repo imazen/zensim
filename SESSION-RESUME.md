@@ -40,7 +40,7 @@ default repointed; board regenerated + gates PASS (287 bakes, 14.5MB — exceeds
 the 12MB-era cap, user ruling pending). zenjpeg zq census 27/27 after the #113
 global-q fix; zenwebp census committed.
 
-**Open user decisions**: zentrain 3-tier plan (`zenmetrics
+**Open user decisions**: r7900x power (hard-off; WoL can't reach it); zentrain 3-tier plan (`zenmetrics
 docs/R2_ZENTRAIN_TRIAGE_2026-08-26.md`); board size cap; lilith (WSL, RTX 5070)
 power settings — it went dark 11:17Z and is the best GPU.
 

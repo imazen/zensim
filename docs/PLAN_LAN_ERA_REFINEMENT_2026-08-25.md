@@ -1015,3 +1015,14 @@ no scalar) — backfill = a features pass (ZEN_SKIP_FEATURES=0 chunked writer,
 follow-up) or a scores run. First writeback attempt OOM-killed a 60G box
 (57.9G rss, bare-nice — run-heavy rule violated); owner fix = ZEN_SKIP_FEATURES
 scores-only pass, peak 21.1G under a 40G cap.
+
+**avifgen FEATURES + post-swap verification (2026-08-26T14:40Z)**:
+`features_folded720append2.parquet` — 562,860 rows × 944 feat, SINGLE regime,
+0 misses, reads verified (sha `c18a5eac8774a726…`), LAN + Tower sha-verified;
+writer = the new per-regime batched ParquetWriter (zenmetrics `d99332d6`;
+first attempt crashed pre-flush on a leftover print — footerless parquet is
+the tell). Post-swap diffmap re-check: **4,621 rows since the swap, ZERO
+failures, 1,165 gm done** — the earlier mixed read was pre-swap window bleed.
+avifgen-enc blob migration R2→LAN in flight (the morning JOBS list omitted the
+enc run; 534,464 objects). r7900x: hard-off after 2×WoL + 15-min watch —
+waking it is physically user-gated.
