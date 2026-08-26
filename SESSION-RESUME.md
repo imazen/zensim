@@ -93,9 +93,15 @@ Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sh
   injected-scorer (zensim deps zenjpeg ⇒ cycle ⇒ MUST inject), 9 unit tests + a REAL-CODEC production
   gate (`79935f20`, tests/target_quality_real.rs, feat=zencodec: encode→decode→fast_ssim2, MEASURED
   6/6 target convergence, k2 1/6 k3 2/6 — a Zq seed would cut iters).** Dep-cycle finding
-  + per-codec table: plan "CRITERION-4 STATUS". TODO: gainmap loop (HDR); zenpredict Zq autotune seed per
-  codec; production gates (census/dial-mono/RD-under-independent-judge/perf); Program-D per-encoder
-  λ-side steering. `zensim-target` (`7e17945e`) is now the shared-algo reference, not the owner.
+  + per-codec table: plan "CRITERION-4 STATUS". **Zq AUTOTUNE MODEL PROVEN per-encoder (`ee7ab1f3`, benchmarks/zq_autotune_zenjpeg_2026-08-26.md):**
+  a feature+target→q ridge on each codec's bigcodec-924 view cuts q-prediction error 59-78% vs a
+  target-only anchor on held-out TEST (zenavif 76%/±10q 96%, zenwebp 78%/93%, zenjpeg 64%/74%, zenjxl
+  59%/74%) — criterion-4's zenpredict-baked Zq one-shot predictor, the MODEL. FOLLOW-ON (mechanical,
+  feature-gated per [[feedback_no_zenpredict_in_codecs]]): MLP via zensim_mlp_train → zenpredict-bake →
+  wire behind each codec's auto-tune feature (cheap 8-feature q0_head design for inference; zenjpeg CAN
+  dep zenanalyze, no cycle). Other TODO: gainmap loop (HDR, needs HDR-zensim); production gates
+  (census/dial-mono/RD-under-independent-judge/perf); svt/aom loops (repos not cloned locally);
+  Program-D per-encoder λ-side steering. `zensim-target` (`7e17945e`) is the shared-algo reference.
 - **C5 PERF (x86 SIMD): CLOSED.** Survey: jxl+zenrav1e already dual-arch; only zenavif `unpremultiply8`
   was NEON-only → AVX2 tier shipped (bit-identical + ~3.3-3.6×). zenavif `b92880e3`, zensim `9afa10f8`,
   `benchmarks/simd_x86_gap_survey_2026-08-25.md`.
