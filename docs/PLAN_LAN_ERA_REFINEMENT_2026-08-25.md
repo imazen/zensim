@@ -969,7 +969,7 @@ the enc-mode facet). Regen recipe: `viewer/static/data-hdrgrid/README.md`.
 their writeback/scored-RD parquets before they can be rolled (data-availability,
 not viewer work).
 
-### C4 UPDATE 2026-08-26 — zenjpeg Zq seed SHIPPED ($ZQSHA-era, zenjpeg main 9f130cf03cf6)
+### C4 UPDATE 2026-08-26 — zenjpeg Zq seed SHIPPED (zenjpeg main 9f130cf03cf6)
 First per-codec Zq autotune seed landed via a pre-registered wave
 (zenjpeg `benchmarks/zq_seed_wave_2026-08-26.md`): fitted-constants head
 (q0_head exemplar), labels = 96,894 PAVA-isotonized 7-pt q→zensim curves from
