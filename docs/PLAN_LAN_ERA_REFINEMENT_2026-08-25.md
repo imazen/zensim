@@ -618,3 +618,58 @@ LAN store — ssim2+butteraugli GPU-only (`ZENMETRICS_REQUIRE_GPU=1`), cvvdp+fea
 r7900x+the GPU box on the pool, (4) first-cell gate → scale the 4 boxes → harvest → writeback →
 `_MANIFEST.json` + orientation gate + Tower mirror, (5) HDR model wave (Q recipe + multi-codec leg
 vs BHdr). This is a multi-hour fleet operation; every enabler is verified so it runs clean.
+
+---
+
+## HDR CAMPAIGN — EXECUTION LOG (2026-08-26, live)
+
+State CORRECTIONS to the plan above (verified from R2, not docs):
+
+1. **The score jobs were ALREADY DECLARED on R2** (08-07) — the plan's "declare
+   ScoreFile jobs" step is DONE. The full family exists under `s3://zentrain/jobs/`:
+   `hdrgrid-sf-{cpu,gpu,gpu-huge,gpu-small}-20260807`, a second wave `hdrgrid-sf2-*`,
+   and `hdrgrid-diffmap-20260807`. So the HDR work is a **RESUME**, not a re-declare.
+   - `hdrgrid-sf-gpu` ledger fill: **0 results / 0 claims** — GPU scoring NEVER RAN.
+     This is the criterion-2 headline (ssim2-gpu + iwssim-gpu, `hdr:true`).
+   - `hdrgrid-sf-cpu`: **1254 results / 23 claims** — CPU scoring PARTIAL.
+   - `hdrgrid-sf2-gpu`, `hdrgrid-diffmap`: 0 — never ran.
+2. **Salvage DONE**: all **98,805** enc blobs at `/mnt/v/output/hdrgrid-2026-08-06/blobs/`
+   (rc=0). The GPU score cell's inputs are ALL enc-blob shas → refs are among these 98,805.
+   The salvage-read cred bug (nested `ZEN_STORE=r2` gave a 5-char key) is fixed: load
+   `~/.config/cloudflare/r2-credentials` and map `R2_ACCESS_KEY_ID→AWS_ACCESS_KEY_ID`
+   explicitly; do NOT source `lanstore.env` directly (its keys are `ZEN_S3_*`; the AWS_*
+   mapping only happens inside `s3env.sh`).
+3. **R2 creds distributed** to the 3 LAN GPU boxes (r7900x, lianli, r5900xt) — authorized
+   ("distribute any creds needed"); home-LAN owned hardware. So the read path is unblocked
+   WITHOUT moving blobs to the LAN store (duplicate-work-okay; R2 not deleted; new work goes
+   LAN-native; the CURATED output mirrors to LAN+Tower per criterion 2).
+4. **GPU boxes**: r7900x + lianli = GTX 1060 6 GB; r5900xt = GTX 1050 2 GB (small-bucket only).
+   tower's NVIDIA driver is DEAD; i265 has no GPU. nvidia-docker runtime works on r7900x.
+5. **The existing GPU-score launchers are VAST.AI-oriented** (`gpu_scorefile_launch.sh`,
+   `gpu_e2e_proof.sh`) — they `vastai create instance`. The user shifted to the LAN fleet, so
+   HDR GPU scoring runs on the LAN boxes via a **direct-manifest docker worker**, not vast.
+
+### LAN GPU worker recipe (the resume command — direct-manifest mode)
+`crates/zenfleet-worker/fleet-entrypoint.sh` single-run mode reads `ZEN_RUN` +
+`ZEN_MANIFEST_URI` (+ `ZEN_CONTROL_KEY`); `ZEN_REQUIRE_GPU=1` = the goal's GPU-only rule.
+On a GPU box (R2 creds present):
+```
+sudo docker run --rm --gpus all \
+  -e AWS_ACCESS_KEY_ID=<r2> -e AWS_SECRET_ACCESS_KEY=<r2> -e AWS_REGION=auto \
+  -e ZEN_R2_ENDPOINT=https://<acct>.r2.cloudflarestorage.com -e ZEN_BUCKET=zentrain \
+  -e ZEN_RUN=jobs/hdrgrid-sf-gpu-20260807 \
+  -e ZEN_MANIFEST_URI=s3://zentrain/jobs/hdrgrid-sf-gpu-20260807/manifest.json \
+  -e ZEN_CONTROL_KEY=jobs/hdrgrid-sf-gpu-20260807/control.json \
+  -e ZEN_REQUIRE_GPU=1 -e ZEN_WORKER=<host> -e ZEN_PROVIDER=basement \
+  --entrypoint /usr/local/bin/fleet-entrypoint.sh \
+  ghcr.io/imazen/zenfleet-worker:exec-gpu-avifgen-66e3c417
+```
+The `exec-gpu-avifgen` image (1.9 GB, CUDA) is GPU-metric-capable (it scored `ssim2_gpu` for
+the SDR avifgen sweep); local on r7900x. Remove `ZEN_MAX_MIN`/`ZEN_IDLE_PASSES` caps for the
+real run; add lianli + r5900xt (small→`hdrgrid-sf-gpu-small`). Harvest via `writeback_scores.py`.
+
+### FIRST-CELL GATE (in progress at log time)
+One capped (8-min) GPU worker launched on r7900x → log confirms `GPU-only scoring enforced;
+visible GPU: GTX 1060 6GB`, manifest fetched (8.29 MB), **claimed 1 cell**. Watching for the
+first DONE row (gate PASS) vs worker-exit (gate reveals HDR-decode/`hdr:true` blocker). Result
+appended below once the watcher fires.
