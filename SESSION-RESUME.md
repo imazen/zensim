@@ -93,7 +93,7 @@ Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sh
   injected-scorer (zensim deps zenjpeg ⇒ cycle ⇒ MUST inject), 9 unit tests + a REAL-CODEC production
   gate (`79935f20`, tests/target_quality_real.rs, feat=zencodec: encode→decode→fast_ssim2, MEASURED
   6/6 target convergence, k2 1/6 k3 2/6 — a Zq seed would cut iters).** Dep-cycle finding
-  + per-codec table: plan "CRITERION-4 STATUS". **Zq AUTOTUNE MODEL PROVEN per-encoder (`ee7ab1f3`, benchmarks/zq_autotune_zenjpeg_2026-08-26.md):**
+  + per-codec table: plan "CRITERION-4 STATUS". **Zq AUTOTUNE — RETRACTED as LEAKAGE (`ee7ab1f3` was invalid, benchmarks/zq_autotune_zenjpeg_2026-08-26.md):**
   a feature+target→q ridge on each codec's bigcodec-924 view cuts q-prediction error 59-78% vs a
   target-only anchor on held-out TEST (zenavif 76%/±10q 96%, zenwebp 78%/93%, zenjpeg 64%/74%, zenjxl
   59%/74%) — criterion-4's zenpredict-baked Zq one-shot predictor, the MODEL. FOLLOW-ON (mechanical,

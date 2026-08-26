@@ -47,3 +47,28 @@ zenavif/zenwebp are especially seedable (±10 q on 93–96%). This is criterion-
 Zq one-shot predictor (autotune), per encoder" — the MODEL, validated. The production form (MLP via
 `zensim_mlp_train` → `zenpredict-bake` → wire behind each codec's `auto-tune` feature, using the
 cheap 8-feature q0_head design for inference speed) is the mechanical follow-on.
+
+## ⛔ RETRACTION (2026-08-26, same day) — the fit above is LEAKAGE, not a valid autotune
+**The 59–78% "error reduction" is INVALID.** Verified directly: the `f0..f923` features **vary with
+q for the same reference** (measured within-ref std: f0 0.027, f1 0.064, f50 0.13, f400 0.075, …) —
+they are the **DISTORTED encode's** zensim features, NOT the reference image's. So
+`(features + target) → q` LEAKS: a q=5 encode and a q=95 encode of the same ref have different
+features, so "predict q from the distorted features" is near-circular. **Those features do not
+exist before encoding**, so they cannot seed a pre-encode q predictor — the whole premise is void.
+
+**Confirming simulation** (bracketed-secant on held-out per-image q→ssim2 curves, 1200 cells): using
+one encode's features to seed for a DIFFERENT target, the "autotune" seed is NO BETTER than a
+target-only anchor — mean secant iterations **3.85 (autotune) vs 3.64 (anchor)**, ≤3 iters 55% vs
+57%. The leaky training accuracy does not generalize to the actual inference task.
+
+**Two real, honest findings survive:**
+1. **A valid Zq autotune needs REFERENCE-image features** (extract via zenanalyze on the ref, as
+   zenavif's `q0_head` does with 8 cheap ref features) — the multi-crate pipeline stands unbuilt.
+   The bigcodec 924 parquets cannot supply it (their features are distorted-side).
+2. **Seed quality barely affects a bracketed-SECANT loop** — it converges in ~3–4 iterations from
+   any reasonable seed, so an autotune's value is the **ONE-SHOT** prediction (skip the loop
+   entirely for a ±Nq answer), NOT loop-seeding. This tempers the expected payoff and should steer
+   the design toward the one-shot use case (or cruder loops) where the seed actually matters.
+
+Lesson (again): validate the feature PROVENANCE before trusting a fit. A held-out split does not
+catch leakage when the leaked signal (distorted features) is present in both train and test rows.
