@@ -1037,3 +1037,13 @@ zensim absent by data), encoded_bytes = R2 enc-blob object sizes
 `/mnt/v/output/canonical-viewer-avifgen-2026-08-26/`. Remaining C6 sets:
 hdrfeat944 (drain-gated) + the 924-rescored bigcodec view (marginal — same
 encodes as the default set, newer metric profile; do with the next rescore).
+
+### C4 UPDATE 2026-08-26 — gainmap (ultrahdr) OWNS its target loop
+`ultrahdr-rs/src/target_quality.rs` shipped (ultrahdr main, 9/9 tests): per-codec
+copy of zenjpeg's `search_target` — injected scorer (ultrahdr never deps zensim),
+base-JPEG-quality knob (gainmap quality caller-fixed), lowest-reaching selection.
+The last format in the loop-ownership table now owns a loop. HONEST remaining
+scope for the gainmap row: a real HDR scorer wiring example + a registered
+census on an HDR instrument + gainmap-calibrated anchor (the zenjpeg-derived
+anchor ships documented-uncalibrated; the search corrects). zenav1-svt/aom rows
+stay premature (no turnkey encode API yet — recorded above).
