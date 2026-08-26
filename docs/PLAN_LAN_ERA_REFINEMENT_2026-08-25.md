@@ -885,3 +885,18 @@ for the same ceiling.
   large HDR images, OR (b) catch `CUDA_ERROR_OUT_OF_MEMORY` and reclassify it TRANSIENT (retryable)
   instead of the non-transient `encoder_panic` — so the reconciler retries and (with a card-aware
   cap) self-heals. The `default 8 GB` fallback should also be the card's real total, not a constant.
+
+### C1 WALL-CLOCK MEASURED — throughput rising (2026-08-26, from ledger chunk timestamps)
+Measured the HDR scoring wave's rate per bucket (chunk mtimes; no polling):
+- **ssim2-gpu (sf-huge, .27):** 0.58/min overall → **0.73/min in the last 15 min** — RISING, because
+  the VRAM cap eliminated the OOM→retry churn (each poisoned cell had burned attempts before).
+- **butteraugli-gpu (sf2-huge, node-2):** 0.27/min (RTX 3070 just warming on the large bucket).
+- **features-cpu (sf-cpu):** **1.33/min in the last 15 min** across 3 CPU workers (i265+r5900xt+tower)
+  — RISING vs the pre-tower single/dual-worker rate (tower's 24 cores joined 01:24Z).
+  (The "overall 0.05/min" is an artifact: this ledger also holds the 08-07 partial run, so the naive
+  span is 18 days; the last-15-min figure is the true current-wave rate.)
+**Falling wall clock = rising throughput, driven by three landed interventions this session:** the 2nd
+GPU box (node-2 RTX 3070 → butteraugli in parallel), the 3rd CPU box (tower), and the VRAM cap
+(23b3777d, no OOM retries). Rough remaining: sf-cpu ~2079/3420 cells left ≈ 26 h at current CPU rate;
+GPU buckets faster. Rates are re-measurable any time from `ledger/` mtimes — the standing waiter is the
+sequencer's `~/lan_gpu_seq.COMPLETE` marker + the ledger fill (no idle polling).
