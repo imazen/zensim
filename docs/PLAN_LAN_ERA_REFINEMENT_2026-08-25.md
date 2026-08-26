@@ -1230,3 +1230,14 @@ auto-pause safety correctly did nothing). Tower's 1-min load hit 42.8 under cpus
 to a cpuset, so admission oversubscribes the slice**; mitigated by shrinking
 tower to cpuset 0-11/24g (media priority absolute), owner item queued:
 `host_box_budget()` must respect cgroup/cpuset limits.
+
+**CONVERGENT THIRD MECHANISM (concurrent session, 2026-08-26T20:12Z)**: a
+parallel session landed `zenmetrics 68048212` (+ described-intent `67a982ea`):
+the Rust `zenfleet-ctl declare --spec` path never populates `DesiredJob.hint`,
+so every Metric-kind cell fell to the 512 MiB fallback → massive over-admission
+(24 G / 512 MiB ≈ 48 concurrent cells per box) — stacking with the no-snapshot
+tax and the classing hole to complete tonight's picture, and explaining the
+tower thrash beyond the cpuset finding. Fallback raised to 2 GiB + jxl
+fallible-alloc wired in plan.rs. Audit: no cross-session clobbering (my commit
+carries only the design doc; their diff is intact in 68048212; markers never
+overlapped). Fleet roll onto images at the fixed tip in progress.
