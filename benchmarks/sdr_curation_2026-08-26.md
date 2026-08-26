@@ -36,3 +36,20 @@ zenwebp_lossy   rows  484470 refs  2307 orig  212 | q<=40:  43% 40-70:  29% >70:
   (13%) — acceptable, and the corruption/negrich heads cover the severe-negative regime separately.
 
 (HDR set curation is pending its scoring completion — the fleet is producing it now.)
+
+## imazen-26 holdout audit — id CLEAN, dHash needs EYE review (2026-08-26)
+Criterion-2 "imazen-26 audited by id AND dHash+eye": both computed
+(`scripts/canonical_corpus/audit_imazen26_holdout.py` + `benchmarks/imazen26_holdout_audit_2026-08-25.{json,dhash.tsv}`).
+- **BY ID: CLEAN** — `LEAKAGE=False`; no imazen-26 test/eval/fixture id appears in any training view.
+- **BY dHash: 62 training sources flagged at d≤10** of an imazen-26 image (min d=5). Per the dHash
+  discipline (CLAUDE.md), **d≤10 is a SCREENING threshold for HUMAN review, NOT an auto-quarantine
+  cutoff** — the closest matches are **web-screenshots + document scans** (BLS employment page, LOC
+  pictures, patent/manuscript scans), exactly the flat-/structured-region content where dHash
+  collides for DIFFERENT images (the 2026-05-14 revert established this — 149 loose-threshold flags
+  were mostly false positives). So these 62 are candidates, not confirmed dupes.
+- **⇒ EYE REVIEW IS USER-GATED (flagged, not resolved).** Per the ship policy: build side-by-side
+  montages for each d≤10 pair and get user sign-off entry-by-entry before any blocklist action; never
+  auto-quarantine on dHash alone. Until that review, treat the id-clean result as the operative gate
+  (imazen-26 is content-distinct from the training corpus by exact id) and the 62 dHash candidates as
+  an OPEN user-review item — surfaced here, not buried. The audit script + reports are committed;
+  the eye step is the one part that genuinely requires the user.
