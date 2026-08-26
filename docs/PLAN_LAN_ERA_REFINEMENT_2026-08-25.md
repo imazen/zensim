@@ -849,3 +849,39 @@ correctly-named temp). **True state:** sf2-gpu-small DONE (687, butteraugli, 2 G
 works on these HDR blobs. Two GPU boxes now scoring in parallel: **node-2 (RTX 3070 8 GB) on sf2
 (butteraugli)** + **.27 (GTX 1060 6 GB) on sf (ssim2/iwssim)** — different metrics, no lease contention.
 Lesson: a `skipped=N` line means "already done", NOT "can't do" — read the ledger before concluding.
+
+### ROOT CAUSE — the sf-huge "encoder_panic" failures = ssim2-gpu CUDA OOM (2026-08-26)
+The 19/453 `error_class=encoder_panic` failures on `hdrgrid-sf-gpu-huge` are a **MISLABEL** —
+reproduced (node-2, RTX 3070 8 GB) as a **CUDA_ERROR_OUT_OF_MEMORY** panic in
+`zenforks-cubecl-cuda-0.10.1/src/runtime.rs:90` (`.unwrap()` on the CUDA alloc). The failing cells
+are the LARGEST imazen-26 HDR-grid images (`1232_interior`, `15xx_nature`, …, JXL HDR refs);
+ssim2-gpu's scale-0 allocation exceeds VRAM. It OOMs on BOTH the 6 GB (.27) and 8 GB (node-2) cards,
+so it is a genuine per-image VRAM ceiling, not a small-card issue. (`encoder_panic` is the honest
+transient label the jobexec applies to an uncaught worker panic — see
+`zenmetrics-cli/src/jobexec.rs:165`; it is NOT an encoder failure.)
+**Owner fix (zenmetrics/ssim2-gpu):** the GPU kernel must bound VRAM for large images — either a
+fallible alloc that falls back to a tiled/multi-pass SSIMULACRA2 (the scales complicate naive
+tiling), or a documented max-pixels ceiling above which the huge cells are scored by a separate
+path. Until fixed, the ~19 largest HDR cells per huge bucket will `encoder_panic` and lack ssim2;
+they are a KNOWN gap in the HDR ssim2 coverage, not silent. butteraugli-gpu (sf2) should be checked
+for the same ceiling.
+
+### OOM FIX VALIDATED + RECOVERY (2026-08-26)
+- **Mechanism (refined):** `butteraugli-gpu/src/memory_mode.rs::vram_cap_bytes()` DOES probe live
+  free-VRAM via `nvidia-smi` (present in the exec image) with a 10% margin, else an 8 GB default.
+  But the auto Full-vs-Strip decision still let large HDR images pick Full and OOM — the Full-mode
+  VRAM *estimate* under-counts for these images (JXL HDR, huge dims). The env cap
+  `ZENMETRICS_VRAM_CAP_BYTES` (always wins) forces Strip earlier and fixes it.
+- **VALIDATED in production:** with cap 7.5 G, node-2 (RTX 3070) sf2-gpu-huge chunk `pass-i134-huge-1`
+  = **54/54 done, 0 errors** (large butteraugli, previously the OOM class). Manual test: the OOM'd
+  cell now returns ssim2_gpu=85.56. Landed `23b3777d` (zenmetrics) + sequencers relaunched cap 5.5 G
+  (.27) / 7.5 G (node-2).
+- **The 19 already-poisoned sf-huge cells** stay poisoned (`EncoderPanic.is_transient()==false`,
+  status.rs:110; no reset CLI — `zenfleet-ctl` re-declare "keeps never-seen + retryable" only). To
+  recover them: **declare a FRESH small job set with just those 19 (ref+distorted) and score with
+  the cap** (they're the largest imazen-26 HDR-grid refs; extract from the sf-huge failed ledger
+  rows). Small tail; the cap prevents ALL forward poisoning on the remaining large-image buckets.
+- **OWNER FIX (zenmetrics, the real fix):** (a) fix the Full-mode VRAM estimate to not under-count
+  large HDR images, OR (b) catch `CUDA_ERROR_OUT_OF_MEMORY` and reclassify it TRANSIENT (retryable)
+  instead of the non-transient `encoder_panic` — so the reconciler retries and (with a card-aware
+  cap) self-heals. The `default 8 GB` fallback should also be the card's real total, not a constant.
