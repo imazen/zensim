@@ -819,3 +819,20 @@ encodes are a 07-27 run and may not share filenames with the 07-01 sidecar), plu
 set-selector in the viewer (`meta.json` already supports multiple datasets). Do NOT
 union across zensim profiles (07-01 = zensimA/PreviewV0_2 ≠ 924). Until then the
 viewer serves the 07-01 SDR canonical set only.
+
+### C1 EVIDENCE — tower enrolled, 4 boxes busy, declare→gap→reconcile live (2026-08-26T01:24Z)
+- **tower** (Threadripper 2950X 32T, dead GPU) enrolled as a CAPPED CPU worker on `sf-cpu`
+  (`--cpuset-cpus=0-23` leaves 8 cores for the media stack, `--cpu-shares=256`, `--memory=40g`,
+  fresh image pull, Docker-only, creds passed as env — the stateless host is untouched). Observed
+  first: load 1.08, media stack + `zen-lanstore` + PXE running, no heavy compute worker → safe.
+- **4 boxes busy:** .27 `zen-seq-huge` (GPU, 6-bucket sequencer) + i265 `zen-hdr-cpu` + r5900xt
+  `zen-score-cpu` + tower `zen-hdr-cpu` (all CPU on sf-cpu). Remaining home boxes: **mac** (needs
+  the arm-native `_pool944neon` worker, not the x86 image) + **node-2/node-3** (kids' PCs, flip
+  needs user approval) — both constrained, not autonomously enrollable.
+- **declare→gap→reconcile** is the zenfleet substrate, live per bucket (declared cells in the
+  manifest, `ledger/` = done chunks, `claims/` = in-flight gaps under R2 lease): at snapshot
+  sf-cpu 1299 done + 50 claims, sf-gpu-huge 12 + 11, sf-gpu(medium) 14 + 7, sf-gpu-small 2 done,
+  sf2-gpu 0 (queued behind the sequencer). ssim2/iwssim/butteraugli GPU-only (ZEN_REQUIRE_GPU=1,
+  proven — GTX 1050 2GB CANNOT and skipped, only the 1060 6GB scores); zensim/features on CPU.
+- **wall clock:** GPU wave START 01:03:40Z (small drained in 19s, huge in progress). sf-cpu
+  1254→1299 in ~73 min pre-tower; tower's 24 cores should raise the CPU rate (re-measure next pass).
