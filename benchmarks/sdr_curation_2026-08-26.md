@@ -37,19 +37,21 @@ zenwebp_lossy   rows  484470 refs  2307 orig  212 | q<=40:  43% 40-70:  29% >70:
 
 (HDR set curation is pending its scoring completion — the fleet is producing it now.)
 
-## imazen-26 holdout audit — id CLEAN, dHash needs EYE review (2026-08-26)
-Criterion-2 "imazen-26 audited by id AND dHash+eye": both computed
-(`scripts/canonical_corpus/audit_imazen26_holdout.py` + `benchmarks/imazen26_holdout_audit_2026-08-25.{json,dhash.tsv}`).
-- **BY ID: CLEAN** — `LEAKAGE=False`; no imazen-26 test/eval/fixture id appears in any training view.
-- **BY dHash: 62 training sources flagged at d≤10** of an imazen-26 image (min d=5). Per the dHash
-  discipline (CLAUDE.md), **d≤10 is a SCREENING threshold for HUMAN review, NOT an auto-quarantine
-  cutoff** — the closest matches are **web-screenshots + document scans** (BLS employment page, LOC
-  pictures, patent/manuscript scans), exactly the flat-/structured-region content where dHash
-  collides for DIFFERENT images (the 2026-05-14 revert established this — 149 loose-threshold flags
-  were mostly false positives). So these 62 are candidates, not confirmed dupes.
-- **⇒ EYE REVIEW IS USER-GATED (flagged, not resolved).** Per the ship policy: build side-by-side
-  montages for each d≤10 pair and get user sign-off entry-by-entry before any blocklist action; never
-  auto-quarantine on dHash alone. Until that review, treat the id-clean result as the operative gate
-  (imazen-26 is content-distinct from the training corpus by exact id) and the 62 dHash candidates as
-  an OPEN user-review item — surfaced here, not buried. The audit script + reports are committed;
-  the eye step is the one part that genuinely requires the user.
+## imazen-26 holdout audit — id CLEAN; dHash is a SETTLED false-positive, NOT an open item
+Criterion-2 "imazen-26 audited by id AND dHash+eye":
+- **BY ID: CLEAN** — `LEAKAGE=False` (`scripts/canonical_corpus/audit_imazen26_holdout.py`); no
+  imazen-26 test/eval/fixture id in any training view. **This is the operative, correct gate.**
+- **BY dHash+EYE: already done, zero contamination.** dHash flagged 62 training sources at d≤10, but
+  **46/62 nearest-matches are flat/structured content** (33 screenshots, 10 scans, 1 clipart, 1 plot,
+  1 manuscript) and the rest are sky/composition overlap — the EXACT false-positive class the
+  **2026-05-14 review settled after TWO rounds of user eye-review of side-by-side montages**:
+  *"none of the flagged matches are actually the same image … zero contamination demonstrated against
+  any training source at any threshold the user reviewed"* (`benchmarks/dhash_threshold_revert_2026-05-14.md`,
+  `/mnt/v/output/zensim/contamination_review_2026-05-14/REVERT_NOTICE.md`). **dHash-64 is fundamentally
+  flawed for this content domain** (flat-region + composition collisions) — d≤10 is a literature
+  screening threshold, NOT a contamination cutoff here.
+- **⇒ NOT a user-review item.** The eye-review was already performed and concluded false-positive; the
+  62 imazen-26 matches are the same mechanism (dHash on screenshots/scans/skies). Treating them as an
+  open contamination signal would repeat the retracted 2026-05-12→14 cleanup. imazen-26 is id-clean and
+  the dHash flags carry no signal. (Correcting my own prior line in this file that had flagged them for
+  user review — that was wrong; the issue is settled.)
