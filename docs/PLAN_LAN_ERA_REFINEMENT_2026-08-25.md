@@ -990,3 +990,15 @@ q0_head already), each its own registered wave.
   ~2-pass loop — structurally little seed headroom; no wave planned.
 - **zenavif**: `q0_head` ships (ssim2 targets); a zensim-target refit is a
   data task after current-model rescoring exists.
+
+### FLEET FINDING 2026-08-26 — diffmap jpeg-gainmap cells: GPU image missing `hdr-gainmap`
+`hdrgrid-diffmap-20260807` ledger read: 46,681 failed rows, **46,680 =
+jpeg-gainmap** (zenjxl 0, svt 1 — noise), metric-symmetric (butteraugli
+23,340 / cvvdp 23,341 = same CELLS), size-flat, both workers, attempts=1 ⇒
+the variant DECODE fails: `exec-gpu-2af6dbc3` was built without
+`hdr-gainmap` (the same bug hdrfeat944 hit on CPU images this morning).
+Queue truth: declared 193,574 / done 37,771 / gap 155,803. Fix in flight:
+bookworm GPU rebuild WITH the feature → new exec-gpu tag → swap i134's
+worker (live gate: gm rows flip failed→done) → enroll r7900x (2× WoL sent;
+if it stays dark it is hard-off = user-gated). Failed rows re-claim
+naturally (latest-wins ledger).
