@@ -1085,3 +1085,13 @@ converted the failed pool (40.8k→51.3k distinct done) then emitted ~30 min of
 100%-duplicate done rows (newest chunks 14/375/49 rows, 0 fresh) — either
 mostly-done mixed chunks flushing separately (benign tax) or a view gap; the
 armed 45-min checker adjudicates post-restart.
+
+**Diffmap "stall" analysis (2026-08-26T18:0xZ)**: post-restart evidence — 158
+flushed chunks / 14,692 rows / 0 fresh, GPU 0%, but CPU load 15-17 with three
+jobexec at 80-126%. Reading: per-chunk flush ordering — all-done chunks
+re-affirm instantly (`make(d, Done, sha)` re-emit path), while mixed chunks
+holding FRESH HDR diffmap cells (1920×2560 cvvdp-class, minutes/cell on CPU)
+have not completed, so their rows have not flushed; distinct_done should step
+when the first mixed chunks land. 60-min adjudicator armed (bar 51,267):
+advance = benign flush-ordering; still frozen = real chunk-execution bug →
+deep-dive. (The pass-timeout kill is FIXED regardless — 86400s.)
