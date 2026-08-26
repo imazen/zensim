@@ -1343,3 +1343,15 @@ now pin e.g. hdr-gainmap on HDR runs — wire into the next declare.
 (conservative kind→feature map; CPU-native metric names deliberately claim
 nothing) stamped by all three ctl declare builders — every NEW manifest gates
 automatically; old manifests unchanged.
+
+**§5 C10 DONE (jxl-encoder be79ffb752de, 2026-08-26)**: the four 372-class
+'Err(_) => Ok(seed)' swallows now panic with the arm name via loud_compare()
+(+ #[should_panic] gate, --features zensim-loop); bfly≈NaN read-site note. The
+other two C10 items were already fixed 08-25 (comment reads "superseded";
+NaN set-site documented). Same commit: djxl/cjxl test helpers now probe-run
+candidates (the jxl-efforts build rotted — OpenEXR 2.5 libs gone — leaving 3
+decoder-validation tests red on default features; pre-existing, now green).
+NOTE §1.3's "no secant controller exists" is STALE: S1/S2-shape secant landed
+08-25 (JXL_ZENSIM_SECANT, benchmarks/zensim_secant_2026-08-25.md — k2 census
+17/27 vs 16/27, med|err| 0.951 vs 1.428; k3 med 0.297 vs 0.433). §5 remaining:
+min-|Δln L| guard, S3 per-tile gain, S4 elasticity prior, C2..C9.
