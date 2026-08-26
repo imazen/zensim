@@ -952,3 +952,19 @@ Serving a LAN set in the browser is a real multi-step ETL, confirmed (not a quic
 ETL, ~an hour+ per set. **The browser IS functional and SERVED** (http://localhost:3400/ ,
 http://192.168.50.44:3400/ — `python3 -m http.server 3400 --bind 0.0.0.0 --directory
 ~/work/coefficient/viewer/build`) on the 07-01 canonical set; LAN coverage is the ETL above.
+
+### C6 UPDATE 2026-08-26 — hdrgrid IS SERVED (selector + gate live)
+The viewer now serves TWO pools behind a data-set selector (`?set=hdrgrid`):
+the SDR 07-01 canonical (default) and the **HDR-grid 08-26 rollup** (1,350
+rows: 3 arms × q-grid × 12 maxdims from the 102,485-cell harvest).
+Profile purity holds by construction — separate `data-<set>/` roots, never
+unioned. ETL: harvest scores + LAN blob sizes (`encoded_bytes` from
+`s3://zentrain/jobs/hdrgrid-enc-20260806/blobs/` object sizes, 0 rows missing;
+5,698 dup rows = content-address dedup) + dims parsed from `.scaleWxH.`
+(1140/1140 filenames). `rollup_zenmetrics.py --datasets` (coefficient
+`f7eefa4`) + viewer selector (`79ad39d`); `check-render.mjs` asserts the set
+paints (6/6 — the gate caught the first cut, where `mode='hdr_lossy'` failed
+the enc-mode facet). Regen recipe: `viewer/static/data-hdrgrid/README.md`.
+**Remaining for full C6**: avifgen + bigcodec-924 + hdrfeat944 sets still need
+their writeback/scored-RD parquets before they can be rolled (data-availability,
+not viewer work).
