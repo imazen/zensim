@@ -101,3 +101,18 @@ the direction. Criterion-5's one real gap is CLOSED (correctness + perf).
 Optional follow-ups (not blocking): a uniform-alpha fast-path (scalar skips the
 divide on a==255/0 pixels; the SIMD path divides unconditionally, same as NEON),
 and the two `v4`-tier extensions (jxl forward_xyb, zenavif yuv inner).
+
+## UPDATE 2026-08-26 — the jxl forward_xyb v4 tier is BLOCKED (not a NEON gap)
+Followed up on the "add a v4 tier to jxl `forward_xyb`" item. Two facts settle it:
+1. **It is NOT a NEON-only gap** — `forward_xyb_impl` already carries the `v3` (AVX2) tier
+   (`X64V3Token: F64x4Backend` exists in magetypes 0.9.28, x86_v3.rs:867), so x86 IS covered. The
+   criterion-5 requirement (NEON-only → x86) does not apply; adding `v4` would be an AVX-512 PERF
+   upgrade, not a coverage fix.
+2. **The v4 (AVX-512) tier is blocked on magetypes** — the kernel uses `f64x4` (cube-root Newton),
+   and magetypes 0.9.28 still has **no `F64x4Backend for X64V4Token`** (impls exist only for X64V3 /
+   Neon / Wasm128 / Scalar). So `#[magetypes(..., v4, ...)]` cannot compile the f64x4 lane for
+   AVX-512 until magetypes adds that backend. This is the exact cap the xyb.rs:34 comment records.
+**Verdict:** C5's one genuine NEON-only kernel (zenavif `unpremultiply8`) is shipped (`b92880e3`,
+~3.3–3.6×, byte-identical). The v4 extensions are optional perf upgrades; the jxl one is
+magetypes-gated (upstream feature), the zenavif yuv `v4` remains available (pure-f32) but is likewise
+a perf upgrade, not a coverage gap. **Criterion 5 (x86 for every NEON-only kernel) is MET.**
