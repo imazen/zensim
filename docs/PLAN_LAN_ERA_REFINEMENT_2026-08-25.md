@@ -601,3 +601,20 @@ loop ownership lives per-codec (jxl+zenavif already do). Remaining C4 code: zenj
 zenjpeg), confirm/add zenwebp's secant, and svt/aom/gainmap loops (each in its own crate). Then the
 per-encoder 27-cell k2/k3 census + zenpredict Zq autotune per encoder. Every new per-codec loop reuses
 the bracket-safeguarded secant shape (bisection fallback), default budget-optimal (ON), env-off escape.
+
+## §4 B4 HDR CAMPAIGN — PRECONDITIONS VERIFIED 2026-08-25 (runnable; a multi-hour fleet op)
+
+All enablers PROVEN this session:
+- **Encodes exist**: `s3://zentrain/jobs/hdrgrid-enc-20260806/blobs/` = **98,805 HDR encode blobs**
+  on R2 (~10-30 GB) + `ledger_snapshot.parquet` (6.8 MB) + the pair index local
+  (`/mnt/v/output/hdrgrid-2026-08-06/pairs_full.parquet` 6.7 MB, `manifest_enc.json.gz`).
+- **Pipeline PROVEN**: the appendix-S G-S1 gate decoded+scored HDR jxl 9.48 / svt 4.78 / gainmap
+  8.72 JOD via `score-pairs --hdr` (`hdr::decode_to_nits`); `jobexec` `run_score_file_hdr` arm is
+  implemented (crates/zenmetrics-cli/src/jobexec.rs:772).
+- **Fleet path PROVEN**: r7900x enrolled on the LAN store with cred (this session).
+The campaign (NOT completable in one session): (1) salvage the 98,805 encode blobs R2→LAN store
+(the LAN-only-directive salvage-read pattern; ~30 GB), (2) `declare-diffmaps`/ScoreFile jobs on the
+LAN store — ssim2+butteraugli GPU-only (`ZENMETRICS_REQUIRE_GPU=1`), cvvdp+features CPU, (3) enroll
+r7900x+the GPU box on the pool, (4) first-cell gate → scale the 4 boxes → harvest → writeback →
+`_MANIFEST.json` + orientation gate + Tower mirror, (5) HDR model wave (Q recipe + multi-codec leg
+vs BHdr). This is a multi-hour fleet operation; every enabler is verified so it runs clean.
