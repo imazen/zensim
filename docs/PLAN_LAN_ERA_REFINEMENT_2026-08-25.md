@@ -1059,3 +1059,9 @@ stack untouched). Per-arm 944-feature writebacks launched (the per-regime
 batched writer). Next: 944-HDR leg (same recipe as build_hdrgrid372_leg.py,
 regime-labeled, never mixed) → orientation gate → manifests/mirrors →
 registered SOTA-HDR wave.
+
+**hdrgrid944 LEG BUILT (2026-08-26T~17:00Z)**: 944-regime HDR leg from the
+hdrfeat944-zenjxl features (same population/split as the 372 leg), orientation-
+gated, LAN + Tower sha-verified. All three arms' 944 feature tables written +
+mirrored. NEXT: the registered SOTA-HDR wave (arms + gates + endgame frozen
+before any training run) on this leg.
