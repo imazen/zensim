@@ -1204,3 +1204,15 @@ the tower rule — adding cap envs to the launcher is the queued enabler.
   snapshot-fed workers. Consequence: lilith's failure storm cannot poison
   cells (infinite-retry tax only). Recorded as a zenfleet semantic: the
   attempts ladder is inert unless the view carries failure history.
+
+**SIX-BOX DIFFMAP DRAIN (2026-08-26T20:05Z, operator push: "we have 8 cpu
+boxes")**: enrolled everything enrollable — i134 (GPU, unrestricted) + i265 +
+r5900xt + r3500 + **Tower (caps VERIFIED via docker inspect: cpuset 0-23,
+shares 256, mem 40g — the launcher gained ZEN_CPUSET/ZEN_CPU_SHARES/ZEN_MEMORY,
+`116bf83b`)** + **dev itself (capped 0-19/24g — the operator box works too)**,
+all cpu_heavy-routed on the classing-fixed image, all snapshot-consumed at
+boot. Genuinely gated: r5600g (Windows/kids — user approval), r7900x
+(hard-off), lilith (broken WSL, store-blocked), mac (**needs an aarch64
+executor image — no arm tag exists on ghcr; queued build**: aarch64-musl
+zenmetrics with sweep+hdr-gainmap+cpu-metrics + the arm base, then the mac's
+idle-only launchd enrollment).
