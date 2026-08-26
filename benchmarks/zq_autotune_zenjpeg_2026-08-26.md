@@ -72,3 +72,30 @@ target-only anchor — mean secant iterations **3.85 (autotune) vs 3.64 (anchor)
 
 Lesson (again): validate the feature PROVENANCE before trusting a fit. A held-out split does not
 catch leakage when the leaked signal (distorted features) is present in both train and test rows.
+
+## ✅ THE VALID FORMULATION ALREADY EXISTS (found 2026-08-26, post-retraction)
+The correct, non-leaky autotune was already prototyped: **`picker_zenjpeg_A_sourcefeat_v3.bin`**
+(`/mnt/v/zen/picker-dense-full-2026-05-27/`, ZNPR, `leakyrelu_mlp_picker`). Its `.toml` is explicit:
+> Inputs are IMAGE features (feat_*) + **zq_norm (the user's REQUESTED target quality / 100)**. The
+> codec's per-encode q is **NOT an input — q is the decision the picker makes. No q-leakage.**
+
+It ports `zentrain/tools/train_hybrid.py build_dataset`: per (image, target_zq), predict
+`bytes_log = ln(min encoded_bytes over knob cells whose score_zensim ≥ target_zq)` + `reach` mask;
+pick = argmin(bytes, mask=reach). Uses **SOURCE (reference) zenanalyze features**
+(`zenjpeg_source_features_full.tsv` has feat_uniformity / feat_flat_color_block_ratio /
+feat_distinct_color_bins — the same q0-family features).
+
+**So the retraction stands and is now fully explained:** my ridge fit used the bigcodec
+*distorted-side* `f0..f923` (leakage); the picker work correctly used **source features + zq_norm**
+(no leakage) months ago. The valid formulation is proven; my attempt was a regression from it.
+
+**What's genuinely left for a PRODUCTION Zq autotune** (the picker's own recorded follow-ons):
+1. **Dense sweep** — the prototype swept only 5 q levels {10,30,60,80,90}; production needs ~30 q +
+   16-20 log-spaced sizes (per the sweep discipline) — a data-gen task.
+2. **A q_start / scalar head** — the prototype picks categorical knob cells + bytes; a Zq *seed*
+   needs a continuous-q prediction head (the `.toml` lists "scalar prediction heads" as a follow-on).
+3. **Source features for the CURRENT refs** — the 2026-05-27 source-feature set is 321 images; the
+   924-era bigcodec has 2307 refs, whose source features must be extracted (zenanalyze on the refs).
+4. **Wire behind each codec's `auto-tune` feature** (feature-gated per [[feedback_no_zenpredict_in_codecs]]).
+And recall the measured caveat above: for a bracketed-SECANT loop the seed saves ~0 iterations, so
+the autotune's real payoff is **one-shot** (predict-and-encode-once), not loop-seeding.
