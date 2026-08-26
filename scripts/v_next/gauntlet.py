@@ -143,7 +143,7 @@ DEFAULT_LOOP_TARGETING = (
     # frontier arm (candidate + h3-mag own-map + CTRL exp 1.0 / clamp 2.0 +
     # binned attribution): k2 18/27 med 1.19, k3 24/27 med 0.54 — beats the
     # butter comparator (outer_zensimA 12/27 j2, 14/27 j3) at both budgets.
-    "/home/lilith/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-07.json"
+    "/home/lilith/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-26.json"
 )
 LOOP_BAKE_MAP = {
     # loop-model key (summary JSON `models` key, = the sweep TSV run prefix)
@@ -1620,7 +1620,7 @@ function renderLoop(){
     +'show); <b>emit-last</b> = final iterate. Outer arms (<b>j2/j3</b>, marked °) re-encode outside the inner loop, '
     +'judged at outer_iter ≤ 2/3, and sit in the k2/k3 emit-last columns (an outer iterate IS its last emit). '
     +'Hover a cell for median |err|, median bytes and provenance (fresh run vs derived from a committed TSV). '
-    +'Source: <code>'+(meta.source||'jxl-encoder benchmarks/zensim_loop_23shot_summary_2026-08-01.json')+'</code>.'}));
+    +'Source: <code>'+(meta.source||'jxl-encoder benchmarks/zensim_loop_23shot_summary_2026-08-26.json')+'</code>.'}));
   const MODES=[['k2_emit_best','k2 emit-best'],['k3_emit_best','k3 emit-best'],['k2_emit_last','k2 emit-last'],['k3_emit_last','k3 emit-last']];
   const OUTER={k2_emit_last:'j2',k3_emit_last:'j3'};
   const cellOf=(m,mode)=>{const cs=m.cells||{};if(cs[mode])return cs[mode];
