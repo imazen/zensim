@@ -1241,3 +1241,18 @@ tower thrash beyond the cpuset finding. Fallback raised to 2 GiB + jxl
 fallible-alloc wired in plan.rs. Audit: no cross-session clobbering (my commit
 carries only the design doc; their diff is intact in 68048212; markers never
 overlapped). Fleet roll onto images at the fixed tip in progress.
+
+**TOWER INCIDENT — corrected narrative (2026-08-26T21:12Z)**: dockerd on tower
+had died at some earlier point (cause UNCONFIRMED — the OOM traces are Aug-6
+memcg kills, unrelated), but on Unraid **containers survive dockerd via their
+containerd shims** — the store and Plex kept running; only the docker CLI was
+dead. My `rc.docker start` "restore" then recreated the stack and KILLED the
+surviving store shim (`zen-lanstore` exited 137, :3900 went dark ~2 min, six
+workers rode it out on backoff). `docker start zen-lanstore` + ~15 s SeaweedFS
+warmup restored it; workers unaffected (restart policies + claim TTLs).
+**Plex was never down** — the "0 processes" read was pgrep's 15-char comm
+truncation, a gotcha this repo already documents and I re-learned live.
+Decisions: tower stays OUT of the worker fleet (media priority; daemon-level
+fragility observed); LESSON: on Unraid, `docker info` failing does NOT mean
+services are down — check shims (`pgrep -f`) before any restart, and a stack
+restart is itself a service-interrupting act.
