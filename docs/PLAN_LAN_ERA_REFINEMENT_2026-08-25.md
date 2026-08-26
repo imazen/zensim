@@ -734,3 +734,24 @@ Workers self-exit on drain (`ZEN_IDLE_PASSES=8`). Monitor: `/home/lilith/tmp/hdr
 on CPU boxes; (3) `hdrgrid-diffmap`; (4) `writeback_scores.py` → `_MANIFEST.json` +
 orientation gate (`check_target_orientation.py`) + Tower mirror; (5) HDR model wave.
 Teardown a box: `ssh <h> sudo docker rm -f zen-hdr`.
+
+---
+
+## CRITERION-4 STATUS — per-codec OUTER SDR target loops (verified 2026-08-26)
+
+| codec | owns SDR target loop? | search | seed | notes |
+|---|---|---|---|---|
+| jxl-encoder | ✓ `vardct/zensim_loop.rs` | secant (JXL_ZENSIM_SECANT) | — | H3 magnitude steering |
+| zenavif | ✓ `target_quality.rs` | bracketed secant/bisection | `q0_head` (zenpredict) | EXEMPLAR; TargetMetric::{Ssim2,Zensim} |
+| zenwebp | ✓ `encoder/zensim_target.rs` (1766 ln) | one-pair secant + per-segment overrides | anchor table | most advanced |
+| **zenjpeg** | **✓ NEW `target_quality.rs` (`277b1efb`)** | bracketed secant/bisection | anchor_guess | injected-scorer (no zensim cycle); 9 tests |
+
+⇒ **All four main image codecs OWN their SDR target loop.** Remaining criterion-4:
+- **gainmap** (ultrahdr / gainforge): no outer loop — GAP (HDR-side; needs the HDR scores landing now).
+- **zenav1-svt / -aom**: driven by zenavif's loop for AVIF-family; a STANDALONE still loop is optional.
+- **zenpredict Zq autotune seed** per codec (zenavif's `q0_head` is the model) — needs the curated
+  training data (the SDR sets exist; HDR is scoring now).
+- **Production gates** per encoder: census on the 27-cell instrument, dial-mono, RD ≥ baseline under
+  an INDEPENDENT judge (ssim2, never the steering metric), perf bar.
+- **Program D** (deeper): per-encoder diffmap STEERING — svt/aom/rav1e λ-side rdmult, zenjpeg
+  per-block AQ. Separate/harder than the outer loop.

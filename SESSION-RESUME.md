@@ -85,25 +85,36 @@ Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sh
   trade with C (worse CSIQ/KonJND/nonphoto), G-AC3 not met, C still selected. avif944 adopted as a
   standing mix leg @ w≈0.55. zensim `AD.R`/`AD.R.1` (`bf15ed9e`,`1ad91786`). HDR models: NOT started
   (needs the HDR corpus, criterion 2).
-- **C4 LOOPS: secant delivered for 4+ encoders.** (1) jxl in-loop `JXL_ZENSIM_SECANT` + min-|Δln L|
-  guard: on the SHIPPED C recipe **+3 k2 census, −55%/−71% median error** (jxl `1ed4ee72`;
-  `benchmarks/zensim_secant_2026-08-25.md`). (2) outer `zensim-target` bracket-safeguarded secant
-  `ZENSIM_TARGET_SECANT` (serves zenjpeg/zenwebp/zenavif): demo_matrix **median 4 vs 5 iters, faster
-  17/36** (zensim `7e17945e`; plan §5 C9 RESULT; unblocked a stale [patch]). Both default OFF. TODO:
-  decoded-judged jxl A/B; svt/aom/gainmap loops (not in zensim-target CodecKind); zenpredict autotune
-  per encoder; Illinois stall-fix for the outer secant's 1 q-ceiling edge cell.
+- **C4 LOOPS: all 4 main image codecs OWN their SDR target loop (per-codec-ownership directive).**
+  jxl `vardct/zensim_loop.rs` (+`JXL_ZENSIM_SECANT`, `1ed4ee72`); zenavif `target_quality.rs`
+  (bracketed secant/bisection + `q0_head` zenpredict seed — EXEMPLAR); zenwebp `encoder/zensim_target.rs`
+  (VERIFIED 2026-08-26: real one-pair secant + anchor seed + per-segment diffmap overrides, most advanced);
+  **zenjpeg NEW `target_quality.rs` (`277b1efb` on origin/main) — `search_target` + `encode_with_target`,
+  injected-scorer (zensim deps zenjpeg ⇒ cycle ⇒ MUST inject), 9 tests, clippy-clean.** Dep-cycle finding
+  + per-codec table: plan "CRITERION-4 STATUS". TODO: gainmap loop (HDR); zenpredict Zq autotune seed per
+  codec; production gates (census/dial-mono/RD-under-independent-judge/perf); Program-D per-encoder
+  λ-side steering. `zensim-target` (`7e17945e`) is now the shared-algo reference, not the owner.
 - **C5 PERF (x86 SIMD): CLOSED.** Survey: jxl+zenrav1e already dual-arch; only zenavif `unpremultiply8`
   was NEON-only → AVX2 tier shipped (bit-identical + ~3.3-3.6×). zenavif `b92880e3`, zensim `9afa10f8`,
   `benchmarks/simd_x86_gap_survey_2026-08-25.md`.
-- **C2 DATA: imazen-26 ID audit CLEAN + committed** (`78b60142`, scripts/canonical_corpus/
-  audit_imazen26_holdout.py) — no held-out id in any imazen-26-derived view. TODO: dHash+eye cross-corpus
-  follow-up; HDR corpus (hdrgrid) encode/score/harvest (NOT on Tower/LAN — needs a fleet lane); curation.
+- **C2 DATA: HDR corpus scoring LIVE (2026-08-26).** imazen-26 ID audit CLEAN (`78b60142`). HDR:
+  98,805 hdrgrid encode blobs salvaged R2→local; the score jobs were ALREADY DECLARED on R2 (resume,
+  not re-declare) — `hdrgrid-sf-gpu` (ssim2-gpu+iwssim-gpu, hdr:true) was 0/0, now RUNNING. First-cell
+  GATE PASSED (693-pair chunk, 0 errors); scaled to 3 GPU boxes (r7900x/lianli medium, r5900xt small) +
+  i265 on `sf-cpu` (zensim/features). Producing (GPU ~10 chunks + CPU 1263 in ~20 min). Recipe + resume:
+  plan "HDR CAMPAIGN — EXECUTION LOG". TODO: drain → reassign 6GB boxes to `-huge` → `sf2`/butteraugli →
+  `writeback_scores.py` → `_MANIFEST`+orientation gate+Tower mirror → HDR model wave; dHash+eye follow-up; curation.
 - **C7 DOCS:** jxl comment + zenmetrics SeaweedFS doc-truth fixed; plan/survey/campaign records current.
-- **C1 FLEET: at zero** (A1 enroll-script LAN fix pending; A3 cred distribution user-gated). **C6 BROWSER:**
-  located (`~/work/coefficient/viewer`), not extended. **C8 ZENPICKER:** blocked on C4 per-codec completion.
+- **C1 FLEET: 4 boxes BUSY (2026-08-26).** A1 enroll LAN fix landed; A3 cred distribution DONE (R2 creds
+  pushed to r7900x/lianli/r5900xt/i265 — authorized). ssim2+butteraugli GPU-only (`ZEN_REQUIRE_GPU=1`,
+  proven on GTX 1060/1050); cvvdp/zensim/features on CPU (i265). Drain/stall monitor armed
+  (`/home/lilith/tmp/hdr-fleet-monitor.sh`). Note: the vast GPU-score launchers are cloud-only; LAN
+  scoring uses the direct-manifest docker worker (recipe in plan). **C6 BROWSER:** located, not extended.
+  **C8 ZENPICKER:** blocked on C4 autotune/gates.
 
-Next: A1 fleet enroll fix → HDR corpus lane → other-encoder loops. Repo gotchas: zenmetrics=`master`;
-verify pushes with `origin/<branch>` (git) not `main@origin` (jj). Full plan: docs/PLAN + this session's memory.
+Next: HDR GPU buckets drain → reassign to `-huge` + run `sf2`/butteraugli + harvest; then gainmap loop /
+zenpredict Zq autotune. Repo gotchas: zenmetrics=`master`; verify pushes with `origin/<branch>` (git) not
+`main@origin` (jj); after `bookmark set main -r @`+push verify `@-` (push auto-advances @ to an empty child).
 
 ## THE three entry points (a newcomer starts here)
 
