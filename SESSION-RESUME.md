@@ -1,3 +1,40 @@
+## ⚡ 2026-08-26 — LAN-store day: R2 quiet, HDR chain complete, censuses fresh (READ FIRST)
+
+**Store**: the fleet writes ONLY the LAN SeaweedFS (tower :3900). All fleet-job
+data + `refs/` migrated off R2 + byte-verified; launchers resolve via s3env.sh
+(fail-loud, no silent R2 fallback). R2 deletion still user-gated. Ops trail:
+`zenmetrics/docs/INCIDENT_r2_writes_2026-08-26.md`.
+
+**Live fleet** (self-sustaining, teardown+writeback recipes in session memory):
+`hdrfeat944-{zenjxl,svt,gm}-20260826` = 944-regime HDR features over the full
+102,485-cell hdrgrid corpus (3 CPU boxes, image `exec-zensim944hdr-2ffccb36`,
+ZEN_PASS_TIMEOUT=7200); `hdrgrid-diffmap-20260807` = 193k butteraugli+cvvdp HDR
+diffmaps (node-2 GPU). Every other declared queue: DRAINED + auto-paused
+(reconcile `--auto-pause`, zenfleet stale-claim self-heal `702465c9`).
+
+**New canonical data** (see `~/work/zen/DATA_PROVENANCE.md` 2026-08-26 section):
+hdrgrid harvest tables (102,485 × 3 arms, LAN+Tower mirrored, manifested);
+`hdrgrid372-leg` (cvvdp-mix, orientation-gated, 372-regime — never mix with
+944/924); linear baseline val SROCC 0.8105 + registered wave-1 (best MLP 0.8163,
+linear better-calibrated).
+
+**Selection (criterion 3, CURRENT)**: `freeze_check --select` over the 287-bake
+board → **W10L9_s4003** (8/8 floors, sel_comp 0.9842, M3a 0.8626) —
+`benchmarks/freeze_select_2026-08-26.md`.
+
+**Censuses (criterion 4)**: jxl 27-cell census ALL-FRESH on the secant-default
+loop (9 models incl. both W10L9 arms; h3ctrl2 frontier k3_best 25/27 med 0.34) —
+`jxl-encoder benchmarks/zensim_loop_23shot_summary_2026-08-26.json`; gauntlet
+default repointed; board regenerated + gates PASS (287 bakes, 14.5MB — exceeds
+the 12MB-era cap, user ruling pending). zenjpeg zq census 27/27 after the #113
+global-q fix; zenwebp census committed.
+
+**Open user decisions**: zentrain 3-tier plan (`zenmetrics
+docs/R2_ZENTRAIN_TRIAGE_2026-08-26.md`); board size cap; lilith (WSL, RTX 5070)
+power settings — it went dark 11:17Z and is the best GPU.
+
+---
+
 # SESSION-RESUME — read this first after every compact
 
 **Last updated: 2026-08-04 (consolidation wave).** The current era is the
