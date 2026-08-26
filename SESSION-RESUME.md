@@ -102,8 +102,11 @@ Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sh
 - **C2 DATA: HDR corpus scoring LIVE (2026-08-26).** imazen-26 ID audit CLEAN (`78b60142`). HDR:
   98,805 hdrgrid encode blobs salvaged R2→local; the score jobs were ALREADY DECLARED on R2 (resume,
   not re-declare) — `hdrgrid-sf-gpu` (ssim2-gpu+iwssim-gpu, hdr:true) was 0/0, now RUNNING. First-cell
-  GATE PASSED (693-pair chunk, 0 errors); scaled — but r7900x≡lianli (SAME box, ssh-aliased to .27), so ONE 6GB GPU box (serial),
-  r5900xt(2GB)+i265 on CPU `sf-cpu` (zensim/features). Producing (GPU ~10 chunks + CPU 1263 in ~20 min). Recipe + resume:
+  GATE PASSED (693-pair chunk, 0 errors); scaled to **2 GPU boxes**: .27 (GTX 1060 6GB, r7900x≡lianli ssh-aliased) on **sf ssim2/iwssim** +
+  **node-2/i134 (RTX 3070 8GB, .148) on sf2 butteraugli** — parallel, different metrics, no lease
+  contention; sequencers via `lan_gpu_sequence.sh`. 3 CPU boxes (i265+r5900xt+tower) on `sf-cpu`
+  features. sf/sf2-small DONE (r5900xt's 2GB DID do butteraugli-small — 687/687). NOTE: ssim2-gpu
+  failed 15/453 HDR images on sf-huge (3.3% tail, investigate). Producing (GPU ~10 chunks + CPU 1263 in ~20 min). Recipe + resume:
   plan "HDR CAMPAIGN — EXECUTION LOG". TODO: drain → reassign 6GB boxes to `-huge` → `sf2`/butteraugli →
   `writeback_scores.py` → `_MANIFEST`+orientation gate+Tower mirror → HDR model wave; dHash+eye follow-up; curation.
 - **C7 DOCS:** jxl comment + zenmetrics SeaweedFS doc-truth fixed; plan/survey/campaign records current.
