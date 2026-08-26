@@ -30,3 +30,20 @@ real held-out data.
   inference; zenavif's `q0_head` uses 8 CHEAP zenanalyze features for speed, the better production
   design vs the full 924 here). CID22 stays validation-only; train on the curated bigcodec sets.
 - **Per-codec:** the same recipe applies to zenwebp/zenavif/jxl from their bigcodec views.
+
+## PER-ENCODER generalization (all 4 main codecs, TEST split, 2026-08-26)
+Same fit (924 features + target ssim2 → q, ridge λ=10) on each codec's bigcodec 924 view:
+
+| codec | train rows | anchor RMSE(q) | full RMSE(q) | error cut | within ±10 q |
+|---|--:|--:|--:|--:|--:|
+| zenavif_lossy | 775,152 | 18.46 | **4.41** | **76%** | **96%** |
+| zenwebp_lossy | 484,470 | 26.08 | **5.61** | **78%** | **93%** |
+| zenjpeg_lossy | 761,310 | 26.71 | **9.74** | **64%** | **74%** |
+| zenjxl_lossy  | 726,705 | 24.01 | **9.90** | **59%** | **74%** |
+
+**The Zq autotune model generalizes to every main codec** — a feature-based one-shot q predictor
+beats a target-only anchor by 59–78% RMSE, landing within ±10 q on 74–96% of held-out encodes.
+zenavif/zenwebp are especially seedable (±10 q on 93–96%). This is criterion-4's "zenpredict-baked
+Zq one-shot predictor (autotune), per encoder" — the MODEL, validated. The production form (MLP via
+`zensim_mlp_train` → `zenpredict-bake` → wire behind each codec's `auto-tune` feature, using the
+cheap 8-feature q0_head design for inference speed) is the mechanical follow-on.
