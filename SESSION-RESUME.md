@@ -1,3 +1,14 @@
+# SESSION-RESUME — read this first after every compact
+
+**Last updated: 2026-08-26 (LAN-store day; see the ⚡ block below).** The current era is the
+**SOTA-944 model campaign** — pre-registered, five seed/lever waves + two
+ensemble waves, all appended in place in the one authority doc:
+[`benchmarks/sota944_campaign_2026-08-03.md`](benchmarks/sota944_campaign_2026-08-03.md).
+Everything before it (372-era, 720/924-era) is historical context, era-tagged —
+never compare numbers across eras without the doc's era-bridge notes.
+
+## Current true state (2026-08-04)
+
 ## ⚡ 2026-08-26 — LAN-store day: R2 quiet, HDR chain complete, censuses fresh (READ FIRST)
 
 **Store**: the fleet writes ONLY the LAN SeaweedFS (tower :3900). All fleet-job
@@ -34,17 +45,6 @@ docs/R2_ZENTRAIN_TRIAGE_2026-08-26.md`); board size cap; lilith (WSL, RTX 5070)
 power settings — it went dark 11:17Z and is the best GPU.
 
 ---
-
-# SESSION-RESUME — read this first after every compact
-
-**Last updated: 2026-08-04 (consolidation wave).** The current era is the
-**SOTA-944 model campaign** — pre-registered, five seed/lever waves + two
-ensemble waves, all appended in place in the one authority doc:
-[`benchmarks/sota944_campaign_2026-08-03.md`](benchmarks/sota944_campaign_2026-08-03.md).
-Everything before it (372-era, 720/924-era) is historical context, era-tagged —
-never compare numbers across eras without the doc's era-bridge notes.
-
-## Current true state (2026-08-04)
 
 - **★ 2026-08-05: Profile `C` SHIPPED (user-gated)** — the wave-11
   battery-selected `W10L9_s4003_packed` (k=8-confirmed corrected-mix recipe,
