@@ -1186,3 +1186,21 @@ stays GPU-only (criterion 1's split, now enforced by the fixed classing).
 Tower deliberately NOT enrolled: `lan_score_launch.sh` has no cap flags
 (cpuset/cpu-shares/memory) and an uncapped worker on the media server violates
 the tower rule — adding cap envs to the launcher is the queued enabler.
+
+**Parity + roll + zombie (2026-08-26T19:5xZ)**:
+- **CPU-vs-GPU butteraugli diffmap: BIT-IDENTICAL** (one sampled cell recomputed
+  on the GPU image: output sha `57ee3543…` equal on both paths) — the 3,180
+  CPU-made maps are valid; provenance concern dissolved (n=1 sample, but any
+  divergence would show at byte level).
+- CPU boxes rolled to `exec-zensim944hdr-9cae2b20` (classing-fixed worker) —
+  they stop claiming butteraugli; verifier confirms post-roll.
+- **lilith (WSL) is failing at the OS layer**: docker rm bus-errors, systemctl
+  segfaults, home dir read-only/I/O errors — while its STALE-image worker
+  zombie keeps scoring (1,626 done + 1,259 failed per 10 min; the failures are
+  the gm-decode class). USER ACTION NEEDED: `wsl --shutdown` from Windows.
+  Tower-side :3900 block attempted; IP unresolvable so far (WSL NAT egress).
+- **Poison-safety finding**: snapshot views are done-rows-only, so failed
+  attempts always recompute as 1 — no escalation to Poison ever happens under
+  snapshot-fed workers. Consequence: lilith's failure storm cannot poison
+  cells (infinite-retry tax only). Recorded as a zenfleet semantic: the
+  attempts ladder is inert unless the view carries failure history.
