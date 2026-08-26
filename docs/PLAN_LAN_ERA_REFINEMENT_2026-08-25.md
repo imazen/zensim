@@ -1051,3 +1051,11 @@ stay premature (no turnkey encode API yet — recorded above).
 **avifgen-enc migration COMPLETE (2026-08-26T16:46Z)**: R2→LAN, 542,483==542,483
 objects verified, 16.6 GiB — the avifgen set's encode+score+feature persistence
 is fully on the LAN store (scores+features also Tower-mirrored).
+
+**hdrfeat944 COMPLETE (2026-08-26T16:48Z)**: all three arms gap==0 in ~8 h
+(reconcile `--auto-pause` caught them re-scoring done cells at 3.8–6.7× tax
+and paused all three). CPU workers torn down (r5900xt, i265, tower — media
+stack untouched). Per-arm 944-feature writebacks launched (the per-regime
+batched writer). Next: 944-HDR leg (same recipe as build_hdrgrid372_leg.py,
+regime-labeled, never mixed) → orientation gate → manifests/mirrors →
+registered SOTA-HDR wave.
