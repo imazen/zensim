@@ -917,3 +917,20 @@ scored data in `{base}/{dataset}/*.parquet` form WITH encoded_bytes+dims (extrac
 artifacts / the encode job's per-variant metadata), then `rollup_zenmetrics.py --base <lan-set>` +
 a set-selector. The 07-01 zensimA set must NOT be unioned with a LAN 944-profile set (different
 zensim profile). So C6 is FUNCTIONAL now; full LAN coverage is a data-availability task, not a viewer bug.
+
+### CORRECTION (2026-08-26) — svt/aom ARE cloned; the real blocker is they're low-level ports
+Two wrong things I'd said, both fixed:
+- **"svt/aom repos not cloned locally" was FALSE** (stale index) — `~/work/zen/zenav1-aom` (401 .rs,
+  workspace: crates/{zenav1-aom,aom-encode,aom-decode,aom-dsp,...}) and `~/work/zen/zenav1-svt`
+  (202 .rs) are both fully cloned. I never needed to ask to clone a dependency.
+- **The REAL reason their zensim target loop isn't done:** they are **AV1 encoder ALGORITHM PORTS
+  in progress** — `aom-encode` exposes block/SB/OBU-level functions (`encode_block_coeffs`,
+  `encode_sb_dry`, `obu_assemble → Vec<u8>`), validated module-by-module against C (CHANGELOG:
+  transform/quant/txb/cdef/restore/intra/loopfilter/dist/inter). There is **no turnkey
+  `encode(image, cq)→bytes` entry, no image-encode example/CLI, and no zenavif integration yet.** A
+  bracketed-secant target loop needs a single-call encode-at-quality to iterate over; that doesn't
+  exist here yet. So the loop is **premature**, not blocked on cloning or on me. The AV1 target loop
+  TODAY is **zenavif's** (`encode_rgb8_with_target`, rav1e/zenrav1e which ARE turnkey); zenav1-aom/svt
+  get their own outer loop when their high-level encode API lands. (Program-D λ-side rdmult steering
+  is the deeper per-encoder work, also awaiting that API.) Loop-ownership map + zenjpeg's tested
+  `target_quality.rs` remain the template to copy the moment a turnkey encode entry exists.

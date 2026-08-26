@@ -100,7 +100,7 @@ Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sh
   feature-gated per [[feedback_no_zenpredict_in_codecs]]): MLP via zensim_mlp_train → zenpredict-bake →
   wire behind each codec's auto-tune feature (cheap 8-feature q0_head design for inference; zenjpeg CAN
   dep zenanalyze, no cycle). Other TODO: gainmap loop (HDR, needs HDR-zensim); production gates
-  (census/dial-mono/RD-under-independent-judge/perf); svt/aom loops (repos not cloned locally);
+  (census/dial-mono/RD-under-independent-judge/perf); svt/aom loops (cloned; but they're low-level AV1 algorithm ports with no turnkey encode-at-quality API yet — loop is premature, not blocked on cloning);
   Program-D per-encoder λ-side steering. `zensim-target` (`7e17945e`) is the shared-algo reference.
 - **C5 PERF (x86 SIMD): CLOSED.** Survey: jxl+zenrav1e already dual-arch; only zenavif `unpremultiply8`
   was NEON-only → AVX2 tier shipped (bit-identical + ~3.3-3.6×). zenavif `b92880e3`, zensim `9afa10f8`,
