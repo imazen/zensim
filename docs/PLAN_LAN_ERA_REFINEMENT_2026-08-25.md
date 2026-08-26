@@ -836,3 +836,11 @@ viewer serves the 07-01 SDR canonical set only.
   proven — GTX 1050 2GB CANNOT and skipped, only the 1060 6GB scores); zensim/features on CPU.
 - **wall clock:** GPU wave START 01:03:40Z (small drained in 19s, huge in progress). sf-cpu
   1254→1299 in ~73 min pre-tower; tower's 24 cores should raise the CPU rate (re-measure next pass).
+
+### GPU VRAM finding (2026-08-26): butteraugli needs >2 GB; ssim2 fits 2 GB
+Tried offloading `sf2-gpu-small` (butteraugli) to r5900xt's GTX 1050 (2 GB) to parallelize the
+GPU-bound path. It **skipped all 687 cells** (done=0, GPU capability/VRAM check fails for
+butteraugli-gpu on 2 GB) — whereas the same card DID score `sf-gpu-small` (ssim2, 687/687). So:
+**ssim2-gpu fits 2 GB (small images); butteraugli-gpu does NOT.** The 2 GB card is CPU-only for
+sf2; all 6 GPU buckets run on the one 6 GB box (.27) via the sequencer. r5900xt returned to CPU
+`sf-cpu`. (Its `--restart unless-stopped` would have restart-looped on the all-skip drain — stopped it.)
