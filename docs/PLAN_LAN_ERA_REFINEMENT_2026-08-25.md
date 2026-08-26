@@ -1095,3 +1095,14 @@ have not completed, so their rows have not flushed; distinct_done should step
 when the first mixed chunks land. 60-min adjudicator armed (bar 51,267):
 advance = benign flush-ordering; still frozen = real chunk-execution bug →
 deep-dive. (The pass-timeout kill is FIXED regardless — 86400s.)
+
+**Diffmap adjudicated: SILENT-RESPAWN DEFECT (2026-08-26T19:10Z)**: another
+frozen hour ruled out flush-ordering. Signature: jobexec children live ~5 s at
+66-135% CPU, endlessly respawned; the container's whole 2 h log = 5 startup
+lines; ZERO ledger rows (not even failures). OWNER DEFECT (zenfleet-worker):
+a child that dies must produce a FAILED ledger row + captured stderr + backoff
+— an invisible retry-spin is the worst failure mode a fleet can have. Prime
+death suspect: huge HDR diffmap cells OOMing the 8 GB 3070 — my 17:20 relaunch
+DROPPED the VRAM cap (Strip mode). Relaunched with ZEN_VRAM_CAP=5 GiB;
+15-min checker adjudicates. The owner fix (record+log+backoff) is queued
+regardless of the cap verdict.
