@@ -1065,3 +1065,13 @@ hdrfeat944-zenjxl features (same population/split as the 372 leg), orientation-
 gated, LAN + Tower sha-verified. All three arms' 944 feature tables written +
 mirrored. NEXT: the registered SOTA-HDR wave (arms + gates + endgame frozen
 before any training run) on this leg.
+
+### C3 HDR UPDATE 2026-08-26 — first registered 944-HDR wave COMPLETE
+Chain closed same-day: hdrfeat944 fleet run → per-arm writebacks → hdrgrid944
+leg (orientation-gated, mirrored) → linear floor 0.7609 → frozen registration →
+6 arms → **G-W1/G-W2 PASS, best `wave1_h64_s3` val SROCC 0.8130** (372-route
+best 0.8163; MLP shrinks the front-end gap from −0.050 linear to −0.0033).
+HONEST remaining C3-HDR scope: this is the wave-measured HDR candidate on the
+leg's own registered read — a freeze_check-grade HDR selection needs HDR eval
+instrumentation (fulleval-class corpora/board for HDR), which stays the
+registered next lever alongside the HDR-specific append features.
