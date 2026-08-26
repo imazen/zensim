@@ -90,7 +90,9 @@ Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sh
   (bracketed secant/bisection + `q0_head` zenpredict seed — EXEMPLAR); zenwebp `encoder/zensim_target.rs`
   (VERIFIED 2026-08-26: real one-pair secant + anchor seed + per-segment diffmap overrides, most advanced);
   **zenjpeg NEW `target_quality.rs` (`277b1efb` on origin/main) — `search_target` + `encode_with_target`,
-  injected-scorer (zensim deps zenjpeg ⇒ cycle ⇒ MUST inject), 9 tests, clippy-clean.** Dep-cycle finding
+  injected-scorer (zensim deps zenjpeg ⇒ cycle ⇒ MUST inject), 9 unit tests + a REAL-CODEC production
+  gate (`79935f20`, tests/target_quality_real.rs, feat=zencodec: encode→decode→fast_ssim2, MEASURED
+  6/6 target convergence, k2 1/6 k3 2/6 — a Zq seed would cut iters).** Dep-cycle finding
   + per-codec table: plan "CRITERION-4 STATUS". TODO: gainmap loop (HDR); zenpredict Zq autotune seed per
   codec; production gates (census/dial-mono/RD-under-independent-judge/perf); Program-D per-encoder
   λ-side steering. `zensim-target` (`7e17945e`) is now the shared-algo reference, not the owner.
