@@ -1163,3 +1163,15 @@ my last-48h conclusions:
    all already written down within 48 h of me re-deriving them wrong.
 Relaunched: concurrent mode, fixed image, snapshot present, VRAM cap; the
 checker gates on distinct_done rising (the only honest progress metric here).
+
+**DIFFMAP RESOLVED (2026-08-26T19:23Z)**: on the fixed stack (snapshot consumed
+— boot heartbeat `snap=3627309` vs the previous boots' `snap=none` — + classing
+fix `9cae2b20` + VRAM cap, concurrent mode), **distinct_done rose 51,267 →
+52,339 (+1,072 fresh cells) within 2 minutes**, failed-only falling, rescore
+tax 2.44→2.41 and dropping. At this rate the 141k gap drains in hours, not
+days. Standing operator action until the ADR's Nomad periodic job lands:
+REFRESH THE SNAPSHOT (`compact_ledgers.py <run>` + upload) on any long run —
+the silent no-snapshot state is the whole tax. Drain completion signal = the
+worker's self-exit (armed waiter). Queued zenfleet owner items stand as
+recorded: partial-chunk flush/heartbeat, honest diffmap cost model, child
+stderr surfacing, non-silent snapshot fetch.
