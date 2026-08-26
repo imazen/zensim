@@ -5,6 +5,21 @@ The user's premise was "jxl and avif are only arm optimized at this time". This
 survey (read-only, source-verified 2026-08-25) tests that premise. **It is mostly
 false for jxl and true for exactly one hot zenavif kernel.**
 
+> **UPDATE 2026-08-26 — the one mandatory gap is CLOSED.** Task #1 (zenavif
+> `unpremultiply8` x86 tier) shipped in `zenavif` commit `b92880e` ("feat(simd):
+> x86 AVX2 tier for unpremultiply8"): a `Desktop64`/AVX2 kernel
+> (`src/simd/unpremul.rs:112`) with the dispatch (`:189`) now routing x86_64 to it
+> instead of the scalar fallback. Verified 2026-08-26 on an x86_64 box: the
+> **exhaustive `(channel, alpha)` oracle passes bit-exact** through
+> `unpremultiply8_dispatch` (`exact_over_complete_domain`, `tail_lengths_exact`,
+> `edge_alpha_semantics` all green — on x86 these exercise the AVX2 path). So the
+> mandatory half of criterion 5 is DONE; only the two OPTIONAL `v4`/AVX-512 tier
+> extensions below (tasks #2, #3 — speedups on AVX-512 hardware, not arch gaps)
+> remain, each with the noted prerequisite (jxl `f64x4` AVX-512 mapping check;
+> zenavif magetypes `0.9.15 → 0.9.27` bump). The module doc-comment header of
+> `unpremul.rs` still reads "NEON unpremultiply" and predates the AVX2 body — a
+> cosmetic staleness, not a functional gap.
+
 Method: grep each repo's `src/` for aarch64/NEON SIMD (`core::arch::aarch64`,
 `neon`, `vld1`/`vld4`, `target_feature(enable="neon")`), then check each NEON
 kernel for an x86 sibling (`core::arch::x86_64`, `avx2`/`avx512`, or a
@@ -17,7 +32,7 @@ generic bodies are multi-arch by construction and are NOT gaps.
 |---|---|---|
 | **jxl-encoder** | NOT NEON-only — criterion effectively CLOSED | YES, `0.9.27` (current); already forwards an `avx512` feature |
 | **zenrav1e** | NOT NEON-only — x86 is strictly AHEAD (has `ec`/`lrf`/`quantize` asm modules aarch64 lacks) | NO (only transitive in Cargo.lock) — don't add for this |
-| **zenavif** | ONE genuine gap: `unpremultiply8` | YES but STALE `0.9.15` (jxl is on 0.9.27) |
+| **zenavif** | ~~ONE genuine gap: `unpremultiply8`~~ → **CLOSED 2026-08-26 (`b92880e`, AVX2 tier, exhaustive oracle verified on x86)** | STALE `0.9.15` — but the AVX2 tier is hand-written via `core::arch::x86_64` + `Desktop64` (the lower-risk path the work-list named), so the magetypes bump was NOT needed for task #1 |
 
 ### jxl-encoder — closed
 43 hand-written NEON/AVX2 kernel pairs + 6 magetypes-consolidated bodies
@@ -34,7 +49,7 @@ shared `impl_1d_tx!` body). Nothing NEON-only.
 
 ## The work-list (ranked)
 
-### 1. zenavif `unpremultiply8` — THE only real x86 arch gap, and it is hot
+### 1. zenavif `unpremultiply8` — ✅ CLOSED 2026-08-26 (`b92880e`) — was THE only real x86 arch gap, and it is hot
 - `zenavif/src/simd/unpremul.rs:75` (NEON kernel); dispatch `:122` has only an
   `aarch64` arm → x86/wasm hit `unpremultiply8_scalar` (`:110`).
 - Runs once per row on every **alpha-bearing** AVIF, buffered
