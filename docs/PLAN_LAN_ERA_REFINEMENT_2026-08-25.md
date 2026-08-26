@@ -1314,3 +1314,17 @@ the next image build (fleet is stopped pending tower cache space anyway —
 perfect roll window). Meta-lesson banked: cargo test filters are SUBSTRINGS
 (no `\|` alternation) and a green guard must require "N>0 passed", not
 "0 failed".
+
+**INVARIANT 1 LANDED (zenmetrics 3f22dfd50c88)**: progress-conditioned lease renewal —
+each chunk's claim is overwritten by its holder with fresh ts + done/total as
+completions accumulate (~total/10 cadence); zero progress means zero renewals
+means TTL lapse means steal: wedge-holders lose their lease BY CONSTRUCTION,
+no timers, call sites untouched (ChunkParams.renew hook; read_claim first-token
+parse keeps every steal-side reader compatible). Anti-wedge set now
+**7 of 9 implemented with tests** (1,2,3,4,6,7,9); remaining: 5 (capability
+gating at claim — rides the orchestrator capability cache) and 8 (Nomad ADR
+P2/P3). Honest trail: zenmetrics a2d0d115 is an EMPTY commit carrying this
+feature's message (patch aborted pre-apply, weak green-guard let it through;
+superseded by 3f22dfd50c88; guards now demand "N>0 passed" + explicit exit gates).
+Bonus fix: ETXTBSY spawn retry at all three worker spawn sites (fork-race the
+new fork-heavy tests exposed).
