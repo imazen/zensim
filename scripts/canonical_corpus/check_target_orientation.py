@@ -124,7 +124,7 @@ EXPECTED_ORIENTATION = {
     # independent-label test — human_score derives 50% from score_cvvdp. The
     # registered caveat lives in Appendix Q §Q.1.
     "hdr_v3mix": QUALITY,
-    "hdrgrid372": QUALITY,
+    "hdrgrid372", "hdrgrid944": QUALITY,
 }
 
 # Known eval roots for --all-roots. (root, {corpus: filename})
@@ -362,7 +362,8 @@ KEYED_GROUND_TRUTH = {"sdr25": sdr25_ground_truth_keyed,
 # table (declared-weaker consistency checks; loader takes (path, hs)).
 INTABLE_GROUND_TRUTH = {"hdr_v3mix": hdr_v3mix_ground_truth_intable,
                         # hdrgrid372 leg (2026-08-26 harvest) carries the same in-table shape
-                        "hdrgrid372": hdr_v3mix_ground_truth_intable}
+                        "hdrgrid372": hdr_v3mix_ground_truth_intable,
+    "hdrgrid944": hdr_v3mix_ground_truth_intable}
 
 # ---------------------------------------------------------------------------
 # TARGET PROVENANCE of every leg in the SOTA-944 training mix, and therefore
