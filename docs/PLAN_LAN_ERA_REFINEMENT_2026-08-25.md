@@ -1175,3 +1175,14 @@ the silent no-snapshot state is the whole tax. Drain completion signal = the
 worker's self-exit (armed waiter). Queued zenfleet owner items stand as
 recorded: partial-chunk flush/heartbeat, honest diffmap cost model, child
 stderr surfacing, non-silent snapshot fetch.
+
+**THREE-BOX DIFFMAP DRAIN (2026-08-26T19:25Z)**: first-cell gate on the CPU
+image passed (one cvvdp diffmap cell, rc=0, 2.83 MB map — the CPU hdr image's
+`hdr` feature carries the whole diffmap route), so i265 + r5900xt enrolled with
+`ZEN_CAPABILITY=cpu_heavy` (launcher now forwards it, `8c4e344b`) alongside
+i134's GPU worker — all three booted snapshot-consumed (`snap=3627309`).
+Capability routing means the CPU boxes pull only the cvvdp half; butteraugli
+stays GPU-only (criterion 1's split, now enforced by the fixed classing).
+Tower deliberately NOT enrolled: `lan_score_launch.sh` has no cap flags
+(cpuset/cpu-shares/memory) and an uncapped worker on the media server violates
+the tower rule — adding cap envs to the launcher is the queued enabler.
