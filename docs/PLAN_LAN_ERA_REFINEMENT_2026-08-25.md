@@ -968,3 +968,14 @@ the enc-mode facet). Regen recipe: `viewer/static/data-hdrgrid/README.md`.
 **Remaining for full C6**: avifgen + bigcodec-924 + hdrfeat944 sets still need
 their writeback/scored-RD parquets before they can be rolled (data-availability,
 not viewer work).
+
+### C4 UPDATE 2026-08-26 — zenjpeg Zq seed SHIPPED ($ZQSHA-era, zenjpeg main 9f130cf03cf6)
+First per-codec Zq autotune seed landed via a pre-registered wave
+(zenjpeg `benchmarks/zq_seed_wave_2026-08-26.md`): fitted-constants head
+(q0_head exemplar), labels = 96,894 PAVA-isotonized 7-pt q→zensim curves from
+the 07-01 canonical set. First arm FAILED the frozen gate honestly (189
+deep-undershoot regressions at 25.7% improvement); registered arm B
+(seed clamp [anchor−18,+12], frozen L rule) → **zero regressions, −13.5%
+encodes, G-Z2 PASS** → `zenjpeg/src/zq_seed.rs`. Remaining Zq clause:
+zenwebp/jxl/zenavif-zensim analogs (same recipe; zenavif has its ssim2
+q0_head already), each its own registered wave.
