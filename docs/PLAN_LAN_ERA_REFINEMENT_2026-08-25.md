@@ -673,3 +673,64 @@ One capped (8-min) GPU worker launched on r7900x → log confirms `GPU-only scor
 visible GPU: GTX 1060 6GB`, manifest fetched (8.29 MB), **claimed 1 cell**. Watching for the
 first DONE row (gate PASS) vs worker-exit (gate reveals HDR-decode/`hdr:true` blocker). Result
 appended below once the watcher fires.
+
+---
+
+## CRITERION-4 DESIGN — the dependency-cycle finding (2026-08-26)
+
+**`zensim` depends on `zenjpeg` + `zenpng`** (`zensim/zensim/Cargo.toml`: `zenjpeg
+0.8.4 features=[decoder]`, `zenpng` workspace — used to decode test images in
+zensim's own harness). Therefore:
+
+| codec | can it `dep zensim`? | target-loop scorer wiring |
+|---|---|---|
+| zenavif | YES (zensim ⊬ zenavif) | already does — `TargetMetric::{Ssim2,Zensim}`, `target_quality.rs` |
+| zenwebp | YES | already does — `ZensimTarget` |
+| jxl-encoder | YES | already does — `vardct/zensim_loop.rs` (+ secant, this session) |
+| **zenjpeg** | **NO — CYCLE** (zensim → zenjpeg) | **must inject** `FnMut(ref,dec)->f64` |
+| **zenpng** | **NO — CYCLE** (zensim → zenpng) | must inject (if it ever needs a loop) |
+| zenav1-svt / -aom | standalone: no zensim dep today | inject, or driven by zenavif's loop |
+| gainmap (ultrahdr/gainforge) | n/a | inject |
+
+**⇒ The uniform "each codec owns its diffmap secant + loop" design is the
+INJECTED-SCORER pattern**, not a baked zensim dep: the codec owns the loop
+MECHANICS (secant math ε̂=ΔlnL/ΔlnS, bracket-safeguard, monotone selection =
+smallest file in the target band, encode→decode per trial, a q0/Zq seed head),
+and takes the metric as a closure. zenavif/zenwebp/jxl bake zensim because they
+CAN (no cycle) and it's ergonomic; zenjpeg/zenpng MUST inject. The zenavif
+`encode_rgb8_with_target(img, config, target, options, stop)` contract +
+`q0_head::predict_q0_for_rgb8` (the zenpredict autotune seed) is the EXEMPLAR to
+mirror. `zensim-target` becomes the thin dispatcher that picks the codec and, for
+the inject-only codecs, supplies the zensim `codec_target`-profile scorer closure.
+
+**zenjpeg loop plan (next deliverable):** new `zenjpeg/src/target_quality.rs`:
+`encode_rgb8_with_target(img, &EncoderConfig, target_zdsim: f64, scorer: &mut
+dyn FnMut(&DecodedRef, &Decoded) -> f64, opts)` → bracketed secant/bisection over
+q∈[1,100] on the monotone (q→score) curve, selection = smallest byte-size iterate
+in [target−tol, ∞), `converged` flag, injected scorer (no zensim dep). Seed from a
+fixed anchor curve first; a zenpredict Zq head is the autotune follow-up. Gate:
+census on the 27-cell instrument + dial-mono + RD≥baseline under an independent
+judge (ssim2, NOT the steering metric) + a perf bar. Owner test lives in a zenjpeg
+example/bench with a `dev-dependency` on zensim (dev-deps don't form the cycle).
+
+### GATE RESULT: **PASS** (2026-08-26T00:19Z) + FLEET SCALED
+First r7900x GPU worker scored a **693-pair chunk, all `status=done`, zero
+`error_class`** → the HDR GPU path is proven end-to-end (GPU-only enforce · R2 HDR
+blob fetch · HDR decode · ssim2-gpu+iwssim-gpu on GTX 1060 · DONE ledger rows +
+`output_sha` sidecars). The zenfleet ledger is a job-STATUS ledger (done +
+output_sha); scores live in the output sidecars → harvest with
+`scripts/jobsys/writeback_scores.py`.
+
+**Scaled to all 3 LAN GPU boxes** (uncapped, `--restart unless-stopped`, `--gpus
+all`, `ZEN_REQUIRE_GPU=1`, container `zen-hdr`, image `exec-gpu-avifgen-66e3c417`):
+- r7900x (1060 6GB) + lianli (1060 6GB) → `hdrgrid-sf-gpu` (medium, **2280** cells; shared via R2 lease)
+- r5900xt (1050 2GB) → `hdrgrid-sf-gpu-small` (**687** cells)
+- `hdrgrid-sf-gpu-huge` (**453**, 6GB-only) queued next — reassign r7900x/lianli when medium drains.
+Workers self-exit on drain (`ZEN_IDLE_PASSES=8`). Monitor: `/home/lilith/tmp/hdr-fleet-monitor.sh`
+→ `hdr-fleet-progress.log` + `hdr-fleet.done` on drain/stall(>30min).
+
+**Remaining HDR steps** (after GPU buckets drain): (1) reassign 6GB boxes to `-huge`;
+(2) run the `sf2` GPU wave (butteraugli) + finish `sf-cpu` (cvvdp+features, 1254→done)
+on CPU boxes; (3) `hdrgrid-diffmap`; (4) `writeback_scores.py` → `_MANIFEST.json` +
+orientation gate (`check_target_orientation.py`) + Tower mirror; (5) HDR model wave.
+Teardown a box: `ssh <h> sudo docker rm -f zen-hdr`.
