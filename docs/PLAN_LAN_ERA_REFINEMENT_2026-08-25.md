@@ -1355,3 +1355,13 @@ NOTE §1.3's "no secant controller exists" is STALE: S1/S2-shape secant landed
 08-25 (JXL_ZENSIM_SECANT, benchmarks/zensim_secant_2026-08-25.md — k2 census
 17/27 vs 16/27, med|err| 0.951 vs 1.428; k3 med 0.297 vs 0.433). §5 remaining:
 min-|Δln L| guard, S3 per-tile gain, S4 elasticity prior, C2..C9.
+
+**§5 DECODED-JUDGED SECANT A/B DONE (jxl-encoder 7127af69b09d, 2026-08-26)**: accuracy
+CONFIRMED on decoded scores (k2 census 18→22/23 of 27, med|err| −55%; k3
+24→25/27, med −39%; engagement 23-27/27 bitstreams differ) — but every secant
+arm costs +1.8..2.0% bytes and the frozen S1 rule caps at ±1%, so the arm is
+REPORTED NOT ADOPTED (default OFF). Analysis: the control undershoots the
+target; the secant's bytes are mostly target-hitting. Registered open
+question for the user: rate-matched read (mm-F3 shape) vs bytes-bar
+amendment. S3 per-tile secant gain LANDED default-OFF (ca32d08f) — its
+instrument A/B is next.
