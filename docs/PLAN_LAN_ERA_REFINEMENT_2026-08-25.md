@@ -1360,8 +1360,9 @@ min-|Δln L| guard, S3 per-tile gain, S4 elasticity prior, C2..C9.
 CONFIRMED on decoded scores (k2 census 18→22/23 of 27, med|err| −55%; k3
 24→25/27, med −39%; engagement 23-27/27 bitstreams differ) — but every secant
 arm costs +1.8..2.0% bytes and the frozen S1 rule caps at ±1%, so the arm is
-REPORTED NOT ADOPTED (default OFF). Analysis: the control undershoots the
-target; the secant's bytes are mostly target-hitting. Registered open
-question for the user: rate-matched read (mm-F3 shape) vs bytes-bar
-amendment. S3 per-tile secant gain LANDED default-OFF (ca32d08f) — its
+REPORTED NOT ADOPTED (default OFF). Analysis (corrected 3ee7f324ab69): the
+control lands HIGH on mean (+1.8/+1.9 at k2), the secant near zero — aggregate
+bias does NOT explain the bytes; only a per-cell rate-matched read can.
+Registered open question for the user: rate-matched read (mm-F3 shape) vs
+bytes-bar amendment. S3 per-tile secant gain LANDED default-OFF (ca32d08f) — its
 instrument A/B is next.
