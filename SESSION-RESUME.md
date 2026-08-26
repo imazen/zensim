@@ -100,14 +100,14 @@ Per-criterion state (committed shas; `git -C <repo> merge-base --is-ancestor <sh
 - **C2 DATA: HDR corpus scoring LIVE (2026-08-26).** imazen-26 ID audit CLEAN (`78b60142`). HDR:
   98,805 hdrgrid encode blobs salvaged R2→local; the score jobs were ALREADY DECLARED on R2 (resume,
   not re-declare) — `hdrgrid-sf-gpu` (ssim2-gpu+iwssim-gpu, hdr:true) was 0/0, now RUNNING. First-cell
-  GATE PASSED (693-pair chunk, 0 errors); scaled to 3 GPU boxes (r7900x/lianli medium, r5900xt small) +
-  i265 on `sf-cpu` (zensim/features). Producing (GPU ~10 chunks + CPU 1263 in ~20 min). Recipe + resume:
+  GATE PASSED (693-pair chunk, 0 errors); scaled — but r7900x≡lianli (SAME box, ssh-aliased to .27), so ONE 6GB GPU box (serial),
+  r5900xt(2GB)+i265 on CPU `sf-cpu` (zensim/features). Producing (GPU ~10 chunks + CPU 1263 in ~20 min). Recipe + resume:
   plan "HDR CAMPAIGN — EXECUTION LOG". TODO: drain → reassign 6GB boxes to `-huge` → `sf2`/butteraugli →
   `writeback_scores.py` → `_MANIFEST`+orientation gate+Tower mirror → HDR model wave; dHash+eye follow-up; curation.
 - **C7 DOCS:** jxl comment + zenmetrics SeaweedFS doc-truth fixed; plan/survey/campaign records current.
 - **C1 FLEET: 4 boxes BUSY (2026-08-26).** A1 enroll LAN fix landed; A3 cred distribution DONE (R2 creds
-  pushed to r7900x/lianli/r5900xt/i265 — authorized). ssim2+butteraugli GPU-only (`ZEN_REQUIRE_GPU=1`,
-  proven on GTX 1060/1050); cvvdp/zensim/features on CPU (i265). Drain/stall monitor armed
+  pushed to r7900x/lianli/r5900xt/i265 — authorized). ssim2+butteraugli GPU-only (`ZEN_REQUIRE_GPU=1`, proven on the ONE GTX 1060 6GB .27; the
+  GTX 1050 2GB is too small→CPU); cvvdp/zensim/features on CPU (i265). Drain/stall monitor armed
   (`/home/lilith/tmp/hdr-fleet-monitor.sh`). Note: the vast GPU-score launchers are cloud-only; LAN
   scoring uses the direct-manifest docker worker (recipe in plan). **C6 BROWSER:** located, not extended.
   **C8 ZENPICKER:** blocked on C4 autotune/gates.

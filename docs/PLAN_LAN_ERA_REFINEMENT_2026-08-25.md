@@ -771,3 +771,18 @@ Teardown a box: `ssh <h> sudo docker rm -f zen-hdr`.
   then `writeback_scores.py` → `_MANIFEST` + orientation gate + Tower mirror. Same docker-run recipe as
   the "LAN GPU worker recipe" above, swapping `ZEN_RUN`/`ZEN_MANIFEST_URI`/`ZEN_CONTROL_KEY` + a unique
   `ZEN_WORKER`. Fix `hdr-gpu-scale.sh` to pass the name via `-e` from an env var, not heredoc interpolation.
+
+### ⚠ FLEET CAPACITY CORRECTION (2026-08-26) — only ONE 6 GB GPU box
+`~/.ssh/config` has `Host r7900x lianli → 192.168.50.27` — **both aliases are the SAME physical
+box** (hostname `r7900x`, one GTX 1060 6 GB). So the earlier "scaled to 3 GPU boxes" was wrong:
+- **.27 (r7900x≡lianli): the ONLY 6 GB GPU box** — GPU scoring is SERIAL here. Running TWO GPU
+  containers on it (the medium "2-worker" launch) contended for the single 6 GB card → the OOM
+  `failed=9` cells. Run ONE GPU worker at a time on .27.
+- r5900xt (.250): GTX 1050 **2 GB** — too small for the GPU metric (skipped all cells, GPU 0%) →
+  CPU worker only.
+- i265 (.140): no GPU → CPU worker.
+NODES.md lists lianli + r7900x as separate nodes (different MACs); the real second box (lianli
+`74:56:3c:b8:45:8d`) is either down or the config conflates them — a WoL/config follow-up could
+recover a second GPU. Until then: GPU = 1 box (serial), CPU = i265 + r5900xt. GPU buckets run
+sequentially via `lan_score_launch.sh` single-run (pool mode is tar/enc-oriented, doesn't fit the
+HDR direct-blob score jobs). Sequence on .27: small → huge → medium-leftovers → sf2(butteraugli).
