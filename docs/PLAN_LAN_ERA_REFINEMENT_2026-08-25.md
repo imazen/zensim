@@ -1075,3 +1075,13 @@ HONEST remaining C3-HDR scope: this is the wave-measured HDR candidate on the
 leg's own registered read — a freeze_check-grade HDR selection needs HDR eval
 instrumentation (fulleval-class corpora/board for HDR), which stays the
 registered next lever alongside the HDR-specific append features.
+
+**Diffmap pass-timeout bug (2026-08-26T17:20Z)**: ZEN_PASS_TIMEOUT=7200 (sized
+for hdrfeat944's per-pass cells) KILLED node-2's productive pass-1 at 2 h
+(rc=124; the entrypoint labels it "worker hung" — mislabel, the log shows
+active work). For single-run whole-queue mode the pass ≈ the queue: relaunched
+with ZEN_PASS_TIMEOUT=86400. Secondary observation under watch: pass-2
+converted the failed pool (40.8k→51.3k distinct done) then emitted ~30 min of
+100%-duplicate done rows (newest chunks 14/375/49 rows, 0 fresh) — either
+mostly-done mixed chunks flushing separately (benign tax) or a view gap; the
+armed 45-min checker adjudicates post-restart.
