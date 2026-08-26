@@ -1002,3 +1002,16 @@ bookworm GPU rebuild WITH the feature → new exec-gpu tag → swap i134's
 worker (live gate: gm rows flip failed→done) → enroll r7900x (2× WoL sent;
 if it stays dark it is hard-off = user-gated). Failed rows re-claim
 naturally (latest-wins ledger).
+
+**GM GATE PASS (2026-08-26T14:25Z)**: node-2 swapped to `exec-gpu-812a00d9`
+(hdr-gainmap baked; builder gained ZEN_METRICS_BIN/ZEN_WORKER_BIN, zenmetrics
+`812a00d9`+`c6ad8469`) → first post-swap pass: **109 jpeg-gainmap diffmap cells
+DONE, 0 failed** (previously 100% of 46,680 failed). The 25k failed gm cells
+re-claim naturally. avifgen writeback landed the same hour:
+`avifgen-2026-08-06/harvest-2026-08-26/scores.parquet` — 562,860/562,860 cells,
+4 metrics at 100% (butteraugli max+p3, cvvdp, ssim2); `zensim_score` is
+structurally absent (these runs' feature records carry `features`+`regime` but
+no scalar) — backfill = a features pass (ZEN_SKIP_FEATURES=0 chunked writer,
+follow-up) or a scores run. First writeback attempt OOM-killed a 60G box
+(57.9G rss, bare-nice — run-heavy rule violated); owner fix = ZEN_SKIP_FEATURES
+scores-only pass, peak 21.1G under a 40G cap.
