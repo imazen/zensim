@@ -1256,3 +1256,18 @@ Decisions: tower stays OUT of the worker fleet (media priority; daemon-level
 fragility observed); LESSON: on Unraid, `docker info` failing does NOT mean
 services are down — check shims (`pgrep -f`) before any restart, and a stack
 restart is itself a service-interrupting act.
+
+### OPERATOR DIRECTIVES (2026-08-26 ~21:3xZ, verbatim intents)
+1. "a fundamentally solid solution to prevent wedging" — the anti-wedge
+   invariants doc graduates from design to IMPLEMENTATION (in progress:
+   invariant 3 landed both paths; 6 next; then 7/4/2/1).
+2. "keep cvvdp and any iqa except zensim on gpu … unless CPU cvvdp is within
+   50% of GPU on the RTX 3070s" — routing policy revision (supersedes the
+   GOAL's 'cvvdp on CPU' line): all IQA metrics EXCEPT zensim class Gpu,
+   conditional on the 50% measurement. NOTE: no such measurement existed
+   (tonight's cvvdp ran CPU because the diffmap route only implements CPU
+   cvvdp); measuring GPU-vs-CPU cvvdp score-kind on i134's 3070 now.
+3. **"only do iqa algorithms your science needs"** — STANDING DECLARE RULE:
+   score waves request only the metrics their registered science consumes;
+   no more all-metric sweeps by default. (Persist-everything still applies to
+   what IS computed; this rule governs what gets computed.)
