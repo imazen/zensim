@@ -1271,3 +1271,19 @@ restart is itself a service-interrupting act.
    score waves request only the metrics their registered science consumes;
    no more all-metric sweeps by default. (Persist-everything still applies to
    what IS computed; this rule governs what gets computed.)
+
+**cvvdp ROUTING VERDICT (measured, 2026-08-26T~22:0xZ, i134's RTX 3070)**:
+HDR cvvdp one-shot (fresh container per cell — exactly the fleet's execution
+shape), identical-pair (cost is resolution-bound), n=1/size:
+| size | GPU (`cvvdp-gpu --hdr`) | CPU (`cvvdp --hdr`) |
+|---|---|---|
+| 768×1024 | 1.914 s | **0.911 s** |
+| 1920×2560 | 3.010 s | **2.612 s** |
+CPU is not merely "within 50%" — it WINS at one-shot semantics (GPU pays CUDA
+init per process). Per the operator's conditional, **cvvdp stays CPU-eligible**;
+"all IQA except zensim on GPU" binds on ssim2/butteraugli/dssim/iwssim (already
+GPU-routed by the `-gpu` naming). Correction of record: `--metric cvvdp
+--gpu-runtime cuda` runs the CPU impl (names select impls: `cvvdp` vs
+`cvvdp-gpu`) — the first measurement pass compared CPU to itself. LEVER if GPU
+cvvdp is ever wanted: the warm `--serve` executor amortizes CUDA init and would
+flip these numbers; re-measure under warm-exec before any future re-routing.
