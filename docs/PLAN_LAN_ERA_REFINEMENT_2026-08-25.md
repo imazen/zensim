@@ -1026,3 +1026,14 @@ failures, 1,165 gm done** — the earlier mixed read was pre-swap window bleed.
 avifgen-enc blob migration R2→LAN in flight (the morning JOBS list omitted the
 enc run; 534,464 objects). r7900x: hard-off after 2×WoL + 15-min watch —
 waking it is physically user-gated.
+
+### C6 UPDATE 2026-08-26 (2nd set) — avifgen SERVED (`?set=avifgen`, 8/8 gate)
+Third pool live: the 562,860-cell avifgen rollup (24-q dense grid, 1,170 knob
+cells → 30 rollup config rows × maxdims) behind the set selector, render-gated
+8/8 (coefficient main, verified). ETL: harvest scores (ssim2/cvvdp/butteraugli;
+zensim absent by data), encoded_bytes = R2 enc-blob object sizes
+(534,464/534,464 exact), dims from ref `.scaleWxH.` (0 misses). Regen recipe:
+`viewer/static/data-avifgen/README.md` + base parquets at
+`/mnt/v/output/canonical-viewer-avifgen-2026-08-26/`. Remaining C6 sets:
+hdrfeat944 (drain-gated) + the 924-rescored bigcodec view (marginal — same
+encodes as the default set, newer metric profile; do with the next rescore).
