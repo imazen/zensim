@@ -934,3 +934,21 @@ Two wrong things I'd said, both fixed:
   get their own outer loop when their high-level encode API lands. (Program-D λ-side rdmult steering
   is the deeper per-encoder work, also awaiting that API.) Loop-ownership map + zenjpeg's tested
   `target_quality.rs` remain the template to copy the moment a turnkey encode entry exists.
+
+
+### C6 — LAN-set ETL scope VERIFIED (2026-08-26, checked harder per user push)
+Serving a LAN set in the browser is a real multi-step ETL, confirmed (not a quick pointer change):
+- **avifgen-2026-08-06**: `pairs_final.parquet` (562,860 rows) has `ref_path/dist_path/codec/q/encode_sha`
+  but **NO scores and NO bytes**; its `scores.parquet`/`features.parquet` were never generated
+  (`writeback_scores.py` not run for this set).
+- **The per-encode metric sidecars** (`fill4metrics_sidecar_*`) have scores + `encode_sha` but **no
+  encoded_bytes/dims**.
+- **bigcodec-924 views** ARE scored but carry distorted-side features, no RD bytes.
+- `encoded_bytes` exist ONLY as the content-addressed artifact file sizes (recoverable via `s5cmd ls`
+  of the encode prefix, keyed by `encode_sha`); dims come from the ref images.
+**⇒ To serve avifgen/bigcodec:** (1) run/finish `writeback_scores.py` for the set → scores; (2)
+`s5cmd ls` the artifacts → (encode_sha, bytes); (3) join scores+bytes+ref-dims → an RD parquet in
+`{base}/{dataset}/*.parquet` shape; (4) `rollup_zenmetrics.py --base <that>` + a set-selector. Real
+ETL, ~an hour+ per set. **The browser IS functional and SERVED** (http://localhost:3400/ ,
+http://192.168.50.44:3400/ — `python3 -m http.server 3400 --bind 0.0.0.0 --directory
+~/work/coefficient/viewer/build`) on the 07-01 canonical set; LAN coverage is the ETL above.
