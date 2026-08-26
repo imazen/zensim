@@ -1287,3 +1287,17 @@ GPU-routed by the `-gpu` naming). Correction of record: `--metric cvvdp
 `cvvdp-gpu`) — the first measurement pass compared CPU to itself. LEVER if GPU
 cvvdp is ever wanted: the warm `--serve` executor amortizes CUDA init and would
 flip these numbers; re-measure under warm-exec before any future re-routing.
+
+**STORE WRITE OUTAGE (2026-08-26T~21:26Z onward, found 23:2xZ)**: tower's NVMe
+cache hit **100%** (1.9T; 18G left) → SeaweedFS "No writable volumes" → every
+PUT 500s → all six workers wrote NOTHING for ~2h (i134: `skipped=142307
+rows=0` — claims unwritable). Reads stayed fine, which is why monitoring
+looked half-alive. ROOT CAUSE of the fill: the `coefficient` NAS share had
+**1.2T parked on cache** (mover not run) + today's ~200G of diffmap blobs +
+16.6G migration. FIX: workers stopped (no-op passes), **Unraid mover started**
+(coefficient cache→array; 21T free there) — frees ~1.2T; the store keeps its
+NVMe layout and gains the ~300G the remaining diffmap corpus needs. Fleet
+relaunch gated on a space-watcher (≥80G free). LESSONS: (a) the store's disk
+is a WEDGE AXIS the anti-wedge doc missed — add "store-capacity watermark
+alerting + admission" as invariant 9; (b) my own Tower mirrors land on this
+cache until the mover runs — mirror bursts must check cache headroom.
