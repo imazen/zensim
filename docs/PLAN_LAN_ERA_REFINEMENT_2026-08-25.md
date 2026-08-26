@@ -1132,3 +1132,34 @@ VRAM-aware admission floor for GPU diffmap kinds (+ the visibility defects
 recorded above). Repro hygiene note: `sudo -n docker` DROPS sourced creds —
 the first repro's `source_fetch: AWS_ACCESS_KEY_ID unset` was the probe's own
 env bug; use --env-file (0600), never -e passthrough under sudo.
+
+### 48-HOUR ASSUMPTIONS REVISION (operator-directed, 2026-08-26T19:2xZ)
+Re-read of the orchestration layer (zenmetrics-orchestrator crate, the Nomad
+ADR `docs/status/fleet-orchestration-2026-08.md`, `fleetbench_2026-08-24.md`,
+`compact_ledgers.py`, the `fleet` driver) overturned or corrected several of
+my last-48h conclusions:
+1. **PRIMARY diffmap mechanism = the documented NO-SNAPSHOT re-work tax**, not
+   any of my three successive theories. `hdrgrid-diffmap-20260807` had NO
+   `ledger_snapshot.parquet`; the entrypoint's fetch fails SILENTLY → empty
+   reconcile view → "gap = all cells every pass", the exact 2.0-3.4× tax
+   `compact_ledgers.py`'s docstring documents (I measured 2.44×). FIXED the
+   sanctioned way: compact → snapshot uploaded (51,267 done rows).
+2. **My "6 concurrent children = admission storm" repeated the EXACT
+   methodology error G-T1 documents**: process/PID counts are not admission
+   counts (`can_admit` was ground-truth-verified correct 750/750 on
+   2026-08-24 with `ZEN_DEBUG_ADMIT=1` — the instrument already existed).
+3. **What survives**: the Diffmap classing hole was REAL (bare "butteraugli"
+   → CpuHeavy → vram 0 → ungated; fixed at the owner `9cae2b20` + test, image
+   `exec-gpu-9cae2b2064de`); the pre-cap NVRM ctxBufPool OOMs were real; my
+   7200s pass-timeout kill was real and mine; the single-cell success repro
+   was sound.
+4. **Unnecessary detours**: the serial relaunch (flush-latency + no-snapshot
+   explained everything); the hand-rolled WoL (fleet power apply exists;
+   r5900xt "never answers WoL" was already a recorded finding — r7900x's
+   silence fits the pattern, not necessarily hard-off); the ad-hoc image
+   repro (fleet smoke-image exists).
+5. **Standing lesson re-learned**: DOCS-SEARCH-FIRST. The tax number, the
+   unreliable-signal warning, the instrument, and the snapshot cadence were
+   all already written down within 48 h of me re-deriving them wrong.
+Relaunched: concurrent mode, fixed image, snapshot present, VRAM cap; the
+checker gates on distinct_done rising (the only honest progress metric here).
