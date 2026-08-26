@@ -124,7 +124,8 @@ EXPECTED_ORIENTATION = {
     # independent-label test — human_score derives 50% from score_cvvdp. The
     # registered caveat lives in Appendix Q §Q.1.
     "hdr_v3mix": QUALITY,
-    "hdrgrid372", "hdrgrid944": QUALITY,
+    "hdrgrid372": QUALITY,
+    "hdrgrid944": QUALITY,
 }
 
 # Known eval roots for --all-roots. (root, {corpus: filename})
