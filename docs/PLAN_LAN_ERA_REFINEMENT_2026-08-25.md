@@ -1338,3 +1338,8 @@ failures. Deviation: min-build-sha dropped (shas unordered; version by TOKEN).
 **Anti-wedge set: 8 of 9 implemented with tests** (1,2,3,4,5,6,7,9);
 remaining: 8 = the Nomad box-lifecycle ADR (P2/P3 sequencing). Declares can
 now pin e.g. hdr-gainmap on HDR runs — wire into the next declare.
+
+**INVARIANT 5 DECLARE WIRING (zenmetrics 399abe825936)**: JobKind::required_capabilities()
+(conservative kind→feature map; CPU-native metric names deliberately claim
+nothing) stamped by all three ctl declare builders — every NEW manifest gates
+automatically; old manifests unchanged.
