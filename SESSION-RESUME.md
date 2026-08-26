@@ -9,40 +9,39 @@ never compare numbers across eras without the doc's era-bridge notes.
 
 ## Current true state (2026-08-04)
 
-## ⚡ 2026-08-26 — LAN-store day: R2 quiet, HDR chain complete, censuses fresh (READ FIRST)
+## ⚡ 2026-08-26 — LAN-store day (updated 17:15Z): HDR chain CLOSED same-day, loops complete, 3 browser pools
 
-**Store**: the fleet writes ONLY the LAN SeaweedFS (tower :3900). All fleet-job
-data + `refs/` migrated off R2 + byte-verified; launchers resolve via s3env.sh
-(fail-loud, no silent R2 fallback). R2 deletion still user-gated. Ops trail:
-`zenmetrics/docs/INCIDENT_r2_writes_2026-08-26.md`.
+**Store**: fleet writes ONLY the LAN SeaweedFS; avifgen-enc blobs migrated
+(542,483 verified). R2 receives zero writes (deletion user-gated).
 
-**Live fleet** (self-sustaining, teardown+writeback recipes in session memory):
-`hdrfeat944-{zenjxl,svt,gm}-20260826` = 944-regime HDR features over the full
-102,485-cell hdrgrid corpus (3 CPU boxes, image `exec-zensim944hdr-2ffccb36`,
-ZEN_PASS_TIMEOUT=7200); `hdrgrid-diffmap-20260807` = 193k butteraugli+cvvdp HDR
-diffmaps (node-2 GPU). Every other declared queue: DRAINED + auto-paused
-(reconcile `--auto-pause`, zenfleet stale-claim self-heal `702465c9`).
+**Same-day HDR chain (C2+C3)**: hdrfeat944 fleet run (~8 h, auto-paused at
+3.8-6.7× rescore tax) → per-arm 944 feature writebacks → `hdrgrid944-leg`
+(orientation-gated, LAN+Tower) → linear floor 0.7609 → **registered wave-1:
+G-W1/W2 PASS, best `wave1_h64_s3` val 0.8130** (372-route best 0.8163; MLP
+closes the folded front-end's −0.050 linear gap to −0.0033). Remaining C3-HDR:
+HDR fulleval instrumentation + the HDR-append feature wave.
 
-**New canonical data** (see `~/work/zen/DATA_PROVENANCE.md` 2026-08-26 section):
-hdrgrid harvest tables (102,485 × 3 arms, LAN+Tower mirrored, manifested);
-`hdrgrid372-leg` (cvvdp-mix, orientation-gated, 372-regime — never mix with
-944/924); linear baseline val SROCC 0.8105 + registered wave-1 (best MLP 0.8163,
-linear better-calibrated).
+**Loops (C4) COMPLETE for turnkey codecs**: zenjpeg Zq seed SHIPPED (−13.5%
+encodes, 0 regressions); jxl Zq FAILED-as-registered (5.6%<15%; nonphoto −51%
+= future lever, head env-gated OFF); **gainmap loop shipped**
+(`ultrahdr-rs/target_quality.rs`, 9/9); zenwebp no-headroom; svt/aom premature
+(no encode API).
 
-**Selection (criterion 3, CURRENT)**: `freeze_check --select` over the 287-bake
-board → **W10L9_s4003** (8/8 floors, sel_comp 0.9842, M3a 0.8626) —
-`benchmarks/freeze_select_2026-08-26.md`.
+**Browser (C6)**: three pools render-gated — default SDR-07-01, `?set=hdrgrid`,
+`?set=avifgen`.
 
-**Censuses (criterion 4)**: jxl 27-cell census ALL-FRESH on the secant-default
-loop (9 models incl. both W10L9 arms; h3ctrl2 frontier k3_best 25/27 med 0.34) —
-`jxl-encoder benchmarks/zensim_loop_23shot_summary_2026-08-26.json`; gauntlet
-default repointed; board regenerated + gates PASS (287 bakes, 14.5MB — exceeds
-the 12MB-era cap, user ruling pending). zenjpeg zq census 27/27 after the #113
-global-q fix; zenwebp census committed.
+**Fleet (C1)**: diffmap's 46,680 gm failures root-caused (GPU image lacked
+hdr-gainmap) → image `exec-gpu-812a00d9` → ZERO post-swap failures; ledger
+readers tolerate in-flight chunks; reconcile --auto-pause self-heals. avifgen
+DATA closed (scores+features+encodes, mirrored, manifested).
 
-**Open user decisions**: r7900x power (hard-off; WoL can't reach it); zentrain 3-tier plan (`zenmetrics
-docs/R2_ZENTRAIN_TRIAGE_2026-08-26.md`); board size cap; lilith (WSL, RTX 5070)
-power settings — it went dark 11:17Z and is the best GPU.
+**Infra lessons banked (memory)**: git-object corruption repair (`--refetch`),
+jj detached-HEAD orphan trap, per-regime batched writers, OOM = run-heavy
+always.
+
+**Open user decisions**: r7900x power (hard-off, 2×WoL failed); zentrain 3-tier
+plan (`zenmetrics docs/R2_ZENTRAIN_TRIAGE_2026-08-26.md`); board size cap
+(14.5MB vs 12MB); lilith (WSL, RTX 5070) power.
 
 ---
 
