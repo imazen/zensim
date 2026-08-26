@@ -790,3 +790,32 @@ HDR direct-blob score jobs). Sequence on .27: small → huge → medium-leftover
 `scripts/jobsys/lan_gpu_sequence.sh` (one box drains all 6 GPU buckets in blocking single-run mode,
 self-advancing, `~/lan_gpu_seq.COMPLETE` marker). LAUNCHED 2026-08-26T01:03Z; small already done,
 huge scoring. sf=ssim2-gpu+iwssim-gpu, sf2=butteraugli-gpu (the goal's GPU-only pair).
+
+---
+
+## CRITERION-6 (BROWSER) — scoped 2026-08-26
+
+The coefficient viewer (`~/work/coefficient/viewer`, SvelteKit) loads
+**`data/cells.json` + `data/meta.json`** (COLUMNAR JSON — `Record<col, val[]>`
+inflated to rows; NOT parquet — the memory's "cells.parquet" was stale), via
+`viewer/src/lib/cells.ts` (`loadCells`). Generator = **`scripts/rollup_zenmetrics.py`**
+(`--base DIR --sidecar F --out DIR`): a DuckDB rollup of `{base}/{dataset}/*.parquet`
+(grain: dataset×cell×q×maxdim, ~15k rows) LEFT JOIN the 4-metric sidecar on
+`encoded_filename`. It needs, per row: `encoded_bytes`, `width`, `height` (→ maxdim +
+bpp = the comparable RD axis), `score_ssim2`/`score_zensim` (native), `q`, `codec`,
+`knob_tuple_json`, `knob_plan`.
+
+**The GAP for the LAN 924 sets:** the ext924 bigcodec split views
+(`/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27/bigcodec/<dataset>/<split>_924.parquet`,
+932 cols) carry `encoded_filename`, `codec`, `q`, `knob_tuple_json`,
+`score_{ssim2,zensim}` + `feat_0..923` — but **NO size/RD columns**
+(`encoded_bytes`/`width`/`height` absent; keys are `origin_id`/`ref_filename`/
+`encoded_filename`). They are TRAINING feature tables, not RD tables. So the browser
+cannot compute bpp from them directly. **The chunk:** extend `rollup_zenmetrics.py`
+to join the 924 scores with an encode-metadata sidecar carrying `encoded_bytes` +
+dims (candidates to locate: `tbig_924_full.parquet` keyed `encode_sha`; the
+`fill4metrics_sidecar` keyed `encoded_filename` — verify key overlap first, the 924
+encodes are a 07-27 run and may not share filenames with the 07-01 sidecar), plus a
+set-selector in the viewer (`meta.json` already supports multiple datasets). Do NOT
+union across zensim profiles (07-01 = zensimA/PreviewV0_2 ≠ 924). Until then the
+viewer serves the 07-01 SDR canonical set only.
