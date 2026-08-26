@@ -1047,3 +1047,7 @@ scope for the gainmap row: a real HDR scorer wiring example + a registered
 census on an HDR instrument + gainmap-calibrated anchor (the zenjpeg-derived
 anchor ships documented-uncalibrated; the search corrects). zenav1-svt/aom rows
 stay premature (no turnkey encode API yet — recorded above).
+
+**avifgen-enc migration COMPLETE (2026-08-26T16:46Z)**: R2→LAN, 542,483==542,483
+objects verified, 16.6 GiB — the avifgen set's encode+score+feature persistence
+is fully on the LAN store (scores+features also Tower-mirrored).
