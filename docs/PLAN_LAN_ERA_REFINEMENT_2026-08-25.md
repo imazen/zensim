@@ -979,3 +979,14 @@ deep-undershoot regressions at 25.7% improvement); registered arm B
 encodes, G-Z2 PASS** → `zenjpeg/src/zq_seed.rs`. Remaining Zq clause:
 zenwebp/jxl/zenavif-zensim analogs (same recipe; zenavif has its ssim2
 q0_head already), each its own registered wave.
+
+### C4 Zq status after both waves (2026-08-26)
+- **zenjpeg: SHIPPED** (`zq_seed.rs`, arm-B clamp, −13.5% encodes, zero
+  regressions — see the C4 UPDATE above).
+- **jxl-encoder: FAILED-as-registered** (census G-J2 5.6% < 15% bar; head +
+  wiring stay in-tree env-gated OFF; nonphoto −51% recorded as the future
+  class-conditional-seed lever — its own wave if pursued).
+- **zenwebp**: already ships a content-aware anchor-table seed inside a
+  ~2-pass loop — structurally little seed headroom; no wave planned.
+- **zenavif**: `q0_head` ships (ssim2 targets); a zensim-target refit is a
+  data task after current-model rescoring exists.
