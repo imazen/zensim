@@ -1328,3 +1328,13 @@ feature's message (patch aborted pre-apply, weak green-guard let it through;
 superseded by 3f22dfd50c88; guards now demand "N>0 passed" + explicit exit gates).
 Bonus fix: ETXTBSY spawn retry at all three worker spawn sites (fork-race the
 new fork-heavy tests exposed).
+
+**INVARIANT 5 LANDED (zenmetrics 22e1837f7b27)**: claim-time capability gating.
+DesiredJob.requires (serde-additive, non-key) names executor capability
+tokens; 'zenmetrics capabilities' self-reports compiled features; the worker
+probes once per pass and SELF-EXCLUDES from unservable jobs with a loud
+missing-token line — a stale image claims nothing instead of grinding
+failures. Deviation: min-build-sha dropped (shas unordered; version by TOKEN).
+**Anti-wedge set: 8 of 9 implemented with tests** (1,2,3,4,5,6,7,9);
+remaining: 8 = the Nomad box-lifecycle ADR (P2/P3 sequencing). Declares can
+now pin e.g. hdr-gainmap on HDR runs — wire into the next declare.
