@@ -837,10 +837,15 @@ viewer serves the 07-01 SDR canonical set only.
 - **wall clock:** GPU wave START 01:03:40Z (small drained in 19s, huge in progress). sf-cpu
   1254→1299 in ~73 min pre-tower; tower's 24 cores should raise the CPU rate (re-measure next pass).
 
-### GPU VRAM finding (2026-08-26): butteraugli needs >2 GB; ssim2 fits 2 GB
-Tried offloading `sf2-gpu-small` (butteraugli) to r5900xt's GTX 1050 (2 GB) to parallelize the
-GPU-bound path. It **skipped all 687 cells** (done=0, GPU capability/VRAM check fails for
-butteraugli-gpu on 2 GB) — whereas the same card DID score `sf-gpu-small` (ssim2, 687/687). So:
-**ssim2-gpu fits 2 GB (small images); butteraugli-gpu does NOT.** The 2 GB card is CPU-only for
-sf2; all 6 GPU buckets run on the one 6 GB box (.27) via the sequencer. r5900xt returned to CPU
-`sf-cpu`. (Its `--restart unless-stopped` would have restart-looped on the all-skip drain — stopped it.)
+### GPU VRAM finding (2026-08-26, CORRECTED) — 2 GB DOES do butteraugli-small
+**RETRACTION of an earlier wrong read.** I first saw r5900xt (GTX 1050 2 GB) log `skipped=687` on
+`sf2-gpu-small` (butteraugli) and wrongly concluded "2 GB can't do butteraugli". **FALSE:** the
+ledger chunk `pass-r5900xt-sf2small-1` has **687 rows, all status=done, ZERO errors** — r5900xt DID
+score every butteraugli-small cell. The `skipped=687` was a *later* pass hitting already-done cells
+(idempotent skip), not a capability failure. Likewise the manual `unsupported HDR input extension:
+.bin` error was MY red herring (I named the blob `.bin`; the worker/jobexec names fetched blobs by
+detected format, so both ssim2 AND butteraugli score fine — `hdr.rs:111` extension-dispatch is fed a
+correctly-named temp). **True state:** sf2-gpu-small DONE (687, butteraugli, 2 GB card); butteraugli-gpu
+works on these HDR blobs. Two GPU boxes now scoring in parallel: **node-2 (RTX 3070 8 GB) on sf2
+(butteraugli)** + **.27 (GTX 1060 6 GB) on sf (ssim2/iwssim)** — different metrics, no lease contention.
+Lesson: a `skipped=N` line means "already done", NOT "can't do" — read the ledger before concluding.
