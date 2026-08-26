@@ -1221,7 +1221,11 @@ idle-only launchd enrollment).
 cpu-butteraugli = 0 — every CPU box cvvdp-only, i134 owns butteraugli);
 lilith zombie DEAD (0 rows post-block); velocity **~660 cells/min**
 (distinct_done 63,495→79,920 in ~25 min), rescore tax 2.44→**1.97** and
-falling, gap ≈113k → ~3 h. Tower's 1-min load hit 42.8 under cpuset 0-23 —
+falling. ETA CORRECTED 20:45Z: the 660/min was a transient burst (easy
+cells); sustained six-box pace ≈130-150 cells/min → the ~110k gap drains
+OVERNIGHT (~12-14 h). Closer re-armed with an exact-match completion test
+(the first one substring-matched "NOT COMPLETE" and self-exited; its
+auto-pause safety correctly did nothing). Tower's 1-min load hit 42.8 under cpuset 0-23 —
 **finding: BoxBudget probes HOST cores (32) while the container is confined
 to a cpuset, so admission oversubscribes the slice**; mitigated by shrinking
 tower to cpuset 0-11/24g (media priority absolute), owner item queued:
