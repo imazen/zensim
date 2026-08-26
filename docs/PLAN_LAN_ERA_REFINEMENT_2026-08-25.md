@@ -1301,3 +1301,16 @@ relaunch gated on a space-watcher (≥80G free). LESSONS: (a) the store's disk
 is a WEDGE AXIS the anti-wedge doc missed — add "store-capacity watermark
 alerting + admission" as invariant 9; (b) my own Tower mirrors land on this
 cache until the mover runs — mirror bursts must check cache headroom.
+
+**ANTI-WEDGE IMPLEMENTATION ROLL-UP (2026-08-26 night)**: landed with tests —
+inv 3 strict-snapshot both worker paths (`844962f6`+`dd3ff02d`); inv 6 cgroup
+RAM clamp (`963707ce`); inv 2 per-cell watchdog w/ process-group kill
+(`3a5e94ed`); inv 4 compact-side failure-carrying snapshots (`ec89e207`);
+inv 4+7 worker-side tolerant sidecar fold + s3io list_entries (`deb01c249`);
+inv 9 per-pass store WRITE probe (this commit's sibling). REMAINING: inv 1
+(progress-conditioned lease renewal — the schema change, next), inv 5
+(capability gating at claim), inv 8 (Nomad ADR P2/P3). All land in workers at
+the next image build (fleet is stopped pending tower cache space anyway —
+perfect roll window). Meta-lesson banked: cargo test filters are SUBSTRINGS
+(no `\|` alternation) and a green guard must require "N>0 passed", not
+"0 failed".
