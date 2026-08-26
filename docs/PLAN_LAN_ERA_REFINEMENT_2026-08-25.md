@@ -755,3 +755,19 @@ Teardown a box: `ssh <h> sudo docker rm -f zen-hdr`.
   an INDEPENDENT judge (ssim2, never the steering metric), perf bar.
 - **Program D** (deeper): per-encoder diffmap STEERING — svt/aom/rav1e λ-side rdmult, zenjpeg
   per-block AQ. Separate/harder than the outer loop.
+
+### FLEET OPS (2026-08-26, live) — health + reassignment recipe
+- **6 GB boxes (r7900x + lianli): healthy, GPU 100%, ~1294 cells/pass, lease-dedup working**
+  (skipped=985 = the other worker's held leases). Medium (2280) draining fast.
+- **r5900xt (GTX 1050 2 GB): CANNOT run the GPU metric** — skipped all 687 small cells, GPU 0%/3 MiB,
+  exited clean. Repurposed to a **CPU worker on `sf-cpu`** (zensim/features) alongside i265. So the
+  small (687) + huge (453) GPU buckets need a **6 GB** box.
+- **KNOWN: worker-name collision** — both 6 GB workers launched with `ZEN_WORKER=lianli-hdr` (a
+  `<<REMOTE` heredoc `$wname` expansion bug in `hdr-gpu-scale.sh`). Correctness holds (ledger dedups by
+  cell; duplicate work is acceptable), but USE UNIQUE NAMES on relaunch.
+- **DRAIN → reassign (when the monitor fires `DRAIN`):** relaunch the 6 GB boxes on the remaining GPU
+  buckets, unique names — e.g. `r7900x → hdrgrid-sf-gpu-small` (`ZEN_WORKER=r7900x-small`),
+  `lianli → hdrgrid-sf-gpu-huge` (`ZEN_WORKER=lianli-huge`); then `sf2` (butteraugli) the same way;
+  then `writeback_scores.py` → `_MANIFEST` + orientation gate + Tower mirror. Same docker-run recipe as
+  the "LAN GPU worker recipe" above, swapping `ZEN_RUN`/`ZEN_MANIFEST_URI`/`ZEN_CONTROL_KEY` + a unique
+  `ZEN_WORKER`. Fix `hdr-gpu-scale.sh` to pass the name via `-e` from an env var, not heredoc interpolation.
