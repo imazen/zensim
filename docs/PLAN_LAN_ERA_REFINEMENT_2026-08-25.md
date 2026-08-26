@@ -778,11 +778,15 @@ box** (hostname `r7900x`, one GTX 1060 6 GB). So the earlier "scaled to 3 GPU bo
 - **.27 (r7900x≡lianli): the ONLY 6 GB GPU box** — GPU scoring is SERIAL here. Running TWO GPU
   containers on it (the medium "2-worker" launch) contended for the single 6 GB card → the OOM
   `failed=9` cells. Run ONE GPU worker at a time on .27.
-- r5900xt (.250): GTX 1050 **2 GB** — too small for the GPU metric (skipped all cells, GPU 0%) →
-  CPU worker only.
+- r5900xt (.250): GTX 1050 **2 GB** — CORRECTION: it DID score the small bucket on GPU (ledger chunk
+  `pass-r5900xt-hdr-1` = 687/687 done); the earlier "skipped/GPU 0%" read was POST-completion idle. So
+  the 2 GB card handles SMALL HDR images but likely OOMs on huge/medium. Currently on CPU `sf-cpu`.
 - i265 (.140): no GPU → CPU worker.
 NODES.md lists lianli + r7900x as separate nodes (different MACs); the real second box (lianli
 `74:56:3c:b8:45:8d`) is either down or the config conflates them — a WoL/config follow-up could
 recover a second GPU. Until then: GPU = 1 box (serial), CPU = i265 + r5900xt. GPU buckets run
 sequentially via `lan_score_launch.sh` single-run (pool mode is tar/enc-oriented, doesn't fit the
-HDR direct-blob score jobs). Sequence on .27: small → huge → medium-leftovers → sf2(butteraugli).
+HDR direct-blob score jobs). Sequence on .27: small → huge → medium-leftovers → sf2(butteraugli) — AUTOMATED by
+`scripts/jobsys/lan_gpu_sequence.sh` (one box drains all 6 GPU buckets in blocking single-run mode,
+self-advancing, `~/lan_gpu_seq.COMPLETE` marker). LAUNCHED 2026-08-26T01:03Z; small already done,
+huge scoring. sf=ssim2-gpu+iwssim-gpu, sf2=butteraugli-gpu (the goal's GPU-only pair).
