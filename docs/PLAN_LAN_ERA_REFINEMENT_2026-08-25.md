@@ -1106,3 +1106,16 @@ death suspect: huge HDR diffmap cells OOMing the 8 GB 3070 — my 17:20 relaunch
 DROPPED the VRAM cap (Strip mode). Relaunched with ZEN_VRAM_CAP=5 GiB;
 15-min checker adjudicates. The owner fix (record+log+backoff) is queued
 regardless of the cap verdict.
+
+**CORRECTION (2026-08-26T19:2xZ) — the mechanism is giant-dynamic-chunk
+invisibility, not silent respawn**: the worker DOES record every cell (Done or
+Failed) — at CHUNK flush (`run_chunk_concurrent` → per-chunk durable write).
+Chunks are LPT-packed to a 300s COST-MODEL estimate; when the model
+underestimates huge HDR diffmap cells, a chunk packs thousands, cells OOM-die
+in ~5 s each (NVRM traces), and hours of results sit in memory before any
+flush — and a container stop DISCARDS the batch (why zero failed rows
+appeared). OWNER DEFECTS QUEUED: (1) periodic partial-chunk flush or
+progress heartbeat; (2) diffmap-kind cost model must reflect measured cell
+cost; (3) surface failing-cell stderr at a cadence. The 15-min post-cap
+checker's chunk-count verdict is therefore PESSIMISTIC-ONLY — real health =
+child lifetimes (minutes, not 5 s) + GPU utilization.
