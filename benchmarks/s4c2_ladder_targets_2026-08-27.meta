@@ -1,0 +1,9 @@
+S4+C2 wave data step (pre-registered in docs/PLAN_LAN_ERA_REFINEMENT_2026-08-25.md, 2026-08-27).
+Producer: bake_verdict --bake zensim/weights/c_sdr_mlp944_corrmix_2026-08-05.bin --regime 944
+  with ZENSIM_DIAL_PRED_OUT (the owner's per-cell dial dump) over
+  /mnt/v/output/zensim/v2-eval-944-2026-08-01/dial_grid_944col_2026-08-01.parquet (jxl rows).
+Derived per (image, target in 70/80/88): seed_q (ladder crossing, linear interp),
+slope_dlnL_dq = centered d ln(100-pred)/dq at the crossing, ladder monotone_frac.
+zensim commit: 340f933d. Grid ids are TEXTUALLY disjoint from the
+corpus9 instrument refs; a dHash audit is REQUIRED before any adoption-grade fit
+(registered caveat). No model is fit in this step.
