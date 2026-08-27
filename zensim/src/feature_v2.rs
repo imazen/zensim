@@ -877,6 +877,27 @@ fn saturate_v<T: F32x8Backend + Copy>(token: T, x: V8<T>, c: V8<T>) -> V8<T> {
     x / (x + c)
 }
 
+/// Vectorized MSCN divisive normalizer — `resid / sqrt(var + c)`.
+///
+/// Deliberately IEEE `sqrt` + `div` (both correctly rounded on every vendor
+/// and every tier), NOT `resid * (var + c).rsqrt()`. Under the pinned
+/// magetypes 0.9.28 contract `rsqrt()` is the hardware estimate
+/// (`vrsqrtps`, whose seed table is CPU-VENDOR-specific) plus one
+/// Newton-Raphson step, which leaves a ~1e-8 rel vendor residue — the
+/// AMD-vs-Intel divergence measured on exactly the `MSCN_DIFF_MEAN` /
+/// `MSCN_DIFF_L2` append slots in the bf944 wave (imazen/zensim#56,
+/// `benchmarks/backfill944_bigcodec_2026-08-02.md`); on NEON it is
+/// `1/sqrt` then a multiply (double rounding), a third distinct result. The
+/// scalar tail, the f64 reference in `attr_pass_b_main_px`, and the
+/// attribution pass-B SIMD kernel all use this exact single-rounding form
+/// already; this makes the production kernel match. Gated bit-exact against
+/// the scalar IEEE result on every tier by
+/// `mscn_norm_v_is_correctly_rounded_on_every_tier`.
+#[inline(always)]
+fn mscn_norm_v<T: F32x8Backend + Copy>(_token: T, resid: V8<T>, var: V8<T>, c: V8<T>) -> V8<T> {
+    resid / (var + c).sqrt()
+}
+
 /// Vectorized [`pjnd_transducer`] — fused `saturate(raw_abs_err/(1+k*act),
 /// c)` collapsed to one division (phase-6 §A.16, exact — see the scalar
 /// sibling's doc for the derivation). Bounded `[0, 1)`.
@@ -3276,8 +3297,9 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
 
             let var1 = (b2 - m1 * m1).max(zero);
             let var2 = ((ld!(ssq) - b2) - m2 * m2).max(zero);
-            let n1 = (s - m1) * (var1 + c_mvar).rsqrt();
-            let n2 = (dd - m2) * (var2 + c_mvar).rsqrt();
+            // #56: exact sqrt+div, not rsqrt — see `mscn_norm_v`.
+            let n1 = mscn_norm_v(token, s - m1, var1, c_mvar);
+            let n2 = mscn_norm_v(token, dd - m2, var2, c_mvar);
             let dn = n1 - n2;
             r_mscn += saturate_v(token, dn.abs(), c_mabs);
             r_mscn2 += saturate_v(token, dn * dn, c_msq);
@@ -9136,6 +9158,116 @@ fn compute_v2_append_attribution_impl(
 mod tests {
     use super::*;
     use crate::source::RgbSlice;
+
+    /// imazen/zensim#56 regression gate: the MSCN divisive normalizer must
+    /// be the CORRECTLY-ROUNDED IEEE `resid / sqrt(var + c)` on every SIMD
+    /// tier, lane for lane, bit for bit. That is what makes the
+    /// `MSCN_DIFF_MEAN`/`MSCN_DIFF_L2` slots CPU-vendor-deterministic: IEEE
+    /// sqrt and div are exactly rounded on every vendor, whereas the
+    /// `rsqrt()` the kernel used before (`vrsqrtps` estimate + 1 NR step on
+    /// x86; `1/sqrt` then multiply on NEON and scalar) is not — the bf944
+    /// wave measured AMD≠Intel by ~1e-8 rel on exactly those 22 columns.
+    ///
+    /// Mutation-verified: substituting `resid * (var + c).rsqrt()` in
+    /// `mscn_norm_v` fails this test on x86 (NR residue) AND on NEON /
+    /// scalar (double rounding), so it cannot silently regress on any CI
+    /// platform. The corpus deliberately includes the exact-zero variance
+    /// floor (`var = 0` → `sqrt(C_MSCN_VAR)`), sub-floor, unit and large
+    /// variances, and signed residuals spanning ±[1e-4, 4].
+    fn check_mscn_norm_tier<T: F32x8Backend + Copy>(token: T, tier: &str) {
+        let c = C_MSCN_VAR as f32;
+        let cv = V8::<T>::splat(token, c);
+        // Deterministic LCG so the corpus is identical on every platform.
+        let mut state = 0x9E37_79B9u32;
+        let mut next = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let mut n_checked = 0usize;
+        let mut n_mismatch = 0usize;
+        let mut first_mismatch: Option<(f32, f32, f32, f32)> = None;
+        for block in 0..512 {
+            let mut resid = [0f32; 8];
+            let mut var = [0f32; 8];
+            for lane in 0..8 {
+                let u = next();
+                // Signed residual, log-spread magnitude 1e-4..4.
+                let mag = 1e-4 * (4e4f32).powf(next());
+                resid[lane] = if u < 0.5 { -mag } else { mag };
+                // Variance: exact floor every 8th lane, else log-spread
+                // 1e-9..1e2 (covers below the C_MSCN_VAR floor and far above).
+                var[lane] = if (block + lane) % 8 == 0 {
+                    0.0
+                } else {
+                    1e-9 * (1e11f32).powf(next())
+                };
+            }
+            let got = mscn_norm_v(
+                token,
+                V8::<T>::from_array(token, resid),
+                V8::<T>::from_array(token, var),
+                cv,
+            )
+            .to_array();
+            for lane in 0..8 {
+                // Scalar Rust f32 sqrt and div are IEEE-754 correctly rounded.
+                let want = resid[lane] / (var[lane] + c).sqrt();
+                n_checked += 1;
+                if got[lane].to_bits() != want.to_bits() {
+                    n_mismatch += 1;
+                    first_mismatch.get_or_insert((resid[lane], var[lane], got[lane], want));
+                }
+            }
+        }
+        assert_eq!(
+            n_mismatch, 0,
+            "tier {tier}: {n_mismatch}/{n_checked} lanes of mscn_norm_v are not the \
+             correctly-rounded IEEE resid/sqrt(var+c); first: {first_mismatch:?} \
+             (resid, var, got, want)"
+        );
+    }
+
+    #[test]
+    fn mscn_norm_v_is_correctly_rounded_on_every_tier() {
+        use archmage::SimdToken as _;
+        let mut tiers_run = 0usize;
+        check_mscn_norm_tier(
+            archmage::ScalarToken::summon().expect("scalar token is infallible"),
+            "scalar",
+        );
+        tiers_run += 1;
+        #[cfg(target_arch = "x86_64")]
+        {
+            if let Some(t) = archmage::X64V3Token::summon() {
+                check_mscn_norm_tier(t, "x86 v3");
+                tiers_run += 1;
+            }
+            if let Some(t) = archmage::X64V4Token::summon() {
+                check_mscn_norm_tier(t, "x86 v4");
+                tiers_run += 1;
+            }
+            #[cfg(feature = "avx512")]
+            if let Some(t) = archmage::X64V4xToken::summon() {
+                check_mscn_norm_tier(t, "x86 v4x");
+                tiers_run += 1;
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            if let Some(t) = archmage::NeonToken::summon() {
+                check_mscn_norm_tier(t, "neon");
+                tiers_run += 1;
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(t) = archmage::Wasm128Token::summon() {
+                check_mscn_norm_tier(t, "wasm128");
+                tiers_run += 1;
+            }
+        }
+        assert!(tiers_run >= 1, "no tier was exercised");
+    }
 
     // Perf pass (§A.13): widened from 1e-6 to 5e-4 after switching mu1/mu2/
     // ssq/s12 to `crate::blur::fused_blur_h_ssim`'s single fused-multiply-add
