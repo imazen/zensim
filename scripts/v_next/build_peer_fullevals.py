@@ -64,9 +64,10 @@ PEERS = {
 # q_jnd (the 50-pair instrument = the board axis population exactly).
 for peer in list(PEERS):
     sign, corp = PEERS[peer]
-    stem = {"ssim2": "ssim2", "butteraugli": "butter", "cvvdp": "cvvdp", "iwssim": "iwssim"}[peer]
+    stems = {"ssim2": ["ssim2"], "butteraugli": ["butteraugli", "butter"],
+             "cvvdp": ["cvvdp"], "iwssim": ["iwssim"]}[peer]
     for c in ("csiq", "live", "aic4", "sdr25"):
-        for cand in (f"{c}_{stem}_gpu.tsv", f"{c}_{stem}.tsv"):
+        for cand in [f"{c}_{st}{sfx}.tsv" for st in stems for sfx in ("_gpu", "")]:
             if os.path.exists(os.path.join(RM, cand)):
                 corp[c] = (cand, None, None)
                 break

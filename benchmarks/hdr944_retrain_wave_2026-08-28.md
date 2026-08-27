@@ -195,3 +195,25 @@ carry `per_pair` (scatter matrix) and ride every rank-driven chart.
 csiq / live / aic4 / sdr25 axes, the dial-grid ladder (peer dial curves) and
 the corruption grid (peer ordering) — each needs (ref,dist) pair
 reconstruction + `zenmetrics batch` (ssim2/butter GPU, cvvdp CPU).
+
+## PEERS COMPLETE — 4 peers × ALL 12 board rank axes (2026-08-28)
+
+Scoring closed the gaps: cvvdp CPU locally (sanctioned rung); ssim2/butter/
+iwssim on the wsl RTX 5070 via the baked `exec-gpu-cuda13-6d4f9963` container
+(GPU-only rule; first-cell AWGN-monotone gate; 11 runs rc=0, full rows;
+LIVE via the PNG mirror). All TSVs persisted in `reports/refmetrics/`.
+
+| peer | cid22 | kadid | tid | csiq | live | aic3 | aic4 | konjnd | sdr25 | imazen26 | nonphoto | hfnlproxy |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ssim2 | 0.889 | 0.813 | 0.846 | 0.905 | 0.960 | 0.797 | 0.913 | 0.479 | 0.958 | 1.0* | 1.0* | 1.0* |
+| butteraugli | 0.741 | 0.606 | 0.668 | 0.844 | 0.871 | 0.707 | 0.866 | 0.358 | 0.884 | 0.670 | 0.684 | 0.507 |
+| cvvdp | 0.821 | 0.834 | 0.853 | 0.896 | 0.946 | 0.792 | 0.891 | 0.048 | 0.861 | 0.803 | 0.778 | 0.434 |
+| iwssim | 0.784 | 0.850 | 0.779 | 0.921 | 0.957 | 0.773 | 0.953 | 0.186 | 0.950 | 0.692 | 0.669 | 0.327 |
+
+(*self-target: those axes' targets are ssim2-derived — 1.0 by construction,
+footnoted in the row, never a measurement.) Board regenerated (304 rows, all
+gates PASS); peers ride the scoreboard, heatmap, band tables and scatter
+matrix. Remaining chart surfaces without peer data: the dial-grid ladder and
+corruption grid (peer curves need scoring those grids' encodes — registered,
+not run). /mnt/v is NOT shared between dev and wsl (verified by sharecheck —
+overlapping content is historical sync); data shipped with the job.
