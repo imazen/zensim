@@ -200,6 +200,12 @@ jobs:
       - uses: taiki-e/install-action@cross
       - uses: Swatinem/rust-cache@v2
       - name: Test published crates on 32-bit
+        env:
+          # codec-corpus resolves its cache through `dirs::cache_dir()`, which
+          # is not writable inside the cross container (the zensim-regress
+          # orientation tests died with PermissionDenied). Point it at the
+          # mounted target dir; `Cross.toml` passes the variable through.
+          CODEC_CORPUS_CACHE: /target/codec-corpus-cache
         run: cross test --target i686-unknown-linux-gnu --no-fail-fast -p zensim -p zensim-regress -- --nocapture
 
   msrv:
