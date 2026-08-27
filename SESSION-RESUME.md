@@ -1,6 +1,6 @@
 # SESSION-RESUME — read this first after every compact
 
-**Last updated: 2026-08-26 (LAN-store day; see the ⚡ block below).** The current era is the
+**Last updated: 2026-08-27 (production-readiness close-out; see the ⚡ 2026-08-27 block below).** The current era is the
 **SOTA-944 model campaign** — pre-registered, five seed/lever waves + two
 ensemble waves, all appended in place in the one authority doc:
 [`benchmarks/sota944_campaign_2026-08-03.md`](benchmarks/sota944_campaign_2026-08-03.md).
@@ -8,6 +8,44 @@ Everything before it (372-era, 720/924-era) is historical context, era-tagged �
 never compare numbers across eras without the doc's era-bridge notes.
 
 ## Current true state (2026-08-04)
+
+## ⚡ 2026-08-27 — production-readiness close-out: all executable lanes closed or ruled; the board holds the open decisions
+
+**The DONE test** (`docs/GOAL_PRODUCTION_READINESS_2026-08-25.md`) now carries a
+terminal-state **evidence appendix**; the plan doc's LOOPS table + critical path
+are current. Decision Board artifact (D1–D5) = the live user-decision surface.
+
+**LOOPS — all 7 lines closed or ruled**: jxl ✅ (+RD full pass vs independent
+judges `f7c95cbe`+`6fc24060`); zenwebp ✅ (buckets = the one-shot); zenjpeg ✅
+(inert zq head +47.9%/+45.9% — wiring = D3); zenavif(+rav1e) ✅ (q0_head);
+**zenav1-svt ✅ NEW** — `svtav1-target` crate, HDR census (blind k2 17.64 → S1
+seeds {t70:22, t80:13, t88:5} k2 3.306/k3 1.513, svt `c6701dcc`); **gainmap ✅
+census CLOSED, CEILING-BOUND** (no config crosses t70 on any scene; Ultra HDR =
+low/mid-fidelity; multi-channel falsified + ultrahdr encode bug fixed
+`971ad8d4`); zenav1-aom premature-ruled (its own gates mid-flight, re-checked
+08-27 at `d2c0ded`).
+
+**MODELS/HDR**: HDR-944 wave complete — winner `HDR944_L1T1_s4005` (packaged,
+sha `d6203e9d`), runner-up T2_s4004; freeze = D2. Gauntlet now shows per-bake
+**training dates + recipes** (`6d25dfee`).
+
+**imazen-26 audit — root-sourced (the user caught the wrong estate copy)**:
+canonical = the `imazen/imazen-26` repo manifest + png-v3; `o_NNNN` = the
+4-digit id; `/mnt/v/imazen-26*` = quarantined inspo, NEVER use (memory:
+`feedback_imazen26_canonical_copy`). **Provenance is the deriving owner**
+(`imazen-26/scripts/derive_sharing_provenance.py`), dHash the verifier.
+Sharing: 68 generator-token ids + 166 split-piercing family ids; **realized
+eval inflation MEASURED ≈0** at both tiers (upper bound excludes 25–32% of
+rows: median Δ +0.0043, max 0.0143, nonphoto deltas positive). Exclusion = D1,
+low-stakes; annotation `imazen26-nonphoto-sharing-provenance-2026-08-27` in
+force. `imazen26_manifest.tsv` header + split column corrected (`77de3ccb`).
+Record: `benchmarks/imazen26_dhash_audit_2026-08-27.md`.
+
+**Open, user-gated (the board)**: D1 exclusion · D2 HDR freeze · D3 one-shot
+wiring (zenjpeg zq / jxl B3 / svt qp_start) · D4 judge-era unification · D5
+history rewrite. Other-lane: zenav1-aom differential gates. Shas of record
+today: zensim `6d25dfee`→`77de3ccb`, imazen-26 `946cb61`+`a7bea19`, zenmetrics
+`31795bf6`, svt `c6701dcc`.
 
 ## ⚡ 2026-08-26 — LAN-store day (updated 17:15Z): HDR chain CLOSED same-day, loops complete, 3 browser pools
 
@@ -25,7 +63,7 @@ HDR fulleval instrumentation + the HDR-append feature wave.
 encodes, 0 regressions); jxl Zq FAILED-as-registered (5.6%<15%; nonphoto −51%
 = future lever, head env-gated OFF); **gainmap loop shipped**
 (`ultrahdr-rs/target_quality.rs`, 9/9); zenwebp no-headroom; svt/aom premature
-(no encode API).
+(no encode API) — *superseded 08-27: svt loop+census+S1 CLOSED, gainmap census CLOSED; see below*.
 
 **Browser (C6)**: three pools render-gated — default SDR-07-01, `?set=hdrgrid`,
 `?set=avifgen`.
