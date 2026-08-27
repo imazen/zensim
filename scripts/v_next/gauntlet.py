@@ -191,6 +191,9 @@ CURATED_BOARD = [
     # classical reference metrics as PEER rows (user request 2026-08-28;
     # built from stored refmetrics per-pair tables — build_peer_fullevals.py)
     "peer_ssim2", "peer_butteraugli", "peer_cvvdp", "peer_iwssim",
+    # HDR-944 retrain wave (2026-08-28): the selected winner + the
+    # HF-discrimination runner-up
+    "HDR944_L1T1_s4005_hfpack", "HDR944R_t2_s4003_hfpack",
     # campaign arm candidates + named leaders (benchmarks/sota944_campaign_2026-08-03.md)
     "sota944_winner_A_bvls_X_AM5",       # arm A candidate = campaign winner (§SELECTION)
     "sota944_B_blend_lam1e-3_a0.7_w",    # arm B candidate
@@ -230,7 +233,7 @@ SPRINT_BEST = [
     ("KFG sprint", "KFG75_s4101"),
     ("nt sprint", "sota944_nt223"),
     ("HDR-372 era", "bhdr_linear_shaped_cvvdpmix"),
-    ("HDR-944 wave", "HDR944_L1T1_s4005"),
+    ("HDR-944 wave", "HDR944_L1T1_s4005_hfpack"),
 ]
 
 CURATED = set(CURATED_BOARD)

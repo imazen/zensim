@@ -142,3 +142,18 @@ addressable on its own scale).
 
 freeze_check refused selection pending M3a (required-measured, appendix E.4)
 — the coherence instrument is running for all 7; selection follows.
+
+## SELECTION (registered E.4 rule) + ENDGAME — 2026-08-28
+
+M3a measured for all 7 (coherence instrument, owner run_full_eval).
+**SELECTED: `HDR944_L1T1_s4005_hfpack`** — floors 5/8 (top, tied with the
+three t2 retrains), tie-break selection_composite **0.8853** (t2 retrains
+0.795-0.814; t1 retrains 4/8 floors), M3a 0.7642, sdr25 0.9667. sha256
+`0a437d9927dd63dc…`, 180,195 B, dial [0, 96.1]. The L0 arm (incumbent + HF re-anchor)
+beats the retrains under the registered rule: the retrains' HF-discrimination
+and narwaria gains do not offset their floor/composite/SDR-CID22 costs — and
+the retrains carry the sihdr sign-flip flag. Runner-up:
+`HDR944R_t2_s4003_hfpack` (5/8, M3a 0.8122, HF-band SROCC 0.716 — the
+discrimination lead; kept packaged for a future HF-precision wave). All 7
+fullevals + M3a artifacts on the board dir; every cell in this md.
+**Freeze remains USER-GATED — proposal presented with peers + d-ladder.**
