@@ -1828,7 +1828,7 @@ auto-pause had frozen all 7 runs paused; `snapshot_rows` now queue-true
 (flip's failed row surfaces, stale done row drops — was riding the sidecar
 fold window). Census: sf-gpu 1,824 / sf-cpu 2,280 / sf2-cpu 1,505 /
 sf-gpu-huge 421 / sf-gpu-small 496 / sf2-gpu-huge 360 / sf2-gpu-small 563
-(sf2-gpu main: CLEAN, 0). All 7 unpaused, snapshots rebuilt, flips live
+(sf2-gpu main: the census line 'CLEAN, 0' was VACUOUS — see the 2026-08-27 reassert correction below). All 7 unpaused, snapshots rebuilt, flips live
 (gap_live 360-1,896 per run).
 
 **Re-drain fleet (homefleet `e3cd66c`)**: Nomad jobs sf2cpu×4 + sfcpu×1
@@ -2072,3 +2072,20 @@ declared; manifest stamped with the numbers), and **mirroring** — the leg
 `a7f28118…` verified tower-side). Remaining for this set: the
 canonical-gates note's raw-parquet provenance chase (its GRAM derivative
 is sha-attested via the #68 chain) — recorded, low-priority.
+
+## sf2-gpu overlay + reassert + the vacuous-clean correction (2026-08-27 ~22:5xZ)
+
+The live-gap semantics exposed a buried incident: **the broken-cuda wsl
+worker, booted 08-26 09:08 on a PARTIAL mid-migration ledger view,
+re-claimed the ALREADY-DONE sf2-gpu run and overlaid all 2,280 cells with
+bogus failed rows.** Repair = the new `zenfleet-ctl reassert` verb
+(zenmetrics `ff9eea8b`): done-copy rows for jobs whose latest is a
+failure by the diagnosed overlay worker AND whose original blob is
+present — 2,280 reasserted, 0 missing blobs; the overlay sweep found NO
+other run affected. **Correction of two of my own claims** (in-place +
+fbdfd4a0): the morning's "sf2-gpu clean, 0 error-carriers" was VACUOUS —
+the overlay left zero done-latest jobs to scan. Post-reassert content
+scan: **1,618/2,280 carry .bin-era error rows** (same class as the
+siblings) — flipped, snapshot rebuilt; **662 genuinely-clean cells
+rescued**. GPU queue truth now: ~5,215 cells across the 6 runs on the
+single i134 3070 — the wsl reboot is the schedule-dominant unlock.
