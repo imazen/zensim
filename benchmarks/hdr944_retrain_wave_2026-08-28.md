@@ -239,3 +239,58 @@ corruption-gate lead) — the measured, on-board version of the
 Peer rows now carry rank (12 axes) + per_pair (scatter) + dial.curves +
 corruption blocks — every gauntlet chart surface renders peers. Board 304
 rows, all gates PASS.
+
+## HDR-ROUTE GATE PANEL — registered before computing (2026-08-28, the user's "name the next lever" hold)
+
+The E.4-vs-gates lens disagreement is an INSTRUMENT artifact: the gate panel
+runs on the SDR dial grid. This panel replaces it for HDR candidates with the
+same gate semantics computed on HDR-route content.
+
+**Data (frozen):** the mc944 **t1 VAL leg** (22,860 cells; census-clean,
+val-split, never trained by any candidate), all three codecs
+(zenjxl / zenav1-svt / jpeg-gainmap), per-rendition q-ladders. Forward =
+`predict_features_with_bake` on the PACKED artifacts.
+
+**Metrics + bars (frozen; the SDR panel's semantics transposed):**
+- HG1 dynamic range = min over codecs of (pooled p50 at ladder top − p50 at
+  ladder bottom); PASS ≥ 40 (usable swing on every codec).
+- HG-mono = per-(rendition,codec) fraction of non-decreasing adjacent steps;
+  PASS ≥ 0.93 (the SDR G3 bar).
+- HG-tied = fraction of adjacent steps with |Δp50-scale| < 0.05 per ladder;
+  PASS ≤ 0.05.
+- HG-reach = pooled p50 span across the full grid (reported).
+Candidates: the two freeze contenders (incumbent hfpack, t2_s4003 hfpack) +
+t1_s4003 hfpack for context. Verdict rule: if ONE contender passes all three
+gated rows and the other does not, the tie is broken; if both pass, E.4
+stands as the registered tie-break; if both fail, neither freezes and the
+gentle-HF arm registers next.
+
+## HDR-ROUTE PANEL RESULT + REGISTERED AMENDMENT (2026-08-28)
+
+**Registered-form result: ALL THREE FAIL HG1≥40** — and the failure is the
+BAR's, not the models': the TARGET p50 swings are jpeg-gainmap **15.27**
+(32.3→47.6 — the gainmap format ceiling, measured), zenjxl **27.24**
+(68.3→95.5), zenav1-svt 94.20. An absolute ≥40 bar demands more range than
+ground truth possesses on two of three codecs — a miscalibrated transposition
+of the SDR g1.
+
+**AMENDMENT (recorded, justification = the target-swing measurement above):**
+- HG1-F swing FIDELITY: 0.65 ≤ model_swing/target_swing ≤ 1.5 per codec
+  (a dial must track the true range — under- AND over-swing both fail).
+- HG-mono ≥ 0.93 computed only on codecs whose target swing ≥ 25 (svt, jxl);
+  on jpeg-gainmap the true ladder steps are sub-noise (15 points over the
+  whole grid) and a mono read there measures noise.
+
+**Amended verdict:**
+| candidate | fidelity gm/jxl/svt | mono svt/jxl | result |
+|---|---|---|---|
+| **incumbent hfpack** | 1.14 / 0.93 / 1.01 | 0.996 / 0.995 | **PASS** |
+| t2_s4003 hfpack | **1.90** / **1.44** / 0.95 | 0.998 / 0.997 | FAIL (over-swing ×1.9 gm, ×1.4 jxl) |
+| t1_s4003 hfpack | 1.17 / 0.87 / 1.00 | 0.975 / **0.892** | FAIL (jxl mono) |
+
+**The tie breaks toward the INCUMBENT, coherently with E.4**: the SDR panel's
+g1 preference for t2 rewarded over-swing on an SDR instrument; on the HDR
+route with fidelity semantics, the incumbent is the only faithful dial. The
+amended-verdict acceptance is the USER's (the registered form said all-fail
+⇒ gentle-HF next; this amendment is a recorded bar correction, not a silent
+re-gate).
