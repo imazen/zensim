@@ -1671,3 +1671,51 @@ wsl's GPU worker stays sentinel-cycled docker pending the nvidia/Nomad-driver
 work (daylight). Invariant 8 remaining: P3 (all boxes + drain hooks wired
 into OS flips) + P4 (periodic plumbing jobs). Spec + runbook committed in the
 private fleet repo.
+
+## HDRGRID-DIFFMAP WAVE — rollup (2026-08-27 ~09:45Z; final counts appended at gap=0)
+
+**Per-wave wall clock, measured (the FLEET criterion's falling-clock evidence):**
+| era | fleet | rate |
+|---|---|---|
+| 08-26 (pre-fix) | 1 GPU box, Gpu-misclassed, VRAM-throttled, cache-bound store | ~4.3 cells/s bursts, ~50% duty, projected 33-66 h |
+| 08-27 02:00 | +4 CPU boxes (reclass image), array-direct store | ~450 cells/min |
+| 08-27 03:30 | +r7900x (6 boxes, Nomad P2) | **~765 cells/min sustained** |
+| 08-27 tail | pardoned big-cell class (1920×2560+, 2 maps each) | ~40-85 cells/min |
+
+**Zero-residue trajectory**: the pardoned 9,159 image-era cells are completing
+at 100% (300 recent sidecars sampled: 7,840/7,840 rows done, zero fresh
+failures of any class) — the run converges to **gap=0 with NO residue**;
+every failure in its history was environmental (missing-hdr-gainmap image
+era, store outages), none data-genuine.
+
+**Sha ledger (zenmetrics unless noted; every one push-verified in-session):**
+lease renewal 3f22dfd5 · cell deadlines/exec watchdog (earlier session) ·
+capability gate 22e1837f + declare wiring 399abe82 · CPU image 90aed765 /
+GPU image 9ecff548 (exec-*-399abe82) · migration waves f21e64b5, da54c83e,
+0785e96a, ae23e16c, audit-close 10c523b0 · sentinel 3ee0ace7 + fixes
+d98c82d4, 9a89cfb9, cycling 590c1dc2 · report/compact partial-tolerance
+5f9c7e1d · bounded transfers 294a6944 (W9 taxonomy 3d335866) · audit-blobs
+0388e3b9 · amnesty 44ba7ca1 (+0f1f80d4/3f010766 honest broken-push trail) ·
+requeue pardon b07a0485 + v2 de7bca96 · reclass+timing 526c84b8 · pairs
+metric column 416e45f8 + abs-path guard 8b3dc4d0 · runtime provenance
+b8db9ee4 · zensim: audit e5974ca3 + tonight's doc entries · jxl-encoder:
+C10 be79ffb7, secant/S3/S3xS1 records through f6e6f757, rate-matched
+7e719c1c, verdict dedup d7fc8f7e · homefleet: Nomad P2 1c52c22.
+
+**Volume-migration decision (revises the earlier queued step)**: with new
+store writes redirected to the direct-disk /data2 and the mover reclaiming
+the coefficient share, the cache recovers on its own (19G → 55G+ free
+observed overnight); the 526 GB of legacy store volumes on cache are static.
+The cache→disk1 migration is therefore a DAYTIME maintenance window
+(store-stopped, ~1 h), not a 4 a.m. necessity — deliberately deferred.
+
+**hdrfeat944-20260826**: found paused by its owner as MIS-DECLARED ("all
+chunks defaulted to cell codec zenjpeg") — the exact multi-codec identity
+drift class the script→owner migration fixed; `zenfleet-ctl
+declare-scorefiles` (per-row identity codec, 416e45f8-era) is the re-declare
+vehicle when the hdrcorpus lane resumes. Not touched (owner's lane).
+
+**Post-drain**: join table via `jobctl pairs` (metric column + abs-path
+guard), final counts appended here, Nomad job stays up as warm capacity
+(every other known queue is at gap=0 — criterion 1's "busy when non-empty"
+holds vacuously). dHash+eye audit half remains the registered daylight pass.
