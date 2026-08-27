@@ -1490,9 +1490,18 @@ PASS (median 0.36/0.60/0.72 grid-steps vs ≤2.0; sign-agree 1.00;
 ref features (4,497) → frozen-protocol ridge fit
 (`benchmarks/s4c2_prior_fit_2026-08-27.md`): **seed prior REAL at t70/t80
 (error halved, SROCC 0.83-0.86); t88 FAILS baseline on the primary cell (do
-not ship); slope prior t80/t88 only.** Next: wire the t70/t80 seed +
-t80-slope-exponent tables into the jxl loop instrument arms and run the
-frozen k2-census gates (jxl-encoder side).
+not ship); slope prior t80/t88 only.** S4+C2 CONCLUDED same night (jxl-encoder
+`benchmarks/s4_iter1_eps_wave_2026-08-27.md`, commits 229bebae + efc94e8e):
+**C2a closed MEASURED-REDUNDANT** (the 2026-08-26 `zq_seed` wave owns the
+seed lever; its census caps the whole lever at 5.6% — a better regressor
+cannot 3× that; the registered class-conditional variant is flagged
+arithmetically dominated on its own census). **S4 iter-1 elasticity prior:
+census G-J2 PASS — 27.0% median |err| improvement (bar ≥15%), ±2 hits 22/27,
+photo-concentrated (−32%), nonphoto honestly +5.8%.** Unit bridge: power-law
+exp ⇔ ε̂=−1/exp; ε̂_prior=(slope/(100−t))/DQ via the public
+quality_to_distance (q2d_probe example). Ship form (cheap-feature refit +
+its own census, then a user-gated default decision) is the registered
+follow-up.
 
 
 **§5 RATE-MATCHED SECANT READ DONE (jxl-encoder 7e719c1ccd33)**: mm-F3 rule on the
