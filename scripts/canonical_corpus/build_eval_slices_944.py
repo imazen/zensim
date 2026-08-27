@@ -84,7 +84,7 @@ def main() -> int:
     cls_of = {}
     with open(a.manifest) as f:
         for row in csv.DictReader(f, delimiter="\t"):
-            cls_of[int(row["sha256"])] = row["content_class"]
+            cls_of[int(row["stem"])] = row["content_class"]  # col1 = the 4-digit corpus id (header fixed 2026-08-27; was mislabeled "sha256")
 
     feat_cols = [f"f{i}" for i in range(a.n_feat)]
     cols = ["ref_filename", "score_ssim2"] + feat_cols

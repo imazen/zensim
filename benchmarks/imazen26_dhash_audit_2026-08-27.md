@@ -67,7 +67,7 @@ pool-path/estate-id labels + near-blank annotations →
 **Root cause of the v1 blank halves:** the audit staged its SDR estate refs
 under the SESSION SCRATCHPAD in `/tmp` (banned volatile path) and the wipe
 hit between staging and montage render — the 2026-07-15 lesson re-learned;
-v2 indexes the DURABLE estate (`/mnt/v/imazen-26` + the hdr-grid roots).
+v2 indexes the DURABLE trees (`/mnt/v/imazen-26` — later shown to be the INSPO copy, see the CORRECTION below — + the hdr-grid roots).
 
 **The queued intersection (finding 2's follow-up), now computed:** of the
 d0 synth↔estate matches, **63 are REAL** (generator-token-identical name+seed

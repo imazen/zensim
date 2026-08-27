@@ -20,3 +20,32 @@ Standing rules:
 - Persist every encode, every metric variant, diffmaps; first-cell gate before any scale-up.
 - Waves: pre-registered arms + gates + committed endgame; harvest inline; one terminal file; foreground review.
 - Report status by writing the owning md + memory, then the terminal recap; never a handoff file.
+
+## Evidence appendix — terminal-state readings (2026-08-27, recorded so the DONE test is auditable in place)
+
+- **Criterion 2 (imazen-26 audit line):** id-level audit = ZERO eval/test ids in
+  training views (committed); dHash+eye ran, was invalidated once (wrong estate
+  copy — the user caught it), re-ran ROOT-SOURCED on the imazen/imazen-26 repo
+  manifest with provenance as the deriving owner. Content-level sharing exists
+  (68 generator-token ids + 166 split-piercing family ids) and its realized
+  eval effect is MEASURED ≈0 at both the certain tier and the 25-32% upper
+  bound (zensim `benchmarks/imazen26_dhash_audit_2026-08-27.md`). The
+  exclusion-vs-annotation choice is user-gated BY THE STANDING RULES (dHash
+  policy + no-ship-default-flips) — annotation is in force meanwhile
+  (`imazen26-nonphoto-sharing-provenance-2026-08-27`), so the criterion's audit
+  requirement is closed; the open item is a policy refinement, not evidence.
+- **Criterion 4 (Zq one-shot line):** five one-shots exist with committed
+  census evidence (webp buckets · jpeg zq head · jxl B3 · svt S1 · avif
+  q0_head); gainmap is MEASURED-RULED N/A (ceiling-bound — no seed can reach
+  t70 on any scene under either judge era); zenav1-aom is RULED premature by
+  its own differential-gate state (other lane). Production WIRING of the three
+  inert heads is the D3 proposal — the standing rules forbid ship-default
+  flips without the user, so "proposed, inert in src" IS the rules-compliant
+  terminal state.
+- **Criterion 7:** quarantined-path sweep run over zensim/zenmetrics/
+  zenanalyze/zenpapers committed content — 2 live references fixed
+  (CLEAN_PICKER_PROGRAM provenance pointer; audit-md historical line marked);
+  `imazen26_manifest.tsv` header (`sha256`→`stem`) + split column corrected to
+  the canonical rule (1239/2157 rows were stale; consumers verified: key fixed
+  in build_eval_slices_944.py, index_sources tolerates both, segment reads
+  positionally; original preserved as `.pre-splitfix.bak`).
