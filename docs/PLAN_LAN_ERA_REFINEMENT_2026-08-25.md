@@ -1466,3 +1466,24 @@ is 0.994–1.0003 (n 8–12/27, selection effect stated): the +1.9% aggregate wa
 target-hitting cost, NOT waste. The frozen ±1% total-bytes bar conflated the
 two. **ADOPTION PROPOSAL drafted (user-gated)**: JXL_ZENSIM_SECANT=1 default,
 tile-secant stays opt-in. Nothing flips without the user's yes.
+
+## PARTIAL RELAUNCH (2026-08-27 00:26Z) — store writable EARLY; wsl box joins the GPU queue
+
+The sentinel's first tick found the store WRITABLE again (mover freed a
+volume well below the 80G cache gate) — verified with a real s5cmd write.
+Actions taken, in order: (1) the failure-carrying snapshot uploaded to
+jobs/hdrgrid-diffmap-20260807/ledger/ledger_snapshot.parquet (6,294,191 B —
+84,820 done + 9,219 newest-failed rows; the retry-vs-poison ladder now has
+history); (2) tower firewall unblock for the `wsl` box (the stale-worker
+REJECT rule removed, 0 matching rules remain); (3) **`wsl` enrolled as the
+first-cell GPU worker** (user directive "wsl is now available for the gpu
+queue"): RTX 5070 12 GB, 32 threads / 23 GB WSL VM, docker GPU passthrough
+verified in-container; a Docker-Desktop `credsStore` relic broke all pulls
+and was removed (config backup kept on-box); worker zen-score-l5070 launched
+via lan_score_launch.sh (KIND=gpu → --gpus all + ZEN_REQUIRE_GPU=1,
+ZEN_MEMORY=16g, ZEN_CAPABILITY=gpu) on hdrgrid-diffmap-20260807 with the
+invariant-carrying exec-gpu-399abe82; (4) fleet_sentinel.sh (zenmetrics
+3ee0ace7) re-armed WITH --runlist so drain-stall/space/store/plex/tower
+conditions each EXIT and invoke the supervisor — no silent log lines.
+First-cell gate: boot log + artifact landing check armed; scale-up
+(i134 gpu + cpu boxes) only after it passes.
