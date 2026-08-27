@@ -49,3 +49,21 @@ Standing rules:
   the canonical rule (1239/2157 rows were stale; consumers verified: key fixed
   in build_eval_slices_944.py, index_sources tolerates both, segment reads
   positionally; original preserved as `.pre-splitfix.bak`).
+
+### Criterion 7 — the 2026-08-27 docs audit, bounded and enumerated
+Sweeps run: (a) quarantined-path grep (`/mnt/v/imazen-26` non-inspo forms) over
+zensim/zenmetrics/zenanalyze/zenpapers committed scripts+docs+benchmarks — 2
+live hits, both fixed; (b) claim-interaction pass over every doc today's
+findings touch: `imazen26_dhash_audit` (correction sections in place),
+`PLAN_LAN_ERA` (LOOPS table + critical path + scorecard line), this file
+(evidence appendix), `SESSION-RESUME` (08-27 block; stale svt/aom line marked),
+`FULL_EVAL` (annotation pointer), `DATASET_HISTORY` (§3.24),
+zenmetrics `INDEXES.md` (manifest sha superseded, pre-fix sha recorded) +
+`CLEAN_PICKER_PROGRAM` (provenance pointer), imazen-26
+`split_crossid_dupes` md + `STORAGE-MAP` (pre-existing drift note stands),
+registry (2 superseding entries), memory (canonical-copy feedback + index +
+LAN-era project note). Known-stale-by-design leftovers, deliberately kept:
+the audit md's invalidated first-run sections (historical record, marked),
+`montages_v2/` (referenced by the recorded eye pass), and the R2 copy of the
+pre-fix manifest (annotated in INDEXES.md; R2 writes out of scope). Shas:
+zensim `77de3ccb`→`d9eb130b`, zenmetrics `31795bf6`+`ef94c52c`.
