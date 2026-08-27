@@ -1,104 +1,111 @@
 #!/usr/bin/env python3
-"""Labeled dHash-review montages (v2 — replaces the 2026-08-27 unlabeled set).
+"""Labeled side-by-side montages for the imazen-26 dHash audit eye pass.
 
-Fixes from the user's eye pass: (1) every montage now carries a text strip
-naming each side (pool path left, estate file right) plus the Hamming d;
-(2) both images are ASSERTED loaded and non-blank before compositing — the
-v1 set silently rendered two synth montages with a white right half (a
-loader failure indistinguishable from 'different image' to the reviewer).
+v2 (2026-08-27): rebuilt for the CANONICAL-estate sweeps after the wrong-copy
+correction (the v1 sweeps indexed /mnt/v/imazen-26 — the quarantined
+inspiration dir, now imazen-26-inspo; see the audit md CORRECTION section).
+Refs are the repo-manifest members of /mnt/v/output/imazen-26-png-v3, so every
+estate label carries the canonical 4-digit id natively (user requirement).
 
-usage: make_dhash_montages.py [--audit-dir DIR] [--out DIR]
+Inputs (produced by check_holdout_overlap + the analysis step):
+  canon_vs_train_synth.tsv   — canonical refs vs synthetic-v2 metric sources
+  canon_vs_train_picker.tsv  — canonical refs vs picker-ladder renditions
+Montage sets:
+  synth d<=2 pairs (POOL vs CANON)  — the generator-sharing channel
+  picker CROSS-ID d<=2 pairs (CANON vs CANON) — split-piercing duplicate candidates
+Near-blank sides are ANNOTATED, never refused (flat-content dHash FP class).
 """
 import argparse, collections, os
 from PIL import Image, ImageDraw
 
 def load_checked(path, side):
-    # A failed load raises (that is what silently blanked v1's synth montages);
-    # a GENUINELY near-white image (white-page screenshots are legitimate
-    # estate content, and flat content is the documented dHash false-positive
-    # class) is kept but flagged so the reviewer sees "near-blank" as a fact
-    # about the FILE, not a rendering bug.
     im = Image.open(path).convert("RGB")
     g = im.resize((16, 16)).convert("L")
     px = list(g.getdata())
-    near_blank = sum(1 for p in px if p > 245) / len(px) > 0.99
+    near_blank = (max(px) - min(px)) < 8
     return im, near_blank
 
 def fit(im, h):
-    w = round(im.width * h / im.height)
-    return im.resize((max(1, w), h))
+    w = max(1, round(im.width * h / im.height))
+    return im.resize((w, h))
+
+def canon_index(refs_dir):
+    idx = {}
+    for f in os.listdir(refs_dir):
+        tok = f.split("_")[0]
+        if tok.isdigit() and len(tok) == 4:
+            idx[f] = os.path.join(refs_dir, f)
+    return idx
+
+def montage(out_dir, name, lp, ltag, rp, rtag, foot, manifest, row):
+    Lim, Lb = load_checked(lp, "left")
+    Rim, Rb = load_checked(rp, "right")
+    L, R = fit(Lim, 360), fit(Rim, 360)
+    band = 34
+    canvas = Image.new("RGB", (L.width + R.width + 12, 360 + band * 2), (24, 26, 30))
+    canvas.paste(L, (0, band)); canvas.paste(R, (L.width + 12, band))
+    dr = ImageDraw.Draw(canvas)
+    dr.text((4, 8), f"{ltag}  {os.path.basename(lp)}", fill=(220, 220, 210))
+    dr.text((L.width + 16, 8), f"{rtag}  {os.path.basename(rp)}", fill=(220, 220, 210))
+    note = "".join(["   LEFT NEAR-BLANK (flat-content dHash class)" if Lb else "",
+                    "   RIGHT NEAR-BLANK (flat-content dHash class)" if Rb else ""])
+    dr.text((4, 360 + band + 8), foot + note,
+            fill=(230, 170, 120) if note else (150, 200, 180))
+    canvas.save(os.path.join(out_dir, name))
+    manifest.write(row + "\n")
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--audit-dir", default="/mnt/v/output/zensim/imazen26-dhash-2026-08-27")
-    ap.add_argument("--out", default="/mnt/v/output/zensim/imazen26-dhash-2026-08-27/montages_v2")
+    ap.add_argument("--refs-dir", default="/mnt/v/output/zensim/imazen26-dhash-2026-08-27/canon_refs")
+    ap.add_argument("--out", default="/mnt/v/output/zensim/imazen26-dhash-2026-08-27/montages_v3")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-
-    # Estate index. The audit's staged refs (hash-prefixed copies under the
-    # session scratchpad) were WIPED — the /tmp-ban lesson, again: that wipe is
-    # also what blanked v1's two synth montages. Index the DURABLE estate
-    # trees by original basename and strip the 8-hex staging prefix on lookup.
-    est_idx = {}
-    for root_dir in ("/mnt/v/imazen-26",
-                     "/mnt/v/output/imazen-26-hdr-grid-2026-06-14",
-                     "/mnt/v/output/imazen-26-variants",
-                     "/mnt/v/output/imazen-26-png-v2"):
-        if not os.path.isdir(root_dir):
-            continue
-        for root, _, files in os.walk(root_dir):
-            for f in files:
-                est_idx.setdefault(f, os.path.join(root, f))
-    import re
-    unprefix = lambda n: re.sub(r"^[0-9a-f]{8}_", "", n)
-
+    idx = canon_index(a.refs_dir)
     manifest = open(os.path.join(a.out, "manifest.tsv"), "w")
-    manifest.write("montage\tsweep\td\tleft_path\tright_file\n")
+    manifest.write("montage\tset\td\tleft\tright\n")
     made = 0
-    for sweep in ("refs_sdr_vs_train_picker", "refs_sdr_vs_train_synth",
-                  "refs_hdr_vs_train_picker", "refs_hdr_vs_train_synth"):
-        tsv = os.path.join(a.audit_dir, f"{sweep}.tsv")
-        if not os.path.exists(tsv):
+
+    # Set 1: synth-pool sharing, d<=2 (one montage per (source-stem, ref) pair)
+    pairs = collections.OrderedDict()
+    for line in open(os.path.join(a.audit_dir, "canon_vs_train_synth.tsv")):
+        f = line.rstrip("\n").split("\t")
+        if len(f) < 5 or not f[4].isdigit() or int(f[4]) > 2:
             continue
-        pairs = collections.OrderedDict()
-        for line in open(tsv):
-            f = line.rstrip("\n").split("\t")
-            if len(f) < 5 or not f[4].isdigit():
-                continue
-            d = int(f[4])
-            if d > 2:
-                continue
-            # one montage per (origin-file, estate-file) pair; keep smallest d
-            key = (f[0].split(".scale")[0], f[2])
-            if key not in pairs or d < pairs[key][2]:
-                pairs[key] = (f[0], f[2], d)
-        # sample: all d1/d2 + up to 24 of the d0 tier (mirrors the v1 sampling)
-        d0 = [v for v in pairs.values() if v[2] == 0][:24]
-        rest = [v for v in pairs.values() if v[2] > 0]
-        for left_path, right_file, d in d0 + rest:
-            right_path = est_idx.get(right_file) or est_idx.get(unprefix(right_file))
-            if right_path is None:
-                print(f"SKIP (estate file not found on disk): {right_file}")
-                continue
-            Lim, Lblank = load_checked(left_path, "left/pool")
-            Rim, Rblank = load_checked(right_path, "right/estate")
-            L, R = fit(Lim, 360), fit(Rim, 360)
-            strip = 34
-            canvas = Image.new("RGB", (L.width + R.width + 12, 360 + strip * 2), (24, 26, 30))
-            canvas.paste(L, (0, strip)); canvas.paste(R, (L.width + 12, strip))
-            dr = ImageDraw.Draw(canvas)
-            dr.text((4, 8), f"POOL  {os.path.basename(left_path)}", fill=(220, 220, 210))
-            dr.text((L.width + 16, 8), f"ESTATE  {right_file}", fill=(220, 220, 210))
-            note = "".join([
-                "   LEFT NEAR-BLANK (flat-content dHash class)" if Lblank else "",
-                "   RIGHT NEAR-BLANK (flat-content dHash class)" if Rblank else "",
-            ])
-            dr.text((4, 360 + strip + 8), f"{sweep}   hamming d={d}{note}",
-                    fill=(230, 170, 120) if note else (150, 200, 180))
-            name = f"{sweep.replace('refs_','').replace('_vs_train','')}_d{d}_{made:03d}.png"
-            canvas.save(os.path.join(a.out, name))
-            manifest.write(f"{name}\t{sweep}\t{d}\t{left_path}\t{right_file}\n")
-            made += 1
+        key = (os.path.basename(f[0]).split("_")[0], f[2])
+        if key not in pairs or int(f[4]) < pairs[key][2]:
+            pairs[key] = (f[0], f[2], int(f[4]))
+    for lp, rf, d in pairs.values():
+        rp = idx.get(rf)
+        if rp is None:
+            print(f"SKIP (ref not in canon_refs): {rf}"); continue
+        cid = rf.split("_")[0]
+        name = f"synthshare_id{cid}_d{d}_{made:03d}.png"
+        montage(a.out, name, lp, "SYNTH-POOL", rp, f"CANON id {cid}",
+                f"synthetic-v2 source vs canonical  hamming d={d}",
+                manifest, f"{name}\tsynth-share\t{d}\t{lp}\t{rf}")
+        made += 1
+
+    # Set 2: canonical-internal cross-id duplicates, d<=2 (split-piercing candidates)
+    seen = set()
+    for line in open(os.path.join(a.audit_dir, "canon_vs_train_picker.tsv")):
+        f = line.rstrip("\n").split("\t")
+        if len(f) < 5 or not f[4].isdigit() or int(f[4]) > 2:
+            continue
+        aid = os.path.basename(f[0]).split(".")[0].replace("o_", "")
+        bid = f[2].split("_")[0]
+        if aid == bid or (min(aid, bid), max(aid, bid)) in seen:
+            continue
+        seen.add((min(aid, bid), max(aid, bid)))
+        la = [p for n, p in idx.items() if n.startswith(aid + "_")]
+        if not la or f[2] not in idx:
+            continue
+        d = int(f[4])
+        name = f"crossid_{aid}x{bid}_d{d}_{made:03d}.png"
+        montage(a.out, name, la[0], f"CANON id {aid}", idx[f[2]], f"CANON id {bid}",
+                f"cross-id duplicate candidate  hamming d={d}",
+                manifest, f"{name}\tcross-id\t{d}\t{la[0]}\t{f[2]}")
+        made += 1
     manifest.close()
     print(f"wrote {made} labeled montages -> {a.out} (+ manifest.tsv)")
 

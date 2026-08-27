@@ -93,3 +93,133 @@ both axes meanwhile (done, pending-action entry); (c) the cross-parity
 `gen-line__00032` pair remains open — it is IN the labeled v2 set for a
 specific look (the FP class shows gen-line-polygons false-positive at d0,
 so a generator-collision read gained plausibility).
+
+## ⛔ CORRECTION (2026-08-27, user): the audit's SDR refs were the WRONG COPY — canonical estate re-run
+
+**User directive (verbatim intent):** the audit sourced its SDR estate refs
+from `/mnt/v/imazen-26` — an **inspiration/collection dir**, NOT the
+canonical estate; "every imazen 26 image should have a 4 digit numeric
+leading id"; "`/mnt/v` imazen26 [top-level dirs] is wrong, never use those."
+
+**Canonical estate =** `/mnt/v/output/imazen-26-png-v3` (2,639 files; latest
+reconvert; v1 at `…/imazen-26-png` is the manifest's path root), id-mapped by
+`/mnt/v/output/imazen-26-features/imazen26_manifest.tsv` (2,157 4-digit ids,
+id→split→content_class→source→path; v3 carries EXACTLY the manifest's id set,
+verified both directions). **The eval-slice origin numbers ARE canonical ids**:
+`o_NNNN` ↔ manifest id `NNNN` (e.g. o_7007 = `7000-lilith-plots/aliased-lines/
+7007_plots_line-00020-s1aac7045_1024x1024.sdr.png`) — the origin↔estate join
+is an exact id join, not a dHash inference.
+
+**Quarantine aligned:** the wsl box had already renamed its bad copy to
+`/mnt/v/imazen-26-inspo` (+`-inspo-versions`); this box's `/mnt/v/imazen-26`
+(1,152 files, identical layout) was the same bad copy still under the
+canonical-looking name — renamed to `/mnt/v/imazen-26-inspo` 2026-08-27 to
+match. No box now has a bare `/mnt/v/imazen-26`.
+
+**What this invalidates in the RUN half above:** every "SDR estate" refs-side
+claim (the 1,068-file walk, the 117-file picker mapping counts, the 63-REAL/
+9-FP synth intersection, and the o_70xx affected-origin table derived through
+it) — the refs were inspiration files, and ~60% of the CANONICAL estate was
+never hashed at all. The HDR-grid sweeps used the real HDR roots and stand.
+The eye-pass verdicts stand as judgments of the pairs shown (same-image
+confirmations + the flat-content FP class), but their estate side was
+inspo-dir content. The v1 montages' /tmp-staging root cause stands.
+
+**Corrected run (in flight):** `check_holdout_overlap` refs =
+`imazen-26-png-v3` × {synthetic-v2 sources, clean-picker-corpus renditions},
+d≤10 → `canon_vs_train_{synth,picker}.tsv` in this dir; affected-origin set
+re-derived from canonical ids; montages regenerated with 4-digit-id labels;
+eval-slice intersection + clean-slice measurement re-based on the corrected
+set. Results appended below when the sweeps land.
+
+## CORRECTED RESULTS (2026-08-27) — canonical-estate sweeps + root-source verification
+
+**Root source (user directive): the `imazen/imazen-26` git repo** (local
+`~/work/imazen-26`) — `CORPUS-MANIFEST.tsv` (2,160 rows) is the membership
+oracle; splits are canonical in `manifests/` (last-digit rule, explicitly
+"identical to zenmetrics origin_split.py"); rendition sets are registered
+under `variant-sets/` with per-file sha256s. Chain verified:
+
+- **Split conformance:** repo `split_map.tsv` id 7007 = test ✓ (last-digit
+  rule ⇒ the eval {7,9} test views are split-conformant). The zensim-side
+  `/mnt/v/output/imazen-26-features/imazen26_manifest.tsv` carries a WRONG
+  `split` column (1846 train/311 val, no test; says 7007=train) + a mislabeled
+  header (`sha256` column holds ids) — DORMANT: all consumers derive split via
+  canonical `origin_split.split_of()` (segment_imazen26.py carries it only as
+  a report column; build_eval_slices_944.py reads class only). Flagged, not
+  silently rewritten.
+- **Picker variant set byte-verified:** local
+  `clean-picker-corpus-2026-06-26/` = registered
+  `variant-sets/cleanpicker-ladder11@2026-06-26/files.tsv` exactly (4,497 of
+  4,497 files, 20/20 spot sha256). The eval chain's bytes trace to the repo.
+- **png-v3 mirror verified:** local `/mnt/v/output/imazen-26-png-v3` = the
+  official R2 prefix (2,639 objects both; 13/13 spot md5 byte-identical,
+  incl. descriptor-drift renames; 3 URL-guess fails were path-form, not data).
+  199 files carry pre-rename descriptors vs the current manifest paths — the
+  4-digit id is the stable join key (repo rule); id-join maps 2,157/2,160
+  (ids 1444/1455/1458 newer than the local mirror).
+- **No-id triage (user: "triaged and likely excluded"):** 406 files without a
+  4-digit leading id — ALL inside the `nope/` staging subfolder (auto_screen
+  captures + working material), structurally excluded from every id-keyed
+  consumer; inventory `png_v3_noid_files.tsv` (this dir). Only naive
+  recursive walks can ingest them (the v1 audit's failure mode). R2-side
+  reconciliation remains queued repo-side (STORAGE-MAP "Known drift").
+
+**Corrected sweeps** (refs = 2,157 manifest-member canonical pngs via
+`canon_refs/` id-join; d≤10 screen): `canon_vs_train_synth.tsv` (16,540
+synthetic-v2 sources) + `canon_vs_train_picker.tsv` (4,497 picker renditions).
+
+- **Channel A — synth-pool generator sharing (d≤2, REAL tier): 71 canonical
+  ids**, essentially the whole `7000-lilith-plots` class + 6054 — the same
+  plot/line generation runs fed both synthetic-v2 sources and the canonical
+  7000-class. d3–10 tier: 327 ids (flat-content screen zone, eye-gated).
+- **Channel B — canonical-internal cross-id duplicates (d≤2) whose twin is a
+  TRAIN id: 9 ids** (6067, 6083, 7017, 8105, 8113, 8115, 8229, 8231, 8265).
+  237 cross-id rows at d≤10 overall (`canon_crossid_pairs_2026-08-27.tsv`) —
+  by-design content families (patent scan forms 6xxx, screenshot dpr ladders
+  8xxx, plot seed families 7xxx) landing on both sides of the id-parity
+  split. Split-piercing pairs incl. o_7017[test]~7064[train] d=0,
+  o_8229[test]~8112[train] d=0.
+- **Eye-pass fodder:** `montages_v3/` — 108 montages, every label carries the
+  canonical 4-digit id (`make_dhash_montages.py`, rewritten for this model).
+
+**Corrected eval-slice exposure** (A∪B; `affected_ids_2026-08-27.tsv`):
+
+| slice | affected origins | rows excluded |
+|---|---|---|
+| imazen26 (372 root & 944 root) | 8/74 (7007,7017,7027,7039,7047,7049 + B:6067,8229) | 10.9% |
+| nonphoto 944 root | 8/58 (same ids) | 13.9% |
+| nonphoto 372 root | 16/128 (13 val-parity A + B:6083,8113,8231) | 12.6% |
+
+(The earlier "944-nonphoto structurally clean" chat read applied only to the
+invalidated affected set — dead with it.)
+
+**Clean-slice measurement — realized inflation ≈ ZERO.** 9 leader bakes ×
+{imazen26, nonphoto} × {ctrl = unfiltered root, clean = corrected-set-excluded},
+same invocation both sides (`cleanslice/cleanslice_summary.tsv`):
+
+| bake (regime) | imazen26 Δ | nonphoto Δ |
+|---|---|---|
+| shippedB (372) | −0.0039 | −0.0015 |
+| ADD156 (372) | −0.0010 | +0.0002 |
+| winner_dial (372) | −0.0009 | −0.0001 |
+| W10L9_s4001 (944) | +0.0021 | +0.0043 |
+| KFG75_s4101 (944) | +0.0031 | +0.0052 |
+| nt223 (944) | +0.0054 | +0.0100 |
+| coherent924_selected (944 root) | +0.0030 | +0.0062 |
+| HDR944_L1T1_s4005 (944) | −0.0006 | −0.0025 |
+| HDR944_L1T2_s4004 (944) | +0.0072 | +0.0077 |
+
+Median Δ +0.0026, max |Δ| 0.0100, and the sign is mostly POSITIVE — the
+shared-generator content is HARD content the models score worse on, not
+memorized easy content. The era flagships (trained on synthetic-v2, which
+contains the shared runs) lose at most 0.004 when it is excluded — if
+memorization were inflating the axes, exclusion would drop them materially.
+NOTE: ctrl values are same-root self-consistent; board rows for era/924 bakes
+come from earlier slice-era files, so only the Δs are the finding here.
+
+**Standing decision input (user-gated as before):** with realized inflation
+measured ≈0, keep-under-annotation is defensible and exclusion changes
+little; the annotation registry entry now carries the corrected sets + these
+deltas. The cross-id duplicate census (channel B, 237 pairs) is corpus-repo
+territory — inventory committed to `imazen-26/benchmarks/`.
