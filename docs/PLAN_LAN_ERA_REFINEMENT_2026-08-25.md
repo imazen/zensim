@@ -1410,3 +1410,21 @@ Frozen before data is touched, per the waves rule. Trains NOTHING tonight.
 - **Endgame**: verdict + cells TSV committed; adoption user-gated as always.
 Not started: waits for the box (GPU image build holds it) and runs before/
 independent of fleet relaunch.
+
+## BROWSER lane scoped (2026-08-27)
+
+The result browser = `~/work/coefficient/viewer/` (static SvelteKit, `just
+rollup` → `scripts/rollup_zenmetrics.py` → `viewer/static/data`, ~15k-row
+rollup over the 5.74M canonical picker parquets + 4-metric sidecar; serve
+`just viewer-serve` :3317; render gate `viewer-check`). The rollup ALREADY has
+the extension seam (`--datasets`, tolerant of absent bases). To serve the new
+sets (GOAL criterion 6): each needs a picker-SHAPE canonical view first —
+avifgen's harvest (`/mnt/v/output/avifgen-2026-08-06/harvest-2026-08-26/
+scores.parquet`, 562,860 rows × 5 metrics, encode_sha-keyed) is
+metric-sidecar-shaped, so the view build goes through the zenmetrics
+`assemble` owner (typed full-key join), never an ad-hoc join. Order: avifgen
+view (data ready) → `--datasets avifgen` rollup + viewer-check → hdrgrid /
+hdr_v3mix views after their scores harvest (fleet-gated). R2 deploy exists
+(`deploy_viewer.sh`) but the LAN-era serve target is the open question
+(mntv-gallery cannot host it — directory lister; needs the http.server-style
+index resolution or a tower container).
