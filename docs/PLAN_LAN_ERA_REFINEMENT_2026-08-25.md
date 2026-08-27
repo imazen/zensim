@@ -1954,3 +1954,47 @@ Criterion-5 state: **audit half DONE (this record)**; the byte-identical +
 zenbench evidence exists per kernel family in each repo's own benches
 (jxl `tier_isolation`/`kernel_tiers`, zenavif `unpremul_tiers`/
 `tier_isolation`, run without target-cpu=native per their headers).
+
+## AV1-trio + gainmap LOOPS rulings + the HDR instrument registration (2026-08-27)
+
+**zenrav1e: COVERED by the zenavif census.** The criterion's own grouping
+("zenavif/zenrav1e") reflects the product reality: zenrav1e's only
+still-image product surface IS zenavif (which wraps it); the zenavif AC.4
+census (k2 0.756 / k3 0.336) is its loop evidence. RECORDED, not a gap.
+
+**zenav1-svt: loop = a NEW registered wave, HDR-native.** The encode entry
+is proven (the fleet's `encode_svt_hdr` drives
+`svtav1::encoder::pipeline::EncodePipeline` at q, 10-bit BT.2020nc 4:2:0);
+but svt has NO SDR product path (zenmetrics `sweep/hdr.rs` records this),
+so the SDR corpus9 instrument does not apply — blocking prerequisite is the
+HDR instrument below. Design question for the wave (recorded, not decided):
+where the loop lives — a zensim dep inside the byte-gated port repo vs a
+harness-side loop (zenavif-style) — plus zenav1-svt#11 (restoration OOB on
+bd10 4:2:0 real photos) must be fixed first (115 absent hdrgrid cells trace
+to it). NOTE: zenav1-svt + zenav1-aom both carry CONTEXT-HANDOFF.md files
+from other lanes (the banned artifact class) — flagged for the user, not
+deleted by me.
+
+**zenav1-aom: census PREMATURE until the differential gates say the encoder
+is complete.** The encoder exists feature-gated (RD search + pack) but the
+repo's contract is module-by-module C-parity validation; a product loop
+census before its own gates pass would measure an unfinished encoder.
+Revisit when its differential gates are green end-to-end.
+
+**jpeg-gainmap: loop rides zenjpeg + the HDR instrument.** The gainmap
+encode = zenjpeg SDR base + ultrahdr gain-map math (the fleet's B4 arm);
+its target loop must judge in HDR (the gain map IS the HDR signal) — same
+instrument prerequisite as svt.
+
+### REGISTERED: the HDR 27-cell instrument (prerequisite for svt + gainmap censuses)
+- Refs: 9 from `imazen-26-hdr-grid-2026-06-14` (the campaign's HDR corpus),
+  chosen by k-means over the hdrfeat feature space when that lane's
+  re-declare lands, else the 9 largest-coverage scenes; 3 size tiers.
+- Targets: t∈{70,80,88} in the BHdr judge scale.
+- Judge: decoded pixels through the `zenmetrics score --hdr` route
+  (PU-rescale, measured display peak per campaign appendix AA) with the
+  BHdr bake — never the loop's internal score.
+- k∈{2,3} passes; family bar for any seed/steering arm vs its control.
+- The instrument definition FREEZES when its ref list is committed
+  (blocked only on choosing refs — a one-session task once hdrfeat944
+  re-declares or the coverage fallback is accepted).
