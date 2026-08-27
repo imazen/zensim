@@ -1387,3 +1387,26 @@ exec-zensim944hdr-399abe82 (+ canonical :exec) — all 8 anti-wedge invariants
 corrected). GPU image at tip = next (old GPU executor lacks the capabilities
 subcommand → requires-bearing GPU jobs would self-exclude; rebuild BEFORE any
 new declare).
+
+## PRE-REGISTERED (2026-08-27, before any training): the S4+C2 wave — content-aware first-step prior
+
+Frozen before data is touched, per the waves rule. Trains NOTHING tonight.
+- **Data**: `dial_grid_924col_2026-07-28.parquet` ladders (per-image per-codec
+  q→score curves). Derived target per (image): the local log-elasticity of the
+  jxl ladder around the seed's operating region (the §5.1 ε̂ the first
+  controller step must currently assume ≡ 1), and the q/distance whose ladder
+  score lands at each t∈{70,80,88} (the C2 seed-distance target). The 9
+  corpus9 refs (and their source images) are HELD OUT of any fit.
+- **Arms**: C2a ridge/linear on ref-only features → seed distance; C2b same →
+  first-step exponent (S4's consumption: `JXL_ZENSIM_CTRL_EXP` set per-image
+  from the prior instead of the constant 1.0; secant unchanged from iterate 2).
+  A tiny committed table/coefficients bake — no new runtime dependency.
+- **Gates (frozen)**: k2 emit-best census on the screen t70/t80 residue cells
+  (AB.4: seeds land ≈91 for t70 — the miss class the prior exists for) must
+  improve; photo cells must not regress (census equal or better); bytes
+  within ±1% of the fixed-exp control; engagement proven by trace divergence
+  on the screen cells only (photo priors ≈1.0 expected).
+- **Instrument**: run_23shot_sota944.sh pattern, same-substrate controls, k2+k3.
+- **Endgame**: verdict + cells TSV committed; adoption user-gated as always.
+Not started: waits for the box (GPU image build holds it) and runs before/
+independent of fleet relaunch.
