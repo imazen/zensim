@@ -255,3 +255,13 @@ zenpredict Zq autotune. Repo gotchas: zenmetrics=`master`; verify pushes with `o
 (CONTEXT-HANDOFF files are banned; durable facts live in the docs above. The
 IQA literature corpus is `~/work/zen/zenpapers` — search it before designing
 features or metrics.)
+
+**⚡ 2026-08-28 addendum — user decisions EXECUTED:** family-aware purity
+program done (slices family-pure + 280-row board rescore-graft; SDR
+instrument clean; HDR instrument: hdr_v3mix carries 7/9 census scenes —
+annotated, freeze gates clean; purge list committed). D3 wirings LIVE:
+zenjpeg `seeded_for_image` (`37e44fda`), jxl `s4_eps` B3 default
+(`7c4ddd65`), svt `TargetOptions::seeded` (`cb400901`). D4 = stay era-B
+(decided). D2 freeze re-proposed post-purity. zensim `de1e340e`. jj lesson
+banked: verify pushes by MESSAGE, never bare sha
+([[feedback_jj_sideways_push_clobber]] addendum).
