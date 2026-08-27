@@ -1449,3 +1449,13 @@ SROCC vs both ladder slope and seed_q (n=33, CI ~±0.25 — screen only).
 Wave's next data step: derive per-origin jxl ladders from the BIGCODEC
 canonical parquets (q-dense, 414 origins × renditions) — the real regressor
 training set; the 39-image dial grid stays the held-out probe.
+
+**S4+C2 open design question (recorded before any derivation)**: the bigcodec
+picker parquets carry `score_zensim` from the 07-01 zensimA scorer and
+372-width features — the C bake (944, `caller_input_width` 944) can neither
+rescore those rows nor should the regressor train on another model's ladder
+shape without a measured proxy check. Options, to be decided at wave start:
+(a) rescore bigcodec jxl ladders through the C bake over the 924/944 views
+(tbig_924 exists; 944 append2 backfill coverage for tbig NOT verified), or
+(b) train on zensimA-ladder shape and measure the proxy gap on the 39-image
+dial grid (where both scorings exist). Neither is started tonight.
