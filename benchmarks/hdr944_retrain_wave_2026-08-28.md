@@ -83,3 +83,32 @@ is distinguishable (loop tol ±0.5 ⇒ ~0.2d resolution; ±0.25 ⇒ ~0.1d). The
 dial p50 tracks the leg's own cvvdp-mix target p50 within ~0.3 at every rung.
 Under the incumbent pack this band read 81–86, unreachable — the L0 fix is
 what makes it addressable.
+
+## PEER METRICS on the same instrument (user request: "ssim2 and butter and cvvdp as peers")
+
+Same 2,160 val zenjxl cells (q≥86), scores joined from the post-drain
+harvest by encode_sha (`harvest-2026-08-27/scores.parquet`; join 2,160/2,160):
+
+| q | d | zensim hfpack p50 | ssim2 p50 | butter_max p50 | cvvdp JOD p50 |
+|---|---|---|---|---|---|
+| 90 | 1.0 | 92.53 | 86.46 | 1.998 | 9.973 |
+| 92 | 0.8 | 93.06 | 87.54 | 1.858 | 9.979 |
+| 94 | 0.6 | 93.63 | 88.41 | 1.682 | 9.983 |
+| 96 | 0.4 | 94.55 | 89.96 | 1.410 | 9.990 |
+| 98 | 0.2 | 95.16 | 90.85 | 1.230 | 9.993 |
+| 100 | 0.0 | 95.39 | 91.24 | 1.146 | 9.994 |
+
+Controllability in the d1.0→d0 band (per-scene, 1,350 adjacent steps):
+
+| | monotone | frac step>0 | median step |
+|---|---|---|---|
+| **zensim hfpack** | **99.9%** | **0.999** | 0.54 |
+| ssim2 | 99.3% | 0.966 | 0.94 |
+| cvvdp | 98.5% | 0.985 | 0.0041 JOD (ceiling-saturated: 9.97→9.99) |
+| butter_max | 91.7% | 0.896 | 0.157 |
+
+Reading: ssim2 is a strong peer with the largest per-step magnitude; cvvdp
+discriminates but against a saturated ceiling (tolerance bands become
+sub-0.01-JOD — impractical as a dial up here); butteraugli-max is the
+noisiest orderer in this band. The hfpack peers at the top on both
+controllability axes. These rows accompany every freeze candidate table.

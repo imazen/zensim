@@ -211,6 +211,25 @@ CURATED_BOARD = [
     # 2/3-shot loop panel 2026-08-05 — the first new-era model with loop columns)
     "W10L9_s4003_packed",
 ]
+# "Sprint bests" (user request 2026-08-28): ONE selected leader per sprint/era,
+# newest last. The ensembles sprint's best is resolved at build time (highest
+# composite among ensemble rows) rather than hardcoded.
+SPRINT_BEST = [
+    ("v0x QAT era", "v47_strict_QAT_native"),
+    ("linear BVLS", "v02_bvls_NO_shaping"),
+    ("shipped-B linear", "b_sdr_linear_cid80_inclwinsor_dense_dial"),
+    ("Ebothg era", "winner_dial_Ebothg_hfgain_winsor_dial"),
+    ("additive era", "ADD156_safesyn_only_raw_lasso"),
+    ("924 coherent", "coherent924_selected"),
+    ("944 era-bridge", "sota944_EM4_s42_on944root"),
+    ("wave-7 kon leg", "sota944_B_konhead_w"),
+    ("wave-10", "W10L9_s4001"),
+    ("KFG sprint", "KFG75_s4101"),
+    ("nt sprint", "sota944_nt223"),
+    ("HDR-372 era", "bhdr_linear_shaped_cvvdpmix"),
+    ("HDR-944 wave", "HDR944_L1T1_s4005"),
+]
+
 CURATED = set(CURATED_BOARD)
 
 
@@ -679,6 +698,14 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
             "orientation": EXPECTED_ORIENTATION,
             "loopTargeting": loop_targeting,
             "hfnlAxis": hfnl_axis}
+    present = {b.get("name") for b in bakes}
+    sprint = [{"s": lbl, "n": n} for lbl, n in SPRINT_BEST if n in present]
+    ens = [b for b in bakes if (b.get("model") or {}).get("kind") == "ensemble"
+           and isinstance(b.get("composite"), (int, float))]
+    if ens:
+        best_e = max(ens, key=lambda b: b["composite"])
+        sprint.append({"s": "ensembles", "n": best_e["name"]})
+    data["sprintBest"] = sprint
     any_stub = any(b.get("is_stub") for b in bakes)
     stub_note = ("<span class='stub'>STUB DATA</span> — synthesized fixtures "
                  "(<code>make_stub_fulleval.py</code>); drop the eval agent's real "
@@ -903,6 +930,8 @@ function renderBar(){
   bar.append(
     mk('curated',()=>{state.visible=new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name));rerender();renderBar();},
       'the default set: era flagships + campaign arm candidates/leaders + ensembles'),
+    mk('sprint bests',()=>{state.visible=new Set((DATA.sprintBest||[]).map(x=>x.n));rerender();renderBar();},
+      'one selected leader per sprint/era: '+((DATA.sprintBest||[]).map(x=>x.s+' \u2192 '+x.n).join(' \u00b7 ')||'none resolved')),
     mk('all',()=>{DATA.bakes.forEach(b=>state.visible.add(b.name));rerender();renderBar();}),
     mk('none',()=>{state.visible.clear();rerender();renderBar();}),
     mk('top 6',()=>{const s=[...DATA.bakes].sort((a,b)=>b.composite-a.composite).slice(0,6).map(b=>b.name);
