@@ -1366,3 +1366,10 @@ bias does NOT explain the bytes; only a per-cell rate-matched read can.
 Registered open question for the user: rate-matched read (mm-F3 shape) vs
 bytes-bar amendment. S3 per-tile secant gain LANDED default-OFF (ca32d08f) — its
 instrument A/B is next.
+
+**§5 S3 DECODED A/B DONE (jxl-encoder cd2122ccc995)**: per-tile secant gain at k3
+improves every registered column — census 24→25/27, nonphoto 7→8/9 (the S3
+endpoint), med −5.7%, bytes +0.39% (inside ±1%); k2 is byte-identical BY
+CONSTRUCTION (gain first differs at the 2nd steered iterate; no later encode
+at k2 — asserted as an identity control in the phase). Default OFF. Registered
+next: S3×S1 composition, S4 elasticity prior, the secant rate-matched read.
