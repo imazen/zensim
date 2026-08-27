@@ -655,8 +655,22 @@
     "trained_with": "synthetic-v2 sources (the metric training pool)",
     "supersedes": "imazen26-nonphoto-synthv2-generator-sharing"
    },
-   "reason": "Corrected against the ROOT SOURCE (imazen/imazen-26 repo manifest; the prior audit's refs were the quarantined inspiration dir). Channel A (synth-pool generator sharing, dHash d<=2): 71 canonical ids, ~the whole 7000-lilith-plots class. Channel B (canonical-internal cross-id duplicate whose twin is a TRAIN id): 9 ids. Eval exposure: imazen26 8/74 origins (10.9% rows, both roots: 7007,7017,7027,7039,7047,7049,6067,8229); nonphoto-944 8/58 (13.9%); nonphoto-372 16/128 (12.6%). MEASURED realized inflation ~ZERO: 9 leader bakes ctrl-vs-clean, median delta +0.0026, max |delta| 0.0100, era flagships lose <=0.004 \u2014 shared content is hard, not memorized. Axes remain citable with this annotation; exclusion decision stays user-gated but is low-stakes.",
+   "reason": "Corrected against the ROOT SOURCE (imazen/imazen-26 repo manifest; the prior audit's refs were the quarantined inspiration dir). Channel A (synth-pool generator sharing, dHash d<=2): 71 canonical ids, ~the whole 7000-lilith-plots class. Channel B (canonical-internal cross-id duplicate whose twin is a TRAIN id): 9 ids. Eval exposure: imazen26 8/74 origins (10.9% rows, both roots: 7007,7017,7027,7039,7047,7049,6067,8229); nonphoto-944 8/58 (13.9%); nonphoto-372 16/128 (12.6%). MEASURED realized inflation ~ZERO: 9 leader bakes ctrl-vs-clean, median delta +0.0026, max |delta| 0.0100, era flagships lose <=0.004 \u2014 shared content is hard, not memorized. Axes remain citable with this annotation; exclusion decision stays user-gated but is low-stakes. \u21d2 REFINED same day by imazen26-nonphoto-sharing-provenance-2026-08-27 (provenance-derived owner; dHash demoted to verifier).",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (CORRECTED RESULTS); /mnt/v/output/zensim/imazen26-dhash-2026-08-27/{affected_ids_2026-08-27.tsv,canon_crossid_pairs_2026-08-27.tsv,cleanslice/cleanslice_summary.tsv,montages_v3/}",
+   "date": "2026-08-27"
+  },
+  {
+   "id": "imazen26-nonphoto-sharing-provenance-2026-08-27",
+   "kind": "annotated",
+   "fields": [
+    "rank.imazen26",
+    "rank.nonphoto"
+   ],
+   "scope": {
+    "supersedes": "imazen26-nonphoto-sharing-corrected-2026-08-27"
+   },
+   "reason": "Sharing sets now PROVENANCE-DERIVED over the whole corpus (imazen-26/scripts/derive_sharing_provenance.py; dHash = verifier). Channel A exact-generator-token: 68 ids. Channel B split-piercing name families (dpr/viewport ladders, plot kind-variants, +3/+4 patent families): 166 non-train ids with a train twin. Upper-bound eval exposure: imazen26 19/74 origins (25.1% rows), nonphoto-944 19/58 (32.2%), nonphoto-372 35/128 (26.6%). MEASURED at the upper bound (9 leader bakes): median delta +0.0043, max |delta| 0.0143, nonphoto deltas consistently POSITIVE \u2014 the shared classes are the hardest content; no memorization advantage. Axes citable under this annotation; exclusion remains user-gated and measured low-stakes.",
+   "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (PROVENANCE IS THE OWNER); /mnt/v/output/zensim/imazen26-dhash-2026-08-27/{prov_*.tsv,affected_ids_full_2026-08-27.tsv,cleanslice/cleanslice_summary_full.tsv}",
    "date": "2026-08-27"
   }
  ]

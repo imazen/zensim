@@ -223,3 +223,67 @@ measured ≈0, keep-under-annotation is defensible and exclusion changes
 little; the annotation registry entry now carries the corrected sets + these
 deltas. The cross-id duplicate census (channel B, 237 pairs) is corpus-repo
 territory — inventory committed to `imazen-26/benchmarks/`.
+
+## PROVENANCE IS THE OWNER, dHASH THE VERIFIER (2026-08-27, user insight)
+
+The user, reading montages_v3: "all overlaps — shouldn't you be able to figure
+those out via provenance alone" + "there are a few exceptions in synth at the
+bottom". Both correct, and the reformulation is now implemented:
+**`imazen-26/scripts/derive_sharing_provenance.py`** derives sharing sets
+deterministically from NAMES/manifest over the WHOLE corpus (dHash covered
+only the 414 picker-covered ids); the dHash sweep becomes the independent
+verifier.
+
+**The exceptions, decomposed** (classification of all 79 d≤2 synth pairs):
+72 EXACT-TOKEN (generator kind+index+seed identical in both names, e.g.
+`gen-chart__00118_s37436075` ↔ `7092_plots_chart-00118-s37436075`) + 3
+SAME-SEED-DIFF-INDEX at d=0 (the chart generator's seed determines content)
++ **4 NO-TOKEN pairs, all d=2 — the user's "exceptions": `gen-line` sources
+vs different-token concentric plots (7060, 7064) and vs a PATENT SCAN page
+(6054, twice)** — the flat/line-content dHash FP class, visibly different
+images. Provenance rejects all 4 automatically; ids 6054/7060/7064 drop from
+channel A (all train-parity — eval exposure unchanged by the drop).
+
+**Channel A (provenance) = 68 ids, all exact-token** (34 train / 23 val / 11
+test) — equals the dHash set minus exactly the 3 weak-evidence ids. Perfect
+cross-validation.
+
+**Channel B (provenance, corrected family grammar) = 166 non-train ids with a
+train twin across 91 split-piercing families** — far beyond dHash's 9
+(dHash saw only picker-covered ids and only scale-stable hashes):
+- screenshots `8100`: family = (site alnum-normalized, page) minus dpr —
+  the dpr1/dpr2 (and other viewport) captures of one page carry
+  parity-flipping id offsets, so most pages cross buckets. dpr-only twins are
+  CERTAIN same-content (dHash d=0, eye-confirmed); cross-viewport members are
+  responsive re-layouts — plausible-tier.
+- plots `7000`: family = (index, seed) across kind variants —
+  `line-00230-s6a3b9505` ↔ `line-concentric-00230-s6a3b9505` render
+  identically (d=0).
+- patents `6000`: family = (patent, page). The lynn-conway trio uses
+  parity-PRESERVING +30 offsets (same bucket by design — good); the
+  martha-jones/yvonne-brill +3/+4 offsets cross buckets. **dHash's 6067/6083
+  are PROVENANCE-CONTRADICTED** (their matches were DIFFERENT pages, p020~p009
+  — schematic pages aliasing at dHash scale); kept pending-eye only.
+
+**Upper-bound eval exposure** (A ∪ B ∪ pending; `affected_ids_full_2026-08-27.tsv`):
+imazen26 19/74 origins (25.1% rows, both roots) · nonphoto-944 19/58 (32.2%)
+· nonphoto-372 35/128 (26.6%).
+
+**Upper-bound measurement — the question closes.** Same 9 bakes, ctrl vs
+25-32%-excluded clean slices (`cleanslice/cleanslice_summary_full.tsv`):
+median Δ +0.0043, max |Δ| 0.0143, and every nonphoto delta for the SDR
+leaders is POSITIVE (+0.006..+0.014) — exclusion RAISES scores because the
+shared plot/screenshot classes are the hardest content. The era flagships
+(trained on the sharing pool) lose ≤0.0021 on imazen26. **No memorization
+advantage exists at either the certain tier or the page-level upper bound.**
+The first-pass (certain-tier) measurement table above stands as the lower
+bound; both are in `cleanslice/` (v1 = certain-tier clean JSONs kept as
+`*.clean_v1.json`).
+
+**Corpus-design finding (for imazen-26):** id-offset parity is what decides
+whether a by-design content family crosses the split. lynn-conway got it
+right (+30); the dpr/viewport ladders and the +3/+4 patent families did not.
+Recorded in `imazen-26/benchmarks/split_crossid_dupes_2026-08-27.md`; a
+family-aware split (bucket by family key, not raw id, for classes 6xxx/7xxx/
+8100) is the structural fix if content-level separation is ever wanted —
+measured stakes today: ≈0.
