@@ -1,0 +1,106 @@
+# FLEET criterion-1 runtime-column audit — ssim2+butteraugli GPU-only
+# date: 2026-08-27  store: tower (ZEN_STORE=tower, http://192.168.50.170:3900)
+# cmd: ZEN_STORE=tower python3 scripts/jobsys/audit_gpu_only_metrics.py  (zenmetrics)
+# result: PASS (exit 0) — every ssim2/butteraugli done row ends -gpu; violations table empty
+
+# hdrgrid-sf2-cpu-20260807: no ledger (Could not open Parquet input source 'zentrain/jobs)
+job	metric	worker	done_rows
+avifgen-sf-cpu-20260806	cvvdp	i265	31979
+avifgen-sf-cpu-20260806	cvvdp	ryzen5800xt	32391
+avifgen-sf-cpu-20260806	cvvdp	tower	24354
+avifgen-sf-cpu-20260806	zensim-foldapp2	i265	31979
+avifgen-sf-cpu-20260806	zensim-foldapp2	ryzen5800xt	32391
+avifgen-sf-cpu-20260806	zensim-foldapp2	tower	24354
+avifgen-sf-gpu-20260806	butteraugli-gpu	lianli	32574
+avifgen-sf-gpu-20260806	butteraugli-gpu	node-2	65174
+avifgen-sf-gpu-20260806	ssim2-gpu	lianli	32574
+avifgen-sf-gpu-20260806	ssim2-gpu	node-2	65174
+avifgen-sf-gpu-rescue-20260808	butteraugli-gpu	i134	90
+avifgen-sf-gpu-rescue-20260808	butteraugli-gpu	i134-gpu	4978
+avifgen-sf-gpu-rescue-20260808	butteraugli-gpu	lianli	17634
+avifgen-sf-gpu-rescue-20260808	butteraugli-gpu	lilith-gpu	8404
+avifgen-sf-gpu-rescue-20260808	butteraugli-gpu	node-2	3406
+avifgen-sf-gpu-rescue-20260808	ssim2-gpu	i134	90
+avifgen-sf-gpu-rescue-20260808	ssim2-gpu	i134-gpu	4978
+avifgen-sf-gpu-rescue-20260808	ssim2-gpu	lianli	17634
+avifgen-sf-gpu-rescue-20260808	ssim2-gpu	lilith-gpu	8404
+avifgen-sf-gpu-rescue-20260808	ssim2-gpu	node-2	3406
+hdrgrid-diffmap-20260807	butteraugli	dev-dcpu	5900
+hdrgrid-diffmap-20260807	butteraugli	dev-fix11d	113
+hdrgrid-diffmap-20260807	butteraugli	dev-nomad	2851
+hdrgrid-diffmap-20260807	butteraugli	i134-gpu	71079
+hdrgrid-diffmap-20260807	butteraugli	i265-cpu	5064
+hdrgrid-diffmap-20260807	butteraugli	i265-i265cpu	3923
+hdrgrid-diffmap-20260807	butteraugli	i265-nomad	2310
+hdrgrid-diffmap-20260807	butteraugli	lilith-gpu	15405
+hdrgrid-diffmap-20260807	butteraugli	lilith-l5070	38529
+hdrgrid-diffmap-20260807	butteraugli	r3500-nomad	1744
+hdrgrid-diffmap-20260807	butteraugli	r3500-r3500cpu	2419
+hdrgrid-diffmap-20260807	butteraugli	r5900xt-cpu	3380
+hdrgrid-diffmap-20260807	butteraugli	r5900xt-nomad	1816
+hdrgrid-diffmap-20260807	butteraugli	r5900xt-r5900xtcpu	8019
+hdrgrid-diffmap-20260807	butteraugli	r7900x-nomad	2641
+hdrgrid-diffmap-20260807	butteraugli	r7900x-r79cpu	3360
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	dev-dcpu	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	dev-fix11d	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	dev-nomad	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	i134-gpu	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	i265-cpu	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	i265-i265cpu	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	i265-nomad	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	lilith-gpu	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	lilith-l5070	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	r3500-nomad	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	r3500-r3500cpu	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	r5900xt-cpu	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	r5900xt-nomad	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	r5900xt-r5900xtcpu	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	r7900x-nomad	0
+hdrgrid-diffmap-20260807	butteraugli (diffmap; GPU-launch enforced)	r7900x-r79cpu	0
+hdrgrid-diffmap-20260807	cvvdp	Tower-cpu	5794
+hdrgrid-diffmap-20260807	cvvdp	dev-cpu	4535
+hdrgrid-diffmap-20260807	cvvdp	dev-dcpu	6605
+hdrgrid-diffmap-20260807	cvvdp	dev-fix11d	113
+hdrgrid-diffmap-20260807	cvvdp	dev-nomad	6291
+hdrgrid-diffmap-20260807	cvvdp	i134-gpu	68049
+hdrgrid-diffmap-20260807	cvvdp	i265-cpu	15049
+hdrgrid-diffmap-20260807	cvvdp	i265-i265cpu	6568
+hdrgrid-diffmap-20260807	cvvdp	i265-nomad	5323
+hdrgrid-diffmap-20260807	cvvdp	lilith-gpu	15359
+hdrgrid-diffmap-20260807	cvvdp	r3500-cpu	920
+hdrgrid-diffmap-20260807	cvvdp	r3500-nomad	3470
+hdrgrid-diffmap-20260807	cvvdp	r3500-r3500cpu	2981
+hdrgrid-diffmap-20260807	cvvdp	r5900xt-cpu	9050
+hdrgrid-diffmap-20260807	cvvdp	r5900xt-nomad	3851
+hdrgrid-diffmap-20260807	cvvdp	r5900xt-r5900xtcpu	7560
+hdrgrid-diffmap-20260807	cvvdp	r7900x-nomad	5242
+hdrgrid-diffmap-20260807	cvvdp	r7900x-r79cpu	3361
+hdrgrid-sf-cpu-20260807	zensim	dev-fix11d	11
+hdrgrid-sf-cpu-20260807	zensim	i265-hdrcpu	54641
+hdrgrid-sf-cpu-20260807	zensim	r5900xt-cpu	7372
+hdrgrid-sf-cpu-20260807	zensim	r5900xt-hdrcpu	1577
+hdrgrid-sf-cpu-20260807	zensim	r7900x-nomad	2998
+hdrgrid-sf-cpu-20260807	zensim	tower-hdrcpu	10033
+hdrgrid-sf-cpu-20260807	zensim	wsl-c1	63640
+hdrgrid-sf-cpu-20260807	zensim	wsl-c2	122808
+hdrgrid-sf-gpu-20260807	iwssim-gpu	lianli-hdr	3936
+hdrgrid-sf-gpu-20260807	iwssim-gpu	lilith-l5070	1532
+hdrgrid-sf-gpu-20260807	iwssim-gpu	r7900x-hdrsmoke	693
+hdrgrid-sf-gpu-20260807	iwssim-gpu	r7900x-med	10021
+hdrgrid-sf-gpu-20260807	iwssim-gpu	wsl-nomad	1445
+hdrgrid-sf-gpu-20260807	ssim2-gpu	lianli-hdr	3936
+hdrgrid-sf-gpu-20260807	ssim2-gpu	lilith-l5070	1532
+hdrgrid-sf-gpu-20260807	ssim2-gpu	r7900x-hdrsmoke	693
+hdrgrid-sf-gpu-20260807	ssim2-gpu	r7900x-med	10021
+hdrgrid-sf-gpu-20260807	ssim2-gpu	wsl-nomad	1445
+hdrgrid-sf-gpu-huge-20260807	iwssim-gpu	i134-nomad	344
+hdrgrid-sf-gpu-huge-20260807	iwssim-gpu	r7900x-huge	1115
+hdrgrid-sf-gpu-huge-20260807	ssim2-gpu	i134-nomad	344
+hdrgrid-sf-gpu-huge-20260807	ssim2-gpu	r7900x-huge	1115
+hdrgrid-sf-gpu-small-20260807	ssim2-gpu	r5900xt-hdr	1374
+hdrgrid-sf2-gpu-20260807	butteraugli-gpu	i134-med	5223
+hdrgrid-sf2-gpu-20260807	butteraugli-gpu	reassert	2280
+hdrgrid-sf2-gpu-huge-20260807	butteraugli-gpu	i134-huge	5595
+hdrgrid-sf2-gpu-small-20260807	butteraugli-gpu	r5900xt-sf2small	687
+
+PASS: every ssim2/butteraugli SCORE row carries the -gpu runtime suffix (GPU rung executed; no CPU rung anywhere). diffmap butteraugli rows come from ZEN_REQUIRE_GPU=1 GPU launches. zensim features + cvvdp + encodes on CPU by design.

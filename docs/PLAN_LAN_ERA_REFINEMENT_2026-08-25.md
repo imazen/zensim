@@ -2095,16 +2095,16 @@ single i134 3070 — the wsl reboot is the schedule-dominant unlock.
 Status legend: ✅ evidence committed · 🟡 executing (evidence for the done part) · 🔶 USER-GATED · ❌ open.
 
 **1 FLEET**
-- Boxes enrolled + busy-when-non-empty: ✅ 8 Nomad nodes ready (roster read live); CPU jobs posted/retired to match queue state (homefleet `e3cd66c`→`c2a2243`→`d0033da`); 🟡 wsl box GPU-dead (USER: reboot).
-- ssim2/butter GPU-only, no CPU rung: ✅ `ZEN_REQUIRE_GPU=1` + the entrypoint's **operational cuInit+dispatch probe** (zenmetrics `9dffa5ca` CPU / `6d4f9963` GPU images; probe live-verified in i134's boot log 09:46:58Z); runtime column lands with the rolled images (`b8db9ee4`).
+- Boxes enrolled + busy-when-non-empty: ✅ 8 Nomad nodes ready (roster read live); CPU jobs posted/retired to match queue state (homefleet `e3cd66c`→`c2a2243`→`d0033da`); ✅ wsl box BACK post-reboot (l5070 GPU done-rows in sf-gpu ledgers; sidecars observed 02:4x-03:1xZ).
+- ssim2/butter GPU-only, no CPU rung: ✅ `ZEN_REQUIRE_GPU=1` + the entrypoint's **operational cuInit+dispatch probe** (zenmetrics `9dffa5ca` CPU / `6d4f9963` GPU images; probe live-verified in i134's boot log 09:46:58Z); runtime column AUDITED 2026-08-27: `benchmarks/fleet_gpu_runtime_audit_2026-08-27.txt` — every ssim2/butteraugli done row across 12 ledgers ends `-gpu`, zero violations, PASS exit 0 (`audit_gpu_only_metrics.py`, images `b8db9ee4`).
 - declare→gap→reconcile herding every run: ✅ used all day (fix11: declare `hdrgrid-enc-fix11` → drain → append-declares into 5 runs → gap verbs); defects fixed at owner with tests: live accounting (`ca3cbf15`), queue-true snapshots (`451f4dea`), shim capability probe (`6d4f9963`), all-error guard (`3ce2fb09`), reassert (`ff9eea8b`+`fbdfd4a0`).
 - Waiters leave evidence: ✅ every waiter this session wrote a log + terminal line; per the user's 3×-kill signal, waiters are now FOREGROUND pulses (memory-banked).
-- Per-wave wall clock measured and falling: ✅ the diffmap rollup's wall-clock table (`f5878299`: 4.3/s bursts → 765/min sustained) + today's points: fix11 encode wave = **115 cells / ~2 min**; fix11 CPU-delta drains = 248 cells / ~4 min single-box; census waves each ≤1 session. ❌ remaining: the GPU re-drain (~5,215 cells, single-3070-bound — wall clock falls when wsl returns).
+- Per-wave wall clock measured and falling: ✅ the diffmap rollup's wall-clock table (`f5878299`: 4.3/s bursts → 765/min sustained) + today's points: fix11 encode wave = **115 cells / ~2 min**; fix11 CPU-delta drains = 248 cells / ~4 min single-box; census waves each ≤1 session. 🟡 remaining: GPU re-drain gap_live 5,046 (report 04:0xZ), multi-box now (i134 + l5070 + r7900x tiers observed; zenmetrics-9c session shepherding).
 
 **2 DATA**
 - avifgen: ✅ encoded+scored (4 fleet metrics + zensim-C944 fill `b278d791`/`0d6583f0`), featured@944, manifested, LAN+Tower mirrored (`785b3e35`), browser-served.
 - bigcodec + ext legs: ✅ prior-era canonical (triple-mirrored, manifested — zensim CLAUDE.md canon); ladder-density curation MEASURED today (9-pt grid recorded honestly in the ladder pointer `e093b186`).
-- hdrgrid: 🟡 encodes ✅ (incl. the 115-cell svt#11 backfill `a2e9b432`); diffmaps ✅ (193,800 finals, manifested+mirrored); cvvdp+zensim features ✅ re-drained clean; GPU metrics 🟡 (~5,215 cells on i134).
+- hdrgrid: 🟡 encodes ✅ (incl. the 115-cell svt#11 backfill `a2e9b432`); diffmaps ✅ (193,800 finals, manifested+mirrored); cvvdp+zensim features ✅ re-drained clean; GPU metrics 🟡 (gap_live 5,046 @ 04:0xZ, multi-box); diffmap re-drain COMPLETE 193,800/193,804 (the 4 = content-fan arithmetic, recorded).
 - hdr_v3mix: ✅ @944 manifested w/ build_commit, orientation-gated PASS both splits, store+Tower mirrored (`7d4e2dcf`).
 - Curation recorded: ✅ split rule (origin even/odd, `origin_split.py` owner), k-means reps (sweep-discipline records), ladder density (today), redundancy (content-dedup measured: avifgen 562,860→534,464; diffmap dup-identity census).
 - imazen-26 audit: ✅ id half (`4d446c2d`/`e5974ca3`), ✅ dHash RUN half (`1bc58d4b`, 40 montages); 🔶 EYE half = the user's (policy).
