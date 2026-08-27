@@ -157,3 +157,41 @@ the retrains carry the sihdr sign-flip flag. Runner-up:
 discrimination lead; kept packaged for a future HF-precision wave). All 7
 fullevals + M3a artifacts on the board dir; every cell in this md.
 **Freeze remains USER-GATED — proposal presented with peers + d-ladder.**
+
+## GATE-SCORECARD CORRECTION + SEMANTICS AUDIT (2026-08-28, the user's challenges)
+
+**Gates (the user is right).** The E.4 selection and the GATE scorecard
+disagree, and the earlier recommendation presented only the E.4 lens. Gate
+facts: the selected L0 pack reads `g1_dynamic_range` **0.696** and
+`weighted_goal` 0.420 against the t2 retrain's **g1 = 1.0** and 0.453 (dial
+reach 77 vs 107; shipped-B reads g1 = 1.0, weighted_goal 0.610). The two
+lenses trade: E.4 (floors + balanced composite) favors L0 via its CID22-family
+strength; the gate panel favors t2_s4003 via dynamic range. NOTE the gate
+panel runs on the SDR 944 dial grid — an SDR-route instrument applied to
+HDR-route bakes — so both readings are cross-domain and neither is a clean
+HDR product gate; the honest state is BOTH tables side by side, no
+recommendation. **The freeze recommendation is WITHDRAWN pending the user's
+read**; the freeze remains user-gated.
+
+**Column semantics (verified from bytes, per the user's warning):** neither
+leg's `human_score` is human — the t1 leg's is the cvvdp-mix (half ssim2 by
+construction; range [0, 0.9999], `zensim_score` column all-null) and the t2
+leg's is era-B zensim/100 (range [−2.34, 0.956] — the negative tail is the
+fingerprint). Every G-HF band, anchor, and "target" in this wave is therefore
+METRIC-derived; computations were internally consistent, and all labels in
+this doc now carry that reading. The picker-lineage axes' `human_score` is
+ssim2-derived (the axis definition; peer provenance states it).
+
+## PEERS EVERYWHERE — status (user directive: all graphs, no model skipped)
+
+Peer rows (ssim2/butteraugli/cvvdp/iwssim) now cover **8 of the board's rank
+axes** from stored data only: cid22/kadid/tid/aic3/konjnd (refmetrics
+per-pair tables) + imazen26/nonphoto/hfnlproxy (fill4+hqfill+avifgap sidecar
+join through the identity-gated slice-selection reproduction; coverage
+71%/71%/100%). Notable: on hfnlproxy the classics collapse (butter 0.507,
+cvvdp 0.434, iwssim 0.327) — peer context for the HF-NL weak zone. Peers
+carry `per_pair` (scatter matrix) and ride every rank-driven chart.
+**Remaining, registered as scoring jobs (stored data does not exist):**
+csiq / live / aic4 / sdr25 axes, the dial-grid ladder (peer dial curves) and
+the corruption grid (peer ordering) — each needs (ref,dist) pair
+reconstruction + `zenmetrics batch` (ssim2/butter GPU, cvvdp CPU).

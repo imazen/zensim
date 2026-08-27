@@ -83,6 +83,7 @@ def main():
     for peer, (sign, corpora) in PEERS.items():
         rank = {}
         prov = {}
+        per_pair_all = {}
         for corpus, (tsv, _, _) in corpora.items():
             p = os.path.join(RM, tsv)
             if not os.path.exists(p):
@@ -97,14 +98,20 @@ def main():
             # comes from the batch full path — never alias abs into signed.
             try:
                 from zen_stats import panel_batch
-                sb = panel_batch([(pred, ys)])[0]
+                sb = panel_batch([("p", pred, ys)])[0]
                 signed = sb.get("srocc_signed")
             except Exception:
                 signed = None
+            import random as _r
+            _r.seed(11)
+            k = min(5000, len(pred))
+            samp = sorted(_r.sample(range(len(pred)), k))
+            per_pair_local = {"pred": [pred[i] for i in samp], "mos": [ys[i] for i in samp]}
             rank[corpus] = {"srocc": st["srocc"],
                             **({"srocc_signed": signed} if signed is not None else {}),
                             "plcc": st["plcc"], "krocc": st["krocc"], "or": st["or"],
                             "pwrc": st["pwrc"], "z_rmse": st["z_rmse"], "n": st["n"]}
+            per_pair_all[corpus] = per_pair_local
             prov[corpus] = {"tsv": tsv, "human_col": hcol, "metric_col": mcol,
                             "n": st["n"], "oriented": "negated" if sign < 0 else "as-is"}
         doc = {
@@ -120,6 +127,7 @@ def main():
                                "imazen26/nonphoto (ssim2-derived targets — a self-row "
                                "would be trivially perfect).")},
             "rank": rank,
+            "per_pair": per_pair_all,
             "m3_coherence": None, "m3a_coherence": None,
             "peer": True,
             "peer_provenance": prov,
