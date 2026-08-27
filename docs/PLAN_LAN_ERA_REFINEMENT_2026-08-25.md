@@ -1550,3 +1550,41 @@ failures, drain-complete, space-gate, tower/plex, budget. This keeps the
 user's "Claude handles all conditions" directive at the DECISION layer while
 killing the per-transition wake churn the latency discipline bans. Armed on
 the wsl worker + diffmap runlist.
+
+## DIFFMAP BOTTLENECK — measured, fixed at three layers (2026-08-27 ~02:00Z)
+
+**The question ("what is the bottleneck, did you profile it, are you using the
+other GPUs") exposed two wrong assumptions and one infra cap:**
+
+1. **Store (the real cap): the SeaweedFS volumes lived in appdata on the cache
+   NVMe — a share the mover NEVER migrates.** Remaining queue = 103k cells ×
+   5.6 MB mean blob (400-blob sample; max 26 MB) ≈ **580 GB**, against 19 G
+   free cache and ~6 GB/h of mover relief that could never apply to the
+   store's own data. Fix: recreated `zen-lanstore` with a SECOND volume dir on
+   the array (`/mnt/user/coefficient/zenstore-data2 → /data2`,
+   `-dir=/data,/data2`; 21 T free; ownership matched to the container uid
+   after a permission-denied fatal; original container config backed up at
+   tower `/boot/config/zen-lanstore-config-backup-20260827.txt`). Write probe
+   green; writes now land at array speed with no mover in the loop.
+2. **Classing (the wrong GPU story): BOTH diffmap owners are CPU** —
+   butteraugli via the reference crate (`butteraugli_linear`, cpu-metrics) and
+   cvvdp via the in-tree port, read from the executor body. The 9cae2b20 Gpu
+   classing (its comment claimed the route "runs via butteraugli-gpu") pinned
+   a pure-CPU queue to GPU boxes, idled every CPU box, AND throttled worker
+   concurrency through VRAM admission that had nothing to gate. CORRECTED at
+   the owner (zenmetrics 526c84b8, test locks CpuHeavy for all four name
+   forms).
+3. **Profile (now real, was absent): `ZEN_JOB_TIMING=1`** at the executor +
+   measured on real cells (768×1024, this box, single-thread): butteraugli
+   hdr **fetch 64 ms + map+gz 146 ms**, cvvdp hdr **49 + 291 ms**, ~2.8 MB
+   out, ~230 MB RSS. Pure CPU, small — the per-cell cost was never the
+   problem; routing + store were.
+
+**Projection**: CPU fleet at even ~20 cells/s aggregate ≈ 85 MB/s store
+writes (inside array sequential) → the 103k-cell gap drains in hours, not the
+33-66 h the mover-bound path implied. GPU boxes are NOT needed for this
+queue and never were; lilith's 5070 stays enrolled (its old-image worker
+still serves; the GPU matters for the ssim2/butteraugli SCORING queues,
+which are genuinely GPU-only per criterion 1). Rollout: reclass image
+exec-zensim944hdr-526c84b8 → first-cell on dev (capped cpuset 0-19/24g) →
+i265/r5900xt/r3500.
