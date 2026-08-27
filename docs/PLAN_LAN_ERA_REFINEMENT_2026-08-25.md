@@ -1612,3 +1612,34 @@ cache: partial-file splits are the failure mode.**
 remaining /data (cache) volumes to disk1 to give the household cache real
 headroom — volumes are open while weed runs, so this waits for the
 DRAIN-COMPLETE wake, not a live store.
+
+## STORE INCIDENT ARC CLOSED (2026-08-27 02:55Z) — full recovery, ~450 cells/min
+
+Chain of causes, each fixed at its owner, in order found:
+1. shfs cache-first "array" dir → direct-disk /data2 (recorded above).
+2. ENOSPC-split volume triplets → 3 volumes quarantined
+   (`zenstore-quarantine-20260827` on disk1), partial dests reconciled.
+3. `jobctl report` silently zeroed on a bulk-cp failure → PARTIAL-tolerant +
+   loud per-file fallback (zenmetrics 5f9c7e1d) — proved live (263k rows read
+   with a 67-unreadable warning where the old code printed done=0).
+4. **W9, a NEW wedge mode (taxonomy 3d335866): the store HANGS on
+   dead-chunk GETs** — 67 dead sidecars wedged every reader at once (worker
+   sidecar folds, report fallback, verify tasks) while healthy-object probes
+   stayed green. Mitigation: short-timeout parallel scan → deleted the 67
+   dead objects (their cells re-enter the gap). Structural guard: every
+   zenfleet-ledger s5cmd transfer is BOUNDED (120 s default,
+   ZEN_S5CMD_TIMEOUT_SEC; 294a6944).
+5. `audit-blobs` (new jobctl verb, 0388e3b9): 95,739 readable done rows ×
+   99,265 blobs → **ZERO missing outputs** — total incident data impact =
+   re-run work only, no loss.
+6. Final flap: the direct-disk dir was root-mkdir'd → weed (uid 1000) could
+   READ moved volumes but not CREATE new ones → volume growth
+   permission-denied → writes died whenever allocation was needed. One chown
+   → 5/5 sustained writes.
+
+**Verified steady state (02:50-02:55Z)**: 5/5 workers landing sidecars
+(36 chunks/4 min), done 95,764→100,271 (+4,507/~10 min ≈ 450 cells/min),
+gap 93,303 (ETA ≈ 3.5 h), disk1 22→36G (~25 MB/s), cache FLAT at 25G and
+rising, sentinel auto-cycled the wsl GPU worker back (cycle 2), Plex 200
+through the whole arc. Queued on DRAIN-COMPLETE: migrate the /data cache
+volumes to disk1 in a store-stopped window; then the diffmap writeback.
