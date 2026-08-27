@@ -236,8 +236,7 @@ unsafe fn forward_avx512(
 
     // For each input feature i: scale-and-accumulate w1's row into h_pre.
     // Preserves the sparse-x short-circuit.
-    for i in 0..n_features {
-        let s = x[i];
+    for (i, &s) in x[..n_features].iter().enumerate() {
         if s == 0.0 {
             continue;
         }
@@ -255,8 +254,8 @@ unsafe fn forward_avx512(
             }
         }
         // Scalar tail for n_hidden % 8 != 0 (test cases).
-        for j in tail_start..n_hidden {
-            h_pre[j] += s * unsafe { *row_ptr.add(j) };
+        for (k, h) in h_pre[tail_start..n_hidden].iter_mut().enumerate() {
+            *h += s * unsafe { *row_ptr.add(tail_start + k) };
         }
     }
 
@@ -373,8 +372,7 @@ unsafe fn backprop_avx512(
     // 2) gw1 row update: for each i, if x[i] != 0,
     //    gw1[i*N + j] += x[i] * dl_dh_pre[j] for all j.
     let gw1_ptr = gw1.as_mut_ptr();
-    for i in 0..n_features {
-        let s = x[i];
+    for (i, &s) in x[..n_features].iter().enumerate() {
         if s == 0.0 {
             continue;
         }
@@ -439,8 +437,7 @@ unsafe fn forward_avx2(
     let n_chunks = n_hidden / 4;
     let tail_start = n_chunks * 4;
 
-    for i in 0..n_features {
-        let s = x[i];
+    for (i, &s) in x[..n_features].iter().enumerate() {
         if s == 0.0 {
             continue;
         }
@@ -456,8 +453,8 @@ unsafe fn forward_avx2(
                 _mm256_storeu_pd(h_pre_ptr.add(off), new_acc);
             }
         }
-        for j in tail_start..n_hidden {
-            h_pre[j] += s * unsafe { *row_ptr.add(j) };
+        for (k, h) in h_pre[tail_start..n_hidden].iter_mut().enumerate() {
+            *h += s * unsafe { *row_ptr.add(tail_start + k) };
         }
     }
 
@@ -563,8 +560,7 @@ unsafe fn backprop_avx2(
     gb2[0] += dl_dy;
 
     let gw1_ptr = gw1.as_mut_ptr();
-    for i in 0..n_features {
-        let s = x[i];
+    for (i, &s) in x[..n_features].iter().enumerate() {
         if s == 0.0 {
             continue;
         }
