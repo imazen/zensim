@@ -692,14 +692,13 @@
    "id": "hdr-instrument-v3mix-scene-overlap",
    "kind": "annotated",
    "fields": [
-    "hdr census (27-cell) evaluations of hdr_v3mix-trained models",
-    "svt/gainmap census judge (BHdr route)"
+    "hdr census (27-cell) evaluations of hdr_v3mix-trained models (BHdr \u2014 the svt/gainmap census judge)"
    ],
    "scope": {
     "scenes_in_train": "1064,1242,1494,1520,1640",
     "scenes_in_val": "1065,1495"
    },
-   "reason": "hdr_v3mix/hdr944-leg contains 7 of the 9 frozen HDR census scenes; models trained on it (BHdr, HDR944_L1T*) overlap the instrument. D2 freeze gates are external corpora (clean). Fix: next instrument revision uses scenes held out of all HDR training views.",
+   "reason": "hdr_v3mix/hdr944-leg contains 7 of the 9 frozen HDR census scenes; models trained on it (BHdr, the census JUDGE) overlap the instrument. CORRECTED 2026-08-28: the HDR-944 candidates (HDR944_L1T*) are NOT affected \u2014 their training root is the hdrgrid-mc944 legs, verified ZERO census-scene overlap by direct table read. Fix path unchanged: future hdr_v3mix-lineage training (BHdr retrain) uses hdr944-leg-pure-2026-08-28 (census scenes held out).",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (MEASUREMENTS 2+3)",
    "date": "2026-08-28"
   },

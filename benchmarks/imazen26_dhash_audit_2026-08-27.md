@@ -400,3 +400,17 @@ censuses stand as controller-convergence baselines (within-judge comparator
 structure) under this annotation. **Fix path (binds future work per the
 purge policy):** the next HDR instrument revision draws scenes held out of
 ALL HDR training views, frozen before the next HDR training wave.
+
+## CORRECTION (2026-08-28, same session): the HDR-944 candidates were NEVER instrument-contaminated
+
+My MEASUREMENTS 2+3 write-up over-reached: it said the hdr_v3mix↔instrument
+overlap covered "BHdr — the census JUDGE — and the HDR-944 candidates". The
+candidates' embedded repro shows their actual training root is the
+**hdrgrid-mc944 legs**, whose builder excluded census scenes by design —
+verified by direct table read: t1 train/val (41,788/22,860 rows, 33+18
+scenes) and t2 train/val both have **ZERO census-scene overlap**. The overlap
+finding stands ONLY for hdr_v3mix-trained artifacts: **BHdr (the svt/gainmap
+census judge)** and anything else fit on the hdr_v3mix gram/leg. The D2
+"hold for purity-clean retrain" was answered on my wrong premise — corrected
+and re-put to the user. (The purified `hdr944-leg-pure-2026-08-28/` build
+stands as the future-BHdr-retrain input per the purge policy.)
