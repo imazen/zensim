@@ -41,6 +41,13 @@ for ds in sorted(os.listdir(ROOT)):
     dsp = os.path.join(ROOT, ds)
     if not os.path.isdir(dsp):
         continue
+    def onum(v):
+        """Numeric origin for the parity rule — origin_id may be a string
+        (e.g. '123' or a name carrying trailing digits)."""
+        s = str(v)
+        d = "".join(ch for ch in s if ch.isdigit())
+        return int(d) if d else -1
+
     ids = {}
     refs = {}
     for split in ("train", "validate", "test"):
@@ -48,7 +55,7 @@ for ds in sorted(os.listdir(ROOT)):
         t = pq.read_table(p, columns=["origin_id", "ref_filename"])
         ids[split] = set(t.column("origin_id").to_pylist())
         refs[split] = {os.path.splitext(os.path.basename(r))[0] for r in t.column("ref_filename").to_pylist()}
-        bad_parity = {i for i in ids[split] if i % 10 not in SPLIT_OK[split]}
+        bad_parity = {i for i in ids[split] if onum(i) % 10 not in SPLIT_OK[split]}
         if bad_parity:
             fails.append(f"{ds}/{split}: {len(bad_parity)} origin ids violate the parity rule (e.g. {sorted(bad_parity)[:3]})")
     for a, b in (("train", "test"), ("train", "validate"), ("validate", "test")):
