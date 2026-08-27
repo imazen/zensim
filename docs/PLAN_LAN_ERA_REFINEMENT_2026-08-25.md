@@ -2054,3 +2054,21 @@ the dHash audit TSVs/montages mirrored via NFS (view sha spot-verified).
 Foreign-owned pre-existing dirs on the NFS side blocked direct cp — the
 tower-docker pull-from-store pattern (per the tower rules) is the mirror
 route for those.
+
+## hdr_v3mix (criterion 2) — status TRUE with evidence (2026-08-27 ~22:3xZ)
+
+Recon corrected the audit assumption ("undeclared lane"): **hdr_v3mix@944
+EXISTS and is manifested** — `/mnt/v/output/zensim/hdr944-leg/` (train
+7,410 / val 3,900 × 944 features + human_score/cvvdp/zensim targets),
+`_MANIFEST.json` with `build_commit b464855a` + shas + front-end provenance
+(foldapp2hdrpq, PQ peak 10,000 nits, dst-activity OFF per P1.5), built by
+the sota944 B-gap amendment 2026-08-03. Tonight closed its two open
+sub-items: **B4(ii) orientation gate RUN — PASS on BOTH splits** (signed
+SROCC +0.849 train / +0.861 val vs in-table cvvdp, quality-oriented as
+declared; manifest stamped with the numbers), and **mirroring** — the leg
+(4 files incl. the raw hdr944_features_all.tsv) now on the LAN store
+(`s3://zentrain/hdr944-leg/`) AND Tower
+(`/mnt/user/coefficient/output/zensim/hdr944-leg/`, train-table sha
+`a7f28118…` verified tower-side). Remaining for this set: the
+canonical-gates note's raw-parquet provenance chase (its GRAM derivative
+is sha-attested via the #68 chain) — recorded, low-priority.
