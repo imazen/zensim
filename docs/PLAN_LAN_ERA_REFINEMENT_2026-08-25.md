@@ -1838,3 +1838,17 @@ retired. Remaining rotation: sf-gpu-small + sf2-gpu-small/huge follow on the
 GPU boxes as their current runs drain. The avifgen "gap=0" completeness
 claims were re-checked by the same blob-content standard: its harvest rows
 were verified non-error at fill time (0 nulls on all four metrics).
+
+**wsl GPU saga (2026-08-27 ~13:3xZ)**: the `wsl` box failed cuda-operational
+under BOTH Nomad `runtime=nvidia` AND the previously-proven docker
+`--gpus all` path (all-error rows, caught by the first-cell content gate
+twice; damage re-flipped twice via `--scan-errors --error-substring`).
+Read-only diagnosis after killing the workers: WSL-level nvidia-smi fine
+(5070/12,227 MiB), plain-container `--gpus all` fine, the worker IMAGE
+resolves the injected WSL driver libcuda and its own `nvidia-smi -L` +
+`zenmetrics capabilities` (full gpu set) fine — i.e. the box RECOVERED once
+the wedged containers died; best hypothesis = a stuck GPU state from the
+first Nomad attempt poisoning subsequent containers. Worker relaunched on
+the docker path with ZEN_VRAM_CAP=9.5G; first-chunk content gate armed —
+NOTHING is trusted from that box until a fresh blob shows scores.
+**i134 with the 5.5G cap: FULL PASS (ssim2+iwssim scoring, 0 errors).**
