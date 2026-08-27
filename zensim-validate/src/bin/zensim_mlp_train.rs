@@ -3766,8 +3766,12 @@ fn main() {
             // regime-372. Known widths map to their regime; anything else
             // keeps the default and says so.
             match args.max_features {
-                720 => { cmd.arg("--regime").arg("720"); }
-                944 => { cmd.arg("--regime").arg("944"); }
+                720 => {
+                    cmd.arg("--regime").arg("720");
+                }
+                944 => {
+                    cmd.arg("--regime").arg("944");
+                }
                 372 => {}
                 w => eprintln!(
                     "bake_verdict auto-eval: width {w} has no registered --regime; using the 372 default (verify the root)"
