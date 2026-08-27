@@ -1859,7 +1859,7 @@ NOTHING is trusted from that box until a fresh blob shows scores.
 | encoder | target loop | 27-cell census | Zq one-shot | verified how |
 |---|---|---|---|---|
 | jxl-encoder | ✓ `vardct/zensim_loop` | ✓ (mm + 23shot + S4 records) | in-tree, census-FAILED honestly (staircase stays) | this campaign |
-| zenwebp | ✓ `encoder::zensim_target` | ✓ 27-cell k2/k3 census TEST (`967db71`) | ✗ — THE gap | src + git log |
+| zenwebp | ✓ `encoder::zensim_target` (bucket-anchor seed + secant) | ✗ on the REAL instrument — `967db71` is a 27-cell census over SYNTHETIC in-test images (corrected 2026-08-27 after reading the test) | ✗ | src + test read |
 | zenjpeg | zq dial shipped (#113 global-q floor); iterative-loop form UNVERIFIED | zq wave census ran | ✓ `zq_seed` shipped | zq wave md + git |
 | zenavif (+zenrav1e) | ✓ `encode_rgb8_zensim_loop` + `two_shot` (public API) | UNVERIFIED | ✓ `q0_head` | src/lib.rs |
 | zenav1-svt | ✗ | ✗ | ✗ | grep (repo present) |
