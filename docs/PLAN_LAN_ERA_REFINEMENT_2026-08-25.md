@@ -2113,7 +2113,7 @@ Status legend: ✅ evidence committed · 🟡 executing (evidence for the done p
 
 **3 MODELS** (largely prior-campaign work; consolidated here as the criterion asks)
 - SOTA SDR: ✅ sota944 campaign — pre-registered waves per WAVE_PLAYBOOK, selection by `freeze_check --select` (E.4 rule), packaged candidates incl. `c_sdr_mlp944_corrmix_2026-08-05.bin` IN-REPO with spline + dead-column pruning (944→667, bit-identical gate) + M3a measured post-append2-fix; board = summer_gauntlet (166 cells) + eval_annotations registry. Records: `benchmarks/sota944_campaign_2026-08-03.md`, `dead_column_pruning_2026-08-04.md`, TOP_MODELS_COOKBOOK.
-- SOTA HDR: ✅ BHdr family (pure-Rust repro chain #68, sha-attested grams) + the hdr_v3mix@944 leg for the next wave; 🔶 any FREEZE/default flip is the user's.
+- SOTA HDR: **✅ FIRST GATE-PASSING HDR-944 CANDIDATES (2026-08-27, `bfab4951`)** — L1-T2 breadth wave: UPIQ pooled ~0.70 (bar ≥0.55; L0 was 0.14–0.33), narwaria ~0.65 (bar >0; L0 zero), ALL 3 seeds pass; `HDR944_L1T2_s4004` freeze_check-SELECTED (E.4 chain, M3a measured 0.79) + PACKAGED (29,151 B, prune identity gate bit-identical, sha `614fa4fb…`). Caveats recorded (SDR-route pack anchor; sdr25 cross-route inversion; HDR-route dial anchor = registered future work). T1 (cvvdp-mix) at drain-end. + BHdr family (pure-Rust repro #68). 🔶 any FREEZE/default flip is the user's.
 - Board/docs current: ✅ maintained through today's corrections.
 
 **4 LOOPS** (instrument = corpus9 27-cell; per-repo verdicts all committed)
