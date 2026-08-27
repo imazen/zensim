@@ -112,3 +112,33 @@ discriminates but against a saturated ceiling (tolerance bands become
 sub-0.01-JOD — impractical as a dial up here); butteraugli-max is the
 noisiest orderer in this band. The hfpack peers at the top on both
 controllability axes. These rows accompany every freeze candidate table.
+
+## L1 RESULTS (2026-08-28) — all six retrains PASS G-HF and G-EXT; sihdr flag
+
+Training: 6/6 done (2 targets × seeds {4003,4004,4005}; HF group engaged —
+in-train hdrmc_hf SROCC climbing through 0.92-0.97). All packed with the
+HF anchors (identity gates BIT-identical; T1 dial tops 96.3-96.4, T2 93.4
+with a negative-capable bottom).
+
+| candidate | G-HF p50 / frac≥88 | UPIQ pooled | narwaria | korshunov | CID22-944 verify | HF-band SROCC |
+|---|---|---|---|---|---|---|
+| **L0 hfpack (incumbent+re-anchor)** | 93.87 / 0.967 | **+0.666** | +0.643 | **+0.928** | **0.9392** | 0.591 |
+| R t1_s4003 | 93.83 / 0.979 | +0.643 | +0.684 | +0.832 | 0.9096 | 0.619 |
+| R t1_s4004 | 93.82 / 0.979 | +0.632 | +0.687 | +0.828 | 0.9012 | 0.623 |
+| R t1_s4005 | 93.92 / 0.979 | +0.626 | +0.684 | +0.816 | 0.8846 | 0.623 |
+| R t2_s4003 | 92.30 / 1.000 | +0.659 | **+0.702** | +0.875 | 0.8991 | **0.716** |
+| R t2_s4004 | 92.25 / 1.000 | +0.631 | +0.699 | +0.825 | 0.8861 | 0.692 |
+| R t2_s4005 | 92.29 / 1.000 | +0.636 | +0.683 | +0.826 | 0.8744 | 0.710 |
+
+All 7 PASS both frozen gates (G-HF: p50≥90 ∧ frac≥88≥0.5; G-EXT: pooled
+≥0.55 ∧ narwaria >0). The retrains buy HF discrimination (+0.03 t1-band,
+t2-band 0.69-0.72) and narwaria (+0.04-0.06) at SDR-CID22 cost (−0.03..−0.05
+vs L0's 0.9392). **Diagnostic flag (not a registered gate): the retrains flip
+`sihdr pooled` NEGATIVE (−0.41..−0.54) where L0 reads +0.358** — the
+HF-weighting inverted the SI-HDR out-of-domain ordering; recorded for the
+freeze decision. jxl d-ladder: t1_s4003 ≡ L0's curve (92.5→95.4 across
+d1.0→d0, band fully addressable); t2_s4003 maps lower (86.5→91.4, also
+addressable on its own scale).
+
+freeze_check refused selection pending M3a (required-measured, appendix E.4)
+— the coherence instrument is running for all 7; selection follows.
