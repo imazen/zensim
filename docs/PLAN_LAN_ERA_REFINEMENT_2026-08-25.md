@@ -1643,3 +1643,19 @@ gap 93,303 (ETA ≈ 3.5 h), disk1 22→36G (~25 MB/s), cache FLAT at 25G and
 rising, sentinel auto-cycled the wsl GPU worker back (cycle 2), Plex 200
 through the whole arc. Queued on DRAIN-COMPLETE: migrate the /data cache
 volumes to disk1 in a store-stopped window; then the diffmap writeback.
+
+**HOLDOUT CONSTRAINT REGISTERED for the hdrgrid diffmap corpus (2026-08-27,
+BEFORE any training use)**: the maps' reference images are
+`imazen-26-hdr-grid-2026-06-14` sources — imazen-26 is an EVAL corpus (the
+ssim2 north-star family), and the GOAL's DATA criterion requires zero
+test/eval/fixture ids in any training view (id AND dHash+eye audit).
+Therefore any spatial-supervision wave over these maps MUST, before its
+first fit: (1) run the id + dHash audit against the imazen26 eval slices and
+every board fixture; (2) cut train/val/test with THE split owner
+(`zenmetrics/scripts/picker/origin_split.py` — never a seeded shuffle;
+per-rendition splits leak scale); (3) hold the corpus9 loop-instrument refs
+OUT of any fit, as the S4C2 registration already does. Maps for eval/judge
+use (census, RD gates, steering-map validation) are exempt — judging is what
+holdouts are FOR. The spatial-supervision experiment itself stays a
+registered open hypothesis (cvvdp-scalar is a measured dead end; the mix/
+spatial form is the untested ask).
