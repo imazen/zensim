@@ -1,0 +1,14 @@
+scene	tier	rendition
+1520_nature_tulips-in-garden_notre-dame-versailles-france_ip15pro_iso80-f1p8_img-3545_4284x5712	large	1520_nature_tulips-in-garden_notre-dame-versailles-france_ip15pro_iso80-f1p8_img-3545_4284x5712.scale1536x2048.hdr.png
+1242_interiors_storage-room-clutter_la-pedrera-barcelona_zfold7_iso640-f2p2_20260319-183704_3000x4000	large	1242_interiors_storage-room-clutter_la-pedrera-barcelona_zfold7_iso640-f2p2_20260319-183704_3000x4000.scale1536x2048.hdr.png
+1064_general_castle-bridge-moat_montjuic-castle-barcelona_zfold7_iso40-f1p7_20260315-175347_3000x4000	large	1064_general_castle-bridge-moat_montjuic-castle-barcelona_zfold7_iso40-f1p7_20260315-175347_3000x4000.scale1536x2048.hdr.png
+1639_food_sashimi-on-plate_colorado_s25u_iso200-f1p7_20250425-214145_4000x3000	mid	1639_food_sashimi-on-plate_colorado_s25u_iso200-f1p7_20250425-214145_4000x3000.scale1024x768.hdr.png
+1494_nature_sunset-over-forest_colorado_zfold7_iso250-f1p7_20251110-170409_4000x3000	mid	1494_nature_sunset-over-forest_colorado_zfold7_iso250-f1p7_20251110-170409_4000x3000.scale1024x768.hdr.png
+1229_interiors_lighted-archway-ceiling_casa-batllo-barcelona_zfold7_iso1250-f1p7_20260315-210321_3000x4000	mid	1229_interiors_lighted-archway-ceiling_casa-batllo-barcelona_zfold7_iso1250-f1p7_20260315-210321_3000x4000.scale768x1024.hdr.png
+1065_general_cathedral-model-workshop_sagrada-familia-barcelona_zfold7_iso64-f1p7_20260317-165822_3000x4000	small	1065_general_cathedral-model-workshop_sagrada-familia-barcelona_zfold7_iso64-f1p7_20260317-165822_3000x4000.scale384x512.hdr.png
+1640_food_birthday-cake-table_colorado_ip16pro_iso125-f1p8_img-2666_4284x5712	small	1640_food_birthday-cake-table_colorado_ip16pro_iso125-f1p8_img-2666_4284x5712.scale384x512.hdr.png
+1495_nature_lighthouse-on-island_york-maine_ip13pro_iso50-f1p5_fullsizerender-1_3855x2891	small	1495_nature_lighthouse-on-island_york-maine_ip13pro_iso50-f1p5_fullsizerender-1_3855x2891.scale512x384.hdr.png
+# FROZEN 2026-08-27 per the HDR-instrument registration's coverage fallback:
+# 9 scenes by coverage x category round-robin (nature x3, interiors x2, general x2, food x2,
+# all at 2,550 diffmap cells), tiers large/mid/small x3. Targets t in {70,80,88} BHdr scale;
+# judge = zenmetrics --hdr route (PU-rescale, measured peak); k in {2,3}.
