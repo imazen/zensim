@@ -1852,3 +1852,39 @@ first Nomad attempt poisoning subsequent containers. Worker relaunched on
 the docker path with ZEN_VRAM_CAP=9.5G; first-chunk content gate armed —
 NOTHING is trusted from that box until a fresh blob shows scores.
 **i134 with the 5.5G cap: FULL PASS (ssim2+iwssim scoring, 0 errors).**
+
+## LOOPS + PERF criterion survey (2026-08-27 ~15:0xZ) — verified gap tables
+
+**LOOPS (criterion 4), per-repo verified state:**
+| encoder | target loop | 27-cell census | Zq one-shot | verified how |
+|---|---|---|---|---|
+| jxl-encoder | ✓ `vardct/zensim_loop` | ✓ (mm + 23shot + S4 records) | in-tree, census-FAILED honestly (staircase stays) | this campaign |
+| zenwebp | ✓ `encoder::zensim_target` | ✓ 27-cell k2/k3 census TEST (`967db71`) | ✗ — THE gap | src + git log |
+| zenjpeg | zq dial shipped (#113 global-q floor); iterative-loop form UNVERIFIED | zq wave census ran | ✓ `zq_seed` shipped | zq wave md + git |
+| zenavif (+zenrav1e) | ✓ `encode_rgb8_zensim_loop` + `two_shot` (public API) | UNVERIFIED | ✓ `q0_head` | src/lib.rs |
+| zenav1-svt | ✗ | ✗ | ✗ | grep (repo present) |
+| zenav1-aom | ✗ | ✗ | ✗ | grep |
+| jpeg-gainmap | rides the zenjpeg SDR base; HDR-loop form UNDEFINED | ✗ | ✗ | — |
+
+**Standing-directive resolution (recorded, not silent):** the GOAL text says
+"zenpredict-baked Zq" but `feedback_no_zenpredict_in_codecs` (2026-07-01,
+zenwebp's bake REMOVED then) + the per-codec-loop-ownership directive make
+the CONSTS-module head (zenjpeg `zq_seed` / zenavif `q0_head` / jxl
+`zq_seed`) the sanctioned in-codec form. The criterion is read as "a trained
+one-shot Zq head per encoder", consts form. If the user wants ZNPR-in-codec
+revisited, that reverses a recorded directive — their call, not mine.
+
+**PERF (criterion 5) coarse-verified:** jxl-encoder-simd carries extensive
+x86 tiers (dct8 164 x86 refs vs 9 neon; dct4/64, quantize, dequant, entropy,
+sanitize all x86-heavy) + `tier_isolation`/`kernel_tiers` benches; zenavif
+similarly (yuv_convert fast/libyuv_simd tiers + `unpremul_tiers` bench).
+Remaining PERF work is a per-KERNEL verification audit (enumerate
+`#[cfg(aarch64)]` fns lacking an x86 dispatch sibling + re-run parity/bench
+gates), NOT a broad port. transpose.rs (13 neon / 9 x86 refs) is the first
+audit target.
+
+**Execution order chosen:** (1) zenwebp Zq wave (pattern proven 3×, data
+canonical, census infra in-tree — registered next); (2) zenavif census
+verification; (3) PERF per-kernel audit; (4) AV1-family loops (the big
+build, after the sf re-drain frees the boxes); gainmap-loop definition rides
+the B4 HDR chain.
