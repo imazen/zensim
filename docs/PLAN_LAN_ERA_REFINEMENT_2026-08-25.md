@@ -1513,3 +1513,18 @@ content-addressed members, 62/2000 measured). docs/SCRIPT_MIGRATION_LEDGER.md
 = the standing migrated/keep/queue record. STORE went write-dead again during
 gates (cache 19G — worker outran the mover as projected); lilith worker
 STOPPED cleanly to spare the GPU; sentinel fires the recovery signal.
+
+**MIGRATION DIRECTIVE COMPLETE (zenmetrics ae23e16c78c0 + earlier shas)**: 6 Python
+scripts fully migrated + deleted (report/compact/progress/pairs/
+declare-scorefiles in zenfleet-ctl; all parity-gated), the build_scorefile
+FAMILY (3 scripts) migrated-in-place (ETL python, emission owner-side), 3
+inline jxl verdict copies → one script (d7fc8f7e). Bug classes fixed at
+owners en route: invariant-5 requires never stamped by hand-rolled JSON;
+member→identity last-write-wins; control.json re-declare unpause; gunzip/gzip
+pipe deadlock; resolver EP-precedence (r2 403); snappy-vs-zstd contracts
+split (ledger zstd-only, pairs reads accept snappy).
+docs/SCRIPT_MIGRATION_LEDGER.md = the standing record (writeback-vs-assemble
+= the one queued audit). FLEET: store self-recovered at 01:02 (write=ok at
+20G); wsl GPU worker RESTARTED on the correct snapshot; gapfill sidecar
+repaired on-store (zstd; snappy original in _backup/). Sentinel v3 (-ge +
+fail→ok transition wake) running.
