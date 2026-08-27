@@ -126,7 +126,7 @@ dataset incl. lossless PNG/WebP**: the `idx_append::MSCN_DIFF_MEAN`(+5) /
   bf924 row (0/924); on i265 = f725 off by 8.7e-9. In `zenavif_lossy/test`,
   85,392 of 271,488 rows diverge somewhere (only cross-vendor-re-extracted
   rows; the rest happen to refine identically).
-- **FIXED 2026-08-27, zensim `45a94bb5` (#56):** the production append
+- **FIXED 2026-08-27, zensim `7ee3cdce` (#56):** the production append
   kernel's `.rsqrt()` (magetypes 0.9.28 = `vrsqrtps` estimate + 1 NR step on
   x86, `1/sqrt`·x on NEON) is replaced by exact IEEE `resid / sqrt(var + c)`
   (`mscn_norm_v`), gated bit-exact vs scalar IEEE on every tier
@@ -134,7 +134,7 @@ dataset incl. lossless PNG/WebP**: the `idx_append::MSCN_DIFF_MEAN`(+5) /
   measured perf-neutral. **CUT-OVER for this wave's artifacts:** from that
   commit the 22 MSCN columns move by ~1e-9 rel on EVERY vendor, so
   `tbig_924_full` / the 21 bf944 views are bitwise-reproducible on those
-  columns only by a pre-`45a94bb5` extractor (the vendor-class table below
+  columns only by a pre-`7ee3cdce` extractor (the vendor-class table below
   describes the pre-fix extractor; post-fix, the vendor split collapses for
   the MSCN pair, though the SIMD-TIER split of the first finding still
   stands). A future G-BF1 run against these stores must pin the extractor
