@@ -1860,7 +1860,7 @@ NOTHING is trusted from that box until a fresh blob shows scores.
 |---|---|---|---|---|
 | jxl-encoder | ✓ `vardct/zensim_loop` | ✓ (mm + 23shot + S4 records) | in-tree, census-FAILED honestly (staircase stays) | this campaign |
 | zenwebp | ✓ `encoder::zensim_target` (bucket-anchor seed + secant) | **✓ CLOSED 2026-08-27** (k2 1.859/15hits, k3 0.967/17; zenwebp `642bd960`) | **✓ by census**: the calibrated bucket anchors ARE the one-shot Zq (fitted-head arm FAILED the family bar against them — k2 +8.1%, k3 −45%) | executed wave |
-| zenjpeg | zq dial shipped (#113 global-q floor); iterative-loop form UNVERIFIED | zq wave census ran | ✓ `zq_seed` shipped | zq wave md + git |
+| zenjpeg | ✓ `target_quality::search_target` (bracketed, caller-driven) | **✓ CLOSED 2026-08-27** — A anchor_guess k2 3.657/8hits vs B zq_seed k2 1.905/14, k3 1.383/17: **B PASSES +47.9%/+45.9%, both classes** (zenjpeg `336c4107`, merged `e7c53d2e`) | ✓ consts shipped; **default wiring = user-gated proposal** (head is inert in src today) | executed |
 | zenavif (+zenrav1e) | ✓ `encode_rgb8_zensim_loop` + `two_shot` + the AC.4 CQ instrument harness | **✓ CLOSED 2026-08-27** — AC.4 control-baseline subset: k2 med 0.756 (23/27), k3 0.336 (zenavif `5b28f31`, merged `44d5fef`); candidate/h3 arms stay wave-12-gated | ✓ `q0_head` | executed |
 | zenav1-svt | ✗ | ✗ | ✗ | grep (repo present) |
 | zenav1-aom | ✗ | ✗ | ✗ | grep |
@@ -1913,3 +1913,14 @@ merge of both heads (`44d5fef`), nothing lost. Root causes, both mine:
 blind `.workongoing` overwrite at claim time. Banked as memory
 `feedback-jj-sideways-push-clobber`; the ancestor-check is now part of my
 push flow everywhere.
+
+**zenjpeg instrument census EXECUTED (2026-08-27, `336c4107`+merge `e7c53d2e`)**:
+registered → harness (`zenjpeg/examples/zensim_census.rs`, in-binary
+zenanalyze features + the shipped zq_seed) → both arms both k. **The
+shipped-but-inert head nearly HALVES target error** (k2 3.657→1.905, k3
+2.556→1.383; hits 8→14 / 11→17; both classes improve — anchor_guess is the
+family's weakest baseline, so the head pays here where it failed vs webp's
+strong buckets). Default `q_start` wiring = USER-GATED proposal in the wave
+md. Family census board: **jxl, zenwebp, zenavif, zenjpeg all CLOSED**;
+AV1 trio + gainmap remain. Second parallel-lane note: zenjpeg also carries
+an active recompress/DQT lane today (merged, not mine).
