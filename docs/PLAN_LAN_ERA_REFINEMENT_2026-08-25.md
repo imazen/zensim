@@ -2089,3 +2089,46 @@ scan: **1,618/2,280 carry .bin-era error rows** (same class as the
 siblings) — flipped, snapshot rebuilt; **662 genuinely-clean cells
 rescued**. GPU queue truth now: ~5,215 cells across the 6 runs on the
 single i134 3070 — the wsl reboot is the schedule-dominant unlock.
+
+## CRITERION SCORECARD (2026-08-27 ~23:1xZ) — the DONE-test ledger, per line, with evidence
+
+Status legend: ✅ evidence committed · 🟡 executing (evidence for the done part) · 🔶 USER-GATED · ❌ open.
+
+**1 FLEET**
+- Boxes enrolled + busy-when-non-empty: ✅ 8 Nomad nodes ready (roster read live); CPU jobs posted/retired to match queue state (homefleet `e3cd66c`→`c2a2243`→`d0033da`); 🟡 wsl box GPU-dead (USER: reboot).
+- ssim2/butter GPU-only, no CPU rung: ✅ `ZEN_REQUIRE_GPU=1` + the entrypoint's **operational cuInit+dispatch probe** (zenmetrics `9dffa5ca` CPU / `6d4f9963` GPU images; probe live-verified in i134's boot log 09:46:58Z); runtime column lands with the rolled images (`b8db9ee4`).
+- declare→gap→reconcile herding every run: ✅ used all day (fix11: declare `hdrgrid-enc-fix11` → drain → append-declares into 5 runs → gap verbs); defects fixed at owner with tests: live accounting (`ca3cbf15`), queue-true snapshots (`451f4dea`), shim capability probe (`6d4f9963`), all-error guard (`3ce2fb09`), reassert (`ff9eea8b`+`fbdfd4a0`).
+- Waiters leave evidence: ✅ every waiter this session wrote a log + terminal line; per the user's 3×-kill signal, waiters are now FOREGROUND pulses (memory-banked).
+- Per-wave wall clock measured and falling: ✅ the diffmap rollup's wall-clock table (`f5878299`: 4.3/s bursts → 765/min sustained) + today's points: fix11 encode wave = **115 cells / ~2 min**; fix11 CPU-delta drains = 248 cells / ~4 min single-box; census waves each ≤1 session. ❌ remaining: the GPU re-drain (~5,215 cells, single-3070-bound — wall clock falls when wsl returns).
+
+**2 DATA**
+- avifgen: ✅ encoded+scored (4 fleet metrics + zensim-C944 fill `b278d791`/`0d6583f0`), featured@944, manifested, LAN+Tower mirrored (`785b3e35`), browser-served.
+- bigcodec + ext legs: ✅ prior-era canonical (triple-mirrored, manifested — zensim CLAUDE.md canon); ladder-density curation MEASURED today (9-pt grid recorded honestly in the ladder pointer `e093b186`).
+- hdrgrid: 🟡 encodes ✅ (incl. the 115-cell svt#11 backfill `a2e9b432`); diffmaps ✅ (193,800 finals, manifested+mirrored); cvvdp+zensim features ✅ re-drained clean; GPU metrics 🟡 (~5,215 cells on i134).
+- hdr_v3mix: ✅ @944 manifested w/ build_commit, orientation-gated PASS both splits, store+Tower mirrored (`7d4e2dcf`).
+- Curation recorded: ✅ split rule (origin even/odd, `origin_split.py` owner), k-means reps (sweep-discipline records), ladder density (today), redundancy (content-dedup measured: avifgen 562,860→534,464; diffmap dup-identity census).
+- imazen-26 audit: ✅ id half (`4d446c2d`/`e5974ca3`), ✅ dHash RUN half (`1bc58d4b`, 40 montages); 🔶 EYE half = the user's (policy).
+- hdrfeat944 re-declare: ❌ other lane's (mis-declare recorded).
+
+**3 MODELS** (largely prior-campaign work; consolidated here as the criterion asks)
+- SOTA SDR: ✅ sota944 campaign — pre-registered waves per WAVE_PLAYBOOK, selection by `freeze_check --select` (E.4 rule), packaged candidates incl. `c_sdr_mlp944_corrmix_2026-08-05.bin` IN-REPO with spline + dead-column pruning (944→667, bit-identical gate) + M3a measured post-append2-fix; board = summer_gauntlet (166 cells) + eval_annotations registry. Records: `benchmarks/sota944_campaign_2026-08-03.md`, `dead_column_pruning_2026-08-04.md`, TOP_MODELS_COOKBOOK.
+- SOTA HDR: ✅ BHdr family (pure-Rust repro chain #68, sha-attested grams) + the hdr_v3mix@944 leg for the next wave; 🔶 any FREEZE/default flip is the user's.
+- Board/docs current: ✅ maintained through today's corrections.
+
+**4 LOOPS** (instrument = corpus9 27-cell; per-repo verdicts all committed)
+- jxl ✅✅ (+S4 iter-1 ε̂ B3 census PASS 36.7% — 🔶 ship form); zenwebp ✅✅ (head FAILED vs bucket anchors — buckets = the validated one-shot); zenavif(+zenrav1e) ✅✅ (k2 0.756/k3 0.336); zenjpeg ✅✅ (inert head +47.9%/+45.9% — 🔶 default wiring).
+- "zenpredict-baked" wording: resolved 2026-08-27 to the sanctioned consts form (feedback_no_zenpredict_in_codecs) — recorded, reversible only by the user.
+- zenav1-svt: ❌ loop (HDR-native wave registered; svt#11 prerequisite CLOSED today); zenav1-aom: ruled premature (its own gates first); gainmap: ❌ (HDR instrument + zenjpeg base). HDR instrument: registered, ref-selection open.
+- Production gates (dial mono / RD-vs-independent-judges / perf bar) per encoder: 🟡 census+judge halves done for 4; the RD-vs-independent-judge sweep per encoder = registered follow-on.
+
+**5 PERF**
+- Per-kernel audit: ✅ (`a5ac5c62`) — no production NEON-only kernel in either codec; dispatch verified per file.
+- Byte-identical + zenbench evidence: ✅ EXISTS PER KERNEL FAMILY in-repo — jxl `tier_isolation`/`kernel_tiers` + dispatch-parity batteries (`dct_idct_8x8_scalar_vs_dispatch_edge_battery`); zenavif `unpremul_tiers`/`tier_isolation` + the parallel lane's zenbench 4.0×@1920px (`09494c6`) + magetypes byte-identical-by-construction converter. ❌ one consolidated re-RUN table across both repos on this box (nice-to-have; the per-repo records are the evidence).
+
+**6 BROWSER**
+- ✅ SERVING: coefficient repo viewer (located + extended, never forked): canonical 7-codec pool + HDR-grid pool (`79ad39d`) + avifgen pool with zensim (`ccbbf65`+`c3eeacd`), render-gated 8/8; typed `flat-picker` builder registered for future pools (`7949671f`/`6c9e4942`). ❌ hdrgrid/hdr_v3mix pools await their score completion (GPU drain) — the builder is ready.
+
+**7 DOCS**
+- ✅ continuous today: 6 wrong claims corrected IN PLACE (webp census row, sf2-gpu vacuous-clean, my own commit message via `fbdfd4a0`, hdr_v3mix "undeclared", BROWSER staleness, census-table fix); memory index updated 5×; every learning in its owning md; this scorecard = the compaction-safe ledger.
+
+**The critical path to DONE**, in order: (1) wsl reboot → GPU drain (~halves remaining wall) → hdrgrid DATA ✅ → browser pools; (2) the user's four gates (dHash eye pass, zenjpeg zq wiring, jxl B3, any MODEL freeze); (3) the HDR instrument ref-selection → svt/gainmap loop waves; (4) hdrfeat944 re-declare (other lane).
