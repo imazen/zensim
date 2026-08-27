@@ -109,3 +109,4 @@ apidoc/target/
 
 # workspace-local target symlink (CARGO_TARGET_DIR redirect)
 /target
+.jj/
