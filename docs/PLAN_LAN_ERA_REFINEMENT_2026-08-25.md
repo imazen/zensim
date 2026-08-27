@@ -1780,3 +1780,27 @@ regenerated `_MANIFEST_diffmap.json` (deterministic generator:
 zenmetrics `scripts/jobsys/diffmap_manifest.py`, 851eef6d — counts by
 metric/codec, executor provenance, incident + holdout pointers). Nomad
 worker job left up as warm capacity per the line above.
+
+## BROWSER + avifgen DATA lane — truth pass (2026-08-27 ~11:1xZ)
+
+The BROWSER-lane scoping above is STALE in two ways, corrected here:
+- **Another session already shipped the pools** (coefficient repo, 2026-08-26):
+  `79ad39d` data-set selector + HDR-grid pool; `ccbbf65` avifgen pool
+  (562,860-cell rollup, render-gated 8/8) — via a ~/tmp-staged ETL, with
+  score_zensim declared ABSENT (the score runs carried no scalar).
+- **Tonight closed the zensim gap + gave the base a typed owner** (all
+  verified on origin): zensim C-944 fill over the stored 944-feature harvest
+  (zensim `b278d791` + `0d6583f0`, canonical forward, per-sha,
+  equality-asserted across byte-identical cells); `zenmetrics assemble
+  --mode flat-picker` (zenmetrics `7949671f` + `6c9e4942`, strict typed
+  join + 4 safety tests) whose output reproduces the shipped pool base
+  EXACTLY (562,860/562,860 on all shared columns) — registered as the
+  builder for future sets; pool base score_zensim filled (all-NaN
+  precondition + 100% coverage asserts), rollup regenerated with the
+  recorded command, render gate 8/8, provenance in the pool README
+  (coefficient `c3eeacd`).
+- **Remaining for criterion 6/2**: hdr_v3mix has NO scores run declared at
+  all (nothing on the store) — encode/score/declare is the open lane, and
+  its pool follows via flat-picker; hdrgrid scoring queues are ALL gap=0
+  (sf/sf2 cpu+gpu+huge+small verified 2026-08-27) so its pool's data is
+  complete. The hdrfeat944 re-declare stays its owner's.
