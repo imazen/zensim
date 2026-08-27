@@ -1483,6 +1483,17 @@ option (b) FIRST, with a frozen proxy-gap gate; (a) only if the gate fails.**
 - Provenance rule either way: any shipped table/coefficients states
   "trained on zensimA-proxy targets; proxy gap <measured> on dial-39".
 
+**S4+C2 EXECUTED THROUGH THE FIT (2026-08-27, overnight)**: gate MEASURED —
+PASS (median 0.36/0.60/0.72 grid-steps vs ≤2.0; sign-agree 1.00;
+`benchmarks/s4c2_proxy_gap_gate_2026-08-27.md`) → ladder targets derived
+(157,395; `benchmarks/s4c2_jxl_ladders_2026-08-27.pointer.md`) → identity-944
+ref features (4,497) → frozen-protocol ridge fit
+(`benchmarks/s4c2_prior_fit_2026-08-27.md`): **seed prior REAL at t70/t80
+(error halved, SROCC 0.83-0.86); t88 FAILS baseline on the primary cell (do
+not ship); slope prior t80/t88 only.** Next: wire the t70/t80 seed +
+t80-slope-exponent tables into the jxl loop instrument arms and run the
+frozen k2-census gates (jxl-encoder side).
+
 
 **§5 RATE-MATCHED SECANT READ DONE (jxl-encoder 7e719c1ccd33)**: mm-F3 rule on the
 committed cells — at equal achieved (|Δ|≤0.5) the secant's median bytes ratio
