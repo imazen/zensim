@@ -591,3 +591,36 @@ this audit as evidence that the mix is good — only that it is not broken.
 
 *Maintenance: update this doc whenever a verdict is added, re-framed, or a confound is found.
 Prefer editing here in-place over a handoff note. Every claim keeps its citation.*
+
+### §3.24 — imazen-26 root-source correction: wrong estate copy, provenance-derived sharing, manifest split-column fix (2026-08-27)
+
+**Thought-why:** `/mnt/v/imazen-26` was "the imazen-26 SDR estate", so the
+2026-08-27 dHash audit indexed it as its refs; `imazen26_manifest.tsv`'s
+`split` column was assumed meaningful; content sharing between synthetic-v2
+and the eval slices was assumed to need dHash to find.
+
+**Actual-why:** that directory is the INSPIRATION/collection copy (the wsl box
+had already quarantined its copy as `imazen-26-inspo`; this box's rename had
+never happened). The canonical estate is the **`imazen/imazen-26` git repo**
+(CORPUS-MANIFEST membership oracle + canonical split manifests + sha-pinned
+variant-set registry) with official png-v3 derivatives; eval/picker origin
+`o_NNNN` IS the canonical 4-digit id. The manifest TSV's `split` column was
+stale bookkeeping (wrong on 1,239/2,157 rows; header mislabeled `sha256`) —
+corrected 2026-08-27 to the canonical last-digit rule (consumers verified;
+pre-fix bytes in `.pre-splitfix.bak`). And sharing is **provenance-derivable**:
+generator tokens live in the filenames on both sides, and cross-id duplicate
+families follow the name grammar — dHash is only the verifier (it also
+false-positives on flat/line content and misses non-picker-covered ids).
+
+**Outcome:** chain byte-verified (repo → registered picker set → local
+mirrors); sharing = 68 exact-token ids + 166 split-piercing family ids;
+realized eval inflation MEASURED ≈0 at certain tier AND the 25–32% upper bound
+(median Δ +0.0043, max 0.0143, nonphoto positive). Annotation
+`imazen26-nonphoto-sharing-provenance-2026-08-27` in force; exclusion = board
+D1. Records: `benchmarks/imazen26_dhash_audit_2026-08-27.md`, imazen-26
+`benchmarks/split_crossid_dupes_2026-08-27.md` + `derive_sharing_provenance.py`.
+
+**Rules:** join imazen-26 data by the 4-digit id, never by dHash; derive
+sharing/duplicates from provenance first, verify with dHash second; never
+index `/mnt/v/imazen-26*`; a by-design content family crosses the split iff
+its id offsets flip parity (family-aware split is the structural fix).

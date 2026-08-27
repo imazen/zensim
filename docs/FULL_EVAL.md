@@ -160,6 +160,11 @@ origins {7,9}; exact `encoded_filename`-key joins, match_rate 1.0000):
 with `score_ssim2` / `score_zensim` targets carried from the canonical picker
 datasets. The `nonphoto` slice = the same test views filtered to non-photo
 content classes via `/mnt/v/output/imazen-26-features/imazen26_manifest.tsv`.
+(Manifest header+split column corrected 2026-08-27 — DATASET_HISTORY §3.24.
+Both axes carry the standing annotation
+`imazen26-nonphoto-sharing-provenance-2026-08-27`: ~10-32% of rows sit on refs
+whose content also feeds synthetic-v2 or a train-split twin; measured effect on
+leader SROCCs ≈0. Read `benchmarks/eval_annotations.json` before citing.)
 
 The 720-era `ext_imazen26_720` / `ext_nonphoto_720` tables were built by
 NEAREST-NEIGHBOR fingerprint matching against fleet blobs (winning encode
