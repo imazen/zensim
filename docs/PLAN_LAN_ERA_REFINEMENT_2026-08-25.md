@@ -1441,3 +1441,11 @@ tower); (3) re-upload the failure-carrying snapshot
 ~/tmp/zen-snaps/snap_hdrgrid-diffmap-20260807.parquet (84,820 done + 9,219
 newest-failed; its first upload died on the store-full 500); (4) first-cell
 gate before scale.
+
+**S4+C2 SCREEN DONE (2026-08-27)**: identity-pair extraction proves the
+ref-only feature set structurally (190/944 live — difference features vanish
+on ref==dist); a single content-complexity cluster screens at +0.56..0.62
+SROCC vs both ladder slope and seed_q (n=33, CI ~±0.25 — screen only).
+Wave's next data step: derive per-origin jxl ladders from the BIGCODEC
+canonical parquets (q-dense, 414 origins × renditions) — the real regressor
+training set; the 39-image dial grid stays the held-out probe.

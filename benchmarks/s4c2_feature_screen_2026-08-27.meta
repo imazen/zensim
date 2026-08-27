@@ -1,0 +1,11 @@
+S4+C2 wave, screen step (2026-08-27). Identity-pair 944 extraction (v2_ab_extract,
+ZENSIM_AB_MODE=foldapp2, ref==dist) over the 39 dial-grid source PNGs; joined to
+benchmarks/s4c2_ladder_targets_2026-08-27.tsv (t80 rows; n=33 with crossings).
+STRUCTURAL FINDING: only 190/944 features are LIVE on identity pairs — the
+difference features vanish, leaving exactly the ref-only content descriptors the
+registration named. Top screens (SROCC, zen_stats panel_batch): one correlated
+content-complexity cluster (f726 f882 f916 f451 f558 f461 f547) at +0.56..0.58 vs
+ladder slope and +0.57..0.62 vs seed_q. CAVEAT: n=33 -> CI ~ +-0.25; this is a
+SCREEN, never a model. The wave's regressor trains on the bigcodec per-origin
+ladders (5.7M rows, q-dense) — not on n=33.
+zensim commit: ac566c9e.
