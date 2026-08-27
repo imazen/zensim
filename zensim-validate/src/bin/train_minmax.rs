@@ -17,6 +17,11 @@ use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 use zensim_validate::dial_spline::{fit_spline_knots, spline_payload};
 use zensim_validate::mlp_train::minmax_monotone::{MinMaxMonotone, train_ranknet};
 use zensim_validate::parquet_loader::load_parquet;
+// Canonical Spearman (imazen/zensim#41 Tier-1 #2): this bin carried its own
+// ORDINAL-rank copy (ties broken by sort order, `+1e-12` denominator guard);
+// zenstats uses midranks, so the reported SROCC differs only when the
+// prediction or target vectors contain exact ties.
+use zenstats::panel::spearman;
 
 const N: usize = 372;
 const CAN: &str = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train";
@@ -83,29 +88,6 @@ fn transform_row(row: &[f64], tf: &[(zenpredict::FeatureTransform, Vec<f32>)]) -
     (0..N)
         .map(|f| tf[f].0.apply_with_params(row[f] as f32, &tf[f].1) as f64)
         .collect()
-}
-
-fn spearman(a: &[f64], b: &[f64]) -> f64 {
-    let rank = |v: &[f64]| {
-        let mut idx: Vec<usize> = (0..v.len()).collect();
-        idx.sort_by(|&i, &j| v[i].partial_cmp(&v[j]).unwrap_or(std::cmp::Ordering::Equal));
-        let mut r = vec![0.0; v.len()];
-        for (k, &i) in idx.iter().enumerate() {
-            r[i] = k as f64;
-        }
-        r
-    };
-    let (ra, rb) = (rank(a), rank(b));
-    let n = a.len() as f64;
-    let mean = (n - 1.0) / 2.0;
-    let (mut num, mut da, mut db) = (0.0, 0.0, 0.0);
-    for i in 0..a.len() {
-        let (x, y) = (ra[i] - mean, rb[i] - mean);
-        num += x * y;
-        da += x * x;
-        db += y * y;
-    }
-    num / (da.sqrt() * db.sqrt() + 1e-12)
 }
 
 fn main() {

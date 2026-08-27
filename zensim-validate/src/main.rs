@@ -26,6 +26,8 @@ use clap::Parser;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+// Canonical IQA stats, aliased onto this file's historical names (#41).
+use zenstats::{pearson as pearson_correlation, ranks, spearman as spearman_correlation};
 
 #[derive(Parser)]
 #[command(
@@ -4521,15 +4523,13 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
 // `pearson_correlation` `var == 0.0` exact-zero guard becomes
 // `zenstats::pearson`'s `< 1e-12` guard (both reject same values in
 // practice). See `zensim/CHANGELOG.md` Unreleased / Changed.
-
-fn spearman_correlation(x: &[f64], y: &[f64]) -> f64 {
-    zenstats::spearman(x, y)
-}
-
-fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
-    zenstats::pearson(x, y)
-}
-
-fn ranks(data: &[f64]) -> Vec<f64> {
-    zenstats::ranks(data)
-}
+//
+// imazen/zensim#41: the three delegating wrapper fns that lived here are now
+// plain `use zenstats::{...}` aliases in the import block at the top of this
+// file, so `zensim-validate/src` defines NO fn named spearman/pearson/ranks
+// (gated by `tests/no_private_iqa_stats.rs`). `fast_kendall` above is NOT
+// covered by that gate: it is an O(n log n) tau-b with an exact-tie
+// predicate that `zenstats::kendall_tau`'s approximate-tie form cannot
+// reproduce (CHANGELOG, "Knight's O(n log n) kendall_tau was rejected"),
+// and it is a training objective (`TrainObjective::Krocc`), so replacing it
+// is a trainer-number change that needs an owner decision.

@@ -234,6 +234,9 @@ pub fn train_ranknet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Canonical midrank Spearman (imazen/zensim#41): the test used to carry
+    // its own ordinal-rank copy.
+    use crate::panel::spearman;
 
     /// Deterministic pseudo-random weights in [-scale, scale] (no rng dep).
     fn seeded(k: usize, j: usize, nf: usize, sign: Vec<f64>) -> MinMaxMonotone {
@@ -349,29 +352,6 @@ mod tests {
             srocc > 0.90,
             "min-max should rank a monotone piecewise-linear target well; got SROCC {srocc:.3}"
         );
-    }
-
-    fn spearman(a: &[f64], b: &[f64]) -> f64 {
-        fn ranks(v: &[f64]) -> Vec<f64> {
-            let mut idx: Vec<usize> = (0..v.len()).collect();
-            idx.sort_by(|&i, &j| v[i].partial_cmp(&v[j]).unwrap());
-            let mut r = vec![0.0; v.len()];
-            for (rank, &i) in idx.iter().enumerate() {
-                r[i] = rank as f64;
-            }
-            r
-        }
-        let (ra, rb) = (ranks(a), ranks(b));
-        let n = a.len() as f64;
-        let mean = (n - 1.0) / 2.0;
-        let (mut num, mut da, mut db) = (0.0, 0.0, 0.0);
-        for i in 0..a.len() {
-            let (x, y) = (ra[i] - mean, rb[i] - mean);
-            num += x * y;
-            da += x * x;
-            db += y * y;
-        }
-        num / (da.sqrt() * db.sqrt())
     }
 
     /// `project` zeroes dropped features and clamps signs.

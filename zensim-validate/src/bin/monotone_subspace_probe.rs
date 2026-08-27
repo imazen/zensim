@@ -28,6 +28,8 @@
 
 use std::path::PathBuf;
 use zensim_validate::parquet_loader::load_parquet;
+// Spearman is zenstats' — the single owner of stat math (imazen/zensim#41).
+use zenstats::panel::spearman;
 
 const NF: usize = 372;
 const HM: usize = 96; // mono backbone hidden
@@ -86,16 +88,6 @@ fn load_mask() -> (Vec<usize>, Vec<usize>) {
         }
     }
     (mono, free)
-}
-
-/// Spearman rank correlation.
-///
-/// Delegates to `zenstats` — the single owner of stat math. This file used to
-/// carry its own copy (one of four byte-identical ones across the probes). The
-/// copies used 1-based ranks against zenstats' 0-based, which changes nothing:
-/// a correlation is invariant to a constant offset in the ranks.
-fn spearman(a: &[f64], b: &[f64]) -> f64 {
-    zenstats::panel::spearman(a, b)
 }
 
 fn load(path: &str, name: &str) -> Option<(Vec<Vec<f64>>, Vec<f64>)> {
