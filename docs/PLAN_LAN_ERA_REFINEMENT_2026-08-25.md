@@ -1501,3 +1501,15 @@ cells/min sustained), clean SIGTERM claim-release observed live on my
 restart. **SCALE-UP HELD deliberately**: one worker consumes cache ~6G/5min
 vs mover freeing ~1G/10min — more boxes would write the store full; sentinel
 owns the space/store conditions and the fleet grows when the cache clears.
+
+**SCRIPT→OWNER MIGRATION WAVE 2 (zenmetrics da54c83e4b47)**: pool_progress /
+pairs_from_encode_ledger / declare_direct_objects → `zenfleet-ctl
+progress/pairs/declare-scorefiles`. Parity: progress EXACT (490,173 = 66/66
+snapshots both tools); pairs key-set equal modulo one hand-appended SNAPPY
+sidecar (3 rows — the zstd-only contract; recompress staged for the writable
+window); declare = identical modulo TWO FIXED PYTHON BUGS (invariant-5
+requires now stamped; per-row true identity vs last-write-wins on shared
+content-addressed members, 62/2000 measured). docs/SCRIPT_MIGRATION_LEDGER.md
+= the standing migrated/keep/queue record. STORE went write-dead again during
+gates (cache 19G — worker outran the mover as projected); lilith worker
+STOPPED cleanly to spare the GPU; sentinel fires the recovery signal.
