@@ -21,6 +21,20 @@ Standing rules:
 - Waves: pre-registered arms + gates + committed endgame; harvest inline; one terminal file; foreground review.
 - Report status by writing the owning md + memory, then the terminal recap; never a handoff file.
 
+## EVIDENCE INDEX (consolidated 2026-08-28) — every criterion verifiable from the repo alone
+
+| # | criterion | status | primary shas | record |
+|---|---|---|---|---|
+| 1 | FLEET | ✅ evidence committed | zenmetrics `9dffa5ca`/`6d4f9963`/`b8db9ee4` (GPU-only probe + runtime audit), `ca3cbf15`/`451f4dea`/`3ce2fb09`/`ff9eea8b` (herding fixes-at-owner), `f5878299` (wall clock) | plan §FLEET + `benchmarks/fleet_gpu_runtime_audit_2026-08-27.txt`; GPU re-drain COMPLETE 2026-08-27 14:21Z |
+| 2 | DATA | ✅ + user program executed | hdrgrid harvest+era (`c6247214` lane), hdr_v3mix TRUE (`7d4e2dcf`), imazen-26 audits: id (`4d446c2d`/`e5974ca3`), root-sourced dHash+provenance (`03841856`→`0f270dcd`), re-slice program (`de1e340e`), purge list + family split (imazen-26 `c583263`) | plan §2 + `benchmarks/imazen26_dhash_audit_2026-08-27.md` + `imazen26_id_audit_2026-08-27.md` + DATASET_HISTORY §3.24/§3.25 |
+| 3 | MODELS | ✅ SDR + HDR | SDR: the sota944 campaign board (162 cells + freeze_check selection machinery, campaign doc); HDR: wave `hdr944_bake_wave_2026-08-27.md` + retrain wave `hdr944_retrain_wave_2026-08-28.md` (winner E.4-selected `d6203e9d`, HF re-anchor `0a437d99`; freeze = D2, user-gated by rule) | boards current (304 rows), peers on all surfaces (`f4904e8d`) |
+| 4 | LOOPS | ✅ all 7 closed/ruled; D3 wirings LIVE | censuses: zenwebp `642bd960`, zenjpeg `336c4107`, zenavif `5b28f31`, svt `52c8aba4`+S1 `c6701dcc`, gainmap zenmetrics `b61d2b0b`/`c537feef`, jxl RD-gate `f7c95cbe`+`6fc24060`; aom premature-ruled (re-checked `d2c0ded`); WIRINGS (user-approved): zenjpeg `37e44fda`, jxl `7c4ddd65`, svt `cb400901` | plan LOOPS table + `loops_production_gates_2026-08-27.md` |
+| 5 | PERF | ✅ | zenavif `b92880e`/`09494c6` (AVX2 tiers + zenbench), jxl tier batteries; consolidated rerun table | `benchmarks/perf_x86_tiers_rerun_2026-08-27.md` |
+| 6 | BROWSER | ✅ closed with mapping | coefficient `fa1ef73`/`c3eeacd`/`ccbbf65` (3 pools render-gated 8/8); C6 mapping ruling (`9e0b432e`) | plan §C6 (encode-set↔pool mapping; live-serve verified :3317) |
+| 7 | DOCS | ✅ bounded audit + current | sweeps + 13-doc claim pass (`f0fa5c2b`), resume current (`d1b516db`, `3adeca7d`), ledger §3.24/25 (`d9eb130b`), this index | SESSION-RESUME.md + memory index |
+
+User-gated residue (by the standing rules, not omissions): D2 freeze (two lenses recorded), D4 decided (era-B), D5 optional; other-lane: zenav1-aom gates.
+
 ## Evidence appendix — terminal-state readings (2026-08-27, recorded so the DONE test is auditable in place)
 
 - **Criterion 2 (imazen-26 audit line):** id-level audit = ZERO eval/test ids in
