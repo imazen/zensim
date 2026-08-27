@@ -42,3 +42,25 @@ dial zone must be addressible so jxl low distances can be reached."**
 Winner packed (HF-anchored spline + prune), fulleval + board promotion,
 this md carries all cells, freeze proposal to the user. Census-instrument
 evals of these models are VALID (census-clean training).
+
+## L0 RESULT — G-HF **PASS** decisively (2026-08-28, same session)
+
+HF-anchored re-pack of the incumbent (anchor = 20,769 train-leg rows incl.
+ALL 7,790 HF rows; `bake_dial_refit pack --anchor anchor_hf_t1.parquet`):
+`HDR944_L1T1_s4005_hfpack.bin` (180,195 B, 19 knots, dial y-range
+[0.0, 96.1], prune identity gate BIT-identical on all 20,769 anchors,
+sha `0a437d99…`; 944-CID22 verify post-spline SROCC 0.9392).
+
+Val HF band (human_score ≥ 0.92, n=3,036) through the packed artifact:
+**p5 90.76 / p50 93.87 / p95 95.84 / max 96.78; frac ≥88 = 0.967 (bar 0.5),
+frac ≥92 = 0.889** — vs the incumbent pack's p50 81.06 / frac ≥88 = 0.002.
+**G-HF: PASS both clauses.** The HF dial zone is addressable; jxl
+low-distance targets (t88–t95) are reachable.
+
+**G-EXT inherits PASS by rank-invariance**: the re-pack differs from the
+gated incumbent only by a MONOTONE output spline + a bit-identical class-1
+prune — SROCC-based external gates (UPIQ pooled +0.656, narwaria +0.605)
+are invariant under both. Recorded as inherited, not re-run.
+
+L1 (HF-weighted retrains, 2 targets × 3 seeds) launched per registration —
+results follow.
