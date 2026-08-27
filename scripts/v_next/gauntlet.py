@@ -529,8 +529,58 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             blocks = {"uses156": bool(bp.get("uses_f156_371")),
                       "fams": {k: [v.get("used"), v.get("cols")]
                                for k, v in fams.items() if isinstance(v, dict)}}
+        # Training provenance (user ask 2026-08-27): date the bake was produced +
+        # a parsed recipe so theory/training DIFFS read straight off the board.
+        # Source of truth = the embedded zentrain.repro (timestamp_epoch,
+        # target_column, legs, arch); bakes predating mandatory-repro fall back
+        # to the bake FILE mtime, labeled src:"file" so nobody mistakes it for
+        # a training timestamp.
+        repro_o = o.get("repro") or {}
+        train_date = None
+        if isinstance(repro_o, dict) and repro_o.get("timestamp_epoch"):
+            import datetime as _dt
+            train_date = {"d": _dt.datetime.fromtimestamp(
+                int(repro_o["timestamp_epoch"]), _dt.timezone.utc).strftime("%Y-%m-%d"), "src": "repro"}
+        else:
+            bp = o.get("bake")
+            if bp and Path(bp).exists():
+                import datetime as _dt
+                train_date = {"d": _dt.datetime.fromtimestamp(
+                    Path(bp).stat().st_mtime, _dt.timezone.utc).strftime("%Y-%m-%d"), "src": "file"}
+        recipe = None
+        if isinstance(repro_o, dict) and repro_o:
+            legs = []
+            for inp in (repro_o.get("inputs") or []):
+                if isinstance(inp, dict):
+                    legs.append({"name": inp.get("name", "?"),
+                                 "nf": inp.get("n_features"),
+                                 "rows": inp.get("rows") or inp.get("n_rows")})
+            argv = repro_o.get("argv") or []
+            extras = []
+            interesting = {"--coarse-decay", "--coarse-l2-mult", "--qat-fine-tune-epochs",
+                           "--dataset-weights", "--feature-set", "--auto-transforms",
+                           "--target-scale", "--keep-features", "--also", "--val-policy",
+                           "--out-dtype", "--allow-narrow-features"}
+            i = 0
+            while i < len(argv):
+                tok = str(argv[i])
+                if tok in interesting:
+                    val = str(argv[i + 1]) if i + 1 < len(argv) and not str(argv[i + 1]).startswith("--") else ""
+                    extras.append((tok.lstrip("-") + (" " + val if val else "")).strip())
+                    i += 2 if val else 1
+                else:
+                    i += 1
+            recipe = {"target": repro_o.get("target_column"),
+                      "hidden": repro_o.get("n_hidden_layers"),
+                      "width": repro_o.get("max_features"),
+                      "epochs": repro_o.get("epochs"),
+                      "pairs": repro_o.get("pairs_per_epoch"),
+                      "seed": repro_o.get("seed"),
+                      "best_val": repro_o.get("best_val"),
+                      "legs": legs, "extras": extras}
         bakes.append({
             "name": name, "regime": regime_of(o), "regime_flag": o.get("regime", "?"),
+            "train_date": train_date, "recipe": recipe,
             "curated": curated, "family": family_of(name),
             "date": o.get("date", ""), "colorIndex": ci,
             "rank": rank, "dial": o.get("dial", {}), "m3": o.get("m3_coherence"),
@@ -981,6 +1031,7 @@ function makeSortable(tbl){
 const COLS=[
   ['name','bake',true,b=>b.name],
   ['regime','regime',true,b=>b.regime],
+  ['trained','trained',true,b=>b.train_date?b.train_date.d+(b.train_date.src==='file'?'*':''):null],
   ['composite','composite',false,b=>b.composite],
   ['cid22','CID22',false,b=>rs(b,'cid22')],
   ['nonphoto','nonphoto',false,b=>rs(b,'nonphoto')],
@@ -1607,6 +1658,44 @@ function renderGates(){
 // ---- JXL LOOP TARGETING (2-shot / 3-shot) — fed by the jxl-encoder exact-sweep summary
 // JSON (READ verbatim; the jxl-encoder analyze script is the stats owner). Shows EVERY
 // loop model, including the outer arms + ssim2 which are not bakes on this board.
+function renderRecipes(){
+  // Training-recipe table (2026-08-27, user ask): the theory of a bake = its
+  // TARGET + data LEGS; capacity = hidden/width/epochs x pairs. Reading down a
+  // column IS the training diff between any two visible bakes. Dates come from
+  // the embedded zentrain.repro timestamp; '*' marks a bake-file-mtime fallback.
+  const host=$('#recipes');if(!host)return;host.innerHTML='';
+  const bs=DATA.bakes.filter(b=>state.visible.has(b.name));
+  if(!bs.length)return;
+  host.append(el('h2',{text:'Training recipes — dates, theory, capacity'}));
+  host.append(el('div',{class:'cap',html:'<b>theory</b> = target column + data legs (name:width, k-rows); '
+    +'<b>capacity</b> = hidden layers, feature width, epochs\u00d7pairs. Differences between bakes read '
+    +'straight down each column. trained\u00a0<b>*</b> = bake-file date (pre-repro bake, no embedded '
+    +'training timestamp). em-dash = no embedded repro. Click a header to sort.'}));
+  const tbl=el('table',{});
+  const thead=el('tr',{});
+  ['bake','trained','target','legs','hidden','width','epochs\u00d7pairs','seed','best_val','extras'].forEach(h=>thead.append(el('th',{text:h,class:h==='bake'?'lbl':''})));
+  tbl.append(el('thead',{},thead));
+  const tb=el('tbody',{});
+  bs.slice().sort((a,b)=>((b.train_date&&b.train_date.d)||'').localeCompare((a.train_date&&a.train_date.d)||'')).forEach(b=>{
+    const r=b.recipe;const tr=el('tr',{});
+    tr.append(nameInto(el('td',{class:'lbl'}),b));
+    tr.append(el('td',{text:b.train_date?b.train_date.d+(b.train_date.src==='file'?'*':''):'\u2014'}));
+    if(!r){for(let i=0;i<8;i++)tr.append(el('td',{text:'\u2014'}));tb.append(tr);return;}
+    tr.append(el('td',{text:r.target||'\u2014'}));
+    tr.append(el('td',{text:(r.legs&&r.legs.length)?r.legs.map(l=>l.name+(l.nf?(':'+l.nf):'')+(l.rows?('('+Math.round(l.rows/1000)+'k)'):'')).join(' + '):'\u2014'}));
+    tr.append(el('td',{text:r.hidden!=null?String(r.hidden):'\u2014'}));
+    tr.append(el('td',{text:r.width!=null?String(r.width):'\u2014'}));
+    tr.append(el('td',{text:(r.epochs!=null&&r.pairs!=null)?(r.epochs+'\u00d7'+Math.round(r.pairs/1000)+'k'):'\u2014'}));
+    tr.append(el('td',{text:r.seed!=null?String(r.seed):'\u2014'}));
+    tr.append(el('td',{text:r.best_val!=null?Number(r.best_val).toFixed(4):'\u2014'}));
+    tr.append(el('td',{text:(r.extras&&r.extras.length)?r.extras.join('; '):'\u2014'}));
+    tb.append(tr);
+  });
+  tbl.append(tb);
+  makeSortable(tbl);
+  const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
+}
+
 function renderLoop(){
   const host=$('#looptgt');if(!host)return;host.innerHTML='';
   if(!LT||!LT.models||!Object.keys(LT.models).length)return;
@@ -1920,12 +2009,12 @@ function renderModels(){
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'recipes'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
 function rerender(){disposeCharts();state.renderedTheme=effTheme();
-  mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderHfnl();renderGates();renderModels();renderTrade();renderScatter();}
+  mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderHfnl();renderGates();renderRecipes();renderModels();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 // Theme reactivity: charts (and everything else) rebuild with the other theme's option
