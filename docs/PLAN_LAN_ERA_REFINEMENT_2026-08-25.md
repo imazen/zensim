@@ -1528,3 +1528,14 @@ docs/SCRIPT_MIGRATION_LEDGER.md = the standing record (writeback-vs-assemble
 20G); wsl GPU worker RESTARTED on the correct snapshot; gapfill sidecar
 repaired on-store (zstd; snappy original in _backup/). Sentinel v3 (-ge +
 fail→ok transition wake) running.
+
+**BOUNCE-RHYTHM FINDING (2026-08-27 01:30Z)**: the store's write-dead/writable
+cycle is SeaweedFS volume-reclaim, NOT mover progress — avail sits pinned at
+19-20G through full cycles (worker parked or running), while writability
+returns ~6-15 min after each death. Measured duty: ~10-min writable windows,
+~600-1,200 diffmap cells per window, worker parked between (sentinel exit 17
+→ park; exit 11 → restart; Claude in the loop per directive). Implication:
+the 80G gate will NOT arrive from the mover at this rate — scale-up stays
+held; the drain proceeds at ~50% duty on the single wsl GPU worker. If the
+mover is genuinely stalled (df flat for hours), that is a tower-side
+investigation for the daytime, not a 2am config change on the household NAS.
