@@ -66,5 +66,57 @@ def main():
         print(f"{peer}: {sum(len(v) for v in curves.values())} curve points, "
               f"codecs {sorted(curves)}, mono {ok}/{steps} = {ok/steps:.3f}")
 
+CSRC = {
+    "ssim2": ("corruption_ssim2_gpu.tsv", +1),
+    "butteraugli": ("corruption_butteraugli_gpu.tsv", -1),
+    "iwssim": ("corruption_iwssim_gpu.tsv", +1),
+    "cvvdp": ("corruption_cvvdp.tsv", +1),
+}
+
+def corruption_blocks():
+    """Peer `corruption` blocks matching the board shape {n_triples, pass_q10,
+    pass_q20, per_family}: an entry PASSES when the metric scores the
+    corruption below its q10/q20 anchor of the same base name (the
+    corruption-gate semantics; entry = gb82_dog__<family>__<params>__{corruption,q10,q20})."""
+    for peer, (tsv, sign) in CSRC.items():
+        p = os.path.join(R, tsv)
+        if not os.path.exists(p):
+            print(f"corr {peer}: absent — skipped"); continue
+        val = {}
+        col = None
+        for r in csv.DictReader(open(p), delimiter="\t"):
+            if col is None:
+                col = [c for c in r if c not in ("ref_path", "dist_path", "entry")][-1]
+            try:
+                val[r["entry"]] = sign * float(r[col])
+            except (TypeError, ValueError):
+                pass
+        bases = {}
+        for e, v in val.items():
+            for suf in ("__corruption", "__q10", "__q20"):
+                if e.endswith(suf):
+                    bases.setdefault(e[: -len(suf)], {})[suf[2:]] = v
+        n = p10 = p20 = 0
+        fam = {}
+        for b, d in bases.items():
+            if "corruption" not in d or "q10" not in d or "q20" not in d:
+                continue
+            n += 1
+            f = b.split("__")[1] if "__" in b else "?"
+            fam.setdefault(f, [0, 0, 0])
+            fam[f][0] += 1
+            if d["corruption"] < d["q10"]: p10 += 1; fam[f][1] += 1
+            if d["corruption"] < d["q20"]: p20 += 1; fam[f][2] += 1
+        jp = os.path.join(OUT, f"peer_{peer}.fulleval.json")
+        doc = json.load(open(jp))
+        doc["corruption"] = {"n_triples": n, "pass_q10": p10 / n if n else None,
+                             "pass_q20": p20 / n if n else None,
+                             "per_family": {f: {"n": c[0], "pass_q10": c[1] / c[0], "pass_q20": c[2] / c[0]}
+                                            for f, c in sorted(fam.items())},
+                             "provenance": "peer-scored persisted corruption_gate PNGs; gate semantics (corruption below its own q-anchors)"}
+        json.dump(doc, open(jp, "w"), indent=1)
+        print(f"corr {peer}: {n} triples, pass_q10 {p10/n:.3f}, pass_q20 {p20/n:.3f}")
+
 if __name__ == "__main__":
     main()
+    corruption_blocks()
