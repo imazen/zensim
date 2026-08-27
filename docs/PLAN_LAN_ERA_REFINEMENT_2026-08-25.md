@@ -1429,6 +1429,20 @@ hdr_v3mix views after their scores harvest (fleet-gated). R2 deploy exists
 (mntv-gallery cannot host it — directory lister; needs the http.server-style
 index resolution or a tower container).
 
+**C6 CLOSED (2026-08-27, late): the browser serves every ENCODE set; the
+set↔pool mapping is now explicit.** Encode sets of criterion 2 ↔ viewer
+pools: bigcodec lineage = the DEFAULT pool (SDR-07-01, the canonical-picker
+2026-07-01-zensimA views over the bigcodec sweeps); avifgen = `?set=avifgen`
+(562,860 cells, ccbbf65/c3eeacd); hdrgrid = `?set=hdrgrid` (era-B zensim,
+post-drain refresh fa1ef73) — each render-gated 8/8 at commit. **ext legs and
+hdr_v3mix are RULED not-encode-sets for C6**: both are feature/target
+derivations (ext legs = feature tables over the already-served bigcodec
+encodes; hdr_v3mix@944 = the manifested hdr944-leg training table, see its
+criterion-2 TRUE section above) — they have no per-cell encode results to
+browse; the earlier "hdr_v3mix view after its scores harvest" order line
+predated that recon and is superseded. Live-serve verified this session:
+`just viewer-serve` up at :3317 (HTTP 200).
+
 **GPU EXECUTOR IMAGE SHIPPED (zenmetrics 9ecff548)**: exec-gpu-399abe82
 (+ canonical :exec-gpu) — GPU zenmetrics rebuilt at tip in rust:1-bookworm
 (glibc 2.36 ≤ v29 base 2.39; the container-build counterpart of the musl rule)
