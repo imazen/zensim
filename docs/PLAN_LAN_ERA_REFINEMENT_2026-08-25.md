@@ -1373,3 +1373,17 @@ endpoint), med −5.7%, bytes +0.39% (inside ±1%); k2 is byte-identical BY
 CONSTRUCTION (gain first differs at the 2nd steered iterate; no later encode
 at k2 — asserted as an identity control in the phase). Default OFF. Registered
 next: S3×S1 composition, S4 elasticity prior, the secant rate-matched read.
+
+**§5 S3×S1 COMPOSITION DONE (jxl-encoder f6e6f757cd7f)**: best median of all arms
+(0.328 vs fixed 0.566, secant-alone 0.344), census ties 25/27; bytes owned by
+the global secant (+2.07% composed vs +0.39% tile-alone); tile gain's
+nonphoto +1 does NOT survive composition (7/9). Axes trade: tile-secant alone
+= in-bar bytes + nonphoto win; composition = accuracy-median. All default
+OFF; §5 remaining: S4 elasticity prior, the rate-matched read, C2..C9.
+**CPU EXECUTOR IMAGE SHIPPED (zenmetrics 90aed765)**:
+exec-zensim944hdr-399abe82 (+ canonical :exec) — all 8 anti-wedge invariants
++ hdr-gainmap + 'zenmetrics capabilities' baked, statically linked, launcher
++ fleet.env wired; built + pushed from THIS box (stale no-docker note
+corrected). GPU image at tip = next (old GPU executor lacks the capabilities
+subcommand → requires-bearing GPU jobs would self-exclude; rebuild BEFORE any
+new declare).
