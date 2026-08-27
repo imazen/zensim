@@ -2206,10 +2206,17 @@ fn fused_blur_h_mu_inner(
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
-    let row_groups = height / 8;
 
-    for rg in 0..row_groups {
-        let row_base = rg * 8;
+    // Masked 8-row groups — same construction as `fused_blur_h_ssim_inner`:
+    // lanes past `valid` alias the last real row, only real rows are
+    // stored, so tail rows carry the vector body's exact numerics (the
+    // former scalar tail summed `sum += add - rem`, a different association
+    // from the vector `sum + add - rem`).
+    let mut run_group = |row_base: usize, valid: usize| {
+        let mut row_off = [0usize; 8];
+        for (ro, off) in row_off.iter_mut().enumerate() {
+            *off = (row_base + ro.min(valid - 1)) * width;
+        }
         let mut sum_s = f32x8::zero(token);
         let mut sum_d = f32x8::zero(token);
 
@@ -2221,10 +2228,9 @@ fn fused_blur_h_mu_inner(
             };
             let mut s_arr = [0.0f32; 8];
             let mut d_arr = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            for (ro, &off) in row_off.iter().enumerate() {
+                s_arr[ro] = src[off + idx];
+                d_arr[ro] = dst[off + idx];
             }
             sum_s = sum_s + f32x8::from_array(token, s_arr);
             sum_d = sum_d + f32x8::from_array(token, d_arr);
@@ -2233,8 +2239,8 @@ fn fused_blur_h_mu_inner(
         for x in 0..width {
             let mu1_result = (sum_s * inv_v).to_array();
             let mu2_result = (sum_d * inv_v).to_array();
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + x;
+            for (ro, &off) in row_off.iter().enumerate().take(valid) {
+                let base = off + x;
                 out_mu1[base] = mu1_result[ro];
                 out_mu2[base] = mu2_result[ro];
             }
@@ -2258,58 +2264,24 @@ fn fused_blur_h_mu_inner(
             let mut d_add = [0.0f32; 8];
             let mut s_rem = [0.0f32; 8];
             let mut d_rem = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+            for (ro, &off) in row_off.iter().enumerate() {
+                s_add[ro] = src[off + add_idx];
+                d_add[ro] = dst[off + add_idx];
+                s_rem[ro] = src[off + rem_idx];
+                d_rem[ro] = dst[off + rem_idx];
             }
             sum_s = sum_s + f32x8::from_array(token, s_add) - f32x8::from_array(token, s_rem);
             sum_d = sum_d + f32x8::from_array(token, d_add) - f32x8::from_array(token, d_rem);
         }
+    };
+
+    let row_groups = height / 8;
+    for rg in 0..row_groups {
+        run_group(rg * 8, 8);
     }
-
-    // Scalar remainder rows
-    let inv = 1.0 / diam as f32;
-    for row in (row_groups * 8)..height {
-        let row_off = row * width;
-        let s_row = &src[row_off..row_off + width];
-        let d_row = &dst[row_off..row_off + width];
-        let mut sum_s = 0.0f32;
-        let mut sum_d = 0.0f32;
-
-        for i in 0..diam {
-            let idx = if i <= r {
-                (r - i).min(width - 1)
-            } else {
-                (i - r).min(width - 1)
-            };
-            sum_s += s_row[idx];
-            sum_d += d_row[idx];
-        }
-
-        for x in 0..width {
-            out_mu1[row_off + x] = sum_s * inv;
-            out_mu2[row_off + x] = sum_d * inv;
-
-            let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
-            let rem_i = x as isize - r as isize;
-            let rem_idx = if rem_i < 0 {
-                rem_i.unsigned_abs()
-            } else {
-                rem_i as usize
-            };
-            let rem_idx = rem_idx.min(width - 1);
-            sum_s += s_row[add_idx] - s_row[rem_idx];
-            sum_d += d_row[add_idx] - d_row[rem_idx];
-        }
+    let tail = height - row_groups * 8;
+    if tail > 0 {
+        run_group(row_groups * 8, tail);
     }
 }
 
@@ -3175,10 +3147,24 @@ fn fused_blur_h_ssim_inner(
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
-    let row_groups = height / 8;
 
-    for rg in 0..row_groups {
-        let row_base = rg * 8;
+    // One 8-row group per call. `valid` (1..=8) is the number of real rows
+    // starting at `row_base`; lanes past it alias the LAST real row, so
+    // every lane runs the identical vector arithmetic on in-bounds data and
+    // only the real rows are stored. The tail rows (height % 8) therefore
+    // get bit-for-bit the same numerics as full-group rows on every tier.
+    // A separate scalar tail (`f32::mul_add`, i.e. a fused FMA) diverged
+    // from the vector body wherever the tier's `mul_add` is the unfused
+    // `a * b + c` (scalar polyfill, wasm128), which made the H-blur output
+    // depend on how the caller banded the plane — the streaming strips
+    // (32 + 2·r rows) and the whole-plane attribution walk (h rows) then
+    // disagreed on tail rows. Caught by the i686 CI run (scalar-only
+    // dispatch) in `attribution::tests::sum_preservation_*`.
+    let mut run_group = |row_base: usize, valid: usize| {
+        let mut row_off = [0usize; 8];
+        for (ro, off) in row_off.iter_mut().enumerate() {
+            *off = (row_base + ro.min(valid - 1)) * width;
+        }
         let mut sum_s = f32x8::zero(token);
         let mut sum_d = f32x8::zero(token);
         let mut sum_sq = f32x8::zero(token);
@@ -3192,10 +3178,9 @@ fn fused_blur_h_ssim_inner(
             };
             let mut s_arr = [0.0f32; 8];
             let mut d_arr = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            for (ro, &off) in row_off.iter().enumerate() {
+                s_arr[ro] = src[off + idx];
+                d_arr[ro] = dst[off + idx];
             }
             let sv = f32x8::from_array(token, s_arr);
             let dv = f32x8::from_array(token, d_arr);
@@ -3210,8 +3195,8 @@ fn fused_blur_h_ssim_inner(
             let mu2_result = (sum_d * inv_v).to_array();
             let sq_result = (sum_sq * inv_v).to_array();
             let prod_result = (sum_prod * inv_v).to_array();
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + x;
+            for (ro, &off) in row_off.iter().enumerate().take(valid) {
+                let base = off + x;
                 out_mu1[base] = mu1_result[ro];
                 out_mu2[base] = mu2_result[ro];
                 out_sigma_sq[base] = sq_result[ro];
@@ -3237,12 +3222,11 @@ fn fused_blur_h_ssim_inner(
             let mut d_add = [0.0f32; 8];
             let mut s_rem = [0.0f32; 8];
             let mut d_rem = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+            for (ro, &off) in row_off.iter().enumerate() {
+                s_add[ro] = src[off + add_idx];
+                d_add[ro] = dst[off + add_idx];
+                s_rem[ro] = src[off + rem_idx];
+                d_rem[ro] = dst[off + rem_idx];
             }
             let sa = f32x8::from_array(token, s_add);
             let da = f32x8::from_array(token, d_add);
@@ -3256,65 +3240,15 @@ fn fused_blur_h_ssim_inner(
             );
             sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
         }
+    };
+
+    let row_groups = height / 8;
+    for rg in 0..row_groups {
+        run_group(rg * 8, 8);
     }
-
-    // Scalar remainder rows
-    let inv = 1.0 / diam as f32;
-    for row in (row_groups * 8)..height {
-        let row_off = row * width;
-        let s_row = &src[row_off..row_off + width];
-        let d_row = &dst[row_off..row_off + width];
-        let mut sum_s = 0.0f32;
-        let mut sum_d = 0.0f32;
-        let mut sum_sq = 0.0f32;
-        let mut sum_prod = 0.0f32;
-
-        for i in 0..diam {
-            let idx = if i <= r {
-                (r - i).min(width - 1)
-            } else {
-                (i - r).min(width - 1)
-            };
-            let s = s_row[idx];
-            let d = d_row[idx];
-            sum_s += s;
-            sum_d += d;
-            sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-            sum_prod = s.mul_add(d, sum_prod);
-        }
-
-        for x in 0..width {
-            out_mu1[row_off + x] = sum_s * inv;
-            out_mu2[row_off + x] = sum_d * inv;
-            out_sigma_sq[row_off + x] = sum_sq * inv;
-            out_sigma12[row_off + x] = sum_prod * inv;
-
-            let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
-            let rem_i = x as isize - r as isize;
-            let rem_idx = if rem_i < 0 {
-                rem_i.unsigned_abs()
-            } else {
-                rem_i as usize
-            };
-            let rem_idx = rem_idx.min(width - 1);
-            let sa = s_row[add_idx];
-            let da = d_row[add_idx];
-            let sr = s_row[rem_idx];
-            let dr = d_row[rem_idx];
-            sum_s = sum_s + sa - sr;
-            sum_d = sum_d + da - dr;
-            sum_sq = sa.mul_add(
-                sa,
-                da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
-            );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
-        }
+    let tail = height - row_groups * 8;
+    if tail > 0 {
+        run_group(row_groups * 8, tail);
     }
 }
 
