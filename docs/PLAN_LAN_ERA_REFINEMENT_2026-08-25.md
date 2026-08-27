@@ -1998,3 +1998,27 @@ instrument prerequisite as svt.
 - The instrument definition FREEZES when its ref list is committed
   (blocked only on choosing refs — a one-session task once hdrfeat944
   re-declares or the coverage fallback is accepted).
+
+## B4(iv) CLOSED — svt#11 backfill (2026-08-27 ~20:0xZ)
+
+zenav1-svt#11 (restoration.rs:985 OOB) was fixed by its owner lane
+(`99180fcea`, issue closed 08-08) but the **115 absent hdrgrid cells were
+never re-encoded** (verified: the failing renditions sat at partial diffmap
+coverage, 8–22 of 58 cells). Tonight: local svt checkout advanced to the
+fixed tip (c6bafcba; the zenmetrics path-dep API held — clean build with
+`hdr-svt`), the EXACT panicking cell smoked rc=0 through the real jobexec
+route (1,126-byte conformant AVIF at q15/383x512), then run
+`hdrgrid-enc-fix11-20260827` declared (cell-identity subset of the original
+manifest — job-id matching failed across id eras, a known trap) and drained
+LOCALLY with the fixed binary via the arg-driven `zenfleet-worker` single
+pass: **115/115 done, 0 failed, ~2 min wall (32-core concurrent mode),
+ledger landed, blob content-gated.** Issue commented.
+
+**Registered follow-up (the fix11 downstream):** feature/score/diffmap
+declares for these 115 encodes APPEND to the ORIGINAL hdrgrid runs (one
+corpus, not fragment slices) via `declare-scorefiles`; the closed diffmap
+wave's finals re-emit at their next gap=0 (the manifest generator is
+deterministic by design). NOTE for the image roll: today's CPU image
+(9dffa5ca) does NOT carry `hdr-svt` — the next roll must add it (features:
+`sweep,png,jpeg,webp,avif,jxl,cpu-metrics,hdr-gainmap,hdr-svt`) so fleet
+boxes can encode svt cells again.
