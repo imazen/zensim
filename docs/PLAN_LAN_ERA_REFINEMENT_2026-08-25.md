@@ -1428,3 +1428,16 @@ hdr_v3mix views after their scores harvest (fleet-gated). R2 deploy exists
 (`deploy_viewer.sh`) but the LAN-era serve target is the open question
 (mntv-gallery cannot host it — directory lister; needs the http.server-style
 index resolution or a tower container).
+
+**GPU EXECUTOR IMAGE SHIPPED (zenmetrics 9ecff548)**: exec-gpu-399abe82
+(+ canonical :exec-gpu) — GPU zenmetrics rebuilt at tip in rust:1-bookworm
+(glibc 2.36 ≤ v29 base 2.39; the container-build counterpart of the musl rule)
++ tonight's static musl worker. In-image capabilities: full gpu-* set +
+hdr-gainmap. BOTH images now carry all 8 invariants; launcher + fleet.env
+defaults point at the 399abe82 pins. **Relaunch runbook (fires on the ≥80G
+space watcher)**: (1) boxes pull the new pins (launcher defaults already
+correct); (2) relaunch i134 gpu + i265/r5900xt/r3500/dev cpu_heavy (NOT
+tower); (3) re-upload the failure-carrying snapshot
+~/tmp/zen-snaps/snap_hdrgrid-diffmap-20260807.parquet (84,820 done + 9,219
+newest-failed; its first upload died on the store-full 500); (4) first-cell
+gate before scale.
