@@ -52,7 +52,7 @@ zenpng  = { path = "../../zenpng",           optional = true, default-features =
 # zencodec traits are needed for the JXL encode path's `EncodeJob` / `Encoder`
 # / `EncoderConfig` trait bounds (zenjxl exposes the encoder via these traits
 # when the `zencodec` feature is enabled).
-zencodec = { version = "0.1.20", optional = true }
+zencodec = { version = "0.1.26", optional = true }
 
 [dev-dependencies]
 # CPU butteraugli for the cross-codec smoke test (sibling-worktree path).
@@ -70,6 +70,9 @@ path = "src/bin/zensim_target.rs"
 zenavif-serialize = { path = "../../zenavif/zenavif-serialize" }
 jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../../zenjpeg/zenjpeg" }
+# zenjxl@HEAD requires the UNPUBLISHED zenjxl-decoder 0.4.0 (crates.io max is
+# 0.3.x) — patch the local sibling in, same as zensim-bench does.
+zenjxl-decoder = { path = "../../zenjxl-decoder/zenjxl-decoder" }
 
 # Mirror the root workspace build profiles (this is its own workspace root).
 [profile.release]

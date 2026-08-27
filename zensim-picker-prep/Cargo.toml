@@ -21,14 +21,15 @@ zensim = { path = "../zensim", features = ["training"] }
 zensim-experimental = { path = "../zensim-experimental" }
 
 # Codec crates — local sibling paths (user directive: no crates.io versions)
-zenjpeg = { path = "../../zenjpeg/zenjpeg", default-features = false, features = ["zencodec", "decoder", "__expert", "trellis"] }
+# zenjpeg 0.9.0 dropped the `decoder` / `trellis` features (both unconditional now).
+zenjpeg = { path = "../../zenjpeg/zenjpeg", default-features = false, features = ["zencodec", "__expert"] }
 zenwebp = { path = "../../zenwebp" }
 zenavif = { path = "../../zenavif", features = ["encode"] }
 zenjxl = { path = "../../zenjxl", features = ["zencodec"] }
 zenpng = { path = "../../zenpng" }
 
 # Helper crates the codecs need
-zencodec = "0.1.20"
+zencodec = "0.1.26"
 zenpixels = "0.2.10"
 zenpixels-convert = "0.2.10"
 zenanalyze = { path = "../../zenanalyze" }
@@ -58,6 +59,9 @@ parquet = { version = "58.3.0", default-features = false, features = ["arrow", "
 [patch.crates-io]
 jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../../zenjpeg/zenjpeg" }
+# zenjxl@HEAD requires the UNPUBLISHED zenjxl-decoder 0.4.0 (crates.io max is
+# 0.3.x) — patch the local sibling in, same as zensim-bench does.
+zenjxl-decoder = { path = "../../zenjxl-decoder/zenjxl-decoder" }
 
 # Mirror the root workspace build profiles (this is its own workspace root).
 [profile.release]

@@ -371,7 +371,7 @@ mod real {
 
     #[cfg(feature = "verify-webp")]
     fn decode_webp(bytes: &[u8]) -> Outcome {
-        let cfg = zenwebp::WebpDecoderConfig::new();
+        let cfg = zenwebp::zencodec::WebpDecoderConfig::new();
         let res = (|| -> Result<Vec<u8>, String> {
             let out = cfg
                 .job()

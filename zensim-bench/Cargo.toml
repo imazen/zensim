@@ -28,11 +28,13 @@ extract-omni = ["training", "dep:parquet", "dep:arrow", "dep:zenavif", "dep:zenj
 # prove the ~403 GiB PNG decode-cache is regenerable from the ~38 GiB of
 # bitstreams. `verify-decode` is JPEG-only (lightest — zenjpeg + zencodec).
 # Add per-codec features for the heavier graphs (rav1d / jxl / webp).
-verify-decode = ["dep:zencodec", "dep:zenpixels", "dep:zenjpeg"]
-# NB: zencodec is a NON-optional dep in local zenavif/zenjxl (always built), so it
-# cannot be enabled via `zenavif/zencodec` — that ref is invalid. Just pull the dep.
+verify-decode = ["dep:zencodec", "dep:zenpixels", "dep:zenjpeg", "zenjpeg/zencodec"]
+# NB: zenavif's zencodec impls are unconditional (no `zencodec` feature there);
+# zenjpeg and zenjxl gate their `*DecoderConfig` types behind their own
+# `zencodec` feature, so enable it explicitly. zenwebp's are unconditional
+# (re-exported under `zenwebp::zencodec::`).
 verify-avif = ["verify-decode", "dep:zenavif"]
-verify-jxl = ["verify-decode", "dep:zenjxl"]
+verify-jxl = ["verify-decode", "dep:zenjxl", "zenjxl/zencodec"]
 verify-webp = ["verify-decode", "dep:zenwebp"]
 verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 
@@ -46,7 +48,9 @@ cc = "1"
 
 [dependencies]
 # zensim-bench is internal tooling (not published).
-zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref"] }
+# `deprecated-profiles` keeps `ZensimProfile::A` available for `zwe_zenbench`,
+# which deliberately benchmarks the deprecated generation-A MLP profile.
+zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles"] }
 # Dedup-K (2026-05-26): profile_compat_report example routes
 # spearman/pearson/kendall_tau through canonical zenstats.
 zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
@@ -95,7 +99,7 @@ zenpixels = { version = "0.2.10", default-features = false, optional = true }
 # `verify_bitstream_decode` decode path (zencodec unified API).
 # zenjpeg is also patched in [patch.crates-io] for transitive consumers; this
 # direct optional dep adds the zencodec + decoder features for the JPEG path.
-zencodec = { version = "0.1.24", optional = true }
+zencodec = { version = "0.1.26", optional = true }
 zenjpeg = { path = "../../zenjpeg/zenjpeg", optional = true }
 zenwebp = { path = "../../zenwebp", package = "zenwebp", optional = true, default-features = false }
 
@@ -158,15 +162,15 @@ check-cfg = ['cfg(feature, values("training"))', 'cfg(has_cpp_ssimulacra2)', 'cf
 jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../../zenjpeg/zenjpeg" }
 # use local sibling codecs so the whole graph resolves to one version (2026-07-18):
-# transitive crates.io zenavif/zencodec/zenpixels were skewing (bench 0.1.24 vs
-# zenavif-wants-0.1.26 vs local 0.1.27). Forcing local unifies them.
+# transitive crates.io zenavif/zenpixels were skewing against the local siblings.
+# Forcing local unifies them. (zencodec no longer needs a patch: every sibling
+# requires the published 0.1.26 taxonomy release — rollout 2026-08-27.)
 zenavif = { path = "../../zenavif" }
 zenjxl = { path = "../../zenjxl" }
 # zenjxl@HEAD consumes the UNPUBLISHED zenjxl-decoder error-taxonomy API
 # (jxl::api::ErrorClass) — patch the local sibling in (SOTA-944 hdr944
 # amendment; the "patch it in and KEEP WORKING" rule).
 zenjxl-decoder = { path = "../../zenjxl-decoder/zenjxl-decoder" }
-zencodec = { path = "../../zencodec" }
 zenpixels = { path = "../../zenpixels/zenpixels" }
 
 # Mirror the root workspace build profiles (this is its own workspace root).
