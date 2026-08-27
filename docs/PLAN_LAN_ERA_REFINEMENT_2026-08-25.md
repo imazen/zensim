@@ -2118,7 +2118,7 @@ Status legend: ✅ evidence committed · 🟡 executing (evidence for the done p
 **4 LOOPS** (instrument = corpus9 27-cell; per-repo verdicts all committed)
 - jxl ✅✅ (+S4 iter-1 ε̂ B3 census PASS 36.7% — 🔶 ship form); zenwebp ✅✅ (head FAILED vs bucket anchors — buckets = the validated one-shot); zenavif(+zenrav1e) ✅✅ (k2 0.756/k3 0.336); zenjpeg ✅✅ (inert head +47.9%/+45.9% — 🔶 default wiring).
 - "zenpredict-baked" wording: resolved 2026-08-27 to the sanctioned consts form (feedback_no_zenpredict_in_codecs) — recorded, reversible only by the user.
-- zenav1-svt: ❌ loop (HDR-native wave registered; svt#11 prerequisite CLOSED today); zenav1-aom: ruled premature (its own gates first); gainmap: ❌ (HDR instrument + zenjpeg base). HDR instrument: registered, ref-selection open.
+- zenav1-svt: **✓ loop + ✓ census CLOSED 2026-08-27** — `svtav1-target` crate (search `57805614` + judge-injected trial `508012c8`, tested through the real encoder) + phase-B census on the frozen HDR instrument (k2 17.64/1hit, k3 7.43/9hits, t80 1.20 — blind-seed cost quantified; zenav1-svt `52c8aba4`); seed arms register separately. zenav1-aom: ruled premature (its own gates first); gainmap: ❌ the one remaining census (HDR instrument now EXISTS + zenjpeg base). HDR instrument: ✓ refs frozen `7543b810`.
 - Production gates (dial mono / RD-vs-independent-judges / perf bar) per encoder: 🟡 census+judge halves done for 4; the RD-vs-independent-judge sweep per encoder = registered follow-on.
 
 **5 PERF**
