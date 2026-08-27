@@ -194,6 +194,8 @@ CURATED_BOARD = [
     # HDR-944 retrain wave (2026-08-28): the selected winner + the
     # HF-discrimination runner-up
     "HDR944_L1T1_s4005_hfpack", "HDR944R_t2_s4003_hfpack",
+    # SDR purity-retrain winner (2026-08-28 wave; freeze pending)
+    "W10L9P_s4005_packed",
     # campaign arm candidates + named leaders (benchmarks/sota944_campaign_2026-08-03.md)
     "sota944_winner_A_bvls_X_AM5",       # arm A candidate = campaign winner (§SELECTION)
     "sota944_B_blend_lam1e-3_a0.7_w",    # arm B candidate

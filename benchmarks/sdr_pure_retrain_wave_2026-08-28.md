@@ -36,3 +36,26 @@ Same as the campaign selection: freeze_check E.4 over the fullevals
 **Comparison row:** the incumbent W10L9_s4003 on the same panels — the wave
 answers "does purity-clean training cost or gain?" with the E.4 + gate-panel
 numbers side by side. No auto-freeze: the result returns to the user.
+
+## RESULTS — the purity retrain WINS on both lenses (2026-08-28)
+
+3/3 seeds trained (verbatim recipe, pure views), packed with the exact
+campaign parity invocation (identity gates BIT-identical on all 2,035
+anchors). Selection (freeze_check E.4, incumbent included):
+
+| rank | bake | floors | bal_comp | M3a | sel_comp | sdr25 |
+|---|---|---|---|---|---|---|
+| **1** | **W10L9P_s4005_packed** | **8/8** | 0.8565 | **0.8744** | **0.9876** | 0.9612 |
+| 2-3 | W10L9_s4003(_packed) — incumbent | 8/8 | 0.8549 | 0.8626 | 0.9843 | 0.9527 |
+| 4 | W10L9P_s4003_packed | 8/8 | 0.8567 | 0.8278 | 0.9808 | 0.9539 |
+| 5 | W10L9P_s4004_packed | 7/8 | 0.8491 | 0.8822 | 0.9814 | 0.9678 |
+
+Gate panel AGREES: winner weighted_goal **0.764 vs 0.727**, g1=g7=1.0, dial
+mono 0.9947, reach 90.6. Axis detail: cid22 0.8901 (+0.003), imazen26 0.9298
+(+0.009), nonphoto 0.9342 (+0.008); honest dips: konjnd 0.4446 (−0.054),
+hfnlproxy 0.3781 (−0.042) — the family-filtered rows carried near-threshold/
+near-lossless signal; floors hold 8/8 regardless. **Answer to the wave's
+question: family-clean training GAINS on the headline axes and the selection
+rule — the freeze proposal moves to `W10L9P_s4005_packed`** (user-gated).
+Sha: recorded in the board fulleval; bakes at
+`/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/`.
