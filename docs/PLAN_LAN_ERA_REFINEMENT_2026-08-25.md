@@ -1499,9 +1499,13 @@ arithmetically dominated on its own census). **S4 iter-1 elasticity prior:
 census G-J2 PASS — 27.0% median |err| improvement (bar ≥15%), ±2 hits 22/27,
 photo-concentrated (−32%), nonphoto honestly +5.8%.** Unit bridge: power-law
 exp ⇔ ε̂=−1/exp; ε̂_prior=(slope/(100−t))/DQ via the public
-quality_to_distance (q2d_probe example). Ship form (cheap-feature refit +
-its own census, then a user-gated default decision) is the registered
-follow-up.
+quality_to_distance (q2d_probe example). Ship form RESOLVED same night:
+**B3 census FULL PASS on stricter bars — 36.7% overall (beats B1's 27.0%),
+hits 22/27, nonphoto IMPROVES 1.84→1.59** (8 cheap features + owner zq_seed
+q0 + bridge-validity guard q0≥40 ∧ slope>0; B2 without the guard formally
+passed but poisoned nonphoto 1.84→4.17 — diagnosed: DQ→0 in the low-q flat
+region of quality_to_distance). Final ship proposal = B3 form, USER-GATED;
+everything stays instrument-side until a yes.
 
 
 **§5 RATE-MATCHED SECANT READ DONE (jxl-encoder 7e719c1ccd33)**: mm-F3 rule on the
