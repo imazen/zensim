@@ -1924,3 +1924,33 @@ strong buckets). Default `q_start` wiring = USER-GATED proposal in the wave
 md. Family census board: **jxl, zenwebp, zenavif, zenjpeg all CLOSED**;
 AV1 trio + gainmap remain. Second parallel-lane note: zenjpeg also carries
 an active recompress/DQT lane today (merged, not mine).
+
+## PERF criterion 5 — per-kernel audit COMPLETE (2026-08-27 ~19:0xZ)
+
+Method: enumerate every fn defined inside an `#[cfg(aarch64)]` region in
+jxl-encoder-simd + jxl-encoder + zenavif src; for each name-pattern flag,
+verify the DISPATCH layer (not the name) for an x86 arm.
+
+**jxl-encoder-simd: FULL x86 coverage.** 84 NEON-gated fns; all 9
+name-flags are naming asymmetries over real dispatch — per-file verified:
+`dct8.rs` (`dct_8x8_avx2`/`idct_8x8_avx2` + `X64V3Token::summon` dispatch +
+the `dct_idct_8x8_scalar_vs_dispatch_edge_battery` parity gates),
+`dct16.rs`/`idct16.rs` (f32x8 batch kernels, 28/32 x86 refs), `dequant.rs`
+(`dequant_dct8_avx2`), `transpose.rs` (`transpose_8x8_avx2`).
+
+**zenavif: no production NEON-only kernel.** The production YUV converter
+(`src/yuv_convert.rs`, the strip route `decode_av1.rs`/`plane_convert.rs`
+consume) is `#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]` — all five
+tiers from ONE elementwise-IEEE recipe, byte-identical by design.
+`unpremultiply8` gained its x86 AVX2 tier TODAY from the parallel lane
+(`b92880e` + zenbench 4.0×@1920px + tier-isolation gates + module-header
+doc `0ff36f6` — that lane's work, credited not duplicated). The two
+remaining genuinely-NEON-only fns (`yuv_convert_fast::process_16_pixels_
+420_neon`, `yuv_convert_libyuv_simd::yuv_to_rgb_neon_i32`) live in
+EXPERIMENT/bench modules outside the production decode route — noted, not
+ported (porting dead-route kernels is not the criterion).
+
+Criterion-5 state: **audit half DONE (this record)**; the byte-identical +
+zenbench evidence exists per kernel family in each repo's own benches
+(jxl `tier_isolation`/`kernel_tiers`, zenavif `unpremul_tiers`/
+`tier_isolation`, run without target-cpu=native per their headers).
