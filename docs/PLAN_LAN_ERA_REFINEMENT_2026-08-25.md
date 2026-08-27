@@ -1487,3 +1487,17 @@ invariant-carrying exec-gpu-399abe82; (4) fleet_sentinel.sh (zenmetrics
 conditions each EXIT and invoke the supervisor — no silent log lines.
 First-cell gate: boot log + artifact landing check armed; scale-up
 (i134 gpu + cpu boxes) only after it passes.
+
+**SCRIPT→OWNER MIGRATION WAVE 1 (zenmetrics f21e64b57e5f)**: pool_reconcile_report.py +
+compact_ledgers.py → `zenfleet-ctl report/compact` (unit-tested pure logic in
+the ctl lib; live parity: compact monotone-superset on the draining run,
+report declared exact + 128× faster (1s vs the Python's 11s, after finding a
+real gunzip pipe-deadlock in my first cut); --upload targets the ONE run-root
+snapshot key, killing tonight's misplaced-key footgun at the owner; all
+callers migrated same commit, scripts DELETED).
+**FIRST-CELL GATE: PASS** — lilith worker lands sidecars
+(pass-lilith-l5070-1.chunk-*), gap 108,754→104,953 in ~35 min (~100+
+cells/min sustained), clean SIGTERM claim-release observed live on my
+restart. **SCALE-UP HELD deliberately**: one worker consumes cache ~6G/5min
+vs mover freeing ~1G/10min — more boxes would write the store full; sentinel
+owns the space/store conditions and the fleet grows when the cache clears.
