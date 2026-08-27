@@ -217,3 +217,25 @@ matrix. Remaining chart surfaces without peer data: the dial-grid ladder and
 corruption grid (peer curves need scoring those grids' encodes — registered,
 not run). /mnt/v is NOT shared between dev and wsl (verified by sharecheck —
 overlapping content is historical sync); data shipped with the job.
+
+## PEER GRID SURFACES COMPLETE (2026-08-28) — dial + corruption, all 4 peers
+
+Scored from the persisted grid pixels (dial: 6,487 ladder pairs; corruption:
+2,016 gate PNGs; cvvdp CPU local, GPU trio on the wsl 5070 baked container;
+the first GPU pass was starved by rsync's `--files-from` non-recursion —
+caught by rows=0, re-shipped size-verified, re-run):
+
+| peer | dial mono (per-ladder) | corruption pass_q10 | pass_q20 |
+|---|---|---|---|
+| iwssim | **0.995** | 0.098 | 0.168 |
+| cvvdp | 0.985 | 0.213 | 0.362 |
+| ssim2 | 0.978 | 0.201 | 0.345 |
+| butteraugli | 0.882 | **0.521** | **0.618** |
+
+The two instruments dissociate cleanly: iwssim is the best LADDER orderer and
+the WORST corruption detector; butteraugli inverts (noisiest ladder, 2.5×
+corruption-gate lead) — the measured, on-board version of the
+"butter wins corruption-gate" finding that motivated the corruption HEAD.
+Peer rows now carry rank (12 axes) + per_pair (scatter) + dial.curves +
+corruption blocks — every gauntlet chart surface renders peers. Board 304
+rows, all gates PASS.
