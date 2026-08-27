@@ -1659,3 +1659,15 @@ use (census, RD gates, steering-map validation) are exempt — judging is what
 holdouts are FOR. The spatial-supervision experiment itself stays a
 registered open hypothesis (cvvdp-scalar is a measured dead end; the mix/
 spatial form is the untested ask).
+
+**ANTI-WEDGE INVARIANT 8 — P2 EXECUTED (2026-08-27 ~03:40Z)**: the Nomad
+dashboard's "no jobs" was true — tonight's workers were launcher-docker. Now
+`zen-score-diffmap` runs as a Nomad service job on the five CPU boxes (5/5
+healthy first placement; Variables-based creds; force_pull; kill_timeout per
+the pilot's measured drain test), docker workers retired, scheduler
+memory-oversubscription enabled (else memory_max is silently ignored and the
+soft cap becomes a hard cap that invariant 6's cgroup budget then obeys).
+wsl's GPU worker stays sentinel-cycled docker pending the nvidia/Nomad-driver
+work (daylight). Invariant 8 remaining: P3 (all boxes + drain hooks wired
+into OS flips) + P4 (periodic plumbing jobs). Spec + runbook committed in the
+private fleet repo.
