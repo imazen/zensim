@@ -64,3 +64,22 @@ are invariant under both. Recorded as inherited, not re-run.
 
 L1 (HF-weighted retrains, 2 targets × 3 seeds) launched per registration —
 results follow.
+
+## JXL LOW-DISTANCE REACHABILITY — MEASURED YES (2026-08-28, user question "are d 0.1 to d 1 jxl reachable")
+
+Val zenjxl ladder (270 cells/rung) through the L0 hfpack; d = the public
+`quality_to_distance` mapping (q≥90 → d=(100−q)/10):
+
+| d | q | dial p50 | | d | q | dial p50 |
+|---|---|---|---|---|---|---|
+| 1.0 | 90 | 92.53 | | 0.4 | 96 | 94.55 |
+| 0.8 | 92 | 93.06 | | 0.2 | 98 | 95.16 |
+| 0.6 | 94 | 93.63 | | 0.0 | 100 | 95.39 |
+
+d0.1 ≈ target 95.3; the whole band sits below the dial top (max 96.8).
+Controllability: per-scene monotone 99.9% (1888/1890 steps); adjacent-rung
+separation median 0.54 dial points, 99.9% positive — every 0.2-distance step
+is distinguishable (loop tol ±0.5 ⇒ ~0.2d resolution; ±0.25 ⇒ ~0.1d). The
+dial p50 tracks the leg's own cvvdp-mix target p50 within ~0.3 at every rung.
+Under the incumbent pack this band read 81–86, unreachable — the L0 fix is
+what makes it addressable.
