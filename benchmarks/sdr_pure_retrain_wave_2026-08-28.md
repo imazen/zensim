@@ -59,3 +59,55 @@ question: family-clean training GAINS on the headline axes and the selection
 rule — the freeze proposal moves to `W10L9P_s4005_packed`** (user-gated).
 Sha: recorded in the board fulleval; bakes at
 `/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/`.
+
+## G-OUT: worst-outlier gates per chart — REGISTERED before computing (2026-08-28, user: "new gates for worst outliers per chart, extreme outliers are bad signs")
+
+Per (candidate × rank axis), from the fulleval `per_pair` blocks (the same
+data the scatter charts draw):
+- **chart-z** = residual from the OLS fit line (what the chart shows),
+  normalized by the MAD-σ of residuals (robust). The 4PL-mapped OR/Z-RMSE
+  remain the panel's own stats; chart-z is the chart-visual outlier measure,
+  method stated.
+- **rank-displacement** = |rank(pred) − rank(target)| / n per pair.
+Bars (first-pass, provisional): **EXTREME: zero pairs with |chart-z| > 6 on
+any axis (n≥500)**; SEVERE: frac(|chart-z| > 4) ≤ 0.2% per axis;
+rank-displacement: no pair > 0.6 on any axis with n≥1000. Plus the DIAL
+chart: worst backward step magnitude per ladder (report; bar = no backward
+step > 5 dial points). Worst-5 pairs per axis are LISTED with their targets
+so outliers are inspectable, not just counted. Candidates: SDR purity winner
++ incumbent; HDR incumbent-hfpack + t2 retrain.
+
+## G-OUT RESULTS (2026-08-28) — all four candidates FAIL the registered bars; the bars fail the base-rate test; the lens still ranks
+
+**Registered-form verdicts:** SDR purity winner FAIL 4 axes; SDR incumbent
+FAIL 5; HDR incumbent FAIL 9; HDR t2 FAIL 9. **But the PEER base-rates show
+the zero-extreme bar is unpassable by any known metric on these axes** —
+cvvdp: 341/327/353 extremes on hfnl/imazen26/nonphoto (max|z| 91.8!);
+butteraugli: 278/24/25. Comparative extreme counts (hfnl / imazen26 / nonphoto):
+
+| candidate | extremes | reading |
+|---|---|---|
+| SDR purity winner | 71 / **2** / **4** | the cleanest tails ever measured on these axes |
+| SDR incumbent | **61** / 8 / 8 | comparable; hfnl slightly cleaner, imazen26/nonphoto heavier |
+| butteraugli peer | 278 / 24 / 25 | 4-6× the models' tails |
+| cvvdp peer | 341 / 327 / 353 | catastrophic tails |
+| HDR incumbent (cross-domain) | 362 / 372 / 345 | SDR axes are out-of-route; bounded [−28, 100] |
+| HDR t2 (cross-domain) | 524 / 196 / 170 | **UNBOUNDED out-of-domain: emits −387 (kadid), −301 (live)** |
+
+**Named outlier classes (the product signal the gate exists for):**
+1. **HF-NL catastrophics** (every candidate + every peer): near-lossless
+   cells (target ≈ 0.91+) scored 28–55 — the HF weak zone's worst tail.
+2. **Corruption-cell high-scores**: negative-target cells (−45…−66) scored
+   58–100 by the SDR models — exactly the corruption-HEAD territory (the
+   dial's known blind spot; the head is the shipped mitigation).
+3. **Unbounded out-of-domain emission** (HDR t2 only): −387/−301 raw values
+   on SDR content vs the incumbent's bounded saturation — a production-safety
+   differentiator; a dial must fail bounded.
+
+**Proposed calibrated gate form (user decides):** per axis, (a) candidate
+extreme count ≤ the best peer's count (comparative — beats the field), AND
+(b) absolute ceiling max|z| ≤ 35 (excludes cvvdp-class blowups), AND
+(c) bounded output (predictions within the dial's declared range ±5) — the
+boundedness clause alone formalizes finding 3. Under (a)+(b)+(c): both SDR
+candidates PASS, HDR incumbent PASSES on-route (bounded; cross-domain axes
+annotated), HDR t2 FAILS (c).
