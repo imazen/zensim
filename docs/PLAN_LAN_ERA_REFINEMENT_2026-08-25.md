@@ -1459,3 +1459,10 @@ shape without a measured proxy check. Options, to be decided at wave start:
 (tbig_924 exists; 944 append2 backfill coverage for tbig NOT verified), or
 (b) train on zensimA-ladder shape and measure the proxy gap on the 39-image
 dial grid (where both scorings exist). Neither is started tonight.
+
+**§5 RATE-MATCHED SECANT READ DONE (jxl-encoder 7e719c1ccd33)**: mm-F3 rule on the
+committed cells — at equal achieved (|Δ|≤0.5) the secant's median bytes ratio
+is 0.994–1.0003 (n 8–12/27, selection effect stated): the +1.9% aggregate was
+target-hitting cost, NOT waste. The frozen ±1% total-bytes bar conflated the
+two. **ADOPTION PROPOSAL drafted (user-gated)**: JXL_ZENSIM_SECANT=1 default,
+tile-secant stays opt-in. Nothing flips without the user's yes.
