@@ -1861,7 +1861,7 @@ NOTHING is trusted from that box until a fresh blob shows scores.
 | jxl-encoder | ✓ `vardct/zensim_loop` | ✓ (mm + 23shot + S4 records) | in-tree, census-FAILED honestly (staircase stays) | this campaign |
 | zenwebp | ✓ `encoder::zensim_target` (bucket-anchor seed + secant) | **✓ CLOSED 2026-08-27** (k2 1.859/15hits, k3 0.967/17; zenwebp `642bd960`) | **✓ by census**: the calibrated bucket anchors ARE the one-shot Zq (fitted-head arm FAILED the family bar against them — k2 +8.1%, k3 −45%) | executed wave |
 | zenjpeg | zq dial shipped (#113 global-q floor); iterative-loop form UNVERIFIED | zq wave census ran | ✓ `zq_seed` shipped | zq wave md + git |
-| zenavif (+zenrav1e) | ✓ `encode_rgb8_zensim_loop` + `two_shot` (public API) | UNVERIFIED | ✓ `q0_head` | src/lib.rs |
+| zenavif (+zenrav1e) | ✓ `encode_rgb8_zensim_loop` + `two_shot` + the AC.4 CQ instrument harness | **✓ CLOSED 2026-08-27** — AC.4 control-baseline subset: k2 med 0.756 (23/27), k3 0.336 (zenavif `5b28f31`, merged `44d5fef`); candidate/h3 arms stay wave-12-gated | ✓ `q0_head` | executed |
 | zenav1-svt | ✗ | ✗ | ✗ | grep (repo present) |
 | zenav1-aom | ✗ | ✗ | ✗ | grep |
 | jpeg-gainmap | rides the zenjpeg SDR base; HDR-loop form UNDEFINED | ✗ | ✗ | — |
@@ -1881,7 +1881,11 @@ similarly (yuv_convert fast/libyuv_simd tiers + `unpremul_tiers` bench).
 Remaining PERF work is a per-KERNEL verification audit (enumerate
 `#[cfg(aarch64)]` fns lacking an x86 dispatch sibling + re-run parity/bench
 gates), NOT a broad port. transpose.rs (13 neon / 9 x86 refs) is the first
-audit target.
+audit target. **PARALLEL-LANE DISCOVERY (2026-08-27): another session is
+executing criterion 5 on zenavif directly — `b92880e` x86 AVX2 tier for
+unpremultiply8 ("the one hot NEON-only kernel") + `09494c6` zenbench 4.0×
+@1920px / 3.5× @512px + module-header doc — the zenavif half may be theirs
+to finish; coordinate via pushed commits, do not duplicate.**
 
 **Execution order chosen:** (1) zenwebp wave — EXECUTED same day (see table) (pattern proven 3×, data
 canonical, census infra in-tree — registered next); (2) zenavif census
@@ -1900,3 +1904,12 @@ inert in-tree). Criterion-4 zenwebp: loop ✓, census ✓, Zq ✓ (the
 census-validated bucket anchors). zenanalyze gained `print_features`
 (`a6802a33`). Remaining LOOPS gaps: zenjpeg loop-form verification, zenavif
 census, AV1 trio, gainmap definition.
+
+**INCIDENT (2026-08-27 ~17:1xZ, zenavif, repaired in ~4 min)**: my census
+push moved main sideways over a DIVERGED origin/main and orphaned the
+parallel session's grid+alpha lane (`1393bc8`+`5044ad6`); restored by a
+merge of both heads (`44d5fef`), nothing lost. Root causes, both mine:
+`--allow-backwards` without an ancestor check on a diverged remote, and a
+blind `.workongoing` overwrite at claim time. Banked as memory
+`feedback-jj-sideways-push-clobber`; the ancestor-check is now part of my
+push flow everywhere.
