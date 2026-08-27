@@ -53,7 +53,25 @@ PEERS = {
         "konjnd": ("konjnd_iwssim_heldout.tsv", None, None),
     }),
 }
-HUMAN_CANDS = ["MCOS", "DMOS", "MOS", "mos", "jnd", "human", "human_score", "dmos", "pjnd", "label"]
+
+# 2026-08-28 completion (user: "don't skip any"): csiq/live/aic4/sdr25 —
+# cvvdp scored CPU locally (the CPU rung is sanctioned for cvvdp); ssim2/
+# butter/iwssim scored on the wsl RTX 5070 through the baked exec-gpu-cuda13
+# container (the GPU-only rule); LIVE runs on the PNG-converted mirror.
+# Label semantics per corpus: csiq human_score = 1-DMOS (quality); live =
+# the canonical builder's quality orientation; aic4 = signed JND
+# (|SROCC| convention — srocc_signed may read negative by design); sdr25 =
+# q_jnd (the 50-pair instrument = the board axis population exactly).
+for peer in list(PEERS):
+    sign, corp = PEERS[peer]
+    stem = {"ssim2": "ssim2", "butteraugli": "butter", "cvvdp": "cvvdp", "iwssim": "iwssim"}[peer]
+    for c in ("csiq", "live", "aic4", "sdr25"):
+        for cand in (f"{c}_{stem}_gpu.tsv", f"{c}_{stem}.tsv"):
+            if os.path.exists(os.path.join(RM, cand)):
+                corp[c] = (cand, None, None)
+                break
+
+HUMAN_CANDS = ["MCOS", "DMOS", "MOS", "mos", "jnd", "q_jnd", "human", "human_score", "dmos", "pjnd", "label"]
 
 def load_pairs(path):
     with open(path) as f:
