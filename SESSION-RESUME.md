@@ -265,3 +265,18 @@ zenjpeg `seeded_for_image` (`37e44fda`), jxl `s4_eps` B3 default
 (decided). D2 freeze re-proposed post-purity. zensim `de1e340e`. jj lesson
 banked: verify pushes by MESSAGE, never bare sha
 ([[feedback_jj_sideways_push_clobber]] addendum).
+
+**⚡ 2026-08-28 later — HDR retrain wave + peers-everywhere:** D2 evolved:
+retrain wave ran (user hold call, premise later corrected — candidates were
+census-clean all along; hdr_v3mix overlap = BHdr the judge). L0 (HF-anchored
+re-pack) fixed the user's HF-addressability requirement (d1.0→d0.1 jxl band
+reachable, p50 93.9 vs old 81); 6 HF-weighted retrains all pass G-HF+G-EXT
+but flip sihdr; **E.4 and the GATE scorecard DISAGREE** (L0: floors/sel_comp;
+t2_s4003: g1 1.0/weighted_goal/dial reach) — recommendation withdrawn, both
+lenses recorded, D2 open. **Peers COMPLETE: ssim2/butter/cvvdp/iwssim × all
+12 board rank axes** (stored refmetrics + identity-gated lineage sidecar
+join + fresh scoring: cvvdp CPU local, GPU trio on wsl 5070 via the baked
+cuda13 container; LIVE via PNG mirror; /mnt/v NOT shared dev↔wsl —
+sharecheck-verified, data ships with jobs). Dial/corruption-grid peer curves
+scoring in flight from persisted pixels. Board 304 rows; 'sprint bests'
+preset; training-date column. Wave md: hdr944_retrain_wave_2026-08-28.md.
