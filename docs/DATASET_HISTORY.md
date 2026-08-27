@@ -624,3 +624,19 @@ D1. Records: `benchmarks/imazen26_dhash_audit_2026-08-27.md`, imazen-26
 sharing/duplicates from provenance first, verify with dHash second; never
 index `/mnt/v/imazen-26*`; a by-design content family crosses the split iff
 its id offsets flip parity (family-aware split is the structural fix).
+
+### §3.25 — the family-aware purity program EXECUTED (2026-08-28, user decisions)
+
+User calls (recorded in the audit md ★REGISTERED section): structural
+family-aware re-slice + full-board rescore (done — 280 rows grafted, 11
+ensembles + 2 wrong-regime rows annotated); measure hfnlproxy/instruments
+(done — SDR instrument clean at d≤2; HDR instrument: hdr_v3mix carries 7/9
+census scenes — judge/training overlap annotated, freeze gates unaffected);
+training policy = **purge + family-aware**: `benchmarks/
+synthv2_channelA_purge_2026-08-28.tsv` lists the synthetic-v2 files that
+leave the metric training lineage for all FUTURE trainings, and future
+picker/bigcodec/HDR train views bucket by `split_map_family.tsv` + hold the
+HDR instrument scenes out entirely. Existing bakes stand, era-tagged.
+D3 one-shot wirings executed (zenjpeg/jxl/svt). D4 decided: hdrgrid stays
+era-B. **Rules for every future corpus build:** consume the family split,
+apply the purge list, and keep instrument scenes out of training views.

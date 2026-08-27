@@ -244,6 +244,47 @@ def graft_rank_corpus(board: Path, verdict: Path, corpus: str, dry_run: bool = F
                               dry_run, f"graft rank.{corpus} ({v.get('name')})")
 
 
+def reslice_rank(board: Path, verdict: Path, corpora, dry_run: bool = False) -> bool:
+    """Replace `rank.<corpus>` blocks with a same-bake verdict scored on the
+    FAMILY-AWARE re-sliced eval tables (registered program 2026-08-28, user
+    decision: structural re-slice + full-board rescore; zensim
+    benchmarks/imazen26_dhash_audit_2026-08-27.md ★REGISTERED section).
+
+    A REPLACEMENT graft: sha-gated to the same bake, provenance per corpus in
+    `rank_graft_sources.<corpus>` carrying the reslice tag + the superseded
+    srocc, and the everything-else-byte-identical gate of the other surgical
+    modes (only rank.<named corpora> + rank_graft_sources may change)."""
+    bdoc = _load_board(board)
+    v_bytes = verdict.read_bytes()
+    v = json.loads(v_bytes)
+    if bdoc.get("bake_sha256") != v.get("bake_sha256"):
+        raise SystemExit(f"reslice-rank: bake_sha256 mismatch — {board.name} vs {verdict.name}; refusing")
+    doc = copy.deepcopy(bdoc)
+    srcs = dict(doc.get("rank_graft_sources") or {})
+    changed = []
+    for corpus in corpora:
+        blk = (v.get("rank") or {}).get(corpus)
+        if not isinstance(blk, dict):
+            print(f"reslice-rank: {verdict.name} has no rank.{corpus} — skipped")
+            continue
+        old = (bdoc.get("rank") or {}).get(corpus)
+        doc.setdefault("rank", {})[corpus] = blk
+        srcs[corpus] = {"path": str(verdict), "sha256": hashlib.sha256(v_bytes).hexdigest(),
+                        "name": v.get("name"), "reslice": "family-aware-2026-08-28",
+                        "superseded_srocc": (old or {}).get("srocc")}
+        changed.append(corpus)
+    if not changed:
+        return False
+    doc["rank_graft_sources"] = srcs
+    for k in set(bdoc.get("rank") or {}) | set(doc.get("rank") or {}):
+        if k in changed:
+            continue
+        if _jc((bdoc.get("rank") or {}).get(k)) != _jc((doc.get("rank") or {}).get(k)):
+            raise SystemExit(f"reslice-rank: rank.{k} changed — refusing to write")
+    return _write_board_gated(board, bdoc, doc, {"rank", "rank_graft_sources"},
+                              dry_run, f"reslice rank.{{{','.join(changed)}}}")
+
+
 def repair_rank_orientation(board: Path, verdict: Path, corpus: str,
                             dry_run: bool = False) -> bool:
     """Replace `rank.<corpus>` with a fresh same-bake verdict's block when the
@@ -541,6 +582,9 @@ def main(argv=None) -> int:
                     help="existing fulleval (same bake) whose measured M3/M3a fill this verdict's nulls")
     ap.add_argument("--graft-into", default=None, type=Path,
                     help="GRAFT mode: existing board fulleval to receive --verdict's corruption_head")
+    ap.add_argument("--reslice-rank", default=None, metavar="CORPORA",
+                    help="comma list: REPLACE rank.<corpus> blocks from --verdict "
+                         "(family-aware re-slice graft, sha-gated; use with --graft-into)")
     ap.add_argument("--graft-rank", default=None, metavar="CORPUS",
                     help="with --graft-into: graft rank.<CORPUS> from --verdict instead of "
                          "corruption_head (era-bridge hfnlproxy fill; sha-gated)")
@@ -605,13 +649,15 @@ def main(argv=None) -> int:
 
     if a.graft_into is not None:
         if a.name or a.members or a.members_file or a.strip_per_pair or a.carry_coherence_from:
-            ap.error("--graft-into takes only --verdict/--graft-rank/--repair-rank-orientation "
+            ap.error("--graft-into takes only --verdict/--graft-rank/--reslice-rank/--repair-rank-orientation "
                      "(and --dry-run)")
         if a.graft_rank and a.repair_rank_orientation:
             ap.error("--graft-rank and --repair-rank-orientation are mutually exclusive")
         if not a.graft_into.exists():
             raise SystemExit(f"graft: board file not found: {a.graft_into}")
-        if a.repair_rank_orientation:
+        if a.reslice_rank:
+            reslice_rank(a.graft_into, a.verdict, a.reslice_rank.split(","), a.dry_run)
+        elif a.repair_rank_orientation:
             repair_rank_orientation(a.graft_into, a.verdict, a.repair_rank_orientation, a.dry_run)
         elif a.graft_rank:
             graft_rank_corpus(a.graft_into, a.verdict, a.graft_rank, a.dry_run)

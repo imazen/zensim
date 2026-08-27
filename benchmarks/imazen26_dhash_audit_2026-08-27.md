@@ -292,3 +292,111 @@ measured stakes today: ≈0.
 --tier certain|upperbound --apply` (self-contained id sets with provenance
 comments; dry-run default; refuses double-apply; `.pre-d1.bak` kept). Dry-run
 reproduces the recorded row counts at both tiers exactly.
+
+## ★ REGISTERED (2026-08-28, user decisions): the FAMILY-AWARE PURITY PROGRAM
+
+User calls (AskUserQuestion, this session): treatment = **family-aware
+re-slice (structural)** + full-board rescore; measure **hfnlproxy exposure,
+picker/Zq-seed exposure, HDR family-level**; training policy = **purge +
+family-aware split** (existing bakes stand; policy binds future training).
+D3 = wire all three one-shot seeds (separate lane, user-approved). D2 freeze
+HELD until the HDR family-level check. D4 = stay era-B (decided).
+
+Frozen rules, registered before any build:
+- **Family key** = the derive_sharing_provenance.py keys (plots (index,seed)
+  across kind variants; patents (patent,page); screenshots (site-normalized,
+  page) minus dpr/viewport; all other classes = singleton families).
+- **Family bucket** = the canonical last-digit rule applied to the FAMILY'S
+  LOWEST id (deterministic, no seed; singletons reduce to the existing rule).
+  Owner: the imazen-26 repo (`manifests/split_map_family.tsv`).
+- **Eval slices (re-slice)**: test views = origins whose FAMILY bucket is
+  test, MINUS the channel-A synth-shared ids (68; excluded permanently —
+  every existing bake's training saw that content, and cross-era board
+  comparability requires one slice for all). In-place regeneration with
+  `.pre-reslice.bak` + manifest + registry entry; then EVERY board bake
+  rescored on the new slices (stored features, no re-extraction) and the
+  board regenerated.
+- **Training purge (future)**: the synth-pool files sharing generator runs
+  with imazen-26 (channel-A source list) leave the metric training lineage
+  for all future trainings; future picker/bigcodec train views bucket by
+  family. Existing bakes and their published numbers stand, era-tagged.
+
+**Amendment (registered before the slice build): per-slice purity rule.** The
+944-root slices (`ext_imazen26`/`ext_nonphoto`/`ext_hfnlproxy`) are TRUE test
+views → keep = family-bucket **test**. The 372-legacy `nonphoto` table is a
+mixed val+test population by construction → keep = family-bucket **≠ train**
+(purity vs training; its val-coupling to model selection is recorded as a
+caveat, second-order). Channel-A ids excluded everywhere. Resulting drops:
+imazen26 21.5%/21.8% (944/372 roots), nonphoto-944 27.7%, nonphoto-372 17.6%,
+hfnlproxy 19.3% (= measurement 1's exposure). Family manifest: imazen-26
+`manifests/split_map_family.tsv`.
+
+## ★ EXECUTED (2026-08-28): the re-slice + full-board rescore + D3 wirings
+
+**Slices rebuilt family-pure** (rules per the Amendment; `.pre-reslice.bak`
+kept; 944 `_MANIFEST` stamped): imazen26 −21.5/21.8% rows, nonphoto-944
+−27.7%, nonphoto-372 −17.6%, hfnlproxy −19.3%. **All 280 single-bake board
+rows rescored and replacement-grafted** (`promote_fulleval.py --reslice-rank`,
+sha-gated, `superseded_srocc` per axis; joblist + verdicts in
+`reslice_rescore/`). Excluded, annotated in the registry: the 11 ensemble
+rows (member-wise re-aggregation = registered follow-up) and 2 wrong-regime
+rows (`ebothg_m504`, `kbase_KADIS_full720`) that bake_verdict's f156-371
+guard refused — the guard doing exactly its job. Board regenerated, all
+gates PASS; HDR-944 candidates added to the CURATED default-visible set
+(user: "it is not in the gauntlet").
+
+Post-reslice leaders (imazen26 srocc, `was` = the board's OLD stored value):
+
+| bake | imazen26 (was) | nonphoto |
+|---|---|---|
+| shippedB | 0.8306 (was 0.8961) | 0.8640 |
+| ADD156 | 0.8348 (was 0.8941) | 0.8672 |
+| winner_dial | 0.8235 (was 0.8872) | 0.8584 |
+| W10L9_s4001 | 0.9309 (was 0.9295) | 0.9347 |
+| KFG75_s4101 | 0.9226 (was 0.9181) | 0.9288 |
+| nt223 | 0.8969 (was 0.8935) | 0.9027 |
+| coherent924_selected | 0.9106 (was 0.8655) | 0.9181 |
+| HDR944_L1T1_s4005 | 0.7979 (was 0.8024) | 0.7757 |
+
+**READ THE DELTAS CORRECTLY:** the family-filter effect alone is ≈0 (the
+ctrl-vs-clean measurement above). The board deltas ADDITIONALLY fold in the
+slice-file unification this pass performed — every >372-width bake now reads
+the canonical 944 test views (not the legacy 720-NN tables) and era bakes
+read the current 372 tables; e.g. shippedB's −0.065 and coherent924's +0.045
+are table-era changes, NOT contamination effects. Cross-bake comparison on
+these axes is now UNIFORM for the 280 resliced rows.
+
+**D3 wirings executed same day (all three user-approved):** zenjpeg
+`TargetOptions::seeded_for_image` + `predict_q0_from_image` (`37e44fda`);
+jxl `s4_eps` B3 elasticity prior as the ctrl-exp default (`7c4ddd65`); svt
+`TargetOptions::seeded` S1 anchors (`cb400901`). Each with tests; each wave
+md's PROPOSAL section now reads APPROVED+WIRED.
+
+## MEASUREMENTS 2+3 (2026-08-28, user-requested): instrument purity
+
+**SDR 27-cell instrument (corpus9) — CLEAN.** The instrument is a DIFFERENT
+corpus (diffmap-coherence-2026-07-18: city/dog/girl/sc_* + pexels-id photos),
+so the family channel cannot reach it by construction; dHash vs both training
+pools: **zero pairs at d≤2**; the only screen-tier hits (d9-10) are
+`sc_codec_wiki.png` vs unrelated flat screenshots/plots — the documented
+flat-content FP class (`sdrcensus_vs_{synth,picker}.tsv`). ⇒ the census
+evidence behind all three D3 wirings is instrument-clean. The Zq fits' OWN
+internal validate numbers (origin-split views) inherit the family channel —
+annotated, but the wirings' justification never rested on them.
+
+**HDR 27-cell instrument — judge/training overlap FOUND.** The 9 census
+scenes vs the 67 non-census hdrgrid scenes: provenance shows 0 same-subject
+pairs (22 same-venue-different-subject) and dHash shows **0 pairs at d≤10 —
+scene-level CLEAN vs the S1 fit pool** (`hdr_census_vs_pool.tsv`). BUT
+**hdr_v3mix (the hdr944-leg) contains rows for 7 of the 9 census scenes**
+(train: 1064,1242,1494,1520,1640; val: 1065,1495) ⇒ (a) BHdr — the
+svt/gainmap census JUDGE's bake — and the HDR-944 candidates all trained on
+distorted views of 7/9 judged scenes; (b) any evaluation of an
+hdr_v3mix-trained model ON the current HDR instrument is train-contaminated
+for those scenes. **What stays valid:** the D2 freeze gates (UPIQ pooled /
+narwaria / korshunov / sdr25 / gauntlet floors) are external or
+now-resliced corpora — the freeze evidence is PURITY-CLEAN; the svt/gainmap
+censuses stand as controller-convergence baselines (within-judge comparator
+structure) under this annotation. **Fix path (binds future work per the
+purge policy):** the next HDR instrument revision draws scenes held out of
+ALL HDR training views, frozen before the next HDR training wave.

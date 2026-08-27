@@ -185,6 +185,9 @@ CURATED_BOARD = [
     "v02_bvls_NO_shaping",
     # the 944 era-bridge (EM4 evaluated on the 944 root = the bar source, 0.8923796503)
     "sota944_EM4_s42_on944root",
+    # HDR-944 wave candidates (2026-08-27; D2 freeze pending — user asked for
+    # default visibility)
+    "HDR944_L1T1_s4005", "HDR944_L1T2_s4004",
     # campaign arm candidates + named leaders (benchmarks/sota944_campaign_2026-08-03.md)
     "sota944_winner_A_bvls_X_AM5",       # arm A candidate = campaign winner (§SELECTION)
     "sota944_B_blend_lam1e-3_a0.7_w",    # arm B candidate

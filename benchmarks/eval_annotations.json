@@ -672,6 +672,47 @@
    "reason": "Sharing sets now PROVENANCE-DERIVED over the whole corpus (imazen-26/scripts/derive_sharing_provenance.py; dHash = verifier). Channel A exact-generator-token: 68 ids. Channel B split-piercing name families (dpr/viewport ladders, plot kind-variants, +3/+4 patent families): 166 non-train ids with a train twin. Upper-bound eval exposure: imazen26 19/74 origins (25.1% rows), nonphoto-944 19/58 (32.2%), nonphoto-372 35/128 (26.6%). MEASURED at the upper bound (9 leader bakes): median delta +0.0043, max |delta| 0.0143, nonphoto deltas consistently POSITIVE \u2014 the shared classes are the hardest content; no memorization advantage. Axes citable under this annotation; exclusion remains user-gated and measured low-stakes.",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (PROVENANCE IS THE OWNER); /mnt/v/output/zensim/imazen26-dhash-2026-08-27/{prov_*.tsv,affected_ids_full_2026-08-27.tsv,cleanslice/cleanslice_summary_full.tsv}",
    "date": "2026-08-27"
+  },
+  {
+   "id": "imazen26-nonphoto-reslice-family-2026-08-28",
+   "kind": "annotated",
+   "fields": [
+    "rank.imazen26",
+    "rank.nonphoto",
+    "rank.hfnlproxy"
+   ],
+   "scope": {
+    "decision": "user (AskUserQuestion 2026-08-28): family-aware structural re-slice + full-board rescore"
+   },
+   "reason": "Eval slices REBUILT family-pure (family-aware split imazen-26 manifests/split_map_family.tsv @ c583263 + channel-A synth-shared ids excluded; per-slice rules in the audit md Amendment; 17.6-27.7% of rows dropped, .pre-reslice.bak kept). ALL 280 single-bake board rows re-scored on the new slices and REPLACEMENT-grafted (promote_fulleval.py --reslice-rank, sha-gated, superseded_srocc recorded per axis). Values published BEFORE 2026-08-28 on these axes are pre-reslice. NOT resliced (axes remain pre-reslice, do not rank against resliced rows): the 11 ensemble rows (member-wise re-aggregation = registered follow-up) and 2 wrong-regime-class rows (ebothg_m504, kbase_KADIS_full720 \u2014 bake_verdict's f156-371 guard refused; native roots outside this slice family). Note: >372-width bakes previously read the legacy 720 NN tables now uniformly read the family-pure canonical 944 test views (the FULL_EVAL 924-era convention).",
+   "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (REGISTERED + Amendment); /mnt/v/output/zensim/imazen26-dhash-2026-08-27/reslice_rescore/",
+   "date": "2026-08-28"
+  },
+  {
+   "id": "hdr-instrument-v3mix-scene-overlap",
+   "kind": "annotated",
+   "fields": [
+    "hdr census (27-cell) evaluations of hdr_v3mix-trained models",
+    "svt/gainmap census judge (BHdr route)"
+   ],
+   "scope": {
+    "scenes_in_train": "1064,1242,1494,1520,1640",
+    "scenes_in_val": "1065,1495"
+   },
+   "reason": "hdr_v3mix/hdr944-leg contains 7 of the 9 frozen HDR census scenes; models trained on it (BHdr, HDR944_L1T*) overlap the instrument. D2 freeze gates are external corpora (clean). Fix: next instrument revision uses scenes held out of all HDR training views.",
+   "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (MEASUREMENTS 2+3)",
+   "date": "2026-08-28"
+  },
+  {
+   "id": "zq-fit-internal-val-family-channel",
+   "kind": "annotated",
+   "fields": [
+    "zq_seed fit-internal validate metrics (zenjpeg G-Z2 559k-cell, jxl, webp bucket fits)"
+   ],
+   "scope": {},
+   "reason": "Fit-internal validate views use the origin split; family twins cross it (channel B). The wiring decisions rested on the 27-cell census (different corpus, verified clean at d<=2), not on these numbers.",
+   "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (MEASUREMENTS 2+3)",
+   "date": "2026-08-28"
   }
  ]
 }
