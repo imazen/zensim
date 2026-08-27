@@ -2022,3 +2022,24 @@ deterministic by design). NOTE for the image roll: today's CPU image
 (9dffa5ca) does NOT carry `hdr-svt` — the next roll must add it (features:
 `sweep,png,jpeg,webp,avif,jxl,cpu-metrics,hdr-gainmap,hdr-svt`) so fleet
 boxes can encode svt cells again.
+
+**fix11 downstream CLOSED for the CPU-able queues (2026-08-27 ~21:1xZ)**:
+deltas declared into the ORIGINAL five runs by exact-shape mirroring
+(score queues +11 chunked jobs each; diffmap +230), then the Nomad CPU
+fleet found NOTHING — the worker's own log named it: the delta jobs carry
+`requires:["hdr"]` (invariant-5) and the baked `zenfleet-exec` shim
+misroutes the `capabilities` probe into `jobexec`, so requires-bearing jobs
+are capability-gate-excluded on every fleet box (the originals, requires:
+None, were never gated — this class was INVISIBLE until the first
+requires-bearing declare). Shim fixed at the owner (zenmetrics `6d4f9963`;
+rides the next image roll together with hdr-svt). Deltas drained LOCALLY
+with a fixed shim: diffmap 226 done + sf-cpu 11 + sf2-cpu 11, 0 failed;
+manifest-gap verbs read **0 remaining** on all three. The report's stubborn
+"gap 4" = 2 byte-identical encode pairs × 2 metrics — duplicate DERIVED job
+identities from content dedup (230 manifest jobs → 226 distinct ids;
+verified by identity census). Corpus finals re-emitted: `diffmap_pairs`
+**193,800 rows** (sha `921ca11c…`), manifest regenerated + mirrored;
+consumers join maps BY SHA so the 2 shadowed duplicate cells resolve
+correctly by construction. Remaining fix11 tail: the GPU deltas (11+11
+ssim2/iwssim/butteraugli chunk-jobs) are image-gated (need the shim-fixed
+GPU image) — they ride the GPU image roll at i134's rotation point.
