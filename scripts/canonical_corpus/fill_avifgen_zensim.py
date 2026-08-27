@@ -42,6 +42,17 @@ for g in range(f.num_row_groups):
     print(f"rg {g+1}/{f.num_row_groups} done ({len(shas)} rows)", flush=True)
 
 bake_sha = hashlib.sha256(open(BAKE, "rb").read()).hexdigest()
+# Dedupe to per-sha: identical bytes => identical features => identical
+# score. Assert equality (never assume) — a mismatch would mean the features
+# were NOT a pure function of the bytes and must fail loud.
+per_sha = {}
+for k, v in zip(shas, scores):
+    if k in per_sha:
+        assert abs(per_sha[k] - v) < 1e-9, f"sha {k}: {per_sha[k]} != {v}"
+    else:
+        per_sha[k] = v
+print(f"dedupe: {len(shas)} cell rows -> {len(per_sha)} distinct shas (equality-asserted)")
+shas, scores = list(per_sha.keys()), list(per_sha.values())
 tbl = pa.table({"encode_sha": shas, "zensim_c944": scores})
 pq.write_table(tbl, OUT, compression="zstd")
 mf = {
