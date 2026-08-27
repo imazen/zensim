@@ -1743,3 +1743,16 @@ vehicle when the hdrcorpus lane resumes. Not touched (owner's lane).
 guard), final counts appended here, Nomad job stays up as warm capacity
 (every other known queue is at gap=0 — criterion 1's "busy when non-empty"
 holds vacuously). dHash+eye audit half remains the registered daylight pass.
+
+**FINAL COUNTS (2026-08-27 ~10:4xZ, gap=0 — wave CLOSED end-to-end):**
+`declared=193,574 distinct_done=193,574 failed-only=0 gap=0` — every declared
+cell done, ZERO failure floor, zero residue (raw ledger 411,057 rows, rescore
+tax 2.12×; every failure in the run's history was environmental and was
+retried to done — none survived). Final join table
+`diffmap_pairs_2026-08-27.parquet` = **193,574 rows** (sha256
+`969e83fd2574…b7afca230`), local `/mnt/v/output/hdrgrid-2026-08-06/` +
+mirrored to `s3://zentrain/jobs/hdrgrid-diffmap-20260807/` alongside the
+regenerated `_MANIFEST_diffmap.json` (deterministic generator:
+zenmetrics `scripts/jobsys/diffmap_manifest.py`, 851eef6d — counts by
+metric/codec, executor provenance, incident + holdout pointers). Nomad
+worker job left up as warm capacity per the line above.
