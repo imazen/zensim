@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the HDR-944 L1-T2 training leg: hdrgrid MULTI-CODEC x 944 feats x
+"""Build an HDR-944 L1 training leg (T2 era-B zensim, or T1 cvvdp-mix via --target): hdrgrid MULTI-CODEC x 944 feats x
 era-B zensim target (wave registration + scheduling amendment:
 benchmarks/hdr944_bake_wave_2026-08-27.md — T2's inputs are complete+final).
 
@@ -26,6 +26,10 @@ CENSUS_TSV = os.path.expanduser("~/work/zen/zensim/benchmarks/hdr_instrument_ref
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="/mnt/v/zen/zensim-training/hdrgrid-mc944-t2-2026-08-27")
+    ap.add_argument("--target", choices=["era-b-zensim", "cvvdp-mix"], default="era-b-zensim",
+                    help="T2 = era-B zensim/100; T1 = 0.5*clip01(ssim2/100)+0.5*clip01((JOD-6)/4) "
+                         "from the post-drain harvest (appendix-Q form)")
+    ap.add_argument("--harvest", default="/mnt/v/output/hdrgrid-2026-08-06/harvest-2026-08-27/scores.parquet")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -36,16 +40,32 @@ def main():
             continue
         census_scenes.add(line.split("\t")[0])
 
-    era = pq.read_table(ERA)
     bare = lambda s: s.rsplit("/", 1)[-1]
     tgt = {}
-    for sha, cod, z, e in zip(*[era[c].to_pylist() for c in ["encode_sha", "codec", "zensim_score", "judge_era"]]):
-        if not e.startswith("B-"):
-            continue
-        k = bare(sha)
-        if k in tgt:
-            raise SystemExit(f"duplicate era-B encode_sha {k}")
-        tgt[k] = z
+    if a.target == "era-b-zensim":
+        era = pq.read_table(ERA)
+        for sha, cod, z, e in zip(*[era[c].to_pylist() for c in ["encode_sha", "codec", "zensim_score", "judge_era"]]):
+            if not e.startswith("B-"):
+                continue
+            k = bare(sha)
+            if k in tgt:
+                raise SystemExit(f"duplicate era-B encode_sha {k}")
+            tgt[k] = z
+    else:  # cvvdp-mix (T1): both components non-null required, appendix-Q form
+        clip01 = lambda x: 0.0 if x < 0 else (1.0 if x > 1 else x)
+        hvt = pq.read_table(a.harvest, columns=["encode_sha", "ssim2_gpu", "cvvdp_cpu_imazen_v0_1_0"])
+        seen_comp = {}
+        for sha, s2, jod in zip(*[hvt[c].to_pylist() for c in hvt.column_names]):
+            if s2 is None or jod is None:
+                continue
+            k = bare(sha)
+            v = 100.0 * (0.5 * clip01(s2 / 100.0) + 0.5 * clip01((jod - 6.0) / 4.0))
+            if k in tgt:
+                # sha fan: byte-identical encodes score identically — assert, keep first
+                if abs(tgt[k] - v) > 1e-9:
+                    raise SystemExit(f"sha {k} rows DIFFER ({tgt[k]} vs {v}) — not a byte-fan")
+                continue
+            tgt[k] = v
 
     parts, counts = [], {}
     for cdir in ["zenjxl", "svt", "gm"]:
