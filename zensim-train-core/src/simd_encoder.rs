@@ -11,7 +11,9 @@
 //! needed via mixed-precision training.
 
 use archmage::{incant, magetypes};
-use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16 as GenericF32x16};
+use magetypes::simd::generic::f32x8 as GenericF32x8;
+#[cfg(target_arch = "x86_64")] // only the AVX-512 (`X64V4Token`) kernels are 16-wide
+use magetypes::simd::generic::f32x16 as GenericF32x16;
 
 /// f32 encoder forward: same semantics as the f64 version.
 #[inline]

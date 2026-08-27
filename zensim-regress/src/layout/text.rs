@@ -323,7 +323,7 @@ impl TextSpec {
         }
         // Wrap the inner buffer with bg-colored padding on all four sides.
         let mut out = vec![0u8; (outer_w as usize) * (outer_h as usize) * 4];
-        for px in out.chunks_exact_mut(4) {
+        for px in out.as_chunks_mut::<4>().0.iter_mut() {
             px.copy_from_slice(&self.bg);
         }
         for row in 0..inner_h {

@@ -150,7 +150,7 @@ pub(crate) fn build_scaled_run_sdf(
             let fy = yt.frac[y];
             let row = &mut out
                 [y * row_stride + x_off..y * row_stride + x_off + scaled_char_w as usize * 4];
-            for (x, px) in row.chunks_exact_mut(4).enumerate() {
+            for (x, px) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let (x0, x1, fx) = (xt.i0[x] as usize, xt.i1[x] as usize, xt.frac[x]);
                 let top = {
                     let a = at.data[r0 + x0] as f32;
@@ -236,7 +236,7 @@ mod tests {
         // through this module; prove the full path produces output.
         let (buf, w, h) = crate::font::render_text_height("Rag7", [255; 4], [0, 0, 0, 255], 40);
         assert!(w > 0 && h == 40 && buf.len() == (w * h * 4) as usize);
-        let bright = buf.chunks_exact(4).filter(|p| p[0] > 200).count();
+        let bright = buf.as_chunks::<4>().0.iter().filter(|p| p[0] > 200).count();
         assert!(bright > 50, "expected bright glyph pixels, got {bright}");
     }
 
@@ -246,7 +246,7 @@ mod tests {
         // must produce clean non-empty output there.
         let (buf, w, h) = crate::font::render_text_height("R", [255; 4], [0, 0, 0, 255], 96);
         assert!(w > 0 && h == 96);
-        let bright = buf.chunks_exact(4).filter(|p| p[0] > 200).count();
+        let bright = buf.as_chunks::<4>().0.iter().filter(|p| p[0] > 200).count();
         assert!(
             bright > 300,
             "expected substantial ink at 96px, got {bright}"

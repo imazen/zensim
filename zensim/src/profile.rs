@@ -1749,8 +1749,13 @@ mod descriptor_hdr_routing_tests {
         for v in d.iter_mut().step_by(9) {
             *v *= 0.8;
         }
-        let rgb =
-            |px: &[f32]| -> Vec<f32> { px.chunks_exact(4).flat_map(|c| c[..3].to_vec()).collect() };
+        let rgb = |px: &[f32]| -> Vec<f32> {
+            px.as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|c| c[..3].to_vec())
+                .collect()
+        };
         let (rr, dd) = (rgb(&r), rgb(&d));
         (
             NitsSource { rgba: r, w, h },

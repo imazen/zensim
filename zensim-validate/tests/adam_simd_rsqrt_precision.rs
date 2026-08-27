@@ -14,10 +14,15 @@
 #[path = "../src/adam_simd.rs"]
 mod adam_simd;
 
-use adam_simd::{AdamUpdateArgs, adam_update_scalar_ref};
+// The tests below exercise the x86_64 AVX-512 kernels only; gate the shared
+// helpers the same way so the file is warning-free on other hosts.
 #[cfg(target_arch = "x86_64")]
-use adam_simd::{RsqrtPrecision, adam_update_rsqrt_v4, adam_update_rsqrt_v4_tiered};
+use adam_simd::{
+    AdamUpdateArgs, RsqrtPrecision, adam_update_rsqrt_v4, adam_update_rsqrt_v4_tiered,
+    adam_update_scalar_ref,
+};
 
+#[cfg(target_arch = "x86_64")]
 fn synth_state(n: usize, seed: u64) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
     let mut state = seed;
     let mut nxt = || {
@@ -44,6 +49,7 @@ fn synth_state(n: usize, seed: u64) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) 
     (w, g, m, v)
 }
 
+#[cfg(target_arch = "x86_64")]
 fn make_args<'a>(
     w: &'a mut [f64],
     g: &'a mut [f64],

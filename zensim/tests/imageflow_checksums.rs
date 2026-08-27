@@ -113,7 +113,9 @@ fn load_image_rgba(path: &Path) -> Option<(Vec<[u8; 4]>, u32, u32)> {
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     let pixels: Vec<[u8; 4]> = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| [c[0], c[1], c[2], c[3]])
         .collect();
     Some((pixels, w, h))

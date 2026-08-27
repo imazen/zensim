@@ -138,7 +138,11 @@ fn pad(strategy: Pad, src: &[u8], n: usize) -> (Vec<u8>, usize) {
 }
 
 fn to_px(flat: &[u8]) -> Vec<[u8; 3]> {
-    flat.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
+    flat.as_chunks::<3>()
+        .0
+        .iter()
+        .map(|c| [c[0], c[1], c[2]])
+        .collect()
 }
 
 fn score(z: &Zensim, r: &[u8], d: &[u8], n: usize, strategy: Pad) -> Result<f64, String> {
@@ -220,7 +224,7 @@ fn main() {
 
 fn vec_solid(n: usize, c: [u8; 3]) -> Vec<u8> {
     let mut v = vec![0u8; n * n * 3];
-    for px in v.chunks_exact_mut(3) {
+    for px in v.as_chunks_mut::<3>().0.iter_mut() {
         px.copy_from_slice(&c);
     }
     v

@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn checkerboard_all_opaque() {
         let buf = checkerboard(16, 16, 4);
-        for px in buf.chunks_exact(4) {
+        for px in buf.as_chunks::<4>().0.iter() {
             assert_eq!(px[3], 255);
         }
     }
@@ -270,7 +270,7 @@ mod tests {
         let buf = color_blocks(64, 64);
         // Collect unique RGB tuples (ignoring alpha).
         let mut unique = std::collections::HashSet::new();
-        for px in buf.chunks_exact(4) {
+        for px in buf.as_chunks::<4>().0.iter() {
             unique.insert((px[0], px[1], px[2]));
         }
         // Should have at least 16 distinct colors.
@@ -297,8 +297,8 @@ mod tests {
     #[test]
     fn solid_uniform() {
         let buf = solid(8, 8, 128, 64, 32, 200);
-        for px in buf.chunks_exact(4) {
-            assert_eq!(px, [128, 64, 32, 200]);
+        for px in buf.as_chunks::<4>().0.iter() {
+            assert_eq!(*px, [128, 64, 32, 200]);
         }
     }
 

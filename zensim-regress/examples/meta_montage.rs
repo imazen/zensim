@@ -149,7 +149,7 @@ fn pixel_stats(a: &[u8], b: &[u8]) -> PixelStats {
     let mut sum_d: u64 = 0;
     let mut max_d: u32 = 0;
     let n = a.len() / 4;
-    for (pa, pb) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+    for (pa, pb) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0.iter()) {
         let d = (0..4)
             .map(|i| (pa[i] as i32 - pb[i] as i32).unsigned_abs())
             .max()

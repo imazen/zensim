@@ -133,8 +133,8 @@ fn monotone_cbc_projection_signs_exact() {
         .get("zentrain.per_sample_alpha_head")
         .expect("monotone_cbc bake has per_sample_alpha_head metadata");
     let mut floats = Vec::with_capacity(2 * n_hidden + 8);
-    for chunk in entry.value.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    for chunk in entry.value.as_chunks::<4>().0.iter() {
+        floats.push(f32::from_le_bytes(*chunk));
     }
     let w_alpha = &floats[..n_hidden];
     let b_alpha = floats[n_hidden];
@@ -174,8 +174,8 @@ fn monotone_cbc_off_does_not_project() {
         .expect("bake has per_sample_alpha_head metadata");
     let n_hidden = model.n_outputs();
     let mut floats = Vec::with_capacity(2 * n_hidden + 8);
-    for chunk in entry.value.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    for chunk in entry.value.as_chunks::<4>().0.iter() {
+        floats.push(f32::from_le_bytes(*chunk));
     }
     let b_alpha = floats[n_hidden];
     // b_alpha=30 is the monotone_cbc force-value; with monotone_cbc=false

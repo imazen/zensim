@@ -174,7 +174,9 @@ pub fn generate_structural_diff(
     // pixels contribute zero regardless of their RGB values.
     let to_gray = |img: &Bitmap| -> Vec<f32> {
         img.as_raw()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|px| {
                 let a = px[3] as f32 / 255.0;
                 (0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32) * a
@@ -1477,8 +1479,8 @@ mod tests {
         let img = Bitmap::from_fn(8, 8, |x, y| [(x * 32) as u8, (y * 32) as u8, 128, 255]);
         let diff = generate_diff_image(&img, &img, 10);
         // All pixels should be dark gray (no difference)
-        for pixel in diff.as_raw().chunks_exact(4) {
-            assert_eq!(pixel, [24, 24, 24, 255]);
+        for pixel in diff.as_raw().as_chunks::<4>().0.iter() {
+            assert_eq!(*pixel, [24, 24, 24, 255]);
         }
     }
 
@@ -1505,9 +1507,9 @@ mod tests {
         let a = Bitmap::from_pixel(4, 4, [255, 0, 0, 0]);
         let b = Bitmap::from_pixel(4, 4, [0, 255, 0, 0]);
         let diff = generate_diff_image(&a, &b, 10);
-        for pixel in diff.as_raw().chunks_exact(4) {
+        for pixel in diff.as_raw().as_chunks::<4>().0.iter() {
             assert_eq!(
-                pixel,
+                *pixel,
                 [24, 24, 24, 255],
                 "transparent pixels should diff to zero"
             );
@@ -1703,8 +1705,8 @@ mod tests {
         let img = Bitmap::from_fn(32, 32, |x, y| [(x * 8) as u8, (y * 8) as u8, 128, 255]);
         let diff = generate_structural_diff(&img, &img, 3, 10);
         // All pixels should be dark gray (no structural difference)
-        for px in diff.as_raw().chunks_exact(4) {
-            assert_eq!(px, [24, 24, 24, 255]);
+        for px in diff.as_raw().as_chunks::<4>().0.iter() {
+            assert_eq!(*px, [24, 24, 24, 255]);
         }
     }
 
@@ -1721,7 +1723,9 @@ mod tests {
         // Should have non-dark pixels around y=32 (orange = added structure)
         let non_dark: usize = diff
             .as_raw()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|px| px[0] > 24 || px[1] > 24 || px[2] > 24)
             .count();
         assert!(
@@ -1742,7 +1746,9 @@ mod tests {
         // Should have cyan pixels around y=32 (missing structure)
         let cyan_pixels: usize = diff
             .as_raw()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|px| px[1] > 50 && px[2] > 50 && px[0] < 10)
             .count();
         assert!(

@@ -60,8 +60,8 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleHeadPayload> 
         return None;
     }
     let mut floats = Vec::with_capacity(2 * n_hidden + 8);
-    for chunk in entry.value.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    for chunk in entry.value.as_chunks::<4>().0.iter() {
+        floats.push(f32::from_le_bytes(*chunk));
     }
     let w_alpha = floats[..n_hidden].to_vec();
     let b_alpha = floats[n_hidden];

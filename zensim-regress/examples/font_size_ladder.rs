@@ -30,7 +30,7 @@ fn main() {
     for &char_h in &sizes {
         let (rgba, w, h) =
             zensim_regress::font::render_text_height(&text, [255; 4], [0, 0, 0, 255], char_h);
-        let gray: Vec<u8> = rgba.chunks_exact(4).map(|p| p[0]).collect();
+        let gray: Vec<u8> = rgba.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
         let path = out_dir.join(format!("engine_{char_h}px.pgm"));
         let mut f = fs::File::create(&path).expect("create pgm");
         writeln!(f, "P5 {w} {h} 255").expect("header");

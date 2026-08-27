@@ -1662,7 +1662,9 @@ mod tests {
     }
 
     fn px(rgba: &[u8]) -> Vec<[u8; 4]> {
-        rgba.chunks_exact(4)
+        rgba.as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| [c[0], c[1], c[2], c[3]])
             .collect()
     }

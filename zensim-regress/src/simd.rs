@@ -467,7 +467,9 @@ fn compare_outputs(
     let ref_h = outputs[0].3 as usize;
     let ref_pixels: Vec<[u8; 4]> = outputs[0]
         .1
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| [c[0], c[1], c[2], c[3]])
         .collect();
     let ref_img = RgbaSlice::new(&ref_pixels, ref_w, ref_h);
@@ -477,7 +479,9 @@ fn compare_outputs(
 
     for (label, px, w, h) in &outputs[1..] {
         let actual_pixels: Vec<[u8; 4]> = px
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| [c[0], c[1], c[2], c[3]])
             .collect();
         let actual_img = RgbaSlice::new(&actual_pixels, *w as usize, *h as usize);

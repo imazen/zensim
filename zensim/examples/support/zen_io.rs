@@ -68,7 +68,7 @@ fn decode_png_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
         }
         ChannelType::U16 => {
             for y in 0..h as u32 {
-                for pair in slice.row(y).chunks_exact(2).take(samples_per_row) {
+                for pair in slice.row(y).as_chunks::<2>().0.iter().take(samples_per_row) {
                     let v = u16::from_ne_bytes([pair[0], pair[1]]) as u32;
                     samples.push(((v * 255 + 32767) / 65535) as u8);
                 }
@@ -79,12 +79,12 @@ fn decode_png_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
     let mut rgb = Vec::with_capacity(w * h);
     match (channels, has_alpha) {
         (4, true) => {
-            for px in samples.chunks_exact(4) {
+            for px in samples.as_chunks::<4>().0.iter() {
                 rgb.push([px[0], px[1], px[2]]);
             }
         }
         (3, false) => {
-            for px in samples.chunks_exact(3) {
+            for px in samples.as_chunks::<3>().0.iter() {
                 rgb.push([px[0], px[1], px[2]]);
             }
         }
@@ -94,7 +94,7 @@ fn decode_png_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
             }
         }
         (2, true) => {
-            for px in samples.chunks_exact(2) {
+            for px in samples.as_chunks::<2>().0.iter() {
                 rgb.push([px[0], px[0], px[0]]);
             }
         }
@@ -111,7 +111,12 @@ fn decode_jpeg_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
     let (w, h) = result.dimensions();
     let (w, h) = (w as usize, h as usize);
     let px = result.pixels_u8().expect("u8 jpeg output");
-    let rgb: Vec<[u8; 3]> = px.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+    let rgb: Vec<[u8; 3]> = px
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|c| [c[0], c[1], c[2]])
+        .collect();
     (rgb, w, h)
 }
 
@@ -137,7 +142,11 @@ pub fn resize_rgb8(
         .format(PixelDescriptor::RGB8_SRGB)
         .build();
     let out = Resizer::new(&config).resize(&flat);
-    out.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
+    out.as_chunks::<3>()
+        .0
+        .iter()
+        .map(|c| [c[0], c[1], c[2]])
+        .collect()
 }
 
 /// Encode packed RGB8 to JPEG at `quality` (0-100) with 4:2:0 chroma
@@ -179,7 +188,7 @@ pub fn decode_rgb16(path: &std::path::Path) -> (Vec<[u16; 3]>, usize, usize) {
         }
         ChannelType::U16 => {
             for y in 0..h as u32 {
-                for pair in slice.row(y).chunks_exact(2).take(samples_per_row) {
+                for pair in slice.row(y).as_chunks::<2>().0.iter().take(samples_per_row) {
                     samples.push(u16::from_ne_bytes([pair[0], pair[1]]));
                 }
             }
@@ -189,12 +198,12 @@ pub fn decode_rgb16(path: &std::path::Path) -> (Vec<[u16; 3]>, usize, usize) {
     let mut rgb = Vec::with_capacity(w * h);
     match channels {
         4 => {
-            for px in samples.chunks_exact(4) {
+            for px in samples.as_chunks::<4>().0.iter() {
                 rgb.push([px[0], px[1], px[2]]);
             }
         }
         3 => {
-            for px in samples.chunks_exact(3) {
+            for px in samples.as_chunks::<3>().0.iter() {
                 rgb.push([px[0], px[1], px[2]]);
             }
         }
@@ -204,7 +213,7 @@ pub fn decode_rgb16(path: &std::path::Path) -> (Vec<[u16; 3]>, usize, usize) {
             }
         }
         2 => {
-            for px in samples.chunks_exact(2) {
+            for px in samples.as_chunks::<2>().0.iter() {
                 rgb.push([px[0], px[0], px[0]]);
             }
         }

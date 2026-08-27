@@ -35,7 +35,11 @@ fn load_rgb(path: &str) -> Option<(Vec<u8>, u32, u32)> {
 }
 
 fn rgb_to_pixels(buf: &[u8]) -> Vec<[u8; 3]> {
-    buf.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
+    buf.as_chunks::<3>()
+        .0
+        .iter()
+        .map(|c| [c[0], c[1], c[2]])
+        .collect()
 }
 
 /// Inject heavy block-quantization-style noise into rows [y0, y1) only.

@@ -527,7 +527,7 @@ fn pixel_buffer_to_rgba8(pixels: &PixelBuffer, w: u32, h: u32) -> Result<Vec<u8>
             (4, true) => out.extend_from_slice(&row[..(w as usize) * 4]),
             // Rgb
             (3, false) => {
-                for px in row.chunks_exact(3).take(w as usize) {
+                for px in row.as_chunks::<3>().0.iter().take(w as usize) {
                     out.extend_from_slice(&[px[0], px[1], px[2], 255]);
                 }
             }
@@ -539,7 +539,7 @@ fn pixel_buffer_to_rgba8(pixels: &PixelBuffer, w: u32, h: u32) -> Result<Vec<u8>
             }
             // GrayAlpha
             (2, true) => {
-                for px in row.chunks_exact(2).take(w as usize) {
+                for px in row.as_chunks::<2>().0.iter().take(w as usize) {
                     out.extend_from_slice(&[px[0], px[0], px[0], px[1]]);
                 }
             }
@@ -621,17 +621,17 @@ fn pixel_buffer_to_gray8(pixels: &PixelBuffer) -> Result<Vec<u8>, PngError> {
         match (channels, has_alpha) {
             (1, false) => out.extend_from_slice(&row[..w]),
             (2, true) => {
-                for px in row.chunks_exact(2).take(w) {
+                for px in row.as_chunks::<2>().0.iter().take(w) {
                     out.push(px[0]);
                 }
             }
             (3, false) => {
-                for px in row.chunks_exact(3).take(w) {
+                for px in row.as_chunks::<3>().0.iter().take(w) {
                     out.push(px[1]); // green as luminance proxy
                 }
             }
             (4, true) => {
-                for px in row.chunks_exact(4).take(w) {
+                for px in row.as_chunks::<4>().0.iter().take(w) {
                     out.push(px[1]);
                 }
             }
@@ -997,7 +997,7 @@ pub(crate) fn fill_rect(img: &mut Bitmap, x: u32, y: u32, w: u32, h: u32, color:
     let solid_lin = srgb_u8_to_linear_premul(&color);
     // Pre-fill an fg scratch with the solid color repeated.
     let mut fg = vec![0.0f32; row_w * 4];
-    for px in fg.chunks_exact_mut(4) {
+    for px in fg.as_chunks_mut::<4>().0.iter_mut() {
         px.copy_from_slice(&solid_lin);
     }
     let mut bg = vec![0.0f32; row_w * 4];
@@ -1006,7 +1006,7 @@ pub(crate) fn fill_rect(img: &mut Bitmap, x: u32, y: u32, w: u32, h: u32, color:
     for yy in y..y_end {
         let off = (yy as usize) * stride + (x as usize) * 4;
         // Convert canvas row → linear premul into bg.
-        for (i, dst_px) in bg.chunks_exact_mut(4).enumerate() {
+        for (i, dst_px) in bg.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let p_off = off + i * 4;
             dst_px.copy_from_slice(&srgb_u8_to_linear_premul(&img.pixels[p_off..p_off + 4]));
         }
@@ -1014,7 +1014,7 @@ pub(crate) fn fill_rect(img: &mut Bitmap, x: u32, y: u32, w: u32, h: u32, color:
         blended.copy_from_slice(&fg);
         zenblend::blend_row(&mut blended, &bg, zenblend::BlendMode::SrcOver);
         // Convert blended → sRGB-u8 back into canvas.
-        for (i, src_px) in blended.chunks_exact(4).enumerate() {
+        for (i, src_px) in blended.as_chunks::<4>().0.iter().enumerate() {
             let p_off = off + i * 4;
             let pix = [src_px[0], src_px[1], src_px[2], src_px[3]];
             img.pixels[p_off..p_off + 4].copy_from_slice(&linear_premul_to_srgb_u8(pix));

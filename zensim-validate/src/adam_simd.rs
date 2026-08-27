@@ -144,25 +144,27 @@ fn adam_update_inner_v4(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'
     let eps_v = f64x8::splat(token, args.eps);
     let zero_v = f64x8::zero(token);
 
-    // chunks_exact_mut gives `&mut [f64; 8]` so LLVM can prove all
+    // `as_chunks_mut` gives `&mut [f64; 8]` so LLVM can prove all
     // intra-chunk indexes are bounded, eliminating per-iteration bounds
     // checks. The `partition_slice_mut` helper in magetypes does the
     // same thing via a single `unsafe` slice cast at the boundary; we
     // use the safe stdlib variant.
     let n = args.w.len();
     let tail_len = n % 8;
-    let g_chunks = args.g.chunks_exact_mut(8);
-    let m_chunks = args.m.chunks_exact_mut(8);
-    let v_chunks = args.v.chunks_exact_mut(8);
-    let w_chunks = args.w.chunks_exact_mut(8);
+    let (g_chunks, _) = args.g.as_chunks_mut::<8>();
+    let (m_chunks, _) = args.m.as_chunks_mut::<8>();
+    let (v_chunks, _) = args.v.as_chunks_mut::<8>();
+    let (w_chunks, _) = args.w.as_chunks_mut::<8>();
 
-    for (((wc, gc), mc), vc) in w_chunks.zip(g_chunks).zip(m_chunks).zip(v_chunks) {
-        // `wc/gc/mc/vc: &mut [f64; 8]` — fixed-size arrays let LLVM
-        // emit straight-line vector loads/stores with no bounds checks.
-        let wc_fixed: &mut [f64; 8] = wc.try_into().unwrap();
-        let gc_fixed: &mut [f64; 8] = gc.try_into().unwrap();
-        let mc_fixed: &mut [f64; 8] = mc.try_into().unwrap();
-        let vc_fixed: &mut [f64; 8] = vc.try_into().unwrap();
+    for (((wc_fixed, gc_fixed), mc_fixed), vc_fixed) in w_chunks
+        .iter_mut()
+        .zip(g_chunks)
+        .zip(m_chunks)
+        .zip(v_chunks)
+    {
+        // `*_fixed: &mut [f64; 8]` — `as_chunks_mut` hands out fixed-size
+        // arrays, so LLVM emits straight-line vector loads/stores with no
+        // bounds checks.
 
         let g = f64x8::load(token, gc_fixed);
         let m = f64x8::load(token, mc_fixed);
@@ -404,17 +406,17 @@ fn adam_update_inner_v4_rsqrt_body<P: RsqrtPrecisionTier>(
 
     let n = args.w.len();
     let tail_len = n % 8;
-    let g_chunks = args.g.chunks_exact_mut(8);
-    let m_chunks = args.m.chunks_exact_mut(8);
-    let v_chunks = args.v.chunks_exact_mut(8);
-    let w_chunks = args.w.chunks_exact_mut(8);
+    let (g_chunks, _) = args.g.as_chunks_mut::<8>();
+    let (m_chunks, _) = args.m.as_chunks_mut::<8>();
+    let (v_chunks, _) = args.v.as_chunks_mut::<8>();
+    let (w_chunks, _) = args.w.as_chunks_mut::<8>();
 
-    for (((wc, gc), mc), vc) in w_chunks.zip(g_chunks).zip(m_chunks).zip(v_chunks) {
-        let wc_fixed: &mut [f64; 8] = wc.try_into().unwrap();
-        let gc_fixed: &mut [f64; 8] = gc.try_into().unwrap();
-        let mc_fixed: &mut [f64; 8] = mc.try_into().unwrap();
-        let vc_fixed: &mut [f64; 8] = vc.try_into().unwrap();
-
+    for (((wc_fixed, gc_fixed), mc_fixed), vc_fixed) in w_chunks
+        .iter_mut()
+        .zip(g_chunks)
+        .zip(m_chunks)
+        .zip(v_chunks)
+    {
         let g = f64x8::load(token, gc_fixed);
         let m = f64x8::load(token, mc_fixed);
         let v = f64x8::load(token, vc_fixed);
@@ -536,17 +538,17 @@ fn adam_update_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamUpdateA
 
     let n = args.w.len();
     let tail_len = n % 4;
-    let g_chunks = args.g.chunks_exact_mut(4);
-    let m_chunks = args.m.chunks_exact_mut(4);
-    let v_chunks = args.v.chunks_exact_mut(4);
-    let w_chunks = args.w.chunks_exact_mut(4);
+    let (g_chunks, _) = args.g.as_chunks_mut::<4>();
+    let (m_chunks, _) = args.m.as_chunks_mut::<4>();
+    let (v_chunks, _) = args.v.as_chunks_mut::<4>();
+    let (w_chunks, _) = args.w.as_chunks_mut::<4>();
 
-    for (((wc, gc), mc), vc) in w_chunks.zip(g_chunks).zip(m_chunks).zip(v_chunks) {
-        let wc_fixed: &mut [f64; 4] = wc.try_into().unwrap();
-        let gc_fixed: &mut [f64; 4] = gc.try_into().unwrap();
-        let mc_fixed: &mut [f64; 4] = mc.try_into().unwrap();
-        let vc_fixed: &mut [f64; 4] = vc.try_into().unwrap();
-
+    for (((wc_fixed, gc_fixed), mc_fixed), vc_fixed) in w_chunks
+        .iter_mut()
+        .zip(g_chunks)
+        .zip(m_chunks)
+        .zip(v_chunks)
+    {
         let g = f64x4::load(token, gc_fixed);
         let m = f64x4::load(token, mc_fixed);
         let v = f64x4::load(token, vc_fixed);
@@ -609,17 +611,17 @@ fn adam_update_inner(token: Token, args: &mut AdamUpdateArgs<'_>) {
 
     let n = args.w.len();
     let tail_len = n % 4;
-    let g_chunks = args.g.chunks_exact_mut(4);
-    let m_chunks = args.m.chunks_exact_mut(4);
-    let v_chunks = args.v.chunks_exact_mut(4);
-    let w_chunks = args.w.chunks_exact_mut(4);
+    let (g_chunks, _) = args.g.as_chunks_mut::<4>();
+    let (m_chunks, _) = args.m.as_chunks_mut::<4>();
+    let (v_chunks, _) = args.v.as_chunks_mut::<4>();
+    let (w_chunks, _) = args.w.as_chunks_mut::<4>();
 
-    for (((wc, gc), mc), vc) in w_chunks.zip(g_chunks).zip(m_chunks).zip(v_chunks) {
-        let wc_fixed: &mut [f64; 4] = wc.try_into().unwrap();
-        let gc_fixed: &mut [f64; 4] = gc.try_into().unwrap();
-        let mc_fixed: &mut [f64; 4] = mc.try_into().unwrap();
-        let vc_fixed: &mut [f64; 4] = vc.try_into().unwrap();
-
+    for (((wc_fixed, gc_fixed), mc_fixed), vc_fixed) in w_chunks
+        .iter_mut()
+        .zip(g_chunks)
+        .zip(m_chunks)
+        .zip(v_chunks)
+    {
         let g = f64x4::load(token, gc_fixed);
         let m = f64x4::load(token, mc_fixed);
         let v = f64x4::load(token, vc_fixed);

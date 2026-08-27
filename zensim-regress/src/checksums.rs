@@ -1806,7 +1806,9 @@ fn rgba_bytes_to_pixels(bytes: &[u8]) -> Vec<[u8; 4]> {
         bytes.len()
     );
     bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| [c[0], c[1], c[2], c[3]])
         .collect()
 }
@@ -1828,12 +1830,12 @@ fn image_source_to_packed_rgba(src: &dyn ImageSource) -> (Vec<u8>, u32, u32) {
                 rgba.extend_from_slice(&row[..w * 4]);
             }
             PixelFormat::Srgb8Bgra => {
-                for pixel in row[..w * 4].chunks_exact(4) {
+                for pixel in row[..w * 4].as_chunks::<4>().0.iter() {
                     rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
                 }
             }
             PixelFormat::Srgb8Rgb => {
-                for pixel in row[..w * 3].chunks_exact(3) {
+                for pixel in row[..w * 3].as_chunks::<3>().0.iter() {
                     rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
                 }
             }

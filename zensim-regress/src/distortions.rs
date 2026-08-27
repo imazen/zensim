@@ -29,7 +29,9 @@ pub fn truncate_lsb(rgba: &[u8]) -> Vec<u8> {
         rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| [px[0] & 0xFE, px[1] & 0xFE, px[2] & 0xFE, px[3]])
         .collect()
 }
@@ -43,7 +45,9 @@ pub fn expand_256(rgba: &[u8]) -> Vec<u8> {
         rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| {
             [
                 ((px[0] as u16 * 256) / 257) as u8,
@@ -71,7 +75,9 @@ pub fn round_half_up(rgba: &[u8]) -> Vec<u8> {
             v
         }
     };
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| [adjust(px[0]), adjust(px[1]), adjust(px[2]), px[3]])
         .collect()
 }
@@ -85,7 +91,9 @@ pub fn premul_as_straight(rgba: &[u8]) -> Vec<u8> {
         rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| {
             let a = px[3] as u16;
             [
@@ -107,7 +115,9 @@ pub fn straight_as_premul(rgba: &[u8]) -> Vec<u8> {
         rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| {
             if px[3] == 0 {
                 [px[0], px[1], px[2], px[3]]
@@ -132,7 +142,9 @@ pub fn channel_swap_rb(rgba: &[u8]) -> Vec<u8> {
         rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| [px[2], px[1], px[0], px[3]])
         .collect()
 }
@@ -145,7 +157,9 @@ pub fn invert(rgba: &[u8]) -> Vec<u8> {
         rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| [255 - px[0], 255 - px[1], 255 - px[2], px[3]])
         .collect()
 }
@@ -160,7 +174,9 @@ pub fn uniform_shift(rgba: &[u8], delta: i16) -> Vec<u8> {
         "RGBA byte length must be a multiple of 4"
     );
     let apply = |v: u8| -> u8 { (v as i16 + delta).clamp(0, 255) as u8 };
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| [apply(px[0]), apply(px[1]), apply(px[2]), px[3]])
         .collect()
 }
@@ -183,7 +199,12 @@ mod tests {
     fn truncate_lsb_max_delta_1() {
         let src = test_image();
         let dst = truncate_lsb(&src);
-        for (s, d) in src.chunks_exact(4).zip(dst.chunks_exact(4)) {
+        for (s, d) in src
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(dst.as_chunks::<4>().0.iter())
+        {
             for c in 0..3 {
                 assert!(s[c].abs_diff(d[c]) <= 1);
             }

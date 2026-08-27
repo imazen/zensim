@@ -215,7 +215,7 @@ pub fn render_text_height_lh(
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
 
     // Fill background
-    for pixel in buf.chunks_exact_mut(4) {
+    for pixel in buf.as_chunks_mut::<4>().0.iter_mut() {
         pixel.copy_from_slice(&bg);
     }
 
@@ -672,7 +672,7 @@ pub fn render_lines_fitted_lh(
     let mut run: Option<(u32, Arc<Bitmap>)> = None;
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
-    for pixel in buf.chunks_exact_mut(4) {
+    for pixel in buf.as_chunks_mut::<4>().0.iter_mut() {
         pixel.copy_from_slice(&bg);
     }
 
@@ -879,7 +879,10 @@ mod tests {
         let (delta, w2, _) = render_text_height("Δ", [255; 4], [0; 4], 40);
         assert_eq!(w1, w2, "notdef occupies exactly one cell");
         assert_ne!(rocket, delta, "notdef must not masquerade as Δ");
-        assert!(rocket.chunks_exact(4).any(|p| p[0] == 255), "box drawn");
+        assert!(
+            rocket.as_chunks::<4>().0.iter().any(|p| p[0] == 255),
+            "box drawn"
+        );
     }
 
     #[test]

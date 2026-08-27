@@ -90,7 +90,7 @@ fn le_u16(b: &[u8], off: usize) -> Result<u16, String> {
 
 fn le_u32(b: &[u8], off: usize) -> Result<u32, String> {
     b.get(off..off + 4)
-        .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+        .map(|s| u32::from_le_bytes(s.try_into().expect("chunk of 4")))
         .ok_or_else(|| format!("zip: truncated at offset {off}"))
 }
 
@@ -407,24 +407,30 @@ fn parse_npy(bytes: &[u8]) -> Result<NpyArray, String> {
         "<f8" => {
             need(8)?;
             NpyData::F64(
-                data.chunks_exact(8)
-                    .map(|c| f64::from_le_bytes(c.try_into().expect("chunk of 8")))
+                data.as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| f64::from_le_bytes(*c))
                     .collect(),
             )
         }
         "<f4" => {
             need(4)?;
             NpyData::F32(
-                data.chunks_exact(4)
-                    .map(|c| f32::from_le_bytes(c.try_into().expect("chunk of 4")))
+                data.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|c| f32::from_le_bytes(*c))
                     .collect(),
             )
         }
         "<i8" => {
             need(8)?;
             NpyData::I64(
-                data.chunks_exact(8)
-                    .map(|c| i64::from_le_bytes(c.try_into().expect("chunk of 8")))
+                data.as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| i64::from_le_bytes(*c))
                     .collect(),
             )
         }

@@ -85,12 +85,12 @@ fn load_png_rgb8(path: &std::path::Path) -> (Vec<[u8; 3]>, usize, usize) {
         let row = slice.row(y);
         match (channels, has_alpha) {
             (4, true) => {
-                for px in row.chunks_exact(4).take(w) {
+                for px in row.as_chunks::<4>().0.iter().take(w) {
                     rgb.push([px[0], px[1], px[2]]);
                 }
             }
             (3, false) => {
-                for px in row.chunks_exact(3).take(w) {
+                for px in row.as_chunks::<3>().0.iter().take(w) {
                     rgb.push([px[0], px[1], px[2]]);
                 }
             }

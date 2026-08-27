@@ -279,7 +279,9 @@ fn premultiplied_matches_straight() {
     // 16x16 drops the score to ~95.8 (measured), so == 100.0 is a byte-exact
     // assertion. This is strictly stronger than the old score-threshold form.
     let reference: Vec<u8> = premul
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| {
             let a = px[3];
             if a == 0 {

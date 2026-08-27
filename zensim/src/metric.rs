@@ -3842,8 +3842,8 @@ fn parse_per_sample_alpha_meta(payload: &[u8], n_hidden: usize) -> Option<PerSam
         return None;
     }
     let mut floats: Vec<f32> = Vec::with_capacity(2 * n_hidden + 8);
-    for chunk in payload.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    for chunk in payload.as_chunks::<4>().0 {
+        floats.push(f32::from_le_bytes(*chunk));
     }
     let w_alpha: Vec<f32> = floats[..n_hidden].to_vec();
     let b_alpha = floats[n_hidden];
@@ -3966,8 +3966,8 @@ fn parse_hybrid_head_meta(payload: &[u8], n_hidden: usize) -> Option<HybridHeadM
         return None;
     }
     let mut floats: Vec<f32> = Vec::with_capacity(n_hidden + 8);
-    for chunk in payload.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    for chunk in payload.as_chunks::<4>().0 {
+        floats.push(f32::from_le_bytes(*chunk));
     }
     let rank_w: Vec<f32> = floats[..n_hidden].to_vec();
     let rank_b = floats[n_hidden];
