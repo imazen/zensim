@@ -1460,6 +1460,30 @@ shape without a measured proxy check. Options, to be decided at wave start:
 (b) train on zensimA-ladder shape and measure the proxy gap on the 39-image
 dial grid (where both scorings exist). Neither is started tonight.
 
+**S4+C2 DESIGN RULING (2026-08-27, logged overnight per the no-questions
+window; presentable, not user-gated — it gates my own fit, not a ship):
+option (b) FIRST, with a frozen proxy-gap gate; (a) only if the gate fails.**
+- Why: (b) needs zero fleet work (targets derive from stored bigcodec
+  parquets today), and its one risk — zensimA ladder shape as a proxy for the
+  runtime judge — is exactly measurable on the 39-image dial grid before any
+  fit ships. (a) is blocked behind an UNVERIFIED tbig append2/944 backfill;
+  scoring the C bake over zero-filled append blocks is the documented
+  `--regime` mis-scoring class (Known Bugs), so (a) without a verified
+  backfill is not a fallback, it is the bug.
+- **Frozen proxy-gap gate (before any regressor ships):** on the 39-image
+  probe, C-score the jxl ladder cells via the loop instrument's own scoring
+  path (decoded pixels — no parquet regime hazard), then compare against the
+  stored zensimA ladders: (i) median |q_seed(zensimA) − q_seed(C)| ≤ 2
+  q-steps at each t ∈ {70, 80, 88}, reported photo/screen split (screen is
+  where divergence lives); (ii) elasticity sign-agreement ≥ 90% of cells;
+  (iii) corpus9 refs stay held out of both fit and gate.
+- If the gate FAILS: (a) becomes a declared fleet wave over the jxl-ladder
+  SUBSET only (bounded, via `zenfleet-ctl declare-scorefiles`), never a full
+  tbig backfill on spec.
+- Provenance rule either way: any shipped table/coefficients states
+  "trained on zensimA-proxy targets; proxy gap <measured> on dial-39".
+
+
 **§5 RATE-MATCHED SECANT READ DONE (jxl-encoder 7e719c1ccd33)**: mm-F3 rule on the
 committed cells — at equal achieved (|Δ|≤0.5) the secant's median bytes ratio
 is 0.994–1.0003 (n 8–12/27, selection effect stated): the +1.9% aggregate was
