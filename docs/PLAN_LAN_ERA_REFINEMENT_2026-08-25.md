@@ -1859,7 +1859,7 @@ NOTHING is trusted from that box until a fresh blob shows scores.
 | encoder | target loop | 27-cell census | Zq one-shot | verified how |
 |---|---|---|---|---|
 | jxl-encoder | ✓ `vardct/zensim_loop` | ✓ (mm + 23shot + S4 records) | in-tree, census-FAILED honestly (staircase stays) | this campaign |
-| zenwebp | ✓ `encoder::zensim_target` (bucket-anchor seed + secant) | ✗ on the REAL instrument — `967db71` is a 27-cell census over SYNTHETIC in-test images (corrected 2026-08-27 after reading the test) | ✗ | src + test read |
+| zenwebp | ✓ `encoder::zensim_target` (bucket-anchor seed + secant) | **✓ CLOSED 2026-08-27** (k2 1.859/15hits, k3 0.967/17; zenwebp `642bd960`) | **✓ by census**: the calibrated bucket anchors ARE the one-shot Zq (fitted-head arm FAILED the family bar against them — k2 +8.1%, k3 −45%) | executed wave |
 | zenjpeg | zq dial shipped (#113 global-q floor); iterative-loop form UNVERIFIED | zq wave census ran | ✓ `zq_seed` shipped | zq wave md + git |
 | zenavif (+zenrav1e) | ✓ `encode_rgb8_zensim_loop` + `two_shot` (public API) | UNVERIFIED | ✓ `q0_head` | src/lib.rs |
 | zenav1-svt | ✗ | ✗ | ✗ | grep (repo present) |
@@ -1883,8 +1883,20 @@ Remaining PERF work is a per-KERNEL verification audit (enumerate
 gates), NOT a broad port. transpose.rs (13 neon / 9 x86 refs) is the first
 audit target.
 
-**Execution order chosen:** (1) zenwebp Zq wave (pattern proven 3×, data
+**Execution order chosen:** (1) zenwebp wave — EXECUTED same day (see table) (pattern proven 3×, data
 canonical, census infra in-tree — registered next); (2) zenavif census
 verification; (3) PERF per-kernel audit; (4) AV1-family loops (the big
 build, after the sf re-drain frees the boxes); gainmap-loop definition rides
 the B4 HDR chain.
+
+**zenwebp instrument wave EXECUTED (2026-08-27, zenwebp `3d03b861`+`642bd960`)**:
+registration + amendment (loop rides PUBLISHED zensim 0.2 — two-judge design;
+model-family upgrade = separate user-gated wave) → phase A control census on
+the real corpus9 instrument (k2 med 1.859 / 15 hits, k3 0.967 / 17; nonphoto
+the weak class again; pass-1 anchor-accuracy row 3.261 kept from a caught
+harness misconfig — band OFF never iterates) → phase B fitted-head arm
+**FAIL as registered** (helps nonphoto, hurts photo; buckets stay; hook stays
+inert in-tree). Criterion-4 zenwebp: loop ✓, census ✓, Zq ✓ (the
+census-validated bucket anchors). zenanalyze gained `print_features`
+(`a6802a33`). Remaining LOOPS gaps: zenjpeg loop-form verification, zenavif
+census, AV1 trio, gainmap definition.
