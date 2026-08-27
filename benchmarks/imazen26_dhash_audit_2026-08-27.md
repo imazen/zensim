@@ -287,3 +287,8 @@ Recorded in `imazen-26/benchmarks/split_crossid_dupes_2026-08-27.md`; a
 family-aware split (bucket by family key, not raw id, for classes 6xxx/7xxx/
 8100) is the structural fix if content-level separation is ever wanted —
 measured stakes today: ≈0.
+
+**D1 is one command when called:** `scripts/canonical_corpus/apply_d1_exclusion.py
+--tier certain|upperbound --apply` (self-contained id sets with provenance
+comments; dry-run default; refuses double-apply; `.pre-d1.bak` kept). Dry-run
+reproduces the recorded row counts at both tiers exactly.
