@@ -2043,3 +2043,14 @@ consumers join maps BY SHA so the 2 shadowed duplicate cells resolve
 correctly by construction. Remaining fix11 tail: the GPU deltas (11+11
 ssim2/iwssim/butteraugli chunk-jobs) are image-gated (need the shim-fixed
 GPU image) — they ride the GPU image roll at i134's rotation point.
+
+**Tower mirroring pass (2026-08-27 ~22:0xZ, criterion 2)**: diffmap corpus
+final (`diffmap_pairs_2026-08-27.parquet`, sha `921ca11c…` VERIFIED
+tower-side) + `_MANIFEST_diffmap.json` → `/mnt/user/coefficient/output/
+hdrgrid-2026-08-06/`; avifgen zensim-C944 sidecar (sha `ea868928…`
+verified) + its manifest → `.../avifgen-2026-08-06/` (also now on the
+store under `jobs/avifgen-enc-20260806/`); the avifgen browser view +
+the dHash audit TSVs/montages mirrored via NFS (view sha spot-verified).
+Foreign-owned pre-existing dirs on the NFS side blocked direct cp — the
+tower-docker pull-from-store pattern (per the tower rules) is the mirror
+route for those.
