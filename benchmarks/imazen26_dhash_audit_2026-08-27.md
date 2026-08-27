@@ -50,3 +50,46 @@ imazen26/nonphoto eval-slice refs?) (c) spot-confirm the picker d=0 tier
 (24 sampled montages) so finding 1's "by construction" reading is
 eye-ratified. Actions (blocklists, eval-slice notes, registry entries)
 follow the eye pass only.
+
+## EYE PASS RESULTS (2026-08-27, the user) + the follow-up intersection
+
+**User verdicts:** (i) the montages show the SAME image across tone-map/
+resolution differences — finding 1's "by construction" reading is
+EYE-RATIFIED for the picker tier; (ii) the two synth montages showed a
+white right half → "different" — **CORRECT, twice over**: the estate side
+(`163ab2b6_wikipedia__coffee…`) is a genuinely near-white page capture and
+its d=0 against a sunset gradient is the documented FLAT-CONTENT dHash
+false-positive class; (iii) the montages lacked ids — fixed:
+`make_dhash_montages.py` (committed) regenerates the full set WITH
+pool-path/estate-id labels + near-blank annotations →
+`montages_v2/` (77 montages + manifest.tsv).
+
+**Root cause of the v1 blank halves:** the audit staged its SDR estate refs
+under the SESSION SCRATCHPAD in `/tmp` (banned volatile path) and the wipe
+hit between staging and montage render — the 2026-07-15 lesson re-learned;
+v2 indexes the DURABLE estate (`/mnt/v/imazen-26` + the hdr-grid roots).
+
+**The queued intersection (finding 2's follow-up), now computed:** of the
+d0 synth↔estate matches, **63 are REAL** (generator-token-identical name+seed
+— the same generation runs fed both pools) and **9 are flat-content false
+positives** (excluded per the eye verdicts). Mapping the real set through
+picker origins into the eval slices:
+
+| eval slice | affected origins | affected rows |
+|---|---|---|
+| imazen26 (real-codec ssim2) | 7 of 74 (`o_7007,7017,7039,7047,7049,7059,7077`) | 91,707 / 962,328 = **9.5%** |
+| nonphoto | 13 of 128 (`o_7001,7003,7005,7011,7013,7015,7021,7023,7025,7045,7053,7095,7101`) | 1,058 / 10,000 = **10.6%** |
+
+**Meaning:** ~10% of both north-star eval axes sit on refs whose exact
+generator output is in the METRIC's training pool (synthetic-v2 sources) —
+a real potential-inflation channel the id audit could not see (ids were
+disjoint; content crossed via shared generation runs).
+
+**Proposed actions (USER-GATED per the 2026-05-14 policy):**
+(a) exclude the 20 origins from the imazen26/nonphoto eval slices (an
+eval-side blocklist — no training change) and recompute clean-slice deltas
+for the era flagships to measure realized inflation; (b) registry-annotate
+both axes meanwhile (done, pending-action entry); (c) the cross-parity
+`gen-line__00032` pair remains open — it is IN the labeled v2 set for a
+specific look (the FP class shows gen-line-polygons false-positive at d0,
+so a generator-collision read gained plausibility).
