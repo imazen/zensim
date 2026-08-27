@@ -3759,6 +3759,20 @@ fn main() {
             println!("\n--- bake_verdict (auto-eval) ---");
             let mut cmd = std::process::Command::new(vb);
             cmd.arg("--bake").arg(&out_path);
+            // Regime must FOLLOW the bake's input width — a 944-class bake
+            // verdicted at the default 372 root silently mis-scores (the
+            // ebothg_m504 wrong-root class; zensim CLAUDE.md Known Bugs).
+            // Found live 2026-08-27: the HDR-944 L1 bakes' auto-verdicts ran
+            // regime-372. Known widths map to their regime; anything else
+            // keeps the default and says so.
+            match args.max_features {
+                720 => { cmd.arg("--regime").arg("720"); }
+                944 => { cmd.arg("--regime").arg("944"); }
+                372 => {}
+                w => eprintln!(
+                    "bake_verdict auto-eval: width {w} has no registered --regime; using the 372 default (verify the root)"
+                ),
+            }
             // Always write verdict file alongside the bake
             let verdict_path = out_path.with_extension("verdict.md");
             cmd.arg("--output").arg(&verdict_path);

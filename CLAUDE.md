@@ -51,6 +51,10 @@ implements its A1-A5/A9 candidates.
   exists for this; the invocation looks safe precisely on the bakes that are
   immune. **Check `bake_block_profile` before choosing `--regime` for any
   <944-input bake**, and treat a large 372-vs-944 gap as this bug, not a finding.
+  The INVERSE instance is fixed 2026-08-27: the trainer's auto-eval hook used to
+  invoke bake_verdict with NO `--regime` regardless of width (the HDR-944 L1
+  bakes' auto-verdicts ran the 372 root); it now maps `--max-features` 720/944
+  to the matching regime and warns on unregistered widths.
   **A CONCRETE INSTANCE IS ON THE BOARD**: `ebothg_m504` (`model.n_inputs` 504,
   `block_profile.uses_f156_371` true) publishes CID22 **0.4045** with EVERY axis
   collapsed (aic3 0.11, nonphoto 0.14, imazen26 0.15, kadid 0.18, aic4 0.19,
