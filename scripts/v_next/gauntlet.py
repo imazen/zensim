@@ -188,6 +188,9 @@ CURATED_BOARD = [
     # HDR-944 wave candidates (2026-08-27; D2 freeze pending — user asked for
     # default visibility)
     "HDR944_L1T1_s4005", "HDR944_L1T2_s4004",
+    # classical reference metrics as PEER rows (user request 2026-08-28;
+    # built from stored refmetrics per-pair tables — build_peer_fullevals.py)
+    "peer_ssim2", "peer_butteraugli", "peer_cvvdp", "peer_iwssim",
     # campaign arm candidates + named leaders (benchmarks/sota944_campaign_2026-08-03.md)
     "sota944_winner_A_bvls_X_AM5",       # arm A candidate = campaign winner (§SELECTION)
     "sota944_B_blend_lam1e-3_a0.7_w",    # arm B candidate
@@ -235,6 +238,8 @@ CURATED = set(CURATED_BOARD)
 
 def family_of(name: str) -> str:
     """Control-bar family grouping (group toggles). Input = the board name."""
+    if name.startswith("peer_"):
+        return "peers"
     n = name[len("sota944_"):] if name.startswith("sota944_") else name
     if n.startswith(("ens_", "W5_", "W6_")):
         return "ensembles"
