@@ -1588,3 +1588,27 @@ still serves; the GPU matters for the ssim2/butteraugli SCORING queues,
 which are genuinely GPU-only per criterion 1). Rollout: reclass image
 exec-zensim944hdr-526c84b8 → first-cell on dev (capped cpuset 0-19/24g) →
 i265/r5900xt/r3500.
+
+## INCIDENT + FIX (2026-08-27 02:05-02:18Z): the "array" volume dir was cache-backed — shfs lesson
+
+My first array-direct design mounted `/mnt/user/coefficient/zenstore-data2` —
+a USER-SHARE path. With `shareUseCache=yes`, shfs lands NEW writes on the
+CACHE first: the store's "array" volumes were cache blocks all along, the
+fleet filled the cache to 100% (844K free — a real hazard for every other
+appdata service incl. Plex's DB), and a relocation `mv` through the same
+shfs path died writing tiny `.vif` files, leaving split volume triplets.
+**Recovery (store down ~10 min, workers retried by design, Plex 200
+throughout)**: partial dest files removed (71, sources intact), the complete
+cache-resident files relocated to a DIRECT DISK path
+(`/mnt/disk1/coefficient/zenstore-data2` — bypasses shfs and the cache
+entirely; 11T free), orphaned idx/vif colocated with their dat, container
+recreated with /data2 → the direct path. Probes green; cache back to 21G
+free and now FLAT from the store's side (all new volumes land on disk1).
+**LESSON (permanent): on Unraid, `/mnt/user/...` is NEVER an array path for
+new writes when the share caches — direct-to-array means `/mnt/diskN/...`
+(or `/mnt/user0/...`). And never bulk-`mv` through shfs onto a nearly-full
+cache: partial-file splits are the failure mode.**
+**Post-drain step (queued, needs a store-stopped window)**: migrate the
+remaining /data (cache) volumes to disk1 to give the household cache real
+headroom — volumes are open while weed runs, so this waits for the
+DRAIN-COMPLETE wake, not a live store.
