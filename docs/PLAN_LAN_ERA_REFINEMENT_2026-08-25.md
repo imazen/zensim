@@ -1804,3 +1804,37 @@ The BROWSER-lane scoping above is STALE in two ways, corrected here:
   its pool follows via flat-picker; hdrgrid scoring queues are ALL gap=0
   (sf/sf2 cpu+gpu+huge+small verified 2026-08-27) so its pool's data is
   complete. The hdrfeat944 re-declare stays its owner's.
+
+## HDRGRID SCORE-DATA CORRECTION + RE-DRAIN (2026-08-27 ~12:3xZ) — the gap=0 claim was WRONG
+
+**Correction of this doc's own earlier claims** ("hdrgrid scoring queues are
+ALL gap=0 so its pool's data is complete", and the B4 premise that only a
+salvage read remained): the queues were drained, but **7,449 of the "done"
+cells carry ERROR rows instead of scores** — three diagnosed classes:
+(1) `hdr decode: unsupported HDR input extension: .bin` — full-URI blob
+fetches fell back to a `.bin` temp suffix on executor images predating the
+08-06 `ext_for` entries (the extension IS the decode dispatch);
+(2) `hdr-gainmap build feature` missing (sf2-cpu era image);
+(3) `cuda … compiled in but not operational` + GPU placement fails — cells
+"scored" on a broken-GPU box and correctly refused CPU fallback, then were
+marked done anyway. Same class as the jxl-lossy gpuscore incident recorded
+in homefleet (stale image, clean-looking job, all-error rows).
+
+**Fixes, all at owners (zenmetrics `ca3cbf15` + `451f4dea`, tests 15/15):**
+`audit-blobs --scan-errors` (blob-content audit → transient flips + error
+histogram); report gains `live_done`/`gap_live` (latest-wins queue truth) —
+the old ever-done `gap` structurally CANNOT re-open after a flip and its
+auto-pause had frozen all 7 runs paused; `snapshot_rows` now queue-true
+(flip's failed row surfaces, stale done row drops — was riding the sidecar
+fold window). Census: sf-gpu 1,824 / sf-cpu 2,280 / sf2-cpu 1,505 /
+sf-gpu-huge 421 / sf-gpu-small 496 / sf2-gpu-huge 360 / sf2-gpu-small 563
+(sf2-gpu main: CLEAN, 0). All 7 unpaused, snapshots rebuilt, flips live
+(gap_live 360-1,896 per run).
+
+**Re-drain fleet (homefleet `e3cd66c`)**: Nomad jobs sf2cpu×4 + sfcpu×1
+(CPU) + sfgpu wsl / sfgpu-huge i134 (`runtime=nvidia`, `ZEN_REQUIRE_GPU=1`,
+exec-gpu-399abe82 — GPU-only ssim2/butter per criterion 1); diffmap job
+retired. Remaining rotation: sf-gpu-small + sf2-gpu-small/huge follow on the
+GPU boxes as their current runs drain. The avifgen "gap=0" completeness
+claims were re-checked by the same blob-content standard: its harvest rows
+were verified non-error at fill time (0 nulls on all four metrics).
