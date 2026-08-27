@@ -1539,3 +1539,14 @@ the 80G gate will NOT arrive from the mover at this rate — scale-up stays
 held; the drain proceeds at ~50% duty on the single wsl GPU worker. If the
 mover is genuinely stalled (df flat for hours), that is a tower-side
 investigation for the daytime, not a 2am config change on the household NAS.
+
+**SENTINEL v4: WORKER-CYCLING (zenmetrics 590c1dc2 + 9a89cfb9)**: after three
+measured judgment-free park/restart cycles, the mechanical pair is automated
+(--cycle-ssh/--cycle-container: docker-stop on a dead store, docker-start on
+recovery, initial state probed from reality since arming-while-parked is the
+normal moment). The supervisor is invoked ONLY for judgment: parked-and-
+still-dead >8 ticks (abnormal outage), >8 cycles (thrash), cycle-ssh
+failures, drain-complete, space-gate, tower/plex, budget. This keeps the
+user's "Claude handles all conditions" directive at the DECISION layer while
+killing the per-transition wake churn the latency discipline bans. Armed on
+the wsl worker + diffmap runlist.
