@@ -345,3 +345,19 @@ a DATA-MIX property — the family purge removed the recipe's only HF-band
 signal; restoring it from the family-clean side of the SAME table both
 lifts HF ~3× and cleans the HF outlier tail. H-BAL (val-only twin) will
 show whether selection alone could have found any of this (prediction: no).
+
+### Instrument disagreement recorded + SPH1-M3a seed extension registered (2026-08-28, pre-fit)
+
+freeze_check E.4 over the full 14-candidate pool selects `W10L9P_s4005_packed`
+(sel_comp 0.9876) — but ONLY via the M3a tie-break term: on floors+bal_comp
+alone `W10L9PH_s4004_packed` LEADS the pool (8/8, bal_comp 0.8599, highest
+sdr25 0.9770). The HF leg costs M3a systematically (SPH1 seeds 0.81/0.76/0.73
+vs purity twins 0.83/0.88/0.87 — the HF gradient reshapes coarse
+attribution). The wave's registered selection rule (eligibility-first, E.4
+among eligible) stands: PH_s4004 is the sole eligible candidate and thus the
+wave's selection; the whole-pool E.4 row is the comparator record. M3a is a
+real steering-coherence property — so, using the measured 42.3% M3a seed
+variance: **SPH1-M3a EXTENSION (frozen): 3 more SPH1 seeds {4006,4007,4008};
+eligibility clauses unchanged; among eligible seeds prefer highest M3a.**
+Queued behind H-BAL. If no new seed is both eligible and ≥0.83 M3a, PH_s4004
+stands as the wave candidate with its M3a honestly recorded.
