@@ -111,3 +111,76 @@ extreme count ≤ the best peer's count (comparative — beats the field), AND
 boundedness clause alone formalizes finding 3. Under (a)+(b)+(c): both SDR
 candidates PASS, HDR incumbent PASSES on-route (bounded; cross-domain axes
 annotated), HDR t2 FAILS (c).
+
+## G-OUT VARIANT STUDY (2026-08-27, user-requested: "try a few variants based on or and zrmse and p99 and p1")
+
+Instrument: `scripts/v_next/outlier_gate_variants.py` — per (model × axis):
+**V1** `or` + **V2** `z_rmse` READ from the rank blocks (panel-owned stats, no
+new math), **V3a** p99(|chart-z|), **V3b** signed tails p1(z)/p99(z), **V4**
+max|z| + emitted pred range. Computed on both SDR candidates, both HDR
+candidates, and both classical peers (cvvdp, butteraugli) over
+cid22/imazen26/nonphoto/hfnlproxy/kadid/live.
+
+### What each variant can and cannot see (all MEASURED)
+
+- **V1 OR (rate)** — cleanly monotone on the product axes (imazen26: purity
+  .009 < incumbent .011 < L1T1 .032 < t2 .034 < cvvdp .038 < butter .045;
+  nonphoto same shape; SDR candidates 0.000 on cid22/live). But it is a
+  *rate*, blind to *depth*: on hfnlproxy every model sits at .031–.036
+  (non-discriminating on exactly the catastrophic axis), and **t2 PASSES OR
+  on kadid (.008, better than L1T1's .010) while emitting −387**.
+- **V2 Z-RMSE (bulk fidelity)** — good bulk ordering on cid22/imazen26/
+  nonphoto, but **actively unsuitable as an outlier gate**: the panel's 4PL
+  map-before-compare SATURATES unbounded emissions to the logistic floor
+  before the stat is computed. Decisive cell: t2 on kadid emits < −50 on
+  **8.78% of pairs** (439/5000, floor −387) yet its z_rmse (0.756) reads
+  BETTER than L1T1's (0.802, range [−1,100]). On hfnlproxy the tiny target
+  span z-normalizes everyone to ~0.9 and the 47-z cvvdp catastrophics
+  vanish. Z-RMSE stays a reported fidelity stat; it cannot carry G-OUT.
+  (This measurement is also the panel-native justification for G-OUT
+  existing at all: the mapped-space panel structurally cannot see
+  out-of-range emissions.)
+- **V3a p99|z| (severity, n-stable)** — the workhorse. Catches every named
+  class the registered form found, without max|z|'s single-pair noise:
+  hfnl depth separates SDR (6.8–6.9) from HDR (21.9/28.2) from peers
+  (butter 12.2, cvvdp 47.5); t2's kadid/live problems show (9.5/10.6 vs
+  L1T1 2.7/4.9) where OR and Z-RMSE both missed them. Sibling seeds
+  s4003/s4005 agree on p99 to ≤0.03 where max|z| is single-pair-driven
+  (L1T1 vs t2 nonphoto RANK FLIPS between max 32.1>14.3 and p99 10.4>8.2).
+- **V3b p1/p99 signed (diagnostic)** — separates the failure modes: hfnl is
+  pure UNDER-prediction (p1 carries everything, p99_z ≈ 2.5–4.2 for all);
+  the HDR corruption-cell class is the OVER-prediction tail (p99_z ≈ +9
+  on imazen26/nonphoto where SDR sits +2.7); t2's cid22 failure is
+  over-prediction (p99_z 6.56 vs p1 −3.29) — scoring bad things good, the
+  worse mode for a dial. Keep as reported diagnosis, not a gated bar.
+- **V4 max|z| + range** — max|z| demoted to a backstop (only stat that sees
+  ONE catastrophic pair; p99 needs ~n/100). The emitted-range check is
+  irreplaceable: NO statistical form reliably catches unboundedness
+  (OR/Z-RMSE saturate it away; p99 only when frequent).
+
+### Calibrated G-OUT v2 (the synthesis — PROPOSED)
+
+Per candidate class; peers are the calibration, never gated:
+
+| clause | bar |
+|---|---|
+| **R** rate | axis OR ≤ best-peer OR + 0.005 |
+| **S** severity | axis p99\|z\| ≤ min(best-peer p99, 12.0) |
+| **B** backstop | axis max\|z\| ≤ 35 |
+| **D** bounded | emitted preds within declared dial range ±5 (every axis, on- or off-route) |
+
+SDR candidates gate on all six axes; HDR candidates gate R/S/B on-route
+(cid22 + the HDR-route panel) + D everywhere (unboundedness is a model
+property, visible anywhere).
+
+**Results under v2:** `W10L9P_s4005_packed` **PASS 6/6 axes, all four
+clauses** (p99 margins 1.4–1.8× vs best peer everywhere; hfnl OR .036 ≤
+butter .034+.005). Incumbent `W10L9_s4003_packed` PASS (purity better on 4
+of 6 p99 axes; incumbent on kadid/hfnl by hairs). `HDR944_L1T1_s4005_hfpack`
+PASS on-route (cid22: OR .003 = cvvdp; p99 4.64 ≤ cvvdp 4.68 — hair-thin,
+noted; max 7.9; bounded [−28,100] everywhere incl. off-route). `HDR944R_t2`
+**FAIL three ways** (R: cid22 OR .017 = 5.7× cvvdp; S: p99 6.6/9.5/10.6;
+D: −387/−302). No classical peer would clear S+B on the SDR axes (cvvdp
+max|z| 91.8/33.2/37.0; butter unbounded-below by construction). The gate is
+therefore simultaneously peer-calibrated, passable by the best models, and
+failed by the known-bad candidate — the sense-making criterion.
