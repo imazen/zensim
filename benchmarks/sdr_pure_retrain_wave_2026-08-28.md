@@ -184,3 +184,39 @@ D: −387/−302). No classical peer would clear S+B on the SDR axes (cvvdp
 max|z| 91.8/33.2/37.0; butter unbounded-below by construction). The gate is
 therefore simultaneously peer-calibrated, passable by the best models, and
 failed by the known-bad candidate — the sense-making criterion.
+
+### G-OUT v2 ACCEPTED AS FINAL FORM (user, 2026-08-27)
+
+The user accepted v2 R+S+B+D. Registered and implemented at the owner —
+`scripts/v_next/outlier_gate.py` is now the v2 evaluator (peers passed as
+calibration via `--peer`; declared dial ranges decoded from each bake's
+`zentrain.output_calibration_spline`; D floor = bottom_knot − span/3, the
+neg-tail design's sanctioned extrapolation zone; ceiling 105). **Gated axis
+scope = the six axes of the study** (cid22, imazen26, nonphoto, hfnlproxy,
+kadid, live — the scope the acceptance was presented over); every other axis
+is reported, never silently gated. G-OUT joins freeze_check as an
+externally-owned ATTACH row (the existing mechanism for panel-external gates).
+
+Final verdicts (2026-08-27 run): `W10L9P_s4005_packed` **PASS**,
+`W10L9_s4003_packed` **PASS**, `HDR944_L1T1_s4005_hfpack` **PASS** (on-route
+= cid22 + D everywhere; bounded [−28,100] ≥ floor −32.0),
+`HDR944R_t2_s4003_hfpack` **FAIL cid22:R, cid22:S, kadid:D (−387 < −227),
+live:D (−302)**.
+
+**Named finding, NOT folded into the gate without a user call:** on konjnd
+(outside the gated scope) BOTH SDR candidates exceed the peer rate bar
+(OR .038 purity / .032 incumbent vs best-peer+tol .011). KonJND targets are
+PJND thresholds, not MOS — the panel's OR band semantics differ there — but
+the signal is real and recorded: the SDR family emits ~3× the peer outlier
+rate on the JND axis. Declared spline ranges of record: purity (5.11→87.09),
+incumbent (5.42→86.96), L1T1 (0.00→96.14), t2 (−146.92→93.43 — and it still
+overshoots its own declared floor by 240).
+
+### SDR freeze — user REQUIREMENT recorded (2026-08-27, not a pick)
+
+"lf and hf both matter and neither can be sacrificed or lose granularity."
+⇒ No SDR freeze until a TWO-ZONE scorecard shows, for purity vs incumbent:
+LF zone (low-q/heavy-distortion: low bands, corruption blocks, negative
+reach) AND HF zone (near-lossless: hfnlproxy, top bands, q≥90 step-1 dial
+granularity) — rank + dial granularity per zone, neither zone sacrificed
+relative to the other candidate. Scorecard follows below when computed.
