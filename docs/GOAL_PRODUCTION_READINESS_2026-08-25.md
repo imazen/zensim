@@ -81,3 +81,21 @@ the audit md's invalidated first-run sections (historical record, marked),
 `montages_v2/` (referenced by the recorded eye pass), and the R2 copy of the
 pre-fix manifest (annotated in INDEXES.md; R2 writes out of scope). Shas:
 zensim `77de3ccb`→`d9eb130b`, zenmetrics `31795bf6`+`ef94c52c`.
+
+### 2026-08-28 balance-campaign evidence block (criterion 3 MODELS + gates)
+
+G-OUT v2 (user-accepted R+S+B+D) = a standing selection gate; owner
+`scripts/v_next/outlier_gate.py`; registration + verdicts in
+`benchmarks/sdr_pure_retrain_wave_2026-08-28.md`. 24h balance campaign:
+`benchmarks/balance_campaign_2026-08-28.md` (hypothesis ledger + sealed
+hidden panel + terminal read + three-way synthesis). SDR candidate space
+CLOSED at 20 candidates; sole full-eligibility pass `W10L9PH_s4004_packed`
+(sha 61ebc4562c2c4f78…); hidden-robustness alternative rankings recorded;
+HDR incumbent `HDR944_L1T1_s4005_hfpack` case complete (5-dose response,
+teachers exonerated). Freezes = user calls, presented after overnight.
+Board 332 bakes gates PASS. Data: `sdr-pure-2026-08-28` +
+`balance-hidden-2026-08-28` (+ hdr retrain legs) manifested, provenance
+indexed, Tower-mirrored sha-verified. Shas (all message-verified on origin):
+zensim `2f32cf1f` (G-OUT final) → `431e311c`/`6f7e560b` (seed ext) →
+`8eacbcf8`/`359fbce9` (GH1/GH2) → `d8feb9cf`..`4669e282` (campaign chain) →
+`09dd01d2` (model-search closed + board sources) → `472cd6ef` (ledger).
