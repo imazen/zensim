@@ -381,3 +381,18 @@ POOL'S HIGHEST M3a (0.9308/0.9323/0.8689 vs SPH1 0.73-0.81, purity
 attribution maps, consistent with the E-M coarse-mass-drift mechanism. The
 M3a↔rank trade across training epochs is a real structure worth a future
 registered study (checkpoint-level M3a trajectory), not an ad-hoc chase.
+
+### SPH1-M3a EXTENSION RESULTS — fallback fires; PH_s4004 stands (2026-08-28)
+
+| seed | cid22 | hfnl | M3a | G-OUT | eligibility |
+|---|---|---|---|---|---|
+| s4006 | 0.8814 | 0.7647 | 0.8219 | FAIL kadid:S (p99 4.48) | out |
+| s4007 | 0.8929 | 0.7580 | 0.8386 | **FAIL kadid:D, live:D (−71/−27 vs floor −18.3)** | out |
+| s4008 | 0.8799 | 0.7457 | 0.7781 | PASS | cid22 −0.0069 CI-sig → out |
+
+s4007 is the instructive cell: pool-best cid22 + high M3a, but it emits 63
+points below its declared floor — the t2 unboundedness class in miniature,
+and exactly what clause D exists to catch. Across 6 SPH1 seeds the frozen
+eligibility passes EXACTLY ONE (s4004) — the filter is strict, not a rubber
+stamp. **Registered fallback: `W10L9PH_s4004_packed` stands as the wave
+candidate with M3a 0.7628 honestly recorded** (sha 61ebc4562c2c4f78…).

@@ -218,6 +218,9 @@ CURATED_BOARD = [
     # wave-11 battery-selected candidate (k=8-confirmed recipe; entered the jxl
     # 2/3-shot loop panel 2026-08-05 — the first new-era model with loop columns)
     "W10L9_s4003_packed",
+    # balance campaign (2026-08-28): the first fully-eligible two-zone candidate
+    # (dominates incumbent on BOTH zones, G-OUT v2 PASS) + the frozen-lens picks
+    "W10L9PH_s4004_packed", "W10L9PH_s4003_packed", "BAL_E1_s4010_s4006",
 ]
 # "Sprint bests" (user request 2026-08-28): ONE selected leader per sprint/era,
 # newest last. The ensembles sprint's best is resolved at build time (highest
@@ -236,6 +239,7 @@ SPRINT_BEST = [
     ("nt sprint", "sota944_nt223"),
     ("HDR-372 era", "bhdr_linear_shaped_cvvdpmix"),
     ("HDR-944 wave", "HDR944_L1T1_s4005_hfpack"),
+    ("balance campaign", "W10L9PH_s4004_packed"),
 ]
 
 CURATED = set(CURATED_BOARD)
@@ -264,6 +268,14 @@ def family_of(name: str) -> str:
         return "arm H (konjnd leg)"   # wave-7 cells + their packaged forms
     if n.startswith("EM4_"):
         return "era bridge"
+    if n.startswith(("W10L9PH", "W10L9PB", "BAL_")):
+        return "balance campaign"
+    if n.startswith("W10L9P"):
+        return "purity retrain"
+    if n.startswith(("W10L9", "W10L", "KFG")):
+        return "wave 10/11"
+    if n.startswith(("HDR944", "bhdr")):
+        return "HDR"
     return "pre-944 era"
 
 

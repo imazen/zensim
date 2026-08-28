@@ -169,3 +169,14 @@ Semi-hidden preview (axes never used in eligibility; |srocc| read down
 columns, aic4/sdr25 stored orientations negative): PH_s4004 beats the
 INCUMBENT on all six (aic3 .800, aic4 .914, csiq .944, tid .939, sdr25
 .977, konjnd .501) — no hidden-axis collapse.
+
+## MODEL-SEARCH PHASE CLOSED (2026-08-28 ~04:1xZ)
+
+No further arms will be trained in this campaign window without the user.
+Final SDR pool: 20 candidates (incumbent + 9 purity + 6 SPH1 + 3 H-BAL +
+E1). Sole fully-eligible: `W10L9PH_s4004_packed`. HDR lane: incumbent
+`HDR944_L1T1_s4005_hfpack` case complete (2 challengers falsified across 5
+doses, teacher exonerated). Next: board regen, then the ONE-TIME H-HID
+terminal read over the frozen lens picks {W10L9P_s4005_packed,
+W10L9PH_s4004_packed, W10L9PH_s4003_packed, BAL_E1} + incumbent + shipped-B
+reference, then the overnight decision brief.
