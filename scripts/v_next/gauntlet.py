@@ -1133,6 +1133,7 @@ if(LT){COLS.push(
   ['loop3err','3shot med|err|',false,b=>{const c=ltCell(b,'k3_emit_best');return c!=null&&c.med_abs_err!=null?c.med_abs_err:null;}]);}
 function fmtCell(key,v){
   if(key==='name'||key==='regime')return v;
+  if(key==='trained')return v==null?'—':v;
   if(key==='cid22_bwd')return v==null?'—':pct(v);
   if(key==='dial_tied')return pct(v);
   if(key==='corr'||key==='dial_mono')return pct(v);
@@ -1203,7 +1204,8 @@ function renderTable(){
     ranges[c[0]]=vs.length?[Math.min(...vs),Math.max(...vs)]:[0,1];});
   const col=COLS.find(c=>c[0]===state.sortKey)||COLS[2];
   const rows=[...DATA.bakes].sort((a,b)=>{let x=col[3](a),y=col[3](b);
-    if(typeof x==='string')return state.sortDir*x.localeCompare(y);
+    if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1; // nulls last either direction
+    if(typeof x==='string')return state.sortDir*String(x).localeCompare(String(y));
     x=x==null?-1e9:x;y=y==null?-1e9:y;return state.sortDir*(x-y);});
   const tb=el('tbody',{});
   rows.forEach(b=>{
