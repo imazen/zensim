@@ -257,3 +257,30 @@ freeze_check E.4 (profile floors, tie-break bal_comp + 0.15·M3a); below-zero
 reach breaks remaining ties. If NO seed in the 9 is eligible ⇒ the recipe
 cannot satisfy the requirement; escalate to the konjnd/hfnl-preserving
 variant lever WITH the user (no silent recipe change).
+
+### SEED EXTENSION RESULTS — NO ELIGIBLE SEED IN 9; escalation fires (2026-08-28)
+
+6 new seeds trained/packed/harvested clean (driver exit 0). G-OUT v2:
+s4006/s4007/s4010/s4011 PASS; s4008 FAIL (hfnl:B max|z|), s4009 FAIL
+(live:R+S). Frozen eligibility on the passers (paired-Δ vs incumbent,
+aligned rescore, B=5000):
+
+| seed | hfnl Δ (CI) | cid22 Δ (CI) | LF bot-band c22 | verdict |
+|---|---|---|---|---|
+| s4006P | −0.0033 [−0.0101,+0.0034] **NOT-WORSE — first seed to hold HF** | −0.0028 [−0.0052,−0.0005] ✗ | 0.682 (bar 0.697) ✗ | fails (ii)+(iii) |
+| s4007P | −0.2231 ✗ | −0.0118 ✗ | 0.687 | fails (i) |
+| s4010P | −0.0813 ✗ | **+0.0059 BETTER** | **0.711 ✓** (tid 0.885) | fails (i) |
+| s4011P | −0.2269 ✗ | −0.0045 ✗ | 0.686 | fails (i) |
+
+With the original 3: **0 of 9 seeds satisfies G-OUT v2 + two-zone
+non-sacrifice.** The axes anti-separate across the recipe's seed
+distribution — the cid22-best seeds (s4010 0.8926, s4005 0.8901) sacrifice
+hfnl; the hfnl-holding seed (s4006) pays cid22+LF-band. The recipe's seed
+Pareto front does not contain a point dominating the incumbent on both
+zones, consistent with the wave's own observation that the family-filtered
+tbig rows carried near-threshold/near-lossless signal. **Per the frozen
+rule: the recipe cannot satisfy the requirement; the
+konjnd/hfnl-preserving VARIANT lever goes to the user** (candidate design,
+mirroring the HDR L1 pattern that passed: same pure views + an HF-band
+extra group drawn from tbig_944_200k_pure human_score ≥ 0.90 at weight
+~1.0 — purity-costless since it is the same family-clean table).
