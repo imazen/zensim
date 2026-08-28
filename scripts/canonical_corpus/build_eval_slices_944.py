@@ -78,6 +78,10 @@ def main() -> int:
     ap.add_argument("--manifest", default="/mnt/v/output/imazen-26-features/imazen26_manifest.tsv")
     ap.add_argument("--suffix", default="_944")
     ap.add_argument("--n-feat", type=int, default=944)
+    ap.add_argument("--split", default="test", choices=["test", "validate"],
+                    help="picker-view split to slice (2026-08-28: 'validate' added so "
+                         "SELECTION runs on validate-family slices and the test-family "
+                         "slices retire to touch-once terminal reads)")
     ap.add_argument("--out-root", required=True)
     a = ap.parse_args()
 
@@ -91,7 +95,7 @@ def main() -> int:
     tabs = []
     prov = []
     for ds in VIEWS:
-        p = Path(a.views_root) / ds / f"test{a.suffix}.parquet"
+        p = Path(a.views_root) / ds / f"{a.split}{a.suffix}.parquet"
         t = pq.read_table(p, columns=cols)
         tabs.append(t)
         prov.append({"view": str(p), "sha256": sha256_file(p), "rows": t.num_rows})

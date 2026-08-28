@@ -786,3 +786,44 @@ against the SDR CoR's 0.8927 native read. Decision rule (frozen): PU-route
 CID22 SROCC within 0.01 of native ⇒ register the joint single-model
 training wave (SDR+HDR legs through the PU front-end); worse ⇒ two-model
 architecture stands with the measurement recorded.
+
+## METHODOLOGY AUDIT (user: eval-vs-test, bake-quantity overfitting, epoch/pairs optimality — 2026-08-28)
+
+**1. Which split does selection actually use? — stated precisely, including
+the uncomfortable part.** cid22 = the 4,292-pair validation set (validation-
+only vs TRAINING by law, but REUSED across selection rounds — standard for
+this project, monitored below). kadid/tid = whole corpora (train==val
+memorization known; integrity guards only). imazen26 / nonphoto /
+hfnlproxy = **TEST-family slices** (the D1 re-slice cut them from the
+family TEST bucket) — meaning this campaign's repeated selection has been
+consuming the TEST bucket while the VALIDATE bucket (661 families) sits
+unused. That is a split-ladder inversion. **Fix registered and tooled:**
+`build_eval_slices_944.py --split validate` (added) → build
+validate-family selection slices; all FUTURE selection runs on them; the
+current test-family slices RETIRE to touch-once terminal reads (the KADIS
+hidden-panel discipline). Queued behind the running chain.
+
+**2. Is bake-quantity overfitting a concern? — measured, two answers.**
+Selection-noise optimism: full-pool split-half shrinkage over K=21 aligned
+models (every candidate + checkpoint with per-pair data), 120 splits:
+cid22 **−0.0014 ± 0.0061**, hfnl **+0.0006 ± 0.0102**, winner identity
+120/120 stable on both axes — between-model differences dwarf half-set
+noise, so the reported winners' scores carry negligible selection
+optimism even at this pool size. BUT the second sense of overfitting —
+axis EXPOSURE — is real and unmeasurable from inside: the test-family
+slices and cid22 have absorbed dozens of selection looks this campaign.
+The validate-ladder fix (above) + sealed terminal panels are the
+structural answer; shrinkage monitoring rides every future wave.
+
+**3. Epochs/pairs optimal? — NO, and here is the evidence.** epochs=120 /
+pairs=50k are INHERITED from the W10 campaign recipe, never swept this
+era. Direct evidence of epoch non-optimality: the frozen candidate's own
+trajectory put best_val at **epoch 30 of 120** — three quarters of the
+training budget added nothing to the selected checkpoint (harmless for
+quality via best_val checkpointing; a 4× compute waste). The epoch axis is
+now internally swept by W11's checkpoint dumps (every 10). The UNSWEPT
+axis is pairs-per-epoch: **W12 probe registered** — 2 seeds ×
+pairs ∈ {25k, 100k} with dumps, vs the 50k baseline; compare best-
+checkpoint quality + wall time; queued behind PU21. Per the sweep
+discipline, none of these constants may be called optimal until that grid
+exists.
