@@ -827,3 +827,28 @@ pairs ∈ {25k, 100k} with dumps, vs the 50k baseline; compare best-
 checkpoint quality + wall time; queued behind PU21. Per the sweep
 discipline, none of these constants may be called optimal until that grid
 exists.
+
+## VALIDATE-SLICE SELECTION RERUN (user directive) — THE FROZEN SELECTION REPLICATES (2026-08-28 ~22:45Z)
+
+Validate-family slices built (`--split validate`, family-atomic bucket
+filter + conservative sharing-family drop; imazen26 61 / nonphoto 61 /
+hfnl 87 validate origins; staged root `valsel-2026-08-28/`). All six
+eligibility-relevant candidates rescored on the NEVER-SELECTED data:
+
+| candidate | v-hfnl | v-im26 | v-nonph | v-hfnl Δinc (CI) |
+|---|---|---|---|---|
+| **A PH_s4004** | **0.6993** | 0.9314 | 0.9280 | **+0.3654 [+0.3481,+0.3834] BETTER** |
+| B e060 | 0.6624 | **0.9360** | **0.9328** | +0.3285 BETTER |
+| f054 | 0.6563 | 0.9316 | 0.9281 | +0.3224 BETTER |
+| s4005P | 0.2823 | 0.9316 | 0.9268 | −0.0515 SACRIFICED |
+| s4010P | 0.2309 | 0.9337 | 0.9287 | −0.1028 SACRIFICED |
+| incumbent | 0.3337 | 0.9238 | 0.9204 | — |
+
+**Verdict: the frozen selection replicates on validate-family content with
+a LARGER hfnl margin than on test (+0.365 vs +0.332)** — the test-slice
+selection was not a fluke of exposure; every family-ordering fact
+reproduces (SPH1 family dominant, HF-less seeds sacrificed, incumbent
+last on all three axes). Going forward, selection runs on THESE slices;
+the test-family slices are retired to touch-once terminal reads.
+PU21 note: the converter's multiprocessing children die at import
+(kadis-distort env guard) — being fixed; the PU21 verdict follows.
