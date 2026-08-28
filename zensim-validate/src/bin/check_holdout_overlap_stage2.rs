@@ -180,25 +180,9 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// dHash-64 of a `DynamicImage`. Resize to 9×8 grayscale Lanczos3, set
-/// bit per row-adjacent pixel pair if `left > right`.
-fn dhash_64(img: &DynamicImage) -> u64 {
-    let small =
-        image::imageops::resize(&img.to_luma8(), 9, 8, image::imageops::FilterType::Lanczos3);
-    let mut hash = 0u64;
-    let mut bit = 0u32;
-    for y in 0..8 {
-        for x in 0..8 {
-            let left = small.get_pixel(x, y).0[0];
-            let right = small.get_pixel(x + 1, y).0[0];
-            if left > right {
-                hash |= 1u64 << bit;
-            }
-            bit += 1;
-        }
-    }
-    hash
-}
+// dHash-64 primitive: ONE owner, `zensim_validate::content_clusters::dhash_64`
+// (shared with `check_holdout_overlap` and `corpus_content_clusters`).
+use zensim_validate::content_clusters::dhash_64;
 
 /// Slide aspect-1:1 windows of decreasing size over `img`; dHash each
 /// window; return the (ref_name, hamming, x, y, window_size, w_count)

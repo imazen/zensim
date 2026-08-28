@@ -200,27 +200,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// dHash-64 of an image file. Resize to 9×8 luminance, compare each
-/// row's adjacent pairs, set bit if left > right. Returns a 64-bit
-/// hash; two hashes with Hamming distance ≤ 10 are very likely the
-/// same image.
+/// dHash-64 of an image file (decode + the ONE shared primitive,
+/// `zensim_validate::content_clusters::dhash_64`). Two hashes with
+/// Hamming distance ≤ 10 are very likely the same image.
 fn dhash_64_path(path: &Path) -> Result<u64> {
     let img = image::open(path).with_context(|| format!("decoding {}", path.display()))?;
-    let small =
-        image::imageops::resize(&img.to_luma8(), 9, 8, image::imageops::FilterType::Lanczos3);
-    let mut hash = 0u64;
-    let mut bit = 0u32;
-    for y in 0..8 {
-        for x in 0..8 {
-            let left = small.get_pixel(x, y).0[0];
-            let right = small.get_pixel(x + 1, y).0[0];
-            if left > right {
-                hash |= 1u64 << bit;
-            }
-            bit += 1;
-        }
-    }
-    Ok(hash)
+    Ok(zensim_validate::content_clusters::dhash_64(&img))
 }
 
 /// One-level shallow directory listing (no recursion).

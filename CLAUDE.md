@@ -1489,6 +1489,18 @@ overlap). The cleanup was REVERTED — see
 3. Get user sign-off entry by entry before adding to any blocklist.
 4. Never auto-quarantine based on dHash alone.
 
+**Where dHash IS the right tool — WITHIN-corpus resample-variant clustering
+(issue #33, landed 2026-08-28):** `corpus_content_clusters` (owner module
+`zensim_validate::content_clusters`, also the one `dhash_64` both
+`check_holdout_overlap*` bins use) clusters a corpus at the STRICT d ≤ 3
+threshold so `<hex>_512sq` / `_769x513` / `_1024sq` variants of one source
+form one cluster, then emits per-content weights (`1/cluster_size`; for the
+trainer, `--reweight-dir` writes one `--group` per cluster size with
+`train_w ∝ n_rows/k`), a one-variant-per-cluster cull (`--cull-csv`), and a
+content-stratified split (`--split-dir`). It refuses `--max-dist > 10`. The
+retrain comparison (equal-weight vs reweighted vs culled) has NOT been run —
+it needs `/mnt/v/input/zensim/sources/` + a training box.
+
 ### Safe synthetic dataset (V0_18 ship corpus)
 
 - File: `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv`
