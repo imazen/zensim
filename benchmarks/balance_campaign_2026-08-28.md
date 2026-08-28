@@ -612,3 +612,34 @@ spans; the ssim2/butter-judged columns (with their oracle floors) are the
 fair reading.** Registry entry + board caption added. Rev (metric-unit
 targets, round-trip translated) ≈ fwd throughout — the translation maps
 compose cleanly both directions.
+
+## PROXY SCOPE HONESTY + MAPPING OPTIMALITY (user challenge, 2026-08-28)
+
+**What the proxy can and cannot estimate.** The loop proxy estimates
+SCALAR-STEERING utility only: it selects among fixed-q ladder rungs by the
+bake's scalar. Diffmap utility is ALLOCATION — bit movement within the
+image producing operating points OFF the fixed-q ladder — structurally
+invisible to any on-ladder simulation. The truthful instrument hierarchy:
+(1) M3a = self-coherence (measured this week to NOT predict loop value);
+(2) map-vs-external-judge block agreement on stored pixels (registerable
+future instrument); (3) **paired redistribution-on/off encodes judged
+independently — the only true measure** — run tonight as the `h3own` arm
+(candidate's OWN attribution map steering real encodes vs its scalar base,
+same 27-cell matrix, fresh substrate) for both freeze-decision candidates.
+Board columns relabeled "(scalar)" and the caption states the boundary.
+
+**Mapping optimality, corrected.** The v1 maps (20-bin quantile medians +
+flat clamp) were the right CLASS (monotone) but not the optimal estimator.
+Upgraded in `loop_proxy.py` to: **weighted PAVA isotonic regression** on
+the paired cells (the optimal monotone conditional-mean estimator;
+per-image 1/n weights so oversampled ladders don't dominate) with **linear
+tail extrapolation** (the old flat clamp made above-anchor near-lossless
+targets untranslatable — a product defect), plus a **round-trip drift
+diagnostic** since the two directions are independent fits: measured
+ssim2 0.27-0.45 bake-units (tight), butter up to 1.3 on avif (the
+heavy-tailed scale is the loose direction — quote butter translations with
+that uncertainty). Validation gate re-run under the new maps: STILL PASSES
+(A 0.526 < B 0.817 jxl k3; GL2 still best-native/worst-translated).
+Remaining non-optimality, stated: the maps are unconditional (content-
+conditional translation would cut residuals but requires features at
+target-setting time — a registered future lever, not silently added).

@@ -1148,10 +1148,10 @@ const PX=DATA.loopProxy||null;
 const pxc=(b,codec,kk,key)=>{if(!PX)return null;const r=PX[b.name];if(!r||!r[codec])return null;
   const c=r[codec].cells&&r[codec].cells[kk];return c?c[key]:null;};
 if(PX){COLS.push(
-  ['proxy_jxl_s','jxl-k3 ssim2⌁',false,b=>pxc(b,'jxl','k3','ssim2_fwd_med')],
-  ['proxy_jxl_n','jxl-k3 native⌁',false,b=>pxc(b,'jxl','k3','native_med')],
-  ['proxy_avif_s','avif-k3 ssim2⌁',false,b=>pxc(b,'avif','k3','ssim2_fwd_med')],
-  ['proxy_avif_n','avif-k3 native⌁',false,b=>pxc(b,'avif','k3','native_med')]);}
+  ['proxy_jxl_s','jxl-k3 ssim2⌁ (scalar)',false,b=>pxc(b,'jxl','k3','ssim2_fwd_med')],
+  ['proxy_jxl_n','jxl-k3 nat⌁ (scalar)',false,b=>pxc(b,'jxl','k3','native_med')],
+  ['proxy_avif_s','avif-k3 ssim2⌁ (scalar)',false,b=>pxc(b,'avif','k3','ssim2_fwd_med')],
+  ['proxy_avif_n','avif-k3 nat⌁ (scalar)',false,b=>pxc(b,'avif','k3','native_med')]);}
 if(LT){COLS.push(
   ['loop2','2shot ±2',false,b=>{const c=ltCell(b,'k2_emit_best');return c?c.within2:null;}],
   ['loop3','3shot ±2',false,b=>{const c=ltCell(b,'k3_emit_best');return c?c.within2:null;}],
@@ -1173,7 +1173,7 @@ function renderTable(){
   const wrap=el('div',{});
   const domNote=DATA.nDominatedExcluded?('<b>'+DATA.nDominatedExcluded+' dominated bakes FULLY EXCLUDED</b> '
     +'(strict-pareto-2026-08-04; files + fullevals retained — registry/dominance TSV). '):'';
-  const pxNote=DATA.loopProxy?('⌁ loop-utility PROXY (seeded-secant on the stored dial grid, census-validated): '
+  const pxNote=DATA.loopProxy?('⌁ SCALAR-STEERING proxy (seeded-secant on the stored dial grid, census-validated; DIFFMAP allocation value is structurally invisible to any on-ladder simulation — measured separately by the h3own paired-encode A/B): '
     +'the <b>ssim2-judged</b> columns are the FAIR cross-bake reading; native columns are per-bake diagnostics '
     +'only — bakes with compressed dial spans are flattered natively (measured: GL2). ') : '';
   const cap=el('div',{class:'cap',html:domNote+pxNote+'Sortable scoreboard — click a header. SROCC is polarity-corrected '

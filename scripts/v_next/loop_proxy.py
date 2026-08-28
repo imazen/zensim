@@ -54,16 +54,54 @@ def forward(bake, X):
         os.unlink(wire)
     return np.array([float(v) for v in r.stdout.split()])
 
-def qmap(x, y, nb=20):
-    """monotone quantile translation x->y; returns an interp fn."""
-    qs = np.quantile(x, np.linspace(0, 1, nb + 1))
-    ax, ay = [], []
-    for i in range(nb):
-        m = (x >= qs[i]) & (x <= qs[i + 1])
-        if m.sum() < 8: continue
-        ax.append(np.median(x[m])); ay.append(np.median(y[m]))
-    ax = np.array(ax); ay = np.maximum.accumulate(np.array(ay))
-    return lambda v: np.interp(v, ax, ay)
+def _pava(y, w):
+    """pool-adjacent-violators: weighted isotonic means (optimal monotone
+    L2 fit on paired data). Returns fitted values, same length."""
+    y = list(map(float, y)); w = list(map(float, w))
+    vals, wts, cnt = [], [], []
+    for yi, wi in zip(y, w):
+        vals.append(yi); wts.append(wi); cnt.append(1)
+        while len(vals) > 1 and vals[-2] > vals[-1]:
+            wv = wts[-2] + wts[-1]
+            vals[-2] = (vals[-2] * wts[-2] + vals[-1] * wts[-1]) / wv
+            wts[-2] = wv; cnt[-2] += cnt[-1]
+            vals.pop(); wts.pop(); cnt.pop()
+    out = []
+    for v, c in zip(vals, cnt):
+        out.extend([v] * c)
+    return np.array(out)
+
+def qmap(x, y, imgs=None, nb=None):
+    """OPTIMAL-CLASS monotone translation x->y (upgraded 2026-08-28 after the
+    user's mapping-optimality challenge): weighted PAVA isotonic regression on
+    the paired cells (weights = 1/n_cells(image) so oversampled ladders don't
+    dominate), evaluated by interpolation over the isotonic knots with LINEAR
+    TAIL EXTRAPOLATION from the outer 10% of knots (the old flat clamp made
+    near-lossless targets untranslatable above the top anchor)."""
+    x = np.asarray(x, float); y = np.asarray(y, float)
+    if imgs is not None:
+        imgs = np.asarray(imgs)
+        cnt = {im: (imgs == im).sum() for im in set(imgs.tolist())}
+        w = np.array([1.0 / cnt[im] for im in imgs])
+    else:
+        w = np.ones(len(x))
+    o = np.argsort(x, kind="stable")
+    xs, ys, ws = x[o], y[o], w[o]
+    fit = _pava(ys, ws)
+    # unique-x knots (mean fit per x)
+    ux, inv = np.unique(np.round(xs, 6), return_inverse=True)
+    ky = np.array([fit[inv == i].mean() for i in range(len(ux))])
+    ky = np.maximum.accumulate(ky)
+    n = len(ux); k10 = max(2, n // 10)
+    lo_s = (ky[k10] - ky[0]) / (ux[k10] - ux[0] + 1e-12)
+    hi_s = (ky[-1] - ky[-1 - k10]) / (ux[-1] - ux[-1 - k10] + 1e-12)
+    def f(v):
+        v = np.asarray(v, float)
+        out = np.interp(v, ux, ky)
+        out = np.where(v < ux[0], ky[0] + (v - ux[0]) * max(lo_s, 0.0), out)
+        out = np.where(v > ux[-1], ky[-1] + (v - ux[-1]) * max(hi_s, 0.0), out)
+        return out if out.ndim else float(out)
+    return lambda v: float(f(v)) if np.isscalar(v) or getattr(v, "ndim", 0) == 0 else f(v)
 
 # Family-loop emulation (v2 after the registered validation gate FAILED on
 # blind bisection): SEEDED start + SECANT steps — the shape the real loops
@@ -127,8 +165,12 @@ def main():
             all_ix = [i for ix in ladders.values() for i in ix]
             b = pred[all_ix]
             mv = {m: np.array([peers[m][(img[i], zc, qv[i])] for i in all_ix]) for m in peers}
-            fwd = {m: qmap(b, mv[m]) for m in peers}   # bake -> metric
-            rev = {m: qmap(mv[m], b) for m in peers}   # metric -> bake
+            im_of = np.array([img[i] for i in all_ix])
+            fwd = {m: qmap(b, mv[m], im_of) for m in peers}   # bake -> metric (isotonic)
+            rev = {m: qmap(mv[m], b, im_of) for m in peers}   # metric -> bake (isotonic)
+            # round-trip drift diagnostic (directions are fit independently;
+            # drift quantifies their non-inverseness in bake units)
+            drift = {m: float(np.median(np.abs(np.asarray(rev[m](fwd[m](b))) - b))) for m in peers}
             cells = {}
             for k in (2, 3):
                 nat, fwd_err, rev_err, oracle, qfloor = [], {m: [] for m in peers}, {m: [] for m in peers}, {m: [] for m in peers}, []
@@ -156,7 +198,8 @@ def main():
                     **{f"{m}_fwd_med": float(np.median(fwd_err[m])) for m in peers},
                     **{f"{m}_rev_med": float(np.median(rev_err[m])) for m in peers},
                     **{f"{m}_oracle_med": float(np.median(oracle[m])) for m in peers}}
-            res[codec] = {"n_ladders": len(ladders), "cells": cells}
+            res[codec] = {"n_ladders": len(ladders), "cells": cells,
+                          "roundtrip_drift_bake_units": {m: round(drift[m], 3) for m in peers}}
         results[name] = res
     for name, res in results.items():
         for codec, r in res.items():
