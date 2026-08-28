@@ -349,3 +349,41 @@ every 10 epochs; the re-trained FINAL bake must byte-match the original
 (a free reproducibility validation of the embedded-repro chain — a mismatch
 is itself a reportable finding); (3) per checkpoint: parity pack + M3a +
 cid22/hfnl rank; plot the trajectory.
+
+## H-TRAJ RESULTS — hypothesis CONFIRMED; the M3a↔granularity trade measured (2026-08-28 ~05:1xZ)
+
+Retrace of the exact PH_s4004 argv+seed with the new checkpoint dumps
+(trainer feature + plain-lane fix, both tested):
+
+**Reproducibility validated bit-exactly:** after stripping the
+`zentrain.repro` metadata (whose argv legitimately differs by the dump
+flags), the retrace and original bakes are **byte-identical** — the
+embedded-repro chain reproduces weights exactly; metrics matched to 4dp on
+three instruments before the strip check.
+
+Trajectory (M3a oscillates — NOT monotone decline; best_val epochs 10/30 =
+the cid22 peaks — land on M3a-LOW checkpoints, an anti-correlation at val
+peaks):
+
+| epoch | m3a | cid22 | hfnl |
+|---|---|---|---|
+| 0 | 0.9162 | 0.8721 | 0.6029 |
+| 10 | 0.7673 | 0.8958 | 0.7167 |
+| 20 | 0.8314 | 0.8755 | 0.7157 |
+| **30 = best_val = final** | **0.7628** | **0.8927** | **0.7524** |
+| 40 | 0.7551 | 0.8850 | 0.7336 |
+| 50 | 0.8349 | 0.8785 | 0.6943 |
+| **60** | **0.8333** | 0.8869 | 0.7273 |
+| 70 | 0.8541 | 0.8735 | 0.7208 |
+| 80 | 0.8412 | 0.8781 | 0.7222 |
+
+**The registered window EXISTS (hypothesis CONFIRMED)**: e060 and e070
+clear M3a ≥0.83 at ≥95% of final rank. Full frozen eligibility on both
+(harvested, G-OUT, paired CIs): **e060 passes every clause EXCEPT (iv)
+HF dial tied-rate 0.37 vs bar 0.335** (the final: 0.228) — with hfnl
++0.3069 BETTER, cid22 +0.0002 NOT-WORSE, G-OUT PASS, konjnd 0.540 (best
+measured), M3a 0.8333. e070: cid22 −0.0132 SACRIFICED → out. **The M3a
+recovery is real and costs top-zone dial granularity** — the two are the
+same coarse-structure coin. PH_s4004 (final) remains the sole
+full-eligibility candidate; e060 is the quantified M3a-recovery option
+whose clause-(iv) relaxation only the user can grant.
