@@ -329,3 +329,23 @@ discount. Run / skip.
 Both freezes are candidate-of-record designations only — the shipped
 default stays B; any default flip remains a separate proposal per the
 standing rule.
+
+## H-TRAJ (epoch-M3a trajectory) — registered 2026-08-28 ~04:3xZ BEFORE any code/fit
+
+Motivation: the recommended SDR candidate's sole weakness is M3a 0.7628;
+H-BAL showed HF-val-selected (earlier-class) checkpoints carry pool-best
+M3a (0.93); SPH1 systematically lowered M3a vs purity twins. **Hypothesis
+(frozen): M3a declines across training epochs (coarse-mass drift, E-M
+mechanism) while rank rises; an epoch window exists with M3a ≥ 0.83 AND
+≥95% of final cid22+hfnl.** If such a checkpoint exists AND passes the
+frozen eligibility, it becomes a MORNING OPTION (registered as such — not a
+freeze, and not a new arm: same recipe, same seed, same trajectory,
+different stopping point).
+
+Method: (1) owner feature `zensim_mlp_train --dump-checkpoints-every N`
+(bakes current weights at each N-epoch boundary via the existing v3 bake
+path; test included); (2) re-run the EXACT SPH1 s4004 argv+seed with dumps
+every 10 epochs; the re-trained FINAL bake must byte-match the original
+(a free reproducibility validation of the embedded-repro chain — a mismatch
+is itself a reportable finding); (3) per checkpoint: parity pack + M3a +
+cid22/hfnl rank; plot the trajectory.

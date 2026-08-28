@@ -64,6 +64,15 @@ pub struct MlpHyperparams {
     pub leaky_alpha: f64,
     pub seed: u64,
     pub log_every: usize,
+    /// H-TRAJ (balance campaign 2026-08-28): dump a spline-less bake of the
+    /// CURRENT projected net every N epochs (0 = off). Fires at validation
+    /// points only, so the effective cadence is epochs that are multiples of
+    /// BOTH `log_every` and N. Wired for the per-sample-α 0-hidden lane;
+    /// other architectures refuse loudly (assert) rather than skip silently.
+    pub dump_checkpoints_every: usize,
+    /// Directory for `dump_checkpoints_every` output (`ckpt_epochNNN.bin`).
+    /// None = current directory.
+    pub dump_checkpoints_dir: Option<std::path::PathBuf>,
     /// L2 regularization on layer weights (not biases). 0 disables.
     pub l2_lambda: f64,
     /// Stop after this many epochs of no validation improvement.
@@ -886,6 +895,8 @@ impl Default for MlpHyperparams {
             per_sample_alpha_head: false,
             skip_connection: false,
             n_hidden_layers: 1,
+            dump_checkpoints_every: 0,
+            dump_checkpoints_dir: None,
             mse_weight: 0.0,
             sigma_weighted_mse: false,
             ema_decay: 0.0,
@@ -9602,6 +9613,65 @@ fn train_mlp_per_sample_alpha_head(
                     break;
                 }
             }
+            // H-TRAJ checkpoint dump (balance campaign 2026-08-28). TWIN OF
+            // the L0 best-val snapshot above — keep the model build in
+            // lockstep; the dump is DEFINED as "what the best-val snapshot
+            // would save at this epoch". Runs while EMA weights are swapped
+            // in (before the swap-back below), spline-less like the
+            // snapshot: the pack step fits the spline.
+            if hyperparams.dump_checkpoints_every > 0
+                && epoch % hyperparams.dump_checkpoints_every == 0
+            {
+                assert!(
+                    !use_2layer && !use_skip,
+                    "--dump-checkpoints-every is wired for the 0-hidden                      per-sample-α lane only"
+                );
+                let bake_w1 = proj_w1_masked(&w1);
+                let bake_rank_w = proj_leq0(&rank_w);
+                let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
+                let bake_b_alpha = proj_b_alpha_one(b_alpha);
+                let model = psah::PerSampleAlphaHeadModel {
+                    scaler_mean: scaler_mean.clone(),
+                    scaler_scale: scaler_scale.clone(),
+                    w1: bake_w1,
+                    b1: b1.clone(),
+                    rank_w: bake_rank_w,
+                    rank_b,
+                    reducer_w,
+                    reducer_b,
+                    w_alpha: bake_w_alpha,
+                    b_alpha: bake_b_alpha,
+                    n_hidden: n_hidden_final,
+                    n_features,
+                    leaky_alpha: hyperparams.leaky_alpha,
+                };
+                let ckpt_bytes = if tanh_pin_active {
+                    psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
+                        &model,
+                        tanh_scale,
+                        hyperparams.feature_transforms.as_deref(),
+                        hyperparams.feature_transform_params.as_deref(),
+                        None, // spline added at pack time
+                    )
+                } else {
+                    psah::bake_per_sample_alpha_head_v3(&model)
+                };
+                let dir = hyperparams
+                    .dump_checkpoints_dir
+                    .clone()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let ckpt_path = dir.join(format!("ckpt_epoch{epoch:03}.bin"));
+                std::fs::write(&ckpt_path, &ckpt_bytes)
+                    .expect("H-TRAJ checkpoint dump write failed");
+                log_line(
+                    &format!(
+                        "  checkpoint dump: {} ({} B)",
+                        ckpt_path.display(),
+                        ckpt_bytes.len()
+                    ),
+                    log,
+                );
+            }
             if ema_active {
                 ema_swap_all!();
             }
@@ -12217,6 +12287,94 @@ mod tests {
     /// that lives in `zensim::metric::forward_one_bake`). For the
     /// test, we replicate the pin here to compare apples-to-apples
     /// with the trainer's loss.
+    /// H-TRAJ dump feature (balance campaign 2026-08-28): a tiny
+    /// per-sample-α train with --dump-checkpoints-every must emit v3 bakes
+    /// at the val-aligned epochs, byte-parseable (header byte 4 == 3).
+    #[test]
+    fn htraj_checkpoint_dumps_emit_v3_bakes() {
+        let dir = std::env::temp_dir().join(format!("htraj_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (pool_rows, ref_ranges, ref_pjnd_target, ref_weight) = kah_build_pool();
+        let pool_row_refs: Vec<&[f64]> = pool_rows.iter().map(|r| r.as_slice()).collect();
+        let konjnd_agg = KonjndAggregationPool {
+            name: "synthetic_konjnd".to_string(),
+            features: pool_row_refs.as_slice(),
+            ref_ranges: ref_ranges.as_slice(),
+            ref_pjnd_target: ref_pjnd_target.as_slice(),
+            ref_weight: ref_weight.as_slice(),
+        };
+        let mut primary_features: Vec<Vec<f64>> = Vec::with_capacity(KAH_N_PRIMARY_PAIRS);
+        let mut primary_scores: Vec<f64> = Vec::with_capacity(KAH_N_PRIMARY_PAIRS);
+        for i in 0..KAH_N_PRIMARY_PAIRS {
+            let frac = (i as f64) / ((KAH_N_PRIMARY_PAIRS - 1).max(1) as f64);
+            primary_features.push(vec![frac, -1.0 + 2.0 * frac, 0.0, 0.0]);
+            primary_scores.push(0.5 + 0.5 * (-1.0 + 2.0 * frac));
+        }
+        let primary_refs: Vec<&[f64]> = primary_features.iter().map(|r| r.as_slice()).collect();
+        let mut groups = [TrainingGroup {
+            name: "synthetic_primary".to_string(),
+            human_scores: &primary_scores,
+            features: FeatureRows::Borrowed(&primary_refs),
+            metric_sigmas: None,
+            train_weight: 1.0,
+            validation_weight: 0.0,
+            ref_ids: None,
+            loss_mode: GroupLossMode::default(),
+        }];
+        let mut hp = MlpHyperparams {
+            n_hidden: 16,
+            n_hidden_layers: 1,
+            n_epochs: 30,
+            pairs_per_epoch: 200,
+            minibatch_size: 1,
+            initial_lr: 1e-2,
+            l2_lambda: 1e-6,
+            leaky_alpha: 0.01,
+            early_stop_patience: 0,
+            per_sample_alpha_head: true,
+            tanh_output_head_scale: 20.0,
+            ranknet_weight: 1.0,
+            konjnd_aggregation_weight: 1.0,
+            konjnd_aggregation_step_p: 1.0,
+            konjnd_aggregation_samples_per_ref: 8,
+            konjnd_aggregation_refs_per_step: 8,
+            seed: 42,
+            dump_checkpoints_every: 10,
+            dump_checkpoints_dir: Some(dir.clone()),
+            ..Default::default()
+        };
+        hp.validation_policy = ValidationPolicy::Min;
+        let mut log: Vec<String> = Vec::new();
+        let _bake = train_mlp_with_tv_anchored_equiv_pjnd(
+            &mut groups,
+            KAH_N_FEATURES,
+            &hp,
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+            Some(&konjnd_agg),
+        );
+        let mut dumps: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("ckpt_epoch"))
+            .collect();
+        dumps.sort();
+        assert!(
+            dumps.len() >= 3,
+            "expected >=3 checkpoint dumps (epochs 0,10,20), got {dumps:?}"
+        );
+        for d in &dumps {
+            let bytes = std::fs::read(d).unwrap();
+            assert!(bytes.len() > 64, "dump too small: {} ({} B)", d.display(), bytes.len());
+            assert_eq!(bytes[4], 3, "dump not ZNPR v3: {}", d.display());
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     fn kah_aggregation_mse_under_bake(
         bake_bytes: &[u8],
         features: &[Vec<f64>],

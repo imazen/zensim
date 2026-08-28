@@ -187,6 +187,16 @@ struct Args {
     #[arg(long, default_value_t = 10)]
     log_every: usize,
 
+    /// H-TRAJ (balance campaign 2026-08-28): dump a spline-less checkpoint
+    /// bake every N epochs (0 = off). Fires at validation points only, so
+    /// use a multiple of --log-every. 0-hidden per-sample-α lane only.
+    #[arg(long, default_value_t = 0)]
+    dump_checkpoints_every: usize,
+
+    /// Directory for --dump-checkpoints-every output (default: cwd).
+    #[arg(long)]
+    dump_checkpoints_dir: Option<std::path::PathBuf>,
+
     /// Early-stop patience (epochs of no validation improvement). 0 disables.
     #[arg(long, default_value_t = 50)]
     early_stop_patience: usize,
@@ -2656,6 +2666,8 @@ fn main() {
         leaky_alpha: args.leaky_alpha,
         seed: args.seed,
         log_every: args.log_every,
+        dump_checkpoints_every: args.dump_checkpoints_every,
+        dump_checkpoints_dir: args.dump_checkpoints_dir.clone(),
         l2_lambda: args.l2,
         early_stop_patience: args.early_stop_patience,
         validation_policy: val_policy,
