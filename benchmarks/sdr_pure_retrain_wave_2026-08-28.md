@@ -361,3 +361,4 @@ variance: **SPH1-M3a EXTENSION (frozen): 3 more SPH1 seeds {4006,4007,4008};
 eligibility clauses unchanged; among eligible seeds prefer highest M3a.**
 Queued behind H-BAL. If no new seed is both eligible and ≥0.83 M3a, PH_s4004
 stands as the wave candidate with its M3a honestly recorded.
+LF-severe addendum: PH_s4004 corruption q10 0.0774 / q20 0.1920 — best of all candidates (incumbent 0.061/0.188); worst families unchanged (aliasing, channel swaps — corruption-head territory). The two-zone LF case is complete on every measure.

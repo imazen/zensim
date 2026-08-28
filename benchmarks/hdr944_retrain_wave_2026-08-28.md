@@ -365,3 +365,29 @@ paired-Δ vs `HDR944_L1T1_s4005_hfpack` — displacement requires gates 1-3
 PASS and Δ > 0 with CI excluding 0. Any seed passing all → E.4 among
 passers picks the freeze proposal; 0/4 passing → the incumbent freezes with
 the dose-response fully measured (1.0 / 0.3 / 0.15 / 0.10 / 0).
+
+### GH2 RESULTS — 0/4 displace; dose-response complete; teacher EXONERATED (2026-08-28)
+
+| cell | jxl mono (bar 0.93) | fidelity | G-HF | HF shared-band Δ |
+|---|---|---|---|---|
+| GH2a_s4003 (0.10) | 0.917 ✗ | all ✓ | ✓ | +0.0141 [+0.0067,+0.0210] |
+| GH2a_s4005 (0.10) | 0.867 ✗ | all ✓ | ✓ | +0.0277 [+0.0199,+0.0353] |
+| GH2b_s4003 (0.15) | 0.921 ✗ | all ✓ | ✓ | +0.0123 [+0.0055,+0.0187] |
+| GH2b_s4005 (0.15) | 0.866 ✗ | all ✓ | ✓ | +0.0257 [+0.0182,+0.0329] |
+
+Full dose-response on jxl mono: **0 → 0.996 PASS; 0.10 → 0.867-0.917;
+0.15 → 0.866-0.921; 0.30 → 0.852-0.872; 1.0 (t2) → fidelity broken.** The
+HF gain is real at every dose; the mono cost appears at the smallest dose
+and never clears the bar. **Mechanism isolated by measurement:** BOTH
+teachers are themselves ~0.995-0.999 monotone on every codec's ladders
+(era-B jxl 0.998, cvvdp-mix jxl 0.995) — the damage is NOT inherited label
+noise but a target-mixture/optimization artifact, invisible to epoch
+selection (val = cvvdp-mix only). Closing it would need a mono-aware
+constraint or selection signal — a NEW mechanism, not a dose.
+
+**HDR lane verdict: under the frozen displacement rule, nothing displaces.
+The incumbent `HDR944_L1T1_s4005_hfpack` freeze case is COMPLETE** with two
+falsified challengers (t2, GH-family at 4 doses), the amended route panel,
+6/6 author panel, G-OUT v2 on-route + bounded, G-HF, and now a
+teacher-exonerating mechanism record. The freeze remains the USER's call
+(overnight — logged, will be presented after 08:00 Denver).
