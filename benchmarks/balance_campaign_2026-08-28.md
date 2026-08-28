@@ -387,3 +387,33 @@ recovery is real and costs top-zone dial granularity** — the two are the
 same coarse-structure coin. PH_s4004 (final) remains the sole
 full-eligibility candidate; e060 is the quantified M3a-recovery option
 whose clause-(iv) relaxation only the user can grant.
+
+## GRANULARITY GOALS RATIFIED + CLAUSE-(iv) AMENDMENT (user: "yes, amend the gate to span+reach+mono", 2026-08-28 ~05:3xZ)
+
+The user's framing — "granularity matters only up to a useful point" — is
+now the recorded design position, with these ratified goals:
+
+- **Dial**: useful quantum = 1 point (users type integers; every censused
+  loop succeeds at ±2, best land ±0.3-1.5). Goals: HF-zone (q≥88) span ≥ 8
+  per codec; reach to the codec's true ceiling; median step ≈ 0.5 per
+  step-1 rung; ladder mono ≥ 0.93; the BINDING test is closed-loop (k3
+  census median |err| ≤ 1). Tied-rate is a DIAGNOSTIC capped ~0.5 — honest
+  ties exist (adjacent rungs that are perceptually identical SHOULD tie; a
+  metric that always separates adjacent encoder rungs is hallucinating).
+- **Score**: quantum 0.5; report to 0.1; cross-model differences < 0.25 are
+  noise; bounded within the declared range (G-OUT clause D unchanged).
+- **Diffmap**: consumed at codec partition sizes — smallest actionable
+  8px. Goals: block-Δ rank/magnitude correct at 8-128px (M3a ≥ 0.85 gold
+  at 16-128), sum-consistent with the scalar, O(1) rect query. Finer than
+  8px = visualization only.
+
+**AMENDED two-zone eligibility clause (iv) — G-GRAN**, replacing the
+HF-tied bar (operationalization registered before recomputation):
+per codec on the HF zone (q ≥ 88): **span** p50(top)−p50(bottom) ≥ 8;
+**reach** p50(top) ≥ incumbent's p50(top) − 1 (non-inferiority, avoids
+codec-ceiling absolutes); **mono** ladder-mono ≥ 0.93. HF tied-rate stays
+REPORTED with a 0.5 diagnostic cap. Clauses (i)-(iii) and G-OUT v2
+unchanged. Measured basis for the amendment: e060's spans/reach are equal
+or better than the final's (jpeg 14.9 vs 10.6, webp 9.7 vs 8.4, jxl 27.2
+vs 25.5) — its higher tied-rate was clustered honest ties inside a WIDER
+range, the exact failure mode of tied-rate as a gate.

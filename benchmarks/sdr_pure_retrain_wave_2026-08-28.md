@@ -412,3 +412,16 @@ family-clean candidates; the arm's DECIDING axes are cid22 (human,
 fully-held-out), the semi-hidden secondaries, and post-hoc codec-like/
 non-codec subgroup reads of the (already-seen) hidden panel. Gates:
 G-OUT v2 + cid22 paired-CI vs incumbent AND vs PH_s4004.
+
+## CLAUSE-(iv) AMENDED BY USER → G-GRAN; eligible set = {PH_s4004, e060} (2026-08-28)
+
+User ratified the granularity goals and the amendment ("yes, amend the gate
+to span+reach+mono"; operationalization + measured basis in the campaign
+md). Recomputed: **W10L9PH_s4004_packed G-GRAN PASS** (tied diag 0.421) and
+**PH_s4004_e060 G-GRAN PASS** (tied diag 0.474) against incumbent-reach
+non-inferiority (avif 96.2 / jpeg 94.4 / jxl 96.6 / webp 91.9). e070 stays
+out (cid22 CI-sacrificed — clause ii, untouched by the amendment). The
+final's earlier 0.228 tied figure was the cross-codec pool; per-codec max
+is 0.421 (webp) — recorded for honesty. Selection between the two eligible
+candidates: E.4 among eligible per the frozen wave rule, pending the
+user-called FINE trajectory pass (may add a dominating checkpoint).
