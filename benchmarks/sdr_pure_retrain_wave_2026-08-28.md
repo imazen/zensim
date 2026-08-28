@@ -25,7 +25,7 @@ Unchanged groups (separate corpora, standing clean audits): cid22_train201
 train/val.
 
 ## Recipe (frozen = the W10L9 embedded argv verbatim, paths swapped, seeds {4003,4004,4005})
-L0 (0-hidden), target human_score ×100, epochs 120, pairs/epoch 50k,
+L0 (0-hidden) [ARCH CORRECTION 2026-08-28: the trainer IGNORES --n-hidden-layers 0 (cookbook §1); the emitted bakes are 128-hidden LeakyReLU MLPs (verified from bytes: 667→128→1 post-prune). The campaign-era 'L0' label was the known additive-vs-MLP mislabel recurring; caught in the era-lessons revisit.], target human_score ×100, epochs 120, pairs/epoch 50k,
 coarse-decay 1e-5, max-features 944, the full winsor/signed_cbrt transform
 list from the repro, group weights identical.
 
