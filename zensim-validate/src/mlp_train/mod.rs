@@ -2793,6 +2793,42 @@ pub fn train_mlp_strategy(
                 log,
             );
 
+            // H-TRAJ checkpoint dump (balance campaign 2026-08-28), plain-MLP
+            // lane. TWIN OF the best-val snapshot below — same serialization,
+            // current weights, spline-less (the pack step fits the spline).
+            if hyperparams.dump_checkpoints_every > 0
+                && epoch % hyperparams.dump_checkpoints_every == 0
+            {
+                let ckpt_bytes = bake_two_layer_znpr_v3(
+                    &scaler_mean,
+                    &scaler_scale,
+                    &w1,
+                    &b1,
+                    &w2,
+                    &b2,
+                    n_features,
+                    n_hidden,
+                    n_outputs,
+                    hyperparams.out_dtype,
+                    hyperparams.feature_transforms.as_deref(),
+                    hyperparams.feature_transform_params.as_deref(),
+                );
+                let dir = hyperparams
+                    .dump_checkpoints_dir
+                    .clone()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let ckpt_path = dir.join(format!("ckpt_epoch{epoch:03}.bin"));
+                std::fs::write(&ckpt_path, &ckpt_bytes)
+                    .expect("H-TRAJ checkpoint dump write failed");
+                log_line(
+                    &format!(
+                        "  checkpoint dump: {} ({} B)",
+                        ckpt_path.display(),
+                        ckpt_bytes.len()
+                    ),
+                    log,
+                );
+            }
             if val_score > best_val_score {
                 best_val_score = val_score;
                 stale_epochs = 0;
@@ -9624,7 +9660,7 @@ fn train_mlp_per_sample_alpha_head(
             {
                 assert!(
                     !use_2layer && !use_skip,
-                    "--dump-checkpoints-every is wired for the 0-hidden                      per-sample-α lane only"
+                    "--dump-checkpoints-every: 2-layer/skip not wired (plain-MLP and 0/1-hidden per-sample-alpha lanes are)"
                 );
                 let bake_w1 = proj_w1_masked(&w1);
                 let bake_rank_w = proj_leq0(&rank_w);
@@ -12287,6 +12323,75 @@ mod tests {
     /// that lives in `zensim::metric::forward_one_bake`). For the
     /// test, we replicate the pin here to compare apples-to-apples
     /// with the trainer's loss.
+    /// H-TRAJ dump feature, PLAIN-MLP lane (the W10L9 recipe's lane —
+    /// caught missing on first deployment 2026-08-28: the recipe logs the
+    /// plain-loop format, and the alpha-lane-only hook emitted nothing).
+    #[test]
+    fn htraj_checkpoint_dumps_plain_lane() {
+        let dir = std::env::temp_dir().join(format!("htraj_plain_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut primary_features: Vec<Vec<f64>> = Vec::with_capacity(KAH_N_PRIMARY_PAIRS);
+        let mut primary_scores: Vec<f64> = Vec::with_capacity(KAH_N_PRIMARY_PAIRS);
+        for i in 0..KAH_N_PRIMARY_PAIRS {
+            let frac = (i as f64) / ((KAH_N_PRIMARY_PAIRS - 1).max(1) as f64);
+            primary_features.push(vec![frac, -1.0 + 2.0 * frac, 0.0, 0.0]);
+            primary_scores.push(0.5 + 0.5 * (-1.0 + 2.0 * frac));
+        }
+        let primary_refs: Vec<&[f64]> = primary_features.iter().map(|r| r.as_slice()).collect();
+        let mut groups = [TrainingGroup {
+            name: "synthetic_primary".to_string(),
+            human_scores: &primary_scores,
+            features: FeatureRows::Borrowed(&primary_refs),
+            metric_sigmas: None,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+            ref_ids: None,
+            loss_mode: GroupLossMode::default(),
+        }];
+        let hp = MlpHyperparams {
+            n_hidden: 8,
+            n_epochs: 30,
+            pairs_per_epoch: 200,
+            minibatch_size: 1,
+            initial_lr: 1e-2,
+            l2_lambda: 1e-6,
+            leaky_alpha: 0.01,
+            early_stop_patience: 0,
+            ranknet_weight: 1.0,
+            seed: 42,
+            dump_checkpoints_every: 10,
+            dump_checkpoints_dir: Some(dir.clone()),
+            ..Default::default()
+        };
+        let mut log: Vec<String> = Vec::new();
+        let _bake = train_mlp_with_tv_anchored_equiv_pjnd(
+            &mut groups,
+            KAH_N_FEATURES,
+            &hp,
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let dumps: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("ckpt_epoch"))
+            .collect();
+        assert!(
+            dumps.len() >= 3,
+            "expected >=3 plain-lane checkpoint dumps, got {dumps:?}"
+        );
+        for d in &dumps {
+            let bytes = std::fs::read(d).unwrap();
+            assert_eq!(bytes[4], 3, "dump not ZNPR v3: {}", d.display());
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// H-TRAJ dump feature (balance campaign 2026-08-28): a tiny
     /// per-sample-α train with --dump-checkpoints-every must emit v3 bakes
     /// at the val-aligned epochs, byte-parseable (header byte 4 == 3).
