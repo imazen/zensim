@@ -284,3 +284,22 @@ territory that is the corruption head's by design. The incumbent's hidden
 MIN edge was a non-product-distortion artifact. This decomposition is
 post-hoc on a seen panel — stated openly; its claims are subgroup reads of
 one sealed sample, not a new sealed test.
+
+## PAIRED-SYSTEM CLOSURE (2026-08-28 ~05:0xZ) — the corruption axis neutralized
+
+`bake_verdict --corruption-head corrhead944_s13.bin` joint reports, same
+head, both candidates: **identical — joint pass_q10 0.9256 / pass_q20
+0.7932 for BOTH** PH_s4004 and the incumbent (dial-alone 0.077-0.192; the
+corruption instrument's pass decisions are head-dominated by design). The
+paired-system corruption axis therefore does not discriminate the SDR
+candidates, and the incumbent's hidden non-codec-synthetic edge — its last
+standing advantage — is exactly the territory the (identical) head covers.
+
+**Final SDR case, complete:** (1) paired corruption equal; (2) PH_s4004
+dominates in-domain (sole eligible, both zones CI-sig, G-OUT PASS);
+(3) PH_s4004 beats the incumbent on the hidden CODEC-LIKE subset on all
+three independent targets; (4) the incumbent leads only on unpaired
+non-codec synthetics, neutralized by (1). Recorded costs of PH_s4004,
+stated plainly: M3a 0.7628 (steering-map coherence, vs incumbent 0.8626)
+and whole-panel unpaired hidden MIN. All freeze decisions remain the
+user's, presented after overnight.
