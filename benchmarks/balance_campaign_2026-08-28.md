@@ -253,3 +253,34 @@ training breadth restores hidden robustness while the HF leg keeps the
 balance; its board axes would need family-leakage discounting, which is the
 trade the user weighs. All freeze decisions remain the user's; presented
 after 08:00 Denver per the overnight rule.
+
+## TERMINAL-READ ADDENDUM (post-hoc decomposition of the SEEN panel — labeled as such; no new selection event)
+
+Per-distortion-type decomposition of the already-read hidden panel answers
+WHERE the incumbent's MIN edge lives, and it reverses the product reading:
+
+**Codec-like subset** (compress_jpeg, compress_jp2k, pixelate,
+color_quantize, blur_gauss, denoise_dncnn; n=2,495 hidden rows —
+the distortion families the steering product actually encounters):
+
+| model | ssim2 | butter | cvvdp | MIN |
+|---|---|---|---|---|
+| **PH_s4004** | **0.9549** | **0.7571** | **0.9190** | **0.7571** |
+| incumbent | 0.9346 | 0.7279 | 0.9166 | 0.7279 |
+| PH_s4003 | 0.9324 | 0.7261 | 0.9170 | 0.7261 |
+
+**PH_s4004 beats the incumbent on ALL THREE independent targets on
+never-seen codec-like content.** Its whole-panel deficit is concentrated in
+NON-codec synthetics: noneccentricity (patch-shuffle, Δbutter −0.120),
+color_saturate_hsv (−0.089), color noise/shift classes — distortions no
+codec emits and which the product design assigns to the corruption HEAD.
+It is BETTER than the incumbent on mean_shift (+0.073), blur_lens (+0.069),
+contrast (+0.051), color_block (+0.038).
+
+**Synthesis, sharpened:** the "three-way tension" largely dissolves under
+the product lens — PH_s4004 wins in-domain (board), wins hidden codec-like
+(off-distribution, independent targets), and cedes only non-codec synthetic
+territory that is the corruption head's by design. The incumbent's hidden
+MIN edge was a non-product-distortion artifact. This decomposition is
+post-hoc on a seen panel — stated openly; its claims are subgroup reads of
+one sealed sample, not a new sealed test.
