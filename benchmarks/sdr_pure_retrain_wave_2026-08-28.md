@@ -362,3 +362,22 @@ eligibility clauses unchanged; among eligible seeds prefer highest M3a.**
 Queued behind H-BAL. If no new seed is both eligible and ≥0.83 M3a, PH_s4004
 stands as the wave candidate with its M3a honestly recorded.
 LF-severe addendum: PH_s4004 corruption q10 0.0774 / q20 0.1920 — best of all candidates (incumbent 0.061/0.188); worst families unchanged (aliasing, channel swaps — corruption-head territory). The two-zone LF case is complete on every measure.
+
+## H-BAL RESULTS — prediction confirmed; the mechanism question is closed (2026-08-28)
+
+Val-only HF signal (identical leg, 0:1.0) recovers only ~20-25% of the HF
+gap (hfnl 0.476/0.469/0.398 vs SPH1's 0.729/0.752/0.734) while CRATERING
+the product axes (imazen26 0.8755/0.8701/0.9239 vs ≥0.92 for every other
+family member; cid22 0.870-0.881) — epoch selection under an HF-weighted
+geomean lands on checkpoints that TRADE product skill for HF, because no
+gradient ever taught both. **The cid22↔hfnl anti-separation is decisively a
+data-mix property: HF skill must be in the GRADIENT (SPH1), where it is
+additive; in the SELECTION (H-BAL) it is only exchangeable.** All three
+H-BAL seeds ineligible on their face (imazen26 collapse).
+
+Unexpected observation, recorded not chased: H-BAL checkpoints carry the
+POOL'S HIGHEST M3a (0.9308/0.9323/0.8689 vs SPH1 0.73-0.81, purity
+0.83-0.88) — earlier/HF-val-selected epochs have far more coherent
+attribution maps, consistent with the E-M coarse-mass-drift mechanism. The
+M3a↔rank trade across training epochs is a real structure worth a future
+registered study (checkpoint-level M3a trajectory), not an ad-hoc chase.
