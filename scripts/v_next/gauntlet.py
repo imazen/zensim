@@ -554,7 +554,34 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                 stats = sc_json.get(corp, {}).get(ref)
                 if not stats:                      # JSON omitted it -> canonical panel at build
                     stats = _panel_srocc_plcc(pred, rv)
-                cell[ref] = {"pts": pts, "fit": _fit_line(pred, rv),
+                # Geometric plot diagnostics (user directive 2026-08-28): computed in
+                # shape-normalized space (pred mapped BY RANK onto the reference's
+                # quantiles), residual r = qq - ref in ref units:
+                #   out4      — fraction outside the ±4·MAD envelope (G-OUT severe band)
+                #   maxd/p99d — max / p99 |r| as a fraction of the ref span p1..p99
+                #   cov/clump — fraction of 20 ref-span bins holding ≥0.5% of points /
+                #               largest single-bin share (density structure)
+                #   clampLo/Hi— mass sitting AT the prediction's exact min/max value
+                #               (dial floor/ceiling saturation, the incumbent-5.4 class)
+                geo = None
+                okm = np.isfinite(pred) & np.isfinite(rv)
+                if okm.sum() >= 50:
+                    pv, rr = pred[okm], rv[okm]
+                    order = np.argsort(pv, kind="stable")
+                    qq = np.empty(len(pv)); qq[order] = np.sort(rr)
+                    r = qq - rr
+                    mad = float(np.median(np.abs(r - np.median(r))) * 1.4826) or 1e-9
+                    span = float(np.percentile(rr, 99) - np.percentile(rr, 1)) or 1e-9
+                    hist, _ = np.histogram(rr, bins=20)
+                    geo = {"out4": round(float((np.abs(r) > 4 * mad).mean()), 4),
+                           "maxd": round(float(np.max(np.abs(r)) / span), 3),
+                           "p99d": round(float(np.percentile(np.abs(r), 99) / span), 3),
+                           "cov": round(float((hist >= max(1, len(rr) // 200)).mean()), 2),
+                           "clump": round(float(hist.max() / len(rr)), 2),
+                           "clampLo": round(float((pv == pv.min()).mean()), 4),
+                           "clampHi": round(float((pv == pv.max()).mean()), 4),
+                           "mad": round(mad, 3)}
+                cell[ref] = {"pts": pts, "fit": _fit_line(pred, rv), "geo": geo,
                              "srocc": stats.get("srocc"), "plcc": stats.get("plcc"),
                              "n": stats.get("n", len(pts))}
             if cell:
@@ -1339,6 +1366,10 @@ function scatterOpt(b,corp,ref,cell){
     const ys=cell.pts.map(p=>p[1]);const lo=Math.min.apply(null,ys),hi=Math.max.apply(null,ys);
     series.push({type:'line',silent:true,symbol:'none',z:3,
       data:[[lo,lo],[hi,hi]],lineStyle:{color:t['text-secondary'],width:1.5,opacity:.7,type:'dashed'}});
+    if(cell.geo&&cell.geo.mad){const m=4*cell.geo.mad;
+      [[lo,lo+m,hi,hi+m],[lo,lo-m,hi,hi-m]].forEach(l=>series.push({type:'line',silent:true,
+        symbol:'none',z:1,data:[[l[0],l[1]],[l[2],l[3]]],
+        lineStyle:{color:t['text-secondary'],width:1,opacity:.35,type:'dotted'}}));}
   }else if(cell.fit)series.push({type:'line',silent:true,symbol:'none',z:3,
     data:[[cell.fit[0],cell.fit[1]],[cell.fit[2],cell.fit[3]]],
     lineStyle:{color:c,width:2,opacity:.9}});
@@ -1355,7 +1386,10 @@ function scatterOpt(b,corp,ref,cell){
   }
   return{animation:false,
     title:{text:(b.name.length>30?b.name.slice(0,29)+'…':b.name)+ensTag(b),
-      subtext:'ρ '+f3(cell.srocc)+'   r '+f3(cell.plcc)+'   n='+cell.n,
+      subtext:'ρ '+f3(cell.srocc)+'   r '+f3(cell.plcc)+'   n='+cell.n
+        +(cell.geo?('\nout '+(cell.geo.out4*100).toFixed(1)+'%·maxd '+(cell.geo.maxd*100).toFixed(0)
+          +'%sp·cov '+(cell.geo.cov*100).toFixed(0)+'%·clump '+(cell.geo.clump*100).toFixed(0)
+          +'%·clamp '+(cell.geo.clampLo*100).toFixed(1)+'/'+(cell.geo.clampHi*100).toFixed(1)+'%'):''),
       top:2,left:8,itemGap:1,
       textStyle:{color:t['text-primary'],fontSize:10.5,fontWeight:600},
       subtextStyle:{color:t['text-secondary'],fontSize:9.5}},
