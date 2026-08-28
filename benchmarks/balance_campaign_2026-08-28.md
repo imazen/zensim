@@ -141,3 +141,31 @@ optimism, and paired-CI eligibility (±0.002 resolution) is measuring real
 differences. Caveats recorded: one axis (cid22), one recipe family;
 board-scale selection (300 rows) or noisier axes (per-ref hfnl) would show
 more — the H-HID terminal read remains the generalization check of record.
+
+## H-MAXIMIN lenses FROZEN + the forking-paths guard (2026-08-28, pre-terminal)
+
+Computing the registered percentile-maximin exposed its scale-blindness
+(BAL_E1 tops it while carrying a CI-significant −0.33 hfnl deficit, because
+tightly-packed axes rank-count the same as chasms); z-maximin has the
+mirrored defect (pool-spread-inverse weighting amplifies milli-differences
+on packed axes). Rather than iterate lenses until one flatters a favorite,
+the lens SET is frozen here with each lens's pick, and the sealed hidden
+panel adjudicates BETWEEN lenses at terminal (which pick generalizes).
+No lens edits after this commit.
+
+| lens | pick | note |
+|---|---|---|
+| freeze_check E.4 (composite + M3a tie-break) | W10L9P_s4005_packed | sel_comp 0.9876 |
+| wave eligibility-first (frozen two-zone + G-OUT) | **W10L9PH_s4004_packed** | sole eligible |
+| percentile-maximin (as first registered) | BAL_E1 / PH_s4003 (tied 0.462) | scale-blind, kept for the record |
+| z-maximin | W10L9PH_s4003_packed | spread-inverse, kept for the record |
+| CI-unit maximin (gap-to-best / paired-CI halfwidth; hw: cid22 .0017, hfnl .0169, others .003 approx) | **W10L9PH_s4004_packed** | worst gap 5.1 units (kadid); SPH1 seeds sweep top-3 (5.1/5.5/8.2 vs 18.7 next) |
+
+Whatever the lens, the SPH1 family IS the balance result; lenses only
+permute within it. Distinct terminal picks to score on H-HID:
+{W10L9P_s4005_packed, W10L9PH_s4004_packed, W10L9PH_s4003_packed, BAL_E1}.
+
+Semi-hidden preview (axes never used in eligibility; |srocc| read down
+columns, aic4/sdr25 stored orientations negative): PH_s4004 beats the
+INCUMBENT on all six (aic3 .800, aic4 .914, csiq .944, tid .939, sdr25
+.977, konjnd .501) — no hidden-axis collapse.
