@@ -274,7 +274,7 @@ def family_of(name: str) -> str:
         return "balance campaign"
     if n.startswith("W10L9P"):
         return "purity retrain"
-    if n.startswith(("W10L9", "W10L", "KFG")):
+    if n.startswith(("W10L9", "W10L", "KFG", "w11_")):
         return "wave 10/11"
     if n.startswith(("HDR944", "bhdr")):
         return "HDR"
