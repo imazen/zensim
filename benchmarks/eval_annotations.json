@@ -712,6 +712,43 @@
    "reason": "Fit-internal validate views use the origin split; family twins cross it (channel B). The wiring decisions rested on the 27-cell census (different corpus, verified clean at d<=2), not on these numbers.",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (MEASUREMENTS 2+3)",
    "date": "2026-08-28"
+  },
+  {
+   "id": "sph1broad-family-exposed-axes",
+   "kind": "annotated",
+   "fields": [
+    "rank.imazen26",
+    "rank.nonphoto",
+    "rank.hfnlproxy"
+   ],
+   "scope": {
+    "names": [
+     "W10L9PBR_s4003_packed",
+     "W10L9PBR_s4004_packed",
+     "W10L9PBR_s4005_packed"
+    ]
+   },
+   "reason": "SPH1-broad trains on the UN-purged tbig base (5 test + 12 validate imazen-26 ids); its imazen26/nonphoto/hfnl reads are family-exposed \u2014 REPORTED, never rankable against family-clean candidates (arm registration). Deciding axes were cid22 + semi-hidden; the arm was falsified there (cid22 CI-worse vs both references).",
+   "record": "benchmarks/sdr_pure_retrain_wave_2026-08-28.md (SPH1-BROAD ARM + fine+broad RESULTS)",
+   "date": "2026-08-28"
+  },
+  {
+   "id": "htraj-checkpoint-provenance",
+   "kind": "annotated",
+   "fields": [
+    "repro",
+    "bake_sha256"
+   ],
+   "scope": {
+    "names": [
+     "PH_s4004_e060",
+     "PH_s4004_f054",
+     "PH_s4004_f058"
+    ]
+   },
+   "reason": "H-TRAJ checkpoint rows: harvested from the UNSTAMPED dump bakes (repro null on the board); stamped siblings (*_stamped.bin, zentrain.repro + checkpoint_epoch, byte/score-identity verified) exist for freeze packaging. Weights chain is bit-identical to the W10L9PH_s4004 retrace (campaign md, REPRO CHECK).",
+   "record": "benchmarks/balance_campaign_2026-08-28.md (CHECKPOINT REPRO PACKAGING)",
+   "date": "2026-08-28"
   }
  ]
 }

@@ -221,6 +221,8 @@ CURATED_BOARD = [
     # balance campaign (2026-08-28): the first fully-eligible two-zone candidate
     # (dominates incumbent on BOTH zones, G-OUT v2 PASS) + the frozen-lens picks
     "W10L9PH_s4004_packed", "W10L9PH_s4003_packed", "BAL_E1_s4010_s4006",
+    # H-TRAJ checkpoint alternative on the live decision (M3a 0.833, 7/8 floors)
+    "PH_s4004_e060",
 ]
 # "Sprint bests" (user request 2026-08-28): ONE selected leader per sprint/era,
 # newest last. The ensembles sprint's best is resolved at build time (highest
@@ -268,7 +270,7 @@ def family_of(name: str) -> str:
         return "arm H (konjnd leg)"   # wave-7 cells + their packaged forms
     if n.startswith("EM4_"):
         return "era bridge"
-    if n.startswith(("W10L9PH", "W10L9PB", "BAL_")):
+    if n.startswith(("W10L9PH", "W10L9PB", "BAL_", "PH_s4004")):
         return "balance campaign"
     if n.startswith("W10L9P"):
         return "purity retrain"
