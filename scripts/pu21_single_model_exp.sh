@@ -33,7 +33,7 @@ json.dump(json_map, open(os.path.join(D, "srcmap.json"), "w"))
 PY
 # 2) srgb -> PQ16 (convention owner)
 say "srgb->pq"
-nice -n19 /home/lilith/.venvs/pytools/bin/python "$REPO/scripts/hdr/srgb_to_pq_png.py" "$D/srclist.tsv" "$D/pq" --jobs 8 >> "$HB" 2>&1
+nice -n19 /home/lilith/.venvs/pytools/bin/python "$REPO/scripts/hdr/srgb_to_pq_png.py" "$D/srclist.tsv" "$D/pq" --jobs 1 >> "$HB" 2>&1
 # 3) build pq + sdr pair TSVs
 python3 - "$PAIRS" "$D" <<'PY'
 import csv, json, os, sys

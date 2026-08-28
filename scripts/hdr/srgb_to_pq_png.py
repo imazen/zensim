@@ -60,6 +60,12 @@ def convert(src: str) -> str:
 
 paths = [l.strip() for l in open(a.list_tsv) if l.strip()]
 os.makedirs(a.out_dir, exist_ok=True)
-with ProcessPoolExecutor(max_workers=a.jobs) as ex:
-    res = list(ex.map(convert, paths, chunksize=8))
+if a.jobs <= 1:
+    # SERIAL path (2026-08-28): --jobs 1 avoids multiprocessing entirely —
+    # forkserver children can resolve a mixed interpreter in venv setups and
+    # die at import (measured: PU21 experiment, all 849 conversions lost).
+    res = [convert(p) for p in paths]
+else:
+    with ProcessPoolExecutor(max_workers=a.jobs) as ex:
+        res = list(ex.map(convert, paths, chunksize=8))
 print(f"converted {res.count('ok')}, skipped {res.count('skip')}, total {len(paths)}")
