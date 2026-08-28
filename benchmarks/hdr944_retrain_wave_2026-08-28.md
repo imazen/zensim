@@ -325,3 +325,28 @@ HF-anchored parity invocation (anchor_hf_t1, verify 944-CID22).
 Selection among own seeds: freeze_check E.4. Driver:
 `scripts/hdr_gh1_arm.sh` (queued behind the SDR seed extension —
 serialized heavy jobs).
+
+### GH1 RESULTS — mechanism real, mono cost fatal; incumbent stands (2026-08-28)
+
+3/3 seeds trained/packed/harvested clean. Frozen gates:
+
+| seed | route fidelity gm/svt/jxl | jxl mono (bar 0.93) | G-HF p50 / frac≥88 | HF shared-band Δ vs incumbent |
+|---|---|---|---|---|
+| GH1_s4003 | 1.15 / 1.00 / 0.75 ✓ | **0.852 ✗** | 93.80 / 0.984 ✓ | **+0.0276 [+0.0188,+0.0363]** |
+| GH1_s4004 | 0.72 / 1.00 / 0.80 ✓ | **0.872 ✗** | 93.83 / 0.979 ✓ | **+0.0266 [+0.0147,+0.0389]** |
+| GH1_s4005 | 1.08 / 0.99 / 0.83 ✓ | **0.859 ✗** | 93.84 / 0.975 ✓ | **+0.0272 [+0.0190,+0.0353]** |
+
+**Verdict under the frozen displacement rule: GH1 does NOT displace — gate 1
+fails on every seed (jxl mono 0.85-0.87 vs incumbent 0.996).** The science:
+the era-B HF admixture at weight 0.3 adds REAL, seed-consistent HF-band rank
+skill (+0.027, all CIs exclude 0) and full addressability, at the isolated
+cost of jxl ladder monotonicity — the dose-response across the family is now
+measured (t2@1.0: fidelity broken ×1.9; GH1@0.3: fidelity fine, mono broken,
+HF +0.027; incumbent@0: all gates pass). Per this arm's own registration,
+the retrain levers are exhausted and **the incumbent
+`HDR944_L1T1_s4005_hfpack` freeze case is COMPLETE** — E.4 selection, G-HF,
+amended route panel (only faithful dial), 6/6 author panel, HF CI reversal
+of t2, G-OUT v2 on-route + bounded everywhere, and now two falsified
+challengers. A micro-dose arm (0.10-0.15) chasing the +0.027 without the
+mono cost is the one remaining registered-able retrain idea; running it is
+the USER's call, as is the freeze.
