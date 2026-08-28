@@ -396,3 +396,19 @@ and exactly what clause D exists to catch. Across 6 SPH1 seeds the frozen
 eligibility passes EXACTLY ONE (s4004) — the filter is strict, not a rubber
 stamp. **Registered fallback: `W10L9PH_s4004_packed` stands as the wave
 candidate with M3a 0.7628 honestly recorded** (sha 61ebc4562c2c4f78…).
+
+## SPH1-BROAD ARM — registered 2026-08-28 ~04:5xZ BEFORE any fit (user call)
+
+Tests breadth-vs-purity on the hidden non-codec robustness axis. **Arm
+(frozen):** the SPH1 recipe with the UN-PURGED bigcodec base tables
+(`tbig_944_200k.parquet` 208,169 rows + `sota944/teacher/tbig_teacher944.parquet`
+— the incumbent's own training breadth) + the FAMILY-CLEAN HF leg
+(`tbig_hf_pure`, so the HF signal carries no new leakage; the discount is
+confined to the base tables). Seeds {4003,4004,4005}, stems `W10L9PBR_s*`,
+pack/harvest identical. **Leakage discount, stated up front:** its
+imazen26/nonphoto/hfnl board reads are family-exposed (the un-purged base
+holds 5 test + 12 validate ids) and are REPORTED but not rankable against
+family-clean candidates; the arm's DECIDING axes are cid22 (human,
+fully-held-out), the semi-hidden secondaries, and post-hoc codec-like/
+non-codec subgroup reads of the (already-seen) hidden panel. Gates:
+G-OUT v2 + cid22 paired-CI vs incumbent AND vs PH_s4004.
