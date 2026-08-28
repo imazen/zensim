@@ -872,3 +872,26 @@ domain-transposed front-end is a strong transfer result; a JOINT-trained
 PU-front model (SDR+HDR legs through one PU front) might close much of the
 gap and would be the registered follow-up wave if the user wants the
 single-model line pursued.
+
+## W11 JOINT-SELECTION VERDICT (2026-08-28 ~23:0xZ) — no full pass; the frontier moved anyway
+
+Full frozen battery on the shortlist (G-OUT + paired CIs on cid22 +
+VALIDATE-hfnl + bands + G-GRAN):
+
+| cell | cid22 vs A | v-hfnl vs A | m3a | fails |
+|---|---|---|---|---|
+| s4014_final | −0.0074 WORSE | +0.0043 NOT-WORSE | **0.8719** | tid-band 0.838; webp span 6.7/top 89.4 |
+| **s4014_e050** | **+0.0041 BETTER (campaign cid22 champ, +0.0101 vs inc)** | −0.0360 WORSE | 0.8415 | tid-band 0.839; **webp top 90.57 vs 90.9 (−0.33)** |
+| s4012_e080 | −0.0137 WORSE | **+0.0179 BETTER** | 0.8276 | c22-band 0.682; **webp top 90.67 (−0.23)**; has below-zero reach −12.7 |
+| s4013_e060 | — | — | — | G-OUT kadid:D |
+
+**Per the frozen W11 rule: zero cells pass full eligibility ⇒ A
+(W10L9PH_s4004_packed) remains the sole full-eligibility candidate; the
+h3own A/B step is not triggered** (it required eligibility-passing picks).
+The conservation pattern extends to a fourth wave: every challenger beats
+A on exactly one axis (e050: cid22; e080: v-hfnl; final: m3a) and pays
+elsewhere. NOTED FOR THE USER, not acted on: e050/e080 miss webp reach by
+0.23-0.33 dial points — under the ratified useful quantum (1 point) — so
+one user-approved bar adjustment would admit them; the frozen bars stand
+meanwhile. s4014_final remains the best map-strong artifact (m3a 0.872,
+v-hfnl parity with A) for a possible companion-map role.
