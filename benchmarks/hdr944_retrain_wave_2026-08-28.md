@@ -391,3 +391,13 @@ falsified challengers (t2, GH-family at 4 doses), the amended route panel,
 6/6 author panel, G-OUT v2 on-route + bounded, G-HF, and now a
 teacher-exonerating mechanism record. The freeze remains the USER's call
 (overnight — logged, will be presented after 08:00 Denver).
+
+## ★ FREEZE EXECUTED (user, 2026-08-28T08:53Z): HDR944_L1T1_s4005_hfpack = HDR CANDIDATE-OF-RECORD
+
+User approved after the complete case (E.4, G-HF, amended route panel, 6/6
+author panel, t2 + GH-family falsified, bounded, G-OUT on-route).
+Artifact: /mnt/v/output/zensim/bakes/hdr944-2026-08-27/HDR944_L1T1_s4005_hfpack.bin
+sha256 0a437d99… — packaged (HF-anchored spline, prune identity bit-exact on
+20,769 anchors, M3a measured, G-EXT inherited-by-rank-invariance).
+Candidate-of-record ONLY; shipped default remains B; Krasula-form human
+study = registered future lever.

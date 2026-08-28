@@ -505,3 +505,12 @@ Cells: `~/tmp/jxlloop/fresh_{v47ctl,candA,candB}/fresh/target_ab_*.tsv`
 **Board**: baked date+TIME now rendered (repro timestamp_epoch, file-mtime
 fallback), regen 339 bakes gates PASS. SUBSTRATE NOTE registered below for
 the 2026-08-05 loop panel.
+
+## ★ CAMPAIGN CLOSE-OUT (2026-08-28T08:53Z): BOTH FREEZES EXECUTED BY THE USER
+
+SDR: **W10L9PH_s4004_packed** (61ebc456…). HDR: **HDR944_L1T1_s4005_hfpack**
+(0a437d99…). The 24h directive's deliverable — truly balanced models argued
+to hidden held-out sets with critical instruments — is complete: 10
+hypotheses resolved by measurement, 2 gates ratified by the user (G-OUT v2,
+G-GRAN + granularity goals), 26 SDR candidates evaluated, every counter-
+argument tested, and the freezes made on the full instrument set.

@@ -425,3 +425,12 @@ final's earlier 0.228 tied figure was the cross-codec pool; per-codec max
 is 0.421 (webp) — recorded for honesty. Selection between the two eligible
 candidates: E.4 among eligible per the frozen wave rule, pending the
 user-called FINE trajectory pass (may add a dominating checkpoint).
+
+## ★ FREEZE EXECUTED (user, 2026-08-28T08:53Z): W10L9PH_s4004_packed = SDR CANDIDATE-OF-RECORD
+
+User approved "Freeze A: PH_s4004" after the full instrument set (bands 0-6,
+translation, in-loop trio, G-OUT v2, G-GRAN, hidden panel, paired CIs).
+Artifact: /mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/W10L9PH_s4004_packed.bin
+sha256 61ebc4562c2c4f78… — packaged (HF-anchored spline, pruned, M3a 0.7628
+measured, embedded repro, board current). Candidate-of-record designation
+ONLY: the shipped default remains B; any default flip is a separate proposal.
