@@ -303,3 +303,29 @@ non-codec synthetics, neutralized by (1). Recorded costs of PH_s4004,
 stated plainly: M3a 0.7628 (steering-map coherence, vs incumbent 0.8626)
 and whole-panel unpaired hidden MIN. All freeze decisions remain the
 user's, presented after overnight.
+
+## MORNING BRIEF (prepared 04:2xZ; fires as AskUserQuestion after 08:00 Denver)
+
+**Q1 — SDR freeze.** Recommend `W10L9PH_s4004_packed` (sha 61ebc456…):
+sole full-eligibility pass of 20; dominates the incumbent in-domain (cid22
++0.006, hfnl +0.332, both CI-sig; LF bands + corruption + reach); beats it
+on the hidden CODEC-LIKE subset on all three independent targets; paired
+corruption identical (head-dominated). Stated costs: M3a 0.7628 (steering
+coherence, vs 0.8626) and unpaired non-codec synthetics. Alternatives:
+incumbent (status quo; shift-robust unpaired), PH_s4003/E1 (compromise),
+hold.
+
+**Q2 — HDR freeze.** Recommend `HDR944_L1T1_s4005_hfpack` (sha 0a437d99…):
+case complete — E.4 selection, G-HF, amended route panel (only faithful
+dial), 6/6 author panel, t2 falsified (CI reversal + G-OUT + route), GH
+family falsified at 4 doses with teachers exonerated. Alternative: hold for
+the Krasula human study (multi-day).
+
+**Q3 — SPH1-broad arm (optional).** The un-purged 208k tbig + HF leg:
+tests whether training breadth restores the (non-codec) hidden robustness
+while keeping the HF gain; its board axes would carry a family-leakage
+discount. Run / skip.
+
+Both freezes are candidate-of-record designations only — the shipped
+default stays B; any default flip remains a separate proposal per the
+standing rule.
