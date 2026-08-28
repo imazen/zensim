@@ -1,5 +1,13 @@
 # TOP MODELS COOKBOOK — the science + exact reproduction paths (2026-07-18)
 
+> **★ CANDIDATES-OF-RECORD (frozen by user 2026-08-28; shipped default remains B):**
+> SDR **`W10L9PH_s4004_packed`** (61ebc456…; SPH1 recipe = W10L9 purity views +
+> family-clean tbig HF leg; the balance campaign's sole full-eligibility pass,
+> in-loop best) — recipe/evidence: `benchmarks/sdr_pure_retrain_wave_2026-08-28.md`
+> + `balance_campaign_2026-08-28.md`. HDR **`HDR944_L1T1_s4005_hfpack`**
+> (0a437d99…) — `benchmarks/hdr944_retrain_wave_2026-08-28.md`.
+
+
 > **ERA BANNER (added 2026-08-04).** The roster, champions, and numbers below are the
 > **372-era record** (v1 feature space, 372col corpora). The current era is **944**
 > (folded+append+append2): its record — frozen bar, arm results, corrections, the

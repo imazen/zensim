@@ -99,3 +99,20 @@ indexed, Tower-mirrored sha-verified. Shas (all message-verified on origin):
 zensim `2f32cf1f` (G-OUT final) → `431e311c`/`6f7e560b` (seed ext) →
 `8eacbcf8`/`359fbce9` (GH1/GH2) → `d8feb9cf`..`4669e282` (campaign chain) →
 `09dd01d2` (model-search closed + board sources) → `472cd6ef` (ledger).
+
+### ★ CRITERION 3 CLOSED (2026-08-28 ~09:0xZ): both freezes EXECUTED by the user
+
+SDR candidate-of-record: **W10L9PH_s4004_packed** (sha 61ebc4562c2c4f78…,
+selected under the frozen eligibility + user-ratified G-OUT v2/G-GRAN gates,
+confirmed by the user after the full requested instrument set: bands 0-6,
+translation utility, in-loop 27-cell trio). HDR candidate-of-record:
+**HDR944_L1T1_s4005_hfpack** (sha 0a437d99…, complete case: route panel,
+author panel, two challenger families falsified, G-HF, bounded). Both
+packaged (spline+prune+M3a+embedded repro), board current (339 bakes,
+gates PASS, date+time rendered). Shipped default remains B by standing
+rule; flips are separate proposals. Freeze record: zensim `b03bc4e7`
+(+ the balance-campaign chain `d8feb9cf`..`6f8edab7`). **With this, all
+seven criteria carry committed evidence — the DONE test is satisfied**;
+remaining registered levers (Krasula HDR human study, freeze-bar tied-row
+modernization, zenav1-aom gates when mature) are future work by design,
+not gaps.

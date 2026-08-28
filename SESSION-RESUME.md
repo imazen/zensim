@@ -41,7 +41,7 @@ low-stakes; annotation `imazen26-nonphoto-sharing-provenance-2026-08-27` in
 force. `imazen26_manifest.tsv` header + split column corrected (`77de3ccb`).
 Record: `benchmarks/imazen26_dhash_audit_2026-08-27.md`.
 
-**Open, user-gated (the board)**: D1 exclusion · D2 HDR freeze · D3 one-shot
+**RESOLVED 2026-08-28**: D1 EXECUTED (family re-slice) · D2 BOTH FROZEN — SDR candidate-of-record W10L9PH_s4004_packed (61ebc456), HDR HDR944_L1T1_s4005_hfpack (0a437d99); shipped default stays B · D3 wired (zenjpeg/jxl/svt) · D4 era-B. Balance campaign: `benchmarks/balance_campaign_2026-08-28.md`.
 wiring (zenjpeg zq / jxl B3 / svt qp_start) · D4 judge-era unification · D5
 history rewrite. Other-lane: zenav1-aom differential gates. Shas of record
 today: zensim `6d25dfee`→`77de3ccb`, imazen-26 `946cb61`+`a7bea19`, zenmetrics
