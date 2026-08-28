@@ -350,3 +350,18 @@ of t2, G-OUT v2 on-route + bounded everywhere, and now two falsified
 challengers. A micro-dose arm (0.10-0.15) chasing the +0.027 without the
 mono cost is the one remaining registered-able retrain idea; running it is
 the USER's call, as is the freeze.
+
+## MICRO-DOSE ARM (GH2) — registered 2026-08-28 BEFORE any fit (user call)
+
+The user chose one micro-dose arm before freezing. **Arms (frozen):** the
+GH1 recipe with the hf2 group's train-weight at **0.10 (GH2a)** and **0.15
+(GH2b)** — bracketing the dose inside the user's range; seeds {4003,4005}
+per dose (4 fits). Stems `HDR944_GH2a_s*` / `HDR944_GH2b_s*`. Pack (HF
+anchor) + harvest identical to GH1.
+
+**Gates + displacement rule (frozen, unchanged from GH1):** amended route
+fidelity + jxl/svt mono ≥ 0.93 + G-OUT v2 on-route + G-HF + HF shared-band
+paired-Δ vs `HDR944_L1T1_s4005_hfpack` — displacement requires gates 1-3
+PASS and Δ > 0 with CI excluding 0. Any seed passing all → E.4 among
+passers picks the freeze proposal; 0/4 passing → the incumbent freezes with
+the dose-response fully measured (1.0 / 0.3 / 0.15 / 0.10 / 0).

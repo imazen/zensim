@@ -284,3 +284,20 @@ konjnd/hfnl-preserving VARIANT lever goes to the user** (candidate design,
 mirroring the HDR L1 pattern that passed: same pure views + an HF-band
 extra group drawn from tbig_944_200k_pure human_score ≥ 0.90 at weight
 ~1.0 — purity-costless since it is the same family-clean table).
+
+## HF-PRESERVING VARIANT ARM (SPH1) — registered 2026-08-28 BEFORE any fit (user call)
+
+The user chose the escalation's recommended lever. **Arm (frozen):** the
+purity recipe verbatim + ONE extra group
+`tbig_hf:/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/tbig_hf_pure.parquet:1.0:0.0:both`
+— the family-clean tbig table filtered to human_score ≥ 0.90 (11,941 rows,
+1,973 refs, targets 0.90-0.984; built this session, same table = zero purity
+cost by construction; the HDR L1 target-coherent pattern, NOT GH1's
+cross-era mix). Seeds {4003,4004,4005}, stems `W10L9PH_s*`. Pack + harvest
+identical to the extension.
+
+**Gates (frozen, unchanged):** the extension's eligibility rule verbatim —
+G-OUT v2 + hfnl paired-Δ CI not wholly below 0 + cid22 paired-Δ CI not
+wholly below 0 + LF bottom-bands ≥ incumbent − 0.01 + LF mono 1.0 + HF tied
+≤ incumbent + 0.02. Selection among eligible: freeze_check E.4; below-zero
+reach breaks ties. If 0/3 eligible: report; no further silent arms.
