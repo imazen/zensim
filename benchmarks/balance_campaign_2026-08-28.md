@@ -643,3 +643,33 @@ that uncertainty). Validation gate re-run under the new maps: STILL PASSES
 Remaining non-optimality, stated: the maps are unconditional (content-
 conditional translation would cut residuals but requires features at
 target-setting time — a registered future lever, not silently added).
+
+## DIFFMAP-UTILITY A/B (h3own, paired encodes, fresh substrate) — THE MAP REVERSES THE LOOP STORY (2026-08-28)
+
+Own-attribution-map H3 steering vs scalar-only base, same 27 cells, both
+candidates, engagement gates exact:
+
+| candidate | arm | k2_best med\|err\| | k3_best med\|err\| | k3 dBytes |
+|---|---|---|---|---|
+| A PH_s4004 | base (scalar) | 0.971 | **0.343** | — |
+| A PH_s4004 | h3own (map) | 0.817 | 0.404 (W/L 9/17) | −0.83% |
+| B e060 | base (scalar) | 1.088 | 0.570 | — |
+| B e060 | **h3own (map)** | 0.908 | **0.205 (W/L 18/8) — best measured tonight** | **−1.45%** |
+
+**With the map IN the loop, the ordering flips: e060's map carries real
+allocation value** (0.570 → 0.205, beating every same-substrate number
+including A's base 0.343 and the v47 control 0.355, at −1.45% bytes),
+while **A's own map makes A worse at k3** (0.343 → 0.404). The earlier
+"M3a does not translate to loop utility" conclusion was true only of
+SCALAR-ONLY loops — the loop trio ran base arms where the map is unused.
+With map steering on, the M3a-strong checkpoint wins: **M3a's product
+meaning is rehabilitated as a map-on loop-value predictor** (one candidate
+pair, one codec, H3-mag arm, n=27 paired cells — scope stated).
+
+**Freeze implication, stated plainly:** the SDR freeze of A rested partly
+on "A best in-loop", which was the scalar-only reading. The product
+contract steers WITH the diffmap. Under the map-on reading, B (e060) is
+the better steering metric on this instrument. A remains
+candidate-of-record (rank eligibility + 8/8 floors + scalar loop +
+translation all still favor it); the map-on loop evidence now favors B —
+this goes back to the user rather than being absorbed silently.
