@@ -14,13 +14,16 @@ mkdir -p "$(dirname "$HB")"
 trap 'echo "$(date -u +%FT%TZ) EXIT rc=$?" >> "$HB"; touch "$HB.done"' EXIT
 say() { echo "$(date -u +%FT%TZ) $*" | tee -a "$HB"; }
 mapfile -t ARGV < "$ARGV_FILE"
+# the argv file's first line is the trainer path itself — strip it
+[[ "${ARGV[0]}" == */zensim_mlp_train ]] && ARGV=("${ARGV[@]:1}")
+FAILS=0
 for seed in 4006 4007 4008 4009 4010 4011; do
     stem="W10L9P_s${seed}"
     if [ ! -f "$OUT/$stem.bin" ]; then
         say "train $stem"
         nice -n19 ionice -c3 "$REPO/target/release/zensim_mlp_train" "${ARGV[@]}" \
             --seed "$seed" --out "$OUT/$stem.bin" >> "$OUT/train_ext.log" 2>&1 \
-            || { say "TRAIN FAILED $stem"; continue; }
+            || { say "TRAIN FAILED $stem"; FAILS=$((FAILS+1)); continue; }
     fi
     if [ ! -f "$OUT/${stem}_packed.bin" ]; then
         say "pack $stem"
@@ -28,10 +31,11 @@ for seed in 4006 4007 4008 4009 4010 4011; do
             --in "$OUT/$stem.bin" --out "$OUT/${stem}_packed.bin" --neg-tail \
             --anchor "$ROOT/anchor944_dial.parquet" --target-col target_score \
             --verify "$ROOT/ext_cid22val.parquet" --verify-col human_score --verify-scale 100 \
-            >> "$OUT/pack_ext.log" 2>&1 || { say "PACK FAILED $stem"; continue; }
+            >> "$OUT/pack_ext.log" 2>&1 || { say "PACK FAILED $stem"; FAILS=$((FAILS+1)); continue; }
     fi
     say "harvest ${stem}_packed"
     "$REPO/scripts/harvest_bakes.sh" --bake "$OUT/${stem}_packed.bin" --regime 944 \
-        >> "$OUT/harvest_ext.log" 2>&1 || say "HARVEST FAILED ${stem}_packed"
+        >> "$OUT/harvest_ext.log" 2>&1 || { say "HARVEST FAILED ${stem}_packed"; FAILS=$((FAILS+1)); }
 done
-say "ALL DONE"
+say "ALL DONE fails=$FAILS"
+[ "$FAILS" = 0 ] || exit 6

@@ -294,3 +294,34 @@ route with fidelity semantics, the incumbent is the only faithful dial. The
 amended-verdict acceptance is the USER's (the registered form said all-fail
 ⇒ gentle-HF next; this amendment is a recorded bar correction, not a silent
 re-gate).
+
+## GENTLE-HF ARM (GH1) — registered 2026-08-27 BEFORE any fit (the user's hold: "Hold for gentle-HF retrain arm")
+
+Skeptical premise, stated up front: t2's apparent HF lead was ALREADY
+falsified by the shared-band paired bootstrap (Δ −0.0093, CI excludes 0), so
+this arm tests whether ANY era-B HF admixture at low weight adds HF skill
+without t2's failure modes (over-swing ×1.9/×1.4, unbounded −387 emissions).
+Its null result is as decisive as its positive: if GH1 fails, every retrain
+lever short of the human pairwise study is exhausted and the incumbent
+freeze case is complete.
+
+**Arm (frozen):** the L1-T1 recipe verbatim (3 groups: hdrmc t1 train 1.0 /
+t1_train_hf 1.0 / t1 val) + a 4th group `hdrmc_hf2:
+hdr944-retrain-2026-08-28/t2_train_hf.parquet` at **train-weight 0.3, val 0**.
+Scale note, recorded: the t2 HF leg's human_score is era-B/100; in the HF
+band (≥0.90) both target scales occupy ≈[0.9,1.0] and pair sampling is
+per-group (rank loss within group), so no cross-scale pair is drawn. Seeds
+{4003,4004,4005}; epochs/pairs/decay/width identical to L1. Pack = the
+HF-anchored parity invocation (anchor_hf_t1, verify 944-CID22).
+
+**Gates (frozen):**
+1. Amended HDR-route fidelity: 0.65 ≤ swing ratio ≤ 1.5 per codec; mono
+   ≥ 0.93 on svt+jxl.
+2. G-OUT v2 on-route (cid22) + clause D on every axis.
+3. G-HF addressability: val HF band p50 ≥ 90 AND frac(≥88) ≥ 0.5.
+4. HF shared-band paired-Δ vs `HDR944_L1T1_s4005_hfpack` (aligned rescore,
+   B=5000, seed 11): GH1 DISPLACES the incumbent only if Δ > 0 with CI
+   excluding 0 AND gates 1-3 pass; ties → incumbent stands.
+Selection among own seeds: freeze_check E.4. Driver:
+`scripts/hdr_gh1_arm.sh` (queued behind the SDR seed extension —
+serialized heavy jobs).
