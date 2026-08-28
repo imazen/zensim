@@ -762,6 +762,21 @@
    "reason": "The jxl-encoder substrate changed 2026-08-27 (leaf-coder fixes): the 23shot substrate probe now FAILS against the 2026-08-05 committed matrix (81 cell mismatches). The 2026-08-05 loop rows remain valid AS a same-substrate panel among themselves but are NOT comparable to loop numbers measured on the current binary; new candidates were measured as a fresh same-substrate trio (v47ctl/candA/candB, 2026-08-28).",
    "record": "benchmarks/balance_campaign_2026-08-28.md (USER-REQUESTED DECISION INSTRUMENTS)",
    "date": "2026-08-28"
+  },
+  {
+   "id": "prefamily-tbig-training-exposure",
+   "kind": "annotated",
+   "fields": [
+    "rank.imazen26",
+    "rank.nonphoto",
+    "rank.hfnlproxy"
+   ],
+   "scope": {
+    "trained_with": "tbig_944_200k.parquet (pre-family split) or /home/lilith/sota944/data/tbig legs per embedded repro"
+   },
+   "reason": "Bakes trained on the PRE-family bigcodec tables saw 5 test-bucket + 12 validate-bucket imazen-26 ids (family relatives of the re-sliced eval content). Their eval-slice RESCORES are clean (test-family rows only) but their TRAINING exposure stands: imazen26/nonphoto/hfnl reads are inflated-suspect relative to family-pure candidates. H-CONTAM measured ONE bake/axis (incumbent hfnl: edge genuine on clean rows); the population is annotated, not individually tested. CID22/AIC/CSIQ/LIVE/TID reads unaffected.",
+   "record": "benchmarks/balance_campaign_2026-08-28.md (ADVERSARIAL AUDIT) + sdr_pure_retrain_wave_2026-08-28.md (SPH1-BROAD leakage-discount precedent)",
+   "date": "2026-08-28"
   }
  ]
 }

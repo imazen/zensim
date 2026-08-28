@@ -514,3 +514,43 @@ to hidden held-out sets with critical instruments — is complete: 10
 hypotheses resolved by measurement, 2 gates ratified by the user (G-OUT v2,
 G-GRAN + granularity goals), 26 SDR candidates evaluated, every counter-
 argument tested, and the freezes made on the full instrument set.
+
+## ADVERSARIAL AUDIT (user: "be adversarial", 2026-08-28 ~09:3xZ) — why prior bakes out-score the frozen candidate on CID22, tested not narrated
+
+The date-sorted board shows prior bakes above the frozen `W10L9PH_s4004_packed`
+(0.8927) on CID22: `FS_GL2_s2503`/`R1_GL2_s2503_packed` **0.9010**,
+`W10L3_s4001` 0.8998, `ens_E1_k2/k3` 0.894, `winner_dial` 0.894. Honest
+admissions first: (a) these CID22 edges are REAL — CID22 is validation-only
+forever, immune to every contamination class here; (b) the balance
+campaign's "sole eligible of 26" was a claim about ITS registered pool, not
+the 339-bake board — the CID22 leaders had never been run through the
+user-ratified gates. So they were run through them tonight:
+
+| challenger | cid22 Δinc | verdict under today's gates |
+|---|---|---|
+| **R1_GL2_s2503_packed** | **+0.0143 [+0.0098,+0.0186] BETTER** | G-OUT PASS, hfnl NOT-WORSE, M3a 0.849 — but **G-GRAN FAILS ALL 4 CODECS** (tops 84.8-89.2 vs bars 90.9-95.6, spans 4.7-6.1 on 3) |
+| W10L3_s4001 | +0.0131 | NO output spline (raw head, emissions [−13,13] — not a dial); G-OUT FAIL kadid:R+S; hfnl 0.118 |
+| ens_E1_k2/k3 | +0.007 | hfnl ≈ 0.00 (dead HF rank) — two-zone instant fail |
+| winner_dial (era) | +0.001 | 372-era; im26 .824/nonph .858 (≪ .92+), composite .846 |
+
+**The GL2 kill was earned, not assumed:** an HF-anchored re-pack (the exact
+move that fixed the HDR incumbent) was tried — it reproduced the SAME
+narrow spline (y-range 38.3→82.4) because **the compression is in the
+MODEL's raw output**: on the near-lossless slice GL2's predictions top out
+at **89.9 (p95 88.9)** vs PH_s4004's 100.0. The top dial decade does not
+exist in GL2's range; near-lossless is structurally unaddressable —
+failing the user's founding requirement ("the hf dial zone must be
+addressible so jxl low distances can be reached"). Process honesty: my
+first repack check printed a FALSE "restores addressability" verdict from
+a vacuous loop (empty dial block in the light --json); caught and
+corrected in-transcript before it informed anything.
+
+**The answer to the user's question, measured:** last month's campaign
+optimized CID22-max within its 5-row bar and produced rank-brilliant
+models with compressed or absent dials and dead HF; this week's campaign
+optimized the balanced product dial. The ~0.008 CID22 gap is the measured
+price of addressability + both zones + bounded emissions + loop utility.
+Additionally, the old population's im26/nonphoto/hfnl reads carry
+pre-family TRAINING exposure (their prediction rescores were re-sliced,
+their training was not) — inflated-suspect on exactly the axes where they
+already lose; registry entry added below.
