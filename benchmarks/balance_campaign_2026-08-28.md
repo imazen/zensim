@@ -466,3 +466,42 @@ BYTE-IDENTICAL (append→strip == original) and SCORE-IDENTITY EXACT
 (forwards byte-equal on the 3,036-row HF wire). The harvested fullevals
 keep their original (unstamped) bake shas; a freeze of a checkpoint uses
 the stamped sibling and re-records its sha at packaging.
+
+## USER-REQUESTED DECISION INSTRUMENTS (2026-08-28 ~08:5xZ): bands, translation, in-loop, timestamps
+
+**B0-B6 low bands** (merged-decile scheme, signed, read down columns):
+cid22 [..0.7] n=1775: A +0.714 / B +0.698 / inc +0.707; tid [..0.5] n=1418:
+A +0.857 / B +0.851 / inc +0.857; kadid [..0.2] n=1697: A +0.492 / **B
++0.539** / inc old-scheme-excluded. A leads or ties everywhere except
+kadid-severe (B +0.047).
+
+**Translation utility** (bake units → metric units; monotone quantile map
+fit on even hidden-panel rows, residuals on odd rows, in TARGET units):
+all three candidates translate comparably — residual p50 ≈ 18-24% of each
+target's IQR (ssim2 ~15 of IQR 67; cvvdp ~0.27-0.31 of IQR 1.45; iwssim
+~0.014 of IQR 0.07); incumbent marginally best on this (synthetics) panel,
+A ≥ B on 3 of 4 targets. Codec-domain translation favors A per the
+codec-like subgroup ordering.
+
+**In-loop diffmap utility (the decisive new datum)** — jxl 2/3-shot 27-cell
+instrument, SAME-SUBSTRATE trio (fresh v47A control + A + B; the substrate
+probe FAILED against the 2026-08-05 carried controls — the Aug-27 encoder
+commits changed encode outputs, so carried rows are invalid on the current
+binary and the trio is its own same-substrate block):
+
+| arm | k2 med\|err\| (±2 hits) | k3-best med\|err\| (±2 hits) |
+|---|---|---|
+| v47A control | 0.832 (21/27) | 0.355 (24/27) |
+| **A: PH_s4004** | 0.971 (21/27) | **0.315 (25/27) — best in trio** |
+| B: e060 | 1.088 (16/27) | 0.570 (23/27) |
+
+**A steers better than B everywhere in the loop, and beats the v47 control
+at k3** — M3a coherence (B 0.833 vs A 0.763) does NOT translate into loop
+utility; A's finer top-zone dial structure does. This is the product test
+the granularity goals point at, and it separates the pair cleanly.
+Cells: `~/tmp/jxlloop/fresh_{v47ctl,candA,candB}/fresh/target_ab_*.tsv`
+(medians derived from the TSVs; abs_err column agrees).
+
+**Board**: baked date+TIME now rendered (repro timestamp_epoch, file-mtime
+fallback), regen 339 bakes gates PASS. SUBSTRATE NOTE registered below for
+the 2026-08-05 loop panel.

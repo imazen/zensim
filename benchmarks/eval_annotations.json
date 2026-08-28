@@ -749,6 +749,19 @@
    "reason": "H-TRAJ checkpoint rows: harvested from the UNSTAMPED dump bakes (repro null on the board); stamped siblings (*_stamped.bin, zentrain.repro + checkpoint_epoch, byte/score-identity verified) exist for freeze packaging. Weights chain is bit-identical to the W10L9PH_s4004 retrace (campaign md, REPRO CHECK).",
    "record": "benchmarks/balance_campaign_2026-08-28.md (CHECKPOINT REPRO PACKAGING)",
    "date": "2026-08-28"
+  },
+  {
+   "id": "jxl-loop-panel-substrate-2026-08-05",
+   "kind": "annotated",
+   "fields": [
+    "loop panel (2shot/3shot columns + section)"
+   ],
+   "scope": {
+    "note": "all 2026-08-05 loop-panel entries"
+   },
+   "reason": "The jxl-encoder substrate changed 2026-08-27 (leaf-coder fixes): the 23shot substrate probe now FAILS against the 2026-08-05 committed matrix (81 cell mismatches). The 2026-08-05 loop rows remain valid AS a same-substrate panel among themselves but are NOT comparable to loop numbers measured on the current binary; new candidates were measured as a fresh same-substrate trio (v47ctl/candA/candB, 2026-08-28).",
+   "record": "benchmarks/balance_campaign_2026-08-28.md (USER-REQUESTED DECISION INSTRUMENTS)",
+   "date": "2026-08-28"
   }
  ]
 }

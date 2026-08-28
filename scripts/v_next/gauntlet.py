@@ -586,13 +586,13 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         if isinstance(repro_o, dict) and repro_o.get("timestamp_epoch"):
             import datetime as _dt
             train_date = {"d": _dt.datetime.fromtimestamp(
-                int(repro_o["timestamp_epoch"]), _dt.timezone.utc).strftime("%Y-%m-%d"), "src": "repro"}
+                int(repro_o["timestamp_epoch"]), _dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "src": "repro"}
         else:
             bp = o.get("bake")
             if bp and Path(bp).exists():
                 import datetime as _dt
                 train_date = {"d": _dt.datetime.fromtimestamp(
-                    Path(bp).stat().st_mtime, _dt.timezone.utc).strftime("%Y-%m-%d"), "src": "file"}
+                    Path(bp).stat().st_mtime, _dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "src": "file"}
         recipe = None
         if isinstance(repro_o, dict) and repro_o:
             legs = []
