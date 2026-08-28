@@ -673,3 +673,45 @@ the better steering metric on this instrument. A remains
 candidate-of-record (rank eligibility + 8/8 floors + scalar loop +
 translation all still favor it); the map-on loop evidence now favors B —
 this goes back to the user rather than being absorbed silently.
+
+## SPLIT-ROLE TEST (user call) — CONFIRMED, the companion pattern works (2026-08-28)
+
+Owner change: jxl-encoder `JXL_ZENSIM_MAP_BAKE=<path>` (fd2f4351) mounts a
+second bake whose FD gradient drives the map/H3 steering while
+`JXL_ZENSIM_RD_PROFILE` keeps scoring; unset = structurally identical path;
+loud width/probe asserts. Cross arm run on the SAME substrate binary as the
+trio (the concurrent jxl rebase was NOT rebuilt into it — substrate
+integrity preserved):
+
+| arm (jxl, k3_best, 27 cells) | med\|err\| | ±2 | dBytes |
+|---|---|---|---|
+| A base (scalar) | 0.343 | 25/27 | — |
+| A + own map | 0.404 | 23/27 | −0.83% |
+| **A + B-map (SPLIT)** | **0.300** | **25/27** | **−1.01%** |
+| B + own map | 0.205 | 23/27 | −2.27% |
+
+**Scoring with A + steering with e060's map beats both A-alone forms at
+equal hit-rate with byte savings** — A's rank quality + B's map value
+compose. (B+own keeps the lowest raw error at B's weaker scoring and fewer
+±2.) k2 cross 0.652 also beats A-base k2 0.971. Product pattern implied:
+A = candidate-of-record scorer, e060's stamped bake = the registered
+STEERING-MAP COMPANION (the corruption-head pattern) — adoption is the
+user's call.
+
+## BOARD: shaping-aware scatters, hfnl scaling, knob-end default (user asks, all live)
+
+- **Shape-normalized scatter (default ON, toggle)**: predictions mapped BY
+  RANK onto the reference's own quantiles — spline/range shaping removed,
+  cells visually comparable, dashed diagonal = ideal, tooltip keeps the raw
+  value; ρ unchanged (rank-invariant). Raw-units mode remains for
+  calibration reading.
+- **hfnl scaling**: hfnl cells use tight band-quantile axis limits — the
+  0.90-0.985 near-lossless band fills the plot.
+- **Knob-end default exclusion**: G-GRAN semantics (q≥88 span ≥ 8 AND top
+  ≥ reach−1 per codec) computed per bake at build, scoped to SDR dial
+  models (peers are not dials; HDR bakes are judged on their route panel).
+  Default compare set: **13** (frozen candidates + HDR family + peers +
+  2 era survivors); **27 curated knob-end failers** — including the SDR
+  incumbent itself (avif span) — move behind the 'curated+knobfail'
+  preset. Honest note: 309 of 322 board rows fail the ratified top-zone
+  goals; the goals are far stricter than the board's history.

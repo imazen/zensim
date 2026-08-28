@@ -720,6 +720,32 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     # marks from promote_fulleval --mark-dominated, rule strict-pareto-2026-08-04).
     n_dom = sum(1 for b in bakes if b.get("dominated_by"))
     bakes = [b for b in bakes if not b.get("dominated_by")]
+    # Knob-end failure (user directive 2026-08-28): a model that cannot reach
+    # or span the top of the dial (G-GRAN semantics: HF-zone q>=88 per codec,
+    # top p50 >= incumbent-reach - 1 and span >= 8) is EXCLUDED from the
+    # DEFAULT compare set (still toggleable, unlike dominance).
+    _REACH = {"avif": 96.2, "jpeg": 94.4, "jxl": 96.6, "webp": 91.9}
+    for b in bakes:
+        # Scope: the SDR dial grid judges SDR dial models only — peers are
+        # reference metrics (not dials) and HDR-family bakes are judged on
+        # the HDR route panel, not this grid.
+        nm = b.get("name") or ""
+        fam = family_of(nm)
+        if nm.startswith("peer_") or fam in ("HDR", "peers"):
+            b["knob_end_fail"] = []
+            continue
+        fails = []
+        curves = ((b.get("dial") or {}).get("curves") or {})
+        for c, pts in curves.items():
+            if c not in _REACH:
+                continue
+            hf = sorted([p for p in pts if p[0] >= 88])
+            if len(hf) < 3:
+                continue
+            p50 = [p[2] for p in hf]
+            if (p50[-1] - p50[0]) < 8 or p50[-1] < _REACH[c] - 1:
+                fails.append(c)
+        b["knob_end_fail"] = fails
     for b in bakes:
         b["_n_dominated_excluded"] = n_dom  # caption reads it off any row
     # loop-utility PROXY (owner: scripts/v_next/loop_proxy.py; committed JSON —
@@ -851,8 +877,12 @@ const corpTitle=(node,c)=>{const t=[];
   if(c==="sdr25")t.push("⊂ aic4: "+annReason("sdr25-subset-of-aic4"));
   if(t.length)node.setAttribute("title",t.join(" | "));
   return node;};
-const CURATED=DATA.bakes.filter(b=>b.curated&&!DOM(b)).map(b=>b.name);
-const state={visible:new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name)),
+const KNOBFAIL=b=>!!(b.knob_end_fail&&b.knob_end_fail.length);
+const CURATED_ALL=DATA.bakes.filter(b=>b.curated&&!DOM(b)).map(b=>b.name);
+// default compare set excludes knob-end failers (dial cannot reach/span the
+// top zone — G-GRAN semantics); they stay toggleable + in 'curated+knobfail'.
+const CURATED=DATA.bakes.filter(b=>b.curated&&!DOM(b)&&!KNOBFAIL(b)).map(b=>b.name);
+const state={shapeNorm:true,visible:new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name)),
   ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false};
 function effTheme(){const dt=document.documentElement.getAttribute('data-theme');
   return dt||((window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light');}
@@ -970,6 +1000,8 @@ function renderBar(){
   const mk=(t,fn,title)=>{const x=el('button',{class:'btn',text:t});if(title)x.setAttribute('title',title);x.onclick=fn;return x;};
   bar.append(
     mk('curated',()=>{state.visible=new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name));rerender();renderBar();},
+    mk('curated+knobfail',()=>{state.visible=new Set(CURATED_ALL);rerender();renderBar();},
+      'curated including knob-end failers (dial cannot reach/span the top zone)'),
       'the default set: era flagships + campaign arm candidates/leaders + ensembles'),
     mk('sprint bests',()=>{state.visible=new Set((DATA.sprintBest||[]).map(x=>x.n));rerender();renderBar();},
       'one selected leader per sprint/era: '+((DATA.sprintBest||[]).map(x=>x.s+' \u2192 '+x.n).join(' \u00b7 ')||'none resolved')),
@@ -1286,14 +1318,41 @@ function renderTable(){
 
 // ---- scatter-matrix cell (ECharts): pred (x) vs reference (y), OLS fit as a line
 // series, dataZoom inside (both axes) + x slider, constant symbol size at any zoom.
+function qqMap(pts){
+  // shape normalization: map each prediction, BY RANK, onto the reference's
+  // own quantiles — removes output shaping (splines / range compression) so
+  // cells are visually comparable across models. SROCC is rank-invariant.
+  const ys=pts.map(p=>p[1]).sort((a,b)=>a-b);
+  const order=pts.map((p,i)=>[p[0],i]).sort((a,b)=>a[0]-b[0]);
+  const out=new Array(pts.length);
+  order.forEach((oi,rank)=>{const i=oi[1];out[i]=[ys[Math.min(rank,ys.length-1)],pts[i][1],pts[i][0]];});
+  return out;
+}
 function scatterOpt(b,corp,ref,cell){
   const t=TH();const c=color(b);
   const refLab=DATA.refLabels[ref]||ref;
-  const series=[{type:'scatter',name:b.name,data:cell.pts,symbolSize:6,
+  const norm=state.shapeNorm!==false;
+  const pts=norm?qqMap(cell.pts):cell.pts;
+  const series=[{type:'scatter',name:b.name,data:pts,symbolSize:6,
     itemStyle:{color:c,opacity:.55},emphasis:{itemStyle:{opacity:1}},z:2}];
-  if(cell.fit)series.push({type:'line',silent:true,symbol:'none',z:3,
+  if(norm){
+    const ys=cell.pts.map(p=>p[1]);const lo=Math.min.apply(null,ys),hi=Math.max.apply(null,ys);
+    series.push({type:'line',silent:true,symbol:'none',z:3,
+      data:[[lo,lo],[hi,hi]],lineStyle:{color:t['text-secondary'],width:1.5,opacity:.7,type:'dashed'}});
+  }else if(cell.fit)series.push({type:'line',silent:true,symbol:'none',z:3,
     data:[[cell.fit[0],cell.fit[1]],[cell.fit[2],cell.fit[3]]],
     lineStyle:{color:c,width:2,opacity:.9}});
+  // hfnl visual scaling: the near-lossless band fills the plot instead of
+  // hiding in a corner (tight data-quantile limits both axes).
+  let axX=axStyle(),axY=axStyle();
+  if(corp==='hfnlproxy'){
+    const q=(arr,f)=>{const a=[...arr].sort((x,y)=>x-y);return a[Math.floor(f*(a.length-1))];};
+    const xs=pts.map(p=>p[0]),ys2=pts.map(p=>p[1]);
+    const pad=(lo,hi)=>{const m=(hi-lo)*0.04||0.5;return[lo-m,hi+m];};
+    const xr=pad(q(xs,0.01),q(xs,0.99)),yr=pad(q(ys2,0.01),q(ys2,0.99));
+    axX=Object.assign(axStyle(),{min:xr[0],max:xr[1]});
+    axY=Object.assign(axStyle(),{min:yr[0],max:yr[1]});
+  }
   return{animation:false,
     title:{text:(b.name.length>30?b.name.slice(0,29)+'…':b.name)+ensTag(b),
       subtext:'ρ '+f3(cell.srocc)+'   r '+f3(cell.plcc)+'   n='+cell.n,
@@ -1302,10 +1361,12 @@ function scatterOpt(b,corp,ref,cell){
       subtextStyle:{color:t['text-secondary'],fontSize:9.5}},
     tooltip:Object.assign(ttStyle(),{trigger:'item',formatter:p=>
       p.seriesType==='scatter'
-        ?('<b>'+b.name+'</b><br>pred <b>'+f3(p.value[0])+'</b><br>'+refLab+' <b>'+f3(p.value[1])+'</b>')
+        ?('<b>'+b.name+'</b><br>'+(state.shapeNorm!==false&&p.value.length>2
+            ?('pred(raw) <b>'+f3(p.value[2])+'</b> → ref-scale <b>'+f3(p.value[0])+'</b>')
+            :('pred <b>'+f3(p.value[0])+'</b>'))+'<br>'+refLab+' <b>'+f3(p.value[1])+'</b>')
         :('OLS fit')}),
     grid:{left:42,right:10,top:38,bottom:42},
-    xAxis:axStyle(),yAxis:axStyle(),
+    xAxis:axX,yAxis:axY,
     dataZoom:[{type:'inside',xAxisIndex:0,filterMode:'none'},
               {type:'inside',yAxisIndex:0,filterMode:'none'},
               dzSlider({xAxisIndex:0,filterMode:'none'})],
@@ -1317,7 +1378,13 @@ function renderScatter(){
   const ref=state.ref;const bs=visBakes();
   host.append(el('h2',{text:'Correlation scatter matrix — predicted vs '+(DATA.refLabels[ref]||ref)}));
   const nSc=bs.filter(b=>Object.keys(b.scatter).length).length;
-  host.append(el('div',{class:'cap',html:'One clean scatter per (bake × corpus) for the selected reference; '
+  const tgl=el('button',{class:'btn',text:state.shapeNorm!==false?'shape-normalized ✓ (click for raw units)':'raw units (click to shape-normalize)'});
+  tgl.onclick=()=>{state.shapeNorm=!(state.shapeNorm!==false);renderScatter();};
+  host.append(tgl);
+  host.append(el('div',{class:'cap',html:(state.shapeNorm!==false
+    ?'<b>Shape-normalized</b>: each prediction is mapped BY RANK onto the reference’s own quantiles — output shaping (splines, range compression) is removed, cells are visually comparable across models, and the dashed diagonal is the ideal. ρ is rank-invariant (unchanged). hfnl cells use tight band limits so the near-lossless range fills the plot. '
+    :'<b>Raw units</b>: predictions in each model’s own dial units — shaping differences (spline shape, range compression) dominate the visual; use for calibration reading only. ')
+    +'One clean scatter per (bake × corpus) for the selected reference; '
     +'bakes sit side by side per corpus so you can compare fits. ρ = canonical SROCC, r = PLCC. '
     +'Switch reference in the bar above; toggle bakes to add/remove columns. '
     +'<b>Scatter data is embedded for the curated headline set only</b> (registered size rule — '
