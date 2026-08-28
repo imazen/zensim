@@ -12379,7 +12379,12 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("ckpt_epoch"))
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("ckpt_epoch")
+            })
             .collect();
         assert!(
             dumps.len() >= 3,
@@ -12465,7 +12470,12 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("ckpt_epoch"))
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("ckpt_epoch")
+            })
             .collect();
         dumps.sort();
         assert!(
@@ -12474,7 +12484,12 @@ mod tests {
         );
         for d in &dumps {
             let bytes = std::fs::read(d).unwrap();
-            assert!(bytes.len() > 64, "dump too small: {} ({} B)", d.display(), bytes.len());
+            assert!(
+                bytes.len() > 64,
+                "dump too small: {} ({} B)",
+                d.display(),
+                bytes.len()
+            );
             assert_eq!(bytes[4], 3, "dump not ZNPR v3: {}", d.display());
         }
         std::fs::remove_dir_all(&dir).ok();

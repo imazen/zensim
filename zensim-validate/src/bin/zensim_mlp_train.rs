@@ -3647,24 +3647,18 @@ fn main() {
                         std::process::exit(4);
                     }
                 };
-                if bytes
-                    .windows(key_bytes.len())
-                    .any(|w| w == key_bytes)
-                {
+                if bytes.windows(key_bytes.len()).any(|w| w == key_bytes) {
                     continue; // already stamped (idempotent re-run)
                 }
                 let mut v: serde_json::Value =
                     serde_json::from_str(&repro_json).expect("repro_json reparse");
                 v["checkpoint_epoch"] = serde_json::Value::String(epoch_s.to_string());
-                let stamped = zenpredict_bake::append_metadata_utf8(
-                    &bytes,
-                    "zentrain.repro",
-                    &v.to_string(),
-                )
-                .unwrap_or_else(|e| {
-                    eprintln!("FATAL: could not embed zentrain.repro into {pth:?}: {e:?}");
-                    std::process::exit(4);
-                });
+                let stamped =
+                    zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.repro", &v.to_string())
+                        .unwrap_or_else(|e| {
+                            eprintln!("FATAL: could not embed zentrain.repro into {pth:?}: {e:?}");
+                            std::process::exit(4);
+                        });
                 if let Err(e) = std::fs::write(&pth, &stamped) {
                     eprintln!("FATAL: rewrite checkpoint {pth:?}: {e}");
                     std::process::exit(4);
