@@ -180,3 +180,61 @@ doses, teacher exonerated). Next: board regen, then the ONE-TIME H-HID
 terminal read over the frozen lens picks {W10L9P_s4005_packed,
 W10L9PH_s4004_packed, W10L9PH_s4003_packed, BAL_E1} + incumbent + shipped-B
 reference, then the overnight decision brief.
+
+## H-HID TERMINAL READ (touch-once, 2026-08-28T04:08:45Z) + H-MAXIMIN VERDICT
+
+Sealed panel (20k rows, 4k never-used KADIS sources, 24 synthetic
+distortion types, 6 independent metric targets; sha 5ec40732…). srocc,
+quality-oriented (butter/dssim negated); MIN = worst target:
+
+| candidate | ssim2 | butter_max | cvvdp | iwssim | dssim | zensim | **MIN** |
+|---|---|---|---|---|---|---|---|
+| incumbent W10L9_s4003 | **.8573** | **.6331** | .8207 | **.8696** | **.8944** | .7984 | **.6331** |
+| PH_s4003 | .8514 | .6075 | .8305 | .8504 | .8894 | **.8046** | .6075 |
+| BAL_E1 (true avg) | .8525 | .6072 | **.8380** | .8355 | .8882 | .7981 | .6072 |
+| PH_s4004 (eligibility pick) | .8292 | .5843 | .8064 | .8224 | .8598 | .7991 | .5843 |
+| s4005P (E.4 pick) | .8346 | .5754 | .8210 | .8245 | .8753 | .7811 | .5754 |
+
+**H-MAXIMIN: CONFIRMED in the lens comparison.** The percentile-maximin
+picks (E1 + PH_s4003) are exactly the two best off-distribution NEW models;
+the composite lens's pick (s4005P) is LAST on hidden MIN; the
+eligibility-first pick (PH_s4004) second-to-last. Maximin-style selection
+out-generalized composite selection.
+
+**The deeper finding (the campaign's headline): in-domain balance and
+off-distribution robustness are DIFFERENT AXES.** The incumbent — trained
+on 15k more (pre-family) rows with no HF leg — wins 5/6 hidden targets and
+the MIN; the codec-domain balance champion (PH_s4004) gives up 0.049 hidden
+MIN for its in-domain domination; PH_s4003/E1 sit between, keeping ~90% of
+the HF gain at a 0.026 hidden-MIN cost. On the most perceptual hidden
+target (cvvdp) the ordering INVERTS: E1 > PH_s4003 > … > incumbent >
+PH_s4004 — the incumbent's MIN edge rides on butteraugli-max, the
+outlier-sensitive fidelity norm.
+
+**Stated limitations (before anyone over-reads):** hidden targets are
+METRIC scores (no human labels) and KADIS distortions are synthetic — this
+panel measures distribution-shift robustness, NOT product-domain (codec)
+skill, which the board's imazen26/nonphoto/hfnl axes measure and where the
+SPH1 family dominates. Both readings are true simultaneously; they answer
+different questions.
+
+## CAMPAIGN SYNTHESIS — the three-way tension, measured
+
+1. **Codec-domain balance**: `W10L9PH_s4004_packed` — sole candidate
+   passing every frozen clause; dominates the incumbent on BOTH zones
+   in-domain; beats it on all six never-selected semi-hidden axes.
+2. **Distribution-shift robustness**: the incumbent `W10L9_s4003_packed` —
+   hidden MIN 0.6331; its extra (pre-family) training breadth is the
+   likely mechanism; its board reads on family-overlapped axes remain
+   leakage-questionable in principle (H-CONTAM cleared hfnl specifically).
+3. **The compromise**: `W10L9PH_s4003_packed` (single) or `BAL_E1`
+   (ensemble) — ~90% of the HF gain, best-new hidden robustness, best
+   hidden cvvdp; PH_s4003's in-domain cid22 −0.0033 CI-sig vs incumbent is
+   its recorded cost.
+
+Registered follow-up PROPOSAL (not run — model-search closed): "SPH1-broad"
+— the SPH1 recipe on the UN-purged 208k tbig + HF leg, testing whether
+training breadth restores hidden robustness while the HF leg keeps the
+balance; its board axes would need family-leakage discounting, which is the
+trade the user weighs. All freeze decisions remain the user's; presented
+after 08:00 Denver per the overnight rule.
