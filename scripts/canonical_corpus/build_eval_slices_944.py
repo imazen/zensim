@@ -99,14 +99,15 @@ def main() -> int:
         t = pq.read_table(p, columns=cols)
         tabs.append(t)
         prov.append({"view": str(p), "sha256": sha256_file(p), "rows": t.num_rows})
-        print(f"  {ds}: test rows {t.num_rows}", flush=True)
+        print(f"  {ds}: {a.split} rows {t.num_rows}", flush=True)
     full = pa.concat_tables(tabs)
     refs = full["ref_filename"].to_pylist()
     origins = np.array([origin_of(r) for r in refs])
     classes = np.array([cls_of.get(o, "?") for o in origins])
-    assert (np.char.not_equal(classes, "?")).all(), "unmapped origins in TEST views"
+    assert (np.char.not_equal(classes, "?")).all(), f"unmapped origins in {a.split} views"
     odd = np.unique(origins % 10)
-    assert set(odd.tolist()) <= {7, 9}, f"TEST views must be origins {{7,9}}, saw digits {odd}"
+    want = {7, 9} if a.split == "test" else {1, 3, 5}
+    assert set(odd.tolist()) <= want, f"{a.split} views must be origins {want}, saw digits {odd}"
 
     def emit(name: str, mask: np.ndarray, scale: float):
         idx_all = np.nonzero(mask)[0]
