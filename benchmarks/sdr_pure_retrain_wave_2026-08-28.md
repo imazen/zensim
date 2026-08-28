@@ -220,3 +220,40 @@ LF zone (low-q/heavy-distortion: low bands, corruption blocks, negative
 reach) AND HF zone (near-lossless: hfnlproxy, top bands, q≥90 step-1 dial
 granularity) — rank + dial granularity per zone, neither zone sacrificed
 relative to the other candidate. Scorecard follows below when computed.
+
+## SEED EXTENSION — registered 2026-08-27 BEFORE any new seed trains
+
+Trigger: under the user's two-zone requirement + the accepted G-OUT v2, NO
+existing candidate qualifies (all paired-bootstrap, aligned rescored rows,
+B=5000, seed 11; instrument `bake_verdict --per-pair-output` on the resliced
+ext944 slices — the fulleval per_pair subsamples were row-misaligned across
+bakes, so rescoring is the alignment method of record):
+
+| candidate | hfnl Δ vs incumbent | cid22 Δ vs incumbent | G-OUT v2 | verdict |
+|---|---|---|---|---|
+| s4005P | **−0.0423 [−0.0489,−0.0357]** | +0.0034 [+0.0018,+0.0050] | PASS | HF SACRIFICED |
+| s4004P | **+0.0169 [+0.0092,+0.0244]** | −0.0093 [−0.0113,−0.0074] | **FAIL hfnl:B (max\|z\| 45.9)** | gate-ineligible |
+| incumbent | — | — | PASS | LF-extreme floor 5.4 (all worse-than-worst collapses to one value); trails imazen26/nonphoto; pre-family training |
+
+Two-zone dial granularity is EQUIVALENT across all three (HF q88-100 med
+step 0.36-0.42, tied 0.32; LF q0-45 tied 0.077, mono 1.0) — the zones
+separate on RANK and on LF-extreme reach (only s4005P emits below zero,
+−5.8; the others floor at their bottom knot). hfnl seed spread within the
+recipe is 0.30→0.44 — the recipe reaches HF-strong seeds; whether one seed
+can hold cid22 + hfnl + the gate simultaneously is exactly what a seed
+extension answers.
+
+**Arms (frozen):** the identical recipe (`~/tmp/sdrpure_argv.txt`, the
+embedded-repro argv verbatim, pure views), seeds **s4006..s4011** (6 new;
+9 total). Pack = the campaign parity invocation. Harvest = the standard
+chain (sota944_verdict + run_full_eval + M3a).
+
+**Selection rule (frozen):** ELIGIBLE = passes G-OUT v2 (gated six axes)
+AND two-zone non-sacrifice vs the incumbent: (i) hfnl paired-Δ CI does not
+sit wholly below 0, (ii) cid22 paired-Δ CI does not sit wholly below 0,
+(iii) LF: cid22/tid bottom-band srocc ≥ incumbent − 0.01 and LF dial mono
+= 1.0, (iv) HF dial tied-frac ≤ incumbent + 0.02. Among eligible, PRIMARY =
+freeze_check E.4 (profile floors, tie-break bal_comp + 0.15·M3a); below-zero
+reach breaks remaining ties. If NO seed in the 9 is eligible ⇒ the recipe
+cannot satisfy the requirement; escalate to the konjnd/hfnl-preserving
+variant lever WITH the user (no silent recipe change).
