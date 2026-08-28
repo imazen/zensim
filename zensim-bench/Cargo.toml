@@ -43,10 +43,16 @@ verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 # folded+append2 HDR-PQ features — no PNG decode-cache on disk.
 hdr944-extract = ["dep:zenjxl", "dep:zenpixels", "zensim/feature-regime-v2", "zensim/custom-profiles"]
 
+# `sdr944_extract` example (2026-08-28 era-lessons revisit): local SDR twin of
+# hdr944_extract — 944 Folded720Append2 features for arbitrary (ref, dist) PNG
+# pairs (identity-check instrument; the fleet's zensim-foldapp2 is jobexec-only).
+sdr944-extract = ["dep:png", "zensim/feature-regime-v2"]
+
 [build-dependencies]
 cc = "1"
 
 [dependencies]
+png = { version = "0.18.1", optional = true }
 # zensim-bench is internal tooling (not published).
 # `deprecated-profiles` keeps `ZensimProfile::A` available for `zwe_zenbench`,
 # which deliberately benchmarks the deprecated generation-A MLP profile.
@@ -123,6 +129,10 @@ harness = false
 [[example]]
 name = "hdr944_extract"
 required-features = ["hdr944-extract"]
+
+[[example]]
+name = "sdr944_extract"
+required-features = ["sdr944-extract"]
 
 [[example]]
 name = "extract_features_372col"

@@ -736,3 +736,53 @@ each verified, not assumed:
 
 Also answered here: "A" in this campaign = `W10L9PH_s4004_packed` (new, frozen
 yesterday) — NOT ZensimProfile::A (deprecated v47-QAT, which indeed lost to B).
+
+## IDENTITY CHECK (era requirement, user-ordered) — the frozen pair is PERFECT; the incumbent violates (2026-08-28)
+
+Instrument built at the owner: `zensim-bench/examples/sdr944_extract`
+(the local SDR twin of hdr944_extract — 944 Folded720Append2 features for
+arbitrary PNG pairs; the fleet's zensim-foldapp2 was jobexec-only).
+Identity = (ref,ref) features → each finalist's forward; above-identity =
+any of the 4,817 dial-grid predictions exceeding the same image's identity.
+
+| finalist | identity p5/p50/min | above-identity |
+|---|---|---|
+| **A W10L9PH_s4004_packed** | **100.00 / 100.00 / 100.00** | **0/4817** |
+| **B e060 (companion)** | **100.00 / 100.00 / 100.00** | **0/4817** |
+| incumbent W10L9_s4003 | 92.64 / 96.64 / 91.45 | **228/4817 VIOLATIONS** |
+| HDR L1T1 hfpack (off-route grid) | 96.98 / 97.34 / 96.90 | 144/4817 (SDR grid; HDR-route identity = follow-up) |
+
+The frozen candidate-of-record + companion PASS the era identity
+requirement perfectly; the incumbent FAILS it (distorted encodes scoring
+above pristine = dial-integrity violation) — retroactively strengthening
+the freeze and vindicating the era-lessons revisit.
+
+## NEXT-GEN PROGRAM (user: "proceed with everything needed to do a better job…") — registered 2026-08-28
+
+**W11 JOINT-SELECTION WAVE (launching now, frozen):** the campaign proved
+rank-best and map-best live at different checkpoints of the same run
+(s4004-final vs e060) and that checkpoint dumps + per-checkpoint M3a + the
+loop proxy make BOTH measurable per checkpoint. Arms: SPH1 recipe verbatim,
+seeds {4012,4013,4014}, dumps every 10 (now repro-stamped by the trainer).
+Selection (frozen): per seed, the eligibility-passing checkpoint (all
+frozen clauses + G-OUT + G-GRAN) with the highest M3a; the top two picks
+then take the h3own paired-encode A/B (own-map + split vs the frozen
+pair). Goal: ONE artifact that is rank-eligible AND map-strong — or the
+measured proof that the two are inherently different checkpoints (then the
+split-role companion ships as the pattern).
+
+**Loop hygiene (follow-ups from the revisit, owner = jxl-encoder):**
+re-seed `ZENSIM_DISTANCE_TARGETS` against the candidate-of-record, then
+re-pin the shipped loop off deprecated ZensimProfile::A; replace the
+legacy census seed_d=2.5 with an S4-style fitted seed.
+
+**PU21-SINGLE-MODEL EXPERIMENT (launching after W11, frozen):** the user's
+hypothesis — if the PU-route front-end scores SDR content as well as the
+SDR pipeline, one model can serve SDR+HDR. Test: stratified CID22-512
+subset (~800 pairs across the MOS range) → `srgb_to_pq_png` (the
+convention-matched nits mapping) → `hdr944_extract` (PQ 944 features) →
+forward the HDR candidate-of-record → canonical panel vs MCOS, compared
+against the SDR CoR's 0.8927 native read. Decision rule (frozen): PU-route
+CID22 SROCC within 0.01 of native ⇒ register the joint single-model
+training wave (SDR+HDR legs through the PU front-end); worse ⇒ two-model
+architecture stands with the measurement recorded.
