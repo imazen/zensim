@@ -417,3 +417,39 @@ unchanged. Measured basis for the amendment: e060's spans/reach are equal
 or better than the final's (jpeg 14.9 vs 10.6, webp 9.7 vs 8.4, jxl 27.2
 vs 25.5) — its higher tied-rate was clustered honest ties inside a WIDER
 range, the exact failure mode of tied-rate as a gate.
+
+## FINE TRAJECTORY + SPH1-BROAD RESULTS — the selection is now unambiguous (2026-08-28 ~08:2xZ, logged overnight)
+
+**SPH1-broad: FALSIFIED as displacement** — on its registered deciding axis
+(cid22, human, fully held-out) both seeds are CI-WORSE than the incumbent
+AND than PH_s4004 (br4003 −0.0071/−0.0131; br4005 −0.0024/−0.0085); br4003's
+hfnl edge over PH_s4004 (+0.0184) cannot compensate under its own
+registration. Training breadth does not pay on clean axes; the family
+purge stands vindicated.
+
+**Fine trajectory (every-2, 44-72):** two new near-miss candidates, each ONE
+clause short — a conservation pattern across the whole family:
+
+| candidate | cid22 Δinc | hfnl Δinc | m3a | fails |
+|---|---|---|---|---|
+| **PH_s4004 final** | **+0.0060 BETTER** | **+0.3320** | 0.7628 | — (ELIGIBLE, 8/8 floors) |
+| **e060** | +0.0002 NOT-WORSE | +0.3069 | **0.8333** | — (ELIGIBLE, 7/8 floors; no embedded repro) |
+| f054 | **+0.0068 BETTER (family best)** | +0.3115 | 0.8238 | tid bot-band 0.828 < 0.847 |
+| f058 | +0.0057 BETTER | +0.3250 | 0.8256 | G-GRAN webp (span 7.7, reach 88.9) |
+| e070 | — | — | 0.8541 | cid22 −0.0132 SACRIFICED |
+
+Every M3a-recovering checkpoint surrenders a different clause — coarse-map
+coherence trades against SOME fine-structure axis every time, but WHICH
+axis varies by epoch. Under the user-ratified gates (incl. G-GRAN) the
+eligible set is **{PH_s4004 final, e060}**, and the frozen selection rule
+(E.4 floors PRIMARY) picks **W10L9PH_s4004_packed**. e060 stays the
+documented M3a-alternative: choosing it requires the user to accept 7/8
+floors (and its missing below-zero reach), which only they can do.
+
+**Packaging gap found by freeze_check:** checkpoint dumps carry no embedded
+`zentrain.repro` (the trainer embeds only the final). Fix queued at the
+owner (trainer post-train append to dumps) so checkpoint candidates are
+freeze-packagable. Also flagged, not edited: freeze_check's bar table still
+carries the old dial-tied ≤5% row, inconsistent with the ratified
+granularity goals — amending those bars (zenpapers plan §5 lineage) is a
+user call.
