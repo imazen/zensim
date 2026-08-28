@@ -101,3 +101,15 @@ is a property of the RECIPE'S function class + data mix, not of packing
 incumbent leakage (H-CONTAM). Live mechanisms: SPH1 (HF signal in the
 GRADIENT — training now), H-BAL (HF signal in the SELECTION only), GH2
 (HDR micro-dose, queued), H-MAXIMIN + H-HID (terminal).
+
+## H-KON: RESOLVED — the "3× peer rate" was an unaligned-instrument artifact (2026-08-28)
+
+The konjnd OR comparison behind the recorded finding put candidates (n=504
+pairs) against peers (n=1,008 pairs) — different pair sets, so the rate
+comparison is invalid. CORRECTION to the G-OUT registration's konjnd
+paragraph: that finding is NOT COMPARABLE as stated. What IS measured on
+each model's own set: severe outliers (|z|>4) — s4005P 1, incumbent 0,
+cvvdp 8, butter 26; candidates' konjnd train_eq_val=False (no memorization
+flag); all severe misses across every model are UNDER-predictions in the
+40-58 PJND band. No candidate-side konjnd pathology stands. Folding konjnd
+into any gated scope would first require an aligned pair set for peers.

@@ -207,7 +207,7 @@ live:D (−302)**.
 (outside the gated scope) BOTH SDR candidates exceed the peer rate bar
 (OR .038 purity / .032 incumbent vs best-peer+tol .011). KonJND targets are
 PJND thresholds, not MOS — the panel's OR band semantics differ there — but
-the signal is real and recorded: the SDR family emits ~3× the peer outlier
+the signal was recorded as ~3× the peer outlier [AMENDED 2026-08-28: INVALID comparison — candidates n=504 vs peers n=1,008, unaligned pair sets; own-set severe outliers show candidates CLEANER than peers 1/0 vs 8/26; campaign H-KON] outlier
 rate on the JND axis. Declared spline ranges of record: purity (5.11→87.09),
 incumbent (5.42→86.96), L1T1 (0.00→96.14), t2 (−146.92→93.43 — and it still
 overshoots its own declared floor by 240).
