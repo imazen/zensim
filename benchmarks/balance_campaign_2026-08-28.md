@@ -453,3 +453,16 @@ freeze-packagable. Also flagged, not edited: freeze_check's bar table still
 carries the old dial-tied ≤5% row, inconsistent with the ratified
 granularity goals — amending those bars (zenpapers plan §5 lineage) is a
 user call.
+
+## CHECKPOINT REPRO PACKAGING — gap closed at the owner (2026-08-28, overnight)
+
+Two owner extensions, both tested: (1) the trainer now stamps every
+checkpoint dump with the run's `zentrain.repro` (+`checkpoint_epoch`)
+post-training — idempotent, FATAL on failure like the final embed;
+(2) `bake_dial_refit append-meta` (strip's inverse, zenpredict-bake
+section splice) for post-hoc stamping. The four live checkpoint candidates
+(e060/e070/f054/f058) are stamped as `*_stamped.bin` siblings — round-trip
+BYTE-IDENTICAL (append→strip == original) and SCORE-IDENTITY EXACT
+(forwards byte-equal on the 3,036-row HF wire). The harvested fullevals
+keep their original (unstamped) bake shas; a freeze of a checkpoint uses
+the stamped sibling and re-records its sha at packaging.

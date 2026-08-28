@@ -3619,6 +3619,62 @@ fn main() {
     });
     println!("Wrote {} bytes to {out_path:?}", bake_bytes.len());
 
+    // H-TRAJ (balance campaign 2026-08-28): stamp every checkpoint dump with
+    // the SAME repro (+ its epoch) so a checkpoint promoted to candidacy is
+    // freeze-packagable under the mandatory-repro rule. Idempotent (skips
+    // already-stamped files); failure is FATAL like the final embed.
+    if args.dump_checkpoints_every > 0 {
+        let dir = args
+            .dump_checkpoints_dir
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let key_bytes = b"zentrain.repro";
+        let mut stamped_n = 0usize;
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for ent in rd.flatten() {
+                let pth = ent.path();
+                let name = pth.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let Some(epoch_s) = name
+                    .strip_prefix("ckpt_epoch")
+                    .and_then(|s| s.strip_suffix(".bin"))
+                else {
+                    continue;
+                };
+                let bytes = match std::fs::read(&pth) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("FATAL: read checkpoint {pth:?}: {e}");
+                        std::process::exit(4);
+                    }
+                };
+                if bytes
+                    .windows(key_bytes.len())
+                    .any(|w| w == key_bytes)
+                {
+                    continue; // already stamped (idempotent re-run)
+                }
+                let mut v: serde_json::Value =
+                    serde_json::from_str(&repro_json).expect("repro_json reparse");
+                v["checkpoint_epoch"] = serde_json::Value::String(epoch_s.to_string());
+                let stamped = zenpredict_bake::append_metadata_utf8(
+                    &bytes,
+                    "zentrain.repro",
+                    &v.to_string(),
+                )
+                .unwrap_or_else(|e| {
+                    eprintln!("FATAL: could not embed zentrain.repro into {pth:?}: {e:?}");
+                    std::process::exit(4);
+                });
+                if let Err(e) = std::fs::write(&pth, &stamped) {
+                    eprintln!("FATAL: rewrite checkpoint {pth:?}: {e}");
+                    std::process::exit(4);
+                }
+                stamped_n += 1;
+            }
+        }
+        println!("Stamped {stamped_n} checkpoint dump(s) with zentrain.repro (+checkpoint_epoch)");
+    }
+
     // Provenance sidecar `<bake>.spec.json` — so downstream tooling (bandwise
     // dashboard honesty matrix, bake_verdict train-vs-heldout labeling) never has
     // to GUESS which corpora a bake trained on. Derived from the ACTUAL train_w>0

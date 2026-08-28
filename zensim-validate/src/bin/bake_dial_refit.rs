@@ -144,6 +144,10 @@ enum Cmd {
     /// re-emit everything else verbatim (reproduces
     /// `strip_spline_metadata.py`).
     Strip(StripArgs),
+    /// Append ONE metadata entry via zenpredict-bake's section splice
+    /// (weights byte-untouched; strip's inverse). Added 2026-08-28 to stamp
+    /// H-TRAJ checkpoint dumps with `zentrain.repro` post-hoc.
+    AppendMeta(AppendMetaArgs),
     /// Lasso-CD fit on a frozen feature-Gram npz, f16 pack, anchor spline,
     /// and bake — the Rust-native BHdr fit chain (reproduces
     /// `linear_projections_2026-07-03.py` `fit` plus `finalize` for one
@@ -1815,6 +1819,45 @@ struct StripArgs {
     /// Metadata key to remove.
     #[arg(long, default_value = SPLINE_KEY)]
     key: String,
+}
+
+#[derive(Args)]
+struct AppendMetaArgs {
+    #[arg(long = "in")]
+    input: PathBuf,
+    #[arg(long)]
+    out: PathBuf,
+    /// Metadata key to add (refused if already present — append, never
+    /// overwrite; strip first to replace).
+    #[arg(long)]
+    key: String,
+    /// File whose UTF-8 contents become the value.
+    #[arg(long)]
+    value_file: PathBuf,
+}
+
+fn cmd_append_meta(a: &AppendMetaArgs) -> Result<(), String> {
+    let bytes = std::fs::read(&a.input).map_err(|e| format!("read {:?}: {e}", a.input))?;
+    let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
+    if model.metadata().iter().any(|m| m.key == a.key) {
+        return Err(format!(
+            "metadata key {:?} already present in {:?} — append never overwrites;              `strip --key` first to replace",
+            a.key, a.input
+        ));
+    }
+    let value = std::fs::read_to_string(&a.value_file)
+        .map_err(|e| format!("read {:?}: {e}", a.value_file))?;
+    let out_bytes = zenpredict_bake::append_metadata_utf8(&bytes, &a.key, &value)
+        .map_err(|e| format!("append_metadata_utf8: {e:?}"))?;
+    std::fs::write(&a.out, &out_bytes).map_err(|e| format!("write {:?}: {e}", a.out))?;
+    eprintln!(
+        "appended {:?} ({} B value) -> {:?} ({} B)",
+        a.key,
+        value.len(),
+        a.out,
+        out_bytes.len()
+    );
+    Ok(())
 }
 
 fn cmd_strip(a: &StripArgs) -> Result<(), String> {
@@ -3778,6 +3821,7 @@ fn main() -> ExitCode {
         Cmd::Gate(a) => cmd_gate(a),
         Cmd::Pack(a) => cmd_pack(a).map(|_| false),
         Cmd::Strip(a) => cmd_strip(a).map(|_| false),
+        Cmd::AppendMeta(a) => cmd_append_meta(a).map(|_| false),
         Cmd::FitLasso(a) => cmd_fit_lasso(a).map(|_| false),
         Cmd::Gram(a) => cmd_gram(a).map(|_| false),
         Cmd::Predict(a) => cmd_predict(a).map(|_| false),
