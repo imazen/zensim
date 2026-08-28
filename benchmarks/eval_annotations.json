@@ -777,6 +777,49 @@
    "reason": "Bakes trained on the PRE-family bigcodec tables saw 5 test-bucket + 12 validate-bucket imazen-26 ids (family relatives of the re-sliced eval content). Their eval-slice RESCORES are clean (test-family rows only) but their TRAINING exposure stands: imazen26/nonphoto/hfnl reads are inflated-suspect relative to family-pure candidates. H-CONTAM measured ONE bake/axis (incumbent hfnl: edge genuine on clean rows); the population is annotated, not individually tested. CID22/AIC/CSIQ/LIVE/TID reads unaffected.",
    "record": "benchmarks/balance_campaign_2026-08-28.md (ADVERSARIAL AUDIT) + sdr_pure_retrain_wave_2026-08-28.md (SPH1-BROAD leakage-discount precedent)",
    "date": "2026-08-28"
+  },
+  {
+   "id": "native-loop-error-span-incomparable",
+   "kind": "annotated",
+   "fields": [
+    "proxy_jxl_n",
+    "proxy_avif_n",
+    "loop2",
+    "loop3",
+    "loop3err"
+   ],
+   "scope": {
+    "note": "any cross-bake comparison of native-unit loop error"
+   },
+   "reason": "Native loop error is measured in each bake's OWN dial units; bakes with compressed dial spans (e.g. GL2 38-82) get flattered \u2014 measured: GL2 best native (jxl k3 0.434, 97/99) while WORST translated (ssim2-judged 1.36-2.71). Cross-bake loop comparisons must use the translated (ssim2/butter-judged) proxy columns with their oracle floors; native columns are per-bake diagnostics only.",
+   "record": "benchmarks/balance_campaign_2026-08-28.md (LOOP-PROXY RESULTS) + benchmarks/loop_proxy_2026-08-28.json",
+   "date": "2026-08-28"
+  },
+  {
+   "id": "trained-date-file-mtime-fallback",
+   "kind": "annotated",
+   "fields": [
+    "trained (scoreboard column, entries marked *)"
+   ],
+   "scope": {
+    "note": "rows whose train_date.src == 'file'"
+   },
+   "reason": "Bakes without embedded repro show the bake FILE's mtime (marked *) \u2014 that is copy/pack time, NOT training time, and can postdate training by days. Only unstarred (repro timestamp_epoch) stamps are training times.",
+   "record": "board(dates) commit 05091211",
+   "date": "2026-08-28"
+  },
+  {
+   "id": "peer-rank-cells-subset-n",
+   "kind": "annotated",
+   "fields": [
+    "rank.* (peer_ rows)"
+   ],
+   "scope": {
+    "note": "peer_ssim2 / peer_butteraugli / peer_cvvdp / peer_iwssim rows"
+   },
+   "reason": "Peer rows are computed from stored refmetrics per-pair tables whose pair sets differ in size/composition from candidate evals on some axes (measured: konjnd peers n=1008 vs candidates n=504 \u2014 the H-KON invalid-rate incident). Down-column reads vs candidates are indicative, not exact; aligned-set comparisons require a rescore.",
+   "record": "balance_campaign_2026-08-28.md (H-KON) + sdr wave konjnd amendment",
+   "date": "2026-08-28"
   }
  ]
 }

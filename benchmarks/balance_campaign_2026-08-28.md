@@ -554,3 +554,61 @@ Additionally, the old population's im26/nonphoto/hfnl reads carry
 pre-family TRAINING exposure (their prediction rescores were re-sliced,
 their training was not) — inflated-suspect on exactly the axes where they
 already lose; registry entry added below.
+
+## LOOP-UTILITY PROXY (user directive) — design REGISTERED before computing (2026-08-28 ~09:5xZ)
+
+Goal: a per-bake k2/k3 loop-utility measure for jxl AND avif that needs no
+encodes and no census (substrate-consistent, cheap), measured (a) in NATIVE
+bake units and (b) in WELL-TRANSLATED butter and ssim2 units, BOTH
+directions. Substrate: the stored 944 dial grid (4,817 cells; jxl 33
+images × 49 rungs, avif 35 × 40) joined to the peer scores measured on the
+SAME cells (refmetrics dialgrid ssim2/butter TSVs).
+
+**Frozen definition** (`scripts/v_next/loop_proxy.py` = the owner):
+- Search emulation: bracketed q-bisection over the stored ladder (the
+  family loop's shape), k ∈ {2,3} evaluations, emit-best on the bake's own
+  score; landing rung's TRUE peer scores are then read off the same cell.
+- Readings per (codec, k, t∈{70,80,88}):
+  1. NATIVE: med |bake(landed) − t|, ±2 hits — comparable to the census.
+  2. FWD (bake-steered, metric-judged): med |M(landed) − map_b→M(t)| in M
+     units, M ∈ {ssim2, butter_max}; maps = monotone quantile maps fit on
+     the joined codec-domain cells (20 anchors, enforced monotone).
+  3. REV (metric target, bake-steered): t_M → map_M→b → steer → judge
+     |M(landed) − t_M| — the round-trip composition, the "both directions"
+     reading.
+- FAIRNESS FLOORS reported beside every number: the M-steered oracle (same
+  k-bisection steering on M itself) and the k∞ ladder-quantization floor —
+  a bake is judged against what the ladder makes achievable, never against
+  zero. A proxy table without its floors is the deceptive form; the floors
+  ARE the fairness device.
+- VALIDATION GATE: the proxy's k3 native ordering on jxl must reproduce
+  tonight's measured census ordering (A better than e060) or the proxy is
+  rejected.
+
+### LOOP-PROXY RESULTS — validation PASSED on v2 (seeded-secant); the native-units deception MEASURED
+
+v1 (blind bisection) FAILED the registered validation gate (B ≤ A at jxl
+k3, contradicting the census) — it measured search geometry, not the bake;
+recorded, rejected. v2 emulates the family loop (fixed seed: jxl d2.5,
+avif q78; secant steps; emit-best): **gate PASSES** — jxl k3 native A
+0.526 (93/99) < B 0.817 (75/99), matching the measured census ordering,
+magnitudes in the census range.
+
+Key readings (med |err|; full table `benchmarks/loop_proxy_2026-08-28.json`):
+
+| bake | jxl k3 native (±2) | jxl k3 ssim2-judged (oracle) | avif k3 native | avif k3 ssim2-judged |
+|---|---|---|---|---|
+| A PH_s4004 | 0.526 (93/99) | 1.05 (0.41) | 0.639 | 1.06 |
+| B e060 | 0.817 (75/99) | 1.50 (0.41) | 0.511 | 1.03 |
+| incumbent | 0.400 (92/99) | 0.74 (0.47) | 0.537 | 1.02 |
+| GL2 | **0.434 (97/99)** | **1.36** | 0.444 | **1.60** |
+
+**The deception, measured:** GL2's native numbers are the table's best while
+its translated (true-quality) errors are the worst — a compressed dial
+(38→82 span) makes each native unit worth more quality, so native ±2
+flatters exactly the models with the least addressable dials. **Native
+loop error is NOT cross-comparable between bakes with different dial
+spans; the ssim2/butter-judged columns (with their oracle floors) are the
+fair reading.** Registry entry + board caption added. Rev (metric-unit
+targets, round-trip translated) ≈ fwd throughout — the translation maps
+compose cleanly both directions.

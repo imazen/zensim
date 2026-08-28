@@ -715,7 +715,24 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
                hfnl_axis=None):
     ech_js, ech_ver = _load_echarts()
     _, ann_meta = load_annotations_registry()
-    data = {"bakes": bakes, "palette": PALETTE, "references": REFERENCES,
+    # FULL dominance exclusion (user directive 2026-08-28): dominated bakes are
+    # EXCLUDED from the board entirely (files + fullevals retained on disk;
+    # marks from promote_fulleval --mark-dominated, rule strict-pareto-2026-08-04).
+    n_dom = sum(1 for b in bakes if b.get("dominated_by"))
+    bakes = [b for b in bakes if not b.get("dominated_by")]
+    for b in bakes:
+        b["_n_dominated_excluded"] = n_dom  # caption reads it off any row
+    # loop-utility PROXY (owner: scripts/v_next/loop_proxy.py; committed JSON —
+    # READ, never re-derived here). Name map: proxy run names -> board names.
+    proxy = None
+    _pp = Path(__file__).resolve().parents[2] / "benchmarks" / "loop_proxy_2026-08-28.json"
+    if _pp.exists():
+        _pj = json.loads(_pp.read_text())
+        _pmap = {"A_PH_s4004": "W10L9PH_s4004_packed", "B_e060": "PH_s4004_e060",
+                 "incumbent": "W10L9_s4003_packed", "GL2": "R1_GL2_s2503_packed"}
+        proxy = {_pmap.get(k, k): v for k, v in _pj.items()}
+    data = {"bakes": bakes, "loopProxy": proxy, "nDominatedExcluded": n_dom,
+            "palette": PALETTE, "references": REFERENCES,
             "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
             "chartThemes": THEME_VARS, "echartsVersion": ech_ver,
             "annRegistry": ann_meta,
@@ -1127,6 +1144,14 @@ const LT=DATA.loopTargeting||null;
 const ltN=()=>(LT&&LT.meta&&LT.meta.matrix&&LT.meta.matrix.n_cells)||27;
 const ltCell=(b,mode)=>{if(!LT)return null;const mk=LT.bakeMap[b.name];if(!mk)return null;
   const m=LT.models[mk];return (m&&m.cells&&m.cells[mode])||null;};
+const PX=DATA.loopProxy||null;
+const pxc=(b,codec,kk,key)=>{if(!PX)return null;const r=PX[b.name];if(!r||!r[codec])return null;
+  const c=r[codec].cells&&r[codec].cells[kk];return c?c[key]:null;};
+if(PX){COLS.push(
+  ['proxy_jxl_s','jxl-k3 ssim2⌁',false,b=>pxc(b,'jxl','k3','ssim2_fwd_med')],
+  ['proxy_jxl_n','jxl-k3 native⌁',false,b=>pxc(b,'jxl','k3','native_med')],
+  ['proxy_avif_s','avif-k3 ssim2⌁',false,b=>pxc(b,'avif','k3','ssim2_fwd_med')],
+  ['proxy_avif_n','avif-k3 native⌁',false,b=>pxc(b,'avif','k3','native_med')]);}
 if(LT){COLS.push(
   ['loop2','2shot ±2',false,b=>{const c=ltCell(b,'k2_emit_best');return c?c.within2:null;}],
   ['loop3','3shot ±2',false,b=>{const c=ltCell(b,'k3_emit_best');return c?c.within2:null;}],
@@ -1141,11 +1166,17 @@ function fmtCell(key,v){
   if(key==='cid22_ci')return v==null?'—':'±'+v.toFixed(3);
   if(key==='loop2'||key==='loop3')return v==null?'—':v+'/'+ltN();
   if(key==='loop3err')return v==null?'—':(+v).toFixed(2);
+  if(key&&key.startsWith('proxy_'))return v==null?'—':(+v).toFixed(2);
   return f3(v);
 }
 function renderTable(){
   const wrap=el('div',{});
-  const cap=el('div',{class:'cap',html:'Sortable scoreboard — click a header. SROCC is polarity-corrected '
+  const domNote=DATA.nDominatedExcluded?('<b>'+DATA.nDominatedExcluded+' dominated bakes FULLY EXCLUDED</b> '
+    +'(strict-pareto-2026-08-04; files + fullevals retained — registry/dominance TSV). '):'';
+  const pxNote=DATA.loopProxy?('⌁ loop-utility PROXY (seeded-secant on the stored dial grid, census-validated): '
+    +'the <b>ssim2-judged</b> columns are the FAIR cross-bake reading; native columns are per-bake diagnostics '
+    +'only — bakes with compressed dial spans are flattered natively (measured: GL2). ') : '';
+  const cap=el('div',{class:'cap',html:domNote+pxNote+'Sortable scoreboard — click a header. SROCC is polarity-corrected '
     +'(|SROCC| for JND corpora). <b>regime</b> = the model’s TRUE input width, derived from the ZNPR’s '
     +'<code>n_inputs</code> (372/720/924/944-class) — NOT the recorded flag string, which reads “720” '
     +'cosmetically on the campaign verdicts (the flag shows in the bake-picker tooltip when it differs; for an '
