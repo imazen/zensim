@@ -301,3 +301,14 @@ G-OUT v2 + hfnl paired-Δ CI not wholly below 0 + cid22 paired-Δ CI not
 wholly below 0 + LF bottom-bands ≥ incumbent − 0.01 + LF mono 1.0 + HF tied
 ≤ incumbent + 0.02. Selection among eligible: freeze_check E.4; below-zero
 reach breaks ties. If 0/3 eligible: report; no further silent arms.
+
+## H-BAL ARM — registered 2026-08-28 BEFORE any fit (balance campaign)
+
+Mechanism twin of SPH1: the SAME purity recipe + the SAME tbig_hf leg but
+**val-weighted only** (`tbig_hf:...:0.0:1.0:both`) — HF enters epoch
+SELECTION (best_val geomean), never the gradient. Seeds {4003,4004,4005},
+stems `W10L9PB_s*`, pack/harvest identical. Gates: the extension eligibility
+rule verbatim. Reading: SPH1-vs-H-BAL separates "HF skill needs training
+signal" from "HF skill exists in some epochs and selection loses it" — if
+H-BAL alone closes the HF gap, the anti-separation was a checkpoint-selection
+artifact; if only SPH1 does, it is a data-mix property.

@@ -54,3 +54,50 @@ NO ship-default flips; freezes remain proposals to the user; every arm
 registered in its owning wave md before fit; every result committed; docs +
 memory updated in-pass. SPH1 + GH2 (already registered, user-called)
 continue and fold into the balance picture.
+
+## H-DIAL-FLOOR: FALSIFIED (2026-08-28, no repack needed — decisive from existing data)
+
+The premise was wrong on inspection: `anchor944_dial.parquet` ALREADY holds
+negatives (min −100, 2.46% of 2,035 rows < 0, p1 −34.1). The decisive
+evidence against the pack-property hypothesis: every flooring candidate's
+emission floor EQUALS its bottom-knot dial value exactly (incumbent 5.4 =
+knot 5.42; s4006P/s4010P 7.8 = knot 7.78) — meaning their raw outputs never
+go below the bottom knot's raw x on any SDR corpus, so the below-knot linear
+extrapolation is never exercised. s4005P (−5.8 < knot 5.11) does emit
+below-knot raw. **The floor is a MODEL raw-range property (output-range
+compression on OOD-severe content), not anchor coverage.** Refined
+mechanism, recorded: the floor's VALUE sits at the pack's knot-placement
+percentile (a deeper bottom knot would lower every floor), but WHETHER a
+model extrapolates below is its own raw range — so below-zero reach remains
+a legitimate model discriminator, and the LF-extreme axis stays in the
+two-zone scorecard. Critical-thinking note: this is the campaign's own
+first registered hypothesis, killed by its first measurement — as it
+should be.
+
+## H-ENS: FALSIFIED in strong form (2026-08-28)
+
+`bake_verdict --ensemble` fullevals of three parent pairings: E1
+(s4010+s4006) PASSES G-OUT v2 (B tamed: 26.8) with cid22 0.8904 — but its
+HF paired-Δ vs incumbent is −0.0325 [−0.0390,−0.0260]: averaging moves a
+candidate ALONG the recipe's cid22↔hfnl front, it does not escape it. E2/E3
+(with s4004) inherit its hfnl:B outlier at ~36-37 (halved from 45.9, still
+over the 35 bar) and FAIL. Ensembling this recipe's seeds cannot produce
+the balanced candidate.
+
+## H-CONTAM (the sharpest critical question, asked and answered): FALSIFIED
+
+Hypothesis: the incumbent's hfnl edge is train-on-eval-family leakage (its
+pre-purge tbig table holds 5 test-bucket + 12 validate-bucket ids; 2
+families overlap the hfnl eval = 352/9,167 rows, 3.8%). Measured by
+splitting the paired Δ: **incumbent−s4005P on family-CLEAN rows +0.0430
+[+0.0363,+0.0500] — the edge is fully present where no leakage is possible**
+— and smaller (+0.0197, CI incl 0) on the overlapped rows. The incumbent's
+HF advantage is genuine skill, not contamination. (Also decisive a priori:
+3.8% exposure cannot mechanically produce a +0.04 whole-set edge.)
+
+Campaign state after three falsifications: the cid22↔hfnl anti-separation
+is a property of the RECIPE'S function class + data mix, not of packing
+(H-DIAL-FLOOR), not escapable by averaging (H-ENS), not an artifact of
+incumbent leakage (H-CONTAM). Live mechanisms: SPH1 (HF signal in the
+GRADIENT — training now), H-BAL (HF signal in the SELECTION only), GH2
+(HDR micro-dose, queued), H-MAXIMIN + H-HID (terminal).
