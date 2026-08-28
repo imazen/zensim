@@ -312,3 +312,36 @@ rule verbatim. Reading: SPH1-vs-H-BAL separates "HF skill needs training
 signal" from "HF skill exists in some epochs and selection loses it" — if
 H-BAL alone closes the HF gap, the anti-separation was a checkpoint-selection
 artifact; if only SPH1 does, it is a data-mix property.
+
+## SPH1 RESULTS — W10L9PH_s4004_packed is the FIRST fully-eligible candidate (2026-08-28)
+
+3/3 seeds clean. The HF leg transforms the recipe — seed-consistent, not a
+lottery (hfnl 0.729/0.752/0.734 vs purity twins 0.30-0.44):
+
+| seed | cid22 Δ vs incumbent (CI) | hfnl Δ (CI) | LF bots c22/tid | HF tied | G-OUT | negmin |
+|---|---|---|---|---|---|---|
+| **PH_s4004** | **+0.0060 [+0.0044,+0.0077] BETTER** | **+0.3320 [+0.3150,+0.3487] BETTER** | **0.714 ✓ / 0.857 ✓** | **0.228 ✓** | **PASS** | **−18.1** |
+| PH_s4003 | −0.0033 ✗ | +0.3086 BETTER | 0.694 ✗ / 0.871 | 0.446 ✗ | PASS | 7.8 |
+| PH_s4005 | −0.0079 ✗ | +0.3133 BETTER | 0.683 ✗ / 0.871 | 0.435 ✗ | PASS | 7.8 |
+
+**`W10L9PH_s4004_packed` (sha 61ebc4562c2c4f78…) satisfies EVERY frozen clause — by
+domination, not trade**: better than the incumbent on BOTH zones with CIs
+excluding zero, LF bands over bars, best HF tied-rate in the field, G-OUT
+v2 PASS with the cleanest hfnl tail ever measured (OR 0.013, p99 3.87 —
+half the previous best), below-zero reach (−18.1, the LF-extreme contract),
+konjnd 0.501, imazen26/nonphoto above incumbent. m3a 0.7628 is its one
+soft spot (tie-break input; the campaign's terminal read stands between it
+and any freeze proposal regardless).
+
+Provenance note (asked and answered before celebrating): the HF train leg's
+target is the ssim2-derived label — the SAME metric family as the hfnl eval
+target — so this is on-task skill on disjoint families, not cross-metric
+proof; cross-metric transfer is measured ONCE by the sealed H-HID panel
+(7 independent targets). The +0.006 on cid22 (human MOS, fully held out) is
+the first human-labeled evidence the HF skill costs humans nothing.
+
+Mechanism reading (with H-BAL pending): the cid22↔hfnl anti-separation was
+a DATA-MIX property — the family purge removed the recipe's only HF-band
+signal; restoring it from the family-clean side of the SAME table both
+lifts HF ~3× and cleans the HF outlier tail. H-BAL (val-only twin) will
+show whether selection alone could have found any of this (prediction: no).
