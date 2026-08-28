@@ -895,3 +895,83 @@ elsewhere. NOTED FOR THE USER, not acted on: e050/e080 miss webp reach by
 one user-approved bar adjustment would admit them; the frozen bars stand
 meanwhile. s4014_final remains the best map-strong artifact (m3a 0.872,
 v-hfnl parity with A) for a possible companion-map role.
+
+## GATE-PROVENANCE AUDIT (2026-08-28, user directive: "missing by hairs is sus")
+
+**Provenance of every frozen bar** (audit trigger: three hairline decisions
+all traced to incumbent-derived floors, and the incumbent is the certified
+UNBALANCED model — LF specialist, 228/4817 identity violations):
+
+| bar | level | provenance | ever decided by a hair? |
+|---|---|---|---|
+| (i)/(ii) hfnl+cid22 paired CI | non-inferiority CI | principled (paired, no point value) | no — CI form self-reports noise |
+| (iii) LF floors c22 0.697 / tid 0.847 | incumbent LF band − 0.01 | incumbent-derived POINT bars | yes: e050 0.839, s4006P 0.682, f054 0.828 |
+| (iv) G-GRAN span ≥8 / mono ≥0.93 | ratified granularity goals / convention | principled / arbitrary-small | no |
+| (iv) G-GRAN reach = incumbent − 1 | incumbent dial curves | incumbent-derived, AND reach is a CALIBRATION property (more ≠ better) | yes: e050 webp −0.33, e080 −0.23 |
+| G-OUT R (OR ≤ peer+0.005) | external peers | principled | no |
+| G-OUT S cap 12 / B 35 / D span/3+105 | arbitrary tolerances | arbitrary — but only egregious cells ever hit them (s4007 −63 below floor) | no |
+
+**The webp reach bar — empirically VINDICATED** (instrument:
+`scripts/v_next/webp_ceiling_audit.py` on the stored 944 dial grid + the
+refmetrics ssim2/butteraugli sidecars). Peer truth at the top knob: webp
+genuinely delivers the lowest ceiling of the four codecs (ssim2 p50 90.76
+vs jpeg 93.79 / avif 95.13 / jxl 97.04; butteraugli p50 1.187 vs 0.547 /
+0.259 / 0.066 — webp lossy is structurally 4:2:0). Inverting each bake's
+OWN optimal-class translation map (loop_proxy.qmap) at the median top-cell
+ssim2 gives the honest webp reach in model units: **91.2-92.4 across all
+five maps** — the bar (91.9) sits AT the honest ceiling, not above it. The
+incumbent's webp reach was CALIBRATED (+0.13 stretch, the smallest |stretch|
+of the five bakes measured; its stretch problems are elsewhere — it
+under-reports jxl top by 2.5). The W11 cells genuinely under-report webp's
+top zone beyond their own honest values (e050 −0.92, e080 −1.33, s4014f
+−1.74). **User's adjustment condition ("unless webp qualities not
+addressable at top end") is NOT met — webp's top end IS addressable at the
+bar; no adjustment.** Bonus finding: A under-reports webp top too (−0.91) —
+top-zone webp is the whole family's soft spot, worth a targeted data leg in
+W12.
+
+**The tid-LF floor hairline — also a REAL regression, not gate noise.**
+Converted the point comparison to the principled form: paired bootstrap
+(B=5000, seed 11) on the tid LF band (human ≤ 0.5, n=1424 aligned pairs):
+e050 − incumbent = **−0.0179 CI [−0.0303, −0.0056] — wholly below zero**;
+A − incumbent = +0.0005 CI [−0.0135, +0.0151] (dead even). e050's miss is
+outside noise; the floor happened to agree with the CI.
+
+**Registered improvement (W12, user-gated):** convert the clause-(iii) LF
+floors from incumbent-derived POINT bars to paired-CI non-inferiority vs
+the incumbent (the same form clauses (i)/(ii) already use). This audit
+shows the point bar and the CI agreed HERE, but only the CI form makes a
+hairline miss self-interpreting. The G-GRAN reach bar stays point-form but
+gains a documented meaning: it now has a measured honest-ceiling basis
+(91.2-92.4), not just incumbent lineage.
+
+## W11 MAP-COMPANION A/B (2026-08-28 ~23:1xZ) — e060 keeps the companion crown
+
+s4014_final (M3a 0.8719, the strongest map-side artifact by coherence) took
+the h3own instrument as A's map companion and as own-map, same substrate
+binary as the trio (NOT rebuilt), 27 cells, h3-mag, k3 emit-best. All
+dBytes below are vs A-base-k3-best from the trio (the product-relevant
+denominator: marginal cost of adding the companion to A; the earlier
+table's −1.01% used the carried incumbent-base rows as denominator — both
+stated, neither wrong):
+
+| arm | k3_best med\|err\| | ±2 | dBytes vs A base |
+|---|---|---|---|
+| A base (scalar) | 0.343 | 25/27 | — |
+| **A + e060-map (companion-of-record candidate)** | **0.300** | **25/27** | +0.32% |
+| A + s4014f-map | 0.326 | 24/27 | −0.42% |
+| s4014f own | 0.477 | 26/27 | **+16.80%** |
+
+**e060 remains the best companion** (lower error at equal hit-rate).
+s4014f-as-companion is close but not better; s4014f-own over-encodes
+(+16.8% bytes) — its measured top-zone under-reporting (ceiling audit:
+−1.74 on webp, −2.21 on jpeg) makes the loop chase scores the model won't
+emit. Science note: within the map-strong class, M3a DECOUPLES from loop
+value (s4014f 0.872 > e060 0.833 in M3a, yet steers slightly worse) — M3a
+predicts map-on loop value coarsely (map-strong ≫ map-weak), not finely.
+Scope: one codec, one instrument, n=27. Cells:
+`~/tmp/jxlloop/{cross_As4014f,own_s4014f}/` + preserved crossAB cells.
+Driver fix landed with this: `TS_BD` override completes on all 7 cells-TSV
+sites (the h3own/h3ownsp/gainsweep phases used to clobber the committed
+2026-08-05 baseline TSV — the crossAB run had done so; restored to HEAD,
+cross cells preserved).
