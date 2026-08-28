@@ -113,3 +113,31 @@ cvvdp 8, butter 26; candidates' konjnd train_eq_val=False (no memorization
 flag); all severe misses across every model are UNDER-predictions in the
 40-58 PJND band. No candidate-side konjnd pathology stands. Folding konjnd
 into any gated scope would first require an aligned pair set for peers.
+
+## H-MAXIMIN definition + H-SEL shrinkage instrument (registered before computing)
+
+**Maximin score** := min over the six G-OUT axes (cid22, hfnlproxy,
+imazen26, nonphoto, kadid, live) of the candidate's within-pool percentile
+rank of `srocc_signed`. Pool = the 9 purity seeds + incumbent + SPH1 +
+H-BAL seeds + gate-passing ensembles. konjnd excluded (H-KON: unaligned),
+sdr25 excluded (comparator by standing rule). The maximin pick is compared
+against the E.4 composite pick on the H-HID hidden panel at terminal read —
+that comparison IS the H-MAXIMIN test.
+
+**H-SEL selection shrinkage** := with K seeds, select the best on a random
+half of cid22 pairs, measure on the other half; the mean (select-half −
+measure-half) gap over 200 splits estimates the upward bias our K-seed
+selection puts on the winner's reported score. Reported alongside any
+winner so the board number carries its own bias estimate.
+
+## H-SEL RESULT: selection bias ≈ ZERO for our K=9 seed selections (2026-08-28)
+
+200 random split-halves of the aligned cid22 matrix (9 seeds × 4,292 pairs):
+mean(select-half − measure-half) for the per-split winner = **−0.0002
+(sd 0.0062)**. Mechanism: seed-to-seed differences (spread ~0.018) exceed
+half-set sampling noise, so the same seeds win across splits — the ordering
+is signal. Consequence: wave-level K≤9 selections on cid22 carry negligible
+optimism, and paired-CI eligibility (±0.002 resolution) is measuring real
+differences. Caveats recorded: one axis (cid22), one recipe family;
+board-scale selection (300 rows) or noisier axes (per-ref hfnl) would show
+more — the H-HID terminal read remains the generalization check of record.
