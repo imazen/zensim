@@ -852,3 +852,23 @@ last on all three axes). Going forward, selection runs on THESE slices;
 the test-family slices are retired to touch-once terminal reads.
 PU21 note: the converter's multiprocessing children die at import
 (kadis-distort env guard) — being fixed; the PU21 verdict follows.
+
+## PU21 SINGLE-MODEL EXPERIMENT — VERDICT under the frozen rule (2026-08-28 ~22:5xZ)
+
+800 stratified CID22 pairs (human MOS), both routes on the SAME pairs
+(converter fixed serial; extractor gained 16-bit PNG handling mid-run):
+
+| route | model | CID22 SROCC (n=800) |
+|---|---|---|
+| native SDR (sRGB features) | SDR CoR PH_s4004 | **0.8939** |
+| PU21 (sRGB→203-nit→PQ, HDR-route features) | HDR CoR L1T1_hfpack | 0.8343 |
+| PU21 features → SDR CoR (cross-curiosity) | PH_s4004 | 0.8134 |
+
+**Gap 0.0596 ≫ the frozen 0.01 rule ⇒ a single PU-front model is NOT
+viable as-is; the two-model architecture stands.** Honest footnote,
+recorded as a future-lever motivation (NOT pursued): 0.8343 from a model
+trained exclusively on HDR-grid content — zero SDR images — through a
+domain-transposed front-end is a strong transfer result; a JOINT-trained
+PU-front model (SDR+HDR legs through one PU front) might close much of the
+gap and would be the registered follow-up wave if the user wants the
+single-model line pursued.

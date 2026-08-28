@@ -107,6 +107,18 @@ fn decode_png_rgb8(p: &Path) -> Result<(Vec<u8>, usize, usize), String> {
             }
             o
         }
+        (png::ColorType::Rgb, png::BitDepth::Sixteen) => {
+            // magick-normalized sources can stay 16-bit; take the high byte
+            // (exact for values that were 8-bit-scaled up; ±1/2 LSB otherwise)
+            buf.chunks_exact(2).map(|c| c[0]).collect()
+        }
+        (png::ColorType::Rgba, png::BitDepth::Sixteen) => {
+            let mut o = Vec::with_capacity(w * h * 3);
+            for px in buf.chunks_exact(8) {
+                o.extend_from_slice(&[px[0], px[2], px[4]]);
+            }
+            o
+        }
         (ct, bd) => return Err(format!("{p:?}: unsupported png {ct:?}/{bd:?}")),
     };
     Ok((rgb, w, h))
