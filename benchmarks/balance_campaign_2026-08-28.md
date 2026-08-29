@@ -1661,3 +1661,32 @@ other axes. **No scale-up; north-anchor's recipe is at its kon optimum in
 this weight family.** Fresh-B's KonJND 0.547 vs north-anchor 0.501 stands as
 the one rank axis the default keeps (cid22 itself is now CI-tested in the
 CANDIDATE's favor). Probe bake kept: `wlin-2026-08-29/R6M_PH_kon25_s4004.bin`.
+
+## SPLIT-LADDER AUDIT (2026-08-29, user question: "what is our train vs eval split on konjnd, hfnl, tid, kadid, kadis, etc")
+
+Verified against `docs/DATA_SPLITS.md` + manifests + the parquets themselves
+(origin-digit histograms). New findings, all recorded in the registry (§3c):
+
+1. **Three slice generations are live on the board** for imazen26/nonphoto/
+   hfnlproxy: era candidates read the pre-D1 TEST-family cuts (n 7,869/7,255/
+   9,167), today's pair reads the 2026-08-28 validate-family cuts (6,953/
+   6,142/7,717), and B's remeasure read the 372-root TEST-family cuts (7,844/
+   8,241/11,356). Cross-generation numbers are NOT same-ruler.
+2. **Same-ruler rescore (validate slices) of the era candidates:**
+   north-anchor cid22 0.8927 / nonphoto 0.9280 / im26 0.9314 / kon 0.5006 /
+   hfnl **0.6993**; amber 0.8735/0.9314/0.9329/0.4557/**0.6393**; gray-tower
+   0.8867/0.9204/0.9238/0.4988/**0.3337**. Rankings hold; hfnl drops 0.05–
+   0.09 vs the test-family reads. **On the same ruler, jeweler-loupe (0.7260)
+   is the hfnl LEADER** — ahead of north-anchor (0.6993).
+3. **jeweler-loupe's training is holdout-clean, now VERIFIED:** its train leg
+   `tbig_hf_pure` = 195 origins, all train digits {0,2,4,6,8}; the hfnlproxy
+   eval = 87 validate-digit origins {1,3,5}; **origin intersection 0**.
+4. **Bookkeeping fixed:** the 3 hf-leg files were unmanifested in the
+   sdr-pure root (added with shas); the hfnl family had no DATA_SPLITS.md
+   section (added §3c); the ext944 `_MANIFEST_eval_slices.json` hfnlproxy
+   entry is STALE (records the pre-D1 11,356-row cut) and bake_verdict's
+   "944 TEST views" display string is wrong for the validate slice (both
+   flagged in §3c; display-string fix queued, not load-bearing).
+5. **B's remeasure consumed the retired test-family slice** (372 root) — a
+   terminal-read-class touch, consistent with D1's touch-once rule, but its
+   hfnl/im26/nonphoto rows are not same-ruler with any 944 candidate.

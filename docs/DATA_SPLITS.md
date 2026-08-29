@@ -309,3 +309,22 @@ scaled alternative when a grid is big enough to warrant the job system.
    ssim2 saturates); (c) re-derive the digit-split train/val files from it.
    Until then, ssim2-target waves (v51) validate the held-out-val selection
    fix, NOT the final supervision design.
+
+### §3c. HF-near-lossless family (registered 2026-08-29 — was missing from this registry)
+
+| Asset | Tier | Split | Notes |
+|---|---|---|---|
+| `hf_nearlossless_{train,val}` (372-col, 1,200 rows / 200 refs; canonical-2026-07-15) | T2 train + within-family val | REF-level: sorted refs, every 4th → val (150/50, zero ref overlap) | jxl near-lossless refit corpus; target = ssim2/100; manifest `_MANIFEST_hf_nearlossless.json` |
+| `tbig_hf_pure` (944, 11,941 rows / 195 origins; sdr-pure-2026-08-28) | T2 train | LSD **train digits {0,2,4,6,8}** — verified 2026-08-29, zero origin overlap with any eval slice | The l944_hf gram source = jeweler-loupe's training data + north-anchor's `tbig_hf` group. Was UNMANIFESTED until 2026-08-29 (now in the root `_MANIFEST.json` with shas, incl. the `_jw`/`_jwfold` variants) |
+| `ext_hfnlproxy` @ ext944 root (7,717 rows / 87 origins) | T3 selection instrument | LSD **VALIDATE digits {1,3,5}** — the 2026-08-28 D1 re-slice (methodology audit: selection had been consuming TEST families; fixed) | ⚠ the root's `_MANIFEST_eval_slices.json` still records the pre-D1 11,356-row cut — STALE for this file. ⚠ bake_verdict's display string "944 TEST views" is now WRONG for this slice (it reads validate views) |
+| `ext_hfnlproxy` @ 372 root (11,356 rows / 74 origins) | T3 touch-once terminal | LSD **TEST digits {7,9}** (pre-D1 cut, built 2026-08-27) | What shipped-B's 2026-08-29 remeasure consumed. Retired from selection per D1; terminal reads only |
+
+**⚠ Cross-generation comparability (measured 2026-08-29):** three slice
+generations are simultaneously live on the board for imazen26/nonphoto/
+hfnlproxy — era-candidate fullevals (pre-D1 test-family: n 7,869/7,255/9,167),
+the 2026-08-28 validate-family cuts (6,953/6,142/7,717), and B's 372-root
+test-family cuts (7,844/8,241/11,356). Numbers across generations are NOT
+same-ruler; hfnl shifts up to 0.09 between populations (north-anchor 0.752
+test-family vs 0.699 validate-family). Same-ruler comparisons must rescore on
+one generation — see the balance campaign's split-audit section for the
+validate-slice rescores of the era candidates.
