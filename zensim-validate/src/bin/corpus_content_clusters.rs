@@ -434,7 +434,105 @@ fn main() -> Result<()> {
         eprintln!("  hint {h}: clusters {:?}", clusters_per_hint[h]);
     }
 
-    // 5b. Validation step 2 (the EYEBALL pass) instrument. The 2026-05-14
+    // (The montage instrument is step 7, deliberately AFTER the CSV outputs:
+    // a group that cannot be rendered must never cost the curation
+    // deliverables this run is FOR.)
+
+    // 6. CSV-derived outputs.
+    if let Some(csv) = &csv {
+        let by_name: HashMap<&str, usize> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), i))
+            .collect();
+        let row_index = |line: &str| -> Option<usize> {
+            let src = source_of(line, csv.source_col);
+            let key = Path::new(src)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            by_name.get(key.as_str()).copied()
+        };
+        let row_idx: Vec<Option<usize>> = csv.lines.iter().map(|l| row_index(l)).collect();
+        let n_unknown = row_idx.iter().filter(|r| r.is_none()).count();
+        eprintln!(
+            "csv rows: {} ({} with a source that was not hashed → treated as size-1 / canonical / train)",
+            csv.lines.len(),
+            n_unknown
+        );
+
+        if let Some(out) = &args.cull_csv {
+            let kept: Vec<&String> = csv
+                .lines
+                .iter()
+                .zip(&row_idx)
+                .filter(|(_, r)| r.is_none_or(|i| canonical[i]))
+                .map(|(l, _)| l)
+                .collect();
+            write_csv(out, &csv.header, &kept)?;
+            eprintln!(
+                "cull: kept {} / {} rows (one variant per cluster) → {}",
+                kept.len(),
+                csv.lines.len(),
+                out.display()
+            );
+        }
+
+        if let Some(dir) = &args.reweight_dir {
+            std::fs::create_dir_all(dir)?;
+            let row_k: Vec<usize> = row_idx
+                .iter()
+                .map(|r| r.map_or(1, |i| sizes[ids[i]]))
+                .collect();
+            let groups = reweight_groups(&row_k);
+            let mut spec = String::new();
+            for g in &groups {
+                let fname = format!("cluster_size_{}.csv", g.cluster_size);
+                let rows: Vec<&String> = csv
+                    .lines
+                    .iter()
+                    .zip(&row_k)
+                    .filter(|&(_, &k)| k == g.cluster_size)
+                    .map(|(l, _)| l)
+                    .collect();
+                write_csv(&dir.join(&fname), &csv.header, &rows)?;
+                spec.push_str(&format!(
+                    "--group k{}:{}:{:.6}:0\n",
+                    g.cluster_size,
+                    dir.join(&fname).display(),
+                    g.train_weight
+                ));
+            }
+            std::fs::write(dir.join("groups.txt"), &spec)?;
+            eprintln!(
+                "reweight: {} groups (train_w ∝ n_rows / cluster_size) → {}/groups.txt",
+                groups.len(),
+                dir.display()
+            );
+            eprint!("{spec}");
+        }
+
+        if let Some(dir) = &args.split_dir {
+            std::fs::create_dir_all(dir)?;
+            let (mut train, mut val) = (Vec::new(), Vec::new());
+            for (l, r) in csv.lines.iter().zip(&row_idx) {
+                match r.map_or(Split::Train, |i| split[i]) {
+                    Split::Train => train.push(l),
+                    Split::Val => val.push(l),
+                }
+            }
+            write_csv(&dir.join("train.csv"), &csv.header, &train)?;
+            write_csv(&dir.join("val.csv"), &csv.header, &val)?;
+            eprintln!(
+                "split: train {} / val {} rows (whole clusters per side) → {}",
+                train.len(),
+                val.len(),
+                dir.display()
+            );
+        }
+    }
+
+    // 7. Validation step 2 (the EYEBALL pass) instrument. The 2026-05-14
     // revert's ship policy is "build side-by-side montages, sign off entry
     // by entry" — file names alone are what produced the 149-basename
     // false-positive blocklist. Both halves of the naming-agreement report
@@ -568,98 +666,5 @@ fn main() -> Result<()> {
         );
     }
 
-    // 6. CSV-derived outputs.
-    if let Some(csv) = &csv {
-        let by_name: HashMap<&str, usize> = names
-            .iter()
-            .enumerate()
-            .map(|(i, n)| (n.as_str(), i))
-            .collect();
-        let row_index = |line: &str| -> Option<usize> {
-            let src = source_of(line, csv.source_col);
-            let key = Path::new(src)
-                .file_name()
-                .map(|f| f.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            by_name.get(key.as_str()).copied()
-        };
-        let row_idx: Vec<Option<usize>> = csv.lines.iter().map(|l| row_index(l)).collect();
-        let n_unknown = row_idx.iter().filter(|r| r.is_none()).count();
-        eprintln!(
-            "csv rows: {} ({} with a source that was not hashed → treated as size-1 / canonical / train)",
-            csv.lines.len(),
-            n_unknown
-        );
-
-        if let Some(out) = &args.cull_csv {
-            let kept: Vec<&String> = csv
-                .lines
-                .iter()
-                .zip(&row_idx)
-                .filter(|(_, r)| r.is_none_or(|i| canonical[i]))
-                .map(|(l, _)| l)
-                .collect();
-            write_csv(out, &csv.header, &kept)?;
-            eprintln!(
-                "cull: kept {} / {} rows (one variant per cluster) → {}",
-                kept.len(),
-                csv.lines.len(),
-                out.display()
-            );
-        }
-
-        if let Some(dir) = &args.reweight_dir {
-            std::fs::create_dir_all(dir)?;
-            let row_k: Vec<usize> = row_idx
-                .iter()
-                .map(|r| r.map_or(1, |i| sizes[ids[i]]))
-                .collect();
-            let groups = reweight_groups(&row_k);
-            let mut spec = String::new();
-            for g in &groups {
-                let fname = format!("cluster_size_{}.csv", g.cluster_size);
-                let rows: Vec<&String> = csv
-                    .lines
-                    .iter()
-                    .zip(&row_k)
-                    .filter(|&(_, &k)| k == g.cluster_size)
-                    .map(|(l, _)| l)
-                    .collect();
-                write_csv(&dir.join(&fname), &csv.header, &rows)?;
-                spec.push_str(&format!(
-                    "--group k{}:{}:{:.6}:0\n",
-                    g.cluster_size,
-                    dir.join(&fname).display(),
-                    g.train_weight
-                ));
-            }
-            std::fs::write(dir.join("groups.txt"), &spec)?;
-            eprintln!(
-                "reweight: {} groups (train_w ∝ n_rows / cluster_size) → {}/groups.txt",
-                groups.len(),
-                dir.display()
-            );
-            eprint!("{spec}");
-        }
-
-        if let Some(dir) = &args.split_dir {
-            std::fs::create_dir_all(dir)?;
-            let (mut train, mut val) = (Vec::new(), Vec::new());
-            for (l, r) in csv.lines.iter().zip(&row_idx) {
-                match r.map_or(Split::Train, |i| split[i]) {
-                    Split::Train => train.push(l),
-                    Split::Val => val.push(l),
-                }
-            }
-            write_csv(&dir.join("train.csv"), &csv.header, &train)?;
-            write_csv(&dir.join("val.csv"), &csv.header, &val)?;
-            eprintln!(
-                "split: train {} / val {} rows (whole clusters per side) → {}",
-                train.len(),
-                val.len(),
-                dir.display()
-            );
-        }
-    }
     Ok(())
 }
