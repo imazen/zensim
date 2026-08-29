@@ -1866,3 +1866,82 @@ exactly (ruler confirmed).
 - **R5 — policy hygiene:** next-generation recipes on the v2 train views
   (kadis_train mandatory) + checker green; kadid board rows migrate to the
   select view (T-flagged until post-v2 models exist); live cross-root audit.
+
+## R-LANE EXECUTION + THE GATES CANON (2026-08-29, user directives: "R1 was done long ago… proceed through all the rest… see if we can make a C class HDR… decide on gates… zenjpeg is float quality")
+
+### R1 — resolved without regeneration (the user was right)
+
+The validate-digit 372 feature tables EXIST:
+`/mnt/v/output/zensim-multicodec-probe/bigcodec_{hqdedup,hqfill}_valdigits_2026-07-02.parquet`
+(114,871 + 148,657 rows). Nothing was regenerated. Built B-side validate-BUCKET
+views from them (`{imazen26,nonphoto,hfnlproxy}_valbucket_372_2026-08-29.parquet`,
+manifested) and scored B: **imazen26 0.8644 / nonphoto 0.8728 / hfnlproxy
+0.8403** (per-ref ~0.96). BUT the read teaches the deeper lesson: these are
+FULL-density tables (263k/128k/26k rows) vs the 944 slices' strided-deduped
+cuts (7k rows) — **slice SAMPLING moves srocc as much as bucket choice**
+(B hfnl: 0.503 test-cut → 0.840 full-val-bucket; neither comparable to the
+944 slices' 0.699-class numbers). Cross-regime PAIR identity was attempted
+via the (ref, score) fingerprint and measured at 0-20% match (score
+generations differ) — the documented join-trap, not pursued. **R1b
+registered:** keyed rebuild of BOTH sides from the encode-sha lineage
+(sidecar + canonical views) = the only honest same-pair family instrument.
+Until R1b, family axes stay direction-only.
+
+### R3 executed — the HDR transfer sweep + the path to a C-class HDR
+
+Swept ALL 39 existing 944-HDR bakes through `upiq_panel` (own-regime
+features; full table `~/tmp/hdr_upiq_sweep.log`, headline rows):
+- **No existing 944 bake reaches shipped BHdr (0.7536).** Ceiling:
+  **HDR944_L1T1_s4004 = 0.7254** (nar 0.7419 / kor 0.9312), then L1T2_s4005
+  0.7201, L1T2_s4003 0.6995.
+- **The frozen aurora (s4005, 0.6664) was not even its own family's best on
+  transfer** — s4004 (+0.059) sat unpromoted. Transfer is violently
+  seed-variant (L0 family 0.33–0.65; L1T1 0.665–0.725): selection without a
+  transfer axis was blind to it — the R3 gate thesis, now measured.
+- Paired vs BHdr: s4004 Δ pooled +0.0283 p=0.042 (borderline), narwaria
+  +0.042 p=0.21 (ns), korshunov −0.014 (s4004 ahead, ns) — a NEAR-tie,
+  vs aurora's decisive loss (p=0.0000).
+- **Launched now:** UPIQ-gated seed-mining wave, L1T1 recipe verbatim ×
+  seeds {4006–4009}, each bake UPIQ-read on completion
+  (`~/tmp/hdr_seedwave*.log`). If any seed ≥ BHdr-parity on the paired test
+  AND passes the HDR-lane battery, it becomes the CHdr-swap proposal;
+  s4004 is the standing contender regardless (its battery run is the next
+  step after the wave).
+
+### THE GATES CANON (decided, as delegated)
+
+1. **G-OUT v2 — FROZEN** (peer-derived bars; provenance audit stands).
+2. **Two-zone eligibility — FROZEN** (SDR lane).
+3. **G-GRAN v2 — ADOPTED as the dial gate**, superseding v1 for gating (v1
+   stays a build-time knob-end display). CONDITION: its knob-quanta map must
+   be re-derived for jpeg first (see zenjpeg correction below) — until that
+   lands, the board 'usable' trio stays G+E+K rather than gate on a stale
+   quantum table.
+4. **HDR: UPIQ-TRANSFER GATE — FROZEN NOW.** An HDR ship/freeze candidate
+   must show (a) paired UPIQ pooled vs shipped BHdr NOT significantly worse
+   (p ≥ 0.05 on the paired bootstrap), (b) korshunov ≥ 0.92, (c) the
+   HDR-lane freeze battery. HDR SELECTION runs the UPIQ read per seed
+   (seed-variance 0.33–0.73 makes transfer-blind selection invalid).
+5. **Composite-v2 — ADOPTED IN PRINCIPLE**: two scalars (held-out human |
+   trainable-anchor), fixed coverage, signed audited terms, HF-NL + dial
+   terms, derived weights. Implementation lane registered (bake_verdict owns
+   the formula); until it lands every citation names formula + coverage.
+6. kadid board rows migrate to the SELECT view (T-flagged); tid retired
+   (both already recorded).
+
+### zenjpeg IS FLOAT QUALITY (user correction — confirmed and FIXED)
+
+`zenjpeg::EncodeOptions`-side and internal quality is `f32` end to end
+(`target_quality.rs: pub quality: f32`); the INTEGER assumption lived in OUR
+tooling: `search_target` rounded every trial to the integer grid on a false
+premise comment ("JPEG quality is integer-valued") and zenjpeg-bench-utils
+carries `quality: u8` fields. **Fixed in zenjpeg (`fad6a0af`, pushed +
+verified):** float-native secant with `TargetOptions::quality_step`
+(default 0.25; 1.0 restores the old grid), f32-bit trial cache, 2 new grid
+tests, 11/11 pass. CONSEQUENCES REGISTERED: (a) the "zenjpeg error floor
+1.06 = integer-q rung" census conclusion is SUPERSEDED — the floor was our
+search's artifact; re-census zenjpeg targeting with step 0.25 to re-measure
+the true floor; (b) G-GRAN v2's jpeg knob-quantum entry (integer ladder) is
+wrong for zenjpeg-owned loops and must be re-derived; (c) bench-utils' u8
+quality fields are a separate cleanup (they quantize sweeps, acceptable for
+grids, wrong for loops).
