@@ -140,6 +140,8 @@ GROUPS = {
     "l944_ttbig": ("/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/tbig_teacher944_pure.parquet", ["human_score"]),
     "l944_konbpg": ("/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/konjnd_bpg_train_944.parquet", ["human_score"]),
     "l944_hf": ("/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/tbig_hf_pure.parquet", ["human_score"]),
+    "l944_kadid": ("/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_kadid.parquet", ["human_score"]),
+    "l944_tid": ("/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_tid.parquet", ["human_score"]),
     "hdr_v3mix": (PROBE / "hdr_zenjxl_v3mix_traindigits_2026-07-03.parquet", ["human_score"]),
     # 2026-07-12 teacher-ceiling probe (§8.3): iwssim-teacher targets. NOTE:
     # iwssim NaNs on ALL tiny scales (5-scale pyramid min size) → these corpora

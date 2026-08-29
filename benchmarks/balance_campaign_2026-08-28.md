@@ -1333,3 +1333,29 @@ KonJND above B. Candidates so far preserved in
 `/mnt/v/output/zensim/bakes/wlin-2026-08-29/` (shas in-log); the
 imazen26-leading cell (`wlin_raw_lam0.0003`, 7,051 B, 194 features) is a
 potential ssim2-lane SPECIALIST even if the B-replacement needs arm 2.
+
+### W-LIN ARM 2 RESULTS — the multi-head blend works; best linear of the era (2026-08-29 ~15:3xZ)
+
+The Profile-B mechanism (fit-lasso `--emit-fit-npz` + `blend-heads`, built
+by the SOTA-944 campaign §4) ran end-to-end at 944 after one usage bug
+(shaped heads blended WITHOUT `--transforms-tsv` → raw features through
+shaped weights → degenerate z-norm; fixed). Findings, in order:
+- kadid/tid HELP linear cid22 at 944 (canonical-shape head 0.835 vs 0.797
+  without them — another 372-era exclusion reversed);
+- RD mass dilutes cid22 in a single head (full mix 0.797) but carries
+  imazen26 (0.90) — the specialist-blend premise re-confirmed at 944;
+- **blend(canonical-head, full-mix-head, α=0.6): cid22 0.8453 /
+  imazen26 0.8734 / nonphoto-strong — imazen26 +0.043 ABOVE shipped B
+  (0.831), cid22 −0.037 below (0.882), at 1.7 KB** (single collapsed
+  linear layer, B's shipped scaler shape).
+
+**Remaining gaps (honest):** KonJND 0.12 (B 0.519) and HF-NL 0.06-0.11
+(B 0.503) — the near-threshold and HF axes need TARGET-ENGINEERED
+specialist heads (B's 372 kon head used per-corpus ssim2-anchor targets +
+sign-constrained BVLS, machinery not yet exercised at 944; grams would
+need anchor-target columns). Registered as the arm-2 continuation, with a
+3-head chain (or kon-target gram rebuild) as the concrete next lever.
+Candidates + head npzs preserved in `bakes/wlin-2026-08-29/` (shas
+in-log). No ship/default claim — B remains shipped; wlin2_a0.6 is the
+era's best linear artifact and a live candidate once the kon/HF axes
+close.
