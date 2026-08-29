@@ -1981,3 +1981,36 @@ The challenge was correct on the protocol and answerable on the population:
    — same lesson: single-axis max-of-k selection on a small surface is how
    overfitting enters. The scorecard/battery selection style (multi-gate,
    CI-tested) is the counter-design.
+
+### IS B OVERFIT? (user question, 2026-08-29 — measured verdict: NO; B is UNDERFIT where it fails, and seed-exact by construction)
+
+1. **Capacity forbids memorization:** B is 373 f16 parameters (372→1 linear +
+   bias) against ~340k training rows — 1e-3 params/row.
+2. **The guard INVERSION is the signature of a non-memorizing model:** on the
+   corpora B trained on wholesale it ranks LAST (kadid-select 0.820 vs the
+   MLPs' 0.908–0.914; tid 0.787 vs ~0.93), while on CLEAN axes it ranks
+   mid-to-top (kon-504 **0.594 = best on board, training-clean**; csiq 0.934;
+   aic4 0.891). A memorizer dominates its own training corpora; B cannot.
+3. **Train-leg gap is uniform across classes** (measured: cid22t-201
+   ssim2-leg vs cid22-49 human holdout — C +0.098, amber +0.113, gray-tower
+   +0.105, copper +0.109, loupe +0.109): no model shows an outsized
+   trained-on advantage; the ~0.10 gap is target-type (ssim2 vs human MOS) +
+   ref shift, not differential memorization. (B's own 372 train-leg row table
+   no longer exists outside grams — its gap is not directly measurable;
+   the guard inversion covers the question.)
+4. **Selection bias: real, bounded, visible.** B was selected FOR cid22 (the
+   name says cid80; final blend round n=5, campaign surface larger). The
+   observed cost: fresh remeasure cid22 0.8821 → 0.8764 (−0.006) on updated
+   corpora. Post-selection-era instruments it never saw during its search
+   (kon-JPEG-504, sdr25, G-OUT v2, the valbucket views) read strong on rank —
+   its generalization is real.
+5. **Where B fails is UNDERFIT, not overfit:** the near-lossless band had
+   ~zero training mass in its era → hfnl 0.503 + the worst outlier behavior
+   on the board (p99 chart-z 14.6 = wild extrapolation in an unseen region),
+   and honest dial top-reach misses. Coverage hole, not memorization.
+6. **Seed stability: exact by construction.** B is a deterministic convex fit
+   (lasso/BVLS coordinate descent on frozen grams — no SGD, no seed), with a
+   BYTE-identical reproduction chain (sha-gated, reproduced repeatedly in
+   this repo). Zero seed variance — against the MLPs' measured 42% M3a
+   seed-noise share and the HDR family's 0.33–0.73 transfer swing. This is a
+   structural advantage of the linear class worth keeping on the ledger.
