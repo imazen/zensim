@@ -290,6 +290,42 @@
     "why": "kadid+imazen26+nonphoto:S; cid22 +0.0020 vs inc; vhfnl +0.0370",
     "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
    }
+  },
+  "LSTAR3_s4041_packed": {
+   "gout": {
+    "v": "fail",
+    "why": "kadid:S (jw data-content class; weight+structure falsified)",
+    "src": "balance_campaign_2026-08-28.md W12-U3 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "kadid:S wall; battery not continued past G-OUT",
+    "src": "balance_campaign_2026-08-28.md W12-U3 VERDICT"
+   }
+  },
+  "LSTAR3_s4042_packed": {
+   "gout": {
+    "v": "fail",
+    "why": "kadid:S (jw data-content class; weight+structure falsified)",
+    "src": "balance_campaign_2026-08-28.md W12-U3 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "kadid:S wall; battery not continued past G-OUT",
+    "src": "balance_campaign_2026-08-28.md W12-U3 VERDICT"
+   }
+  },
+  "LSTAR3_s4043_packed": {
+   "gout": {
+    "v": "fail",
+    "why": "kadid:S (jw data-content class; weight+structure falsified)",
+    "src": "balance_campaign_2026-08-28.md W12-U3 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "kadid:S wall; battery not continued past G-OUT",
+    "src": "balance_campaign_2026-08-28.md W12-U3 VERDICT"
+   }
   }
  }
 }

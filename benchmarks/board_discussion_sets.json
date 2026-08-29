@@ -7,6 +7,19 @@
  ],
  "sets": [
   {
+   "id": "2026-08-29-w12u3-jwfold",
+   "date": "2026-08-29",
+   "label": "2026-08-29 · W12-U3 jwfold (structure falsified) + avif matrix era",
+   "bakes": [
+    "LSTAR3_s4041_packed",
+    "LSTAR3_s4042_packed",
+    "LSTAR3_s4043_packed",
+    "W10L9PH_s4004_packed",
+    "PH_s4004_e060",
+    "W10L9_s4003_packed"
+   ]
+  },
+  {
    "id": "2026-08-29-w12u2-jw05",
    "date": "2026-08-29",
    "label": "2026-08-29 · W12-U2 jw05 verdict (weight lever falsified)",

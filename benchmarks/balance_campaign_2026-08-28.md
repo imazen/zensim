@@ -1160,3 +1160,23 @@ row mass). Seeds {4041,4042,4043}, stems `LSTAR3_s*`, dumps every 10,
 same battery, same unified bar, pair = fallback. Launches AFTER the avif
 matrix (machine-safety serialization; the avif eval is the user's
 explicit priority — "avif matters a little more than jxl").
+
+### W12-U3 VERDICT (2026-08-29 ~04:0xZ) — group-structure hypothesis ALSO falsified; kadid:S diagnosis diffuse; lodestar track holds
+
+jwfold finals (single group, W11's exact group count, same jpeg/webp row
+emphasis): **kadid:S fails on all three at 3.69-3.89** — indistinguishable
+from the separate-group runs. With weight (U2) and structure (U3) both
+falsified, the inflation tracks the jw DATA CONTENT itself. Per-type
+chart-z attribution (row-order type derivation, 25/25 level-blocks
+verified; NORMALIZATION CAVEAT: quick res/std, not the gate owner's exact
+z — relative reads only): the top-1% offenders are DIFFUSE (JPEG2000/JPEG/
+blur/noise for lodestar AND for A AND the incumbent alike; no jpeg-type
+concentration) — the corpus-values-conflict hypothesis is NOT confirmed;
+the lodestar class fattens the whole kadid chart, mechanism open (fit-line
+rotation from ssim2-teacher HF targets is the surviving candidate,
+untested). **Three falsifications in one cycle → lever-guessing stops
+here per the rigor discipline.** The lodestar track HOLDS pending the
+registered owner work (gradient-supervised map loss); the pair
+(anchor-lantern) remains the proposed configuration; W12-U3 cells carry
+gates-registry entries. Finals: s4041 0.8812/0.6645/0.782, s4042
+0.8839/0.7287/0.784, s4043 0.8859/0.6918/0.812.
