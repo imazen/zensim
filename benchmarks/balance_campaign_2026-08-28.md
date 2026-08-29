@@ -1222,3 +1222,24 @@ screen-incoherent.**
    bytes-at-parity gate (the re-gated steering objective).
 3. **Gradient-supervised map loss** — the registered owner surgery,
    only if 1-2 fail.
+
+### M3a-SCREEN FIRST MEASUREMENTS (2026-08-29 ~06:4xZ) — the gap is real, universal, and text-shaped
+
+| bake | M3a-photo (frozen instrument) | **M3a-SCREEN (new)** |
+|---|---|---|
+| north-anchor (Profile C) | 0.763 | **0.493** |
+| river-lantern (map champion) | 0.833 | **0.518** |
+| deep-loom (photo-M3a star) | 0.872 | **0.497** |
+
+**Every map in the zoo class is ~half as coherent on screen content as on
+photos, and the photo ordering FLATTENS on screen** (the 0.11 photo spread
+collapses to 0.025) — photo-M3a selection carried zero screen signal.
+Structure (river-lantern cells): dense TEXT is the failure mode —
+sc_wiki median **0.265** (near-random attribution on text) vs
+sc_imessage 0.791; small crops worst (256px 0.437 vs 576px 0.736);
+worst cells all sc_wiki/imessage at q20/q75 (0.11-0.15). This measurably
+explains the avif screen steering catastrophe (incoherent maps → wrong
+per-SB allocation on exactly the content where allocation matters most)
+and gives W13 its precise target: **text-dense content at small-to-mid
+scales**. Zoo-mining (arm 1) baseline set; a companion candidate must
+clear BOTH instruments per the registration.
