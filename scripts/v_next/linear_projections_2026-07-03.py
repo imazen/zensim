@@ -131,6 +131,15 @@ GROUPS = {
     "tid": (CANON / "tid.parquet", ["human_score"]),
     "konjnd_dense": (CANON / "konjnd-dense-norm.parquet", ["human_score", "pjnd_target"]),
     "hdr_v3": (PROBE / "hdr_zenjxl_v3_traindigits_2026-07-03.parquet", ["human_score"]),
+    # --- W-LIN 944-regime purity legs (2026-08-29; ZLIN_NFEAT=944) ---
+    "l944_safesyn": ("/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/safesyn_pure.parquet", ["human_score"]),
+    "l944_cid22t": ("/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_cid22_train201.parquet", ["human_score"]),
+    "l944_tbig": ("/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/tbig_944_200k_pure.parquet", ["human_score"]),
+    "l944_kadis": ("/mnt/v/zen/zensim-training/kadis-944-2026-08-01/kadis_944_ssim2_50k.parquet", ["human_score"]),
+    "l944_tsafesyn": ("/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/safesyn_teacher944_pure.parquet", ["human_score"]),
+    "l944_ttbig": ("/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/tbig_teacher944_pure.parquet", ["human_score"]),
+    "l944_konbpg": ("/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/konjnd_bpg_train_944.parquet", ["human_score"]),
+    "l944_hf": ("/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/tbig_hf_pure.parquet", ["human_score"]),
     "hdr_v3mix": (PROBE / "hdr_zenjxl_v3mix_traindigits_2026-07-03.parquet", ["human_score"]),
     # 2026-07-12 teacher-ceiling probe (§8.3): iwssim-teacher targets. NOTE:
     # iwssim NaNs on ALL tiny scales (5-scale pyramid min size) → these corpora

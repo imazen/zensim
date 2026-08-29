@@ -1273,3 +1273,27 @@ k2 also better (0.635/21 vs 0.652/21). One ±2 cell traded (24 vs 25).
 "anchor-amber"** — adoption remains the user's call, as does e060's
 retirement. This is the dual-instrument selection thesis validated on its
 first application: one zoo scan + one A/B replaced the champion.
+
+## W-LIN REGISTRATION — linear-projection B replacement (2026-08-29, pre-fit; user directive "make a decent linear projection model given our new bars and stats to replace B" + the size directive)
+
+**Why linear:** B (harbor-line) is a 7.3 KB linear model; its successor
+should stay linear-class (size, determinism, no collapse, trivially
+coherent constant-gradient maps — M3a-screen measurable). The C-class
+MLPs are 149-180 KB (now behind `candidate-profiles`, default-on).
+
+**Fit (frozen):** owner = `bake_dial_refit fit-lasso` (pure Rust; the
+shipped-BHdr producer) over a COMBINED 944-regime gram: the W10L9 purity
+regression legs with the recipe's train weights (safesyn 1.0,
+cid22_train 1.0, tbig_200k 0.5, kadis50k 0.15, tsafesyn 0.5, ttbig 0.5,
+konjnd_bpg 1.2, tbig_hf 1.0; kadid/tid excluded — rank-mode in the
+recipe), target human_score, RAW feature space first (the folded regime
+zeroes the winsor-prone IW pools; shaped space only if raw fails),
+λ ∈ {3e-4, 1e-3, 3e-3}, anchor spline on `anchor944_dial.parquet`,
+f16 pack. Gram = `linear_projections cmd_gram` at ZLIN_NFEAT=944 per leg
++ an additive weighted combine (grams are additive by construction).
+
+**Bars (frozen; the B-replacement lane judges vs B/harbor-line, not A):**
+two-zone paired CIs vs B (cid22 + validate-hfnl not-worse), the B-lane
+north stars (nonphoto/imazen26 + KonJND not-worse vs B), G-OUT v2,
+G-GRAN v1, packed size ≤ 12 KB, dial mono; M3a photo+screen REPORTED
+(constant-gradient maps). Ship/default flip stays USER-GATED.
