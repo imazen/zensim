@@ -1429,3 +1429,29 @@ data (ssim2-anchor targets + hdr_v3mix + BVLS at 372) — the 944
 reproduction of that emergence is the registered next lever (hdr_v3mix
 gram at 944 exists from the E-LIN campaign; check + reuse). Artifacts:
 `wlin3_a0.6.bin` (sha ad1da162…) + head npzs preserved.
+
+### W-LIN round 5 (hdrmix leg) — WAVE LEADER: wlin4_a0.5 (2026-08-29 ~16:4xZ)
+
+The hdr_v3mix-944 leg (the campaign's own front-end-answer table) grammed
++ added to B's exact kon recipe shape (safesyn/cid22t/kadid/tid/hdrmix,
+BVLS): kon-emergence partially reproduces (head KonJND 0.267, hfnl 0.20).
+Final blends:
+
+| candidate | cid22 | nonphoto | imazen26 | KonJND | hfnl | composite |
+|---|---|---|---|---|---|---|
+| **wlin4_a0.5 (WAVE LEADER)** | **0.8502** | **0.8713** | **0.8821** | 0.206 | 0.084 | **0.7970** |
+| wlin4_a0.6 | 0.8506 | 0.8637 | 0.8742 | 0.213 | 0.113 | 0.7951 |
+| shipped B | 0.8821 | 0.8640 | 0.8306 | 0.519 | 0.503 | 0.8487 |
+
+**The 2-3 KB linear now beats B on nonphoto AND imazen26** (the ssim2
+north stars, both first-class gates) with cid22 within 0.032. The
+remaining composite gap is KonJND+hfnl — and the campaign's own
+hdr_v3mix-944 conclusion ("the B-gap is front-end/regime, not missing
+supervision") now reads as the LINEAR KonJND ceiling explanation at 944:
+the folded-944 front end may not expose the near-threshold signal a
+372-front linear could reach (B's kon head hit 0.67 KonJND at 372 with
+NO konjnd data). Registered next levers (not run): a 372-front kon head
+blended cross-regime (needs width-bridging — real design work), or
+accepting the pair-of-profiles shape (wlin for RD-lane + B for JND-lane).
+Wave artifacts complete in `bakes/wlin-2026-08-29/` (7 heads, 9 blends,
+shas in-log).
