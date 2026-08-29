@@ -276,6 +276,8 @@ def family_of(name: str) -> str:
         return "purity retrain"
     if n.startswith(("W10L9", "W10L", "KFG", "w11_")):
         return "wave 10/11"
+    if n.startswith(("LSTAR", "lstar")):
+        return "lodestar"
     if n.startswith(("HDR944", "bhdr")):
         return "HDR"
     return "pre-944 era"

@@ -3,66 +3,245 @@
  "bakes": {
   "W10L9PH_s4004_packed": {
    "star": "FROZEN SDR candidate-of-record (user freeze 2026-08-28): sole full two-zone eligibility pass of 20+ candidates; 8/8 floors; identity PERFECT (100.00, 0/4817 violations)",
-   "gout": {"v": "pass", "src": "sdr_pure_retrain_wave_2026-08-28.md SPH1 battery"},
-   "elig": {"v": "pass", "why": "sole full pass; freeze executed", "src": "sdr_pure_retrain_wave_2026-08-28.md FREEZE EXECUTED"},
-   "dialv2": {"v": "fail", "why": "jpeg:top(-1.81), jxl:hf_entry(-1.02)", "src": "dial_addressability_2026-08-28.md"}
+   "gout": {
+    "v": "pass",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md SPH1 battery"
+   },
+   "elig": {
+    "v": "pass",
+    "why": "sole full pass; freeze executed",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md FREEZE EXECUTED"
+   },
+   "dialv2": {
+    "v": "fail",
+    "why": "jpeg:top(-1.81), jxl:hf_entry(-1.02)",
+    "src": "dial_addressability_2026-08-28.md"
+   }
   },
   "HDR944_L1T1_s4005_hfpack": {
    "star": "FROZEN HDR candidate-of-record (user freeze 2026-08-28): HDR-lane battery winner on the route panel",
-   "elig": {"v": "pass", "why": "HDR-lane freeze battery (route-panel judged)", "src": "hdr944_retrain_wave_2026-08-28.md FREEZE EXECUTED"}
+   "elig": {
+    "v": "pass",
+    "why": "HDR-lane freeze battery (route-panel judged)",
+    "src": "hdr944_retrain_wave_2026-08-28.md FREEZE EXECUTED"
+   }
   },
   "PH_s4004_e060": {
    "star": "STEERING-MAP champion: best map-on loop value (0.205 own-map; 0.300 as A's companion, beating A-alone 0.343) — registered companion-of-record candidate",
-   "elig": {"v": "pass", "why": "in the G-GRAN-amended eligible set {PH_s4004, e060}", "src": "sdr_pure_retrain_wave_2026-08-28.md clause-(iv) amendment"},
-   "dialv2": {"v": "fail", "why": "jpeg:top(-1.67), webp:top(-1.90)", "src": "dial_addressability_2026-08-28.md"}
+   "elig": {
+    "v": "pass",
+    "why": "in the G-GRAN-amended eligible set {PH_s4004, e060}",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md clause-(iv) amendment"
+   },
+   "dialv2": {
+    "v": "fail",
+    "why": "jpeg:top(-1.67), webp:top(-1.90)",
+    "src": "dial_addressability_2026-08-28.md"
+   }
   },
-  "PH_s4004_e070": {"elig": {"v": "fail", "why": "cid22 CI-sacrificed (clause ii)", "src": "sdr_pure_retrain_wave_2026-08-28.md"}},
-  "PH_s4004_f054": {"elig": {"v": "fail", "why": "tid bot-band 0.828 < 0.847", "src": "balance_campaign_2026-08-28.md htraj-fine"}},
+  "PH_s4004_e070": {
+   "elig": {
+    "v": "fail",
+    "why": "cid22 CI-sacrificed (clause ii)",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md"
+   }
+  },
+  "PH_s4004_f054": {
+   "elig": {
+    "v": "fail",
+    "why": "tid bot-band 0.828 < 0.847",
+    "src": "balance_campaign_2026-08-28.md htraj-fine"
+   }
+  },
   "W10L9PH_s4006_packed": {
-   "gout": {"v": "fail", "why": "kadid:S (p99 4.48)", "src": "sdr_pure_retrain_wave_2026-08-28.md SPH1-M3a ext"},
-   "elig": {"v": "fail", "why": "clauses (ii)+(iii): cid22 CI, c22-bot 0.682", "src": "sdr_pure_retrain_wave_2026-08-28.md"}
+   "gout": {
+    "v": "fail",
+    "why": "kadid:S (p99 4.48)",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md SPH1-M3a ext"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "clauses (ii)+(iii): cid22 CI, c22-bot 0.682",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md"
+   }
   },
   "W10L9PH_s4007_packed": {
-   "gout": {"v": "fail", "why": "kadid:D, live:D (emits -71/-27 vs floor -18.3)", "src": "sdr_pure_retrain_wave_2026-08-28.md SPH1-M3a ext"},
-   "elig": {"v": "fail", "why": "out on G-OUT", "src": "sdr_pure_retrain_wave_2026-08-28.md"}
+   "gout": {
+    "v": "fail",
+    "why": "kadid:D, live:D (emits -71/-27 vs floor -18.3)",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md SPH1-M3a ext"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "out on G-OUT",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md"
+   }
   },
   "W10L9PH_s4008_packed": {
-   "gout": {"v": "pass", "src": "sdr_pure_retrain_wave_2026-08-28.md SPH1-M3a ext"},
-   "elig": {"v": "fail", "why": "cid22 -0.0069 CI-significant", "src": "sdr_pure_retrain_wave_2026-08-28.md"}
+   "gout": {
+    "v": "pass",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md SPH1-M3a ext"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "cid22 -0.0069 CI-significant",
+    "src": "sdr_pure_retrain_wave_2026-08-28.md"
+   }
   },
   "w11_s4014_final": {
    "star": "map-coherence star: M3a 0.872 (strongest map-side artifact), v-hfnl parity with frozen A",
-   "gout": {"v": "pass", "src": "balance_campaign_2026-08-28.md W11 VERDICT"},
-   "elig": {"v": "fail", "why": "tid-band 0.838; webp span 6.7/top 89.4 (G-GRAN v1)", "src": "balance_campaign_2026-08-28.md W11 VERDICT"},
-   "dialv2": {"v": "fail", "why": "jpeg:top(-2.22), webp:top(-1.74)", "src": "dial_addressability_2026-08-28.md"}
+   "gout": {
+    "v": "pass",
+    "src": "balance_campaign_2026-08-28.md W11 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "tid-band 0.838; webp span 6.7/top 89.4 (G-GRAN v1)",
+    "src": "balance_campaign_2026-08-28.md W11 VERDICT"
+   },
+   "dialv2": {
+    "v": "fail",
+    "why": "jpeg:top(-2.22), webp:top(-1.74)",
+    "src": "dial_addressability_2026-08-28.md"
+   }
   },
   "w11_s4014_e050": {
    "star": "campaign CID22 champ (0.8968; +0.0101 CI vs incumbent, +0.0041 vs A) AND best-calibrated dial under G-GRAN v2 (single anchor fail)",
-   "gout": {"v": "pass", "src": "balance_campaign_2026-08-28.md W11 VERDICT"},
-   "elig": {"v": "fail", "why": "tid-LF regression REAL (paired CI [-0.0303,-0.0056] wholly neg); webp top -0.33 (v1); v-hfnl -0.036 vs A", "src": "balance_campaign_2026-08-28.md W11 VERDICT + GATE-PROVENANCE AUDIT"},
-   "dialv2": {"v": "fail", "why": "avif:hf_entry(-1.24) — best in pool", "src": "dial_addressability_2026-08-28.md"}
+   "gout": {
+    "v": "pass",
+    "src": "balance_campaign_2026-08-28.md W11 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "tid-LF regression REAL (paired CI [-0.0303,-0.0056] wholly neg); webp top -0.33 (v1); v-hfnl -0.036 vs A",
+    "src": "balance_campaign_2026-08-28.md W11 VERDICT + GATE-PROVENANCE AUDIT"
+   },
+   "dialv2": {
+    "v": "fail",
+    "why": "avif:hf_entry(-1.24) — best in pool",
+    "src": "dial_addressability_2026-08-28.md"
+   }
   },
   "w11_s4012_e080": {
-   "gout": {"v": "pass", "src": "balance_campaign_2026-08-28.md W11 VERDICT"},
-   "elig": {"v": "fail", "why": "c22-band 0.682; webp top -0.23 (v1); cid22 -0.0137 vs A", "src": "balance_campaign_2026-08-28.md W11 VERDICT"},
-   "dialv2": {"v": "fail", "why": "jpeg:top(-1.91), jpeg:hf_entry(+1.11), webp:top(-1.32)", "src": "dial_addressability_2026-08-28.md"}
+   "gout": {
+    "v": "pass",
+    "src": "balance_campaign_2026-08-28.md W11 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "c22-band 0.682; webp top -0.23 (v1); cid22 -0.0137 vs A",
+    "src": "balance_campaign_2026-08-28.md W11 VERDICT"
+   },
+   "dialv2": {
+    "v": "fail",
+    "why": "jpeg:top(-1.91), jpeg:hf_entry(+1.11), webp:top(-1.32)",
+    "src": "dial_addressability_2026-08-28.md"
+   }
   },
   "w11_s4013_e060": {
-   "gout": {"v": "fail", "why": "kadid:D", "src": "balance_campaign_2026-08-28.md W11 VERDICT"},
-   "elig": {"v": "fail", "why": "out on G-OUT", "src": "balance_campaign_2026-08-28.md W11 VERDICT"}
+   "gout": {
+    "v": "fail",
+    "why": "kadid:D",
+    "src": "balance_campaign_2026-08-28.md W11 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "out on G-OUT",
+    "src": "balance_campaign_2026-08-28.md W11 VERDICT"
+   }
   },
   "R1_GL2_s2503_packed": {
-   "elig": {"v": "fail", "why": "KILLED by adversarial audit: intrinsic top ceiling 89.9 (model cannot address the top zone; repack does not restore)", "src": "balance_campaign_2026-08-28.md adversarial audit"}
+   "elig": {
+    "v": "fail",
+    "why": "KILLED by adversarial audit: intrinsic top ceiling 89.9 (model cannot address the top zone; repack does not restore)",
+    "src": "balance_campaign_2026-08-28.md adversarial audit"
+   }
   },
   "W10L9_s4003_packed": {
    "star": "era rank incumbent (wave 10 flagship; the two-zone battery's reference model — LF/cid22 domain star, HF-blind: A leads v-hfnl +0.3654)",
-   "dialv2": {"v": "fail", "why": "jpeg:top(-1.09), jxl:top(-2.46), jxl NON-MONO on native distance ladder (0.89)", "src": "dial_addressability_2026-08-28.md"}
+   "dialv2": {
+    "v": "fail",
+    "why": "jpeg:top(-1.09), jxl:top(-2.46), jxl NON-MONO on native distance ladder (0.89)",
+    "src": "dial_addressability_2026-08-28.md"
+   }
   },
   "b_sdr_linear_cid80_inclwinsor_dense_dial": {
    "star": "SHIPPED product default (Profile B; BVLS multi-head lineage)"
   },
   "ADD156_safesyn_only_raw_lasso": {
    "star": "additive-class star: 28-coefficient lasso, rank-EXACT at 837 bytes packed (interpretability/size domain)"
+  },
+  "LSTAR_s4021_packed": {
+   "gout": {
+    "v": "fail",
+    "why": "FAIL kadid:S (p99 2.96 vs 2.74)",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "cid22 +0.0063 vs inc, vhfnl +0.0119 vs A CI-positive — but c22bot 0.693, tidbot 0.817, G-GRAN avif/webp span + jpeg/webp top",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   }
+  },
+  "lstar4021_e080": {
+   "gout": {
+    "v": "fail",
+    "why": "FAIL kadid:S (3.69)",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "vhfnl +0.0517 CI-positive but cid22 CI-worse vs A; webp span/top",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   }
+  },
+  "LSTAR_s4022_packed": {
+   "gout": {
+    "v": "fail",
+    "why": "FAIL kadid:S (2.92)",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "vhfnl +0.0298 CI-positive, c22bot 0.724 ✓ — tidbot 0.844 hairline, webp span 7.8/top −1.23",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   }
+  },
+  "lstar4022_e070": {
+   "gout": {
+    "v": "fail",
+    "why": "FAIL kadid:S",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "cid22 CI-worse both refs",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   }
+  },
+  "lstar4022_e080": {
+   "gout": {
+    "v": "fail",
+    "why": "FAIL kadid:S",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "vhfnl collapsed −0.0559; G-GRAN v1 PASS",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   }
+  },
+  "lstar4023_e070": {
+   "gout": {
+    "v": "fail",
+    "why": "FAIL kadid:S",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "tidbot 0.761; G-GRAN v1 PASS",
+    "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
+   }
   }
  }
 }

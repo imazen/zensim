@@ -1064,3 +1064,41 @@ training — consistent with the jw-leg hypothesis. Selection per the frozen
 protocol via `scripts/w12u_select.sh` (checkpoint 40-80 window + finals:
 pack → M3a → cid22 + VALIDATE-hfnl), then full battery on the m3a-picks
 and the own-map h3own unified bar.
+
+### W12-U LODESTAR VERDICT (2026-08-29 ~02:5xZ) — zero full passers; fallback fires; the jw lever WORKED on its axis
+
+Frozen battery on the six M3a-ranked cells (full table:
+`~/tmp/w12ubat/verdict_full.txt`, G-OUT owner copy `gout_full.txt`):
+
+| cell | cid22 vs inc | cid22 vs A | vhfnl vs A | c22/tid bots | G-GRAN v1 | G-OUT |
+|---|---|---|---|---|---|---|
+| lstar4021_final | **+0.0063 ✓** | +0.0003 even | **+0.0119 CI-POSITIVE** | 0.693✗h / 0.817✗ | avif+webp span, jpeg/webp top | FAIL kadid:S 2.96 |
+| lstar4021_e080 | −0.0023 ✗ | −0.0083 ✗ | **+0.0517 CI-POSITIVE** | 0.693✗ / 0.879✓ | webp span/top | FAIL kadid:S 3.69 |
+| lstar4022_final | +0.0037 ✓ | −0.0023 even | **+0.0298 CI-POSITIVE** | 0.724✓ / 0.844✗h | webp span 7.8/top −1.23 | FAIL kadid:S 2.92 |
+| lstar4022_e070 | −0.0079 ✗ | −0.0140 ✗ | +0.0423 | 0.690✗ / 0.841✗ | webp | FAIL kadid:S |
+| lstar4022_e080 | −0.0049 ✗ | −0.0109 ✗ | −0.0559 ✗ | 0.686✗ / 0.866✓ | **PASS** | FAIL kadid:S |
+| lstar4023_e070 | +0.0057 ✓ | −0.0003 even | +0.0287 | 0.708✓ / 0.761✗ | **PASS** | FAIL kadid:S |
+
+**Zero full passers ⇒ the registered fallback fires: anchor-lantern (the
+pair) remains the proposed configuration.** The h3own selection step is
+void (passers only); one INFORMATIONAL own-map probe on the map-strongest
+cell (lstar4021_e080, M3a 0.854): **0.477 (23/27, −4.6% bytes)** — far
+from the 0.300 unified bar; M3a decoupling above ~0.83 re-confirmed a
+fourth time. The unified gap is LOOP VALUE, not rank — **the next
+registered lever is map-aware training loss** (as pre-registered).
+
+**The science, honestly split:** (a) the jw data lever DELIVERED its
+target — validate-hfnl is CI-BETTER than A on 5 of 6 cells (up to
++0.0517), and for the first time in the campaign a candidate holds cid22
+parity with A while CI-beating it on v-hfnl (lstar4021_final +0.0119 /
++0.0003; also beats the incumbent on cid22 outright +0.0063). (b) The
+recipe pays on exactly three fronts: a UNIVERSAL single-clause G-OUT fail
+— kadid:S chart-z p99 2.92-3.69 vs peer bar 2.74 (every other clause on
+every axis passes; doubling jpeg/webp HF mass inflates the synthetic-
+distortion chart spread), LF-floor hairlines (c22bot 0.686-0.724 around
+the 0.697 bar; tid mostly under 0.847), and the webp span/top shortfall
+(the vindicated bars). **W12-U2 registration (next wave, frozen now): jw
+leg at HALF weight (0.5) to pull the kadid spread back + a map-aware loss
+arm; same battery, same unified bar.** Board: lodestar family added,
+cells + G-OUT verdicts appended to the gates registry, discussion set
+"2026-08-29 lodestar verdict" appended.
