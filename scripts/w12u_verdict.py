@@ -29,8 +29,9 @@ _DEFAULT_CELLS = {
 if not os.environ.get("W12U_CELLS"):
     CELLS = _DEFAULT_CELLS
     FE_STEM = {"lstar4021_final": "LSTAR_s4021_packed", "lstar4022_final": "LSTAR_s4022_packed"}
-M3A = {"lstar4021_final": 0.838767, "lstar4021_e080": 0.854230, "lstar4022_final": 0.821222,
-       "lstar4022_e070": 0.855970, "lstar4022_e080": 0.867652, "lstar4023_e070": 0.817556}
+if not os.environ.get("W12U_CELLS"):
+    M3A = {"lstar4021_final": 0.838767, "lstar4021_e080": 0.854230, "lstar4022_final": 0.821222,
+           "lstar4022_e070": 0.855970, "lstar4022_e080": 0.867652, "lstar4023_e070": 0.817556}
 REACH = {"avif": 96.2, "jpeg": 94.4, "jxl": 96.6, "webp": 91.9}
 
 def pp(tag, ax):

@@ -242,6 +242,54 @@
     "why": "tidbot 0.761; G-GRAN v1 PASS",
     "src": "balance_campaign_2026-08-28.md W12-U LODESTAR VERDICT"
    }
+  },
+  "LSTAR2_s4033_packed": {
+   "gout": {
+    "v": "fail",
+    "why": "kadid:S (jw-group presence class)",
+    "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "wave final (weak-val seed class)",
+    "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
+   }
+  },
+  "lstar2_4033_e080": {
+   "gout": {
+    "v": "fail",
+    "why": "kadid:S (jw-group presence class)",
+    "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "kadid:S 4.08; cid22 CI-worse vs A; vhfnl +0.0271 CI-positive",
+    "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
+   }
+  },
+  "lstar2_4033_e070": {
+   "gout": {
+    "v": "fail",
+    "why": "kadid:S (jw-group presence class)",
+    "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "kadid:S 3.75; vhfnl +0.0543 CI-positive (pool best); webp top -0.21",
+    "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
+   }
+  },
+  "lstar2_4032_e070": {
+   "gout": {
+    "v": "fail",
+    "why": "kadid:S (jw-group presence class)",
+    "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "kadid+imazen26+nonphoto:S; cid22 +0.0020 vs inc; vhfnl +0.0370",
+    "src": "balance_campaign_2026-08-28.md W12-U2 VERDICT"
+   }
   }
  }
 }

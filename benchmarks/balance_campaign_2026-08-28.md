@@ -1135,3 +1135,28 @@ decoupling from loop value. **The loop-value lever escalates to the true
 gradient-supervised map loss (second-order trainer surgery) — registered
 as owner work, not a wave arm.** Arm jw05 (LSTAR2_s4031-3) trained clean;
 selection + battery proceed on it alone.
+
+### W12-U2 VERDICT (2026-08-29 ~04:0xZ) — weight lever FALSIFIED; group-structure hypothesis registered as W12-U3
+
+jw05 battery (6 M3a-picked cells; full tables `~/tmp/w12u2bat/`):
+**kadid:S fails on all six at jw weight 0.5 exactly as at 1.0** (p99 3.02-4.08
+vs 2.74; 4031_e060 adds kadid:D+live:D, 4032_e070 adds imazen26:S+nonphoto:S)
+— while W11 (same recipe, NO jw group) passed G-OUT on 3 of 4 cells. So the
+kadid chart-spread inflation tracks the jw group's PRESENCE, not its weight.
+**v-hfnl is robust: all six CI-positive vs A (+0.0128..+0.0543)** — the
+lever's benefit does not need weight 1.0. But **cid22 is CI-worse vs A on
+all six** (the jw1.0 wave's three parity cells did not reproduce at 0.5),
+c22bot 0.676-0.703 straddles the floor, and G-GRAN webp/jpeg tops persist.
+Zero full passers → pair stands.
+
+**W12-U3 REGISTERED (pre-fit): the group-structure hypothesis.** Mechanism:
+the trainer samples pairs PER GROUP, so adding any group dilutes every
+other group's draw share (kadid included) regardless of the new group's
+weight — consistent with weight-invariant kadid:S. Arm (frozen):
+`tbig_hf_jwfold.parquet` = tbig_hf_pure ∪ (jw rows duplicated once) as a
+REPLACEMENT for the tbig_hf group (same 1.0 weight, same group count as
+W11 = the G-OUT-passing structure, same jpeg/webp emphasis as jw05 by
+row mass). Seeds {4041,4042,4043}, stems `LSTAR3_s*`, dumps every 10,
+same battery, same unified bar, pair = fallback. Launches AFTER the avif
+matrix (machine-safety serialization; the avif eval is the user's
+explicit priority — "avif matters a little more than jxl").

@@ -7,6 +7,20 @@
  ],
  "sets": [
   {
+   "id": "2026-08-29-w12u2-jw05",
+   "date": "2026-08-29",
+   "label": "2026-08-29 · W12-U2 jw05 verdict (weight lever falsified)",
+   "bakes": [
+    "LSTAR2_s4033_packed",
+    "lstar2_4033_e080",
+    "lstar2_4033_e070",
+    "lstar2_4032_e070",
+    "W10L9PH_s4004_packed",
+    "PH_s4004_e060",
+    "W10L9_s4003_packed"
+   ]
+  },
+  {
    "id": "unified-track",
    "date": "2026-08-29",
    "label": "unified track · lodestar generations (accumulating)",
@@ -15,7 +29,9 @@
     "lstar4021_e080",
     "LSTAR_s4022_packed",
     "W10L9PH_s4004_packed",
-    "PH_s4004_e060"
+    "PH_s4004_e060",
+    "LSTAR2_s4033_packed",
+    "lstar2_4033_e080"
    ]
   },
   {

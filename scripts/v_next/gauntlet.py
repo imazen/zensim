@@ -196,6 +196,11 @@ CURATED_BOARD = [
     "HDR944_L1T1_s4005_hfpack", "HDR944R_t2_s4003_hfpack",
     # SDR purity-retrain winner (2026-08-28 wave; freeze pending)
     "W10L9P_s4005_packed",
+    # balance-campaign flagships (2026-08-28/29; standing rule: curated covers
+    # LIVE candidates — the frozen pair + W11 stars + incumbent + lodestar finals)
+    "W10L9PH_s4004_packed", "PH_s4004_e060", "W10L9_s4003_packed",
+    "w11_s4014_e050", "w11_s4014_final",
+    "LSTAR_s4021_packed", "LSTAR_s4022_packed", "LSTAR2_s4033_packed",
     # campaign arm candidates + named leaders (benchmarks/sota944_campaign_2026-08-03.md)
     "sota944_winner_A_bvls_X_AM5",       # arm A candidate = campaign winner (§SELECTION)
     "sota944_B_blend_lam1e-3_a0.7_w",    # arm B candidate
@@ -811,7 +816,10 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
         _dj = json.loads(_dp.read_text())
         _ds = sorted(_dj.get("sets", []), key=lambda x: x.get("date", ""), reverse=True)
         _inc = _dj.get("incumbents", [])
-    data = {"bakes": bakes, "discussionSets": _ds, "incumbents": _inc,
+    _cp = Path(__file__).resolve().parents[2] / "benchmarks" / "loop_eval_coverage.json"
+    _cov = json.loads(_cp.read_text()).get("rows", []) if _cp.exists() else []
+    data = {"bakes": bakes, "loopCoverage": _cov,
+            "discussionSets": _ds, "incumbents": _inc,
             "loopProxy": proxy, "nDominatedExcluded": n_dom,
             "palette": PALETTE, "references": REFERENCES,
             "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
@@ -1252,6 +1260,7 @@ const COLS=[
   ['nonphoto','nonphoto',false,b=>rs(b,'nonphoto')],
   ['konjnd','KonJND',false,b=>rs(b,'konjnd')],
   ['aic3','AIC-3',false,b=>rs(b,'aic3')],
+  ['aic4','AIC-4',false,b=>rs(b,'aic4')],
   ['live','LIVE',false,b=>rs(b,'live')],
   ['csiq','CSIQ',false,b=>rs(b,'csiq')],
   ['hfnl','HF-NL/ref',false,b=>b.rank.hfnlproxy&&b.rank.hfnlproxy.per_ref_mean!=null?b.rank.hfnlproxy.per_ref_mean:null],
@@ -1982,6 +1991,25 @@ function renderRecipes(){
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
 }
 
+function renderCoverage(){
+  const host=$('#loopcov');if(!host)return;host.innerHTML='';
+  const rows=DATA.loopCoverage||[];if(!rows.length)return;
+  host.append(el('h2',{text:'Codec-loop eval coverage'}));
+  host.append(el('div',{class:'cap',html:'Which backend × steering-mode combinations HAVE an eval '
+    +'(user directive 2026-08-29). Statuses: <b>measured</b> (committed record), <b>running</b> '
+    +'(launched, lands on the next regen), <b>not-built</b> (mechanism absent — owner work), '
+    +'<b>ruled-premature</b> (registered ruling). Numbers are READ from the owning records: '
+    +'<code>benchmarks/loop_eval_coverage.json</code> (append-only).'}));
+  const t=el('table',{});
+  t.append(el('tr',{},[el('th',{text:'backend'}),el('th',{text:'mode'}),el('th',{text:'status'}),el('th',{text:'detail'})]));
+  rows.forEach(r=>{
+    const col={measured:'var(--seq-hi)',running:'var(--text-secondary)'}[r.status]||'#c0392b';
+    t.append(el('tr',{},[el('td',{class:'lbl',text:r.backend}),el('td',{text:r.mode}),
+      el('td',{html:'<b style="color:'+col+'">'+r.status+'</b>',title:r.src||''}),
+      el('td',{text:r.detail})]));
+  });
+  t.style.fontSize='12px';host.append(t);
+}
 function renderLoop(){
   const host=$('#looptgt');if(!host)return;host.innerHTML='';
   if(!LT||!LT.models||!Object.keys(LT.models).length)return;
@@ -2039,8 +2067,7 @@ function renderLoop(){
   tbl.append(tb);
   makeSortable(tbl);
   const wrap=el('div',{style:'overflow-x:auto'});wrap.append(tbl);host.append(wrap);
-  if(meta.notes)host.append(el('div',{class:'cap',text:'notes: '+meta.notes}));
-}
+  if(meta.notes)host.append(el('div',{class:'cap',text:'notes: '+meta.notes}));}
 
 // ---- HF-NL AXIS PANEL (appendix O, 2026-08-05). HA is the committed axis-study JSON:
 // per-model per-reference SROCC histograms + means/CIs, the reference/ceiling context
@@ -2295,12 +2322,12 @@ function renderModels(){
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'recipes'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'loopcov'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'recipes'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
 function rerender(){disposeCharts();state.renderedTheme=effTheme();
-  mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderHfnl();renderGates();renderRecipes();renderModels();renderTrade();renderScatter();}
+  mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderCoverage();renderHfnl();renderGates();renderRecipes();renderModels();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 // Theme reactivity: charts (and everything else) rebuild with the other theme's option
