@@ -9,10 +9,16 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 from zen_stats import panel_batch_indexed, panel
 
-WD = os.path.expanduser("~/tmp/w12ubat")
+WD = os.path.expanduser(os.environ.get("W12U_WD", "~/tmp/w12ubat"))
 FE = "/mnt/v/output/zensim/reports/fulleval"
 OUT = "/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28"
-CELLS = {
+# cells override: a JSON {tag: {"bake":..., "m3a":..., "fe_stem":...}} via $W12U_CELLS
+if os.environ.get("W12U_CELLS"):
+    _cfg = json.load(open(os.environ["W12U_CELLS"]))
+    CELLS = {t: e["bake"] for t, e in _cfg.items()}
+    FE_STEM = {t: e["fe_stem"] for t, e in _cfg.items() if e.get("fe_stem")}
+    M3A = {t: e["m3a"] for t, e in _cfg.items()}
+_DEFAULT_CELLS = {
     "lstar4021_final": f"{OUT}/LSTAR_s4021_packed.bin",
     "lstar4021_e080":  f"{OUT}/LSTAR_s4021_ckpts/ckpt_epoch080_s4021_packed.bin",
     "lstar4022_final": f"{OUT}/LSTAR_s4022_packed.bin",
@@ -20,7 +26,9 @@ CELLS = {
     "lstar4022_e080":  f"{OUT}/LSTAR_s4022_ckpts/ckpt_epoch080_s4022_packed.bin",
     "lstar4023_e070":  f"{OUT}/LSTAR_s4023_ckpts/ckpt_epoch070_s4023_packed.bin",
 }
-FE_STEM = {"lstar4021_final": "LSTAR_s4021_packed", "lstar4022_final": "LSTAR_s4022_packed"}
+if not os.environ.get("W12U_CELLS"):
+    CELLS = _DEFAULT_CELLS
+    FE_STEM = {"lstar4021_final": "LSTAR_s4021_packed", "lstar4022_final": "LSTAR_s4022_packed"}
 M3A = {"lstar4021_final": 0.838767, "lstar4021_e080": 0.854230, "lstar4022_final": 0.821222,
        "lstar4022_e070": 0.855970, "lstar4022_e080": 0.867652, "lstar4023_e070": 0.817556}
 REACH = {"avif": 96.2, "jpeg": 94.4, "jxl": 96.6, "webp": 91.9}
