@@ -201,3 +201,21 @@ census metric stage (armed, auto-declares on encode convergence).
   controller on screen content; the avif map lane needs TRAINED maps
   (registered owner work). Separate bug note: scalar t70 unreachable on
   screen crops (achieved floors ~50) on the current substrate.
+
+## Census stage 2 + the jxl fingerprint-drift incident (2026-08-29 ~08:2xZ)
+
+Encode wave CONVERGED (37,342 ledger chunks stable): 48,501 jpeg/webp/avif
+cells done with persisted blobs. **Metric stage auto-declared and
+launched** (97,002 jobs: ssim2 + butteraugli over every done encode —
+`steer8h-q5m`). The 13,311 jxl cells all landed FAILED — diagnosed via a
+local jobexec repro as **the id-grammar drift tripwire working as
+designed**: the cells were declared with the pre-sync zenmetrics build,
+and the synced zenjxl changed the plan-cell fingerprints ("declared
+95341966… resolved d451332b…") — deterministic fails, never wrong
+encodes. Fix: re-emitted with the current build (13,311 cells,
+fingerprints now match by construction) and launched as `steer8h-q5j`.
+Minor flag for zenfleet owners: the worker maps this executor exit to
+`error_class=encoder_panic` — mislabeled; it deserves its own class
+(fp_mismatch). Also measured: the poison-retry ledger absorbed 58k retry
+rows without wedging — the anti-wedge design held under a full-codec
+failure.
