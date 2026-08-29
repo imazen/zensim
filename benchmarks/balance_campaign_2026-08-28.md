@@ -1054,3 +1054,13 @@ river-lantern = e060, anchor-lantern = the pair, clear-ember = e050,
 deep-loom = s4014_final, aurora-anchor = HDR freeze, gray-tower =
 incumbent, harbor-line = shipped B, pocket-lens = ADD156, lodestar = this
 track.
+
+### W12-U wave LANDED (2026-08-29 ~02:13Z) — 3/3 seeds clean; selection sweep running
+
+Finals (test-era fulleval reads): LSTAR_s4021 cid22 0.8930 / hfnl 0.7111 /
+**m3a 0.8388**; s4022 0.8904 / 0.7291 / 0.8212; s4023 0.8759 / 0.7015 /
+0.7491. Two of three finals sit in the map-strong M3a class straight from
+training — consistent with the jw-leg hypothesis. Selection per the frozen
+protocol via `scripts/w12u_select.sh` (checkpoint 40-80 window + finals:
+pack → M3a → cid22 + VALIDATE-hfnl), then full battery on the m3a-picks
+and the own-map h3own unified bar.
