@@ -66,3 +66,33 @@ aurora-anchor (`c_hdr_l1t1944_2026-08-29.bin`, 180,195 B, sha 0a437d99…,
 944/697) — additive variant (enum is non_exhaustive), BHdr-parallel,
 BHdr remains shipped HDR default. 8/8 profile tests green incl. both
 sha pins + identity + end-to-end folded944.
+
+## Hour 1-2 log
+
+**Q5 fleet is LIVE on 6 LAN nodes** (r7900x/i265/r3500/r5900xt/r5600g/i134;
+dev+wsl excluded to protect the local loop lane). Bring-up found and fixed
+three real infrastructure defects, each caught by a designed gate:
+(1) stale `:exec` image — capability gate excluded all 61,812 jobs
+(anti-wedge invariant); fixed by local musl rebuild + push. The jxl
+feature is OMITTED from the new image: **sibling drift** — zenjxl@e79179e
+no longer compiles against jxl-encoder main (`api::ErrorClass` moved) —
+so the 13,311 zenjxl cells wait for the sibling fix (flagged, not-mine);
+48,501 jpeg/webp/avif cells proceed. (2) `source_fetch` failures — the
+executor resolves `$ZEN_CORPUS_PREFIX/<image_path>` VERBATIM, and plan
+cells carried absolute local paths; re-declared with basenames (q5c).
+(3) docker socket + root-owned buildx state — image builds ride
+`sudo docker` with the user config (the established lane). Smoke gate
+PASSED on q5c (done rows, real output_shas, encoded blobs persisting)
+before any scale-up.
+
+**Q1-avif SETTLED (same-binary tri-arm):** scalar 0.392/19, own-map
+0.291/18 (median for a hit — a trade, not a win), pair 0.409/18.
+**No map arm beats the scalar loop on avif.** With the earlier
+within-binary result (north-anchor 0.180/24 vs gray-tower 0.336/23),
+the avif ship-shape is: Profile-C scalar loop, no map. SUBSTRATE
+REGRESSION FLAG: concurrent zenavif encoder changes moved the scalar
+census 0.180→0.392 between binaries — loop targetability degraded by
+those changes; flagged to the owning lane.
+
+**In flight:** Q2 beatbutter (north-anchor, fresh substrate; G-BB1
+substrate gate will speak first) + zenjpeg k4/k5 census extension.
