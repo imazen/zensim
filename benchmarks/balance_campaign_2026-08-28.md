@@ -1180,3 +1180,45 @@ registered owner work (gradient-supervised map loss); the pair
 (anchor-lantern) remains the proposed configuration; W12-U3 cells carry
 gates-registry entries. Finals: s4041 0.8812/0.6645/0.782, s4042
 0.8839/0.7287/0.784, s4043 0.8859/0.6918/0.812.
+
+## W13 REGISTRATION — trained maps, screen-aware (2026-08-29, pre-fit; user directive "do the right thing on trained maps and screen content, use zenanalyze as needed, prod code paths all-Rust and perf-optimal")
+
+**Measured basis (all this session):** avif per-SB map steering fails
+catastrophically on screen content and both application-rule fixes are
+falsified; jxl's per-tile pair HELPS screen cells (nonphoto 1.438→1.335,
+5/9 screen cells better) — the damage is the avif application layer ×
+map quality, not steering per se; and **the entire map zoo was selected
+on photo-only M3a fixtures** (city/dog/girl) — screen coherence was
+never measured.
+
+**Production decisions (recorded):**
+- jxl ships the pair UNGATED — a screen gate would forfeit the measured
+  nonphoto improvement. No change.
+- avif ships mapless (settled) until a candidate passes the NEW gates.
+- **The standard screen classifier for any future steering gate is
+  zenanalyze `PatchFraction ≥ 0.27`** (feature id 23; AUC 0.880 on the
+  219-image labeled corpus, photos p50 0.002 vs screens 0.726) —
+  all-Rust, tier-1 cheap, classified ONCE per source before the loop
+  (zero per-iteration cost; perf-optimal). Wired only where measurement
+  says it pays.
+- CLI injection (aomenc/aomdec) is census-harness-only; every shipping
+  loop path is pure Rust (audited: jxl/avif/svt/jpeg loops + judges).
+
+**New instrument: M3a-SCREEN** — `m3a_sweep.sh` gained
+`ZENSIM_M3_CONTENT`/fixtures overrides (owner extension); screen fixture
+set `diffmap-coherence-screen-2026-08-29` (sc_gui/sc_imessage/sc_wiki ×
+{576,384,256} × q{20,50,75}, ImageMagick-jpeg distortions — recorded;
+the photo instrument stays frozen). **Map selection henceforth reports
+BOTH M3a-photo and M3a-screen; a companion candidate must not be
+screen-incoherent.**
+
+**W13 arms (frozen order, cheapest-discriminating-first):**
+1. **Zoo mining** — score the existing checkpoint zoo on M3a-screen; any
+   member coherent on BOTH instruments + rank-parity vs river-lantern is
+   a companion-upgrade candidate (no training).
+2. **Screen-mass training** — the W11J recipe + a screen-class HF leg
+   (tbig screen-class rows; zenanalyze PatchFraction labels the corpus),
+   checkpoint dumps, selection on the DUAL M3a instruments + the
+   bytes-at-parity gate (the re-gated steering objective).
+3. **Gradient-supervised map loss** — the registered owner surgery,
+   only if 1-2 fail.

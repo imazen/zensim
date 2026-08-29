@@ -67,7 +67,11 @@ mkdir -p "$LOGDIR"
 HEAVY=(nice -n 19)
 command -v ionice >/dev/null 2>&1 && HEAVY=(nice -n 19 ionice -c 3)
 
-CONTENT=(city dog girl)
+# ZENSIM_M3_CONTENT overrides the content set (space-separated) — the
+# M3a-SCREEN instrument (2026-08-29) passes "sc_gui sc_imessage sc_wiki"
+# with ZENSIM_M3_FIXTURES pointed at the screen fixture dir. The default
+# photo trio stays the frozen selection instrument.
+read -r -a CONTENT <<< "${ZENSIM_M3_CONTENT:-city dog girl}"
 SIZES=(576 384 256)
 QS=(20 50 75)
 
