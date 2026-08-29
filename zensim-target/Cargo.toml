@@ -40,7 +40,7 @@ rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
 imgref = "1.12"
 bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 # zenpixels is needed for AVIF decode (descriptor + buffer accessors).
-zenpixels = { version = "0.2.10", default-features = false }
+zenpixels = { version = ">=0.2.10, <0.4.0", default-features = false }
 
 # Codec deps — path refs to sibling worktrees per workspace policy.
 # All AGPL-3.0-only OR Imazen commercial.
@@ -52,7 +52,7 @@ zenpng  = { path = "../../zenpng",           optional = true, default-features =
 # zencodec traits are needed for the JXL encode path's `EncodeJob` / `Encoder`
 # / `EncoderConfig` trait bounds (zenjxl exposes the encoder via these traits
 # when the `zencodec` feature is enabled).
-zencodec = { version = "0.1.26", optional = true }
+zencodec = { version = ">=0.1.26, <0.3.0", optional = true }
 
 [dev-dependencies]
 # CPU butteraugli for the cross-codec smoke test (sibling-worktree path).

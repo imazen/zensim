@@ -117,7 +117,7 @@ thiserror = { workspace = true }
 linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
-zenpixels = { version = "0.2.11", default-features = false, features = ["std"], optional = true }
+zenpixels = { version = ">=0.2.11, <0.4.0", default-features = false, features = ["std"], optional = true }
 # Runtime for the `PreviewV0_3` MLP scorer. zenpredict is MIT/Apache-2.0
 # (matching zensim), so the runtime dep is unconditional in 0.3.0+.
 # Prior comments claiming AGPL referred to a license plan that was

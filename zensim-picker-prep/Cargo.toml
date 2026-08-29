@@ -29,9 +29,9 @@ zenjxl = { path = "../../zenjxl", features = ["zencodec"] }
 zenpng = { path = "../../zenpng" }
 
 # Helper crates the codecs need
-zencodec = "0.1.26"
-zenpixels = "0.2.10"
-zenpixels-convert = "0.2.10"
+zencodec = ">=0.1.26, <0.3.0"
+zenpixels = ">=0.2.10, <0.4.0"
+zenpixels-convert = ">=0.2.10, <0.4.0"
 zenanalyze = { path = "../../zenanalyze" }
 almost-enough = "0.4.3"
 enough = { version = "0.4.4", default-features = false, features = ["std"] }
