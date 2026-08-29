@@ -2047,3 +2047,35 @@ Wave s4006–4009 landed (pre-protocol full-380 reads, disclosed: 0.6853 /
   recipes supports recipe-level movement; seeds do not); (c) HDR training
   data expansion (the binding constraint; avif-HDR datagen gate). The
   confirm half remains UNREAD (virgin for the eventual recipe-level pick).
+
+### BHdr+ REFRESH — registered arms (2026-08-29, pre-fit; the surviving C-class-HDR path)
+
+Deterministic 372-PU linear refits on the shipped-BHdr chain (gram
+hdr_v3mix.npz shaped, anchor.npz, screen tsv — `reproduce_bhdr.sh` argv):
+- Arm λ: lam ∈ {1e-4, 3e-4 (= shipped control, byte-identity expected),
+  1e-3, 3e-3} — the sparsity axis (the loupe lesson).
+- Arm BVLS: `--solver bvls --bounds-tsv feature_sign_mask` (B's kon-head
+  class; f372+ absent at 372 so the mask fully binds).
+- SELECTION per the frozen HDR protocol: select-half UPIQ (pulinear
+  select-half views, positional split, built + manifested) + the shipped
+  control read on the same half. The CONFIRM half is spent ONLY if an arm
+  beats the BHdr control on the select half — then the paired-vs-BHdr
+  confirm read IS the promotion gate. Bars: promote-interest iff
+  select-half |SROCC| > BHdr's select-half read; else record + close.
+- No seed axis exists (convex deterministic fits) — the search is over
+  recipes, where transfer moves recipe-level (+0.78 best_val correlation).
+
+### BHdr+ VERDICT — no arm beats the shipped control; confirm half preserved (2026-08-29 ~21:2xZ)
+
+Control reproduced BYTE-IDENTICALLY (lam 3e-4 = shipped sha). Select-half
+reads: **shipped BHdr 0.7856** > lam1e-4 0.7712 > bvls 0.7570 > lam3e-3
+0.7278 > lam1e-3 0.7174. Registered bar not met by any arm → record + close;
+the CONFIRM half remains unread. Conclusion: BHdr's λ was already
+near-optimal on its own gram — **the C-class-HDR gap is not reachable by
+re-solving the existing HDR data.** The whole day's HDR arc now reads:
+seed mining FALSIFIED (scene-idiosyncratic), same-gram refit FALSIFIED
+(shipped pick optimal), transfer gate FROZEN, split-half protocol proven.
+What remains is exactly the registered R3 hard path: NEW HDR training data
+(hdr_v3mix is the only leg; avif-HDR datagen is user-gated) + recipe-level
+search under the transfer gate + the 944-route/PU-route question. BHdr
+stays the HDR default on merit.
