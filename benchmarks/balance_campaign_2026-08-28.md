@@ -2014,3 +2014,36 @@ The challenge was correct on the protocol and answerable on the population:
    this repo). Zero seed variance — against the MLPs' measured 42% M3a
    seed-noise share and the HDR family's 0.33–0.73 transfer swing. This is a
    structural advantage of the linear class worth keeping on the ledger.
+
+### SEED-MINING FALSIFIED — the split-half protocol worked on first use (2026-08-29 ~21:1xZ)
+
+Wave s4006–4009 landed (pre-protocol full-380 reads, disclosed: 0.6853 /
+0.6474 / 0.6472 / 0.7209). Protocol applied over all 7 L1T1 seeds:
+
+- **Select-half REORDERS the population**: aurora/s4005 (full-380 0.6664,
+  the "loser") is the select-half TOP (0.7249); s4004 (full-380 winner
+  0.7254) reads mid-pack (0.7031). Seed-rank agreement select-half vs
+  full-380: **SROCC 0.14 over 7 seeds — nothing.**
+- Interpretation: the paired s4004-vs-s4005 difference (p=0.0036) is real
+  PER-ITEM but **content-idiosyncratic — it does not transfer across scene
+  halves**. Any seed chosen by any 380-item UPIQ read is scene luck. With
+  10 scenes per half, per-content skill dominates per-seed skill.
+- **The honest family value: UPIQ 0.680 ± 0.030 (7 seeds, range 0.647–
+  0.725).** The gap to shipped BHdr (0.7536) is a RECIPE-level gap sitting
+  above the entire seed distribution. **Seed mining is FALSIFIED as the
+  C-class-HDR path.**
+- **Correction to this morning's framing:** "aurora wasn't even family-best
+  on transfer / s4004 sat unpromoted" is RETRACTED as a selection-error
+  claim — on scene-robust terms no L1T1 seed is meaningfully better than
+  another; aurora's freeze was not a transfer mistake. (The structural point
+  stands: selection had no transfer axis; it just turns out a transfer axis
+  at n=380 cannot rank seeds either.)
+- **The protocol's first save:** a full-380 selection would have promoted
+  s4004 with an inflated near-tie-with-BHdr claim. The split caught it
+  before promotion — this is exactly the winner's-curse control working.
+- **C-class HDR path, sharpened to recipe/data only:** (a) BHdr+ refresh
+  (372-PU linear refit — cheap, deterministic, no seed lottery); (b)
+  RECIPE-level transfer-gated search (best_val↔transfer +0.78 across
+  recipes supports recipe-level movement; seeds do not); (c) HDR training
+  data expansion (the binding constraint; avif-HDR datagen gate). The
+  confirm half remains UNREAD (virgin for the eventual recipe-level pick).
