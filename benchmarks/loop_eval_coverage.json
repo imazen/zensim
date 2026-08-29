@@ -1,14 +1,68 @@
 {
  "_schema": "Codec-loop eval coverage (2026-08-29, user directive: surface which backend x steering-mode combinations have evals and which are gaps). APPEND-ONLY; status: measured | running | not-built | ruled-premature. Numbers are READ from the owning records, never re-derived.",
  "rows": [
-  {"backend": "jxl (jxl-encoder)", "mode": "scalar 2/3-shot target", "status": "measured", "detail": "27-cell instrument; A k3-best 0.343 (25/27), v47 control 0.355", "src": "jxl-encoder benchmarks 23shot series"},
-  {"backend": "jxl (jxl-encoder)", "mode": "diffmap h3-mag steering", "status": "measured", "detail": "anchor-lantern pair 0.300 (25/27); gain sweep closed (g10 flat-optimal)", "src": "docs/STEERING_PAIR.md"},
-  {"backend": "avif (zenavif)", "mode": "scalar CQ target", "status": "running", "detail": "registered matrix (appendix AC) launched 2026-08-29 with candidate=north-anchor, control=gray-tower; smoke passed 2026-08-07", "src": "zenavif benchmarks/zensim_avif_loop_2026-08-07.md"},
-  {"backend": "avif (zenavif)", "mode": "diffmap h3-mag steering (per-64px SB q-scale)", "status": "running", "detail": "same matrix; arms self-gate on zenravif FRAME_HINTS_LIVE — refusal recorded if the dep bump is absent", "src": "same"},
-  {"backend": "avif (proxy)", "mode": "seeded-secant scalar proxy on stored dial grid", "status": "measured", "detail": "board proxy_avif columns (census-validated v2 proxy)", "src": "benchmarks/loop_proxy_2026-08-28.json"},
-  {"backend": "svt (zenav1-svt)", "mode": "target-zq scalar (HDR lane, BHdr-route judge)", "status": "measured", "detail": "27-cell HDR census: blind k2 17.64 / k3 7.43 -> S1-seeded k2 3.31 / k3 1.51 (S1 wired via TargetOptions::seeded, user-approved)", "src": "zenav1-svt benchmarks/zensim_hdr_target_wave_2026-08-27.md"},
-  {"backend": "svt (zenav1-svt)", "mode": "diffmap steering", "status": "not-built", "detail": "no map hook in the svt target crate; owner work (per-codec loop ownership)", "src": "-"},
-  {"backend": "aom (zenav1-aom)", "mode": "target-zq scalar", "status": "ruled-premature", "detail": "LAN-era goal criterion 4 ruling: aom target loop premature; repo not cloned locally", "src": "docs/GOAL_PRODUCTION_READINESS_2026-08-25.md"},
-  {"backend": "aom (zenav1-aom)", "mode": "diffmap steering", "status": "not-built", "detail": "blocked behind the scalar ruling", "src": "-"}
+  {
+   "backend": "jxl (jxl-encoder)",
+   "mode": "scalar 2/3-shot target",
+   "status": "measured",
+   "detail": "27-cell instrument; A k3-best 0.343 (25/27), v47 control 0.355",
+   "src": "jxl-encoder benchmarks 23shot series"
+  },
+  {
+   "backend": "jxl (jxl-encoder)",
+   "mode": "diffmap h3-mag steering",
+   "status": "measured",
+   "detail": "anchor-lantern pair 0.300 (25/27); gain sweep closed (g10 flat-optimal)",
+   "src": "docs/STEERING_PAIR.md"
+  },
+  {
+   "backend": "avif (zenavif)",
+   "mode": "scalar CQ target",
+   "status": "measured",
+   "detail": "G-AV3 matrix 2026-08-29: north-anchor k3 med|err| 0.180 (24/27) BEATS gray-tower 0.336 (23/27); k2 0.387 vs 0.756; inner controller >> outer bisection (j3 1.12)",
+   "src": "zenavif benchmarks/zensim_avif_loop_2026-08-07.md MATRIX RESULTS"
+  },
+  {
+   "backend": "avif (zenavif)",
+   "mode": "diffmap h3-mag steering (per-64px SB q-scale)",
+   "status": "not-built",
+   "detail": "arms refused as registered (FRAME_HINTS_LIVE false); unblock IN FLIGHT: zenravif zenrav1e-0.2.0 path bump + hinted send staged in ravif repo, builds after the training lane frees",
+   "src": "same"
+  },
+  {
+   "backend": "avif (proxy)",
+   "mode": "seeded-secant scalar proxy on stored dial grid",
+   "status": "measured",
+   "detail": "board proxy_avif columns (census-validated v2 proxy)",
+   "src": "benchmarks/loop_proxy_2026-08-28.json"
+  },
+  {
+   "backend": "svt (zenav1-svt)",
+   "mode": "target-zq scalar (HDR lane, BHdr-route judge)",
+   "status": "measured",
+   "detail": "27-cell HDR census: blind k2 17.64 / k3 7.43 -> S1-seeded k2 3.31 / k3 1.51 (S1 wired via TargetOptions::seeded, user-approved)",
+   "src": "zenav1-svt benchmarks/zensim_hdr_target_wave_2026-08-27.md"
+  },
+  {
+   "backend": "svt (zenav1-svt)",
+   "mode": "diffmap steering",
+   "status": "not-built",
+   "detail": "no map hook in the svt target crate; owner work (per-codec loop ownership)",
+   "src": "-"
+  },
+  {
+   "backend": "aom (zenav1-aom)",
+   "mode": "target-zq scalar",
+   "status": "ruled-premature",
+   "detail": "LAN-era goal criterion 4 ruling: aom target loop premature; repo not cloned locally",
+   "src": "docs/GOAL_PRODUCTION_READINESS_2026-08-25.md"
+  },
+  {
+   "backend": "aom (zenav1-aom)",
+   "mode": "diffmap steering",
+   "status": "not-built",
+   "detail": "blocked behind the scalar ruling",
+   "src": "-"
+  }
  ]
 }
