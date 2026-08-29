@@ -5,7 +5,7 @@
    "backend": "jxl (jxl-encoder)",
    "mode": "scalar 2/3-shot target",
    "status": "measured",
-   "detail": "27-cell instrument; A k3-best 0.343 (25/27), v47 control 0.355",
+   "detail": "27-cell instrument; A k3-best 0.343 (25/27), v47 control 0.355; Q2: inner beats buttloop-structure outer 4.3x (0.404/23 vs 1.739/15, Profile C both)",
    "src": "jxl-encoder benchmarks 23shot series"
   },
   {
@@ -25,9 +25,9 @@
   {
    "backend": "avif (zenavif)",
    "mode": "diffmap h3-mag steering (per-64px SB q-scale)",
-   "status": "not-built",
-   "detail": "arms refused as registered (FRAME_HINTS_LIVE false); unblock IN FLIGHT: zenravif zenrav1e-0.2.0 path bump + hinted send staged in ravif repo, builds after the training lane frees",
-   "src": "same"
+   "status": "measured",
+   "detail": "own-map AND pair DEGRADE avif targeting; at quality parity maps cost +2.2/+3.1% bytes — avif ships scalar+S1 seeds (zq_seed_s1_avif tsv)",
+   "src": "zenavif benchmarks/zensim_avif_loop_2026-08-07.md 2026-08-29 sections"
   },
   {
    "backend": "avif (proxy)",
@@ -63,6 +63,20 @@
    "status": "not-built",
    "detail": "blocked behind the scalar ruling",
    "src": "-"
+  },
+  {
+   "backend": "zenjpeg",
+   "mode": "seeded bracketed search (2+ shots)",
+   "status": "measured",
+   "detail": "k4 1.096/19, k5 1.064/20 — plateau at the integer-q rung; sub-q codec lever registered",
+   "src": "steering_coopt_8h_2026-08-29.md"
+  },
+  {
+   "backend": "avif (zenavif)",
+   "mode": "fitted S1 seeds (2-encode)",
+   "status": "measured",
+   "detail": "k1 seeded 0.656/19 vs blind 0.881/17 (+26%); wiring user-gated",
+   "src": "zenavif benchmarks/zq_seed_s1_avif_2026-08-29.tsv"
   }
  ]
 }
