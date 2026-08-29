@@ -1455,3 +1455,30 @@ blended cross-regime (needs width-bridging — real design work), or
 accepting the pair-of-profiles shape (wlin for RD-lane + B for JND-lane).
 Wave artifacts complete in `bakes/wlin-2026-08-29/` (7 heads, 9 blends,
 shas in-log).
+
+## PROFILE B UNDER THE MODERN BATTERY (2026-08-29, user directive: "how does profile b do on the same flaw checks and gates")
+
+| gate / instrument | B's result | context |
+|---|---|---|
+| G-OUT v2 | **FAIL nonphoto:S** (p99 chart-z 5.33 vs bar 4.86, max 10.9) | passes kadid by 0.02 (2.72/2.74 — where every lodestar cell failed), cid22/live/imazen26 clean; hfnlproxy absent from its per_pair (absent ≠ failed) |
+| G-GRAN v1 (its own era's dial gate) | **FAIL all three measured codecs**: avif span 7.0 + top −0.61, jpeg top −2.08, webp top −1.76 (mono 1.00 everywhere; no jxl curve in its fulleval — not measured) | the incumbent-derived reach bars B misses are the ones the audit VINDICATED as ≈ honest ceilings |
+| M3a photo | **0.597** — far below the MLP zoo (0.76-0.87) | the constant-gradient linear map is weak on photos |
+| M3a screen | **0.543** — mid-pack (incumbent 0.632 > amber 0.601 > B) | but nearly FLAT across content (0.597→0.543) vs the MLPs' collapse (0.83→0.52) — linear maps are content-robust, mediocre everywhere |
+| composite | 0.8487 (2nd behind A) | the audit's note stands: composite under-reads B's real strengths |
+| where B still leads | cid22 **0.8821**, KonJND **0.519**, HF-NL **0.503**, full [0,100] spline, D-clause clean | the axes the composite under-weights are exactly B's |
+
+Curve-level G-GRAN-v2 calibration was attempted and is INCONCLUSIVE
+(the endpoint-interpolation method is degenerate at the peer top —
+recorded so nobody cites the +0.00 "stretch" it prints); a proper
+map-inversion read needs 372-class forwards over peer-scored cells
+(regime purity blocks reusing the 944 grid features).
+
+**The structural finding: the gate system is ASYMMETRIC.** Every modern
+gate postdates B and was applied only to challengers — the shipped
+default was never re-qualified and fails 2 of the 3 hard gates it can
+take, while remaining the leader on exactly the axes the composite
+under-weights. Implications registered: (1) B-replacement comparisons
+must run on EQUAL gates (the W-LIN table now carries B's fail rows, not
+just its wins); (2) any future default flip decision should weigh that
+the bar "pass what B passes" is much lower than the bar challengers have
+been held to.

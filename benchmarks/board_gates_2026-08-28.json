@@ -167,7 +167,17 @@
    }
   },
   "b_sdr_linear_cid80_inclwinsor_dense_dial": {
-   "star": "SHIPPED product default (Profile B; BVLS multi-head lineage)"
+   "star": "SHIPPED product default (Profile B; BVLS multi-head lineage)",
+   "gout": {
+    "v": "fail",
+    "why": "nonphoto:S (p99 5.33 vs 4.86); kadid passes by 0.02; hfnl absent-not-gated",
+    "src": "balance_campaign_2026-08-28.md PROFILE B UNDER THE MODERN BATTERY"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "G-GRAN v1: avif span 7.0/top -0.61, jpeg top -2.08, webp top -1.76 (gates postdate B; never re-qualified — asymmetry finding)",
+    "src": "same"
+   }
   },
   "ADD156_safesyn_only_raw_lasso": {
    "star": "additive-class star: 28-coefficient lasso, rank-EXACT at 837 bytes packed (interpretability/size domain)"
