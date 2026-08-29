@@ -773,6 +773,15 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
             if (p50[-1] - p50[0]) < 8 or p50[-1] < _REACH[c] - 1:
                 fails.append(c)
         b["knob_end_fail"] = fails
+    # codename registry (user directive 2026-08-28: memorable word-chain names).
+    _np = Path(__file__).resolve().parents[2] / "benchmarks" / "candidate_names.json"
+    _nm = {}
+    if _np.exists():
+        for cn, e in json.loads(_np.read_text()).get("names", {}).items():
+            if e.get("board_name"):
+                _nm[e["board_name"]] = cn
+    for b in bakes:
+        b["codename"] = _nm.get(b.get("name") or "")
     # gates + stars overlay (user directive 2026-08-28): committed, append-only,
     # measured-verdicts-only registry (absent = NOT MEASURED, never failed).
     _gp = Path(__file__).resolve().parents[2] / "benchmarks" / "board_gates_2026-08-28.json"
@@ -792,7 +801,16 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
         _pmap = {"A_PH_s4004": "W10L9PH_s4004_packed", "B_e060": "PH_s4004_e060",
                  "incumbent": "W10L9_s4003_packed", "GL2": "R1_GL2_s2503_packed"}
         proxy = {_pmap.get(k, k): v for k, v in _pj.items()}
-    data = {"bakes": bakes, "loopProxy": proxy, "nDominatedExcluded": n_dom,
+    # discussion sets (user directive 2026-08-28): dropdown filters to the latest
+    # discussion's models UNION incumbents UNION iqa peers.
+    _dp = Path(__file__).resolve().parents[2] / "benchmarks" / "board_discussion_sets.json"
+    _ds, _inc = [], []
+    if _dp.exists():
+        _dj = json.loads(_dp.read_text())
+        _ds = sorted(_dj.get("sets", []), key=lambda x: x.get("date", ""), reverse=True)
+        _inc = _dj.get("incumbents", [])
+    data = {"bakes": bakes, "discussionSets": _ds, "incumbents": _inc,
+            "loopProxy": proxy, "nDominatedExcluded": n_dom,
             "palette": PALETTE, "references": REFERENCES,
             "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
             "chartThemes": THEME_VARS, "echartsVersion": ech_ver,
@@ -979,6 +997,9 @@ function gateExcluded(b){let x=false;state.gateFilter.forEach(g=>{if(gateV(b,g)=
 function nameInto(node,b,suffix){
   node.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}));
   node.append(document.createTextNode(b.name+(suffix||'')));
+  if(b.codename)node.append(el('span',{text:' \u201c'+b.codename+'\u201d',
+    style:'margin-left:4px;color:var(--seq-hi);font-weight:600;font-size:11px',
+    title:'codename (benchmarks/candidate_names.json)'}));
   if(b.star)node.append(el('span',{text:' \u{1F31F}',style:'margin-left:2px;cursor:help',
     title:'\u{1F31F} '+b.star}));
   const bd=ensBadge(b);if(bd)node.append(bd);
@@ -1068,6 +1089,20 @@ function renderBar(){
   // scoreboard list itself (and drop them from the visible chart set). Not-measured
   // gates never exclude. 'usable' = the frozen-gate trio G+E+K (dial-v2 stays opt-in
   // while it is a registered-not-adopted W12 candidate).
+  // discussion-set dropdown (user directive 2026-08-28): pick a board
+  // generation's discussion set -> visible = set UNION incumbents UNION peers.
+  const ds=DATA.discussionSets||[];
+  if(ds.length){
+    const sel=el('select',{class:'btn',title:'filter to a discussion set + incumbents + iqa peers (benchmarks/board_discussion_sets.json, latest first)'});
+    sel.append(el('option',{text:'discussion set\u2026',value:''}));
+    ds.forEach((d,i)=>sel.append(el('option',{text:d.label,value:String(i)})));
+    sel.onchange=()=>{if(sel.value==='')return;const d=ds[+sel.value];
+      const peers=DATA.bakes.filter(b=>b.name.startsWith('peer_')).map(b=>b.name);
+      const want=new Set([...(d.bakes||[]),...(DATA.incumbents||[]),...peers]);
+      state.visible=new Set(DATA.bakes.filter(b=>want.has(b.name)).map(b=>b.name));
+      rerender();renderBar();};
+    bar.append(sel);
+  }
   bar.append(el('span',{text:'gate filter:',style:'margin-left:.6rem;color:var(--text-secondary);font-size:11px'}));
   const applyGF=()=>{if(state.gateFilter.size)DATA.bakes.forEach(b=>{if(gateExcluded(b))state.visible.delete(b.name);});
     rerender();renderBar();};

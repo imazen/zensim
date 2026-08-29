@@ -1017,3 +1017,40 @@ Verdict source of truth: `benchmarks/board_gates_2026-08-28.json`
 (committed, append-only, measured-verdicts-only — same discipline as the
 annotations registry). Regen gates PASS (the star glyph initially broke
 the harness's name-prefix row matching — moved after the name).
+
+## W12-U "LODESTAR" — unified ship candidate wave, REGISTERED BEFORE ANY FIT (2026-08-28)
+
+User directive: "doc and further test this kind of pair, but prioritize a
+unified ship candidate." Pre-launch evidence closing two open questions:
+**gain sweep on the pair (anchor-lantern) is CLOSED** — k3-best med|err|:
+g5 0.281 (24/27), g10 (default) 0.300 (25/27), g20 0.281 (23/27), g40
+0.350 (25/27) → flat optimum 5-20, default retained; and **no existing
+bake is near-unified**: clear-ember (e050, the best-calibrated dial + cid22
+champ) own-map scores 0.406 (24/27, +4.1% bytes) — WORSE than plain A
+scalar (0.343). M3a 0.84 again fails to translate above the ~0.83 line.
+A unified candidate must be TRAINED for it.
+
+**Recipe (frozen):** the W11J argv + `tbig_hf` (1.0) + NEW
+`tbig_hf_jw.parquet` (1.0) — the jpeg+webp subset of the family-clean HF
+leg (3,523 of 11,941 rows by encoded extension), doubling jpeg/webp
+top-zone mass to attack the measured universal jpeg/webp top-end
+under-report (dial addressability audit). Seeds {4021,4022,4023}, stems
+`LSTAR_s*`, checkpoint dumps every 10, standard pack/harvest.
+
+**Selection + gates (frozen):** per seed, checkpoints take the FULL
+standing two-zone battery (clauses i-iv with G-GRAN v1 as frozen; G-GRAN
+v2 REPORTED informationally) + G-OUT v2; among passers pick highest M3a;
+top-2 take the own-map h3own A/B. **UNIFIED BAR: own-map k3-best
+med|err| ≤ 0.300 AND ±2 ≥ 25/27** — i.e. a single artifact must MATCH the
+pair it would replace. **Fallback, stated up front:** if no cell passes,
+the pair (anchor-lantern: north-anchor scores + river-lantern steers)
+remains the proposed configuration and the lodestar track continues in a
+later wave with different levers (map-aware training loss is the next
+registered lever, not this wave's).
+
+Codenames now govern candidate references
+(`benchmarks/candidate_names.json`, append-only): north-anchor = A,
+river-lantern = e060, anchor-lantern = the pair, clear-ember = e050,
+deep-loom = s4014_final, aurora-anchor = HDR freeze, gray-tower =
+incumbent, harbor-line = shipped B, pocket-lens = ADD156, lodestar = this
+track.

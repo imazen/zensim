@@ -1,0 +1,9 @@
+{
+ "_schema": "Board discussion sets (2026-08-28, user directive: 'each generation of gauntlet should have a dropdown item that filters to the set of models in the latest discussion and the incumbents and iqa peers'). APPEND-ONLY: each board generation appends its set; the dropdown lists sets latest-first and selecting one shows set UNION incumbents UNION iqa peers (peer_* rows).",
+ "incumbents": ["W10L9_s4003_packed", "b_sdr_linear_cid80_inclwinsor_dense_dial", "v47_strict_QAT_native"],
+ "sets": [
+  {"id": "2026-08-28-pair-freezes-w11", "date": "2026-08-28",
+   "label": "2026-08-28 · freezes + steering pair + W11 + gate audit",
+   "bakes": ["W10L9PH_s4004_packed", "PH_s4004_e060", "w11_s4014_e050", "w11_s4012_e080", "w11_s4014_final", "HDR944_L1T1_s4005_hfpack", "ADD156_safesyn_only_raw_lasso"]}
+ ]
+}
