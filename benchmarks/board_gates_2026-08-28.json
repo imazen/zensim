@@ -170,12 +170,12 @@
    "star": "SHIPPED product default (Profile B; BVLS multi-head lineage)",
    "gout": {
     "v": "fail",
-    "why": "nonphoto:S (p99 5.33 vs 4.86); kadid passes by 0.02; hfnl absent-not-gated",
-    "src": "balance_campaign_2026-08-28.md PROFILE B UNDER THE MODERN BATTERY"
+    "why": "FRESH REMEASURE: 7 clauses/4 axes — hfnlproxy R+S (p99 14.6, max 25.1), imazen26 R+S, nonphoto R+S, kadid S",
+    "src": "balance campaign B FULL REMEASURE 2026-08-29"
    },
    "elig": {
     "v": "fail",
-    "why": "G-GRAN v1: avif span 7.0/top -0.61, jpeg top -2.08, webp top -1.76 (gates postdate B; never re-qualified — asymmetry finding)",
+    "why": "G-GRAN v1 fresh: jxl PASS; jpeg top -3.43, webp -3.06, avif -1.61+span 7.0; composite was stale-high 0.8487->0.8291",
     "src": "same"
    }
   },
@@ -336,6 +336,30 @@
     "v": "fail",
     "why": "kadid:S wall; battery not continued past G-OUT",
     "src": "balance_campaign_2026-08-28.md W12-U3 VERDICT"
+   }
+  },
+  "copperline_wlin4_a05": {
+   "gout": {
+    "v": "fail",
+    "why": "FAIL 6 (hfnl R+S, im26:R, nonphoto:R, cid22:S, live:S)",
+    "src": "balance campaign pair-on-equal-gates 2026-08-29"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "G-GRAN FAIL all 4 incl MONO 0.75-0.87 — non-monotone dials, no spline fix",
+    "src": "same"
+   }
+  },
+  "jewelerloupe_hf0003": {
+   "gout": {
+    "v": "fail",
+    "why": "FAIL 6 (cid22:R, hfnl:S hair-over, im26:R, kadid:S, live:S, nonphoto:R)",
+    "src": "balance campaign pair-on-equal-gates 2026-08-29"
+   },
+   "elig": {
+    "v": "fail",
+    "why": "G-GRAN FAIL all 4 — tops 86-93 span 6-7 in its own q>=88 lane",
+    "src": "same"
    }
   }
  }

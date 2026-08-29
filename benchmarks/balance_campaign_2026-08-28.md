@@ -1603,3 +1603,25 @@ min-maxed legs).**
   now the ONE axis B keeps (fresh remeasure widened it: −0.102).
 - Ship-shape (which lane a caller gets, and when) is a product decision —
   user-gated, like every default flip.
+
+### The pair on EQUAL GATES (2026-08-29) — rank bars pass, dial battery does NOT
+
+Per the equal-gates rule the pair took the same battery as fresh-B:
+
+| | copper-line | jeweler-loupe | fresh B |
+|---|---|---|---|
+| G-OUT v2 | FAIL 6 (hfnl R+S 5.61/7.0, im26:R, nonphoto:R, cid22:S, live:S) | FAIL 6 (cid22:R, hfnl:S 3.28/3.24 hair-over, im26:R, kadid:S, live:S, nonphoto:R; off-band konjnd chart-z 15.9 is un-gated) | FAIL 7 (hfnl p99 14.6) |
+| G-GRAN v1 | **FAIL all 4 incl. MONO** (avif 0.82 / jpeg 0.87 / jxl 0.75; tops 86–89) | FAIL all 4 (tops 86–93, spans 6–7; mono 0.95–1.00) | jxl PASS; jpeg/webp/avif top-reach fails; mono 0.95–1.00 |
+| M3a (photo) | **0.780** — linear-with-transforms lands in the MLP coherence zone | **0.801** | 0.597 |
+
+**Tempered conclusion (recorded before any enthusiasm ships):** the pair wins
+its rank lanes and BOTH members' maps are far more coherent than B's — but
+copper-line's per-codec dials are NON-MONOTONE at the medians (0.75–0.87),
+which no spline refit can repair (spline is monotone; the medians are the
+model's raw ordering on codec ladders). As a product DIAL the pair is
+currently WEAKER than B; jeweler-loupe's own q≥88 zone (its lane!) tops out
+86–93 with spans 6–7 vs the 8-bar. Next levers, in order: (1) the
+bake_dial_refit dial pass (extend-top / shared-anchor) that B itself received
+— never applied to any wlin bake; fixes spline-shape reach, NOT mono; (2) a
+mono-targeted refit of copper-line (kon/dial-ordering data in the blend); (3)
+accept scorer-lane-only roles. No ship claim.

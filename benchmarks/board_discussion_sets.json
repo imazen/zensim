@@ -75,6 +75,18 @@
     "HDR944_L1T1_s4005_hfpack",
     "ADD156_safesyn_only_raw_lasso"
    ]
+  },
+  {
+   "label": "2026-08-29 R6: B remeasured + the linear pair",
+   "members": [
+    "b_sdr_linear_cid80_inclwinsor_dense_dial",
+    "copperline_wlin4_a05",
+    "jewelerloupe_hf0003",
+    "W10L9PH_s4004_packed",
+    "PH_s4004_e070",
+    "W10L9_s4003_packed"
+   ],
+   "note": "fresh-B battery + copper-line/jeweler-loupe pair on equal gates"
   }
  ]
 }
