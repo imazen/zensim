@@ -328,3 +328,46 @@ same-ruler; hfnl shifts up to 0.09 between populations (north-anchor 0.752
 test-family vs 0.699 validate-family). Same-ruler comparisons must rescore on
 one generation — see the balance campaign's split-audit section for the
 validate-slice rescores of the era candidates.
+
+---
+
+## 8. SPLIT POLICY v2 (registered 2026-08-29, user directive: "test and eval won't be trained on")
+
+**Universal invariant:** any content (ref/origin/source) that appears on an
+eval surface (board rank row, gate population, selection instrument, terminal
+read) is NEVER in a train-side group of the same feature family. Deterministic
+per-dataset rules; enforcement is mechanical, not disciplinary.
+
+**Owner tool:** `scripts/canonical_corpus/check_split_compliance.py` —
+audits any recipe (`--group …`) or any bake's embedded repro
+(`--from-fulleval …`) against the registered surfaces; hard-errors on
+overlap; registered train==val guards print WARN. Run it before every
+new-recipe train; the WAVE_PLAYBOOK gains this as a step.
+
+**Tier names:** TRAIN / SELECT (selection eval; digits {1,3,5} where the LSD
+rule applies) / TERMINAL (touch-once; digits {7,9}). kadis keeps its
+registered %10 rule (<8 / 8 / 9) as a documented exception.
+
+**Per-dataset v2 assignments (views built 2026-08-29, manifests
+`_MANIFEST_splitv2_views_2026-08-29.json` at the ext944 root + the 372
+mirror manifest):**
+
+| dataset | TRAIN | SELECT | TERMINAL | measured reasonableness |
+|---|---|---|---|---|
+| KADID | 40 refs / 5,000 rows (`ext_kadid_train`) | 25 refs / 3,125 | 16 refs / 2,000 | **REASONABLE** — 6-model rescore: buckets agree within 0.01–0.03, rankings identical |
+| TID | 12 refs / 1,440 | 9 refs / 1,080 | 4 refs / 480 | SELECT reasonable (rankings hold); **4-ref TERMINAL is level-shifted (+0.03–0.05 for every model)** — sanity guard only, never a ranking surface |
+| KonJND | BPG half (403/101 refs %10 — unchanged; JPEG never trains) | JPEG 404 refs | JPEG 100 refs | SELECT tracks the full set; **100-ref TERMINAL is VOLATILE (amber 0.50→0.24, models reorder)** — touch-once sanity only |
+| KADIS | `kadis_944_ssim2_train_2026-08-29.parquet` (40,040 rows, %10<8) | %10==8 | %10==9 (safety grid) | **the 50k leg VIOLATED the rule (19.92% val/test sources; every 944-era bake trained on them)** — fixed view built; recipes switch next generation |
+| imazen-26 family | digits {0,2,4,6,8} | {1,3,5} (the D1 slices) | {7,9} | already compliant (verified: 0 overlap for every tbig/hf leg) |
+| CID22 | 201 refs, ssim2 targets | — | 49-ref gold (also reused for selection — documented deviation) | verified 0 ref intersection |
+| KonFiG | `konfig_originsplit_train` ONLY for new recipes | originsplit_val | originsplit_test | full-table-trained models keep their annotation |
+| hdrmix | 38 train-digit origins (verified {0,2,4,6,8}) | val file carries {1,3,5}+{7,9} — carve TERMINAL {7,9} at next HDR wave | — | queued |
+| safesyn / teachers | all-train | — | — | rule: an all-train dataset may NOT gain an eval role without splitting first |
+| T0 estate (aic3/aic4/sdr25/csiq/live/UPIQ…) | NEVER | — | eval-only | checker hard-errors on any T0 name in a train group |
+
+**Recipe migration:** existing bakes are NOT retrained; they carry the audit
+verdict (north-anchor: compliant except the kadis leg + kadid/tid guards).
+Every NEW recipe uses the `*_train` views (kadid/tid/kadis/konfig) and must
+pass the checker. Board kadid/tid rank rows migrate to the SELECT views
+(honest generalization for future models; equal-footing memorization reads
+for existing ones — both sides trained on those refs).

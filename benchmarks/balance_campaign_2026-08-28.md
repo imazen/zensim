@@ -1690,3 +1690,85 @@ Verified against `docs/DATA_SPLITS.md` + manifests + the parquets themselves
 5. **B's remeasure consumed the retired test-family slice** (372 root) — a
    terminal-read-class touch, consistent with D1's touch-once rule, but its
    hfnl/im26/nonphoto rows are not same-ruler with any 944 candidate.
+
+## SPLIT POLICY v2 + THE FAIR B-vs-CHALLENGERS TABLE (2026-08-29, user directives)
+
+**Policy v2 registered** (DATA_SPLITS.md §8): universal invariant (eval/test
+content never trains), per-dataset TRAIN/SELECT/TERMINAL views built for
+kadid (40/25/16 refs), tid (12/9/4), konjnd JPEG (—/404/100), kadis
+(%10<8 view, 40,040 rows); enforcement owner
+`scripts/canonical_corpus/check_split_compliance.py` (audits any bake's
+embedded repro; hard-errors; guards WARN).
+
+**Audit findings:** (1) **kadis 50k leg violated its own registered rule —
+19.92% val/test sources; every 944-era bake trained on KADIS val AND test
+sources** (the safety grid is not a content holdout for them; fixed view
+built, next-generation recipes switch, checker now catches it — verified
+exit 1 on the old leg, exit 0 on the new). (2) Everything else in the
+flagship recipe is clean (tbig/hf legs 0 overlap vs every slice; konbpg
+BPG⊥JPEG; cid22 201⊥49). (3) kadid/tid full-set train==val remains as
+REGISTERED GUARD rows only.
+
+**Split reasonableness (6-model rescore on the new views):** KADID 3-way
+REASONABLE (buckets agree 0.01–0.03, rankings identical); TID SELECT
+reasonable, 4-ref terminal level-shifted (+0.03–0.05, rank-preserving) —
+guard only; KonJND SELECT (404) tracks the full set, 100-ref terminal
+VOLATILE (amber 0.502→0.244; jeweler-loupe is the most content-stable JND
+model: 0.449/0.418).
+
+**Board made generation-consistent:** the three era fullevals re-ranked on
+the current validate slices (backups kept): north-anchor im26 0.9314 / hfnl
+0.6993 / composite 0.8664; amber 0.9329 / 0.6393 / 0.8527; gray-tower
+0.9238 / 0.3337 / 0.8601. Every 944 board row now reads the same slice
+generation as the pair.
+
+### The fair comparison — B vs the SDR challengers (same-ruler axes marked)
+
+| axis (ruler) | B (fresh) | north-anchor (C) | amber | copper-line | jeweler-loupe |
+|---|---|---|---|---|---|
+| cid22, identical 4,292 rows + paired CI | 0.8764 | **0.8927 (+0.016, CI excl 0)** | 0.8735 | 0.8502 | 0.8080 |
+| konjnd JPEG 504, identical rows | **0.547** | 0.501 | 0.456 | 0.206 | 0.445 |
+| kadid SELECT view, identical rows (all trained on these refs — equal footing) | 0.820 | **0.908** | 0.914 | 0.839 | 0.649 |
+| tid SELECT view, ditto | 0.770 | **0.929** | 0.924 | 0.802 | 0.671 |
+| nonphoto (B: 372 test-family / others: validate-family — POPULATION CAVEAT) | 0.8640 | 0.9280 | **0.9314** | 0.8713 | 0.8190 |
+| imazen26 (same caveat) | 0.8306 | 0.9314 | **0.9329** | 0.8821 | 0.8217 |
+| hfnl (same caveat) | 0.503 | 0.699 | 0.639 | 0.084 | **0.726** |
+| M3a photo / screen (same instrument) | 0.597 / 0.543 | 0.763 / — | 0.83? / 0.601 | 0.780 / — | 0.801 / — |
+| G-OUT v2 (same gates) | FAIL 7 clauses (hfnl p99 14.6 = worst on board) | full-eligibility PASS (Q1: sole pass of 20) | — | FAIL 6 | FAIL 6 |
+| G-GRAN v1 | jxl PASS, 3 codecs top-reach FAIL, mono clean | faithful dial (Q1 case) | — | FAIL 4 + MONO | FAIL 4 |
+| composite (same formula) | 0.8291 | **0.8664** | 0.8527 | 0.7970 | — |
+| size | 7.3 KB | 149 KB (behind default-ON `candidate-profiles`) | 152 KB | ~3 KB | ~7.7 KB |
+
+**Stated against the swap (SDR):** kon −0.046 (B's one axis; roughly parity
+on the kon-SELECT view: NA 0.529); the touch-once hidden panel's maximin
+ranked s4004 LAST among the finalists (incumbent 0.6331 > … > s4004 0.5843
+— shift-robustness on non-codec synthetics); 20× the bytes.
+
+### HDR: BHdr vs aurora-anchor (CHdr) — UPIQ human anchor
+
+Fresh seven-domain external reads for aurora (`--scorer bake:`) vs shipped
+BHdr's recorded upiq_panel row (same 380 UPIQ rows + JOD labels; different
+pipelines — instrument caveat stated):
+
+| | UPIQ pooled | narwaria | korshunov |
+|---|---|---|---|
+| shipped BHdr (λ3e-4 cvmix, recorded 2026-07-12) | **0.7536** | **0.7834** | 0.9175 |
+| aurora-anchor (fresh) | 0.6664 | 0.6434 | **0.9280** |
+
+Aurora also reads: hdrvdc 0.699/0.695/0.792, avt pooled 0.778, chug 0.739,
+rousselot 0.821/0.847, sihdr 0.358. **On the HDR human anchor the shipped
+default LEADS by +0.09 pooled / +0.14 narwaria** — aurora's superiority is
+in-domain (route dial, hdr944 instruments), not transfer.
+
+### RECOMMENDATION (user-gated, as always)
+
+- **SDR: swap B → north-anchor (Profile C) — the evidence supports it.**
+  It leads every same-ruler rank axis except kon (CI-tested on cid22),
+  passes the eligibility battery B fails, has a coherent map (M3a +0.17)
+  and a faithful dial, at stated costs: kon ≈ −0.05, hidden-panel
+  shift-robustness (gray-tower led there), 149 KB vs 7.3 KB. If byte-size
+  or the hidden-panel result weighs heavier, the conservative alternative
+  is HOLD with C as candidate-of-record (status quo).
+- **HDR: do NOT swap — keep BHdr.** Aurora loses the UPIQ human anchor by
+  a wide margin; CHdr stays candidate-of-record and the next HDR lever is
+  closing the transfer gap (UPIQ-gated retrain on the 944 HDR route).
