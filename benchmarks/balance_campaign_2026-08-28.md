@@ -1945,3 +1945,39 @@ the true floor; (b) G-GRAN v2's jpeg knob-quantum entry (integer ladder) is
 wrong for zenjpeg-owned loops and must be re-derived; (c) bench-utils' u8
 quality fields are a separate cleanup (they quantize sweeps, acceptable for
 grids, wrong for loops).
+
+### OVERFITTING + SEED STABILITY (user challenge, 2026-08-29 — measured before the seed wave lands)
+
+The challenge was correct on the protocol and answerable on the population:
+
+1. **Seed differences are REAL, not eval noise.** Paired within-stratum
+   bootstrap s4004-vs-s4005 (same recipe, seeds only): **pooled Δ +0.0588,
+   p=0.0036** (narwaria +0.098 p=0.085; korshunov +0.003). Selecting among
+   seeds selects genuine model quality — but the SELECTED value still carries
+   max-of-k inflation, which the protocol below makes measurable.
+2. **In-domain selection is recipe-valid, seed-blind.** best_val vs UPIQ
+   across 23 raw bakes: SROCC **+0.78** (in-domain signal is NOT overfit
+   garbage at recipe level) — but within a family best_val saturates
+   (L1T1: 0.9918–0.9924, range 6e-4) and cannot see the real 0.059 seed
+   difference. This is exactly how aurora got frozen over s4004.
+3. **No valid external seed proxy exists** (measured on the 6 family bakes):
+   AVT 0.657–0.685 and CHUG 0.642–0.660 are seed-FLAT and wrongly ordered;
+   rousselot (n=96) separates only the s4003 outlier; SI-HDR is unstable
+   (−0.40…+0.36 across the family) and cannot rank anything.
+4. **PROTOCOL (registered, applies to the running s4006–4009 wave):** UPIQ
+   is split content-deterministically (image-id parity; 10 scenes/190 rows
+   per half; `upiq_hdr_944_{selecthalf,confirmhalf}_2026-08-29.csv`,
+   manifested). Seed SELECTION uses the SELECT half only (+ the in-domain
+   battery as sanity); the CONFIRM half is read ONCE for the single
+   pre-declared pick, and the select-vs-confirm gap of the pick IS the
+   measured winner's curse, reported alongside. The full-380 sweep numbers
+   measured today are PRE-PROTOCOL reads and are so labeled — for the
+   existing 39 bakes the confirm half is not virgin (disclosed, not hidden);
+   the protocol is clean for the new seeds. The frozen HDR UPIQ-transfer
+   SHIP gate (paired-vs-BHdr) is unchanged — it gates the final candidate,
+   not selection.
+5. **SDR analogs on record:** M3a carries 42.3% seed-noise variance at fixed
+   recipe (the coherence study) and the kon 100-ref terminal reorders models
+   — same lesson: single-axis max-of-k selection on a small surface is how
+   overfitting enters. The scorecard/battery selection style (multi-gate,
+   CI-tested) is the counter-design.
