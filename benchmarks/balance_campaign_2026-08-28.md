@@ -1414,3 +1414,18 @@ human composite | trainable-anchor composite), + an HF-NL term and a
 dial-calibration term; weights derived and provenance-tagged like the
 G-GRAN v2 bars. Until adopted, every composite citation should name the
 formula and coverage.
+
+### W-LIN arm-2 round 4 — BVLS heads land; best linear of the era (2026-08-29 ~16:0xZ)
+
+`--solver bvls --bounds-tsv feature_sign_mask_2026-05-26.tsv` (the B
+kon-head class, f372+ free): the canonical-mix BVLS head alone =
+**cid22 0.8453 + KonJND 0.1931** (2.5× the lasso head's KonJND) —
+sign-constrained density is real skill, not lore. **blend(konbvls,
+full-mix, α=0.6) = cid22 0.8491 / imazen26 0.8727 / composite 0.7910**
+— the era's best linear (B: 0.882/0.831/0.8487). Gap decomposition:
+cid22 −0.033, composite −0.058, driven almost entirely by KonJND (0.188
+vs 0.519). B's own kon head reached 0.67 KonJND WITHOUT konjnd training
+data (ssim2-anchor targets + hdr_v3mix + BVLS at 372) — the 944
+reproduction of that emergence is the registered next lever (hdr_v3mix
+gram at 944 exists from the E-LIN campaign; check + reuse). Artifacts:
+`wlin3_a0.6.bin` (sha ad1da162…) + head npzs preserved.
