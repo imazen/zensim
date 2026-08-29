@@ -37,6 +37,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: python3 scripts/lint_scripts.py
+      # The nine run_cross_codec_v*_seed.sh entry points are shims over one
+      # parameterized recipe (#41 Tier-1 #3). This renders each one's trainer
+      # argv in dry-run mode and diffs it against the argv the pre-consolidation
+      # scripts emitted, so a shared-body edit cannot silently change what an
+      # experiment runs. No data, no trainer, no network; ~1 s.
+      - run: bash scripts/v_next/tests/test_cross_codec_seed_argv.sh
 
   clippy:
     name: Clippy
