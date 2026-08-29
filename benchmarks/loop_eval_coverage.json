@@ -53,15 +53,15 @@
   {
    "backend": "aom (zenav1-aom)",
    "mode": "target-zq scalar",
-   "status": "ruled-premature",
-   "detail": "LAN-era goal criterion 4 ruling: aom target loop premature; repo not cloned locally",
-   "src": "docs/GOAL_PRODUCTION_READINESS_2026-08-25.md"
+   "status": "measured",
+   "detail": "dep-injected Zq loop (user directive 2026-08-29): blind k2 3.497/9-27, k3 1.476/19-27, Profile-C judge, roundtrip-gated aomenc/aomdec injection; seeds = phase B",
+   "src": "zenav1-aom benchmarks/zensim_zq_target_wave_2026-08-29.md"
   },
   {
    "backend": "aom (zenav1-aom)",
    "mode": "diffmap steering",
    "status": "not-built",
-   "detail": "blocked behind the scalar ruling",
+   "detail": "unblocked in principle by the dep-injection loop; deferred behind the map-value falsifications (maps add no targeting value on any codec measured)",
    "src": "-"
   },
   {

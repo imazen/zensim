@@ -176,3 +176,28 @@ seeds; zenjpeg = seeded search (floor = knob quantum, codec-side lever
 registered); svt-HDR = S1-seeded qp staircase (already wired).**
 Truth-judged (peer-CI) confirmation of the parity numbers rides on the
 census metric stage (armed, auto-declares on encode convergence).
+
+## Extension hours (user directives): repos synced, aom Zq SHIPPED, avif rule falsifications
+
+- **All repos synced** — the other machine's zenjxl fix landed (compiles);
+  zenmetrics patched for zenjpeg's new unpublished zenanalyze 0.2.0 dep;
+  jxl-capable executor image pushed; fleet cycled — all 61,812 cells
+  claimable (6 nodes).
+- **aom backend Zq (user directive, premature ruling superseded):**
+  `zenav1-aom/crates/aom-target` — the svt ruling pattern taken further:
+  encoder AND judge dependency-injected (`trial(qindex)` closure; crate
+  has zero codec/metric deps; pure-Rust whole-frame encoder swaps in
+  later, no loop change). Census harness injects aomenc/aomdec CLI
+  (matrix-roundtrip-gated) + the frozen Profile-C judge. **Phase-A census
+  CLOSED: blind k2 3.497 (9/27), k3 1.476 (19/27)** — comparable-judge
+  numbers on the instrument where "ruled premature" stood this morning.
+  All three AV1 backends (rav1e-class via zenavif, svt, aom) now have
+  measured Zq loops. Better-than-ssim2-integration criteria met:
+  decoded-pixel Profile-C judging + seeded-capable inner search + census
+  discipline vs an outer ssim2 re-encode bisection.
+- **avif steering-rule bug hunt:** mechanism found (arith-mean-after-clamp
+  renorm drift, screen-concentrated), fix arm FALSIFIED (zerosum 0.491/17
+  vs legacy 0.291/18) — per-SB redistribution of any rule fights the
+  controller on screen content; the avif map lane needs TRAINED maps
+  (registered owner work). Separate bug note: scalar t70 unreachable on
+  screen crops (achieved floors ~50) on the current substrate.
