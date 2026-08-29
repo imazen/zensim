@@ -444,3 +444,79 @@ fn montage_dir_renders_reviewable_clusters_with_correct_members() {
     }
     assert_eq!(rendered, 3);
 }
+
+/// The naming-agreement report has two halves and BOTH are review material:
+/// a cluster the hash joined across base hints (cross-source duplicate, or
+/// the flat-content false positive the 2026-05-14 revert retracted a
+/// 149-basename blocklist over) and a base hint the hash split across
+/// clusters. Without `--montage-all` those flagged groups are exactly what
+/// gets rendered, and each must carry its own warning in the index.
+#[test]
+fn flagged_clusters_and_split_hints_are_rendered_by_default() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cc_e2e_flagged");
+    let _ = std::fs::remove_dir_all(&root);
+    let sources = root.join("sources");
+    std::fs::create_dir_all(&sources).unwrap();
+    // Same content under two different base hints -> ONE cluster spanning 2
+    // hints (the "eyeball this" case).
+    let same = render(71, 256, 256);
+    write_png(&same, &sources.join("srcA0000_256sq.png"));
+    write_png(&same, &sources.join("srcB0000_256sq.png"));
+    // Same base hint over two different contents -> one hint, 2 clusters
+    // (the "variants the hash did not join" case).
+    write_png(&render(81, 256, 256), &sources.join("dupC0000_256sq.png"));
+    write_png(&render(91, 128, 128), &sources.join("dupC0000_128sq.png"));
+
+    let out_tsv = root.join("clusters.tsv");
+    let montage = root.join("montage");
+    let status = Command::new(env!("CARGO_BIN_EXE_corpus_content_clusters"))
+        .args([
+            "--corpus-dir",
+            sources.to_str().unwrap(),
+            "--max-dist",
+            "3",
+            "--out-tsv",
+            out_tsv.to_str().unwrap(),
+            "--montage-dir",
+            montage.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let files: BTreeSet<String> = std::fs::read_dir(&montage)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    let multihint: Vec<&String> = files
+        .iter()
+        .filter(|f| f.contains("_multihint.png"))
+        .collect();
+    assert_eq!(
+        multihint.len(),
+        1,
+        "the srcA/srcB cluster must be rendered without --montage-all: {files:?}"
+    );
+    assert!(
+        files.contains("hint_dupC0000.png"),
+        "the split hint must be rendered too: {files:?}"
+    );
+    // The three unflagged size-1 clusters must NOT be rendered by default.
+    assert_eq!(
+        files.len(),
+        3,
+        "montage dir should hold 2 PNGs + index: {files:?}"
+    );
+
+    let index = std::fs::read_to_string(montage.join("index.html")).unwrap();
+    assert!(
+        index.contains("SPANS &gt;1 BASE HINT"),
+        "missing join warning"
+    );
+    assert!(
+        index.contains("SPREAD OVER &gt;1 CLUSTER"),
+        "missing split warning"
+    );
+    assert!(index.contains("srcA0000_256sq.png") && index.contains("srcB0000_256sq.png"));
+    assert!(index.contains("dupC0000_128sq.png"));
+}
