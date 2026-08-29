@@ -27,7 +27,7 @@
    }
   },
   "PH_s4004_e060": {
-   "star": "STEERING-MAP champion: best map-on loop value (0.205 own-map; 0.300 as A's companion, beating A-alone 0.343) — registered companion-of-record candidate",
+   "star": "river-lantern — retired map champion (superseded by amber-lantern)",
    "elig": {
     "v": "pass",
     "why": "in the G-GRAN-amended eligible set {PH_s4004, e060}",
@@ -45,7 +45,7 @@
     "why": "cid22 CI-sacrificed (clause ii)",
     "src": "sdr_pure_retrain_wave_2026-08-28.md"
    },
-   "star": "amber-lantern — PROPOSED companion-of-record (dual-instrument pick; best measured loop config 0.256 at −1.52% bytes)"
+   "star": "amber-lantern — ADOPTED companion-of-record (user 2026-08-29); best measured loop config 0.256 at −1.52% bytes"
   },
   "PH_s4004_f054": {
    "elig": {

@@ -36,7 +36,7 @@ include = [
 all-features = true
 
 [features]
-default = ["avx512", "imgref", "threads", "deprecated-profiles"]
+default = ["avx512", "imgref", "threads", "deprecated-profiles", "candidate-profiles"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## Diagnostic ONLY: accumulate `Σ activity` during extraction so `ScaleStats::
 ## iw_mean_w` reports the factor the `1/n`-pooled `iw_*` features carry (they
@@ -86,6 +86,11 @@ custom-profiles = []
 ## drop `A` and its ~27 KB MLP bake entirely. A future minor release may move
 ## this feature out of `default`; migrate off `A` now.
 deprecated-profiles = []
+# Generation-C candidate profiles (C = 149 KB SDR MLP, CHdr = 180 KB HDR MLP).
+# ON by default; size-sensitive builds drop them (`--no-default-features` +
+# re-add what you need) to save ~329 KB of embedded bake bytes — the same
+# opt-out shape as `deprecated-profiles` (A's ~27 KB v47 bake).
+candidate-profiles = []
 ## Opt-in "bounded" v2 feature-extraction regime (`feature_v2` module,
 ## `Zensim::compute_v2_features`, `FeatureViewV2`). STRICTLY ADDITIVE — the
 ## default v1 372-feature extraction (`metric.rs`, `streaming.rs`) is byte-frozen

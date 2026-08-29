@@ -63,3 +63,14 @@ steering wired (per-codec loop ownership — each codec owns that work);
 the jxl loop's own-score path still pins deprecated ZensimProfile::A
 (re-seed ZENSIM_DISTANCE_TARGETS); map-aware training loss is the next
 lodestar lever if W12-U's data lever fails.
+
+## ADOPTION UPDATE (user, 2026-08-29): the pair is now ANCHOR-AMBER
+
+The user adopted the dual-instrument upgrade: **the companion of record is
+`amber-lantern` (PH_s4004_e070)** — photo M3a 0.854 / screen M3a 0.601
+(both above river-lantern's 0.833/0.518), loop k3 0.256 (25→24 ±2, one
+cell traded) at −1.52% bytes with nonphoto error HALVED (0.635 vs 1.335).
+river-lantern (e060) is retired. Mechanism unchanged
+(`JXL_ZENSIM_MAP_BAKE`, opt-in env; no default flip claimed). Selection
+provenance: the W13 dual-instrument rule (photo + screen M3a + loop A/B +
+bytes-at-parity), first application.

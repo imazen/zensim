@@ -8,12 +8,12 @@
   },
   "river-lantern": {
    "board_name": "PH_s4004_e060",
-   "role": "prior steering-map champion (superseded-proposed by amber-lantern 2026-08-29; user call pending)",
+   "role": "retired map champion (superseded by amber-lantern, user-adopted 2026-08-29)",
    "named": "2026-08-28"
   },
   "anchor-lantern": {
    "board_name": null,
-   "role": "PAIR configuration: north-anchor scores, river-lantern steers (JXL_ZENSIM_MAP_BAKE split-role)",
+   "role": "retired pair name (superseded by anchor-amber)",
    "named": "2026-08-28"
   },
   "clear-ember": {
@@ -53,12 +53,12 @@
   },
   "amber-lantern": {
    "board_name": "PH_s4004_e070",
-   "role": "PROPOSED steering-map companion (dual-instrument pick: photo 0.854 + screen 0.601; loop 0.256/-1.52% bytes — best measured)",
+   "role": "ADOPTED steering-map companion of record (user 2026-08-29; dual-instrument pick, loop 0.256/-1.52%)",
    "named": "2026-08-29"
   },
   "anchor-amber": {
    "board_name": null,
-   "role": "PAIR configuration: north-anchor scores, amber-lantern steers — proposed companion-of-record upgrade over anchor-lantern",
+   "role": "ADOPTED companion configuration of record (user 2026-08-29): north-anchor scores, amber-lantern steers (jxl; map env opt-in unchanged)",
    "named": "2026-08-29"
   }
  }

@@ -158,6 +158,7 @@ pub enum ZensimProfile {
     /// Full provenance, training data shas, exact reproduction chain
     /// and verification gates: `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`
     /// and the mapping table in `docs/CODEC_TARGET_METRIC.md`.
+    #[cfg(feature = "candidate-profiles")]
     C,
     /// **`CHdr` — generation-C HDR profile (external name `zensim-c-hdr`),
     /// FROZEN 2026-08-29.** Internal `HDR944_L1T1_s4005_hfpack`
@@ -169,6 +170,7 @@ pub enum ZensimProfile {
     /// content only** — SDR content routes to [`Self::C`]. The
     /// BHdr-parallel candidate slot: [`Self::BHdr`] remains the shipped
     /// HDR default; `CHdr` is the candidate-of-record.
+    #[cfg(feature = "candidate-profiles")]
     CHdr,
     /// **Externally-defined profile** — an escape hatch for profiles
     /// constructed outside this crate (for example the unpublished
@@ -310,7 +312,9 @@ impl ZensimProfile {
             Self::PreviewV0_2 => "zensim-preview-v0.2",
             Self::B => "zensim-b",
             Self::BHdr => "zensim-b-hdr",
+            #[cfg(feature = "candidate-profiles")]
             Self::C => "zensim-c",
+            #[cfg(feature = "candidate-profiles")]
             Self::CHdr => "zensim-c-hdr",
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
@@ -354,7 +358,9 @@ impl ZensimProfile {
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
             Self::B => &PROFILE_B,
             Self::BHdr => &PROFILE_B_HDR,
+            #[cfg(feature = "candidate-profiles")]
             Self::C => &PROFILE_C,
+            #[cfg(feature = "candidate-profiles")]
             Self::CHdr => &PROFILE_C_HDR,
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
@@ -1096,6 +1102,7 @@ static PROFILE_B_HDR: ProfileParams = ProfileParams {
 /// and `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`. The pinning test
 /// `profile_c_tests::weight_sha256_pinned` fails loud on any silent
 /// byte swap of this file.
+#[cfg(feature = "candidate-profiles")]
 pub(crate) fn mlp_bake_c_purity944() -> &'static [u8] {
     include_bytes!("../weights/c_sdr_purity944_2026-08-29.bin")
 }
@@ -1108,6 +1115,7 @@ pub(crate) fn mlp_bake_c_purity944() -> &'static [u8] {
 /// failing loud). Full-fidelity scoring goes through the folded-944
 /// extraction + [`crate::score_features_with_profile`]; see the
 /// [`ZensimProfile::C`] docs for the contract.
+#[cfg(feature = "candidate-profiles")]
 static PROFILE_C: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_2,
     blur_radius: 5,
@@ -1139,6 +1147,7 @@ static PROFILE_C: ProfileParams = ProfileParams {
 /// FROZEN 2026-08-29 (user-directed HDR Profile-C freeze). 944 caller /
 /// 697 internal (dead-column pruned). Pinned by
 /// `profile_c_tests::chdr_weight_sha256_pinned`.
+#[cfg(feature = "candidate-profiles")]
 pub(crate) fn mlp_bake_chdr_l1t1944() -> &'static [u8] {
     include_bytes!("../weights/c_hdr_l1t1944_2026-08-29.bin")
 }
@@ -1146,6 +1155,7 @@ pub(crate) fn mlp_bake_chdr_l1t1944() -> &'static [u8] {
 /// Generation-C HDR profile params — the PROFILE_C shape (folded-944
 /// contract, bake-carried dial spline, negative tail) over the
 /// aurora-anchor bytes. HDR feature extraction happens route-side.
+#[cfg(feature = "candidate-profiles")]
 static PROFILE_C_HDR: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_2,
     blur_radius: 5,
@@ -1934,7 +1944,7 @@ mod linearf32_sdr_not_hdr_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "candidate-profiles"))]
 mod profile_c_tests {
     use super::*;
     use crate::source::RgbSlice;
