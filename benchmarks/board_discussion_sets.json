@@ -87,6 +87,19 @@
     "W10L9_s4003_packed"
    ],
    "note": "fresh-B battery + copper-line/jeweler-loupe pair on equal gates"
+  },
+  {
+   "label": "2026-08-29 B-SWAP DECISION (same-ruler)",
+   "members": [
+    "b_sdr_linear_cid80_inclwinsor_dense_dial",
+    "W10L9PH_s4004_packed",
+    "PH_s4004_e070",
+    "W10L9_s4003_packed",
+    "copperline_wlin4_a05",
+    "jewelerloupe_hf0003",
+    "HDR944_L1T1_s4005_hfpack"
+   ],
+   "note": "fair B-vs-challengers table (campaign doc); era rows refreshed onto validate slices; recommendation: swap SDR B->C (stated costs), do NOT swap HDR"
   }
  ]
 }
