@@ -8,7 +8,7 @@
   },
   "river-lantern": {
    "board_name": "PH_s4004_e060",
-   "role": "steering-map champion (proposed map companion)",
+   "role": "prior steering-map champion (superseded-proposed by amber-lantern 2026-08-29; user call pending)",
    "named": "2026-08-28"
   },
   "anchor-lantern": {
@@ -50,6 +50,16 @@
    "board_name": null,
    "role": "PROGRAM: the W12-U unified ship candidate track (rank+dial+map in ONE bake; stems LSTAR_s*)",
    "named": "2026-08-28"
+  },
+  "amber-lantern": {
+   "board_name": "PH_s4004_e070",
+   "role": "PROPOSED steering-map companion (dual-instrument pick: photo 0.854 + screen 0.601; loop 0.256/-1.52% bytes — best measured)",
+   "named": "2026-08-29"
+  },
+  "anchor-amber": {
+   "board_name": null,
+   "role": "PAIR configuration: north-anchor scores, amber-lantern steers — proposed companion-of-record upgrade over anchor-lantern",
+   "named": "2026-08-29"
   }
  }
 }

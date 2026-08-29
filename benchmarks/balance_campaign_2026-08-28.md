@@ -1243,3 +1243,33 @@ per-SB allocation on exactly the content where allocation matters most)
 and gives W13 its precise target: **text-dense content at small-to-mid
 scales**. Zoo-mining (arm 1) baseline set; a companion candidate must
 clear BOTH instruments per the registration.
+
+### W13 ARM-1 (zoo mining) OUTCOME — dual-instrument selection pays IMMEDIATELY (2026-08-29 ~07:0xZ)
+
+Zoo M3a-screen ranking (11 checkpoints, 0 failures): **gray-tower 0.632 —
+the incumbent beats every purity/lodestar-era checkpoint on screen
+coherence** (the purity-era data changes apparently LOST screen map
+coherence — a data hint for arm 2); htraj_e070 0.601;
+lstar_s4021_e080 0.566; … river-lantern sat at 0.518. **No cell clears a
+photo-gold-class bar (0.85) on screen** — no ready screen-coherent map
+exists; arm 2 stands. BUT the mining surfaced a companion upgrade:
+**PH_s4004_e070 dominates river-lantern on BOTH instruments** (photo
+0.854 vs 0.833, screen 0.601 vs 0.518; it was only ever excluded as a
+SCORER — cid22 clause ii — which the companion role never gates).
+
+**Loop A/B (same substrate, jxl 27-cell, h3-mag):**
+
+| arm (k3_best) | med \|err\| | ±2 | nonphoto med | Δbytes vs A-scalar (all / at parity) |
+|---|---|---|---|---|
+| A scalar | 0.343 | 25/27 | 1.438 | — |
+| A + river-lantern (e060) | 0.300 | 25/27 | 1.335 | +0.32% / −0.41% |
+| **A + e070 ("amber-lantern")** | **0.256** | 24/27 | **0.635** | **−1.52% / −0.15%** |
+
+**The best loop configuration ever measured** — median −15% vs the e060
+pair, nonphoto error HALVED (the screen-coherence gain showing up exactly
+where the instrument predicted), byte-negative overall and at parity;
+k2 also better (0.635/21 vs 0.652/21). One ±2 cell traded (24 vs 25).
+**Proposed companion-of-record: e070 = "amber-lantern"; the pair =
+"anchor-amber"** — adoption remains the user's call, as does e060's
+retirement. This is the dual-instrument selection thesis validated on its
+first application: one zoo scan + one A/B replaced the champion.
