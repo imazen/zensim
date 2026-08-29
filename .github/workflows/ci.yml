@@ -197,9 +197,12 @@ jobs:
   i686:
     name: Test (i686-unknown-linux-gnu)
     runs-on: ubuntu-latest
-    # Bring-up mode: non-blocking until proven green, then remove this line so it
-    # gates like every other platform (i686 is a primary target per workspace policy).
-    continue-on-error: true
+    # Bring-up finished 2026-08-29: this lane now GATES like every other platform
+    # (i686 is a primary target per workspace policy). It had been green on every
+    # run that reached a conclusion — the remaining non-successes were all
+    # `cancelled` by the concurrency group, never `failure`. Do not reintroduce
+    # `continue-on-error` here: a non-blocking lane that everyone believes is
+    # gating is worse than no lane at all.
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable

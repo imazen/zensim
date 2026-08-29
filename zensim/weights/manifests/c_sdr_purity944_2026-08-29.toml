@@ -1,0 +1,178 @@
+# Manifest for the shipped `zensim-c` (SDR, 944-regime) bake — codename
+# "north-anchor", internal `W10L9PH_s4004_packed`. FROZEN into the crate
+# 2026-08-29 by commit `e9a705c0` (user-directed Profile-C freeze), taking
+# over the `ZensimProfile::C` slot from the 2026-08-05 `W10L9_s4003_packed`
+# bytes (whose manifest, `c_sdr_mlp944_corrmix_2026-08-05.toml`, stays with
+# the superseded artifact).
+#
+# Schema: zensim/weights/manifests/README.md
+#
+# NOTE ON SCOPE — no [training] section, the same deliberate choice the
+# superseded sibling manifest made, for the same reason. The exact recipe
+# (11 `--group` legs with per-group loss modes + 64 `--feature-transform`
+# flags + seed 4004 = 170 argv tokens) is EMBEDDED IN THE BAKE ITSELF as the
+# mandatory `zentrain.repro` metadata: every input path + sha256 + row count,
+# the full argv, `best_val`, and the trainer HEAD. Re-typing 170 argv tokens
+# into TOML would create a second copy that can drift from the authoritative
+# embedded one — the exact incident class this manifest system exists to
+# prevent. [reproduce] therefore records the IDENTIFYING facts and points at
+# the recipe of record rather than duplicating it.
+#
+# This is not a convenience: the base argv exists NOWHERE ELSE. The driver
+# reads it from `$SDRPURE_ARGV` (default `~/tmp/sdrpure_argv.txt`), which is
+# untracked and no longer on disk. The bake's embedded repro is the only
+# surviving copy. Read it with:
+#   zenpredict inspect ../c_sdr_purity944_2026-08-29.bin   # key zentrain.repro
+#
+# PROVENANCE OF THIS FILE (2026-08-29): written to close the gap that
+# `zensim-validate/tests/shipped_bake_provenance.rs` caught — the freeze
+# commit shipped the bytes without a manifest. Every field below is derived
+# from evidence in this repo or from the bake's own bytes, and the derivation
+# is named inline. Nothing here was guessed to satisfy the schema; what the
+# records do NOT establish is marked ABSENT rather than filled in.
+
+[bake]
+name               = "zensim-c"
+internal_version   = "W10L9PH_s4004_packed (\"north-anchor\"; SPH1 arm of the sdr-pure retrain wave, seed 4004)"
+file               = "../c_sdr_purity944_2026-08-29.bin"
+# MEASURED on the committed file (sha256 + stat). Independently pinned by
+# `zensim/src/profile.rs::profile_c_tests::weight_sha256_pinned`, and stated
+# in freeze commit e9a705c0.
+sha256             = "61ebc4562c2c4f78663d2c4d7608e7560d77f519c9e18d84fb0555d5fbca5940"
+file_bytes         = 149343
+# Caller-facing feature width. `bake_loads_caller_width_944_internal_667`
+# asserts caller_input_width()==944, n_inputs()==667, n_outputs()==1,
+# n_layers()==2. Size every feature vector by caller_input_width(), never
+# n_inputs().
+n_inputs           = 944
+# READ OUT OF THE SHIPPED BYTES (ZNPR v3 header + layer table; body is one
+# LZ4 block from offset 128): n_inputs=667, n_outputs=1, n_layers=2;
+# layer0 667->128 LeakyReLU f16, layer1 128->1 Identity f16.
+#
+# The embedded argv carries `--n-hidden-layers 0`, which does NOT mean a
+# 0-hidden additive model: the trainer branches only on
+# `n_hidden_layers >= 2` (zensim-validate/src/mlp_train/mod.rs:6385), so 0
+# and the default 1 both select the ONE-hidden-layer architecture, and
+# `--hidden` was left at its default 128 (zensim_mlp_train.rs:140). The wave
+# record states the same correction from the other direction —
+# benchmarks/sdr_pure_retrain_wave_2026-08-28.md:28: "the trainer IGNORES
+# `--n-hidden-layers 0` ...; the emitted bakes are 128-hidden LeakyReLU MLPs
+# (verified from bytes: 667->128->1 post-prune)". Recorded here because the
+# campaign-era "L0"/additive label recurs and is wrong for these bytes.
+arch               = "MLP 944 -> 667 -> 128 -> 1. ZNPR v3, LZ4-compressed body. Caller width 944; internal layer-0 width 667 after dead-column pruning (277 FeatureTransform::Drop lines). layer0 667->128 LeakyReLU f16; layer1 128->1 Identity f16. Carries a bake-embedded 17-knot monotone PCHIP dial spline (`zentrain.output_calibration_spline`, dial range 8.08 -> 86.94) plus `zentrain.feature_transforms` / `zentrain.feature_transform_params`."
+# PROFILE_C sets skip_score_mapping = true and extrapolate_score = true: the
+# spline output IS the dial value, the negative tail stays open below 0
+# (`pack --neg-tail`), and the runtime caps at 100 above the top knot.
+output_disposition = "extrapolate_score"
+date               = "2026-08-29"
+ship_commit        = "e9a705c0"
+
+[reproduce]
+# Every value in this block is read from the bake's own `zentrain.repro`
+# blob, which is the recipe of record. They identify the run; they do not
+# replace it.
+entrypoint     = "zensim_mlp_train (recipe of record = the bake's embedded zentrain.repro) then zensim-validate bake_dial_refit pack"
+seed           = "4004"
+trainer_commit = "af2a9fb56e3f"           # zentrain.repro.trainer_head_at_train
+best_val       = "0.9234843503741893"     # zentrain.repro.best_val, f64-exact
+trained_at     = "2026-08-28T02:46:26Z"   # zentrain.repro.timestamp_epoch 1787885186
+trained_out    = "/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/W10L9PH_s4004.bin"
+command = """
+STAGE 1 — train. The 170-token argv is embedded verbatim in the bake; dump it
+with `zenpredict inspect ../c_sdr_purity944_2026-08-29.bin` (key
+zentrain.repro, field .argv). Shape: zensim_mlp_train with 11 --group legs,
+--n-hidden-layers 0, --target-column human_score, --target-scale 100,
+--epochs 120, --pairs-per-epoch 50000, --max-features 944,
+--allow-narrow-features, --coarse-decay 1e-5, 64 --feature-transform flags
+(54 winsor_p99 of which 24 are degenerate `:0,0` append2/BANDVIS guards, plus
+10 signed_cbrt), --seed 4004. Driver of record: scripts/sdrpure_hf_variant.sh
+(seeds 4003/4004/4005), which appends the tbig_hf leg after the transforms.
+
+STAGE 2 — pack. VERBATIM from scripts/sdrpure_hf_variant.sh:29-34, with
+ROOT=/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01:
+
+  bake_dial_refit pack \\
+    --in  $OUT/W10L9PH_s4004.bin \\
+    --out $OUT/W10L9PH_s4004_packed.bin \\
+    --neg-tail \\
+    --anchor $ROOT/anchor944_dial.parquet --target-col target_score \\
+    --verify $ROOT/ext_cid22val.parquet --verify-col human_score --verify-scale 100
+
+This is ONE pack step, not the add-spline-then-pack chain the superseded
+s4003 sibling used: `pack` does strip -> zerobias -> dead-column prune ->
+f16 -> spline refit on the packed net in a single pass, so there is no
+intermediate `_dial` artifact for this bake. Registered as the "campaign
+parity invocation" (benchmarks/sdr_pure_retrain_wave_2026-08-28.md:35,42-44).
+"""
+# The 11 training legs by name and root. Per-leg sha256 + row counts live in
+# the embedded repro and are deliberately NOT restated here (see header).
+# "PH" = the Purity views plus the tbig_Hf leg: the wave rebuilt
+# safesyn/tbig/teacher tables under sdr-pure-2026-08-28/ under the family
+# split policy, and SPH1 added `tbig_hf_pure` (11,941 rows, human_score >=
+# 0.90) on top of the 10-group W10L9 mix. That is what "purity944" names.
+requires = "11 legs — safesyn, bigcodec, tsafesyn, ttbig, tbig_hf (sdr-pure-2026-08-28/); cid22_train, kadid, tid, konjnd_bpg, konjnd_bpg_val (ext944-canonical-2026-08-01/); kadis (kadis-944-2026-08-01/). Paths + sha256 + rows: embedded zentrain.repro.inputs. Pack stage additionally needs anchor944_dial.parquet + ext_cid22val.parquet from ext944-canonical-2026-08-01/."
+lineage  = "wave-10 arm L9 recipe (W10L9, embedded argv) --retrained on the policy-clean 'pure' views (tbig/teacher -15,455 family-leaked rows; the safesyn purge measured a NO-OP)--> W10L9P_s* --+ family-clean HF leg tbig_hf_pure (SPH1 arm)--> W10L9PH_s4004 (seed 4004, best_val 0.9234843503741893) --bake_dial_refit pack --neg-tail (f16 + dead-column prune 944->667 + 17-knot dial spline refit on the packed net)--> W10L9PH_s4004_packed = SHIPPED"
+verified = "2026-08-28 — the embedded-repro chain was retraced from the recorded argv and, after stripping `zentrain.repro` (whose argv legitimately differs by the dump flags), the retrace and the original are BYTE-IDENTICAL; three instruments matched to 4 dp before the strip check (benchmarks/balance_campaign_2026-08-28.md:358-362; driver scripts/htraj_study.sh:15-25). The pack stage's own prune-identity gate was BIT-identical on all 2,035 anchor rows."
+asserts  = "shipped sha256 61ebc456… (149,343 B); trained stage identified by seed 4004 + trainer af2a9fb56e3f + best_val 0.9234843503741893. Whole-file identity check: scripts/verify_bake_identity.sh."
+# Honest gaps, so a future reader does not hunt for records that do not exist:
+absent   = "NOT RECORDED ANYWHERE: (1) sha256 of the raw pre-pack W10L9PH_s4004.bin — the retrace shas were printed to an uncommitted heartbeat log; (2) any R2/S3 or Tower mirror for these bytes (the `s3://zentrain/profiles/C-2026-08-05/` prefix belongs to the SUPERSEDED bake — there is no C-2026-08-29 prefix); (3) a `.spec.json` sidecar; (4) learning rate / optimizer settings — no --lr token is in the argv, so the trainer default applies but was never chosen or logged; (5) a reproduction walkthrough for THIS bake — docs/PROFILE_C_REPRODUCTION_2026-08-05.md documents the s4003 chain and does not mention W10L9PH/s4004."
+
+[docs]
+freeze_record     = "benchmarks/sdr_pure_retrain_wave_2026-08-28.md"   # FREEZE EXECUTED (user, 2026-08-28T08:53Z)
+campaign          = "benchmarks/balance_campaign_2026-08-28.md"
+gate_registry     = "benchmarks/board_gates_2026-08-28.json"           # bakes.W10L9PH_s4004_packed
+dial_addressability = "benchmarks/dial_addressability_2026-08-28.md"   # + the .json machine copy
+profile_freeze_log = "benchmarks/steering_coopt_8h_2026-08-29.md"      # P0.1/P0.2 EXECUTED
+codename_registry = "benchmarks/candidate_names.json"                  # north-anchor
+driver            = "scripts/sdrpure_hf_variant.sh"                    # train + pack + harvest
+retrace_driver    = "scripts/htraj_study.sh"                           # byte-identity retrace
+methodology       = "docs/PROFILE_C_REPRODUCTION_2026-08-05.md"        # C-family chain, written for s4003
+superseded        = "zensim/weights/manifests/c_sdr_mlp944_corrmix_2026-08-05.toml"
+
+# Freeze-time scorecard. CITED from the records named in [docs] — not
+# re-derived here. Sources given per line.
+[eval]
+cid22_srocc  = 0.8927   # balance_campaign_2026-08-28.md:373
+hfnl_srocc   = 0.7524   # balance_campaign_2026-08-28.md:373 (hfnlproxy)
+konjnd_srocc = 0.501    # sdr_pure_retrain_wave_2026-08-28.md:333
+csiq_srocc   = 0.944    # balance_campaign_2026-08-28.md:170
+tid_srocc    = 0.939    # balance_campaign_2026-08-28.md:170
+aic3_srocc   = 0.800    # balance_campaign_2026-08-28.md:170
+aic4_srocc   = 0.914    # balance_campaign_2026-08-28.md:171
+sdr25_srocc  = 0.9770   # sdr_pure_retrain_wave_2026-08-28.md:353
+m3a_coherence = 0.7628  # sdr_pure_retrain_wave_2026-08-28.md:333
+balanced_composite = 0.8599  # sdr_pure_retrain_wave_2026-08-28.md:353
+notes = """
+FROZEN SDR candidate-of-record (user, 2026-08-28T08:53Z); frozen into
+ZensimProfile::C 2026-08-29. Sole full two-zone eligibility pass of 20+
+candidates; 8/8 balanced floors. Paired deltas vs the incumbent:
+cid22 +0.0060 [+0.0044,+0.0077] BETTER, hfnl +0.3320 [+0.3150,+0.3487]
+BETTER (sdr_pure_retrain_wave_2026-08-28.md:323).
+
+DIAL IDENTITY PERFECT: 100.00/100.00/100.00 with 0 of 4817 above-identity
+violations on the dial grid (balance_campaign_2026-08-28.md:750; the
+incumbent reads 92.64/96.64/91.45 with 228/4817). G-OUT v2 PASS with the
+cleanest hfnl tail measured (OR 0.013, p99 3.87); below-zero reach
+negmin -18.1. G-GRAN v1 PASS (per-codec max tied diag 0.421, webp).
+
+CARRIED HONESTLY — this bake does NOT sweep every gate:
+  * `dialv2` (G-GRAN v2, a registered W12 candidate gate, NOT the gate it
+    was frozen against) is recorded FAIL: jpeg:top(-1.81),
+    jxl:hf_entry(-1.02) — board_gates_2026-08-28.json, source
+    dial_addressability_2026-08-28.md:84.
+  * M3a photo coherence 0.7628 is its recorded soft spot; M3a-SCREEN 0.493
+    on the instrument added after the freeze
+    (balance_campaign_2026-08-28.md:1230).
+  * On the sealed hidden panel it is second-to-last of five on the MIN axis
+    (MIN 0.5843 vs incumbent 0.6331, balance_campaign_2026-08-28.md:195,201);
+    on the post-hoc codec-like subset it beats the incumbent on all three
+    (MIN 0.7571, :268).
+  * The whole-pool freeze_check E.4 run selects a DIFFERENT cell
+    (W10L9P_s4005_packed, sel_comp 0.9876) via the M3a tie-break term; on
+    floors + balanced_composite alone this bake leads
+    (sdr_pure_retrain_wave_2026-08-28.md:349-363). It was frozen
+    eligibility-first, not on a clean sweep of every instrument.
+
+Profile B remains the shipped SDR product default; C is the generation-C
+profile and this is its candidate-of-record.
+"""

@@ -1,0 +1,200 @@
+# Manifest for the shipped `zensim-c-hdr` (HDR, 944-regime) bake — codename
+# "aurora-anchor", internal `HDR944_L1T1_s4005_hfpack`. FROZEN into the crate
+# 2026-08-29 by commit `e9a705c0` (user-directed), which ADDED
+# `ZensimProfile::CHdr`. `ZensimProfile::BHdr` remains the shipped HDR
+# product default; CHdr is the candidate-of-record.
+#
+# Schema: zensim/weights/manifests/README.md
+#
+# READ THE NAME: `c_hdr` (profile C, HDR lane) + `l1t1` (wave arm **L1**, the
+# multi-codec breadth arm, x target **T1**, the cvvdp-mix target) + `944`
+# (caller width) + the freeze date. "L1" is NOT an L1 loss and "T1" is NOT a
+# tier — benchmarks/hdr944_bake_wave_2026-08-27.md:152-172 registers L1 as
+# the hdrgrid breadth arm and :158-161 registers T1 = cvvdp-mix (vs T2 =
+# era-B zensim).
+#
+# NOTE ON SCOPE — no [training] section, matching the C-lane sibling
+# manifests. The recipe is EMBEDDED IN THE BAKE as the mandatory
+# `zentrain.repro` metadata (input paths + sha256 + rows + full argv +
+# best_val + trainer HEAD); duplicating it in TOML would create a second copy
+# that can drift from the authoritative one. Read it with:
+#   zenpredict inspect ../c_hdr_l1t1944_2026-08-29.bin   # key zentrain.repro
+#
+# TWO SEPARATE EVENTS, do not conflate: the *candidate-of-record* freeze was
+# the user at 2026-08-28T08:53Z (hdr944_retrain_wave_2026-08-28.md:395); the
+# *crate profile* freeze (`ZensimProfile::CHdr`) is 2026-08-29 (profile.rs:163
+# and benchmarks/steering_coopt_8h_2026-08-29.md:61-67).
+#
+# PROVENANCE OF THIS FILE (2026-08-29): written to close the gap that
+# `zensim-validate/tests/shipped_bake_provenance.rs` caught — the freeze
+# commit shipped the bytes without a manifest. Every field is derived from
+# repo evidence or the bake's own bytes, with the derivation named inline.
+# What the records do NOT establish is marked ABSENT, not filled in.
+
+[bake]
+name               = "zensim-c-hdr"
+internal_version   = "HDR944_L1T1_s4005_hfpack (\"aurora-anchor\"; arm L1 / target T1, seed 4005, HF re-pack)"
+file               = "../c_hdr_l1t1944_2026-08-29.bin"
+# MEASURED on the committed file (sha256 + stat). Independently pinned by
+# `zensim/src/profile.rs::profile_c_tests::chdr_weight_sha256_pinned`, and
+# stated in freeze commit e9a705c0 and
+# hdr944_retrain_wave_2026-08-28.md:52,152,400.
+sha256             = "0a437d9927dd63dce08ba72d031ce0a6d0c13ff4bd3034458d56cb1995d2463d"
+file_bytes         = 180195
+# `chdr_bake_loads_caller_width_944_internal_697` asserts
+# caller_input_width()==944, n_inputs()==697, n_outputs()==1, n_layers()==2.
+# Size feature vectors by caller_input_width(), never n_inputs().
+n_inputs           = 944
+# READ OUT OF THE SHIPPED BYTES (ZNPR v3 header + layer table; body is one
+# LZ4 block from offset 128): n_inputs=697, n_outputs=1, n_layers=2;
+# layer0 697->128 LeakyReLU f16, layer1 128->1 Identity f16.
+#
+# RECORD CORRECTION, load-bearing. benchmarks/hdr944_bake_wave_2026-08-27.md
+# AMENDMENT 2 (:42-49) describes this family as "`--n-hidden-layers 0` (the
+# additive-class finding)". The argv flag is real, but the conclusion is not:
+# the trainer branches only on `n_hidden_layers >= 2`
+# (zensim-validate/src/mlp_train/mod.rs:6385), so 0 selects the
+# ONE-hidden-layer architecture with `--hidden` at its default 128
+# (zensim_mlp_train.rs:140). These bytes are a 128-hidden LeakyReLU MLP, NOT
+# an additive model — verified by reading the layer table above. The SDR-lane
+# record already flagged the same mislabel in the other direction
+# (sdr_pure_retrain_wave_2026-08-28.md:28, "the campaign-era 'L0' label was
+# the known additive-vs-MLP mislabel recurring"). Trust the bytes.
+arch               = "MLP 944 -> 697 -> 128 -> 1. ZNPR v3, LZ4-compressed body. Caller width 944; internal layer-0 width 697 after dead-column pruning (247 dropped lines). layer0 697->128 LeakyReLU f16; layer1 128->1 Identity f16. Carries a bake-embedded 19-knot monotone PCHIP dial spline (`zentrain.output_calibration_spline`, dial y-range [0.0, 96.1]) plus `zentrain.feature_transforms` / `zentrain.feature_transform_params`. Training was transform-free — the argv carries no --feature-transform flag; the stored transform table is pack's prune table."
+# PROFILE_C_HDR is the PROFILE_C shape: skip_score_mapping = true,
+# extrapolate_score = true (`pack --neg-tail`), mlp_primary_mix = 1.0.
+output_disposition = "extrapolate_score"
+date               = "2026-08-29"
+ship_commit        = "e9a705c0"
+
+[runtime]
+# The scoring contract, from profile.rs:163-173 + 1155-1180.
+contract = "Same folded-944 scoring contract as ZensimProfile::C — 944 caller width. HDR feature extraction happens ROUTE-SIDE via `compute_folded720_append2_features_hdr` (zensim/src/metric.rs:1900); the 372-feature `Zensim::compute` path cannot score this bake (returns ModelForwardFailed; byte-identical pairs still short-circuit to 100). Extract folded-944 features and call `score_features_with_profile`, behind the `feature-regime-v2` feature."
+content  = "HDR content ONLY — SDR content routes to ZensimProfile::C."
+# Stated for the TRAINING legs, not pinned for callers: the hdrgrid legs were
+# built with `HdrEncoding::Linear` and the record warns they were NEVER
+# byte-compared against the hdr944-leg Pq pipeline
+# (hdr944_bake_wave_2026-08-27.md:154-156). profile.rs pins no encoding for
+# the runtime route.
+training_encoding = "HdrEncoding::Linear"
+
+[reproduce]
+# THE SHIPPED BYTES ARE A RE-PACK, NOT A RETRAIN. In the 2026-08-28 retrain
+# wave this is the **L0 arm**, defined at hdr944_retrain_wave_2026-08-28.md
+# :20-24 as "recalibrate, no retrain: re-anchor the incumbent T1's output
+# spline". The six L1 retrains (HDR944R_t1/t2_s400x_hfpack) all LOST (:152).
+# So the training run of record belongs to the PREVIOUS wave
+# (benchmarks/hdr944_bake_wave_2026-08-27.md:238-262), and the values below
+# come from the bake's own zentrain.repro.
+entrypoint     = "zensim_mlp_train (2026-08-27 bake wave, arm L1 / target T1) then zensim-validate bake_dial_refit pack with the HF-band anchor"
+seed           = "4005"
+trainer_commit = "6b7c6640c954"           # zentrain.repro.trainer_head_at_train
+best_val       = "0.9917511830803178"     # zentrain.repro.best_val, f64-exact (record rounds it to 0.9918 at hdr944_bake_wave_2026-08-27.md:249)
+trained_at     = "2026-08-27T14:46:26Z"   # zentrain.repro.timestamp_epoch 1787841986
+trained_out    = "/mnt/v/output/zensim/bakes/hdr944-2026-08-27/HDR944_L1T1_s4005.bin"
+command = """
+STAGE 1 — train (2026-08-27 wave). Full 24-token argv is embedded; dump with
+`zenpredict inspect ../c_hdr_l1t1944_2026-08-29.bin` (key zentrain.repro,
+field .argv). Shape: zensim_mlp_train with TWO --group legs (train + val
+only), --n-hidden-layers 0, --target-column human_score, --target-scale 100,
+--epochs 120, --pairs-per-epoch 50000, --max-features 944,
+--allow-narrow-features, --coarse-decay 1e-5, --seed 4005. No
+--feature-transform flags: this arm ran transform-free
+(hdr944_bake_wave_2026-08-27.md:46-49).
+
+STAGE 2 — HF re-pack (2026-08-28 retrain wave, L0 arm). Invocation shape from
+scripts/hdr_gh1_arm.sh:30-34, with the HF-band anchor:
+
+  bake_dial_refit pack \\
+    --in  HDR944_L1T1_s4005.bin \\
+    --out HDR944_L1T1_s4005_hfpack.bin \\
+    --neg-tail \\
+    --anchor /mnt/v/zen/zensim-training/hdr944-retrain-2026-08-28/anchor_hf_t1.parquet \\
+    --target-col target_score \\
+    --verify /mnt/v/zen/zensim-training/ext944-canonical-2026-08-01/ext_cid22val.parquet \\
+    --verify-col human_score --verify-scale 100
+
+"hf" in `_hfpack` is the HF (high-fidelity / near-lossless) BAND ANCHOR, not
+"half float". The anchor is 20,769 train-leg rows including ALL 7,790 HF rows
+(hdr944_retrain_wave_2026-08-28.md:46-52). `pack` does strip -> zerobias ->
+dead-column prune -> f16 -> spline refit on the packed net in one pass.
+"""
+requires = "2 legs, both from /mnt/v/zen/zensim-training/hdrgrid-mc944-t1-2026-08-27/ — hdrmc (hdrgrid_mc944_t2_train.parquet, 41,788 rows, sha256 841bd5c3…, train_w 1.0 / val_w 0.0) and hdrmc_val (hdrgrid_mc944_t2_val.parquet, 22,860 rows, sha256 3053a2f4…, train_w 0.0 / val_w 1.0); both loss_mode Both, n_features 944, within_ref false. NOTE THE PATH QUIRK — the directory is named `…-t1-…` while the files are named `…_t2_…`; the same quirk appears in the committed driver scripts/hdr_gh1_arm.sh:19,22. Full sha256 + rows: embedded zentrain.repro.inputs. Re-pack stage additionally needs anchor_hf_t1.parquet (hdr944-retrain-2026-08-28/) and ext_cid22val.parquet (ext944-canonical-2026-08-01/)."
+lineage  = "hdrgrid multi-codec table (zenjxl + zenav1-svt + jpeg-gainmap cells @ hdrfeat944, joined on encode_sha, origin-digit split even=train/{1,3,5}=val; 84,989 joined cells, ZERO census-scene overlap) --train arm L1 x target T1 cvvdp-mix, seed 4005--> HDR944_L1T1_s4005.bin (raw f32, 493,816 B) --pack, SDR-anchored--> HDR944_L1T1_s4005_packed.bin (180,139 B, sha d6203e9d…, 12 knots, dial [11.4, 87.0]) --RE-pack with the HF-band anchor (the L0 arm of the 2026-08-28 retrain wave)--> HDR944_L1T1_s4005_hfpack.bin (180,195 B, sha 0a437d99…, 19 knots, dial [0.0, 96.1]) = SHIPPED"
+verified = "The re-pack's prune-identity gate was BIT-identical on all 20,769 anchor rows; 944-CID22 verify post-spline SROCC 0.9392 (hdr944_retrain_wave_2026-08-28.md:46-52). The earlier SDR-anchored pack's identity gate was bit-identical on 2,035 anchors (hdr944_bake_wave_2026-08-27.md:256-262)."
+asserts  = "shipped sha256 0a437d99… (180,195 B); trained stage identified by seed 4005 + trainer 6b7c6640c954 + best_val 0.9917511830803178. Whole-file identity check: scripts/verify_bake_identity.sh."
+absent   = "NOT RECORDED ANYWHERE: (1) sha256 of the raw f32 HDR944_L1T1_s4005.bin (493,816 B) — none exists; (2) the intermediate _packed sha is recorded to 8 hex only (`d6203e9d…`) — no full-length value in-repo; (3) any R2/S3 or Tower mirror for these bytes or their training legs; (4) a `.spec.json` / `.metrics.json` sidecar (B and BHdr have them in the same dir; this bake does not — provenance is embedded-only); (5) learning rate — never recorded in doc, driver, or argv, so the trainer default applies but was never chosen or logged; (6) a reproduction walkthrough — there is no docs/PROFILE_CHDR_REPRODUCTION*.md; (7) the T1 leg parquet is named in no committed doc, only in this bake's embedded repro and scripts/hdr_gh1_arm.sh."
+
+[docs]
+freeze_record  = "benchmarks/hdr944_retrain_wave_2026-08-28.md"   # FREEZE EXECUTED (user, 2026-08-28T08:53Z)
+training_wave  = "benchmarks/hdr944_bake_wave_2026-08-27.md"      # the L1/T1 run of record, :238-262
+author_panel   = "benchmarks/hdr944_author_panel_2026-08-28.md"   # 6/6 panel + the HF-band bootstrap
+gate_registry  = "benchmarks/board_gates_2026-08-28.json"         # bakes.HDR944_L1T1_s4005_hfpack
+profile_freeze_log = "benchmarks/steering_coopt_8h_2026-08-29.md" # P0.1/P0.2 EXECUTED
+codename_registry  = "benchmarks/candidate_names.json"            # aurora-anchor
+driver         = "scripts/hdr_gh1_arm.sh"                         # the pack invocation shape
+outlier_gate   = "scripts/v_next/outlier_gate.py"                 # carries the declared spline range
+
+# Freeze-time scorecard. CITED from the records named in [docs] — not
+# re-derived here. Sources given per line.
+[eval]
+ghf_p50            = 93.87   # hdr944_retrain_wave_2026-08-28.md:54-58 (val HF band human_score >= 0.92, n=3,036)
+ghf_frac_ge_88     = 0.967   # same; bar is 0.5. frac >= 92 = 0.889; p5 90.76 / p95 95.84 / max 96.78
+upiq_srocc         = 0.666   # hdr944_retrain_wave_2026-08-28.md:125 (freeze table row)
+narwaria_srocc     = 0.643   # :125
+korshunov_srocc    = 0.928   # :125
+cid22_944_verify_srocc = 0.9392  # :52,:125 — the pack's advisory verify on ext_cid22val, NOT a board CID22 rank read
+sdr25_srocc        = 0.9667  # :151
+m3a_coherence      = 0.7642  # :151
+selection_composite = 0.8853 # :151
+hf_band_srocc      = 0.591   # :125
+notes = """
+FROZEN HDR candidate-of-record (user, 2026-08-28T08:53Z); added as
+ZensimProfile::CHdr 2026-08-29. Selected on floors 5/8 (top, tied with three
+t2 retrains) with selection_composite as tie-break. G-HF PASS on both clauses
+(p50 93.87 >= 90 and frac>=88 0.967 >= 0.5, vs the pre-hfpack pack's p50 81.06
+/ frac 0.002 — the HF re-anchor is what this artifact buys). G-OUT v2 PASS
+on-route, bounded [-28, 100] against floor -32.0
+(sdr_pure_retrain_wave_2026-08-28.md:178-181,200-203).
+
+HDR-ROUTE GATE PANEL: the registered panel was AMENDED pre-verdict after all
+three candidates failed a transposed SDR bar, replaced by HG1-F swing
+fidelity (0.65 <= model/target <= 1.5 per codec) + mono >= 0.93. This bake
+passed on fidelity gm/jxl/svt 1.14 / 0.93 / 1.01 and mono svt/jxl 0.996 /
+0.995; both retrain challengers FAILED (t2_s4003 over-swing, t1_s4003 jxl
+mono 0.892). "The tie breaks toward the INCUMBENT … the incumbent is the only
+faithful dial" (hdr944_retrain_wave_2026-08-28.md:268-296).
+jxl d-ladder: per-scene monotone 99.9% (1888/1890), median adjacent-rung
+separation 0.54 — ahead of ssim2, cvvdp and butteraugli on the same 2,160
+val cells (:87-108).
+
+CARRIED HONESTLY — the caveats are load-bearing:
+  * EVERY TARGET IN THIS LANE IS METRIC-DERIVED, NOT HUMAN. The T1 leg's
+    `human_score` is the cvvdp-mix (half ssim2 by construction), so every
+    G-HF band, anchor and "target" here is metric-derived
+    (hdr944_retrain_wave_2026-08-28.md:176-181). No human pairwise CIs exist
+    on the HDR route at all (hdr944_author_panel_2026-08-28.md:98-100).
+  * UPIQ / narwaria were NOT re-run on these bytes — G-EXT was recorded as
+    "inherited by rank-invariance" (:60-63), and the record is internally
+    inconsistent about the values: :62 gives UPIQ +0.656 / narwaria +0.605
+    (which match the pre-hfpack _packed bake's own measured reads at
+    hdr944_bake_wave_2026-08-27.md:249) while the freeze table at :125 gives
+    +0.666 / +0.643. The [eval] keys above carry the :125 table row; treat
+    the pair as approximate to ~0.01 and re-measure before citing either.
+  * HF-band SROCC 0.591 is the WEAKEST HF discrimination in the freeze
+    table. This bake won on floors / composite / dial fidelity, not on HF
+    rank skill; the GH-family delta of +0.027 (CI excludes 0) against it is
+    real and unclaimed (:335-340).
+  * HDR-ROUTE DIAL IDENTITY WAS NEVER MEASURED. The only identity reading is
+    off-route, on the SDR dial grid: 96.98/97.34/96.90 with 144 of 4817
+    above-identity violations (balance_campaign_2026-08-28.md:753). Recorded
+    there as a follow-up.
+  * The SDR gate-panel readings (g1_dynamic_range 0.696, weighted_goal 0.420)
+    are cross-domain — an SDR-route instrument applied to an HDR-route bake —
+    and are not a clean HDR product gate (:161-174).
+  * NO HEAD-TO-HEAD AGAINST BHdr EXISTS. The wave registered a shipped-BHdr
+    baseline row and never filled it in (hdr944_bake_wave_2026-08-27.md:19-20).
+    Any claim that CHdr beats BHdr is unsupported by the record.
+
+BHdr remains the shipped HDR product default; CHdr is the candidate-of-record.
+"""
