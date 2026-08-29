@@ -1102,3 +1102,24 @@ leg at HALF weight (0.5) to pull the kadid spread back + a map-aware loss
 arm; same battery, same unified bar.** Board: lodestar family added,
 cells + G-OUT verdicts appended to the gates registry, discussion set
 "2026-08-29 lodestar verdict" appended.
+
+### W12-U2 REGISTRATION COMPLETED + LAUNCH (2026-08-29, pre-fit; user standing directive "keep launching as you learn")
+
+Two arms, serialized, seeds {4031,4032,4033} each, checkpoint dumps every
+10, standard pack/harvest, SAME battery + unified bar as W12-U:
+- **Arm jw05** (stems `LSTAR2_s*`): W11J argv + tbig_hf(1.0) +
+  tbig_hf_jw(**0.5**) — the registered half-weight lever against the
+  kadid:S chart-spread inflation, keeping most of the proven v-hfnl gain.
+- **Arm jw05+cd** (stems `LSTAR2C_s*`): jw05 + `--coarse-decay 1e-5`.
+  TRANSPARENT AMENDMENT to the registered "map-aware loss arm": a true
+  gradient-supervised map loss needs second-order trainer surgery (owner
+  work, registered separately); this arm uses the E-M campaign's one
+  measured map-ADJACENT regularizer (decoupled coarse decay — the
+  "KonJND +0.15, CSIQ +0.07, ~free" keeper, mechanism-linked to the
+  coarse-mass drift that degrades maps). Amendment made BEFORE any arm-2
+  fit; the arm is labeled jw05+cd, never "map-aware loss", in results.
+
+Standing board discipline (user, this directive): every wave generation
+appends its review set to `benchmarks/board_discussion_sets.json` so
+generations are comparable from the dropdown; a cross-wave "unified
+track" set accumulates the lodestar-lineage candidates.

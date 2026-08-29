@@ -7,6 +7,18 @@
  ],
  "sets": [
   {
+   "id": "unified-track",
+   "date": "2026-08-29",
+   "label": "unified track · lodestar generations (accumulating)",
+   "bakes": [
+    "LSTAR_s4021_packed",
+    "lstar4021_e080",
+    "LSTAR_s4022_packed",
+    "W10L9PH_s4004_packed",
+    "PH_s4004_e060"
+   ]
+  },
+  {
    "id": "2026-08-29-lodestar-verdict",
    "date": "2026-08-29",
    "label": "2026-08-29 · lodestar W12-U verdict (jw lever + kadid:S wall)",
