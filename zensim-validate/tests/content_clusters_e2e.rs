@@ -327,3 +327,120 @@ fn corpus_dir_mode_and_loose_threshold_refused() {
     );
     assert!(!fx.root.join("never.tsv").exists());
 }
+
+/// Validation step 2 of issue #33 — the EYEBALL pass — is only executable
+/// if the tool hands the reviewer pictures. This gates that it does, and
+/// that the pictures show the right members in the right places: every
+/// cell is cropped back out of the montage and dHash-compared to the file
+/// the index claims is there, so a shuffled or mis-scaled placement fails.
+#[test]
+fn montage_dir_renders_reviewable_clusters_with_correct_members() {
+    use zensim_validate::content_clusters::{dhash_64, hamming, montage_layout};
+
+    let fx = build_fixture("montage");
+    let out_tsv = fx.root.join("clusters_montage.tsv");
+    let montage = fx.root.join("montage");
+    let cell = 192u32;
+    let status = Command::new(env!("CARGO_BIN_EXE_corpus_content_clusters"))
+        .args([
+            "--training-csv",
+            fx.csv.to_str().unwrap(),
+            "--source-root",
+            fx.sources.to_str().unwrap(),
+            "--max-dist",
+            "3",
+            "--out-tsv",
+            out_tsv.to_str().unwrap(),
+            "--montage-dir",
+            montage.to_str().unwrap(),
+            "--montage-all",
+            "--montage-cell",
+            &cell.to_string(),
+            "--montage-cols",
+            "6",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let (header, rows) = read_tsv(&out_tsv);
+    // Members of each cluster, in the order the tool emitted them — which
+    // is the left-to-right order of the montage cells.
+    let mut members: BTreeMap<String, Vec<(PathBuf, u64)>> = BTreeMap::new();
+    for r in &rows {
+        let id = col(&header, r, "cluster_id").to_string();
+        let path = PathBuf::from(col(&header, r, "path"));
+        let hash = u64::from_str_radix(col(&header, r, "dhash"), 16).unwrap();
+        members.entry(id).or_default().push((path, hash));
+    }
+    // 3 multi-variant sources + 1 singleton; only the former get montages
+    // (--montage-all still skips size-1 clusters — a montage of one image
+    // is not a comparison).
+    let multi: Vec<&String> = members
+        .iter()
+        .filter(|(_, m)| m.len() > 1)
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(multi.len(), 3, "expected 3 multi-variant clusters");
+
+    let index = std::fs::read_to_string(montage.join("index.html")).unwrap();
+    assert!(index.contains("issue #33"), "index must name the issue");
+    let singleton = members
+        .iter()
+        .find(|(_, m)| m.len() == 1)
+        .map(|(k, _)| k.clone())
+        .unwrap();
+    assert!(
+        !index.contains(&format!(
+            "cluster_{:05}_n1",
+            singleton.parse::<usize>().unwrap()
+        )),
+        "a one-member cluster is not a comparison and must not be rendered"
+    );
+
+    let mut rendered = 0usize;
+    for id in multi {
+        let group = &members[id];
+        let file = format!(
+            "cluster_{:05}_n{}.png",
+            id.parse::<usize>().unwrap(),
+            group.len()
+        );
+        let path = montage.join(&file);
+        assert!(path.exists(), "missing montage {}", path.display());
+        assert!(index.contains(&file), "index does not link {file}");
+        rendered += 1;
+
+        let sheet = image::open(&path).unwrap().to_rgb8();
+        let imgs: Vec<DynamicImage> = group.iter().map(|(p, _)| image::open(p).unwrap()).collect();
+        let sizes: Vec<(u32, u32)> = imgs.iter().map(|i| (i.width(), i.height())).collect();
+        let layout = montage_layout(&sizes, cell, 6);
+        assert_eq!(
+            (sheet.width(), sheet.height()),
+            (layout.width, layout.height)
+        );
+        for (k, (&(x, y, w, h), (_, member_hash))) in
+            layout.cells.iter().zip(group.iter()).enumerate()
+        {
+            let crop =
+                DynamicImage::ImageRgb8(image::imageops::crop_imm(&sheet, x, y, w, h).to_image());
+            let d = hamming(dhash_64(&crop), *member_hash);
+            assert!(
+                d <= 6,
+                "cluster {id} cell {k}: montage content is {d} bits from the member it claims"
+            );
+        }
+        // The mid-grey ground must survive around a member smaller than the
+        // cell, or flat white screen content would be invisible in review.
+        let small = layout
+            .cells
+            .iter()
+            .position(|&(_, _, w, h)| w < cell || h < cell);
+        if let Some(i) = small {
+            let (x, y, _, _) = layout.cells[i];
+            let (bx, by) = ((x / cell) * cell, (y / cell) * cell);
+            assert_eq!(sheet.get_pixel(bx + 1, by + 1).0, [128, 128, 128]);
+        }
+    }
+    assert_eq!(rendered, 3);
+}

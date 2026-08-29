@@ -261,6 +261,108 @@ pub fn base_hint(file_name: &str) -> &str {
     stem.split_once('_').map_or(stem, |(b, _)| b)
 }
 
+/// Where one member's thumbnail lands inside a montage: `(x, y, w, h)`.
+pub type MontageCell = (u32, u32, u32, u32);
+
+/// Grid placement for a side-by-side montage of `sizes` (each member's
+/// `(width, height)` in pixels).
+///
+/// The 2026-05-14 dHash revert set the ship policy for acting on ANY dHash
+/// result: build side-by-side montages and get sign-off entry by entry
+/// (`benchmarks/dhash_threshold_revert_2026-05-14.md`). Issue #33's
+/// validation step 2 is that same eyeball pass at d ≤ 3, so the montage is
+/// an instrument the tool owes the reviewer, not a nicety.
+///
+/// Every member is scaled to FIT its `cell`×`cell` box (aspect preserved,
+/// never upscaled past the cell) and centred in it, so a 512² variant and a
+/// 1022×818 variant of one source line up at comparable visual size —
+/// which is exactly the judgement "is this the same content?" needs.
+pub struct MontageLayout {
+    /// Side of one square cell, in pixels.
+    pub cell: u32,
+    pub cols: u32,
+    pub rows: u32,
+    pub width: u32,
+    pub height: u32,
+    /// Per member, in input order.
+    pub cells: Vec<MontageCell>,
+}
+
+/// Compute [`MontageLayout`] for `sizes` at `cell` px per member, wrapping
+/// after `max_cols`. A zero-dimension member is placed as a 1×1 dot rather
+/// than being dropped, so the montage's member count always matches the
+/// cluster's.
+pub fn montage_layout(sizes: &[(u32, u32)], cell: u32, max_cols: u32) -> MontageLayout {
+    let cell = cell.max(1);
+    let max_cols = max_cols.max(1);
+    let n = sizes.len() as u32;
+    let cols = n.min(max_cols).max(1);
+    let rows = n.div_ceil(cols).max(1);
+    let cells = sizes
+        .iter()
+        .enumerate()
+        .map(|(i, &(w, h))| {
+            let col = (i as u32) % cols;
+            let row = (i as u32) / cols;
+            let (tw, th) = if w == 0 || h == 0 {
+                (1, 1)
+            } else {
+                // Scale to fit; never enlarge (an upscaled thumbnail invents
+                // detail the reviewer would be judging).
+                let s = (f64::from(cell) / f64::from(w)).min(f64::from(cell) / f64::from(h));
+                let s = s.min(1.0);
+                (
+                    ((f64::from(w) * s).round() as u32).max(1),
+                    ((f64::from(h) * s).round() as u32).max(1),
+                )
+            };
+            (
+                col * cell + (cell - tw.min(cell)) / 2,
+                row * cell + (cell - th.min(cell)) / 2,
+                tw.min(cell),
+                th.min(cell),
+            )
+        })
+        .collect();
+    MontageLayout {
+        cell,
+        cols,
+        rows,
+        width: cols * cell,
+        height: rows * cell,
+        cells,
+    }
+}
+
+/// Render `images` into one side-by-side montage per [`montage_layout`].
+///
+/// The background is mid-grey (128) so that both white screen-content and
+/// black letterboxing stay visible against it — the flat-region content
+/// that made dHash false-positive at loose thresholds is precisely what a
+/// white background would hide.
+pub fn render_montage(images: &[DynamicImage], cell: u32, max_cols: u32) -> image::RgbImage {
+    let sizes: Vec<(u32, u32)> = images.iter().map(|im| (im.width(), im.height())).collect();
+    let layout = montage_layout(&sizes, cell, max_cols);
+    let mut out = image::RgbImage::from_pixel(
+        layout.width.max(1),
+        layout.height.max(1),
+        image::Rgb([128u8, 128, 128]),
+    );
+    for (im, &(x, y, w, h)) in images.iter().zip(layout.cells.iter()) {
+        if im.width() == 0 || im.height() == 0 {
+            continue;
+        }
+        let thumb = image::imageops::resize(
+            &im.to_rgb8(),
+            w.max(1),
+            h.max(1),
+            image::imageops::FilterType::Lanczos3,
+        );
+        image::imageops::overlay(&mut out, &thumb, i64::from(x), i64::from(y));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,5 +553,65 @@ mod tests {
             let d = hamming(h_base, dhash_64(&render(seed, 256, 256)));
             assert!(d > 10, "seed {seed}: different content only d={d} away");
         }
+    }
+
+    #[test]
+    fn montage_layout_fits_centres_and_never_upscales() {
+        // Three variants of one source at different sizes + a tiny one.
+        let sizes = [(512u32, 512u32), (1022, 818), (100, 50), (64, 64)];
+        let l = montage_layout(&sizes, 192, 3);
+        assert_eq!((l.cols, l.rows), (3, 2));
+        assert_eq!((l.width, l.height), (576, 384));
+        assert_eq!(l.cells.len(), 4);
+        // Square 512 -> exactly the cell, at the cell origin.
+        assert_eq!(l.cells[0], (0, 0, 192, 192));
+        // 1022x818 -> fit by WIDTH, centred vertically, in column 1.
+        // 818 * (192/1022) = 153.67 -> 154, leaving (192-154)/2 = 19 above.
+        assert_eq!(l.cells[1], (192, 19, 192, 154));
+        // 100x50 is SMALLER than the cell: never upscaled, still centred.
+        let (x2, y2, w2, h2) = l.cells[2];
+        assert_eq!((w2, h2), (100, 50));
+        assert_eq!((x2, y2), (2 * 192 + 46, 71));
+        // Wraps to row 1.
+        // column 0 of row 1: x = (192-64)/2 = 64, y = 192 + 64.
+        assert_eq!(l.cells[3], (64, 256, 64, 64));
+    }
+
+    #[test]
+    fn montage_layout_handles_degenerate_input() {
+        let empty = montage_layout(&[], 128, 4);
+        assert_eq!((empty.cols, empty.rows), (1, 1));
+        assert!(empty.cells.is_empty());
+        // A zero-dimension member is placed, not dropped: the montage's
+        // member count must match the cluster's or the reviewer signs off
+        // on a set they did not see.
+        let z = montage_layout(&[(0, 0), (10, 10)], 64, 4);
+        assert_eq!(z.cells.len(), 2);
+        assert_eq!(z.cells[0].2, 1);
+    }
+
+    #[test]
+    fn render_montage_places_each_member_in_its_own_cell() {
+        // Three flat images of distinct colours, each exactly one cell.
+        let mk = |c: [u8; 3]| {
+            DynamicImage::ImageRgb8(image::RgbImage::from_pixel(64, 64, image::Rgb(c)))
+        };
+        let imgs = [mk([255, 0, 0]), mk([0, 255, 0]), mk([0, 0, 255])];
+        let m = render_montage(&imgs, 64, 3);
+        assert_eq!((m.width(), m.height()), (192, 64));
+        assert_eq!(m.get_pixel(32, 32).0, [255, 0, 0]);
+        assert_eq!(m.get_pixel(96, 32).0, [0, 255, 0]);
+        assert_eq!(m.get_pixel(160, 32).0, [0, 0, 255]);
+
+        // A member SMALLER than the cell leaves the mid-grey background
+        // visible around it -- flat white screen content must not vanish.
+        let small = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            16,
+            16,
+            image::Rgb([255, 255, 255]),
+        ));
+        let m2 = render_montage(&[small], 64, 3);
+        assert_eq!(m2.get_pixel(32, 32).0, [255, 255, 255]);
+        assert_eq!(m2.get_pixel(2, 2).0, [128, 128, 128]);
     }
 }

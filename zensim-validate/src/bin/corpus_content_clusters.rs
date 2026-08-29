@@ -50,7 +50,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use zensim_validate::content_clusters::{
     Split, base_hint, canonical_members, cluster_by_hamming, cluster_sizes, content_weights,
-    dhash_64, reweight_groups, stratified_split,
+    dhash_64, hamming, render_montage, reweight_groups, stratified_split,
 };
 
 #[derive(Parser, Debug)]
@@ -100,6 +100,76 @@ struct Args {
     /// Option 4: write `train.csv` / `val.csv` here.
     #[arg(long, requires = "training_csv")]
     split_dir: Option<PathBuf>,
+
+    /// Validation step 2: write side-by-side montages + `index.html` here
+    /// for the EYEBALL pass. The 2026-05-14 revert made montage review the
+    /// standing precondition for acting on any dHash result; without this
+    /// the reviewer has only file names to judge by.
+    #[arg(long)]
+    montage_dir: Option<PathBuf>,
+
+    /// Montage cell size in pixels (each member is scaled to fit).
+    #[arg(long, default_value_t = 192)]
+    montage_cell: u32,
+
+    /// Members per montage row.
+    #[arg(long, default_value_t = 6)]
+    montage_cols: u32,
+
+    /// Cap on montages written (review-flagged clusters first).
+    #[arg(long, default_value_t = 60)]
+    montage_max: usize,
+
+    /// Render every multi-member cluster, not just the review-flagged ones.
+    #[arg(long)]
+    montage_all: bool,
+}
+
+/// One rendered montage plus the facts the reviewer signs off against.
+struct MontageEntry {
+    file: String,
+    title: String,
+    flag: &'static str,
+    members: Vec<usize>,
+    max_dist: u32,
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Render one montage PNG from member indices; returns the max pairwise
+/// Hamming distance inside the group (the number that says how far the
+/// linkage chain stretched).
+fn write_montage(
+    dir: &Path,
+    file: &str,
+    members: &[usize],
+    hashed: &[Hashed],
+    cell: u32,
+    cols: u32,
+) -> Result<u32> {
+    let mut images = Vec::with_capacity(members.len());
+    for &i in members {
+        let img = image::open(&hashed[i].path)
+            .with_context(|| format!("re-open {}", hashed[i].path.display()))?;
+        images.push(img);
+    }
+    let montage = render_montage(&images, cell, cols);
+    let path = dir.join(file);
+    montage
+        .save(&path)
+        .with_context(|| format!("write {}", path.display()))?;
+    let mut max_dist = 0u32;
+    for (a, &i) in members.iter().enumerate() {
+        for &j in &members[a + 1..] {
+            max_dist = max_dist.max(hamming(hashed[i].hash, hashed[j].hash));
+        }
+    }
+    Ok(max_dist)
 }
 
 fn is_image(p: &Path) -> bool {
@@ -362,6 +432,140 @@ fn main() -> Result<()> {
     }
     for h in split_hints.iter().take(20) {
         eprintln!("  hint {h}: clusters {:?}", clusters_per_hint[h]);
+    }
+
+    // 5b. Validation step 2 (the EYEBALL pass) instrument. The 2026-05-14
+    // revert's ship policy is "build side-by-side montages, sign off entry
+    // by entry" — file names alone are what produced the 149-basename
+    // false-positive blocklist. Both halves of the naming-agreement report
+    // get a montage: clusters the hash JOINED across base hints, and base
+    // hints the hash SPLIT across clusters.
+    if let Some(dir) = &args.montage_dir {
+        std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+        let flagged: BTreeSet<usize> = multi_hint.iter().copied().collect();
+        let mut order: Vec<usize> = multi_hint.clone();
+        if args.montage_all {
+            let mut rest: Vec<usize> = (0..sizes.len())
+                .filter(|c| sizes[*c] >= 2 && !flagged.contains(c))
+                .collect();
+            rest.sort_by_key(|&c| (std::cmp::Reverse(sizes[c]), c));
+            order.extend(rest);
+        }
+        let mut entries: Vec<MontageEntry> = Vec::new();
+        for &c in order.iter().take(args.montage_max) {
+            let members: Vec<usize> = (0..ids.len()).filter(|&i| ids[i] == c).collect();
+            let is_flagged = flagged.contains(&c);
+            let file = format!(
+                "cluster_{c:05}_n{}{}.png",
+                members.len(),
+                if is_flagged { "_multihint" } else { "" }
+            );
+            let max_dist = write_montage(
+                dir,
+                &file,
+                &members,
+                &hashed,
+                args.montage_cell,
+                args.montage_cols,
+            )?;
+            entries.push(MontageEntry {
+                file,
+                title: format!("cluster {c} — {} members", members.len()),
+                flag: if is_flagged {
+                    "SPANS &gt;1 BASE HINT — cross-source duplicate, or the flat-content false positive the 2026-05-14 revert is about"
+                } else {
+                    ""
+                },
+                members,
+                max_dist,
+            });
+        }
+        for h in split_hints.iter().take(args.montage_max) {
+            let members: Vec<usize> = (0..names.len())
+                .filter(|&i| base_hint(&names[i]) == *h)
+                .collect();
+            let file = format!("hint_{h}.png");
+            let max_dist = write_montage(
+                dir,
+                &file,
+                &members,
+                &hashed,
+                args.montage_cell,
+                args.montage_cols,
+            )?;
+            entries.push(MontageEntry {
+                file,
+                title: format!("base hint {h} — {} members", members.len()),
+                flag: "SPREAD OVER &gt;1 CLUSTER — variants the hash did NOT join (crop, or a naming collision)",
+                members,
+                max_dist,
+            });
+        }
+
+        let index = dir.join("index.html");
+        let mut w = BufWriter::new(
+            File::create(&index).with_context(|| format!("create {}", index.display()))?,
+        );
+        writeln!(
+            w,
+            "<!doctype html><meta charset=\"utf-8\"><title>content clusters — eyeball pass</title>\
+             <style>body{{font:14px/1.45 system-ui,sans-serif;margin:2rem;max-width:80rem}}\
+             img{{max-width:100%;image-rendering:auto;border:1px solid #8888}}\
+             table{{border-collapse:collapse;margin:.4rem 0}}td,th{{padding:.15rem .5rem;text-align:left;\
+             border-bottom:1px solid #8883;font-variant-numeric:tabular-nums}}\
+             .flag{{color:#b40;font-weight:600}}section{{margin:2rem 0;padding-top:1rem;border-top:2px solid #8884}}</style>"
+        )?;
+        writeln!(
+            w,
+            "<h1>Within-corpus content clusters — eyeball pass (issue #33)</h1>\
+             <p>d &le; {}, {} files, {} clusters. Every montage below is a group this run \
+             proposes to treat as ONE content. Sign off entry by entry; a group that is NOT \
+             one content is a false positive and must be excluded before any reweight/cull \
+             is applied (2026-05-14 revert policy).</p>",
+            args.max_dist,
+            hashed.len(),
+            sizes.len()
+        )?;
+        for e in &entries {
+            writeln!(
+                w,
+                "<section><h2>{}</h2>{}<p><img src=\"{}\" alt=\"{}\"></p>\
+                 <p>max pairwise dHash distance inside the group: <b>{}</b></p>\
+                 <table><tr><th>#</th><th>file</th><th>dhash</th><th>pixels</th>\
+                 <th>cluster</th><th>canonical</th><th>split</th></tr>",
+                html_escape(&e.title),
+                if e.flag.is_empty() {
+                    String::new()
+                } else {
+                    format!("<p class=\"flag\">{}</p>", e.flag)
+                },
+                html_escape(&e.file),
+                html_escape(&e.title),
+                e.max_dist
+            )?;
+            for (n, &i) in e.members.iter().enumerate() {
+                writeln!(
+                    w,
+                    "<tr><td>{}</td><td>{}</td><td>{:016x}</td><td>{}</td><td>{}</td>\
+                     <td>{}</td><td>{}</td></tr>",
+                    n,
+                    html_escape(&names[i]),
+                    hashed[i].hash,
+                    hashed[i].pixels,
+                    ids[i],
+                    if canonical[i] { "yes" } else { "" },
+                    split[i].as_str()
+                )?;
+            }
+            writeln!(w, "</table></section>")?;
+        }
+        w.flush()?;
+        eprintln!(
+            "=== montages: {} written to {} (open {}) ===",
+            entries.len(),
+            dir.display(),
+            index.display()
+        );
     }
 
     // 6. CSV-derived outputs.
