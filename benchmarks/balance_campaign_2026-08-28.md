@@ -2079,3 +2079,40 @@ What remains is exactly the registered R3 hard path: NEW HDR training data
 (hdr_v3mix is the only leg; avif-HDR datagen is user-gated) + recipe-level
 search under the transfer gate + the 944-route/PU-route question. BHdr
 stays the HDR default on merit.
+
+## DID WE ERR DROPPING THE v1 IW/MASKED/PEAKS BLOCK FROM SCORING? (user question, 2026-08-29 — measured: PARTLY YES, on exactly one axis, and the "two models anyway" point is architecturally correct)
+
+**What the record shows the drop was for** (720 feature-gap audit): NOT
+diffmap zealotry alone — (a) the iw subfamily is structurally redundant on
+basic+peaks (median R² 0.998, 71/72 ≥ 0.99; 0.97–1.49% of L0 mass in every
+bake); (b) the measured A/B: 504-config (drop f156–371, add v2-348) BEAT
+full-372 v1 nearly everywhere incl. KonJND +0.182 at that era; (c) keeping
+it AND adding v2 (full-720) OVERFIT the small FR corpora (CSIQ −0.131,
+LIVE −0.160); (d) the fold can never express its non-additive poolings.
+
+**What is nonetheless true today (new measurements, `bake_contrib
+--ablate-range 156..372` — joint exact block ablation, owner extended):**
+- **The block is HALF of shipped B**: ablating it costs B cid22 −0.487,
+  kadid-select −0.306, kon-504 −0.221, hfnl-valbucket −0.182. B without the
+  block (kon 0.373) falls BELOW the 944 models — so v2 did replace much of
+  the signal for models trained with it.
+- **But not all of it on the near-threshold axis**: every 944 model trails
+  full-B on kon-504 by ≥0.09 (CI), and B's kon mass is 48.6% block-borne.
+  The 720-era "+0.182 kon" A/B result did NOT survive to the 944 era. The
+  carriers, named (mean|Δ| on kon-504): **masked f237/f231/f243 > peaks
+  f190/f226/f178/f196 > iw f333/f303/f321** — the "iwssim" label is a
+  misnomer for what matters; masked+peaks dominate.
+- **The "two models anyway" point stands**: the foldability constraint only
+  ever needed to bind the MAP model. Since the scorer/map split (anchor-
+  amber; the profile pairs), a SCORING regime never needed to give up
+  non-foldable features. The remaining honest constraint is STREAMING
+  (non-additive poolings need the buffered path), which is an opt-in cost,
+  not a law.
+
+**Registered consequence — R2's kon mechanism (b) is now concrete:** revive
+the named carriers as an APPEND block (f944+, append-only discipline;
+scoring-only regime, buffered path, fold-exempt because the map model is
+separate). Gate unchanged: kon-504 ≥ 0.55 holding cid22 ≥ 0.885. This is
+extractor work (the v1 masked/peaks/iw kernels exist; wire an appendix into
+the extended path) + a retrain — the highest-evidence kon-closure lever on
+the table.

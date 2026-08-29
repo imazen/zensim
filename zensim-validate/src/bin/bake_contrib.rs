@@ -240,6 +240,38 @@ fn ablate_row(layers: &[OwnedLayer], heads: &Heads<'_>, model: &Model, row: &[f6
     }
 }
 
+/// Block ablation: score with every standardized input in [lo, hi) removed at
+/// once (z0 − Σ_k x̃_k·W0[k,:], exact re-forward — same machinery as the
+/// per-input rank-1 update in `ablate_row`).
+fn block_ablated_score(
+    layers: &[OwnedLayer],
+    heads: &Heads<'_>,
+    model: &Model,
+    row: &[f64],
+    lo: usize,
+    hi: usize,
+) -> f64 {
+    let n = layers[0].in_dim;
+    let out = layers[0].out_dim;
+    let mut xt = vec![0.0f32; n];
+    transform_standardize(model, row, &mut xt);
+    let mut z0 = vec![0.0f32; out];
+    layer0_preact(&layers[0], &xt, &mut z0);
+    for (k, &x) in xt.iter().enumerate().take(hi.min(n)).skip(lo) {
+        if x == 0.0 {
+            continue;
+        }
+        let wrow = &layers[0].w[k * out..(k + 1) * out];
+        for j in 0..out {
+            z0[j] -= x * wrow[j];
+        }
+    }
+    let mut h = Vec::with_capacity(out.max(8));
+    let mut o = Vec::with_capacity(out.max(8));
+    forward_from_z0(layers, &z0, &mut h, &mut o);
+    score_from_network_output(&o, heads.psa, heads.hybrid, heads.pin, heads.spline)
+}
+
 /// Feature-family label per the registered aggregation keys (§C.3).
 fn family_of(idx: usize, n_inputs: usize) -> &'static str {
     match n_inputs {
@@ -318,6 +350,11 @@ fn main() -> ExitCode {
     let mut dump_scores: Option<PathBuf> = None;
     let mut summary_path: Option<PathBuf> = None;
     let mut live_mask: Option<PathBuf> = None;
+    // Joint block ablation (2026-08-29): zero the STANDARDIZED inputs in
+    // [LO, HI) simultaneously — the rank-|K| analog of the per-input rank-1
+    // update, exact for any depth. Reported as a per-corpus SROCC pair
+    // (baseline vs block-ablated) and an extra dump-scores column.
+    let mut ablate_range: Option<(usize, usize)> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -331,6 +368,16 @@ fn main() -> ExitCode {
             "--dump-scores" => dump_scores = Some(args.next().expect("--dump-scores PATH").into()),
             "--summary" => summary_path = Some(args.next().expect("--summary PATH").into()),
             "--live-mask" => live_mask = Some(args.next().expect("--live-mask PATH").into()),
+            "--ablate-range" => {
+                let spec = args.next().expect("--ablate-range LO..HI");
+                let (lo, hi) = spec
+                    .split_once("..")
+                    .expect("--ablate-range LO..HI (half-open, e.g. 156..372)");
+                ablate_range = Some((
+                    lo.parse::<usize>().expect("LO usize"),
+                    hi.parse::<usize>().expect("HI usize"),
+                ));
+            }
             "--corpus" => {
                 let spec = args.next().expect("--corpus name:path:target:scale");
                 let parts: Vec<&str> = spec.split(':').collect();
@@ -507,6 +554,7 @@ fn main() -> ExitCode {
         deltas.push(Vec::with_capacity(total_rows));
     }
     let mut baselines: Vec<Vec<f64>> = Vec::new(); // per corpus
+    let mut block_abl: Vec<Vec<f64>> = Vec::new(); // per corpus (--ablate-range)
     let mut xt_sum = vec![0.0f64; n_inputs];
     let mut xt_sumsq = vec![0.0f64; n_inputs];
     let mut xt_nonzero = vec![0usize; n_inputs];
@@ -554,6 +602,14 @@ fn main() -> ExitCode {
             }
         }
         baselines.push(base);
+        if let Some((lo, hi)) = ablate_range {
+            let abl: Vec<f64> = c
+                .rows
+                .par_iter()
+                .map(|row| block_ablated_score(&layers, &heads, &model, row, lo, hi))
+                .collect();
+            block_abl.push(abl);
+        }
     }
 
     // ---- per-input aggregates -----------------------------------------
@@ -744,6 +800,25 @@ fn main() -> ExitCode {
             },
             Err(e) => {
                 let _ = writeln!(packed_report, "packed twin read failed: {e}");
+            }
+        }
+    }
+
+    // ---- joint block-ablation report -----------------------------------
+    if let Some((lo, hi)) = ablate_range {
+        println!("block-ablation [{lo}..{hi}) — baseline vs ablated SROCC per corpus:");
+        for (ci, c) in data.iter().enumerate() {
+            if let Some(t) = c.targets.as_ref() {
+                let b = spearman(&baselines[ci], t).abs();
+                let a = spearman(&block_abl[ci], t).abs();
+                println!(
+                    "  {:12} n={:6}  baseline {:.4}  ablated {:.4}  delta {:+.4}",
+                    c.name,
+                    t.len(),
+                    b,
+                    a,
+                    a - b
+                );
             }
         }
     }
