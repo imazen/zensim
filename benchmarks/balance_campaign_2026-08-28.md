@@ -1359,3 +1359,58 @@ Candidates + head npzs preserved in `bakes/wlin-2026-08-29/` (shas
 in-log). No ship/default claim — B remains shipped; wlin2_a0.6 is the
 era's best linear artifact and a live candidate once the kon/HF axes
 close.
+
+## COMPOSITE-SCORE AUDIT (2026-08-29, user directive: "gate composite score matters too, lmk its flaws — B and its competitors")
+
+**The composite now joins the W-LIN gates** (composite-vs-B, full-coverage
+product_composite). The audit of the metric itself, each flaw pinned to
+evidence:
+
+1. **TWO formulas share the name.** Rust `product_composite` = a
+   weight-NORMALIZED mean over {cid22 1.0, imazen26 0.5, nonphoto 0.3,
+   konjnd 0.2, aic3 0.1, aic4 0.05}; the board's fallback `_composite`
+   (used for any row without the stored value) = an UN-normalized sum
+   WITHOUT the imazen26 term. One sortable column silently mixes two
+   quantities (the stats-eval review's "2 composites" finding, now pinned
+   to the exact code sites).
+2. **Coverage renormalization makes composites incomparable.** A bake
+   verdicted on fewer corpora renormalizes the denominator — same name,
+   different quantity. (This audit's own wlin rescores needed the full
+   6-corpus set to be comparable at all.)
+3. **Polarity-blind terms.** `term()` reads plain `r.srocc` — JND
+   corpora ride the |SROCC| convention, and any future orientation drift
+   on an included corpus ADDS positively (the KADID-inversion incident
+   class; kadid/tid are excluded, so current exposure is latent, not
+   live).
+4. **Held-out and trainable-toward axes are summed together.** cid22
+   (sacred human holdout) + imazen26/nonphoto (ssim2-anchored,
+   training-adjacent): a model can buy composite on trainable axes; the
+   scalar hides WHICH kind of skill it holds.
+5. **No HF-NL term — the documented product weak zone is invisible.**
+   Showcase: incumbent 0.8602 vs A 0.8645 — 0.004 apart on composite
+   while A leads validate-hfnl by +0.365 and the incumbent carries 228
+   identity violations and a non-monotone native-distance jxl dial.
+6. **Rank-only.** No dial/calibration, mono, map-coherence, or screen
+   term — every dial gate this campaign built is outside the scalar.
+7. **Hand-set weights, no provenance, no CI weighting.** 1.0/0.5/0.3/
+   0.2/0.1/0.05 have no registered derivation; a 300-pair aic4 term and
+   the 4,292-pair cid22 term carry weight ratios unrelated to their
+   noise.
+
+**The ranking under the flaws (product_composite, full coverage):**
+
+| model | composite | what the scalar hides |
+|---|---|---|
+| north-anchor (A) | **0.8645** | UNDER-reads it: dial/identity/hfnl superiority invisible |
+| clear-ember (e050) | 0.8616 | ranks ≈A while failing tid-LF + eligibility — composite is eligibility-blind |
+| gray-tower (incumbent) | 0.8602 | THE flaw showcase (see #5) |
+| **shipped B (harbor-line)** | 0.8487 | under-reads B's dial + KonJND 0.519 + HF-NL 0.503 (0.2/0-weighted); over-rewards its challengers' trainable axes |
+| wlin2_a0.6 (arm-2 blend) | 0.7830 | correctly shows the KonJND/aic gaps; hides that it BEATS B on imazen26 (+0.043) at 2.6 KB |
+
+**Registered proposal (composite-v2, adoption user-gated):** fixed
+corpus set (absent ⇒ NOT COMPARABLE, never renormalized), signed
+orientation-audited terms, split into TWO reported scalars (held-out
+human composite | trainable-anchor composite), + an HF-NL term and a
+dial-calibration term; weights derived and provenance-tagged like the
+G-GRAN v2 bars. Until adopted, every composite citation should name the
+formula and coverage.
