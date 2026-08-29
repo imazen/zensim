@@ -1482,3 +1482,47 @@ must run on EQUAL gates (the W-LIN table now carries B's fail rows, not
 just its wins); (2) any future default flip decision should weigh that
 the bar "pass what B passes" is much lower than the bar challengers have
 been held to.
+
+## REGISTRATION — B FULL REMEASURE + W-LIN ROUND 6 (kon/hfnl lane) + R6-M MLP probe (2026-08-29, user directive: "remeasure b in full and try to get our new candidates hfnl and konjnd better")
+
+**Correction first:** the B-battery table above says "no jxl curve in its
+fulleval — not measured". WRONG — `dial.curves` has all four codecs
+(avif/jpeg/jxl/webp); the earlier read walked the wrong key. The remeasure
+below re-derives every dial verdict from the fresh JSON.
+
+**Candidate baselines (board, pre-round):** the kon/hfnl-weak candidates are
+the LINEARS — wlin4_a0.5 kon 0.206 / hfnl 0.084 vs B 0.519/0.503. The MLP
+candidates already beat B on hfnl (north-anchor 0.752, amber 0.721) and sit
+near kon parity (0.501 / 0.456 vs 0.519).
+
+**B remeasure protocol:** `scripts/run_full_eval.sh <B bake> b_sdr_… 372`
+with `ZENSIM_M3_REUSE=1` (M3a photo re-measured this session = stored value
+to 4 dp; screen M3a 0.543 recorded in doc+registry — the fulleval schema has
+no screen slot yet). Old JSON preserved as `.pre-remeasure-2026-08-29.bak`.
+Fresh JSON ⇒ hfnlproxy per_pair lands (G-OUT can gate that axis), signed
+sroccs + merged-decile bands + current corruption block from today's owners.
+Then G-OUT v2 + G-GRAN v1 re-run off the fresh JSON; board regen.
+
+**W-LIN round 6 arms (fit AFTER this registration):**
+- **R6-K** kon-head refit = round-5 kon recipe (safesyn/cid22t/kadid/tid/
+  hdrmix, BVLS shaped) **+ konbpg leg** (8,060 rows, the JND-threshold BPG
+  encodes) at weight w ∈ {1.0, 2.0}. Report head-alone kon/hfnl; blend with
+  head_cid at α ∈ {0.4, 0.5, 0.6}.
+- **R6-H** sparse hf head: fit-lasso on l944_hf (11,941 rows, human_score),
+  lam ∈ {1e-3, 3e-3} (sparse-additive is the measured hfnl-axis winner class,
+  appendix O: 0.70–0.85 vs mid-MLP ~0.09). 3-way blend γ ∈ {0.1, 0.2} via a
+  second blend-heads pass over the best R6-K blend.
+- **Frozen bars (PASS):** kon ≥ 0.40 AND hfnl ≥ 0.40 AND cid22 ≥ 0.845 AND
+  nonphoto ≥ 0.865 AND imazen26 ≥ 0.875 (hold wlin4's north-star wins within
+  0.005/0.006). STRETCH: kon ≥ 0.45 AND hfnl ≥ 0.45. FALSIFIER: if no cell
+  reaches kon 0.40 at cid22 ≥ 0.845, the folded-944 near-threshold cap is
+  CONFIRMED for linears ⇒ registered outcome = pair-of-profiles shape (wlin
+  RD-lane + B JND-lane) or the 372-front cross-regime design.
+- Eval = bake_verdict --regime 944, corpora cid22,nonphoto,imazen26,konjnd,
+  aic3,aic4,hfnlproxy (the round-5 instrument, unchanged).
+
+**R6-M (MLP kon probe, background, k=1):** north-anchor recipe + konbpg
+training leg (the W7 lever: kon 0.456–0.459 on the EM4 family, cid22 cost
+certified THERE — untested on the PH line). Bars: kon ≥ 0.52 AND cid22 ≥
+0.885 AND hfnl ≥ 0.70 (dominate B on every rank axis at once). One seed;
+scale only if the probe passes.
