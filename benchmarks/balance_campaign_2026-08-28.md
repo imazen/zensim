@@ -1297,3 +1297,39 @@ two-zone paired CIs vs B (cid22 + validate-hfnl not-worse), the B-lane
 north stars (nonphoto/imazen26 + KonJND not-worse vs B), G-OUT v2,
 G-GRAN v1, packed size ≤ 12 KB, dial mono; M3a photo+screen REPORTED
 (constant-gradient maps). Ship/default flip stays USER-GATED.
+
+### W-LIN ROUND 1 (raw space) — north stars beaten at 7KB; cid22/HF short; two era-findings falsified (2026-08-29 ~14:4xZ)
+
+Full-mix raw-944 lasso (6.6-7.1 KB, 48-194 active features):
+**imazen26 0.904 / nonphoto 0.895 — BOTH ABOVE B (0.831/0.864)** at
+cid22 0.755 (B 0.882), |KonJND| 0.23 (B 0.519), hfnl 0.02-0.16 (B 0.503).
+Falsified in-round: (1) the 372-era "bigcodec poisons linear CID22"
+finding does NOT transfer to 944 (dropping tbig/ttbig made EVERYTHING
+worse — cid22 0.646-0.686, imazen26 collapsed to 0.62-0.73); (2) heavy HF
+upweighting (hf 2.5) is catastrophic (cid22 0.449). The full recipe mix
+is the right mix for linear too. Remaining registered lever: SHAPED space
+with north-anchor's own trained 944 transforms (winsor/signed_cbrt fit on
+this exact mix; the raw heavy-tail features are exactly what linear
+capacity cannot absorb) — screen extracted from the frozen bake, shaped
+grams rebuilding.
+
+### W-LIN ROUND 2 (shaped) + interim verdict (2026-08-29 ~14:5xZ)
+
+Shaped space (north-anchor's trained 944 transforms) ≈ raw: cid22 0.756
+(vs raw 0.755), imazen26 0.899 — **shaping does not close the human-axis
+gap**. The pattern is architectural, not mix or shaping: B itself is a
+BVLS MULTI-HEAD linear (the v02_bvls lineage measured 0.824 cid22 +
+0.594 KonJND at 372), not a single global projection; a single-head 944
+lasso tops out ~0.75 cid22 on this mix at every λ and both spaces.
+
+**Interim W-LIN verdict (honest):** the 7 KB single-head linear is
+already a NORTH-STAR winner — imazen26 0.904 / nonphoto 0.895, both
+ABOVE shipped B (0.831/0.864) at half B's size — but NOT a B replacement
+on cid22 (0.755 vs 0.882), KonJND, or HF-NL. **Registered continuation
+(W-LIN arm 2): the BVLS multi-head architecture at 944** — B's own class
+(bounded-variable least squares, multiple heads + the dense-dial
+calibration lineage), the measured 372-era path to 0.82+ cid22 with
+KonJND above B. Candidates so far preserved in
+`/mnt/v/output/zensim/bakes/wlin-2026-08-29/` (shas in-log); the
+imazen26-leading cell (`wlin_raw_lam0.0003`, 7,051 B, 194 features) is a
+potential ssim2-lane SPECIALIST even if the B-replacement needs arm 2.
