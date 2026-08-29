@@ -1637,3 +1637,14 @@ not spline shape. **loupe's saturation fit cannot converge** (non-decaying k)
 — same class. So the pair's reach shortfalls are not repairable by any
 spline pass; the remaining paths are a mono/top-targeted RETRAIN of the RD
 member, or scorer-lane-only roles. Recorded before enthusiasm shipped.
+
+### Two-zone cid22 CIs for B (paired bootstrap, B=5000, seed 11, aligned n=4292; 2026-08-29)
+
+Completes the two-zone zone B never took. ΔSROCC vs fresh-B, medians + 95% CI:
+- **north-anchor +0.0163 [+0.0115, +0.0212] — LEADS B, CI excludes 0** (the
+  first significance-tested cid22 claim for the C candidate vs the default).
+- copper-line −0.0262 [−0.0333, −0.0193] — B leads.
+- jeweler-loupe −0.0682 [−0.0787, −0.0590] — B leads (band specialist, expected).
+- v-hfnl zone: **NOT COMPARABLE cross-regime** — B's hfnl slice is the
+  372-root (n 11,356), candidates' is the 944 TEST views (n 7,717); different
+  pair populations, no row alignment. Stated, not skipped.
