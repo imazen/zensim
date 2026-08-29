@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ONE parameterized cross-codec seed-training recipe (issue #41, Tier-1 item 3).
 #
-# Before 2026-08-29 this recipe existed nine times, as
-# run_cross_codec_v{2,3,4,4b,5,6,7,8,9}_seed.sh. The nine bodies shared ~55-70%
+# Before 2026-08-29 this recipe existed eleven times, as
+# run_cross_codec_v{2,3,4,4b,5,6,7,8,9}_seed.sh plus the two v9 follow-ups
+# run_cross_codec_v9_{conservative,mono_recovery}.sh. Those bodies shared ~55-70%
 # of their lines (measured in benchmarks/sweep_training_script_dedup_2026-05-26.md);
 # every one of them repeated the whole trainer invocation so that changing a
 # shared flag meant editing nine files, and the ones you miss keep running
@@ -10,7 +11,7 @@
 #
 # Now: this driver holds the shared body, and each experiment is a config file
 # in cross_codec_variants/<variant>.conf that sets ONLY the knobs it changes
-# (plus its historical rationale header). The nine original entry points remain
+# (plus its historical rationale header). The eleven original entry points remain
 # as thin shims that exec this driver, so every command line quoted in
 # benchmarks/*.md and in run_v9_full_pipeline.sh still works unchanged. That
 # thin-wrapper shape is the same one _picker_lib.py already proved in-repo.
@@ -18,7 +19,8 @@
 # EQUIVALENCE IS GATED, NOT ASSUMED. scripts/v_next/tests/test_cross_codec_seed_argv.sh
 # renders every variant's trainer argv in dry-run mode and diffs it against
 # cross_codec_variants/golden/<variant>.args — goldens captured by executing the
-# nine PRE-consolidation scripts against a stub trainer at commit e9a705c0.
+# eleven PRE-consolidation scripts against a stub trainer (the nine seed drivers
+# at e9a705c0, the two v9 follow-ups at 5f17a99e).
 #
 #   Usage:  run_cross_codec_seed.sh <variant> <seed> [variant-specific args...]
 #           run_cross_codec_v6_seed.sh <seed> <anchor_w> <anchor_p>   # via shim
@@ -33,9 +35,11 @@
 #   Two deliberate (documented) behavior supersets vs the pre-consolidation
 #   scripts, neither reachable without opting in:
 #     * KBATCH / LR_OVERRIDE are now honored for every variant. v2/v3/v4/v4b
-#       hardcoded --minibatch-size 1 and --lr 1e-3; unset env reproduces those
-#       exactly (the golden gate proves it), so only an explicit override differs.
-#     * v9 now prints the same trailing "DONE ..." line the other eight print.
+#       hardcoded --minibatch-size 1 and --lr 1e-3 and the v9 family hardcoded
+#       32 and 5.66e-3; unset env reproduces all of those exactly (the golden
+#       gate proves it), so only an explicit override differs.
+#     * v9 and its two follow-ups now print the same trailing "DONE ..." line
+#       the other eight already printed.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

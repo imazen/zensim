@@ -16,7 +16,7 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 | Build the interactive comparison-site data | [`build_site_data.py`](build_site_data.py) + [`build_scatter_data.py`](build_scatter_data.py) |
 | Export a corpus to parquet for the site | [`export_human_corpora_to_parquet.py`](export_human_corpora_to_parquet.py), `export_aic3_to_parquet.py`, `export_aic4_to_parquet.py` |
 | Verify a baked MLP reproduces a known SROCC | `bake_verdict --bake <bin>` (Rust; ~3.5 s for all corpora). `verify_bake_srocc.py` was deleted 2026-07-15 — its target binary had no source anywhere. |
-| Train a cross-codec seed bake (any generation) | [`run_cross_codec_seed.sh`](run_cross_codec_seed.sh) `<v2\|v3\|v4\|v4b\|v5\|v6\|v7\|v8\|v9> <seed> [args]` — ONE recipe; per-experiment knobs in [`cross_codec_variants/`](cross_codec_variants/README.md). The nine `run_cross_codec_v*_seed.sh` names still work (thin shims). |
+| Train a cross-codec seed bake (any generation) | [`run_cross_codec_seed.sh`](run_cross_codec_seed.sh) `<v2\|v3\|v4\|v4b\|v5\|v6\|v7\|v8\|v9\|v9cons\|v9mono> <seed> [args]` — ONE recipe; per-experiment knobs in [`cross_codec_variants/`](cross_codec_variants/README.md). All eleven historical names still work (thin shims). |
 | Prove the consolidated driver still runs each experiment's exact argv | [`tests/test_cross_codec_seed_argv.sh`](tests/test_cross_codec_seed_argv.sh) — no data, no trainer, no network |
 | Run the cross-codec eval harness for a generation | [`eval_cross_codec.sh`](eval_cross_codec.sh) `<v4\|v4b\|v5\|v6\|v7\|v8>` |
 | Check multi-codec PJND score agreement | [`cross_codec_pjnd_check.py`](cross_codec_pjnd_check.py) `<exp> <dir>` |

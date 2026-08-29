@@ -23,7 +23,7 @@ run_variant() {
         v2 | v3 | v4) echo "7 0.5" ;;
         v4b) echo "7 0.05" ;;
         v6) echo "7 1.0 0.30" ;;
-        v5 | v7 | v8 | v9) echo "7" ;;
+        v5 | v7 | v8 | v9 | v9cons | v9mono) echo "7" ;;
         *)
             echo "no sample args for variant $1" >&2
             exit 2
@@ -34,8 +34,12 @@ run_variant() {
 fails=0
 checked=0
 
-for variant in v2 v3 v4 v4b v5 v6 v7 v8 v9; do
-    shim="${VNEXT}/run_cross_codec_${variant}_seed.sh"
+for variant in v2 v3 v4 v4b v5 v6 v7 v8 v9 v9cons v9mono; do
+    case "${variant}" in
+        v9cons) shim="${VNEXT}/run_cross_codec_v9_conservative.sh" ;;
+        v9mono) shim="${VNEXT}/run_cross_codec_v9_mono_recovery.sh" ;;
+        *) shim="${VNEXT}/run_cross_codec_${variant}_seed.sh" ;;
+    esac
     gold="${GOLDEN}/${variant}.args"
 
     if [ ! -x "${shim}" ]; then
@@ -89,4 +93,4 @@ if [ "${fails}" -ne 0 ]; then
     echo "cross-codec argv gate: ${fails} FAILED, ${checked} passed"
     exit 1
 fi
-echo "cross-codec argv gate: ${checked} checks passed (9 variants byte-identical to pre-consolidation argv)"
+echo "cross-codec argv gate: ${checked} checks passed (11 variants byte-identical to pre-consolidation argv)"
