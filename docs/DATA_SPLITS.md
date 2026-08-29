@@ -371,3 +371,23 @@ Every NEW recipe uses the `*_train` views (kadid/tid/kadis/konfig) and must
 pass the checker. Board kadid/tid rank rows migrate to the SELECT views
 (honest generalization for future models; equal-footing memorization reads
 for existing ones — both sides trained on those refs).
+
+### §8.1 TID RETIRED TO TRAIN-ONLY (USER RULING 2026-08-29)
+
+TID2013 is **T2 train-only** effective immediately: all 3,000 rows / 25 refs
+trainable; **no TID eval surface exists** — board tid rows are historical
+guard reads, never ranking signal (the gauntlet legend says so). The
+`ext_tid_{select,terminal}` views built earlier the same day are RETIRED
+UNUSED for eval (files kept; they demonstrated the reasonableness
+measurement). Rationale: 25 refs is too small to fund an honest eval tier
+AND a train share; its distortion mix is ~95% non-compression; ssim2 is
+in-sample on all of it.
+
+### §8.2 REGISTERED DEFECT: `live` targets are NOT rank-identical across roots (found 2026-08-29)
+
+The single-ruler audit's target-identity gate caught it: the 372-root LIVE
+table's `human_score` ordering disagrees with `ext_live`'s (|SROCC| < 1
+between the two target vectors on the same 779 pairs). One of them carries a
+target defect or a different label version. LIVE is EXCLUDED from
+cross-regime comparisons until audited (owner: canonical_corpus; annotate
+any cross-root live citation). Registered in `eval_annotations.json`.

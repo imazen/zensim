@@ -1444,7 +1444,41 @@ function renderTable(){
     +[...state.gateFilter].map(g=>(GATE_DEFS.find(x=>x[0]===g)||[g,g])[1]).join('+')
     +']: '+nGateHidden+' gate-FAILING rows excluded from this list.</b> '
     +'Only measured FAILs are excluded — a not-measured gate (\u00b7) never hides a row.'}):null;
-  wrap.append(el('h2',{text:'Scoreboard'}),cap);if(gf)wrap.append(gf);wrap.append(tbl);
+  // Gates legend (user directive 2026-08-29: "the gauntlet gates are entirely
+  // obscure and not explained in the report"). A visible, plain-language
+  // explainer for BOTH gate systems + the ruler caveats; collapsed by default.
+  const lg=el('details',{class:'cap'});
+  lg.append(el('summary',{html:'<b>How to read the gates + rulers (click to expand)</b>'}));
+  lg.append(el('div',{html:
+    '<p><b>The gates column (✓✗·, order G E D K)</b> — hard PASS/FAIL verdicts from the '
+    +'committed registry (<span class="mono">benchmarks/board_gates_2026-08-28.json</span>) + build-time checks. '
+    +'✓ pass · ✗ fail · · = NOT MEASURED (never treated as fail). Hover a glyph for the specific failing clause + source.</p>'
+    +'<ul>'
+    +'<li><b>G = G-OUT v2</b> (owner <span class="mono">outlier_gate.py</span>): per-corpus outlier discipline of the '
+    +'model’s raw predictions — clause R (outlier ratio), S (p99 chart-z: the 99th-percentile studentized miss vs a '
+    +'peer-calibrated bar), B (max-z blowup), D (declared dial range vs emitted floor). Bars are PEER-derived '
+    +'(calibrated on the flagship population), never model-derived.</li>'
+    +'<li><b>E = eligibility</b>: the frozen two-zone battery — paired bootstrap CIs on cid22 AND validate-hfnl vs both '
+    +'the incumbent and the candidate-of-record (CI must not show a significant loss), + LF-band floors + LF monotonicity. '
+    +'HDR bakes take the HDR-lane freeze battery instead.</li>'
+    +'<li><b>D = G-GRAN v2</b> (REGISTERED, not yet frozen — opt-in filter): peer-anchored two-sided dial calibration at '
+    +'three truth anchors, knob-quantum-aware gap checks, secant attainability.</li>'
+    +'<li><b>K = knob-end</b> (G-GRAN v1 semantics, computed at build): can the dial REACH each codec’s top '
+    +'(bar = incumbent reach − 1: avif 96.2 / jpeg 94.4 / jxl 96.6 / webp 91.9), with HF-zone span ≥ 8 and '
+    +'q-curve monotonicity ≥ 0.93.</li>'
+    +'</ul>'
+    +'<p><b>The "Gate scorecard" table below</b> is a DIFFERENT system: CODEC_TARGET_GOALS soft-gates '
+    +'(continuous 0–1 scores, weighted into a shippability scalar) — diagnostic shading, not pass/fail law.</p>'
+    +'<p><b>Ruler caveats (read before comparing rows):</b> '
+    +'kadid rows are <b>train==eval for every current model</b> (integrity guards, not skill); '
+    +'tid is <b>RETIRED TO TRAIN-ONLY</b> (user ruling 2026-08-29) — do not rank on it; '
+    +'konjnd board rows for 372-class bakes historically scored the full 1,008-ref file while 944 bakes scored the '
+    +'JPEG-504 — same-pair kon reads live in the campaign doc’s single-ruler table; '
+    +'imazen26/nonphoto/hfnlproxy are family slices whose CUT changed 2026-08-28 (validate-family) — all 944 rows '
+    +'now read the same generation, but 372-class bakes read a different (test-family) cut of the same corpus family: '
+    +'direction is comparable, decimals are not. The registered single-ruler comparison (identical pairs, '
+    +'rank-identical targets, paired CIs) is in <span class="mono">benchmarks/balance_campaign_2026-08-28.md</span>.</p>'}));
+  wrap.append(el('h2',{text:'Scoreboard'}),cap,lg);if(gf)wrap.append(gf);wrap.append(tbl);
   return wrap;
 }
 

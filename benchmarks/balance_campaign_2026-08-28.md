@@ -1772,3 +1772,97 @@ in-domain (route dial, hdr944 instruments), not transfer.
 - **HDR: do NOT swap — keep BHdr.** Aurora loses the UPIQ human anchor by
   a wide margin; CHdr stays candidate-of-record and the next HDR lever is
   closing the transfer gap (UPIQ-gated retrain on the 944 HDR route).
+
+## THE SINGLE-RULER REPORT (from the top, 2026-08-29 — user directive: same eval methods, flag test=train, tid train-only, B vs C vs the MLP/linear leaders SDR+HDR, path to improvement)
+
+**Doctrine:** an axis enters this table ONLY if every model reads IDENTICAL
+pairs with RANK-IDENTICAL targets (asserted programmatically from per-pair
+vectors; value-encoding may differ across roots, ordering may not). Paired
+bootstrap B=5000 seed 11 vs shipped B on every axis. Flags: CLEAN =
+content-disjoint from every model's training; FAMILY = same corpus family,
+content-disjoint; **T = train==eval** (all models trained on these refs).
+TID is RETIRED TO TRAIN-ONLY (user ruling, §8.1). LIVE is EXCLUDED (targets
+not rank-identical across roots — registered defect §8.2). Architectures
+verified from the bakes: B/copper/loupe = single-layer linears; C/amber/
+gray-tower/aurora = 2-layer MLPs (944→667/697→128→1).
+
+| axis (flag) | n | B 372-lin | C MLP | amber MLP | gray-tower MLP | copper lin | loupe lin |
+|---|---|---|---|---|---|---|---|
+| cid22 (FAMILY) | 4292 | 0.8764 | **0.8927** ▲ | 0.8735 = | 0.8867 ▲ | 0.8502 ▼ | 0.8080 ▼ |
+| konjnd JPEG-504 (B CLEAN; MLPs FAMILY-bpg) | 504 | **0.5935** | 0.5006 ▼ | 0.4557 ▼ | 0.4988 ▼ | 0.2064 ▼ | 0.4453 ▼ |
+| aic3 (CLEAN) | 600 | 0.7774 | **0.8000** ▲ | 0.7785 = | 0.7968 ▲ | 0.7534 ▼ | 0.7151 ▼ |
+| aic4 (CLEAN) | 300 | 0.8906 | **0.9144** ▲ | 0.9006 ▲ | 0.9019 ▲ | 0.8860 = | 0.8071 ▼ |
+| csiq (CLEAN) | 866 | 0.9342 | 0.9443 = | **0.9533** ▲ | 0.9331 = | 0.9108 ▼ | 0.7531 ▼ |
+| kadid-select (**T for all**) | 3125 | 0.8198 | 0.9082 ▲ | **0.9139** ▲ | 0.9078 ▲ | 0.8394 ▲ | 0.6489 ▼ |
+
+▲/▼ = paired 95% CI vs B excludes 0; = spans 0. Full CIs in
+`~/tmp/samepair_report*.json` (mirrored below in-doc where cited).
+
+**Corrections this table forced:** (1) **B's board kon 0.5466 was DILUTED**
+— its 372 file scores all 1,008 refs (both halves); on the JPEG-504 same
+pairs B reads **0.5935** and leads EVERY challenger with CI excluding 0
+(C −0.0930 [−0.1367,−0.0487]). The kon cost of a B→C swap is real and
+larger than previously stated. New view: `konjnd_jpeg504_372_2026-08-29.parquet`.
+(2) live excluded (§8.2). (3) family axes (imazen26/nonphoto/hfnl) are NOT
+in this table — no cross-regime pair key exists (no distorted-id column in
+any of the tables); they remain direction-only evidence: C 0.93/0.93/0.70 vs
+B 0.86/0.83/0.50 on different cuts of the same family. Closing this gap =
+roadmap item R1.
+
+**HDR head-to-head (same instrument, each model on its OWN regime features —
+the tool built for exactly this):** `upiq_panel.py --compare`, paired
+per-stratum bootstrap, 5000 resamples. BHdr reproduces its recorded 0.7536
+exactly (ruler confirmed).
+
+| | pooled | narwaria | korshunov |
+|---|---|---|---|
+| shipped BHdr (372-PU linear) | **0.7536** | **0.7834** | 0.9175 |
+| aurora / CHdr (944 MLP) | 0.6664 | 0.6434 | 0.9280 |
+| paired Δ (BHdr−aurora) | **+0.0872, p=0.0000** | **+0.1400, p=0.0116** | −0.0105, p=0.96 (ns) |
+
+**Verdicts under the single ruler:**
+- **SDR:** C beats B with CI on cid22/aic3/aic4 (+ the T-flagged kadid) and
+  ties csiq; **B beats every model on konjnd by ≥0.09 (CI)** — and B's kon
+  read is the only CLEAN one (no konjnd data in its recipe). The swap
+  recommendation STANDS but its cost is now precisely priced: −0.093 kon,
+  plus the hidden-panel shift-robustness note, plus 20× bytes.
+- **SDR linear lane (the "replace B with a linear" question):** no current
+  linear beats B under the single ruler — copper loses cid22/kon/aic3/csiq
+  (wins only T-flagged kadid), loupe loses everything broad (it is a
+  specialist). The linears' family-axis wins (nonphoto/imazen26) are
+  direction-only pending R1. The honest linear story: B is still the best
+  all-round linear we have; copper/loupe are lane specialists.
+- **HDR:** keep BHdr; aurora's UPIQ loss is significant. We NEED a better
+  HDR model — path below.
+
+**PATH TO IMPROVEMENT (registered lanes, in priority order):**
+- **R1 — same-pair family axes (unblocks every remaining comparison):**
+  re-extract 372 features for the validate-family slice content (~20.8k
+  encodes; rescore-from-links pattern, fleet-sized) so B and the 944 estate
+  read identical family pairs. Until then family axes stay direction-only.
+- **R2 — kon closure for C (the swap's one cost):** weight levers are
+  exhausted (R6-K, R6-M falsified). Three registered mechanisms: (a) distill
+  B's kon head as a teacher leg (tkon: B-kon predictions over the train
+  estate — cross-regime knowledge without cross-regime features); (b)
+  near-threshold FEATURE work (BANDVIS-GAIN combine, the registered P3/LOO
+  candidate); (c) a kon-companion micro-head at the profile level (pair
+  shape). Gate: kon-JPEG504 ≥ 0.55 holding cid22 ≥ 0.885.
+- **R3 — better HDR (the user's call-out):** (a) freeze a UPIQ-TRANSFER
+  gate into HDR selection (aurora's in-domain wins never checked transfer);
+  (b) BHdr+ refresh — same PU-372 shaped recipe refit with corrected target
+  frames + an HDR near-lossless sparse head (the loupe recipe on the HDR
+  band); (c) the binding constraint is HDR TRAIN DATA: hdr_v3mix is the
+  only leg (7,410 rows / 58 origins, cvvdp-mix teacher) — expand origins +
+  codecs (avif-HDR datagen remains USER-HALTED pending zenavif confirm —
+  that gate must lift first) and mine SI-HDR's weak zone (both models 0.36 —
+  reproduction-error domain is the data gap); (d) a 944-HDR retrain with
+  UPIQ-gated selection. Gate: UPIQ pooled ≥ 0.75 AND korshunov ≥ 0.92 AND
+  the HDR-lane freeze battery.
+- **R4 — linear lane:** (a) global target-frame rebuild for ALL legs (R6
+  proved per-corpus min-max frames poison joint fits — ONE calibrated frame
+  unblocks single-model hf+kon+broad composition); (b) dial-mono supervision
+  for copper (q-ladder rank constraints from the dial grid in the fit); (c)
+  the pair stays scorer-lane fallback.
+- **R5 — policy hygiene:** next-generation recipes on the v2 train views
+  (kadis_train mandatory) + checker green; kadid board rows migrate to the
+  select view (T-flagged until post-v2 models exist); live cross-root audit.
