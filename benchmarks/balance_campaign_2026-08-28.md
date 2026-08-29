@@ -1648,3 +1648,16 @@ Completes the two-zone zone B never took. ΔSROCC vs fresh-B, medians + 95% CI:
 - v-hfnl zone: **NOT COMPARABLE cross-regime** — B's hfnl slice is the
   372-root (n 11,356), candidates' is the 944 TEST views (n 7,717); different
   pair populations, no row alignment. Stated, not skipped.
+
+### R6-M VERDICT — FALSIFIED, direction negative (2026-08-29, k=1 s4004)
+
+Kon-leg weight 1.2 → 2.5 on the exact north-anchor recipe (only variable;
+seed-matched): cid22 0.8769 (−0.016), kon **0.4635 (−0.037 — the target axis
+went DOWN)**, hfnl 0.6926 (−0.060), nonphoto/im26 +0.002/+0.008, composite
+0.8558. All three bars missed. Mechanism: the konjnd_bpg val leg is already
+saturated in-recipe (val srocc 0.9967) — extra mass shifts the model toward
+the BPG train distribution without buying PJND generalization, and costs the
+other axes. **No scale-up; north-anchor's recipe is at its kon optimum in
+this weight family.** Fresh-B's KonJND 0.547 vs north-anchor 0.501 stands as
+the one rank axis the default keeps (cid22 itself is now CI-tested in the
+CANDIDATE's favor). Probe bake kept: `wlin-2026-08-29/R6M_PH_kon25_s4004.bin`.
