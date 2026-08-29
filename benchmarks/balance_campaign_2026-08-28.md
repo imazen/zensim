@@ -1625,3 +1625,15 @@ bake_dial_refit dial pass (extend-top / shared-anchor) that B itself received
 — never applied to any wlin bake; fixes spline-shape reach, NOT mono; (2) a
 mono-targeted refit of copper-line (kon/dial-ordering data in the blend); (3)
 accept scorer-lane-only roles. No ship claim.
+
+### Dial-repair lever (1) MEASURED-FALSIFIED for the pair (2026-08-29)
+
+`bake_dial_refit` gained `signed_cbrt`/`log1p` in the f64 fit-forward (owner
+extended, unit-tested — the shaped-944 class was previously refused). Then:
+**extend-top on copper-line is a NO-OP on its dial curves** (top 87.82
+unchanged, rank identical) — its raw scores on the best grid encodes never
+reach the spline's top region: the top-zone compression is MODEL resolution,
+not spline shape. **loupe's saturation fit cannot converge** (non-decaying k)
+— same class. So the pair's reach shortfalls are not repairable by any
+spline pass; the remaining paths are a mono/top-targeted RETRAIN of the RD
+member, or scorer-lane-only roles. Recorded before enthusiasm shipped.

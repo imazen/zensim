@@ -321,6 +321,11 @@ enum FwOp {
     Identity,
     /// `np.clip(x, lo, hi)` semantics — matches `FeatureTransform::WinsorP99`.
     Winsor(f64, f64),
+    /// `sign(x) * |x|^(1/3)` — matches `FeatureTransform::SignedCbrt` (the
+    /// shaped-944 W-LIN class; added 2026-08-29 so the dial pass covers it).
+    SignedCbrt,
+    /// `ln(1 + x)` — matches `FeatureTransform::Log1p`.
+    Log1p,
 }
 
 impl FwOp {
@@ -337,15 +342,21 @@ impl FwOp {
                     x
                 }
             }
+            FwOp::SignedCbrt => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * x.abs().cbrt()
+            }
+            FwOp::Log1p => x.ln_1p(),
         }
     }
 }
 
 /// Build the per-feature forward ops from the bake's transform metadata.
 /// Absent metadata ⇒ all-identity (the baker omits the entry when every
-/// transform is identity). Only `identity` / `winsor_p99` are supported in
-/// the f64 fit-forward; any other token errors (the yeo-johnson / shaped
-/// HDR path stays in the research Python, per the migration doc).
+/// transform is identity). `identity` / `winsor_p99` / `signed_cbrt` /
+/// `log1p` are supported in the f64 fit-forward (the last two added
+/// 2026-08-29 for the shaped-944 W-LIN class); any other token errors
+/// (the yeo-johnson HDR path stays in the research Python).
 fn build_fw_ops(model: &Model, n: usize) -> Result<Vec<FwOp>, String> {
     let md = model.metadata();
     let Some(t) = md.get(zenpredict::keys::FEATURE_TRANSFORMS) else {
@@ -387,10 +398,12 @@ fn build_fw_ops(model: &Model, n: usize) -> Result<Vec<FwOp>, String> {
                     })?;
                 ops.push(FwOp::Winsor(lo, hi));
             }
+            "signed_cbrt" => ops.push(FwOp::SignedCbrt),
+            "log1p" => ops.push(FwOp::Log1p),
             other => {
                 return Err(format!(
-                    "f64 fit-forward supports identity/winsor_p99 only; feature {i} has {other:?} \
-                     (shaped/HDR bakes stay in the research Python)"
+                    "f64 fit-forward supports identity/winsor_p99/signed_cbrt/log1p; feature {i} \
+                     has {other:?} (yeo-johnson-class HDR bakes stay in the research Python)"
                 ));
             }
         }
@@ -4050,6 +4063,17 @@ mod tests {
         assert_eq!(op.apply(-3.0), -1.0);
         assert_eq!(op.apply(0.5), 0.5);
         assert_eq!(op.apply(9.0), 2.0);
+    }
+
+    #[test]
+    fn signed_cbrt_and_log1p_ops_match_canonical_math() {
+        // sign(x)·|x|^(1/3), matching zenpredict FeatureTransform::SignedCbrt.
+        assert!((FwOp::SignedCbrt.apply(8.0) - 2.0).abs() < 1e-12);
+        assert!((FwOp::SignedCbrt.apply(-8.0) + 2.0).abs() < 1e-12);
+        assert_eq!(FwOp::SignedCbrt.apply(0.0), 0.0);
+        // ln(1+x), matching FeatureTransform::Log1p.
+        assert!((FwOp::Log1p.apply(std::f64::consts::E - 1.0) - 1.0).abs() < 1e-12);
+        assert_eq!(FwOp::Log1p.apply(0.0), 0.0);
     }
 
     /// A 2-layer f32 MLP bake (3→2 leaky-relu, 2→1 identity) with weights
