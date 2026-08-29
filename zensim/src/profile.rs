@@ -1973,10 +1973,13 @@ mod profile_c_tests {
     }
 
     /// The shipped `C` weight file is pinned by sha256 — a silent byte
-    /// swap of `c_sdr_mlp944_corrmix_2026-08-05.bin` fails this test
-    /// loudly. Expected digest = the wave-11 battery's committed
-    /// `W10L9_s4003_packed.bin` (campaign appendix K.R, verdict
-    /// `bake_sha256`, Tower-mirror spot-check — all the same bytes).
+    /// swap of `c_sdr_purity944_2026-08-29.bin` fails this test loudly.
+    /// Expected digest = the committed `W10L9PH_s4004_packed` bytes
+    /// ("north-anchor"), frozen 2026-08-29 by `e9a705c0` and described
+    /// by `zensim/weights/manifests/c_sdr_purity944_2026-08-29.toml`.
+    /// (Before that rotation this pinned `W10L9_s4003_packed` /
+    /// `c_sdr_mlp944_corrmix_2026-08-05.bin`; that bake's manifest
+    /// stays in the same directory for the superseded artifact.)
     #[test]
     fn weight_sha256_pinned() {
         use sha2::{Digest, Sha256};

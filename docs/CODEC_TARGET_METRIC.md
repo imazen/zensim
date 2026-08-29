@@ -4,8 +4,9 @@
 > prose below predates the A→B default flip and the 'three production
 > trails' framing predates A/B. Trust `zensim/src/profile.rs` +
 > `docs/MODEL_SELECTION_SCORECARD.md` for anything outside the mapping
-> table. **The mapping table itself was refreshed 2026-08-05** (Profile C
-> ship) and is verified against `profile.rs` as of that date.
+> table. **The mapping table itself was refreshed 2026-08-29** (Profile C
+> rotation + the new `CHdr` variant) and is verified against
+> `profile.rs` as of that date.
 
 **Stable alias:** `ZensimProfile::codec_target()` → `ZensimProfile::B`
 (since 2026-07-12; generation-A is deprecated).
@@ -20,7 +21,8 @@ on every rotation — never inline bake identity into variant rustdocs).
 |---|---|---|
 | `B` (`zensim-b`) — **default**; `codec_target()`/`latest_preview()` | `zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin` (`ens-Pline-cid80` inclusive-winsor dense-dial, sha `b6fe5233…`) | `benchmarks/profile_b_methodology_2026-07-12.md` |
 | `BHdr` (`zensim-b-hdr`) — HDR (absolute-nits) route | `zensim/weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin` (`hdrmix-lasso0.0003-shaped`, sha `7d7f2123…`) | `benchmarks/bhdr_improvement_split_lineage_2026-07-12.md` §7 |
-| `C` (`zensim-c`) — SOTA-944 wave-11 candidate; 944-regime scoring contract (folded-944 features + `score_features_with_profile`) | `zensim/weights/c_sdr_mlp944_corrmix_2026-08-05.bin` (`W10L9_s4003_packed`, sha `1a2c8d52…`, PRUNED caller 944 / internal 667) | `docs/PROFILE_C_REPRODUCTION_2026-08-05.md` |
+| `C` (`zensim-c`) — generation-C SDR; 944-regime scoring contract (folded-944 features + `score_features_with_profile`) | `zensim/weights/c_sdr_purity944_2026-08-29.bin` (`W10L9PH_s4004_packed`, "north-anchor", sha `61ebc456…`, PRUNED caller 944 / internal 667) — **rotated 2026-08-29** (`e9a705c0`) from `W10L9_s4003_packed` | `zensim/weights/manifests/c_sdr_purity944_2026-08-29.toml` + `benchmarks/sdr_pure_retrain_wave_2026-08-28.md`; `docs/PROFILE_C_REPRODUCTION_2026-08-05.md` walks the C-family chain but documents the SUPERSEDED s4003 bake |
+| `CHdr` (`zensim-c-hdr`) — generation-C HDR (candidate-of-record; `BHdr` remains the shipped HDR default). **HDR content only** — SDR routes to `C`; features via `compute_folded720_append2_features_hdr` route-side | `zensim/weights/c_hdr_l1t1944_2026-08-29.bin` (`HDR944_L1T1_s4005_hfpack`, "aurora-anchor", sha `0a437d99…`, PRUNED caller 944 / internal 697) — **added 2026-08-29** (`e9a705c0`) | `zensim/weights/manifests/c_hdr_l1t1944_2026-08-29.toml` + `benchmarks/hdr944_retrain_wave_2026-08-28.md` (freeze) + `benchmarks/hdr944_bake_wave_2026-08-27.md` (the L1/T1 training run) |
 | `A` (`zensim-a`) — **deprecated** since 0.3.0; behind default-on `deprecated-profiles` | `zensim/weights/v47_strict_qat_native_2026-05-27.bin` (`v47-strict-QAT`, rotated 2026-05-27 from V39) | `benchmarks/v0_qat_native_methodology_2026-05-27.md` |
 | `PreviewV0_1` / `PreviewV0_2` — historical linear profiles | in-source weight arrays (`WEIGHTS_PREVIEW_V0_1` / `_V0_2`), no bake file | README "v0.2" section |
 
