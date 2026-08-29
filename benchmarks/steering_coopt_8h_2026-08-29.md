@@ -155,3 +155,24 @@ study: replace the \|err\| gate with "bytes ≤ baseline − X% at
 truth-quality non-inferior (paired CI)" — the maps' measured behavior
 (byte savings at small quality cost) becomes a candidate WIN under the
 right objective instead of a loss under the wrong one.
+
+## Hour 3-4: Q3 additivity + the parity inversion — the co-optimization picture completes
+
+**Q3 (seeds compose):** avif fitted S1 seeds (trace-derived, t70→cq129 /
+t80→106 / t88→46, committed in zenavif): **k1 (2 encodes) seeded 0.656
+(19/27) vs blind 0.881 (17/27)** — +26% median at the tightest budget,
+≈ blind k2. With svt (17.6→3.3), zenjpeg (+46-48%), and jxl's committed
+seed work, the family law is measured everywhere: **fitted seeds are the
+2-shot lever; the inner controller is the 3-shot lever; they compose.**
+
+**The parity inversion (the window's sharpest finding):** re-scoring the
+map arms at self-judged QUALITY PARITY (|Δachieved| ≤ 0.5 vs scalar):
+avif own-map **+2.16%** bytes, avif pair **+3.06%** — the naive "−5.4%
+byte savings" was under-shooting targets, not efficiency. jxl's pair, by
+the same analysis: **−0.41% at parity AND better error** — it alone
+passes the re-gated objective. **Ship-shape by codec: jxl =
+anchor-lantern (scorer + companion map); avif = Profile-C scalar + S1
+seeds; zenjpeg = seeded search (floor = knob quantum, codec-side lever
+registered); svt-HDR = S1-seeded qp staircase (already wired).**
+Truth-judged (peer-CI) confirmation of the parity numbers rides on the
+census metric stage (armed, auto-declares on encode convergence).
