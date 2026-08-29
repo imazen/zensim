@@ -912,7 +912,7 @@ UNBALANCED model — LF specialist, 228/4817 identity violations):
 | G-OUT S cap 12 / B 35 / D span/3+105 | arbitrary tolerances | arbitrary — but only egregious cells ever hit them (s4007 −63 below floor) | no |
 
 **The webp reach bar — empirically VINDICATED** (instrument:
-`scripts/v_next/webp_ceiling_audit.py` on the stored 944 dial grid + the
+`scripts/v_next/webp_ceiling_audit.py` (since superseded by `dial_range_gate.py`, which absorbs it) on the stored 944 dial grid + the
 refmetrics ssim2/butteraugli sidecars). Peer truth at the top knob: webp
 genuinely delivers the lowest ceiling of the four codecs (ssim2 p50 90.76
 vs jpeg 93.79 / avif 95.13 / jxl 97.04; butteraugli p50 1.187 vs 0.547 /
@@ -975,3 +975,24 @@ Driver fix landed with this: `TS_BD` override completes on all 7 cells-TSV
 sites (the h3own/h3ownsp/gainsweep phases used to clobber the committed
 2026-08-05 baseline TSV — the crossAB run had done so; restored to HEAD,
 cross cells preserved).
+
+## G-GRAN v2 BUILT — peer-anchored dial gate + committed addressability expectations (2026-08-28)
+
+User directive executed ("do all of this + establish addressability
+expectations at the ends + jxl on distance + support integer and float
+knobs"). Full record: `benchmarks/dial_addressability_2026-08-28.md`
+(+ `.json`); owner `scripts/v_next/dial_range_gate.py`. Headlines:
+the jxl q=100−4d display map is MEASURED unfair (q88 = ssim2 75.2 for jxl
+vs 84.7 jpeg — jxl gates natively on distance now); effective knob quanta
+measured by encode-identity (jpeg q99..100 = ONE encode, ditto q0..10;
+webp top collapses 4-way; jxl truly continuous); forced ties on duplicate
+encodes no longer count against models; two-sided calibration at three
+peer anchors with cap-aware top tol; gaps gated only on integer-quantum
+codecs (bar 4 = 2× ratified loop tolerance); attainability proxy is the
+unifying gate. Verdicts: **e050 is the best-calibrated dial** (one fail,
+−1.24 avif entry); the incumbent's jxl dial is NON-MONOTONE on the native
+distance ladder (0.89) — invisible to the old q-axis check; **every bake
+under-reports jpeg's top zone** (in-scale, no cap excuse) = the top W12
+data target with webp top; no dial gaps and no stretch anywhere on the
+six finalists. Rank-side verdicts unchanged. G-GRAN v2 = registered
+W12 replacement candidate, adoption user-gated.

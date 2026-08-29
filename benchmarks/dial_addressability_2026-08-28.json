@@ -1,0 +1,778 @@
+{
+ "z_hf": 83.0,
+ "tol_top": 1.0,
+ "tol_bottom": 23.183492762999997,
+ "gap_bar": 4.0,
+ "attain_bar": 2.0,
+ "mono_bar": 0.93,
+ "expectations": {
+  "avif": {
+   "knob_kind": "integer-quantum q (effective ladder)",
+   "n_grid_steps": 40,
+   "n_effective_steps": 39,
+   "anchors": {
+    "bottom": {
+     "knob": 0.0,
+     "knobs_in_class": [
+      0.0
+     ],
+     "ssim2_p50": -14.779942,
+     "butter_p50": 19.488798
+    },
+    "hf_entry": {
+     "knob": 76.0,
+     "knobs_in_class": [
+      76.0
+     ],
+     "ssim2_p50": 83.263095,
+     "butter_p50": 1.864187
+    },
+    "top": {
+     "knob": 100.0,
+     "knobs_in_class": [
+      99.9,
+      100.0
+     ],
+     "ssim2_p50": 95.128303,
+     "butter_p50": 0.258653
+    }
+   },
+   "hf_zone_truth_span": 11.865207999999996
+  },
+  "jpeg": {
+   "knob_kind": "integer-quantum q (effective ladder)",
+   "n_grid_steps": 40,
+   "n_effective_steps": 33,
+   "anchors": {
+    "bottom": {
+     "knob": 0.0,
+     "knobs_in_class": [
+      0.0,
+      5.0,
+      10.0
+     ],
+     "ssim2_p50": 22.35004,
+     "butter_p50": 7.197019
+    },
+    "hf_entry": {
+     "knob": 86.0,
+     "knobs_in_class": [
+      86.0
+     ],
+     "ssim2_p50": 83.242099,
+     "butter_p50": 1.894198
+    },
+    "top": {
+     "knob": 100.0,
+     "knobs_in_class": [
+      99.0,
+      99.25,
+      99.5,
+      99.75,
+      99.9,
+      100.0
+     ],
+     "ssim2_p50": 93.789153,
+     "butter_p50": 0.546803
+    }
+   },
+   "hf_zone_truth_span": 10.547054000000003
+  },
+  "jxl": {
+   "knob_kind": "float-distance (native; q display map measured unfair)",
+   "n_grid_steps": 49,
+   "n_effective_steps": 49,
+   "anchors": {
+    "bottom": {
+     "knob": -25.0,
+     "knobs_in_class": [
+      -25.0
+     ],
+     "ssim2_p50": 11.300635,
+     "butter_p50": 18.261265
+    },
+    "hf_entry": {
+     "knob": -1.6,
+     "knobs_in_class": [
+      -1.6
+     ],
+     "ssim2_p50": 84.377978,
+     "butter_p50": 1.887472
+    },
+    "top": {
+     "knob": -0.025,
+     "knobs_in_class": [
+      -0.025
+     ],
+     "ssim2_p50": 97.038396,
+     "butter_p50": 0.065748
+    }
+   },
+   "hf_zone_truth_span": 12.660418000000007
+  },
+  "webp": {
+   "knob_kind": "integer-quantum q (effective ladder)",
+   "n_grid_steps": 40,
+   "n_effective_steps": 33,
+   "anchors": {
+    "bottom": {
+     "knob": 0.0,
+     "knobs_in_class": [
+      0.0
+     ],
+     "ssim2_p50": -12.0338775,
+     "butter_p50": 14.181807
+    },
+    "hf_entry": {
+     "knob": 89.0,
+     "knobs_in_class": [
+      89.0
+     ],
+     "ssim2_p50": 83.907632,
+     "butter_p50": 1.8042695
+    },
+    "top": {
+     "knob": 100.0,
+     "knobs_in_class": [
+      99.5,
+      99.75,
+      99.9,
+      100.0
+     ],
+     "ssim2_p50": 90.755856,
+     "butter_p50": 1.1867779999999999
+    }
+   },
+   "hf_zone_truth_span": 6.848223999999988
+  }
+ },
+ "results": {
+  "incumbent_s4003": {
+   "avif": {
+    "anchors": {
+     "bottom": {
+      "honest": 12.787435870333333,
+      "actual": 13.244406,
+      "delta": 0.45697012966666684
+     },
+     "hf_entry": {
+      "honest": 83.92402896216667,
+      "actual": 83.445028,
+      "delta": -0.47900096216667976
+     },
+     "top": {
+      "honest": 97.14428715983334,
+      "actual": 96.193748,
+      "delta": -0.9505391598333404
+     }
+    },
+    "gap_p90": 2.2474422000000005,
+    "mono": 1.0,
+    "tie_rate": 0.04,
+    "attain_med_native": 0.2608369999999951,
+    "attain_med_ssim2": 0.2334333905957635,
+    "n_targets": 245
+   },
+   "jpeg": {
+    "anchors": {
+     "bottom": {
+      "honest": 34.50347127966667,
+      "actual": 32.342075,
+      "delta": -2.1613962796666684
+     },
+     "hf_entry": {
+      "honest": 83.92402896216667,
+      "actual": 83.240721,
+      "delta": -0.6833079621666798
+     },
+     "top": {
+      "honest": 95.48657453316667,
+      "actual": 94.393504,
+      "delta": -1.0930705331666815
+     }
+    },
+    "gap_p90": 1.7497640000000132,
+    "mono": 1.0,
+    "tie_rate": 0.0625,
+    "attain_med_native": 0.804471999999997,
+    "attain_med_ssim2": 0.7020151931941996,
+    "n_targets": 138
+   },
+   "jxl": {
+    "anchors": {
+     "bottom": {
+      "honest": 29.033019611666663,
+      "actual": 32.049641,
+      "delta": 3.0166213883333377
+     },
+     "hf_entry": {
+      "honest": 84.62855682850001,
+      "actual": 85.045002,
+      "delta": 0.41644517149998705
+     },
+     "top": {
+      "honest": 99.02993527266668,
+      "actual": 96.56732,
+      "delta": -2.4626152726666817
+     }
+    },
+    "gap_p90": 2.4107103999999966,
+    "mono": 0.8928571428571429,
+    "tie_rate": 0.03571428571428571,
+    "attain_med_native": 0.46585199999999816,
+    "attain_med_ssim2": 0.55125202330467,
+    "n_targets": 231
+   },
+   "webp": {
+    "anchors": {
+     "bottom": {
+      "honest": 12.828878686,
+      "actual": 13.4366025,
+      "delta": 0.6077238139999999
+     },
+     "hf_entry": {
+      "honest": 84.2555714875,
+      "actual": 83.68030999999999,
+      "delta": -0.5752614875000148
+     },
+     "top": {
+      "honest": 91.75672112316667,
+      "actual": 91.8912865,
+      "delta": 0.13456537683333636
+     }
+    },
+    "gap_p90": 2.008370999999998,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.4529020000000017,
+    "attain_med_ssim2": 0.6116498983454548,
+    "n_targets": 72
+   }
+  },
+  "A_PH_s4004": {
+   "avif": {
+    "anchors": {
+     "bottom": {
+      "honest": 23.2369795575,
+      "actual": 21.834981,
+      "delta": -1.4019985575000007
+     },
+     "hf_entry": {
+      "honest": 83.50426344166667,
+      "actual": 82.983479,
+      "delta": -0.5207844416666632
+     },
+     "top": {
+      "honest": 100.01611830616666,
+      "actual": 99.94786,
+      "delta": -0.06825830616665485
+     }
+    },
+    "gap_p90": 2.7497512,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.5417015000000021,
+    "attain_med_ssim2": 0.3977260425543392,
+    "n_targets": 280
+   },
+   "jpeg": {
+    "anchors": {
+     "bottom": {
+      "honest": 37.28290627616667,
+      "actual": 34.556691,
+      "delta": -2.72621527616667
+     },
+     "hf_entry": {
+      "honest": 83.50426344166667,
+      "actual": 83.924079,
+      "delta": 0.4198155583333403
+     },
+     "top": {
+      "honest": 97.78691926233333,
+      "actual": 95.981804,
+      "delta": -1.8051152623333309
+     }
+    },
+    "gap_p90": 2.523758000000001,
+    "mono": 1.0,
+    "tie_rate": 0.0625,
+    "attain_med_native": 1.1930409999999938,
+    "attain_med_ssim2": 0.8403344616670125,
+    "n_targets": 161
+   },
+   "jxl": {
+    "anchors": {
+     "bottom": {
+      "honest": 33.830606872000004,
+      "actual": 34.514502,
+      "delta": 0.6838951279999961
+     },
+     "hf_entry": {
+      "honest": 84.70763637683332,
+      "actual": 83.684315,
+      "delta": -1.023321376833323
+     },
+     "top": {
+      "honest": 101.63376716983332,
+      "actual": 100.0,
+      "delta": -1.6337671698333196
+     }
+    },
+    "gap_p90": 2.696933800000005,
+    "mono": 1.0,
+    "tie_rate": 0.14285714285714285,
+    "attain_med_native": 0.6655519999999981,
+    "attain_med_ssim2": 0.61381055001182,
+    "n_targets": 264
+   },
+   "webp": {
+    "anchors": {
+     "bottom": {
+      "honest": 24.420625067499998,
+      "actual": 24.6665535,
+      "delta": 0.2459284325000013
+     },
+     "hf_entry": {
+      "honest": 83.80017481916666,
+      "actual": 83.75279599999999,
+      "delta": -0.047378819166667085
+     },
+     "top": {
+      "honest": 92.38160476666665,
+      "actual": 91.468406,
+      "delta": -0.9131987666666532
+     }
+    },
+    "gap_p90": 2.273195699999999,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.4929314999999974,
+    "attain_med_ssim2": 0.3977260425543392,
+    "n_targets": 96
+   }
+  },
+  "B_e060": {
+   "avif": {
+    "anchors": {
+     "bottom": {
+      "honest": 14.892806692666666,
+      "actual": 14.992884,
+      "delta": 0.10007730733333453
+     },
+     "hf_entry": {
+      "honest": 82.37376448533334,
+      "actual": 82.166544,
+      "delta": -0.20722048533333748
+     },
+     "top": {
+      "honest": 100.72261002333333,
+      "actual": 100.0,
+      "delta": -0.7226100233333312
+     }
+    },
+    "gap_p90": 3.6312083999999945,
+    "mono": 1.0,
+    "tie_rate": 0.28,
+    "attain_med_native": 0.5180150000000054,
+    "attain_med_ssim2": 0.33067892067511195,
+    "n_targets": 315
+   },
+   "jpeg": {
+    "anchors": {
+     "bottom": {
+      "honest": 34.170196669333336,
+      "actual": 30.871414,
+      "delta": -3.2987826693333346
+     },
+     "hf_entry": {
+      "honest": 82.37376448533334,
+      "actual": 81.959388,
+      "delta": -0.41437648533333515
+     },
+     "top": {
+      "honest": 99.99592307133334,
+      "actual": 98.321435,
+      "delta": -1.674488071333343
+     }
+    },
+    "gap_p90": 2.815625400000005,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 1.5633520000000019,
+    "attain_med_ssim2": 0.9150171072744513,
+    "n_targets": 184
+   },
+   "jxl": {
+    "anchors": {
+     "bottom": {
+      "honest": 26.196825945999997,
+      "actual": 29.55861,
+      "delta": 3.3617840540000046
+     },
+     "hf_entry": {
+      "honest": 83.786766892,
+      "actual": 82.869029,
+      "delta": -0.9177378920000052
+     },
+     "top": {
+      "honest": 103.48805759066667,
+      "actual": 100.0,
+      "delta": -3.4880575906666706
+     }
+    },
+    "gap_p90": 3.1289202000000045,
+    "mono": 1.0,
+    "tie_rate": 0.42857142857142855,
+    "attain_med_native": 1.3983275000000006,
+    "attain_med_ssim2": 1.123261805731076,
+    "n_targets": 330
+   },
+   "webp": {
+    "anchors": {
+     "bottom": {
+      "honest": 15.801165382666666,
+      "actual": 17.281227,
+      "delta": 1.4800616173333356
+     },
+     "hf_entry": {
+      "honest": 83.56472365666667,
+      "actual": 82.655175,
+      "delta": -0.9095486566666722
+     },
+     "top": {
+      "honest": 93.294254514,
+      "actual": 91.3954085,
+      "delta": -1.898846014
+     }
+    },
+    "gap_p90": 2.651364799999993,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.8359680000000012,
+    "attain_med_ssim2": 0.5083321780358858,
+    "n_targets": 120
+   }
+  },
+  "w11_s4014_e050": {
+   "avif": {
+    "anchors": {
+     "bottom": {
+      "honest": 16.25175924766667,
+      "actual": 15.111786,
+      "delta": -1.1399732476666689
+     },
+     "hf_entry": {
+      "honest": 83.34175437716667,
+      "actual": 82.098459,
+      "delta": -1.2432953771666604
+     },
+     "top": {
+      "honest": 98.39746202783334,
+      "actual": 98.378418,
+      "delta": -0.019044027833345467
+     }
+    },
+    "gap_p90": 2.6162716000000046,
+    "mono": 0.96,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.39331599999999867,
+    "attain_med_ssim2": 0.3243602366000431,
+    "n_targets": 245
+   },
+   "jpeg": {
+    "anchors": {
+     "bottom": {
+      "honest": 39.0955922655,
+      "actual": 30.294494,
+      "delta": -8.801098265500002
+     },
+     "hf_entry": {
+      "honest": 83.34175437716667,
+      "actual": 83.41519,
+      "delta": 0.07343562283332972
+     },
+     "top": {
+      "honest": 95.63457950683333,
+      "actual": 94.891176,
+      "delta": -0.7434035068333316
+     }
+    },
+    "gap_p90": 2.1480287999999916,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.9455925000000036,
+    "attain_med_ssim2": 0.6935495262789857,
+    "n_targets": 138
+   },
+   "jxl": {
+    "anchors": {
+     "bottom": {
+      "honest": 34.63093427866667,
+      "actual": 33.071795,
+      "delta": -1.5591392786666702
+     },
+     "hf_entry": {
+      "honest": 84.66313297416667,
+      "actual": 84.348448,
+      "delta": -0.3146849741666671
+     },
+     "top": {
+      "honest": 99.85898683966667,
+      "actual": 100.0,
+      "delta": 0.14101316033332978
+     }
+    },
+    "gap_p90": 3.047759800000009,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.6515229999999974,
+    "attain_med_ssim2": 0.6514795699211078,
+    "n_targets": 231
+   },
+   "webp": {
+    "anchors": {
+     "bottom": {
+      "honest": 18.353952470166668,
+      "actual": 17.331557,
+      "delta": -1.0223954701666678
+     },
+     "hf_entry": {
+      "honest": 84.02246456350001,
+      "actual": 83.2276755,
+      "delta": -0.794789063500005
+     },
+     "top": {
+      "honest": 91.49025572533334,
+      "actual": 90.56868499999999,
+      "delta": -0.9215707253333534
+     }
+    },
+    "gap_p90": 2.136557900000007,
+    "mono": 1.0,
+    "tie_rate": 0.09090909090909091,
+    "attain_med_native": 0.6042500000000004,
+    "attain_med_ssim2": 0.6550598941905292,
+    "n_targets": 72
+   }
+  },
+  "w11_s4012_e080": {
+   "avif": {
+    "anchors": {
+     "bottom": {
+      "honest": 20.168049269,
+      "actual": 20.045392,
+      "delta": -0.12265726900000118
+     },
+     "hf_entry": {
+      "honest": 82.39084279599999,
+      "actual": 82.376363,
+      "delta": -0.014479795999989165
+     },
+     "top": {
+      "honest": 100.23722631000001,
+      "actual": 100.0,
+      "delta": -0.23722631000001115
+     }
+    },
+    "gap_p90": 3.682701199999997,
+    "mono": 1.0,
+    "tie_rate": 0.2,
+    "attain_med_native": 0.48700499999999636,
+    "attain_med_ssim2": 0.35682682820656453,
+    "n_targets": 315
+   },
+   "jpeg": {
+    "anchors": {
+     "bottom": {
+      "honest": 34.121765238,
+      "actual": 31.153864,
+      "delta": -2.967901238000003
+     },
+     "hf_entry": {
+      "honest": 82.39084279599999,
+      "actual": 83.497725,
+      "delta": 1.1068822040000157
+     },
+     "top": {
+      "honest": 99.19918163133332,
+      "actual": 97.289739,
+      "delta": -1.9094426313333202
+     }
+    },
+    "gap_p90": 2.7889652000000043,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 1.5289969999999968,
+    "attain_med_ssim2": 1.0206078460756913,
+    "n_targets": 184
+   },
+   "jxl": {
+    "anchors": {
+     "bottom": {
+      "honest": 29.410639388666667,
+      "actual": 30.767771,
+      "delta": 1.3571316113333332
+     },
+     "hf_entry": {
+      "honest": 84.02775940466665,
+      "actual": 83.069096,
+      "delta": -0.9586634046666518
+     },
+     "top": {
+      "honest": 102.85230040433333,
+      "actual": 100.0,
+      "delta": -2.8523004043333344
+     }
+    },
+    "gap_p90": 2.6315060000000043,
+    "mono": 1.0,
+    "tie_rate": 0.35714285714285715,
+    "attain_med_native": 1.4614629999999948,
+    "attain_med_ssim2": 0.8937315654067817,
+    "n_targets": 297
+   },
+   "webp": {
+    "anchors": {
+     "bottom": {
+      "honest": 21.345830731333333,
+      "actual": 21.4936515,
+      "delta": 0.14782076866666571
+     },
+     "hf_entry": {
+      "honest": 83.42888747466665,
+      "actual": 83.248968,
+      "delta": -0.17991947466664726
+     },
+     "top": {
+      "honest": 91.99275607366667,
+      "actual": 90.670434,
+      "delta": -1.322322073666669
+     }
+    },
+    "gap_p90": 2.5807547999999954,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.6441879999999998,
+    "attain_med_ssim2": 0.37356266975454844,
+    "n_targets": 96
+   }
+  },
+  "w11_s4014_final": {
+   "avif": {
+    "anchors": {
+     "bottom": {
+      "honest": 14.808749397500002,
+      "actual": 14.777059,
+      "delta": -0.03169039750000202
+     },
+     "hf_entry": {
+      "honest": 83.25029958916667,
+      "actual": 82.404068,
+      "delta": -0.8462315891666776
+     },
+     "top": {
+      "honest": 97.98229309083334,
+      "actual": 97.669929,
+      "delta": -0.3123640908333414
+     }
+    },
+    "gap_p90": 2.660222399999995,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.48088099999999656,
+    "attain_med_ssim2": 0.4823278728895559,
+    "n_targets": 245
+   },
+   "jpeg": {
+    "anchors": {
+     "bottom": {
+      "honest": 35.8831270225,
+      "actual": 32.249874,
+      "delta": -3.6332530225
+     },
+     "hf_entry": {
+      "honest": 83.25029958916667,
+      "actual": 84.086166,
+      "delta": 0.8358664108333329
+     },
+     "top": {
+      "honest": 96.0956345225,
+      "actual": 93.877078,
+      "delta": -2.218556522500009
+     }
+    },
+    "gap_p90": 2.1988584000000033,
+    "mono": 1.0,
+    "tie_rate": 0.0625,
+    "attain_med_native": 0.9855149999999995,
+    "attain_med_ssim2": 0.8768259989048985,
+    "n_targets": 138
+   },
+   "jxl": {
+    "anchors": {
+     "bottom": {
+      "honest": 26.951605076666667,
+      "actual": 31.521328,
+      "delta": 4.569722923333334
+     },
+     "hf_entry": {
+      "honest": 83.99292051500001,
+      "actual": 83.943624,
+      "delta": -0.04929651500000887
+     },
+     "top": {
+      "honest": 100.00944751,
+      "actual": 99.551475,
+      "delta": -0.4579725100000047
+     }
+    },
+    "gap_p90": 2.3854666000000013,
+    "mono": 1.0,
+    "tie_rate": 0.0,
+    "attain_med_native": 0.8203519999999997,
+    "attain_med_ssim2": 0.7616804672677446,
+    "n_targets": 264
+   },
+   "webp": {
+    "anchors": {
+     "bottom": {
+      "honest": 16.17356623416667,
+      "actual": 16.21753,
+      "delta": 0.04396376583332895
+     },
+     "hf_entry": {
+      "honest": 83.93270800750001,
+      "actual": 83.46535700000001,
+      "delta": -0.4673510074999996
+     },
+     "top": {
+      "honest": 91.17827974333333,
+      "actual": 89.43390600000001,
+      "delta": -1.7443737433333268
+     }
+    },
+    "gap_p90": 1.877130600000005,
+    "mono": 1.0,
+    "tie_rate": 0.09090909090909091,
+    "attain_med_native": 0.902663000000004,
+    "attain_med_ssim2": 1.0798161480426032,
+    "n_targets": 96
+   }
+  }
+ },
+ "bakes": {
+  "incumbent_s4003": "/mnt/v/output/zensim/bakes/sota944/bakes/W10L9_s4003_packed.bin",
+  "A_PH_s4004": "/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/W10L9PH_s4004_packed.bin",
+  "B_e060": "/mnt/v/output/zensim/bakes/htraj-2026-08-28/ckpt_epoch060_packed_stamped.bin",
+  "w11_s4014_e050": "/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/W11J_s4014_ckpts/ckpt_epoch050_s4014_packed.bin",
+  "w11_s4012_e080": "/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/W11J_s4012_ckpts/ckpt_epoch080_s4012_packed.bin",
+  "w11_s4014_final": "/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/W11J_s4014_ckpts/W11J_s4014_s4014_packed.bin"
+ },
+ "provenance": {
+  "top/entry tol": "noise-derived (2x cross-map spread)",
+  "bottom tol": "noise-derived (in-run)",
+  "gap/attain": "goal-derived (ratified +/-2 loop tolerance)",
+  "zones": "peer-derived (ssim2 >= 83 entry)",
+  "mono": "convention"
+ }
+}
