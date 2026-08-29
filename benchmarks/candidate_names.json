@@ -1,15 +1,55 @@
 {
  "_schema": "Candidate codename registry (2026-08-28, user directive: 'memorable names for candidates, perhaps word chains'). APPEND-ONLY; names are never reused or reassigned. Scheme: two-word chains; a PAIR configuration chains its members' second words (north-anchor + river-lantern => anchor-lantern). 'lodestar' is the reserved PROGRAM name for the unified-ship-candidate track (W12-U); its winner is codenamed at freeze.",
  "names": {
-  "north-anchor":  {"board_name": "W10L9PH_s4004_packed", "role": "FROZEN SDR scorer (candidate-of-record)", "named": "2026-08-28"},
-  "river-lantern": {"board_name": "PH_s4004_e060", "role": "steering-map champion (proposed map companion)", "named": "2026-08-28"},
-  "anchor-lantern": {"board_name": null, "role": "PAIR configuration: north-anchor scores, river-lantern steers (JXL_ZENSIM_MAP_BAKE split-role)", "named": "2026-08-28"},
-  "clear-ember":   {"board_name": "w11_s4014_e050", "role": "campaign cid22 champ + best G-GRAN v2 dial calibration", "named": "2026-08-28"},
-  "deep-loom":     {"board_name": "w11_s4014_final", "role": "map-coherence star (M3a 0.872)", "named": "2026-08-28"},
-  "aurora-anchor": {"board_name": "HDR944_L1T1_s4005_hfpack", "role": "FROZEN HDR scorer (candidate-of-record)", "named": "2026-08-28"},
-  "gray-tower":    {"board_name": "W10L9_s4003_packed", "role": "era rank incumbent (battery reference)", "named": "2026-08-28"},
-  "harbor-line":   {"board_name": "b_sdr_linear_cid80_inclwinsor_dense_dial", "role": "SHIPPED product default (Profile B)", "named": "2026-08-28"},
-  "pocket-lens":   {"board_name": "ADD156_safesyn_only_raw_lasso", "role": "additive-class star (837 B packed)", "named": "2026-08-28"},
-  "lodestar":      {"board_name": null, "role": "PROGRAM: the W12-U unified ship candidate track (rank+dial+map in ONE bake; stems LSTAR_s*)", "named": "2026-08-28"}
+  "north-anchor": {
+   "board_name": "W10L9PH_s4004_packed",
+   "role": "PROFILE C (SDR) — frozen into the zensim crate 2026-08-29 (user-directed); prior: frozen SDR candidate-of-record",
+   "named": "2026-08-28"
+  },
+  "river-lantern": {
+   "board_name": "PH_s4004_e060",
+   "role": "steering-map champion (proposed map companion)",
+   "named": "2026-08-28"
+  },
+  "anchor-lantern": {
+   "board_name": null,
+   "role": "PAIR configuration: north-anchor scores, river-lantern steers (JXL_ZENSIM_MAP_BAKE split-role)",
+   "named": "2026-08-28"
+  },
+  "clear-ember": {
+   "board_name": "w11_s4014_e050",
+   "role": "campaign cid22 champ + best G-GRAN v2 dial calibration",
+   "named": "2026-08-28"
+  },
+  "deep-loom": {
+   "board_name": "w11_s4014_final",
+   "role": "map-coherence star (M3a 0.872)",
+   "named": "2026-08-28"
+  },
+  "aurora-anchor": {
+   "board_name": "HDR944_L1T1_s4005_hfpack",
+   "role": "PROFILE CHdr (HDR) — frozen into the zensim crate 2026-08-29 (user-directed); BHdr stays shipped default",
+   "named": "2026-08-28"
+  },
+  "gray-tower": {
+   "board_name": "W10L9_s4003_packed",
+   "role": "era rank incumbent (battery reference)",
+   "named": "2026-08-28"
+  },
+  "harbor-line": {
+   "board_name": "b_sdr_linear_cid80_inclwinsor_dense_dial",
+   "role": "SHIPPED product default (Profile B)",
+   "named": "2026-08-28"
+  },
+  "pocket-lens": {
+   "board_name": "ADD156_safesyn_only_raw_lasso",
+   "role": "additive-class star (837 B packed)",
+   "named": "2026-08-28"
+  },
+  "lodestar": {
+   "board_name": null,
+   "role": "PROGRAM: the W12-U unified ship candidate track (rank+dial+map in ONE bake; stems LSTAR_s*)",
+   "named": "2026-08-28"
+  }
  }
 }

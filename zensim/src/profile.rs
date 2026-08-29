@@ -159,6 +159,17 @@ pub enum ZensimProfile {
     /// and verification gates: `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`
     /// and the mapping table in `docs/CODEC_TARGET_METRIC.md`.
     C,
+    /// **`CHdr` — generation-C HDR profile (external name `zensim-c-hdr`),
+    /// FROZEN 2026-08-29.** Internal `HDR944_L1T1_s4005_hfpack`
+    /// ("aurora-anchor"), the HDR-lane freeze battery winner (route-panel
+    /// judged; records: `benchmarks/hdr944_retrain_wave_2026-08-28.md`
+    /// FREEZE EXECUTED). Same folded-944 scoring contract as [`Self::C`]
+    /// (944 caller width, HDR feature extraction via
+    /// `compute_folded720_append2_features_hdr` route-side); **HDR
+    /// content only** — SDR content routes to [`Self::C`]. The
+    /// BHdr-parallel candidate slot: [`Self::BHdr`] remains the shipped
+    /// HDR default; `CHdr` is the candidate-of-record.
+    CHdr,
     /// **Externally-defined profile** — an escape hatch for profiles
     /// constructed outside this crate (for example the unpublished
     /// `zensim-experimental` crate, which preserves the historical
@@ -300,6 +311,7 @@ impl ZensimProfile {
             Self::B => "zensim-b",
             Self::BHdr => "zensim-b-hdr",
             Self::C => "zensim-c",
+            Self::CHdr => "zensim-c-hdr",
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
             // Experimental / historical profiles live in `zensim-experimental`
@@ -343,6 +355,7 @@ impl ZensimProfile {
             Self::B => &PROFILE_B,
             Self::BHdr => &PROFILE_B_HDR,
             Self::C => &PROFILE_C,
+            Self::CHdr => &PROFILE_C_HDR,
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
             // Experimental / historical profiles carry their own
@@ -1058,9 +1071,17 @@ static PROFILE_B_HDR: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// `ZensimProfile::C` bake bytes — internal `W10L9_s4003_packed`
-/// (`c_sdr_mlp944_corrmix_2026-08-05.bin`, 165,696 B, sha256
-/// `1a2c8d522fed8034b279ff018aa052f19d0b9f419f12cf22cca303a0b4abb7f4`).
+/// `ZensimProfile::C` bake bytes — internal `W10L9PH_s4004_packed`
+/// ("north-anchor", `c_sdr_purity944_2026-08-29.bin`, 149,343 B, sha256
+/// `61ebc4562c2c4f78663d2c4d7608e7560d77f519c9e18d84fb0555d5fbca5940`).
+/// FROZEN 2026-08-29 (user-directed Profile-C freeze, superseding the
+/// 2026-08-05 `W10L9_s4003_packed` bytes): the balance-campaign SDR
+/// candidate-of-record — sole full two-zone eligibility pass, 8/8
+/// floors, PERFECT identity (100.00 exact, 0/4817 dial-grid violations),
+/// best avif scalar-loop steering measured (k3 med |err| 0.180, 24/27).
+/// Records: `benchmarks/sdr_pure_retrain_wave_2026-08-28.md` (FREEZE
+/// EXECUTED) + `benchmarks/balance_campaign_2026-08-28.md`. Prior C
+/// provenance (superseded):
 /// The SOTA-944 wave-11 battery-selected cell: 944 → 128 → 1 MLP
 /// (f16 + zerobias-0.005, LeakyReLU), trained seed 4003 on the 10-group
 /// corrected mix (corrected `ext_kadid`, KonJND-BPG leg, teacher tables,
@@ -1075,8 +1096,8 @@ static PROFILE_B_HDR: ProfileParams = ProfileParams {
 /// and `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`. The pinning test
 /// `profile_c_tests::weight_sha256_pinned` fails loud on any silent
 /// byte swap of this file.
-pub(crate) fn mlp_bake_c_corrmix_944() -> &'static [u8] {
-    include_bytes!("../weights/c_sdr_mlp944_corrmix_2026-08-05.bin")
+pub(crate) fn mlp_bake_c_purity944() -> &'static [u8] {
+    include_bytes!("../weights/c_sdr_purity944_2026-08-29.bin")
 }
 
 /// Generation-C SDR profile params. The bake is a 944-input (pruned to
@@ -1099,7 +1120,7 @@ static PROFILE_C: ProfileParams = ProfileParams {
     // (`zentrain.output_calibration_spline`, refit on the packed net);
     // raw output is dial-honest after the spline applies.
     skip_score_mapping: true,
-    mlp_bytes: Some(mlp_bake_c_corrmix_944),
+    mlp_bytes: Some(mlp_bake_c_purity944),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
     extended_features: true,
@@ -1107,6 +1128,39 @@ static PROFILE_C: ProfileParams = ProfileParams {
     soft_clamp_score: false,
     // Negative dial tail is part of the contract (pack --neg-tail):
     // worse-than-worst-codec inputs score below 0 instead of tying at 0.
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// `ZensimProfile::CHdr` bake bytes — internal `HDR944_L1T1_s4005_hfpack`
+/// ("aurora-anchor", `c_hdr_l1t1944_2026-08-29.bin`, 180,195 B, sha256
+/// `0a437d9927dd63dce08ba72d031ce0a6d0c13ff4bd3034458d56cb1995d2463d`).
+/// FROZEN 2026-08-29 (user-directed HDR Profile-C freeze). 944 caller /
+/// 697 internal (dead-column pruned). Pinned by
+/// `profile_c_tests::chdr_weight_sha256_pinned`.
+pub(crate) fn mlp_bake_chdr_l1t1944() -> &'static [u8] {
+    include_bytes!("../weights/c_hdr_l1t1944_2026-08-29.bin")
+}
+
+/// Generation-C HDR profile params — the PROFILE_C shape (folded-944
+/// contract, bake-carried dial spline, negative tail) over the
+/// aurora-anchor bytes. HDR feature extraction happens route-side.
+static PROFILE_C_HDR: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_chdr_l1t1944),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
     extrapolate_score: true,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
@@ -1916,15 +1970,15 @@ mod profile_c_tests {
     #[test]
     fn weight_sha256_pinned() {
         use sha2::{Digest, Sha256};
-        let bytes = mlp_bake_c_corrmix_944();
-        assert_eq!(bytes.len(), 165_696, "C weight byte length changed");
+        let bytes = mlp_bake_c_purity944();
+        assert_eq!(bytes.len(), 149_343, "C weight byte length changed");
         let mut hasher = Sha256::new();
         hasher.update(bytes);
         let digest = hasher.finalize();
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
-            hex, "1a2c8d522fed8034b279ff018aa052f19d0b9f419f12cf22cca303a0b4abb7f4",
-            "C weight bytes do not match the pinned wave-11 W10L9_s4003_packed sha256"
+            hex, "61ebc4562c2c4f78663d2c4d7608e7560d77f519c9e18d84fb0555d5fbca5940",
+            "C weight bytes do not match the pinned north-anchor W10L9PH_s4004_packed sha256"
         );
     }
 
@@ -1935,10 +1989,37 @@ mod profile_c_tests {
     /// never `n_inputs()` (metric.rs fix `ae852b1b`).
     #[test]
     fn bake_loads_caller_width_944_internal_667() {
-        let model = crate::mlp::Model::from_bytes(mlp_bake_c_corrmix_944())
+        let model = crate::mlp::Model::from_bytes(mlp_bake_c_purity944())
             .expect("shipped C bake must parse");
         assert_eq!(model.caller_input_width(), 944, "caller-facing width");
         assert_eq!(model.n_inputs(), 667, "internal (pruned) layer-0 width");
+        assert_eq!(model.n_outputs(), 1);
+        assert_eq!(model.n_layers(), 2);
+    }
+
+    /// CHdr freeze pin (aurora-anchor bytes, 2026-08-29).
+    #[test]
+    fn chdr_weight_sha256_pinned() {
+        use sha2::{Digest, Sha256};
+        let bytes = mlp_bake_chdr_l1t1944();
+        assert_eq!(bytes.len(), 180_195, "CHdr weight byte length changed");
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let digest = hasher.finalize();
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex, "0a437d9927dd63dce08ba72d031ce0a6d0c13ff4bd3034458d56cb1995d2463d",
+            "CHdr weight bytes do not match the pinned aurora-anchor sha256"
+        );
+    }
+
+    /// CHdr widths: 944 caller / 697 internal (pruned).
+    #[test]
+    fn chdr_bake_loads_caller_width_944_internal_697() {
+        let model = crate::mlp::Model::from_bytes(mlp_bake_chdr_l1t1944())
+            .expect("shipped CHdr bake must parse");
+        assert_eq!(model.caller_input_width(), 944, "caller-facing width");
+        assert_eq!(model.n_inputs(), 697, "internal (pruned) layer-0 width");
         assert_eq!(model.n_outputs(), 1);
         assert_eq!(model.n_layers(), 2);
     }

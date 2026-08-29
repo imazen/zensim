@@ -57,3 +57,12 @@ here, for this task, and if we are solving the right problem in RD",
 New controller math; trainer surgery (map-aware loss stays registered
 owner work); any Profile B default flip (B remains shipped default);
 publishes.
+
+## P0.1/P0.2 EXECUTED (2026-08-29 ~05:2xZ)
+Profile C (SDR) := north-anchor (`c_sdr_purity944_2026-08-29.bin`,
+149,343 B, sha 61ebc456…) — fn `mlp_bake_c_purity944`, pinning test
+updated, width test holds (944/667). **NEW `ZensimProfile::CHdr`** :=
+aurora-anchor (`c_hdr_l1t1944_2026-08-29.bin`, 180,195 B, sha 0a437d99…,
+944/697) — additive variant (enum is non_exhaustive), BHdr-parallel,
+BHdr remains shipped HDR default. 8/8 profile tests green incl. both
+sha pins + identity + end-to-end folded944.
