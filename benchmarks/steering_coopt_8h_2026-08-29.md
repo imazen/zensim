@@ -96,3 +96,62 @@ those changes; flagged to the owning lane.
 
 **In flight:** Q2 beatbutter (north-anchor, fresh substrate; G-BB1
 substrate gate will speak first) + zenjpeg k4/k5 census extension.
+
+## Hour 2-3: Q2 + zenjpeg verdicts
+
+**Q2 (beat-buttloop) — DECIDED on fresh same-substrate cells, north-anchor
+both arms:** inner zensim loop (h3, k3) med |err| **0.404 (23/27)** vs the
+buttloop-structure outer (score-target re-encode search, zensim judge)
+**1.739 (15/27)** at 4 encodes — a 4.3× error advantage at equal-or-lower
+budget (inner compares are cheaper than full re-encodes). k2 inner 0.817
+(19/27) also beats outer. bin8 ≡ bin1 BYTE-identical (binned attribution
+integration is free); clamp 2.5 vs default 2.0 = +1 hit at equal median
+(marginal, not adopted). The committed 2026-08-07 G-BB4 already held for
+gray-tower; today's data extends it to the frozen Profile C on the current
+substrate: **the butter loop's structure is the dominated part — "buttloop
+with zensim substituted" loses to the native inner controller.**
+
+**zenjpeg "2 or more shots" — the floor is the KNOB, not the controller:**
+arm B (fitted seed) k2 1.905/14, k3 1.383/17, **k4 1.096/19, k5 1.064/20**
+— a hard plateau at ~1.06, which is zenjpeg's integer-q rung spacing at
+these targets (the addressability audit's effective-quantum finding,
+manifesting as a shots-invariant error floor). More shots cannot beat the
+rung; the lever is codec-side sub-q granularity (per-block quant scaling),
+registered as owner work. Judge-era caveat: zenjpeg census judges via its
+git-pinned zensim (self-consistent within-census); Profile-C re-pin is a
+registered follow-up.
+
+## Q4 VERDICT — precision, accuracy, and whether RD target-hitting is the right problem
+
+All terms measured this window (native units, k3-class budgets):
+
+| error term | measured size | vs product quanta (dial 1.0, tolerance ±2) |
+|---|---|---|
+| controller residual (jxl inner) | 0.404 med | 2.5× under quantum |
+| controller residual (avif) | 0.29-0.39 | ~3× under quantum |
+| controller residual (zenjpeg) | **1.06 floor** | AT quantum — and it is the KNOB's rung spacing, not controller error |
+| controller residual (svt-HDR, S1) | 1.51 | inside tolerance |
+| scorer-truth calibration (top anchors) | **0.9-2.2** per codec | 1-2 quanta — THE BINDING TERM |
+| cross-codec truth-span divergence | webp top 90.8 vs jxl 97.0 ssim2 | the "same target, same quality" contract is the gap |
+| map steering effect on \|err\| | negative or neutral everywhere measured | maps move BYTES (−1..−5.4%), at quality cost |
+
+**Answers.** (1) *How much precision matters:* controller precision is
+SOLVED — every codec's loop sits at or under the dial quantum, and
+0.1-point score reporting is over-precise against the ±2 product
+tolerance and ssim2's own ~±0.3-0.5 per-cell noise. Further controller
+refinement pays ≈ nothing; zenjpeg's floor is a codec-side knob-quantum
+problem (sub-q per-block scaling), not a loop problem. (2) *How much
+accuracy matters:* accuracy — calibration to model-independent truth and
+its CONSISTENCY across codecs — is 3-5× the controller residual and is
+now the whole ballgame for scoring quality. (3) *Are we solving the right
+RD problem:* partly no. Target-|err| is saturated below useful quanta;
+the objectives that still buy product value, in order: **(a) cross-codec
+calibration consistency** (truth-anchored refit — exactly what the Q5
+census feeds), **(b) bytes-at-achieved-truth** (steering/maps re-gated as
+BD-rate-at-fixed-truth with paired ssim2/butter CIs — the measured maps
+already cut bytes but were judged on the wrong axis), **(c) knob
+granularity floors** (zenjpeg). REGISTERED PROPOSAL for the next steering
+study: replace the \|err\| gate with "bytes ≤ baseline − X% at
+truth-quality non-inferior (paired CI)" — the maps' measured behavior
+(byte savings at small quality cost) becomes a candidate WIN under the
+right objective instead of a loss under the wrong one.
