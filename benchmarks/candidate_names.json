@@ -60,6 +60,19 @@
    "board_name": null,
    "role": "ADOPTED companion configuration of record (user 2026-08-29): north-anchor scores, amber-lantern steers (jxl; map env opt-in unchanged)",
    "named": "2026-08-29"
+  },
+  "copper-line": {
+   "bake": "wlin4_a0.5",
+   "sha256_prefix": "f4e13366",
+   "role": "W-LIN RD-lane pair member (cid22 0.8502/nonphoto 0.8713/im26 0.8821)",
+   "status": "candidate",
+   "registered": "2026-08-29"
+  },
+  "jeweler-loupe": {
+   "bake": "head_hf0.003_bake",
+   "role": "W-LIN JND/HF-lane pair member (kon 0.445/hfnl 0.726); 74-coeff lasso 3e-3 on l944_hf",
+   "status": "candidate",
+   "registered": "2026-08-29"
   }
  }
 }

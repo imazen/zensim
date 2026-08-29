@@ -1526,3 +1526,80 @@ training leg (the W7 lever: kon 0.456–0.459 on the EM4 family, cid22 cost
 certified THERE — untested on the PH line). Bars: kon ≥ 0.52 AND cid22 ≥
 0.885 AND hfnl ≥ 0.70 (dominate B on every rank axis at once). One seed;
 scale only if the probe passes.
+
+### R6 mid-round findings + AMENDMENT R6-H2 (target-frame fix; 2026-08-29)
+
+- **R6-K FALSIFIED at head level:** konbpg in the kon head HURTS its own axis
+  (kon 0.154/0.143 at w 1.0/2.0 vs 0.267 without). Not blended further.
+- **The hf head is the discovery:** fit-lasso on l944_hf alone, lam 3e-3
+  (74 coeffs): kon **0.445** + hfnl **0.726** + cid22 0.808. Sparsity curve
+  peaks at 3e-3 (lam 1e-3: kon 0.044; 2e-3: 0.369; 5e-3: 0.414). The
+  944-folded front end CARRIES the near-threshold signal — the round-5
+  "front-end cap" reading is OVERTURNED; the cap was data-frame, not features.
+- **Convex blending CANCELS it:** head_cid is hfnl-ANTI (−0.016), and even at
+  70% hf weight the blend reads hfnl 0.068 / kon 0.216. wlin5_a* all fail.
+- **Single-head naive mix is WORSE (and diagnostic):** hf-w 5/10 in the mix
+  → hfnl NEGATIVE, cid22 0.28–0.54. ROOT CAUSE (measured from gram moments):
+  **the hf leg's per-corpus min-maxed target lives in a LOCAL frame** — leg
+  y_mean 0.324 vs 0.50–0.78 everywhere else, i.e. its "0.32" = top third of
+  the near-lossless band while safesyn's 0.77 = mid encodes. Mixed frames
+  poison the joint fit; SROCC-invariance hides it in single-leg fits. This
+  RETRO-EXPLAINS round-2's "hf 2.5 catastrophic" — never an upweighting
+  problem, a target-frame incompatibility.
+- **AMENDMENT R6-H2 (registered before the refit):** remap the hf gram's
+  target moments into the global top slice via exact affine moment algebra
+  (q′=a·q+b·s, Y1′=a·Y1+b·n, Y2′=a²Y2+2abY1+b²n), mappings y′ ∈
+  {0.85+0.15y, 0.80+0.20y} (the band ≈ ssim2 ≥ 91 ⇒ top ~15% of frame),
+  hf-w ∈ {3, 6}, lam 2e-3/3e-3 as needed. Bars UNCHANGED from the round-6
+  registration.
+
+### B FULL REMEASURE — results (2026-08-29; fresh fulleval, regime 372, current owners)
+
+`scripts/run_full_eval.sh … 372`, M3 carried (photo M3a re-measured = stored
+to 4 dp). Old JSON preserved as `.pre-remeasure-2026-08-29.bak`. Deltas:
+
+| axis | stale row | fresh | why it moved |
+|---|---|---|---|
+| cid22 | 0.8821 | **0.8764** | current corpus/eval state (peers were scored on it; B never was) |
+| konjnd | 0.5186 | **0.5466** | ditto (B *improves*) |
+| aic3 / tid | 0.7650 / 0.7785 | 0.7774 / 0.7868 | ditto |
+| kadid | −0.8085 | **+0.8201** | the documented era rule: fresh verdict on rebuilt tables; matches the ledger's "+0.8201" exactly |
+| composite | 0.8487 | **0.8291** | **the stored composite was STALE-HIGH by 0.02** — it never matched its own rank rows (recomputed-from-old-rows = 0.8285). Peers are clean (drift ≤ 0.0001). **Ladder reorders: A 0.8645 > gray-tower 0.8602 > amber 0.8508 > B 0.8291** — B falls 2nd → 4th |
+| hfnlproxy | grafted, no per-pair | 0.5027 + native per-pair (n 11,356) | the axis is now G-OUT-gateable for B |
+
+**G-OUT v2 (fresh): FAIL 7 clauses / 4 axes** — hfnlproxy:R+S (p99 chart-z
+**14.60** vs bar 3.24, max **25.1** — the worst outlier axis measured on the
+board; the linear head extrapolates wildly inside the near-lossless band),
+imazen26:R+S (3.66/3.18), nonphoto:R+S (5.24/3.47), kadid:S (2.92/2.73).
+The earlier stale-row run (FAIL nonphoto:S only) is superseded — its per-pair
+block was the old sampling.
+
+**G-GRAN v1 (fresh): jxl PASSES** (top 95.95, span 27.6 — the "no jxl curve"
+claim in the first battery table is RETIRED; fresh top-shortfalls: jpeg
+−3.43, webp −3.06, avif −1.61 + span 7.0; mono 0.95–1.00). M3a photo 0.597 /
+screen 0.543 unchanged.
+
+### W-LIN ROUND 6 VERDICT — falsifier FIRED for single-linear; the PAIR passes (2026-08-29)
+
+Probes after the amendment: hf-dominant mixes (broad 20/40%) lose both ends
+(kon ≤ 0.15, cid22 ≤ 0.76); BVLS-on-hf kon 0.251; lam 4e-3 kon 0.424. Best
+remap cell (r85_hf6): hfnl 0.360, cid22 0.758 — under bar on both.
+
+**Verdict: no single 944 linear reaches kon ≥ 0.40 ∧ hfnl ≥ 0.40 while
+holding cid22 ≥ 0.845 — the registered falsifier fires, but for a NEW reason:
+not a front-end cap (the hf head PROVES the folded-944 features carry kon
+0.445 + hfnl 0.726) — composition itself fails (blend cancellation vs an
+hfnl-anti generalist head; joint-fit frame incoherence across per-corpus
+min-maxed legs).**
+
+**Registered outcome — the PAIR (both tiny linears, ~11 KB together):**
+- **copper-line** = wlin4_a0.5 (RD lane): cid22 0.8502 / nonphoto 0.8713 /
+  imazen26 0.8821 — holds the three RD bars.
+- **jeweler-loupe** = head_hf0.003 (JND/HF lane): kon **0.445** / hfnl
+  **0.726** / cid22 0.808 — holds both JND bars; 74 coefficients, lasso 3e-3
+  on the l944_hf leg alone (recipe + sha in wave artifacts).
+- Jointly the pair passes ALL FIVE frozen round-6 bars on their assigned
+  lanes. vs B: loupe leads hfnl +0.223; kon −0.074 vs B's fresh 0.547 is
+  now the ONE axis B keeps (fresh remeasure widened it: −0.102).
+- Ship-shape (which lane a caller gets, and when) is a product decision —
+  user-gated, like every default flip.
