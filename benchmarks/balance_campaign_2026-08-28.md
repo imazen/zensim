@@ -1123,3 +1123,15 @@ Standing board discipline (user, this directive): every wave generation
 appends its review set to `benchmarks/board_discussion_sets.json` so
 generations are comparable from the dropdown; a cross-wave "unified
 track" set accumulates the lodestar-lineage candidates.
+
+### W12-U2 arm-2 VACUOUS (discovered at launch, 2026-08-29 ~03:11Z)
+
+The jw05+cd arm failed at argv construction: **the base W10L9 recipe
+already carries `--coarse-decay 1e-5`** (the E-M keeper is baked into
+every wave since W10L9, including all of W12-U). So "add the map-adjacent
+regularizer" was a no-op duplicate — and the finding sharpens: the one
+measured map-adjacent trainer knob is ALREADY ON while M3a keeps
+decoupling from loop value. **The loop-value lever escalates to the true
+gradient-supervised map loss (second-order trainer surgery) — registered
+as owner work, not a wave arm.** Arm jw05 (LSTAR2_s4031-3) trained clean;
+selection + battery proceed on it alone.
