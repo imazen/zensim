@@ -996,3 +996,24 @@ under-reports jpeg's top zone** (in-scale, no cap excuse) = the top W12
 data target with webp top; no dial gaps and no stretch anywhere on the
 six finalists. Rank-side verdicts unchanged. G-GRAN v2 = registered
 W12 replacement candidate, adoption user-gated.
+
+## BOARD: gate pre-filter + gates column + 🌟 stars (2026-08-28, user directive)
+
+The scoreboard (first table) now carries a **gates** column — glyphs in
+order G/E/D/K = G-OUT v2 / two-zone eligibility (HDR bakes: HDR-lane
+battery) / G-GRAN v2 dial gate (registered W12 candidate) / knob-end —
+✓ pass, ✗ fail, · NOT MEASURED (absent ≠ failed, hover for
+detail+source). The top control bar gains a **gate filter**: per-gate
+chips + a `usable` preset (G+E+K; dial-v2 opt-in while unadopted) that
+EXCLUDE measured-fail rows from the list itself before reading, and drop
+them from the visible chart set; a caption states the excluded count and
+that not-measured never hides a row. **🌟** marks frozen /
+breakthrough / domain-star models (hover = reason): the two FROZEN
+candidates (W10L9PH_s4004_packed SDR, HDR944_L1T1_s4005_hfpack HDR), the
+steering-map champion (PH_s4004_e060), the campaign cid22 champ + best
+G-GRAN-v2 dial (w11_s4014_e050), the map-coherence star (w11_s4014_final),
+the era rank incumbent, shipped B, and the additive-class star (ADD156).
+Verdict source of truth: `benchmarks/board_gates_2026-08-28.json`
+(committed, append-only, measured-verdicts-only — same discipline as the
+annotations registry). Regen gates PASS (the star glyph initially broke
+the harness's name-prefix row matching — moved after the name).

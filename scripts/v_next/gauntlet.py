@@ -773,6 +773,14 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
             if (p50[-1] - p50[0]) < 8 or p50[-1] < _REACH[c] - 1:
                 fails.append(c)
         b["knob_end_fail"] = fails
+    # gates + stars overlay (user directive 2026-08-28): committed, append-only,
+    # measured-verdicts-only registry (absent = NOT MEASURED, never failed).
+    _gp = Path(__file__).resolve().parents[2] / "benchmarks" / "board_gates_2026-08-28.json"
+    _gov = json.loads(_gp.read_text()).get("bakes", {}) if _gp.exists() else {}
+    for b in bakes:
+        ov = _gov.get(b.get("name") or "", {})
+        b["gatecheck"] = {k: v for k, v in ov.items() if k != "star"}
+        b["star"] = ov.get("star")
     for b in bakes:
         b["_n_dominated_excluded"] = n_dom  # caption reads it off any row
     # loop-utility PROXY (owner: scripts/v_next/loop_proxy.py; committed JSON —
@@ -910,7 +918,7 @@ const CURATED_ALL=DATA.bakes.filter(b=>b.curated&&!DOM(b)).map(b=>b.name);
 // top zone — G-GRAN semantics); they stay toggleable + in 'curated+knobfail'.
 const CURATED=DATA.bakes.filter(b=>b.curated&&!DOM(b)&&!KNOBFAIL(b)).map(b=>b.name);
 const state={shapeNorm:true,visible:new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name)),
-  ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false};
+  ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false, gateFilter:new Set()};
 function effTheme(){const dt=document.documentElement.getAttribute('data-theme');
   return dt||((window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light');}
 const pal=()=>DATA.palette[effTheme()==='dark'?'dark':'light'];
@@ -950,9 +958,29 @@ const domBadge=b=>DOM(b)?el('span',{style:'font-size:9px;font-weight:700;letter-
     +' — beaten on every measured floor axis + composite within its class; kept for the record, default-off',
   text:'dom'}):null;
 // swatch + name (+ ens/dom badges) cell content, shared by every table that names a bake
+// ---- gates (overlay benchmarks/board_gates_2026-08-28.json + build-computed knob-end).
+// Verdicts: 'pass' | 'fail' | null (NOT MEASURED — never treated as fail).
+const GATE_DEFS=[
+  ['gout','G','G-OUT v2 outlier gate (owner outlier_gate.py)'],
+  ['elig','E','frozen two-zone eligibility battery (HDR bakes: HDR-lane freeze battery)'],
+  ['dialv2','D','G-GRAN v2 peer-anchored dial gate (REGISTERED W12 candidate, not yet frozen)'],
+  ['knob','K','knob-end check (G-GRAN v1 semantics: HF-zone reach/span; computed at build)']];
+function gateV(b,g){
+  if(g==='knob')return (b.knob_end_fail===undefined)?null:(b.knob_end_fail.length?'fail':'pass');
+  const e=(b.gatecheck||{})[g];return e?e.v:null;}
+function gateWhy(b,g){
+  if(g==='knob')return b.knob_end_fail&&b.knob_end_fail.length?('fails: '+b.knob_end_fail.join(', ')):'';
+  const e=(b.gatecheck||{})[g];return e?((e.why?e.why+' ':'')+(e.src?'['+e.src+']':'')):'';}
+function gateGlyphs(b){return GATE_DEFS.map(([g])=>{const v=gateV(b,g);
+  return v==='pass'?'✓':(v==='fail'?'✗':'·');}).join('');}
+function gateTitle(b){return GATE_DEFS.map(([g,l,d])=>{const v=gateV(b,g);
+  return l+' = '+d+': '+(v?v.toUpperCase():'not measured')+(gateWhy(b,g)?' — '+gateWhy(b,g):'');}).join('\n');}
+function gateExcluded(b){let x=false;state.gateFilter.forEach(g=>{if(gateV(b,g)==='fail')x=true;});return x;}
 function nameInto(node,b,suffix){
-  node.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}),
-    document.createTextNode(b.name+(suffix||'')));
+  node.append(el('span',{class:'sw',style:'display:inline-block;margin-right:5px;background:'+color(b)}));
+  node.append(document.createTextNode(b.name+(suffix||'')));
+  if(b.star)node.append(el('span',{text:' \u{1F31F}',style:'margin-left:2px;cursor:help',
+    title:'\u{1F31F} '+b.star}));
   const bd=ensBadge(b);if(bd)node.append(bd);
   const dd=domBadge(b);if(dd)node.append(dd);
   return node;
@@ -1036,6 +1064,23 @@ function renderBar(){
     mk('none',()=>{state.visible.clear();rerender();renderBar();}),
     mk('top 6',()=>{const s=[...DATA.bakes].sort((a,b)=>b.composite-a.composite).slice(0,6).map(b=>b.name);
       state.visible=new Set(s);rerender();renderBar();}));
+  // gate pre-filter (user directive 2026-08-28): exclude gate-FAILING rows from the
+  // scoreboard list itself (and drop them from the visible chart set). Not-measured
+  // gates never exclude. 'usable' = the frozen-gate trio G+E+K (dial-v2 stays opt-in
+  // while it is a registered-not-adopted W12 candidate).
+  bar.append(el('span',{text:'gate filter:',style:'margin-left:.6rem;color:var(--text-secondary);font-size:11px'}));
+  const applyGF=()=>{if(state.gateFilter.size)DATA.bakes.forEach(b=>{if(gateExcluded(b))state.visible.delete(b.name);});
+    rerender();renderBar();};
+  bar.append(mk('usable',()=>{state.gateFilter=new Set(['gout','elig','knob']);applyGF();},
+    'exclude rows with a MEASURED fail on G-OUT, eligibility, or knob-end (dial-v2 opt-in via its chip)'));
+  GATE_DEFS.forEach(([g,l,d])=>{
+    const on=state.gateFilter.has(g);
+    const ch=el('span',{class:'gchip'+(on?'':' off'),text:l,
+      title:(on?'ON — excluding measured fails of: ':'off — click to exclude measured fails of: ')+d});
+    ch.onclick=()=>{on?state.gateFilter.delete(g):state.gateFilter.add(g);applyGF();};
+    bar.append(ch);});
+  if(state.gateFilter.size)bar.append(mk('clear gates',()=>{state.gateFilter.clear();rerender();renderBar();},
+    'remove the gate filter (rows return to the list; visibility unchanged)'));
   // family toggles: click = show the whole family (or hide it when fully shown)
   const fams=[];DATA.bakes.forEach(b=>{if(b.family&&fams.indexOf(b.family)<0)fams.push(b.family);});
   fams.forEach(f=>{
@@ -1164,6 +1209,7 @@ const COLS=[
   ['name','bake',true,b=>b.name],
   ['regime','regime',true,b=>b.regime],
   ['trained','trained',true,b=>b.train_date?b.train_date.d+(b.train_date.src==='file'?'*':''):null],
+  ['gates','gates',true,b=>gateGlyphs(b)],
   ['composite','composite',false,b=>b.composite],
   ['cid22','CID22',false,b=>rs(b,'cid22')],
   ['nonphoto','nonphoto',false,b=>rs(b,'nonphoto')],
@@ -1218,6 +1264,7 @@ if(LT){COLS.push(
 function fmtCell(key,v){
   if(key==='name'||key==='regime')return v;
   if(key==='trained')return v==null?'—':v;
+  if(key==='gates')return v;
   if(key==='cid22_bwd')return v==null?'—':pct(v);
   if(key==='dial_tied')return pct(v);
   if(key==='corr'||key==='dial_mono')return pct(v);
@@ -1276,6 +1323,10 @@ function renderTable(){
       +(state.sortKey===c[0]?' sorted'+(state.sortDir>0?' asc':''):''),
       text:c[1]+(jnd?' JND↓':'')});
     if(jnd)th.setAttribute('title',JND_TIP(c[0]));
+    if(c[0]==='gates')th.setAttribute('title','Gate glyphs, in order G E D K: '
+      +GATE_DEFS.map(([g,l,d])=>l+' = '+d).join('; ')
+      +'. \u2713 pass, \u2717 fail, \u00b7 NOT MEASURED (absent \u2260 failed). '
+      +'Use the gate-filter chips in the top bar to EXCLUDE failing rows from this list.');
     if(c[0]==='hfnl')th.setAttribute('title','hfnlproxy per-REFERENCE mean signed SROCC '
       +'(quality-oriented, pin 730a386e): + = orders each near-lossless ladder like ssim2, '
       +'- = inverted. NOT the pooled SROCC (range-restricted). Differences under the axis LSD '
@@ -1293,7 +1344,9 @@ function renderTable(){
     const vs=DATA.bakes.map(c[3]).filter(v=>v!=null&&isFinite(v));
     ranges[c[0]]=vs.length?[Math.min(...vs),Math.max(...vs)]:[0,1];});
   const col=COLS.find(c=>c[0]===state.sortKey)||COLS[2];
-  const rows=[...DATA.bakes].sort((a,b)=>{let x=col[3](a),y=col[3](b);
+  const pool=state.gateFilter.size?DATA.bakes.filter(b=>!gateExcluded(b)):DATA.bakes;
+  const nGateHidden=DATA.bakes.length-pool.length;
+  const rows=[...pool].sort((a,b)=>{let x=col[3](a),y=col[3](b);
     if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1; // nulls last either direction
     if(typeof x==='string')return state.sortDir*String(x).localeCompare(String(y));
     x=x==null?-1e9:x;y=y==null?-1e9:y;return state.sortDir*(x-y);});
@@ -1306,6 +1359,8 @@ function renderTable(){
       const v=c[3](b);
       const td=el('td',{class:(c[0]==='name'||c[0]==='regime')?'lbl':'',text:fmtCell(c[0],v)});
       if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
+      if(c[0]==='gates'){td.setAttribute('title',gateTitle(b));td.style.cursor='help';
+        td.style.fontFamily='ui-monospace,monospace';td.style.letterSpacing='1px';}
       // ⚠ registry badges (benchmarks/eval_annotations.json). GENERIC (2026-08-06):
       // any matched entry whose `fields` cover this column's dot-path badges this cell,
       // so adding a registry entry is sufficient — no per-id JS. Only on a rendered
@@ -1339,7 +1394,11 @@ function renderTable(){
     tb.appendChild(tr);
   });
   tbl.appendChild(tb);
-  wrap.append(el('h2',{text:'Scoreboard'}),cap,tbl);
+  const gf=state.gateFilter.size?el('div',{class:'cap',html:'<b>GATE FILTER ON ['
+    +[...state.gateFilter].map(g=>(GATE_DEFS.find(x=>x[0]===g)||[g,g])[1]).join('+')
+    +']: '+nGateHidden+' gate-FAILING rows excluded from this list.</b> '
+    +'Only measured FAILs are excluded — a not-measured gate (\u00b7) never hides a row.'}):null;
+  wrap.append(el('h2',{text:'Scoreboard'}),cap);if(gf)wrap.append(gf);wrap.append(tbl);
   return wrap;
 }
 
