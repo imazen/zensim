@@ -11665,6 +11665,10 @@ mod tests {
             (61, 40, "sub-64, w%8==5 (tail + small)"),
         ];
         let mut worst_overall: (f64, String) = (0.0, String::new());
+        // Per (variant, family): worst |dev| with the sum|x| and bound it came
+        // with, so §10.5's table is filled from measurement, not guessed.
+        let mut per: std::collections::BTreeMap<(&str, &str), (f64, f64, f64)> =
+            std::collections::BTreeMap::new();
 
         for &(w, h, note) in geoms {
             let src_px = textured_image(w, h, 0xD1FF);
@@ -11751,8 +11755,23 @@ mod tests {
                     true,
                 );
 
-                for (variant, accum) in [("dispatched", &lane_pool), ("pools_scalar", &scalar_pool)]
-                {
+                let era2 = dense_block_kernel_era2(
+                    &src_planes[ch],
+                    &dst_planes[ch],
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    act,
+                    w,
+                    h,
+                    true,
+                );
+                for (variant, accum) in [
+                    ("dispatched", &lane_pool),
+                    ("pools_scalar", &scalar_pool),
+                    ("era2", &era2),
+                ] {
                     let got = dense_accum_slots(accum);
                     for i in 0..N_SLOTS {
                         let fam = slot_family(i);
@@ -11796,6 +11815,9 @@ mod tests {
                         let n_px = (w * h) as f64;
                         let chunks_per_lane = (w / 8) as f64;
                         let pools_in_f64 = variant == "pools_scalar" && fam == "pools";
+                        // era-2 folds its tail into the lanes, so it has no
+                        // per-pixel f64 tail term (era-1 does).
+                        let era2_shape = variant == "era2";
                         let acc_u32 = if pools_in_f64 {
                             0.0
                         } else {
@@ -11804,13 +11826,25 @@ mod tests {
                         let acc_u64 = if pools_in_f64 {
                             n_px
                         } else {
-                            h as f64 + 8.0 + (w % 8) as f64 * h as f64
+                            h as f64
+                                + 8.0
+                                + if era2_shape {
+                                    0.0
+                                } else {
+                                    (w % 8) as f64 * h as f64
+                                }
                         };
                         let bound = k_eval * n_px * U32
                             + (acc_u32 * U32 + acc_u64 * U64) * sum_abs[i]
                             + 8.0 * U64 * l2[i].abs()
                             + f64::MIN_POSITIVE;
                         let dev = (got[i] - l2[i]).abs();
+                        {
+                            let e = per.entry((variant, fam)).or_insert((0.0, 0.0, 0.0));
+                            if dev > e.0 {
+                                *e = (dev, sum_abs[i], bound);
+                            }
+                        }
                         // Reported signal: dev as a fraction of its bound.
                         // A kernel change that degrades accuracy moves this
                         // long before it trips the assert.
@@ -11854,6 +11888,17 @@ mod tests {
             100.0 * worst_overall.0,
             worst_overall.1
         );
+        eprintln!("ERA2-ORACLE per-variant x family worst |dev| vs the EXACT sum:");
+        eprintln!(
+            "  {:<14} {:<7} {:>13} {:>13} {:>13} {:>8}",
+            "variant", "family", "max|dev|", "sum|x|", "bound", "% bound"
+        );
+        for ((v, f), (dev, sa, bd)) in &per {
+            eprintln!(
+                "  {v:<14} {f:<7} {dev:>13.4e} {sa:>13.4e} {bd:>13.4e} {:>7.1}%",
+                100.0 * dev / bd
+            );
+        }
     }
 
     /// identical and the gate passes trivially.
@@ -15347,6 +15392,11 @@ mod tests {
 // these kernels, not an era-2 one-off. Measure a new kernel against the oracle
 // BEFORE measuring it against a bench.
 #[cfg(any(test, feature = "oracle"))]
+// The oracle is a RULER, not semantics: its consumers are `cfg(test)` gates and
+// the `oracle`-feature harnesses. Building the lib with `oracle` on but without
+// `cfg(test)` therefore leaves most of it unreferenced, which is correct rather
+// than a smell.
+#[allow(dead_code)]
 pub(crate) mod oracle {
     use super::*;
 
@@ -15755,4 +15805,429 @@ impl Lanes8 {
     fn reduce(self) -> f64 {
         era2_reduce8(self.0)
     }
+}
+
+/// era-2 per-pixel term evaluation, f32 — the SIMD-shaped semantics
+/// (user directive: the SIMD shape is canonical and the scalar path matches
+/// it, never the reverse). Mirrors the `_v` helpers operating on one lane.
+#[inline(always)]
+fn e2_ssim_d(mu1: f32, mu2: f32, s12: f32, ssq: f32) -> f32 {
+    let (c1, c2) = (C1_V2 as f32, C2_V2 as f32);
+    let a = 2.0 * mu1 * mu2 + c1;
+    let b = mu1 * mu1 + mu2 * mu2 + c1;
+    let cov = s12 - mu1 * mu2;
+    let c = 2.0 * cov + c2;
+    let d = ssq - mu1 * mu1 - mu2 * mu2 + c2;
+    let local = (a * c) / (b * d);
+    (1.0 - local).max(0.0)
+}
+#[inline(always)]
+fn e2_bounded_sim(a: f32, b: f32, c: f32) -> f32 {
+    (2.0 * a * b + c) / (a * a + b * b + c)
+}
+#[inline(always)]
+fn e2_saturate(x: f32, c: f32) -> f32 {
+    let x = x.max(0.0);
+    x / (x + c)
+}
+#[inline(always)]
+fn e2_bounded_excess_pair(a: f32, b: f32, c: f32) -> (f32, f32) {
+    let r = 1.0 / (a + b + c);
+    ((a - b).max(0.0) * r, (b - a).max(0.0) * r)
+}
+#[inline(always)]
+fn e2_bounded_excess(a: f32, b: f32, c: f32) -> f32 {
+    (a - b).max(0.0) / (a + b + c)
+}
+#[inline(always)]
+fn e2_pjnd(raw_abs_err: f32, act: f32, k: f32, c: f32) -> f32 {
+    raw_abs_err / (raw_abs_err + c * (1.0 + k * act))
+}
+
+/// era-2 core terms for one pixel: the values every downstream family reads.
+#[inline(always)]
+fn e2_terms(s: f32, dd: f32, m1: f32, m2: f32, s12: f32, ssq: f32) -> (f32, f32, f32, f32) {
+    let d = e2_ssim_d(m1, m2, s12, ssq);
+    let diff_src = (s - m1).abs();
+    let diff_dst = (dd - m2).abs();
+    let edge_dissim = 1.0 - e2_bounded_sim(diff_src, diff_dst, C_EDGE as f32);
+    let (mut art_i, mut det_i) = (0.0f32, 0.0f32);
+    if diff_dst > diff_src {
+        art_i = edge_dissim;
+    } else if diff_dst < diff_src {
+        det_i = edge_dissim;
+    }
+    let raw_sq_err = (s - dd) * (s - dd);
+    let mse_i = e2_saturate(raw_sq_err, C_MSE as f32);
+    (d, art_i, det_i, mse_i)
+}
+
+/// **THE ERA-2 DENSE KERNEL.**
+///
+/// One code path, no tier-specific bodies. Written over `[f32; 8]` fixed
+/// arrays so cross-tier bit-identity is not a proof obligation but a
+/// tautology — there is only one implementation — while LLVM still
+/// auto-vectorises the fixed-size chunks (the workspace's fixed-size-array
+/// pattern). If a tier ever needs a hand-written body for speed, it must be
+/// proven identical to this one; the oracle gate is where that happens.
+///
+/// SHAPE (all of it semantics, see `benchmarks/era2_perf_break_2026-08-31.md`):
+/// 8 f32 virtual lanes entered via `as_chunks::<8>` with the tail folded into
+/// the same lanes; `era2_reduce8`'s fixed tree, never `reduce_add()`; per-row
+/// reduction into an f64 band partial (bounding the f32 lane depth exactly as
+/// era-1 did, so accuracy is unchanged); band partials merged in band index
+/// order, with `ERA2_BAND_ROWS` a pure function of geometry.
+///
+/// PASS SPLIT (perf only — §14.4 proves any split gives identical bytes):
+/// **two passes per row.** Pass A evaluates the terms once, accumulates the 13
+/// core families, and writes the four reusable per-pixel values to a row
+/// scratch; pass B reads that scratch for the 22 pool accumulators. This keeps
+/// each pass's live accumulator set inside a 16-register tier's budget without
+/// re-deriving the division-heavy terms, and it is the split to revisit first
+/// if the tier numbers ask for it.
+/// Cross-vendor / cross-tier harness access: all 35 dense accumulator slots
+/// for both eras, so a static binary can print per-slot hashes on two boxes.
+/// `benchmarks/era2_perf_break_2026-08-31.md` §15.
+#[cfg(any(test, feature = "oracle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn harness_dense_slots(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+    era2: bool,
+) -> [f64; 35] {
+    let a = if era2 {
+        dense_block_kernel_era2(
+            src,
+            dst,
+            mu1,
+            mu2,
+            ssq,
+            s12,
+            activity,
+            width,
+            height,
+            transducer_bank,
+        )
+    } else {
+        dense_block_kernel(
+            src,
+            dst,
+            mu1,
+            mu2,
+            ssq,
+            s12,
+            activity,
+            width,
+            height,
+            transducer_bank,
+        )
+    };
+    oracle::dense_accum_slots(&a)
+}
+
+/// Which SIMD tier the dispatcher actually selected on this host — reported by
+/// the harness so a cross-box difference is never mistaken for a vendor effect
+/// when it is a TIER effect (they are confounded on real hardware).
+#[cfg(any(test, feature = "oracle"))]
+pub fn harness_active_tier() -> &'static str {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use archmage::SimdToken as _;
+        if archmage::X64V4xToken::summon().is_some() {
+            return "v4x (AVX-512)";
+        }
+        if archmage::X64V4Token::summon().is_some() {
+            return "v4 (AVX2)";
+        }
+        if archmage::X64V3Token::summon().is_some() {
+            return "v3 (SSE4.2)";
+        }
+    }
+    "scalar/other"
+}
+
+/// Bench/gate access to the era-1 dispatched kernel (see `dense_block_kernel`).
+#[cfg(any(test, feature = "oracle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn bench_dense_era1(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> f64 {
+    let a = dense_block_kernel(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+    );
+    a.sum_d + a.ws_iw_mse.num
+}
+
+/// Bench/gate access to the era-2 kernel.
+#[cfg(any(test, feature = "oracle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn bench_dense_era2(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> f64 {
+    let a = dense_block_kernel_era2(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+    );
+    a.sum_d + a.ws_iw_mse.num
+}
+
+#[allow(clippy::too_many_arguments, dead_code)]
+fn dense_block_kernel_era2(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    let mut acc = DenseAccum::default();
+    // Row scratch for the pass-A -> pass-B handoff (d, art, det, mse).
+    let mut sc_d = vec![0.0f32; width];
+    let mut sc_art = vec![0.0f32; width];
+    let mut sc_det = vec![0.0f32; width];
+    let mut sc_mse = vec![0.0f32; width];
+
+    let mut b0 = 0usize;
+    while b0 < height {
+        let b1 = (b0 + ERA2_BAND_ROWS).min(height);
+        // f64 band partials — one per accumulator slot.
+        let mut band = [0.0f64; 35];
+
+        for y in b0..b1 {
+            let row = y * width;
+            // ---- PASS A: terms + the 13 core families ----
+            let mut l_d = Lanes8::zero();
+            let mut l_d2 = Lanes8::zero();
+            let mut l_d3 = Lanes8::zero();
+            let mut l_d4 = Lanes8::zero();
+            let mut l_art = Lanes8::zero();
+            let mut l_det = Lanes8::zero();
+            let mut l_mse = Lanes8::zero();
+            let mut l_hfg = Lanes8::zero();
+            let mut l_hfl = Lanes8::zero();
+            let mut l_hfm = Lanes8::zero();
+            let mut l_pj = Lanes8::zero();
+            let mut l_pjl = Lanes8::zero();
+            let mut l_pjh = Lanes8::zero();
+
+            let mut x = 0usize;
+            while x < width {
+                let n = (width - x).min(8);
+                let mut t_d = [0.0f32; 8];
+                let mut t_a = [0.0f32; 8];
+                let mut t_t = [0.0f32; 8];
+                let mut t_m = [0.0f32; 8];
+                let mut t_hg = [0.0f32; 8];
+                let mut t_hl = [0.0f32; 8];
+                let mut t_hm = [0.0f32; 8];
+                let mut t_pj = [0.0f32; 8];
+                let mut t_pl = [0.0f32; 8];
+                let mut t_ph = [0.0f32; 8];
+                for k in 0..n {
+                    let i = row + x + k;
+                    let (s, dd) = (src[i], dst[i]);
+                    let (m1, m2) = (mu1[i], mu2[i]);
+                    let (d, art_i, det_i, mse_i) = e2_terms(s, dd, m1, m2, s12[i], ssq[i]);
+                    t_d[k] = d;
+                    t_a[k] = art_i;
+                    t_t[k] = det_i;
+                    t_m[k] = mse_i;
+                    sc_d[x + k] = d;
+                    sc_art[x + k] = art_i;
+                    sc_det[x + k] = det_i;
+                    sc_mse[x + k] = mse_i;
+
+                    let hf_src = s - m1;
+                    let hf_dst = dd - m2;
+                    let (g, l) =
+                        e2_bounded_excess_pair(hf_dst * hf_dst, hf_src * hf_src, C_HF as f32);
+                    t_hg[k] = g;
+                    t_hl[k] = l;
+                    t_hm[k] = e2_bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF as f32);
+
+                    let act = activity[i];
+                    let rae = (s - dd).abs();
+                    t_pj[k] = e2_pjnd(rae, act, K_PJND_MASK as f32, C_PJND_CLAMP as f32);
+                    if transducer_bank {
+                        t_pl[k] = e2_pjnd(rae, act, K_PJND_MASK_LOW as f32, C_PJND_CLAMP as f32);
+                        t_ph[k] = e2_pjnd(rae, act, K_PJND_MASK_HIGH as f32, C_PJND_CLAMP as f32);
+                    }
+                }
+                // d² / d³ / d⁴ from the SAME d, so the moments cannot drift
+                // from their base (era-1 recomputes them the same way).
+                let mut t_d2 = [0.0f32; 8];
+                let mut t_d3 = [0.0f32; 8];
+                let mut t_d4 = [0.0f32; 8];
+                for k in 0..n {
+                    let d = t_d[k];
+                    t_d2[k] = d * d;
+                    t_d3[k] = d * d * d;
+                    t_d4[k] = d * d * d * d;
+                }
+                l_d.add_tail(&t_d[..n]);
+                l_d2.add_tail(&t_d2[..n]);
+                l_d3.add_tail(&t_d3[..n]);
+                l_d4.add_tail(&t_d4[..n]);
+                l_art.add_tail(&t_a[..n]);
+                l_det.add_tail(&t_t[..n]);
+                l_mse.add_tail(&t_m[..n]);
+                l_hfg.add_tail(&t_hg[..n]);
+                l_hfl.add_tail(&t_hl[..n]);
+                l_hfm.add_tail(&t_hm[..n]);
+                l_pj.add_tail(&t_pj[..n]);
+                l_pjl.add_tail(&t_pl[..n]);
+                l_pjh.add_tail(&t_ph[..n]);
+                x += n;
+            }
+
+            // ---- PASS B: the 11 weighted pools from the row scratch ----
+            let (mut p_mw, mut p_iw) = (Lanes8::zero(), Lanes8::zero());
+            let mut p_m = [Lanes8::zero(); 4];
+            let mut p_i = [Lanes8::zero(); 4];
+            let mut p_kn = [Lanes8::zero(); 3];
+            let mut p_kd = [Lanes8::zero(); 3];
+            let mut x = 0usize;
+            while x < width {
+                let n = (width - x).min(8);
+                let mut mw = [0.0f32; 8];
+                let mut iw = [0.0f32; 8];
+                let mut mv = [[0.0f32; 8]; 4];
+                let mut iv = [[0.0f32; 8]; 4];
+                let mut kn = [[0.0f32; 8]; 3];
+                let mut kd = [[0.0f32; 8]; 3];
+                for k in 0..n {
+                    let act = activity[row + x + k];
+                    let sat = e2_saturate(act, C_ACTIVITY as f32);
+                    let m_w = 1.0 - sat;
+                    let i_w = sat + IW_WEIGHT_FLOOR as f32;
+                    mw[k] = m_w;
+                    iw[k] = i_w;
+                    let vals = [sc_d[x + k], sc_art[x + k], sc_det[x + k], sc_mse[x + k]];
+                    for j in 0..4 {
+                        mv[j][k] = m_w * vals[j];
+                        iv[j][k] = i_w * vals[j];
+                    }
+                    for (j, &v) in vals[..3].iter().enumerate() {
+                        let sal = e2_saturate(v, C_PEAK as f32);
+                        kn[j][k] = sal * v;
+                        kd[j][k] = sal;
+                    }
+                }
+                p_mw.add_tail(&mw[..n]);
+                p_iw.add_tail(&iw[..n]);
+                for j in 0..4 {
+                    p_m[j].add_tail(&mv[j][..n]);
+                    p_i[j].add_tail(&iv[j][..n]);
+                }
+                for j in 0..3 {
+                    p_kn[j].add_tail(&kn[j][..n]);
+                    p_kd[j].add_tail(&kd[j][..n]);
+                }
+                x += n;
+            }
+
+            // ---- per-row reduction into the f64 band partial ----
+            let rowvals = [
+                l_d, l_d2, l_d3, l_d4, l_art, l_det, l_mse, l_hfg, l_hfl, l_hfm, l_pj, l_pjl, l_pjh,
+            ];
+            for (b, v) in band[..13].iter_mut().zip(rowvals.iter()) {
+                *b += v.reduce();
+            }
+            // peak num/den (ssim, art, det), then mask (4 num + shared den),
+            // then iw (4 num + shared den) — the DenseAccum slot order.
+            for j in 0..3 {
+                band[13 + j * 2] += p_kn[j].reduce();
+                band[14 + j * 2] += p_kd[j].reduce();
+            }
+            let mw_row = p_mw.reduce();
+            let iw_row = p_iw.reduce();
+            for j in 0..4 {
+                band[19 + j * 2] += p_m[j].reduce();
+                band[20 + j * 2] += mw_row;
+                band[27 + j * 2] += p_i[j].reduce();
+                band[28 + j * 2] += iw_row;
+            }
+        }
+
+        // ---- band partials merge in BAND INDEX ORDER ----
+        let s = &mut acc;
+        s.sum_d += band[0];
+        s.sum_d2 += band[1];
+        s.sum_d3 += band[2];
+        s.sum_d4 += band[3];
+        s.sum_art += band[4];
+        s.sum_det += band[5];
+        s.sum_mse += band[6];
+        s.sum_hf_gain += band[7];
+        s.sum_hf_loss += band[8];
+        s.sum_hf_mag_loss += band[9];
+        s.sum_pjnd += band[10];
+        s.sum_pjnd_lo += band[11];
+        s.sum_pjnd_hi += band[12];
+        for (j, w) in [
+            (&mut s.ws_peak_ssim, 13),
+            (&mut s.ws_peak_art, 15),
+            (&mut s.ws_peak_det, 17),
+            (&mut s.ws_mask_ssim, 19),
+            (&mut s.ws_mask_art, 21),
+            (&mut s.ws_mask_det, 23),
+            (&mut s.ws_mask_mse, 25),
+            (&mut s.ws_iw_ssim, 27),
+            (&mut s.ws_iw_art, 29),
+            (&mut s.ws_iw_det, 31),
+            (&mut s.ws_iw_mse, 33),
+        ] {
+            j.num += band[w];
+            j.den += band[w + 1];
+        }
+        b0 = b1;
+    }
+    acc
 }

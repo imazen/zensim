@@ -252,6 +252,19 @@ required-features = ["custom-profiles", "feature-regime-v2"]
 name = "era2_accum_shape"
 harness = false
 
+# Cross-vendor / cross-tier probe for the era-2 reduction-order result.
+# benchmarks/era2_perf_break_2026-08-31.md §15
+[[example]]
+name = "era2_vendor_probe"
+required-features = ["oracle", "training"]
+
+# era-1 vs era-2 dense kernel, paired. The break is justified by speed, so the
+# kernel carrying it is measured before it is flipped.
+[[bench]]
+name = "era2_dense_ab"
+harness = false
+required-features = ["oracle"]
+
 [[bench]]
 name = "fold_pools_bench"
 harness = false

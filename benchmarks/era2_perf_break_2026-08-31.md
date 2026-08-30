@@ -929,3 +929,63 @@ accumulator receives nor their order — each accumulator still sees its terms i
 increasing `x`. **Any pass split yields identical bytes.** So the split can be
 tuned freely, even per tier, without touching the era. Only the *lane count*,
 the *reduction tree* and the *band size* are semantics.
+
+---
+
+## 15. The `reduce_add` hypothesis: MEASURED on one vendor/tier pair
+
+§14.2 flagged, as a hypothesis and explicitly not a claim, that the
+tier-dependent `reduce_add` could be a contributor to v1's historical
+cross-vendor golden failure. It is now measured on one pair.
+
+**Method.** `zensim/examples/era2_vendor_probe.rs` — one binary, no
+`target-cpu=native`, printing all 35 dense accumulator slots as raw f64 bits
+for **both eras** across three geometry classes (tight 64×64, non-tight
+200×150, scalar-tail 127×93), plus the tier the dispatcher actually selected.
+Built once here, `scp`'d, run on both boxes, diffed.
+
+| box | CPU | vendor | tier selected |
+|---|---|---|---|
+| dev (this box) | AMD Zen 4 | AuthenticAMD | **v4x (AVX-512)** |
+| i134 (LAN) | Intel Core i5-13400F (Raptor Lake) | GenuineIntel | **v3 (SSE4.2)** |
+
+**Result.**
+
+| era | slots differing across the pair | per geometry |
+|---|---:|---|
+| **era-1** | **66 of 105** | 22/35 at each of 64×64, 200×150, 127×93 |
+| **era-2** | **0 of 105** | 0/35 at every geometry |
+
+era-1 diverges on **63 %** of dense accumulator slots between the two boxes.
+era-2 is **bit-identical** — same binary, different vendor, different tier.
+
+### 15.1 What this does and does not establish
+
+**Does:** the era-2 shape (fixed 8-lane grouping + the written-out
+`era2_reduce8` tree + tail folded into the lanes) produces byte-identical
+output across a genuine vendor pair where era-1 does not. The hypothesis is
+**MEASURED on this pair**, not merely plausible.
+
+**Does not:** prove it for all vendors. This is **one pair**. `neon` and
+`wasm128` remain unverifiable from this box (§12.4) and stay declared as such;
+CI is where they become evidence.
+
+**And the confound must be named:** vendor and tier are **not separable here**.
+The AMD box selects `v4x` and the Intel box selects `v3`, so what was varied is
+*(vendor, tier)* jointly. The mechanism is tier-dependent — `reduce_add`
+resolves per backend — so the honest statement is that this is a **cross-tier**
+result which a vendor difference happened to induce. That is exactly the shape
+the historical failure had (all non-AMD classes agreeing with *each other* on
+one alternative result set, i.e. clustering by reduction shape rather than by
+CPU), which is why it is consistent with the hypothesis — but "consistent with"
+is as far as one pair goes.
+
+### 15.2 The consequence worth surfacing to the user
+
+era-1's golden policy is a **tolerance** precisely because exactness never held
+cross-vendor (241–246 of 372 v1 features diverged on every non-AMD class). If
+era-2 is bit-identical across tiers, **re-tightening the golden gate from
+tolerance back to exact becomes a user option** — recovering a materially
+stronger correctness property that was given up in 2026-08. Registered as an
+option, not taken: it needs the CI matrix (`windows-11-arm`, `macos-*-intel`,
+`i686`) to confirm the `neon`/`wasm` half before anyone relies on it.
