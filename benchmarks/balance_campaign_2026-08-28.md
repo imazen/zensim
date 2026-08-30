@@ -2795,3 +2795,36 @@ encode or a recorded divergence (ledger `failed/encoder_panic` rows carry
 onto this run when svt drains). Expected: ~25% refusals × one retry. The
 verified cells are exactly the "zen aom backend" data the user asked for;
 the refusal map is the port session's next worklist.
+
+## DIVERGENCE WORK (user: "work on divergences", 2026-08-30 ~06:0x–06:4xZ) — KB-41: the refusals were ALL screen-detected frames; harness mismatch closed at the arm, port residual pinned with tiny reproducers
+- Claimed `zenav1-aom` (stale 24 h marker, clean tree; worked on `main@origin`), read
+  its differential playbook (§10 "diagnose to the decision") and the framesize KBs
+  (22/26/28/36/38) — none matched. The decisive read was the CONTENT: 8172.scale1920x1080
+  is a mailing-list screenshot; 1280x800 a NASA page; 128x80 a tiny screenshot; 128x128 and
+  85x128 product shots on flat white; 1024x745 a dark sunset photo.
+- **Localizer `crates/aom-bench/tests/kb41_screen_detected_defaults.rs`** (on-demand,
+  `ZENAV1_PLANES_DIR` = the exact planes the arm fed both encoders, dumped by the new
+  `ZEN_AOMRS_DUMP_PLANES` knob): reads the oracle stream's own
+  `allow_screen_content_tools` — **30/30 refused cells have it set** (libaom's
+  anti-aliasing-aware detector flags the dark photo too). The arm drove the port with
+  `ToggleKnobs::default()` (palette+IntraBC OFF) against `c_encode_defaults` (libaom
+  ALLINTRA: both ON). **My "720p band" hypothesis in #14 was WRONG** — corrected on the
+  issue (comment 2) and in the zenav1-aom KB-41 entry; the passing sizes were simply
+  frames the detector left alone.
+- **Arm fix (zenmetrics `a90eb727`):** mirror the header bit into the port's knobs. Effect
+  (cpu 6/8, cq {6,32,57}): 128x128 6/6 and 128x80 5/6 byte-identical; 85x128 1/6 (five
+  cells: equal length, different bytes; `ZENAV1_DECODE_BOTH=1` shows the first recon
+  divergence at luma (0,87)/(17,61)/(48,32)); 1024x745 +6/+8/−32 B; 1280x800 ≈ −2 kB;
+  1920x1080 −9..−20 kB (from +32..+231 kB). The residual = the port's palette/IntraBC
+  search fidelity on real screen content (KB-15 / KB-P29 / PALETTE_MANY_COLORS_OPEN) — now
+  with an 85x128 cq57 cpu6 reproducer (267 B both sides). Landed on zenav1-aom main
+  (`4e9c2d22`: localizer + KB-41 entry + T4 row).
+- Fleet: image `exec-zensim944hdr-a90eb727` (digest `98cc36ac…`); the 1,575
+  harness-mismatch-era `encoder_panic` rows were pardoned (`zenfleet-ctl requeue`,
+  documented broken-era window) and r3500 relaunched; **svt wave DRAINED** (gap 0/130,950;
+  pairs table 130,590 DONE cells) → r5900xt + r7900x rolled onto the aom run;
+  svt score waves declared: `avifsvt-sf-gpu-20260830` (ssim2-gpu+butteraugli-gpu, 11,608
+  jobs, on i134 via the validated cuda13 sequencer) and `avifsvt-sf-cpu-20260830`
+  (cvvdp+zensim-foldapp2 944 features, 11,608 jobs, CPU pool after the aom encodes drain).
+- Perf note for the port lane: with IntraBC on, the port's 1920x1080 cells took ~80 s each
+  in the localizer (the oracle: ~1 s) — the screen-tools search is far outside Gate 3.
