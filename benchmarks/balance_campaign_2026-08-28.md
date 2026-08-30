@@ -3006,3 +3006,76 @@ closed with the KB-41 roots (the "720p band" was which renditions are screen-det
   (only the listed `ZM_*` tokens cross), so this was a hand-mirrored `docker run` of the same
   env/entrypoint — extend `lan_score_launch.sh` to forward `ZM_CPUSET/ZM_CPU_SHARES/ZM_MEMORY`
   before the next tower launch.
+
+### KB-41 ROOTS #18-#21 — THE cpu-4/5 SCREEN RESIDUALS ALL CLOSE; THE WAVE'S SCREEN CAP IS LIFTED (2026-08-30 ~13:2xZ, zenav1-aom, after `4e0229e1`)
+
+The five cells left open after roots #14-#17 (s4: 1280x800 cq44 +10 B, 1920x1080
+cq57 +10 B, 1920x1080 cq6 −33 B; s5: 1280x800 cq25 −5 B, 1920x1080 cq32 −123 B)
+were four more C conventions, each found by the same instrument — first-syntax-diff
+on the two decoded streams, then paired C/port probes around the first diverging
+block (per-txb eobs on the OUTPUT run, `search_tx_type` quant/trellis state, the
+intra edge availability + neighbour samples, the IntraBC per-direction RD, the
+est-rd prune arrays):
+
+- **#18** AB-partition split-ctx reuse (`is_split_ctx_is_ready`) needs a SPLIT child
+  leaf with no palette and no CfL — the port reused any leaf.
+- **#19** the SEARCH-side txfm-partition contexts are stamped on the OUTPUT run too
+  (`tx_partition_count_update` → `update_txfm_count` → `txfm_partition_update`,
+  partition_search.c:511-516; the dry run stamps via `tx_partition_set_contexts`).
+  The port stamped only on dry runs, so after an SB's output run the search arrays
+  held the value restored at SB start — the row-ABOVE SB's stamp — and the next SB
+  row costed a tx split at ctx 18 where C had 19 (1080p cq57 s4, mi(32,90) under the
+  8x8 IntraBC at mi(30,90), leaf TX_4X4 eobs [0,0,5,0] on both sides).
+- **#20** the IntraBC candidate's predict-skip SSE is `pixel_diff_dist(x, 0, 0, 0,
+  bsize, bsize, NULL)` — the VISIBLE block only. The port summed the whole block,
+  so a frame-bottom 64x64 (56 visible rows) carried its 8 off-frame rows in the skip
+  candidate (847872 vs C's 716800), lost to PAETH, and the next SB coded differently
+  (same cell, mi(256,16), dv (−512,0)). Found via a DC-prediction mismatch (224 vs
+  226) that turned out to be the LEFT neighbour's IntraBC+DC recon — a red herring
+  the per-direction IBC-RD probe resolved.
+- **#21** a pick-skip'd var-tx txb hands its siblings the SEARCHED entropy context
+  (`no_split->txb_entropy_ctx = p->txb_entropy_ctx[block]`, tx_search.c:2447 —
+  `pick_skip_txfm` zeroes only eob + tx type; the encode pass re-derives 0 via
+  `is_blk_skip`). The port zeroed it, so the (1,1) child of an 8x8 IntraBC got
+  txb_skip_ctx 3 where C had 5 once the (0,1) child searched eob 13 and was
+  pick-skip'd (1080p cq6 s4, mi(20,154), dv (−368,−824)). This one closed BOTH the
+  cq6 s4 and the cq32 s5 cells.
+
+Census after the four: **s4 9/9, s5 3/3, the s6/s8 dir 24/24**, every gate suite
+green, all temporary probes stripped before the commit (a `cargo fmt` that would
+have reflowed 103 files was rolled back via `jj op restore`; the repo is not
+rustfmt-clean and the commit stays semantic: 4 files, +46/−6).
+
+**Cap lifted.** The s4 census — three 1920x1080 cells among nine — runs in 81.5 s
+INCLUDING the oracle encode and both decodes, ~20 s per 1080p cell at cpu 4 (the
+executor comment's ">40 min at cpu 4" predates roots #10/#16). The 2,976 remaining
+`encoder_panic`-class cells of `avifaom-enc-20260830` (112 renditions above 0.30 MP,
+all q, all three speeds, refused 11:52–12:11Z by the cap; 123,024 done) are real
+encodes now: zenmetrics `ZEN_AOMRS_MAX_SCREEN_MP` default 0.30 → 16 MP (largest
+rendition 3062x4096 = 12.5 MP, ~2-3 min at cpu 4), executor image rebuilt on the
+roots-#18-#21 port, the cells re-queued, the three LAN boxes relaunched.
+
+### SVT WAVE HARVESTED — 130,590 cells × (4 metrics + 944 features) (2026-08-30 13:1xZ)
+
+Both svt score runs finished clean (`avifsvt-sf-gpu-20260830` 11,608/11,608 done, 0
+failed; `avifsvt-sf-cpu-20260830` 11,608/11,608, 0 failed — the 113 GPU pass-kill rows
+requeued at 08:5xZ all completed). Write-back (`writeback_scores.py avifsvt avif
+<both runs>`, two-stage env: `ZEN_STORE=tower ZEN_JOBS_BUCKET=zentrain
+ZEN_PAIRS_PARQUET=/mnt/v/output/avifsvt-2026-08-30/pairs_svt.parquet`, metrics
+`butteraugli-gpu,cvvdp,ssim2-gpu,zensim-foldapp2`; 23,218 blobs; run-heavy peak RSS
+6.85 GiB, 133 s) → `/mnt/v/output/avifsvt-2026-08-30/harvest-2026-08-30/`:
+
+- `scores.parquet` — 130,590 rows × 10 cols: `butteraugli_max_gpu` (0–64.9, mean 4.84),
+  `butteraugli_pnorm3_gpu` (0–21.0), `cvvdp_cpu_imazen_v0_1_0` (3.58–10, mean 9.55),
+  `ssim2_gpu` (−141–99.99, mean 69.5; **921 nulls = 19 renditions at ≥ 12 MP
+  (3000x4000 / 4000x3000 / 2945x4417 …) where ssim2-gpu errored** — the 969 "error
+  rows skipped" — a CPU fast-ssim2 backfill for those 19 is registered, not run).
+- `features_folded720append2.parquet` — 130,590 rows × 944 `feat_*` (the 944 regime,
+  `miss_sha=0 miss_score=0`).
+- `zensim_score` is **empty by construction** in both files: the spec declared the
+  944 feature extractor (`zensim-foldapp2`) and no scalar zensim metric; the scalar comes
+  from a bake over the features (the training views), not from this harvest.
+
+Next for this lane: `avifgen_training_views.py`-style train_944 / eval8_944 views over
+the harvest (origin even/odd rule — the corpus is train-side only), then the
+`fused944native` comparison the carrier report registered.
