@@ -2116,3 +2116,29 @@ separate). Gate unchanged: kon-504 ≥ 0.55 holding cid22 ≥ 0.885. This is
 extractor work (the v1 masked/peaks/iw kernels exist; wire an appendix into
 the extended path) + a retrain — the highest-evidence kon-closure lever on
 the table.
+
+## R2 EXECUTION — THE KON-COMPANION EXPERIMENT (registered pre-fit, 2026-08-29; user: "do the work all the way through to the final end")
+
+**Design (the decision experiment for the carrier hypothesis at 944-class):**
+combined scorer = small head over [C_score, the 10 named carriers
+(masked f237/231/243, peaks f190/226/178/196, iw f333/303/321 — 372-root
+values)], trained by THE trainer (n-hidden 0, 11 inputs, RankNet) on:
+- konjnd_bpg train half (8,060 rows; BPG refs ⊥ the JPEG eval refs — CLEAN)
+- kadid + tid full (T1 guards; frames min-maxed as in the B recipe)
+- val group = konjnd_bpg val (%10∈{8,9})
+C_score comes from north-anchor's canonical forward (bake_contrib
+--dump-scores, parity-gated vs Predictor); carriers from the 372 tables;
+row alignment across regimes VERIFIED per-corpus by target rank-identity /
+(ref, target) join before any fit — misalignment aborts.
+
+**Frozen bars:** PASS = combined kon-504 ≥ 0.55 AND combined cid22 ≥ 0.885
+(C alone: 0.5006 / 0.8927; B: 0.5935 / 0.8764). STRETCH: kon-504 ≥ 0.5935
+(match B). Eval surfaces are CLEAN of the fit (JPEG 504 refs never fit;
+cid22-49 never fit). k=3 seeds — the k-seed spread is REPORTED (the
+seed-stability discipline), selection by val group only.
+**Falsifier:** no seed reaches both bars ⇒ the carriers are insufficient at
+944-class in companion form ⇒ the 954 single-model fleet retrain loses its
+cheap justification; record and close.
+**If PASS:** name the companion, run the wider battery on the combined
+scorer, and register the production step (two-stage scorer wiring vs the
+954-regime fleet extraction) as the follow-on.
