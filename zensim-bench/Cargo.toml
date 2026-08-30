@@ -182,6 +182,8 @@ zenjxl = { path = "../../zenjxl" }
 # amendment; the "patch it in and KEEP WORKING" rule).
 zenjxl-decoder = { path = "../../zenjxl-decoder/zenjxl-decoder" }
 zenpixels = { path = "../../zenpixels/zenpixels" }
+# zenjpeg@0.9.0 requires unpublished zenanalyze 0.2.x — dev-only local patch (2026-08-30).
+zenanalyze = { path = "../../zenanalyze" }
 
 # Mirror the root workspace build profiles (this is its own workspace root).
 [profile.release]

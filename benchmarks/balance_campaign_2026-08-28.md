@@ -2409,3 +2409,41 @@ Remaining criterion-8 steps: wire the bake into `zenpicker::MetaPicker`
 spread report (the stability discipline applies to the picker too).
 Artifacts: `/mnt/v/output/zensim/metapicker-2026-08-30/` (bake + toml
 manifest + inputs + _MANIFEST).
+
+### THE 10 CARRIERS — NAMED + COSTED (2026-08-30, user question)
+
+Decoded from the v1 layout (metric.rs feature tables; peaks base 156, masked
+base 228, iw base 300; scale-major × {X,Y,B} × slot):
+
+| f | family | name | scale · ch | what it measures |
+|---|---|---|---|---|
+| f178 | peaks | art_l8 | s1 · X | L8-pooled edge ARTIFACT (ringing/blocking heavy tail) |
+| f190 | peaks | art_l8 | s1 · B | 〃 |
+| f196 | peaks | art_l8 | s2 · X | 〃 |
+| f226 | peaks | art_l8 | s3 · B | 〃 |
+| f231 | masked | masked_art_4th | s0 · X | L4 edge artifact × FLATNESS mask (artifacts in flat regions) |
+| f237 | masked | masked_art_4th | s0 · Y | 〃 |
+| f243 | masked | masked_art_4th | s0 · B | 〃 |
+| f303 | iw | iw_art_4th | s0 · X | L4 edge artifact × IW weight (artifacts in TEXTURED regions) |
+| f321 | iw | iw_art_4th | s1 · X | 〃 |
+| f333 | iw | iw_art_4th | s1 · B | 〃 |
+
+**All ten are the same physical quantity — edge-artifact error — under
+extreme poolings**: heavy-tail peaks (L8), flat-region weighting, and
+texture weighting, at fine scales. The near-threshold JND signal is
+"ringing/blocking in its worst hiding places", which is why mean-pooled
+stacks miss it and why B (which carries these slots) owns kon.
+
+**Compute cost — MEASURED** (`zensim-bench extended_iw_perf`, 576², 15
+iters, buffered path, rayon): standard-228 2.23 ms → +masked 2.73 → +IW
+2.76 → **both 2.75 ms (1.24×, +0.52 ms/compare)**. The 4 peaks carriers are
+FREE (always-computed accumulators in the base pass); the masked+IW passes
+share their extra sweep (+0.5 ms covers all 6). Structural caveat: these
+poolings are non-streaming — the extended regime is BUFFERED-path only
+(memory shape, not speed, is the streaming constraint). Dev-only
+`[patch.crates-io] zenanalyze` added to zensim-bench (zenjpeg 0.9.0's
+unpublished dep; flagged, revert at release).
+
+**hdrmix-954 status (checked):** no 720-width hdr_v3mix extraction exists
+(the leg is HDR-route 944-native) — hdrmix stays absent from the 954 linear
+mix until an extraction lands (registered; not blocking the candidates).
