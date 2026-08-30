@@ -2386,3 +2386,26 @@ unblock). Missing legs vs B's world: hdrmix (no 954 fusion — ext720 root
 lacks it; buildable from the hdr944-leg + hdr_v3mix-720? registered check),
 kadis (width), konjnd (width). The linear lane's gap to B: kon −0.10,
 cid22 −0.021 — the closest a non-372 linear has come, from a 4-6 leg mix.
+
+### ZENPICKER v1 — HONEST PANELS + BASELINE GATE (2026-08-30 ~02:4xZ)
+
+Grid winner [128,128] lr 2e-3 (6-candidate bounded search, ranked by held-out
+argmin). **Origin-validate view (held-out odd origins, 38,668 (image,zq)
+rows, 245,402 cell pairs): argmin accuracy 0.7499 · byte overhead mean
+4.47% / p50 0.00% / p90 14.52% · bytes-SROCC 0.9869.** Train-side grouped
+panel agrees (0.702 / 4.6% / 0 / 14.4%) — no split-shift pathology.
+
+**Pre-declared baseline gate — PASSED decisively.** Always-best-single-family
+on the same view (coarse 5-target grid; picker numbers are dense-grid —
+stated): best fixed choice = always-avif at **20.4% mean overhead** (p90
+55.1%); every other fixed family is far worse (webp 60%, jxl 81%, jpeg 94%
+mean). The picker's 4.47% is **4.5× better than the best possible fixed
+routing**; median pick costs ZERO extra bytes. Interesting corpus fact
+banked: avif reaches every (image,zq) cell and is the single-family
+runner-up by a wide margin — consistent with the avif-priority directive.
+
+Remaining criterion-8 steps: wire the bake into `zenpicker::MetaPicker`
+(inert, flip user-gated), test-view touch-once at ship proposal, k-seed
+spread report (the stability discipline applies to the picker too).
+Artifacts: `/mnt/v/output/zensim/metapicker-2026-08-30/` (bake + toml
+manifest + inputs + _MANIFEST).
