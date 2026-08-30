@@ -3282,3 +3282,86 @@ commit, PARITY/CLAUDE rows, and the 35-tiny-cell trial-encode arm if cheap.
   Pending after that: CPU backfill for the GPU-refused tiny/odd-dim cells (27 seen on the main
   run) and the requeue of the 277 refused large-screen cells once root #22 lands + the executor
   image is rebuilt.
+
+## 2026-08-30 ~17:1xZ — OPUS LANES, ROUND 1 RESULTS (orchestrated; execution delegated per user directive)
+
+**User directives this round:** "bake zenpicker, do R1b, explain why 720 instead of an all-feature
+944 extraction — optimize a pass that extracts all 944 first, use Opus for all."
+
+**Why the carriers came from a 720-width table (answered):** the 944 regime (`folded720append2`)
+writes f156–371 as structural zeros; the only table with those slots live was the `ext720` root
+(unfolded v1 block, row-identical to the ext944 legs); and v1 pool features diverge across
+extraction widths (padded-width effect: f237 rel 7.6e-2, f333 2.05e-1), so all carriers had to
+come from ONE width. The user's amendment replaces that fusion with a one-pass, one-width
+all-live extraction (`V1PoolsMode::Full` → regime `folded720append2pools`, 944 live slots).
+
+### KB-41 lane (zenav1-aom) — DONE: roots #22-#23, both >1 MP screen cells byte-exact
+- **#22** `is_rect_ctx_is_ready` needs a palette-free (luma AND chroma) rect winner, not only
+  non-CfL (partition_search.c:3613-3619) — the RECT twin of #18's SPLIT gate. The hand-off premise
+  "C never evaluates HORZ_B" was a stale-binary dump artifact: C evaluates it and rejects it on
+  sub-block 2 (494,626,860 cumulative vs the port's palette-leaf reuse 427,208,793).
+- **#23** `mbmode_cost` is NOT dead on a KEY frame: the speed≥8 nonrd palette shell charges
+  DC_PRED through `mbmode_cost[size_group][DC_PRED]` (intra_mode_search.c:1139-1152); the port had
+  an all-zero placeholder (C 375 vs port 3) → every nonrd palette header 372 units too cheap.
+  Closes `PALETTE_MANY_COLORS_OPEN` (both kb37 pins → zero).
+- Cells: `2091x3072_cq62_s4` 162,231 B, `_s8` 157,073 B (+0). Census **104/104**. Commits
+  `fb745179` + `d950eec1` (verified on origin). 35 tiny cells = unported
+  `av1_determine_sc_tools_with_encoding` — registered NOT-cheap (6-item checklist, PARITY C3).
+- **KB-42 OPENED (found while gating):** zenav1-aom `main` CI RED since `735a0a6d` (roots #3-#6);
+  300/16 encode integration tests locally + aarch64 aom-bench gates; the landings' gate lists
+  ran `--lib` only. Not caused by #22-#23 (revert-measured). Carrier narrowed to var_tx /
+  partition_pick tx-policy plumbing → Opus KB-42 lane launched (fix + all CI legs green + gate
+  list closed). The 277 refused wave cells requeue after the next executor image (zenmetrics-cli
+  takes the port as a PATH dep, so any image build carries #22-#23).
+
+### R1b lane (zensim) — DONE: `benchmarks/r1b_keyed_rebuild_2026-08-30.md` (commits `c0d5bacf`…`68f02f74`)
+- Keyed: the 11 canonical local legs (149,195 rows; `(ref_path, dist_path)` IS the key — pairs
+  TSVs on disk, row counts equal) + the 3 D1 validate slices (20,812 rows; keys recovered one
+  level up in the bigcodec views, G-KEY 3/3 row-for-row). Keyable-not-built (fleet scale):
+  tbig_200k / tbig_hf / teacher legs / kadis. **NOT KEYABLE at this regime: hdrmix** (no SDR-route
+  extraction of hdr_v3mix exists).
+- Extracted at pools-944: **170,007 rows** + a same-binary zero-block control (18,521).
+  **G-P1 5/5: 728/728 non-pool columns BIT-IDENTICAL to the control** (the regime flag changes the
+  pool block and nothing else); G-P2 216/216 live. G-E 11/11. Drift vs the 2026-08-01 root:
+  22/728 append cols at ~1e-8 (extractor version; reported, not gated).
+- **REPRO HAZARD caught (G-B):** re-extracting KADID from its pairs TSV reproduces the
+  pre-2026-08-05 INVERTED target (−0.582360) — the 08-05 correction was applied to the parquets,
+  not the TSV. Repaired via the owner (+0.582360); anyone re-extracting any ext leg inherits this.
+- **First same-pair bars (B on native 372, arms on native 944):**
+
+  | model | cid22 | \|kon504\| | nonphoto | imazen26 | hfnl |
+  |---|---|---|---|---|---|
+  | **B (shipped)** | **0.8763** | **0.5183** | **0.9093** | **0.9142** | **0.3553** |
+  | A0 zero-block | 0.8311 | 0.2062 | 0.8773 | 0.8806 | 0.2398 |
+  | A2 pools-live | 0.8332 | 0.1911 | 0.8784 | 0.8815 | 0.2474 |
+  | R-1 A0 / A2 | 0.8646 / 0.8652 | 0.3994 / 0.4105 | 0.8709 / 0.8779 | 0.8834 / 0.8891 | 0.2342 / 0.2521 |
+
+  B leads every axis; all arms FAIL the round-6 bars. Whole-block-live moves the head ~0.002
+  cid22 / 0.01–0.02 elsewhere. **A3 (discriminating):** the same driver on the ledger's OWN
+  fused944native tables gives the same near-null (kon −0.1914 vs A2 −0.1911) ⇒ the 720-width
+  fusion is NOT what separates this read from the ledger's +0.3243 carrier head — the RECIPE is:
+  those heads were fit ad hoc with no committed driver/argv. **R1b does not falsify the carrier
+  finding; it makes it UNREPRODUCED until the recipe is recorded.** One-width all-live extraction
+  and the fused tables are behaviourally equivalent for this head (0.0003 kon / 0.0009 cid22).
+- Open: full-mix cid head + `wlin954b` blend (needs bigcodec legs at this regime — fleet job);
+  hdrmix; B's ledger kon 0.5935 vs R1b 0.5183 (instrument difference, unadjudicated). Corpus
+  defects found: `tid2013/reference_images_png/i25.png` lowercase vs TSV `I25.png` (silently loses
+  120 rows); v1's feature-vector length is size-dependent in both extractors (~6.5% of slice rows
+  emit 279 not 372) — the 944 fold is fixed-width. Follow-ups handed back to the lane.
+
+### zenpicker lane (zenanalyze) — IN PROGRESS: 10 commits (`782ee43`→`d7eb26b`)
+- Inert `zenpicker::cell` wiring, touch-once contract test, 13 CI-runnable refusal tests,
+  `zenpicker-train --baselines` (baseline gate at the owner) + k-seed driver, slot→feature identity
+  table, e2e demo. v1 panel reproduced 0.7500 / 4.47% / p50 0 / p90 14.53% / 0.9869; `--hidden
+  128,128 --seed 0` reproduces `metapicker_v1.bin` BYTE-FOR-BYTE.
+- Baseline gate final: picker 4.47% vs always-avif **19.75%** (avif covers only 94.44% of cells —
+  the ledger's "20.4%" corrected). Band so far (2/5 seeds): s0 0.7500/4.47%/14.53%,
+  s4 0.7551/4.27%/13.70% — s4 is WORSE on the trainer's internal held-out split but BETTER on the
+  honest panel: the grid search's selection surface inverts against the honest one at this margin
+  (registered). Remaining seeds finalize ~17:41Z.
+
+### aom score harvest — on disk
+i134 GPU gap-fill drained 16:37Z (33 min); write-back: 125,688 cells × 4 metrics
+(`scores.parquet`), 125,687 × 944 (`features_folded720append2.parquet`), 1,540 error rows
+skipped; views blocked on `avifgen_training_views.py`'s positional ID assert (one feature-less
+cell) → ID-column join fix + rerun handed to the all-944 lane. Idle score containers removed.
