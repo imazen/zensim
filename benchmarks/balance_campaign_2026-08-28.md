@@ -2447,3 +2447,56 @@ unpublished dep; flagged, revert at release).
 **hdrmix-954 status (checked):** no 720-width hdr_v3mix extraction exists
 (the leg is HDR-route 944-native) — hdrmix stays absent from the 954 linear
 mix until an extraction lands (registered; not blocking the candidates).
+
+## CORRECTIONS + MEASUREMENTS (2026-08-30, user questions: buffering, peak memory, feature ids, bench quality, skip-unused)
+
+**1. "Buffered-only" RETRACTED — the streaming pass already computes every carrier.**
+`streaming.rs` accumulates `ssim_d8/edge_art8/edge_det8` (L8), the max
+slots, `masked_*` (incl. `masked_art4`) and `iw_*` per strip and finalizes
+`art_l8`, `masked_art_4th`, `iw_art_4th` (lines 405–425, 557–621). The
+production folded path emits `[156..372) = 0.0` by POLICY ("deprecated: no
+current model reads them", metric.rs:1684), not by inability. v1 is fully
+streamable; the 944 layout simply drops the block. (The measured
+"padded-width divergence" is buffered-372 vs streaming-720 numerics; the
+fused carriers came from the streaming-720 family, consistent with the 944
+legs.)
+
+**2. Peak memory by feature set — MEASURED (`/usr/bin/time -v` max RSS):**
+
+| path | 576² | 2048² | 4096² |
+|---|---|---|---|
+| streaming 944 (`foldapp_stream_bigpair`) | 17 MB / 0.01 s | 71 MB / 0.68 s | 188 MB / 2.78 s |
+| buffered v1-372 (`extended_iw_perf`, 4-config process = upper bound) | 35 MB / 2.8 ms | 235 MB / 26.8 ms | 664 MB / 135 ms |
+
+Inside the streaming pass the carriers cost accumulators only (no extra
+planes: flatness/IW maps are already built for v2's masked/iw slots) —
+the memory-optimal structure is the streaming pass with the block emitted.
+Per-config buffered RSS (228 vs 372) NOT separable in that harness — not
+measured.
+
+**3. "Why add 10 features that already have ids" — CONCEDED.** f178/190/
+196/226/231/237/243/303/321/333 are native slots of the 944 layout
+(structural zeros). The discipline-correct design is to UN-ZERO the native
+slots under a regime flag (zeroed vs filled rows never column-mixed), not to
+append f944+. Rebuilt at native slots (`fused944native-2026-08-30/`, width
+944) and re-ran the matched BVLS pair — at native slots the sign-mask PINS
+the carriers ≥0 (B's own class): **kon 0.4570 / cid22 0.8726** (appended-
+free: 0.4887/0.8502; no-carrier: 0.1644/0.8249). The carrier effect stands
+either way (+0.29 kon); the pinned form trades kon for cid22 — 0.8726 is
+within 0.004 of B. The "10 vs whole block" question resolves the same way:
+emit the WHOLE block (free) and let dead-column pruning drop what a bake
+doesn't use.
+
+**4. Bench honesty:** the "+0.52 ms" was the existing `extended_iw_perf`
+wall-clock loop (15 iters, synthetic pair) on the OLD buffered v1 path —
+a real measurement but NOT zenbench-grade (no interleaving / paired stats)
+and NOT the optimal structure. The correct instrument is a zenbench paired
+A/B of the streaming pass with the block emitted vs zeroed (expected
+noise-level) — registered as the next perf measurement.
+
+**5. Skip-unused-blocks (user design ask):** family gates already exist as
+config booleans (`compute_all_features` / `extended_features` /
+`compute_iw_features`); the optimal extractor generalizes them to a
+bake-derived FAMILY MASK (from `bake_block_profile` / the live-mask) so
+extraction skips any v1/v2/append family the loaded bake does not read —
+registered as the extractor design item, zenbench-gated per family.
