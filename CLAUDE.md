@@ -508,13 +508,38 @@ form is `compute_multiscale_stats_streaming_strips*`. The fold
 (`foldapp_streaming_walk`) is a third thing. At least two sessions have been
 misled by this.
 
-**The fold is an EXTRACTOR, not a metric.** `ZensimV2Result` has no `score()`.
-Every scoring entry — `compute`, `compute_with_ref`, `*_and_diffmap`, `classify`,
-`compute_pu_linear*`, `compute_streaming_strips*` — runs the buffered walk, as
-does attribution's basic canvas (`attribution.rs:1378`). **Buffered is not
-removable today**: no score in the fold, no ref-cached fold form, the
-buffered-native attribution canvas, and the width divergence below. `zensim-gpu`'s
-only CPU oracle is `compute_extended_features` too.
+**The fold WAS an extractor, not a metric — and as of 2026-08-30 it has a
+score.** `ZensimV2Result` still has none, but
+`Zensim::with_engine(ScoringEngine::Fold)` (`#[doc(hidden)]`,
+`feature-regime-v2`-gated, default OFF) routes `compute`,
+`compute_with_codec_hint`, `compute_extended_features`,
+`compute_all_features`, `compute_with_ref` and `classify` through the fold and
+returns a **BIT-IDENTICAL** `ZensimResult` — score, `raw_distance`, every
+feature, and `mean_offset`. Gates: `zensim/tests/fold_engine_parity.rs` (11
+tests, `to_bits()` equality over 18 geometries × {serial, rayon} × rayon pools
+1/2/3/8/16) and `fold_backed_fixtures_match_golden` in `v1_golden_bytes.rs`
+(the fold reproduces the PINNED golden arrays, not merely the buffered path).
+Record: [`benchmarks/fold_engine_2026-08-31.md`](benchmarks/fold_engine_2026-08-31.md).
+
+**Corrections to the paragraph this replaces**, all read from source:
+`PrecomputedReference` is a pyramid cache, NOT buffered-walk state — the fold's
+producer reads it directly, so the ref-cached form needed no new type;
+`build_attribution_into_sink` calls only `crate::blur`, so
+`compute_attribution_density*` was never walk-bound (the FUSED compare is —
+`compute_zensim_streaming_with_ref_and_attr_{planes,fold}`); the width
+divergence was closed by option C; and `zensim-gpu`'s oracle walk is now
+selectable (`ZENSIM_GPU_ORACLE_ENGINE=fold`, zenmetrics `92bdec00`) with the
+swap measured inert (103 pass / same 6 pre-existing wgpu failures either way).
+
+**Buffered is still not removable, but for a DIFFERENT and now-gating reason:**
+`feature-regime-v2` is not a default feature, so a default `cargo add zensim`
+build contains no fold at all. Six entries also still route to buffered by
+design — `compute_pu_linear*`, the fused attribution compare,
+`compute_streaming_strips*`, weight-skipping linear profiles
+(`PreviewV0_1`/`V0_2` `compute()`), any `with_stop` request, and any
+`num_scales != 4`. The registered retirement proposal (prerequisites, deletion
+order, what must survive) is §9 of the fold-engine note; **nothing has been
+deleted and it awaits sign-off.**
 
 **Parallelism is the structural asymmetry.** Buffered parallelises band-per-strip,
 degree `layout_h.div_ceil(STRIP_INNER)` — it grows with image height. The fold
