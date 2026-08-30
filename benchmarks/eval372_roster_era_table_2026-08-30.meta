@@ -1,0 +1,14 @@
+# Provenance for eval372_roster_era_table_2026-08-30.tsv
+commit:        72d2b436 (tooling ea16c7ee; TID loader fix 2d94890c)
+host:          WSL2 dev box (28 cores / ~59 GiB)
+command:       run-heavy --mem 16G --jobs 8 -- ./scripts/canonical_corpus/eval372_roster.sh
+               then: python3 scripts/canonical_corpus/eval372_roster_table.py
+wall clock:    111 s (11 bakes x 2 eras x default 14-corpus bake_verdict --full-json, + kon504 side roots)
+old root:      /mnt/v/zen/zensim-training/2026-05-15-full-features        (PRE-FIX; thread-dependent masked/IW)
+new root:      /mnt/v/zen/zensim-training/2026-08-30-full-features-372    (build_commit ea16c7ee)
+dial grid:     dial_grid_372col_2026-05-29_quarantined_v2.parquet (SAME file on both eras — see the doc's §3a
+               caveat: the grid is itself pre-fix era and is not re-extractable)
+stats owner:   every number is READ from bake_verdict --full-json (zensim_validate::panel -> zenstats);
+               the table script computes no statistic.
+record:        benchmarks/eval372_current_root_2026-08-30.md ; ledger docs/DATASET_HISTORY.md §3.28
+full outputs:  /mnt/v/output/zensim/eval372-roster-2026-08-30/ (per-bake md + json, kon504/, ordering flips)
