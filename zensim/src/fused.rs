@@ -101,6 +101,29 @@ pub(crate) fn fused_vblur_features_ssim(
     store_mu: bool,
     sd_out: &mut [f32],
     store_sd: bool,
+    // `ssq_out` / `s12_out`: the V-blurred `h_sigma_sq` / `h_sigma12` for the
+    // inner rows — the exact planes `box_blur_v_from_copy` would produce from
+    // the same inputs, taken straight out of the registers instead of a second
+    // sweep. Used by the v1-pool replay's masked/IW SSIM slots (which is why
+    // BIT-identity, not closeness, is required: `folded720_v1_pools_match_v1_path`
+    // compares the pool slots to v1's 372 with `to_bits()`).
+    //
+    // Why they are bit-identical: each column's V-blur is an INDEPENDENT scalar
+    // recurrence (`sum += src[add] - src[rem]`, then `sum * (1.0 / diam)`), so
+    // lane width cannot change a value and only the index sequence can. Init
+    // (`mirror_idx`) and `rem_idx` are written the same way in both kernels;
+    // the ONE textual difference is the bottom-edge `add_idx` fold — this
+    // kernel's `vblur_add_idx` takes `|2·(h−1) − add_raw|`, `box_blur_v`'s
+    // takes `saturating_sub`. They differ only when `2·(h−1) < y + r + 1` for
+    // some `y < h`, i.e. only when `h < r + 2` (= 7 at BLUR_RADIUS 5). The
+    // folded walk reflect-pads to a 64px floor and runs 4 pyramid scales, so
+    // the smallest plane it ever V-blurs is 8 rows and every band buffer is at
+    // least that tall — the divergent branch is unreachable on this path.
+    // (Not a general guarantee: a caller that V-blurs a <7-row plane must keep
+    // using `box_blur_v_from_copy` if it needs v1 parity.)
+    ssq_out: &mut [f32],
+    s12_out: &mut [f32],
+    store_sigma: bool,
 ) -> StripChannelAccum {
     incant!(
         fused_vblur_ssim_inner(
@@ -119,7 +142,10 @@ pub(crate) fn fused_vblur_features_ssim(
             mu2_out,
             store_mu,
             sd_out,
-            store_sd
+            store_sd,
+            ssq_out,
+            s12_out,
+            store_sigma
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -224,6 +250,9 @@ fn fused_vblur_ssim_inner_v4(
     store_mu: bool,
     sd_out: &mut [f32],
     store_sd: bool,
+    ssq_out: &mut [f32],
+    s12_out: &mut [f32],
+    store_sigma: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -293,6 +322,10 @@ fn fused_vblur_ssim_inner_v4(
                 if store_mu {
                     mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
                     mu2_out[base..base + 16].copy_from_slice(&mu2.to_array());
+                }
+                if store_sigma {
+                    ssq_out[base..base + 16].copy_from_slice(&ssq.to_array());
+                    s12_out[base..base + 16].copy_from_slice(&s12.to_array());
                 }
 
                 // === Edge ===
@@ -410,6 +443,10 @@ fn fused_vblur_ssim_inner_v4(
                     mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
                     mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
                 }
+                if store_sigma {
+                    ssq_out[base..base + 8].copy_from_slice(&ssq.to_array());
+                    s12_out[base..base + 8].copy_from_slice(&s12.to_array());
+                }
 
                 // Edge
                 let diff1 = (s - mu1).abs();
@@ -508,6 +545,10 @@ fn fused_vblur_ssim_inner_v4(
                 if store_mu {
                     mu1_out[y * width + x] = mu1;
                     mu2_out[y * width + x] = mu2;
+                }
+                if store_sigma {
+                    ssq_out[y * width + x] = ssq;
+                    s12_out[y * width + x] = s12;
                 }
 
                 // Edge (f32 to match SIMD paths)
@@ -577,6 +618,9 @@ fn fused_vblur_ssim_inner_v4x(
     store_mu: bool,
     sd_out: &mut [f32],
     store_sd: bool,
+    ssq_out: &mut [f32],
+    s12_out: &mut [f32],
+    store_sigma: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -646,6 +690,10 @@ fn fused_vblur_ssim_inner_v4x(
                 if store_mu {
                     mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
                     mu2_out[base..base + 16].copy_from_slice(&mu2.to_array());
+                }
+                if store_sigma {
+                    ssq_out[base..base + 16].copy_from_slice(&ssq.to_array());
+                    s12_out[base..base + 16].copy_from_slice(&s12.to_array());
                 }
 
                 // === Edge ===
@@ -763,6 +811,10 @@ fn fused_vblur_ssim_inner_v4x(
                     mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
                     mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
                 }
+                if store_sigma {
+                    ssq_out[base..base + 8].copy_from_slice(&ssq.to_array());
+                    s12_out[base..base + 8].copy_from_slice(&s12.to_array());
+                }
 
                 // Edge
                 let diff1 = (s - mu1).abs();
@@ -861,6 +913,10 @@ fn fused_vblur_ssim_inner_v4x(
                 if store_mu {
                     mu1_out[y * width + x] = mu1;
                     mu2_out[y * width + x] = mu2;
+                }
+                if store_sigma {
+                    ssq_out[y * width + x] = ssq;
+                    s12_out[y * width + x] = s12;
                 }
 
                 // Edge (f32 to match SIMD paths)
@@ -935,6 +991,9 @@ fn fused_vblur_ssim_inner_v3(
     store_mu: bool,
     sd_out: &mut [f32],
     store_sd: bool,
+    ssq_out: &mut [f32],
+    s12_out: &mut [f32],
+    store_sigma: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
@@ -995,6 +1054,10 @@ fn fused_vblur_ssim_inner_v3(
                 if store_mu {
                     mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
                     mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                }
+                if store_sigma {
+                    ssq_out[base..base + 8].copy_from_slice(&ssq.to_array());
+                    s12_out[base..base + 8].copy_from_slice(&s12.to_array());
                 }
 
                 // Edge
@@ -1095,6 +1158,10 @@ fn fused_vblur_ssim_inner_v3(
                     mu1_out[y * width + x] = mu1;
                     mu2_out[y * width + x] = mu2;
                 }
+                if store_sigma {
+                    ssq_out[y * width + x] = ssq;
+                    s12_out[y * width + x] = s12;
+                }
 
                 // Edge
                 let diff1 = (sv - mu1).abs();
@@ -1167,6 +1234,9 @@ fn fused_vblur_ssim_inner(
     store_mu: bool,
     sd_out: &mut [f32],
     store_sd: bool,
+    ssq_out: &mut [f32],
+    s12_out: &mut [f32],
+    store_sigma: bool,
 ) -> StripChannelAccum {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -1245,6 +1315,10 @@ fn fused_vblur_ssim_inner(
                 if store_mu {
                     mu1.store((&mut mu1_out[base..base + 8]).try_into().unwrap());
                     mu2.store((&mut mu2_out[base..base + 8]).try_into().unwrap());
+                }
+                if store_sigma {
+                    ssq.store((&mut ssq_out[base..base + 8]).try_into().unwrap());
+                    s12.store((&mut s12_out[base..base + 8]).try_into().unwrap());
                 }
 
                 // Edge
@@ -1351,6 +1425,10 @@ fn fused_vblur_ssim_inner(
                 if store_mu {
                     mu1_out[y * width + x] = mu1;
                     mu2_out[y * width + x] = mu2;
+                }
+                if store_sigma {
+                    ssq_out[y * width + x] = ssq;
+                    s12_out[y * width + x] = s12;
                 }
 
                 // Edge

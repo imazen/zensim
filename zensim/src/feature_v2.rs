@@ -4141,24 +4141,14 @@ fn fold_v1_basic_bands(
         if let Some((ps, full)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
             let band_n = h_local * width;
             ps.ensure(band_n);
-            sums.accumulate(&crate::fused::fused_vblur_features_ssim(
-                &mu1_h[span.clone()],
-                &mu2_h[span.clone()],
-                &ssq_h[span.clone()],
-                &s12_h[span.clone()],
-                &src[span.clone()],
-                &dst[span.clone()],
-                width,
-                h_local,
-                inner_start,
-                inner_h,
-                BLUR_RADIUS,
-                &mut ps.mu1_v[..band_n],
-                &mut ps.mu2_v[..band_n],
-                true,
-                &mut empty_sd,
-                false,
-            ));
+            // ORDER: activity FIRST, fused kernel SECOND. The activity blur
+            // borrows `ssq_v` as its scratch temp, and the fused kernel then
+            // overwrites `ssq_v`'s INNER rows with the real V-blurred sigma
+            // (`store_sigma`) — so the two uses are disjoint in time and the
+            // temp costs no extra buffer. Reordering is sum-neutral: the
+            // `sums` fields written here (masked/IW) are disjoint from the
+            // ones `accumulate` writes (basic).
+            //
             // v1 computes `|src − H_blur(src)|` with its own H kernel
             // (`box_blur_h_into_abs_diff`); the fold already holds the
             // H-blurred src as `mu1_h` (the shared fused H-pass plane), so the
@@ -4177,6 +4167,36 @@ fn fold_v1_basic_bands(
                 h_local,
                 BLUR_RADIUS,
             );
+            // `store_sigma` replaces the two `box_blur_v_from_copy(ssq_h →
+            // ssq_v)` / `(s12_h → s12_v)` band sweeps the `Full` arm used to
+            // run after this call: the fused kernel already carries the same
+            // running V-blur sums in registers and divides by the same
+            // `1.0 / diam`, so the stored planes are BIT-IDENTICAL to what
+            // that second sweep produced (and it writes only the inner rows —
+            // the only rows the masked/IW SSIM kernel reads). `Carriers`
+            // needs no sigma, so it stores none and `ssq_v` simply stays the
+            // activity temp.
+            sums.accumulate(&crate::fused::fused_vblur_features_ssim(
+                &mu1_h[span.clone()],
+                &mu2_h[span.clone()],
+                &ssq_h[span.clone()],
+                &s12_h[span.clone()],
+                &src[span.clone()],
+                &dst[span.clone()],
+                width,
+                h_local,
+                inner_start,
+                inner_h,
+                BLUR_RADIUS,
+                &mut ps.mu1_v[..band_n],
+                &mut ps.mu2_v[..band_n],
+                true,
+                &mut empty_sd,
+                false,
+                &mut ps.ssq_v[..band_n],
+                &mut ps.s12_v[..band_n],
+                full,
+            ));
             let inner = inner_start * width..(inner_start + inner_h) * width;
             let inner_src = &src[span.start + inner.start..span.start + inner.end];
             let inner_dst = &dst[span.start + inner.start..span.start + inner.end];
@@ -4184,23 +4204,10 @@ fn fold_v1_basic_bands(
             let inner_mu2 = &ps.mu2_v[inner.clone()];
             let act_inner = &ps.act[inner.clone()];
             if full {
-                // The masked/IW SSIM + MSE slots: sigma planes V-blurred over
-                // the band, then the fused kernels (`Full` only — the
-                // carriers need neither).
-                crate::blur::box_blur_v_from_copy(
-                    &ssq_h[span.clone()],
-                    &mut ps.ssq_v[..band_n],
-                    width,
-                    h_local,
-                    BLUR_RADIUS,
-                );
-                crate::blur::box_blur_v_from_copy(
-                    &s12_h[span.clone()],
-                    &mut ps.s12_v[..band_n],
-                    width,
-                    h_local,
-                    BLUR_RADIUS,
-                );
+                // The masked/IW SSIM + MSE slots — the sigma planes are
+                // already in `ps.ssq_v` / `ps.s12_v` (the fused kernel's
+                // `store_sigma` side-output above), so this arm no longer runs
+                // its own two V-blur band sweeps.
                 let (mse_m, mse_i) = crate::simd_ops::build_inline_mse(
                     act_inner, V1_MASK_K, V1_IW_K, inner_src, inner_dst,
                 );
@@ -4248,6 +4255,9 @@ fn fold_v1_basic_bands(
                 &mut empty_mu2,
                 false,
                 &mut empty_sd,
+                false,
+                &mut [],
+                &mut [],
                 false,
             ));
         }

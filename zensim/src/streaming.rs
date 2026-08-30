@@ -1645,6 +1645,14 @@ fn process_strip_channel(
                 store_mu,
                 &mut bufs.temp_blur,
                 store_sd,
+                // v1's own strip path keeps deriving `sigma1_sq`/`sigma12`
+                // with `box_blur_v_from_copy` below (it reuses those very
+                // buffers as the H-planes first, so it cannot take the
+                // side-output) — the folded pool replay is the only caller
+                // that does.
+                &mut [],
+                &mut [],
+                false,
             );
 
             // Accumulate weighted features into diffmap before extended features

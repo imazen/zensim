@@ -74,7 +74,16 @@ fn main() {
             let src_static: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
             let dst_static: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
             suite.compare(&format!("folded944_pools_{w}"), |group| {
-                group.config().max_rounds(200);
+                // The default 120 s group budget yielded only 4 usable rounds
+                // on a shared box (the paired CI then spans ±10 points, which
+                // cannot resolve a few-percent lever). Raise the wall budget +
+                // the round floor so the interleaved A/B has enough paired
+                // samples; the gate still throttles on load.
+                group
+                    .config()
+                    .max_rounds(200)
+                    .min_rounds(25)
+                    .max_wall_time(std::time::Duration::from_secs(600));
                 group.bench("pools_zeroed", move |b| {
                     let mut scratch = zensim::feature_v2::V2Scratch::new();
                     b.iter(move || {

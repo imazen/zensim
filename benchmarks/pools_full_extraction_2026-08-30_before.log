@@ -1,0 +1,42 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=38763MiB :: cargo bench --bench fold_pools_bench -p zensim --features custom-profiles,feature-regime-v2
+   Compiling zensim v0.3.0 (/home/lilith/work/zen/zensim--pools-perf/zensim)
+    Finished `bench` profile [optimized] target(s) in 3.24s
+     Running benches/fold_pools_bench.rs (target-lane2/release/deps/fold_pools_bench-d4dfeac6c9985192)
+[zenbench] calibration: int=0.19ns/iter mem_bw=101.3GiB/s mem_lat=10.3ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.20ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788107779-d4eb.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788107779-d4eb
+═══════════════════════════════════════════════════════════════
+
+  folded944_pools_576  20 rounds × 1 calls
+                       mean ±mad ms  95% CI vs base   
+  ├─ pools_zeroed       23.6 ±4.9ms  [20.5–27.2]ms     [1]
+  ├─ pools_carriers10   26.2 ±7.6ms  [+9.6%–+21.6%]    [2]
+  ╰─ pools_full216      27.6 ±8.0ms  [+18.0%–+25.3%]   [3]
+
+  pools_zeroed      █████████████████████████████████████████████ 23.61ms
+  pools_carriers10  █████████████████████████████████████████████████ 26.18ms
+  pools_full216     ████████████████████████████████████████████████████ 27.59ms
+  [1] CV=33%
+  [2] CV=29%
+  [3] CV=30%
+
+  folded944_pools_1152  20 rounds × 1 calls
+                         mean ±mad ms  95% CI vs base   
+  ├─ pools_zeroed         80.0 ±7.8ms  [68.6–94.9]ms     [1]
+  ├─ pools_carriers10     90.9 ±7.6ms  [+10.4%–+14.1%]   [2]
+  ╰─ pools_full216      100.9 ±13.4ms  [+21.9%–+29.2%]   [3]
+
+  pools_zeroed      ████████████████████████████████████████ 80.01ms
+  pools_carriers10  ██████████████████████████████████████████████ 90.93ms
+  pools_full216     ███████████████████████████████████████████████████ 100.93ms
+  [1] CV=38%
+  [2] CV=34%
+  [3] CV=38%
+
+  total: 1230.6s  (1203 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 1234s | peak-RSS 0.37GiB | min-avail 34249MiB | peak-load 26.47

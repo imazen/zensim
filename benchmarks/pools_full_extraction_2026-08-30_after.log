@@ -1,0 +1,39 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=40823MiB :: cargo bench --bench fold_pools_bench -p zensim --features custom-profiles,feature-regime-v2
+    Finished `bench` profile [optimized] target(s) in 0.07s
+     Running benches/fold_pools_bench.rs (target-lane2/release/deps/fold_pools_bench-d4dfeac6c9985192)
+[zenbench] calibration: int=0.19ns/iter mem_bw=105.1GiB/s mem_lat=9.7ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.19ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788109573-9b24c.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788109573-9b24c
+═══════════════════════════════════════════════════════════════
+
+  folded944_pools_576  20 rounds × 1 calls
+                       mean ±mad ms  95% CI vs base   
+  ├─ pools_zeroed       16.6 ±0.4ms  [16.1–17.5]ms    
+  ├─ pools_carriers10   18.6 ±0.5ms  [+11.6%–+15.9%]  
+  ╰─ pools_full216      19.5 ±0.5ms  [+16.1%–+18.9%]  
+
+  pools_zeroed      ████████████████████████████████████████████ 16.62ms
+  pools_carriers10  ██████████████████████████████████████████████████ 18.60ms
+  pools_full216     ████████████████████████████████████████████████████ 19.53ms
+
+  folded944_pools_1152  20 rounds × 1 calls
+                       mean ±mad ms  95% CI vs base   
+  ├─ pools_zeroed       74.3 ±1.2ms  [61.7–98.1]ms     [1]
+  ├─ pools_carriers10   85.1 ±1.3ms  [+12.9%–+14.4%]   [2] [3]
+  ╰─ pools_full216      89.0 ±1.9ms  [+17.7%–+20.2%]   [4]
+
+  pools_zeroed      ███████████████████████████████████████████ 74.31ms
+  pools_carriers10  ██████████████████████████████████████████████████ 85.12ms
+  pools_full216     ████████████████████████████████████████████████████ 88.95ms
+  [1] CV=69%
+  [2] drift r=-0.57 — later rounds faster
+  [3] CV=77%
+  [4] CV=72%
+
+  total: 1248.3s  (1235 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 1249s | peak-RSS 0.08GiB | min-avail 36255MiB | peak-load 14.62

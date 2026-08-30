@@ -853,6 +853,11 @@ fn process_channel_banded(
             true,
             &mut bufs.sd[off..off + band_n],
             true,
+            // No sigma side-output here: the attribution walk re-derives what
+            // it needs; the v1-pool replay is the only sigma consumer.
+            &mut [],
+            &mut [],
+            false,
         );
         merge_acc(&mut acc, &band);
         y = inner_end;
