@@ -263,6 +263,12 @@ pub mod feature_v2;
 #[cfg(feature = "feature-regime-v2")]
 pub(crate) mod feature_v2_stream;
 
+// The fold-backed scoring engine (benchmarks/fold_engine_2026-08-31.md):
+// gives the streaming fold a `score()` by attaching it under the SHARED
+// scoring tail + bake forward, rather than duplicating either.
+#[cfg(feature = "feature-regime-v2")]
+pub mod fold_engine;
+
 // --- Primary API ---
 /// Cooperative-cancellation vocabulary, re-exported from the
 /// [`enough`](https://docs.rs/enough) crate for use with

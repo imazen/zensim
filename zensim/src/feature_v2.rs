@@ -6126,6 +6126,7 @@ pub(crate) fn compute_folded720_streaming_impl(
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
             None,
+            None,
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -6136,7 +6137,82 @@ pub(crate) fn compute_folded720_streaming_impl(
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
         None,
+        None,
     ))
+}
+
+/// **The fold-backed v1-372 extraction** (fold-engine lane, 2026-08-30):
+/// the streaming walk asked for exactly what a v1 score needs and nothing
+/// else — `v1_only` (skip every v2-era block *and* its upstream V-blur /
+/// activity work; pure compute-skipping, gated by
+/// `folded_v1_only_matches_full_walk`) plus [`V1PoolsMode::Full`] (emit
+/// `f156..372` live). Returns `(features, mean_offset)` where
+/// `features[0..372]` is **bit-identical to v1's 372-feature extraction** at
+/// every width under option C — `v1_372_bit_exact_to_fold_at_every_width` is
+/// the gate — and `mean_offset` reproduces
+/// `streaming::compute_xyb_mean_offset` bit-exactly (see [`MeanOffsetRows`]).
+///
+/// The returned vector is the requesting regime's WIDTH (720 here) with
+/// `f372..` at the structural `0.0`; the caller truncates to its config's
+/// v1 width, which is a prefix (`[0,156)` basic · `[156,228)` peaks ·
+/// `[228,300)` masked · `[300,372)` IW).
+///
+/// SDR only. A declared-HDR pair returns
+/// [`ZensimError::HdrInputRequiresPuPath`] — the PU entries keep the
+/// buffered walk until the fold's PU front-end grows a matching
+/// mean-offset path.
+pub(crate) fn compute_folded_v1_372_streaming_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    scratch: &mut V2Scratch,
+) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
+    crate::metric::validate_pair_dims(source, distorted)?;
+    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    if source.is_hdr() || distorted.is_hdr() {
+        return Err(ZensimError::HdrInputRequiresPuPath);
+    }
+    let toggles = V2NewFeatureToggles {
+        v1_pools: V1PoolsMode::Full,
+        v1_only: true,
+        ..V2NewFeatureToggles::default()
+    };
+    // Sub-64 reflect-pad BEFORE the walk, exactly as
+    // `metric::compute_with_config_inner` does — so both engines' features
+    // AND mean_offset are taken over the same padded plane. The two arms are
+    // written out rather than closed over because the padded and unpadded
+    // sides are different `ImageSource` types.
+    if source.width() < crate::metric::MIN_PYRAMID_DIM
+        || source.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded_src = crate::metric::reflect_pad_to_min(source);
+        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
+        let mut mo = MeanOffsetRows::new(padded_src.width(), padded_src.height());
+        let res = foldapp_streaming_walk(
+            &padded_src,
+            &padded_dst,
+            parallel,
+            toggles,
+            crate::feature_v2_stream::FrontEnd::Sdr,
+            scratch,
+            None,
+            Some(&mut mo),
+        );
+        return Ok((res.into_features(), mo.finish()));
+    }
+    let mut mo = MeanOffsetRows::new(source.width(), source.height());
+    let res = foldapp_streaming_walk(
+        source,
+        distorted,
+        parallel,
+        toggles,
+        crate::feature_v2_stream::FrontEnd::Sdr,
+        scratch,
+        None,
+        Some(&mut mo),
+    );
+    Ok((res.into_features(), mo.finish()))
 }
 
 /// The declared-HDR folded/append streaming entry (HDR_PLAN chunk 2):
@@ -6193,10 +6269,11 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
             front_end,
             scratch,
             None,
+            None,
         ));
     }
     Ok(foldapp_streaming_walk(
-        source, distorted, parallel, toggles, front_end, scratch, None,
+        source, distorted, parallel, toggles, front_end, scratch, None, None,
     ))
 }
 
@@ -6276,6 +6353,7 @@ pub(crate) fn compute_folded944_streaming_with_retention(
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
             Some(retention),
+            None,
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -6286,6 +6364,7 @@ pub(crate) fn compute_folded944_streaming_with_retention(
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
         Some(retention),
+        None,
     ))
 }
 
@@ -6514,6 +6593,108 @@ pub(crate) fn compute_folded720_append_streaming_impl(
 /// walk. The hooks only COPY: accumulation, kernels, and finalize are
 /// identical either way, so retained and plain walks emit bitwise-equal
 /// features (G-N1).
+/// Per-scale-0-row `Σ_x (src[x] − dst[x])` sums, in f64, one triple per row —
+/// the decomposition that lets the streaming fold reproduce the buffered
+/// path's `ZensimResult::mean_offset` **bit-exactly** rather than to a
+/// tolerance.
+///
+/// `streaming::compute_xyb_mean_offset` sums 64-row chunks, each chunk
+/// summing per-row f64 sums of `(s[i] − d[i]) as f64` — note the subtraction
+/// happens in **f32** and only the difference is widened. Two properties make
+/// it reproducible from a strip walk that visits scale-0 rows in a different
+/// grouping:
+///
+/// 1. It is already **thread-invariant**: the rayon arm is an
+///    order-preserving `into_par_iter().map().collect()` and the final
+///    reduction walks that `Vec` serially in row order, so parallelism never
+///    reassociates it.
+/// 2. It **decomposes per row**: chunk `acc` is a left-to-right f64 sum of
+///    per-row sums, so recording the per-row sums as the strips go past and
+///    performing [`Self::finish`]'s identical chunk reduction afterwards
+///    lands on the same bits.
+///
+/// Cost is one `Vec<[f64; 3]>` of `height` entries (55 KB at 2304², against
+/// the walk's measured 163 MB peak RSS) plus one f32 subtract + f64 add per
+/// scale-0 pixel per channel, taken while the producer's rolling plane rows
+/// are already cache-hot.
+pub(crate) struct MeanOffsetRows {
+    rows: Vec<[f64; 3]>,
+    width: usize,
+    height: usize,
+}
+
+impl MeanOffsetRows {
+    pub(crate) fn new(width: usize, height: usize) -> Self {
+        Self {
+            rows: vec![[0.0f64; 3]; height],
+            width,
+            height,
+        }
+    }
+
+    /// Accumulate one scale-0 strip's rows. `src`/`dst` are the producer's
+    /// rolling-plane rows for channel `ch` covering `[y0, y0 + n_rows)` at
+    /// `plane_w` stride; `plane_w == width` at scale 0 under option C.
+    fn add_strip_channel(
+        &mut self,
+        ch: usize,
+        y0: usize,
+        n_rows: usize,
+        plane_w: usize,
+        src: &[f32],
+        dst: &[f32],
+    ) {
+        for k in 0..n_rows {
+            let y = y0 + k;
+            if y >= self.height {
+                break;
+            }
+            let s = &src[k * plane_w..k * plane_w + self.width];
+            let d = &dst[k * plane_w..k * plane_w + self.width];
+            let mut row_sum = 0.0f64;
+            for i in 0..self.width {
+                row_sum += (s[i] - d[i]) as f64;
+            }
+            self.rows[y][ch] = row_sum;
+        }
+    }
+
+    /// The exact reduction `streaming::compute_xyb_mean_offset` performs:
+    /// 64-row chunks in ascending order, per channel a left-to-right sum of
+    /// the chunk's row sums, then a left-to-right sum over chunks, then one
+    /// divide by `width · height`. Reproduced loop-for-loop on purpose — this
+    /// is the function whose *shape* is the guarantee.
+    pub(crate) fn finish(&self) -> [f64; 3] {
+        let n = (self.width * self.height) as f64;
+        let chunk_rows = 64usize;
+        let mut chunks: Vec<[f64; 3]> = Vec::with_capacity(self.height.div_ceil(chunk_rows));
+        let mut row_start = 0usize;
+        while row_start < self.height {
+            let row_end = (row_start + chunk_rows).min(self.height);
+            let mut diff = [0.0f64; 3];
+            for (c, d) in diff.iter_mut().enumerate() {
+                let mut acc = 0.0f64;
+                for y in row_start..row_end {
+                    acc += self.rows[y][c];
+                }
+                *d = acc;
+            }
+            chunks.push(diff);
+            row_start += chunk_rows;
+        }
+        let mut offset = [0.0f64; 3];
+        for chunk_diff in &chunks {
+            for (o, &d) in offset.iter_mut().zip(chunk_diff.iter()) {
+                *o += d;
+            }
+        }
+        for o in &mut offset {
+            *o /= n;
+        }
+        offset
+    }
+}
+
 fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     source: &S,
     distorted: &D,
@@ -6522,6 +6703,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     front_end: crate::feature_v2_stream::FrontEnd,
     scratch: &mut V2Scratch,
     mut retention: Option<&mut FoldRetention>,
+    mut mean_offset: Option<&mut MeanOffsetRows>,
 ) -> ZensimV2Result {
     use crate::feature_v2_stream::StripPlaneProducer;
     let fold_v1 = true;
@@ -6623,6 +6805,23 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 
     while let Some(info) = producer.next_strip() {
         let scale = info.scale;
+
+        // mean_offset side-channel (fold-engine lane): the scale-0 strips
+        // tile [0, h0) exactly once in ascending order, so each row's
+        // Σ_x (src − dst) is recorded exactly once here. Emitted for EVERY
+        // strip layout — the walk's toggles never change which strips the
+        // producer emits, only what is computed from them.
+        if scale == 0
+            && let Some(mo) = mean_offset.as_deref_mut()
+        {
+            let y1 = info.y0 + info.strip_h;
+            for ch in 0..3 {
+                let s = producer.rows(crate::feature_v2_stream::Side::Source, ch, 0, info.y0, y1);
+                let d =
+                    producer.rows(crate::feature_v2_stream::Side::Distorted, ch, 0, info.y0, y1);
+                mo.add_strip_channel(ch, info.y0, info.strip_h, info.plane_w, s, d);
+            }
+        }
 
         // ref_y strip rows straight from the producer's rolling plane
         // (valid until the next `next_strip` call).

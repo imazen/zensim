@@ -1220,6 +1220,14 @@ pub struct Zensim {
     /// Optional cooperative-cancellation token, checked at row-band and
     /// scale boundaries inside the streaming walk. See [`Zensim::with_stop`].
     stop: Option<StopHandle>,
+    /// Route the scoring entries through the streaming fold instead of the
+    /// buffered walk (fold-engine lane, 2026-08-30). Always `false` unless
+    /// something explicitly asks for it via
+    /// `Zensim::with_engine(ScoringEngine::Fold)`, which only exists under
+    /// `feature-regime-v2` — so a default build cannot leave this `false`.
+    /// Requests the fold cannot serve bit-identically
+    /// (`fold_engine::is_fold_backable`) fall back to buffered even when set.
+    pub(crate) fold_engine: bool,
 }
 
 /// Shared cancellation token stored on [`Zensim`]. Wraps the caller's
@@ -1249,6 +1257,34 @@ impl Zensim {
             parallel: true,
             max_pixels: Some(120_000_000),
             stop: None,
+            fold_engine: false,
+        }
+    }
+
+    /// Select the walk the scoring entries run. See
+    /// [`ScoringEngine`](crate::fold_engine::ScoringEngine).
+    ///
+    /// `#[doc(hidden)]` + `feature-regime-v2`-gated: an internal selector for
+    /// the parity gates and the perf comparison, not a product knob. The
+    /// default is unchanged (`Buffered`), and a request the fold cannot serve
+    /// bit-identically falls back to buffered rather than scoring a different
+    /// quantity.
+    #[cfg(feature = "feature-regime-v2")]
+    #[doc(hidden)]
+    pub fn with_engine(mut self, engine: crate::fold_engine::ScoringEngine) -> Self {
+        self.fold_engine = matches!(engine, crate::fold_engine::ScoringEngine::Fold);
+        self
+    }
+
+    /// The walk this instance's scoring entries run — the read-back of
+    /// [`Self::with_engine`].
+    #[cfg(feature = "feature-regime-v2")]
+    #[doc(hidden)]
+    pub fn engine(&self) -> crate::fold_engine::ScoringEngine {
+        if self.fold_engine {
+            crate::fold_engine::ScoringEngine::Fold
+        } else {
+            crate::fold_engine::ScoringEngine::Buffered
         }
     }
 
@@ -1428,8 +1464,14 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         self.check_stop()?;
         let config = config_from_params(params, self.parallel);
-        let mut result =
-            compute_with_config_inner(source, distorted, &config, params.weights, self.stop_ref());
+        let mut result = compute_with_config_inner_engine(
+            source,
+            distorted,
+            &config,
+            params.weights,
+            self.stop_ref(),
+            self.fold_engine,
+        );
         self.check_stop()?;
         apply_mlp_scoring_with_codec(
             &mut result,
@@ -1482,8 +1524,14 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let mut config = config_from_params(params, self.parallel);
         config.extended_features = true;
-        let result =
-            compute_with_config_inner(source, distorted, &config, params.weights, self.stop_ref());
+        let result = compute_with_config_inner_engine(
+            source,
+            distorted,
+            &config,
+            params.weights,
+            self.stop_ref(),
+            self.fold_engine,
+        );
         self.check_stop()?;
         Ok(result.with_profile(self.profile))
     }
@@ -2582,8 +2630,14 @@ impl Zensim {
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params, self.parallel);
         config.compute_all_features = true;
-        let result =
-            compute_with_config_inner(source, distorted, &config, params.weights, self.stop_ref());
+        let result = compute_with_config_inner_engine(
+            source,
+            distorted,
+            &config,
+            params.weights,
+            self.stop_ref(),
+            self.fold_engine,
+        );
         self.check_stop()?;
         Ok(result.with_profile(self.profile))
     }
@@ -3149,6 +3203,21 @@ fn compute_with_config_inner(
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
 ) -> ZensimResult {
+    compute_with_config_inner_engine(source, distorted, config, weights, stop, false)
+}
+
+/// [`compute_with_config_inner`] with the engine selector (fold-engine lane,
+/// 2026-08-30). The reflect-pad and byte-identical short-circuit are SHARED
+/// — they run before either walk, so both engines see exactly the same
+/// pixels and the same identical-pair payload. Only the walk differs.
+fn compute_with_config_inner_engine(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
+    use_fold: bool,
+) -> ZensimResult {
     // Sub-64px inputs can't form the 4-scale pyramid. Reflect-pad both sides
     // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
     // scales. NO-OP at ≥ 64px in both dims (the common path is untouched).
@@ -3156,9 +3225,9 @@ fn compute_with_config_inner(
     if needs_pyramid_pad(w, h, config.num_scales) {
         let s = reflect_pad_for_scales(source, config.num_scales);
         let d = reflect_pad_for_scales(distorted, config.num_scales);
-        return compute_with_config_core(&s, &d, config, weights, stop);
+        return compute_with_config_core(&s, &d, config, weights, stop, use_fold);
     }
-    compute_with_config_core(source, distorted, config, weights, stop)
+    compute_with_config_core(source, distorted, config, weights, stop, use_fold)
 }
 
 fn compute_with_config_core(
@@ -3167,12 +3236,34 @@ fn compute_with_config_core(
     config: &ZensimConfig,
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
+    use_fold: bool,
 ) -> ZensimResult {
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if images_byte_identical(source, distorted) {
         return identical_result(config);
     }
+
+    // A live cancellation token keeps the request on buffered: issue #48's
+    // contract is cooperative cancellation INSIDE the walk (row-band and
+    // scale boundaries) and the fold has no stop hook, so routing a
+    // stoppable request to it would silently downgrade cancellation to the
+    // caller's before/after `check_stop`. Named in `is_fold_backable`'s
+    // caller rather than hidden.
+    #[cfg(feature = "feature-regime-v2")]
+    if use_fold && stop.is_none() && crate::fold_engine::is_fold_backable(config) {
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        // The fold's only failure modes here are the dimension/HDR checks the
+        // caller already made; a surprise falls back rather than erroring out
+        // of a path whose signature is infallible.
+        if let Ok(r) =
+            crate::fold_engine::compute_fold_backed(source, distorted, config, weights, &mut scratch)
+        {
+            return r;
+        }
+    }
+    #[cfg(not(feature = "feature-regime-v2"))]
+    let _ = use_fold;
 
     crate::streaming::compute_zensim_streaming_stoppable(source, distorted, config, weights, stop)
 }
@@ -4895,6 +4986,66 @@ pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_WITH_PEAKS * 3;
 #[cfg(any(feature = "training", test))]
 pub const WEIGHTS: &[f64; 228] = &crate::profile::WEIGHTS_PREVIEW_V0_2;
 
+/// **THE single owner of "turn a v1-layout feature vector into
+/// `(score, raw_distance)`".** Extracted verbatim from [`combine_scores`]
+/// (2026-08-30, the fold-engine lane) so the buffered walk and the
+/// fold-backed engine share one implementation of the linear scoring tail
+/// instead of each restating the dot product — per the repo's
+/// NO-DUPLICATE-IMPLEMENTATIONS rule, where a second *Rust* site counts as a
+/// duplicate exactly as much as a Python one.
+///
+/// Does three things, in this order and no other:
+///
+/// 1. **Sanitize non-finite values** (NaN/Inf → 0) in place, before scoring
+///    *and* before the MLP forward reads the same slice. A single bad feature
+///    would otherwise poison the MLP (NaN cascades through every weighted
+///    sum) or the dot product (Inf swamps it). Replacing with 0 matches
+///    `zensim_gpu`'s defensive behaviour on degenerate inputs (one corpus
+///    pair, 2048×1365 JPEG q60, hit Inf at masked-ssim_mean B-channel).
+/// 2. **Dot with the weights** over the scored prefix — basic + peak, i.e.
+///    `n_scales · 3 · FEATURES_PER_CHANNEL_WITH_PEAKS` slots, truncated to
+///    `weights.len()` — in **ascending index order**, then divide by
+///    `max(n_scales, 1)`. The order is load-bearing: it is what makes the
+///    two engines' `raw_distance` bit-identical rather than
+///    equal-to-an-epsilon, so do not reassociate it.
+/// 3. **Map distance to score**: the correct-by-construction bounded squash
+///    (linear profiles that opt in) or the legacy unbounded `100 − a·d^b`.
+///    The squash is a strictly-monotone transform of the same
+///    `raw_distance`, so the *rank* is identical; only boundedness differs.
+///    See [`bounded_score_squash`] and
+///    `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+///
+/// `features` may be any v1-layout width (228 / 300 / 372) — the scored
+/// prefix is the same in all of them, and the tail is sanitized but not
+/// weighted.
+pub(crate) fn score_v1_layout_features(
+    features: &mut [f64],
+    weights: &[f64],
+    config: &ZensimConfig,
+    n_scales: usize,
+) -> (f64, f64) {
+    for f in features.iter_mut() {
+        if !f.is_finite() {
+            *f = 0.0;
+        }
+    }
+
+    let scored_total = n_scales * 3 * FEATURES_PER_CHANNEL_WITH_PEAKS;
+    let n_score = scored_total.min(weights.len()).min(features.len());
+    let mut raw_distance = 0.0f64;
+    for (i, &feat) in features[..n_score].iter().enumerate() {
+        raw_distance += feat * weights[i];
+    }
+    raw_distance /= n_scales.max(1) as f64;
+
+    let score = if config.bounded_squash {
+        bounded_score_squash(raw_distance, config.score_mapping_a, config.score_mapping_b)
+    } else {
+        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b)
+    };
+    (score, raw_distance)
+}
+
 pub(crate) fn combine_scores(
     scale_stats: &[ScaleStats],
     weights: &[f64],
@@ -4926,7 +5077,6 @@ pub(crate) fn combine_scores(
     let total = basic_total + peak_total + masked_total + iw_total;
 
     let mut features = Vec::with_capacity(total);
-    let mut raw_distance = 0.0f64;
 
     // Pass 1: scored features (13/ch, weight-compatible order)
     for ss in scale_stats.iter() {
@@ -4988,39 +5138,9 @@ pub(crate) fn combine_scores(
         }
     }
 
-    // Sanitize non-finite values (NaN/Inf) before scoring + MLP. A
-    // single bad feature would otherwise poison the MLP forward pass
-    // (NaN cascades through every weighted-sum) or the dot-product
-    // score (Inf swamps the result). Replacing with 0 matches GPU
-    // zensim_gpu defensive behavior on degenerate inputs (one corpus
-    // pair, 2048×1365 JPEG q60, hit Inf at masked-ssim_mean B-channel).
-    for f in features.iter_mut() {
-        if !f.is_finite() {
-            *f = 0.0;
-        }
-    }
-
-    // Apply weights — basic + peak features are scored
-    let scored_total = basic_total + peak_total;
-    let n_score = scored_total.min(weights.len());
-    for (i, &feat) in features[..n_score].iter().enumerate() {
-        raw_distance += feat * weights[i];
-    }
-
-    // Normalize by number of scales
-    raw_distance /= scale_stats.len().max(1) as f64;
-
-    // Correct-by-construction bounded squash (linear profiles that opt
-    // in) vs. the legacy unbounded `100 − a·d^b`. The squash is a
-    // strictly-monotone transform of the same `raw_distance`, so the
-    // *rank* is identical; only boundedness differs. See
-    // `bounded_score_squash` and
-    // `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
-    let score = if config.bounded_squash {
-        bounded_score_squash(raw_distance, config.score_mapping_a, config.score_mapping_b)
-    } else {
-        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b)
-    };
+    let (score, raw_distance) =
+        score_v1_layout_features(&mut features, weights, config, scale_stats.len());
+    debug_assert_eq!(basic_total + peak_total, n_scales * 3 * FEATURES_PER_CHANNEL_WITH_PEAKS);
 
     // Placeholder profile tag — every `Zensim::compute*` caller overrides
     // it via `with_profile(self.profile)` before returning to the user.
