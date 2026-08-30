@@ -2314,3 +2314,15 @@ Gates for v1 (pre-declared): report argmin accuracy + byte-overhead
 mean/p50/p90 on the origin-validate view vs the trivial baselines
 (always-best-single-family; oracle=0 overhead). Ship/wire remains
 user-gated per standing rules.
+
+**C stability — k=5 FINAL (s4007/s4008 harvested 2026-08-30):** s4007 cid22
+0.8929 / kon 0.4839 / nonphoto 0.9288 / hfnl 0.7087; s4008 0.8798 / 0.4291 /
+0.9382 / 0.7193. Band: **cid22 median 0.8834 sd 0.0061 [0.8788–0.8929]; kon
+median 0.4744 sd 0.0255 [0.4291–0.5006]**. The k=3 read replicates exactly.
+SWAP-LEDGER RE-PRICE (final): C's honest kon = 0.474 (median draw), best-seed
+0.501; vs B's 0.5935 the kon gap is **−0.12 at the median, −0.09 at the
+selected seed**. cid22 remains a CI-solid C win at every draw (worst seed
+0.8788 > B's 0.8764 only marginally — the worst-draw cid22 margin is ~0.002,
+i.e. the cid22 claim is seed-robust in DIRECTION but thin at the band floor;
+the +0.016 CI applies to the SELECTED seed). Refinement stance unchanged: no
+ensemble; selection-aware pricing + the freeze battery is the control.
