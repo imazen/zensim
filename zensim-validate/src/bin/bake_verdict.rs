@@ -2267,6 +2267,67 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 // Main
 // ============================================================================
 
+/// The RULER a verdict was produced on, recorded INSIDE the artifact.
+///
+/// # Why this exists
+///
+/// Until 2026-08-30 a `--full-json` verdict carried the corpus *values* but
+/// never the *root* they came from. `regime` is not that fact — it is a
+/// campaign flag string, and it reads `"720"` cosmetically on board JSONs that
+/// are not 720 reads — so "which ruler produced this row?" was answerable only
+/// by re-running the bake against each candidate root and diffing per-pair
+/// predictions. That is not hypothetical: it is exactly the archaeology that
+/// established **7 of 9** apparently-stored-era board rows were `--regime 720`
+/// ext720 reads and only two were genuine stored-root reads
+/// (`benchmarks/eval372_current_root_2026-08-30.md` §7). One field would have
+/// answered it in a grep.
+///
+/// It matters most where it is easiest to get wrong: the `--regime 372` default
+/// root MOVED on 2026-08-30 (`a25d1b80`), so the same flagless command means a
+/// different ruler before and after that commit, and the era shift between the
+/// two 372 roots is model-specific — a number read on one cannot be corrected
+/// into the other, only re-verdicted.
+///
+/// # Cost
+///
+/// Zero extra hashing: `corpus_prov` is the vector the provenance pre-pass
+/// already built, so this reuses those sha256s. No statistic is recomputed.
+/// `corpus_prov` also carries the dial grid, which lives OUTSIDE the features
+/// root — entries are filtered by path prefix so this block describes the
+/// features root and nothing else (the dial grid keeps its own provenance row
+/// in the markdown header, and its era caveat is registry-tracked as
+/// `dial372-grid-thread-dependent-era-2026-08-30`).
+fn features_root_block(root: &Path, corpus_prov: &[(String, PathBuf, String, u64)]) -> serde_json::Value {
+    let manifest = root.join("_MANIFEST.json");
+    let manifest_sha = zensim_validate::train_manifest::sha256_file(&manifest).ok();
+    let files: Vec<serde_json::Value> = corpus_prov
+        .iter()
+        .filter(|(_, path, _, _)| path.starts_with(root))
+        .map(|(name, path, sha, bytes)| {
+            serde_json::json!({
+                "name": name,
+                "file": path
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                "sha256": sha,
+                "bytes": bytes,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "path": root.display().to_string(),
+        // The registered one-line era label. An unregistered root is reported as
+        // unknown rather than guessed — a wrong era label is worse than none.
+        "era": era_of(root),
+        // The root's own manifest: null when it has none (an unmanaged root).
+        "manifest_sha256": manifest_sha,
+        "declared_regime": root_declared_regime(root),
+        // Exactly the files under this root that this run read, by content.
+        "corpus_files": files,
+    })
+}
+
 /// Render the provenance header: everything needed to reproduce every number
 /// in this report, named by CONTENT rather than by location.
 ///
@@ -3598,6 +3659,11 @@ Run the dedicated q-sweep harness for those._\n",
             "bake_sha256": bake_sha,
             "name": name,
             "regime": regime,
+            // WHICH RULER produced every `rank`/`per_pair` number below: the
+            // resolved features root, its registered era label, its manifest
+            // sha + declared regime, and the per-corpus files actually read.
+            // `regime` above is a campaign flag string and is NOT this fact.
+            "features_root": features_root_block(&args.features_root, &corpus_prov),
             "n_inputs": n_inputs,
             // Architecture + in/out modifiers (transforms, winsor bounds, spline,
             // heads) — the structured `zenpredict inspect`.
@@ -4145,6 +4211,124 @@ mod tests {
     /// shift is model-specific so no correction factor could undo it
     /// (`benchmarks/eval372_current_root_2026-08-30.md`). The stored root stays a valid
     /// STORED-ERA read — it is just no longer what "no flag" means.
+    /// The `--full-json` `features_root` block must name the root the run
+    /// ACTUALLY resolved — in every regime, including the ones that swap the
+    /// root out from under an unset `--features-root`. Without this, the era of
+    /// a stored verdict is recoverable only by re-running and diffing
+    /// predictions, which is precisely how 7 of 9 board rows spent a day being
+    /// misattributed to the stored 372 root when they were ext720 reads.
+    #[test]
+    fn full_json_features_root_matches_the_resolved_root_in_every_regime() {
+        for args in [
+            vec!["--bake", "/x/b.bin"],
+            vec!["--bake", "/x/b.bin", "--regime", "720"],
+            vec!["--bake", "/x/b.bin", "--regime", "944"],
+            vec!["--bake", "/x/b.bin", "--features-root", "/x/some-root"],
+            vec![
+                "--bake",
+                "/x/b.bin",
+                "--regime",
+                "944",
+                "--features-root",
+                "/x/explicit-wins",
+            ],
+        ] {
+            let a = parse(&args);
+            let blk = features_root_block(&a.features_root, &[]);
+            assert_eq!(
+                blk["path"].as_str().unwrap(),
+                a.features_root.display().to_string(),
+                "features_root.path must be the RESOLVED root for {args:?}"
+            );
+            assert_eq!(
+                blk["era"].as_str().unwrap(),
+                era_of(&a.features_root),
+                "era label must come from the registry, for {args:?}"
+            );
+            assert!(
+                blk.get("corpus_files").is_some() && blk.get("manifest_sha256").is_some(),
+                "the block's shape is part of the contract"
+            );
+        }
+        // The three registered roots must be distinguishable from the block
+        // alone — that is the whole point of recording it.
+        let d = features_root_block(&parse(&["--bake", "/x/b.bin"]).features_root, &[]);
+        let s720 = features_root_block(
+            &parse(&["--bake", "/x/b.bin", "--regime", "720"]).features_root,
+            &[],
+        );
+        let stored = features_root_block(
+            Path::new(zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15),
+            &[],
+        );
+        assert_ne!(d["path"], s720["path"]);
+        assert_ne!(d["path"], stored["path"]);
+        assert_ne!(d["era"], stored["era"]);
+        assert!(stored["era"].as_str().unwrap().contains("STORED-ERA"));
+    }
+
+    /// The block describes the features root and ONLY it: `corpus_prov` also
+    /// carries the dial grid, which lives elsewhere and is a different artifact
+    /// with its own era caveat.
+    #[test]
+    fn features_root_block_lists_only_files_under_that_root() {
+        let root = std::env::temp_dir().join(format!(
+            "zensim_frblock_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("_MANIFEST.json"),
+            r#"{"description":"probe","regime":"v1-372 probe","corpora":{}}"#,
+        )
+        .unwrap();
+        let inside = root.join("cid22_features_372col.parquet");
+        std::fs::write(&inside, b"corpus-bytes").unwrap();
+        let outside = std::env::temp_dir().join("some_dial_grid_not_under_root.parquet");
+        std::fs::write(&outside, b"dial-bytes").unwrap();
+
+        let prov = vec![
+            ("CID22".to_string(), inside.clone(), "aaa".to_string(), 12u64),
+            (
+                "dial grid (canonical)".to_string(),
+                outside.clone(),
+                "bbb".to_string(),
+                10u64,
+            ),
+        ];
+        let blk = features_root_block(&root, &prov);
+
+        assert_eq!(blk["path"].as_str().unwrap(), root.display().to_string());
+        assert_eq!(blk["declared_regime"].as_str().unwrap(), "v1-372 probe");
+        assert_eq!(
+            blk["manifest_sha256"].as_str().unwrap(),
+            zensim_validate::train_manifest::sha256_file(&root.join("_MANIFEST.json")).unwrap(),
+            "the root's manifest is named by content, not by path"
+        );
+        let files = blk["corpus_files"].as_array().unwrap();
+        assert_eq!(files.len(), 1, "the dial grid is not a features-root file");
+        assert_eq!(files[0]["name"].as_str().unwrap(), "CID22");
+        assert_eq!(
+            files[0]["file"].as_str().unwrap(),
+            "cid22_features_372col.parquet"
+        );
+        assert_eq!(files[0]["sha256"].as_str().unwrap(), "aaa");
+
+        // An unmanaged root is honestly null, never a fabricated hash.
+        let bare = root.join("kon504");
+        std::fs::create_dir_all(&bare).unwrap();
+        let b = features_root_block(&bare, &[]);
+        assert!(b["manifest_sha256"].is_null() && b["declared_regime"].is_null());
+        assert!(b["era"].as_str().unwrap().contains("UNKNOWN"));
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_file(&outside).ok();
+    }
+
     #[test]
     fn default_features_root_is_the_current_extractor_372_root() {
         let a = parse(&["--bake", "/x/b.bin"]);
