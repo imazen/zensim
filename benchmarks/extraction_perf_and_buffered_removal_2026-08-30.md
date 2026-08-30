@@ -1451,3 +1451,30 @@ remaining MT headroom is at most ~1.2× and is gated behind an era decision, so
 buffered retirement should be planned on the API blockers *first* and should
 not wait on the fold reaching buffered-class scaling, which it cannot do
 without changing 944 bytes.
+
+> **SUPERSEDED 2026-08-30 by the fold-engine lane —
+> [`benchmarks/fold_engine_2026-08-31.md`](fold_engine_2026-08-31.md).**
+> Blockers **1, 3, 4 and 5 are now CLOSED**, each with a bit-exactness gate
+> (`zensim/tests/fold_engine_parity.rs`, 11 tests; `fold_backed_fixtures_
+> match_golden` in `v1_golden_bytes.rs`; zenmetrics `92bdec00`). Three
+> corrections to the analysis above, all made by reading source rather than
+> by measurement:
+>
+> * **Blocker 3 needed no new type.** `PrecomputedReference` is not
+>   buffered-walk state — it is an XYB pyramid cache whose contents are
+>   exactly what the fold's producer fills its source side with, so the fold
+>   reads the existing one and `compute_with_ref` routes with zero API change.
+> * **Blocker 4 was narrower than recorded.** `build_attribution_into_sink`
+>   calls only `crate::blur`; its buffered dependency was the concrete TYPE,
+>   not the walk. `compute_attribution_density*` survives buffered's deletion.
+>   The genuinely walk-bound consumer is the FUSED compare
+>   (`compute_zensim_streaming_with_ref_and_attr_{planes,fold}`), whose
+>   in-strip fold is tiled to `BAND_ROWS == STRIP_INNER`.
+> * **A blocker this list did not name is now the gating one:**
+>   `feature-regime-v2` is not a default feature, so a default `cargo add
+>   zensim` build contains no fold at all. Buffered cannot be deleted while
+>   that holds, independent of every parity gate.
+>
+> The retirement proposal — deletion order, what must survive, and the six
+> entries still routing to buffered by design — is §9 of the fold-engine note.
+> It is a REGISTERED PROPOSAL awaiting sign-off; nothing has been deleted.

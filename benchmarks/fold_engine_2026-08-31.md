@@ -437,4 +437,270 @@ no licence to differ, and §1.1 shows they do not.
 
 ## 8. Stage results
 
-*(appended per stage as each lands)*
+### 8.1 Stage 2 — fold-backed scoring (`3dcb777c`)
+
+Landed as designed. The additive surface is items 1–3 of §6 and nothing else;
+items 4–5 (tier-2 cached moments) were **not** built, because stage 3 turned
+out not to need a new reference type at all (§8.2).
+
+**Gate — `zensim/tests/fold_engine_parity.rs`, `to_bits()` equality on
+`score`, `raw_distance`, every feature, and `mean_offset`:**
+
+| test | matrix | result |
+|---|---|---|
+| `compute_is_bit_identical_across_engines` | 18 geometries × {serial, rayon}, profile B (372 + bake + spline) | PASS |
+| `extended_features_are_bit_identical_across_engines` | same × {B → 372, `PreviewV0_2` → 300} | PASS |
+| `golden_real_fixture_is_bit_identical_across_engines` | the 96×96 real-photo golden fixture, both entries | PASS |
+| `both_engines_are_bit_identical_across_rayon_pool_sizes` | 4 geometries × rayon pools 1/2/3/8/16 — cross-engine parity at every count AND each engine thread-invariant | PASS |
+| `identical_pair_short_circuit_is_shared` | the `mark_identical` payload | PASS |
+| `classify_is_bit_identical_across_engines` | 3 geometries, result + classification | PASS |
+| `fold_falls_back_on_a_weight_skipping_profile` | `PreviewV0_2::compute()` | PASS (falls back) |
+| `fold_backed_fixtures_match_golden` (`be63ff39`) | the fold vs the **pinned golden arrays** — `GOLDEN_SYNTHETIC`, `GOLDEN_NONTIGHT`, `GOLDEN_REAL` | PASS |
+
+The last row is the one the retirement rests on and is deliberately stated
+against the frozen constants rather than against the buffered path: the two
+walks agreeing proves nothing if they could drift together.
+
+Whole suite: **374 passed, 0 failed**. Clippy clean at default features, at
+`feature-regime-v2` alone, and at
+`training,classification,feature-regime-v2,custom-profiles`.
+
+**Design changes vs §2, with reasons:**
+
+* `is_fold_backable` gained a fourth condition —
+  `compute_all_features || extended_features`. `streaming::active_channels`
+  drops a channel whose basic+peak weights are all ≈0 unless one of those is
+  set, leaving its slots at the `ScaleStats` default; the fold always computes
+  all three. Same SCORE (the dropped slots carry zero weight), DIFFERENT
+  features. Requiring an all-active flag keeps the parity claim about the whole
+  `ZensimResult`. Every MLP-scored profile sets `compute_all_features` (it is
+  `mlp_bytes.is_some()`) and every `compute_extended_features` call sets
+  `extended_features`; the excluded case is the plain linear
+  `PreviewV0_1`/`PreviewV0_2` `compute()`.
+* A live cancellation token also falls back. Issue #48's contract is
+  cooperative cancellation *inside* the walk (row-band and scale boundaries)
+  and the fold has no stop hook, so routing a stoppable request to it would
+  silently downgrade cancellation to the caller's before/after `check_stop`.
+
+### 8.2 Stage 3 — the ref-cached fold form (`02a8fd35`)
+
+**The API stayed at zero new items**, because `PrecomputedReference` is not
+buffered-walk state — it is an XYB pyramid cache, and its contents are exactly
+what the fold's source side needs. The producer fills scale 0 with
+`convert_source_to_xyb_into_slices` and cascades `downscale_2x_into`; the cache
+is built by `convert_source_to_xyb` + `downscale_2x_into`; and
+`producer_windows_byte_equal_materialized` already pins the producer against
+exactly that materialisation. So the fold learned to READ the existing cache
+(`StripPlaneProducer::new_with_ref_feed` → `ref_planes`) instead of getting a
+parallel type, and `Zensim::compute_with_ref` routes with no signature change.
+
+`feature_v2::cached_ref_feed_usable` is the admission test:
+`NUM_SCALES` levels, dims matching the fold's floor-halving recurrence, tightly
+packed at each level's width. `PrecomputedReference` stops its pyramid at
+`w < 8 || h < 8`, so a short cache is refused and the call falls back.
+
+| test | matrix | result |
+|---|---|---|
+| `fold_ref_cache_matches_independent_computes` | 18 geometries × 4 distorted candidates × {serial, rayon}: N-vs-one-ref **bit-identical** to N independent `compute` calls, all four fields | PASS |
+| `compute_with_ref_cross_engine` | features / `score` / `raw_distance` bit-identical across engines at the with-ref entry | PASS |
+
+**A property the buffered path does not have for itself.** Buffered's
+`*_with_ref` derives `mean_offset` from a strip-wise `offset_sums /
+pixel_count` accumulation rather than `compute_xyb_mean_offset`'s 64-row chunk
+reduction, which is why `cross_platform::mean_offset_precomputed_ref` can only
+assert `< 1e-10` between buffered's OWN two entries. The fold's ref-cached form
+feeds the same producer over the same planes as its direct form, so it has
+nothing to round differently — hence the bit-exact gate above. Across engines
+at the with-ref entry the residual is that same buffered accumulation, measured
+at worst **|Δmean_offset| = 8.674e-19** over the whole matrix.
+
+Tier 2 (cached `mu1`/`activity`/`bs2`) was **not built.** §3.3's memory
+argument stands and tier 1 needed no new type, so shipping a 47.8 B/px opt-in
+before anyone has asked for it would be speculative. The spec stays in §3.3.
+
+### 8.3 Stage 4 — the attribution canvas (`30aee3d7`)
+
+**Blocker 4 was narrower than recorded, and the correction is the deliverable.**
+`build_attribution_into_sink` calls only `crate::blur` — never
+`compute_multiscale_stats_streaming`, `process_scale_bands`, or any other walk
+function. Its buffered dependency was a pyramid to read, so the builders now
+take `&impl MultiScaleRef` and `basic_attr_prep` reads through the trait
+(`scale(0)` / `num_scales()`). The only concrete-`PrecomputedReference` use
+left in the canvas path is `validate_ref_match`, which is API-level validation,
+not pyramid access.
+
+| test | result |
+|---|---|
+| `attribution_density_is_engine_independent` — `compute_attribution_density`, `_binned(8)`, `_full`: density AND SAT block sums bit-identical across engines, 4 geometries | PASS |
+| `fused_compare_splits_into_fold_score_plus_standalone_map` — the fold-backed `compute_with_ref` score is bit-identical to the fused compare's score | PASS |
+| the 26 pre-existing attribution unit gates, **unchanged** — incl. `attribution_covers_expected_slots_per_width`, `sum_preservation_mean_slots`, `sum_preservation_ppool_and_hf_slots` (the plane-sum identities), `fused_score_bit_matches_diffmap_path`, `fused_matches_standalone_attribution`, `fused944_features_bitwise_and_score_match_standalone` | 26 passed, 0 failed |
+
+M3a cannot move: it is computed FROM these densities, and they are bit-identical
+between engines.
+
+**What is still walk-bound, stated plainly:** the FUSED compare.
+`compute_with_ref_score_and_attribution*` calls
+`streaming::compute_zensim_streaming_with_ref_and_attr_{planes,fold}` — the
+buffered band walk with an `on_scale` callback folding the map *in strip*, on a
+tiling (`BAND_ROWS == streaming::STRIP_INNER`) chosen to be bit-compatible with
+the buffered extractor. Re-hosting that on the fold's own strip geometry
+(`STRIP_ROWS`, `HALO_P`) is a re-derivation, not a re-point, and carries real
+bit-risk. **Not attempted.** It falls back to buffered under
+`ScoringEngine::Fold`, and the migration path is the split, whose score half is
+bit-identical (gate above) and whose map half is already characterised by
+`fused_matches_standalone_attribution` (f32-combine precision, 3e-5·max_abs).
+
+### 8.4 Stage 5 — `zensim-gpu`'s CPU oracle (zenmetrics `92bdec00`)
+
+`crates/zensim-gpu/tests/it/cpu_oracle.rs` makes the oracle's WALK selectable:
+buffered by default (byte-for-byte the previous `ZensimCpu::new(profile)`
+expression) and the fold under `ZENSIM_GPU_ORACLE_ENGINE=fold`. Six oracle
+constructors route through it.
+
+Measured on this box (`cargo test -p zensim-gpu --test it
+--no-default-features --features wgpu` — a **software** wgpu adapter; the dev
+box has no GPU):
+
+| run | zensim | zenmetrics | result |
+|---|---|---|---|
+| baseline | `5e83d94c` (pre-lane) | pristine | 102 passed, 6 failed |
+| buffered oracle | `be63ff39` | the change | 103 passed, 6 failed |
+| **FOLD oracle** | `be63ff39` | the change | **103 passed, 6 failed** |
+
+The same six failure NAMES in all three, and the same CPU reference VALUES in
+the failure text (`odd_769x513 … cpu=2.478096e2` identically). Two conclusions,
+both load-bearing:
+
+* the six failures are **pre-existing** on this adapter — the odd-dimension
+  pyramid-height class the module doc names, the stale cubecl-pool-page read,
+  and two diffmap tolerances — and are not caused by either repo's changes;
+* **swapping the oracle to the fold changes nothing the suite measures.**
+
+The 103rd test is `cpu_oracle_engines_agree`, which needs no GPU: both walks
+must produce `to_bits`-identical CPU references at the geometries this suite
+compares kernels against (64/128/192 squares, 320×240, the odd 320×241 and
+769×513 that `odd_dim_pyramid_parity` exists for, and the sub-64 48×40
+reflect-pad case) for `compute_extended_features` AND `Zensim::compute`.
+
+**Not repointed, and it is the one oracle site that still needs buffered:**
+`cpu_gpu_diffmap_parity`'s `precompute_reference_linear_planar` — the PU-linear
+route, which §1 excludes.
+
+---
+
+## 9. REGISTERED PROPOSAL — retiring the buffered walk
+
+**Status: proposal only. Nothing in §9 has been executed, and this lane
+deletes no buffered code.** It needs the user's sign-off, and one item (§9.2)
+is an era-shaped decision that is not a perf or API question at all.
+
+### 9.1 What the four blockers look like now
+
+| # | blocker (predecessor §15) | status after this lane |
+|---|---|---|
+| 1 | the fold has no `score()` | **CLOSED** (`3dcb777c`, `be63ff39`) — every SDR scoring entry runs fold-backed, bit-identical, and the fold reproduces the pinned golden bytes |
+| 2 | pool values differ at production widths | CLOSED by option C (`56bbcda2`) |
+| 3 | no ref-cached fold form | **CLOSED** (`02a8fd35`) — and with zero new API, because the pyramid cache serves both engines |
+| 4 | attribution's basic canvas is buffered-native | **NARROWED AND CLOSED for `compute_attribution_density*`** (`30aee3d7`); the FUSED compare remains, see §9.3 |
+| 5 | `zensim-gpu`'s only CPU oracle is `compute_extended_features` | **CLOSED** (zenmetrics `92bdec00`) — the oracle's walk is selectable and the swap is measured inert |
+| 6 | the fold must not be slower | see §10 |
+| **7** | **`feature-regime-v2` is not a default feature** | **NEW, OPEN — and it is now the gating one.** §1.3 |
+
+### 9.2 The prerequisites, in order
+
+1. **Make the fold reachable in a default build.** Either move
+   `feature-regime-v2` into `default`, or make `feature_v2` /
+   `feature_v2_stream` / `fold_engine` unconditional and keep the feature as a
+   no-op alias for one release. Until this lands, deleting buffered breaks
+   `cargo add zensim`. This is a public-surface decision (it un-hides
+   `feature_v2`'s whole module) and needs approval on its own terms.
+2. **Decide `v1_only`.** §1.2: backing `score()` with the fold makes a
+   `#[doc(hidden)]` "test/bench instrumentation" toggle a production compute
+   request. Either bless it (rename it to something that says what it is —
+   `compute_v1_blocks_only` — and drop the "not a product mode" language), or
+   accept ~2× the work per score by running the full 944 walk. Measured cost of
+   the latter is the predecessor's §10.1: `v1_only` removes 53 % of the walk.
+3. **Flip the engine default** to `Fold` and let the whole suite run against
+   it — every gate in §8 is already engine-parametrised, so this is a one-line
+   change plus a full-suite run. Then run the zenmetrics A/B (§8.4) on real GPU
+   hardware and flip `cpu_oracle`'s default too.
+4. **Then, and only then, delete.**
+
+### 9.3 What is NOT covered, and therefore blocks a *complete* deletion
+
+Each of these still routes to buffered today, by design, with a named reason:
+
+| entry | why buffered | what closing it needs |
+|---|---|---|
+| `compute_pu_linear{,_planar,_extended_features}` + `precompute_reference_linear_planar` | the fold has a PU front-end (`FrontEnd::Hdr`) but no wired mean-offset path there, and these take f32 slices rather than an `ImageSource` | a PU `MeanOffsetRows` hook + a linear-planar source adapter |
+| `compute_with_ref_score_and_attribution*` (the fused compare) | the map is folded IN STRIP on the buffered band tiling (`BAND_ROWS == STRIP_INNER`) — §8.3 | a re-derivation on the fold's `STRIP_ROWS`/`HALO_P` geometry, with its own bit-gate; or accept the split (score bit-identical, map to 3e-5·max_abs) |
+| `compute_streaming_strips*` (> 16 MP) | no fold entry with that API | probably **dissolves rather than ports**: the fold's plane residency is O(strip) natively and its peak RSS is thread-independent (predecessor §13: 163 MB at 2304²), so the >16 MP case is what the fold is *for*. Routing these to the fold would also drop the strip path's documented "minor approximation in the strip-boundary blur context" — an improvement, but an output change, so an era decision |
+| `PreviewV0_1`/`PreviewV0_2` `compute()` | weight-skipping (§8.1) | either compute all channels for those profiles (changes their feature vectors, not their scores) or keep a buffered path for them |
+| any `with_stop` request | no in-walk cancellation hook in the fold | a `Stop` check at the fold's strip boundary — small, and it makes issue #48's contract engine-independent |
+| any `num_scales != 4` `ZensimConfig` | the fold is hard-wired to `NUM_SCALES` | generalise the fold's scale count, or declare 4 the only supported value |
+| `compute_zensim_with_config` (the `training` free function) | deliberately unrouted — it is the entry `v1_golden_bytes` measures | route it LAST; `fold_backed_fixtures_match_golden` already shows the fold reproduces the same arrays through `compute_extended_features` |
+
+### 9.4 Deletion order, once §9.2 and §9.3 are settled
+
+Delete outside-in, one commit per step, full suite between steps:
+
+1. **`metric::combine_scores`** and the `ScaleStats` → feature assembly.
+   Pinned by: every parity test in §8 (they compare against it), plus
+   `v1_golden_bytes`. Delete only after the goldens are re-pinned to the
+   fold-backed entry.
+2. **`streaming::compute_zensim_streaming{,_stoppable}`,
+   `compute_multiscale_stats_streaming`, `multiscale_stats_over_pu_xyb`,
+   `compute_multiscale_stats_pu_linear_*`.** Pinned by `cross_platform`,
+   `pu_entry`, `size_invariance`.
+3. **`compute_multiscale_stats_streaming_with_ref{,_borrowed}`,
+   `compute_multiscale_accums_streaming_with_ref_borrowed`,
+   `compute_zensim_streaming_with_ref{,_and_diffmap{,_linear_planar}}`.**
+   Pinned by `cross_platform::mean_offset_precomputed_ref` and the diffmap
+   tests.
+4. **`compute_multiscale_stats_streaming_strips{,_with_ref}`** — only after
+   §9.3's ">16 MP dissolves" decision. Pinned by `streaming_strips` and the
+   `streaming_strips_oom` feature test.
+5. **`compute_zensim_streaming_with_ref_and_attr_{planes,fold}`** — only after
+   the fused compare is re-hosted or the split is accepted. Pinned by
+   `attribution::tests::fused_*`.
+6. **The band machinery itself**: `process_scale_bands`,
+   `process_scale_bands_into_accum`, `process_strip_channel`,
+   `ScaleAccumulators` (`streaming.rs:386-679`, ~294 lines), `active_channels`,
+   `downscale_6_planes`, `AttrScaleRetention`/`AttrBandSlices`/`AttrFoldBand`.
+   This is the bulk — `streaming.rs` is 6,738 lines and most of it is here.
+7. **`compute_xyb_mean_offset{,_range}`** — LAST, and read §9.5 first.
+
+### 9.5 What must SURVIVE, and why it is not "buffered code"
+
+Deleting these would break the fold:
+
+* **`PrecomputedReference` + `PrecomputedReferenceView` + `MultiScaleRef`** —
+  the pyramid cache. Consumed by the fold's own ref feed (§8.2) *and* by the
+  attribution canvas (§8.3). These deserve to move out of `streaming.rs` into
+  their own `pyramid` module as part of the deletion, precisely so that
+  "delete the walk" cannot take them with it.
+* **`convert_source_to_xyb{,_into,_into_slices}`,
+  `convert_linear_planar_to_{,pu_}xyb_into`,
+  `convert_linear_interleaved_to_pu_xyb_into`, `downscale_3_planes`,
+  `blur::downscale_2x_into`** — the front end. The producer calls them.
+* **`compute_delta_stats`** and the `DeltaAccum` cluster — classification is a
+  pure per-pixel pass with no pyramid and no walk.
+* **`upsample_row_powx_add`** — attribution uses it.
+* **`compute_xyb_mean_offset`** — not because the fold calls it (it does not),
+  but because it is the **definition** `MeanOffsetRows::finish` reproduces. If
+  it is deleted, that reproduction loses its oracle. Keep it as a
+  `#[cfg(test)]` reference with a test asserting the two agree bit-for-bit on
+  materialised planes, or accept that `MeanOffsetRows` becomes the definition
+  and say so in `docs/DATASET_HISTORY.md`.
+
+### 9.6 One thing this proposal will not do
+
+It will not claim the fold is as fast as buffered. The predecessor measured
+944-full at 2.2–3.8× `buf_v1_372` (§13), and this lane's own numbers are in
+§10. Retirement is being proposed **on the API and correctness blockers**,
+which are now closed or named, and the perf question is a separate trade the
+user has already been given the shape of: the fold buys one code path and a
+4.7× memory reduction, and §14 of the predecessor bounds the remaining MT
+headroom at ~1.2× behind an era decision. If the trade is not acceptable,
+the right outcome is "keep both, with the fold as a gated alternative" — which
+is exactly the state this lane leaves the tree in.
