@@ -106,6 +106,40 @@ implements its A1-A5/A9 candidates.
 
 ### Resolved
 
+- **✅ RESOLVED 2026-08-30 — v1's 372-feature vector could come out 93 / 186 / 279
+  wide, and it was SIZE, not batch.** `docs/DATASET_HISTORY.md` §3.26 registered
+  this as "a v1-372 feature vector is not a pure function of its pair … it is a
+  function of the BATCH". **That framing is retracted**: the pre-fix binary
+  (`6d0a393a`) gives **5 short of 5 run alone, 453 of 453 alone, 453 of the
+  6,953-row batch** (§3.26 predicted 0 / 33 / 453), and the row values are
+  byte-identical across every batch composition. The width is
+  `2 + n_scales(W,H)·3·31` — predicted with **ZERO errors on all 20,812 stored
+  rows**. The scale walk starts at `simd_padded_width(width)` but plain
+  `height`, so 4 scales need **`simd_padded_width(W) >= 64 AND H >= 64`**; that
+  asymmetry (`54x96` FULL vs `96x54` SHORT) is what made "too small" look
+  falsified. **Mechanism:** `compute_with_config_inner` reflect-pads for every
+  `Zensim::compute*`; three entries did not —
+  `compute_zensim_with_config` (`metric.rs:4854`, `training`) returned a SILENT
+  short vector and is called by BOTH v1-372 extractors, while
+  `compute_zensim_with_ref_and_config` (`metric.rs:723`) and
+  `Zensim::compute_with_ref_into` (`metric.rs:2282`, a **product** API) PANICKED
+  `scale 0 width mismatch`. **Fixed** in `f9fac41e` by giving the pad decision
+  ONE owner (`metric::needs_pyramid_pad` + `min_pyramid_dim_for_scales` +
+  `reflect_pad_for_scales`) used at all seven pyramid entries, `num_scales`-aware
+  so `--num-scales 5/6` cannot truncate either. **Gate:**
+  `zensim/tests/v1_feature_width_pure_function.rs` (8 tests; 5 fail pre-fix).
+  **Blast radius, measured:** 0 of the 149,195 canonical-leg pairs could
+  truncate; every canonical 372 parquet is full width; the 944 fold is immune and
+  byte-identical pre/post; `bake_verdict` never extracts; 19,444/19,444
+  previously-372 R1b rows are BYTE-IDENTICAL after the fix and 1,368/1,368 short
+  rows became 372, with `f0..f155` bit-identical to the stored 944 fold. **Still
+  open (registered, not executed):** `r1b-samepair372-2026-08-30` is a
+  size-correlated 6.5 % row-restriction and `r1b-372root-2026-08-30/` has three
+  dangling symlinks; full-width CSVs are at
+  `/mnt/v/output/zensim/v1width-fix-recheck-2026-08-30/`. Record:
+  `benchmarks/v1_width_defect_2026-08-30.md`.
+
+
 - **v1 golden byte-identity gate environment fragility — CLOSED-BY-POLICY 2026-08-05.**
   USER RULING (verbatim): *"the golden-gate policy is tiny tolerances, not per-class
   exactness; and full-precision fallbacks are acceptable only if runtime-optional via

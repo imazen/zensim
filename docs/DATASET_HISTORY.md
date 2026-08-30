@@ -641,7 +641,15 @@ D3 one-shot wirings executed (zenjpeg/jxl/svt). D4 decided: hdrgrid stays
 era-B. **Rules for every future corpus build:** consume the family split,
 apply the purge list, and keep instrument scenes out of training views.
 
-### §3.26 — v1's 372-feature vector width is a function of the BATCH, not of the pair (R1b, 2026-08-30)
+### §3.26 — v1's 372-feature vector width: RESOLVED 2026-08-30 (it was SIZE, not batch)
+
+**STATUS: RESOLVED.** Root-caused, fixed in the owner, and gated —
+commit `f9fac41e` (`fix(v1-372 width): reflect-pad at EVERY pyramid entry`) on
+`main@origin`; gate `zensim/tests/v1_feature_width_pure_function.rs`; full
+record with every measurement `benchmarks/v1_width_defect_2026-08-30.md`.
+**The BATCH framing below is retracted in turn** — this entry keeps both
+retractions because two different wrong explanations were registered here and
+the second one is the more misleading of the two.
 
 **What was seen.** Re-extracting the R1b eval slices at the v1-372 regime
 produced RAGGED CSVs: 453 of 6,953 imazen26 rows, 422 of 6,142 nonphoto, 493 of
@@ -650,26 +658,47 @@ produced RAGGED CSVs: 453 of 6,953 imazen26 rows, 422 of 6,142 nonphoto, 493 of
 missing. The rows are not empty: a short row carries ~268 non-zero values, i.e.
 a real 3-scale computation.
 
-**The first explanation was WRONG and is retracted.** It was recorded on
-2026-08-30 as "v1's vector length is size-dependent — a rendition too small for
-the 4th scale emits 3 scales". Measured and falsified the same day:
+**Retraction 1 (the original entry).** "v1's vector length is size-dependent —
+a rendition too small for the 4th scale emits 3 scales" was rejected on
+2026-08-30 because `512x384` appeared among the short rows, the same size
+appeared in both sets, and 259 of 957 references carried BOTH widths.
 
-| test | result |
-|---|---|
-| size correlation | 168 distinct sizes among short rows, min-side **36 … 1024**; the SAME size appears in both short and full sets. `512x384` is among the short. NOT size. |
-| per-reference | **259 of 957** references have BOTH short and full rows — same reference, same dimensions, different distorted image. |
-| ref/dist dimensions | equal on every short row inspected (144×192, 512×384 …) — not a dim mismatch. |
-| identical-input short circuit | ruled out: short rows carry real values, and `ref` bytes ≠ `dist` bytes. |
-| thread count | `RAYON_NUM_THREADS` 1 / 2 / 8 → **33 / 33 / 33** short. NOT a data race. |
-| determinism | the full batch re-run twice gives the **identical** 453-row short set (symmetric difference 0). |
-| **batch composition** | the SAME 453 pairs re-run as their own batch give only **33** short; 5 of them run alone give **0** short. |
-| tool | identical short-row set from `zensim-bench extract_features_372col` and `v2_ab_extract ZENSIM_AB_MODE=v1`, and from the grouped AND per-pair flows (`ZENSIM_AB_GROUPED=0`). Not a tool quirk. |
+**Retraction 2 (what replaced it, also wrong).** "The width is a function of
+the BATCH, not of the pair" — evidenced by the same 453 pairs re-run as their
+own batch giving only 33 short and 5 run alone giving 0. **Both numbers fail to
+reproduce.** A binary built from the pre-fix tree (`6d0a393a`) on the exact
+pair lists gives **5 short of 5 alone, 453 short of 453 alone, 453 short of the
+6,953-row batch** — the width never moves, and the row VALUES are byte-identical
+across all three compositions (pre-fix and post-fix alike). The likeliest source
+of the 33/0 reading is a re-run routed through a `Zensim::compute*` entry (which
+reflect-pads, so 0 short) and/or a pair list rebuilt from `ref_basename`, which
+§8.5(a) of the R1b doc itself records as **not row-unique**.
 
-**So: the v1-372 feature vector for a given (ref, dist) pair is not a pure
-function of that pair.** It is deterministic for a fixed input set and changes
-when the set changes. Root cause is inside v1's compute path and is NOT
-diagnosed here — R1b's lane is the keyed rebuild; this is registered so the
-next session starts from the measurements rather than the retracted guess.
+**The truth: it is a pure function of `(W, H)`.** The scale walk starts at
+`w = simd_padded_width(width)` but plain `h = height` and stops at `w < 8 ||
+h < 8`, so a 4-scale pyramid needs **`simd_padded_width(W) ≥ 64 AND H ≥ 64`**
+(i.e. `W ≥ 49 && H ≥ 64` below 497 px). The predicate `2 + n_scales(W,H)·3·31`
+reproduces the field count of **all 20,812 stored rows with ZERO errors**; every
+short row's min side is in `[36, 55]`; the short and full size sets are
+**disjoint**. The width asymmetry is why "too small" looked falsified: `54x96` is
+FULL (54 → 64 by SIMD alignment) while `96x54` is SHORT, and `62x96` is FULL
+while `48x64` is SHORT. `512x384` was never short — that reading came from the
+max side, not the min.
+
+**Mechanism.** `compute_with_config_inner` (`metric.rs:3153`, behind every
+`Zensim::compute*`) reflect-pads any sub-64 side before the walk. Three entries
+did not: `compute_zensim_with_config` (`metric.rs:4854`, `training`) returned a
+**silent short vector** (93/186/279 wide, no error) — and **both** v1-372
+extractors call it (`extract_features_372col.rs:195`,
+`v2_ab_extract.rs:319`), which is exactly why the identical short set came from
+both tools and both flows; `compute_zensim_with_ref_and_config`
+(`metric.rs:723`, `training`) and `Zensim::compute_with_ref_into`
+(`metric.rs:2282`, a **product** API) **panicked** `scale 0 width mismatch`.
+
+**Fix.** One owner for the decision — `metric::needs_pyramid_pad(w, h,
+num_scales)` + `min_pyramid_dim_for_scales` + `reflect_pad_for_scales` — used at
+all seven pyramid entries. `MIN_PYRAMID_DIM` stays 64; the threshold is now
+`num_scales`-aware so `--num-scales 5/6` cannot truncate either.
 
 **Consequence for existing data — MEASURED, and it is benign.** Every canonical
 372 parquet is full width with real values; nothing is NaN- or zero-padded:
@@ -682,18 +711,38 @@ next session starts from the measurements rather than the retracted guess.
 | `imazen26_test_120k_2026-07-16` | 7,844 | 0 | 0 |
 | `nonphoto_features_372col_2026-07-15` | 8,241 | 8 (0.10 %) | 0 |
 
-The fixed-size corpora carry their COMPLETE row counts, so no row was dropped
-in those builds. A ragged CSV cannot become a parquet silently — the builder
-raises (`ArrowInvalid: Column ... expected length 6953 but got length 6500`,
-observed 2026-08-30) — so a short row is always either a build failure or an
-explicit drop, never a padded row. The 8 nonphoto all-zero rows are the
-identical-input signature, not truncation.
+A ragged CSV cannot become a parquet silently — the builder raises
+(`ArrowInvalid: Column ... expected length 6953 but got length 6500`) — so a
+short row is always either a build failure or an explicit drop, never a padded
+row. The 8 nonphoto all-zero rows are the identical-input signature, not
+truncation. **Confirmed 2026-08-30 by direct measurement:** a header-level
+dimension scan of all **149,195** pairs across the 11 canonical legs finds
+**0 pairs** that could have truncated; re-extracting cid22val (250), kon504
+(504) and safesyn (250) gives 372 on every row, alone == batch byte-identical,
+and the **pre-fix and post-fix binaries agree BYTE-FOR-BYTE** on all 1,004 rows.
+(Unrelated and pre-existing: a fresh extraction differs from the *stored*
+2026-05-15 / 2026-08-29 tables on most slots — that is the §8.5(b) extractor
+drift, not this defect; the two binaries agreeing byte-for-byte is the proof.)
 
 **The 944 regime does not have this problem.** The folded/append path emits a
-fixed width, so R1b's 944 tables are ragged-free by construction. This is a
-concrete robustness argument for the 944 regime over v1-372.
+fixed width, so R1b's 944 tables are ragged-free by construction. Measured:
+`foldapp2pools` on the 453 sub-64 pairs emits 946 columns on every row, and the
+pre-fix and post-fix CSVs are BYTE-IDENTICAL.
 
-**Guard now in place.** `v2_ab_extract` refuses to write a table whose row count
-differs from the pairs count and exits 3 (`ZENSIM_AB_ALLOW_MISSING=1` is the
-caller's visible opt-out) — a short/partial extraction can no longer land on
-disk unannounced. Record: `benchmarks/r1b_keyed_rebuild_2026-08-30.md` §8.5(d).
+**Where it did land, still open.** The three R1b eval slices are the only place
+sub-64 renditions met the defective extractor. `build_r1b_samepair_roots.py`
+dropped the 1,368 short rows (counted, never silent), so
+`r1b-samepair372-2026-08-30` is a size-correlated 6.5 % restriction of its
+population, and `r1b-372root-2026-08-30/` carries **three dangling symlinks**
+into `r1b-372slices-2026-08-30/`, which only ever received
+`ext_konjnd_jpeg_val.parquet`. Full-width replacements now exist as CSVs at
+`/mnt/v/output/zensim/v1width-fix-recheck-2026-08-30/` (sha-manifested,
+`build_commit` stamped, with the exact affected-pair lists); promoting them to
+parquet and re-cutting the same-pair roots at 6,953 / 6,142 / 7,717 rows belongs
+to the keyed-rebuild lane and is REGISTERED, not executed.
+
+**Guard.** `v2_ab_extract` refuses to write a table whose row count differs from
+the pairs count and exits 3 (`ZENSIM_AB_ALLOW_MISSING=1` is the caller's visible
+opt-out). That guard catches a DROPPED row; the new width gate catches a SHORT
+one. Record: `benchmarks/r1b_keyed_rebuild_2026-08-30.md` §8.5(d) +
+`benchmarks/v1_width_defect_2026-08-30.md`.

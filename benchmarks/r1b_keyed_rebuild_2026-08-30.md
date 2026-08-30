@@ -597,6 +597,18 @@ extractors agree to 0.0004 — so this is an INSTRUMENT difference in which
 quotes its own instrument and does not adjudicate; anyone comparing to the
 ledger's 0.5935 must first establish which table produced it.
 
+**(d) v1's 372 vector width — RESOLVED 2026-08-30, and the BATCH reading below is
+RETRACTED.** Root cause: three v1 entry points skipped the reflect-pad that
+`compute_with_config_inner` applies, so the pyramid lost scales whenever
+`simd_padded_width(W) < 64 || H < 64` — a pure function of `(W, H)`. Fixed in
+`f9fac41e`; the pre-fix binary gives **5 short of 5 alone, 453 of 453 alone,
+453 of the full batch** (not 0 / 33 / 453), and the predicate
+`2 + n_scales(W,H)*3*31` classifies all 20,812 stored rows with zero errors.
+The three slices' full-width re-extractions and the affected-pair lists are at
+`/mnt/v/output/zensim/v1width-fix-recheck-2026-08-30/`; **the samepair roots'
+1,368 dropped rows can now be recovered** (registered, not executed here).
+Full record: `benchmarks/v1_width_defect_2026-08-30.md`. Original text follows.
+
 **(d) v1's 372 vector width is a function of the BATCH, not of the pair.**
 ~6.5 % of slice rows come out at **279** columns (3 scales × 3 × 31) instead of
 372 (4 scales): 453/6,953 imazen26, 422/6,142 nonphoto, 493/7,717 hfnlproxy,
