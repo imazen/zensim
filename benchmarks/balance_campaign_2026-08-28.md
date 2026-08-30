@@ -2142,3 +2142,55 @@ cheap justification; record and close.
 **If PASS:** name the companion, run the wider battery on the combined
 scorer, and register the production step (two-stage scorer wiring vs the
 954-regime fleet extraction) as the follow-on.
+
+**Arm-1 result + open amendment (arm-2).** Tables verified exact (f0-only
+reproduces C: kon 0.5006 / cid22 0.8927; carriers individually +0.12…+0.45
+zero-shot on kon-504). Arm-1 (konbpg-trained) FAILS both bars on all 3 seeds
+AND degrades kon below C (0.376–0.413) — BPG-half training poisons JPEG
+transfer (consistent with R6's konbpg falsification and with B's kon being
+training-clean). ARM-2 registered before running: same head, TRAIN =
+kadid+tid rank only (no kon data — B's actual condition), val unchanged;
+same bars, k=3 seeds.
+
+**Arm-2 result + FINAL arm-3 (pre-declared).** Arm-2 lifts kon into B's zone
+(0.489/0.532/0.517 — above C in 2 of 3 seeds; broad-fit carriers DO transfer
+where kon-fit ones poisoned) but cid22 craters (0.838–0.850): the 2-corpus
+fit surface cannot hold C's cid22 ordering. ARM-3 (FINAL — the falsifier
+fires after it): add a self-distillation anchor leg (konbpg_tr pixels with
+target := C's own score /100 — no human/kon labels consumed) at weight 2.0 to
+pin f0-identity, kadid+tid rank 0.5/0.5 steer the carriers. Same bars, k=3.
+
+### R2 KON-COMPANION — FINAL VERDICT: FALSIFIED (2026-08-29, ran to the registered end)
+
+Nine fits across three pre-declared arms; no seed reaches both bars:
+
+| arm (train data) | kon-504 (bar 0.55) | cid22 (bar 0.885) |
+|---|---|---|
+| 1: konbpg-trained | 0.376–0.413 (BELOW C) | 0.880–0.883 |
+| 2: kadid+tid only | **0.489–0.532** (above C, 2/3) | 0.837–0.850 (craters) |
+| 3: self-distill anchor + guards | 0.415–0.457 | 0.884–0.886 (2/3 pass) |
+
+**What the frontier teaches (all recorded):** (1) kon-FIT carriers poison
+JPEG transfer (arm-1 — consistent with R6's konbpg falsification and B's
+training-clean kon); (2) broad-fit carriers DO lift kon at 944-class
+(arm-2's 0.532 — the mechanism is partially real) but the 11-dim companion
+surface cannot simultaneously hold C's cid22; (3) pinning identity (arm-3)
+recovers cid22 and forfeits the kon lift. **B achieves both because its
+carriers co-train with the full 372 set on full-breadth data — the carrier
+VALUE is interaction-borne.** A bolt-on head structurally cannot reproduce
+it.
+
+**The lane's end state:** every cheap path to C-with-B's-kon is now
+measured-closed (weight levers R6-K/R6-M; the companion arms 1–3). The one
+remaining route is the **full 954-regime retrain** — carriers + all 944
+features co-trained on the full legs — which requires the fleet
+re-extraction campaign (new regime slots f944..953, all training legs, days
+of LAN fleet + storage; zenfleet job class exists). Evidence FOR: the block
+is half of B and 48.6% of its kon mass, and arm-2 proved partial transfer;
+evidence tempering: the 720-era drop-vs-keep A/B favored dropping AT THAT
+ERA, and interaction-dependence means the retrain is the only honest test
+left. **The campaign is a real spend — registered as the R2 endpoint,
+launch user-gated.** Until then the kon axis stays B's, priced at −0.09 in
+the swap decision, with the pair/companion product shapes as the standing
+alternatives. Artifacts: `bakes/koncompanion-2026-08-29/` (6 tables + 9
+bakes + manifest), logs `~/tmp/koncomp*`.
