@@ -2828,3 +2828,29 @@ the refusal map is the port session's next worklist.
   (cvvdp+zensim-foldapp2 944 features, 11,608 jobs, CPU pool after the aom encodes drain).
 - Perf note for the port lane: with IntraBC on, the port's 1920x1080 cells took ~80 s each
   in the localizer (the oracle: ~1 s) — the screen-tools search is far outside Gate 3.
+
+### KB-41 ROOT CAUSE + FIX LANDED IN THE PORT (2026-08-30 ~07:1xZ) — two palette cost-table plumbing defects; four pinned divergence classes close
+Method (playbook §10 to the decision): the localizer's new decode-side SYNTAX diff put the
+first divergent block of `85x128 cq32 cpu8` at mi(22,6) — port took a 3-colour UV palette,
+C kept SMOOTH; a sibling instrumented libaom (`~/tmp/libaom-instr`, fprintf in
+`av1_rd_pick_intra_sbuv_mode` / `av1_rd_pick_palette_intra_sbuv` / `intra_mode_info_cost_uv`)
+vs matching port dumps: every tokenonly rate/dist equal; only the palette HEADER rate differed.
+Kernels excluded first: `palette_shim.c` exports the DISPATCHED `av1_calc_indices_dim{1,2}` /
+`av1_k_means_dim{1,2}`; `palette_kmeans_diff.rs` = 1,050 cases bit-identical.
+- Root 1: `palette_uv_mode_cost` NEVER FILLED (the fill fn had a unit differential and zero
+  callers) → UV palette flag cost 0 where C has 23 (no palette) / 2592 (palette).
+- Root 2: palette size/colour-index cost tables read from the FRAME-INIT tables for the whole
+  frame while every other mode cost follows the per-SB/SB-row `INTERNAL_COST_UPD_*` refresh
+  (979 vs 864 = default-CDF vs adapted cost).
+Fix (zenav1-aom, one commit, pushed after the gate sweep): `real_costs.rs` fills the flag table;
+`pack.rs` routes `sb_real.palette_costs` into the per-SB `PickFrameCfg`.
+Closures (self-promoting pins fired and were re-pinned): `85x128 cq32 cpu8` byte-identical;
+`rd_close_palette` `text_420_128_cq20` (a "genuine near-tie" since the palette landing) →
+BYTE_EXACT; **`PALETTE_ON_SPEED8_OPEN` CLOSED** (9/9 rows); **the full-RD half of
+`PALETTE_MANY_COLORS_OPEN` CLEAN** (9/9); **`SCREEN_ARRAY_OPEN_ROWS` CLOSED** (1/1);
+`encoder_gate_e2e_byte_match` 32/32 unchanged. Remaining: `ui_420_128_cq32` (pinned near-tie),
+the speed-9 `fc256 n40 cq40 −1 B` row, and whatever the re-running KB-41 census still shows.
+Datagen note: with IntraBC mirrored ON for screen-detected frames the PORT's DV search is the
+wave's bottleneck (1080p screenshots ~80 s/cell at cpu6 vs ~1 s for the oracle; cpu4 being
+timed) — the aom wave's done-rate fell to ~0/min for a 10-min window while the boxes sat at
+full load. Gate-3 territory for the port; a size/screen-tier scoping decision for the wave.
