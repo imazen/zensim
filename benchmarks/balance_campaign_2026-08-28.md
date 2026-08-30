@@ -3188,3 +3188,20 @@ kernels at `k = k_iw = 4`), so:
   `harvest-2026-08-30/ssim2_cpu_backfill.parquet` (921 rows × ID + `ssim2_cpu`, sha
   `31dcb3df…`, manifest beside it). Kept as its OWN column: CPU-vs-GPU ssim2 equivalence on
   the overlap is not measured here, so a consumer coalesces only after that check.
+
+### THE CARRIERS REGIME IS A FLEET METRIC NOW — `zensim-foldapp2carriers`; svt carriers feature run declared (2026-08-30 14:2xZ)
+
+- zenmetrics `c0cdf095`: `ZensimFeatureRegime::Folded720Append2Carriers` (regime tag
+  `folded720append2carriers`, 944 wide) = the streaming 944 extraction with
+  `V1PoolsMode::Carriers` — the `fused944native` regime produced by the fleet directly
+  instead of by table surgery. SDR-only (the HDR arm emits an explicit error row); gate
+  `folded944carriers_matches_driver_args` (bit-identical to the direct zensim call; exactly
+  the ten carrier slots differ from the plain 944 regime). Executor image rebuilt on it
+  (`exec-zensim944hdr-c0cdf095`, musl, `strings` check on the metric name).
+- Declared `avifsvt-sf-carriers-20260830` over the svt wave's 130,590 DONE cells (11,608
+  score_file jobs, `--full-uri --cell-codec zenavif`, empty snapshot uploaded). Launch:
+  on the tower as a second capped container (cpuset 0-23 / shares 256 / 24 GiB — inside
+  the media-server cap, sharing it with the aom CPU scorer) once the image is up; the
+  write-back then yields `features_folded720append2carriers.parquet` beside the svt harvest —
+  the training view for a linear/BVLS carrier head on fresh svt-rs encodes, the
+  registered "fused944native comparison" on data the trainer has never seen.
