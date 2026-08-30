@@ -3574,3 +3574,58 @@ the 94.44% it can reach. Against the best FULL-coverage fixed family (jxl,
   extract-perf lane (`8a98a286`) — handed to that lane.
 - **Registered follow-ups**: new DATED 372 root (never overwrite in place), B-lineage re-verdict on
   it, B training re-extraction (~227k pairs, fleet wave). Root+re-verdict lane launched (round 4b).
+
+## 2026-08-30 ~21:0xZ — ROUNDS 5 + 6: fleet claims/wall-time, KB-42 CI green, the dated 372 root + era table
+
+### Fleet lane (zenmetrics `7e4695b3`..`5438f8f5`) — the 312-cell round + wall-time fixes
+- ORCHESTRATOR ERROR, owned: the 17:32Z requeue launched on lane 2's pools image (`03bdf64b`,
+  built WITHOUT `avif-aom`) — all 312 cells claimed and poisoned in 28 s ("build lacks the
+  avif-aom feature" → EncoderPanic, poison-on-first-deterministic-failure). Two zenfleet defects
+  fixed with tests: `required_capabilities()` ignored the backend knob (capability gate inert;
+  proven both directions — the old image is now excluded 126,360/126,360), and reconcile's Poison
+  arm counted nothing (the `rows=0` ambiguity that read as "never claimed").
+- Round rerun on a correct image: **253/312 done (222 large + 31 tiny — roots #22-#23 cured some
+  tiny cells), 59 poison = 41 REAL divergences (31 screen residual + 10 PHOTO `screen_tools=false`,
+  the first non-screen class) + 18 tiny (sc_tools arm)**. Planes staged
+  `/mnt/v/output/avifaom-2026-08-30/poison-planes-2026-08-30/` → KB-43 lane launched (in flight).
+  Harvest: **125,941 scores / 125,940×944 features; views train 102,373/871, eval8 23,567/209**.
+- Wall time (user ask): wave = 12.09 h wall, **49.1 % of 37 box-h idle**; scheduler defect =
+  per-box chunk boundaries → 19.6 % duplicate executions (2.939× exec/distinct) →
+  `pack_chunks_lpt_uniform` + skipped≠idle shipped, A/B measured **1.000×**, disjoint exact
+  splits. Remaining 12.5 idle box-h = operator loop → auto pardon-and-relaunch + completion
+  beacon REGISTERED, not started. GPU `ZM_VRAM_CAP` usable = 5,500,000,000 (full 8 GiB OOM'd 23
+  cells). Sidecar names overwrite across generations (snapshot = the durable done-set).
+
+### KB-42 (zenav1-aom `c80b40d1`,`cb76cda9`,`5ac5fae6`) — CI GREEN all 7 legs ×2 runs
+Three roots, single-carrier premise falsified: (A) census ceiling fired on roots #3-#6's
+legitimate IntraBC reachability gain — re-pinned with BOTH floors rising; (B) root #12's
+`search_tx_mode_is_select` placeholder `false` at ALL 19 call sites froze search tx-size costs at
+frame-init on TX_MODE_SELECT frames (worst at low q; encode cell derived it correctly — why the
+census stayed 104/104); fixed = derive `!coded_lossless` everywhere; (C) a test bootstrapped
+screen tune without declaring the knob. 316/0 encode tests; census 104/104; process hole closed
+(`just gate-encode` + mandatory gate list + PARITY rule 6 — `--lib` runs no byte gates).
+
+### Round-4b (zensim `2d94890c`..`39ffc008`) — the dated 372 root + the era table + a drift-doc CORRECTION
+- New root `/mnt/v/zen/zensim-training/2026-08-30-full-features-372/` (8 corpora re-extracted at
+  HEAD `ea16c7ee`; csiq/live/pipal BIT-IDENTICAL to stored — pre-fix era touched only some
+  corpora; 6 byte-copied with era flags, aic4 unrefreshable). Old root untouched (verified).
+  Two more loader defects fixed en route (cid22 path resolution; tid i25 case → 3,000/3,000).
+- **Era shift is MODEL-SPECIFIC** (0.00000 on the three basic-only bakes — the negative control —
+  up to |Δ| 0.489): **41 ordering flips**; B 4th → **1st on CID22**; `cl_tfm_LQ_MLP` 1st → LAST on
+  KonJND (0.761→0.272); composite leader cl_tfm → blend_2L; **the 2-layer blend's "+0.004 CID22
+  over B" was an era artifact (current era: −0.0002, B ahead)**; its TID +0.062 / nonphoto +0.088
+  survive, KonJND deficit deepens to −0.145.
+- **CORRECTION to round 4's §3b**: the drift lane's KADID/TID/AIC-3 runtime rows were key-joined on
+  a non-unique `(ref_basename, human_score)` (aic3 100/600 distinct). Corrected positionally:
+  runtime B KADID **0.80847**, TID **0.77852**, AIC-3 **0.76501** — TID and AIC-3 now slightly
+  BELOW stored, so "runtime B better on every genuine holdout" is FALSIFIED; what stands:
+  **CID22 +0.006 and KonJND +0.103** (0 duplicate keys there), KADID down (memorization), TID/AIC-3
+  down ~0.01. Drift doc + CLAUDE.md corrected in place.
+- Registry: 3 appended annotation entries (stored-era invalidated; basic-only era-independent;
+  the 372 dial/corruption grids are themselves pre-fix era and unrebuildable without a decode
+  pass). kon504 = two files: R1b keyed (post-fix) vs the 372 root's `_2026-08-29` (pre-fix subset).
+- **OPEN — governance (user):** flipping `bake_verdict`'s default `--features-root` to the new
+  root moves every future 372 number mid-campaign — needs an explicit decision; until then
+  current-era reads use the explicit flag. Board promotion of the 11 `<label>_new.json` verdicts +
+  gauntlet regen → lane launched (round 6b). B training re-extraction (~227k, fleet) still
+  registered, user-gated.
