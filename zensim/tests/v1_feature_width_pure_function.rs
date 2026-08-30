@@ -316,3 +316,126 @@ fn compute_with_ref_into_matches_compute_with_ref_at_sub64() {
         assert_eq!(a.features(), b.features(), "{w}x{h}: feature mismatch");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Purity w.r.t. the RAYON POOL SIZE.
+//
+// The same "pure function of its pair" contract, on the other axis that broke
+// it. Measured 2026-08-30 (`benchmarks/v1_extractor_drift_2026-08-30.md`):
+// built at `58e6f8d8` — the commit the canonical 2026-05-15 372-col tables
+// record as their own build — the v1-372 vector's masked (f228..300) and IW
+// (f300..372) blocks are a function of `RAYON_NUM_THREADS`. On the 504
+// KonJND-JPEG pairs, T=1 / 2 / 8 / 28 give four DIFFERENT output files, and
+// T=1 vs T=28 moves 100 % of rows on 100 % of the 144 masked/IW slots, by up
+// to |Δ| 0.086 — while basic (f0..156) and peaks (f156..228) stay inside the
+// golden tolerance on every row.
+//
+// Two commits produced it together:
+//   * `2dab8f30` (2026-05-17) — the activity map for masked/IW read
+//     `bufs.mu1` at strip-OVERLAP rows, which the fused V-blur never writes;
+//     the contents there were whatever the buffer-reuse cascade left (zero,
+//     the previous channel's source, the previous strip's mask). Replaced by
+//     a per-channel `H_blur(src)` reference. (`docs/PRINCIPLED_ACTIVITY.md`.)
+//   * `6af83b60` (2026-06-09) — the band layout was
+//     `rayon::current_num_threads().min(total_strips)`, so the thread count
+//     chose where those overlap rows fell. Now geometry-only.
+//
+// basic/peaks survived because the strip aggregator's own 1e-6 parity gate
+// bounds them; masked/IW had no such gate because they were reading data no
+// gate covered. This test is that missing gate, stated on the whole vector.
+// ---------------------------------------------------------------------------
+
+/// The v1-372 vector must not depend on how many threads rayon happens to
+/// have — on the free-function extractor path or on the product `compute`.
+///
+/// Sizes are chosen to span several strips (`STRIP_INNER = 32`), which is
+/// the only regime where a band layout exists to disagree about.
+#[cfg(feature = "threads")]
+#[test]
+fn v1_372_is_bit_identical_across_rayon_pool_sizes() {
+    let mut cfg = v1_config();
+    // The product default: zensim's OWN band parallelism on. `v1_config`
+    // turns it off to match the extractors' outer-parallel shape; the
+    // thread-count dependence lived in the inner layout, so this test must
+    // exercise it.
+    cfg.allow_multithreading = true;
+
+    let z = Zensim::new(ZensimProfile::codec_target());
+
+    for &(w, h) in &[(256usize, 256usize), (96, 320), (320, 96), (64, 512)] {
+        let (r, d) = pair(w, h, 0xBADC0DE);
+        let mut ref_free: Option<Vec<f64>> = None;
+        let mut ref_prod: Option<(u64, Vec<f64>)> = None;
+
+        for threads in [1usize, 2, 3, 5, 8] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("build rayon pool");
+
+            let free = pool.install(|| {
+                compute_zensim_with_config(&r, &d, w, h, cfg)
+                    .unwrap_or_else(|e| panic!("v1 compute failed at {w}x{h}: {e:?}"))
+                    .features()
+                    .to_vec()
+            });
+            assert_eq!(free.len(), 372, "{w}x{h} @ {threads} threads: not 372 wide");
+            match &ref_free {
+                None => ref_free = Some(free),
+                Some(first) => assert_eq!(
+                    *first, free,
+                    "{w}x{h}: compute_zensim_with_config moved between 1 and {threads} \
+                     rayon threads — the v1-372 vector is not a pure function of its pair"
+                ),
+            }
+
+            let prod = pool.install(|| {
+                let rs = RgbSlice::new(&r, w, h);
+                let ds = RgbSlice::new(&d, w, h);
+                let out = z.compute(&rs, &ds).expect("product compute");
+                (out.score().to_bits(), out.features().to_vec())
+            });
+            match &ref_prod {
+                None => ref_prod = Some(prod),
+                Some(first) => assert_eq!(
+                    *first, prod,
+                    "{w}x{h}: Zensim::compute moved between 1 and {threads} rayon threads"
+                ),
+            }
+        }
+    }
+}
+
+/// The same invariant on the block that actually broke, stated separately so
+/// a failure names it: masked (f228..300) + IW (f300..372) must be
+/// thread-invariant. These are the 144 slots that moved on 100 % of rows at
+/// `58e6f8d8`.
+#[cfg(feature = "threads")]
+#[test]
+fn v1_masked_and_iw_blocks_are_thread_invariant() {
+    let mut cfg = v1_config();
+    cfg.allow_multithreading = true;
+    let (w, h) = (256usize, 256usize);
+    let (r, d) = pair(w, h, 0x5CA1E);
+
+    let run = |threads: usize| -> Vec<f64> {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .expect("build rayon pool")
+            .install(|| {
+                compute_zensim_with_config(&r, &d, w, h, cfg)
+                    .expect("v1 compute")
+                    .features()[228..372]
+                    .to_vec()
+            })
+    };
+    let one = run(1);
+    for threads in [2usize, 4, 7, 16] {
+        assert_eq!(
+            one,
+            run(threads),
+            "masked+IW (f228..372) moved between 1 and {threads} rayon threads"
+        );
+    }
+}
