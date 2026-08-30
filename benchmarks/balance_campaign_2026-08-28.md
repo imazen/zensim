@@ -2700,3 +2700,41 @@ parity-preserving variant, which also exercises the port on every cell). The
 executor arm + a baked libaom (the port's oracle is v3.14.1; the box has 3.13.1
 — pin the oracle version in the image) is the registered chunk after the svt
 wave clears its first fleet chunk.
+
+### SVT WAVE — GATES 1+2 PASSED, SCALED (2026-08-30 ~05:1xZ)
+- Gate 1 (local first cell, 1552.scale1024x745, speed 6, q 30/60/90): svt-rs
+  3/3 encode+decode OK; bytes 2,350 / 6,185 / 22,193 vs zenravif 2,720 / 6,383 /
+  31,680 (0.70-0.97×); encode 28-57 ms vs 1,392-1,620 ms (~40× faster at the
+  same nominal speed); zensim 38.2/65.9/80.7 vs 49.7/73.8/86.4 — the two
+  backends map `q` differently (documented in zenavif), so `q` is a knob, not a
+  quality equivalence.
+- Image trap caught by the first fleet chunk: the executor image overlaid the
+  glibc-built `zenfleet-worker` (Ubuntu 26.04 box → GLIBC_2.38/2.39 symbols)
+  onto the 24.04 base → every pass rc=1 before a cell ran. Fixed at the owner
+  (`build_executor_image.sh` prefers the static musl worker, warns on a dynamic
+  overlay; zenmetrics `5589dd4d`); `exec-zensim944hdr-c4b01933` re-pushed
+  (digest `3017f9f2…`).
+- Gate 2 (first fleet chunk, r5900xt 32c): ledger 10,004 done / 0 failed at the
+  first read; blobs are `ftypavif`; compacted to a snapshot at 14,842 distinct
+  done; scaled to r7900x (24c). Both boxes were idle before load (observed:
+  i134 + r5600g carry other sessions' workers, i265 a fleetbench — left alone).
+  Run: `s3://zentrain/jobs/avifsvt-enc-20260830/`.
+
+### AOM ARM — REGISTERED (user directive 2026-08-30: "i want our rust code exercised")
+Design (executor `backend: "aom-rs"`, feature `avif-aom`, zenmetrics): every
+cell runs the zenav1-aom port end to end
+(`aom_bench::EncodeCell::port_encode`) with the pinned C libaom v3.14.1 oracle
+(`aom-sys-ref`, cmake-built by its build.rs) supplying ONLY the header-field
+bootstrap (`c_encode_defaults` = plain `aomenc --allintra` defaults: cdef OFF,
+restoration ON, qm OFF); the port's frame OBU payload MUST equal the oracle's
+byte-for-byte or the cell fails loud (no unverified bytes ever emitted); the
+emitted AVIF = the port's payload spliced into the OBU frame (TDs dropped),
+muxed by zenavif-serialize with BT.601 full-range nclx. Colour path = `zenyuv`
+(THE owner; same BT.601 full-range 4:2:0 convention as zenavif's svt-rs
+backend). Mapping recorded: `cq_level = round((100−q)·63/100)` clamped 1..63;
+`speed` = `--cpu-used` 0..9 (default 6). Wave grid (frozen, mirrors the svt
+wave): 1,455 sources × speeds {4, 6, 8} × 30 q = 130,950 cells,
+`s3://zentrain/jobs/avifaom-enc-20260830/`. Gates: first cell local (port ==
+oracle, decode-back OK), first fleet chunk (blobs + 0 errors), encode-fail
+< 0.5%, orientation ladders ≥ 99%. The oracle build makes this arm's executor a
+glibc (not musl) build — image path to be settled at the first-cell gate.
