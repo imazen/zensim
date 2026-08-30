@@ -3545,3 +3545,32 @@ the 94.44% it can reach. Against the best FULL-coverage fixed family (jxl,
 77.95% mean) the picker is 17.4x better.
 
 <<BAND SECTION>>
+
+## 2026-08-30 ~20:0xZ — ROUND 4: THE v1 EXTRACTOR DRIFT, RESOLVED — RUNTIME B ≠ EVALUATED B (drift lane: `1246823c`,`1672cc26`,`35112cab`,`fe6428f2`; doc `benchmarks/v1_extractor_drift_2026-08-30.md`, DATASET_HISTORY §3.27)
+
+- **Drift = masked f228–299 + IW f300–371 ONLY** (100 % of rows, max_abs 0.12, max_rel to 1.0);
+  basic+peaks BIT-IDENTICAL stored↔HEAD ⇒ pixels identical (decode ruled out, measured).
+- **Bisect: ONE commit, `2dab8f30` (2026-05-17)** — the activity map had read strip-OVERLAP rows
+  the fused V-blur never writes (undefined, cross-strip stale state). `2dab8f30`→HEAD moves
+  NOTHING (0 cells over tol across every SIMD/streaming/archmage change since).
+- **The stored tables never reproduce at their own build commit**: the pre-fix masked/IW block was
+  a function of RAYON thread count (1/2/8/28 → four different outputs, all 144 slots, |Δ| ≤ 0.086).
+  Intended fix of an unintended NONDETERMINISM — extractor untouched, no golden re-baselined, no
+  tolerance widened; the stored 372-era tables are declared STALE for runtime purposes. New gates:
+  `v1_372_is_bit_identical_across_rayon_pool_sizes` + `v1_masked_and_iw_blocks_are_thread_invariant`.
+- **Runtime B is NOT the evaluated B** (23 of B's 95 live inputs are in the drifted block, incl.
+  its largest weight f353): SROCC stored → runtime = CID22 0.87638 → **0.88212** (+0.006), KonJND
+  0.54665 → **0.64967** (+0.103), AIC-3 +0.017, TID +0.008, KADID −0.016 (train==val memorization
+  corpus falling = the expected sign). **Per-pair dial shift mean −5.0 to −5.9 points, max 17.4,
+  ~100 % of pairs > 0.5** — a real train/serve skew (B trained on pre-fix-era features).
+  ⇒ Every B row in this ledger (incl. R1b's 0.8763/0.5183 instrument row) is STORED-ERA; the
+  runtime bar is HIGHER, especially kon. Comparisons vs B must name which B they read.
+- **2026-05-20 canonical-audit claim corrected in CLAUDE.md**: it sampled only f0..f99 — entirely
+  inside the non-drifting block — at a commit already past the fix.
+- Side findings: kon504 `SRC0437` pair-list defect (mean PJND exactly 58.50; loader rounds to
+  `_059`, the committed TSV names `_058` — two different images; R1b's keyed 504 inherits it);
+  `zensim-validate --extract-only --format tid2013` drops 120 TID pairs on decode failure (open);
+  main's `clippy --tests -D warnings` broken by two excessive_precision literals from the in-flight
+  extract-perf lane (`8a98a286`) — handed to that lane.
+- **Registered follow-ups**: new DATED 372 root (never overwrite in place), B-lineage re-verdict on
+  it, B training re-extraction (~227k pairs, fleet wave). Root+re-verdict lane launched (round 4b).
