@@ -2365,3 +2365,24 @@ carrier-fused — no cross-root keys on the D1 cuts; registered gap, R1b's
 keyed rebuild covers it). Next (same machinery, registered): full-mix 954
 cid head (tbig/hf/teacher legs at 954) + blend sweep = the W-LIN
 resurrection candidate against the round-6 bars.
+
+### W-LIN 954 RESURRECTION — first candidates (2026-08-30)
+
+The carrier discovery immediately re-opens the linear B-replacement lane.
+(One repeated mistake caught in-run: the first cid-head fit mixed the RAW
+hf leg at 1.0 — the R6 local-frame poison — dropped and refit.)
+
+| candidate | kon-504 | cid22 | notes |
+|---|---|---|---|
+| head954_kon (standalone BVLS, 4 legs) | **0.4887** | 0.8502 | = wlin4's cid22 from ONE head; kon 2.4× wlin4 |
+| **wlin954b l5e-4 α0.4 (blend)** | 0.4499 | **0.8551** | beats wlin4 on cid22 (+0.005) at kon +0.244 |
+| wlin4_a0.5 (round-5 leader) | 0.2064 | 0.8502 | superseded on this surface |
+| B | 0.5935 | 0.8764 | still ahead on both |
+
+Round-6 bars: kon ≥0.40 PASSES both candidates; cid22 ≥0.845 passes the
+blend; **hfnl/nonphoto/im26 bars are UNMEASURABLE at 954 today** (the D1
+validate slices are keyless — no carrier fusion; R1b's keyed rebuild is the
+unblock). Missing legs vs B's world: hdrmix (no 954 fusion — ext720 root
+lacks it; buildable from the hdr944-leg + hdr_v3mix-720? registered check),
+kadis (width), konjnd (width). The linear lane's gap to B: kon −0.10,
+cid22 −0.021 — the closest a non-372 linear has come, from a 4-6 leg mix.
