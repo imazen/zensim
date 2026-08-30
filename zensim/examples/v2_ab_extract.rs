@@ -686,6 +686,41 @@ fn main() {
             .collect()
     };
 
+    // NO GRACEFUL SKIPS (2026-08-30). Every `SKIP` above — missing file,
+    // dimension mismatch, compute error — used to drop a row and let the run
+    // exit 0 with a short CSV. The only thing that ever caught it was a
+    // row-count guard in whatever driver happened to wrap the call, and the
+    // TID `i25.png` casing defect proved that is not enough: 120 rows went
+    // missing and the manifest that caused it sat on disk for six weeks.
+    // A short table is now a HARD FAILURE and the partial CSV is NOT written,
+    // so nothing downstream can pick it up. `ZENSIM_AB_ALLOW_MISSING=1` moves
+    // the decision to the caller, where it is visible in the invocation.
+    if rows.len() != pairs.len() {
+        let allow = std::env::var("ZENSIM_AB_ALLOW_MISSING")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let missing = pairs.len() - rows.len();
+        if allow {
+            eprintln!(
+                "WARNING (ZENSIM_AB_ALLOW_MISSING=1): {missing} of {} pairs were \
+                 skipped; writing a SHORT table of {} rows. The SKIP lines above \
+                 name every one.",
+                pairs.len(),
+                rows.len()
+            );
+        } else {
+            eprintln!(
+                "ABORT: {missing} of {} pairs did not produce a row (see the SKIP \
+                 lines above for each reason). Refusing to write a partial table \
+                 to {} — fix the pairs TSV / corpus, or set \
+                 ZENSIM_AB_ALLOW_MISSING=1 to accept a short table deliberately.",
+                pairs.len(),
+                args[1]
+            );
+            std::process::exit(3);
+        }
+    }
+
     let n_feat = n_feat_seen.load(Ordering::Relaxed);
     let mut out = String::from("ref_basename,human_score");
     for k in 0..n_feat {

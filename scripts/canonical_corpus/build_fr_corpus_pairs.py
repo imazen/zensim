@@ -16,8 +16,49 @@ Usage: python3 scripts/canonical_corpus/build_fr_corpus_pairs.py <csiq|live|tid2
 Then:  extract_features_372col --corpus pairs-tsv --path <out.tsv> --out <corpus>_features_372col.csv
        (convert csv→parquet, add a Corpus entry to bake_verdict CORPORA, rebuild)
 """
-import sys, csv
+import os, sys, csv
 from pathlib import Path
+
+
+class MissingCorpusFiles(RuntimeError):
+    """A pairs manifest could not name every (ref, dist) the label file lists."""
+
+
+def _require_all_resolved(label: str, missing: list[str], total: int) -> None:
+    """NO GRACEFUL SKIPS. A pairs builder that silently drops rows produces a
+    manifest that looks complete and is not — the downstream extractor then
+    emits fewer rows than the corpus has and, if anything catches it at all, it
+    is a row-count guard several steps later.
+
+    MEASURED CASE (2026-08-30): `build_tid` upper-cased every reference stem
+    while TID2013's own reference dir carries `i25.png` LOWERCASE (its source
+    BMP is `i25.bmp` too). 120 of 3,000 rows named a path that does not exist.
+    The old code counted them into a `skipped` total and printed it; nothing
+    failed, and the broken manifest sat on disk for six weeks until an
+    unrelated re-extraction hit the row-count guard.
+
+    Set `FRPAIRS_ALLOW_MISSING=1` to downgrade to a loud warning — the decision
+    then belongs to the CALLER and is visible in the invocation, which is the
+    only form of skip the project allows.
+    """
+    if not missing:
+        return
+    head = "\n  ".join(missing[:10])
+    more = f"\n  ... and {len(missing) - 10} more" if len(missing) > 10 else ""
+    msg = (f"{label}: {len(missing)} of {total} label rows name a file that does "
+           f"not exist:\n  {head}{more}\n"
+           f"Refusing to write a manifest that silently omits them.")
+    if os.environ.get("FRPAIRS_ALLOW_MISSING") == "1":
+        print(f"WARNING (FRPAIRS_ALLOW_MISSING=1): {msg}", file=sys.stderr)
+        return
+    raise MissingCorpusFiles(msg)
+
+
+def _case_insensitive_index(d: Path) -> dict:
+    """name.lower() -> real path. Corpora with mixed-case filenames (TID2013
+    ships both `I01_..` and `i01_..`, and its 25th reference as `i25.png`) must
+    be resolved through this, never by forcing a case."""
+    return {q.name.lower(): q for q in d.iterdir()}
 
 
 def build_csiq():
@@ -154,31 +195,47 @@ def build_kadid():
 
 
 def build_tid():
-    """TID2013 for the A/B: q=mos/9 in [0,1]. Uses the pre-converted PNGs; the
-    distorted filenames are mixed-case (i01/I01) — resolved case-insensitively."""
+    """TID2013 for the A/B: q=mos/9 in [0,1]. Uses the pre-converted PNGs.
+
+    BOTH sides are mixed-case and BOTH are resolved case-insensitively. The
+    distorted side always was; the REFERENCE side was not — it forced
+    `stem.upper() + ".png"`, which silently lost every row of the one reference
+    TID ships lowercase (`i25.png`, matching its source `i25.bmp`): 120 of
+    3,000 pairs. Fixed 2026-08-30; a miss is now fatal (`_require_all_resolved`).
+    """
     SRC = "/mnt/v/dataset/tid2013"
     OUT = f"{SRC}/tid_pairs_ab.tsv"
-    dist_dir = Path(f"{SRC}/distorted_images_png")
-    by_lower = {p.name.lower(): p for p in dist_dir.iterdir()}
-    out, miss = [], 0
+    dist_by_lower = _case_insensitive_index(Path(f"{SRC}/distorted_images_png"))
+    ref_by_lower = _case_insensitive_index(Path(f"{SRC}/reference_images_png"))
+    out, missing, total = [], [], 0
     with open(f"{SRC}/mos_with_names.txt") as f:
         for line in f:
             parts = line.split()
             if len(parts) != 2:
                 continue
+            total += 1
             mos, bmp = float(parts[0]), parts[1]
-            png = by_lower.get(bmp.lower().replace(".bmp", ".png"))
-            refname = bmp.split("_")[0].upper() + ".png"
-            ref = Path(f"{SRC}/reference_images_png/{refname}")
-            if png is None or not ref.exists():
-                miss += 1
+            png = dist_by_lower.get(bmp.lower().replace(".bmp", ".png"))
+            ref = ref_by_lower.get(bmp.split("_")[0].lower() + ".png")
+            if png is None:
+                missing.append(f"distorted {bmp} (as .png)")
+                continue
+            if ref is None:
+                missing.append(f"reference for {bmp}")
                 continue
             out.append((str(ref), str(png), mos / 9.0))
+    _require_all_resolved("TID2013", missing, total)
+    prev = Path(OUT)
+    if prev.is_file():
+        bak = prev.with_suffix(prev.suffix + ".pre-i25case-2026-08-30.bak")
+        if not bak.exists():
+            prev.rename(bak)
+            print(f"TID2013: preserved previous manifest as {bak.name}")
     with open(OUT, "w", newline="") as f:
         w = csv.writer(f, delimiter="\t")
         w.writerow(["ref_path", "dist_path", "human_score"])
         w.writerows(out)
-    print(f"TID2013: {len(out)} pairs -> {OUT}  (skipped {miss})")
+    print(f"TID2013: {len(out)}/{total} pairs -> {OUT}  (0 skipped — a miss is fatal)")
 
 
 def build_cid22val():
