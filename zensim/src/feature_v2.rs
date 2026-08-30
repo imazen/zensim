@@ -4159,12 +4159,15 @@ fn fold_v1_basic_bands(
                 &mut empty_sd,
                 false,
             ));
-            crate::blur::box_blur_h_into_abs_diff(
+            // v1 computes `|src − H_blur(src)|` with its own H kernel
+            // (`box_blur_h_into_abs_diff`); the fold already holds the
+            // H-blurred src as `mu1_h` (the shared fused H-pass plane), so the
+            // activity is one abs-diff pass — the pool parity gate proves the
+            // two H kernels agree bit-for-bit on these planes.
+            crate::simd_ops::abs_diff_into(
                 &src[span.clone()],
+                &mu1_h[span.clone()],
                 &mut ps.act_raw[..band_n],
-                width,
-                h_local,
-                BLUR_RADIUS,
             );
             crate::blur::box_blur_1pass_into(
                 &ps.act_raw[..band_n],

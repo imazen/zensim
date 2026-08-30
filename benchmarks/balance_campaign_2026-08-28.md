@@ -3158,10 +3158,19 @@ kernels at `k = k_iw = 4`), so:
   free (the kernel returns them), but the two art-L4 carriers need the ref-side
   activity map and a second fused edge pass at scales 0-1, and scale 0 is the whole
   image. +0.52 ms was the buffered-harness figure and is superseded by this table.
-  Registered next lever (not claimed): fold the ref-side activity into the v2
-  walk's existing activity pass and the weighted art-L4 sums into the fused V-blur
-  kernel (no `store_mu`, no second edge pass) — that is where the "accumulators
-  only" structure actually lives.
+  First lever taken (same session): v1's activity is `|src − H_blur(src)|` and the fold
+  already holds `H_blur(src)` as the shared `mu1_h` plane, so the re-blur became one
+  abs-diff pass (bit-exactness kept — the two H kernels agree):
+
+  | pair | zeroed | carriers (10) | full (216) |
+  |---|---|---|---|
+  | 576² | 15.0 ±0.3 ms | 17.2 ±0.1 (+11.9–16.5%) | 18.3 ±0.0 (+17.7–26.2%) |
+  | 1152² | 59.2 ±1.1 ms | 67.8 ±0.3 (+14.5–15.3%) | 72.9 ±1.3 (+21.3–25.7%) |
+
+  (v2's own activity plane is `|src − mu1(2D)|` blurred — a different quantity — so it
+  cannot be reused.) Registered next lever (not claimed): the weighted art-L4 sums inside
+  the fused V-blur kernel (no `store_mu`, no second edge pass) — that is where the
+  "accumulators only" structure actually lives.
 
 ### PASS-TIMEOUT INCIDENT: every big-cell pass died at the 1800 s default — all five workers relaunched with a 4 h pass budget (2026-08-30 13:5xZ); svt ssim2 gap backfilled on CPU
 
