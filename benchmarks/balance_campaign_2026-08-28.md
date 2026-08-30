@@ -2738,3 +2738,23 @@ wave): 1,455 sources × speeds {4, 6, 8} × 30 q = 130,950 cells,
 oracle, decode-back OK), first fleet chunk (blobs + 0 errors), encode-fail
 < 0.5%, orientation ladders ≥ 99%. The oracle build makes this arm's executor a
 glibc (not musl) build — image path to be settled at the first-cell gate.
+
+### AOM-RS ARM — FIRST-CELL GATE RESULT: THE PORT IS BYTE-IDENTICAL EVERYWHERE EXCEPT THE 720p BAND (2026-08-30 ~05:5xZ)
+Executor arm landed (zenmetrics `2690d66e`, feature `avif-aom`, `backend: "aom-rs"`):
+every cell = zenav1-aom `port_encode` + the v3.14.1 oracle bootstrap, refuse on
+any payload mismatch. The refusal FIRED on the first cell (1552.scale1024x745,
+all q). Localisation (speed 6, restoration-ON defaults bootstrap; q 30/60/90):
+192×256, 384×206, 384×512, 576×768, 1536×1152, 1536×2048, 1730×3072, 3000×4000
+= **byte-identical (24/24 cells)**; **1024×745 and 1280×800 = DIVERGED (6/6)**.
+Same 1024×745 image: centre crops 196²/352×288/512×384/640×480 identical in all
+four arms (speed 0/6 × restoration on/off); restoration-OFF bootstrap narrows
+the full frame's divergence to q90 (cq 6) only. Pattern = libaom's
+`is_720p_or_larger && !is_1080p_or_larger` framesize-dependent ALLINTRA sf arm
+(min-dim 576 pass, 745/800 fail, 1152+ pass). The port runs FAST enough for
+datagen (3 cells + 3 oracle encodes at 1024×745 in 0.34 s wall).
+**Filed: imazen/zenav1-aom#14** (repro cells + hypothesis; assigned).
+**Wave envelope decision:** declare the aom-rs wave over the svt-wave sources
+EXCLUDING renditions with 720 ≤ min(w,h) < 1080 (recorded as a deferred
+residual, content-addressed, re-declared additively when #14 lands); every
+declared cell is still byte-verified per cell, so any further divergence
+surfaces as a loud failure, never as unverified data.
