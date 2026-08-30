@@ -246,6 +246,12 @@ name = "fused944_bench"
 harness = false
 required-features = ["custom-profiles", "feature-regime-v2"]
 
+# era-2 design validation: what does the f32-lane -> f64-virtual-lane
+# accumulation shape cost? benchmarks/era2_perf_break_2026-08-31.md §2
+[[bench]]
+name = "era2_accum_shape"
+harness = false
+
 [[bench]]
 name = "fold_pools_bench"
 harness = false

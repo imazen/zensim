@@ -748,3 +748,86 @@ component, then cancellation amplification), each of which would have shipped
 as a silently-wrong "proven bound". That is the argument for §11.4 — a relative
 comparison against the previous implementation could not have surfaced either,
 because both sides share the same evaluation error.
+
+---
+
+## 13. MEASURED BEFORE BUILDING: the f64 virtual lanes cost 2.3×, and the design changes
+
+§2.1 said the scalar realisation "will likely auto-vectorise anyway — that is
+to be MEASURED, not assumed". Measured (`zensim/benches/era2_accum_shape.rs`,
+576 × 128, accumulation isolated with the term evaluation stubbed so the lane
+shape is 100 % of the work):
+
+| shape | time | vs era-1 |
+|---|---:|---:|
+| `era1_f32_lanes` (8 f32 lanes, reduced per row) | **3.08 µs** | base |
+| `era2_f64_chunked` (8 f64 virtual lanes, `chunks_exact(8)`) | **6.99 µs** | **+132 – 147 %** |
+| `era2_f64_virtual` (8 f64 lanes, naive `x % 8` indexing) | **34.17 µs** | +780 – 915 % |
+
+Two findings, one of them fatal to the design as written:
+
+1. **Never write the lanes as `lane[x % 8] += …`.** The modulo indexing defeats
+   vectorisation completely — **11× slower** than the chunked form. The
+   structure must be `chunks_exact(8)` with a folded tail. This is an
+   implementation requirement, not a style note.
+2. **f64 virtual lanes cost 2.27× on the accumulation step.** f64 SIMD lanes
+   are half as wide, and the accumulation does not get cheaper elsewhere to pay
+   for it. In the real kernel accumulation is a minority of the work (the term
+   evaluation is division-heavy), so 2.27× is an **upper bound** on the whole-
+   kernel penalty rather than the penalty itself — but it is a real cost
+   against a design whose entire justification is speed.
+
+### 13.1 Is the accuracy the f64 lanes buy actually needed? — No
+
+The f32 lane accumulation contributes ≈ **4.3e-6** relative error (§10.3). The
+dial's materiality step is 0.5 points on a `[0,100]` scale, i.e. **5e-3**
+relative. The error era-2's f64 upgrade would remove therefore sits about
+**three orders of magnitude below anything a score can resolve**, and about
+**100× below** the module's own long-standing 5e-4 pool policy.
+
+So the f64 accumulators buy precision that no consumer can see, at 2.27× on the
+step, in a break whose stated purpose is "extremely fast".
+
+### 13.2 The revised design: 8 **f32** virtual lanes + an f64 band layer
+
+The prize was never f64 — it was the **fixed grouping**. Fixing the grouping is
+what gives cross-tier bit-identity (§2.2) and band-parallelism (§2.4); the
+accumulator *type* is independent of both. So:
+
+```
+per row:   8 f32 lanes, fixed count (era-1 uses 8 OR 16 depending on tier)
+           terms enter via chunks_exact(8); the tail folds into the same lanes
+           reduce by a FIXED tree  ->  f64
+per band:  f64 band partial += the row's f64 value        (one add per row)
+merge:     band partials folded in band order             (one add per band)
+```
+
+This keeps **every** era-2 prize:
+
+* **cross-tier bit-identity** — the lane count (8) and reduce tree are fixed, so
+  `v4x` no longer accumulates 16-wide while `v3` accumulates 8-wide. IEEE f32
+  `+` is correctly rounded on every arch, so §2.2's proof holds unchanged with
+  `f32` substituted for `f64`;
+* **band-parallelism** — the f64 band layer is exactly the §2.4 structure;
+* **no width-dependence** — the tail folds into the lanes;
+* **era-1-class accuracy AND era-1-class speed** — the f32 lane depth per row is
+  unchanged, so §10.3's dominant term neither grows nor shrinks.
+
+What it gives up is the accuracy improvement, which §13.1 shows nothing
+consumes.
+
+**This is a design change driven by measurement, and it is put up for
+confirmation rather than taken unilaterally** — the user's refinement said
+"e.g. 8 f64 virtual lanes", and this proposes 8 **f32** virtual lanes with an
+f64 band layer on top for the same structural guarantees. If the f64
+accumulators are wanted for reasons beyond the ones analysed here, the 2.27 %
+… 2.27× cost is now quantified and the choice is informed either way.
+
+### 13.3 Consequence for the break's size
+
+Under §13.2 the byte change is much smaller than under f64 lanes: fix the lane
+count at 8, fix the reduce tree, fold the tail, add the band layer. It remains
+a **real** byte change (era-1's `v4x` accumulates 16-wide, and the tail
+currently lands in the f64 running total), so the era and its blast radius
+stand — but the reshape is a far smaller and lower-risk edit than the f64
+rewrite, which is a second reason to prefer it.
