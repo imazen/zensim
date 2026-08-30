@@ -3079,3 +3079,20 @@ ZEN_PAIRS_PARQUET=/mnt/v/output/avifsvt-2026-08-30/pairs_svt.parquet`, metrics
 Next for this lane: `avifgen_training_views.py`-style train_944 / eval8_944 views over
 the harvest (origin even/odd rule — the corpus is train-side only), then the
 `fused944native` comparison the carrier report registered.
+
+### AOM-RS WAVE RELAUNCHED WITH THE CAP LIFTED (2026-08-30 13:20Z) — image `exec-zensim944hdr-e7a99c2d`; SVT TRAINING VIEWS EMITTED
+
+- Port commit zenav1-aom `0c92ef1f` (roots #18-#21) is on origin/main; zenmetrics
+  `e7a99c2d` (cap 0.30 → 16 MP) + `3004dd52` (fleet.env pin) on origin/master. The
+  executor image was rebuilt on the sibling checkout (musl, `build_executor_image.sh`),
+  the 2,976 cap-deferred `encoder_panic` cells pardoned (`requeue --classes
+  encoder_panic`, pardon rows `pass-requeue-pardon-1788096000.parquet`, snapshot
+  123,024 done + 2,976 newest-failed at the compact) and r3500 / r5900xt / r7900x
+  relaunched at 13:20:22Z against the LAN store. Expected: ~50 box-hours (112
+  renditions from 0.41 to 12.5 MP × 30 q × 3 speeds; ~20 s per 1080p cell at cpu 4).
+- **svt training views** (`avifgen_training_views.py`, AC.R1 rule — the corpus is
+  train-side only): `/mnt/v/output/avifsvt-2026-08-30/views-2026-08-30/train_944.parquet`
+  **106,380 rows / 871 origins** (terminal digits 0/2/4/6) and `eval8_944.parquet`
+  **24,210 rows / 209 origins** (digit 8; never trained on); ID columns asserted
+  row-aligned between the score and feature sidecars (`features.parquet` is a symlink to
+  the harvest's `features_folded720append2.parquet`). `view_counts.json` beside them.
