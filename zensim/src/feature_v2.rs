@@ -1451,6 +1451,25 @@ pub struct V2NewFeatureToggles {
     /// block is NOT free — +25-32% @576², +34-40% @1152² over the zeroed
     /// fold; see the campaign ledger for the carriers-only cost.
     pub v1_pools: V1PoolsMode,
+    /// BLOCK-SKIPPING (2026-08-30): compute ONLY v1's blocks — `f0..156`
+    /// basic plus, with [`Self::v1_pools`], `f156..372` pools — and skip
+    /// every v2-era block (dense-348, gradient, append, append2/BANDVIS,
+    /// CSFW). Skips their upstream work too: phase A drops the four
+    /// `box_blur_v_from_copy` sweeps that produce the V-blurred
+    /// `mu1/mu2/ssq/s12` strips AND the v2 activity chain, because nothing
+    /// v1 needs reads them (`fold_v1_basic_bands` takes the H-blurred
+    /// planes and computes its own activity internally).
+    ///
+    /// PURE COMPUTE-SKIPPING — the slots that ARE emitted are bit-identical
+    /// to the same request with this off (gated by
+    /// `folded_v1_only_matches_full_walk`). Semantics are untouched; this
+    /// is not the padded-width question.
+    ///
+    /// The emitted vector keeps the requesting regime's WIDTH, with
+    /// `f372..` left at the structural 0.0 — the final 372-width plumbing
+    /// waits on the pad-semantics decision (campaign §8), so that this
+    /// lever can be measured and shipped independently of it.
+    pub v1_only: bool,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -1484,6 +1503,7 @@ impl Default for V2NewFeatureToggles {
             csfw_block: false,
             append2_dst_activity: false,
             v1_pools: V1PoolsMode::Off,
+            v1_only: false,
         }
     }
 }
@@ -1687,6 +1707,7 @@ fn run_blur_pass(
         abs_src,
         activity_tmp,
         activity,
+        true,
     );
 }
 
@@ -1729,6 +1750,7 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
         abs_src,
         activity_tmp,
         activity,
+        true,
     );
 }
 
@@ -1916,6 +1938,7 @@ fn run_blur_pass_inner(
     abs_src: &mut [f32],
     activity_tmp: &mut [f32],
     activity: &mut [f32],
+    want_v2: bool,
 ) {
     let n = width * height_local;
     let mu1_h = &mut mu1_h[..n];
@@ -1933,6 +1956,15 @@ fn run_blur_pass_inner(
         height_local,
         BLUR_RADIUS,
     );
+
+    // BLOCK-SKIPPING: everything below this line feeds v2-era kernels ONLY.
+    // `fold_v1_basic_bands` reads the H-blurred planes above and computes its
+    // own activity internally, so a v1-only request can stop here — four
+    // whole-window `box_blur_v_from_copy` sweeps and the activity chain
+    // (abs-diff + a full 1-pass blur) are skipped, not merely unread.
+    if !want_v2 {
+        return;
+    }
 
     let mu1 = &mut mu1[..n];
     crate::blur::box_blur_v_from_copy(mu1_h, mu1, width, height_local, BLUR_RADIUS);
@@ -5532,6 +5564,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
     ch: usize,
     want_bs2: bool,
     want_act_dst: bool,
+    want_v2: bool,
     scr: &mut ScratchV2Strip,
 ) {
     use crate::feature_v2_stream::Side;
@@ -5582,6 +5615,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         abs_src,
         activity_tmp,
         activity,
+        want_v2,
     );
     // BANDVIS dst self-mask (`append2_dst_activity`, Y channel only): the
     // exact dst twin of the ref activity chain — `box_blur(|dst − mu2|)`
@@ -5648,6 +5682,7 @@ fn stream_phase_b(
     info: &crate::feature_v2_stream::StripInfo,
     toggles: V2NewFeatureToggles,
     fold_v1: bool,
+    v2_blocks: bool,
     append: bool,
     refy_strip: &[f32],
     cross: Option<(&[f32], &[f32])>,
@@ -5665,49 +5700,56 @@ fn stream_phase_b(
 
     let src_strip = &src_win[off..off + strip_n];
     let dst_strip = &dst_win[off..off + strip_n];
-    let mu1_strip = &scr.mu1[off..off + strip_n];
-    let mu2_strip = &scr.mu2[off..off + strip_n];
-    let ssq_strip = &scr.ssq[off..off + strip_n];
-    let s12_strip = &scr.s12[off..off + strip_n];
-    let act_strip = &scr.activity[off..off + strip_n];
 
-    let d = dense_block_kernel(
-        src_strip,
-        dst_strip,
-        mu1_strip,
-        mu2_strip,
-        ssq_strip,
-        s12_strip,
-        act_strip,
-        width,
-        strip_h,
-        toggles.transducer_bank,
-    );
-    acc.dense[scale].accumulate(&d);
+    // BLOCK-SKIPPING: with `v1_only` the phase-A V planes and activity were
+    // never produced, so nothing below may touch them. The v1 fold hook
+    // reads only the H planes + the raw windows and is run unconditionally
+    // below.
+    if v2_blocks {
+        let mu1_strip = &scr.mu1[off..off + strip_n];
+        let mu2_strip = &scr.mu2[off..off + strip_n];
+        let ssq_strip = &scr.ssq[off..off + strip_n];
+        let s12_strip = &scr.s12[off..off + strip_n];
+        let act_strip = &scr.activity[off..off + strip_n];
 
-    if toggles.gradient_features {
-        let g_off = (HALO_P - 1) * width;
-        let g_n = width * (strip_h + 2);
-        // BANDVIS accumulates only on (Y, append2 on) — the const-split
-        // instantiation; every other path runs the byte-identical
-        // BANDVIS=false kernel. The dst self-mask plane routes in only
-        // when `append2_dst_activity` is live (third instantiation).
-        let bandvis = append2
-            .filter(|_| cross.is_some())
-            .map(|p| (p.bv_delta_lo, p.bv_delta_hi));
-        let bv_act_dst = append2
-            .filter(|p| cross.is_some() && p.dst_activity)
-            .map(|_| &scr.activity_dst[off..off + strip_n]);
-        let g = gradient_block_kernel(
-            &src_win[g_off..g_off + g_n],
-            &dst_win[g_off..g_off + g_n],
+        let d = dense_block_kernel(
+            src_strip,
+            dst_strip,
+            mu1_strip,
+            mu2_strip,
+            ssq_strip,
+            s12_strip,
             act_strip,
             width,
             strip_h,
-            bandvis,
-            bv_act_dst,
+            toggles.transducer_bank,
         );
-        acc.grad[scale].accumulate(&g);
+        acc.dense[scale].accumulate(&d);
+
+        if toggles.gradient_features {
+            let g_off = (HALO_P - 1) * width;
+            let g_n = width * (strip_h + 2);
+            // BANDVIS accumulates only on (Y, append2 on) — the const-split
+            // instantiation; every other path runs the byte-identical
+            // BANDVIS=false kernel. The dst self-mask plane routes in only
+            // when `append2_dst_activity` is live (third instantiation).
+            let bandvis = append2
+                .filter(|_| cross.is_some())
+                .map(|p| (p.bv_delta_lo, p.bv_delta_hi));
+            let bv_act_dst = append2
+                .filter(|p| cross.is_some() && p.dst_activity)
+                .map(|_| &scr.activity_dst[off..off + strip_n]);
+            let g = gradient_block_kernel(
+                &src_win[g_off..g_off + g_n],
+                &dst_win[g_off..g_off + g_n],
+                act_strip,
+                width,
+                strip_h,
+                bandvis,
+                bv_act_dst,
+            );
+            acc.grad[scale].accumulate(&g);
+        }
     }
 
     if fold_v1 {
@@ -5739,7 +5781,14 @@ fn stream_phase_b(
     }
 
     if append {
+        debug_assert!(v2_blocks, "append_block requires the v2 planes");
         debug_assert_eq!(refy_strip.len(), strip_n);
+        // Re-bind the phase-A V planes: they are scoped to the `v2_blocks`
+        // arm above, and `append` can only be set when that arm ran.
+        let mu1_strip = &scr.mu1[off..off + strip_n];
+        let mu2_strip = &scr.mu2[off..off + strip_n];
+        let ssq_strip = &scr.ssq[off..off + strip_n];
+        let act_strip = &scr.activity[off..off + strip_n];
         let hl = append2.map(|p| p.hl_bins).unwrap_or(false) && cross.is_some();
         let a = append_block_kernel(
             src_strip,
@@ -5774,7 +5823,7 @@ fn stream_phase_b(
         }
     }
 
-    if toggles.blockiness {
+    if v2_blocks && toggles.blockiness {
         let (sum_v, sum_h) = &mut acc.block[scale];
         blockiness_sparse_strip_wide(
             &src_win[..n_wide],
@@ -6300,10 +6349,23 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 ) -> ZensimV2Result {
     use crate::feature_v2_stream::StripPlaneProducer;
     let fold_v1 = true;
-    let append_on = toggles.append_block;
-    let append2_on = toggles.append2_block;
+    // BLOCK-SKIPPING: a v1-only request computes NOTHING v2-era. Every
+    // v2 toggle is forced off here rather than asserted, so the caller can
+    // set `v1_only` on top of any existing toggle set and get the v1 blocks
+    // of that request — which is what makes it a drop-in A/B in the bench.
+    let v2_blocks = !toggles.v1_only;
+    // LAYOUT vs COMPUTE. The emitted vector keeps the WIDTH and REGIME the
+    // caller asked for — a v1-only 944 request is still a 944 row, with
+    // `f372..` at the structural 0.0 — while the `*_on` flags below drive
+    // what is actually COMPUTED. Deriving the regime from the compute flags
+    // instead would silently hand back a 720-wide vector for a 944 request.
+    let layout_append = toggles.append_block;
+    let layout_append2 = toggles.append2_block;
+    let layout_csfw = toggles.csfw_block;
+    let append_on = toggles.append_block && v2_blocks;
+    let append2_on = toggles.append2_block && v2_blocks;
     assert!(
-        !append2_on || append_on,
+        !layout_append2 || layout_append,
         "append2_block requires append_block (f924+ sits after the append block)"
     );
     assert!(
@@ -6327,9 +6389,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             },
         }
     });
-    let csfw_on = toggles.csfw_block;
+    let csfw_on = toggles.csfw_block && v2_blocks;
     assert!(
-        !csfw_on || append2_on,
+        !layout_csfw || layout_append2,
         "csfw_block requires append2_block (f944+ sits after the append2 block)"
     );
     // Route-local derived φ: the SAME weighting mechanism on both routes,
@@ -6414,6 +6476,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         ch,
                         append_cell_active(append_on, ch, scale),
                         ch == 1 && act_dst_on && append_cell_active(append_on, 1, scale),
+                        v2_blocks,
                         scr,
                     );
                 });
@@ -6453,6 +6516,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     &info,
                     toggles,
                     fold_v1,
+                    v2_blocks,
                     append_cell_active(append_on, ch, scale),
                     refy,
                     cross,
@@ -6489,7 +6553,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             let y_active = append_cell_active(append_on, 1, scale);
             for ch in [0usize, 2] {
                 let active = append_cell_active(append_on, ch, scale);
-                stream_phase_a(&producer, &info, ch, active, false, scr);
+                stream_phase_a(&producer, &info, ch, active, false, v2_blocks, scr);
                 if y_active {
                     let stash = if ch == 0 {
                         &mut stash_x_buf[0].activity
@@ -6509,6 +6573,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     &info,
                     toggles,
                     fold_v1,
+                    v2_blocks,
                     active,
                     refy,
                     None,
@@ -6518,7 +6583,15 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 );
             }
             {
-                stream_phase_a(&producer, &info, 1, y_active, y_active && act_dst_on, scr);
+                stream_phase_a(
+                    &producer,
+                    &info,
+                    1,
+                    y_active,
+                    y_active && act_dst_on,
+                    v2_blocks,
+                    scr,
+                );
                 let cross = if y_active {
                     Some((
                         &stash_x_buf[0].activity[..strip_n],
@@ -6538,6 +6611,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     &info,
                     toggles,
                     fold_v1,
+                    v2_blocks,
                     y_active,
                     refy,
                     cross,
@@ -6556,17 +6630,17 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     //     values ⇒ identical bits). ---
     let v1_total = if fold_v1 { n_scales * 3 * 31 } else { 0 };
     let v12_total = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
-    let append_total = if append_on {
+    let append_total = if layout_append {
         n_scales * 3 * FEATURES_PER_CHANNEL_APPEND
     } else {
         0
     };
-    let append2_total = if append2_on {
+    let append2_total = if layout_append2 {
         n_scales * APPEND2_PER_SCALE
     } else {
         0
     };
-    let csfw_total = if csfw_on {
+    let csfw_total = if layout_csfw {
         n_scales * CSFW_PER_SCALE
     } else {
         0
@@ -6738,8 +6812,12 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     ZensimV2Result {
         features,
         n_scales,
-        v1_pools: if fold_v1 { toggles.v1_pools } else { V1PoolsMode::Off },
-        regime: match (append_on, append2_on, csfw_on) {
+        v1_pools: if fold_v1 {
+            toggles.v1_pools
+        } else {
+            V1PoolsMode::Off
+        },
+        regime: match (layout_append, layout_append2, layout_csfw) {
             (true, true, true) => FeatureRegime::Folded720Csfw,
             (true, true, false) => FeatureRegime::Folded720Append2,
             (true, false, _) => FeatureRegime::Folded720Append,
@@ -11321,6 +11399,84 @@ mod tests {
         }
     }
 
+    /// BLOCK-SKIPPING GATE: `v1_only` is PURE COMPUTE-SKIPPING. The slots it
+    /// still emits (`f0..156` basic, plus `f156..372` under `v1_pools`) must
+    /// be BIT-IDENTICAL to the same request with the v2-era blocks left on,
+    /// and the skipped range must be finite — never NaN from finalising an
+    /// accumulator that was never accumulated into, which is the failure mode
+    /// this gate exists to catch.
+    ///
+    /// Covered across `V1PoolsMode` (the pools ride the same hook), across
+    /// serial and rayon (the two arms of the walk take different code paths
+    /// through phase A/B), and across geometries that exercise the strip
+    /// tiling — including a height that is not a whole number of strips.
+    #[cfg(feature = "training")]
+    #[test]
+    fn folded_v1_only_matches_full_walk() {
+        for &(w, h) in &[
+            (96usize, 64usize),
+            (208, 144),
+            (127, 93),
+            (256, 200),
+            (64, 300),
+        ] {
+            let src = textured_image(w, h, 7);
+            let dst = quantize_distort(&src, w, h);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            for pools in [V1PoolsMode::Off, V1PoolsMode::Carriers, V1PoolsMode::Full] {
+                for parallel in [false, true] {
+                    let z = crate::Zensim::new(crate::ZensimProfile::codec_target())
+                        .with_parallel(parallel);
+                    let mut scratch = V2Scratch::new();
+                    let full = z
+                        .compute_folded720_append_features_streaming(
+                            &sref,
+                            &dref,
+                            V2NewFeatureToggles {
+                                v1_pools: pools,
+                                ..V2NewFeatureToggles::default()
+                            },
+                            &mut scratch,
+                        )
+                        .unwrap();
+                    let only = z
+                        .compute_folded720_append_features_streaming(
+                            &sref,
+                            &dref,
+                            V2NewFeatureToggles {
+                                v1_pools: pools,
+                                v1_only: true,
+                                ..V2NewFeatureToggles::default()
+                            },
+                            &mut scratch,
+                        )
+                        .unwrap();
+                    let (ff, fo) = (full.features(), only.features());
+                    assert_eq!(fo.len(), ff.len(), "{w}x{h}: v1_only changed the width");
+                    let emitted = if pools == V1PoolsMode::Off { 156 } else { 372 };
+                    for i in 0..emitted {
+                        assert_eq!(
+                            fo[i].to_bits(),
+                            ff[i].to_bits(),
+                            "{w}x{h} pools={pools:?} par={parallel}: v1_only moved f{i} \
+                             ({:e} vs {:e}) — block-skipping must not change VALUES",
+                            fo[i],
+                            ff[i]
+                        );
+                    }
+                    for (i, &v) in fo.iter().enumerate().skip(372) {
+                        assert!(
+                            v.is_finite(),
+                            "{w}x{h} pools={pools:?} par={parallel}: skipped slot f{i} is {v:e} \
+                             — an un-accumulated accumulator was finalised"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// POOL PARITY GATE (2026-08-30, the carrier lane): with
     /// [`V2NewFeatureToggles::v1_pools`] the fold replays v1's extended
     /// strip section per v1-aligned band, so the peak / masked / IW blocks
@@ -11398,10 +11554,21 @@ mod tests {
             // values (same arithmetic), every other slot unchanged from off.
             for i in 0..fo.len() {
                 if V1PoolsMode::CARRIER_SLOTS.contains(&i) {
-                    assert_eq!(fc[i].to_bits(), fp[i].to_bits(), "{w}x{h}: carrier slot {i}");
-                    assert!(fc[i] > 0.0, "{w}x{h}: carrier slot {i} is zero on a distorted pair");
+                    assert_eq!(
+                        fc[i].to_bits(),
+                        fp[i].to_bits(),
+                        "{w}x{h}: carrier slot {i}"
+                    );
+                    assert!(
+                        fc[i] > 0.0,
+                        "{w}x{h}: carrier slot {i} is zero on a distorted pair"
+                    );
                 } else {
-                    assert_eq!(fc[i].to_bits(), fo[i].to_bits(), "{w}x{h}: non-carrier slot {i}");
+                    assert_eq!(
+                        fc[i].to_bits(),
+                        fo[i].to_bits(),
+                        "{w}x{h}: non-carrier slot {i}"
+                    );
                 }
             }
             assert!(
