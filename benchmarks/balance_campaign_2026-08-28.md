@@ -3214,3 +3214,71 @@ kernels at `k = k_iw = 4`), so:
   write-back then yields `features_folded720append2carriers.parquet` beside the svt harvest —
   the training view for a linear/BVLS carrier head on fresh svt-rs encodes, the
   registered "fused944native comparison" on data the trainer has never seen.
+
+### AOM WAVE DRAINED (2026-08-30 15:32Z): 125,688 done; the 312 poisoned cells are TWO port classes, both reproduced locally; svt carriers features landed; a write-back join defect found and fixed
+
+- **Drain:** `avifaom-enc-20260830` idle on all three boxes at 15:32Z — **125,688 done + 312
+  poison** (attempts 2, `encoder_panic`). Gap-fill pairs cut (`pairs_aom_full.parquet`,
+  125,688 DONE cells; 2,664 new since the 13:24Z bridge) and two gap-fill score runs
+  declared (`avifaom-sf-{gpu,cpu}-gap-20260830`, 278 jobs each); the CPU gap-fill runs on
+  r7900x (`zen-score-cpugap`, 15:42Z); the GPU gap-fill waits for i134's main bucket. The
+  three encode workers were retired.
+- **The 312 poison cells, reproduced through the executor's own arm** (`zenmetrics sweep`
+  on the dev box, planes dumped): they are NOT timeouts.
+  - **277 cells on 56 renditions > 1 MP (screen-detected), q ≤ 35 (cq ≥ ~40), cpu 4/8**: a
+    genuine port divergence — e.g. `6012.scale2091x3072` q1 (cq62): **port 162,676 B vs
+    oracle 162,231 B** at s4, 157,273 vs 157,073 at s8. First syntax diff (localizer,
+    `~/tmp/aom_poison_repro/planes_6012.scale2091x3072.png`): s4 mi(124,328) — the port
+    codes a 16x8 PALETTE block (4 colours) where the oracle splits to 8x4 V_PRED;
+    s8 mi(80,280) — port 16x16 with a 2-colour palette + TX_8X8, oracle no palette + TX_16X16.
+    So at qindex 249 the port's palette search accepts palettes the oracle rejects — the
+    next KB-41 class ("palette at extreme cq on large screen content"); localization in
+    progress (paired C/port palette probes).
+  - **35 cells on 21 tiny renditions (59x128 … 99x128)**: the port's screen-content decision
+    disagrees with the oracle header (`palette=0 intrabc=0 photo=6 fast=true`; detector 0,
+    header 1) — the still-unported `av1_determine_sc_tools_with_encoding` trial-encode arm
+    (two q ≥ 244 fixed-partition encodes), which the bench asserts by name. A port of that arm
+    is the fix; registered, not started.
+- **svt carriers features:** `avifsvt-sf-carriers-20260830` drained 11,608/11,608 (0 failed)
+  in 91 min on the tower under the media cap; write-back →
+  `harvest-2026-08-30-carriers/features_folded720append2carriers.parquet` (130,590 × 944):
+  exactly the ten carrier slots live (f178/190/196/226/231/237/243/303/321/333, 91-99.7%
+  non-zero), every other pool slot 0, the plain harvest's block all 0 — the regime is what it
+  claims.
+- **Write-back join defect (zenmetrics `writeback_scores.py`), found by that check:** 18
+  rows disagreed between the two svt harvests on NON-carrier slots. Cause: different source
+  images can encode to byte-identical bytes (15 shas shared across 30 svt cells, all q=1
+  tiny renditions; 7 shas / 14 cells on the aom wave), and the write-back keyed scores +
+  features by `encode_sha` ALONE — last cell wins, so those rows carried the OTHER cell's
+  (ref, dist) values. Verified: refs 7064/7020.scale128x128 differ in 99.9% of pixels yet
+  share blob `4b1e87e5…`; the current zensim reproduces the plain harvest's f0 (0.0618) for
+  (7064, blob) and the carriers harvest's f0 (0.0478) for (7020, blob). Fixed: keys are
+  `(ref basename, sha[, metric])`; both svt harvests and the views re-written from the cached
+  blobs (old files kept as `shakey-bak/`). The earlier per-codec harvests (hdrgrid, avifgen)
+  carry the same latent defect wherever a sha is shared across refs — a one-line count per
+  pairs table tells whether any row is affected.
+
+## 2026-08-30 16:05Z — orchestration hand-off (user directive) + aom score waves drained
+
+**User directive (2026-08-30):** execution is delegated to Opus subagents; the Fable session
+orchestrates only (watchers, launches, ledgers). First delegation: the KB-41 large-screen
+partition divergence (root #22 candidate — the port evaluates HORZ_B at the 16x16 mi(124,328)
+of `2091x3072_cq62_s4` and skips HORZ_4, where libaom evaluates HORZ_4 and never runs the AB
+arm; best_rdc 852,710,591 vs 880,017,878) — the Opus agent owns the fix, regate, probe strip,
+commit, PARITY/CLAUDE rows, and the 35-tiny-cell trial-encode arm if cheap.
+
+**aom score waves — status at hand-off (all MEASURED from worker logs):**
+- i134 GPU main (`avifaom-sf-gpu-20260830`, ssim2-gpu + butteraugli-gpu): sequencer dropped
+  `lan_gpu_seq.COMPLETE` at 15:55:02Z ("ALL BUCKETS DRAINED").
+- tower CPU main (`avifaom-sf-cpu-20260830`, cvvdp + zensim-foldapp2): idle passes
+  (`done=0 … rows=0`) from 15:40Z on — drained.
+- r7900x CPU gap-fill (`avifaom-sf-cpu-gap-20260830`, 2,664 cells): idle passes 7–8 at
+  16:03Z — drained.
+- **i134 GPU gap-fill (`avifaom-sf-gpu-gap-20260830`) LAUNCHED 16:04Z** (stale COMPLETE marker
+  cleared first; `ZEN_PASS_TIMEOUT=14400`, snap=1376 rows seen on pass 1).
+- Watcher `~/tmp/aom_gap_watch.sh` (log `aom_gap_watch.log`): on DRAINED it runs
+  `aom_harvest.sh writeback` (4 runs, `(ref basename, sha, metric)` joins) then `views`, stops the
+  three idle CPU score containers, and writes `aom_gap_watch.done` on every exit path (8 h cap).
+  Pending after that: CPU backfill for the GPU-refused tiny/odd-dim cells (27 seen on the main
+  run) and the requeue of the 277 refused large-screen cells once root #22 lands + the executor
+  image is rebuilt.
