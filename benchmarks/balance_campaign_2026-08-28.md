@@ -3629,3 +3629,46 @@ screen tune without declaring the knob. 316/0 encode tests; census 104/104; proc
   current-era reads use the explicit flag. Board promotion of the 11 `<label>_new.json` verdicts +
   gauntlet regen → lane launched (round 6b). B training re-extraction (~227k, fleet) still
   registered, user-gated.
+
+## 2026-08-30 ~22:2xZ — ROUND 7 (W-LIN PASS) + ROUND 6b (board era rows + the features-root flip)
+
+### W-LIN ROUND 7 — VERDICT **PASS** (`e3cdd752`..`7ac3a8a3`; doc `benchmarks/wlin_round7_rawframe_2026-08-30.md`, 133-arm TSV)
+**17/133 arms clear ALL FIVE round-6 bars — the round-6 falsifier is REVERSED by one variable, the
+raw target frame** (priced +0.154 kon / +0.105 hfnl vs the mm01 control; flips the generalist head
+hfnl −0.083 → +0.288). Rule-selected `PL_P3_KHp6_H_b0.3` (3,589 B): 0.8562 / 0.4915 / 0.8809 /
+0.8911 / 0.4162 (5/5). Best-all-panel `PL_T3_KH01_C1_b0.85`: 0.8492 / 0.5197 / 0.9009 / 0.9066 /
+0.4125. **B-ruler corrected** (the same-pair restriction was size-correlated, +0.05–0.07 on B's
+family axes): runtime-era B on the FULL keyed slices = 0.8821 / 0.5186 / 0.8505 / 0.8609 / 0.3496
+= **2/5** — the 3.6 KB linears beat runtime-B on nonphoto/imazen26/hfnl; B keeps cid22 (+0.026)
+and dial range (86 vs 59). **Pool block's first clear WIN: +14.7–21.7 dial dynamic range** (rank
+effect stays hundredths, matching the carrier lane). NOT a ship candidate: all 5/5 arms have
+compressed dials (hf leg = a ≥0.90 band — data-coverage limit); selected arm fails G-RANGE by one
+row. Leg collapse: tbig_hf ⊂ tbig, tsafesyn/ttbig = target twins ⇒ ONE extraction (208,169 rows;
+G-K1/G-J 0.0 / G-R1 216/216 / G-X 944/944; triple-mirrored). tbig cost MEASURED: fetch 72 min
+@48 c/s (dominant), decode 31 min @112 c/s, extract 5m39s @614 c/s — LOCAL by necessity
+(103,585/208,169 cells exist only as tar members; not URI-expressible). R7-A1: the shared τ 0.005
+zeroed the hf head to a constant bake — caught by pre-registration. **Slicing shortcut FALSIFIED:
+fold f0..371 ≠ current-era buffered v1 on 60 % of tbig rows** (handed to the 372-subset lane);
+kon-504 features bit-identical across eras. R1b §9 CLOSED: B's ledger kon 0.5935 vs keyed 0.5183 =
+two extractions, 371/372 columns differ. SRC0437: |Δ| ≤ 0.0003, no bar changes.
+
+### ROUND 6b — board era rows + **the features-root flip (USER DIRECTIVE, DONE)** (`a25d1b80` + 2 more)
+- 11 `@cur372` rows promoted (4 curated pairs incl. B and the new composite leader
+  `mlp_2L_diverse_H128@cur372` 0.88191; 7 grid-interior behind a family toggle); never-overwrite
+  gate PASS; gauntlet regenerated + full gates PASS →
+  `http://localhost:3300/zensim/reports/summer_gauntlet.html` (prior HTML preserved).
+- **DEFAULT `--features-root` = `/mnt/v/zen/zensim-training/2026-08-30-full-features-372`** via ONE
+  owner constant (`zensim_validate::eval_roots`; was a literal in ten files); every run prints its
+  era line; 4 pin tests; flagless vs explicit **byte-identical full-json**; stored-era verdicts
+  remain valid as stored-era reads; dial/corruption grids excluded.
+- **FINDING: 7 of the 9 "stored-era" board rows were never stored-root reads** — they are
+  `regime:"720"` ext720 reads (post-fix root; reproduce bit-exactly), already ≤2e-4 from the
+  current read. Only shipped B + `T_appT_b372_lam1e-3` are genuine stored-root reads ⇒ **only B's
+  pair is a clean era A/B on the board** (registry `board372-row-read-on-ext720-root-2026-08-30`;
+  round-4b §7 attribution handed back to its lane). Two honesty annotations added: 6/14 corpora in
+  the current root are byte-copies (39.5 % of product_composite weight rides on them), and the dial
+  grid is pre-fix era for ALL rows.
+- `family_of()` gate scoping bug fixed (`era_base_name()`); OPEN: board 18.87 MB vs the 12 MB cap
+  (was already 18.30 before this round — cap needs a deliberate decision); `--full-json` does not
+  record `features_root` (era line is stderr-only — provenance gap, handed to round-4b's lane);
+  `LOOP_BAKE_MAP.blend2L_base` left unmapped (era-consistency of the loop columns is one decision).
