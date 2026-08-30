@@ -2326,3 +2326,42 @@ selected seed**. cid22 remains a CI-solid C win at every draw (worst seed
 i.e. the cid22 claim is seed-robust in DIRECTION but thin at the band floor;
 the +0.016 CI applies to the SELECTED seed). Refinement stance unchanged: no
 ensemble; selection-aware pricing + the freeze battery is the control.
+
+### LINEAR-QUESTION FINAL ARM (registered pre-fit, 2026-08-30): matched-mix kon heads 944 vs 954
+
+Same legs/weights (safesyn 1.0 + cid22t 1.5 + kadid 0.5 + tid 0.5), same
+solver (BVLS + sign-mask, f372+ free), same shaped space (screen944 +
+identity rows for the carriers): ONE fit from the existing l944 grams, ONE
+from a fresh 954 gram over the fused legs. Δ(kon504/cid22/hfnl) = the
+carrier effect ON A TRUE LINEAR — the arm the trainer cannot produce (its
+"linear" still inserts a hidden layer, verified). Read: if the 954 linear
+recovers kon toward B, shaping-on-944(+carriers) enables a linear and 372
+is NOT required; if not, the 372 requirement stands with the frame rebuild
+(R4) as the only remaining linear lever.
+
+### LINEAR-QUESTION ANSWERED (2026-08-30): 372 NOT required — the carriers enable the 944-class linear
+
+Matched-mix TRUE-linear pair (BVLS shaped, safesyn 1.0/cid22t 1.5/kadid 0.5/
+tid 0.5, sign-mask, identical everything except the 10 carrier columns):
+
+| | kon-504 | cid22 | hfnl |
+|---|---|---|---|
+| 944 shaped, no carriers | 0.1644 | 0.8249 | 0.143 |
+| **954 (+10 carriers)** | **0.4887** | **0.8502** | (no fused hfnl eval yet) |
+| carrier effect | **+0.3243** | +0.0253 | |
+| refs | B 0.5935 | B 0.8764 / wlin4 0.8502 | |
+
+**Answer to the user's question: a good linear does NOT require the 372
+front. Shaping on 944 alone does not enable it (kon 0.16); 944 + the v1
+carriers DOES — one 954 head reaches C's kon band (0.489 ∈ [0.43, 0.50])
+and equals the entire wlin4 blend on cid22, no blend needed.** This also
+closes the loop on the whole kon saga: the carriers ARE the linear class's
+kon backbone (matching the B-ablation's 48.6%), and the 954 MLP ignoring
+them was an ARCHITECTURE-conditional outcome, not feature redundancy —
+gradient descent with a hidden layer routes around them; a convex
+sign-constrained fit cannot, and uses them. Fused-eval surface is
+kon504+cid22 today (nonphoto/imazen26/hfnl validate slices cannot be
+carrier-fused — no cross-root keys on the D1 cuts; registered gap, R1b's
+keyed rebuild covers it). Next (same machinery, registered): full-mix 954
+cid head (tbig/hf/teacher legs at 954) + blend sweep = the W-LIN
+resurrection candidate against the round-6 bars.
