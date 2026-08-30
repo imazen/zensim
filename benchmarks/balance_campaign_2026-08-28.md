@@ -2252,3 +2252,35 @@ human corpora (B7 KonFiG — overlap-audit CLEAN, runnable — is the on-disk
 candidate) or accepting the priced trade. Artifacts:
 `fused954-2026-08-29/` (12 legs + 6 bakes + manifest), evals `~/tmp/c954_*`,
 `~/tmp/c944ctrl_*`.
+
+## FLOAT-Q RE-CENSUS + C STABILITY (2026-08-30, user directives)
+
+**Float-quality re-census (zenjpeg, step 0.25, same corpus9/judge/seeds —
+`instrument-census-floatq-2026-08-30/`):**
+
+| arm | k | median \|err\| | ±2 hits | integer-era |
+|---|---|---|---|---|
+| A anchor | 2 | 3.612 | 9/27 | 3.657 / 8 |
+| A | 3 | **2.276** | **13/27** | 2.556 / 11 |
+| B zq_seed | 2 | 2.297 | 13/27 | **1.905 / 14** |
+| B | 3 | **1.426** | **17/27** | (k3 base in census md) |
+
+Nuance worth the record: **float wins at k=3 (A −11%, B reaches 1.426/17)
+but REGRESSES B at k=2** — with only two encodes the fine step
+under-explores where integer rounding acted as a wider probe. Registered
+consequence: the production default stays step 0.25 for k≥3 loops; 2-shot
+budgets should use a coarser first step (hybrid schedule — a zenjpeg
+follow-up, registered not run). G-GRAN v2's jpeg knob quantum: 0.25
+(zenjpeg-owned loops), integer for foreign jpeg encoders.
+
+**C stability (k=3 on-disk band + refinement verdict):** cid22
+0.8788/0.8834/0.8927 (sd 0.006 — tight), **kon 0.4482/0.4744/0.5006
+(spread 0.052 — the swap ledger's 0.5006 is the BEST of three seeds;
+band median ≈0.474 ⇒ honest kon gap to B ≈ −0.12 at the median draw)**;
+hfnl 0.699–0.734; composite 0.858–0.866. The 3-seed mean-score ENSEMBLE
+(computed from stored per-pairs): cid22 0.8862 / kon 0.4814 — variance-free
+but below the selected seed and 3× inference. **Refinement verdict: do NOT
+ensemble; re-price the swap at the band (cid22 0.883±0.006, kon
+0.474±0.026) and treat s4004's kon as selection-favored.** k=5 firming
+seeds (s4007/s4008, exact argv) training now. Family axes for s4003/s4005
+are pre-D1 cuts (flagged; cid22/kon are same-ruler).
