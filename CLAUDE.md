@@ -545,6 +545,51 @@ regime's pooling. Residual: three cells at **h = 93** at non-tight widths,
 `--features custom-profiles,feature-regime-v2` invocation compiles it out
 silently. Always include `training` when the pool block is in scope.
 
+**OPTION C (user decision 2026-08-30): v1 stops pooling phantom columns.**
+MEASURED before implementing, and it inverts two premises. (1) It is
+BIT-EXACT: with no padding the fold and buffered agree to the bit at every
+width tested — 127×93 went 1.739e-1 → **0.000e0**, 200×150 8.155e-1 →
+**0.000e0** — so the h=93 residual reported earlier was an artifact of the
+option-A PRE-PAD workaround and **does not exist under C**. (2) It is
+CHEAPER, not costlier: buffered v1-372 Ir **−9.02 % at 576, −7.37 % at 1152,
++0.00 % at the tight-width control 592**. The lane-alignment padding is not
+paying for itself. **Not flipped** — default untouched pending the era
+rollout. ⚠ `v1_golden_bytes` fixtures are 64×64 and `simd_padded_width(64) ==
+64`, so the golden set is entirely in the TIGHT class and is **structurally
+blind to the defect C fixes**; a C rollout needs a non-tight golden
+(200×150 or 576×96).
+
+**Block-skipping: `V2NewFeatureToggles::v1_only`.** A 372-only request skips
+every v2-era block AND its phase-A upstream (the four V-blur sweeps + the v2
+activity chain). 249 M Ir vs buffered v1-372's 336 M (**0.743×**) and
+944-full's 535 M (**0.466×**). Gate: `folded_v1_only_matches_full_walk`
+(bit-identical emitted slots, skipped range asserted FINITE).
+
+**MT: the fold saturated at exactly 3 threads and REGRESSED past it** (2.26×
+@3T, then worse) — the channel fan-out is the whole of its parallelism. Band
+parallelism inside the channel (4 bands/strip) lifts it: 944-full best 7.75 →
+**6.67 ms (2.57× @8T)**, and at 8T the 944-full/944-zeroed marginal
+**vanishes** (9.4 vs 9.4 ms paired). Bit-exact ONLY because the merge is
+**sequential in band order** — `((0+b0)+b1)+…` reproduces the in-place loop;
+a tree/unordered reduction would not (f64 addition is not associative).
+Remaining cap: the serial `StripPlaneProducer`.
+
+**Two perf traps, both measured the hard way.** (a) **Fusion is not free**:
+folding the activity abs-diff into the H-blur's load sites (registered lever
+#1) LOSES — 944-full +1.04 %, 372-only +2.01 % — because post-rem-ring the
+H-blur gathers one strided column and fusing makes it two, to save a cheap
+contiguous pass. Reverted and deleted. (b) **Parallelism that allocates is
+not parallelism**: `map_init(FoldPoolScratch::default)` re-allocates ~580 KB
+per worker per strip per channel and made band-parallel 944-full *worse* at
+3T (7.75 → 10.00); persistent per-band scratch slots fixed it. Spill audit:
+`box_blur_h_inner_v4x` 1 store/2 loads (rem-ring is spill-clean),
+`fused_vblur_ssim_inner_v4x` 4/**28** — the standing fission candidate.
+
+**RSS shapes differ, and the crossover is ~1.5 MP.** Buffered scales with
+AREA (3.5–3.8× for 4× pixels), the fold with WIDTH (2.1–2.2×). At 2304² the
+fold's working set is 0.62–0.80× buffered's; at 1152² it is *heavier*
+(62.8 vs 55.5 MB). Do not assume "streaming = less memory" at small sizes.
+
 **Perf lever that shipped: the rem-ring.** Horizontal box blurs vectorise ACROSS
 rows, so each x-step assembled a vector from 16 (or 8) strided scalar loads —
 twice, add-side and remove-side. For every `x >= diam` those are the SAME column

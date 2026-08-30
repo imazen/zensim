@@ -965,3 +965,139 @@ priced at ≈0.4 % of the walk and rejected on value.
 buffered v1-372**, a caller that only wants v1's 372 saves roughly half by
 having a dedicated path — which is why the block-skipping mode was still worth
 shipping even though 944-full could not be brought down to 944-zeroed.
+
+---
+
+## 10. Block-skipping, MT, and the final picture
+
+### 10.1 Block-skipping (`v1_only`) — 53 % of the walk removed
+
+A 372-only request had been paying for every v2-era block. `V2NewFeatureToggles
+::v1_only` now skips dense-348, gradient, append, append2/BANDVIS, CSFW and
+blockiness — **and their upstream work in phase A**, which is where most of the
+win is: the four whole-window `box_blur_v_from_copy` sweeps producing the
+V-blurred `mu1/mu2/ssq/s12` strips, plus the v2 activity chain. Nothing v1
+needs reads any of it (`fold_v1_basic_bands` takes the H-blurred planes and
+computes its own activity), so this is real compute removal.
+
+| arm | Ir (576², serial, v3) | vs `buf_v1_372` | vs `fold944_full` |
+|---|---:|---:|---:|
+| `fold372_only` | 249,228,173 | **0.743×** | **0.466×** |
+| `buf_v1_372` | 335,620,797 | 1.000× | — |
+| `fold944_full` | 534,893,298 | 1.594× | 1.000× |
+
+**The 372-only fold is 25.7 % cheaper in instructions than today's buffered
+v1-372**, and block-skipping removes 53.4 % of the 944 walk. The naive
+compute-944-then-project it replaces was 3.9–4.8× buffered in wall at 28T.
+
+Pure compute-skipping: `folded_v1_only_matches_full_walk` asserts the emitted
+slots are bit-identical to the same request with the v2 blocks on, over 5
+geometries × 3 `V1PoolsMode` values × serial and rayon, and that the skipped
+range is FINITE (never NaN from finalising an accumulator nothing wrote). One
+subtlety the gate caught: the emitted vector must keep the caller's WIDTH and
+REGIME — deriving them from the compute flags handed back a 720-wide vector for
+a 944 request.
+
+### 10.2 MT — the 3-thread ceiling, and lifting it
+
+The fold parallelised only across its 3 channels, and a thread sweep showed
+that is exactly where it stopped (576², wall, 40–60 iters/point):
+
+| threads | 1 | 2 | 3 | 4 | 6 | 8 | 12 | 16 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 944-full **before** | 17.50 | 10.50 | **7.75** | 8.50 | 8.75 | 7.75 | 9.25 | — |
+| 944-off **before** | 14.25 | 9.75 | **6.25** | 8.00 | 7.00 | 7.75 | 7.50 | — |
+| 944-full **after** | 17.17 | 10.50 | 8.67 | 7.67 | 7.33 | **6.67** | 7.00 | 7.33 |
+| 944-off **after** | 13.83 | 8.67 | 6.83 | **5.50** | 5.83 | 5.83 | 6.33 | 7.17 |
+| 372-only **after** | 10.00 | 6.17 | 6.00 | 5.17 | 4.33 | 4.17 | **3.67** | 5.33 |
+
+Before: 2.26× at 3 threads and **negative returns past it** — rayon
+oversubscription with no work left to hand out. Not a diffuse serial fraction;
+a hard structural cap.
+
+After adding band parallelism inside the channel (4 bands per strip at
+`STRIP_ROWS` 128 / `V1_BAND_ROWS` 32): **944-full best 7.75 → 6.67 ms (−14 %,
+2.57× at 8T), 944-off 6.25 → 5.50 (−12 %), 372-only 3.67 ms at 12T (2.72×)**,
+and the past-3-threads regression is gone in all three modes.
+
+**Bit-exactness is the load-bearing part**: each band accumulates into its own
+zero-initialised `V1BasicSums` and the merge runs **sequentially in band
+order**, so the f64 addition sequence is `((0 + b0) + b1) + …` — exactly the
+in-place serial loop's. An unordered or tree reduction would not be equivalent;
+f64 addition is not associative. Both paths use the same local-then-merge
+shape, so serial and parallel are identical by construction.
+
+**The first attempt measured a LOSS and the reason generalises**:
+`map_init(FoldPoolScratch::default)` re-allocates ~580 KB of band buffers per
+worker per strip per channel, which made 944-full *worse* at 3T (7.75 → 10.00).
+One persistent scratch slot per band position fixed it. Parallelism that
+allocates in the hot path is not parallelism.
+
+Still short of buffered-class scaling (buffered reaches 4.6× at 28T). The
+remaining cap is the **serial `StripPlaneProducer`** — the next axis, not
+attempted here.
+
+### 10.3 Peak RSS per mode — the low-memory hook
+
+`/usr/bin/time -v`, 8 threads, one arm per process. Working set subtracts the
+harness's two input images (7.96 MB at 1152², 31.85 MB at 2304²).
+
+| arm | 1152² peak | 2304² peak | 1152²→2304² | 2304² working set | vs `buf_v1_372` |
+|---|---:|---:|---:|---:|---:|
+| `buf_v1_228` | 56.9 MB | 216.5 MB | 3.81× | 184.6 MB | 1.12× |
+| `buf_v1_372` | 55.5 MB | 196.2 MB | 3.53× | 164.4 MB | 1.00× |
+| `fold372_only` | 62.8 MB | 135.5 MB | **2.16×** | 103.6 MB | **0.63×** |
+| `fold944_off` | 61.3 MB | 134.4 MB | **2.19×** | 102.5 MB | **0.62×** |
+| `fold944_full` | 76.3 MB | 163.6 MB | **2.14×** | 131.8 MB | **0.80×** |
+
+The shapes are the story: buffered holds whole-image pyramids and scales with
+AREA (3.5–3.8× for 4× the pixels); the fold holds O(strip × width) rolling
+planes and scales closer to WIDTH (2.1–2.2×). **At 2304² the fold's working set
+is 0.62–0.80× buffered's, and the gap widens with size** — that is the
+low-memory hook, and it is why the fold is the right shape for large images
+even where its wall clock is not yet.
+
+**The MT win was not free in memory**, as promised: `fold944_full`'s 2304²
+working set went 114.6 → 131.8 MB (+15 %) because `pool_scratch` is now four
+band-slot scratches per channel instead of one. Below ~1.5 MP the fold is still
+the *heavier* path (62.8 vs 55.5 MB at 1152²); the crossover is real but it is
+a large-image property, not a universal one.
+
+### 10.4 Final paired numbers, 8 threads
+
+`extract_paths_bench`, five arms interleaved in one process, 20 rounds each,
+`RAYON_NUM_THREADS=8`. Box load 4–8 during this run (the quietest conditions
+this lane got; still not certified clean).
+
+| arm | 576² | vs base | 1152² | vs base |
+|---|---:|---|---:|---|
+| `buf_v1_228` | **2.2 ms** | base | **6.9 ms** | base |
+| `buf_v1_372` | **3.0 ms** | +31.5 – +42.1 % | **9.3 ms** | +30.9 – +38.8 % |
+| `fold372_only` | 6.6 ms | +176.8 – +217.3 % | 22.6 ms | +208.2 – +243.2 % |
+| `fold944_off` | 9.4 ms | +297.3 – +349.0 % | 31.9 ms | +335.0 – +385.0 % |
+| `fold944_full` | 9.4 ms | +301.9 – +349.9 % | 35.0 ms | +394.2 – +422.9 % |
+
+Two results worth separating:
+
+* **The 944-full → 944-zeroed marginal collapses under threads.** At 576² the
+  two arms are **identical (9.4 vs 9.4 ms)**; at 1152² the gap is **+9.7 %**,
+  against **+16.55 % in serial instructions**. Band parallelism absorbs the
+  pool work, because the pool block is exactly the part that now has a second
+  parallel axis. **This is the answer to "which world are we in": at ≥ 8
+  threads 944-full is at or near 944-zeroed, so 944-full's overhead does NOT
+  on its own justify a separate 372-only path.**
+* **But `fold372_only` is still 30 % below `fold944_full`** (6.6 vs 9.4;
+  22.6 vs 35.0), so the mode earns its keep for callers that genuinely only
+  want v1's 372 — the dataset extractors, the GPU oracle, `zensim-target`,
+  the published `zensim-regress`. It is one boolean on an existing struct with
+  a bit-identity gate, not a third pipeline.
+
+**The "372-only at or under buffered at matched thread counts" bar: MET at 1
+thread, NOT met at 8.** Serial the 372-only fold is 0.743× buffered v1-372 in
+instructions (and 10.0 vs ~12.8 ms wall); at 8 threads it is **2.2–2.4×**
+buffered. The cause is not the fold's per-pixel work — it is that buffered
+parallelises band-per-strip with a degree that grows with image height while
+the fold now tops out at 3 channels × 4 bands, over a **serial
+`StripPlaneProducer`**. Until the producer parallelises, buffered wins at high
+thread counts on wall clock no matter how much per-pixel work the fold drops.
+That is the single named blocker for retiring buffered on perf grounds.
