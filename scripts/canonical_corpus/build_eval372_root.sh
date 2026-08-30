@@ -36,7 +36,10 @@ ex() { # ex <name> <corpus> <path>
   "$EX" --corpus "$2" --path "$3" --out "$WORK/$1.csv"
 }
 
-zv cid22 /mnt/v/dataset/cid22           cid22
+# NOTE: the CID22 *validation set* is a SUBDIR — pointing at the parent silently
+# yields "0 valid pairs from Cid22" and an empty 34-byte cache, with rc=0. That
+# is how the 2026-08-30 era-2 build lost cid22 and had to be re-run by hand.
+zv cid22 /mnt/v/dataset/cid22/CID22_validation_set cid22
 zv kadid /mnt/v/dataset/kadid10k        kadid10k
 zv tid   /mnt/v/dataset/tid2013         tid2013
 zv pipal /mnt/v/dataset/pipal           pipal

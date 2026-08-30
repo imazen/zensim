@@ -1011,6 +1011,25 @@
    "evidence": "docs/DATASET_HISTORY.md \u00a73.30; commit 56bbcda2",
    "date": "2026-08-30",
    "fix_path": "re-extract as a dated era-3 root; do NOT flip zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372 until the B-under-C delta is reviewed"
+  },
+  {
+   "id": "eval-root-era3-2026-08-30-mixed-era-copies",
+   "kind": "annotated",
+   "fields": [
+    "rank.aic4",
+    "rank.nonphoto",
+    "rank.imazen26",
+    "rank.sdr25",
+    "rank.hfnlproxy",
+    "rank.hf_nearlossless"
+   ],
+   "scope": {
+    "features_root": "/mnt/v/zen/zensim-training/2026-08-30-era3-full-features-372"
+   },
+   "reason": "the era-3 root re-extracted 8 corpora + kon504 under option C; these six are NOT re-extractable on this box and were COPIED from the era-2 root, so they carry era-2 (phantom-column-pooled) features inside an era-3 root. Read them as prior-era.",
+   "evidence": "_MANIFEST.json 'COPIED FROM THE OLD ROOT'; benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md \u00a712.1",
+   "date": "2026-08-30",
+   "fix_path": "re-extract on a box with the source corpora, then drop this annotation"
   }
  ],
  "live-cross-root-targets-divergent-2026-08-29": {

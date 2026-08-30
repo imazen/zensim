@@ -1183,3 +1183,67 @@ So the honest next step for 944-full MT is **restructuring `dense_block_kernel`
 to produce per-band self-contained accumulators** (the fold-hook pattern),
 not parallelising the producer. Recorded here rather than attempted, because
 it is a kernel rewrite with a bit-exactness gate and wants its own stage.
+
+---
+
+## 12. Era-3 eval root, and shipped B measured under C
+
+### 12.1 The root
+
+`scripts/canonical_corpus/build_eval372_root.sh` re-run on the era-3 tree into
+`/mnt/v/zen/zensim-training/2026-08-30-era3-full-features-372`. **Eight corpora
+genuinely re-extracted** (cid22 4292, kadid 10125, tid 3000, pipal 21800,
+konjnd 1008, aic3 600, csiq 866, live 779) plus the `kon504` fresh subset. Six
+are **not re-extractable on this box and were copied — they remain prior-era**
+and must be read as such: aic4, nonphoto, imazen26, sdr25, hfnlproxy,
+hf_nearlossless.
+
+**A latent bug in the build script was found and fixed on the way.** `zv cid22`
+pointed at `/mnt/v/dataset/cid22`, the dataset PARENT, when the pairs live in
+the `CID22_validation_set` subdir. The failure mode is silent: the run reports
+`4292 pairs in 0.0s (12427864/s)` — twelve million pairs a second, i.e. no work
+at all — then `0 valid pairs from Cid22`, writes a **34-byte empty cache**, and
+**exits 0**. The era-2 build hit exactly this (its 13:07 cid22 cache is also 34
+bytes; the CSV is timestamped 13:08, from a hand re-run). Fixed in the script
+with the symptom written next to it, so the next era build cannot lose a corpus
+to a zero-exit no-op.
+
+**The tight/non-tight predicate validated itself.** Comparing era-2 to era-3
+CSVs: seven of eight differ, and **`pipal` is byte-identical** — its images are
+288×288 and `pyramid_plane_stride(288) == 288`, so it sits entirely in the
+tight class where C is a no-op. That is a natural control nobody had to
+construct, and it lands exactly where the registered predicate says it should.
+
+### 12.2 Shipped B under C — the number for the default-flip decision
+
+`bake_verdict` on `b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07`
+(the shipped B), same bake, same corpora, only the features root changed:
+
+| corpus | era-2 (padded) | era-3 (C) | delta | n |
+|---|---:|---:|---:|---:|
+| cid22 | 0.882117 | 0.882141 | **+0.000024** | 4292 |
+| konjnd | −0.649669 | −0.654272 | −0.004603 | 1008 |
+| tid | 0.778520 | 0.778883 | +0.000363 | 3000 |
+| csiq | 0.934208 | 0.934929 | +0.000721 | 866 |
+| live | 0.897026 | 0.898517 | +0.001491 | 779 |
+| kadid | 0.808474 | 0.808505 | +0.000032 | 10125 |
+| aic3 | 0.765012 | 0.763666 | −0.001347 | 600 |
+| **pipal** | 0.564971 | 0.564971 | **+0.000000** | 21800 |
+
+**C does not meaningfully move shipped B anywhere.** The largest move is
+konjnd at 0.0046 — and konjnd's SROCC is read as a magnitude, so 0.6497 →
+0.6543 is B getting slightly *better*. cid22, the gold holdout, moves by
+**+0.000024**. `pipal` at exactly **+0.000000** is the instrument confirming
+itself on the tight class.
+
+So the era shift is a correctness fix that is very nearly free at the product
+level: the features change materially at non-tight widths (up to 81.6 % on a
+single pool slot), but the *pooled rank statistics* B is scored on barely
+move — which is what one would expect from removing ≤16 columns of ~576.
+
+**STILL NOT FLIPPED, and this is the item for the user:**
+`zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372` still points at the
+era-2 root. The flip to `2026-08-30-era3-full-features-372` is now supported by
+the table above; the one caveat to weigh is that six of its corpora (aic4,
+nonphoto, imazen26, sdr25, hfnlproxy, hf_nearlossless) are copied prior-era
+rows, so a flip makes the default root era-mixed until those are re-extractable.

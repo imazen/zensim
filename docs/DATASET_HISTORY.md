@@ -1084,3 +1084,52 @@ table and no 944-trained model is affected.**
 **NOT flipped, listed for the user:** `zensim_validate::eval_roots::
 DEFAULT_FEATURES_ROOT_372` stays pointing at the era-2 root until the
 era-3 re-extraction lands and the shipped-B-under-C delta is reviewed.
+
+### §3.31 — the era-3 eval root, and shipped B priced under C (2026-08-30)
+
+**Built.** `/mnt/v/zen/zensim-training/2026-08-30-era3-full-features-372` —
+eight corpora genuinely re-extracted under option C (cid22 4292, kadid 10125,
+tid 3000, pipal 21800, konjnd 1008, aic3 600, csiq 866, live 779) plus the
+`kon504` fresh subset. **Six are copied and remain prior-era**: aic4,
+nonphoto, imazen26, sdr25, hfnlproxy, hf_nearlossless (registered as
+`eval-root-era3-2026-08-30-mixed-era-copies`).
+
+**A silent-loss bug in the build script, found and fixed.** `zv cid22` pointed
+at the dataset PARENT rather than `CID22_validation_set`. The failure reports
+`4292 pairs in 0.0s (12427864/s)` — no work done — then `0 valid pairs`, writes
+a **34-byte empty cache**, and **exits 0**. The era-2 build hit the same thing
+(its cid22 cache is also 34 bytes, and its CSV is timestamped a minute later
+from a hand re-run). Now fixed with the symptom documented at the call site.
+
+**The era predicate validated itself, for free.** Seven of eight era-2 vs
+era-3 CSVs differ; **`pipal` is byte-identical**, because its images are
+288×288 and 288 is stride-invariant — it sits entirely in the tight class where
+C is a no-op. That is a control nobody had to build, landing exactly where
+§3.30's predicate says it must.
+
+**Shipped B under C** (same bake, same corpora, only the features root
+changed — `b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07`):
+
+| corpus | era-2 | era-3 (C) | delta | n |
+|---|---:|---:|---:|---:|
+| cid22 | 0.882117 | 0.882141 | **+0.000024** | 4292 |
+| konjnd | −0.649669 | −0.654272 | −0.004603 | 1008 |
+| tid | 0.778520 | 0.778883 | +0.000363 | 3000 |
+| csiq | 0.934208 | 0.934929 | +0.000721 | 866 |
+| live | 0.897026 | 0.898517 | +0.001491 | 779 |
+| kadid | 0.808474 | 0.808505 | +0.000032 | 10125 |
+| aic3 | 0.765012 | 0.763666 | −0.001347 | 600 |
+| **pipal** | 0.564971 | 0.564971 | **+0.000000** | 21800 |
+
+**C does not meaningfully move B anywhere.** Largest is konjnd 0.0046, and
+konjnd is read as a magnitude so that is B improving. cid22 moves +0.000024.
+`pipal` at exactly zero is the instrument confirming itself. The features
+change materially at non-tight widths (up to 81.6 % on a pool slot); the
+pooled rank statistics barely move, which is what removing ≤16 columns of ~576
+should do.
+
+**NOT FLIPPED — the user's item.** `eval_roots::DEFAULT_FEATURES_ROOT_372`
+still points at the era-2 root. The flip is now supported by the table above;
+the caveat to weigh is that six corpora in the era-3 root are copied prior-era
+rows, so flipping makes the default root era-mixed until those can be
+re-extracted.
