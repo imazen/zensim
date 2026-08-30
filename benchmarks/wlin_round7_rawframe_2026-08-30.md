@@ -523,7 +523,7 @@ blend. This is an independent second pricing of the campaign's registered lane
 
 ---
 
-## 6.6 THE DIAL DEFECT — measured, and AMENDMENT R7-A2 declared against it
+### 6.6 THE DIAL DEFECT — measured, and AMENDMENT R7-A2 declared against it
 
 The round-6 bars are a **rank** gate. The campaign's own two-panel mandate says a
 rank-only verdict is a regression, so the dial panel `bake_verdict` computes on
@@ -940,3 +940,8 @@ between this round's result and a ship candidate.
   `.fulleval.json` + `.verdict.md` and an embedded `zentrain.repro`.
 - **Pinned extractor:** `/mnt/v/output/zensim/wlin7-2026-08-30/bin/v2_ab_extract_PREFIX_PINNED`
   (sha256 `fc0d780b…`), the G-X-gated pre-fix build every pools table was made with.
+- **Machine-readable bars table:** `benchmarks/wlin7_bars_all_2026-08-30.tsv` —
+  all 133 arms plus the two B rows, one line each: the five signed axis values
+  (KonJND as |SROCC|), bars cleared, maximin margin, axes ≥ B, and the source
+  fulleval path. Produced by `scripts/wlin7_bars.py --tsv`, which reads
+  `rank.<corpus>.srocc_signed` and computes nothing.
