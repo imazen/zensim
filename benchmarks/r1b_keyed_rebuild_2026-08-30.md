@@ -489,9 +489,19 @@ This head is **KonJND-degenerate in every arm and both framings** (signed
 PJND parameter, so as a magnitude these are 0.19–0.41 with the sign carrying no
 extra information here). The campaign's no-carrier arm read KonJND **+0.1644**
 at cid22 0.8249, mine reads −0.2062 at 0.8311 — **so this is not the same head,
-and R1b has NOT reproduced their baseline.** Their exact argv is not
-recoverable: the 954 heads were fit ad hoc and no driver was committed (the
-`wlin-2026-08-29` bakes exist, the commands do not). What R1b measures is
+and R1b has NOT reproduced their baseline.** **SUPERSEDED SAME DAY (`fdd13b0f`): the argv WAS recovered**, from the bakes'
+own metadata, and it names two things §2b could not have guessed — the
+shaping screen is the trained-bake screen the heads carry (914 identity /
+30 winsor_p99 / 10 signed_cbrt, all inside f0..f155), **not**
+`scripts/sota944/screen944_monotone.tsv` which §2b used; and there is no
+min-max target framing at all (scale 1.0). Both of R1b's arms therefore
+used the wrong shaping screen, which is sufficient to explain the
+kon-degenerate head — §2c's R-1 variant removed the min-max framing but
+not the screen. **The §8.3 arm numbers stand as measured but must NOT be
+read as evidence about carriers**; the recovered recipe reproduces the
+ledger's six numbers to 4 dp. The R1b substrate and gates are unaffected —
+§8.3b's A2-vs-A3 equivalence (0.0003 kon) was measured with ONE recipe on
+two roots, so it holds whichever recipe that was. What R1b measures is
 therefore: *a faithful implementation of the recipe as it is described in the
 ledger shows no carrier/pool effect at one width on keyed rows.* Two
 explanations remain open and R1b does not choose between them — (i) an
