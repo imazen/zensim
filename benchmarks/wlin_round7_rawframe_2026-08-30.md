@@ -627,3 +627,112 @@ The result that does NOT depend on the search is the mechanism (§6.3, §6.4): t
 target frame is worth **+0.154 kon / +0.105 hfnl / two bars** on one fixed
 composition, and the generalist head flips from hfnl-anti to hfnl-positive with
 that single switch. That is a one-variable measurement, not a selection.
+
+### 6.9 The third panel — G-RANGE (`bake_dial_refit gate`, cid22, n=4,292)
+
+| bake | knot domain | raw pred | below/above knot | G-RANGE | Z-RMSE (adv) | OUT-RATIO (adv) |
+|---|---|---|---|---|---|---|
+| B (shipped) | — | — | 0 / 0 | **PASS** | 0.482 | — |
+| `T3_KH01_C1_b0.95` | [−4.442, 0.682] | [−0.02, 0.67] | 0 / 0 | **PASS** | 0.574 | 0.0023 |
+| `P3_KHp4_H_b0.5` | — | — | 0 / 0 | **PASS** | 0.550 | — |
+| `P3_KHp6_H_b0.3` | [−3.309, 0.614] | [−0.23, 0.61] | 0 / **1 (0.023 %)** | **FAIL** | 0.530 | 0.0009 |
+| `Hp_lasso_w10_l2.5e-4` | — | — | 0 / **10 (0.233 %)** | **FAIL** | 0.711 | — |
+
+The arm the registered rule selects passes the hard gate; the dial-preferred
+alternative and the standalone H′ head do not. Every arm carries an embedded
+`zentrain.repro` (argv + head shas + code commit), verified on the winner.
+
+---
+
+## 7. THE B REFERENCE, ERA BY ERA — and one open ledger item CLOSED
+
+A second substrate update from the drift lane says B's *runtime* behaviour on
+current-extractor features differs from every published (stored-era) B number,
+and asks for both columns. Producing them turned up two things worth more than
+the columns.
+
+### 7.1 The coordinator's slicing shortcut does NOT hold — measured
+
+The suggestion was to read B's 372 inputs out of the pools-944 tables'
+`f0..f371` block, "which is bit-identical to v1 at HEAD". Checked against the
+post-fix full-width v1-372 extraction of the *same rows in the same order*:
+
+| slice | rows | cols with max\|Δ\| > 1e-6 | max abs | rows with any \|Δ\| > 1e-6 |
+|---|---|---|---|---|
+| `ext_imazen26` | 6,953 | **372 / 372** | 29.10 | 4,181 (**60.1 %**) |
+| `ext_nonphoto` | 6,142 | **372 / 372** | 44.01 | — |
+| `ext_hfnlproxy` | 7,717 | **372 / 372** | 3.79 | — |
+
+Row 0 agrees to 8 decimals, so the two are the *same quantity* — but 60 % of
+rows differ materially. The explanation is era, not layout: **this lane's pools
+tables are the PINNED PRE-FIX extraction** (§0), and the v1-width fix
+(`f9fac41e`) changed v1 values well beyond the previously-short rows. Slicing
+them would have produced a silently pre-fix "current-era" B. The shortcut is
+recorded as **falsified**; B's 372 side is extracted, not sliced.
+
+### 7.2 Both B columns, each axis labelled by the table it came from
+
+| axis | B **stored-era** | B **runtime-era** | table used for runtime |
+|---|---|---|---|
+| cid22 | **0.8764** | **0.8821** | fresh HEAD extraction of `cid22val_pairs_ab.tsv` (matches the drift lane's 0.88212) |
+| \|kon-504\| | 0.5186 | **0.5186** | fresh HEAD extraction of `konjnd_jpeg_val_pairs.tsv` |
+| nonphoto | 0.8505 | 0.8505 | post-fix full-width slice (the only full-row 372 table that exists) |
+| imazen26 | 0.8609 | 0.8609 | 〃 |
+| hfnl | 0.3496 | 0.3496 | 〃 |
+
+**kon-504 has no era difference on this instrument, and that is a measurement,
+not an omission:** a fresh HEAD extraction of the 504 keyed pairs is
+**BIT-IDENTICAL** (max abs **0.000e+00**, 0 of 372 columns differ) to the table
+R1b used. These images are large enough that the width fix does not touch them.
+Only cid22 moves (**+0.0057**), and it moves to exactly the drift lane's value.
+
+**So B's bars verdict is unchanged by era: 2 of 5**, on both columns.
+
+### 7.3 CLOSED — R1b §9's "B's ledger KonJND 0.5935 vs R1b's 0.5183, unadjudicated"
+
+The ledger's number comes from a **different 504-row table**:
+`/mnt/v/zen/zensim-training/2026-05-15-full-features/konjnd_jpeg504_372_2026-08-29.parquet`.
+Scoring B on it reads **exactly −0.5935**.
+
+Aligned against R1b's `ext_konjnd_jpeg_val` (names differ only by a `.png`
+suffix):
+
+- **the same 504 sources**, and the targets are **bit-identical** (mean 54.010,
+  range [22.46, 69.98]);
+- **371 of 372 feature columns differ, on all 504 rows** (max abs 0.120).
+
+So the two are **two different 372 extractions of identical pairs with identical
+targets**, and the choice between them is worth **0.075 SROCC on the kon axis for
+one fixed bake**. That is the whole of the 0.5935-vs-0.5186 gap. R1b's open item
+is closed as an instrument difference — now *localized* to the feature table
+rather than merely suspected — and it is a standing caution: **on kon-504, "which
+372 extraction" moves the number by more than most model changes in this round.**
+
+Every kon figure in this document is on **R1b's keyed `ext_konjnd_jpeg_val`**,
+for every model including B.
+
+### 7.4 The `SRC0437` pair-list defect — footnoted, and its effect measured
+
+The drift lane reports that one kon-504 row, `SRC0437`, is a pair-list defect
+(PJND ties at exactly 58.50; the loader rounds to `_059` while the TSV names
+`_058` — two different images), and that R1b's keyed 504 inherits it. It is
+recorded here rather than left unlabelled, and the honest way to size it is to
+recompute the axis without that row.
+
+`SRC0437` is **row 436** of R1b's keyed 504. Recomputing the axis on the
+remaining 503 pairs through the **`panel` owner** (`zensim_validate::panel`; the
+per-pair `pred`/`jnd` vectors come straight out of `bake_verdict --full-json`,
+nothing is re-derived):
+
+| model | \|kon\| all 504 | \|kon\| without `SRC0437` (n=503) | Δ |
+|---|---|---|---|
+| `T3_KH01_C1_b0.95` | 0.5434 | 0.5434 | 0.0000 |
+| `P3_KHp6_H_b0.3` | 0.4856 | 0.4856 | 0.0000 |
+| `K_pools` | 0.4866 | 0.4868 | +0.0002 |
+| B (both eras) | 0.5186 | 0.5189 | +0.0003 |
+
+**The defect is real and now labelled, and its effect is ≤ 0.0003 — it changes no
+bar decision for any model here.** (The `panel` run also reproduces each fulleval's
+kon value exactly, which is a free cross-check that the per-pair vectors are the
+ones the verdict used.) Every kon number in this document is the **all-504**
+value, with this footnote attached.
