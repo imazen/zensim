@@ -3823,3 +3823,19 @@ selective re-apply; no other lane's edits clobbered).
   and must not wait for buffered-class scaling** (unreachable without changing 944 bytes).
 - Extraction-lane scorecard final: 4 shipped / 5 rejected-on-measurement / 2 era-gated decisions
   surfaced (root flip; the one-time accumulation-shape change).
+
+## 2026-08-31 ~02:1xZ — ROUND 13: PERF ERA BREAK AUTHORIZED (user directive)
+
+User, verbatim: "we can do an era break in order to push performance higher, remember the point of
+zensim is to be extremely fast, and as good or better than ssim, and be good at hdr."
+⇒ The era-2 lane is launched: all-tier POOL_SIMD-equivalent accumulation + scalar tails folded
+row-local (dense permanently band-parallelisable; the 8T plateau re-attacked on the new shape);
+the rejected-for-byte-stability pile re-opened ONCE (art-L4 fused sums etc. — each must still WIN
+on measurement); ONE batched era, layout/slots unchanged (append-only holds); era gates =
+same-binary determinism (bit-exact) + thread-count invariance BY CONSTRUCTION + measured/declared
+numerical equivalence to era-1 + rank preservation (B + roster on same-pair era-1-vs-era-2);
+blast radius + re-extraction/retraining waves (944 roster + the registered ~227k B re-extraction
+fold in) to be REGISTERED with priorities, launched on user go; hdr944 route inherits the kernels
+(enumerated); the future HDR-feature append lands ON era-2. Sequencing with the fold-engine lane
+(score()/ref-cache/attribution/oracle, running on era-1 parity gates) coordinated explicitly.
+Mission memory saved (user_zensim_mission).
