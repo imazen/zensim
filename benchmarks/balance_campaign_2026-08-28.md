@@ -2500,3 +2500,29 @@ config booleans (`compute_all_features` / `extended_features` /
 bake-derived FAMILY MASK (from `bake_block_profile` / the live-mask) so
 extraction skips any v1/v2/append family the loaded bake does not read —
 registered as the extractor design item, zenbench-gated per family.
+
+## AVIF-HDR DATAGEN — GATE LIFTED (user, 2026-08-30) — registered plan + ground truth
+
+**Ground truth (read from the estate, not the plan):** `hdrgrid-2026-08-06`
+is ALREADY multi-codec — arms zenjxl / zenav1-svt (= AV1-HDR) / jpeg-gainmap,
+1,140 PQ sources × 30 q, 102,485 encodes done, **hdrfeat944 features for
+ALL THREE arms** (34,200 / 34,085 / 34,200) and cvvdp for jxl 80% / svt 65%.
+The hdrgrid944 leg used zenjxl ONLY because **ssim2 is 0% on svt and
+gainmap** — the GPU score wave failed: ledger 1,824 `worker_lost` (marked by
+the GPU-only audit) + 72 `encoder_panic` on r7900x (the documented
+exec-gpu-without-`hdr-gainmap` decode gap). The zenavif arm is ABSENT by the
+B5 record ("additive-later; rows independent"). The executor's zenavif HDR
+encode path is REAL (`sweep::hdr::encode_avif_hdr`, knobs lossless/speed).
+
+**Plan (first-cell-gated, zenfleet only):**
+1. Build + push a GPU executor image with `hdr-gainmap` (+avif HDR decode)
+   — the gating step for every HDR score wave (local build, canonical
+   package, new tag).
+2. Re-declare the ssim2/butter GPU score waves for the svt + gainmap cells
+   (gap/reconcile on the existing blobs — zero new encodes) → build the
+   **3-arm HDR leg** immediately (jxl+svt+gainmap; the "multi-codec leg vs
+   BHdr" the plan queued).
+3. Declare the **zenavif arm** via `hdrgrid_cells.py` (+ `("zenavif",
+   {"speed": <quality tier>})`, 34,200 encodes, hdr:true) → score → hdrfeat944
+   → the 4-arm leg → the HDR model wave under the frozen UPIQ-transfer gate.
+Every step persists encodes/metrics/diffmaps; first cell before scale-up.
