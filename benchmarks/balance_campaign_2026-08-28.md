@@ -2194,3 +2194,20 @@ launch user-gated.** Until then the kon axis stays B's, priced at −0.09 in
 the swap decision, with the pair/companion product shapes as the standing
 alternatives. Artifacts: `bakes/koncompanion-2026-08-29/` (6 tables + 9
 bakes + manifest), logs `~/tmp/koncomp*`.
+
+### R2 AMENDMENT — THE 954 RETRAIN NEEDS NO NEW DATA (user correction #3, 2026-08-29)
+
+"We never deleted the 372 features" — correct, and stronger than that: the
+**ext720 root carries the UNFOLDED v1 block for the same legs, row-order
+IDENTICAL to the ext944 legs** (cid22t/safesyn/kadid/tid verified 1:1), and
+`tbig_720_full.parquet` (5.74M rows, the ENTIRE canonical corpus at 720,
+keyed encode_sha) is on disk. The fleet-extraction claim is RETRACTED — the
+954 experiment is a column-fusion job. Carrier width note: v1 features
+DIVERGE across extraction widths (f237 median rel 7.6e-2, f333 2.05e-1 —
+the padded-width divergence; f178 exactly 0) so ALL carriers come from ONE
+width (the 720 extraction), evals included (ext720 cid22val + kon504 are
+row-identical to ext944's). Legs without a 720-width source: kadis
+(dropped, both arms — 2.4% of pairs) and konjnd_bpg (arm-B only, 372-width
+carriers, flagged). ARM-A = C's recipe minus kadis/konbpg, all-954 fused;
+ARM-B = arm-A + konbpg with 372-width carriers. Bars unchanged
+(kon-504 ≥ 0.55 ∧ cid22 ≥ 0.885), k=2 seeds per arm.
