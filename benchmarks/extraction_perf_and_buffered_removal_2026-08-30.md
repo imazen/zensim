@@ -702,3 +702,101 @@ geometries.
 toggle/mode on the existing `V2NewFeatureToggles` surface, and step 5 needs a
 scoring method and a ref-cached entry on the fold. No public API was added or
 changed by this lane.
+
+---
+
+## 8. "Make the 372 segment of 944 correct" — the fork, measured
+
+A second directive arrived: do **not** scope the buffered-equal semantics to a
+372-subset flag; fix the fold's v1 blocks so they equal buffered v1 wherever
+the 944-class regimes emit them, ship the corrected semantics under a new
+regime/era tag, and accept the re-extraction cost.
+
+Executing that hits a fork that the measurements above settle, and it needs a
+decision before any code moves.
+
+### 8.1 First, a correction to the premise
+
+The framing supplied with the directive was that "the fold pools at the
+SIMD-padded width where buffered v1 pools at unpadded semantics (or vice
+versa; measure, don't assume)". **Measured: it is vice versa.**
+
+* **BUFFERED v1 pools over PADDED columns.** It starts its walk at
+  `w = simd_padded_width(width)` (`streaming.rs:871`) and mirror-fills the
+  extra columns (`streaming.rs:3185`), so its means and pools include up to 16
+  columns that are not in the image.
+* **The fold pools over the image only.**
+
+So on the plain reading of the word, **the fold's v1 blocks are already the
+"unpadded semantics" ones, and buffered is the path carrying the artifact.**
+The operative gate as stated — "corrected fold `f0..371` bit-identical to
+buffered v1 at HEAD" — therefore asks the fold to *reproduce v1's phantom
+columns*, not to drop them. Worth naming explicitly, because "correct" and
+"bit-identical to buffered" point in opposite directions here.
+
+### 8.2 The blast radius of the pre-pad — why it cannot just be switched on
+
+§7.1's pre-pad makes `f0..371` bit-exact. It also makes the fold compute the
+v2/append blocks **of the padded image**. Measured by the same gate (tight
+widths as the control):
+
+| width class | v1 block `f0..372` | v2/append block `f372..944` |
+|---|---|---|
+| tight (96×64, 208×144, 592×80, 128×93) | 0/372 differ | **0/552 differ** |
+| non-tight (all 15 others) | 0/372 (17 cells) or ≤1.1e-6 (3 cells) | **505–508 of 552 differ**, worst rel **up to 36.4×** |
+
+Worst movers: f487 rel **3.644e1** (129×96), f603 **2.166e1** (126×93), f866
+**2.017e0**, f882 **1.350e0**, f432 **1.370e0**. These are not last-ulp
+drifts; they are different features. The tight-width control (0/552) proves
+the movement is caused by the pad columns and nothing else — that invariant is
+now asserted by the gate, in both directions.
+
+**So the pre-pad fixes 372 slots and destroys the comparability of 552.**
+"Fix the 372 segment" and "leave the 944 regime alone" cannot both be had by
+padding the walk.
+
+### 8.3 The three options, with their measured cost
+
+| | what changes | blast radius | perf cost |
+|---|---|---|---|
+| **A. Pre-pad the whole walk** | fold `f0..371` becomes buffered-exact; `f372..943` becomes features-of-the-padded-image | **92 % of the v2/append block moves, up to 36×.** Every 944 table re-extracts **and every 944-trained model is invalidated** — the inputs changed meaning, not just their values | ~free (one wider walk; +2.8 % columns at 576²) |
+| **B. Two plane sets** | v1 blocks over padded planes, v2 blocks over unpadded | `f0..371` buffered-exact, `f372..943` **unchanged** — no 944 table or model touched | **the expensive one**: a second pyramid + H/V blur chain, directly opposing the perf mandate. Not yet measured; the H-blur families are 25–44 % of the walk (§2), so a naive second set is a large regression |
+| **C. Stop v1 pooling over pad columns** | buffered v1 changes to match the fold | `f0..371` correct-by-construction everywhere, **nothing in 944 moves at all** — but **every stored 372 table, `v1_golden_bytes`, and the shipped metric's output change** | free |
+
+**Option A is the one the directive's letter selects and it is the most
+expensive by far** — it invalidates the 944 models, not just their tables. The
+directive authorises re-extraction; it does not obviously authorise
+re-training every 944-class model, which is what a 36× shift in 92 % of the v2
+features amounts to. **This needs an explicit decision and is not a call this
+lane should make silently**, which is exactly why it is written down here with
+numbers instead of implemented.
+
+Option C is the one that matches the word "correct", costs nothing in the
+944 regime, and is the only one where the fold needs no change at all — its
+price is v1's byte-stability, which is the golden-gate policy's territory.
+
+Option B is the only one that satisfies both "372 equals buffered" and "944
+untouched", and its cost is unmeasured. **If a decision is wanted quickly, the
+cheapest next measurement is B's**: instrument a second plane set behind a
+flag and price it on `extract_paths_bench`.
+
+### 8.4 Status of the rest of the directive
+
+* **`f0..371` correctness fix** — mechanism found, measured, gated
+  (§7.1/§7.2); implementation blocked on the §8.3 decision plus the h = 93
+  residual (§7.2).
+* **New regime/era tag + annotations-registry marking of the shipped 944-era
+  tables** (ext924/ext944 legs, tbig_924/944, r1b-pools944, svt/aom harvest
+  features, kadis-924, eval instruments) — **not done**; it should follow the
+  decision, since which tables become prior-era depends on which option ships
+  (A invalidates all of them, B and C invalidate none).
+* **Eval-root re-extraction equality on cid22val / kon504 / tid** — **not
+  run**; needs the subset mode to exist.
+* **"Really optimize with and without the 372 top half"** — the rem-ring
+  shipped (§2: −8.29 % buffered, −5.57 % zeroed-944, −6.22 % live-944 in
+  instructions) and the ranked lever list is executed and adjudicated (§3),
+  including the re-ranking of lever #1 that this profile forces. **The
+  profile-driven work beyond that list is not done**, and it should be
+  re-based on the CORRECTED semantics rather than on today's — otherwise every
+  bit-exactness gate it is measured against is pinned to bytes that are about
+  to change.

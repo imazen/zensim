@@ -11239,10 +11239,63 @@ mod tests {
                     }
                 }
             }
+            // BLAST RADIUS of the pre-pad: it does not only move f0..372.
+            // The v2/append blocks are features OF THE PADDED IMAGE too, so
+            // measure how far they move — that is the difference between
+            // "fix the 372 segment" and "re-extract all 944".
+            let unpadded = z
+                .compute_folded720_append_features_streaming(
+                    &RgbSlice::new(&src, w, h),
+                    &RgbSlice::new(&dst, w, h),
+                    V2NewFeatureToggles {
+                        v1_pools: V1PoolsMode::Full,
+                        ..V2NewFeatureToggles::default()
+                    },
+                    &mut scratch,
+                )
+                .unwrap();
+            let uf = unpadded.features();
+            let mut v2_differ = 0usize;
+            let mut v2_worst = (0usize, 0.0f64);
+            for i in 372..ff.len().min(uf.len()) {
+                if ff[i].to_bits() != uf[i].to_bits() {
+                    v2_differ += 1;
+                    let (a, b) = (ff[i], uf[i]);
+                    let rel = if b.abs() > 1e-12 {
+                        (a - b).abs() / b.abs()
+                    } else {
+                        (a - b).abs()
+                    };
+                    if rel > v2_worst.1 {
+                        v2_worst = (i, rel);
+                    }
+                }
+            }
             eprintln!(
-                "PADPROBE {w}x{h} (v1 pads {w}->{pw}): {n_differ}/372 slots differ, worst f{} rel {:.3e}",
-                worst.0, worst.1
+                "PADPROBE {w}x{h} (v1 pads {w}->{pw}): v1-block {n_differ}/372 differ worst f{} rel {:.3e} | v2/append {v2_differ}/{} differ worst f{} rel {:.3e}",
+                worst.0,
+                worst.1,
+                ff.len() - 372,
+                v2_worst.0,
+                v2_worst.1
             );
+            // Tight widths pad by nothing, so the v2/append blocks MUST be
+            // untouched — that is what proves the movement at non-tight
+            // widths is caused by the pad columns and nothing else.
+            if pw == w {
+                assert_eq!(
+                    v2_differ, 0,
+                    "{w}x{h} is tight (no pad columns) so the v2/append block must be \
+                     bit-identical, but {v2_differ} slots moved"
+                );
+            } else {
+                assert!(
+                    v2_differ > 400,
+                    "{w}x{h}: the pre-pad is expected to move MOST of the v2/append block \
+                     ({v2_differ}/552 moved). If this drops, the fold's v2 blocks stopped \
+                     seeing the pad columns — re-measure the blast radius before relying on it."
+                );
+            }
             if max_rel == 0.0 {
                 assert_eq!(
                     n_differ, 0,
