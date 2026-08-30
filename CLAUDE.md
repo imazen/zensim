@@ -672,6 +672,19 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   band edges disagree are refused. Read down a column, never across one: band
   SROCC is range-restricted. All values are read from `rank.<corpus>.bands[]`;
   nothing is recomputed.
+  Plus (2026-08-30) **ERA ROWS**: a board name ending in `gauntlet.ERA372_CUR_SUFFIX`
+  (**`@cur372`**) is the SAME BAKE as its unsuffixed sibling, read on the
+  current-extractor 372 root instead of the 2026-05-15 one — same stem so the pair
+  sorts together, `@` in no other board name so the suffix test is unambiguous.
+  Promoted by `scripts/promote_era372_board.py` (a caller of `promote_fulleval.py`,
+  with a never-overwrite gate on the stored halves); `family_of()` returns
+  `"@cur372 (current extractor)"` for them, checked FIRST. **`family_of()` is not
+  only a toggle label** — `build_html`'s knob-end gate scopes its peers/HDR
+  exemption on it, so any rule that judges the MODEL rather than the ruler must go
+  through `gauntlet.era_base_name()`. Read a pair DOWN, not across: only shipped
+  B's pair is a clean era A/B (7 of the 9 historical "stored-era" rows are
+  `--regime 720` ext720 reads — `benchmarks/board_era_rows_2026-08-30.md` §2,
+  registry `board372-row-read-on-ext720-root-2026-08-30`).
   Plus (2026-08-04) **ENSEMBLE rows**: a fulleval JSON stamped `model.kind:"ensemble"`
   by `scripts/promote_fulleval.py --members` (the generalized promoter — it publishes
   ANY verdict, single-bake or ensemble, onto the board and recomputes NOTHING — every
