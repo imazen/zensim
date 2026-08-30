@@ -341,6 +341,182 @@ cost. Any blend number would require column-mixing regimes, which is refused.
 - The hfnl / nonphoto / imazen26 readings are NEW information either way —
   they have never been measurable for this arm.
 
+### 2c. ROBUSTNESS VARIANT R-1 (declared 2026-08-30 BEFORE running it)
+
+The §2b head, run on both arms, reads **KonJND NEGATIVE on BOTH** (A0 −0.2062,
+A2 −0.1911). A head that is anti-correlated on an axis is degenerate on that
+axis, so the arm delta there is a difference between two broken reads, not
+evidence about carriers. That is a defect in my instantiation of the recipe's
+one free parameter, not a result.
+
+**Declared before running:** variant **R-1** = the identical recipe with the
+per-corpus min-max target framing REMOVED (`--target human_score`,
+`--target-scale 100`, no `--target-minmax01`); everything else — legs,
+weights, space, screen, solver, sign mask, anchor — unchanged, and run on BOTH
+arms. It is reported whatever it says, alongside the registered §2b numbers,
+which are NOT withdrawn. No further variants are declared; if R-1 is also
+kon-degenerate, the honest conclusion is that this head recipe does not
+reproduce the campaign's kon head and the arm comparison stands only on the
+axes where the head is healthy.
+
 ## 8. RESULTS
 
-*(filled only by measurements, in the order they land)*
+### 8.1 The rebuilt roots (what exists now)
+
+| root | regime | contents |
+|---|---|---|
+| `/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/` | `folded720append2pools` | the 11 canonical local legs (149,195 rows) + the 3 keyed D1 validate slices (20,812 rows) = **14 corpora / 170,007 rows**, all 216 pool slots live |
+| `/mnt/v/zen/zensim-training/r1b-ctrl944-2026-08-30/` | `folded720append2` | 5-leg SAME-BINARY zero-block control (18,521 rows), built only to gate the pools tables |
+| `/mnt/v/zen/zensim-training/r1b-samepair{372,944}-2026-08-30/` | v1-372 / pools-944 | the family-axis slices restricted to rows that HAVE a full v1-372 vector, so a 372-input bake and a 944-class candidate read identical pairs |
+
+Every parquet carries a `regime` column AND `zensim_regime` parquet key-value
+metadata; the root manifests carry `regime` + a `regime_purity` line.
+
+### 8.2 GATES — all results
+
+| gate | result |
+|---|---|
+| **G-KEY** (slice row identity) | **PASS 3/3** — the keyed sidecars name exactly the rows the stored slices hold, `ref_basename` row for row |
+| **G-P1** (pools vs SAME-BINARY control, non-pool block) | **PASS 5/5 controlled legs** — **728 of 728** non-pool columns BIT-IDENTICAL. The regime flag changes the pool block and nothing else. |
+| **G-P2** (pool block state) | control **216/216 zero**, pools **216/216 live**, on every controlled leg |
+| **G-E** (row identity + target vs the stored 2026-08-01 root) | **PASS 11/11** — `ref_basename` and `human_score` EQUAL row for row |
+| **G-B** (target orientation) | KADID **+0.582360** (after repair, below), TID **+1.000000**, CSIQ/LIVE **SKIPPED = not checked** |
+| **G-D** (regime purity) | enforced in the promoter: a `*pools` mode with an all-zero f156-371 block ABORTS, and so does a folded mode with live slots |
+| drift vs the 2026-08-01 root (REPORTED, not gated) | **22 of 728** non-pool columns differ, all in the append block, max abs ~1e-8, max rel ~5e-6 — extractor-version drift between `ec3bdd6a` (2026-08-01) and `ced6f52a` (today), identical on every leg |
+
+**G-B caught a live repro hazard, which is the gate earning its keep.**
+Re-extracting KADID from its canonical pairs TSV reproduces the
+**pre-2026-08-05 INVERTED target** (gate reads **−0.582360**), because the
+2026-08-05 orientation correction was applied to the ext *parquets* and not to
+the pairs TSV that feeds a re-extraction. Repaired on both new roots with the
+owner (`fix_ext_kadid_orientation.py`), cross-checked against the
+independently-built canonical at **5.55e-17**. Anyone re-extracting any ext leg
+from a pairs TSV inherits this and must re-run the gate — the DATA_SPLITS §1.4
+hazard note describes the repro direction, not this one.
+
+### 8.3 THE ARMS — the pre-registered measurement
+
+Head recipe exactly as §2b (BVLS + sign-mask, shaped, 4 legs), run identically
+on the two roots; §2c's declared R-1 variant repeats it without the per-corpus
+min-max target framing. Read on the KEYED slices. Signed SROCC throughout.
+
+| arm | cid22 | KonJND-504 | nonphoto | imazen26 | hfnl (pooled) | hfnl (per-ref) |
+|---|---|---|---|---|---|---|
+| **A0-zero** (f156-371 = 0) | +0.8311 | −0.2062 | +0.8207 | +0.8310 | +0.1544 | +0.6133 |
+| **A2-pools** (216 slots live) | **+0.8332** | **−0.1911** | **+0.8219** | +0.8311 | **+0.1781** | **+0.6252** |
+| Δ (pools − zero) | **+0.0021** | **+0.0151** | **+0.0012** | **+0.0001** | **+0.0237** | **+0.0119** |
+| R-1 A0-zero (no min-max) | +0.8646 | −0.3994 | +0.8126 | +0.8304 | +0.1539 | +0.5760 |
+| R-1 A2-pools | +0.8652 | −0.4105 | +0.8116 | +0.8298 | +0.1853 | +0.5789 |
+| Δ (R-1) | +0.0006 | −0.0111 | −0.0010 | −0.0006 | +0.0314 | +0.0029 |
+
+**Result, stated plainly: making the ENTIRE v1 pool block live moves this head
+by ~0.002 on cid22 and by ~0.01–0.02 on every other axis — nothing like the
++0.3243 KonJND effect the campaign measured for the ten carriers on
+720-width-FUSED tables.** The direction is consistent (pools ≥ zeros on 5 of 6
+axes in the registered variant) but the magnitude is at noise scale, and it
+does not depend on the target framing: R-1 reproduces the same near-null.
+
+**The honest caveat, stated before anyone quotes this as a falsification.**
+This head is **KonJND-degenerate in every arm and both framings** (signed
+−0.19…−0.41; KonJND is conventionally read as |SROCC| because its target is a
+PJND parameter, so as a magnitude these are 0.19–0.41 with the sign carrying no
+extra information here). The campaign's no-carrier arm read KonJND **+0.1644**
+at cid22 0.8249, mine reads −0.2062 at 0.8311 — **so this is not the same head,
+and R1b has NOT reproduced their baseline.** Their exact argv is not
+recoverable: the 954 heads were fit ad hoc and no driver was committed (the
+`wlin-2026-08-29` bakes exist, the commands do not). What R1b measures is
+therefore: *a faithful implementation of the recipe as it is described in the
+ledger shows no carrier/pool effect at one width on keyed rows.* Two
+explanations remain open and R1b does not choose between them — (i) an
+unrecorded difference in their head, or (ii) the 720-width FUSION carrying the
+effect, which is the possibility the user's amendment was designed to exclude.
+The driver here IS committed (`scripts/r1b_linear_arms.sh`), so this arm is
+reproducible in a way its predecessor is not.
+
+### 8.4 B UNDER THE SAME RULER — the axes that were unmeasurable
+
+Same pairs, each model on its native regime: B (372 inputs) on the v1-372 twin,
+the arms (944) on the pools twin, over the row set where BOTH exist (rows too
+small for v1's 4th scale carry only 279 features and are excluded — MEASURED
+453/6,953 imazen26, 422/6,142 nonphoto, 493/7,717 hfnlproxy, ~6.5 % each,
+counted and recorded, never silently dropped).
+
+| model | cid22 | \|KonJND-504\| | nonphoto | imazen26 | hfnl | hfnl/ref |
+|---|---|---|---|---|---|---|
+| **B (shipped, 372)** | **0.8763** | **0.5183** | **0.9093** | **0.9142** | **0.3553** | **0.6279** |
+| A0-zero (944) | 0.8311 | 0.2062 | 0.8773 | 0.8806 | 0.2398 | 0.6215 |
+| A2-pools (944) | 0.8332 | 0.1911 | 0.8784 | 0.8815 | 0.2474 | 0.6233 |
+| R-1 A0-zero | 0.8646 | 0.3994 | 0.8709 | 0.8834 | 0.2342 | 0.5760 |
+| R-1 A2-pools | 0.8652 | 0.4105 | 0.8779 | 0.8891 | 0.2521 | 0.5789 |
+
+**This table is the thing R1b was built to make possible** — before it, the
+nonphoto / imazen26 / hfnl columns for a 944-class candidate and for B were
+read on DIFFERENT pairs and were direction-only. B leads on every axis; no arm
+comes close on the family axes.
+
+**Bars (§2): FAIL on all four arms** — every arm misses `kon ≥ 0.40` (as a
+magnitude R-1 reaches 0.40/0.41, but at cid22 0.865 it still misses
+`nonphoto ≥ 0.865` and `imazen26 ≥ 0.875`), and all four miss `hfnl ≥ 0.40`.
+The registered FALSIFIER language applies to this head only, not to the lane:
+what is falsified is *this* reconstruction, and §8.3 says why that is weaker
+than a falsification of the carrier finding.
+
+### 8.5 Instrument caveats, measured rather than asserted
+
+**(a) The two v1-372 extractors differ per-feature but NOT on the bar.**
+`v2_ab_extract ZENSIM_AB_MODE=v1` and the canonical
+`zensim-bench extract_features_372col` differ by up to **|d| 0.0927 (f129)** on
+the same 504 KonJND pairs. Scoring B on each: KonJND **−0.518703** vs
+**−0.518294** — **|ΔSROCC| 0.0004**. The per-feature difference does not move
+the axis, so the 372 twin stays on `v2_ab_extract`, which is the only one of
+the two that preserves pairs-TSV ROW ORDER (the canonical extractor reorders,
+and its `ref_basename` is not row-unique, so its output cannot be aligned back
+to a keyed table at all — a real limitation of that tool for keyed work).
+
+**(b) A fresh canonical extraction of cid22 has drifted from the 2026-05-15
+stored table by +0.0060 SROCC for B** (0.8822 fresh vs 0.87627 stored; the
+stored value is the one B's published 0.8764 lives on). Three and a half months
+of extractor evolution. Recorded because it bounds how precisely any
+cross-era 372 number can be compared.
+
+**(c) B's KonJND-504 reads 0.5183 here against the ledger's 0.5935.** Same
+504 JPEG-half pairs, same PJND target range (22.46–69.98), and the two
+extractors agree to 0.0004 — so this is an INSTRUMENT difference in which
+504-row table the ledger's number was taken on, not extractor drift. R1b
+quotes its own instrument and does not adjudicate; anyone comparing to the
+ledger's 0.5935 must first establish which table produced it.
+
+**(d) v1's feature vector length is size-dependent — in BOTH extractors.** A
+rendition too small for the 4th scale emits 3 x 93 = 279 features. Measured on
+the R1b slices: 453/6,953 imazen26, 422/6,142 nonphoto, 493/7,717 hfnlproxy
+(~6.5 % each), identical counts from `v2_ab_extract` and the canonical
+extractor. So this is a property of v1, not of a tool. Those rows have no 372
+vector and are excluded from every same-ruler read, counted in the manifest.
+The 944 side has no such problem (the folded path emits a fixed width), which
+is a real robustness advantage of the 944 regime worth recording.
+
+
+## 9. WHAT IS OPEN, WITH THE MEASURED REASON
+
+| item | status | measured reason |
+|---|---|---|
+| full-mix `cid` head + the `wlin954b` BLEND at this regime | **NOT DONE** | needs `tbig_200k` (208,169 rows), `tbig_hf`, the teacher legs (`tsafesyn`/`ttbig`) and `kadis50k` at `folded720append2pools`. Their bytes are the bigcodec tarball corpus; R1b proved the fetch path (100 % resolution, byte-range indexes, decode) on 20,812 pairs at 910 MB — the 200k-class leg is the same machinery at ~10x, a fleet job with the `zensim-foldapp2pools` metric (zenmetrics `905ae73d`) once its executor image lands. Producing a blend from heads fit at DIFFERENT regimes is refused. |
+| `hdrmix` at 954/pools | **NOT KEYABLE at this regime** | no 720-width or SDR-route extraction of `hdr_v3mix` exists; the leg is HDR-route 944-native. Unchanged from the campaign's own check. |
+| `kadis` at pools | keyable, not built | KADIS-700k rows are keyed by `source_id` + a persisted `distorted_url`; the fetch is the same shape as the bigcodec one. Cost, not blocker. |
+| arm **A1-carr** (ten carriers only) | **NOT RUN** | A2 (all 216 live) already shows a near-null effect, so the ten-slot subset cannot show more than the whole block; running it would only refine a null. Registered in §2b, honestly not executed. |
+| B's ledger KonJND-504 0.5935 vs R1b's 0.5183 | **UNRESOLVED** | §8.5(c): an instrument difference in which 504-row table the ledger's number came from. Not adjudicated here. |
+| CID22 holdout audit (G-C) on newly keyed TRAINING rows | **NOT APPLICABLE** | R1b introduced NO new training rows. Every leg is the same pair list as the stored canonical root (G-E: `ref_basename` equal row for row on 11/11), so the 2026-08-01 audit carries over unchanged. The three keyed slices are eval-only. |
+| the 22-column append drift vs the 2026-08-01 root | reported, not chased | max abs ~1e-8 / max rel ~5e-6, identical on every leg; harmless within a root, and every R1b comparison is within-root. |
+
+## 10. WHAT R1b CHANGED IN THE TOOLING (all committed, all through owners)
+
+- `build_eval_slices_944.py` — `--emit-keys` / `--keys-only` / `--verify-against`.
+- `validate_slice_family_filter.py` — filters the key sidecar under ONE keep-index with the feature table, refuses if they disagree, and gates row identity.
+- `join_safety.py` — `safe_key_join_arrow`, a pyarrow-native sibling of `safe_metric_join` with identical refusal semantics (this box has pyarrow, no pandas; the alternative was a bespoke join in a builder, which is what that module exists to prevent).
+- `resolve_bigcodec_pair_uris.py` / `fetch_bigcodec_bytes.py` — `encoded_filename` → bytes, object GET or indexed byte range, 100 %-resolution gate, per-member size gate.
+- `extract_944_canonical.sh` — `ZM944_MODE`, `ZM944_LEGS`, `ZM944_PAIRS_<LEG>`.
+- `promote_ext944_canonical.py` — `EXT944_MODE` (regime column + parquet metadata + manifest), `EXT944_LEGS` with manifest MERGE, `EXT944_EXTRA_LEGS`, `EXT944_N_FEAT`, `EXT944_VERIFY_ROOT` (bit-identity gate), `EXT944_DRIFT_ROOT` (reported), `EXT944_BASENAME_MAP`.
+- `verify_bitstream_decode` — `--decode-list` mode reusing its four zencodec decoders, non-RGB8 layouts routed through the canonical `zenpixels_convert::RowConverter` (4,417 of 20,655 canonical-picker AVIF members are `bd10` cells decoding to Rgb16).
+- `build_r1b_samepair_roots.py` — the row-restricted 372/944 pair, with the short-v1-row count recorded.
+- `bake_verdict` — the wrong-regime guard now ASKS the root (`root_declared_regime`) instead of assuming every `--regime 944` root feeds zeros; verified both directions; regression test added.
+- `scripts/r1b_linear_arms.sh` — the committed arm driver (the predecessor 954 heads had none).

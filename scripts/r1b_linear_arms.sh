@@ -33,7 +33,7 @@ for leg in $ORDER; do
   [ -f "$g" ] && { echo "== gram $leg cached"; continue; }
   echo "== gram $ARM/$leg $(ts)"
   "$BDR" gram --parquet "$ROOT/${LEG[$leg]}.parquet" --target human_score \
-    --target-scale 100 --target-minmax01 --space shaped \
+    --target-scale 100 ${R1B_MM01:---target-minmax01} --space shaped \
     --transforms-tsv "$SCREEN" --expect-n-feat 944 --out "$g"
 done
 
@@ -44,7 +44,7 @@ done
 
 BAKE="$OUT/${ARM}_head_kon.bin"
 echo "== fit $ARM $(ts)"
-"$BDR" fit-lasso "${GARGS[@]}" --space shaped --target human_score__mm01 \
+"$BDR" fit-lasso "${GARGS[@]}" --space shaped --target "${R1B_FIT_TARGET:-human_score__mm01}" \
   --solver bvls --bounds-tsv "$SIGNS" --lam 0 \
   --transforms-tsv "$SCREEN" \
   --anchor-parquet "$ROOT/ext_safesyn_full.parquet" --anchor-stride 37 \

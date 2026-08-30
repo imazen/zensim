@@ -38,6 +38,10 @@ pools regime instead of a second copy of this code:
                 destination (entries replaced by corpus name, others kept), so
                 a root built over several runs still ends with one complete
                 manifest instead of the last run's slice of it.
+  EXT944_N_FEAT feature width to expect in the CSVs (default 944). R1b uses
+                372 for the v1 twin extraction of the D1 slices, so a 372-input
+                bake (shipped B) can be read on EXACTLY the same pairs as the
+                944-class candidates.
   EXT944_EXTRA_LEGS
                 comma-separated corpus names that have NO entry in the
                 inherited manifest (R1b: the D1 eval slices ext_imazen26 /
@@ -93,7 +97,7 @@ OLD_MANIFEST = Path(
 ZENSIM_COMMIT = os.environ.get("ZENSIM_COMMIT") or sys.exit(
     "ABORT: ZENSIM_COMMIT env required (full sha of the extractor build)"
 )
-N_FEATURES = 944
+N_FEATURES = int(os.environ.get("EXT944_N_FEAT", "944"))
 MODE = os.environ.get("EXT944_MODE", "folded720append2")
 ONLY_LEGS = set(os.environ.get("EXT944_LEGS", "").split())
 VERIFY_ROOT = os.environ.get("EXT944_VERIFY_ROOT")
@@ -156,13 +160,13 @@ def csv_to_parquet(src: Path, dst: Path, want_rows: int) -> int:
         sys.exit(f"ABORT {src.name}: {n} rows, want {want_rows}")
     if BASENAME_MAP:
         cols[names[0]] = [BASENAME_MAP.get(b, b) for b in cols[names[0]]]
-    nz, zero = _pool_stats(cols, names)
-    if POOLS_LIVE and nz == 0:
+    nz, zero = _pool_stats(cols, names) if N_FEATURES >= 372 else (0, 0)
+    if POOLS_LIVE and N_FEATURES > 372 and nz == 0:
         sys.exit(
             f"ABORT {src.name}: EXT944_MODE={MODE} claims live pools but "
             f"f156..f371 are all zero — that is a folded720append2 extraction"
         )
-    if not POOLS_LIVE and nz != 0:
+    if not POOLS_LIVE and N_FEATURES > 372 and nz != 0:
         sys.exit(
             f"ABORT {src.name}: EXT944_MODE={MODE} expects structural zeros but "
             f"{nz} of 216 f156..f371 slots are live"
