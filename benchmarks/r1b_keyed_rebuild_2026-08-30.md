@@ -366,6 +366,32 @@ kon-degenerate, the honest conclusion is that this head recipe does not
 reproduce the campaign's kon head and the arm comparison stands only on the
 axes where the head is healthy.
 
+### 2d. DISCRIMINATING ARM A3 (declared 2026-08-30 BEFORE running it)
+
+§8.3 leaves two explanations open for the near-null: (i) my head differs from
+the ledger's in some unrecorded way, or (ii) the 720-width FUSION carried the
+effect. They are separable with one run, so it is declared and run.
+
+**A3 = the IDENTICAL §2b recipe and driver, on the ledger's own
+`fused944native-2026-08-30` tables** (the carriers written into their native
+slots by 720-width fusion — the exact tables the "+0.3243 carrier effect" and
+the `kon 0.4570 / cid22 0.8726` pinned-form reading were produced on). Row
+counts match my legs exactly (safesyn 111,068 / cid22t 17,611 / kadid 10,125 /
+tid 3,000 / cid22val 4,292 / kon504 504).
+
+**Decision rule, frozen before the run:**
+- If A3 reproduces a LARGE KonJND lift over A0 (order +0.2 or more), the effect
+  lives in the FUSED tables and not in a single-width all-live extraction ⇒
+  explanation (ii), and the user's amendment was the right call.
+- If A3 is also near-null, my head is not their head ⇒ explanation (i), and
+  R1b says nothing about the carrier finding beyond "not reproduced by this
+  recipe".
+- Any other outcome is reported as-is. This is ONE run; no variants follow.
+
+**KADID orientation is checked on the fused root before the fit** — that root
+was built on 2026-08-29 from the ext lineage, so it may carry either
+orientation; the gate decides and the result is recorded.
+
 ## 8. RESULTS
 
 ### 8.1 The rebuilt roots (what exists now)
@@ -439,6 +465,40 @@ unrecorded difference in their head, or (ii) the 720-width FUSION carrying the
 effect, which is the possibility the user's amendment was designed to exclude.
 The driver here IS committed (`scripts/r1b_linear_arms.sh`), so this arm is
 reproducible in a way its predecessor is not.
+
+### 8.3b ARM A3 — the discriminating run, and what it settles
+
+A3 ran the §2b driver, unchanged, on the ledger's OWN
+`fused944native-2026-08-30` tables (KADID orientation gate on that root first:
+**+0.582360 OK**).
+
+| arm | feature source | cid22 | KonJND-504 (signed) | kadid | tid |
+|---|---|---|---|---|---|
+| A0-zero | stored 944, f156-371 = 0 | +0.8311 | −0.2062 | +0.8688 | +0.8429 |
+| A2-pools | **R1b, ONE width, 216 slots live** | +0.8332 | −0.1911 | +0.8699 | +0.8427 |
+| A3-fused | **the ledger's 720-width-fused carriers** | +0.8341 | **−0.1914** | +0.8691 | +0.8427 |
+
+**Two conclusions, both clean, per the rule frozen in §2d:**
+
+1. **The fusion is NOT the cause.** The same recipe on the ledger's own fused
+   tables gives the same near-null (kon −0.1914 vs A2's −0.1911, cid22 +0.8341
+   vs +0.8332). So R1b lands on explanation **(i)**: my head is not their head,
+   and **R1b does NOT falsify the carrier finding** — it reports that a
+   faithful reading of the recipe *as written in the ledger* does not reproduce
+   it, and that the missing information is the ledger's unrecorded argv.
+
+2. **The rebuild validates itself.** A2 and A3 differ by **0.0003 on KonJND and
+   0.0009 on cid22** — a single-width all-live extraction and a 720-width
+   fusion are behaviourally equivalent for this head. That is the strongest
+   available evidence that the R1b tables are a faithful substrate: they
+   reproduce, from clean one-width extraction on keyed rows, what the fused
+   tables do, while carrying the keys the fused tables never had.
+
+The practical consequence for the lane: the 954/pools linear question is
+*re-openable at any time* on a substrate that is keyed, one-width, gate-passed
+and driver-reproducible — which is what R1b was for. What it needs from the
+other lane is one thing only: **the argv of the head that read kon +0.1644 /
+0.4887.**
 
 ### 8.4 B UNDER THE SAME RULER — the axes that were unmeasurable
 
