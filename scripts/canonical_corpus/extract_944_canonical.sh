@@ -15,18 +15,32 @@
 #              --example v2_ab_extract -p zensim
 #              --features feature-regime-v2,threads,training)
 #   ZM944_OUT  output dir for the per-leg CSVs
+#   ZM944_MODE ZENSIM_AB_MODE for every leg. Default "foldapp2" = the
+#              canonical zero-block 944 regime. "foldapp2pools" =
+#              R1b's all-live regime (f156..371 = v1's pool blocks LIVE,
+#              V1PoolsMode::Full, regime tag folded720append2pools);
+#              "foldapp2carriers" = the ten carrier slots only. Each is
+#              its OWN regime -- never column-mix their rows.
+#   ZM944_LEGS space-separated leg names to run (default: all 11). A leg
+#              name is the ext_* label below, e.g. "ext_tid ext_kadid".
 set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${ZM944_BIN:-$REPO_ROOT/target/release/examples/v2_ab_extract}"
 OUT="${ZM944_OUT:-/mnt/v/output/zensim/ext944-run-$(date -u +%F)}"
+MODE="${ZM944_MODE:-foldapp2}"
+LEGS="${ZM944_LEGS:-}"
 [ -x "$BIN" ] || { echo "ABORT: extractor binary missing: $BIN"; exit 1; }
 mkdir -p "$OUT"
 ts() { date -u +%H:%M:%SZ; }
+echo "== extract_944_canonical MODE=$MODE OUT=$OUT LEGS=${LEGS:-<all>}"
 
 run_leg() {
   local name="$1" pairs="$2"
+  if [ -n "$LEGS" ]; then
+    case " $LEGS " in *" $name "*) ;; *) echo "== $name SKIPPED (not in ZM944_LEGS)"; return 0;; esac
+  fi
   echo "== $name start $(ts)"
-  ZENSIM_AB_MODE=foldapp2 "$BIN" "$pairs" "$OUT/$name.csv"
+  ZENSIM_AB_MODE="$MODE" "$BIN" "$pairs" "$OUT/$name.csv"
   local rc=$?
   local rows=-1 cols=-1
   if [ -f "$OUT/$name.csv" ]; then

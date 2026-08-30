@@ -24,6 +24,21 @@ filter via imazen26_manifest.tsv):
 
 Deterministic (global stride per slice to ~TARGET rows). Output columns:
 ref_basename, human_score, f0..f943 (f64, zstd) — the ext-leg convention.
+
+KEY EMISSION (--emit-keys / --keys-only, added 2026-08-30 for R1b): the ext-leg
+convention DROPS every column that identifies which encode a row is, which is
+why the 944-era slices cannot be re-attached to features extracted at another
+regime (the `(ref, score)` fingerprint join measured 0-20%: the documented
+join-trap). The views one level up DO carry the identity
+(`origin_id, ref_filename, encoded_filename, codec, q, knob_tuple_json`), so
+--emit-keys writes a sidecar `keys_<name>.parquet` holding exactly the rows the
+slice holds, in the slice's row order, with that identity plus `row_index`.
+`--keys-only` skips the feature columns entirely (the row-index arithmetic
+depends only on `ref_filename` + `score_ssim2`, both metadata), so keys can be
+cut for an already-built slice in seconds. When `--verify-against DIR` is given,
+the emitted `ref_basename` sequence is asserted EQUAL, row for row, to the
+stored `ext_<name>.parquet` in DIR — that assertion is what makes the key
+attachment proven rather than assumed.
 """
 
 import argparse
@@ -83,7 +98,16 @@ def main() -> int:
                          "SELECTION runs on validate-family slices and the test-family "
                          "slices retire to touch-once terminal reads)")
     ap.add_argument("--out-root", required=True)
+    ap.add_argument("--emit-keys", action="store_true",
+                    help="also write keys_<name>.parquet (row identity sidecar)")
+    ap.add_argument("--keys-only", action="store_true",
+                    help="write ONLY the key sidecars (no feature read, no ext_* rewrite)")
+    ap.add_argument("--verify-against", default=None,
+                    help="dir holding the stored ext_<name>.parquet; asserts the emitted "
+                         "ref_basename sequence matches it row for row")
     a = ap.parse_args()
+    if a.keys_only:
+        a.emit_keys = True
 
     cls_of = {}
     with open(a.manifest) as f:
@@ -91,7 +115,14 @@ def main() -> int:
             cls_of[int(row["stem"])] = row["content_class"]  # col1 = the 4-digit corpus id (header fixed 2026-08-27; was mislabeled "sha256")
 
     feat_cols = [f"f{i}" for i in range(a.n_feat)]
-    cols = ["ref_filename", "score_ssim2"] + feat_cols
+    KEY_COLS = ["origin_id", "ref_filename", "encoded_filename", "codec", "q",
+                "knob_tuple_json", "score_ssim2", "score_zensim"]
+    if a.keys_only:
+        cols = list(KEY_COLS)
+    elif a.emit_keys:
+        cols = KEY_COLS + feat_cols
+    else:
+        cols = ["ref_filename", "score_ssim2"] + feat_cols
     tabs = []
     prov = []
     for ds in VIEWS:
@@ -115,16 +146,56 @@ def main() -> int:
         idx = idx_all[::step]
         t = full.take(pa.array(idx))
         hs = pc.cast(pc.multiply(t["score_ssim2"], scale), pa.float64())
-        out_cols = {"ref_basename": t["ref_filename"], "human_score": hs}
-        for c in feat_cols:
-            out_cols[c] = t[c]
-        out = Path(a.out_root) / f"ext_{name}.parquet"
-        pq.write_table(pa.table(out_cols), out, compression="zstd", compression_level=7)
         n_refs = len(set(np.array(refs)[idx].tolist()))
-        print(f"  ext_{name}: {len(idx)} rows / {n_refs} refs (pool {len(idx_all)}, step {step})")
-        return {"file": str(out), "sha256": sha256_file(out), "rows": len(idx),
-                "distinct_refs": n_refs, "pool_rows": int(len(idx_all)), "stride": step,
-                "human_score": f"score_ssim2 x {scale}"}
+        ent = {"rows": len(idx), "distinct_refs": n_refs,
+               "pool_rows": int(len(idx_all)), "stride": step,
+               "human_score": f"score_ssim2 x {scale}"}
+
+        if not a.keys_only:
+            out_cols = {"ref_basename": t["ref_filename"], "human_score": hs}
+            for c in feat_cols:
+                out_cols[c] = t[c]
+            out = Path(a.out_root) / f"ext_{name}.parquet"
+            pq.write_table(pa.table(out_cols), out, compression="zstd",
+                           compression_level=7)
+            ent["file"] = str(out)
+            ent["sha256"] = sha256_file(out)
+
+        if a.emit_keys:
+            kcols = {"row_index": pa.array(np.arange(len(idx), dtype=np.int64)),
+                     "ref_basename": t["ref_filename"], "human_score": hs,
+                     "view_row": pa.array(idx.astype(np.int64))}
+            for c in KEY_COLS:
+                kcols[c] = t[c]
+            kcols["split"] = pa.array([a.split] * len(idx), pa.string())
+            kp = Path(a.out_root) / f"keys_{name}.parquet"
+            pq.write_table(pa.table(kcols), kp, compression="zstd",
+                           compression_level=7)
+            ent["keys_file"] = str(kp)
+            ent["keys_sha256"] = sha256_file(kp)
+            n_enc = len(set(t["encoded_filename"].to_pylist()))
+            ent["distinct_encoded_filenames"] = n_enc
+            print(f"  keys_{name}: {len(idx)} rows / {n_enc} distinct encoded_filename")
+            if n_enc != len(idx):
+                print(f"    NOTE: {len(idx) - n_enc} rows share an encoded_filename "
+                      f"(byte-identical encodes across cells) -- the key is "
+                      f"(ref_basename, encoded_filename), never encoded_filename alone")
+
+        if a.verify_against:
+            stored = Path(a.verify_against) / f"ext_{name}.parquet"
+            got = t["ref_filename"].to_pylist()
+            want = pq.read_table(stored, columns=["ref_basename"])["ref_basename"].to_pylist()
+            assert got == want, (
+                f"G-KEY FAIL {name}: emitted row identity does not match {stored} "
+                f"({len(got)} vs {len(want)} rows; first mismatch at "
+                f"{next((i for i, (x, y) in enumerate(zip(got, want)) if x != y), 'len')})")
+            ent["verified_against"] = str(stored)
+            ent["verified_rows"] = len(want)
+            print(f"    G-KEY OK: row identity == {stored.name} ({len(want)} rows)")
+
+        print(f"  ext_{name}: {len(idx)} rows / {n_refs} refs "
+              f"(pool {len(idx_all)}, step {step})")
+        return ent
 
     m_all = np.ones(len(refs), dtype=bool)
     m_np = np.isin(classes, sorted(NONPHOTO_CLASSES))
@@ -162,7 +233,11 @@ def main() -> int:
         "views": prov,
         "slices": [e1, e2, e3],
     }
-    mp = Path(a.out_root) / "_MANIFEST_eval_slices.json"
+    manifest["split"] = a.split
+    manifest["keys_emitted"] = bool(a.emit_keys)
+    mname = ("_MANIFEST_eval_slice_keys.json" if a.keys_only
+             else "_MANIFEST_eval_slices.json")
+    mp = Path(a.out_root) / mname
     mp.write_text(json.dumps(manifest, indent=1))
     print(f"wrote {mp}")
     return 0
