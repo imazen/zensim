@@ -640,3 +640,60 @@ HDR instrument scenes out entirely. Existing bakes stand, era-tagged.
 D3 one-shot wirings executed (zenjpeg/jxl/svt). D4 decided: hdrgrid stays
 era-B. **Rules for every future corpus build:** consume the family split,
 apply the purge list, and keep instrument scenes out of training views.
+
+### §3.26 — v1's 372-feature vector width is a function of the BATCH, not of the pair (R1b, 2026-08-30)
+
+**What was seen.** Re-extracting the R1b eval slices at the v1-372 regime
+produced RAGGED CSVs: 453 of 6,953 imazen26 rows, 422 of 6,142 nonphoto, 493 of
+7,717 hfnlproxy (~6.5 % each) carried **279** feature columns instead of 372.
+279 = 3 scales × 3 channels × 31; 372 = 4 scales × 3 × 31 — one whole scale
+missing. The rows are not empty: a short row carries ~268 non-zero values, i.e.
+a real 3-scale computation.
+
+**The first explanation was WRONG and is retracted.** It was recorded on
+2026-08-30 as "v1's vector length is size-dependent — a rendition too small for
+the 4th scale emits 3 scales". Measured and falsified the same day:
+
+| test | result |
+|---|---|
+| size correlation | 168 distinct sizes among short rows, min-side **36 … 1024**; the SAME size appears in both short and full sets. `512x384` is among the short. NOT size. |
+| per-reference | **259 of 957** references have BOTH short and full rows — same reference, same dimensions, different distorted image. |
+| ref/dist dimensions | equal on every short row inspected (144×192, 512×384 …) — not a dim mismatch. |
+| identical-input short circuit | ruled out: short rows carry real values, and `ref` bytes ≠ `dist` bytes. |
+| thread count | `RAYON_NUM_THREADS` 1 / 2 / 8 → **33 / 33 / 33** short. NOT a data race. |
+| determinism | the full batch re-run twice gives the **identical** 453-row short set (symmetric difference 0). |
+| **batch composition** | the SAME 453 pairs re-run as their own batch give only **33** short; 5 of them run alone give **0** short. |
+| tool | identical short-row set from `zensim-bench extract_features_372col` and `v2_ab_extract ZENSIM_AB_MODE=v1`, and from the grouped AND per-pair flows (`ZENSIM_AB_GROUPED=0`). Not a tool quirk. |
+
+**So: the v1-372 feature vector for a given (ref, dist) pair is not a pure
+function of that pair.** It is deterministic for a fixed input set and changes
+when the set changes. Root cause is inside v1's compute path and is NOT
+diagnosed here — R1b's lane is the keyed rebuild; this is registered so the
+next session starts from the measurements rather than the retracted guess.
+
+**Consequence for existing data — MEASURED, and it is benign.** Every canonical
+372 parquet is full width with real values; nothing is NaN- or zero-padded:
+
+| table | rows | last-93 block all-zero | non-finite |
+|---|---|---|---|
+| `cid22_features_372col_2026-05-15` | 4,292 (complete corpus) | 0 | 0 |
+| `kadid_features_372col_2026-05-15` | 10,125 (complete corpus) | 0 | 0 |
+| `konjnd_features_372col_2026-05-15` | 1,008 (complete corpus) | 0 | 0 |
+| `imazen26_test_120k_2026-07-16` | 7,844 | 0 | 0 |
+| `nonphoto_features_372col_2026-07-15` | 8,241 | 8 (0.10 %) | 0 |
+
+The fixed-size corpora carry their COMPLETE row counts, so no row was dropped
+in those builds. A ragged CSV cannot become a parquet silently — the builder
+raises (`ArrowInvalid: Column ... expected length 6953 but got length 6500`,
+observed 2026-08-30) — so a short row is always either a build failure or an
+explicit drop, never a padded row. The 8 nonphoto all-zero rows are the
+identical-input signature, not truncation.
+
+**The 944 regime does not have this problem.** The folded/append path emits a
+fixed width, so R1b's 944 tables are ragged-free by construction. This is a
+concrete robustness argument for the 944 regime over v1-372.
+
+**Guard now in place.** `v2_ab_extract` refuses to write a table whose row count
+differs from the pairs count and exits 3 (`ZENSIM_AB_ALLOW_MISSING=1` is the
+caller's visible opt-out) — a short/partial extraction can no longer land on
+disk unannounced. Record: `benchmarks/r1b_keyed_rebuild_2026-08-30.md` §8.5(d).

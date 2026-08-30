@@ -587,14 +587,32 @@ extractors agree to 0.0004 — so this is an INSTRUMENT difference in which
 quotes its own instrument and does not adjudicate; anyone comparing to the
 ledger's 0.5935 must first establish which table produced it.
 
-**(d) v1's feature vector length is size-dependent — in BOTH extractors.** A
-rendition too small for the 4th scale emits 3 x 93 = 279 features. Measured on
-the R1b slices: 453/6,953 imazen26, 422/6,142 nonphoto, 493/7,717 hfnlproxy
-(~6.5 % each), identical counts from `v2_ab_extract` and the canonical
-extractor. So this is a property of v1, not of a tool. Those rows have no 372
-vector and are excluded from every same-ruler read, counted in the manifest.
-The 944 side has no such problem (the folded path emits a fixed width), which
-is a real robustness advantage of the 944 regime worth recording.
+**(d) v1's 372 vector width is a function of the BATCH, not of the pair.**
+~6.5 % of slice rows come out at **279** columns (3 scales × 3 × 31) instead of
+372 (4 scales): 453/6,953 imazen26, 422/6,142 nonphoto, 493/7,717 hfnlproxy,
+the identical set from BOTH v1 extractors and from both the grouped and
+per-pair flows.
+
+*The first explanation given for this — "size-dependent, a rendition too small
+for the 4th scale" — was WRONG and is retracted.* Measured: 168 distinct sizes
+among the short rows spanning min-side 36…1024 (`512x384` is one of them), the
+same size appears in both sets, and **259 of 957 references have BOTH short and
+full rows**. Not a data race either (`RAYON_NUM_THREADS` 1/2/8 → 33/33/33) and
+fully deterministic (two runs, symmetric difference 0). What DOES change it is
+the **input set**: the same 453 pairs re-run as their own batch give only 33
+short, and 5 of them run alone give 0. So a v1-372 feature vector is not a pure
+function of its pair. Root cause is inside v1 and is not diagnosed here;
+registered with all measurements in `docs/DATASET_HISTORY.md` §3.26.
+
+The **944 regime is immune** — the folded path emits a fixed width — which is a
+concrete robustness argument for it over v1-372.
+
+Consequence for the same-ruler read: those rows have no usable 372 vector and
+are excluded, counted in the manifest, never silently dropped. Consequence for
+existing data, measured: every canonical 372 parquet is FULL WIDTH with real
+values (no NaN, no zero padding), and the fixed-size corpora (cid22 4,292 /
+kadid 10,125 / konjnd 1,008) carry their complete row counts, so nothing was
+dropped in those builds.
 
 
 ## 9. WHAT IS OPEN, WITH THE MEASURED REASON
