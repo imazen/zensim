@@ -2211,3 +2211,10 @@ row-identical to ext944's). Legs without a 720-width source: kadis
 carriers, flagged). ARM-A = C's recipe minus kadis/konbpg, all-954 fused;
 ARM-B = arm-A + konbpg with 372-width carriers. Bars unchanged
 (kon-504 ≥ 0.55 ∧ cid22 ≥ 0.885), k=2 seeds per arm.
+
+**Arm-0 control (registered before any 954 result is read).** Arms A/B drop
+kadis (both) and konbpg (A) relative to C — their deltas conflate
+{carriers added} with {legs dropped}. ARM-0 = the SAME recipe as arm-A at
+944 width (no carriers, same dropped legs), seeds 4004/4006, trained after
+the A/B wave (serialized per machine-safety). The carrier effect = arm-A −
+arm-0 at matched seeds; C's published numbers remain the ship reference.
