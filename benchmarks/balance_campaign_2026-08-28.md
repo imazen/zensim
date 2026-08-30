@@ -2902,3 +2902,13 @@ tests; bonus: `rd_close_intrabc`'s pin promoted the KB-15 cell `scc_480x180_196_
 port's DV search is still ~80 s/1080p cell at cpu6). Not ported: BIGDIA (unreachable on
 allintra), the speed-4/5 `prune_tx_type_est_rd` arm. Record: zenav1-aom `CLAUDE.md` KB-41
 roots #3-#6, `PARITY.md`.
+
+### AOM-RS WAVE RELAUNCHED ON THE BYTE-EXACT PORT (2026-08-30 08:39Z) — image `exec-zensim944hdr-47f5ab9c`
+zenmetrics master `0bcede27` (fleet.env CPU pin bumped). Chain: musl rebuild (the new port's unique
+strings confirmed in the binary) → image build + push (digest `5f4f9bd5…`) → `zenfleet-ctl requeue
+--classes encoder_panic` (**5,312** pre-fix refusals + deferrals pardoned) → compact (96,881 distinct
+done) → relaunch r3500 / r5900xt / r7900x. Ledger at relaunch: aom-rs 96,881/126,360 done;
+svt encode 130,590/130,950; svt GPU score (i134, `zen-score-gpusf`) 5,136/11,608 done + 113 failed
+(61 encoder_panic + 52 oom — to classify + requeue after the drain; the oom class wants a bigger
+`ZEN_VRAM_CAP` pass); svt CPU score (cvvdp + 944) 0 — still queued for a free CPU box. zenav1-aom#14
+closed with the KB-41 roots (the "720p band" was which renditions are screen-detected).
