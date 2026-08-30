@@ -112,6 +112,65 @@ def safe_metric_join(target, metric, join_keys: Sequence[str], metric_col: str,
     return target.merge(metric[list(join_keys) + [metric_col]], on=list(join_keys), how=how)
 
 
+def safe_key_join_arrow(target, side, join_keys: Sequence[str],
+                        bring: Sequence[str]):
+    """pyarrow-native sibling of `safe_metric_join` — SAME refusal semantics.
+
+    Added 2026-08-30 (R1b) because this box has pyarrow but no pandas, and the
+    alternative was a bespoke join in a builder — exactly what this module
+    exists to prevent. `target` and `side` are `pyarrow.Table`s; returns a new
+    Table = target ++ the `bring` columns of `side`, in TARGET ROW ORDER, with
+    a null wherever a target row has no side row (the caller gates on nulls).
+
+    Refuses, never collapses, when:
+      * the effective key is a subset of `REF_ONLY_KEYS` (the Mode-B misjoin);
+      * a key column is absent on either side;
+      * the SIDE is not unique on the key (averaging/last-wins would destroy
+        per-pair signal — this is the same defect the 2026-08-30 write-back
+        fix repaired for `(ref basename, encode_sha)`).
+    """
+    tnames, snames = set(target.column_names), set(side.column_names)
+    missing_target = [k for k in join_keys if k not in tnames]
+    missing_side = [k for k in join_keys if k not in snames]
+    effective = [k for k in join_keys if k in tnames and k in snames]
+    if set(effective) <= REF_ONLY_KEYS:
+        raise JoinSafetyError(
+            f"safe_key_join_arrow: refusing to join on {effective or ['<none>']} "
+            f"alone — that is a reference-level key and would broadcast one side "
+            f"row onto every distortion of a reference (the ssim2_gpu ref-misjoin). "
+            f"target missing {missing_target}, side missing {missing_side}."
+        )
+    if missing_target or missing_side:
+        raise JoinSafetyError(
+            f"safe_key_join_arrow: keys {list(join_keys)} but target missing "
+            f"{missing_target}, side missing {missing_side}. A partial-key join "
+            f"silently mis-broadcasts."
+        )
+    if len(join_keys) != 1:
+        raise JoinSafetyError(
+            "safe_key_join_arrow currently supports a single-column key; compose "
+            "a composite key column explicitly so it is visible in the table."
+        )
+    key = join_keys[0]
+    skeys = side[key].to_pylist()
+    if len(set(skeys)) != len(skeys):
+        raise JoinSafetyError(
+            f"safe_key_join_arrow: side is NOT unique on {key!r} "
+            f"({len(skeys) - len(set(skeys))} duplicate rows) — collapsing them "
+            f"would destroy per-pair signal. De-duplicate the side first."
+        )
+    import pyarrow as _pa
+
+    cols = {c: side[c].to_pylist() for c in bring}
+    pos = {k: i for i, k in enumerate(skeys)}
+    idx = [pos.get(k) for k in target[key].to_pylist()]
+    out = {c: target[c] for c in target.column_names}
+    for c in bring:
+        src = cols[c]
+        out[c] = _pa.array([None if i is None else src[i] for i in idx])
+    return _pa.table(out)
+
+
 def attach_metric_positional(target, metric_values, metric_col: str):
     """Attach a per-pair metric POSITIONALLY (row order == target row order).
 

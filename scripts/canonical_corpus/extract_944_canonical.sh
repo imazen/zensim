@@ -23,6 +23,10 @@
 #              its OWN regime -- never column-mix their rows.
 #   ZM944_LEGS space-separated leg names to run (default: all 11). A leg
 #              name is the ext_* label below, e.g. "ext_tid ext_kadid".
+#   ZM944_PAIRS_<LEG>  per-leg pairs-TSV override, LEG uppercased with the
+#              ext_ prefix dropped (ext_tid -> ZM944_PAIRS_TID). For a leg
+#              whose canonical TSV names a path the corpus no longer has;
+#              the substitution MUST be recorded in the run's manifest.
 set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${ZM944_BIN:-$REPO_ROOT/target/release/examples/v2_ab_extract}"
@@ -36,6 +40,12 @@ echo "== extract_944_canonical MODE=$MODE OUT=$OUT LEGS=${LEGS:-<all>}"
 
 run_leg() {
   local name="$1" pairs="$2"
+  local ov
+  ov="ZM944_PAIRS_$(echo "${name#ext_}" | tr '[:lower:]' '[:upper:]')"
+  if [ -n "${!ov:-}" ]; then
+    echo "== $name pairs OVERRIDE $ov=${!ov}"
+    pairs="${!ov}"
+  fi
   if [ -n "$LEGS" ]; then
     case " $LEGS " in *" $name "*) ;; *) echo "== $name SKIPPED (not in ZM944_LEGS)"; return 0;; esac
   fi
