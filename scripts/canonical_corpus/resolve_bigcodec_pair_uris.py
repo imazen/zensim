@@ -49,9 +49,12 @@ DATASETS = {
     "zenjpeg_lossy": ("object", "bf-zjpeg"),
     "zenwebp_lossy": ("object", "bf-zwebp"),
     "zenpng_lossless": ("object", "bf-zpng"),
-    "zenjxl_lossless": ("object", "bf-zjxll"),
+    "zenjxl_lossless": ("object", "bf-zjxlm"),
     "zenavif_lossy": ("tarrange", "bf-zavif"),
-    "zenjxl_lossy": ("tarrange", "bf-zjxlm"),
+    # NB the tag names are the OPPOSITE of the obvious reading, verified by
+    # reading the indexes: bf-zjxlm-t* holds `zenjxl_q0` (modular = LOSSLESS,
+    # 10 boxes) and bf-zjxll-t* holds the 24-box lossy VarDCT run.
+    "zenjxl_lossy": ("tarrange", "bf-zjxll"),
 }
 ENCODES_PREFIX = "canonical/2026-06-27"
 

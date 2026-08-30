@@ -292,6 +292,55 @@ decode path is `zenjxl-decoder`, which is NOT the `jxl-oxide` the 2026-06
 generator used — so R1b's JXL rows are re-decoded through today's decoder, and
 that is a property of the rebuild, not a defect to hide.
 
+## 2b. PRE-REGISTERED FIT (frozen 2026-08-30, before any R1b fit exists)
+
+The measurement R1b exists for is the **matched-mix TRUE-linear arm** — the one
+the campaign's "LINEAR-QUESTION ANSWERED" section measured at kon 0.1644 →
+0.4887 on 720-width-FUSED tables that could only be read on two axes. R1b
+re-runs it at ONE width, on KEYED rows, with all five bars readable.
+
+**Recipe (IDENTICAL across arms; nothing but the feature block changes):**
+legs `safesyn 1.0 + cid22t 1.5 + kadid 0.5 + tid 0.5`, target `human_score`,
+per-corpus min-max frames, shaped space (`scripts/sota944/screen944_monotone.tsv`),
+solver **BVLS + sign-mask** (`benchmarks/feature_sign_mask_2026-05-26.tsv`;
+f372+ free), owners `bake_dial_refit gram` → `bake_dial_refit fit-lasso
+--solver bvls --emit-fit-npz`. No new fit code.
+
+**Three arms, one variable:**
+
+| arm | f156..f371 | what it isolates |
+|---|---|---|
+| `A0-zero` | structural zeros (stored `ext944-canonical-2026-08-01`) | the no-carrier baseline |
+| `A1-carr` | the TEN carrier slots live, other 206 zeroed | the `fused944native` carriers regime, at native slots, on keyed rows and ONE width |
+| `A2-pools` | ALL 216 pool slots live (`folded720append2pools`) | the user's amendment — the whole block, live |
+
+`A1-carr` is produced from the `A2-pools` table by zeroing the 206 non-carrier
+columns, so A1 and A2 are the SAME pixels, the SAME extraction, the SAME
+binary — the only difference is which slots the fit may see. A0 is the stored
+zero-block root at the same rows.
+
+**Bars read:** the five of §2, on the KEYED slices, plus **B under the same
+ruler**: B is a 372-input bake, so the same 20,812 slice pairs are ALSO
+extracted at `ZENSIM_AB_MODE=v1` (372) and B is scored on those — the first
+time a 372-class model and a 944-class model are read on literally the same
+pairs for the family axes. cid22 and kon-504 already share pairs across roots
+(same pairs TSVs), so those two are same-ruler by construction.
+
+**SCOPE, stated before the numbers (not after):** the full-mix `cid` head and
+therefore the `wlin954b` BLEND need the tbig / tbig_hf / teacher (`tsafesyn`,
+`ttbig`) / kadis legs at this regime. Those are 200k–5.7M-row bigcodec legs
+whose rebuild is a fleet job, not a local one. R1b delivers the HEAD arm — the
+arm the linear-question result rests on — and prices the blend's remaining
+cost. Any blend number would require column-mixing regimes, which is refused.
+
+**What a result means (decision rule, frozen):**
+- If `A2-pools`/`A1-carr` clear `kon ≥ 0.40` at `cid22 ≥ 0.845` on the keyed
+  slices, the carrier finding survives the move to one width + keyed rows.
+- If they do not, the 720-width fusion was carrying the effect and the
+  registered R1b outcome is that the 954 linear lane closes.
+- The hfnl / nonphoto / imazen26 readings are NEW information either way —
+  they have never been measurable for this arm.
+
 ## 8. RESULTS
 
 *(filled only by measurements, in the order they land)*
