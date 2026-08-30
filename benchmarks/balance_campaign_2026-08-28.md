@@ -2626,3 +2626,48 @@ Re-read from the estate, not from the 08-26 snapshot the section above relied on
   arm anywhere. That is the lane the user's "fresh avif encode with zen svt
   and zen aom backends" opens: new executor codec arms (svt SDR + aom SDR/HDR
   through zenavif-serialize), then declare.
+
+## FRESH AVIF WAVE — SVT BACKEND (registered pre-launch, 2026-08-30 ~05:4xZ; user: "fresh avif encode with zen svt and zen aom backends")
+
+**Owner discovery (before any code):** zenavif ALREADY carries the svt backend —
+`Av1Backend::SvtRs` (`encode-svt-rs` feature; `src/encoder_svt_rs.rs`: the
+pure-Rust zenav1-svt port as a 4:2:0 still encoder, 8/10-bit, arbitrary dims,
+muxed in-crate by zenavif-serialize; speed 1..=10 → SVT preset 0..=13 linear).
+The executor's SDR AVIF arm only ever built zenravif. Change (zenmetrics, this
+commit): feature `avif-svt = ["avif", "zenavif/encode-svt-rs"]` + a `backend`
+knob on the zenavif sweep arm (`"zenravif"` default | `"svt-rs"`; unknown →
+loud error; `svt-rs` on a build without the feature → loud error, NEVER a silent
+zenravif fallback; svt-rs forces 4:2:0 — the first-cell gate caught the
+missing `chroma_subsampling` refusal before any fleet minute was spent).
+zenavif's own `rd_core` planner has no backend stratum, so this wave is a
+knob-grid wave (cell identity = `{"backend":"svt-rs","speed":S}`), emitted by
+`scripts/jobsys/avifsvt_cells.py` → `zenfleet-ctl declare-encodes`.
+
+**aom:** there is NO aom encode backend anywhere yet — `zenav1-aom/aom-encode`
+has no frame-level driver (its parity tests hand-assemble KEY frames), zenavif's
+`aom-backend` is DECODE-only, and the concurrent zenav1-aom session's Zq census
+shells out to the `aomenc` CLI. Registered follow-up (separate chunk, after this
+wave's first cell): an `aomenc` CLI arm baked into the executor image (libaom
+allintra — the exact oracle zenav1-aom byte-matches at every `--cpu-used`;
+box has 3.13.1, the port's oracle is 3.14.1 — pin one and record it).
+
+**Wave spec (frozen):**
+- sources: `train_renditions_2026-06-14` (the avif944 corpus sources; local
+  `/mnt/v/output/imazen-26-features/train_renditions_2026-06-14/`, store
+  `s3://zentrain/refs/train-renditions-2026-06-14/`, 1,482 renditions), minus
+  the >16 MP monster tier (parsed from `.scaleWxH.`; avifgen excluded 27) →
+  expected 1,455 sources. Train-side origins only (0/2/4/6/8) by construction —
+  same split rule as avif944 (`origin_split.py`), never per-rendition.
+- q: 1 + 5..70 step 5 + 72..100 step 2 = 30 points (avif944 grid).
+- speeds: {4, 6, 8} (SVT presets ≈ 4/7/10); additive-later for more.
+- cells: 1,455 × 3 × 30 = 130,950 encodes, codec `zenavif`, hdr:false.
+- persistence: content-addressed AVIF bytes in `jobs/avifsvt-enc-20260830/blobs/`
+  + Parquet ledger (job system), then the standard score waves (ssim2/butter GPU
+  on the LAN GPU boxes via the validated cuda13 sequencer; cvvdp + 944 features
+  CPU) → harvest → training views under the avif944 rules (AC.R1).
+- gates: (1) first cell locally: encode OK + decode-back OK + bytes within 3× of
+  the zenravif cell at the same q (sanity, not a bar); (2) first fleet chunk:
+  blobs present + `error` rate 0 before scale-up; (3) encode-fail rate < 0.5%
+  over the wave (avif944 residue reference); (4) orientation ladders (q↑ →
+  bytes↑ monotone per source×speed) ≥ 99% before any table is built.
+- images: CPU executor rebuilt with `avif-svt` (new tag; fleet.env pin bump).
