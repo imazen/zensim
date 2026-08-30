@@ -87,7 +87,14 @@ version so the SIMD library is not a variable:
 | stored 2026-05-15 | probe @ `f9fac41e` (HEAD) | 0 | 582,499 | 0.0374 / 0.1235 |
 | **probe @ `2dab8f30`** | **probe @ HEAD** | **0** | **0** | **5.55e-17 (1 ULP, 18 scale-0 IW slots)** |
 
-(CID22 numbers; kon504 gives the same shape — see `drift_matrix.txt`.)
+(CID22 numbers; KonJND gives the same shape — see `drift_matrix.txt`.)
+
+The `58e6f8d8` and `bf4a1e80` rows are identical because the two probe binaries are
+identical: sha256 `78165221…` for both — nothing between the tables' build commit and
+`2dab8f30^` changes the compiled v1 path. The row is a consistency check, not a second
+independent datum. Probe shas: `2dab8f30` `850f889e…`, `58e6f8d8` / `bf4a1e80`
+`78165221…`, `f9fac41e` `428a5098…` (recorded in
+`probe_outputs/PROBE_BINARY_SHA256.txt`).
 
 **Three and a half months of extractor evolution moved the v1-372 vector by less than
 the golden tolerance on every one of 4,292 × 372 cells.** Everything attributed to
