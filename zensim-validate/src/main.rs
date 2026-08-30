@@ -3942,9 +3942,39 @@ fn load_tid2013(base: &Path) -> Vec<ImagePair> {
     load_tid2013_mos(&mos_path, base)
 }
 
+/// `lowercased file name -> real path` for one directory.
+///
+/// TID2013 ships its 25th reference LOWERCASE (`i25.bmp`, matching its source
+/// `i25.bmp`) while the other 24 are uppercase (`I01.BMP`), and the distorted
+/// set mixes cases as well. Forcing either case drops whole references.
+fn case_insensitive_index(dir: &Path) -> std::collections::HashMap<String, PathBuf> {
+    let mut idx = std::collections::HashMap::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            idx.insert(
+                entry.file_name().to_string_lossy().to_ascii_lowercase(),
+                entry.path(),
+            );
+        }
+    }
+    idx
+}
+
+/// Look `name` up in a [`case_insensitive_index`], also trying the alternate
+/// extensions a corpus is known to ship (`.bmp` vs `.png`).
+fn lookup_ci(idx: &std::collections::HashMap<String, PathBuf>, name: &str) -> Option<PathBuf> {
+    idx.get(&name.to_ascii_lowercase()).cloned()
+}
+
 fn load_tid2013_mos(mos_path: &Path, base: &Path) -> Vec<ImagePair> {
     let content = std::fs::read_to_string(mos_path).expect("Failed to read MOS file");
     let mut pairs = Vec::new();
+
+    // Built ONCE per directory: the per-row lookup is a hash hit, not a readdir.
+    let ref_idx = case_insensitive_index(&base.join("reference_images"));
+    let dist_idx = case_insensitive_index(&base.join("distorted_images"));
+    let mut missing: Vec<String> = Vec::new();
+    let mut label_rows = 0usize;
 
     for line in content.lines() {
         let line = line.trim();
@@ -3961,22 +3991,30 @@ fn load_tid2013_mos(mos_path: &Path, base: &Path) -> Vec<ImagePair> {
             Err(_) => continue,
         };
         let filename = parts[1].trim();
+        label_rows += 1;
 
-        // Extract reference image number: I01_01_1.bmp → reference_images/I01.BMP
-        // Filenames have inconsistent case (I01 vs i01), references are uppercase
-        let ref_num = filename[..3].to_uppercase();
-        let ref_path = base
-            .join("reference_images")
-            .join(format!("{}.BMP", ref_num));
+        // Extract reference image number: I01_01_1.bmp -> reference_images/I01.BMP
+        // BOTH sides resolve case-insensitively (see `case_insensitive_index`):
+        // forcing the reference stem upper-case dropped all 120 rows of `i25`
+        // for six weeks (2026-08-30; the same defect the Python pairs builder
+        // carried, fixed in `build_fr_corpus_pairs.py` 657100db).
+        let ref_stem = &filename[..3];
+        let ref_path = match lookup_ci(&ref_idx, &format!("{ref_stem}.bmp"))
+            .or_else(|| lookup_ci(&ref_idx, &format!("{ref_stem}.png")))
+        {
+            Some(p) => p,
+            None => {
+                missing.push(format!("reference_images/{ref_stem}.BMP (for {filename})"));
+                continue;
+            }
+        };
 
-        // Distorted images also have inconsistent case
-        let dist_path = base.join("distorted_images").join(filename);
-        let dist_path = if dist_path.exists() {
-            dist_path
-        } else {
-            // Try case variations
-            let upper = base.join("distorted_images").join(filename.to_uppercase());
-            if upper.exists() { upper } else { dist_path }
+        let dist_path = match lookup_ci(&dist_idx, filename) {
+            Some(p) => p,
+            None => {
+                missing.push(format!("distorted_images/{filename}"));
+                continue;
+            }
         };
 
         // TID2013 MOS: 0-9 scale (higher = better)
@@ -3985,6 +4023,44 @@ fn load_tid2013_mos(mos_path: &Path, base: &Path) -> Vec<ImagePair> {
             distorted: dist_path,
             human_score: mos / 9.0, // Normalize to 0-1
         });
+    }
+
+    // NO GRACEFUL SKIPS: a loader that silently emits fewer rows than the label
+    // file lists produces a table that looks complete and is not. The skip is
+    // the CALLER's decision and must be visible in the invocation.
+    if !missing.is_empty() {
+        let head = missing
+            .iter()
+            .take(10)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n  ");
+        let more = if missing.len() > 10 {
+            format!("\n  ... and {} more", missing.len() - 10)
+        } else {
+            String::new()
+        };
+        eprintln!(
+            "load_tid2013: {} of {} label rows name a file that does not exist under {}:\n  {}{}",
+            missing.len(),
+            label_rows,
+            base.display(),
+            head,
+            more
+        );
+        if std::env::var("ZENSIM_ALLOW_MISSING_PAIRS").as_deref() == Ok("1") {
+            eprintln!(
+                "load_tid2013: continuing with {} of {} pairs (ZENSIM_ALLOW_MISSING_PAIRS=1)",
+                pairs.len(),
+                label_rows
+            );
+        } else {
+            eprintln!(
+                "load_tid2013: refusing to emit a partial dataset. \
+                 Set ZENSIM_ALLOW_MISSING_PAIRS=1 to opt in, visibly, at the call site."
+            );
+            std::process::exit(3);
+        }
     }
 
     pairs
@@ -4533,3 +4609,43 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
 // reproduce (CHANGELOG, "Knight's O(n log n) kendall_tau was rejected"),
 // and it is a training objective (`TrainObjective::Krocc`), so replacing it
 // is a trainer-number change that needs an owner decision.
+
+#[cfg(test)]
+mod tid_case_tests {
+    use super::{case_insensitive_index, lookup_ci};
+    use std::io::Write;
+
+    /// TID2013 ships 24 uppercase references and ONE lowercase (`i25.bmp`).
+    /// A loader that forces either case drops every row of the odd one out —
+    /// 120 of 3,000 pairs, silently, which is exactly what happened until
+    /// 2026-08-30.
+    #[test]
+    fn case_insensitive_index_resolves_both_casings() {
+        let dir = std::env::temp_dir().join(format!(
+            "zensim_validate_tid_case_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["I01.BMP", "i25.bmp"] {
+            let mut f = std::fs::File::create(dir.join(name)).unwrap();
+            f.write_all(b"x").unwrap();
+        }
+
+        let idx = case_insensitive_index(&dir);
+
+        // Requested upper, stored upper.
+        assert_eq!(lookup_ci(&idx, "I01.BMP").unwrap(), dir.join("I01.BMP"));
+        // Requested lower, stored upper.
+        assert_eq!(lookup_ci(&idx, "i01.bmp").unwrap(), dir.join("I01.BMP"));
+        // Requested UPPER, stored lower -- the i25 case that was dropped.
+        assert_eq!(lookup_ci(&idx, "I25.BMP").unwrap(), dir.join("i25.bmp"));
+        // Absent stays absent (the loader must be able to fail loud).
+        assert!(lookup_ci(&idx, "I26.BMP").is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
