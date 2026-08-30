@@ -188,6 +188,110 @@ registered there.
 
 ---
 
-## 7. RESULTS
+## 7. LINEAGE RESULT — the keyed pair tables (LANDED 2026-08-30)
 
-*(empty by construction — filled only by measurements, in the order they land)*
+### 7.1 The eleven TSV legs — keyed by construction
+
+Every canonical local leg's pairs TSV is on disk with a row count EQUAL to its
+stored parquet, so the `(ref_path, dist_path)` pair *is* the key and the
+rebuild is a re-run of the same driver at a different regime. Verified by
+`wc -l − 1` vs `ParquetFile.metadata.num_rows` (§3 table) and by a full
+existence scan of both sides of all 149,195 pairs.
+
+**One defect found by that scan, recorded not papered over:** `ext_tid`'s
+canonical TSV names `/mnt/v/dataset/tid2013/reference_images_png/I25.png`; the
+corpus holds **`i25.png`** (lowercase — TID2013's own inconsistency; the source
+BMP is `i25.bmp` too). The 2026-08-01 canonical run produced 3,000 rows, so the
+uppercase name resolved then and does not now. The extractor SKIPped those 120
+rows and `extract_944_canonical.sh`'s row-count guard correctly ABORTED the leg
+— the guard did its job. Repaired with a NEW dated pairs TSV
+(`r1b-pools944-2026-08-30/pairs/tid_pairs_ab_r1b_i25case.tsv`, the one path
+substituted, 3,000 rows) fed through the new `ZM944_PAIRS_<LEG>` override; the
+substitution is recorded in the run manifest. No corpus file was renamed or
+created. Every other leg scanned clean: **0 missing refs, 0 missing distorted
+files across the other 146,195 pairs.**
+
+### 7.2 The three D1 validate slices — keyed, with a row-identity PROOF
+
+`build_eval_slices_944.py` reads only `ref_filename` + `score_ssim2` + features
+from the bigcodec views and drops the identity columns; that drop is the whole
+"keyless" defect. `--emit-keys` / `--keys-only` now writes the identity sidecar,
+and `validate_slice_family_filter.py` applies ONE keep-index to the feature
+table and the sidecar together (it refuses if they disagree), so the two can
+never drift.
+
+| slice | pre-filter rows | after validate-family filter | G-KEY row identity vs the stored canonical slice |
+|---|---|---|---|
+| `ext_imazen26` | 10,037 | **6,953** (87 origins) | **OK** — `ref_basename` equal row for row |
+| `ext_nonphoto` | 10,042 | **6,142** (61 origins) | **OK** |
+| `ext_hfnlproxy` | 10,179 | **7,717** (87 origins) | **OK** |
+
+Each keyed row carries `row_index, ref_basename, human_score, view_row,
+origin_id, ref_filename, encoded_filename, codec, q, knob_tuple_json,
+score_ssim2, score_zensim, split`. The registered claim "the D1 cuts carry no
+key" is now **false by construction** — and the gate is what makes it a proof
+rather than an assumption.
+
+Interesting negative: `encoded_filename` is distinct on all 20,812 slice rows,
+so for THESE slices the sha-sharing hazard (different sources encoding to
+identical bytes — the 2026-08-30 write-back defect) does not bite. The key is
+still stated as `(ref_basename, encoded_filename)`, never `encoded_filename`
+alone, because the hazard is a property of the corpus, not of this cut.
+
+### 7.3 Where the bigcodec bytes actually are (MEASURED, not assumed)
+
+`resolve_bigcodec_pair_uris.py` joins the key tables to the canonical-picker
+`pairs.validate.parquet` on `encoded_filename` through
+`join_safety.safe_key_join_arrow` (a pyarrow-native sibling of
+`safe_metric_join` added in the same owner — this box has pyarrow and no
+pandas; identical refusal semantics: ref-only key, missing key, non-unique
+side). **100 % of all 20,812 rows resolve**; the run aborts otherwise.
+
+| dataset | imazen26 | nonphoto | hfnlproxy | how the bytes are reachable |
+|---|---|---|---|---|
+| `zenjpeg_lossy` | 1,930 | 1,698 | 1,379 | per-file object GET (`…/encodes/<member>`) |
+| `zenwebp_lossy` | 1,223 | 1,091 | 774 | per-file object GET |
+| `zenavif_lossy` | 1,968 | 1,734 | 4,710 | byte-range into `variants/box-N.tar` |
+| `zenjxl_lossy` | 1,832 | 1,619 | 854 | byte-range into `variants/box-N.tar` |
+
+- The reference PNGs are **local** (`/mnt/v/output/clean-picker-corpus-2026-06-26`,
+  4,497 files) — no fetch needed on that side.
+- The `encodes/` prefix **exists for zenjpeg / zenwebp / zenpng / zenjxl-lossless
+  and is EMPTY for zenavif / zenjxl-lossy**. The `_regroup` `.FAILED` marker is
+  a red herring (that run died in 3 s on an unset endpoint variable); the real
+  run and its recovery pass covered originals→png→webp→jpeg→jxl-lossless and
+  **never attempted avif or jxl-lossy** — unexecuted, not failed.
+- For those two, member-level `variant_index.tsv` files
+  (`member \t offset \t size \t name`, built by zenmetrics
+  `scripts/jobsys/index_tar_byterange.py`) already exist under
+  `s3://zentrain/jobs/bf-zavif-t{0..7}/` and `bf-zjxlm-t*`, so the bytes come
+  out by byte range. **No whole-tar download is needed** — the four lossy runs
+  total 151.90 GiB of tar, against ~1 GiB of member bytes for these slices.
+
+`fetch_bigcodec_bytes.py` materialises both modes (s5cmd batch `cp` for
+objects, indexed range GETs for tar members, indexed size asserted per member)
+and emits the local `(ref_path, dist_path, human_score)` TSV the zensim
+extractors consume. Every requested member must land non-empty or the run
+aborts.
+
+### 7.4 Decode capability — the one real gap, and how it was closed
+
+`v2_ab_extract` reads its pairs through `zen_io::decode_rgb8`, which handles
+**png / jpg / bmp only**. The bigcodec distorted sides are `.avif` / `.jxl` /
+`.webp` / `.jpg`, so the slices could not go through the same extractor as the
+eleven local legs — and using a *different* extractor for them would reintroduce
+exactly the cross-regime hazard R1b exists to remove.
+
+Closed by adding a `--decode-list <tsv> --out-dir <dir>` mode to
+`zensim-bench/examples/verify_bitstream_decode` — the file that already owns
+the four zencodec decode paths (jpeg / avif / jxl / webp). It reuses those
+functions verbatim (no second decode path), writes RGB8 back out as PNG through
+`zenpng::encode_rgb8`, and skips anything already written. The decoders are the
+same `zencodec` implementations the fleet uses. Known and recorded: the JXL
+decode path is `zenjxl-decoder`, which is NOT the `jxl-oxide` the 2026-06
+generator used — so R1b's JXL rows are re-decoded through today's decoder, and
+that is a property of the rebuild, not a defect to hide.
+
+## 8. RESULTS
+
+*(filled only by measurements, in the order they land)*

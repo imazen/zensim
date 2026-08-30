@@ -21,6 +21,23 @@
 //! exact match here means re-extraction from bitstreams via zencodec would
 //! produce byte-identical features to the canonical parquets.
 //!
+//! ## `--decode-list` mode (added 2026-08-30, R1b keyed rebuild)
+//!
+//! The same zencodec decoders, driven off an explicit list instead of the
+//! images-root walk, writing each decoded bitstream out as RGB8 PNG:
+//!
+//! ```text
+//! verify_bitstream_decode --decode-list <tsv> --out-dir <dir> [--jobs N]
+//! ```
+//!
+//! `<tsv>` is one input path per line (a `dist_path` header line is skipped);
+//! the output is `<dir>/<input file stem>.png`. This exists because the zensim
+//! feature extractors (`v2_ab_extract`, `extract_features_372col`) read PNG /
+//! JPEG only, so re-extracting features for corpus rows whose distorted side
+//! is an `.avif` / `.jxl` / `.webp` bitstream needs a decode step through the
+//! SAME decoders the fleet uses. It reuses this file's per-codec decode
+//! functions verbatim — no second decode path.
+//!
 //! ## Build
 //!
 //! JPEG only (lightest — `zenjpeg` is already a workspace dep):
@@ -59,6 +76,7 @@ mod real {
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
 
+    use enough::Unstoppable;
     use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
     use zenpixels::{PixelBuffer, PixelDescriptor};
 
@@ -121,8 +139,8 @@ mod real {
     }
 
     enum Outcome {
-        /// RGB8 pixels decoded from the bitstream.
-        Rgb(Vec<u8>),
+        /// RGB8 pixels decoded from the bitstream, with its dimensions.
+        Rgb(Vec<u8>, u32, u32),
         /// Decoder for this extension was not compiled in.
         NotBuilt,
         /// Decode failed.
@@ -130,6 +148,23 @@ mod real {
     }
 
     pub fn run() {
+        let argv: Vec<String> = std::env::args().collect();
+        if let Some(i) = argv.iter().position(|a| a == "--decode-list") {
+            let list = PathBuf::from(argv.get(i + 1).expect("--decode-list <tsv>"));
+            let out_dir = argv
+                .iter()
+                .position(|a| a == "--out-dir")
+                .and_then(|j| argv.get(j + 1))
+                .map(PathBuf::from)
+                .expect("--out-dir <dir> required with --decode-list");
+            let jobs = argv
+                .iter()
+                .position(|a| a == "--jobs")
+                .and_then(|j| argv.get(j + 1))
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(8);
+            std::process::exit(run_decode_list(&list, &out_dir, jobs));
+        }
         let args = parse_args();
         eprintln!("verify_bitstream_decode (zencodec decode path)");
         eprintln!("  images-root : {}", args.images_root.display());
@@ -212,6 +247,120 @@ mod real {
         report(&stats);
     }
 
+    /// Decode every path in `list` and write `<out_dir>/<stem>.png`. Returns a
+    /// process exit code: 0 only if EVERY input decoded and was written.
+    fn run_decode_list(list: &Path, out_dir: &Path, jobs: usize) -> i32 {
+        use std::sync::Mutex;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let text = match std::fs::read_to_string(list) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("ABORT: read {}: {e}", list.display());
+                return 2;
+            }
+        };
+        let inputs: Vec<PathBuf> = text
+            .lines()
+            .map(|l| l.split('\t').next().unwrap_or("").trim())
+            .filter(|l| !l.is_empty() && *l != "dist_path" && *l != "path")
+            .map(PathBuf::from)
+            .collect();
+        if let Err(e) = std::fs::create_dir_all(out_dir) {
+            eprintln!("ABORT: mkdir {}: {e}", out_dir.display());
+            return 2;
+        }
+        eprintln!(
+            "decode-list: {} inputs -> {} ({} threads)",
+            inputs.len(),
+            out_dir.display(),
+            jobs
+        );
+        let done = AtomicUsize::new(0);
+        let skipped = AtomicUsize::new(0);
+        let errs: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(jobs)
+            .build()
+            .expect("rayon pool");
+        pool.install(|| {
+            use rayon::prelude::*;
+            inputs.par_iter().for_each(|src| {
+                let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                let dst = out_dir.join(format!("{stem}.png"));
+                if dst.is_file() && std::fs::metadata(&dst).map(|m| m.len()).unwrap_or(0) > 0 {
+                    skipped.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+                let ext = src
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                let bytes = match std::fs::read(src) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        errs.lock().unwrap().push(format!("{}: read {e}", src.display()));
+                        return;
+                    }
+                };
+                let (rgb, w, h) = match decode_bitstream(&bytes, &ext) {
+                    Outcome::Rgb(v, w, h) => (v, w, h),
+                    Outcome::NotBuilt => {
+                        errs.lock().unwrap().push(format!(
+                            "{}: decoder for .{ext} NOT COMPILED IN — rebuild with \
+                             --features verify-all",
+                            src.display()
+                        ));
+                        return;
+                    }
+                    Outcome::Err(e) => {
+                        errs.lock().unwrap().push(format!("{}: {e}", src.display()));
+                        return;
+                    }
+                };
+                if rgb.len() != (w as usize) * (h as usize) * 3 {
+                    errs.lock().unwrap().push(format!(
+                        "{}: {} bytes for {w}x{h}",
+                        src.display(),
+                        rgb.len()
+                    ));
+                    return;
+                }
+                match write_png_rgb8(&dst, &rgb, w, h) {
+                    Ok(()) => {
+                        let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                        if n % 2000 == 0 {
+                            eprintln!("  decoded {n}/{}", inputs.len());
+                        }
+                    }
+                    Err(e) => errs.lock().unwrap().push(format!("{}: {e}", dst.display())),
+                }
+            });
+        });
+        let errs = errs.into_inner().unwrap();
+        eprintln!(
+            "decode-list: wrote {}, skipped-existing {}, errors {}",
+            done.load(Ordering::Relaxed),
+            skipped.load(Ordering::Relaxed),
+            errs.len()
+        );
+        for e in errs.iter().take(10) {
+            eprintln!("  ERR {e}");
+        }
+        if errs.is_empty() { 0 } else { 1 }
+    }
+
+    /// Write packed RGB8 as a PNG through zenpng (the zen encoder, not `image`).
+    fn write_png_rgb8(dst: &Path, px: &[u8], w: u32, h: u32) -> Result<(), String> {
+        use rgb::FromSlice;
+        let img = imgref::ImgRef::new(px.as_rgb(), w as usize, h as usize);
+        let cfg = zenpng::EncodeConfig::default();
+        let bytes = zenpng::encode_rgb8(img, None, &cfg, &Unstoppable, &Unstoppable)
+            .map_err(|e| format!("png encode: {e:?}"))?;
+        std::fs::write(dst, bytes).map_err(|e| format!("write: {e}"))
+    }
+
     fn check_pair(bitstream: &Path, ext: &str, png: &Path, stat: &mut Stat) {
         // Reference: read the stored PNG exactly how the feature extractor does.
         let (rw, rh, ref_rgb) = match image::open(png) {
@@ -241,7 +390,7 @@ mod real {
         };
 
         let dec = match decode_bitstream(&bytes, ext) {
-            Outcome::Rgb(v) => v,
+            Outcome::Rgb(v, _, _) => v,
             Outcome::NotBuilt => {
                 stat.not_built += 1;
                 return;
@@ -309,9 +458,9 @@ mod real {
         }
     }
 
-    fn wrap(r: Result<Vec<u8>, String>) -> Outcome {
+    fn wrap(r: Result<(Vec<u8>, u32, u32), String>) -> Outcome {
         match r {
-            Ok(v) => Outcome::Rgb(v),
+            Ok((v, w, h)) => Outcome::Rgb(v, w, h),
             Err(e) => Outcome::Err(e),
         }
     }
@@ -319,7 +468,7 @@ mod real {
     /// Decode a bitstream through the zencodec `DecoderConfig → DecodeJob →
     /// Decode` path, asking for the codec's native format (`&[]`), then flatten
     /// the resulting `PixelBuffer` to packed RGB8.
-    fn decode_jpeg(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    fn decode_jpeg(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
         let cfg = zenjpeg::JpegDecoderConfig::new();
         let out = cfg
             .job()
@@ -328,20 +477,23 @@ mod real {
             .decode()
             .map_err(|e| format!("jpeg decode: {e}"))?;
         let pb = out.into_buffer();
-        pixelbuffer_to_rgb8(&pb)
+        let (w, h) = (pb.width(), pb.height());
+        pixelbuffer_to_rgb8(&pb).map(|v| (v, w, h))
     }
 
     #[cfg(feature = "verify-avif")]
     fn decode_avif(bytes: &[u8]) -> Outcome {
         let cfg = zenavif::AvifDecoderConfig::new();
-        let res = (|| -> Result<Vec<u8>, String> {
+        let res = (|| -> Result<(Vec<u8>, u32, u32), String> {
             let out = cfg
                 .job()
                 .decoder(Cow::Borrowed(bytes), &[])
                 .map_err(|e| format!("avif job: {e}"))?
                 .decode()
                 .map_err(|e| format!("avif decode: {e}"))?;
-            pixelbuffer_to_rgb8(&out.into_buffer())
+            let pb = out.into_buffer();
+            let (w, h) = (pb.width(), pb.height());
+            pixelbuffer_to_rgb8(&pb).map(|v| (v, w, h))
         })();
         wrap(res)
     }
@@ -353,14 +505,16 @@ mod real {
     #[cfg(feature = "verify-jxl")]
     fn decode_jxl(bytes: &[u8]) -> Outcome {
         let cfg = zenjxl::JxlDecoderConfig::new();
-        let res = (|| -> Result<Vec<u8>, String> {
+        let res = (|| -> Result<(Vec<u8>, u32, u32), String> {
             let out = cfg
                 .job()
                 .decoder(Cow::Borrowed(bytes), &[])
                 .map_err(|e| format!("jxl job: {e}"))?
                 .decode()
                 .map_err(|e| format!("jxl decode: {e}"))?;
-            pixelbuffer_to_rgb8(&out.into_buffer())
+            let pb = out.into_buffer();
+            let (w, h) = (pb.width(), pb.height());
+            pixelbuffer_to_rgb8(&pb).map(|v| (v, w, h))
         })();
         wrap(res)
     }
@@ -372,14 +526,16 @@ mod real {
     #[cfg(feature = "verify-webp")]
     fn decode_webp(bytes: &[u8]) -> Outcome {
         let cfg = zenwebp::zencodec::WebpDecoderConfig::new();
-        let res = (|| -> Result<Vec<u8>, String> {
+        let res = (|| -> Result<(Vec<u8>, u32, u32), String> {
             let out = cfg
                 .job()
                 .decoder(Cow::Borrowed(bytes), &[])
                 .map_err(|e| format!("webp job: {e}"))?
                 .decode()
                 .map_err(|e| format!("webp decode: {e}"))?;
-            pixelbuffer_to_rgb8(&out.into_buffer())
+            let pb = out.into_buffer();
+            let (w, h) = (pb.width(), pb.height());
+            pixelbuffer_to_rgb8(&pb).map(|v| (v, w, h))
         })();
         wrap(res)
     }
