@@ -1294,8 +1294,11 @@ fn box_blur_h_into_abs_diff_inner_v4(
     let r = radius;
     let row_groups = height / 16;
 
+    let mut ring = [[0.0f32; 16]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 16;
+        let mut ring_pos = 0usize;
 
         let mut sum = f32x16::zero(token);
         for i in 0..diam {
@@ -1343,11 +1346,30 @@ fn box_blur_h_into_abs_diff_inner_v4(
             let rem_idx = rem_idx.min(width - 1);
 
             let mut add_arr = [0.0f32; 16];
-            let mut rem_arr = [0.0f32; 16];
             for ro in 0..16 {
-                let base = (row_base + ro) * width;
-                add_arr[ro] = input[base + add_idx];
-                rem_arr[ro] = input[base + rem_idx];
+                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let rem_arr = if use_ring && x >= diam {
+                ring[ring_pos]
+            } else {
+                let mut a = [0.0f32; 16];
+                for ro in 0..16 {
+                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                }
+                a
+            };
+            if use_ring {
+                ring[ring_pos] = add_arr;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum = sum + f32x16::from_array(token, add_arr) - f32x16::from_array(token, rem_arr);
         }
@@ -1359,8 +1381,11 @@ fn box_blur_h_into_abs_diff_inner_v4(
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
+    let mut ring = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum = f32x8::zero(v3);
         for i in 0..diam {
             let idx = if i <= r {
@@ -1400,11 +1425,30 @@ fn box_blur_h_into_abs_diff_inner_v4(
             };
             let rem_idx = rem_idx.min(width - 1);
             let mut add_arr = [0.0f32; 8];
-            let mut rem_arr = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                add_arr[ro] = input[base + add_idx];
-                rem_arr[ro] = input[base + rem_idx];
+                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let rem_arr = if use_ring && x >= diam {
+                ring[ring_pos]
+            } else {
+                let mut a = [0.0f32; 8];
+                for ro in 0..8 {
+                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                }
+                a
+            };
+            if use_ring {
+                ring[ring_pos] = add_arr;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum = sum + f32x8::from_array(v3, add_arr) - f32x8::from_array(v3, rem_arr);
         }
@@ -1460,8 +1504,11 @@ fn box_blur_h_into_abs_diff_inner_v4x(
     let r = radius;
     let row_groups = height / 16;
 
+    let mut ring = [[0.0f32; 16]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 16;
+        let mut ring_pos = 0usize;
 
         let mut sum = f32x16::zero(token);
         for i in 0..diam {
@@ -1509,11 +1556,30 @@ fn box_blur_h_into_abs_diff_inner_v4x(
             let rem_idx = rem_idx.min(width - 1);
 
             let mut add_arr = [0.0f32; 16];
-            let mut rem_arr = [0.0f32; 16];
             for ro in 0..16 {
-                let base = (row_base + ro) * width;
-                add_arr[ro] = input[base + add_idx];
-                rem_arr[ro] = input[base + rem_idx];
+                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let rem_arr = if use_ring && x >= diam {
+                ring[ring_pos]
+            } else {
+                let mut a = [0.0f32; 16];
+                for ro in 0..16 {
+                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                }
+                a
+            };
+            if use_ring {
+                ring[ring_pos] = add_arr;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum = sum + f32x16::from_array(token, add_arr) - f32x16::from_array(token, rem_arr);
         }
@@ -1525,8 +1591,11 @@ fn box_blur_h_into_abs_diff_inner_v4x(
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
+    let mut ring = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum = f32x8::zero(v3);
         for i in 0..diam {
             let idx = if i <= r {
@@ -1566,11 +1635,30 @@ fn box_blur_h_into_abs_diff_inner_v4x(
             };
             let rem_idx = rem_idx.min(width - 1);
             let mut add_arr = [0.0f32; 8];
-            let mut rem_arr = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                add_arr[ro] = input[base + add_idx];
-                rem_arr[ro] = input[base + rem_idx];
+                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let rem_arr = if use_ring && x >= diam {
+                ring[ring_pos]
+            } else {
+                let mut a = [0.0f32; 8];
+                for ro in 0..8 {
+                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                }
+                a
+            };
+            if use_ring {
+                ring[ring_pos] = add_arr;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum = sum + f32x8::from_array(v3, add_arr) - f32x8::from_array(v3, rem_arr);
         }
@@ -1627,8 +1715,11 @@ fn box_blur_h_into_abs_diff_inner_v3(
     let r = radius;
     let row_groups = height / 8;
 
+    let mut ring = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 8;
+        let mut ring_pos = 0usize;
 
         let mut sum = f32x8::zero(token);
         for i in 0..diam {
@@ -1669,11 +1760,30 @@ fn box_blur_h_into_abs_diff_inner_v3(
             };
             let rem_idx = rem_idx.min(width - 1);
             let mut add_arr = [0.0f32; 8];
-            let mut rem_arr = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                add_arr[ro] = input[base + add_idx];
-                rem_arr[ro] = input[base + rem_idx];
+                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let rem_arr = if use_ring && x >= diam {
+                ring[ring_pos]
+            } else {
+                let mut a = [0.0f32; 8];
+                for ro in 0..8 {
+                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                }
+                a
+            };
+            if use_ring {
+                ring[ring_pos] = add_arr;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
         }
@@ -1731,8 +1841,11 @@ fn box_blur_h_into_abs_diff_inner(
     let r = radius;
     let row_groups = height / 8;
 
+    let mut ring = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum = f32x8::zero(token);
         for i in 0..diam {
             let idx = if i <= r {
@@ -1772,11 +1885,30 @@ fn box_blur_h_into_abs_diff_inner(
             };
             let rem_idx = rem_idx.min(width - 1);
             let mut add_arr = [0.0f32; 8];
-            let mut rem_arr = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                add_arr[ro] = input[base + add_idx];
-                rem_arr[ro] = input[base + rem_idx];
+                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let rem_arr = if use_ring && x >= diam {
+                ring[ring_pos]
+            } else {
+                let mut a = [0.0f32; 8];
+                for ro in 0..8 {
+                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                }
+                a
+            };
+            if use_ring {
+                ring[ring_pos] = add_arr;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
         }
@@ -1853,8 +1985,12 @@ fn fused_blur_h_mu_inner_v4(
     let r = radius;
     let row_groups = height / 16;
 
+    let mut ring_s = [[0.0f32; 16]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 16]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 16;
+        let mut ring_pos = 0usize;
         let mut sum_s = f32x16::zero(token);
         let mut sum_d = f32x16::zero(token);
 
@@ -1901,14 +2037,36 @@ fn fused_blur_h_mu_inner_v4(
 
             let mut s_add = [0.0f32; 16];
             let mut d_add = [0.0f32; 16];
-            let mut s_rem = [0.0f32; 16];
-            let mut d_rem = [0.0f32; 16];
             for ro in 0..16 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 16];
+                let mut da = [0.0f32; 16];
+                for ro in 0..16 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum_s = sum_s + f32x16::from_array(token, s_add) - f32x16::from_array(token, s_rem);
             sum_d = sum_d + f32x16::from_array(token, d_add) - f32x16::from_array(token, d_rem);
@@ -1921,8 +2079,12 @@ fn fused_blur_h_mu_inner_v4(
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
+    let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum_s = f32x8::zero(v3);
         let mut sum_d = f32x8::zero(v3);
 
@@ -1969,14 +2131,36 @@ fn fused_blur_h_mu_inner_v4(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            let mut s_rem = [0.0f32; 8];
-            let mut d_rem = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 8];
+                let mut da = [0.0f32; 8];
+                for ro in 0..8 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum_s = sum_s + f32x8::from_array(v3, s_add) - f32x8::from_array(v3, s_rem);
             sum_d = sum_d + f32x8::from_array(v3, d_add) - f32x8::from_array(v3, d_rem);
@@ -2043,8 +2227,12 @@ fn fused_blur_h_mu_inner_v4x(
     let r = radius;
     let row_groups = height / 16;
 
+    let mut ring_s = [[0.0f32; 16]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 16]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 16;
+        let mut ring_pos = 0usize;
         let mut sum_s = f32x16::zero(token);
         let mut sum_d = f32x16::zero(token);
 
@@ -2091,14 +2279,36 @@ fn fused_blur_h_mu_inner_v4x(
 
             let mut s_add = [0.0f32; 16];
             let mut d_add = [0.0f32; 16];
-            let mut s_rem = [0.0f32; 16];
-            let mut d_rem = [0.0f32; 16];
             for ro in 0..16 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 16];
+                let mut da = [0.0f32; 16];
+                for ro in 0..16 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum_s = sum_s + f32x16::from_array(token, s_add) - f32x16::from_array(token, s_rem);
             sum_d = sum_d + f32x16::from_array(token, d_add) - f32x16::from_array(token, d_rem);
@@ -2111,8 +2321,12 @@ fn fused_blur_h_mu_inner_v4x(
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
+    let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum_s = f32x8::zero(v3);
         let mut sum_d = f32x8::zero(v3);
 
@@ -2159,14 +2373,36 @@ fn fused_blur_h_mu_inner_v4x(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            let mut s_rem = [0.0f32; 8];
-            let mut d_rem = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 8];
+                let mut da = [0.0f32; 8];
+                for ro in 0..8 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum_s = sum_s + f32x8::from_array(v3, s_add) - f32x8::from_array(v3, s_rem);
             sum_d = sum_d + f32x8::from_array(v3, d_add) - f32x8::from_array(v3, d_rem);
@@ -2234,8 +2470,12 @@ fn fused_blur_h_mu_inner_v3(
     let r = radius;
     let row_groups = height / 8;
 
+    let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum_s = f32x8::zero(token);
         let mut sum_d = f32x8::zero(token);
 
@@ -2282,14 +2522,36 @@ fn fused_blur_h_mu_inner_v3(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            let mut s_rem = [0.0f32; 8];
-            let mut d_rem = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 8];
+                let mut da = [0.0f32; 8];
+                for ro in 0..8 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum_s = sum_s + f32x8::from_array(token, s_add) - f32x8::from_array(token, s_rem);
             sum_d = sum_d + f32x8::from_array(token, d_add) - f32x8::from_array(token, d_rem);
@@ -2363,6 +2625,10 @@ fn fused_blur_h_mu_inner(
     // former scalar tail summed `sum += add - rem`, a different association
     // from the vector `sum + add - rem`).
     let mut run_group = |row_base: usize, valid: usize| {
+        let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
+        let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
+        let use_ring = diam <= H_RING_CAP;
+        let mut ring_pos = 0usize;
         let mut row_off = [0usize; 8];
         for (ro, off) in row_off.iter_mut().enumerate() {
             *off = (row_base + ro.min(valid - 1)) * width;
@@ -2412,13 +2678,34 @@ fn fused_blur_h_mu_inner(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            let mut s_rem = [0.0f32; 8];
-            let mut d_rem = [0.0f32; 8];
             for (ro, &off) in row_off.iter().enumerate() {
                 s_add[ro] = src[off + add_idx];
                 d_add[ro] = dst[off + add_idx];
-                s_rem[ro] = src[off + rem_idx];
-                d_rem[ro] = dst[off + rem_idx];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 8];
+                let mut da = [0.0f32; 8];
+                for (ro, &off) in row_off.iter().enumerate() {
+                    sa[ro] = src[off + rem_idx];
+                    da[ro] = dst[off + rem_idx];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             sum_s = sum_s + f32x8::from_array(token, s_add) - f32x8::from_array(token, s_rem);
             sum_d = sum_d + f32x8::from_array(token, d_add) - f32x8::from_array(token, d_rem);
@@ -2539,8 +2826,12 @@ fn fused_blur_h_ssim_inner_v4(
     let r = radius;
     let row_groups = height / 16;
 
+    let mut ring_s = [[0.0f32; 16]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 16]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 16;
+        let mut ring_pos = 0usize;
 
         let mut sum_s = f32x16::zero(token);
         let mut sum_d = f32x16::zero(token);
@@ -2600,14 +2891,36 @@ fn fused_blur_h_ssim_inner_v4(
 
             let mut s_add = [0.0f32; 16];
             let mut d_add = [0.0f32; 16];
-            let mut s_rem = [0.0f32; 16];
-            let mut d_rem = [0.0f32; 16];
             for ro in 0..16 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 16];
+                let mut da = [0.0f32; 16];
+                for ro in 0..16 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             let sa = f32x16::from_array(token, s_add);
             let da = f32x16::from_array(token, d_add);
@@ -2629,8 +2942,12 @@ fn fused_blur_h_ssim_inner_v4(
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
+    let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum_s = f32x8::zero(v3);
         let mut sum_d = f32x8::zero(v3);
         let mut sum_sq = f32x8::zero(v3);
@@ -2687,14 +3004,36 @@ fn fused_blur_h_ssim_inner_v4(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            let mut s_rem = [0.0f32; 8];
-            let mut d_rem = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 8];
+                let mut da = [0.0f32; 8];
+                for ro in 0..8 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             let sa = f32x8::from_array(v3, s_add);
             let da = f32x8::from_array(v3, d_add);
@@ -2861,8 +3200,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     let r = radius;
     let row_groups = height / 16;
 
+    let mut ring_s = [[0.0f32; 16]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 16]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 16;
+        let mut ring_pos = 0usize;
 
         let mut sum_s = f32x16::zero(token);
         let mut sum_d = f32x16::zero(token);
@@ -2929,14 +3272,36 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
 
             let mut s_add = [0.0f32; 16];
             let mut d_add = [0.0f32; 16];
-            let mut s_rem = [0.0f32; 16];
-            let mut d_rem = [0.0f32; 16];
             for ro in 0..16 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 16];
+                let mut da = [0.0f32; 16];
+                for ro in 0..16 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             let sa = f32x16::from_array(token, s_add);
             let da = f32x16::from_array(token, d_add);
@@ -2960,8 +3325,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
+    let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum_s = f32x8::zero(v3);
         let mut sum_d = f32x8::zero(v3);
         let mut sum_sq = f32x8::zero(v3);
@@ -3025,14 +3394,36 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            let mut s_rem = [0.0f32; 8];
-            let mut d_rem = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 8];
+                let mut da = [0.0f32; 8];
+                for ro in 0..8 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             let sa = f32x8::from_array(v3, s_add);
             let da = f32x8::from_array(v3, d_add);
@@ -3137,8 +3528,12 @@ fn fused_blur_h_ssim_inner_v3(
     let r = radius;
     let row_groups = height / 8;
 
+    let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
+    let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
+    let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
         let row_base = rg * 8;
+        let mut ring_pos = 0usize;
         let mut sum_s = f32x8::zero(token);
         let mut sum_d = f32x8::zero(token);
         let mut sum_sq = f32x8::zero(token);
@@ -3195,14 +3590,36 @@ fn fused_blur_h_ssim_inner_v3(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            let mut s_rem = [0.0f32; 8];
-            let mut d_rem = [0.0f32; 8];
             for ro in 0..8 {
-                let base = (row_base + ro) * width;
-                s_add[ro] = src[base + add_idx];
-                d_add[ro] = dst[base + add_idx];
-                s_rem[ro] = src[base + rem_idx];
-                d_rem[ro] = dst[base + rem_idx];
+                let base = (row_base + ro) * width + add_idx;
+                s_add[ro] = src[base];
+                d_add[ro] = dst[base];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 8];
+                let mut da = [0.0f32; 8];
+                for ro in 0..8 {
+                    let base = (row_base + ro) * width + rem_idx;
+                    sa[ro] = src[base];
+                    da[ro] = dst[base];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             let sa = f32x8::from_array(token, s_add);
             let da = f32x8::from_array(token, d_add);
@@ -3311,6 +3728,10 @@ fn fused_blur_h_ssim_inner(
     // disagreed on tail rows. Caught by the i686 CI run (scalar-only
     // dispatch) in `attribution::tests::sum_preservation_*`.
     let mut run_group = |row_base: usize, valid: usize| {
+        let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
+        let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
+        let use_ring = diam <= H_RING_CAP;
+        let mut ring_pos = 0usize;
         let mut row_off = [0usize; 8];
         for (ro, off) in row_off.iter_mut().enumerate() {
             *off = (row_base + ro.min(valid - 1)) * width;
@@ -3370,13 +3791,34 @@ fn fused_blur_h_ssim_inner(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            let mut s_rem = [0.0f32; 8];
-            let mut d_rem = [0.0f32; 8];
             for (ro, &off) in row_off.iter().enumerate() {
                 s_add[ro] = src[off + add_idx];
                 d_add[ro] = dst[off + add_idx];
-                s_rem[ro] = src[off + rem_idx];
-                d_rem[ro] = dst[off + rem_idx];
+            }
+            // rem-ring: for every `x >= diam`, `rem_idx(x)` and
+            // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
+            // and unclamped, so the remove-side gather re-reads bytes the
+            // add-side gather already loaded. Reuse them from a stack ring —
+            // same memory, same values, same `sum + add - rem` order, so
+            // BIT-IDENTICAL. Full note at `box_blur_h_inner_v4`.
+            let (s_rem, d_rem) = if use_ring && x >= diam {
+                (ring_s[ring_pos], ring_d[ring_pos])
+            } else {
+                let mut sa = [0.0f32; 8];
+                let mut da = [0.0f32; 8];
+                for (ro, &off) in row_off.iter().enumerate() {
+                    sa[ro] = src[off + rem_idx];
+                    da[ro] = dst[off + rem_idx];
+                }
+                (sa, da)
+            };
+            if use_ring {
+                ring_s[ring_pos] = s_add;
+                ring_d[ring_pos] = d_add;
+                ring_pos += 1;
+                if ring_pos == diam {
+                    ring_pos = 0;
+                }
             }
             let sa = f32x8::from_array(token, s_add);
             let da = f32x8::from_array(token, d_add);
@@ -4894,6 +5336,189 @@ mod tests {
                         got[i],
                         want[i]
                     );
+                }
+            }
+        }
+    }
+
+    /// Shared geometry set for the rem-ring reference tests: straddles the
+    /// 16-row group, the 8-row remainder and the scalar/masked tail, and
+    /// every `width` vs `diam` relation including `width <= diam` (where the
+    /// ring never engages) and `width == diam` (the boundary).
+    const RING_GEOM: &[(usize, usize)] = &[
+        (7, 3),
+        (11, 16),
+        (12, 16),
+        (13, 17),
+        (31, 24),
+        (64, 42),
+        (127, 8),
+        (208, 26),
+        (592, 33),
+    ];
+
+    fn ring_plane(w: usize, h: usize, salt: usize) -> Vec<f32> {
+        (0..w * h)
+            .map(|i| {
+                let k = ((i + salt) * 2654435761usize) % 65521;
+                (k as f32) * 1.0009765625 - 30000.0
+            })
+            .collect()
+    }
+
+    /// Per-row scalar reference for the horizontal sliding window. The
+    /// H-blur is an independent per-row recurrence and every lane does the
+    /// same elementwise IEEE ops, so a scalar row-at-a-time walk reproduces
+    /// any lane width BIT-FOR-BIT — provided the association is copied
+    /// exactly: the kernels evaluate `(sum + add) - rem`, NOT
+    /// `sum += add - rem` (a real distinction the authors already hit when
+    /// they replaced the old scalar tails with masked vector groups).
+    fn ring_walk(width: usize, radius: usize, mut step: impl FnMut(usize, usize, usize)) {
+        let diam = 2 * radius + 1;
+        let r = radius;
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            step(usize::MAX, idx, usize::MAX);
+        }
+        for x in 0..width {
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            step(x, add_idx, rem_idx.min(width - 1));
+        }
+    }
+
+    /// `box_blur_h_into_abs_diff` — the v1 activity kernel.
+    #[test]
+    fn abs_diff_h_ring_matches_regathered_reference() {
+        for &(w, h) in RING_GEOM {
+            let input = ring_plane(w, h, 0);
+            for &radius in &[1usize, 2, 5, 8] {
+                let diam = 2 * radius + 1;
+                let inv = 1.0 / diam as f32;
+                let mut got = vec![0.0f32; w * h];
+                super::box_blur_h_into_abs_diff(&input, &mut got, w, h, radius);
+                let mut want = vec![0.0f32; w * h];
+                for row in 0..h {
+                    let off = row * w;
+                    let mut sum = 0.0f32;
+                    ring_walk(w, radius, |x, a, rm| {
+                        if x == usize::MAX {
+                            sum += input[off + a];
+                        } else {
+                            want[off + x] = (input[off + x] - sum * inv).abs();
+                            sum = sum + input[off + a] - input[off + rm];
+                        }
+                    });
+                }
+                for i in 0..w * h {
+                    assert_eq!(got[i].to_bits(), want[i].to_bits(), "abs_diff {w}x{h} r={radius} idx {i}");
+                }
+            }
+        }
+    }
+
+    /// `fused_blur_h_mu` and `fused_blur_h_ssim` (+ the `ssim3` MU1=false
+    /// specialisation, which shares the ring code path).
+    ///
+    /// HEIGHTS ARE MULTIPLES OF 8 HERE, and that is load-bearing rather than
+    /// convenient. `fused_blur_h_mu_inner_{v4,v4x,v3}` still carry a SCALAR
+    /// remainder for the last `height % 8` rows which accumulates
+    /// `sum += add - rem` — i.e. `sum + (add - rem)` — while their vector
+    /// bodies evaluate `(sum + add) - rem`. f32 addition is not associative,
+    /// so those tail rows differ from the vector rows in the last ulp or two
+    /// (MEASURED: 2528.7349 vs 2528.7344 at 7x3 r=1). That is PRE-EXISTING
+    /// and unrelated to the rem-ring — the identical assertion fails
+    /// identically on the pre-ring kernels — and the ring never touches a
+    /// scalar tail, so restricting to full groups isolates what this test is
+    /// for. `fused_blur_h_ssim`'s generic variant already fixed the same
+    /// wart by switching its tail to a masked vector group (see the comment
+    /// above `run_group`); the `mu` family has not been converted, and doing
+    /// so would move v1's shipped bytes, so it needs the golden-gate policy
+    /// and is deliberately NOT done here.
+    #[test]
+    fn fused_h_ring_matches_regathered_reference() {
+        const FUSED_GEOM: &[(usize, usize)] = &[
+            (7, 8),
+            (11, 16),
+            (12, 16),
+            (13, 24),
+            (31, 24),
+            (64, 40),
+            (127, 8),
+            (208, 24),
+            (592, 32),
+        ];
+        for &(w, h) in FUSED_GEOM {
+            let src = ring_plane(w, h, 0);
+            let dst = ring_plane(w, h, 7919);
+            for &radius in &[1usize, 2, 5, 8] {
+                let diam = 2 * radius + 1;
+                let inv = 1.0 / diam as f32;
+                let n = w * h;
+                let (mut m1, mut m2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                super::fused_blur_h_mu(&src, &dst, &mut m1, &mut m2, w, h, radius);
+                let (mut s1, mut s2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
+                super::fused_blur_h_ssim(&src, &dst, &mut s1, &mut s2, &mut sq, &mut pr, w, h, radius);
+                let (mut t1, mut t2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                let (mut tq, mut tp) = (vec![0.0f32; n], vec![0.0f32; n]);
+                super::fused_blur_h_ssim3(&src, &dst, &mut t1, &mut t2, &mut tq, &mut tp, w, h, radius);
+
+                let (mut wm1, mut wm2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                let (mut wq, mut wp) = (vec![0.0f32; n], vec![0.0f32; n]);
+                for row in 0..h {
+                    let off = row * w;
+                    let (mut ss, mut sd) = (0.0f32, 0.0f32);
+                    let (mut ssq, mut sprod) = (0.0f32, 0.0f32);
+                    ring_walk(w, radius, |x, a, rm| {
+                        if x == usize::MAX {
+                            let (sv, dv) = (src[off + a], dst[off + a]);
+                            ss += sv;
+                            sd += dv;
+                            ssq = sv.mul_add(sv, dv.mul_add(dv, ssq));
+                            sprod = sv.mul_add(dv, sprod);
+                            return;
+                        }
+                        wm1[off + x] = ss * inv;
+                        wm2[off + x] = sd * inv;
+                        wq[off + x] = ssq * inv;
+                        wp[off + x] = sprod * inv;
+                        let (sa, da) = (src[off + a], dst[off + a]);
+                        let (sr, dr) = (src[off + rm], dst[off + rm]);
+                        ss = ss + sa - sr;
+                        sd = sd + da - dr;
+                        ssq = sa.mul_add(sa, da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, ssq))));
+                        sprod = sa.mul_add(da, (-sr).mul_add(dr, sprod));
+                    });
+                }
+                for i in 0..n {
+                    let c = |g: f32, want: f32, what: &str| {
+                        assert_eq!(g.to_bits(), want.to_bits(), "{what} {w}x{h} r={radius} idx {i}: {g} != {want}");
+                    };
+                    c(m1[i], wm1[i], "mu.mu1");
+                    c(m2[i], wm2[i], "mu.mu2");
+                    c(s1[i], wm1[i], "ssim.mu1");
+                    c(s2[i], wm2[i], "ssim.mu2");
+                    c(sq[i], wq[i], "ssim.sigma_sq");
+                    c(pr[i], wp[i], "ssim.sigma12");
+                    c(t2[i], wm2[i], "ssim3.mu2");
+                    c(tq[i], wq[i], "ssim3.sigma_sq");
+                    c(tp[i], wp[i], "ssim3.sigma12");
                 }
             }
         }
