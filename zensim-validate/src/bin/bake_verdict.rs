@@ -289,6 +289,26 @@ fn slot_720(name: &str) -> Option<&'static str> {
     })
 }
 
+/// What extraction regime does a features root declare? Reads
+/// `<root>/_MANIFEST.json`'s top-level `"regime"` string (written by
+/// `scripts/canonical_corpus/promote_ext944_canonical.py` since 2026-08-30).
+/// `None` = the root says nothing, which callers must treat as the historical
+/// folded default — never as "safe".
+fn root_declared_regime(root: &Path) -> Option<String> {
+    let txt = std::fs::read_to_string(root.join("_MANIFEST.json")).ok()?;
+    // Deliberately a narrow scan rather than a serde model: this file has
+    // several historical shapes and the guard only needs one string.
+    let key = "\"regime\"";
+    let i = txt.find(key)?;
+    let rest = &txt[i + key.len()..];
+    let c = rest.find(':')?;
+    let after = &rest[c + 1..];
+    let q1 = after.find('"')?;
+    let after = &after[q1 + 1..];
+    let q2 = after.find('"')?;
+    Some(after[..q2].to_string())
+}
+
 /// Root-aware slot resolution for `--regime 720`-class roots. The 944 root
 /// (`ext944-canonical-2026-08-01`) carries the canonical-test-view slices
 /// `ext_nonphoto.parquet` / `ext_imazen26.parquet` (built by
@@ -2411,7 +2431,24 @@ fn main() -> ExitCode {
     // structurally uses that block would score to plausible-looking garbage
     // (ebothg_m504; appendix U.R0's shipped-B CID22 0.3862 vs true 0.8764) —
     // refuse, unless `--cross-regime` states the read is intentional.
-    if args.regime_944 && !args.cross_regime {
+    // R1b (2026-08-30): the guard's premise — "a `--regime 944` root feeds
+    // f156-371 as structural zeros" — is TRUE of every folded root but FALSE of
+    // the all-live pools roots (`folded720append2pools` / `…carriers`), which
+    // are 944 wide with that block populated. Ask the ROOT what regime it is
+    // instead of assuming, so the guard refuses exactly when the block really
+    // is zeros. Unknown / unmarked roots keep the old (refusing) behaviour.
+    let root_regime = root_declared_regime(&args.features_root);
+    let root_block_live = root_regime
+        .as_deref()
+        .is_some_and(|r| r.ends_with("pools") || r.ends_with("carriers"));
+    if root_block_live {
+        eprintln!(
+            "bake_verdict: features-root declares regime {} — f156-371 is LIVE at \
+             this root, wrong-regime refusal not applicable",
+            root_regime.as_deref().unwrap_or("?")
+        );
+    }
+    if args.regime_944 && !args.cross_regime && !root_block_live {
         for (p, m) in members.iter().zip(models.iter()) {
             match zensim_validate::block_profile::folded_root_conflict(m) {
                 Ok(None) => {}
@@ -2434,7 +2471,7 @@ fn main() -> ExitCode {
                 }
             }
         }
-    } else if args.regime_944 && args.cross_regime {
+    } else if args.regime_944 && args.cross_regime && !root_block_live {
         eprintln!("bake_verdict: --cross-regime set — wrong-regime refusal disabled by caller");
     }
     let ens = Ensemble {
@@ -3989,6 +4026,52 @@ mod tests {
     /// literally here so neither the const nor the corpus registry can drift
     /// without a conscious edit to this test (and to the campaign doc, which
     /// this list mirrors: scripts/sota944_verdict.sh's §0 invocation).
+    /// R1b (2026-08-30): the wrong-regime guard must ask the ROOT what regime
+    /// it is, not assume that every `--regime 944` root feeds f156-371 as
+    /// zeros. An all-live pools root is 944 wide WITH that block populated;
+    /// refusing there blocks a correct read. An unmarked root must still read
+    /// as folded (the refusing default) — silence is never "safe".
+    #[test]
+    fn root_declared_regime_reads_the_manifest_and_defaults_to_none() {
+        let d = std::env::temp_dir().join(format!(
+            "r1b_regime_probe_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(root_declared_regime(&d), None, "no manifest => no claim");
+
+        std::fs::write(
+            d.join("_MANIFEST.json"),
+            r#"{"description":"x","driver":"v2_ab_extract (folded720append2pools)",
+                "regime":"folded720append2pools",
+                "regime_purity":"never column-mix","entries":[]}"#,
+        )
+        .unwrap();
+        let r = root_declared_regime(&d).expect("regime present");
+        assert_eq!(r, "folded720append2pools");
+        assert!(r.ends_with("pools"), "pools roots feed the block LIVE");
+
+        // `regime_purity` must not be mistaken for `regime`, and a folded root
+        // must NOT read as live.
+        std::fs::write(
+            d.join("_MANIFEST.json"),
+            r#"{"regime_purity":"never column-mix","regime":"folded720append2"}"#,
+        )
+        .unwrap();
+        let r = root_declared_regime(&d).expect("regime present");
+        assert_eq!(r, "folded720append2");
+        assert!(!r.ends_with("pools") && !r.ends_with("carriers"));
+
+        // A manifest with no `regime` key at all (every pre-2026-08-30 root).
+        std::fs::write(d.join("_MANIFEST.json"), r#"{"description":"old","entries":[]}"#).unwrap();
+        assert_eq!(root_declared_regime(&d), None);
+        std::fs::remove_dir_all(&d).ok();
+    }
+
     #[test]
     fn regime_944_default_corpora_match_the_frozen_campaign_list() {
         assert_eq!(

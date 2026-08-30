@@ -54,7 +54,7 @@ echo "== fit $ARM $(ts)"
 
 echo "== verdict $ARM $(ts)"
 "$BV" --bake "$BAKE" --regime 944 --features-root "$ROOT" \
-  --corpora cid22,konjnd,nonphoto,imazen26,hfnlproxy,kadid,tid \
+  --corpora "${R1B_CORPORA:-cid22,konjnd,nonphoto,imazen26,hfnlproxy,kadid,tid}" \
   --full-json "$OUT/${ARM}_head_kon.fulleval.json" \
   --output "$OUT/${ARM}_head_kon.verdict.md"
 echo "R1B-ARM-DONE $ARM $(ts)"
