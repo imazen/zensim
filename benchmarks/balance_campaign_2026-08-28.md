@@ -3365,3 +3365,61 @@ i134 GPU gap-fill drained 16:37Z (33 min); write-back: 125,688 cells × 4 metric
 (`scores.parquet`), 125,687 × 944 (`features_folded720append2.parquet`), 1,540 error rows
 skipped; views blocked on `avifgen_training_views.py`'s positional ID assert (one feature-less
 cell) → ID-column join fix + rerun handed to the all-944 lane. Idle score containers removed.
+
+## 2026-08-30 ~18:0xZ — OPUS LANES, ROUND 2 RESULTS
+
+### All-944-live pass (lane 2) — DONE: zenmetrics `905ae73d`, zensim `d3092e98`, image `exec-zensim944hdr-03bdf64b`
+- `zensim-foldapp2pools` metric = regime `folded720append2pools` (every one of the 944 slots live),
+  `V1PoolsMode::Full`; **9/9 cells all 944 slots bit-identical to `v2_ab_extract --mode
+  foldapp2pools`; f156–371 bit-identical to the v1 372 regime (0 of 1,944 slots differ)**; non-pool
+  slots bit-identical to plain 944. NOTE (brief correction): `zenmetrics batch --metric` cannot reach
+  ANY zensim feature metric — `jobexec` and the regime enum are the surfaces.
+- Perf lever shipped: reuse the fused V-blur kernel's `sigma²/sigma12` register values (side
+  outputs, activity-first ordering, inner-rows-only stores) instead of two `box_blur_v_from_copy`
+  sweeps. Paired zenbench (20 rounds/arm): full216 **+18–25 % → +16–19 % @576², +22–29 % →
+  +18–20 % @1152²** over zeroed; full-vs-carriers **+11.0 % → +4.5 % @1152²** (+5.4 → +5.0 @576²).
+  The registered "art-L4 sums inside the fused kernel" half is **unshippable bit-exact**
+  (column-group-major vs row-major f64 sums drift; gate fails) — remaining bit-exact levers ranked
+  in `benchmarks/pools_full_extraction_2026-08-30.md`. Bench budget raised (`min_rounds(25)`,
+  600 s): the stock 120 s ceiling gave 4 rounds and ±10-pt CIs; earlier ledger figures are on the
+  4-round budget and NOT comparable. **GATE HAZARD:** `folded720_v1_pools_match_v1_path` is
+  `#[cfg(feature = "training")]` — the feature list `custom-profiles,feature-regime-v2` silently
+  compiles it out (206 lib tests pass, gate never runs); with `training`: 322/0.
+- Image built + pushed locally, verified from INSIDE the container (1-cell jobexec →
+  `regime=folded720append2pools`, 944 feats, bit-identical to local); pinned `ZEN_FLEET_IMAGE_CPU`
+  (`affcee66`); predates `d3092e98` (output-identical; speed-only rebuild owed).
+  `ZEN_WRITEBACK_METRICS` must LIST `zensim-foldapp2pools` (defaults carry neither live-pool metric).
+- `avifgen_training_views.py`: positional assert → 4-column ID key join with a uniqueness assert.
+  `(image_path, encode_sha)` alone has **4,242 duplicate rows per side** (tiny renditions saturate
+  → byte-identical encodes across q). aom views: **train_944 102,180 rows / 871 origins; eval8_944
+  23,507 / 209**; 1 scores-only drop (`5006.scale2896x4096` q94 s6, feature blob never landed).
+
+### aom requeue round (fleet) — RUNNING (`~/tmp/aom_requeue6.sh`, launched 17:32Z)
+312 `encoder_panic` cells pardoned (277 large-screen + 35 tiny trial-encode, which re-poison by
+design) → `aomenc` workers r3500/r5900xt/r7900x on `03bdf64b` (roots #22-#23 in; KB-42 fixes not
+yet — the executor byte-verifies every cell) → drain → gap-2 score declares (i134 GPU, tower CPU)
+→ write-back over all six runs → views (old harvest/views kept as `*-pre-requeue.bak`).
+
+### R1b follow-ups — DONE (`37961318`, `657100db`, `63aef3bc`, `251febdd`)
+- **TID `i25.png` casing** (`build_fr_corpus_pairs.py::build_tid()` upper-cased the reference name
+  while resolving the distorted side case-insensitively; the 120 rows of the one lowercase ref were
+  dropped with a printed count and exit 0): both sides now case-insensitive; an unresolved label row
+  is FATAL across the builders (`FRPAIRS_ALLOW_MISSING=1` opt-out); `v2_ab_extract` refuses to
+  write a partial table when rows != pairs (exit 3; `ZENSIM_AB_ALLOW_MISSING=1` opt-out). Canonical
+  TSV regenerated 3,000/3,000 (only the 120 paths changed); TID re-extracted at pools-944 + control:
+  G-P1 728/728, G-E equal, orientation +1.000000; root manifest back to 14 corpora.
+- Stale regroup trace logs under `s3://zentrain/canonical/2026-06-27/_regroup/` removed from R2
+  (5 objects, 811 MiB; no copies on tower MinIO / local mirror / Tower NFS; the `.done` record kept).
+- **v1-372 WIDTH DEFECT — "size-dependent" RETRACTED, it is BATCH-DEPENDENT and deterministic**
+  (`docs/DATASET_HISTORY.md` §3.26): short (279-wide) rows occur at 168 distinct sizes (min side
+  36…1024, same sizes in both sets), 259/957 refs carry both widths; threads 1/2/8 → 33/33/33 (not
+  a race); full batch twice → identical 453-row set; **the same 453 pairs re-run alone → 33 short;
+  5 alone → 0**; identical set from both v1 extractors, grouped and per-pair. A v1-372 vector is
+  not a pure function of its pair. Canonical 372 parquets are unaffected in practice (full width,
+  0 NaN, 0 zero-padded; fixed-size corpora complete: cid22 4,292 / kadid 10,125 / konjnd 1,008; a
+  ragged CSV cannot become a parquet silently — the builder raises). The 944 fold is fixed-width by
+  construction. Root cause NOT diagnosed → diagnosis lane launched (see round 3).
+- Cross-reference: the carrier-recipe lane (`fdd13b0f`) recovered the missing kon-head argv — the
+  shaping screen is the TRAINED-BAKE screen (R1b §2b used `screen944_monotone.tsv`) with no min-max
+  framing — which explains R1b's kon-degenerate head; R1b's arm numbers stand as measured but are
+  NOT evidence about carriers. The A2-vs-A3 root equivalence (0.0003 kon) is unaffected.
