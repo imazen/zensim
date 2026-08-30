@@ -2779,3 +2779,19 @@ surfaces as a loud failure, never as unverified data.
   r7900x carry the svt wave, i134/r5600g/i265 other sessions' workers).
   Gate: blobs present + 0 errors before scale-up.
 - svt wave at launch time: 48,131 / 130,950 blobs, ledger 49,487 done / 0 failed.
+
+### AOM-RS WAVE — FIRST FLEET CHUNK: 199 VERIFIED / 67 REFUSED; the port's envelope is patchier than the census showed (2026-08-30 ~06:1xZ)
+r3500 first 266 rows: **199 done (byte-identical port encodes), 67 `encoder_panic`
+= the arm's PORT-DIVERGED refusal** (verified by local repro of every failing
+class: never a panic). Refusals cluster by (image, speed, q): tiny frames
+(85×128, 128×80, 128×128) at specific cq at s6/s8 with byte deltas of ±1–25 B,
+and **1920×1080 at s6 with the port emitting 2–4× the oracle's bytes** (s8
+~1.3×) — a tool family missing/mis-gated at min-dim = 1080 while ≥1152 and
+≤576 matched. The 10-point speed-6 census was too coarse to see either.
+Posted to imazen/zenav1-aom#14 (comment with the cell table).
+**Decision:** the wave runs on as a census — each cell is either a verified port
+encode or a recorded divergence (ledger `failed/encoder_panic` rows carry
+(w,h,speed,q)); no scale-up beyond idle boxes (r3500 now; the svt boxes roll
+onto this run when svt drains). Expected: ~25% refusals × one retry. The
+verified cells are exactly the "zen aom backend" data the user asked for;
+the refusal map is the port session's next worklist.
