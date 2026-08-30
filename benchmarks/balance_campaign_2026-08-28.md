@@ -2671,3 +2671,32 @@ box has 3.13.1, the port's oracle is 3.14.1 — pin one and record it).
   over the wave (avif944 residue reference); (4) orientation ladders (q↑ →
   bytes↑ monotone per source×speed) ≥ 99% before any table is built.
 - images: CPU executor rebuilt with `avif-svt` (new tag; fleet.env pin bump).
+
+### CORRECTION (2026-08-30 ~05:2xZ, user challenge: "why are you saying there is no zen aom encoder port")
+
+The "no aom encode backend exists anywhere" line above was WRONG. The precise
+state of `zenav1-aom` (read from PARITY.md + `aom-bench/src/lib.rs`):
+- The encoder port EXISTS and is BYTE-IDENTICAL to real `aomenc` for ALLINTRA
+  at every `--cpu-used 0..9` — landed gates `encoder_gate_e2e_byte_match`,
+  `encoder_gate_real_image_e2e_kb6_repro` (real content 30/30, partial-SB
+  edges), `encoder_gate_speed{1..9}_textured_allintra`, chroma-subsampling e2e.
+- Its end-to-end driver is `aom_bench::EncodeCell::port_encode(&self,
+  bootstrap)`: strided copy + border extension + the full SB search + pack walk
+  + LF-level search (+ restoration search) + OBU assembly, returning the frame
+  OBU payload. What it still takes from a reference aomenc stream is the
+  **sequence-header + uncompressed-frame-header FIELD PARSE** (bootstrap; the
+  coding DECISIONS are never copied — rule 4 "no bootstrap leak"). So the gap
+  is a standalone header derivation + a public frame-level API (y/u/v + cq +
+  speed → bytes), not the encoder.
+- What I had grepped for (a top-level `pub fn encode_*` in `aom-encode`) does
+  not exist; the driver lives in `aom-bench`. Wrong inference from a narrow
+  grep — the ledger said "byte-matches aomenc at every speed" and that was the
+  fact to trust.
+Consequence for the datagen lane: an `aomenc --allintra` arm produces the SAME
+bytes the port produces (byte-identical by the landed gates at every speed), so
+the "zen aom backend" data can be generated now through the CLI — either
+directly, or via `port_encode` with the aomenc stream as its bootstrap (the
+parity-preserving variant, which also exercises the port on every cell). The
+executor arm + a baked libaom (the port's oracle is v3.14.1; the box has 3.13.1
+— pin the oracle version in the image) is the registered chunk after the svt
+wave clears its first fleet chunk.
