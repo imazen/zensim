@@ -48,30 +48,43 @@ from `ref_basename`, which §8.5(a) itself records as **not row-unique**.
 alignment but not the height, so the rule is asymmetric and does not look like "too
 small": `54x96` is FULL (54 → 64 by `simd_padded_width`) while `96x54` is SHORT, and
 `62x96` is FULL while `48x64` is SHORT. Reading "min side < 64" off the data therefore
-fails on real counterexamples, and "168 distinct sizes spanning 36…1024" is what you get
-when the parsed field is the max side rather than the min. The true rule is
-**`simd_padded_width(W) ≥ 64 AND H ≥ 64`**, i.e. `W ≥ 49 && H ≥ 64` for `W < 497`.
+fails on real counterexamples. The true rule is **`simd_padded_width(W) ≥ 64 AND H ≥ 64`**,
+i.e. `W ≥ 49 && H ≥ 64` for `W < 497`.
+
+§3.26's *size* figures do not correspond to the short rows at all, under any parse:
+across all three slices the short rows span **13 distinct `(W, H)` classes**, min side
+`{36, 41, 42, 43, 44, 45, 47, 48, 54, 55}` and max side `{64, 96}` — not "168 distinct
+sizes spanning 36…1024", and `512x384` is **not** among them. Whatever population that
+figure was computed over, it was not the short rows.
 
 ## 2. Mechanism (file:line)
 
 The pyramid walk stops on either dimension:
 
 ```
-zensim/src/streaming.rs:889   for scale in 0..num_scales {
-zensim/src/streaming.rs:890       if w < 8 || h < 8 { break; }     // w starts at simd_padded_width(width), h at height
+zensim/src/streaming.rs:862   pub(crate) fn compute_multiscale_stats_streaming(...)
+zensim/src/streaming.rs:889       for scale in 0..num_scales {
+zensim/src/streaming.rs:890           if w < 8 || h < 8 { break; }   // w starts at simd_padded_width(width), h at height
 ```
-(and the three `*_with_ref` siblings at `streaming.rs:3383` and `streaming.rs:2809`).
-`combine_scores` then sizes the output from what survived — `metric.rs:4834`
+(the same `< 8` break guards the `*_with_ref` walk at `streaming.rs:3381` and the
+`PrecomputedReference` dim table at `streaming.rs:2807`).
+`combine_scores` then sizes the output from what survived — `metric.rs:4916`
 `let n_scales = scale_stats.len();` — so 3 scales emit `3·3·31 = 279`, 2 emit 186, 1 emits 93.
+The returned **score** was wrong too, by the same mechanism: `try_score_from_features`
+re-derives `n_scales = features.len() / features_per_scale` (`metric.rs:393`) and divides
+the raw distance by it, so a truncated vector was scored as the mean over the 3 surviving
+scales instead of 4. Stated from the code, not measured — the only entry that could
+produce such a vector is the `training` free function, whose `score()` no shipped consumer
+reads (both extractors take `.features()`; the benches take timings).
 
-`compute_with_config_inner` (`metric.rs:3153`, behind every `Zensim::compute*`) prevents
+`compute_with_config_inner` (`metric.rs:3145`, behind every `Zensim::compute*`) prevents
 that by reflect-padding any sub-`MIN_PYRAMID_DIM` side first. **Three entries did not:**
 
 | entry | kind | pre-fix behaviour at `W < 49` or `H < 64` |
 |---|---|---|
-| `compute_zensim_with_config` (`metric.rs:4854`) | `training` free fn | **silent short vector** — 93 / 186 / 279 wide, no error |
-| `compute_zensim_with_ref_and_config` (`metric.rs:723`) | `training` free fn | **panic** `scale 0 width mismatch` (unpadded distorted vs padded reference) |
-| `Zensim::compute_with_ref_into` (`metric.rs:2282`) | **PRODUCT API**, not gated | **panic**, same assertion — not previously reported |
+| `compute_zensim_with_config` (`metric.rs:4800`) | `training` free fn | **silent short vector** — 93 / 186 / 279 wide, no error |
+| `compute_zensim_with_ref_and_config` (`metric.rs:706`) | `training` free fn | **panic** `scale 0 width mismatch` (unpadded distorted vs padded reference) |
+| `Zensim::compute_with_ref_into` (`metric.rs:2271`) | **PRODUCT API**, not gated | **panic**, same assertion — not previously reported |
 
 The reported defect is entirely the first row: **both** v1-372 extractors call it —
 `zensim-bench/examples/extract_features_372col.rs:195` and

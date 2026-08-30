@@ -119,10 +119,10 @@ implements its A1-A5/A9 candidates.
   asymmetry (`54x96` FULL vs `96x54` SHORT) is what made "too small" look
   falsified. **Mechanism:** `compute_with_config_inner` reflect-pads for every
   `Zensim::compute*`; three entries did not —
-  `compute_zensim_with_config` (`metric.rs:4854`, `training`) returned a SILENT
+  `compute_zensim_with_config` (`metric.rs:4800`, `training`) returned a SILENT
   short vector and is called by BOTH v1-372 extractors, while
-  `compute_zensim_with_ref_and_config` (`metric.rs:723`) and
-  `Zensim::compute_with_ref_into` (`metric.rs:2282`, a **product** API) PANICKED
+  `compute_zensim_with_ref_and_config` (`metric.rs:706`) and
+  `Zensim::compute_with_ref_into` (`metric.rs:2271`, a **product** API) PANICKED
   `scale 0 width mismatch`. **Fixed** in `f9fac41e` by giving the pad decision
   ONE owner (`metric::needs_pyramid_pad` + `min_pyramid_dim_for_scales` +
   `reflect_pad_for_scales`) used at all seven pyramid entries, `num_scales`-aware

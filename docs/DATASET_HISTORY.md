@@ -682,18 +682,20 @@ reproduces the field count of **all 20,812 stored rows with ZERO errors**; every
 short row's min side is in `[36, 55]`; the short and full size sets are
 **disjoint**. The width asymmetry is why "too small" looked falsified: `54x96` is
 FULL (54 → 64 by SIMD alignment) while `96x54` is SHORT, and `62x96` is FULL
-while `48x64` is SHORT. `512x384` was never short — that reading came from the
-max side, not the min.
+while `48x64` is SHORT. The size figures quoted above do not describe the short
+rows under any parse: across all three slices they span **13 distinct `(W, H)`
+classes**, min side `{36…55}` and max side `{64, 96}` — not 168 sizes spanning
+36…1024 — and `512x384` is **not** among them.
 
-**Mechanism.** `compute_with_config_inner` (`metric.rs:3153`, behind every
+**Mechanism.** `compute_with_config_inner` (`metric.rs:3145`, behind every
 `Zensim::compute*`) reflect-pads any sub-64 side before the walk. Three entries
-did not: `compute_zensim_with_config` (`metric.rs:4854`, `training`) returned a
+did not: `compute_zensim_with_config` (`metric.rs:4800`, `training`) returned a
 **silent short vector** (93/186/279 wide, no error) — and **both** v1-372
 extractors call it (`extract_features_372col.rs:195`,
 `v2_ab_extract.rs:319`), which is exactly why the identical short set came from
 both tools and both flows; `compute_zensim_with_ref_and_config`
-(`metric.rs:723`, `training`) and `Zensim::compute_with_ref_into`
-(`metric.rs:2282`, a **product** API) **panicked** `scale 0 width mismatch`.
+(`metric.rs:706`, `training`) and `Zensim::compute_with_ref_into`
+(`metric.rs:2271`, a **product** API) **panicked** `scale 0 width mismatch`.
 
 **Fix.** One owner for the decision — `metric::needs_pyramid_pad(w, h,
 num_scales)` + `min_pyramid_dim_for_scales` + `reflect_pad_for_scales` — used at
