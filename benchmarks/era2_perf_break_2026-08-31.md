@@ -47,7 +47,96 @@ point, not the dense change on its own.
 
 ---
 
-## 2. The era-2 accumulation shape
+## 2. The era-2 accumulation shape — FIXED VIRTUAL LANES
+
+**User refinement (2026-08-30), adopted: the canonical semantics are the
+SIMD-shaped accumulation, and the scalar path is made to MATCH SIMD — never
+the reverse. No compensated or otherwise slower accumulator is ever forced
+into a product path; the compensated/exact oracle (§11) is the RULER, never
+the semantics.**
+
+### 2.0 The definition
+
+era-2 accumulation is defined at a **fixed virtual lane grouping of 8 `f64`
+lanes**, independent of the physical tier:
+
+```
+for each accumulator:  lane[0..8] : f64            // NOT f32
+term at pixel x  ->  lane[x mod 8] += term         // terms in increasing x
+reduce:  acc = ((((((lane0+lane1)+lane2)+lane3)+lane4)+lane5)+lane6)+lane7
+```
+
+Three deliberate choices, each load-bearing:
+
+* **8 lanes, not 16.** 8 `f64` is exactly one `f64x8` on AVX-512, two `f64x4`
+  on AVX2/NEON, and 8 scalars on the fallback — every tier maps onto it without
+  remainder. Choosing 16 would strand every non-AVX-512 tier.
+* **`f64` accumulators, not `f32`.** This is the accuracy change that makes the
+  break worth taking on quality grounds as well as speed: era-1 accumulates in
+  `f32` lanes, whose ~`4.3e-6` relative error **dominates the entire error
+  budget** (§10.3). Moving the accumulator to `f64` removes that term
+  outright. Term *evaluation* stays `f32` (SIMD-shaped, per the refinement) —
+  so the residual error is the per-term evaluation rounding, not the summation.
+* **The reduction tree is part of the semantics**, written above explicitly, so
+  no tier may choose its own.
+
+**The scalar tail disappears as a special case.** Tail pixels `x ∈ [width8,
+width)` land in `lane[x mod 8]` like every other pixel. There is no separate
+tail accumulation path, which is what made era-1's grouping width-dependent.
+
+### 2.1 How each tier realises it
+
+| tier | physical | realisation |
+|---|---|---|
+| `v4x` (AVX-512) | `f64x8` | consumes the virtual lanes natively, 1:1 |
+| `v4`/`v3` (AVX2/SSE) | `f64x4` ×2 | the same 8 partial sums, two registers |
+| `neon`/`wasm128` | `f64x2` ×4 | the same 8 partial sums, four registers |
+| `scalar` | `[f64; 8]` | an array of 8 running sums mirroring the virtual lanes — **which LLVM will likely auto-vectorise anyway; that is to be MEASURED, not assumed** |
+
+An `f32x16` producer (v4x term evaluation) widens to two `f64x8` halves, both
+added into the same 8 lanes — pixel `x` still lands in `lane[x mod 8]`.
+
+### 2.2 Theorem (cross-tier bit-identity, by construction)
+
+> **Claim.** Every tier produces bit-identical accumulator values.
+
+*Proof.* All tiers (i) evaluate the same per-pixel formula on the same `f32`
+inputs with the same operations — lane width does not change per-element
+arithmetic; (ii) widen `f32→f64`, which is exact; (iii) add each term into
+`lane[x mod 8]` in increasing `x`, so each lane sees the same terms in the same
+order; and (iv) reduce by the same fixed tree. Every operation is IEEE-754
+`+`, `−`, `*`, `/` or `max`, all correctly rounded and therefore
+architecture-independent. ∎
+
+### 2.3 What remains architecture-dependent — enumerated, then neutralised
+
+This is the historical killer: v1's exact golden never held cross-vendor
+(241–246 of 372 features diverged on every non-AMD class). Under fixed-lane
+`f64` accumulation the enumeration is short, and it was checked in source
+rather than assumed:
+
+| source | status in the dense path |
+|---|---|
+| **FMA contraction** (`a*b+c` fused vs separate) | **CHECKED: zero `mul_add` in the dense kernel body.** Rust does not auto-contract without fast-math, so `a*b+c` is mul-then-add on every target. To be **gated**, not merely observed |
+| **`rsqrt` / reciprocal estimates** (vendor-specific seed tables) | **already neutralised and documented in-tree**: the MSCN normalizer deliberately uses IEEE `sqrt` + `div` because "`rsqrt()` is the hardware estimate whose seed table is CPU-VENDOR-specific". Nothing in the dense formulas uses it |
+| **Transcendentals** (`powf`, `exp`, `ln` — libm-dependent) | **none in the dense formulas**; they use only `+ − * / .max()` |
+| **`f32→f64` widening** | exact by IEEE-754, no rounding |
+| **`.max()` NaN semantics** | operands are non-NaN by construction here; a NaN would be a bug the oracle catches |
+| **Horizontal reduce order** | fixed by §2.0, not left to the tier |
+
+**So cross-ARCH bit-identity is a plausible consequence, not just cross-tier**,
+and §4 gate 5 states what can and cannot be verified directly from this box.
+
+### 2.4 Band parallelism on top
+
+Unchanged from the earlier design and orthogonal to the lanes: each band keeps
+its own 8-lane set, bands merge **lane-wise in band order**, then the fixed
+tree reduces once. Band layout is a pure function of `(height, BAND)`, so §10.6
+still holds.
+
+---
+
+## 2bis. The superseded shape (kept for the record)
 
 **Invariant (the whole design in one line): every accumulator receives exactly
 one add per BAND, and bands are a pure function of geometry.**
@@ -144,7 +233,8 @@ bound written down here. Any measurement exceeding its proven bound is a
 **BUG, and the lane stops** — a bound violation is never a reason to widen a
 tolerance.
 
-Four new gates, plus the existing suite. Each is stated as what it proves, not
+**Five** new gates, plus the existing suite. Gate 5 (cross-tier / cross-arch
+bit-identity) is new with the virtual-lane refinement — see §12.4. Each is stated as what it proves, not
 as a number to be tuned.
 
 1. **Same-binary determinism, bit-exact.** Two computes of the same pair on one
@@ -518,3 +608,143 @@ chain was ever compared to the exact answer. The oracle breaks the circularity �
 after era-2, "correct" means "within a proven bound of the exact sum", and the
 golden fixtures become a *convenience* for catching regressions fast rather than
 the definition of right.
+
+---
+
+## 12. Math update for fixed virtual lanes — and the bound my first model got WRONG
+
+### 12.1 The oracle earned its keep before a single kernel changed
+
+The first version of §10.5's bound modelled **only the summation error**. Run
+against the oracle, it failed immediately and correctly:
+
+```
+96x64 ch0 [tight, w%8==0] dispatched: slot sum_d (core) deviates
+4.459455237082466e-5 from the EXACT sum, above its proven bound
+2.2204967404769756e-5  (Σ|x| = 1.8626876582358037e1)
+```
+
+Measured coefficient `dev/(u₃₂·Σ|x|)` ≈ **40**; my model predicted **20**. The
+missing factor is **term-evaluation rounding**: the SIMD path evaluates each
+per-pixel term in `f32`, so every term already carries its own relative error
+before it is ever summed. `ssim_d_local_v` alone is ~10 `f32` operations
+(`2·μ₁·μ₂+c₁`, `μ₁²+μ₂²+c₁`, `s₁₂−μ₁μ₂`, `2·cov+c₂`, `ssq−μ₁²−μ₂²+c₂`, a
+division, `1−local`, a `max`) with a division in the middle, and the SSIM form
+is cancellation-prone.
+
+**This is exactly why the oracle lands before the kernels** (§11.4): era-1's
+correctness argument was relative and could never have surfaced this, because
+both sides of a relative comparison share the same evaluation error. The
+corrected model is below; the failure is recorded rather than quietly patched,
+because a bound that was wrong once should be visibly re-derived.
+
+### 12.2 The corrected bound
+
+For a slot accumulating `n` terms, with `k_eval` `f32` rounding operations per
+term, `L = 8` virtual lanes, and `m = n/L` terms per lane:
+
+```
+|dev|  ≤  [ k_eval·u₃₂                       ]·Σ|xᵢ|     (term evaluation, f32)
+        + [ (m − 1)·u₆₄ + (L − 1)·u₆₄        ]·Σ|xᵢ|     (lane accum + reduce, f64)
+        + O(u²)                                                        … (5)
+```
+
+The change from era-1 is entirely in the **second** bracket: era-1's
+accumulation term is `(chunks_per_lane)·u₃₂ ≈ 72·5.96e-8 ≈ 4.3e-6`; era-2's is
+`(m + L − 2)·u₆₄ ≈ (9216 + 6)·1.11e-16 ≈ 1.0e-12` at 576². **Six orders of
+magnitude smaller.** The first bracket is unchanged between eras because the
+term evaluation is unchanged — which is why era-2 is a large *accuracy*
+improvement even though it is motivated by speed.
+
+`k_eval` per family is a documented op count, not a fitted constant:
+
+| family | dominant formula | `k_eval` (counted) |
+|---|---|---|
+| core `sum_d…sum_d4` | `ssim_d_local` + up to 3 self-multiplies | ~13 |
+| core `art`/`det` | `bounded_sim` (5 ops) + subtract | ~7 |
+| core `mse` | `saturate` (3 ops) | ~4 |
+| `hf_*` | `bounded_excess_pair` (shared-denominator, 6 ops) | ~7 |
+| `pjnd_*` | `pjnd_transducer` (4 ops) | ~5 |
+| pools | the above **plus** `saturate(act)` and one multiply per pair | family + 4 |
+
+The gate uses these with a stated safety factor and reports the measured
+coefficient beside the bound, so drift *toward* the bound is visible long
+before it crosses.
+
+### 12.3 The blocked-vs-sequential theorem still applies
+
+§10.2 is unchanged and now applies to the **virtual-lane** grouping directly:
+`L = 8` lanes of `m = n/8` is blocked summation with `b = 8`, so its
+coefficient is `n/8 + 6 ≤ n − 1` for all `n ≥ 8` — strictly tighter than
+sequential, by the same convexity argument, with the added benefit that `L` is
+now a *fixed constant* rather than a tier-dependent lane width. era-1's
+coefficient varied with the physical tier (8 vs 16 lanes); era-2's does not,
+which is the same property that gives §2.2 its bit-identity.
+
+### 12.4 Gate 5 (new): cross-tier and cross-arch identity
+
+* **Cross-tier, verifiable here:** `v3`, `v4`, `v4x` all summon on this box
+  (Zen 4), plus the `scalar` fallback — four tiers, asserted bit-identical.
+* **Cross-arch, NOT verifiable from this box:** `neon` (aarch64) and `wasm128`
+  need CI or the localizer harness. The design's claim for them is a
+  *consequence of the theorem* (§2.2) plus the enumeration (§2.3), and it is
+  **declared as unverified-locally** rather than asserted — the CI matrix
+  (`windows-11-arm`, `macos-*-intel`, `i686`) is where it becomes evidence.
+
+**Honest statement of what changed:** era-1's goldens were known not to hold
+cross-vendor (241–246 of 372 features diverged), and the policy response was
+tolerances. era-2 aims to make the exact golden *true* rather than tolerated.
+That is a claim to be earned on the CI matrix, not one this doc gets to assert.
+
+### 12.5 The second thing the oracle caught: cancellation amplification
+
+With the term-evaluation component added, `sum_d` passed and **`sum_d2`
+failed** — deviation `4.719e-7` against a bound of `1.806e-7`. The measured
+coefficient against the slot's own `Σ|x|` was **120**, far above any plausible
+op count.
+
+The cause is not the accumulation at all:
+
+```
+d = max(1 − local, 0)   with   local ≈ 1        ← a CANCELLING difference
+```
+
+so `d`'s **absolute** error is `~u₃₂·|local| ≈ u₃₂` and does **not** shrink as
+`d` shrinks. The moments then inherit it amplified by the derivative,
+`δ(dᵏ) = k·d^(k−1)·δd`, so their error is proportional to `Σ|d^(k−1)|` — not to
+`Σ|dᵏ|`. Those differ enormously: at 96×64 ch0, `Σ|d| = 18.63` against
+`Σ|d²| = 0.0659`, a factor of **283**. A bound written against a slot's own
+`Σ|x|` understates every derived slot by about two orders of magnitude. The
+same applies to every pool `num` (weight × d).
+
+**Resolution — one uniformly-valid form instead of a per-slot patchwork.**
+Every intermediate in these formulas is bounded by 1 in magnitude (`d`, `sal`,
+the weights, `bounded_sim`, `saturate` all live in `[0,1]`), so a single `f32`
+rounding anywhere in a term contributes at most `u₃₂·1` — **absolute**, not
+relative to `|term|`. Hence
+
+```
+|dev| ≤ k_eval·n·u₃₂                                    (term evaluation, absolute)
+      + [ (chunks + L)·u₃₂ + (rows + tail)·u₆₄ ]·Σ|xᵢ|  (accumulation)          … (6)
+```
+
+which is cancellation-safe by construction and needs no special case for
+moments, pools or tails.
+
+**(6) is deliberately LOOSE.** It is a proven upper bound, not a fitted one,
+and worst-case FP bounds are always slack against measured error because real
+roundings partially cancel. The *regression* signal is therefore not the assert
+— it is the **reported deviation as a percentage of bound**, which moves long
+before the bound is crossed.
+
+**Result: gate green, worst case `18.93 %` of its proven bound** —
+`pools_scalar`, 127×93 ch2 (non-tight, `w%8==7`), `ws_peak_ssim.den`,
+`dev 4.53e-3` against bound `2.39e-2`. Healthy: neither absurdly slack nor
+tuned to the data.
+
+**Scoreboard for the oracle, before it has judged a single era-2 kernel: it
+found two independent errors in my analysis** (the missing term-evaluation
+component, then cancellation amplification), each of which would have shipped
+as a silently-wrong "proven bound". That is the argument for §11.4 — a relative
+comparison against the previous implementation could not have surfaced either,
+because both sides share the same evaluation error.

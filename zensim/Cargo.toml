@@ -51,6 +51,14 @@ avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## to justify a re-extract). Default OFF. Adds only a sum; it CANNOT change any
 ## feature value, so on/off builds produce identical bakes.
 iw-diagnostics = []
+## TEST-ONLY scalar oracle for the pooled-feature math (`feature_v2::oracle`):
+## an L1 Neumaier-compensated reference plus an L2 EXACT Shewchuk-expansion
+## accumulator, used as ground truth for the era-2 error bounds
+## (`benchmarks/era2_perf_break_2026-08-31.md` §11). Automatically available
+## under `cfg(test)`; this feature exists so benches and fuzz targets OUTSIDE
+## `cfg(test)` can reach it. NEVER enable in a product build — it is a ruler,
+## not semantics.
+oracle = []
 ## Enable multi-threaded computation via rayon. Disable for wasm or single-threaded use.
 threads = ["dep:rayon"]
 ## Exposes training/research API: ZensimConfig, try_score_from_features,

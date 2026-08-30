@@ -6942,8 +6942,13 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             let y1 = info.y0 + info.strip_h;
             for ch in 0..3 {
                 let s = producer.rows(crate::feature_v2_stream::Side::Source, ch, 0, info.y0, y1);
-                let d =
-                    producer.rows(crate::feature_v2_stream::Side::Distorted, ch, 0, info.y0, y1);
+                let d = producer.rows(
+                    crate::feature_v2_stream::Side::Distorted,
+                    ch,
+                    0,
+                    info.y0,
+                    y1,
+                );
                 mo.add_strip_channel(ch, info.y0, info.strip_h, info.plane_w, s, d);
             }
         }
@@ -11488,6 +11493,236 @@ mod tests {
     /// relative tolerance of the §A.14 scalar-pool path — same
     /// reassociation class as the phase-4 core-moment change. On hosts
     /// where the active tier runs scalar pools anyway, both sides are
+    /// ERA-2 ORACLE GATE (`benchmarks/era2_perf_break_2026-08-31.md` §11).
+    ///
+    /// Judges the production kernels against an EXACT reference rather than
+    /// against a previous implementation. Three things happen, in order:
+    ///
+    /// 1. **The oracle judges itself.** L1 (Neumaier-compensated f64) is
+    ///    compared to L2 (Shewchuk exact expansion). If L1 drifts from L2
+    ///    beyond compensated summation's own bound, the oracle is broken and
+    ///    says so BEFORE it is used to judge anything else.
+    /// 2. **Each production pool shape is measured against L2** — both the
+    ///    `POOL_SIMD` lane form (what `v4x` ships today and what era-2 makes
+    ///    universal) and the scalar-pool form (what every 16-register tier
+    ///    ships today). Their deviations differ by construction, which is the
+    ///    §10.4 accuracy-class change made visible instead of assumed.
+    /// 3. **Every slot is checked against a bound derived from the SAME run** —
+    ///    `Σ|xᵢ|` per slot comes out of the oracle, so the bound is computed
+    ///    from measured magnitudes rather than guessed.
+    ///
+    /// Geometries deliberately straddle the classes that matter to the era-2
+    /// reshape: tight vs non-tight width, `width % 8 == 0` vs not (the scalar
+    /// tail), and heights that do and do not divide the band size.
+    ///
+    /// A deviation above its bound is a BUG — in the kernel or in the analysis
+    /// — and the lane STOPS to find out which. It is never a tolerance to
+    /// widen.
+    #[test]
+    fn era2_oracle_bounds_hold_for_every_pool_shape() {
+        use oracle::{Exact, N_SLOTS, Neumaier, SLOT_NAMES, dense_accum_slots, slot_family};
+        const U32: f64 = 5.960_464_477_539_063e-8; // 2^-24
+        const U64: f64 = 1.110_223_024_625_157e-16; // 2^-53
+
+        // (w, h, note)
+        let geoms: &[(usize, usize, &str)] = &[
+            (96, 64, "tight, w%8==0"),
+            (200, 136, "non-tight, w%8==0"),
+            (127, 93, "non-tight, w%8==7 (scalar tail)"),
+            (61, 40, "sub-64, w%8==5 (tail + small)"),
+        ];
+        let mut worst_overall: (f64, String) = (0.0, String::new());
+
+        for &(w, h, note) in geoms {
+            let src_px = textured_image(w, h, 0xD1FF);
+            let dst_px = quantize_distort(&src_px, w, h);
+            let source = RgbSlice::new(&src_px, w, h);
+            let distorted = RgbSlice::new(&dst_px, w, h);
+            let src_planes = crate::streaming::convert_source_to_xyb(&source, w, false);
+            let dst_planes = crate::streaming::convert_source_to_xyb(&distorted, w, false);
+            let mut scratch = ScratchV2Strip::new(w * h);
+            let n = w * h;
+
+            for ch in 0..3 {
+                run_blur_pass(&src_planes[ch], &dst_planes[ch], w, h, &mut scratch);
+                let (mu1, mu2) = (&scratch.mu1[..n], &scratch.mu2[..n]);
+                let (ssq, s12) = (&scratch.ssq[..n], &scratch.s12[..n]);
+                let act = &scratch.activity[..n];
+
+                let (l1, _) = oracle::dense_reference::<Neumaier>(
+                    &src_planes[ch],
+                    &dst_planes[ch],
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    act,
+                    w,
+                    h,
+                    true,
+                );
+                let (l2, sum_abs) = oracle::dense_reference::<Exact>(
+                    &src_planes[ch],
+                    &dst_planes[ch],
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    act,
+                    w,
+                    h,
+                    true,
+                );
+
+                // (1) The oracle judges itself. Compensated summation's error
+                // is O(u) * Σ|x| regardless of n — that is the whole point of
+                // the compensation — so a generous constant times u64 is a
+                // true bound, not a fitted one.
+                for i in 0..N_SLOTS {
+                    let allow = 64.0 * U64 * sum_abs[i] + f64::MIN_POSITIVE;
+                    assert!(
+                        (l1[i] - l2[i]).abs() <= allow,
+                        "{w}x{h} ch{ch} [{note}]: ORACLE SELF-CHECK FAILED at {} \
+                         (L1 Neumaier {:e} vs L2 exact {:e}, allowed {:e}). The oracle is \
+                         broken; do not trust any kernel judged by it.",
+                        SLOT_NAMES[i],
+                        l1[i],
+                        l2[i],
+                        allow
+                    );
+                }
+
+                // (2)+(3) Each production pool shape vs L2, bound from Σ|x|.
+                let lane_pool = dense_block_kernel(
+                    &src_planes[ch],
+                    &dst_planes[ch],
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    act,
+                    w,
+                    h,
+                    true,
+                );
+                let scalar_pool = dense_block_kernel_pools_scalar(
+                    &src_planes[ch],
+                    &dst_planes[ch],
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    act,
+                    w,
+                    h,
+                    true,
+                );
+
+                for (variant, accum) in [("dispatched", &lane_pool), ("pools_scalar", &scalar_pool)]
+                {
+                    let got = dense_accum_slots(accum);
+                    for i in 0..N_SLOTS {
+                        let fam = slot_family(i);
+                        // f32 lane accumulation: (chunks per lane) + (reduce
+                        // tree depth) terms at u32. f64 aggregation: one add
+                        // per row at u64. The scalar-pool variant accumulates
+                        // its POOL slots per pixel in f64 instead, so those
+                        // carry no u32 term.
+                        // BOUND per design §12.2 + §12.5. Two components:
+                        //
+                        // (1) TERM-EVALUATION, absolute and cancellation-safe.
+                        //     Every intermediate in these formulas is bounded
+                        //     by 1 in magnitude (d, sal, the weights,
+                        //     bounded_sim, saturate all live in [0,1]), so ONE
+                        //     f32 rounding anywhere in a term contributes at
+                        //     most u32·1 — ABSOLUTE, not relative to |term|.
+                        //     That matters because `d = max(1-local,0)` with
+                        //     `local ≈ 1` is a CANCELLING difference: d's
+                        //     absolute error does not shrink as d does, and
+                        //     the derived slots (d², d³, d⁴, and every pool
+                        //     `num`) inherit it amplified by the derivative.
+                        //     A bound written against the slot's own Σ|x|
+                        //     understates those by two orders (Σ|d| is 282x
+                        //     Σ|d²| here) — measured, and it is what the
+                        //     oracle caught first.
+                        //
+                        // (2) ACCUMULATION, relative to Σ|x| (design §12.2).
+                        //
+                        // (1) dominates and is deliberately LOOSE — a proven
+                        // upper bound, not a fitted one. The regression signal
+                        // is the reported per-family COEFFICIENT below, which
+                        // moves long before the bound is crossed.
+                        const SAFETY: f64 = 2.0;
+                        let k_eval = SAFETY
+                            * match fam {
+                                "core" => 13.0,
+                                "hf" => 7.0,
+                                "pjnd" => 5.0,
+                                _ => 17.0, // pools: core formula + weight ops
+                            };
+                        let n_px = (w * h) as f64;
+                        let chunks_per_lane = (w / 8) as f64;
+                        let pools_in_f64 = variant == "pools_scalar" && fam == "pools";
+                        let acc_u32 = if pools_in_f64 {
+                            0.0
+                        } else {
+                            chunks_per_lane + 8.0
+                        };
+                        let acc_u64 = if pools_in_f64 {
+                            n_px
+                        } else {
+                            h as f64 + 8.0 + (w % 8) as f64 * h as f64
+                        };
+                        let bound = k_eval * n_px * U32
+                            + (acc_u32 * U32 + acc_u64 * U64) * sum_abs[i]
+                            + 8.0 * U64 * l2[i].abs()
+                            + f64::MIN_POSITIVE;
+                        let dev = (got[i] - l2[i]).abs();
+                        // Reported signal: dev as a fraction of its bound.
+                        // A kernel change that degrades accuracy moves this
+                        // long before it trips the assert.
+                        let frac = dev / bound;
+                        if frac > worst_overall.0 {
+                            worst_overall = (
+                                frac,
+                                format!(
+                                    "{} {}x{} ch{} [{}] {} ({}): dev {:e} = {:.1}% of bound {:e}",
+                                    variant,
+                                    w,
+                                    h,
+                                    ch,
+                                    note,
+                                    SLOT_NAMES[i],
+                                    fam,
+                                    dev,
+                                    100.0 * frac,
+                                    bound
+                                ),
+                            );
+                        }
+                        assert!(
+                            dev <= bound,
+                            "{w}x{h} ch{ch} [{note}] {variant}: slot {} ({}) deviates {:e} from \
+                             the EXACT sum, above its proven bound {:e} (Σ|x| = {:e}). A bound \
+                             violation is a BUG in the kernel or in the error analysis — find \
+                             out which. Do NOT widen this.",
+                            SLOT_NAMES[i],
+                            fam,
+                            dev,
+                            bound,
+                            sum_abs[i]
+                        );
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "ERA2-ORACLE worst deviation = {:.2}% of its proven bound\n  {}",
+            100.0 * worst_overall.0,
+            worst_overall.1
+        );
+    }
+
     /// identical and the gate passes trivially.
     #[test]
     fn pool_simd_drift_within_policy() {
@@ -14949,5 +15184,362 @@ mod tests {
             checked >= 3,
             "fixture too tame — only {checked} signed slots direction-checked"
         );
+    }
+}
+
+// ============================================================================
+// THE SCALAR ORACLE (era-2, 2026-08-31) — `benchmarks/era2_perf_break_2026-08-31.md` §11
+//
+// TEST-ONLY. Never in the product build. Two levels, because "correct" must
+// not itself be an approximation:
+//
+//   L1 `Neumaier` — a readable scalar reference in unambiguous left-to-right
+//      order with Kahan-Babuska-NEUMAIER compensation (chosen over plain
+//      Kahan, which loses the correction when the running total is smaller in
+//      magnitude than the addend — a real case here, since these sums start
+//      at 0 and the first terms can dominate).
+//   L2 `Exact`   — Shewchuk non-overlapping expansion via TwoSum. The
+//      expansion holds the EXACT sum of the f64 terms; `value()` rounds it
+//      once by summing components smallest-first.
+//
+// SCOPE, stated precisely: the oracle is exact with respect to SUMMATION, and
+// the per-pixel formulas are evaluated in f64. That is the right reference,
+// because what era-2 changes IS the summation order and the precision of the
+// accumulation — not the formulas. Where a production tier evaluates the
+// per-pixel terms in f32 lanes (the POOL_SIMD pool path), its deviation from
+// this oracle legitimately includes that term-precision difference, and §10.4
+// of the design says so.
+//
+// STANDING ROLE: this is the regression instrument for ALL future perf work on
+// these kernels, not an era-2 one-off. Measure a new kernel against the oracle
+// BEFORE measuring it against a bench.
+#[cfg(any(test, feature = "oracle"))]
+pub(crate) mod oracle {
+    use super::*;
+
+    /// Number of accumulator slots: 13 plain sums + 11 `WeightedSum` × (num, den).
+    pub(crate) const N_SLOTS: usize = 13 + 11 * 2;
+
+    /// Slot names, index-aligned with [`Slots`], grouped by FAMILY so the gate
+    /// can report per-family worst cases (design §11.2).
+    pub(crate) const SLOT_NAMES: [&str; N_SLOTS] = [
+        "sum_d",
+        "sum_d2",
+        "sum_d3",
+        "sum_d4",
+        "sum_art",
+        "sum_det",
+        "sum_mse",
+        "sum_hf_gain",
+        "sum_hf_loss",
+        "sum_hf_mag_loss",
+        "sum_pjnd",
+        "sum_pjnd_lo",
+        "sum_pjnd_hi",
+        "ws_peak_ssim.num",
+        "ws_peak_ssim.den",
+        "ws_peak_art.num",
+        "ws_peak_art.den",
+        "ws_peak_det.num",
+        "ws_peak_det.den",
+        "ws_mask_ssim.num",
+        "ws_mask_ssim.den",
+        "ws_mask_art.num",
+        "ws_mask_art.den",
+        "ws_mask_det.num",
+        "ws_mask_det.den",
+        "ws_mask_mse.num",
+        "ws_mask_mse.den",
+        "ws_iw_ssim.num",
+        "ws_iw_ssim.den",
+        "ws_iw_art.num",
+        "ws_iw_art.den",
+        "ws_iw_det.num",
+        "ws_iw_det.den",
+        "ws_iw_mse.num",
+        "ws_iw_mse.den",
+    ];
+
+    /// The family each slot belongs to, for per-family bound reporting.
+    pub(crate) fn slot_family(i: usize) -> &'static str {
+        match i {
+            0..=6 => "core",
+            7..=9 => "hf",
+            10..=12 => "pjnd",
+            _ => "pools",
+        }
+    }
+
+    /// A compensated or exact accumulator.
+    pub(crate) trait Acc: Default + Clone {
+        fn add(&mut self, x: f64);
+        fn value(&self) -> f64;
+    }
+
+    /// L1: Kahan-Babuska-Neumaier compensated summation.
+    #[derive(Clone, Default, Debug)]
+    pub(crate) struct Neumaier {
+        sum: f64,
+        c: f64,
+    }
+    impl Acc for Neumaier {
+        #[inline]
+        fn add(&mut self, x: f64) {
+            let t = self.sum + x;
+            // The Neumaier branch: pick the operand that is larger in
+            // magnitude as the one whose bits survive, so the correction is
+            // captured in BOTH orderings (plain Kahan drops it in one).
+            if self.sum.abs() >= x.abs() {
+                self.c += (self.sum - t) + x;
+            } else {
+                self.c += (x - t) + self.sum;
+            }
+            self.sum = t;
+        }
+        #[inline]
+        fn value(&self) -> f64 {
+            self.sum + self.c
+        }
+    }
+
+    /// `a + b` exactly, as (rounded sum, exact error). Knuth's TwoSum — no
+    /// assumption about the relative magnitudes of `a` and `b`.
+    #[inline]
+    fn two_sum(a: f64, b: f64) -> (f64, f64) {
+        let s = a + b;
+        let bb = s - a;
+        let err = (a - (s - bb)) + (b - bb);
+        (s, err)
+    }
+
+    /// L2: Shewchuk non-overlapping expansion. The component list holds the
+    /// EXACT sum; nothing is discarded.
+    #[derive(Clone, Default, Debug)]
+    pub(crate) struct Exact {
+        parts: Vec<f64>,
+    }
+    impl Acc for Exact {
+        fn add(&mut self, x: f64) {
+            if x == 0.0 {
+                return;
+            }
+            let mut carry = x;
+            let mut keep = 0usize;
+            for j in 0..self.parts.len() {
+                let (hi, lo) = two_sum(carry, self.parts[j]);
+                if lo != 0.0 {
+                    self.parts[keep] = lo;
+                    keep += 1;
+                }
+                carry = hi;
+            }
+            self.parts.truncate(keep);
+            if carry != 0.0 {
+                self.parts.push(carry);
+            }
+        }
+        fn value(&self) -> f64 {
+            // Components are non-overlapping and increasing in magnitude;
+            // summing smallest-first rounds the exact total once.
+            let mut s = 0.0;
+            for &p in &self.parts {
+                s += p;
+            }
+            s
+        }
+    }
+
+    /// One accumulator per slot.
+    #[derive(Clone)]
+    pub(crate) struct Slots<A: Acc> {
+        pub acc: Vec<A>,
+    }
+    impl<A: Acc> Default for Slots<A> {
+        fn default() -> Self {
+            Self {
+                acc: vec![A::default(); N_SLOTS],
+            }
+        }
+    }
+    impl<A: Acc> Slots<A> {
+        #[inline]
+        fn add(&mut self, i: usize, x: f64) {
+            self.acc[i].add(x);
+        }
+        pub(crate) fn values(&self) -> [f64; N_SLOTS] {
+            let mut out = [0.0f64; N_SLOTS];
+            for (o, a) in out.iter_mut().zip(self.acc.iter()) {
+                *o = a.value();
+            }
+            out
+        }
+    }
+
+    /// Flatten a production [`DenseAccum`] into the same slot order.
+    pub(super) fn dense_accum_slots(a: &DenseAccum) -> [f64; N_SLOTS] {
+        [
+            a.sum_d,
+            a.sum_d2,
+            a.sum_d3,
+            a.sum_d4,
+            a.sum_art,
+            a.sum_det,
+            a.sum_mse,
+            a.sum_hf_gain,
+            a.sum_hf_loss,
+            a.sum_hf_mag_loss,
+            a.sum_pjnd,
+            a.sum_pjnd_lo,
+            a.sum_pjnd_hi,
+            a.ws_peak_ssim.num,
+            a.ws_peak_ssim.den,
+            a.ws_peak_art.num,
+            a.ws_peak_art.den,
+            a.ws_peak_det.num,
+            a.ws_peak_det.den,
+            a.ws_mask_ssim.num,
+            a.ws_mask_ssim.den,
+            a.ws_mask_art.num,
+            a.ws_mask_art.den,
+            a.ws_mask_det.num,
+            a.ws_mask_det.den,
+            a.ws_mask_mse.num,
+            a.ws_mask_mse.den,
+            a.ws_iw_ssim.num,
+            a.ws_iw_ssim.den,
+            a.ws_iw_art.num,
+            a.ws_iw_art.den,
+            a.ws_iw_det.num,
+            a.ws_iw_det.den,
+            a.ws_iw_mse.num,
+            a.ws_iw_mse.den,
+        ]
+    }
+
+    /// The reference implementation of the dense pooled-feature math.
+    ///
+    /// Plain scalar loops, row-major, unambiguous left-to-right order, every
+    /// per-pixel term evaluated in f64 with the SAME formulas the production
+    /// scalar tail uses (`ssim_d_local`, `bounded_sim`, `saturate`,
+    /// `bounded_excess_pair`, `bounded_excess`, `pjnd_transducer`) — this is a
+    /// reference for the ACCUMULATION, so the formulas are shared rather than
+    /// re-derived, and any formula change is caught by the production tests
+    /// rather than silently diverging here.
+    ///
+    /// Also returns `sum_abs`, the per-slot `Σ|xᵢ|`, which is what the error
+    /// bounds in design §10.5 are proportional to — so the gate can compute
+    /// each slot's bound from the same run that measures its deviation.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn dense_reference<A: Acc>(
+        src: &[f32],
+        dst: &[f32],
+        mu1: &[f32],
+        mu2: &[f32],
+        ssq: &[f32],
+        s12: &[f32],
+        activity: &[f32],
+        width: usize,
+        height: usize,
+        transducer_bank: bool,
+    ) -> ([f64; N_SLOTS], [f64; N_SLOTS]) {
+        let mut s: Slots<A> = Slots::default();
+        let mut sum_abs = [0.0f64; N_SLOTS];
+        let push = |s: &mut Slots<A>, sum_abs: &mut [f64; N_SLOTS], i: usize, v: f64| {
+            s.add(i, v);
+            sum_abs[i] += v.abs();
+        };
+
+        for y in 0..height {
+            for x in 0..width {
+                let i = y * width + x;
+                let sv = src[i] as f64;
+                let dv = dst[i] as f64;
+                let m1 = mu1[i] as f64;
+                let m2 = mu2[i] as f64;
+                let act = activity[i] as f64;
+
+                let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64);
+                push(&mut s, &mut sum_abs, 0, d);
+                push(&mut s, &mut sum_abs, 1, d * d);
+                push(&mut s, &mut sum_abs, 2, d * d * d);
+                push(&mut s, &mut sum_abs, 3, d * d * d * d);
+
+                let diff_src = (sv - m1).abs();
+                let diff_dst = (dv - m2).abs();
+                let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+                let (mut art_i, mut det_i) = (0.0, 0.0);
+                if diff_dst > diff_src {
+                    art_i = edge_dissim;
+                } else if diff_dst < diff_src {
+                    det_i = edge_dissim;
+                }
+                push(&mut s, &mut sum_abs, 4, art_i);
+                push(&mut s, &mut sum_abs, 5, det_i);
+
+                let raw_sq_err = (sv - dv) * (sv - dv);
+                let mse_i = saturate(raw_sq_err, C_MSE);
+                push(&mut s, &mut sum_abs, 6, mse_i);
+
+                let hf_src = sv - m1;
+                let hf_dst = dv - m2;
+                let (hf_gain_i, hf_loss_i) =
+                    bounded_excess_pair(hf_dst * hf_dst, hf_src * hf_src, C_HF);
+                push(&mut s, &mut sum_abs, 7, hf_gain_i);
+                push(&mut s, &mut sum_abs, 8, hf_loss_i);
+                push(
+                    &mut s,
+                    &mut sum_abs,
+                    9,
+                    bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF),
+                );
+
+                let raw_abs_err = (sv - dv).abs();
+                push(
+                    &mut s,
+                    &mut sum_abs,
+                    10,
+                    pjnd_transducer(raw_abs_err, act, K_PJND_MASK, C_PJND_CLAMP),
+                );
+                if transducer_bank {
+                    push(
+                        &mut s,
+                        &mut sum_abs,
+                        11,
+                        pjnd_transducer(raw_abs_err, act, K_PJND_MASK_LOW, C_PJND_CLAMP),
+                    );
+                    push(
+                        &mut s,
+                        &mut sum_abs,
+                        12,
+                        pjnd_transducer(raw_abs_err, act, K_PJND_MASK_HIGH, C_PJND_CLAMP),
+                    );
+                }
+
+                // Weighted pools, in the production order.
+                let sat_act = saturate(act, C_ACTIVITY);
+                let mask_w = 1.0 - sat_act;
+                let iw_w = sat_act + IW_WEIGHT_FLOOR;
+                let sal_ssim = saturate(d, C_PEAK);
+                let sal_art = saturate(art_i, C_PEAK);
+                let sal_det = saturate(det_i, C_PEAK);
+                for (base, w, v) in [
+                    (13, sal_ssim, d),
+                    (15, sal_art, art_i),
+                    (17, sal_det, det_i),
+                    (19, mask_w, d),
+                    (21, mask_w, art_i),
+                    (23, mask_w, det_i),
+                    (25, mask_w, mse_i),
+                    (27, iw_w, d),
+                    (29, iw_w, art_i),
+                    (31, iw_w, det_i),
+                    (33, iw_w, mse_i),
+                ] {
+                    push(&mut s, &mut sum_abs, base, w * v);
+                    push(&mut s, &mut sum_abs, base + 1, w);
+                }
+            }
+        }
+        (s.values(), sum_abs)
     }
 }
