@@ -577,7 +577,28 @@ mod real {
             }
             Ok(out)
         } else {
-            Err(format!("decoded descriptor {desc:?} is not RGB8/RGBA8"))
+            // Everything else (10/12-bit AVIF -> Rgb16, gray, f32, premultiplied,
+            // channel-reordered) goes through the CANONICAL pixel-format owner,
+            // `zenpixels_convert::RowConverter` -> RGB8_SRGB — the exact path
+            // zenmetrics' `decode.rs` uses, so a bitstream decoded here matches
+            // what the fleet extractor saw. Measured need (R1b, 2026-08-30):
+            // 4,417 of 20,655 canonical-picker AVIF members are `bd10` cells
+            // that decode to Rgb16 and hit this branch.
+            use zenpixels_convert::converter::RowConverter;
+            let dst_stride = w * 3;
+            let mut out = vec![0u8; dst_stride * h];
+            let mut conv = RowConverter::new(desc, PixelDescriptor::RGB8_SRGB)
+                .map_err(|e| format!("cannot plan {desc:?} -> RGB8_SRGB: {e}"))?;
+            conv.convert_rows(
+                data,
+                stride,
+                &mut out,
+                dst_stride,
+                w as u32,
+                h as u32,
+            )
+            .map_err(|e| format!("row conversion {desc:?} -> RGB8_SRGB: {e}"))?;
+            Ok(out)
         }
     }
 

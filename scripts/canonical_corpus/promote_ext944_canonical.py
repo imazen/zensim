@@ -33,7 +33,17 @@ pools regime instead of a second copy of this code:
                 column-mixed with a zero-block row. (The zensim parquet
                 loader projects only the columns it needs and skips the rest,
                 so the extra column is loader-transparent.)
-  EXT944_LEGS   space-separated corpus names to promote (default: all).
+  EXT944_LEGS   space-separated corpus names to promote (default: all). A
+                PARTIAL promote MERGES into an existing `_MANIFEST.json` in the
+                destination (entries replaced by corpus name, others kept), so
+                a root built over several runs still ends with one complete
+                manifest instead of the last run's slice of it.
+  EXT944_EXTRA_LEGS
+                comma-separated corpus names that have NO entry in the
+                inherited manifest (R1b: the D1 eval slices ext_imazen26 /
+                ext_nonphoto / ext_hfnlproxy, whose row count comes from their
+                own CSV). Roles/target semantics are recorded as
+                "R1b-rebuilt eval slice" rather than inherited.
   EXT944_VERIFY_ROOT
                 root holding a SAME-BINARY zero-block control extraction.
                 When set, each promoted leg is GATED:
@@ -87,6 +97,7 @@ N_FEATURES = 944
 MODE = os.environ.get("EXT944_MODE", "folded720append2")
 ONLY_LEGS = set(os.environ.get("EXT944_LEGS", "").split())
 VERIFY_ROOT = os.environ.get("EXT944_VERIFY_ROOT")
+EXTRA_LEGS = [x for x in os.environ.get("EXT944_EXTRA_LEGS", "").split(",") if x]
 DRIFT_ROOT = os.environ.get("EXT944_DRIFT_ROOT")
 BASENAME_MAP = dict(
     kv.split(":", 1) for kv in os.environ.get("EXT944_BASENAME_MAP", "").split(",") if kv
@@ -262,7 +273,15 @@ def main() -> None:
     DEST.mkdir(parents=True, exist_ok=True)
     entries = []
     total = 0
-    for oe in old["entries"]:
+    old_entries = list(old["entries"]) + [
+        {"corpus": c, "rows": None,
+         "role": "R1b-rebuilt eval slice (validate-family D1 cut, keyed)",
+         "target_semantics": "human_score = score_ssim2-derived (slice convention)",
+         "notes": "row count taken from the leg's own CSV; identity gated by "
+                  "the keys sidecar + validate_slice_family_filter G-KEY"}
+        for c in EXTRA_LEGS
+    ]
+    for oe in old_entries:
         corpus = oe["corpus"]
         if ONLY_LEGS and corpus not in ONLY_LEGS:
             continue
@@ -270,7 +289,11 @@ def main() -> None:
         if not src.is_file():
             sys.exit(f"ABORT: missing extraction {src}")
         dst = DEST / f"{corpus}.parquet"
-        rows, nz = csv_to_parquet(src, dst, oe["rows"])
+        want = oe["rows"]
+        if want is None:
+            with open(src, newline="") as f:
+                want = sum(1 for _ in f) - 1
+        rows, nz = csv_to_parquet(src, dst, want)
         total += rows
         gate = verify_against_stored(corpus, dst) if VERIFY_ROOT else None
         drift = measure_drift(corpus, dst) if DRIFT_ROOT else None
@@ -320,7 +343,17 @@ def main() -> None:
         "inherited_from": str(OLD_MANIFEST),
         "entries": entries,
     }
-    (DEST / "_MANIFEST.json").write_text(json.dumps(manifest, indent=1))
+    mp = DEST / "_MANIFEST.json"
+    if ONLY_LEGS and mp.is_file():
+        prev = json.load(open(mp))
+        by = {e["corpus"]: e for e in prev.get("entries", [])}
+        for e in entries:
+            by[e["corpus"]] = e
+        manifest["entries"] = list(by.values())
+        manifest["n_corpora"] = len(manifest["entries"])
+        manifest["total_rows"] = sum(e["rows"] for e in manifest["entries"])
+        print(f"merged into existing manifest: {len(by)} corpora total")
+    mp.write_text(json.dumps(manifest, indent=1))
     print(f"MANIFEST: {len(entries)} corpora, {total} rows -> {DEST}/_MANIFEST.json")
     if ONLY_LEGS:
         print(f"partial promote ({len(entries)} of {len(old['entries'])} legs) — "

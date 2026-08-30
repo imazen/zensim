@@ -61,6 +61,12 @@ def main() -> int:
     ap.add_argument("--r2", action="store_true")
     ap.add_argument("--jobs", type=int, default=16)
     ap.add_argument("--pairs-out-dir", default=None)
+    ap.add_argument("--decoded-dir", default=None,
+                    help="if given, the emitted pairs TSVs point at "
+                         "<decoded-dir>/<member stem>.png instead of the raw "
+                         "bitstream (the verify_bitstream_decode --decode-list "
+                         "output), so the PNG/JPEG-only zensim extractors can "
+                         "read every codec. The decode list is written too.")
     a = ap.parse_args()
     if a.r2:
         os.environ["R1B_R2"] = "1"
@@ -169,17 +175,27 @@ def main() -> int:
         man = {}
         for name, t in tables.items():
             slug = name.replace("uris_", "")
-            op = od / f"pairs_{slug}_local.tsv"
+            dec = Path(a.decoded_dir) if a.decoded_dir else None
+            op = od / (f"pairs_{slug}_png.tsv" if dec else f"pairs_{slug}_local.tsv")
             with open(op, "w") as f:
                 f.write("ref_path\tdist_path\thuman_score\n")
                 for r, m, h in zip(t["ref_local"].to_pylist(),
                                    t["dist_member"].to_pylist(),
                                    t["human_score"].to_pylist()):
-                    f.write(f"{r}\t{cache / m}\t{h}\n")
+                    d = (dec / f"{Path(m).stem}.png") if dec else (cache / m)
+                    f.write(f"{r}\t{d}\t{h}\n")
             h = hashlib.sha256(op.read_bytes()).hexdigest()
             man[slug] = {"pairs_tsv": str(op), "sha256": h, "rows": t.num_rows}
             print(f"  {op} ({t.num_rows} rows)")
-        (od / "_MANIFEST_local_pairs.json").write_text(json.dumps(man, indent=1))
+        mfn = ("_MANIFEST_png_pairs.json" if a.decoded_dir
+               else "_MANIFEST_local_pairs.json")
+        (od / mfn).write_text(json.dumps(man, indent=1))
+        if a.decoded_dir:
+            lst = od / "decode_list.tsv"
+            members = sorted({m for t in tables.values()
+                              for m in t["dist_member"].to_pylist()})
+            lst.write_text("\n".join(str(cache / m) for m in members) + "\n")
+            print(f"  decode list: {lst} ({len(members)} distinct members)")
     return 0
 
 

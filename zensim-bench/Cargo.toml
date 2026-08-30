@@ -31,7 +31,7 @@ extract-omni = ["training", "dep:parquet", "dep:arrow", "dep:zenavif", "dep:zenj
 # `dep:zenpng` + `dep:enough` are the --decode-list writer (R1b, 2026-08-30):
 # the decoded RGB8 goes back out as PNG through the zen encoder so the zensim
 # feature extractors (PNG/JPEG readers) can consume avif/jxl/webp corpus rows.
-verify-decode = ["dep:zencodec", "dep:zenpixels", "dep:zenjpeg", "zenjpeg/zencodec", "dep:zenpng", "dep:enough"]
+verify-decode = ["dep:zencodec", "dep:zenpixels", "dep:zenjpeg", "zenjpeg/zencodec", "dep:zenpng", "dep:enough", "dep:zenpixels-convert"]
 # NB: zenavif's zencodec impls are unconditional (no `zencodec` feature there);
 # zenjpeg and zenjxl gate their `*DecoderConfig` types behind their own
 # `zencodec` feature, so enable it explicitly. zenwebp's are unconditional
@@ -114,6 +114,10 @@ zenwebp = { path = "../../zenwebp", package = "zenwebp", optional = true, defaul
 # --decode-list PNG writer (R1b): re-encode the decoded RGB8 so the PNG/JPEG-only
 # zensim feature extractors can read avif/jxl/webp corpus rows.
 zenpng = { version = "0.1.4", optional = true, default-features = false }
+# The canonical pixel-format converter (u16->u8 `v>>8`, gray broadcast, alpha
+# drop, channel reorder). Same crate zenmetrics' decode.rs funnels through, so
+# a bitstream decoded by --decode-list matches what the fleet extractor saw.
+zenpixels-convert = { version = ">=0.2.16, <0.4.0", optional = true }
 enough = { version = "0.4", optional = true }
 
 [[bench]]
