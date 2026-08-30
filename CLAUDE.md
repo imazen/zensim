@@ -12,6 +12,46 @@ implements its A1-A5/A9 candidates.
 
 ## Known Bugs
 
+- **⛔ THE STORED 372-COL masked/IW BLOCK IS PRE-FIX AND THREAD-DEPENDENT — THE
+  RUNTIME PROFILE B IS NOT THE EVALUATED PROFILE B (found + measured 2026-08-30,
+  OPEN as a DATA issue; the extractor is correct and is NOT to be changed).**
+  Every `*_372col_2026-05-15.parquet` under
+  `/mnt/v/zen/zensim-training/2026-05-15-full-features/` — **which is
+  `bake_verdict`'s DEFAULT `--features-root`, i.e. the root under every
+  `--regime 372` verdict ever published** — carries a masked (`f228..299`) + IW
+  (`f300..371`) block that today's extractor does not reproduce, and that was
+  **never reproducible**: at `58e6f8d8` (the commit those tables record as their
+  own build) the block is a function of `RAYON_NUM_THREADS` — 1/2/8/28 give four
+  different outputs, T1-vs-T28 moving 100 % of rows on all 144 slots by up to
+  |Δ| 0.086. Cause: `2dab8f30` (2026-05-17) — the activity map read `bufs.mu1`
+  at strip-overlap rows the fused V-blur never writes — plus `6af83b60`'s
+  pre-2026-06-09 `rayon::current_num_threads()`-derived band layout, which chose
+  where those rows fell. Both are FIXED; HEAD is bit-identical across thread
+  counts and across the two v1 entry paths, and `2dab8f30` → HEAD is **0 cells
+  over the golden tolerance** on 4,292 × 372. `f0..155` + `f156..227` never
+  drifted (bit-identical stored↔HEAD on cid22val), so this is masked/IW only.
+  **What this means for numbers you read:** shipped **B** puts 23 of its 95 live
+  inputs in `f228..371`, including its largest weight (`f353`, norm 182.4).
+  Matched-row, same bake, same pixels — stored root → fresh root: CID22 SROCC
+  **0.87638 → 0.88212**, KonJND **0.54665 → 0.64967**, AIC-3 0.77743 → 0.79410,
+  TID 0.78866 → 0.79691, KADID 0.82008 → 0.80426 (KADID is B's train==val CHEAT
+  corpus). Per-pair the **dial** shifts mean **−4.98** (CID22) / **−5.86**
+  (KonJND) zensim points, >0.5 pt on 99.9 %/100 % of pairs, max 17.4 — and
+  `Zensim::compute` at `codec_target` matches the FRESH prediction to 8 decimals
+  on 10/10 sampled pairs. **So: do NOT cite a `--regime 372` verdict number for
+  a `uses_f156_371` bake as the runtime's behaviour, and do not compare a
+  stored-root number with a fresh-root one.** B's training tables carry the same
+  pre-fix values (`canonical-2026-05-21/train/{kadid,tid}` are row-order
+  identical to the 2026-05-15 root), so B is fit on pre-fix and serves post-fix.
+  Gate against recurrence: `zensim/tests/v1_feature_width_pure_function.rs`
+  (`v1_372_is_bit_identical_across_rayon_pool_sizes`,
+  `v1_masked_and_iw_blocks_are_thread_invariant`). Fresh tables + drift matrix +
+  `_MANIFEST.json`: `/mnt/v/output/zensim/v1-extractor-drift-2026-08-30/`.
+  Record: `benchmarks/v1_extractor_drift_2026-08-30.md`,
+  `docs/DATASET_HISTORY.md` §3.27. **Registered, not executed:** rebuild the
+  canonical 372 root at HEAD as a NEW dated root (seconds of CPU), re-verdict
+  the B lineage, re-extract B's training legs (~227k pairs — a fleet wave).
+
 - **✅ RESOLVED 2026-08-06 (appendix V) — THE CID22 B9 BAND WAS DEGENERATE AND
   F8 READ AN ABSOLUTE VALUE.** Kept here because **every per-band number
   published before 2026-08-06 is still wrong** and 160 board cells still carry
@@ -195,7 +235,23 @@ Quick paths:
 - Master inventory: `~/work/zen/_ml-inventory-2026-05-20/00-MASTER-SYNTHESIS.md` (7-part forensic inventory of repos + parquets + datasets, 2026-05-20)
 - Worktree audit: `~/work/zen/_ml-inventory-2026-05-20/01-zensim.md`
 
-The 2026-05-20 byte-equivalence audit (`10-canonical-build-audit.md`) confirmed current zensim main produces features bit-equivalent to all 13 canonical-2026-05-21 parquets (sub-ULP precision). No build drift; trustworthy as-is. The `cvvdp_iwssim_LARGE_372col.parquet` (73,300 rows, 85.5 MB, sha256: 14c205332701b5ff6f2842a8d60f8ac1282f8be3d5cd89c11700e1e4b864a20f) lives at `canonical-2026-05-21/features/` — extracted 2026-05-20 to fill the f300..f371 IW-pool gap.
+⚠ **CORRECTED 2026-08-30 — the 2026-05-20 byte-equivalence audit
+(`10-canonical-build-audit.md`) sampled ONLY `f0..f99`.** This paragraph used to
+read "confirmed current zensim main produces features bit-equivalent to all 13
+canonical-2026-05-21 parquets (sub-ULP precision). No build drift; trustworthy
+as-is." That conclusion is correct **for `f0..f99`** — the audit's own §1 says
+*"emits f0..f99"* and its tolerance is
+`max_abs_diff(extracted_f0..f99, parquet_f0..f99)` — and `f0..f99` is entirely
+inside the **basic** block, the one block that did not drift. It does **NOT**
+extend to `f156..371`: the masked (`f228..299`) and IW (`f300..371`) blocks of
+every 2026-05-15-era 372-col table differ from today's extractor on **100 % of
+rows** (max_abs 0.0374 / 0.1235 on cid22val), and
+`canonical-2026-05-21/train/{kadid,tid}.parquet` carry those same pre-fix values
+(row-order identical to the 2026-05-15 root on `f0`/`f228`/`f300`/`f353`). See
+the Known Bug below and `benchmarks/v1_extractor_drift_2026-08-30.md`. The
+audit's §5 softening of the `DATA_PROVENANCE.md` "semantically incompatible"
+warning rests on the same 100-column sample and is likewise scoped to basic.
+The `cvvdp_iwssim_LARGE_372col.parquet` (73,300 rows, 85.5 MB, sha256: 14c205332701b5ff6f2842a8d60f8ac1282f8be3d5cd89c11700e1e4b864a20f) lives at `canonical-2026-05-21/features/` — extracted 2026-05-20 to fill the f300..f371 IW-pool gap.
 
 ## ★ THE 924-FEATURE PARQUETS (folded+append STREAMING regime) — the current-era datasets (2026-07-27/28)
 

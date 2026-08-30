@@ -121,7 +121,7 @@ fn v1_with_ref_entry_emits_372_at_every_r1b_size_class() {
         let (r, d) = pair(w, h, 0x51DE);
         let pre = precompute_reference_with_scales(&r, w, h, cfg.num_scales)
             .unwrap_or_else(|e| panic!("precompute failed at {w}x{h}: {e:?}"));
-        let n = compute_zensim_with_ref_and_config(&pre, &d, w, h, cfg.clone())
+        let n = compute_zensim_with_ref_and_config(&pre, &d, w, h, cfg)
             .unwrap_or_else(|e| panic!("with-ref compute failed at {w}x{h}: {e:?}"))
             .features()
             .len();

@@ -748,3 +748,92 @@ the pairs count and exits 3 (`ZENSIM_AB_ALLOW_MISSING=1` is the caller's visible
 opt-out). That guard catches a DROPPED row; the new width gate catches a SHORT
 one. Record: `benchmarks/r1b_keyed_rebuild_2026-08-30.md` §8.5(d) +
 `benchmarks/v1_width_defect_2026-08-30.md`.
+
+### §3.27 — the STORED 372-col masked/IW block was a function of the thread count (2026-08-30)
+
+**Thought-why:** "the 2026-05-15 canonical 372 tables and today's extractor
+disagree on masked/IW — three and a half months of extractor evolution."
+(§8.5(b) of `benchmarks/r1b_keyed_rebuild_2026-08-30.md`, priced there at
++0.0060 SROCC for B on CID22 and left as an unexplained cross-era gap.)
+
+**Actual why:** ONE commit, and the stored side of the comparison was never
+reproducible in the first place. `2dab8f30` (2026-05-17,
+*"principled per-channel H-blur activity for masked/IW features"*) replaced the
+activity-map reference — which read `bufs.mu1` at strip-**overlap** rows that
+the fused V-blur never writes, i.e. whatever the buffer-reuse cascade left there
+— with a per-channel `H_blur(src_c)`. Its own message names the blast radius:
+*"Affects masked (228..300) and IW (300..372) feature blocks. Basic 228 features
+are unchanged."* Combined with `6af83b60`'s pre-fix band layout
+(`num_bands = rayon::current_num_threads().min(total_strips)`, made geometry-only
+2026-06-09), the thread count chose where those overlap rows fell — so the
+pre-fix masked/IW block was **machine-dependent**.
+
+**Measured** (`benchmarks/v1_extractor_drift_2026-08-30.md`; artifacts +
+`_MANIFEST.json` at `/mnt/v/output/zensim/v1-extractor-drift-2026-08-30/`):
+
+- **The stored table does not reproduce at its own build commit.** A probe built
+  at `58e6f8d8` — the commit `_MANIFEST.md` records for the 2026-05-15 tables —
+  run at `RAYON_NUM_THREADS` 1 / 2 / 8 / 28 produces **four different**
+  504×372 outputs. T=1 vs T=28 moves **100 % of rows on all 144 masked/IW slots,
+  up to |Δ| 0.086**, while basic + peaks have **zero** cells outside the golden
+  tolerance. At HEAD the same four runs give **one** md5.
+- **Blast radius is exactly masked+IW.** stored-vs-HEAD on cid22val (4,292
+  pairs): `f0..155` and `f156..227` **bit-identical** (max_abs 0), `f228..371`
+  differ on 100 % of rows (max_abs 0.0374 masked / 0.1235 IW). Pixels are
+  therefore identical, and HEAD's with-ref path == HEAD's plain path
+  bit-for-bit, so neither decode nor entry path is a confound.
+- **Nothing since.** `2dab8f30` → HEAD is **0 cells over tolerance** on
+  4,292 × 372 (residual 5.55e-17 on 18 scale-0 IW slots).
+- **Era map:** `2026-05-15-full-features` is PRE-fix.
+  `ext720-canonical-2026-07-22` and HEAD are the SAME post-fix era (they differ
+  only on the 439 rows where the zen_io decoder disagrees with the `image`
+  crate, and those differ in basic too). `r1b-pools944-2026-08-30` is post-fix
+  but on the FOLD path (the documented `folded720_*` padded-width class).
+- **`canonical-2026-05-21/train/{kadid,tid}.parquet` carry the SAME pre-fix
+  values** — row-order identical to the 2026-05-15 root on `f0`, `f228`, `f300`,
+  `f353`. So the whole training lineage of the 372 era inherits them.
+
+**Product consequence (the reason this is a §3 entry and not a footnote):**
+shipped **Profile B** has 23 of its 95 live inputs in `f228..371` and its single
+largest-magnitude input is `f353 = iw/s2/c2/iw_mse` (L2 norm 182.4, 2× the next).
+Same bake, same pairs, same pixels, matched row sets, two feature tables:
+CID22 SROCC **0.87638 → 0.88212**, KonJND **0.54665 → 0.64967**, AIC-3
+0.77743 → 0.79410, TID 0.78866 → 0.79691, KADID 0.82008 → **0.80426** (KADID is
+B's train==val CHEAT corpus, so a memorization score falling is the expected
+sign). Per-pair the **dial** moves by mean **−4.98** (CID22) / **−5.86**
+(KonJND) zensim points, 99.9 % / 100 % of pairs by more than 0.5 points, max
+17.4. The product API (`Zensim::compute` at `codec_target`) matches the
+fresh-root prediction to 8 decimals on 10/10 sampled pairs — so **the runtime B
+is not the evaluated B**, and the published B numbers are stored-root values.
+
+**Why nobody caught it in May.** The 2026-05-20 canonical-build audit
+(`~/work/zen/_ml-inventory-2026-05-20/10-canonical-build-audit.md`) that
+`zensim/CLAUDE.md` cites as "bit-equivalent … no build drift; trustworthy as-is"
+**sampled only `f0..f99`** — its own §1 says *"emits f0..f99"* and its tolerance
+is `max_abs_diff(extracted_f0..f99, parquet_f0..f99)`. `f0..f99` is entirely
+inside the basic block, the one block that did NOT drift. It ran at `fdd1b8f6`
+(2026-05-19), already past `2dab8f30`, so a single masked slot in the sample
+would have caught this three months earlier. Its §5 softening of the
+`DATA_PROVENANCE.md` "semantically incompatible" warning rests on the same
+100-column sample and does not extend to `f156..371`.
+
+**Guard.** `zensim/tests/v1_feature_width_pure_function.rs` gained
+`v1_372_is_bit_identical_across_rayon_pool_sizes` and
+`v1_masked_and_iw_blocks_are_thread_invariant` — rayon pools of 1/2/3/5/8 (and
+1/2/4/7/16) on both `compute_zensim_with_config` and `Zensim::compute`, at sizes
+spanning several `STRIP_INNER = 32` strips. The extractor was NOT changed and no
+tolerance was widened: the pre-fix values were undefined buffer contents, not a
+different-but-valid definition.
+
+**Registered, not executed:** rebuild the canonical 372 root at HEAD as a NEW
+dated root (cheap — cid22 8.8 s, kadid 14.9 s, tid 4.2 s, konjnd 2.9 s, aic3
+14.2 s at 8 jobs) rather than overwriting in place; re-verdict every
+372-input `uses_f156_371` board cell; re-extract B's training legs (safesyn
+196,086 + cid22_train 17,611 + kadid 10,125 + tid 3,000 + `hdr_v3mix`) and
+consider a retrain — a fleet wave, not a step. `aic4` cannot be refreshed: its
+source CSV under `/mnt/v/backups/...` no longer exists on this box.
+
+**Separate defect found in passing, NOT fixed:** `zensim-validate --extract-only
+--format tid2013` yields **2,880 of 3,000** TID pairs today — 120 rows silently
+dropped on decode/extract failure, surfaced only as a `2880 valid pairs` count.
+Same "silent skip" class already documented for `dataset_metric_baseline`.

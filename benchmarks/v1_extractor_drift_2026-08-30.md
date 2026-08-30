@@ -43,20 +43,31 @@ CID22-val, 4,292 pairs, **identical pixels** (see §1c), same tool family:
 | masked `f228..299` | 4,292 (1.0000) | 288,418 | 0.0374 | 0.872 |
 | IW `f300..371`   | 4,292 (1.0000) | 294,081 | 0.1235 | 0.893 |
 
-kon504 (the KonJND JPEG half, 504 pairs; stored `konjnd_jpeg504_372_2026-08-29.parquet`
-is a **byte-exact row subset** of `konjnd_features_372col_2026-05-15.parquet`, verified):
+KonJND-1k, all 1,008 pairs, both sides built through the same `load_konjnd` pairing
+rule (the kon504 stored table `konjnd_jpeg504_372_2026-08-29.parquet` is a **byte-exact
+row subset** of `konjnd_features_372col_2026-05-15.parquet`, verified — so the JPEG
+half is contained here):
 
 | block | rows over tol | cells over tol | max abs over tol | max rel over tol |
 |---|---:|---:|---:|---:|
-| basic  | 1 (0.0020) | 122 | 0.00494 | 0.135 |
-| peaks  | 1 (0.0020) | 72  | 0.0421  | 0.150 |
-| masked | 504 (1.0000) | 34,525 | 0.0302 | **1.000** |
-| IW     | 504 (1.0000) | 35,254 | 0.1200 | **1.000** |
+| basic  | **0** (0.0000) | **0** | 0 | 0 |
+| peaks  | **0** (0.0000) | **0** | 0 | 0 |
+| masked | 1,008 (1.0000) | 68,870 | 0.0302 | **1.000** |
+| IW     | 1,008 (1.0000) | 70,341 | 0.1200 | **1.000** |
 
-The single kon504 row that moves in basic/peaks is `SRC0437` — one JPEG whose decode
-has changed; it is 1 row of 504 and it is NOT the drift under study. `max_rel = 1.000`
-on kon504's channel-2 masked/IW slots means one side is exactly zero — the pre-fix
-B-channel activity was literally the stale plane described in §2.
+`max_rel = 1.000` on the channel-2 masked/IW slots means one side is exactly zero — the
+pre-fix B-channel activity was literally the stale plane described in §2.
+
+**One row needs a caveat, and it is a pair-list defect, not drift.** A first pass ran
+kon504 off the committed pairs TSV
+`/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv` and showed
+exactly one row moving in basic/peaks (`SRC0437`, max_abs 0.0421). That is **not** a
+decode difference: `SRC0437`'s mean PJND is exactly **58.50**, and the loader picks the
+distortion level with `mean.round()`, which in Rust is half-away-from-zero → `059`,
+while the TSV names `SRC0437_JPEG_058.jpg`. **Two different distorted images.** Both
+files exist. Re-run through `load_konjnd` on both sides, `SRC0437`'s `f0..227` delta is
+**exactly 0.0** and the whole-corpus basic/peaks count is 0 as tabulated. Registered in
+§4c.7 — anything keyed on that TSV inherits the substitution on that one row.
 
 **The drift is confined to masked + IW, at every scale, on every row.** Worst slots
 (CID22, by `max_abs`): `f313 iw/s0/c2/iw_ssim1` 0.1235, `f301 iw/s0/c0/iw_ssim1`
@@ -87,9 +98,9 @@ reproduce — which is §2.
 
 - **Decode.** basic + peaks are **bit-identical** (`max_abs = 0`, 0 slots differing)
   between the stored 2026-05-15 CID22 table and today's extraction across all 4,292
-  pairs — including the 536 JPEG distortions. The `image` crate decode has not moved
-  for this corpus, so the masked/IW difference cannot be pixels. (kon504's one
-  `SRC0437` row is the exception, isolated and counted.)
+  pairs — including the 536 JPEG distortions, and on all 1,008 KonJND pairs (0 cells
+  over tolerance in basic+peaks). The `image` crate decode has not moved for either
+  corpus, so the masked/IW difference cannot be pixels.
 - **Entry path.** The stored CID22/KADID/TID tables came from `zensim-validate
   --extract-only`, which uses `precompute_reference_with_scales` +
   `compute_zensim_with_ref_and_config`; the fresh probe uses the plain
@@ -322,7 +333,15 @@ tolerance was widened.
    `/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG_AIC_reconstructed_jnd_scores.csv`
    no longer exists on this box. The stored `aic4_features_372col_2026-05-20.parquet`
    is pre-fix like the rest and currently unrefreshable.
-6. **Separate defect, found in passing, not fixed here:** today's
+6. **The `SRC0437` pair-list defect.** The committed
+   `/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv` names
+   `SRC0437_JPEG_058.jpg` where `load_konjnd` (and therefore every canonical KonJND
+   table) uses `SRC0437_JPEG_059.jpg`: the mean PJND is exactly 58.50 and Rust's
+   `f64::round` is half-away-from-zero while whatever built the TSV rounded to even.
+   One row of 504; both files exist; it changes basic/peaks by up to 0.042. Any keyed
+   kon504 work off that TSV — including the R1b 504-row slice — carries the
+   substitution. Not fixed here (that TSV is another lane's input).
+7. **Separate defect, found in passing, not fixed here:** today's
    `zensim-validate --extract-only --format tid2013` yields **2,880 of 3,000** TID
    pairs — 120 rows (4 %) silently dropped on decode/extract failure, printed only as a
    `2880 valid pairs` count. The stored table has all 3,000. This is the
@@ -352,7 +371,7 @@ tolerance was widened.
   comes from `bake_verdict` → `zensim_validate::panel` → `zenstats`. Nothing is
   re-derived.
 - **Weak points, stated:** (a) the TID comparison is on 2,880 of 3,000 rows because of
-  §4c.6, and the missing 120 are decode failures, i.e. not a random subset; (b) aic4 is
+  §4c.7, and the missing 120 are decode failures, i.e. not a random subset; (b) aic4 is
   absent; (c) §3d's BHdr/A rows are structural arguments from shared code, not
   measurements; (d) the "one ULP since 2dab8f30" result is on CID22 + kon504 content
   only — it does not prove ULP-equality on content those corpora do not contain.
