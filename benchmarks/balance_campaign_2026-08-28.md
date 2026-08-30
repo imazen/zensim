@@ -3162,3 +3162,29 @@ kernels at `k = k_iw = 4`), so:
   walk's existing activity pass and the weighted art-L4 sums into the fused V-blur
   kernel (no `store_mu`, no second edge pass) — that is where the "accumulators
   only" structure actually lives.
+
+### PASS-TIMEOUT INCIDENT: every big-cell pass died at the 1800 s default — all five workers relaunched with a 4 h pass budget (2026-08-30 13:5xZ); svt ssim2 gap backfilled on CPU
+
+- **What happened:** the three aom encode boxes' pass 1 (13:20Z) and the tower's score
+  pass 1 all ended `rc=124` at +30 min — the worker's per-pass `timeout` (default
+  `ZEN_PASS_TIMEOUT=1800`). A pass claims a CHUNK of cells; the cap-lifted chunks hold
+  ≥ 12 MP screen renditions at cpu 4 (~2-3 min each), and a 12 MP score_file job covers 12
+  variants, so no pass could finish. The worker's timeout handler releases the chunk claim
+  ("spot preemption — released chunk claim … for fast requeue"), so nothing was lost — the
+  cells simply re-entered the gap every 30 min and the boxes made no progress (drain watcher:
+  `idle_all=0`, three `rc=124` lines). i134's sequencer showed the same shape
+  (`consec_fails=1`).
+- **Fix:** `lan_score_launch.sh` already forwards `ZEN_PASS_TIMEOUT`; the GPU sequencer did
+  not — zenmetrics `0cc07589` adds `ZM_PASS_TIMEOUT` → `-e ZEN_PASS_TIMEOUT` to
+  `_lan_gpu_seq_driver.sh` / `lan_gpu_sequence.sh`. All five relaunched with
+  `ZEN_PASS_TIMEOUT=14400` (verified on the containers: r7900x, tower, i134): encode boxes
+  13:57Z, tower cpusf (caps intact: cpuset 0-23 / shares 256 / 24 GiB), i134 sequencer
+  (VRAM cap 8 GiB). Stops were `docker stop -t 90` (SIGTERM) before `rm`, so the in-flight
+  chunk claims were released, not orphaned — `reassert` at the drain covers any that were
+  not.
+- **svt harvest ssim2 gap CLOSED on CPU:** the 921 cells (19 renditions ≥ 12 MP) whose
+  ssim2-gpu was null were scored locally with `zenmetrics batch --metric ssim2` (fast-ssim2,
+  run-heavy 1026 s, peak RSS 1.96 GiB) → keyed sidecar
+  `harvest-2026-08-30/ssim2_cpu_backfill.parquet` (921 rows × ID + `ssim2_cpu`, sha
+  `31dcb3df…`, manifest beside it). Kept as its OWN column: CPU-vs-GPU ssim2 equivalence on
+  the overlap is not measured here, so a consumer coalesces only after that check.
