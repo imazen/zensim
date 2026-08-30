@@ -205,6 +205,63 @@ def assemble_from_features(a) -> int:
     return 0
 
 
+BAND_EDGES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1.01]
+
+
+def stratified_slice(a) -> int:
+    """The W-LIN round-7b FULL-RANGE hf cut (`benchmarks/wlin_round7_rawframe_2026-08-30.md`
+    §13.1) — a RE-CUT of an existing leg, never a re-extraction.
+
+    Round 7's `tbig_hf` kept only `human_score >= 0.90`, so the head it fed had
+    never seen a low-quality encode and its raw output saturated (measured: raw
+    span 0.366 on the dial grid against 0.75-0.84 for every full-range head).
+    This cut keeps the hf band whole AND gives every lower band real mass:
+
+        keep ALL rows with human_score >= --strat-keep-above   (may be unset)
+        plus up to --strat-per-band rows from each band of BAND_EDGES below it
+
+    Selection inside a band is a deterministic global stride (`idx[::step]`), the
+    same mechanism the leg itself is built with, so the cut carries NO RNG and is
+    reproducible from the flags alone.
+    """
+    t = pq.read_table(a.band_from)
+    y = np.asarray(t["human_score"].combine_chunks(), dtype=np.float64)
+    keep: list[int] = []
+    rows_desc = []
+    hi_cut = a.strat_keep_above
+    for i in range(len(BAND_EDGES) - 1):
+        lo, hi = BAND_EDGES[i], BAND_EDGES[i + 1]
+        idx = np.flatnonzero((y >= lo) & (y < hi))
+        if hi_cut is not None and lo >= hi_cut:
+            sel = idx                      # the hf band is kept whole
+        elif len(idx) > a.strat_per_band > 0:
+            step = max(1, len(idx) // a.strat_per_band)
+            sel = idx[::step][: a.strat_per_band]
+        else:
+            sel = idx
+        keep.extend(sel.tolist())
+        rows_desc.append({"band": [lo, hi], "available": int(len(idx)), "kept": int(len(sel))})
+        print(f"  band [{lo:.2f},{hi:.2f}) available {len(idx):7d} kept {len(sel):7d}", flush=True)
+    keep_arr = np.array(sorted(keep), dtype=np.int64)
+    out_t = t.take(pa.array(keep_arr))
+    yk = np.asarray(out_t["human_score"].combine_chunks(), dtype=np.float64)
+    print(f"stratified cut: {out_t.num_rows} of {t.num_rows} rows; target mean {yk.mean():.4f} "
+          f"[{yk.min():.4f}, {yk.max():.4f}]", flush=True)
+    outp = Path(a.out)
+    pq.write_table(out_t, outp, compression="zstd", compression_level=7)
+    man = {"file": str(outp), "sha256": sha256_file(outp), "rows": out_t.num_rows,
+           "mode": "stratified-band-slice", "band_edges": BAND_EDGES,
+           "strat_per_band": a.strat_per_band, "strat_keep_above": a.strat_keep_above,
+           "mechanism": "deterministic global stride within each band; the band at/above "
+                        "--strat-keep-above is kept whole. No RNG.",
+           "bands": rows_desc, "target_mean": float(yk.mean()),
+           "source": {"path": str(a.band_from), "sha256": sha256_file(Path(a.band_from)),
+                      "rows": t.num_rows}}
+    (outp.parent / (outp.name + "._MANIFEST.json")).write_text(json.dumps(man, indent=1))
+    print(f"wrote {outp} + manifest")
+    return 0
+
+
 def band_slice(a) -> int:
     """The `tbig_hf` leg = the TOP TARGET BAND of the tbig leg, nothing else.
 
@@ -256,6 +313,11 @@ def main() -> int:
                          "gated on the ref_basename sequence AND the target)")
     ap.add_argument("--regime", help="regime tag written as a column + parquet metadata")
     ap.add_argument("--band-from", help="build the tbig_hf leg: the top target band of this leg")
+    ap.add_argument("--strat-per-band", type=int, default=0,
+                    help="round-7b full-range cut: max rows kept per band below "
+                         "--strat-keep-above (deterministic stride; 0 = plain --band-min cut)")
+    ap.add_argument("--strat-keep-above", type=float, default=None,
+                    help="keep EVERY row at or above this target (the hf band, kept whole)")
     ap.add_argument("--band-min", type=float, default=0.90,
                     help="band floor on human_score (0.90 reproduces the registered "
                          "tbig_hf leg set-exactly)")
@@ -266,6 +328,8 @@ def main() -> int:
         a.emit_keys = True
     if a.from_features:
         return assemble_from_features(a)
+    if a.band_from and (a.strat_per_band or a.strat_keep_above is not None):
+        return stratified_slice(a)
     if a.band_from:
         return band_slice(a)
     if not a.views_root:

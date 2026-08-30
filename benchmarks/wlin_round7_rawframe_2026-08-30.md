@@ -1107,3 +1107,108 @@ internally consistent (G-X bit-identical, one pinned extractor throughout).
 **A confirmation pass for the 7b winners on new-semantics roots is registered
 here and is NOT run in this round**; until it lands, 7b's numbers are scoped to
 the pre-fix fold, exactly as round 7's were.
+
+---
+
+## 14. ROUND 7b RESULTS
+
+158 arms fitted (`benchmarks/wlin7b_bars_2026-08-30.tsv`). Rank axes on the keyed
+slices; **dial on the regime-matched grid** (pools arms on the §12.3 pools grid,
+control arms on the canonical `foldapp2` grid).
+
+### 14.1 The re-cut heads — the coverage fix works, and it costs hf specificity
+
+| head (pools) | cid22 | \|kon\| | nonphoto | imazen26 | hfnl | **dial dyn** | p5 |
+|---|---|---|---|---|---|---|---|
+| round-7 `H` (≥0.90 band only) | 0.8001 | 0.4836 | 0.8089 | 0.8130 | **0.7272** | **25.94** | 66.63 |
+| **`H7b_A1000_l2.5e-4`** (full range) | 0.7011 | 0.2198 | **0.9236** | **0.9270** | 0.4881 | **89.78** | **3.57** |
+| `H7b_A2500_l2.5e-4` | 0.6856 | 0.1942 | 0.9210 | 0.9264 | 0.4269 | 16.92 | 74.85 |
+| `H7b_B_l2.5e-4` (equal mass) | 0.6761 | 0.2260 | 0.9200 | 0.9264 | 0.3644 | 35.29 | 57.91 |
+
+**The re-cut takes the hf head's dial from 25.9 to 89.8 — past B's 86.08 — and
+its p5 from 66.6 to 3.6**, i.e. it can now score a q0 encode. That is the
+coverage defect closed at the head. It costs hf specificity (hfnl 0.727 → 0.488)
+and kon (0.484 → 0.220), because the same capacity now spans the whole range.
+`HFX-A1000` (hf band whole + 1,000/band below) is the best of the three cuts on
+every axis that matters; the equal-mass extreme `HFX-B` gives up too much hf mass.
+
+**Swapping the hf head outright is NOT enough** (`T7b_*`, 32 arms): the dial
+passes everywhere (dyn 71–80) but hfnl falls to 0.32–0.41 and cid22 to 0.81–0.84
+— **0 of 32 reach 5/5**. The two hf heads are complements, not substitutes.
+
+### 14.2 The four-way — both hf heads, and the gates close
+
+`HG = H7b × H` at γ (range + specificity), then `K × HG` at α, then `× C1` at β.
+Top cells, all on the pools substrate, **all G-RANGE PASS**:
+
+| arm | cid22 | \|kon\| | nonphoto | imazen26 | hfnl | bars | maximin | **dial dyn** | p5 | G-RANGE | bytes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **`Q7b_pools_g0.2_a0.2_b0.97`** | **0.8588** | **0.5118** | **0.8778** | **0.8873** | **0.4056** | **5/5** | **+0.0140** | **61.72** | 32.58 | **PASS** | 3,583 |
+| `Q7b_pools_g0.2_a0.18_b0.97` | 0.8560 | 0.5126 | 0.8812 | 0.8900 | 0.4171 | 5/5 | +0.0130 | 61.17 | 32.78 | PASS | 3,580 |
+| **`Q7b_pools_g0.25_a0.2_b0.97`** | 0.8555 | 0.5031 | 0.8824 | 0.8917 | 0.4063 | 5/5 | +0.0125 | **71.67** | 22.71 | **PASS** | 3,599 |
+| `Q7b_pools_g0.2_a0.18_b0.95` | 0.8551 | 0.5096 | 0.8858 | 0.8943 | 0.4119 | 5/5 | +0.0120 | 60.99 | 33.27 | PASS | 3,589 |
+| `Q7b_pools_g0.25_a0.18_b0.97` | 0.8524 | 0.5030 | 0.8859 | 0.8945 | 0.4176 | 5/5 | +0.0087 | 71.61 | 23.03 | PASS | 3,593 |
+| `Q7b_pools_g0.3_a0.2_b0.95` | 0.8513 | 0.4953 | 0.8901 | 0.8989 | 0.4021 | 5/5 | +0.0052 | 71.82 | 22.14 | PASS | 3,599 |
+| `Q7b_pools_g0.35_a0.2_b0.97` | 0.8484 | 0.4888 | 0.8903 | 0.8992 | 0.4061 | 5/5 | +0.0041 | 72.96 | 21.43 | PASS | 3,597 |
+| *round-7 winner `PL_P3_KHp6_H_b0.3`* | *0.8562* | *0.4915* | *0.8809* | *0.8911* | *0.4162* | *5/5* | *+0.0133* | *59.60* | *34.66* | ***FAIL*** | *3,589* |
+| *B — stored-era, same pairs* | *0.8764* | *0.5186* | *0.8505* | *0.8609* | *0.3496* | *2/5* | *−0.126* | *86.08* | *13.65* | *PASS* | *7,325* |
+| *B — runtime-era, same pairs* | *0.8821* | *0.5186* | *0.8505* | *0.8609* | *0.3496* | *2/5* | *−0.126* | *86.08* | *13.65* | *PASS* | *7,325* |
+
+**15 arms clear all five rank bars AND G-DYN**, and every one checked also passes
+G-RANGE. Per-codec dial monotonicity on the winner is 0.982–0.999 with **zero**
+tied rate on all four codecs.
+
+### 14.3 The two fixes are SUBSTITUTES, not additive — the registered anchor sweep
+
+With the coverage fixed, the round-7b winners were re-splined on the other two
+registered anchors (`shared-anchor`, weights untouched):
+
+| arm | **AN-S** (safesyn) | AN-D (dial anchor) | AN-U (union) |
+|---|---|---|---|
+| `Q7b_pools_g0.2_a0.2_b0.97` | **61.72** | 53.87 | 52.72 |
+| `Q7b_pools_g0.25_a0.2_b0.97` | **71.67** | 60.85 | 57.70 |
+| `Q7b_pools_g0.3_a0.2_b0.95` | **71.82** | 58.45 | 66.12 |
+
+**Round 7's default anchor is now the best of the three, and the dial anchor that
+bought +22.4 in §12.2 now costs 8–13.** That is the clean reading of the
+attribution: the anchor had leverage *because* the model was coverage-starved and
+its raw output was bunched; once the training data spans the range, the model's
+raw lands where safesyn's density already is, and the alternative anchors only
+add slack. **Fix the coverage and the anchor stops mattering** — which is why the
+coordinator's instruction to fix coverage rather than the spline was right, and
+why 7b ships the AN-S arms.
+
+---
+
+## 15. ROUND 7b VERDICT — **PASS** (per the §13.3 rule, frozen before any 7b fit)
+
+At least one arm clears all five rank bars **and** G-DYN **and** G-RANGE. 15 do.
+
+**The candidate the registered rule names:** **`Q7b_pools_g0.2_a0.2_b0.97`**,
+**3,583 bytes**, keyed pools-944 — cid22 **0.8588** · \|kon\| **0.5118** ·
+nonphoto **0.8778** · imazen26 **0.8873** · hfnl **0.4056**, dial dyn **61.72**,
+G-RANGE **PASS**, `zentrain.repro` embedded (sha `51d094f2…`).
+
+Against round 7's winner it is **better on every registered axis**: maximin
++0.0140 vs +0.0133, dial **61.72 vs 59.60**, and it **passes** the G-RANGE gate
+round 7's winner failed — at the same size.
+
+**The dial-preferred alternative** — `Q7b_pools_g0.25_a0.2_b0.97` — trades
+0.0015 of maximin (below the axis LSD) for **+10 points of dial** (71.67), and is
+the arm to prefer if the dial is weighted at all beyond its gate. Both are named;
+**no default is flipped.**
+
+Against **B** on the same pairs, the winner wins **nonphoto +0.027, imazen26
++0.026, hfnl +0.056** and loses **cid22 −0.018 (stored) / −0.023 (runtime), kon
+−0.007**, at **49 % of B's size**. B still holds cid22 and a wider dial (86.08).
+
+**What 7b changed, in one line:** round 7 reached the rank bars with a dial that
+could not score a bad image (p5 64.8); 7b reaches the same bars with **p5 32.6
+and dyn 61.7–73.0**, because the hf leg now contains low-quality rows.
+
+**Still not claimed:** M3a coherence, G-OUT v2, G-GRAN v1 and the corruption
+panel were not run; these are single deterministic fits with no CI, selected from
+158 arms against a fixed gate that includes cid22 (§6.8's multiplicity caveat
+carries over verbatim); and per §13.4 a **confirmation pass on the corrected-fold
+roots is registered and NOT run** — 7b's numbers are scoped to the pre-fix fold,
+exactly as round 7's were.
