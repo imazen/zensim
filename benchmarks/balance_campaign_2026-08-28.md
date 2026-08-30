@@ -3866,3 +3866,28 @@ Mission memory saved (user_zensim_mission).
   reached stage 4 — **the fold has `score()`**); then the byte change + both paths' gate re-pins go
   in one/adjacent commits. Fleet metric suffix remains a registered zenmetrics item for the
   re-extraction fleet lane.
+
+## 2026-08-31 ~03:1xZ — ROUND 15: R2→LAN mirror COMPLETE (zenmetrics lane, 13 commits, latest `10493507`)
+
+**457.54 GiB moved, 32 prefixes verified equal on both stores, 0 mismatches; nothing deleted from
+R2.** Inventory from USAGE (48 rows): P0 369.6 GiB (all 61 bigcodec box tars — the round-7 fetch
+bottleneck — + all 53 variant indexes + canonical/2026-06-27 metadata + zenwebp_lossless encodes
+40,473 + eval-grids + canonical-2026-05-21 + both kadis canonicals + every ext/tbig/kadis/hdr
+table) + P1 213.5 GiB; 609 GiB / 1.45 M objects measured and deliberately NOT mirrored; refs/jobs/
+blobs already present (verified, not re-copied). **6 of 7 bigcodec datasets are now byte-complete
++ fetchable via tar+index on the LAN store** (each proven by hashing a real member offset from
+both stores); `zenjpeg_lossy` has tars but NO index exists anywhere (needs building). Four
+`encodes/` plain-GET prefixes deferred (2.77 M objects; bytes covered by tars; do tower-LOCALLY
+after the Unraid mover — running 3 d 21 h — drains). Capacity: array 20 T free (42 %);
+SeaweedFS writes round-robin across tiers ⇒ NVMe cache took +210 GiB (849 G free) — first
+snapshot said untouched, corrected in the doc.
+
+**Traps found (all recorded in `zenmetrics/benchmarks/r2_lan_mirror_2026-08-30.md` + the reusable
+`scripts/lanstore/mirror_r2.sh` with the rules baked in):** `s5cmd ls` UNDERCOUNTS
+non-deterministically against SeaweedFS (40,450/40,466/40,467 vs true 40,473 — any s5cmd-diffed
+mirror re-transfers phantoms forever; aws-lister only); **`s3env.sh`'s LAN arm re-exports the LAN
+key AS `R2_ACCESS_KEY_ID`** — anything sourcing it then talking to real R2 gets EMPTY listings,
+not an auth error (registered for a zenfleet fix, unassigned); ~333 small-object PUT/s took the
+tower to load 30.7 / 48.9 % iowait / S3 unresponsive (recovered ~12 min; load gate now in the
+tool; large sequential is fine); `zen-lanstore` runs volumeSizeLimitMB=1024 (30× under default →
+1,123 volume files; flagged, unchanged); pre-existing dangling `volume 473` filer retry loop.
