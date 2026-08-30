@@ -11107,15 +11107,179 @@ mod tests {
         }
     }
 
+    /// CHARACTERISATION + GATE for the padded-width divergence class, and the
+    /// constructive test of the one hypothesis that makes a 372 subset of the
+    /// fold bit-exact.
+    ///
+    /// THE DIVERGENCE. v1 walks `simd_padded_width(width)` columns
+    /// (`streaming.rs:871`) and fills the extra ones by reflect-101 mirroring
+    /// (`streaming.rs:3185` `mirror_pad_columns`), so its pools and means
+    /// include columns that are not in the image; the fold walks `width`.
+    /// Un-padded, that is worth up to 81.6 % relative on a pool slot
+    /// (`folded720_v1_pools_match_v1_path`'s 200x150 line), and EVERY common
+    /// production width is in the divergent class because `simd_padded_width`
+    /// adds a further 16 whenever the 16-aligned value is >= 512 and an even
+    /// multiple of 16 (512->528, 576->592, 1152->1168, 2304->2320).
+    ///
+    /// THE FIX, MEASURED HERE. Mirror-pad the RGB input by the same rule and
+    /// run the fold on the padded image: sRGB->XYB is per-pixel, so
+    /// pad-then-convert and convert-then-pad are the same values, and if the
+    /// walk agrees on everything else the outputs must coincide. They do —
+    /// **17 of 20 geometries below are BIT-IDENTICAL across all 372 slots**,
+    /// including every tight width, every even non-tight width (200->208,
+    /// 576->592, 1152->1168, 100->112) and every odd non-tight width
+    /// (127->128, 129->144, 201->208, 255->256, 577->592). So a bit-exact
+    /// 372-subset mode is a PRE-PAD away and needs NO change to the 944
+    /// regime's pooling — which matters, because the shipped 944-era tables
+    /// were built with the current fold semantics and must stay reproducible.
+    ///
+    /// THE RESIDUAL, and it is a HEIGHT effect, not a width class. Three
+    /// cells still differ, all at `h = 93`, and only when the width is
+    /// non-tight: (126,93) 64/372 slots worst 8.920e-7, (127,93) 50/372 worst
+    /// 1.098e-6, (255,93) 37/372 worst 2.287e-7. The SAME widths are exact at
+    /// h = 64 / 96 / 128, and h = 93 is exact at the tight width 128 — so it
+    /// is an interaction between the pad columns and the pyramid's row-group
+    /// tiling at that height (93 -> 46 -> 23 -> 11 rows), not a property of
+    /// any width. The magnitudes sit inside the golden policy's `1e-5 * scale`
+    /// but are NOT bit-exact, so per the ship gate this class is REPORTED,
+    /// not shipped over.
+    ///
+    /// This test asserts the classification in BOTH directions: the exact
+    /// cells must stay bit-exact, and the bounded cells must stay bounded. A
+    /// regression either way — a new divergence, or a silent fix that makes
+    /// the bounded cells exact — fails it and should be read, not re-baselined.
+    #[cfg(feature = "training")]
+    #[test]
+    fn v1_padded_width_divergence_is_column_padding() {
+        // (w, h, max_rel_allowed): 0.0 means "must be bit-exact".
+        const CELLS: &[(usize, usize, f64)] = &[
+            // tight: simd_padded_width(w) == w
+            (96, 64, 0.0),
+            (208, 144, 0.0),
+            (592, 80, 0.0),
+            (128, 93, 0.0),
+            // even, non-tight
+            (200, 150, 0.0),
+            (200, 151, 0.0),
+            (576, 96, 0.0),
+            (1152, 72, 0.0),
+            (100, 96, 0.0),
+            // odd, non-tight
+            (127, 64, 0.0),
+            (127, 96, 0.0),
+            (127, 128, 0.0),
+            (129, 96, 0.0),
+            (201, 96, 0.0),
+            (255, 96, 0.0),
+            (577, 80, 0.0),
+            // the h=93 x non-tight-width interaction (see the doc above)
+            (126, 93, 2.0e-6),
+            (127, 93, 2.0e-6),
+            (255, 93, 2.0e-6),
+        ];
+        for &(w, h, max_rel) in CELLS {
+            let pw = crate::blur::simd_padded_width(w);
+            let src = textured_image(w, h, 7);
+            let dst = quantize_distort(&src, w, h);
+            let cfg = crate::ZensimConfig {
+                extended_features: true,
+                compute_iw_features: true,
+                allow_multithreading: false,
+                ..Default::default()
+            };
+            let v1 = crate::compute_zensim_with_config(&src, &dst, w, h, cfg).unwrap();
+            let v1f = v1.features();
+            assert_eq!(v1f.len(), 372, "{w}x{h}: v1 must emit 372");
+
+            // Reflect-101 column mirror — byte-for-byte the rule
+            // `mirror_pad_columns` applies to the XYB planes.
+            let pad = |img: &[[u8; 3]]| -> Vec<[u8; 3]> {
+                let period = 2 * (w - 1).max(1);
+                let mut out = Vec::with_capacity(pw * h);
+                for y in 0..h {
+                    out.extend_from_slice(&img[y * w..y * w + w]);
+                    for i in 0..(pw - w) {
+                        let m = (w + i) % period;
+                        let sx = if m < w { m } else { period - m };
+                        out.push(img[y * w + sx]);
+                    }
+                }
+                out
+            };
+            let (psrc, pdst) = (pad(&src), pad(&dst));
+
+            let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+            let mut scratch = V2Scratch::new();
+            let folded = z
+                .compute_folded720_append_features_streaming(
+                    &RgbSlice::new(&psrc, pw, h),
+                    &RgbSlice::new(&pdst, pw, h),
+                    V2NewFeatureToggles {
+                        v1_pools: V1PoolsMode::Full,
+                        ..V2NewFeatureToggles::default()
+                    },
+                    &mut scratch,
+                )
+                .unwrap();
+            let ff = folded.features();
+
+            let mut worst = (0usize, 0.0f64);
+            let mut n_differ = 0usize;
+            for i in 0..372 {
+                if ff[i].to_bits() != v1f[i].to_bits() {
+                    n_differ += 1;
+                    let (a, b) = (ff[i], v1f[i]);
+                    let rel = if b.abs() > 1e-12 {
+                        (a - b).abs() / b.abs()
+                    } else {
+                        (a - b).abs()
+                    };
+                    if rel > worst.1 {
+                        worst = (i, rel);
+                    }
+                }
+            }
+            eprintln!(
+                "PADPROBE {w}x{h} (v1 pads {w}->{pw}): {n_differ}/372 slots differ, worst f{} rel {:.3e}",
+                worst.0, worst.1
+            );
+            if max_rel == 0.0 {
+                assert_eq!(
+                    n_differ, 0,
+                    "{w}x{h}: pre-padded fold must be BIT-EXACT to v1-372, but {n_differ} slots \
+                     differ (worst f{} rel {:.3e}). Do not widen this to a tolerance — a new \
+                     divergence here means the pre-pad equivalence broke.",
+                    worst.0, worst.1
+                );
+            } else {
+                assert!(
+                    n_differ > 0,
+                    "{w}x{h} is registered as the bounded h=93 interaction class but came out \
+                     BIT-EXACT. That is good news, not a pass: re-measure the class and move \
+                     this cell to the exact list."
+                );
+                assert!(
+                    worst.1 <= max_rel,
+                    "{w}x{h}: bounded class regressed — worst f{} rel {:.3e} exceeds {max_rel:.1e}",
+                    worst.0,
+                    worst.1
+                );
+            }
+        }
+    }
+
     /// POOL PARITY GATE (2026-08-30, the carrier lane): with
     /// [`V2NewFeatureToggles::v1_pools`] the fold replays v1's extended
     /// strip section per v1-aligned band, so the peak / masked / IW blocks
     /// (`f156..372`) are **BIT-IDENTICAL** to the frozen v1 372 extraction
     /// at every width where the basic block is (`simd_padded_width(w) ==
     /// w`); the padded-width class documents its divergence the same way
-    /// (`folded720_v1_basic_matches_v1_path`). Also gates that the toggle
-    /// changes NOTHING else — basic + v2 slots bit-equal to the toggle-off
-    /// fold — and that the toggle-off fold still zeroes the block.
+    /// (`folded720_v1_basic_matches_v1_path`), and
+    /// `v1_padded_width_divergence_is_column_padding` shows that class is
+    /// entirely v1's mirror-padded columns — pre-pad the input and 17 of 20
+    /// geometries become bit-exact. Also gates that the toggle changes
+    /// NOTHING else — basic + v2 slots bit-equal to the toggle-off fold —
+    /// and that the toggle-off fold still zeroes the block.
     #[cfg(feature = "training")]
     #[test]
     fn folded720_v1_pools_match_v1_path() {

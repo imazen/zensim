@@ -5318,7 +5318,7 @@ mod tests {
                 // ring pulled from the wrong slot cannot coincide with the
                 // right one.
                 let k = (i * 2654435761usize) % 65521;
-                *v = (k as f32) * 1.0009765625 - 30000.0;
+                *v = (k as f32) * (1.0 + 1.0 / 1024.0) - 30000.0;
             }
             for &radius in &[1usize, 2, 5, 8] {
                 if 2 * radius + 1 > w.max(1) * 4 {
@@ -5361,7 +5361,7 @@ mod tests {
         (0..w * h)
             .map(|i| {
                 let k = ((i + salt) * 2654435761usize) % 65521;
-                (k as f32) * 1.0009765625 - 30000.0
+                (k as f32) * (1.0 + 1.0 / 1024.0) - 30000.0
             })
             .collect()
     }

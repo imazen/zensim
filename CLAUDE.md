@@ -487,6 +487,77 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
 - Trainer-bin globals must be set BEFORE the training call — the best_val relocation
   silently moved the regularizer setup post-training (caught by the decay-debug counter).
 
+## EXTRACTION PERF + THE BUFFERED PATH — read before touching either walk (2026-08-30)
+
+Full record: [`benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md`](benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md).
+
+**Naming trap first.** `compute_multiscale_stats_streaming` (`streaming.rs:862`)
+is the **BUFFERED** path — it materialises whole-image XYB pyramids; "streaming"
+there means band-processing inside a scale. The genuinely memory-streaming v1
+form is `compute_multiscale_stats_streaming_strips*`. The fold
+(`foldapp_streaming_walk`) is a third thing. At least two sessions have been
+misled by this.
+
+**The fold is an EXTRACTOR, not a metric.** `ZensimV2Result` has no `score()`.
+Every scoring entry — `compute`, `compute_with_ref`, `*_and_diffmap`, `classify`,
+`compute_pu_linear*`, `compute_streaming_strips*` — runs the buffered walk, as
+does attribution's basic canvas (`attribution.rs:1378`). **Buffered is not
+removable today**: no score in the fold, no ref-cached fold form, the
+buffered-native attribution canvas, and the width divergence below. `zensim-gpu`'s
+only CPU oracle is `compute_extended_features` too.
+
+**Parallelism is the structural asymmetry.** Buffered parallelises band-per-strip,
+degree `layout_h.div_ceil(STRIP_INNER)` — it grows with image height. The fold
+parallelises per channel, **degree fixed at 3**, over a producer with no rayon.
+MEASURED 1T→8T: buffered **2–4×**, fold **1.1–1.5×**; 1T→28T buffered 4.6–6.5×,
+fold 1.8–2.0×. Consequence for the SAME 216 v1 pool features: the fold is
+**0.63–0.91×** buffered's cost serial, and **1.09–3.30×** at 8 threads. **Name a
+thread budget before trading one path for the other.** zenmetrics dodges this by
+running the fold `.with_parallel(false)` and parallelising across pairs.
+
+**Per-pixel cost RISES with size in every arm** (buffered 25.6→31.3 ms/MP,
+zeroed fold 49.2→63.7 across 576²→2304²), so an `α + β·pixels` fit returns a
+NEGATIVE intercept — the linear model failing, not a fixed-cost saving. Never
+quote a single "ms/MP" for these walks.
+
+**The fold-vs-v1 372 divergence is entirely v1's mirror-padded columns.** v1
+walks `simd_padded_width(w)` (`streaming.rs:871`) and mirror-fills the extras
+(`streaming.rs:3185`); the fold walks `w`. `simd_padded_width` adds a further
+16 whenever the 16-aligned value is ≥512 and an even multiple of 16, so
+**512/576/1152/2304 are all divergent** — up to 81.6 % on a pool slot, and ~60 %
+of real corpus rows. **Pre-pad the RGB input by the same reflect-101 rule and 17
+of 20 geometries go BIT-EXACT** (gate:
+`v1_padded_width_divergence_is_column_padding`), with no change to the 944
+regime's pooling. Residual: three cells at **h = 93** at non-tight widths,
+≤1.098e-6 — a pad-column × row-group-tiling interaction, not a width class.
+**`--regime` note:** `folded720_v1_pools_match_v1_path` is
+`#[cfg(feature = "training")]`; the plain
+`--features custom-profiles,feature-regime-v2` invocation compiles it out
+silently. Always include `training` when the pool block is in scope.
+
+**Perf lever that shipped: the rem-ring.** Horizontal box blurs vectorise ACROSS
+rows, so each x-step assembled a vector from 16 (or 8) strided scalar loads —
+twice, add-side and remove-side. For every `x >= diam` those are the SAME column
+(`x - r`), so half the gathers were redundant. A stack ring of the last `diam`
+add-vectors removes them, bit-exactly. MEASURED (callgrind Ir, 576², v3 tier):
+buffered v1-372 **−8.29 %**, zeroed-944 fold **−5.57 %**, live-pools fold
+**−6.22 %**. Gates: three `to_bits()` reference tests in `blur.rs`, each with its
+negative control run.
+
+**Known wart, deliberately NOT fixed:** `fused_blur_h_mu_inner_{v4,v4x,v3}` use
+`sum += add - rem` in their scalar tails and `(sum + add) - rem` in their vector
+bodies, so tail rows differ from vector rows in the last ulp or two (2528.7349 vs
+2528.7344). Pre-existing; `fused_blur_h_ssim` already fixed it via a masked
+vector tail. Converting `mu` would move v1's shipped bytes — golden-gate policy,
+not a drive-by.
+
+**Profiling here:** `perf` is unusable (`perf_event_paranoid = 4` under WSL2
+refuses even user-space events). Use callgrind on a `--no-default-features`
+build (valgrind cannot execute AVX-512) — and remember the resulting profile is
+the **v3/SSE tier**, so kernel *ratios* may shift at v4x. Put the profiling
+`CARGO_TARGET_DIR` under `target/` — `.gitignore`'s `/target` does NOT match a
+sibling `target-cg`, and 54 MiB of build output reached main that way once.
+
 ## LATENCY + TOKEN DISCIPLINE — idle waiting is re-charged, not cached (2026-08-04)
 
 **MEASURED, `benchmarks/rnd_cycle_audit_2026-08-04.md`.** Over the 2026-08-03/04
