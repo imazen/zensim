@@ -2550,3 +2550,42 @@ scales badly** (at 1024² it is 3× v1 single-thread and 7× v1 multithreaded
 1024²+ v2 scaling is the perf lane worth a proper profile (`v2_stage_profile`
 / `v2_feature_group_cost` are the instruments). Logs:
 `~/tmp/fused944_bench.log`, `~/tmp/v2_speed_baseline.log`.
+
+### AVIF-HDR DATAGEN — STEP 1+2 EXECUTED: first-cell GPU gate PASSED (2026-08-30 ~04:4xZ)
+
+**Ledger truth (the "failed GPU wave" re-read from `hdrgrid-sf-gpu-20260807`
+ledger_snapshot + 71 parts):** r7900x-med attempted ONLY the zenjxl jobs
+(456 attempts: 384 done, 72 `encoder_panic`); the 760 svt + 760 gainmap +
+304 jxl rows marked `worker_lost` carry **attempts=0** and worker
+`audit-blobs-scan` — the audit's `--scan-errors` requeue vocabulary, NOT a
+lost worker. Their blobs (from the 08-26 image era) hold
+`"error":"hdr decode: unsupported HDR input extension: .bin"` on every
+variant (verified on the svt blob `cd5dd909…` and gainmap `11b29758…`) —
+the extension-sniff gap of the exec-gpu-without-`hdr-gainmap` image.
+So step 1 of the plan was ALREADY satisfied: the current GPU pin
+`exec-gpu-cuda13-6d4f9963` decodes both blob types; no new GPU image needed.
+A CPU HDR executor `exec-zensim944hdr-1f92f30c` (musl; sweep,png,jpeg,webp,
+avif,jxl,cpu-metrics,hdr-gainmap,hdr-svt; digest `421d278e…`) was built +
+pushed locally for the encode/feature arms and pinned in `fleet.env`
+(zenmetrics `bacf504c`). Side find: two sessions had landed the same
+`zenanalyze` `[patch.crates-io]` key in zenmetrics' Cargo.toml → every build
+failed at manifest parse ("duplicate key"); deduped + pushed (`e93814d6`).
+
+**First-cell gate (registered "first cell before scale-up"):** a 2-cell
+manifest (`s3://zentrain/jobs/hdrgrid-sfgpu-probe-20260830/`, kind
+`score_file [ssim2-gpu, iwssim-gpu] hdr:true`, one svt blob `6fc90aa4…`
++ one gainmap blob `0e9030c9…`) run via `lan_gpu_sequence.sh i134 gpu` on
+the RTX 3070 (cuda13 image, `ZM_VRAM_CAP=7.5e9`): **pass 1 done=2 failed=0
+in ~3 s**, blobs carry real scores, no `error` keys:
+
+| cell | ssim2-gpu | iwssim-gpu |
+|---|---|---|
+| zenav1-svt · 1541_nature_blue-wildflower… scale768x1024 | 81.000 | 0.99358 |
+| jpeg-gainmap · 1230_interiors_empty-tiled-pool… scale1200x1600 | 27.258 | 0.94885 |
+
+**Residual wave design (job system's own tool, zero new encodes):**
+`zenfleet-ctl gap --manifest <sf-gpu manifest> --ledger <snapshot + 71
+parts> --out residual.json` → declare as a new run → `lan_gpu_sequence.sh
+i134 gpu <run>`. Expected residual = 1,824 never-run + 72 jxl panics (one
+retry each; genuine panics re-poison with current-era evidence). Then the
+3-arm HDR leg, then the zenavif arm declare.
