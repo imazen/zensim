@@ -19,7 +19,9 @@
 #             NOT scripts/sota944/screen944_monotone.tsv
 #   target    human_score, target-scale 1.0, NO per-corpus min-max framing
 #   solver    bvls + benchmarks/feature_sign_mask_2026-05-26.tsv (f372+ free)
-#   lam 0 · tau 0 · n_sweeps 200 · tol 1e-10   (all defaults; bit-exact confirms)
+#   lam 0 · n_sweeps 200 · tol 1e-10 (defaults; bit-exact confirms)
+#   tau       0.005 — recovered from the packed weights (530 of 954 exactly zero,
+#             |w| mean 0.0077320594 matched to 10 digits; tau=0 gives 340/0.0081902)
 #
 # Usage:
 #   scripts/carrier_head_fit.sh <arm> <features-root> <n_feat> <screen.tsv> <out-dir>
@@ -28,6 +30,17 @@
 #   CHF_LEG_<leg>       parquet basename override per leg (no .parquet)
 #   CHF_GRAM_DIR        reuse frozen grams from this dir as <prefix><leg>.npz
 #   CHF_GRAM_PREFIX     prefix for the above (e.g. l954_)
+#   CHF_TAU             pre-pack zero threshold (default 0.005, the recovered value)
+#   CHF_MM01=1          build/consume the PER-CORPUS MIN-MAX target frame instead of the
+#                       raw one. The ledger's no-carrier arm used this and its carrier
+#                       arms did not (see the doc's 2x2) — this knob exists so that
+#                       asymmetry can be reproduced and priced, never repeated by
+#                       accident.
+#   CHF_SLICE           --slice-file: restrict the CD to these coordinates. Forcing
+#                       w=0 on a coordinate is EXACTLY equivalent to zeroing that
+#                       column in the table (its S[j,k]*w[k] terms vanish), so this
+#                       gives a same-gram / same-rows / same-binary block ablation
+#                       with no table surgery.
 #   CHF_ANCHOR          anchor parquet basename (default: the safesyn leg)
 #   CHF_EVAL            space-separated LABEL=<abs parquet> pairs -> `gate` |SROCC|
 #   CHF_VERDICT_ROOT    features-root for `bake_verdict` (adds signed SROCC + bars)
@@ -59,6 +72,7 @@ for leg in $ORDER; do
       echo "== gram $ARM/$leg $(ts)"
       "$BDR" gram --parquet "$ROOT/$(leg_file "$leg").parquet" \
         --target human_score --space shaped --transforms-tsv "$SCREEN" \
+        ${CHF_MM01:+--target-minmax01} \
         --expect-n-feat "$NFEAT" --out "$g"
     fi
   fi
@@ -69,8 +83,9 @@ ANCHOR="$ROOT/${CHF_ANCHOR:-$(leg_file safesyn)}.parquet"
 BAKE="$OUT/${ARM}.bin"
 echo "== fit $ARM $(ts)"
 "$BDR" fit-lasso "${GARGS[@]}" \
-  --space shaped --target human_score \
-  --solver bvls --bounds-tsv "$SIGNS" --lam 0 \
+  --space shaped --target "human_score${CHF_MM01:+__mm01}" \
+  --solver bvls --bounds-tsv "$SIGNS" --lam 0 --tau "${CHF_TAU:-0.005}" \
+  ${CHF_SLICE:+--slice-file "$CHF_SLICE"} \
   --transforms-tsv "$SCREEN" \
   --anchor-parquet "$ANCHOR" --anchor-stride 37 \
   --anchor-target human_score --anchor-scale 100 \
