@@ -520,3 +520,110 @@ blend. This is an independent second pricing of the campaign's registered lane
 | **G-U** (byte resolution) | **PASS** — 100 % of 208,169 rows resolve (104,584 object, 103,585 tar-range) |
 | **G-T** (teacher graft) | **PASS** — 111,068 rows, target mean 0.6142450490816594, source bit-identical to the registered `tsafesyn_954` target |
 | **G-R1** (regime purity) | in the assembler; aborts on a dead pool block in a `*pools` table or a live one in a folded table |
+
+---
+
+## 6.6 THE DIAL DEFECT — measured, and AMENDMENT R7-A2 declared against it
+
+The round-6 bars are a **rank** gate. The campaign's own two-panel mandate says a
+rank-only verdict is a regression, so the dial panel `bake_verdict` computes on
+every invocation was read for every arm. It says something the bars cannot:
+
+| arm | dial dynamic range | p5 | p95 | mono | bars/5 |
+|---|---|---|---|---|---|
+| B (shipped) | **86.08** | 13.65 | 99.72 | 0.9792 | 2 |
+| `K` (4-leg head) | 69.96 | 24.32 | 94.28 | 0.9904 | 2 |
+| `C1` / `C2` (full-mix heads) | 66.22 / 65.99 | 26.43 / 25.53 | 92.66 / 91.52 | 0.9909 / 0.9940 | 2 |
+| `B2_C2K_a0.6` (no H) | 68.25 | 24.22 | 92.47 | 0.9951 | 4 |
+| **`H` (hf-only head)** | **25.94** | **66.63** | 92.57 | 0.9949 | 2 |
+| **every 5/5 arm** | **27.3 – 32.0** | **60.4 – 65.0** | 92.2 – 95.1 | 0.9953 – 0.9964 | **5** |
+
+**The hf-only head cannot score below ~66 on the dial, and every arm that
+inherits enough of it to clear `hfnl ≥ 0.40` inherits that floor.** The cause is
+data coverage, not fitting: `tbig_hf` is the `human_score ≥ 0.90` band, so the
+head has never seen a low-quality encode and its output saturates there. A
+monotone output spline cannot undo saturation.
+
+This is a **product-relevant failure** — the metric is a dial first — and it is
+reported here rather than left for a later battery, because the five-bar gate
+would otherwise have shipped past it. Monotonicity itself is *better* than B's on
+every 5/5 arm (0.995–0.996 vs 0.979, tied ≤ 0.006), so the defect is specifically
+the reachable RANGE, not curve shape.
+
+**AMENDMENT R7-A2 (declared before the arms are fit).** The obvious in-recipe
+repair is to give the hf head full-range rows and let the hf band carry extra
+weight, instead of restricting it to the band:
+
+> **H′** = `tbig 1.0 · tbig_hf w` at the raw frame, `w ∈ {3, 5, 10}`, both solvers
+> (`bvls` with the sign mask, and `lasso` at λ ∈ {2.5e-4, 5e-4} with `tau 0`), then
+> the same spine/blend chain as §6.2.
+
+Round 6 tried hf-upweighting (`hf-w 5/10`) and measured **hfnl NEGATIVE, cid22
+0.28–0.54** — but that was at the min-max frame, i.e. inside the exact
+frame-poison §6.3 isolates, so it does not predict the raw-frame behaviour. The
+prediction being tested is that at one frame the upweighted mix keeps the hf
+signal *and* the low-quality rows. Bars, selection rule and every other arm are
+unchanged. The result is reported whatever it says; if H′ does not clear the
+bars, the §6.2 arms stand as they are, with the dial defect stated as their
+limitation.
+
+### 6.7 R7-A2 RESULT — the frontier is real, and it is a data-coverage limit
+
+**H′ heads (`tbig 1.0 · tbig_hf w`, raw frame), on the zero-block control:**
+
+| head | cid22 | \|kon\| | nonphoto | imazen26 | hfnl | dial dyn | p5 |
+|---|---|---|---|---|---|---|---|
+| `Hp_lasso_w10_l2.5e-4` | 0.7019 | 0.1862 | **0.9168** | **0.9215** | **0.4629** | **80.49** | 11.51 |
+| `Hp_lasso_w5_l2.5e-4` | 0.6923 | 0.1827 | **0.9161** | **0.9216** | **0.4216** | **80.10** | 10.66 |
+| `Hp_lasso_w3_l2.5e-4` | 0.6862 | 0.1839 | **0.9152** | **0.9215** | 0.3932 | **81.27** | 11.36 |
+| `Hp_bvls_w10` | 0.7070 | 0.1806 | **0.9110** | **0.9174** | **0.4347** | 20.46 | 71.70 |
+| (for reference) `H` hf-only | 0.8001 | **0.4836** | 0.8089 | 0.8130 | **0.7272** | 25.94 | 66.63 |
+
+**The amendment's prediction holds, and round 6's hf-upweighting result does not
+transfer to the raw frame.** R6 measured hf-w 5/10 as "hfnl NEGATIVE, cid22
+0.28–0.54"; at the raw frame the same shape reads hfnl **+0.39…+0.46** and cid22
+0.69–0.71 — still a specialist, but a coherent one, and with a **dial dynamic
+range of 80–81, essentially B's 86**. It also posts the round's best family axes
+outright (nonphoto 0.9168, imazen26 0.9215).
+
+Note the solver split: the **lasso** H′ heads keep the full dial range; the
+**BVLS** ones collapse it (dyn ~20). The sign box makes every admissible
+contribution monotone-positive, which saturates the low end. Recorded as
+measured; not diagnosed further here.
+
+**The frontier, over 120 fitted cells.** Blending H′ into the K/C chain gives
+healthy dials but cannot reach `hfnl ≥ 0.40` (best `P3_KHp4_H_b0.5`: hfnl 0.3987,
+i.e. 0.0013 short, dyn 68.3); pulling in enough of the hf-only `H` to clear the
+bar pulls the dial back down. The two best 5/5 cells sit at opposite ends of that
+trade:
+
+| arm | cid22 | \|kon\| | nonphoto | imazen26 | hfnl | bars | maximin | **dial dyn** | p5 | mono | bytes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `T3_KH01_C1_b0.95` | 0.8559 | 0.5434 | 0.8842 | 0.8891 | 0.4582 | **5** | **+0.013** | 30.32 | 64.77 | 0.9953 | 3,190 |
+| `P3_KHp6_H_b0.3` | 0.8580 | 0.4856 | 0.8801 | 0.8885 | 0.4043 | **5** | +0.011 | **37.67** | 56.13 | 0.9953 | 3,190 |
+| `P3_KHp4_H_b0.5` (4/5 − hfnl by 0.0013) | 0.8362 | 0.4202 | 0.8963 | 0.9045 | 0.3987 | 3 | −0.010 | **68.28** | 23.44 | 0.9940 | 3,190 |
+| *B* | *0.8764* | *0.5186* | *0.8505* | *0.8609* | *0.3496* | *2* | *−0.126* | *86.08* | *13.65* | *0.9792* | *7,325* |
+
+**Applying the registered rule as written** (§4.3: PRIMARY bars, TIE-BREAK 1
+maximin) selects **`T3_KH01_C1_b0.95`**. Stated plainly: the two 5/5 arms differ
+by **0.002 in relative maximin margin — about 0.0017 absolute on cid22, below the
+≈0.004 axis LSD recorded for this instrument** — so the tie-break does not
+meaningfully order them, while the **dial panel separates them decisively** in
+the other direction. The rule is applied as registered rather than rewritten
+after the fact; the dial reading is reported beside it, and it is the reason
+neither arm is put forward as a ship candidate.
+
+### 6.8 MULTIPLICITY — stated, not buried
+
+**120 arms were fitted and scored in this round**, and the five-bar gate is read
+on a fixed evaluation set that includes **cid22, the sacred human holdout**. The
+passing margins are small (maximin **+0.005 to +0.013**, i.e. ~0.004–0.011
+absolute on the binding axis). With 120 cells and margins of that size, the
+correct reading of "5/5" is **"this recipe family reaches the bars", not "this
+particular α/β/λ is worth 0.002 more than that one"** — and the round-7 arms are
+single deterministic fits with no confidence interval (§3.5).
+
+The result that does NOT depend on the search is the mechanism (§6.3, §6.4): the
+target frame is worth **+0.154 kon / +0.105 hfnl / two bars** on one fixed
+composition, and the generalist head flips from hfnl-anti to hfnl-positive with
+that single switch. That is a one-variable measurement, not a selection.

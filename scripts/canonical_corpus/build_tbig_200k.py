@@ -112,9 +112,48 @@ def assemble_from_features(a) -> int:
         print(f"FATAL: features table lacks {len(missing)} of {a.n_feat} columns "
               f"(first: {missing[:4]})", flush=True)
         return 2
-    feats = feats.select(["encoded_filename"] + feat_cols)
-    joined = safe_key_join_arrow(keys.select(["encoded_filename"]), feats,
-                                 join_keys=["encoded_filename"], bring=feat_cols)
+    if a.features_key_col == "__rowid__":
+        # ROW-ALIGNED mode. `v2_ab_extract` preserves its pairs-TSV row order (R1b
+        # §8.5a — it is the only v1/944 extractor that does), and the pairs TSV is
+        # emitted from the key table's own row order, so position IS the key here
+        # and is STRONGER than a name join: it identifies the exact (ref, dist)
+        # pair, not a filename that could repeat. The gate is correspondingly
+        # strict — BOTH the reference-basename sequence AND the target must match
+        # row for row, or the assembly aborts.
+        if feats.num_rows != keys.num_rows:
+            print(f"G-J FAIL: features {feats.num_rows} rows, keys {keys.num_rows}",
+                  flush=True)
+            return 2
+        # v2_ab_extract writes the reference STEM (`I01.png` -> `I01`), while the
+        # key table carries the full rendition filename, whose "extension" may be a
+        # scale token (`o_9158.png.scale85x128.png`). Strip only a real image
+        # extension, on both sides, so the comparison is well defined.
+        img_ext = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".avif", ".jxl"}
+
+        def _norm(x: str) -> str:
+            q = Path(str(x)).name
+            return Path(q).stem if Path(q).suffix.lower() in img_ext else q
+
+        kb = [_norm(x) for x in keys["ref_basename"].to_pylist()]
+        fb = [_norm(x) for x in feats["ref_basename"].to_pylist()]
+        if kb != fb:
+            bad = next(i for i, (x, y) in enumerate(zip(kb, fb)) if x != y)
+            print(f"G-J FAIL: ref_basename differs at row {bad}: {kb[bad]!r} vs {fb[bad]!r}",
+                  flush=True)
+            return 2
+        yk = np.asarray(keys["human_score"].combine_chunks(), dtype=np.float64)
+        yf = np.asarray(feats["human_score"].combine_chunks(), dtype=np.float64)
+        if not np.allclose(yk, yf, rtol=0, atol=1e-9):
+            print(f"G-J FAIL: human_score differs, max|d| {np.abs(yk - yf).max():.3e}",
+                  flush=True)
+            return 2
+        print(f"G-J PASS (row-aligned): {keys.num_rows} rows, ref_basename sequence "
+              f"equal, target max|d| {np.abs(yk - yf).max():.3e}", flush=True)
+        joined = feats.select(feat_cols)
+    else:
+        feats = feats.select(["encoded_filename"] + feat_cols)
+        joined = safe_key_join_arrow(keys.select(["encoded_filename"]), feats,
+                                     join_keys=["encoded_filename"], bring=feat_cols)
     if joined.num_rows != keys.num_rows:
         print(f"FATAL: join produced {joined.num_rows} rows for {keys.num_rows} keys", flush=True)
         return 2
@@ -212,7 +251,9 @@ def main() -> int:
                          "preserving the key table's row order")
     ap.add_argument("--keys-in", help="key sidecar for --from-features")
     ap.add_argument("--features-key-col", default="encoded_filename",
-                    help="column in --from-features carrying the encoded_filename value")
+                    help="column in --from-features carrying the encoded_filename value; "
+                         "'__rowid__' selects ROW-ALIGNED assembly (position is the key, "
+                         "gated on the ref_basename sequence AND the target)")
     ap.add_argument("--regime", help="regime tag written as a column + parquet metadata")
     ap.add_argument("--band-from", help="build the tbig_hf leg: the top target band of this leg")
     ap.add_argument("--band-min", type=float, default=0.90,
