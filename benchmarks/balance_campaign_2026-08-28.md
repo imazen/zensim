@@ -2939,6 +2939,18 @@ cells), kb35 3/3, kb36 2/2, kb37 3/3, aom-encode lib 85/85. Record: zenav1-aom `
 "KB-41 roots #7-#13", `CLAUDE.md` KB-41 entry. The datagen wave (below) still runs the
 roots-#3-#6 image; the encoder_panic cells it refuses are re-queued after this lands.
 
+### KB-30 CLOSED + THE 512² SCREEN CAP IS TOO LOW (2026-08-30 ~11:0xZ, zenav1-aom `07d207ba`)
+`cid22_6292444` (the one CID22 photo that diverged at every quantizer at cpu 6 since 2026-08-01)
+is a SCREEN-DETECTED frame: the oracle's ALLINTRA defaults turn palette + IntraBC on for it, and
+the old xbench arm ran the port with both off. Replayed through the executor's own plane dump
+(`ZEN_AOMRS_DUMP_PLANES`) + the KB-41 localizer on the roots-#7-#13 port: **11/11 byte-identical**
+(cq 1..60, cpu 6); the tools-off arm reproduces the old −0.25..−3.7 % byte deltas exactly. No
+per-block dump needed. MEASURED encode+verify time for that 512² screen-detected cell: **0.12 s /
+0.38 s / 3.2 s at cpu 8 / 6 / 4** — so the `ZEN_AOMRS_MAX_SCREEN_MP` 0.25 MP cap (set for the
+40-min 1080p cpu-4 case) is deferring the 512² renditions (0.262 MP) for nothing. Default raised to
+0.30 MP in zenmetrics (`encode.rs`); the running wave keeps 0.25 (a relaunch would orphan its
+in-flight claims); the DEFERRED class is re-queued with the raised cap at the drain.
+
 ### AOM-RS WAVE RELAUNCHED ON THE BYTE-EXACT PORT (2026-08-30 08:39Z) — image `exec-zensim944hdr-47f5ab9c`
 zenmetrics master `0bcede27` (fleet.env CPU pin bumped). Chain: musl rebuild (the new port's unique
 strings confirmed in the binary) → image build + push (digest `5f4f9bd5…`) → `zenfleet-ctl requeue
