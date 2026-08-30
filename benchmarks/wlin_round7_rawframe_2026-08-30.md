@@ -945,3 +945,165 @@ between this round's result and a ship candidate.
   (KonJND as |SROCC|), bars cleared, maximin margin, axes ≥ B, and the source
   fulleval path. Produced by `scripts/wlin7_bars.py --tsv`, which reads
   `rank.<corpus>.srocc_signed` and computes nothing.
+
+---
+
+# ROUND 7b — FIXING THE DIAL COVERAGE GAP
+
+*(User directive: "fix the hf dial coverage gap and rerun round 7." Round 7's
+verdict named the cause; §12 shows that diagnosis was only **half** right.)*
+
+## 12. DIAGNOSIS — a three-way attribution, measured
+
+Round 7 §10 stated the dial compression was "a **data-coverage** limit, not a
+fitting one, and no monotone spline can repair it." That is **true for the hf
+head alone and FALSE for the blends that actually pass the bars.** Two
+measurements separate them.
+
+### 12.1 Raw (pre-spline) spread on the dial grid — saturation is not the blend's problem
+
+`bake_dial_refit predict` over the 4,817-row 944 dial grid, on each bake and on
+its spline-stripped twin (`bake_dial_refit strip`), so the number is the model's
+own output before any calibration:
+
+| bake | RAW p5 | RAW p95 | **RAW span** | dial dyn (fulleval) |
+|---|---|---|---|---|
+| `H` (hf-only head) | 0.5859 | 0.9514 | **0.366** ← narrowest | 25.94 |
+| `C1` | 0.3494 | 0.9238 | 0.574 | 66.22 |
+| `Hp` (hf-upweighted) | 0.2971 | 0.9570 | 0.660 | 80.49 |
+| `K` | 0.2292 | 0.9828 | 0.754 | 69.96 |
+| `T3_KH01_C1_b0.95` (blend) | −0.0719 | 0.7096 | **0.781** | **30.32** |
+| `PL_T3_KH01_C1_b0.85` (blend) | −0.3529 | 0.4860 | **0.839** ← widest | 53.67 |
+
+**The two 3-way blends have the WIDEST raw spread of any bake here and the
+narrowest dials.** Saturation cannot be the explanation for them. The hf head
+alone *is* saturated (0.366, by a wide margin), which is the coverage limit round
+7 named — but it is the blends, not the head, that carry the bars.
+
+### 12.2 The single-variable anchor swap — the blends' compression is the SPLINE
+
+Same bake bytes, same weights, **only the output spline refit**, on the
+registered full-range dial anchor `anchor944_dial.parquet` (2,035 rows,
+`target_score` ∈ [−100, 95.64]) instead of round 7's `safesyn --anchor-stride 37`
+(`bake_dial_refit shared-anchor` — the owner; no retraining, no weight touched):
+
+| bake | dial dyn, safesyn anchor | dial dyn, full-range dial anchor | **Δ** |
+|---|---|---|---|
+| `T3_KH01_C1_b0.95` (blend) | 30.32 | **52.76** | **+22.44** |
+| `H` (hf-only head) | 25.94 | 29.45 | +3.51 |
+| `K` (broad head) | 69.96 | 59.52 | **−10.44** |
+
+**Attribution, stated plainly:**
+
+1. **ANCHOR — ~40 % of the blend's gap to B, and it costs nothing.** Swapping
+   only the spline anchor buys the round-7 winner **+22.4** of its ~56-point
+   deficit, with zero retraining. Round 7's "no monotone spline can repair it"
+   is **WITHDRAWN for the blends**; it stands for the hf head alone (+3.5).
+2. **TARGET COVERAGE — real, and confined to the hf head.** The hf head's raw
+   span is 0.366 against 0.75–0.84 for every full-range head, and the anchor
+   swap barely moves it. This is the piece §13 re-cuts.
+3. **WEIGHTING — a trade, already mapped (round 7 §6.7).** More `H` → higher
+   hfnl, lower dial; the frontier was measured, not assumed.
+
+The safesyn anchor is not "wrong" — it is *better* for `K` (which loses 10.4
+points on the dial anchor). The anchor must match where the model's raw output
+lives, which is why §13 registers it as a swept axis rather than a fixed choice.
+
+### 12.3 A confound checked before it could be quoted: the dial grid's REGIME
+
+The canonical 944 dial grid is `foldapp2` — **f156–371 structurally zero** — so
+round 7 scored its `*pools` arms (which have trained weight in that block) on a
+grid that feeds those slots zeros. That is the wrong-regime read CLAUDE.md
+records, and round 7's "+14.7…+21.7 dial dyn from the pool block" rested on it.
+
+Rather than caveat it, the twin was built: `build_dial944.py` gains
+**`DIAL944_MODE`** (default unchanged) and the grid was re-extracted at
+`foldapp2pools` from the **persisted 2026-07-27 decoded pixels** — no re-encode,
+**G-DIAL 4,817/4,817 matched**. Re-scoring the pools arms on their own regime:
+
+| arm | zero-block grid | pools grid (correct) | Δ |
+|---|---|---|---|
+| `PL_T3_KH01_C1_b0.85` | 53.67 | 54.45 | +0.78 |
+| `PL_P3_KHp6_H_b0.3` | 59.37 | 59.60 | +0.23 |
+| `PL_T3_KH01_C1_b0.95` | 45.07 | 45.83 | +0.76 |
+
+**The confound is ≤ 0.8 points — round 7's pool-block dial claim STANDS.** From
+7b onward every dial number is read on the **regime-matched** grid, and the
+pools grid is an artifact of record.
+
+---
+
+## 13. PRE-REGISTRATION — ROUND 7b (written before any 7b fit exists)
+
+### 13.1 What changes, and what does not
+
+**Unchanged:** the invariant recipe (§3.1 — shaped/trained-bake screen, raw
+`human_score` at scale 1.0, BVLS + sign mask, λ 0, `tau` 0.005; `tau` 0 for
+lasso heads per R7-A1), the substrates, the five rank bars, the instrument, the
+maximin selection rule, and every ban.
+
+**Changed — two axes, both motivated by §12:**
+
+**(a) The hf leg is re-CUT to full range.** This is a **re-cut, not a
+re-extraction**: the pools tbig table already holds all 208,169 rows spanning
+q ∈ {5,15,25,30,40,50,60,70,80,85,90,95} and every target band —
+19,430 rows below 0.10, 1,798 above 0.95. Round 7's `tbig_hf` kept only the
+12,743 rows ≥ 0.90 and that is the whole coverage defect.
+
+| leg | rule | intent |
+|---|---|---|
+| **`HFX-A<N>`** | ALL rows ≥ 0.90 ∪ up to **N** rows per band from the 10 bands below, N ∈ {1000, 2500} | keeps the full hf mass (so the hfnl signal survives) and gives every lower band real weight (so the raw stops saturating) |
+| **`HFX-B`** | equal mass per band, min-band-limited (1,798 × 12 = 21,576) | the uniform-coverage extreme; hf mass drops to 1/12 |
+
+Bands are the 12 registered edges `[0, .1, .2, .3, .4, .5, .6, .7, .8, .85, .9,
+.95, 1.01]` — denser above 0.80, per the campaign's sweep discipline (dense in
+the perceptibility band, **low end included**). Sampling within a band is a
+deterministic global stride, so the cut is reproducible and carries no RNG.
+
+**(b) The output-spline anchor becomes a swept axis** (§12.2 showed no single
+anchor is right for every head):
+
+| anchor | rows | target |
+|---|---|---|
+| **`AN-S`** | safesyn, `--anchor-stride 37` (3,002) | `human_score` × 100 — round 7's default |
+| **`AN-D`** | `anchor944_dial.parquet` (2,035) | `target_score`, scale 1, range [−100, 95.6] |
+| **`AN-U`** | union of the two (5,037), one common target column | full-range **and** codec-realistic |
+
+### 13.2 The gates — the five rank bars, PLUS two dial gates registered here
+
+Rank bars, verbatim and unchanged:
+`kon ≥ 0.40` ∧ `hfnl ≥ 0.40` ∧ `cid22 ≥ 0.845` ∧ `nonphoto ≥ 0.865` ∧ `imazen26 ≥ 0.875`.
+
+**NEW, frozen now, before any 7b fit:**
+
+- **G-DYN — dial dynamic range ≥ 60.0**, read on the **regime-matched** grid.
+  Derivation, stated so it is not tuned later: B reads **86.08**, so 60 is
+  **70 % of the incumbent**; every round-7 5/5 arm sits at **27.3–59.6** and
+  fails it, while `Hp_lasso_w10` already reaches **80.5**, so the bar is both
+  discriminating and demonstrably reachable. **STRETCH: ≥ 75** (87 % of B).
+- **G-RANGE — PASS** (`bake_dial_refit gate`, cid22, < 0.010 % extrapolating).
+  Round 7's rule-selected arm failed this by one row; it is now a gate, not a
+  footnote.
+
+**An arm PASSES round 7b only if all five rank bars AND G-DYN AND G-RANGE hold.**
+Selection among passers is the **unchanged** rule: TIE-BREAK 1 = maximin margin
+over the five rank bars; TIE-BREAK 2 = cid22; size reported, not selected on.
+
+### 13.3 Verdict rule (frozen)
+
+- **PASS** — ≥ 1 arm clears all five rank bars **and** both dial gates. It is
+  named with its size; **no default is flipped**.
+- **PARTIAL** — arms clear the five rank bars but none clears G-DYN, i.e. the
+  coverage fix moves the dial without closing it. The best dial achieved at 5/5
+  is reported with the residual named.
+- **FAIL** — the re-cut does not improve the dial at matched rank. Then round 7's
+  frontier stands as the honest limit of this head class.
+
+### 13.4 Registered confirmation pass (NOT run here)
+
+Another lane is repairing the fold's v1-block semantics (the 60 %-divergence
+class of §7.1). Round 7b runs on the **current** pools-944 substrate, which is
+internally consistent (G-X bit-identical, one pinned extractor throughout).
+**A confirmation pass for the 7b winners on new-semantics roots is registered
+here and is NOT run in this round**; until it lands, 7b's numbers are scoped to
+the pre-fix fold, exactly as round 7's were.

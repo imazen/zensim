@@ -62,7 +62,12 @@ for tag in ("jpeg", "webp", "avif", "jxl"):
             keys.append(key)
             f.write(f"{repfx(r['ref_path'])}\t{repfx(r['dist_path'])}\t{i}\n")
     csvp = f"{WORK}/feat944_{tag}.csv"
-    env = dict(os.environ, ZENSIM_AB_MODE="foldapp2")
+    # DIAL944_MODE (W-LIN round 7b): the dial grid is a REGIME-BEARING table and a
+    # model must be read on a grid of its OWN regime. The 2026-08-01 grid is
+    # `foldapp2` (f156-371 structurally zero), so scoring a `*pools` model on it
+    # feeds live-trained slots a structural zero -- the wrong-regime read CLAUDE.md
+    # records. Default unchanged; DIAL944_MODE=foldapp2pools builds the all-live twin.
+    env = dict(os.environ, ZENSIM_AB_MODE=os.environ.get("DIAL944_MODE", "foldapp2"))
     r = subprocess.run([EXTRACT, drv, csvp], env=env)
     if r.returncode != 0:
         sys.exit(f"ABORT: extract {tag} rc={r.returncode}")
