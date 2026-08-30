@@ -243,6 +243,13 @@ name = "fold_pools_bench"
 harness = false
 required-features = ["custom-profiles", "feature-regime-v2"]
 
+# Head-to-head: BUFFERED v1 (228/372) vs the STREAMING fold (944 zeroed/live
+# pools), paired in one process. benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md
+[[bench]]
+name = "extract_paths_bench"
+harness = false
+required-features = ["custom-profiles", "feature-regime-v2", "training"]
+
 [[bench]]
 name = "tenx_bar_bench"
 harness = false
