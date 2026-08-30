@@ -2526,3 +2526,27 @@ encode path is REAL (`sweep::hdr::encode_avif_hdr`, knobs lossless/speed).
    {"speed": <quality tier>})`, 34,200 encodes, hdr:true) → score → hdrfeat944
    → the 4-arm leg → the HDR model wave under the frozen UPIQ-transfer gate.
 Every step persists encodes/metrics/diffmaps; first cell before scale-up.
+
+### FULL-944 SPEED — zenbench-grade (2026-08-30, user question "how fast can 944 be if all 944 feats are computed")
+
+`fused944_bench` (zenbench paired, serial, reference precomputed, 576²):
+**score-only folded-944 extraction 16.8 ±2.2 ms** (fused score+map 40.3;
+loop-today two-call 29.5). `v2_speed_baseline` (zenbench, pixels/s):
+
+| size | v1-372 1-thr | v1-372 N-thr | v2 folded 1-thr | v2 folded N-thr | v2 with-ref 1-thr |
+|---|---|---|---|---|---|
+| 256² | 3.0 ms | 1.3 | 3.5 | 1.7 | 3.2 |
+| 576² | 16.5 ms | 3.6 | 13.0 | 5.7 | 11.8 |
+| 1024² | 43.7 ms (24 Mpx/s) | 7.3 (145 Mpx/s) | **129 ms** (8 Mpx/s) | **49.8** (21 Mpx/s) | 137 |
+
+**Answer:** emitting the whole v1 block on top of the folded path costs at
+most the masked+IW accumulator sweep — ≤0.5 ms at 576² (buffered upper
+bound; expected smaller in-stream) — i.e. ≤3–4% of the pass. Full-944 ≈
+**~17 ms serial / ~6 ms multithreaded at 576²; ~130 / ~50 ms at 1024²**.
+The v1 block is NOT where the time goes: **the v2-348 block dominates and
+scales badly** (at 1024² it is 3× v1 single-thread and 7× v1 multithreaded
+— memory-bound behavior, the "bounded" strips). Implications registered:
+(1) the skip-unused family mask pays on the v2/append side, not v1; (2) the
+1024²+ v2 scaling is the perf lane worth a proper profile (`v2_stage_profile`
+/ `v2_feature_group_cost` are the instruments). Logs:
+`~/tmp/fused944_bench.log`, `~/tmp/v2_speed_baseline.log`.
