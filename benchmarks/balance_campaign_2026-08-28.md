@@ -2912,3 +2912,19 @@ svt encode 130,590/130,950; svt GPU score (i134, `zen-score-gpusf`) 5,136/11,608
 (61 encoder_panic + 52 oom — to classify + requeue after the drain; the oom class wants a bigger
 `ZEN_VRAM_CAP` pass); svt CPU score (cvvdp + 944) 0 — still queued for a free CPU box. zenav1-aom#14
 closed with the KB-41 roots (the "720p band" was which renditions are screen-detected).
+
+### SVT SCORE RUNS — GPU pass-kill artifacts requeued; CPU-score run launched on the tower (2026-08-30 08:5xZ)
+- **GPU (i134, `zen-score-gpusf`):** the 113 `failed` rows (61 encoder_panic + 52 oom, all on
+  sub-1 MP renditions) share ONE timestamp — 07:02:24Z on the first-pass worker `i134-med`, i.e.
+  the 1,800 s pass-timeout kill's in-flight cells, not a tiny-frame defect (21 of the 34 renditions
+  also have done cells). Requeued (`--classes oom,encoder_panic --before 07:03Z`, 113 pardon
+  rows). The relaunched worker is healthy (GPU 56%, 3.8 GB VRAM, pass 1 under the 7,200 s
+  budget — chunks flush at pass end).
+- **CPU (`avifsvt-sf-cpu-20260830`, 11,608 score_file jobs: cvvdp + zensim-foldapp2/944):** no
+  LAN CPU box is free (all three on the aom-rs wave), so it runs on the **tower** inside a capped
+  container per the media-server rule — image `exec-zensim944hdr-47f5ab9c`, `--cpuset-cpus 0-23
+  --cpu-shares 256 --memory 24g`, worker `Tower-cpusf`, container `zen-score-cpusf`,
+  `ZEN_REQUIRE_SNAPSHOT=0` (fresh run). The LAN launcher cannot pass caps over its ssh line
+  (only the listed `ZM_*` tokens cross), so this was a hand-mirrored `docker run` of the same
+  env/entrypoint — extend `lan_score_launch.sh` to forward `ZM_CPUSET/ZM_CPU_SHARES/ZM_MEMORY`
+  before the next tower launch.
