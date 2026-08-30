@@ -3122,3 +3122,43 @@ zensim-foldapp2 944 features, **10,950 jobs**).
   (0 rows) satisfied it and the worker claimed at 13:24:48Z.
 - The 2,976 cells still encoding get a gap-fill declare (`pairs` again → a second pair of
   runs) at the encode drain; `writeback_scores.py` merges runs.
+
+### THE CARRIERS' NATIVE SLOTS ARE LIVE IN THE STREAMING PASS — AND MEASURED NOT FREE (2026-08-30 ~14:0xZ, zensim)
+
+The registered product step from the carrier report ("un-zero the native slots
+under a regime flag; zenbench paired A/B emit-vs-zero") is implemented:
+`V2NewFeatureToggles::v1_pools: V1PoolsMode { Off | Carriers | Full }`. The fold
+hook (`fold_v1_basic_bands`) already replayed v1's 32-row band tiling bit-for-bit
+for the basic block; it now also replays v1's extended strip section per band
+(the fused kernel's `store_mu` means, the ref-side activity map over the same
+band buffer, the V-blurred sigma planes, the fused masked+IW SSIM / edge / MSE
+kernels at `k = k_iw = 4`), so:
+
+- **Parity: BIT-IDENTICAL to v1's frozen 372 extraction** for all of `f156..372`
+  at every exact-width fixture (96x64, 64x300, 208x144) — gate
+  `folded720_v1_pools_match_v1_path`, which also asserts the toggle changes nothing
+  outside the block and that `Off` still zeroes it. Padded-width class (127, 200)
+  diverges the way the basic block does (v1's pad wart), max rel 0.17 / 0.82.
+- **`Carriers`** = exactly the ten `fused944native` slots (f178/190/196/226 art_l8,
+  f231/237/243 masked_art_4th, f303/321/333 iw_art_4th) live, everything else 0 —
+  the regime those tables were built in; **`Full`** = all 216. The result carries
+  the mode (`ZensimV2Result::v1_pools()`), extractor modes `foldapp2carriers` /
+  `foldapp2pools`. Same 944 width either way — a distinct regime by the purity
+  rule, never column-mixed with zeroed-block rows.
+- **Cost, zenbench paired (`benches/fold_pools_bench.rs`, serial; the box was
+  loaded — 4 clean rounds per arm, 240 noisy):**
+
+  | pair | zeroed | carriers (10) | full (216) |
+  |---|---|---|---|
+  | 576² | 15.4 ±0.3 ms | 18.6 ±0.7 (+18.1–24.8%) | 19.9 ±0.3 (+27.9–32.0%) |
+  | 1152² | 59.0 ±0.3 ms | 72.2 ±0.2 (+21.5–23.4%) | 77.0 ±0.5 (+29.0–31.6%) |
+
+  So the carrier report's item 2 ("inside the streaming pass the carriers cost
+  accumulators only … expected noise-level") is FALSIFIED as stated: the peaks are
+  free (the kernel returns them), but the two art-L4 carriers need the ref-side
+  activity map and a second fused edge pass at scales 0-1, and scale 0 is the whole
+  image. +0.52 ms was the buffered-harness figure and is superseded by this table.
+  Registered next lever (not claimed): fold the ref-side activity into the v2
+  walk's existing activity pass and the weighted art-L4 sums into the fused V-blur
+  kernel (no `store_mu`, no second edge pass) — that is where the "accumulators
+  only" structure actually lives.

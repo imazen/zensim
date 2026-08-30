@@ -230,7 +230,16 @@ fn main() {
     let stream_append = mode == "foldapp" || mode == "foldappstream";
     let do_hdr100 = mode == "foldapphdr100" || mode == "foldapp2hdr100" || mode == "foldcsfwhdr100";
     let do_hdrpq = mode == "foldapphdrpq" || mode == "foldapp2hdrpq" || mode == "foldcsfwhdrpq";
-    let do_app2 = mode == "foldapp2" || mode == "foldcsfw";
+    // "foldapp2pools" = foldapp2 with v1's peak/masked/IW pool blocks LIVE in
+    // f156..372 (`V2NewFeatureToggles::v1_pools`; the carrier lane) — its own
+    // extraction regime, never column-mixed with zeroed-block 944 rows.
+    let pools_mode = match mode.as_str() {
+        "foldapp2pools" => zensim::feature_v2::V1PoolsMode::Full,
+        "foldapp2carriers" => zensim::feature_v2::V1PoolsMode::Carriers,
+        _ => zensim::feature_v2::V1PoolsMode::Off,
+    };
+    let pools_on = pools_mode != zensim::feature_v2::V1PoolsMode::Off;
+    let do_app2 = mode == "foldapp2" || mode == "foldcsfw" || pools_on;
     let app2_on = mode.starts_with("foldapp2") || mode.starts_with("foldcsfw");
     let csfw_on = mode.starts_with("foldcsfw");
     let do_v1stream = mode == "v1stream";
@@ -241,7 +250,7 @@ fn main() {
         "v2" => (false, true),
         // own branches below
         "none" | "fold" | "foldapp" | "foldstream" | "foldappstream" | "foldapphdr100"
-        | "foldapphdrpq" | "foldapp2" | "foldapp2hdr100" | "foldapp2hdrpq" | "foldcsfw"
+        | "foldapphdrpq" | "foldapp2" | "foldapp2pools" | "foldapp2carriers" | "foldapp2hdr100" | "foldapp2hdrpq" | "foldcsfw"
         | "foldcsfwhdr100" | "foldcsfwhdrpq" | "v1stream" | "v1ref" | "v1streamref" => {
             (false, false)
         }
@@ -400,6 +409,7 @@ fn main() {
                 append2_block: true,
                 csfw_block: csfw_on,
                 append2_dst_activity: dstact_on,
+                v1_pools: pools_mode,
                 ..V2NewFeatureToggles::default()
             };
             let t0 = std::time::Instant::now();

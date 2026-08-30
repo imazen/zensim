@@ -239,6 +239,11 @@ harness = false
 required-features = ["custom-profiles", "feature-regime-v2"]
 
 [[bench]]
+name = "fold_pools_bench"
+harness = false
+required-features = ["custom-profiles", "feature-regime-v2"]
+
+[[bench]]
 name = "tenx_bar_bench"
 harness = false
 required-features = ["custom-profiles", "feature-regime-v2"]

@@ -1072,6 +1072,10 @@ pub struct ZensimV2Result {
     features: Vec<f64>,
     n_scales: usize,
     regime: FeatureRegime,
+    /// `V2NewFeatureToggles::v1_pools`: which of `f156..372` carry v1's
+    /// live pool values (a distinct extraction regime per mode at the SAME
+    /// layout width — see the toggle's doc).
+    v1_pools: V1PoolsMode,
 }
 
 impl ZensimV2Result {
@@ -1086,6 +1090,17 @@ impl ZensimV2Result {
     }
     pub fn regime(&self) -> FeatureRegime {
         self.regime
+    }
+    /// Which of `f156..372` hold v1's LIVE pool values (the
+    /// [`V2NewFeatureToggles::v1_pools`] regimes) rather than the folded
+    /// walk's structural zeros. Same layout width either way — this is the
+    /// regime-purity marker for that block.
+    pub fn v1_pools(&self) -> V1PoolsMode {
+        self.v1_pools
+    }
+    /// `v1_pools() != Off`.
+    pub fn v1_pools_live(&self) -> bool {
+        self.v1_pools != V1PoolsMode::Off
     }
     /// Explicit-regime named view over this result's features.
     ///
@@ -1417,6 +1432,45 @@ pub struct V2NewFeatureToggles {
     /// `append2_block` (asserted).
     /// Record: `benchmarks/bandvis_dst_activity_2026-08-02.md`.
     pub append2_dst_activity: bool,
+    /// Emit v1's peak / masked / IW pool blocks (`f156..372`) LIVE inside
+    /// the folded walk instead of the structural zeros (2026-08-30, the
+    /// carrier lane: `benchmarks/balance_campaign_2026-08-28.md` "carriers
+    /// named + costed" → "un-zero the native slots under a regime flag").
+    /// Per v1-aligned band the fold hook replays v1's extended strip
+    /// section — see [`fold_v1_basic_bands`] — so at
+    /// `simd_padded_width(w) == w` the block is BIT-IDENTICAL to v1's 372
+    /// extraction (`folded720_v1_pools_match_v1_path`). Default OFF: rows
+    /// with the block live are their OWN extraction regime — never
+    /// column-mix them with zeroed-block folded rows
+    /// (`ZensimV2Result::v1_pools`; extractor modes `foldapp2carriers` /
+    /// `foldapp2pools`). [`V1PoolsMode::Carriers`] emits ONLY the ten
+    /// carrier slots the `fused944native` tables carry (the peaks are free;
+    /// the masked/IW art-L4 slots need the activity map + the fused edge
+    /// kernel at scales 0-1 only); [`V1PoolsMode::Full`] emits all 216.
+    /// MEASURED (zenbench paired, `benches/fold_pools_bench.rs`): the full
+    /// block is NOT free — +25-32% @576², +34-40% @1152² over the zeroed
+    /// fold; see the campaign ledger for the carriers-only cost.
+    pub v1_pools: V1PoolsMode,
+}
+
+/// Which of v1's pool slots (`f156..372`) the folded walk emits live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum V1PoolsMode {
+    /// Structural zeros (the production folded regimes).
+    #[default]
+    Off,
+    /// The ten carrier slots of the `fused944native` regime — `art_l8` at
+    /// (s1,c0) (s1,c2) (s2,c0) (s3,c2) = f178/190/196/226,
+    /// `masked_art_4th` at s0 c0-2 = f231/237/243, `iw_art_4th` at (s0,c0)
+    /// (s1,c0) (s1,c2) = f303/321/333 — every other pool slot stays 0.
+    Carriers,
+    /// All 216 slots: peaks (72) + masked (72) + IW (72), v1-exact.
+    Full,
+}
+
+impl V1PoolsMode {
+    /// The ten carrier slots (`Carriers`), in v1's 372 layout.
+    pub const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243, 303, 321, 333];
 }
 impl Default for V2NewFeatureToggles {
     fn default() -> Self {
@@ -1429,6 +1483,7 @@ impl Default for V2NewFeatureToggles {
             append2_block: false,
             csfw_block: false,
             append2_dst_activity: false,
+            v1_pools: V1PoolsMode::Off,
         }
     }
 }
@@ -3839,6 +3894,28 @@ struct V1BasicSums {
     hf_sq_dst: f64,
     hf_abs_src: f64,
     hf_abs_dst: f64,
+    // --- v1 pool blocks (`V2NewFeatureToggles::v1_pools`): the peak
+    //     accumulators the fused kernel returns anyway, plus the masked /
+    //     IW sums v1's extended strip section derives per band
+    //     (`streaming::ScaleAccumulators` field-for-field). ---
+    ssim_d8: f64,
+    edge_art8: f64,
+    edge_det8: f64,
+    ssim_max: f32,
+    edge_art_max: f32,
+    edge_det_max: f32,
+    masked_ssim_d: f64,
+    masked_ssim_d4: f64,
+    masked_ssim_d2: f64,
+    masked_art4: f64,
+    masked_det4: f64,
+    masked_mse: f64,
+    iw_ssim_d: f64,
+    iw_ssim_d4: f64,
+    iw_ssim_d2: f64,
+    iw_art4: f64,
+    iw_det4: f64,
+    iw_mse: f64,
 }
 
 impl V1BasicSums {
@@ -3857,6 +3934,45 @@ impl V1BasicSums {
         self.hf_sq_dst += s.hf_sq_dst;
         self.hf_abs_src += s.hf_abs_src;
         self.hf_abs_dst += s.hf_abs_dst;
+        // Peaks: v1 merges them the same way (`streaming.rs`
+        // `accum.ssim_d8[c] += strip_acc.ssim_d8; accum.ssim_max[c] =
+        // accum.ssim_max[c].max(strip_acc.ssim_max)`, …) — free to carry.
+        self.ssim_d8 += s.ssim_d8;
+        self.edge_art8 += s.edge_art8;
+        self.edge_det8 += s.edge_det8;
+        self.ssim_max = self.ssim_max.max(s.ssim_max);
+        self.edge_art_max = self.edge_art_max.max(s.edge_art_max);
+        self.edge_det_max = self.edge_det_max.max(s.edge_det_max);
+    }
+
+    /// Finalize the v1 pool blocks — peaks (6/ch), masked (6/ch), IW
+    /// (6/ch) — into their v1 slot order, replicating
+    /// `streaming::ScaleAccumulators::finalize` + `metric.rs`'s pass-2/3/4
+    /// pushes (`.abs()` on the masked/IW ssim + art/det L4 slots, none on
+    /// the peaks / mse).
+    fn finalize_pools_into(&self, n: usize, peaks: &mut [f64], masked: &mut [f64], iw: &mut [f64]) {
+        debug_assert_eq!(peaks.len(), 6);
+        debug_assert_eq!(masked.len(), 6);
+        debug_assert_eq!(iw.len(), 6);
+        let one_over_n = 1.0 / n as f64;
+        peaks[0] = f64::from(self.ssim_max);
+        peaks[1] = f64::from(self.edge_art_max);
+        peaks[2] = f64::from(self.edge_det_max);
+        peaks[3] = (self.ssim_d8 * one_over_n).max(0.0).powf(0.125);
+        peaks[4] = (self.edge_art8 * one_over_n).max(0.0).powf(0.125);
+        peaks[5] = (self.edge_det8 * one_over_n).max(0.0).powf(0.125);
+        masked[0] = (self.masked_ssim_d * one_over_n).abs();
+        masked[1] = (self.masked_ssim_d4 * one_over_n).max(0.0).powf(0.25).abs();
+        masked[2] = (self.masked_ssim_d2 * one_over_n).max(0.0).sqrt().abs();
+        masked[3] = (self.masked_art4 * one_over_n).max(0.0).powf(0.25).abs();
+        masked[4] = (self.masked_det4 * one_over_n).max(0.0).powf(0.25).abs();
+        masked[5] = self.masked_mse * one_over_n;
+        iw[0] = (self.iw_ssim_d * one_over_n).abs();
+        iw[1] = (self.iw_ssim_d4 * one_over_n).max(0.0).powf(0.25).abs();
+        iw[2] = (self.iw_ssim_d2 * one_over_n).max(0.0).sqrt().abs();
+        iw[3] = (self.iw_art4 * one_over_n).max(0.0).powf(0.25).abs();
+        iw[4] = (self.iw_det4 * one_over_n).max(0.0).powf(0.25).abs();
+        iw[5] = self.iw_mse * one_over_n;
     }
 
     /// Finalize into one channel's 13 basic features, replicating v1's
@@ -3915,6 +4031,48 @@ impl V1BasicSums {
 const V1_BAND_ROWS: usize = 32;
 const V1_BAND_OVERLAP: usize = 5;
 
+/// v1's masking / IW strengths (`metric::config_from_params`:
+/// `extended_masking_strength: 4.0`, `iw_strength: 4.0`) — the fold's pool
+/// replay uses the same constants so the block reproduces v1's numbers.
+const V1_MASK_K: f32 = 4.0;
+const V1_IW_K: f32 = 4.0;
+
+/// Band-local planes for the v1 pool replay (`V2NewFeatureToggles::v1_pools`):
+/// sized for one v1 band buffer (`V1_BAND_ROWS + 2 * V1_BAND_OVERLAP` rows ×
+/// width), grown on first use per channel accumulator and reused across
+/// bands, strips and scales (the widest scale sizes it once).
+#[derive(Debug, Clone, Default)]
+struct FoldPoolScratch {
+    /// V-blurred `mu1` / `mu2` (the fused kernel's `store_mu` side-output).
+    mu1_v: Vec<f32>,
+    mu2_v: Vec<f32>,
+    /// `|src − H_blur(src)|` (v1's `bufs.mask` role).
+    act_raw: Vec<f32>,
+    /// One-pass-blurred activity (v1's `bufs.mul_buf` role).
+    act: Vec<f32>,
+    /// V-blurred `ssq_h` / `s12_h` (v1's `bufs.sigma1_sq` / `bufs.sigma12`);
+    /// `ssq_v` doubles as the activity blur's temp before it is filled.
+    ssq_v: Vec<f32>,
+    s12_v: Vec<f32>,
+}
+
+impl FoldPoolScratch {
+    fn ensure(&mut self, n: usize) {
+        for b in [
+            &mut self.mu1_v,
+            &mut self.mu2_v,
+            &mut self.act_raw,
+            &mut self.act,
+            &mut self.ssq_v,
+            &mut self.s12_v,
+        ] {
+            if b.len() < n {
+                b.resize(n, 0.0);
+            }
+        }
+    }
+}
+
 /// Run v1's fused V-blur + basic-feature kernel over the v1-aligned bands
 /// covered by one fold buffer (the FOLD hook): consumes the v2 blur
 /// pass's H-planes + halo buffers directly (H-blur is per-row/stateless,
@@ -3929,15 +4087,28 @@ const V1_BAND_OVERLAP: usize = 5;
 /// (band extents clamp against it, exactly like v1 clamps against the
 /// plane).
 ///
-/// Store flags are off, so the kernel's `mu1/mu2/sd` side-outputs are
-/// never written — empty slices are safe (every write in every tier is
-/// `if store_*`-gated).
+/// With `pools == None` the store flags are off, so the kernel's
+/// `mu1/mu2/sd` side-outputs are never written — empty slices are safe
+/// (every write in every tier is `if store_*`-gated). With `Some`
+/// (`V2NewFeatureToggles::v1_pools`) each band ALSO replays v1's extended
+/// strip section (`streaming::process_strip_channel`'s `need_activity`
+/// block) on the band buffer: the kernel stores its V-blurred mu1/mu2 for
+/// the inner rows, the ref-side activity is `|src − H_blur(src)|`
+/// one-pass-blurred over the SAME band buffer (mirror-clamped at its
+/// edges exactly like v1's strip buffer), the sigma planes are the shared
+/// H-planes V-blurred over the band, and the three fused masked+IW
+/// kernels (`build_inline_mse`, `ssim_channel_inline_both`,
+/// `edge_diff_channel_inline_both`) run on the inner rows at v1's
+/// `k = 4` / `k_iw = 4`. Band extents, buffer contents and reduction
+/// order are v1's, so the pooled sums are bit-identical to v1's whenever
+/// the plane values are.
 ///
 /// `planes = [mu1_h, mu2_h, ssq_h, s12_h, src, dst]`, all in the SAME
 /// buffer-local coordinate system (`local = row − strip_y0 +
 /// halo_offset`): the strip path passes the scratch H-planes + halo
 /// buffers; the whole-plane path passes the full-plane H-planes + the
 /// real src/dst planes with `strip_y0 = halo_offset = 0`.
+#[allow(clippy::too_many_arguments)]
 fn fold_v1_basic_bands(
     width: usize,
     rows: core::ops::Range<usize>,
@@ -3946,6 +4117,7 @@ fn fold_v1_basic_bands(
     height: usize,
     planes: [&[f32]; 6],
     sums: &mut V1BasicSums,
+    mut pools: Option<(&mut FoldPoolScratch, bool)>,
 ) {
     debug_assert_eq!(rows.start % V1_BAND_ROWS, 0, "strips are 32-row aligned");
     let [mu1_h, mu2_h, ssq_h, s12_h, src, dst] = planes;
@@ -3966,24 +4138,116 @@ fn fold_v1_basic_bands(
         let mut empty_mu1: [f32; 0] = [];
         let mut empty_mu2: [f32; 0] = [];
         let mut empty_sd: [f32; 0] = [];
-        sums.accumulate(&crate::fused::fused_vblur_features_ssim(
-            &mu1_h[span.clone()],
-            &mu2_h[span.clone()],
-            &ssq_h[span.clone()],
-            &s12_h[span.clone()],
-            &src[span.clone()],
-            &dst[span],
-            width,
-            h_local,
-            inner_start,
-            inner_h,
-            BLUR_RADIUS,
-            &mut empty_mu1,
-            &mut empty_mu2,
-            false,
-            &mut empty_sd,
-            false,
-        ));
+        if let Some((ps, full)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
+            let band_n = h_local * width;
+            ps.ensure(band_n);
+            sums.accumulate(&crate::fused::fused_vblur_features_ssim(
+                &mu1_h[span.clone()],
+                &mu2_h[span.clone()],
+                &ssq_h[span.clone()],
+                &s12_h[span.clone()],
+                &src[span.clone()],
+                &dst[span.clone()],
+                width,
+                h_local,
+                inner_start,
+                inner_h,
+                BLUR_RADIUS,
+                &mut ps.mu1_v[..band_n],
+                &mut ps.mu2_v[..band_n],
+                true,
+                &mut empty_sd,
+                false,
+            ));
+            crate::blur::box_blur_h_into_abs_diff(
+                &src[span.clone()],
+                &mut ps.act_raw[..band_n],
+                width,
+                h_local,
+                BLUR_RADIUS,
+            );
+            crate::blur::box_blur_1pass_into(
+                &ps.act_raw[..band_n],
+                &mut ps.act[..band_n],
+                &mut ps.ssq_v[..band_n],
+                width,
+                h_local,
+                BLUR_RADIUS,
+            );
+            let inner = inner_start * width..(inner_start + inner_h) * width;
+            let inner_src = &src[span.start + inner.start..span.start + inner.end];
+            let inner_dst = &dst[span.start + inner.start..span.start + inner.end];
+            let inner_mu1 = &ps.mu1_v[inner.clone()];
+            let inner_mu2 = &ps.mu2_v[inner.clone()];
+            let act_inner = &ps.act[inner.clone()];
+            if full {
+                // The masked/IW SSIM + MSE slots: sigma planes V-blurred over
+                // the band, then the fused kernels (`Full` only — the
+                // carriers need neither).
+                crate::blur::box_blur_v_from_copy(
+                    &ssq_h[span.clone()],
+                    &mut ps.ssq_v[..band_n],
+                    width,
+                    h_local,
+                    BLUR_RADIUS,
+                );
+                crate::blur::box_blur_v_from_copy(
+                    &s12_h[span.clone()],
+                    &mut ps.s12_v[..band_n],
+                    width,
+                    h_local,
+                    BLUR_RADIUS,
+                );
+                let (mse_m, mse_i) = crate::simd_ops::build_inline_mse(
+                    act_inner, V1_MASK_K, V1_IW_K, inner_src, inner_dst,
+                );
+                sums.masked_mse += mse_m;
+                sums.iw_mse += mse_i;
+                let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
+                    crate::simd_ops::ssim_channel_inline_both(
+                        inner_mu1,
+                        inner_mu2,
+                        &ps.ssq_v[inner.clone()],
+                        &ps.s12_v[inner.clone()],
+                        act_inner,
+                        V1_MASK_K,
+                        V1_IW_K,
+                    );
+                sums.masked_ssim_d += sd_m;
+                sums.masked_ssim_d4 += sd4_m;
+                sums.masked_ssim_d2 += sd2_m;
+                sums.iw_ssim_d += sd_i;
+                sums.iw_ssim_d4 += sd4_i;
+                sums.iw_ssim_d2 += sd2_i;
+            }
+            let ((art4_m, det4_m), (art4_i, det4_i)) =
+                crate::simd_ops::edge_diff_channel_inline_both(
+                    inner_src, inner_dst, inner_mu1, inner_mu2, act_inner, V1_MASK_K, V1_IW_K,
+                );
+            sums.masked_art4 += art4_m;
+            sums.masked_det4 += det4_m;
+            sums.iw_art4 += art4_i;
+            sums.iw_det4 += det4_i;
+        } else {
+            sums.accumulate(&crate::fused::fused_vblur_features_ssim(
+                &mu1_h[span.clone()],
+                &mu2_h[span.clone()],
+                &ssq_h[span.clone()],
+                &s12_h[span.clone()],
+                &src[span.clone()],
+                &dst[span],
+                width,
+                h_local,
+                inner_start,
+                inner_h,
+                BLUR_RADIUS,
+                &mut empty_mu1,
+                &mut empty_mu2,
+                false,
+                &mut empty_sd,
+                false,
+            ));
+        }
         b0 = b1;
     }
 }
@@ -5087,6 +5351,9 @@ struct StreamChannelAccums {
     /// CSFW weighted-pool partials (Y channel + `csfw_block` only —
     /// untouched zeros otherwise).
     csfw: Vec<CsfwAccum>,
+    /// Band-local planes for the v1 pool replay (`v1_pools`); empty
+    /// (never allocated) when the toggle is off.
+    pool_scratch: FoldPoolScratch,
 }
 
 impl StreamChannelAccums {
@@ -5098,6 +5365,7 @@ impl StreamChannelAccums {
             v1: vec![V1BasicSums::default(); n_scales],
             block: vec![(0.0, 0.0); n_scales],
             csfw: vec![CsfwAccum::default(); n_scales],
+            pool_scratch: FoldPoolScratch::default(),
         }
     }
 }
@@ -5445,6 +5713,15 @@ fn stream_phase_b(
                 &dst_win[..n_wide],
             ],
             &mut acc.v1[scale],
+            match toggles.v1_pools {
+                V1PoolsMode::Off => None,
+                // The carrier slots need the activity + edge kernel at
+                // scales 0-1 only (masked_art_4th s0, iw_art_4th s0-s1);
+                // the peaks come from the kernel at every scale for free.
+                V1PoolsMode::Carriers if scale <= 1 => Some((&mut acc.pool_scratch, false)),
+                V1PoolsMode::Carriers => None,
+                V1PoolsMode::Full => Some((&mut acc.pool_scratch, true)),
+            },
         );
     }
 
@@ -6348,6 +6625,38 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             for (ch, acc) in accums.iter().enumerate() {
                 let base = scale * 39 + ch * 13;
                 acc.v1[scale].finalize_into(n, &mut features_v12[base..base + 13]);
+                if toggles.v1_pools != V1PoolsMode::Off {
+                    // v1's block-major 372 layout: [basic 156][peaks 72]
+                    // [masked 72][iw 72], each pool block scale-major then
+                    // channel-major, 6 per (scale, ch) (`metric.rs` passes
+                    // 2/3/4). `n_scales`-generic: 13/6/6/6 per (scale, ch).
+                    let cell = (scale * 3 + ch) * 6;
+                    let peaks0 = n_scales * 39 + cell;
+                    let masked0 = n_scales * 57 + cell;
+                    let iw0 = n_scales * 75 + cell;
+                    let mut peaks = [0.0f64; 6];
+                    let mut masked = [0.0f64; 6];
+                    let mut iw = [0.0f64; 6];
+                    acc.v1[scale].finalize_pools_into(n, &mut peaks, &mut masked, &mut iw);
+                    if toggles.v1_pools == V1PoolsMode::Full {
+                        features_v12[peaks0..peaks0 + 6].copy_from_slice(&peaks);
+                        features_v12[masked0..masked0 + 6].copy_from_slice(&masked);
+                        features_v12[iw0..iw0 + 6].copy_from_slice(&iw);
+                    } else {
+                        // Carriers: only the ten `fused944native` slots go
+                        // live (peak slot 4 = art_l8, masked/iw slot 3 =
+                        // art_4th); everything else stays the structural 0.
+                        for &slot in V1PoolsMode::CARRIER_SLOTS.iter() {
+                            if slot == peaks0 + 4 {
+                                features_v12[slot] = peaks[4];
+                            } else if slot == masked0 + 3 {
+                                features_v12[slot] = masked[3];
+                            } else if slot == iw0 + 3 {
+                                features_v12[slot] = iw[3];
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -6416,6 +6725,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     ZensimV2Result {
         features,
         n_scales,
+        v1_pools: if fold_v1 { toggles.v1_pools } else { V1PoolsMode::Off },
         regime: match (append_on, append2_on, csfw_on) {
             (true, true, true) => FeatureRegime::Folded720Csfw,
             (true, true, false) => FeatureRegime::Folded720Append2,
@@ -6613,6 +6923,7 @@ fn compute_v2_features_with_ref_impl_inner(
     Ok(ZensimV2Result {
         features,
         n_scales,
+        v1_pools: V1PoolsMode::Off,
         regime: FeatureRegime::V2Bounded,
     })
 }
@@ -10776,6 +11087,128 @@ mod tests {
                 }
                 eprintln!(
                     "fold parity {w}x{h}: padded-width class (v1 pads {w}->{}), max rel {max_rel:.3e}",
+                    crate::blur::simd_padded_width(w),
+                    max_rel = max_rel
+                );
+            }
+        }
+    }
+
+    /// POOL PARITY GATE (2026-08-30, the carrier lane): with
+    /// [`V2NewFeatureToggles::v1_pools`] the fold replays v1's extended
+    /// strip section per v1-aligned band, so the peak / masked / IW blocks
+    /// (`f156..372`) are **BIT-IDENTICAL** to the frozen v1 372 extraction
+    /// at every width where the basic block is (`simd_padded_width(w) ==
+    /// w`); the padded-width class documents its divergence the same way
+    /// (`folded720_v1_basic_matches_v1_path`). Also gates that the toggle
+    /// changes NOTHING else — basic + v2 slots bit-equal to the toggle-off
+    /// fold — and that the toggle-off fold still zeroes the block.
+    #[cfg(feature = "training")]
+    #[test]
+    fn folded720_v1_pools_match_v1_path() {
+        for &(w, h, exact) in &[
+            (96usize, 64usize, true),
+            (64, 300, true),
+            (208, 144, true),
+            (127, 93, false),
+            (200, 150, false),
+        ] {
+            let src = textured_image(w, h, 7);
+            let dst = quantize_distort(&src, w, h);
+            let cfg = crate::ZensimConfig {
+                extended_features: true,
+                compute_iw_features: true,
+                allow_multithreading: false,
+                ..Default::default()
+            };
+            let v1 = crate::compute_zensim_with_config(&src, &dst, w, h, cfg).unwrap();
+            let v1f = v1.features();
+            assert_eq!(v1f.len(), 372);
+            let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            let mut scratch = V2Scratch::new();
+            let off = z
+                .compute_folded720_append_features_streaming(
+                    &sref,
+                    &dref,
+                    V2NewFeatureToggles::default(),
+                    &mut scratch,
+                )
+                .unwrap();
+            let on = z
+                .compute_folded720_append_features_streaming(
+                    &sref,
+                    &dref,
+                    V2NewFeatureToggles {
+                        v1_pools: V1PoolsMode::Full,
+                        ..V2NewFeatureToggles::default()
+                    },
+                    &mut scratch,
+                )
+                .unwrap();
+            let carriers = z
+                .compute_folded720_append_features_streaming(
+                    &sref,
+                    &dref,
+                    V2NewFeatureToggles {
+                        v1_pools: V1PoolsMode::Carriers,
+                        ..V2NewFeatureToggles::default()
+                    },
+                    &mut scratch,
+                )
+                .unwrap();
+            assert!(!off.v1_pools_live());
+            assert_eq!(on.v1_pools(), V1PoolsMode::Full);
+            assert_eq!(carriers.v1_pools(), V1PoolsMode::Carriers);
+            assert_eq!(off.regime(), on.regime());
+            let (fo, fp, fc) = (off.features(), on.features(), carriers.features());
+            assert_eq!(fo.len(), fp.len());
+            // Carriers: exactly the ten slots live, bit-equal to Full's
+            // values (same arithmetic), every other slot unchanged from off.
+            for i in 0..fo.len() {
+                if V1PoolsMode::CARRIER_SLOTS.contains(&i) {
+                    assert_eq!(fc[i].to_bits(), fp[i].to_bits(), "{w}x{h}: carrier slot {i}");
+                    assert!(fc[i] > 0.0, "{w}x{h}: carrier slot {i} is zero on a distorted pair");
+                } else {
+                    assert_eq!(fc[i].to_bits(), fo[i].to_bits(), "{w}x{h}: non-carrier slot {i}");
+                }
+            }
+            assert!(
+                fo[156..372].iter().all(|&v| v == 0.0),
+                "{w}x{h}: toggle-off fold must keep f156..372 at exactly 0.0"
+            );
+            for i in (0..156).chain(372..fo.len()) {
+                assert_eq!(
+                    fo[i].to_bits(),
+                    fp[i].to_bits(),
+                    "{w}x{h}: slot {i} changed by v1_pools ({:e} vs {:e})",
+                    fo[i],
+                    fp[i]
+                );
+            }
+            if exact {
+                for i in 156..372 {
+                    assert_eq!(
+                        fp[i].to_bits(),
+                        v1f[i].to_bits(),
+                        "{w}x{h}: pool slot {i} ({:e}) != v1 ({:e})",
+                        fp[i],
+                        v1f[i]
+                    );
+                }
+                eprintln!("pool parity {w}x{h}: BIT-EXACT");
+            } else {
+                let mut max_rel = 0.0f64;
+                for i in 156..372 {
+                    let (a, b) = (fp[i], v1f[i]);
+                    assert!(a.is_finite(), "{w}x{h}: pool f{i} not finite");
+                    if b.abs() > 1e-12 {
+                        max_rel = max_rel.max((a - b).abs() / b.abs());
+                    }
+                }
+                eprintln!(
+                    "pool parity {w}x{h}: padded-width class (v1 pads {w}->{}), max rel {max_rel:.3e}",
                     crate::blur::simd_padded_width(w),
                     max_rel = max_rel
                 );
