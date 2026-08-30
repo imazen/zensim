@@ -574,6 +574,32 @@ parallelism inside the channel (4 bands/strip) lifts it: 944-full best 7.75 →
 a tree/unordered reduction would not (f64 addition is not associative).
 Remaining cap: the serial `StripPlaneProducer`.
 
+**dense_block_kernel is the MT ceiling and it is ERA-LOCKED — do not
+restructure it without asking.** It is 23.2% of the 944-full walk and gets
+3-way parallelism only. Band/row-partial merging is bit-exact ONLY when each
+accumulator takes exactly one add per row, which needs `POOL_SIMD` (v4x-only)
+AND `width % 8 == 0` at every scale. Neither holds generally — the
+`weighted_pool_accumulate_scalar` call inside the x-loop (feature_v2.rs:2352)
+and the `width8..width` scalar tail (:2416) both add per PIXEL across row
+boundaries. MEASURED on the kernel's accumulation shape: 0 ulps at
+`tail_k = 0`, **−2 ulps** with a scalar tail, **13 ulps** with per-pixel pools.
+Amdahl UPPER bound on fixing it (dense scaling perfectly, nothing else
+changing, restructure free): **1.17× @8T, 1.23× @16T** — against re-extracting
+every 944 table AND re-training every 944 model. Not a silent trade.
+
+**Y-channel imbalance has no free fix.** The 3 channel accumulators are
+disjoint, so scheduling is already free and rayon work-steals; the imbalance is
+that append/BANDVIS/CSFW are Y-ONLY WORK. Shortening it means splitting Y's
+kernels, which lands on the same grouping obstacle. Pipelining X/B past the
+barrier was analysed and rejected: X and B are the small channels, so
+overlapping their phase B with Y's phase A shortens nothing.
+
+**`fused_vblur_ssim` fission: RETIRED, no rewrite needed.** Its 4 stores / 28
+spill loads look alarming but only **1 load and 0 stores are inside the
+innermost loop** (188 insns of a 1750-insn function); the other 27 are
+per-column-group setup. No hot-loop register pressure exists to relieve. Locate
+spills against loop structure with objdump BEFORE proposing a fission.
+
 **Two perf traps, both measured the hard way.** (a) **Fusion is not free**:
 folding the activity abs-diff into the H-blur's load sites (registered lever
 #1) LOSES — 944-full +1.04 %, 372-only +2.01 % — because post-rem-ring the

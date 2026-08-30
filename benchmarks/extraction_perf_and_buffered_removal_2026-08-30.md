@@ -1303,3 +1303,151 @@ mode: `buf_v1_372` at 8T measures 3.0 ms @576² and 9.3 ms @1152² (§10.4). The
 fold is 2.2–3.8× that today. Closing it is the §5 four-blocker checklist plus
 the `dense_block_kernel` restructuring — the fold does not retire buffered
 until parity *and* perf are both proven.
+
+---
+
+## 14. The named ceiling: dense restructure — STOP, with the numbers
+
+The constraint was explicit: restructure `dense_block_kernel` into per-band
+self-contained accumulators **only if the merge reproduces the current
+grouping bit-exactly**. It cannot, generally. Reporting the obstacle instead
+of shipping a byte change.
+
+### 14.1 The grouping obstacle, read from source
+
+`dense_block_kernel_generic` (`feature_v2.rs:2190`) walks `for y in 0..height`
+with row-local f32 lane accumulators "zeroed each row and reduced ONCE at the
+end of the row". If that were the whole story, row-granular partials merged in
+row order would be bit-exact — each accumulator would receive exactly one add
+per row, and `((0 + r0) + r1) + …` is what the serial loop already computes.
+
+It is not the whole story. **Two paths accumulate into the f64 `acc` per
+PIXEL, crossing row boundaries:**
+
+1. **`weighted_pool_accumulate_scalar` inside the vector x-loop**
+   (`:2352`) — the §A.14 register-pressure fix scalarises the 11 masked/IW/
+   soft-peak weighted pools and adds them per lane, per pixel. This is the
+   `POOL_SIMD == false` path, i.e. **every tier except `v4x`**.
+2. **The `for x in width8..width` scalar tail** (`:2416`) — adds
+   `acc.sum_d`, `acc.sum_d2`, … per pixel whenever `width % 8 != 0`.
+
+So an accumulator receives **one add per row only when `POOL_SIMD` is on AND
+`width % 8 == 0`**. Otherwise it receives many, and the grouping a row-partial
+merge produces is `P₀ + ((rd₁ + t₁₀) + t₁₁)` where the shipped path computes
+`((P₀ + rd₁) + t₁₀) + t₁₁`. f64 addition is not associative.
+
+**Measured on the kernel's actual accumulation shape** (one running f64; per
+row one vector-reduce add plus `k` tail adds; magnitudes at SSIM-error scale):
+
+| case | sequential | row-partial | ulps |
+|---|---:|---:|---:|
+| `tail_k = 0` (`width%8==0`, POOL_SIMD on) | 45604.37737893196 | 45604.37737893196 | **0** |
+| `tail_k = 4` (`width%8==4`) | 47564.057405498337 | 47564.057405498352 | **−2** |
+| `tail_k = 7` | 46955.583814196572 | 46955.583814196587 | **−2** |
+| per-pixel pools (POOL_SIMD off, k = width) | 79183.813797129988 | 79183.813797129798 | **13** |
+
+The `tail_k = 0` row is the important one: it confirms the restructure IS
+bit-exact in the narrow case, so the obstacle is precisely located rather than
+hand-waved. Neither precondition holds generally:
+
+* `POOL_SIMD` is **`v4x`-only** by design (on 16-register tiers the 16 pool
+  lane accumulators would spill), so `v4`, `v3`, `neon`, `wasm128` and
+  `scalar` all take the per-pixel path.
+* `width % 8 == 0` fails at most pyramid scales for many images: 200×150
+  walks widths 200 / 100 / 50 / 25, and the tail fires at **three of four
+  scales**.
+
+A restructure that is bit-exact only on one SIMD tier at one width class is
+not a restructure — it is a second output regime hiding inside the kernel.
+
+### 14.2 The gain it would buy — bounded, and small
+
+`dense_block_kernel` is **125,098,677 Ir = 23.2 %** of the net 944-full walk
+at 576². Amdahl bound, with three deliberately optimistic assumptions (dense
+scales *perfectly*, everything else stays at its measured 3-way effective cap,
+and the restructure itself costs nothing):
+
+| threads | now | dense perfect | **upper-bound gain** |
+|---|---:|---:|---:|
+| 8 | 0.3333 | 0.2851 | **1.17×** |
+| 16 | 0.3333 | 0.2706 | **1.23×** |
+
+So the ceiling this would lift is worth **at most 17–23 %** of wall, and
+realistically less.
+
+### 14.3 The cost it would incur
+
+Changing the grouping changes `f0..943` output bytes for every image whose
+width is not a multiple of 8 at every scale — i.e. **most of them**. That
+makes every 944-era artifact prior-era: the 11 canonical `ext924/944` legs, the
+5.7 M-row bigcodec table and its 21 split views, `kadis700k_924`, the eval
+instruments, **and every 944-trained model**, because the inputs would change
+meaning rather than merely their values.
+
+**17–23 % of wall against re-extracting and re-training the entire 944 era is
+not a trade this lane should make silently, and the user has not been asked.**
+STOPPED and reported, per the constraint.
+
+**If it is ever wanted**, the cheapest honest form is not a byte change at all:
+give the kernel a `POOL_SIMD`-equivalent path on every tier *and* fold the
+scalar tail into the row-local accumulators, so each accumulator takes exactly
+one add per row. That is *itself* a byte change today — but it is a
+**one-time** one that would make the kernel permanently band-parallelisable,
+rather than a change bought per-optimisation.
+
+### 14.4 Y-channel imbalance — no free rebalancing exists
+
+Rebalancing *which thread computes what* is free; changing summation order is
+not. Measured against that line: **there is nothing free left to rebalance.**
+The three channel accumulators are disjoint, so scheduling order is already
+irrelevant and rayon already work-steals across the fan-out. The imbalance is
+not a scheduling artifact — `append`, BANDVIS and CSFW are **Y-only work**, so
+channel 1 simply has more to do. The only way to shorten that critical path is
+to split Y's own kernels, which lands on exactly the §14.1 obstacle.
+
+The one genuinely free change available — letting X and B pipeline
+phase A → phase B without waiting on the barrier Y needs — was analysed and
+**rejected on expected value**: X and B are the *small* channels precisely
+because the Y-only blocks are what make Y big, so overlapping their phase B
+with Y's phase A shortens nothing on the critical path.
+
+### 14.5 `fused_vblur_ssim` fission — RETIRED without implementing it
+
+The standing candidate was its 4 spill stores / **28 spill loads**. Located
+them against the loop structure before writing any code:
+
+| | total | inside the innermost loop |
+|---|---:|---:|
+| spill loads | 28 | **1** |
+| spill stores | 4 | **0** |
+
+The function is 1750 instructions with 10 loop heads; its innermost loop body
+is 188 instructions and contains **one** spill load and no spill stores. The
+other 27 loads sit in per-column-group setup, executed once per group rather
+than per element.
+
+**So there is no hot-loop register pressure to relieve, and the fission
+premise is void.** The candidate is retired on measurement at a cost of one
+`objdump` — which is the outcome the "honest prior: expect nothing" called for,
+reached without spending a kernel rewrite to find out.
+
+---
+
+## 15. Buffered-retirement checklist — updated to what is now true
+
+| # | blocker | status |
+|---|---|---|
+| 1 | **The fold has no `score()`** — `ZensimV2Result` exposes none; `compute`, `compute_with_ref`, `*_and_diffmap`, `classify`, `compute_pu_linear*`, `compute_streaming_strips*` all run the buffered walk, and `zensim-regress` is a published crate | **OPEN — the gating blocker.** Additive API, not a rewrite |
+| 2 | **Pool values differ at production widths** (up to 81.6 % relative) | **CLOSED by C** (`56bbcda2`). fold `f0..371` is now bit-identical to buffered at all 19 gated geometries; gate `v1_372_bit_exact_to_fold_at_every_width` |
+| 3 | **No ref-cached fold form** — `precompute_reference` amortises one reference across N distorted; every encoder loop and the corpus builder use it; zenmetrics hard-errors for folded regimes on the ref-ctx path | **OPEN.** Additive API |
+| 4 | **Attribution's basic canvas is buffered-native** — `attribution.rs:1378` builds a `PrecomputedReference`; jxl-encoder's production loop consumes the 372-class arms | **OPEN** |
+| 5 | *(secondary)* `zensim-gpu`'s only CPU oracle is `compute_extended_features` | **OPEN** — deleting buffered removes the CubeCL kernels' reference |
+| 6 | *(perf)* fold must not be slower | **OPEN, and now quantified.** 944-full peaks at **2.30–2.54×** (8T) vs buffered's ~5.8×; buffered `buf_v1_372` is 3.0 ms @576²/8T against the fold's 7.17. The producer is **not** the cause (~8 % of the walk); the causes are §14.1 (dense, 23 %, era-locked) and §14.4 (Y-only work) |
+
+**Net: C closed blocker 2 and nothing else changed.** Blockers 1, 3, 4 and 5
+are all additive-API or oracle work with no measurement risk — they are the
+path to retirement. Blocker 6 is now **bounded rather than open-ended**: the
+remaining MT headroom is at most ~1.2× and is gated behind an era decision, so
+buffered retirement should be planned on the API blockers *first* and should
+not wait on the fold reaching buffered-class scaling, which it cannot do
+without changing 944 bytes.
