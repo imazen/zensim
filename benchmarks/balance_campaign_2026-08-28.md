@@ -2903,6 +2903,42 @@ port's DV search is still ~80 s/1080p cell at cpu6). Not ported: BIGDIA (unreach
 allintra), the speed-4/5 `prune_tx_type_est_rd` arm. Record: zenav1-aom `CLAUDE.md` KB-41
 roots #3-#6, `PARITY.md`.
 
+### KB-41 ROOTS #7-#13 — the census widened past the datagen cells and every residual closed (2026-08-30 ~09:0x–13:0xZ, zenav1-aom `38a92657`)
+Widening the localizer to the two 85x128 repro dirs + the 1280x800/1024x745 band + the six
+1920x1080 aomplanes cells exposed seven more C mechanisms, each localized by the sibling-C +
+port dumps and closed in turn (census 30/30 → **57/57 byte-identical**, 0 DIV, 0 panics):
+- **#7** the SEARCH-time `allow_intrabc` is the screen detector's decision
+  (`estimate_screen_content_antialiasing_aware`, now ported as `screen_detect.rs`); C flips the
+  header to 0 only after the tiles when no block used IntraBC (encodeframe.c:2443), so the
+  port had been searching with the FINAL bit and paying the wrong `intrabc_cost`.
+- **#8/#9/#12** three search-ctx CDF shadows (`TileCtxState::search_*`): C refills the search
+  costs per SB from `xd->tile_ctx`, which `update_stats` adapts under different gates than the
+  writer — `intrabc_cdf` under the search-time allow; palette-Y flag/size only for
+  chroma-reference intra blocks (`av1_sum_intra_stats` early return; IntraBC winners are
+  `is_inter_block` and skip it — the missing exclusion cost a 1280x800 s6 regression);
+  `tx_size_cdf` for EVERY coded intra block at the search-time `TX_MODE_SELECT` even when the
+  header ends `TX_MODE_LARGEST` via the `txb_split_count == 0` flip (encodeframe.c:2797) — the
+  85x128 cq62 s8 non-screen cell (winner-mode tx-size cost 220 vs 42 at ctx 2). All three sit
+  behind `allow_update_cdf` (the `cdf0` config-permutation cells caught the missing gate).
+- **#10** allintra speed >= 8 never runs the DV search (`rd_pick_intrabc_mode_sb` returns under
+  `rt_sf.use_nonrd_pick_mode`, rdopt.c:3432-3434) — the port used IntraBC in 6,857 blocks of
+  1920x1080 cq32 s8 where the oracle used none. `use_nonrd_pick_mode` + `mv_sf.use_intrabc`
+  modelled; the {7,9} speed-feature class split (re-pinned from the C source).
+- **#11** frame-edge HORZ_4/VERT_4 code fewer than 4 strips (`rd_pick_4partition` breaks at the
+  first out-of-frame strip, partition_search.c:3948); the port's all-4-strips envelope guard is
+  gone and `SbTree::{Horz4,Vert4}` carry `Option` strips — 85x128 cq19 s4.
+- **#13** `av1_set_screen_content_options` arm order: seq-forced → `--tune-content=screen`
+  (new `ToggleKnobs::tune_content_screen`, kb37's reference) → detection OFF at speed 9
+  (`use_nonrd_pick_mode && !hybrid_intra_pickmode`, kb35's control) → detector. NOT ported:
+  the two-pass trial encode `av1_determine_sc_tools_with_encoding` (live on allintra < speed 8
+  when the detector says off; the bench asserts the decision against the header and names it).
+Gates after the closure: config_permutations 87/87 (speed classes re-pinned: 7/8/9 now distinct),
+rd_close_palette 2/2 (the last pinned near-tie `ui_420_128_cq32` promoted to byte-exact — the
+"near-ties" were wrong search costs), rd_close_intrabc, toggles 25/25, kb22 (+3 ignored-arm
+cells), kb35 3/3, kb36 2/2, kb37 3/3, aom-encode lib 85/85. Record: zenav1-aom `PARITY.md` row
+"KB-41 roots #7-#13", `CLAUDE.md` KB-41 entry. The datagen wave (below) still runs the
+roots-#3-#6 image; the encoder_panic cells it refuses are re-queued after this lands.
+
 ### AOM-RS WAVE RELAUNCHED ON THE BYTE-EXACT PORT (2026-08-30 08:39Z) — image `exec-zensim944hdr-47f5ab9c`
 zenmetrics master `0bcede27` (fleet.env CPU pin bumped). Chain: musl rebuild (the new port's unique
 strings confirmed in the binary) → image build + push (digest `5f4f9bd5…`) → `zenfleet-ctl requeue
