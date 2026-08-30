@@ -119,11 +119,16 @@ their basic/peaks differences are decode, not math.
 | stored 2026-05-15 vs `ext720-2026-07-22` | 4,292 (100 %) | 439 rows (decode) | **max 0.0374 / 0.1235 — the same signature as stored-vs-HEAD** |
 | HEAD vs `r1b-pools944-2026-08-30` (the 944 fold's `f156..371`) | 4,292 (100 %) | max 0.0768 / 0.3045 | max 0.0417 / 0.0478 |
 
+The 439 rows are a clean decoder split, verified by extension: **439 of the 536 JPEG
+distortions differ in basic/peaks, and 0 of the 3,756 PNG distortions do** (zenjpeg vs
+the `image` crate's `zune-jpeg`; PNG is lossless and both decoders agree exactly).
+
 So there are **two** eras, not three: `2026-05-15-full-features` is **pre-fix**;
-`ext720-2026-07-22` and HEAD are the **same post-fix era** (the 439 differing rows are
-exactly the JPEGs, and they differ in basic too). `r1b-pools944` is post-fix but on the
-FOLD path, whose divergence from v1 at non-SIMD-exact padded widths is the
-pre-existing, documented `folded720_*` parity class — not this drift.
+`ext720-2026-07-22` and HEAD are the **same post-fix era** — on the 3,756 PNG rows,
+where the decoders agree bit-for-bit, their masked/IW agrees too.
+`r1b-pools944` is post-fix but on the FOLD path, whose divergence from v1 at
+non-SIMD-exact padded widths is the pre-existing, documented `folded720_*` parity
+class — not this drift.
 
 ---
 
