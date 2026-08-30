@@ -560,6 +560,29 @@ this harness and that one are measuring the same thing.
 1T → 28T scaling: `buf_v1_372` **4.6× / 6.5×**, `fold944_full` **1.84× /
 2.02×**. The gap is the 3-way channel cap.
 
+### Peak RSS — the streaming design's payoff, and where it starts
+
+`/usr/bin/time -v`, one arm per process (`ZEN_XP_RSS`), serial, 8 iterations.
+The harness holds both input images (2 × w² × 3 B = 7.96 MB at 1152²,
+31.85 MB at 2304²) in every arm; the "working set" row subtracts that constant.
+
+| arm | 1152² peak | working set | 2304² peak | working set | 1152²→2304² |
+|---|---:|---:|---:|---:|---:|
+| `buf_v1_228` | 49.3 MB | 41.4 MB | 223.8 MB | 192.0 MB | **4.54×** |
+| `buf_v1_372` | 48.7 MB | 40.8 MB | 203.2 MB | 171.4 MB | **4.17×** |
+| `fold944_off` | 62.7 MB | 54.7 MB | 136.6 MB | 104.8 MB | **2.18×** |
+| `fold944_full` | 68.1 MB | 60.2 MB | 146.5 MB | 114.6 MB | **2.15×** |
+
+**The fold costs MORE memory at 1152² and much LESS at 2304²**, and the reason
+is the shapes: buffered holds whole-image pyramids so it scales with area
+(4.2–4.5× for 4× the pixels), while the fold holds O(strip × width) rolling
+planes and scales closer to width (2.2×). The crossover sits between the two
+sizes — at 2304² the fold's working set is **0.6×** buffered's, at 1152² it is
+**1.4×**. So the C5 switchover's "4.7× memory reduction" is a large-image
+property, and at small sizes the fold is the heavier of the two. Anything
+choosing a path on memory grounds needs to know which side of ~1.5 MP it is
+on.
+
 ---
 
 ## 7. The 372-as-a-subset-of-944 mandate — findings
