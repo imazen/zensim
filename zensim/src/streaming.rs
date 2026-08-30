@@ -2767,11 +2767,8 @@ impl PrecomputedReference {
         // (`ref_width`/`ref_height`) stay the ORIGINAL size so `compute_with_ref*`
         // still validates the distorted image against the caller's dimensions.
         let (orig_w, orig_h) = (source.width(), source.height());
-        if orig_w > 0
-            && orig_h > 0
-            && (orig_w < crate::metric::MIN_PYRAMID_DIM || orig_h < crate::metric::MIN_PYRAMID_DIM)
-        {
-            let padded = crate::metric::reflect_pad_to_min(source);
+        if crate::metric::needs_pyramid_pad(orig_w, orig_h, num_scales) {
+            let padded = crate::metric::reflect_pad_for_scales(source, num_scales);
             let mut r = Self::new_inner(&padded, num_scales, parallel);
             r.ref_width = orig_w;
             r.ref_height = orig_h;

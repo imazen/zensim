@@ -723,13 +723,27 @@ pub fn compute_zensim_with_ref_and_config(
         return Err(ZensimError::DimensionMismatch);
     }
     let dst_img = crate::source::RgbSlice::try_new(distorted, width, height)?;
-    let result = crate::streaming::compute_zensim_streaming_with_ref(
-        precomputed,
-        &dst_img,
-        &config,
-        WEIGHTS,
-        None,
-    );
+    // The reference was reflect-padded inside `PrecomputedReference::new`;
+    // pad the distorted to match or the scale walk asserts on the width
+    // mismatch. Same rule as `Zensim::compute_with_ref`.
+    let result = if needs_pyramid_pad(width, height, config.num_scales) {
+        let d = reflect_pad_for_scales(&dst_img, config.num_scales);
+        crate::streaming::compute_zensim_streaming_with_ref(
+            precomputed,
+            &d,
+            &config,
+            WEIGHTS,
+            None,
+        )
+    } else {
+        crate::streaming::compute_zensim_streaming_with_ref(
+            precomputed,
+            &dst_img,
+            &config,
+            WEIGHTS,
+            None,
+        )
+    };
     // This entry point scores via the plain WEIGHTS (V0_2 linear) distance,
     // never an MLP forward pass — tag honestly rather than inheriting
     // `combine_scores`'s internal `codec_target()` (`B`) placeholder tag
@@ -2026,8 +2040,8 @@ impl Zensim {
         let (ow, oh) = (distorted.width(), distorted.height());
         // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
         // (also-padded) reference pyramid; score with the original dims.
-        let mut result = if ow < MIN_PYRAMID_DIM || oh < MIN_PYRAMID_DIM {
-            let d = reflect_pad_to_min(distorted);
+        let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
+            let d = reflect_pad_for_scales(distorted, config.num_scales);
             crate::streaming::compute_zensim_streaming_with_ref(
                 precomputed,
                 &d,
@@ -2122,7 +2136,7 @@ impl Zensim {
         // Sub-64px images can't form the pyramid the strip geometry assumes and
         // don't need streaming (they fit in memory) — route them to the
         // buffered path, which reflect-pads to the pyramid minimum.
-        if source.width() < MIN_PYRAMID_DIM || source.height() < MIN_PYRAMID_DIM {
+        if needs_pyramid_pad(source.width(), source.height(), params.num_scales) {
             return self.compute(source, distorted);
         }
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
@@ -2207,7 +2221,7 @@ impl Zensim {
         // Sub-64px distorted doesn't need streaming and can't form the strip
         // pyramid — route to the buffered ref path (which pads to align with
         // the also-padded reference).
-        if distorted.width() < MIN_PYRAMID_DIM || distorted.height() < MIN_PYRAMID_DIM {
+        if needs_pyramid_pad(distorted.width(), distorted.height(), params.num_scales) {
             return self.compute_with_ref(precomputed, distorted);
         }
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
@@ -2268,7 +2282,23 @@ impl Zensim {
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
-        let (stats, mean_offset) =
+        let (ow, oh) = (distorted.width(), distorted.height());
+        // Pad a sub-pyramid-minimum distorted so it aligns with the (also
+        // padded) reference pyramid — the same rule `compute_with_ref`
+        // applies. Without it this entry fed a 48-wide plane to a 64-wide
+        // reference scale and tripped `scale 0 width mismatch`; scoring still
+        // uses the ORIGINAL dims (2026-08-30).
+        let (stats, mean_offset) = if needs_pyramid_pad(ow, oh, config.num_scales) {
+            let d = reflect_pad_for_scales(distorted, config.num_scales);
+            crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
+                precomputed,
+                &d,
+                &mut scratch.dst_planes,
+                &config,
+                params.weights,
+                self.stop_ref(),
+            )
+        } else {
             crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
                 precomputed,
                 distorted,
@@ -2276,15 +2306,11 @@ impl Zensim {
                 &config,
                 params.weights,
                 self.stop_ref(),
-            );
+            )
+        };
         self.check_stop()?;
         let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
-        apply_mlp_scoring(
-            &mut result,
-            params,
-            distorted.width() as u32,
-            distorted.height() as u32,
-        )?;
+        apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -2990,7 +3016,45 @@ fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource
 }
 
 /// Minimum per-dimension size for the full 4-scale pyramid (8·2³ = 64).
-pub(crate) const MIN_PYRAMID_DIM: usize = 64;
+pub(crate) const MIN_PYRAMID_DIM: usize = min_pyramid_dim_for_scales(crate::NUM_SCALES);
+
+/// Smallest per-dimension size that still forms `num_scales` pyramid levels.
+///
+/// The scale walk (`streaming::compute_multiscale_stats_streaming` and every
+/// `*_with_ref` sibling) halves `w`/`h` per level and stops at `w < 8 ||
+/// h < 8`, so level `num_scales-1` needs `8 · 2^(num_scales-1)` at level 0.
+/// At the shipped `NUM_SCALES = 4` this is 64 — the historical
+/// [`MIN_PYRAMID_DIM`] constant, unchanged.
+#[inline]
+pub(crate) const fn min_pyramid_dim_for_scales(num_scales: usize) -> usize {
+    // `num_scales` comes from a profile / `ZensimConfig` (1..=6 in practice);
+    // saturate rather than shift-overflow on a nonsense value.
+    match num_scales {
+        0 | 1 => 8,
+        n if n <= 32 => 8usize << (n - 1),
+        _ => usize::MAX,
+    }
+}
+
+/// **THE single owner of the "must reflect-pad before the scale walk"
+/// decision.** Every v1 entry point that reaches the pyramid asks this.
+///
+/// A pair that answers `true` and is NOT padded produces a SHORT feature
+/// vector (fewer `ScaleStats` → `n_scales · 3 · 31` instead of 372) or, on
+/// the `*_with_ref` paths, trips the `scale 0 width mismatch` assertion
+/// against an already-padded reference. Both were live defects until
+/// 2026-08-30 — see `docs/DATASET_HISTORY.md` §3.26 and
+/// `zensim/tests/v1_feature_width_pure_function.rs`.
+///
+/// Note the asymmetry this hides: the walk starts at
+/// `simd_padded_width(width)` but plain `height`, so before the padding was
+/// applied `54x96` came out full-width (54 → 64 by SIMD alignment) while
+/// `96x54` came out short. Callers must not re-derive the rule.
+#[inline]
+pub(crate) fn needs_pyramid_pad(width: usize, height: usize, num_scales: usize) -> bool {
+    let min_dim = min_pyramid_dim_for_scales(num_scales);
+    width > 0 && height > 0 && (width < min_dim || height < min_dim)
+}
 
 /// Owned, tightly-packed image presenting a reflect(mirror)-padded view of a
 /// sub-64px input so the multi-scale pyramid always forms. This is the
@@ -3049,9 +3113,15 @@ pub(crate) fn reflect_index(i: usize, n: usize) -> usize {
 
 /// Reflect(mirror)-pad `src` up to at least [`MIN_PYRAMID_DIM`] in each dim.
 pub(crate) fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
+    reflect_pad_for_scales(src, crate::NUM_SCALES)
+}
+
+/// Reflect(mirror)-pad `src` up to [`min_pyramid_dim_for_scales`] in each dim.
+pub(crate) fn reflect_pad_for_scales(src: &impl ImageSource, num_scales: usize) -> OwnedImage {
+    let min_dim = min_pyramid_dim_for_scales(num_scales);
     let (w, h) = (src.width(), src.height());
     let bpp = src.pixel_format().bytes_per_pixel();
-    let (bw, bh) = (w.max(MIN_PYRAMID_DIM), h.max(MIN_PYRAMID_DIM));
+    let (bw, bh) = (w.max(min_dim), h.max(min_dim));
     let mut data = vec![0u8; bw * bh * bpp];
     for y in 0..bh {
         let srow = src.row_bytes(reflect_index(y, h));
@@ -3083,9 +3153,9 @@ fn compute_with_config_inner(
     // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
     // scales. NO-OP at ≥ 64px in both dims (the common path is untouched).
     let (w, h) = (source.width(), source.height());
-    if w > 0 && h > 0 && (w < MIN_PYRAMID_DIM || h < MIN_PYRAMID_DIM) {
-        let s = reflect_pad_to_min(source);
-        let d = reflect_pad_to_min(distorted);
+    if needs_pyramid_pad(w, h, config.num_scales) {
+        let s = reflect_pad_for_scales(source, config.num_scales);
+        let d = reflect_pad_for_scales(distorted, config.num_scales);
         return compute_with_config_core(&s, &d, config, weights, stop);
     }
     compute_with_config_core(source, distorted, config, weights, stop)
@@ -4784,7 +4854,19 @@ pub fn compute_zensim_with_config(
     let src_img = crate::source::RgbSlice::new(source, width, height);
     let dst_img = crate::source::RgbSlice::new(distorted, width, height);
 
-    let result = crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
+    // Reflect-pad a sub-pyramid-minimum pair, exactly as
+    // `compute_with_config_inner` (every `Zensim::compute*`) does. Without
+    // this the scale walk stopped early and this entry returned a SHORT
+    // feature vector — 93 / 186 / 279 wide instead of 372 — with no error.
+    // Both v1-372 extractors call this, which is what made ~6.5 % of the
+    // R1b eval-slice rows ragged (docs/DATASET_HISTORY.md §3.26).
+    let result = if needs_pyramid_pad(width, height, config.num_scales) {
+        let s = reflect_pad_for_scales(&src_img, config.num_scales);
+        let d = reflect_pad_for_scales(&dst_img, config.num_scales);
+        crate::streaming::compute_zensim_streaming(&s, &d, &config, WEIGHTS)
+    } else {
+        crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS)
+    };
     // See the identical-shortcut branch above: this function scores via
     // plain linear WEIGHTS, not an MLP bake, so it does not inherit
     // `combine_scores`'s internal `codec_target()` (`B`) placeholder tag
