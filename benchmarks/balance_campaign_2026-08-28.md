@@ -2854,3 +2854,16 @@ Datagen note: with IntraBC mirrored ON for screen-detected frames the PORT's DV 
 wave's bottleneck (1080p screenshots ~80 s/cell at cpu6 vs ~1 s for the oracle; cpu4 being
 timed) — the aom wave's done-rate fell to ~0/min for a 10-min window while the boxes sat at
 full load. Gate-3 territory for the port; a size/screen-tier scoping decision for the wave.
+
+### AOM-RS WAVE — THROUGHPUT DECISION: screen-detected frames above 0.25 MP DEFERRED (2026-08-30 ~07:4xZ)
+Measured: with palette+IntraBC mirrored ON, the port's IntraBC DV search is the wave's
+bottleneck — 1920x1080 screenshot ≈ 80 s/cell at cpu6, and at **cpu4 a single cell had not
+finished after 40 min** (killed; the oracle codes the same cell in ~1 s). After the mirror
+image went live the three encode boxes sat at full load and wrote NO ledger rows for ~35 min
+(in-flight cells), done-rate ~280/min → ~0. Decision: executor knob
+`ZEN_AOMRS_MAX_SCREEN_MP` (default 0.25 MP): a screen-detected frame above the cap is
+REFUSED with a distinct "DEFERRED … not a divergence" message (ledger `failed` row →
+pardon + re-declare, content-addressed, when the port's search is fast); below the cap the
+port is exercised + byte-verified as before. Non-screen frames are unaffected. This is Gate-3
+territory for the port (KB-41 perf note in zenav1-aom's CLAUDE.md); the deferred set is
+recoverable at zero data cost.
