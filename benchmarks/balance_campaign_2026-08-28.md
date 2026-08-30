@@ -2284,3 +2284,33 @@ ensemble; re-price the swap at the band (cid22 0.883±0.006, kon
 0.474±0.026) and treat s4004's kon as selection-favored.** k=5 firming
 seeds (s4007/s4008, exact argv) training now. Family axes for s4003/s4005
 are pre-D1 cuts (flagged; cid22/kon are same-ruler).
+
+## CRITERION 8 — ZENPICKER META-PICKER LANE (opened 2026-08-30, user GO)
+
+Design (from the settled memos + criterion text): meta-picker = SOURCE
+features ⊕ zq_norm → per-FAMILY bytes_log, masked argmin routes among the
+production Zq loops. Pipeline, all from existing assets:
+1. **Era-correct judge**: all 7 canonical picker datasets × 3 splits
+   RESCORED under Profile B (`rescore_parquet --profile b`; 5.7M rows;
+   first-cell gate: lossless rescores constant-high ✓) →
+   `/mnt/v/output/zensim/picker-rescore-B-2026-08-30/` (21 files).
+2. **Source features**: the existing `clean_features.tsv` (4,497 renditions,
+   zenanalyze 0.2.0, provenance-stamped) — 36 size-gated columns
+   (aq_map/noise_floor) are empty on the same 636 small renditions →
+   COLUMNS dropped, every rendition kept ⇒ 61 features. No re-extraction
+   (check-disk rule, third confirmation today).
+3. **Meta-input builder** (committed:
+   `scripts/canonical_corpus/build_metapicker_input_2026-08-30.py`):
+   families become the trainer's cells via the plan-cell knob schema
+   (`{"cell": family}`); rows keep q/score/bytes; splits stay the canonical
+   origin-digit views. Built: train 2,946,036 / validate 1,764,808 / test
+   1,031,816 rows, 0 missing renditions
+   (`/mnt/v/output/zensim/metapicker-2026-08-30/` + manifest).
+4. **Trainer**: `zenpicker-train --mode mlp` (the within-cell-optimal
+   formulation, no q-leakage) — v1 seed 0 training now; origin-level
+   honest panel via the EXISTING `--eval-bake` mode (a prior session's
+   addition, confirmed not duplicated) on the validate view.
+Gates for v1 (pre-declared): report argmin accuracy + byte-overhead
+mean/p50/p90 on the origin-validate view vs the trivial baselines
+(always-best-single-family; oracle=0 overhead). Ship/wire remains
+user-gated per standing rules.
