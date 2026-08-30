@@ -3798,3 +3798,28 @@ selective re-apply; no other lane's edits clobbered).
 - Score: **4 levers shipped** (rem-ring, block-skipping, band-parallel fold hook, C) / **4
   implemented-then-rejected on measurement** (activity fusion +1.04 %, map_init scratch, row-
   parallel blur, option-A pre-pad) — the rejections are the measurements working.
+
+## 2026-08-31 ~01:5xZ — ROUND 12: the dense fork priced and STOPPED (`091dc35a`; no code changed — the decision is the deliverable)
+
+- **Grouping obstacle located exactly**: dense's f64 accumulator takes one add per row ONLY on
+  `v4x` with `width % 8 == 0` (`POOL_SIMD` is v4x-only by design — 16-register tiers would spill;
+  the scalar tail fires at 3 of 4 scales on 200×150). Measured ulps: 0 (v4x, w%8==0) / −2 (tails) /
+  13 (per-pixel pools). A restructure bit-exact on one tier at one width class = a second output
+  regime hiding inside the kernel.
+- **Gain vs cost**: dense = 23.2 % of the walk; Amdahl UPPER bound 1.17× @8T / 1.23× @16T — against
+  making prior-era the 11 canonical legs, tbig 5.7M + 21 views, kadis700k_924, the eval
+  instruments, AND every 944-trained model. Not traded silently. If ever wanted: ONE-TIME byte
+  change giving every tier a POOL_SIMD-equivalent path + tails folded into row-local accumulators
+  (= permanently band-parallelisable), paid once — best bundled with the next unavoidable era break
+  (e.g. the future HDR-features regime).
+- **Y-channel imbalance: no free rebalancing exists** — disjoint accumulators already work-steal;
+  the imbalance IS Y-only work (append/BANDVIS/CSFW); pipelining X/B rejected on expected value.
+- **Fission probe retired pre-implementation**: of the 28 spill loads, ONE is in the innermost loop
+  (188 of 1750 insns) — no hot-loop pressure to relieve; cost of the answer = one objdump.
+- **Buffered-retirement checklist (§15) updated to what is true**: C closed blocker 2 (width
+  divergence). Remaining: 1 fold `score()` (the gating one), 3 ref-cached form, 4 attribution's
+  basic canvas, 5 zensim-gpu CPU oracle — all additive-API/oracle work, no measurement risk.
+  Blocker 6 (MT) now BOUNDED: ≤ ~1.2× headroom, era-gated ⇒ **retirement plans on the API blockers
+  and must not wait for buffered-class scaling** (unreachable without changing 944 bytes).
+- Extraction-lane scorecard final: 4 shipped / 5 rejected-on-measurement / 2 era-gated decisions
+  surfaced (root flip; the one-time accumulation-shape change).
