@@ -1101,3 +1101,85 @@ the fold now tops out at 3 channels × 4 bands, over a **serial
 `StripPlaneProducer`**. Until the producer parallelises, buffered wins at high
 thread counts on wall clock no matter how much per-pixel work the fold drops.
 That is the single named blocker for retiring buffered on perf grounds.
+
+---
+
+## 11. Mode taxonomy collapsed: 944-full is the only product mode (2026-08-30)
+
+User decision, superseding §10's three-mode framing: **944 with all pools live
+is the ONLY product mode.** The zeroed regime and the `v1_only` block-skipping
+boolean are not product paths.
+
+* **`V2NewFeatureToggles::v1_only` is `#[doc(hidden)]`** and documented as
+  test/bench instrumentation — the control arm for
+  `folded_v1_only_matches_full_walk` and for pricing what the v2-era blocks
+  cost inside the one product walk. **It could not be made `pub(crate)`**:
+  the struct is constructed by external crates with `..Default::default()`,
+  and functional record update requires every field to be visible, so a
+  private field breaks every out-of-crate constructor — zenmetrics included,
+  which is a scope fence. `#[doc(hidden)]` is as far as this goes without a
+  builder-style redesign of the struct. **Listed for approval.**
+* **`V1PoolsMode` stays fully public.** The fleet constructs it and the
+  in-flight aom/svt harvests run at `foldapp2` / `carriers`; touching it would
+  break their internal consistency. Canonicalising `zensim-foldapp2pools` as
+  the datagen default is a registered fleet-lane task, not this lane's.
+* The `fold372_only` bench arm is removed; `toggles_off` survives in
+  `extract_paths_bench` **as the measurement control that prices the pool
+  block**, not as a shippable configuration.
+
+### 11.1 Row-parallel H-blur — MEASURED NEUTRAL, reverted
+
+With 944-full as the only target, the next MT axis tried was splitting phase
+A's `fused_blur_h_ssim` across row bands. It is provably bit-exact — a
+horizontal box blur is an independent running-sum recurrence per row, and
+`box_blur_h_ring_matches_regathered_reference` already proves a scalar
+per-row reference matches the vector kernels bit-for-bit, so band boundaries
+can only change which lane-width tier a row lands in, never a value. (The
+VERTICAL blur has no such property: its recurrence walks the whole column, so
+restarting it mid-plane re-inits the running sum from a different sequence of
+adds. It can only be split by column, which needs a kernel signature change.)
+
+Implemented, gated, measured, **reverted**:
+
+| threads | 576² ON | 576² OFF | 1152² ON | 1152² OFF |
+|---|---:|---:|---:|---:|
+| 4 | 7.33 | 7.50 | 34.00 | 34.00 |
+| 6 | 7.00 | 7.17 | 31.00 | 31.50 |
+| 8 | 7.00 | 7.83 | 34.00 | 33.50 |
+| 12 | 8.17 | 7.17 | 31.50 | 35.00 |
+
+Every delta is inside the noise of this instrument. The reason is structural:
+phase A already runs inside the 3-way channel fan-out and the fold hook is
+already band-parallel, so a third nesting level of rayon adds fork/join
+overhead against plane sizes that are already saturating the threads
+available. **Complexity for no measured gain does not ship** — the wrapper and
+its wiring were deleted, not left behind a flag.
+
+That makes three levers this lane implemented and then rejected on
+measurement (activity-fusion §9.5, `map_init` band scratch §10.2, row-parallel
+blur here), against three that shipped (rem-ring, block-skipping,
+band-parallel fold hook). The rejections are the measurements working.
+
+### 11.2 Where 944-full's remaining MT ceiling is
+
+944-full now reaches **2.40–2.45×** (576² 17.17 → 7.00 ms; 1152² 74.50 →
+31.00 ms), against buffered's ~5.8× at 1152². The gap is NOT the producer,
+which is only ~8 % of the walk by instruction count
+(`srgb_to_positive_xyb_planar` 17.0 M + `downscale_2x_into` 15.5 M + memcpy
+8.6 M of 535 M). It is two things the fold cannot currently split:
+
+1. **`dense_block_kernel` is 23 % of the walk and gets 3-way parallelism
+   only.** It accumulates row-by-row into a running f64 `DenseAccum`, so
+   splitting rows into chunks and merging gives `((0+r0)+r1) + ((0+r2)+r3)`
+   where the serial path gives `(((0+r0)+r1)+r2)+r3` — **not bit-exact**,
+   f64 addition is not associative. The fold hook could be band-parallelised
+   precisely because each band returns a self-contained value that is then
+   merged in order; `dense` would need the same restructuring to qualify.
+2. **Channel load imbalance.** `append`, BANDVIS and CSFW are Y-only, so the
+   3-way fan-out is bounded by channel 1's time, not the mean. More threads do
+   not help a fan-out whose critical path is one task.
+
+So the honest next step for 944-full MT is **restructuring `dense_block_kernel`
+to produce per-band self-contained accumulators** (the fold-hook pattern),
+not parallelising the producer. Recorded here rather than attempted, because
+it is a kernel rewrite with a bit-exactness gate and wants its own stage.

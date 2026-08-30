@@ -73,7 +73,7 @@ fn main() {
             let (src, dst) = test_pair(w, h);
             let src_static: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
             let dst_static: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
-            suite.compare(&format!("folded944_pools_{w}"), |group| {
+            suite.compare(format!("folded944_pools_{w}"), |group| {
                 // The default 120 s group budget yielded only 4 usable rounds
                 // on a shared box (the paired CI then spans ±10 points, which
                 // cannot resolve a few-percent lever). Raise the wall budget +

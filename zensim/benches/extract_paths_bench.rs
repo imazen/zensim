@@ -90,6 +90,9 @@ fn fold_zensim() -> &'static Zensim {
     ))
 }
 
+// NOTE: 944 with all pools live (`toggles_full`) is the ONLY product mode.
+// `toggles_off` (structural-zero pools) is kept as the measurement CONTROL
+// arm that prices the pool block, not as a shippable configuration.
 fn toggles_off() -> zensim::feature_v2::V2NewFeatureToggles {
     zensim::feature_v2::V2NewFeatureToggles {
         append_block: true,
@@ -102,15 +105,6 @@ fn toggles_full() -> zensim::feature_v2::V2NewFeatureToggles {
     zensim::feature_v2::V2NewFeatureToggles {
         v1_pools: zensim::feature_v2::V1PoolsMode::Full,
         ..toggles_off()
-    }
-}
-
-/// BLOCK-SKIPPING: v1's blocks only (`f0..372` live, rest structural zero).
-/// This is the arm that has to beat `buf_v1_372`.
-fn toggles_v1only() -> zensim::feature_v2::V2NewFeatureToggles {
-    zensim::feature_v2::V2NewFeatureToggles {
-        v1_only: true,
-        ..toggles_full()
     }
 }
 
@@ -140,11 +134,11 @@ fn rss_mode(arm: &str) {
                     .expect("buf_v1_372");
                 sink += r.features()[371];
             }
-            "fold944_off" | "fold944_full" | "fold372_only" => {
-                let t = match arm {
-                    "fold944_full" => toggles_full(),
-                    "fold372_only" => toggles_v1only(),
-                    _ => toggles_off(),
+            "fold944_off" | "fold944_full" => {
+                let t = if arm == "fold944_full" {
+                    toggles_full()
+                } else {
+                    toggles_off()
                 };
                 let rsv = RgbSlice::new(&src, size, size);
                 let dsv = RgbSlice::new(&dst, size, size);
@@ -169,13 +163,13 @@ fn main() {
         .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
         .unwrap_or_else(|| vec![576, 1152, 2304]);
     let z = fold_zensim();
-    let (off, full, v1only) = (toggles_off(), toggles_full(), toggles_v1only());
+    let (off, full) = (toggles_off(), toggles_full());
     let result = zenbench::run(|suite| {
         for &n in &sizes {
             let (src, dst) = test_pair(n, n);
             let src_s: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
             let dst_s: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
-            suite.compare(&format!("extract_paths_{n}"), |group| {
+            suite.compare(format!("extract_paths_{n}"), |group| {
                 // Same budget the pools lane raised fold_pools_bench to: the
                 // default 120 s / 4-usable-rounds cannot resolve a few-percent
                 // lever on a shared box.
@@ -208,17 +202,6 @@ fn main() {
                             .compute_folded720_features_streaming(&rsv, &dsv, off, &mut scratch)
                             .unwrap();
                         zenbench::black_box(v2.features()[943]);
-                    })
-                });
-                group.bench("fold372_only", move |b| {
-                    let mut scratch = zensim::feature_v2::V2Scratch::new();
-                    b.iter(move || {
-                        let rsv = RgbSlice::new(src_s, n, n);
-                        let dsv = RgbSlice::new(dst_s, n, n);
-                        let v2 = z
-                            .compute_folded720_features_streaming(&rsv, &dsv, v1only, &mut scratch)
-                            .unwrap();
-                        zenbench::black_box((v2.features()[178], v2.features()[371]));
                     })
                 });
                 group.bench("fold944_full", move |b| {

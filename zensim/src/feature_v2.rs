@@ -1451,6 +1451,20 @@ pub struct V2NewFeatureToggles {
     /// block is NOT free — +25-32% @576², +34-40% @1152² over the zeroed
     /// fold; see the campaign ledger for the carriers-only cost.
     pub v1_pools: V1PoolsMode,
+    /// **TEST/BENCH INSTRUMENTATION — NOT A PRODUCT MODE** (`#[doc(hidden)]`
+    /// 2026-08-30 by user decision: 944 with all pools live is
+    /// the ONLY product mode; there is no 372-only product path and no public
+    /// or CLI surface offers one). Retained solely as the control arm for
+    /// `folded_v1_only_matches_full_walk` and for pricing what the v2-era
+    /// blocks cost inside the one product walk.
+    ///
+    /// It stays `pub` only because the struct is constructed by external
+    /// crates with `..Default::default()`, and functional record update
+    /// requires every field to be visible — making it `pub(crate)` breaks
+    /// every out-of-crate constructor, zenmetrics included. `#[doc(hidden)]`
+    /// takes it off the documented surface, which is as far as this can go
+    /// without a builder-style redesign of the struct (listed for approval).
+    ///
     /// BLOCK-SKIPPING (2026-08-30): compute ONLY v1's blocks — `f0..156`
     /// basic plus, with [`Self::v1_pools`], `f156..372` pools — and skip
     /// every v2-era block (dense-348, gradient, append, append2/BANDVIS,
@@ -1469,6 +1483,7 @@ pub struct V2NewFeatureToggles {
     /// `f372..` left at the structural 0.0 — the final 372-width plumbing
     /// waits on the pad-semantics decision (campaign §8), so that this
     /// lever can be measured and shipped independently of it.
+    #[doc(hidden)]
     pub v1_only: bool,
 }
 
@@ -1707,6 +1722,7 @@ fn run_blur_pass(
         abs_src,
         activity_tmp,
         activity,
+        // materialized walk: always wants the v2 planes
         true,
     );
 }
@@ -1750,6 +1766,7 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
         abs_src,
         activity_tmp,
         activity,
+        // materialized walk: always wants the v2 planes
         true,
     );
 }
