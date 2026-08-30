@@ -887,3 +887,45 @@ surfaced** — after the missing term-evaluation component and cancellation
 amplification (§12.1, §12.5). All three were invisible to relative A/B testing:
 a fold-vs-buffered comparison shares the same `reduce_add`, so it can never see
 that the reduction order is unspecified.
+
+### 14.3 `ERA2_BAND_ROWS` is SEMANTICS, not a tuning knob — earned the hard way
+
+The first version of the structural gate asserted "band-merge == serial fold,
+bit-exact". It **failed at 127×93** (`7.854278564453125` vs
+`7.8542633056640625`), and the assertion was wrong rather than the design:
+
+```
+serial:  ((band0 + r32) + r33) + …        banded:  band0 + band1
+```
+
+Banding **is** a different grouping. This is the same blocking
+non-associativity documented for the era-1 dense kernel (§14 of the era-1 doc)
+— it does not go away because the shape is new. (576×128 passed by
+coincidence, which is exactly why a single geometry is never enough.)
+
+**Consequence, and it needs to be loud: `ERA2_BAND_ROWS` is part of era-2's
+semantics.** Changing it changes output bytes and is an era decision, not a
+perf tuning knob. It is deliberately not derived from thread count, image
+height, or anything else that varies at runtime — that is precisely what makes
+thread-invariance structural rather than tested.
+
+**What is actually asserted** by `era2_band_merge_and_tail_are_structural`:
+
+* bands may be **computed** in any order (the gate computes them in reverse, as
+  an out-of-order worker pool would) provided they are **merged** in band
+  index order — bit-identical;
+* lane `j` holds exactly the terms at `x ≡ j (mod 8)` in increasing `x`, tail
+  included — so the shape is width-independent, which era-1's was not.
+
+**Fourth error caught by the write-it-down discipline**, after the missing
+term-evaluation component, cancellation amplification, and the tier-dependent
+`reduce_add`. Every one of them was invisible to relative A/B testing.
+
+### 14.4 Pass structure is a perf knob and NOT semantics
+
+The converse, and it is useful: splitting a row into several passes (to fit
+register pressure on 16-register tiers) changes neither which terms an
+accumulator receives nor their order — each accumulator still sees its terms in
+increasing `x`. **Any pass split yields identical bytes.** So the split can be
+tuned freely, even per tier, without touching the era. Only the *lane count*,
+the *reduction tree* and the *band size* are semantics.

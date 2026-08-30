@@ -11493,6 +11493,139 @@ mod tests {
     /// relative tolerance of the §A.14 scalar-pool path — same
     /// reassociation class as the phase-4 core-moment change. On hosts
     /// where the active tier runs scalar pools anyway, both sides are
+    /// ERA-2 STRUCTURAL GATE: the properties the break actually rests on.
+    ///
+    /// **A correction the first version of this test earned.** It originally
+    /// asserted "band-merge == serial fold, bit-exact" and FAILED at 127x93
+    /// (7.854278564453125 vs 7.8542633056640625). The assertion was wrong, not
+    /// the design: banding IS a different grouping — serial computes
+    /// `((band0 + r32) + r33) + …` while banded computes `band0 + band1` — and
+    /// f64/f32 addition is not associative. This is the same blocking
+    /// non-associativity documented for the era-1 dense kernel; it does not go
+    /// away because the shape is new.
+    ///
+    /// **So `ERA2_BAND_ROWS` is SEMANTICS, not a tuning knob.** Changing it
+    /// changes output bytes and is an era decision. It is deliberately NOT
+    /// derived from the thread count, image height, or anything else that
+    /// varies at runtime — that is what makes thread-invariance structural.
+    /// Anyone reaching for it to "tune the band size" must read this first.
+    ///
+    /// What is actually asserted:
+    /// (a) the banded fold is INVARIANT to how bands are distributed across
+    ///     workers — computing them in any order, or all at once, gives
+    ///     bit-identical results, because the merge is sequential in band index;
+    /// (b) lane `j` holds exactly the terms at `x ≡ j (mod 8)` in increasing
+    ///     `x`, tail included — so the shape is width-independent, unlike
+    ///     era-1's, whose tail landed in the f64 running total.
+    #[test]
+    fn era2_band_merge_and_tail_are_structural() {
+        let term = |i: usize| -> f32 {
+            let k = (i * 2654435761usize) % 65521;
+            (k as f32) * (1.0 / 65536.0) - 0.5
+        };
+
+        // Fold one band's rows into its own lane set.
+        let band_of = |plane: &[f32], width: usize, y0: usize, y1: usize| -> super::Lanes8 {
+            let mut band = super::Lanes8::zero();
+            for y in y0..y1 {
+                let row = &plane[y * width..(y + 1) * width];
+                let (chunks, tail) = row.as_chunks::<8>();
+                for c in chunks {
+                    band.add_chunk(c);
+                }
+                band.add_tail(tail);
+            }
+            band
+        };
+
+        for &(width, rows) in &[(576usize, 128usize), (127, 93), (61, 40), (8, 3), (5, 1)] {
+            let plane: Vec<f32> = (0..width * rows).map(term).collect();
+
+            let mut starts = Vec::new();
+            let mut b = 0usize;
+            while b < rows {
+                starts.push(b);
+                b = (b + super::ERA2_BAND_ROWS).min(rows);
+            }
+
+            // Reference: bands computed in index order, merged in index order.
+            let mut reference = super::Lanes8::zero();
+            for (i, &y0) in starts.iter().enumerate() {
+                let y1 = starts.get(i + 1).copied().unwrap_or(rows);
+                let bandv = band_of(&plane, width, y0, y1);
+                for (m, v) in reference.0.iter_mut().zip(bandv.0.iter()) {
+                    *m += *v;
+                }
+            }
+
+            // (a) Compute the bands in REVERSE order (as a worker pool would,
+            // completing out of order), then merge in index order as the design
+            // requires. Must be bit-identical.
+            let mut partials: Vec<Option<super::Lanes8>> = vec![None; starts.len()];
+            for (i, &y0) in starts.iter().enumerate().rev() {
+                let y1 = starts.get(i + 1).copied().unwrap_or(rows);
+                partials[i] = Some(band_of(&plane, width, y0, y1));
+            }
+            let mut out_of_order = super::Lanes8::zero();
+            for p in partials.iter().flatten() {
+                for (m, v) in out_of_order.0.iter_mut().zip(p.0.iter()) {
+                    *m += *v;
+                }
+            }
+            assert_eq!(
+                reference.reduce().to_bits(),
+                out_of_order.reduce().to_bits(),
+                "{width}x{rows}: computing bands out of order changed the result. \
+                 era-2's thread-invariance rests on the MERGE being sequential in \
+                 band index while the bands themselves are order-free."
+            );
+
+            // (b) lane j == the terms at x ≡ j (mod 8), tail included.
+            let mut expect = [0.0f32; 8];
+            for y in 0..rows {
+                for x in 0..width {
+                    expect[x % 8] += plane[y * width + x];
+                }
+            }
+            let single = band_of(&plane, width, 0, rows);
+            assert_eq!(
+                single.0.map(f32::to_bits),
+                expect.map(f32::to_bits),
+                "{width}x{rows}: lane contents diverge from 'terms at x ≡ j (mod 8), \
+                 in increasing x' — the tail fold is wrong."
+            );
+        }
+    }
+
+    /// The trap that motivates [`super::era2_reduce8`]: `reduce_add()` is
+    /// TIER-DEPENDENT (§14.2), so it can never be part of era-2's semantics.
+    ///
+    /// This does not assert a divergence (this box runs one tier), it asserts
+    /// the FIXED tree is what we think it is — an executable statement of the
+    /// semantics, so a future refactor that silently swaps in `reduce_add()`
+    /// fails here.
+    #[test]
+    fn era2_reduce_tree_is_fixed_and_explicit() {
+        // Values chosen so the two known groupings genuinely differ: adjacent
+        // pairing vs the x86_v3 (i, i+4) pairing.
+        let a: [f32; 8] = [1.0, 1e-8, 1.0, 1e-8, -1.0, 1e-8, -1.0, 1e-8];
+        let fixed = super::era2_reduce8(a);
+        let adjacent = (((a[0] + a[1]) + (a[2] + a[3])) + ((a[4] + a[5]) + (a[6] + a[7]))) as f64;
+        let v3_style = (((a[0] + a[4]) + (a[1] + a[5])) + ((a[2] + a[6]) + (a[3] + a[7]))) as f64;
+        assert_eq!(
+            fixed.to_bits(),
+            adjacent.to_bits(),
+            "era2_reduce8 must be the ADJACENT-pairwise tree, written out"
+        );
+        assert_ne!(
+            adjacent.to_bits(),
+            v3_style.to_bits(),
+            "the two backend reduction shapes must be demonstrably different on \
+             this fixture — if they agree, the fixture stopped exercising the \
+             divergence and this test no longer documents anything"
+        );
+    }
+
     /// ERA-2 ORACLE GATE (`benchmarks/era2_perf_break_2026-08-31.md` §11).
     ///
     /// Judges the production kernels against an EXACT reference rather than
@@ -15541,5 +15674,85 @@ pub(crate) mod oracle {
             }
         }
         (s.values(), sum_abs)
+    }
+}
+
+// ============================================================================
+// ERA-2 DENSE KERNEL (`benchmarks/era2_perf_break_2026-08-31.md` §2, §13.2, §14)
+//
+// NOT YET THE DEFAULT. Built alongside era-1 so it can be gated and measured
+// without moving a byte; the flip is a separate, sequenced commit (design §8 —
+// it lands after the fold-engine lane pins its parity stages).
+//
+// THE SHAPE, and every part of it is semantics rather than implementation:
+//   * 8 f32 virtual lanes per accumulator, term at pixel x -> lane[x mod 8],
+//     entered via `as_chunks::<8>` — NEVER modulo indexing, which was MEASURED
+//     11x slower because it defeats vectorisation entirely (§13);
+//   * the scalar tail folds into the SAME lanes, so the shape is
+//     width-independent (era-1's tail landed in the f64 running total, which is
+//     what made its grouping depend on `width % 8`);
+//   * a FIXED reduction tree — `era2_reduce8`, never `reduce_add()`, which is
+//     TIER-DEPENDENT (§14.2: x86_v3 pairs lane i with i+4 first, wasm/scalar
+//     pair adjacent lanes — different groupings of the same eight addends);
+//   * an f64 BAND layer: rows fold into a band partial, band partials merge in
+//     band order. Band layout is a pure function of (height, ERA2_BAND_ROWS),
+//     never of thread count.
+//
+// PASS STRUCTURE IS A PERF KNOB, NOT SEMANTICS. Splitting the row into several
+// passes changes neither which terms an accumulator sees nor their order — each
+// accumulator still receives its terms in increasing x — so any pass split
+// yields IDENTICAL bytes. That frees the split to be tuned per tier for
+// register pressure without touching the era.
+
+/// era-2 band height. A pure function of geometry; deliberately NOT derived
+/// from the thread count, which is what makes thread-invariance structural.
+// NOTE ON `dead_code`: these primitives are consumed by the era-2 dense kernel,
+// which lands in the SEQUENCED flip commit (design §8 — after the fold-engine
+// lane pins its parity stages). Until then they are exercised only by the
+// era-2 structural gates, so a non-test build sees them as unused. The
+// allow comes off with the kernel.
+#[allow(dead_code)]
+pub(crate) const ERA2_BAND_ROWS: usize = 32;
+
+/// The era-2 horizontal reduction — **part of the semantics**.
+///
+/// Pairwise rather than sequential (tighter error, equally fixed), and written
+/// out rather than delegated: `GenericF32x8::reduce_add` resolves to a
+/// per-backend order (§14.2), so calling it would make the reduction tree an
+/// unspecified, tier-dependent operation — precisely what the era-2 identity
+/// theorem forbids.
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) fn era2_reduce8(a: [f32; 8]) -> f64 {
+    (((a[0] + a[1]) + (a[2] + a[3])) + ((a[4] + a[5]) + (a[6] + a[7]))) as f64
+}
+
+/// One era-2 accumulator: 8 f32 virtual lanes.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) struct Lanes8(pub [f32; 8]);
+#[allow(dead_code)]
+impl Lanes8 {
+    #[inline(always)]
+    fn zero() -> Self {
+        Self([0.0; 8])
+    }
+    /// Add one full 8-wide chunk, lane-wise.
+    #[inline(always)]
+    fn add_chunk(&mut self, c: &[f32; 8]) {
+        for (l, &v) in self.0.iter_mut().zip(c.iter()) {
+            *l += v;
+        }
+    }
+    /// Fold a partial tail into the SAME lanes: tail element k -> lane k.
+    #[inline(always)]
+    fn add_tail(&mut self, t: &[f32]) {
+        for (l, &v) in self.0.iter_mut().zip(t.iter()) {
+            *l += v;
+        }
+    }
+    #[inline(always)]
+    fn reduce(self) -> f64 {
+        era2_reduce8(self.0)
     }
 }
