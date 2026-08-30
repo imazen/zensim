@@ -263,11 +263,18 @@ being the thing that identifies a row.
 
 ## 6. What is registered, not executed
 
-1. **`bake_verdict`'s default `--features-root` is NOT flipped** to the new
-   root. Flipping it silently changes every future 372-regime number for every
-   lane mid-campaign; that is a governance call for the campaign owner, not this
-   lane. Until then, a current-era 372 verdict needs an explicit
-   `--features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372`.
+1. ~~**`bake_verdict`'s default `--features-root` is NOT flipped**~~ —
+   **SUPERSEDED same day.** This lane left the flip alone as a governance call;
+   the **user directed it** and the board lane executed it in `a25d1b80`: the
+   default `--regime 372` root is now
+   `/mnt/v/zen/zensim-training/2026-08-30-full-features-372`, owned by the single
+   constant `zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372`, and every
+   verdict prints its ruler on stderr (`era_of`). **Consequence for reading this
+   document:** a flagless `bake_verdict` invocation is now a CURRENT-era read, so
+   the stored-era column of §3 needs
+   `--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features`
+   (`STORED_FEATURES_ROOT_2026_05_15`) — the opposite of the flag discipline in
+   force when the roster was run.
 2. **The board is NOT regenerated** (registered for the board owner). The
    ready-to-promote current-era verdicts are
    `/mnt/v/output/zensim/eval372-roster-2026-08-30/json/<label>_new.json`;
@@ -287,16 +294,64 @@ being the thing that identifies a row.
    *SDR-route* era sensitivity at ≈0.002 SROCC and says nothing about the HDR
    route (drift doc §4c.4).
 
-## 7. Registry entries added (`benchmarks/eval_annotations.json`)
+## 7. Registry entries added — and a CORRECTED board-row attribution
 
-- `eval372-stored-root-thread-dependent-2026-08-30` — **invalidated**, the 6
-  measured f156-371-using 372-class board cells, fields
-  `rank.{cid22,kadid,tid,konjnd,aic3}` + `composite`.
+> **⚠ CORRECTION (2026-08-30, same day).** The three entries below were scoped
+> on the assumption that **all nine** board rows are reads of the 2026-05-15 372
+> root. **Seven of the nine are not** — they are `regime:"720"` **ext720**
+> reads. The board lane measured it
+> (`board372-row-read-on-ext720-root-2026-08-30`) and **this lane reproduced it
+> independently, three ways:**
+>
+> | check | result |
+> |---|---|
+> | board `cl_tfm_corruption_LQ_MLP_s13` vs a fresh `bake_verdict --regime 720 --corpora cid22` | **max\|Δ\| = 0.000e+00 on 4,292 pairs (BIT-EXACT)** |
+> | the same board row vs this lane's STORED-372 run | max\|Δ\| **96.4** — not a 372-root read at all |
+> | board **B** vs this lane's STORED-372 run | **BIT-EXACT** (and 17.4 from the current-372 run) |
+> | board **`T_appT_b372_lam1e-3`** vs this lane's STORED-372 run | **BIT-EXACT** (and 6.09 from the current-372 run) |
+> | the other six board rows vs BOTH of this lane's 372 runs | differ from each (0.29 … 59.5) — none is a 372-root read |
+>
+> **Only `b_sdr_linear_cid80_inclwinsor_dense_dial` (shipped B) and
+> `T_appT_b372_lam1e-3` are genuine stored-root board rows, so B's pair is the
+> board's only clean era A/B.** The seven ext720 rows read a **post-fix** root,
+> so the era-stale flag is *misapplied* to them — the board lane measured them
+> already agreeing with a current-extractor 372 read to ≤2e-4 on CID22. The
+> three basic-only rows carry an extra tell that this lane measured: they differ
+> from this lane's stored and current 372 runs by the **same** amount
+> (ADD156 0.294 / 0.294, Ebothg_scr05 0.797 / 0.797, winner_dial 0.502 / 0.502)
+> — an era-independent offset, i.e. the folded-720 feature space, not an era.
+>
+> **The §3 roster science is unaffected: it never used a board row.** Every
+> number in §3 comes from this lane's own paired `bake_verdict` runs, one per
+> (bake, root), on the two roots named in §2 — the board's provenance is
+> irrelevant to it. Scopes were narrowed in place below (the
+> `kadid-ext-root-inverted` precedent); the roster table and its conclusions
+> stand unchanged.
+>
+> **Root cause of the archaeology**, and now closed: a fulleval recorded the
+> corpus *values* but never the *root* they came from, so "which ruler produced
+> this row?" was answerable only by re-running and diffing predictions. Fixed —
+> `bake_verdict --full-json` now emits a `features_root` block (path + era label
+> + manifest sha + per-corpus file sha256s); see the CHANGELOG entry for
+> `features_root`.
+
+- `eval372-stored-root-thread-dependent-2026-08-30` — **invalidated**. Scope
+  **NARROWED** to the **2** measured genuine stored-root cells
+  (`b_sdr_linear_cid80_inclwinsor_dense_dial`, `T_appT_b372_lam1e-3`); fields
+  `rank.{cid22,kadid,tid,konjnd,aic3}` + `composite`. The four ext720 rows it
+  used to name are covered by `board372-row-read-on-ext720-root-2026-08-30`
+  instead.
 - `eval372-basic-only-bakes-era-independent-2026-08-30` — **annotated**, the 3
-  measured basic-only cells: the invalidation does NOT apply, Δ is measured at
-  0.00000, do not re-verdict them expecting a change.
-- `dial372-grid-thread-dependent-era-2026-08-30` — **annotated**, all 9, fields
-  `dial` + `gates.g1_dynamic_range`.
+  measured basic-only cells. The claim it makes about the MODEL (a bake reading
+  only `f0..155` is era-independent; Δ measured at 0.00000 across the two 372
+  roots) is unchanged and still true; those particular BOARD rows are ext720
+  reads on top of that.
+- `dial372-grid-thread-dependent-era-2026-08-30` — **annotated**. Scope
+  **NARROWED** to the same 2 stored-root cells: the seven ext720 rows are
+  dialled against the 720 grid, not the 2026-05-29 372 grid this entry is about.
+  Fields `dial` + `gates.g1_dynamic_range`. (The board lane's
+  `dial372-grid-thread-dependent-era-current-rows-2026-08-30` extends the same
+  caveat to the `@cur372` halves.)
 
 Rendering verified with
 `freeze_check --profile balanced-2026-08-04 --annotations benchmarks/eval_annotations.json`:

@@ -89,7 +89,17 @@ implements its A1-A5/A9 candidates.
   `@cur372` rows — `benchmarks/board_era_rows_2026-08-30.md`, which also records
   the MEASURED finding that **7 of the 9 "stored-era" board rows were never read
   on the stored root** (they are `--regime 720` ext720 reads, bit-exactly
-  reproduced; registry `board372-row-read-on-ext720-root-2026-08-30`).
+  reproduced; registry `board372-row-read-on-ext720-root-2026-08-30`) —
+  independently reproduced by the round-4b lane (board `cl_tfm` vs a fresh
+  `--regime 720 --corpora cid22`: **BIT-EXACT on 4,292 pairs**, and 96.4 points
+  from a stored-372 read; board **B** and **`T_appT_b372_lam1e-3`** BIT-EXACT
+  against its stored-root re-verdicts), so **only B's pair is a clean era A/B on
+  the board** and the two era-scoped registry entries were **NARROWED in place**
+  to those 2 cells — no post-fix row carries a false era-stale badge. The §3.28
+  roster science never used a board row and is unaffected. A `--full-json`
+  verdict now also records a **`features_root`** block (resolved path + registered
+  era label + root manifest sha/regime + the per-corpus file sha256s it read), so
+  a row's ruler is a grep, not an afternoon of re-running and diffing predictions.
   **STILL registered, not executed:** the 372 dial/corruption-grid rebuild (needs
   a decode pass — the `q<X>.png` cache is gone) and B's training-leg
   re-extraction (~227k pairs — a fleet wave).

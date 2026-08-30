@@ -910,9 +910,7 @@ unless the caller sets `ZENSIM_ALLOW_MISSING_PAIRS=1`. The new root's TID is
 **3,000/3,000**, and the recovered 120 rows are bit-identical to the stored
 table in basic+peaks — they were absent, not different.
 
-**Registered, NOT executed:** `bake_verdict`'s default `--features-root` is NOT
-flipped (that silently changes every future 372 number for every lane —
-governance, not a lane decision); the board is NOT regenerated (ready-to-promote
+**Registered, NOT executed:** the board is NOT regenerated (ready-to-promote
 verdicts at `/mnt/v/output/zensim/eval372-roster-2026-08-30/json/<label>_new.json`);
 the dial/corruption grid rebuild needs a decode pass first; aic4 stays pre-fix;
 B's training legs stay pre-fix (the retrain is still a fleet wave); BHdr's own
@@ -920,10 +918,42 @@ PU-linear HDR route is still unmeasured — the `BHdr_sdr_route` row bounds only
 the SDR-route sensitivity (≈0.002 SROCC).
 
 **Registry:** `benchmarks/eval_annotations.json` gains
-`eval372-stored-root-thread-dependent-2026-08-30` (invalidated, 6 cells),
-`eval372-basic-only-bakes-era-independent-2026-08-30` (annotated, 3 cells —
-measured Δ 0.00000, the invalidation does NOT apply) and
-`dial372-grid-thread-dependent-era-2026-08-30` (annotated, 9 cells).
+`eval372-stored-root-thread-dependent-2026-08-30` (invalidated),
+`eval372-basic-only-bakes-era-independent-2026-08-30` (annotated — measured
+Δ 0.00000, the invalidation does NOT apply) and
+`dial372-grid-thread-dependent-era-2026-08-30` (annotated).
+
+**SAME-DAY FOLLOW-UPS (2026-08-30).**
+1. **The default `--features-root` WAS flipped** — user directive, executed by
+   the board lane in `a25d1b80`: `--regime 372` now defaults to the
+   current-extractor root through the single constant
+   `zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372`, and every verdict
+   prints its ruler. A **stored**-era read now needs the explicit flag
+   (`STORED_FEATURES_ROOT_2026_05_15`) — the reverse of the discipline in force
+   when the roster above was run.
+2. **Board-row attribution CORRECTED: 7 of the 9 rows were never stored-root
+   reads.** They are `regime:"720"` ext720 reads
+   (`board372-row-read-on-ext720-root-2026-08-30`), which this lane reproduced
+   independently: board `cl_tfm_corruption_LQ_MLP_s13` vs a fresh
+   `bake_verdict --regime 720 --corpora cid22` is **BIT-EXACT on 4,292 pairs**
+   and **96.4 points** from a stored-372 read; board **B** and
+   **`T_appT_b372_lam1e-3`** are **BIT-EXACT against this lane's stored-root
+   re-verdicts** (and 17.4 / 6.09 from the current-root ones), so they are the
+   only genuine stored-era board rows and **B's pair is the board's only clean
+   era A/B**. The three basic-only rows differ from the stored and current 372
+   runs by the SAME amount (0.294/0.294, 0.797/0.797, 0.502/0.502) — an
+   era-independent offset, i.e. the folded-720 space, not an era. The two
+   affected registry scopes were NARROWED in place to the 2 genuine rows (the
+   `kadid-ext-root-inverted` precedent), so no post-fix row carries a false
+   era-stale badge. **§3.28's roster science is untouched — it never used a
+   board row**; every number came from this lane's own paired runs on the two
+   roots.
+3. **The provenance gap that forced that archaeology is CLOSED**:
+   `bake_verdict --full-json` now records a `features_root` block (path,
+   registered era label, root `_MANIFEST.json` sha256 + declared regime, and the
+   per-corpus file sha256s it actually read), so "which ruler produced this row?"
+   is answerable from the artifact instead of by re-running and diffing
+   predictions.
 
 ### §3.29 — the default eval root IS the current-extractor root, and what the board rows turned out to be (2026-08-30)
 
