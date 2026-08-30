@@ -2951,6 +2951,18 @@ per-block dump needed. MEASURED encode+verify time for that 512² screen-detecte
 0.30 MP in zenmetrics (`encode.rs`); the running wave keeps 0.25 (a relaunch would orphan its
 in-flight claims); the DEFERRED class is re-queued with the raised cap at the drain.
 
+### ROOTS #7-#13 FALLOUT: TWO MORE LONG-OPEN BANDS CLOSED WITHOUT NEW CODE (2026-08-30 ~11:3xZ, zenav1-aom `799de43f`)
+Replaying the port's other self-promoting pins on the `38a92657` tree: **`RD_BAND_OPEN`** (1272x724
+cq24, open since 2026-08-02 at cpu 2..5 with −14/−104/−167/−189 B) is byte-exact at every RD speed
+0..7 and the cpu-9 control is exact while reaching 22 non-square leaves — the reach matches root
+#11 (a partial superblock on both frame edges; the 4-way partition types are searched exactly at
+2..5). **KB-13's last two real-content cells** (`00-quantizer-00` 128²@64,64 and `23-film_grain-50`
+64²@96,64, both cpu3 cq63, open since 2026-08-03) are byte-exact too — 77 B and 60 B on both sides,
+not screen-detected — consistent with root #12 (at cq63 nothing splits, so the header ends
+TX_MODE_LARGEST while the search ran at SELECT). Neither attribution is bite-proved by per-root
+revert. New self-promoting replay `kb13_cpu3_cq63.rs`; the remaining pins (mono s0, HBD, HD
+format/speed, crop, tiles, nonrd size bands) are being swept the same way.
+
 ### AOM-RS WAVE RELAUNCHED ON THE BYTE-EXACT PORT (2026-08-30 08:39Z) — image `exec-zensim944hdr-47f5ab9c`
 zenmetrics master `0bcede27` (fleet.env CPU pin bumped). Chain: musl rebuild (the new port's unique
 strings confirmed in the binary) → image build + push (digest `5f4f9bd5…`) → `zenfleet-ctl requeue
