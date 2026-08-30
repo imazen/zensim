@@ -831,3 +831,59 @@ a **real** byte change (era-1's `v4x` accumulates 16-wide, and the tail
 currently lands in the f64 running total), so the era and its blast radius
 stand — but the reshape is a far smaller and lower-risk edit than the f64
 rewrite, which is a second reason to prefer it.
+
+---
+
+## 14. S1 implementation findings (before the kernel)
+
+### 14.1 The lane count was ALREADY 8 everywhere — the break is smaller again
+
+`type V8<T> = GenericF32x8<T>` and `dense_block_kernel_generic<T: F32x8Backend>`
+— so **every tier, `v4x` included, already accumulates in 8 f32 lanes.** The
+"v4x accumulates 16-wide" concern in §13.2 was wrong: `v4x`'s only difference is
+`POOL_SIMD` (pools in lanes vs per-pixel scalar), not lane width.
+
+So the era-2 reshape reduces to four changes, not five:
+
+1. `POOL_SIMD` pool accumulation on **every** tier (the register-pressure item);
+2. the scalar tail **folded into the lanes** instead of the f64 running total;
+3. the **f64 band layer** with band-order merge;
+4. a **fixed reduction tree** — see §14.2, which is the one that turned out to
+   matter most.
+
+### 14.2 `reduce_add()` IS TIER-DEPENDENT — era-2 must not call it
+
+The identity theorem (§2.2) requires the reduction order to be part of the
+semantics. It is not, today. `GenericF32x8::reduce_add` delegates to
+`T::reduce_add`, and the backends genuinely disagree:
+
+| backend | f32x8 reduction order |
+|---|---|
+| `x86_v3` (AVX2) | `extractf128` + `add_ps` pairs lane `i` with lane `i+4` **first**, then a `shuffle`/`movehl` tree over the resulting 4 |
+| `x86_v4` (AVX-512, f32-delegated) | delegates to the `v3` f32x4 path |
+| `wasm128` | `(l0+l1) + (l2+l3)` — **adjacent** lanes first |
+| `scalar` | `(a[0]+a[1]) + (a[2]+a[3])` — adjacent lanes first |
+
+`(l0+l4)+(l1+l5)` and `(l0+l1)+(l2+l3)` are different groupings of the same
+eight addends, so they round differently. **Every horizontal reduction in the
+current kernels is therefore an unspecified, backend-dependent operation.**
+
+**Consequence for S1, concrete:** era-2 extracts lanes with `to_array()` and
+sums them in an explicitly written fixed order. The cost is one array
+materialisation per reduction — negligible, since reductions happen once per
+row per accumulator, not per pixel.
+
+**Hypothesis worth flagging, NOT a claim:** this is a plausible contributor to
+the historical cross-vendor golden failure (241–246 of 372 v1 features diverged
+on every non-AMD class, all non-AMD classes agreeing with each other on one
+alternative result set). A tier-dependent reduction tree would produce exactly
+that signature — one result per *reduction shape*, not one per CPU. It has not
+been isolated to this cause and should not be reported as solved until it is;
+`v4`/`v4x` delegating to `v3` while `wasm`/`scalar` use adjacent-pairing is at
+least consistent with the observed clustering.
+
+**This is the third design-level error the "write the math out" discipline has
+surfaced** — after the missing term-evaluation component and cancellation
+amplification (§12.1, §12.5). All three were invisible to relative A/B testing:
+a fold-vs-buffered comparison shares the same `reduce_add`, so it can never see
+that the reduction order is unspecified.
