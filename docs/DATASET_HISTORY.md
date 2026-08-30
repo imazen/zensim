@@ -1012,3 +1012,75 @@ correction above), `eval372-current-root-copied-corpora-2026-08-30` (annotated,
 11 cells — six of the new root's fourteen corpora are byte-copies, and 39.5 % of
 `product_composite`'s weight rides on them) and
 `dial372-grid-thread-dependent-era-current-rows-2026-08-30` (annotated, 11 cells).
+
+### §3.30 — ERA-3: v1 stopped pooling phantom columns (option C, 2026-08-30)
+
+**Thought-why:** the fold's `f0..371` disagreed with the buffered v1 path, and
+the working assumption (twice) was that the FOLD was the odd one out — first
+that it was a tolerance question, then that the fix was to make the fold
+reproduce v1 by pre-padding its input.
+
+**Actual-why.** Measured, it is the reverse. **Buffered v1 pooled columns that
+are not in the image.** `simd_padded_width` rounded the width up to a multiple
+of 16 and added a *further* 16 whenever that landed on an even multiple of 16
+at or above 512 (an L1d set-aliasing dodge); `mirror_pad_columns` filled the
+extras by reflect-101; and the scale walk then pooled them. The fold never
+padded. So the fold was already computing the correct statistic and v1 was not.
+
+Consequences, all measured:
+
+* Divergence up to **81.6 % relative** on a pool slot (200×150) and 17.4 %
+  (127×93) — not a tolerance question.
+* **Every common production width was in the divergent class**: 512→528,
+  576→592, 768→784, 1024→1040, 1152→1168, 2304→2320. Tight widths (multiples
+  of 16 below 512, and the non-bumped alignments above) were bit-identical
+  across eras and do **not** change era. It is a per-ROW property of the
+  width, not a per-table one.
+* The h=93 "residual" reported mid-investigation was an artifact of the
+  rejected pre-pad workaround, not of either walk. **Under C it does not
+  exist.**
+
+**What shipped (era-3, `56bbcda2`).** `blur::pyramid_plane_stride` returns the
+width and is the single greppable owner; `mirror_pad_columns` and its three
+call sites are deleted (with no padding they could never fire). The fold
+needed no change, and that is verified structurally rather than numerically:
+its production path never references the owner — every occurrence in
+`feature_v2.rs` is a doc comment or test code — so **the 944 regimes are
+unchanged by construction and no 944 table or model is invalidated.**
+
+**It is also cheaper.** Buffered v1-372 instruction counts: **−9.02 % at 576,
+−7.37 % at 1152, +0.00 % at the tight-width control 592**. The aliasing
+rationale in the old doc is stale — on the current kernels the bump cost 7-9 %
+at exactly the sizes it applied to. That is why C ships as "no padding" rather
+than "padded buffers with pool-width exclusion": the latter would still blur
+the phantom columns and is strictly slower.
+
+**The golden gate was structurally blind, and that is the headline.**
+`GOLDEN_SYNTHETIC` (64×64) and `GOLDEN_REAL` (96×96) are both stride-invariant
+widths, so the golden set sat entirely in the tight class — it would have
+passed however wrong the padded class was. **Their values are UNCHANGED by
+era-3; they were re-verified, not re-pinned**, and that they still pass is the
+evidence. A third fixture `GOLDEN_NONTIGHT` (200×150, procedural) now covers
+the class. Negative control run: reintroducing era-2 padding fails **only**
+the new fixture — synthetic and real both still pass.
+
+**Gate meanings that inverted** (sanctioned re-pins, each a tightening — no
+tolerance was widened anywhere):
+
+| gate | era-2 meaning | era-3 meaning |
+|---|---|---|
+| `v1_padded_width_divergence_is_column_padding` → `v1_372_bit_exact_to_fold_at_every_width` | assert the paths DIFFER at non-tight widths, bounded | assert they are BIT-IDENTICAL at all 19 geometries incl. h=93 |
+| `folded720_v1_basic_matches_v1_path` | `expect_bit_exact` flag; 127/200 in a "divergence class" | flag deleted; every geometry asserts bit-exactness |
+| `folded720_v1_pools_match_v1_path` | same | same |
+| *(new)* `pyramid_stride_has_no_phantom_columns` | — | pins the decision at its owner over 24 widths |
+
+**Prior-era artifacts** (registered in `benchmarks/eval_annotations.json` as
+`v1-372-era2-phantom-column-pooling`, `v1-golden-tight-width-blind-pre-era3`,
+`eval-root-2026-08-30-372-prior-era`): every 372 table extracted through the
+buffered extractor at a **non-tight** width, which includes the day-old
+`2026-08-30-full-features-372` root and the 2026-05-15 STORED root. **No 944
+table and no 944-trained model is affected.**
+
+**NOT flipped, listed for the user:** `zensim_validate::eval_roots::
+DEFAULT_FEATURES_ROOT_372` stays pointing at the era-2 root until the
+era-3 re-extraction lands and the shipped-B-under-C delta is reviewed.

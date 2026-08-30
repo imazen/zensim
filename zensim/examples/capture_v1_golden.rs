@@ -79,6 +79,23 @@ fn main() {
         syn_result.features().len()
     );
 
+    // --- NON-TIGHT fixture (era-3 / option C, 2026-08-30). 200x150: under
+    //     era-2 this width was padded to 208 and the phantom columns were
+    //     POOLED, which is exactly the class the other two fixtures could not
+    //     see (64 and 96 are both stride-invariant, so their goldens are
+    //     UNCHANGED by C). Procedural, so no fixture file is needed. ---
+    let (nw, nh) = (200usize, 150usize);
+    let nt_ref = generators::gen_value_noise(nw, nh, 0xC0FFEE);
+    let nt_dist = generators::distort_block_artifacts(&nt_ref, nw, nh);
+    let nt_result = compute_zensim_with_config(&nt_ref, &nt_dist, nw, nh, v1_config())
+        .expect("non-tight v1 compute");
+    print_vec("GOLDEN_NONTIGHT", nt_result.features());
+    eprintln!(
+        "non-tight: {nw}x{nh} score={} n_features={}",
+        nt_result.score(),
+        nt_result.features().len()
+    );
+
     // --- Real fixture (cropped from gb82 city.png / city_q50.jpg, committed
     //     at tests/fixtures/v1_golden_real_{ref,dist}.png, <10KB combined). ---
     let manifest = env!("CARGO_MANIFEST_DIR");
