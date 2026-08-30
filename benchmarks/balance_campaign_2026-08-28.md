@@ -3096,3 +3096,29 @@ the harvest (origin even/odd rule — the corpus is train-side only), then the
   **24,210 rows / 209 origins** (digit 8; never trained on); ID columns asserted
   row-aligned between the score and feature sidecars (`features.parquet` is a symlink to
   the harvest's `features_folded720append2.parquet`). `view_counts.json` beside them.
+
+### AOM-RS SCORE WAVES DECLARED ON THE 123,024 DONE CELLS (2026-08-30 13:24Z) — GPU on i134, CPU on the tower
+
+Rather than idle the scorers until the 2,976 large-screen encodes finish, the pairs
+bridge was cut on the run's DONE rows now (`zenfleet-ctl pairs --ledger
+s3://zentrain/jobs/avifaom-enc-20260830/ledger --refs-prefix
+s3://zentrain/refs/train-renditions-2026-06-14 --blobs-prefix
+s3://zentrain/jobs/avifaom-enc-20260830/blobs` → `/mnt/v/output/avifaom-2026-08-30/
+pairs_aom.parquet`, **123,024 DONE cells**, 2,976 non-done skipped; one in-flight ledger
+chunk was unreadable and skipped — a live worker's partial file) and two score-file runs
+declared with `--full-uri --cell-codec zenavif` (the svt shape; without `--full-uri` the
+declare wants `dist_member` columns the bridge does not carry): `avifaom-sf-gpu-20260830`
+(ssim2-gpu + butteraugli-gpu, **10,950 jobs**) and `avifaom-sf-cpu-20260830` (cvvdp +
+zensim-foldapp2 944 features, **10,950 jobs**).
+
+- **GPU:** the drained svt worker's restart loop on i134 (`zen-score-gpusf`, idle since
+  07:04Z) was removed and the cuda13 sequencer launched (`lan_gpu_sequence.sh i134 gpu`,
+  image `exec-gpu-cuda13-6d4f9963`, `ZM_VRAM_CAP=8 GiB`); claiming at 13:24:09Z, GPU 15%.
+- **CPU:** the tower's drained `zen-score-cpusf` removed and relaunched capped
+  (`ZEN_CPUSET=0-23 ZEN_CPU_SHARES=256 ZEN_MEMORY=24g`, verified on the container:
+  cpuset 0-23 / shares 256 / 24 GiB — the launcher forwards the caps now) on image
+  `exec-zensim944hdr-e7a99c2d`. First start died on `ZEN_REQUIRE_SNAPSHOT=1` with no
+  snapshot for a fresh run; `zenfleet-ctl compact --run avifaom-sf-cpu-20260830 --upload`
+  (0 rows) satisfied it and the worker claimed at 13:24:48Z.
+- The 2,976 cells still encoding get a gap-fill declare (`pairs` again → a second pair of
+  runs) at the encode drain; `writeback_scores.py` merges runs.
