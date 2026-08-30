@@ -2963,6 +2963,24 @@ TX_MODE_LARGEST while the search ran at SELECT). Neither attribution is bite-pro
 revert. New self-promoting replay `kb13_cpu3_cq63.rs`; the remaining pins (mono s0, HBD, HD
 format/speed, crop, tiles, nonrd size bands) are being swept the same way.
 
+### KB-41 ROOTS #14-#17 — THE cpu-4 SCREEN PROBE FOUND A NON-CONFORMANT STREAM (2026-08-30 ~11:4xZ, zenav1-aom `4e0229e1`)
+Timing the 1280x800 screen cell at cpu 4 for the cap policy (11 s for oracle + both port arms —
+the "40 min" figure predates roots #3-#6's search gating) turned up the first non-conformant
+stream the port ever produced: both libaom and the port decoder rejected it ("intrabc DV failed
+validity"). The wave never wrote one (every cell is byte-verified against the oracle and refused on
+mismatch), and cpu 4 screen cells above 0.25 MP were deferred anyway. Root #14: with
+`allow_intrabc` C skips EVERY post-filter stage (`if (!allow_intrabc) loopfilter_frame()`,
+encoder.c:3780) and the header codes no restoration params, but the port still ran its restoration
+search at speed <= 5 and the re-pack wrote 54 LR units the header never announced. Then three RD
+roots on the now-decodable cell: #15 the var-tx first child is bounded by `ref_best_rd - 0` (C never
+recomputes rdcost after setting the partition-flag rate); #16 the speed-4/5 est-rd tx-type prune
+(`prune_txk_type` / `_separ`) replaces the 2D-NN prune on inter/IntraBC blocks — ported; #17 the
+pixel-domain-final downgrade reads the POST-prune mask. Cell byte-exact after the four. Method note:
+the writer/reader block-sequence probe (`PACK`/`DEC` per block) localized the desync to the first
+partition symbol in one run; the header field-diff (`read_uncompressed_header` on both TUs, 1060
+lines equal) then proved it was tile data, and the pass-tag probe proved the spliced bytes came
+from the LR re-pack. Widened census (the s6 planes replayed at s4/s5 against a fresh oracle): s4 6/9 exact (open: 1280x800 cq44 +10 B, 1920x1080 cq57 +10 B, 1920x1080 cq6 −33 B), s5 1/3 (open: 1280x800 cq25 −5 B, 1920x1080 cq32 −123 B) — RD-level residuals, decodable streams; all 68 prior census cells and every gate unchanged.
+
 ### AOM-RS WAVE RELAUNCHED ON THE BYTE-EXACT PORT (2026-08-30 08:39Z) — image `exec-zensim944hdr-47f5ab9c`
 zenmetrics master `0bcede27` (fleet.env CPU pin bumped). Chain: musl rebuild (the new port's unique
 strings confirmed in the binary) → image build + push (digest `5f4f9bd5…`) → `zenfleet-ctl requeue
