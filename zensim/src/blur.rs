@@ -4193,6 +4193,16 @@ pub(crate) fn simd_padded_width(width: usize) -> usize {
     // allocation site that derives from `padded_width` is guarded by
     // `padded_width.checked_mul(height)` (see [`checked_padded_plane_len`])
     // and will surface `ImageTooLarge` rather than wrap.
+    // OPTION-C EXPERIMENT (2026-08-30, not shipped in this form): return the
+    // real width so no phantom columns exist at all. This is semantically
+    // option C plus the loss of the alignment/anti-alias stride, which is
+    // exactly the pair the "padded vs exact" cost question needs bracketed.
+    // Cached: this is called per (scale, entry), and an env read per call
+    // would show up in the very measurement it exists to serve.
+    static NOPAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *NOPAD.get_or_init(|| std::env::var_os("ZEN_C_NOPAD").is_some()) {
+        return width;
+    }
     let aligned = match width.checked_add(15) {
         Some(v) => v & !15,
         None => return usize::MAX,
@@ -5302,15 +5312,15 @@ mod tests {
         }
 
         for &(w, h) in &[
-            (7usize, 3usize),   // width <= diam: ring never engages
-            (11, 16),           // width == diam exactly
-            (12, 16),           // first width where the ring fires
-            (13, 17),           // scalar remainder rows
-            (31, 24),           // 16-group + 8-group
-            (64, 42),           // the fold's band shape (32 + 2*5 overlap)
-            (127, 8),           // odd width, pure 8-group
-            (208, 26),          // 16-group + 8-group + scalar remainder
-            (592, 33),          // the padded production width
+            (7usize, 3usize), // width <= diam: ring never engages
+            (11, 16),         // width == diam exactly
+            (12, 16),         // first width where the ring fires
+            (13, 17),         // scalar remainder rows
+            (31, 24),         // 16-group + 8-group
+            (64, 42),         // the fold's band shape (32 + 2*5 overlap)
+            (127, 8),         // odd width, pure 8-group
+            (208, 26),        // 16-group + 8-group + scalar remainder
+            (592, 33),        // the padded production width
         ] {
             let mut input = vec![0.0f32; w * h];
             for (i, v) in input.iter_mut().enumerate() {
@@ -5426,7 +5436,11 @@ mod tests {
                     });
                 }
                 for i in 0..w * h {
-                    assert_eq!(got[i].to_bits(), want[i].to_bits(), "abs_diff {w}x{h} r={radius} idx {i}");
+                    assert_eq!(
+                        got[i].to_bits(),
+                        want[i].to_bits(),
+                        "abs_diff {w}x{h} r={radius} idx {i}"
+                    );
                 }
             }
         }
@@ -5474,10 +5488,14 @@ mod tests {
                 super::fused_blur_h_mu(&src, &dst, &mut m1, &mut m2, w, h, radius);
                 let (mut s1, mut s2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
-                super::fused_blur_h_ssim(&src, &dst, &mut s1, &mut s2, &mut sq, &mut pr, w, h, radius);
+                super::fused_blur_h_ssim(
+                    &src, &dst, &mut s1, &mut s2, &mut sq, &mut pr, w, h, radius,
+                );
                 let (mut t1, mut t2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut tq, mut tp) = (vec![0.0f32; n], vec![0.0f32; n]);
-                super::fused_blur_h_ssim3(&src, &dst, &mut t1, &mut t2, &mut tq, &mut tp, w, h, radius);
+                super::fused_blur_h_ssim3(
+                    &src, &dst, &mut t1, &mut t2, &mut tq, &mut tp, w, h, radius,
+                );
 
                 let (mut wm1, mut wm2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut wq, mut wp) = (vec![0.0f32; n], vec![0.0f32; n]);
@@ -5502,13 +5520,20 @@ mod tests {
                         let (sr, dr) = (src[off + rm], dst[off + rm]);
                         ss = ss + sa - sr;
                         sd = sd + da - dr;
-                        ssq = sa.mul_add(sa, da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, ssq))));
+                        ssq = sa.mul_add(
+                            sa,
+                            da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, ssq))),
+                        );
                         sprod = sa.mul_add(da, (-sr).mul_add(dr, sprod));
                     });
                 }
                 for i in 0..n {
                     let c = |g: f32, want: f32, what: &str| {
-                        assert_eq!(g.to_bits(), want.to_bits(), "{what} {w}x{h} r={radius} idx {i}: {g} != {want}");
+                        assert_eq!(
+                            g.to_bits(),
+                            want.to_bits(),
+                            "{what} {w}x{h} r={radius} idx {i}: {g} != {want}"
+                        );
                     };
                     c(m1[i], wm1[i], "mu.mu1");
                     c(m2[i], wm2[i], "mu.mu2");
@@ -5523,5 +5548,4 @@ mod tests {
             }
         }
     }
-
 }

@@ -800,3 +800,168 @@ flag and price it on `extract_paths_bench`.
   re-based on the CORRECTED semantics rather than on today's — otherwise every
   bit-exactness gate it is measured against is pinned to bytes that are about
   to change.
+
+---
+
+## 9. Option C — measured, and it is a WIN not a cost
+
+User decision: stop v1 pooling phantom columns; the fold's unpadded semantics
+are the truth; buffered is fixed to match. Measured before implementing.
+
+### 9.1 C makes fold == buffered BIT-EXACT, and dissolves the h=93 residual
+
+The experiment switch `ZEN_C_NOPAD` makes `simd_padded_width` return the real
+width, so no phantom columns exist. Re-running the existing parity gate:
+
+| geometry | baseline (padded) | under C |
+|---|---|---|
+| 96×64, 64×300, 208×144 (tight) | BIT-EXACT | BIT-EXACT |
+| 127×93 | max rel **1.739e-1** | **0.000e0** |
+| 200×150 | max rel **8.155e-1** | **0.000e0** |
+
+**Under C the fold and the buffered path agree bit-for-bit at every width
+tested, h=93 included.** So the §7.2 h = 93 residual was an artifact of the
+option-A pre-pad workaround — a property of padding the *input*, not of the
+two walks. **Under C it does not exist**, and item 3 is resolved by deletion
+rather than by a fix.
+
+Full suite under C: **223 passed, 1 failed** — the one failure is
+`v1_padded_width_divergence_is_column_padding`, this lane's own
+characterisation gate, which asserts the *padded* behaviour by construction
+and cannot hold once padding is gone. `v1_golden_bytes`, `size_invariance`,
+`streaming_strips` and `v1_feature_width_pure_function` all pass under C.
+
+### 9.2 …but the goldens pass for the wrong reason
+
+`v1_golden_bytes` uses **64×64** fixtures, and `simd_padded_width(64) == 64`.
+The golden set is entirely in the TIGHT class, so it is **structurally blind
+to the defect C fixes** — it would have passed no matter how wrong the padded
+class was. Any C rollout needs a golden fixture at a non-tight width
+(e.g. 200×150 or 576×96); without one the golden gate gives false confidence
+on exactly this axis.
+
+### 9.3 The cost of exactness — it is negative
+
+Ask: "what is the perf difference of padded vs exact above the must-pad
+threshold?" Measured on the buffered v1-372 path (callgrind Ir, serial, v3
+tier, minus the 27,549,000 harness constant):
+
+| width | padded Ir | exact Ir | delta | % |
+|---|---:|---:|---:|---:|
+| 576 (pads → 592) | 335,626,055 | 305,345,180 | −30,280,875 | **−9.02 %** |
+| **592 (TIGHT — control)** | 326,245,903 | 326,257,116 | +11,213 | **+0.00 %** |
+| 1152 (pads → 1168) | 1,386,215,532 | 1,284,044,571 | −102,170,961 | **−7.37 %** |
+
+**Exactness is 7–9 % CHEAPER at non-tight widths and free at tight ones.** The
+tight-width control landing at +0.003 % is the measurement validating itself:
+where there is nothing to exclude, C is exactly a no-op.
+
+The reason is simple once stated: the phantom columns were not free to compute.
+`simd_padded_width` adds 16 columns to every width ≥ 512 that is an even
+multiple of 16 (the anti-alias stride trick), and every blur, every pool and
+every downscale then ran over them. Removing them removes ~2.8 % of the
+columns at 576 — and yields ~9 %, so the padded width was also landing on a
+worse row-group tail than the exact one.
+
+**This inverts one premise of the brief.** The instruction was that
+lane-alignment padding of BUFFERS should stay and only pooling should change.
+Measured, the alignment padding is not paying for itself on this walk: it
+costs 7–9 % and buys correctness problems. The cheapest *and* most correct
+implementation of C is simply not to pad. **Not flipped here** — the default
+is untouched pending the era rollout; this is the number the decision needs.
+
+### 9.4 Era discipline — what would change, and what would not
+
+* **The fold's 944 outputs are UNCHANGED by construction under C.** The fold
+  never padded; C only removes padding from the buffered path. This is
+  assertable and should be asserted before rollout (a before/after
+  bit-identity gate on the 944 regimes) — noting that the pre-pad blast-radius
+  gate (§8.2) already proves the converse direction, that *adding* padding
+  moves 92 % of the v2 block.
+* **372 artifacts that become prior-era** — every table extracted through
+  `compute_zensim_with_config` / `compute_zensim_with_ref_and_config` at a
+  **non-tight** width. Tight-width rows are bit-identical under C and do not
+  change era. Since `simd_padded_width` bumps every width ≥ 512 that is an
+  even multiple of 16, and 576/1152/2304 are all in that class, the practical
+  answer is "most of them" — but it is a per-row property of the width, not a
+  per-table one, so the annotation should record the predicate rather than a
+  list.
+* **Not flipped, listed for the user**: the `eval_roots` default, and whether
+  C ships as (a) no padding at all (fastest, simplest, measured above),
+  (b) padded buffers with pool-width exclusion (matches the brief's letter;
+  needs a `(width, stride)` split through the pooling kernels; strictly slower
+  than (a) since the pad columns still get blurred), or (c) a config flag with
+  the old behaviour retained for prior-era reproduction.
+
+### 9.5 Fusion vs fission — the register-pressure steer, measured
+
+Prompted by "multiple passes per row can be faster depending on register
+spills; do NOT assume maximal fusion wins", the registered lever #1
+(`box_blur_h_of_abs_diff` — fold the activity's abs-diff into the H-blur's
+load sites so `act_raw` is never materialised) was implemented, gated
+bit-exact, measured, and **REVERTED**:
+
+| arm | two-pass (shipped) | fused | delta |
+|---|---:|---:|---:|
+| `fold944_full` | 562,449,826 | 568,313,440 | **+5,850,600 (+1.04 %)** |
+| `fold372_only` | 276,789,555 | 282,338,738 | **+5,561,565 (+2.01 %)** |
+
+Fusion LOSES. Post-rem-ring the H-blur gathers one strided column per x-step;
+folding in the abs-diff makes it gather **two** planes, and the contiguous
+`abs_diff_into` pass it removes is cheap per element by comparison. The
+comparison is lane-width-fair (both arms are 8-wide at the profiled v3 tier),
+so this attributes to fusion itself, not to the kernel's width. In production
+it would be worse still: the two-pass path has hand-written 16-wide v4/v4x
+variants, while a `magetypes`-generic fused kernel is 8-wide everywhere.
+Kernel and its bit-exactness test were deleted rather than parked.
+
+**Spill audit of the kernels this lane shipped** (`objdump`, xmm/ymm/zmm ↔
+`(%rsp)` traffic inside the function body):
+
+| kernel | spill stores | spill loads |
+|---|---:|---:|
+| `box_blur_h_inner_v4x` (rem-ring) | 1 | 2 |
+| `fused_blur_h_ssim_inner_v4x` (rem-ring) | 4 | 2 |
+| `fused_vblur_ssim_inner_v4x` (carries `store_sigma`) | 4 | **28** |
+
+The rem-ring is spill-clean — the stack ring did not cost register pressure.
+`fused_vblur_ssim` carries 28 spill reloads and is the standing
+fission-vs-fusion candidate: it is the most-fused kernel in the walk and the
+only one showing real spill traffic. Splitting it was NOT attempted here and
+is the registered next experiment.
+
+### 9.6 Where the 944-full → 944-zeroed gap actually lives
+
+The priority steer asks for this gap crushed. Attributed (callgrind, 576²,
+serial, v3; gap = **75,958,119 Ir, +16.55 %** over zeroed):
+
+| kernel | zeroed | full | delta | of gap |
+|---|---:|---:|---:|---:|
+| `box_blur_h_inner` | 49,896,194 | 80,978,858 | +31,082,664 | **40.9 %** |
+| `ssim_channel_inline_both` | 0 | 11,985,990 | +11,985,990 | 15.8 % |
+| `edge_diff_channel_inline_both` | 0 | 9,589,905 | +9,589,905 | 12.6 % |
+| `box_blur_v_copy` | 44,895,045 | 54,204,960 | +9,309,915 | 12.3 % |
+| `build_inline_mse` | 0 | 4,134,045 | +4,134,045 | 5.4 % |
+| `fused_vblur_ssim` (`store_sigma`) | 61,564,959 | 64,869,759 | +3,304,800 | 4.4 % |
+| `abs_diff_into` | 2,941,191 | 6,143,526 | +3,202,335 | 4.2 % |
+| memset + memcpy (scratch growth) | 13,791,991 | 17,076,945 | +3,284,954 | 4.3 % |
+
+Two groups: the **activity chain** (H-blur + V-blur + abs-diff) is
+**43.6 M = 57.4 %** of the gap, and the **pool math proper** (SSIM / edge /
+MSE kernels) is 25.7 M = 33.8 %.
+
+The activity chain looks close to irreducible at fixed semantics:
+`blur(|src − blur_h(src)|)` is a blur of a non-linear function of a blur, so
+the two passes cannot be algebraically merged; the fused-load form is measured
+above and loses; and the ±overlap recompute per band is what makes the fold
+v1-exact (v1 mirror-clamps the activity at its own strip edges), so it is
+semantic, not waste. The remaining named levers are the `fused_vblur_ssim`
+fission experiment (§9.5) and the inner-rows-only V-blur write, which was
+priced at ≈0.4 % of the walk and rejected on value.
+
+**So the honest answer to "which world are we in": the pool block costs
++16.55 % over zeroed and that is close to its intrinsic price.** With
+`fold372_only` at **276,789,555 Ir = 0.49× of 944-full and 0.74× of today's
+buffered v1-372**, a caller that only wants v1's 372 saves roughly half by
+having a dedicated path — which is why the block-skipping mode was still worth
+shipping even though 944-full could not be brought down to 944-zeroed.

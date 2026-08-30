@@ -11349,6 +11349,13 @@ mod tests {
                     }
                 }
             }
+            if n_differ > 0 && std::env::var("ZEN_PADPROBE_DECODE").is_ok() {
+                let mut idx: Vec<usize> = (0..372)
+                    .filter(|&i| ff[i].to_bits() != v1f[i].to_bits())
+                    .collect();
+                idx.truncate(400);
+                eprintln!("  DIFFSLOTS {w}x{h}: {idx:?}");
+            }
             eprintln!(
                 "PADPROBE {w}x{h} (v1 pads {w}->{pw}): v1-block {n_differ}/372 differ worst f{} rel {:.3e} | v2/append {v2_differ}/{} differ worst f{} rel {:.3e}",
                 worst.0,
