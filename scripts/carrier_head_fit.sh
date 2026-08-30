@@ -45,6 +45,22 @@
 #   CHF_EVAL            space-separated LABEL=<abs parquet> pairs -> `gate` |SROCC|
 #   CHF_VERDICT_ROOT    features-root for `bake_verdict` (adds signed SROCC + bars)
 #   CHF_CORPORA         bake_verdict --corpora (default the five-bar set)
+#
+# W-LIN ROUND 7 additions (benchmarks/wlin_round7_rawframe_2026-08-30.md) — the
+# recipe above is the DEFAULT and is unchanged, so the recovery gate still runs
+# byte-identically; these only let a DIFFERENT mix use the same driver instead of
+# a second copy of it:
+#   CHF_LEGS            space-separated `name:weight`, in mix order. Default is the
+#                       recovered 4-leg kon head `safesyn:1.0 cid22t:1.5 kadid:0.5
+#                       tid:0.5`. A leg's parquet basename comes from CHF_LEG_<name>
+#                       or the DEF table; its ROOT from CHF_ROOT_<name> (default the
+#                       positional features-root), so one mix can span two roots
+#                       (e.g. the R1b legs + this lane's new legs) without copying
+#                       tables around.
+#   CHF_SOLVER          `bvls` (default, the recovered recipe) or `lasso`
+#   CHF_LAM             --lam (default 0; the L1 penalty when CHF_SOLVER=lasso)
+#   CHF_NO_BOUNDS=1     omit --bounds-tsv (a lasso head has no sign box)
+#   CHF_TARGET          target column name (default human_score)
 set -euo pipefail
 ARM="${1:?arm name}"; ROOT="${2:?features root}"; NFEAT="${3:?n_feat}"
 SCREEN="${4:?screen tsv}"; OUT="${5:?out dir}"
@@ -55,11 +71,19 @@ SIGNS="$REPO/benchmarks/feature_sign_mask_2026-05-26.tsv"
 mkdir -p "$OUT/grams"
 ts() { date -u +%H:%M:%SZ; }
 
-ORDER="safesyn cid22t kadid tid"
-declare -A W=( [safesyn]=1.0 [cid22t]=1.5 [kadid]=0.5 [tid]=0.5 )
 declare -A DEF=( [safesyn]=ext_safesyn_full [cid22t]=ext_cid22_train201 \
-                 [kadid]=ext_kadid [tid]=ext_tid )
-leg_file() { local l="$1"; local v="CHF_LEG_${l}"; echo "${!v:-${DEF[$l]}}"; }
+                 [kadid]=ext_kadid [tid]=ext_tid \
+                 [tsafesyn]=tsafesyn_pools944 [tbig]=tbig_pools944 \
+                 [ttbig]=ttbig_pools944 [tbig_hf]=tbig_hf_pools944 )
+declare -A W=()
+ORDER=""
+for spec in ${CHF_LEGS:-safesyn:1.0 cid22t:1.5 kadid:0.5 tid:0.5}; do
+  ORDER="$ORDER ${spec%%:*}"; W[${spec%%:*}]="${spec##*:}"
+done
+ORDER="${ORDER# }"
+TARGET="${CHF_TARGET:-human_score}"
+leg_file() { local l="$1"; local v="CHF_LEG_${l}"; echo "${!v:-${DEF[$l]:-}}"; }
+leg_root() { local l="$1"; local v="CHF_ROOT_${l}"; echo "${!v:-$ROOT}"; }
 
 GARGS=()
 for leg in $ORDER; do
@@ -67,24 +91,29 @@ for leg in $ORDER; do
     g="$CHF_GRAM_DIR/${CHF_GRAM_PREFIX:-}${leg}.npz"
     [ -f "$g" ] || { echo "missing frozen gram $g" >&2; exit 2; }
   else
+    lf="$(leg_file "$leg")"
+    [ -n "$lf" ] || { echo "no parquet known for leg '$leg' (set CHF_LEG_$leg)" >&2; exit 2; }
     g="$OUT/grams/${leg}_shaped.npz"
     if [ ! -f "$g" ]; then
       echo "== gram $ARM/$leg $(ts)"
-      "$BDR" gram --parquet "$ROOT/$(leg_file "$leg").parquet" \
-        --target human_score --space shaped --transforms-tsv "$SCREEN" \
+      "$BDR" gram --parquet "$(leg_root "$leg")/$lf.parquet" \
+        --target "$TARGET" --space shaped --transforms-tsv "$SCREEN" \
         ${CHF_MM01:+--target-minmax01} \
-        --expect-n-feat "$NFEAT" --out "$g"
+        --expect-n-feat "$NFEAT" --out "$g" || exit 2
     fi
   fi
   GARGS+=(--gram "$g" --weight "${W[$leg]}")
 done
 
-ANCHOR="$ROOT/${CHF_ANCHOR:-$(leg_file safesyn)}.parquet"
+ANCHOR="${CHF_ANCHOR_ABS:-$(leg_root safesyn)/${CHF_ANCHOR:-${DEF[safesyn]}}.parquet}"
 BAKE="$OUT/${ARM}.bin"
 echo "== fit $ARM $(ts)"
+BOUNDS=(--bounds-tsv "$SIGNS")
+[ -n "${CHF_NO_BOUNDS:-}" ] && BOUNDS=()
 "$BDR" fit-lasso "${GARGS[@]}" \
-  --space shaped --target "human_score${CHF_MM01:+__mm01}" \
-  --solver bvls --bounds-tsv "$SIGNS" --lam 0 --tau "${CHF_TAU:-0.005}" \
+  --space shaped --target "${TARGET}${CHF_MM01:+__mm01}" \
+  --solver "${CHF_SOLVER:-bvls}" ${BOUNDS[@]+"${BOUNDS[@]}"} --lam "${CHF_LAM:-0}" \
+  --tau "${CHF_TAU:-0.005}" \
   ${CHF_SLICE:+--slice-file "$CHF_SLICE"} \
   --transforms-tsv "$SCREEN" \
   --anchor-parquet "$ANCHOR" --anchor-stride 37 \

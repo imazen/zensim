@@ -85,13 +85,74 @@ def predict(bdr: Path, members: list[str], corpus: Path, out: Path) -> np.ndarra
     return np.loadtxt(out, delimiter="\t", skiprows=1, usecols=1)
 
 
+def graft(a) -> int:
+    """Carry an EXISTING twin's teacher target onto the SAME rows at another regime.
+
+    A teacher target is a scalar per row: it is a property of the (ref, dist) PAIR,
+    not of the feature regime the student reads. So a twin at a new regime is the
+    new regime's features + the already-computed target, joined by row identity —
+    NOT a fresh teacher forward.
+
+    Re-forwarding is REFUSED here, and the refusal is the point: the committed
+    teachers are `folded720append2` (zero-block) 944 models, whose weights on
+    f156..f371 were never trained (a zero input has zero gradient). Forwarding one
+    over a `*pools` table pushes live values through untrained slots — the
+    wrong-regime defect CLAUDE.md records under "`--regime 944` silently
+    mis-scores". The target would change for a reason that has nothing to do with
+    the student.
+
+    Gate G-T: the source twin's `ref_basename` sequence must equal the feature
+    table's, row for row. Any mismatch aborts.
+    """
+    src = pq.read_table(a.graft_from, columns=["ref_basename", "human_score"])
+    feat_tbl = pq.read_table(a.graft_features)
+    if src.num_rows != feat_tbl.num_rows:
+        print(f"G-T FAIL: {a.graft_from} has {src.num_rows} rows, "
+              f"{a.graft_features} has {feat_tbl.num_rows}", flush=True)
+        return 3
+    if not src["ref_basename"].combine_chunks().equals(
+            feat_tbl["ref_basename"].combine_chunks()):
+        print("G-T FAIL: ref_basename sequences differ row-for-row", flush=True)
+        return 3
+    feats = [c for c in feat_tbl.column_names if c.startswith("f") and c[1:].isdigit()]
+    feats.sort(key=lambda c: int(c[1:]))
+    carry = [c for c in ("ref_basename", "encoded_filename", "regime")
+             if c in feat_tbl.column_names]
+    out_t = feat_tbl.select(carry + feats).append_column(
+        "human_score", src["human_score"].combine_chunks())
+    y = np.asarray(out_t["human_score"].combine_chunks(), dtype=np.float64)
+    print(f"G-T PASS: {out_t.num_rows} rows, target mean {y.mean()!r} "
+          f"[{y.min()!r}, {y.max()!r}]", flush=True)
+    outp = Path(a.out)
+    pq.write_table(out_t, outp, compression="zstd", compression_level=7)
+    man = {"file": str(outp), "sha256": sha256(outp), "rows": out_t.num_rows,
+           "mode": "graft-target",
+           "mechanism": "features from --graft-features, teacher target from "
+                        "--graft-from, joined by ROW IDENTITY (G-T: ref_basename "
+                        "sequences equal). The teacher forward is NOT re-run: the "
+                        "committed teachers are zero-block 944 models and "
+                        "forwarding one over live pool slots is the wrong-regime "
+                        "defect.",
+           "target_source": {"path": str(a.graft_from), "sha256": sha256(Path(a.graft_from))},
+           "features_source": {"path": str(a.graft_features),
+                               "sha256": sha256(Path(a.graft_features))},
+           "target_mean": float(y.mean())}
+    (outp.parent / (outp.name + "._MANIFEST.json")).write_text(json.dumps(man, indent=1))
+    print(f"wrote {outp} + manifest")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tag", required=True, help="teacher tag, e.g. ensk2")
+    ap.add_argument("--graft-from", help="existing twin parquet whose human_score "
+                                         "(the teacher target) is carried over")
+    ap.add_argument("--graft-features", help="feature table at the NEW regime, same rows")
+    ap.add_argument("--out", help="output parquet for --graft-from mode")
+    ap.add_argument("--tag", help="teacher tag, e.g. ensk2")
     ap.add_argument(
-        "--members", required=True, help="comma-separated ZNPR bakes (k=1 → single teacher)"
+        "--members", help="comma-separated ZNPR bakes (k=1 → single teacher)"
     )
-    ap.add_argument("--out-dir", required=True, type=Path)
+    ap.add_argument("--out-dir", type=Path)
     ap.add_argument(
         "--bdr",
         type=Path,
@@ -99,6 +160,15 @@ def main() -> int:
         help="bake_dial_refit binary (the predict owner)",
     )
     a = ap.parse_args()
+
+    if a.graft_from:
+        if not (a.graft_features and a.out):
+            print("--graft-from requires --graft-features and --out", file=sys.stderr)
+            return 2
+        return graft(a)
+    if not (a.tag and a.members and a.out_dir):
+        print("teacher-forward mode requires --tag --members --out-dir", file=sys.stderr)
+        return 2
 
     members = [m for m in a.members.split(",") if m]
     for m in members:
