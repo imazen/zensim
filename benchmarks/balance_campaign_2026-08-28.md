@@ -3672,3 +3672,43 @@ two extractions, 371/372 columns differ. SRC0437: |Δ| ≤ 0.0003, no bar change
   (was already 18.30 before this round — cap needs a deliberate decision); `--full-json` does not
   record `features_root` (era line is stderr-only — provenance gap, handed to round-4b's lane);
   `LOOP_BAKE_MAP.blend2L_base` left unmapped (era-consistency of the loop columns is one decision).
+## 2026-08-30 ~23:1xZ — ROUND 8: extraction perf/removability lane (6 commits; doc `benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md`)
+
+- **Shipped lever: H-blur gather ring** (redundant strided remove-side gathers eliminated across 24
+  sites, bit-exact by construction, negative controls run): callgrind Ir @576² buffered-372 −8.29 %,
+  zeroed-944 −5.57 %, live-944 −6.22 % (per-kernel `box_blur_h` −21…−22 %). Prior ranked lever #1
+  (`box_blur_h_of_abs_diff`) is MIS-RANKED (re-adds a gather to a gather-bound kernel); #2 ≈ 0.4 %.
+  Next real target: `dense_block_kernel` (needs re-profiling at v4x).
+- **Buffered NOT removable — four blockers, none perf**: the fold has no `score()` (every scoring
+  entry + attribution's basic canvas runs the buffered walk); no ref-cached fold form; pool values
+  differ at production widths; zensim-gpu's CPU oracle is `compute_extended_features`. And the fold's
+  MT scaling is structurally weaker: fixed degree 3 (1T→8T 1.1–1.5×) vs buffered band-per-strip
+  (2–4×) ⇒ **buffered is FASTER at 8T for the same pools (1.09–3.30×) and cheaper serial is the
+  fold (0.63–0.91×)** — "is buffered slower than streaming" inverts with thread count. α+β fits
+  return negative intercepts (per-pixel cost rises with size — the linear model failing).
+- **★ PREMISE INVERSION on the "372 segment" mandate: BUFFERED pools over PADDED (phantom)
+  columns; the FOLD is the unpadded/clean one.** Pre-padding makes 17/20 geometries bit-exact
+  (incl. the 81.6 %-divergent 200×150 and 576/1152 classes; tight widths 0/552 = the control) but
+  moves 505–508/552 v2 slots up to 36× — so "fix 372" and "leave 944 alone" cannot both be had by
+  padding. FORK → USER: **A** pre-pad everything (invalidates every 944-trained MODEL, beyond
+  re-extraction); **B** two plane sets (944 untouched, 372 reproduces buffered; cost unmeasured —
+  being priced); **C** stop v1 padding (fold already correct; buffered fixed to match; a NEW 372
+  era — tables AND shipped-B runtime move again; B retrain already registered). Residual either
+  way: 3 cells at h=93 (≤1.1e-6, pad-column × row-group tiling) — under root-cause. Block-skipping
+  does not exist yet (naive 944-then-project = 3.9–4.8× buffered at 28T) — being built now, option-
+  independent, along with fold band-parallelism.
+- **Lane error, flagged**: `714da506` pushed 54.4 MiB of build artifacts to main (gitignore gap,
+  fixed + removed in `7d8ac808`); blobs remain in history — any filter-repo pass is a coordinated,
+  user-gated history rewrite (NOT attempted). Benches ran not-load-clean (box shared all day; CV
+  24–90 %, effect sizes 1–2 orders above) — callgrind Ir numbers are the quotable ones.
+
+### Round-4b follow-ups landed (`5d393734`, `5507d443`, `4af30b97`)
+§7 board-row attribution corrected with INDEPENDENT verification (cl_tfm board row bit-exact to a
+fresh `--regime 720` read; only B + `T_appT` bit-exact to the stored-372 run — B's pair confirmed
+the board's only clean era A/B; basic-only rows show the same offset vs BOTH eras = folded-720
+feature space, not an era). Registry scopes narrowed in place to the 2 genuine rows. §6.1 marked
+SUPERSEDED by the `a25d1b80` default flip. **`--full-json` now records `features_root`**
+{path, era label (UNKNOWN never guessed), manifest sha, declared regime, per-corpus file sha256s} —
+additive, recomputes nothing, 2 tests; stored root honestly reports `manifest_sha256: null`
+(it ships `_MANIFEST.md`). Stale-working-copy incident handled without loss (pre-backup +
+selective re-apply; no other lane's edits clobbered).
