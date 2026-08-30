@@ -2589,3 +2589,40 @@ parts> --out residual.json` → declare as a new run → `lan_gpu_sequence.sh
 i134 gpu <run>`. Expected residual = 1,824 never-run + 72 jxl panics (one
 retry each; genuine panics re-poison with current-era evidence). Then the
 3-arm HDR leg, then the zenavif arm declare.
+
+### CORRECTION (2026-08-30 ~05:1xZ): the AVIF-HDR "ground truth" above was STALE — steps 1+2 were ALREADY COMPLETE on 2026-08-27
+
+Re-read from the estate, not from the 08-26 snapshot the section above relied on:
+- `hdrgrid-sf-gpu-20260807` DRAINED on 2026-08-27 14:21Z. After the audit's
+  requeue rows (attempts=0 over the `.bin`-extension error blobs) the LAN
+  nomad pool (wsl/i134/r5600g) re-ran every svt + gainmap + jxl job
+  (13:5x–14:3x UTC ledger parts) with real scores. `zenfleet-ctl gap` over the
+  snapshot + all 71 parts: **0 of 2,291 remain**. The first-cell probe above
+  reproduced two of those stored scores **bit-identically** (svt
+  81.00002466634244 / 0.9935848616225961; gainmap 27.257822109597257 /
+  0.9488483317924166) — so its actual value is: the cuda13 image + LAN
+  sequencer path is validated for HDR AVIF/gainmap blobs (needed for the
+  zenavif-arm score wave), and the stored svt/gainmap scores are confirmed
+  GPU-exact. No residual wave exists to launch.
+- `harvest-2026-08-27/scores.parquet` (post-drain full writeback, manifested)
+  carries ssim2_gpu at **99.9% jxl / 99.6% svt / 99.5% gainmap** — the
+  "ssim2 is 0% on svt and gainmap" line above was read off the 08-26
+  jxl-only leg manifest (`coverage_note: all-zenjxl by score-wave size-tier
+  design`), i.e. a pre-drain artifact.
+- The 3-arm HDR legs EXIST: `hdrgrid-mc944-t2-2026-08-27` (era-B zensim
+  target; 37,991/20,742) and `hdrgrid-mc944-t1-2026-08-27` (cvvdp-mix;
+  41,788/22,860), built by the owner `build_hdrgrid_mc944_t2_leg.py`. The
+  HDR-944 L1 wave RAN on them (`benchmarks/hdr944_bake_wave_2026-08-27.md`):
+  BOTH arms pass the pre-registered UPIQ bar on all seeds; SELECTED
+  `HDR944_L1T1_s4005` (UPIQ pooled +0.656, narwaria +0.605, korshunov +0.925,
+  M3a 0.764, sel_comp 0.8867; packed 180,139 B, real 12-knot dial) = the
+  "C-class HDR" candidate (codename aurora / CHdr); ship/freeze USER-GATED.
+- What is genuinely NOT done in the HDR estate: the **zenavif arm** (B5
+  "additive-later"; executor path `encode_avif_hdr` via zenrav1e, knobs
+  lossless/speed) and any **aom** arm (no AV1 encode via zenav1-aom exists in
+  the executor; zenav1-aom's `aom-encode` is ALLINTRA and byte-matches
+  aomenc at every speed — a real encoder to wire). The svt arm exists for HDR
+  ONLY (`encode_svt_hdr`, 10-bit PQ 4:2:0 CQP); there is no SDR svt/aom AVIF
+  arm anywhere. That is the lane the user's "fresh avif encode with zen svt
+  and zen aom backends" opens: new executor codec arms (svt SDR + aom SDR/HDR
+  through zenavif-serialize), then declare.
