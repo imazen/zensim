@@ -2729,6 +2729,7 @@ impl ZensimScratch {
 /// `(width, height)`. Named so the ref-cached fold feed can pass a
 /// `&[XybPyramidLevel]` without re-spelling the tuple at every boundary
 /// (fold-engine lane, stage 3).
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
 pub(crate) type XybPyramidLevel = ([Vec<f32>; 3], usize, usize);
 
 pub struct PrecomputedReference {

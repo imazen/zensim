@@ -1464,7 +1464,7 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         self.check_stop()?;
         let config = config_from_params(params, self.parallel);
-        let mut result = compute_with_config_inner_engine(
+        let mut result = compute_with_config_inner(
             source,
             distorted,
             &config,
@@ -1524,7 +1524,7 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let mut config = config_from_params(params, self.parallel);
         config.extended_features = true;
-        let result = compute_with_config_inner_engine(
+        let result = compute_with_config_inner(
             source,
             distorted,
             &config,
@@ -2657,7 +2657,7 @@ impl Zensim {
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params, self.parallel);
         config.compute_all_features = true;
-        let result = compute_with_config_inner_engine(
+        let result = compute_with_config_inner(
             source,
             distorted,
             &config,
@@ -2719,7 +2719,8 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params, true);
-        let result = compute_with_config_inner(source, distorted, &config, params.weights, None);
+        let result =
+            compute_with_config_inner(source, distorted, &config, params.weights, None, false);
         Ok(result)
     }
 }
@@ -3223,21 +3224,13 @@ pub(crate) fn reflect_pad_for_scales(src: &impl ImageSource, num_scales: usize) 
     }
 }
 
-fn compute_with_config_inner(
-    source: &impl ImageSource,
-    distorted: &impl ImageSource,
-    config: &ZensimConfig,
-    weights: &[f64],
-    stop: Option<&dyn enough::Stop>,
-) -> ZensimResult {
-    compute_with_config_inner_engine(source, distorted, config, weights, stop, false)
-}
-
-/// [`compute_with_config_inner`] with the engine selector (fold-engine lane,
-/// 2026-08-30). The reflect-pad and byte-identical short-circuit are SHARED
-/// — they run before either walk, so both engines see exactly the same
+/// **The shared front of every SDR scoring entry**, with the engine selector
+/// (fold-engine lane, 2026-08-30). The reflect-pad and the byte-identical
+/// short-circuit run BEFORE either walk, so both engines see exactly the same
 /// pixels and the same identical-pair payload. Only the walk differs.
-fn compute_with_config_inner_engine(
+///
+/// `use_fold == false` is the pre-2026-08-30 path, byte-for-byte.
+fn compute_with_config_inner(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,

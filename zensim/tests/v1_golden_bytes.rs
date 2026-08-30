@@ -1400,3 +1400,45 @@ pub const GOLDEN_NONTIGHT: [f64; 372] = [
     8.77514440624983035e-4,
     1.16192806773243424e-5,
 ];
+
+/// **The fold reproduces the pinned golden bytes** (fold-engine lane,
+/// 2026-08-30). Every test above measures the BUFFERED walk against the
+/// goldens; this one measures the streaming fold against the SAME arrays.
+///
+/// It is the gate the buffered-retirement proposal rests on, and it is
+/// deliberately stated against the pinned constants rather than against the
+/// buffered path: `fold_engine_parity` already proves the two walks agree
+/// bit-for-bit today, so a cross-path test would keep passing if BOTH drifted
+/// together. Comparing the fold to the frozen bytes cannot.
+///
+/// Same comparator and same tiny tolerance as the buffered fixtures — the
+/// tolerance is for cross-environment drift (`benchmarks/
+/// v1_golden_env_triage_2026-08-05.md`), not for path drift, and on one box
+/// the two walks are bit-identical.
+#[cfg(feature = "feature-regime-v2")]
+#[test]
+fn fold_backed_fixtures_match_golden() {
+    use zensim::{RgbSlice, Zensim, ZensimProfile, fold_engine::ScoringEngine};
+    let z = Zensim::new(ZensimProfile::codec_target()).with_engine(ScoringEngine::Fold);
+    let feats = |r: &[[u8; 3]], d: &[[u8; 3]], w: usize, h: usize| -> Vec<f64> {
+        z.compute_extended_features(&RgbSlice::new(r, w, h), &RgbSlice::new(d, w, h))
+            .expect("fold-backed extended features")
+            .into_features()
+    };
+
+    let (w, h) = (64, 64);
+    let r = common::generators::gen_value_noise(w, h, 0xC0FFEE);
+    let d = common::generators::distort_block_artifacts(&r, w, h);
+    assert_golden_close("GOLDEN_SYNTHETIC/fold", &feats(&r, &d, w, h), &GOLDEN_SYNTHETIC);
+
+    let (w, h) = (200, 150);
+    let r = common::generators::gen_value_noise(w, h, 0xC0FFEE);
+    let d = common::generators::distort_block_artifacts(&r, w, h);
+    assert_golden_close("GOLDEN_NONTIGHT/fold", &feats(&r, &d, w, h), &GOLDEN_NONTIGHT);
+
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let (r, rw, rh) = load_png_rgb8(&manifest.join("tests/fixtures/v1_golden_real_ref.png"));
+    let (d, dw, dh) = load_png_rgb8(&manifest.join("tests/fixtures/v1_golden_real_dist.png"));
+    assert_eq!((rw, rh), (dw, dh), "fixture dimension mismatch");
+    assert_golden_close("GOLDEN_REAL/fold", &feats(&r, &d, rw, rh), &GOLDEN_REAL);
+}
