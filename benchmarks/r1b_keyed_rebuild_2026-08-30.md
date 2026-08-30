@@ -275,6 +275,13 @@ side). **100 % of all 20,812 rows resolve**; the run aborts otherwise.
   out by byte range. **No whole-tar download is needed** — the four lossy runs
   total 151.90 GiB of tar, against ~1 GiB of member bytes for these slices.
 
+**Housekeeping while reading that prefix:** five stale `_regroup` trace logs
+(the 2026-06-27 run's `.FAILED` / `.log` / `.progress.log` set, 811 MiB) were
+removed from the dataset root — run scaffolding, not data, and superseded by
+the recovery pass's own `.done` record, which is kept. The `_regroup` finding
+above is unaffected: it comes from the per-codec `encodes/` prefixes and from
+the recovery `.done`, both still in place.
+
 `fetch_bigcodec_bytes.py` materialises both modes (s5cmd batch `cp` for
 objects, indexed range GETs for tar members, indexed size asserted per member)
 and emits the local `(ref_path, dist_path, human_score)` TSV the zensim
