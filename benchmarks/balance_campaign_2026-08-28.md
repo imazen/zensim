@@ -2878,3 +2878,27 @@ is in the executor stderr, not the ledger — classified by local repro). Blob c
 snapshot after its first pass hit the 1,800 s pass limit on a big chunk (a slow chunk, not a
 hang — the worker released the claim and moved on); the svt CPU score run (cvvdp + 944
 features) stays queued until a CPU box frees up.
+
+### KB-41 CLOSED — the aom-rs port is byte-exact on every datagen census cell (2026-08-30, zenav1-aom `735a0a6d`)
+The six cpu-6 residuals (1920x1080 cq6/32/57, 1280x800 cq6/25/44) were FOUR unported speed
+features on the IntraBC path, each localized to one block decision by the sibling-C + port
+dumps and re-measured after each fix (1920x1080 cq57 s6: −8,887 B → −637 → −618 → +77 →
+byte-exact):
+1. the port ran libaom's speed-0 IntraBC DV search at every speed (`intrabc_search_level` 1
+   at ≥6: 4x4/8x8/16x16 only, ABOVE-only, pixel search only on a hash miss; hash-8x8 cap at ≥4;
+   64-candidate prune + doubled mesh thresh at ≥1; DIAMOND site config at ≥3 with NO mesh; the
+   speed≤2 resolution×qindex search-method bands; `use_downsampled_sad=2` for ≥720p at EVERY
+   speed) — the witness block's level-0 pixel search overrode a valid hash match with an invalid
+   lower-cost point and dropped the IntraBC candidate C coded;
+2. the intrabc coeff arm used pixel-domain distortion at every speed (C: DEFAULT_EVAL
+   transform-domain type 1/2 from speed 1, `predict_dc_level` 1 at ≥6);
+3. the intrabc var-tx knobs were speed-0 constants (inter init depth 1 at ≥1, ml split 4000,
+   PRUNE_2/3 rows, `skip_tx_search`, framesize `prune_tx_type_using_stats`);
+4. C re-derives an IntraBC coeff block's skip flag at ENCODE time (`av1_encode_sb`: all-zero
+   after the encode-pass trellis → skip=1); the port wrote the search's skip=0 + coefficients.
+Final census **30/30 byte-identical**; 88/88 palette/screen/HD gates; 311/311 aom-encode unit
+tests; bonus: `rd_close_intrabc`'s pin promoted the KB-15 cell `scc_480x180_196_cq48`. The
+`ZEN_AOMRS_MAX_SCREEN_MP` datagen cap stays (a throughput cap, not a correctness one — the
+port's DV search is still ~80 s/1080p cell at cpu6). Not ported: BIGDIA (unreachable on
+allintra), the speed-4/5 `prune_tx_type_est_rd` arm. Record: zenav1-aom `CLAUDE.md` KB-41
+roots #3-#6, `PARITY.md`.
