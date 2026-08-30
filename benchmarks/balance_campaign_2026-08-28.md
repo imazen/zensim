@@ -2218,3 +2218,37 @@ kadis (both) and konbpg (A) relative to C — their deltas conflate
 944 width (no carriers, same dropped legs), seeds 4004/4006, trained after
 the A/B wave (serialized per machine-safety). The carrier effect = arm-A −
 arm-0 at matched seeds; C's published numbers remain the ship reference.
+
+### THE 954 VERDICT — carrier co-training FALSIFIED; the kon mechanism fully mapped (2026-08-30 ~01:2xZ, ran to the final end)
+
+| model (kon504 / cid22) | s4004 | s4006 |
+|---|---|---|
+| C published (full recipe, 944) | 0.5006 / 0.8927 | — |
+| arm-0 control (944, −kadis −konbpg) | 0.4204 / 0.8696 | 0.4487 / 0.8818 |
+| arm-A (954+carriers, same drops) | 0.4420 / 0.8740 | 0.4488 / 0.8855 |
+| arm-B (arm-A + konbpg@372w) | 0.4402 / 0.8805 | 0.4171 / 0.8776 |
+
+- **Isolated carrier effect (arm-A − arm-0, matched seeds): kon +0.022/+0.000,
+  cid22 +0.004/+0.004** — consistent with the joint ablation on the trained
+  bake (kon −0.012 when removed): the optimizer, given the full 944 stack,
+  assigns the carriers almost nothing. **Co-training does not rescue them.**
+- **The leg-drop effect is the big term:** −kadis−konbpg alone costs kon
+  0.05–0.08 vs C — CONFIRMING the standing "KADIS cracks KonJND" finding:
+  kadis is a real kon ingredient in C's recipe (dropped here only for
+  carrier-width purity).
+- **konbpg at 954 adds nothing** (arm-B ≤ arm-A), consistent with every prior
+  konbpg reading.
+
+**The complete kon mechanism, end to end:** B's kon edge is NOT recoverable
+by feature revival — the 944 feature stack spans the carriers' information
+(they get no weight when co-trained), the companion form cancels
+(interaction ≠ addable), and C's own kon rides partly on kadis data. The
+residual B-edge source is B's era-composition (its mix incl. hdr_v3mix, the
+linear inductive bias, min-maxed frames, 372-width numerics) — not a
+transplantable component. **Every revival path is now measured-closed: the
+carrier program ends here.** The kon axis remains B's at −0.09 in the swap
+ledger. Remaining honest levers are DATA, not features: new near-threshold
+human corpora (B7 KonFiG — overlap-audit CLEAN, runnable — is the on-disk
+candidate) or accepting the priced trade. Artifacts:
+`fused954-2026-08-29/` (12 legs + 6 bakes + manifest), evals `~/tmp/c954_*`,
+`~/tmp/c944ctrl_*`.
