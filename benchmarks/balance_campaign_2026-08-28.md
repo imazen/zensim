@@ -3765,3 +3765,36 @@ selective re-apply; no other lane's edits clobbered).
   (sent): C implementation + 372 era step (non-tight golden, era-3 eval root, B-under-C delta),
   producer parallelization, the fission experiment, profile-driven work re-based on corrected
   semantics.
+
+## 2026-08-31 ~01:2xZ — ROUND 11: option C LANDED; era-3; B-under-C a non-event; single-mode taxonomy (5 commits, `56bbcda2`..`f769e7b9`)
+
+- **C shipped** (`pyramid_plane_stride` = the one owner; `mirror_pad_columns` + 3 call sites DELETED):
+  buffered v1-372 Ir −9.02 % @576 / −7.37 % @1152 / +0.00 % @tight-control 592; the fold needed no
+  change (verified structurally — its production path never references the owner) ⇒ **no 944 table
+  or model invalidated**. Three gates inverted meaning, each a TIGHTENING (differ-bounded → equal-
+  exactly; §3.30 table); no tolerance widened.
+- **Goldens: re-VERIFIED, not re-pinned** — 64×64/96×96 are stride-invariant so C leaves them
+  bit-unchanged (that is the finding); `GOLDEN_NONTIGHT` (200×150, the 81.6 %-divergence geometry)
+  added with the one-line negative control: restoring era-2 padding fails ONLY the new fixture.
+- **Era-3 root** re-extracted (8 corpora + kon504; six copied corpora stay prior-era, registered;
+  `pipal` byte-identical = the tight-class self-validation). Found+fixed a silent-loss bug: `zv
+  cid22` at the dataset parent wrote a 34-byte empty cache and EXITED 0 ("4292 pairs in 0.0 s");
+  the era-2 build had hit the same and been hand-patched.
+- **Shipped B under C: a NON-EVENT** — cid22 +0.000024, konjnd −0.0046 (|·| ⇒ improves), pipal
+  exactly +0.000000 (control); features move materially at non-tight widths, pooled rank stats
+  barely move. `DEFAULT_FEATURES_ROOT_372` NOT flipped — user decision; caveat: six era-3 corpora
+  are copied prior-era rows, so a flip makes the default root ERA-MIXED.
+- **Taxonomy per the user's single-mode decision**: `v1_only` = `#[doc(hidden)]` instrumentation
+  (pub(crate) impossible — `..Default::default()` visibility from external crates, incl.
+  zenmetrics); `V1PoolsMode` untouched (fleet harvests); `fold372_only` bench arm deleted;
+  `toggles_off` survives only as the pool-block price control.
+- **Final 944-full table (1/8/16T)**: 576² 17.33/7.17/6.83 ms (best 2.54×), 1152² 76.0/33.0/34.5
+  (2.30×), 2304² 381.7/180/180 (2.12×); **Ir/MP flat (1628→1546 M) across 16× pixels ⇒ the wall
+  convexity is memory-system**; RSS thread-independent (39/76/163 MB). Scaling peaks at 8T.
+- **Producer parallelization NOT done — measured ~8 % of the walk** (the earlier "named blocker"
+  re-priced); the real ceiling is `dense_block_kernel` (23 %, 3-way, not bit-exactly row-splittable
+  as accumulated today) + Y-channel imbalance → next: per-band self-contained accumulators, ONLY
+  under bit-exact sequential merge (a byte change to 944 outputs is an ERA decision, not a lever).
+- Score: **4 levers shipped** (rem-ring, block-skipping, band-parallel fold hook, C) / **4
+  implemented-then-rejected on measurement** (activity fusion +1.04 %, map_init scratch, row-
+  parallel blur, option-A pre-pad) — the rejections are the measurements working.
