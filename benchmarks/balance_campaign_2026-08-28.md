@@ -3423,3 +3423,125 @@ yet — the executor byte-verifies every cell) → drain → gap-2 score declare
   shaping screen is the TRAINED-BAKE screen (R1b §2b used `screen944_monotone.tsv`) with no min-max
   framing — which explains R1b's kon-degenerate head; R1b's arm numbers stand as measured but are
   NOT evidence about carriers. The A2-vs-A3 root equivalence (0.0003 kon) is unaffected.
+
+## 2026-08-30 ~19:2xZ — OPUS LANES, ROUND 3 RESULTS + CORRECTIONS
+
+### CORRECTIONS to this ledger (from `benchmarks/carrier_head_recipe_2026-08-30.md`, verdict RECIPE-DEPENDENT)
+- **WITHDRAWN:** "shaping-on-944-alone falsified (kon 0.16)" — that 0.16 was the per-corpus
+  MIN-MAX-framed head; the raw-framed 944 head with NO carriers reads **kon 0.4403 / cid22 0.8726**.
+- **RE-PRICED:** "the 10 carriers take kon 0.164 → 0.489 (+0.324)" — numbers exact, cause wrong:
+  the matched pair was matched on features, NOT on the target frame (no-carrier arm mm01, carrier
+  arms raw). 2×2 at matched frame: **+0.2759 target frame (85 %) + 0.0317 954-append-vs-944-native
+  layout (10 %) + 0.0167 carriers (5 %)**; carrier term on cid22 = **0.0000**. "Carriers ARE the
+  linear kon backbone" — NOT supported (+0.015…+0.046). "A good linear does not require the 372
+  front" — STANDS, on firmer ground. Recipe recovered bit-exactly (legs safesyn 1.0 / cid22t 1.5 /
+  kadid 0.5 / tid 0.5; trained-bake screen 914 id / 30 winsor_p99 / 10 signed_cbrt inside
+  f0..f155; `--tau 0.005`; raw `human_score`); driver `scripts/carrier_head_fit.sh` (+`CHF_MM01`),
+  `scripts/extract_bake_transform_screen.py`; reproduction residual 0.0000; commits `fdd13b0f`,
+  `6d0a393a`. **Positive:** dropping the min-max frame = +0.276 kon / +0.048 cid22 / +0.074 hfnl /
+  +0.014 imazen26 at zero cost (−0.015 kadid, −0.009 tid train-side). Keyed pools-944 raw-frame
+  arms: K0zero 0.8726/0.4403/0.8296/0.8470/0.2195, K1carr 0.8769/0.4553/0.8187/0.8374/0.1972,
+  K2pools 0.8440/0.4866/0.8127/0.8386/0.1957 (cid22/|kon|/nonphoto/imazen26/hfnl) — round-6 bars
+  FAIL on all arms; B leads every family axis. **W-LIN round 7** (raw frame, full mix incl. the
+  bigcodec/hf/teacher legs extracted at pools-944 via the fleet) launched as an Opus lane.
+- **RETRACTED (round-2 entry above):** "v1-372 width is BATCH-dependent" — FALSIFIED by
+  `f9fac41e`'s lane: the width is a pure function of (W, H). Mechanism: the pyramid walk starts at
+  `simd_padded_width(W)` but plain `H` and stops at `< 8`, so 4 scales need padded-W ≥ 64 AND
+  H ≥ 64; `combine_scores` sizes the output from the surviving scales (3 → 279, 2 → 186, 1 → 93).
+  `compute_with_config_inner` reflect-pads; THREE entries did not: `compute_zensim_with_config`
+  (silent short vector — both v1-372 extractors call it), `compute_zensim_with_ref_and_config`
+  (panic) and the PRODUCT `Zensim::compute_with_ref_into` (panic; no caller found). The W-vs-H
+  asymmetry (54x96 full, 96x54 short) is what made "too small" look falsified. Fix: one owner
+  (`needs_pyramid_pad` / `reflect_pad_for_scales`, `num_scales`-aware) at all seven entries; gate
+  `tests/v1_feature_width_pure_function.rs` (8 tests, 5 fail pre-fix); 19,444/19,444 previously-372
+  R1b rows BYTE-IDENTICAL post-fix, 1,368 short rows now 372 with f0..f155 bit-identical to the
+  944 fold. **Blast radius: no shipped table exposed** (25 canonical 372 parquets exact width; 0 of
+  149,195 canonical pairs could truncate; 944 tables byte-identical pre/post). Commits `f9fac41e`,
+  `f3097091`, `ca7e65cf`; `benchmarks/v1_width_defect_2026-08-30.md`; DATASET_HISTORY §3.26 RESOLVED.
+  Open: `r1b-samepair372-2026-08-30` dropped the 1,368 short rows (size-correlated 6.5 % restriction)
+  and `r1b-372root` has three dangling symlinks — full-width replacements at
+  `/mnt/v/output/zensim/v1width-fix-recheck-2026-08-30/` (handed to round 7).
+- **NEW, PRE-EXISTING (found by the width lane): v1-372 EXTRACTOR DRIFT vs the stored canonical
+  tables** — a fresh v1-372 extraction differs from the STORED cid22val/kon504 tables on essentially
+  every masked/IW slot (100 % of rows, max_rel 0.34 / 1.0); two binaries (pre/post width fix)
+  agree byte-for-byte, so it is drift between the extractor era and the stored tables, not the
+  fix. Shipped B consumes f156–371 at runtime from the CURRENT extractor while its verdicts read the
+  STORED tables → B's runtime behaviour vs its evaluated behaviour is UNVERIFIED. Diagnosis lane
+  launched (round 4).
+
+### zenpicker (criterion 8) — DONE: 11 commits `782ee43`→`18971ef` on zenanalyze
+# Campaign-ledger rows for `zensim/benchmarks/balance_campaign_2026-08-28.md`
+# (criterion-8 section — I do not hold the zensim repo; paste these there.)
+
+### ZENPICKER v1 — WIRING LANDED (INERT) + REPRODUCTION GATES (2026-08-30)
+
+**Both v1 numbers reproduce, one of them BYTE-IDENTICALLY.** (a) The registered
+honest panel re-runs to **argmin 0.7500 · overhead mean 4.47% / p50 0 /
+p90 14.53% · bytes-SROCC 0.9869**, matching the ledger's 0.7499/4.47/0/14.52/
+0.9869 on every reported statistic. The ledger's 38,668-row count is
+`--val-frac 0.999` (MEASURED: 0.999 → 38,668 rows, 1.0 → 38,696;
+`grouped_split_picker` rounds `n_images·val_frac`, so 0.999 withholds exactly
+one image); no statistic moves between them, and the k-seed wave uses 1.0 = the
+ENTIRE view. (b) `zenpicker-train --hidden 128,128 --seed 0` reproduces
+`metapicker_v1.bin` **byte-for-byte** (sha256 `4479ef9c874ebf1c…`) with an
+identical `[heldout]` block to every digit — so `--hidden` really is grid
+candidate #2, training is bit-deterministic, and the k-seed wave varies ONLY
+the seed.
+
+**Wiring: landed, INERT, additive** (zenanalyze `782ee433` … `d7eb26b1`, 10
+commits). The registered mis-map was real — v1's 7 cells are family×mode while
+`CodecFamily` is a 6-enum, so `MetaPicker::pick` would read
+`CodecFamily::ALL[cell_index]`. New `zenpicker::cell`: `CellContract`
+(+`from_model` validation, `build_input`), `CellPicker`
+(+`from_znpr_bytes[_with_schema]`, `predict_cells`, `meta_picker`),
+`FamilyModeCell`, `CellMode`, `CellPrediction`, 4 consts,
+`MetaPickerError::CellContract`. `default_route` / `route` / `pick` /
+`default_routers` and the three shipped routers are untouched — a test asserts
+each shipped router is REFUSED as a cell bake. `no_std+alloc` clean
+(`aarch64-unknown-none`). Flip stays user-gated.
+
+**Touch-once test**: the contract mapping is asserted a BIJECTION — each of the
+61 declared source features requested exactly once, `zq_norm` placed exactly
+once and never requested, nothing outside the contract read, every slot
+carrying the value of the name declared there (probe source injective by
+construction). Bake located via `ZENPICKER_METAPICKER_V1_BAKE`; unset ⇒ FAIL
+LOUD; the skip decision lives in the caller (`just metapicker-v1-test`; CI
+`-- --skip metapicker_v1_`). A second file (`cell_contract.rs`, 13 tests on
+synthetic in-process bakes) covers every refusal path on every CI run.
+
+**The identity gap (open, upstream, machine-checked)**: v1 declares its
+features POSITIONALLY (`feat_0..feat_60`) and carries no
+`zentrain.feature_columns`, so `Model::feature_columns()` is empty and
+`MetaPicker::feature_request()` is `None` — **v1 cannot consume a shared
+zenanalyze-api `Offer`**. Cause located: zensim
+`scripts/canonical_corpus/build_metapicker_input_2026-08-30.py:59` renames the
+qualified source columns to `feat_<j>` and records the originals nowhere.
+Recovered (all 61 qualified `name@hex8`) into
+zenanalyze `benchmarks/metapicker_v1_feature_slots_2026-08-30.tsv` by
+re-running the builder's own rule against the sha-pinned source TSV; a test
+keeps it in lockstep. **The fix belongs upstream** — not applied here because
+changing the bake metadata would void the byte-identity gate.
+
+**Baseline gate, re-measured on the picker's OWN dense grid** (new
+`zenpicker-train --baselines`; the v1 20.4%/55% always-avif figure came off a
+coarse 5-target side grid, as the ledger says). The fixed-policy table is bake-INDEPENDENT (it is a property of the dataset +
+oracle) and came out byte-identical on every seed, so it is the gate at EVERY
+seed including the worst:
+
+| fixed policy (its own best reachable cell) | mean | p50 | p90 | argmin | coverage |
+|---|---|---|---|---|---|
+| always-avif  | **0.1975** | 0.0000 | 0.5213 | 0.5156 | **0.9444** |
+| always-jxl   | 0.7795 | 0.3535 | 2.3123 | 0.2180 | 1.0000 |
+| always-webp  | 0.8052 | 0.3795 | 2.1829 | 0.1705 | 1.0000 |
+| always-jpeg  | 0.9421 | 0.4266 | 1.4689 | 0.0497 | 0.8878 |
+| always-png   | 5.4751 | 1.8689 | 11.7862 | 0.0462 | 1.0000 |
+
+**The ledger's 4.5x HOLDS on the dense grid**: best fixed choice = always-avif
+at 19.75% mean / 52.13% p90 (coarse-grid figure was 20.4% / 55.1%). But a
+CORRECTION: avif does **not** reach every (image,zq) cell — coverage **0.9444**
+(jpeg 0.8878, jxl-lossy 0.7745, webp-lossy 0.7398); only the three
+lossless-bearing families reach everywhere, and avif's 19.75% is measured on
+the 94.44% it can reach. Against the best FULL-coverage fixed family (jxl,
+77.95% mean) the picker is 17.4x better.
+
+<<BAND SECTION>>
