@@ -591,7 +591,7 @@ Note the solver split: the **lasso** H′ heads keep the full dial range; the
 contribution monotone-positive, which saturates the low end. Recorded as
 measured; not diagnosed further here.
 
-**The frontier, over 120 fitted cells.** Blending H′ into the K/C chain gives
+**The frontier, over 133 fitted cells.** Blending H′ into the K/C chain gives
 healthy dials but cannot reach `hfnl ≥ 0.40` (best `P3_KHp4_H_b0.5`: hfnl 0.3987,
 i.e. 0.0013 short, dyn 68.3); pulling in enough of the hf-only `H` to clear the
 bar pulls the dial back down. The two best 5/5 cells sit at opposite ends of that
@@ -615,10 +615,10 @@ neither arm is put forward as a ship candidate.
 
 ### 6.8 MULTIPLICITY — stated, not buried
 
-**120 arms were fitted and scored in this round**, and the five-bar gate is read
+**133 arms were fitted and scored in this round**, and the five-bar gate is read
 on a fixed evaluation set that includes **cid22, the sacred human holdout**. The
 passing margins are small (maximin **+0.005 to +0.013**, i.e. ~0.004–0.011
-absolute on the binding axis). With 120 cells and margins of that size, the
+absolute on the binding axis). With 133 cells and margins of that size, the
 correct reading of "5/5" is **"this recipe family reaches the bars", not "this
 particular α/β/λ is worth 0.002 more than that one"** — and the round-7 arms are
 single deterministic fits with no confidence interval (§3.5).
@@ -736,3 +736,207 @@ bar decision for any model here.** (The `panel` run also reproduces each fulleva
 kon value exactly, which is a free cross-check that the per-pair vectors are the
 ones the verdict used.) Every kon number in this document is the **all-504**
 value, with this footnote attached.
+
+---
+
+## 8. THE EXTRACTION — cost, and why it ran LOCALLY rather than on the fleet
+
+Measured, not estimated. 208,169 cells (the tbig leg), 2,136 distinct references,
+4 codecs.
+
+| phase | wall | throughput | footprint | caps |
+|---|---|---|---|---|
+| byte fetch (R2) | **72 min** (2,964 s + 1,357 s resume) | **48 cells/s** | 5.8 GB encodes | `run-heavy --mem 16G --jobs 8`, s5cmd/range workers 16–24 |
+| decode → PNG | **31 min** | **112 cells/s** (197,301 written + 10,868 already present, 0 errors) | 31 GB | `run-heavy --mem 20G --jobs 14` |
+| extract (`foldapp2pools`) | **5 min 39 s** | **614 cells/s** = 1.63 ms/pair wall (20.2 ms/pair compute-only) | 1.45 GB parquet | `run-heavy --mem 20G --jobs 8` |
+
+The fetch resumed cleanly after one transient `Read timeout` on a single tar
+member — the owner is idempotent (it skips cached members), so the resume
+re-fetched only the outstanding 45,024.
+
+**Why not the fleet — the blocker, stated explicitly.**
+
+1. **The bigcodec corpus is not on the LAN store.** Measured this session:
+   `s5cmd --endpoint-url <LAN> ls s3://zentrain/canonical/2026-06-27/` returns
+   *"no object found"*, and the LAN `s3://codec-corpus/` holds only
+   `imazen-26-variants/` and two `jobsys-demo-*` prefixes. The corpus is on R2.
+2. **For zenavif and zenjxl-lossy — 103,585 of the 208,169 cells (49.8 %) — the
+   per-file `encodes/` prefix is EMPTY** (R1b §7.3, re-verified here). Those
+   bytes exist only as members inside `variants/box-N.tar` (32 tars, 151.9 GiB).
+   `declare-scorefiles --full-uri` needs a per-object `dist_path` URI, and **a
+   tar-member byte range is not expressible as a pair URI** — so the job system
+   cannot address half the cells without a materialization pass first.
+3. **That materialization pass is exactly the local fetch.** The fleet path is a
+   strict *superset* of what ran: the same 72-minute R2 fetch, **plus** a
+   208,169-object upload of 5.8 GB into the LAN store, **plus** declare → workers
+   → compact → write-back — in order to move ~32 minutes of local CPU (31 decode
+   + 6 extract) onto tower/i134.
+
+With the compute phase projected — and then measured — at well under an hour,
+finishing locally was the cheaper path by a wide margin. The brief's
+"fleet for the big legs" rule assumes the bytes are fleet-addressable; for this
+leg, half of them structurally are not.
+
+**Pipelining and ref-reuse (asked, and already true):** `v2_ab_extract` groups
+pairs **by reference** by default (`ZENSIM_AB_GROUPED=1`), so each of the 2,136
+references is decoded and prepared **once per group**, not once per pair — the
+owner already does this and no change was needed. The distorted side is decoded
+once per distinct member (208,169 distinct, `decode_list.tsv`), never twice.
+Fetch → decode → extract are separate phases because the decode owner consumes a
+completed list; the fetch's own object and tar-range passes are internally
+concurrent (16–24 workers).
+
+**Shared-box discipline.** Every phase ran under `~/work/zen/scripts/run-heavy`
+with an explicit memory cap. The decode was raised from `--jobs 8` to
+`--jobs 14` after **measuring** the box at load average 10.78 on 32 cores with
+~2 cores used by other lanes; that raise took the phase from a projected ~130 min
+to a measured **31 min** and still left ≥16 cores free for the concurrent KB-43
+censuses. Peak RSS stayed ≤ 0.6 GiB for the fetch phases and min-available RAM
+never dropped below 31 GiB.
+
+---
+
+## 9. THE KEYED POOLS-944 SUBSTRATE — the registered treatment
+
+The tbig leg landed at `folded720append2pools` (208,169 rows, 1.45 GB), and with
+it the teacher twin `ttbig` and the band slice `tbig_hf`. Every gate passed:
+
+| gate | result |
+|---|---|
+| **G-J** (assembly) | **PASS** — row-aligned, `ref_basename` sequence equal, target max\|Δ\| **0.000e+00** |
+| **G-R1** (regime purity) | **OK — 216/216 f156-371 slots live** |
+| **G-T** (teacher graft) | **PASS** — 208,169 rows, teacher mean 0.6033651451972182 |
+| band slice | 12,743 of 208,169 rows at `human_score ≥ 0.90` — the same count the zero-block control produced, from an independent extraction |
+
+### 9.1 The pool block's contribution, at matched arm, matched frame, matched rows
+
+Every row below is the SAME recipe fit on the two substrates, which differ in
+exactly one thing: whether f156–371 carry values or zeros.
+
+| arm | Δcid22 | Δ\|kon\| | Δnonphoto | Δimazen26 | Δhfnl | **Δ dial dyn** |
+|---|---|---|---|---|---|---|
+| `T3_KH01_C1_b0.95` | −0.0013 | +0.0030 | −0.0088 | −0.0077 | +0.0074 | **+14.7** |
+| `T3_KH01_C1_b0.9` | −0.0009 | +0.0119 | −0.0037 | −0.0033 | +0.0054 | **+19.4** |
+| `T3_KH01_C1_b0.85` | −0.0004 | +0.0135 | −0.0008 | −0.0008 | +0.0033 | **+21.7** |
+| `P3_KHp6_H_b0.3` | −0.0017 | +0.0059 | +0.0008 | +0.0026 | +0.0119 | **+21.7** |
+| `C1` (head) | +0.0239 | +0.0210 | +0.0083 | +0.0033 | +0.0984 | −2.4 |
+| `Hp` (head) | +0.0326 | +0.0421 | +0.0122 | +0.0112 | +0.0184 | −52.1 |
+| `K` (head) | −0.0286 | +0.0464 | −0.0247 | −0.0115 | −0.0417 | −3.2 |
+
+**On rank the pool block is worth hundredths** — +0.003…+0.014 kon and
+−0.009…+0.012 elsewhere on the blends — which agrees with the carrier-recipe
+lane's independent finding (+0.010…+0.046 kon, −0.009…−0.029 cid22) and is
+nothing like the ledger's +0.32.
+
+**The pool block's real contribution here is to the DIAL: +14.7 to +21.7 points
+of dynamic range on every 3-way blend**, which is the round's actual defect
+(§6.6). That is a new result — the carrier lane read rank only — and it is the
+first thing measured in this campaign that the live pool block clearly buys.
+
+### 9.2 All 5/5 arms, both substrates, ranked by the registered rule
+
+17 of the 133 fitted arms clear all five bars. Ranked by PRIMARY (bars) then
+TIE-BREAK 1 (maximin margin), exactly as registered:
+
+| rank | arm | substrate | maximin | cid22 | \|kon\| | nonphoto | imazen26 | hfnl | dial dyn | G-RANGE | bytes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **1** | **`PL_P3_KHp6_H_b0.3`** | **pools** | **+0.01327** | 0.8562 | 0.4915 | 0.8809 | 0.8911 | 0.4162 | **59.37** | **FAIL** (1 row, 0.023 %) | 3,589 |
+| 2 | `T3_KH01_C1_b0.95` | zero | +0.01293 | 0.8559 | 0.5434 | 0.8842 | 0.8891 | 0.4582 | 30.32 | PASS | 3,190 |
+| 3 | `T3_KH01_C2_b0.95` | zero | +0.01220 | 0.8553 | 0.5378 | 0.8837 | 0.8886 | 0.4575 | 30.12 | — | 3,185 |
+| 4 | `P3_KHp6_H_b0.3` | zero | +0.01076 | 0.8580 | 0.4856 | 0.8801 | 0.8885 | 0.4043 | 37.67 | FAIL | 3,241 |
+| 5 | `T3_KH01_C2_b0.92` | zero | +0.01050 | 0.8539 | 0.5221 | 0.8911 | 0.8963 | 0.4405 | 29.89 | — | 3,184 |
+| 6 | `PL_T3_KH01_C1_b0.92` | pools | +0.00999 | 0.8534 | 0.5400 | 0.8864 | 0.8921 | 0.4475 | 46.60 | **PASS** | 3,436 |
+| … | (11 more, maximin +0.0049 … +0.0098) | | | | | | | | 27.3–53.7 | | 3,182–3,453 |
+| 16 | `PL_T3_KH01_C1_b0.85` | pools | +0.00492 | 0.8492 | 0.5197 | 0.9009 | 0.9066 | 0.4125 | **53.67** | **PASS** | 3,453 |
+| — | *B (runtime-era, same pairs)* | — | *−0.126* | *0.8821* | *0.5186* | *0.8505* | *0.8609* | *0.3496* | *86.08* | *PASS* | *7,325* |
+
+**The registered rule selects `PL_P3_KHp6_H_b0.3`** — on the keyed pools
+substrate, 3,589 bytes, all five bars with the largest weakest-axis margin, and
+the best dial of any 5/5 arm. It **fails G-RANGE by one row of 4,292 (0.023 %
+against a 0.010 % gate)**, which is not in the selection rule and is reported
+beside it, not used to re-rank after the fact.
+
+**The best arm that clears all five bars AND passes G-RANGE AND has the healthiest
+dial is `PL_T3_KH01_C1_b0.85`** (maximin +0.0049, dyn 53.67, 3,453 B): cid22
+0.8492 · \|kon\| 0.5197 · nonphoto 0.9009 · imazen26 0.9066 · hfnl 0.4125,
+per-codec dial monotonicity 0.987–0.999 with **zero** tied rate. Against B on the
+same pairs it wins **nonphoto +0.050, imazen26 +0.046, hfnl +0.063, kon +0.001**
+and loses **cid22 −0.033**, at **47 % of B's size**.
+
+Both are named because they are what the two panels respectively prefer; neither
+is proposed as a default.
+
+---
+
+## 10. VERDICT — **PASS** (per the §4.4 rule, frozen before any fit)
+
+At least one arm clears all five round-6 bars, so the registered verdict is
+**PASS**. 17 arms do, across both substrates. **The round-6 falsifier — "no
+single 944 linear reaches kon ≥ 0.40 ∧ hfnl ≥ 0.40 while holding cid22 ≥ 0.845"
+— is reversed**, and the reversal is attributable to one variable.
+
+**The candidate the rule names:** `PL_P3_KHp6_H_b0.3`, **3,589 bytes**, on the
+keyed pools-944 substrate — cid22 0.8562 · |kon| 0.4915 · nonphoto 0.8809 ·
+imazen26 0.8911 · hfnl 0.4162. **No default is flipped; that is user-gated.**
+
+**What actually did it — and it is not the features.** The single-variable
+min-max control (§6.4) prices the target frame at **+0.154 kon, +0.105 hfnl,
++0.006 nonphoto, +0.007 imazen26, +0.001 cid22 — two bars** on one fixed
+composition, and shows the generalist head flipping from **hfnl −0.0832** to
+**hfnl +0.2882** with that switch alone. Round 6 diagnosed its own failure as
+"blend cancellation vs an hfnl-anti generalist head"; the frame is *why* the head
+was hfnl-anti. This is the campaign's own registered lane **R4(a)**, priced a
+second time and independently, on eight legs instead of four.
+
+**What the pool block is worth (the registered treatment-vs-control question).**
+At matched arm, frame, rows and target, the 216 live slots move rank by
+**hundredths** (+0.003…+0.014 kon; −0.009…+0.012 elsewhere) — consistent with the
+carrier-recipe lane and nothing like the ledger's +0.32 — but they add
+**+14.7 to +21.7 points of dial dynamic range** to every 3-way blend. On the axis
+this round found to be the binding product defect, the pool block is the largest
+single lever measured.
+
+**What is NOT claimed.**
+
+- **Not a ship candidate.** Every 5/5 arm has a compressed dial (dyn 27–59 against
+  B's 86; §6.6), because the hf leg is a `human_score ≥ 0.90` band and its head
+  cannot score a low-quality encode. That is a **data-coverage** limit, not a
+  fitting one, and no monotone spline can repair it. The rule-selected arm also
+  fails **G-RANGE** by one row.
+- **Not a seed band.** These are single deterministic fits (**G-DET PASS**:
+  bit-identical `w`/`bias`/`mu`/`sd` across two processes). There is no confidence
+  interval here, and 133 arms were fitted against a fixed gate that includes
+  cid22 at margins of +0.005…+0.013 (§6.8). Read the result as *"this recipe
+  family reaches the bars"*, not as an ordering of α/β/λ.
+- **Not the registered mix.** `kadis50k`, `konjnd_bpg` and `hdrmix` are absent
+  with measured reasons (§2.2).
+- **Not the full battery.** M3a coherence, G-OUT v2, G-GRAN v1 and the corruption
+  panel were not run this round.
+- **Not a cross-era comparison.** Arms are on the pinned pre-fix extractor; B's
+  372 side is stated per axis and per era (§7.2).
+
+**The next lever, named from the measurement rather than guessed:** an hf head
+trained on the FULL quality range with the hf band upweighted keeps the dial
+(`Hp_lasso_w10`: dyn 80–81, essentially B's 86, and the round's best family axes
+at nonphoto 0.9290 / imazen26 0.9327 on the pools substrate) but tops out at
+hfnl ≈ 0.46 and cannot carry a blend past the bar on its own. Closing the last
+0.04 of hfnl **without** the band-only head is the whole remaining distance
+between this round's result and a ship candidate.
+
+---
+
+## 11. ARTIFACTS
+
+- **Doc:** this file. **Driver:** `scripts/carrier_head_fit.sh` (extended, default
+  recipe byte-unchanged and re-gated bit-exactly). **Reporting view:**
+  `scripts/wlin7_bars.py` (reads fulleval JSONs; computes no statistic).
+- **Owners extended:** `build_tbig_200k.py` (`--emit-keys` / `--keys-only` /
+  `--from-features` / `--band-from`), `build_teacher944.py` (`--graft-from`),
+  `bake_dial_refit blend-heads --emit-fit-npz`.
+- **Tables:** `/mnt/v/zen/zensim-training/wlin7-{pools944,ctrl944,b372full,bruntime372}-2026-08-30/`,
+  each with `_MANIFEST.json` (`build_commit`, regime, per-file sha256 + rows) and
+  per-file manifests; registered in `~/work/zen/DATA_PROVENANCE.md`.
+- **Arms:** `/mnt/v/output/zensim/wlin7-2026-08-30/arms/` — 133 bakes, each with
+  `.fulleval.json` + `.verdict.md` and an embedded `zentrain.repro`.
+- **Pinned extractor:** `/mnt/v/output/zensim/wlin7-2026-08-30/bin/v2_ab_extract_PREFIX_PINNED`
+  (sha256 `fc0d780b…`), the G-X-gated pre-fix build every pools table was made with.
