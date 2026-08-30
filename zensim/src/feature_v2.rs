@@ -6125,8 +6125,7 @@ pub(crate) fn compute_folded720_streaming_impl(
             toggles,
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
-            None,
-            None,
+            FoldWalkExtras::default(),
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -6136,8 +6135,7 @@ pub(crate) fn compute_folded720_streaming_impl(
         toggles,
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
-        None,
-        None,
+        FoldWalkExtras::default(),
     ))
 }
 
@@ -6196,8 +6194,10 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
             toggles,
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
-            None,
-            Some(&mut mo),
+            FoldWalkExtras {
+                mean_offset: Some(&mut mo),
+                ..Default::default()
+            },
         );
         return Ok((res.into_features(), mo.finish()));
     }
@@ -6209,10 +6209,99 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
         toggles,
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
-        None,
-        Some(&mut mo),
+        FoldWalkExtras {
+            mean_offset: Some(&mut mo),
+            ..Default::default()
+        },
     );
     Ok((res.into_features(), mo.finish()))
+}
+
+/// Whether a [`crate::streaming::PrecomputedReference`] can feed the fold's
+/// source side for a walk over `(w, h)` COMPUTE dims — the ref-cached form's
+/// admission test, and **the single owner of that predicate**.
+///
+/// Requires the cache to hold exactly [`crate::NUM_SCALES`] levels whose
+/// dimensions match the fold's own floor-halving recurrence and whose planes
+/// are tightly packed at each level's width. `PrecomputedReference` stops its
+/// pyramid at `w < 8 || h < 8`, so a cache with fewer levels (or built at
+/// different dims) is refused and the caller re-derives from the image
+/// instead of scoring a mismatched pyramid.
+pub(crate) fn cached_ref_feed_usable(
+    scales: &[crate::streaming::XybPyramidLevel],
+    w: usize,
+    h: usize,
+) -> bool {
+    if scales.len() != crate::NUM_SCALES {
+        return false;
+    }
+    let (mut sw, mut sh) = (w, h);
+    for (planes, cw, ch) in scales.iter() {
+        if *cw != sw || *ch != sh {
+            return false;
+        }
+        if planes.iter().any(|p| p.len() != sw * sh) {
+            return false;
+        }
+        sw /= 2;
+        sh /= 2;
+    }
+    true
+}
+
+/// **The ref-cached fold-backed v1-372 extraction** (fold-engine lane stage
+/// 3): [`compute_folded_v1_372_streaming_impl`] with the source side fed from
+/// an already-built XYB pyramid, so N distorted candidates amortise one
+/// reference's decode + sRGB→XYB conversion + 3-level downscale chain — the
+/// shape `Zensim::precompute_reference` / `compute_with_ref` has always had on
+/// the buffered path.
+///
+/// `distorted` must already be at the cache's COMPUTE dims (the caller
+/// reflect-pads a sub-64 distorted, exactly as `Zensim::compute_with_ref`
+/// does). Returns `None` when the cache cannot feed the fold
+/// ([`cached_ref_feed_usable`]) — the caller then falls back rather than
+/// scoring a different pyramid.
+///
+/// Bit-identical to N independent [`compute_folded_v1_372_streaming_impl`]
+/// calls; `fold_ref_cache_matches_independent_computes` is the gate.
+pub(crate) fn compute_folded_v1_372_with_ref_impl(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+    parallel: bool,
+    scratch: &mut V2Scratch,
+) -> Option<(Vec<f64>, [f64; 3])> {
+    let (cw, ch) = (precomputed.scales[0].1, precomputed.scales[0].2);
+    if distorted.width() != cw || distorted.height() != ch {
+        return None;
+    }
+    if !cached_ref_feed_usable(&precomputed.scales, cw, ch) {
+        return None;
+    }
+    let toggles = V2NewFeatureToggles {
+        v1_pools: V1PoolsMode::Full,
+        v1_only: true,
+        ..V2NewFeatureToggles::default()
+    };
+    let mut mo = MeanOffsetRows::new(cw, ch);
+    // `source` is unused by the producer on the cached feed (every source-side
+    // row is copied from the cache); it is still the type parameter, so pass
+    // the distorted image and let the feed override it. The producer's
+    // `ref_planes` branch is taken for EVERY side-0 fill, so no pixel of this
+    // argument is ever read for side 0.
+    let res = foldapp_streaming_walk(
+        distorted,
+        distorted,
+        parallel,
+        toggles,
+        crate::feature_v2_stream::FrontEnd::Sdr,
+        scratch,
+        FoldWalkExtras {
+            mean_offset: Some(&mut mo),
+            ref_planes: Some(&precomputed.scales),
+            ..Default::default()
+        },
+    );
+    Some((res.into_features(), mo.finish()))
 }
 
 /// The declared-HDR folded/append streaming entry (HDR_PLAN chunk 2):
@@ -6268,12 +6357,17 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
             toggles,
             front_end,
             scratch,
-            None,
-            None,
+            FoldWalkExtras::default(),
         ));
     }
     Ok(foldapp_streaming_walk(
-        source, distorted, parallel, toggles, front_end, scratch, None, None,
+        source,
+        distorted,
+        parallel,
+        toggles,
+        front_end,
+        scratch,
+        FoldWalkExtras::default(),
     ))
 }
 
@@ -6352,8 +6446,10 @@ pub(crate) fn compute_folded944_streaming_with_retention(
             toggles,
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
-            Some(retention),
-            None,
+            FoldWalkExtras {
+                retention: Some(retention),
+                ..Default::default()
+            },
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -6363,8 +6459,10 @@ pub(crate) fn compute_folded944_streaming_with_retention(
         toggles,
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
-        Some(retention),
-        None,
+        FoldWalkExtras {
+            retention: Some(retention),
+            ..Default::default()
+        },
     ))
 }
 
@@ -6695,6 +6793,23 @@ impl MeanOffsetRows {
     }
 }
 
+/// The fold walk's optional SIDE CHANNELS, bundled so the walk keeps one
+/// options parameter instead of growing a positional tail.
+///
+/// All three are `None` on the plain extraction path, which is then
+/// byte-for-byte the walk as it was before any of them existed.
+#[derive(Default)]
+pub(crate) struct FoldWalkExtras<'a> {
+    /// Appendix-N retention hooks (the fused-944 attribution session).
+    pub(crate) retention: Option<&'a mut FoldRetention>,
+    /// Per-scale-0-row `Σ_x (src − dst)` sums, for the fold-backed engine's
+    /// bit-exact `mean_offset` (see [`MeanOffsetRows`]).
+    pub(crate) mean_offset: Option<&'a mut MeanOffsetRows>,
+    /// A pre-built source-side XYB pyramid the producer copies from instead
+    /// of decoding + converting + downscaling (the ref-cached fold form).
+    pub(crate) ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
+}
+
 fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     source: &S,
     distorted: &D,
@@ -6702,9 +6817,13 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     toggles: V2NewFeatureToggles,
     front_end: crate::feature_v2_stream::FrontEnd,
     scratch: &mut V2Scratch,
-    mut retention: Option<&mut FoldRetention>,
-    mut mean_offset: Option<&mut MeanOffsetRows>,
+    extras: FoldWalkExtras<'_>,
 ) -> ZensimV2Result {
+    let FoldWalkExtras {
+        mut retention,
+        mut mean_offset,
+        ref_planes,
+    } = extras;
     use crate::feature_v2_stream::StripPlaneProducer;
     let fold_v1 = true;
     // BLOCK-SKIPPING: a v1-only request computes NOTHING v2-era. Every
@@ -6800,8 +6919,14 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     // channel's dst-activity plane (and ONLY the Y channel's — the block
     // is Y-only, so X/B never pay the chain).
     let act_dst_on = append2.map(|p| p.dst_activity).unwrap_or(false);
-    let mut producer =
-        StripPlaneProducer::new_with_front_end(source, distorted, parallel, stream_pool, front_end);
+    let mut producer = StripPlaneProducer::new_with_ref_feed(
+        source,
+        distorted,
+        parallel,
+        stream_pool,
+        front_end,
+        ref_planes,
+    );
 
     while let Some(info) = producer.next_strip() {
         let scale = info.scale;

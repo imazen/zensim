@@ -1,0 +1,216 @@
+// Copyright (c) Imazen LLC.
+// Licensed under AGPL-3.0-or-later OR the Imazen commercial license.
+//! **Fold-backed vs buffered SCORING**, paired/interleaved in one process so
+//! shared-box noise cancels (`benchmarks/fold_engine_2026-08-31.md` stage 2).
+//!
+//! This is a different question from `extract_paths_bench`'s. That bench
+//! compares feature-extraction FAMILIES at different widths (buffered v1-372
+//! vs the 944 fold), so its arms do different amounts of work by design. Here
+//! both arms compute **the same `ZensimResult`, bit-for-bit** — same profile,
+//! same 372 features, same score — and differ only in which walk produced it.
+//! `fold_engine_parity` is the gate that makes that claim true; this bench is
+//! what it costs.
+//!
+//! | arm | entry | walk |
+//! |---|---|---|
+//! | `score_buffered` | `Zensim::compute` (profile B) | buffered |
+//! | `score_fold`     | `Zensim::compute` (profile B) | the fold (`v1_only` + `V1PoolsMode::Full`) |
+//! | `feat_buffered`  | `Zensim::compute_extended_features` (B) | buffered |
+//! | `feat_fold`      | same | the fold |
+//! | `ref_buffered`   | `Zensim::compute_with_ref` (B), one precomputed reference | buffered |
+//! | `ref_fold`       | same | the fold (source-side planes COPIED from the cache) |
+//!
+//! The `ref_*` arms are the M1 precompute-once / compare-many shape: the
+//! reference pyramid is built ONCE outside the timed loop and every iteration
+//! scores one distorted candidate against it, so `ref_x − score_x` is what
+//! amortising the reference buys that engine. On the fold that is the decode +
+//! sRGB→XYB conversion + 3-level downscale of the source side; on buffered it
+//! is the same, plus buffered additionally skips re-materialising its
+//! reference pyramid.
+//!
+//! `score_* − feat_*` is the bake forward + output spline, which is SHARED
+//! code running after both walks — so it should come out equal in both
+//! families, and a large asymmetry there is a measurement problem, not a
+//! finding.
+//!
+//! Thread count comes from `RAYON_NUM_THREADS` (both arms take
+//! `parallel = true`); run the binary once per count. Budget matches
+//! `extract_paths_bench`'s raised one — the default 120 s / 4-usable-rounds
+//! cannot resolve a few-percent lever on a shared box.
+//!
+//! Run:
+//! ```text
+//! RAYON_NUM_THREADS=8 cargo bench --bench fold_engine_bench -p zensim \
+//!   --features feature-regime-v2,threads
+//! ```
+use zensim::fold_engine::ScoringEngine;
+use zensim::{RgbSlice, Zensim, ZensimProfile};
+
+/// Deterministic textured pair — byte-for-byte the generator
+/// `extract_paths_bench` and `fold_pools_bench` use, so numbers are
+/// comparable across all three.
+fn test_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+    let mut src = Vec::with_capacity(w * h);
+    let mut dst = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            let base = ((x * 255) / w) as u8;
+            let tex = (((x * 7 + y * 13) % 32) * 3) as u8;
+            let edge = if (y / 16) % 2 == 0 { 40 } else { 0 };
+            let px = [
+                base.wrapping_add(tex),
+                base.wrapping_add(edge),
+                (255 - base).wrapping_add(tex / 2),
+            ];
+            src.push(px);
+            let q = |v: u8| (v / 12) * 12;
+            let mut d = [q(px[0]), q(px[1]), q(px[2])];
+            if x < w / 2 && y < h / 2 {
+                d[0] = d[0].saturating_add(18);
+            }
+            dst.push(d);
+        }
+    }
+    (src, dst)
+}
+
+fn engines() -> (&'static Zensim, &'static Zensim) {
+    let buffered = Box::leak(Box::new(
+        Zensim::new(ZensimProfile::codec_target()).with_parallel(true),
+    ));
+    let fold = Box::leak(Box::new(
+        Zensim::new(ZensimProfile::codec_target())
+            .with_parallel(true)
+            .with_engine(ScoringEngine::Fold),
+    ));
+    (buffered, fold)
+}
+
+/// One-arm loop for external peak-RSS measurement (`/usr/bin/time -v`),
+/// mirroring `extract_paths_bench`'s `ZEN_XP_RSS` mode.
+fn rss_mode(arm: &str) {
+    let size: usize = std::env::var("ZEN_FE_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1152);
+    let iters: usize = std::env::var("ZEN_FE_ITERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20);
+    let (src, dst) = test_pair(size, size);
+    let (buffered, fold) = engines();
+    let z = match arm {
+        "score_buffered" | "feat_buffered" | "ref_buffered" => buffered,
+        "score_fold" | "feat_fold" | "ref_fold" => fold,
+        other => panic!("unknown ZEN_FE_RSS arm: {other}"),
+    };
+    let pre = arm
+        .starts_with("ref_")
+        .then(|| z.precompute_reference(&RgbSlice::new(&src, size, size)).unwrap());
+    let mut sink = 0.0f64;
+    for _ in 0..iters {
+        let rsv = RgbSlice::new(&src, size, size);
+        let dsv = RgbSlice::new(&dst, size, size);
+        let r = match &pre {
+            Some(p) => z.compute_with_ref(p, &dsv).expect("compute_with_ref"),
+            None if arm.starts_with("score_") => z.compute(&rsv, &dsv).expect("compute"),
+            None => z
+                .compute_extended_features(&rsv, &dsv)
+                .expect("compute_extended_features"),
+        };
+        sink += r.score() + r.features()[371];
+    }
+    println!("{arm} size={size} iters={iters} sink={sink:e}");
+}
+
+fn main() {
+    if let Ok(arm) = std::env::var("ZEN_FE_RSS") {
+        rss_mode(&arm);
+        return;
+    }
+    let sizes: Vec<usize> = std::env::var("ZEN_FE_SIZES")
+        .ok()
+        .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
+        .unwrap_or_else(|| vec![576, 1152, 2304]);
+    let (buffered, fold) = engines();
+    let result = zenbench::run(|suite| {
+        for &n in &sizes {
+            let (src, dst) = test_pair(n, n);
+            let src_s: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
+            let dst_s: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
+            suite.compare(format!("fold_engine_{n}"), |group| {
+                group
+                    .config()
+                    .max_rounds(200)
+                    .min_rounds(25)
+                    .max_wall_time(std::time::Duration::from_secs(600));
+                group.bench("score_buffered", move |b| {
+                    b.iter(move || {
+                        let r = buffered
+                            .compute(&RgbSlice::new(src_s, n, n), &RgbSlice::new(dst_s, n, n))
+                            .unwrap();
+                        zenbench::black_box(r.score());
+                    })
+                });
+                group.bench("score_fold", move |b| {
+                    b.iter(move || {
+                        let r = fold
+                            .compute(&RgbSlice::new(src_s, n, n), &RgbSlice::new(dst_s, n, n))
+                            .unwrap();
+                        zenbench::black_box(r.score());
+                    })
+                });
+                group.bench("feat_buffered", move |b| {
+                    b.iter(move || {
+                        let r = buffered
+                            .compute_extended_features(
+                                &RgbSlice::new(src_s, n, n),
+                                &RgbSlice::new(dst_s, n, n),
+                            )
+                            .unwrap();
+                        zenbench::black_box(r.features()[371]);
+                    })
+                });
+                group.bench("feat_fold", move |b| {
+                    b.iter(move || {
+                        let r = fold
+                            .compute_extended_features(
+                                &RgbSlice::new(src_s, n, n),
+                                &RgbSlice::new(dst_s, n, n),
+                            )
+                            .unwrap();
+                        zenbench::black_box(r.features()[371]);
+                    })
+                });
+                // Precomputed ONCE, outside the timed loop — the encoder-loop
+                // shape. Both engines consume the SAME `PrecomputedReference`.
+                let pre_b: &'static _ = Box::leak(Box::new(
+                    buffered
+                        .precompute_reference(&RgbSlice::new(src_s, n, n))
+                        .unwrap(),
+                ));
+                let pre_f: &'static _ = Box::leak(Box::new(
+                    fold.precompute_reference(&RgbSlice::new(src_s, n, n))
+                        .unwrap(),
+                ));
+                group.bench("ref_buffered", move |b| {
+                    b.iter(move || {
+                        let r = buffered
+                            .compute_with_ref(pre_b, &RgbSlice::new(dst_s, n, n))
+                            .unwrap();
+                        zenbench::black_box(r.score());
+                    })
+                });
+                group.bench("ref_fold", move |b| {
+                    b.iter(move || {
+                        let r = fold
+                            .compute_with_ref(pre_f, &RgbSlice::new(dst_s, n, n))
+                            .unwrap();
+                        zenbench::black_box(r.score());
+                    })
+                });
+            });
+        }
+    });
+    let _ = result;
+}

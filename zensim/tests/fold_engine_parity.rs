@@ -347,3 +347,114 @@ fn classify_is_bit_identical_across_engines() {
         );
     }
 }
+
+// ── STAGE 3: the ref-cached fold form ────────────────────────────────────
+
+/// **The stage-3 gate.** N distorted candidates scored against ONE
+/// `precompute_reference` must equal N independent `compute` calls, on the
+/// fold, **bit-for-bit** — every field, at every geometry.
+///
+/// This is a strictly STRONGER property than the buffered path has for
+/// itself: buffered's `compute_with_ref` derives `mean_offset` from a
+/// strip-wise `offset_sums / pixel_count` accumulation rather than
+/// `compute_xyb_mean_offset`'s 64-row chunk reduction, so
+/// `cross_platform::mean_offset_precomputed_ref` can only assert `< 1e-10`
+/// between buffered's own two entries. The fold's ref-cached form feeds the
+/// SAME producer over the SAME planes as its direct form, so it has nothing
+/// to round differently.
+#[test]
+fn fold_ref_cache_matches_independent_computes() {
+    for &(w, h) in CELLS {
+        let (r, _) = pair(w, h);
+        // Several distinct distortions against one reference — the encoder
+        // loop's actual shape, not a single-candidate smoke test.
+        let dists: Vec<Vec<[u8; 3]>> = (0..4)
+            .map(|k| {
+                let mut d = common::generators::distort_block_artifacts(&r, w, h);
+                for (i, px) in d.iter_mut().enumerate() {
+                    if i % (3 + k) == 0 {
+                        px[k % 3] = px[k % 3].saturating_add(7 * (k as u8 + 1));
+                    }
+                }
+                d
+            })
+            .collect();
+        for parallel in [false, true] {
+            let z = Zensim::new(ZensimProfile::codec_target())
+                .with_parallel(parallel)
+                .with_engine(ScoringEngine::Fold);
+            let rs = RgbSlice::new(&r, w, h);
+            let precomputed = z.precompute_reference(&rs).expect("precompute");
+            for (k, d) in dists.iter().enumerate() {
+                let ds = RgbSlice::new(d, w, h);
+                let direct = z.compute(&rs, &ds).expect("compute");
+                let with_ref = z.compute_with_ref(&precomputed, &ds).expect("with_ref");
+                assert_result_bit_identical(
+                    &format!("fold ref-cache {w}x{h} cand{k} par={parallel}"),
+                    &direct,
+                    &with_ref,
+                );
+            }
+        }
+    }
+}
+
+/// Cross-engine at the `compute_with_ref` entry. Features, score and
+/// `raw_distance` are bit-identical; `mean_offset` is the one field where the
+/// two engines' *ref-cached* forms genuinely differ, because buffered's
+/// `*_with_ref` accumulates it strip-wise while the fold reproduces
+/// `compute_xyb_mean_offset` exactly — the same divergence
+/// `cross_platform::mean_offset_precomputed_ref` already bounds at `1e-10`
+/// between buffered's OWN two entries. Asserted at that same bound, and the
+/// observed maximum is printed so a drift shows up as a number rather than as
+/// a pass.
+#[test]
+fn compute_with_ref_cross_engine() {
+    let mut worst = 0.0f64;
+    for &(w, h) in CELLS {
+        let (r, d) = pair(w, h);
+        let rs = RgbSlice::new(&r, w, h);
+        let ds = RgbSlice::new(&d, w, h);
+        for parallel in [false, true] {
+            let zb = Zensim::new(ZensimProfile::codec_target()).with_parallel(parallel);
+            let zf = Zensim::new(ZensimProfile::codec_target())
+                .with_parallel(parallel)
+                .with_engine(ScoringEngine::Fold);
+            let pb = zb.precompute_reference(&rs).expect("precompute");
+            let pf = zf.precompute_reference(&rs).expect("precompute");
+            let b = zb.compute_with_ref(&pb, &ds).expect("with_ref");
+            let f = zf.compute_with_ref(&pf, &ds).expect("with_ref");
+            let (bf, ff) = (b.features(), f.features());
+            assert_eq!(bf.len(), ff.len());
+            for (i, (&x, &y)) in bf.iter().zip(ff.iter()).enumerate() {
+                assert_eq!(
+                    x.to_bits(),
+                    y.to_bits(),
+                    "{w}x{h} par={parallel}: with_ref f{i} buffered {x:.17e} vs fold {y:.17e}"
+                );
+            }
+            assert_eq!(
+                b.score().to_bits(),
+                f.score().to_bits(),
+                "{w}x{h} par={parallel}: with_ref score"
+            );
+            assert_eq!(
+                b.raw_distance().to_bits(),
+                f.raw_distance().to_bits(),
+                "{w}x{h} par={parallel}: with_ref raw_distance"
+            );
+            for c in 0..3 {
+                let diff = (b.mean_offset()[c] - f.mean_offset()[c]).abs();
+                worst = worst.max(diff);
+                assert!(
+                    diff < 1e-10,
+                    "{w}x{h} par={parallel}: with_ref mean_offset[{c}] buffered {:.17e} vs \
+                     fold {:.17e} (diff {diff:.3e})",
+                    b.mean_offset()[c],
+                    f.mean_offset()[c]
+                );
+            }
+        }
+    }
+    println!("compute_with_ref cross-engine worst |Δmean_offset| = {worst:.3e}");
+}

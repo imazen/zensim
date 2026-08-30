@@ -2055,6 +2055,43 @@ impl Zensim {
         ))
     }
 
+    /// The engine-routed body of [`Self::compute_with_ref`]: the fold-backed
+    /// ref-cached compare when this instance asks for it AND the fold can
+    /// serve the request bit-identically, the buffered `*_with_ref` walk
+    /// otherwise. Both consume the SAME `PrecomputedReference` — the pyramid
+    /// cache is not buffered-walk state (fold-engine lane stage 3).
+    fn compare_against_ref(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        config: &ZensimConfig,
+        weights: &[f64],
+    ) -> ZensimResult {
+        #[cfg(feature = "feature-regime-v2")]
+        if self.fold_engine
+            && self.stop.is_none()
+            && crate::fold_engine::is_fold_backable(config)
+        {
+            let mut scratch = crate::feature_v2::V2Scratch::new();
+            if let Some(r) = crate::fold_engine::compute_fold_backed_with_ref(
+                precomputed,
+                distorted,
+                config,
+                weights,
+                &mut scratch,
+            ) {
+                return r;
+            }
+        }
+        crate::streaming::compute_zensim_streaming_with_ref(
+            precomputed,
+            distorted,
+            config,
+            weights,
+            self.stop_ref(),
+        )
+    }
+
     /// Compare a distorted image against a precomputed reference.
     ///
     /// # Errors
@@ -2087,24 +2124,14 @@ impl Zensim {
         let config = config_from_params(params, self.parallel);
         let (ow, oh) = (distorted.width(), distorted.height());
         // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
-        // (also-padded) reference pyramid; score with the original dims.
+        // (also-padded) reference pyramid; score with the original dims. The
+        // pad is SHARED — it runs before either engine, so both see the same
+        // pixels against the same cached pyramid.
         let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
             let d = reflect_pad_for_scales(distorted, config.num_scales);
-            crate::streaming::compute_zensim_streaming_with_ref(
-                precomputed,
-                &d,
-                &config,
-                params.weights,
-                self.stop_ref(),
-            )
+            self.compare_against_ref(precomputed, &d, &config, params.weights)
         } else {
-            crate::streaming::compute_zensim_streaming_with_ref(
-                precomputed,
-                distorted,
-                &config,
-                params.weights,
-                self.stop_ref(),
-            )
+            self.compare_against_ref(precomputed, distorted, &config, params.weights)
         };
         self.check_stop()?;
         apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;

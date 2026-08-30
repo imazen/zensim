@@ -250,6 +250,12 @@ name = "extract_paths_bench"
 harness = false
 required-features = ["custom-profiles", "feature-regime-v2", "training"]
 
+# Fold-engine lane: fold-backed vs buffered SCORING, same ZensimResult.
+[[bench]]
+name = "fold_engine_bench"
+harness = false
+required-features = ["feature-regime-v2", "threads"]
+
 [[bench]]
 name = "tenx_bar_bench"
 harness = false

@@ -2725,6 +2725,12 @@ impl ZensimScratch {
 /// For a 3840×2160 image: ~133 MB. For 7680×4320: ~532 MB.
 ///
 /// Created via [`Zensim::precompute_reference`](crate::Zensim::precompute_reference).
+/// One level of a materialised XYB pyramid: 3 planes at that level's exact
+/// `(width, height)`. Named so the ref-cached fold feed can pass a
+/// `&[XybPyramidLevel]` without re-spelling the tuple at every boundary
+/// (fold-engine lane, stage 3).
+pub(crate) type XybPyramidLevel = ([Vec<f32>; 3], usize, usize);
+
 pub struct PrecomputedReference {
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
     // INVARIANT: scales[i].0[0..3].len() == scales[i].1 * scales[i].2

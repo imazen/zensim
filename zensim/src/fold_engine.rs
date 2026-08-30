@@ -161,3 +161,40 @@ pub(crate) fn compute_fold_backed(
         mean_offset,
     ))
 }
+
+/// Fold-backed replacement for
+/// [`crate::streaming::compute_zensim_streaming_with_ref`] — the M1
+/// precompute-once / compare-many shape, on the fold.
+///
+/// The reference's XYB pyramid IS what the fold's source side needs (the
+/// producer fills scale 0 with `convert_source_to_xyb_into_slices` and
+/// cascades `downscale_2x_into`, the same two functions that built the
+/// cache), so no new reference type exists: `PrecomputedReference` serves
+/// both engines. Returns `None` when the cache cannot feed the fold —
+/// `feature_v2::cached_ref_feed_usable` owns that predicate — and the caller
+/// falls back to the buffered `*_with_ref` walk rather than scoring a
+/// mismatched pyramid.
+pub(crate) fn compute_fold_backed_with_ref(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    scratch: &mut V2Scratch,
+) -> Option<ZensimResult> {
+    let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_with_ref_impl(
+        precomputed,
+        distorted,
+        config.allow_multithreading,
+        scratch,
+    )?;
+    features.truncate(v1_feature_width(config));
+    let (score, raw_distance) =
+        crate::metric::score_v1_layout_features(&mut features, weights, config, config.num_scales);
+    Some(ZensimResult::new(
+        score,
+        raw_distance,
+        features,
+        crate::profile::ZensimProfile::codec_target(),
+        mean_offset,
+    ))
+}

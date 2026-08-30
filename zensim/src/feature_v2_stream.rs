@@ -210,6 +210,24 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     /// Peak `hi − lo` observed per scale (capacity-budget telemetry for
     /// the C1 tests; also what G-RAM's O(width) claim rests on).
     max_held_rows: Vec<usize>,
+    /// REF-CACHED FEED (fold-engine lane, stage 3). When `Some`, the SOURCE
+    /// side's rolling planes are filled by COPYING from an already-built XYB
+    /// pyramid instead of decoding + converting scale 0 and downscaling the
+    /// cascade — the streaming counterpart of `Zensim::precompute_reference`'s
+    /// amortisation across N distorted candidates.
+    ///
+    /// Bit-exactness is BY CONSTRUCTION and is gated, not argued: the cache is
+    /// built by `convert_source_to_xyb` + `downscale_2x_into`, the same two
+    /// functions this producer uses (`producer_windows_byte_equal_materialized`
+    /// pins the producer against exactly that materialisation), so the bytes
+    /// copied in are the bytes the conversion would have produced. The
+    /// distorted side is untouched.
+    ///
+    /// `[XybPyramidLevel; NUM_SCALES]`, borrowed from the caller's
+    /// `PrecomputedReference`. The caller guarantees `len() == NUM_SCALES` and
+    /// that every level's `(width, height)` matches this producer's — see
+    /// `feature_v2::cached_ref_feed_usable`.
+    ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
 }
 
 /// Capacity (in rows) budgeted for one scale's rolling window: one
@@ -247,6 +265,20 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         parallel: bool,
         pool: &mut Vec<Vec<f32>>,
         front_end: FrontEnd,
+    ) -> Self {
+        Self::new_with_ref_feed(source, distorted, parallel, pool, front_end, None)
+    }
+
+    /// [`Self::new_with_front_end`] with an optional pre-built source-side XYB
+    /// pyramid (see the `ref_planes` field). `None` is byte-for-byte the
+    /// non-cached constructor.
+    pub(crate) fn new_with_ref_feed(
+        source: &'a S,
+        distorted: &'a D,
+        parallel: bool,
+        pool: &mut Vec<Vec<f32>>,
+        front_end: FrontEnd,
+        ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
     ) -> Self {
         let (w0, h0) = (source.width(), source.height());
         debug_assert_eq!(w0, distorted.width());
@@ -292,6 +324,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 FrontEnd::Hdr(_) => vec![[0.0f32; 3]; w0],
             },
             max_held_rows: vec![0; crate::NUM_SCALES],
+            ref_planes,
         }
     }
 
@@ -369,6 +402,23 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         let front_end = self.front_end;
         for si in 0..2 {
             let width = self.scales[0].plane_w;
+            // REF-CACHED FEED: the source side's scale-0 rows already exist
+            // in the caller's pyramid — copy them instead of decoding and
+            // converting. Bytes are identical by construction (see the
+            // `ref_planes` field doc); the distorted side never takes this
+            // branch.
+            if si == 0 && let Some(rp) = self.ref_planes {
+                let (planes, cw, _) = &rp[0];
+                debug_assert_eq!(*cw, width, "cached ref stride must equal the plane width");
+                let [c0, c1, c2] = &mut self.planes[0];
+                for (ch, plane) in [c0, c1, c2].into_iter().enumerate() {
+                    let dst = plane[0].append_rows(n_new);
+                    dst.copy_from_slice(
+                        &planes[ch][hi0 * width..(hi0 + n_new) * width],
+                    );
+                }
+                continue;
+            }
             let [c0, c1, c2] = &mut self.planes[si];
             let (p0, p1, p2) = (
                 c0[0].append_rows(n_new),
@@ -436,6 +486,18 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                         continue;
                     }
                     let n_out = target - child_hi;
+                    // REF-CACHED FEED: the cache holds every level, built by
+                    // the same `downscale_2x_into` this cascade runs, so the
+                    // source side copies instead of downscaling.
+                    if si == 0 && let Some(rp) = self.ref_planes {
+                        let (planes, cw, _) = &rp[scale];
+                        debug_assert_eq!(*cw, plane_w, "cached ref stride at scale {scale}");
+                        let dst = self.planes[0][ch][scale].append_rows(n_out);
+                        dst.copy_from_slice(
+                            &planes[ch][child_hi * plane_w..(child_hi + n_out) * plane_w],
+                        );
+                        continue;
+                    }
                     // Split borrow: parent (read) vs child (write).
                     let (head, tail) = self.planes[si][ch].split_at_mut(scale);
                     let parent = &head[scale - 1];
