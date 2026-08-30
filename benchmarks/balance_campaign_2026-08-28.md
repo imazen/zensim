@@ -3839,3 +3839,30 @@ fold in) to be REGISTERED with priorities, launched on user go; hdr944 route inh
 (enumerated); the future HDR-feature append lands ON era-2. Sequencing with the fold-engine lane
 (score()/ref-cache/attribution/oracle, running on era-1 parity gates) coordinated explicitly.
 Mission memory saved (user_zensim_mission).
+
+## 2026-08-31 ~02:5xZ — ROUND 14: era-2 S0/S0b + the S1 accumulator decision
+
+- **S0 design-before-code** (`78f3f988`): batched-era principle; the re-opened pile is honestly ONE
+  item deep (only art-L4 fused sums were rejected for byte stability alone); era stamp; blast
+  radius R1–R7 registered, launched by nobody; HDR-route cleanliness; fold-engine sequencing.
+- **S0b — the oracle landed FIRST** (`41f0b44d`; Neumaier L1 + Shewchuk-exact L2, test-only
+  `oracle` feature) **and caught two errors in the lane's own bound analysis before judging any
+  kernel**: (1) the first model bounded only summation — the f32 term-evaluation error was missing
+  (measured coefficient 40 vs predicted 20); (2) cancellation amplification: `d = max(1−local, 0)`
+  is a cancelling difference, so moment bounds go as Σ|d^(k−1)| not Σ|dᵏ| — 283× apart here.
+  One uniformly-valid cancellation-safe bound replaced the patchwork; gate green, worst case at
+  18.93 % of its proven bound. A relative A/B could not have caught either — the whole argument
+  for the user's oracle demand.
+- **Arch-dependence enumerated in source**: zero `mul_add` in dense, no transcendentals, `rsqrt`
+  already rejected in-tree with the vendor-seed-table reason ⇒ cross-ARCH identity is plausible,
+  neon/wasm declared not-verifiable-from-this-box (never asserted).
+- **S1 DECIDED (orchestrator, on the user's no-slower-accumulators directive): 8 f32 virtual lanes
+  + f64 band layer.** Measured: f64 chunked lanes +132–147 % on the accumulation step; naive
+  `lane[x % 8]` +780–915 % (modulo defeats vectorization — `as_chunks::<8>` required, trap noted);
+  f32 lane error ~4.3e-6 relative = 3 orders under dial materiality (5e-3) and ~100× under the
+  5e-4 pool policy; IEEE f32 `+` correctly rounded on every arch ⇒ the bit-identity theorem holds
+  unchanged. v4x's 16-wide accumulation narrowing to the fixed 8 IS part of the break.
+- Sequencing: era-2 kernels land AFTER the fold-engine lane pins its remaining parity stages (it
+  reached stage 4 — **the fold has `score()`**); then the byte change + both paths' gate re-pins go
+  in one/adjacent commits. Fleet metric suffix remains a registered zenmetrics item for the
+  re-extraction fleet lane.
