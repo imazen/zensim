@@ -2867,3 +2867,14 @@ pardon + re-declare, content-addressed, when the port's search is fast); below t
 port is exercised + byte-verified as before. Non-screen frames are unaffected. This is Gate-3
 territory for the port (KB-41 perf note in zenav1-aom's CLAUDE.md); the deferred set is
 recoverable at zero data cost.
+
+### AOM-RS WAVE RELAUNCHED ON THE FIXED PORT (2026-08-30 07:06Z) — image `exec-zensim944hdr-361864f9`
+Chain: image build+push (first push hit a ghcr.io i/o timeout; retried), `zenfleet-ctl requeue
+--classes encoder_panic` (the pre-fix refusals), compact (21,656 distinct done), relaunch
+r3500 / r5900xt / r7900x. First 30 s: +900 blobs (the pardoned tiny screen cells verifying);
+first chunk rows on the new image: 380 done / 30 refused (7%; deferred-vs-divergence split
+is in the executor stderr, not the ledger — classified by local repro). Blob count 24,071 /
+126,360. The svt GPU score run on i134 was relaunched with `ZEN_PASS_TIMEOUT=7200` + a ledger
+snapshot after its first pass hit the 1,800 s pass limit on a big chunk (a slow chunk, not a
+hang — the worker released the claim and moved on); the svt CPU score run (cvvdp + 944
+features) stays queued until a CPU box frees up.
