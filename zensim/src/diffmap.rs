@@ -974,7 +974,7 @@ impl crate::metric::Zensim {
         let (result, mut diffmap_padded, padded_width) =
             if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
                 let (pp, pw, ph) = reflect_pad_planes_f32(planes, width, height, stride);
-                let padded_width = crate::blur::simd_padded_width(pw);
+                let padded_width = crate::blur::pyramid_plane_stride(pw);
                 let (result, dm, _) =
                     crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
                         precomputed,
@@ -991,7 +991,7 @@ impl crate::metric::Zensim {
                     );
                 (result, dm, padded_width)
             } else {
-                let padded_width = crate::blur::simd_padded_width(width);
+                let padded_width = crate::blur::pyramid_plane_stride(width);
                 let (result, dm, _) =
                     crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
                         precomputed,

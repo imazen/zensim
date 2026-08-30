@@ -4175,43 +4175,28 @@ fn downscale_2x_into_inner(
     }
 }
 
-/// Compute SIMD-aligned width that also avoids L1d cache set aliasing.
+/// Row stride of a v1 pyramid plane — **equal to the image width**.
 ///
-/// The basic alignment rounds up to a multiple of 16 (SIMD lane count).
-/// But when `padded_width * 4` (stride in bytes) causes power-of-2 aliasing
-/// in the 32KB 8-way L1d cache (512 sets), rows 0 and 2 map to the same
-/// cache set, causing catastrophic conflict misses in H-blur (which writes
-/// to 4 output buffers × 16 rows simultaneously).
+/// OPTION C (2026-08-30, user decision; `docs/DATASET_HISTORY.md` era-3).
+/// This used to round the width up to a multiple of 16, plus a further 16
+/// whenever that landed on an even multiple of 16 at or above 512 (an
+/// L1d set-aliasing dodge). The extra columns were mirror-filled by
+/// `mirror_pad_columns` and then **POOLED** — so every v1 feature at a
+/// non-tight width was a statistic over columns that are not in the image.
+/// Measured, that was worth up to **81.6 % relative** on a pool slot, it put
+/// 512/576/768/1024/1152/2304 all in the divergent class, and it was the
+/// entire reason the fold's `f0..372` disagreed with the buffered path.
 ///
-/// Fix: for widths >= 512 (where the H-blur working set exceeds L1),
-/// ensure `padded_width / 16` is odd so the cache-line stride between
-/// rows is odd, spreading all 16 rows across distinct cache sets.
-/// Below 512, the working set fits in L1 and aliasing doesn't matter.
-pub(crate) fn simd_padded_width(width: usize) -> usize {
-    // For widths near `usize::MAX` the original `(width + 15) & !15` would
-    // wrap silently. Saturate to `usize::MAX` instead — every downstream
-    // allocation site that derives from `padded_width` is guarded by
-    // `padded_width.checked_mul(height)` (see [`checked_padded_plane_len`])
-    // and will surface `ImageTooLarge` rather than wrap.
-    // OPTION-C EXPERIMENT (2026-08-30, not shipped in this form): return the
-    // real width so no phantom columns exist at all. This is semantically
-    // option C plus the loss of the alignment/anti-alias stride, which is
-    // exactly the pair the "padded vs exact" cost question needs bracketed.
-    // Cached: this is called per (scale, entry), and an env read per call
-    // would show up in the very measurement it exists to serve.
-    static NOPAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *NOPAD.get_or_init(|| std::env::var_os("ZEN_C_NOPAD").is_some()) {
-        return width;
-    }
-    let aligned = match width.checked_add(15) {
-        Some(v) => v & !15,
-        None => return usize::MAX,
-    };
-    if aligned >= 512 && (aligned / 16).is_multiple_of(2) {
-        aligned.saturating_add(16)
-    } else {
-        aligned
-    }
+/// Removing it is exact AND faster: buffered v1-372 instruction counts moved
+/// **−9.02 % at 576 and −7.37 % at 1152**, with the tight-width control at
+/// 592 unchanged (+0.00 %) — so the aliasing dodge was costing more than it
+/// saved on the current kernels. The fold needed no change; it never padded.
+///
+/// Kept as a named function rather than inlined at the ~18 call sites so the
+/// decision stays greppable and so a future stride experiment has one owner.
+#[inline]
+pub(crate) fn pyramid_plane_stride(width: usize) -> usize {
+    width
 }
 
 /// Compute `padded_width * height` for plane-allocation sites with overflow

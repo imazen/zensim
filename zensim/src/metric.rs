@@ -2906,7 +2906,7 @@ pub(crate) fn validate_ref_match(
 
 /// Reject `width × height` if it overflows `usize` on the current target,
 /// exceeds the configured `max_pixels` cap, or if the padded plane size
-/// (`simd_padded_width(width) × height`) would overflow during downstream
+/// (`pyramid_plane_stride(width) × height`) would overflow during downstream
 /// allocation.
 ///
 /// Centralizes the overflow guard so 32-bit / wasm32 builds (where
@@ -2924,12 +2924,12 @@ pub(crate) fn check_within_max_pixels(
     {
         return Err(ZensimError::ImageTooLarge);
     }
-    // Also confirm the padded plane size fits. `simd_padded_width` rounds
+    // Also confirm the padded plane size fits. `pyramid_plane_stride` rounds
     // up to a multiple of 16 (and may add another 16 above 512 wide), so
     // `padded_width * height` may overflow even when `width * height` did
     // not. Guarding here is cheaper than threading checked-arithmetic
     // through every internal allocation site.
-    let padded = crate::blur::simd_padded_width(width);
+    let padded = crate::blur::pyramid_plane_stride(width);
     crate::blur::checked_padded_plane_len(padded, height)?;
     Ok(())
 }
@@ -3047,7 +3047,7 @@ pub(crate) const fn min_pyramid_dim_for_scales(num_scales: usize) -> usize {
 /// `zensim/tests/v1_feature_width_pure_function.rs`.
 ///
 /// Note the asymmetry this hides: the walk starts at
-/// `simd_padded_width(width)` but plain `height`, so before the padding was
+/// `pyramid_plane_stride(width)` but plain `height`, so before the padding was
 /// applied `54x96` came out full-width (54 → 64 by SIMD alignment) while
 /// `96x54` came out short. Callers must not re-derive the rule.
 #[inline]
@@ -4811,7 +4811,7 @@ pub fn compute_zensim_with_config(
     let pixels = width
         .checked_mul(height)
         .ok_or(ZensimError::ImageTooLarge)?;
-    // Also reject overflow on the padded plane size (simd_padded_width(width) * height).
+    // Also reject overflow on the padded plane size (pyramid_plane_stride(width) * height).
     check_within_max_pixels(width, height, None)?;
     if source.len() != pixels {
         return Err(ZensimError::InvalidDataLength);

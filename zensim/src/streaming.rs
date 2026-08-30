@@ -6,7 +6,7 @@
 
 use crate::blur::{
     box_blur_1pass_into, box_blur_h_into_abs_diff, box_blur_v_from_copy, downscale_2x_inplace,
-    fused_blur_h_mu, fused_blur_h_ssim, simd_padded_width,
+    fused_blur_h_mu, fused_blur_h_ssim, pyramid_plane_stride,
 };
 use crate::color::{
     apply_gamut_matrix, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
@@ -868,7 +868,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let width = source.width();
     let height = source.height();
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let num_scales = config.num_scales;
     let parallel = config.allow_multithreading;
 
@@ -937,7 +937,7 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleStats>, [f64; 3]) {
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let n = padded_width * height;
     let mut src_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
@@ -983,7 +983,7 @@ pub(crate) fn compute_multiscale_stats_pu_linear_interleaved(
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
 ) -> (Vec<ScaleStats>, [f64; 3]) {
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let n = padded_width * height;
     let mut src_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
@@ -1033,7 +1033,7 @@ fn reflect_pad_pu_planes(
     }
     let bw = width.max(MIN_PYRAMID_DIM);
     let bh = height.max(MIN_PYRAMID_DIM);
-    let bpw = simd_padded_width(bw);
+    let bpw = pyramid_plane_stride(bw);
     let mut out: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; bpw * bh]);
     for (src, dst) in planes.iter().zip(out.iter_mut()) {
         for y in 0..bh {
@@ -1043,7 +1043,6 @@ fn reflect_pad_pu_planes(
             }
         }
     }
-    mirror_pad_columns(&mut out, bw, bh, bpw);
     (out, bw, bh, bpw)
 }
 
@@ -2781,7 +2780,7 @@ impl PrecomputedReference {
     fn new_inner(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
         let width = source.width();
         let height = source.height();
-        let padded_width = simd_padded_width(width);
+        let padded_width = pyramid_plane_stride(width);
         Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
             convert_source_to_xyb_into(source, scale0, padded_width, parallel);
         })
@@ -2916,7 +2915,7 @@ impl PrecomputedReference {
                     out
                 });
                 let padded_refs: [&[f32]; 3] = [&padded[0], &padded[1], &padded[2]];
-                let padded_width = simd_padded_width(bw);
+                let padded_width = pyramid_plane_stride(bw);
                 return Self::build_from_dims(num_scales, padded_width, bh, parallel, |scale0| {
                     convert_linear_planar_to_xyb_into(
                         padded_refs,
@@ -2930,7 +2929,7 @@ impl PrecomputedReference {
                 .with_ref_dims(width, height);
             }
         }
-        let padded_width = simd_padded_width(width);
+        let padded_width = pyramid_plane_stride(width);
         Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
             convert_linear_planar_to_xyb_into(planes, width, height, stride, padded_width, scale0);
         })
@@ -3144,8 +3143,6 @@ pub(crate) fn convert_linear_planar_to_pu_xyb_into(
             &mut o2[out_off..out_off + width],
         );
     }
-
-    mirror_pad_columns(out, width, height, padded_width);
 }
 
 /// Interleaved-input sibling of [`convert_linear_planar_to_pu_xyb_into`]:
@@ -3175,34 +3172,6 @@ pub(crate) fn convert_linear_interleaved_to_pu_xyb_into(
             &mut o2[out_off..out_off + width],
         );
     }
-
-    mirror_pad_columns(out, width, height, padded_width);
-}
-
-/// Mirror-pad columns `width..padded_width` of three planes in place,
-/// identical to the SDR conversion's column padding so every downstream
-/// kernel sees the same layout regardless of input path.
-fn mirror_pad_columns(out: &mut [Vec<f32>; 3], width: usize, height: usize, padded_width: usize) {
-    let pad_count = padded_width - width;
-    if pad_count == 0 {
-        return;
-    }
-    let period = 2 * (width - 1).max(1);
-    let mirror_offsets: Vec<usize> = (0..pad_count)
-        .map(|i| {
-            let m = (width + i) % period;
-            if m < width { m } else { period - m }
-        })
-        .collect();
-    let [ref mut o0, ref mut o1, ref mut o2] = *out;
-    for y in 0..height {
-        let row_off = y * padded_width;
-        for (i, &src_x) in mirror_offsets.iter().enumerate() {
-            o0[row_off + width + i] = o0[row_off + src_x];
-            o1[row_off + width + i] = o1[row_off + src_x];
-            o2[row_off + width + i] = o2[row_off + src_x];
-        }
-    }
 }
 
 /// Streaming multi-scale stats using a precomputed reference.
@@ -3218,7 +3187,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let width = distorted.width();
     let height = distorted.height();
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let n = padded_width * height;
     let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     let result = compute_multiscale_stats_streaming_with_ref_borrowed(
@@ -3304,7 +3273,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
 ) -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
     let width = distorted.width();
     let height = distorted.height();
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let num_scales = config.num_scales.min(precomputed.num_scales());
     let parallel = config.allow_multithreading;
     let n = padded_width * height;
@@ -3815,7 +3784,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
     let width = distorted.width();
     let height = distorted.height();
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let dst_planes = convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
 
     compute_diffmap_from_xyb(
@@ -3848,7 +3817,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
     guided_redistribution: bool,
     stop: Option<&dyn enough::Stop>,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let dst_planes = convert_linear_planar_to_xyb(planes, width, height, stride, padded_width);
 
     compute_diffmap_from_xyb(
@@ -4076,7 +4045,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
 ) -> crate::metric::ZensimResult {
     let width = distorted.width();
     let height = distorted.height();
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let mut dst_planes =
         convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
 
@@ -4165,7 +4134,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
 ) -> crate::metric::ZensimResult {
     let width = distorted.width();
     let height = distorted.height();
-    let padded_width = simd_padded_width(width);
+    let padded_width = pyramid_plane_stride(width);
     let mut dst_planes =
         convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
 
