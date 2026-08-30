@@ -3736,3 +3736,32 @@ selective re-apply; no other lane's edits clobbered).
   after the re-cut, the anchor that bought +22.4 costs 8–13 and plain safesyn is best (fixing
   coverage removes the anchor's leverage — the user's directive was right).
 - Corrected-fold (option-C) confirmation pass for the winners: REGISTERED, not run (sequencing).
+
+## 2026-08-31 ~00:4xZ — ROUND 10: extraction lane, option-independent items DONE (4 commits; doc §6-§8 extended)
+
+- **Block-skipping SHIPPED** (`V2NewFeatureToggles::v1_only`, additive): 372-only fold = **249.2M Ir
+  = 0.743× buffered** (25.7 % below) and 0.466× of 944-full — 53.4 % of the walk removed; gate
+  `folded_v1_only_matches_full_walk` (bit-identical, 5 geometries × 3 pool modes × serial+rayon;
+  caught a regime-from-compute-flags bug — layout and compute now separate).
+- **MT structural cap FIXED**: the fold saturated at exactly 3 threads (2.26×) — band parallelism
+  (4 bands/strip, SEQUENTIAL-ORDER merge so f64 sums stay bit-exact) lifts 944-full to 2.57× @8T
+  (−14 % wall best-case), regression-past-3T gone in all modes. Trap caught: `map_init` scratch
+  re-allocation LOST 15 % — persistent per-band slots fixed it ("parallelism that allocates isn't
+  parallelism").
+- **h=93 residual DISSOLVED** — it was an artifact of the option-A pre-pad workaround; under C the
+  divergent classes go to exactly 0. Resolved by deletion.
+- **Option C measures as a PERF WIN, not a cost**: fixed-buffered Ir −9.02 % @576 / −7.37 % @1152 /
+  +0.00 % at the tight-width control. **And the v1 golden fixtures are 64×64 = tight-width —
+  structurally BLIND to the defect C fixes** → C rollout requires a non-tight golden geometry.
+- **Which world (user's steer answered)**: at ≥8T **944-full ≈ 944-zeroed** (identical @576², +9.7 %
+  @1152²; band parallelism absorbed the pool work) — 944-full's overhead does NOT justify a separate
+  path by itself; `v1_only` stays as ONE boolean (0.7× buffered serial) for the ~25 v1-372
+  consumers, not a third pipeline.
+- **Fusion trap measured** (user's register-spill steer): folding activity abs-diff into the H-blur
+  LOSES (+1.0/+2.0 %) post-rem-ring — reverted and DELETED. Spill audit: rem-ring clean (1 store /
+  2 loads); `fused_vblur_ssim_inner_v4x` carries 28 spill loads = the standing fission candidate.
+- **Named MT blocker for retiring buffered**: the serial `StripPlaneProducer` (buffered still ~2-3×
+  ahead at 8T; its parallelism grows with image height, the fold's tops out at 3×4). Next axes
+  (sent): C implementation + 372 era step (non-tight golden, era-3 eval root, B-under-C delta),
+  producer parallelization, the fission experiment, profile-driven work re-based on corrected
+  semantics.
