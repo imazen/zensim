@@ -2758,3 +2758,24 @@ EXCLUDING renditions with 720 ≤ min(w,h) < 1080 (recorded as a deferred
 residual, content-addressed, re-declared additively when #14 lands); every
 declared cell is still byte-verified per cell, so any further divergence
 surfaces as a loud failure, never as unverified data.
+
+### AOM-RS ARM — EXECUTOR IMAGE + FIRST FLEET CHUNK (2026-08-30 ~06:0xZ)
+- Wave declared: `s3://zentrain/jobs/avifaom-enc-20260830/` — 1,404 sources × {4,6,8}
+  × 30 q = **126,360 cells** (`avifsvt_cells.py --backend aom-rs --exclude-min-dim
+  720:1080`; the 51 band renditions in `cells_aom_declare.jsonl.excluded.txt`,
+  `/mnt/v/output/avifaom-2026-08-30/`).
+- Static musl executor with the arm: the glibc-built libaom oracle objects
+  reference `fopen64` (glibc LFS symbol; musl exports none) → linked a 1-line
+  `fopen64→fopen` shim as a bare OBJECT on `*-musl` targets only (an archive was
+  never searched: rustc orders `-l static=` before the rlibs carrying the oracle
+  objects — first attempt left every reference unresolved). Also stamps
+  `ZEN_CODEC_ZENAV1_AOM_COMMIT` so every aom-rs cell carries the port commit it
+  was byte-verified at. Smoke (musl binary, 384×512 s6 q60): 1/1 cell, port ==
+  oracle, 30,054 B, 282 ms. zenmetrics `fca352dd`.
+- Image `ghcr.io/imazen/zenfleet-worker:exec-zensim944hdr-fca352dd` (digest
+  `44f4d55d…`; superset of c4b01933: avif-svt + avif-aom + HDR arms), pinned in
+  `fleet.env` (`ba73a466`).
+- First fleet chunk launched on r3500 (6c; the only idle LAN CPU box — r5900xt +
+  r7900x carry the svt wave, i134/r5600g/i265 other sessions' workers).
+  Gate: blobs present + 0 errors before scale-up.
+- svt wave at launch time: 48,131 / 130,950 blobs, ledger 49,487 done / 0 failed.
