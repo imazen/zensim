@@ -255,6 +255,7 @@ required-features = ["custom-profiles", "feature-regime-v2", "training"]
 name = "fold_engine_bench"
 harness = false
 required-features = ["feature-regime-v2", "threads"]
+# `custom-profiles` additionally enables the fused-vs-split attribution arms.
 
 [[bench]]
 name = "tenx_bar_bench"

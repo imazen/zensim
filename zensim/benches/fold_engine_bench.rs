@@ -20,6 +20,17 @@
 //! | `ref_buffered`   | `Zensim::compute_with_ref` (B), one precomputed reference | buffered |
 //! | `ref_fold`       | same | the fold (source-side planes COPIED from the cache) |
 //!
+//! With `custom-profiles` two more arms price the RETIREMENT MIGRATION for
+//! the fused compare — the one genuinely walk-bound attribution consumer:
+//!
+//! | arm | what |
+//! |---|---|
+//! | `fused_buffered` | `compute_with_ref_score_and_attribution` — score + map from ONE buffered pipeline (the C3a shape) |
+//! | `split_fold`     | fold-backed `compute_with_ref` + standalone `compute_attribution_density_with_ref` |
+//!
+//! `fused_compare_splits_into_fold_score_plus_standalone_map` gates that the
+//! split does not move the score; these arms are what it costs.
+//!
 //! The `ref_*` arms are the M1 precompute-once / compare-many shape: the
 //! reference pyramid is built ONCE outside the timed loop and every iteration
 //! scores one distorted candidate against it, so `ref_x − score_x` is what
@@ -209,6 +220,42 @@ fn main() {
                         zenbench::black_box(r.score());
                     })
                 });
+                #[cfg(feature = "custom-profiles")]
+                {
+                    // A mixed-sign, all-slot basic gradient — the same shape
+                    // `fused_matches_standalone_attribution` uses.
+                    let s_grad: &'static [f64] = Box::leak(
+                        (0..156)
+                            .map(|k| {
+                                let sign = if k % 3 == 0 { -1.0 } else { -0.25 };
+                                sign * (1.0 + (k % 7) as f64 * 0.1)
+                            })
+                            .collect::<Vec<f64>>()
+                            .into_boxed_slice(),
+                    );
+                    group.bench("fused_buffered", move |b| {
+                        b.iter(move || {
+                            let (r, a) = buffered
+                                .compute_with_ref_score_and_attribution(
+                                    pre_b,
+                                    &RgbSlice::new(dst_s, n, n),
+                                    s_grad,
+                                )
+                                .unwrap();
+                            zenbench::black_box((r.score(), a.density()[0]));
+                        })
+                    });
+                    group.bench("split_fold", move |b| {
+                        b.iter(move || {
+                            let ds = RgbSlice::new(dst_s, n, n);
+                            let r = fold.compute_with_ref(pre_f, &ds).unwrap();
+                            let a = fold
+                                .compute_attribution_density_with_ref(pre_f, &ds, s_grad)
+                                .unwrap();
+                            zenbench::black_box((r.score(), a.density()[0]));
+                        })
+                    });
+                }
             });
         }
     });

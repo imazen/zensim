@@ -948,8 +948,18 @@ fn basic_combine_channel(
 /// Returns `(canvas, basic_features)` where `basic_features` mirrors the
 /// production basic block (13 × 3 × scales, scale-major) — consumed by the
 /// sum-preservation tests.
+///
+/// **Takes `&impl MultiScaleRef`, not `&PrecomputedReference`** (fold-engine
+/// lane, stage 4). The predecessor lane recorded "attribution's basic canvas
+/// is buffered-native" as retirement blocker 4; read at source that is true of
+/// the concrete TYPE and not of the WALK — this builder and
+/// [`build_attribution_into_sink`] call only `crate::blur`, never
+/// `compute_multiscale_stats_streaming`, `process_scale_bands`, or any other
+/// walk function. The generic signature is that statement made structural: the
+/// canvas needs a pyramid to read, nothing more, and it survives the deletion
+/// of the buffered walk provided the pyramid cache does.
 fn build_attribution_canvas(
-    pyramid: &PrecomputedReference,
+    pyramid: &impl MultiScaleRef,
     dst_planes: [Vec<f32>; 3],
     comp_pw: usize,
     comp_h: usize,
@@ -979,7 +989,7 @@ fn build_attribution_canvas(
 /// full-resolution canvas exists.
 #[allow(clippy::too_many_arguments)]
 fn build_attribution_into_sink(
-    pyramid: &PrecomputedReference,
+    pyramid: &impl MultiScaleRef,
     mut dst_planes: [Vec<f32>; 3],
     comp_pw: usize,
     comp_h: usize,
@@ -1354,14 +1364,14 @@ impl crate::metric::Zensim {
         // Compute dims come from the (possibly reflect-padded) reference
         // pyramid; a sub-64px distorted is reflect-padded to match, and the
         // original image stays in the top-left for the trim/clip below.
-        let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
+        let (_, comp_pw, comp_h) = precomputed.scale(0);
         let dst_planes = if width < MIN_PYRAMID_DIM || height < MIN_PYRAMID_DIM {
             let padded = reflect_pad_to_min(distorted);
             convert_source_to_xyb(&padded, comp_pw, self.parallel())
         } else {
             convert_source_to_xyb(distorted, comp_pw, self.parallel())
         };
-        let num_scales = config.num_scales.min(precomputed.scales.len());
+        let num_scales = config.num_scales.min(precomputed.num_scales());
         Ok((
             dst_planes,
             comp_pw,
@@ -3297,7 +3307,7 @@ impl crate::metric::Zensim {
         s: &[f64],
         prime: Option<&mut AttributionSession>,
     ) -> Result<FusedBasicCanvas, ZensimError> {
-        let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
+        let (_, comp_pw, comp_h) = precomputed.scale(0);
         let mut canvas = vec![0.0f32; comp_pw * comp_h];
         let (result, t_pipe_ms, combine_ms) = self.fused_basic_into(
             precomputed,
@@ -3353,7 +3363,7 @@ impl crate::metric::Zensim {
 
         let width = distorted.width();
         let height = distorted.height();
-        let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
+        let (_, comp_pw, comp_h) = precomputed.scale(0);
 
         let t_all = std::time::Instant::now();
         let combine_ms = std::cell::Cell::new(0.0f64);
@@ -3645,7 +3655,7 @@ impl crate::metric::Zensim {
             };
         }
 
-        let (comp_pw, comp_h) = (precomputed.scales[0].1, precomputed.scales[0].2);
+        let (_, comp_pw, comp_h) = precomputed.scale(0);
         let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
         let t_all = std::time::Instant::now();
         let tail_ms = std::cell::Cell::new(0.0f64);

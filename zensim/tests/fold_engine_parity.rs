@@ -458,3 +458,129 @@ fn compute_with_ref_cross_engine() {
     }
     println!("compute_with_ref cross-engine worst |Δmean_offset| = {worst:.3e}");
 }
+
+// ── STAGE 4: the attribution canvas ──────────────────────────────────────
+
+/// **The stage-4 structural claim, stated as a test.** The predecessor lane
+/// recorded "attribution's basic canvas is buffered-native" as retirement
+/// blocker 4. Read at source that is true of the concrete TYPE and not of the
+/// WALK: `build_attribution_into_sink` calls only `crate::blur` — never
+/// `compute_multiscale_stats_streaming`, `process_scale_bands`, or any other
+/// walk function — and its only buffered dependency is a pyramid to read.
+/// This lane made that structural by giving the builder a
+/// `&impl MultiScaleRef` signature.
+///
+/// The observable consequence, gated here: `compute_attribution_density*` is
+/// **engine-independent** — bit-identical density and SAT block sums under
+/// both engines, at per-pixel and binned resolution, for the basic-only and
+/// the full-coverage (v2 + append + append2) entries. A future change that
+/// routes the canvas through a walk would break this.
+#[cfg(feature = "custom-profiles")]
+#[test]
+fn attribution_density_is_engine_independent() {
+    let s_basic: Vec<f64> = (0..156)
+        .map(|k| if k % 3 == 0 { -1.0 } else { -0.25 } * (1.0 + (k % 7) as f64 * 0.1))
+        .collect();
+    let mut s_full = vec![0.0f64; 944];
+    for (k, v) in s_full.iter_mut().enumerate() {
+        *v = ((k % 13) as f64 - 6.0) * 0.05;
+    }
+    for &(w, h) in &[(150usize, 170usize), (200, 150), (96, 64), (127, 93)] {
+        let (r, d) = pair(w, h);
+        let rs = RgbSlice::new(&r, w, h);
+        let ds = RgbSlice::new(&d, w, h);
+        let zb = Zensim::new(ZensimProfile::codec_target());
+        let zf = Zensim::new(ZensimProfile::codec_target()).with_engine(ScoringEngine::Fold);
+
+        let cmp = |name: &str, a: &zensim::AttributionResult, b: &zensim::AttributionResult| {
+            assert_eq!((a.width(), a.height()), (b.width(), b.height()), "{name} dims");
+            for (i, (&x, &y)) in a.density().iter().zip(b.density().iter()).enumerate() {
+                assert_eq!(
+                    x.to_bits(),
+                    y.to_bits(),
+                    "{name} {w}x{h}: density[{i}] buffered {x:e} vs fold {y:e} — the \
+                     attribution canvas reads a pyramid, not a walk, so it must not \
+                     depend on the engine at all"
+                );
+            }
+            let (ba, bb) = (a.block_sums(16), b.block_sums(16));
+            for (i, (&x, &y)) in ba.iter().zip(bb.iter()).enumerate() {
+                assert_eq!(x.to_bits(), y.to_bits(), "{name} {w}x{h}: block_sums[{i}]");
+            }
+        };
+
+        cmp(
+            "density",
+            &zb.compute_attribution_density(&rs, &ds, &s_basic).unwrap(),
+            &zf.compute_attribution_density(&rs, &ds, &s_basic).unwrap(),
+        );
+        cmp(
+            "density_binned8",
+            &zb.compute_attribution_density_binned(&rs, &ds, &s_basic, 8)
+                .unwrap(),
+            &zf.compute_attribution_density_binned(&rs, &ds, &s_basic, 8)
+                .unwrap(),
+        );
+        cmp(
+            "density_full",
+            &zb.compute_attribution_density_full(&rs, &ds, &s_full).unwrap(),
+            &zf.compute_attribution_density_full(&rs, &ds, &s_full).unwrap(),
+        );
+    }
+}
+
+/// **The retirement migration path for the fused compare, measured as a
+/// gate.** `compute_with_ref_score_and_attribution` is the one genuinely
+/// walk-bound attribution consumer: it folds the map in-strip inside
+/// `streaming::compute_zensim_streaming_with_ref_and_attr_{planes,fold}`,
+/// whose band tiling (`BAND_ROWS == streaming::STRIP_INNER`) is chosen to be
+/// bit-compatible with the buffered extractor. It therefore stays on buffered
+/// under `ScoringEngine::Fold` (the fallback), and a caller that wants the
+/// fold has to SPLIT it into a fold-backed score plus a standalone map.
+///
+/// This gates that the split is sound: the fold-backed `compute_with_ref`
+/// score is **bit-identical** to the fused compare's score, so only the map
+/// half changes — and the map half's difference is already characterised by
+/// `attribution::tests::fused_matches_standalone_attribution` (f32-combine
+/// precision, 3e-5·max_abs). What the split COSTS is the bench's
+/// `fused_buffered` vs `split_fold` arms; this test is what it does not cost.
+#[cfg(feature = "custom-profiles")]
+#[test]
+fn fused_compare_splits_into_fold_score_plus_standalone_map() {
+    let s: Vec<f64> = (0..156)
+        .map(|k| if k % 3 == 0 { -1.0 } else { -0.25 } * (1.0 + (k % 7) as f64 * 0.1))
+        .collect();
+    for &(w, h) in &[(150usize, 170usize), (200, 150), (127, 93)] {
+        let (r, d) = pair(w, h);
+        let rs = RgbSlice::new(&r, w, h);
+        let ds = RgbSlice::new(&d, w, h);
+        let zb = Zensim::new(ZensimProfile::codec_target());
+        let zf = Zensim::new(ZensimProfile::codec_target()).with_engine(ScoringEngine::Fold);
+        let pre_b = zb.precompute_reference(&rs).unwrap();
+        let pre_f = zf.precompute_reference(&rs).unwrap();
+
+        let (fused_res, _fused_map) = zb
+            .compute_with_ref_score_and_attribution(&pre_b, &ds, &s)
+            .unwrap();
+        let split_res = zf.compute_with_ref(&pre_f, &ds).unwrap();
+        assert_eq!(
+            fused_res.score().to_bits(),
+            split_res.score().to_bits(),
+            "{w}x{h}: fused-compare score {:.17e} vs fold-backed compute_with_ref {:.17e} — \
+             the split must not move the number the product ships",
+            fused_res.score(),
+            split_res.score()
+        );
+
+        // …and the fused entry itself is engine-invariant, because it falls
+        // back: asking for the fold returns the buffered answer verbatim.
+        let (fused_f, _) = zf
+            .compute_with_ref_score_and_attribution(&pre_f, &ds, &s)
+            .unwrap();
+        assert_eq!(
+            fused_res.score().to_bits(),
+            fused_f.score().to_bits(),
+            "{w}x{h}: the fused compare must fall back to buffered identically"
+        );
+    }
+}
