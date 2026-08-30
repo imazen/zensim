@@ -166,9 +166,36 @@ def assemble_from_features(a) -> int:
     return 0
 
 
+def band_slice(a) -> int:
+    """The `tbig_hf` leg = the TOP TARGET BAND of the tbig leg, nothing else.
+
+    VERIFIED, not assumed (2026-08-30): the set of `encoded_filename` in the
+    registered `tbig_hf_954` leg is EXACTLY `{rows of tbig_954 with human_score
+    >= 0.90}` — 11,941 of 192,714, set-equal, and not equal at 0.895. So the hf
+    near-lossless leg is a band rule over the same corpus, not a separate one,
+    and it is reproduced here by that rule rather than by re-deriving a cut.
+    """
+    t = pq.read_table(a.band_from)
+    y = np.asarray(t["human_score"].combine_chunks(), dtype=np.float64)
+    keep = np.flatnonzero(y >= a.band_min)
+    out_t = t.take(pa.array(keep))
+    print(f"band >= {a.band_min}: {len(keep)} of {t.num_rows} rows", flush=True)
+    outp = Path(a.out)
+    pq.write_table(out_t, outp, compression="zstd", compression_level=7)
+    man = {"file": str(outp), "sha256": sha256_file(outp), "rows": out_t.num_rows,
+           "mode": "band-slice", "band_min": a.band_min,
+           "mechanism": "rows of --band-from with human_score >= --band-min; "
+                        "verified set-equal to the registered tbig_hf_954 leg at 0.90",
+           "source": {"path": str(a.band_from), "sha256": sha256_file(Path(a.band_from)),
+                      "rows": t.num_rows}}
+    (outp.parent / (outp.name + "._MANIFEST.json")).write_text(json.dumps(man, indent=1))
+    print(f"wrote {outp} + manifest")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--views-root", required=True)
+    ap.add_argument("--views-root")
     ap.add_argument("--suffix", default="_944", help="view filename suffix (train<suffix>.parquet)")
     ap.add_argument("--n-feat", type=int, default=944)
     ap.add_argument("--verify-against", help="reference slice for G-T1/G-T2 (the 924 file)")
@@ -187,6 +214,10 @@ def main() -> int:
     ap.add_argument("--features-key-col", default="encoded_filename",
                     help="column in --from-features carrying the encoded_filename value")
     ap.add_argument("--regime", help="regime tag written as a column + parquet metadata")
+    ap.add_argument("--band-from", help="build the tbig_hf leg: the top target band of this leg")
+    ap.add_argument("--band-min", type=float, default=0.90,
+                    help="band floor on human_score (0.90 reproduces the registered "
+                         "tbig_hf leg set-exactly)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
@@ -194,6 +225,11 @@ def main() -> int:
         a.emit_keys = True
     if a.from_features:
         return assemble_from_features(a)
+    if a.band_from:
+        return band_slice(a)
+    if not a.views_root:
+        print("FATAL: --views-root required (or use --from-features / --band-from)", flush=True)
+        return 2
 
     feat_cols = [f"f{i}" for i in range(a.n_feat)]
     parts = []

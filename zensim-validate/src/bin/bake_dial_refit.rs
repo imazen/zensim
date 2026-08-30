@@ -2783,6 +2783,14 @@ struct BlendHeadsArgs {
     /// Output bake path.
     #[arg(long)]
     out: PathBuf,
+    /// Also write the collapsed blend as a fit npz (`w`/`bias`/`mu`/`sd`, f64,
+    /// PRE-f16-pack) so a SECOND `blend-heads` pass can compose a third head on
+    /// it — the registered 3-way mechanism. `mu` is all-zero and `sd` all-one, so
+    /// this head's own raw-x collapse (`w/sd`, `bias − Σ μ·w/sd`) reproduces the
+    /// blend exactly; the emitted vector is the pre-pack f64 blend, matching what
+    /// `fit-lasso --emit-fit-npz` writes.
+    #[arg(long)]
+    emit_fit_npz: Option<PathBuf>,
     /// Embed zentrain.repro (argv + head shas). Fatal on failure.
     #[arg(long)]
     embed_repro: bool,
@@ -2923,6 +2931,27 @@ fn cmd_blend_heads(a: &BlendHeadsArgs) -> Result<(), String> {
         *ab = a.alpha * heads[0].a_raw[j] / s1 + (1.0 - a.alpha) * heads[1].a_raw[j] / s2;
     }
     let c_blend = a.alpha * (heads[0].c - m1) / s1 + (1.0 - a.alpha) * (heads[1].c - m2) / s2;
+
+    // 5a. optional head artifact: the PRE-pack f64 blend in fit-npz form, so a
+    //     second pass can treat this blend as one head (mu=0, sd=1 makes the
+    //     reader's raw-x collapse the identity on these numbers).
+    if let Some(npz_path) = &a.emit_fit_npz {
+        use zensim_validate::npz::{NpzF64Entry, write_npz_f64};
+        let shape1 = [n_feat];
+        let bias_s = [c_blend];
+        let mu0 = vec![0.0f64; n_feat];
+        let sd1 = vec![1.0f64; n_feat];
+        write_npz_f64(
+            npz_path,
+            &[
+                NpzF64Entry { name: "w", shape: &shape1, data: &a_blend },
+                NpzF64Entry { name: "bias", shape: &[], data: &bias_s },
+                NpzF64Entry { name: "mu", shape: &shape1, data: &mu0 },
+                NpzF64Entry { name: "sd", shape: &shape1, data: &sd1 },
+            ],
+        )?;
+        eprintln!("  blend fit npz -> {npz_path:?}");
+    }
 
     // 5. f16 pack, spline on the PACKED forward (QUANTIZE-then-CALIBRATE).
     let wp: Vec<f64> = a_blend

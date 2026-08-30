@@ -315,3 +315,208 @@ including the ones that are inconvenient; no arm is dropped for its result.
 - No cross-document comparison to a pre-R1b published number is treated as
   same-ruler.
 
+
+---
+
+## 4b. AMENDMENT R7-A1 — the H head's `tau`, declared before the refit
+
+The invariant recipe's `--tau 0.005` (§3.1) is a *pre-pack zero threshold*
+recovered from a full-range BVLS head. The **H** head's target is the
+near-lossless band `[0.90, 0.984]` — a range of **0.084** — so its coefficients
+are ~12× smaller than a full-range head's, and the shared threshold **zeroes
+every one of them**.
+
+MEASURED, on the zero-block control, before this amendment was written:
+
+| λ | pre-pack active | post-`tau 0.005` active | result |
+|---|---|---|---|
+| 2e-3 | 18 | **0** | constant bake, dial range `[68.33, 68.33]`, SROCC **0.0000 on all seven corpora** |
+| 3e-3 | 16 | **0** | 〃 |
+| 5e-3 | 11 | **0** | 〃 |
+
+That is a degenerate artifact of a mis-scaled threshold, not a result about the
+hf head, and `tau 0.005` is therefore **not a valid setting for this head at
+all**.
+
+**Amendment, applying to the H head ONLY (every other arm keeps `tau 0.005`):**
+
+1. `--tau 0`.
+2. λ is additionally swept **down**, to {1e-4, 2.5e-4, 5e-4, 1e-3}. The L1
+   penalty is on the mean-loss scale, so its effective sparsity scales with the
+   target range: round 6's operating point (mm01 frame, λ 3e-3, 74 coefficients)
+   corresponds to λ ≈ 3e-3 × 0.084 ≈ **2.5e-4** at the raw frame. The registered
+   {2e-3, 3e-3, 5e-3} are re-run at `tau 0` as well and reported.
+
+This changes no bar, no selection rule and no other arm. It is recorded here,
+before the refit, because a shared constant that silently produces a constant
+model is exactly the class of defect this campaign keeps paying for.
+
+---
+
+## 5. THE B RULER — a correction that changes the reference row
+
+R1b §8.4 read B on a **same-pair-restricted** subset (rows that also carry a full
+v1-372 vector). The v1-width lane has since landed the fix (`f9fac41e`) and
+re-extracted the three slices at full width
+(`/mnt/v/output/zensim/v1width-fix-recheck-2026-08-30/`, `build_commit`
+`f9fac41e…`), with two gates that make the two cuts directly comparable: the
+19,444 previously-full rows are **byte-identical** to the pre-fix extraction, and
+for the 453 previously-short imazen26 pairs the fixed v1 `f0..f155` is
+**BIT-IDENTICAL to the stored 944 fold** — so the 372 and 944 sides agree on the
+shared block for exactly the rows that were missing.
+
+Scoring B (`b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin`, sha
+`b6fe5233…`, 372 inputs) on **both** cuts with one binary isolates the effect of
+the restriction alone:
+
+| axis | B, restricted cut (n) | B, FULL cut (n) | Δ |
+|---|---|---|---|
+| cid22 | 0.8764 (4,292) | 0.8764 (4,292) | 0 |
+| \|kon-504\| | 0.5186 (504) | 0.5186 (504) | 0 |
+| nonphoto | 0.9093 (5,720) | **0.8505** (6,142) | **−0.0588** |
+| imazen26 | 0.9144 (6,500) | **0.8609** (6,953) | **−0.0535** |
+| hfnlproxy | 0.4213 (7,224) | **0.3496** (7,717) | **−0.0717** |
+
+**The 6.5 % restriction was not neutral — it was size-correlated, and it
+inflated B's three family axes by 0.05–0.07.** On the full pair set B clears
+**2 of the 5 round-6 bars** (cid22, kon), not 4.
+
+Consequences, applied throughout §6:
+
+- Every arm in this round is read on the **FULL** slices (cid22 4,292 · kon 504 ·
+  nonphoto 6,142 · imazen26 6,953 · hfnlproxy 7,717) and B is read on the same
+  pairs. The restricted cut appears nowhere in a bars table.
+- B's cid22 and kon come from the **STORED** canonical 372 tables
+  (`cid22_features_372col_2026-05-15`, `konjnd_features_372col_2026-05-15`), never
+  a fresh extraction: a fresh v1-372 extraction is known to drift from the stored
+  masked/IW slots on 100 % of rows (under diagnosis in another lane), and the
+  ledger's B numbers live on the stored tables.
+- `scripts/wlin7_bars.py` therefore **reads** B's row out of a fulleval JSON
+  (`--b-fulleval`) instead of carrying it as a constant, so the two rulers cannot
+  be mixed by accident. The hardcoded fallback is explicitly labelled
+  "RESTRICTED".
+- One number is **not reconciled**: R1b §8.4 reports B's restricted hfnl as
+  0.3553; the same bake on the same restricted root through this lane's binary
+  reads **0.4213**. cid22, kon, nonphoto and imazen26 all reproduce R1b exactly,
+  so this is one axis, not a systematic offset. It is recorded, not adjudicated —
+  and it does not enter any comparison here, because every hfnl number in §6 is
+  on the FULL cut.
+
+B's row used everywhere below, all on the full pair set:
+**cid22 0.8764 · |kon| 0.5186 · nonphoto 0.8505 · imazen26 0.8609 · hfnl 0.3496**
+— **2/5 bars**, maximin margin **−0.126**.
+
+---
+
+## 6. RESULTS — the zero-block control substrate (`folded720append2`)
+
+The zero-block root carries every leg of the mix already, so it is the substrate
+where the round-7 recipe is first readable end to end. Signed SROCC from
+`bake_verdict --full-json`; KonJND as \|SROCC\|; **`bands[].srocc` never read**.
+
+### 6.1 The heads
+
+| head | legs (weights) | cid22 | \|kon\| | nonphoto | imazen26 | hfnl | kadid | tid | bytes |
+|---|---|---|---|---|---|---|---|---|---|
+| **K** | safesyn 1.0 · cid22t 1.5 · kadid 0.5 · tid 0.5 | **0.8726** | **0.4403** | 0.8374 | 0.8501 | 0.2373 | 0.8570 | 0.8209 | 8,988 |
+| **C1** | safesyn 1.0 · cid22t 1.0 · tbig 0.5 · tsafesyn 0.5 · ttbig 0.5 · tbig_hf 1.0 | 0.7861 | 0.3773 | **0.9080** | **0.9157** | 0.2882 | 0.6268 | 0.7403 | 9,135 |
+| **C2** | C1 + kadid 0.5 + tid 0.5 | 0.8226 | 0.3819 | **0.9053** | **0.9121** | 0.3344 | 0.7814 | 0.8070 | 9,327 |
+| **H** | tbig_hf 1.0, lasso λ 2.5e-4, `tau 0` (§4b) | 0.8001 | **0.4836** | 0.8089 | 0.8130 | **0.7272** | 0.6355 | 0.6975 | 8,141 |
+
+**Two exact reproductions anchor the substrate.** `K` reads cid22 **0.8726** /
+\|kon\| **0.4403** — identical to `carrier_head_recipe` §4.2's `raw × no-carriers`
+cell and to R1b's `K0zero`. And the min-max control's `MM_K` (§6.4) reads cid22
+**0.8249** / \|kon\| **0.1644** — the ledger's baseline, to 4 dp. Two independent
+cells of a published 2×2 regenerate through this lane's driver.
+
+**The full mix is what moves the family axes.** Against the 4-leg `K` head,
+adding the bigcodec + teacher + hf legs is worth **+0.068 nonphoto and +0.062
+imazen26** (C2 vs K) — the axes B was thought to own — while costing **−0.050
+cid22** and **−0.058 kon**. The two heads are strongly complementary, which is the
+blend premise, measured rather than assumed.
+
+**The H head reproduces round 6's discovery at the raw frame.** R6's
+`head_hf0.003` (mm01 frame, λ 3e-3, **74** coefficients) read kon 0.445 / hfnl
+0.726 / cid22 0.808. The raw-frame refit at the λ the §4b rescaling predicts
+(3e-3 × 0.084 ≈ 2.5e-4) lands at **75** coefficients and reads kon **0.4836** /
+hfnl **0.7272** / cid22 **0.8001**. The λ-rescaling prediction was made from the
+target range before the fit ran and is confirmed to one coefficient.
+
+### 6.2 The blends — and the round-6 falsifier reversed
+
+Round 6's verdict was: *"no single 944 linear reaches kon ≥ 0.40 ∧ hfnl ≥ 0.40
+while holding cid22 ≥ 0.845 … composition itself fails (blend cancellation vs an
+hfnl-anti generalist head; joint-fit frame incoherence across per-corpus
+min-maxed legs)."* At the raw frame, composition does not fail.
+
+| arm | cid22 | \|kon\| | nonphoto | imazen26 | hfnl | bars/5 | maximin | ≥B | bytes |
+|---|---|---|---|---|---|---|---|---|---|
+| **`T3_KH01_C1_b0.95`** | **0.8559** | **0.5434** | **0.8842** | **0.8891** | **0.4582** | **5** | **+0.013** | **4/5** | **3,190** |
+| `T3_KH01_C2_b0.95` | **0.8553** | **0.5378** | **0.8837** | **0.8886** | **0.4575** | **5** | +0.012 | 4/5 | 3,190 |
+| `T3_KH01_C2_b0.92` | **0.8539** | **0.5221** | **0.8911** | **0.8963** | **0.4405** | **5** | +0.010 | 4/5 | 3,190 |
+| `T3_KH01_C1_b0.9` | **0.8533** | **0.5222** | **0.8955** | **0.9008** | **0.4310** | **5** | +0.010 | 4/5 | 3,190 |
+| `T3_KH01_C2_b0.9` | **0.8527** | **0.5128** | **0.8947** | **0.9000** | **0.4304** | **5** | +0.009 | 3/5 | 3,194 |
+| `T3_KH015_C2_b0.95` | **0.8642** | **0.5328** | **0.8771** | **0.8836** | **0.4197** | **5** | +0.010 | 4/5 | 3,190 |
+| `T3_KH01_C1_b0.85` | **0.8496** | **0.5061** | **0.9017** | **0.9074** | **0.4092** | **5** | +0.005 | 4/5 | 3,190 |
+| `B2_C2H_a0.2` (2-way) | 0.8255 | **0.4581** | **0.9100** | **0.9157** | **0.4236** | 4 | −0.023 | 3/5 | 3,175 |
+| `B2_KH_a0.1` (2-way) | **0.8554** | **0.5601** | 0.8619 | 0.8667 | **0.4880** | 3 | −0.010 | 3/5 | 3,190 |
+| `B2_C2K_a0.6` (2-way) | **0.8451** | **0.4425** | **0.8926** | **0.9016** | 0.2963 | 4 | −0.259 | 2/5 | 3,220 |
+| *B (shipped, 372) — FULL pairs* | *0.8764* | *0.5186* | *0.8505* | *0.8609* | *0.3496* | *2* | *−0.126* | — | *7,325* |
+
+**Seven 3-way blends clear all five round-6 bars.** The selection rule (§4.3)
+picks `T3_KH01_C1_b0.95` on the maximin margin (**+0.013**, i.e. every axis is
+above its bar with margin to spare). At **3,190 bytes** it is **2.3× smaller than
+B** and beats B on **four of the five axes**; the one axis B keeps is cid22
+(0.8764 vs 0.8559, −0.0205).
+
+The 3-way is two nested `blend-heads` passes (`--emit-fit-npz`, added this round
+so pass 2 can compose on pass 1's exact pre-pack weights). The pass-1 spine fixes
+K:H at 0.1:0.9; pass 2 mixes that spine against C at β. That is the mechanism
+round 6 registered and could not run.
+
+### 6.3 What the blend does that round 6's could not
+
+Round 6 measured that its generalist head was **hfnl-ANTI (−0.016)** so the blend
+cancelled the hf head. Here, at matched everything except the frame:
+
+| head | hfnl at RAW frame | hfnl at MIN-MAX frame |
+|---|---|---|
+| `C1` (the generalist) | **+0.2882** | **−0.0832** |
+
+**The generalist head is hfnl-anti at the min-max frame and hfnl-positive at the
+raw frame.** That is round 6's cancellation mechanism, isolated to the one
+variable, and it is why the same composition succeeds here.
+
+### 6.4 The MIN-MAX control — R4(a) re-priced on the full mix
+
+The identical mix, screen, solver, λ, `tau` and blend chain, with **only** the
+target frame switched (`CHF_MM01=1`; the H head's λ moved 2.5e-4 → 3e-3, the same
+operating point under the §4b rescaling, so the two arms sit at matched sparsity):
+
+| arm | frame | cid22 | \|kon\| | nonphoto | imazen26 | hfnl | bars/5 |
+|---|---|---|---|---|---|---|---|
+| `T3_KH01_C1_b0.95` | **raw** | 0.8559 | **0.5434** | 0.8842 | 0.8891 | **0.4582** | **5** |
+| `MM_T3_KH01_C1_b0.95` | min-max | 0.8550 | 0.3896 | 0.8784 | 0.8825 | 0.3529 | 3 |
+| **Δ (raw − min-max)** | | **+0.0009** | **+0.1538** | **+0.0058** | **+0.0066** | **+0.1053** | **+2** |
+
+Per-head, same switch: `K` **+0.2759 kon / +0.0477 cid22** (the carrier-recipe
+lane's number, reproduced), `C1` **+0.3714 hfnl / +0.0565 kon / +0.0038 cid22**,
+`H` **+0.0014 kon / −0.0003 hfnl** (a single-leg fit is SROCC-invariant to the
+frame — this near-null is the control on the control).
+
+**So the frame is worth two bars on the full mix**, and its value is concentrated
+exactly where round 6 failed: kon **+0.154** and hfnl **+0.105** on the shipped
+blend. This is an independent second pricing of the campaign's registered lane
+**R4(a)**, now on eight legs instead of four.
+
+### 6.5 Gates
+
+| gate | result |
+|---|---|
+| **G-X** (extractor pin) | **PASS** — `ext_tid` re-extracted at `foldapp2pools` with the pinned pre-fix binary is **944/944 columns bit-identical** to the stored R1b table |
+| **G-DET** (determinism) | **PASS** — the C2 recipe fit in two separate processes gives `w`/`bias`/`mu`/`sd` **bit-identical** |
+| recovery-gate regression | **PASS** — the extended driver still reproduces the recovered kon head **bit-exactly** (`--parity-fit`, W=144047, act=614, bias=0.611542) |
+| **G-K1** (tbig key identity) | **PASS** — `ref_basename` + `encoded_filename` + `human_score` bit-identical row-for-row to `tbig_944_200k` |
+| **G-U** (byte resolution) | **PASS** — 100 % of 208,169 rows resolve (104,584 object, 103,585 tar-range) |
+| **G-T** (teacher graft) | **PASS** — 111,068 rows, target mean 0.6142450490816594, source bit-identical to the registered `tsafesyn_954` target |
+| **G-R1** (regime purity) | in the assembler; aborts on a dead pool block in a `*pools` table or a live one in a folded table |
