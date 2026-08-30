@@ -4,9 +4,16 @@
 `## R-LANE EXECUTION + THE GATES CANON` ~L1870). This is a NEW document; the
 campaign ledger folds these rows in — nothing here is appended there.
 
-**Status:** OPEN — registration + lineage landed; extraction + gates + bars
-follow in this same file as they land. Every table below states its own
-measurement status; nothing is claimed before it is measured.
+**Status (2026-08-30, end of lane):** the INSTRUMENT is DELIVERED — the D1
+validate slices are keyed with a row-identity proof, every leg and slice is
+re-extracted at ONE width in the all-live regime, the gates pass (one caught a
+live repro hazard), and the five round-6 bars are readable for a 944-class
+candidate and for shipped B **on identical pairs** for the first time. The
+pre-registered ARM measurement ran to its registered end and is reported with
+its caveat (§8.3): a faithful implementation of the ledger's recipe shows the
+pool block to be worth ~nothing, but it does not reproduce the ledger's
+baseline, so it does not falsify the carrier finding. §9 lists what is open and
+why, priced. Nothing here is claimed before it is measured.
 
 ---
 
