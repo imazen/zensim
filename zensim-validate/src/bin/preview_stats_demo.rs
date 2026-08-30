@@ -174,7 +174,7 @@ const CORPORA: &[Corpus] = &[
     },
 ];
 
-const FEATURES_ROOT: &str = "/mnt/v/zen/zensim-training/2026-05-15-full-features";
+const FEATURES_ROOT: &str = zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15;
 
 // Butter parquets — (codec, file)
 struct CodecParquet {

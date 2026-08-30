@@ -184,7 +184,12 @@ halves of the HDR pair.
    was already exceeded (18.30 MB) before this change, which contributed +0.57 MB. Not
    addressed here — re-stripping the ~29 curated cells is a curation decision, not a
    promotion one.
-3. **No verdict records its `--features-root`.** The root had to be *inferred* from the
-   `regime` stamp and then *proved* by bit-exact reproduction (§2). A `features_root` field
-   in `bake_verdict --full-json` would make §2's archaeology a grep.
+3. **A verdict still does not RECORD its `--features-root`.** The root had to be *inferred*
+   from the `regime` stamp and then *proved* by bit-exact reproduction (§2). Partly closed
+   the same day: `bake_verdict` now PRINTS its ruler
+   (`bake_verdict: features-root era — … :: …`, `zensim_validate::eval_roots::era_of`) as
+   part of the default-root flip (`docs/DATASET_HISTORY.md` §3.29) — but the line goes to
+   stderr, not into `--full-json`, so a *stored* verdict still cannot be attributed without
+   re-running it. A `features_root` + era field in the JSON would make §2's archaeology a
+   grep, and would have made this section unnecessary.
 4. The round-4b doc's §7 scope claim (§2 above) is for that lane to correct.

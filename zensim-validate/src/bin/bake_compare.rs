@@ -29,7 +29,7 @@
 //! ```
 //! bake_compare --a <bake_a.bin> --b <bake_b.bin> \
 //!     [--corpora cid22,kadid,tid,konjnd,aic3] \
-//!     [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features] \
+//!     [--features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372] \
 //!     [--bands 10|4] \
 //!     [--bootstrap-resamples 1000] \
 //!     [--output report.md] \
@@ -119,7 +119,7 @@ USAGE:\n\
                  [--corpora cid22,kadid,tid,konjnd,aic3]\n\
                  [--bands 10|4]\n\
                  [--bootstrap-resamples 1000]\n\
-                 [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features]\n\
+                 [--features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372]\n\
                  [--output <path.md>]\n\
                  [--json <path.json>]\n\
                  [--seed 42]\n\
@@ -128,7 +128,7 @@ DEFAULTS:\n\
     --corpora             all 5 (cid22,kadid,tid,konjnd,aic3)\n\
     --bands               10 (B0..B9 width-10 grid)\n\
     --bootstrap-resamples 1000 (per § A.9 step 4)\n\
-    --features-root       /mnt/v/zen/zensim-training/2026-05-15-full-features\n\
+    --features-root       /mnt/v/zen/zensim-training/2026-08-30-full-features-372\n\
     --seed                42\n\
     --output              stdout\n\
 \n\
@@ -170,7 +170,7 @@ fn parse_args() -> Result<Args, String> {
     let mut output: Option<PathBuf> = None;
     let mut json: Option<PathBuf> = None;
     let mut features_root: PathBuf =
-        PathBuf::from("/mnt/v/zen/zensim-training/2026-05-15-full-features");
+        PathBuf::from(zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372);
     let mut bands: u32 = 10;
     let mut bootstrap_resamples: usize = 1000;
     let mut seed: u64 = 42;

@@ -17,6 +17,7 @@ pub mod block_profile;
 pub mod content_clusters;
 pub mod dial_spline;
 pub mod eval_report;
+pub mod eval_roots;
 pub mod gram_lasso;
 #[allow(clippy::all)]
 pub mod mlp_train;

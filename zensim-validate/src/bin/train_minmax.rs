@@ -25,7 +25,7 @@ use zenstats::panel::spearman;
 
 const N: usize = 372;
 const CAN: &str = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train";
-const FR: &str = "/mnt/v/zen/zensim-training/2026-05-15-full-features";
+const FR: &str = zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15;
 const SCREEN: &str =
     "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv";
 const SIGN: &str = "benchmarks/feature_sign_mask_2026-05-26.tsv";

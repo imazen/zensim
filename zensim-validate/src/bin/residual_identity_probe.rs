@@ -31,7 +31,7 @@ use zenstats::panel::spearman;
 const NF: usize = 372;
 const NH: usize = 64;
 const CANON: &str = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train";
-const VAL: &str = "/mnt/v/zen/zensim-training/2026-05-15-full-features";
+const VAL: &str = zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15;
 
 struct Rng(u64);
 impl Rng {

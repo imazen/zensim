@@ -39,7 +39,7 @@ const NF: usize = 372;
 const H: usize = 64; // φ hidden width
 const K: usize = 32; // embedding dim
 const CANON: &str = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train";
-const VAL: &str = "/mnt/v/zen/zensim-training/2026-05-15-full-features";
+const VAL: &str = zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15;
 const L2: f64 = 1e-5; // weight decay on φ
 
 struct Rng(u64);

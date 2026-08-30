@@ -1268,7 +1268,7 @@ struct PackArgs {
     /// percentiles). Pass `--verify none` to skip.
     #[arg(
         long,
-        default_value = "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet"
+        default_value = "/mnt/v/zen/zensim-training/2026-08-30-full-features-372/cid22_features_372col_2026-05-15.parquet"
     )]
     verify: String,
     #[arg(long, default_value = "human_score")]
@@ -2944,10 +2944,26 @@ fn cmd_blend_heads(a: &BlendHeadsArgs) -> Result<(), String> {
         write_npz_f64(
             npz_path,
             &[
-                NpzF64Entry { name: "w", shape: &shape1, data: &a_blend },
-                NpzF64Entry { name: "bias", shape: &[], data: &bias_s },
-                NpzF64Entry { name: "mu", shape: &shape1, data: &mu0 },
-                NpzF64Entry { name: "sd", shape: &shape1, data: &sd1 },
+                NpzF64Entry {
+                    name: "w",
+                    shape: &shape1,
+                    data: &a_blend,
+                },
+                NpzF64Entry {
+                    name: "bias",
+                    shape: &[],
+                    data: &bias_s,
+                },
+                NpzF64Entry {
+                    name: "mu",
+                    shape: &shape1,
+                    data: &mu0,
+                },
+                NpzF64Entry {
+                    name: "sd",
+                    shape: &shape1,
+                    data: &sd1,
+                },
             ],
         )?;
         eprintln!("  blend fit npz -> {npz_path:?}");

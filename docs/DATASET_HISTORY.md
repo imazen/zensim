@@ -924,3 +924,61 @@ the SDR-route sensitivity (≈0.002 SROCC).
 `eval372-basic-only-bakes-era-independent-2026-08-30` (annotated, 3 cells —
 measured Δ 0.00000, the invalidation does NOT apply) and
 `dial372-grid-thread-dependent-era-2026-08-30` (annotated, 9 cells).
+
+### §3.29 — the default eval root IS the current-extractor root, and what the board rows turned out to be (2026-08-30)
+
+**Thought-why:** "§3.28 left two follow-ups open for governance: flip
+`bake_verdict`'s default `--features-root`, and put the current-era verdicts on
+the board." (User decision; both executed the same day.)
+
+**Actual-why / what shipped.**
+
+1. **Default flipped, and it now has ONE owner.** The 372 root path was a string
+   literal in ten `.rs` files. It is now
+   `zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372` =
+   `/mnt/v/zen/zensim-training/2026-08-30-full-features-372`, with
+   `STORED_FEATURES_ROOT_2026_05_15` naming the previous default (which the probe
+   and trainer bins now reference BY NAME, so their era choice is deliberate and
+   visible rather than accidental). `bake_verdict` and `bake_compare` read the new
+   constant; `bake_dial_refit gate`'s default corpus moved to the same-named file
+   under the new root. **Nothing was rewritten and nothing was deleted** — the
+   2026-05-15 root stays on disk and stays a valid STORED-ERA read; the flip only
+   changes what a *flagless* invocation means going forward.
+2. **Every verdict is now self-describing.** `bake_verdict` prints
+   `bake_verdict: features-root era — <label> :: <path>` before it loads a corpus
+   (`eval_roots::era_of`, which labels the four registered roots and reports an
+   unregistered one as UNKNOWN rather than guessing). Two tests pin the default
+   (`default_features_root_is_the_current_extractor_372_root`,
+   `explicit_features_root_overrides_the_default_and_relabels_the_era`) plus two
+   in `eval_roots`.
+3. **VERIFIED:** a flagless `bake_verdict --bake <shipped B>` and the same run
+   with `--features-root <new root>` produce a **byte-identical** `--full-json`
+   (sha256 `9596f1bd9f3b2166612866f830e36079675f470870162b73a9ecd2c6d756b2c7`;
+   the markdown differs only in the wall-time line), and the flagless numbers
+   reproduce §3.28's current-era column exactly (CID22 0.8821166166, KonJND
+   0.6496694639, KADID 0.8084738650, TID 0.7785195153, AIC-3 0.7650123966,
+   composite 0.8407364995733521).
+4. **NOT in the flip:** the 372 dial + corruption grids. They are their own
+   pre-fix files (2026-05-29 / 2026-05-28), not re-extractable without a decode
+   pass, and stay annotated `dial372-grid-thread-dependent-era-2026-08-30`.
+   Training legs are untouched and still pre-fix.
+
+**The board, and a MEASURED surprise.** The 11 current-era verdicts are promoted
+as `<stored name>@cur372` rows (`benchmarks/board_era_rows_2026-08-30.md`), the
+stored rows kept and gate-verified byte-identical. Pairing them exposed that
+**7 of the 9 "stored-era" 372-class board rows were never reads of the 2026-05-15
+root**: each is stamped `regime: "720"`, and a fresh `bake_verdict --regime 720
+--corpora cid22` reproduces its per-pair predictions bit-exactly, i.e. they came
+from `ext720-canonical-2026-07-22`, whose masked/IW block is POST-FIX. Those rows
+already agree with the current-extractor read to ≤2e-4 on CID22 while differing
+from the true stored-root read by up to 0.0153 SROCC. Only
+`b_sdr_linear_cid80_inclwinsor_dense_dial` and `T_appT_b372_lam1e-3` (stamped
+`regime: "372"`) are genuine stored-root reads. §3.28's era table is unaffected —
+it compared `_old` vs `_new` from one instrument and never used a board row.
+
+**Registry:** `benchmarks/eval_annotations.json` gains
+`board372-row-read-on-ext720-root-2026-08-30` (annotated, 7 cells — the scope
+correction above), `eval372-current-root-copied-corpora-2026-08-30` (annotated,
+11 cells — six of the new root's fourteen corpora are byte-copies, and 39.5 % of
+`product_composite`'s weight rides on them) and
+`dial372-grid-thread-dependent-era-current-rows-2026-08-30` (annotated, 11 cells).

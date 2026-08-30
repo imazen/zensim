@@ -16,9 +16,11 @@ implements its A1-A5/A9 candidates.
   RUNTIME PROFILE B IS NOT THE EVALUATED PROFILE B (found + measured 2026-08-30,
   OPEN as a DATA issue; the extractor is correct and is NOT to be changed).**
   Every `*_372col_2026-05-15.parquet` under
-  `/mnt/v/zen/zensim-training/2026-05-15-full-features/` — **which is
-  `bake_verdict`'s DEFAULT `--features-root`, i.e. the root under every
-  `--regime 372` verdict ever published** — carries a masked (`f228..299`) + IW
+  `/mnt/v/zen/zensim-training/2026-05-15-full-features/` — **which WAS
+  `bake_verdict`'s DEFAULT `--features-root` until 2026-08-30, i.e. the root
+  under every `--regime 372` verdict published before then** (the default is now
+  the current-extractor root; see the DONE note below) — carries a masked
+  (`f228..299`) + IW
   (`f300..371`) block that today's extractor does not reproduce, and that was
   **never reproducible**: at `58e6f8d8` (the commit those tables record as their
   own build) the block is a function of `RAYON_NUM_THREADS` — 1/2/8/28 give four
@@ -68,11 +70,29 @@ implements its A1-A5/A9 candidates.
   unrefreshable), so a zero delta there is an identity, not evidence. Record:
   `benchmarks/eval372_current_root_2026-08-30.md`; registry:
   `eval372-stored-root-thread-dependent-2026-08-30` (+ the basic-only immunity
-  and dial-grid entries). **STILL registered, not executed:** flipping
-  `bake_verdict`'s DEFAULT root (governance — it silently moves every future 372
-  number), the board regen, the 372 dial/corruption-grid rebuild (needs a decode
-  pass — the `q<X>.png` cache is gone), and B's training-leg re-extraction
-  (~227k pairs — a fleet wave).
+  and dial-grid entries).
+  **DONE 2026-08-30 (default flip):** `bake_verdict`'s (and `bake_compare`'s)
+  default `--features-root` IS the current-extractor root, owned by ONE constant
+  — `zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372` (the path was a
+  literal in ten `.rs` files before). Every run now prints its ruler
+  (`bake_verdict: features-root era — …`), two tests pin the default, and a
+  flagless verdict was verified **byte-identical** to the same run with the root
+  passed explicitly (full-json sha256 `9596f1bd…`; the markdown differs only in
+  the wall-time line) and reproduces the round-4b current-era numbers exactly.
+  **Nothing was rewritten** — the 2026-05-15 root stays on disk and stays a valid
+  STORED-ERA read (`eval_roots::STORED_FEATURES_ROOT_2026_05_15`, which the
+  probe/trainer bins now name explicitly so their era choice is visible); the flip
+  only changes what a flagless invocation means going forward. The dial +
+  corruption grids are NOT part of the flip — they are their own pre-fix files,
+  annotated `dial372-grid-thread-dependent-era-2026-08-30`.
+  **DONE 2026-08-30 (board):** the 11 current-era verdicts are on the gauntlet as
+  `@cur372` rows — `benchmarks/board_era_rows_2026-08-30.md`, which also records
+  the MEASURED finding that **7 of the 9 "stored-era" board rows were never read
+  on the stored root** (they are `--regime 720` ext720 reads, bit-exactly
+  reproduced; registry `board372-row-read-on-ext720-root-2026-08-30`).
+  **STILL registered, not executed:** the 372 dial/corruption-grid rebuild (needs
+  a decode pass — the `q<X>.png` cache is gone) and B's training-leg
+  re-extraction (~227k pairs — a fleet wave).
 
 - **✅ RESOLVED 2026-08-06 (appendix V) — THE CID22 B9 BAND WAS DEGENERATE AND
   F8 READ AN ABSOLUTE VALUE.** Kept here because **every per-band number
@@ -252,7 +272,16 @@ implements its A1-A5/A9 candidates.
 **The canonical index for all ML data lives at `~/work/zen/DATA_PROVENANCE.md`.**
 
 Quick paths:
-- Trainer input: `/mnt/v/zen/zensim-training/canonical-2026-05-21/` (local) + `s3://zentrain/canonical-2026-05-21/` (R2) + `/mnt/tower/output/zensim-archive-2026-05-20/` (Tower)
+- **Eval features root (`--regime 372`), default since 2026-08-30:**
+  `/mnt/v/zen/zensim-training/2026-08-30-full-features-372/` — the CURRENT
+  extractor (`build_commit ea16c7ee`). The previous default
+  `/mnt/v/zen/zensim-training/2026-05-15-full-features/` stays on disk as a valid
+  STORED-ERA read; it is not deleted and not rewritten. Both are named once, in
+  `zensim_validate::eval_roots` (`DEFAULT_FEATURES_ROOT_372` /
+  `STORED_FEATURES_ROOT_2026_05_15`) — never re-type the literal. Every
+  `bake_verdict` run prints which era it read. Era shift is model-specific: see
+  `benchmarks/eval372_current_root_2026-08-30.md`, ledger §3.28.
+- Trainer input: `/mnt/v/zen/zensim-training/canonical-2026-05-21/` (local) + `s3://zentrain/canonical-2026-05-21/` (R2) + `/mnt/tower/output/zensim-archive-2026-05-20/` (Tower) — **training legs are still PRE-FIX** (§3.27); the flip above is an EVAL default only
 - Per-row truth: `_MANIFEST.json` in each canonical/picker training dir
 - Master inventory: `~/work/zen/_ml-inventory-2026-05-20/00-MASTER-SYNTHESIS.md` (7-part forensic inventory of repos + parquets + datasets, 2026-05-20)
 - Worktree audit: `~/work/zen/_ml-inventory-2026-05-20/01-zensim.md`
@@ -1237,9 +1266,16 @@ Build with `cargo build --release --bin bake_verdict -p zensim-validate`.
 ```sh
 ./target/release/bake_verdict --bake <bake.bin> \
     [--corpora cid22,kadid,tid,konjnd,aic3] \
-    [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features] \
+    [--features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372] \
     [--output verdict.md]
 ```
+**The `--features-root` default flipped to the current-extractor root on
+2026-08-30** (owner: `zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372`).
+Every run prints `bake_verdict: features-root era — <label> :: <path>`, so a
+verdict is self-describing; pass
+`--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features` for a
+deliberate STORED-ERA read (the note relabels itself). A number read on one era
+cannot be corrected into the other — the shift is model-specific.
 Loads pre-extracted 372-feature parquets per validation corpus + bake
 bytes, scores MLP via `Predictor::predict_transformed`, emits full
 Mohammadi panel (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE) aggregate +

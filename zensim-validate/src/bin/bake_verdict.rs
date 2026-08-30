@@ -10,7 +10,9 @@
 //! New path: read parquet sidecars + MLP forward only, <5 s wall.
 //!
 //! Inputs (T10.1 outputs):
-//!     /mnt/v/zen/zensim-training/2026-05-15-full-features/
+//!     /mnt/v/zen/zensim-training/2026-08-30-full-features-372/  (default since
+//!     2026-08-30; file names are deliberately the 2026-05-15 ones — the ROOT
+//!     carries the date. The old root stays valid as a STORED-ERA read.)
 //!         aic3_features_372col_2026-05-15.parquet
 //!         cid22_features_372col_2026-05-15.parquet
 //!         kadid_features_372col_2026-05-15.parquet
@@ -30,7 +32,7 @@
 //!     bake_verdict --bake <path>
 //!                  [--corpora cid22,kadid,tid,konjnd,aic3]
 //!                  [--output <path.md>]
-//!                  [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features]
+//!                  [--features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372]
 //!
 //! Verification: when invoked with the V_22-IW v2 calibrated bake
 //! (`zensim-experimental/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`), the
@@ -51,6 +53,7 @@ use zenpredict::{Model, Predictor};
 
 use zensim_validate::bands;
 use zensim_validate::eval_report;
+use zensim_validate::eval_roots::{DEFAULT_FEATURES_ROOT_372, era_of};
 use zensim_validate::panel::{
     Orientation, PerGroupSrocc, compute_panel, per_group_srocc, rescale_logistic, spearman,
 };
@@ -330,7 +333,7 @@ fn slot_720_file(name: &str, root: &Path) -> Option<String> {
 }
 
 /// Default `--features-root` for `--regime 720`.
-const DEFAULT_FEATURES_ROOT_720: &str = "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22";
+const DEFAULT_FEATURES_ROOT_720: &str = zensim_validate::eval_roots::FEATURES_ROOT_720;
 /// Default dial + corruption grids for `--regime 720` (720-wide re-extractions).
 const DEFAULT_DIAL_GRID_720: &str =
     "/mnt/v/output/zensim/v2-eval-720-2026-07-22/dial_grid_720col_2026-07-22.parquet";
@@ -374,7 +377,7 @@ const PERPAIR_METRIC_COLS: &[(&str, &str)] = &[
 
 /// Default `--features-root` for `--regime 944` (the ext944 canonical legs +
 /// TEST-view eval slices; `_MANIFEST.json` carries per-file sha256s).
-const DEFAULT_FEATURES_ROOT_944: &str = "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01";
+const DEFAULT_FEATURES_ROOT_944: &str = zensim_validate::eval_roots::FEATURES_ROOT_944;
 /// Default dial + corruption grids for `--regime 944`.
 const DEFAULT_DIAL_GRID_944: &str =
     "/mnt/v/output/zensim/v2-eval-944-2026-08-01/dial_grid_944col_2026-08-01.parquet";
@@ -703,7 +706,7 @@ USAGE:\n\
                  [--corpora cid22,kadid,tid,konjnd,aic3,aic4]\n\
                  [--output <path.md>] [--html <path.html>]\n\
                  [--ramp-grid <path.parquet>] [--compare <ref-bake.bin>]\n\
-                 [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features]\n\
+                 [--features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372]\n\
 \n\
 DEFAULTS:\n\
     --corpora       all 6 (cid22,kadid,tid,konjnd,aic3,aic4)\n\
@@ -713,7 +716,9 @@ DEFAULTS:\n\
     --compare       none (per-zone dial-agreement vs a reference bake)\n\
     --corruption-grid canonical grid (negative-tail gate; auto if present)\n\
     --corruption-head none (companion head bake scored on the corruption grid)\n\
-    --features-root /mnt/v/zen/zensim-training/2026-05-15-full-features\n\
+    --features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372\n\
+                    (the CURRENT-extractor 372 root, default since 2026-08-30; the\n\
+                    2026-05-15 root stays on disk as a valid STORED-ERA read)\n\
 \n\
 REGIMES (--regime 372|720|944):\n\
     372  (default) v1 feature space, 372col corpora\n\
@@ -761,8 +766,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             )
         });
     let mut corruption_head: Option<PathBuf> = None;
-    let mut features_root: PathBuf =
-        PathBuf::from("/mnt/v/zen/zensim-training/2026-05-15-full-features");
+    let mut features_root: PathBuf = PathBuf::from(DEFAULT_FEATURES_ROOT_372);
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(CANONICAL_DIAL_GRID));
@@ -2284,7 +2288,9 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 ///
 /// It also could not answer "which corpus?" when two plausibly-named ones
 /// exist. They did: `2026-05-15-full-features/cid22_features_372col…` (this
-/// binary's default, sha `a1050ace…`) and `canonical-2026-05-21/val/cid22.parquet`
+/// binary's default UNTIL 2026-08-30 — the current-extractor root reuses the
+/// same file name, so the ROOT is the only thing that disambiguates; sha
+/// `a1050ace…` is the 2026-05-15 one) and `canonical-2026-05-21/val/cid22.parquet`
 /// (the canonical set per CLAUDE.md, sha `6eea0825…`). Measured 2026-07-15:
 /// same 4,292 rows in the same order, `human_score` and all 372 features
 /// byte-identical — the canonical one merely adds 21 target columns. So no
@@ -2370,6 +2376,14 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Every verdict states the ruler it was produced on (2026-08-30): the 372 default
+    // moved to the current-extractor root, and a number read on one era cannot be
+    // corrected into the other (the shift is model-specific — see zensim_validate::eval_roots).
+    eprintln!(
+        "bake_verdict: features-root era — {} :: {}",
+        era_of(&args.features_root),
+        args.features_root.display()
+    );
     eprintln!(
         "bake_verdict — bake={}  features-root={}  corpora={}",
         args.bake.display(),
@@ -4067,7 +4081,11 @@ mod tests {
         assert!(!r.ends_with("pools") && !r.ends_with("carriers"));
 
         // A manifest with no `regime` key at all (every pre-2026-08-30 root).
-        std::fs::write(d.join("_MANIFEST.json"), r#"{"description":"old","entries":[]}"#).unwrap();
+        std::fs::write(
+            d.join("_MANIFEST.json"),
+            r#"{"description":"old","entries":[]}"#,
+        )
+        .unwrap();
         assert_eq!(root_declared_regime(&d), None);
         std::fs::remove_dir_all(&d).ok();
     }
@@ -4119,6 +4137,46 @@ mod tests {
         assert_eq!(a.perpair_metrics, PathBuf::from("/tmp/pp.parquet"));
         let names: Vec<&str> = a.corpora.iter().map(|c| c.name).collect();
         assert_eq!(names, vec!["cid22", "konjnd"]);
+    }
+
+    /// THE DEFAULT ROOT IS PINNED (2026-08-30 flip). A flagless `bake_verdict` must read
+    /// the CURRENT-extractor 372 root; a silent revert to `2026-05-15-full-features` would
+    /// change every future 372-regime number without touching a call site, and the era
+    /// shift is model-specific so no correction factor could undo it
+    /// (`benchmarks/eval372_current_root_2026-08-30.md`). The stored root stays a valid
+    /// STORED-ERA read — it is just no longer what "no flag" means.
+    #[test]
+    fn default_features_root_is_the_current_extractor_372_root() {
+        let a = parse(&["--bake", "/x/b.bin"]);
+        assert!(!a.regime_720 && !a.regime_944);
+        assert_eq!(a.features_root, PathBuf::from(DEFAULT_FEATURES_ROOT_372));
+        assert_eq!(
+            a.features_root,
+            PathBuf::from("/mnt/v/zen/zensim-training/2026-08-30-full-features-372")
+        );
+        assert_ne!(
+            a.features_root,
+            PathBuf::from(zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15)
+        );
+        // …and the run line can name the era it just pinned.
+        assert!(era_of(&a.features_root).contains("current-extractor 372"));
+    }
+
+    /// An explicit `--features-root` still wins, and the note follows it — that is how a
+    /// deliberate stored-era read stays available and stays LABELED.
+    #[test]
+    fn explicit_features_root_overrides_the_default_and_relabels_the_era() {
+        let a = parse(&[
+            "--bake",
+            "/x/b.bin",
+            "--features-root",
+            zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15,
+        ]);
+        assert_eq!(
+            a.features_root,
+            PathBuf::from(zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15)
+        );
+        assert!(era_of(&a.features_root).contains("STORED-ERA 372"));
     }
 
     /// `--regime 720` behavior is unchanged by the 944 addition: 720 defaults,
