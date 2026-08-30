@@ -1247,3 +1247,59 @@ era-2 root. The flip to `2026-08-30-era3-full-features-372` is now supported by
 the table above; the one caveat to weigh is that six of its corpora (aic4,
 nonphoto, imazen26, sdr25, hfnlproxy, hf_nearlossless) are copied prior-era
 rows, so a flip makes the default root era-mixed until those are re-extractable.
+
+---
+
+## 13. FINAL TABLE — 944-full, the one product mode (1 / 8 / 16 threads)
+
+The reporting matrix is **1 / 8 / 16 threads** (user correction; 28T is not a
+reported cell). All rows are `fold944_full` — 944 with every pool live — on the
+final era-3 tree. Wall is `/usr/bin/time` over 60/20/6 iterations; Ir is
+callgrind (serial, `v3` tier, no-avx512 build, **net of the harness's
+image-construction constant** 27,549,000 / 110,172,744 / 440,644,680); RSS is
+`/usr/bin/time -v` peak, including the two input images.
+
+| size | Ir (net) | Ir/MP | 1T | 8T | 16T | best | RSS 1T | RSS 8T | RSS 16T |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 576² | 540,211,635 | 1628 M | 17.33 ms | 7.17 ms | **6.83 ms** | **2.54×** | 39.3 MB | 38.9 MB | 38.8 MB |
+| 1152² | 2,095,277,476 | 1579 M | 76.00 ms | **33.00 ms** | 34.50 ms | **2.30×** | 76.4 MB | 76.3 MB | 75.4 MB |
+| 2304² | 8,204,093,562 | 1546 M | 381.67 ms | **180.00 ms** | 180.00 ms | **2.12×** | 162.9 MB | 166.0 MB | 163.0 MB |
+
+Three things this table says:
+
+* **Ir/MP is essentially flat** (1628 → 1546 M/MP across a 16× pixel range),
+  so the walk's per-pixel instruction cost does not degrade with size — the
+  earlier convexity in *wall* time is memory-system behaviour, not extra work.
+* **Scaling peaks at 8 threads and is flat-to-slightly-worse at 16** (1152²
+  actually regresses 33.00 → 34.50). 944-full tops out at **2.1–2.5×**, well
+  short of the buffered scoring path. §11.2 names why, and it is not the
+  producer: `dense_block_kernel` is 23 % of the walk with 3-way-only
+  parallelism and is not bit-exactly row-splittable as written, and
+  append/BANDVIS/CSFW are Y-only so the channel fan-out is bounded by one task.
+* **RSS is thread-independent** (≤2 % across 1→16T), which is the band-scratch
+  design working as intended: the four band-slot scratches are per *channel*,
+  not per *thread*, so adding threads costs no memory.
+
+### Spill counts, kernels this lane touched (`v4x`, final tree)
+
+| kernel | spill stores | spill loads |
+|---|---:|---:|
+| `box_blur_h_inner_v4x` | 1 | 2 |
+| `box_blur_h_into_abs_diff_inner_v4x` | 1 | 2 |
+| `fused_blur_h_ssim_inner_v4x` | 4 | 2 |
+| `fused_vblur_ssim_inner_v4x` | 4 | **28** |
+
+The rem-ring left every kernel it touched spill-clean. `fused_vblur_ssim`
+remains the one kernel with real spill traffic and the standing
+fission-vs-fusion candidate — **not attempted**, and worth stating plainly
+that the two fission-adjacent experiments this lane *did* run (activity-fusion
+§9.5, row-parallel blur §11.1) both came back negative or neutral, so the
+prior on it should be "measure, expect nothing" rather than "obvious win".
+
+### Comparison baseline (buffered scoring path, same box)
+
+Buffered is the path `score()` still runs, so it is the baseline, not a rival
+mode: `buf_v1_372` at 8T measures 3.0 ms @576² and 9.3 ms @1152² (§10.4). The
+fold is 2.2–3.8× that today. Closing it is the §5 four-blocker checklist plus
+the `dense_block_kernel` restructuring — the fold does not retire buffered
+until parity *and* perf are both proven.
