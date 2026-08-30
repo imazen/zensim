@@ -33,9 +33,16 @@ implements its A1-A5/A9 candidates.
   **What this means for numbers you read:** shipped **B** puts 23 of its 95 live
   inputs in `f228..371`, including its largest weight (`f353`, norm 182.4).
   Matched-row, same bake, same pixels — stored root → fresh root: CID22 SROCC
-  **0.87638 → 0.88212**, KonJND **0.54665 → 0.64967**, AIC-3 0.77743 → 0.79410,
-  TID 0.78866 → 0.79691, KADID 0.82008 → 0.80426 (KADID is B's train==val CHEAT
-  corpus). Per-pair the **dial** shifts mean **−4.98** (CID22) / **−5.86**
+  **0.87638 → 0.88212**, KonJND **0.54665 → 0.64967**, AIC-3 0.77743 →
+  **0.76501**, TID **0.78683 → 0.77852**, KADID 0.82008 → **0.80847** (KADID is
+  B's train==val CHEAT corpus), kon504 |0.59349| → **|0.51938|**. *(The AIC-3 /
+  TID / KADID figures first published here were 0.79410 / 0.79691 / 0.80426 —
+  key-aligned on a non-unique `(ref_basename, human_score)` key, which collapsed
+  a whole repeated-key group onto ONE fresh row: aic3's fresh table held 100
+  distinct rows of 600. Corrected positionally 2026-08-30; the AIC-3 and TID
+  deltas change SIGN, so the runtime B is NOT better on every holdout —
+  `benchmarks/eval372_current_root_2026-08-30.md` §5. CID22 + KonJND have unique
+  keys and were never affected.)* Per-pair the **dial** shifts mean **−4.98** (CID22) / **−5.86**
   (KonJND) zensim points, >0.5 pt on 99.9 %/100 % of pairs, max 17.4 — and
   `Zensim::compute` at `codec_target` matches the FRESH prediction to 8 decimals
   on 10/10 sampled pairs. **So: do NOT cite a `--regime 372` verdict number for
@@ -48,9 +55,24 @@ implements its A1-A5/A9 candidates.
   `v1_masked_and_iw_blocks_are_thread_invariant`). Fresh tables + drift matrix +
   `_MANIFEST.json`: `/mnt/v/output/zensim/v1-extractor-drift-2026-08-30/`.
   Record: `benchmarks/v1_extractor_drift_2026-08-30.md`,
-  `docs/DATASET_HISTORY.md` §3.27. **Registered, not executed:** rebuild the
-  canonical 372 root at HEAD as a NEW dated root (seconds of CPU), re-verdict
-  the B lineage, re-extract B's training legs (~227k pairs — a fleet wave).
+  `docs/DATASET_HISTORY.md` §3.27.
+  **DONE 2026-08-30 (§3.28):** the NEW dated root is
+  `/mnt/v/zen/zensim-training/2026-08-30-full-features-372/` (drop-in
+  `--features-root`, `_MANIFEST.json` with `build_commit` + per-file sha256 +
+  per-corpus ERA; `kon504/` side root included), and the 372-class lineage is
+  re-verdicted on BOTH eras — **the shift is model-specific, not a constant**
+  (exactly 0.00000 for a basic-block-only bake → |Δ| 0.489 for `cl_tfm_LQ_MLP`
+  on KonJND), with **41 ordering flips** (B goes 4th → 1st on CID22 in its
+  comparison set; the 2-layer blend's +0.004 CID22 win over B is an era
+  artifact). Six corpora in the new root are byte-COPIES (aic4 pre-fix and
+  unrefreshable), so a zero delta there is an identity, not evidence. Record:
+  `benchmarks/eval372_current_root_2026-08-30.md`; registry:
+  `eval372-stored-root-thread-dependent-2026-08-30` (+ the basic-only immunity
+  and dial-grid entries). **STILL registered, not executed:** flipping
+  `bake_verdict`'s DEFAULT root (governance — it silently moves every future 372
+  number), the board regen, the 372 dial/corruption-grid rebuild (needs a decode
+  pass — the `q<X>.png` cache is gone), and B's training-leg re-extraction
+  (~227k pairs — a fleet wave).
 
 - **✅ RESOLVED 2026-08-06 (appendix V) — THE CID22 B9 BAND WAS DEGENERATE AND
   F8 READ AN ABSOLUTE VALUE.** Kept here because **every per-band number

@@ -837,3 +837,90 @@ source CSV under `/mnt/v/backups/...` no longer exists on this box.
 --format tid2013` yields **2,880 of 3,000** TID pairs today — 120 rows silently
 dropped on decode/extract failure, surfaced only as a `2880 valid pairs` count.
 Same "silent skip" class already documented for `dataset_metric_baseline`.
+
+### §3.28 — the DATED current-extractor 372 eval root, and the era shift priced per model (2026-08-30)
+
+**Thought-why:** "§3.27 declared the stored 372 tables stale; rebuild the root
+and re-verdict the lineage." (Registered follow-ups (a) + (b) of
+`benchmarks/v1_extractor_drift_2026-08-30.md` §4c.1–2.)
+
+**Actual why + what shipped:** a NEW dated root at
+`/mnt/v/zen/zensim-training/2026-08-30-full-features-372/` (`_MANIFEST.json`,
+`build_commit ea16c7ee`, per-file sha256 + row accounting + per-corpus ERA +
+per-slot drift-vs-stored), never an in-place overwrite — the 2026-05-15 root is
+untouched and every published 372-regime number keeps its substrate. Eight of
+the fourteen default `bake_verdict` corpora were re-extracted through the SAME
+tool the stored table used; six (aic4, nonphoto, imazen26, sdr25, hfnlproxy,
+hf_nearlossless) are byte-copies because their distorted material is
+bigcodec/R2 encodes or, for aic4, a source CSV that no longer exists — so an
+era delta of zero on those is a **structural identity, not evidence**. Plus a
+current-era `kon504` ruler + a `kon504/` one-file side root.
+
+**Measured (`benchmarks/eval372_current_root_2026-08-30.md`):**
+
+- **The era shift is MODEL-SPECIFIC, not a constant** — 11 bakes × 2 roots ×
+  the default 14-corpus list, same instrument: from **exactly 0.00000** (three
+  basic-block-only bakes, all 15 corpora) to **|Δ| 0.489** (`cl_tfm_LQ_MLP`,
+  KonJND). No correction factor exists for a published 372-era number.
+- **41 ordering flips.** Shipped **B goes 4th → 1st on CID22** among
+  {B, `blend_2L_H128`, `cl_tfm_LQ_MLP`, `Ebothg_scr05`}; `cl_tfm_LQ_MLP` goes
+  **1st → last** on KonJND (0.761 → 0.272) and on AIC-3; the composite leader
+  changes `cl_tfm_LQ_MLP` → `blend_2L_H128`.
+- **The 2-layer blend's headline CID22 win over B (+0.004) is an era artifact** —
+  on the current extractor it is **−0.0002**, i.e. B is ahead. Its TID +0.062 and
+  nonphoto +0.088 survive; its KonJND deficit deepens (−0.038 → −0.145).
+- **csiq / live / pipal (built 2026-07-18) are BIT-IDENTICAL to a HEAD
+  re-extraction** — 0 slots differing, max_abs exactly 0 on 866 / 779 / 21,800
+  rows. §3.27's commit-level era map is now a direct measurement on three
+  corpora, and it survives six weeks of extractor work including the blur
+  rewrite. Same check on cid22 + konjnd vs the drift lane's own `f9fac41e`
+  extraction: 0 cells over tolerance — the `714da506` / `8a98a286` BIT-EXACT
+  claims hold on corpus data.
+- **The 372 dial + corruption grids are themselves pre-fix-era** (extracted
+  2026-05-29 / 05-28, i.e. after `2dab8f30` but before `6af83b60`) and are NOT
+  re-extractable: their pairs TSV names the `q<X>.png` decode cache deleted
+  2026-06-22 (**2,560 of 2,560 dist paths missing**). Both eras of a
+  stored-vs-current re-verdict read the same grid file, so the identical dial
+  panel is an identity, not a clean bill of health.
+- **kon504 is two files under nearly one name.** R1b's keyed 504 rebuild is
+  post-fix (HEAD reproduces it bit-for-bit — W-LIN r7, `df931814`); the 372
+  root's `konjnd_jpeg504_372_2026-08-29.parquet` is a byte-exact subset of the
+  **pre-fix** konjnd table and carries the full §3.27 signature (masked 34,525 /
+  IW 35,254 cells over tolerance on 100 % of rows). Both lanes are right about
+  different files.
+
+**CORRECTION to §3.27's source doc (§3b of `v1_extractor_drift_2026-08-30.md`):**
+its KADID / TID / AIC-3 rows are invalid — the study's `mkroots.py` aligned
+stored↔fresh on `(ref_basename, human_score)`, a key that is **not unique** on
+those corpora (stored rows in repeated groups: KADID 64.8 %, AIC-3 100 %, TID
+24.2 %), so a whole group collapsed onto one fresh row. Its own `freshroot/`
+tables carry the evidence: **aic3 100 distinct rows of 600**, kadid 6,227 of
+10,125, tid 2,505 of 2,880; **cid22 and konjnd 0 duplicated**, which is why the
+headline CID22/KonJND numbers stand. Positionally aligned: KADID 0.82008 →
+**0.80847**, TID **0.78683 → 0.77852**, AIC-3 0.77743 → **0.76501** — the TID
+and AIC-3 deltas **change sign**, so "on every genuine holdout the runtime B is
+better" is falsified (AIC-3 goes DOWN). Mechanism and decision unchanged.
+
+**Loader fix that came with it (`2d94890c`):** `load_tid2013` forced the
+reference stem upper-case while TID2013 ships `i25.bmp` LOWERCASE, so 120 of
+3,000 rows named a nonexistent path and were dropped with the loss visible only
+as a row count (§3.27's "separate defect found in passing"). Both sides now
+resolve through a case-insensitive index and an unresolved label row is FATAL
+unless the caller sets `ZENSIM_ALLOW_MISSING_PAIRS=1`. The new root's TID is
+**3,000/3,000**, and the recovered 120 rows are bit-identical to the stored
+table in basic+peaks — they were absent, not different.
+
+**Registered, NOT executed:** `bake_verdict`'s default `--features-root` is NOT
+flipped (that silently changes every future 372 number for every lane —
+governance, not a lane decision); the board is NOT regenerated (ready-to-promote
+verdicts at `/mnt/v/output/zensim/eval372-roster-2026-08-30/json/<label>_new.json`);
+the dial/corruption grid rebuild needs a decode pass first; aic4 stays pre-fix;
+B's training legs stay pre-fix (the retrain is still a fleet wave); BHdr's own
+PU-linear HDR route is still unmeasured — the `BHdr_sdr_route` row bounds only
+the SDR-route sensitivity (≈0.002 SROCC).
+
+**Registry:** `benchmarks/eval_annotations.json` gains
+`eval372-stored-root-thread-dependent-2026-08-30` (invalidated, 6 cells),
+`eval372-basic-only-bakes-era-independent-2026-08-30` (annotated, 3 cells —
+measured Δ 0.00000, the invalidation does NOT apply) and
+`dial372-grid-thread-dependent-era-2026-08-30` (annotated, 9 cells).

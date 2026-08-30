@@ -222,6 +222,23 @@ to **all 8 printed decimals, 10 of 10** (e.g. row 0: 35.73740903 both; row 4291:
 
 ### 3b. Rank panel — same bake, same pairs, same pixels, two feature tables
 
+> **⚠ CORRECTION (2026-08-30, round-4b — `benchmarks/eval372_current_root_2026-08-30.md` §5).**
+> **The KADID, TID and AIC-3 rows of the table below are NOT valid; CID22 and
+> KonJND are.** `mkroots.py` aligned stored↔fresh on
+> `(ref_basename, round(human_score, 9))` with a first-occurrence-wins index, and
+> that key is not unique on those three corpora — so every row of a repeated-key
+> group was matched to the SAME fresh row. MEASURED on the `freshroot/` tables
+> shipped with this study (distinct feature vectors vs rows): **aic3 100 distinct
+> of 600 (83.3 % duplicated), kadid 6,227 of 10,125 (38.5 %), tid 2,505 of 2,880
+> (13.0 %); cid22 and konjnd 0 duplicated.** Positionally aligned (same loader,
+> same label file, `human_score` elementwise equal), the corrected values are
+> **KADID 0.82008 → 0.80847**, **TID 0.78683 → 0.77852** (on the full 3,000 rows,
+> which §4c.7's loader fix restored), **AIC-3 0.77743 → 0.76501** — and the TID
+> and AIC-3 deltas **change sign**. Consequently the paragraph below beginning
+> "On every corpus that is a genuine holdout" is **falsified**: AIC-3 is a
+> genuine holdout and it goes DOWN. The mechanism (§1, §2) and the decision (§4)
+> are unaffected.
+
 `bake_verdict` (`zensim_validate::panel`, the canonical Mohammadi panel; no statistic
 recomputed here). Row sets are matched exactly between the two roots (§5 caveat).
 
