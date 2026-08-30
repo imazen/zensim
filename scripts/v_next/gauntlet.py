@@ -145,6 +145,22 @@ DEFAULT_LOOP_TARGETING = (
     # butter comparator (outer_zensimA 12/27 j2, 14/27 j3) at both budgets.
     "/home/lilith/work/zen/jxl-encoder/benchmarks/zensim_loop_23shot_summary_2026-08-26.json"
 )
+# ---- 372 ERA SUFFIX (2026-08-30) ------------------------------------------------------
+# A board name ending in this suffix is the SAME BAKE as its unsuffixed sibling, read on
+# the dated current-extractor 372 root (/mnt/v/zen/zensim-training/2026-08-30-full-features-372,
+# _MANIFEST.json build_commit ea16c7ee) instead of the 2026-05-15 root whose masked/IW block
+# (f156-371) was a function of RAYON_NUM_THREADS. The stored-era row is NEVER overwritten —
+# it stays, flagged by benchmarks/eval_annotations.json. Details + the era table:
+# benchmarks/eval372_current_root_2026-08-30.md, benchmarks/board_era_rows_2026-08-30.md.
+ERA372_CUR_SUFFIX = "@cur372"
+
+
+def era_base_name(name: str) -> str:
+    """The unsuffixed stem of a board name — i.e. the bake's identity, era stripped.
+    Any rule that judges the MODEL (not the ruler it was read on) must scope on this,
+    or an era twin gets judged differently from the row it is paired with."""
+    return name[:-len(ERA372_CUR_SUFFIX)] if name.endswith(ERA372_CUR_SUFFIX) else name
+
 LOOP_BAKE_MAP = {
     # loop-model key (summary JSON `models` key, = the sweep TSV run prefix)
     #   ->  bake `name` on the gauntlet board (fulleval JSON `name`).
@@ -181,8 +197,19 @@ CURATED_BOARD = [
     # era flagships (pre-944 eras)
     "winner_dial_Ebothg_hfgain_winsor_dial", "Ebothg_scr0_5_dial",
     "ADD156_safesyn_only_raw_lasso", "b_sdr_linear_cid80_inclwinsor_dense_dial",
+    "b_sdr_linear_cid80_inclwinsor_dense_dial" + ERA372_CUR_SUFFIX,
     "v47_strict_QAT_native", "coherent924_selected", "bhdr_linear_shaped_cvvdpmix",
-    "v02_bvls_NO_shaping",
+    "v02_bvls_NO_shaping", "v02_bvls_NO_shaping" + ERA372_CUR_SUFFIX,
+    # 372 ERA PAIRS (2026-08-30, benchmarks/board_era_rows_2026-08-30.md): the four
+    # decision-relevant cells of the 41 ordering flips are default-visible as PAIRS —
+    # shipped B (4th -> 1st on CID22), the 2-layer blend (new composite leader; its
+    # published "+0.004 over B" is an era artifact), cl_tfm (1st -> LAST on KonJND and
+    # AIC-3, composite -0.049) and the BVLS no-shaping arm (current-era KonJND leader).
+    # cl_tfm's STORED half joins curation here so the pair reads together. The other
+    # seven @cur372 rows are grid-interior behind the "@cur372" family toggle.
+    "cl_tfm_corruption_LQ_MLP_s13",
+    "cl_tfm_corruption_LQ_MLP_s13" + ERA372_CUR_SUFFIX,
+    "mlp_2L_diverse_H128" + ERA372_CUR_SUFFIX,
     # the 944 era-bridge (EM4 evaluated on the 944 root = the bar source, 0.8923796503)
     "sota944_EM4_s42_on944root",
     # HDR-944 wave candidates (2026-08-27; D2 freeze pending — user asked for
@@ -254,6 +281,11 @@ CURATED = set(CURATED_BOARD)
 
 def family_of(name: str) -> str:
     """Control-bar family grouping (group toggles). Input = the board name."""
+    if name.endswith(ERA372_CUR_SUFFIX):
+        # Era-suffixed rows read the SAME bake on the 2026-08-30 current-extractor 372
+        # root; checked FIRST so a pair's two halves never land in different families
+        # (every stem here also matches a prefix rule below).
+        return "@cur372 (current extractor)"
     if name.startswith("peer_"):
         return "peers"
     n = name[len("sota944_"):] if name.startswith("sota944_") else name
@@ -763,7 +795,10 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
         # Scope: the SDR dial grid judges SDR dial models only — peers are
         # reference metrics (not dials) and HDR-family bakes are judged on
         # the HDR route panel, not this grid.
-        nm = b.get("name") or ""
+        # Scope on the ERA-STRIPPED stem: an @cur372 twin is the same MODEL as its
+        # sibling, so the peers/HDR exemption must apply identically to both (its
+        # `dial` block is bit-equal — both eras read the same --dial-grid file).
+        nm = era_base_name(b.get("name") or "")
         fam = family_of(nm)
         if nm.startswith("peer_") or fam in ("HDR", "peers"):
             b["knob_end_fail"] = []

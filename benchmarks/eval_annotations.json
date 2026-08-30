@@ -894,6 +894,88 @@
    "evidence": "benchmarks/eval372_current_root_2026-08-30.md §dial; benchmarks/eval_grids_2026-05-29.pointer.md; docs/DATASET_HISTORY.md §3.27",
    "date": "2026-08-30",
    "fix_path": "rebuild the 372 dial grid at HEAD (decode the bitstreams under /mnt/v/input/zensim/images first, then extract_features_372col --corpus pairs); registered, not executed"
+  },
+  {
+   "id": "eval372-current-root-copied-corpora-2026-08-30",
+   "kind": "annotated",
+   "fields": [
+    "rank.aic4",
+    "rank.nonphoto",
+    "rank.imazen26",
+    "rank.sdr25",
+    "rank.hfnlproxy",
+    "rank.hf_nearlossless",
+    "composite"
+   ],
+   "scope": {
+    "names": [
+     "b_sdr_linear_cid80_inclwinsor_dense_dial@cur372",
+     "mlp_2L_diverse_H128@cur372",
+     "cl_tfm_corruption_LQ_MLP_s13@cur372",
+     "v02_bvls_NO_shaping@cur372",
+     "v02_bvls_shaped@cur372",
+     "v47_strict_QAT_native@cur372",
+     "T_appT_b372_lam1e-3@cur372",
+     "bhdr_linear_shaped_cvvdpmix@cur372",
+     "ADD156_safesyn_only_raw_lasso@cur372",
+     "Ebothg_scr0_5_dial@cur372",
+     "winner_dial_Ebothg_hfgain_winsor_dial@cur372"
+    ]
+   },
+   "reason": "an @cur372 row is a CURRENT-extractor read on only 8 of its 14 corpora (cid22, kadid, tid, konjnd, aic3 re-extracted at build_commit ea16c7ee; csiq, live, pipal measured BIT-IDENTICAL to the stored tables). These six are BYTE-COPIES of the 2026-05-15 root because their distorted material is bigcodec/R2 encodes or — for aic4 — a source CSV that no longer exists, so an era delta of exactly zero on them is true by construction, not evidence of era-cleanliness; aic4 specifically is PRE-FIX (pre-2dab8f30) and unrefreshable, while nonphoto/imazen26 are believed post-fix by BUILD DATE only, an inference and not the measurement the csiq/live/pipal trio got. product_composite inherits the mix: imazen26 0.50 + nonphoto 0.30 + aic4 0.05 of its 2.15 denominator = 39.5% of the composite LEVEL rides on stored-era tables (the stored-vs-current composite DELTA is clean — those terms cancel)",
+   "evidence": "benchmarks/eval372_current_root_2026-08-30.md §2 (root table, 'COPIED ≠ current') + §3a; benchmarks/board_era_rows_2026-08-30.md",
+   "date": "2026-08-30",
+   "fix_path": "re-extract the six at HEAD (needs a decode pass for the bigcodec/R2 legs; aic4 is permanent — its source CSV is gone). Until then read an @cur372 row's era-clean axes only: cid22/kadid/tid/konjnd/aic3/csiq/live/pipal"
+  },
+  {
+   "id": "dial372-grid-thread-dependent-era-current-rows-2026-08-30",
+   "kind": "annotated",
+   "fields": [
+    "dial",
+    "gates.g1_dynamic_range"
+   ],
+   "scope": {
+    "names": [
+     "b_sdr_linear_cid80_inclwinsor_dense_dial@cur372",
+     "mlp_2L_diverse_H128@cur372",
+     "cl_tfm_corruption_LQ_MLP_s13@cur372",
+     "v02_bvls_NO_shaping@cur372",
+     "v02_bvls_shaped@cur372",
+     "v47_strict_QAT_native@cur372",
+     "T_appT_b372_lam1e-3@cur372",
+     "bhdr_linear_shaped_cvvdpmix@cur372",
+     "ADD156_safesyn_only_raw_lasso@cur372",
+     "Ebothg_scr0_5_dial@cur372",
+     "winner_dial_Ebothg_hfgain_winsor_dial@cur372"
+    ]
+   },
+   "reason": "extends dial372-grid-thread-dependent-era-2026-08-30 (whose names scope lists only the stored-era halves) to the @cur372 halves: the dial grid is its own file (--dial-grid), OUTSIDE --features-root, so both eras of a re-verdict read the SAME dial_grid_372col_2026-05-29 parquet and an @cur372 row's dial numbers are BIT-EQUAL to its stored-era sibling's — a structural identity, not a current-extractor measurement. That grid was extracted 2026-05-29, AFTER the activity-map fix 2dab8f30 but BEFORE the geometry-only band layout 6af83b60, so its masked/IW block is from the thread-count-dependent era and a bake using f156-371 is dialled against extinct features",
+   "evidence": "benchmarks/eval372_current_root_2026-08-30.md §3a; benchmarks/eval_grids_2026-05-29.pointer.md; docs/DATASET_HISTORY.md §3.27",
+   "date": "2026-08-30",
+   "fix_path": "rebuild the 372 dial grid at HEAD (decode the bitstreams under /mnt/v/input/zensim/images first, then extract_features_372col --corpus pairs); registered, not executed"
+  },
+  {
+   "id": "board372-row-read-on-ext720-root-2026-08-30",
+   "kind": "annotated",
+   "fields": [
+    "rank",
+    "composite"
+   ],
+   "scope": {
+    "names": [
+     "cl_tfm_corruption_LQ_MLP_s13",
+     "v02_bvls_NO_shaping",
+     "v47_strict_QAT_native",
+     "bhdr_linear_shaped_cvvdpmix",
+     "ADD156_safesyn_only_raw_lasso",
+     "Ebothg_scr0_5_dial",
+     "winner_dial_Ebothg_hfgain_winsor_dial"
+    ]
+   },
+   "reason": "MEASURED SCOPE CORRECTION to eval372-stored-root-thread-dependent-2026-08-30 / eval372-basic-only-bakes-era-independent-2026-08-30, which assume these board rows are reads of the 2026-05-15 372 root. They are NOT: each is stamped regime \"720\" and a fresh `bake_verdict --regime 720 --corpora cid22` reproduces its cid22 per-pair predictions BIT-EXACTLY (max|Δ| = 0.0 on 4,292 pairs for six of the seven; bhdr max|Δ| 4.9e-6), i.e. they were read on the ext720 root (/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_<corpus>.parquet). That root's masked/IW block is POST-FIX — its cid22 f156/f200/f300/f371 columns are element-identical to the 2026-08-30 372 root's — so these rows already agree with the current-extractor 372 read to ≤2e-4 on CID22 (v02_bvls_NO_shaping 3e-5, cl_tfm 7e-5, v47 9e-5, bhdr 1.9e-4, the three basic-only controls 6e-5..1e-4) and the era-stale flag on them is misdirected. The two board rows stamped regime \"372\" (b_sdr_linear_cid80_inclwinsor_dense_dial, T_appT_b372_lam1e-3) ARE true 2026-05-15-root reads — bit-exact against the round-4b _old.json — and their era flag stands. Nothing here changes round-4b's science: its era table compares _old vs _new from ONE instrument on the two 372 roots and never used a board row",
+   "evidence": "benchmarks/board_era_rows_2026-08-30.md §2 (per-row root attribution table, bit-exact reproductions); benchmarks/eval372_current_root_2026-08-30.md (the era table it corrects the board-row attribution for)",
+   "date": "2026-08-30",
+   "fix_path": "re-verdict the seven at --regime 372 on the current root (their <name>@cur372 row already IS that read); the round-4b doc's §7 registry paragraph should gain this scope correction — flagged for that lane, not edited here"
   }
  ],
  "live-cross-root-targets-divergent-2026-08-29": {
