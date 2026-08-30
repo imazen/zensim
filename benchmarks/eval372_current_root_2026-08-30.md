@@ -13,6 +13,8 @@ per-corpus era, per-slot drift-vs-stored).
 **Verdicts + tables:** `/mnt/v/output/zensim/eval372-roster-2026-08-30/`
 (`roster_era_table.tsv` / `.md`, `json/<label>_{old,new}.json`,
 `kon504/<label>_{old,new}.json`, `old/`+`new/` markdown verdicts).
+**Tower mirror:** `/mnt/tower/output/zensim-eval372-current-2026-08-30/`
+(`rsync -rlt`, sha256-verified on 3 random files against the manifest).
 **Reproduce:** `scripts/canonical_corpus/build_eval372_root.sh` →
 `pack_eval372_root.py` → `eval372_roster.sh` → `eval372_roster_table.py`.
 
