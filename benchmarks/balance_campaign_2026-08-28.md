@@ -3712,3 +3712,27 @@ SUPERSEDED by the `a25d1b80` default flip. **`--full-json` now records `features
 additive, recomputes nothing, 2 tests; stored root honestly reports `manifest_sha256: null`
 (it ships `_MANIFEST.md`). Stale-working-copy incident handled without loss (pre-backup +
 selective re-apply; no other lane's edits clobbered).
+
+## 2026-08-31 ~00:1xZ — ROUND 9: W-LIN 7b — VERDICT PASS (`d9ead488` pre-reg, `cda35fe8` results; 158 arms)
+
+- **Diagnosis corrected round 7 honestly**: the blends' dial compression was ~40 % SPLINE ANCHOR
+  (single-variable `shared-anchor` swap: +22.44 dyn on the round-7 winner), not pure coverage —
+  "no monotone spline can repair it" WITHDRAWN for the blends, stands for the hf head (which IS
+  saturated: raw span 0.366). **Confound caught pre-quote**: the canonical 944 dial grid is
+  `foldapp2` (pools ZEROED), so round-7 pools arms were dialed at the wrong regime →
+  `build_dial944.py DIAL944_MODE` rebuilt the twin from the persisted 2026-07-27 pixels (no
+  re-encode, G-DIAL 4,817/4,817); measured confound +0.23…+0.78 ⇒ round-7's pool-dial claim stands.
+- **Coverage = a RE-CUT, not a re-extraction**: tbig already spans q5→q95 (19,430 rows < 0.10);
+  band-stratified cuts (12 registered edges, deterministic stride, no RNG) on both substrates.
+- **Pre-registered dial gates added**: G-DYN ≥ 60.0 (70 % of B's 86.08; reachable — Hp_lasso_w10
+  80.5 — and discriminating — no round-7 arm cleared it) + G-RANGE PASS; same maximin rule.
+- **Results: 15 arms clear all five rank bars + G-DYN (and G-RANGE)**. Winner
+  `Q7b_pools_g0.2_a0.2_b0.97` (3,583 B): 0.8588 / 0.5118 / 0.8778 / 0.8873 / 0.4056, dyn 61.72,
+  G-RANGE PASS — beats the round-7 winner on EVERY registered axis at the same size; sibling
+  g0.25 variant reaches dyn 71.67. B stored/runtime: 0.8764/0.8821, 0.5186, 0.8505, 0.8609,
+  0.3496, 2/5, dyn 86.08. Head-level: the 7b hf head's dial 25.94 → 89.78 (past B) at p5 3.57.
+- **Non-obvious mechanics**: swapping the hf head outright FAILS (32 arms, 0 at 5/5 — the two hf
+  heads are COMPLEMENTS; the four-way HG = H7b × H closes it); and the two fixes are SUBSTITUTES —
+  after the re-cut, the anchor that bought +22.4 costs 8–13 and plain safesyn is best (fixing
+  coverage removes the anchor's leverage — the user's directive was right).
+- Corrected-fold (option-C) confirmation pass for the winners: REGISTERED, not run (sequencing).
