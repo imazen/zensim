@@ -4255,3 +4255,37 @@ the f64 pooled accumulation ⇒ moves bytes today, so it is recorded as an **era
 `compute` is an API/ownership decision); cross-channel band-slot pooling priced (−7.4 MB at
 1152²/8T, nothing at 16T), not built; 512²/8T still 1.84× (four band slots are genuine there and a
 180-row rolling floor is 85 % of a 512-row image).
+
+## 2026-08-31 ~10:3xZ — ROUND 24: era-2 stage A — the lane's OWN hypothesis falsified, and the 2.12× isolated (`e1a0f724`)
+
+- **Design absorbed (§18)**: era-2 is now the umbrella for all byte-changing speed work, ordered by
+  gain-per-risk — A pass split (lowest risk), B column tiling (biggest gain), C `fold_v1` flag.
+  Two constraints fell out of composing tiling with the lanes/bands, and they are what make tiling
+  SAFE rather than another grouping hazard: **`TILE_WIDTH` must be a multiple of 8** (a pixel's lane
+  is `x mod 8` on the GLOBAL x; for tile `t` at offset `k`, `x mod 8 = k mod 8` iff `Tw ≡ 0 mod 8`,
+  so lane assignment stays tile-invariant and the identity proof carries over untouched — without
+  it tiling would silently permute which terms share a lane), and the merge is a fixed function of
+  **(tile, band), tile-major/band-minor**, which is also the natural loop order ⇒ merge order and
+  loop order coincide and **no per-tile partial storage is needed**. `TILE_WIDTH` joins
+  `ERA2_BAND_ROWS` as semantics-not-a-knob.
+- **Stage A falsified its own §17.2 hypothesis.** Re-baselined on current main first (the other
+  lanes moved these kernels; era-1 106.8/231.8 µs vs era-2 two-pass 226.1/454.9 = 2.12×/1.96×,
+  ≈ §17 ⇒ their work did not change the era relationship). Then the proposed single-pass-on-v4x
+  fusion, implemented behind `const FUSED` and measured: **445.5 / 911.2 µs — 2× WORSE than the
+  two-pass, 3.98× of era-1**. Arithmetic says why: 29 `Lanes8` accumulators = **232 live f32
+  values** against 32 registers — the same wall that capped `POOL_SIMD` at 16 originally. **The
+  two-pass split is not a 16-register concession; it is the right structure on EVERY tier**
+  (the user's "multiple passes per row can beat fusion when it spills" steer, confirmed in code).
+  Byte-neutrality of pass structure is now proven ON the configuration that turned out slower:
+  `era2_fused_and_two_pass_are_bit_identical`, all 35 slots `to_bits()`, 6 geometries × 3 channels.
+- **The remaining 2.12× is attributed**: era-1 accumulates in `V8<T>` magetypes SIMD types, era-2 in
+  plain `[f32; 8]` arrays — with fusion ruled out and the `target_feature` region already in place,
+  the gap is the accumulator REPRESENTATION, not pass structure or ISA. Next lever specified:
+  rewrite the body against `V8<T>` keeping every semantic (V8 IS 8 lanes; explicit `to_array` +
+  `era2_reduce8`, never `reduce_add`; tail folded; band-order merge). **Tiling is deliberately
+  queued BEHIND this** — its win is a cache-footprint effect a 2× compute deficit would mask.
+  The flip stays blocked.
+- ⚠ For other lanes: `cargo clippy --tests --benches -D warnings` **fails on main** with 14
+  warnings, **none in era-2 code** — `feature_v2_stream.rs` (83, 774, 1073), `fold_timing.rs` (45,
+  63, 65, 154, 182), `feature_v2.rs` (639, 2078). Left for their owners rather than a conflicting
+  drive-by.
