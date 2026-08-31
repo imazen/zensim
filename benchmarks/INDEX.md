@@ -214,3 +214,6 @@ These are the docs to read first for a given purpose:
 2. [`v0_20_l0_norms_2026-05-15.md`](v0_20_l0_norms_2026-05-15.md) — GD-selection confirmation across 4 bakes
 3. [`iw_pyramid_spike_methodology_2026-05-15.md`](iw_pyramid_spike_methodology_2026-05-15.md) — paper-faithful pyramid path (untested for ship)
 4. [`iw_pyramid_ab_results_2026-05-15.md`](iw_pyramid_ab_results_2026-05-15.md) — pyramid vs spatial-variance A/B
+
+**Era-2 break — the user's decision surface**:
+[`era2_drop_redefine_table_2026-08-31.md`](era2_drop_redefine_table_2026-08-31.md) — items E (drops) + F (redefinitions) as one table: what each buys, its per-model rank cost, and what it takes to ship. Backed by [`era2_perf_break_2026-08-31.md`](era2_perf_break_2026-08-31.md) and [`blur_radius_locality_branches_2026-08-31.md`](blur_radius_locality_branches_2026-08-31.md).

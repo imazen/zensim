@@ -2168,3 +2168,64 @@ At the 1 MiB L2 on this part that is `tile <= 1365`; **1024** leaves headroom
 on parts with 512 KiB L2 and is inside the measured-flat band. Fixing it at
 1536 because 1536 is what the sweep happened to use would be exactly the
 "hand-distilled from N=1" anti-pattern the workspace rules name.
+
+### 24.5 The two exits, PRICED — exit 1 recovers 80–86 %, and my "about half" was wrong
+
+Round 29's directive was to price the two exits rather than assume, which is
+this lane's own rule and which §24.4's estimate had already broken ("recovers
+roughly **half**"). Priced with a contained timing probe — phase A skips the
+`mu2`/`ssq`/`s12` sweeps in both arms; **exit 1** additionally performs the
+three inner-row copies a redirect would make, **exit 2** performs none.
+Outputs are garbage in both arms by construction; this measures time. 1T,
+`setarch -R`, CCD-pinned, `H_TILE` off so the sweeps are the only variable.
+
+| | 2304² walk | Δ | `planesA` | `fold` | 4608² walk | Δ | `planesA` | `fold` |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 330.48 | — | 39.27 | 80.18 | 1939.21 | — | 248.50 | 382.57 |
+| **exit 1** (copy) | **318.51** | **−11.97 (−3.6 %)** | 22.42 | 81.62 | **1840.03** | **−99.18 (−5.1 %)** | 139.21 | 394.74 |
+| **exit 2** (no copy) | 315.50 | −14.98 (−4.5 %) | 22.51 | 78.06 | 1824.38 | −114.83 (−5.9 %) | 139.28 | 382.17 |
+
+**`planesA` falls 39.27 → 22.42 (−16.85 ms) and 248.50 → 139.21 (−109.3 ms)**,
+reproducing §24.4's −16.69 ms independently. The copy shows up exactly where
+it should — in `fold`, +1.44 ms at 2304² and +12.17 ms at 4608² — and costs
+**3.0 ms / 15.7 ms** of walk.
+
+**So exit 1 captures 80 % (2304²) and 86 % (4608²) of exit 2's win, for zero
+kernel change.** My §24.4 estimate of "roughly half" was wrong because it
+assumed the copy costs as much as the plane write it replaces; it does not —
+the copy's source is an L2-hot band buffer, while the sweep it removes was a
+cold full-plane *read* plus the same write.
+
+**Decision: build exit 1.** Exit 2's extra 3.0 / 15.7 ms would cost an output
+row-offset parameter threaded through all six `fused_vblur_ssim_inner` tier
+bodies, and §23.5 is the standing precedent for not assuming the no-copy form
+wins — there, the no-copy form lost outright. Exit 2 is registered as a
+follow-up with its price attached, not as the primary.
+
+**Two implementation facts that cost time to establish, recorded so they are
+not re-derived:**
+
+1. **§24.4's overlap obstacle is smaller than stated.** The fused kernel
+   writes **only the inner rows** of its `mu1_out`/`mu2_out`/`ssq_out`/
+   `s12_out` (its own comment says so, and the pool replay then reads exactly
+   `inner_start .. inner_start + inner_h`). So bands write disjoint strip-plane
+   rows even though their band *buffers* overlap by `2 × V1_BAND_OVERLAP`. The
+   corruption I predicted only occurs if a caller hands the kernel a
+   whole-buffer output slice **and** the kernel wrote halo rows — it does not.
+2. **The blocker is a BORROW, not the algorithm.** `stream_phase_b` takes
+   `scr: &ScratchV2Strip`, and its `src_win`/`dst_win` arguments are produced
+   by `stream_windows_shared(.., scr)` — i.e. they may borrow `scr.src_wide` /
+   `scr.dst_wide`. Taking `&mut scr` to write `mu2`/`ssq`/`s12` conflicts with
+   that live immutable borrow. The fix is a **field-level destructure at the
+   call site** (`let ScratchV2Strip { src_wide, dst_wide, mu2, ssq, s12, .. }`)
+   with the window selection inlined there, so the raw windows and the three
+   moment planes are disjoint field borrows. That, plus moving the fold to
+   first among the phase-B kernels (it is currently third of five; the
+   accumulators are independent, so the move is byte-neutral), is the whole
+   build.
+
+Also note the redirect only applies where the fold actually produces the
+planes: `V1PoolsMode::Full` (⇒ `BandPoolWork::Full` ⇒ `store_sigma`), which is
+the 944 product mode. Any other pool mode keeps phase A's sweeps, and the
+parallel band path needs the per-band output slices chunked disjointly before
+it can opt in.
