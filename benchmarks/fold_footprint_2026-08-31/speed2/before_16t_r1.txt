@@ -1,0 +1,8 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=41855MiB :: /home/lilith/tmp/foldmem-target/release/deps/fold_engine_bench-a5599983409f8574
+[zenbench] calibration: int=0.18ns/iter mem_bw=110.8GiB/s mem_lat=8.5ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788161783-1d71b4.txt
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_1152 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m13s, ETA in 1m37s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m28s, ETA in 1m23s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m43s, ETA in 1m08s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m58s, ETA in 53s)

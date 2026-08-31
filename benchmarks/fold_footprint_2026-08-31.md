@@ -804,9 +804,16 @@ FE_BIN=<the bench binary> benchmarks/fold_footprint_2026-08-31/rss_sweep.sh out.
 benchmarks/fold_footprint_2026-08-31/model.py out.tsv after      # per-cell error
 benchmarks/fold_footprint_2026-08-31/model.py crossover           # predicted crossover
 BEFORE_BIN=… AFTER_BIN=… benchmarks/fold_footprint_2026-08-31/speed_ab.sh speed 1 16
+FE_BIN=… benchmarks/fold_footprint_2026-08-31/ccd_saturation.sh ccd.tsv 2304 10
+# and the two allocator probes quoted in §3.2 / §5.1:
+MALLOC_ARENA_MAX=1 ZEN_FE_RSS=score_fold ZEN_FE_SIZE=1152 RAYON_NUM_THREADS=1 \
+    /usr/bin/time -v <the bench binary>
 ```
 
 Gates: `cargo test --release -p zensim --features feature-regime-v2,threads,custom-profiles,training`
-(232 lib + 11 `fold_engine_parity` + every integration test, all green), plus a
-`--no-default-features --features feature-regime-v2` build for the non-threaded
-arms of both new functions.
+— **366 passed, 0 failed** on the final tree (re-run after a sibling lane's work
+landed under this one), including `both_engines_are_bit_identical_across_rayon_
+pool_sizes`, `producer_windows_are_advance_invariant`,
+`fold_self_blur_matches_precomputed_h` and `phase_a_blur_bands_are_bit_exact` —
+plus a `--no-default-features --features feature-regime-v2` build for the
+non-threaded arms of both new functions.
