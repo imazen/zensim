@@ -468,7 +468,7 @@ thread-local, and that is an API/ownership decision, not a footprint one.
 
 ---
 
-## 7. Speed — the footprint cut is worth 13–27 % of wall clock at one thread
+## 7. Speed — 13–27 % of wall clock at one thread, 5–14 % at sixteen
 
 `fold_engine_bench` under zenbench, the same bench/arms/generator/box the MT
 lane's §5 used. zenbench interleaves arms WITHIN one process, so the before and
@@ -517,43 +517,51 @@ still fit, the arm moves −10.2 %, consistent with `ref_fold`'s −12.1 ms. **T
 gain is cache residency, and it is only there while something else is not
 holding the cache.**
 
-### 7.2 Sixteen threads — read the ratio, not the level
+### 7.2 Sixteen threads
 
-| arm | 1152² before | after | 2304² before | after |
-|---|---:|---:|---:|---:|
-| `score_buffered` *(control)* | 9.4 | 9.0 | 34.8 | **38.8** |
-| `score_fold` | 13.9 | **12.0** | 54.4 | 57.6 |
-| `feat_buffered` *(control)* | 8.1 | 7.9 | 28.5 | 32.1 |
-| `feat_fold` | 13.9 | 11.9 | 53.1 | 57.9 |
-| `ref_buffered` *(control)* | 7.2 | 6.8 | 27.5 | 29.7 |
-| `ref_fold` | 14.3 | 11.7 | 53.7 | 57.7 |
-| `refinto_fold` | 12.9 | 12.2 | 50.9 | 53.9 |
+The first 16-thread pair overlapped a sibling lane queued on zenbench's
+exclusive lock — every arm in its "after" run came back slower, the untouched
+buffered controls by 8–24 %, with tripled `mad`. Rather than report that, the
+16-thread pair was **re-run end to end on a quiet box** (`speed2/`, load
+0.4–1.2, both runs back to back under the lock, 07:44–08:24 UTC); those are the
+numbers below. The contaminated pair is retained in `speed/` for provenance and
+must not be read as levels.
 
-**The 2304²/16T "after" run is contaminated and must not be read as a level.**
-EVERY arm in it is slower than its "before" counterpart, the untouched buffered
-controls by **+8 % to +24 %**, and its `mad` triples (±6.3–47 ms against
-±1.5–7.4). A concurrent lane's bench had been queued on zenbench's exclusive
-lock across that window. What survives contamination is the RATIO inside one
-process:
+| arm | 1152² before | after | Δ | 2304² before | after | Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| `score_buffered` *(control)* | 9.1 | 9.3 | +2.2 % | 33.7 | 32.6 | −3.3 % |
+| **`score_fold`** | 14.5 | **12.7** | **−12.4 %** | 55.8 | **51.8** | **−7.2 %** |
+| `feat_buffered` *(control)* | 7.7 | 7.9 | +2.6 % | 28.8 | 27.3 | −5.2 % |
+| `feat_fold` | 14.4 | 12.4 | −13.9 % | 55.6 | 52.0 | −6.5 % |
+| `ref_buffered` *(control)* | 6.7 | 6.8 | +1.5 % | 27.3 | 26.6 | −2.6 % |
+| `ref_fold` | 14.5 | 12.5 | −13.8 % | 54.3 | 51.2 | −5.7 % |
+| `refinto_fold` | 13.4 | 12.5 | −6.7 % | 52.9 | 50.3 | −4.9 % |
+| `fused_buffered` *(control)* | 24.7 | 23.9 | −3.2 % | 100.4 | 98.9 | −1.5 % |
+| `split_fold` | 73.6 | 70.8 | −3.8 % | 280.0 | 273.5 | −2.3 % |
+
+The buffered controls move ±3.3 % — the noise floor at 16 threads on this box —
+so read the ratio, which is drift-immune because both arms are measured inside
+one interleaved process:
 
 | size | `score_fold ÷ score_buffered` before | after |
 |---|---:|---:|
-| 1152² / 16T | 1.48 | **1.33** |
-| 2304² / 16T | 1.56 | **1.49** |
+| 1152² / 16T | 1.593 | **1.366** |
+| 2304² / 16T | 1.656 | **1.589** |
 
-At 1152² the ratio improves by 10 %; at 2304² by 4 %, which is inside that run's
-noise. **That split is exactly what §9 predicts** and is the strongest
+At 1152² the ratio improves by **14 %**; at 2304² by **4 %**, which is at the
+edge of the controls' own spread. **That split is exactly what §9 predicts** and is the strongest
 independent evidence for it: the fixes cut the walk's TOTAL footprint but not
 its per-thread HOT SET, so they help wherever the reduced total changes what
 stays resident (1 thread everywhere, 16 threads at 1152²) and do essentially
 nothing at 16 threads on 2304², where `8 × 4.43 MiB = 35.4 MiB` still overflows
 CCD1's 32 MiB L3 either way.
 
-**Load conditions.** The four round-1 runs ran back to back 05:50–07:20 UTC
-under zenbench's exclusive lock. Box load was 0.2–1.5 for the two 1-thread runs
-and the 16-thread BEFORE run; the 16-thread AFTER run overlapped a queued
-sibling lane and is flagged above. A second round was cancelled rather than run
-against that contention.
+**Load conditions.** The 1-thread pair ran back to back 05:50–06:31 UTC under
+zenbench's exclusive lock at box load 0.2–1.5. The 16-thread pair reported here
+is the clean re-run, 07:44–08:24 UTC at load 0.4–1.2, again back to back under
+the lock; its predecessor is kept in `speed/` and flagged above. Second rounds
+were cancelled in both cases rather than run against a sibling lane's queued
+bench.
 
 ---
 
