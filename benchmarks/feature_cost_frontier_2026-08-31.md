@@ -462,11 +462,32 @@ inherits a grown pool scratch from an earlier one. Only `ensure_h` runs.
 The footprint lane's §9.2 finding was that at 2304² eight fold threads need
 35.4 MiB against a 32 MiB L3 while buffered needs 26.6 MiB, and "the threshold
 falls exactly between them". **A peaks-only model class moves the fold to the
-other side of that threshold** — 17.7 MiB, below buffered's own 26.6 MiB. So
-the basic-only class plausibly wins twice: less work per pixel AND a hot set
-that fits where the current one does not. Whether the second win materialises
-is that lane's §9.4 experiment, not this one's; this note supplies the input to
-it, not the answer.
+other side of that threshold** — 17.7 MiB, below buffered's own 26.6 MiB.
+
+**And it moves the OTHER cache term too, which is the one their §9.4 showed
+actually governs the ceiling.** That lane measured N-process saturation at
+2304² going from **3.38× to 5.85×** on the 96 MiB CCD purely by shrinking the
+*per-process tightly-reused* set (`slots · 3 ch · 10 planes · 42 · W · 4`) from
+52.7 MiB to 11.1 MiB — "+80 % throughput from a change that computes nothing
+differently", with the CCD-sensitivity pattern (insensitive before, 22 % apart
+after) proving it is L3 capacity rather than DRAM bandwidth. They were explicit
+that their fixes **do not** move the per-BAND-TASK number.
+
+`V1PoolsMode::Peaks` moves both, because it changes the plane COUNT rather than
+the slot count: `FoldPoolScratch::ensure` never runs, so a slot holds **4
+planes (the band-local H buffer) instead of 10**.
+
+| quantity at 2304², after both lanes | `Full` | **`Peaks`** |
+|---|---:|---:|
+| per band task (hot set) | 4.43 MiB | **2.21 MiB** |
+| per process, 1 slot × 3 ch | 11.1 MiB | **4.4 MiB** |
+| per process, 4 slots × 3 ch (the 16T shape) | 44.3 MiB | **17.7 MiB** |
+
+So the basic-only class plausibly wins twice — less work per pixel AND a
+smaller resident set on the exact term their saturation test responds to.
+**Whether that converts into throughput is their §9.4 experiment, not this
+one's**; this note supplies an input to it (a compute mode that halves the
+plane count), not an answer.
 
 ---
 
