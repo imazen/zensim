@@ -2159,7 +2159,7 @@ impl Zensim {
             && crate::fold_engine::is_fold_backable(config)
         {
             let mut owned;
-            let v2 = match scratch.as_deref_mut() {
+            let v2 = match scratch.as_mut() {
                 Some(s) => &mut s.v2,
                 None => {
                     owned = crate::feature_v2::V2Scratch::new();

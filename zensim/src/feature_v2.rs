@@ -636,7 +636,7 @@ pub(crate) const H_BLUR_ROW_GROUP: usize = 16;
 /// so the bands are cheaper in total work as well as wider.
 /// `benchmarks/fold_mt_scaling_2026-08-31.md`.
 pub(crate) const H_BLUR_BAND_ROWS: usize = 16;
-const _: () = assert!(H_BLUR_BAND_ROWS % H_BLUR_ROW_GROUP == 0);
+const _: () = assert!(H_BLUR_BAND_ROWS.is_multiple_of(H_BLUR_ROW_GROUP));
 
 /// Mirror-without-repeating-edge boundary reflection ("reflect_101" /
 /// whole-sample-symmetric convention: `-1 -> 1`, `-2 -> 2`, `height ->
@@ -2051,9 +2051,6 @@ fn fill_ref_moments(scales: &[([Vec<f32>; 3], usize, usize)]) -> Vec<[V2RefMomen
         .collect()
 }
 
-/// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
-/// fused H-blur + 4x V-blur + activity sequence, over explicit buffers.
-#[allow(clippy::too_many_arguments)]
 /// Row-band-parallel wrapper for [`crate::blur::fused_blur_h_ssim`].
 ///
 /// **Bit-exact by construction, and the construction is the whole argument.**
@@ -2131,6 +2128,9 @@ fn fused_blur_h_ssim_banded(
     );
 }
 
+/// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
+/// fused H-blur + 4x V-blur + activity sequence, over explicit buffers.
+#[allow(clippy::too_many_arguments)]
 fn run_blur_pass_inner(
     src: &[f32],
     dst: &[f32],
@@ -7646,9 +7646,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         csfw,
                         acc,
                     );
-                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::PhaseBBusy, scale);
+                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
                 });
-            crate::fold_timing::stop(__t_f, crate::fold_timing::Phase::PhaseBWall, scale);
+            crate::fold_timing::stop(__t_f, crate::fold_timing::Phase::BWall, scale);
             continue;
         }
 
@@ -7676,9 +7676,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         true,
                         scr,
                     );
-                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::PhaseABusy, scale);
+                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::ABusy, scale);
                 });
-            crate::fold_timing::stop(__t_a, crate::fold_timing::Phase::PhaseAWall, scale);
+            crate::fold_timing::stop(__t_a, crate::fold_timing::Phase::AWall, scale);
             let __t_between = crate::fold_timing::start();
             let scratches: &[ScratchV2Strip; 3] = scratch_strips;
             // Retention hooks (appendix N): serial copies between the two
@@ -7729,9 +7729,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     csfw,
                     acc,
                 );
-                crate::fold_timing::stop(__t, crate::fold_timing::Phase::PhaseBBusy, scale);
+                crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
             });
-            crate::fold_timing::stop(__t_b, crate::fold_timing::Phase::PhaseBWall, scale);
+            crate::fold_timing::stop(__t_b, crate::fold_timing::Phase::BWall, scale);
             true
         } else {
             false

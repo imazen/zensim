@@ -35,9 +35,7 @@ fn mgr() -> ChecksumManager {
 }
 
 fn px(rgba: &[u8]) -> Vec<[u8; 4]> {
-    rgba.chunks_exact(4)
-        .map(|c| [c[0], c[1], c[2], c[3]])
-        .collect()
+    rgba.as_chunks::<4>().0.to_vec()
 }
 
 // ---- Checksums workflow tests ----

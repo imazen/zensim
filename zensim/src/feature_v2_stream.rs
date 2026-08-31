@@ -80,7 +80,7 @@ pub(crate) enum FrontEnd {
 /// producer takes [`advance_rows_for`]'s answer, which is 256 only on a pool
 /// that can spend the degree; the capacity it costs is priced there.
 const ADVANCE_ROWS: usize = 256;
-const _: () = assert!(ADVANCE_ROWS % crate::streaming::DEFAULT_CONVERT_CHUNK_ROWS == 0);
+const _: () = assert!(ADVANCE_ROWS.is_multiple_of(crate::streaming::DEFAULT_CONVERT_CHUNK_ROWS));
 
 /// The advance actually used by one producer — [`ADVANCE_ROWS`] is its CEILING,
 /// not its value (fold-footprint lane, `benchmarks/fold_footprint_2026-08-31.md`).
@@ -771,7 +771,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             }
             chans.iter_mut().for_each(one);
         }
-        drop(chans);
 
         crate::fold_timing::stop(__t_ds, crate::fold_timing::Phase::ProdDownscale, 0);
 
@@ -1070,7 +1069,7 @@ mod tests {
                 // Emission ORDER may differ across advances (the cross-scale
                 // interleave is exactly what the advance changes); the SET of
                 // (scale, y0, side, ch) windows and their bits may not.
-                got.sort_by(|a, b| (a.0, a.1, a.2, a.3).cmp(&(b.0, b.1, b.2, b.3)));
+                got.sort_by_key(|t| (t.0, t.1, t.2, t.3));
                 if ai == 0 {
                     baseline = got;
                     assert!(!baseline.is_empty(), "{w}x{h}: no strips emitted");

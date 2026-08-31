@@ -4312,7 +4312,10 @@ const SPREAD_ROW_BAND: usize = 64;
 /// against low-ms serial work, and the serial path got faster than the
 /// banded one below ~8M elements. Every 576²/1152² compare therefore
 /// takes the serial path; 4K-class compares' scale 0 engages rayon.
-#[cfg_attr(not(any(feature = "custom-profiles", test)), allow(dead_code))] // attribution parallel-spread crossover + its bitwise gate test
+// Its only users — the fused attribution paths and their bitwise gate test —
+// are BOTH behind `custom-profiles`, so a plain `--tests` build without that
+// feature still sees it unused (the old `test` disjunct did not cover that).
+#[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))] // attribution parallel-spread crossover + its bitwise gate test
 pub(crate) const SPREAD_PARALLEL_MIN_N: usize = 8_388_608;
 
 /// f32 spread-and-merge twin of [`box_spread_sum_preserving`] for the
