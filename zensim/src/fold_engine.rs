@@ -241,37 +241,76 @@ const V1_PEAKS: (usize, usize) = (156, 228);
 const V1_MASKED: (usize, usize) = (228, 300);
 const V1_IW: (usize, usize) = (300, 372);
 
+/// The layer-0 column range each CALLER line occupies, in caller order —
+/// `caller_col_spans()[k] = (start, end)` with `end == start` for a line the
+/// bake dropped.
+///
+/// **Why this exists here and is not a duplicate.** A bake with a
+/// variable-arity [`zenpredict::FeatureTransform`] has caller line `k` ≠
+/// layer-0 column `k`: `Drop` (dead-column pruning, which
+/// `bake_dial_refit pack` performs BY DEFAULT since 2026-08-04) consumes zero
+/// columns, `Sinusoidal` consumes `2·N`. Slicing columns at caller boundaries
+/// on such a bake is the caller-width bug class
+/// `zensim-validate::block_profile` documents four instances of. That crate
+/// folds per-column *values* back to caller lines; this needs only the
+/// *spans*, and both are thin callers of
+/// [`zenpredict::FeatureTransform::output_arity`], which is the single owner
+/// of arity semantics. zensim cannot depend on zensim-validate (it is the
+/// other way round), so the narrow primitive lives in the lower crate.
+///
+/// `None` when the arities do not tile layer 0 — a malformed bake, which the
+/// caller must treat as "assume everything is read".
+fn caller_col_spans(model: &crate::mlp::Model, in_dim: usize) -> Option<Vec<(usize, usize)>> {
+    let Some(ts) = model.feature_transforms() else {
+        // No transform table: caller line k IS column k.
+        return (in_dim == model.n_inputs()).then(|| (0..in_dim).map(|i| (i, i + 1)).collect());
+    };
+    let params = model.feature_transform_params();
+    if let Some(p) = params
+        && p.len() != ts.len()
+    {
+        return None;
+    }
+    let mut out = Vec::with_capacity(ts.len());
+    let mut cur = 0usize;
+    for (k, t) in ts.iter().enumerate() {
+        let pk: &[f32] = params.map(|p| p[k].as_slice()).unwrap_or(&[]);
+        let end = cur + t.output_arity(pk);
+        if end > in_dim {
+            return None;
+        }
+        out.push((cur, end));
+        cur = end;
+    }
+    (cur == in_dim).then_some(out)
+}
+
 /// Layer-0 structural read-set of one bake, or [`V1PoolNeed::ALL`] when the
 /// bake cannot be analysed safely.
 ///
-/// **Declines (returns `ALL`) on transform-arity divergence.** When
-/// `caller_input_width() != n_inputs()` the bake declares a variable-arity
-/// [`zenpredict::FeatureTransform`] (`Drop` from dead-column pruning, or an
-/// expander), so layer-0 column `k` is NOT caller line `k` and slicing the
-/// columns at caller boundaries is the caller-width bug class
-/// `zensim-validate::block_profile` documents. Rather than re-implement that
-/// crate's arity walk here — one owner per task — this refuses the case. It
-/// costs nothing today: pruning only ever removes columns that were already
-/// exact zeros, so a pruned bake's parent gives the same answer, and no
-/// shipped profile carries an expander.
+/// Handles pruned and expanded bakes through [`caller_col_spans`]; returns
+/// `ALL` only for a bake whose declared arities do not tile layer 0, which no
+/// valid bake does.
 fn bake_pool_need(bytes: &[u8]) -> V1PoolNeed {
     let Ok(model) = crate::mlp::Model::from_bytes(bytes) else {
         return V1PoolNeed::ALL;
     };
     let layer = model.layer(0);
     let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
-    if model.caller_input_width() != model.n_inputs() || in_dim != model.n_inputs() {
+    let Some(spans) = caller_col_spans(&model, in_dim) else {
         return V1PoolNeed::ALL;
-    }
-    // Any caller line at or beyond a family's start that carries a nonzero
-    // weight marks that family read. A bake narrower than a family's start
-    // cannot read it at all.
+    };
+    // Any caller line at or beyond a family's start whose columns carry a
+    // nonzero weight marks that family read. A dropped line spans no columns,
+    // so it reads nothing — which is exactly pruning's contract (a pruned
+    // column was already an exact zero, or a transform-forced constant folded
+    // into the bias). A bake narrower than a family's start cannot read it.
     let reads = |lo: usize, hi: usize| -> bool {
-        let hi = hi.min(in_dim);
+        let hi = hi.min(spans.len());
         if lo >= hi {
             return false;
         }
-        (lo..hi).any(|i| match &layer.weights {
+        spans[lo..hi].iter().flat_map(|&(a, b)| a..b).any(|i| match &layer.weights {
             crate::mlp::WeightStorage::F32(w) => {
                 w[i * out_dim..(i + 1) * out_dim].iter().any(|&v| v != 0.0)
             }
@@ -542,5 +581,33 @@ mod skip_policy_tests {
     fn an_unparseable_bake_needs_everything() {
         assert_eq!(bake_pool_need(&[0u8; 8]), V1PoolNeed::ALL);
         assert_eq!(bake_pool_need(&[]), V1PoolNeed::ALL);
+    }
+
+    /// `caller_col_spans` must tile layer 0 exactly and stay in CALLER space.
+    /// The class this guards is the one that made the policy useless on a
+    /// pruned bake: `bake_dial_refit pack` prunes BY DEFAULT (2026-08-04), so
+    /// a bake whose caller width is 944 can have 667 layer-0 columns, and
+    /// reading column `k` as caller line `k` there silently mis-reports which
+    /// families are live.
+    #[test]
+    fn caller_col_spans_tile_layer0_in_caller_space() {
+        let params = ZensimProfile::B.params();
+        for bytes in params.scoring_bake_bytes() {
+            let model = crate::mlp::Model::from_bytes(bytes).expect("shipped bake parses");
+            let in_dim = model.layer(0).in_dim;
+            let spans = caller_col_spans(&model, in_dim).expect("a shipped bake must tile");
+            assert_eq!(
+                spans.len(),
+                model.caller_input_width(),
+                "one span per CALLER line, not per column"
+            );
+            assert_eq!(spans.first().map(|s| s.0), Some(0));
+            assert_eq!(spans.last().map(|s| s.1), Some(in_dim));
+            for w in spans.windows(2) {
+                assert_eq!(w[0].1, w[1].0, "spans must tile without gap or overlap");
+            }
+            let covered: usize = spans.iter().map(|&(a, b)| b - a).sum();
+            assert_eq!(covered, in_dim);
+        }
     }
 }
