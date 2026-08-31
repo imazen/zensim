@@ -2102,17 +2102,36 @@ fn fused_blur_h_ssim_banded(
                 let rows = m1.len() / width;
                 let lo = y0 * width;
                 let hi = lo + rows * width;
-                crate::blur::fused_blur_h_ssim(
-                    &src[lo..hi],
-                    &dst[lo..hi],
-                    m1,
-                    m2,
-                    sq,
-                    s12,
-                    width,
-                    rows,
-                    BLUR_RADIUS,
-                );
+                let tile = h_blur_tile_width();
+                if tile > 0 && width > tile {
+                    // Tiles nest INSIDE the row band, so the two axes compose:
+                    // the band gives the thread its rows, the tile keeps that
+                    // band's 6-plane window inside L2. Each worker owns its own
+                    // thread-local tile arena.
+                    fused_blur_h_ssim_column_tiled(
+                        &src[lo..hi],
+                        &dst[lo..hi],
+                        m1,
+                        m2,
+                        sq,
+                        s12,
+                        width,
+                        rows,
+                        tile,
+                    );
+                } else {
+                    crate::blur::fused_blur_h_ssim(
+                        &src[lo..hi],
+                        &dst[lo..hi],
+                        m1,
+                        m2,
+                        sq,
+                        s12,
+                        width,
+                        rows,
+                        BLUR_RADIUS,
+                    );
+                }
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BlurBandBusy, 0);
             });
         return;

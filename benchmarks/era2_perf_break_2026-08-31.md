@@ -1838,7 +1838,52 @@ planes over a 42-row band (4.6 MB at 4608², nowhere near L2) and so has the
 Both are copy-bound in this form and neither can be fixed by another
 `column_tiled_pass` call.
 
-### 23.6 What is next, in value order
+### 23.6 THREADS INVERT THE SIGN BELOW ~4000 px — tiling cannot be default-on as it stands
+
+The rayon arm of `fused_blur_h_ssim_banded` row-bands across threads and
+returned before the tile, so every number above is 1T. Wiring the tile INSIDE
+each row band (the two axes compose — the band gives a thread its rows, the
+tile keeps that band's 6-plane window in L2; each worker owns its own
+thread-local arena) and re-measuring:
+
+| threads | size | untiled | tiled | ratio |
+|---:|---|---:|---:|---:|
+| 1 | 2304² | 363.17 | 290.28 | **1.251×** |
+| 1 | 4608² | 2455.19 | 1366.59 | **1.797×** |
+| 8 | 2304² | 104.24 | 117.04 | **0.891×** |
+| 8 | 4608² | 677.53 | 515.71 | **1.314×** |
+| 16 | 2304² | 108.90 | 119.38 | **0.912×** |
+| 16 | 4608² | 608.54 | 563.20 | **1.081×** |
+
+**At 8–16 threads and 2304², tiling is a 9–11 % REGRESSION.** The 8T/2304²
+cell is the one that was chased to convergence, because a 5-sample run first
+reported it as a 1.039× *win*: with n = 11 process starts it is
+min 104.24 vs 117.04 (**0.891×**) and median 120.64 vs 126.16 (0.956×) — a
+real regression, and a reminder that threaded cells need more samples than
+1T ones (thread placement is a second lottery on top of §22.5's layout one).
+
+The mechanism is consistent: at 1T the whole strip's ~14 plane buffers churn
+one core's L2 between passes, so shrinking the H blur's window helps a lot;
+at 8T each core owns its own 1 MiB L2 and a 16-row band is
+`16 × 6 × width × 4 B` = **864 KiB at 2304** — it already fits, so the tile's
+copies are pure overhead. At 4608 the same band is **1.73 MiB** and does not
+fit at any thread count, so tiling wins there regardless.
+
+An intermediate 8T sweep (2304 / 2880 / 3456 / 4032 / 4608, n = 5) came back
+**non-monotone** (1.039× / 1.125× / 0.914× / 0.950× / 1.271×) and is reported
+as unconverged rather than fitted: n = 5 is demonstrably not enough at 8T, and
+the honest statement from the data that IS converged is directional —
+**tiling helps at 1T from ~2304 up, and at ≥8T only above ~4000 px width.**
+
+**Consequence for shipping.** A blanket default-on would regress the common
+threaded 5 MP case by ~10 %, so the tile must be **conditioned on width and on
+whether the H blur is running row-banded across threads** — two thresholds,
+not one constant. Deriving them is a sweep, not a guess: sizes at 512-px
+steps from 1536 to 6144 × {1, 4, 8, 16} threads × both CCDs, n ≥ 11 process
+starts, min-over-layouts. Until that runs, both knobs stay default-off, and
+the numbers in §23.3–23.5 stand as the 1T result they are.
+
+### 23.7 What is next, in value order
 
 1. **The zero-copy form, which is now the blocker for everything else.**
    §23.5 shows the remaining items (`fold` 28.3 %, `planesA` residue 19.1 %)
