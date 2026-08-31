@@ -316,22 +316,34 @@ pub(crate) fn cached_bake_pool_need(bytes: &[u8]) -> V1PoolNeed {
     need
 }
 
-/// The pool mode a fold-backed SCORE may run for this profile.
+/// The pool mode a fold-backed SCORE may run for this profile — the three-way
+/// **model-class** decision, not a per-family one.
 ///
 /// Returns [`V1PoolsMode::Full`] — today's unconditional behaviour — unless
 /// the caller opted into skipping AND **every** consumer of the feature
-/// vector structurally ignores `f228..372`:
+/// vector structurally ignores the block in question. The consumers are:
 ///
 /// * the profile's linear `weights`, which `metric::score_v1_layout_features`
-///   reads only over `[0, num_scales·3·FEATURES_PER_CHANNEL_WITH_PEAKS)` =
-///   `f0..228` — masked/IW are structurally out of its reach, so it never
-///   constrains the decision (asserted below rather than assumed);
+///   reads over `[0, num_scales·3·FEATURES_PER_CHANNEL_WITH_PEAKS)` =
+///   `f0..228`. Masked/IW are structurally out of its reach (checked, not
+///   assumed), but the PEAK block is not — so dropping to
+///   [`V1PoolsMode::Off`] additionally requires the weight vector to be zero
+///   there, or `raw_distance` would move;
 /// * `mlp_bytes`, `mlp_bytes_b3` and `ensemble_classifier_bytes`, each read
 ///   through [`cached_bake_pool_need`].
 ///
-/// The peaks family is never skipped, because skipping it saves nothing: its
-/// accumulators are produced unconditionally by the fused V-blur kernel (see
-/// [`V1PoolsMode::Peaks`]).
+/// The ladder, cheapest first:
+///
+/// | mode | when | what it skips |
+/// |---|---|---|
+/// | [`V1PoolsMode::Off`] | nothing reads `f156..372` — the **basic-only model class** (`ADD156` reads 28 of 156 basic lines and 0 of 216 pool lines) | the whole pool block |
+/// | [`V1PoolsMode::Peaks`] | peaks read, masked/IW not | the masked/IW pass group |
+/// | [`V1PoolsMode::Full`] | anything reads masked or IW — every profile shipped today | nothing |
+///
+/// `Off` and `Peaks` cost the SAME to compute (the peak accumulators are the
+/// fused V-blur kernel's unconditional L8/max tier); the difference between
+/// them is only which slots are emitted. The real compute boundary is
+/// `{Off, Peaks}` vs `Full`.
 pub(crate) fn score_pool_mode(
     params: &crate::profile::ProfileParams,
     config: &crate::metric::ZensimConfig,
@@ -362,14 +374,27 @@ pub(crate) fn score_pool_mode(
     }
     if !any_bake {
         // A purely linear profile reads f0..228 only, so masked/IW are
-        // unread by construction.
+        // unread by construction. The peak block still feeds `raw_distance`.
         return V1PoolsMode::Peaks;
     }
     if need.masked || need.iw {
-        V1PoolsMode::Full
-    } else {
-        V1PoolsMode::Peaks
+        return V1PoolsMode::Full;
     }
+    // Nothing reads masked or IW — the BASIC-ONLY / basic-plus-peaks classes.
+    //
+    // `V1PoolsMode::Off` would emit less (the peak slots would come back 0.0
+    // instead of carrying their values) but it is never the right answer
+    // here, and the reason is footprint, not arithmetic. `Off` hands the band
+    // no scratch at all, which disables the band-local self-blur shape
+    // (`FoldHSource::SelfBlur`) — so the walk falls back to phase A's four
+    // STRIP-wide H planes (`4 × 3 × 148·W × 4` bytes) where `Peaks` blurs
+    // exactly the 42 rows a band consumes into `3 × slots × 4 × 42·W × 4`.
+    // `Peaks` computes the identical sums, emits a superset of `Off`'s slots,
+    // and is the smaller hot set (`benchmarks/fold_footprint_2026-08-31.md`
+    // §9.2 costs a `Full` band task 12 planes × 42 rows = 2,016·W bytes;
+    // `Peaks` touches 6 of those 12). So `Peaks` dominates `Off` on every
+    // axis and the policy never returns `Off`.
+    V1PoolsMode::Peaks
 }
 
 #[cfg(test)]

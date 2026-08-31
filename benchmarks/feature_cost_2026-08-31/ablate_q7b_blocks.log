@@ -1,0 +1,202 @@
+run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=41646MiB :: bash /home/lilith/tmp/fc/ablate_q7b.sh
+##### Q7b_pools_g0.2_a0.2_b0.97
+  cid22: loaded 4292 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_cid22val.parquet" [49 refs]
+corpus cid22: 4292 rows (4292 loaded), 944 features
+  konjnd: loaded 504 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_konjnd_jpeg_val.parquet" [504 refs]
+corpus konjnd: 504 rows (504 loaded), 944 features
+  nonphoto: loaded 6142 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_nonphoto.parquet" [671 refs]
+corpus nonphoto: 6142 rows (6142 loaded), 944 features
+  imazen26: loaded 6953 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_imazen26.parquet" [957 refs]
+corpus imazen26: 6953 rows (6953 loaded), 944 features
+  hfnlproxy: loaded 7717 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_hfnlproxy.parquet" [897 refs]
+corpus hfnlproxy: 7717 rows (7717 loaded), 944 features
+  kadid: loaded 10125 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_kadid.parquet" [81 refs]
+corpus kadid: 10125 rows (10125 loaded), 944 features
+  tid: loaded 3000 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_tid.parquet" [25 refs]
+corpus tid: 3000 rows (3000 loaded), 944 features
+  csiq: loaded 866 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_csiq.parquet" [30 refs]
+corpus csiq: 866 rows (866 loaded), 944 features
+  live: loaded 779 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_live.parquet" [29 refs]
+corpus live: 779 rows (779 loaded), 944 features
+# block-ablation: |SROCC| baseline vs family-ablated, per corpus
+ABL	family	lo	hi	corpus	n	srocc_base	srocc_ablated	delta
+ABL	v1_all	0	372	cid22	4292	0.858847	0.831437	-0.027409
+ABL	v1_all	0	372	konjnd	504	0.511845	0.452970	-0.058874
+ABL	v1_all	0	372	nonphoto	6142	0.877801	0.862617	-0.015184
+ABL	v1_all	0	372	imazen26	6953	0.887309	0.879186	-0.008122
+ABL	v1_all	0	372	hfnlproxy	7717	0.405616	0.345816	-0.059800
+ABL	v1_all	0	372	kadid	10125	0.721759	0.770248	+0.048489
+ABL	v1_all	0	372	tid	3000	0.776726	0.818061	+0.041335
+ABL	v1_all	0	372	csiq	866	0.879356	0.875434	-0.003922
+ABL	v1_all	0	372	live	779	0.812893	0.930102	+0.117209
+ABL	v2_348	372	720	cid22	4292	0.858847	0.114023	-0.744823
+ABL	v2_348	372	720	konjnd	504	0.511845	0.018235	-0.493609
+ABL	v2_348	372	720	nonphoto	6142	0.877801	0.376827	-0.500974
+ABL	v2_348	372	720	imazen26	6953	0.887309	0.347043	-0.540266
+ABL	v2_348	372	720	hfnlproxy	7717	0.405616	0.001041	-0.404575
+ABL	v2_348	372	720	kadid	10125	0.721759	0.229332	-0.492427
+ABL	v2_348	372	720	tid	3000	0.776726	0.353214	-0.423513
+ABL	v2_348	372	720	csiq	866	0.879356	0.560511	-0.318846
+ABL	v2_348	372	720	live	779	0.812893	0.504101	-0.308792
+ABL	append_204	720	944	cid22	4292	0.858847	0.842937	-0.015909
+ABL	append_204	720	944	konjnd	504	0.511845	0.531580	+0.019735
+ABL	append_204	720	944	nonphoto	6142	0.877801	0.859300	-0.018501
+ABL	append_204	720	944	imazen26	6953	0.887309	0.868837	-0.018472
+ABL	append_204	720	944	hfnlproxy	7717	0.405616	0.359452	-0.046163
+ABL	append_204	720	944	kadid	10125	0.721759	0.709740	-0.012019
+ABL	append_204	720	944	tid	3000	0.776726	0.743574	-0.033152
+ABL	append_204	720	944	csiq	866	0.879356	0.866084	-0.013272
+ABL	append_204	720	944	live	779	0.812893	0.752041	-0.060852
+ABL	v2_dense	372	600	cid22	4292	0.858847	0.469057	-0.389790
+ABL	v2_dense	372	600	konjnd	504	0.511845	0.008206	-0.503638
+ABL	v2_dense	372	600	nonphoto	6142	0.877801	0.533645	-0.344156
+ABL	v2_dense	372	600	imazen26	6953	0.887309	0.516551	-0.370758
+ABL	v2_dense	372	600	hfnlproxy	7717	0.405616	0.072600	-0.333016
+ABL	v2_dense	372	600	kadid	10125	0.721759	0.466312	-0.255447
+ABL	v2_dense	372	600	tid	3000	0.776726	0.575342	-0.201384
+ABL	v2_dense	372	600	csiq	866	0.879356	0.692354	-0.187003
+ABL	v2_dense	372	600	live	779	0.812893	0.669424	-0.143469
+ABL	v2_rest	600	720	cid22	4292	0.858847	0.848991	-0.009855
+ABL	v2_rest	600	720	konjnd	504	0.511845	0.485109	-0.026736
+ABL	v2_rest	600	720	nonphoto	6142	0.877801	0.864385	-0.013416
+ABL	v2_rest	600	720	imazen26	6953	0.887309	0.878907	-0.008402
+ABL	v2_rest	600	720	hfnlproxy	7717	0.405616	0.388094	-0.017522
+ABL	v2_rest	600	720	kadid	10125	0.721759	0.663633	-0.058126
+ABL	v2_rest	600	720	tid	3000	0.776726	0.736942	-0.039784
+ABL	v2_rest	600	720	csiq	866	0.879356	0.865910	-0.013446
+ABL	v2_rest	600	720	live	779	0.812893	0.712718	-0.100175
+# bake_contrib — /mnt/v/output/zensim/wlin7b-2026-08-30/arms/Q7b_pools_g0.2_a0.2_b0.97.bin
+
+n_inputs=944, layers=["944x1:Identity"], heads: psa=false hybrid=false pin=false spline=true, transforms=true, i8_dequant_caveat=false
+rows scored: 40378 across 9 corpora; parity vs score_row: max|diff|=0.000e0, violations(>1e-6)=0
+analytic-vs-ablation SROCC: simple=0.9411, path=0.9411
+structural-zero gate f156-371: FAIL — 108 nonzero of 216
+
+dead (mean|Δ|<1e-4 ∧ p95|Δ|<1e-3): 200 / 944; rank-dead (std<1e-4): 200
+
+## Family profile
+
+| family | n | dead | rank-dead | Σmean|Δ| share | share cid22 | share konjnd | share nonphoto | share imazen26 | share hfnlproxy | share kadid | share tid | share csiq | share live |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| v1fold156 | 156 | 52 | 52 | 8.1% | 7.5% | 7.5% | 8.1% | 8.1% | 6.4% | 8.3% | 9.0% | 8.0% | 9.3% |
+| zeros156-371 | 216 | 109 | 109 | 12.0% | 10.8% | 11.0% | 10.0% | 9.8% | 5.4% | 15.3% | 13.9% | 11.3% | 13.0% |
+| v2-348 | 348 | 0 | 0 | 52.9% | 52.4% | 54.1% | 53.7% | 53.9% | 58.1% | 50.9% | 52.1% | 56.1% | 53.7% |
+| append204 | 204 | 31 | 31 | 24.6% | 26.8% | 24.9% | 24.7% | 25.2% | 24.6% | 24.2% | 23.7% | 23.2% | 22.6% |
+| tail20 | 20 | 8 | 8 | 2.3% | 2.4% | 2.6% | 3.6% | 3.0% | 5.5% | 1.2% | 1.3% | 1.3% | 1.4% |
+
+## Top movers (by overall mean|Δ|)
+
+| idx | family | mean|Δ| | std | sign | ΔSROCC cid22 | ΔSROCC konjnd | ΔSROCC nonphoto | ΔSROCC imazen26 | ΔSROCC hfnlproxy | ΔSROCC kadid | ΔSROCC tid | ΔSROCC csiq | ΔSROCC live |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 664 | v2-348 | 6.2445 | 23.9068 | 1.00 | +0.0029 | +0.0367 | +0.0016 | +0.0020 | -0.0122 | -0.0297 | +0.0033 | +0.0138 | -0.0814 |
+| 742 | append204 | 4.2184 | 3.4521 | 1.00 | -0.0004 | +0.0032 | -0.0059 | -0.0027 | -0.0489 | +0.0102 | +0.0026 | +0.0082 | +0.0306 |
+| 804 | append204 | 3.5890 | 1.5684 | 1.00 | +0.0129 | -0.0104 | -0.0061 | -0.0055 | +0.0207 | +0.0005 | -0.0013 | -0.0003 | -0.0004 |
+| 480 | v2-348 | 3.4998 | 1.7417 | 1.00 | -0.0170 | -0.0583 | +0.0095 | +0.0082 | -0.0399 | -0.0005 | +0.0006 | +0.0003 | +0.0002 |
+| 216 | zeros156-371 | 3.0289 | 12.0982 | 1.00 | +0.0017 | -0.0007 | +0.0012 | +0.0014 | -0.0054 | -0.0146 | -0.0028 | -0.0136 | -0.0591 |
+| 13 | v1fold156 | 2.6969 | 4.5308 | 1.00 | +0.0063 | +0.0011 | -0.0079 | -0.0049 | -0.0084 | +0.0246 | +0.0145 | +0.0154 | +0.1041 |
+| 498 | v2-348 | 2.6818 | 2.3277 | 1.00 | -0.0035 | -0.0429 | +0.0014 | +0.0007 | +0.0264 | -0.0090 | -0.0031 | -0.0066 | -0.0251 |
+| 748 | append204 | 2.6423 | 2.4341 | 1.00 | -0.0015 | -0.0374 | -0.0023 | -0.0036 | +0.0407 | -0.0070 | -0.0073 | -0.0031 | -0.0202 |
+
+baseline |SROCC| per corpus: cid22=0.8588, konjnd=0.5118, nonphoto=0.8778, imazen26=0.8873, hfnlproxy=0.4056, kadid=0.7218, tid=0.7767, csiq=0.8794, live=0.8129
+
+##### Q7b_pools_g0.25_a0.2_b0.97
+  cid22: loaded 4292 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_cid22val.parquet" [49 refs]
+corpus cid22: 4292 rows (4292 loaded), 944 features
+  konjnd: loaded 504 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_konjnd_jpeg_val.parquet" [504 refs]
+corpus konjnd: 504 rows (504 loaded), 944 features
+  nonphoto: loaded 6142 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_nonphoto.parquet" [671 refs]
+corpus nonphoto: 6142 rows (6142 loaded), 944 features
+  imazen26: loaded 6953 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_imazen26.parquet" [957 refs]
+corpus imazen26: 6953 rows (6953 loaded), 944 features
+  hfnlproxy: loaded 7717 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_hfnlproxy.parquet" [897 refs]
+corpus hfnlproxy: 7717 rows (7717 loaded), 944 features
+  kadid: loaded 10125 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_kadid.parquet" [81 refs]
+corpus kadid: 10125 rows (10125 loaded), 944 features
+  tid: loaded 3000 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_tid.parquet" [25 refs]
+corpus tid: 3000 rows (3000 loaded), 944 features
+  csiq: loaded 866 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_csiq.parquet" [30 refs]
+corpus csiq: 866 rows (866 loaded), 944 features
+  live: loaded 779 pairs × 944 features (f0..f943) from "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_live.parquet" [29 refs]
+corpus live: 779 rows (779 loaded), 944 features
+# block-ablation: |SROCC| baseline vs family-ablated, per corpus
+ABL	family	lo	hi	corpus	n	srocc_base	srocc_ablated	delta
+ABL	v1_all	0	372	cid22	4292	0.855540	0.828701	-0.026839
+ABL	v1_all	0	372	konjnd	504	0.503099	0.452389	-0.050711
+ABL	v1_all	0	372	nonphoto	6142	0.882426	0.864514	-0.017912
+ABL	v1_all	0	372	imazen26	6953	0.891711	0.880914	-0.010797
+ABL	v1_all	0	372	hfnlproxy	7717	0.406318	0.343976	-0.062342
+ABL	v1_all	0	372	kadid	10125	0.722488	0.766280	+0.043792
+ABL	v1_all	0	372	tid	3000	0.779939	0.818448	+0.038509
+ABL	v1_all	0	372	csiq	866	0.882926	0.878025	-0.004901
+ABL	v1_all	0	372	live	779	0.795622	0.928901	+0.133279
+ABL	v2_348	372	720	cid22	4292	0.855540	0.125416	-0.730124
+ABL	v2_348	372	720	konjnd	504	0.503099	0.047172	-0.455928
+ABL	v2_348	372	720	nonphoto	6142	0.882426	0.397892	-0.484535
+ABL	v2_348	372	720	imazen26	6953	0.891711	0.367373	-0.524338
+ABL	v2_348	372	720	hfnlproxy	7717	0.406318	0.004744	-0.401574
+ABL	v2_348	372	720	kadid	10125	0.722488	0.224243	-0.498244
+ABL	v2_348	372	720	tid	3000	0.779939	0.356561	-0.423378
+ABL	v2_348	372	720	csiq	866	0.882926	0.575212	-0.307714
+ABL	v2_348	372	720	live	779	0.795622	0.523475	-0.272148
+ABL	append_204	720	944	cid22	4292	0.855540	0.842769	-0.012771
+ABL	append_204	720	944	konjnd	504	0.503099	0.523619	+0.020520
+ABL	append_204	720	944	nonphoto	6142	0.882426	0.863566	-0.018861
+ABL	append_204	720	944	imazen26	6953	0.891711	0.873245	-0.018467
+ABL	append_204	720	944	hfnlproxy	7717	0.406318	0.359476	-0.046842
+ABL	append_204	720	944	kadid	10125	0.722488	0.715203	-0.007285
+ABL	append_204	720	944	tid	3000	0.779939	0.747741	-0.032198
+ABL	append_204	720	944	csiq	866	0.882926	0.870526	-0.012401
+ABL	append_204	720	944	live	779	0.795622	0.749073	-0.046550
+ABL	v2_dense	372	600	cid22	4292	0.855540	0.471480	-0.384061
+ABL	v2_dense	372	600	konjnd	504	0.503099	0.005288	-0.497812
+ABL	v2_dense	372	600	nonphoto	6142	0.882426	0.554880	-0.327546
+ABL	v2_dense	372	600	imazen26	6953	0.891711	0.542830	-0.348882
+ABL	v2_dense	372	600	hfnlproxy	7717	0.406318	0.073153	-0.333165
+ABL	v2_dense	372	600	kadid	10125	0.722488	0.461925	-0.260563
+ABL	v2_dense	372	600	tid	3000	0.779939	0.575149	-0.204790
+ABL	v2_dense	372	600	csiq	866	0.882926	0.695128	-0.187798
+ABL	v2_dense	372	600	live	779	0.795622	0.644154	-0.151468
+ABL	v2_rest	600	720	cid22	4292	0.855540	0.847147	-0.008394
+ABL	v2_rest	600	720	konjnd	504	0.503099	0.479575	-0.023524
+ABL	v2_rest	600	720	nonphoto	6142	0.882426	0.869973	-0.012453
+ABL	v2_rest	600	720	imazen26	6953	0.891711	0.883675	-0.008036
+ABL	v2_rest	600	720	hfnlproxy	7717	0.406318	0.397441	-0.008877
+ABL	v2_rest	600	720	kadid	10125	0.722488	0.663303	-0.059185
+ABL	v2_rest	600	720	tid	3000	0.779939	0.741414	-0.038525
+ABL	v2_rest	600	720	csiq	866	0.882926	0.872516	-0.010410
+ABL	v2_rest	600	720	live	779	0.795622	0.708498	-0.087124
+# bake_contrib — /mnt/v/output/zensim/wlin7b-2026-08-30/arms/Q7b_pools_g0.25_a0.2_b0.97.bin
+
+n_inputs=944, layers=["944x1:Identity"], heads: psa=false hybrid=false pin=false spline=true, transforms=true, i8_dequant_caveat=false
+rows scored: 40378 across 9 corpora; parity vs score_row: max|diff|=0.000e0, violations(>1e-6)=0
+analytic-vs-ablation SROCC: simple=0.9402, path=0.9402
+structural-zero gate f156-371: FAIL — 108 nonzero of 216
+
+dead (mean|Δ|<1e-4 ∧ p95|Δ|<1e-3): 200 / 944; rank-dead (std<1e-4): 200
+
+## Family profile
+
+| family | n | dead | rank-dead | Σmean|Δ| share | share cid22 | share konjnd | share nonphoto | share imazen26 | share hfnlproxy | share kadid | share tid | share csiq | share live |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| v1fold156 | 156 | 52 | 52 | 8.4% | 7.6% | 7.5% | 8.4% | 8.4% | 6.5% | 8.7% | 9.2% | 8.2% | 9.6% |
+| zeros156-371 | 216 | 109 | 109 | 13.2% | 11.9% | 12.0% | 11.0% | 10.8% | 5.9% | 16.5% | 14.8% | 12.0% | 14.0% |
+| v2-348 | 348 | 0 | 0 | 51.8% | 51.6% | 53.3% | 52.8% | 53.0% | 57.7% | 49.5% | 51.0% | 55.0% | 52.4% |
+| append204 | 204 | 31 | 31 | 24.5% | 26.4% | 24.6% | 24.4% | 24.9% | 24.5% | 24.2% | 23.7% | 23.5% | 22.7% |
+| tail20 | 20 | 8 | 8 | 2.2% | 2.4% | 2.5% | 3.4% | 2.9% | 5.4% | 1.2% | 1.3% | 1.3% | 1.3% |
+
+## Top movers (by overall mean|Δ|)
+
+| idx | family | mean|Δ| | std | sign | ΔSROCC cid22 | ΔSROCC konjnd | ΔSROCC nonphoto | ΔSROCC imazen26 | ΔSROCC hfnlproxy | ΔSROCC kadid | ΔSROCC tid | ΔSROCC csiq | ΔSROCC live |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 664 | v2-348 | 6.4065 | 21.2510 | 1.00 | +0.0021 | +0.0352 | +0.0014 | +0.0018 | -0.0116 | -0.0365 | +0.0034 | +0.0162 | -0.0673 |
+| 742 | append204 | 4.8652 | 3.6192 | 1.00 | -0.0006 | +0.0056 | -0.0070 | -0.0038 | -0.0508 | +0.0104 | +0.0028 | +0.0085 | +0.0282 |
+| 804 | append204 | 3.7406 | 1.2546 | 1.00 | +0.0130 | -0.0083 | -0.0056 | -0.0050 | +0.0216 | +0.0007 | -0.0012 | -0.0002 | -0.0002 |
+| 480 | v2-348 | 3.6378 | 1.5166 | 1.00 | -0.0170 | -0.0586 | +0.0086 | +0.0073 | -0.0390 | -0.0003 | +0.0005 | +0.0003 | -0.0001 |
+| 13 | v1fold156 | 3.2267 | 4.8441 | 1.00 | +0.0065 | +0.0039 | -0.0084 | -0.0054 | -0.0086 | +0.0243 | +0.0146 | +0.0152 | +0.1110 |
+| 216 | zeros156-371 | 3.0558 | 10.6355 | 1.00 | +0.0013 | -0.0002 | +0.0011 | +0.0012 | -0.0051 | -0.0164 | -0.0023 | -0.0117 | -0.0470 |
+| 498 | v2-348 | 2.9177 | 2.2786 | 1.00 | -0.0036 | -0.0411 | +0.0019 | +0.0012 | +0.0261 | -0.0089 | -0.0028 | -0.0065 | -0.0210 |
+| 748 | append204 | 2.8543 | 2.4182 | 1.00 | -0.0012 | -0.0356 | -0.0015 | -0.0028 | +0.0407 | -0.0072 | -0.0073 | -0.0032 | -0.0184 |
+
+baseline |SROCC| per corpus: cid22=0.8555, konjnd=0.5031, nonphoto=0.8824, imazen26=0.8917, hfnlproxy=0.4063, kadid=0.7225, tid=0.7799, csiq=0.8829, live=0.7956
+
+run-heavy: done rc=0 4s | peak-RSS 0.58GiB | min-avail 40549MiB | peak-load 1.25

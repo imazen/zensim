@@ -108,6 +108,28 @@ fn toggles_full() -> zensim::feature_v2::V2NewFeatureToggles {
     }
 }
 
+/// The MODEL-CLASS arms (feature-cost lane, 2026-08-31). Each is the CHEAPEST
+/// fold request that can serve one class of scoring model, so the deltas
+/// between them are what a model class costs, not what a feature block costs:
+///
+/// | arm | serves | v1 slots live |
+/// |---|---|---|
+/// | `fold156_basic` | a basic-only model (ADD156 and its class) | `f0..156` |
+/// | `fold228_peaks` | basic + peaks | `f0..228` |
+/// | `fold372_full`  | any 372-input model — **what a fold-backed `score()` runs today** | `f0..372` |
+/// | `fold944_full`  | a 944-input model (the W-LIN 7b blend, the 944 MLPs) | all |
+///
+/// All three 372-class arms set `v1_only`, which is the block-skipping the
+/// predecessor measured at 53 % of the 944 walk; `fold944_full` is the same
+/// request `score()` would run for a 944 bake.
+fn toggles_v1_only(pools: zensim::feature_v2::V1PoolsMode) -> zensim::feature_v2::V2NewFeatureToggles {
+    zensim::feature_v2::V2NewFeatureToggles {
+        v1_only: true,
+        v1_pools: pools,
+        ..Default::default()
+    }
+}
+
 /// One-arm loop for external peak-RSS measurement (`/usr/bin/time -v`).
 fn rss_mode(arm: &str) {
     let size: usize = std::env::var("ZEN_XP_SIZE")
@@ -133,6 +155,20 @@ fn rss_mode(arm: &str) {
                 let r = compute_zensim_with_config(&src, &dst, size, size, v1_cfg(true, true))
                     .expect("buf_v1_372");
                 sink += r.features()[371];
+            }
+            "fold156_basic" | "fold228_peaks" | "fold372_full" => {
+                use zensim::feature_v2::V1PoolsMode;
+                let t = toggles_v1_only(match arm {
+                    "fold156_basic" => V1PoolsMode::Off,
+                    "fold228_peaks" => V1PoolsMode::Peaks,
+                    _ => V1PoolsMode::Full,
+                });
+                let rsv = RgbSlice::new(&src, size, size);
+                let dsv = RgbSlice::new(&dst, size, size);
+                let v2 = z
+                    .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
+                    .expect("fold v1_only");
+                sink += v2.features()[0];
             }
             "fold944_off" | "fold944_full" => {
                 let t = if arm == "fold944_full" {
@@ -193,6 +229,24 @@ fn main() {
                         zenbench::black_box(r.features()[371]);
                     })
                 });
+                for (name, pools) in [
+                    ("fold156_basic", zensim::feature_v2::V1PoolsMode::Off),
+                    ("fold228_peaks", zensim::feature_v2::V1PoolsMode::Peaks),
+                    ("fold372_full", zensim::feature_v2::V1PoolsMode::Full),
+                ] {
+                    let t = toggles_v1_only(pools);
+                    group.bench(name, move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        b.iter(move || {
+                            let rsv = RgbSlice::new(src_s, n, n);
+                            let dsv = RgbSlice::new(dst_s, n, n);
+                            let v2 = z
+                                .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
+                                .unwrap();
+                            zenbench::black_box(v2.features()[0]);
+                        })
+                    });
+                }
                 group.bench("fold944_off", move |b| {
                     let mut scratch = zensim::feature_v2::V2Scratch::new();
                     b.iter(move || {
