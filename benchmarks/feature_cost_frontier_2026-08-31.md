@@ -204,8 +204,30 @@ answer, and the shipped skip removes it.
 
 ## 3. Per-family compute cost — measured
 
-*(§3.1 numbers land from the paired zenbench run below; §3.2 is the
-already-published callgrind split this lane reads rather than repeats.)*
+### 3.1 Wall clock, paired/interleaved (zenbench), 7 arms × 3 sizes × {1, 8, 16}T
+
+Arms, and what each one is the cheapest request for:
+
+| arm | request | serves |
+|---|---|---|
+| `buf_v1_228` | buffered v1, no extended/IW | (control) |
+| `buf_v1_372` | buffered v1, extended + IW | today's buffered walk |
+| `fold156_basic` | fold, `v1_only` + `Off` | (control — see the note below) |
+| `fold228_peaks` | fold, `v1_only` + **`Peaks`** | the **basic-only** class |
+| `fold372_full` | fold, `v1_only` + `Full` | the **sparse 372 linear** class (what `score()` runs today) |
+| `fold944_off` | fold, 944 + `Off` | the **944 MLP** class (its bake reads no pool line) |
+| `fold944_full` | fold, 944 + `Full` | the **W-LIN 7b** class |
+
+`fold156_basic` and `fold228_peaks` accumulate the identical sums — the peak
+tier is the fused kernel's unconditional byproduct — so their difference is
+purely the H-plane shape: `Off` hands the band no scratch and therefore
+disables the band-local self-blur, falling back to phase A's strip-wide H
+planes, while `Peaks` blurs the 42 rows each band consumes into its own
+buffer. Their `f0..156` slots are bit-identical by transitivity
+(`folded720_v1_pools_match_v1_path` gives `Off ≡ Full` there,
+`folded_peaks_mode_is_pure_compute_skipping` gives `Peaks ≡ Full`).
+
+<!--MS_TABLE-->
 
 ### 3.2 Instruction-level split (predecessor lane, callgrind, 576², serial, v3 tier)
 
