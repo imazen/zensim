@@ -53,16 +53,28 @@ also carries the v2 planes, which the fold-footprint lane prices separately).
 <!--DT_BEGIN-->
 | model class | example | required families | ms 576²/1152²/2304² @1T | @8T | @16T | WS/thr (W=2304) | CID22 | KonJND | nonphoto | imazen26 | HF-NL pooled / per-ref | vs ssim2 (human corpora) | to ship |
 |---|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|
-| basic-only | ADD156 | basic | 6.41 / 25.3 / 122.0 | 1.34 / 5.31 / 29.3 | 1.79 / 7.33 / 30.0 | 2.21 MiB | 0.8632 | 0.5363 | 0.8453 | 0.8546 | 0.295 / **0.799** | ties on LIVE/CSIQ/KADID, −0.026 CID22, **+0.058 KonJND** | a profile slot + a ship call — **no retrain, no era**; the skip already fires |
-| sparse 372 linear | **shipped B** | basic + peaks + **masked + IW** | 8.72 / 36.0 / 170.0 | 1.91 / 8.90 / 53.6 | 2.82 / 10.0 / 40.0 | 4.43 MiB | 0.8821 | 0.5198 | 0.8498 | 0.8603 | 0.350 / **0.765** | +0.030 CSIQ, −0.061 LIVE, −0.067 TID | nothing to drop |
-| W-LIN 7b blend | Q7b g0.20 | all of v1-372 + v2-348 + append-204 | 15.1 / 62.0 / 354.0 | 4.51 / 22.7 / 124.6 | 6.92 / 25.3 / 120.0 | ≥4.43 MiB | 0.8588 | 0.5118 | 0.8778 | 0.8873 | 0.406 / **0.756** | below on all six (LIVE −0.147) | a retrain + the `fold_v1` lever (§6.4) to cash its dead v1-372 |
-| 944 MLP | C purity944 | basic + v2-348 + append-204 (**no pool block**) | 12.8 / 52.0 / 312.0 | 3.91 / 17.7 / 101.0 | 6.15 / 22.7 / 102.0 | ≥4.43 MiB | 0.8927 | 0.5006 | 0.9277 | 0.9313 | 0.694 / **0.810** | **at or above on all six** | **nothing** — its bake reads 0/216 pool lines, so the shipped skip is exact |
+| basic-only | ADD156 | basic | 6.41 / 25.3 / 122.0 | 1.33 / 5.28 / 29.3 | 2.00 / 6.98 / 31.0 | 2.21 MiB | 0.8632 | 0.5363 | 0.8453 | 0.8546 | 0.295 / **0.799** | ties on LIVE/CSIQ/KADID, −0.026 CID22, **+0.058 KonJND** | a profile slot + a ship call — **no retrain, no era**; the skip already fires |
+| sparse 372 linear | **shipped B** | basic + peaks + **masked + IW** | 8.72 / 36.0 / 170.0 | 1.88 / 8.99 / 53.6 | 2.63 / 9.94 / 45.3 | 4.43 MiB | 0.8821 | 0.5198 | 0.8498 | 0.8603 | 0.350 / **0.765** | +0.030 CSIQ, −0.061 LIVE, −0.067 TID | nothing to drop |
+| W-LIN 7b blend | Q7b g0.20 | all of v1-372 + v2-348 + append-204 | 15.1 / 62.0 / 354.0 | 4.51 / 22.8 / 124.6 | 6.07 / 25.1 / 118.3 | ≥4.43 MiB | 0.8588 | 0.5118 | 0.8778 | 0.8873 | 0.406 / **0.756** | below on all six (LIVE −0.147) | a retrain + the `fold_v1` lever (§6.4) to cash its dead v1-372 |
+| 944 MLP | C purity944 | basic + v2-348 + append-204 (**no pool block**) | 12.8 / 52.0 / 312.0 | 3.91 / 17.7 / 101.4 | 6.09 / 21.6 / 101.5 | ≥4.43 MiB | 0.8927 | 0.5006 | 0.9277 | 0.9313 | 0.694 / **0.810** | **at or above on all six** | **nothing** — its bake reads 0/216 pool lines, so the shipped skip is exact |
 <!--DT_END-->
 
-**Speed, up front:** at 2304²/1T the basic-only class's walk is **2.9×** the
-W-LIN blend's and **2.6×** the 944 MLP's, and **1.6×** today's shipped
-buffered v1-372. The ~2× the user asked about is available, and it is bought
-by changing the model class, not by trimming a family out of one.
+**Speed, up front — the ~2× exists, and it is a class choice.** At 2304², the
+basic-only class's walk against the others:
+
+| | 1T | 8T | 16T |
+|---|---:|---:|---:|
+| vs the W-LIN 7b blend | **2.90×** | **4.25×** | **3.82×** |
+| vs the 944 MLP | **2.56×** | **3.46×** | **3.27×** |
+| vs shipped B's fold walk | 1.39× | 1.83× | 1.46× |
+| vs shipped B's walk **today** (buffered) | **1.64×** | 1.27× | 0.99× |
+
+**The class gap widens with threads** — 2.9× → 4.3× from 1 to 8 — because the
+944 walk scales worse than the 372 one, which is the fold-MT lane's finding
+landing on this frontier. (The buffered row inverts for the opposite reason:
+buffered takes 2-4× from eight threads where the fold takes 1.1-1.5×, so at
+16T the shipped path catches up. Read the 8/16T columns for shape — §3.1
+records their spread and the conditions.)
 
 **vs-ssim2 verdict** compares only the human-labelled corpora — `nonphoto`,
 `imazen26` and `hfnlproxy` have ssim2 *as their target*, so a model's number
@@ -218,7 +230,7 @@ answer, and the shipped skip removes it.
 
 ## 3. Per-family compute cost — measured
 
-### 3.1 Wall clock, paired/interleaved (zenbench), 7 arms × 3 sizes × {1, 8, 16}T
+### 3.1 Wall clock — 7 arms × 3 sizes × {1, 8, 16} threads
 
 Arms, and what each one is the cheapest request for:
 
@@ -244,25 +256,25 @@ buffer. Their `f0..156` slots are bit-identical by transitivity
 <!--MS_BEGIN-->
 | arm | 576² 1T | 8T | 16T | 1152² 1T | 8T | 16T | 2304² 1T | 8T | 16T |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `buf_v1_228` | 6.67 | 1.45 | 1.79 | 28.7 | 6.70 | 6.00 | 146.0 | 29.2 | 24.0 |
-| `buf_v1_372` | 10.5 | 2.13 | 2.31 | 44.0 | 8.52 | 7.33 | 200.0 | 38.8 | 30.0 |
-| `fold156_basic` | 6.15 | 1.25 | 2.56 | 26.0 | 4.97 | 9.33 | 188.0 | 36.4 | 40.0 |
-| `fold228_peaks` | 6.41 | 1.34 | 1.79 | 25.3 | 5.31 | 7.33 | 122.0 | 29.3 | 30.0 |
-| `fold372_full` | 8.72 | 1.91 | 2.82 | 36.0 | 8.90 | 10.0 | 170.0 | 53.6 | 40.0 |
-| `fold944_off` | 12.8 | 3.91 | 6.15 | 52.0 | 17.7 | 22.7 | 312.0 | 101.0 | 102.0 |
-| `fold944_full` | 15.1 | 4.51 | 6.92 | 62.0 | 22.7 | 25.3 | 354.0 | 124.6 | 120.0 |
+| `buf_v1_228` | 6.67 | 1.43 | 1.73 | 28.7 | 5.91 | 6.04 | 146.0 | 29.3 | 26.3 |
+| `buf_v1_372` | 10.5 | 2.13 | 2.28 | 44.0 | 8.30 | 8.18 | 200.0 | 37.1 | 30.7 |
+| `fold156_basic` | 6.15 | 1.28 | 1.88 | 26.0 | 4.97 | 7.80 | 188.0 | 36.4 | 39.0 |
+| `fold228_peaks` | 6.41 | 1.33 | 2.00 | 25.3 | 5.28 | 6.98 | 122.0 | 29.3 | 31.0 |
+| `fold372_full` | 8.72 | 1.88 | 2.63 | 36.0 | 8.99 | 9.94 | 170.0 | 53.6 | 45.3 |
+| `fold944_off` | 12.8 | 3.91 | 6.09 | 52.0 | 17.7 | 21.6 | 312.0 | 101.4 | 101.5 |
+| `fold944_full` | 15.1 | 4.51 | 6.07 | 62.0 | 22.8 | 25.1 | 354.0 | 124.6 | 118.3 |
 
 Marginal cost of the masked/IW pass group (`fold372_full − fold228_peaks`) — the ONLY separable family boundary inside `f0..372`:
 
 | | 576² 1T | 8T | 16T | 1152² 1T | 8T | 16T | 2304² 1T | 8T | 16T |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **delta** | +2.31 (36 %) | +0.56 (42 %) | +1.03 (57 %) | +10.67 (42 %) | +3.58 (67 %) | +2.67 (36 %) | +48.00 (39 %) | +24.24 (83 %) | +10.00 (33 %) |
+| **delta** | +2.31 (36 %) | +0.55 (42 %) | +0.63 (31 %) | +10.67 (42 %) | +3.71 (70 %) | +2.96 (42 %) | +48.00 (39 %) | +24.24 (83 %) | +14.24 (46 %) |
 
 Marginal cost of the v2-348 + append-204 blocks (`fold944_full − fold372_full`):
 
 | | 576² 1T | 8T | 16T | 1152² 1T | 8T | 16T | 2304² 1T | 8T | 16T |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **delta** | +6.4 (74 %) | +2.6 (137 %) | +4.1 (145 %) | +26.0 (72 %) | +13.8 (155 %) | +15.3 (153 %) | +184.0 (108 %) | +71.0 (133 %) | +80.0 (200 %) |
+| **delta** | +6.4 (74 %) | +2.6 (140 %) | +3.4 (130 %) | +26.0 (72 %) | +13.8 (154 %) | +15.2 (153 %) | +184.0 (108 %) | +71.0 (133 %) | +73.1 (161 %) |
 
 **Conditions.** Two-point subtraction `(t(N) − t(1)) / (N−1)` over the bench
 binary's single-arm loop (`ZEN_XP_RSS`), which removes process start, the
@@ -280,13 +292,13 @@ Round-to-round spread, `(max − min) / median`, worst cell per arm:
 
 | arm | worst spread | where |
 |---|---:|---|
-| `buf_v1_228` | 33.3 % | 1152²/16T |
-| `buf_v1_372` | 27.3 % | 1152²/16T |
-| `fold156_basic` | 50.0 % | 576²/16T |
-| `fold228_peaks` | 28.6 % | 576²/16T |
-| `fold372_full` | 45.4 % | 576²/16T |
-| `fold944_off` | 45.8 % | 576²/16T |
-| `fold944_full` | 44.4 % | 576²/16T |
+| `buf_v1_228` | 26.6 % | 1152²/8T |
+| `buf_v1_372` | 20.0 % | 1152²/16T |
+| `fold156_basic` | 60.0 % | 576²/16T |
+| `fold228_peaks` | 17.0 % | 576²/8T |
+| `fold372_full` | 28.0 % | 1152²/8T |
+| `fold944_off` | 12.8 % | 1152²/1T |
+| `fold944_full` | 7.8 % | 576²/16T |
 <!--MS_END-->
 
 ### 3.2 Instruction-level split (predecessor lane, callgrind, 576², serial, v3 tier)
@@ -643,6 +655,25 @@ paired with what a wave would have to do:
 * **A 944 MLP without the pool block** needs nothing — it already trains that
   way. This is the one row where the ablation and the retrain agree exactly,
   because the weights are structurally zero rather than merely small.
+
+### 6.3b The HDR third of the mission is NOT answered here
+
+The stated goal is "extremely fast, as good or better than ssim, **and good at
+HDR**". Everything above is SDR: every corpus in §4 is an SDR corpus, the fold
+requests priced in §3 all take `FrontEnd::Sdr`, and the fold-backed scoring
+path this lane extends explicitly falls back to buffered for declared-HDR /
+PU-linear input (`fold_engine`'s own "what the engine does NOT cover"). So
+**nothing in this note licenses an HDR claim for any of these classes**, and
+the basic-only recommendation in particular is untested there — the HDR
+profiles (`BHdr`, `CHdr`) are separate bakes with separate read sets, and the
+UPIQ/HDR panels are a different instrument (`scripts/external_reads/`,
+`scripts/hdr/upiq_panel.py`).
+
+The mechanism itself is HDR-neutral by construction — `V1PoolsMode::Peaks` is
+a compute request, and `compute_folded720_hdr_streaming_impl` takes its
+`toggles` from its caller — but the *policy* is only wired into the SDR
+scoring entries. Pricing the HDR classes is a separate pass on the same
+template: read set → cheapest request → ms → the UPIQ bars.
 
 ### 6.4 The one lever this lane did NOT pull, and why it is the next one
 
