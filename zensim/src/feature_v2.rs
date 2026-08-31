@@ -1649,6 +1649,103 @@ struct ScratchV2Strip {
     /// bit-for-bit unchanged; sized on first use by `stream_phase_a`.
     activity_dst: Vec<f32>,
 }
+/// **Item D — the compute-set descriptor.** WHAT one extraction request
+/// actually computes, as one value, derived once.
+///
+/// This is the named home for the **compute** half of the layout-vs-compute
+/// split the walk already documents: the emitted vector keeps the WIDTH and
+/// REGIME the caller asked for (a `v1_only` 944 request is still a 944 row
+/// with `f372..` at the structural 0.0), while this decides what work runs.
+/// Before it, that decision lived in six ad-hoc locals recomputed from
+/// [`V2NewFeatureToggles`] at the top of the walk and re-derived again inside
+/// the strip loop; `from_toggles` is now the single derivation and
+/// `compute_set_matches_legacy_derivation` holds it to the old one.
+///
+/// **Why it is worth a type.** Two things the charter asks for are naturally
+/// expressed here and nowhere else:
+///
+/// 1. **Per-model drops (era-2 item E).** The v1 masked/IW/soft-peak pool pass
+///    is **41.2 ms — 13.6 % of the tiled 5 MP walk** — and it is worth
+///    *exactly nothing* to the 944 MLPs (they read those slots with zero
+///    weight) and 0.399 CID22 to `B`. So the right shipping form is neither
+///    "drop" nor "keep" but **"let the request say"**, computed from the
+///    model's own block profile rather than hand-set per call site. That
+///    constructor (`from_block_profile`) is the next step and is deliberately
+///    NOT added here — it needs a `zenpredict::Model`, i.e. a decision about
+///    which crate owns the derivation.
+/// 2. **HDR toggles.** The HDR append is a future regime whose blocks extend
+///    this struct **append-only**, exactly as the feature numbering does. The
+///    HDR front end already flows into the walk (`FrontEnd::Hdr` selects the
+///    BANDVIS deltas and the `hl_bins` lane); an HDR block set becomes fields
+///    here rather than more booleans on the public toggle struct.
+///
+/// **Public surface: none yet, deliberately.** `V2NewFeatureToggles` stays the
+/// public request type and is unchanged; this is `pub(crate)` and derived from
+/// it. Promoting it (and `from_block_profile`) is an API change and is listed
+/// for approval in `benchmarks/era2_perf_break_2026-08-31.md` §26 rather than
+/// taken unilaterally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ComputeSet {
+    /// The v1 basic fold (`f0..155`). Always on today; a field so that a
+    /// v2-only request is expressible rather than impossible.
+    pub v1_basic: bool,
+    /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
+    pub v1_pools: V1PoolsMode,
+    /// The v2-era blocks as a group (`f372..`): false for a `v1_only`
+    /// request, which then computes NOTHING v2-era.
+    pub v2_blocks: bool,
+    pub gradient: bool,
+    pub blockiness: bool,
+    pub transducer_bank: bool,
+    pub transducers_luma_only: bool,
+    pub append: bool,
+    pub append2: bool,
+    pub append2_dst_activity: bool,
+    pub csfw: bool,
+}
+
+impl ComputeSet {
+    /// The ONE derivation from the public request type. Every `&&
+    /// v2_blocks` here was previously written out at a call site; the
+    /// invariant is that a v1-only request forces every v2-era block off
+    /// rather than asserting they are already off, so `v1_only` composes
+    /// with any toggle set (which is what makes it a drop-in bench A/B).
+    pub(crate) fn from_toggles(t: V2NewFeatureToggles) -> Self {
+        let v2_blocks = !t.v1_only;
+        let append = t.append_block && v2_blocks;
+        let append2 = t.append2_block && v2_blocks;
+        Self {
+            v1_basic: true,
+            v1_pools: t.v1_pools,
+            v2_blocks,
+            gradient: t.gradient_features && v2_blocks,
+            blockiness: t.blockiness && v2_blocks,
+            transducer_bank: t.transducer_bank,
+            transducers_luma_only: t.transducers_luma_only,
+            append,
+            append2,
+            append2_dst_activity: t.append2_dst_activity && append2,
+            csfw: t.csfw_block && v2_blocks,
+        }
+    }
+
+    /// Which plane GROUPS the strip scratch must hold, given whether the v1
+    /// fold is running self-blur bands (in which case phase A is skipped
+    /// whole and its four fused-H outputs are never written).
+    pub(crate) fn plane_needs(&self, self_blur: bool) -> StripPlaneNeeds {
+        StripPlaneNeeds {
+            h: !self_blur,
+            v2: self.v2_blocks,
+        }
+    }
+
+    /// True when the fold can own its H planes band-locally — the shape that
+    /// skips phase A entirely. Needs the band pool scratch, hence `Full`.
+    pub(crate) fn self_blur_eligible(&self) -> bool {
+        !self.v2_blocks && self.v1_basic && matches!(self.v1_pools, V1PoolsMode::Full)
+    }
+}
+
 /// Which groups of [`ScratchV2Strip`]'s planes a walk will actually write.
 ///
 /// The set is a property of the REQUEST, and the fold-footprint lane measured
@@ -1666,7 +1763,7 @@ struct ScratchV2Strip {
 /// from the main heap and `calloc` has to memset it. Not asking for the planes
 /// is the only way to not depend on that.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct StripPlaneNeeds {
+pub(crate) struct StripPlaneNeeds {
     /// `mu1_h` / `mu2_h` / `ssq_h` / `s12_h` — phase A's fused-H outputs.
     /// False only when every v1 band blurs its own rows ([`FoldHSource::SelfBlur`]).
     h: bool,
@@ -7558,12 +7655,16 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         ref_planes,
     } = extras;
     use crate::feature_v2_stream::StripPlaneProducer;
-    let fold_v1 = true;
+    // ITEM D: one derivation of WHAT this request computes. Every local
+    // below reads from it instead of re-deriving from `toggles`.
+    let compute = ComputeSet::from_toggles(toggles);
+    let fold_v1 = compute.v1_basic;
     // BLOCK-SKIPPING: a v1-only request computes NOTHING v2-era. Every
-    // v2 toggle is forced off here rather than asserted, so the caller can
-    // set `v1_only` on top of any existing toggle set and get the v1 blocks
-    // of that request — which is what makes it a drop-in A/B in the bench.
-    let v2_blocks = !toggles.v1_only;
+    // v2 toggle is forced off in `ComputeSet::from_toggles` rather than
+    // asserted, so the caller can set `v1_only` on top of any existing
+    // toggle set and get the v1 blocks of that request — which is what
+    // makes it a drop-in A/B in the bench.
+    let v2_blocks = compute.v2_blocks;
     // BAND PARALLELISM: the channel fan-out is only 3-way, and the fold was
     // MEASURED to saturate at exactly 3 threads (2.27x) and REGRESS beyond
     // it. Bands inside a channel are independent, so they are the next axis;
@@ -7577,8 +7678,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     let layout_append = toggles.append_block;
     let layout_append2 = toggles.append2_block;
     let layout_csfw = toggles.csfw_block;
-    let append_on = toggles.append_block && v2_blocks;
-    let append2_on = toggles.append2_block && v2_blocks;
+    let append_on = compute.append;
+    let append2_on = compute.append2;
     assert!(
         !layout_append2 || layout_append,
         "append2_block requires append_block (f924+ sits after the append block)"
@@ -7644,17 +7745,10 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     let fuse_channels = parallel && !append_on && retention.is_none();
     #[cfg(not(feature = "threads"))]
     let fuse_channels = false;
-    let self_blur =
-        fuse_channels && !v2_blocks && fold_v1 && matches!(toggles.v1_pools, V1PoolsMode::Full);
-    scratch.ensure_for(
-        strip_max_n,
-        StripPlaneNeeds {
-            // Phase A is skipped WHOLE under self-blur bands, so its four
-            // fused-H outputs are never written.
-            h: !self_blur,
-            v2: v2_blocks,
-        },
-    );
+    let self_blur = fuse_channels && compute.self_blur_eligible();
+    // Phase A is skipped WHOLE under self-blur bands, so its four fused-H
+    // outputs are never written — `plane_needs` is where that is decided.
+    scratch.ensure_for(strip_max_n, compute.plane_needs(self_blur));
     let V2Scratch {
         strips: scratch_strips,
         stream_pool,
@@ -12469,6 +12563,7 @@ pub(crate) mod tests {
     /// (b) lane `j` holds exactly the terms at `x ≡ j (mod 8)` in increasing
     ///     `x`, tail included — so the shape is width-independent, unlike
     ///     era-1's, whose tail landed in the f64 running total.
+
     #[test]
     fn era2_band_merge_and_tail_are_structural() {
         let term = |i: usize| -> f32 {
@@ -12547,6 +12642,79 @@ pub(crate) mod tests {
                  in increasing x' — the tail fold is wrong."
             );
         }
+    }
+
+    /// ITEM D: the descriptor must reproduce the derivation it replaced, for
+    /// every toggle combination — not just the ones the walk happens to use.
+    /// The legacy expressions are written out here verbatim (they were six
+    /// ad-hoc locals at the top of `foldapp_streaming_walk`); if
+    /// `ComputeSet::from_toggles` ever drifts from them this fails, which is
+    /// the whole point of landing the descriptor separately from any change
+    /// in behaviour.
+    #[test]
+    fn compute_set_matches_legacy_derivation() {
+        use super::{ComputeSet, V1PoolsMode, V2NewFeatureToggles};
+        let pools = [
+            V1PoolsMode::Off,
+            V1PoolsMode::Peaks,
+            V1PoolsMode::Carriers,
+            V1PoolsMode::Full,
+        ];
+        let mut checked = 0usize;
+        for bits in 0u32..256 {
+            for pm in pools {
+                let t = V2NewFeatureToggles {
+                    gradient_features: bits & 1 != 0,
+                    transducer_bank: bits & 2 != 0,
+                    blockiness: bits & 4 != 0,
+                    transducers_luma_only: bits & 8 != 0,
+                    append_block: bits & 16 != 0,
+                    append2_block: bits & 32 != 0,
+                    csfw_block: bits & 64 != 0,
+                    append2_dst_activity: bits & 128 != 0,
+                    v1_pools: pm,
+                    v1_only: bits & 3 == 3,
+                };
+                let cs = ComputeSet::from_toggles(t);
+                // --- the legacy derivation, verbatim ---
+                let v2_blocks = !t.v1_only;
+                let append_on = t.append_block && v2_blocks;
+                let append2_on = t.append2_block && v2_blocks;
+                let self_blur_core =
+                    !v2_blocks && true && matches!(t.v1_pools, V1PoolsMode::Full);
+                // --- /legacy ---
+                assert_eq!(cs.v2_blocks, v2_blocks, "v2_blocks bits={bits}");
+                assert_eq!(cs.append, append_on, "append bits={bits}");
+                assert_eq!(cs.append2, append2_on, "append2 bits={bits}");
+                assert_eq!(
+                    cs.self_blur_eligible(),
+                    self_blur_core,
+                    "self_blur bits={bits}"
+                );
+                assert_eq!(cs.v1_pools, t.v1_pools);
+                // A v1-only request must compute NOTHING v2-era, whatever
+                // else the caller set.
+                if t.v1_only {
+                    assert!(
+                        !cs.v2_blocks
+                            && !cs.gradient
+                            && !cs.blockiness
+                            && !cs.append
+                            && !cs.append2
+                            && !cs.append2_dst_activity
+                            && !cs.csfw,
+                        "v1_only must force every v2-era block off, bits={bits}"
+                    );
+                }
+                // `append2_dst_activity` refines BANDVIS and cannot outlive it.
+                assert!(!cs.append2_dst_activity || cs.append2);
+                // Plane needs follow the group, not the individual blocks.
+                assert_eq!(cs.plane_needs(false).v2, cs.v2_blocks);
+                assert!(!cs.plane_needs(true).h);
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 256 * 4);
     }
 
     /// The trap that motivates [`super::era2_reduce8`]: `reduce_add()` is

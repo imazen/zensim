@@ -2229,3 +2229,65 @@ planes: `V1PoolsMode::Full` (⇒ `BandPoolWork::Full` ⇒ `store_sigma`), which 
 the 944 product mode. Any other pool mode keeps phase A's sweeps, and the
 parallel band path needs the per-band output slices chunked disjointly before
 it can opt in.
+
+---
+
+## 26. Item D: the compute-set descriptor — landed internally, public surface PROPOSED
+
+**What landed** (`ComputeSet` in `feature_v2.rs`, `pub(crate)`): one derivation
+of *what a request computes*, replacing six ad-hoc locals that were recomputed
+from `V2NewFeatureToggles` at the top of `foldapp_streaming_walk` and
+re-derived again inside the strip loop. The walk now reads `compute.v2_blocks`
+/ `.append` / `.append2` / `.self_blur_eligible()` / `.plane_needs(self_blur)`
+instead of writing `&& v2_blocks` out at each site.
+
+**Behaviour is unchanged, and that is gated rather than asserted.**
+`compute_set_matches_legacy_derivation` sweeps **1,024 combinations** (256
+toggle bit-patterns × 4 `V1PoolsMode` values) and checks each against the
+legacy expressions written out verbatim, plus two invariants the old code only
+implied: a `v1_only` request forces **every** v2-era block off whatever else
+the caller set, and `append2_dst_activity` cannot outlive `append2`.
+
+**Why this is the right home for two things the charter asks for.**
+
+* **Per-model drops (item E).** §24.1 measured the v1 masked/IW/soft-peak pool
+  pass at **41.2 ms — 13.6 % of the tiled 5 MP walk** — and the frontier lane
+  measured its rank cost as **exactly 0 for the 944 MLPs** and **0.399 CID22
+  for `B`**. A global drop is therefore wrong in both directions. The shipping
+  form is `ComputeSet::from_block_profile(model)`: read the model's own block
+  profile and compute only what it can read. That constructor is **not added
+  here** — it needs a `zenpredict::Model`, which is a question about which
+  crate owns the derivation, and it should be answered before it is coded.
+* **HDR toggles.** The HDR append is a future regime; its blocks become
+  **fields on this struct, append-only**, exactly as feature numbering is. The
+  HDR front end already reaches the walk (`FrontEnd::Hdr` selects the BANDVIS
+  deltas and the `hl_bins` lane), so the wiring exists — what was missing was a
+  place to put "this request wants the HDR blocks" that is not another boolean
+  on the public request type.
+
+### 26.1 Proposed public surface — for approval, NOT taken
+
+`V2NewFeatureToggles` remains the public request type and is **unchanged**.
+Nothing below is implemented; it is listed so the API change can be approved
+or refused as a unit, per the repo's API rule.
+
+| item | shape | why |
+|---|---|---|
+| `pub struct ComputeSet` | promote the `pub(crate)` type | lets a caller state a compute set directly instead of encoding it in toggle booleans |
+| `ComputeSet::from_toggles(V2NewFeatureToggles)` | already exists | the compatibility path; keeps every current caller working unchanged |
+| `ComputeSet::from_block_profile(&Model)` | new | **item E's shipping form** — derives the drop set from the model, so the 13.6 % pool pass is skipped exactly when it is worth 0 |
+| `compute_*_with_set(.., ComputeSet)` | one new entry per existing extraction entry | the only way to *use* a compute set that was not derived from toggles |
+
+The cheapest version that unlocks item E without any of the above is to keep
+everything `pub(crate)` and derive the compute set **inside** the existing
+entry points from a model handle the caller already passes. That needs no new
+public types at all, and is the recommendation.
+
+### 26.2 What item D does NOT do
+
+It does not change what is computed, and it is not a perf change — the six
+locals it replaces were already correct. Its value is that **items E and F are
+expressible**: before it, "drop the pool pass for this model" had no place to
+live except another public boolean, and "add the HDR blocks" had the same
+problem. The measured levers are in §23–§25 and
+`benchmarks/era2_drop_redefine_table_2026-08-31.md`; this is the vehicle.
