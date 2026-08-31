@@ -1,0 +1,11 @@
+r5 re-extraction (this lane, tree 6306303e) vs canonical r1b-pools944-2026-08-30, to_bits()
+ext_cid22val           rows=  4292 bit-identical 4051648/4051648 (100.0000%) max|d|=0.000e+00
+ext_kadid              rows= 10125 bit-identical 9558000/9558000 (100.0000%) max|d|=0.000e+00
+ext_tid                rows=  3000 bit-identical 2832000/2832000 (100.0000%) max|d|=0.000e+00
+ext_csiq               rows=   866 bit-identical 817504/817504 (100.0000%) max|d|=0.000e+00
+ext_live               rows=   779 bit-identical 735376/735376 (100.0000%) max|d|=0.000e+00
+ext_konjnd_jpeg_val    rows=   504 bit-identical 475776/475776 (100.0000%) max|d|=0.000e+00
+ext_aic3               rows=   600 bit-identical 566400/566400 (100.0000%) max|d|=0.000e+00
+ext_aic4               rows=   300 bit-identical 283200/283200 (100.0000%) max|d|=0.000e+00
+ext_sdr25              rows=    50 bit-identical 47200/47200 (100.0000%) max|d|=0.000e+00
+TOTAL 19367104/19367104 (100.0000%)

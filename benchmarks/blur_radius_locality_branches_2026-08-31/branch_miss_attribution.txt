@@ -1,0 +1,67 @@
+===== bm_2304 (branch-misses:u, fold944_full, 1T) =====
+    37.54%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_box_blur_v_copy_inner_v4x
+     9.01%  extract_paths_b  BENCH  [.] zensim::feature_v2::stream_phase_b
+     7.36%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_downscale_2x_into_inner_v4x
+     6.16%  extract_paths_b  BENCH  [.] zensim::feature_v2::__arcane_dense_block_kernel_entry_v4x
+     4.35%  extract_paths_b  BENCH  [.] zensim::fused::__arcane_fused_vblur_ssim_inner_v4x
+     4.20%  extract_paths_b  BENCH  [.] crossbeam_epoch::default::with_handle::<crossbeam_epoch::default::pin::{closure#0}, crossbeam_epoch::guard::Guard>
+     4.05%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_box_blur_h_inner_v4x
+     3.45%  extract_paths_b  BENCH  [.] zensim::feature_v2::gradient_block_kernel_generic::<archmage::tokens::ScalarToken, false, false>::{closure#0}
+     3.30%  extract_paths_b  BENCH  [.] zensim::feature_v2::__arcane_append_block_kernel_entry_nocross_v4x
+     3.30%  extract_paths_b  BENCH  [.] zensim::feature_v2::gradient_block_kernel_generic::<archmage::tokens::ScalarToken, true, false>::{closure#0}
+     2.70%  extract_paths_b  BENCH  [.] zensim::feature_v2::__arcane_gradient_block_kernel_entry_bandvis_v4x
+     2.40%  extract_paths_b  BENCH  [.] zensim::feature_v2::__arcane_append_block_kernel_entry_cross_v4x
+     1.95%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_fused_blur_h_ssim_inner_v4x
+     1.20%  extract_paths_b  BENCH  [.] zensim::simd_ops::__arcane_abs_diff_into_inner_v4
+     1.20%  extract_paths_b  libc.so.6                             [.] __memset_avx512_unaligned_erms
+
+===== bm_2303 (branch-misses:u, fold944_full, 1T) =====
+    34.82%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_box_blur_v_copy_inner_v4x
+    14.61%  extract_paths_b  BENCH  [.] zensim::feature_v2::__arcane_dense_block_kernel_entry_v4x
+     8.01%  extract_paths_b  BENCH  [.] zensim::feature_v2::stream_phase_b
+     6.61%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_downscale_2x_into_inner_v4x
+     5.21%  extract_paths_b  BENCH  [.] zensim::fused::__arcane_fused_vblur_ssim_inner_v4x
+     4.32%  extract_paths_b  BENCH  [.] zensim::feature_v2::gradient_block_kernel_generic::<archmage::tokens::ScalarToken, false, false>::{closure#0}
+     3.05%  extract_paths_b  BENCH  [.] zensim::feature_v2::gradient_block_kernel_generic::<archmage::tokens::ScalarToken, true, false>::{closure#0}
+     2.80%  extract_paths_b  BENCH  [.] crossbeam_epoch::default::with_handle::<crossbeam_epoch::default::pin::{closure#0}, crossbeam_epoch::guard::Guard>
+     2.54%  extract_paths_b  BENCH  [.] zensim::feature_v2::__arcane_append_block_kernel_entry_cross_v4x
+     2.41%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_box_blur_h_inner_v4x
+     2.41%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_fused_blur_h_ssim_inner_v4x
+     2.41%  extract_paths_b  BENCH  [.] zensim::feature_v2::__arcane_append_block_kernel_entry_nocross_v4x
+     1.91%  extract_paths_b  BENCH  [.] zensim::feature_v2::__arcane_gradient_block_kernel_entry_v4x
+     1.52%  extract_paths_b  [unknown]                             [k] 0xffffffff93600b90
+
+===== bm_64 (branch-misses:u, fold944_full, 1T) =====
+    28.55%  extract_paths_b  BENCH  [.] crossbeam_epoch::default::with_handle::<crossbeam_epoch::default::pin::{closure#0}, crossbeam_epoch::guard::Guard>
+    13.98%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_box_blur_v_copy_inner_v4x
+     7.38%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_box_blur_h_inner_v4x
+     7.32%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_downscale_2x_into_inner_v4x
+     5.71%  extract_paths_b  BENCH  [.] zensim::blur::__arcane_fused_blur_h_ssim_inner_v4x
+     2.86%  extract_paths_b  BENCH  [.] zensim::simd_ops::__arcane_abs_diff_into_inner_v4
+     2.56%  extract_paths_b  BENCH  [.] <rayon_core::latch::LockLatch>::wait_and_reset
+     2.50%  extract_paths_b  libc.so.6                             [.] __memset_avx512_unaligned_erms
+     2.38%  extract_paths_b  BENCH  [.] <rayon_core::registry::WorkerThread>::take_local_job
+     2.38%  extract_paths_b  BENCH  [.] zensim::feature_v2::stream_phase_b
+     2.26%  extract_paths_b  BENCH  [.] zensim::feature_v2::foldapp_streaming_walk::<zensim::source::RgbSlice, zensim::source::RgbSlice>
+     2.26%  extract_paths_b  libc.so.6                             [.] __memmove_avx512_unaligned_erms
+     2.14%  extract_paths_b  BENCH  [.] <rayon_core::registry::WorkerThread>::take_local_job
+     1.96%  extract_paths_b  BENCH  [.] zensim::fused::__arcane_fused_vblur_ssim_inner_v4x
+     1.49%  extract_paths_b  BENCH  [.] <zensim::feature_v2_stream::StripPlaneProducer<zensim::metric::OwnedImage, zensim::metric::OwnedImage>>::fill_wide
+     1.13%  extract_paths_b  BENCH  [.] <rayon_core::registry::WorkerThread>::find_work
+     1.13%  extract_paths_b  BENCH  [.] rayon::iter::plumbing::bridge_producer_consumer::helper::<rayon::iter::enumerate::EnumerateProducer<rayon::slice::IterMutProducer<zensim::feature_v2::ScratchV2Strip>>, rayon::iter::for_each::ForEachConsumer<zensim::feature_v2::foldapp_streaming_walk<zensim::source::RgbSlice, zensim::source::RgbSlice>::{closure#7}>>
+
+===== bm_2304_16t (branch-misses:u, foldapp_stream_bigpair 944full, 16T, CCD1-pinned) =====
+    48.57%  foldapp_stream_  foldapp_stream_bigpair  [.] crossbeam_epoch::default::with_handle::<crossbeam_epoch::default::pin::{closure#0}, crossbeam_epoch::guard::Guard>
+    11.38%  foldapp_stream_  foldapp_stream_bigpair  [.] zensim::blur::__arcane_box_blur_v_copy_inner_v4x
+     4.76%  foldapp_stream_  foldapp_stream_bigpair  [.] <crossbeam_epoch::internal::Global>::try_advance
+     3.76%  foldapp_stream_  foldapp_stream_bigpair  [.] zensim::fused::__arcane_fused_vblur_ssim_inner_v4x
+     3.23%  foldapp_stream_  [unknown]               [k] 0xffffffff94d32947
+     3.12%  foldapp_stream_  foldapp_stream_bigpair  [.] zensim::feature_v2::stream_phase_b
+     1.96%  foldapp_stream_  foldapp_stream_bigpair  [.] <rayon_core::sleep::Sleep>::sleep::<<rayon_core::registry::WorkerThread>::wait_until_cold::{closure#0}>
+     1.96%  foldapp_stream_  foldapp_stream_bigpair  [.] zensim::blur::__arcane_downscale_2x_into_inner_v4x
+     1.96%  foldapp_stream_  foldapp_stream_bigpair  [.] zensim::blur::__arcane_fused_blur_h_ssim_inner_v4x
+     1.80%  foldapp_stream_  foldapp_stream_bigpair  [.] <rayon_core::registry::WorkerThread>::find_work
+     1.53%  foldapp_stream_  foldapp_stream_bigpair  [.] <rayon_core::sleep::Sleep>::wake_specific_thread
+     1.53%  foldapp_stream_  foldapp_stream_bigpair  [.] zensim::feature_v2::__arcane_dense_block_kernel_entry_v4x
+     1.11%  foldapp_stream_  foldapp_stream_bigpair  [.] <std::sys::sync::mutex::futex::Mutex>::lock_contended
+     1.06%  foldapp_stream_  foldapp_stream_bigpair  [.] zensim::blur::__arcane_box_blur_h_inner_v4x
