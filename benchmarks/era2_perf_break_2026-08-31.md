@@ -1336,3 +1336,126 @@ and will be built on **this** kernel. Still required before the flip: the
 sibling lane's v2-348/append hand-off folded into the same break (reusing
 `Lanes8`/`era2_reduce8` rather than growing a second set of primitives), rank
 preservation, the blast-radius registration, and the gate re-pin enumeration.
+
+---
+
+## 21. Charter widened: "speed is king" (user directive, 2026-08-31)
+
+Until now every era-2 lever had to reproduce the same mathematical quantity —
+the break bought a *regrouping*, never a *redefinition*. That constraint is
+lifted. The user's directive, in its own terms: **speed is king**; features may
+be **dropped** if it helps; HDR wants **toggleable feature sets per route**;
+**const generics** are in scope; **direct archmage intrinsics** are allowed
+beyond magetypes where they pay; and **the canonical calculation of a feature
+may change for speed, as long as the feature remains useful**.
+
+**The bar moves from bit-identity to utility preservation — and utility has to
+be *proven*, not asserted.** Bit-identity remains the standard *within* the
+era (cross-tier, cross-vendor, thread-count); what is no longer required is
+that era-2 reproduce era-1.
+
+### 21.1 The redefinition bar — declared BEFORE anything is fitted
+
+Any feature redefinition must clear all three, and the thresholds below are
+registered **now**, before a single candidate exists, precisely so they cannot
+be renegotiated against a result:
+
+1. **A scalar oracle for the NEW definition.** The oracle is not optional
+   because the definition changed — it is what makes "the new formula, computed
+   exactly" a thing that exists to measure against. Same two levels (Neumaier
+   L1, exact-expansion L2), same per-family bounds written out (§10.5), same
+   "a bound violation is a bug, not a tolerance to widen".
+2. **Rank preservation, pre-declared bar.** Shipped B + the 944 roster + the
+   two W-LIN winners, scored on old-vs-new features over the **same pairs**:
+   > **PASS iff no corpus loses more than `0.005` SROCC and the product
+   > composite does not fall.**
+   `0.005` is ~200× the era-1→era-3 (option C) precedent of `+0.000024` on
+   cid22 and an order below the campaign's 0.5-score-point materiality step, so
+   it is strict enough to catch a real utility loss and loose enough not to
+   trip on reseeding noise. **A redefinition that fails is reverted, not
+   renegotiated.**
+3. **The dial gates**, wherever a redefinition could bend monotonicity —
+   `bake_verdict`'s G1/G3/G4 on the densified multi-codec grid. A cheaper
+   formulation that costs monotonicity is not cheaper.
+
+### 21.2 Dropping features — the drop set, and how a drop is expressed
+
+Input from the frontier lane: **peaks are free byproducts**, **masked+IW are
+one pass group costing +33–36 %**, **v2-348+append roughly doubles
+extraction**. The intra-v2 structural read (which slots are byproducts vs
+which force their own sweep) comes from the v2-block lane
+(`benchmarks/v2_block_cost_2026-08-31.md`) and is a **coordination input, not
+something this lane re-derives**.
+
+**A drop is a declared structural zero, never a renumbering.** The
+append-only discipline is unconditional: `f156..371`'s precedent is exactly
+this — slots preserved, zeroed, with a registered reason, so every existing
+bake keeps reading the right columns. A drop set therefore ships as
+(slot range → registered reason) in `benchmarks/eval_annotations.json`, and
+`bake_block_profile` already reports which blocks a bake actually uses, so the
+per-model cost of a drop is computable before it is taken.
+
+**Proposal shape** (to be filled by measurement, not guessed): for each
+candidate block, its **measured** extraction saving and its **measured** rank
+cost per model class, so the user chooses on a table rather than an argument.
+
+### 21.3 HDR toggles — generalize `V1PoolsMode`/`v1_only` into a compute set
+
+The right shape is a **compute-set descriptor** on the request: which feature
+families to compute, resolved per route. `V1PoolsMode` and the `#[doc(hidden)]`
+`v1_only` are the two ad-hoc instances of this idea already in tree; era-2
+replaces both with one descriptor rather than adding a third.
+
+Frontier-lane input: **`BHdr` reads 28 masked / 17 IW; `c_hdr_l1t1944` reads
+0 masked / 72 IW.** So the HDR route demonstrably does not need the whole pool
+group, and a descriptor lets it say so.
+
+**One thing to state rather than leave implicit: the fold currently falls back
+to the BUFFERED path for declared-HDR input.** Era-2 does **not** change that
+by itself — the descriptor makes the HDR *feature set* expressible, not the HDR
+*route* fold-native. Whether HDR becomes fold-native is a separate decision
+that belongs with the fold-engine lane, and this doc will not quietly imply it
+has happened.
+
+### 21.4 Const generics — yes, with the cost reported
+
+For the compute-set descriptor and the tier/lane/tile parameters, monomorphising
+removes branches from the hot loop. Stage B is a live warning about
+monomorphisation-adjacent effects: the closure→macro finding shows how
+violently code shape interacts with inlining here. So every const-generic
+parameter added must report **code size and compile time alongside the speed
+win** — more monomorphisation is also more I-cache pressure and more build
+time, and this lane has already measured one case where the "obviously faster"
+structure was 36× slower.
+
+### 21.5 Direct archmage intrinsics — justified per site
+
+The repo rule prefers `#[magetypes]` for uniform algorithms, and **stage B is
+evidence for that rule, not against it**: the generic `V8<T>` types turned out
+*faster* than plain `[f32; 8]` arrays. So raw intrinsics are reserved for
+specific measured cases where even `V8` leaves something on the floor. Each
+such site needs its measured delta, and the generic path stays as the reference
+implementation for every tier not hand-written — which is also what keeps the
+cross-tier bit-identity claim checkable.
+
+### 21.6 Re-ordered plan (gain per unit of risk)
+
+| # | item | gain | risk | status |
+|---|---|---|---|---|
+| ~~A~~ | pass split | — | — | **done**: fused falsified, byte-neutrality confirmed |
+| ~~B~~ | `V8<T>` accumulators | **2.12× → 1.04×** | — | **done**, parity reached |
+| **C** | column tiling | hot set 4.43 → 1.02 MiB/thread | medium | next; constraints derived (§18.1) |
+| **D** | compute-set descriptor (subsumes `fold_v1`, `v1_only`, `V1PoolsMode`, HDR toggles) | skips whole blocks per route | low | replaces item C of §18 with the general form |
+| **E** | drop set | up to ~2× (v2-348+append) | **highest** — the only item that can lose utility | needs §21.1's bar and the v2-block lane's read |
+| **F** | redefinitions | unbounded, per candidate | highest | each one takes §21.1 individually |
+
+**C and D first** — both are pure skipping/reordering with the existing
+instruments, no utility question. **E and F last**, because they are the only
+items where "faster" can mean "worse", and they are the ones that need the
+user's judgement on a measured table rather than this lane's.
+
+**Unchanged non-negotiables:** ONE batched era; oracle + written-out math +
+declared bounds per kernel; determinism and thread-invariance by construction;
+cross-tier and (where verifiable) cross-vendor bit-identity *within* the era;
+the vendor probe on dev + i134; blast radius registered, not launched; HDR-route
+cleanliness; and the flip blocked until parity and perf numbers exist.
