@@ -134,9 +134,14 @@ fn toggles_v1_only(pools: zensim::feature_v2::V1PoolsMode) -> zensim::feature_v2
 /// `ZEN_XP_ROUNDS` / `ZEN_XP_WALL_S` overrides. `min_rounds` follows
 /// `max_rounds` down (a min above the max would never terminate).
 fn bench_budget() -> (usize, usize, u64) {
-    let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse().ok());
-    let max_r: usize = env("ZEN_XP_ROUNDS").unwrap_or(200);
-    let wall_s: u64 = env("ZEN_XP_WALL_S").unwrap_or(600);
+    let max_r: usize = std::env::var("ZEN_XP_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200);
+    let wall_s: u64 = std::env::var("ZEN_XP_WALL_S")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(600);
     (max_r, 25.min(max_r), wall_s)
 }
 
