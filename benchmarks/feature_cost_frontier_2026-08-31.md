@@ -62,12 +62,8 @@ also carries the v2 planes, which the fold-footprint lane prices separately).
 **Speed, up front — the ~2× exists, and it is a class choice.** At 2304², the
 basic-only class's walk against the others:
 
-| | 1T | 8T | 16T |
-|---|---:|---:|---:|
-| vs the W-LIN 7b blend | **2.90×** | **4.25×** | **3.82×** |
-| vs the 944 MLP | **2.56×** | **3.46×** | **3.27×** |
-| vs shipped B's fold walk | 1.39× | 1.83× | 1.46× |
-| vs shipped B's walk **today** (buffered) | **1.64×** | 1.27× | 0.99× |
+<!--HD_BEGIN-->
+<!--HD_END-->
 
 **The class gap widens with threads** — 2.9× → 4.3× from 1 to 8 — because the
 944 walk scales worse than the 372 one, which is the fold-MT lane's finding
@@ -539,10 +535,16 @@ arities do not tile layer 0 comes back as `V1PoolNeed::ALL`. No valid bake is
 in that state; pruned and expanded bakes are handled properly (§5.1b).
 
 **The policy never returns `Off`,** and the reason is footprint rather than
-arithmetic: `Off` hands the band no scratch, which disables self-blur, so the
-walk falls back to phase A's four strip-wide H planes. `Peaks` computes the
-identical sums, emits a superset of `Off`'s slots, and is the smaller hot set
-(§4.4). `Off` is dominated on every axis.
+arithmetic: `Off` hands the band no scratch, which disables the band-local
+self-blur, so the walk falls back to phase A's four STRIP-wide H planes.
+`Peaks` computes the identical sums, emits a superset of `Off`'s slots, and is
+the smaller hot set (§4.4) — `Off` is dominated on every axis. The wall-clock
+gap between them is **small**: zenbench puts `fold156_basic` at 128.8 ms
+against `fold228_peaks`' 123.5 at 2304²/1T, **1.04×**. (This lane's first pass
+read that gap as ~1.5× from the round-robin harness, which over-charges `Off`
+for the per-walk allocation and first touch of those strip-wide planes — see
+§3.1's two-instrument comparison. The policy decision does not turn on the
+magnitude, but the number is corrected here rather than left standing.)
 
 ### 5.3 The opt-in, and why it is one
 
