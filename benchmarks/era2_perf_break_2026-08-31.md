@@ -1257,3 +1257,82 @@ rests on, and named the next lever with evidence. Column tiling (item B) and
 tiling in particular should be built on the *fast* kernel, not the slow one,
 since its predicted win is a cache-footprint effect that a 2× compute deficit
 would mask.
+
+---
+
+## 20. Stage B: the V8 rewrite closes the 2.12× — and the closure→macro step was worth 55×
+
+### 20.1 Result
+
+| geometry | era-1 dispatched | era-2 (V8, macros) | ratio |
+|---|---:|---:|---:|
+| 576×128 | 98.4 µs | **101.8 µs** | **+4.0 – +5.8 %** |
+| 1152×128 | 202.7 µs | **210.1 µs** | **−7.1 – +16.2 %** (CI spans zero) |
+
+**Parity.** era-2 is within ~4–6 % at 576² and statistically indistinguishable
+at 1152². The gap that blocked everything downstream is closed.
+
+### 20.2 The path, and the trap in the middle
+
+| step | 576×128 | vs era-1 |
+|---|---:|---:|
+| runtime chunk bound | 1007.5 µs | 10.3× |
+| `as_chunks::<8>` | 482.1 µs | 4.4× |
+| `+ target_feature` region | 226.1 µs | 2.12× |
+| `V8<T>` accumulators, **closures** | **5610.1 µs** | **36×** |
+| `V8<T>` accumulators, **macros** | **101.8 µs** | **1.04×** |
+
+The V8 rewrite made things **17× worse** before it made them better, and the
+cause is documented in this very file's history: era-1's `dense_block_kernel`
+carries a comment recording a **5.3×** regression when "the POOL_SIMD variant
+pushed the body past LLVM's inline-cost threshold, the hint stopped being
+honored and every V8 operator compiled into a CALL to a non-inlined
+`core::arch` shim outside the feature region". My body had two large closures
+(`terms`, `pools`); LLVM declined to inline them, so every `V8` operation
+became an out-of-line call **outside** the `target_feature` region — the same
+failure, at 36× instead of 5.3× because the body is bigger.
+
+**Converting the two closures to `macro_rules!` — textual expansion, so there
+is no inline-cost decision to lose — took it from 5610 µs to 101.8 µs, a 55×
+step.** `#[inline(always)]` on the enclosing function is *not* sufficient when
+the hot work sits inside closures it contains.
+
+**This is the fifth catch**, and the first one the *code's own comments* had
+already warned about. Reading era-1's kernel comment before writing the
+replacement would have saved the detour; the bench found it in one run
+regardless.
+
+### 20.3 All three instruments re-verified on the V8 kernel
+
+* **Oracle bounds** — deviations essentially unchanged, with one *improvement*:
+  `hf` went **3.7719e-5 → 3.4382e-5**, because `bounded_excess_pair_v` uses a
+  true division where my scalar helper used reciprocal-multiply. The V8 path
+  now matches era-1's per-pixel term math exactly. core `2.7564e-4`, pjnd
+  `1.5011e-4`, pools `4.3567e-3` unchanged; all under bound.
+* **Vendor probe (dev AMD-v4x vs i134 Intel-v3)** — **era-1 66/105 slots
+  differ, era-2 0/105**. Cross-tier bit-identity survives the rewrite, which is
+  the load-bearing one: each tier now compiles its own `V8` operations, and
+  they still agree to the bit.
+* **Bit-identity gates** — `era2_fused_and_two_pass_are_bit_identical`,
+  `era2_band_merge_and_tail_are_structural`,
+  `era2_reduce_tree_is_fixed_and_explicit` all green.
+
+### 20.4 One trap worth recording: the tail cannot be zero-padded
+
+The V8 chunk loop is fed by `as_chunks::<8>`, but the row **tail** must be
+masked, not zero-padded into a full-width add. Padded lanes are not
+accumulator-neutral for the pool **weights**: `mask_w = 1 − saturate(act)` and
+`saturate(0) = 0`, so every padded lane would contribute `mask_w = 1.0` (and
+`iw_w = IW_WEIGHT_FLOOR`) to the weight denominators. `v8_add_first` therefore
+adds only the first `n` lanes. The core term families *are* zero on padded
+lanes (`d`, `art`, `det`, `mse`, `hf`, `pjnd` all evaluate to 0 from zero
+inputs), which is exactly why this would have been easy to miss — the
+pool denominators are the only place it shows.
+
+### 20.5 Status
+
+The 2.12× is closed, so tiling (item B) and `fold_v1` (item C) are unblocked
+and will be built on **this** kernel. Still required before the flip: the
+sibling lane's v2-348/append hand-off folded into the same break (reusing
+`Lanes8`/`era2_reduce8` rather than growing a second set of primitives), rank
+preservation, the blast-radius registration, and the gate re-pin enumeration.

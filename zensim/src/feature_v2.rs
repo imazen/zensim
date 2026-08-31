@@ -12199,8 +12199,14 @@ pub(crate) mod tests {
     /// relative tolerance of the §A.14 scalar-pool path — same
     /// reassociation class as the phase-4 core-moment change. On hosts
     /// where the active tier runs scalar pools anyway, both sides are
-    /// §14.4 UNDER TEST: the FUSED (v4x, one pass) and two-pass (16-register
-    /// tiers) bodies must produce BIT-IDENTICAL accumulators.
+    /// §14.4 UNDER TEST: the two `const FUSED` instantiations must produce
+    /// BIT-IDENTICAL accumulators.
+    ///
+    /// Post-V8-rewrite the split is vestigial (both entries select `false`,
+    /// since fusing MEASURED 2x worse — §19.2), but the gate is kept because
+    /// it is the executable form of §14.4's claim that pass structure is a
+    /// perf knob and not semantics. It runs on the `scalar` token so it is
+    /// tier-independent.
     ///
     /// This is the claim that lets the pass split be tuned per tier without
     /// touching the era. It is asserted directly rather than inferred: both
@@ -12227,7 +12233,10 @@ pub(crate) mod tests {
             let n = w * h;
             for ch in 0..3 {
                 run_blur_pass(&sp[ch], &dp[ch], w, h, &mut scratch);
-                let f = super::dense_block_kernel_era2_generic::<true>(
+                use archmage::SimdToken as _;
+                let tok = archmage::ScalarToken::summon().expect("infallible");
+                let f = super::dense_block_kernel_era2_generic::<_, true>(
+                    tok,
                     &sp[ch],
                     &dp[ch],
                     &scratch.mu1[..n],
@@ -12239,7 +12248,8 @@ pub(crate) mod tests {
                     h,
                     true,
                 );
-                let t = super::dense_block_kernel_era2_generic::<false>(
+                let t = super::dense_block_kernel_era2_generic::<_, false>(
+                    tok,
                     &sp[ch],
                     &dp[ch],
                     &scratch.mu1[..n],
@@ -16933,131 +16943,8 @@ impl Lanes8 {
     }
 }
 
-/// The 11 weighted-pool accumulators for one row, bundled so the fused and
-/// two-pass bodies can share one chunk routine (and therefore cannot drift).
-#[derive(Clone, Copy)]
-struct E2Pools {
-    mw: Lanes8,
-    iw: Lanes8,
-    m: [Lanes8; 4],
-    i: [Lanes8; 4],
-    kn: [Lanes8; 3],
-    kd: [Lanes8; 3],
-}
-impl E2Pools {
-    #[inline(always)]
-    fn zero() -> Self {
-        Self {
-            mw: Lanes8::zero(),
-            iw: Lanes8::zero(),
-            m: [Lanes8::zero(); 4],
-            i: [Lanes8::zero(); 4],
-            kn: [Lanes8::zero(); 3],
-            kd: [Lanes8::zero(); 3],
-        }
-    }
-    /// Accumulate one 8-chunk of already-evaluated terms. `n` is 8 for a full
-    /// chunk and `width % 8` for the tail; lanes past `n` are never added.
-    #[inline(always)]
-    fn add_chunk8(
-        &mut self,
-        n: usize,
-        act: &[f32; 8],
-        d: &[f32; 8],
-        art: &[f32; 8],
-        det: &[f32; 8],
-        mse: &[f32; 8],
-    ) {
-        let mut mw = [0.0f32; 8];
-        let mut iw = [0.0f32; 8];
-        let mut mv = [[0.0f32; 8]; 4];
-        let mut iv = [[0.0f32; 8]; 4];
-        let mut kn = [[0.0f32; 8]; 3];
-        let mut kd = [[0.0f32; 8]; 3];
-        for k in 0..8 {
-            let sat = e2_saturate(act[k], C_ACTIVITY as f32);
-            let m_w = 1.0 - sat;
-            let i_w = sat + IW_WEIGHT_FLOOR as f32;
-            mw[k] = m_w;
-            iw[k] = i_w;
-            let vals = [d[k], art[k], det[k], mse[k]];
-            for j in 0..4 {
-                mv[j][k] = m_w * vals[j];
-                iv[j][k] = i_w * vals[j];
-            }
-            for j in 0..3 {
-                let sal = e2_saturate(vals[j], C_PEAK as f32);
-                kn[j][k] = sal * vals[j];
-                kd[j][k] = sal;
-            }
-        }
-        self.mw.add_tail(&mw[..n]);
-        self.iw.add_tail(&iw[..n]);
-        for j in 0..4 {
-            self.m[j].add_tail(&mv[j][..n]);
-            self.i[j].add_tail(&iv[j][..n]);
-        }
-        for j in 0..3 {
-            self.kn[j].add_tail(&kn[j][..n]);
-            self.kd[j].add_tail(&kd[j][..n]);
-        }
-    }
-}
 
-/// era-2 per-pixel term evaluation, f32 — the SIMD-shaped semantics
-/// (user directive: the SIMD shape is canonical and the scalar path matches
-/// it, never the reverse). Mirrors the `_v` helpers operating on one lane.
-#[inline(always)]
-fn e2_ssim_d(mu1: f32, mu2: f32, s12: f32, ssq: f32) -> f32 {
-    let (c1, c2) = (C1_V2 as f32, C2_V2 as f32);
-    let a = 2.0 * mu1 * mu2 + c1;
-    let b = mu1 * mu1 + mu2 * mu2 + c1;
-    let cov = s12 - mu1 * mu2;
-    let c = 2.0 * cov + c2;
-    let d = ssq - mu1 * mu1 - mu2 * mu2 + c2;
-    let local = (a * c) / (b * d);
-    (1.0 - local).max(0.0)
-}
-#[inline(always)]
-fn e2_bounded_sim(a: f32, b: f32, c: f32) -> f32 {
-    (2.0 * a * b + c) / (a * a + b * b + c)
-}
-#[inline(always)]
-fn e2_saturate(x: f32, c: f32) -> f32 {
-    let x = x.max(0.0);
-    x / (x + c)
-}
-#[inline(always)]
-fn e2_bounded_excess_pair(a: f32, b: f32, c: f32) -> (f32, f32) {
-    let r = 1.0 / (a + b + c);
-    ((a - b).max(0.0) * r, (b - a).max(0.0) * r)
-}
-#[inline(always)]
-fn e2_bounded_excess(a: f32, b: f32, c: f32) -> f32 {
-    (a - b).max(0.0) / (a + b + c)
-}
-#[inline(always)]
-fn e2_pjnd(raw_abs_err: f32, act: f32, k: f32, c: f32) -> f32 {
-    raw_abs_err / (raw_abs_err + c * (1.0 + k * act))
-}
 
-/// era-2 core terms for one pixel: the values every downstream family reads.
-#[inline(always)]
-fn e2_terms(s: f32, dd: f32, m1: f32, m2: f32, s12: f32, ssq: f32) -> (f32, f32, f32, f32) {
-    let d = e2_ssim_d(m1, m2, s12, ssq);
-    let diff_src = (s - m1).abs();
-    let diff_dst = (dd - m2).abs();
-    let edge_dissim = 1.0 - e2_bounded_sim(diff_src, diff_dst, C_EDGE as f32);
-    let (mut art_i, mut det_i) = (0.0f32, 0.0f32);
-    if diff_dst > diff_src {
-        art_i = edge_dissim;
-    } else if diff_dst < diff_src {
-        det_i = edge_dissim;
-    }
-    let raw_sq_err = (s - dd) * (s - dd);
-    let mse_i = e2_saturate(raw_sq_err, C_MSE as f32);
-    (d, art_i, det_i, mse_i)
-}
 
 /// **THE ERA-2 DENSE KERNEL.**
 ///
@@ -17282,8 +17169,8 @@ fn dense_block_kernel_era2_entry(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
-    let _ = token;
-    dense_block_kernel_era2_generic::<false>(
+    dense_block_kernel_era2_generic::<_, false>(
+        token,
         src,
         dst,
         mu1,
@@ -17312,8 +17199,8 @@ fn dense_block_kernel_era2_entry(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
-    let _ = token;
-    dense_block_kernel_era2_generic::<false>(
+    dense_block_kernel_era2_generic::<_, false>(
+        token,
         src,
         dst,
         mu1,
@@ -17327,14 +17214,42 @@ fn dense_block_kernel_era2_entry(
     )
 }
 
+/// Accumulate the first `n` lanes of a term array into a `V8` accumulator,
+/// preserving lane identity and add order.
+///
+/// Used ONLY for the row tail. Zero-padding the tail into a full `V8` add is
+/// NOT equivalent: the pool weights are `mask_w = 1 - saturate(act)`, and
+/// `saturate(0) = 0`, so a padded lane contributes `mask_w = 1.0` (and
+/// `iw_w = IW_WEIGHT_FLOOR`) to the weight denominators. Those are not
+/// accumulator-neutral, so the tail is masked rather than padded.
+#[inline(always)]
+#[allow(dead_code)]
+fn v8_add_first<T: F32x8Backend + Copy>(token: T, acc: V8<T>, t: &[f32; 8], n: usize) -> V8<T> {
+    let mut a = acc.to_array();
+    for k in 0..n {
+        a[k] += t[k];
+    }
+    V8::<T>::from_array(token, a)
+}
+
 /// `#[inline(always)]`, not `#[inline]` — this body exists ONLY to fuse into
 /// its entry's `target_feature` region. era-1 measured a **5.3x** whole-
 /// extraction regression when the equivalent hint stopped being honoured and
 /// the vector ops compiled into calls outside the feature region; the same
 /// trap applies here verbatim.
+///
+/// V8 REWRITE (era-2 stage B): accumulators are `V8<T>` magetypes vectors, not
+/// `[f32; 8]` arrays. `V8` **is** the 8 virtual lanes, so every semantic is
+/// unchanged — lane `j` still takes the terms at `x ≡ j (mod 8)` in increasing
+/// `x`, the reduction is still the explicit `era2_reduce8` tree over
+/// `to_array()` and never `reduce_add()` (which is tier-dependent, §14.2), the
+/// tail still folds into lane `k`, and band partials still merge in band order.
+/// Term evaluation moves to the `_v` helpers, i.e. **the same functions era-1's
+/// SIMD path uses**, so the per-pixel math is era-1's exactly.
 #[inline(always)]
 #[allow(clippy::too_many_arguments, dead_code)]
-fn dense_block_kernel_era2_generic<const FUSED: bool>(
+fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
+    token: T,
     src: &[f32],
     dst: &[f32],
     mu1: &[f32],
@@ -17346,288 +17261,208 @@ fn dense_block_kernel_era2_generic<const FUSED: bool>(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
-    let mut acc = DenseAccum::default();
-    // Row scratch for the pass-A -> pass-B handoff (d, art, det, mse).
-    let mut sc_d = vec![0.0f32; width];
-    let mut sc_art = vec![0.0f32; width];
-    let mut sc_det = vec![0.0f32; width];
-    let mut sc_mse = vec![0.0f32; width];
+    let _ = FUSED; // the split is chosen by tier; see the entries above
+    let zero = V8::<T>::zero(token);
+    let one = V8::<T>::splat(token, 1.0);
+    let c1 = V8::<T>::splat(token, C1_V2 as f32);
+    let c2 = V8::<T>::splat(token, C2_V2 as f32);
+    let c_edge = V8::<T>::splat(token, C_EDGE as f32);
+    let c_mse = V8::<T>::splat(token, C_MSE as f32);
+    let c_hf = V8::<T>::splat(token, C_HF as f32);
+    let c_pj = V8::<T>::splat(token, C_PJND_CLAMP as f32);
+    let k_mid = V8::<T>::splat(token, K_PJND_MASK as f32);
+    let k_lo = V8::<T>::splat(token, K_PJND_MASK_LOW as f32);
+    let k_hi = V8::<T>::splat(token, K_PJND_MASK_HIGH as f32);
+    let c_act = V8::<T>::splat(token, C_ACTIVITY as f32);
+    let c_peak = V8::<T>::splat(token, C_PEAK as f32);
+    let iw_floor = V8::<T>::splat(token, IW_WEIGHT_FLOOR as f32);
 
+    let mut acc = DenseAccum::default();
     let mut b0 = 0usize;
     while b0 < height {
         let b1 = (b0 + ERA2_BAND_ROWS).min(height);
-        // f64 band partials — one per accumulator slot.
         let mut band = [0.0f64; 35];
 
         for y in b0..b1 {
             let row = y * width;
-            // ---- PASS A: terms + the 13 core families ----
-            //
-            // FIXED-SIZE CHUNKS. The first version of this loop used
-            // `let n = (width - x).min(8)` with a runtime bound, and it
-            // MEASURED 9-10x SLOWER than era-1 because LLVM cannot prove
-            // `n == 8` and so refuses to vectorise. `as_chunks::<8>` hands the
-            // body a `&[f32; 8]` whose length is a compile-time constant —
-            // the workspace's fixed-size-array pattern, and the difference
-            // between a kernel and a scalar loop.
-            let mut l_d = Lanes8::zero();
-            let mut l_d2 = Lanes8::zero();
-            let mut l_d3 = Lanes8::zero();
-            let mut l_d4 = Lanes8::zero();
-            let mut l_art = Lanes8::zero();
-            let mut l_det = Lanes8::zero();
-            let mut l_mse = Lanes8::zero();
-            let mut l_hfg = Lanes8::zero();
-            let mut l_hfl = Lanes8::zero();
-            let mut l_hfm = Lanes8::zero();
-            let mut l_pj = Lanes8::zero();
-            let mut l_pjl = Lanes8::zero();
-            let mut l_pjh = Lanes8::zero();
+            // 13 core + 16 pool accumulators, all V8.
+            let mut r = [zero; 13];
+            let mut p_mw = zero;
+            let mut p_iw = zero;
+            let mut p_m = [zero; 4];
+            let mut p_i = [zero; 4];
+            let mut p_kn = [zero; 3];
+            let mut p_kd = [zero; 3];
 
-            let rs = &src[row..row + width];
-            let rd = &dst[row..row + width];
-            let r1 = &mu1[row..row + width];
-            let r2 = &mu2[row..row + width];
-            let rq = &ssq[row..row + width];
-            let r12 = &s12[row..row + width];
-            let ra = &activity[row..row + width];
-
-            let (cs, ts) = rs.as_chunks::<8>();
-            let (cd, td) = rd.as_chunks::<8>();
-            let (c1, t1) = r1.as_chunks::<8>();
-            let (c2, t2) = r2.as_chunks::<8>();
-            let (cq, tq) = rq.as_chunks::<8>();
-            let (c12, t12) = r12.as_chunks::<8>();
-            let (ca, ta) = ra.as_chunks::<8>();
-
-            // One closure, used for the full chunks AND the tail, so the two
-            // paths cannot drift. `n` is 8 for chunks and `width % 8` for the
-            // tail; the chunk call sites pass fixed-size arrays so the bound
-            // folds away there.
-            let mut pools = E2Pools::zero();
-            let core_step = |n: usize,
-                             s8: &[f32; 8],
-                             d8: &[f32; 8],
-                             m1: &[f32; 8],
-                             m2: &[f32; 8],
-                             q8: &[f32; 8],
-                             p8: &[f32; 8],
-                             a8: &[f32; 8],
-                             out_x: usize,
-                             l_d: &mut Lanes8,
-                             l_d2: &mut Lanes8,
-                             l_d3: &mut Lanes8,
-                             l_d4: &mut Lanes8,
-                             l_art: &mut Lanes8,
-                             l_det: &mut Lanes8,
-                             l_mse: &mut Lanes8,
-                             l_hfg: &mut Lanes8,
-                             l_hfl: &mut Lanes8,
-                             l_hfm: &mut Lanes8,
-                             l_pj: &mut Lanes8,
-                             l_pjl: &mut Lanes8,
-                             l_pjh: &mut Lanes8,
-                             sc_d: &mut [f32],
-                             sc_art: &mut [f32],
-                             sc_det: &mut [f32],
-                             sc_mse: &mut [f32],
-                             pools: &mut E2Pools| {
-                let mut t_d = [0.0f32; 8];
-                let mut t_a = [0.0f32; 8];
-                let mut t_t = [0.0f32; 8];
-                let mut t_m = [0.0f32; 8];
-                let mut t_hg = [0.0f32; 8];
-                let mut t_hl = [0.0f32; 8];
-                let mut t_hm = [0.0f32; 8];
-                let mut t_pj = [0.0f32; 8];
-                let mut t_pl = [0.0f32; 8];
-                let mut t_ph = [0.0f32; 8];
-                for k in 0..8 {
-                    let (sv, dv) = (s8[k], d8[k]);
-                    let (a1, a2) = (m1[k], m2[k]);
-                    let (dd, art_i, det_i, mse_i) = e2_terms(sv, dv, a1, a2, p8[k], q8[k]);
-                    t_d[k] = dd;
-                    t_a[k] = art_i;
-                    t_t[k] = det_i;
-                    t_m[k] = mse_i;
-                    let hf_src = sv - a1;
-                    let hf_dst = dv - a2;
-                    let (g, l) =
-                        e2_bounded_excess_pair(hf_dst * hf_dst, hf_src * hf_src, C_HF as f32);
-                    t_hg[k] = g;
-                    t_hl[k] = l;
-                    t_hm[k] = e2_bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF as f32);
-                    let rae = (sv - dv).abs();
-                    let act = a8[k];
-                    t_pj[k] = e2_pjnd(rae, act, K_PJND_MASK as f32, C_PJND_CLAMP as f32);
-                    t_pl[k] = e2_pjnd(rae, act, K_PJND_MASK_LOW as f32, C_PJND_CLAMP as f32);
-                    t_ph[k] = e2_pjnd(rae, act, K_PJND_MASK_HIGH as f32, C_PJND_CLAMP as f32);
-                }
-                let mut t_d2 = [0.0f32; 8];
-                let mut t_d3 = [0.0f32; 8];
-                let mut t_d4 = [0.0f32; 8];
-                for k in 0..8 {
-                    let dd = t_d[k];
-                    t_d2[k] = dd * dd;
-                    t_d3[k] = dd * dd * dd;
-                    t_d4[k] = dd * dd * dd * dd;
-                }
-                if FUSED {
-                    // Terms are still in registers — pool them now and skip
-                    // the scratch round-trip entirely.
-                    pools.add_chunk8(n, a8, &t_d, &t_a, &t_t, &t_m);
-                } else {
-                    sc_d[out_x..out_x + n].copy_from_slice(&t_d[..n]);
-                    sc_art[out_x..out_x + n].copy_from_slice(&t_a[..n]);
-                    sc_det[out_x..out_x + n].copy_from_slice(&t_t[..n]);
-                    sc_mse[out_x..out_x + n].copy_from_slice(&t_m[..n]);
-                }
-                l_d.add_tail(&t_d[..n]);
-                l_d2.add_tail(&t_d2[..n]);
-                l_d3.add_tail(&t_d3[..n]);
-                l_d4.add_tail(&t_d4[..n]);
-                l_art.add_tail(&t_a[..n]);
-                l_det.add_tail(&t_t[..n]);
-                l_mse.add_tail(&t_m[..n]);
-                l_hfg.add_tail(&t_hg[..n]);
-                l_hfl.add_tail(&t_hl[..n]);
-                l_hfm.add_tail(&t_hm[..n]);
-                l_pj.add_tail(&t_pj[..n]);
-                if transducer_bank {
-                    l_pjl.add_tail(&t_pl[..n]);
-                    l_pjh.add_tail(&t_ph[..n]);
-                }
-            };
-
-            for ci in 0..cs.len() {
-                core_step(
-                    8,
-                    &cs[ci],
-                    &cd[ci],
-                    &c1[ci],
-                    &c2[ci],
-                    &cq[ci],
-                    &c12[ci],
-                    &ca[ci],
-                    ci * 8,
-                    &mut l_d,
-                    &mut l_d2,
-                    &mut l_d3,
-                    &mut l_d4,
-                    &mut l_art,
-                    &mut l_det,
-                    &mut l_mse,
-                    &mut l_hfg,
-                    &mut l_hfl,
-                    &mut l_hfm,
-                    &mut l_pj,
-                    &mut l_pjl,
-                    &mut l_pjh,
-                    &mut sc_d,
-                    &mut sc_art,
-                    &mut sc_det,
-                    &mut sc_mse,
-                    &mut pools,
-                );
-            }
-            if !ts.is_empty() {
-                // Pad the tail into fixed-size arrays so the SAME closure runs;
-                // lanes beyond `n` are never accumulated or stored.
-                let pad = |t: &[f32]| -> [f32; 8] {
-                    let mut o = [0.0f32; 8];
-                    o[..t.len()].copy_from_slice(t);
-                    o
-                };
-                core_step(
-                    ts.len(),
-                    &pad(ts),
-                    &pad(td),
-                    &pad(t1),
-                    &pad(t2),
-                    &pad(tq),
-                    &pad(t12),
-                    &pad(ta),
-                    cs.len() * 8,
-                    &mut l_d,
-                    &mut l_d2,
-                    &mut l_d3,
-                    &mut l_d4,
-                    &mut l_art,
-                    &mut l_det,
-                    &mut l_mse,
-                    &mut l_hfg,
-                    &mut l_hfl,
-                    &mut l_hfm,
-                    &mut l_pj,
-                    &mut l_pjl,
-                    &mut l_pjh,
-                    &mut sc_d,
-                    &mut sc_art,
-                    &mut sc_det,
-                    &mut sc_mse,
-                    &mut pools,
-                );
-            }
-
-            // ---- PASS B (two-pass tiers only): pools from the row scratch ----
-            //
-            // FUSED tiers skip this entirely — they accumulated the pools in
-            // pass A from the terms while they were still in registers. Both
-            // paths call the SAME `E2Pools::add_chunk8` on the SAME term
-            // values, which is why §14.4's "pass split is byte-neutral" holds
-            // in code and not merely in argument.
-            if !FUSED {
-                let (ka, _) = ra.as_chunks::<8>();
-                let (kd_, _) = sc_d[..width].as_chunks::<8>();
-                let (kr, _) = sc_art[..width].as_chunks::<8>();
-                let (ke, _) = sc_det[..width].as_chunks::<8>();
-                let (km, _) = sc_mse[..width].as_chunks::<8>();
-                for ci in 0..ka.len() {
-                    pools.add_chunk8(8, &ka[ci], &kd_[ci], &kr[ci], &ke[ci], &km[ci]);
-                }
-                let rem = width % 8;
-                if rem != 0 {
-                    let base = width - rem;
-                    let pad = |t: &[f32]| -> [f32; 8] {
-                        let mut o = [0.0f32; 8];
-                        o[..t.len()].copy_from_slice(t);
-                        o
+            // One term-evaluation closure, shared by the full-chunk and tail
+            // paths so they cannot drift. Returns every term as a V8.
+            macro_rules! terms {
+                ($s:expr, $dd:expr, $m1:expr, $m2:expr, $q:expr, $p:expr, $act:expr) => {{
+                    let (s, dd, m1, m2, q, p, act) = ($s, $dd, $m1, $m2, $q, $p, $act);
+                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2);
+                    let d2 = d * d;
+                    let diff_src = (s - m1).abs();
+                    let diff_dst = (dd - m2).abs();
+                    let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
+                    let gt = diff_dst.simd_gt(diff_src);
+                    let lt = diff_dst.simd_lt(diff_src);
+                    let art_i = V8::<T>::blend(gt, edge_dissim, zero);
+                    let det_i = V8::<T>::blend(lt, edge_dissim, zero);
+                    let raw_diff = s - dd;
+                    let mse_i = saturate_v(token, raw_diff * raw_diff, c_mse);
+                    let hf_src = s - m1;
+                    let hf_dst = dd - m2;
+                    let (hfg, hfl) =
+                        bounded_excess_pair_v(token, hf_dst * hf_dst, hf_src * hf_src, c_hf);
+                    let hfm = bounded_excess_v(token, hf_src.abs(), hf_dst.abs(), c_hf);
+                    let rae = raw_diff.abs();
+                    let pj = pjnd_transducer_v(token, rae, act, k_mid, c_pj);
+                    let (pjl, pjh) = if transducer_bank {
+                        (
+                            pjnd_transducer_v(token, rae, act, k_lo, c_pj),
+                            pjnd_transducer_v(token, rae, act, k_hi, c_pj),
+                        )
+                    } else {
+                        (zero, zero)
                     };
-                    pools.add_chunk8(
-                        rem,
-                        &pad(&ra[base..]),
-                        &pad(&sc_d[base..width]),
-                        &pad(&sc_art[base..width]),
-                        &pad(&sc_det[base..width]),
-                        &pad(&sc_mse[base..width]),
-                    );
+                    // d³ and d⁴ share `d2`, matching era-1's SIMD path exactly
+                    // (`d2 * d`, `d2 * d2`) rather than re-multiplying from `d`.
+                    (
+                        [
+                            d,
+                            d2,
+                            d2 * d,
+                            d2 * d2,
+                            art_i,
+                            det_i,
+                            mse_i,
+                            hfg,
+                            hfl,
+                            hfm,
+                            pj,
+                            pjl,
+                            pjh,
+                        ],
+                        art_i,
+                        det_i,
+                        mse_i,
+                        d,
+                        act,
+                    )
+                }};
+            }
+
+            // Pool contributions from already-evaluated terms.
+            macro_rules! pools {
+                ($d:expr, $art:expr, $det:expr, $mse:expr, $act:expr) => {{
+                    let (d, art_i, det_i, mse_i, act) = ($d, $art, $det, $mse, $act);
+                    let sat = saturate_v(token, act, c_act);
+                    let m_w = one - sat;
+                    let i_w = sat + iw_floor;
+                    let vals = [d, art_i, det_i, mse_i];
+                    let mut mv = [zero; 4];
+                    let mut iv = [zero; 4];
+                    for j in 0..4 {
+                        mv[j] = m_w * vals[j];
+                        iv[j] = i_w * vals[j];
+                    }
+                    let mut kn = [zero; 3];
+                    let mut kd = [zero; 3];
+                    for j in 0..3 {
+                        let sal = saturate_v(token, vals[j], c_peak);
+                        kn[j] = sal * vals[j];
+                        kd[j] = sal;
+                    }
+                    (m_w, i_w, mv, iv, kn, kd)
+                }};
+            }
+
+            let n8 = width - width % 8;
+            let mut x = 0usize;
+            macro_rules! ld {
+                ($plane:expr, $off:expr) => {
+                    V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+                };
+            }
+            while x < n8 {
+                let i = row + x;
+                let (t, art_i, det_i, mse_i, d, act) = terms!(
+                    ld!(src, i),
+                    ld!(dst, i),
+                    ld!(mu1, i),
+                    ld!(mu2, i),
+                    ld!(ssq, i),
+                    ld!(s12, i),
+                    ld!(activity, i)
+                );
+                for j in 0..13 {
+                    r[j] += t[j];
+                }
+                let (m_w, i_w, mv, iv, kn, kd) = pools!(d, art_i, det_i, mse_i, act);
+                p_mw += m_w;
+                p_iw += i_w;
+                for j in 0..4 {
+                    p_m[j] += mv[j];
+                    p_i[j] += iv[j];
+                }
+                for j in 0..3 {
+                    p_kn[j] += kn[j];
+                    p_kd[j] += kd[j];
+                }
+                x += 8;
+            }
+            // TAIL: masked, never zero-padded (see `v8_add_first`).
+            let rem = width - n8;
+            if rem != 0 {
+                let pad = |pl: &[f32]| -> V8<T> {
+                    let mut o = [0.0f32; 8];
+                    o[..rem].copy_from_slice(&pl[row + n8..row + width]);
+                    V8::<T>::from_array(token, o)
+                };
+                let (t, art_i, det_i, mse_i, d, act) = terms!(
+                    pad(src),
+                    pad(dst),
+                    pad(mu1),
+                    pad(mu2),
+                    pad(ssq),
+                    pad(s12),
+                    pad(activity)
+                );
+                for j in 0..13 {
+                    r[j] = v8_add_first(token, r[j], &t[j].to_array(), rem);
+                }
+                let (m_w, i_w, mv, iv, kn, kd) = pools!(d, art_i, det_i, mse_i, act);
+                p_mw = v8_add_first(token, p_mw, &m_w.to_array(), rem);
+                p_iw = v8_add_first(token, p_iw, &i_w.to_array(), rem);
+                for j in 0..4 {
+                    p_m[j] = v8_add_first(token, p_m[j], &mv[j].to_array(), rem);
+                    p_i[j] = v8_add_first(token, p_i[j], &iv[j].to_array(), rem);
+                }
+                for j in 0..3 {
+                    p_kn[j] = v8_add_first(token, p_kn[j], &kn[j].to_array(), rem);
+                    p_kd[j] = v8_add_first(token, p_kd[j], &kd[j].to_array(), rem);
                 }
             }
 
-            // ---- per-row reduction into the f64 band partial ----
-            let rowvals = [
-                l_d, l_d2, l_d3, l_d4, l_art, l_det, l_mse, l_hfg, l_hfl, l_hfm, l_pj, l_pjl, l_pjh,
-            ];
-            for (b, v) in band[..13].iter_mut().zip(rowvals.iter()) {
-                *b += v.reduce();
+            // Per-row reduction into the f64 band partial, via the FIXED tree.
+            for j in 0..13 {
+                band[j] += era2_reduce8(r[j].to_array());
             }
-            // peak num/den (ssim, art, det), then mask (4 num + shared den),
-            // then iw (4 num + shared den) — the DenseAccum slot order.
             for j in 0..3 {
-                band[13 + j * 2] += pools.kn[j].reduce();
-                band[14 + j * 2] += pools.kd[j].reduce();
+                band[13 + j * 2] += era2_reduce8(p_kn[j].to_array());
+                band[14 + j * 2] += era2_reduce8(p_kd[j].to_array());
             }
-            let mw_row = pools.mw.reduce();
-            let iw_row = pools.iw.reduce();
+            let mw_row = era2_reduce8(p_mw.to_array());
+            let iw_row = era2_reduce8(p_iw.to_array());
             for j in 0..4 {
-                band[19 + j * 2] += pools.m[j].reduce();
+                band[19 + j * 2] += era2_reduce8(p_m[j].to_array());
                 band[20 + j * 2] += mw_row;
-                band[27 + j * 2] += pools.i[j].reduce();
+                band[27 + j * 2] += era2_reduce8(p_i[j].to_array());
                 band[28 + j * 2] += iw_row;
             }
         }
 
-        // ---- band partials merge in BAND INDEX ORDER ----
+        // Band partials merge in BAND INDEX ORDER.
         let s = &mut acc;
         s.sum_d += band[0];
         s.sum_d2 += band[1];
@@ -17642,7 +17477,7 @@ fn dense_block_kernel_era2_generic<const FUSED: bool>(
         s.sum_pjnd += band[10];
         s.sum_pjnd_lo += band[11];
         s.sum_pjnd_hi += band[12];
-        for (j, w) in [
+        for (w, o) in [
             (&mut s.ws_peak_ssim, 13),
             (&mut s.ws_peak_art, 15),
             (&mut s.ws_peak_det, 17),
@@ -17655,8 +17490,8 @@ fn dense_block_kernel_era2_generic<const FUSED: bool>(
             (&mut s.ws_iw_det, 31),
             (&mut s.ws_iw_mse, 33),
         ] {
-            j.num += band[w];
-            j.den += band[w + 1];
+            w.num += band[o];
+            w.den += band[o + 1];
         }
         b0 = b1;
     }
