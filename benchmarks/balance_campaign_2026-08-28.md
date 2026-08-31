@@ -4588,3 +4588,51 @@ threaded shape knobs, no PEBS-class sampling on this host.
   the shipped flagship.** Every number attributed to its lane; not-measured cells say so.
 - Flip prerequisites remaining: **rank preservation across the roster** (needs model eval — not that
   lane) and **blast-radius / wave registration**.
+
+## 2026-08-31 ~16:5xZ — ROUND 31: era-2 RANK PRESERVATION measured — the shippable subset is TILING; radius 4 is the whole decision (`34a30831`, `3e1bc89f`, `1115b3ef`; doc `benchmarks/era2_rank_preservation_2026-08-31.md`)
+
+**★ Scope check first, and it re-prices the break**: at `9e52fb16` the break has **exactly ONE
+merged byte-changing component — the column tile** (`ZENSIM_H_TILE`, default off, five H dispatch
+sites). **The fixed 8-lane accumulation + `era2_reduce8` + `ERA2_BAND_ROWS` is IN TREE but NOT
+WIRED** — every `dense_block_kernel_era2` call site sits inside `mod tests` or
+`#[cfg(any(test, feature="oracle"))]`, while the four PRODUCTION dense sites call era-1
+unconditionally with no flag. **So the largest semantic component of the break cannot clear the bar
+until that kernel sits behind a runtime switch** (an env knob on those four sites would make it a
+70 s re-run). Radius 4 is not in the break (main is R=5); the V-redirect exit 1 is priced, not
+landed; item D is byte-neutral.
+- **Tiling at the production width 1024: 5 PASS / 1 FAIL.** Eight of nine corpora are
+  **byte-identical BY CONSTRUCTION** — every H entry guards `width > tile` and the corpora are
+  narrow (four top out at 512 px, eight at ≤768; only AIC-3 has refs >1024) — so the panel sees the
+  flip on ONE corpus and moves it by ≤2.0e-4. The single FAIL is `BHdr` on the bar's
+  **zero-tolerance composite clause by 3.2e-6** (13 % of the +0.000024 non-event the bar itself
+  cites); its worst corpus loss is 4e-5, **125× inside** the 0.005 clause. **Reported as FAIL — the
+  threshold was not renegotiated.** Stress arms: tile 256 costs ≤1.8e-4 anywhere; **tile 32** gives
+  the study's only real corpus-clause failure (BHdr/sdr25 −0.0162), mechanism measured — BHdr
+  amplifies the perturbation **>30×** (max |Δscore| 1.82 vs C944's 0.054) and sdr25 is the smallest
+  corpus.
+- **Radius 4: 2 PASS / 4 FAIL** — reproduces the blur lane's four cells to the digit and adds a
+  **new second passing model, `ADD156`** (worst −0.0027 aic3, composite +0.0049) beside C944;
+  B / both W-LINs / BHdr fail.
+- **★ ISOLATION: the components are separable and RADIUS DOMINATES.** Every model's worst-corpus
+  delta is identical to five decimals between "radius 4, tile off" and "radius 4 + tile 1024"; the
+  tile contributes ~1e-5 to a composite against radius's ~4e-3. **So whatever the break decides
+  about radius 4 IS the break's verdict, and the shippable subset today is TILING ALONE at
+  tile ≥ 1024.**
+- **Dial clause satisfied by construction, and the radius lane's was CLOSED too**: grids are read
+  from stored parquets so cross-arm identity proves nothing — the lane rebuilt them per arm. Every
+  dial-grid reference is ≤1024 px and the corruption grid is one 576² image, so the tile-1024 twin
+  is **byte-identical** (sha `1bed24cf…`, 4,547,248/4,547,248 cells). At tile 32 the grid moves and
+  the panel was run: no G3 bound crossed. **Radius 4's clause 3 — registered by the blur lane and
+  never run — is now measured: 52 % of dial and corruption cells move and NO model flips a gate.**
+- **Controls**: the era-1 arm is sha256-identical leg-for-leg to the blur lane's R=5 root (hence
+  19,367,104/19,367,104 cells to canonical r1b), which **incidentally byte-verifies `ab49d4b7`
+  (the tile onto all H entries) as byte-neutral on 20,516 real pairs**; the radius-4 rebuild
+  reproduces their R=4 byte-for-byte; revert verified two ways; row alignment exact across all 7
+  arms and both blur-lane roots.
+- **Unmeasured, with reasons**: era-2 accumulation (not wired), V-redirect (not landed),
+  imazen26/nonphoto/hfnlproxy (bigcodec views, no local pairs TSV — absent, NOT counted as passes),
+  BHdr's HDR panel (SDR corpora only), E1's rank cost (frontier lane's, attributed not re-derived).
+  **All six bakes were trained at era-1, so every FAIL is an UPPER BOUND on cost, not an estimate**
+  — the registered radius-4 retrain was deliberately not launched. Incidental: the stored canonical
+  `dial_grid_944col_2026-08-01` is slightly stale vs HEAD (104,107 of 4.55M cells, max |Δ| 7.2e-9,
+  inside golden policy).
