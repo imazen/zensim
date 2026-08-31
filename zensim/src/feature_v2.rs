@@ -16043,6 +16043,14 @@ fn dense_block_kernel_era2(
         for y in b0..b1 {
             let row = y * width;
             // ---- PASS A: terms + the 13 core families ----
+            //
+            // FIXED-SIZE CHUNKS. The first version of this loop used
+            // `let n = (width - x).min(8)` with a runtime bound, and it
+            // MEASURED 9-10x SLOWER than era-1 because LLVM cannot prove
+            // `n == 8` and so refuses to vectorise. `as_chunks::<8>` hands the
+            // body a `&[f32; 8]` whose length is a compile-time constant —
+            // the workspace's fixed-size-array pattern, and the difference
+            // between a kernel and a scalar loop.
             let mut l_d = Lanes8::zero();
             let mut l_d2 = Lanes8::zero();
             let mut l_d3 = Lanes8::zero();
@@ -16057,9 +16065,52 @@ fn dense_block_kernel_era2(
             let mut l_pjl = Lanes8::zero();
             let mut l_pjh = Lanes8::zero();
 
-            let mut x = 0usize;
-            while x < width {
-                let n = (width - x).min(8);
+            let rs = &src[row..row + width];
+            let rd = &dst[row..row + width];
+            let r1 = &mu1[row..row + width];
+            let r2 = &mu2[row..row + width];
+            let rq = &ssq[row..row + width];
+            let r12 = &s12[row..row + width];
+            let ra = &activity[row..row + width];
+
+            let (cs, ts) = rs.as_chunks::<8>();
+            let (cd, td) = rd.as_chunks::<8>();
+            let (c1, t1) = r1.as_chunks::<8>();
+            let (c2, t2) = r2.as_chunks::<8>();
+            let (cq, tq) = rq.as_chunks::<8>();
+            let (c12, t12) = r12.as_chunks::<8>();
+            let (ca, ta) = ra.as_chunks::<8>();
+
+            // One closure, used for the full chunks AND the tail, so the two
+            // paths cannot drift. `n` is 8 for chunks and `width % 8` for the
+            // tail; the chunk call sites pass fixed-size arrays so the bound
+            // folds away there.
+            let core_step = |n: usize,
+                                 s8: &[f32; 8],
+                                 d8: &[f32; 8],
+                                 m1: &[f32; 8],
+                                 m2: &[f32; 8],
+                                 q8: &[f32; 8],
+                                 p8: &[f32; 8],
+                                 a8: &[f32; 8],
+                                 out_x: usize,
+                                 l_d: &mut Lanes8,
+                                 l_d2: &mut Lanes8,
+                                 l_d3: &mut Lanes8,
+                                 l_d4: &mut Lanes8,
+                                 l_art: &mut Lanes8,
+                                 l_det: &mut Lanes8,
+                                 l_mse: &mut Lanes8,
+                                 l_hfg: &mut Lanes8,
+                                 l_hfl: &mut Lanes8,
+                                 l_hfm: &mut Lanes8,
+                                 l_pj: &mut Lanes8,
+                                 l_pjl: &mut Lanes8,
+                                 l_pjh: &mut Lanes8,
+                                 sc_d: &mut [f32],
+                                 sc_art: &mut [f32],
+                                 sc_det: &mut [f32],
+                                 sc_mse: &mut [f32]| {
                 let mut t_d = [0.0f32; 8];
                 let mut t_a = [0.0f32; 8];
                 let mut t_t = [0.0f32; 8];
@@ -16070,47 +16121,40 @@ fn dense_block_kernel_era2(
                 let mut t_pj = [0.0f32; 8];
                 let mut t_pl = [0.0f32; 8];
                 let mut t_ph = [0.0f32; 8];
-                for k in 0..n {
-                    let i = row + x + k;
-                    let (s, dd) = (src[i], dst[i]);
-                    let (m1, m2) = (mu1[i], mu2[i]);
-                    let (d, art_i, det_i, mse_i) = e2_terms(s, dd, m1, m2, s12[i], ssq[i]);
-                    t_d[k] = d;
+                for k in 0..8 {
+                    let (sv, dv) = (s8[k], d8[k]);
+                    let (a1, a2) = (m1[k], m2[k]);
+                    let (dd, art_i, det_i, mse_i) = e2_terms(sv, dv, a1, a2, p8[k], q8[k]);
+                    t_d[k] = dd;
                     t_a[k] = art_i;
                     t_t[k] = det_i;
                     t_m[k] = mse_i;
-                    sc_d[x + k] = d;
-                    sc_art[x + k] = art_i;
-                    sc_det[x + k] = det_i;
-                    sc_mse[x + k] = mse_i;
-
-                    let hf_src = s - m1;
-                    let hf_dst = dd - m2;
+                    let hf_src = sv - a1;
+                    let hf_dst = dv - a2;
                     let (g, l) =
                         e2_bounded_excess_pair(hf_dst * hf_dst, hf_src * hf_src, C_HF as f32);
                     t_hg[k] = g;
                     t_hl[k] = l;
                     t_hm[k] = e2_bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF as f32);
-
-                    let act = activity[i];
-                    let rae = (s - dd).abs();
+                    let rae = (sv - dv).abs();
+                    let act = a8[k];
                     t_pj[k] = e2_pjnd(rae, act, K_PJND_MASK as f32, C_PJND_CLAMP as f32);
-                    if transducer_bank {
-                        t_pl[k] = e2_pjnd(rae, act, K_PJND_MASK_LOW as f32, C_PJND_CLAMP as f32);
-                        t_ph[k] = e2_pjnd(rae, act, K_PJND_MASK_HIGH as f32, C_PJND_CLAMP as f32);
-                    }
+                    t_pl[k] = e2_pjnd(rae, act, K_PJND_MASK_LOW as f32, C_PJND_CLAMP as f32);
+                    t_ph[k] = e2_pjnd(rae, act, K_PJND_MASK_HIGH as f32, C_PJND_CLAMP as f32);
                 }
-                // d² / d³ / d⁴ from the SAME d, so the moments cannot drift
-                // from their base (era-1 recomputes them the same way).
                 let mut t_d2 = [0.0f32; 8];
                 let mut t_d3 = [0.0f32; 8];
                 let mut t_d4 = [0.0f32; 8];
-                for k in 0..n {
-                    let d = t_d[k];
-                    t_d2[k] = d * d;
-                    t_d3[k] = d * d * d;
-                    t_d4[k] = d * d * d * d;
+                for k in 0..8 {
+                    let dd = t_d[k];
+                    t_d2[k] = dd * dd;
+                    t_d3[k] = dd * dd * dd;
+                    t_d4[k] = dd * dd * dd * dd;
                 }
+                sc_d[out_x..out_x + n].copy_from_slice(&t_d[..n]);
+                sc_art[out_x..out_x + n].copy_from_slice(&t_a[..n]);
+                sc_det[out_x..out_x + n].copy_from_slice(&t_t[..n]);
+                sc_mse[out_x..out_x + n].copy_from_slice(&t_m[..n]);
                 l_d.add_tail(&t_d[..n]);
                 l_d2.add_tail(&t_d2[..n]);
                 l_d3.add_tail(&t_d3[..n]);
@@ -16122,9 +16166,78 @@ fn dense_block_kernel_era2(
                 l_hfl.add_tail(&t_hl[..n]);
                 l_hfm.add_tail(&t_hm[..n]);
                 l_pj.add_tail(&t_pj[..n]);
-                l_pjl.add_tail(&t_pl[..n]);
-                l_pjh.add_tail(&t_ph[..n]);
-                x += n;
+                if transducer_bank {
+                    l_pjl.add_tail(&t_pl[..n]);
+                    l_pjh.add_tail(&t_ph[..n]);
+                }
+            };
+
+            for ci in 0..cs.len() {
+                core_step(
+                    8,
+                    &cs[ci],
+                    &cd[ci],
+                    &c1[ci],
+                    &c2[ci],
+                    &cq[ci],
+                    &c12[ci],
+                    &ca[ci],
+                    ci * 8,
+                    &mut l_d,
+                    &mut l_d2,
+                    &mut l_d3,
+                    &mut l_d4,
+                    &mut l_art,
+                    &mut l_det,
+                    &mut l_mse,
+                    &mut l_hfg,
+                    &mut l_hfl,
+                    &mut l_hfm,
+                    &mut l_pj,
+                    &mut l_pjl,
+                    &mut l_pjh,
+                    &mut sc_d,
+                    &mut sc_art,
+                    &mut sc_det,
+                    &mut sc_mse,
+                );
+            }
+            if !ts.is_empty() {
+                // Pad the tail into fixed-size arrays so the SAME closure runs;
+                // lanes beyond `n` are never accumulated or stored.
+                let pad = |t: &[f32]| -> [f32; 8] {
+                    let mut o = [0.0f32; 8];
+                    o[..t.len()].copy_from_slice(t);
+                    o
+                };
+                core_step(
+                    ts.len(),
+                    &pad(ts),
+                    &pad(td),
+                    &pad(t1),
+                    &pad(t2),
+                    &pad(tq),
+                    &pad(t12),
+                    &pad(ta),
+                    cs.len() * 8,
+                    &mut l_d,
+                    &mut l_d2,
+                    &mut l_d3,
+                    &mut l_d4,
+                    &mut l_art,
+                    &mut l_det,
+                    &mut l_mse,
+                    &mut l_hfg,
+                    &mut l_hfl,
+                    &mut l_hfm,
+                    &mut l_pj,
+                    &mut l_pjl,
+                    &mut l_pjh,
+                    &mut sc_d,
+                    &mut sc_art,
+                    &mut sc_det,
+                    &mut sc_mse,
+                );
             }
 
             // ---- PASS B: the 11 weighted pools from the row scratch ----
@@ -16133,44 +16246,72 @@ fn dense_block_kernel_era2(
             let mut p_i = [Lanes8::zero(); 4];
             let mut p_kn = [Lanes8::zero(); 3];
             let mut p_kd = [Lanes8::zero(); 3];
-            let mut x = 0usize;
-            while x < width {
-                let n = (width - x).min(8);
-                let mut mw = [0.0f32; 8];
-                let mut iw = [0.0f32; 8];
-                let mut mv = [[0.0f32; 8]; 4];
-                let mut iv = [[0.0f32; 8]; 4];
-                let mut kn = [[0.0f32; 8]; 3];
-                let mut kd = [[0.0f32; 8]; 3];
-                for k in 0..n {
-                    let act = activity[row + x + k];
-                    let sat = e2_saturate(act, C_ACTIVITY as f32);
-                    let m_w = 1.0 - sat;
-                    let i_w = sat + IW_WEIGHT_FLOOR as f32;
-                    mw[k] = m_w;
-                    iw[k] = i_w;
-                    let vals = [sc_d[x + k], sc_art[x + k], sc_det[x + k], sc_mse[x + k]];
+            {
+                let mut pool_step = |n: usize,
+                                     a8: &[f32; 8],
+                                     d8: &[f32; 8],
+                                     ar8: &[f32; 8],
+                                     de8: &[f32; 8],
+                                     ms8: &[f32; 8]| {
+                    let mut mw = [0.0f32; 8];
+                    let mut iw = [0.0f32; 8];
+                    let mut mv = [[0.0f32; 8]; 4];
+                    let mut iv = [[0.0f32; 8]; 4];
+                    let mut kn = [[0.0f32; 8]; 3];
+                    let mut kd = [[0.0f32; 8]; 3];
+                    for k in 0..8 {
+                        let sat = e2_saturate(a8[k], C_ACTIVITY as f32);
+                        let m_w = 1.0 - sat;
+                        let i_w = sat + IW_WEIGHT_FLOOR as f32;
+                        mw[k] = m_w;
+                        iw[k] = i_w;
+                        let vals = [d8[k], ar8[k], de8[k], ms8[k]];
+                        for j in 0..4 {
+                            mv[j][k] = m_w * vals[j];
+                            iv[j][k] = i_w * vals[j];
+                        }
+                        for j in 0..3 {
+                            let sal = e2_saturate(vals[j], C_PEAK as f32);
+                            kn[j][k] = sal * vals[j];
+                            kd[j][k] = sal;
+                        }
+                    }
+                    p_mw.add_tail(&mw[..n]);
+                    p_iw.add_tail(&iw[..n]);
                     for j in 0..4 {
-                        mv[j][k] = m_w * vals[j];
-                        iv[j][k] = i_w * vals[j];
+                        p_m[j].add_tail(&mv[j][..n]);
+                        p_i[j].add_tail(&iv[j][..n]);
                     }
-                    for (j, &v) in vals[..3].iter().enumerate() {
-                        let sal = e2_saturate(v, C_PEAK as f32);
-                        kn[j][k] = sal * v;
-                        kd[j][k] = sal;
+                    for j in 0..3 {
+                        p_kn[j].add_tail(&kn[j][..n]);
+                        p_kd[j].add_tail(&kd[j][..n]);
                     }
+                };
+                let (ka, _) = ra.as_chunks::<8>();
+                let (kd_, _) = sc_d[..width].as_chunks::<8>();
+                let (kr, _) = sc_art[..width].as_chunks::<8>();
+                let (ke, _) = sc_det[..width].as_chunks::<8>();
+                let (km, _) = sc_mse[..width].as_chunks::<8>();
+                for ci in 0..ka.len() {
+                    pool_step(8, &ka[ci], &kd_[ci], &kr[ci], &ke[ci], &km[ci]);
                 }
-                p_mw.add_tail(&mw[..n]);
-                p_iw.add_tail(&iw[..n]);
-                for j in 0..4 {
-                    p_m[j].add_tail(&mv[j][..n]);
-                    p_i[j].add_tail(&iv[j][..n]);
+                let rem = width % 8;
+                if rem != 0 {
+                    let base = width - rem;
+                    let pad = |t: &[f32]| -> [f32; 8] {
+                        let mut o = [0.0f32; 8];
+                        o[..t.len()].copy_from_slice(t);
+                        o
+                    };
+                    pool_step(
+                        rem,
+                        &pad(&ra[base..]),
+                        &pad(&sc_d[base..width]),
+                        &pad(&sc_art[base..width]),
+                        &pad(&sc_det[base..width]),
+                        &pad(&sc_mse[base..width]),
+                    );
                 }
-                for j in 0..3 {
-                    p_kn[j].add_tail(&kn[j][..n]);
-                    p_kd[j].add_tail(&kd[j][..n]);
-                }
-                x += n;
             }
 
             // ---- per-row reduction into the f64 band partial ----

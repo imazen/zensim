@@ -989,3 +989,76 @@ tolerance back to exact becomes a user option** — recovering a materially
 stronger correctness property that was given up in 2026-08. Registered as an
 option, not taken: it needs the CI matrix (`windows-11-arm`, `macos-*-intel`,
 `i686`) to confirm the `neon`/`wasm` half before anyone relies on it.
+
+---
+
+## 16. Four catches: the case for oracle-first, in one place
+
+The user asked for the math written out. That demand — not the tests, not the
+benches — is what found all four of the following. Each was a real defect in
+the analysis or the instrument, each would have shipped silently, and **not one
+of them was reachable by a relative A/B test**, because both sides of a
+fold-vs-buffered comparison share the same evaluation error, the same
+`reduce_add`, and the same grouping.
+
+| # | what was wrong | how it surfaced | what it would have cost |
+|---|---|---|---|
+| **1** | The error bound modelled only **summation**, ignoring that the SIMD path evaluates each per-pixel term in `f32` so every term carries its own error *before* being summed | oracle gate failed immediately: `sum_d` deviated `4.459e-5` against a bound of `2.220e-5` — measured coefficient **40** vs a predicted 20 | a "proven bound" that was wrong by 2×, published as the era's acceptance criterion |
+| **2** | **Cancellation amplification.** `d = max(1−local, 0)` with `local ≈ 1` cancels, so `d`'s *absolute* error does not shrink with `d`; the moments inherit it amplified by `k·d^(k−1)`, making their bound proportional to `Σ|d^(k−1)|`, not `Σ|dᵏ|` | with (1) fixed, `sum_d2` failed at coefficient **120**; `Σ|d|` is **283×** `Σ|d²|` at that geometry | every derived slot's bound understated by ~2 orders — the gate would have passed anything |
+| **3** | **`reduce_add()` is tier-dependent.** `x86_v3` pairs lane `i` with `i+4` first; `wasm128`/`scalar` pair adjacent lanes. Every horizontal reduction in the kernels was an unspecified operation | reading the magetypes backends while writing §2.2's identity proof — the proof could not be completed without pinning the tree | era-2 would have shipped claiming cross-tier bit-identity while calling a function that does not have it. **Now measured: 66/105 slots diverge in era-1, 0/105 in era-2** (§15) |
+| **4** | My own **test premise**: it asserted "band-merge == serial fold, bit-exact". Banding *is* a different grouping — the same blocking non-associativity already documented for era-1's dense kernel | the gate failed at 127×93 (`7.854278564453125` vs `7.8542633056640625`); 576×128 passed *by coincidence* | `ERA2_BAND_ROWS` would have been treated as a tuning knob. It is **semantics** — changing it changes bytes |
+
+Two things worth drawing out.
+
+**Catch 3 is the one that pays for the whole exercise.** It began as a proof
+obligation nobody could discharge, became a documented hypothesis, and is now
+a measured cross-vendor result that puts an exact golden gate back within
+reach after it was abandoned as impossible. A relative A/B would have reported
+"fold matches buffered" on both boxes and found nothing — because they match
+*each other* while both diverge from the other machine.
+
+**Catch 4 is the reason to keep writing tests that can fail.** It was my
+assertion that was wrong, not the design, and only a geometry sweep caught it:
+the geometry a lazier test would have used (576×128) passed by luck. One
+geometry is never enough, and a test that passes on the first try deserves a
+negative control before it is trusted.
+
+---
+
+## 17. The kernel was 9–10× slower, and the cause was my own trap note
+
+First measured build of `dense_block_kernel_era2` (paired zenbench,
+`era2_dense_ab`):
+
+| geometry | era-1 dispatched | era-2 (first cut) | ratio |
+|---|---:|---:|---:|
+| 576×128 | 98.2 µs | **1007.5 µs** | **10.3× slower** |
+| 1152×128 | 226.2 µs | **2001.9 µs** | **8.9× slower** |
+
+Disqualifying for a break justified by speed — and the cause was **the exact
+trap §13 wrote down and I then walked into**. §13 said "never modulo indexing;
+the structure must be `as_chunks::<8>`". The first kernel instead used
+
+```rust
+while x < width { let n = (width - x).min(8); for k in 0..n { … } }
+```
+
+a **runtime** bound. LLVM cannot prove `n == 8`, so it declines to vectorise and
+emits a scalar loop with bounds checks — the same class of failure as the
+modulo form, reached by a different route. Writing the trap down is not the
+same as not falling into it; only the bench caught it.
+
+**Fix:** `as_chunks::<8>()` on all seven input planes, one closure shared by
+the full chunks (`n = 8`, compile-time constant) and the zero-padded tail
+(`n = width % 8`), so the two paths cannot drift.
+
+**The fix is byte-neutral, and that is checked rather than assumed.** Oracle
+deviations after the rewrite are *identical to the digit* — core `2.7564e-4`,
+hf `3.7719e-5`, pjnd `1.5011e-4`, pools `4.3567e-3` — confirming §14.4's claim
+that chunking and pass structure are perf knobs, not semantics.
+
+Re-measurement of the corrected kernel is **queued behind the fold-engine
+lane** on zenbench's box-wide exclusive lock (that lock is the system working
+as designed — it prevents two lanes' benches from contaminating each other).
+The flip stays blocked on that number: a break justified by speed does not ship
+before its speed is known.
