@@ -196,7 +196,10 @@ vacuous).
 | ↳ v2 `f600..720` | −0.010 | −0.027 | −0.013 | −0.008 | −0.018 | −0.058 | −0.040 | −0.013 | −0.100 |
 | append `f720..944` | −0.016 | +0.020 | −0.019 | −0.018 | −0.046 | −0.012 | −0.033 | −0.013 | −0.061 |
 
-The g0.25 sibling reproduces every one of these within ±0.02 (same file).
+The g0.25 sibling reproduces the whole table closely: over all 108 (family ×
+corpus) cells the two arms' deltas agree to **max 0.038**, and only 4 cells
+exceed 0.02 (all on `v2_348`/`v2_dense`, the block both depend on most). Its
+raw numbers are in the same logs.
 
 **Reading.** The blend's signal lives almost entirely in **v2-348**. The whole
 v1-372 block — 372 slots, the entire pool arm, the basic fused kernel — is
