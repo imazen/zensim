@@ -2002,6 +2002,7 @@ fn fused_blur_h_ssim_banded(
             .zip(s12_h.par_chunks_mut(n))
             .enumerate()
             .for_each(|(b, (((m1, m2), sq), s12))| {
+                let __t = crate::fold_timing::start();
                 let y0 = b * H_BLUR_BAND_ROWS;
                 let rows = m1.len() / width;
                 let lo = y0 * width;
@@ -2017,6 +2018,7 @@ fn fused_blur_h_ssim_banded(
                     rows,
                     BLUR_RADIUS,
                 );
+                crate::fold_timing::stop(__t, crate::fold_timing::Phase::BlurBandBusy, 0);
             });
         return;
     }
@@ -4240,6 +4242,9 @@ struct FoldPoolScratch {
     /// `ssq_v` doubles as the activity blur's temp before it is filled.
     ssq_v: Vec<f32>,
     s12_v: Vec<f32>,
+    /// BAND-LOCAL H-blurred planes, for the self-blur band shape
+    /// ([`FoldHSource::SelfBlur`]). Only allocated when that shape runs.
+    h: [Vec<f32>; 4],
 }
 
 impl FoldPoolScratch {
@@ -4257,6 +4262,47 @@ impl FoldPoolScratch {
             }
         }
     }
+
+    /// Grow the band-local H planes to `n` elements. Separate from
+    /// [`Self::ensure`] so the precomputed-H shape never allocates them.
+    fn ensure_h(&mut self, n: usize) {
+        for b in self.h.iter_mut() {
+            if b.len() < n {
+                b.resize(n, 0.0);
+            }
+        }
+    }
+}
+
+/// Where a v1 band's four H-blurred planes come from.
+///
+/// **This is the fold's memory-traffic lever, and it is a measured one.**
+/// The 16-independent-process throughput test at 2304² (see
+/// `benchmarks/fold_mt_scaling_2026-08-31.md`) puts the fold's ceiling at
+/// **4.2×** on a box where the buffered walk reaches **10.9×** — from the same
+/// serial speed. The whole difference is this: buffered blurs a band's rows
+/// into band-PRIVATE buffers and consumes them in the SAME task, while the
+/// fold blurred the whole 148-row strip window in one set of tasks and read it
+/// back in another, so four planes round-tripped through L3/DRAM per strip.
+///
+/// `SelfBlur` gives the fold buffered's shape: each band H-blurs exactly the
+/// `[b0 − overlap, b1 + overlap)` rows it is about to consume, into its own
+/// scratch. It costs redundant blur at the band seams — 42 rows blurred per 32
+/// consumed against 148 per 128, i.e. **+40 % blur compute** — and buys a
+/// self-contained task.
+///
+/// Bit-exact either way: the H blur is an independent per-row recurrence
+/// (`phase_a_blur_bands_are_bit_exact`), so a band's rows carry the same bits
+/// whichever call produced them, and the band kernel below reads the same rows
+/// at the same offsets. `fold_self_blur_matches_precomputed_h` is the gate.
+#[derive(Clone, Copy)]
+enum FoldHSource<'a> {
+    /// The four planes, over the strip's whole wide window (row 0 of each
+    /// plane is wide-window row 0).
+    Precomputed([&'a [f32]; 4]),
+    /// Each band blurs its own rows from the raw windows into
+    /// `FoldPoolScratch::h`.
+    SelfBlur,
 }
 
 /// One v1-aligned band of the fold hook. Extracted from `fold_v1_basic_bands`
@@ -4271,11 +4317,12 @@ fn fold_v1_one_band(
     strip_y0: usize,
     halo_offset: usize,
     height: usize,
-    planes: [&[f32]; 6],
+    h_src: FoldHSource<'_>,
+    raw: [&[f32]; 2],
     sums: &mut V1BasicSums,
     mut pools: Option<(&mut FoldPoolScratch, bool)>,
 ) -> usize {
-    let [mu1_h, mu2_h, ssq_h, s12_h, src, dst] = planes;
+    let [src, dst] = raw;
     let rows = 0..rows_end;
     let _ = &rows;
     let b1 = (b0 + V1_BAND_ROWS).min(rows_end);
@@ -4296,6 +4343,49 @@ fn fold_v1_one_band(
     if let Some((ps, full)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
         let band_n = h_local * width;
         ps.ensure(band_n);
+        let self_blur = matches!(h_src, FoldHSource::SelfBlur);
+        if self_blur {
+            ps.ensure_h(band_n);
+        }
+        // ONE destructure, so the band-local H planes can be READ while the
+        // pool planes stay mutable — disjoint fields of the same `&mut`.
+        let FoldPoolScratch {
+            mu1_v,
+            mu2_v,
+            act_raw,
+            act,
+            ssq_v,
+            s12_v,
+            h,
+        } = ps;
+        let [h0, h1, h2, h3] = h;
+        if self_blur {
+            // The band's OWN H blur, over exactly the rows it consumes.
+            // Bit-identical to reading those rows out of a whole-window call
+            // (`phase_a_blur_bands_are_bit_exact`); the point is that these
+            // four planes never leave this task.
+            crate::blur::fused_blur_h_ssim(
+                &src[span.clone()],
+                &dst[span.clone()],
+                &mut h0[..band_n],
+                &mut h1[..band_n],
+                &mut h2[..band_n],
+                &mut h3[..band_n],
+                width,
+                h_local,
+                BLUR_RADIUS,
+            );
+        }
+        let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = match h_src {
+            FoldHSource::Precomputed([a, b, c, d]) => (a, b, c, d, span.clone()),
+            FoldHSource::SelfBlur => (
+                &h0[..band_n],
+                &h1[..band_n],
+                &h2[..band_n],
+                &h3[..band_n],
+                0..band_n,
+            ),
+        };
         // ORDER: activity FIRST, fused kernel SECOND. The activity blur
         // borrows `ssq_v` as its scratch temp, and the fused kernel then
         // overwrites `ssq_v`'s INNER rows with the real V-blurred sigma
@@ -4311,13 +4401,13 @@ fn fold_v1_one_band(
         // two H kernels agree bit-for-bit on these planes.
         crate::simd_ops::abs_diff_into(
             &src[span.clone()],
-            &mu1_h[span.clone()],
-            &mut ps.act_raw[..band_n],
+            &mu1_h[span_h.clone()],
+            &mut act_raw[..band_n],
         );
         crate::blur::box_blur_1pass_into(
-            &ps.act_raw[..band_n],
-            &mut ps.act[..band_n],
-            &mut ps.ssq_v[..band_n],
+            &act_raw[..band_n],
+            &mut act[..band_n],
+            &mut ssq_v[..band_n],
             width,
             h_local,
             BLUR_RADIUS,
@@ -4332,10 +4422,10 @@ fn fold_v1_one_band(
         // needs no sigma, so it stores none and `ssq_v` simply stays the
         // activity temp.
         sums.accumulate(&crate::fused::fused_vblur_features_ssim(
-            &mu1_h[span.clone()],
-            &mu2_h[span.clone()],
-            &ssq_h[span.clone()],
-            &s12_h[span.clone()],
+            &mu1_h[span_h.clone()],
+            &mu2_h[span_h.clone()],
+            &ssq_h[span_h.clone()],
+            &s12_h[span_h.clone()],
             &src[span.clone()],
             &dst[span.clone()],
             width,
@@ -4343,24 +4433,24 @@ fn fold_v1_one_band(
             inner_start,
             inner_h,
             BLUR_RADIUS,
-            &mut ps.mu1_v[..band_n],
-            &mut ps.mu2_v[..band_n],
+            &mut mu1_v[..band_n],
+            &mut mu2_v[..band_n],
             true,
             &mut empty_sd,
             false,
-            &mut ps.ssq_v[..band_n],
-            &mut ps.s12_v[..band_n],
+            &mut ssq_v[..band_n],
+            &mut s12_v[..band_n],
             full,
         ));
         let inner = inner_start * width..(inner_start + inner_h) * width;
         let inner_src = &src[span.start + inner.start..span.start + inner.end];
         let inner_dst = &dst[span.start + inner.start..span.start + inner.end];
-        let inner_mu1 = &ps.mu1_v[inner.clone()];
-        let inner_mu2 = &ps.mu2_v[inner.clone()];
-        let act_inner = &ps.act[inner.clone()];
+        let inner_mu1 = &mu1_v[inner.clone()];
+        let inner_mu2 = &mu2_v[inner.clone()];
+        let act_inner = &act[inner.clone()];
         if full {
             // The masked/IW SSIM + MSE slots — the sigma planes are
-            // already in `ps.ssq_v` / `ps.s12_v` (the fused kernel's
+            // already in `ssq_v` / `s12_v` (the fused kernel's
             // `store_sigma` side-output above), so this arm no longer runs
             // its own two V-blur band sweeps.
             let (mse_m, mse_i) = crate::simd_ops::build_inline_mse(
@@ -4372,8 +4462,8 @@ fn fold_v1_one_band(
                 crate::simd_ops::ssim_channel_inline_both(
                     inner_mu1,
                     inner_mu2,
-                    &ps.ssq_v[inner.clone()],
-                    &ps.s12_v[inner.clone()],
+                    &ssq_v[inner.clone()],
+                    &s12_v[inner.clone()],
                     act_inner,
                     V1_MASK_K,
                     V1_IW_K,
@@ -4393,6 +4483,12 @@ fn fold_v1_one_band(
         sums.iw_art4 += art4_i;
         sums.iw_det4 += det4_i;
     } else {
+        // No pool scratch => no band-local H buffer either, so this arm only
+        // serves `FoldHSource::Precomputed`. `fold_v1_basic_bands` refuses the
+        // combination up front rather than reaching here.
+        let FoldHSource::Precomputed([mu1_h, mu2_h, ssq_h, s12_h]) = h_src else {
+            unreachable!("SelfBlur requires pool scratch (checked in fold_v1_basic_bands)")
+        };
         sums.accumulate(&crate::fused::fused_vblur_features_ssim(
             &mu1_h[span.clone()],
             &mu2_h[span.clone()],
@@ -4448,12 +4544,16 @@ fn fold_v1_one_band(
 /// order are v1's, so the pooled sums are bit-identical to v1's whenever
 /// the plane values are.
 ///
-/// `planes = [mu1_h, mu2_h, ssq_h, s12_h, src, dst]`, all in the SAME
-/// buffer-local coordinate system (`local = row − strip_y0 +
-/// halo_offset`): the strip path passes the scratch H-planes + halo
-/// buffers; the whole-plane path passes the full-plane H-planes + the
+/// `raw = [src, dst]` and, for [`FoldHSource::Precomputed`], the four
+/// H-planes, all in the SAME buffer-local coordinate system (`local = row −
+/// strip_y0 + halo_offset`): the strip path passes the scratch H-planes +
+/// halo buffers; the whole-plane path passes the full-plane H-planes + the
 /// real src/dst planes with `strip_y0 = halo_offset = 0`.
-#[allow(clippy::too_many_arguments)]
+/// [`FoldHSource::SelfBlur`] passes no H-planes — each band produces its own
+/// from `raw`, which is the memory-traffic shape (see that type's doc).
+/// SelfBlur requires `pools` (the band-local H buffer lives in the band's
+/// [`FoldPoolScratch`]) and is refused otherwise.
+///
 /// RAII closer for the [`crate::fold_timing::Phase::FoldWall`] span, so the
 /// early `return` in the parallel arm still records it. Diagnostic only.
 struct FoldTimingGuard(Option<std::time::Instant>);
@@ -4463,17 +4563,23 @@ impl Drop for FoldTimingGuard {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fold_v1_basic_bands(
     width: usize,
     rows: core::ops::Range<usize>,
     strip_y0: usize,
     halo_offset: usize,
     height: usize,
-    planes: [&[f32]; 6],
+    h_src: FoldHSource<'_>,
+    raw: [&[f32]; 2],
     sums: &mut V1BasicSums,
     pools: Option<(&mut [FoldPoolScratch], bool)>,
     parallel: bool,
 ) {
+    assert!(
+        !matches!(h_src, FoldHSource::SelfBlur) || pools.is_some(),
+        "FoldHSource::SelfBlur needs the band pool scratch for its H buffer"
+    );
     debug_assert_eq!(rows.start % V1_BAND_ROWS, 0, "strips are 32-row aligned");
     let __t_fold = crate::fold_timing::start();
     let __fold_guard = FoldTimingGuard(__t_fold);
@@ -4520,7 +4626,8 @@ fn fold_v1_basic_bands(
                         strip_y0,
                         halo_offset,
                         height,
-                        planes,
+                        h_src,
+                        raw,
                         &mut local,
                         Some((ps, full)),
                     );
@@ -4540,7 +4647,8 @@ fn fold_v1_basic_bands(
                         strip_y0,
                         halo_offset,
                         height,
-                        planes,
+                        h_src,
+                        raw,
                         &mut local,
                         None,
                     );
@@ -4567,7 +4675,8 @@ fn fold_v1_basic_bands(
             strip_y0,
             halo_offset,
             height,
-            planes,
+            h_src,
+            raw,
             &mut local,
             pools
                 .as_mut()
@@ -5837,6 +5946,30 @@ fn stream_windows_shared<'w, S: ImageSource, D: ImageSource>(
     }
 }
 
+/// The wide-window GATHER half of [`stream_phase_a`], for the self-blur band
+/// shape that skips the rest of phase A.
+///
+/// Interior strips take the producer's rolling-plane slices directly and this
+/// is a no-op; only a strip touching the true top or bottom needs the
+/// reflect-padded copy into the scratch, which is exactly what
+/// [`stream_windows_shared`] then reads back. Byte-identical to what phase A
+/// does — it is the same two calls, lifted.
+fn stream_gather_windows<S: ImageSource, D: ImageSource>(
+    producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
+    info: &crate::feature_v2_stream::StripInfo,
+    ch: usize,
+    scr: &mut ScratchV2Strip,
+) {
+    use crate::feature_v2_stream::Side;
+    let n_wide = info.plane_w * info.wide_h();
+    if producer.wide_window(Side::Source, ch, info).is_none()
+        || producer.wide_window(Side::Distorted, ch, info).is_none()
+    {
+        producer.fill_wide(Side::Source, ch, info, &mut scr.src_wide[..n_wide]);
+        producer.fill_wide(Side::Distorted, ch, info, &mut scr.dst_wide[..n_wide]);
+    }
+}
+
 /// Phase A of one (strip, channel): resolve the wide windows (zero-copy
 /// producer slices for interior strips; `fill_wide` into the scratch
 /// buffers when the strip touches the true top/bottom), then the
@@ -5976,6 +6109,11 @@ fn stream_phase_b(
     fold_v1: bool,
     v2_blocks: bool,
     band_parallel: bool,
+    // `self_blur`: each v1 band produces its OWN H planes instead of reading
+    // the strip-wide ones phase A wrote. Only legal when phase A did NOT run
+    // (`!v2_blocks`) and `v1_pools` is `Full` (SelfBlur needs the band pool
+    // scratch) — `foldapp_streaming_walk` owns that decision.
+    self_blur: bool,
     append: bool,
     refy_strip: &[f32],
     cross: Option<(&[f32], &[f32])>,
@@ -6052,14 +6190,17 @@ fn stream_phase_b(
             y0,
             HALO_P,
             info.plane_h,
-            [
-                &scr.mu1_h[..n_wide],
-                &scr.mu2_h[..n_wide],
-                &scr.ssq_h[..n_wide],
-                &scr.s12_h[..n_wide],
-                &src_win[..n_wide],
-                &dst_win[..n_wide],
-            ],
+            if self_blur {
+                FoldHSource::SelfBlur
+            } else {
+                FoldHSource::Precomputed([
+                    &scr.mu1_h[..n_wide],
+                    &scr.mu2_h[..n_wide],
+                    &scr.ssq_h[..n_wide],
+                    &scr.s12_h[..n_wide],
+                ])
+            },
+            [&src_win[..n_wide], &dst_win[..n_wide]],
             &mut acc.v1[scale],
             match toggles.v1_pools {
                 V1PoolsMode::Off => None,
@@ -7118,6 +7259,25 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // thread runs what, and when, changes.
         #[cfg(feature = "threads")]
         let fuse_channels = parallel && !append_on && retention.is_none();
+        // SELF-BLUR BANDS. With `v1_only` phase A's ONLY output is the four
+        // H-blurred planes over the strip's whole 148-row wide window, and the
+        // v1 bands are its only consumer. Writing them there and reading them
+        // back in a different task is four planes through L3/DRAM per strip —
+        // which the 16-independent-process throughput test measures as the
+        // fold's ceiling (4.2x against buffered's 10.9x from the same serial
+        // speed; `benchmarks/fold_mt_scaling_2026-08-31.md`). Letting each
+        // band blur exactly the rows it consumes into its own scratch drops
+        // phase A entirely and makes every band a self-contained task — the
+        // shape `streaming::process_channel_strip` has always had.
+        //
+        // `V1PoolsMode::Full` is required because the band-local H buffer
+        // lives in the band's `FoldPoolScratch`, and it is what every
+        // fold-backed SCORE asks for.
+        #[cfg(feature = "threads")]
+        let self_blur = fuse_channels
+            && !v2_blocks
+            && fold_v1
+            && matches!(toggles.v1_pools, V1PoolsMode::Full);
         #[cfg(feature = "threads")]
         if fuse_channels {
             use rayon::prelude::*;
@@ -7128,7 +7288,13 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 .enumerate()
                 .for_each(|(ch, (scr, acc))| {
                     let __t = crate::fold_timing::start();
-                    stream_phase_a(&producer, &info, ch, false, false, v2_blocks, true, scr);
+                    if self_blur {
+                        // Phase A is skipped whole; only the wide-window
+                        // gather it also performs is still needed.
+                        stream_gather_windows(&producer, &info, ch, scr);
+                    } else {
+                        stream_phase_a(&producer, &info, ch, false, false, v2_blocks, true, scr);
+                    }
                     let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
                     stream_phase_b(
                         scr,
@@ -7139,6 +7305,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         fold_v1,
                         v2_blocks,
                         band_parallel,
+                        self_blur,
                         false,
                         &[][..],
                         None,
@@ -7221,6 +7388,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     fold_v1,
                     v2_blocks,
                     band_parallel,
+                    false,
                     append_cell_active(append_on, ch, scale),
                     refy,
                     cross,
@@ -7281,6 +7449,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     fold_v1,
                     v2_blocks,
                     band_parallel,
+                    false,
                     active,
                     refy,
                     None,
@@ -7321,6 +7490,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     fold_v1,
                     v2_blocks,
                     band_parallel,
+                    false,
                     y_active,
                     refy,
                     cross,
@@ -12300,6 +12470,92 @@ mod tests {
     /// extras while the fold walked the image. That divergence was the defect,
     /// not an invariant. C removes the phantom columns
     /// (`blur::pyramid_plane_stride` now returns the width), so the assertion
+    /// **The bit-exactness gate for [`FoldHSource::SelfBlur`]** (fold-MT lane).
+    ///
+    /// A band that H-blurs its own `[b0 − overlap, b1 + overlap)` rows must
+    /// produce byte-identical sums to one reading those rows out of a
+    /// whole-window blur. The property it rests on is the H blur's per-row
+    /// independence; this asserts the consequence directly, on every field of
+    /// `V1BasicSums`, at geometries that exercise a top band (clamped `top`),
+    /// a bottom band (clamped `bot`), a partial last band, and both pool
+    /// modes' band counts.
+    #[test]
+    fn fold_self_blur_matches_precomputed_h() {
+        for &(width, plane_h, strip_h) in &[
+            (64usize, 128usize, 128usize),
+            (97, 96, 96),
+            (2304, 128, 128),
+            (128, 200, 128),
+            (65, 40, 40),
+        ] {
+            let wide_h = strip_h + 2 * HALO_P;
+            let n = width * wide_h;
+            let src: Vec<f32> = (0..n)
+                .map(|i| ((i * 2654435761usize) % 977) as f32 / 977.0)
+                .collect();
+            let dst: Vec<f32> = (0..n)
+                .map(|i| ((i * 40503usize + 11) % 991) as f32 / 991.0)
+                .collect();
+            // The precomputed arm's four planes, over the WHOLE wide window.
+            let mut h = [vec![0.0f32; n], vec![0.0; n], vec![0.0; n], vec![0.0; n]];
+            {
+                let (a, rest) = h.split_at_mut(1);
+                let (b, rest2) = rest.split_at_mut(1);
+                let (c, d) = rest2.split_at_mut(1);
+                crate::blur::fused_blur_h_ssim(
+                    &src,
+                    &dst,
+                    &mut a[0],
+                    &mut b[0],
+                    &mut c[0],
+                    &mut d[0],
+                    width,
+                    wide_h,
+                    BLUR_RADIUS,
+                );
+            }
+            for &parallel in &[false, true] {
+                let run = |h_src: FoldHSource<'_>| -> V1BasicSums {
+                    let mut pool: Vec<FoldPoolScratch> = (0..V1_BANDS_PER_STRIP)
+                        .map(|_| FoldPoolScratch::default())
+                        .collect();
+                    let mut sums = V1BasicSums::default();
+                    fold_v1_basic_bands(
+                        width,
+                        0..strip_h.min(plane_h),
+                        0,
+                        HALO_P,
+                        plane_h,
+                        h_src,
+                        [&src, &dst],
+                        &mut sums,
+                        Some((&mut pool[..], true)),
+                        parallel,
+                    );
+                    sums
+                };
+                let want = run(FoldHSource::Precomputed([&h[0], &h[1], &h[2], &h[3]]));
+                let got = run(FoldHSource::SelfBlur);
+                // `{:?}` on f64 is the shortest round-tripping form, so it
+                // separates every pair of distinct finite values — the one
+                // hole is NaN, whose payload it hides, so exclude NaN
+                // explicitly rather than let it mask a difference.
+                let wb = format!("{want:?}");
+                let gb = format!("{got:?}");
+                assert!(
+                    !wb.contains("NaN"),
+                    "{width}x{plane_h}: fixture produced NaN, which would make \
+                     the Debug comparison below blind: {wb}"
+                );
+                assert_eq!(
+                    wb, gb,
+                    "{width}x{plane_h} strip {strip_h} par={parallel}: self-blur bands \
+                     must equal precomputed-H bands"
+                );
+            }
+        }
+    }
+
     /// **The bit-exactness gate for [`fused_blur_h_ssim_banded`]** (fold-MT
     /// lane). The banded call must equal the whole-plane call BIT-FOR-BIT, at
     /// every band size that is a multiple of [`H_BLUR_ROW_GROUP`] and at

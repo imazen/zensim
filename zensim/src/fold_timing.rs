@@ -37,7 +37,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 /// One accumulator slot. Indices are `(phase, scale)`; see [`Phase`].
-const N_PHASE: usize = 12;
+const N_PHASE: usize = 13;
 const N_SCALE: usize = 8;
 
 macro_rules! zeroed_atomics {
@@ -83,6 +83,8 @@ pub(crate) enum Phase {
     ProdConvert = 10,
     /// Downscale cascade inside the producer.
     ProdDownscale = 11,
+    /// Summed per-BAND busy time inside `fused_blur_h_ssim_banded`.
+    BlurBandBusy = 12,
 }
 
 #[inline(always)]
@@ -208,7 +210,7 @@ fn dump(walks: u64) {
     row("  convert", Phase::ProdConvert, None);
     row("  downscale", Phase::ProdDownscale, None);
     row("phaseA", Phase::PhaseAWall, Some(Phase::PhaseABusy));
-    row("  blur_h(sum)", Phase::BlurHWall, None);
+    row("  blur_h(sum)", Phase::BlurHWall, Some(Phase::BlurBandBusy));
     row("between", Phase::Between, None);
     row("phaseB", Phase::PhaseBWall, Some(Phase::PhaseBBusy));
     row("  fold(sum)", Phase::FoldWall, Some(Phase::BandBusy));
