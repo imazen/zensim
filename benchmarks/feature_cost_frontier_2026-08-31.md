@@ -593,15 +593,20 @@ slot there is a wrong answer even when no weight reads it.
   — forces the skip on 5 geometries × serial/rayon and asserts `score`,
   `raw_distance`, `mean_offset` and every slot in `f0..228` are bit-identical,
   the skipped block is exactly zero, and `Full`'s block is non-zero.
+* `…::a_fired_skip_is_score_neutral_on_the_ref_cached_entry` — the same
+  guarantee on `compute_fold_backed_with_ref`, which is a **different function
+  with its own `pool_mode` argument**. `compute_with_ref` is the shape an
+  encoder loop actually runs (one reference, N candidates), so a wiring slip
+  there would be invisible to the `compute()` gate and visible to every user.
 * `fold_engine_parity::unread_feature_skipping_is_inert_on_a_profile_that_reads_the_block`
   — 23 geometries × rayon pools {1, 2, 3, 8, 16} × {Buffered, Fold}: opting in
   on profile B changes nothing, because B reads the block.
-* four policy tests (shipped profiles resolve to `Full`; off by default;
+* five policy tests (shipped profiles resolve to `Full`; off by default;
   `bake_pool_need` on shipped B matches what `bake_block_profile` reports for
   the same bytes; an unparseable bake needs everything) plus
   `caller_col_spans_tile_layer0_in_caller_space` (§5.1b).
 
-Whole `zensim` lib suite **239 passed / 0 failed**; every `zensim` integration
+Whole `zensim` lib suite **240 passed / 0 failed**; every `zensim` integration
 target passes (`v1_golden_bytes`, `cross_platform`, `pu_entry`,
 `size_invariance`, `streaming_strips`, `attribution_cross_tier` included);
 `fold_engine_parity` 12/12; `zensim-validate` 160 + 40. Clippy clean on both

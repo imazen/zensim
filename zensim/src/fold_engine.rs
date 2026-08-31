@@ -574,6 +574,66 @@ mod skip_policy_tests {
         }
     }
 
+    /// The same guarantee on the REF-CACHED entry. `compute_with_ref` routes
+    /// through `compute_fold_backed_with_ref`, a different function with its
+    /// own `pool_mode` argument, so "the skip is score-neutral" has to be
+    /// stated about it separately — a wiring slip there would be invisible to
+    /// the `compute()` gate above.
+    #[cfg(all(feature = "training", feature = "threads"))]
+    #[test]
+    fn a_fired_skip_is_score_neutral_on_the_ref_cached_entry() {
+        use crate::feature_v2::V2Scratch;
+        use crate::source::RgbSlice;
+        let params = ZensimProfile::B.params();
+        for &(w, h) in &[(96usize, 64usize), (200, 150), (256, 256), (577, 385)] {
+            for &parallel in &[false, true] {
+                let mut config = crate::metric::config_from_params(params, parallel);
+                config.allow_multithreading = parallel;
+                let src = crate::feature_v2::tests::textured_image(w, h, 7);
+                let dst = crate::feature_v2::tests::quantize_distort(&src, w, h);
+                let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+                let pre =
+                    crate::streaming::PrecomputedReference::new(&sref, config.num_scales, parallel);
+                let mut scratch = V2Scratch::new();
+                let full = compute_fold_backed_with_ref(
+                    &pre,
+                    &dref,
+                    &config,
+                    params.weights,
+                    &mut scratch,
+                    Some(V1PoolsMode::Full),
+                )
+                .expect("the cache must feed the fold at these dims");
+                let peaks = compute_fold_backed_with_ref(
+                    &pre,
+                    &dref,
+                    &config,
+                    params.weights,
+                    &mut scratch,
+                    Some(V1PoolsMode::Peaks),
+                )
+                .expect("peaks");
+                assert_eq!(
+                    full.raw_distance().to_bits(),
+                    peaks.raw_distance().to_bits(),
+                    "{w}x{h} par={parallel}: ref-cached raw_distance moved"
+                );
+                assert_eq!(full.score().to_bits(), peaks.score().to_bits());
+                assert_eq!(full.mean_offset(), peaks.mean_offset());
+                let (ff, fp) = (full.features(), peaks.features());
+                for i in 0..228 {
+                    assert_eq!(
+                        ff[i].to_bits(),
+                        fp[i].to_bits(),
+                        "{w}x{h} par={parallel}: ref-cached scored slot {i} moved"
+                    );
+                }
+                assert!(fp[228..372].iter().all(|&v| v == 0.0));
+                assert!(ff[228..372].iter().any(|&v| v != 0.0));
+            }
+        }
+    }
+
     /// A bake this module declines to analyse must come back as `ALL`, never
     /// as an optimistic "nothing is read" — the failure mode that would
     /// silently zero a live slot.
