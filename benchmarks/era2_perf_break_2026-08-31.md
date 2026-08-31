@@ -1062,3 +1062,49 @@ lane** on zenbench's box-wide exclusive lock (that lock is the system working
 as designed — it prevents two lanes' benches from contaminating each other).
 The flip stays blocked on that number: a break justified by speed does not ship
 before its speed is known.
+
+### 17.1 The ISA gap: plain Rust compiles to baseline SSE2
+
+The `as_chunks` fix took era-2 from 10.3× to **4.4×** slower — better, still
+disqualifying. The remaining factor was not shape at all:
+
+**a plain Rust function compiles to baseline x86-64 (SSE2) regardless of what
+the host supports.** era-1's kernel lives inside an `#[arcane]`/`incant!`
+`target_feature` region, so LLVM emits AVX-512 there; mine did not, so it
+emitted SSE2. Same source, ~4× less vector throughput.
+
+Fix: wrap the identical body in `#[magetypes(v4x, v4, v3, neon, wasm128,
+scalar)]` + `incant!`, so each tier compiles the **same source** inside its own
+`target_feature` region. The token is unused — magetypes is present purely for
+the ISA region, not for its types.
+
+| stage | 576×128 | 1152×128 | vs era-1 |
+|---|---:|---:|---:|
+| era-1 dispatched | 103.5 µs | 235.3 µs | 1.00× |
+| era-2, runtime chunk bound | 1007.5 µs | 2001.9 µs | 10.3× / 8.9× |
+| era-2, `as_chunks::<8>` | 482.1 µs | — | 4.4× |
+| era-2, `+ target_feature` | **232.1 µs** | **457.5 µs** | **2.24× / 1.94×** |
+
+**Bit-identity survives per-tier compilation — verified, not assumed.** Oracle
+deviations are unchanged to the digit, and the cross-vendor probe re-run under
+the new build still reports **era-1 66/105 slots differing, era-2 0/105**. So
+compiling one source into six `target_feature` regions did not reintroduce
+divergence, which is the outcome §2.3's enumeration predicted (no FMA
+contraction without fast-math, no transcendentals, no `rsqrt`).
+
+### 17.2 Where the remaining 2× is, and the lever for it
+
+**era-2 is still ~2× slower than era-1, so the flip stays blocked.** The gap is
+now attributable rather than mysterious: era-1 runs **one pass**; era-2 runs
+**two**, writing and re-reading four scratch planes per row. That round-trip is
+the two-pass design's cost, and it was adopted to fit 16-register tiers.
+
+**The lever is already licensed by §14.4: pass split is byte-neutral, so it can
+differ per tier.** `v4x` has 32 registers and does not need the split — era-1's
+own `POOL_SIMD` path proves a single fused pass fits there. So the next step is
+a **single-pass body for `v4x`, two-pass for the 16-register tiers**, which
+§14.4 guarantees produces identical bytes and which the oracle + vendor probe
+can both confirm. That is the measurement that decides whether era-2 can reach
+parity; until it does, the break does not ship.
+
+**Status: the flip is correctly blocked on a number, not on an opinion.**

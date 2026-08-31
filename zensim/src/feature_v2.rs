@@ -16014,6 +16014,17 @@ pub fn bench_dense_era2(
     a.sum_d + a.ws_iw_mse.num
 }
 
+/// Tier dispatch for the era-2 kernel. The BODY is one source shared by every
+/// tier (see `dense_block_kernel_era2_inner`); `#[magetypes]` exists here only
+/// to put that body inside each tier's `target_feature` region.
+///
+/// **This is what the first measurement was missing.** Plain Rust compiles to
+/// baseline x86-64 (SSE2) no matter what the host supports, which measured
+/// **4.4x slower** than era-1's `#[arcane]`-wrapped kernel — not a shape
+/// problem, an ISA problem. Cross-tier bit-identity survives because the
+/// source is identical and Rust does not contract `a*b+c` into an FMA without
+/// fast-math (which is off); it is VERIFIED, not assumed, by
+/// `era2_vendor_probe` across the AMD/Intel pair.
 #[allow(clippy::too_many_arguments, dead_code)]
 fn dense_block_kernel_era2(
     src: &[f32],
@@ -16027,6 +16038,41 @@ fn dense_block_kernel_era2(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
+    incant!(
+        dense_block_kernel_era2_inner(
+            src,
+            dst,
+            mu1,
+            mu2,
+            ssq,
+            s12,
+            activity,
+            width,
+            height,
+            transducer_bank
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+#[allow(clippy::too_many_arguments, dead_code)]
+fn dense_block_kernel_era2_inner(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    // The token is unused: this body is plain fixed-size-array arithmetic and
+    // magetypes is here purely for the per-tier `target_feature` region.
+    let _ = token;
     let mut acc = DenseAccum::default();
     // Row scratch for the pass-A -> pass-B handoff (d, art, det, mse).
     let mut sc_d = vec![0.0f32; width];
@@ -16086,31 +16132,31 @@ fn dense_block_kernel_era2(
             // tail; the chunk call sites pass fixed-size arrays so the bound
             // folds away there.
             let core_step = |n: usize,
-                                 s8: &[f32; 8],
-                                 d8: &[f32; 8],
-                                 m1: &[f32; 8],
-                                 m2: &[f32; 8],
-                                 q8: &[f32; 8],
-                                 p8: &[f32; 8],
-                                 a8: &[f32; 8],
-                                 out_x: usize,
-                                 l_d: &mut Lanes8,
-                                 l_d2: &mut Lanes8,
-                                 l_d3: &mut Lanes8,
-                                 l_d4: &mut Lanes8,
-                                 l_art: &mut Lanes8,
-                                 l_det: &mut Lanes8,
-                                 l_mse: &mut Lanes8,
-                                 l_hfg: &mut Lanes8,
-                                 l_hfl: &mut Lanes8,
-                                 l_hfm: &mut Lanes8,
-                                 l_pj: &mut Lanes8,
-                                 l_pjl: &mut Lanes8,
-                                 l_pjh: &mut Lanes8,
-                                 sc_d: &mut [f32],
-                                 sc_art: &mut [f32],
-                                 sc_det: &mut [f32],
-                                 sc_mse: &mut [f32]| {
+                             s8: &[f32; 8],
+                             d8: &[f32; 8],
+                             m1: &[f32; 8],
+                             m2: &[f32; 8],
+                             q8: &[f32; 8],
+                             p8: &[f32; 8],
+                             a8: &[f32; 8],
+                             out_x: usize,
+                             l_d: &mut Lanes8,
+                             l_d2: &mut Lanes8,
+                             l_d3: &mut Lanes8,
+                             l_d4: &mut Lanes8,
+                             l_art: &mut Lanes8,
+                             l_det: &mut Lanes8,
+                             l_mse: &mut Lanes8,
+                             l_hfg: &mut Lanes8,
+                             l_hfl: &mut Lanes8,
+                             l_hfm: &mut Lanes8,
+                             l_pj: &mut Lanes8,
+                             l_pjl: &mut Lanes8,
+                             l_pjh: &mut Lanes8,
+                             sc_d: &mut [f32],
+                             sc_art: &mut [f32],
+                             sc_det: &mut [f32],
+                             sc_mse: &mut [f32]| {
                 let mut t_d = [0.0f32; 8];
                 let mut t_a = [0.0f32; 8];
                 let mut t_t = [0.0f32; 8];
