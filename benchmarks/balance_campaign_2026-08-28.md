@@ -4152,3 +4152,57 @@ buffered **3.25× → 1.69×** (108.6 → **54.47 ms**); at 8T **2.54× → 1.46
 - **Weigh**: RSS — `ADVANCE_ROWS` 256 + band-local H planes cost footprint; at 2304² the fold is
   still 0.75×/0.85× buffered, but at 1152² it went 1.13× → **1.32–1.38×** (§5.2). No era-2 byte
   flip landed during the lane, so its bit-identity is relative to current main throughout.
+
+## 2026-08-31 ~09:0xZ — ROUND 22: THE FEATURE/MODEL COST FRONTIER (user: "what features should we drop" + "drop linear/blend/MLPs if it buys 2×"; doc `benchmarks/feature_cost_frontier_2026-08-31.md` §0.1, head `f035aede`)
+
+**Slot counts are a LIE about cost.** B reads 95/372 but you cannot save 74 % — the families share
+passes, read from source: **peaks (f156..228) are FREE** (`acc.ssim_d8 +=` at 10 sites,
+`acc.edge_art_max =` at 20, NONE behind a predicate; `V1PoolsMode::Off` was already computing them
+and merely declining to emit), and **masked + IW are ONE pass group** (one activity chain, one
+`store_mu`/`store_sigma`, three `*_inline_both` kernels doing both strengths in a single sweep —
+dropping one saves ~nothing, dropping both removes the arm). So f0..372 has **exactly one compute
+boundary: peaks vs masked-and-IW**, worth **+2.4 / +9.8 / +44.2 ms** at 576²/1152²/2304² (1T) =
++33–36 % of the peaks-only walk.
+
+**Rank cost of that boundary** (exact rank-|K| ablation via `bake_contrib`; baseline parity vs
+`score_row` max|diff| **0.000e0** over 47,511 rows): shipped **B** CID22 **−0.399** / KonJND
+**−0.525** (it needs them); **W-LIN 7b** −0.005 / −0.048; **944 MLPs exactly 0** (layer 0 is
+exact-zero there). W-LIN also: whole v1-372 = CID22 −0.027 but LIVE **+0.117**; v2-348 = CID22
+**−0.745**.
+
+**⇒ The model CLASS is the lever, not the family.** At 2304² the basic-only walk is
+**2.65×/3.46×/3.57×** (1/8/16T) the W-LIN blend, **2.26×/2.95×/3.54×** the 944 MLP, and
+1.60×/0.98×/1.12× today's buffered path (the win over TODAY's default is low-thread only).
+**Recommended drop set: NOTHING inside shipped B** — every family it computes, it uses. The real
+recommendation is to **evaluate the basic-only class (`ADD156`) seriously**: within **0.019** pooled
+CID22 of B, and on WITHIN-IMAGE ranking (what a dial actually consumes) it matches or beats B on
+**7 of 8 corpora**, incl. HF-NL/ref **0.799 vs 0.765**. Only the 944 MLP is at-or-above the board's
+`peer_ssim2` row on every human corpus; ADD156 is the closest tie. **Cost to realize: a profile
+slot and a ship call — no retrain, no era.**
+
+**Shipped**: `V1PoolsMode::Peaks` + `BandPoolWork{HOnly,Carriers,Full}` (the compute boundary made
+expressible, band-local self-blur kept); per-profile weight-skipping
+(`fold_engine::{V1PoolNeed, bake_pool_need, cached_bake_pool_need, caller_col_spans,
+score_pool_mode}` + `Zensim::with_unread_feature_skipping`, **opt-in, default off**);
+`caller_col_spans` handles PRUNED bakes — without it the policy would never have fired on any
+packed bake (pruning has been on by default since 2026-08-04), including the two 944 MLPs where it
+is exact. Gates: `folded_peaks_mode_is_pure_compute_skipping` (19 geom × {v1_only,944} ×
+{serial,rayon}, bit-exact), raw-distance bit-identity on both the plain and ref-cached entries,
+`unread_feature_skipping_is_inert_…` (23 geom × pools 1/2/3/8/16 × both engines) + 5 policy tests;
+zensim lib **240/0**, zensim-validate 160+40, clippy clean. **Working set: `Peaks` halves the plane
+count (10→4 per slot)** — per-band-task 4.43→2.21 MiB, per-process 11.1→4.4 MiB at 2304², and the
+footprint lane's saturation test shows that term governs the thread ceiling (**3.38 → 5.85×**).
+
+**New public items for approval** (all `feature-regime-v2`-gated, methods `#[doc(hidden)]`):
+`V1PoolsMode::Peaks` (variant on a `pub` non-`#[non_exhaustive]` enum),
+`Zensim::with_unread_feature_skipping`, `Zensim::score_pool_mode`.
+
+**Open**: the `fold_v1` lever (`feature_v2.rs:7395`, hardcoded `true`; the walk already branches on
+it in four places) is the biggest remaining block for the W-LIN class but is NOT byte-neutral
+(turns f0..372 into zeros in a 944 vector) ⇒ an ERA decision, priced not pulled; the 944-MLP
+v2/append ablation was not run (~2 TFLOP, would have contended with the wall-clock measurement);
+HDR untouched (the fold falls back to buffered for declared-HDR) though the free part is measured —
+`BHdr` reads 28 masked / 17 IW, `c_hdr_l1t1944` reads 0/72, so the SDR split repeats exactly.
+⚠ Process note: **`cargo … | grep -E '^error'` NEVER matches** — cargo's ANSI colorizing puts an
+escape before `error`; it hid a bench compile failure for ~30 min and made a first clippy "clean"
+false.
