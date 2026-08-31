@@ -145,29 +145,46 @@ fn bench_budget() -> (usize, usize, u64) {
     (max_r, 25.min(max_r), wall_s)
 }
 
-/// One-arm loop for external peak-RSS measurement (`/usr/bin/time -v`).
+/// One-arm loop for external peak-RSS measurement (`/usr/bin/time -v`) and
+/// for hardware-counter profiling (`perf stat`/`perf record`).
+///
+/// `ZEN_XP_SIZE` is the square side. `ZEN_XP_W` / `ZEN_XP_H` override the
+/// width / height independently, which is what the branch-behaviour lane
+/// needs: it has to compare a width that is a multiple of the SIMD lane
+/// count (8 f32 lanes on `v4`, 16 on `v4x`) against ones that are not, so
+/// the row-tail hypothesis can be tested rather than assumed.
 fn rss_mode(arm: &str) {
     let size: usize = std::env::var("ZEN_XP_SIZE")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1152);
+    let w: usize = std::env::var("ZEN_XP_W")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(size);
+    let h: usize = std::env::var("ZEN_XP_H")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(size);
     let iters: usize = std::env::var("ZEN_XP_ITERS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(20);
-    let (src, dst) = test_pair(size, size);
+    let (src, dst) = test_pair(w, h);
+    let _ = size;
+    let size = w; // reported below; the walk uses `w`/`h`
     let z = fold_zensim();
     let mut scratch = zensim::feature_v2::V2Scratch::new();
     let mut sink = 0.0f64;
     for _ in 0..iters {
         match arm {
             "buf_v1_228" => {
-                let r = compute_zensim_with_config(&src, &dst, size, size, v1_cfg(false, false))
+                let r = compute_zensim_with_config(&src, &dst, w, h, v1_cfg(false, false))
                     .expect("buf_v1_228");
                 sink += r.features()[0];
             }
             "buf_v1_372" => {
-                let r = compute_zensim_with_config(&src, &dst, size, size, v1_cfg(true, true))
+                let r = compute_zensim_with_config(&src, &dst, w, h, v1_cfg(true, true))
                     .expect("buf_v1_372");
                 sink += r.features()[371];
             }
@@ -178,8 +195,8 @@ fn rss_mode(arm: &str) {
                     "fold228_peaks" => V1PoolsMode::Peaks,
                     _ => V1PoolsMode::Full,
                 });
-                let rsv = RgbSlice::new(&src, size, size);
-                let dsv = RgbSlice::new(&dst, size, size);
+                let rsv = RgbSlice::new(&src, w, h);
+                let dsv = RgbSlice::new(&dst, w, h);
                 let v2 = z
                     .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
                     .expect("fold v1_only");
@@ -191,8 +208,8 @@ fn rss_mode(arm: &str) {
                 } else {
                     toggles_off()
                 };
-                let rsv = RgbSlice::new(&src, size, size);
-                let dsv = RgbSlice::new(&dst, size, size);
+                let rsv = RgbSlice::new(&src, w, h);
+                let dsv = RgbSlice::new(&dst, w, h);
                 let v2 = z
                     .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
                     .expect("fold");
@@ -201,7 +218,7 @@ fn rss_mode(arm: &str) {
             other => panic!("unknown ZEN_XP_RSS arm: {other}"),
         }
     }
-    println!("{arm} size={size} iters={iters} sink={sink:e}");
+    println!("{arm} size={size} w={w} h={h} iters={iters} sink={sink:e}");
 }
 
 fn main() {
