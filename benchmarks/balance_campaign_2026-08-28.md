@@ -4636,3 +4636,46 @@ landed; item D is byte-neutral.
   — the registered radius-4 retrain was deliberately not launched. Incidental: the stored canonical
   `dial_grid_944col_2026-08-01` is slightly stale vs HEAD (104,107 of 4.55M cells, max |Δ| 7.2e-9,
   inside golden policy).
+
+## 2026-08-31 ~17:5xZ — ROUND 32: era-2 — accumulation WIRED + measured, V-redirect built-then-REVERTED, blast radius registered ⇒ ALL FLIP PREREQUISITES CLOSED (`c2282c8c`, `3d9ea485`, `068df97c`)
+
+- **(1) The accumulation is measurable: `ZENSIM_ERA2_DENSE=1`.** The switch is on the **ENTRY**, for
+  the reason round 30 established the hard way (a selected-call-site tile silently split the v1 path
+  from the fold); era-1's body is now the explicit `dense_block_kernel_era1` arm for the four
+  test/harness sites, so their comparison cannot be silently turned into an identity. **Live and
+  confined: 714/956 slots bit-identical, 242 move, max 5.073e-6 at `f548` — and the movers are 241
+  in `f372..719` + 1 in `f720+`, ZERO in `f0..371`.** **Blast radius zero: 370/0 at BOTH settings**
+  (the five goldens tiling moves all pin v1's 372, which this does not touch) — the two components
+  have very different profiles. **Perf: NEUTRAL** (1.026×/1.015×, corroborated by phase attribution;
+  `v2:dense` marginally worse) — **its value is the fixed grouping (66/105 → 0/105 cross-vendor),
+  not speed.** §28.5 records a caught mistake: the lane's first measurement said 1.296×, impossible
+  since Amdahl caps a 7.9 % component at 1.086× even at zero cost; cause = arms run in sequential
+  blocks, which its own §22.5 forbids. **Third unsound estimator this session, same tell every time:
+  a result larger than the component it claims to come from.**
+- **(2) V-redirect: built, enumerated, REVERTED.** Four couplings, each caught by an existing gate,
+  each with a number: (i) **not byte-neutral**, 677/956 — the lane's own §24.5 call was wrong (the
+  doc says bit-identical *from the same inputs*, and the fold V-blurs its BAND BUFFER while phase A
+  V-blurs the WIDE WINDOW); (ii) `mu2` cannot be redirected where BANDVIS runs — it reads `mu2` over
+  the wide window, and redirecting moved `f939` by **68 %**; (iii) it must fire in EVERY pool mode or
+  `v1_pools` moves v2-era slot 372 (two independent gates); (iv) then it must fire in the PARALLEL
+  arm too (failures 2 → 11, including `streamed_parallel_matches_serial`). Shippable design fully
+  specified; remaining work is the rayon band chunking. **The prize (−3.6 %/−5.1 %) is SMALLER than
+  the v1 pool pass at 13.6 %, which needs no new code — only item D's per-model derivation. That
+  ordering is the finding.** Round 28 *reasoned* about this change and got the obstacle wrong in
+  both directions.
+- **(3) Blast radius + wave REGISTERED** (`benchmarks/era2_blast_radius_2026-08-31.md`) — **the last
+  outstanding flip prerequisite is closed. And the radius decides its size:**
+
+  | | tiling | accumulation | radius 4 |
+  |---|---|---|---|
+  | test re-pins | 5 goldens | **0** | 5 (same set) |
+  | re-extraction | no | no | **required** |
+  | retrain | no (5/6) | not yet checked | **required** (4/6) |
+
+  Tiling and the accumulation have **essentially no data-side blast radius**. Radius 4 carries all
+  of it: the **5.74 M-row bigcodec table is ~97 %** of the re-extraction (a fleet wave), the 11 local
+  legs + 2 eval grids are a local job, plus **378 board fullevals to RESCORE** (not re-extract)
+  under a new era stamp, plus a 6-arm retrain wave. Append-only: a new dated root, never an in-place
+  overwrite. **BHdr is the one model constraining BOTH components.**
+- The E/F table now carries the F6 accumulation row, the corrected F4 row, and a "what is shippable
+  today" section: **tiling alone; radius 4 only behind the registered retrain.**
