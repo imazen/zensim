@@ -22,10 +22,38 @@ registered before any candidate existed.
 | **F3** | **Column-tile the phase-A H blur (packed)** | **1.151× @2304², 1.733× @4608²** at 1T; **1.234× @4608²/8T**, 1.109× @16T; nothing below the tile width (same code path) | **NOT MEASURED.** Same quantities, different summation grouping — needs the rank-preservation gate | **Era** (byte change; running sum restarts per tile) | era-2 (§23) |
 | **F4** | **Redirect phase A's `mu2`/`ssq`/`s12` V sweeps into the fold** (exit 1, inner-row copy) | **−3.6 % @2304², −5.1 % @4608²** at 1T (`planesA` 39.27 → 22.42 / 248.50 → 139.21) | **Candidate BIT-IDENTICAL** — the fused kernel's stores are documented bit-identical to `box_blur_v_from_copy`; the open question is the plane top/bottom edges | **Possibly nothing** if the edge gate passes; else era | era-2 (§24.5) |
 | **F4b** | Same, exit 2 (inner-only store offset) | +3.0 ms @2304², +15.7 ms @4608² *on top of* F4 | as F4 | Output row-offset through six `fused_vblur_ssim_inner` tier bodies | era-2 (§24.5) |
+| **F6** | **Era-2 accumulation** (fixed 8 virtual lanes) — `ZENSIM_ERA2_DENSE=1` | **Perf-neutral**: 1.026× @2304², 1.015× @4608², inside the noise floor. Its value is the fixed grouping — cross-vendor divergence 66/105 → **0/105** | 242 of 956 slots move, all in `f372+`, max 5.07e-6 relative. Rank-checkable as of this commit; **not yet rank-checked** | **Era**, but **zero test re-pins** — the five goldens all pin v1's 372, which this does not touch | era-2 (§28) |
 | **F5** | **Basic-only feature class** (no v2-348 / append) | **2.3–3.6× faster overall** | Not a drop — it is a different model class. B and W-LIN already live there; the 944 MLPs do not | **Model choice**, no code change | blur/radius lane |
 | **—** | *Branch/tail-shape work* | **0.14–0.50 % of cycles total**; worst tail class +0.06 pp | — | **Closed — nothing to ship** | blur/radius lane |
 | **—** | *Band-local phase A / rolling row window* | **+13.1 % / +3.0 %** (i.e. slower) at R=5 | — | **Closed at R=5.** Sign flips near R=2 — revisit only if F2 ships | era-2 (§22), v2-block (L3) |
 | **—** | *Packed column slab* | ceiling **5.4 %**, already reduced by a measured kernel penalty at narrow width | — | **Not built** — premise falsified (the fold is not width-diseased) | era-2 (§24) |
+
+---
+
+## What is shippable TODAY, and what is not
+
+**The shippable-today subset is TILING ALONE (F3).** It passes 5 of 6 models at
+the production tile width 1024, and 8 of 9 corpora are byte-identical *by
+construction* — every H entry guards `width > tile` and only AIC-3 has refs
+wider than 1024. The single FAIL is `BHdr`, missing the bar's zero-tolerance
+composite clause by **3.2e-6** (13 % of the `+0.000024` non-event the bar
+itself cites) with its worst-corpus loss 125× inside the 0.005 clause. The rank
+lane reported that as FAIL rather than renegotiating the bar, which is right —
+**the disposition is the user's**, framed as "tiling ships, with one model
+3.2e-6 outside a zero-tolerance clause".
+
+**F1 (radius 4) is NOT shippable for the roster today.** It is 2 PASS / 4 FAIL
+(C944 and ADD156 pass; B, both W-LINs and BHdr fail) — but every FAIL is an
+**upper bound**, because all six bakes were trained at era-1. **Radius 4
+becomes shippable for the whole roster only behind the registered retrain**,
+which is unlaunched.
+
+**F6 (the accumulation) is rank-checkable as of §28 and not yet rank-checked.**
+
+And the components are **separable, with radius dominating**: every model's
+worst-corpus delta is identical to five decimals with the tile on or off, and
+the tile moves a composite by ~1e-5 against radius's ~4e-3. **The break's
+verdict is really the radius decision.**
 
 ---
 

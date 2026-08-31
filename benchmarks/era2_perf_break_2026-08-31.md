@@ -2382,3 +2382,94 @@ re-pin none if its edge gate shows bit-identity. And it is measured at
 `tile = 32`, the most aggressive setting: at a production tile width there are
 fewer tile edges per row, so the deltas are smaller — but the *set* of tests
 that move is the same, which is what the enumeration is for.
+
+---
+
+## 28. The era-2 accumulation is now WIRED — and its blast radius is nothing like the tile's
+
+The rank lane found that at `9e52fb16` every `dense_block_kernel_era2` call
+site was inside `mod tests` or `#[cfg(feature = "oracle")]`, while the four
+production dense sites called era-1 unconditionally. The break's largest
+semantic component was **unreachable in production** — so it could not be
+rank-checked at all. That was an instrument gap, not an evidence gap.
+
+### 28.1 The switch, and where it had to go
+
+`ZENSIM_ERA2_DENSE=1` routes every production dense call through
+`dense_block_kernel_era2` (fixed 8 virtual lanes, `era2_reduce8` pairwise tree,
+`ERA2_BAND_ROWS` bands) instead of era-1's per-row f64 reduction.
+
+**It is on the ENTRY, for the reason §27 established the hard way.** The column
+tile was first applied at selected call sites and silently split the v1
+reference path from the fold; a switch that some dense sites honour and others
+do not is the same defect in a different kernel. `dense_block_kernel` now
+dispatches, and era-1's body is `dense_block_kernel_era1` — which is also the
+explicit arm for the four test/harness sites that mean "era 1" rather than
+"whatever is switched on", so their comparison cannot be silently turned into
+an identity by the switch.
+
+### 28.2 It is live, and confined to the v2-era slots
+
+956-feature dump at 1152², switch off vs on:
+
+| | |
+|---|---|
+| bit-identical slots | **714 / 956** |
+| slots that move | **242** |
+| largest relative move | **5.073e-6** (`f548`) |
+
+and the moved slots are **241 in `f372..719` plus 1 in `f720+` — ZERO in
+`f0..371`**. That confinement is structural (the dense kernel produces only
+v2-era slots) and it is what makes the next result true.
+
+### 28.3 Blast radius: ZERO
+
+`cargo test --no-fail-fast`, both settings:
+
+| | result |
+|---|---|
+| `ZENSIM_ERA2_DENSE=0` | **370 passed, 0 failed** |
+| `ZENSIM_ERA2_DENSE=1` | **370 passed, 0 failed** |
+
+**No test re-pins for the accumulation component.** The five goldens that the
+tiling flip moves (§27.3) all pin **v1's 372**, which the dense kernel does not
+touch; and every cross-path / cross-engine / cross-pool-size identity gate
+compares paths that now both go through the switched entry — which is exactly
+why the switch had to be on the entry rather than at call sites.
+
+So the break's two merged byte-changing components have very different
+profiles: **tiling re-pins five goldens and no consistency gates; the
+accumulation re-pins nothing at all.**
+
+### 28.4 Perf: neutral, as designed
+
+Interleaved arms, one binary, byte-identical env value lengths, min of 3–7
+walks per process, min over 7 process starts, CCD-pinned:
+
+| | era 1 | era 2 | ratio |
+|---|---:|---:|---:|
+| 2304² 1T | 332.38 | 324.09 | 1.026× |
+| 4608² 1T | 2356.81 | 2323.12 | 1.015× |
+
+Inside the noise floor, and corroborated by phase attribution, which shows
+**every phase identical** and `v2:dense` marginally *worse* under era 2
+(102.96 → 104.40 ms at 4608²) — matching §20's kernel-level result. **The
+accumulation's value is the fixed grouping, not speed**: cross-vendor
+divergence goes 66/105 → 0/105 (§15), and the grouping is what makes band and
+tile splits byte-neutral (§22.2, §24.5).
+
+### 28.5 A protocol violation, caught by the instrument, recorded because it is the third one
+
+The first measurement of this switch reported **1.296× at 4608²** — a
+whole-walk gain from a kernel that is 7.9 % of the walk, which Amdahl caps at
+1.086× even if the kernel went to *zero*. The phase attribution above is what
+caught it: every phase identical. The cause was mine — the arms were run in
+**sequential blocks** (`for v in 0 1` inside the size loop) rather than
+interleaved, which §22.5 forbids in as many words. Min-over-N process starts
+does **not** rescue a non-interleaved comparison; it only removes interference
+within each block, not drift between them.
+
+Three times this session an unsound estimator produced a confident wrong number
+(§22.5's 6.6 %, §23.6's 8T "regression", and this 1.296×). In all three the
+tell was the same: **a result larger than the component it claims to come
+from.** That check is cheaper than the measurement and should precede it.

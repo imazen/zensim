@@ -2911,7 +2911,79 @@ fn dense_block_kernel_pools_scalar(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// **The era-2 accumulation switch.** `ZENSIM_ERA2_DENSE=1` routes every
+/// production dense call through [`dense_block_kernel_era2`] — the fixed
+/// 8-virtual-lane accumulation with the `era2_reduce8` pairwise tree and
+/// `ERA2_BAND_ROWS` bands — instead of era-1's per-row f64 reduction.
+///
+/// **It is on the ENTRY, for the reason §27 established the hard way.** The
+/// column tile was first applied at selected call sites and silently split the
+/// v1 reference path from the fold; a switch that some dense call sites honour
+/// and others do not is the same defect. There are four production dense sites
+/// (the materialized strip walk, the whole-image bypass, `stream_phase_b`, and
+/// the plain-v2 walk) and this is the only place they can disagree.
+///
+/// Until this existed the era-2 kernel was **unreachable outside `mod tests`**
+/// — every call site was a test or `#[cfg(feature = "oracle")]` — so the
+/// accumulation could not be rank-checked at all. That was an instrument gap,
+/// not an evidence gap.
+///
+/// Tests that compare the two accumulations must call
+/// [`dense_block_kernel_era1`] / [`dense_block_kernel_era2`] explicitly, so
+/// their comparison is not silently turned into an identity by the switch.
+#[inline]
+fn era2_dense_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("ZENSIM_ERA2_DENSE").as_deref() == Ok("1"))
+}
+
+/// The production dense entry: dispatches on [`era2_dense_enabled`].
+#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    if era2_dense_enabled() {
+        return dense_block_kernel_era2(
+            src,
+            dst,
+            mu1,
+            mu2,
+            ssq,
+            s12,
+            activity,
+            width,
+            height,
+            transducer_bank,
+        );
+    }
+    dense_block_kernel_era1(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+    )
+}
+
+/// Era-1's per-row-reduced accumulation — the shipped path, and the explicit
+/// arm for any test that means "era 1" rather than "whatever is switched on".
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel_era1(
     src: &[f32],
     dst: &[f32],
     mu1: &[f32],
@@ -12717,7 +12789,7 @@ pub(crate) mod tests {
                 }
 
                 // (2)+(3) Each production pool shape vs L2, bound from Σ|x|.
-                let lane_pool = dense_block_kernel(
+                let lane_pool = dense_block_kernel_era1(
                     &src_planes[ch],
                     &dst_planes[ch],
                     mu1,
@@ -12904,7 +12976,7 @@ pub(crate) mod tests {
         for ch in 0..3 {
             run_blur_pass(&src_planes[ch], &dst_planes[ch], w, h, &mut scratch);
             let n = w * h;
-            let a = dense_block_kernel(
+            let a = dense_block_kernel_era1(
                 &src_planes[ch],
                 &dst_planes[ch],
                 &scratch.mu1[..n],
@@ -17202,7 +17274,7 @@ pub fn harness_dense_slots(
             transducer_bank,
         )
     } else {
-        dense_block_kernel(
+        dense_block_kernel_era1(
             src,
             dst,
             mu1,
@@ -17254,7 +17326,7 @@ pub fn bench_dense_era1(
     height: usize,
     transducer_bank: bool,
 ) -> f64 {
-    let a = dense_block_kernel(
+    let a = dense_block_kernel_era1(
         src,
         dst,
         mu1,
@@ -17310,7 +17382,7 @@ pub fn bench_dense_era2(
 /// source is identical and Rust does not contract `a*b+c` into an FMA without
 /// fast-math (which is off); it is VERIFIED, not assumed, by
 /// `era2_vendor_probe` across the AMD/Intel pair.
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_era2(
     src: &[f32],
     dst: &[f32],
