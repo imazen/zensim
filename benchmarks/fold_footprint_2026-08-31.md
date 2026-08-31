@@ -460,9 +460,92 @@ thread-local, and that is an API/ownership decision, not a footprint one.
 
 ---
 
-## 7. Speed
+## 7. Speed — the footprint cut is worth 13–27 % of wall clock at one thread
 
-*(filled in below from the paired A/B — `fold_footprint_2026-08-31/speed_ab.sh`)*
+`fold_engine_bench` under zenbench, the same bench/arms/generator/box the MT
+lane's §5 used. zenbench interleaves arms WITHIN one process, so the before and
+after builds cannot share a group; the two binaries are alternated instead
+(`speed_ab.sh`), one process per (binary, thread count). Raw outputs are
+committed beside this note under `fold_footprint_2026-08-31/speed/`.
+
+**Sanity check on the pairing:** the BEFORE binary reproduces the MT lane's §5
+table on every arm it shares — 1152²/1T `score_buffered` 48.0 vs 48.59,
+`score_fold` 50.5 vs 50.39; 2304²/1T 204.2 vs 210.00 and 201.6 vs 201.95;
+2304²/16T 34.8 vs 32.25 and **54.4 vs 54.47**. The box has not moved under us.
+
+### 7.1 One thread — the clean measurement
+
+| arm | 1152² before | after | Δ | 2304² before | after | Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| `score_buffered` *(control)* | 48.0 | 47.7 | −0.6 % | 204.2 | 200.5 | −1.8 % |
+| **`score_fold`** | 50.5 | **37.1** | **−26.5 %** | 201.6 | **175.1** | **−13.1 %** |
+| `feat_buffered` *(control)* | 47.6 | 47.8 | +0.4 % | 202.1 | 198.3 | −1.9 % |
+| `feat_fold` | 48.0 | 37.3 | −22.3 % | 199.1 | 173.1 | −13.1 % |
+| `ref_buffered` *(control)* | 40.8 | 40.7 | −0.2 % | 181.4 | 174.6 | −3.7 % |
+| `ref_fold` | 45.9 | 33.8 | −26.4 % | 187.6 | 161.9 | −13.7 % |
+| `refinto_buffered` *(control)* | 41.4 | 40.9 | −1.2 % | 179.5 | 173.1 | −3.6 % |
+| `refinto_fold` | 44.0 | 34.1 | −22.5 % | 185.9 | 161.8 | −13.0 % |
+| `fused_buffered` *(control)* | 66.8 | 66.3 | −0.7 % | 274.2 | 271.2 | −1.1 % |
+| `split_fold` | 138.8 | 124.7 | −10.2 % | 556.3 | 556.4 | +0.0 % |
+
+Every buffered arm is untouched code and moves ≤ 3.7 %; every fold arm that
+takes the scoring walk moves **13–27 %**. **A memory change bought a quarter of
+the serial wall clock**, which is the shape of a cache effect and not of a
+compute one — nothing in these fixes removes work; `advance_rows_for` and the
+band chunking both *add* a little (four times as many `produce()` calls at 1
+thread, and 4 bands through 1 scratch instead of 4).
+
+**`score_fold` is now FASTER than `score_buffered` serially: 37.1 vs 47.7 ms at
+1152² (0.78×) and 175.1 vs 200.5 at 2304² (0.87×)**, against the MT lane's
+recorded 1.03×/0.96×. The fold's serial position changed from parity to a clear
+win, on a byte-identical result.
+
+`split_fold` at 2304² is the one arm that does not move, and it is informative
+rather than anomalous: the standalone attribution map does **not** go through
+`foldapp_streaming_walk` (no `StripPlaneProducer` reaches `attribution.rs`), so
+it cannot have changed — and it is large enough at 2304² (≈ 370 ms of the 556)
+to evict everything the fold-score half just gained. At 1152², where both halves
+still fit, the arm moves −10.2 %, consistent with `ref_fold`'s −12.1 ms. **The
+gain is cache residency, and it is only there while something else is not
+holding the cache.**
+
+### 7.2 Sixteen threads — read the ratio, not the level
+
+| arm | 1152² before | after | 2304² before | after |
+|---|---:|---:|---:|---:|
+| `score_buffered` *(control)* | 9.4 | 9.0 | 34.8 | **38.8** |
+| `score_fold` | 13.9 | **12.0** | 54.4 | 57.6 |
+| `feat_buffered` *(control)* | 8.1 | 7.9 | 28.5 | 32.1 |
+| `feat_fold` | 13.9 | 11.9 | 53.1 | 57.9 |
+| `ref_buffered` *(control)* | 7.2 | 6.8 | 27.5 | 29.7 |
+| `ref_fold` | 14.3 | 11.7 | 53.7 | 57.7 |
+| `refinto_fold` | 12.9 | 12.2 | 50.9 | 53.9 |
+
+**The 2304²/16T "after" run is contaminated and must not be read as a level.**
+EVERY arm in it is slower than its "before" counterpart, the untouched buffered
+controls by **+8 % to +24 %**, and its `mad` triples (±6.3–47 ms against
+±1.5–7.4). A concurrent lane's bench had been queued on zenbench's exclusive
+lock across that window. What survives contamination is the RATIO inside one
+process:
+
+| size | `score_fold ÷ score_buffered` before | after |
+|---|---:|---:|
+| 1152² / 16T | 1.48 | **1.33** |
+| 2304² / 16T | 1.56 | **1.49** |
+
+At 1152² the ratio improves by 10 %; at 2304² by 4 %, which is inside that run's
+noise. **That split is exactly what §9 predicts** and is the strongest
+independent evidence for it: the fixes cut the walk's TOTAL footprint but not
+its per-thread HOT SET, so they help wherever the reduced total changes what
+stays resident (1 thread everywhere, 16 threads at 1152²) and do essentially
+nothing at 16 threads on 2304², where `8 × 4.43 MiB = 35.4 MiB` still overflows
+CCD1's 32 MiB L3 either way.
+
+**Load conditions.** The four round-1 runs ran back to back 05:50–07:20 UTC
+under zenbench's exclusive lock. Box load was 0.2–1.5 for the two 1-thread runs
+and the 16-thread BEFORE run; the 16-thread AFTER run overlapped a queued
+sibling lane and is flagged above. A second round was cancelled rather than run
+against that contention.
 
 ---
 

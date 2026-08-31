@@ -6,3 +6,59 @@ run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=44372MiB :: /home/lilith/t
 ═══════════════════════════════════════════════════════════════
   zenbench  1788157867-19094d
 ═══════════════════════════════════════════════════════════════
+
+  fold_engine_1152  20 rounds × 1 calls
+                       mean ±mad ms  95% CI vs base     
+  ├─ score_buffered      9.4 ±0.6ms  [9.0–9.7]ms        
+  ├─ score_fold         13.9 ±1.1ms  [+41.8%–+55.8%]    
+  ├─ feat_buffered       8.1 ±1.0ms  [-19.4%–-11.2%]    
+  ├─ feat_fold          13.9 ±1.6ms  [+39.6%–+57.5%]    
+  ├─ ref_buffered        7.2 ±0.7ms  [-24.5%–-19.6%]    
+  ├─ ref_fold           14.3 ±0.9ms  [+44.3%–+56.7%]    
+  ├─ refinto_buffered    8.5 ±0.7ms  [-15.8%–-6.7%]     
+  ├─ refinto_fold       12.9 ±1.7ms  [+28.4%–+47.6%]    
+  ├─ fused_buffered     24.5 ±1.6ms  [+155.0%–+168.7%]  
+  ╰─ split_fold         72.8 ±3.7ms  [+656.7%–+694.8%]  
+
+  ref_buffered      █████ 7.24ms
+  feat_buffered     ██████ 8.10ms
+  refinto_buffered  ██████ 8.49ms
+  score_buffered    ███████ 9.38ms
+  refinto_fold      █████████ 12.93ms
+  feat_fold         ██████████ 13.92ms
+  score_fold        ██████████ 13.94ms
+  ref_fold          ██████████ 14.31ms
+  fused_buffered    ██████████████████ 24.54ms
+  split_fold        ████████████████████████████████████████████████████ 72.76ms
+
+  fold_engine_2304  19 rounds × 1 calls
+                        mean ±mad ms  95% CI vs base     
+  ├─ score_buffered      34.8 ±3.6ms  [32.0–38.4]ms       [1]
+  ├─ score_fold          54.4 ±5.6ms  [+48.0%–+64.7%]    
+  ├─ feat_buffered       28.5 ±1.5ms  [-21.4%–-8.5%]     
+  ├─ feat_fold           53.1 ±4.5ms  [+50.2%–+67.0%]    
+  ├─ ref_buffered        27.5 ±2.1ms  [-21.6%–-15.4%]    
+  ├─ ref_fold            53.7 ±4.8ms  [+45.7%–+62.8%]     [2]
+  ├─ refinto_buffered    31.9 ±2.3ms  [-14.3%–-6.5%]      [3]
+  ├─ refinto_fold        50.9 ±4.6ms  [+43.1%–+62.1%]    
+  ├─ fused_buffered      96.4 ±2.4ms  [+180.0%–+191.9%]  
+  ╰─ split_fold         276.0 ±7.4ms  [+710.8%–+729.5%]  
+
+  ref_buffered      █████ 27.50ms
+  feat_buffered     █████ 28.53ms
+  refinto_buffered  ██████ 31.95ms
+  score_buffered    ██████ 34.82ms
+  refinto_fold      █████████ 50.85ms
+  feat_fold         ██████████ 53.06ms
+  ref_fold          ██████████ 53.72ms
+  score_fold        ██████████ 54.39ms
+  fused_buffered    ██████████████████ 96.44ms
+  split_fold        ███████████████████████████████████████████████████ 275.97ms
+  [1] CV=21%
+  [2] drift r=0.62 — later rounds slower
+  [3] CV=22%
+
+  total: 1239.0s  (1170 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 1239s | peak-RSS 1.23GiB | min-avail 38428MiB | peak-load 2.92

@@ -1,0 +1,94 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=41747MiB :: /home/lilith/tmp/foldmem-target/release/deps/fold_engine_bench-f19930f28bf62f8f
+[zenbench] calibration: int=0.18ns/iter mem_bw=107.9GiB/s mem_lat=8.8ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788159107-1a2394.txt
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 1s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 16s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 31s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 46s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 1m01s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 1m16s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 1m31s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 1m46s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 2m01s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 2m16s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 2m31s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 2m46s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m01s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m16s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m31s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m46s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 4m01s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 4m16s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 4m31s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 4m46s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 5m01s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 5m16s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 5m31s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 5m46s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 6m01s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 6m16s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 6m31s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 6m46s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 7m01s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1703576, binary extract_paths_bench-4bc2a357f3e2ca57, running 7m16s)
+[zenbench] lock acquired after waiting; running /fold_engine_1152
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788159107-1a2394
+═══════════════════════════════════════════════════════════════
+
+  fold_engine_1152  20 rounds × 1 calls
+                       mean ±mad ms  95% CI vs base     
+  ├─ score_buffered      9.0 ±0.5ms  [8.8–9.3]ms        
+  ├─ score_fold         12.0 ±1.3ms  [+25.7%–+41.1%]    
+  ├─ feat_buffered       7.9 ±0.8ms  [-16.2%–-9.1%]     
+  ├─ feat_fold          11.9 ±1.4ms  [+24.2%–+39.6%]    
+  ├─ ref_buffered        6.8 ±0.6ms  [-27.6%–-22.6%]    
+  ├─ ref_fold           11.7 ±1.2ms  [+20.4%–+39.7%]    
+  ├─ refinto_buffered    7.3 ±0.9ms  [-24.5%–-15.5%]    
+  ├─ refinto_fold       12.2 ±1.2ms  [+26.9%–+43.3%]    
+  ├─ fused_buffered     23.0 ±1.1ms  [+147.9%–+163.9%]  
+  ╰─ split_fold         67.5 ±2.7ms  [+625.5%–+654.6%]  
+
+  ref_buffered      █████ 6.76ms
+  refinto_buffered  ██████ 7.32ms
+  feat_buffered     ██████ 7.86ms
+  score_buffered    ███████ 9.02ms
+  ref_fold          █████████ 11.74ms
+  feat_fold         █████████ 11.88ms
+  score_fold        █████████ 12.02ms
+  refinto_fold      █████████ 12.21ms
+  fused_buffered    ██████████████████ 23.04ms
+  split_fold        ████████████████████████████████████████████████████ 67.48ms
+
+  fold_engine_2304  19 rounds × 1 calls
+                         mean ±mad ms  95% CI vs base     
+  ├─ score_buffered       38.8 ±6.3ms  [36.2–41.4]ms      
+  ├─ score_fold          57.6 ±11.2ms  [+35.3%–+60.9%]    
+  ├─ feat_buffered        32.1 ±4.0ms  [-20.9%–-14.7%]    
+  ├─ feat_fold           57.9 ±13.0ms  [+45.5%–+61.5%]    
+  ├─ ref_buffered         29.7 ±3.6ms  [-25.1%–-18.3%]    
+  ├─ ref_fold            57.7 ±13.6ms  [+38.0%–+59.8%]    
+  ├─ refinto_buffered     36.4 ±4.8ms  [-10.8%–-1.2%]     
+  ├─ refinto_fold        53.9 ±12.3ms  [+28.2%–+49.2%]    
+  ├─ fused_buffered     114.1 ±15.4ms  [+178.2%–+212.1%]   [1]
+  ╰─ split_fold         343.0 ±47.2ms  [+715.5%–+861.9%]   [2]
+
+  ref_buffered      ████ 29.67ms
+  feat_buffered     █████ 32.07ms
+  refinto_buffered  █████ 36.36ms
+  score_buffered    ██████ 38.78ms
+  refinto_fold      ████████ 53.88ms
+  score_fold        █████████ 57.60ms
+  ref_fold          █████████ 57.72ms
+  feat_fold         █████████ 57.93ms
+  fused_buffered    █████████████████ 114.10ms
+  split_fold        ███████████████████████████████████████████████████ 342.99ms
+  [1] drift r=0.79 — later rounds slower
+  [2] drift r=0.67 — later rounds slower
+
+  total: 1675.8s  (1162 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 1676s | peak-RSS 1.21GiB | min-avail 38059MiB | peak-load 6.45
