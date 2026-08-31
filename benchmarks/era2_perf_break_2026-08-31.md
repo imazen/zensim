@@ -2041,3 +2041,105 @@ For `benchmarks/blur_radius_locality_branches_2026-08-31.md` (not yet on
   arms, byte-identical env-var lengths, interleaving, and an
   identical-code-path control cell; the noise floor is ±0.3 % at 1T and up to
   **6.5 % at 8T**.
+
+### 24.4 Priced: phase A's four V sweeps are 22.05 ms, and the fold already has those values in registers
+
+§24.2 guessed 15–20 ms for deduplicating the fold's V blur. Reading the kernel
+first changes the direction of the dedup, and measuring it sizes the real one.
+
+`fused_vblur_features_ssim` does not run a V-blur *pass* — it maintains the
+four column recurrences in registers while it streams the features, and it
+already exposes `mu1_out` / `mu2_out` / `ssq_out` / `s12_out` behind
+`store_mu` / `store_sigma`. In the 944 walk with `V1PoolsMode::Full` it is
+**already storing all four** into `FoldPoolScratch` for the pool replay. So
+removing the fold's V blur would save only ALU, not a memory pass — the
+§24.2 estimate was wrong in the useful direction: **the duplicate to remove is
+phase A's, not the fold's.**
+
+Priced with a temporary timing probe (skips the sweeps and lets the outputs be
+garbage — timing only; the probe was removed in the same commit that recorded
+this), 2304², 1T, `setarch -R`, untiled:
+
+| arm | `v2:planesA` | Δ |
+|---|---:|---:|
+| all four V sweeps | **39.82** | — |
+| skip `mu2` / `ssq` / `s12` | **23.13** | **−16.69** |
+| skip all four | 17.77 | −22.05 |
+
+**The four `box_blur_v_from_copy` sweeps are 22.05 ms — 55 % of `planesA`.**
+Three of them (`mu2`, `ssq`, `s12`) are **16.69 ms = 5.5 % of the 302 ms tiled
+walk at 5 MP**, and `planesA` is width-diseased, so the share grows with size
+(it is 222.7 ms at 4608²).
+
+`mu1`'s sweep (5.35 ms) must stay: the activity chain needs `mu1` on the
+`±BLUR_RADIUS` halo rows *outside* the strip, which the fold — banded over
+strip rows only — never produces.
+
+**The build this implies**, ranked above both the slab and §24.2:
+
+1. Run the v1 fold **before** the other phase-B kernels (it is already inside
+   `stream_phase_b`, currently third of five).
+2. Point its existing `mu2_out` / `ssq_out` / `s12_out` stores at the
+   strip-wide plane buffers at the band's row offset instead of (or as well
+   as) the band-local `FoldPoolScratch`, so phase A can skip those three
+   sweeps entirely.
+3. Keep `mu1`'s sweep for the activity halo.
+
+**Bit-identity is plausible but not free**, and is the thing to gate rather
+than assume: the fused kernel's outputs are documented bit-identical to
+`box_blur_v_from_copy` *from the same inputs*, and `folded720_v1_pools_match_
+v1_path` already compares those pool slots to v1's 372 with `to_bits()`. The
+open question is the **plane edges**: the fold V-blurs a band buffer clamped
+to the plane and mirrors at its edges, while phase A V-blurs the wide window
+whose halo the producer reflect-pads. Interior strips have real rows on both
+sides and must agree by construction; the top and bottom strips are where the
+two mirror conventions have to be shown to coincide. That is a test, and it
+is the first thing the build should write.
+
+**Not yet built** — it is specified here with its price so the next pass
+starts from a number rather than a guess, which is the same discipline that
+stopped the slab.
+
+---
+
+## 25. `ZENSIM_H_TILE` default-on: what flipping it costs and gains
+
+Queued as the decision after the slab. The data is §23.6's table, re-read as a
+flip decision.
+
+| threads | 576² | 1152² | 2304² | 4608² |
+|---:|---:|---:|---:|---:|
+| **1** | 1.001× | 0.997× | **1.151×** | **1.733×** |
+| **8** | 1.008× | 0.935× | 1.064× | **1.234×** |
+| **16** | 0.989× | 1.018× | 0.944× | **1.109×** |
+
+**What it costs: nothing below the tile width, structurally.** The tile is a
+no-op when `width <= tile`, so at 576² and 1152² both arms execute the *same
+instructions* — those cells are not "small regressions", they are the
+measurement's noise floor (±0.3 % at 1T, ±1.8 % at 16T, up to 6.5 % at 8T),
+and they bound how much any other cell in the same row can be trusted.
+
+**What it gains:** 1.151× / 1.733× at 1T from 2304² up, and 1.234× / 1.109×
+at 4608² on 8 and 16 threads. The 2304²-threaded cells (1.064× @8T, 0.944×
+@16T) sit inside their own rows' floors and are unresolved in either
+direction; resolving them needs n ≥ 15 process starts, and it is **not a
+blocker**, because the worst case there is bounded by the floor that the
+control cells measure.
+
+**Recommendation: flip it on unconditionally as part of era-2, with no width
+threshold.** A threshold would only re-express what the code already does for
+free (`width <= tile` ⇒ untiled), and every cell where tiling actually runs is
+a win or inside noise. It **cannot** flip standalone: the running sum along x
+restarts per tile, so it is a byte change and rides the era-2 golden re-pin
+with the oracle bounds, vendor probe and rank-preservation gate like
+everything else in the break.
+
+**On `TILE_WIDTH` as a constant.** 512 / 1024 / 1536 are within noise of each
+other at 2304² (271.25 / 271.64 / 270.57), so the value is not critical, which
+is itself the useful finding — but it should be *derived*, not picked: the
+quantity that matters is the H blur's live window,
+`H_BLUR_ROW_GROUP × 6 planes × tile × 4 B`, which wants to sit inside L2.
+At the 1 MiB L2 on this part that is `tile <= 1365`; **1024** leaves headroom
+on parts with 512 KiB L2 and is inside the measured-flat band. Fixing it at
+1536 because 1536 is what the sweep happened to use would be exactly the
+"hand-distilled from N=1" anti-pattern the workspace rules name.
