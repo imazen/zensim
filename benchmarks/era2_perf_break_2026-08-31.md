@@ -2473,3 +2473,80 @@ Three times this session an unsound estimator produced a confident wrong number
 (§22.5's 6.6 %, §23.6's 8T "regression", and this 1.296×). In all three the
 tell was the same: **a result larger than the component it claims to come
 from.** That check is cheaper than the measurement and should precede it.
+
+---
+
+## 29. V-plane redirect (exit 1): BUILT, and the enumeration says it is not landable as specified
+
+§24.5 priced exit 1 at **−3.6 % / −5.1 %** and called it a "candidate
+bit-identical, possibly needing no era". It was built end to end — phase A's
+`mu2`/`ssq`/`s12` sweeps skipped, the v1 fold hoisted ahead of the phase-B
+kernels and made to write the three planes it already carries in registers.
+**Four couplings surfaced, each caught by an existing gate, each with a
+number.** The build is reverted; the enumeration is the deliverable.
+
+### 29.1 It is NOT byte-neutral — my §24.5 call was wrong
+
+Measured, 956-feature dump at 1152²: **677 / 956 bit-identical**, and the
+divergence is the familiar near-zero cancelling class (worst relative `f693`
+0.240 on an absolute value of 2.94e-5, i.e. an absolute move of 7.1e-6; 30
+slots above 1e-2 relative, all tiny in absolute terms).
+
+The error in §24.5 was reading `fused_vblur_features_ssim`'s doc too
+generously. Its outputs are bit-identical to `box_blur_v_from_copy` **from the
+same inputs** — meaning the same buffer. The fold V-blurs its **band buffer**
+`[b0 − 5, b1 + 5)` while phase A V-blurs the **wide window**; the window *sums*
+agree, but the running-sum accumulation restarts differently. That is exactly
+the §22 V-restart class. **The redirect is an era-2 byte change like the
+others.**
+
+### 29.2 `mu2` cannot be redirected wherever the BANDVIS dst chain runs
+
+The dst self-mask does `abs_diff_into(dst_win, &mu2[..n_wide], ..)` — `mu2`
+over the **whole wide window**, including the `±HALO_P` rows outside the strip
+that a band-scoped fold never produces. Redirecting it anyway moved **`f939`
+(a BANDVIS slot) by 68 % relative**. `mu2`'s sweep must be kept wherever
+`want_act_dst` is set; only `ssq`/`s12` are unconditionally redirectable, which
+also caps the prize below the measured 16.69 ms.
+
+### 29.3 It must fire in EVERY pool mode, or `v1_pools` stops being pure compute-skipping
+
+Gating the redirect on `V1PoolsMode::Full` — the only mode whose fold stores
+sigma by default — made **v2-era slot 372 move with the pool mode**
+(2.9674264951609075e-3 vs 2.9671634353386858e-3). Two independent gates caught
+it: `folded_peaks_mode_is_pure_compute_skipping` and
+`folded720_v1_pools_match_v1_path`. Pool mode is required to be **pure compute
+skipping**, so the redirect must store in all four fold paths — the `Full` pool
+arm, the `Carriers` pool arm, the `HOnly` arm, and the no-pool path.
+
+### 29.4 And then it must fire in the PARALLEL arm too
+
+With the stores added to every pool path and the mode gate removed, the count
+went from 2 failures to **11** — including `streamed_parallel_matches_serial`,
+`folded720_entry_paths_bit_identical`, `append_entry_paths_bit_identical` and
+three identity gates. Cause: the redirect forces the **serial** band loop
+(per-band output ranges are disjoint but adjacent, and handing rayon disjoint
+mutable sub-slices of three planes is plumbing that was deferred), so the
+serial and channel-fused parallel arms compute different bytes.
+
+### 29.5 Disposition
+
+**Reverted, not parked.** The shippable design is now fully specified:
+
+1. store the three planes in **all four** fold paths (done in the prototype);
+2. keep `mu2`'s sweep wherever `want_act_dst` runs (done);
+3. **chunk the per-band output ranges for rayon** so the parallel arm redirects
+   identically (not done — this is the remaining work);
+4. accept it as an **era-2 byte change**, not a byte-neutral one (§29.1).
+
+Against that, the prize is **−3.6 % at 5 MP and −5.1 % at 21 MP**, reduced by
+§29.2's `mu2` carve-out on the Y channel. It is a fair lever, and it is
+**smaller than the v1 pool pass (13.6 %)** which needs no new code at all —
+only item D's per-model derivation. That ordering is the finding.
+
+**The general lesson, third instance this session:** every one of these four
+couplings was found by a gate the crate already had, in under an hour, because
+the change was built and run rather than reasoned about. §24.4 reasoned about
+this same change and got the obstacle wrong in both directions — it predicted
+an overlap problem that does not exist (the kernel stores only inner rows) and
+missed all four that do.
