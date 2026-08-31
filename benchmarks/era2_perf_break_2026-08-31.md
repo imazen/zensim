@@ -2096,9 +2096,34 @@ sides and must agree by construction; the top and bottom strips are where the
 two mirror conventions have to be shown to coincide. That is a test, and it
 is the first thing the build should write.
 
-**Not yet built** — it is specified here with its price so the next pass
-starts from a number rather than a guess, which is the same discipline that
-stopped the slab.
+**And one obstacle, worked out here so the next pass does not hit it blind.**
+Step 2 cannot simply hand the fold a strip-plane slice covering its whole band
+BUFFER. The buffer is `[b0 − V1_BAND_OVERLAP, b1 + V1_BAND_OVERLAP)` and the
+kernel stores at buffer-row coordinates, so adjacent bands' buffers overlap by
+`2 × V1_BAND_OVERLAP = 10` rows — and those overlap rows are exactly the ones
+each band's own V blur mirrors at its buffer edge, i.e. contaminated. Writing
+whole buffers in ascending band order lets band `k+1` overwrite band `k`'s
+last 5 GOOD rows with its own contaminated top halo; descending order breaks
+the first 5 instead. This is the same overlap-corruption that killed in-place
+row banding in §22.1, in a different costume.
+
+Two ways out, with different prices:
+
+* **Copy the inner rows out** after the fused call (3 planes × `inner_h` rows
+  per band, read from a band scratch that is L2-hot). Needs no kernel change.
+  It saves the H-plane *read* and the V-blur ALU but still pays the plane
+  write, so it recovers roughly **half** of the 16.69 ms.
+* **Give the fused kernel an inner-only store offset** (store row `y` to
+  `out[(y − inner_start) · width]`), so each band writes a disjoint strip-plane
+  range in place. Recovers the full 16.69 ms, but touches the store sites in
+  all six `fused_vblur_ssim_inner` tier bodies — and §23.5's lesson says to
+  price that against the copy, not assume the no-copy form wins.
+
+**Not yet built** — it is specified here with its price, its obstacle, and two
+costed exits, so the next pass starts from a number rather than a guess. That
+is the same discipline that stopped the slab, and the ~16.7 ms (5.5 %) ceiling
+should be weighed against §24.1: **the v1 pools are 41.2 ms, 2.5× larger, and
+no layout change touches them.**
 
 ---
 
