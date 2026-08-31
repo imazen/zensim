@@ -227,6 +227,17 @@ root where `f156..371` are structural zeros. So for the 944-MLP class the pool
 arm is not a trade at all: it is work with a provably zero effect on the
 answer, and the shipped skip removes it.
 
+Both are **pruned** bakes (944 caller lines over 667 layer-0 columns), which is
+why §5.1b exists: the first cut of the skip policy would have refused exactly
+these two.
+
+**Not measured here:** a v2-vs-append ablation for the 944-MLP class. Its read
+set answers the question this lane was asked (the pool block is provably dead
+for it), and §2.2 already prices those two blocks for the other 944 class; a
+`bake_contrib` pass over a 667→128 net is ~2 TFLOP and would have contended
+with the wall-clock measurement it shares a box with. Listed as open rather
+than estimated.
+
 ---
 
 ## 3. Per-family compute cost — measured
