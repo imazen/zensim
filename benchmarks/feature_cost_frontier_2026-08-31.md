@@ -30,10 +30,12 @@ per-profile weight-skipping policy.
 **But the big lever is not inside a model — it is the choice of model.** The
 944 MLP is the quality ceiling and needs everything. The W-LIN 7b blend needs
 the whole v2-348 block and essentially nothing of v1's 372 (ablating all 372
-costs it CID22 −0.027). And a **basic-only** model — `ADD156`, which reads 28
-of 156 basic lines and **zero** of the 216 pool lines — lands within 0.019
-CID22 and 0.006 imazen26 of shipped B while needing the cheapest walk the
-extractor has.
+costs it CID22 −0.027 and *improves* its LIVE by 0.117). And a **basic-only**
+model — `ADD156`, which reads 28 of 156 basic lines and **zero** of the 216
+pool lines — lands within 0.019 pooled CID22 of shipped B, **beats** it on
+within-image ranking on seven of eight corpora including the near-lossless
+band, and needs the cheapest walk the extractor has (half the per-thread hot
+set of what `score()` runs today). If a 2× is wanted, that is where it is.
 
 ---
 
@@ -68,11 +70,11 @@ there is agreement-with-ssim2, not a win over it (§4.3).
 | IW | `f300..372` | the same band pool arm |
 
 **The peaks are free, and this is not an estimate.** `fused_vblur_ssim_inner`
-accumulates `acc.ssim_d8 += (sd4*sd4)`, `acc.ssim_max = max(...)`,
-`acc.edge_art_max`, `acc.edge_det_max` **unconditionally in every SIMD
-variant** (`fused.rs` lines 317-318/349-350 v3, 437/469 v4, 540/572 scalar,
-685/717, 805/837, 908/940, 1049/1081, 1152/1184, 1310/1342 — nine sites, no
-predicate), and `V1BasicSums::accumulate` merges them unconditionally with the
+accumulates `acc.ssim_d8 += (sd4*sd4)` and `acc.ssim_max = max(…)`
+**unconditionally in every SIMD variant** — verified by counting:
+`grep -c 'acc.ssim_d8 +='` in `zensim/src/fused.rs` is **10** and
+`grep -c 'acc.edge_art_max = '` is **20** (the ssim and edge kernel families ×
+each dispatch tier), and **not one of them sits behind a predicate**. And `V1BasicSums::accumulate` merges them unconditionally with the
 comment "free to carry". `V1PoolsMode::Off` has therefore been *computing* the
 peak block all along and merely declining to emit it. Not emitting the peaks
 saves nothing; emitting them costs 72 `f64` stores per image.
@@ -257,6 +259,37 @@ read very differently at the `2026-08-30-full-features-372` root
 (ADD156 sdr25 0.0353 there vs 0.9797 here; KonJND 0.4462 vs 0.5363 — the two
 roots ship *different KonJND corpus files*, n = 1008 vs 504). **Only the
 single-root table above is a valid cross-class comparison.**
+
+### 4.2b The same five, read WITHIN image — and the reading changes
+
+Pooled SROCC on a corpus with many references is partly a cross-image scale
+agreement; the **within-image** number is what a codec dial actually needs (the
+user asks for a target and the encoder walks its own ladder). `bake_verdict`
+reports it as `per_ref`, and the project's own note on it says to read the two
+together: "a wide gap means the pooled number is carried by cross-image scale
+rather than ranking".
+
+Mean within-reference SROCC, same five models, same root:
+
+| model | CID22 | nonphoto | imazen26 | **HF-NL** | CSIQ | LIVE | KADID | TID |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| basic-only ADD156 | 0.9507 | 0.9311 | **0.9294** | **0.7993** | 0.9033 | 0.9590 | 0.8277 | 0.8273 |
+| sparse 372 (**B**) | 0.9532 | **0.9322** | 0.9288 | 0.7652 | 0.9327 | 0.9037 | 0.8194 | 0.7844 |
+| W-LIN 7b g0.20 | 0.9535 | 0.9186 | 0.9222 | 0.7558 | 0.8993 | 0.8118 | 0.7335 | 0.7855 |
+| W-LIN 7b g0.25 | 0.9538 | 0.9198 | 0.9238 | 0.7559 | 0.9037 | 0.7945 | 0.7346 | 0.7879 |
+| **944 MLP** | **0.9585** | 0.9270 | 0.9255 | **0.8099** | **0.9459** | **0.9622** | **0.9220** | **0.9428** |
+
+**This inverts the HF-NL story.** Pooled, ADD156 looks like the worst model on
+HF-NL by a wide margin (0.295 vs B's 0.350 and the MLP's 0.694). Within
+reference it is the **second best of the five** — 0.799, *above* shipped B
+(0.765) and the W-LIN blend (0.756), 0.011 behind the 944 MLP. The pooled gap
+is cross-image scale, not ranking, and it is the ranking that a target-hitting
+loop consumes.
+
+On this axis the basic-only class is level with or ahead of shipped B on seven
+of eight corpora (CID22 −0.003, nonphoto −0.001, imazen26 +0.001, HF-NL
+**+0.034**, LIVE **+0.055**, KADID +0.008, TID **+0.043**); its one real loss
+is CSIQ (−0.029).
 
 ### 4.3 Against the ssim2 floor
 
@@ -459,9 +492,12 @@ within 0.019 CID22 and 0.006 imazen26 of shipped B, *beats* B on KonJND
 (+0.017) and LIVE (+0.062), ties ssim2 on LIVE/CSIQ/KADID and is 0.058 ahead
 of ssim2 on KonJND — while its cheapest fold request is `v1_only + Peaks`, the
 smallest walk the crate can do and (§4.4) half the per-thread hot set of what
-`score()` runs today. Its one clear loss is **HF-NL (0.295 vs B's 0.350 and
-the 944 MLP's 0.694)**, which is the near-lossless zone the project has
-repeatedly named as the weak spot and as where product decisions live.
+`score()` runs today. Its apparent loss is **pooled HF-NL (0.295 vs B's 0.350 and the 944 MLP's
+0.694)** — but §4.2b shows that gap is cross-image scale, not ranking: **within
+reference ADD156 is 0.799 on HF-NL, ahead of B's 0.765 and behind only the 944
+MLP's 0.810.** For the stated product — a dial the encoder walks per image —
+the within-image number is the one that governs, and on it the basic-only class
+matches or beats shipped B on seven of eight corpora.
 
 **Keep the 944 MLP as the quality reference.** It is the only class at or above
 ssim2 on every human corpus, and it is the only one that is genuinely strong on
@@ -480,14 +516,17 @@ essentially nothing from the 372 block it forces the walk to compute.
 Zero-at-inference understates what a refit recovers, so each drop set below is
 paired with what a wave would have to do:
 
-* **basic-only, refit for HF-NL.** ADD156's gap to B is concentrated in HF-NL
-  (−0.055) and CID22 (−0.019). A wave that refits a 156-input additive head
-  with `hf_nearlossless` and the HF-NL-proxy slice weighted up is the direct
-  test; the sparsity-trained class already reaches 0.70-0.85 per-ref HF-NL
-  (board HF-NL panel), so the ceiling is plausibly higher than 0.295. Cost: one
-  `zensim_mlp_train` / `bake_dial_refit fit-lasso` recipe on the existing
-  `f0..156` columns — **no new extraction**, every canonical root already
-  carries them.
+* **basic-only, refit for the pooled tails.** ADD156's real gaps to B are
+  POOLED HF-NL (−0.055) and CID22 (−0.019); its within-reference numbers are
+  already level or better (§4.2b), so what a refit has to fix is cross-image
+  calibration, not ranking — which is the dial/spline half of the pipeline
+  (`bake_dial_refit`) at least as much as the head. A wave that refits a
+  156-input additive head with `hf_nearlossless` weighted up and re-anchors the
+  output spline is the direct test. Cost: one `zensim_mlp_train` /
+  `bake_dial_refit fit-lasso` recipe over the existing `f0..156` columns —
+  **no new extraction**, every canonical root already carries them. This is
+  the cheapest wave on this list by a wide margin and it is the one to run
+  first.
 * **W-LIN 7b without v1-372.** The blend's own numbers say the block is worth
   −0.027 CID22 to it; a refit on `f372..944` alone would recover part of that
   by redistributing onto v2 slots it already uses. Needs the `fold_v1` lever
