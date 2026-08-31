@@ -454,6 +454,9 @@ mod skip_policy_tests {
     /// stated as a fact about the bakes rather than as an intention.
     #[test]
     fn shipped_profiles_read_the_pool_block_so_skipping_is_a_no_op() {
+        // A one-element list today; it exists so a second shipped profile is a
+        // one-line addition rather than a copy-paste of the body.
+        #[allow(clippy::single_element_loop)]
         for p in [ZensimProfile::B] {
             let (params, config) = cfg_for(p);
             assert_eq!(

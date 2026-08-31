@@ -378,6 +378,7 @@ impl ProfileParams {
     /// classifier. Used by the fold engine's per-profile weight-skipping to
     /// take the UNION of what the profile actually reads — missing one would
     /// silently skip a family a live consumer still looks at.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
     pub(crate) fn scoring_bake_bytes(&self) -> impl Iterator<Item = &'static [u8]> + '_ {
         [
             self.mlp_bytes,

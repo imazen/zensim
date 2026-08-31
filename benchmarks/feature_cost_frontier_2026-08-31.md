@@ -55,16 +55,22 @@ also carries the v2 planes, which the fold-footprint lane prices separately).
 <!--DT_BEGIN-->
 | model class | example | required families | ms 576²/1152²/2304² @1T | @8T | @16T | WS/thr (W=2304) | CID22 | KonJND | nonphoto | imazen26 | HF-NL pooled / per-ref | vs ssim2 (human corpora) | to ship |
 |---|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|
-| basic-only | ADD156 | basic | 6.41 / 25.3 / 122.0 | 1.33 / 5.28 / 29.3 | 2.00 / 6.98 / 31.0 | 2.21 MiB | 0.8632 | 0.5363 | 0.8453 | 0.8546 | 0.295 / **0.799** | ties on LIVE/CSIQ/KADID, −0.026 CID22, **+0.058 KonJND** | a profile slot + a ship call — **no retrain, no era**; the skip already fires |
-| sparse 372 linear | **shipped B** | basic + peaks + **masked + IW** | 8.72 / 36.0 / 170.0 | 1.88 / 8.99 / 53.6 | 2.63 / 9.94 / 45.3 | 4.43 MiB | 0.8821 | 0.5198 | 0.8498 | 0.8603 | 0.350 / **0.765** | +0.030 CSIQ, −0.061 LIVE, −0.067 TID | nothing to drop |
-| W-LIN 7b blend | Q7b g0.20 | all of v1-372 + v2-348 + append-204 | 15.1 / 62.0 / 354.0 | 4.51 / 22.8 / 124.6 | 6.07 / 25.1 / 118.3 | ≥4.43 MiB | 0.8588 | 0.5118 | 0.8778 | 0.8873 | 0.406 / **0.756** | below on all six (LIVE −0.147) | a retrain + the `fold_v1` lever (§6.4) to cash its dead v1-372 |
-| 944 MLP | C purity944 | basic + v2-348 + append-204 (**no pool block**) | 12.8 / 52.0 / 312.0 | 3.91 / 17.7 / 101.4 | 6.09 / 21.6 / 101.5 | ≥4.43 MiB | 0.8927 | 0.5006 | 0.9277 | 0.9313 | 0.694 / **0.810** | **at or above on all six** | **nothing** — its bake reads 0/216 pool lines, so the shipped skip is exact |
+| basic-only | ADD156 | basic | 7.30 / 28.6 / 123.5 | 3.20 / 9.80 / 37.3 | 3.40 / 8.20 / 34.7 | 2.21 MiB | 0.8632 | 0.5363 | 0.8453 | 0.8546 | 0.295 / **0.799** | ties on LIVE/CSIQ/KADID, −0.026 CID22, **+0.058 KonJND** | a profile slot + a ship call — **no retrain, no era**; the skip already fires |
+| sparse 372 linear | **shipped B** | basic + peaks + **masked + IW** | 9.70 / 38.4 / 167.7 | 3.30 / 12.7 / 60.3 | 3.70 / 11.1 / 50.0 | 4.43 MiB | 0.8821 | 0.5198 | 0.8498 | 0.8603 | 0.350 / **0.765** | +0.030 CSIQ, −0.061 LIVE, −0.067 TID | nothing to drop |
+| W-LIN 7b blend | Q7b g0.20 | all of v1-372 + v2-348 + append-204 | 17.1 / 77.3 / 327.0 | 8.30 / 29.6 / 128.9 | 8.80 / 27.9 / 123.9 | ≥4.43 MiB | 0.8588 | 0.5118 | 0.8778 | 0.8873 | 0.406 / **0.756** | below on all six (LIVE −0.147) | a retrain + the `fold_v1` lever (§6.4) to cash its dead v1-372 |
+| 944 MLP | C purity944 | basic + v2-348 + append-204 (**no pool block**) | 14.9 / 66.7 / 279.6 | 6.40 / 28.4 / 110.1 | 8.20 / 25.4 / 123.0 | ≥4.43 MiB | 0.8927 | 0.5006 | 0.9277 | 0.9313 | 0.694 / **0.810** | **at or above on all six** | **nothing** — its bake reads 0/216 pool lines, so the shipped skip is exact |
 <!--DT_END-->
 
 **Speed, up front — the ~2× exists, and it is a class choice.** At 2304², the
 basic-only class's walk against the others:
 
 <!--HD_BEGIN-->
+| | 1T | 8T | 16T |
+|---|---:|---:|---:|
+| vs the W-LIN 7b blend | **2.65×** | **3.46×** | **3.57×** |
+| vs the 944 MLP | **2.26×** | **2.95×** | **3.54×** |
+| vs shipped B's fold walk | **1.36×** | **1.62×** | **1.44×** |
+| vs shipped B's walk **today** (buffered) | **1.60×** | **0.98×** | **1.12×** |
 <!--HD_END-->
 
 **Against the two 944 classes the gap holds at every thread count** (3-4×), and
@@ -270,6 +276,33 @@ buffer. Their `f0..156` slots are bit-identical by transitivity
 `folded_peaks_mode_is_pure_compute_skipping` gives `Peaks ≡ Full`).
 
 <!--MS_BEGIN-->
+**zenbench** (the canonical instrument — arms interleaved in ONE process, so
+box drift cancels within a round). Mean ms. **Every group ran 3 rounds**, not
+the 25 the config asks for: this run used `ZEN_XP_WALL_S=90` to keep the shared
+exclusive lock short (another lane had held it for hours), and 90 s per group
+across 7 arms is 3 rounds. Three rounds is thin — which is exactly why the
+second harness below exists and why the two are compared arm by arm.
+
+| arm | 576² 1T | 8T | 16T | 1152² 1T | 8T | 16T | 2304² 1T | 8T | 16T |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `buf_v1_228` | 6.90 | 2.00 | 2.00 | 33.9 | 7.60 | 6.20 | 138.6 | 29.5 | 24.5 |
+| `buf_v1_372` | 10.5 | 2.60 | 2.50 | 48.4 | 10.6 | 9.40 | 197.2 | 36.6 | 39.0 |
+| `fold156_basic` | 6.50 | 3.00 | 4.10 | 30.8 | 9.70 | 8.00 | 128.8 | 39.5 | 40.5 |
+| `fold228_peaks` | 7.30 | 3.20 | 3.40 | 28.6 | 9.80 | 8.20 | 123.5 | 37.3 | 34.7 |
+| `fold372_full` | 9.70 | 3.30 | 3.70 | 38.4 | 12.7 | 11.1 | 167.7 | 60.3 | 50.0 |
+| `fold944_off` | 14.9 | 6.40 | 8.20 | 66.7 | 28.4 | 25.4 | 279.6 | 110.1 | 123.0 |
+| `fold944_full` | 17.1 | 8.30 | 8.80 | 77.3 | 29.6 | 27.9 | 327.0 | 128.9 | 123.9 |
+
+Rounds per group — 576²/1T: 3r · 576²/8T: 3r · 576²/16T: 3r · 1152²/1T: 3r · 1152²/8T: 3r · 1152²/16T: 3r · 2304²/1T: 3r · 2304²/8T: 3r · 2304²/16T: 3r
+
+**A second, independent harness** (`ms_roundrobin.sh`, committed beside this
+note): the bench binary's single-arm loop with a two-point subtraction
+`(t(N) − t(1))/(N−1)` removing process start, `test_pair` construction and
+first-touch faults, arms visited round-robin, 5 rounds, **median** reported,
+`taskset`-pinned. It was built because zenbench's exclusive lock was held for
+hours by another lane, and it is kept because two instruments agreeing is
+worth more than one:
+
 | arm | 576² 1T | 8T | 16T | 1152² 1T | 8T | 16T | 2304² 1T | 8T | 16T |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | `buf_v1_228` | 6.67 | 1.43 | 1.73 | 28.7 | 5.91 | 6.04 | 146.0 | 29.3 | 26.3 |
@@ -280,41 +313,37 @@ buffer. Their `f0..156` slots are bit-identical by transitivity
 | `fold944_off` | 12.8 | 3.91 | 6.09 | 52.0 | 17.7 | 21.6 | 312.0 | 101.4 | 101.5 |
 | `fold944_full` | 15.1 | 4.51 | 6.07 | 62.0 | 22.8 | 25.1 | 354.0 | 124.6 | 118.3 |
 
-Marginal cost of the masked/IW pass group (`fold372_full − fold228_peaks`) — the ONLY separable family boundary inside `f0..372`:
+**Where they agree and where they do not (2304²/1T):**
+
+| arm | zenbench | round-robin | Δ |
+|---|---:|---:|---:|
+| `buf_v1_228` | 138.6 | 146.0 | +5 % |
+| `buf_v1_372` | 197.2 | 200.0 | +1 % |
+| `fold156_basic` | 128.8 | 188.0 | +46 % |
+| `fold228_peaks` | 123.5 | 122.0 | -1 % |
+| `fold372_full` | 167.7 | 170.0 | +1 % |
+| `fold944_off` | 279.6 | 312.0 | +12 % |
+| `fold944_full` | 327.0 | 354.0 | +8 % |
+
+Five of seven agree to ≤ 10 %. The outlier is **`fold156_basic`**, and the
+reason is instructive: `V1PoolsMode::Off` is the one arm that allocates and
+first-touches four STRIP-wide phase-A H planes per walk, so a 6-iteration loop
+amortises that over far fewer iterations than zenbench's warm round does.
+**zenbench is the number to use for it**, and it revises this lane's earlier
+reading of the `Off`-vs-`Peaks` gap down from ~1.5× to ~1.04× (§5.2 says why
+the policy still never returns `Off`).
+
+Marginal cost of the masked/IW pass group (`fold372_full − fold228_peaks`) — the ONLY separable family boundary inside `f0..372` — zenbench:
 
 | | 576² 1T | 8T | 16T | 1152² 1T | 8T | 16T | 2304² 1T | 8T | 16T |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **delta** | +2.31 (36 %) | +0.55 (42 %) | +0.63 (31 %) | +10.67 (42 %) | +3.71 (70 %) | +2.96 (42 %) | +48.00 (39 %) | +24.24 (83 %) | +14.24 (46 %) |
+| **masked+IW** | +2.40 (33 %) | +0.10 (3 %) | +0.30 (9 %) | +9.80 (34 %) | +2.90 (30 %) | +2.90 (35 %) | +44.20 (36 %) | +23.00 (62 %) | +15.30 (44 %) |
 
-Marginal cost of the v2-348 + append-204 blocks (`fold944_full − fold372_full`):
+Marginal cost of v2-348 + append-204 (`fold944_full − fold372_full`) — zenbench:
 
 | | 576² 1T | 8T | 16T | 1152² 1T | 8T | 16T | 2304² 1T | 8T | 16T |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **delta** | +6.4 (74 %) | +2.6 (140 %) | +3.4 (130 %) | +26.0 (72 %) | +13.8 (154 %) | +15.2 (153 %) | +184.0 (108 %) | +71.0 (133 %) | +73.1 (161 %) |
-
-**Conditions.** Two-point subtraction `(t(N) − t(1)) / (N−1)` over the bench
-binary's single-arm loop (`ZEN_XP_RSS`), which removes process start, the
-`test_pair` construction and first-touch page faults. Arms are visited
-ROUND-ROBIN, 5 rounds, median reported; `N` is raised 10× for the 8T/16T
-passes so a 10 ms clock still resolves a few-ms arm. Pinned with `taskset`
-(1T: one core; 8T: cores 8-15; 16T: cores 8-23), `nice -n19 ionice -c3`,
-**while another lane held zenbench's exclusive lock for a multi-hour paired
-A/B**. This is therefore NOT the locked `extract_paths_bench` group (which
-stays queued behind that lane): it is the same arms measured with a coarser
-instrument that does not jump the queue. Box load during the runs was
-4.4-6.5 of 28 cores.
-
-Round-to-round spread, `(max − min) / median`, worst cell per arm:
-
-| arm | worst spread | where |
-|---|---:|---|
-| `buf_v1_228` | 26.6 % | 1152²/8T |
-| `buf_v1_372` | 20.0 % | 1152²/16T |
-| `fold156_basic` | 60.0 % | 576²/16T |
-| `fold228_peaks` | 17.0 % | 576²/8T |
-| `fold372_full` | 28.0 % | 1152²/8T |
-| `fold944_off` | 12.8 % | 1152²/1T |
-| `fold944_full` | 7.8 % | 576²/16T |
+| **v2-348 + append** | +7.4 (76 %) | +5.0 (152 %) | +5.1 (138 %) | +38.9 (101 %) | +16.9 (133 %) | +16.8 (151 %) | +159.3 (95 %) | +68.6 (114 %) | +73.9 (148 %) |
 <!--MS_END-->
 
 **Cross-check against a different lane's different harness.** The
@@ -653,8 +682,8 @@ no Pareto-dominated family in shipped B, and the honest answer to the literal
 question is that B's 95-of-372 read set is *not* a 74 % saving waiting to be
 taken.
 
-And the price it is paying for that: the masked/IW pass group is **+2.3 ms at
-576², +10.7 ms at 1152², +48 ms at 2304²** (1T) — **33-42 %** on top of the
+And the price it is paying for that: the masked/IW pass group is **+2.4 ms at
+576², +9.8 ms at 1152², +44.2 ms at 2304²** (1T) — **33-36 %** on top of the
 peaks-only walk (§3.1). That is the honest shape of the trade for B: a third
 of the walk for 0.40 CID22.
 
@@ -668,8 +697,9 @@ of the walk for 0.40 CID22.
 | peaks (`f156..228`) | anyone | −0.038 CID22 / −0.311 KonJND on B | **never worth doing** — it saves zero compute |
 
 and the biggest one of all, which is a *class* choice rather than a family
-choice: **v2-348 + append-204** costs **+72-108 % on top of the whole 372 walk**
-(§3.1) and is what separates a 15 ms/576² model from a 6 ms one.
+choice: **v2-348 + append-204** costs **+76-101 % on top of the whole 372 walk**
+at 1 thread and **+114-152 % at 8-16** (§3.1) — it is what separates a
+17 ms/576² model from a 7 ms one.
 
 ### 6.2 The model-class recommendation
 

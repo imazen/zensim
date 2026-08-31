@@ -1235,6 +1235,8 @@ pub struct Zensim {
     /// skipped slots at `0.0` in [`ZensimResult::features`]. The SCORE and
     /// `raw_distance` are bit-identical either way, by construction: a slot
     /// is only skipped when every consumer's weight on it is exactly zero.
+    /// Read only by the `feature-regime-v2`-gated fold engine.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
     pub(crate) skip_unread_pools: bool,
 }
 

@@ -13243,12 +13243,12 @@ pub(crate) mod tests {
                         );
                     }
                     // Skipped block: exactly zero, and finite.
-                    for i in 228..372 {
+                    for (i, &v) in fp[228..372].iter().enumerate() {
                         assert_eq!(
-                            fp[i].to_bits(),
+                            v.to_bits(),
                             0.0f64.to_bits(),
-                            "{w}x{h} {tag} par={parallel}: skipped slot {i} is {:e}, not +0.0",
-                            fp[i]
+                            "{w}x{h} {tag} par={parallel}: skipped slot {} is {v:e}, not +0.0",
+                            228 + i
                         );
                     }
                     // The peak block must actually carry values — a mode that

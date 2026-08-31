@@ -45,4 +45,9 @@
 // or load MLP models should depend on `zenpredict` directly. We
 // re-export here only what `zensim::metric` and `zensim::profile`
 // actually consume.
-pub(crate) use zenpredict::{Model, Predictor, WeightStorage, f16_bits_to_f32};
+pub(crate) use zenpredict::{Model, Predictor};
+/// Layer-weight readers — used only by the fold engine's per-profile
+/// weight-skipping (`feature-regime-v2`), so re-exported under that gate to
+/// keep a default build free of unused imports.
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) use zenpredict::{WeightStorage, f16_bits_to_f32};
