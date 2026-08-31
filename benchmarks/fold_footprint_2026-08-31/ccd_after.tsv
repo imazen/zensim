@@ -1,0 +1,17 @@
+arm	ccd	n	iters	wall_s	throughput	speedup
+score_fold	0	1	10	1.797	5.564	1.000
+score_fold	0	2	10	1.826	10.954	1.969
+score_fold	0	4	10	1.934	20.687	3.718
+score_fold	0	8	10	2.458	32.544	5.849
+score_fold	1	1	10	1.801	5.553	1.000
+score_fold	1	2	10	1.917	10.431	1.879
+score_fold	1	4	10	2.126	18.811	3.388
+score_fold	1	8	10	3.177	25.184	4.535
+score_buffered	0	1	10	2.151	4.648	1.000
+score_buffered	0	2	10	2.220	9.009	1.938
+score_buffered	0	4	10	2.275	17.584	3.783
+score_buffered	0	8	10	2.498	32.030	6.891
+score_buffered	1	1	10	2.094	4.775	1.000
+score_buffered	1	2	10	2.183	9.160	1.918
+score_buffered	1	4	10	2.309	17.324	3.628
+score_buffered	1	8	10	2.532	31.591	6.616

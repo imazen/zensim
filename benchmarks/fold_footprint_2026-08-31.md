@@ -16,6 +16,14 @@ thread. The fold pre-allocated a `FoldPoolScratch` per *(channel × band slot)* 
 `ScratchV2Strip` sets of which a `v1_only` score writes two planes**. At one
 thread that is 12 band buffers against buffered's 1, on identical work.
 
+**What it was worth, beyond the bytes:** the predecessor read this box's
+N-independent-process saturation ceiling — **3.5× for the fold against 10.9×
+for buffered** — as the machine's own bound, and concluded there was no
+scheduling left to find. It was the fold's own footprint. The same test on the
+same box, pinned per CCD, reproduces **3.38×/3.33×** before this lane and reaches
+**5.85×/4.54×** after it: **+80 % throughput at 8 processes on the 96 MiB CCD**,
+from a change that computes nothing differently (§9.4).
+
 **What shipped:** three byte-neutral fixes, each gated by the existing
 bit-identity suite. The fold's working set drops **55–57 % at 1 thread** and
 **9–19 % at 8/16 threads**, and the RSS crossover moves from **~3.2 MP down to
@@ -646,18 +654,32 @@ touches its 7 `ScaleBuffers` planes plus the same 2 raw windows — `1,512·W`.
 | 4096 | 7.88 MiB | 5.91 MiB | 63.0 MiB | 47.2 MiB |
 | 8192 | 15.75 MiB | 11.81 MiB | 126.0 MiB | 94.5 MiB |
 
+Streamed traffic is a separate budget and it runs the other way: buffered pushes
+`24·W·H` bytes of whole-image plane through DRAM per compare (127 MB at 2304²)
+plus the cascade's re-reads, while the fold's rolling window is
+`24·Σ W_s·cap_s` (37 MB before this lane, 11.6 MB at 1 thread after) and is
+re-read out of L2/L3. **That is the whole trade in one line: the fold buys less
+DRAM traffic with more cache pressure**, which is why it wins serially once the
+pressure drops (§7) and still loses at 16 threads on a large image.
+
 **At 2304² — the size the ceiling was measured at — 8 threads on CCD1 need
 35.4 MiB for the fold and 26.6 MiB for buffered against a 32 MiB L3. The
 threshold falls exactly between them.** That is an arithmetic coincidence
 precise enough to be worth testing rather than asserting, and §9.4 is the test.
 
-**This lane's shipped fixes do NOT move this number**, and saying so is the
-point: a band task touches ONE pool slot whether the walk keeps 3 of them or 12,
-so `band_slots_for` changes the walk's total footprint and its cross-strip
-reuse, not its per-task hot set. `advance_rows_for` shrinks a STREAMED term
-(each rolling row is written once and read a few times) rather than a resident
-one. What they bought is real and large (§6, §7) — it is just a different
-quantity from the one that bounds thread scaling.
+**This lane's shipped fixes do not move THIS number** — a band task touches ONE
+pool slot whether the walk keeps 3 of them or 12 — which is why the 16-thread
+2304² ratio in §7.2 barely moves. But the per-task hot set is not the only
+cache-resident quantity: a *process* cycles through **all** the slots it keeps,
+strip after strip, and that set is `slots · 3 ch · 10 · 42 · W · 4`:
+
+| | per process at 2304² | × 8 processes | vs CCD0 96 MiB | vs CCD1 32 MiB |
+|---|---:|---:|---|---|
+| before — 4 slots × 3 ch, slot 0 `Vec`-doubled (`24,000·W`) | 52.7 MiB | 422 MiB | over | over |
+| after at 1 thread — 1 slot × 3 ch (`5,040·W`) | 11.1 MiB | 88.6 MiB | **fits** | over |
+
+That is the quantity the N-process saturation test responds to, and §9.4
+measures it doing exactly this.
 
 ### 9.3 Column tiling is the only lever that reaches the budget — and it is not this lane's to pull
 
@@ -717,10 +739,59 @@ rather than paid for twice:
 
 `fold_footprint_2026-08-31/ccd_saturation.sh` runs the predecessor's
 N-independent-process saturation test **pinned per CCD** (`taskset -c 0-7` vs
-`8-15`). If the fold's ceiling is an L3-per-thread effect it must saturate
-EARLIER on CCD1's 32 MiB than on CCD0's 96 MiB; if the two CCDs behave the same,
-the ceiling is DRAM bandwidth and column tiling buys far less than §9.3
-predicts. Results below.
+`8-15`), at 2304², 10 compares per process, with an untimed warm pass per cell.
+If the fold's ceiling is an L3-capacity effect it must saturate EARLIER on
+CCD1's 32 MiB than on CCD0's 96 MiB; if the two CCDs behave the same, the
+ceiling is DRAM bandwidth and column tiling buys far less than §9.3 predicts.
+
+Three binaries, so the two shipped levers separate instead of being inferred:
+**before** (pre-lane), **slots-only** (the pool/slot/strip fixes with the
+advance pinned back at 256 — a throwaway ablation build), and **after**.
+
+| arm | binary | CCD0 n=8 | CCD1 n=8 | CCD0 thr | CCD1 thr |
+|---|---|---:|---:|---:|---:|
+| `score_fold` | before | **3.38×** | **3.33×** | 18.09 | 16.12 |
+| `score_fold` | slots-only | 5.52× | 4.66× | 30.88 | 25.14 |
+| `score_fold` | **after** | **5.85×** | **4.54×** | 32.54 | 25.18 |
+| `score_buffered` *(control)* | before | 6.52× | 6.70× | 31.28 | 32.17 |
+| `score_buffered` *(control)* | after | 6.89× | 6.62× | 32.03 | 31.59 |
+
+Three things fall out, and none of them was assumed:
+
+1. **The predecessor's 3.5× ceiling is reproduced exactly — and it was NOT the
+   machine's bound.** `score_fold` before this lane saturates at **3.38× / 3.33×**
+   against §4's recorded 3.5×, and the same test on the same box after the lane
+   reaches **5.85× / 4.54×** — **+80 % throughput on CCD0** (18.09 → 32.54 cmp/s).
+   The MT note's reading of that number as "a property of the fold's memory
+   behaviour, not of its schedule" was right; its conclusion that the
+   implementation therefore sat at 94–108 % of the box's own bound was reading
+   the fold's own footprint as the machine's.
+2. **The ceiling is L3 capacity, and the arithmetic predicts which side it
+   falls on.** BEFORE, the fold is CCD-INSENSITIVE (3.38 vs 3.33, 1.5 % apart):
+   at 52.7 MiB of band scratch per process, 8 processes want 422 MiB and no CCD
+   helps. AFTER, it becomes CCD-SENSITIVE (5.85 vs 4.54, **22 % apart**): at
+   11.1 MiB per process, 8 processes want 88.6 MiB, which **fits CCD0's 96 MiB
+   and does not fit CCD1's 32 MiB**. Buffered is CCD-insensitive in every run
+   (≤ 4 % apart, both directions) because 8 × 3.3 MiB fits both. A
+   DRAM-bandwidth ceiling cannot produce that pattern; an L3-capacity one
+   produces exactly it.
+3. **`band_slots_for` is the lever; `advance_rows_for` is a footprint win with
+   little throughput in it.** The slots-only ablation already reaches 5.52× /
+   4.66× — essentially the whole gain — and adding the advance change moves
+   CCD0 5.52 → 5.85× and CCD1 4.66 → 4.54× (i.e. nothing, or slightly
+   negative). That is the expected split: the slots are a tightly-reused
+   resident set, the advance is a streamed one.
+
+**What this says about §9.3.** The fold now fits the 96 MiB CCD and not the
+32 MiB one at 2304²/8 processes; at 4096² it fits neither
+(`8 × 5,040·W` = 157 MiB). Column tiling is what makes that
+term width-independent, and the measured shape of the ceiling — a 22 % gap that
+tracks L3 capacity — is the evidence that closing it converts into throughput.
+
+**Load conditions:** all three sweeps ran back to back 07:27–07:33 UTC at box
+load 1.3–3.7 with no other bench holding zenbench's lock, `nice -n19 ionice -c3`,
+warm pass per cell discarded. The buffered control reproduces across the two
+sweeps to within 3 %, which is the noise floor these numbers should be read at.
 
 ---
 
