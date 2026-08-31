@@ -21,9 +21,22 @@ HDR-route-clean so a later HDR append lands on era-2 as its base.
 
 ## 1. What era-1 does today, and why it blocks perf
 
+> **CORRECTION (2026-08-31, from the v2-block lane's wall-clock decomposition
+> — `benchmarks/v2_block_cost_2026-08-31.md` §7).** The 23.2 % below is a
+> **callgrind instruction count on the `v3` tier**, and callgrind masks
+> AVX-512 out of CPUID, so it can never execute the shipping path: `POOL_SIMD`
+> is `v4x`-only, and the Ir profile therefore prices the *scalar-pool* form of
+> this kernel. Measured by wall clock on the shipping tier, `dense_block_kernel`
+> is **13.5 % of the v2 block and 7.3 % of the 944 walk** at 2304², and every
+> figure derived from the 23.2 % — including the **1.17× @8T / 1.23× @16T**
+> Amdahl bound two paragraphs down — is scoped to `v3`, not to what ships.
+> Keep reading §1 for the *structural* argument (why the kernel cannot be split
+> bit-exactly), which is unaffected; discard the *magnitudes*. §22 is where
+> that correction sent this lane next.
+
 `dense_block_kernel_generic` (`feature_v2.rs:2190`) is **23.2 % of the 944-full
-walk** (125,098,677 of 540,211,635 net Ir at 576²) and gets 3-way channel
-parallelism only. It cannot be split further without changing bytes, because
+walk** (125,098,677 of 540,211,635 net Ir at 576², `v3` tier — see the
+correction above) and gets 3-way channel parallelism only. It cannot be split further without changing bytes, because
 two paths accumulate into the f64 accumulator **per pixel, across row
 boundaries**:
 
@@ -1459,3 +1472,179 @@ declared bounds per kernel; determinism and thread-invariance by construction;
 cross-tier and (where verifiable) cross-vendor bit-identity *within* the era;
 the vendor probe on dev + i134; blast radius registered, not launched; HDR-route
 cleanliness; and the flip blocked until parity and perf numbers exist.
+
+---
+
+## 22. Band-local phase A: MEASURED AND FALSIFIED at every band height
+
+The v2-block lane's hand-off named this the era's biggest measured serial
+prize — "**−65.8 ms: the block 1.49×, the whole walk 367.7 → ~302 ms
+(1.22×)**", with ~275 ms (1.34×) projected. It was measured **by proxy** (the
+v1 fold's band-local self-blur against phase A's strip-wide H blur, at
+2.00 vs 4.94 ns/px). Built and measured directly, **it loses at every band
+height tested**, and the reason is arithmetic that the proxy could not show.
+
+### 22.1 What was built
+
+`stream_phase_ab_banded` (`feature_v2.rs`) runs the phase-A plane chain and
+the phase-B kernels together over one band of `ZENSIM_BAND_ROWS` rows at a
+time, out of a `width * (B + 2·HALO_P)` scratch, instead of phase A
+materialising ~13 strip-wide planes that phase B then re-reads. The band
+window is exact, not conservative: `activity(y) ← abs_src(y ± R) ← mu1(y ± R)
+← mu1_h(y ± 2R)` and `HALO_P = 2·BLUR_RADIUS`, so `± HALO_P` is precisely the
+closure of the chain; the v1 fold's own `V1_BAND_OVERLAP = 5 ≤ HALO_P` and the
+gradient kernel's ±1 row both fit inside it. `wide_h` is always
+`strip_h + 2·HALO_P` (the producer mirror-gathers the halo even at the plane
+edges), so the window never clips and every band is exactly `B + 2·HALO_P`
+rows.
+
+**The plumbing is proven, not asserted.** At `B = STRIP_ROWS` the band loop
+degenerates to one band per strip — the same decomposition the strip-wide path
+performs — and it reproduces the strip-wide 956-feature vector **bit-for-bit,
+956 of 956 slots** at 1152². That is the control: any divergence at smaller
+`B` is the band split, not a plumbing bug.
+
+### 22.2 The measurement
+
+2304², 1T, `944full`, CCD0-pinned (`taskset -c 0-7,16-23`), **min of 15 walks**
+per process, three interleaved rounds (`base`, `b32`, `b64`, `b128` in order,
+repeated) — see §22.4 for why anything less is noise.
+
+| shape | halo redundancy | round 1 | round 2 | round 3 | median | vs base |
+|---|---:|---:|---:|---:|---:|---:|
+| strip-wide (base) | 1.156× | 335.28 | 332.71 | 333.82 | **333.82** | — |
+| banded `B=32` | 1.625× | 384.06 | 415.02 | 387.93 | **387.93** | **+16.2 %** |
+| banded `B=64` | 1.31× | 350.78 | 378.51 | 375.39 | **375.39** | **+12.4 %** |
+| banded `B=128` | 1.156× | 334.61 | 334.97 | 333.25 | **334.61** | +0.2 % |
+
+`B=128` is the control and lands on the baseline, as it must. **Every band
+height that actually bands is worse**, monotonically in the halo redundancy.
+
+Under `ZENSIM_FOLD_TIMING` (which perturbs the cache and compresses the
+spread) the phase attribution shows where it goes at `B=64`: `blur_h`
+**129.40 → 117.70 ms** — the band-local H blur *is* more efficient per unit
+work (129.40/1.156 = 111.9 vs 117.70/1.31 = 89.8, **1.25×**, the same
+direction the proxy reported at 1.40×) — but it is doing **13 % more work**,
+and `planesA` (41.12 → 40.24) and `planesApp` (18.65 → 20.01) do not improve
+at all. The efficiency gain is real and it is smaller than the tax.
+
+### 22.3 Why the proxy over-promised — the arithmetic the ns/px numbers hide
+
+The proxy compared the v1 fold's self-blur against phase A's strip-wide blur.
+Those two do not have the same closure:
+
+* the fold's self-blur produces **four H planes** and consumes them in the
+  same band, so it needs `± V1_BAND_OVERLAP = ± 5` rows → **42 rows for 32
+  kept, 1.31×**;
+* phase A's chain ends at `activity = blur(|src − blur(src)|)`, **two chained
+  blurs**, so it needs `± 2·BLUR_RADIUS = ± 10` → **52 rows for 32 kept,
+  1.625×**, and that redundancy applies to the V blurs and the activity and
+  `bs2` chains too, not only to H.
+
+So "make phase A band-local" costs 1.41× the plane work that the proxy's
+shape costs (1.625/1.156 against the strip form; 1.24× against the fold's own
+1.31×). At the per-unit efficiency actually available (1.25×), the trade is a
+wash at best — which is exactly the measured `B=64` row, and it gets worse as
+`B` shrinks.
+
+The second reason is footprint. The hand-off's target working set was
+**~1.2 MiB** — "~21 rows of H planes and ~11 of V planes … ≈ 130 rows ×
+width × 4 B". A 52-row band of the **13** planes the chain actually keeps is
+**676 plane-rows = 6.2 MiB at 2304**, five times that, so the band-local form
+never becomes L2-resident; it moves from *L3-and-DRAM* to *L3*. The 1.2 MiB
+figure belongs to the **rolling row window**, not to a band.
+
+### 22.4 And the rolling row window is predicted to lose, by an already-measured result
+
+The rolling window is the shape that gets both properties the band cannot:
+zero halo redundancy (each H row computed once) and the ~1.2 MiB footprint.
+It also **requires** the V blur to advance one row at a time across the whole
+plane, keeping one running sum per column in a `width`-sized array — which is
+precisely the **row-major running-sum V blur** the v2-block lane already built,
+proved bit-identical over 21 geometries × 3 radii, measured at **+9 % on
+`planesA` at its best tile size (47.71 → 52.13 ms)**, and reverted (L3). Its
+finding is the same mechanism that defeats the band: the column-major form
+keeps its accumulator **in a register** across all 148 rows, and any shape
+that round-trips that accumulator through memory pays more than the traversal
+saves.
+
+I did not rebuild it to re-derive that. **Both shapes that could deliver the
+hand-off's prize are now measured: the band directly (this section, three
+heights), and the rolling window's load-bearing component by the lane that
+tried it.** The prize as scoped is not there.
+
+### 22.5 Methodology, which is the transferable part
+
+The first three sweeps of this experiment said band-local **won by 6.6 %**,
+then that `B=128` won by 9.4 %, then that everything was a wash. All three
+were the same binary. Running configs in sequential blocks measures **drift**:
+unpinned, back-to-back medians on this workload span **329–415 ms for
+identical work** (±13 %). Two changes fixed it, and both were necessary:
+
+1. **Interleave the arms** (`base, b32, b64, b128` repeated), never
+   `base×N then b64×N`.
+2. **Report the MIN of many walks in one process**, not the median. The
+   machine can only make a walk slower, so the minimum is the estimator that
+   interference cannot inflate. Min-of-15 gave `base` = 335.28 / 332.71 /
+   333.82 across three rounds — **±0.4 %**, against ±13 % for the median of
+   the same runs.
+
+CCD pinning alone did **not** fix it (the 9950X3D's asymmetric L3 — 96 MiB on
+CCD0, 32 MiB on CCD1 — was the first suspect and pinned runs still spanned
+325–380 ms on medians). Pinning is retained because it removes one variable
+for free, but the estimator was the fix.
+
+**And then the estimator found the actual cause, which is worth more than the
+experiment that surfaced it.** Min-of-15 is stable *within* a process
+(min 359.00 against median 359.61) and still moves *between* processes
+(334.68, 354.42, 356.00 on three consecutive runs of one binary). Per-process,
+not per-iteration, points at the address space — and it is:
+
+| | run 1 | run 2 | run 3 | run 4 | spread |
+|---|---:|---:|---:|---:|---:|
+| **ASLR off** (`setarch -R`) | 358.93 | 358.76 | 359.16 | 358.42 | **±0.1 %** |
+| **ASLR on** | 335.62 | 332.04 | 359.38 | 334.39 | **7.4 %** |
+
+2304², 1T, `944full`, CCD0-pinned, min of 15 walks each. The ASLR-on column is
+not noisy — it is **bimodal**, landing on ~333 or ~359 and nothing between.
+That is a cache-conflict cliff: the ~13 strip-wide plane buffers are each
+`2304 × 148 × 4 B` = 1,363,968 B = **exactly 333 pages**, so they are
+allocated at a fixed relative stride and every one of them starts congruent
+mod 4096; whether the set they collectively land on conflicts is decided by
+the ASLR base. **The placement of these buffers is worth 7.4 % of the entire
+944 walk, and today it is left to chance on every process start.**
+
+Three consequences, all load-bearing:
+
+1. **Any 2304² perf number in this repo taken from a single process is ±7 %**
+   unless it was run under `setarch -R` or averaged over many process starts.
+   That includes numbers this lane and its siblings have published. The
+   *comparisons* survive when arms were interleaved across many processes
+   (§22.2's b32/b64 losses are 12–16 %, well outside it); single-process
+   before/after pairs do not.
+2. **`setarch -R` is now part of the measurement protocol here**, together
+   with min-of-N and interleaving.
+3. **It is also a lever.** 7.4 % of the walk is available for free, with no
+   byte change at all, if the plane buffers are placed deliberately instead of
+   landing wherever 13 same-sized mmaps land — §23.
+
+### 22.6 Disposition
+
+`stream_phase_ab_banded` and its `ZENSIM_BAND_LOCAL` / `ZENSIM_BAND_ROWS`
+knobs are **reverted** — a losing second implementation of the plane pipeline
+is a duplicate, and this repo's rule is to delete it rather than park it
+(the same call the v2-block lane made on its row-major V blur). What is kept
+is the instrument: `foldapp_stream_bigpair` gained `ZENSIM_BIGPAIR_TOGGLES`
+(`944full` / `924` / `372`), `ZENSIM_BIGPAIR_ITERS` (median + **min**),
+`ZENSIM_BIGPAIR_PARALLEL`, and `ZENSIM_BIGPAIR_DUMP` (all features with their
+`to_bits()`, which is how the `B=128` bit-identity control was run).
+
+**Where the plane pipeline can still be attacked, and why it is the other
+axis.** The halo tax is what killed row banding: 20 rows out of 32 is **62 %**
+redundancy. The same closure in the **column** direction is `± BLUR_RADIUS`,
+so a 256-wide column tile pays `266/256` = **4 %**, and a 512-wide tile 2 %.
+Column tiling is cheap exactly where row banding is expensive, and it cuts the
+H blur's working set — the doc's own diagnosis of the 3.69× degradation
+("16 rows × 6 planes × 2304 × 4 B = 884 KiB, which is the 1 MiB L2 on this
+part") — along the axis that appears in that product. That is where this lane
+goes next, and §22.2's estimator is what it will be judged on.

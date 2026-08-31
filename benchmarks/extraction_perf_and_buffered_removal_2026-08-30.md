@@ -295,10 +295,22 @@ rows = 32 + 2×5 overlap) *does* hit this tail.
 | **#3 per-band ±overlap activity recompute** | Not removable — v1 mirror-clamps the activity blur at its own strip edges, and reproducing that boundary behaviour is what makes the fold v1-exact. (Unchanged from the prior lane's finding.) |
 | **art-L4 weighted sums inside the fused V-blur kernel** | Still unshippable bit-exact, for the reason the prior lane established: the fused loop is column-group-major and folds into `f64` in that order, while `simd_ops::*` is row-major; moving the math changes the `f64` summation order and `f64` addition is not associative. Unchanged. |
 
+> **CORRECTION (2026-08-31): these Ir shares are `v3`-tier and do not price
+> the shipping path.** callgrind masks AVX-512 out of CPUID, so it can only
+> ever execute the `POOL_SIMD == false` (scalar-pool) form of this kernel,
+> which is not what runs on `v4x`. By wall clock on the shipping tier
+> (`benchmarks/v2_block_cost_2026-08-31.md` §2.1), `dense_block_kernel` is
+> **13.5 % of the v2 block and 7.3 % of the 944 walk** at 2304², not 22–26 %.
+> The *reasoning* below — why the kernel is not bit-exactly splittable, and
+> why that made it the wrong lever — is unaffected and was the right call for
+> a better reason than the one given. The **magnitudes** in §14.1–14.2,
+> including the 1.17× / 1.23× Amdahl bound, are `v3`-scoped: read them as an
+> upper bound on a tier we do not ship.
+
 The one genuinely new candidate this profile surfaces is
 `dense_block_kernel_entry` — **125,098,677 Ir, the single largest kernel in
-both fold arms (22–26 %)**, identical in both, i.e. pure v2/append cost that
-neither regime escapes. It was **not** attacked here, and on reading it that
+both fold arms (22–26 % of `v3` instructions; see the correction above)**,
+identical in both, i.e. pure v2/append cost that neither regime escapes. It was **not** attacked here, and on reading it that
 is the right call rather than a punt: it has already had two rounds of
 targeted work (the §A.14 register-pressure fix that scalarised the 22
 weighted-pool accumulators, and the 2026-07-21 `POOL_SIMD` re-vectorisation
@@ -1363,9 +1375,11 @@ not a restructure — it is a second output regime hiding inside the kernel.
 ### 14.2 The gain it would buy — bounded, and small
 
 `dense_block_kernel` is **125,098,677 Ir = 23.2 %** of the net 944-full walk
-at 576². Amdahl bound, with three deliberately optimistic assumptions (dense
-scales *perfectly*, everything else stays at its measured 3-way effective cap,
-and the restructure itself costs nothing):
+at 576² **on the `v3` tier** (7.3 % of the walk by wall clock on the shipping
+`v4x` tier — see the correction in §14.1). Amdahl bound, with three
+deliberately optimistic assumptions (dense scales *perfectly*, everything else
+stays at its measured 3-way effective cap, and the restructure itself costs
+nothing) — and therefore a bound on the **`v3`** walk, not the shipped one:
 
 | threads | now | dense perfect | **upper-bound gain** |
 |---|---:|---:|---:|
