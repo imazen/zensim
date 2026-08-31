@@ -412,6 +412,60 @@ fn fold_ref_cache_matches_independent_computes() {
     }
 }
 
+/// **The fold-MT lane's scratch-reuse gate.** `compute_with_ref_into` now
+/// routes to the fold and hands it the caller's `ZensimScratch`, so a fold
+/// ref-loop reuses its `V2Scratch` across compares instead of re-paying the
+/// first-touch page-fault commit on ~61 MB of strip planes every call.
+///
+/// Reuse cannot move a byte — every kernel fully overwrites the buffers it
+/// reads — but "cannot" is what a gate is for. Three claims, all `to_bits`:
+///
+/// 1. `compute_with_ref_into` with a REUSED scratch equals `compute_with_ref`
+///    (a fresh allocation per call) for every candidate in the loop.
+/// 2. It also equals a plain `compute`, so the routing did not quietly land
+///    on a different walk.
+/// 3. Reuse across DIFFERENT geometries in one scratch is safe (the scratch
+///    only ever grows), which is the shape a batch consumer actually has.
+#[test]
+fn fold_ref_scratch_reuse_is_bit_identical() {
+    for parallel in [false, true] {
+        let z = Zensim::new(ZensimProfile::codec_target())
+            .with_parallel(parallel)
+            .with_engine(ScoringEngine::Fold);
+        // ONE scratch across every geometry and every candidate — claim 3.
+        let mut scratch = zensim::ZensimScratch::new();
+        for &(w, h) in CELLS {
+            let (r, _) = pair(w, h);
+            let rs = RgbSlice::new(&r, w, h);
+            let precomputed = z.precompute_reference(&rs).expect("precompute");
+            for k in 0..4usize {
+                let mut d = common::generators::distort_block_artifacts(&r, w, h);
+                for (i, px) in d.iter_mut().enumerate() {
+                    if i % (3 + k) == 0 {
+                        px[k % 3] = px[k % 3].saturating_add(7 * (k as u8 + 1));
+                    }
+                }
+                let ds = RgbSlice::new(&d, w, h);
+                let fresh = z.compute_with_ref(&precomputed, &ds).expect("with_ref");
+                let reused = z
+                    .compute_with_ref_into(&precomputed, &ds, &mut scratch)
+                    .expect("with_ref_into");
+                assert_result_bit_identical(
+                    &format!("fold scratch reuse {w}x{h} cand{k} par={parallel}"),
+                    &fresh,
+                    &reused,
+                );
+                let direct = z.compute(&rs, &ds).expect("compute");
+                assert_result_bit_identical(
+                    &format!("fold scratch reuse vs direct {w}x{h} cand{k} par={parallel}"),
+                    &direct,
+                    &reused,
+                );
+            }
+        }
+    }
+}
+
 /// Cross-engine at the `compute_with_ref` entry. Features, score and
 /// `raw_distance` are bit-identical; `mean_offset` is the one field where the
 /// two engines' *ref-cached* forms genuinely differ, because buffered's

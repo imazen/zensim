@@ -1150,10 +1150,55 @@ pub(crate) fn convert_source_to_xyb_into_slices(
     #[allow(unused_variables)] parallel: bool,
     abs_row_offset: usize,
 ) {
+    convert_source_to_xyb_into_slices_chunked(
+        source,
+        p0,
+        p1,
+        p2,
+        padded_width,
+        parallel,
+        abs_row_offset,
+        DEFAULT_CONVERT_CHUNK_ROWS,
+    )
+}
+
+/// Rows per parallel chunk in [`convert_source_to_xyb_into_slices`]. The
+/// whole-image callers keep it: at 1152–4096 rows it already yields 18–64
+/// chunks, which is more than any pool needs.
+pub(crate) const DEFAULT_CONVERT_CHUNK_ROWS: usize = 64;
+
+/// [`convert_source_to_xyb_into_slices`] with the parallel chunk height under
+/// the caller's control.
+///
+/// **Byte-neutral in `chunk_rows`, and that is a gate not an argument**
+/// (`convert_chunking_is_byte_invariant`). A chunk is a ROW RANGE: the body
+/// reads `source.row_bytes(y)` for its own rows, converts them with the same
+/// per-pixel kernels, and writes its own rows of the output planes. Nothing
+/// accumulates across a chunk boundary, and `abs_row_offset + y` keeps the
+/// translucent-source noise background in the parent image's phase regardless
+/// of where the boundaries fall — which is the same property that lets the
+/// streaming producer convert in `ADVANCE_ROWS` slices at all.
+///
+/// The fold's [`crate::feature_v2_stream::StripPlaneProducer`] needs this:
+/// it only ever hands this function `ADVANCE_ROWS` (128) rows, so at the
+/// 64-row default a whole side is TWO chunks and the producer's front end
+/// caps at degree 2 (degree 4 with both sides concurrent) no matter how large
+/// the pool is. That was 23 % of the fold-backed score's 16-thread wall.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn convert_source_to_xyb_into_slices_chunked(
+    source: &impl ImageSource,
+    p0: &mut [f32],
+    p1: &mut [f32],
+    p2: &mut [f32],
+    padded_width: usize,
+    #[allow(unused_variables)] parallel: bool,
+    abs_row_offset: usize,
+    chunk_rows: usize,
+) {
     let width = source.width();
     let height = source.height();
 
-    let chunk_rows = 64;
+    let chunk_rows = chunk_rows.max(1);
     let p0_chunks: Vec<&mut [f32]> = p0.chunks_mut(chunk_rows * padded_width).collect();
     let p1_chunks: Vec<&mut [f32]> = p1.chunks_mut(chunk_rows * padded_width).collect();
     let p2_chunks: Vec<&mut [f32]> = p2.chunks_mut(chunk_rows * padded_width).collect();
@@ -2700,6 +2745,24 @@ fn process_scale_bands_into_accum(
 #[derive(Default)]
 pub struct ZensimScratch {
     pub(crate) dst_planes: [Vec<f32>; 3],
+    /// The FOLD engine's per-compare buffers, held across calls for exactly
+    /// the same reason `dst_planes` is (fold-MT lane).
+    ///
+    /// The fold-engine lane measured its ref-cached form saving 7–9 % against
+    /// buffered's 14–20 % and named the cause: `compute_fold_backed_with_ref`
+    /// built a fresh [`crate::feature_v2::V2Scratch`] per compare, so every
+    /// call re-paid the first-touch page-fault commit on three
+    /// `ScratchV2Strip` sets (15 planes each, `width × (STRIP_ROWS + 2·HALO_P)`
+    /// elements — ~61 MB at 2304 wide) plus the producer's rolling-plane pool.
+    /// Keeping it here closes that gap without a new public type: this is a
+    /// private field on the scratch the ref-loop API already takes.
+    ///
+    /// Cannot affect a byte: `V2Scratch` is buffer storage that every kernel
+    /// fully overwrites before reading, which
+    /// `fold_ref_scratch_reuse_is_bit_identical` pins by comparing a reused
+    /// scratch against a fresh one across a run of compares.
+    #[cfg(feature = "feature-regime-v2")]
+    pub(crate) v2: crate::feature_v2::V2Scratch,
 }
 
 impl ZensimScratch {
@@ -4738,6 +4801,91 @@ mod tests {
     use crate::metric::WEIGHTS;
     use crate::metric::compute_zensim_with_config;
     use crate::source::RgbSlice;
+
+    /// **`chunk_rows` is SEMANTICS, not a tuning knob — MEASURED, fold-MT
+    /// lane.** This test exists because the lane tried to raise the streaming
+    /// producer's conversion chunk height (its front end is capped at degree 2
+    /// by the 64-row default over `ADVANCE_ROWS` rows) and the byte-identity
+    /// gate caught it: at 97×51 into a 104-wide destination, chunk height 1
+    /// moves plane 0 index 200 from `0.7426108` to `0.7426113` — one ULP.
+    ///
+    /// The mechanism is the per-chunk `srgb_to_positive_xyb_planar_into` call:
+    /// it converts `rows * width` elements, and which of those elements lands
+    /// in the SIMD body versus the scalar tail depends on the buffer length.
+    /// The two disagree in the last bit, so a pixel's converted value depends
+    /// on the chunk it was in.
+    ///
+    /// What the shipped paths rely on, and why they are safe: every producer
+    /// chunk boundary falls at a global multiple of 64 rows (`ADVANCE_ROWS` is
+    /// a multiple of 64 and `hi0` advances by it), which is exactly where the
+    /// whole-image conversion cuts — so the streaming and materialised
+    /// conversions see identical buffers.
+    /// `producer_windows_byte_equal_materialized` is that end of it. The
+    /// producer may therefore only be given a chunk height that keeps that
+    /// alignment, and `ADVANCE_ROWS` may only be a multiple of 64.
+    ///
+    /// The assertion is deliberately two-sided: chunk 64 must reproduce the
+    /// default EXACTLY, and at least one other height must NOT — if the second
+    /// half ever fails, the per-pixel kernels became length-invariant and this
+    /// whole constraint can be lifted.
+    #[test]
+    fn convert_chunk_rows_is_semantics_not_a_knob() {
+        let mut diverged = 0usize;
+        for &(w, h, padded_w) in &[(64usize, 64usize, 64usize), (97, 51, 104), (7, 130, 7)] {
+            let img: Vec<[u8; 3]> = (0..w * h)
+                .map(|i| {
+                    [
+                        (i * 37 % 256) as u8,
+                        (i * 101 % 256) as u8,
+                        (i * 197 % 256) as u8,
+                    ]
+                })
+                .collect();
+            let src = RgbSlice::new(&img, w, h);
+            let n = padded_w * h;
+            let convert = |chunk: usize, parallel: bool| -> [Vec<f32>; 3] {
+                let mut out = [vec![0.0f32; n], vec![0.0; n], vec![0.0; n]];
+                let (a, rest) = out.split_at_mut(1);
+                let (b, c) = rest.split_at_mut(1);
+                convert_source_to_xyb_into_slices_chunked(
+                    &src,
+                    &mut a[0],
+                    &mut b[0],
+                    &mut c[0],
+                    padded_w,
+                    parallel,
+                    0,
+                    chunk,
+                );
+                out
+            };
+            let want = convert(DEFAULT_CONVERT_CHUNK_ROWS, false);
+            let bits = |v: &[Vec<f32>; 3]| -> Vec<u32> {
+                v.iter().flat_map(|p| p.iter().map(|x| x.to_bits())).collect()
+            };
+            let want_bits = bits(&want);
+            for &parallel in &[false, true] {
+                // The default height, on both arms, is the identity.
+                assert_eq!(
+                    bits(&convert(DEFAULT_CONVERT_CHUNK_ROWS, parallel)),
+                    want_bits,
+                    "{w}x{h} pad={padded_w} par={parallel}: the parallel arm must \
+                     match the serial one at the default chunk height"
+                );
+                for &chunk in &[1usize, 3, 8, 16, 17, 32, 128, 4096] {
+                    if bits(&convert(chunk, parallel)) != want_bits {
+                        diverged += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            diverged > 0,
+            "no swept chunk height moved a byte — if the per-pixel conversion \
+             kernels became length-invariant, the producer's CONVERT_CHUNK_ROWS \
+             constraint (and this test's doc comment) can be lifted"
+        );
+    }
 
     /// Public-API end-to-end test: `compute_streaming_strips_default`
     /// produces a score within 1% of `compute` on a 256×256 image.

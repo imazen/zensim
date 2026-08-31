@@ -111,18 +111,21 @@ fn rss_mode(arm: &str) {
     let (src, dst) = test_pair(size, size);
     let (buffered, fold) = engines();
     let z = match arm {
-        "score_buffered" | "feat_buffered" | "ref_buffered" => buffered,
-        "score_fold" | "feat_fold" | "ref_fold" => fold,
+        "score_buffered" | "feat_buffered" | "ref_buffered" | "refinto_buffered" => buffered,
+        "score_fold" | "feat_fold" | "ref_fold" | "refinto_fold" => fold,
         other => panic!("unknown ZEN_FE_RSS arm: {other}"),
     };
-    let pre = arm
-        .starts_with("ref_")
+    let pre = (arm.starts_with("ref_") || arm.starts_with("refinto_"))
         .then(|| z.precompute_reference(&RgbSlice::new(&src, size, size)).unwrap());
+    let mut sc = zensim::ZensimScratch::new();
     let mut sink = 0.0f64;
     for _ in 0..iters {
         let rsv = RgbSlice::new(&src, size, size);
         let dsv = RgbSlice::new(&dst, size, size);
         let r = match &pre {
+            Some(p) if arm.starts_with("refinto_") => z
+                .compute_with_ref_into(p, &dsv, &mut sc)
+                .expect("compute_with_ref_into"),
             Some(p) => z.compute_with_ref(p, &dsv).expect("compute_with_ref"),
             None if arm.starts_with("score_") => z.compute(&rsv, &dsv).expect("compute"),
             None => z
@@ -216,6 +219,32 @@ fn main() {
                     b.iter(move || {
                         let r = fold
                             .compute_with_ref(pre_f, &RgbSlice::new(dst_s, n, n))
+                            .unwrap();
+                        zenbench::black_box(r.score());
+                    })
+                });
+                // The REF-LOOP shape: one scratch kept alive across compares,
+                // which is what an encoder quantisation loop actually does.
+                // `ref_*` above pays a fresh allocation every call on both
+                // engines; `refinto_* - ref_*` is what keeping it buys.
+                // (fold-MT lane — `compute_with_ref_into` routes to the fold
+                // and reuses its `V2Scratch`; before this lane the ONE entry
+                // that exists to amortise work was the one entry the fold
+                // could not serve.)
+                group.bench("refinto_buffered", move |b| {
+                    let mut sc = zensim::ZensimScratch::new();
+                    b.iter(move || {
+                        let r = buffered
+                            .compute_with_ref_into(pre_b, &RgbSlice::new(dst_s, n, n), &mut sc)
+                            .unwrap();
+                        zenbench::black_box(r.score());
+                    })
+                });
+                group.bench("refinto_fold", move |b| {
+                    let mut sc = zensim::ZensimScratch::new();
+                    b.iter(move || {
+                        let r = fold
+                            .compute_with_ref_into(pre_f, &RgbSlice::new(dst_s, n, n), &mut sc)
                             .unwrap();
                         zenbench::black_box(r.score());
                     })

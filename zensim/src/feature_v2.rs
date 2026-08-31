@@ -7094,6 +7094,64 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             &[][..]
         };
 
+        // FUSED PER-CHANNEL FAN-OUT (fold-MT lane). When no channel reads
+        // another channel's phase-A output and nothing runs BETWEEN the two
+        // phases, the split fan-out below buys nothing and costs the walk's
+        // locality contract: it holds THREE channels' ~9 MB phase-A buffers
+        // live across a barrier, then re-reads them from wherever they landed.
+        // The serial arm already fuses A->B per channel for exactly that
+        // reason (measured +50 ms/pair on aic3-100 when interleaved); this is
+        // the same shape under threads.
+        //
+        // The two preconditions, checked rather than assumed:
+        // * `!append_on` => `cross` is `None` on every channel and `refy` is
+        //   empty, so Y needs nothing from X/B — the ONLY cross-channel edge
+        //   in the walk.
+        // * `retention.is_none()` => nothing runs between the phases (the
+        //   retention hook is a `&mut` shared across channels and must stay
+        //   in the split arm).
+        // A `v1_only` SCORING request satisfies both by construction; the
+        // 944-full product extraction satisfies neither and keeps the split.
+        //
+        // Byte-neutral by construction: identical kernels on identical inputs
+        // into per-channel accumulators that are already disjoint. Only which
+        // thread runs what, and when, changes.
+        #[cfg(feature = "threads")]
+        let fuse_channels = parallel && !append_on && retention.is_none();
+        #[cfg(feature = "threads")]
+        if fuse_channels {
+            use rayon::prelude::*;
+            let __t_f = crate::fold_timing::start();
+            scratch_strips
+                .par_iter_mut()
+                .zip(accums.par_iter_mut())
+                .enumerate()
+                .for_each(|(ch, (scr, acc))| {
+                    let __t = crate::fold_timing::start();
+                    stream_phase_a(&producer, &info, ch, false, false, v2_blocks, true, scr);
+                    let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
+                    stream_phase_b(
+                        scr,
+                        src_win,
+                        dst_win,
+                        &info,
+                        toggles,
+                        fold_v1,
+                        v2_blocks,
+                        band_parallel,
+                        false,
+                        &[][..],
+                        None,
+                        append2,
+                        csfw,
+                        acc,
+                    );
+                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::PhaseBBusy, scale);
+                });
+            crate::fold_timing::stop(__t_f, crate::fold_timing::Phase::PhaseBWall, scale);
+            continue;
+        }
+
         #[cfg(feature = "threads")]
         let ran_parallel = if parallel {
             use rayon::prelude::*;

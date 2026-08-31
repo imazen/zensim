@@ -2067,22 +2067,49 @@ impl Zensim {
         config: &ZensimConfig,
         weights: &[f64],
     ) -> ZensimResult {
+        self.compare_against_ref_into(precomputed, distorted, config, weights, None)
+    }
+
+    /// [`Self::compare_against_ref`] with an optional caller-owned scratch.
+    /// `None` allocates a fresh one per call (what `compute_with_ref` does on
+    /// both engines); `Some` is the ref-loop shape `compute_with_ref_into`
+    /// exposes, and is what makes the fold's ref-cache saving match buffered's
+    /// instead of being halved by a per-compare allocation (fold-MT lane).
+    fn compare_against_ref_into(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        config: &ZensimConfig,
+        weights: &[f64],
+        scratch: Option<&mut crate::streaming::ZensimScratch>,
+    ) -> ZensimResult {
+        #[cfg(feature = "feature-regime-v2")]
+        let mut scratch = scratch;
         #[cfg(feature = "feature-regime-v2")]
         if self.fold_engine
             && self.stop.is_none()
             && crate::fold_engine::is_fold_backable(config)
         {
-            let mut scratch = crate::feature_v2::V2Scratch::new();
+            let mut owned;
+            let v2 = match scratch.as_deref_mut() {
+                Some(s) => &mut s.v2,
+                None => {
+                    owned = crate::feature_v2::V2Scratch::new();
+                    &mut owned
+                }
+            };
             if let Some(r) = crate::fold_engine::compute_fold_backed_with_ref(
                 precomputed,
                 distorted,
                 config,
                 weights,
-                &mut scratch,
+                v2,
             ) {
                 return r;
             }
         }
+        #[cfg(not(feature = "feature-regime-v2"))]
+        let _ = scratch;
         crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
             distorted,
@@ -2358,6 +2385,40 @@ impl Zensim {
         reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
         let (ow, oh) = (distorted.width(), distorted.height());
+        // ENGINE ROUTING (fold-MT lane). `compute_with_ref` has routed to the
+        // fold since the fold-engine lane; this entry did not, so a ref LOOP —
+        // the one shape that exists to amortise work — was the one shape that
+        // could not use the fold. It routes through the same
+        // `compare_against_ref_into` and hands it `scratch`, so the fold's
+        // per-compare `V2Scratch` is reused exactly like buffered's
+        // `dst_planes`. Out-of-domain requests still degrade to the buffered
+        // walk below, byte-for-byte.
+        #[cfg(feature = "feature-regime-v2")]
+        if self.fold_engine && self.stop.is_none() && crate::fold_engine::is_fold_backable(&config)
+        {
+            // Same shared reflect-pad `compute_with_ref` applies, so the two
+            // ref entries route identically rather than differing on sub-64.
+            let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
+                let d = reflect_pad_for_scales(distorted, config.num_scales);
+                self.compare_against_ref_into(
+                    precomputed,
+                    &d,
+                    &config,
+                    params.weights,
+                    Some(scratch),
+                )
+            } else {
+                self.compare_against_ref_into(
+                    precomputed,
+                    distorted,
+                    &config,
+                    params.weights,
+                    Some(scratch),
+                )
+            };
+            apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
+            return Ok(result.with_profile(self.profile));
+        }
         // Pad a sub-pyramid-minimum distorted so it aligns with the (also
         // padded) reference pyramid — the same rule `compute_with_ref`
         // applies. Without it this entry fed a 48-wide plane to a 64-wide

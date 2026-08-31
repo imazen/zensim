@@ -60,7 +60,41 @@ pub(crate) enum FrontEnd {
 /// `2^(NUM_SCALES-1)` keeps every deeper scale's fill cadence in whole
 /// even row pairs (16 rows/step at scale 3), so downscale block parity
 /// never depends on the step size.
-const ADVANCE_ROWS: usize = 128;
+/// Scale-0 rows converted per [`StripPlaneProducer::produce`] call.
+///
+/// **MUST stay a multiple of 64** — see [`CONVERT_CHUNK_ROWS`]: the producer's
+/// conversion is byte-identical to the whole-image one only while every chunk
+/// boundary lands on the same 64-row lattice, and `hi0` advances by exactly
+/// this constant.
+///
+/// Raised 128 → 256 by the fold-MT lane. The conversion fans out at
+/// [`CONVERT_CHUNK_ROWS`] rows per task, so this constant IS the producer
+/// front end's parallel degree: at 128 a side was two chunks (four with both
+/// sides concurrent) against a 16-thread pool, and the conversion was 23 % of
+/// the fold-backed score's 16-thread wall at 2304². 256 doubles the chunk
+/// count without moving a boundary. It costs rolling-plane capacity —
+/// `scale_capacity_rows` budgets `ADVANCE_ROWS >> scale` extra rows per scale
+/// — which is measured in `benchmarks/fold_mt_scaling_2026-08-31.md`.
+const ADVANCE_ROWS: usize = 256;
+const _: () = assert!(ADVANCE_ROWS % crate::streaming::DEFAULT_CONVERT_CHUNK_ROWS == 0);
+
+/// Rows per parallel chunk inside the producer's scale-0 XYB conversion.
+///
+/// **PINNED to `streaming`'s default, and it is not free to move.** Chunk
+/// height is SEMANTICS: which elements land in a per-pixel kernel's SIMD body
+/// versus its scalar tail depends on the buffer length, and the two disagree
+/// in the last bit
+/// (`crate::streaming::tests::convert_chunk_rows_is_semantics_not_a_knob`
+/// measures one ULP at 97×51). The streaming and materialised conversions are
+/// byte-identical only because every producer chunk boundary lands on a global
+/// multiple of 64 rows, which is where the whole-image call cuts.
+///
+/// The fold-MT lane wanted a smaller height here — the producer only ever
+/// hands this function [`ADVANCE_ROWS`] rows, so at 64 a side is two chunks
+/// and the front end caps at degree 2 (4 with both sides concurrent) — and
+/// took [`ADVANCE_ROWS`] up instead, which raises the chunk COUNT while
+/// keeping every boundary on the 64-row lattice.
+const CONVERT_CHUNK_ROWS: usize = crate::streaming::DEFAULT_CONVERT_CHUNK_ROWS;
 
 /// One side (source or distorted) of the pair.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -256,7 +290,16 @@ fn convert_side_scale0(
         c2[0].append_rows(n_new),
     );
     let sub = SubsetView::new(src, hi0, n_new);
-    crate::streaming::convert_source_to_xyb_into_slices(&sub, p0, p1, p2, width, parallel, hi0);
+    crate::streaming::convert_source_to_xyb_into_slices_chunked(
+        &sub,
+        p0,
+        p1,
+        p2,
+        width,
+        parallel,
+        hi0,
+        CONVERT_CHUNK_ROWS,
+    );
 }
 
 /// Ref-cached-feed twin of [`convert_side_scale0`]: copy the source side's
