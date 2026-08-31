@@ -4340,3 +4340,59 @@ contains.** Fifth catch of the campaign, and the first the code's own comments h
   can mean worse — and they come to the USER as a measured table, not a lane decision. Flip still
   blocked pending rank preservation, the v2-block hand-off, blast-radius registration and the
   gate-re-pin enumeration.
+
+## 2026-08-31 ~12:1xZ — ROUND 26: what is costly inside v2-348+append — IT IS THE PLANE PIPELINE, NOT THE FEATURE MATH (user question; `40fdcd86`, doc `benchmarks/v2_block_cost_2026-08-31.md`)
+
+**★ Methodological correction first: `dense_block_kernel`'s `POOL_SIMD` path is v4x-ONLY, and
+valgrind masks AVX-512 out of CPUID — so callgrind physically CANNOT profile the path that ships.**
+Every prior Ir number for this block is the v3 scalar-pool form. The lane did the wall-clock
+re-profile (7 new `fold_timing` phases); attribution additive to ≤1.2 %, reproduced twice ~20 min
+apart at ≤1 % 1T agreement. **`dense` is 13.5 % of the block and 7.3 % of the walk on the shipping
+tier — NOT the 22–26 % this ledger has been repeating** (at v3 it is 47.9 % of the block's Ir;
+`POOL_SIMD` is the entire gap). Everyone citing the old profile should stop.
+
+**Ranked cost, 2304²/1T (the +200.1 ms block):**
+
+| item | ms | % | ns/px 576→2304 |
+|---|---:|---:|---|
+| **H-plane shape** (strip-wide `blur_h` − the fold's self-blur saving) | 65.83 | **32.9** | 1.34→4.94 (**3.7×**) |
+| **`planesA`** (4× V-blur + activity chain) | 49.25 | **24.6** | 1.11→2.01 (1.8×) |
+| `dense_block_kernel` | 27.10 | 13.5 | 1.21→1.28 (1.06×) |
+| `append_block_kernel` | 21.32 | 10.7 | 0.94→1.01 |
+| `gradient_block_kernel` | 16.89 | 8.4 | 0.88→0.80 |
+| `planesApp` (`bs2` chain) | 13.00 | 6.5 | 0.43→0.53 |
+| `blockiness` | 4.46 | 2.2 | 0.17→0.18 |
+
+**Every v2 feature kernel is FLAT in ns/px across a 16× pixel range; every PLANE pass is not.** The
+block's composition inverts with size — kernels are 70.6 % of it at 576², 34.8 % at 2304².
+`planesA` runs at **29.8 GB/s = the single-thread DRAM ceiling** and is ~75 % of the block's 1T→8T
+CPU-time growth; `blur_h` at 4.88 GB/s is NOT bandwidth-bound — its 16-row × 6-plane transpose set
+hits the 1 MiB L2 at width ≳ 2304.
+**Structural read:** all four kernels read the SAME six strip-wide planes, and producing them costs
+**1.84×** what every formula on them costs (128.08 vs 69.77 ms). Dense's 11 weighted-pool slots are
+**byproducts** (extra per-pixel arithmetic, no extra pass — the v2 analogue of v1's free peaks);
+gradient, append and blockiness each force their own sweep; append also OWNS a plane (`bs2`, not
+derivable from `ssq`, which is the SUM `blur(src²+dst²)`); BANDVIS rides gradient's sweep but its
+instantiation costs 1.56×. **The redundancy hunt came back genuinely empty**: v1's activity is
+`|src − blur_h(src)|`, v2's is `|src − mu1|` — different quantities.
+**Shipped (byte-neutral):** the decomposition instrument itself, and
+`folded944_is_bit_identical_across_rayon_pool_sizes` — a REAL gap, since the existing pool sweep
+covers the scoring path, which runs `v1_only` and touches not one v2 kernel; the new gate is 944
+slots `to_bits()` × 22 geometries × pools {1,2,3,8,16}, and it is load-bearing right now because
+era-2 and tiling are about to re-schedule exactly the fan-out whose strip grouping moves f372..943.
+369/0, clippy rc=0.
+**Falsified, four levers, none shipped:** rayon band split at 1T (serial is FASTER, 114.5 vs
+121.5 ms); smaller `STRIP_ROWS` (128→378.0, 64→421.8, 32→418.5 ms — the halo tax beats the cache
+win, so **the fix cannot come from strip height**); row-major V blur (proven BIT-IDENTICAL over 21
+geometries × 3 radii, then **9 % slower** everywhere — the column-major form keeps its accumulator
+in a register across 148 rows; implementation and gate REVERTED, not parked); bounds checks (zero
+`panic_bounds_check` in any v2 kernel or blur, 61 symbols re-verified post-rebase).
+**⇒ Retarget handed to era-2, measured:** phase A's strip-wide H blur and the fold's band-local
+self-blur run the SAME kernel on the SAME data, and band-local is **1.49× cheaper end-to-end on
+13 % MORE blur work** while callgrind independently shows the strip form executes 9.1 % FEWER
+instructions — two instruments, opposite signs ⇒ it is memory. Band-local phase A is worth
+**−65.8 ms**: block 1.49×, walk 367.7 → ~302 ms (**1.22×**), *serial*, so it composes with the
+thread work; ~275 ms (1.34×) if `planesA` gains the same once cache-resident (labelled a
+projection). The shape is a **rolling row window**, not smaller strips.
+Honesty note from the lane: its era-2 dense calibration (a 2× regression) **went stale the same
+day** — stage B landed parity while it measured; §7.3 carries both and says which is live.
