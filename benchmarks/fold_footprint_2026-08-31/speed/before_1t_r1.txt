@@ -6,3 +6,30 @@ run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=45115MiB :: /home/lilith/t
 ═══════════════════════════════════════════════════════════════
   zenbench  1788155438-174da9
 ═══════════════════════════════════════════════════════════════
+
+  fold_engine_1152  19 rounds × 1 calls
+                        mean ±mad ms  95% CI vs base     
+  ├─ score_buffered      48.0 ±1.8ms  [46.5–49.9]ms      
+  ├─ score_fold          50.5 ±2.0ms  [-1.3%–+11.4%]      [1]
+  ├─ feat_buffered       47.6 ±1.5ms  [-3.3%–+5.1%]       [2]
+  ├─ feat_fold           48.0 ±1.2ms  [+0.2%–+3.7%]       [3]
+  ├─ ref_buffered        40.8 ±0.8ms  [-15.4%–-12.4%]    
+  ├─ ref_fold            45.9 ±0.9ms  [-7.4%–-3.4%]      
+  ├─ refinto_buffered    41.4 ±1.4ms  [-16.1%–-11.9%]    
+  ├─ refinto_fold        44.0 ±0.9ms  [-8.2%–-4.8%]      
+  ├─ fused_buffered      66.8 ±1.7ms  [+39.6%–+43.7%]    
+  ╰─ split_fold         138.8 ±2.1ms  [+188.1%–+194.8%]  
+
+  ref_buffered      ███████████████ 40.84ms
+  refinto_buffered  ███████████████ 41.38ms
+  refinto_fold      ████████████████ 43.96ms
+  ref_fold          █████████████████ 45.86ms
+  feat_buffered     █████████████████ 47.61ms
+  feat_fold         ██████████████████ 47.97ms
+  score_buffered    ██████████████████ 47.98ms
+  score_fold        ███████████████████ 50.47ms
+  fused_buffered    █████████████████████████ 66.81ms
+  split_fold        ███████████████████████████████████████████████████ 138.79ms
+  [1] CI crosses zero
+  [2] CI crosses zero
+  [3] CI crosses zero
