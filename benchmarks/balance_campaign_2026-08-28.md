@@ -4396,3 +4396,45 @@ thread work; ~275 ms (1.34×) if `planesA` gains the same once cache-resident (l
 projection). The shape is a **rolling row window**, not smaller strips.
 Honesty note from the lane: its era-2 dense calibration (a 2× regression) **went stale the same
 day** — stage B landed parity while it measured; §7.3 carries both and says which is live.
+
+## 2026-08-31 ~13:2xZ — ROUND 27: era-2 — band-local phase A FALSIFIED, COLUMN TILING is the win, and "tile means PACK" (6 commits → `d56c670a`)
+
+- **Band-local phase A: FALSIFIED.** Round 26's hand-off (−65.8 ms, 1.22×) is not there. Built at
+  three band heights with a sound estimator (one binary, runtime arms, byte-identical env blocks,
+  interleaved, min of 7 walks × min over **15 ASLR layouts**): `B=32` +13.1 %, `B=64` +3.0 %,
+  `B=128` (the bit-identical control, 956/956) 0. **Why the proxy lied: it compared unlike
+  closures.** The fold's self-blur needs ±`V1_BAND_OVERLAP` = 5 rows (1.31× halo); **phase A ends
+  at `activity = blur(|src − blur(src)|)` — TWO CHAINED BLURS, ±2·BLUR_RADIUS = 20 rows out of 32 =
+  62 % redundancy**, and it applies to the V blurs and `bs2` too. Band-local H *is* 1.25× more
+  efficient per unit work; the tax is simply bigger. The rolling-row-window variant needs the
+  row-major V blur round 26 already measured at +9 % and reverted. Reverted, not parked.
+- **★ COLUMN TILING IS THE WIN — on the axis where the halo is 0.6 %.** `blur_h`
+  **1532.7 → 179.6 ms (8.5×)** at 4608²; whole 944 walk **1.15× @5 MP, 1.73× @21 MP** at 1T,
+  1.23× @8T/4608², 1.11× @16T. Untiled ms/MP climbs 22.2 → 108.9; tiled 22.2 → 61.3 — **tiling
+  removes most of the walk's superlinear term, so the win GROWS with size.** Behind
+  `ZENSIM_H_TILE`, default off pending the era-2 re-pin. Found by a zero-code probe: at a FIXED
+  5.31 MP, `blur_h` costs **104.99 ms at width 2304 vs 34.58 at width 1152** — the cost is a
+  function of WIDTH, not pixels.
+- **The transferable result: TILE MEANS PACK.** The lane then built the "clean" version anyone
+  would reach for next — `x0/x1` threaded through all 16 H-blur bodies (38 initialisers, 38 loops,
+  48 ring warm-ups), byte-neutral, suite green — and in the same binary it **bought NOTHING**:
+  1.06× @1T/2304², **0.96× @1T/4608²**, against packed's 1.26× / 1.71×. Restricting `x` does not
+  change which cache lines are walked — the planes are still full-width. **The copies are not
+  overhead; they ARE the optimisation.** All 16 bodies deleted rather than parked. Same pass: an
+  activity-chain tiling committed mid-session as "+1.5 %" is a **wash** when isolated properly
+  (A-only 0.975–1.034× over four cells) — removed, claim superseded.
+- **⚠ MEASUREMENT HAZARD for every lane**: 944@2304² is **bimodal over 10.1 % in the ASLR base
+  alone** (±0.13 % under `setarch -R`); THP, heap-base shift, plane stagger and CCD placement were
+  all ruled out BY MEASUREMENT. **The environment block size is itself a layout input** — adding a
+  provably-dead env var flipped one build 359 → 328 ms. This invalidated three of the lane's own
+  earlier sweeps of the same experiment. Protocol + the identical-code-path control (tile > width
+  cells must read 1.000×, and instead give the noise floor: **±0.3 % @1T, up to 6.5 % @8T**) are
+  now in `zensim/CLAUDE.md`.
+- **Next, specified**: post-tiling at 4608² the leaders are `fold` 373.6 ms (28.3 %) and `planesA`
+  222.7 (19.1 %) — same width disease, neither reachable by another copying tile (they are
+  one-plane-in/one-plane-out; the H blur paid because it is six plane-touches behind two copies).
+  The shape that gets both is the **packed column slab**: copy `src`/`dst`/`refy` into slab-width
+  buffers once per slab, run phase A AND phase B at slab width, never copy out (kernels accumulate;
+  the planes never need to be full-width). Needs an x-offset for `blockiness_sparse_strip_wide` and
+  a per-slab X/B activity stash — no kernel signature changes. The compute-set descriptor (item D)
+  is not started. 369/0, clippy clean.
