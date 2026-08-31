@@ -372,6 +372,24 @@ impl ZensimProfile {
     }
 }
 
+impl ProfileParams {
+    /// Every bake whose forward pass consumes the v1-layout feature vector:
+    /// the primary, the optional D2 secondary, and the optional ensemble
+    /// classifier. Used by the fold engine's per-profile weight-skipping to
+    /// take the UNION of what the profile actually reads — missing one would
+    /// silently skip a family a live consumer still looks at.
+    pub(crate) fn scoring_bake_bytes(&self) -> impl Iterator<Item = &'static [u8]> + '_ {
+        [
+            self.mlp_bytes,
+            self.mlp_bytes_b3,
+            self.ensemble_classifier_bytes,
+        ]
+        .into_iter()
+        .flatten()
+        .map(|f| f())
+    }
+}
+
 impl core::fmt::Display for ZensimProfile {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.name())

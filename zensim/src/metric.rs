@@ -1228,6 +1228,14 @@ pub struct Zensim {
     /// Requests the fold cannot serve bit-identically
     /// (`fold_engine::is_fold_backable`) fall back to buffered even when set.
     pub(crate) fold_engine: bool,
+    /// Let a fold-backed SCORE skip computing the v1 pool families the loaded
+    /// profile structurally never reads (fold_engine::score_pool_mode).
+    /// **Default `false`** — opt-in via
+    /// [`Zensim::with_unread_feature_skipping`], because it leaves the
+    /// skipped slots at `0.0` in [`ZensimResult::features`]. The SCORE and
+    /// `raw_distance` are bit-identical either way, by construction: a slot
+    /// is only skipped when every consumer's weight on it is exactly zero.
+    pub(crate) skip_unread_pools: bool,
 }
 
 /// Shared cancellation token stored on [`Zensim`]. Wraps the caller's
@@ -1258,6 +1266,7 @@ impl Zensim {
             max_pixels: Some(120_000_000),
             stop: None,
             fold_engine: false,
+            skip_unread_pools: false,
         }
     }
 
@@ -1274,6 +1283,56 @@ impl Zensim {
     pub fn with_engine(mut self, engine: crate::fold_engine::ScoringEngine) -> Self {
         self.fold_engine = matches!(engine, crate::fold_engine::ScoringEngine::Fold);
         self
+    }
+
+    /// Let a fold-backed score SKIP computing v1 pool families this
+    /// profile's scoring consumers structurally never read.
+    ///
+    /// `#[doc(hidden)]` + `feature-regime-v2`-gated, and **off by default**,
+    /// for one reason: it is not score-visible but it IS feature-visible. A
+    /// family is only skipped when every layer-0 weight on it is exactly
+    /// zero across every bake the profile forwards, so `score()` and
+    /// `raw_distance()` are bit-identical with it on or off — but the
+    /// skipped slots come back as `0.0` from
+    /// [`ZensimResult::features`](crate::ZensimResult::features), so a
+    /// caller reading the vector must opt in knowingly. This is the same
+    /// distinction `fold_engine::is_fold_backable` already draws for
+    /// `streaming::active_channels`' channel skipping.
+    ///
+    /// Has no effect on the buffered engine, on
+    /// [`Self::compute_extended_features`] (which exists to return the
+    /// vector), or on any profile whose bakes read the pool block.
+    #[cfg(feature = "feature-regime-v2")]
+    #[doc(hidden)]
+    pub fn with_unread_feature_skipping(mut self, on: bool) -> Self {
+        self.skip_unread_pools = on;
+        self
+    }
+
+    /// The pool mode a fold-backed score would run for this instance — the
+    /// read-back of [`Self::with_unread_feature_skipping`], and the hook the
+    /// perf harness prices.
+    #[cfg(feature = "feature-regime-v2")]
+    #[doc(hidden)]
+    pub fn score_pool_mode(&self) -> crate::feature_v2::V1PoolsMode {
+        let params = self.profile.params();
+        let config = config_from_params(params, self.parallel);
+        crate::fold_engine::score_pool_mode(params, &config, self.skip_unread_pools)
+    }
+
+    /// The `pool_mode` argument for a SCORING entry: `None` (compute
+    /// everything) unless this instance opted in and the profile's bakes
+    /// structurally ignore the masked/IW block.
+    #[cfg(feature = "feature-regime-v2")]
+    fn scoring_pool_mode(
+        &self,
+        params: &ProfileParams,
+        config: &ZensimConfig,
+    ) -> Option<crate::feature_v2::V1PoolsMode> {
+        if !self.skip_unread_pools {
+            return None;
+        }
+        Some(crate::fold_engine::score_pool_mode(params, config, true))
     }
 
     /// The walk this instance's scoring entries run — the read-back of
@@ -1471,6 +1530,8 @@ impl Zensim {
             params.weights,
             self.stop_ref(),
             self.fold_engine,
+            #[cfg(feature = "feature-regime-v2")]
+            self.scoring_pool_mode(params, &config),
         );
         self.check_stop()?;
         apply_mlp_scoring_with_codec(
@@ -1531,6 +1592,11 @@ impl Zensim {
             params.weights,
             self.stop_ref(),
             self.fold_engine,
+            // NEVER skip on a feature-extraction entry: this exists to hand
+            // the caller the vector, so zeroing a slot is a wrong answer even
+            // when no weight reads it.
+            #[cfg(feature = "feature-regime-v2")]
+            None,
         );
         self.check_stop()?;
         Ok(result.with_profile(self.profile))
@@ -2098,12 +2164,14 @@ impl Zensim {
                     &mut owned
                 }
             };
+            let pool_mode = self.scoring_pool_mode(self.profile.params(), config);
             if let Some(r) = crate::fold_engine::compute_fold_backed_with_ref(
                 precomputed,
                 distorted,
                 config,
                 weights,
                 v2,
+                pool_mode,
             ) {
                 return r;
             }
@@ -2725,6 +2793,9 @@ impl Zensim {
             params.weights,
             self.stop_ref(),
             self.fold_engine,
+            // Extraction entry — see `compute_extended_features`.
+            #[cfg(feature = "feature-regime-v2")]
+            None,
         );
         self.check_stop()?;
         Ok(result.with_profile(self.profile))
@@ -2780,8 +2851,16 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params, true);
-        let result =
-            compute_with_config_inner(source, distorted, &config, params.weights, None, false);
+        let result = compute_with_config_inner(
+            source,
+            distorted,
+            &config,
+            params.weights,
+            None,
+            false,
+            #[cfg(feature = "feature-regime-v2")]
+            None,
+        );
         Ok(result)
     }
 }
@@ -3298,6 +3377,12 @@ fn compute_with_config_inner(
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
     use_fold: bool,
+    // Per-profile weight-skipping, resolved by the CALLER (only `Zensim`
+    // knows the profile's bakes). `None` = today's unconditional behaviour.
+    // Deliberately a resolved mode rather than a bool: the decision belongs
+    // to `fold_engine::score_pool_mode`, and passing the answer keeps this
+    // shared front ignorant of bakes.
+    #[cfg(feature = "feature-regime-v2")] pool_mode: Option<crate::feature_v2::V1PoolsMode>,
 ) -> ZensimResult {
     // Sub-64px inputs can't form the 4-scale pyramid. Reflect-pad both sides
     // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
@@ -3306,9 +3391,27 @@ fn compute_with_config_inner(
     if needs_pyramid_pad(w, h, config.num_scales) {
         let s = reflect_pad_for_scales(source, config.num_scales);
         let d = reflect_pad_for_scales(distorted, config.num_scales);
-        return compute_with_config_core(&s, &d, config, weights, stop, use_fold);
+        return compute_with_config_core(
+            &s,
+            &d,
+            config,
+            weights,
+            stop,
+            use_fold,
+            #[cfg(feature = "feature-regime-v2")]
+            pool_mode,
+        );
     }
-    compute_with_config_core(source, distorted, config, weights, stop, use_fold)
+    compute_with_config_core(
+        source,
+        distorted,
+        config,
+        weights,
+        stop,
+        use_fold,
+        #[cfg(feature = "feature-regime-v2")]
+        pool_mode,
+    )
 }
 
 fn compute_with_config_core(
@@ -3318,6 +3421,7 @@ fn compute_with_config_core(
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
     use_fold: bool,
+    #[cfg(feature = "feature-regime-v2")] pool_mode: Option<crate::feature_v2::V1PoolsMode>,
 ) -> ZensimResult {
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
@@ -3337,9 +3441,9 @@ fn compute_with_config_core(
         // The fold's only failure modes here are the dimension/HDR checks the
         // caller already made; a surprise falls back rather than erroring out
         // of a path whose signature is infallible.
-        if let Ok(r) =
-            crate::fold_engine::compute_fold_backed(source, distorted, config, weights, &mut scratch)
-        {
+        if let Ok(r) = crate::fold_engine::compute_fold_backed(
+            source, distorted, config, weights, &mut scratch, pool_mode,
+        ) {
             return r;
         }
     }

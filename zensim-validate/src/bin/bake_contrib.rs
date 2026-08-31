@@ -39,7 +39,7 @@
 //! Corpus spec is `name:path:target_col:target_scale`; `target_col = -`
 //! means no target (no Δ-SROCC for that corpus). `--rows N` caps a corpus by
 //! deterministic stride decimation (registered for the imazen26 slices; the
-//! cap applies to corpora whose name ends `@cap`, e.g. `imazen26@cap:...`).
+//! cap applies to corpora whose name ends `@N`, e.g. `imazen26@20000:...`).
 
 use std::env;
 use std::fmt::Write as _;
@@ -354,7 +354,12 @@ fn main() -> ExitCode {
     // [LO, HI) simultaneously — the rank-|K| analog of the per-input rank-1
     // update, exact for any depth. Reported as a per-corpus SROCC pair
     // (baseline vs block-ablated) and an extra dump-scores column.
-    let mut ablate_range: Option<(usize, usize)> = None;
+    //
+    // REPEATABLE + NAMEABLE (2026-08-31, the feature-cost lane): several
+    // ranges price in ONE run, so the expensive per-input `ablate_row` pass
+    // (n_inputs full re-forwards per row) is paid once for a whole family
+    // frontier instead of once per family. Order is the CLI order.
+    let mut ablate_ranges: Vec<(String, usize, usize)> = Vec::new();
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -369,14 +374,23 @@ fn main() -> ExitCode {
             "--summary" => summary_path = Some(args.next().expect("--summary PATH").into()),
             "--live-mask" => live_mask = Some(args.next().expect("--live-mask PATH").into()),
             "--ablate-range" => {
-                let spec = args.next().expect("--ablate-range LO..HI");
-                let (lo, hi) = spec
-                    .split_once("..")
-                    .expect("--ablate-range LO..HI (half-open, e.g. 156..372)");
-                ablate_range = Some((
-                    lo.parse::<usize>().expect("LO usize"),
-                    hi.parse::<usize>().expect("HI usize"),
-                ));
+                // `LO..HI` or `NAME=LO..HI`; repeatable, and one value may
+                // carry a comma-separated list.
+                let spec = args.next().expect("--ablate-range [NAME=]LO..HI");
+                for one in spec.split(',').filter(|t| !t.is_empty()) {
+                    let (name, rng) = match one.split_once('=') {
+                        Some((n, r)) => (n.to_string(), r),
+                        None => (one.to_string(), one),
+                    };
+                    let (lo, hi) = rng
+                        .split_once("..")
+                        .expect("--ablate-range [NAME=]LO..HI (half-open, e.g. 156..372)");
+                    ablate_ranges.push((
+                        name,
+                        lo.parse::<usize>().expect("LO usize"),
+                        hi.parse::<usize>().expect("HI usize"),
+                    ));
+                }
             }
             "--corpus" => {
                 let spec = args.next().expect("--corpus name:path:target:scale");
@@ -554,7 +568,8 @@ fn main() -> ExitCode {
         deltas.push(Vec::with_capacity(total_rows));
     }
     let mut baselines: Vec<Vec<f64>> = Vec::new(); // per corpus
-    let mut block_abl: Vec<Vec<f64>> = Vec::new(); // per corpus (--ablate-range)
+    // [range][corpus] — one ablated score vector per (--ablate-range, corpus).
+    let mut block_abl: Vec<Vec<Vec<f64>>> = vec![Vec::new(); ablate_ranges.len()];
     let mut xt_sum = vec![0.0f64; n_inputs];
     let mut xt_sumsq = vec![0.0f64; n_inputs];
     let mut xt_nonzero = vec![0usize; n_inputs];
@@ -602,13 +617,13 @@ fn main() -> ExitCode {
             }
         }
         baselines.push(base);
-        if let Some((lo, hi)) = ablate_range {
+        for (ri, &(_, lo, hi)) in ablate_ranges.iter().enumerate() {
             let abl: Vec<f64> = c
                 .rows
                 .par_iter()
                 .map(|row| block_ablated_score(&layers, &heads, &model, row, lo, hi))
                 .collect();
-            block_abl.push(abl);
+            block_abl[ri].push(abl);
         }
     }
 
@@ -805,20 +820,28 @@ fn main() -> ExitCode {
     }
 
     // ---- joint block-ablation report -----------------------------------
-    if let Some((lo, hi)) = ablate_range {
-        println!("block-ablation [{lo}..{hi}) — baseline vs ablated SROCC per corpus:");
-        for (ci, c) in data.iter().enumerate() {
-            if let Some(t) = c.targets.as_ref() {
-                let b = spearman(&baselines[ci], t).abs();
-                let a = spearman(&block_abl[ci], t).abs();
-                println!(
-                    "  {:12} n={:6}  baseline {:.4}  ablated {:.4}  delta {:+.4}",
-                    c.name,
-                    t.len(),
-                    b,
-                    a,
-                    a - b
-                );
+    // TSV-shaped so a frontier table can be assembled without re-parsing prose;
+    // `spearman` is the canonical `zensim_validate::panel` one, never re-derived.
+    if !ablate_ranges.is_empty() {
+        println!("# block-ablation: |SROCC| baseline vs family-ablated, per corpus");
+        println!("ABL\tfamily\tlo\thi\tcorpus\tn\tsrocc_base\tsrocc_ablated\tdelta");
+        for (ri, (name, lo, hi)) in ablate_ranges.iter().enumerate() {
+            for (ci, c) in data.iter().enumerate() {
+                if let Some(t) = c.targets.as_ref() {
+                    let b = spearman(&baselines[ci], t).abs();
+                    let a = spearman(&block_abl[ri][ci], t).abs();
+                    println!(
+                        "ABL\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{:+.6}",
+                        name,
+                        lo,
+                        hi,
+                        c.name,
+                        t.len(),
+                        b,
+                        a,
+                        a - b
+                    );
+                }
             }
         }
     }

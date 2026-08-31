@@ -45,4 +45,4 @@
 // or load MLP models should depend on `zenpredict` directly. We
 // re-export here only what `zensim::metric` and `zensim::profile`
 // actually consume.
-pub(crate) use zenpredict::{Model, Predictor};
+pub(crate) use zenpredict::{Model, Predictor, WeightStorage, f16_bits_to_f32};

@@ -1526,6 +1526,23 @@ pub enum V1PoolsMode {
     /// `masked_art_4th` at s0 c0-2 = f231/237/243, `iw_art_4th` at (s0,c0)
     /// (s1,c0) (s1,c2) = f303/321/333 — every other pool slot stays 0.
     Carriers,
+    /// **The peak block only** (`f156..228`) — masked and IW stay 0.
+    ///
+    /// Costs the SAME as [`Self::Off`]: the peak accumulators (`ssim_d8`,
+    /// `edge_art8`, `edge_det8` and the three running maxima) are produced
+    /// UNCONDITIONALLY by `fused::fused_vblur_features_ssim` on every path
+    /// and merged unconditionally by `V1BasicSums::accumulate`, so `Off` has
+    /// been paying for them all along and simply declined to emit them. What
+    /// this mode skips relative to [`Self::Full`] is the masked/IW pass
+    /// group — the band activity chain (`abs_diff_into` +
+    /// `box_blur_1pass_into`), the fused kernel's `store_mu`/`store_sigma`
+    /// side-outputs, and the three `*_inline_both` kernels — which is the
+    /// whole measurable cost of the pool block.
+    ///
+    /// The band scratch is still handed to the band so the memory-traffic
+    /// self-blur shape (`FoldHSource::SelfBlur`) stays available; it owns
+    /// only the four H planes there, never the pool planes.
+    Peaks,
     /// All 216 slots: peaks (72) + masked (72) + IW (72), v1-exact.
     Full,
 }
@@ -4304,6 +4321,28 @@ const V1_BAND_OVERLAP: usize = 5;
 const V1_MASK_K: f32 = 4.0;
 const V1_IW_K: f32 = 4.0;
 
+/// What a v1 band does with its [`FoldPoolScratch`] — the band-level
+/// resolution of [`V1PoolsMode`].
+///
+/// [`Self::HOnly`] exists because the pool block is NOT three independent
+/// jobs. Peaks ride the fused kernel's unconditional L8/max tier, while
+/// masked and IW share ONE activity chain, ONE sigma store and three
+/// `*_inline_both` kernels that compute both strengths in a single sweep. So
+/// the only compute boundary inside `f156..372` is *peaks* vs
+/// *masked-and-IW*, and this enum is that boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BandPoolWork {
+    /// No pool arithmetic at all. The scratch is present only so a
+    /// [`FoldHSource::SelfBlur`] band can own its four H planes.
+    HOnly,
+    /// Activity chain + `edge_diff_channel_inline_both` (the carrier slots'
+    /// `art_4th`); no sigma store, no MSE, no masked/IW SSIM.
+    Carriers,
+    /// Every pool slot: activity chain, sigma store, and all three
+    /// `*_inline_both` kernels.
+    Full,
+}
+
 /// Band-local planes for the v1 pool replay (`V2NewFeatureToggles::v1_pools`):
 /// sized for one v1 band buffer (`V1_BAND_ROWS + 2 * V1_BAND_OVERLAP` rows ×
 /// width), grown on first use per channel accumulator and reused across
@@ -4399,7 +4438,7 @@ fn fold_v1_one_band(
     h_src: FoldHSource<'_>,
     raw: [&[f32]; 2],
     sums: &mut V1BasicSums,
-    mut pools: Option<(&mut FoldPoolScratch, bool)>,
+    mut pools: Option<(&mut FoldPoolScratch, BandPoolWork)>,
 ) -> usize {
     let [src, dst] = raw;
     let rows = 0..rows_end;
@@ -4419,7 +4458,7 @@ fn fold_v1_one_band(
     let mut empty_mu1: [f32; 0] = [];
     let mut empty_mu2: [f32; 0] = [];
     let mut empty_sd: [f32; 0] = [];
-    if let Some((ps, full)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
+    if let Some((ps, work)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
         let band_n = h_local * width;
         // Size to the WIDEST band this plane can ever hold, not to this band's
         // own height (fold-footprint lane). `ensure` grows through
@@ -4430,16 +4469,79 @@ fn fold_v1_one_band(
         // channels. Measured (heaptrack, 1152²): 27.65 MB against the 23.22 MB
         // the slots actually hold, i.e. 3840·width bytes of pure growth slack.
         // Asking for the maximum up front makes every slot exactly 42·width.
+        //
+        // The pool planes are grown BELOW the `HOnly` arm: peaks-only bands
+        // never touch them (feature-cost lane), so allocating them here would
+        // hand a skipping request the footprint it is skipping.
         let band_cap_n = (V1_BAND_ROWS + 2 * V1_BAND_OVERLAP).min(height.max(1)) * width;
         debug_assert!(
             band_n <= band_cap_n,
             "band {band_n} exceeds the {band_cap_n} capacity bound"
         );
-        ps.ensure(band_cap_n);
         let self_blur = matches!(h_src, FoldHSource::SelfBlur);
         if self_blur {
             ps.ensure_h(band_cap_n);
         }
+        if work == BandPoolWork::HOnly {
+            // PEAKS mode. Identical arithmetic to the `pools == None` arm
+            // below — every store flag off, no activity, no masked/IW kernel
+            // — run on whichever H planes this band is using. The peak sums
+            // the caller wants are the kernel's unconditional L8/max tier,
+            // so this costs exactly what `V1PoolsMode::Off` costs and the
+            // emitted peak slots are bit-identical to `Full`'s.
+            if self_blur {
+                let [h0, h1, h2, h3] = &mut ps.h;
+                crate::blur::fused_blur_h_ssim(
+                    &src[span.clone()],
+                    &dst[span.clone()],
+                    &mut h0[..band_n],
+                    &mut h1[..band_n],
+                    &mut h2[..band_n],
+                    &mut h3[..band_n],
+                    width,
+                    h_local,
+                    BLUR_RADIUS,
+                );
+            }
+            let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = if self_blur {
+                (
+                    &ps.h[0][..band_n],
+                    &ps.h[1][..band_n],
+                    &ps.h[2][..band_n],
+                    &ps.h[3][..band_n],
+                    0..band_n,
+                )
+            } else {
+                let FoldHSource::Precomputed([a, b, c, d]) = h_src else {
+                    unreachable!("SelfBlur handled above")
+                };
+                (a, b, c, d, span.clone())
+            };
+            sums.accumulate(&crate::fused::fused_vblur_features_ssim(
+                &mu1_h[span_h.clone()],
+                &mu2_h[span_h.clone()],
+                &ssq_h[span_h.clone()],
+                &s12_h[span_h],
+                &src[span.clone()],
+                &dst[span],
+                width,
+                h_local,
+                inner_start,
+                inner_h,
+                BLUR_RADIUS,
+                &mut empty_mu1,
+                &mut empty_mu2,
+                false,
+                &mut empty_sd,
+                false,
+                &mut [],
+                &mut [],
+                false,
+            ));
+            return b1;
+        }
+        let full = work == BandPoolWork::Full;
+        ps.ensure(band_cap_n);
         // ONE destructure, so the band-local H planes can be READ while the
         // pool planes stay mutable — disjoint fields of the same `&mut`.
         let FoldPoolScratch {
@@ -4666,7 +4768,7 @@ fn fold_v1_basic_bands(
     h_src: FoldHSource<'_>,
     raw: [&[f32]; 2],
     sums: &mut V1BasicSums,
-    pools: Option<(&mut [FoldPoolScratch], bool)>,
+    pools: Option<(&mut [FoldPoolScratch], BandPoolWork)>,
     parallel: bool,
 ) {
     assert!(
@@ -4701,9 +4803,9 @@ fn fold_v1_basic_bands(
         // allocated in the hot path. `map_init(FoldPoolScratch::default)` was
         // tried first and measured a NET LOSS: it re-allocates ~580 KB per
         // worker per strip per channel.
-        let (slots, full) = match pools {
+        let (slots, work) = match pools {
             Some((s, f)) => (Some(s), f),
-            None => (None, false),
+            None => (None, BandPoolWork::HOnly),
         };
         let locals: Vec<V1BasicSums> = match slots {
             // CHUNKED over the slots the channel actually keeps
@@ -4738,7 +4840,7 @@ fn fold_v1_basic_bands(
                                 h_src,
                                 raw,
                                 &mut local,
-                                Some((&mut *ps, full)),
+                                Some((&mut *ps, work)),
                             );
                             crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                             out.push(local);
@@ -6363,12 +6465,17 @@ fn stream_phase_b(
             &mut acc.v1[scale],
             match toggles.v1_pools {
                 V1PoolsMode::Off => None,
+                // Peaks: the scratch travels only so a self-blur band owns
+                // its H planes — no pool arithmetic runs (`HOnly`).
+                V1PoolsMode::Peaks => Some((&mut acc.pool_scratch[..], BandPoolWork::HOnly)),
                 // The carrier slots need the activity + edge kernel at
                 // scales 0-1 only (masked_art_4th s0, iw_art_4th s0-s1);
                 // the peaks come from the kernel at every scale for free.
-                V1PoolsMode::Carriers if scale <= 1 => Some((&mut acc.pool_scratch[..], false)),
+                V1PoolsMode::Carriers if scale <= 1 => {
+                    Some((&mut acc.pool_scratch[..], BandPoolWork::Carriers))
+                }
                 V1PoolsMode::Carriers => None,
-                V1PoolsMode::Full => Some((&mut acc.pool_scratch[..], true)),
+                V1PoolsMode::Full => Some((&mut acc.pool_scratch[..], BandPoolWork::Full)),
             },
             band_parallel,
         );
@@ -6583,6 +6690,10 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
     max_pixels: Option<usize>,
     parallel: bool,
     scratch: &mut V2Scratch,
+    // `None` = `V1PoolsMode::Full` (compute everything), the unconditional
+    // pre-2026-08-31 behaviour. `Some(Peaks)` is per-profile weight-skipping,
+    // resolved by `fold_engine::score_pool_mode` from the bake's layer 0.
+    pool_mode: Option<V1PoolsMode>,
 ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
@@ -6590,7 +6701,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
         return Err(ZensimError::HdrInputRequiresPuPath);
     }
     let toggles = V2NewFeatureToggles {
-        v1_pools: V1PoolsMode::Full,
+        v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
         v1_only: true,
         ..V2NewFeatureToggles::default()
     };
@@ -6687,6 +6798,7 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
     distorted: &impl ImageSource,
     parallel: bool,
     scratch: &mut V2Scratch,
+    pool_mode: Option<V1PoolsMode>,
 ) -> Option<(Vec<f64>, [f64; 3])> {
     let (cw, ch) = (precomputed.scales[0].1, precomputed.scales[0].2);
     if distorted.width() != cw || distorted.height() != ch {
@@ -6696,7 +6808,7 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
         return None;
     }
     let toggles = V2NewFeatureToggles {
-        v1_pools: V1PoolsMode::Full,
+        v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
         v1_only: true,
         ..V2NewFeatureToggles::default()
     };
@@ -7490,9 +7602,15 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // phase A entirely and makes every band a self-contained task — the
         // shape `streaming::process_channel_strip` has always had.
         //
-        // `V1PoolsMode::Full` is required because the band-local H buffer
-        // lives in the band's `FoldPoolScratch`, and it is what every
-        // fold-backed SCORE asks for.
+        // `V1PoolsMode::Full` or `Peaks` is required because the band-local
+        // H buffer lives in the band's `FoldPoolScratch`, and one of those is
+        // what every fold-backed SCORE asks for. (`Peaks` hands the band the
+        // scratch for the H planes alone — see `BandPoolWork::HOnly`.)
+        #[cfg(feature = "threads")]
+        let self_blur = fuse_channels
+            && !v2_blocks
+            && fold_v1
+            && matches!(toggles.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks);
         #[cfg(feature = "threads")]
         if fuse_channels {
             use rayon::prelude::*;
@@ -7826,6 +7944,10 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         features_v12[peaks0..peaks0 + 6].copy_from_slice(&peaks);
                         features_v12[masked0..masked0 + 6].copy_from_slice(&masked);
                         features_v12[iw0..iw0 + 6].copy_from_slice(&iw);
+                    } else if toggles.v1_pools == V1PoolsMode::Peaks {
+                        // Peaks only; the masked/IW sums were never
+                        // accumulated, so their slots stay the structural 0.
+                        features_v12[peaks0..peaks0 + 6].copy_from_slice(&peaks);
                     } else {
                         // Carriers: only the ten `fused944native` slots go
                         // live (peak slot 4 = art_l8, masked/iw slot 3 =
@@ -10654,7 +10776,7 @@ fn compute_v2_append_attribution_impl(
 // ============================================================================
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::source::RgbSlice;
 
@@ -11833,7 +11955,7 @@ mod tests {
     /// Deterministic structured content: gradients + edges + pseudo-noise
     /// texture (LCG), so every feature family (SSIM, HF, gradient,
     /// blockiness, transducer) sees real signal.
-    fn textured_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
+    pub(crate) fn textured_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
         let mut state = seed | 1;
         let mut px = Vec::with_capacity(w * h);
         for y in 0..h {
@@ -11852,7 +11974,7 @@ mod tests {
     }
 
     /// Blocky quantization distortion — deterministic, codec-flavored.
-    fn quantize_distort(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 3]> {
+    pub(crate) fn quantize_distort(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 3]> {
         let mut out = src.to_vec();
         for y in 0..h {
             for x in 0..w {
@@ -12807,7 +12929,7 @@ mod tests {
                         h_src,
                         [&src, &dst],
                         &mut sums,
-                        Some((&mut pool[..], true)),
+                        Some((&mut pool[..], BandPoolWork::Full)),
                         parallel,
                     );
                     sums
@@ -13026,6 +13148,118 @@ mod tests {
                 w,
                 "pyramid_plane_stride({w}) must be {w} under option C"
             );
+        }
+    }
+
+    /// **The per-profile weight-skipping gate** (feature-cost lane,
+    /// 2026-08-31). [`V1PoolsMode::Peaks`] must be pure compute-skipping:
+    /// every slot it DOES emit is bit-identical to what
+    /// [`V1PoolsMode::Full`] emits, and the masked/IW block it skips is left
+    /// at exactly `0.0` (never a partially-accumulated value, never NaN from
+    /// finalising an accumulator nothing wrote).
+    ///
+    /// Run over the same 19 geometries as
+    /// `v1_372_bit_exact_to_fold_at_every_width`, in both the `v1_only`
+    /// (fold-backed SCORE) walk and the full 944 walk, serial AND parallel —
+    /// the parallel arm matters because `Peaks` is the second mode allowed to
+    /// take the band-local self-blur shape, so a band-boundary interaction is
+    /// exactly the failure mode.
+    #[cfg(feature = "training")]
+    #[test]
+    fn folded_peaks_mode_is_pure_compute_skipping() {
+        const CELLS: &[(usize, usize)] = &[
+            (96, 64),
+            (208, 144),
+            (592, 80),
+            (128, 93),
+            (200, 150),
+            (200, 151),
+            (576, 96),
+            (1152, 72),
+            (100, 96),
+            (127, 64),
+            (127, 96),
+            (127, 128),
+            (129, 96),
+            (201, 96),
+            (255, 96),
+            (577, 80),
+            (126, 93),
+            (127, 93),
+            (255, 93),
+        ];
+        for &v1_only in &[true, false] {
+            for &parallel in &[false, true] {
+                let z = crate::Zensim::new(crate::ZensimProfile::codec_target())
+                    .with_parallel(parallel);
+                let mut scratch = V2Scratch::new();
+                for &(w, h) in CELLS {
+                    let src = textured_image(w, h, 7);
+                    let dst = quantize_distort(&src, w, h);
+                    let sref = RgbSlice::new(&src, w, h);
+                    let dref = RgbSlice::new(&dst, w, h);
+                    let base = V2NewFeatureToggles {
+                        v1_only,
+                        append_block: !v1_only,
+                        append2_block: !v1_only,
+                        ..V2NewFeatureToggles::default()
+                    };
+                    let full = z
+                        .compute_folded720_append_features_streaming(
+                            &sref,
+                            &dref,
+                            V2NewFeatureToggles {
+                                v1_pools: V1PoolsMode::Full,
+                                ..base
+                            },
+                            &mut scratch,
+                        )
+                        .unwrap();
+                    let peaks = z
+                        .compute_folded720_append_features_streaming(
+                            &sref,
+                            &dref,
+                            V2NewFeatureToggles {
+                                v1_pools: V1PoolsMode::Peaks,
+                                ..base
+                            },
+                            &mut scratch,
+                        )
+                        .unwrap();
+                    assert_eq!(peaks.v1_pools(), V1PoolsMode::Peaks);
+                    assert!(peaks.v1_pools_live());
+                    assert_eq!(full.regime(), peaks.regime(), "{w}x{h}: regime moved");
+                    let (ff, fp) = (full.features(), peaks.features());
+                    assert_eq!(ff.len(), fp.len(), "{w}x{h}: width moved");
+                    let tag = if v1_only { "v1_only" } else { "944" };
+                    // Emitted slots: bit-identical.
+                    for i in (0..228).chain(372..ff.len()) {
+                        assert_eq!(
+                            fp[i].to_bits(),
+                            ff[i].to_bits(),
+                            "{w}x{h} {tag} par={parallel}: slot {i} moved under Peaks ({:e} vs {:e})",
+                            fp[i],
+                            ff[i]
+                        );
+                    }
+                    // Skipped block: exactly zero, and finite.
+                    for i in 228..372 {
+                        assert_eq!(
+                            fp[i].to_bits(),
+                            0.0f64.to_bits(),
+                            "{w}x{h} {tag} par={parallel}: skipped slot {i} is {:e}, not +0.0",
+                            fp[i]
+                        );
+                    }
+                    // The peak block must actually carry values — a mode that
+                    // emitted zeros there would pass the identity above only
+                    // because Full's were zero too.
+                    assert!(
+                        fp[156..228].iter().any(|&v| v > 0.0),
+                        "{w}x{h} {tag} par={parallel}: Peaks emitted an all-zero peak block"
+                    );
+                }
+            }
         }
     }
 

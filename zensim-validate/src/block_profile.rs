@@ -79,6 +79,22 @@ pub const FAMILIES: &[(&str, usize, usize)] = &[
     ("f720_943", 720, 944),
 ];
 
+/// The v1-372 COMPUTE families — the sub-division of `f0..f371` that maps to
+/// what the extractor actually has to run, rather than to the append-only
+/// numbering blocks of [`FAMILIES`].
+///
+/// v1's 372 layout is block-major (`metric::combine_scores` passes 1-4, and
+/// `feature_v2`'s fold emit site): `[basic 156][peaks 72][masked 72][iw 72]`,
+/// each block scale-major then channel-major. The four families are NOT four
+/// independent compute jobs — see [`V1ComputeNeed`] for the shared-pass
+/// structure that governs what skipping one actually saves.
+pub const V1_FAMILIES: &[(&str, usize, usize)] = &[
+    ("v1_basic", 0, 156),
+    ("v1_peaks", 156, 228),
+    ("v1_masked", 228, 300),
+    ("v1_iw", 300, 372),
+];
+
 /// Near-zero threshold, relative to the max caller-line norm.
 pub const NEAR_ZERO_REL: f64 = 1e-6;
 
@@ -130,6 +146,10 @@ pub struct BlockProfile {
     /// Structurally-used caller lines in the zeroed-block family.
     pub uses_f156_371: bool,
     pub families: Vec<FamilyStats>,
+    /// The [`V1_FAMILIES`] view of the same layer-0 norms — the COMPUTE
+    /// families, as opposed to `families`' append-only numbering blocks.
+    /// Empty when the bake is narrower than 157 caller lines.
+    pub v1_families: Vec<FamilyStats>,
 }
 
 impl BlockProfile {
@@ -137,18 +157,20 @@ impl BlockProfile {
     /// as `block_profile` (consumed by gauntlet.py + freeze_check — field
     /// names are load-bearing; additions are fine, renames are not).
     pub fn to_json(&self) -> String {
-        let fam_json: Vec<String> = self
-            .families
-            .iter()
-            .map(|f| {
-                format!(
-                    "\"{}\":{{\"cols\":{},\"exact_zero\":{},\"near_zero\":{},\"used\":{},\"max_col_norm\":{:.6e}}}",
-                    f.label, f.cols, f.exact_zero, f.near_zero, f.used, f.max_col_norm
-                )
-            })
-            .collect();
+        let render = |fams: &[FamilyStats]| -> Vec<String> {
+            fams.iter()
+                .map(|f| {
+                    format!(
+                        "\"{}\":{{\"cols\":{},\"exact_zero\":{},\"near_zero\":{},\"used\":{},\"max_col_norm\":{:.6e}}}",
+                        f.label, f.cols, f.exact_zero, f.near_zero, f.used, f.max_col_norm
+                    )
+                })
+                .collect()
+        };
+        let fam_json = render(&self.families);
+        let v1_json = render(&self.v1_families);
         format!(
-            "{{\"znpr_version\":{},\"n_inputs\":{},\"caller_input_width\":{},\"n_dropped\":{},\"layer0_in_dim\":{},\"layer0_out_dim\":{},\"dtype\":\"{}\",\"n_layers\":{},\"beyond_f943_cols\":{},\"near_zero_rel\":{:e},\"uses_f156_371\":{},\"families\":{{{}}}}}",
+            "{{\"znpr_version\":{},\"n_inputs\":{},\"caller_input_width\":{},\"n_dropped\":{},\"layer0_in_dim\":{},\"layer0_out_dim\":{},\"dtype\":\"{}\",\"n_layers\":{},\"beyond_f943_cols\":{},\"near_zero_rel\":{:e},\"uses_f156_371\":{},\"families\":{{{}}},\"v1_families\":{{{}}}}}",
             self.znpr_version,
             self.n_inputs,
             self.caller_input_width,
@@ -160,7 +182,8 @@ impl BlockProfile {
             self.beyond_f943_cols,
             NEAR_ZERO_REL,
             self.uses_f156_371,
-            fam_json.join(",")
+            fam_json.join(","),
+            v1_json.join(",")
         )
     }
 
@@ -196,6 +219,17 @@ impl BlockProfile {
             );
         }
         let _ = writeln!(s, "uses_f156_371 (structural): {}", self.uses_f156_371);
+        if !self.v1_families.is_empty() {
+            s.push_str("\n# v1-372 COMPUTE families (basic 156 | peaks 72 | masked 72 | IW 72)\n");
+            s.push_str("family    cols  exact0  near0  used  max\u{2016}col\u{2016}\n");
+            for f in &self.v1_families {
+                let _ = writeln!(
+                    s,
+                    "{:<9} {:>4}  {:>6}  {:>5}  {:>4}  {:.3e}",
+                    f.label, f.cols, f.exact_zero, f.near_zero, f.used, f.max_col_norm
+                );
+            }
+        }
         s
     }
 }
@@ -385,27 +419,32 @@ pub fn profile(model: &Model) -> Result<BlockProfile, String> {
     let max_norm = norms.iter().cloned().fold(0.0f64, f64::max);
     let near = NEAR_ZERO_REL * max_norm;
 
-    let mut families = Vec::new();
-    for &(label, lo, hi) in FAMILIES {
-        if lo >= caller_width {
-            continue;
+    let tabulate = |spec: &'static [(&'static str, usize, usize)]| -> Vec<FamilyStats> {
+        let mut out = Vec::new();
+        for &(label, lo, hi) in spec {
+            if lo >= caller_width {
+                continue;
+            }
+            let hi = hi.min(caller_width);
+            let cols = hi - lo;
+            let sl = &norms[lo..hi];
+            let exact_zero = sl.iter().filter(|&&n| n == 0.0).count();
+            let near_zero = sl.iter().filter(|&&n| n > 0.0 && n <= near).count();
+            let used = cols - exact_zero - near_zero;
+            let fam_max = sl.iter().cloned().fold(0.0f64, f64::max);
+            out.push(FamilyStats {
+                label,
+                cols,
+                exact_zero,
+                near_zero,
+                used,
+                max_col_norm: fam_max,
+            });
         }
-        let hi = hi.min(caller_width);
-        let cols = hi - lo;
-        let sl = &norms[lo..hi];
-        let exact_zero = sl.iter().filter(|&&n| n == 0.0).count();
-        let near_zero = sl.iter().filter(|&&n| n > 0.0 && n <= near).count();
-        let used = cols - exact_zero - near_zero;
-        let fam_max = sl.iter().cloned().fold(0.0f64, f64::max);
-        families.push(FamilyStats {
-            label,
-            cols,
-            exact_zero,
-            near_zero,
-            used,
-            max_col_norm: fam_max,
-        });
-    }
+        out
+    };
+    let families = tabulate(FAMILIES);
+    let v1_families = tabulate(V1_FAMILIES);
     let uses_f156_371 = families
         .iter()
         .find(|f| f.label == "f156_371")
@@ -424,5 +463,6 @@ pub fn profile(model: &Model) -> Result<BlockProfile, String> {
         beyond_f943_cols: caller_width.saturating_sub(944),
         uses_f156_371,
         families,
+        v1_families,
     })
 }

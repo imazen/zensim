@@ -651,3 +651,70 @@ fn fused_compare_splits_into_fold_score_plus_standalone_map() {
         );
     }
 }
+
+/// **Per-profile weight-skipping must be INERT for every shipped profile**
+/// (feature-cost lane, 2026-08-31).
+///
+/// `Zensim::with_unread_feature_skipping(true)` lets a fold-backed score drop
+/// the v1 masked/IW pass group when the profile's bakes structurally ignore
+/// `f228..372`. Profile B does NOT ignore it (its layer 0 carries 10 live
+/// masked lines and 13 live IW lines — `bake_block_profile`, 2026-08-31), so
+/// the policy must resolve to `V1PoolsMode::Full` and the opted-in result must
+/// be bit-identical to the default one — on BOTH engines, at every geometry,
+/// at every rayon pool size. That is the "no silent behaviour change for
+/// existing callers" half of the contract, gated as a fact rather than an
+/// intention: if a future bake, repack or prune zeroed those columns, this
+/// test would keep passing (the skip would then be genuinely score-neutral),
+/// but a policy bug that fired on a live block fails it immediately.
+#[cfg(feature = "threads")]
+#[test]
+fn unread_feature_skipping_is_inert_on_a_profile_that_reads_the_block() {
+    assert_eq!(
+        Zensim::new(ZensimProfile::B)
+            .with_unread_feature_skipping(true)
+            .score_pool_mode(),
+        zensim::feature_v2::V1PoolsMode::Full,
+        "B reads f228..372 — the policy must refuse to skip it"
+    );
+    let cells: Vec<(usize, usize)> = CELLS
+        .iter()
+        .copied()
+        .chain([(256usize, 256usize), (96, 320), (320, 96), (577, 385)])
+        .collect();
+    for &(w, h) in &cells {
+        let (r, d) = pair(w, h);
+        for threads in [1usize, 2, 3, 8, 16] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("build rayon pool");
+            pool.install(|| {
+                for engine in [ScoringEngine::Buffered, ScoringEngine::Fold] {
+                    let base = Zensim::new(ZensimProfile::B)
+                        .with_parallel(true)
+                        .with_engine(engine);
+                    let skipping = Zensim::new(ZensimProfile::B)
+                        .with_parallel(true)
+                        .with_engine(engine)
+                        .with_unread_feature_skipping(true);
+                    let a = base
+                        .compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
+                        .expect("compute");
+                    let b = skipping
+                        .compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
+                        .expect("compute");
+                    assert_result_bit_identical(
+                        &format!("{w}x{h} @ {threads}T {engine:?}: skipping moved the result"),
+                        &a,
+                        &b,
+                    );
+                    // And the block it would have skipped is genuinely live.
+                    assert!(
+                        a.features()[228..372].iter().any(|&v| v != 0.0),
+                        "{w}x{h}: masked/IW block is all-zero — the gate would be vacuous"
+                    );
+                }
+            });
+        }
+    }
+}
