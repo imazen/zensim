@@ -713,6 +713,50 @@ and use the `ZL_BV` / `ZL_TRAIN` / `CARGO_TARGET_DIR` pointers the drivers
 already honour. The real target-dir cost is disk — 28 dirs, 113.6 GB, root at
 95 % — so delete yours when a wave closes.
 
+## PERF MEASUREMENT: the noise floor at 2304² is 10 %, and it is ASLR (2026-08-31)
+
+**MEASURED, `benchmarks/era2_perf_break_2026-08-31.md` §22.5.** The 944 walk at
+2304²/1T, same binary, same environment, CCD-pinned, min of 11 walks per
+process:
+
+| | 8 process starts | spread |
+|---|---|---:|
+| **ASLR off** (`setarch -R`) | 363.22 363.39 363.53 363.22 363.16 363.49 362.98 363.80 | **±0.13 %** |
+| **ASLR on** | 335.48 335.11 357.60 340.53 328.81 361.47 361.97 357.51 | **10.1 %** |
+
+The distribution is **bimodal** (~334 or ~360, rarely between), not noisy. The
+~13 strip planes are each `2304 × 148 × 4 B` = exactly 333 pages at a fixed
+relative stride, so the mmap base decides whether the streams conflict. Ruled
+out by measurement: THP (`madvise` mode, `AnonHugePages: 0 kB` in **both**
+states), a 0–512-page heap-base shift (327.29–328.27 ms flat), per-plane
+staggering from 64 B to 64 KiB (326.95–328.54 ms flat), and CCD placement.
+
+**Consequences — treat these as rules, not advice:**
+
+- **Any single-process 2304² perf number is ±10 %.** That includes numbers
+  already published in this repo's perf docs. Interleaved multi-process
+  comparisons survive; single before/after pairs do not.
+- **A before/after across two BUILDS cannot be trusted at all below ~10 %** —
+  any edit reshuffles the binary's own layout by about that much. Put the arms
+  behind a **runtime** flag in ONE binary.
+- **The environment block is a layout input.** Adding an env var that provably
+  does nothing flipped one build from 359 → 328 ms. Keep env values the same
+  BYTE LENGTH across arms (`ZENSIM_X=032`, not `=32`); never select an arm by
+  the *presence* of a variable.
+- **The protocol:** one binary + runtime arms → identical-length env → arms
+  interleaved → **min of N walks in a process** (kills interference) → **min
+  over ≥15 process starts with ASLR on** (kills layout). Carry a
+  **bit-identical control arm** when one exists; if your estimator reports the
+  control as faster than the thing it is identical to, the estimator is not
+  sound yet. `setarch -R` is a fast second opinion on one arbitrary layout,
+  never the primary.
+
+Instrument: `zensim/examples/foldapp_stream_bigpair.rs` —
+`ZENSIM_BIGPAIR_TOGGLES=944full|924|372`, `ZENSIM_BIGPAIR_ITERS=N` (median +
+min + `smaps_rollup` Rss/AnonHugePages), `ZENSIM_BIGPAIR_PARALLEL=1`,
+`ZENSIM_BIGPAIR_DUMP=<path>` (every feature with its `to_bits()` — the
+bit-identity control).
+
 ## ⇒ POST-COMPACT / NEW SESSION: read [`SESSION-RESUME.md`](SESSION-RESUME.md) FIRST
 
 Then return here. `SESSION-RESUME.md` is the canonical entry point —

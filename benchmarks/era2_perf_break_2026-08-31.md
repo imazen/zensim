@@ -1506,19 +1506,53 @@ performs — and it reproduces the strip-wide 956-feature vector **bit-for-bit,
 
 ### 22.2 The measurement
 
-2304², 1T, `944full`, CCD0-pinned (`taskset -c 0-7,16-23`), **min of 15 walks**
-per process, three interleaved rounds (`base`, `b32`, `b64`, `b128` in order,
-repeated) — see §22.4 for why anything less is noise.
+**Protocol first, because it is what makes the numbers mean anything.** 2304²,
+1T, `944full`, CCD0-pinned (`taskset -c 0-7,16-23`), arms selected by a
+**runtime** flag so all four run from ONE binary, env values chosen to be the
+**same byte length** in every arm (`ZENSIM_BAND_LOCAL=0|1`,
+`ZENSIM_BAND_ROWS=032|064|128`) so the environment block cannot shift the
+address space between arms, arms **interleaved** round-robin, **min of 7 walks
+within each process**, and — the part that turned out to dominate everything —
+**15 separate process starts per arm with ASLR ON, reported as the minimum
+over those 15 layouts.** §22.5 is why.
 
-| shape | halo redundancy | round 1 | round 2 | round 3 | median | vs base |
-|---|---:|---:|---:|---:|---:|---:|
-| strip-wide (base) | 1.156× | 335.28 | 332.71 | 333.82 | **333.82** | — |
-| banded `B=32` | 1.625× | 384.06 | 415.02 | 387.93 | **387.93** | **+16.2 %** |
-| banded `B=64` | 1.31× | 350.78 | 378.51 | 375.39 | **375.39** | **+12.4 %** |
-| banded `B=128` | 1.156× | 334.61 | 334.97 | 333.25 | **334.61** | +0.2 % |
+`B=128` is the **control**: the band loop degenerates to one band per strip,
+so it performs the identical decomposition and emits the identical bits, and
+whatever it costs above the baseline is the price of the extra scratch buffer
+and the loop plumbing, not of banding.
 
-`B=128` is the control and lands on the baseline, as it must. **Every band
-height that actually bands is worse**, monotonically in the halo redundancy.
+| shape | halo redundancy | MIN over 15 | p25 | median | max | vs base | **minus control** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| strip-wide (base) | 1.156× | **323.54** | 332.67 | 335.11 | 360.33 | — | — |
+| banded `B=32` | 1.625× | **373.97** | 383.99 | 412.19 | 420.14 | +15.6 % | **+13.1 %** |
+| banded `B=64` | 1.31× | **341.39** | 350.03 | 352.20 | 379.31 | +5.5 % | **+3.0 %** |
+| banded `B=128` (control) | 1.156× | **331.56** | 333.48 | 335.34 | 358.75 | +2.5 % | 0 |
+
+**Every band height that actually bands is worse, monotonically in the halo
+redundancy.** Three other estimators agree on the sign:
+
+| estimator | base | `B=32` | `B=64` | `B=128` |
+|---|---:|---:|---:|---:|
+| ASLR **off**, one layout | 334.68 | 415.75 (+24.2 %) | 375.45 (+12.2 %) | 356.50 (+6.5 %) |
+| ASLR on, median of 9 | 355.46 | — | 351.87 (−1.0 %) | 335.46 (−5.6 %) |
+| ASLR on, min of 15 (above) | 323.54 | 373.97 (+15.6 %) | 341.39 (+5.5 %) | 331.56 (+2.5 %) |
+
+The ASLR-on **median** row is the one to distrust and it is included as the
+counter-example: with a bimodal ±8 % layout distribution and n = 9 it reports
+`B=128` — a bit-identical arm — as **5.6 % faster than the thing it is
+identical to**. The min-over-layouts estimator puts the same arm at +2.5 %,
+which is the honest reading of "the plumbing costs a little", and that is the
+sanity check the estimator has to pass before any other row of the table is
+worth reading.
+
+**The plumbing is proven, not asserted.** At `B = STRIP_ROWS` the walk
+reproduces the strip-wide 956-feature vector **bit-for-bit, 956 of 956 slots**
+at 1152² (`ZENSIM_BIGPAIR_DUMP` writes every feature with its `to_bits()`).
+At `B = 32`, 547 of 956 slots are still bit-identical and the divergence is
+confined to near-zero cancelling features — the worst *relative* deltas
+(f693 at 19 %, f692 at 16 %) sit on absolute values of 2.9e-5 and 2.1e-5, i.e.
+absolute changes of ~5e-6 — which is the expected signature of the V-blur
+running-sum restart, not of a plumbing error.
 
 Under `ZENSIM_FOLD_TIMING` (which perturbs the cache and compresses the
 spread) the phase attribution shows where it goes at `B=64`: `blur_h`
@@ -1526,7 +1560,7 @@ spread) the phase attribution shows where it goes at `B=64`: `blur_h`
 work (129.40/1.156 = 111.9 vs 117.70/1.31 = 89.8, **1.25×**, the same
 direction the proxy reported at 1.40×) — but it is doing **13 % more work**,
 and `planesA` (41.12 → 40.24) and `planesApp` (18.65 → 20.01) do not improve
-at all. The efficiency gain is real and it is smaller than the tax.
+at all. The efficiency gain is real, and it is smaller than the tax.
 
 ### 22.3 Why the proxy over-promised — the arithmetic the ns/px numbers hide
 
@@ -1573,60 +1607,70 @@ hand-off's prize are now measured: the band directly (this section, three
 heights), and the rolling window's load-bearing component by the lane that
 tried it.** The prize as scoped is not there.
 
-### 22.5 Methodology, which is the transferable part
+### 22.5 Methodology — the noise floor is 10 %, and it is ASLR
+
+This is the transferable part, and it invalidates more than this experiment.
 
 The first three sweeps of this experiment said band-local **won by 6.6 %**,
 then that `B=128` won by 9.4 %, then that everything was a wash. All three
-were the same binary. Running configs in sequential blocks measures **drift**:
-unpinned, back-to-back medians on this workload span **329–415 ms for
-identical work** (±13 %). Two changes fixed it, and both were necessary:
+were the same binary. The cause, isolated:
 
-1. **Interleave the arms** (`base, b32, b64, b128` repeated), never
-   `base×N then b64×N`.
-2. **Report the MIN of many walks in one process**, not the median. The
-   machine can only make a walk slower, so the minimum is the estimator that
-   interference cannot inflate. Min-of-15 gave `base` = 335.28 / 332.71 /
-   333.82 across three rounds — **±0.4 %**, against ±13 % for the median of
-   the same runs.
+| condition (same binary, same env, 8 process starts) | results (ms, min of 11 walks each) | spread |
+|---|---|---:|
+| **ASLR off** (`setarch -R`) | 363.22 363.39 363.53 363.22 363.16 363.49 362.98 363.80 | **±0.13 %** |
+| **ASLR on** | 335.48 335.11 357.60 340.53 328.81 361.47 361.97 357.51 | **10.1 %** |
 
-CCD pinning alone did **not** fix it (the 9950X3D's asymmetric L3 — 96 MiB on
-CCD0, 32 MiB on CCD1 — was the first suspect and pinned runs still spanned
-325–380 ms on medians). Pinning is retained because it removes one variable
-for free, but the estimator was the fix.
+**With ASLR disabled the 944 walk at 2304² is deterministic to ±0.13 %. With
+ASLR enabled it is bimodal over a 10 % range**, landing near ~334 or ~360 and
+rarely between. Identical binary, identical environment, identical work — only
+the mmap base differs. The plane buffers are each `2304 × 148 × 4 B` =
+1,363,968 B = exactly 333 pages, allocated at a fixed relative stride, so
+where that whole block lands decides whether the streams conflict.
 
-**And then the estimator found the actual cause, which is worth more than the
-experiment that surfaced it.** Min-of-15 is stable *within* a process
-(min 359.00 against median 359.61) and still moves *between* processes
-(334.68, 354.42, 356.00 on three consecutive runs of one binary). Per-process,
-not per-iteration, points at the address space — and it is:
+Things that were tried and are **not** the mechanism, each measured:
 
-| | run 1 | run 2 | run 3 | run 4 | spread |
-|---|---:|---:|---:|---:|---:|
-| **ASLR off** (`setarch -R`) | 358.93 | 358.76 | 359.16 | 358.42 | **±0.1 %** |
-| **ASLR on** | 335.62 | 332.04 | 359.38 | 334.39 | **7.4 %** |
+* **Transparent huge pages.** THP is `madvise` on this box and
+  `AnonHugePages: 0 kB` in `smaps_rollup` in **both** the fast and slow
+  states. Not it.
+* **A controlled heap-base shift.** Leaking 0…512 pages immediately before
+  the scratch is sized (`ZENSIM_BIGPAIR_HEAPSHIFT`) moved the walk by
+  **nothing**: 327.29–328.27 ms across the whole sweep.
+* **Staggering the planes against each other.** Giving plane *k* an extra
+  `k × stagger` elements, swept over 64 B … 64 KiB, also moved **nothing**:
+  326.95–328.54 ms. Both probes were removed; neither is a lever.
+* **CCD placement.** The 9950X3D's asymmetric L3 (96 MiB on CCD0, 32 MiB on
+  CCD1) was the first suspect. Pinning to one CCD does not remove the
+  bimodality. Pinning is retained because it removes one variable for free.
 
-2304², 1T, `944full`, CCD0-pinned, min of 15 walks each. The ASLR-on column is
-not noisy — it is **bimodal**, landing on ~333 or ~359 and nothing between.
-That is a cache-conflict cliff: the ~13 strip-wide plane buffers are each
-`2304 × 148 × 4 B` = 1,363,968 B = **exactly 333 pages**, so they are
-allocated at a fixed relative stride and every one of them starts congruent
-mod 4096; whether the set they collectively land on conflicts is decided by
-the ASLR base. **The placement of these buffers is worth 7.4 % of the entire
-944 walk, and today it is left to chance on every process start.**
+And one trap worth naming, because it produced a confident wrong conclusion
+mid-session: **the size of the environment block is itself a layout input.**
+Adding `ZENSIM_PLANE_STAGGER=0` to the environment — a variable that provably
+does nothing — flipped one build from 359 ms to 328 ms, and a later unrelated
+edit flipped the sense of that same comparison. Any A/B whose arms are
+selected by *presence* of an env var is comparing two address spaces. Hence
+`ZENSIM_BAND_ROWS=032` rather than `=32` in §22.2.
 
-Three consequences, all load-bearing:
+**The protocol that follows from this**, and that any future perf claim in
+this repo at this size has to meet:
 
-1. **Any 2304² perf number in this repo taken from a single process is ±7 %**
-   unless it was run under `setarch -R` or averaged over many process starts.
-   That includes numbers this lane and its siblings have published. The
-   *comparisons* survive when arms were interleaved across many processes
-   (§22.2's b32/b64 losses are 12–16 %, well outside it); single-process
-   before/after pairs do not.
-2. **`setarch -R` is now part of the measurement protocol here**, together
-   with min-of-N and interleaving.
-3. **It is also a lever.** 7.4 % of the walk is available for free, with no
-   byte change at all, if the plane buffers are placed deliberately instead of
-   landing wherever 13 same-sized mmaps land — §23.
+1. **One binary, runtime-selected arms.** A before/after across two *builds*
+   cannot distinguish a real change from a relayout; any edit reshuffles the
+   binary's own layout by the same ~10 %.
+2. **Byte-identical environment blocks** between arms.
+3. **Interleave** the arms; never `base×N` then `arm×N`. Sequential blocks
+   measure drift.
+4. **Min of N walks inside a process** (the machine can only make a walk
+   slower) — this removes *interference*, and it is not enough on its own.
+5. **Min over ≥15 process starts with ASLR on** — this removes *layout*. It
+   answers "what does this shape cost in its best placement", which is the
+   only question that is stable enough to be worth answering.
+6. **Carry a bit-identical control arm** whenever one exists (here `B=128`).
+   Its measured delta is the plumbing/layout floor, and an estimator that
+   reports the control as *faster than the thing it is identical to* is
+   telling you it is not yet sound.
+
+A `setarch -R` run is a useful adjunct — it is deterministic and fast — but it
+samples exactly one arbitrary layout, so it can only ever be a second opinion.
 
 ### 22.6 Disposition
 

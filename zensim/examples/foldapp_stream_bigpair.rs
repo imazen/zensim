@@ -120,6 +120,19 @@ fn main() {
             std::fs::write(&path, out).expect("dump");
             eprintln!("dumped {} features to {path}", r.features().len());
         }
+        if let Ok(roll) = std::fs::read_to_string("/proc/self/smaps_rollup") {
+            let g = |k: &str| -> String {
+                roll.lines()
+                    .find(|l| l.starts_with(k))
+                    .map(|l| l.split_whitespace().nth(1).unwrap_or("?").to_string())
+                    .unwrap_or_else(|| "?".into())
+            };
+            eprintln!(
+                "smaps: Rss={} kB AnonHugePages={} kB",
+                g("Rss:"),
+                g("AnonHugePages:")
+            );
+        }
         ms.sort_by(f64::total_cmp);
         eprintln!(
             "arm={arm} {w}x{h} iters={iters} median {:.2} ms  min {:.2}  max {:.2}",
