@@ -4679,3 +4679,55 @@ landed; item D is byte-neutral.
   overwrite. **BHdr is the one model constraining BOTH components.**
 - The E/F table now carries the F6 accumulation row, the corrected F4 row, and a "what is shippable
   today" section: **tiling alone; radius 4 only behind the registered retrain.**
+
+## 2026-08-31 ~18:4xZ — ROUND 33: ★ ERA-2 IS FLIPPED (`515001dc`, `b58b3ade`) + the fast-profile subset (`0a9e7113`)
+
+**USER DECISION EXECUTED: column tiling + fixed-lane accumulation are DEFAULT-ON in one step.**
+Radius 4 not flipped (stays behind the registered retrain wave).
+- **Gate re-pins, old → new: ZERO — and not by luck.** Round 30's enumeration predicted five
+  goldens, but that was measured at `tile = 32`, the forced-on setting used to FIND the set. At the
+  shipped width the fixtures are 64×64, 96×96, 200×150, 128×128 — **all narrower than 1024** — so
+  every H entry's `width > tile` guard runs them untiled; and the accumulation re-pins zero
+  independently (it moves only `f372+`; every golden pins v1's 372). No tolerance widened, nothing
+  ignored, every internal-consistency gate unchanged at both settings.
+- **A hole the flip CREATED, closed in the same commit**: if no fixture is wider than the tile, no
+  test exercises the shipped configuration — `CELLS` topped out at 592. Added **(1153, 72)** and
+  **(2049, 40)** — odd widths crossing one and two tile boundaries, the second leaving a 1-column
+  remainder tile — so the mandated pool-size gate now runs where tiling actually fires. **370/0.**
+- `H_TILE_WIDTH = 1024` is **DERIVED**: the live window is `H_BLUR_ROW_GROUP × 6 × tile × 4 B` ⇒ a
+  1 MiB L2 caps it at 1365; 1024 is the power of two below, fits a 512 KiB L2 (393 KiB), and sits
+  inside the measured-flat 512–1536 band. Semantics-not-a-knob warning ships at the constant.
+- **★ THE ERA'S HEADLINE PROPERTY, on the shipped build** — same binary, dev (`v4x` AVX-512) vs
+  i134 (`v3` SSE4.2): **era-1 `reduce_add` diverges on 66 of 105 slots across vendors; era-2
+  `era2_reduce8` diverges on 0 of 105.** (This is what would let the golden gate be re-tightened
+  from tolerance to EXACT — registered as a user option, not taken.)
+- **BHdr recorded as a USER-ACCEPTED EXCEPTION, not dropped**: `eval_annotations.json` →
+  `era2-tiling-bhdr-accepted-exception`, carrying the standing warning that **any future roll-up
+  counting tiling as 6/6 is WRONG — it is 5/6 plus this exception** — and naming retrain arm
+  W-R4-4 as the fix path. Blemish recorded: a backtick in the flip commit message triggered shell
+  substitution (stray empty file, dropped phrase); since `515001dc` was already on origin the lane
+  landed a follow-up rather than rewriting pushed history.
+
+### The fast-profile subset — measured on the era-2 build, 2304², min over 5 process starts
+
+| compute set | 1T | 8T | 16T | RSS | vs `944full` |
+|---|---:|---:|---:|---:|---|
+| `944full` | 278.0 | 124.0 | 113.6 | 105 MB | — |
+| `944carriers` | 286.3 | 102.8 | 108.0 | 105 MB | **SLOWER at 1T** |
+| `944peaks` | 246.8 | 101.8 | 96.6 | 98 MB | 1.13 / 1.22 / 1.18× |
+| **`156`** | **109.6** | **28.0** | **32.2** | **83 MB** | **2.54 / 4.43 / 3.52×** |
+
+Three things the table said that the prose did not: dropping the pool pass independently reproduces
+the 13.6 % figure; **`944carriers` is NOT a cheap middle** (slower than full at 1T — it still runs
+the masked/IW kernel at scales 0–1); and **basic-only SCALES BEST** (2.54× → 4.43×) because what it
+removes is what contends for bandwidth.
+**Recommendation — two points**: **`156` + an ADD156-class model** for a real fast profile (within
+0.019 CID22 of B and BEATING it on within-image ranking on 7/8 corpora — the criterion a codec loop
+actually consumes); **`944peaks`** for callers keeping a 944 MLP (1.13–1.22× at **exactly zero**
+rank cost). Keep the peaks (free byproducts). NOT recommended: `944carriers`, dropping peaks, and
+`372` (dominated). **API: no new public types** — `ComputeSet::from_block_profile(model)` is the one
+new function; it makes the `944peaks` case automatic, and a fast profile is then just a profile
+carrying an ADD156 bake. Retrain **W-FAST-1 registered, not launched** (not required — ADD156 already
+trains on basic families only — but warranted, since every current bake was trained at era-1; it
+shares the blast-radius wave's re-extraction). Per-corpus deltas vs B and ssim2 are marked
+NOT-MEASURED-HERE / ATTACH from the frontier lane rather than estimated.
