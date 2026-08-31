@@ -1692,3 +1692,125 @@ H blur's working set — the doc's own diagnosis of the 3.69× degradation
 ("16 rows × 6 planes × 2304 × 4 B = 884 KiB, which is the 1 MiB L2 on this
 part") — along the axis that appears in that product. That is where this lane
 goes next, and §22.2's estimator is what it will be judged on.
+
+---
+
+## 23. Column tiling: the H blur is a function of WIDTH, and tiling it is 1.20×@5 MP / 1.78×@21 MP
+
+§22 killed row banding because the halo closure of the phase-A chain is
+`±2·BLUR_RADIUS` — 20 rows out of a 32-row band, **62 % redundancy**. The same
+closure in the **column** direction is `±BLUR_RADIUS`: a 1536-wide tile
+re-blurs 10 of 1546 columns, **0.6 %**. That asymmetry is the whole reason this
+axis works and the other one cannot.
+
+### 23.1 The zero-code probe that pointed here
+
+Hold the pixel count fixed at 5.31 MP and change only the aspect ratio
+(2304², 1T, `setarch -R`, `ZENSIM_FOLD_TIMING`):
+
+| shape | width | `blur_h` ms | `v2:planesA` ms |
+|---|---:|---:|---:|
+| 2304 × 2304 | 2304 | **104.99** | 38.62 |
+| 1152 × 4608 | 1152 | **34.58** | 27.07 |
+| 576 × 9216 | 576 | **30.95** | 26.41 |
+| 288 × 18432 | 288 | **31.33** | 25.14 |
+
+**Same work, same pixels: the H blur costs 3.4× more at width 2304 than at
+width 1152, and is flat below that.** That is not a pixel-count effect and it
+is not bandwidth — it is the kernel's own working set. It holds 16 rows ×
+6 planes (src, dst, four outputs), which is `16 × 6 × 2304 × 4 B` = **884 KiB**
+against the 1 MiB L2 on this part, and 442 KiB at 1152. `planesA` shows the
+same shape more weakly (1.43×). The v2-block lane named this mechanism
+(`benchmarks/v2_block_cost_2026-08-31.md` §2.3) and concluded
+`H_BLUR_BAND_ROWS = 16` was already the smallest legal value — which is true,
+and is why the fix has to come from the **other** dimension of that product.
+
+### 23.2 What was built (a deliberate lower bound)
+
+`fused_blur_h_ssim_column_tiled` (`feature_v2.rs`) runs the existing
+`fused_blur_h_ssim` over column tiles of `ZENSIM_H_TILE` output columns, each
+blurred with a `±BLUR_RADIUS` column halo whose outputs are discarded. It
+**copies** each tile's two inputs in and its four outputs back out, so every
+consumer downstream still sees full-width planes and nothing else in the walk
+changes. Those copies are pure overhead that a stride-aware kernel would not
+pay — **so every number below is a lower bound on the real win.**
+
+Not bit-exact: the kernel's running sum along x restarts at each tile, so this
+is an era-2 byte change. Tile boundaries are a pure function of `(width,
+tile)`, so the result stays thread- and schedule-invariant — the era-2
+contract. Control: at width 1152 with `tile = 1536` no tiling happens and the
+956-feature vector is **bit-identical, 956/956**; with `tile = 1024` (two
+tiles) 791/956 slots are still bit-identical and the largest *relative*
+deviation is 0.143 on `f171`, whose absolute value is 4.0e-4 — the near-zero
+cancelling-feature signature, same as §22.2.
+
+### 23.3 The measurement
+
+2304², 1T, `944full`, CCD0-pinned, one binary, runtime-selected arms with
+byte-identical env values (`ZENSIM_H_TILE=0000|0512|1024|1536`), interleaved,
+min of 7 walks per process, **min over 15 process starts** — the §22.5
+protocol.
+
+| tile | MIN over 15 | p25 | median | max | spread | vs untiled |
+|---|---:|---:|---:|---:|---:|---:|
+| off (`0000`) | 324.10 | 333.20 | 334.64 | 356.14 | **9.9 %** | — |
+| 512 | 271.25 | 272.15 | 272.53 | 277.61 | 2.3 % | **1.195×** |
+| 1024 | 271.64 | 271.88 | 271.96 | 277.18 | 2.0 % | 1.193× |
+| 1536 | **270.57** | 270.89 | 271.06 | 279.37 | 3.2 % | **1.198×** |
+
+Two results, not one:
+
+1. **1.20× on the whole 944 walk**, flat across tile widths from 512 to 1536 —
+   which is what §23.1 predicts, since anything at or below ~1152 fits.
+   Under `ZENSIM_FOLD_TIMING` the attribution is unambiguous: **`blur_h`
+   130.47 → 40.36 ms, a 3.2× on the single largest item in the walk.**
+2. **Tiling also collapses the ASLR lottery.** The untiled arm spans 9.9 % over
+   15 layouts; every tiled arm spans 2–3 %. Shrinking the working set removes
+   most of the conflict cliff §22.5 documents — a second, independent benefit,
+   and one that makes every future measurement here cheaper.
+
+### 23.4 Size sweep — and the superlinear term this removes
+
+Min over 7 process starts per cell, `tile = 1536`:
+
+| size | MP | untiled | tiled | speedup | untiled ms/MP | tiled ms/MP |
+|---|---:|---:|---:|---:|---:|---:|
+| 576² | 0.33 | 7.36 | 7.36 | **1.000×** | 22.2 | 22.2 |
+| 1152² | 1.33 | 62.52 | 62.47 | **1.001×** | 47.1 | 47.0 |
+| 2304² | 5.31 | 325.40 | 270.72 | **1.202×** | 61.3 | 51.0 |
+| 4608² | 21.2 | 2308.51 | 1298.79 | **1.777×** | 108.9 | 61.3 |
+
+The two small buckets are **exactly unchanged**, as they must be: their width
+is below the tile, so no tiling happens and the code path is the untiled one.
+That is the regression check for the small end, not an argument by analogy.
+
+The interesting column is ms/MP. Untiled, it climbs **22.2 → 108.9** — the
+944 walk has a large superlinear term in image size. Tiled, it climbs
+22.2 → 61.3, and from 2304² to 4608² (4× the pixels) the tiled walk grows
+**4.80×** where the untiled grows **7.09×**. **Tiling does not just shift the
+curve down, it removes most of the superlinear term**, which is why the win
+grows with size — 1.20× at 5 MP, 1.78× at 21 MP, and by construction larger
+still above that.
+
+### 23.5 What is next, in value order
+
+1. **Tile `planesA` too.** The four V blurs are **column-independent** —
+   `v_add_idx`/`v_rem_idx` depend only on `y` — so tiling them is
+   **bit-identical and needs no era at all**, and §23.1 shows the pass carries
+   the same width dependence (38.62 → 27.07 ms, 1.43×). The activity and
+   `bs2` chains contain H passes and take the same `±BLUR_RADIUS` halo as the
+   H blur. `planesA` + `planesApp` are 57 ms at 2304² today.
+2. **Delete the copies.** `fused_blur_h_ssim_column_tiled` copies six planes
+   per tile purely to avoid touching the four hand-written tier bodies. A
+   `stride` parameter (row length stays `width`, row base becomes `y*stride`)
+   removes every copy — and the workspace's own pixel-buffer rule already says
+   multi-row functions must take stride natively, at no cost on the packed
+   path. This is the *right* API, not just the faster one.
+3. **The parallel path.** `fused_blur_h_ssim_banded`'s rayon arm is untouched;
+   it row-bands across threads and each band still runs full-width. Tiling
+   composes with it (tiles inside a band), and the shrunken working set should
+   help contention more than it helps 1T.
+4. **`TILE_WIDTH` is then a constant with provenance**, not a knob: 512–1536
+   are within noise of each other at 2304², so the choice should be made on
+   the 4608² and threaded cells, and re-derived per the workspace sweep rule
+   rather than fixed at whatever won once at one size.

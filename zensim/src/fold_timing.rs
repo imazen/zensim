@@ -48,6 +48,12 @@ static COUNTS: [AtomicU64; N_PHASE * N_SCALE] = [const { AtomicU64::new(0) }; N_
 static WALKS: AtomicU64 = AtomicU64::new(0);
 
 /// Phases of the strip loop, in the order they execute.
+// `PhaseAV2Planes` / `PhaseAAppendPlanes` trip `enum_variant_names` on the
+// enum's own name, but the `PhaseA` prefix names the WALK's phase A (the
+// plane-production fan-out) — the shared prefix is the thing being measured,
+// not a restatement of the type. Renaming them would break the correspondence
+// with `stream_phase_a`.
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
 pub(crate) enum Phase {
