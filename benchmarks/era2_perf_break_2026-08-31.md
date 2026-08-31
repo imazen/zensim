@@ -1922,3 +1922,122 @@ exactly the untiled code path.
    are within noise of each other at 2304², so the choice should be made on
    the 4608² and threaded cells, and re-derived per the workspace sweep rule
    rather than fixed at whatever won once at one size.
+
+---
+
+## 24. The packed column slab was measured BEFORE it was built — and its premise is false
+
+The slab was specified in §23.7 and directed as the next build: pack
+`src`/`dst`/`refy` into slab-width buffers once per slab, run phase A *and*
+phase B at slab width, never copy out. Its stated targets were the two
+remaining leaders at 4608² — **`fold` (28.3 %) and `planesA` (19.1 %)** — on
+the reasoning that both "have the same width disease" as the H blur.
+
+**One of those two does not.** The premise came from this lane's own report
+and was never measured; the width probe that found the H blur's disease
+(§23.1) measures every other phase for free, and it says:
+
+Same 5.31 MP, 1T, `setarch -R`, untiled, only the aspect ratio changes:
+
+| phase | w=2304 | w=1152 | w=576 | width-driven headroom |
+|---|---:|---:|---:|---:|
+| `blur_h` | 131.96 | 35.34 | 31.75 | **−100.2 ms (76 %)** — already taken |
+| **`fold`** | **79.86** | **77.33** | **75.01** | **−4.85 ms (6.1 %)** |
+| `v2:planesA` | 39.31 | 27.37 | 26.08 | −13.23 ms (33.7 %) |
+| `v2:planesApp` | 18.81 | 16.07 | 15.67 | −3.14 ms (16.7 %) |
+| `v2:dense` | 26.76 | 27.06 | 27.40 | none — **worse** at narrow width |
+| `v2:gradient` | 18.41 | 19.42 | 21.22 | none — **15 % worse** at w=576 |
+| `v2:append` | 15.82 | 15.85 | 16.04 | none |
+| `v2:blockiness` | 4.66 | 4.69 | 4.64 | none |
+| producer | 35.62 | 35.40 | 35.18 | none |
+
+**The fold is not width-diseased: 6.1 %, ~4.9 ms at 5 MP.** It is 28 % of the
+walk because it is 28 % of the *work*, not because its planes miss cache. Its
+per-pixel cost does drift (15.04 ms/MP at 5 MP against 17.6 at 21 MP, 1.17×),
+so a slab would recover something at 21 MP, but nothing like the H blur's
+8.5×.
+
+So the slab's whole available prize is **`planesA` + `planesApp` ≈ 16.4 ms of
+a 302 ms tiled walk at 5 MP (5.4 %)**, against which it must pay: a three-plane
+copy-in per slab, and **a measured penalty on the pointwise kernels**, which
+get *slower* at narrow width — `gradient` +15 % at w=576, `dense` +2.4 %.
+Those kernels are 66 ms at 5 MP, so a 5 % penalty there is −3.3 ms and eats a
+fifth of the prize before the copies are counted. It also needs a
+`stride`/`width` pair threaded through six phase-B kernels **and** the fold,
+because a column slab's halo is interleaved in every row and cannot be sliced
+off the way a row band's halo can — the "no kernel signature changes" claim in
+§23.7 was wrong for exactly that reason.
+
+**Not built.** A 5.4 % ceiling that arrives already reduced, behind a
+signature change across seven kernels, is not the next move — and the same
+probe says what is.
+
+### 24.1 Where the fold's mass actually is: the v1 pools, 41.2 ms
+
+Decomposing the fold by pool mode (2304², 1T, `setarch -R`, untiled):
+
+| arm | `V1PoolsMode` | `fold` | Δ |
+|---|---|---:|---:|
+| `944full` | Full | **78.79** | — |
+| `924` | Off | **37.59** | **−41.20** |
+| `372` (`v1_only`, self-blur) | Full | 78.15 | — |
+
+**The masked/IW/soft-peak pool pass is 41.2 ms — 52 % of the fold, and 13.6 %
+of the whole tiled 5 MP walk.** That is the single largest remaining item in
+the walk, it is *feature arithmetic* rather than layout, and no amount of
+tiling or slabbing touches it. It is squarely an **item E/F question** (drop
+set / redefinition): the 11 masked/IW pool pairs cost 13.6 % of every compare,
+and whether each earns that is exactly the measured table the charter asks
+for. Priced here so that table has a cost column before it has a utility one.
+
+### 24.2 And a bit-identical dedup the fold is sitting on
+
+`fused_vblur_features_ssim`'s own doc comment records that its `mu1_out` /
+`mu2_out` / `ssq_out` / `s12_out` are "**the exact planes
+`box_blur_v_from_copy` would produce**", bit-identically, because each
+column's V blur is an independent scalar recurrence (with one stated caveat:
+planes under 7 rows). In the **944** walk, phase A has *already computed those
+four planes strip-wide* for the v2 kernels — and then every fold band V-blurs
+the same four planes again over its own 42-row window (1.31× redundancy).
+
+The 944 walk therefore V-blurs the same four moment planes **twice**. The
+non-pool part of the fold is 37.6 ms at 5 MP, of which the V blur is a
+substantial fraction, so the dedup is worth roughly 15–20 ms (5–6 % of the
+tiled walk) and — unlike everything else in §23–24 — is a candidate to be
+**bit-identical, needing no era at all**. The activity blur is NOT part of
+this: v1 mirror-clamps it at its own band edges, which is the genuinely
+different-semantics case the v2-block lane recorded as not removable.
+
+Ranked against the slab's reduced 5.4 %, this is the better next build: bigger,
+byte-neutral, and confined to one call site rather than seven signatures.
+
+### 24.3 Cross-lane: numbers for the blur radius / locality / branches lane
+
+For `benchmarks/blur_radius_locality_branches_2026-08-31.md` (not yet on
+`main` at the time of writing), so it is not re-derived there:
+
+* **Rolling-window locality overlaps §22 and the answer is negative.**
+  Band-local phase A, measured at three band heights with a bit-identical
+  control: `B=32` **+15.6 %**, `B=64` **+5.5 %**, `B=128` (control, 956/956
+  bit-identical) +2.5 % — so **+13.1 % / +3.0 % / 0** net of plumbing, monotone
+  in halo redundancy. The rolling row window needs the row-major running-sum V
+  blur that the v2-block lane measured at **+9 %** and reverted (its L3).
+* **Radius changes this lane's halo arithmetic directly.** Phase A's closure is
+  `±2·BLUR_RADIUS` (activity = `blur(|src − blur(src)|)`), so a 32-row band
+  costs `(32 + 4R)/32` — **1.625× at R=5, 1.50× at R=4, 1.375× at R=3**. Row
+  banding does not become viable until R≈2 (1.25×), and even then it must beat
+  a measured 1.25× per-unit efficiency gain, so **a radius cut does not rescue
+  §22**. The column closure is `±R`, where the same cut is worth almost
+  nothing (a 1536-wide tile goes 0.65 % → 0.26 % redundancy) — **column tiling
+  is radius-insensitive; row banding is radius-limited.**
+* **Branch behaviour at row tails/edges:** the H blur's rem-ring warm-up
+  (`x >= diam`) and the `add_idx`/`rem_idx` mirror selects are the per-column
+  branches in the packed tile path, and packing multiplies the number of tile
+  edges by `width / tile`. That is measurable with the `ZENSIM_H_TILE` knob
+  already on `main` (`0000` vs `0512`/`1536`) — a 3× change in edge count on
+  the same binary.
+* **Protocol, if these are measured at 2304²:** ASLR alone makes this walk
+  bimodal over **10.1 %** (§22.5). Use `setarch -R`, one binary with runtime
+  arms, byte-identical env-var lengths, interleaving, and an
+  identical-code-path control cell; the noise floor is ±0.3 % at 1T and up to
+  **6.5 % at 8T**.
