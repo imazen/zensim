@@ -34,8 +34,10 @@ costs it CID22 −0.027 and *improves* its LIVE by 0.117). And a **basic-only**
 model — `ADD156`, which reads 28 of 156 basic lines and **zero** of the 216
 pool lines — lands within 0.019 pooled CID22 of shipped B, **beats** it on
 within-image ranking on seven of eight corpora including the near-lossless
-band, and needs the cheapest walk the extractor has (half the per-thread hot
-set of what `score()` runs today). If a 2× is wanted, that is where it is.
+band, and needs the cheapest walk the extractor has — **half the plane count**, in
+both the per-band-task hot set and the per-process resident set the
+fold-footprint lane's saturation test showed governs the thread ceiling. If a
+2× is wanted, that is where it is.
 
 ---
 
