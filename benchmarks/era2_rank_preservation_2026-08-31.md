@@ -157,7 +157,9 @@ At `tile = 1024` the byte-compare comes out exactly as the guard predicts:
 refs > 1024 × 60 pairs each). The same holds in the score domain — at
 `tile = 1024`, `per_pair.pred` is *unchanged for every pair of every corpus except
 aic3*, for all six models
-([`score_deltas.txt`](era2_rank_preservation_2026-08-31/score_deltas.txt)).
+([`score_deltas.txt`](era2_rank_preservation_2026-08-31/score_deltas.txt); note
+`bake_verdict` writes a 5,000-row subsample of `per_pair` for kadid, so that
+block's `n` is 5,000 while the SROCC panel above uses all 10,125 rows).
 
 **This is the honest limit of the production-width measurement: it exercises the
 tile on one corpus of nine.** It is not a defect of the extraction — it is what
@@ -299,6 +301,13 @@ largest single-corpus loss in the whole production-width arm is `BHdr`'s
 **4.0e-05** on aic3, which is **125× inside** the 0.005 threshold. The one FAIL
 is entirely the composite clause, which as registered carries **no tolerance**
 ("the composite does not fall"), and `BHdr`'s composite falls by **3.2e-6**.
+
+Two details make the size of these numbers concrete. `ADD156`'s aic3 SROCC is
+**exactly** `0.7769958141384993` in both arms even though 415 of its 600 aic3
+predictions changed (max |Δscore| 1.18e-2) — the perturbation never reordered a
+single pair, so its composite delta is exactly `0.0`. `B`'s aic3 SROCC moves
+`0.7636656440679733` → `0.763672344329381`, which is where its `+4.963e-07`
+composite comes from. That is the resolution this bar is being applied at.
 
 For scale, using the bar's own reference points: 3.2e-6 is **13 %** of the
 `+0.000024` era-1→era-3 precedent §21.1 cites as the size of a non-event, and
