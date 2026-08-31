@@ -4289,3 +4289,54 @@ the f64 pooled accumulation ⇒ moves bytes today, so it is recorded as an **era
   warnings, **none in era-2 code** — `feature_v2_stream.rs` (83, 774, 1073), `fold_timing.rs` (45,
   63, 65, 154, 182), `feature_v2.rs` (639, 2078). Left for their owners rather than a conflicting
   drive-by.
+
+## 2026-08-31 ~11:3xZ — ROUND 25: era-2 stage B — PARITY REACHED, and a 55× lesson about closures
+
+| geometry | era-1 | era-2 (V8, macros) | ratio |
+|---|---:|---:|---:|
+| 576×128 | 98.4 µs | **101.8 µs** | +4.0…+5.8 % |
+| 1152×128 | 202.7 µs | **210.1 µs** | −7.1…+16.2 % (CI spans zero) |
+
+**The 2.12× is closed** — but the route matters more than the number:
+
+| step | 576×128 | vs era-1 |
+|---|---:|---:|
+| runtime chunk bound | 1007.5 µs | 10.3× |
+| `as_chunks::<8>` | 482.1 µs | 4.4× |
+| + `target_feature` | 226.1 µs | 2.12× |
+| **V8 via closures** | **5610.1 µs** | **36×** |
+| **V8 via `macro_rules!`** | **101.8 µs** | **1.04×** |
+
+**The V8 rewrite made things 17× WORSE before better, and era-1's own kernel comment had already
+documented the mechanism** — a prior 5.3× regression when "the body passed LLVM's inline-cost
+threshold, the hint stopped being honored and every V8 operator compiled into a CALL… outside the
+feature region". The lane's two closures hit exactly that, harder (bigger body). Converting them to
+`macro_rules!` — textual expansion, so there is no inline-cost decision to lose — was a **55× step**.
+**`#[inline(always)]` on the enclosing fn is NOT sufficient when the hot work sits in closures it
+contains.** Fifth catch of the campaign, and the first the code's own comments had already warned of.
+- **All three instruments re-verified on the V8 kernel**: oracle unchanged except `hf` IMPROVED
+  (3.77e-5 → 3.44e-5 — `bounded_excess_pair_v` uses a true division where the lane's scalar helper
+  used reciprocal-multiply, so era-2's term math is now literally era-1's `_v` helpers); **vendor
+  probe era-1 66/105 differ, era-2 0/105** ⇒ cross-tier identity SURVIVES per-tier V8 compilation
+  (the load-bearing question); all bit-identity gates green. Trap recorded: the row tail must be
+  **MASKED, not zero-padded** — padded lanes are not accumulator-neutral for the pool WEIGHTS
+  (`saturate(0)` ⇒ `mask_w = 1.0`), and since the core families ARE zero on padded lanes only the
+  pool denominators would have exposed it. Superseded scalar `e2_*` helpers + `E2Pools` deleted.
+- **Widened charter absorbed, with the threshold registered BEFORE any candidate exists**: the bar
+  moves from bit-identity to proven UTILITY PRESERVATION (bit-identity remains the standard WITHIN
+  the era). **PASS iff no corpus loses more than 0.005 SROCC and the composite does not fall** —
+  ~200× the option-C precedent (+0.000024 cid22) and an order below the 0.5-point materiality step;
+  a failing redefinition is reverted, not renegotiated. Drops ship as **structural zeros, never
+  renumbering** (the f156-371 precedent) with a registered reason. HDR gets a **compute-set
+  descriptor that REPLACES `V1PoolsMode` + `v1_only`** rather than adding a third ad-hoc instance;
+  stated explicitly: **the fold still falls back to buffered for declared-HDR and era-2 does not
+  change that** (fold-native HDR is the fold-engine lane's decision).
+- Two places the evidence cuts against the ask, recorded as such: stage B is evidence **FOR** the
+  magetypes rule (generic `V8<T>` beat plain arrays), so raw intrinsics are reserved for measured
+  residues; and const generics must report **code-size + compile-time cost** beside the speed win,
+  because this lane just measured one "obviously faster" structure at 36× slower.
+- Re-ordered by risk: **C (tiling) and D (compute-set descriptor) next** — pure skipping/reordering,
+  no utility question; **E (drop set) and F (redefinitions) last**, as the only items where faster
+  can mean worse — and they come to the USER as a measured table, not a lane decision. Flip still
+  blocked pending rank preservation, the v2-block hand-off, blast-radius registration and the
+  gate-re-pin enumeration.
