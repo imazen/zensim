@@ -100,7 +100,8 @@ accumulates `acc.ssim_d8 += (sd4*sd4)` and `acc.ssim_max = max(…)`
 **unconditionally in every SIMD variant** — verified by counting:
 `grep -c 'acc.ssim_d8 +='` in `zensim/src/fused.rs` is **10** and
 `grep -c 'acc.edge_art_max = '` is **20** (the ssim and edge kernel families ×
-each dispatch tier), and **not one of them sits behind a predicate**. And `V1BasicSums::accumulate` merges them unconditionally with the
+each dispatch tier), and **not one of them sits behind a predicate**. And
+`V1BasicSums::accumulate` merges them unconditionally with the
 comment "free to carry". `V1PoolsMode::Off` has therefore been *computing* the
 peak block all along and merely declining to emit it. Not emitting the peaks
 saves nothing; emitting them costs 72 `f64` stores per image.
@@ -553,11 +554,18 @@ slot there is a wrong answer even when no weight reads it.
 * `fold_engine_parity::unread_feature_skipping_is_inert_on_a_profile_that_reads_the_block`
   — 23 geometries × rayon pools {1, 2, 3, 8, 16} × {Buffered, Fold}: opting in
   on profile B changes nothing, because B reads the block.
-* three policy tests (shipped profiles resolve to `Full`; off by default;
+* four policy tests (shipped profiles resolve to `Full`; off by default;
   `bake_pool_need` on shipped B matches what `bake_block_profile` reports for
-  the same bytes; an unparseable bake needs everything).
+  the same bytes; an unparseable bake needs everything) plus
+  `caller_col_spans_tile_layer0_in_caller_space` (§5.1b).
 
-Whole `zensim` lib suite 238 passed / 0 failed; `fold_engine_parity` 12/12.
+Whole `zensim` lib suite **239 passed / 0 failed**; every `zensim` integration
+target passes (`v1_golden_bytes`, `cross_platform`, `pu_entry`,
+`size_invariance`, `streaming_strips`, `attribution_cross_tier` included);
+`fold_engine_parity` 12/12; `zensim-validate` 160 + 40. Clippy clean on both
+crates at `--all-targets`, and `zensim` builds clean at default features, at
+`feature-regime-v2` alone, and at the full
+`custom-profiles,feature-regime-v2,threads,training,classification` set.
 
 ### 5.4 Tooling — owner extensions, no new duplicates
 
