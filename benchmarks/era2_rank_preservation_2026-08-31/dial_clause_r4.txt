@@ -1,0 +1,45 @@
+Bar clause 3 for item F1 (BLUR_RADIUS 4) — dial + corruption grids RE-EXTRACTED
+at radius 4 (the blur lane registered this and did not run it).
+dial grid       era1 vs r4: 2,366,668 / 4,547,248 cells differ (52.05%), max|d| 9.4201e-01
+corruption grid era1 vs r4:   992,674 / 1,903,104 cells differ (52.16%), max|d| 6.7253e+01
+
+        model             metric       era1(r5)             r4         delta
+            B   G1 dynamic_range      73.804437      72.508360     -1.296076
+            B        G3 mono_pct       0.966610       0.968099     +0.001489
+            B        G3 tied_pct       0.000000       0.000000     +0.000000
+            B           G4 reach     101.402532     100.964207     -0.438324
+            B         corruption              —              —   NOT MEASURED (corruption block absent for this bake)
+
+         C944   G1 dynamic_range      66.810753      68.109401     +1.298647
+         C944        G3 mono_pct       0.993194       0.993407     +0.000213
+         C944        G3 tied_pct       0.037644       0.034879     -0.002765
+         C944           G4 reach      88.364551      89.036997     +0.672446
+         C944      corr pass_q10       0.077381       0.071429     -0.005952
+         C944      corr pass_q20       0.191964       0.188988     -0.002976
+
+  WLIN7b_g020   G1 dynamic_range      59.787189      60.262424     +0.475235
+  WLIN7b_g020        G3 mono_pct       0.994258       0.994258     +0.000000
+  WLIN7b_g020        G3 tied_pct       0.000000       0.000000     +0.000000
+  WLIN7b_g020           G4 reach     100.400998     104.226915     +3.825916
+  WLIN7b_g020      corr pass_q10       0.223214       0.239583     +0.016369
+  WLIN7b_g020      corr pass_q20       0.300595       0.316964     +0.016369
+
+  WLIN7b_g025   G1 dynamic_range      63.662069      65.652698     +1.990628
+  WLIN7b_g025        G3 mono_pct       0.994045       0.993832     -0.000213
+  WLIN7b_g025        G3 tied_pct       0.000000       0.000000     +0.000000
+  WLIN7b_g025           G4 reach     110.411395     113.563490     +3.152095
+  WLIN7b_g025      corr pass_q10       0.220238       0.235119     +0.014881
+  WLIN7b_g025      corr pass_q20       0.297619       0.308036     +0.010417
+
+       ADD156   G1 dynamic_range      85.091412      86.236769     +1.145356
+       ADD156        G3 mono_pct       0.995959       0.994470     -0.001489
+       ADD156        G3 tied_pct       0.000000       0.000000     +0.000000
+       ADD156           G4 reach     108.999668     110.100590     +1.100922
+       ADD156         corruption              —              —   NOT MEASURED (corruption block absent for this bake)
+
+         BHdr   G1 dynamic_range      75.921033      77.259351     +1.338318
+         BHdr        G3 mono_pct       0.974904       0.973628     -0.001276
+         BHdr        G3 tied_pct       0.000000       0.000000     +0.000000
+         BHdr           G4 reach     124.421327     125.608040     +1.186712
+         BHdr         corruption              —              —   NOT MEASURED (corruption block absent for this bake)
+

@@ -1,0 +1,65 @@
+EXTRACTION CONTROLS — era-2 rank-preservation lane, 2026-08-31
+extractor commit 9e52fb164c28725a6f12d911707b8caaeaac995e (zensim--era2-rank workspace, source byte-identical to main)
+
+== C1. era-1 arm vs the blur/radius lane's r5 extraction (CSV byte-compare) ==
+  ext_sdr25  BYTE-IDENTICAL
+  ext_aic4  BYTE-IDENTICAL
+  ext_konjnd_jpeg_val  BYTE-IDENTICAL
+  ext_aic3  BYTE-IDENTICAL
+  ext_live  BYTE-IDENTICAL
+  ext_csiq  BYTE-IDENTICAL
+  ext_tid  BYTE-IDENTICAL
+  ext_cid22val  BYTE-IDENTICAL
+  ext_kadid  BYTE-IDENTICAL
+  (the blur lane in turn measured its r5 root 19,367,104/19,367,104 cells identical
+   to the canonical /mnt/v/zen/zensim-training/r1b-pools944-2026-08-30 root, max abs 0)
+
+== C2. era-1 root parquets vs blur-lane r5 root parquets (sha256) ==
+  ext_sdr25  sha MATCH e41823646ef1c697
+  ext_aic4  sha MATCH 33248df5ea7520af
+  ext_konjnd_jpeg_val  sha MATCH 43b01f19351b4055
+  ext_aic3  sha MATCH 6a7942f5ccaafc52
+  ext_live  sha MATCH 18e9bdd22dfe0547
+  ext_csiq  sha MATCH 364a55d231418306
+  ext_tid  sha MATCH fe7893756fe5f45d
+  ext_cid22val  sha MATCH 4263aac8dd21a1e6
+  ext_kadid  sha MATCH c2bc64179b74dd9d
+
+== C3. my radius-4 rebuild vs the blur lane's r4 extraction (CSV byte-compare) ==
+  ext_sdr25  BYTE-IDENTICAL
+  ext_aic4  BYTE-IDENTICAL
+  ext_konjnd_jpeg_val  BYTE-IDENTICAL
+  ext_aic3  BYTE-IDENTICAL
+  ext_live  BYTE-IDENTICAL
+  ext_csiq  BYTE-IDENTICAL
+  ext_tid  BYTE-IDENTICAL
+  ext_cid22val  BYTE-IDENTICAL
+  ext_kadid  BYTE-IDENTICAL
+
+== C4. radius patch revert check ==
+  after reverting patch_radius.sh to R=5 and rebuilding, a fresh cid22 extraction is
+  BYTE-IDENTICAL to the era-1 arm; all four patched source files restored byte-identical
+  to their pre-patch copies.
+
+== C5. tile=1024 vs era-1, per leg (CSV byte-compare) ==
+  ext_sdr25  BYTE-IDENTICAL (width <= tile on every reference)
+  ext_aic4  BYTE-IDENTICAL (width <= tile on every reference)
+  ext_konjnd_jpeg_val  BYTE-IDENTICAL (width <= tile on every reference)
+  ext_aic3  DIFFERS (420/600 rows)
+  ext_live  BYTE-IDENTICAL (width <= tile on every reference)
+  ext_csiq  BYTE-IDENTICAL (width <= tile on every reference)
+  ext_tid  BYTE-IDENTICAL (width <= tile on every reference)
+  ext_cid22val  BYTE-IDENTICAL (width <= tile on every reference)
+  ext_kadid  BYTE-IDENTICAL (width <= tile on every reference)
+
+== C6. reference widths per corpus (why C5 looks like that) ==
+  corpus            refs   minW   maxW  refs>1024  refs>256
+  sdr25                5    620    620          0         5
+  aic4                 5    620    620          0         5
+  konjnd             504    640    640          0       504
+  aic3                10    560   2592          7        10
+  live                29    480    768          0        29
+  csiq                30    512    512          0        30
+  tid                 25    512    512          0        25
+  cid22               49    512    512          0        49
+  kadid               81    512    512          0        81

@@ -1,0 +1,12 @@
+                   leg    rows      e2t1024       e2t256        e2t32           r4           r5
+             ext_sdr25      50           OK           OK           OK           OK           OK
+              ext_aic4     300           OK           OK           OK           OK           OK
+   ext_konjnd_jpeg_val     504           OK           OK           OK           OK           OK
+              ext_aic3     600           OK           OK           OK           OK           OK
+              ext_live     779           OK           OK           OK           OK           OK
+              ext_csiq     866           OK           OK           OK           OK           OK
+               ext_tid    3000           OK           OK           OK           OK           OK
+          ext_cid22val    4292           OK           OK           OK           OK           OK
+             ext_kadid   10125           OK           OK           OK           OK           OK
+
+TOTAL rows per arm: 20516   mismatching (leg,arm) cells: 0

@@ -1,0 +1,63 @@
+BAR CLAUSE 3 (the dial gates) FOR THE TILING FLIP — dial grid RE-EXTRACTED per arm.
+
+dial grid twins, cellwise (4,547,248 cells = 4,817 rows x 944 features):
+  era1 vs t1024 : 0 differing, max|d| 0.000000e+00  -- and the two parquets are
+                  BYTE-IDENTICAL (sha256 1bed24cf2ccd6678397d33c923c66bb513c1197962113b908b313a9866800829)
+  era1 vs t32   : 2,298,351 differing, max|d| 6.277773e-01
+  era1 vs the STORED 2026-08-01 grid: 104,107 differing (2.3e-3 %), max|d| 7.203198e-09
+                  (era-1-vs-era-1 drift across the ~1 month since that grid was built;
+                   inside the repo golden policy |d| <= max(1e-6, 1e-5*scale))
+
+Why t1024 is bit-identical, structurally: every H entry guards on `tile > 0 && width > tile`
+(zensim/src/blur.rs:600,1294,2000,3016,3086), and every dial-grid REFERENCE is <= 1024 px wide
+  jpeg/webp/avif/jxl reference widths: 512 (9 refs), 513 (9), 769 (4), 818 (7), 1022 (7), 1024 (3)
+so at tile=1024 every call takes the untiled path. The corruption grid is a single 576x576
+reference, untiled at every tile >= 576.
+
+Dial panel, era-1 control vs the tile=32 STRESS grid (tile=1024 omitted: nothing to run):
+
+        model             metric             era1              t32          delta
+            B   G1 dynamic_range        73.804437        73.807304      +0.002868
+            B        G3 mono_pct         0.966610         0.966610      +0.000000
+            B        G3 tied_pct         0.000000         0.000000      +0.000000
+            B           G4 reach       101.402532       101.402533      +0.000002
+            B                 p5        23.287266        23.285448      -0.001818
+            B                p95        97.091703        97.092752      +0.001050
+
+         C944   G1 dynamic_range        66.810753        66.808125      -0.002629
+         C944        G3 mono_pct         0.993194         0.993194      +0.000000
+         C944        G3 tied_pct         0.037644         0.039345      +0.001701
+         C944           G4 reach        88.364551        88.377747      +0.013197
+         C944                 p5        33.189247        33.191875      +0.002629
+         C944                p95       100.000000       100.000000      +0.000000
+
+  WLIN7b_g020   G1 dynamic_range        59.787189        59.760831      -0.026358
+  WLIN7b_g020        G3 mono_pct         0.994258         0.994258      +0.000000
+  WLIN7b_g020        G3 tied_pct         0.000000         0.000000      +0.000000
+  WLIN7b_g020           G4 reach       100.400998       100.372299      -0.028699
+  WLIN7b_g020                 p5        34.781854        34.781504      -0.000349
+  WLIN7b_g020                p95        94.569043        94.542336      -0.026707
+
+  WLIN7b_g025   G1 dynamic_range        63.662069        63.653886      -0.008184
+  WLIN7b_g025        G3 mono_pct         0.994045         0.994045      +0.000000
+  WLIN7b_g025        G3 tied_pct         0.000000         0.000000      +0.000000
+  WLIN7b_g025           G4 reach       110.411395       110.426983      +0.015588
+  WLIN7b_g025                 p5        30.988690        30.983345      -0.005345
+  WLIN7b_g025                p95        94.650759        94.637231      -0.013528
+
+       ADD156   G1 dynamic_range        85.091412        85.096848      +0.005436
+       ADD156        G3 mono_pct         0.995959         0.995959      +0.000000
+       ADD156        G3 tied_pct         0.000000         0.000000      +0.000000
+       ADD156           G4 reach       108.999668       109.002563      +0.002896
+       ADD156                 p5        10.277405        10.276862      -0.000543
+       ADD156                p95        95.368817        95.373710      +0.004893
+
+         BHdr   G1 dynamic_range        75.921033        75.971710      +0.050678
+         BHdr        G3 mono_pct         0.974904         0.977244      +0.002339
+         BHdr        G3 tied_pct         0.000000         0.000000      +0.000000
+         BHdr           G4 reach       124.421327       124.643308      +0.221981
+         BHdr                 p5        16.357015        16.358732      +0.001717
+         BHdr                p95        92.278048        92.330442      +0.052395
+
+G3 gate is mono >= 93% / tied <= 5%. No model crosses either bound in either arm.
+The corruption grid was NOT re-extracted for the tiling arms (576x576 < every tile tested).

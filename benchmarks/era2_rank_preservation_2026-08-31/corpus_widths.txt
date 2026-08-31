@@ -1,0 +1,10 @@
+  corpus            refs   minW   maxW  refs>1024  refs>256
+  sdr25                5    620    620          0         5
+  aic4                 5    620    620          0         5
+  konjnd             504    640    640          0       504
+  aic3                10    560   2592          7        10
+  live                29    480    768          0        29
+  csiq                30    512    512          0        30
+  tid                 25    512    512          0        25
+  cid22               49    512    512          0        49
+  kadid               81    512    512          0        81
