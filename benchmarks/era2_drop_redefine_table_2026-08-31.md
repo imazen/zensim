@@ -94,7 +94,12 @@ Unchanged from the era-2 doc, and none of it is optional:
 1. **Rank preservation across the roster** for every byte-changing row
    (F1 has it; **F3 does not**; F4 may not need it if the edge gate shows
    bit-identity).
-2. **Blast radius + retrain wave registration.**
+2. ~~**Blast radius + retrain wave registration.**~~ **DONE** —
+   [`era2_blast_radius_2026-08-31.md`](era2_blast_radius_2026-08-31.md).
+   Headline: tiling and the accumulation have **essentially no data-side blast
+   radius** (0 re-extraction, 0 retrain); **radius 4 has all of it** (the
+   5.74 M-row bigcodec table is ~97 % of the re-extraction, plus 378 board
+   cells to rescore under a new era stamp, plus a 6-arm retrain wave).
 3. ~~**Gate re-pin enumeration, old → new.**~~ **DONE** for the tiling flip —
    era-2 doc §27: forcing the tile on for the whole suite fails **exactly five
    tests, all absolute-value goldens** (the four `v1_golden_bytes` fixtures and

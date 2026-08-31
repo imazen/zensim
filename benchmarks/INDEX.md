@@ -220,3 +220,4 @@ These are the docs to read first for a given purpose:
 
 **Era-2 break — the user's decision surface**:
 [`era2_drop_redefine_table_2026-08-31.md`](era2_drop_redefine_table_2026-08-31.md) — items E (drops) + F (redefinitions) as one table: what each buys, its per-model rank cost, and what it takes to ship. Backed by [`era2_perf_break_2026-08-31.md`](era2_perf_break_2026-08-31.md) and [`blur_radius_locality_branches_2026-08-31.md`](blur_radius_locality_branches_2026-08-31.md).
+[`era2_blast_radius_2026-08-31.md`](era2_blast_radius_2026-08-31.md) — the era-2 flip's third prerequisite: what re-pins, what re-extracts, what retrains, and the registered (unlaunched) wave.
