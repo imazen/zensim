@@ -3931,3 +3931,42 @@ Open (measured): the fused compare is not re-hosted (its in-strip fold is tiled 
 linear profiles, `with_stop`, `num_scales != 4` all named in §9.3. The predecessor's §15 and
 `zensim/CLAUDE.md`'s "buffered is not removable today" block were stale in four ways and are
 corrected in place.
+
+## 2026-08-31 ~05:0xZ — ROUND 17: era-2 — THE CROSS-VENDOR HYPOTHESIS IS MEASURED; the flip is blocked on a perf number
+
+**`era2_vendor_probe`** (one binary, no `target-cpu=native`, all 35 dense slots as raw f64 bits,
+both eras, run on this box AND i134 over ssh):
+
+| box | CPU | vendor | tier |
+|---|---|---|---|
+| dev | AMD Zen 4 | AuthenticAMD | **v4x (AVX-512)** |
+| i134 | Intel i5-13400F | GenuineIntel | **v3 (SSE4.2)** |
+
+**era-1 differs on 66 of 105 slots (63 %); era-2 on 0 of 105.** The `reduce_add` hypothesis
+graduates from plausible to **MEASURED on one pair** — and the confound is named, not hidden:
+vendor and tier are not separable here (AMD picks v4x, Intel v3), so it is honestly a CROSS-TIER
+result that a vendor difference induced. That is the same shape as the historical failure
+(non-AMD classes agreeing with each other = clustering by reduction shape), which is why it is
+consistent — "consistent with" is as far as one pair goes; `neon`/`wasm` still unverifiable here.
+**Registered, not taken:** era-1's golden policy is a TOLERANCE precisely because exactness never
+held cross-vendor; if era-2 holds on the CI matrix, **re-tightening the golden gate to EXACT
+becomes a user option** — recovering a property abandoned 2026-08-05.
+
+**Perf: 10.3× → 4.4× → 2.24×, and two of the three causes were the lane's own.** (a) The 10× was
+the trap its own §13 had written down — `let n = (width - x).min(8)` is a RUNTIME bound LLVM will
+not vectorize; writing a trap down is not the same as not falling into it, and only the bench
+caught it. (b) The 4.4× was ISA: plain Rust compiles to baseline SSE2 while era-1 sits inside an
+`#[arcane]` `target_feature` region — fixed by wrapping the identical body in `#[magetypes]` +
+`incant!`. Both fixes verified BYTE-NEUTRAL (oracle deviations identical to the digit; the vendor
+probe re-run under the final build still 66/105 vs 0/105). **Remaining 2.24× is attributed**:
+era-1 one pass vs era-2 two, with a four-plane scratch round-trip per row adopted to fit
+16-register tiers — and the lane's own §14.4 licenses the fix (pass split is byte-NEUTRAL, so it
+may differ per tier): single-pass on v4x (32 registers; era-1's `POOL_SIMD` path proves a fused
+pass fits), two-pass elsewhere, byte-identical by construction.
+
+**Accuracy (§10.5 filled from measurement):** era-2 is slightly MORE accurate on the two dominant
+families (core −3.8 %, pools −3.6 %), marginally worse on two much smaller ones; every variant
+under its proven bound (worst overall is era-1's `pools_scalar` at 18.9 % of bound).
+**The flip is correctly BLOCKED on the perf number** — a break justified by speed does not ship
+before its speed is known. Next: the per-tier pass split, then flip + era stamp + rank
+preservation + golden re-pins.
