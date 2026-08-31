@@ -67,12 +67,15 @@ basic-only class's walk against the others:
 <!--HD_BEGIN-->
 <!--HD_END-->
 
-**The class gap widens with threads** — 2.9× → 4.3× from 1 to 8 — because the
-944 walk scales worse than the 372 one, which is the fold-MT lane's finding
-landing on this frontier. (The buffered row inverts for the opposite reason:
-buffered takes 2-4× from eight threads where the fold takes 1.1-1.5×, so at
-16T the shipped path catches up. Read the 8/16T columns for shape — §3.1
-records their spread and the conditions.)
+**Against the two 944 classes the gap holds at every thread count** (3-4×), and
+it is the answer to "can we be ~2× faster". **Against today's shipped buffered
+walk it is a low-thread win only**: buffered takes 2-4× from eight threads
+where the fold takes 1.1-1.5×, so by 8T the shipped path has caught up with the
+cheapest fold request. Read the 8/16T columns for shape — §3.1 records the
+rounds each group got and the conditions.
+
+**The class gap widens with threads** because the 944 walk scales worse than
+the 372 one — the fold-MT lane's ceiling landing on this frontier.
 
 **vs-ssim2 verdict** compares only the human-labelled corpora — `nonphoto`,
 `imazen26` and `hfnlproxy` have ssim2 *as their target*, so a model's number
