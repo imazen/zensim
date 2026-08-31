@@ -757,6 +757,44 @@ min + `smaps_rollup` Rss/AnonHugePages), `ZENSIM_BIGPAIR_PARALLEL=1`,
 `ZENSIM_BIGPAIR_DUMP=<path>` (every feature with its `to_bits()` — the
 bit-identity control).
 
+## PERF: on the strip walk, TILE MEANS PACK — restricting a loop range does nothing (2026-08-31)
+
+**MEASURED, `benchmarks/era2_perf_break_2026-08-31.md` §23.** The phase-A
+fused H blur's cost is a function of **image WIDTH, not pixel count**: at a
+fixed 5.31 MP and 1T it costs **104.99 ms at width 2304 and 34.58 ms at width
+1152** (3.4×), flat below that. It holds 16 rows × 6 planes, which is 884 KiB
+at 2304 against a 1 MiB L2. Column-tiling it with **packing** — stage the tile
+plus a `±BLUR_RADIUS` halo into a compact `rows × (tile + 2R)` buffer, blur
+there, copy the interior back — is worth **1.15× at 5 MP and 1.73× at 21 MP on
+the whole 944 walk** at 1T (`blur_h` itself 1532.7 → 179.6 ms, **8.5×**), and
+1.23×/1.11× at 4608² on 8/16 threads.
+
+**The load-bearing lesson: the win is the PACKING, not the tiling.** Threading
+an output column range `x0..x1` through all 16 H-blur bodies — so the kernel
+tiles *in place* on the full-width planes with no copies — was built,
+byte-neutral (369/0 including the v1 golden gates), and **bought nothing**
+(1.06× at 1T/2304², **0.96× at 1T/4608²**) against the packed form's 1.26×/1.71×
+in the same binary. Restricting `x` does not change which cache lines are
+walked: the planes are still full-width, so a 16-row group at tile width is
+sixteen contiguous runs `width × 4 B` apart and the prefetchers see the same
+six strided streams. Locality comes from the **layout**, not the loop bounds —
+the packed-GEMM result. The x-range refactor was deleted rather than parked.
+**Reach for "pack the tile", never "restrict the loop".**
+
+Two corollaries, both measured the hard way:
+
+- **The other axis does not work.** Row banding fails on the same pipeline
+  because the phase-A halo closure is `±2·BLUR_RADIUS` (activity =
+  `blur(|src − blur(src)|)`), i.e. **20 rows out of a 32-row band = 62 %
+  redundancy**; the column closure is `±BLUR_RADIUS`, so a 1536-wide tile
+  re-blurs **0.6 %**. Band-local phase A measured +15.6 % / +5.5 % (§22).
+- **Carry an identical-code-path control.** The tile does nothing when
+  `width <= tile`, so 576²/1152² cells run the *same code* in both arms and
+  must read 1.000×. What they actually read is the measurement's noise floor:
+  **±0.3 % at 1T, ±1.8 % at 16T, up to 6.5 % at 8T.** Any threaded cell inside
+  that band is unestablished, not a result — a 0.891 × "regression" published
+  earlier in the same session evaporated under it.
+
 ## ⇒ POST-COMPACT / NEW SESSION: read [`SESSION-RESUME.md`](SESSION-RESUME.md) FIRST
 
 Then return here. `SESSION-RESUME.md` is the canonical entry point —
