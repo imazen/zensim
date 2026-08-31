@@ -123,7 +123,16 @@ impl RollingPlane {
     /// irrelevant (every row is fully written before it is read).
     fn from_pooled(mut buf: Vec<f32>, width: usize, cap_rows: usize) -> Self {
         let need = width * cap_rows;
-        if buf.len() < need {
+        if buf.is_empty() {
+            // FRESH buffer (empty pool — the first walk on a new scratch).
+            // `vec![0.0; n]` lowers to `calloc`, which hands back
+            // demand-zeroed pages; `Vec::resize` from empty does an explicit
+            // reserve + fill, i.e. a real ~32 MB memset per walk at 2304².
+            // Every element is written before it is read either way, so the
+            // zeroing was never load-bearing — this is the same allocation,
+            // asked for in the form the allocator can satisfy lazily.
+            buf = vec![0.0; need];
+        } else if buf.len() < need {
             buf.resize(need, 0.0);
         }
         Self {

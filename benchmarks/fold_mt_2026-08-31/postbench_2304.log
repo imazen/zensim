@@ -1,0 +1,39 @@
+=== (a) threaded per-compare wall, 2304 (whole loop, same shape as the ceiling test) ===
+refinto_fold T=1: 185.50 ms/compare
+refinto_fold T=8: 61.50 ms/compare
+refinto_fold T=16: 53.75 ms/compare
+refinto_buffered T=1: 171.50 ms/compare
+refinto_buffered T=8: 35.00 ms/compare
+refinto_buffered T=16: 26.75 ms/compare
+score_fold T=1: 210.00 ms/compare
+score_fold T=8: 65.25 ms/compare
+score_fold T=16: 54.00 ms/compare
+score_buffered T=1: 205.50 ms/compare
+score_buffered T=8: 40.25 ms/compare
+score_buffered T=16: 33.00 ms/compare
+
+=== (a2) walk-only breakdown, refinto vs score (the allocation delta) ===
+refinto_fold T=16: 50.671 ms/walk accounted 43.518 ms/walk = 85.9 % of walk; unaccounted 7.152 ms/walk 
+score_fold T=16: 51.231 ms/walk accounted 44.096 ms/walk = 86.1 % of walk; unaccounted 7.135 ms/walk 
+
+=== (b) N-process throughput ceiling, 2304 ===
+refinto_fold n=1: 5.32 walks/s   -> best-possible latency 188.1 ms/walk
+refinto_fold n=4: 16.34 walks/s   -> best-possible latency 61.2 ms/walk
+refinto_fold n=8: 19.81 walks/s   -> best-possible latency 50.5 ms/walk
+refinto_fold n=16: 18.35 walks/s   -> best-possible latency 54.5 ms/walk
+refinto_buffered n=1: 5.75 walks/s   -> best-possible latency 173.9 ms/walk
+refinto_buffered n=4: 21.16 walks/s   -> best-possible latency 47.3 ms/walk
+refinto_buffered n=8: 38.91 walks/s   -> best-possible latency 25.7 ms/walk
+refinto_buffered n=16: 60.66 walks/s   -> best-possible latency 16.5 ms/walk
+
+=== (c) peak RSS, /usr/bin/time -v ===
+arm                size   threads    peakRSS_MB     wall_s
+score_buffered     1152   1                43.1    0:01.00
+score_buffered     1152   16               59.6    0:00.16
+score_fold         1152   1                60.9    0:01.05
+score_fold         1152   16               72.5    0:00.29
+score_buffered     2304   1               157.9    0:04.18
+score_buffered     2304   16              196.5    0:00.63
+score_fold         2304   1               127.5    0:04.18
+score_fold         2304   16              149.2    0:01.16
+POSTBENCH COMPLETE

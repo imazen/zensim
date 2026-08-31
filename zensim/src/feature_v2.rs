@@ -610,16 +610,31 @@ pub(crate) const STRIP_ROWS: usize = 128;
 /// reflection -- the buffer isn't the true image).
 pub(crate) const HALO_P: usize = 2 * BLUR_RADIUS;
 
-/// The row-group size every `fused_blur_h_ssim_*` kernel walks in
-/// (`run_group(rg * 8, 8)` plus one partial tail). Band boundaries in
-/// [`fused_blur_h_ssim_banded`] MUST be multiples of this so a band's
-/// grouping is a sub-sequence of the whole-plane call's.
-pub(crate) const H_BLUR_ROW_GROUP: usize = 8;
+/// The COARSEST row-group size any `fused_blur_h_ssim_*` kernel walks in.
+///
+/// The kernels transpose a group of rows into lanes and run one group at a
+/// time plus a partial tail: **16 rows on `v4` and `v4x`**
+/// (`blur.rs` `let row_groups = height / 16`), **8 on `v3`, `neon`, `wasm128`
+/// and `scalar`** (`run_group(rg * 8, 8)`). Band boundaries in
+/// [`fused_blur_h_ssim_banded`] are multiples of this coarsest size, which is
+/// a multiple of the other, so on EVERY tier a band's grouping is a
+/// sub-sequence of the whole-plane call's: same group size, same offset within
+/// it, and only the final band can hold the partial group the whole-plane
+/// call's tail would have run.
+///
+/// (`phase_a_blur_bands_are_bit_exact` additionally MEASURES agreement at band
+/// sizes that are not multiples of either — the per-row independence
+/// `box_blur_h_ring_matches_regathered_reference` pins is stronger than the
+/// alignment argument. The alignment is what makes the claim hold without
+/// depending on that, on tiers this box cannot run.)
+pub(crate) const H_BLUR_ROW_GROUP: usize = 16;
 
-/// Rows per phase-A H-blur band. A multiple of [`H_BLUR_ROW_GROUP`] (the
-/// bit-exactness precondition) chosen by measurement — see
-/// `benchmarks/fold_mt_scaling_2026-08-31.md`. Bands smaller than this stop
-/// paying for their fork/join against a 4-plane write of `width * rows`.
+/// Rows per phase-A H-blur band. A multiple of [`H_BLUR_ROW_GROUP`] — the
+/// bit-exactness precondition — and the smallest such value, which is what
+/// measurement wanted: at 16 rows a band's four output planes fit L2, and
+/// phase-A BUSY time FELL 90.2 → 46.2 ms at 2304²/16T when the split landed,
+/// so the bands are cheaper in total work as well as wider.
+/// `benchmarks/fold_mt_scaling_2026-08-31.md`.
 pub(crate) const H_BLUR_BAND_ROWS: usize = 16;
 const _: () = assert!(H_BLUR_BAND_ROWS % H_BLUR_ROW_GROUP == 0);
 
@@ -6974,6 +6989,12 @@ pub(crate) fn compute_folded720_append_streaming_impl(
 /// the walk's measured 163 MB peak RSS) plus one f32 subtract + f64 add per
 /// scale-0 pixel per channel, taken while the producer's rolling plane rows
 /// are already cache-hot.
+/// Rows per task in [`MeanOffsetRows::add_strip`]'s fan-out. Purely a
+/// schedule parameter — the values are per-row and assignment-only, so no
+/// choice here can move a byte (`mean_offset_row_bands_are_bit_exact`).
+#[cfg(feature = "threads")]
+const MEAN_OFFSET_BAND_ROWS: usize = 16;
+
 pub(crate) struct MeanOffsetRows {
     rows: Vec<[f64; 3]>,
     width: usize,
@@ -6989,31 +7010,62 @@ impl MeanOffsetRows {
         }
     }
 
-    /// Accumulate one scale-0 strip's rows. `src`/`dst` are the producer's
-    /// rolling-plane rows for channel `ch` covering `[y0, y0 + n_rows)` at
+    /// Record one scale-0 strip's rows for all three channels. `src`/`dst` are
+    /// the producer's rolling-plane rows covering `[y0, y0 + n_rows)` at
     /// `plane_w` stride; `plane_w == width` at scale 0 under option C.
-    fn add_strip_channel(
+    ///
+    /// **Row-parallel, and BIT-EXACT by construction** (fold-MT lane). Every
+    /// `rows[y][ch]` is ASSIGNED — not accumulated into — by a pure function of
+    /// that one row of `src`/`dst`, so each element is written exactly once
+    /// with a value that does not depend on any other row, any other channel,
+    /// or the order in which they run. The only ordered arithmetic is the
+    /// left-to-right `f64` sum WITHIN a row, and that is never split.
+    /// [`Self::finish`]'s 64-row-chunk reduction then reads `rows` in its own
+    /// fixed order regardless.
+    ///
+    /// Why it earns a fan-out: this side channel is a full pass over the
+    /// scale-0 planes for all three channels (127 MB read per walk at 2304²)
+    /// and it ran SERIALLY between `next_strip` and the channel fan-out — it
+    /// was the whole of the 7.1 ms the phase profile could not account for,
+    /// i.e. 13 % of a 16-thread compare at degree 1.
+    fn add_strip(
         &mut self,
-        ch: usize,
         y0: usize,
         n_rows: usize,
         plane_w: usize,
-        src: &[f32],
-        dst: &[f32],
+        src: [&[f32]; 3],
+        dst: [&[f32]; 3],
+        #[allow(unused_variables)] parallel: bool,
     ) {
-        for k in 0..n_rows {
-            let y = y0 + k;
-            if y >= self.height {
-                break;
-            }
-            let s = &src[k * plane_w..k * plane_w + self.width];
-            let d = &dst[k * plane_w..k * plane_w + self.width];
-            let mut row_sum = 0.0f64;
-            for i in 0..self.width {
-                row_sum += (s[i] - d[i]) as f64;
-            }
-            self.rows[y][ch] = row_sum;
+        let y1 = (y0 + n_rows).min(self.height);
+        if y1 <= y0 {
+            return;
         }
+        let width = self.width;
+        let rows = &mut self.rows[y0..y1];
+        let one = |k_base: usize, out: &mut [[f64; 3]]| {
+            for (i, o) in out.iter_mut().enumerate() {
+                let k = k_base + i;
+                for ch in 0..3 {
+                    let s = &src[ch][k * plane_w..k * plane_w + width];
+                    let d = &dst[ch][k * plane_w..k * plane_w + width];
+                    let mut row_sum = 0.0f64;
+                    for i in 0..width {
+                        row_sum += (s[i] - d[i]) as f64;
+                    }
+                    o[ch] = row_sum;
+                }
+            }
+        };
+        #[cfg(feature = "threads")]
+        if parallel && rows.len() > MEAN_OFFSET_BAND_ROWS {
+            use rayon::prelude::*;
+            rows.par_chunks_mut(MEAN_OFFSET_BAND_ROWS)
+                .enumerate()
+                .for_each(|(b, out)| one(b * MEAN_OFFSET_BAND_ROWS, out));
+            return;
+        }
+        one(0, rows);
     }
 
     /// The exact reduction `streaming::compute_xyb_mean_offset` performs:
@@ -7206,18 +7258,22 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         if scale == 0
             && let Some(mo) = mean_offset.as_deref_mut()
         {
+            let __t_mo = crate::fold_timing::start();
             let y1 = info.y0 + info.strip_h;
-            for ch in 0..3 {
-                let s = producer.rows(crate::feature_v2_stream::Side::Source, ch, 0, info.y0, y1);
-                let d = producer.rows(
+            let src: [&[f32]; 3] = core::array::from_fn(|ch| {
+                producer.rows(crate::feature_v2_stream::Side::Source, ch, 0, info.y0, y1)
+            });
+            let dst: [&[f32]; 3] = core::array::from_fn(|ch| {
+                producer.rows(
                     crate::feature_v2_stream::Side::Distorted,
                     ch,
                     0,
                     info.y0,
                     y1,
-                );
-                mo.add_strip_channel(ch, info.y0, info.strip_h, info.plane_w, s, d);
-            }
+                )
+            });
+            mo.add_strip(info.y0, info.strip_h, info.plane_w, src, dst, parallel);
+            crate::fold_timing::stop(__t_mo, crate::fold_timing::Phase::MeanOffset, scale);
         }
 
         // ref_y strip rows straight from the producer's rolling plane
@@ -12470,6 +12526,69 @@ mod tests {
     /// extras while the fold walked the image. That divergence was the defect,
     /// not an invariant. C removes the phantom columns
     /// (`blur::pyramid_plane_stride` now returns the width), so the assertion
+    /// **The bit-exactness gate for [`MeanOffsetRows::add_strip`]'s row
+    /// fan-out** (fold-MT lane). Serial and parallel must agree on every
+    /// `rows[y][ch]` AND on `finish()`, at heights that straddle the band
+    /// size, at a width where the per-row `f64` sum has a long carry chain,
+    /// and across a multi-strip walk (so the `y0` offsets differ).
+    ///
+    /// The property is assignment-only per (row, channel), so this cannot
+    /// fail for an ordering reason — it can only fail if someone later splits
+    /// the sum WITHIN a row, which is exactly the mistake to catch.
+    #[test]
+    fn mean_offset_row_bands_are_bit_exact() {
+        for &(width, height, strip) in &[
+            (64usize, 128usize, 128usize),
+            (2304, 128, 128),
+            (97, 40, 17),
+            (7, 300, 128),
+            (33, 33, 8),
+        ] {
+            let n = width * height;
+            let src: Vec<f32> = (0..n)
+                .map(|i| ((i * 2654435761usize) % 1013) as f32 / 1013.0)
+                .collect();
+            let dst: Vec<f32> = (0..n)
+                .map(|i| ((i * 40503usize + 3) % 1009) as f32 / 1009.0)
+                .collect();
+            let run = |parallel: bool| -> (Vec<[f64; 3]>, [f64; 3]) {
+                let mut mo = MeanOffsetRows::new(width, height);
+                let mut y0 = 0;
+                while y0 < height {
+                    let rows = strip.min(height - y0);
+                    let lo = y0 * width;
+                    let hi = lo + rows * width;
+                    let s: [&[f32]; 3] = [&src[lo..hi], &src[lo..hi], &dst[lo..hi]];
+                    let d: [&[f32]; 3] = [&dst[lo..hi], &src[lo..hi], &src[lo..hi]];
+                    mo.add_strip(y0, rows, width, s, d, parallel);
+                    y0 += rows;
+                }
+                (mo.rows.clone(), mo.finish())
+            };
+            let (rs, fs) = run(false);
+            let (rp, fp) = run(true);
+            for (y, (a, b)) in rs.iter().zip(rp.iter()).enumerate() {
+                for ch in 0..3 {
+                    assert_eq!(
+                        a[ch].to_bits(),
+                        b[ch].to_bits(),
+                        "{width}x{height} strip {strip}: row {y} ch {ch} \
+                         serial {} vs parallel {}",
+                        a[ch],
+                        b[ch]
+                    );
+                }
+            }
+            for ch in 0..3 {
+                assert_eq!(
+                    fs[ch].to_bits(),
+                    fp[ch].to_bits(),
+                    "{width}x{height} strip {strip}: finish()[{ch}]"
+                );
+            }
+        }
+    }
+
     /// **The bit-exactness gate for [`FoldHSource::SelfBlur`]** (fold-MT lane).
     ///
     /// A band that H-blurs its own `[b0 − overlap, b1 + overlap)` rows must
@@ -12563,12 +12682,13 @@ mod tests {
     /// both at once.
     ///
     /// This is stronger than the shipped constant needs: it sweeps band sizes
-    /// 8/16/24/32/64 so that re-tuning `H_BLUR_BAND_ROWS` on a future box
-    /// cannot silently move a byte. It also asserts a NON-multiple of the row
-    /// group (12) still agrees — recorded, not relied on: the shipped
-    /// constant stays a multiple, and the `const` assert next to it enforces
-    /// that, but if the kernels' per-row independence ever regressed this
-    /// case would catch it first.
+    /// 8/12/16/24/32/64 so that re-tuning `H_BLUR_BAND_ROWS` on a future box
+    /// cannot silently move a byte. Sizes 8, 12 and 24 are NOT multiples of
+    /// [`H_BLUR_ROW_GROUP`] (16 — `v4`/`v4x` transpose 16 rows at a time;
+    /// `v3`/`neon`/`wasm128`/`scalar` take 8), so they test the per-row
+    /// independence itself rather than the alignment argument the shipped
+    /// constant rests on. Recorded, not relied on: the shipped constant stays
+    /// a multiple and the `const` assert beside it enforces that.
     #[test]
     fn phase_a_blur_bands_are_bit_exact() {
         for &(width, height) in &[

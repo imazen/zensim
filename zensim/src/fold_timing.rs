@@ -37,7 +37,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 /// One accumulator slot. Indices are `(phase, scale)`; see [`Phase`].
-const N_PHASE: usize = 13;
+const N_PHASE: usize = 14;
 const N_SCALE: usize = 8;
 
 macro_rules! zeroed_atomics {
@@ -63,7 +63,8 @@ pub(crate) enum Phase {
     PhaseAWall = 1,
     /// Summed per-channel busy time inside phase A.
     PhaseABusy = 2,
-    /// Wall of the phase-B fan-out (3-way over channels, bands nested inside).
+    /// Wall of the consuming fan-out: phase B alone on the SPLIT arm, the
+    /// whole fused (A then B) span on the fused arm.
     PhaseBWall = 3,
     /// Summed per-channel busy time inside phase B.
     PhaseBBusy = 4,
@@ -85,6 +86,8 @@ pub(crate) enum Phase {
     ProdDownscale = 11,
     /// Summed per-BAND busy time inside `fused_blur_h_ssim_banded`.
     BlurBandBusy = 12,
+    /// The `mean_offset` side channel's per-strip pass.
+    MeanOffset = 13,
 }
 
 #[inline(always)]
@@ -206,19 +209,27 @@ fn dump(walks: u64) {
             ms(ps[3]),
         );
     };
+    // NOTE on reading this: the FUSED per-channel arm records its whole
+    // (A then B) span under `PhaseBWall`, so on that arm `phaseA` and
+    // `between` are legitimately 0.000 and `consume` is the whole compute.
+    // Under the SPLIT arm the two are separate rows. `blur_h` reads 0 as well
+    // whenever the self-blur band shape runs — the H blur then happens inside
+    // the band, and its time is inside `fold(sum)`.
     row("producer", Phase::Producer, None);
     row("  convert", Phase::ProdConvert, None);
     row("  downscale", Phase::ProdDownscale, None);
-    row("phaseA", Phase::PhaseAWall, Some(Phase::PhaseABusy));
+    row("phaseA(split)", Phase::PhaseAWall, Some(Phase::PhaseABusy));
     row("  blur_h(sum)", Phase::BlurHWall, Some(Phase::BlurBandBusy));
+    row("mean_offset", Phase::MeanOffset, None);
     row("between", Phase::Between, None);
-    row("phaseB", Phase::PhaseBWall, Some(Phase::PhaseBBusy));
+    row("consume", Phase::PhaseBWall, Some(Phase::PhaseBBusy));
     row("  fold(sum)", Phase::FoldWall, Some(Phase::BandBusy));
     let (p, _) = sum(Phase::Producer);
     let (a, _) = sum(Phase::PhaseAWall);
     let (bt, _) = sum(Phase::Between);
     let (b, _) = sum(Phase::PhaseBWall);
-    let acct = p + a + bt + b;
+    let (mo, _) = sum(Phase::MeanOffset);
+    let acct = p + a + bt + b + mo;
     eprintln!(
         "accounted {:.3} ms/walk = {:.1} % of walk; unaccounted {:.3} ms/walk",
         ms(acct),
