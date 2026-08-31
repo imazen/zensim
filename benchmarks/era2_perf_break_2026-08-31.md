@@ -1792,96 +1792,107 @@ curve down, it removes most of the superlinear term**, which is why the win
 grows with size — 1.20× at 5 MP, 1.78× at 21 MP, and by construction larger
 still above that.
 
-### 23.5 Extending it: the activity chain, and where the copy-based form stops
+### 23.5 THE WIN IS THE PACKING, NOT THE COLUMN RESTRICTION
 
-`column_tiled_pass` generalises the tiling to any single-plane pass with an
-`halo`-column dependence, and the phase-A activity chain
-(`box_blur_1pass_into` over `|src − mu1|`) is the first user, on its own knob
-(`ZENSIM_A_TILE`) so it can be measured against the H tile in the same binary.
+The obvious criticism of §23.2 is that it copies six planes per tile to avoid
+touching four hand-written tier bodies, and that a kernel which simply took
+the output column range would get the same locality **without** the copies.
+That was this lane's own stated next step. It was built, and it is **wrong**.
 
-Min over 7 process starts per cell, three arms, interleaved:
+`x0`/`x1` were threaded through all **16** H-blur bodies (four families —
+`box_blur_h`, `box_blur_h_into_abs_diff`, `fused_blur_h_mu`,
+`fused_blur_h_ssim` — × four tiers), 38 window-initialisers generalised from
+`|i − r|` to `|x0 + i − r|` reflected at the PLANE's edge, 38 x-loops
+re-based, and 48 rem-ring warm-up conditions changed from `x >= diam` to
+`x >= x0 + diam`. Every existing entry point became a thin wrapper passing
+`0..width`, and the **whole suite stayed green at 369 passed / 0 failed**,
+including the v1 golden byte gates — so the generalisation is byte-neutral on
+the packed path, exactly as designed.
 
-| arm | 2304² | vs none | 4608² | vs none |
-|---|---:|---:|---:|---:|
-| no tiling | 333.61 | — | 2366.68 | — |
-| H blur only | 272.15 | **1.226×** | 1298.61 | **1.823×** |
-| H blur + activity | 272.03 | 1.226× | **1279.93** | **1.849×** |
+Then both forms were put behind one knob in ONE binary and measured:
 
-The activity arm buys **+1.5 % at 21 MP and nothing at 5 MP** — small, but
-monotone in size and it composes, so it is kept. Attribution confirms it is
-doing what it claims: `v2:planesA` **247.57 → 222.69 ms** at 4608² (1.11×).
-
-**And that is where the copy-based form stops paying.** The remaining
-`planesA` is four V blurs plus `abs_diff`. Column-tiling those is
-*bit-identical* (their `v_add_idx`/`v_rem_idx` depend only on `y`), but each
-is a one-plane-in/one-plane-out pass, so the copies a tiled call must make are
-the same order as the traffic the pass itself does — the win and the overhead
-are the same size. The H blur paid because it is **six** plane-touches behind
-two copies; a V blur is two behind two.
-
-The profile after tiling says the same thing from the other side. At 4608²,
-1T, the walk is now **1319.8 ms**, and its leaders have changed:
-
-| item | before tiling | after | share now |
+| cell | untiled | **packed** | range-in-place |
 |---|---:|---:|---:|
-| `fold` (v1 band replay) | 382.0 | **373.6** | **28.3 %** |
-| `v2:planesA` | 247.7 | 222.7 | 19.1 % |
-| `blur_h` | **1532.7** | **179.6** | 13.6 % |
-| producer | 139.0 | 140.6 | 10.7 % |
-| `v2:planesApp` | 108.6 | 109.1 | 8.3 % |
-| `v2:dense` | 103.2 | 104.5 | 7.9 % |
+| 1T 2304² | 354.28 | **281.90 (1.257×)** | 334.62 (1.059×) |
+| 1T 4608² | 2440.69 | **1424.16 (1.714×)** | 2540.78 (**0.961×**) |
+| 8T 2304² | 97.50 | **89.05 (1.095×)** | 95.57 (1.020×) |
+| 8T 4608² | 701.29 | **522.35 (1.343×)** | 682.18 (1.028×) |
 
-**The H blur went from 57.4 % of the walk to 13.6 %, an 8.5× on the item
-itself.** What is left is the fold at 28.3 % — which reads six full-width
-planes over a 42-row band (4.6 MB at 4608², nowhere near L2) and so has the
-*same* width disease, and `planesA` at 19.1 %, whose residue is the V blurs.
-Both are copy-bound in this form and neither can be fixed by another
-`column_tiled_pass` call.
+**Restricting the column range in place buys essentially nothing — and at
+1T/4608² it is a net loss.** The copies are not overhead to be optimised
+away; they *are* the optimisation.
 
-### 23.6 THREADS INVERT THE SIGN BELOW ~4000 px — tiling cannot be default-on as it stands
+The mechanism, once seen, is the one every packed GEMM already knows.
+Restricting `x` to a tile does not change which cache lines the kernel walks:
+the six planes are still full-width, so a 16-row group at tile width is
+sixteen contiguous runs separated by `width × 4 B` (18 KiB at 4608²), and the
+prefetchers see six strided streams exactly as before. **Staging the tile into
+a compact `rows × (tile + 2R)` buffer is what makes the accesses dense** — the
+copy in is one linear prefetch-friendly sweep, the kernel then runs entirely
+inside a small hot buffer, and the copy out is another linear sweep. Locality
+comes from the *layout*, not from the loop bounds.
 
-The rayon arm of `fused_blur_h_ssim_banded` row-bands across threads and
-returned before the tile, so every number above is 1T. Wiring the tile INSIDE
-each row band (the two axes compose — the band gives a thread its rows, the
-tile keeps that band's 6-plane window in L2; each worker owns its own
-thread-local arena) and re-measuring:
+**The x-range refactor was therefore deleted, not parked** — 16 kernel bodies
+reverted to their committed form. It is recorded here because the hypothesis
+was well-motivated, the experiment was cheap once the A/B knob existed, and
+the negative result is the useful part: **anyone reaching for "tile the loop"
+on this pipeline should reach for "pack the tile" instead.**
 
-| threads | size | untiled | tiled | ratio |
-|---:|---|---:|---:|---:|
-| 1 | 2304² | 363.17 | 290.28 | **1.251×** |
-| 1 | 4608² | 2455.19 | 1366.59 | **1.797×** |
-| 8 | 2304² | 104.24 | 117.04 | **0.891×** |
-| 8 | 4608² | 677.53 | 515.71 | **1.314×** |
-| 16 | 2304² | 108.90 | 119.38 | **0.912×** |
-| 16 | 4608² | 608.54 | 563.20 | **1.081×** |
+Same pass, same conclusion for the **activity chain**. §23.5 of the previous
+revision claimed +1.5 % at 21 MP for tiling `box_blur_1pass_into`. Isolated
+properly — H and A as independent arms in one binary, more repetitions — it is
+a wash:
 
-**At 8–16 threads and 2304², tiling is a 9–11 % REGRESSION.** The 8T/2304²
-cell is the one that was chased to convergence, because a 5-sample run first
-reported it as a 1.039× *win*: with n = 11 process starts it is
-min 104.24 vs 117.04 (**0.891×**) and median 120.64 vs 126.16 (0.956×) — a
-real regression, and a reminder that threaded cells need more samples than
-1T ones (thread placement is a second lottery on top of §22.5's layout one).
+| cell | none | H only | H + A | A only |
+|---|---:|---:|---:|---:|
+| 1T 2304² | 345.61 | **274.25 (1.260×)** | 285.48 (1.211×) | 351.12 (0.984×) |
+| 1T 4608² | 2537.03 | 1446.11 (1.754×) | **1404.08 (1.807×)** | 2454.07 (1.034×) |
+| 8T 2304² | 115.10 | 110.41 (1.042×) | **105.07 (1.095×)** | 118.06 (0.975×) |
+| 8T 4608² | 720.69 | **579.89 (1.243×)** | 587.07 (1.228×) | 735.91 (0.979×) |
 
-The mechanism is consistent: at 1T the whole strip's ~14 plane buffers churn
-one core's L2 between passes, so shrinking the H blur's window helps a lot;
-at 8T each core owns its own 1 MiB L2 and a 16-row band is
-`16 × 6 × width × 4 B` = **864 KiB at 2304** — it already fits, so the tile's
-copies are pure overhead. At 4608 the same band is **1.73 MiB** and does not
-fit at any thread count, so tiling wins there regardless.
+The A-only column is 0.975–1.034× — noise. H+A against H alone is positive in
+two cells and negative in two. **The activity tiling was removed**, and the
+earlier +1.5 % is superseded: it was a two-cell reading of a wash.
 
-An intermediate 8T sweep (2304 / 2880 / 3456 / 4032 / 4608, n = 5) came back
-**non-monotone** (1.039× / 1.125× / 0.914× / 0.950× / 1.271×) and is reported
-as unconverged rather than fitted: n = 5 is demonstrably not enough at 8T, and
-the honest statement from the data that IS converged is directional —
-**tiling helps at 1T from ~2304 up, and at ≥8T only above ~4000 px width.**
+### 23.6 The shipped shape, measured across threads AND sizes
 
-**Consequence for shipping.** A blanket default-on would regress the common
-threaded 5 MP case by ~10 %, so the tile must be **conditioned on width and on
-whether the H blur is running row-banded across threads** — two thresholds,
-not one constant. Deriving them is a sweep, not a guess: sizes at 512-px
-steps from 1536 to 6144 × {1, 4, 8, 16} threads × both CCDs, n ≥ 11 process
-starts, min-over-layouts. Until that runs, both knobs stay default-off, and
-the numbers in §23.3–23.5 stand as the 1T result they are.
+What remains is exactly one change: the phase-A fused H blur, column-tiled
+with packing, inside the rayon row band as well as the serial path (the axes
+compose — the band gives a thread its rows, the tile keeps that band's
+6-plane window dense; each worker owns its own thread-local arena).
+
+Min over 5–7 process starts per cell, min of 3–15 walks per process,
+CCD-pinned, arms interleaved, byte-identical env blocks:
+
+| threads | 576² | 1152² | 2304² | 4608² |
+|---:|---:|---:|---:|---:|
+| **1** | 1.001× | 0.997× | **1.151×** | **1.733×** |
+| **8** | 1.008× | 0.935× | 1.064× | **1.234×** |
+| **16** | 0.989× | 1.018× | 0.944× | **1.109×** |
+
+**Read the two left columns first — they are the control.** At 576² and 1152²
+the tile (1536) is wider than the image, so no tiling happens and both arms
+run the *identical code path*: those cells must be 1.000×, and what they
+actually report is the measurement's own noise floor — **±0.3 % at 1T, ±1.8 %
+at 16T, and as much as 6.5 % at 8T** (the 8T/1152² cell reads 0.935× on
+identical code). Threaded cells carry a thread-placement lottery on top of
+§22.5's layout one, and min-over-7 does not fully remove it.
+
+Against that floor:
+
+* **Established wins:** 1T from 2304² up (1.151× / **1.733×**, against a
+  0.3 % floor), and 4608² at every thread count (1.234× @8T, 1.109× @16T).
+* **Not established either way:** 2304² threaded (1.064× @8T, 0.944× @16T) —
+  both inside their own cells' noise floor.
+* **No established regression anywhere.** The 0.891× regression reported in
+  the previous revision of this section was **the packed ACTIVITY chain, not
+  the H blur**; with the activity tiling removed, the H-only arm is ≥1.04× at
+  every 8T cell measured.
+
+So the earlier "two thresholds, conditioned on width and on threading" is
+withdrawn. One condition remains, and it is structural rather than tuned: the
+tile does nothing when `width <= tile`, which is why the small buckets are
+exactly the untiled code path.
 
 ### 23.7 What is next, in value order
 
