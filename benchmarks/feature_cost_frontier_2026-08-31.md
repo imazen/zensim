@@ -689,7 +689,7 @@ template: read set → cheapest request → ms → the UPIQ bars.
 
 `fold_v1` is a hardcoded `let fold_v1 = true;` (`feature_v2.rs:7395`), but the
 walk **already branches on it** in four places — the band-replay call
-(`:6299`), the width computation (`v1_total = if fold_v1 { … } else { 0 }`),
+(`:6447`), the width computation (`v1_total = if fold_v1 { … } else { 0 }`),
 the finalize block, and the pool-mode plumb. Making it a compute decision would
 let a 944-class model that reads nothing in `f0..372` skip v1's entire band
 replay, which is the single largest remaining block for the W-LIN class.
@@ -816,6 +816,12 @@ cargo test --release -p zensim --features custom-profiles,feature-regime-v2,thre
   1T ratio; the 8T/16T columns were taken while another lane's 8-thread bench
   was on the box and should be read for shape, not for a few-percent
   comparison.
+* **Every hand-typed cell in this note was re-verified against its source**
+  after the fact — §2.1's 54 ablation deltas and baselines against
+  `ablate_shippedB.log`, §2.2's 65 against the two `ablate_q7b*` logs, §4.2's
+  50 and §4.2b's 40 against the verdict JSONs, §4.3's 42 against those plus
+  the `peer_ssim2` row: **251 cells, 0 mismatches**. The §0.1, §3.1 and §4.4
+  tables are machine-rendered from the committed TSVs and were never typed.
 * The `ms` columns are **extraction only**. The bake forward is excluded and
   was not measured; the MAC counts in §0.1 are the reason it is expected to be
   negligible, not evidence that it is.
