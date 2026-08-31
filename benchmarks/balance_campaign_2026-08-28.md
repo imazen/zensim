@@ -4206,3 +4206,52 @@ HDR untouched (the fold falls back to buffered for declared-HDR) though the free
 ⚠ Process note: **`cargo … | grep -E '^error'` NEVER matches** — cargo's ANSI colorizing puts an
 escape before `error`; it hid a bench compile failure for ~30 min and made a first clippy "clean"
 false.
+
+## 2026-08-31 ~09:3xZ — ROUND 23: THE FOLD FOOTPRINT, DECOMPOSED — and the fold is now FASTER than buffered serially (12 commits; doc `benchmarks/fold_footprint_2026-08-31.md`)
+
+**Why the fold was ever heavier: buffered sizes its band scratch by WORKER COUNT, the fold sized
+its by FAN-OUT SHAPE.** Buffered's `ScaleBuffers` comes from a rayon `map_init` — one buffer per
+worker, so ONE at one thread; the fold pre-allocated a `FoldPoolScratch` per (channel × band slot)
+= **12 band buffers regardless of the pool**, plus three full 14-plane `ScratchV2Strip` sets of
+which a `v1_only` score writes **two planes**. At 1 thread: 12 band buffers against buffered's 1,
+on identical work.
+**Two inherited premises FALSIFIED**: there is **no 1+1/4+1/16 pyramid series** (`downscale_2x_inplace`
+writes over the plane prefix, `Vec::truncate` keeps capacity — the term is exactly `24·W·H`,
+confirmed 31.85 MB/18 calls), and widths are **not** SIMD-padded (`pyramid_plane_stride(w)==w`).
+Closed-form model committed; every term matches heaptrack to **<0.1 %**; per-cell RSS error over 42
+cells buffered −4.4…+9.4 %, fold +3.8…−9.0 %, with per-worker glibc arena churn isolated rather
+than fitted.
+**Pool-block answer (the user's sub-question): 33–34 % of the fold's working set at 1T, 39–43 % at
+16T** — the largest single term, width-scaled and height-independent, which is exactly why the fold
+lost below ~3 MP. After the fix, turning pools ON at 1T makes the walk **smaller** (self-blur's
+1-slot pool is cheaper than the phase-A planes it replaces).
+**Shipped (4 fixes, zero bytes moved)**: `StripPlaneNeeds` (strip scratch sized to the plane groups
+actually written: 2 of 14), `band_slots_for` (`min(bands, threads)` slots + chunked fan-out
+preserving the band-order f64 merge), `advance_rows_for` (`ADVANCE_ROWS` becomes a CEILING; `32·T`
+on the 64-row lattice), `FoldPoolScratch::ensure` sized to the max band. 366/0.
+**Results — working set** 1152² **53,880 → 23,188 KiB** (1T), 64,668 → 55,208 (16T); 2304² 99,520 →
+**43,832** / 116,724 → 104,748; buffered control moved ≤1.5 %. **Crossover 1T ~3.2 → ~0.5 MP**, 8T
+→ ~2.35, 16T ~2.2 → **~1.4 MP**. **Speed 1T: `score_fold` −26.5 % (1152²) / −13.1 % (2304²) — now
+FASTER than buffered, 0.78×/0.87×** (was 1.03×); 16T −12.4 % / −7.2 %, ratio 1.593→1.366 and
+1.656→1.589.
+**★ The machine is NOT a 7950X — it is a Ryzen 9 9950X3D with ASYMMETRIC L3**: CCD0 (cpus
+0-7,16-23) **96 MiB**, CCD1 (8-15,24-31) **32 MiB**; `getconf LEVEL3_CACHE_SIZE` reports 32 MiB and
+is wrong for half the box. Per-thread budget is set by CCD1: 8 MiB (8T) / 4 (16T) / 2 (32T); fold
+band task = `2,016·W` vs buffered `1,512·W`, so at 2304²×8T that is 35.4 vs 26.6 MiB against
+32 MiB — **the threshold falls between them.** Per-CCD N-process saturation, TESTED: pre-fix the
+fold was CCD-insensitive (3.38×/3.33×, reproducing the predecessor's "3.5× machine bound"),
+post-fix it is CCD-SENSITIVE (**5.85× / 4.54×**) ⇒ **the predecessor's "machine's own bound" was
+the fold's OWN footprint**; throughput +80 % on the 96 MiB CCD. Ablation attributes the whole gain
+to `band_slots_for`.
+**Column tiling: PRICED, not implemented** — halo derived from the kernel chain (two chained H
+passes ⇒ 10 columns/side, buffer `Tw+20`, redundant work 15.6/7.8/3.9/1.0 % at Tw=128/256/512/2048);
+any `Tw ≤ 2048` holds the per-thread hot set under CCD1's 16T budget at every width; it reorders
+the f64 pooled accumulation ⇒ moves bytes today, so it is recorded as an **era-2-enabled design**
+(fixed virtual-lane grouping makes it byte-safe by construction) with predicted gain 2304²/16T
+**4.43 → 1.02 MiB/thread at Tw=512**, CCD1 occupancy 35.4 → 8.2 MiB.
+**Open**: the workspace Environment doc names the wrong CPU (user-gated edit, NOT made);
+`Zensim::compute` builds a fresh `V2Scratch` per call so a hot loop churns per-worker arenas
+(+19 % RSS over 20 compares at 16T — `compute_with_ref_into` already avoids it; fixing plain
+`compute` is an API/ownership decision); cross-channel band-slot pooling priced (−7.4 MB at
+1152²/8T, nothing at 16T), not built; 512²/8T still 1.84× (four band slots are genuine there and a
+180-row rolling floor is 85 % of a 512-row image).
