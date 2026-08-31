@@ -67,4 +67,10 @@ Unchanged from the era-2 doc, and none of it is optional:
    (F1 has it; **F3 does not**; F4 may not need it if the edge gate shows
    bit-identity).
 2. **Blast radius + retrain wave registration.**
-3. **Gate re-pin enumeration, old → new.**
+3. ~~**Gate re-pin enumeration, old → new.**~~ **DONE** for the tiling flip —
+   era-2 doc §27: forcing the tile on for the whole suite fails **exactly five
+   tests, all absolute-value goldens** (the four `v1_golden_bytes` fixtures and
+   `hardcoded_reference_scores`), and **zero** internal-consistency gates. That
+   enumeration also found a defect: tiling selected call sites split the v1
+   reference path from the fold, so the tile now lives on all four H **entries**
+   rather than at call sites — either every H entry tiles or none does.

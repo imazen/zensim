@@ -597,6 +597,24 @@ pub(crate) fn box_blur_h(
     height: usize,
     radius: usize,
 ) {
+    let tile = h_blur_tile_width();
+    if tile > 0 && width > tile {
+        h_tile_1in1out(input, output, width, height, radius, tile, |i, o, w, h| {
+            box_blur_h_untiled(i, o, w, h, radius)
+        });
+        return;
+    }
+    box_blur_h_untiled(input, output, width, height, radius)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn box_blur_h_untiled(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
     incant!(
         box_blur_h_inner(input, output, width, height, radius),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -1267,6 +1285,24 @@ fn box_blur_h_inner(
 /// Saves one full plane read of src + one full plane write/read of
 /// h_blur_src per channel per scale on the activity path.
 pub(crate) fn box_blur_h_into_abs_diff(
+    src: &[f32],
+    out_activity: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let tile = h_blur_tile_width();
+    if tile > 0 && width > tile {
+        h_tile_1in1out(src, out_activity, width, height, radius, tile, |i, o, w, h| {
+            box_blur_h_into_abs_diff_untiled(i, o, w, h, radius)
+        });
+        return;
+    }
+    box_blur_h_into_abs_diff_untiled(src, out_activity, width, height, radius)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn box_blur_h_into_abs_diff_untiled(
     src: &[f32],
     out_activity: &mut [f32],
     width: usize,
@@ -1953,6 +1989,34 @@ fn box_blur_h_into_abs_diff_inner(
 /// Reads each pixel of src/dst exactly once, replacing two separate box_blur_h calls.
 /// Used for edge-only channels that need mu1/mu2 but not sigma planes.
 pub(crate) fn fused_blur_h_mu(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let tile = h_blur_tile_width();
+    if tile > 0 && width > tile {
+        h_tile_2in2out(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            width,
+            height,
+            radius,
+            tile,
+            |s2, d2, a, b, w, h| fused_blur_h_mu_untiled(s2, d2, a, b, w, h, radius),
+        );
+        return;
+    }
+    fused_blur_h_mu_untiled(src, dst, out_mu1, out_mu2, width, height, radius)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fused_blur_h_mu_untiled(
     src: &[f32],
     dst: &[f32],
     out_mu1: &mut [f32],
@@ -2722,11 +2786,249 @@ fn fused_blur_h_mu_inner(
     }
 }
 
+/// Column-tile a 1-in / 1-out H pass (`box_blur_h`,
+/// `box_blur_h_into_abs_diff`): stage the tile plus its `±radius` halo into a
+/// compact thread-local buffer, run `f`, copy the interior back.
+///
+/// These entries are tiled for CONSISTENCY, not for speed — the A/B on the
+/// activity chain was a wash (§23.5). Tiling only `fused_blur_h_ssim` left the
+/// v1 reference path and the fold reading planes produced under different
+/// summation groupings, which failed `folded720_v1_pools_match_v1_path` and
+/// `v1_372_bit_exact_to_fold_at_every_width`. Either every H entry tiles or
+/// none does.
+fn h_tile_1in1out(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    rows: usize,
+    radius: usize,
+    tile: usize,
+    mut f: impl FnMut(&[f32], &mut [f32], usize, usize),
+) {
+    thread_local! {
+        static ARENA: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+    ARENA.with(|a| {
+        let mut arena = a.borrow_mut();
+        let tw_max = (tile + 2 * radius).min(width);
+        let per = rows * tw_max;
+        if arena.len() < 2 * per {
+            arena.resize(2 * per, 0.0);
+        }
+        let (tin, tout) = arena.split_at_mut(per);
+        let mut x0 = 0usize;
+        while x0 < width {
+            let x1 = (x0 + tile).min(width);
+            let xl = x0.saturating_sub(radius);
+            let xr = (x1 + radius).min(width);
+            let (tw, keep, kn) = (xr - xl, x0 - xl, x1 - x0);
+            for y in 0..rows {
+                let s = y * width + xl;
+                tin[y * tw..y * tw + tw].copy_from_slice(&input[s..s + tw]);
+            }
+            f(&tin[..rows * tw], &mut tout[..rows * tw], tw, rows);
+            for y in 0..rows {
+                let o = y * width + x0;
+                let t = y * tw + keep;
+                output[o..o + kn].copy_from_slice(&tout[t..t + kn]);
+            }
+            x0 = x1;
+        }
+    });
+}
+
+/// Column-tile the 2-in / 2-out `fused_blur_h_mu`, same contract as
+/// [`h_tile_1in1out`].
+#[allow(clippy::too_many_arguments)]
+fn h_tile_2in2out(
+    src: &[f32],
+    dst: &[f32],
+    o1: &mut [f32],
+    o2: &mut [f32],
+    width: usize,
+    rows: usize,
+    radius: usize,
+    tile: usize,
+    mut f: impl FnMut(&[f32], &[f32], &mut [f32], &mut [f32], usize, usize),
+) {
+    thread_local! {
+        static ARENA: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+    ARENA.with(|a| {
+        let mut arena = a.borrow_mut();
+        let tw_max = (tile + 2 * radius).min(width);
+        let per = rows * tw_max;
+        if arena.len() < 4 * per {
+            arena.resize(4 * per, 0.0);
+        }
+        let (ts, rest) = arena.split_at_mut(per);
+        let (td, rest) = rest.split_at_mut(per);
+        let (t1, t2) = rest.split_at_mut(per);
+        let mut x0 = 0usize;
+        while x0 < width {
+            let x1 = (x0 + tile).min(width);
+            let xl = x0.saturating_sub(radius);
+            let xr = (x1 + radius).min(width);
+            let (tw, keep, kn) = (xr - xl, x0 - xl, x1 - x0);
+            for y in 0..rows {
+                let s = y * width + xl;
+                ts[y * tw..y * tw + tw].copy_from_slice(&src[s..s + tw]);
+                td[y * tw..y * tw + tw].copy_from_slice(&dst[s..s + tw]);
+            }
+            f(
+                &ts[..rows * tw],
+                &td[..rows * tw],
+                &mut t1[..rows * tw],
+                &mut t2[..rows * tw],
+                tw,
+                rows,
+            );
+            for y in 0..rows {
+                let o = y * width + x0;
+                let t = y * tw + keep;
+                o1[o..o + kn].copy_from_slice(&t1[t..t + kn]);
+                o2[o..o + kn].copy_from_slice(&t2[t..t + kn]);
+            }
+            x0 = x1;
+        }
+    });
+}
+
+/// Column-tile width for the fused H blur; 0 disables tiling.
+///
+/// **It lives on the ENTRY, not on selected call sites, and that is
+/// load-bearing.** Tiling only phase A left the v1 reference path untiled, and
+/// running the suite with the tile forced on failed exactly four cross-path
+/// gates — `folded720_v1_basic_matches_v1_path`,
+/// `folded720_v1_pools_match_v1_path`,
+/// `prepared_ref_with_moments_bit_identical_to_pair_path` and
+/// `v1_372_bit_exact_to_fold_at_every_width` — because the fold read tiled H
+/// planes while v1 read untiled ones. Every caller of this entry now tiles
+/// identically, so those gates hold under the tile instead of needing a
+/// re-pin. (The tile boundaries are a pure function of `(width, tile)`, and
+/// the H blur is row-local, so band shape cannot make two callers disagree.)
+#[inline]
+pub(crate) fn h_blur_tile_width() -> usize {
+    use std::sync::OnceLock;
+    static N: OnceLock<usize> = OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("ZENSIM_H_TILE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// [`fused_blur_h_ssim`] over column tiles of `tile` output columns, each
+/// staged with a `±radius` halo into a compact thread-local buffer, blurred
+/// there, and its interior copied back.
+///
+/// The PACKING is the optimisation, not the loop restriction — an in-place
+/// column range measured 0.96–1.06× against this form's 1.26–1.71×
+/// (`benchmarks/era2_perf_break_2026-08-31.md` §23.5).
+///
+/// Not bit-exact: the running sum along x restarts at each tile. Tile
+/// boundaries are a pure function of `(width, tile)`, so the result stays
+/// thread- and schedule-invariant.
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_column_tiled(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    rows: usize,
+    radius: usize,
+    tile: usize,
+) {
+    thread_local! {
+        static ARENA: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+    ARENA.with(|a| {
+        let mut arena = a.borrow_mut();
+        let tw_max = (tile + 2 * radius).min(width);
+        let per = rows * tw_max;
+        if arena.len() < 6 * per {
+            arena.resize(6 * per, 0.0);
+        }
+        let (tsrc, rest) = arena.split_at_mut(per);
+        let (tdst, rest) = rest.split_at_mut(per);
+        let (tm1, rest) = rest.split_at_mut(per);
+        let (tm2, rest) = rest.split_at_mut(per);
+        let (tsq, rest) = rest.split_at_mut(per);
+        let (ts12, _) = rest.split_at_mut(per);
+
+        let mut x0 = 0usize;
+        while x0 < width {
+            let x1 = (x0 + tile).min(width);
+            let xl = x0.saturating_sub(radius);
+            let xr = (x1 + radius).min(width);
+            let tw = xr - xl;
+            let keep = x0 - xl;
+            let kn = x1 - x0;
+            for y in 0..rows {
+                let s = y * width + xl;
+                let t = y * tw;
+                tsrc[t..t + tw].copy_from_slice(&src[s..s + tw]);
+                tdst[t..t + tw].copy_from_slice(&dst[s..s + tw]);
+            }
+            fused_blur_h_ssim_untiled(
+                &tsrc[..rows * tw],
+                &tdst[..rows * tw],
+                &mut tm1[..rows * tw],
+                &mut tm2[..rows * tw],
+                &mut tsq[..rows * tw],
+                &mut ts12[..rows * tw],
+                tw,
+                rows,
+                radius,
+            );
+            for y in 0..rows {
+                let o = y * width + x0;
+                let t = y * tw + keep;
+                out_mu1[o..o + kn].copy_from_slice(&tm1[t..t + kn]);
+                out_mu2[o..o + kn].copy_from_slice(&tm2[t..t + kn]);
+                out_sigma_sq[o..o + kn].copy_from_slice(&tsq[t..t + kn]);
+                out_sigma12[o..o + kn].copy_from_slice(&ts12[t..t + kn]);
+            }
+            x0 = x1;
+        }
+    });
+}
+
 /// Fused horizontal blur for SSIM: computes blur(src), blur(dst), blur(src²+dst²), blur(src*dst)
 /// in a single pass. Reads each pixel of src/dst exactly once, eliminating 3 extra H-passes
 /// and 2 element-wise ops (sq_sum_into, mul_into).
 #[allow(clippy::too_many_arguments)]
 pub fn fused_blur_h_ssim(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let tile = h_blur_tile_width();
+    if tile > 0 && width > tile {
+        fused_blur_h_ssim_column_tiled(
+            src, dst, out_mu1, out_mu2, out_sigma_sq, out_sigma12, width, height, radius, tile,
+        );
+        return;
+    }
+    fused_blur_h_ssim_untiled(
+        src, dst, out_mu1, out_mu2, out_sigma_sq, out_sigma12, width, height, radius,
+    )
+}
+
+/// [`fused_blur_h_ssim`] with the column tile bypassed — the tiled form's own
+/// per-tile call, and the path every caller took before the tile existed.
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_untiled(
     src: &[f32],
     dst: &[f32],
     out_mu1: &mut [f32],
@@ -2774,6 +3076,56 @@ pub fn fused_blur_h_ssim3(
     height: usize,
     radius: usize,
 ) {
+    // The tile must be on THIS entry too, not just `fused_blur_h_ssim`: the
+    // cached-reference-moments path reaches the H planes through here, and
+    // tiling only the 4-output entry made it disagree with the pair path
+    // (`prepared_ref_with_moments_bit_identical_to_pair_path`) and with v1's
+    // pool slots. Inside the tile the 4-output kernel runs — `mu1_scratch`
+    // receives the plane that the v4x 3-output body would have compiled out,
+    // which is exactly what every non-v4x tier already does.
+    let tile = h_blur_tile_width();
+    if tile > 0 && width > tile {
+        fused_blur_h_ssim_column_tiled(
+            src,
+            dst,
+            mu1_scratch,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            radius,
+            tile,
+        );
+        return;
+    }
+    fused_blur_h_ssim3_untiled(
+        src,
+        dst,
+        mu1_scratch,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        radius,
+    )
+}
+
+/// [`fused_blur_h_ssim3`] with the column tile bypassed.
+#[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(any(feature = "feature-regime-v2", test)), allow(dead_code))]
+fn fused_blur_h_ssim3_untiled(
+    src: &[f32],
+    dst: &[f32],
+    mu1_scratch: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
     #[cfg(target_arch = "x86_64")]
     {
         use archmage::SimdToken as _;
@@ -2793,7 +3145,7 @@ pub fn fused_blur_h_ssim3(
             return;
         }
     }
-    fused_blur_h_ssim(
+    fused_blur_h_ssim_untiled(
         src,
         dst,
         mu1_scratch,
@@ -5324,7 +5676,7 @@ mod tests {
                 }
                 let mut got = vec![0.0f32; w * h];
                 let mut want = vec![0.0f32; w * h];
-                super::box_blur_h(&input, &mut got, w, h, radius);
+                super::box_blur_h_untiled(&input, &mut got, w, h, radius);
                 reference(&input, &mut want, w, h, radius);
                 for i in 0..w * h {
                     assert_eq!(
@@ -5409,7 +5761,7 @@ mod tests {
                 let diam = 2 * radius + 1;
                 let inv = 1.0 / diam as f32;
                 let mut got = vec![0.0f32; w * h];
-                super::box_blur_h_into_abs_diff(&input, &mut got, w, h, radius);
+                super::box_blur_h_into_abs_diff_untiled(&input, &mut got, w, h, radius);
                 let mut want = vec![0.0f32; w * h];
                 for row in 0..h {
                     let off = row * w;
@@ -5473,15 +5825,15 @@ mod tests {
                 let inv = 1.0 / diam as f32;
                 let n = w * h;
                 let (mut m1, mut m2) = (vec![0.0f32; n], vec![0.0f32; n]);
-                super::fused_blur_h_mu(&src, &dst, &mut m1, &mut m2, w, h, radius);
+                super::fused_blur_h_mu_untiled(&src, &dst, &mut m1, &mut m2, w, h, radius);
                 let (mut s1, mut s2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
-                super::fused_blur_h_ssim(
+                super::fused_blur_h_ssim_untiled(
                     &src, &dst, &mut s1, &mut s2, &mut sq, &mut pr, w, h, radius,
                 );
                 let (mut t1, mut t2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut tq, mut tp) = (vec![0.0f32; n], vec![0.0f32; n]);
-                super::fused_blur_h_ssim3(
+                super::fused_blur_h_ssim3_untiled(
                     &src, &dst, &mut t1, &mut t2, &mut tq, &mut tp, w, h, radius,
                 );
 

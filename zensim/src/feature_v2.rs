@@ -2199,53 +2199,23 @@ fn fused_blur_h_ssim_banded(
                 let rows = m1.len() / width;
                 let lo = y0 * width;
                 let hi = lo + rows * width;
-                let tile = h_blur_tile_width();
-                if tile > 0 && width > tile {
-                    // Tiles nest INSIDE the row band, so the two axes compose:
-                    // the band gives the thread its rows, the tile keeps that
-                    // band's 6-plane window inside L2. Each worker owns its own
-                    // thread-local tile arena.
-                    fused_blur_h_ssim_column_tiled(
-                        &src[lo..hi],
-                        &dst[lo..hi],
-                        m1,
-                        m2,
-                        sq,
-                        s12,
-                        width,
-                        rows,
-                        tile,
-                    );
-                } else {
-                    crate::blur::fused_blur_h_ssim(
-                        &src[lo..hi],
-                        &dst[lo..hi],
-                        m1,
-                        m2,
-                        sq,
-                        s12,
-                        width,
-                        rows,
-                        BLUR_RADIUS,
-                    );
-                }
+                // The tile lives on `fused_blur_h_ssim` itself, so it nests
+                // inside this row band automatically: the band gives the
+                // thread its rows, the tile keeps that band's 6-plane window
+                // dense. Each worker owns its own thread-local tile arena.
+                crate::blur::fused_blur_h_ssim(
+                    &src[lo..hi],
+                    &dst[lo..hi],
+                    m1,
+                    m2,
+                    sq,
+                    s12,
+                    width,
+                    rows,
+                    BLUR_RADIUS,
+                );
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BlurBandBusy, 0);
             });
-        return;
-    }
-    let tile = h_blur_tile_width();
-    if tile > 0 && width > tile {
-        fused_blur_h_ssim_column_tiled(
-            src,
-            dst,
-            mu1_h,
-            mu2_h,
-            ssq_h,
-            s12_h,
-            width,
-            height_local,
-            tile,
-        );
         return;
     }
     crate::blur::fused_blur_h_ssim(
@@ -2261,109 +2231,6 @@ fn fused_blur_h_ssim_banded(
     );
 }
 
-/// Column-tile width for the phase-A H blur; 0 disables tiling.
-///
-/// PROBE (era-2 doc §23). The H blur's cost is a function of WIDTH, not of
-/// pixel count: at a fixed 5.31 MP and 1T, `blur_h` costs **104.99 ms at
-/// width 2304 and 34.58 ms at width 1152** (3.4×), and is flat below that —
-/// the kernel holds 16 rows × 6 planes, which is 884 KiB at 2304 against the
-/// 1 MiB L2 on this part and 442 KiB at 1152. Unlike ROW banding (§22, where
-/// the halo closure is ±2·BLUR_RADIUS = 20 rows out of 32 = 62 % redundancy),
-/// the COLUMN closure is ±BLUR_RADIUS, so a 1024-wide tile re-blurs
-/// `1034/1024` = **1 %**.
-#[inline]
-fn h_blur_tile_width() -> usize {
-    use std::sync::OnceLock;
-    static N: OnceLock<usize> = OnceLock::new();
-    *N.get_or_init(|| {
-        std::env::var("ZENSIM_H_TILE")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(0)
-    })
-}
-
-
-
-/// [`crate::blur::fused_blur_h_ssim`] over column tiles of `tile` output
-/// columns, each blurred with a `±BLUR_RADIUS` column halo and the halo
-/// outputs discarded.
-///
-/// ZERO-COPY: the kernel takes the output column range directly
-/// ([`crate::blur::fused_blur_h_ssim_range`]), reads its `±BLUR_RADIUS` halo
-/// out of the same full-width buffers, and mirrors at the PLANE's edges — not
-/// the tile's — so nothing is staged and nothing is copied back. The working
-/// set per tile is `rows × tile × 6`.
-///
-/// NOT bit-exact: the kernel's running sum along x restarts at each tile, so
-/// this is an era-2 byte change. Tile boundaries are a pure function of
-/// `width` and `tile`, so the result stays thread- and schedule-invariant.
-#[allow(clippy::too_many_arguments)]
-fn fused_blur_h_ssim_column_tiled(
-    src: &[f32],
-    dst: &[f32],
-    mu1_h: &mut [f32],
-    mu2_h: &mut [f32],
-    ssq_h: &mut [f32],
-    s12_h: &mut [f32],
-    width: usize,
-    rows: usize,
-    tile: usize,
-) {
-    thread_local! {
-        static ARENA: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
-    }
-    ARENA.with(|a| {
-        let mut arena = a.borrow_mut();
-        let tw_max = (tile + 2 * BLUR_RADIUS).min(width);
-        let per = rows * tw_max;
-        if arena.len() < 6 * per {
-            arena.resize(6 * per, 0.0);
-        }
-        let (tsrc, rest) = arena.split_at_mut(per);
-        let (tdst, rest) = rest.split_at_mut(per);
-        let (tm1, rest) = rest.split_at_mut(per);
-        let (tm2, rest) = rest.split_at_mut(per);
-        let (tsq, rest) = rest.split_at_mut(per);
-        let (ts12, _) = rest.split_at_mut(per);
-
-        let mut x0 = 0usize;
-        while x0 < width {
-            let x1 = (x0 + tile).min(width);
-            let xl = x0.saturating_sub(BLUR_RADIUS);
-            let xr = (x1 + BLUR_RADIUS).min(width);
-            let tw = xr - xl;
-            let keep = x0 - xl;
-            let kn = x1 - x0;
-            for y in 0..rows {
-                let s = y * width + xl;
-                let t = y * tw;
-                tsrc[t..t + tw].copy_from_slice(&src[s..s + tw]);
-                tdst[t..t + tw].copy_from_slice(&dst[s..s + tw]);
-            }
-            crate::blur::fused_blur_h_ssim(
-                &tsrc[..rows * tw],
-                &tdst[..rows * tw],
-                &mut tm1[..rows * tw],
-                &mut tm2[..rows * tw],
-                &mut tsq[..rows * tw],
-                &mut ts12[..rows * tw],
-                tw,
-                rows,
-                BLUR_RADIUS,
-            );
-            for y in 0..rows {
-                let o = y * width + x0;
-                let t = y * tw + keep;
-                mu1_h[o..o + kn].copy_from_slice(&tm1[t..t + kn]);
-                mu2_h[o..o + kn].copy_from_slice(&tm2[t..t + kn]);
-                ssq_h[o..o + kn].copy_from_slice(&tsq[t..t + kn]);
-                s12_h[o..o + kn].copy_from_slice(&ts12[t..t + kn]);
-            }
-            x0 = x1;
-        }
-    });
-}
 
 /// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
 /// fused H-blur + 4x V-blur + activity sequence, over explicit buffers.

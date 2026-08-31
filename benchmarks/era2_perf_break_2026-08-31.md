@@ -2291,3 +2291,94 @@ expressible**: before it, "drop the pool pass for this model" had no place to
 live except another public boolean, and "add the HDR blocks" had the same
 problem. The measured levers are in §23–§25 and
 `benchmarks/era2_drop_redefine_table_2026-08-31.md`; this is the vehicle.
+
+---
+
+## 27. The gate re-pin enumeration, established EMPIRICALLY — and the tile moved onto the entries because of it
+
+One of the three outstanding flip prerequisites was "gate re-pin enumeration,
+old → new". Rather than read the test list and reason about it, the tile was
+**forced on for the whole suite** (`ZENSIM_H_TILE=0032`, small enough that
+every fixture tiles) and the failures were read off. That found a real defect
+before it found the enumeration.
+
+### 27.1 The defect: tiling selected call sites splits paths that must agree
+
+First run, with the tile applied where §23 had put it (phase A's banded H
+call): **4 failures**, all cross-path v1 gates —
+`folded720_v1_basic_matches_v1_path`, `folded720_v1_pools_match_v1_path`,
+`prepared_ref_with_moments_bit_identical_to_pair_path`, and
+`v1_372_bit_exact_to_fold_at_every_width`. The mechanism is immediate once
+seen: phase A tiled, **the v1 reference path did not**, so the fold read H
+planes accumulated under one grouping and v1 read them under another. The
+failing slot was `f228` at ~1.3e-9 relative — a summation-order difference, not
+a bug, but these gates are `to_bits()` by design and must not be widened.
+
+**The fix is structural: the tile belongs on the ENTRY, not on call sites.**
+`fused_blur_h_ssim` now checks the tile itself and delegates to a private
+`fused_blur_h_ssim_untiled`; `feature_v2` no longer owns a tiling wrapper or
+the knob. That removed three of the four failures. The remaining two —
+`folded720_v1_pools_match_v1_path` and `v1_372_bit_exact_to_fold_at_every_width`
+— were the same defect one level down: **`fused_blur_h_ssim3`** (the
+cached-reference-moments path), **`box_blur_h`**, **`box_blur_h_into_abs_diff`**
+and **`fused_blur_h_mu`** are separate H entries, and a path that reaches its
+planes through any of them disagreed with a path that went through the tiled
+one. All four now tile on their entry.
+
+`box_blur_h` and friends are tiled **for consistency, not for speed** — §23.5
+measured the activity chain as a wash. The rule that falls out is worth stating
+plainly: **either every H entry tiles or none does**, because the crate's
+strongest gates are cross-path bit-identity, and a tile that applies to some
+paths is a silent regime split.
+
+Perf is unaffected by making it universal (min over 5–9 process starts,
+CCD-pinned, §22.5 protocol): **1.183× @2304²/1T, 1.673× @4608²/1T,
+1.299× @4608²/8T** — the same as §23.6's 1.151× / 1.733× / 1.234× within the
+noise floor, now with every path consistent.
+
+### 27.2 Two kernel-equivalence tests were re-pointed, NOT relaxed
+
+`fused_h_ring_matches_regathered_reference`,
+`box_blur_h_ring_matches_regathered_reference` and
+`abs_diff_h_ring_matches_regathered_reference` compare a kernel's rem-ring
+optimisation against a hand-written re-gathered reference computed inside the
+test. That reference cannot know about tile boundaries, so under a tiled entry
+they failed at exactly the first tile edge. What they verify — *ring ==
+regather* — is a property of the **kernel**, so they now call the `*_untiled`
+entries. No tolerance was widened and no assertion was removed; the tests were
+pointed at the function whose property they state.
+
+### 27.3 The enumeration
+
+`cargo test --no-fail-fast` with `ZENSIM_H_TILE=0032`, i.e. tiling forced on
+every fixture in the suite:
+
+| | result |
+|---|---|
+| **default (tile off)** | **370 passed, 0 failed** |
+| **tile forced on** | **365 passed, 5 failed** |
+
+**All five failures are absolute-value goldens. Zero internal-consistency
+gates fail.**
+
+| # | test | file | what it pins | observed delta |
+|---|---|---|---|---|
+| 1 | `v1_synthetic_fixture_matches_golden` | `tests/v1_golden_bytes.rs` | v1's 372 on the synthetic fixture | 33 of 372 outside tolerance; `f0` −5.149e-6 |
+| 2 | `v1_real_fixture_matches_golden` | same | v1's 372 on the real fixture | same class |
+| 3 | `v1_nontight_fixture_matches_golden` | same | v1's 372 at non-tight geometry | same class |
+| 4 | `fold_backed_fixtures_match_golden` | same | the fold reproducing 1–3 | same class, identical `f0` delta |
+| 5 | `hardcoded_reference_scores` | `tests/cross_platform.rs` | 8 end-to-end scores | **1.8e-4 to 1.0e-2 score points** |
+
+**That is the whole test-side blast radius of the tiling flip: five goldens,
+re-pinned by re-capturing them (`examples/capture_v1_golden.rs` for 1–4).**
+Everything that asserts *A == B* — cross-engine, cross-entry-path,
+cross-rayon-pool-size, cross-tier, the fold-vs-v1 family, the era-2 band and
+fused/two-pass gates — passes unchanged, which is the property that makes the
+flip safe to do in one step rather than incrementally.
+
+Two caveats on scope. This enumerates the **tiling** flip only; radius 4 (item
+F1) re-pins the same five and is additive, and the V-plane redirect (F4) may
+re-pin none if its edge gate shows bit-identity. And it is measured at
+`tile = 32`, the most aggressive setting: at a production tile width there are
+fewer tile edges per row, so the deltas are smaller — but the *set* of tests
+that move is the same, which is what the enumeration is for.
