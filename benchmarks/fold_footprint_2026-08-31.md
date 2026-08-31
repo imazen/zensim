@@ -731,9 +731,11 @@ rather than paid for twice:
 
 > **Predicted:** per-thread hot set `2,016·W → 2,016·(Tw+20)`, width-independent;
 > at 2304²/16T that is 4.43 → 1.02 MiB per thread at `Tw = 512`, taking 8-thread
-> CCD1 occupancy from **35.4 MiB (over a 32 MiB L3) to 8.2 MiB**, at a measured
-> **3.9 % redundant H-blur cost** and a 2× wider fan-out. The saturation
-> experiment in §9.4 is what says whether that converts into thread scaling.
+> CCD1 occupancy from **35.4 MiB (over a 32 MiB L3) to 8.2 MiB**, at a derived
+> **3.9 % redundant H-blur cost** and a 2× wider fan-out. §9.4 is the evidence
+> that this converts into throughput: shrinking a *different* cache-resident
+> term by 4.7× on the same walk moved the N-process ceiling **3.38× → 5.85×**,
+> and left a residual gap that tracks L3 capacity exactly.
 
 ### 9.4 The experiment that decides it
 

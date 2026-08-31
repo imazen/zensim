@@ -6,3 +6,7 @@ run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=41855MiB :: /home/lilith/t
 [zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m28s, ETA in 1m23s)
 [zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m43s, ETA in 1m08s)
 [zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 3m58s, ETA in 53s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 4m13s, ETA in 38s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 4m28s, ETA in 23s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_2304 (pid 1892513, binary extract_paths_bench-4bc2a357f3e2ca57, running 4m43s, ETA in 8s)
+[zenbench] waiting on exclusive bench lock — <unknown project>/extract_paths_576 (pid 1934867, binary extract_paths_bench-4bc2a357f3e2ca57, running 4s)
