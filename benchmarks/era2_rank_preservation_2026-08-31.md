@@ -42,12 +42,13 @@ threshold.
 
 **The reason 8 of 9 corpora are bit-identical is structural, not lucky, and it is
 also this measurement's main limitation.** Every H entry guards on
-`tile > 0 && width > tile`, and the eval corpora are narrow: six of nine have a
-maximum reference width of 512 px, and only AIC-3 has any reference wider than
-1024. So at production width the eval panel can only *see* the flip on one
-corpus. Two stress arms (`tile = 256` and `tile = 32`, the latter being §27's
-gate-re-pin setting and therefore the maximum tile-edge density anyone has
-proposed) were run for exactly this reason, and they bound the worst case.
+`tile > 0 && width > tile`, and the eval corpora are narrow: **four of nine top
+out at 512 px, eight of nine at 768 px or below, and only AIC-3 has any reference
+wider than 1024.** So at production width the eval panel can only *see* the flip
+on one corpus. Two stress arms (`tile = 256` and `tile = 32` — the latter is the
+setting §27 used to force the tile onto every fixture, i.e. the highest
+tile-edge density used anywhere in this break) were run for exactly this reason,
+and they bound the worst case.
 
 **The bar's third clause — the dial gates — is SATISFIED BY CONSTRUCTION for the
 tiling flip, and this lane proved it rather than leaving it open.** The dial grid
@@ -102,7 +103,7 @@ local pairs TSV, which includes **kon504** (`ext_konjnd_jpeg_val`, 504 rows, the
 | `era1` | unset | 5 | the control |
 | `e2t1024` | `1024` | 5 | **the era-2 ship candidate** at §25's derived production width |
 | `e2t256` | `0256` | 5 | intermediate tile-edge density |
-| `e2t32` | `0032` | 5 | **maximum** tile-edge density — §27's gate-re-pin setting |
+| `e2t32` | `0032` | 5 | **highest** tile-edge density in the break — §27's gate-re-pin setting |
 | `r4ctl` | unset | 4 | item F1 alone |
 | `r4t1024` | `1024` | 4 | **the combined break** |
 | `r4t32` | `0032` | 4 | radius 4 under max tile-edge density |
