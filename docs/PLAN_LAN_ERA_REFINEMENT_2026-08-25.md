@@ -593,7 +593,7 @@ BHdr). zenavif HDR arm: authorized per the SDR-lift extension (the halt is lifte
 | zenwebp | PARTIAL (`ZensimTarget` config + a parameter-grid sweep in sweep.rs; NOT a clear encode-score-adjust secant target-loop like zenavif) | no own secant | ⧗ add an own secant target-loop in-crate |
 | zenjpeg | **NO zensim target loop** | — | ✗ GAP — add a per-codec loop+secant (zenjpeg deps zensim) |
 | zenav1-svt | no zensim loop | — | ✗ GAP |
-| zenav1-aom | no zensim loop | — | ✗ GAP |
+| zenav1-aom | no zensim loop *(SUPERSEDED 2026-08-29: `zenav1-aom-target`, dependency-injected — see the criterion-4 LOOPS table)* | — | ✗ GAP → ✓ done |
 | gainmap | no zensim loop | — | ✗ GAP |
 
 The central `zensim-target` secant (7e17945e) is the SHARED-ALGORITHM reference; per the directive the
@@ -929,7 +929,10 @@ Two wrong things I'd said, both fixed:
   transform/quant/txb/cdef/restore/intra/loopfilter/dist/inter). There is **no turnkey
   `encode(image, cq)→bytes` entry, no image-encode example/CLI, and no zenavif integration yet.** A
   bracketed-secant target loop needs a single-call encode-at-quality to iterate over; that doesn't
-  exist here yet. So the loop is **premature**, not blocked on cloning or on me. The AV1 target loop
+  exist here yet. So the loop is **premature**, not blocked on cloning or on me. *(SUPERSEDED
+  2026-08-29 by user directive: the precondition was wrong-shaped, not wrong — a
+  DEPENDENCY-INJECTED loop needs no in-repo encode entry at all. `zenav1-aom-target`
+  and its phase-A census exist; see the criterion-4 LOOPS table.)* The AV1 target loop
   TODAY is **zenavif's** (`encode_rgb8_with_target`, rav1e/zenrav1e which ARE turnkey); zenav1-aom/svt
   get their own outer loop when their high-level encode API lands. (Program-D λ-side rdmult steering
   is the deeper per-encoder work, also awaiting that API.) Loop-ownership map + zenjpeg's tested
@@ -1046,7 +1049,9 @@ The last format in the loop-ownership table now owns a loop. HONEST remaining
 scope for the gainmap row: a real HDR scorer wiring example + a registered
 census on an HDR instrument + gainmap-calibrated anchor (the zenjpeg-derived
 anchor ships documented-uncalibrated; the search corrects). zenav1-svt/aom rows
-stay premature (no turnkey encode API yet — recorded above).
+stay premature (no turnkey encode API yet — recorded above). *SUPERSEDED: svt
+closed 2026-08-27, aom 2026-08-29 — dependency injection removed the turnkey-API
+precondition for both. See the criterion-4 LOOPS table.*
 
 **avifgen-enc migration COMPLETE (2026-08-26T16:46Z)**: R2→LAN, 542,483==542,483
 objects verified, 16.6 GiB — the avifgen set's encode+score+feature persistence
@@ -1877,7 +1882,7 @@ NOTHING is trusted from that box until a fresh blob shows scores.
 | zenjpeg | ✓ `target_quality::search_target` (bracketed, caller-driven) | **✓ CLOSED 2026-08-27** — A anchor_guess k2 3.657/8hits vs B zq_seed k2 1.905/14, k3 1.383/17: **B PASSES +47.9%/+45.9%, both classes** (zenjpeg `336c4107`, merged `e7c53d2e`) | ✓ consts shipped; **default wiring = user-gated proposal** (head is inert in src today) | executed |
 | zenavif (+zenrav1e) | ✓ `encode_rgb8_zensim_loop` + `two_shot` + the AC.4 CQ instrument harness | **✓ CLOSED 2026-08-27** — AC.4 control-baseline subset: k2 med 0.756 (23/27), k3 0.336 (zenavif `5b28f31`, merged `44d5fef`); candidate/h3 arms stay wave-12-gated | ✓ `q0_head` | executed |
 | zenav1-svt | ✓ `svtav1-target` crate (judge-injected bracketed qp) | **✓ CLOSED 2026-08-27** (blind k2 17.64/k3 7.43; S1-seeded k2 3.306/k3 1.513) | ✓ S1 consts {t70:22,t80:13,t88:5} — qp_start wiring user-gated | executed wave |
-| zenav1-aom | RULED premature (its own differential gates first; other lane) | ruled | ruled | recorded ruling |
+| zenav1-aom | ✓ `zenav1-aom-target` crate (`search_target_qindex`, fully dependency-injected: encoder AND judge behind the caller's `trial(qindex)` closure) — **the premature ruling was OVERRIDDEN by the user 2026-08-29** | **✓ CLOSED 2026-08-29** — blind midpoint k2 median \|err\| 3.497 (9/27 hits), k3 1.476 (19/27); cells `zenav1-aom/benchmarks/aomzq_census_k{2,3}.tsv`, wave md `benchmarks/zensim_zq_target_wave_2026-08-29.md` (zenav1-aom `b4e900a`) | ✗ not built — the fitted-seed arm is phase B, registered but not run | executed wave; cells re-derived from the committed TSVs 2026-08-31 |
 | jpeg-gainmap | ✓ census harness (fleet B4 arm, in-process) | **✓ CLOSED 2026-08-27** — CEILING-BOUND (per-scene ceilings < t70 both judge eras) | N/A-ruled (no seed can cross the format ceiling) | executed wave |
 
 **Standing-directive resolution (recorded, not silent):** the GOAL text says
@@ -1989,11 +1994,25 @@ to it). NOTE: zenav1-svt + zenav1-aom both carry CONTEXT-HANDOFF.md files
 from other lanes (the banned artifact class) — flagged for the user, not
 deleted by me.
 
-**zenav1-aom: census PREMATURE until the differential gates say the encoder
-is complete.** The encoder exists feature-gated (RD search + pack) but the
-repo's contract is module-by-module C-parity validation; a product loop
-census before its own gates pass would measure an unfinished encoder.
-Revisit when its differential gates are green end-to-end.
+**zenav1-aom: the PREMATURE ruling was OVERRIDDEN by the user on 2026-08-29
+and the census has since RUN.** The original ruling (kept here for the record)
+read: *census premature until the differential gates say the encoder is
+complete — the encoder exists feature-gated (RD search + pack) but the repo's
+contract is module-by-module C-parity validation, so a product-loop census
+before its own gates pass would measure an unfinished encoder.* The user
+directive of 2026-08-29 ("we need aom backend to support zq as well as svt and
+rav1e, even if we use a dep injection interface for now") dissolves the
+premise: `zenav1-aom-target` holds ZERO codec, FFI or metric dependencies, so
+the loop never touches the unfinished port at all — the census injects the
+`aomenc`/`aomdec` CLIs as encoder and decoder, and the in-repo pure-Rust
+encoder swaps in later with no loop change. Phase A ran the same day: blind
+midpoint k2 median |err| 3.497 (9/27 within ±2), k3 1.476 (19/27), judge =
+zensim Profile C (frozen north-anchor bake, folded-944 — the avif census's
+judge family). Cells `zenav1-aom/benchmarks/aomzq_census_k{2,3}.tsv`, wave md
+`benchmarks/zensim_zq_target_wave_2026-08-29.md`, landed zenav1-aom `b4e900a`
+(on `origin/main`; the medians above were re-derived from the committed TSVs
+2026-08-31). Still open on that line: the fitted-seed phase B, and the port's
+own differential gates — which the dependency-injected loop does not wait on.
 
 **jpeg-gainmap: loop rides zenjpeg + the HDR instrument.** The gainmap
 encode = zenjpeg SDR base + ultrahdr gain-map math (the fleet's B4 arm);
@@ -2133,7 +2152,7 @@ Status legend: ✅ evidence committed · 🟡 executing (evidence for the done p
 **4 LOOPS** (instrument = corpus9 27-cell; per-repo verdicts all committed)
 - jxl ✅✅ (+S4 iter-1 ε̂ B3 census PASS 36.7% — 🔶 ship form); zenwebp ✅✅ (head FAILED vs bucket anchors — buckets = the validated one-shot); zenavif(+zenrav1e) ✅✅ (k2 0.756/k3 0.336); zenjpeg ✅✅ (inert head +47.9%/+45.9% — 🔶 default wiring).
 - "zenpredict-baked" wording: resolved 2026-08-27 to the sanctioned consts form (feedback_no_zenpredict_in_codecs) — recorded, reversible only by the user.
-- zenav1-svt: **✓ loop + ✓ census CLOSED 2026-08-27** — `svtav1-target` crate (search `57805614` + judge-injected trial `508012c8`, tested through the real encoder) + phase-B census on the frozen HDR instrument (k2 17.64/1hit, k3 7.43/9hits, t80 1.20 — blind-seed cost quantified; zenav1-svt `52c8aba4`). **SEED ARM S1 BUILT + PASSED 2026-08-27 (svt `c6701dcc`)**: one-shot anchors {t70:qp22, t80:qp13, t88:qp5} fitted on 25,171 era-B cells (census scenes excluded), census k2 3.306/11 hits vs blind 17.638/1 (81%), k3 1.513/20 vs 7.431/9 (4.9×), t88 26.68→1.0; both frozen gates at 4-5× margin; S2 tercile variant loses the tie. Production qp_start wiring 🔶 user-gated. One-shot inventory: webp buckets ✓ · jpeg head ✓ · jxl B3 ✓ · **svt S1 ✓** · gainmap N/A-ruled · avif anchor-strong baseline · aom premature. zenav1-aom: ruled premature (its own gates first); gainmap: **✓ loop + ✓ census CLOSED 2026-08-27** — harness = zenmetrics `crates/zenmetrics-cli/examples/gainmap_zensim_census.rs` (in-process fleet arm + shelled sibling judge; registered pre-run `b61d2b0b`, closed `c537feef`): G-V PASS 27/27 both k, **0/27 hits (median |err| 71.5/70.4) — the arm is CEILING-BOUND** (today-judge per-scene ceilings −4.1..27.5, ALL < t70 under BOTH judge eras; two scenes negative). No seed arm can help this line. **ARM WAVE 1 executed same day (zenmetrics `c0c5c7a8`): NO config crosses t70 on any scene (best ceiling 27.77) — gm_scale=1 is the only lever (+2.4 median, rescues the negative scenes), gm_quality noise, multi-channel FALSIFIED (≤C3 on 9/9; enabling it also found+fixed the ultrahdr multi-channel encode bug `971ad8d4`). VERDICT: Ultra HDR serves low/mid-fidelity HDR; t70+ targets need zenjxl/zenav1-svt (94+ same corpus). gm_scale=1 fleet default = a PROPOSAL (user-gated, bytes unmeasured).** **ALL 7 ENCODER LINES NOW CLOSED OR RULED.** HDR instrument: ✓ refs frozen `7543b810`.
+- zenav1-svt: **✓ loop + ✓ census CLOSED 2026-08-27** — `svtav1-target` crate (search `57805614` + judge-injected trial `508012c8`, tested through the real encoder) + phase-B census on the frozen HDR instrument (k2 17.64/1hit, k3 7.43/9hits, t80 1.20 — blind-seed cost quantified; zenav1-svt `52c8aba4`). **SEED ARM S1 BUILT + PASSED 2026-08-27 (svt `c6701dcc`)**: one-shot anchors {t70:qp22, t80:qp13, t88:qp5} fitted on 25,171 era-B cells (census scenes excluded), census k2 3.306/11 hits vs blind 17.638/1 (81%), k3 1.513/20 vs 7.431/9 (4.9×), t88 26.68→1.0; both frozen gates at 4-5× margin; S2 tercile variant loses the tie. Production qp_start wiring 🔶 user-gated. One-shot inventory: webp buckets ✓ · jpeg head ✓ · jxl B3 ✓ · **svt S1 ✓** · gainmap N/A-ruled · avif anchor-strong baseline · aom phase-A only (no seed head yet). zenav1-aom: **premature ruling OVERRIDDEN by the user 2026-08-29; loop ✓ + phase-A census ✓ CLOSED** (blind k2 3.497/9 hits, k3 1.476/19; zenav1-aom `b4e900a`), fitted-seed phase B not yet run; gainmap: **✓ loop + ✓ census CLOSED 2026-08-27** — harness = zenmetrics `crates/zenmetrics-cli/examples/gainmap_zensim_census.rs` (in-process fleet arm + shelled sibling judge; registered pre-run `b61d2b0b`, closed `c537feef`): G-V PASS 27/27 both k, **0/27 hits (median |err| 71.5/70.4) — the arm is CEILING-BOUND** (today-judge per-scene ceilings −4.1..27.5, ALL < t70 under BOTH judge eras; two scenes negative). No seed arm can help this line. **ARM WAVE 1 executed same day (zenmetrics `c0c5c7a8`): NO config crosses t70 on any scene (best ceiling 27.77) — gm_scale=1 is the only lever (+2.4 median, rescues the negative scenes), gm_quality noise, multi-channel FALSIFIED (≤C3 on 9/9; enabling it also found+fixed the ultrahdr multi-channel encode bug `971ad8d4`). VERDICT: Ultra HDR serves low/mid-fidelity HDR; t70+ targets need zenjxl/zenav1-svt (94+ same corpus). gm_scale=1 fleet default = a PROPOSAL (user-gated, bytes unmeasured).** **ALL 7 ENCODER LINES NOW CLOSED OR RULED.** HDR instrument: ✓ refs frozen `7543b810`.
 - Production gates per encoder: **✅ CLOSED 2026-08-27** — `benchmarks/loops_production_gates_2026-08-27.md`: RD-vs-independent-judges = structural ruling for the six pure-dial loops (loop outputs ⊂ baseline ladder; reversible-by-measurement) + MEASURED FULL PASS for jxl's steering loop (dSSIM2 +0.138 @ dBytes −0.91%, RD-POSITIVE; jxl `f7c95cbe`+`6fc24060`); dial-mono + perf-bar axes recorded per line.
 
 **5 PERF**
