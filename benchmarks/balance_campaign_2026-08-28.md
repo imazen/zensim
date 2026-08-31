@@ -3970,3 +3970,42 @@ under its proven bound (worst overall is era-1's `pools_scalar` at 18.9 % of bou
 **The flip is correctly BLOCKED on the perf number** — a break justified by speed does not ship
 before its speed is known. Next: the per-tier pass split, then flip + era stamp + rank
 preservation + golden re-pins.
+
+## 2026-08-31 ~05:3xZ — ROUND 18: KB-43 — 28 of 31 screen cells closed; the wave is 125,973/126,000 (zenav1-aom `58204b29`..`ff0dbc99`, CI green ×2)
+
+- **Root #24 — `get_tx_mask`'s mandatory DCT_DCT fallback never ported** (`tx_search.c:1948-1952`):
+  both est-rd prune arms can legitimately clear the INTER tx-type mask (`prune_txk_type_separ`
+  returns 0xFFFF when its best horizontal candidate is skipped; the combine loop can end
+  `num_cand == 0` and then read a tail slot outside the mask). C pins DCT_DCT; the port evaluated
+  nothing → `search_tx_type_inter` = None → the whole IntraBC candidate dropped (238 empty-mask
+  bails in one 256² frame). **Closes 13 cells = exactly the cpu-4 subset** (that prune is the
+  speed-4/5 arm).
+- **Root #25 — `av1_allow_intrabc(cm)` was read off "the DV search runs"**: root #10 nulls
+  `PickFrameCfg::intrabc` at speed ≥ 8, which also dropped `intra_mode_info_cost_y`'s
+  `intrabc_cost[0]`; C zeroes the header flag only AFTER the tiles. Every C YMODE rate was exactly
+  3 units above the port's, `best_rd` 58 tighter, tipping a V_PRED bail. Explicit
+  `PickFrameCfg::search_allow_intrabc`. **+15 ⇒ 28 of 31 screen cells byte-exact.**
+- **Root #26 — `av1_nn_predict` is RTCD-specialized; the port had transcribed `av1_nn_predict_c`**:
+  AVX2 order ported and pinned against the DISPATCHED C (new `shim_nn_predict_dispatched`; 408
+  cases, dispatched ≠ `_c` on 167, port matches dispatched on all). Deliberately NOT wired into
+  `finish_decision` (an AVX2 DNN over #27's scalar CNN models neither chain).
+- **Root #27 — REGISTERED OPEN, the carrier for the last 13**:
+  `av1_cnn_convolve_no_maxpool_padding_valid` is dispatched too. Proven on `2765x4096_cq6_s6`
+  mi(0,352): the port's 25 DNN features are BIT-IDENTICAL to the oracle under `AOM_SIMD_CAPS=0`;
+  raw logits −3.86037111 vs −3.8603348731994629 land on adjacent 1/512 quanta straddling
+  `no_split_thresh = −3.858222961`, flipping `do_square_split`. That family's gate rationale ("the
+  gap stays inside the prec-reduce bucket so flags never flip") was FALSE — a gap need only
+  straddle a boundary; corrected, nothing relaxed. Cost to close: bit-exact `cnn_avx2.c` (two
+  reachable specializations) + a NEON twin.
+- Bonus: a real CI flake fixed (the forced-scalar dispatch sweep asserted a round trip against a
+  snapshot another test could invalidate).
+- **Gates**: census 104/104 across 14 dirs (`unexplained: []` everywhere), `just gate-encode`
+  152/0, test-fast + test-fast-scalar 564/0, probes stripped, **CI green on all seven legs** (runs
+  `33337936828`, `33344816114`).
+- **Fleet round** on image `exec-zensim944hdr-8662064f` (built from a verified-clean
+  zenav1-aom `58204b29`): all 59 pardoned, drained in one pass per box (18/9/5) ⇒ ledger
+  **125,941 → 125,973 done, 27 failing**, cell-for-cell the two registered classes (**14 tiny**
+  C3 — four of the original 18 closed as a side effect — and **13 large** = root #27: 3 screen
+  cpu-6 + all 10 photo). Score runs gap4 16/16 both, 0 failed. Write-back over all 8 runs →
+  125,973 scores × 10 / 125,972 features × 944, `miss_sha=0 miss_score=0`; **views train 102,405 /
+  eval8 23,567**; prior harvest kept as `…-pre-round3.bak`.
