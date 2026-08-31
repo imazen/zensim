@@ -458,6 +458,29 @@ slot is exactly `+0.0` (not a partial accumulation, not a NaN from finalising
 an accumulator nothing wrote); and the peak block is asserted non-vacuous so
 the identity cannot pass by both sides being zero.
 
+### 5.1b Pruned bakes — the gap that would have made this dead code
+
+`bake_dial_refit pack` performs dead-column pruning **by default** since
+2026-08-04, so a shipped bake's caller width and its layer-0 column count
+routinely differ: both 944 MLPs above are 944 caller lines over **667**
+columns. The first cut of the policy refused that case outright (returning
+"assume everything is read"), which is safe and useless — it would never have
+fired on a packed bake, which is every future bake.
+
+`caller_col_spans` closes it by walking the declared arities that
+`zenpredict::FeatureTransform::output_arity` defines (`Drop` → 0 columns,
+`Sinusoidal` → `2N`, everything else → 1) and mapping caller line → column
+span. A dropped line spans no columns and therefore reads nothing, which is
+exactly pruning's contract: a pruned column was already an exact zero, or a
+transform-forced constant folded into the bias.
+
+`zensim-validate::block_profile` folds per-column *values* back to caller
+lines for its report; this needs only the *spans*, `zensim` cannot depend on
+`zensim-validate` (the dependency runs the other way), and both are thin
+callers of `output_arity`, which is the single owner of arity semantics.
+Gated by `caller_col_spans_tile_layer0_in_caller_space`: one span per caller
+line, tiling `[0, in_dim)` with no gap or overlap.
+
 ### 5.2 Per-profile weight-skipping
 
 `fold_engine::score_pool_mode(params, config, skip)` resolves the mode from
@@ -477,14 +500,9 @@ zero weight makes the slot unreachable by the forward pass for every input, so
 leaving it at `0.0` cannot move the score by a ULP. A merely *small* weight is
 never treated as skippable.
 
-**It declines rather than guesses.** When `caller_input_width() != n_inputs()`
-the bake declares a variable-arity `FeatureTransform` (`Drop` from
-dead-column pruning, or an expander) and layer-0 column `k` is not caller line
-`k` — the caller-width bug class `zensim-validate::block_profile` documents
-four instances of. Rather than re-implement that crate's arity walk (one owner
-per task), this returns `V1PoolNeed::ALL`. It costs nothing today: pruning only
-removes columns that were already exact zeros, so a pruned bake's parent gives
-the same answer.
+**It declines rather than guesses** on the one case left: a bake whose declared
+arities do not tile layer 0 comes back as `V1PoolNeed::ALL`. No valid bake is
+in that state; pruned and expanded bakes are handled properly (§5.1b).
 
 **The policy never returns `Off`,** and the reason is footprint rather than
 arithmetic: `Off` hands the band no scratch, which disables self-blur, so the
@@ -558,6 +576,11 @@ no Pareto-dominated family in shipped B, and the honest answer to the literal
 question is that B's 95-of-372 read set is *not* a 74 % saving waiting to be
 taken.
 
+And the price it is paying for that: the masked/IW pass group is **+2.3 ms at
+576², +10.7 ms at 1152², +48 ms at 2304²** (1T) — **33-42 %** on top of the
+peaks-only walk (§3.1). That is the honest shape of the trade for B: a third
+of the walk for 0.40 CID22.
+
 **Across models, the dominated blocks are real and large:**
 
 | drop set | for which class | rank cost (zero-at-inference) | realizable by |
@@ -566,6 +589,10 @@ taken.
 | masked + IW | W-LIN 7b | CID22 −0.005, KonJND −0.048, nonphoto **+0.001**, imazen26 **+0.002** | a retrain, or accept the KonJND cost |
 | the whole v1-372 | W-LIN 7b | CID22 −0.027, imazen26 −0.008, LIVE **+0.117** | a retrain **and** a `fold_v1` skip lever |
 | peaks (`f156..228`) | anyone | −0.038 CID22 / −0.311 KonJND on B | **never worth doing** — it saves zero compute |
+
+and the biggest one of all, which is a *class* choice rather than a family
+choice: **v2-348 + append-204** costs **+72-108 % on top of the whole 372 walk**
+(§3.1) and is what separates a 15 ms/576² model from a 6 ms one.
 
 ### 6.2 The model-class recommendation
 
@@ -681,13 +708,37 @@ As-run logs: `benchmarks/feature_cost_2026-08-31/ablate_{shippedB,q7b,q7b_blocks
 board's own `/mnt/v/output/zensim/reports/fulleval/peer_ssim2.fulleval.json`,
 read, not recomputed.
 
-**Compute (§3.1):**
+**Compute (§3.1).** The measured numbers came from the round-robin harness
+committed alongside, which uses the bench binary's own single-arm loop and
+takes no zenbench lock:
 
 ```sh
 cargo build --release --bench extract_paths_bench -p zensim \
   --features custom-profiles,feature-regime-v2,threads,training
-for T in 1 8 16; do RAYON_NUM_THREADS=$T <the bench binary>; done
+BIN=$(ls -t target/release/deps/extract_paths_bench-* | grep -v '\.d$' | head -1)
+# 1T
+ROUNDS=5 nice -n19 ionice -c3 taskset -c 20 \
+  benchmarks/feature_cost_2026-08-31/ms_roundrobin.sh "$BIN" ms_1t.tsv
+# 8T / 16T (10x the iteration count so a 10 ms clock resolves a few-ms arm)
+RAYON_NUM_THREADS=8  ROUNDS=5 ITER_MULT=10 nice -n19 ionice -c3 taskset -c 8-15 \
+  benchmarks/feature_cost_2026-08-31/ms_roundrobin.sh "$BIN" ms_8t.tsv
+RAYON_NUM_THREADS=16 ROUNDS=5 ITER_MULT=10 nice -n19 ionice -c3 taskset -c 8-23 \
+  benchmarks/feature_cost_2026-08-31/ms_roundrobin.sh "$BIN" ms_16t.tsv
 ```
+
+The canonical instrument for these arms is the zenbench group in
+`extract_paths_bench` itself, which interleaves them in one process with
+paired statistics:
+
+```sh
+for T in 1 8 16; do RAYON_NUM_THREADS=$T ZEN_XP_ROUNDS=40 ZEN_XP_WALL_S=90 "$BIN"; done
+```
+
+It takes zenbench's **exclusive** lock, which another lane held for a
+multi-hour paired A/B while this note was written — hence the harness above,
+and hence `ZEN_XP_ROUNDS` / `ZEN_XP_WALL_S`, so a matrix run does not hold
+that lock for hours in turn. As-run TSVs:
+`benchmarks/feature_cost_2026-08-31/ms_{1,8,16}t.tsv`.
 
 **Gates:**
 
@@ -717,6 +768,18 @@ cargo test --release -p zensim --features custom-profiles,feature-regime-v2,thre
 * The KonJND comparison against the ssim2 peer row crosses corpus files
   (n = 504 vs 1008) and is flagged in place; the other six human corpora match
   pair-for-pair.
-* The wall-clock table's conditions and any zenbench CV flags are recorded with
-  it in §3.1.
+* The wall-clock table is **not** the canonical zenbench group (§7 says why and
+  how to run it when the lock frees). Its conditions and per-arm round-to-round
+  spread are printed with it in §3.1. The **1T** column is the solid one
+  (spread ≤ 13 %, most cells ≤ 5 %) and every ratio quoted in §0 and §6 is a
+  1T ratio; the 8T/16T columns were taken while another lane's 8-thread bench
+  was on the box and should be read for shape, not for a few-percent
+  comparison.
+* The `ms` columns are **extraction only**. The bake forward is excluded and
+  was not measured; the MAC counts in §0.1 are the reason it is expected to be
+  negligible, not evidence that it is.
+* The working-set column is **derived** from the fold-footprint lane's plane
+  accounting plus this lane's code, not independently measured. It is stated
+  as a lower bound for the two 944 rows, whose band task also carries the v2
+  planes that lane prices separately.
 
