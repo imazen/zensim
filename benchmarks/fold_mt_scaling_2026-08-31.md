@@ -9,18 +9,19 @@ parity 1.03× but 2.3–3.3× behind under threads) and
 §5/§6/§10.2/§11.1/§14.
 
 **Result in one line, `fold_engine_bench` means:** at 2304² the fold-backed
-score's thread scaling went **1.95× → 3.31×** (1→16T) and its ratio to
-buffered **3.25× → 1.77×** (108.6 → **61.75 ms**); at 1152² **1.94× → 3.25×**
-and **2.93× → 1.68×** (26.4 → **15.61 ms**). Serial parity is preserved
-(**0.98× / 1.06×**). Every lever is byte-neutral and gated.
+score's thread scaling went **1.95× → 3.71×** (1→16T) and its ratio to buffered
+**3.25× → 1.69×** (108.6 → **54.47 ms**, 2.0× faster); at 8 threads
+**2.54× → 1.46×** (113.1 → **59.67 ms**). At 1152²: **1.94× → 3.49×** and
+**2.93× → 1.61×** (26.4 → **14.45 ms**), 8T **2.30× → 1.37×**. Serial parity is
+preserved (**0.96× / 1.04×**). Every lever is byte-neutral and gated.
 
 The lane then STOPS on a measured ceiling that is a property of the fold's
 memory behaviour, not of its schedule: N *independent single-threaded
-processes* running the same walk saturate this box at **3.7×**, where the
-buffered walk reaches **10.6×** — from the same serial speed. **At 16 threads
-the implementation is at 101 % of that bound**, i.e. one process using sixteen
-threads is now as fast per compare as sixteen processes sharing nothing. There
-is no scheduling left to find at 16T; ~18 % remains at 8T.
+processes* running the same walk saturate this box at **3.5×**, where the
+buffered walk reaches **10.9×** — from the same serial speed. **The threaded
+implementation now sits at 94 % of that bound at 8 threads and 108 % at 16**,
+i.e. one process using sixteen threads is as fast per compare as sixteen
+processes sharing nothing. There is no scheduling left to find.
 
 ---
 
@@ -298,7 +299,8 @@ Do not subtract non-adjacent rows.
 | + producer two-sided + 6-way cascade (2.2) | — | 68.8 | 69.2 |
 | + fused per-channel fan-out (2.4) | — | 69.1 | 66.5 |
 | + `ADVANCE_ROWS` 256 (2.3) | 214.3 | 65.5 | 59.0 |
-| + self-blur bands (2.5) | **203.7** | **54.0** | **59.8** |
+| + self-blur bands (2.5) | 203.7 | 54.0 | 59.0 |
+| + parallel `mean_offset` + calloc (2.6, 2.7) | **199.9** | **53.1** | **50.0** |
 
 Two observations worth keeping:
 
@@ -309,7 +311,7 @@ Two observations worth keeping:
 * **Self-blur is faster at 1 thread too** (214.3 → 203.7, −5 %), despite +40 %
   blur compute. Locality beat arithmetic.
 
-Other sizes, same instrument, 30 walks per point:
+Other sizes, self-blur A/B only, same instrument, 30 walks per point:
 
 | size | 8T before self-blur | 8T after | 16T before | 16T after |
 |---|---:|---:|---:|---:|
@@ -318,7 +320,16 @@ Other sizes, same instrument, 30 walks per point:
 | 2304² | 65.5 | **54.0** | 59.0 | 59.8 |
 
 Better at every cell except 2304²/16T, where it is a wash inside this
-instrument's spread.
+instrument's spread. (The 2304²/16T self-blur row reads 59.0 → 59.8 in the pair
+it was measured against and 59.8 → 50.0 once §2.7 landed on top; the §5 zenbench
+table is what the two changes are worth together.)
+
+**And the last row is where the profile paid off twice.** The `unaccounted`
+column held 7.0–7.5 ms flat through every row above it — the instrument could
+not see inside it, and that constancy under four different schedule changes is
+what identified it as a serial pass rather than anything parallel. §2.7 names
+it; after that change the profile accounts for **100.0 %** of the walk
+(`unaccounted 0.013 ms`).
 
 ---
 
@@ -334,10 +345,10 @@ reuse is on (`refinto_*`) so per-call allocation is not the confound.
 
 | N processes | `refinto_fold` | ×  | `refinto_buffered` | × |
 |---|---:|---:|---:|---:|
-| 1 | 5.32 | 1.00 | 5.75 | 1.00 |
-| 4 | 16.34 | 3.07 | 21.16 | 3.68 |
-| 8 | 19.81 | **3.72** | 38.91 | 6.77 |
-| 16 | 18.35 | 3.45 | 60.66 | **10.55** |
+| 1 | 5.42 | 1.00 | 5.78 | 1.00 |
+| 4 | 16.09 | 2.97 | 21.39 | 3.70 |
+| 8 | 19.19 | **3.54** | 38.76 | 6.71 |
+| 16 | 18.32 | 3.38 | 62.95 | **10.89** |
 
 **The fold's WORK saturates a shared machine resource at ~8 concurrent
 instances. Buffered's does not — from the same serial speed.** Whatever that
@@ -356,9 +367,9 @@ ceiling test and the threaded run price identical work):
 
 | | achieved (threaded) | bound (N processes) | of bound |
 |---|---:|---:|---:|
-| 1 thread | 182.3 ms | 188.1 ms | 103 % |
-| 8 threads | 50.8 ms | 50.5 ms | **99 %** |
-| 16 threads | 51.0 ms | 54.5 ms | **107 %** |
+| 1 thread | 180.0 ms | 184.4 ms | 102 % |
+| 8 threads | 55.3 ms | 52.1 ms | **94 %** |
+| 16 threads | 50.5 ms | 54.6 ms | **108 %** |
 
 **The implementation is AT the bound at both thread counts** — one process
 using 8 or 16 threads now completes a compare as fast as 8 or 16 processes with
@@ -366,10 +377,10 @@ nothing shared between them manage per walk. There is no scheduling left to
 find.
 
 The 8-thread row is the one this bound earned its keep on. Measured BEFORE
-§2.7 it read 61.5 ms against the same 50.5 ms bound — **82 %** — and that 18 %
-was the pointer that sent the lane back to the profile and found the serial
+§2.7 it read **61.5 ms against a 50.5 ms bound — 82 %** — and that 18 % was the
+pointer that sent the lane back to the profile and found the serial
 `mean_offset` pass. A bound is only useful if you act on the gap; this is the
-gap it found.
+gap it found, and closing it is §2.7.
 
 The rest of the gap to buffered is a property of **what the fold computes and
 how it touches memory** — buffered's own bound is 16.5 ms/walk at n=16, three
@@ -396,38 +407,52 @@ which is the same bench, the same arms and the same deterministic generator on
 the same box.
 
 **Load conditions, stated because they matter:** the three runs were serialised
-by zenbench's exclusive lock and ran back to back, unattended, 02:09→03:11 UTC,
-with box load 0.2–2.5 (one unrelated single-core process). `cv` is 6–18 % on
-every cell reported here — a few percent of run-to-run spread — so quote the
-ratios and the scaling factors, not the third digit of a single cell. Raw
-zenbench outputs are committed beside this note under `fold_mt_2026-08-31/`.
+by zenbench's exclusive lock and ran back to back, unattended, 03:22→04:24 UTC,
+with box load 0.2–2.5 (one unrelated single-core process, no other lane
+benching). `cv` is 5–18 % on every cell reported here — a few percent of
+run-to-run spread — so quote the ratios and the scaling factors, not the third
+digit of a single cell. Raw zenbench outputs are committed beside this note
+under `fold_mt_2026-08-31/` (`final_{1,8,16}t.txt`), with the ceiling/RSS
+measurements in `postbench_2304.log`.
 
-All three runs are on the FINAL code (§2.6 included). §5.1 additionally reports
-an independent earlier run at 16 threads on the stage-3 commit `4fb56e04`,
-which reproduces the same conclusion from a different build.
+All three runs are on the SHIPPED code (`457ec709`, §2.7 included). §5.1
+additionally reports an independent earlier run at 16 threads on the stage-3
+commit `4fb56e04`, which reproduces the same conclusion from a different
+build — a useful check that the headline is not one lucky run.
 
 | size | arm | 1T | 8T | 16T | 1→8 | 1→16 |
 |---|---|---:|---:|---:|---:|---:|
-| 1152² | `score_buffered` | **48.00** | **10.74** | **9.31** | 4.47× | 5.16× |
-| 1152² | `score_fold` | **50.77** | **15.92** | **15.61** | 3.19× | 3.25× |
-| 1152² | `feat_buffered` | 48.49 | 9.46 | 7.87 | 5.13× | 6.16× |
-| 1152² | `feat_fold` | 48.89 | 15.36 | 15.04 | 3.18× | 3.25× |
-| 1152² | `ref_buffered` | 41.11 | 8.70 | 7.00 | 4.73× | 5.87× |
-| 1152² | `ref_fold` | 46.44 | 15.02 | 15.25 | 3.09× | 3.05× |
-| 1152² | `refinto_buffered` | 41.38 | 10.20 | 8.11 | 4.06× | 5.10× |
-| 1152² | `refinto_fold` | 44.06 | 14.35 | 14.04 | 3.07× | 3.14× |
-| 1152² | `fused_buffered` | 67.49 | 26.45 | 24.34 | 2.55× | 2.77× |
-| 1152² | `split_fold` | 141.65 | 73.55 | 73.85 | 1.93× | 1.92× |
-| 2304² | `score_buffered` | **208.38** | **40.80** | **34.83** | 5.11× | 5.98× |
-| 2304² | `score_fold` | **204.19** | **65.73** | **61.75** | 3.11× | 3.31× |
-| 2304² | `feat_buffered` | 207.27 | 36.89 | 27.37 | 5.62× | 7.57× |
-| 2304² | `feat_fold` | 204.00 | 64.75 | 61.32 | 3.15× | 3.33× |
-| 2304² | `ref_buffered` | 185.77 | 34.14 | 27.05 | 5.44× | 6.87× |
-| 2304² | `ref_fold` | 193.48 | 65.36 | 58.31 | 2.96× | 3.32× |
-| 2304² | `refinto_buffered` | 183.37 | 38.31 | 32.25 | 4.79× | 5.69× |
-| 2304² | `refinto_fold` | 189.24 | 63.10 | 55.91 | 3.00× | 3.38× |
-| 2304² | `fused_buffered` | 275.71 | 103.74 | 97.34 | 2.66× | 2.83× |
-| 2304² | `split_fold` | 564.25 | 285.24 | 276.45 | 1.98× | 2.04× |
+| 1152² | `score_buffered` | **48.59** | **10.73** | **8.97** | 4.53× | 5.42× |
+| 1152² | `score_fold` | **50.39** | **14.74** | **14.45** | 3.42× | 3.49× |
+| 1152² | `feat_buffered` | 48.90 | 9.51 | 7.56 | 5.14× | 6.47× |
+| 1152² | `feat_fold` | 48.18 | 14.22 | 14.08 | 3.39× | 3.42× |
+| 1152² | `ref_buffered` | 41.06 | 8.48 | 6.48 | 4.84× | 6.34× |
+| 1152² | `ref_fold` | 45.93 | 14.35 | 14.17 | 3.20× | 3.24× |
+| 1152² | `refinto_buffered` | 42.32 | 10.00 | 7.87 | 4.23× | 5.38× |
+| 1152² | `refinto_fold` | 43.96 | 13.29 | 13.04 | 3.31× | 3.37× |
+| 1152² | `fused_buffered` | 66.55 | 26.62 | 24.16 | 2.50× | 2.75× |
+| 1152² | `split_fold` | 144.54 | 71.80 | 71.75 | 2.01× | 2.01× |
+| 2304² | `score_buffered` | **210.00** | **40.86** | **32.25** | 5.14× | 6.51× |
+| 2304² | `score_fold` | **201.95** | **59.67** | **54.47** | 3.38× | 3.71× |
+| 2304² | `feat_buffered` | 206.34 | 36.72 | 27.22 | 5.62× | 7.58× |
+| 2304² | `feat_fold` | 199.20 | 60.65 | 54.42 | 3.28× | 3.66× |
+| 2304² | `ref_buffered` | 182.53 | 33.97 | 27.78 | 5.37× | 6.57× |
+| 2304² | `ref_fold` | 190.37 | 59.42 | 52.92 | 3.20× | 3.60× |
+| 2304² | `refinto_buffered` | 180.41 | 38.42 | 30.32 | 4.70× | 5.95× |
+| 2304² | `refinto_fold` | 187.41 | 57.94 | 50.20 | 3.23× | 3.73× |
+| 2304² | `fused_buffered` | 279.86 | 103.00 | 98.63 | 2.72× | 2.84× |
+| 2304² | `split_fold` | 556.15 | 277.54 | 269.27 | 2.00× | 2.07× |
+
+**The ratio this lane exists to move** — `score_fold ÷ score_buffered`, against the predecessor's §10 numbers on the same bench, arms, generator and box:
+
+| size / threads | before | after | buffered scaling | fold scaling |
+|---|---:|---:|---:|---:|
+| 1152² / 1T | 1.03× | **1.04×** | 1.00× → 1.00× | 1.00× → **1.00×** |
+| 1152² / 8T | 2.30× | **1.37×** | 4.60× → 4.53× | 2.06× → **3.42×** |
+| 1152² / 16T | 2.93× | **1.61×** | 5.51× → 5.42× | 1.94× → **3.49×** |
+| 2304² / 1T | 1.03× | **0.96×** | 1.00× → 1.00× | 1.00× → **1.00×** |
+| 2304² / 8T | 2.54× | **1.46×** | 4.61× → 5.14× | 1.87× → **3.38×** |
+| 2304² / 16T | 3.25× | **1.69×** | 6.15× → 6.51× | 1.95× → **3.71×** |
 
 One asymmetry worth naming rather than glossing: on buffered,
 `score_buffered − feat_buffered` is 7.5 ms at 2304²/16T, while on the fold the
@@ -437,17 +462,6 @@ buffered ENTRIES (`compute` vs `compute_extended_features`), not of this lane �
 it is present unchanged in the predecessor's table (33.4 vs 28.1). It is
 flagged here because it makes `feat_fold ÷ feat_buffered` look worse than
 `score_fold ÷ score_buffered` for reasons that have nothing to do with the fold.
-
-**The ratio this lane exists to move** — `score_fold ÷ score_buffered`, against the predecessor's §10 numbers on the same bench, arms, generator and box:
-
-| size / threads | before | after | buffered scaling | fold scaling |
-|---|---:|---:|---:|---:|
-| 1152² / 1T | 1.03× | **1.06×** | 1.00× → 1.00× | 1.00× → **1.00×** |
-| 1152² / 8T | 2.30× | **1.48×** | 4.60× → 4.47× | 2.06× → **3.19×** |
-| 1152² / 16T | 2.93× | **1.68×** | 5.51× → 5.16× | 1.94× → **3.25×** |
-| 2304² / 1T | 1.03× | **0.98×** | 1.00× → 1.00× | 1.00× → **1.00×** |
-| 2304² / 8T | 2.54× | **1.61×** | 4.61× → 5.11× | 1.87× → **3.11×** |
-| 2304² / 16T | 3.25× | **1.77×** | 6.15× → 5.98× | 1.95× → **3.31×** |
 
 ### 5.1 Cross-check: the same bench on the stage-3 commit (`4fb56e04`), 16 threads
 
@@ -477,10 +491,10 @@ input images (7.96 MB at 1152², 31.85 MB at 2304²) in every arm.
 
 | size | threads | `score_buffered` | `score_fold` | fold ÷ buffered |
 |---|---|---:|---:|---:|
-| 1152² | 1 | 43.1 MB | 60.9 MB | 1.41× |
-| 1152² | 16 | 59.6 MB | 72.5 MB | 1.22× |
-| 2304² | 1 | 157.9 MB | 127.5 MB | **0.81×** |
-| 2304² | 16 | 196.5 MB | 149.2 MB | **0.76×** |
+| 1152² | 1 | 47.6 MB | 60.2 MB | 1.26× |
+| 1152² | 16 | 60.8 MB | 80.8 MB | 1.33× |
+| 2304² | 1 | 159.6 MB | 127.6 MB | **0.80×** |
+| 2304² | 16 | 195.4 MB | 171.1 MB | **0.88×** |
 
 The predecessor's crossover holds and this lane did not move it: buffered
 scales with AREA (whole-image pyramids), the fold closer to WIDTH (rolling
@@ -488,9 +502,13 @@ planes), so the fold is the heavier path below ~1.5 MP and the lighter one
 above it. `ADVANCE_ROWS` 256 (§2.3) and the band-local H planes (§2.5) both add
 to the fold's footprint; against that, self-blur stops touching the strip-wide
 H planes at all, so those pages are never faulted in. Net at 2304²/16T the fold
-is still **0.76×** buffered — the predecessor measured 0.80× for the 944 walk
-and 0.62–0.63× for the narrower modes, so the lane's memory cost is real but
-has not crossed anything.
+is still **0.88×** buffered (0.80× serially) — the predecessor measured 0.80×
+for the 944 walk and 0.62–0.63× for the narrower modes, so **the lane's memory
+cost is real and it has eaten most of the large-image margin at 16 threads**
+without crossing it. At 1152² the fold was already the heavier path (1.13× in
+the predecessor's numbers) and is now 1.26–1.33×. If the memory shape is being
+defended as a product property, that is the number to watch, and §6's rejected
+`scale_capacity_rows` change is the one this lane declined to spend on speed.
 
 ---
 
@@ -543,9 +561,12 @@ Every commit in this lane ran, and all passed:
   with a geometry is the failure mode, and only that sweep can see it.
 * `v1_golden_bytes` — 5 tests, including `fold_backed_fixtures_match_golden`.
 * `phase_a_blur_bands_are_bit_exact`, `fold_self_blur_matches_precomputed_h`,
-  `convert_chunk_rows_is_semantics_not_a_knob` — the three new gates.
-* `cargo test --release -p zensim --features custom-profiles,feature-regime-v2,threads,training,classification` — 384/384.
-* `cargo clippy … --all-targets` — clean.
+  `convert_chunk_rows_is_semantics_not_a_knob`, `fold_ref_scratch_reuse_is_bit_identical`
+  — the new gates.
+* `mean_offset_row_bands_are_bit_exact` — serial vs parallel on every
+  `rows[y][ch]` and on `finish()`.
+* `cargo test --release -p zensim --features custom-profiles,feature-regime-v2,threads,training,classification` — **385/385**.
+* `cargo clippy … --all-targets` — clean; `--no-default-features --features threads` builds.
 
 **No byte moved at any point in this lane.** Where a lever would have moved
 one, it was measured, reverted, and turned into a test.
