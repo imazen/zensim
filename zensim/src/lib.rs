@@ -266,7 +266,14 @@ pub(crate) mod feature_v2_stream;
 // The fold-backed scoring engine (benchmarks/fold_engine_2026-08-31.md):
 // gives the streaming fold a `score()` by attaching it under the SHARED
 // scoring tail + bake forward, rather than duplicating either.
+//
+// `#[doc(hidden)]`: its one public item (`ScoringEngine`) is an internal
+// engine selector for the parity gates and the perf comparison, not a product
+// knob. `Buffered` is the default and a build without `feature-regime-v2`
+// cannot name the module at all, so a default build's documented surface and
+// behaviour are unchanged by its existence.
 #[cfg(feature = "feature-regime-v2")]
+#[doc(hidden)]
 pub mod fold_engine;
 
 // --- Primary API ---

@@ -401,21 +401,33 @@ proposal rather than a commit.
 `#[cfg(feature = "feature-regime-v2")]`, so a default build's public surface is
 byte-for-byte unchanged.**
 
-| # | item | kind | stage |
-|---|---|---|---|
-| 1 | `zensim::ScoringEngine` (`Buffered` \| `Fold`) | `#[doc(hidden)] pub enum` | 2 |
-| 2 | `Zensim::with_engine(self, ScoringEngine) -> Self` | `#[doc(hidden)] pub fn` | 2 |
-| 3 | `Zensim::engine(&self) -> ScoringEngine` | `#[doc(hidden)] pub fn` | 2 |
-| 4 | `Zensim::precompute_reference_with_moments(&self, &impl ImageSource)` | `#[doc(hidden)] pub fn` | 3, tier 2 only |
-| 5 | `PrecomputedReference::has_cached_moments(&self) -> bool` | `pub fn` | 3, tier 2 only |
+| # | item | kind | stage | SHIPPED? |
+|---|---|---|---|---|
+| 1 | `zensim::fold_engine` (module) | `#[doc(hidden)] pub mod` | 2 | **yes** |
+| 2 | `zensim::fold_engine::ScoringEngine` (`Buffered` \| `Fold`) | `#[doc(hidden)] pub enum` | 2 | **yes** |
+| 3 | `Zensim::with_engine(self, ScoringEngine) -> Self` | `#[doc(hidden)] pub fn` | 2 | **yes** |
+| 4 | `Zensim::engine(&self) -> ScoringEngine` | `#[doc(hidden)] pub fn` | 2 | **yes** |
+| 5 | `Zensim::precompute_reference_with_moments(&self, &impl ImageSource)` | `#[doc(hidden)] pub fn` | 3, tier 2 only | **no** |
+| 6 | `PrecomputedReference::has_cached_moments(&self) -> bool` | `pub fn` | 3, tier 2 only | **no** |
+
+**FINAL: four public items, all `#[doc(hidden)]` and all
+`#[cfg(feature = "feature-regime-v2")]`.** A default build's public surface —
+and its behaviour — is byte-for-byte unchanged; `cargo doc --all-features`
+shows none of them. Items 5 and 6 were NOT built: stage 3 turned out to need
+no new reference type at all (§8.2), and §3.3's memory argument stands, so
+shipping a 47.8 B/px opt-in nobody has asked for would have been speculative.
+Item 1 is one more than §6 originally listed — the module itself is a public
+path — and is recorded here rather than slid in.
 
 Internal-only (no public surface): `metric::score_v1_layout_features`,
-`fold_engine::{compute_fold_backed, fold_mean_offset}`,
-`feature_v2_stream::RefFeed`, and the `engine` field on `Zensim`.
-
-Items 4 and 5 ship **only if tier 2 measures worth its memory** (§3.3); if it
-does not, the list is items 1–3 and nothing else. Any item added beyond this
-table gets appended here with its reason before it is committed.
+`fold_engine::{is_fold_backable, v1_feature_width, compute_fold_backed,
+compute_fold_backed_with_ref}`, `feature_v2::{MeanOffsetRows, FoldWalkExtras,
+compute_folded_v1_372_streaming_impl, compute_folded_v1_372_with_ref_impl,
+cached_ref_feed_usable}`, `feature_v2_stream::StripPlaneProducer::
+new_with_ref_feed` + its `ref_planes` field, `streaming::XybPyramidLevel`, and
+the `fold_engine` field on `Zensim`. Two signatures changed from
+`&PrecomputedReference` to `&impl MultiScaleRef`
+(`attribution::build_attribution_{canvas,into_sink}`) — both private.
 
 ---
 
@@ -639,6 +651,7 @@ Each of these still routes to buffered today, by design, with a named reason:
 | any `with_stop` request | no in-walk cancellation hook in the fold | a `Stop` check at the fold's strip boundary — small, and it makes issue #48's contract engine-independent |
 | any `num_scales != 4` `ZensimConfig` | the fold is hard-wired to `NUM_SCALES` | generalise the fold's scale count, or declare 4 the only supported value |
 | `compute_zensim_with_config` (the `training` free function) | deliberately unrouted — it is the entry `v1_golden_bytes` measures | route it LAST; `fold_backed_fixtures_match_golden` already shows the fold reproduces the same arrays through `compute_extended_features` |
+| `compute_with_ref_into` | its signature takes a caller-owned `streaming::ZensimScratch` — the BUFFERED plane scratch. Routing it to the fold would ignore the scratch the caller passed, defeating the entry's whole purpose (allocation reuse across an encoder loop) | a fold-side scratch entry taking `feature_v2::V2Scratch`. **This is a real gap, not a formality**: the fold-backed `compute_with_ref` builds a fresh `V2Scratch` per compare, so a quantization loop pays that allocation every candidate where the buffered `*_into` pays it once. Whether it matters is §10's `ref_fold` arm |
 
 ### 9.4 Deletion order, once §9.2 and §9.3 are settled
 
@@ -704,3 +717,169 @@ user has already been given the shape of: the fold buys one code path and a
 headroom at ~1.2× behind an era decision. If the trade is not acceptable,
 the right outcome is "keep both, with the fold as a gated alternative" — which
 is exactly the state this lane leaves the tree in.
+
+---
+
+## 10. Perf — fold-backed vs buffered SCORING, like for like
+
+### 10.1 What is being compared, and why it is not the predecessor's table
+
+The predecessor's §13 prices `fold944_full` — the 944-feature product
+extraction — against `buf_v1_372`. Those arms do different amounts of work by
+design, and the ratio (2.1–2.5× at 8T) is the cost of 944 features, not the
+cost of the fold.
+
+This bench asks a narrower question: **two engines producing the same
+`ZensimResult`, bit-for-bit — same profile, same 372 features, same score —
+differing only in which walk produced it.** `fold_engine_parity` is what makes
+that claim true; §10 is what it costs.
+
+`zensim/benches/fold_engine_bench.rs`, zenbench, paired/interleaved in one
+process (so shared-box noise cancels), budget raised to
+`min_rounds 25 / max_rounds 200 / max_wall 600 s` per group — the same budget
+`extract_paths_bench` uses, because the default 120 s / 4-usable-rounds cannot
+resolve a few-percent lever here. Thread count from `RAYON_NUM_THREADS`, one
+process per count. Content is the same deterministic textured generator
+`extract_paths_bench` and `fold_pools_bench` use.
+
+Six arms: `score_{buffered,fold}` (`Zensim::compute`, profile B — 372 features
++ bake forward + PCHIP output spline), `feat_{buffered,fold}`
+(`compute_extended_features` — extraction only), `ref_{buffered,fold}`
+(`compute_with_ref` against a reference precomputed ONCE outside the timed
+loop), plus `fused_buffered` vs `split_fold` (§10.4).
+
+**Load conditions, stated because they matter:** the box was shared with the
+era-2 lane throughout. zenbench's exclusive bench lock serialised the two
+binaries — this run waited ~4 minutes for that lock before starting — so no
+two benchmark processes ran concurrently, but the 576² group still came back
+with CV 58–124 % on several arms and its numbers are reported with that caveat
+rather than leaned on. 1152² and 2304² are clean.
+
+### 10.2 Serial (`RAYON_NUM_THREADS=1`), 20 / 19 / 18 usable rounds
+
+| size | `score_buffered` | `score_fold` | ratio | `feat_buffered` | `feat_fold` | ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| 576² | 12.73 ms | 18.54 ms | 1.46× ⚠ | 11.25 ms | 13.77 ms | 1.22× ⚠ |
+| 1152² | 49.63 ms | 51.19 ms | **1.03×** (CI crosses 0) | 48.00 ms | 50.54 ms | **1.05×** (CI crosses 0) |
+| 2304² | 205.50 ms | 211.74 ms | **1.03×** (CI crosses 0) | 199.83 ms | 210.38 ms | 1.05× (CI crosses 0) |
+
+⚠ = the 576² row's CVs are 58 % (`score_buffered`) and 124 % (`score_fold`);
+its ratio is not a resolved number and should not be quoted.
+
+**At 1 thread the fold-backed score is within noise of buffered at both large
+sizes.** That is a much better result than the predecessor's 944 numbers
+suggest, and the reason is §1.2: a v1 score asks the fold for `v1_only +
+V1PoolsMode::Full`, which skips every v2-era block and its upstream V-blur and
+activity work — the predecessor measured that at 53 % of the walk removed.
+Like-for-like, the two walks cost the same serially.
+
+### 10.3 8 threads (`RAYON_NUM_THREADS=8`), 20 / 20 / 19 usable rounds
+
+| size | `score_buffered` | `score_fold` | ratio | `feat_buffered` | `feat_fold` | `ref_buffered` | `ref_fold` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 576² ⚠ | 4.6 ms | 11.6 ms | 2.52× | 4.5 ms | 11.3 ms | 5.1 ms | 9.7 ms |
+| 1152² | 10.8 ms | 24.8 ms | **2.30×** | 9.4 ms | 24.4 ms | 8.6 ms | 22.4 ms |
+| 2304² | 44.6 ms | 113.1 ms | **2.54×** | 37.3 ms | 113.3 ms | 36.8 ms | 103.1 ms |
+
+⚠ the whole 576²/8T group carries CV 84–221 % — at ~5 ms of work per iteration
+the thread-pool overhead dominates and nothing in that row is resolved. It is
+printed for completeness and is not a number to quote.
+
+**This is the trade, and it is exactly the one the predecessor named.** Scaling
+1T → 8T at 1152²: buffered `49.63 → 10.8 ms` = **4.6×**; fold
+`51.19 → 24.8 ms` = **2.06×**. At 2304²: buffered **4.6×**, fold **1.87×**.
+The cause is structural, not a tuning gap — buffered parallelises
+band-per-strip at degree `layout_h.div_ceil(STRIP_INNER)`, which grows with
+image height, while the fold's channel fan-out is fixed at 3 over a producer
+that contains no rayon (predecessor §5). Serial parity plus a 2.2× scaling
+deficit is what a fold-backed default costs on a many-core box today.
+
+Two things this does NOT say:
+
+* It does not say the fold is 2.5× slower *per unit of work*. It is 1.03–1.05×
+  serially (§10.2) on identical output. The gap is entirely how many threads
+  each walk can use.
+* It does not say the gap is closable here. The predecessor bounded the
+  remaining MT headroom at ~1.2× and put it behind an era decision
+  (`dense_block_kernel` is 23 % of the walk with 3-way-only parallelism and is
+  not bit-exactly row-splittable as written). MT is explicitly not this lane's
+  axis and no summation grouping was touched.
+
+### 10.4 The ref-cache saving, and the scratch gap it exposes
+
+`ref_x − score_x` is what amortising one reference across N candidates buys
+that engine:
+
+| size / threads | buffered saving | fold saving |
+|---|---:|---:|
+| 1152² / 1T | 49.63 → 42.70 ms = **−14.0 %** | 51.19 → 46.51 ms = **−9.1 %** |
+| 2304² / 1T | 205.50 → 177.40 ms = **−13.7 %** | 211.74 → 196.34 ms = **−7.3 %** |
+| 1152² / 8T | 10.8 → 8.6 ms = −20.4 % | 24.8 → 22.4 ms = −9.7 % |
+| 2304² / 8T | 44.6 → 36.8 ms = −17.5 % | 113.1 → 103.1 ms = −8.8 % |
+
+The fold's saving is real and it lands where §3.2 predicted — the reference
+front end, decode + sRGB→XYB + the 3-level downscale — but it is **about half
+of buffered's**, and §9.3 names the likely reason: the fold-backed
+`compute_with_ref` builds a fresh `V2Scratch` per compare, where buffered's
+`compute_with_ref_into` lets an encoder loop keep its `ZensimScratch` alive
+across calls. A fold-side `*_into` entry taking `&mut V2Scratch` is the
+obvious follow-up; it is additive API and is NOT in this lane's approved list,
+so it is registered rather than built.
+
+### 10.5 The fused compare vs the split — the migration is not free
+
+| size / threads | `fused_buffered` | `split_fold` | ratio |
+|---|---:|---:|---:|
+| 576² / 1T | 16.45 ms | 38.91 ms | 2.37× |
+| 1152² / 1T | 69.18 ms | 144.28 ms | 2.09× |
+| 2304² / 1T | 275.41 ms | 576.03 ms | 2.09× |
+| 1152² / 8T | 26.1 ms | 80.1 ms | 3.07× |
+| 2304² / 8T | 110.5 ms | 336.6 ms | 3.05× |
+
+`fused_compare_splits_into_fold_score_plus_standalone_map` gates that the split
+does not move the score (bit-identical); this is what it costs. **2.1× serial,
+3.05× at 8 threads** — which is C3a's own finding restated on this bench: the
+fused compare exists precisely because the standalone map is expensive, and
+splitting it undoes that. A jxl-encoder-style loop migrating off buffered
+either takes that cost or the fused compare gets re-hosted on the fold's strip
+geometry (§8.3, §9.3). It is the strongest single argument for doing the
+re-host rather than accepting the split.
+
+### 10.6 16 threads (`RAYON_NUM_THREADS=16`), 20 / 20 / 19 usable rounds
+
+| size | `score_buffered` | `score_fold` | ratio | `feat_buffered` | `feat_fold` | `ref_buffered` | `ref_fold` | `fused_buffered` | `split_fold` |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 576² | 2.5 ms | 8.0 ms | 3.20× | 2.4 ms | 7.9 ms | 2.1 ms | 7.0 ms | 5.9 ms | 21.9 ms |
+| 1152² | 9.0 ms | 26.4 ms | 2.93× | 7.8 ms | 26.5 ms | 7.0 ms | 23.1 ms | 23.9 ms | 81.2 ms |
+| 2304² | 33.4 ms | 108.6 ms | 3.25× | 28.1 ms | 111.0 ms | 27.9 ms | 98.9 ms | 101.3 ms | 329.7 ms |
+
+No CV or drift flags on any 16T cell — this was the cleanest of the three runs
+(load 2.35 → 0.38 across it).
+
+**16 threads is where the two curves have fully separated.** Scaling
+1T → 16T at 2304²: buffered `205.50 → 33.4 ms` = **6.15×**; fold
+`211.74 → 108.6 ms` = **1.95×**. The fold is flat from 8T to 16T
+(113.1 → 108.6 ms, +4 %), which is the predecessor's §13 finding on this
+lane's arms too: the fold saturates and 16T buys it almost nothing.
+
+### 10.7 The whole result in one place
+
+| threads | 1152² `score` fold ÷ buffered | 2304² `score` fold ÷ buffered |
+|---|---:|---:|
+| 1 | **1.03×** (CI crosses 0) | **1.03×** (CI crosses 0) |
+| 8 | 2.30× | 2.54× |
+| 16 | 2.93× | 3.25× |
+
+**Parity target: MET serially, MISSED under threads, and the shape of the miss
+is entirely how many threads each walk can use** — not how much work each does.
+The two arms produce the same 372 features and the same score, bit-for-bit.
+Serially they cost the same; buffered scales 4.6–6.2× to 8/16 threads and the
+fold scales 1.9–2.1×.
+
+No regression is being shipped by this: `ScoringEngine::Buffered` is the
+default, `feature-regime-v2` is not a default feature, and nothing routes to
+the fold unless something explicitly asks. What the table does is put a number
+on the retirement trade the user has to make (§9.6): **a fold-backed default
+is free on one core and costs 2.3–3.3× on 8–16.** The predecessor bounded the
+recoverable part of that at ~1.2× behind an era decision, so most of the gap is
+not closable without changing 944 bytes.

@@ -1,0 +1,86 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=28/32 avail=45348MiB :: /home/lilith/work/zen/zensim--fold-engine/target-fold/release/deps/fold_engine_bench-a5599983409f8574
+[zenbench] calibration: int=0.19ns/iter mem_bw=100.8GiB/s mem_lat=10.0ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788131128-1eebd.txt
+[zenbench] lock acquired after waiting; running /fold_engine_576
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788131128-1eebd
+  git: be63ff393076eefbeee1e33024fc01d3d39d34a7
+═══════════════════════════════════════════════════════════════
+
+  fold_engine_576  20 rounds × 1 calls
+                     mean ±mad ms  95% CI vs base     
+  ├─ score_buffered   12.7 ±0.7ms  [10.8–16.2]ms       [1]
+  ├─ score_fold       18.5 ±1.1ms  [+11.3%–+24.6%]     [2]
+  ├─ feat_buffered    11.3 ±0.6ms  [-3.0%–+4.2%]       [3]
+  ├─ feat_fold        13.8 ±1.3ms  [+14.3%–+25.2%]    
+  ├─ ref_buffered     10.2 ±0.5ms  [-11.4%–-7.0%]     
+  ├─ ref_fold         12.4 ±1.0ms  [+9.9%–+16.3%]     
+  ├─ fused_buffered   16.4 ±0.7ms  [+35.3%–+39.7%]     [4] [5]
+  ╰─ split_fold       38.9 ±2.2ms  [+193.1%–+211.0%]   [6]
+
+  ref_buffered    ██████████████ 10.16ms
+  feat_buffered   ████████████████ 11.25ms
+  ref_fold        █████████████████ 12.40ms
+  score_buffered  ██████████████████ 12.73ms
+  feat_fold       ███████████████████ 13.77ms
+  fused_buffered  ███████████████████████ 16.45ms
+  score_fold      ██████████████████████████ 18.54ms
+  split_fold      ██████████████████████████████████████████████████████ 38.91ms
+  [1] CV=58%
+  [2] CV=124%
+  [3] CI crosses zero
+  [4] drift r=0.57 — later rounds slower
+  [5] CV=22%
+  [6] CV=62%
+
+  fold_engine_1152  19 rounds × 1 calls
+                      mean ±mad ms  95% CI vs base     
+  ├─ score_buffered    49.6 ±2.6ms  [48.3–51.1]ms      
+  ├─ score_fold        51.2 ±4.0ms  [-3.1%–+3.7%]       [1]
+  ├─ feat_buffered     48.0 ±2.6ms  [-6.2%–-2.1%]      
+  ├─ feat_fold         50.5 ±6.0ms  [-1.3%–+5.2%]       [2] [3]
+  ├─ ref_buffered      42.7 ±2.0ms  [-16.2%–-11.9%]    
+  ├─ ref_fold          46.5 ±3.9ms  [-10.0%–-5.7%]     
+  ├─ fused_buffered    69.2 ±2.6ms  [+36.4%–+42.4%]    
+  ╰─ split_fold       144.3 ±4.4ms  [+181.7%–+194.8%]  
+
+  ref_buffered    ████████████████ 42.70ms
+  ref_fold        █████████████████ 46.51ms
+  feat_buffered   ██████████████████ 48.00ms
+  score_buffered  ██████████████████ 49.63ms
+  feat_fold       ███████████████████ 50.54ms
+  score_fold      ███████████████████ 51.19ms
+  fused_buffered  █████████████████████████ 69.18ms
+  split_fold      █████████████████████████████████████████████████████ 144.28ms
+  [1] CI crosses zero
+  [2] CI crosses zero
+  [3] drift r=-0.54 — later rounds faster
+
+  fold_engine_2304  18 rounds × 1 calls
+                      mean ±mad ms  95% CI vs base     
+  ├─ score_buffered   205.5 ±4.2ms  [202.2–209.0]ms    
+  ├─ score_fold       211.7 ±4.3ms  [+0.1%–+4.7%]       [1]
+  ├─ feat_buffered    199.8 ±1.4ms  [-2.8%–-1.4%]      
+  ├─ feat_fold        210.4 ±6.9ms  [-0.2%–+5.0%]       [2]
+  ├─ ref_buffered     177.4 ±1.1ms  [-13.9%–-11.5%]    
+  ├─ ref_fold         196.3 ±5.6ms  [-5.4%–-2.3%]      
+  ├─ fused_buffered   275.4 ±3.7ms  [+34.2%–+37.5%]    
+  ╰─ split_fold       576.0 ±3.5ms  [+177.8%–+182.7%]  
+
+  ref_buffered    ████████████████ 177.40ms
+  ref_fold        ██████████████████ 196.34ms
+  feat_buffered   ██████████████████ 199.83ms
+  score_buffered  ███████████████████ 205.50ms
+  feat_fold       ███████████████████ 210.38ms
+  score_fold      ███████████████████ 211.74ms
+  fused_buffered  █████████████████████████ 275.41ms
+  split_fold      █████████████████████████████████████████████████████ 576.03ms
+  [1] CI crosses zero
+  [2] CI crosses zero
+
+  total: 1967.5s  (1731 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 1968s | peak-RSS 1.16GiB | min-avail 41723MiB | peak-load 13.07
