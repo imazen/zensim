@@ -4112,3 +4112,43 @@ FUTURE regime (e.g. the anticipated HDR append): 197.43 GiB / ~$3.18/mo against 
 cells. **Middle path: keep only `negrich` (167,034 of 699,999 = 23.9 %).**
 ⚠ Flagged, other repo: `~/work/kadis-distort/docs/DATASET.md` still claims the distorted PNGs are
 "cheap to regenerate deterministically" — falsified by the 2026-07-24 measurement.
+
+## 2026-08-31 ~07:3xZ — ROUND 21: FOLD THREAD SCALING — 1.95× → 3.71×, and the machine bound is now the limit (6 commits `ae83a5ca`..`469c5a2c`; doc `benchmarks/fold_mt_scaling_2026-08-31.md`)
+
+**Shipped, zero bytes moved:** 2304² fold-backed scoring 1→16T scaling **1.95× → 3.71×**, ratio to
+buffered **3.25× → 1.69×** (108.6 → **54.47 ms**); at 8T **2.54× → 1.46×** (113.1 → 59.67 ms);
+1152² **1.94× → 3.49×**, ratio **2.93× → 1.61×**. Serial parity preserved (0.96×/1.04×).
+
+- **Profiled first, and the inherited premise was WRONG**: new `zensim/src/fold_timing.rs`
+  (env-gated per-phase wall AND task-busy, so occupancy is measured) puts the 2304²/16T critical
+  path at producer 29.0 % (serial), phase A 35.6 % (occupancy **0.157**), phase B 28.6 % —
+  **`dense_block_kernel` never appears**, because a fold-backed SCORE runs `v1_only`, which gates
+  the whole dense/gradient/append block off. The predecessor's "23 %, era-locked, ~1.2× MT
+  ceiling" applies to the 944 EXTRACTION, not this path; its "row-parallel H-blur is NEUTRAL" was
+  measured where phase A is small.
+- **Six byte-neutral levers**: H-blur row bands aligned to the kernels' own row-transpose group
+  (16 on v4/v4x, 8 elsewhere); two-sided producer conversion + 6-way downscale cascade;
+  `ADVANCE_ROWS` 128→256; fused per-channel fan-out (the only cross-channel edge is absent under
+  `v1_only`); **self-blur bands** (each band blurs the rows it consumes into private scratch —
+  buffered's shape, +40 % blur compute and faster anyway); and the serial `mean_offset` pass
+  parallelised.
+- **The ceiling is MEASURED, not asserted**: N independent single-threaded PROCESSES saturate this
+  box at **3.5× (fold) vs 10.9× (buffered)** from the same serial speed — the fold's larger working
+  set is memory-bandwidth-bound. Against that latency bound the threaded implementation sits at
+  **94 % (8T) / 108 % (16T)**: there is no scheduling left. The bound is also what FOUND the last
+  lever — 8T sat at 82 %, which sent the lane back to the profile and located the serial
+  `mean_offset` pass (7.1 ms "unaccounted" that survived scratch reuse); the profile now accounts
+  for **100.0 %** of the walk.
+- **Two measured negatives, kept as tests not ships**: lowering the conversion chunk height MOVES
+  BYTES (one ULP at 97×51 ⇒ chunk height is SEMANTICS, now pinned two-sidedly); doubling
+  `scale_capacity_rows` buys ~2 ms for ~20 MB — rejected.
+- **Ref-cache gap CLOSED** (the fold-engine lane's open item): `compute_with_ref_into` did not
+  route to the fold at all, and the fold allocated a fresh `V2Scratch` per compare — both fixed
+  with a new PRIVATE field on the existing public `ZensimScratch`, so **no public type or method
+  was added**.
+- Gates 385/385, clippy clean, `--no-default-features` builds;
+  `both_engines_are_bit_identical_across_rayon_pool_sizes` WIDENED from 4 shapes to all 18
+  geometries + 4 large × pools 1/2/3/8/16.
+- **Weigh**: RSS — `ADVANCE_ROWS` 256 + band-local H planes cost footprint; at 2304² the fold is
+  still 0.75×/0.85× buffered, but at 1152² it went 1.13× → **1.32–1.38×** (§5.2). No era-2 byte
+  flip landed during the lane, so its bit-identity is relative to current main throughout.
