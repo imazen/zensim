@@ -4490,3 +4490,57 @@ day** — stage B landed parity while it measured; §7.3 carries both and says w
   essentially radius-insensitive (0.65 % → 0.26 %); tile-edge branch behaviour is measurable today
   on main via `ZENSIM_H_TILE=0000` vs `0512`/`1536` (3× the edge count, same binary); plus the ASLR
   protocol. Item D (compute-set descriptor) not started.
+
+## 2026-08-31 ~14:5xZ — ROUND 29: radius, locality, branches — the three user questions ANSWERED (`c2df4be7`; doc `benchmarks/blur_radius_locality_branches_2026-08-31.md`, library byte-for-byte UNCHANGED)
+
+**(c) Trailing pixels / branch mispredictions: NO — measured for the first time, hypothesis
+falsified.** Enabler worth carrying: `perf_event_paranoid` was 4 (all events blocked) and the
+`perf` first on PATH is a stale binary; with the sysctl at 1 and `/usr/bin/perf`, **hardware
+counters work on the shipping `v4x` tier — which callgrind structurally cannot execute.**
+1T misprediction rate **0.015–0.050 %**; the ENTIRE budget, charging every miss 20 cycles with no
+overlap credit, is **0.14–0.50 % of cycles** (IPC 2.5–3.9). **Row tails falsified**: the worst tail
+class (2303 ≡ 7 mod 8) costs **+0.06 percentage points of cycles** over 2304 and actually LOWERS
+the V blur's share of misses (37.5 → 34.8 %); disassembly shows the reflect-mirror index math is
+already `cmovae`/`cmovb`/`cmovs` — there is no branchy edge handling left to remove. Blur edge
+clamping is the top source (37.5 % of misses) at **0.18 % of cycles**; band/strip boundaries 9.0 %
+of misses = 0.017 %. The only regime near 1 % is 576²/16T (1.2–1.65 %), where **48.6 % of misses
+are `crossbeam_epoch`** — the rayon runtime, not our kernels. Four candidate fixes retired, nothing
+shipped.
+**(a) Radius: real but small, and the one setting that passes quality is FREE.** `HALO_P = 2R`, and
+the blur is a running sum ⇒ **O(1)/px at any radius** — radius buys only halo, prologue and working
+set. A single-build A/B was inadmissible: a control (second R=5 build, identical semantics)
+measured the **cross-build layout floor at 4.67 %**, so every radius got TWO independent builds,
+n=30 draws/arm.
+
+| R | 2304²/1T | 2304²/16T | peak RSS | C944 worst corpus | composite | BAR |
+|---|---|---|---|---|---|---|
+| 4 | +0.68 % | −0.17 % | −1.35 % | −0.0007 | +0.0038 | **PASS** |
+| 3 | −5.53 % | −4.42 % | −2.90 % | −0.0059 | +0.0070 | FAIL |
+| 2 | −4.71 % | −7.14 % | −4.12 % | −0.0221 | +0.0090 | FAIL |
+
+**R=4 passes era-2's registered bar for the shipped 944 flagship and costs nothing measurable in
+time**; R=3/2 buy 4.4–7.1 % at 16T and fail. Mechanism confirmed: every feature kernel and the
+producer are radius-invariant to ≤0.3 % while `planesA` −23.7 %, `planesApp` −14.7 %, `blur_h`
+−13.7 %. Quality is a **redistribution, not a degradation** — gains on cid22/aic3/aic4 and hugely
+on **KonJND (Profile C 0.5006 → 0.5896 at R=2)**, losses on TID/KADID; all models were trained at
+R=5, so a **radius-4 retrain is registered**, not launched. Validation bonus: the lane's radius-5
+re-extraction is **bit-identical to the canonical root — 19,367,104 / 19,367,104 cells, max diff 0**
+across 9 legs, which incidentally byte-neutrality-checks the **155 commits** since that root's
+`build_commit`. Suite 369/0 at R=5 and 362/7 at R=3 with **6 of 7 failures being stored radius-5
+expectations**; all 13 fold-engine parity tests pass at R=3. No test relaxed.
+**(b) Locality: the RADIUS is what unlocks the axis — the sign flips.** At R=5 a 32-row strip is
+**+12.0 %** (reproducing the v2-block L2 falsification); at **R=2 it is −4.7 %**. Best cell
+`R=2 × STRIP_ROWS 32`: **301.8 ms vs 326.5 (−7.6 %) at 61.0 MB vs 97.6 (−37.6 %)** — the locality
+prize, reached through the radius (not shippable: R=2 fails quality, `STRIP_ROWS` is not
+byte-neutral). This **reconciles the one-step arithmetic difference with round 28**: the 1.25 %
+per-unit gain must be compared against the halo RELATIVE TO THE SHAPE IT REPLACES — 1.406/1.257/
+1.176× at R=5/3/2 — so break-even sits between R=3 (a wash: round 28's read, correct) and R=2, and
+round 28's own figure then predicts +12.5 % at R=5 (measured +12.0/+13.1) and −5.9 % at R=2
+(measured −4.7): **three numbers, two lanes, two knobs, inside 1.1 points.** **Column tiling is
+confirmed radius-INSENSITIVE** (1.229/1.189/1.203× at 2304², 1.837/1.874× at 4608², tile width
+128→2048 within 1.4 %) ⇒ radius drops out of era-2's `TILE_WIDTH` grid, one fewer dimension — and
+the levers **COMPOSE**: 335.2 → 272.8 (tile) → 255.8 (both) = **1.311×**, 98 % of the product;
+1.968× at 4608².
+Open: the bar's dial clause (grids are radius-blind — verified byte-identical across all four
+roots), 3 of 12 corpora, the band shape at small radius (needs era-2 to rebuild what it reverted),
+threaded shape knobs, no PEBS-class sampling on this host.
