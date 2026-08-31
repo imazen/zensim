@@ -4544,3 +4544,47 @@ the levers **COMPOSE**: 335.2 → 272.8 (tile) → 255.8 (both) = **1.311×**, 9
 Open: the bar's dial clause (grids are radius-blind — verified byte-identical across all four
 roots), 3 of 12 corpora, the band shape at small radius (needs era-2 to rebuild what it reverted),
 threaded shape knobs, no PEBS-class sampling on this host.
+
+## 2026-08-31 ~15:5xZ — ROUND 30: era-2 — a real DEFECT found while enumerating re-pins; the E+F table exists; item D landed (`512c66c2`, `08c1ac07`, `ab49d4b7`)
+
+- **★ Defect found by forcing the tile on for the whole suite**: tiling only SELECTED call sites
+  **split the v1 reference path from the fold** — 4 cross-path `to_bits()` gates failed at ~1.3e-9.
+  The tile now lives on **all four H entries** (`fused_blur_h_ssim`, `_ssim3`, `box_blur_h`,
+  `box_blur_h_into_abs_diff`, `fused_blur_h_mu`) with private `*_untiled` forms. **The rule: either
+  EVERY H entry tiles or none does — this crate's strongest gates are cross-path bit-identity, so a
+  partial tile is a silent regime split.** Three ring-vs-regather tests were **re-pointed at the
+  kernel, not relaxed**. Perf unaffected (1.183× / 1.673× / 1.299×).
+- **Gate re-pin enumeration DONE for the tiling flip** (one of the three flip prerequisites):
+  default (off) **370 passed / 0 failed**; tile forced on **365 / 5**. All five are ABSOLUTE-VALUE
+  goldens (the four `v1_golden_bytes` fixtures, `f0` −5.149e-6; and `hardcoded_reference_scores`,
+  1.8e-4 … 1.0e-2 score points). **Zero internal-consistency gates fail — that is what makes the
+  flip safe in one step.** Radius 4 re-pins the SAME five and is additive; the V-redirect may
+  re-pin none.
+- **(a) Both V-redirect exits priced, and the lane's own "≈ half" estimate was WRONG**:
+
+  | | 2304² | 4608² |
+  |---|---:|---:|
+  | baseline | 330.48 | 1939.21 |
+  | **exit 1** (inner-row copy, no kernel change) | **318.51 (−3.6 %)** | **1840.03 (−5.1 %)** |
+  | exit 2 (no copy, six tier bodies) | 315.50 (−4.5 %) | 1824.38 (−5.9 %) |
+
+  `planesA` 39.27 → 22.42 and 248.50 → 139.21, independently reproducing round 28's −16.69 ms.
+  **Exit 1 captures 80 %/86 % of exit 2 for zero kernel change** — the estimate had assumed the copy
+  costs as much as the plane write it replaces, but its source is an L2-hot band buffer while the
+  removed sweep was a COLD full-plane read plus the same write. **Decision: build exit 1**; exit 2's
+  extra 3.0/15.7 ms registered with its price. Two facts recorded so they are not re-derived:
+  round 28's overlap obstacle is **smaller than written** (the fused kernel writes only INNER rows,
+  so bands are disjoint), and the real blocker is a **borrow**, not the algorithm.
+- **(b) Item D landed**: `ComputeSet` (`pub(crate)`) replaces six ad-hoc locals and the walk reads
+  it; behaviour is **gated, not asserted** — `compute_set_matches_legacy_derivation` sweeps **1,024
+  combinations** against the legacy expressions verbatim plus two invariants the old code only
+  implied. **No public API added**; §26.1 lists the proposed surface for approval and recommends the
+  cheaper form (keep it `pub(crate)`, derive inside the existing entries from a model handle the
+  caller already passes) — which unlocks item E with no new public types.
+- **(c) The E+F decision table exists**: `benchmarks/era2_drop_redefine_table_2026-08-31.md` (linked
+  from INDEX). Headline shape: **E1 is MODEL-CONDITIONAL, not global** — the pool pass is worth
+  exactly 0 to the 944 MLPs and 0.399 CID22 to B, so its shipping form is "let the request say",
+  which IS item D. **F1 (radius 4) is the one redefinition that has passed the registered bar on
+  the shipped flagship.** Every number attributed to its lane; not-measured cells say so.
+- Flip prerequisites remaining: **rank preservation across the roster** (needs model eval — not that
+  lane) and **blast-radius / wave registration**.
