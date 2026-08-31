@@ -301,6 +301,16 @@ Round-to-round spread, `(max − min) / median`, worst cell per arm:
 | `fold944_full` | 7.8 % | 576²/16T |
 <!--MS_END-->
 
+**Cross-check against a different lane's different harness.** The
+fold-footprint lane measured `score_fold` (extraction **plus** the bake
+forward, through `Zensim::compute`, under zenbench, on the same commit and
+box) at **175.1 ms at 2304²/1T** and **37.1 ms at 1152²/1T**
+(`benchmarks/fold_footprint_2026-08-31.md` §7.1); this harness measures
+`fold372_full` — the same walk, extraction only — at **170.0** and **36.0**.
+Two lanes, two instruments, ~3 % apart on the arm they share. That is the
+confidence the 1T column deserves, and it is why every ratio in §0.1 is quoted
+from 1T.
+
 ### 3.2 Instruction-level split (predecessor lane, callgrind, 576², serial, v3 tier)
 
 | arm | Ir | note |
