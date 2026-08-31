@@ -78,6 +78,53 @@ pub(crate) enum FrontEnd {
 const ADVANCE_ROWS: usize = 256;
 const _: () = assert!(ADVANCE_ROWS % crate::streaming::DEFAULT_CONVERT_CHUNK_ROWS == 0);
 
+/// The advance actually used by one producer — [`ADVANCE_ROWS`] is its CEILING,
+/// not its value (fold-footprint lane, `benchmarks/fold_footprint_2026-08-31.md`).
+///
+/// The constant exists to keep the conversion fan-out fed, and nothing else:
+/// the two sides run concurrently and each fans out at [`CONVERT_CHUNK_ROWS`],
+/// so one `produce()` call offers `2 * advance / CONVERT_CHUNK_ROWS` tasks and
+/// `32 * threads` rows is the smallest advance that offers one per thread. On a
+/// pool that cannot use them the extra rows buy nothing and are pure capacity:
+/// `scale_capacity_rows` budgets `advance >> scale` extra rows at every scale,
+/// which the footprint model prices at `24 * 1.328 * (advance - 64) * width`
+/// bytes — **6.0 KiB per unit of width** between 64 and 256, independent of
+/// height, i.e. 6.9 MB at 1152² and 13.7 MB at 2304² for a degree no
+/// single-threaded walk can spend.
+///
+/// **Byte-neutral, and the existing suite is the gate.** Chunk HEIGHT is
+/// semantics (`crate::streaming::tests::convert_chunk_rows_is_semantics_not_a_knob`
+/// measures one ULP at 97×51); chunk COUNT is not, because every boundary still
+/// lands on a global multiple of [`CONVERT_CHUNK_ROWS`] — which is why this
+/// rounds UP to that lattice and asserts it. Within a scale, strips are still
+/// emitted in strictly ascending order, and each scale owns its own
+/// accumulator, so the cross-scale interleave the advance changes cannot reach
+/// a sum. `fold_engine_parity` already sweeps rayon pools 1/2/3/8/16, so with
+/// this function that sweep IS an advance sweep (64/64/128/256/256);
+/// `producer_windows_are_advance_invariant` pins the producer directly.
+fn advance_rows_for(parallel: bool, h0: usize) -> usize {
+    #[cfg(feature = "threads")]
+    let threads = if parallel {
+        rayon::current_num_threads().max(1)
+    } else {
+        1
+    };
+    #[cfg(not(feature = "threads"))]
+    let threads = {
+        let _ = parallel;
+        1usize
+    };
+    let want = threads
+        .saturating_mul(CONVERT_CHUNK_ROWS / 2)
+        .clamp(CONVERT_CHUNK_ROWS, ADVANCE_ROWS);
+    // UP to the 64-row lattice — never below it, and never past the image.
+    let a = want.div_ceil(CONVERT_CHUNK_ROWS) * CONVERT_CHUNK_ROWS;
+    let h_lattice = h0.max(1).div_ceil(CONVERT_CHUNK_ROWS) * CONVERT_CHUNK_ROWS;
+    let a = a.min(h_lattice);
+    debug_assert_eq!(a % CONVERT_CHUNK_ROWS, 0);
+    a
+}
+
 /// Rows per parallel chunk inside the producer's scale-0 XYB conversion.
 ///
 /// **PINNED to `streaming`'s default, and it is not free to move.** Chunk
@@ -271,6 +318,9 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     /// that every level's `(width, height)` matches this producer's — see
     /// `feature_v2::cached_ref_feed_usable`.
     ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
+    /// Scale-0 rows converted per [`Self::produce`] call, and hence this
+    /// producer's rolling-window capacity — see [`advance_rows_for`].
+    advance_rows: usize,
 }
 
 /// Convert `n_new` scale-0 rows of one side into that side's three rolling
@@ -333,8 +383,8 @@ fn copy_cached_scale0(
 /// kernel strip + both halos + one production step + slack for the
 /// downscale-consumption floor. Exceeding it merely grows the buffer
 /// (correctness-safe); the C1 tests assert it is never exceeded.
-fn scale_capacity_rows(scale: usize, plane_h: usize) -> usize {
-    let step = (ADVANCE_ROWS >> scale).max(2);
+fn scale_capacity_rows(scale: usize, plane_h: usize, advance_rows: usize) -> usize {
+    let step = (advance_rows >> scale).max(2);
     (STRIP_ROWS + 2 * HALO_P + step + 32).min(plane_h.max(1) + 2 * HALO_P)
 }
 
@@ -379,6 +429,43 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         front_end: FrontEnd,
         ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
     ) -> Self {
+        Self::new_inner(
+            source, distorted, parallel, pool, front_end, ref_planes, None,
+        )
+    }
+
+    /// [`Self::new`] with the production advance replaced — the injection point
+    /// for `producer_windows_are_advance_invariant`, which is the direct gate
+    /// on [`advance_rows_for`] being a schedule knob and not semantics.
+    #[cfg(test)]
+    pub(crate) fn new_with_advance(
+        source: &'a S,
+        distorted: &'a D,
+        parallel: bool,
+        pool: &mut Vec<Vec<f32>>,
+        advance_rows: usize,
+    ) -> Self {
+        Self::new_inner(
+            source,
+            distorted,
+            parallel,
+            pool,
+            FrontEnd::Sdr,
+            None,
+            Some(advance_rows),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        source: &'a S,
+        distorted: &'a D,
+        parallel: bool,
+        pool: &mut Vec<Vec<f32>>,
+        front_end: FrontEnd,
+        ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
+        advance_override: Option<usize>,
+    ) -> Self {
         let (w0, h0) = (source.width(), source.height());
         debug_assert_eq!(w0, distorted.width());
         debug_assert_eq!(h0, distorted.height());
@@ -395,6 +482,13 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             h /= 2;
         }
 
+        let advance_rows = advance_override.unwrap_or_else(|| advance_rows_for(parallel, h0));
+        assert_eq!(
+            advance_rows % CONVERT_CHUNK_ROWS,
+            0,
+            "producer advance must keep every conversion chunk boundary on the \
+             {CONVERT_CHUNK_ROWS}-row lattice (chunk HEIGHT is semantics)"
+        );
         let planes = std::array::from_fn(|_| {
             std::array::from_fn(|_| {
                 scales
@@ -404,7 +498,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                         RollingPlane::from_pooled(
                             pool.pop().unwrap_or_default(),
                             st.plane_w,
-                            scale_capacity_rows(s, st.plane_h),
+                            scale_capacity_rows(s, st.plane_h, advance_rows),
                         )
                     })
                     .collect::<Vec<_>>()
@@ -424,6 +518,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             },
             max_held_rows: vec![0; crate::NUM_SCALES],
             ref_planes,
+            advance_rows,
         }
     }
 
@@ -495,7 +590,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         if hi0 >= h0 {
             return false;
         }
-        let n_new = ADVANCE_ROWS.min(h0 - hi0);
+        let n_new = self.advance_rows.min(h0 - hi0);
 
         // --- Scale-0 conversion, both sides. ---
         //
@@ -921,6 +1016,82 @@ mod tests {
         }
     }
 
+    /// The advance is a SCHEDULE knob, not semantics: sweeping it changes how
+    /// many rows one `produce()` call converts (and therefore the cross-scale
+    /// interleave of emitted strips), and every strip's wide window on every
+    /// side and channel must come back BIT-identical.
+    ///
+    /// This is the direct gate on [`advance_rows_for`] making the advance
+    /// depend on the rayon pool size. The values swept are every one that
+    /// function can return (64/128/192/256) plus 512, which is past its
+    /// ceiling — all multiples of [`CONVERT_CHUNK_ROWS`], which is the
+    /// invariant that keeps the conversion byte-identical to the whole-image
+    /// call (chunk HEIGHT is semantics; see
+    /// `crate::streaming::tests::convert_chunk_rows_is_semantics_not_a_knob`).
+    #[test]
+    fn producer_windows_are_advance_invariant() {
+        // Heights that straddle every swept advance, plus a sub-advance one.
+        let cases = [(96usize, 64usize), (127, 93), (200, 150), (96, 1030)];
+        for (w, h) in cases {
+            let src = textured_image(w, h, 23);
+            let dst = distort(&src);
+            let s_img = RgbSlice::new(&src, w, h);
+            let d_img = RgbSlice::new(&dst, w, h);
+            // (scale, y0, side, ch) -> window bits, from the reference advance.
+            let mut baseline: Vec<(usize, usize, usize, usize, Vec<u32>)> = Vec::new();
+            for (ai, advance) in [64usize, 128, 192, 256, 512].into_iter().enumerate() {
+                let mut pool = Vec::new();
+                let mut prod =
+                    StripPlaneProducer::new_with_advance(&s_img, &d_img, false, &mut pool, advance);
+                let mut got: Vec<(usize, usize, usize, usize, Vec<u32>)> = Vec::new();
+                let mut wide = Vec::new();
+                while let Some(info) = prod.next_strip() {
+                    let n_wide = info.plane_w * info.wide_h();
+                    for (si, side) in [Side::Source, Side::Distorted].into_iter().enumerate() {
+                        for ch in 0..3 {
+                            wide.clear();
+                            wide.resize(n_wide, 0.0f32);
+                            prod.fill_wide(side, ch, &info, &mut wide[..n_wide]);
+                            got.push((
+                                info.scale,
+                                info.y0,
+                                si,
+                                ch,
+                                wide.iter().map(|v| v.to_bits()).collect(),
+                            ));
+                        }
+                    }
+                }
+                // Emission ORDER may differ across advances (the cross-scale
+                // interleave is exactly what the advance changes); the SET of
+                // (scale, y0, side, ch) windows and their bits may not.
+                got.sort_by(|a, b| (a.0, a.1, a.2, a.3).cmp(&(b.0, b.1, b.2, b.3)));
+                if ai == 0 {
+                    baseline = got;
+                    assert!(!baseline.is_empty(), "{w}x{h}: no strips emitted");
+                } else {
+                    assert_eq!(
+                        got.len(),
+                        baseline.len(),
+                        "{w}x{h} advance {advance}: strip/window count moved"
+                    );
+                    for (g, b) in got.iter().zip(baseline.iter()) {
+                        assert_eq!(
+                            (g.0, g.1, g.2, g.3),
+                            (b.0, b.1, b.2, b.3),
+                            "{w}x{h} advance {advance}: window identity moved"
+                        );
+                        assert_eq!(
+                            g.4, b.4,
+                            "{w}x{h} advance {advance}: scale {} y0 {} side {} ch {} moved bits",
+                            g.0, g.1, g.2, g.3
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// THE C1 gate: every emitted strip's wide window — both sides, all
     /// 3 channels — is byte-equal to `gather_strip_halo` run against the
     /// materialized planes; interior strips' zero-copy windows equal the
@@ -1016,7 +1187,11 @@ mod tests {
             // Capacity budget: rolling windows never outgrew their
             // construction-time budget (no fallback growth).
             for (scale, &held) in prod.max_held_rows().iter().enumerate() {
-                let budget = scale_capacity_rows(scale, if scale == 0 { h } else { h >> scale });
+                let budget = scale_capacity_rows(
+                    scale,
+                    if scale == 0 { h } else { h >> scale },
+                    advance_rows_for(false, h),
+                );
                 assert!(
                     held <= budget,
                     "{w}x{h} scale {scale}: held {held} rows > budget {budget}"

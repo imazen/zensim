@@ -99,6 +99,13 @@ fn engines() -> (&'static Zensim, &'static Zensim) {
 
 /// One-arm loop for external peak-RSS measurement (`/usr/bin/time -v`),
 /// mirroring `extract_paths_bench`'s `ZEN_XP_RSS` mode.
+///
+/// Arms: the six timed ones above, plus the two pool-block CONTROLS
+/// `poolctl_full` / `poolctl_off` added by the fold-footprint lane
+/// (`benchmarks/fold_footprint_2026-08-31.md`) — the scoring walk with the
+/// f156..371 pool block live vs structurally zero, so peak RSS prices
+/// `FoldPoolScratch`. `poolctl_off` is a measurement control, never a
+/// shippable configuration.
 fn rss_mode(arm: &str) {
     let size: usize = std::env::var("ZEN_FE_SIZE")
         .ok()
@@ -113,6 +120,8 @@ fn rss_mode(arm: &str) {
     let z = match arm {
         "score_buffered" | "feat_buffered" | "ref_buffered" | "refinto_buffered" => buffered,
         "score_fold" | "feat_fold" | "ref_fold" | "refinto_fold" => fold,
+        // MEASUREMENT CONTROL, not a shippable configuration (see the loop).
+        "poolctl_full" | "poolctl_off" => fold,
         other => panic!("unknown ZEN_FE_RSS arm: {other}"),
     };
     let pre = (arm.starts_with("ref_") || arm.starts_with("refinto_"))
@@ -120,6 +129,36 @@ fn rss_mode(arm: &str) {
     let mut sc = zensim::ZensimScratch::new();
     let mut sink = 0.0f64;
     for _ in 0..iters {
+        // POOL-BLOCK CONTROL ARMS (`poolctl_full` / `poolctl_off`). Same walk
+        // shape the fold-backed score takes — `v1_only`, SDR, one fresh
+        // `V2Scratch` per call, exactly as `metric::compute_with_config_inner`
+        // builds one per `Zensim::compute` — differing ONLY in whether the
+        // f156..371 pool block (peaks / masked / IW) is live. The delta is
+        // therefore the `FoldPoolScratch` footprint and nothing else.
+        // `poolctl_off` emits structural zeros in f156..371 and is a
+        // MEASUREMENT CONTROL only; the product mode is `Full`.
+        if let Some(mode) = match arm {
+            "poolctl_full" => Some(zensim::feature_v2::V1PoolsMode::Full),
+            "poolctl_off" => Some(zensim::feature_v2::V1PoolsMode::Off),
+            _ => None,
+        } {
+            let toggles = zensim::feature_v2::V2NewFeatureToggles {
+                v1_only: true,
+                v1_pools: mode,
+                ..Default::default()
+            };
+            let mut sc2 = zensim::feature_v2::V2Scratch::new();
+            let v2 = z
+                .compute_folded720_features_streaming(
+                    &RgbSlice::new(&src, size, size),
+                    &RgbSlice::new(&dst, size, size),
+                    toggles,
+                    &mut sc2,
+                )
+                .expect("poolctl");
+            sink += v2.features()[371] as f64;
+            continue;
+        }
         let rsv = RgbSlice::new(&src, size, size);
         let dsv = RgbSlice::new(&dst, size, size);
         let r = match &pre {

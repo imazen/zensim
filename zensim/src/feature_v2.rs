@@ -1632,23 +1632,72 @@ struct ScratchV2Strip {
     /// bit-for-bit unchanged; sized on first use by `stream_phase_a`.
     activity_dst: Vec<f32>,
 }
+/// Which groups of [`ScratchV2Strip`]'s planes a walk will actually write.
+///
+/// The set is a property of the REQUEST, and the fold-footprint lane measured
+/// what ignoring it costs: a `v1_only` + [`V1PoolsMode::Full`] score — the
+/// fold-backed scoring walk — runs self-blur bands, so phase A never executes
+/// and the ONLY planes it writes are `src_wide` / `dst_wide`. The other twelve
+/// were still allocated at `3 × 148 × width × 4` bytes apiece: **21,312·width
+/// bytes untouched**, 24.6 MB at 1152² and 49.1 MB at 2304².
+///
+/// Under stock glibc those pages are demand-zero (`vec![0.0; n]` →
+/// `alloc_zeroed` → `mmap`) and never fault, so they cost address space rather
+/// than RSS — but that is an ALLOCATOR POLICY, not a property of the program.
+/// MEASURED: with `MALLOC_ARENA_MAX=1` the same binary's `score_fold` peak RSS
+/// at 1152²/1T goes 61,952 KiB → 71,768 KiB, because the allocation now comes
+/// from the main heap and `calloc` has to memset it. Not asking for the planes
+/// is the only way to not depend on that.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct StripPlaneNeeds {
+    /// `mu1_h` / `mu2_h` / `ssq_h` / `s12_h` — phase A's fused-H outputs.
+    /// False only when every v1 band blurs its own rows ([`FoldHSource::SelfBlur`]).
+    h: bool,
+    /// `mu1` / `mu2` / `ssq` / `s12` / `abs_src` / `activity_tmp` / `activity`
+    /// / `bs2` — everything below `run_blur_pass_inner`'s `want_v2` early
+    /// return, plus the σ-split and dst-activity buffers that reuse its temps.
+    v2: bool,
+}
+
+impl StripPlaneNeeds {
+    /// Every plane — what the materialized walks and the reference-moment
+    /// cache ask for, and the safe default for any new caller.
+    const ALL: Self = Self { h: true, v2: true };
+    const NONE: Self = Self {
+        h: false,
+        v2: false,
+    };
+    fn union(self, o: Self) -> Self {
+        Self {
+            h: self.h || o.h,
+            v2: self.v2 || o.v2,
+        }
+    }
+}
+
 impl ScratchV2Strip {
     fn new(max_n: usize) -> Self {
+        Self::new_for(max_n, StripPlaneNeeds::ALL)
+    }
+
+    fn new_for(max_n: usize, needs: StripPlaneNeeds) -> Self {
+        let hn = if needs.h { max_n } else { 0 };
+        let vn = if needs.v2 { max_n } else { 0 };
         Self {
             src_wide: vec![0.0f32; max_n],
             dst_wide: vec![0.0f32; max_n],
-            mu1_h: vec![0.0f32; max_n],
-            mu2_h: vec![0.0f32; max_n],
-            ssq_h: vec![0.0f32; max_n],
-            s12_h: vec![0.0f32; max_n],
-            mu1: vec![0.0f32; max_n],
-            mu2: vec![0.0f32; max_n],
-            ssq: vec![0.0f32; max_n],
-            s12: vec![0.0f32; max_n],
-            abs_src: vec![0.0f32; max_n],
-            activity_tmp: vec![0.0f32; max_n],
-            activity: vec![0.0f32; max_n],
-            bs2: vec![0.0f32; max_n],
+            mu1_h: vec![0.0f32; hn],
+            mu2_h: vec![0.0f32; hn],
+            ssq_h: vec![0.0f32; hn],
+            s12_h: vec![0.0f32; hn],
+            mu1: vec![0.0f32; vn],
+            mu2: vec![0.0f32; vn],
+            ssq: vec![0.0f32; vn],
+            s12: vec![0.0f32; vn],
+            abs_src: vec![0.0f32; vn],
+            activity_tmp: vec![0.0f32; vn],
+            activity: vec![0.0f32; vn],
+            bs2: vec![0.0f32; vn],
             activity_dst: Vec::new(),
         }
     }
@@ -1668,6 +1717,10 @@ impl ScratchV2Strip {
 pub struct V2Scratch {
     strips: [ScratchV2Strip; 3],
     sized_for: usize,
+    /// The UNION of every plane set asked for so far — grow-only, exactly like
+    /// `sized_for`, so a driver that alternates a v1-only score with a 944
+    /// extraction converges to [`StripPlaneNeeds::ALL`] and never thrashes.
+    sized_needs: StripPlaneNeeds,
     /// Recycled rolling-plane buffers for the STREAMING walk's
     /// [`crate::feature_v2_stream::StripPlaneProducer`] (drained at
     /// construction, refilled by `recycle` at walk end) — steady-state
@@ -1685,19 +1738,30 @@ impl V2Scratch {
                 ScratchV2Strip::new(0),
             ],
             sized_for: 0,
+            sized_needs: StripPlaneNeeds::NONE,
             stream_pool: Vec::new(),
         }
     }
 
     /// Grow (never shrink) every buffer to hold `strip_max_n` elements.
     fn ensure(&mut self, strip_max_n: usize) {
-        if strip_max_n > self.sized_for {
+        self.ensure_for(strip_max_n, StripPlaneNeeds::ALL);
+    }
+
+    /// [`Self::ensure`] restricted to the plane groups the caller will write
+    /// (see [`StripPlaneNeeds`]). Both the size and the set are grow-only, so
+    /// this can only ever allocate LESS than `ensure` — never differently.
+    fn ensure_for(&mut self, strip_max_n: usize, needs: StripPlaneNeeds) {
+        let want = self.sized_needs.union(needs);
+        if strip_max_n > self.sized_for || want != self.sized_needs {
+            let n = strip_max_n.max(self.sized_for);
             self.strips = [
-                ScratchV2Strip::new(strip_max_n),
-                ScratchV2Strip::new(strip_max_n),
-                ScratchV2Strip::new(strip_max_n),
+                ScratchV2Strip::new_for(n, want),
+                ScratchV2Strip::new_for(n, want),
+                ScratchV2Strip::new_for(n, want),
             ];
-            self.sized_for = strip_max_n;
+            self.sized_for = n;
+            self.sized_needs = want;
         }
     }
 }
@@ -4357,10 +4421,24 @@ fn fold_v1_one_band(
     let mut empty_sd: [f32; 0] = [];
     if let Some((ps, full)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
         let band_n = h_local * width;
-        ps.ensure(band_n);
+        // Size to the WIDEST band this plane can ever hold, not to this band's
+        // own height (fold-footprint lane). `ensure` grows through
+        // `Vec::resize`, which reserves `max(2*cap, need)`: the first band of
+        // a strip is TOP-CLAMPED to `V1_BAND_ROWS + V1_BAND_OVERLAP` rows, so
+        // slot 0 was sized 37·width and then DOUBLED to 74·width on the first
+        // interior band — 76 % more than it can use, on 10 planes × 3
+        // channels. Measured (heaptrack, 1152²): 27.65 MB against the 23.22 MB
+        // the slots actually hold, i.e. 3840·width bytes of pure growth slack.
+        // Asking for the maximum up front makes every slot exactly 42·width.
+        let band_cap_n = (V1_BAND_ROWS + 2 * V1_BAND_OVERLAP).min(height.max(1)) * width;
+        debug_assert!(
+            band_n <= band_cap_n,
+            "band {band_n} exceeds the {band_cap_n} capacity bound"
+        );
+        ps.ensure(band_cap_n);
         let self_blur = matches!(h_src, FoldHSource::SelfBlur);
         if self_blur {
-            ps.ensure_h(band_n);
+            ps.ensure_h(band_cap_n);
         }
         // ONE destructure, so the band-local H planes can be READ while the
         // pool planes stay mutable — disjoint fields of the same `&mut`.
@@ -4628,28 +4706,53 @@ fn fold_v1_basic_bands(
             None => (None, false),
         };
         let locals: Vec<V1BasicSums> = match slots {
-            Some(slots) => starts
-                .par_iter()
-                .zip(slots.par_iter_mut())
-                .map(|(&b0, ps)| {
-                    let __t = crate::fold_timing::start();
-                    let mut local = V1BasicSums::default();
-                    fold_v1_one_band(
-                        b0,
-                        width,
-                        rows.end,
-                        strip_y0,
-                        halo_offset,
-                        height,
-                        h_src,
-                        raw,
-                        &mut local,
-                        Some((ps, full)),
-                    );
-                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
-                    local
-                })
-                .collect(),
+            // CHUNKED over the slots the channel actually keeps
+            // (`band_slots_for`). With at least as many slots as bands —
+            // every pool of 4+ threads — `per` is 1 and this is exactly the
+            // old one-band-per-slot zip. With fewer, a slot's bands run
+            // sequentially inside one task, which costs parallelism the pool
+            // could not have supplied anyway and saves the slots outright.
+            //
+            // ORDER, which is the whole bit-exactness argument: `par_chunks`
+            // and `par_iter_mut` are both INDEXED, so `collect` yields chunks
+            // in band order and each chunk yields its bands in band order —
+            // flattening reproduces the serial band sequence exactly, and the
+            // merge below is the same left-to-right f64 fold either way.
+            Some(slots) => {
+                let per = starts.len().div_ceil(slots.len().max(1)).max(1);
+                let chunked: Vec<Vec<V1BasicSums>> = starts
+                    .par_chunks(per)
+                    .zip(slots.par_iter_mut())
+                    .map(|(chunk, ps)| {
+                        let mut out = Vec::with_capacity(chunk.len());
+                        for &b0 in chunk {
+                            let __t = crate::fold_timing::start();
+                            let mut local = V1BasicSums::default();
+                            fold_v1_one_band(
+                                b0,
+                                width,
+                                rows.end,
+                                strip_y0,
+                                halo_offset,
+                                height,
+                                h_src,
+                                raw,
+                                &mut local,
+                                Some((&mut *ps, full)),
+                            );
+                            crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
+                            out.push(local);
+                        }
+                        out
+                    })
+                    .collect();
+                debug_assert_eq!(
+                    chunked.iter().map(Vec::len).sum::<usize>(),
+                    starts.len(),
+                    "chunked band fan-out must cover every band exactly once"
+                );
+                chunked.into_iter().flatten().collect()
+            }
             None => starts
                 .par_iter()
                 .map(|&b0| {
@@ -5810,7 +5913,11 @@ struct StreamChannelAccums {
 }
 
 impl StreamChannelAccums {
-    fn new(n_scales: usize) -> Self {
+    /// `n_band_slots` is the number of band scratches this channel keeps —
+    /// see [`band_slots_for`]. It is a CAPACITY, not a tiling: bands are
+    /// chunked across whatever slots exist (`fold_v1_basic_bands`), so any
+    /// count in `1..=V1_BANDS_PER_STRIP` computes the same bytes.
+    fn new(n_scales: usize, n_band_slots: usize) -> Self {
         Self {
             dense: vec![DenseAccum::default(); n_scales],
             grad: vec![GradientAccum::default(); n_scales],
@@ -5818,11 +5925,48 @@ impl StreamChannelAccums {
             v1: vec![V1BasicSums::default(); n_scales],
             block: vec![(0.0, 0.0); n_scales],
             csfw: vec![CsfwAccum::default(); n_scales],
-            pool_scratch: (0..V1_BANDS_PER_STRIP)
+            pool_scratch: (0..n_band_slots.clamp(1, V1_BANDS_PER_STRIP))
                 .map(|_| FoldPoolScratch::default())
                 .collect(),
         }
     }
+}
+
+/// How many [`FoldPoolScratch`] slots one channel needs — the fold-footprint
+/// lane's answer to "why is the fold heavier than buffered below ~2.5 MP".
+///
+/// The band scratch is the fold's single largest term (measured: 33 % of the
+/// walk's peak heap at every size, `benchmarks/fold_footprint_2026-08-31.md`),
+/// and it was sized by the FAN-OUT SHAPE — `V1_BANDS_PER_STRIP` slots per
+/// channel × 3 channels = 12 band buffers — regardless of how many could ever
+/// be live. Buffered's equivalent (`streaming`'s `ScaleBuffers`, 7 planes over
+/// the same 42-row band) is sized by the WORKER COUNT, via `map_init`: one per
+/// rayon worker. At one thread that is 12 buffers against buffered's 1, on
+/// identical work, and it is most of the gap.
+///
+/// A band cannot run without a thread to run it on, so `min(bands, threads)`
+/// is the count that can ever be simultaneously live inside one channel task
+/// (rayon nests: a channel's band `par_iter` can be stolen by every thread in
+/// the pool). Above that the extra slots are memory nothing can reach.
+///
+/// Byte-neutral: which scratch a band borrows cannot reach a feature, because
+/// every band fully overwrites the region it reads and merges into its own
+/// zero-initialised `V1BasicSums`, which are then reduced in BAND ORDER either
+/// way (`fold_v1_basic_bands`). `fold_engine_parity` sweeps rayon pools
+/// 1/2/3/8/16, which is now also a sweep of this function's output (1/2/3/4/4).
+fn band_slots_for(band_parallel: bool) -> usize {
+    #[cfg(feature = "threads")]
+    let n = if band_parallel {
+        V1_BANDS_PER_STRIP.min(rayon::current_num_threads().max(1))
+    } else {
+        1
+    };
+    #[cfg(not(feature = "threads"))]
+    let n = {
+        let _ = band_parallel;
+        1usize
+    };
+    n
 }
 
 /// True when the append kernel runs for this (channel, scale) — mirrors
@@ -7214,7 +7358,25 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     }
 
     let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P);
-    scratch.ensure(strip_max_n);
+    // HOISTED so the strip scratch can be sized to the planes this walk will
+    // actually write (fold-footprint lane). Both flags are strip-independent —
+    // they were computed inside the loop purely because that is where they are
+    // read — and the loop now reads these, so there is one definition of each.
+    #[cfg(feature = "threads")]
+    let fuse_channels = parallel && !append_on && retention.is_none();
+    #[cfg(not(feature = "threads"))]
+    let fuse_channels = false;
+    let self_blur =
+        fuse_channels && !v2_blocks && fold_v1 && matches!(toggles.v1_pools, V1PoolsMode::Full);
+    scratch.ensure_for(
+        strip_max_n,
+        StripPlaneNeeds {
+            // Phase A is skipped WHOLE under self-blur bands, so its four
+            // fused-H outputs are never written.
+            h: !self_blur,
+            v2: v2_blocks,
+        },
+    );
     let V2Scratch {
         strips: scratch_strips,
         stream_pool,
@@ -7222,7 +7384,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     } = scratch;
 
     let mut accums: [StreamChannelAccums; 3] =
-        std::array::from_fn(|_| StreamChannelAccums::new(n_scales));
+        std::array::from_fn(|_| StreamChannelAccums::new(n_scales, band_slots_for(band_parallel)));
     if let Some(ret) = retention.as_deref_mut() {
         ret.ensure(&dims);
     }
@@ -7313,8 +7475,13 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // Byte-neutral by construction: identical kernels on identical inputs
         // into per-channel accumulators that are already disjoint. Only which
         // thread runs what, and when, changes.
-        #[cfg(feature = "threads")]
-        let fuse_channels = parallel && !append_on && retention.is_none();
+        // `fuse_channels` / `self_blur` are HOISTED above the strip loop (they
+        // are strip-independent, and the strip scratch is sized from them).
+        //
+        // FUSED PER-CHANNEL FAN-OUT preconditions, restated where they are
+        // read: `!append_on` => no cross-channel edge; `retention.is_none()`
+        // => nothing runs between the phases.
+        //
         // SELF-BLUR BANDS. With `v1_only` phase A's ONLY output is the four
         // H-blurred planes over the strip's whole 148-row wide window, and the
         // v1 bands are its only consumer. Writing them there and reading them
@@ -7329,11 +7496,6 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // `V1PoolsMode::Full` is required because the band-local H buffer
         // lives in the band's `FoldPoolScratch`, and it is what every
         // fold-backed SCORE asks for.
-        #[cfg(feature = "threads")]
-        let self_blur = fuse_channels
-            && !v2_blocks
-            && fold_v1
-            && matches!(toggles.v1_pools, V1PoolsMode::Full);
         #[cfg(feature = "threads")]
         if fuse_channels {
             use rayon::prelude::*;

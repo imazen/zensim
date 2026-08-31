@@ -1,0 +1,8 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=45115MiB :: /home/lilith/tmp/foldmem-target/release/deps/fold_engine_bench-a5599983409f8574
+[zenbench] calibration: int=0.18ns/iter mem_bw=111.5GiB/s mem_lat=8.9ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788155438-174da9.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788155438-174da9
+═══════════════════════════════════════════════════════════════
