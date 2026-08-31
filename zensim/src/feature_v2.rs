@@ -12199,6 +12199,76 @@ pub(crate) mod tests {
     /// relative tolerance of the §A.14 scalar-pool path — same
     /// reassociation class as the phase-4 core-moment change. On hosts
     /// where the active tier runs scalar pools anyway, both sides are
+    /// §14.4 UNDER TEST: the FUSED (v4x, one pass) and two-pass (16-register
+    /// tiers) bodies must produce BIT-IDENTICAL accumulators.
+    ///
+    /// This is the claim that lets the pass split be tuned per tier without
+    /// touching the era. It is asserted directly rather than inferred: both
+    /// const-generic instantiations are called on the same planes and every
+    /// one of the 35 slots is compared with `to_bits()`. If it ever fails, the
+    /// per-tier split is NOT free and the tier layout becomes semantics.
+    #[test]
+    fn era2_fused_and_two_pass_are_bit_identical() {
+        for &(w, h) in &[
+            (96usize, 64usize),
+            (200, 136),
+            (127, 93),
+            (61, 40),
+            (8, 3),
+            (13, 65),
+        ] {
+            let src_px = textured_image(w, h, 0xBEEF);
+            let dst_px = quantize_distort(&src_px, w, h);
+            let source = RgbSlice::new(&src_px, w, h);
+            let distorted = RgbSlice::new(&dst_px, w, h);
+            let sp = crate::streaming::convert_source_to_xyb(&source, w, false);
+            let dp = crate::streaming::convert_source_to_xyb(&distorted, w, false);
+            let mut scratch = ScratchV2Strip::new(w * h);
+            let n = w * h;
+            for ch in 0..3 {
+                run_blur_pass(&sp[ch], &dp[ch], w, h, &mut scratch);
+                let f = super::dense_block_kernel_era2_generic::<true>(
+                    &sp[ch],
+                    &dp[ch],
+                    &scratch.mu1[..n],
+                    &scratch.mu2[..n],
+                    &scratch.ssq[..n],
+                    &scratch.s12[..n],
+                    &scratch.activity[..n],
+                    w,
+                    h,
+                    true,
+                );
+                let t = super::dense_block_kernel_era2_generic::<false>(
+                    &sp[ch],
+                    &dp[ch],
+                    &scratch.mu1[..n],
+                    &scratch.mu2[..n],
+                    &scratch.ssq[..n],
+                    &scratch.s12[..n],
+                    &scratch.activity[..n],
+                    w,
+                    h,
+                    true,
+                );
+                let (fs, ts) = (oracle::dense_accum_slots(&f), oracle::dense_accum_slots(&t));
+                for i in 0..fs.len() {
+                    assert_eq!(
+                        fs[i].to_bits(),
+                        ts[i].to_bits(),
+                        "{w}x{h} ch{ch} slot {} ({}): FUSED {:e} != two-pass {:e}. The per-tier \
+                         pass split is supposed to be byte-neutral (§14.4); if it is not, the \
+                         tier layout has become part of era-2's semantics.",
+                        i,
+                        oracle::SLOT_NAMES[i],
+                        fs[i],
+                        ts[i]
+                    );
+                }
+            }
+        }
+    }
+
     /// ERA-2 STRUCTURAL GATE: the properties the break actually rests on.
     ///
     /// **A correction the first version of this test earned.** It originally
@@ -16863,6 +16933,77 @@ impl Lanes8 {
     }
 }
 
+/// The 11 weighted-pool accumulators for one row, bundled so the fused and
+/// two-pass bodies can share one chunk routine (and therefore cannot drift).
+#[derive(Clone, Copy)]
+struct E2Pools {
+    mw: Lanes8,
+    iw: Lanes8,
+    m: [Lanes8; 4],
+    i: [Lanes8; 4],
+    kn: [Lanes8; 3],
+    kd: [Lanes8; 3],
+}
+impl E2Pools {
+    #[inline(always)]
+    fn zero() -> Self {
+        Self {
+            mw: Lanes8::zero(),
+            iw: Lanes8::zero(),
+            m: [Lanes8::zero(); 4],
+            i: [Lanes8::zero(); 4],
+            kn: [Lanes8::zero(); 3],
+            kd: [Lanes8::zero(); 3],
+        }
+    }
+    /// Accumulate one 8-chunk of already-evaluated terms. `n` is 8 for a full
+    /// chunk and `width % 8` for the tail; lanes past `n` are never added.
+    #[inline(always)]
+    fn add_chunk8(
+        &mut self,
+        n: usize,
+        act: &[f32; 8],
+        d: &[f32; 8],
+        art: &[f32; 8],
+        det: &[f32; 8],
+        mse: &[f32; 8],
+    ) {
+        let mut mw = [0.0f32; 8];
+        let mut iw = [0.0f32; 8];
+        let mut mv = [[0.0f32; 8]; 4];
+        let mut iv = [[0.0f32; 8]; 4];
+        let mut kn = [[0.0f32; 8]; 3];
+        let mut kd = [[0.0f32; 8]; 3];
+        for k in 0..8 {
+            let sat = e2_saturate(act[k], C_ACTIVITY as f32);
+            let m_w = 1.0 - sat;
+            let i_w = sat + IW_WEIGHT_FLOOR as f32;
+            mw[k] = m_w;
+            iw[k] = i_w;
+            let vals = [d[k], art[k], det[k], mse[k]];
+            for j in 0..4 {
+                mv[j][k] = m_w * vals[j];
+                iv[j][k] = i_w * vals[j];
+            }
+            for j in 0..3 {
+                let sal = e2_saturate(vals[j], C_PEAK as f32);
+                kn[j][k] = sal * vals[j];
+                kd[j][k] = sal;
+            }
+        }
+        self.mw.add_tail(&mw[..n]);
+        self.iw.add_tail(&iw[..n]);
+        for j in 0..4 {
+            self.m[j].add_tail(&mv[j][..n]);
+            self.i[j].add_tail(&iv[j][..n]);
+        }
+        for j in 0..3 {
+            self.kn[j].add_tail(&kn[j][..n]);
+            self.kd[j].add_tail(&kd[j][..n]);
+        }
+    }
+}
+
 /// era-2 per-pixel term evaluation, f32 — the SIMD-shaped semantics
 /// (user directive: the SIMD shape is canonical and the scalar path matches
 /// it, never the reverse). Mirrors the `_v` helpers operating on one lane.
@@ -17095,7 +17236,7 @@ fn dense_block_kernel_era2(
     transducer_bank: bool,
 ) -> DenseAccum {
     incant!(
-        dense_block_kernel_era2_inner(
+        dense_block_kernel_era2_entry(
             src,
             dst,
             mu1,
@@ -17111,9 +17252,24 @@ fn dense_block_kernel_era2(
     )
 }
 
-#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+// Two disjoint-tier entries emitting the same base name (the era-1
+// `dense_block_kernel_entry` pattern), kept because §14.4's byte-neutrality
+// claim is asserted against BOTH instantiations by
+// `era2_fused_and_two_pass_are_bit_identical`.
+//
+// BOTH ARE CURRENTLY `false` (two-pass), because the fused hypothesis was
+// MEASURED AND FALSIFIED. The reasoning was that v4x's 32 SIMD registers would
+// hold 13 core + 16 pool accumulators, so it could skip the scratch
+// round-trip. Measured at 576x128: fused **445.5 us** against two-pass
+// **226.1 us** — 2x WORSE, taking era-2 from 2.12x to 3.98x of era-1. 29
+// `Lanes8` accumulators is 232 live f32 values; 32 registers do not hold that,
+// and it spills. This is the same wall §A.14 hit when it scalarised the pools
+// in the first place, and why POOL_SIMD was capped at 16 accumulators rather
+// than 22. The split is not a 16-register concession — it is the right
+// structure on every tier.
+#[magetypes(+v4x, -v4, -v3, -neon, -wasm128, -scalar)]
 #[allow(clippy::too_many_arguments, dead_code)]
-fn dense_block_kernel_era2_inner(
+fn dense_block_kernel_era2_entry(
     token: Token,
     src: &[f32],
     dst: &[f32],
@@ -17126,9 +17282,70 @@ fn dense_block_kernel_era2_inner(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
-    // The token is unused: this body is plain fixed-size-array arithmetic and
-    // magetypes is here purely for the per-tier `target_feature` region.
     let _ = token;
+    dense_block_kernel_era2_generic::<false>(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+    )
+}
+
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+#[allow(clippy::too_many_arguments, dead_code)]
+fn dense_block_kernel_era2_entry(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    let _ = token;
+    dense_block_kernel_era2_generic::<false>(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+    )
+}
+
+/// `#[inline(always)]`, not `#[inline]` — this body exists ONLY to fuse into
+/// its entry's `target_feature` region. era-1 measured a **5.3x** whole-
+/// extraction regression when the equivalent hint stopped being honoured and
+/// the vector ops compiled into calls outside the feature region; the same
+/// trap applies here verbatim.
+#[inline(always)]
+#[allow(clippy::too_many_arguments, dead_code)]
+fn dense_block_kernel_era2_generic<const FUSED: bool>(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
     let mut acc = DenseAccum::default();
     // Row scratch for the pass-A -> pass-B handoff (d, art, det, mse).
     let mut sc_d = vec![0.0f32; width];
@@ -17187,6 +17404,7 @@ fn dense_block_kernel_era2_inner(
             // paths cannot drift. `n` is 8 for chunks and `width % 8` for the
             // tail; the chunk call sites pass fixed-size arrays so the bound
             // folds away there.
+            let mut pools = E2Pools::zero();
             let core_step = |n: usize,
                              s8: &[f32; 8],
                              d8: &[f32; 8],
@@ -17212,7 +17430,8 @@ fn dense_block_kernel_era2_inner(
                              sc_d: &mut [f32],
                              sc_art: &mut [f32],
                              sc_det: &mut [f32],
-                             sc_mse: &mut [f32]| {
+                             sc_mse: &mut [f32],
+                             pools: &mut E2Pools| {
                 let mut t_d = [0.0f32; 8];
                 let mut t_a = [0.0f32; 8];
                 let mut t_t = [0.0f32; 8];
@@ -17253,10 +17472,16 @@ fn dense_block_kernel_era2_inner(
                     t_d3[k] = dd * dd * dd;
                     t_d4[k] = dd * dd * dd * dd;
                 }
-                sc_d[out_x..out_x + n].copy_from_slice(&t_d[..n]);
-                sc_art[out_x..out_x + n].copy_from_slice(&t_a[..n]);
-                sc_det[out_x..out_x + n].copy_from_slice(&t_t[..n]);
-                sc_mse[out_x..out_x + n].copy_from_slice(&t_m[..n]);
+                if FUSED {
+                    // Terms are still in registers — pool them now and skip
+                    // the scratch round-trip entirely.
+                    pools.add_chunk8(n, a8, &t_d, &t_a, &t_t, &t_m);
+                } else {
+                    sc_d[out_x..out_x + n].copy_from_slice(&t_d[..n]);
+                    sc_art[out_x..out_x + n].copy_from_slice(&t_a[..n]);
+                    sc_det[out_x..out_x + n].copy_from_slice(&t_t[..n]);
+                    sc_mse[out_x..out_x + n].copy_from_slice(&t_m[..n]);
+                }
                 l_d.add_tail(&t_d[..n]);
                 l_d2.add_tail(&t_d2[..n]);
                 l_d3.add_tail(&t_d3[..n]);
@@ -17302,6 +17527,7 @@ fn dense_block_kernel_era2_inner(
                     &mut sc_art,
                     &mut sc_det,
                     &mut sc_mse,
+                    &mut pools,
                 );
             }
             if !ts.is_empty() {
@@ -17339,63 +17565,25 @@ fn dense_block_kernel_era2_inner(
                     &mut sc_art,
                     &mut sc_det,
                     &mut sc_mse,
+                    &mut pools,
                 );
             }
 
-            // ---- PASS B: the 11 weighted pools from the row scratch ----
-            let (mut p_mw, mut p_iw) = (Lanes8::zero(), Lanes8::zero());
-            let mut p_m = [Lanes8::zero(); 4];
-            let mut p_i = [Lanes8::zero(); 4];
-            let mut p_kn = [Lanes8::zero(); 3];
-            let mut p_kd = [Lanes8::zero(); 3];
-            {
-                let mut pool_step = |n: usize,
-                                     a8: &[f32; 8],
-                                     d8: &[f32; 8],
-                                     ar8: &[f32; 8],
-                                     de8: &[f32; 8],
-                                     ms8: &[f32; 8]| {
-                    let mut mw = [0.0f32; 8];
-                    let mut iw = [0.0f32; 8];
-                    let mut mv = [[0.0f32; 8]; 4];
-                    let mut iv = [[0.0f32; 8]; 4];
-                    let mut kn = [[0.0f32; 8]; 3];
-                    let mut kd = [[0.0f32; 8]; 3];
-                    for k in 0..8 {
-                        let sat = e2_saturate(a8[k], C_ACTIVITY as f32);
-                        let m_w = 1.0 - sat;
-                        let i_w = sat + IW_WEIGHT_FLOOR as f32;
-                        mw[k] = m_w;
-                        iw[k] = i_w;
-                        let vals = [d8[k], ar8[k], de8[k], ms8[k]];
-                        for j in 0..4 {
-                            mv[j][k] = m_w * vals[j];
-                            iv[j][k] = i_w * vals[j];
-                        }
-                        for j in 0..3 {
-                            let sal = e2_saturate(vals[j], C_PEAK as f32);
-                            kn[j][k] = sal * vals[j];
-                            kd[j][k] = sal;
-                        }
-                    }
-                    p_mw.add_tail(&mw[..n]);
-                    p_iw.add_tail(&iw[..n]);
-                    for j in 0..4 {
-                        p_m[j].add_tail(&mv[j][..n]);
-                        p_i[j].add_tail(&iv[j][..n]);
-                    }
-                    for j in 0..3 {
-                        p_kn[j].add_tail(&kn[j][..n]);
-                        p_kd[j].add_tail(&kd[j][..n]);
-                    }
-                };
+            // ---- PASS B (two-pass tiers only): pools from the row scratch ----
+            //
+            // FUSED tiers skip this entirely — they accumulated the pools in
+            // pass A from the terms while they were still in registers. Both
+            // paths call the SAME `E2Pools::add_chunk8` on the SAME term
+            // values, which is why §14.4's "pass split is byte-neutral" holds
+            // in code and not merely in argument.
+            if !FUSED {
                 let (ka, _) = ra.as_chunks::<8>();
                 let (kd_, _) = sc_d[..width].as_chunks::<8>();
                 let (kr, _) = sc_art[..width].as_chunks::<8>();
                 let (ke, _) = sc_det[..width].as_chunks::<8>();
                 let (km, _) = sc_mse[..width].as_chunks::<8>();
                 for ci in 0..ka.len() {
-                    pool_step(8, &ka[ci], &kd_[ci], &kr[ci], &ke[ci], &km[ci]);
+                    pools.add_chunk8(8, &ka[ci], &kd_[ci], &kr[ci], &ke[ci], &km[ci]);
                 }
                 let rem = width % 8;
                 if rem != 0 {
@@ -17405,7 +17593,7 @@ fn dense_block_kernel_era2_inner(
                         o[..t.len()].copy_from_slice(t);
                         o
                     };
-                    pool_step(
+                    pools.add_chunk8(
                         rem,
                         &pad(&ra[base..]),
                         &pad(&sc_d[base..width]),
@@ -17426,15 +17614,15 @@ fn dense_block_kernel_era2_inner(
             // peak num/den (ssim, art, det), then mask (4 num + shared den),
             // then iw (4 num + shared den) — the DenseAccum slot order.
             for j in 0..3 {
-                band[13 + j * 2] += p_kn[j].reduce();
-                band[14 + j * 2] += p_kd[j].reduce();
+                band[13 + j * 2] += pools.kn[j].reduce();
+                band[14 + j * 2] += pools.kd[j].reduce();
             }
-            let mw_row = p_mw.reduce();
-            let iw_row = p_iw.reduce();
+            let mw_row = pools.mw.reduce();
+            let iw_row = pools.iw.reduce();
             for j in 0..4 {
-                band[19 + j * 2] += p_m[j].reduce();
+                band[19 + j * 2] += pools.m[j].reduce();
                 band[20 + j * 2] += mw_row;
-                band[27 + j * 2] += p_i[j].reduce();
+                band[27 + j * 2] += pools.i[j].reduce();
                 band[28 + j * 2] += iw_row;
             }
         }

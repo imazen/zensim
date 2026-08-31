@@ -1108,3 +1108,152 @@ can both confirm. That is the measurement that decides whether era-2 can reach
 parity; until it does, the break does not ship.
 
 **Status: the flip is correctly blocked on a number, not on an opinion.**
+
+---
+
+## 18. Era-2 becomes the umbrella (user directive, 2026-08-31)
+
+> *"push forward with refactoring for speed, we can break feature calcs for a
+> new era."*
+
+Era-2 is now the single batched break for **every** byte-changing speed
+refactor, not just the accumulation reshape. The batching rule is unchanged and
+now matters more: a second byte-moving change after this one costs a second
+re-extraction of every 944 table and a second retrain of every 944 model, so
+everything measured-and-wanted goes in **once**.
+
+Absorbed scope, ordered by **measured gain per unit of risk** — which is the
+order they will be built:
+
+| # | item | gain | risk | why that order |
+|---|---|---|---|---|
+| **A** | per-tier pass split (in flight) | closes the remaining **2.24×** era-2 deficit | **lowest** — §14.4 proves pass split is byte-neutral, so the oracle must show *zero* change | already licensed, already instrumented, and it is the thing standing between era-2 and parity |
+| **B** | column tiling | per-thread hot set **4.43 → 1.02 MiB** at `Tw=512`, CCD1 occupancy **35.4 → 8.2 MiB** (2304²/16T) | **medium** — reorders the pooled f64 accumulation | the big one, and only safe *because* of the fixed-grouping discipline already built |
+| **C** | `fold_v1` request flag | skips f0..372 entirely for models that read none of it (W-LIN class) | **low** — pure block-skipping, same shape as `v1_only` | smaller population, but nearly free once A and B are in |
+
+### 18.1 Column tiling — how it composes with the lanes and bands
+
+Priced by the footprint lane (`benchmarks/fold_footprint_2026-08-31.md`): halo
+derived from the kernel chain (`box_blur_1pass_into` = H then V ⇒ two chained H
+passes ⇒ **10 columns per side**, buffer `Tw + 20`), redundant work
+**15.6 / 7.8 / 3.9 / 1.0 %** at `Tw = 128 / 256 / 512 / 2048`.
+
+**`TILE_WIDTH` is SEMANTICS, exactly like `ERA2_BAND_ROWS`.** It reorders the
+pooled f64 accumulation, so changing it changes bytes. It carries the same
+"not a tuning knob" warning at its definition, for the same reason and with the
+same failure mode if ignored.
+
+**Two constraints fall out of the existing design, and they are what make
+tiling safe rather than another grouping hazard:**
+
+1. **`TILE_WIDTH` must be a multiple of 8.** A pixel's lane is `x mod 8` on the
+   *global* x. For tile `t` at offset `k`, `x = t·Tw + k`, so
+   `x mod 8 = k mod 8` **iff `Tw ≡ 0 (mod 8)`**. With that, lane assignment is
+   tile-invariant and the §2.2 identity proof carries over untouched. Without
+   it, tiling would silently permute which terms share a lane.
+2. **The merge is a fixed function of (tile, band).** Defined as **tile-major,
+   band-minor, both increasing** — which is also the natural *loop* order for
+   tiling (walk a column strip down the whole image while its working set is
+   hot), so the merge order and the loop order coincide and **no per-tile
+   partial storage is needed**. Each tile's partial is order-free; the merge is
+   sequential in tile index. §10.6's determinism theorem applies verbatim with
+   `(height, BAND)` replaced by `(height, width, BAND, TILE_WIDTH)`.
+
+Gated by the same instruments, no new ones: scalar oracle per tier × geometry
+(with tile-boundary geometries added — widths that are and are not multiples of
+`TILE_WIDTH`), the vendor probe on dev + i134, determinism, and
+thread-invariance by construction.
+
+### 18.2 Machine facts — corrected, and one old claim FALSIFIED
+
+Superseding the numbers used earlier in this doc:
+
+| | |
+|---|---|
+| CPU | **Ryzen 9 9950X3D**, asymmetric L3 |
+| CCD0 | cpus 0-7, 16-23 → **96 MiB** (3D V-Cache) |
+| CCD1 | cpus 8-15, 24-31 → **32 MiB** |
+| `getconf LEVEL3_CACHE_SIZE` | reports 32 MiB — **wrong for half the machine** |
+| per-thread budget (binding = CCD1) | **8 MiB at 8T, 4 MiB at 16T** |
+
+**The "3.5× is the machine's own bound" claim is FALSIFIED** — it was the
+fold's *own footprint*, not a hardware ceiling. Post-fix saturation is **5.85×
+(big CCD) / 4.54× (small)**. Tiling is therefore designed against the **CCD1**
+budget, and per-CCD saturation gets reported before and after.
+
+### 18.3 Re-baselining — the old ratios in this doc are stale
+
+The fold-engine, fold-MT and footprint lanes have all landed byte-neutral work
+on these kernels since §17 was measured. The 1T fold is now **0.78× / 0.87×**
+buffered — i.e. *faster* serially — so §17's era-1 baseline no longer describes
+current main. Everything from here is measured after
+`jj git fetch && jj rebase -d main@origin`, and the §17 table is retained only
+as the record of how the 10.3× → 2.24× sequence was diagnosed.
+
+---
+
+## 19. Stage A result: the fused v4x hypothesis is FALSIFIED, and the real gap is named
+
+### 19.1 Re-baseline on current main
+
+The other lanes' byte-neutral work moved the baseline, so everything was
+re-measured after `jj rebase -d main@origin`:
+
+| geometry | era-1 dispatched | era-2 (two-pass) | ratio |
+|---|---:|---:|---:|
+| 576×128 | 106.8 µs | 226.1 µs | **2.12×** |
+| 1152×128 | 231.8 µs | 454.9 µs | **1.96×** |
+
+Close to §17's numbers, so the other lanes' work did not change the era-1/era-2
+relationship — useful to know before attributing anything.
+
+### 19.2 The fused hypothesis: measured, and wrong
+
+§17.2 proposed a single fused pass for `v4x` on the reasoning that 32 SIMD
+registers would hold 13 core + 16 pool accumulators and skip the scratch
+round-trip. Implemented behind a `const FUSED: bool` and measured:
+
+| geometry | era-1 | era-2 two-pass | era-2 **fused** |
+|---|---:|---:|---:|
+| 576×128 | 111.8 µs | 226.1 µs | **445.5 µs** |
+| 1152×128 | 212.7 µs | 454.9 µs | **911.2 µs** |
+
+**Fusing is 2× WORSE**, taking era-2 from 2.12× to 3.98× of era-1. The
+arithmetic says why: 29 `Lanes8` accumulators is **232 live f32 values**, and
+32 registers do not hold that — it spills. This is the same wall §A.14 hit when
+it scalarised the pools originally, and exactly why `POOL_SIMD` was capped at
+16 accumulators rather than 22. **The two-pass split is not a 16-register
+concession; it is the right structure on every tier.**
+
+Both instantiations are retained (set to two-pass) because
+`era2_fused_and_two_pass_are_bit_identical` asserts §14.4's byte-neutrality
+against both — across 6 geometries × 3 channels, **all 35 slots bit-identical**.
+So the claim that pass structure is a perf knob and not semantics is now
+confirmed in code, on the very configuration that turned out to be the slower
+one.
+
+### 19.3 The remaining 2.12× is attributable: `[f32; 8]` arrays vs `V8<T>`
+
+With fusion ruled out and the ISA region already in place (§17.1), one
+structural difference remains between the two kernels: era-1 accumulates in
+**`V8<T>` magetypes SIMD types**; era-2 accumulates in **plain `[f32; 8]`
+arrays** and relies on auto-vectorisation. era-1's `v4x` path already does
+everything era-2's fused attempt tried — 13 core + 16 pool accumulators, one
+pass, no scratch — and is fast, which isolates the difference to the
+accumulator representation rather than to the pass structure or the ISA.
+
+**Next lever, well-specified:** rewrite the era-2 body against `V8<T>` while
+keeping every semantic (8 lanes — `V8` *is* 8 lanes; the explicit
+`to_array()` + `era2_reduce8` tree, never `reduce_add()`; tail folded into the
+lanes; band-order merge). The semantics are unaffected because `V8`'s
+elementwise ops are the same IEEE operations in the same order, and all three
+instruments verify it immediately: the oracle, the fused/two-pass gate, and the
+vendor probe.
+
+**The flip stays blocked.** Stage A did not close the gap; it falsified one
+hypothesis, confirmed the byte-neutrality claim the whole per-tier strategy
+rests on, and named the next lever with evidence. Column tiling (item B) and
+`fold_v1` (item C) are unaffected by this result and remain queued behind it —
+tiling in particular should be built on the *fast* kernel, not the slow one,
+since its predicted win is a cache-footprint effect that a 2× compute deficit
+would mask.
