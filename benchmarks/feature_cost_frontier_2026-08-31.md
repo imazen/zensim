@@ -37,6 +37,23 @@ extractor has.
 
 ---
 
+## 0.1 THE DECISION TABLE
+
+One row per model class. Quality is `|SROCC|` from `bake_verdict --full-json`,
+all five on the **same** root (`r1b-pools944-2026-08-30`) over the same pairs.
+`ms` is the **extraction** cost of that class's cheapest fold request — the
+bake forward is excluded and is not measured here (a 372→1 linear is 372 MACs,
+the 149 KB MLP is 667×128+128 ≈ 85 k MACs, against a 15-380 ms extraction).
+`WS/thr` is the per-thread band hot set derived in §4.4.
+
+<!--DECISION_TABLE-->
+
+**vs-ssim2 verdict** compares only the human-labelled corpora — `nonphoto`,
+`imazen26` and `hfnlproxy` have ssim2 *as their target*, so a model's number
+there is agreement-with-ssim2, not a win over it (§4.3).
+
+---
+
 ## 1. The structure, read from source (this is the actual answer)
 
 `zensim/src/feature_v2.rs`, the fold's v1 band replay.
@@ -288,6 +305,12 @@ model and this lane's code, not a second measurement of the same thing.)
 | 4096 | 7.88 MiB | **3.94 MiB** | 63.0 MiB | 31.5 MiB |
 | 8192 | 15.75 MiB | **7.88 MiB** | 126.0 MiB | 63.0 MiB |
 
+The six planes `Peaks` skips are not merely untouched, they are **never
+allocated**: `FoldPoolScratch::ensure` is called only below the `HOnly` arm, and
+`StreamChannelAccums` (which owns `pool_scratch`) is constructed per walk
+(`feature_v2.rs:7499`) rather than persisted in `V2Scratch`, so no compare
+inherits a grown pool scratch from an earlier one. Only `ensure_h` runs.
+
 The footprint lane's §9.2 finding was that at 2304² eight fold threads need
 35.4 MiB against a 32 MiB L3 while buffered needs 26.6 MiB, and "the threshold
 falls exactly between them". **A peaks-only model class moves the fold to the
@@ -488,4 +511,91 @@ decision (every 944 training table has live `f0..372` in the pools roots and
 structural zeros in the folded roots), and no model on the board today reads
 zero from *all* of `f0..372` — the 944 MLPs read all 156 basic lines. Priced
 here, decided elsewhere.
+
+---
+
+## 7. Reproduction
+
+All commands from the repo root; binaries built with
+`--features custom-profiles,feature-regime-v2,threads,training`.
+
+**Per-bake read set (the §2.3 table):**
+
+```sh
+cargo build --release -p zensim-validate --bin bake_block_profile
+./target/release/bake_block_profile --bake <bake.bin>     # v1 COMPUTE families
+./target/release/bake_block_profile --bake <bake.bin> --json | jq .v1_families
+```
+
+**Family ablation (the §2.1/§2.2 tables) — one run, six ranges:**
+
+```sh
+cargo build --release -p zensim-validate --bin bake_contrib
+R=/mnt/v/zen/zensim-training/2026-08-30-full-features-372
+./target/release/bake_contrib --bake zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin \
+  --rows 20000 \
+  --corpus cid22:$R/cid22_features_372col_2026-05-15.parquet:human_score:1 \
+  --corpus konjnd:$R/konjnd_features_372col_2026-05-15.parquet:human_score:1 \
+  --corpus nonphoto@20000:$R/nonphoto_features_372col_2026-07-15.parquet:human_score:1 \
+  --corpus imazen26@20000:$R/imazen26_test_120k_2026-07-16.parquet:human_score:1 \
+  --corpus hfnlproxy@20000:$R/ext_hfnlproxy.parquet:human_score:1 \
+  --corpus kadid:$R/kadid_features_372col_2026-05-15.parquet:human_score:1 \
+  --corpus tid:$R/tid_features_372col_2026-05-15.parquet:human_score:1 \
+  --corpus csiq:$R/csiq_features_372col_2026-07-18.parquet:human_score:1 \
+  --corpus live:$R/live_features_372col_2026-07-18.parquet:human_score:1 \
+  --ablate-range 'v1_basic=0..156,v1_peaks=156..228,v1_masked=228..300,v1_iw=300..372,v1_masked_iw=228..372,v1_pools_all=156..372'
+```
+
+For the 944 bakes swap `R` for
+`/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30` (its `ext_*` filenames)
+and add `v2_348=372..720,append_204=720..944,v1_all=0..372`. **Do not use the
+ext944 root for a pool ablation** — it feeds `f156..371` as structural zeros,
+so every pool delta reads as exactly 0 for the wrong reason.
+
+As-run logs: `benchmarks/feature_cost_2026-08-31/ablate_{shippedB,q7b,q7b_blocks}.log`.
+
+**Cross-class quality (§4.2):** `bake_verdict --features-root
+/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30 --regime 944 --cross-regime
+--full-json <out>.json` for each of the five bakes; the ssim2 floor is the
+board's own `/mnt/v/output/zensim/reports/fulleval/peer_ssim2.fulleval.json`,
+read, not recomputed.
+
+**Compute (§3.1):**
+
+```sh
+cargo build --release --bench extract_paths_bench -p zensim \
+  --features custom-profiles,feature-regime-v2,threads,training
+for T in 1 8 16; do RAYON_NUM_THREADS=$T <the bench binary>; done
+```
+
+**Gates:**
+
+```sh
+cargo test --release -p zensim --features custom-profiles,feature-regime-v2,threads,training \
+  --lib folded_peaks_mode_is_pure_compute_skipping skip_policy
+cargo test --release -p zensim --features custom-profiles,feature-regime-v2,threads,training \
+  --test fold_engine_parity
+```
+
+---
+
+## 8. Measurement quality, stated plainly
+
+* The ablation deltas are **exact** in the sense that matters — the rank-|K|
+  update is algebraically the same forward pass, and the baseline parity gate
+  against `bake_runtime::score_row` returned **max|diff| = 0.000e0** over
+  47,511 rows. What is *approximate* is their meaning: zero-at-inference is a
+  lower bound on what a retrain would have to recover (§2, §6.3).
+* `nonphoto` / `imazen26` / `hfnlproxy` are stride-decimated to 20,000 rows in
+  the ablation runs (baseline and ablated share the rows, so the *delta* is
+  unaffected; the absolute baselines there differ slightly from a full-corpus
+  verdict). §4.2's verdict table is un-decimated.
+* KADID and TID are 100 % train==val for the models trained on them. Their
+  columns are integrity guards, not ranking signal, and the note says so at
+  every point it quotes them.
+* The KonJND comparison against the ssim2 peer row crosses corpus files
+  (n = 504 vs 1008) and is flagged in place; the other six human corpora match
+  pair-for-pair.
+* The wall-clock table's conditions and any zenbench CV flags are recorded with
+  it in §3.1.
 

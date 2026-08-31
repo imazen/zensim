@@ -130,6 +130,16 @@ fn toggles_v1_only(pools: zensim::feature_v2::V1PoolsMode) -> zensim::feature_v2
     }
 }
 
+/// `(max_rounds, min_rounds, max_wall_seconds)` — the defaults, or the
+/// `ZEN_XP_ROUNDS` / `ZEN_XP_WALL_S` overrides. `min_rounds` follows
+/// `max_rounds` down (a min above the max would never terminate).
+fn bench_budget() -> (usize, usize, u64) {
+    let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse().ok());
+    let max_r: usize = env("ZEN_XP_ROUNDS").unwrap_or(200);
+    let wall_s: u64 = env("ZEN_XP_WALL_S").unwrap_or(600);
+    (max_r, 25.min(max_r), wall_s)
+}
+
 /// One-arm loop for external peak-RSS measurement (`/usr/bin/time -v`).
 fn rss_mode(arm: &str) {
     let size: usize = std::env::var("ZEN_XP_SIZE")
@@ -209,11 +219,20 @@ fn main() {
                 // Same budget the pools lane raised fold_pools_bench to: the
                 // default 120 s / 4-usable-rounds cannot resolve a few-percent
                 // lever on a shared box.
+                //
+                // OVERRIDABLE (feature-cost lane): this bench takes an
+                // exclusive zenbench lock, so a full 3-size × 3-thread matrix
+                // at the default budget holds it for hours and starves every
+                // other lane on the box. `ZEN_XP_ROUNDS` / `ZEN_XP_WALL_S`
+                // let a matrix run at a coarser budget; the defaults are
+                // unchanged, so an unqualified invocation reproduces the
+                // published single-shot numbers exactly.
+                let (max_r, min_r, wall_s) = bench_budget();
                 group
                     .config()
-                    .max_rounds(200)
-                    .min_rounds(25)
-                    .max_wall_time(std::time::Duration::from_secs(600));
+                    .max_rounds(max_r)
+                    .min_rounds(min_r)
+                    .max_wall_time(std::time::Duration::from_secs(wall_s));
                 group.bench("buf_v1_228", move |b| {
                     b.iter(move || {
                         let r =
