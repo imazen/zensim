@@ -1792,15 +1792,67 @@ curve down, it removes most of the superlinear term**, which is why the win
 grows with size — 1.20× at 5 MP, 1.78× at 21 MP, and by construction larger
 still above that.
 
-### 23.5 What is next, in value order
+### 23.5 Extending it: the activity chain, and where the copy-based form stops
 
-1. **Tile `planesA` too.** The four V blurs are **column-independent** —
-   `v_add_idx`/`v_rem_idx` depend only on `y` — so tiling them is
-   **bit-identical and needs no era at all**, and §23.1 shows the pass carries
-   the same width dependence (38.62 → 27.07 ms, 1.43×). The activity and
-   `bs2` chains contain H passes and take the same `±BLUR_RADIUS` halo as the
-   H blur. `planesA` + `planesApp` are 57 ms at 2304² today.
-2. **Delete the copies.** `fused_blur_h_ssim_column_tiled` copies six planes
+`column_tiled_pass` generalises the tiling to any single-plane pass with an
+`halo`-column dependence, and the phase-A activity chain
+(`box_blur_1pass_into` over `|src − mu1|`) is the first user, on its own knob
+(`ZENSIM_A_TILE`) so it can be measured against the H tile in the same binary.
+
+Min over 7 process starts per cell, three arms, interleaved:
+
+| arm | 2304² | vs none | 4608² | vs none |
+|---|---:|---:|---:|---:|
+| no tiling | 333.61 | — | 2366.68 | — |
+| H blur only | 272.15 | **1.226×** | 1298.61 | **1.823×** |
+| H blur + activity | 272.03 | 1.226× | **1279.93** | **1.849×** |
+
+The activity arm buys **+1.5 % at 21 MP and nothing at 5 MP** — small, but
+monotone in size and it composes, so it is kept. Attribution confirms it is
+doing what it claims: `v2:planesA` **247.57 → 222.69 ms** at 4608² (1.11×).
+
+**And that is where the copy-based form stops paying.** The remaining
+`planesA` is four V blurs plus `abs_diff`. Column-tiling those is
+*bit-identical* (their `v_add_idx`/`v_rem_idx` depend only on `y`), but each
+is a one-plane-in/one-plane-out pass, so the copies a tiled call must make are
+the same order as the traffic the pass itself does — the win and the overhead
+are the same size. The H blur paid because it is **six** plane-touches behind
+two copies; a V blur is two behind two.
+
+The profile after tiling says the same thing from the other side. At 4608²,
+1T, the walk is now **1319.8 ms**, and its leaders have changed:
+
+| item | before tiling | after | share now |
+|---|---:|---:|---:|
+| `fold` (v1 band replay) | 382.0 | **373.6** | **28.3 %** |
+| `v2:planesA` | 247.7 | 222.7 | 19.1 % |
+| `blur_h` | **1532.7** | **179.6** | 13.6 % |
+| producer | 139.0 | 140.6 | 10.7 % |
+| `v2:planesApp` | 108.6 | 109.1 | 8.3 % |
+| `v2:dense` | 103.2 | 104.5 | 7.9 % |
+
+**The H blur went from 57.4 % of the walk to 13.6 %, an 8.5× on the item
+itself.** What is left is the fold at 28.3 % — which reads six full-width
+planes over a 42-row band (4.6 MB at 4608², nowhere near L2) and so has the
+*same* width disease, and `planesA` at 19.1 %, whose residue is the V blurs.
+Both are copy-bound in this form and neither can be fixed by another
+`column_tiled_pass` call.
+
+### 23.6 What is next, in value order
+
+1. **The zero-copy form, which is now the blocker for everything else.**
+   §23.5 shows the remaining items (`fold` 28.3 %, `planesA` residue 19.1 %)
+   cannot be reached by a copying tile. Two shapes do it:
+   a **`stride` parameter** on the blur entry points (row length stays
+   `width`, row base becomes `y * stride`), or a **column-slab walk** — copy
+   only `src`/`dst`/`refy` columns into slab-width buffers once per slab and
+   run phase A *and* phase B entirely at slab width, so the ~13 plane buffers
+   are allocated slab-wide and **nothing is ever copied out** (the kernels
+   accumulate; the planes never need to be full-width, because nothing outside
+   the strip reads them). The slab form needs no kernel signature changes at
+   all, at the cost of an x-offset argument for `blockiness_sparse_strip_wide`
+   (whose lattice is in global x) and a per-slab X/B activity stash.
+2. **Delete the copies from the H blur too.** `fused_blur_h_ssim_column_tiled` copies six planes
    per tile purely to avoid touching the four hand-written tier bodies. A
    `stride` parameter (row length stays `width`, row base becomes `y*stride`)
    removes every copy — and the workspace's own pixel-buffer rule already says

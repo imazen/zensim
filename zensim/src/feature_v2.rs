@@ -2167,6 +2167,82 @@ fn h_blur_tile_width() -> usize {
     })
 }
 
+/// Column-tile width for the phase-A ACTIVITY chain (`box_blur_1pass_into`),
+/// separate from [`h_blur_tile_width`] so the two can be A/B'd in one binary.
+#[inline]
+fn act_tile_width() -> usize {
+    use std::sync::OnceLock;
+    static N: OnceLock<usize> = OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("ZENSIM_A_TILE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// Column-tile any single-plane pass with an `halo`-column dependence:
+/// `f(input_tile, output_tile, tw, rows)` is run per tile out of a scratch
+/// arena, and only the `tile` interior columns of each output are kept.
+///
+/// `halo = 0` (a purely column-independent pass, e.g. the V blurs — their
+/// `v_add_idx`/`v_rem_idx` depend only on `y`) makes this **bit-identical**;
+/// `halo = BLUR_RADIUS` (any pass containing an H blur) restarts a running
+/// sum along x per tile and is an era-2 byte change, deterministic in
+/// `(width, tile)`.
+///
+/// Like [`fused_blur_h_ssim_column_tiled`] this COPIES, which a stride-aware
+/// kernel would not; any win is a lower bound.
+fn column_tiled_pass(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    rows: usize,
+    tile: usize,
+    halo: usize,
+    mut f: impl FnMut(&[f32], &mut [f32], &mut [f32], usize, usize),
+) {
+    thread_local! {
+        static ARENA: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+    ARENA.with(|a| {
+        let mut arena = a.borrow_mut();
+        let tw_max = (tile + 2 * halo).min(width);
+        let per = rows * tw_max;
+        if arena.len() < 3 * per {
+            arena.resize(3 * per, 0.0);
+        }
+        let (tin, rest) = arena.split_at_mut(per);
+        let (tout, ttmp) = rest.split_at_mut(per);
+        let mut x0 = 0usize;
+        while x0 < width {
+            let x1 = (x0 + tile).min(width);
+            let xl = x0.saturating_sub(halo);
+            let xr = (x1 + halo).min(width);
+            let tw = xr - xl;
+            let keep = x0 - xl;
+            let kn = x1 - x0;
+            for y in 0..rows {
+                let s = y * width + xl;
+                tin[y * tw..y * tw + tw].copy_from_slice(&input[s..s + tw]);
+            }
+            f(
+                &tin[..rows * tw],
+                &mut tout[..rows * tw],
+                &mut ttmp[..rows * tw],
+                tw,
+                rows,
+            );
+            for y in 0..rows {
+                let o = y * width + x0;
+                let t = y * tw + keep;
+                output[o..o + kn].copy_from_slice(&tout[t..t + kn]);
+            }
+            x0 = x1;
+        }
+    });
+}
+
 /// [`crate::blur::fused_blur_h_ssim`] over column tiles of `tile` output
 /// columns, each blurred with a `±BLUR_RADIUS` column halo and the halo
 /// outputs discarded.
@@ -2313,14 +2389,29 @@ fn run_blur_pass_inner(
     let abs_src = &mut abs_src[..n];
     crate::simd_ops::abs_diff_into(src, mu1, abs_src);
     let activity = &mut activity[..n];
-    crate::blur::box_blur_1pass_into(
-        abs_src,
-        activity,
-        &mut activity_tmp[..n],
-        width,
-        height_local,
-        BLUR_RADIUS,
-    );
+    let tile = act_tile_width();
+    if tile > 0 && width > tile {
+        column_tiled_pass(
+            abs_src,
+            activity,
+            width,
+            height_local,
+            tile,
+            BLUR_RADIUS,
+            |i, o, tmp, tw, rows| {
+                crate::blur::box_blur_1pass_into(i, o, tmp, tw, rows, BLUR_RADIUS);
+            },
+        );
+    } else {
+        crate::blur::box_blur_1pass_into(
+            abs_src,
+            activity,
+            &mut activity_tmp[..n],
+            width,
+            height_local,
+            BLUR_RADIUS,
+        );
+    }
     crate::fold_timing::stop(
         __t_pa,
         crate::fold_timing::Phase::PhaseAV2Planes,
