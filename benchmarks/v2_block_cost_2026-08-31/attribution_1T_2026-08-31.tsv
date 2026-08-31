@@ -1,0 +1,31 @@
+size	item	ms	share_of_block_pct	basis	Mpx	ns_per_px
+576	H-plane shape (strip-wide blur_h - fold self-blur saving)	-0.458	-7.55	wide	1.568	-0.292
+576	phaseA v2 planes (4x V-blur + activity chain)	1.741	28.71	wide	1.568	1.110
+576	dense_block_kernel	1.600	26.39	strip	1.322	1.210
+576	append_block_kernel	1.240	20.45	strip	1.322	0.938
+576	gradient_block_kernel	1.169	19.28	strip	1.322	0.884
+576	phaseA append planes (bs2 chain)	0.676	11.15	wide	1.568	0.431
+576	blockiness_sparse_strip_wide	0.273	4.50	wide	1.568	0.174
+576	producer (refy plane)	-0.243	-4.01	strip	1.322	-0.184
+576	RESIDUAL (unattributed)	0.066	1.09	-	-	-
+576	TOTAL v2-348+append block	6.064	100.00	-	-	-
+1152	H-plane shape (strip-wide blur_h - fold self-blur saving)	3.126	9.24	wide	6.152	0.508
+1152	phaseA v2 planes (4x V-blur + activity chain)	9.616	28.42	wide	6.152	1.563
+1152	dense_block_kernel	6.579	19.44	strip	5.288	1.244
+1152	append_block_kernel	5.142	15.20	strip	5.288	0.972
+1152	gradient_block_kernel	4.381	12.95	strip	5.288	0.829
+1152	phaseA append planes (bs2 chain)	2.923	8.64	wide	6.152	0.475
+1152	blockiness_sparse_strip_wide	1.115	3.30	wide	6.152	0.181
+1152	producer (refy plane)	0.547	1.62	strip	5.288	0.103
+1152	RESIDUAL (unattributed)	0.410	1.21	-	-	-
+1152	TOTAL v2-348+append block	33.839	100.00	-	-	-
+2304	H-plane shape (strip-wide blur_h - fold self-blur saving)	65.831	32.90	wide	24.486	2.689
+2304	phaseA v2 planes (4x V-blur + activity chain)	49.251	24.61	wide	24.486	2.011
+2304	dense_block_kernel	27.103	13.55	strip	21.151	1.281
+2304	append_block_kernel	21.316	10.65	strip	21.151	1.008
+2304	gradient_block_kernel	16.887	8.44	strip	21.151	0.798
+2304	phaseA append planes (bs2 chain)	13.003	6.50	wide	24.486	0.531
+2304	blockiness_sparse_strip_wide	4.456	2.23	wide	24.486	0.182
+2304	producer (refy plane)	1.483	0.74	strip	21.151	0.070
+2304	RESIDUAL (unattributed)	0.759	0.38	-	-	-
+2304	TOTAL v2-348+append block	200.089	100.00	-	-	-

@@ -718,3 +718,86 @@ fn unread_feature_skipping_is_inert_on_a_profile_that_reads_the_block() {
         }
     }
 }
+
+/// **The 944 walk's pool-size gate** (v2-cost lane, 2026-08-31 —
+/// `benchmarks/v2_block_cost_2026-08-31.md`).
+///
+/// `both_engines_are_bit_identical_across_rayon_pool_sizes` above sweeps
+/// pools for the SCORING path, which runs `v1_only` — so it exercises the
+/// producer, the H blur and the v1 band replay, and **not one v2-era
+/// kernel**. The 944 extraction walk is the arm that runs `dense`,
+/// `gradient`, `append`, the append2/BANDVIS instantiation, `blockiness`,
+/// and phase A's four `box_blur_v_from_copy` sweeps plus the activity and
+/// `bs2` chains; before this test the only thread coverage those had was
+/// `append2_layout_identity_and_first924_bit_stable`'s single serial-vs-
+/// parallel pair at the ambient pool size.
+///
+/// That is the gap this closes, and it is not hypothetical: the v2 block's
+/// per-strip partials are merged by `DenseAccum::accumulate` and its
+/// siblings, whose own doc records that strip order changes the GROUPING of
+/// the merge. Anything that re-schedules the phase-A/phase-B fan-out, the
+/// H-blur row bands, or the band-parallel slot count is therefore one
+/// grouping change away from silently moving `f372..943` — the exact class
+/// of change the era-2 restructure (`benchmarks/era2_perf_break_2026-08-31.md`)
+/// and the column-tiling lane are both aiming at. A pool sweep over the
+/// whole geometry set is what makes such a move fail loudly instead of
+/// landing in a training table.
+///
+/// Asserted on `to_bits()` over all 944 slots, so a NaN slot must also match
+/// its payload rather than comparing unequal to itself.
+#[cfg(feature = "threads")]
+#[test]
+fn folded944_is_bit_identical_across_rayon_pool_sizes() {
+    use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
+    // `fold944_full` as `benches/extract_paths_bench.rs` defines it: the one
+    // product mode (all pools live) plus the append and append2 blocks.
+    let toggles = V2NewFeatureToggles {
+        v1_pools: V1PoolsMode::Full,
+        append_block: true,
+        append2_block: true,
+        ..Default::default()
+    };
+    let cells: Vec<(usize, usize)> = CELLS
+        .iter()
+        .copied()
+        .chain([(256usize, 256usize), (96, 320), (320, 96), (577, 385)])
+        .collect();
+    assert!(cells.len() >= 18, "geometry set shrank to {}", cells.len());
+    for &(w, h) in &cells {
+        let (r, d) = pair(w, h);
+        let mut first: Option<Vec<u64>> = None;
+        for threads in [1usize, 2, 3, 8, 16] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("build rayon pool");
+            let bits: Vec<u64> = pool.install(|| {
+                let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(true);
+                let mut scratch = V2Scratch::new();
+                let v2 = z
+                    .compute_folded720_features_streaming(
+                        &RgbSlice::new(&r, w, h),
+                        &RgbSlice::new(&d, w, h),
+                        toggles,
+                        &mut scratch,
+                    )
+                    .expect("944 fold walk");
+                v2.features().iter().map(|v| v.to_bits()).collect()
+            });
+            assert_eq!(bits.len(), 944, "{w}x{h} @ {threads}T: width moved");
+            match &first {
+                None => first = Some(bits),
+                Some(b0) => {
+                    if let Some(i) = (0..944).find(|&i| b0[i] != bits[i]) {
+                        panic!(
+                            "{w}x{h}: f{i} moved between 1 and {threads} threads \
+                             ({:e} -> {:e})",
+                            f64::from_bits(b0[i]),
+                            f64::from_bits(bits[i])
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

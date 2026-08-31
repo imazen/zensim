@@ -174,6 +174,26 @@ These are the docs to read first for a given purpose:
 2. [`iw_perf_hotspots_2026-05-15.md`](iw_perf_hotspots_2026-05-15.md) — where the time goes
 3. CLAUDE.md "Performance Optimization" — archmage SIMD patterns
 
+**If you want to make EXTRACTION faster** (read this BEFORE re-profiling any kernel):
+1. [`v2_block_cost_2026-08-31.md`](v2_block_cost_2026-08-31.md) — **what the v2-348 + append-204
+   block actually costs, at the tier that ships.** `dense`'s `POOL_SIMD` path is `v4x`-only and
+   valgrind masks AVX-512 out of CPUID, so callgrind cannot profile production; this is the wall-clock
+   re-profile the predecessor asked for, via seven new `fold_timing` phases. **Every v2 feature kernel
+   is flat in ns/px across a 16× pixel range; the plane passes degrade 1.8–3.7×**, so the block is
+   64 % plane traffic at 2304² and 32 % at 576² — its composition inverts with size. `dense` is
+   **13.5 % of the block on `v4x`**, not the 22–26 % the `v3` Ir profile shows. Production : consumption
+   of the six shared planes = **1.84 : 1**. Includes four falsified levers (rayon band split,
+   `STRIP_ROWS`, a bit-identical row-major V blur, bounds checks) and a measured era-2 retarget.
+2. [`feature_cost_frontier_2026-08-31.md`](feature_cost_frontier_2026-08-31.md) — which FAMILIES a model
+   class needs, and what each class's walk costs (the model-class Pareto front).
+3. [`extraction_perf_and_buffered_removal_2026-08-30.md`](extraction_perf_and_buffered_removal_2026-08-30.md)
+   — the callgrind family split and the levers rejected with reasons. Its Ir shares are the `v3` tier;
+   read 1 above before quoting any of them as a wall share.
+4. [`fold_footprint_2026-08-31.md`](fold_footprint_2026-08-31.md) — the working-set closed form and the
+   per-thread L3 budget. [`fold_mt_scaling_2026-08-31.md`](fold_mt_scaling_2026-08-31.md) — thread scaling.
+5. [`era2_perf_break_2026-08-31.md`](era2_perf_break_2026-08-31.md) — the byte-moving break. Its dense
+   framing predates 1; the plane pipeline is the bigger prize.
+
 **If you want to make TRAINING faster** (read this before re-profiling the trainer):
 1. [`trainer_perf_2026-08-04.md`](trainer_perf_2026-08-04.md) — fresh profile: Adam 44 % (divider-bound,
    irreducible at fixed math), the trainer is RAM-bound not FLOP-bound, half of every lane's 11.88 GB was

@@ -1836,6 +1836,7 @@ fn run_blur_pass(
         // the materialized walk parallelises at the channel/scale level
         // above this call; a nested band fan-out here is not its axis.
         false,
+        0,
     );
 }
 
@@ -1883,6 +1884,7 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
         // the materialized walk parallelises at the channel/scale level
         // above this call; a nested band fan-out here is not its axis.
         false,
+        0,
     );
 }
 
@@ -2149,6 +2151,9 @@ fn run_blur_pass_inner(
     activity: &mut [f32],
     want_v2: bool,
     parallel: bool,
+    // Diagnostic-only: which `fold_timing` scale slot this call's v2-plane
+    // chain is attributed to. Never read by any kernel.
+    t_scale: usize,
 ) {
     let n = width * height_local;
     let mu1_h = &mut mu1_h[..n];
@@ -2178,6 +2183,7 @@ fn run_blur_pass_inner(
         return;
     }
 
+    let __t_pa = crate::fold_timing::start();
     let mu1 = &mut mu1[..n];
     crate::blur::box_blur_v_from_copy(mu1_h, mu1, width, height_local, BLUR_RADIUS);
     let mu2 = &mut mu2[..n];
@@ -2197,6 +2203,11 @@ fn run_blur_pass_inner(
         width,
         height_local,
         BLUR_RADIUS,
+    );
+    crate::fold_timing::stop(
+        __t_pa,
+        crate::fold_timing::Phase::PhaseAV2Planes,
+        t_scale,
     );
 }
 
@@ -6302,6 +6313,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         activity,
         want_v2,
         parallel,
+        info.scale,
     );
     // BANDVIS dst self-mask (`append2_dst_activity`, Y channel only): the
     // exact dst twin of the ref activity chain — `box_blur(|dst − mu2|)`
@@ -6310,6 +6322,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
     // and serve as its temps (the same reuse the bs2 fill below makes —
     // which runs after and overwrites them again, so ordering here is
     // load-bearing: act-dst BEFORE bs2).
+    let __t_pap = crate::fold_timing::start();
     if want_act_dst {
         if activity_dst.len() < n_wide {
             activity_dst.resize(n_wide, 0.0);
@@ -6341,6 +6354,11 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
             BLUR_RADIUS,
         );
     }
+    crate::fold_timing::stop(
+        __t_pap,
+        crate::fold_timing::Phase::PhaseAAppendPlanes,
+        info.scale,
+    );
 }
 
 /// Phase B of one (strip, channel): the materialized walk's kernel set
@@ -6404,6 +6422,7 @@ fn stream_phase_b(
         let s12_strip = &scr.s12[off..off + strip_n];
         let act_strip = &scr.activity[off..off + strip_n];
 
+        let __t_dense = crate::fold_timing::start();
         let d = dense_block_kernel(
             src_strip,
             dst_strip,
@@ -6416,6 +6435,7 @@ fn stream_phase_b(
             strip_h,
             toggles.transducer_bank,
         );
+        crate::fold_timing::stop(__t_dense, crate::fold_timing::Phase::DenseKernel, scale);
         acc.dense[scale].accumulate(&d);
 
         if toggles.gradient_features {
@@ -6431,6 +6451,7 @@ fn stream_phase_b(
             let bv_act_dst = append2
                 .filter(|p| cross.is_some() && p.dst_activity)
                 .map(|_| &scr.activity_dst[off..off + strip_n]);
+            let __t_grad = crate::fold_timing::start();
             let g = gradient_block_kernel(
                 &src_win[g_off..g_off + g_n],
                 &dst_win[g_off..g_off + g_n],
@@ -6440,6 +6461,7 @@ fn stream_phase_b(
                 bandvis,
                 bv_act_dst,
             );
+            crate::fold_timing::stop(__t_grad, crate::fold_timing::Phase::GradKernel, scale);
             acc.grad[scale].accumulate(&g);
         }
     }
@@ -6491,6 +6513,7 @@ fn stream_phase_b(
         let ssq_strip = &scr.ssq[off..off + strip_n];
         let act_strip = &scr.activity[off..off + strip_n];
         let hl = append2.map(|p| p.hl_bins).unwrap_or(false) && cross.is_some();
+        let __t_app = crate::fold_timing::start();
         let a = append_block_kernel(
             src_strip,
             dst_strip,
@@ -6505,6 +6528,7 @@ fn stream_phase_b(
             width,
             strip_h,
         );
+        crate::fold_timing::stop(__t_app, crate::fold_timing::Phase::AppendKernel, scale);
         acc.app[scale].accumulate(&a);
 
         // CSFW pass accumulates only on (Y, csfw_block on) — a separate
@@ -6512,6 +6536,7 @@ fn stream_phase_b(
         // every other path never dispatches it. `cross.is_some()` is the
         // Y-channel discriminant, same as the BANDVIS gate above.
         if let Some(cp) = csfw.filter(|_| cross.is_some()) {
+            let __t_csfw = crate::fold_timing::start();
             let c = csfw_block_kernel(
                 src_strip,
                 dst_strip,
@@ -6520,12 +6545,14 @@ fn stream_phase_b(
                 width,
                 strip_h,
             );
+            crate::fold_timing::stop(__t_csfw, crate::fold_timing::Phase::CsfwKernel, scale);
             acc.csfw[scale].accumulate(&c);
         }
     }
 
     if v2_blocks && toggles.blockiness {
         let (sum_v, sum_h) = &mut acc.block[scale];
+        let __t_blk = crate::fold_timing::start();
         blockiness_sparse_strip_wide(
             &src_win[..n_wide],
             &dst_win[..n_wide],
@@ -6535,6 +6562,7 @@ fn stream_phase_b(
             sum_v,
             sum_h,
         );
+        crate::fold_timing::stop(__t_blk, crate::fold_timing::Phase::BlockKernel, scale);
     }
 }
 

@@ -37,7 +37,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 /// One accumulator slot. Indices are `(phase, scale)`; see [`Phase`].
-const N_PHASE: usize = 14;
+const N_PHASE: usize = 21;
 const N_SCALE: usize = 8;
 
 // Inline-const array repeat, so each element is its own `AtomicU64::new(0)`
@@ -84,6 +84,31 @@ pub(crate) enum Phase {
     BlurBandBusy = 12,
     /// The `mean_offset` side channel's per-strip pass.
     MeanOffset = 13,
+    // ---- v2-block decomposition (v2-cost lane, 2026-08-31) ----
+    // Summed per-(strip, channel) busy time of each v2-era kernel inside
+    // phase B, plus the phase-A work that exists ONLY to feed them. These
+    // rows are what makes the `v1_only`-vs-944 delta attributable to a
+    // kernel at the PRODUCTION tier — callgrind cannot profile `v4x`
+    // (valgrind masks AVX-512 out of CPUID), and `v4x` is exactly where
+    // the dense kernel's `POOL_SIMD` path lives.
+    /// `dense_block_kernel` — the 22-of-29 v2 slots per (ch, scale).
+    DenseKernel = 14,
+    /// `gradient_block_kernel` — GMS/ringing/banding/grad sums (+BANDVIS).
+    GradKernel = 15,
+    /// `append_block_kernel` — the f720+ append-204 block.
+    AppendKernel = 16,
+    /// `csfw_block_kernel` — the f944+ CSFW block (Y only, default off).
+    CsfwKernel = 17,
+    /// `blockiness_sparse_strip_wide` — the sparse lattice pass.
+    BlockKernel = 18,
+    /// Phase A's v2-ONLY plane chain: four `box_blur_v_from_copy` sweeps
+    /// (mu1/mu2/ssq/s12) plus the activity chain (`abs_diff_into` +
+    /// `box_blur_1pass_into`). Skipped entirely by a `v1_only` request.
+    PhaseAV2Planes = 19,
+    /// Phase A's `bs2` chain (`square_into` + H + V blur), which exists
+    /// only for the append block's sigma split, plus the optional
+    /// BANDVIS dst-activity twin.
+    PhaseAAppendPlanes = 20,
 }
 
 #[inline(always)]
@@ -220,6 +245,39 @@ fn dump(walks: u64) {
     row("between", Phase::Between, None);
     row("consume", Phase::BWall, Some(Phase::BBusy));
     row("  fold(sum)", Phase::FoldWall, Some(Phase::BandBusy));
+    // v2-block decomposition (busy sums, not wall spans — these are the
+    // per-(strip, channel) kernel bodies inside the phase-B fan-out, so
+    // their sum exceeds `consume`'s wall whenever the fan-out is parallel).
+    row("  v2:dense", Phase::DenseKernel, None);
+    row("  v2:gradient", Phase::GradKernel, None);
+    row("  v2:append", Phase::AppendKernel, None);
+    row("  v2:csfw", Phase::CsfwKernel, None);
+    row("  v2:blockiness", Phase::BlockKernel, None);
+    row("  v2:planesA", Phase::PhaseAV2Planes, None);
+    row("  v2:planesApp", Phase::PhaseAAppendPlanes, None);
+    let (v2sum, _) = {
+        let mut n = 0u64;
+        let mut c = 0u64;
+        for ph in [
+            Phase::DenseKernel,
+            Phase::GradKernel,
+            Phase::AppendKernel,
+            Phase::CsfwKernel,
+            Phase::BlockKernel,
+            Phase::PhaseAV2Planes,
+            Phase::PhaseAAppendPlanes,
+        ] {
+            let (a, b) = sum(ph);
+            n += a;
+            c += b;
+        }
+        (n, c)
+    };
+    eprintln!(
+        "  v2:TOTAL(busy)  {:>10.3} {:>8.1}",
+        ms(v2sum),
+        pct(v2sum)
+    );
     let (p, _) = sum(Phase::Producer);
     let (a, _) = sum(Phase::AWall);
     let (bt, _) = sum(Phase::Between);
