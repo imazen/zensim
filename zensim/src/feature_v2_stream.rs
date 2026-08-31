@@ -230,6 +230,53 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
 }
 
+/// Convert `n_new` scale-0 rows of one side into that side's three rolling
+/// planes — the body of the producer's per-side conversion, lifted to a free
+/// function so the two sides can run as a `rayon::join` (fold-MT lane). SDR
+/// route only; the HDR route keeps the in-method serial loop because it shares
+/// one `hdr_row` scratch.
+///
+/// Byte-neutral by construction: it is the same
+/// [`crate::streaming::convert_source_to_xyb_into_slices`] call the serial arm
+/// makes, on the same [`SubsetView`], with the same `abs_row_offset` — only
+/// which thread runs it changes.
+#[cfg(feature = "threads")]
+fn convert_side_scale0(
+    src: &impl ImageSource,
+    planes: &mut [Vec<RollingPlane>; 3],
+    hi0: usize,
+    n_new: usize,
+    width: usize,
+    parallel: bool,
+) {
+    let [c0, c1, c2] = planes;
+    let (p0, p1, p2) = (
+        c0[0].append_rows(n_new),
+        c1[0].append_rows(n_new),
+        c2[0].append_rows(n_new),
+    );
+    let sub = SubsetView::new(src, hi0, n_new);
+    crate::streaming::convert_source_to_xyb_into_slices(&sub, p0, p1, p2, width, parallel, hi0);
+}
+
+/// Ref-cached-feed twin of [`convert_side_scale0`]: copy the source side's
+/// scale-0 rows out of the caller's already-built XYB pyramid.
+#[cfg(feature = "threads")]
+fn copy_cached_scale0(
+    rp: &[crate::streaming::XybPyramidLevel],
+    planes: &mut [Vec<RollingPlane>; 3],
+    hi0: usize,
+    n_new: usize,
+    width: usize,
+) {
+    let (cached, cw, _) = &rp[0];
+    debug_assert_eq!(*cw, width, "cached ref stride must equal the plane width");
+    for (ch, plane) in planes.iter_mut().enumerate() {
+        let dst = plane[0].append_rows(n_new);
+        dst.copy_from_slice(&cached[ch][hi0 * width..(hi0 + n_new) * width]);
+    }
+}
+
 /// Capacity (in rows) budgeted for one scale's rolling window: one
 /// kernel strip + both halos + one production step + slack for the
 /// downscale-consumption floor. Exceeding it merely grows the buffer
@@ -399,8 +446,40 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         let n_new = ADVANCE_ROWS.min(h0 - hi0);
 
         // --- Scale-0 conversion, both sides. ---
+        //
+        // MT (fold-MT lane): the two sides write DISJOINT plane sets and read
+        // disjoint sources, so running them concurrently is a pure schedule
+        // change — no accumulation, no shared scratch, not one byte moved.
+        // It is worth doing because the inner fan-out inside
+        // `convert_source_to_xyb_into_slices` chunks at 64 rows and this call
+        // only ever hands it `ADVANCE_ROWS` (128) rows, i.e. TWO chunks; two
+        // sides in parallel take the producer's front end from degree 2 to 4.
+        // The HDR route keeps the serial loop — it shares one `hdr_row`
+        // scratch, and a second buffer is not this lane's measurement.
+        let __t_conv = crate::fold_timing::start();
         let front_end = self.front_end;
-        for si in 0..2 {
+        #[cfg(feature = "threads")]
+        let sides_parallel = self.parallel && matches!(front_end, FrontEnd::Sdr);
+        #[cfg(not(feature = "threads"))]
+        let sides_parallel = false;
+        #[cfg(feature = "threads")]
+        if sides_parallel {
+            let width = self.scales[0].plane_w;
+            let source = self.source;
+            let distorted = self.distorted;
+            let ref_planes = self.ref_planes;
+            let inner_parallel = self.parallel;
+            let (h, t) = self.planes.split_at_mut(1);
+            let (sp, dp) = (&mut h[0], &mut t[0]);
+            rayon::join(
+                || match ref_planes {
+                    Some(rp) => copy_cached_scale0(rp, sp, hi0, n_new, width),
+                    None => convert_side_scale0(source, sp, hi0, n_new, width, inner_parallel),
+                },
+                || convert_side_scale0(distorted, dp, hi0, n_new, width, inner_parallel),
+            );
+        }
+        for si in (0..2).take(if sides_parallel { 0 } else { 2 }) {
             let width = self.scales[0].plane_w;
             // REF-CACHED FEED: the source side's scale-0 rows already exist
             // in the caller's pyramid — copy them instead of decoding and
@@ -472,42 +551,77 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             }
         }
 
+        crate::fold_timing::stop(__t_conv, crate::fold_timing::Phase::ProdConvert, 0);
+
         // --- Cascade downscales: fill each deeper scale from complete
         //     even row pairs of its parent. ---
+        //
+        // MT (fold-MT lane): within ONE scale the six (side, channel) planes
+        // are fully independent — each reads its own parent plane and writes
+        // its own child plane, and `downscale_2x_into` is a pure function of
+        // the rows handed to it. Scales stay SEQUENTIAL because scale `s`
+        // consumes rows scale `s-1` produced in this same call. So the fan-out
+        // is 6-way per scale, which is a pure schedule change: no value is
+        // summed across the boundary, no byte moves.
+        let __t_ds = crate::fold_timing::start();
+        let ref_planes = self.ref_planes;
+        #[cfg(feature = "threads")]
+        let cascade_parallel = self.parallel;
+        let (h, t) = self.planes.split_at_mut(1);
+        let mut chans: [(usize, usize, &mut Vec<RollingPlane>); 6] = {
+            let [s0, s1, s2] = &mut h[0];
+            let [d0, d1, d2] = &mut t[0];
+            [
+                (0, 0, s0),
+                (0, 1, s1),
+                (0, 2, s2),
+                (1, 0, d0),
+                (1, 1, d1),
+                (1, 2, d2),
+            ]
+        };
         for scale in 1..crate::NUM_SCALES {
             let (plane_w, plane_h) = (self.scales[scale].plane_w, self.scales[scale].plane_h);
             let parent_w = self.scales[scale - 1].plane_w;
-            for si in 0..2 {
-                for ch in 0..3 {
-                    let parent_hi = self.planes[si][ch][scale - 1].hi;
-                    let child_hi = self.planes[si][ch][scale].hi;
-                    let target = (parent_hi / 2).min(plane_h);
-                    if target <= child_hi {
-                        continue;
-                    }
-                    let n_out = target - child_hi;
-                    // REF-CACHED FEED: the cache holds every level, built by
-                    // the same `downscale_2x_into` this cascade runs, so the
-                    // source side copies instead of downscaling.
-                    if si == 0 && let Some(rp) = self.ref_planes {
-                        let (planes, cw, _) = &rp[scale];
-                        debug_assert_eq!(*cw, plane_w, "cached ref stride at scale {scale}");
-                        let dst = self.planes[0][ch][scale].append_rows(n_out);
-                        dst.copy_from_slice(
-                            &planes[ch][child_hi * plane_w..(child_hi + n_out) * plane_w],
-                        );
-                        continue;
-                    }
-                    // Split borrow: parent (read) vs child (write).
-                    let (head, tail) = self.planes[si][ch].split_at_mut(scale);
-                    let parent = &head[scale - 1];
-                    let child = &mut tail[0];
-                    let src_rows = parent.rows(child_hi * 2, child_hi * 2 + n_out * 2);
-                    let dst = child.append_rows(n_out);
-                    crate::blur::downscale_2x_into(src_rows, parent_w, dst, plane_w, n_out);
+            let one = |(si, ch, planes): &mut (usize, usize, &mut Vec<RollingPlane>)| {
+                let parent_hi = planes[scale - 1].hi;
+                let child_hi = planes[scale].hi;
+                let target = (parent_hi / 2).min(plane_h);
+                if target <= child_hi {
+                    return;
                 }
+                let n_out = target - child_hi;
+                // REF-CACHED FEED: the cache holds every level, built by
+                // the same `downscale_2x_into` this cascade runs, so the
+                // source side copies instead of downscaling.
+                if *si == 0 && let Some(rp) = ref_planes {
+                    let (cached, cw, _) = &rp[scale];
+                    debug_assert_eq!(*cw, plane_w, "cached ref stride at scale {scale}");
+                    let dst = planes[scale].append_rows(n_out);
+                    dst.copy_from_slice(
+                        &cached[*ch][child_hi * plane_w..(child_hi + n_out) * plane_w],
+                    );
+                    return;
+                }
+                // Split borrow: parent (read) vs child (write).
+                let (head, tail) = planes.split_at_mut(scale);
+                let parent = &head[scale - 1];
+                let child = &mut tail[0];
+                let src_rows = parent.rows(child_hi * 2, child_hi * 2 + n_out * 2);
+                let dst = child.append_rows(n_out);
+                crate::blur::downscale_2x_into(src_rows, parent_w, dst, plane_w, n_out);
+            };
+            #[cfg(feature = "threads")]
+            if cascade_parallel {
+                use rayon::prelude::*;
+                chans.par_iter_mut().for_each(one);
+                continue;
             }
+            chans.iter_mut().for_each(one);
         }
+        drop(chans);
+
+        crate::fold_timing::stop(__t_ds, crate::fold_timing::Phase::ProdDownscale, 0);
 
         for (scale, held) in self.max_held_rows.iter_mut().enumerate() {
             let p = &self.planes[0][0][scale];

@@ -610,6 +610,19 @@ pub(crate) const STRIP_ROWS: usize = 128;
 /// reflection -- the buffer isn't the true image).
 pub(crate) const HALO_P: usize = 2 * BLUR_RADIUS;
 
+/// The row-group size every `fused_blur_h_ssim_*` kernel walks in
+/// (`run_group(rg * 8, 8)` plus one partial tail). Band boundaries in
+/// [`fused_blur_h_ssim_banded`] MUST be multiples of this so a band's
+/// grouping is a sub-sequence of the whole-plane call's.
+pub(crate) const H_BLUR_ROW_GROUP: usize = 8;
+
+/// Rows per phase-A H-blur band. A multiple of [`H_BLUR_ROW_GROUP`] (the
+/// bit-exactness precondition) chosen by measurement — see
+/// `benchmarks/fold_mt_scaling_2026-08-31.md`. Bands smaller than this stop
+/// paying for their fork/join against a 4-plane write of `width * rows`.
+pub(crate) const H_BLUR_BAND_ROWS: usize = 16;
+const _: () = assert!(H_BLUR_BAND_ROWS % H_BLUR_ROW_GROUP == 0);
+
 /// Mirror-without-repeating-edge boundary reflection ("reflect_101" /
 /// whole-sample-symmetric convention: `-1 -> 1`, `-2 -> 2`, `height ->
 /// height-2`, matching the mirror convention `crate::blur`'s own
@@ -1724,6 +1737,9 @@ fn run_blur_pass(
         activity,
         // materialized walk: always wants the v2 planes
         true,
+        // the materialized walk parallelises at the channel/scale level
+        // above this call; a nested band fan-out here is not its axis.
+        false,
     );
 }
 
@@ -1768,6 +1784,9 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
         activity,
         // materialized walk: always wants the v2 planes
         true,
+        // the materialized walk parallelises at the channel/scale level
+        // above this call; a nested band fan-out here is not its axis.
+        false,
     );
 }
 
@@ -1939,6 +1958,81 @@ fn fill_ref_moments(scales: &[([Vec<f32>; 3], usize, usize)]) -> Vec<[V2RefMomen
 /// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
 /// fused H-blur + 4x V-blur + activity sequence, over explicit buffers.
 #[allow(clippy::too_many_arguments)]
+/// Row-band-parallel wrapper for [`crate::blur::fused_blur_h_ssim`].
+///
+/// **Bit-exact by construction, and the construction is the whole argument.**
+/// A horizontal box blur is an independent running-sum recurrence per row, and
+/// the kernels walk rows in groups of [`H_BLUR_ROW_GROUP`]
+/// (`fused_blur_h_ssim_*_inner`'s `run_group(rg * 8, 8)` + one partial tail).
+/// Bands here start at multiples of that group size, so every band's internal
+/// grouping is a **sub-sequence of the whole-plane call's** — each row lands in
+/// a group of the same size, at the same offset within it, on the same SIMD
+/// tier. Only the LAST band can hold a partial group, which is exactly the
+/// partial group the whole-plane call's tail would have run.
+/// `phase_a_blur_bands_are_bit_exact` pins that over every band size and
+/// geometry; `box_blur_h_ring_matches_regathered_reference` independently pins
+/// the per-row claim the construction rests on.
+///
+/// Predecessor context (`extraction_perf_and_buffered_removal_2026-08-30.md`
+/// §11.1): this lever was implemented, measured NEUTRAL and reverted **in the
+/// 944-full walk**, where phase A is a small share behind `dense_block_kernel`.
+/// In the `v1_only` SCORING request that backs the fold engine there is no
+/// dense kernel at all and phase A is 36 % of the walk at 16 threads with an
+/// occupancy of 0.157 — a different measurement, not a re-run of that one.
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_banded(
+    src: &[f32],
+    dst: &[f32],
+    mu1_h: &mut [f32],
+    mu2_h: &mut [f32],
+    ssq_h: &mut [f32],
+    s12_h: &mut [f32],
+    width: usize,
+    height_local: usize,
+    #[allow(unused_variables)] parallel: bool,
+) {
+    #[cfg(feature = "threads")]
+    if parallel && height_local > H_BLUR_BAND_ROWS && width > 0 {
+        use rayon::prelude::*;
+        let n = H_BLUR_BAND_ROWS * width;
+        mu1_h
+            .par_chunks_mut(n)
+            .zip(mu2_h.par_chunks_mut(n))
+            .zip(ssq_h.par_chunks_mut(n))
+            .zip(s12_h.par_chunks_mut(n))
+            .enumerate()
+            .for_each(|(b, (((m1, m2), sq), s12))| {
+                let y0 = b * H_BLUR_BAND_ROWS;
+                let rows = m1.len() / width;
+                let lo = y0 * width;
+                let hi = lo + rows * width;
+                crate::blur::fused_blur_h_ssim(
+                    &src[lo..hi],
+                    &dst[lo..hi],
+                    m1,
+                    m2,
+                    sq,
+                    s12,
+                    width,
+                    rows,
+                    BLUR_RADIUS,
+                );
+            });
+        return;
+    }
+    crate::blur::fused_blur_h_ssim(
+        src,
+        dst,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        width,
+        height_local,
+        BLUR_RADIUS,
+    );
+}
+
 fn run_blur_pass_inner(
     src: &[f32],
     dst: &[f32],
@@ -1956,13 +2050,15 @@ fn run_blur_pass_inner(
     activity_tmp: &mut [f32],
     activity: &mut [f32],
     want_v2: bool,
+    parallel: bool,
 ) {
     let n = width * height_local;
     let mu1_h = &mut mu1_h[..n];
     let mu2_h = &mut mu2_h[..n];
     let ssq_h = &mut ssq_h[..n];
     let s12_h = &mut s12_h[..n];
-    crate::blur::fused_blur_h_ssim(
+    let __t_h = crate::fold_timing::start();
+    fused_blur_h_ssim_banded(
         src,
         dst,
         mu1_h,
@@ -1971,8 +2067,9 @@ fn run_blur_pass_inner(
         s12_h,
         width,
         height_local,
-        BLUR_RADIUS,
+        parallel,
     );
+    crate::fold_timing::stop(__t_h, crate::fold_timing::Phase::BlurHWall, 0);
 
     // BLOCK-SKIPPING: everything below this line feeds v2-era kernels ONLY.
     // `fold_v1_basic_bands` reads the H-blurred planes above and computes its
@@ -4357,6 +4454,15 @@ fn fold_v1_one_band(
 /// buffers; the whole-plane path passes the full-plane H-planes + the
 /// real src/dst planes with `strip_y0 = halo_offset = 0`.
 #[allow(clippy::too_many_arguments)]
+/// RAII closer for the [`crate::fold_timing::Phase::FoldWall`] span, so the
+/// early `return` in the parallel arm still records it. Diagnostic only.
+struct FoldTimingGuard(Option<std::time::Instant>);
+impl Drop for FoldTimingGuard {
+    fn drop(&mut self) {
+        crate::fold_timing::stop(self.0.take(), crate::fold_timing::Phase::FoldWall, 0);
+    }
+}
+
 fn fold_v1_basic_bands(
     width: usize,
     rows: core::ops::Range<usize>,
@@ -4369,6 +4475,8 @@ fn fold_v1_basic_bands(
     parallel: bool,
 ) {
     debug_assert_eq!(rows.start % V1_BAND_ROWS, 0, "strips are 32-row aligned");
+    let __t_fold = crate::fold_timing::start();
+    let __fold_guard = FoldTimingGuard(__t_fold);
     // Band starts, in order. Bands are INDEPENDENT: each reads a clamped
     // window of the shared planes and produces its own sums, so the only
     // cross-band coupling is the accumulation itself.
@@ -4403,6 +4511,7 @@ fn fold_v1_basic_bands(
                 .par_iter()
                 .zip(slots.par_iter_mut())
                 .map(|(&b0, ps)| {
+                    let __t = crate::fold_timing::start();
                     let mut local = V1BasicSums::default();
                     fold_v1_one_band(
                         b0,
@@ -4415,12 +4524,14 @@ fn fold_v1_basic_bands(
                         &mut local,
                         Some((ps, full)),
                     );
+                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                     local
                 })
                 .collect(),
             None => starts
                 .par_iter()
                 .map(|&b0| {
+                    let __t = crate::fold_timing::start();
                     let mut local = V1BasicSums::default();
                     fold_v1_one_band(
                         b0,
@@ -4433,6 +4544,7 @@ fn fold_v1_basic_bands(
                         &mut local,
                         None,
                     );
+                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                     local
                 })
                 .collect(),
@@ -5739,6 +5851,11 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
     want_bs2: bool,
     want_act_dst: bool,
     want_v2: bool,
+    // `parallel`: row-band-parallelise the H-blur
+    // (`fused_blur_h_ssim_banded`). The channel fan-out above is only 3-way,
+    // so on a >3-thread pool phase A is the walk's occupancy floor; bands are
+    // its second axis.
+    parallel: bool,
     scr: &mut ScratchV2Strip,
 ) {
     use crate::feature_v2_stream::Side;
@@ -5790,6 +5907,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         activity_tmp,
         activity,
         want_v2,
+        parallel,
     );
     // BANDVIS dst self-mask (`append2_dst_activity`, Y channel only): the
     // exact dst twin of the ref activity chain — `box_blur(|dst − mu2|)`
@@ -6928,8 +7046,16 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         ref_planes,
     );
 
-    while let Some(info) = producer.next_strip() {
+    let __t_walk = crate::fold_timing::start();
+    loop {
+        let __t_prod = crate::fold_timing::start();
+        let next = producer.next_strip();
+        let Some(info) = next else {
+            crate::fold_timing::stop(__t_prod, crate::fold_timing::Phase::Producer, 0);
+            break;
+        };
         let scale = info.scale;
+        crate::fold_timing::stop(__t_prod, crate::fold_timing::Phase::Producer, scale);
 
         // mean_offset side-channel (fold-engine lane): the scale-0 strips
         // tile [0, h0) exactly once in ascending order, so each row's
@@ -6976,10 +7102,12 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             // done. Values are identical to the serial order (pure
             // kernels on identical inputs); only cache locality differs,
             // and parallel wall is not the 1-thread gate path.
+            let __t_a = crate::fold_timing::start();
             scratch_strips
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(ch, scr)| {
+                    let __t = crate::fold_timing::start();
                     stream_phase_a(
                         &producer,
                         &info,
@@ -6987,9 +7115,13 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         append_cell_active(append_on, ch, scale),
                         ch == 1 && act_dst_on && append_cell_active(append_on, 1, scale),
                         v2_blocks,
+                        true,
                         scr,
                     );
+                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::PhaseABusy, scale);
                 });
+            crate::fold_timing::stop(__t_a, crate::fold_timing::Phase::PhaseAWall, scale);
+            let __t_between = crate::fold_timing::start();
             let scratches: &[ScratchV2Strip; 3] = scratch_strips;
             // Retention hooks (appendix N): serial copies between the two
             // fan-outs — pure reads of the phase-A scratches + windows.
@@ -7006,7 +7138,10 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     );
                 }
             }
+            crate::fold_timing::stop(__t_between, crate::fold_timing::Phase::Between, scale);
+            let __t_b = crate::fold_timing::start();
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
+                let __t = crate::fold_timing::start();
                 let (src_win, dst_win) =
                     stream_windows_shared(&producer, &info, ch, &scratches[ch]);
                 let cross = if ch == 1 && append_cell_active(append_on, ch, scale) {
@@ -7035,7 +7170,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     csfw,
                     acc,
                 );
+                crate::fold_timing::stop(__t, crate::fold_timing::Phase::PhaseBBusy, scale);
             });
+            crate::fold_timing::stop(__t_b, crate::fold_timing::Phase::PhaseBWall, scale);
             true
         } else {
             false
@@ -7064,7 +7201,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             let y_active = append_cell_active(append_on, 1, scale);
             for ch in [0usize, 2] {
                 let active = append_cell_active(append_on, ch, scale);
-                stream_phase_a(&producer, &info, ch, active, false, v2_blocks, scr);
+                stream_phase_a(&producer, &info, ch, active, false, v2_blocks, false, scr);
                 if y_active {
                     let stash = if ch == 0 {
                         &mut stash_x_buf[0].activity
@@ -7102,6 +7239,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     y_active,
                     y_active && act_dst_on,
                     v2_blocks,
+                    false,
                     scr,
                 );
                 let cross = if y_active {
@@ -7136,6 +7274,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         }
     }
 
+    if let Some(t) = __t_walk {
+        crate::fold_timing::walk_done(t.elapsed().as_nanos() as u64);
+    }
     producer.recycle(stream_pool);
 
     // --- Finalize: the materialized walk's per-scale epilogue, replayed
@@ -12101,6 +12242,94 @@ mod tests {
     /// extras while the fold walked the image. That divergence was the defect,
     /// not an invariant. C removes the phantom columns
     /// (`blur::pyramid_plane_stride` now returns the width), so the assertion
+    /// **The bit-exactness gate for [`fused_blur_h_ssim_banded`]** (fold-MT
+    /// lane). The banded call must equal the whole-plane call BIT-FOR-BIT, at
+    /// every band size that is a multiple of [`H_BLUR_ROW_GROUP`] and at
+    /// heights that exercise a partial final group, a partial final band, and
+    /// both at once.
+    ///
+    /// This is stronger than the shipped constant needs: it sweeps band sizes
+    /// 8/16/24/32/64 so that re-tuning `H_BLUR_BAND_ROWS` on a future box
+    /// cannot silently move a byte. It also asserts a NON-multiple of the row
+    /// group (12) still agrees — recorded, not relied on: the shipped
+    /// constant stays a multiple, and the `const` assert next to it enforces
+    /// that, but if the kernels' per-row independence ever regressed this
+    /// case would catch it first.
+    #[test]
+    fn phase_a_blur_bands_are_bit_exact() {
+        for &(width, height) in &[
+            (64usize, 148usize), // the scale-0 strip shape: 18 groups + a 4-row tail
+            (2304, 40),          // wide, band-splittable
+            (97, 148),           // odd width (scalar tail inside every row)
+            (16, 7),             // shorter than one row group
+            (33, 8),             // exactly one row group
+            (127, 93),           // a golden-fixture height
+            (5, 149),            // narrower than one SIMD lane
+        ] {
+            let n = width * height;
+            let src: Vec<f32> = (0..n)
+                .map(|i| ((i * 2654435761usize) % 1000) as f32 / 1000.0)
+                .collect();
+            let dst: Vec<f32> = (0..n)
+                .map(|i| ((i * 40503usize + 7) % 1000) as f32 / 1000.0)
+                .collect();
+            let mut want = [vec![0.0f32; n], vec![0.0; n], vec![0.0; n], vec![0.0; n]];
+            {
+                let (a, rest) = want.split_at_mut(1);
+                let (b, rest2) = rest.split_at_mut(1);
+                let (c, d) = rest2.split_at_mut(1);
+                crate::blur::fused_blur_h_ssim(
+                    &src,
+                    &dst,
+                    &mut a[0],
+                    &mut b[0],
+                    &mut c[0],
+                    &mut d[0],
+                    width,
+                    height,
+                    BLUR_RADIUS,
+                );
+            }
+            for &bands in &[8usize, 12, 16, 24, 32, 64] {
+                let mut got = [vec![0.0f32; n], vec![0.0; n], vec![0.0; n], vec![0.0; n]];
+                // Replay the helper's banding by hand at an arbitrary band
+                // size — the helper itself is pinned to one constant, and the
+                // claim under test is about the BANDING, not that constant.
+                let mut y0 = 0;
+                while y0 < height {
+                    let rows = bands.min(height - y0);
+                    let lo = y0 * width;
+                    let hi = lo + rows * width;
+                    let (a, rest) = got.split_at_mut(1);
+                    let (b, rest2) = rest.split_at_mut(1);
+                    let (c, d) = rest2.split_at_mut(1);
+                    crate::blur::fused_blur_h_ssim(
+                        &src[lo..hi],
+                        &dst[lo..hi],
+                        &mut a[0][lo..hi],
+                        &mut b[0][lo..hi],
+                        &mut c[0][lo..hi],
+                        &mut d[0][lo..hi],
+                        width,
+                        rows,
+                        BLUR_RADIUS,
+                    );
+                    y0 += rows;
+                }
+                for (pi, (g, w)) in got.iter().zip(want.iter()).enumerate() {
+                    for (i, (a, b)) in g.iter().zip(w.iter()).enumerate() {
+                        assert_eq!(
+                            a.to_bits(),
+                            b.to_bits(),
+                            "{width}x{height} bands={bands} plane {pi} idx {i}: \
+                             banded {a} vs whole-plane {b}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// flips: the two paths must now be BIT-IDENTICAL everywhere.
     ///
     /// This is a sanctioned re-pin — a named, deliberate semantics correction

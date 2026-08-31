@@ -250,7 +250,20 @@ fn golden_real_fixture_is_bit_identical_across_engines() {
 #[cfg(feature = "threads")]
 #[test]
 fn both_engines_are_bit_identical_across_rayon_pool_sizes() {
-    for &(w, h) in &[(256usize, 256usize), (96, 320), (320, 96), (200, 150)] {
+    // WIDENED by the fold-MT lane (`benchmarks/fold_mt_scaling_2026-08-31.md`)
+    // from four hand-picked shapes to the WHOLE geometry set, plus the two
+    // large shapes the scaling work is measured on. Every lever that lane
+    // ships is a schedule change in the PARALLEL arm — H-blur row bands, the
+    // two-sided producer front end, the six-way downscale cascade, the fused
+    // per-channel fan-out — so a band boundary interacting with a geometry is
+    // exactly the failure mode, and only a pool sweep over every geometry can
+    // see it.
+    let cells: Vec<(usize, usize)> = CELLS
+        .iter()
+        .copied()
+        .chain([(256usize, 256usize), (96, 320), (320, 96), (577, 385)])
+        .collect();
+    for &(w, h) in &cells {
         let (r, d) = pair(w, h);
         let mut first: Option<(ZensimResult, ZensimResult)> = None;
         for threads in [1usize, 2, 3, 8, 16] {

@@ -263,6 +263,13 @@ pub mod feature_v2;
 #[cfg(feature = "feature-regime-v2")]
 pub(crate) mod feature_v2_stream;
 
+// Env-gated (`ZENSIM_FOLD_TIMING`) per-phase wall/busy accounting for the
+// streaming fold walk — diagnostic only, no public surface, and every hook is
+// a resolved-`OnceLock` load when disabled.
+// benchmarks/fold_mt_scaling_2026-08-31.md
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) mod fold_timing;
+
 // The fold-backed scoring engine (benchmarks/fold_engine_2026-08-31.md):
 // gives the streaming fold a `score()` by attaching it under the SHARED
 // scoring tail + bake forward, rather than duplicating either.
