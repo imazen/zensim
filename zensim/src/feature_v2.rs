@@ -7475,12 +7475,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // Byte-neutral by construction: identical kernels on identical inputs
         // into per-channel accumulators that are already disjoint. Only which
         // thread runs what, and when, changes.
-        // `fuse_channels` / `self_blur` are HOISTED above the strip loop (they
-        // are strip-independent, and the strip scratch is sized from them).
-        //
-        // FUSED PER-CHANNEL FAN-OUT preconditions, restated where they are
-        // read: `!append_on` => no cross-channel edge; `retention.is_none()`
-        // => nothing runs between the phases.
+        // `fuse_channels` and `self_blur` are HOISTED above the strip loop —
+        // they are strip-independent, and the strip scratch is now SIZED from
+        // them (`StripPlaneNeeds`), so there is one definition of each.
         //
         // SELF-BLUR BANDS. With `v1_only` phase A's ONLY output is the four
         // H-blurred planes over the strip's whole 148-row wide window, and the

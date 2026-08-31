@@ -1,0 +1,438 @@
+# The fold's footprint — where every byte goes, and why it was ever heavier than buffered
+
+**The question this lane exists to answer, in the user's words:** *why does the
+streaming fold ever use MORE memory than the whole-image buffered path?*
+[`fold_mt_scaling_2026-08-31.md`](fold_mt_scaling_2026-08-31.md) §5.2 measured
+the fold's working set at **1.32× buffered at 1152²/1T and 1.38× at 16T**, but
+**0.75×/0.85× at 2304²** — and recorded the shape (buffered scales with AREA,
+the fold closer to WIDTH) without decomposing it. On paper a rolling-window walk
+cannot lose to one that materialises whole-image pyramids. It did, below ~2.5 MP.
+
+**The answer in one sentence: buffered sizes its band scratch by the WORKER
+COUNT and the fold sized its by the FAN-OUT SHAPE.** Buffered's `ScaleBuffers`
+comes from a rayon `map_init`, so it exists once per worker — one buffer at one
+thread. The fold pre-allocated a `FoldPoolScratch` per *(channel × band slot)* =
+**12 band buffers regardless of the pool**, plus **three full 14-plane
+`ScratchV2Strip` sets of which a `v1_only` score writes two planes**. At one
+thread that is 12 band buffers against buffered's 1, on identical work.
+
+**What shipped:** three byte-neutral fixes, each gated by the existing
+bit-identity suite. The fold's working set drops **55–57 % at 1 thread** and
+**9–19 % at 8/16 threads**, and the RSS crossover moves from **~2.7 MP down to
+~0.6 MP at 1 thread and ~1.3 MP at 16 threads**. Buffered is the control and
+moved ≤ 1.5 %. Zero bytes moved: `fold_engine_parity` (22 geometries × rayon
+pools 1/2/3/8/16, both engines, `to_bits()` on score + every feature +
+`mean_offset`) passes, and the two new thread-derived quantities are swept BY
+that suite.
+
+Predecessors: [`fold_mt_scaling_2026-08-31.md`](fold_mt_scaling_2026-08-31.md)
+(§2.3 `ADVANCE_ROWS`, §2.5 self-blur bands, §5.2 RSS, §6's rejected
+`scale_capacity_rows` change), [`fold_engine_2026-08-31.md`](fold_engine_2026-08-31.md),
+[`extraction_perf_and_buffered_removal_2026-08-30.md`](extraction_perf_and_buffered_removal_2026-08-30.md) §6.
+
+---
+
+## 1. Instruments and conditions
+
+| what | how |
+|---|---|
+| peak RSS | `/usr/bin/time -v`, ONE arm per process, `ZEN_FE_RSS` mode of `zensim/benches/fold_engine_bench.rs` (the bench owns the workload; `fold_footprint_2026-08-31/rss_sweep.sh` only drives it) |
+| working set | peak RSS − the two input images (`6·W·H` bytes), the column §5.2 introduced |
+| per-term truth | `heaptrack` + `heaptrack_print` PEAK MEMORY CONSUMERS, which attributes **requested** bytes to a call site — the allocation side, exact |
+| pool-block share | two new RSS control arms, `poolctl_full` / `poolctl_off`: the fold's scoring walk shape (`v1_only`, SDR, one fresh `V2Scratch` per call, exactly as `Zensim::compute` builds one) differing ONLY in `V1PoolsMode`. `poolctl_off` emits structural zeros in f156..371 and is a measurement control, never shippable |
+| model check | `fold_footprint_2026-08-31/model.py`, every term derived from source; the ONLY fitted quantity is a per-arm process baseline `P0` taken from the 128×128 row and then held fixed |
+
+Units are **KiB** (`/usr/bin/time -v`'s own unit) and **MB decimal** where a
+heaptrack figure is quoted, because heaptrack prints decimal. §5.2's table is in
+decimal MB; ratios are unit-free and comparable across both.
+
+**Load conditions.** The `rss_before` sweep ran 05:30–05:36 UTC at box load
+**0.49–1.52**; `rss_after` ran 05:48–05:50 at load **3.4–5.7** (an unrelated
+lane). Peak RSS is determined by what the program allocates and touches, not by
+scheduling, and the buffered control arm — measured in both sweeps, unchanged
+code — reproduces to **≤ 1.5 %** across that 4× load difference, which is the
+evidence that the load did not reach these numbers. The speed A/B in §7 is a
+different matter and states its own conditions.
+
+---
+
+## 2. The buffered model — and the pyramid series that is not there
+
+```
+R_buf(W,H,T) = P0
+             + 24·W·H                                    XYB planes
+             + max( min(T, ⌈H/32⌉) · 1176·W ,             ScaleBuffers
+                    min(T, ⌈H/64⌉) ·  192·W )             conversion rgb_buf
+```
+
+* **`24·W·H` — and there is NO `1 + 1/4 + 1/16 + 1/64` series.** `convert_source_to_xyb`
+  (`streaming.rs:1104`) allocates `vec![0.0f32; W*H]` × 3 channels × 2 sides, and the
+  pyramid cascade runs `blur::downscale_2x_inplace` (`blur.rs:3852`), which downscales
+  a plane **over its own prefix** and then `Vec::truncate`s — and `truncate` never
+  releases capacity. All four scales share the same six allocations, pinned at
+  scale-0 capacity, with only one scale's data live at a time. Confirmed by
+  heaptrack: **31.85 MB over 18 calls** at 1152² (= 3 iterations × 6 planes), which
+  is `24·W·H` to the byte. The 85/64 series belongs to `PrecomputedReference`
+  (`streaming.rs:2884`), which owns every level — the `ref_*` arms, not this one.
+* **Widths are NOT SIMD-padded.** `blur::pyramid_plane_stride(w) == w` since option C
+  (`blur.rs:4198`), so every `n` is `W·H` exactly and `mirror_offsets` is empty.
+* **`ScaleBuffers` = 7 `Vec<f32>` × `(STRIP_INNER + 2·overlap) = 42` rows × `w_s`**
+  (`pool.rs:9`, sized at `streaming.rs:2446`). The band layout is geometry-only —
+  one band per 32-row strip, deliberately not thread-derived — and the fan-out is
+  `map_init` per rayon worker (`streaming.rs:2677`), so **concurrently live =
+  min(T, ⌈h_s/32⌉)**, each `1176·w_s` bytes, freed at the end of every scale.
+  heaptrack at 1152²: **1.38 MB at 1T, 21.70 MB at 16T** against the model's 1.29 /
+  21.68 MiB.
+* **`max`, not sum**: the conversion completes before the first `ScaleBuffers`
+  exists, so the two phases are disjoint in time and the allocator reuses the pages.
+  Summing them over-predicts 16T by 9–14 %; taking the max lands within 3.6 %.
+* Not on this path at all: `V2Scratch` / `ScratchV2Strip` (fold-only), the phase-6
+  whole-image bypass (`STRIP_BYPASS_HEIGHT = 0`, permanently dead), the attribution
+  retention planes, and any whole-image `mu1`/`activity`.
+
+**Measured vs predicted, `score_buffered`** (`P0` = 4,016 KiB fitted on 128²):
+
+| size | 1T | 8T | 16T |
+|---|---:|---:|---:|
+| 512² | −4.4 % | +6.4 % | +9.4 % |
+| 768² | −0.6 % | +0.3 % | +3.6 % |
+| 1152² | +0.6 % | +1.4 % | +2.8 % |
+| 1536² | +0.6 % | +0.6 % | +1.8 % |
+| 2048² | +0.2 % | +0.9 % | +1.0 % |
+| 2304² | +0.3 % | +1.0 % | +1.5 % |
+| 3072² | +0.1 % | +0.4 % | +0.6 % |
+
+`min(T, ⌈H/32⌉)` is an UPPER bound on live folders — rayon creates one per
+sequential leaf, not per thread — which is why the error is positive and largest
+where the band count is smallest (512² has 16 bands for 16 threads).
+
+---
+
+## 3. The fold model
+
+```
+R_fold(W,H,T) = P0
+              + 24 · Σ_{s=0..3} (W≫s) · cap_s              rolling pyramid windows
+                   cap_s = min( 128 + 20 + max(A≫s, 2) + 32 , (H≫s) + 20 )
+              +  2 · 3 · 148 · W · 4                        ScratchV2Strip, WRITTEN planes
+              +  3 · slots · 10 · 42 · W · 4                FoldPoolScratch
+              + min(T, 2A/64) · 64 · W · 3                  conversion rgb_buf
+```
+
+with `A` the producer advance and `slots` the band-scratch count per channel.
+`128 = STRIP_ROWS`, `20 = 2·HALO_P`, `32` = `scale_capacity_rows`'s slack,
+`148 = STRIP_ROWS + 2·HALO_P`, `42 = V1_BAND_ROWS + 2·V1_BAND_OVERLAP`,
+`10 = 6 pool planes + 4 band-local H planes`, `7 = 3 channels × …` — every
+constant is read from source, none fitted.
+
+Before this lane: `A = 256` always; `slots = V1_BANDS_PER_STRIP = 4` always; the
+strip term was **14** planes allocated (2 written); and slot 0's ten planes were
+`Vec`-doubled to **74** rows for a 42-row band.
+
+### 3.1 The exact decomposition, heaptrack, 1152²/1T, BEFORE
+
+| consumer | calls | peak | closed form | ✓ |
+|---|---:|---:|---|---|
+| `ScratchV2Strip::new` | 126 | **28.64 MB** | `14·3·148·W·4 = 24,864·W` | exact |
+| pool `ensure`/`ensure_h` (`RawVecInner::finish_grow`) | 603 | **27.65 MB** | `3·(3·42 + 74)·10·W·4 = 24,000·W` | exact |
+| `RollingPlane::from_pooled` | 72 | **18.57 MB** | `24·Σ W_s·cap_s` | exact |
+| the bench's two input images | 2 | 7.96 MB | `6·W·H` | exact |
+| `convert_…_chunked` `rgb_buf` | 108 | 221 KB | `min(T,8)·192·W` | — |
+| `MeanOffsetRows` + accums | 66 | 40 KB | `O(H)` | — |
+| **peak heap** | | **83.17 MB** | | |
+| *buffered, same cell* | | **41.30 MB** | 31.85 + 1.38 + 7.96 | |
+
+126 = 14 planes × 3 channels × 3 iterations; 72 = 2 sides × 3 channels × 4 scales
+× 3 iterations. The `27.65 MB` is `3 channels × [3 slots at 42·W + 1 slot at
+74·W] × 10 planes × 4 B` **to the byte** — which is how the `Vec` growth slack was
+found: slot 0 always takes the top-clamped first band of a strip (37 rows), then
+an interior band (42), and `Vec::resize` reserves `max(2·cap, need)`.
+
+### 3.2 Where the excess was, priced
+
+At 1152² the fold allocated **75.21 MB** of working memory (peak heap − input)
+against buffered's **33.34 MB** — 2.26×. Three items account for all of it:
+
+1. **12 of 14 `ScratchV2Strip` planes are never written by a score.** A
+   `v1_only` + `V1PoolsMode::Full` request runs self-blur bands, so
+   `stream_phase_a` is skipped WHOLE (§2.5 of the MT note) and the only planes
+   touched are `src_wide`/`dst_wide`. **21,312·W bytes untouched** — 24.6 MB at
+   1152², 49.1 MB at 2304².
+2. **The pool block is 12 band buffers where buffered has one per worker.**
+   `3 ch × 4 slots × 10 planes × 42 rows` = `20,160·W` bytes needed and `24,000·W`
+   allocated. Buffered's directly comparable term is `1,176·W` **per live worker**.
+   At 1 thread that is **20.4×**.
+3. **`ADVANCE_ROWS = 256` is a parallel-degree knob priced in capacity.** Between
+   64 and 256 it costs `24 · 1.328 · (A−64) · W` = **6,124·W bytes**, height-
+   independent — 6.9 MB at 1152², 13.7 MB at 2304² — for a producer fan-out no
+   small pool can spend.
+
+**Is the untouched allocation free?** Under stock glibc, `vec![0.0; n]` lowers to
+`alloc_zeroed`; a plane that size is `mmap`ed and its pages are demand-zero, so
+never faulting them costs address space rather than RSS. That is an ALLOCATOR
+POLICY, not a property of the program, and it was tested rather than assumed:
+with **`MALLOC_ARENA_MAX=1`** the same binary's `score_fold` peak at 1152²/1T goes
+**61,952 → 71,768 KiB**, because the allocation now comes from the main heap and
+`calloc` must memset it. Not asking for the planes is the only way not to depend
+on the allocator's mood.
+
+---
+
+## 4. The pool block, answered with numbers
+
+**Before the fix the f156–371 pool block (peaks / masked / IW) is 33–34 % of the
+fold walk's whole working set, at every size, at 1 thread — and 39–43 % at 16
+threads.** It is the single largest term, it scales with WIDTH, and it is
+independent of HEIGHT. That is the headline: buffered's dominant term is area, so
+below the size where area overtakes width, a term like this decides the
+comparison. `poolctl_full − poolctl_off`, working set:
+
+| size | 1T before | 16T before | 1T after | 16T after |
+|---|---:|---:|---:|---:|
+| 512² | 11,296 KiB (32.4 %) | 15,768 KiB (39.8 %) | **−996 KiB** | 10,644 KiB (40.7 %) |
+| 768² | 16,504 (32.6 %) | 25,836 (43.0 %) | **−1,580** | 15,684 (40.9 %) |
+| 1152² | 25,136 (33.4 %) | 37,708 (42.7 %) | **−2,348** | 21,892 (38.1 %) |
+| 1536² | 33,080 (33.4 %) | 48,760 (41.9 %) | **−2,604** | 29,976 (39.4 %) |
+| 2048² | 44,228 (33.9 %) | 62,048 (40.8 %) | **−3,500** | 37,152 (37.5 %) |
+| 2304² | 49,476 (33.9 %) | 73,668 (42.2 %) | **−4,124** | 40,920 (37.4 %) |
+| 3072² | 67,036 (34.5 %) | 86,828 (39.4 %) | **−7,516** | 58,524 (39.2 %) |
+
+Before the fix the delta is **22.0–22.6 KiB per unit of width** at 1T against the
+`24,000·W` bytes = 23.4 KiB/W the allocation model predicts — a 94–96 % residency
+that is the untouched tail of slot 0's doubled buffers.
+
+**The negative column is real and is the point.** After the fix, at one thread,
+turning the pools ON makes the walk **smaller**: `poolctl_full` runs self-blur
+bands, so it pays `3 ch × 1 slot × 10 × 42 · W · 4 = 5,040·W` bytes of pool and
+skips phase A entirely, while `poolctl_off` must run phase A and therefore pays
+the four strip-wide H planes, `4 × 3 × 148 · W · 4 = 7,104·W`. Predicted delta
+**−2,064 B/W**; measured **−2,087 B/W at 1152²** (1.1 % off). The pool block went
+from the fold's largest liability to cheaper than the phase it replaces.
+
+At 16 threads all four slots are justified — four bands of one channel really can
+run at once — so the pool stays `20,160·W` and remains the largest term (37–41 %).
+**That is the honest floor:** the band buffer is `10 planes × 42 rows × width`
+because `V1_BAND_ROWS = 32` is v1's numerics contract (the f32 sliding V-blur
+re-initialises at every band's buffer top, so pooled sums depend on the tiling)
+and the four H planes plus six V/activity planes are what
+`fused_vblur_features_ssim` reads and writes. Below `min(bands, threads)` copies
+of it there is nothing left to remove without changing either the kernel or the
+tiling, and the tiling is not ours to change.
+
+---
+
+## 5. What shipped
+
+All three are byte-neutral **by construction**, and all three are swept by
+`fold_engine_parity::both_engines_are_bit_identical_across_rayon_pool_sizes`,
+which compares the fold at 1T against the fold at 2/3/8/16T bit-identically over
+22 geometries. Because two of the fixes derive a quantity FROM the pool size,
+that pre-existing test is now also a direct sweep of them.
+
+### 5.1 `StripPlaneNeeds` — size the strip scratch to the planes the walk writes
+
+`ScratchV2Strip::new_for(max_n, needs)` + `V2Scratch::ensure_for`. The set has two
+groups: `h` (the four fused-H planes phase A produces) and `v2` (everything below
+`run_blur_pass_inner`'s `want_v2` early return, plus the σ-split and dst-activity
+buffers that reuse its temps). A `v1_only` + `Full` score asks for neither, i.e.
+**2 planes of 14**. Both the size and the set are grow-only — the union of every
+request so far — so a driver alternating a score with a 944 extraction converges
+to ALL and never thrashes, exactly like the existing `sized_for`.
+
+`fuse_channels` / `self_blur` were hoisted out of the strip loop to compute the
+set (they were strip-independent already; the loop now reads the hoisted values,
+so there is one definition of each).
+
+*Value: −21,312·W bytes allocated (−24.6 MB at 1152², −49.1 MB at 2304²).*
+
+### 5.2 `band_slots_for` — size the band scratch to the concurrency, like buffered
+
+`slots = min(V1_BANDS_PER_STRIP, rayon::current_num_threads())` when
+band-parallel, else 1. A band cannot run without a thread to run it on, and rayon
+nests, so that is exactly the count that can ever be simultaneously live inside
+one channel task.
+
+`fold_v1_basic_bands`'s parallel arm becomes `starts.par_chunks(per).zip(slots.par_iter_mut())`
+with `per = ⌈bands/slots⌉`. With at least as many slots as bands — every pool of
+4+ threads — `per` is 1 and it is exactly the old one-band-per-slot zip. **Order
+is the whole bit-exactness argument:** `par_chunks` and `par_iter_mut` are both
+INDEXED, so `collect` yields chunks in band order and each chunk yields its bands
+in band order; flattening reproduces the serial band sequence, and the merge below
+is the same left-to-right `f64` fold either way. (The serial arm already indexed
+`p[i.min(len−1)]` and needed no change.)
+
+*Value: 12 band buffers → 3 at 1 thread, −15,120·W bytes; unchanged at ≥ 4.*
+
+### 5.3 `advance_rows_for` — `ADVANCE_ROWS` becomes a ceiling
+
+The constant exists to keep the conversion fan-out fed and nothing else: the two
+sides run concurrently and each fans out at `CONVERT_CHUNK_ROWS`, so one
+`produce()` offers `2A/64` tasks and `32·threads` rows is the smallest advance
+that offers one per thread. The advance is now
+`clamp(⌈32·T⌉₆₄, 64, 256) ∧ ⌈H⌉₆₄` — 64 at 1–2 threads, 128 at 3–4, 256 at ≥ 8,
+i.e. **unchanged in the configuration the MT lane measured**.
+
+Chunk HEIGHT is semantics (`convert_chunk_rows_is_semantics_not_a_knob` measures
+one ULP at 97×51); chunk COUNT is not, because every boundary still lands on a
+global multiple of 64 — which is why this rounds UP to that lattice and asserts
+it at construction. The new
+`feature_v2_stream::tests::producer_windows_are_advance_invariant` pins the
+producer directly: 4 geometries × advances 64/128/192/256/512, every emitted
+strip's wide window on both sides and all 3 channels compared by `to_bits()`.
+(Emission ORDER across scales legitimately differs — that is what the advance
+changes — so the test compares the sorted set of `(scale, y0, side, channel)`
+windows, which is the invariant that matters: each scale owns its own accumulator
+and strips within a scale stay strictly ascending.)
+
+*Value: −6,124·W bytes at 1–2 threads; nothing at ≥ 8.*
+
+### 5.4 `FoldPoolScratch::ensure` sized to the maximum band
+
+`ensure(band_cap_n)` with `band_cap_n = min(42, height)·width` instead of this
+band's own `h_local·width`, so slot 0 stops being doubled to 74 rows for a
+42-row band. Everything downstream already sliced `[..band_n]`.
+
+*Value: −3,840·W bytes at every thread count.*
+
+---
+
+## 6. Result — the crossover moved
+
+Working set (peak RSS − input), KiB. `ratio` is `score_fold ÷ score_buffered`;
+`score_buffered` is the untouched control and is shown to move ≤ 1.5 %.
+
+| size | T | buf before | buf after | fold before | fold after | fold Δ | ratio before | **ratio after** |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 512² | 1 | 11,244 | 10,872 | 28,244 | **12,516** | −55.7 % | 2.512 | **1.151** |
+| 512² | 8 | 13,964 | 13,772 | 30,172 | 25,284 | −16.2 % | 2.161 | 1.836 |
+| 512² | 16 | 17,888 | 17,656 | 33,900 | 25,736 | −24.1 % | 1.895 | 1.458 |
+| 768² | 1 | 18,840 | 18,392 | 38,660 | **17,304** | −55.2 % | 2.052 | **0.941** |
+| 768² | 8 | 24,824 | 24,100 | 43,204 | 37,384 | −13.5 % | 1.740 | 1.551 |
+| 768² | 16 | 30,844 | 29,940 | 46,060 | 36,904 | −19.9 % | 1.493 | 1.233 |
+| 1152² | 1 | 36,228 | 36,096 | 53,880 | **23,188** | −57.0 % | 1.487 | **0.642** |
+| 1152² | 8 | 45,088 | 44,796 | 64,624 | 53,400 | −17.4 % | 1.433 | 1.192 |
+| 1152² | 16 | 54,760 | 54,700 | 64,668 | **55,208** | −14.6 % | 1.181 | **1.009** |
+| 1536² | 1 | 60,732 | 61,288 | 69,436 | 30,512 | −56.1 % | 1.143 | 0.498 |
+| 1536² | 8 | 73,008 | 72,552 | 79,596 | 72,428 | −9.0 % | 1.090 | 0.998 |
+| 1536² | 16 | 86,008 | 86,516 | 82,368 | 72,020 | −12.6 % | 0.958 | 0.832 |
+| 2048² | 1 | 104,488 | 104,420 | 88,356 | 39,200 | −55.6 % | 0.846 | 0.375 |
+| 2048² | 8 | 120,088 | 119,616 | 105,980 | 94,440 | −10.9 % | 0.883 | 0.790 |
+| 2048² | 16 | 138,524 | 138,760 | 115,492 | 93,096 | −19.4 % | 0.834 | 0.671 |
+| 2304² | 1 | 130,708 | 130,980 | 99,520 | 43,832 | −56.0 % | 0.761 | 0.335 |
+| 2304² | 8 | 148,072 | 148,532 | 108,816 | 106,848 | −1.8 % | 0.735 | 0.719 |
+| 2304² | 16 | 168,264 | 169,324 | 116,724 | 104,748 | −10.3 % | 0.694 | 0.619 |
+| 3072² | 1 | 228,480 | 228,280 | 129,336 | 57,084 | −55.9 % | 0.566 | 0.250 |
+| 3072² | 8 | 252,352 | 252,164 | 157,956 | 137,872 | −12.7 % | 0.626 | 0.547 |
+| 3072² | 16 | 279,940 | 280,520 | 163,556 | 131,872 | −19.4 % | 0.584 | 0.470 |
+
+**Crossover** (the size at which the fold becomes the lighter path):
+
+| threads | before | after |
+|---|---|---|
+| 1 | between 1536² and 2048² (~2.7 MP) | between 512² and 768² (**~0.6 MP**) |
+| 8 | between 1536² and 2048² (~2.9 MP) | at 1536² (**~2.3 MP**, ratio 0.998) |
+| 16 | at 1536² (~2.3 MP) | at 1152² (**~1.3 MP**, ratio 1.009) |
+
+Peak-heap check at 1152² (heaptrack, decimal MB): fold **83.17 → 29.81 MB at
+1T** and **→ 55.86 MB at 16T**, against buffered's unchanged **41.30 / 61.73 MB**
+— so on the allocation side the fold is now the lighter path at 1152² at BOTH
+thread counts, and every post-fix term matches its closed form to < 0.1 %
+(rolling 11.60 vs 11.60; pool 5.81 vs 5.81 at 1T and 23.22 vs 23.22 at 16T; strip
+4.09 vs 4.09; buffered's `ScaleBuffers` 21.70 vs 21.68 MiB at 16T).
+
+### 6.1 Model accuracy, `score_fold`, AFTER (`P0` = 3,824 KiB from the 128² row)
+
+| size | 1T | 8T | 16T |
+|---|---:|---:|---:|
+| 512² | +3.8 % | −5.5 % | −7.1 % |
+| 768² | +3.2 % | −7.5 % | −6.3 % |
+| 1152² | +8.0 % | −5.7 % | −8.8 % |
+| 1536² | +5.6 % | −8.8 % | −8.2 % |
+| 2048² | +6.3 % | −8.0 % | −6.7 % |
+| 2304² | +5.9 % | −9.0 % | −7.2 % |
+| 3072² | +6.2 % | −6.9 % | −2.7 % |
+
+Every cell inside ±10 %, with a sign that is itself informative: **positive at
+1T** (a fraction of the strip scratch's pages genuinely never fault) and
+**negative at 8/16T** by a term the model deliberately does not carry — §6.2.
+
+### 6.2 The one term the model does not predict, isolated
+
+The fold's 8/16-thread residual is **allocator churn across per-worker arenas,
+not a program allocation**, and it was isolated rather than fitted. Peak RSS at
+1152², varying only the number of compares in the loop:
+
+| iterations | fold 1T | fold 16T | buffered 1T | buffered 16T |
+|---|---:|---:|---:|---:|
+| 1 | 31,632 | **54,508** | 44,028 | 62,236 |
+| 2 | 31,332 | 60,132 | 43,652 | 63,560 |
+| 5 | 31,380 | 61,972 | 44,508 | 63,416 |
+| 20 | 31,876 | **64,804** | 48,856 | 63,056 |
+
+The fold's 16T figure grows **+19 % from one compare to twenty** while its 1T
+figure is flat to 0.8 %. `Zensim::compute` builds a fresh `V2Scratch` per call
+(`metric.rs:3336`), and the pool buffers inside it are grown *inside band tasks*,
+so the arena that served compare *k* is not the one compare *k+1* asks — glibc
+retains both. `MALLOC_ARENA_MAX=1` cuts the fold's 16T−1T delta from 9,800 to
+4,756 KiB, i.e. **arenas are about half of it**. Against the ITERS=1 column the
+model's 16T error at 1152² is **−7.6 %**, and it is a single-compare model, which
+is what it should be.
+
+Buffered has the mirror-image effect at **1T** (44,028 → 48,856 over 20 compares):
+`streaming.rs:357`'s background `dealloc_planes` thread joins the *previous*
+handle before spawning, so one compare's `24·W·H` can still be resident during the
+next one's conversion.
+
+**Fix direction, not taken here:** the ref-loop entry already keeps its
+`V2Scratch` alive in `ZensimScratch` (the MT lane's private-field fix), and
+`refinto_fold` therefore does not churn. Giving the plain `compute` the same
+amortisation needs either state on `Zensim` (which is `Sync` and shared) or a
+thread-local, and that is an API/ownership decision, not a footprint one.
+
+---
+
+## 7. Speed
+
+*(filled in below from the paired A/B — `fold_footprint_2026-08-31/speed_ab.sh`)*
+
+---
+
+## 8. What did not move, and why
+
+* **The rolling window's 180-row floor.** `cap_s ≥ STRIP_ROWS(128) + 2·HALO_P(20)
+  + 32` before the advance is added at all, so at 512 rows the scale-0 window is
+  at best 244 of 512 rows (48 %) and the fold holds `24 B/px × 0.48` where
+  buffered holds `24 B/px` outright. It is why 512²/8T is still 1.84×: the pool
+  needs its four slots at 8 threads and the window cannot shrink below the strip
+  it must serve. Cutting `STRIP_ROWS` is a numerics change, not a footprint one.
+* **The band buffer's shape.** `10 planes × 42 rows` is `V1_BAND_ROWS = 32` plus
+  v1's `overlap = 5` on both sides, and v1's band tiling is part of its numerics
+  contract. The four H planes and six V/activity planes are exactly what
+  `fused_blur_h_ssim` produces and `fused_vblur_features_ssim` consumes.
+* **`scale_capacity_rows`'s `+32` slack.** Worth `1,020·W` bytes (1.1 MB at
+  1152²). The C1 test asserts the budget is never exceeded, but that is a
+  one-sided check; tightening it needs the actual `max_held_rows` distribution
+  swept over geometries first. Not attempted — small, and the cheap version of it
+  is a silent capacity-fallback `resize` in the hot path.
+* **Sharing band slots ACROSS channels.** 3 channels × 4 slots = 12 could be a
+  checked-out pool of `min(12, T)`. At 16 threads that saves nothing (12 < 16),
+  at 8 it saves a third; it needs a contended checkout in the hot path, and the
+  MT lane already measured `map_init(FoldPoolScratch::default)` as a net LOSS.
+* **§6's rejected `scale_capacity_rows` doubling** stays rejected, and this lane
+  strengthens the case: it would have bought ~2 ms for ~20 MB at 2304², against
+  which the advance is now *smaller* on the pools that could not use the degree.
+
+## 9. Reproduction
+
+```sh
+cargo build --release --bench fold_engine_bench -p zensim \
+    --features feature-regime-v2,threads,custom-profiles
+FE_BIN=<the bench binary> benchmarks/fold_footprint_2026-08-31/rss_sweep.sh out.tsv
+benchmarks/fold_footprint_2026-08-31/model.py out.tsv after
+BEFORE_BIN=… AFTER_BIN=… benchmarks/fold_footprint_2026-08-31/speed_ab.sh speed 1 16
+```
+
+Gates: `cargo test --release -p zensim --features feature-regime-v2,threads,custom-profiles,training`
+(232 lib + 11 `fold_engine_parity` + every integration test, all green), plus a
+`--no-default-features --features feature-regime-v2` build for the non-threaded
+arms of both new functions.
