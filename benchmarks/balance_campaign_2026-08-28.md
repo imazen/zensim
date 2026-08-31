@@ -3891,3 +3891,43 @@ not an auth error (registered for a zenfleet fix, unassigned); ~333 small-object
 tower to load 30.7 / 48.9 % iowait / S3 unresponsive (recovered ~12 min; load gate now in the
 tool; large sequential is fine); `zen-lanstore` runs volumeSizeLimitMB=1024 (30× under default →
 1,123 volume files; flagged, unchanged); pre-existing dangling `volume 473` filer retry loop.
+
+## 2026-08-31 ~04:1xZ — ROUND 16: THE FOLD IS THE ENGINE (8 zensim commits `7a843375`..`a2918021` + zenmetrics `92bdec00`)
+
+All six stages landed. **Additive API (for approval): 4 items, ALL `#[doc(hidden)]` and ALL behind
+`feature-regime-v2` (not a default feature)** — `zensim::fold_engine` (module),
+`fold_engine::ScoringEngine {Buffered|Fold}`, `Zensim::with_engine`, `Zensim::engine`. Default
+build's surface AND behaviour byte-for-byte unchanged; two pre-registered tier-2 items were NOT
+built (stage 3 needed no new reference type); no existing signature changed.
+
+**Gates:** fold-backed score = `to_bits()` equality on score/raw_distance/all features/mean_offset
+across 18 geometries × {serial, rayon} × profiles B + PreviewV0_2, incl. `classify` and rayon pools
+1/2/3/8/16; the golden gate states the fold against the **PINNED golden arrays**, not the buffered
+path (a cross-path test would pass if both drifted together); ref-cache N-vs-1 **bit-identical**
+(cross-engine worst |Δmean_offset| 8.674e-19); attribution density + SAT block sums bit-identical
+across engines with all 26 pre-existing attribution gates unchanged; GPU oracle A/B same 6 names,
+same CPU values. Full suite **378/0**, clippy clean at 3 feature combos.
+
+**Perf (same `ZensimResult` bit-for-bit in both arms — not a 944-vs-372 table):** serial PARITY
+(1.03×, CI crosses 0) at 1152²/2304²; under threads the fold is 2.30×/2.54× at 8T and 2.93×/3.25×
+at 16T slower — entirely thread SCALING (1T→16T at 2304²: buffered 6.15×, fold 1.95×, flat past
+8T), not work. Serial parity is NEW: a v1 score now asks the fold for `v1_only + PoolsMode::Full`
+(53 % of the walk skipped). `Buffered` remains the DEFAULT — no regression ships. Ref-cache saving
+fold −7.3…−9.7 % vs buffered −13.7…−20.4 % (cause measured: the fold allocates a fresh `V2Scratch`
+per compare — no fold-side `compute_with_ref_into`). Fused-vs-split 2.1× serial / 3.05–3.40× at
+8–16T. 576² cells CV 58–221 % — not quoted.
+
+**Retirement: REGISTERED PROPOSAL, nothing deleted.** Blockers 1/3/4/5 CLOSED (score, ref-cache,
+attribution canvas, GPU oracle). **The new gating blocker: `feature-regime-v2` is not a default
+feature — a default `cargo add zensim` build contains no fold at all**, independent of every parity
+gate. §9 carries 4 prerequisites, 7 entries still routing to buffered by design, a 7-step deletion
+order with the pinning test for each, and what must SURVIVE the deletion (the pyramid cache — move
+it out of `streaming.rs` first; the XYB front end; `compute_delta_stats`; `compute_xyb_mean_offset`
+as the DEFINITION `MeanOffsetRows::finish` reproduces).
+
+Open (measured): the fused compare is not re-hosted (its in-strip fold is tiled to
+`BAND_ROWS == STRIP_INNER`; falls back, costing 2.1–3.4×); no fold-side `compute_with_ref_into`
+(additive API, registered, outside the approved list); PU-linear, >16 MP strips, weight-skipping
+linear profiles, `with_stop`, `num_scales != 4` all named in §9.3. The predecessor's §15 and
+`zensim/CLAUDE.md`'s "buffered is not removable today" block were stale in four ways and are
+corrected in place.
