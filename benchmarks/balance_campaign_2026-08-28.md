@@ -4009,3 +4009,36 @@ preservation + golden re-pins.
   cpu-6 + all 10 photo). Score runs gap4 16/16 both, 0 failed. Write-back over all 8 runs →
   125,973 scores × 10 / 125,972 features × 944, `miss_sha=0 miss_score=0`; **views train 102,405 /
   eval8 23,567**; prior harvest kept as `…-pre-round3.bak`.
+
+## 2026-08-31 ~06:0xZ — ROUND 19: bigcodec retired from R2 (user-gated deletion; zenmetrics `fdc473fe`)
+
+**2,815,191 objects / 311,894,986,018 B (290.47 GiB) deleted; the tree re-lists as `Total Objects:
+0`; nothing outside it touched.** Enumeration was taken BEFORE the first delete (15 groups; it
+caught that `_regroup/` had never been mirrored — mirrored + verified 1/14,561 first).
+Verification per class: (a) 54 mirrored objects re-checked count+bytes on BOTH stores at delete
+time, 0 missing / 0 differing; (b) **zenjpeg had no index anywhere, so one was BUILT** — its 8 box
+tars streamed from the LAN store through the owner tool (extended with `ZEN_INDEX_ONLY=1`, since
+the declaring path also writes the `manifest.json`/`control.json` that make a run claimable):
+`bf-zjpeg-t0..7`, **1,484,010 members = the exact encodes count**, 13 member reads byte-for-byte
+identical to the R2 objects; then set-level coverage on all five `encodes/` prefixes = **0
+uncovered** (the first run was DISCARDED, not reported — `comm` had warned "not in sorted order"
+from mixed collations; recomputed under `LC_ALL=C` with `sort -c` self-checks); (c) all 2,815,191
+keys classified before the first delete: 2,815,122 tar-covered + 54 mirrored + 15 box-tar-covered,
+**0 unclassified**. Post-deletion: **6/6 datasets read end-to-end from the LAN store via
+index→tar byte range with R2 already gone**. Deleted-keys manifest (31.4 MB gz, sha256
+`66f30cd5…`, 2,815,191 lines) uploaded and round-trip verified BEFORE the first delete.
+
+**Cost, read live:** `DeleteObject` is FREE on R2 — the deletion cost nothing; the recurring
+saving is storage-line only, **$4.36–4.68/month** (311.895 GB × $0.015/GB-mo), which does NOT
+touch the operations spend the LAN migration targeted. Lane defect recorded: 353 delete batches
+failed `MalformedXML` because its driver globbed temp payloads a parallel shard was writing — R2
+rejected every one (nothing deleted), unmarked batches retried, driver fixed, final state settled
+by the tree listing at 0 rather than a batch counter.
+
+**Durability, corrected:** the "one physical machine" worry was WRONG — the 61 box tars carrying
+every encode byte were outside the deletion scope and remain on R2 *and* tower, so the compact-form
+off-site copy already exists. The real gap this created: **`originals/` (3 tars, 1.03 GiB) is now
+LAN-ONLY** (no R2, no `/mnt/v`) — cheap and acute; `bf-zjpeg-t0..7` is also LAN-only but
+regenerable in ~8 min. If the R2 box tars are ever retired too, a second compact copy becomes
+urgent. DATA_PROVENANCE carries the stop-block (bigcodec = LAN-primary, R2 removed 2026-08-30,
+tar+index is the fetch path).
