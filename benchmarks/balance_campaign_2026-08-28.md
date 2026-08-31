@@ -4438,3 +4438,55 @@ day** — stage B landed parity while it measured; §7.3 carries both and says w
   the planes never need to be full-width). Needs an x-offset for `blockiness_sparse_strip_wide` and
   a per-slab X/B activity stash — no kernel signature changes. The compute-set descriptor (item D)
   is not started. 369/0, clippy clean.
+
+## 2026-08-31 ~14:1xZ — ROUND 28: era-2 — the slab's PREMISE falsified before building it; the pool pass is now the largest item (`09464b84`, `64d89213`, `31b76af6`)
+
+- **The lane measured its own hand-off premise and killed it.** "fold and planesA are the two
+  remaining WIDTH-DISEASED leaders" was its own claim from round 27, never measured. The same
+  fixed-5.31 MP width probe prices every phase for free:
+
+  | phase | w2304 | w1152 | w576 | width-driven headroom |
+  |---|---:|---:|---:|---|
+  | `blur_h` | 131.96 | 35.34 | 31.75 | −100.2 ms — already taken |
+  | **`fold`** | **79.86** | **77.33** | **75.01** | **−4.85 ms (6.1 %)** |
+  | `planesA` | 39.31 | 27.37 | 26.08 | −13.23 ms |
+  | `dense` | 26.76 | 27.06 | 27.40 | none — *worse* narrow |
+  | `gradient` | 18.41 | 19.42 | 21.22 | none — **15 % worse at w576** |
+
+  **The fold is not width-diseased — it is 28 % of the walk because it is 28 % of the WORK.** So the
+  slab's whole prize is planesA+planesApp ≈ **16.4 ms of a 302 ms tiled walk (5.4 %)**, against a
+  3-plane copy-in AND a measured penalty on the pointwise kernels (they get SLOWER narrow: 66 ms of
+  kernels, −3.3 ms at 5 % eats a fifth of the prize before copies). "No kernel signature changes"
+  was also wrong: a column slab's halo is **interleaved in every row** and cannot be sliced off the
+  way a row band's can, so `stride`/`width` must thread through six phase-B kernels plus the fold.
+  **Not built.**
+- **★ Where the fold's mass actually is**: `944full` fold = 78.79 ms vs `924` (pools **Off**) =
+  37.59 ⇒ **the masked/IW/soft-peak POOL PASS is 41.2 ms = 52 % of the fold and 13.6 % of the whole
+  tiled walk** — the single largest remaining item, it is feature ARITHMETIC, and no tiling or
+  slabbing touches it. **That is the item-E cost column: the 11 pool pairs cost 13.6 % of every
+  compare, 2.5× larger than either layout lever left.**
+- **Next layout build, priced with its obstacle**: reading `fused_vblur_features_ssim` REVERSED the
+  lane's own §24.2 proposal — it does not run a V-blur pass; it keeps the four recurrences in
+  registers and already stores all four into `FoldPoolScratch` under `store_sigma`, so **the
+  duplicate to delete is phase A's**. The four `box_blur_v_from_copy` sweeps are **22.05 ms (55 % of
+  planesA)**; the three the fold already has are **16.69 ms = 5.5 %** (mu1's must stay — the
+  activity chain needs it on halo rows the band-scoped fold never produces). Obstacle worked out
+  BEFORE building: the fold's band buffers **overlap by 10 rows**, exactly the rows each band's V
+  blur mirrors at its buffer edge, so whole-buffer writes corrupt a neighbour in either band order
+  (same corruption as §22.1, different costume). Two costed exits: copy the inner rows out (no
+  kernel change, ≈ HALF the 16.69 ms) or an inner-only store offset (full 16.69, six tier bodies) —
+  and price them rather than assume, since that assumption was falsified once already today.
+- **`ZENSIM_H_TILE` default-on: RECOMMENDED unconditionally as part of era-2.** It **costs nothing
+  below the tile width structurally** (`width <= tile` is a no-op, so the 576²/1152² cells are not
+  small regressions — they ARE the noise floor and they bound every other cell in their row); gains
+  1.151×/1.733× at 1T from 2304² up and 1.234×/1.109× at 4608² on 8/16T. Cannot flip standalone
+  (byte change). **`TILE_WIDTH` should be DERIVED, not frozen at 1536**: the live window is
+  `H_BLUR_ROW_GROUP × 6 × tile × 4 B` ⇒ ≤1365 on this part's 1 MiB L2, so **1024** leaves headroom
+  on 512 KiB-L2 parts and sits inside the measured-flat 512–1536 band.
+- **Cross-lane hand-off done** (the blur/radius/branch lane's doc is not on main yet, so the numbers
+  live in era-2's): the B=32/64/128 band-local results with the bit-identical control; **a radius
+  cut does NOT rescue row banding** — phase A's closure is ±2R, so a 32-row band is 1.625× at R=5
+  and still **1.375× at R=3**, viable only near R=2, while the COLUMN closure is ±R and tiling is
+  essentially radius-insensitive (0.65 % → 0.26 %); tile-edge branch behaviour is measurable today
+  on main via `ZENSIM_H_TILE=0000` vs `0512`/`1536` (3× the edge count, same binary); plus the ASLR
+  protocol. Item D (compute-set descriptor) not started.
