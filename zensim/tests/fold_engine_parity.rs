@@ -137,6 +137,16 @@ fn assert_result_bit_identical(ctx: &str, buffered: &ZensimResult, fold: &Zensim
 /// procedural golden geometries and a sub-64 cell that exercises the shared
 /// reflect-pad.
 const CELLS: &[(usize, usize)] = &[
+    // WIDER THAN `H_TILE_WIDTH` (1024) — the only cells here that exercise the
+    // era-2 column tile at its SHIPPED width. Every other cell is narrower
+    // than the tile and so runs the untiled path by construction
+    // (`width > tile` guards every H entry), which means that without these
+    // the whole parity suite would leave the shipped configuration untested.
+    // 1153 is deliberately odd and crosses the boundary with a 129-column
+    // remainder tile; 2049 crosses two boundaries with a 1-column remainder,
+    // the narrowest tile the loop can emit.
+    (1153, 72),
+    (2049, 40),
     // the procedural golden fixtures
     (64, 64),
     (200, 150),

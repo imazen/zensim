@@ -2915,9 +2915,34 @@ pub(crate) fn h_blur_tile_width() -> usize {
         std::env::var("ZENSIM_H_TILE")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(0)
+            .unwrap_or(H_TILE_WIDTH)
     })
 }
+
+/// Default column-tile width for the H blur. **ERA-2 DEFAULT (2026-08-31).**
+///
+/// **DERIVED, not picked.** The quantity that matters is the H blur's live
+/// window: it holds `H_BLUR_ROW_GROUP` rows × **6** planes (src, dst, four
+/// outputs) × `tile` columns × 4 B, and that wants to sit inside L2. At the
+/// 1 MiB L2 on the development part that is
+/// `1_048_576 / (16 × 6 × 4)` = **1365 columns**; **1024** is the power of two
+/// below it, which also leaves headroom on parts with a 512 KiB L2
+/// (`16 × 6 × 1024 × 4` = 393 KiB, still inside) — and it sits inside the
+/// **measured-flat** band: 512 / 1024 / 1536 were 271.25 / 271.64 / 270.57 ms
+/// at 2304²/1T, i.e. within noise of each other
+/// (`benchmarks/era2_perf_break_2026-08-31.md` §23.3).
+///
+/// **This is SEMANTICS, not a tuning knob.** The running sum along x restarts
+/// at every tile boundary, so changing this value changes the emitted feature
+/// bytes — the tile boundaries are part of the era-2 definition, exactly as
+/// `ERA2_BAND_ROWS` is. Re-tuning it for speed on a different part is a NEW
+/// era, not a configuration change. `ZENSIM_H_TILE` overrides it for
+/// measurement only (`0` disables tiling and reproduces era-1's H planes).
+///
+/// A width at or below the tile is untiled by construction (`width > tile`
+/// guards every H entry), so images narrower than this are byte-for-byte what
+/// era-1 produced.
+pub(crate) const H_TILE_WIDTH: usize = 1024;
 
 /// [`fused_blur_h_ssim`] over column tiles of `tile` output columns, each
 /// staged with a `±radius` halo into a compact thread-local buffer, blurred

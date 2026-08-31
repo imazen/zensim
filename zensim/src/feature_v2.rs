@@ -2935,7 +2935,9 @@ fn dense_block_kernel_pools_scalar(
 fn era2_dense_enabled() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("ZENSIM_ERA2_DENSE").as_deref() == Ok("1"))
+    // ERA-2 DEFAULT (2026-08-31): ON. `ZENSIM_ERA2_DENSE=0` restores era-1's
+    // per-row f64 reduction for measurement only.
+    *ON.get_or_init(|| std::env::var("ZENSIM_ERA2_DENSE").as_deref() != Ok("0"))
 }
 
 /// The production dense entry: dispatches on [`era2_dense_enabled`].

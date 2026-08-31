@@ -2550,3 +2550,108 @@ the change was built and run rather than reasoned about. §24.4 reasoned about
 this same change and got the obstacle wrong in both directions — it predicted
 an overlap problem that does not exist (the kernel stores only inner rows) and
 missed all four that do.
+
+---
+
+## 30. ERA-2 IS FLIPPED — the record (2026-08-31, user decision)
+
+**Shipped ON, by default, in one step: the column tile and the fixed-lane
+accumulation. Radius 4 is NOT flipped** — it stays registered behind the
+retrain wave (`benchmarks/era2_blast_radius_2026-08-31.md` §2.3), because it is
+the only component with a real data-side blast radius.
+
+### 30.1 What changed, and the constant that is now semantics
+
+| component | switch | default |
+|---|---|---|
+| column tile on all four H entries | `ZENSIM_H_TILE` | **`H_TILE_WIDTH = 1024`** (`0` disables, for measurement) |
+| fixed 8-virtual-lane dense accumulation | `ZENSIM_ERA2_DENSE` | **on** (`=0` disables, for measurement) |
+
+`H_TILE_WIDTH` is **derived, not frozen at the 1536 the sweep happened to
+use**. The H blur's live window is `H_BLUR_ROW_GROUP × 6 planes × tile × 4 B`;
+at the 1 MiB L2 on the development part that caps the tile at
+`1_048_576 / (16 × 6 × 4)` = **1365**, and 1024 is the power of two below it —
+which also fits a 512 KiB L2 (393 KiB) and sits inside the measured-flat
+512–1536 band (271.25 / 271.64 / 270.57 ms at 2304²/1T, §23.3). It carries the
+**semantics-not-a-knob** warning at the constant: the running sum along x
+restarts at every tile boundary, so re-tuning this value for speed on another
+part is a NEW ERA, not a configuration change — exactly like `ERA2_BAND_ROWS`.
+
+### 30.2 Gate re-pins, old → new: **ZERO**
+
+The enumeration in §27.3 predicted five absolute-value goldens (the four
+`v1_golden_bytes` fixtures, `f0` −5.149e-6; `hardcoded_reference_scores`,
+1.8e-4…1.0e-2 score points). **At the shipped tile width, none of them move,
+and none were re-pinned.** The reason is structural rather than lucky: every H
+entry guards `width > tile`, and the fixtures are **64×64, 96×96, 200×150 and
+128×128** — all narrower than 1024, so they run the untiled path by
+construction. §27.3's five were the re-pin set at `tile = 32`, the forced-on
+setting used to *find* the set; the shipped setting does not reach them.
+
+The accumulation re-pins zero independently (§28.3): it moves only `f372+`,
+and every golden pins v1's 372.
+
+**No tolerance was widened, and no assertion was removed or ignored.**
+**Every internal-consistency gate passed unchanged at both settings** —
+cross-engine, cross-entry-path, cross-rayon-pool-size, cross-tier, the
+fold-vs-v1 family, the era-2 band and fused/two-pass gates. That is what
+licensed a one-step flip rather than an incremental migration.
+
+**A coverage hole the flip created, and closed in the same commit.** If no
+fixture is wider than the tile, then *no test exercises the shipped
+configuration*. The widest cell in `fold_engine_parity`'s `CELLS` was 592.
+Added **`(1153, 72)` and `(2049, 40)`** — deliberately odd widths that cross
+one and two tile boundaries, the second leaving the narrowest remainder tile
+the loop can emit (1 column). `folded944_is_bit_identical_across_rayon_pool_
+sizes` and every other `CELLS`-driven gate now run at a width that actually
+tiles, and pass. `v1_372_bit_exact_to_fold_at_every_width` already covered
+`(1152, 72)`.
+
+**Suite: 370 passed, 0 failed** with both components on.
+
+### 30.3 The era's headline property, measured on the shipped build
+
+Same binary, two hosts, different SIMD tiers — dev (`v4x`, AVX-512) against
+i134 (`v3`, SSE4.2, 13th Gen Intel i5-13400F):
+
+| accumulation | slots that DIVERGE across the two vendors |
+|---|---|
+| era 1 (`reduce_add`, per-backend order) | **66 / 105** |
+| era 2 (`era2_reduce8`, written-out tree) | **0 / 105** |
+
+That is the accumulation's entire justification and it is now the default. It
+is not a speed change — §28.4 measured it at 1.026× / 1.015×, inside the noise
+floor, with `v2:dense` marginally *worse* — it is a **determinism** change:
+the same image now yields the same bytes on machines whose horizontal reduction
+orders differ.
+
+### 30.4 Speed shipped
+
+From §23.6 / §27.1, min over process starts, CCD-pinned, arms interleaved:
+
+| threads | 576² | 1152² | 2304² | 4608² |
+|---:|---:|---:|---:|---:|
+| 1 | 1.001× | 0.997× | **1.183×** | **1.673×** |
+| 8 | 1.008× | 0.935× | 1.064× | **1.299×** |
+| 16 | 0.989× | 1.018× | 0.944× | 1.109× |
+
+The two left columns are the identical-code-path control and read the
+measurement's noise floor (±0.3 % at 1T, up to 6.5 % at 8T), not a regression.
+Images narrower than the tile are byte-for-byte and cycle-for-cycle what era-1
+produced.
+
+### 30.5 The accepted exception, recorded rather than dropped
+
+**BHdr misses the bar's zero-tolerance composite clause by 3.2e-6** under
+tiling — 13 % of the `+0.000024` non-event the bar itself cites, with its
+worst-corpus loss **125× inside** the same bar's 0.005 per-corpus clause. The
+rank lane reported it as **FAIL** rather than renegotiating the threshold,
+which is right. The user has seen the number and decided to ship.
+
+It is recorded as a **user-accepted exception, not a pass**:
+`benchmarks/eval_annotations.json` entry
+**`era2-tiling-bhdr-accepted-exception`**, with the standing warning that any
+future roll-up counting era-2 tiling as 6/6 is wrong — **it is 5/6 plus this
+exception** — and with the fix path named (the registered, unlaunched
+radius-4/era-2 retrain arm W-R4-4, which would re-measure BHdr as a
+trained-at-era-2 bake rather than an era-1 bake scored on era-2 features).
