@@ -4071,3 +4071,44 @@ are now the ONLY off-site copy of the corpus. Measured, un-mirrored, no active L
 on tower). Recommendation to the user: KEEP the 61 box tars as the off-site copy; retire the
 superseded picker-sweep + the regenerable kadis distorted PNGs instead (~363 GiB, no durability
 loss).
+
+## 2026-08-31 ~07:0xZ — ROUND 20: box-tar dedup + KADIS originals, MEASURED (user questions; zenmetrics `50899f9d`, doc `benchmarks/bigcodec_dedup_and_kadis_originals_2026-08-31.md`)
+
+**Q1 — the box tars are NOT deduplicated; 22.62 % of their payload is duplicate.** Corpus shape,
+exact from the 61 indexes: **5,742,669 members / 231,078,618,620 B payload (215.21 GiB)** inside
+235,474,984,960 B of tar (4.09 GiB header/padding), from **4,497 distinct source renditions**;
+per-family payload reconciles to the byte with the R2 `encodes/` totals. The indexes carry **no
+content hash** (schema `name⇥offset⇥size⇥name`; the trailing 16-hex token in a member name is the
+KNOB-TUPLE hash, not content), so: group by length, then PPS-by-potential-dup-bytes over
+(family, rendition, size), 2,400 draws over 2,241 groups, every member of every sampled group
+sha256'd via ranged GETs (2.21 GiB read, no whole-tar pulls). Duplicate bytes **52,268,279,641 =
+48.68 GiB [48.30, 49.03]**; per family: jxl-lossless **63.9 %**, webp 23.7 %, jxl-lossy 19.1 %,
+png 3.0 %, avif 2.1 %, **jpeg 0.0 %**. Cross-rendition stratum: 2,310 members hashed, **0
+collisions** (≤ ~0.40 GiB by rule of three). **Mechanism: 90.7 % of multi-member groups have q
+fixed and only the knob tuple varying — knob tuples that emit byte-identical bitstreams.**
+Content-dependent, NOT a prunable grid defect (25 zjxlm renditions → 20 distinct (q,knob)→content
+partitions), so only content-addressing recovers it. **Name-level duplication is exactly ZERO**
+(5,742,669 members, 5,742,669 distinct names); rendition-level is 100 % by design (all 4,497
+renditions in all 6 families) — rendition reuse ≠ byte duplication. Unique content **166.53 GiB**;
+dedup opportunity **48.68 GiB per copy**. The tars exist in **THREE** copies (R2 + LAN SeaweedFS +
+tower `zen924/tars/`, re-verified 235,474,984,976 B) ⇒ **dropping a copy is the bigger lever
+(219.30 GiB each)** than deduplicating one.
+
+**Q2 — 140,000 KADIS originals, they exist twice, and the distorted PNGs do NOT regenerate.**
+140,000 verified four ways (distinct `source_id` 0…139,999 and `source_filename` in the GPU
+canonical, the 2026-06-30 canonical and `kadis700k_924.parquet`; plus `/mnt/v/datasets/kadis700k/
+refs/` = exactly 140,000 files, set-matching the parquet with 0 missing / 0 extra both ways).
+Originals live in **two byte-identical copies** — `/mnt/v/datasets/kadis700k/refs/` and
+`s3://zentrain/kadis-700k/refs/`, both 140,000 objects / 44,632,022,736 B (41.57 GiB), 3/3 sha
+spot-checks identical; NOT on tower, NOT on the LAN store. **`kadis-700k-gpu/distorted/` =
+699,999 objects / 211,990,306,109 B (197.43 GiB), R2-only.** ⚠ **NOT faithfully regenerable**:
+measured 2026-07-24, `kadis_distort.io.rng_for()` is not the seed the 2026-06/07 generator used
+(stochastic types come out mean |Δ| ≈ 9.8 different; `serve.py` carries two seeding schemes and
+picks the name-based v2 when `ref_name` is present), and even bit-exact regen would not restore
+validity — all 7 metric scores and every 372/720/924/944 feature vector were computed on THOSE
+pixels, and `negrich` is *defined* as `score_zensim_gpu < 0` on them. Retiring them costs no
+existing work (all four regimes extracted + triple-mirrored) — it costs the option to extract a
+FUTURE regime (e.g. the anticipated HDR append): 197.43 GiB / ~$3.18/mo against re-labelling 700k
+cells. **Middle path: keep only `negrich` (167,034 of 699,999 = 23.9 %).**
+⚠ Flagged, other repo: `~/work/kadis-distort/docs/DATASET.md` still claims the distorted PNGs are
+"cheap to regenerate deterministically" — falsified by the 2026-07-24 measurement.
