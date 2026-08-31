@@ -221,3 +221,4 @@ These are the docs to read first for a given purpose:
 **Era-2 break — the user's decision surface**:
 [`era2_drop_redefine_table_2026-08-31.md`](era2_drop_redefine_table_2026-08-31.md) — items E (drops) + F (redefinitions) as one table: what each buys, its per-model rank cost, and what it takes to ship. Backed by [`era2_perf_break_2026-08-31.md`](era2_perf_break_2026-08-31.md) and [`blur_radius_locality_branches_2026-08-31.md`](blur_radius_locality_branches_2026-08-31.md).
 [`era2_blast_radius_2026-08-31.md`](era2_blast_radius_2026-08-31.md) — the era-2 flip's third prerequisite: what re-pins, what re-extracts, what retrains, and the registered (unlaunched) wave.
+[`era2_fast_profile_subset_2026-08-31.md`](era2_fast_profile_subset_2026-08-31.md) — "what subset should a high-speed model be limited to?": the measured cost curve for five compute sets at 1/8/16T, what each gives up, and the recommended pair (`156` for a fast profile, `944peaks` free for 944 MLPs).

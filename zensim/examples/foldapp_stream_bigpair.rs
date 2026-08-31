@@ -85,6 +85,30 @@ fn main() {
             ..Default::default()
         },
         "924" => V2NewFeatureToggles::default(),
+        // `944peaks` — the full 944 shape MINUS the masked/IW pool pass.
+        // Peaks are free byproducts, so they stay.
+        "944peaks" => V2NewFeatureToggles {
+            append2_block: true,
+            csfw_block: true,
+            append2_dst_activity: true,
+            v1_pools: V1PoolsMode::Peaks,
+            ..Default::default()
+        },
+        // `156` — the basic-only (ADD156) class: v1 basic + free peaks, no
+        // v2-era block at all.
+        "156" => V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Peaks,
+            ..Default::default()
+        },
+        // `944carriers` — pools reduced to the 10 named carrier slots.
+        "944carriers" => V2NewFeatureToggles {
+            append2_block: true,
+            csfw_block: true,
+            append2_dst_activity: true,
+            v1_pools: V1PoolsMode::Carriers,
+            ..Default::default()
+        },
         _ => V2NewFeatureToggles {
             append2_block: true,
             csfw_block: true,
