@@ -4042,3 +4042,32 @@ LAN-ONLY** (no R2, no `/mnt/v`) — cheap and acute; `bf-zjpeg-t0..7` is also LA
 regenerable in ~8 min. If the R2 box tars are ever retired too, a second compact copy becomes
 urgent. DATA_PROVENANCE carries the stop-block (bigcodec = LAN-primary, R2 removed 2026-08-30,
 tar+index is the fetch path).
+
+### Round 19 addendum — the single-copy gap closed (zenmetrics `f240bb93`)
+
+`originals/` (3 tars, 1,100,933,120 B) + `bf-zjpeg-t0..7` (8 index files, 242,272,708 B) copied to
+`s3://zentrain/_archive/bigcodec-2026-08-30/{originals,indexes}/`; **11/11 sha256 identical to the
+LAN source**, LAN copies untouched, per-object shas recorded in the mirror doc §7.7. R2 (not
+`/mnt/v`) because the risk being closed is "the tower is lost" — `/mnt/v` is the same building,
+power and network on a 74 %-full volume, so it would have made the count two while leaving the
+failure mode intact; and `originals/` is IRREPLACEABLE (every encode re-derives from originals +
+a codec; nothing re-derives the originals). `bf-zjpeg` was second-copied rather than left
+regenerable for symmetry (the other 53 `bf-*` index families were already on R2) and filed under
+`_archive/` so a bare index cannot be mistaken for a run; the `ZEN_INDEX_ONLY=1` regeneration
+command + its correctness bar (8 boxes must total 1,484,010 members) are recorded regardless.
+Cost 1.343 GB × $0.015 = **$0.02/mo against the $4.68 freed**. Lane self-correction: a first
+upload silently did nothing (`nice` cannot invoke the `aws_r2` shell function) — caught by
+`--summarize` reading `Total Objects: 0`, redone; the "uploaded" echoes in that pass were false.
+
+**R2 accounting after this round (measured, for the retire-more decision):** deleted =
+`canonical/2026-06-27/` 290.47 GiB (now 0 objects). STILL ON R2 and mirrored to tower: the **61
+box tars, 219.3 GiB**, under `zentrain/jxl-lossy/runs/<run>/variants/` (mandfix4-zenavif 47.20 /
+jxl-lossy-vardct 30.80 / mandfix2-zenjpeg 44.19 / mandfix2-zenwebp 29.71 / jxl-modular 54.60 /
+mandfix2-zenpng 12.81) — these are the SAME bytes as the deleted `encodes/`, in compact form, and
+are now the ONLY off-site copy of the corpus. Measured, un-mirrored, no active LAN reader:
+`kadis-700k-gpu/distorted/` 197.43 GiB (699,999 PNGs, regenerable from links),
+`codec-corpus/picker-sweep-2026-06-22/` 165.91 GiB (superseded by canonical/2026-06-27),
+`codec-corpus/kadis-hdr-2026-07-13/` 66.54 GiB, `codec-corpus/synthetic-v2/` 38.22 GiB (archived
+on tower). Recommendation to the user: KEEP the 61 box tars as the off-site copy; retire the
+superseded picker-sweep + the regenerable kadis distorted PNGs instead (~363 GiB, no durability
+loss).
