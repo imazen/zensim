@@ -489,26 +489,35 @@ predecessor's **2.93× / 3.25×** on the same bench and box.
 `/usr/bin/time -v`, one arm per process, 20 compares each. The loop holds both
 input images (7.96 MB at 1152², 31.85 MB at 2304²) in every arm.
 
-| size | threads | `score_buffered` | `score_fold` | fold ÷ buffered |
+The **working set** column subtracts that constant, which is what the
+predecessor's §10.3 table reports — a peak-RSS ratio and a working-set ratio
+are not the same number, and quoting one against the other is the mistake this
+column exists to avoid.
+
+| size | threads | `score_buffered` peak / w.set | `score_fold` peak / w.set | fold ÷ buffered (w.set) |
 |---|---|---:|---:|---:|
-| 1152² | 1 | 47.6 MB | 60.2 MB | 1.26× |
-| 1152² | 16 | 60.8 MB | 80.8 MB | 1.33× |
-| 2304² | 1 | 159.6 MB | 127.6 MB | **0.80×** |
-| 2304² | 16 | 195.4 MB | 171.1 MB | **0.88×** |
+| 1152² | 1 | 47.6 / 39.6 MB | 60.2 / 52.2 MB | 1.32× |
+| 1152² | 16 | 60.8 / 52.8 MB | 80.8 / 72.8 MB | 1.38× |
+| 2304² | 1 | 159.6 / 127.8 MB | 127.6 / 95.8 MB | **0.75×** |
+| 2304² | 16 | 195.4 / 163.6 MB | 171.1 / 139.3 MB | **0.85×** |
 
 The predecessor's crossover holds and this lane did not move it: buffered
 scales with AREA (whole-image pyramids), the fold closer to WIDTH (rolling
 planes), so the fold is the heavier path below ~1.5 MP and the lighter one
 above it. `ADVANCE_ROWS` 256 (§2.3) and the band-local H planes (§2.5) both add
 to the fold's footprint; against that, self-blur stops touching the strip-wide
-H planes at all, so those pages are never faulted in. Net at 2304²/16T the fold
-is still **0.88×** buffered (0.80× serially) — the predecessor measured 0.80×
-for the 944 walk and 0.62–0.63× for the narrower modes, so **the lane's memory
-cost is real and it has eaten most of the large-image margin at 16 threads**
-without crossing it. At 1152² the fold was already the heavier path (1.13× in
-the predecessor's numbers) and is now 1.26–1.33×. If the memory shape is being
-defended as a product property, that is the number to watch, and §6's rejected
-`scale_capacity_rows` change is the one this lane declined to spend on speed.
+H planes at all, so those pages are never faulted in.
+
+Net at 2304² the fold's working set is **0.75× serially and 0.85× at 16
+threads**. The predecessor's §10.3 measured **0.80×** for the 944 walk (and
+0.62–0.63× for the narrower modes) at 8 threads, so serially this lane is
+slightly AHEAD of that and at 16 threads slightly behind — **the lane's memory
+cost is real and it has eaten part of the large-image margin, without crossing
+it.** At 1152² the fold was already the heavier path (1.13× in the
+predecessor's §6 numbers) and is now **1.32–1.38×**. If the fold's memory shape
+is being defended as a product property, that 1152² row is the number to watch,
+and it is why §6's `scale_capacity_rows` change — which would have added ~20 MB
+more for ~2 ms — was rejected rather than spent.
 
 ---
 
