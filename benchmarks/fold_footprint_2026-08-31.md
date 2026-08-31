@@ -352,12 +352,25 @@ interpolation of the ratio in AREA and is quoted to one decimal for that reason.
 (The landing commit message rounds the 1T pair as 2.7 → 0.6 MP; these are the
 interpolated values and supersede it.)
 
-Peak-heap check at 1152² (heaptrack, decimal MB): fold **83.17 → 29.81 MB at
-1T** and **→ 55.86 MB at 16T**, against buffered's unchanged **41.30 / 61.73 MB**
-— so on the allocation side the fold is now the lighter path at 1152² at BOTH
-thread counts, and every post-fix term matches its closed form to < 0.1 %
-(rolling 11.60 vs 11.60; pool 5.81 vs 5.81 at 1T and 23.22 vs 23.22 at 16T; strip
-4.09 vs 4.09; buffered's `ScaleBuffers` 21.70 vs 21.68 MB at 16T).
+**Per-term predicted vs measured, AFTER** — heaptrack at 1152², decimal MB, the
+same decomposition §3.1 gives for the before state:
+
+| term | 1T measured | 1T closed form | 16T measured | 16T closed form |
+|---|---:|---|---:|---|
+| `RollingPlane::from_pooled` | **11.60** | `24·Σ W_s·cap_s`, A=64 → 11.60 | **18.57** | A=256 → 18.57 |
+| pool `ensure` (`finish_grow`) | **5.81** | `3·1·10·42·W·4` → 5.81 | **23.22** | `3·4·10·42·W·4` → 23.22 |
+| `ScratchV2Strip::new_for` | **4.09** | `2·3·148·W·4` → 4.09 | **4.09** | → 4.09 |
+| `rgb_buf` | 0.22 | `min(T, 2A/64)·192·W` → 0.22 | 1.77 | → 1.77 |
+| input images | 7.96 | `6·W·H` → 7.96 | 7.96 | → 7.96 |
+| **peak heap** | **29.81** | Σ = 29.68 | **55.86** | Σ = 55.61 |
+| *buffered, same cell* | **41.30** | 31.85 + 1.38 + 7.96 | **61.73** | 31.85 + 21.70 + 7.96 |
+
+Every fold term matches its closed form to **< 0.1 %** (the 0.2–0.4 % gap in
+the peak-heap row is the accumulators, `MeanOffsetRows` and rayon/crossbeam
+bookkeeping the table does not itemise), and buffered's `ScaleBuffers` at 16T is
+21.70 measured against 21.68 predicted. So on the
+allocation side the fold is now the lighter path at 1152² at BOTH thread counts
+— 29.81 vs 41.30 MB at 1T and 55.86 vs 61.73 at 16T.
 
 ### 6.1 Model accuracy, `score_fold`, AFTER (`P0` = 3,824 KiB from the 128² row)
 
