@@ -9,6 +9,11 @@ other seven sizes.
 
   ./model.py rss_before.tsv before
   ./model.py rss_after.tsv  after
+
+`fold_model` also returns `strip_alloc`, which the RSS prediction deliberately
+does NOT use: under stock glibc the ScratchV2Strip planes a walk never writes
+are demand-zero mmap pages that never fault, so the RESIDENT term is the written
+set. `strip_alloc` is the allocation-side figure to compare against heaptrack.
 """
 import csv, sys
 
@@ -111,5 +116,33 @@ def main():
                   f"conv {kib(f['conv']):.0f} (adv {f['advance']} slots {f['slots']})")
 
 
+def crossover(t, era, lo=128, hi=8192):
+    """Smallest square side at which the fold model is <= the buffered model.
+
+    Bisection on the square W=H family, terms only (P0 cancels: it is the same
+    process either way and the two arms differ by <300 KiB on the 128 row).
+    """
+    def fold_minus_buf(w):
+        f = fold_model(w, w, t, era)
+        b = buf_model(w, w, t)
+        return (f["rolling"] + f["pool"] + f["strip"] + f["conv"]) - sum(b.values())
+    if fold_minus_buf(hi) > 0:
+        return None
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if fold_minus_buf(mid) > 0:
+            lo = mid
+        else:
+            hi = mid
+    return hi
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "crossover":
+        print(f"{'threads':>7} {'before W':>9} {'before MP':>10} "
+              f"{'after W':>8} {'after MP':>9}")
+        for t in (1, 2, 4, 8, 16):
+            wb, wa = crossover(t, "before"), crossover(t, "after")
+            print(f"{t:>7} {wb:>9} {wb*wb/1e6:>10.2f} {wa:>8} {wa*wa/1e6:>9.2f}")
+        sys.exit(0)
     main()
