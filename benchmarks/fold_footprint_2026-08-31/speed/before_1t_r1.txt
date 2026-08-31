@@ -33,3 +33,35 @@ run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=45115MiB :: /home/lilith/t
   [1] CI crosses zero
   [2] CI crosses zero
   [3] CI crosses zero
+
+  fold_engine_2304  18 rounds × 1 calls
+                        mean ±mad ms  95% CI vs base     
+  ├─ score_buffered     204.2 ±1.8ms  [201.8–206.7]ms    
+  ├─ score_fold         201.6 ±1.2ms  [-2.4%–-0.1%]       [1]
+  ├─ feat_buffered      202.1 ±1.0ms  [-2.7%–+0.8%]       [2] [3]
+  ├─ feat_fold          199.1 ±1.8ms  [-3.4%–-1.5%]      
+  ├─ ref_buffered       181.4 ±1.8ms  [-11.9%–-10.2%]    
+  ├─ ref_fold           187.6 ±1.3ms  [-8.9%–-7.1%]      
+  ├─ refinto_buffered   179.5 ±1.6ms  [-13.7%–-12.8%]    
+  ├─ refinto_fold       185.9 ±2.9ms  [-9.2%–-7.6%]      
+  ├─ fused_buffered     274.2 ±3.6ms  [+32.3%–+36.2%]    
+  ╰─ split_fold         556.3 ±4.8ms  [+173.0%–+174.9%]  
+
+  refinto_buffered  ████████████████ 179.48ms
+  ref_buffered      █████████████████ 181.44ms
+  refinto_fold      █████████████████ 185.94ms
+  ref_fold          █████████████████ 187.65ms
+  feat_fold         ██████████████████ 199.08ms
+  score_fold        ██████████████████ 201.57ms
+  feat_buffered     ███████████████████ 202.09ms
+  score_buffered    ███████████████████ 204.17ms
+  fused_buffered    █████████████████████████ 274.16ms
+  split_fold        ███████████████████████████████████████████████████ 556.27ms
+  [1] CI crosses zero
+  [2] CI crosses zero
+  [3] drift r=0.53 — later rounds slower
+
+  total: 1216.5s  (1110 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 1217s | peak-RSS 1.17GiB | min-avail 41036MiB | peak-load 1.35

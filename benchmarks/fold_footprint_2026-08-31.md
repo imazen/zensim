@@ -503,7 +503,145 @@ thread-local, and that is an API/ownership decision, not a footprint one.
   strengthens the case: it would have bought ~2 ms for ~20 MB at 2304², against
   which the advance is now *smaller* on the pools that could not use the degree.
 
-## 9. Reproduction
+---
+
+## 9. The per-thread cache budget — the target the ratio was a proxy for
+
+A footprint RATIO is not the quantity that decides thread scaling. The
+predecessor measured the real one: **N independent single-threaded processes
+saturate this box at 3.5× for the fold against 10.9× for buffered**, from the
+same serial speed
+([`fold_mt_scaling_2026-08-31.md`](fold_mt_scaling_2026-08-31.md) §4). That is a
+statement about **per-thread HOT SET against L3**, not about total footprint, and
+it is what the rest of this section prices.
+
+### 9.1 The box is not the box the docs say
+
+MEASURED (`lscpu`, `/sys/devices/system/cpu/cpu*/cache/index3/`), because this
+matters and the workspace's Environment note says "AMD Ryzen 9 7950X":
+
+| | |
+|---|---|
+| CPU | **AMD Ryzen 9 9950X3D**, 16 cores / 32 threads, 1 socket, 1 NUMA node |
+| L1d | 48 KiB per core |
+| L2 | **1 MiB per core**, shared by its 2 SMT siblings (`shared_cpu_list` 0,16) |
+| L3 | **ASYMMETRIC — 128 MiB total in 2 instances**: CCD0 = cpus 0-7 + 16-23 → **96 MiB** (3D V-Cache); CCD1 = cpus 8-15 + 24-31 → **32 MiB** |
+
+**`getconf LEVEL3_CACHE_SIZE` returns 33554432 (32 MiB) and is wrong for half
+the machine** — it reports one instance. Read
+`/sys/devices/system/cpu/cpuN/cache/index3/{size,shared_cpu_list}` instead. Any
+budget derived from a flat "64 MiB / 16 threads" is doubly wrong here: the total
+is 128 MiB, and it is not shared.
+
+**Per-thread L3 budget**, assuming Linux spreads a rayon pool across physical
+cores (8 per CCD at 16 threads):
+
+| pool | CCD0 threads | CCD0 budget | CCD1 threads | **CCD1 budget (binding)** |
+|---|---:|---:|---:|---:|
+| 8 | 4 | 24 MiB | 4 | **8 MiB** |
+| 16 | 8 | 12 MiB | 8 | **4 MiB** |
+| 32 | 16 | 6 MiB | 16 | **2 MiB** |
+
+The asymmetry is itself a hazard for any scaling claim on this box: half the
+threads have **3× the cache of the other half**, so a hot set between 4 and
+12 MiB per thread scales on CCD0 and thrashes on CCD1 — which is exactly the
+shape a "saturates around 3.5×" measurement takes.
+
+### 9.2 Every term as bytes PER THREAD
+
+The hot set is what one band task touches while it runs, not the walk's total.
+At scale 0, width `W`, a fold band task (`v1_only` + `Full`, self-blur) touches
+**12 planes over `V1_BAND_ROWS + 2·V1_BAND_OVERLAP = 42` rows**: the 2 raw
+windows it reads plus the 10 it writes (4 band-local H, `act_raw`, `act`,
+`mu1_v`, `mu2_v`, `ssq_v`, `s12_v`) — `2,016·W` bytes. Buffered's band task
+touches its 7 `ScaleBuffers` planes plus the same 2 raw windows — `1,512·W`.
+
+| W | fold / thread | buffered / thread | fold × 8 (one CCD) | buffered × 8 |
+|---|---:|---:|---:|---:|
+| 1152 | 2.21 MiB | 1.66 MiB | 17.7 MiB | 13.3 MiB |
+| 2304 | 4.43 MiB | 3.32 MiB | **35.4 MiB** | **26.6 MiB** |
+| 4096 | 7.88 MiB | 5.91 MiB | 63.0 MiB | 47.2 MiB |
+| 8192 | 15.75 MiB | 11.81 MiB | 126.0 MiB | 94.5 MiB |
+
+**At 2304² — the size the ceiling was measured at — 8 threads on CCD1 need
+35.4 MiB for the fold and 26.6 MiB for buffered against a 32 MiB L3. The
+threshold falls exactly between them.** That is an arithmetic coincidence
+precise enough to be worth testing rather than asserting, and §9.4 is the test.
+
+**This lane's shipped fixes do NOT move this number**, and saying so is the
+point: a band task touches ONE pool slot whether the walk keeps 3 of them or 12,
+so `band_slots_for` changes the walk's total footprint and its cross-strip
+reuse, not its per-task hot set. `advance_rows_for` shrinks a STREAMED term
+(each rolling row is written once and read a few times) rather than a resident
+one. What they bought is real and large (§6, §7) — it is just a different
+quantity from the one that bounds thread scaling.
+
+### 9.3 Column tiling is the only lever that reaches the budget — and it is not this lane's to pull
+
+Every band today is **FULL WIDTH**, so per-thread bytes are `2,016·W`: linear in
+image width, with no bound. No amount of pooling, slot-counting or window
+trimming changes that, because it is the shape of the task, not of the
+allocation. Splitting a band into column tiles of width `Tw` makes the per-thread
+hot set **independent of image width**, which is the only property that reaches
+an L3 budget at 4K and beyond.
+
+**Halo cost, derived from the kernel chain, not guessed.** The band's chain is
+`src → box_blur_h(r=5) → mu1_h → abs_diff → act_raw → box_blur_1pass(r=5) → act`,
+and `box_blur_1pass_into` is `box_blur_h` **then** `box_blur_v_from_copy`
+(`blur.rs:29`) — so there are **two chained H passes**, and a tile needs
+`2 × BLUR_RADIUS = 10` extra columns per side. Buffer width `Tw + 20`;
+redundant work `20/Tw`:
+
+| `Tw` | redundant H work | hot set / thread (`2,016·(Tw+20)`) | fits CCD1 @16T (4 MiB)? | fits L2 (1 MiB/core)? |
+|---:|---:|---:|---|---|
+| 128 | 15.6 % | 0.28 MiB | yes | yes |
+| 256 | 7.8 % | 0.53 MiB | yes | yes |
+| 512 | 3.9 % | 1.02 MiB | yes | marginal |
+| 1024 | 2.0 % | 2.01 MiB | yes | no |
+| 2048 | 1.0 % | 3.98 MiB | just | no |
+| 4096 | 0.5 % | 7.91 MiB | **no** | no |
+
+There is a real optimum between redundant compute and locality somewhere around
+`Tw` 256–1024 and it is a MEASUREMENT, not a derivation — the table gives the
+two costs, not the answer. What the table does settle is that a fixed `Tw ≤ 2048`
+holds the per-thread hot set under CCD1's 16-thread budget **at every image
+width**, which nothing else on the table does.
+
+Two further gains come free with it: the fan-out widens from `3 channels × 4
+bands = 12` tasks per strip to `12 × ⌈W/Tw⌉` (24 at 2304² with `Tw = 1024`, 48
+at 4096²), which is the other half of "scale with cores"; and the same shape
+applies to buffered's `ScaleBuffers` bands, which have the identical
+full-width problem at `1,512·W`.
+
+**Why this lane must not implement it.** Column tiles change the ORDER of the
+`f64` pooled accumulation inside a band — today a band's sums run whole rows
+left-to-right and merge per band; tiled, each tile produces partials that must be
+combined, and `f64` addition is not associative. **That moves bytes**, which is
+this lane's hard constraint. The concurrent era-2 lane's fixed virtual-lane
+grouping with a fixed band-order merge is precisely the property that would make
+a column split byte-safe **by construction** — a tile boundary on a lane-group
+multiple leaves every lane's addition sequence untouched. So this is recorded as
+an **era-2-enabled design with a predicted gain**, to be bundled into that break
+rather than paid for twice:
+
+> **Predicted:** per-thread hot set `2,016·W → 2,016·(Tw+20)`, width-independent;
+> at 2304²/16T that is 4.43 → 1.02 MiB per thread at `Tw = 512`, taking 8-thread
+> CCD1 occupancy from **35.4 MiB (over a 32 MiB L3) to 8.2 MiB**, at a measured
+> **3.9 % redundant H-blur cost** and a 2× wider fan-out. The saturation
+> experiment in §9.4 is what says whether that converts into thread scaling.
+
+### 9.4 The experiment that decides it
+
+`fold_footprint_2026-08-31/ccd_saturation.sh` runs the predecessor's
+N-independent-process saturation test **pinned per CCD** (`taskset -c 0-7` vs
+`8-15`). If the fold's ceiling is an L3-per-thread effect it must saturate
+EARLIER on CCD1's 32 MiB than on CCD0's 96 MiB; if the two CCDs behave the same,
+the ceiling is DRAM bandwidth and column tiling buys far less than §9.3
+predicts. Results below.
+
+---
+
+## 10. Reproduction
 
 ```sh
 cargo build --release --bench fold_engine_bench -p zensim \

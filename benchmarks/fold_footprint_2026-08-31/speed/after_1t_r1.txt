@@ -1,0 +1,65 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=8/32 avail=44985MiB :: /home/lilith/tmp/foldmem-target/release/deps/fold_engine_bench-f19930f28bf62f8f
+[zenbench] calibration: int=0.18ns/iter mem_bw=107.2GiB/s mem_lat=9.5ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788156655-184f39.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788156655-184f39
+═══════════════════════════════════════════════════════════════
+
+  fold_engine_1152  19 rounds × 1 calls
+                        mean ±mad ms  95% CI vs base     
+  ├─ score_buffered      47.7 ±1.1ms  [46.3–49.5]ms      
+  ├─ score_fold          37.1 ±1.5ms  [-22.9%–-19.1%]    
+  ├─ feat_buffered       47.8 ±0.9ms  [-1.1%–+2.5%]       [1]
+  ├─ feat_fold           37.3 ±2.0ms  [-22.2%–-17.0%]    
+  ├─ ref_buffered        40.7 ±1.6ms  [-15.1%–-12.6%]    
+  ├─ ref_fold            33.8 ±0.5ms  [-30.7%–-27.2%]    
+  ├─ refinto_buffered    40.9 ±1.8ms  [-17.0%–-13.8%]    
+  ├─ refinto_fold        34.1 ±1.0ms  [-29.1%–-23.2%]    
+  ├─ fused_buffered      66.3 ±2.1ms  [+37.8%–+42.6%]    
+  ╰─ split_fold         124.7 ±2.5ms  [+166.7%–+171.3%]  
+
+  ref_fold          ██████████████ 33.76ms
+  refinto_fold      ██████████████ 34.06ms
+  score_fold        ███████████████ 37.11ms
+  feat_fold         ███████████████ 37.28ms
+  ref_buffered      █████████████████ 40.66ms
+  refinto_buffered  █████████████████ 40.94ms
+  score_buffered    ███████████████████ 47.65ms
+  feat_buffered     ████████████████████ 47.84ms
+  fused_buffered    ███████████████████████████ 66.30ms
+  split_fold        ███████████████████████████████████████████████████ 124.73ms
+  [1] CI crosses zero
+
+  fold_engine_2304  18 rounds × 1 calls
+                        mean ±mad ms  95% CI vs base     
+  ├─ score_buffered     200.5 ±3.4ms  [197.6–203.6]ms    
+  ├─ score_fold         175.1 ±3.9ms  [-15.3%–-11.6%]    
+  ├─ feat_buffered      198.3 ±3.6ms  [-3.0%–+0.7%]       [1] [2]
+  ├─ feat_fold          173.1 ±2.6ms  [-15.7%–-14.1%]    
+  ├─ ref_buffered       174.6 ±1.6ms  [-13.7%–-12.3%]     [3]
+  ├─ ref_fold           161.9 ±2.1ms  [-21.4%–-17.1%]    
+  ├─ refinto_buffered   173.1 ±3.1ms  [-15.6%–-13.5%]    
+  ├─ refinto_fold       161.8 ±2.0ms  [-20.6%–-18.6%]    
+  ├─ fused_buffered     271.2 ±8.6ms  [+34.3%–+37.7%]    
+  ╰─ split_fold         556.4 ±4.5ms  [+174.1%–+180.9%]  
+
+  refinto_fold      ███████████████ 161.82ms
+  ref_fold          ███████████████ 161.89ms
+  feat_fold         ████████████████ 173.07ms
+  refinto_buffered  ████████████████ 173.07ms
+  ref_buffered      ████████████████ 174.58ms
+  score_fold        ████████████████ 175.12ms
+  feat_buffered     ██████████████████ 198.26ms
+  score_buffered    ██████████████████ 200.52ms
+  fused_buffered    █████████████████████████ 271.24ms
+  split_fold        ███████████████████████████████████████████████████ 556.37ms
+  [1] CI crosses zero
+  [2] drift r=0.52 — later rounds slower
+  [3] drift r=0.55 — later rounds slower
+
+  total: 1212.1s  (1111 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 1212s | peak-RSS 1.13GiB | min-avail 40161MiB | peak-load 3.09
