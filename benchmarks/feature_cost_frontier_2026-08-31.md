@@ -735,6 +735,19 @@ a compute request, and `compute_folded720_hdr_streaming_impl` takes its
 scoring entries. Pricing the HDR classes is a separate pass on the same
 template: read set → cheapest request → ms → the UPIQ bars.
 
+The one free step of that pass, run here because it costs a command: their
+read sets, which say the same thing the SDR classes did.
+
+| HDR bake | v1_basic | v1_peaks | v1_masked | v1_iw |
+|---|---:|---:|---:|---:|
+| `bhdr_linear_shaped_cvvdpmix` (**shipped BHdr**) | 57/156 | 31/72 | 28/72 | 17/72 |
+| `c_hdr_l1t1944` (944 class) | 156/156 | **0**/72 | **0**/72 | **0**/72 |
+
+So the split repeats exactly: the 372-class HDR bake reads the pool block and
+the 944-class one does not. The shipped skip is a no-op for `BHdr` and exact
+for the 944 HDR model — **once the HDR entries are routed through the fold**,
+which they are not.
+
 ### 6.4 The one lever this lane did NOT pull, and why it is the next one
 
 `fold_v1` is a hardcoded `let fold_v1 = true;` (`feature_v2.rs:7395`), but the
