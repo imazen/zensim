@@ -180,10 +180,11 @@ is **55.17 MB**, a 20.0 MB gap against 24.55 MB of untouched plane, so about
 four fifths of it genuinely stays out of RSS and the rest does not. And that
 much is an ALLOCATOR POLICY, not a property of the program; it was tested rather
 than assumed:
-with **`MALLOC_ARENA_MAX=1`** the same binary's `score_fold` peak at 1152²/1T goes
-**61,952 → 71,768 KiB**, because the allocation now comes from the main heap and
-`calloc` must memset it. Not asking for the planes is the only way not to depend
-on the allocator's mood.
+with **`MALLOC_ARENA_MAX=1`** the pre-fix binary's `score_fold` peak at 1152²/1T
+goes **61,952 → 71,768 KiB (+15.8 %)**, because the allocation now comes from the
+main heap and `calloc` must memset it. Not asking for the planes is the only way
+not to depend on the allocator's mood — and after §5.1 the same probe costs
+**31,412 → 31,784 KiB (+1.2 %)**. The exposure is gone because the allocation is.
 
 ---
 
@@ -246,7 +247,8 @@ that pre-existing test is now also a direct sweep of them.
 groups: `h` (the four fused-H planes phase A produces) and `v2` (everything below
 `run_blur_pass_inner`'s `want_v2` early return, plus the σ-split and dst-activity
 buffers that reuse its temps). A `v1_only` + `Full` score asks for neither, i.e.
-**2 planes of 14**. Both the size and the set are grow-only — the union of every
+**2 planes of 14**. The `MALLOC_ARENA_MAX=1` probe closes on this: **+15.8 % peak
+RSS before the fix, +1.2 % after** (1152²/1T). Both the size and the set are grow-only — the union of every
 request so far — so a driver alternating a score with a 944 extraction converges
 to ALL and never thrashes, exactly like the existing `sized_for`.
 

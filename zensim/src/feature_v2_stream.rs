@@ -73,8 +73,12 @@ pub(crate) enum FrontEnd {
 /// sides concurrent) against a 16-thread pool, and the conversion was 23 % of
 /// the fold-backed score's 16-thread wall at 2304². 256 doubles the chunk
 /// count without moving a boundary. It costs rolling-plane capacity —
-/// `scale_capacity_rows` budgets `ADVANCE_ROWS >> scale` extra rows per scale
-/// — which is measured in `benchmarks/fold_mt_scaling_2026-08-31.md`.
+/// `scale_capacity_rows` budgets `advance >> scale` extra rows per scale —
+/// which is measured in `benchmarks/fold_mt_scaling_2026-08-31.md`.
+///
+/// **Since the fold-footprint lane this is the CEILING, not the value.** A
+/// producer takes [`advance_rows_for`]'s answer, which is 256 only on a pool
+/// that can spend the degree; the capacity it costs is priced there.
 const ADVANCE_ROWS: usize = 256;
 const _: () = assert!(ADVANCE_ROWS % crate::streaming::DEFAULT_CONVERT_CHUNK_ROWS == 0);
 
@@ -136,11 +140,12 @@ fn advance_rows_for(parallel: bool, h0: usize) -> usize {
 /// byte-identical only because every producer chunk boundary lands on a global
 /// multiple of 64 rows, which is where the whole-image call cuts.
 ///
-/// The fold-MT lane wanted a smaller height here — the producer only ever
-/// hands this function [`ADVANCE_ROWS`] rows, so at 64 a side is two chunks
-/// and the front end caps at degree 2 (4 with both sides concurrent) — and
-/// took [`ADVANCE_ROWS`] up instead, which raises the chunk COUNT while
-/// keeping every boundary on the 64-row lattice.
+/// The fold-MT lane wanted a smaller height here — the producer hands this
+/// function one advance's worth of rows, so at 64 a side is two chunks and the
+/// front end caps at degree 2 (4 with both sides concurrent) — and took the
+/// ADVANCE up instead, which raises the chunk COUNT while keeping every
+/// boundary on the 64-row lattice. [`advance_rows_for`] then made that a
+/// per-pool decision rather than a constant.
 const CONVERT_CHUNK_ROWS: usize = crate::streaming::DEFAULT_CONVERT_CHUNK_ROWS;
 
 /// One side (source or distorted) of the pair.
@@ -581,7 +586,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         None
     }
 
-    /// Advance production: convert up to [`ADVANCE_ROWS`] new scale-0
+    /// Advance production: convert up to `self.advance_rows` new scale-0
     /// rows on both sides and cascade downscales. Returns false when
     /// scale 0 was already complete (nothing produced).
     fn produce(&mut self) -> bool {
@@ -599,8 +604,8 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         // change — no accumulation, no shared scratch, not one byte moved.
         // It is worth doing because the inner fan-out inside
         // `convert_source_to_xyb_into_slices` chunks at 64 rows and this call
-        // only ever hands it `ADVANCE_ROWS` (128) rows, i.e. TWO chunks; two
-        // sides in parallel take the producer's front end from degree 2 to 4.
+        // hands it `self.advance_rows` rows — as few as TWO chunks on a small
+        // pool ([`advance_rows_for`]); two sides in parallel double that.
         // The HDR route keeps the serial loop — it shares one `hdr_row`
         // scratch, and a second buffer is not this lane's measurement.
         let __t_conv = crate::fold_timing::start();
