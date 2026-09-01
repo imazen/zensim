@@ -123,6 +123,12 @@
   LIVE or TID references protected nothing (`image::open` already handled
   them). Now accepts bmp/tif/tiff/webp, and `--holdout-refs` is a name that
   does not lie when the directory is not CID22.
+- **`tests/panel_parity.rs` — the cross-language scipy parity gate — was
+  UNRUNNABLE under a per-agent `CARGO_TARGET_DIR`.** It located the `panel`
+  binary only at `<repo>/target/{release,debug}/panel`, so every session
+  following the workspace's own per-agent-target-dir guidance silently skipped
+  it. Now honours `ZEN_PANEL_BIN`, then `CARGO_TARGET_DIR`, then the in-repo
+  `target/`; both gates pass on this lane's `panel`.
 
 
 ### Measured — the near-lossless clause of the ssim2 bar, closed (2026-09-01)
