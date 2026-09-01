@@ -1,0 +1,22 @@
+corpus	self_target	ssim2	control_l0.002	treatment_l0.002	control_l0.3	treatment_l0.3
+cid22	False	0.8894	0.7585	0.7766	0.8071	0.8476
+kadid	False	0.8133	0.4693	0.4952	0.6285	0.6643
+tid	False	0.8460	0.6158	0.6320	0.7110	0.7084
+konjnd	False	0.5272	0.3853	0.3738	0.4841	0.5664
+aic3	False	0.7970	0.7160	0.7194	0.7683	0.7688
+aic4	False	0.9127	0.8895	0.8620	0.9361	0.9131
+csiq	False	0.9047	0.6216	0.6566	0.8810	0.9107
+live	False	0.9599	0.8519	0.8749	0.9415	0.9555
+sdr25	False	0.9580	0.8950	0.8934	0.9636	0.9055
+imazen26	True	1.0000	0.8453	0.8164	0.8529	0.8374
+nonphoto	True	1.0000	0.8346	0.8016	0.8459	0.8270
+hfnlproxy	True	1.0000	0.1387	0.1295	0.2522	0.3241
+
+# hfnl_cid22band (BAND_LO=0.8), from paired_perref_boot.py, seed 20260901, B=10000
+arm	pooled_srocc	pooled_delta_vs_ssim2	pooled_P	perref_mean	perref_delta_vs_ssim2	perref_P
+ssim2	0.5058			0.7099		
+ADD156_published_board_row	0.4349	-0.0696	0.0	0.6691	-0.0408	0.0
+control_156only_l0.002	0.2998	-0.2046	0.0	0.5569	-0.1529	0.0
+treatment_156plusfree_l0.002	0.314	-0.1915	0.0	0.5683	-0.1416	0.0
+control_156only_l0.3	0.3538	-0.1506	0.0	0.5978	-0.1121	0.0
+treatment_156plusfree_l0.3	0.4065	-0.0992	0.0	0.6269	-0.083	0.0
