@@ -1469,6 +1469,11 @@ decides, and adds one rule the exam's own §3.6 table needed.
 
 W1, W2, W3, W5, W6, W7 and every threshold in §2.4 are **unchanged**.
 
+→ **Further amended the same day (AMENDMENT B2, `hybrid_candidate_2026-09-01.md`
+§9): W4 redirects to ≤1.25× the 156-walk class (`add156_156basic`), superseding
+this clause's ≤fast-ssim2 reading** — see APPENDIX C / VERDICT (2026-09-01)
+below.
+
 ### B.2 Why the third bullet is in the clause
 
 §3.0 assigns `W10L9P`, `W10L9PH` **and** `Q7b` the same "PASS (1.15–1.21×)",
@@ -1490,3 +1495,126 @@ needs plus its own forward.
 
 Full derivation, the measurement, and the re-evaluated speed lines:
 [`hybrid_candidate_2026-09-01.md`](hybrid_candidate_2026-09-01.md) §1 and §7.
+
+---
+
+## APPENDIX C — VERDICT (2026-09-01, measured — wave_r4 §24): the a4bkon closure, nothing passes W1–W7
+
+**What this closes.** APPENDIX B (2026-09-01) amended W4 to bind at both 1T
+and 8T against `fast-ssim2`. A further amendment, **AMENDMENT B2**
+(`hybrid_candidate_2026-09-01.md` §9, superseding B.1 — see the pointer added
+to APPENDIX B above), redirected W4 to **"close to ADD156"**: the candidate's
+mean ms/compare must be **≤ 1.25× the 156-walk class** (`add156_156basic`),
+at both 1 thread and 8 threads, with the number itself derived (not chosen)
+in that doc's §9.3. Under that bar, `wave_r4_2026-09-01.md` §23 built the
+first 156+free candidate class — `A3b`/`A4b`, a 265-coordinate slice (f0..155
+basic + 72 v1-peaks + 37 raw-moment slots) that still takes a full 372/944-wide
+vector but needs only the cheap walk — and found **`A4b` (distill target,
+teacher = the 944-class flagship blend `HYA_w084`) posts the wave's highest
+product composite of any arm scored, 0.8664, higher than the 944-class teacher
+itself (0.8601) — but fails W1 on KonJND alone (0.4327 vs ssim2's 0.5272)**,
+the single-axis shape this appendix closes out.
+
+**The a4bkon lane** (`benchmarks/wave_r4_2026-09-01.md` §24; sibling jj
+workspace `zensim--a4bkon`; commits `38d948ce`..`2c348ad6`, 10 commits, all
+verified ancestors of `origin/main`: registration `61c55267`, the W4 bench
+arm + drivers `2f1ba2c8`/`8a3f2a55`, scoring `be6f7596`/`63153573`, the
+concurrent `ComputeSet::from_block_profile` fix `c98a5920`, closing
+`ec903a5a`, and the committed speed table `2c348ad6`) tried three registered,
+pre-committed levers to close that one KonJND axis without losing what A4b
+already has. **None of them worked:**
+
+| lever | arm(s) | mean KonJND | Δ vs A4b (0.4327) | cost |
+|---|---|--:|--:|---|
+| kon-data-mass sweep — the SAME certified lever that bought +0.034 mean KonJND on the 944-class flagship (wave_r4 §17/A5), ported unmodified | K1 w=1.8 | 0.3472 | **−0.0855** | worse KonJND, not better |
+| | K1 w=2.4 | 0.3524 | **−0.0804** | worse KonJND **and** an outright LIVE failure, both seeds, pooled and within-image, every CI excludes zero by a wide margin |
+| mixed teacher — completes the "big legs carry a teacher twin too" design via a new key-joined `ttbig` HYA-teacher-target table (§24.2) | K2 | 0.4317 | −0.0010 (statistical wash) | composite drops to 0.8606–0.8608; within-image CID22 (δ=0.004) fails both seeds, one also pooled-CID22 |
+| combined — `ttbig` leg + K1's winning weight, selected by the frozen mechanical rule (§24.3) | K3 | 0.3553 | **−0.0774** | worse KonJND; composite 0.8536–0.8562 |
+
+**The certified kon-data-mass lever inverts on this architecture class.** It
+bought KonJND on the full 944-width MLP; ported verbatim to the 156+free
+slice it makes KonJND worse in every configuration that includes it (K1, K3).
+The one lever that doesn't actively hurt KonJND — K2's `ttbig` leg alone — is
+a tie, not a win, and it isn't free: **7 of the 8 new K1/K2/K3 arms fail a
+within-image CID22 axis (δ=0.004) that K4 (A4b, unchanged) itself passes**
+(K4: Δ −0.0019, within). Only `K3 s4004` matches A4b's single-axis failure
+shape, and even that cell's own KonJND (0.3290) is well below A4b's 0.4327.
+**A4b/K4 remains the best 156+free-class profile the campaign has
+produced — unmatched, not exceeded, by any of the eight new arms.** For
+scale: A4b's 0.4327 is *below* even the worse of the two 944 flagships on
+this axis (W10L9P 0.4446, §3.1) — A4b buys its composite lead at the cost of
+being the single worst KonJND reader on the whole board.
+
+### Per-clause verdict, the 156+free family (K1 w1.8, K1 w2.4, K2, K3, K4=A4b)
+
+| clause | verdict | detail |
+|---|---|---|
+| **W1** | **FAIL, every arm** | K4: KonJND alone (0.4327 vs 0.5272). K1/K2/K3: KonJND **+** within-image CID22 on 7 of 8 arms; K1 w=2.4 additionally fails LIVE outright on both seeds. |
+| **W2** | **FAIL, every arm** | CSIQ is the only confirmed win anywhere in the family (Δ +0.034 to +0.054, every CI excludes zero); CID22 and `hfnl_cid22band` never clear (one CID22 pooled FAIL, K2 s4005) — the K=2-with-≥1-named-axis bar is unreached by any cell. |
+| **W3** | **FAIL, every arm** | pooled monotonicity 0.9879–0.9913, all below ssim2's own 0.9930 bar — the same narrow-MLP failure mode as every 156-class arm this wave produced. K1 w1.8 s4005 additionally ends one q≥85 ladder backwards (0.009), a defect K4 itself does not have. |
+| **W4** | **MOSTLY PASS, one measured exception** | Directly measured this lane (`free156_peaks_raw` arm, N=3 process starts/thread count, ASLR on, CCD0/core-pinned). **1T: clean PASS at every size** — ratio medians 1.0463–1.0766 (4.6–7.7% over the 156-walk bar), full min–max range across all three sizes 1.0000–1.0852 (i.e. 0–8.5%, tightest floor 4.3% at 1152²). **8T: PASSES at 576² (1.14–1.61×) and 2304² (1.14–1.17×) but FAILS at 1152²: 1.4375×–1.4583× across all three starts — a tight, repeatable band, not noise** (contrast the genuinely noisy 16T/1152² spread of 0.94–1.31×, extra data, not part of the bar). Supersedes §23's evidence-backed "PASS (~5–7%)" estimate with a direct measurement that finds one real exception; not root-caused, out of this lane's scope. |
+| **W5** | N/A | no HDR head in this family, unchanged from every prior 156-class arm |
+| **W6** | **PASS, every arm** | nonphoto/imazen26 0.944–0.951, comfortably clear of the 0.85 floor |
+| **W7** | **FAIL, every arm** | none of K1–K4/A4b is wired into a `ZensimProfile` variant. A concurrent fix (`c98a5920`, mid-lane) corrected `ComputeSet::from_block_profile`'s over-fallback for wide free-set bakes — it was silently computing the full 944 walk instead of the cheap Peaks+RawMoments derivation for this whole candidate class, defeating `ZensimProfile::D`'s fast path — genuinely fixed, but it changes nothing about W7's verdict here: shipping A4b's bytes through `ZensimProfile::D` remains an unmade ship decision, not a code gap this lane closed. |
+
+**944-class context, same protocol, unchanged from wave_r4 §20:** the
+944-width flagship (`flagship_944off`) fails W4 by **2.97×–4.06× at 8
+threads** (min-over-5-starts, worse than its own 1T ratio of ~2.13×+). The
+156+free class is one to two orders of magnitude closer to the amended bar
+than the class this campaign's compute went into, and clean at 1T everywhere.
+
+**Exact numbers** (`benchmarks/a4bkon_w4_speed_2026-09-01.txt`, commit
+`2c348ad6`; `free156_peaks_raw` vs `add156_156basic`, same interleaved
+process):
+
+| T | size | ratio (med) | ratio (min–max) | **≤1.25× (W4)** |
+|--:|--:|--:|--:|:--:|
+| 1 | 576² | 1.0625 | 1.0000–1.0759 | PASS |
+| 1 | 1152² | 1.0463 | 1.0430–1.0565 | PASS |
+| 1 | 2304² | 1.0766 | 1.0669–1.0852 | PASS |
+| 8 | 576² | 1.1667 | 1.1364–1.6111 | PASS |
+| 8 | 1152² | **1.4468** | **1.4375–1.4583** | **FAIL** |
+| 8 | 2304² | 1.1436 | 1.1357–1.1717 | PASS |
+
+### What remains — honest, named, none of it attempted here
+
+Nothing above closes KonJND for the fast class. The remaining paths, named
+rather than deferred:
+
+1. **The staged squintly near-threshold human study** (2,536 pairs,
+   sit-down-ready per this session's own closing ledger) — a genuinely new,
+   non-metric-derived human signal near the JND boundary, which is exactly
+   the zone KonJND probes. Every lever tried in this appendix is metric- or
+   data-mass-derived, not human-supervised, on that zone specifically.
+2. **A class-C in-register free-slot design**, distinct from the
+   Peaks+RawMoments slice K1–K4/A4b all share — untried at this recipe.
+3. **An architecture beyond this recipe.** Both variants tried across this
+   wave (sparse additive, small 2-layer MLP) share the same 265-coordinate
+   input and the same KonJND ceiling; nothing measured here rules out a
+   structurally different head reaching it.
+4. **Ship `ZensimProfile::D` with the KonJND weakness stated in the docs**,
+   directing kon-sensitive uses to `B` (raw KonJND **0.5935**, nominally
+   *ahead* of ssim2's 0.5272, unpaired — exam §3.1) or the 944 class
+   (W10L9PH 0.5006 / W10L9P 0.4446, both nominally behind ssim2 but well
+   above A4b) instead — all three well above A4b's 0.4327, even though none
+   of the three is a clean win over ssim2 by the exam's own paired standard
+   (B fails W1 on AIC-3 instead, §3.0/§3.1; both 944 models fail W1 on
+   KonJND itself, just less badly than A4b does). This is a product/ship
+   call, not a measurement, and stays user-gated per every prior appendix in
+   this document.
+
+**Standing conclusion, restated because it is the one that matters:** as of
+this measurement, **no zensim candidate — 944-class, 372-class, or 156+free —
+clears W1–W7 against ssim2.** The 156+free class is now the closest on speed
+(W4 mostly-passes where every wider class fails by 1.8×–4×) and matches or
+beats the 944 teacher's product composite while being reachable at a
+fraction of its cost, but it inherits the teacher's exact weakness axis, and
+three targeted, pre-registered attempts to fix that one axis in this
+architecture class made it worse (K1, K3) or left it flat while giving up
+composite and a CID22 axis the untouched control still passes (K2). `A4b`
+(=K4) stands as the best 156+free-class profile produced to date.
+
+Reproduction: `benchmarks/wave_r4_2026-09-01.md` §24 (full method, frozen
+registration before any fit, all raw numbers); `_MANIFEST.json` at
+`/mnt/v/output/zensim/a4bkon-2026-09-01/`; commit range `38d948ce..2c348ad6`
+on `origin/main`.
