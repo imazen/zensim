@@ -59,11 +59,27 @@ CORPORA = {
     "cid22": ("cid22_ssim2.tsv", "MCOS", "ssim2", 100.0),
     "csiq": ("csiq_ssim2_gpu.tsv", "human_score", "ssim2_gpu", 1.0),
     "aic3": ("aic3_ssim2_heldout.tsv", "jnd", "ssim2_gpu", 1.0),
-    # LIVE is deliberately absent: its peer table and the verdict per-pair dump
-    # hold the same 779 pairs in DIFFERENT row order (max index-wise target
-    # difference 1.12, vs 0.0 for the three above), so the pairing that makes
-    # this test valid does not hold and a join key does not exist in either
-    # file. Reported unpaired in the note instead of silently mis-paired.
+    # LIVE and AIC-4 added 2026-09-01 (hybrid lane) — and the reason the
+    # original exclusion was right is worth keeping, because it is ROOT-scoped,
+    # not corpus-scoped. MEASURED, same peer table, three different dumps of
+    # the SAME 779 LIVE pairs:
+    #
+    #   372 root  (`2026-08-30-full-features-372`, shipped B)  max |Δ| = 1.12
+    #   944 root  (`ext944-canonical-2026-08-01`, W10L9PH)     max |Δ| = 0.0
+    #   pools-944 (`r1b-pools944-2026-08-30`,     W10L9PH)     max |Δ| = 0.0
+    #
+    # So the exam's note ("its peer table and the verdict per-pair dump hold
+    # the same 779 pairs in DIFFERENT row order") is TRUE of the 372 root and
+    # FALSE of every 944-class root — the row order of `ext_live.parquet` at
+    # 944 width already matches `live_ssim2_gpu.tsv` exactly. AIC-4 matches on
+    # the 944 roots too (max |Δ| = 0.0 over 300 rows). Nothing here weakens the
+    # guard: the index-wise assertion below still runs on every arm, so a
+    # 372-root dump fed to CORPUS=live aborts loudly instead of pairing a
+    # fiction. KonJND stays out: its peer table is the DILUTED 1,008-ref ruler
+    # and the JPEG-504 cut is a `dist_path` filter the peer row applies but
+    # this script does not, so pairing it needs a join, not an index.
+    "live": ("live_ssim2_gpu.tsv", "human_score", "ssim2_gpu", 1.0),
+    "aic4": ("aic4_ssim2_gpu.tsv", "human_score", "ssim2_gpu", 1.0),
 }
 CORPUS = os.environ.get("CORPUS", "cid22")
 
