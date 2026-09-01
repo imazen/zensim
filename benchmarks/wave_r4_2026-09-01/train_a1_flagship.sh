@@ -16,6 +16,14 @@
 # A1 is registered as TEACHER / UPPER BOUND, not a W4 candidate (registration
 # §4.2.1): under W4 AMENDMENT B2 no full-944 model can pass the speed clause.
 #
+# Also drives ARM A5 (kon-data lever, registration §3 row A5): "A1's recipe
+# with the certified KonJND data-mass lever applied (konjnd_bpg train weight
+# raised)". WR4_KONJND_TRAIN_W overrides the konjnd_bpg group's train weight;
+# default 1.2 is A1's own verbatim value (wave-7's certified setting, already
+# baked into the incumbent recipe -- see project_konjnd_bpg_leg.md). Nothing
+# else changes between A1 and A5: same script, one parameter, same principle
+# as the rest of this wave's "verbatim except the one deliberate change" arms.
+#
 # Usage: train_a1_flagship.sh <seed> [out.bin]
 set -euo pipefail
 SEED="${1:?seed required}"
@@ -25,6 +33,7 @@ OUTDIR="${WR4_OUT:-/mnt/v/output/zensim/wave-r4-2026-09-01/bakes}"
 OUT="${2:-$OUTDIR/A1_r4_s${SEED}.bin}"
 TRAIN="${ZL_TRAIN:?ZL_TRAIN must point at the zensim_mlp_train binary}"
 KADIS="${WR4_KADIS:-}"     # empty = the kadis leg is ABSENT; see registration §3.1
+KONW="${WR4_KONJND_TRAIN_W:-1.2}"
 mkdir -p "$OUTDIR"
 
 for f in "$V/safesyn_pure.parquet" "$R4/ext_cid22_train201.parquet" \
@@ -43,7 +52,7 @@ TRAIN_GROUPS=(
   --group "bigcodec:$V/tbig_944_200k_pure.parquet:0.5:1.0:both"
   --group "tsafesyn:$V/safesyn_teacher944_pure.parquet:0.5:1.0:both"
   --group "ttbig:$V/tbig_teacher944_pure.parquet:0.5:1.0:both"
-  --group "konjnd_bpg:$R4/ext_konjnd_bpg_train.parquet:1.2:0.0:both"
+  --group "konjnd_bpg:$R4/ext_konjnd_bpg_train.parquet:$KONW:0.0:both"
   --group "konjnd_bpg_val:$R4/ext_konjnd_bpg_val.parquet:0.0:1.5:both"
 )
 if [ -n "$KADIS" ]; then
@@ -91,7 +100,7 @@ TF=(
 )
 TFARGS=(); for t in "${TF[@]}"; do TFARGS+=( --feature-transform "$t" ); done
 
-echo "== A1 seed=$SEED out=$OUT groups=${#TRAIN_GROUPS[@]} transforms=${#TF[@]} $(date -u +%H:%M:%SZ)"
+echo "== A1 seed=$SEED out=$OUT groups=${#TRAIN_GROUPS[@]} transforms=${#TF[@]} konjnd_train_w=$KONW $(date -u +%H:%M:%SZ)"
 exec "$TRAIN" "${TRAIN_GROUPS[@]}" \
   --n-hidden-layers 0 --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 --max-features 944 --allow-narrow-features \
