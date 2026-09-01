@@ -2548,11 +2548,26 @@ function failures(b){
   Object.keys(R).forEach(c=>{
     const r=R[c];if(!r||r.frac_negative==null||r.per_ref_n==null)return;
     if(r.frac_negative<=0.02)return;
-    const sev=r.frac_negative>=0.15?'serious':'watch';
-    bad.push(F(sev,1,'Ranks whole reference ladders backwards on '+c,
+    // aic4/sdr25 are inverted for essentially EVERY board cell — a corpus
+    // property, not a model finding (registry aic4-corpus-wide-per-ref-inversion).
+    // Report it, but never as this model's defect.
+    const corpusWide=(c==='aic4'||c==='sdr25');
+    // A POSITIVE pooled SROCC sitting on a NEGATIVE per-reference mean is the
+    // most misleading shape the board can show: the model separates images and
+    // orders encodes of one image backwards, and only the pooled number is on
+    // the scoreboard. Always a blocker.
+    const flipped=(r.per_ref_mean!=null&&r.per_ref_mean<0&&!corpusWide);
+    const sev=corpusWide?'watch':(flipped?'blocker':(r.frac_negative>=0.15?'serious':'watch'));
+    bad.push(F(sev,corpusWide?11:(flipped?0:1),
+      (flipped?'INVERTED per image on '+c+' while its pooled score looks healthy'
+             :'Ranks whole reference ladders backwards on '+c),
       pc(r.frac_negative)+' of '+r.per_ref_n+' references (within-image mean SROCC '
         +f3(r.per_ref_mean)+' vs pooled '+f3(rs(b,c))+')',
-      'a per-image tuning loop on '+situ(c),
+      corpusWide?('a CORPUS-WIDE inversion — median 60% of aic4 references are backwards '
+        +'across 373 board cells, so this is not evidence about this model')
+        :(flipped?('a per-image tuning loop on '+situ(c)+' — and the scoreboard’s pooled '
+          +f3(rs(b,c))+' does not show it')
+        :('a per-image tuning loop on '+situ(c))),
       'rank.'+c+'.frac_negative / per_ref_mean'));
   });
   // ---- 3+4. ladder inversions by codec x quality zone ----------------------
@@ -2696,10 +2711,15 @@ function failures(b){
         +'inputs (the ebothg_m504 class)','block_profile.uses_f156_371'));
   }
   if(b.zones&&/dial_grid_372col_2026-05-29[.]parquet/.test(b.zones.grid||'')){
-    bad.push(F('watch',12,'Dial numbers come from the un-quarantined 2026-05-29 grid',
-      'that grid carries the 9 corrupt (GPU odd-dim) ladders the quarantine removed',
-      'this cell dial is not directly comparable with a cell cut on the quarantined grid',
-      'dial.zones.grid'));
+    bad.push(F('serious',12,'This cell dial was measured on the UN-quarantined 2026-05-29 grid',
+      'that grid carries both documented defects — the 9 w11-corrupt masked/IW ladders and '
+        +'the 33 JXL cells at butteraugli distance 0.025 encoded before jxl-encoder eeb52735, '
+        +'where 66.7% of the 372 features GROW by 5-8 orders of magnitude from the q99.8 rung '
+        +'to the q99.9 rung',
+      'every ladder row above is INFLATED by the grid, not by the model: the ~19-point drop at '
+        +'that rung is correct scoring of a broken encode. Read the @cur372 sibling cell, which '
+        +'is cut on the quarantined_v2 grid',
+      'dial.zones.grid + eval_annotations dial-cells-on-unquarantined-2026-05-29-grid'));
   }
   // ---- the honest inverse --------------------------------------------------
   Object.keys(R).forEach(c=>{

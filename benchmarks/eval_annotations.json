@@ -1534,6 +1534,42 @@
    "evidence": "benchmarks/board_regen_2026-08-31.md; scripts/v_next/build_peer_fullevals.py ROW_FILTERS",
    "date": "2026-08-31",
    "fix_path": "none for KonJND (resolved); the other axes need an aligned-set rescore per the parent entry"
+  },
+  {
+   "id": "dial-cells-on-unquarantined-2026-05-29-grid",
+   "kind": "annotated",
+   "fields": [
+    "dial"
+   ],
+   "scope": {
+    "names": [
+     "ADD156_safesyn_only_raw_lasso",
+     "Ebothg_scr0_5_dial",
+     "bhdr_linear_shaped_cvvdpmix",
+     "cl_tfm_corruption_LQ_MLP_s13",
+     "v02_bvls_NO_shaping",
+     "v47_strict_QAT_native",
+     "winner_dial_Ebothg_hfgain_winsor_dial"
+    ]
+   },
+   "reason": "These 7 cells' whole dial block was measured on `dial_grid_372col_2026-05-29.parquet` \u2014 the UN-quarantined grid, identified by reproducing each cell's stored dial byte-identically (2026-08-31 ladder-inversion pass). That grid carries both documented defects: the 9 w11-corrupt masked/IW ladders AND the 33 JXL cells at butteraugli distance 0.025 encoded before jxl-encoder eeb52735. MEASURED effect of the second defect on this grid: 66.7% of the 372 features GROW by 5-8 orders of magnitude from the q99.8 rung to the q99.9 rung (on the 944 grid, whose 99.9 rung is healthy, only 0.6% grow and by <=1.55x), so every model scored here drops ~19 dial points at that rung on 23 of 33 JXL ladders and the drop is CORRECT scoring of a broken encode. Consequence: these cells' mono_pct, ladder-inversion rates and backwards-ladder counts are INFLATED by the grid, not by the model. ADD156 reads 16 of 115 q>=85 ladders ending backwards here vs 2 of 106 on the quarantined_v2 grid; v47_strict_QAT_native reads 16 of 115. Read the `@cur372` sibling cell where one exists.",
+   "evidence": "benchmarks/failure_profiles_2026-08-31.md \u00a74; dial.zones.grid on each cell; benchmarks/eval_grids_2026-05-29.pointer.md; bake_verdict CANONICAL_DIAL_GRID doc",
+   "date": "2026-08-31",
+   "fix_path": "re-run bake_verdict --dial-grid <quarantined_v2> for the 372-width cells and re-promote, or read the @cur372 sibling which is already on that grid"
+  },
+  {
+   "id": "aic4-corpus-wide-per-ref-inversion",
+   "kind": "annotated",
+   "fields": [
+    "rank.aic4"
+   ],
+   "scope": {
+    "all": true
+   },
+   "reason": "AIC-4's per-reference ranking is inverted for essentially every model on the board, which makes it a CORPUS property and not a model finding (ADD156 ship audit S3.4 measured it on two unrelated bakes: ADD156 -0.9325 and shipped B -0.8906, both 100% of references backwards, same root; the audit noted no registry entry covered it). MEASURED board-wide 2026-08-31 over 373 cells: median 60.0% of the 5 references backwards, median per-reference SROCC -0.018, median pooled signed SROCC -0.903, and 187 of 373 cells above 10% backwards. AIC-4 is the pre-fix, unrefreshable corpus. Do NOT read a model's aic4 frac_negative or per_ref_mean as evidence about that model; the same caveat applies to sdr25 (a subset of aic4): median 20.0% backwards over 356 cells.",
+   "evidence": "benchmarks/add156_ship_audit_2026-08-31.md S3.4; benchmarks/failure_profiles_2026-08-31.md S3; /mnt/v/output/zensim/failure-profiles-2026-08-31/failure_inventory_2026-08-31.tsv",
+   "date": "2026-08-31",
+   "fix_path": "none \u2014 the corpus cannot be refreshed; treat aic4/sdr25 per-reference signs as corpus-level"
   }
  ]
 }

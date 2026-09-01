@@ -12,6 +12,8 @@ file path + one-line summary.
 If you arrived here cold, start with [RESEARCH.md](../RESEARCH.md)
 first — this index is a deep dive for follow-up.
 
+> **★ FAILURE PROFILES 2026-08-31:** [`failure_profiles_2026-08-31.md`](failure_profiles_2026-08-31.md) — **where each model HURTS**, not how it ranks. The statistic→production-situation mapping; the board-wide ladder-inversion measurement (`dial.zones`: inversions by codec × quality zone × content class, plus the worst ladders by reference image name, 322 of 379 cells); and the board's new *Failure profile* panel. Headlines: `q>=85` is the failing band (**189 of 322 models** carry a ladder that ends backwards there); avif is the worst codec and webp nearly clean; shipped **B** ranks **20.8 %** of `hf_nearlossless` references backwards where ADD156 ranks 0 %, and two board cells invert ~86 % of references while publishing positive pooled SROCCs. Artifacts: [`failure_profiles_2026-08-31.pointer.md`](failure_profiles_2026-08-31.pointer.md).
+
 ## Headline reference cards
 
 These are the docs to read first for a given purpose:
