@@ -704,6 +704,22 @@ struct Args {
     ///
     /// See [`Ensemble`] for the averaging contract and the k=1 identity.
     ensemble: Vec<PathBuf>,
+    /// `--ensemble-weights w1,w2,...`: a CONVEX blend of the members instead of
+    /// the equal-weight mean. Same length as `--ensemble`, non-negative, at
+    /// least one strictly positive; normalised to sum 1 at parse time (the
+    /// normalised vector is what the report and `--full-json` publish).
+    ///
+    /// `None` keeps the pre-existing unweighted `(Σ v_i)/k` accumulation
+    /// **verbatim**, so every ensemble scored before this flag existed
+    /// reproduces bit-for-bit. Three behavioural identities were MEASURED on
+    /// the CID22 pools slice (4,292 rows) when the flag landed and are the
+    /// gates that make the weighted path trustworthy:
+    /// `--ensemble-weights 0.5,0.5` == the unweighted mean (bit-identical,
+    /// 4292/4292 rows), `1,0` == a plain `--bake` on member 0 (bit-identical),
+    /// `0,1` == a plain `--bake` on member 1 (bit-identical). The parse-side
+    /// half is pinned by `ensemble_weights_parse_validate_and_normalise` and
+    /// `ensemble_weights_refusals_are_loud`.
+    ensemble_weights: Option<Vec<f64>>,
     corpora: Vec<&'static Corpus>,
     output: Option<PathBuf>,
     features_root: PathBuf,
@@ -827,6 +843,7 @@ USAGE:\n\
                  [--output <path.md>] [--html <path.html>]\n\
                  [--ramp-grid <path.parquet>] [--compare <ref-bake.bin>]\n\
                  [--features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372]\n\
+                 [--ensemble a.bin,b.bin [--ensemble-weights 0.7,0.3]]\n\
 \n\
 DEFAULTS:\n\
     --corpora       all 6 (cid22,kadid,tid,konjnd,aic3,aic4)\n\
@@ -865,6 +882,7 @@ fn parse_args() -> Result<Args, String> {
 fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut bake: Option<PathBuf> = None;
     let mut ensemble: Vec<PathBuf> = Vec::new();
+    let mut ensemble_weights: Option<Vec<f64>> = None;
     let mut corpora: Option<Vec<&'static Corpus>> = None;
     let mut output: Option<PathBuf> = None;
     let mut per_pair_output: Option<PathBuf> = None;
@@ -1028,6 +1046,27 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     return Err("--ensemble list is empty".to_string());
                 }
             }
+            "--ensemble-weights" => {
+                let v = args
+                    .next()
+                    .ok_or("--ensemble-weights requires a comma-separated list")?;
+                let mut w: Vec<f64> = Vec::new();
+                for tok in v.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    let x: f64 = tok
+                        .parse()
+                        .map_err(|e| format!("--ensemble-weights: {tok:?} is not a number: {e}"))?;
+                    if !x.is_finite() || x < 0.0 {
+                        return Err(format!(
+                            "--ensemble-weights: weights must be finite and >= 0, got {x}"
+                        ));
+                    }
+                    w.push(x);
+                }
+                if w.is_empty() {
+                    return Err("--ensemble-weights list is empty".to_string());
+                }
+                ensemble_weights = Some(w);
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -1037,6 +1076,29 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             }
         }
     }
+    // Weights are meaningless without members, must match them 1:1, and must
+    // not be all-zero (which would score a constant 0 and look like a model).
+    // Normalised here so the ONE published vector is the one that scored.
+    let ensemble_weights = match ensemble_weights {
+        None => None,
+        Some(w) => {
+            if ensemble.is_empty() {
+                return Err("--ensemble-weights requires --ensemble".to_string());
+            }
+            if w.len() != ensemble.len() {
+                return Err(format!(
+                    "--ensemble-weights has {} entries but --ensemble has {} members",
+                    w.len(),
+                    ensemble.len()
+                ));
+            }
+            let sum: f64 = w.iter().sum();
+            if !(sum > 0.0) {
+                return Err("--ensemble-weights must not sum to zero".to_string());
+            }
+            Some(w.iter().map(|x| x / sum).collect::<Vec<f64>>())
+        }
+    };
     // `--ensemble` supplies its own provenance anchor when `--bake` is absent.
     // An explicit `--bake` alongside `--ensemble` must name a member, so the
     // report's provenance header can never describe a bake that is not in the
@@ -1118,6 +1180,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(Args {
         bake,
         ensemble,
+        ensemble_weights,
         corpora,
         output,
         features_root,
@@ -1246,6 +1309,10 @@ struct Ensemble {
     /// to differ here; the dispatch is per-member, never the primary's.
     has_transforms: Vec<bool>,
     n_inputs: usize,
+    /// `None` = the historical equal-weight mean, accumulated exactly as before
+    /// so pre-flag ensembles reproduce bit-for-bit. `Some(w)` = a convex blend
+    /// with `Σw = 1` (normalised at parse time). Same ordering as `models`.
+    weights: Option<Vec<f64>>,
 }
 
 impl Ensemble {
@@ -1259,11 +1326,31 @@ impl Ensemble {
         self.models.len()
     }
 
-    /// Mean of the members' raw predictions, row by row.
+    /// Mean (or convex blend) of the members' raw predictions, row by row.
     fn score_rows(&self, rows: &[Vec<f64>]) -> Vec<f64> {
-        if self.models.len() == 1 {
+        if self.models.len() == 1 && self.weights.is_none() {
             // Bit-identical to the single-bake path by construction.
             return score_grid_one(&self.models[0], self.has_transforms[0], self.n_inputs, rows);
+        }
+        if let Some(w) = &self.weights {
+            let mut acc = vec![0.0f64; rows.len()];
+            for ((m, &tf), &wi) in self
+                .models
+                .iter()
+                .zip(self.has_transforms.iter())
+                .zip(w.iter())
+            {
+                if wi == 0.0 {
+                    continue;
+                }
+                for (a, v) in acc
+                    .iter_mut()
+                    .zip(score_grid_one(m, tf, self.n_inputs, rows))
+                {
+                    *a += wi * v;
+                }
+            }
+            return acc;
         }
         let mut acc = vec![0.0f64; rows.len()];
         for (m, &tf) in self.models.iter().zip(self.has_transforms.iter()) {
@@ -3154,7 +3241,24 @@ fn main() -> ExitCode {
             .collect(),
         n_inputs,
         models,
+        weights: args.ensemble_weights.clone(),
     };
+    if let Some(w) = &args.ensemble_weights {
+        eprintln!(
+            "bake_verdict: WEIGHTED ensemble — {}",
+            w.iter()
+                .zip(args.ensemble.iter())
+                .map(|(wi, p)| {
+                    format!(
+                        "{:.4}*{}",
+                        wi,
+                        p.file_name().and_then(|s| s.to_str()).unwrap_or("member")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" + ")
+        );
+    }
     let model = ens.primary();
     let has_transforms = ens.has_transforms[0];
     let has_per_sample_alpha = extract_per_sample_alpha_head(model).is_some();
@@ -4011,6 +4115,16 @@ Run the dedicated q-sweep harness for those._\n",
                 o.insert("members".into(), json!(args.ensemble.len()));
                 o.insert("member_names".into(), json!(stems));
                 o.insert("anchor".into(), json!(basename(&args.bake)));
+                // The NORMALISED vector that actually scored; `null` = the
+                // historical equal-weight mean. Published so a board cell can
+                // never show a blend under a weight it was not scored at.
+                o.insert(
+                    "member_weights".into(),
+                    match &args.ensemble_weights {
+                        Some(w) => json!(w),
+                        None => serde_json::Value::Null,
+                    },
+                );
             }
             mb
         };
@@ -4917,6 +5031,101 @@ mod tests {
 
     fn parse(argv: &[&str]) -> Args {
         parse_args_from(argv.iter().map(|s| s.to_string())).expect("parse")
+    }
+
+    /// `--ensemble-weights` is parsed, validated and NORMALISED at parse time,
+    /// so the vector the report publishes is the vector that scored.
+    #[test]
+    fn ensemble_weights_parse_validate_and_normalise() {
+        // absent by default — the historical equal-weight path
+        let a = parse(&["--bake", "x.bin", "--ensemble", "x.bin,y.bin"]);
+        assert!(a.ensemble_weights.is_none());
+        // normalised to sum 1
+        let a = parse(&[
+            "--bake",
+            "x.bin",
+            "--ensemble",
+            "x.bin,y.bin",
+            "--ensemble-weights",
+            "3,1",
+        ]);
+        let w = a.ensemble_weights.expect("weights");
+        assert_eq!(w.len(), 2);
+        assert!((w[0] - 0.75).abs() < 1e-12 && (w[1] - 0.25).abs() < 1e-12);
+        assert!((w.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        // a zero member is legal (it is a declared ablation), all-zero is not
+        let a = parse(&[
+            "--bake",
+            "x.bin",
+            "--ensemble",
+            "x.bin,y.bin",
+            "--ensemble-weights",
+            "1,0",
+        ]);
+        assert_eq!(a.ensemble_weights.expect("weights"), vec![1.0, 0.0]);
+    }
+
+    /// Every refusal is loud. A weight vector that cannot describe the members
+    /// must never be silently truncated, padded or ignored.
+    #[test]
+    fn ensemble_weights_refusals_are_loud() {
+        let bad: &[(&[&str], &str)] = &[
+            (
+                &["--bake", "x.bin", "--ensemble-weights", "0.5,0.5"],
+                "requires --ensemble",
+            ),
+            (
+                &[
+                    "--bake",
+                    "x.bin",
+                    "--ensemble",
+                    "x.bin,y.bin",
+                    "--ensemble-weights",
+                    "0.5",
+                ],
+                "entries but --ensemble has",
+            ),
+            (
+                &[
+                    "--bake",
+                    "x.bin",
+                    "--ensemble",
+                    "x.bin,y.bin",
+                    "--ensemble-weights",
+                    "0,0",
+                ],
+                "must not sum to zero",
+            ),
+            (
+                &[
+                    "--bake",
+                    "x.bin",
+                    "--ensemble",
+                    "x.bin,y.bin",
+                    "--ensemble-weights",
+                    "-1,2",
+                ],
+                "must be finite and >= 0",
+            ),
+            (
+                &[
+                    "--bake",
+                    "x.bin",
+                    "--ensemble",
+                    "x.bin,y.bin",
+                    "--ensemble-weights",
+                    "a,2",
+                ],
+                "is not a number",
+            ),
+        ];
+        for (argv, needle) in bad {
+            let e = match parse_args_from(argv.iter().map(|s| s.to_string())) {
+                Ok(_) => panic!("must refuse: {argv:?}"),
+                Err(e) => e,
+            };
+            assert!(e.contains(needle), "expected {needle:?} in {e:?}");
+        }
     }
 
     /// C2 wrong-regime guard (appendix W): the refusal is the DEFAULT and the
