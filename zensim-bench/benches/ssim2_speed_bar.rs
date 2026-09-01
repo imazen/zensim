@@ -25,8 +25,79 @@
 //! ```
 //! `ZEN_S2_SIZES` (default `576,1152,2304`), `ZEN_S2_ROUNDS`, `ZEN_S2_WALL_S`
 //! keep a matrix run from holding zenbench's exclusive lock for hours.
+//!
+//! ## The amended-W4 arms (`benchmarks/hybrid_candidate_2026-09-01.md`, APPENDIX B)
+//!
+//! The exam's speed clause now binds at **both** 1 and 8 threads, and it prices
+//! a candidate on **its own extraction regime plus its own forwards** rather
+//! than on its feature width — two 944-wide models can read different regimes
+//! (`folded720append2` with f156-371 zeroed vs `folded720append2pools` with it
+//! live) whose walks differ materially. An ensemble is ONE compare: one
+//! extraction of the regime that serves every member, plus every member's
+//! forward.
+//!
+//! | arm | extraction | forwards |
+//! |---|---|---|
+//! | `flagship_944off`  | `V1PoolsMode::Off`  (f156-371 = structural zeros) | the MLP |
+//! | `q7b_944pools`     | `V1PoolsMode::Full` (all 944 live)                | the linear |
+//! | `hybrid_944pools`  | `V1PoolsMode::Full`                               | MLP **and** linear |
+//!
+//! Bake bytes come from the environment so none enter git:
+//! `ZEN_HY_MLP` (the 944 MLP flagship) and `ZEN_HY_LIN` (the 944 pools linear).
+//! When either is unset the three arms are **skipped loudly** — never silently.
+//! The forward is `Predictor::predict[_transformed]`, the same call
+//! `zensim_validate::bake_runtime::score_row` dispatches; the output PCHIP
+//! spline (one scalar eval) is NOT in the arm and that exclusion is stated
+//! wherever the numbers are published.
 use imgref::Img;
+use zenpredict::{Model, Predictor};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
+
+/// One env-supplied bake, parsed once and reused across every round.
+struct Head {
+    model: Model,
+    has_transforms: bool,
+    width: usize,
+}
+
+impl Head {
+    fn load(var: &str) -> Option<Head> {
+        let path = std::env::var(var).ok()?;
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("# {var}={path}: unreadable ({e}) — amended-W4 arms SKIPPED");
+                return None;
+            }
+        };
+        let model = match Model::from_bytes(&bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("# {var}={path}: not a loadable ZNPR ({e:?}) — amended-W4 arms SKIPPED");
+                return None;
+            }
+        };
+        let has_transforms = model.has_nontrivial_feature_transforms();
+        let width = model.caller_input_width();
+        eprintln!("# {var}={path}: n_inputs={} caller_width={width}", model.n_inputs());
+        Some(Head {
+            model,
+            has_transforms,
+            width,
+        })
+    }
+
+    fn forward(&self, p: &mut Predictor<'_>, x: &mut Vec<f32>, feats: &[f64]) -> f64 {
+        x.clear();
+        x.extend(feats.iter().take(self.width).map(|v| *v as f32));
+        let out = if self.has_transforms {
+            p.predict_transformed(x).expect("forward")
+        } else {
+            p.predict(x).expect("forward")
+        };
+        out[0] as f64
+    }
+}
 
 /// Byte-identical to `zensim/benches/extract_paths_bench.rs::test_pair` — the
 /// content family the attribution tests and `fold_pools_bench` also use, so
@@ -73,6 +144,23 @@ fn main() {
     let wall_s = env_usize("ZEN_S2_WALL_S", 120) as u64;
 
     let zb: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::B)));
+    // Amended-W4 arms. `Box::leak` so the &'static the closures need is real;
+    // both are parsed exactly once, outside every timed region.
+    let mlp: Option<&'static Head> = Head::load("ZEN_HY_MLP").map(|h| &*Box::leak(Box::new(h)));
+    let lin: Option<&'static Head> = Head::load("ZEN_HY_LIN").map(|h| &*Box::leak(Box::new(h)));
+    // The fold engine + the two pool modes the two regimes correspond to.
+    let zf: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::B)));
+    // Byte-identical to `zensim/benches/extract_paths_bench.rs`'s `toggles_off`
+    // / `toggles_full`, so the two instruments request the same walks.
+    let pools_off = zensim::feature_v2::V2NewFeatureToggles {
+        append_block: true,
+        append2_block: true,
+        ..Default::default()
+    };
+    let pools_full = zensim::feature_v2::V2NewFeatureToggles {
+        v1_pools: zensim::feature_v2::V1PoolsMode::Full,
+        ..pools_off
+    };
 
     println!(
         "# ssim2_speed_bar: RAYON_NUM_THREADS={} ssim2_rayon_feature={}",
@@ -105,6 +193,71 @@ fn main() {
                         zenbench::black_box(zb.compute(&s, &d).unwrap().score())
                     })
                 });
+                // ---- amended-W4: candidate = its own regime + its own forwards
+                if let Some(m) = mlp {
+                    group.bench("flagship_944off", move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        let mut pred = Predictor::new(&m.model);
+                        let mut x: Vec<f32> = Vec::new();
+                        b.iter(move || {
+                            let rs = RgbSlice::new(src_s, n, n);
+                            let ds = RgbSlice::new(dst_s, n, n);
+                            let v2 = zf
+                                .compute_folded720_features_streaming(
+                                    &rs,
+                                    &ds,
+                                    pools_off,
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            zenbench::black_box(m.forward(&mut pred, &mut x, v2.features()))
+                        })
+                    });
+                }
+                if let Some(l) = lin {
+                    group.bench("q7b_944pools", move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        let mut pred = Predictor::new(&l.model);
+                        let mut x: Vec<f32> = Vec::new();
+                        b.iter(move || {
+                            let rs = RgbSlice::new(src_s, n, n);
+                            let ds = RgbSlice::new(dst_s, n, n);
+                            let v2 = zf
+                                .compute_folded720_features_streaming(
+                                    &rs,
+                                    &ds,
+                                    pools_full,
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            zenbench::black_box(l.forward(&mut pred, &mut x, v2.features()))
+                        })
+                    });
+                }
+                if let (Some(m), Some(l)) = (mlp, lin) {
+                    group.bench("hybrid_944pools", move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        let mut pm = Predictor::new(&m.model);
+                        let mut pl = Predictor::new(&l.model);
+                        let (mut xm, mut xl): (Vec<f32>, Vec<f32>) = (Vec::new(), Vec::new());
+                        b.iter(move || {
+                            let rs = RgbSlice::new(src_s, n, n);
+                            let ds = RgbSlice::new(dst_s, n, n);
+                            let v2 = zf
+                                .compute_folded720_features_streaming(
+                                    &rs,
+                                    &ds,
+                                    pools_full,
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            let f = v2.features();
+                            let a = m.forward(&mut pm, &mut xm, f);
+                            let b2 = l.forward(&mut pl, &mut xl, f);
+                            zenbench::black_box(0.5 * a + 0.5 * b2)
+                        })
+                    });
+                }
             });
         }
     });

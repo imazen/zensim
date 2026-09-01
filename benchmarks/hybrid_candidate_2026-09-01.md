@@ -283,3 +283,29 @@ in this lane.
   result is not a ship result.
 - No cross-document comparison to a number on a different root is treated as
   same-ruler.
+
+---
+
+## 5b. AMENDMENT H-A1 — declared after the coarse sweep, before the refinement
+
+The frozen 11-point grid (§4) resolves W1 to **exactly one** interior point,
+`w = 0.80`, on two of the three blends. Its neighbours fail for **opposite**
+reasons — `w = 0.70` fails LIVE (−0.0110 against δ = 0.010) and `w = 0.90`
+fails KonJND (−0.0138) — so the passing region is a genuine window bounded on
+both sides, not a plateau. **A clause that passes at exactly one of eleven grid
+points is not distinguishable from luck at the resolution the grid was frozen
+at**, and the quantity that separates the two is the window's WIDTH.
+
+**Amendment, applying only to the weight axis of HY-A and HY-B:** the sweep is
+refined at **step 0.02 between the two failing neighbours**, w ∈ {0.72, 0.74,
+0.76, 0.78, 0.82, 0.84, 0.86, 0.88} — 16 further cells. Nothing else changes:
+not the members, not the bars, not the selection rule, not the corpora, not the
+bootstrap seed. HY-C is not refined, because its KonJND is **monotone
+decreasing in w** with no interior peak (§6.1) and therefore has no window to
+resolve.
+
+This is declared here, before the refinement runs, because the honest reading
+of a narrow window depends on whether the refinement was planned or was a
+search for a passing cell. Every refined cell is reported, and the window's
+measured width — not the existence of one passing cell — is what §7 argues
+from.

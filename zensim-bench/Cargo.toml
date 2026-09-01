@@ -66,7 +66,12 @@ png = { version = "0.18.1", optional = true }
 # zensim-bench is internal tooling (not published).
 # `deprecated-profiles` keeps `ZensimProfile::A` available for `zwe_zenbench`,
 # which deliberately benchmarks the deprecated generation-A MLP profile.
-zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles"] }
+# `feature-regime-v2` (added 2026-09-01) exposes the streaming fold +
+# `V1PoolsMode` that `benches/ssim2_speed_bar.rs`'s amended-W4 arms price.
+# It is purely additive (67 `#[cfg]` sites, all on new items), and the
+# bench's `zensim_B` anchor arm is the cross-build check that it moved
+# nothing.
+zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles", "feature-regime-v2"] }
 # Dedup-K (2026-05-26): profile_compat_report example routes
 # spearman/pearson/kendall_tau through canonical zenstats.
 zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
@@ -85,7 +90,12 @@ zenbench = "0.1.2"
 # token (NEON on aarch64) so the scalar arm is real rather than a second
 # measurement of the SIMD path.
 archmage = { version = "0.9.28", features = ["std", "testable_dispatch"] }
-zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
+# Bumped 2026-09-01 to the rev the zensim workspace root pins, so the
+# amended-W4 speed arms forward the SHIPPED bakes through the SAME
+# runtime that scores them (`caller_input_width` — i.e. dead-column
+# pruning — does not exist in the older pin, so a pruned bake could not
+# be forwarded at all).
+zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "05de3cbc44b19d8769077d99710b0146c761d6df" }
 zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
 csv = "1"
 image = "0.25"
