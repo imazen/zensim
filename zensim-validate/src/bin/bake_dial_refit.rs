@@ -2175,6 +2175,13 @@ struct FitLassoArgs {
     /// is fatal, exit-4 class).
     #[arg(long)]
     embed_repro: bool,
+    /// Take the LEADING `n_feat` columns of a wider `--anchor-parquet` — the
+    /// opt-in companion of `gram --max-feat`, for the case where the same table
+    /// served the gram at a narrower width (hybrid lane PART II: a 372-wide
+    /// student fit on the leading block of a 944-wide root). Refused unless the
+    /// anchor is strictly wider; never pads.
+    #[arg(long)]
+    anchor_prefix: bool,
     /// Coordinate-slice file (newline-separated feature indices): the
     /// ADD156-class `w[out-of-slice] = 0` constraint — CD sweeps ONLY these
     /// coordinates (SOTA-944 §3a spatializable slices). Omit for all.
@@ -2628,10 +2635,29 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
                     a.anchor_scale,
                 )?;
                 if g.n_features != n_feat {
-                    return Err(format!(
-                        "anchor parquet {path:?} width {} != gram n_feat {n_feat}",
-                        g.n_features
-                    ));
+                    // `--anchor-prefix` is the opt-in companion of
+                    // `gram --max-feat`: the SAME table served the gram at a
+                    // narrower width, so its leading `n_feat` columns are the
+                    // fit space by construction. Opt-in and loud, because a
+                    // silent prefix of an unrelated table would score garbage.
+                    if a.anchor_prefix && g.n_features > n_feat {
+                        eprintln!(
+                            "  --anchor-prefix: anchor {path:?} is {} wide, taking the leading \
+                             {n_feat} columns (the gram's width)",
+                            g.n_features
+                        );
+                    } else {
+                        return Err(format!(
+                            "anchor parquet {path:?} width {} != gram n_feat {n_feat}\
+                             {}",
+                            g.n_features,
+                            if g.n_features > n_feat {
+                                " — pass --anchor-prefix if this is the same table the gram                                  was built from with --max-feat"
+                            } else {
+                                ""
+                            }
+                        ));
+                    }
                 }
                 let mut taken = 0usize;
                 let mut ri = 0usize;
@@ -2640,12 +2666,14 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
                     // the npz-anchor numeric path (and the f32 runtime).
                     match &anchor_appliers {
                         Some(ap) => xaf.extend(
-                            g.feature_rows[ri]
+                            g.feature_rows[ri][..n_feat]
                                 .iter()
                                 .zip(ap.iter())
                                 .map(|(v, (t, ps))| t.apply_with_params(*v as f32, ps)),
                         ),
-                        None => xaf.extend(g.feature_rows[ri].iter().map(|v| *v as f32)),
+                        None => {
+                            xaf.extend(g.feature_rows[ri][..n_feat].iter().map(|v| *v as f32))
+                        }
                     }
                     let mut y = g.human_scores[ri];
                     if let Some(clip) = a.anchor_clip_min
@@ -2798,6 +2826,14 @@ struct PredictArgs {
     /// forward the evaluation used.
     #[arg(long, value_delimiter = ',')]
     ensemble: Vec<PathBuf>,
+    /// Convex member weights (same length as `--ensemble`, non-negative, at
+    /// least one positive; normalised to sum 1). Omitted = the historical
+    /// equal-weight mean, whose accumulation is left verbatim. Mirrors
+    /// `bake_verdict --ensemble-weights` so a TEACHER target is produced by the
+    /// IDENTICAL forward the evaluation scores — which is what the `--ensemble`
+    /// doc above already requires and could not deliver for a weighted blend.
+    #[arg(long, value_delimiter = ',')]
+    ensemble_weights: Vec<f64>,
     /// Feature parquet (f0..fN / feat_0.. + ref_basename).
     #[arg(long)]
     corpus: PathBuf,
@@ -2832,19 +2868,51 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
         let bytes = std::fs::read(p).map_err(|e| format!("read {p:?}: {e}"))?;
         models.push(Model::from_bytes(&bytes).map_err(|e| format!("parse bake {p:?}: {e:?}"))?);
     }
-    // INTERNAL layer-0 width on purpose (NOT `caller_input_width()`): this
-    // is an ensemble arity-equality check across members, not a "how many
-    // features do I feed this" question. Campaign appendix E.9.
-    let n_in = models[0].n_inputs();
+    // CALLER width, not the internal layer-0 width (fixed 2026-09-01, hybrid
+    // lane). Two facts made the old `n_inputs()` reading wrong on both counts:
+    //
+    //  * it SIZED the input buffer, so a dead-column-PRUNED bake
+    //    (`n_inputs` 667, `caller_input_width` 944) was handed the first 667
+    //    columns of a 944-wide row — a prefix, which the repo's own pruning
+    //    rule forbids in as many words ("size every feature vector by
+    //    caller_input_width()"); and
+    //  * it REFUSED a pruned + unpruned pair whose caller widths agree, which
+    //    `bake_verdict`'s `Ensemble` accepts — so this function did not in fact
+    //    "mirror bake_verdict's contract exactly" as its own doc comment
+    //    claims. It does now: same field, same refusal.
+    let n_in = models[0].caller_input_width();
     for (p, m) in members.iter().zip(models.iter()).skip(1) {
-        if m.n_inputs() != n_in {
+        if m.caller_input_width() != n_in {
             return Err(format!(
-                "ensemble member {p:?} has n_inputs={} but member 0 has {n_in} — \
+                "ensemble member {p:?} has caller_input_width={} but member 0 has {n_in} — \
                  averaging across feature regimes is the column-mixing this repo bans",
-                m.n_inputs()
+                m.caller_input_width()
             ));
         }
     }
+    // Weights: same validation and normalisation as `bake_verdict`.
+    let weights: Option<Vec<f64>> = if a.ensemble_weights.is_empty() {
+        None
+    } else {
+        if a.ensemble.is_empty() {
+            return Err("--ensemble-weights requires --ensemble".into());
+        }
+        if a.ensemble_weights.len() != members.len() {
+            return Err(format!(
+                "--ensemble-weights has {} entries but --ensemble has {} members",
+                a.ensemble_weights.len(),
+                members.len()
+            ));
+        }
+        if a.ensemble_weights.iter().any(|w| !w.is_finite() || *w < 0.0) {
+            return Err("--ensemble-weights must be finite and >= 0".into());
+        }
+        let sum: f64 = a.ensemble_weights.iter().sum();
+        if !(sum > 0.0) {
+            return Err("--ensemble-weights must not sum to zero".into());
+        }
+        Some(a.ensemble_weights.iter().map(|w| w / sum).collect())
+    };
     let g =
         zensim_validate::parquet_loader::load_parquet(&a.corpus, "predict", "human_score", 1.0)?;
 
@@ -2852,7 +2920,11 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
     // (single accumulator, single divide-by-one is skipped below).
     let k = models.len();
     let mut acc = vec![0f64; g.feature_rows.len()];
-    for model in &models {
+    for (mi, model) in models.iter().enumerate() {
+        let wi = weights.as_ref().map(|w| w[mi]);
+        if wi == Some(0.0) {
+            continue;
+        }
         let transformed = model.has_nontrivial_feature_transforms();
         let mut predictor = zenpredict::Predictor::new(model);
         let mut xbuf = vec![0f32; n_in];
@@ -2867,14 +2939,14 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
                 predictor.predict(&xbuf)
             }
             .map_err(|e| format!("predictor forward: {e:?}"))?;
-            if k == 1 {
-                acc[i] = p[0] as f64;
-            } else {
-                acc[i] += p[0] as f64;
+            match wi {
+                Some(w) => acc[i] += w * p[0] as f64,
+                None if k == 1 => acc[i] = p[0] as f64,
+                None => acc[i] += p[0] as f64,
             }
         }
     }
-    if k > 1 {
+    if k > 1 && weights.is_none() {
         let kf = k as f64;
         for v in acc.iter_mut() {
             *v /= kf;
@@ -2888,8 +2960,18 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
     }
     std::fs::write(&a.out, &out).map_err(|e| format!("write {:?}: {e}", a.out))?;
     eprintln!(
-        "predict: {} rows x k={k} -> {:?} (n_in {n_in})",
+        "predict: {} rows x k={k}{} -> {:?} (caller_input_width {n_in})",
         g.feature_rows.len(),
+        match &weights {
+            Some(w) => format!(
+                " weighted [{}]",
+                w.iter()
+                    .map(|x| format!("{x:.4}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            None => String::new(),
+        },
         a.out
     );
     Ok(())
@@ -3371,6 +3453,19 @@ struct GramArgs {
     /// purity guard — 924 for the folded+append campaign).
     #[arg(long)]
     expect_n_feat: Option<usize>,
+    /// Accumulate only the FIRST `n` feature columns, i.e. fit a NARROWER
+    /// student on a wider table. The resulting bake declares `n` as its caller
+    /// input width, which is the whole point: a 372-input model needs the
+    /// 372-class walk and a 944-input one needs the 944 walk, whatever its
+    /// weights are zero on. Refuses `n` larger than the table (never pads),
+    /// and prints the truncation so it can never be silent.
+    ///
+    /// Registered 2026-09-01 (hybrid lane PART II): distilling a 944 teacher
+    /// into the 156-compute class needs the STUDENT at 372 width while the
+    /// TEACHER target is only computable on a 944 root. `--slice-file` on
+    /// `fit-lasso` zeroes coefficients; it cannot narrow the declared width.
+    #[arg(long)]
+    max_feat: Option<usize>,
     /// Transform screen TSV (`feat_idx`/`best_transform`/`params_csv`):
     /// apply per-feature monotone transforms DURING accumulation via
     /// zenpredict's own `FeatureTransform` f32 apply (fit space == the f32
@@ -3514,6 +3609,21 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
                         a.parquet
                     ));
                 }
+                if let Some(cap) = a.max_feat {
+                    if cap > n_feat {
+                        return Err(format!(
+                            "--max-feat {cap} exceeds the table's {n_feat} columns; \
+                             this never pads"
+                        ));
+                    }
+                    if cap < n_feat {
+                        eprintln!(
+                            "  --max-feat: TRUNCATING {n_feat} -> {cap} columns \
+                             (the bake's declared caller width will be {cap})"
+                        );
+                    }
+                    n_feat = cap;
+                }
                 s_mat = vec![0.0f64; n_feat * n_feat];
                 s_vec = vec![0.0f64; n_feat];
                 q = vec![vec![0.0f64; n_feat]; a.targets.len()];
@@ -3523,8 +3633,10 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
                     shaped_row = vec![0.0f64; n_feat];
                 }
             }
+            // Row stride is the TABLE's width; `n_feat` may be a prefix cap.
+            let stride = features.len() / n_rows;
             for r in 0..n_rows {
-                let raw = &features[r * n_feat..(r + 1) * n_feat];
+                let raw = &features[r * stride..r * stride + n_feat];
                 let x: &[f64] = if let Some(ap) = &appliers {
                     for (dst, (src, (t, ps))) in
                         shaped_row.iter_mut().zip(raw.iter().zip(ap.iter()))

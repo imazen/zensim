@@ -70,16 +70,19 @@ def sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-def predict(bdr: Path, members: list[str], corpus: Path, out: Path) -> np.ndarray:
+def predict(bdr: Path, members: list[str], corpus: Path, out: Path,
+            weights: str | None = None) -> np.ndarray:
     """Forward the teacher over `corpus` via the canonical owner, return raw preds."""
     if out.exists():
         print(f"  [reuse] {out}")
     else:
         cmd = [str(bdr), "predict", "--corpus", str(corpus), "--out", str(out)]
-        if len(members) == 1:
+        if len(members) == 1 and not weights:
             cmd += ["--bake", members[0]]
         else:
             cmd += ["--ensemble", ",".join(members)]
+            if weights:
+                cmd += ["--ensemble-weights", weights]
         print("  $", " ".join(cmd))
         subprocess.run(cmd, check=True)
     return np.loadtxt(out, delimiter="\t", skiprows=1, usecols=1)
@@ -152,6 +155,25 @@ def main() -> int:
     ap.add_argument(
         "--members", help="comma-separated ZNPR bakes (k=1 → single teacher)"
     )
+    ap.add_argument(
+        "--weights",
+        help="comma-separated convex weights for --members (same length; "
+             "normalised by the owner). Omit for the equal-weight mean. Passed "
+             "straight to `bake_dial_refit predict --ensemble-weights`, so the "
+             "teacher target is the IDENTICAL forward the evaluation scores.",
+    )
+    ap.add_argument(
+        "--twin", action="append", default=[], metavar="NAME=PATH",
+        help="REPLACE the default TWINS map with these (repeatable). Needed for "
+             "any root other than ext944 — e.g. the keyed pools-944 root, whose "
+             "f156-371 block is LIVE and is the only root that can forward a "
+             "pool-reading member. Regime purity is the caller's to state; this "
+             "script never mixes two roots in one run.",
+    )
+    ap.add_argument(
+        "--affine-twin",
+        help=f"which twin the ONE affine is fit on (default {AFFINE_TWIN})",
+    )
     ap.add_argument("--out-dir", type=Path)
     ap.add_argument(
         "--bdr",
@@ -171,6 +193,24 @@ def main() -> int:
         return 2
 
     members = [m for m in a.members.split(",") if m]
+    twins = TWINS
+    affine_twin = a.affine_twin or AFFINE_TWIN
+    if a.twin:
+        twins = {}
+        for spec in a.twin:
+            if "=" not in spec:
+                print(f"--twin wants NAME=PATH, got {spec!r}", file=sys.stderr)
+                return 2
+            name, path = spec.split("=", 1)
+            twins[name] = Path(path)
+        if affine_twin not in twins:
+            print(f"--affine-twin {affine_twin!r} is not among the --twin names "
+                  f"{sorted(twins)}", file=sys.stderr)
+            return 2
+    for name, path in twins.items():
+        if not path.is_file():
+            print(f"twin {name}: not found: {path}", file=sys.stderr)
+            return 2
     for m in members:
         if not Path(m).is_file():
             print(f"member not found: {m}", file=sys.stderr)
@@ -179,27 +219,30 @@ def main() -> int:
 
     # 1. Forward the teacher over every twin (raw predictions).
     raw: dict[str, np.ndarray] = {}
-    for name, path in TWINS.items():
+    for name, path in twins.items():
         print(f"[{a.tag}/{name}] forward over {path.name}")
-        raw[name] = predict(a.bdr, members, path, a.out_dir / f"{name}_teacher.tsv")
+        raw[name] = predict(a.bdr, members, path, a.out_dir / f"{name}_teacher.tsv",
+                            weights=a.weights)
 
     # 2. ONE affine, fit on the AFFINE_TWIN raw preds.
-    ref = raw[AFFINE_TWIN]
+    ref = raw[affine_twin]
     lo, hi = float(np.quantile(ref, QLO)), float(np.quantile(ref, QHI))
-    print(f"[{a.tag}] affine (q{QLO}, q{QHI}) on {AFFINE_TWIN}: [{lo!r}, {hi!r}]")
+    print(f"[{a.tag}] affine (q{QLO}, q{QHI}) on {affine_twin}: [{lo!r}, {hi!r}]")
 
     manifest: dict = {
         "tag": a.tag,
         "teacher_members": members,
+        "teacher_weights": a.weights,
+        "twins": {k: str(v) for k, v in twins.items()},
         "affine": [lo, hi],
-        "affine_rule": f"lo=quantile(raw[{AFFINE_TWIN}],{QLO}) hi=quantile(...,{QHI}); "
+        "affine_rule": f"lo=quantile(raw[{affine_twin}],{QLO}) hi=quantile(...,{QHI}); "
         "human_score = clip((raw-lo)/(hi-lo),0,1)",
         "predict_owner": "bake_dial_refit predict (--bake | --ensemble)",
         "files": {},
     }
 
     # 3. Write each twin with human_score replaced by the teacher target.
-    for name, path in TWINS.items():
+    for name, path in twins.items():
         tbl = pq.read_table(path)
         n = tbl.num_rows
         assert len(raw[name]) == n, f"{name}: {len(raw[name])} preds vs {n} rows"
