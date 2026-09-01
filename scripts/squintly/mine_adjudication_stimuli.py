@@ -103,13 +103,25 @@ def sha256_file(p: Path) -> str:
     return h.hexdigest()
 
 
+def base_source_id(ref_basename: str) -> str:
+    """`clean-picker-corpus-2026-06-26/_provenance.tsv`'s own invariant
+    (verified over all 4,497 rows): `source_file == rendition.split(".scale")[0]`.
+    `ref_basename` in the joined encode table IS the rendition filename
+    (e.g. "o_8170.png.scale1024x576.png"), while crop_holdout_check.py's
+    `source_file` column is the base id (e.g. "o_8170.png") — one base id
+    covers every scale tier. Without this split, a base-id exclusion set
+    never matches a rendition-shaped ref_basename and silently excludes
+    nothing."""
+    return ref_basename.split(".scale")[0]
+
+
 def load_rows(encodes_parquet: Path, exclude_refs: set[str]) -> dict:
     t = pq.read_table(encodes_parquet).to_pydict()
     n = len(t["encoded_filename"])
     by_ref = defaultdict(list)
     for i in range(n):
         rb = t["ref_basename"][i]
-        if rb in exclude_refs:
+        if base_source_id(rb) in exclude_refs:
             continue
         by_ref[rb].append(i)
     cols = {k: v for k, v in t.items()}

@@ -199,17 +199,69 @@ archive screenshot (d=5, d=8) against a dark brown texture and a building
 photo, a scatter-plot chart (d=9) against a flat teal gradient. This matches
 the project's own documented dHash weakness (`dhash_threshold_revert_2026-05-14.md`:
 "flat UI screens matching by flat-region dHash," "'blue sky' overlap mistaken
-for content overlap"). **No candidate is excluded on this basis** — the
-mining script mechanically excludes the 29 strict-threshold (d≤10) flags as a
-belt-and-suspenders precaution (`--crop-holdout-threshold 10`, default),
-consistent with the rest of this project only ever acting on the strict
-threshold and treating the screening threshold as review-only, never a
+for content overlap"). No pair's answer depends on genuine crop provenance —
+but as a belt-and-suspenders precaution the mining script mechanically
+excludes the 29 strict-threshold (d≤10) flags anyway (`--crop-holdout-threshold 10`,
+default), consistent with the rest of this project only ever acting on the
+strict threshold and treating the screening threshold as review-only, never a
 blocklist trigger by itself.
 
 Artifacts: `~/tmp/squintly-prep/crop_holdout_d10.tsv` (per-candidate min
 Hamming distance, best-match window bbox), `crop_holdout_d10_MANIFEST.json`.
 Not committed to git (regenerable in 37s from the pipeline below; not a
 canonical dataset).
+
+### 5.3 Corroborating evidence: the predecessor session's broader sweep, completed
+
+**A second, independent, and much broader reverse-direction sweep already
+existed on disk** at `/mnt/v/output/squintly/adjudication-2026-09-01/holdout-audit/`,
+produced by the prior (rate-limit-terminated) session before this task
+resumed — this is the "mid-flight" state the task referred to. It differs
+from §5.2 in every dimension: **1,895 "jpegaic_family" images** (not just the
+10 AIC-3 CTC originals — AIC-3 CTC pristine **and decoded/distorted**
+renditions across every tested codec, AIC-4 full-resolution, SDR25, BTC/PTC)
+as the query set, searched against **2,307 study candidate images**, with
+smaller minimum windows (as low as ~96–125 px, vs this session's ≥15 % of the
+limiting dimension). Its per-row output
+(`stage2_REVERSE_jpegaic_windows_vs_study.tsv`, 1,895 rows) was complete, but
+the summary/verdict step that would have interpreted it was not — finishing
+that interpretation was this task's job.
+
+**Raw distribution is far more extreme**: min 0 (bit-identical!), median 5,
+p95 14 — 1,421 of 1,895 (75 %) flagged at the strict d≤10 threshold. Read
+naively this looks alarming. **It is not**: every one of the 8 lowest-distance
+rows (5 of them at the theoretical minimum, d=0) resolves to the SAME single
+study image, `o_8170.png.scale1024x576.png` — which is the identical false-
+positive already identified in §5.2 (there flagged at d=3 in the coarser
+10-image sweep). Visual confirmation: `o_8170` is a **scanned list of book
+titles** (a table-of-contents page); its "matches" are photographs of a green
+passenger ferry (AIC-3 CTC source 00006), completely unrelated content. The
+smaller windows this sweep allowed (96–125 px, vs this session's ≥15 % floor)
+sample sub-regions with almost no information content — a mostly-blank margin
+of a text scan, a flat sky/water patch of a photo — which is exactly where
+dHash degenerates to near-identical hashes for unrelated images. **The two
+independent sweeps corroborate the same conclusion via different code paths
+and a 4.6× larger, more diverse query set**: no genuine crop-of-AIC-source
+match exists in the corpus; every extreme low-distance hit traces to dHash's
+documented flat/low-frequency-region weakness, concentrated on one
+already-excluded pathological source.
+
+`o_8170.png` and its size variants were already covered by this session's own
+d≤10 exclusion (§5.2) — but a **real bug** in the first cut of
+`mine_adjudication_stimuli.py` meant that exclusion never actually fired: the
+crop-holdout TSV's `source_file` column holds base ids ("o_8170.png") while
+the joined encode table's `ref_basename` holds full per-scale-tier rendition
+filenames ("o_8170.png.scale1024x576.png") — `if rb in exclude_refs` compared
+the wrong strings and silently excluded nothing, even though the mining
+manifest's `crop_holdout_excluded_refs: 29` printed correctly (it reports the
+SIZE of the exclusion set, not how many rows it actually removed). Caught by
+grepping the staged corpus for the supposedly-excluded filename and finding
+it present. **Fixed** with a `base_source_id()` helper
+(`ref_basename.split(".scale")[0]`, the exact inverse of the provenance TSV's
+own naming invariant, verified over all 4,497 rows) and the entire corpus was
+re-mined and re-staged before this protocol doc's numbers below were written
+— the smoke test in §8 was re-run against the corrected corpus, not the
+buggy one.
 
 ---
 
@@ -392,17 +444,22 @@ curl -X POST "http://127.0.0.1:3031/api/admin/study-pairs?study_id=zensim-adjudi
 # open http://localhost:3031 , study_id=zensim-adjudication (unlisted — direct link needed)
 ```
 
-**Smoke-tested this session** (2026-09-01): built `squintly` release binary,
-booted against the staged corpus (`loaded coefficient manifest sources=834
-encodings=3556`), ingested `pairs.tsv` (`"rows": 2536, "unresolved_in_manifest": 0`
-— every planned pair resolves), created a session, served trial 1 and trial 2
-in planned order, fetched all three image bytes through the proxy endpoints
-(source PNG + both encodings, all HTTP 200 with valid decoded dimensions),
-recorded a response, and confirmed `progress` advanced (`served: 1,
-answered: 1`) and the next call served seq 1. Full loop verified working
-end to end; server stopped after the smoke test (no observer data was
+**Smoke-tested this session** (2026-09-01), **twice** — once before the §5.3
+exclusion bugfix (against the buggy 834-source corpus) and once after (the
+corpus actually shipped): built `squintly` release binary, booted against the
+staged corpus (`loaded coefficient manifest sources=795 encodings=3564` —
+post-fix; 39 fewer sources than the pre-fix run, matching the 29 flagged base
+ids × their scale-tier variants), ingested `pairs.tsv` (`"rows": 2536,
+"unresolved_in_manifest": 0` — every planned pair resolves, both before and
+after the fix), created a session, served trial 1 and trial 2 in planned
+order, fetched all three image bytes through the proxy endpoints (source PNG
++ both encodings, all HTTP 200 with valid decoded dimensions), recorded a
+response, and confirmed `progress` advanced (`served: 1, answered: 1`) and
+the next call served seq 1. Full loop verified working end to end on the
+FINAL corpus; server stopped after each smoke test (no observer data was
 collected against the real study — `~/tmp/squintly-prep/smoke.db` holds only
-the 1 smoke-test response and is not the study's database).
+smoke-test responses and is not the study's database; it is regenerated
+before the real run per §8's `--db` instruction below).
 
 **DB for the real run**: point `--db` at a path under
 `/mnt/v/output/squintly/adjudication-2026-09-01/` (not `~/tmp`, not `/tmp`)
