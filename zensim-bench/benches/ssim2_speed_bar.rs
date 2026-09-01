@@ -42,12 +42,21 @@
 //! | `flagship_944off`  | `V1PoolsMode::Off`  (f156-371 = structural zeros) | the MLP |
 //! | `q7b_944pools`     | `V1PoolsMode::Full` (all 944 live)                | the linear |
 //! | `hybrid_944pools`  | `V1PoolsMode::Full`                               | MLP **and** linear |
+//! | `free156_peaks_raw` | `V1PoolsMode::Peaks` + `V1FreeExtras::RawMoments`, v1-only, 944 layout | the 156+free MLP (A3b/A4b class) |
 //!
 //! Bake bytes come from the environment so none enter git:
-//! `ZEN_HY_MLP` (the 944 MLP flagship), `ZEN_HY_LIN` (the 944 pools linear) and
+//! `ZEN_HY_MLP` (the 944 MLP flagship), `ZEN_HY_LIN` (the 944 pools linear),
 //! `ZEN_HY_ADD` (the basic-only additive head — `bake_block_profile` says it
 //! uses 28 of f0..155 and NONE of f156-371, so its true walk is the cheapest
-//! v1-only fold, not the peaks fold the exam credited it with).
+//! v1-only fold, not the peaks fold the exam credited it with) and
+//! `ZEN_HY_FREE` (the 156+free MLP — `A3b`/`A4b` class, `benchmarks/
+//! wave_r4_2026-09-01.md` §23/§24 — a `--keep-features` model over 265 of the
+//! 944 coordinates: f0..155 + 72 peaks + 37 raw-moment slots.
+//! `bake_block_profile` on this class reports `v1_peaks` 72/72 used and
+//! `f720_943` 37/224 used, i.e. `V1PoolsMode::Peaks` plus the raw-moments
+//! extra — the "15f" walk `zensim/examples/foldapp_stream_bigpair.rs`
+//! already validates in production, copied verbatim below so the two
+//! instruments agree on what the free-set walk means).
 //! When one is unset its arms are **skipped loudly** — never silently.
 //! The forward is `Predictor::predict[_transformed]`, the same call
 //! `zensim_validate::bake_runtime::score_row` dispatches; the output PCHIP
@@ -153,6 +162,7 @@ fn main() {
     let mlp: Option<&'static Head> = Head::load("ZEN_HY_MLP").map(|h| &*Box::leak(Box::new(h)));
     let lin: Option<&'static Head> = Head::load("ZEN_HY_LIN").map(|h| &*Box::leak(Box::new(h)));
     let add: Option<&'static Head> = Head::load("ZEN_HY_ADD").map(|h| &*Box::leak(Box::new(h)));
+    let free: Option<&'static Head> = Head::load("ZEN_HY_FREE").map(|h| &*Box::leak(Box::new(h)));
     // The fold engine + the two pool modes the two regimes correspond to.
     let zf: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::B)));
     // Byte-identical to `zensim/benches/extract_paths_bench.rs`'s `toggles_off`
@@ -171,6 +181,20 @@ fn main() {
     let v1_basic = zensim::feature_v2::V2NewFeatureToggles {
         v1_pools: zensim::feature_v2::V1PoolsMode::Off,
         v1_only: true,
+        ..Default::default()
+    };
+    // The free-set walk (A3b/A4b class): basic + peaks + raw-moments, at the
+    // 944 LAYOUT (append_block/append2_block true) so the scattered
+    // `--keep-features` indices land at their true f156.. / f720.. positions
+    // — copied verbatim from the "15f" arm in
+    // `zensim/examples/foldapp_stream_bigpair.rs` (the free-features lane's
+    // own validated reference), not re-derived.
+    let v1_basic_free = zensim::feature_v2::V2NewFeatureToggles {
+        v1_only: true,
+        v1_pools: zensim::feature_v2::V1PoolsMode::Peaks,
+        append_block: true,
+        append2_block: true,
+        free_extras: zensim::feature_v2::V1FreeExtras::RawMoments,
         ..Default::default()
     };
 
@@ -223,6 +247,26 @@ fn main() {
                                 )
                                 .unwrap();
                             zenbench::black_box(h.forward(&mut pred, &mut x, v2.features()))
+                        })
+                    });
+                }
+                if let Some(f) = free {
+                    group.bench("free156_peaks_raw", move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        let mut pred = Predictor::new(&f.model);
+                        let mut x: Vec<f32> = Vec::new();
+                        b.iter(move || {
+                            let rs = RgbSlice::new(src_s, n, n);
+                            let ds = RgbSlice::new(dst_s, n, n);
+                            let v2 = zf
+                                .compute_folded720_features_streaming(
+                                    &rs,
+                                    &ds,
+                                    v1_basic_free,
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            zenbench::black_box(f.forward(&mut pred, &mut x, v2.features()))
                         })
                     });
                 }
