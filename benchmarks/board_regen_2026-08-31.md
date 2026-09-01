@@ -304,3 +304,85 @@ Binaries: `bake_verdict` / `freeze_check` / `panel` / `bake_block_profile` built
 `6e6efb1a`+ (post the era-2 flip), pinned by sha256 in
 `~/tmp/board-regen/bin/SHA256SUMS`; `bake_verdict` sha256
 `dc9f1e50a79fbf77456873966076c7b3eda99e4a21bba54fb3182a77dfceae20`.
+
+---
+
+## 8. The 2026-08-31 discussion set (appended after §7's regen)
+
+The dropdown that `benchmarks/board_discussion_sets.json` feeds had **no entry for today's
+generation**, so it could not show the discussion that actually happened. Appended
+`2026-08-31-era2-fast-profile` — the era-2 flip (tiling + fixed-lane accumulation
+default-on, `515001dc`), the fast-profile subset measurement, and the ADD156 ship audit:
+
+| bake | why it is in the set | resolves |
+|---|---|---|
+| `ADD156_safesyn_only_raw_lasso` | the fast-profile candidate audited in rounds 34/35 | yes |
+| `ADD156_safesyn_only_raw_lasso@cur372` | its era-2 half (era-row convention, `board_era_rows_2026-08-30.md`) | yes |
+| `b_sdr_linear_cid80_inclwinsor_dense_dial@cur372` | shipped `B`'s era-2 half | yes |
+| `Q7b_pools_g0.2_a0.2_b0.97` | the W-LIN 7b winner, promoted onto the board in §6 today | yes |
+| `W10L9P_s4005_packed` | the current `freeze_check --select` winner (8/8, 0.9876) | yes |
+
+**All five resolve** to a `*.fulleval.json` on the board; none was dropped. The three
+incumbents (`W10L9_s4003_packed`, `b_sdr_linear_cid80_inclwinsor_dense_dial`,
+`v47_strict_QAT_native`) and the four `peer_*` rows are unioned by the page, so they are
+deliberately NOT duplicated into `bakes`.
+
+### 8.1 ⚠ MEASURED: the two legacy entries selected NOTHING, and sorted wrong
+
+Checked on the **pre-change built payload**, not the source. The two entries carrying
+`members`/`note` instead of `id`/`date`/`bakes` were broken two ways:
+
+* **They contributed zero models.** The page reads `d.bakes||[]`; both carried their model
+  list under `members`, so `DATA.discussionSets[5].bakes.length == 0` and
+  `[6].bakes.length == 0` on the shipped board. Selecting either option showed **incumbents
+  ∪ peers only** (7 rows) — never the 6 and 7 models the entries name.
+* **They sorted last, below an older set.** `gauntlet.py:882` sorts on `x.get("date","")`
+  descending, so a missing `date` sorts to the end: two sets labelled `2026-08-29` rendered
+  at dropdown positions 5–6, *beneath* the `2026-08-28` set at position 4. That breaks the
+  `_schema`'s own "lists sets latest-first" contract.
+
+Repaired in place (no value changed — two key renames plus the `id`/`date` their labels and
+the campaign doc imply; `note` kept as provenance):
+`2026-08-29-r6-fresh-b-linear-pair` (the fresh-`B` battery) and `2026-08-29-b-swap-decision`
+(the fair B-vs-challengers table). Both now select `own=6/6` and `own=7/7`, and latest-first
+holds across all eight sets. `_schema`'s APPEND-ONLY rule is about *sets*, not about leaving
+a broken one broken; no set was removed or reordered in the file.
+
+### 8.2 Verification — the shipped handler, on the built payload
+
+`~/tmp/verify_discussion_dropdown.js` extracts the `sel.onchange` block **verbatim from the
+emitted HTML** and runs it against the emitted `DATA` — the page's own code, not a
+re-implementation:
+
+* the new option is present and **first** (`DATA.discussionSets[0]`, `<option value="0">`,
+  right after the inert `discussion set…` placeholder); no option label is blank;
+* selecting it yields **exactly 12 visible rows** = 5 set + 3 incumbents + 4 peers, disjoint,
+  with **no unresolved name**: `ADD156_safesyn_only_raw_lasso`,
+  `ADD156_safesyn_only_raw_lasso@cur372`, `Q7b_pools_g0.2_a0.2_b0.97`, `W10L9P_s4005_packed`,
+  `W10L9_s4003_packed`, `b_sdr_linear_cid80_inclwinsor_dense_dial`,
+  `b_sdr_linear_cid80_inclwinsor_dense_dial@cur372`, `peer_butteraugli`, `peer_cvvdp`,
+  `peer_iwssim`, `peer_ssim2`, `v47_strict_QAT_native`;
+* all 8 sets now resolve every name they list (`own=n/n` for each), and the
+  `date`-descending order is monotone.
+
+**The regen changed nothing else.** Byte-comparing the old and new HTML around the
+`discussionSets` array: the prefix and the suffix are **byte-identical**, the array grows
+2,071 → 2,548 B, and the whole file grows by exactly **+477 B** (19,946,236 → 19,946,713).
+Every rendered row, stat and chart option is unchanged, which is what the gate counts also
+show (362 bakes / 12 sections / 18 tables / 512 rows / 960 ⚠, identical to §5).
+
+**Board:** `/mnt/v/output/zensim/reports/summer_gauntlet.html` —
+<http://localhost:3300/zensim/reports/summer_gauntlet.html>. Prior file preserved as
+`summer_gauntlet_pre_discussionset_2026-08-31.html` (19,946,236 B, sha256
+`8332cabd5a9ab776cac19cb396a51244d2912a320150c0c63c3116d09b3a204b`).
+**Gates:** `scripts/v_next/gauntlet_gates.sh` **PASS** (gate 1: `node --check`, 2 script
+blocks; gate 2: DOM-shim render, sort clicks, ECharts mounts + per-panel SSR, badge check).
+
+Reproduction — §7 step 4 with the pinned `panel` (sha256 `753913d5…`, unchanged from §7):
+
+```sh
+ZEN_PANEL_BIN=~/tmp/board-regen/bin/panel python scripts/v_next/bandwise_dashboard.py \
+    --fulleval-dir /mnt/v/output/zensim/reports/fulleval \
+    --out /mnt/v/output/zensim/reports/summer_gauntlet.html
+scripts/v_next/gauntlet_gates.sh /mnt/v/output/zensim/reports/summer_gauntlet.html
+```

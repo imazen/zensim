@@ -77,8 +77,10 @@
    ]
   },
   {
+   "id": "2026-08-29-r6-fresh-b-linear-pair",
+   "date": "2026-08-29",
    "label": "2026-08-29 R6: B remeasured + the linear pair",
-   "members": [
+   "bakes": [
     "b_sdr_linear_cid80_inclwinsor_dense_dial",
     "copperline_wlin4_a05",
     "jewelerloupe_hf0003",
@@ -89,8 +91,10 @@
    "note": "fresh-B battery + copper-line/jeweler-loupe pair on equal gates"
   },
   {
+   "id": "2026-08-29-b-swap-decision",
+   "date": "2026-08-29",
    "label": "2026-08-29 B-SWAP DECISION (same-ruler)",
-   "members": [
+   "bakes": [
     "b_sdr_linear_cid80_inclwinsor_dense_dial",
     "W10L9PH_s4004_packed",
     "PH_s4004_e070",
@@ -100,6 +104,18 @@
     "HDR944_L1T1_s4005_hfpack"
    ],
    "note": "fair B-vs-challengers table (campaign doc); era rows refreshed onto validate slices; recommendation: swap SDR B->C (stated costs), do NOT swap HDR"
+  },
+  {
+   "id": "2026-08-31-era2-fast-profile",
+   "date": "2026-08-31",
+   "label": "2026-08-31 · era-2 flip (tiling + fixed-lane accumulation default-on) + fast-profile subset + ADD156 ship audit",
+   "bakes": [
+    "ADD156_safesyn_only_raw_lasso",
+    "ADD156_safesyn_only_raw_lasso@cur372",
+    "b_sdr_linear_cid80_inclwinsor_dense_dial@cur372",
+    "Q7b_pools_g0.2_a0.2_b0.97",
+    "W10L9P_s4005_packed"
+   ]
   }
  ]
 }
