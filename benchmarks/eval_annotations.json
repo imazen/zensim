@@ -1128,6 +1128,38 @@
    "evidence": "benchmarks/add156_ship_audit_2026-08-31.md D10 (moved into entries[] 2026-08-31; previously a bare top-level key that load_annotations never read)",
    "date": "2026-08-29",
    "fix_path": "give it a machine scope (missing/present/names/all) if it should badge cells; until then it is documentation-only"
+  },
+  {
+   "id": "konjnd-372-diluted-ruler-pre-2026-08-31",
+   "kind": "annotated",
+   "fields": [
+    "rank.konjnd"
+   ],
+   "scope": {
+    "names": [
+     "ADD156_safesyn_only_raw_lasso@cur372",
+     "Ebothg_scr0_5_dial@cur372",
+     "T_appT_b372_lam1e-3",
+     "T_appT_b372_lam1e-3@cur372",
+     "b_sdr_linear_cid80_inclwinsor_dense_dial",
+     "b_sdr_linear_cid80_inclwinsor_dense_dial@cur372",
+     "bhdr_linear_shaped_cvvdpmix@cur372",
+     "cl_tfm_corruption_LQ_MLP_s13@cur372",
+     "mlp_2L_diverse_H128@cur372",
+     "peer_butteraugli",
+     "peer_cvvdp",
+     "peer_iwssim",
+     "peer_ssim2",
+     "v02_bvls_NO_shaping@cur372",
+     "v02_bvls_shaped@cur372",
+     "v47_strict_QAT_native@cur372",
+     "winner_dial_Ebothg_hfgain_winsor_dial@cur372"
+    ]
+   },
+   "reason": "ERA STEP: these 17 board cells' konjnd row was read on the DILUTED 1,008-ref file (konjnd_features_372col_2026-05-15.parquet, JPEG+BPG) because bake_verdict's 372 corpus map defaulted to it while the JPEG-504 ruler sat in the same directory; the default moved to konjnd_jpeg504_372_*.parquet on 2026-08-31, so every LATER 372-class konjnd number is on the 504 ruler and is NOT comparable to these. The choice inverts model ordering, it does not just shift it: same root/binary/code path, ADD156 0.4462 vs B 0.6497 on the diluted file (B by +0.204) becomes ADD156 0.5332 vs B 0.5194 on JPEG-504 (ADD156 by +0.014). The other 361 board cells (720/944-class, n=504) were ALREADY on the 504 ruler, so this fix makes the board internally consistent rather than moving it. The 4 peer_* reference metrics are in this list: cross-class comparisons against them were also on the diluted ruler. Historical record of the dilution itself: konjnd-372-full-file-dilution-2026-08-29.",
+   "evidence": "benchmarks/add156_ship_audit_2026-08-31.md D2; verified independently by re-running bake_verdict --corpora konjnd on both files with the pinned pre-fix binary and the post-fix binary (n 1008 -> 504); default pinned by tests::konjnd_default_ruler_is_jpeg504_not_the_diluted_file",
+   "date": "2026-08-31",
+   "fix_path": "re-run bake_verdict on the cell (the default now resolves to the JPEG-504 ruler via zensim_validate::eval_roots::KONJND_JPEG504_372_SLOTS) and re-promote; do NOT retro-edit the stored numbers"
   }
  ]
 }

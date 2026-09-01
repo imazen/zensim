@@ -71,6 +71,62 @@ pub fn era_of(root: &Path) -> &'static str {
     }
 }
 
+/// The KonJND **JPEG-504** ruler, newest build first — the file every
+/// 720/944-class row is scored on.
+///
+/// **Why this is a named constant (ADD156 ship audit, defect D2).** KonJND has
+/// two rulers on disk under one slot. `konjnd_features_372col_2026-05-15.parquet`
+/// holds all **1,008** refs — the JPEG *and BPG* halves — while the 720/944
+/// rows score the JPEG **504** half only. The 372 corpus maps defaulted to the
+/// diluted file with the correct one sitting in the same directory, and the
+/// choice does not merely shift a number, it **inverts** cross-model
+/// comparisons. Measured on the same root, same binary, same code path:
+///
+/// | ruler | ADD156 | shipped `B` | winner |
+/// |---|---:|---:|---|
+/// | diluted 1,008 (the old default) | 0.4462 | 0.6497 | `B` by +0.204 |
+/// | JPEG-504 (this constant) | 0.5332 | 0.5194 | ADD156 by +0.014 |
+///
+/// Two dates because the ruler was built per root: the 2026-08-30 roots carry
+/// the 08-30 build, the 2026-05-15 root the 08-29 one. First hit wins.
+///
+/// Both `bake_verdict` and `bake_compare` read THIS list — they carry separate
+/// corpus maps, and a second copy of the filenames is exactly how one of them
+/// would go on publishing the diluted number.
+pub const KONJND_JPEG504_372_SLOTS: &[&str] = &[
+    "konjnd_jpeg504_372_2026-08-30.parquet",
+    "konjnd_jpeg504_372_2026-08-29.parquet",
+];
+
+/// Which file a corpus slot resolved to, and whether that was a last-resort
+/// fall back past every preferred ruler.
+#[derive(Debug, Clone)]
+pub struct ResolvedSlot {
+    /// Filename relative to the features root.
+    pub file: String,
+    /// `preferred` was non-empty but none of it exists under this root, so the
+    /// fallback was used. The number is still produced — silently dropping a
+    /// corpus is worse — but callers MUST announce it.
+    pub degraded: bool,
+}
+
+/// Resolve a corpus slot under a features root: the first `preferred` entry
+/// that exists wins, else `fallback`.
+pub fn resolve_slot(preferred: &[&str], fallback: &str, root: &Path) -> ResolvedSlot {
+    for cand in preferred {
+        if root.join(cand).exists() {
+            return ResolvedSlot {
+                file: (*cand).to_string(),
+                degraded: false,
+            };
+        }
+    }
+    ResolvedSlot {
+        file: fallback.to_string(),
+        degraded: !preferred.is_empty(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

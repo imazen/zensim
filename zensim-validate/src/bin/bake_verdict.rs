@@ -53,7 +53,9 @@ use zenpredict::{Model, Predictor};
 
 use zensim_validate::bands;
 use zensim_validate::eval_report;
-use zensim_validate::eval_roots::{DEFAULT_FEATURES_ROOT_372, era_of};
+use zensim_validate::eval_roots::{
+    DEFAULT_FEATURES_ROOT_372, KONJND_JPEG504_372_SLOTS, era_of, resolve_slot,
+};
 use zensim_validate::panel::{
     Orientation, PerGroupSrocc, compute_panel, per_group_srocc, rescale_logistic, spearman,
 };
@@ -198,6 +200,18 @@ struct Corpus {
     /// fails the build otherwise. The provenance block prints every resolved
     /// path + sha256, so the mix is at least visible in the report.
     filename: &'static str,
+    /// Slots preferred OVER [`Self::filename`], tried in order; the first that
+    /// exists under the features root wins, and `filename` is the last resort.
+    ///
+    /// Exists because a corpus can have more than one ruler on disk under the
+    /// same name. Resolving to `filename` when this list is non-empty means a
+    /// preferred ruler was MISSING, which
+    /// [`resolve_372_slot`] announces loudly — a number read on a superseded
+    /// or diluted ruler must never be indistinguishable from the real one
+    /// (ADD156 ship audit, defect D2).
+    ///
+    /// Empty for every corpus with a single ruler.
+    preferred_slots: &'static [&'static str],
     /// Per-band partitioning enabled? AIC-3 has 600 pairs in a JND
     /// step grid; rank-based per-band stats collapse to 0 on shared
     /// scores (see dataset_metric_baseline.rs comment at L454-471).
@@ -321,6 +335,50 @@ fn root_declared_regime(root: &Path) -> Option<String> {
 /// when it exists under THIS root, else fall back to the legacy filename —
 /// so one binary serves both roots and a missing corpus still fails loud
 /// downstream (never a silent skip).
+/// Resolve a corpus's slot under a 372 features root — a thin adapter over
+/// [`zensim_validate::eval_roots::resolve_slot`], which owns the rule and the
+/// KonJND ruler list that `bake_compare` also reads.
+///
+/// Both `render_corpus` and the load/validate path resolve through here, so
+/// the two cannot drift (they previously carried a "keep these two in sync"
+/// comment and an inlined `corpus.filename`).
+fn resolve_372_slot(
+    corpus: &Corpus,
+    root: &Path,
+) -> zensim_validate::eval_roots::ResolvedSlot {
+    resolve_slot(corpus.preferred_slots, corpus.filename, root)
+}
+
+/// State the ruler, the same way the features-root era line states the era.
+///
+/// Emitted for every corpus with more than one ruler on disk, so a KonJND
+/// number is never again published without the file it was read on being
+/// visible in the run's own output (D2).
+fn ruler_lines(corpora: &[&Corpus], root: &Path) -> Vec<String> {
+    corpora
+        .iter()
+        .filter(|c| !c.preferred_slots.is_empty())
+        .map(|c| {
+            let r = resolve_372_slot(c, root);
+            if r.degraded {
+                format!(
+                    "bake_verdict: ⚠ corpus ruler — {} read on `{}`, a LAST-RESORT slot: none \
+                     of its preferred rulers ({}) exist under {}. For KonJND that file is the \
+                     DILUTED 1,008-ref build (JPEG+BPG) while 720/944-class rows score the \
+                     JPEG-504 half — the two rulers can rank two models in OPPOSITE order. \
+                     Do not compare this number across classes.",
+                    c.display,
+                    r.file,
+                    c.preferred_slots.join(", "),
+                    root.display()
+                )
+            } else {
+                format!("bake_verdict: corpus ruler — {} read on `{}`", c.display, r.file)
+            }
+        })
+        .collect()
+}
+
 fn slot_720_file(name: &str, root: &Path) -> Option<String> {
     let legacy = slot_720(name)?;
     if matches!(name, "nonphoto" | "imazen26") {
@@ -404,18 +462,21 @@ const CORPORA: &[Corpus] = &[
         name: "cid22",
         display: "CID22",
         filename: "cid22_features_372col_2026-05-15.parquet",
+        preferred_slots: &[],
         enable_per_band: true,
     },
     Corpus {
         name: "kadid",
         display: "KADIK10k",
         filename: "kadid_features_372col_2026-05-15.parquet",
+        preferred_slots: &[],
         enable_per_band: true,
     },
     Corpus {
         name: "tid",
         display: "TID2013",
         filename: "tid_features_372col_2026-05-15.parquet",
+        preferred_slots: &[],
         enable_per_band: true,
     },
     Corpus {
@@ -425,6 +486,7 @@ const CORPORA: &[Corpus] = &[
         // stored as `human_score = 1 − DMOS` → quality-oriented [0,1] (matches
         // kadid/tid). Classic FR benchmark; added 2026-07-18 (FR-corpus expansion).
         filename: "csiq_features_372col_2026-07-18.parquet",
+        preferred_slots: &[],
         enable_per_band: true,
     },
     Corpus {
@@ -435,6 +497,7 @@ const CORPORA: &[Corpus] = &[
         // safesyn/cid22_train/kadid/tid). A DISTINCT, harder axis: algorithmic/GAN
         // distortions, not compression — winner ≈0.62 vs 0.96 on CSIQ. Added 2026-07-18.
         filename: "pipal_features_372col_2026-07-18.parquet",
+        preferred_slots: &[],
         enable_per_band: false,
     },
     Corpus {
@@ -447,12 +510,26 @@ const CORPORA: &[Corpus] = &[
         // Added 2026-07-18 (FR-corpus expansion). Pairs builder:
         // scripts/canonical_corpus/build_fr_corpus_pairs.py live.
         filename: "live_features_372col_2026-07-18.parquet",
+        preferred_slots: &[],
         enable_per_band: true,
     },
     Corpus {
         name: "konjnd",
-        display: "KonJND-1k (full)",
+        display: "KonJND-1k",
+        // ⚠ TWO RULERS SHARE THIS SLOT (ADD156 ship audit, defect D2).
+        // `konjnd_features_372col_2026-05-15.parquet` holds all 1,008 refs —
+        // the JPEG **and BPG** halves — while every 720/944-class row scores
+        // the JPEG-504 half only. Reading the diluted file INVERTS
+        // cross-model comparisons: on the same root, same binary, same code
+        // path, ADD156 reads 0.4462 and shipped B 0.6497 (B by +0.204),
+        // while on the JPEG-504 ruler ADD156 reads 0.5332 and B 0.5194
+        // (ADD156 by +0.014). `filename` is kept as the LAST-RESORT slot so
+        // a root that only has the diluted file still produces a number —
+        // but it is announced loudly, never silently.
         filename: "konjnd_features_372col_2026-05-15.parquet",
+        // Same ruler, root-specific dates: the 2026-08-30 roots carry the
+        // 08-30 build, the 2026-05-15 root the 08-29 one. First hit wins.
+        preferred_slots: KONJND_JPEG504_372_SLOTS,
         // KonJND `human_score` here is `mean_threshold` (raw,
         // unit unclear from extract_features_372col.rs but
         // appears to be a per-pair JND threshold in [22, 70]).
@@ -463,6 +540,7 @@ const CORPORA: &[Corpus] = &[
         name: "aic3",
         display: "AIC-3 CTC",
         filename: "aic3_features_372col_2026-05-15.parquet",
+        preferred_slots: &[],
         // AIC-3 = JND step grid (see comment above + L454-471
         // of dataset_metric_baseline.rs); per-band aggregate
         // is misleading.
@@ -476,6 +554,7 @@ const CORPORA: &[Corpus] = &[
         // same convention as AIC-3. Like AIC-3 this is a JND step grid
         // so per-band aggregate on [0, 1] doesn't apply.
         filename: "aic4_features_372col_2026-05-20.parquet",
+        preferred_slots: &[],
         enable_per_band: false,
     },
     Corpus {
@@ -498,6 +577,7 @@ const CORPORA: &[Corpus] = &[
         // flag its meaning: a reproduction pointed at another root got this corpus
         // from the original one without being told.
         filename: "nonphoto_features_372col_2026-07-15.parquet",
+        preferred_slots: &[],
         enable_per_band: false,
     },
     Corpus {
@@ -510,6 +590,7 @@ const CORPORA: &[Corpus] = &[
         // with ssim2 on real modern-codec output. The nonphoto slot's all-content,
         // all-codec sibling. In the default features root.
         filename: "imazen26_test_120k_2026-07-16.parquet",
+        preferred_slots: &[],
         enable_per_band: false,
     },
     Corpus {
@@ -523,6 +604,7 @@ const CORPORA: &[Corpus] = &[
         // (ext_sdr25.parquet); under the default root the load fails loud
         // and the corpus is skipped.
         filename: "ext_sdr25.parquet",
+        preferred_slots: &[],
         enable_per_band: false,
     },
     Corpus {
@@ -535,6 +617,7 @@ const CORPORA: &[Corpus] = &[
         // same confound as the hf corpus's 0.204-pooled/0.916-per-ref).
         // 944-root-only; built by build_eval_slices_944.py.
         filename: "ext_hfnlproxy.parquet",
+        preferred_slots: &[],
         enable_per_band: false,
     },
     Corpus {
@@ -563,6 +646,7 @@ const CORPORA: &[Corpus] = &[
         // nonphoto/imazen26 slots. A root without the file fails LOUD with
         // the R2 restore command — the axis cannot be silently dropped.
         filename: "hf_nearlossless_val.parquet",
+        preferred_slots: &[],
         // Everything here lives in ssim2 91..100, i.e. one width-10 band. A
         // 10-band split would put all 300 rows in B9 and report nine empties.
         enable_per_band: false,
@@ -1926,7 +2010,7 @@ fn render_corpus(
         slot_720_file(corpus.name, features_root)
             .ok_or_else(|| format!("no 720 slot for corpus {}", corpus.name))?
     } else {
-        corpus.filename.to_string()
+        resolve_372_slot(corpus, features_root).file
     };
     let path = features_root.join(&fname);
     let ct = zensim_validate::perf_trace::PerfTrace::new("  corpus");
@@ -2445,6 +2529,13 @@ fn main() -> ExitCode {
         era_of(&args.features_root),
         args.features_root.display()
     );
+    // Same discipline for the RULER as for the era: a corpus with two files on
+    // disk under one slot must say which one produced the number (D2).
+    if !args.regime_720 {
+        for line in ruler_lines(&args.corpora, &args.features_root) {
+            eprintln!("{line}");
+        }
+    }
     eprintln!(
         "bake_verdict — bake={}  features-root={}  corpora={}",
         args.bake.display(),
@@ -2610,15 +2701,16 @@ fn main() -> ExitCode {
         .par_iter()
         .map(|corpus| {
             // Regime-aware slot: --regime 720 loads the 720-wide ext_*.parquet
-            // (via slot_720), NOT the 372col filename. render_corpus resolves the
-            // same way — keep these two in sync.
+            // (via slot_720), NOT the 372col filename. The 372 arm resolves
+            // through the shared `resolve_372_slot`, which render_corpus also
+            // calls — so the two can no longer drift.
             let cfname = if args.regime_720 {
                 match slot_720_file(corpus.name, &args.features_root) {
                     Some(f) => f,
                     None => return Ok(None), // filtered already; belt-and-braces
                 }
             } else {
-                corpus.filename.to_string()
+                resolve_372_slot(corpus, &args.features_root).file
             };
             let cpath = args.features_root.join(&cfname);
             if !cpath.exists() {
@@ -3932,6 +4024,81 @@ mod tests {
     /// pass) but as relative on Windows, so ONLY windows fired the
     /// stale-exemption half against a pin that was load-bearing everywhere
     /// else. `slot_is_absolute` closes that hole for good.
+    #[test]
+    /// **D2 (ADD156 ship audit, `benchmarks/add156_ship_audit_2026-08-31.md`).**
+    /// The default KonJND ruler must be the JPEG-**504** file, not the diluted
+    /// 1,008-ref build that also lives in the same directory.
+    ///
+    /// `konjnd_features_372col_2026-05-15.parquet` holds all 1,008 refs — the
+    /// JPEG *and BPG* halves — while every 720/944-class row scores the JPEG-504
+    /// half. Reading the diluted file does not merely shift the number, it
+    /// **inverts** cross-model comparisons. Measured on the same root, same
+    /// binary, same code path (this audit, replicating the report exactly):
+    ///
+    /// | ruler | ADD156 | shipped `B` | winner |
+    /// |---|---:|---:|---|
+    /// | diluted 1,008 (the OLD default) | 0.4462 | 0.6497 | `B` by +0.204 |
+    /// | JPEG-504 (the new default) | 0.5332 | 0.5194 | ADD156 by +0.014 |
+    ///
+    /// This test pins the default so the diluted file cannot drift back in.
+    fn konjnd_default_ruler_is_jpeg504_not_the_diluted_file() {
+        let konjnd = CORPORA
+            .iter()
+            .find(|c| c.name == "konjnd")
+            .expect("konjnd is a registered corpus");
+
+        // The preferred list is the shared owner's, so `bake_compare` reads the
+        // same ruler — a second copy of these filenames is exactly how one
+        // binary would go on publishing the diluted number.
+        assert_eq!(
+            konjnd.preferred_slots, KONJND_JPEG504_372_SLOTS,
+            "konjnd must resolve through the shared ruler list"
+        );
+        assert!(
+            konjnd.preferred_slots.iter().all(|f| f.contains("jpeg504")),
+            "every preferred konjnd ruler must be a JPEG-504 build"
+        );
+        // The diluted file stays as the LAST-RESORT slot (a root that only has
+        // it still produces a number), never as the preferred one.
+        assert!(
+            konjnd.filename.contains("konjnd_features_372col"),
+            "the diluted build remains the declared fallback"
+        );
+
+        // Under the shipped default root the resolution must land on JPEG-504.
+        let root = Path::new(DEFAULT_FEATURES_ROOT_372);
+        if root.exists() {
+            let r = resolve_372_slot(konjnd, root);
+            assert!(
+                r.file.contains("jpeg504") && !r.degraded,
+                "default root {} resolved konjnd to `{}` (degraded={}) — expected a \
+                 JPEG-504 ruler",
+                root.display(),
+                r.file,
+                r.degraded
+            );
+        }
+
+        // A root with neither preferred ruler falls back, and says so.
+        let empty = std::env::temp_dir().join("zensim-d2-no-ruler-here");
+        let r = resolve_372_slot(konjnd, &empty);
+        assert_eq!(r.file, konjnd.filename);
+        assert!(r.degraded, "falling back past every preferred ruler must flag");
+        let lines = ruler_lines(&[konjnd], &empty);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].contains("LAST-RESORT") && lines[0].contains("DILUTED"),
+            "the fallback must be announced, not silent; got: {}",
+            lines[0]
+        );
+
+        // A single-ruler corpus is unaffected and prints nothing.
+        let cid22 = CORPORA.iter().find(|c| c.name == "cid22").unwrap();
+        assert!(cid22.preferred_slots.is_empty());
+        assert_eq!(resolve_372_slot(cid22, &empty).file, cid22.filename);
+        assert!(ruler_lines(&[cid22], &empty).is_empty());
+    }
+
     #[test]
     fn corpus_slots_are_relative_or_declared_pinned() {
         fn slot_is_absolute(slot: &str) -> bool {

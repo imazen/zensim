@@ -82,7 +82,7 @@ const CORPORA: &[Corpus] = &[
     },
     Corpus {
         name: "konjnd",
-        display: "KonJND-1k (full)",
+        display: "KonJND-1k",
         filename: "konjnd_features_372col_2026-05-15.parquet",
         enable_per_band: false,
     },
@@ -586,7 +586,33 @@ fn render_corpus(
     bootstrap_resamples: usize,
     seed: u64,
 ) -> Result<CorpusResult, String> {
-    let path = features_root.join(corpus.filename);
+    // Resolve through the shared owner so this binary can never publish the
+    // DILUTED KonJND ruler while bake_verdict publishes the JPEG-504 one
+    // (ADD156 ship audit, defect D2 — the two maps are separate structs, which
+    // is exactly how they would drift). Non-KonJND corpora resolve to
+    // `corpus.filename` unchanged.
+    let slot = zensim_validate::eval_roots::resolve_slot(
+        if corpus.name == "konjnd" {
+            zensim_validate::eval_roots::KONJND_JPEG504_372_SLOTS
+        } else {
+            &[]
+        },
+        corpus.filename,
+        features_root,
+    );
+    if slot.degraded {
+        eprintln!(
+            "bake_compare: ⚠ corpus ruler — {} fell back to `{}`; the preferred ruler is \
+             missing under {}. For KonJND that fallback is the DILUTED 1,008-ref build \
+             (JPEG+BPG) and it can rank two models in the OPPOSITE order.",
+            corpus.display,
+            slot.file,
+            features_root.display()
+        );
+    } else if !slot.file.is_empty() && corpus.name == "konjnd" {
+        eprintln!("bake_compare: corpus ruler — {} read on `{}`", corpus.display, slot.file);
+    }
+    let path = features_root.join(&slot.file);
     let g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
         .map_err(|e| format!("load {} parquet: {e}", corpus.display))?;
     let humans = g.human_scores.clone();
