@@ -4832,3 +4832,51 @@ does.** A spline BOTTOM extension has no owner (building it would make D7's rema
 G-RANGE over-counts on any bake whose bottom knot is the dial's zero. Pre-existing, not this lane's:
 three `blur.rs` ring tests panic `subtract with overflow` in DEBUG only (release green); a stale
 `push-qqkqluuttltu` bookmark conflict; zenmetrics#51.
+
+## 2026-08-31 ~21:5xZ — ROUND 36: board regenerated on the corrected KonJND ruler — the column's leader was an ARTEFACT, and three pre-existing board defects fixed (`5d38820c`; doc `benchmarks/board_regen_2026-08-31.md`)
+
+- **17 of 17 diluted-ruler cells re-scored; all 378 board cells now read KonJND at n=504** (verified
+  by scanning `rank.konjnd.n` board-wide; the other 361 untouched). 13 bake cells got a fresh
+  `bake_verdict --full-json` on sha-verified bytes at their own root, grafted with
+  `--graft-into … --reslice-rank konjnd` (which refuses to write unless every other key is
+  byte-identical): **12 of 13 reproduced every non-KonJND rank block BIT-IDENTICALLY** — which
+  independently answers the era-2 question, **the flip does not move a `bake_verdict` rank read**
+  because that path scores stored parquet features. The eleven `@cur372` values match round-4b's
+  independent shim run (different binary, different path) at **max |Δ| = 0.0e+00**. The 4 `peer_*`
+  rows were rebuilt through the owner after proving the `/jpeg/` subset IS the ruler population
+  (504 rows, `pjnd` bit-identical to the parquet's `human_score`).
+- **★ ORDERING: 355 of 378 cells change position in the KonJND column — its leader was a ruler
+  artefact.** `v02_bvls_NO_shaping@cur372` **1 → 295** (0.7275 → 0.3296); `peer_iwssim` **364 → 7**
+  (0.1859 → 0.5704); shipped `B@cur372` 2 → 25; **ADD156@cur372 130 → 14, and now reads ABOVE B
+  (0.5332 vs 0.5194)** — the D2 inversion, corrected on the board. Composite: 188 cells move,
+  **top-10 unchanged**; `freeze_check --select` winner **unchanged** (`W10L9P_s4005_packed`, 8/8,
+  0.9876); three cells cross the F2 KonJND floor.
+- **Correction to my own brief on ADD156**: `SELECTED: ADD156 — 6/8, 0.9644` reproduces exactly **in
+  the two-candidate pool it was run on**. Over the full 374-cell board ADD156 is rank **101** and
+  the rule selects `W10L9P_s4005_packed`; **within era-bridge it is 3rd**. It still leads shipped
+  **B** by **+0.0457** (B is 0.9187 post-fix, not the 0.9151 I quoted). The board has **no place to
+  show `selection_composite`/floors** — its "Gate scorecard" is the unrelated CODEC_TARGET_GOALS
+  system — so the lane did NOT invent a panel; the table is in its doc.
+- **Badge premise CORRECTED by measurement**: the registry repair added **ZERO** badges — all 22
+  recovered findings were `{"manual": …}`, which by construction matches no cell (counted with the
+  gauntlet's own matcher: 42→47 entries, 2,959→3,355 matches, and the +396 is round 35's two
+  MACHINE-scoped entries, not the repair). What the repair bought is **readability** — the 3
+  formerly out-of-array findings are now in the page's `annRegistry`. Badge rendering verified
+  end-to-end incl. a no-finding control (`W10L9P_s4005_packed` clean in every column).
+- **Three PRE-EXISTING board defects found and fixed at the owner**: (1) **276 cells' `composite`
+  was STALE** — the 2026-08-28 reslice replaced two of its six terms and never updated it (|Δ| up to
+  0.0237 **on the default sort key**); `--reslice-rank` now carries the verdict's composite in the
+  same gated write (registered `composite-stale-after-rank-graft-2026-08-28`). (2) **Peer rows led
+  the composite sort at 1.11–1.42** vs the best bake's 0.872 — the legacy unnormalised fallback; now
+  NOT MEASURED (em-dash, sorted last). (3) **`peer_cvvdp.fulleval.json` is not valid strict JSON**
+  (73 bare `NaN`), which aborts `freeze_check --select` over a glob; also fixed
+  `build_peer_fullevals.py` silently deleting other lanes' grafts on re-run. The render gate got
+  **stricter**, not relaxed (it never checked where nulls sort and its sentinel encoded the opposite
+  of the page's rule; negative control fails all three assertions).
+- **Curation**: ADD156, shipped B (both era halves), the 944 flagship, and the newly-promoted
+  **`Q7b_pools_g0.2_a0.2_b0.97`** — the W-LIN 7b candidate the registered rule names, **which was
+  not on the board at all** (7 of 14 corpora; rest em-dashed) — plus a new `W-LIN` `family_of`
+  branch (those stems had been falling through to "pre-944 era"). **Gates PASS** (362 bakes, 18
+  tables, sort clicks, ECharts SSR, **960 ⚠-badged cells**). Board 19.95 MB →
+  http://localhost:3300/zensim/reports/summer_gauntlet.html ; prior board + pre-change cells
+  preserved with SHA256SUMS.
