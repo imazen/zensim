@@ -116,6 +116,23 @@
     "Q7b_pools_g0.2_a0.2_b0.97",
     "W10L9P_s4005_packed"
    ]
+  },
+  {
+   "id": "2026-09-01-a4bkon-konjnd-closure",
+   "date": "2026-09-01",
+   "label": "2026-09-01 · a4bkon KonJND-closure attempt (falsified) + exam APPENDIX C verdict",
+   "bakes": [
+    "A4b_s4004",
+    "a4bkon_K1_w1.8_s4004",
+    "a4bkon_K1_w1.8_s4005",
+    "a4bkon_K1_w2.4_s4004",
+    "a4bkon_K1_w2.4_s4005",
+    "a4bkon_K2_s4004",
+    "a4bkon_K2_s4005",
+    "a4bkon_K3_s4004",
+    "a4bkon_K3_s4005"
+   ],
+   "note": "K1 (kon-mass sweep, w1.8/2.4), K2 (ttbig mixed-teacher leg) and K3 (combined) all fail to close A4b's KonJND-only W1 gap (wave_r4_2026-09-01.md §24): K1/K3 make KonJND WORSE (-0.077 to -0.086 vs A4b), K2 is a statistical wash (-0.001) but costs composite + a within-image CID22 axis A4b itself passes. A4b/K4 (=A4b_s4004 here) remains the best 156+free profile produced, composite 0.8664. W4 (AMENDMENT B2, <=1.25x add156_156basic) directly measured: clean PASS at 1T every size; 8T PASSES 576/2304 but FAILS 1152 (1.4375-1.4583x, repeatable). Closing verdict: ssim2_replacement_bar_2026-08-31.md APPENDIX C."
   }
  ]
 }
