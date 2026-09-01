@@ -5150,3 +5150,5 @@ carries the pairstsv capability via its later lineage. Per the found-in-the-wild
 deleted — the branch list itself is the archive; deletion of the 15 merged ones is a user call.
 Local-only fix applied: `jj bookmark forget push-qqkqluuttltu` (stale conflicted tracking state;
 commits + remote untouched).
+
+**2026-09-01 follow-up (user-directed):** the 15 merged `push-*` branches were DELETED from origin (each re-verified `merge-base --is-ancestor` origin/main immediately before deletion; commits remain reachable via main). Exactly the 11 V0_x-era orphan branches remain, held per the found-in-the-wild rule.
