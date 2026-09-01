@@ -2,6 +2,69 @@
 
 ## [Unreleased]
 
+### Measured — the near-lossless clause of the ssim2 bar, closed (2026-09-01)
+
+- **The `hf_nearlossless` corpus is an ssim2 SELF-TARGET, not a human corpus.**
+  Its `human_score` column **is** `ssim2_gpu / 100` — exactly, in float
+  equality, on **1200/1200 rows** (900 train + 300 val, 200 references).
+  Measured with the owner (`panel --input … --per-group`, ssim2 as the
+  predictor): pooled SROCC **1.0000**, PLCC/KROCC 1.0000, OR 0.0000, Z-RMSE
+  0.0000, per-reference mean **1.0000** over 48 (val) / 148 (train) groups.
+  So the exam's W2 near-lossless clause was **unwinnable on it at any feature
+  width**, and extending it to 944 could never have closed the gap §3.7 named.
+  Its registered 944 substitute `hfnlproxy` was already declared `self_target`
+  by the board's own `peer_provenance`; `hf_nearlossless` escaped that
+  declaration only because `peer_ssim2` carries no row for it.
+- **The 944 re-extraction is NOT-REACHABLE, artifact named.** The 1,200
+  distorted JXL bitstreams of the 2026-07-06 post-fix sweep were never
+  persisted — `encoded_filename` is blank on **1200/1200** rows of the sweep's
+  own `pareto.tsv`, both `refit/distorted/` mirrors (`/mnt/v` and Tower) are
+  empty, and the reference paths root in a wiped `/tmp` scratchpad. The 200
+  references ARE recoverable (200/200 in `/mnt/v/input/zensim/sources`);
+  regeneration was priced and rejected as a substitution (encoder two months
+  past the pinned `jxl-encoder@eeb52735`, GPU ssim2 target unreproducible on
+  this box, prebuilt `zenmetrics` has no `sweep` feature). The corpus parquet
+  is byte-identical (`6fc953f6…`) at all four roots that serve it — copied
+  forward, re-extracted never.
+- **New rank axis `hfnl_cid22band`** — the near-lossless clause decided on
+  human labels instead: the top MOS band of CID22 under the committed
+  `merged-decile-2026-08-06` scheme (MOS ≥ 0.80, **n = 1425 over all 49
+  references**, span 0.1194), with the opponent scored in the same run.
+  MEASURED (pooled signed SROCC / per-reference mean; Δ vs ssim2 with a
+  reference-clustered paired bootstrap, B = 10,000, seed 20260901):
+  ssim2 **0.5058 / 0.7099**; shipped B 0.5089 / 0.7020; W10L9PH_s4004
+  **0.4984 / 0.7060 — a TIE both ways** (−0.0070 [−0.043, +0.023] and −0.0038
+  [−0.016, +0.010]); W10L9P_s4005 0.4801 / 0.7016; ADD156 0.4349 / 0.6691 —
+  **a new W1 failing axis** (−0.0696 and −0.0408, both CIs excluding zero);
+  and `Q7b_pools_g0.2_a0.2_b0.97` 0.4584 / **0.7250**, the **only strict win
+  over ssim2 on a named non-circular axis anywhere in the exam** (within-image
+  **+0.0151, 95 % CI [+0.0006, +0.0301]**, P = 0.980) — marginal by its own
+  lower bound, one axis of six, and nominally *behind* pooled on the same rows.
+  **Nobody passes the exam; `W10L9PH_s4004_packed` still fails W1/W2/W7**, but
+  W2 now fails for a measured, structural reason rather than an unmeasured one.
+- **`benchmarks/ssim2_bar_2026-08-31/paired_perref_boot.py`** gained band mode
+  (`BAND_LO`/`BAND_HI`, cut on the shared target so the pairing survives), an
+  `ARMS` override, the `zenstats::per_group_srocc` per-reference floor on a
+  restricted range, and two sign guards (per-arm `srocc_signed` point estimate
+  + the minimum |SROCC| over every bootstrap draw). **Default output
+  unchanged**: a flagless re-run reproduces every value of the committed
+  `paired_boot_10k.txt`. New: `hfnl944_reachability.py`,
+  `hfnl944_band_table.py`, `hfnl944_graft.py` in the same directory.
+- Landed onto six board cells via `promote_fulleval.py --graft-rank`
+  (sha-gated, everything-else-byte-identical): `peer_ssim2`,
+  `b_sdr_linear_cid80_inclwinsor_dense_dial@cur372`,
+  `ADD156_safesyn_only_raw_lasso@cur372`, `W10L9P_s4005_packed`,
+  `W10L9PH_s4004_packed`, `Q7b_pools_g0.2_a0.2_b0.97`. The axis is not in
+  `gauntlet.DATA.corpOrder`, so the rendered board is unchanged.
+  Record: `benchmarks/ssim2_replacement_bar_2026-08-31.md` **APPENDIX A**
+  (four superseded claims corrected in place at §3.0, §3.4, §3.7, §7);
+  artifacts `benchmarks/hfnl944_2026-09-01.pointer.md`.
+- Two defects found in passing, reported not fixed: `panel --json --per-group`
+  emits **two concatenated JSON documents** (invalid as one stream; nothing has
+  tripped on it because `zen_stats.panel` never passes `--per-group`), and
+  `peer_ssim2`'s stored `per_pair.cid22.mos` is on the **0–100** scale while
+  every model cell's is on **[0,1]**.
+
 
 ### Added — the ssim2-replacement bar (2026-08-31)
 

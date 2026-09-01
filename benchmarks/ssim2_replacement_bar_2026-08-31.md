@@ -410,7 +410,7 @@ winner), and **peer_ssim2** as the control row.
 | clause | ssim2 (control) | W10L9P | W10L9PH | B | ADD156 | Q7b |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|
 | **W1** no regression > δ on any held-out human axis | — | **FAIL** (KonJND −0.083) | **FAIL** (KonJND −0.027) | **FAIL** (AIC-3 −0.032, CI excl. 0) | **FAIL** (CID22 −0.026) | **UNEVALUABLE** |
-| **W2** ≥2 strict wins, ≥1 on CID22 or near-lossless | — | **FAIL** (1 win: CSIQ) | **FAIL** (2 wins, neither named) | FAIL | FAIL | UNEVALUABLE |
+| **W2** ≥2 strict wins, ≥1 on CID22 or near-lossless | — | **FAIL** (1 win: CSIQ) | **FAIL** (2 wins, neither named; ties on the near-lossless band — A.4) | FAIL | FAIL (+1 new losing axis, A.4) | **FAIL** (1 win, and it IS the named one: near-lossless band, within-image +0.0151 — A.4) |
 | **W3** ladder ≥ ssim2 | — | **PASS** | **PASS** | **FAIL** | **FAIL** | not measured on a shared grid |
 | **W4** speed ≥ fast-ssim2 @1T | — | **PASS** (1.15–1.21×) | **PASS** (1.15–1.21×) | **PASS** (1.84–1.95× as shipped) | **PASS** (2.93–3.31×) | **PASS** (1.15–1.21×) |
 | **W5** HDR ≥ ssim2-PU | — | N/A (no HDR head) | N/A | N/A | N/A | N/A |
@@ -421,9 +421,15 @@ winner), and **peer_ssim2** as the control row.
 W1/W2 entry carries a paired CI.*
 
 **Nobody passes. The closest is `W10L9PH_s4004_packed`, which fails W1 on one
-axis by −0.027 and fails W2's naming clause for a reason that is partly an
-instrument gap** (see §3.7 — the near-lossless human axis is not measured for
-any 944 model). Separately, the **HDR** row of the mission is carried by a
+axis by −0.027 and fails W2's naming clause.** *(SUPERSEDED IN PART by
+**APPENDIX A**, 2026-09-01: the clause does not fail for an instrument gap. The
+corpus it names is an ssim2 SELF-TARGET — `human_score` **is** `ssim2_gpu/100`,
+exactly, on 1200/1200 rows — so the opponent scores 1.0 on it by construction
+at any feature width and no extraction could ever have closed it. Measured on a
+non-circular near-lossless axis (the top MOS band of CID22, `hfnl_cid22band`),
+W10L9PH **ties** ssim2: −0.0070 pooled [−0.043, +0.023] and −0.0038
+within-image [−0.016, +0.010]. W2 still FAILS; the reason is now measured and
+structural. `Q7b` picks up one strict named win there. See A.1, A.4, A.5.)* Separately, the **HDR** row of the mission is carried by a
 model that is not in this table at all: shipped **`BHdr`**, which does clear
 W5 (+0.049 over ssim2-PU) — see §3.5.
 
@@ -568,9 +574,14 @@ is different again (§3.3). Both are real; they measure different things on
 different data. Two further cautions:
 
 - **The 944 candidates do not carry `hf_nearlossless` at all** — it is a
-  372-root-only axis present on 13 of 379 board cells. So the exam's
-  near-lossless human clause is **NOT MEASURED** for the leading candidates,
-  which is why W2 fails for a reason that is half instrument.
+  372-root-only axis present on 13 of 379 board cells. *(SUPERSEDED by
+  **APPENDIX A.1**: calling it a "human clause" was wrong. That corpus's
+  `human_score` is `ssim2_gpu/100` **exactly**, so it is an ssim2 self-target
+  like `nonphoto`/`imazen26`/`hfnlproxy` and belongs in §2.1's exclusion list.
+  `peer_ssim2` measured on it reads pooled SROCC **1.0000**, per-ref mean
+  1.0000 over 48 refs. Extending it to 944 was never the blocker; A.2 records
+  it as NOT-REACHABLE anyway — the 1,200 distorted bitstreams were never
+  persisted.)*
 - **`hfnlproxy` is not a common footing.** `n` is 7,717 / 9,167 / 11,356 across
   the five candidates. Its registered LSD is 0.039 on the per-ref column, and
   the pooled column is dominated by cross-image scale: ADD156 reads 0.295
@@ -678,7 +689,7 @@ makes the `fast_ssim2` number in the same group trustworthy at the same scale.
 |---|---|---|---|---|
 | **W10L9PH_s4004** | W1 KonJND | −0.027 vs ssim2 | The KonJND↔CID22 trade is measured and certified (wave-7: the kon lever is data-mass, not selection; `B` gets +0.066 from a 372-linear recipe). A blend or a KonJND-weighted leg is the registered lever | fleet wave |
 | | W2 (needs a named win) | CID22 +0.0032 vs ±0.010 | **DATA, not features** — E-M6b priced v3-marginal at ≈+0.001/seed vs +0.004 for the data slice | fleet wave |
-| | W2 (near-lossless axis) | **NOT MEASURED** | `hf_nearlossless` (300 pairs, 50 refs) exists **only at 372 width**; the 2026-08-30 root carries it as a byte-copy because *"their distorted material is bigcodec/R2 encodes"*. A 944 read therefore needs the encodes pulled and re-extracted — an eval-coverage gap, not a modelling one, but **not** the free command it first looks like | **R2 pull + extraction** (300 pairs — small, but not local-only) |
+| | W2 (near-lossless axis) | ~~NOT MEASURED~~ → **MEASURED TIE** (APPENDIX A) | ~~a 944 read needs the encodes pulled and re-extracted~~ — **both halves of that row were wrong.** (i) The corpus is an **ssim2 self-target** (`human_score == ssim2_gpu/100`, 1200/1200 exact), so the opponent scores 1.0 on it by construction and the clause is unwinnable there at any width. (ii) The extraction is **NOT-REACHABLE** regardless: the 1,200 distorted JXL bitstreams were never persisted (`encoded_filename` blank on 1200/1200 rows; both `distorted/` mirrors empty). Decided instead on `hfnl_cid22band` (CID22 top MOS band, n=1425/49 refs), where W10L9PH **ties** ssim2 | **DONE — no extraction** |
 | | W7 | needs `custom-profiles` | a profile slot + a ship call | user call |
 | **W10L9P_s4005** | as above, plus KonJND −0.083 | | same | same |
 | **shipped B** | W1 AIC-3 (−0.032, CI excl. 0), W2, W3 | ladder 0.9792 vs 0.9930; within-image CID22 −0.0079 | Nothing in flight targets B; the 944 class already dominates it on W1/W2/W3 while being 1.9× slower. **The measured answer is to replace it, not to fix it** | user call |
@@ -1111,11 +1122,307 @@ cargo build --release --bench ssim2_speed_bar [--features ssim2-rayon]
   of the comparison, not the pixels. **W5 is therefore the one clause in the
   exam whose opponent row is not measured in the same run — which is exactly
   what W5 requires for a future claim, and is the first ranked next action.**
-- **`hf_nearlossless` is absent for every 944 candidate**, so the exam's
+- ~~**`hf_nearlossless` is absent for every 944 candidate**, so the exam's
   near-lossless human clause is NOT MEASURED for the leading models rather than
-  failed. That distinction is the registry's `absent-not-failed` convention and
-  it is used here deliberately.
+  failed.~~ **SUPERSEDED by APPENDIX A.** It is absent, but it is also not a
+  human corpus and not reachable: `human_score` **is** `ssim2_gpu/100` exactly
+  (1200/1200 rows), so the opponent is unbeatable on it by construction, and
+  the distorted bitstreams it would have to be re-extracted from were never
+  persisted. The clause is decided in A.4 on `hfnl_cid22band` — the top MOS
+  band of CID22 — where the opponent scores 0.5058 pooled / 0.7099
+  within-image and can therefore be beaten.
 - Every statistic in this document was produced by `zenstats` via
   `bake_verdict`, `panel`, or `panel --batch`. **Nothing statistical was
   hand-rolled**, including the bootstrap, whose per-resample correlations are
   `panel --batch` calls.
+
+---
+
+## APPENDIX A — the near-lossless clause, closed (hfnl944 lane, 2026-09-01)
+
+**The charge.** §3.7 left one row open: the near-lossless human axis is *NOT
+MEASURED* for every 944-class model, because `hf_nearlossless` exists only at
+372 width. The stated fix was "pull the encodes, re-extract at 944". This
+appendix went to do that and found two things that settle the clause without
+it — and then measured the clause on an axis that can actually decide it.
+
+Everything below is measured on this box today. Instruments and gates are named
+at every number; nothing statistical is hand-rolled.
+
+### A.1 The finding that matters: the near-lossless axis is an ssim2 SELF-TARGET
+
+`hf_nearlossless`'s `human_score` column **is** `ssim2_gpu / 100`. Not
+approximately — **exactly, in float equality, on 1,200 of 1,200 rows**:
+
+| file | rows | refs | `max abs(human_score×100 − ssim2_gpu)` | rows exactly equal |
+|---|--:|--:|--:|--:|
+| `hf_nearlossless.parquet` | 1200 | 200 | **0.0** | 1200/1200 |
+| `hf_nearlossless_train.parquet` | 900 | 150 | **0.0** | 900/900 |
+| `hf_nearlossless_val.parquet` | 300 | 50 | **0.0** | 300/300 |
+
+The corpus carries **no human label at all**. Its own manifest says so in one
+line — `"target_column": "human_score (= ssim2/100 …)"` — and the name of the
+column is what hid it: every other corpus in the eval set uses `human_score`
+for a MOS/JND, so the near-lossless axis reads as human in every table it
+appears in, including this document's §3.4 and the project CLAUDE.md's
+"RECURRING PRIORITIES" list, which calls it a corpus with "targets human_score
++ ssim2_gpu" as though those were two different things.
+
+**Measured consequence** (`panel --input … --col-predicted ssim2_gpu
+--col-target human_score --col-band ref_basename --per-group`, i.e. the
+opponent scored on the axis by the canonical owner):
+
+| | pooled SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | per-ref mean | per-ref n | frac_neg | frac_perfect |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| **`peer_ssim2` on `hf_nearlossless_val`** | **1.0000** | 1.0000 | 1.0000 | 0.0000 | 1.0000 | 0.0000 | **1.0000** | 48 | 0.0000 | 1.0000 |
+| `peer_ssim2` on `hf_nearlossless_train` | — | — | — | — | — | — | **1.0000** | 148 | 0.0000 | 1.0000 |
+
+**So W2's near-lossless clause could never have been won on this corpus, at any
+feature width.** §2.1 already excludes ssim2-anchored axes from every "beats"
+clause by name (`nonphoto`, `imazen26`, `hfnlproxy`); `hf_nearlossless` belongs
+on that list and was not on it, because `peer_ssim2` carries no row for it and
+so never had to declare `self_target`. Its registered 944 substitute
+**`hfnlproxy` is already declared** `"self_target": true, "srocc 1.0 by
+construction, not a measurement"` in the board's own `peer_provenance`.
+
+**The near-lossless axis is therefore circular at BOTH widths.** §3.7's cost
+line — "an eval-coverage gap, not a modelling one … R2 pull + extraction" — is
+superseded: the extraction would have produced an axis on which the opponent
+scores 1.0 by definition. The gap was never the missing feature width.
+
+### A.2 The extraction itself: NOT-REACHABLE, artifact named
+
+Independently of A.1, the 944 extraction cannot be done faithfully. A 944 read
+needs the (reference, distorted) **pixels**; the references survive and the
+distorted material does not.
+
+| artifact | state |
+|---|---|
+| 200 reference images | **RECOVERABLE — 200/200** found by basename in `/mnt/v/input/zensim/sources/` |
+| 1,200 distorted JXL bitstreams | **MISSING.** `encoded_filename` is blank on **1200/1200** rows of the sweep's own `pareto.tsv` — the sweep encoded in memory, scored, and discarded (the exact §4 "persist encoded variants" violation the ML-pipeline rule exists to prevent) |
+| `refit/distorted/` | present and **EMPTY** on `/mnt/v` **and** on the Tower mirror |
+| the sweep's reference paths | rooted at `/tmp/claude-1000/…/a9bacddc-…/scratchpad`, i.e. a wiped scratch dir |
+
+**Named missing artifact: the 1,200 distorted JXL bitstreams of the 2026-07-06
+post-fix near-lossless sweep** (`zenjxl`, q90, butteraugli distance
+{0.005, 0.01, 0.015, 0.02, 0.025, 0.03}, encoder `jxl-encoder@eeb52735`).
+
+Regeneration was priced and **rejected as a substitution**, not skipped: the
+encoder is two months past the pinned rev, the stored target is a GPU ssim2
+read and this box has no working GPU, and the prebuilt `zenmetrics` cannot
+encode at all (its `capabilities` list carries `jobexec` but not `sweep`, and
+the help is explicit that the encode job kinds need `--features sweep`). Any
+re-encode therefore produces different bitstreams **and** different targets, so
+the row-for-row `ref_basename` + `human_score` alignment gate could not hold
+and the result would be a different corpus wearing the same name.
+
+One more fact from the same check, worth recording because it explains why the
+axis never moved: the parquet is **byte-identical at all four roots that serve
+it** — sha256 `6fc953f6159cb22f770fb0251c30892158cfd266d6c0ee0b6f15354ed7b7f4b7`
+at `canonical-2026-07-15/train`, `2026-08-30-full-features-372`,
+`2026-08-30-era3-full-features-372` and `2026-05-15-full-features`. It has been
+copied forward through every root and re-extracted at none.
+
+### A.3 What the reachable near-lossless rows actually say
+
+Two tables, on two different populations. **They are not a common footing and
+must not be read across.**
+
+**(a) the true corpus, `hf_nearlossless` (372 only, 300 pairs / 50 refs, JXL
+d ∈ [0.005, 0.03]).** ssim2 row measured here; model rows read from the board.
+
+| arm | width it reads | pooled signed SROCC | per-ref mean | per-ref n | per-ref backwards frac |
+|---|---|--:|--:|--:|--:|
+| **`peer_ssim2`** | (it *is* the target) | **1.0000** | **1.0000** | 48 | **0.0000** |
+| shipped **B** `@cur372` | 372 | 0.6142 | 0.4880 | 48 | **0.2083** |
+| **ADD156** `@cur372` | 372 | 0.4581 | **0.9488** | 48 | **0.0000** |
+| W10L9PH_s4004 | 944 | **NOT-REACHABLE** | — | — | — |
+| W10L9P_s4005 | 944 | **NOT-REACHABLE** | — | — | — |
+| Q7b | 944 | **NOT-REACHABLE** | — | — | — |
+
+The two numbers this document carried into §3.4 — B backwards on 20.8 % of
+references, ADD156 on 0 % — **reproduce exactly** from the board cells
+(0.208333 / 0.000000). They remain true and they remain a statement about
+*agreement with ssim2 in the HF band*, not about human perception. The 48
+(not 50) references are the `per_group_srocc` floor doing its job: two refs
+have a flat ssim2 ladder and no spread, so they drop for every arm including
+the opponent.
+
+**(b) the registered 944 substitute, `hfnlproxy` — and it is not one footing
+either.** Four different row populations have been published under this one
+name, and **the opponent's is on none of the roots that remain on disk**:
+
+| arm | n | pooled signed | per-ref mean | per-ref n | frac_neg | population |
+|---|--:|--:|--:|--:|--:|---|
+| **`peer_ssim2`** | 9167 | **1.0000** *(self-target)* | — | — | — | **not on any root today** |
+| W10L9PH_s4004 | 7717 | 0.6993 | 0.8268 | 790 | 0.0165 | ext944 post-reslice |
+| Q7b | 7717 | 0.4056 | 0.7558 | 791 | 0.0430 | r1b-pools944 |
+| W10L9P_s4005 | 9167 | 0.3781 | 0.7269 | 585 | 0.0479 | (matches the peer) |
+| shipped **B** | 11356 | 0.5027 | 0.8252 | 757 | 0.0132 | 372 roots / pre-reslice |
+| ADD156 | 11356 | 0.4921 | 0.8306 | 757 | 0.0198 | 372 roots / pre-reslice |
+
+On-disk row counts for `ext_hfnlproxy.parquet`: **7,224** (r1b-samepair 372 and
+944), **7,717** (ext944-canonical current, r1b-pools944, valsel, wlin7 372),
+**11,356** (all four 372 roots, ext720, and ext944's `.pre-reslice.bak`).
+**There is no 9,167-row slice anywhere** — so the leading candidate (7,717) and
+the opponent (9,167) have never been compared on the same rows, and the
+opponent's rows cannot be recovered. Combined with A.1 (the axis is circular
+anyway) this row should be read as a health indicator per arm and never as a
+comparison.
+
+### A.4 The clause, decided — on a near-lossless axis that is NOT circular
+
+If the near-lossless clause is to mean anything it has to be measured against
+**people**, on rows every arm shares, with the opponent in the same run. That
+axis exists and nobody had cut it: the **top band of CID22 under the committed
+`merged-decile-2026-08-06` scheme** — MOS ≥ 0.80, open above, **n = 1425 over
+all 49 references, span 0.1194**. It is the high-fidelity end of the gold human
+holdout, it is the same 4,292-pair population every arm in §3.1 already shares
+(index-wise target identity, max |Δ| **exactly 0.0**, asserted before pairing),
+and `peer_ssim2` can be scored on it.
+
+Registered here as the rank axis **`hfnl_cid22band`**.
+
+Statistics: `panel --input … --per-group` = `zenstats::per_group_srocc`, the
+same quantity `bake_verdict` publishes as `per_ref_mean` / `per_ref_n` /
+`frac_negative`. Intervals: `paired_perref_boot.py` with `BAND_LO=0.8` —
+reference-clustered paired bootstrap, B = 10,000, seed 20260901, the identical
+instrument and seed §3.1 used.
+
+| arm | pooled signed SROCC | Δ vs ssim2 [95 % CI] | P | per-ref mean | Δ vs ssim2 [95 % CI] | P | per-ref n | frac_neg |
+|---|--:|---|--:|--:|---|--:|--:|--:|
+| **ssim2** | **0.5058** | — | — | **0.7099** | — | — | 49 | 0.0000 |
+| shipped **B** | 0.5089 | +0.0030 [−0.0312, +0.0387] | 0.560 | 0.7020 | −0.0079 [−0.0267, +0.0111] | 0.207 | 49 | 0.0000 |
+| **ADD156** | 0.4349 | **−0.0696 [−0.1030, −0.0327]** | 0.000 | 0.6691 | **−0.0408 [−0.0620, −0.0210]** | 0.000 | 49 | 0.0000 |
+| W10L9P_s4005 | 0.4801 | −0.0248 [−0.0579, +0.0080] | 0.075 | 0.7016 | −0.0083 [−0.0190, +0.0029] | 0.072 | 49 | 0.0000 |
+| **W10L9PH_s4004** | 0.4984 | −0.0070 [−0.0432, +0.0234] | 0.365 | 0.7060 | −0.0038 [−0.0163, +0.0095] | 0.279 | 49 | 0.0000 |
+| **Q7b** (W-LIN 7b) | 0.4584 | −0.0452 [−0.0988, +0.0071] | 0.049 | **0.7250** | **+0.0151 [+0.0006, +0.0301]** | **0.980** | 49 | 0.0000 |
+
+**Three readings.**
+
+1. **W10L9PH ties ssim2 in the near-lossless human zone**, pooled and
+   within-image, both CIs straddling zero and both point estimates inside
+   δ_corpus. That is now a MEASUREMENT, not an absent row.
+2. **`Q7b_pools_g0.2_a0.2_b0.97` is the only arm on the page that strictly
+   beats ssim2 on a named non-circular axis** — within-image, +0.0151, CI
+   [+0.0006, +0.0301], P = 0.980. **Read it with its caveats, which are
+   large**: the lower bound is +0.0006, i.e. it clears zero by a twentieth of
+   its own width; it is one axis out of six and would not survive a
+   multiple-comparison correction; and the same arm is nominally *behind*
+   ssim2 **pooled** on the same rows (−0.0452, P = 0.049), so its two columns
+   disagree in sign. The honest label is **a real but marginal within-image
+   win on the axis a codec loop consumes, on a model that is otherwise the
+   least-evaluated candidate in the exam.**
+3. **ADD156 acquires a new W1 failure.** −0.0696 pooled and −0.0408
+   within-image, both CIs excluding zero, both far outside δ_corpus = 0.010.
+   The fast-profile candidate is measurably worse than ssim2 in the zone
+   compression products live in — which is consistent with, and much sharper
+   than, its −0.0256 on full CID22.
+
+### A.5 W1–W7 for `W10L9PH_s4004_packed`, updated
+
+| clause | before this appendix | after |
+|---|---|---|
+| **W1** no regression > δ | **FAIL** (KonJND −0.027) | **FAIL** — unchanged. The new axis does not add a failure: −0.0070 pooled and −0.0038 within-image are both inside δ. |
+| **W2** ≥2 strict wins, ≥1 named | **FAIL** (2 wins, neither named) *+ the named alternative NOT MEASURED* | **FAIL — and now for a measured, structural reason.** The near-lossless corpus named by the clause is an ssim2 self-target (A.1), so it is unwinnable at any width; on the non-circular replacement the model **ties** (A.4). It still holds its two unnamed strict wins (CSIQ pooled, AIC-3 within-image). |
+| **W3** ladder ≥ ssim2 | PASS | PASS — untouched |
+| **W4** speed ≥ fast-ssim2 @1T | PASS (1.15–1.21×) | PASS — untouched |
+| **W5** HDR | N/A (no HDR head) | N/A — untouched |
+| **W6** not circular | PASS | PASS — and now demonstrably so on this axis, whose target is human MOS |
+| **W7** default build | FAIL (`custom-profiles`) | FAIL — untouched |
+
+**`W10L9PH_s4004_packed` still fails the exam, on W1 (KonJND −0.027), W2 and
+W7.** What changed is *why* W2 fails: not an instrument gap that a fleet wave
+could close, but a tie against the opponent on human labels in the zone the
+clause names, plus a corpus that could never have decided it.
+
+**Does any candidate's overall verdict change? No — nobody passes.** Two rows
+of §3.0 move:
+
+- **Q7b** goes from `W2: UNEVALUABLE` to **holding one strict named win**
+  (the near-lossless zone, within-image). It still fails W2 because K = 2 and
+  it has one, and it remains UNEVALUABLE on W1 (no `csiq`/`live`/`aic3`/`aic4`
+  rows). **Its cheapest next step is unchanged and now clearly worth taking:
+  `run_full_eval.sh` on the bake, one command.**
+- **ADD156** gains a new W1 failing axis (A.4, reading 3). It already failed
+  W1 on CID22.
+
+**And a clause-design consequence the exam should absorb:** W2 names
+"CID22 **or the near-lossless zone**" as the two axes one win must land on. As
+written, the second of those was unwinnable — the only corpora the project has
+under that name are ssim2 self-targets. The registered replacement
+`hfnl_cid22band` makes the clause decidable without changing its intent, and it
+is a *strictly harder* bar than the corpus it replaces: on it, ssim2 scores
+0.5058 / 0.7099, not 1.0.
+
+### A.6 Gates
+
+Every one of these ran; each fails loud.
+
+| # | gate | result |
+|---|---|---|
+| 1 | `human_score × 100 == ssim2_gpu` (float equality) over the whole corpus | **1200/1200 exact**, max abs diff 0.0 |
+| 2 | the corpus parquet is one file at every root | 4/4 sha256 identical (`6fc953f6…`) |
+| 3 | index-wise target identity across all six arms before pairing | max abs Δ **exactly 0.0** (asserted in `paired_perref_boot.py`; this is the assertion that caught LIVE in §3.1) |
+| 4 | the band cut does not disturb the per-ref floor | 49 of 49 references kept; 0 dropped for `< 3` in-band pairs or no spread |
+| 5 | `abs(SROCC)` used by the bootstrap fast path equals `srocc_signed` | all six arms positive at the point estimate; **min over all 10,000 draws × 6 arms = 0.2475** (ADD156), so no draw crossed zero |
+| 6 | cross-instrument agreement | `panel --per-group` and `paired_perref_boot.py` point estimates agree to 6 dp on all six arms (e.g. ssim2 0.505825 / 0.709866) |
+| 7 | the extended bootstrap script did not move the exam's numbers | flagless re-run reproduces **every** value of `paired_boot_10k.txt` (pooled, within-image, CIs, P) |
+| 8 | each arm's dump is provably the board cell's own prediction vector | 5 of 6 pred-vector-identical (max abs Δ 0.0); **ADD156**'s `@cur372` cell has per-pair stripped, so identity is proved by its pooled CID22 SROCC being **bit-equal** (0.8633799667492866) and distinct from the stored-era cell (0.8632968920382094) |
+| 9 | landing the axis changes nothing else on the board | `promote_fulleval.py --graft-rank`, sha-gated, everything-but-`rank`/`rank_graft_sources` byte-identical (the owner's own assertion) |
+
+### A.7 Landed, and what was corrected in place
+
+- **`rank.hfnl_cid22band`** grafted onto the six candidate board cells —
+  `peer_ssim2`, `b_sdr_linear_cid80_inclwinsor_dense_dial@cur372`,
+  `ADD156_safesyn_only_raw_lasso@cur372`, `W10L9P_s4005_packed`,
+  `W10L9PH_s4004_packed`, `Q7b_pools_g0.2_a0.2_b0.97` — each carrying the band
+  definition, the paired deltas, the pairing evidence and a `provenance` block
+  naming the circularity finding. **Six cells of 379**, per the brief. The axis
+  is not in `gauntlet.DATA.corpOrder`, so the board renders exactly as before;
+  adding a column for a 6-of-379 axis is a presentation change this lane
+  deliberately did not make.
+- **Three claims in this document are superseded by A.1/A.2** and are marked
+  in place: §3.0's footnote, §3.4's first bullet, §3.7's `W10L9PH / W2
+  (near-lossless axis)` row, and §7's `hf_nearlossless is absent` bullet.
+- Two **defects found in passing**, reported and not fixed here:
+  `panel --json --per-group` emits **two concatenated JSON documents**, so its
+  stdout is not valid JSON (nothing has tripped on it because
+  `zen_stats.panel` never passes `--per-group`); and `peer_ssim2`'s stored
+  `per_pair.cid22.mos` is on the **0–100** scale while every model cell's is
+  on **[0,1]**, so anything that band-cuts from stored per-pair must normalise
+  per cell.
+
+### A.8 Reproduction
+
+```sh
+# A.1 + A.2 — the two findings, from stored bytes only
+python3 benchmarks/ssim2_bar_2026-08-31/hfnl944_reachability.py \
+    --json /mnt/v/output/zensim/hfnl944-2026-09-01/hfnl_reachability.json
+
+# A.1 — the opponent, measured on the axis by the owner
+target/release/panel \
+  --input /mnt/v/zen/zensim-training/canonical-2026-07-15/train/hf_nearlossless_val.parquet \
+  --col-predicted ssim2_gpu --col-target human_score --col-band ref_basename --per-group
+
+# A.4 — the non-circular axis: statistics, then intervals
+ZEN_PANEL_BIN=$PWD/target/release/panel \
+  python3 benchmarks/ssim2_bar_2026-08-31/hfnl944_band_table.py \
+    --out-dir /mnt/v/output/zensim/hfnl944-2026-09-01
+ZEN_PANEL_BIN=$PWD/target/release/panel ARMS="B ADD156 W10L9P W10L9PH Q7b" BAND_LO=0.8 \
+  python3 benchmarks/ssim2_bar_2026-08-31/paired_perref_boot.py
+
+# gate 7 — the exam's own numbers, unmoved by the band extension
+ZEN_PANEL_BIN=$PWD/target/release/panel \
+  python3 benchmarks/ssim2_bar_2026-08-31/paired_perref_boot.py   # == paired_boot_10k.txt
+
+# A.7 — land it (sha-gated; --dry-run first)
+python3 benchmarks/ssim2_bar_2026-08-31/hfnl944_graft.py \
+  --panel /mnt/v/output/zensim/hfnl944-2026-09-01/cid22_hfnl_band_panel.json \
+  --boot  /mnt/v/output/zensim/hfnl944-2026-09-01/cid22_hfnl_band_paired_boot.txt \
+  --out-dir /mnt/v/output/zensim/hfnl944-2026-09-01/graftsrc
+```
+
+Artifacts + `_MANIFEST.json` (build commit, shas, row counts):
+`/mnt/v/output/zensim/hfnl944-2026-09-01/`, pointer
+`benchmarks/hfnl944_2026-09-01.pointer.md`.

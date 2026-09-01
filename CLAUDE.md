@@ -857,8 +857,20 @@ the loop. Every metric decision serves this:
 ### Data assets that keep getting forgotten
 
 - **HF near-lossless parquets**: `canonical-2026-07-15/train/hf_nearlossless_{train,val}.parquet`
-  (900 + 300 rows × 372 feat; targets human_score + ssim2_gpu). The `hf_nearlossless`
-  corpus in bake_verdict. INCLUDE in training + eval.
+  (900 + 300 rows × 372 feat). The `hf_nearlossless` corpus in bake_verdict.
+  INCLUDE in training + eval — **but it is an ssim2 SELF-TARGET, not human data.**
+  MEASURED 2026-09-01: `human_score` **is** `ssim2_gpu / 100`, exactly, in float
+  equality, on **1200/1200 rows** — they are ONE column, not two targets, and this
+  bullet said otherwise for six weeks. So a score on this axis is AGREEMENT WITH
+  ssim2, never a win over it (`peer_ssim2` reads pooled SROCC **1.0000**, per-ref
+  mean 1.0000); it belongs with `nonphoto`/`imazen26`/`hfnlproxy` in the
+  circularity-excluded set. It is also **372-only and NOT re-extractable**: the
+  1,200 distorted JXL bitstreams were never persisted (`encoded_filename` blank on
+  1200/1200 `pareto.tsv` rows; both `refit/distorted/` mirrors empty), so no wider
+  regime can ever read it. For a NON-circular near-lossless read use
+  `hfnl_cid22band` — the top MOS band of CID22 (n=1425/49 refs), where ssim2 scores
+  0.5058 pooled / 0.7099 within-image. Record:
+  `benchmarks/ssim2_replacement_bar_2026-08-31.md` APPENDIX A.
 - **Negative-rich data**: `canonical-2026-07-15/train/kadis_negrich.parquet` — the
   negative-dial-tail training corpus.
 - **bigcodec's cvvdp/iwssim ARE backfilled** (the depth-iter

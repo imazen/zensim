@@ -629,6 +629,21 @@ const CORPORA: &[Corpus] = &[
         // without it ranks this regime BACKWARDS (per-ref -0.144, 60% of refs
         // negative) while every pooled number looks fine.
         //
+        // IT IS AN ssim2 SELF-TARGET, NOT HUMAN DATA (measured 2026-09-01,
+        // `benchmarks/ssim2_replacement_bar_2026-08-31.md` APPENDIX A). Its
+        // `human_score` column IS `ssim2_gpu / 100` — exactly, in float
+        // equality, on 1200/1200 rows. So a number here is AGREEMENT with
+        // ssim2 and can never be a win over it: scored with ssim2 as the
+        // predictor this axis reads pooled SROCC 1.0000 and per-ref mean
+        // 1.0000. Read it as a health indicator alongside `nonphoto` /
+        // `imazen26` / `hfnlproxy`, never as evidence of superiority.
+        //
+        // It is also 372-only FOREVER, not "not yet": the 1,200 distorted JXL
+        // bitstreams it would have to be re-extracted from were never persisted
+        // (`encoded_filename` blank on every row of the sweep's own pareto.tsv;
+        // both `refit/distorted/` mirrors empty). The parquet is byte-identical
+        // at all four roots that serve it — copied forward, re-extracted never.
+        //
         // READ THE per-ref COLUMN, NOT POOLED. The ladder moves ~0.92 ssim2 pts
         // within an image against ~6 pts of cross-image spread, so pooled SROCC
         // reads +0.204 where per-ref reads +0.916 on the same rows — pooled is

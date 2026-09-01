@@ -11,6 +11,29 @@ pair set is identical for every arm.
 
 Resample unit = the REFERENCE, because that is the unit the eval population
 actually samples (49 CID22 sources) and the unit a per-ref mean averages over.
+
+BAND MODE (`BAND_LO` / `BAND_HI`, added by the hfnl944 lane 2026-09-01).
+Restricts every arm to the rows whose SHARED human target falls in
+`[BAND_LO, BAND_HI)`, so the pairing the whole test rests on is untouched — the
+band is cut on the target, which is identical index-wise across arms by the
+assertion above. This is what makes a NEAR-LOSSLESS clause answerable on human
+labels: the exam's near-lossless corpora (`hf_nearlossless`, `hfnlproxy`) are
+ssim2 SELF-TARGETS, so the opponent scores 1.0 there by construction and no
+model can ever beat it; the high-MOS band of CID22 is the same zone measured
+against people. In band mode two extra guards run, because a restricted range
+is where the appendix-V band defects live:
+
+  * references with fewer than `PER_REF_MIN_ROWS` (3) in-band pairs, or with no
+    spread on either vector, are DROPPED — the same filter
+    `zenstats::per_group_srocc` applies, so a per-ref mean here means what
+    `bake_verdict`'s does;
+  * `srocc_signed` is printed for every arm's point estimate, and the minimum
+    over all bootstrap draws is printed, so a reader can confirm the |SROCC|
+    the fast bootstrap path returns is equal to the signed value on every draw
+    rather than assuming it.
+
+Default (no band) output is unchanged, byte for byte — the extra lines are
+band-mode only, so `paired_boot_10k.txt` still reproduces.
 """
 import csv, os, sys, random, statistics
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "lib"))
@@ -20,6 +43,11 @@ O = os.environ.get("O", "/mnt/v/output/zensim/ssim2-bar-2026-08-31")
 RM = "/mnt/v/output/zensim/reports/refmetrics"
 B_ITERS = int(os.environ.get("BOOT", "10000"))
 SEED = int(os.environ.get("SEED", "20260901"))
+BAND_LO = float(os.environ["BAND_LO"]) if os.environ.get("BAND_LO") else None
+BAND_HI = float(os.environ["BAND_HI"]) if os.environ.get("BAND_HI") else None
+BANDED = BAND_LO is not None or BAND_HI is not None
+# `zenstats::per_group_srocc`'s own floor (bake_verdict PER_REF_MIN_ROWS).
+PER_REF_MIN_ROWS = 3
 
 def model_rows(path):
     rows = [l.rstrip("\n").split("\t") for l in open(path) if l.strip()]
@@ -45,7 +73,10 @@ def peer_rows():
     return [(float(x[mc]), float(x[hc]) / div, os.path.basename(x["ref_path"])) for x in r]
 
 arms = {"ssim2": peer_rows()}
-for name in ("B", "ADD156", "W10L9P", "W10L9PH"):
+# ARMS is env-overridable so a lane can add a candidate without editing the
+# default list — which stays exactly as the exam ran it, so the committed
+# `paired_boot_10k.txt` reproduces from a flagless invocation.
+for name in os.environ.get("ARMS", "B ADD156 W10L9P W10L9PH").split():
     p = f"{O}/pp_{name}_{CORPUS}.tsv"
     if os.path.exists(p):
         arms[name] = model_rows(p)
@@ -59,6 +90,21 @@ for k, v in arms.items():
     d = max(abs(t - b) for (_, t, _), b in zip(v, base))
     assert d < 1e-9, f"{k}: targets differ index-wise by {d}"
 
+# ---- band restriction (optional) --------------------------------------
+# Cut on the SHARED target, so every arm keeps exactly the same rows and the
+# pairing survives. Applied before grouping so the per-ref filter below sees
+# in-band counts.
+band_note = ""
+if BANDED:
+    keep = [i for i in range(n)
+            if (BAND_LO is None or base[i] >= BAND_LO)
+            and (BAND_HI is None or base[i] < BAND_HI)]
+    assert keep, "band selection is empty"
+    arms = {k: [v[i] for i in keep] for k, v in arms.items()}
+    base = [base[i] for i in keep]
+    n = len(keep)
+    band_note = (f" band=[{BAND_LO}, {BAND_HI}) span={max(base) - min(base):.6f}")
+
 # Reference grouping comes from the PEER table (names); the model dumps carry
 # integer ids, and the two agree because the row order is identical.
 refs = [r for _, _, r in arms["ssim2"]]
@@ -66,7 +112,35 @@ groups = {}
 for i, r in enumerate(refs):
     groups.setdefault(r, []).append(i)
 keys = sorted(groups)
-print(f"# corpus={CORPUS}: {len(keys)} references, {n} pairs, {B_ITERS} bootstrap resamples, seed {SEED}")
+if BANDED:
+    # Same filter zenstats::per_group_srocc applies, so a per-ref mean on a
+    # band means what bake_verdict's per_ref_mean means on the full corpus.
+    def usable(k):
+        idx = groups[k]
+        if len(idx) < PER_REF_MIN_ROWS:
+            return False
+        for arm in arms.values():
+            xs = [arm[i][0] for i in idx]
+            if all(x == xs[0] for x in xs):
+                return False
+        ys = [base[i] for i in idx]
+        return any(y != ys[0] for y in ys)
+    dropped = [k for k in keys if not usable(k)]
+    keys = [k for k in keys if k not in set(dropped)]
+    assert keys, "no reference survives the per-ref floor in this band"
+    band_note += (f" refs_kept={len(keys)} refs_dropped={len(dropped)}"
+                  f" (<{PER_REF_MIN_ROWS} in-band pairs or no spread)")
+print(f"# corpus={CORPUS}:{band_note} {len(keys)} references, {n} pairs, "
+      f"{B_ITERS} bootstrap resamples, seed {SEED}")
+if BANDED:
+    # State the SIGN once per arm. The bootstrap below uses panel's |SROCC|
+    # fast path; on a restricted range that is only equal to the signed value
+    # while nothing crosses zero, which the printed bootstrap minimum checks.
+    sgn = panel_batch([(f"sgn_{k}", [r[0] for r in v], [r[1] for r in v])
+                       for k, v in arms.items()], stats="full")
+    print("# signed point estimate (pooled, in-band), panel --batch stats=full:")
+    for k, r in zip(arms, sgn):
+        print(f"#   {k:10s} srocc_signed={r['srocc_signed']:+.6f}  |srocc|={r['srocc']:.6f}")
 
 # Per-reference SROCC vectors, one panel --batch call per arm.
 perref = {}
@@ -103,6 +177,11 @@ for name, (pt, jobs) in pooled_jobs.items():
     res = panel_batch(jobs, stats="srocc")
     pooled_boot[name] = [r["srocc"] for r in res]
     print(f"{name}\t{pt:.4f}")
+if BANDED:
+    print("# min |SROCC| over all bootstrap draws (a value > 0 means the fast "
+          "|.| path equals srocc_signed on every draw):")
+    for name in pooled_boot:
+        print(f"#   {name:10s} min={min(pooled_boot[name]):.6f}")
 print("\ncandidate\tpooled\tssim2\tdelta\tCI95_lo\tCI95_hi\tP(cand>ssim2)")
 for name in [k for k in pooled_boot if k != "ssim2"]:
     d = [a - b for a, b in zip(pooled_boot[name], pooled_boot["ssim2"])]
