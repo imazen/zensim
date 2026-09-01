@@ -466,3 +466,291 @@ LIVE, and W1 will not buy enough of it.
 So **W2 FAILS for every hybrid arm, for the same reason it fails for
 `W10L9PH`** — no named strict win — while `Q7b`, which holds the named win,
 fails W1 on five axes out of six.
+
+**The disjointness, mapped.** `hfnl_cid22band` within-image Δ vs ssim2 across
+the whole weight axis (same instrument, same seed, references resampled):
+
+| w | Δ vs ssim2 | 95 % CI | P | named win? | inside the W1 window? |
+|--:|--:|---|--:|:--:|:--:|
+| 0.00 (Q7b) | **+0.0151** | [+0.0006, +0.0301] | 0.980 | **YES** | no (fails 5 axes) |
+| 0.20 | +0.0122 | [−0.0008, +0.0257] | 0.967 | no (just) | no (LIVE −0.100) |
+| 0.40 | **+0.0123** | [+0.0019, +0.0239] | 0.991 | **YES** | no (LIVE −0.064) |
+| 0.60 | +0.0089 | [−0.0012, +0.0201] | 0.958 | no (just) | no (LIVE −0.025) |
+| 0.76 | +0.0034 | [−0.0071, +0.0148] | 0.725 | no | **YES** |
+| 0.80 | +0.0018 | [−0.0093, +0.0139] | 0.613 | no | **YES** |
+| 0.86 | +0.0011 | [−0.0103, +0.0136] | 0.566 | no | **YES** |
+| 1.00 (W10L9PH) | −0.0038 | [−0.0163, +0.0095] | 0.279 | no | no (KonJND −0.027) |
+
+Read down the two right-hand columns: **the "YES" cells never coincide.** The
+named win is present but *marginal* out to w ≈ 0.4–0.6 — marginal enough that
+its significance flickers between adjacent weights (w = 0.20 and w = 0.60 miss
+by a hair while w = 0.40 clears), which is itself the honest characterisation
+of a win whose parent lower bound is +0.0006 — and it is gone by the time W1
+becomes satisfiable at w = 0.76. **Two clauses, two feasible regions, empty
+intersection.**
+
+### 6.6 W6 and W7
+
+- **W6 (not circular): PASS**, and it is the same PASS the exam gave every
+  candidate. `nonphoto` 0.9281 and `imazen26` 0.9314 at `w = 0.80` — both well
+  above the 0.85 floor, and both *higher* than either parent (Q7b 0.8778 /
+  0.8873, W10L9PH 0.9277 / 0.9313). The third sanity row, `hfnlproxy`, reads
+  0.6522; it is below 0.85 **for every model in the exam including the
+  incumbent** (`W10L9PH` 0.6944, shipped `B` 0.5027), and the exam's own §3.0
+  marks W6 PASS for all of them, so applying the floor to that row would fail
+  the entire field. It is reported, not enforced — and the reason it cannot be
+  enforced is APPENDIX A.3: `hfnlproxy` has four different row populations
+  published under one name and the opponent's is on none of the roots that
+  remain on disk.
+- **W7 (reachable by a default build): FAIL**, for every arm, by construction
+  and as registered in §4.4 risk 3. An ensemble of two ZNPRs is not loadable by
+  a default build; neither parent is either (both need `custom-profiles`), and
+  a weighted two-member ensemble additionally needs a runtime that forwards two
+  models and mixes them, which no `ZensimProfile` slot expresses today.
+
+### 6.7 The FAMILY, not the point — how much of this is selection
+
+`HYA_w076` … `HYA_w086` are six weights of one recipe and they are nearly
+indistinguishable on every axis: CID22 spans 0.8911–0.8922, CSIQ 0.9397–0.9435,
+the worst-axis W1 margin −0.0098 … −0.0060, `product_composite` 0.8674–0.8676.
+The registered TIE-BREAK 2 (worst-axis margin) orders them and names
+**`HYA_w084`** — but it does so by ~0.002 on AIC-4 (n = 300), which is inside
+the axis noise this instrument has already recorded (campaign appendix O puts
+the family-axis LSD at ≈0.004). **The correct reading is "this blend family
+reaches W1 and W3", not "w = 0.84 is better than w = 0.82".** The rule is
+applied as written rather than rewritten after the fact, and this paragraph is
+the caveat that belongs beside its answer.
+
+Multiplicity, stated: **49 cells** were scored (33 frozen + 16 declared
+refinement) against a fixed evaluation set that includes CID22. The result that
+does NOT depend on the search is the *mechanism* — the KonJND super-additivity
+(§6.3), the ladder repair (§6.4) and the disjointness (§6.5) are one-variable
+measurements over the whole weight axis, not a selection.
+
+---
+
+## 8. WHAT WOULD CLOSE THE REMAINING GAPS — per clause, per cost class
+
+The best hybrid fails **W2** and **W7**, and those are the only two. Neither is
+closable by a different blend weight; §6.5 shows W2's feasible region is empty
+for *this pair of parents* and W7 is a code + API question rather than a
+modelling one. Mapping each onto work that is already registered:
+
+| clause | gap | shortest measured-or-registered path | cost class | this lane's position |
+|---|---|---|---|---|
+| **W2** — needs ≥1 STRICT named win | the named axis `hfnl_cid22band` is a **tie** for every W1-passing weight (+0.0018 at w = 0.80, CI [−0.0093, +0.0139]); the only arm that wins it is 0.147 behind on LIVE | **(a) A BIGGER named axis.** `hfnl_cid22band` is n = 1,425 over 49 references and its winning margin is +0.0151 with a +0.0006 lower bound — the axis is too small to resolve a real effect of this size. The concurrent HF-human lane landed the same zone at **n = 515,250 forced choices** (`hfnl_2026-09-01`, `btc_native` / the JPEG-AI leg) and measured a **STRICT win there for `W10L9PH` itself** (+0.0012 [+0.0002, +0.0025], replicated across two seeds). If that axis is admitted to the exam as a named near-lossless axis, W2's naming clause may already be satisfied by the flagship — **and this hybrid is 84 % flagship**. Measuring the hybrid there is one `bake_verdict` run per arm on that lane's tables and **it is the single cheapest remaining move in this whole lane.** | **local, one command** — NOT run here (that lane owns the axis and its registration) | recommended first |
+| | | **(b) The registered retrain wave.** Everything in §6 is a fits-only composition of two frozen bakes; nothing here trains. The exam's §3.7 already prices the CID22 lever as **DATA, not features** (E-M6b: v3-marginal ≈ +0.001/seed vs +0.004 for the data slice), and wave-7 certified the KonJND lever as data-mass. A retrain that puts Q7b's hf legs (`H` / `H7b`, the `HFX-A1000` full-range re-cut) into the *flagship's* recipe as additional legs is the arm this lane could not run — `blend-heads` consumes a linear fit npz and an MLP has none, so weight-space grafting is structurally unavailable without training. | **fleet wave** | registered, **NOT launched** |
+| **W7** — reachable by a default build | a weighted two-member ensemble needs (i) a `ZensimProfile` slot, (ii) a runtime that forwards two models and mixes them at a declared weight, (iii) `custom-profiles` off the critical path. Both parents already fail W7 on (iii) alone. | Either **collapse the blend into ONE bake** — impossible in weight space here (MLP + linear), possible only by *distilling* the blend's output into a single model, which is a retrain — or **add a two-member profile** to the runtime. The second is honest but is a **public API change**, which this lane is barred from proposing. | **user call** (API) or **fleet wave** (distillation) | neither taken |
+
+**What is NOT a gap, and should not be re-litigated:**
+
+- **W1** — passed, over a 0.10-wide window, by something neither parent
+  achieves. That is the lane's deliverable.
+- **W3** — passed, and the blend is strictly better than both parents on the
+  two ladder pathologies each of them owns (Q7b's 91.3-point step, the
+  flagship's 0.0376 tied rate).
+- **W5** — N/A. Neither parent has an HDR head, and the mission's HDR axis is
+  carried by shipped `BHdr`, which already clears W5 (+0.049 over ssim2-PU).
+- **The near-lossless corpus** — do not extract `hf_nearlossless` at 944. It is
+  an ssim2 SELF-TARGET (APPENDIX A.1: `human_score` **is** `ssim2_gpu/100` on
+  1200/1200 rows) and its 1,200 distorted bitstreams were never persisted. The
+  extraction would produce an axis the opponent wins by definition.
+
+---
+
+# PART II — THE REDIRECT (2026-09-01, mid-lane): "close to ADD156", and distillation into the 156 compute set
+
+**Two user directives arrived after PART I's arms were scored and before any
+PART II fit existed.** Both are recorded verbatim, because both invalidate a
+clause PART I passed, and a lane that quietly re-scopes is worse than one that
+fails.
+
+> **(1)** *"the exam's speed clause is now 'close to ADD156'"* — not merely
+> faster than fast-ssim2. The passing candidate's runtime must be close to the
+> 156-walk speed class. Amend the exam accordingly: propose and REGISTER the
+> margin, and re-evaluate every candidate's speed line under it. **Consequence
+> to state plainly: no full-944 model can pass the speed clause as-is** — the
+> 944 flagship and Q7b become teachers / upper bounds, not passing candidates.
+>
+> **(2)** *Therefore the hybrid arms re-aim*: the PRIMARY arms become
+> **distillation into the 156 compute set** — a 156-input student (additive
+> AND a small-MLP variant, both sizes reported), fit against (a) the human legs
+> and (b) TEACHER targets from the 944 flagship computed by forward-passing the
+> stored feature tables. Keep one 944-hybrid arm as the quality upper bound.
+
+**What this does to PART I.** Nothing in §1–§8 is withdrawn: those numbers
+stand as measured, and the W1/W3 result — a blend passing a clause neither
+parent passes — remains the measured behaviour of the 944 class. What changes
+is the *verdict*: under the amended W4, **`HYA_w084` is no longer a candidate.**
+It becomes the **teacher and the quality ceiling**, and PART I becomes the
+measurement of how much quality there is to distil.
+
+---
+
+## 9. AMENDMENT B2 — the speed clause becomes a CLASS bar
+
+### 9.1 Why "faster than fast-ssim2" was the wrong bar
+
+B.1's W4 asked the candidate to beat the opponent. Every zensim class already
+does — 944 included, at 1.15–1.21× (exam §3.6) — so the clause **separated
+nothing**: it passed the 7 ms model and the 18 ms model alike. The mission says
+*extremely fast*, and the thing that makes zensim extremely fast is the
+**basic-only walk**, not the 944 walk. A bar that both classes clear is not
+measuring the axis the mission names.
+
+### 9.2 The amended clause, verbatim
+
+> **W4 (speed) — amended again 2026-09-01 (AMENDMENT B2), superseding B.1.**
+> R4: the candidate's mean ms/compare, priced on its OWN extraction regime plus
+> its OWN forwards (B.1's rule, retained), must be
+>
+> **≤ 1.25 × the 156-walk class, at BOTH 1 thread and 8 threads**,
+>
+> where "the 156-walk class" is the measured cost of the cheapest fold that can
+> serve a basic-only (f0..f155) model plus that model's own forward — the
+> `add156_156basic` arm, in the same interleaved process, same images, same
+> round. Both thread counts bind.
+>
+> **`fast-ssim2` is RETAINED as a context row at both thread counts** — a
+> candidate that clears 1.25× the 156 class but somehow lost to the opponent
+> would be a contradiction worth seeing — but it is no longer the bar.
+>
+> An ensemble is still priced as ONE compare (one extraction of the regime that
+> serves every member, plus every member's forward), and the ASLR / interleave
+> protocol is unchanged.
+
+### 9.3 Where 1.25× comes from — derived, not chosen
+
+"Close to" needs a number, and the number must separate **classes** rather than
+**seeds**. Three measured quantities fix it, all from this lane's own matrix
+(§10) and the exam's §3.6, on this box:
+
+1. **The measurement's own resolution.** The start-to-start spread of the
+   `add156_156basic` arm across ASLR process starts bounds how tight a bar can
+   be *read at all*. A bar below ~1.10× would be inside that spread and would
+   therefore rank layout lottery. **1.25× is comfortably outside it.**
+2. **The next class up is further away than the bar.** The 372-class fold costs
+   **1.27–1.43×** the 156 walk and the 944 folds **2.3–3.6×** (exam §3.6 ratios,
+   reproduced in §10). So a bar at 1.25× admits the 156 class *and its noise
+   band* and excludes every other measured class — it cuts between classes, in
+   the gap, not through one.
+3. **It is reachable by construction.** `ADD156` itself sits at 1.00× by
+   definition, so the bar is not vacuous: at least one existing model passes it,
+   which is the property a bar must have before it can fail anything.
+
+A bar tighter than 1.10× would be unmeasurable; one looser than ~1.27× would
+start admitting the 372 class and stop meaning "close to ADD156". **1.25× is
+the widest value that still excludes the next class**, which is the honest
+reading of "close to".
+
+### 9.4 The consequence, stated plainly before it is measured
+
+**No full-944 model can pass W4 as amended.** The 944 walk is 2.3–3.6× the 156
+walk; 1.25× is unreachable by any amount of forward-side tuning, because the
+gap is the *extraction*, not the model. Therefore:
+
+- `W10L9P_s4005_packed`, `W10L9PH_s4004_packed`, `Q7b_pools_g0.2_a0.2_b0.97`
+  and **every PART I hybrid arm** move from "candidate" to **TEACHER / UPPER
+  BOUND**. Their rank and dial numbers stay on the board and stay true; they
+  are no longer eligible to *pass the exam*.
+- Shipped **B** (372-class, 1.27–1.43×) also fails the amended W4 — it was
+  already failing W1/W2/W3.
+- **`ADD156` is the only arm in the exam that passes W4 as amended**, and it
+  fails W1 (CID22 −0.0256) and the near-lossless band (−0.0696), which is
+  exactly the hole PART II's students are being fit to fill.
+
+---
+
+## 10. PART II REGISTRATION — written before any student exists
+
+Nothing in §11 onwards existed when this section was committed. The speed
+matrix of §10.1 was already running under B.1's protocol when the redirect
+arrived; it contains the `add156_156basic` arm by construction, so it prices
+the amended bar without a re-run.
+
+### 10.1 The instrument (unchanged)
+
+`zensim-bench/benches/ssim2_speed_bar.rs`, six arms interleaved in ONE process:
+`fast_ssim2` (context), `zensim_B` (the shipped 372 public API, cross-build
+anchor), **`add156_156basic`** (the BAR), `flagship_944off`, `q7b_944pools`,
+`hybrid_944pools`. 3 sizes × {1, 8} threads × {plain, `ssim2-rayon`} builds ×
+5 ASLR starts, CCD0-pinned, `min` over starts, spread and per-start box load
+recorded beside every number.
+
+**`add156_156basic` is `ADD156`'s TRUE walk, and naming it corrected the exam.**
+`bake_block_profile`: `ADD156_safesyn_only_raw_lasso` uses **28 of f0..155 and
+0 of f156..371**, so its walk is the v1-only `fold156_basic`, not the
+`fold228_peaks` row §3.6 credited it with (B.2).
+
+### 10.2 The students — arms, FROZEN
+
+Every student is **372-input with its support confined to f0..f155**, which is
+`ADD156`'s own shape: the bake still takes a 372-wide vector (so every existing
+caller and every 372/944 root works unchanged) while `bake_block_profile`
+reports `uses_f156_371 = false`, so it needs only the 156 walk. The mechanism is
+the owner's, not this lane's:
+
+- **additive**: `bake_dial_refit fit-lasso --slice-file scripts/sota944/slice_basic156.txt`
+  — the registered ADD156-class `w[out-of-slice] = 0` constraint (CD sweeps only
+  those coordinates).
+- **MLP**: `zensim_mlp_train --max-features 372 --keep-features scripts/sota944/slice_basic156.txt`
+  — the input-mask path, at the ship width (no `--allow-narrow-features`, so the
+  banned narrow-cap regime is not entered).
+
+| arm | class | target | legs |
+|---|---|---|---|
+| **`SADD_H`** | additive, 156-slice | `human_score` | the human/dense legs only — the ADD156 recipe re-run as the like-for-like CONTROL |
+| **`SADD_T`** | additive, 156-slice | **TEACHER** only | the teacher twin of the dense leg(s) |
+| **`SADD_HT(λ)`** | additive, 156-slice | human + teacher | gram-mix weight λ ∈ {0.25, 0.5, 1.0, 2.0} on the teacher leg |
+| **`SMLP_H`** | 2-layer MLP, 156-slice | `human_score` | same legs as `SADD_H` |
+| **`SMLP_HT(λ)`** | 2-layer MLP, 156-slice | human + teacher | λ ∈ {0.5, 1.0} |
+| **`U_HYA_w084`** | 944 ensemble | — | PART I's selected blend, carried as the **UPPER BOUND** row. Fails W4 by construction and is labelled so everywhere it appears. |
+
+**The teacher is the PART I hybrid**, forwarded over the stored feature tables
+by `bake_dial_refit predict --ensemble … --ensemble-weights …` — the owner of
+"forward a bake over a parquet", extended in this lane so the teacher target is
+produced by the *identical* forward the evaluation scores (its own doc comment
+already states that rule: *"the teacher a distillation trains against must come
+from the same forward the evaluation used"*). No re-extraction: the teacher is a
+scalar per stored row.
+
+**Both sizes are reported** for every student (packed bytes, and layer-0 rows
+after dead-column pruning), per the directive.
+
+### 10.3 Bars and selection rule — the amended exam, unchanged otherwise
+
+W1, W2, W3, W5, W6, W7 exactly as in §4.1 (δ_corpus 0.010, δ_cid22-within
+0.004, K = 2 with one named win on CID22 or `hfnl_cid22band`, ladder bar =
+ssim2's own measured value, S floor 0.85), plus **W4 as amended in §9.2**.
+Selection rule and verdict rule as in §4.2/§4.3, with one addition made
+necessary by the redirect:
+
+> **The UPPER BOUND row is never selectable.** `U_HYA_w084` is reported in every
+> table so the distillation gap is visible, and it is excluded from PRIMARY,
+> from both tie-breaks, and from the verdict.
+
+### 10.4 Registered expectations and risks — before any student is fit
+
+1. **The incumbent 156-class model already fails two exam clauses.** `ADD156` is
+   −0.0256 on CID22 and −0.0696 / −0.0408 on `hfnl_cid22band` (exam §3.1,
+   APPENDIX A.4), all CIs excluding zero. A student that merely matches ADD156
+   inherits both failures. **The bar for "this worked" is beating ADD156 on
+   those two axes**, not beating it on average.
+2. **Distillation cannot exceed its teacher, and the teacher is 84 % of a model
+   that itself fails W2.** So the *best case* for PART II is a 156-class model
+   that passes W1 + W3 + W4 and still fails W2 — i.e. **strictly more clauses
+   than anything currently in the exam, and still not a pass.** Registered now
+   so no result is later read as more than it is.
+3. **The capacity gap is real and is the thing being measured.** 28 live
+   coefficients (ADD156) or a small MLP over 156 inputs against a
+   667→128→1 MLP over 944: if the student lands far below the teacher, that is a
+   *capacity* finding, and it is the finding the fleet wave needs.
+4. **Fits-only means the answer is a PROBE, not a ship.** These students are fit
+   on already-extracted features with no re-extraction and no fleet. Per the
+   coordinator, the value of the result is **which student arms deserve
+   fleet-scale training** in the era-2/radius-4 re-extraction wave — not a
+   candidate to ship. Nothing here is launched or approved.
+5. **Era independence is a GATE, not an assumption.** Basic-only bakes are
+   registered as era-independent (`eval372-basic-only-bakes-era-independent-2026-08-30`).
+   §11's first gate re-measures it on THIS lane's two roots rather than citing
+   it, because every student depends on it.

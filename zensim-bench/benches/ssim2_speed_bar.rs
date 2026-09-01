@@ -38,13 +38,17 @@
 //!
 //! | arm | extraction | forwards |
 //! |---|---|---|
+//! | `add156_156basic`  | `V1PoolsMode::Off`, v1-only (f0..156)              | the additive head |
 //! | `flagship_944off`  | `V1PoolsMode::Off`  (f156-371 = structural zeros) | the MLP |
 //! | `q7b_944pools`     | `V1PoolsMode::Full` (all 944 live)                | the linear |
 //! | `hybrid_944pools`  | `V1PoolsMode::Full`                               | MLP **and** linear |
 //!
 //! Bake bytes come from the environment so none enter git:
-//! `ZEN_HY_MLP` (the 944 MLP flagship) and `ZEN_HY_LIN` (the 944 pools linear).
-//! When either is unset the three arms are **skipped loudly** — never silently.
+//! `ZEN_HY_MLP` (the 944 MLP flagship), `ZEN_HY_LIN` (the 944 pools linear) and
+//! `ZEN_HY_ADD` (the basic-only additive head — `bake_block_profile` says it
+//! uses 28 of f0..155 and NONE of f156-371, so its true walk is the cheapest
+//! v1-only fold, not the peaks fold the exam credited it with).
+//! When one is unset its arms are **skipped loudly** — never silently.
 //! The forward is `Predictor::predict[_transformed]`, the same call
 //! `zensim_validate::bake_runtime::score_row` dispatches; the output PCHIP
 //! spline (one scalar eval) is NOT in the arm and that exclusion is stated
@@ -148,6 +152,7 @@ fn main() {
     // both are parsed exactly once, outside every timed region.
     let mlp: Option<&'static Head> = Head::load("ZEN_HY_MLP").map(|h| &*Box::leak(Box::new(h)));
     let lin: Option<&'static Head> = Head::load("ZEN_HY_LIN").map(|h| &*Box::leak(Box::new(h)));
+    let add: Option<&'static Head> = Head::load("ZEN_HY_ADD").map(|h| &*Box::leak(Box::new(h)));
     // The fold engine + the two pool modes the two regimes correspond to.
     let zf: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::B)));
     // Byte-identical to `zensim/benches/extract_paths_bench.rs`'s `toggles_off`
@@ -160,6 +165,13 @@ fn main() {
     let pools_full = zensim::feature_v2::V2NewFeatureToggles {
         v1_pools: zensim::feature_v2::V1PoolsMode::Full,
         ..pools_off
+    };
+    // The cheapest fold that can serve a basic-only (f0..156) model — the walk
+    // ADD156 actually needs. Matches `extract_paths_bench`'s `fold156_basic`.
+    let v1_basic = zensim::feature_v2::V2NewFeatureToggles {
+        v1_pools: zensim::feature_v2::V1PoolsMode::Off,
+        v1_only: true,
+        ..Default::default()
     };
 
     println!(
@@ -194,6 +206,26 @@ fn main() {
                     })
                 });
                 // ---- amended-W4: candidate = its own regime + its own forwards
+                if let Some(h) = add {
+                    group.bench("add156_156basic", move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        let mut pred = Predictor::new(&h.model);
+                        let mut x: Vec<f32> = Vec::new();
+                        b.iter(move || {
+                            let rs = RgbSlice::new(src_s, n, n);
+                            let ds = RgbSlice::new(dst_s, n, n);
+                            let v2 = zf
+                                .compute_folded720_features_streaming(
+                                    &rs,
+                                    &ds,
+                                    v1_basic,
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            zenbench::black_box(h.forward(&mut pred, &mut x, v2.features()))
+                        })
+                    });
+                }
                 if let Some(m) = mlp {
                     group.bench("flagship_944off", move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();

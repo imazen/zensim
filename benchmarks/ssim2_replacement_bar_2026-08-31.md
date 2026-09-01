@@ -1426,3 +1426,67 @@ python3 benchmarks/ssim2_bar_2026-08-31/hfnl944_graft.py \
 Artifacts + `_MANIFEST.json` (build commit, shas, row counts):
 `/mnt/v/output/zensim/hfnl944-2026-09-01/`, pointer
 `benchmarks/hfnl944_2026-09-01.pointer.md`.
+
+---
+
+## APPENDIX B — the speed clause, amended to 1 AND 8 threads (hybrid lane, 2026-09-01)
+
+**User directive, verbatim:** *"the exam should also be perf runtime at 8t."*
+
+§2.3's **W4** judged speed at **1 thread only**, while §3.6 already carried the
+8-thread columns — including the control that gives the opponent its own
+`rayon` feature — as reporting rather than as part of the pass/fail rule. This
+appendix promotes the measurement that already existed into the clause that
+decides, and adds one rule the exam's own §3.6 table needed.
+
+### B.1 The amended clause, verbatim
+
+> **W4 (speed) — amended 2026-09-01.** R4: the candidate's mean ms/compare must
+> be **≤ fast-ssim2's at BOTH 1 thread and 8 threads**, on the same images, in
+> the same process, arms interleaved. Both thread counts bind; neither
+> substitutes for the other.
+>
+> - **1 T** is the per-core floor and stays the conservative reading — the
+>   opponent does not thread by default.
+> - **8 T** is what a deployment actually runs, and it must be measured with
+>   the opponent **given its own `rayon` feature**, since a candidate that wins
+>   per-core and loses under threads has not replaced anything on the box it
+>   ships to. Where the opponent's threaded build is not available in the same
+>   process, its single-build 8 T number is used and the substitution is stated
+>   at the number.
+> - **The measurement prices the candidate's OWN extraction regime, not its
+>   feature width.** Two 944-wide models can read different regimes
+>   (`folded720append2` with f156-371 zeroed vs `folded720append2pools` with it
+>   live) whose walks differ materially; a class-level speed row assigns one
+>   number to both and is therefore wrong for at least one of them.
+> - **An ensemble is priced as ONE compare**: one extraction of the regime that
+>   serves every member, plus every member's forward. If no single regime
+>   serves every member, the ensemble is priced at the sum of the extractions
+>   it actually needs, and that fact is stated.
+> - The **ASLR / measurement protocol** is unchanged: `zenbench`, arms
+>   interleaved in one process on the same generated pair, mean ms, thread
+>   count from `RAYON_NUM_THREADS`, one process per count.
+
+W1, W2, W3, W5, W6, W7 and every threshold in §2.4 are **unchanged**.
+
+### B.2 Why the third bullet is in the clause
+
+§3.0 assigns `W10L9P`, `W10L9PH` **and** `Q7b` the same "PASS (1.15–1.21×)",
+which is §3.6's `fold944_full` row. Those three do not read the same features.
+`bake_block_profile`, this lane:
+
+| bake | `uses_f156_371` | layer-0 rows on f156-371 | the walk it actually needs |
+|---|:--:|---|---|
+| `W10L9PH_s4004_packed` | **false** | 216/216 exactly zero | `fold944_off` |
+| `W10L9P_s4005_packed` | **false** | 216/216 exactly zero | `fold944_off` |
+| `Q7b_pools_g0.2_a0.2_b0.97` | **true** | 107 of 216 live | `fold944_full` |
+| shipped `B` | **true** | 49 of 216 live (peaks 26 / masked 10 / iw 13) | `fold372_full` ✓ (as credited) |
+| `ADD156_safesyn_only_raw_lasso` | **false** | 0 of 216; 28 of f0..155 | `fold156_basic`, **not** `fold228_peaks` |
+
+The exam's number happened to be the **expensive** one, so `Q7b`'s line was
+right and the other three were conservative — but that is luck, not method. The
+amended clause removes the luck, and §B.3 prices each candidate on the walk it
+needs plus its own forward.
+
+Full derivation, the measurement, and the re-evaluated speed lines:
+[`hybrid_candidate_2026-09-01.md`](hybrid_candidate_2026-09-01.md) §1 and §7.

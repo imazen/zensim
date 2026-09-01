@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Measured — the HYBRID candidate, and the exam's speed clause amended to 8 threads (2026-09-01)
+
+- **APPENDIX B amends the ssim2 exam's W4**, per the user directive that "the
+  exam should also be perf runtime at 8t". W4 now binds at **BOTH 1 and 8
+  threads** (the opponent given its own `rayon` feature at 8 T), and it prices a
+  candidate on **its own extraction regime plus its own forwards** rather than
+  on its feature width — the exam gave `W10L9P` / `W10L9PH` / `Q7b` one speed
+  row although the flagships are blind to f156-371 (`fold944_off`) and `Q7b`
+  uses 107 of those columns (`fold944_full`). An ensemble is priced as ONE
+  compare. Nothing else in the exam changes.
+- **The hybrid PASSES W1, which NEITHER parent passes.** A convex score-space
+  blend `w · W10L9PH_s4004_packed + (1−w) · Q7b_pools_g0.2_a0.2_b0.97`, scored
+  on ONE keyed pools-944 substrate, holds every held-out human axis inside δ of
+  `peer_ssim2` over a measured window — **HY-A w ∈ [0.76, 0.86]** (0.10 wide),
+  bounded BELOW by LIVE and ABOVE by KonJND. The flagship fails W1 on KonJND
+  (−0.0266); `Q7b` fails five axes of six.
+- **KonJND is genuinely SUPER-ADDITIVE**: both parents are *below* ssim2
+  (0.5006 and 0.5118 vs 0.5272) and the blend peaks at **0.5390** at w = 0.5–0.6
+  — above all three. Rank correlation is not linear in the score, so a
+  fits-only blend buys what wave-7 priced as a data-mass problem.
+- **W3 passes and the blend repairs both parents' ladder pathologies**: `Q7b`'s
+  deepest q ≥ 85 backwards step falls **91.3 → 30.4** dial points (below
+  ssim2's own 52.2) and the flagship's 0.0376 tied rate goes to **0.0000**,
+  at pooled monotonicity ≥ ssim2's 0.9929817 and 0 % of ladders ending
+  backwards.
+- **W2 still FAILS, and the reason is measured and structural.** Every window
+  arm holds three strict wins (CSIQ pooled + within, AIC-3 within) and none is
+  named. `hfnl_cid22band` within-image Δ vs ssim2 across the axis: **w = 0.00
+  +0.0151 WIN, w = 0.40 +0.0123 WIN, w ≥ 0.60 tie** — while W1 does not start
+  until w = 0.76. **The two feasible regions are disjoint**, because the model
+  holding the only non-circular win is the one 0.147 behind on LIVE.
+- **`bake_verdict --ensemble-weights`** — convex member weights, normalised at
+  parse, published as `model.member_weights`. Three measured identities make the
+  sweep self-anchoring: uniform weights == the unweighted mean, `1,0` == a plain
+  `--bake` on member 0, `0,1` == member 1, **all bit-identical** on 4,292 rows.
+- **LIVE and AIC-4 are pairable at 944 width** — the exam's exclusion was
+  ROOT-scoped, not corpus-scoped (372 root max |Δ| 1.12; both 944 roots
+  **0.0**). `paired_perref_boot.py` gains both, closing exam §4.5 item 6 by
+  measurement.
+
 ### Measured — the JPEG-AIC study family, ingested as EVAL axes (2026-09-01)
 
 - **They are ONE study family on TEN source images, and three board axes are

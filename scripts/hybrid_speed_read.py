@@ -33,8 +33,9 @@ def main():
     ap.add_argument('--json')
     a = ap.parse_args()
     cells = {}                      # (build, t, size, arm) -> [means]
-    for f in sorted(glob.glob(os.path.join(a.dir, 's2_*_start*.txt'))):
-        b = os.path.basename(f)
+    # zenbench renders its table on STDERR; the .txt holds only the header line.
+    for f in sorted(glob.glob(os.path.join(a.dir, 's2_*_start*.txt.err'))):
+        b = os.path.basename(f)[:-4]
         m = re.match(r's2_(\w+)_(\d+)t_start(\d+)\.txt$', b)
         if not m:
             continue

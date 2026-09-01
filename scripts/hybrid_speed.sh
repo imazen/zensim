@@ -23,6 +23,7 @@ OUT=${HY_OUT:-/mnt/v/output/zensim/hybrid-2026-09-01}/speed
 TGT=${HY_BENCH_TARGET:-$REPO/target-bench}
 export ZEN_HY_MLP=${ZEN_HY_MLP:-/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/W10L9PH_s4004_packed.bin}
 export ZEN_HY_LIN=${ZEN_HY_LIN:-/mnt/v/output/zensim/wlin7b-2026-08-30/arms/Q7b_pools_g0.2_a0.2_b0.97.bin}
+export ZEN_HY_ADD=${ZEN_HY_ADD:-/mnt/v/output/zensim/corr-lq/ADD156_safesyn_only_raw_lasso.bin}
 mkdir -p "$OUT"
 
 bin_for() {   # bin_for plain|rayon
