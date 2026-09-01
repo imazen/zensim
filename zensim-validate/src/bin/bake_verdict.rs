@@ -1607,12 +1607,23 @@ struct ZoneLadders {
 /// same split by reviewed content class.
 #[derive(Clone)]
 struct DialZones {
+    /// The dial grid this split was cut from — a zone rate is only comparable
+    /// across cells cut from the same ladders, and the board carries cells
+    /// measured on several different grids.
+    grid: String,
+    /// Rows in that grid (the ladder population's size).
+    n_grid_rows: usize,
     /// `(split_kind, key, zone)` -> counts. `split_kind` is `codec`, `class`
     /// or `all`.
     cells: Vec<(String, String, String, ZoneCell, ZoneLadders)>,
     /// Reviewed content class -> number of grid images carrying it (including
     /// `unclassified`, which is reported and never merged).
     class_images: std::collections::BTreeMap<String, usize>,
+    /// The worst individual ladders BY NAME — `(image_id, codec, class, zone,
+    /// endpoint delta, rungs, worst backwards step)`. The aggregate rates say
+    /// how often; this says WHICH reference image, which is the only form a
+    /// reader can go and look at.
+    worst_ladders: Vec<(String, String, String, String, f64, usize, f64)>,
 }
 
 impl DialMetrics {
@@ -1798,6 +1809,7 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
     let mut zcells: BTreeMap<(String, String, String), ZoneCell> = BTreeMap::new();
     let mut zladders: BTreeMap<(String, String, String), ZoneLadders> = BTreeMap::new();
     let mut class_images: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+    let mut named_ladders: Vec<(String, String, String, String, f64, usize, f64)> = Vec::new();
     for ((img, codec), pts) in curves.iter_mut() {
         pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         let entry = per_codec.entry(codec.clone()).or_default();
@@ -1891,6 +1903,25 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
             let hi = rungs.last().copied().unwrap_or((0.0, 0.0));
             let backwards = hi.1 - lo.1 < -MATERIAL_INV;
             let had_inv = *zone_has_inv.get(zone).unwrap_or(&false);
+            if backwards || had_inv {
+                // worst step inside THIS zone of THIS ladder
+                let mut worst_step = 0.0f64;
+                for w in rungs.windows(2) {
+                    let d = w[1].1 - w[0].1;
+                    if d < -worst_step {
+                        worst_step = -d;
+                    }
+                }
+                named_ladders.push((
+                    img.clone(),
+                    codec.clone(),
+                    class.clone(),
+                    zone.to_string(),
+                    hi.1 - lo.1,
+                    rungs.len(),
+                    worst_step,
+                ));
+            }
             for (kind, key) in keys.iter() {
                 let l = zladders
                     .entry((kind.clone(), key.clone(), zone.to_string()))
@@ -1939,7 +1970,17 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
             let l = zladders.get(&k).cloned().unwrap_or_default();
             cells.push((k.0.clone(), k.1.clone(), k.2.clone(), c, l));
         }
+        // most-backwards endpoint first, then deepest single reversal
+        named_ladders.sort_by(|a, b| {
+            a.4.partial_cmp(&b.4)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(b.6.partial_cmp(&a.6).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        named_ladders.truncate(12);
         DialZones {
+            grid: grid_path.display().to_string(),
+            n_grid_rows: scores.len(),
+            worst_ladders: named_ladders,
             cells,
             class_images: class_images
                 .into_iter()
@@ -3905,11 +3946,22 @@ Run the dedicated q-sweep harness for those._\n",
             // split_kind=="all" rows reconcile with mono_pct exactly.
             "zones": dial_metrics.zones.as_ref().map(|z| json!({
                 "scheme": "ladder-inversion-2026-08-31",
+                // The grid this split was cut from. Recorded because the board
+                // carries cells measured on SEVERAL dial grids (the 2026-05-29
+                // 372 grid and its two quarantines, 720/924/944, the carriers
+                // POOLS grid, the era-2 tiling variants) and a zone rate is
+                // only comparable across cells cut from the same ladders.
+                "grid": z.grid,
+                "n_grid_rows": z.n_grid_rows,
                 "zone_edges": ZONE_EDGES,
                 "material_pt": MATERIAL_INV_PT,
                 "min_rungs_per_ladder_zone": 3,
                 "class_table": "benchmarks/dial_grid_content_classes_2026-08-31.tsv",
                 "class_images": z.class_images,
+                "worst_ladders": z.worst_ladders.iter().map(|(img, cd, cl, zn, dend, n, worst)| json!({
+                    "image_id": img, "codec": cd, "class": cl, "zone": zn,
+                    "end_delta": dend, "n_rungs": n, "worst_step": worst,
+                })).collect::<Vec<_>>(),
                 "cells": z.cells.iter().map(|(kind, key, zone, c, l)| {
                     let mut mags = c.inv_mags.clone();
                     mags.sort_by(f64::total_cmp);

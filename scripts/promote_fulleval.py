@@ -546,6 +546,68 @@ def mark_dominated(board: Path, dominated_by: list[str], rule: str,
                               dry_run, f"mark dominated_by={sorted(dominated_by)}")
 
 
+def _num_eq(a, b) -> bool:
+    """Structural equality with NUMERIC leaf comparison — `0` and `0.0` are the
+    same number even though their JSON text differs, and a dial block that
+    round-tripped through a board file must still compare equal to the verdict
+    it came from. Floats compare with `==`, so a real 1-ULP move still differs."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return set(a) == set(b) and all(_num_eq(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_num_eq(x, y) for x, y in zip(a, b))
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a is b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return a == b
+    return a == b
+
+
+def graft_dial_zones(board: Path, verdict: Path, dry_run: bool = False) -> bool:
+    """Copy `dial.zones` (the ladder-inversion split by codec x quality zone and
+    content class x zone, `bake_verdict` 2026-08-31) from a same-bake verdict
+    into a board fulleval.
+
+    The gate is stronger than a sha match, because a sha match alone does not
+    prove the verdict was scored on the SAME dial grid — and a zone split cut
+    from a different grid would silently disagree with the `mono_pct` printed
+    beside it. So every pre-existing scalar of the board's `dial` block
+    (mono_pct / tied_pct / p5 / p95 / reach / dynamic_range / per_codec /
+    curves) must be BYTE-IDENTICAL in the fresh verdict. Same bake + same
+    pooled dial numbers = same grid, same regime, same code path.
+
+    Provenance lands in `dial_zone_source`; only `dial` and `dial_zone_source`
+    may change, and inside `dial` only the `zones` key may appear."""
+    bdoc = _load_board(board)
+    v_bytes = verdict.read_bytes()
+    v = json.loads(v_bytes)
+    z = (v.get("dial") or {}).get("zones")
+    if not isinstance(z, dict):
+        raise SystemExit(f"graft-dial-zones: {verdict} carries no dial.zones block")
+    if bdoc.get("bake_sha256") != v.get("bake_sha256"):
+        raise SystemExit(f"graft-dial-zones: bake_sha256 mismatch — {board.name} is not the "
+                         f"same bake as {verdict.name}; refusing")
+    bd, vd = bdoc.get("dial") or {}, v.get("dial") or {}
+    for k in bd:
+        if k == "zones":
+            continue
+        if not _num_eq(bd.get(k), vd.get(k)):
+            raise SystemExit(f"graft-dial-zones: {board.name}: dial.{k} differs between the "
+                             f"board and the fresh verdict — the verdict was NOT scored on "
+                             f"the board's dial grid; refusing")
+    if isinstance(bd.get("zones"), dict):
+        if _jc(bd["zones"]) == _jc(z):
+            print(f"graft-dial-zones: {board.name} already carries this zones block — unchanged")
+            return False
+    doc = copy.deepcopy(bdoc)
+    doc.setdefault("dial", {})["zones"] = z
+    doc["dial_zone_source"] = {"path": str(verdict),
+                               "sha256": hashlib.sha256(v_bytes).hexdigest(),
+                               "name": v.get("name"),
+                               "scheme": z.get("scheme")}
+    return _write_board_gated(board, bdoc, doc, {"dial", "dial_zone_source"}, dry_run,
+                              f"graft dial.zones ({v.get('name')})")
+
+
 def set_block_profile(board: Path, bbp_bin: str, dry_run: bool = False) -> bool:
     """Compute the static feature-block usage fingerprint from the fulleval's
     own bake bytes (`bake_block_profile --json`, sha-gated against
@@ -657,6 +719,10 @@ def main(argv=None) -> int:
                          "no rescore, no bake load")
     ap.add_argument("--band-corpora", default="cid22,csiq,kadid,live,tid",
                     help="with --rebuild-bands: which banded corpora to recut")
+    ap.add_argument("--graft-dial-zones", action="store_true",
+                    help="with --graft-into + --verdict: copy dial.zones (the ladder-inversion "
+                         "split) from a same-bake verdict whose pooled dial numbers are "
+                         "byte-identical (that identity is what proves the same dial grid)")
     ap.add_argument("--set-block-profile", default=None, type=Path, metavar="BOARD_JSON",
                     help="BLOCK-PROFILE mode: compute the static feature-block fingerprint from "
                          "the fulleval's bake bytes (bake_block_profile --json, sha-gated) and "
@@ -701,8 +767,8 @@ def main(argv=None) -> int:
 
     if a.graft_into is not None:
         if a.name or a.members or a.members_file or a.strip_per_pair or a.carry_coherence_from:
-            ap.error("--graft-into takes only --verdict/--graft-rank/--reslice-rank/--repair-rank-orientation "
-                     "(and --dry-run)")
+            ap.error("--graft-into takes only --verdict/--graft-rank/--graft-dial-zones/"
+                     "--reslice-rank/--repair-rank-orientation (and --dry-run)")
         if a.graft_rank and a.repair_rank_orientation:
             ap.error("--graft-rank and --repair-rank-orientation are mutually exclusive")
         if not a.graft_into.exists():
@@ -714,6 +780,8 @@ def main(argv=None) -> int:
             repair_rank_orientation(a.graft_into, a.verdict, a.repair_rank_orientation, a.dry_run)
         elif a.graft_rank:
             graft_rank_corpus(a.graft_into, a.verdict, a.graft_rank, a.dry_run)
+        elif a.graft_dial_zones:
+            graft_dial_zones(a.graft_into, a.verdict, a.dry_run)
         else:
             graft_corruption_head(a.graft_into, a.verdict, a.dry_run)
         return 0

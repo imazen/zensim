@@ -543,6 +543,50 @@ def _ann_matches(o, entry):
     return bool(scope.get("all"))
 
 
+# Ladder-inversion zone matrix (bake_verdict `dial.zones`, 2026-08-31). Embedded
+# COMPACTLY: the verdict block averages 9.4 KB and the board carries 322 of them
+# (3.0 MB against a page already at ~20 MB), so the page takes the columns the
+# failure panel reads and rounds them, ~1 KB/bake. Nothing is re-derived — every
+# number below is copied out of the verdict.
+ZONE_ORDER = ["q<50", "q50-85", "q>=85"]
+# The columns the failure panel reads, in row order. Counts are integers copied
+# verbatim; the three rates and the two magnitudes are the verdict's OWN stored
+# values (rounded for the wire), never recomputed on the page.
+ZONE_INT_COLS = ["n_pairs", "inv_material", "flat", "codec_sat", "n_ladders",
+                 "ladders_with_inv", "ladders_ends_backwards"]
+ZONE_RATE_COLS = [("inv_rate", 5), ("frac_ladders_with_inv", 4),
+                  ("frac_ladders_ends_backwards", 4),
+                  ("inv_mag_med", 2), ("inv_mag_max", 2)]
+ZONE_ROW_KEYS = ZONE_INT_COLS + [c for c, _ in ZONE_RATE_COLS]
+
+
+def compact_zones(dial):
+    """`dial.zones` -> {"grid":…, "rows": {"split|key|zone": [ZONE_ROW_KEYS…]}}
+    or None when the cell was not measured (never a zero — an unmeasured cell
+    and a cell measured at zero are different facts)."""
+    z = (dial or {}).get("zones")
+    if not isinstance(z, dict) or not z.get("cells"):
+        return None
+    rows = {}
+    for c in z["cells"]:
+        k = f'{c.get("split")}|{c.get("key")}|{c.get("zone")}'
+        row = [c.get(col, 0) for col in ZONE_INT_COLS]
+        for col, nd in ZONE_RATE_COLS:
+            v = c.get(col)
+            row.append(None if v is None else round(float(v), nd))
+        rows[k] = row
+    grid = str(z.get("grid") or "")
+    # the named worst ladders — the only form of "which content" a reader can go
+    # and look at. Top 6 (the verdict keeps 12); each is [image, codec, class,
+    # zone, endpoint delta, worst backwards step].
+    worst = [[w.get("image_id"), w.get("codec"), w.get("class"), w.get("zone"),
+              round(float(w.get("end_delta") or 0.0), 2),
+              round(float(w.get("worst_step") or 0.0), 2)]
+             for w in (z.get("worst_ladders") or [])[:6]]
+    return {"grid": grid.rsplit("/", 1)[-1], "rows": rows, "worst": worst,
+            "classes": z.get("class_images") or {}, "scheme": z.get("scheme")}
+
+
 def load_fulleval(fulleval_dir, best_per_day=None):
     """Read every *.fulleval.json; order by best_per_day date when available. Returns the list of
     bake dicts prepared for embedding (subsampled scatter points + fit lines + composite)."""
@@ -567,6 +611,17 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                             else (1, len(CURATED_BOARD), str(o.get("name", "")).lower())))
 
     ann_entries, _ann_meta = load_annotations_registry()
+    # Why a cell has no ladder-inversion split (measure_dial_zones.py records one
+    # reason per board cell). NOT MEASURED must always come with its reason.
+    zone_skip = {}
+    _zl = Path("/mnt/v/output/zensim/failure-profiles-2026-08-31/dial_zones_measure_log.json")
+    if _zl.exists():
+        try:
+            for r in json.loads(_zl.read_text()).get("records", []):
+                if not r.get("measured") and r.get("name"):
+                    zone_skip[r["name"]] = r.get("reason")
+        except Exception:
+            pass
     rng = np.random.RandomState(0)
     bakes = []
     for ci, o in enumerate(raw):
@@ -727,7 +782,13 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "train_date": train_date, "recipe": recipe,
             "curated": curated, "family": family_of(name),
             "date": o.get("date", ""), "colorIndex": ci,
-            "rank": rank, "dial": o.get("dial", {}), "m3": o.get("m3_coherence"),
+            # dial WITHOUT `zones` — the raw zone block is ~9.4 KB/cell (3.0 MB
+            # across the board); `compact_zones` is the ~1 KB projection the
+            # failure panel actually reads.
+            "rank": rank, "dial": {k: v for k, v in (o.get("dial") or {}).items() if k != "zones"},
+            "m3": o.get("m3_coherence"),
+            "zones": compact_zones(o.get("dial")),
+            "zoneSkip": zone_skip.get(name),
             "m3a": o.get("m3a_coherence"),
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
@@ -886,7 +947,8 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     _cp = Path(__file__).resolve().parents[2] / "benchmarks" / "loop_eval_coverage.json"
     _cov = json.loads(_cp.read_text()).get("rows", []) if _cp.exists() else []
     data = {"bakes": bakes, "loopCoverage": _cov,
-            "discussionSets": _ds, "incumbents": _inc,
+            "zoneRowKeys": ZONE_ROW_KEYS,
+        "discussionSets": _ds, "incumbents": _inc,
             "loopProxy": proxy, "nDominatedExcluded": n_dom,
             "palette": PALETTE, "references": REFERENCES,
             "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
@@ -2422,15 +2484,396 @@ function renderModels(){
   host.append(grid);
 }
 
+// ================= FAILURE PROFILE ==========================================
+// "Where does this model hurt." Every row below is a FORMATTING of a number the
+// verdict already carries — SROCC signs, per-reference frac_negative, the stored
+// zone counts/rates, dial mono/tied/p5/p95, corruption pass rates, M3/M3a. The
+// only logic here is (a) thresholding a stored number into a severity and (b)
+// naming the production situation that number predicts. No statistic is
+// computed on the page; a value the verdict does not carry renders as NOT
+// MEASURED with its reason, never as a blank and never as a zero.
+const ZK=DATA.zoneRowKeys||['n_pairs','inv_material','flat','codec_sat','n_ladders',
+  'ladders_with_inv','ladders_ends_backwards','inv_rate','frac_ladders_with_inv',
+  'frac_ladders_ends_backwards','inv_mag_med','inv_mag_max'];
+const ZI={};ZK.forEach((k,i)=>{ZI[k]=i;});
+const zrow=(b,split,key,zone)=>{const z=b.zones;if(!z||!z.rows)return null;
+  return z.rows[split+'|'+key+'|'+zone]||null;};
+const zv=(row,k)=>row?row[ZI[k]]:null;
+const ZONES=['q<50','q50-85','q>=85'];
+const ZONE_MEANING={'q<50':'aggressive web compression',
+  'q50-85':'ordinary web quality','q>=85':'high-fidelity / near-lossless (q90+ pipelines)'};
+// What each corpus PREDICTS about production. Used to turn "nonphoto 0.845" into
+// a sentence about the content a user would actually ship.
+const SITUATION={
+  cid22:'human MOS on real codec output — the closest stand-in for a user looking at an encode',
+  nonphoto:'non-photographic content (UI, illustration, screenshots, text) judged by ssim2',
+  imazen26:'the real-codec web corpus judged by ssim2',
+  hfnlproxy:'high-fidelity / near-lossless encodes — where a q90+ web pipeline operates',
+  hf_nearlossless:'high-fidelity / near-lossless encodes',
+  konjnd:'the just-noticeable-difference threshold — the visually-lossless boundary',
+  kadid:'synthetic distortion families (blur, noise, blocking, colour)',
+  tid:'synthetic distortion families (TID2013)',
+  csiq:'classic photographic distortion sets',
+  live:'classic photographic distortion sets (LIVE)',
+  aic3:'AIC-3 near-threshold JND triplets — fine discrimination just above visibility',
+  aic4:'AIC-4 near-threshold JND triplets',
+  kadis:'700k synthetic distortions scored by reference metrics',
+  pipal:'GAN / restoration outputs',
+  sdr25:'the JPEG-AI SDR high-quality zone'};
+const situ=c=>SITUATION[c]||(c+' pairs');
+const SEV={blocker:0,serious:1,watch:2};
+const sevTone={blocker:'var(--serious)',serious:'var(--warn)',watch:'var(--muted)'};
+const pc=v=>v==null||!isFinite(v)?'—':(v*100).toFixed(v*100<10?1:0)+'%';
+
+// One finding: what breaks / how big / where you meet it / evidence.
+function F(sev,rank,what,size,where,ev){return {sev:sev,rank:rank,what:what,size:size,where:where,ev:ev};}
+
+function failures(b){
+  const bad=[],good=[],nm=[];
+  const R=b.rank||{},D=b.dial||{};
+  // ---- 1. a corpus ranked backwards outright ------------------------------
+  Object.keys(R).forEach(c=>{
+    const r=R[c];if(!r)return;const v=rs(b,c);
+    if(v==null)return;
+    if(v<0){
+      bad.push(F('blocker',0,'Ranks '+c+' BACKWARDS',
+        'pooled SROCC '+f3(v)+' over n='+(r.n||'?')+' pairs',
+        situ(c),'rank.'+c+'.srocc_signed'));
+    }
+  });
+  // ---- 2. whole reference ladders ranked backwards -------------------------
+  // frac_negative is the share of REFERENCES whose within-image ranking is
+  // inverted. It is the statistic a codec loop meets: the loop only ever
+  // compares encodes of ONE image.
+  Object.keys(R).forEach(c=>{
+    const r=R[c];if(!r||r.frac_negative==null||r.per_ref_n==null)return;
+    if(r.frac_negative<=0.02)return;
+    const sev=r.frac_negative>=0.15?'serious':'watch';
+    bad.push(F(sev,1,'Ranks whole reference ladders backwards on '+c,
+      pc(r.frac_negative)+' of '+r.per_ref_n+' references (within-image mean SROCC '
+        +f3(r.per_ref_mean)+' vs pooled '+f3(rs(b,c))+')',
+      'a per-image tuning loop on '+situ(c),
+      'rank.'+c+'.frac_negative / per_ref_mean'));
+  });
+  // ---- 3+4. ladder inversions by codec x quality zone ----------------------
+  if(b.zones&&b.zones.rows){
+    const codecs=new Set();Object.keys(b.zones.rows).forEach(k=>{const p=k.split('|');
+      if(p[0]==='codec')codecs.add(p[1]);});
+    ZONES.forEach(z=>{
+      Array.from(codecs).sort().forEach(cd=>{
+        const row=zrow(b,'codec',cd,z);if(!row)return;
+        const back=zv(row,'ladders_ends_backwards'),nl=zv(row,'n_ladders');
+        if(back>0){
+          bad.push(F('blocker',2,'Whole '+cd+' ladders run BACKWARDS at '+z,
+            back+' of '+nl+' ladders ('+pc(zv(row,'frac_ladders_ends_backwards'))
+              +'): the best-quality rung scores materially below the worst',
+            'a codec loop tuning '+cd+' in the '+ZONE_MEANING[z]+' band walks the wrong way',
+            'dial.zones codec|'+cd+'|'+z));
+        }
+        const ir=zv(row,'inv_rate');
+        if(ir!=null&&ir>=0.02){
+          bad.push(F(ir>=0.05?'serious':'watch',3,
+            'Orders adjacent '+cd+' quality steps backwards at '+z,
+            zv(row,'inv_material')+' of '+zv(row,'n_pairs')+' steps ('+pc(ir)
+              +'), worst reversal '+f2(zv(row,'inv_mag_max'))+' dial pts; '
+              +zv(row,'ladders_with_inv')+' of '+nl+' ladders affected',
+            'raising '+cd+' quality inside the '+ZONE_MEANING[z]
+              +' band can LOWER the reported score',
+            'dial.zones codec|'+cd+'|'+z));
+        }
+      });
+      // content class
+      ['text_lineart','nonphoto','photo'].forEach(cl=>{
+        const row=zrow(b,'class',cl,z);if(!row)return;
+        const ir=zv(row,'inv_rate');const nimg=(b.zones.classes||{})[cl];
+        if(ir!=null&&ir>=0.03){
+          bad.push(F(ir>=0.06?'serious':'watch',4,
+            'Orders '+cl.replace('_','/')+' quality steps backwards at '+z,
+            zv(row,'inv_material')+' of '+zv(row,'n_pairs')+' steps ('+pc(ir)
+              +') across '+(nimg!=null?nimg:'?')+' reference images, worst '
+              +f2(zv(row,'inv_mag_max'))+' dial pts',
+            (cl==='text_lineart'?'text / line-art content (scanned documents, sheet music, '
+              +'high-contrast lettering)':cl==='nonphoto'?'rendered or synthetic content '
+              +'(illustration, CGI, display captures)':'ordinary photographic content')
+              +' in the '+ZONE_MEANING[z]+' band',
+            'dial.zones class|'+cl+'|'+z));
+        }
+      });
+    });
+  }else{
+    nm.push({what:'Ladder inversions by codec / quality zone / content class',
+      why:(b.zoneSkip||'not measured for this cell')});
+  }
+  // ---- 5. dial dead zone ---------------------------------------------------
+  if(D.tied_pct!=null&&D.tied_pct>0){
+    bad.push(F(D.tied_pct>0.05?'serious':'watch',5,'Dial dead zone: distinct encodes score identically',
+      pc(D.tied_pct)+' of adjacent quality steps move the score by <1e-9',
+      'a loop cannot tell two different encodes apart there — it stops converging',
+      'dial.tied_pct'));
+  }
+  // ---- 6. unreachable dial ends -------------------------------------------
+  if(D.p5!=null&&D.p5>25){
+    bad.push(F('serious',6,'Dial cannot reach low quality',
+      'p5 of the whole codec grid is '+f2(D.p5)+' (gate G1 wants <=25)',
+      'a user asking for a target below '+f2(D.p5)+' can never be served — the loop '
+        +'saturates and returns the wrong bytes','dial.p5'));
+  }
+  if(D.p95!=null&&D.p95<85){
+    bad.push(F('serious',6,'Dial cannot reach high quality',
+      'p95 is '+f2(D.p95)+' (gate G1 wants >=85)',
+      'near-lossless targets are unreachable','dial.p95'));
+  }
+  // ---- 7. corruption ordering ---------------------------------------------
+  if(b.corruption&&b.corruption.pass_q20!=null){
+    const p=b.corruption.pass_q20;
+    if(p<0.6){
+      // per_family ships in TWO shapes: bake cells carry a list of
+      // {family,pass_rate,n}; the peer rows carry an object keyed by family
+      // whose values hold pass_q10/pass_q20. Normalise before reading, and
+      // read pass_q20 for the object form so both shapes name the SAME rate.
+      const pfr=b.corruption.per_family;
+      const fams=(Array.isArray(pfr)?pfr.filter(f=>f.pass_rate===0).map(f=>f.family)
+        :(pfr&&typeof pfr==='object'?Object.keys(pfr).filter(k=>pfr[k]&&pfr[k].pass_q20===0):[]));
+      bad.push(F(p<0.3?'serious':'watch',7,'Does not rank corrupted images below a bad encode',
+        'passes '+pc(p)+' of '+(b.corruption.n_triples||'?')+' corruption triples'
+          +(fams.length?'; '+fams.length+' families at 0% ('+fams.slice(0,4).join(', ')
+            +(fams.length>4?', …':'')+')':''),
+        'a truncated / mis-decoded / occluded image can be reported as good quality '
+          +'and shipped','corruption.pass_q20 + per_family'));
+    }
+  }else{nm.push({what:'Corruption ordering',why:'no corruption block in this cell'});}
+  // ---- 8. steering coherence ----------------------------------------------
+  if(b.m3a!=null){
+    if(b.m3a<0.85)bad.push(F(b.m3a<0.6?'serious':'watch',8,
+      'Its attribution map disagrees with its own score',
+      'M3a block coherence '+f3(b.m3a)+' (gate >=0.85)',
+      'per-block steering points at the wrong blocks — a codec loop spends bits '
+        +'where the metric will not reward them','m3a_coherence'));
+  }else if(b.m3!=null&&b.m3<0.70){
+    bad.push(F('watch',8,'Its deployable diffmap disagrees with its score',
+      'M3 '+f3(b.m3)+' (M3a NOT MEASURED for this cell)',
+      'the map a codec can use today does not track the scalar it is steering to',
+      'm3_coherence'));
+  }
+  if(b.m3a==null&&b.m3==null)nm.push({what:'Steering coherence (M3 / M3a)',
+    why:isEns(b)?'ensemble — the coherence instrument loads one ZNPR':'not measured for this cell'});
+  // ---- 9. band tails -------------------------------------------------------
+  Object.keys(R).forEach(c=>{
+    const r=R[c];if(!r||!r.bands)return;
+    r.bands.forEach(bd=>{
+      if(bd.srocc_signed==null){
+        nm.push({what:'Per-band ranking on '+c+' band '+bd.band,
+          why:bd.not_measured_reason||'band not usable'});return;}
+      if(bd.srocc_signed<0.09){
+        bad.push(F(bd.srocc_signed<0?'serious':'watch',9,
+          'Weak or inverted ranking inside one quality band of '+c,
+          'band '+bd.band+' SROCC '+f3(bd.srocc_signed)+' (n='+bd.n+', MOS span '
+            +f2(bd.span)+')',
+          'choosing between two encodes that are already close in quality — '
+            +'exactly the decision a near-lossless pipeline makes','rank.'+c+'.bands[]'));
+      }
+    });
+  });
+  // ---- 10. memorised corpora ----------------------------------------------
+  const teq=Object.keys(R).filter(c=>R[c]&&R[c].train_eq_val);
+  if(teq.length)bad.push(F('watch',10,'Some corpus numbers reward memorisation',
+    teq.join(', ')+': train and validation pairs overlap',
+    'those SROCCs are integrity guards, not evidence of generalisation','rank.*.train_eq_val'));
+  // ---- 11. registry annotations -------------------------------------------
+  (b.annotations||[]).forEach(id=>{
+    bad.push(F('watch',11,'Registry annotation: '+annKind(id),annReason(id),
+      'a published number on this row is qualified or invalidated','eval_annotations.json '+id));
+  });
+  // ---- 12. reproducibility + root exposure --------------------------------
+  if(!b.repro)bad.push(F('watch',12,'No reproduction provenance',
+    'no embedded zentrain.repro and no .spec.json',
+    'the model cannot be rebuilt or re-derived without archaeology','repro'));
+  if(b.blocks&&b.blocks.uses156&&String(b.regime||'').indexOf('944')>=0){
+    bad.push(F('serious',12,'Reads a feature block the folded roots zero',
+      'the encoder has live weight in f156-371, which folded 944-class roots feed as '
+        +'structural zeros',
+      'scored at the wrong regime this model returns a plausible number from zeroed '
+        +'inputs (the ebothg_m504 class)','block_profile.uses_f156_371'));
+  }
+  if(b.zones&&/dial_grid_372col_2026-05-29[.]parquet/.test(b.zones.grid||'')){
+    bad.push(F('watch',12,'Dial numbers come from the un-quarantined 2026-05-29 grid',
+      'that grid carries the 9 corrupt (GPU odd-dim) ladders the quarantine removed',
+      'this cell dial is not directly comparable with a cell cut on the quarantined grid',
+      'dial.zones.grid'));
+  }
+  // ---- the honest inverse --------------------------------------------------
+  Object.keys(R).forEach(c=>{
+    const r=R[c],v=rs(b,c);if(!r||v==null)return;
+    if(v>=0.85&&(r.frac_negative==null||r.frac_negative<=0.02)&&!r.train_eq_val)
+      good.push('Ranks '+c+' well and consistently per image — SROCC '+f3(v)
+        +(r.per_ref_n!=null?', '+pc(r.frac_negative)+' of '+r.per_ref_n
+          +' references backwards':'')+' ('+situ(c)+')');
+  });
+  if(b.zones&&b.zones.rows){
+    const codecs=new Set();Object.keys(b.zones.rows).forEach(k=>{const p=k.split('|');
+      if(p[0]==='codec')codecs.add(p[1]);});
+    Array.from(codecs).sort().forEach(cd=>{
+      let tot=0,inv=0,back=0,ok=true;
+      ZONES.forEach(z=>{const r=zrow(b,'codec',cd,z);if(!r){ok=false;return;}
+        tot+=zv(r,'n_pairs');inv+=zv(r,'inv_material');back+=zv(r,'ladders_ends_backwards');});
+      if(ok&&inv===0&&back===0&&tot>0)
+        good.push('Never orders a '+cd+' quality step backwards — 0 of '+tot
+          +' adjacent steps across all three quality zones');
+    });
+  }
+  if(D.mono_pct!=null&&D.mono_pct>=0.99&&D.tied_pct===0)
+    good.push('Dial is monotone with no dead zone — '+pc(D.mono_pct)
+      +' of steps forward, 0% tied');
+  if(b.m3a!=null&&b.m3a>=0.85)
+    good.push('Attribution map agrees with the score (M3a '+f3(b.m3a)
+      +') — safe to steer a codec per block');
+  // NOT MEASURED that applies to every board cell
+  nm.push({what:'Out-of-distribution / extrapolation exposure (G-RANGE: share of rows '
+    +'predicting outside the spline knots)',
+    why:'owned by bake_dial_refit gate, which is not run per board cell — see '
+      +'benchmarks/add156_ship_audit_2026-08-31.md for the one model it has been run on'});
+  nm.push({what:'Bytes saved at equal judged quality (G-RD) and target-hitting (G-TARGET)',
+    why:'owned by the codec probe matrix; only mapped bakes carry the JXL loop panel'});
+  bad.sort((x,y)=>(SEV[x.sev]-SEV[y.sev])||(x.rank-y.rank)||x.what.localeCompare(y.what));
+  return {bad:bad,good:good,nm:nm};
+}
+
+function renderFailures(){
+  const host=$('#failures');if(!host)return;host.innerHTML='';
+  host.append(el('h2',{text:'Failure profile — what breaks, how big, where you meet it'}));
+  host.append(el('div',{class:'cap',html:'Ranked by product impact, per model. Every row is a '
+    +'number the verdict already carries, restated as the production situation it predicts — '
+    +'nothing here is recomputed. <b>blocker</b> = a codec loop is led the wrong way; '
+    +'<b>serious</b> = a gate the shipping design depends on; <b>watch</b> = qualified or '
+    +'thin evidence. Ladder rows come from <code>dial.zones</code> '
+    +'(<code>bake_verdict</code>, scheme <code>ladder-inversion-2026-08-31</code>); '
+    +'reference rows from <code>rank.*.frac_negative</code>, the share of whole reference '
+    +'ladders the model orders backwards. A cell with no measurement says NOT MEASURED and '
+    +'why — never a blank, never a zero.'}));
+  const bs=visBakes();
+  if(!bs.length){host.append(el('div',{class:'cap',text:'no bakes visible'}));return;}
+  // ---- side-by-side comparison table (the choosing-between-models view) ----
+  const HEAD=['bake','blockers','serious','ladders backwards q>=85','ladder-inv q>=85',
+    'ladder-inv q<50','refs bwd (HF-NL)','refs bwd (CID22)','dial dead-zone','corruption q20',
+    'steer M3a','worst single reversal'];
+  const tbl=el('table',{});
+  const hr=el('tr',{});HEAD.forEach(h=>hr.append(el('th',{text:h})));
+  const th=el('thead',{});th.append(hr);tbl.append(th);
+  const tb=el('tbody',{});
+  bs.forEach(b=>{
+    const f=failures(b);
+    const zAll=z=>zrow(b,'all','all',z);
+    const hi=zAll('q>=85'),lo=zAll('q<50');
+    const hfr=b.rank.hfnlproxy||b.rank.hf_nearlossless;
+    const worst=['q<50','q50-85','q>=85'].map(z=>zv(zAll(z),'inv_mag_max'))
+      .filter(v=>v!=null).reduce((a,v)=>Math.max(a,v),0);
+    const tr=el('tr',{});
+    const nameTd=el('td',{});nameInto(nameTd,b,'');
+    tr.append(nameTd);
+    const cells=[
+      String(f.bad.filter(x=>x.sev==='blocker').length),
+      String(f.bad.filter(x=>x.sev==='serious').length),
+      hi?zv(hi,'ladders_ends_backwards')+' / '+zv(hi,'n_ladders'):'— NOT MEASURED',
+      hi?pc(zv(hi,'inv_rate')):'— NOT MEASURED',
+      lo?pc(zv(lo,'inv_rate')):'— NOT MEASURED',
+      hfr&&hfr.frac_negative!=null?pc(hfr.frac_negative):'— NOT MEASURED',
+      b.rank.cid22&&b.rank.cid22.frac_negative!=null?pc(b.rank.cid22.frac_negative):'—',
+      b.dial&&b.dial.tied_pct!=null?pc(b.dial.tied_pct):'—',
+      b.corruption&&b.corruption.pass_q20!=null?pc(b.corruption.pass_q20):'— NOT MEASURED',
+      b.m3a!=null?f3(b.m3a):'— NOT MEASURED',
+      hi||lo?f2(worst)+' pts':'— NOT MEASURED'];
+    cells.forEach(c=>tr.append(el('td',{text:String(c)})));
+    tb.append(tr);
+  });
+  tbl.append(tb);
+  makeSortable(tbl);
+  host.append(tbl);
+  host.append(el('div',{class:'cap',html:'<b>ladders backwards q&gt;=85</b> = (image, codec) '
+    +'ladders whose best-quality rung scores materially BELOW its worst-quality rung inside '
+    +'the near-lossless band. <b>ladder-inv</b> = share of adjacent quality steps ordered '
+    +'backwards by more than 0.5 dial points (the same events the G3 gate counts). '
+    +'<b>refs bwd</b> = share of reference images whose within-image ranking is inverted. '
+    +'<b>corruption q20</b> is a pass rate (higher is better); the dial alone is not the '
+    +'corruption owner in the shipping design — a companion head is.'}));
+  // ---- per-model cards -----------------------------------------------------
+  const grid=el('div',{style:'display:flex;flex-wrap:wrap;gap:10px;margin-top:12px'});
+  bs.forEach(b=>{
+    const f=failures(b);
+    const card=el('div',{style:'border:1px solid var(--border);border-radius:8px;padding:10px 12px;'
+      +'background:var(--surface-1);min-width:340px;max-width:520px;flex:1 1 380px'});
+    const hd=el('div',{style:'display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap'});
+    hd.append(el('span',{class:'sw',style:'display:inline-block;background:'+color(b)}),el('b',{text:b.name}));
+    const eb=ensBadge(b);if(eb)hd.append(eb);
+    hd.append(el('span',{style:'font-size:9.5px;opacity:.7',
+      text:(b.zones?('ladders: '+b.zones.grid):'ladders: NOT MEASURED')}));
+    card.append(hd);
+    if(!f.bad.length)card.append(el('div',{style:'font-size:11px;opacity:.8',
+      text:'No failure rows cross the reporting thresholds on the evidence this cell carries. '
+        +'Read the NOT MEASURED list below before reading that as clean.'}));
+    f.bad.forEach(x=>{
+      const row=el('div',{style:'margin:5px 0;padding:5px 7px;border-radius:5px;border:1px solid var(--border);'
+        +'background:color-mix(in srgb, '+sevTone[x.sev]+' 12%, var(--surface-1))'});
+      const t=el('div',{style:'font-size:11px'});
+      t.append(el('span',{style:'font-size:8.5px;font-weight:700;letter-spacing:.05em;padding:1px 5px;'
+        +'border-radius:7px;margin-right:6px;background:color-mix(in srgb, '+sevTone[x.sev]
+        +' 35%, var(--surface-1))',text:x.sev.toUpperCase()}),el('b',{text:x.what}));
+      row.append(t);
+      row.append(el('div',{style:'font-size:10.5px;margin-top:2px',text:'how big: '+x.size}));
+      row.append(el('div',{style:'font-size:10.5px;opacity:.9',text:'where you meet it: '+x.where}));
+      row.append(el('div',{style:'font-size:9px;opacity:.6;margin-top:2px',text:'evidence: '+x.ev}));
+      card.append(row);
+    });
+    if(b.zones&&b.zones.worst&&b.zones.worst.length){
+      const d=el('details',{style:'margin-top:6px'});
+      d.append(el('summary',{style:'font-size:10px;cursor:pointer;opacity:.85',
+        text:'worst individual ladders, by reference image ('+b.zones.worst.length+')'}));
+      const t=el('table',{style:'font-size:10px;margin-top:4px'});
+      const hr=el('tr',{});['reference image','codec','content','zone','end delta','worst step']
+        .forEach(h=>hr.append(el('th',{text:h})));
+      const th2=el('thead',{});th2.append(hr);t.append(th2);
+      const tb2=el('tbody',{});
+      b.zones.worst.forEach(w=>{const tr=el('tr',{});
+        [w[0],w[1],String(w[2]||'').replace('_','/'),w[3],
+         (w[4]>0?'+':'')+f2(w[4])+' pts',f2(w[5])+' pts']
+          .forEach(c=>tr.append(el('td',{text:String(c)})));tb2.append(tr);});
+      t.append(tb2);makeSortable(t);d.append(t);
+      d.append(el('div',{class:'cap',style:'margin-top:3px',
+        text:'end delta = score at the zone best-quality rung minus the worst-quality rung '
+          +'(negative = the whole ladder runs backwards); worst step = the deepest single '
+          +'backwards move inside the zone. Sources are the dial grid reference PNGs — '
+          +'/mnt/v/input/zensim/sources/<reference image>.png.'}));
+      card.append(d);
+    }
+    if(f.good.length){
+      const d=el('details',{style:'margin-top:6px'});
+      d.append(el('summary',{style:'font-size:10px;cursor:pointer;opacity:.8',
+        text:'reliably good at ('+f.good.length+')'}));
+      const ul=el('ul',{style:'font-size:10.5px;margin:4px 0 0 16px'});
+      f.good.forEach(g=>ul.append(el('li',{text:g})));
+      d.append(ul);card.append(d);
+    }
+    if(f.nm.length){
+      const d=el('details',{style:'margin-top:4px'});
+      d.append(el('summary',{style:'font-size:10px;cursor:pointer;opacity:.8',
+        text:'NOT MEASURED ('+f.nm.length+')'}));
+      const ul=el('ul',{style:'font-size:10.5px;margin:4px 0 0 16px'});
+      f.nm.forEach(g=>ul.append(el('li',{text:g.what+' — '+g.why})));
+      d.append(ul);card.append(d);
+    }
+    grid.append(card);
+  });
+  host.append(grid);
+}
+
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'loopcov'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'recipes'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'failures'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'loopcov'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'recipes'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
 function rerender(){disposeCharts();state.renderedTheme=effTheme();
-  mountTable();renderHeat();renderMPanel();renderDial();renderLoop();renderCoverage();renderHfnl();renderGates();renderRecipes();renderModels();renderTrade();renderScatter();}
+  mountTable();renderFailures();renderHeat();renderMPanel();renderDial();renderLoop();renderCoverage();renderHfnl();renderGates();renderRecipes();renderModels();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 // Theme reactivity: charts (and everything else) rebuild with the other theme's option

@@ -494,3 +494,73 @@ if (process.argv.includes('--dump-row')) {
 console.log('render OK: ' + nBakes + ' bakes, ' + panelsEl.children.length + ' sections, '
   + tables + ' tables, ' + rows + ' rows, ' + countTag('svg') + ' svgs'
   + (DATA && DATA.loopTargeting ? ', loop panel: ' + Object.keys(DATA.loopTargeting.models || {}).length + ' models' : ', no loop panel'));
+
+// ---- FAILURE PROFILE panel (2026-08-31) ----------------------------------------------
+// The panel exists to say what a model gets WRONG; a panel that renders blank, or that
+// draws a NOT-MEASURED cell as a zero, is worse than no panel. Assert it populated: the
+// heading, one comparison row per visible bake, one card per visible bake, real finding
+// rows somewhere in the set, and the NOT MEASURED / measured split matching the payload.
+if (DATA) (function failurePanelTest() {
+  if (!h2s.some(t => t.startsWith('Failure profile')))
+    fail('Failure profile section did not render (h2s: ' + h2s.join(' | ') + ')');
+  const host = query('#failures');
+  if (!host || !host.children.length) fail('#failures panel is empty');
+  const isFail = h => h.includes('bake') && h.includes('blockers')
+    && h.some(x => x.indexOf('ladder-inv') === 0);
+  const tabs = attachedTables(isFail);
+  if (tabs.length !== 1) { fail('failure panel: expected 1 attached comparison table, got ' + tabs.length); return; }
+  const rows = tabs[0];
+  // the page's own default-visible rule: curated, not dominated, no knob-end failure
+  const vis = DATA.bakes.filter(b => b.curated
+    && !(b.dominated_by && b.dominated_by.length)
+    && !(b.knob_end_fail && b.knob_end_fail.length));
+  const nVis = vis.length || DATA.bakes.length;
+  if (rows.length - 1 !== nVis)
+    fail('failure comparison rows ' + (rows.length - 1) + ' != visible bakes ' + nVis);
+  const hdr = rows[0].children.map(cellText).map(s => s.trim());
+  const iHi = hdr.indexOf('ladder-inv q>=85');
+  if (iHi < 0) fail('failure table lacks the "ladder-inv q>=85" column');
+  // measured vs NOT MEASURED must follow the payload, and NOT MEASURED must never be 0%
+  let nMeasured = 0, nNM = 0;
+  rows.slice(1).forEach(tr => {
+    const nm = bakeOfRow(tr);
+    const b = DATA.bakes.find(x => x.name === nm);
+    const cell = cellText(tr.children[iHi]).trim();
+    const hasZones = !!(b && b.zones && b.zones.rows);
+    if (hasZones) {
+      nMeasured++;
+      if (cell.indexOf('NOT MEASURED') >= 0)
+        fail('failure table: ' + nm + ' carries zones but the cell says NOT MEASURED');
+    } else {
+      nNM++;
+      if (cell.indexOf('NOT MEASURED') < 0)
+        fail('failure table: ' + nm + ' has NO zones but the cell reads "' + cell
+          + '" instead of NOT MEASURED');
+    }
+  });
+  if (!nMeasured) fail('failure table: no visible bake carries a measured ladder-inversion split');
+  // per-model cards: one per visible bake, and the visible set must produce real findings
+  const cardNames = [];
+  (function walk(e) {
+    if (!e || !e.children) return;
+    if (e.tagName === 'B' && namesByLen.indexOf(String(e.textContent || '').trim()) >= 0
+        && e.parentNode && e.parentNode.parentNode
+        && e.parentNode.parentNode.parentNode === host) cardNames.push(String(e.textContent).trim());
+    e.children.forEach(walk);
+  })(host);
+  const sevSpans = [];
+  (function walk(e) {
+    if (!e || !e.children) return;
+    const t = String(e.textContent || '').trim();
+    if (e.tagName === 'SPAN' && (t === 'BLOCKER' || t === 'SERIOUS' || t === 'WATCH'))
+      sevSpans.push(t);
+    e.children.forEach(walk);
+  })(host);
+  if (!sevSpans.length)
+    fail('failure panel rendered no severity-tagged finding rows at all — every visible '
+      + 'model came out clean, which the board data does not support');
+  if (!/what breaks, how big, where you meet it/.test(html))
+    fail('failure panel heading lost its "what breaks / how big / where" framing');
+  console.log('failure panel OK: ' + (rows.length - 1) + ' rows (' + nMeasured
+    + ' measured, ' + nNM + ' NOT MEASURED), ' + sevSpans.length + ' findings');
+})();
