@@ -1,0 +1,63 @@
+# Content class per dial-grid reference image (39 images = the union of the
+# 372-col grid's 38 and the 720/924/944 grids' 39).
+#
+# HOW THESE LABELS WERE MADE (2026-08-31): every source PNG in
+# /mnt/v/input/zensim/sources/<image_id>.png was rendered into two 5x4 contact
+# sheets and classified BY EYE. There is no classifier and no feature
+# threshold behind this file — it is a hand review, recorded so the ladder-
+# inversion split by content is auditable and reproducible. Re-do the review
+# if the grid gains images; an image absent from this table is reported in an
+# explicit `unclassified` bucket, never silently folded into a class.
+#
+# CLASSES
+#   photo        natural photographic capture, continuous tone
+#   text_lineart dominated by high-contrast text / line structures on a flat
+#                ground (scanned or photographed sheet music, handwriting,
+#                engraved lettering). The ringing-sensitive class.
+#   nonphoto     rendered or synthetic-origin signal: flat-shaded
+#                illustration, CGI render, or a capture of an emissive display
+#                whose dither/subpixel grid dominates the high frequencies.
+#
+# CAVEAT ON n: photo 27, text_lineart 9, nonphoto 3. The nonphoto class is
+# THREE images (12 ladders) — report its n beside any rate read from it.
+#
+# image_id<TAB>class<TAB>note
+00b13be94a4867dd_1022x818	photo	waterfront buildings
+037aa5751d88b97f_818x1022	photo	plants, fine foliage
+090d19695a8b43c2_512sq	photo	leaf macro, large smooth regions
+0e53ea752da698d9_1022x818	text_lineart	engraved stone plaque, dense small caps
+14ab4af28901fbeb1356b06d2d08ae06_512sq	photo	portrait, skin + eyes
+1a20ecb0c1b92466_1022x818	photo	grayscale branches, dense texture
+20f63bf11ab2c911_512sq	photo	macro organic texture
+271a645aa6d6aec1_513x769	photo	wooden building
+2b79a18d1b7537e0_818x1022	photo	blurred indoor scene
+3316926_opo25u_512sq	photo	sky and clouds, smooth gradients
+3bd6bfbcb85d489c_513x769	photo	church tower, overcast sky
+41f9443a79fd502b_818x1022	text_lineart	handwritten music manuscript
+4bb837d2ff0eabc5_513x769	nonphoto	LED display capture, regular dither grid
+5002b18aa50f70d9_512sq	photo	rooster
+5a9b3b963f852e20_512sq	text_lineart	printed sheet music
+60430844748882ff66b9a5598ef06dd6_818x1022	photo	red pepper, saturated smooth
+68845bbc29306de5_769x513	photo	painted wall, large flat regions
+717df959e85e1afd_1024sq	photo	plants, backlit
+76c1e30469720c75_769x513	text_lineart	printed sheet music
+7f7998c62e54398f_1024sq	photo	trees, park
+85d6b54b6872b19b_512sq	photo	rock texture
+8af82a660ac1508d_512sq	photo	drum kit, heavy bokeh
+9059ec43b26aa167_769x513	photo	baroque facade
+96a0024c685ead3f_1024sq	photo	apartment facade, windows
+a06b91d3d8419aad_513x769	photo	grass with caterpillars
+a9143f4b78fe5a13_513x769	text_lineart	handwritten manuscript, sparse ink
+ad31f526f5b114d1_512sq	photo	graffiti banner in a street scene
+b2e6e2b5969eaf25_1022x818	text_lineart	faint manuscript on ruled cream paper
+be4a0d05ad6c6e16_818x1022	text_lineart	printed music, dense staves
+c37e9ae52fbab790_1022x818	photo	night city, point lights
+cb0260b6b79ecca6_513x769	nonphoto	flat-shaded landscape illustration
+d01e6b7798bbe066_513x769	text_lineart	music notation on cream ground
+d4ca57dd68a5e2ae_513x769	photo	building entrance, glass doors
+dafb444e13a86f51_513x769	photo	window in a rendered wall
+e0c167d669e76fea_769x513	photo	beach town, many small figures
+e848b3f7fa4ec74c_818x1022	photo	insect on a plant stem
+ef576c4ed599d75d72145a8f34b58ccb_1022x818	nonphoto	CGI underwater render
+f65a24b7e176eb47_1022x818	text_lineart	printed music, dense staves
+fd9a529710854d75_818x1022	photo	museum interior, specular sculpture

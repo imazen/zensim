@@ -15,6 +15,7 @@ pub mod bake_runtime;
 pub mod bands;
 pub mod block_profile;
 pub mod content_clusters;
+pub mod dial_content;
 pub mod dial_spline;
 pub mod eval_report;
 pub mod eval_roots;

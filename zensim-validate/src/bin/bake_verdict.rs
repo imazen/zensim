@@ -1517,6 +1517,10 @@ struct DialMetrics {
     /// the (p25, median, p75) of the dial score across that codec's image
     /// ladders. Compact (~40-60 pts/codec) yet enough to draw the dial shape.
     curves: Vec<CodecCurve>,
+    /// Ladder inversions split by codec x quality zone and by content class x
+    /// quality zone (`None` only when the grid is absent). The pooled `mono`
+    /// above answers "does the dial run backwards"; this answers "WHERE".
+    zones: Option<DialZones>,
 }
 
 #[derive(Clone)]
@@ -1535,6 +1539,82 @@ struct CodecCurve {
     pts: Vec<(f64, f64, f64, f64)>,
 }
 
+/// Quality-zone edges on the grid's normalised `q` axis (0..100), shared by
+/// every codec including JXL (whose native param is a butteraugli distance —
+/// the grid carries the normalised `q` beside it).
+///
+/// The zones are production regimes, not statistics: below 50 is aggressive
+/// web compression, 50..85 is ordinary web quality, 85 and above is the
+/// high-fidelity / near-lossless band where a codec loop spends most of its
+/// iterations and where every learned metric is weakest.
+const ZONE_EDGES: [f64; 2] = [50.0, 85.0];
+
+/// A backwards step this large (dial score points) is a real ranking error
+/// rather than sub-JND noise — the threshold the G3 gate has always used,
+/// lifted to module scope so the zone split and the JSON emitter quote the
+/// SAME number the gate counts.
+const MATERIAL_INV_PT: f64 = 0.5;
+
+/// Zone label for one adjacent-q PAIR, keyed on the pair's q MIDPOINT (the
+/// decision "is the next step up actually better" is made between the two
+/// rungs, so the midpoint is the operating point that meets the user).
+fn zone_of(q_mid: f64) -> &'static str {
+    if q_mid < ZONE_EDGES[0] {
+        "q<50"
+    } else if q_mid < ZONE_EDGES[1] {
+        "q50-85"
+    } else {
+        "q>=85"
+    }
+}
+
+/// The three zone labels in report order.
+const ZONE_LABELS: [&str; 3] = ["q<50", "q50-85", "q>=85"];
+
+/// Adjacent-rung outcome counts for one (split-key, zone) cell of the ladder
+/// grid. The six buckets are the SAME five mutually-exclusive outcomes the
+/// pooled G3 gate uses (plus the strict-inversion diagnostic), so a cell's
+/// numbers add up to `n_pairs` and reconcile with `mono`/`tied` exactly.
+#[derive(Clone, Default)]
+struct ZoneCell {
+    n_pairs: usize,
+    forward: usize,
+    inv_material: usize,
+    inv_strict: usize,
+    flat: usize,
+    codec_sat: usize,
+    subres: usize,
+    /// Magnitudes (dial points) of the MATERIAL backwards steps in this cell.
+    inv_mags: Vec<f64>,
+}
+
+/// Ladder-level (whole-curve) outcomes for one (split-key, zone) cell.
+#[derive(Clone, Default)]
+struct ZoneLadders {
+    /// Ladders with at least 3 rungs inside the zone (the population).
+    n: usize,
+    /// Ladders carrying at least one MATERIAL backwards rung inside the zone.
+    with_inv: usize,
+    /// Ladders whose zone ENDPOINTS are backwards: the score at the zone's
+    /// best-quality rung is more than MATERIAL below the score at its
+    /// worst-quality rung. This is the "ranks the ladder backwards" statement
+    /// — a codec loop handed such a ladder walks the wrong way.
+    endpoint_backwards: usize,
+}
+
+/// Ladder-inversion breakdown: the pooled dial monotonicity split by the two
+/// axes a reader meets it on — which codec, and which quality zone — plus the
+/// same split by reviewed content class.
+#[derive(Clone)]
+struct DialZones {
+    /// `(split_kind, key, zone)` -> counts. `split_kind` is `codec`, `class`
+    /// or `all`.
+    cells: Vec<(String, String, String, ZoneCell, ZoneLadders)>,
+    /// Reviewed content class -> number of grid images carrying it (including
+    /// `unclassified`, which is reported and never merged).
+    class_images: std::collections::BTreeMap<String, usize>,
+}
+
 impl DialMetrics {
     const NAN: Self = Self {
         mono: f64::NAN,
@@ -1544,6 +1624,7 @@ impl DialMetrics {
         reach: f64::NAN,
         per_codec: Vec::new(),
         curves: Vec::new(),
+        zones: None,
     };
 }
 
@@ -1700,7 +1781,7 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
     //                          dial moved < half a point. EXPECTED on the dense
     //                          near-lossless grid (sub-JND configs); NOT gated.
     // MATERIAL_INV = 0.5 score-pt, below any user-targetable dial precision.
-    const MATERIAL_INV: f64 = 0.5;
+    const MATERIAL_INV: f64 = MATERIAL_INV_PT;
     // per-codec: [pairs, material_inversions, flat_clamp, n_curves]
     let mut tot_pairs = 0usize;
     let mut tot_fwd = 0usize; // Δ > MATERIAL_INV — clear quality increase
@@ -1711,36 +1792,161 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
     let mut tot_subres = 0usize; // 1e-9 < |Δ| ≤ MATERIAL_INV — expected oversampling
     let mut inv_mags: Vec<f64> = Vec::new(); // magnitudes of strict inversions
     let mut per_codec: BTreeMap<String, [usize; 4]> = BTreeMap::new();
-    for ((_img, codec), pts) in curves.iter_mut() {
+    // Ladder-inversion split (2026-08-31): the same five outcomes, bucketed by
+    // (codec, zone) and (content class, zone). Nothing above changes — these
+    // accumulate alongside so the split ALWAYS reconciles with the pooled gate.
+    let mut zcells: BTreeMap<(String, String, String), ZoneCell> = BTreeMap::new();
+    let mut zladders: BTreeMap<(String, String, String), ZoneLadders> = BTreeMap::new();
+    let mut class_images: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+    for ((img, codec), pts) in curves.iter_mut() {
         pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         let entry = per_codec.entry(codec.clone()).or_default();
         entry[3] += 1;
+        let class = zensim_validate::dial_content::class_of(img).to_string();
+        class_images
+            .entry(class.clone())
+            .or_default()
+            .insert(img.clone());
+        // split keys this ladder contributes to (`all` is the reconciliation row)
+        let keys: [(String, String); 3] = [
+            ("all".to_string(), "all".to_string()),
+            ("codec".to_string(), codec.clone()),
+            ("class".to_string(), class.clone()),
+        ];
+        // per-zone rung indices for the ladder-level (endpoint) statistic
+        let mut zone_rungs: BTreeMap<&'static str, Vec<(f64, f64)>> = BTreeMap::new();
+        let mut zone_has_inv: BTreeMap<&'static str, bool> = BTreeMap::new();
+        for &(q, sc, _) in pts.iter() {
+            zone_rungs.entry(zone_of(q)).or_default().push((q, sc));
+        }
         for w in pts.windows(2) {
-            let (_, s0, i0) = w[0];
-            let (_, s1, i1) = w[1];
+            let (q0, s0, i0) = w[0];
+            let (q1, s1, i1) = w[1];
             tot_pairs += 1;
             entry[0] += 1;
             let delta = s1 - s0;
-            if delta < -1e-9 {
+            let zone = zone_of(0.5 * (q0 + q1));
+            let strict = delta < -1e-9;
+            // five mutually-exclusive buckets summing to tot_pairs:
+            //   0 forward | 1 material inversion | 2 codec-saturated
+            //   3 flat/clamp dead-zone | 4 sub-resolution
+            let bucket: u8 = if delta > MATERIAL_INV {
+                0
+            } else if delta < -MATERIAL_INV {
+                1
+            } else if feat_eq(i0, i1) {
+                2
+            } else if delta.abs() <= 1e-9 {
+                3
+            } else {
+                4
+            };
+            if strict {
                 tot_inv += 1; // strict backwards (diagnostic, all magnitudes)
                 inv_mags.push(-delta);
             }
-            // five mutually-exclusive buckets summing to tot_pairs:
-            if delta > MATERIAL_INV {
-                tot_fwd += 1; // clear quality increase
-            } else if delta < -MATERIAL_INV {
-                tot_inv_material += 1; // material backwards (gate)
-                entry[1] += 1;
-            } else if feat_eq(i0, i1) {
-                tot_codec_sat += 1; // codec emitted identical image — not the bake's fault
-            } else if delta.abs() <= 1e-9 {
-                tot_flat += 1; // distinct inputs, identical score — metric dead-zone (gate)
-                entry[2] += 1;
-            } else {
-                tot_subres += 1; // 1e-9 < |Δ| ≤ MATERIAL_INV (expected; not gated)
+            match bucket {
+                0 => tot_fwd += 1, // clear quality increase
+                1 => {
+                    tot_inv_material += 1; // material backwards (gate)
+                    entry[1] += 1;
+                    zone_has_inv.insert(zone, true);
+                }
+                2 => tot_codec_sat += 1, // codec emitted identical image — not the bake's fault
+                3 => {
+                    tot_flat += 1; // distinct inputs, identical score — metric dead-zone (gate)
+                    entry[2] += 1;
+                }
+                _ => tot_subres += 1, // 1e-9 < |Δ| ≤ MATERIAL_INV (expected; not gated)
+            }
+            for (kind, key) in keys.iter() {
+                let c = zcells
+                    .entry((kind.clone(), key.clone(), zone.to_string()))
+                    .or_default();
+                c.n_pairs += 1;
+                if strict {
+                    c.inv_strict += 1;
+                }
+                match bucket {
+                    0 => c.forward += 1,
+                    1 => {
+                        c.inv_material += 1;
+                        c.inv_mags.push(-delta);
+                    }
+                    2 => c.codec_sat += 1,
+                    3 => c.flat += 1,
+                    _ => c.subres += 1,
+                }
+            }
+        }
+        // ladder-level: a zone counts this ladder once it holds >= 3 rungs, and
+        // the ladder is "endpoint backwards" there when its best-quality rung
+        // scores MATERIALLY below its worst-quality rung — a loop pointed at
+        // that zone walks the wrong way regardless of the per-rung wiggles.
+        for (zone, rungs) in zone_rungs.iter() {
+            if rungs.len() < 3 {
+                continue;
+            }
+            let lo = rungs.first().copied().unwrap_or((0.0, 0.0));
+            let hi = rungs.last().copied().unwrap_or((0.0, 0.0));
+            let backwards = hi.1 - lo.1 < -MATERIAL_INV;
+            let had_inv = *zone_has_inv.get(zone).unwrap_or(&false);
+            for (kind, key) in keys.iter() {
+                let l = zladders
+                    .entry((kind.clone(), key.clone(), zone.to_string()))
+                    .or_default();
+                l.n += 1;
+                if had_inv {
+                    l.with_inv += 1;
+                }
+                if backwards {
+                    l.endpoint_backwards += 1;
+                }
             }
         }
     }
+    let dial_zones = {
+        // RECONCILIATION (load-bearing): the split_kind=="all" cells must
+        // re-derive the pooled gate exactly. A split that quietly disagrees
+        // with the number it claims to explain is the failure mode this whole
+        // panel exists to prevent, so it aborts rather than ships.
+        let a_pairs: usize = zcells
+            .iter()
+            .filter(|((k, _, _), _)| k == "all")
+            .map(|(_, c)| c.n_pairs)
+            .sum();
+        let a_inv: usize = zcells
+            .iter()
+            .filter(|((k, _, _), _)| k == "all")
+            .map(|(_, c)| c.inv_material)
+            .sum();
+        let a_flat: usize = zcells
+            .iter()
+            .filter(|((k, _, _), _)| k == "all")
+            .map(|(_, c)| c.flat)
+            .sum();
+        assert_eq!(
+            (a_pairs, a_inv, a_flat),
+            (tot_pairs, tot_inv_material, tot_flat),
+            "dial zone split does not reconcile with the pooled G3 counters"
+        );
+        let mut cells: Vec<(String, String, String, ZoneCell, ZoneLadders)> = Vec::new();
+        let mut keyset: std::collections::BTreeSet<(String, String, String)> =
+            zcells.keys().cloned().collect();
+        keyset.extend(zladders.keys().cloned());
+        for k in keyset {
+            let c = zcells.get(&k).cloned().unwrap_or_default();
+            let l = zladders.get(&k).cloned().unwrap_or_default();
+            cells.push((k.0.clone(), k.1.clone(), k.2.clone(), c, l));
+        }
+        DialZones {
+            cells,
+            class_images: class_images
+                .into_iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect(),
+        }
+    };
     // forward strict-increase rate; inversion rate; tied rate — three rates
     // that sum to 1. "monotonicity" (G3) = 1 - inversion rate (ties are not
     // inversions but are reported on their own line). The gate uses the
@@ -1924,6 +2130,86 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
          zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step .05, 1→3 step .2, \
          13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
+    // Ladder inversions WHERE they happen: codec x quality zone, then content
+    // class x quality zone. The pooled `inversions` row above is one number for
+    // a codec loop; this is the number for the loop the reader is actually
+    // running, at the quality it is running at.
+    s.push_str("\nLadder inversions by quality zone (rung pairs keyed on the pair's q midpoint):\n\n");
+    s.push_str(
+        "| split | key | zone | rung pairs | inversions | inv rate | worst step | flat | ladders | ≥1 inv | ends backwards |\n",
+    );
+    s.push_str("|---|---|---|--:|--:|--:|--:|--:|--:|--:|--:|\n");
+    {
+        let mut rows: Vec<&(String, String, String, ZoneCell, ZoneLadders)> =
+            dial_zones.cells.iter().collect();
+        // report order: all, then codec rows, then class rows; zones ascending
+        let kind_rank = |k: &str| match k {
+            "all" => 0,
+            "codec" => 1,
+            _ => 2,
+        };
+        let zone_rank = |z: &str| ZONE_LABELS.iter().position(|x| *x == z).unwrap_or(9);
+        rows.sort_by(|a, b| {
+            kind_rank(&a.0)
+                .cmp(&kind_rank(&b.0))
+                .then(a.1.cmp(&b.1))
+                .then(zone_rank(&a.2).cmp(&zone_rank(&b.2)))
+        });
+        for (kind, key, zone, c, l) in rows {
+            let rate = if c.n_pairs > 0 {
+                c.inv_material as f64 / c.n_pairs as f64
+            } else {
+                f64::NAN
+            };
+            let flat_r = if c.n_pairs > 0 {
+                c.flat as f64 / c.n_pairs as f64
+            } else {
+                f64::NAN
+            };
+            let worst = c
+                .inv_mags
+                .iter()
+                .copied()
+                .fold(0.0f64, |a, b| if b > a { b } else { a });
+            let lad = if l.n > 0 {
+                format!(
+                    "{} | {} | {}",
+                    l.n,
+                    format_args!("{:.0}%", 100.0 * l.with_inv as f64 / l.n as f64),
+                    format_args!("{:.0}%", 100.0 * l.endpoint_backwards as f64 / l.n as f64)
+                )
+            } else {
+                "0 | — | —".to_string()
+            };
+            s.push_str(&format!(
+                "| {kind} | {key} | {zone} | {} | {} | {rate:.4} | {worst:.1} | {flat_r:.4} | {lad} |\n",
+                c.n_pairs, c.inv_material
+            ));
+        }
+        let classes: Vec<String> = dial_zones
+            .class_images
+            .iter()
+            .map(|(k, v)| format!("{k} {v}"))
+            .collect();
+        s.push_str(&format!(
+            "\n_Zones cut on the grid's normalised q axis at {:?}: `q<50` aggressive web \
+             compression, `q50-85` ordinary web quality, `q>=85` high-fidelity / \
+             near-lossless. A rung pair is assigned by its q MIDPOINT. `inversions` counts \
+             the SAME material (>{MATERIAL_INV}pt backwards) events the pooled G3 gate \
+             counts, so the `all` rows sum to the pooled numbers exactly. `ladders` = \
+             (image, codec) curves with ≥3 rungs in the zone; `≥1 inv` = share carrying at \
+             least one material backwards rung there; **`ends backwards`** = share whose \
+             best-quality rung in the zone scores materially BELOW its worst-quality rung \
+             — a codec loop pointed at that zone walks the wrong way. Content classes are \
+             a recorded HAND review of the grid's reference images \
+             (`benchmarks/dial_grid_content_classes_2026-08-31.tsv`), image counts: {}. \
+             Read the n column: a class with 3 images carries 12 ladders and its rate is \
+             coarse._\n",
+            ZONE_EDGES,
+            classes.join(", ")
+        ));
+    }
+
     // Per-codec breakout + aggregated dial curves for --full-json (the
     // markdown table above prints the same numbers; this is the structured
     // twin the dashboard reads — never re-derived downstream).
@@ -1991,6 +2277,7 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
             reach,
             per_codec: per_codec_json,
             curves: curve_json,
+            zones: Some(dial_zones),
         },
     )
 }
@@ -3612,6 +3899,46 @@ Run the dedicated q-sweep harness for those._\n",
                 c.codec.clone(),
                 c.pts.iter().map(|&(q, p25, med, p75)| vec![q, p25, med, p75]).collect::<Vec<_>>(),
             )).collect::<std::collections::BTreeMap<_, _>>(),
+            // zones: ladder inversions split by codec x quality zone and by
+            // reviewed content class x quality zone — the WHERE behind
+            // `mono_pct`. Same events, same MATERIAL threshold, so the
+            // split_kind=="all" rows reconcile with mono_pct exactly.
+            "zones": dial_metrics.zones.as_ref().map(|z| json!({
+                "scheme": "ladder-inversion-2026-08-31",
+                "zone_edges": ZONE_EDGES,
+                "material_pt": MATERIAL_INV_PT,
+                "min_rungs_per_ladder_zone": 3,
+                "class_table": "benchmarks/dial_grid_content_classes_2026-08-31.tsv",
+                "class_images": z.class_images,
+                "cells": z.cells.iter().map(|(kind, key, zone, c, l)| {
+                    let mut mags = c.inv_mags.clone();
+                    mags.sort_by(f64::total_cmp);
+                    json!({
+                        "split": kind, "key": key, "zone": zone,
+                        "n_pairs": c.n_pairs,
+                        "forward": c.forward,
+                        "inv_material": c.inv_material,
+                        "inv_strict": c.inv_strict,
+                        "flat": c.flat,
+                        "codec_sat": c.codec_sat,
+                        "subres": c.subres,
+                        "inv_rate": if c.n_pairs > 0 {
+                            Some(c.inv_material as f64 / c.n_pairs as f64) } else { None },
+                        "flat_rate": if c.n_pairs > 0 {
+                            Some(c.flat as f64 / c.n_pairs as f64) } else { None },
+                        "inv_mag_med": if mags.is_empty() { None } else {
+                            Some(mags[mags.len() / 2]) },
+                        "inv_mag_max": mags.last().copied(),
+                        "n_ladders": l.n,
+                        "ladders_with_inv": l.with_inv,
+                        "ladders_ends_backwards": l.endpoint_backwards,
+                        "frac_ladders_with_inv": if l.n > 0 {
+                            Some(l.with_inv as f64 / l.n as f64) } else { None },
+                        "frac_ladders_ends_backwards": if l.n > 0 {
+                            Some(l.endpoint_backwards as f64 / l.n as f64) } else { None },
+                    })
+                }).collect::<Vec<_>>(),
+            })),
         });
 
         // corruption: the real bake_verdict gate (score(corruption) < score(q20)
@@ -3893,6 +4220,51 @@ Run the dedicated q-sweep harness for those._\n",
 
 #[cfg(test)]
 mod tests {
+    /// Zone edges are a PRODUCT statement (aggressive / ordinary / near-lossless),
+    /// so pin them and pin the midpoint rule the split is keyed on.
+    #[test]
+    fn zone_labels_partition_the_q_axis_at_the_documented_edges() {
+        assert_eq!(super::ZONE_EDGES, [50.0, 85.0]);
+        assert_eq!(super::zone_of(0.0), "q<50");
+        assert_eq!(super::zone_of(49.999), "q<50");
+        assert_eq!(super::zone_of(50.0), "q50-85");
+        assert_eq!(super::zone_of(84.999), "q50-85");
+        assert_eq!(super::zone_of(85.0), "q>=85");
+        assert_eq!(super::zone_of(100.0), "q>=85");
+        // every label the report orders on is reachable
+        for z in super::ZONE_LABELS {
+            assert!([
+                super::zone_of(10.0),
+                super::zone_of(60.0),
+                super::zone_of(95.0)
+            ]
+            .contains(&z));
+        }
+    }
+
+    /// The zone split counts the SAME events the G3 gate counts; if that
+    /// threshold ever moves, both must move together.
+    #[test]
+    fn material_threshold_is_shared_with_the_gate() {
+        assert_eq!(super::MATERIAL_INV_PT, 0.5);
+    }
+
+    /// The content-class table must cover the dial grid's images. This asserts
+    /// the coupling (bake_verdict reads it) without loading the 25 MB grid: the
+    /// table's own module test pins the counts, this pins that bake_verdict
+    /// resolves through it and that an unknown id is reported, not merged.
+    #[test]
+    fn content_class_lookup_is_wired_and_reports_unknowns() {
+        assert_eq!(
+            zensim_validate::dial_content::class_of("5a9b3b963f852e20_512sq"),
+            "text_lineart"
+        );
+        assert_eq!(
+            zensim_validate::dial_content::class_of("not_in_the_grid"),
+            zensim_validate::dial_content::UNCLASSIFIED
+        );
+    }
+
     /// `--per-pair-refs` (appendix O): the 2-column default is byte-stable
     /// (three committed consumers exact-unpack it) and the opt-in 3-column
     /// form appends the interned ref id, aligned 1:1.
