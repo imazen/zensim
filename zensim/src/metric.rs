@@ -1262,13 +1262,30 @@ impl Zensim {
     /// ~14×w×h×4 B). Call [`Zensim::with_max_pixels`] to tighten it, or
     /// `with_max_pixels(usize::MAX)` to opt out for trusted input.
     pub fn new(profile: ZensimProfile) -> Self {
+        // `ZensimProfile::D`'s whole reason to exist is speed: its bake
+        // structurally reads none of the `f156..372` pool block
+        // (`ComputeSet::from_block_profile` / `fold_engine::score_pool_mode`
+        // both derive `V1PoolsMode::Peaks` for it), so — unlike every other
+        // profile, which defaults to the buffered walk and leaves these
+        // `#[doc(hidden)]` knobs to an explicit opt-in — `D` opts itself in.
+        // On a build without `feature-regime-v2` these two fields are inert
+        // (nothing reads them outside that feature), so `D` computes
+        // correctly via the ordinary buffered walk at `B`-class cost; the
+        // `156`-class speedup is reachable only with the feature compiled
+        // in. See the `D` variant's rustdoc and
+        // `benchmarks/profile_d_and_published_speed_2026-09-01.md` for the
+        // measured default-build-vs-feature-enabled consequence.
+        #[cfg(feature = "candidate-profiles")]
+        let fast_by_default = matches!(profile, ZensimProfile::D);
+        #[cfg(not(feature = "candidate-profiles"))]
+        let fast_by_default = false;
         Self {
             profile,
             parallel: true,
             max_pixels: Some(120_000_000),
             stop: None,
-            fold_engine: false,
-            skip_unread_pools: false,
+            fold_engine: fast_by_default,
+            skip_unread_pools: fast_by_default,
         }
     }
 

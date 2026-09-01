@@ -27,6 +27,7 @@ include = [
     "weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin",
     "weights/b_sdr_linear_cid80_anchored_2026-07-04.bin",
     "weights/c_sdr_mlp944_corrmix_2026-08-05.bin",
+    "weights/d_sdr_add156_dense_dial_2026-08-31.bin",
     "weights/manifests/v47_strict_qat.toml",
 ]
 

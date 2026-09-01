@@ -285,19 +285,17 @@ fn caller_col_spans(model: &crate::mlp::Model, in_dim: usize) -> Option<Vec<(usi
     (cur == in_dim).then_some(out)
 }
 
-/// Layer-0 structural read-set of one bake, or [`V1PoolNeed::ALL`] when the
-/// bake cannot be analysed safely.
-///
-/// Handles pruned and expanded bakes through [`caller_col_spans`]; returns
-/// `ALL` only for a bake whose declared arities do not tile layer 0, which no
-/// valid bake does.
-fn bake_pool_need(bytes: &[u8]) -> V1PoolNeed {
-    let Ok(model) = crate::mlp::Model::from_bytes(bytes) else {
-        return V1PoolNeed::ALL;
-    };
+/// Layer-0 structural read-set of an ALREADY-PARSED bake, or
+/// [`V1PoolNeed::ALL`] when its arities do not tile layer 0 (which no valid
+/// bake's do). The parse-free half of [`bake_pool_need`] — split out so
+/// [`crate::feature_v2::ComputeSet::from_block_profile`] can derive the same
+/// structural read-set from a model handle it already holds, rather than
+/// re-parsing bytes it was never given. Handles pruned and expanded bakes
+/// through [`caller_col_spans`].
+pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed {
     let layer = model.layer(0);
     let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
-    let Some(spans) = caller_col_spans(&model, in_dim) else {
+    let Some(spans) = caller_col_spans(model, in_dim) else {
         return V1PoolNeed::ALL;
     };
     // Any caller line at or beyond a family's start whose columns carry a
@@ -329,6 +327,16 @@ fn bake_pool_need(bytes: &[u8]) -> V1PoolNeed {
         masked: reads(V1_MASKED.0, V1_MASKED.1),
         iw: reads(V1_IW.0, V1_IW.1),
     }
+}
+
+/// Layer-0 structural read-set of one bake's BYTES, or [`V1PoolNeed::ALL`]
+/// when the bake cannot be parsed. Parses then delegates to
+/// [`bake_pool_need_from_model`] — see that function for the derivation.
+fn bake_pool_need(bytes: &[u8]) -> V1PoolNeed {
+    let Ok(model) = crate::mlp::Model::from_bytes(bytes) else {
+        return V1PoolNeed::ALL;
+    };
+    bake_pool_need_from_model(&model)
 }
 
 /// [`bake_pool_need`], interned by bake-bytes data pointer — the same cache
@@ -416,24 +424,37 @@ pub(crate) fn score_pool_mode(
         // unread by construction. The peak block still feeds `raw_distance`.
         return V1PoolsMode::Peaks;
     }
+    pools_mode_for_need(need)
+}
+
+/// The [`V1PoolsMode`] to run for a given structural read-set.
+///
+/// **Never returns [`V1PoolsMode::Off`]**, even when nothing reads the pool
+/// block at all — `Off` and `Peaks` cost the SAME to compute (the peak
+/// accumulators are the fused V-blur kernel's unconditional L8/max tier) but
+/// `Off` is never the better choice, and the reason is footprint, not
+/// arithmetic. `Off` hands the band no scratch at all, which disables the
+/// band-local self-blur shape (`FoldHSource::SelfBlur`) — so the walk falls
+/// back to phase A's four STRIP-wide H planes (`4 × 3 × 148·W × 4` bytes)
+/// where `Peaks` blurs exactly the 42 rows a band consumes into
+/// `3 × slots × 4 × 42·W × 4`. `Peaks` computes the identical sums, emits a
+/// superset of `Off`'s slots, and is the smaller hot set
+/// (`benchmarks/fold_footprint_2026-08-31.md` §9.2 costs a `Full` band task
+/// 12 planes × 42 rows = 2,016·W bytes; `Peaks` touches 6 of those 12). So
+/// `Peaks` dominates `Off` on every axis and this policy never returns `Off`.
+///
+/// Shared by [`score_pool_mode`] (which unions `need` across a profile's up
+/// to three bakes first) and
+/// [`crate::feature_v2::ComputeSet::from_block_profile`] (which derives
+/// `need` from one already-parsed model) so the "`Off` is never the right
+/// answer" policy lives in exactly one place.
+pub(crate) fn pools_mode_for_need(need: V1PoolNeed) -> crate::feature_v2::V1PoolsMode {
+    use crate::feature_v2::V1PoolsMode;
     if need.masked || need.iw {
-        return V1PoolsMode::Full;
+        V1PoolsMode::Full
+    } else {
+        V1PoolsMode::Peaks
     }
-    // Nothing reads masked or IW — the BASIC-ONLY / basic-plus-peaks classes.
-    //
-    // `V1PoolsMode::Off` would emit less (the peak slots would come back 0.0
-    // instead of carrying their values) but it is never the right answer
-    // here, and the reason is footprint, not arithmetic. `Off` hands the band
-    // no scratch at all, which disables the band-local self-blur shape
-    // (`FoldHSource::SelfBlur`) — so the walk falls back to phase A's four
-    // STRIP-wide H planes (`4 × 3 × 148·W × 4` bytes) where `Peaks` blurs
-    // exactly the 42 rows a band consumes into `3 × slots × 4 × 42·W × 4`.
-    // `Peaks` computes the identical sums, emits a superset of `Off`'s slots,
-    // and is the smaller hot set (`benchmarks/fold_footprint_2026-08-31.md`
-    // §9.2 costs a `Full` band task 12 planes × 42 rows = 2,016·W bytes;
-    // `Peaks` touches 6 of those 12). So `Peaks` dominates `Off` on every
-    // axis and the policy never returns `Off`.
-    V1PoolsMode::Peaks
 }
 
 #[cfg(test)]
@@ -644,6 +665,48 @@ mod skip_policy_tests {
     fn an_unparseable_bake_needs_everything() {
         assert_eq!(bake_pool_need(&[0u8; 8]), V1PoolNeed::ALL);
         assert_eq!(bake_pool_need(&[]), V1PoolNeed::ALL);
+    }
+
+    /// **The Profile-D task gate**: scores must be bit-identical whatever
+    /// walk/skip combination produces them — buffered vs fold, skip vs
+    /// no-skip, all four combinations, through the REAL public
+    /// `Zensim::compute` entry point (not the internal `compute_fold_backed`
+    /// harness the tests above use). This is the end-to-end proof that
+    /// `Zensim::new`'s per-profile fast-by-default wiring
+    /// (`benchmarks/profile_d_and_published_speed_2026-09-01.md`) changes
+    /// only performance, never the score — and that the DEFAULT
+    /// construction (fast-by-default under this feature build) agrees with
+    /// every explicit combination too.
+    #[cfg(feature = "candidate-profiles")]
+    #[test]
+    fn profile_d_scores_are_engine_and_skip_invariant() {
+        use crate::source::RgbSlice;
+        for &(w, h) in &[(96usize, 64usize), (256, 256), (577, 385)] {
+            let src = crate::feature_v2::tests::textured_image(w, h, 11);
+            let dst = crate::feature_v2::tests::quantize_distort(&src, w, h);
+            let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+
+            let default_result = crate::Zensim::new(ZensimProfile::D)
+                .compute(&sref, &dref)
+                .expect("D scores by default");
+            let want = default_result.score().to_bits();
+
+            for &engine in &[ScoringEngine::Buffered, ScoringEngine::Fold] {
+                for &skip in &[false, true] {
+                    let r = crate::Zensim::new(ZensimProfile::D)
+                        .with_engine(engine)
+                        .with_unread_feature_skipping(skip)
+                        .compute(&sref, &dref)
+                        .unwrap_or_else(|e| panic!("{w}x{h} engine={engine:?} skip={skip}: {e}"));
+                    assert_eq!(
+                        r.score().to_bits(),
+                        want,
+                        "{w}x{h}: engine={engine:?} skip={skip} diverged from the default \
+                         (fast-by-default) score — D's speed knobs must never move the score"
+                    );
+                }
+            }
+        }
     }
 
     /// `caller_col_spans` must tile layer 0 exactly and stay in CALLER space.

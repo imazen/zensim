@@ -172,6 +172,75 @@ pub enum ZensimProfile {
     /// HDR default; `CHdr` is the candidate-of-record.
     #[cfg(feature = "candidate-profiles")]
     CHdr,
+    /// **`D` — the FAST SDR profile (external name `zensim-d`).** A
+    /// basic-only 372-declared-width linear (single identity-activation
+    /// layer) bake — internal `ADD156` (`ens-safesyn-only-raw-lasso`, 28
+    /// nonzero coefficients over `f0..156`, spline-top-extended,
+    /// 3,671 B, sha256 `4481c2d4…`) — reads `f0..156` only (0 of the 216
+    /// `f156..372` peak/masked/IW pool slots), so a build with
+    /// `feature-regime-v2` can skip computing that block entirely: the
+    /// `156` compute set measured **2.54×/4.43×/3.52× faster than the full
+    /// 944-class walk at 1/8/16 threads, −21 % peak RSS**
+    /// (`benchmarks/era2_fast_profile_subset_2026-08-31.md` §1). `D` is
+    /// this profile's shipping form — the compute-set derivation
+    /// (`ComputeSet::from_block_profile`, internal) reads the bake's own
+    /// block profile and switches off the unread pool block automatically,
+    /// same mechanism [`Self::C`]'s 944 MLPs already use to skip it for
+    /// free.
+    ///
+    /// **Quality: within 0.019 CID22 of [`Self::B`]** (0.8634 vs 0.8821),
+    /// and **beats `B` on within-image ranking on 6 of 8 canonical
+    /// corpora** — including HF near-lossless, where `B` ranks 21 % of
+    /// reference ladders backwards and `D` ranks 0 %. KonJND
+    /// |SROCC| is **0.5332** on the JPEG-504 ruler (the registry-correct
+    /// one; a diluted 1,008-ref file some tooling defaults to reads 0.4462
+    /// and inverts this comparison — see
+    /// `benchmarks/add156_ship_audit_2026-08-31.md` D2). Dial panel is
+    /// fully green (monotonicity 98.5 %, 0 % tied, G-DYN 85.5 vs `B`'s
+    /// 86.1) and its near-lossless ceiling reaches *higher* than `B`'s
+    /// (dial 90.96 vs 85.29 at q100 on a real jpeg ladder).
+    ///
+    /// **Honest gaps, none of them silently patched:**
+    /// - **No comprehensive OOD guard.** Ships with the free, rank-exact
+    ///   spline-TOP extension only (fixes the 100 %-above-knot
+    ///   HF-near-lossless failure for zero rank cost); it does **not**
+    ///   carry the winsor feature-bounds guard `B` has, so
+    ///   `bake_dial_refit gate` (G-RANGE) still fails on out-of-distribution
+    ///   corpora (PIPAL, imazen26, nonphoto, LIVE, CSIQ, KADID, TID — 6 of
+    ///   14 corpora at the time of the audit). Adding the winsor guard
+    ///   trades away real rank (LIVE/KADID/TID) and is a **user-gated**
+    ///   decision this profile deliberately does not make for you — see
+    ///   `benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md`.
+    /// - **No embedded byte-repro block** (`zentrain.repro` is absent from
+    ///   this bake's metadata) — its 28 coefficients are a 400-sweep
+    ///   solver truncation, not the lasso optimum at convergence (26
+    ///   coefficients; `max|w_conv − w_400|` ≈ 55 % of the largest
+    ///   coefficient), and that provenance lives only in the campaign
+    ///   record, not in the bake. A future re-emit through the trainer
+    ///   would fix this without changing scores.
+    /// - **No companion corruption head** — the corruption-ordering gate is
+    ///   `ABSENT` for this profile, not measured-and-passing.
+    /// - **SDR content only** — structurally, like [`Self::C`]; route HDR
+    ///   content to [`Self::BHdr`].
+    ///
+    /// **Default-build behaviour (no `feature-regime-v2`): `D` scores
+    /// correctly via the ordinary buffered walk, at the SAME per-pixel cost
+    /// as `B`** (it still extracts the full 372-feature vector; only the
+    /// forward pass is smaller) — a default build gets a correct, `B`-class
+    /// dial with `D`'s ranking properties, not the `156`-class speed. The
+    /// 2.54×+ speedup is reachable only in a build compiled with
+    /// `feature-regime-v2` (still gated `#[doc(hidden)]` today — see
+    /// `Zensim::with_engine` / `Zensim::with_unread_feature_skipping`, which
+    /// `Zensim::new(ZensimProfile::D)` sets automatically under that
+    /// feature). MEASURED in
+    /// `benchmarks/profile_d_and_published_speed_2026-09-01.md`.
+    ///
+    /// Full audit, corrections, and reproduction:
+    /// `benchmarks/add156_ship_audit_2026-08-31.md`,
+    /// `benchmarks/era2_fast_profile_subset_2026-08-31.md`, and the mapping
+    /// table in `docs/CODEC_TARGET_METRIC.md`.
+    #[cfg(feature = "candidate-profiles")]
+    D,
     /// **Externally-defined profile** — an escape hatch for profiles
     /// constructed outside this crate (for example the unpublished
     /// `zensim-experimental` crate, which preserves the historical
@@ -316,6 +385,8 @@ impl ZensimProfile {
             Self::C => "zensim-c",
             #[cfg(feature = "candidate-profiles")]
             Self::CHdr => "zensim-c-hdr",
+            #[cfg(feature = "candidate-profiles")]
+            Self::D => "zensim-d",
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
             // Experimental / historical profiles live in `zensim-experimental`
@@ -362,6 +433,8 @@ impl ZensimProfile {
             Self::C => &PROFILE_C,
             #[cfg(feature = "candidate-profiles")]
             Self::CHdr => &PROFILE_C_HDR,
+            #[cfg(feature = "candidate-profiles")]
+            Self::D => &PROFILE_D,
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
             // Experimental / historical profiles carry their own
@@ -1203,6 +1276,50 @@ static PROFILE_C_HDR: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: true,
     mlp_bytes: Some(mlp_bake_chdr_l1t1944),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// `ZensimProfile::D` bake bytes — internal `ADD156`
+/// (`ens-safesyn-only-raw-lasso`, spline-top-extended "arm A",
+/// `d_sdr_add156_dense_dial_2026-08-31.bin`, 3,671 B, sha256
+/// `4481c2d4a7c0d35e82f423587b9bc5ce8a52642375e778e5214af38b799ad504`).
+/// **Landed 2026-09-01** from the audit's registered fix
+/// (`benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md` arm A —
+/// "RANK-EXACT vs baseline on all 14 corpora... Land this."): the ORIGINAL
+/// campaign bake plus ONLY the free spline-top extension that closes the
+/// 100 %-above-knot HF-near-lossless failure; the costly winsor OOD guard
+/// (arms B/C) is deliberately NOT included — see the `D` variant doc for why.
+/// A 372-declared-width dense bake (NOT dead-column-pruned — packing this
+/// bake erases the spline-top fix, so it ships unpacked, exactly like `B`).
+#[cfg(feature = "candidate-profiles")]
+pub(crate) fn mlp_bake_d_add156() -> &'static [u8] {
+    include_bytes!("../weights/d_sdr_add156_dense_dial_2026-08-31.bin")
+}
+
+/// Generation-D fast profile params — the same runtime shape as `B`
+/// (372-declared width, spline-calibrated, negative tail) over the ADD156
+/// bytes. `skip_score_mapping` / `extrapolate_score` both `true`: per audit
+/// finding D9, a spline-carrying bake with either `false` silently scores
+/// every distortion `0.000000` (the legacy distance mapping fights the
+/// bake's own spline) — both are set here, not left to a caller's default.
+#[cfg(feature = "candidate-profiles")]
+static PROFILE_D: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_d_add156),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
     extended_features: true,
@@ -2165,5 +2282,115 @@ mod profile_c_tests {
             s_dist < s_iden,
             "distorted must score below identical ({s_dist} !< {s_iden})"
         );
+    }
+
+    // --- ZensimProfile::D ---
+
+    /// The shipped `D` weight file is pinned by sha256 — a silent byte
+    /// swap of `d_sdr_add156_dense_dial_2026-08-31.bin` fails this test
+    /// loudly. Expected digest = the committed ADD156 "arm A" bytes
+    /// (spline-top-extended, rank-exact vs the campaign baseline; see
+    /// `benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md`).
+    #[test]
+    fn d_weight_sha256_pinned() {
+        use sha2::{Digest, Sha256};
+        let bytes = mlp_bake_d_add156();
+        assert_eq!(bytes.len(), 3_671, "D weight byte length changed");
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let digest = hasher.finalize();
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex, "4481c2d4a7c0d35e82f423587b9bc5ce8a52642375e778e5214af38b799ad504",
+            "D weight bytes do not match the pinned ADD156 arm-A sha256"
+        );
+    }
+
+    /// Unlike `C`/`CHdr`, `D` is DENSE over the standard v1 372-feature
+    /// layout — not dead-column-pruned (packing this bake would erase its
+    /// spline-top fix, see the `D` variant doc), so caller width and
+    /// internal layer-0 width are equal.
+    #[test]
+    fn d_bake_loads_caller_width_372_dense() {
+        let model = crate::mlp::Model::from_bytes(mlp_bake_d_add156())
+            .expect("shipped D bake must parse");
+        assert_eq!(model.caller_input_width(), 372, "caller-facing width");
+        assert_eq!(model.n_inputs(), 372, "D is unpruned: no Drop columns");
+        assert_eq!(model.n_outputs(), 1);
+    }
+
+    /// Identity fixture: byte-identical inputs score exactly 100 through
+    /// the `is_identical` short-circuit (profile-independent contract).
+    #[test]
+    fn d_identity_fixture_scores_100() {
+        let (src, _) = sdr_pair(64, 64);
+        let z = Zensim::new(ZensimProfile::D);
+        let score = z
+            .compute(&RgbSlice::new(&src, 64, 64), &RgbSlice::new(&src, 64, 64))
+            .expect("identity compute")
+            .score();
+        assert!(
+            (score - 100.0).abs() < 1e-9,
+            "identity must score 100, got {score}"
+        );
+    }
+
+    /// **The default-build (W7) proof.** Unlike `C`/`CHdr`, `D`'s bake is
+    /// 372-declared-width, so it fits the STANDARD `Zensim::compute`
+    /// pipeline directly — no `feature-regime-v2`, no folded-944 extraction,
+    /// no special entry point. A non-identical pair scores normally (Ok,
+    /// finite, strictly below the identical-pair score), through the exact
+    /// same default build a plain `cargo add zensim` gets. This is the
+    /// property the whole task exists to ship: `D` reachable with zero
+    /// extra features, not just `bake_verdict`-only like the audit found it.
+    #[test]
+    fn d_compute_on_non_identical_pair_scores_normally() {
+        let (src, dst) = sdr_pair(64, 64);
+        let z = Zensim::new(ZensimProfile::D);
+        let s_iden = z
+            .compute(&RgbSlice::new(&src, 64, 64), &RgbSlice::new(&src, 64, 64))
+            .expect("identical pair")
+            .score();
+        let s_dist = z
+            .compute(&RgbSlice::new(&src, 64, 64), &RgbSlice::new(&dst, 64, 64))
+            .expect("D must score a non-identical pair through the plain 372-wide pipeline")
+            .score();
+        assert!(s_iden.is_finite() && s_dist.is_finite());
+        assert!(
+            s_dist < s_iden,
+            "distorted must score below identical ({s_dist} !< {s_iden})"
+        );
+    }
+
+    /// A short real-ish quality ladder (increasingly distorted copies of the
+    /// same source) must be monotone non-increasing and stay bounded — the
+    /// same shape the ship audit's `profile_api_audit` example checked
+    /// manually, pinned here as a regression gate.
+    #[test]
+    fn d_ladder_is_monotone_and_bounded() {
+        let (src, _) = sdr_pair(96, 96);
+        let z = Zensim::new(ZensimProfile::D);
+        let source = RgbSlice::new(&src, 96, 96);
+        let mut prev = f64::INFINITY;
+        for step in 1..=5 {
+            let mut distorted = src.clone();
+            for (i, px) in distorted.iter_mut().enumerate() {
+                if i % (7 - step.min(6)) == 0 {
+                    px[0] = px[0].saturating_sub((step * 12) as u8);
+                    px[1] = px[1].saturating_sub((step * 8) as u8);
+                }
+            }
+            let score = z
+                .compute(&source, &RgbSlice::new(&distorted, 96, 96))
+                .unwrap_or_else(|e| panic!("step {step}: {e}"))
+                .score();
+            assert!(score.is_finite(), "step {step}: got {score}");
+            assert!(score <= 100.0 + 1e-9, "step {step}: runtime caps at 100, got {score}");
+            assert!(
+                score <= prev + 1e-9,
+                "step {step}: ladder must be monotone non-increasing, got {score} after {prev}"
+            );
+            prev = score;
+        }
     }
 }

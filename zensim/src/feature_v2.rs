@@ -1802,6 +1802,94 @@ impl ComputeSet {
     pub(crate) fn self_blur_eligible(&self) -> bool {
         !self.v2_blocks && self.v1_basic && matches!(self.v1_pools, V1PoolsMode::Full)
     }
+
+    /// Derive the minimal compute set a bake structurally needs, from its own
+    /// declared layer-0 read pattern — item E's shipping form
+    /// (`benchmarks/era2_perf_break_2026-08-31.md` §26,
+    /// `benchmarks/era2_fast_profile_subset_2026-08-31.md` §4-5): read the
+    /// model's own block profile — the same one `zensim-validate`'s
+    /// `bake_block_profile` reports — and switch off any family it reads
+    /// with zero weight, rather than hand-setting a toggle per call site.
+    ///
+    /// `pub(crate)`, per the recorded decision
+    /// (era2_perf_break_2026-08-31.md §26.1 / era2_fast_profile_subset
+    /// §4: "No new public type, no new public entry point"): the cheapest
+    /// shipping form needs no new public surface at all, so this stays
+    /// internal — reached from entry points that already hold a model
+    /// handle (today: [`crate::Zensim::new`]'s per-profile engine defaults
+    /// for [`crate::profile::ZensimProfile::D`]).
+    ///
+    /// A bake whose declared CALLER width fits within the v1 372-feature
+    /// layout (`[0,156) basic · [156,228) peaks · [228,300) masked ·
+    /// [300,372) IW`) cannot read any v2-era block by construction — there
+    /// is no such column for it to read — so `v2_blocks` and every field
+    /// under it come back `false` exactly, with zero risk of
+    /// under-reporting. Within that layout, `v1_pools` is derived the same
+    /// way [`crate::fold_engine::score_pool_mode`] derives it for a single
+    /// bake, via the shared [`crate::fold_engine::bake_pool_need_from_model`]
+    /// and [`crate::fold_engine::pools_mode_for_need`] together — one
+    /// policy, two call sites, never duplicated.
+    ///
+    /// A bake WIDER than the v1 layout (a folded-720/944/append model) is
+    /// not analysed block-by-block here: deriving append/append2/csfw/
+    /// gradient/blockiness read-sets from layer 0 is future work, out of
+    /// scope for the v1-only profiles this function serves today. It gets
+    /// the safe "everything is needed" fallback — the same shape
+    /// [`crate::fold_engine::bake_pool_need_from_model`] uses for a bake it
+    /// cannot analyse ([`V1PoolNeed::ALL`]) — so a caller that hands this
+    /// function a wide model degrades to computing everything rather than
+    /// silently under-computing.
+    ///
+    /// Not yet a runtime call site (see the "smallest fix" trade recorded in
+    /// `era2_fast_profile_subset_2026-08-31.md` §5: [`Self::from_toggles`]'s
+    /// `V1PoolsMode`-only plumbing already reaches `ZensimProfile::D` through
+    /// the tested, CACHED [`crate::fold_engine::score_pool_mode`] path, and
+    /// swapping that for a per-call uncached parse through this function
+    /// would regress the exact hot path this exists to speed up) — exercised
+    /// today by the cross-check tests that gate it against
+    /// `bake_block_profile`'s independently-reported numbers, hence `test`
+    /// rather than a blanket allow.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn from_block_profile(model: &crate::mlp::Model) -> Self {
+        // The v1-layout total: `num_scales * 3 channels *
+        // (extended-per-channel + IW-per-channel)` = 4*3*(25+6) = 372. Named
+        // via the same constants `fold_engine::v1_feature_width` composes,
+        // rather than a bare `372` magic number.
+        let v1_total = crate::NUM_SCALES
+            * 3
+            * (crate::metric::FEATURES_PER_CHANNEL_EXTENDED + crate::metric::FEATURES_PER_CHANNEL_IW);
+        if model.caller_input_width() > v1_total {
+            return Self {
+                v1_basic: true,
+                v1_pools: V1PoolsMode::Full,
+                v2_blocks: true,
+                gradient: true,
+                blockiness: true,
+                transducer_bank: true,
+                transducers_luma_only: false,
+                append: true,
+                append2: true,
+                append2_dst_activity: true,
+                csfw: true,
+                free_extras: V1FreeExtras::Off,
+            };
+        }
+        let need = crate::fold_engine::bake_pool_need_from_model(model);
+        Self {
+            v1_basic: true,
+            v1_pools: crate::fold_engine::pools_mode_for_need(need),
+            v2_blocks: false,
+            gradient: false,
+            blockiness: false,
+            transducer_bank: false,
+            transducers_luma_only: false,
+            append: false,
+            append2: false,
+            append2_dst_activity: false,
+            csfw: false,
+            free_extras: V1FreeExtras::Off,
+        }
+    }
 }
 
 /// Which groups of [`ScratchV2Strip`]'s planes a walk will actually write.
@@ -12821,6 +12909,93 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(checked, 256 * 4);
+    }
+
+    /// **The safety gate `era2_fast_profile_subset_2026-08-31.md` §5 item 2
+    /// asks for**: the derivation must never drop a family the model
+    /// actually reads. Cross-checks [`ComputeSet::from_block_profile`]
+    /// against the independently-derived, already-tested
+    /// [`crate::fold_engine::score_pool_mode`] on shipped `B` — same bake,
+    /// two derivations, must agree bit-for-bit on `v1_pools`, and `B` must
+    /// resolve to `Full` (it reads the whole pool block, so nothing is safe
+    /// to skip).
+    #[test]
+    fn from_block_profile_matches_score_pool_mode_on_shipped_b() {
+        use crate::profile::ZensimProfile;
+        let params = ZensimProfile::B.params();
+        let bytes: Vec<&'static [u8]> = params.scoring_bake_bytes().collect();
+        assert_eq!(bytes.len(), 1, "B forwards exactly one bake");
+        let model = crate::mlp::Model::from_bytes(bytes[0]).expect("shipped B bake parses");
+        let cs = ComputeSet::from_block_profile(&model);
+        assert_eq!(cs.v1_pools, V1PoolsMode::Full, "B reads the whole pool block");
+        assert!(!cs.v2_blocks, "B's bake is a 372-wide v1-layout bake");
+
+        let config = crate::metric::config_from_params(params, false);
+        let want = crate::fold_engine::score_pool_mode(params, &config, true);
+        assert_eq!(
+            cs.v1_pools, want,
+            "from_block_profile disagrees with the tested score_pool_mode path"
+        );
+    }
+
+    /// The same cross-check on a model this function DECLINES to analyse
+    /// block-by-block (wider than the v1 372-feature layout): it must return
+    /// the safe "everything needed" answer, never an optimistic under-report.
+    /// `C` (944-wide) is used only as a wide fixture; its OWN pool need is a
+    /// separate, already-gated question (`bake_pool_need_matches_the_block_profile_tool_on_shipped_b`-style
+    /// coverage for 944 bakes lives in the block-profile tooling, not here).
+    #[cfg(feature = "candidate-profiles")]
+    #[test]
+    fn from_block_profile_falls_back_to_everything_on_a_wide_bake() {
+        use crate::profile::ZensimProfile;
+        let params = ZensimProfile::C.params();
+        let bytes: Vec<&'static [u8]> = params.scoring_bake_bytes().collect();
+        assert_eq!(bytes.len(), 1, "C forwards exactly one bake");
+        let model = crate::mlp::Model::from_bytes(bytes[0]).expect("shipped C bake parses");
+        assert!(
+            model.caller_input_width() > 372,
+            "fixture must actually be wider than the v1 layout to exercise the fallback"
+        );
+        let cs = ComputeSet::from_block_profile(&model);
+        assert!(cs.v2_blocks, "a wide, unanalysed bake must fall back to computing everything");
+        assert_eq!(cs.v1_pools, V1PoolsMode::Full);
+        assert!(cs.append && cs.append2 && cs.gradient && cs.blockiness && cs.csfw);
+    }
+
+    /// **Profile D's whole reason to exist.** `ADD156` reads only `f0..156`
+    /// (28 of 156 basic lines; 0 of 216 pool lines — `bake_block_profile`,
+    /// `benchmarks/add156_ship_audit_2026-08-31.md` §1.5), so the derived
+    /// compute set must resolve to the cheap `Peaks` mode (never the
+    /// mathematically-tempting but footprint-inferior `Off` — see
+    /// [`crate::fold_engine::pools_mode_for_need`]) and must NOT claim any
+    /// v2-era block.
+    #[cfg(feature = "candidate-profiles")]
+    #[test]
+    fn from_block_profile_derives_the_156_set_for_profile_d() {
+        use crate::profile::ZensimProfile;
+        let params = ZensimProfile::D.params();
+        let bytes: Vec<&'static [u8]> = params.scoring_bake_bytes().collect();
+        assert_eq!(bytes.len(), 1, "D forwards exactly one bake");
+        let model = crate::mlp::Model::from_bytes(bytes[0]).expect("shipped D bake parses");
+        assert_eq!(
+            model.caller_input_width(),
+            372,
+            "ADD156 is dense over the v1 372-layout width, not pruned"
+        );
+        let cs = ComputeSet::from_block_profile(&model);
+        assert_eq!(
+            cs.v1_pools,
+            V1PoolsMode::Peaks,
+            "ADD156 reads 0 of 216 pool lines, so masked+IW must be skippable, \
+             and Peaks (not Off) is the correct minimal answer"
+        );
+        assert!(!cs.v2_blocks && !cs.append && !cs.append2 && !cs.gradient && !cs.csfw);
+
+        // Cross-checked against the tested score_pool_mode path too, exactly
+        // as the B gate above does — one policy, proven to agree twice.
+        let config = crate::metric::config_from_params(params, false);
+        let want = crate::fold_engine::score_pool_mode(params, &config, true);
+        assert_eq!(cs.v1_pools, want);
     }
 
     /// The trap that motivates [`super::era2_reduce8`]: `reduce_add()` is

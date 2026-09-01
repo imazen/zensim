@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Added — `ZensimProfile::D`, the fast SDR profile (additive, not yet released) (2026-09-01)
+
+- **New public API surface** (queued for the next 0.3.x / minor release, not
+  published here): `ZensimProfile::D` — a new unit variant on the
+  `#[non_exhaustive]` enum, gated behind the existing default-on
+  `candidate-profiles` feature (same gate as `C`/`CHdr`). Purely additive:
+  no existing variant, method, or field changed shape. `#[non_exhaustive]`
+  means adding a variant is not a breaking change.
+- Carries the ADD156 bake (`weights/d_sdr_add156_dense_dial_2026-08-31.bin`,
+  3,671 B, spline-top-extended "arm A" — rank-exact vs the campaign baseline,
+  fixes the 100 %-above-knot HF-near-lossless failure for free; the costly
+  winsor OOD-guard trade is deliberately NOT included, per
+  `benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md`). Ships UNPACKED —
+  packing this bake erases the spline-top fix.
+- **Internal-only** (no new public type): `ComputeSet::from_block_profile`
+  (`feature_v2.rs`, `pub(crate)`) derives the minimal v1 compute set a bake
+  structurally needs from its own layer-0 read pattern, per the recorded
+  "no new public type" decision in `benchmarks/era2_perf_break_2026-08-31.md`
+  §26.1 and `benchmarks/era2_fast_profile_subset_2026-08-31.md` §4.
+  `Zensim::new(ZensimProfile::D)` opts itself into the existing (already
+  `feature-regime-v2`-gated, `#[doc(hidden)]`) fast fold + pool-skip engine
+  by default — every other profile is unaffected and keeps defaulting to
+  the buffered walk.
+- **Default-build consequence, measured, not assumed**: without
+  `feature-regime-v2`, `D` scores correctly via the ordinary buffered walk
+  at `B`-class cost (reachable by a plain `cargo add zensim` — closes the
+  audit's D1/W7 gap); the measured `156`-class speedup requires
+  `feature-regime-v2` compiled in. Full numbers:
+  `benchmarks/profile_d_and_published_speed_2026-09-01.md`.
+- Gates: buffered vs fold vs skip-on/off score bit-identity
+  (`fold_engine::skip_policy_tests::profile_d_scores_are_engine_and_skip_invariant`),
+  identity/ladder/dense-region correctness in a genuine default build
+  (`profile::profile_c_tests::d_*`), and a cross-check of
+  `from_block_profile`'s derivation against the independently-tested
+  `fold_engine::score_pool_mode` path on shipped `B` and `D`.
+
 ### Recovered — the 130 AIC-3 `IPTC_*` stimuli were never missing, and the native pairwise axis is 6x larger (2026-09-01)
 
 - **APPENDIX A of `benchmarks/hfhuman_2026-09-01.md`.** §2.7 called the 130
