@@ -4947,3 +4947,46 @@ gate — it caught a real crash pre-ship); gates PASS (974 badges, 29 tables). B
 rule). Not measured, stated: per-ref-by-name on rank corpora (zenstats returns aggregates; the
 interned-id fix is a sibling-repo item), KonJND has no per-ref statistic, G-RANGE/G-RD/G-TARGET are
 other tools' rows.
+
+## 2026-09-01 ~00:3xZ — ROUND 38: ★ THE SSIM2-REPLACEMENT BAR — defined, measured, and the honest per-axis verdict (4 commits; doc `benchmarks/ssim2_replacement_bar_2026-08-31.md`, 1,121 lines)
+
+**Has real progress been made toward "the new ssim2"? Per axis:**
+
+| axis | verdict | the numbers |
+|---|---|---|
+| **SPEED** | **WON, 1.2–7× — and it had NEVER been measured** | fast-ssim2 **21.7 ms** @576²/1T vs the 944 walk **18.3** (1.19×) and the 372 fold **9.4** (2.31×); public API end-to-end ~1.95× @1T, **5.9–9.9× @8T** |
+| **RANK** | **statistical TIE at the top** (progress on July's clear-#2, not a win) | CID22: ssim2 **0.8894**, W10L9PH **0.8927** (+0.0032, CI [−0.007, +0.013]; reference-clustered CI ±0.010) |
+| **DIAL** | **944 class WINS; the shipped default LOSES** | ssim2 mono 0.9930 / 14 % NL-ladder inversions / 0 % backwards; W10L9P **0.9947 / 6 % / 0 %**; shipped B **0.9792 / 17 % / 2 %** |
+| **HDR** | **shipped BHdr WINS; the frozen candidate loses to BOTH** | BHdr **0.7536** > ssim2-PU **0.7044** > HDR944_L1T1 **0.6664** (UPIQ, n=380 human JOD) |
+
+**The user's worry is PARTLY TRUE and precisely locatable**: the 944 class ties the opponent on the
+gold holdout and beats it on the dial, and the whole crate is faster — but **the shipped default B
+is measurably WORSE than ssim2 within-image on CID22 (−0.0079, CI excludes 0) and on the dial. No
+gate could have said so, because until today `bake_verdict` refused to run on a reference metric
+and NO gate in the stack contained the opponent at all.** **Nobody passes the exam (W1–W7).**
+Closest: `W10L9PH_s4004_packed` — fails W1 on KonJND (−0.027), and W2 partly because the
+near-lossless HUMAN axis is **NOT MEASURED (not failed) for every 944 model**.
+
+**Premise ledger, top rows (the 944 story corrected at the source):** the literal "only slightly
+slower than 156" sentence does not exist — the real claim was **"≤3–4 % … the v1 block is NOT where
+the time goes"**, built on a table that compared a FOLDED 944 walk against a BUFFERED 372 walk
+(different engines). Truth: v2-348+append is **+76–101 % @1T, +114–152 % @8–16T**. Dollar/hour cost
+of the wrong premise: **not recoverable — stated, never estimated.** Also corrected: "dense is
+22–26 %" (13.5 % of the block / 7.3 % of the walk; callgrind profiled a tier we don't ship); "3.5×
+is the machine's bound" (the fold's own footprint); the 2026-05-20 "bit-equivalent" audit sampled
+only f0..f99 — the one block that didn't drift — so **B was fit on pre-fix features and serves
+post-fix ones**; and **the orchestrator's own "ssim2 has no HDR" claim is FALSE** (fast-ssim2 has a
+PU path — caught by reading the code). **Balanced by what 944 BOUGHT**: the only class at-or-above
+ssim2 across human corpora AND the only one beating it on the dial; the lift is mostly the DATA
+(E-M6b), durable at any width.
+
+**Sharpest instrument finding:** `peer_ssim2` holds the **HIGHEST `balanced_composite` on the board
+(0.8979, above every model) while ranking LAST at 4/8 floors** — the first by arithmetic (nonphoto,
+whose target IS ssim2, at weight 0.30), the second because four floors were structurally
+unmeasurable for a peer (two now measurable; ssim2 passes both → 6/8). The board's stored CID22
+`srocc_ci` is a pair bootstrap and **understates reference-clustered uncertainty ~2×**.
+**Instruments landed** (extensions of owners, both gated): `bake_verdict --dial-peer-scores` (the
+dial panel on a reference metric — reproduces a bake's own dial section line-for-line from dumped
+cells) and `panel --per-group` (canonical per-group SROCC, parity-exact vs `per_ref_mean`); plus
+the fast-ssim2 speed bar. **Seven proposed instrument changes in §4.5 — proposed, not implemented;
+adoption of the exam as THE bar is the user's call.**
