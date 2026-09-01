@@ -1593,6 +1593,46 @@ pub enum V1FreeExtras {
     /// there. So a full 944 walk is unaffected whatever this is set to.
     RawMoments,
 }
+
+/// Indices of the 40 FREE slots ([`V1FreeExtras::RawMoments`]) in the 944
+/// layout, for an `n_scales`-scale pyramid: the three `GLOBAL_*` append
+/// slots per (scale, channel) plus append2's per-scale `LUMA_MEAN_REF`. The
+/// `APPEND_SKIP_B_SCALE0` cell is excluded — the 944 walk never computes
+/// that append cell, so its slots are structural zeros on BOTH sides and
+/// including them would make a parity gate weaker, not stronger.
+///
+/// Promoted from a test-only helper (`free_slot_indices`, formerly
+/// `#[cfg(feature = "training")]` inside `mod tests`) so
+/// [`ComputeSet::from_block_profile`] can reuse the SAME derivation a wide
+/// bake's free-extras eligibility is checked against, rather than a second
+/// hand-maintained copy of this arithmetic (`fold_engine::wide_bake_v2_read`
+/// calls this via `crate::feature_v2::free_slot_indices`). The gate tests in
+/// `mod tests` (`free_extras_*`) call this exact function — no shadow copy.
+pub(crate) fn free_slot_indices(n_scales: usize) -> Vec<usize> {
+    // v1 (31/ch/scale) ++ v2 (29) ++ append (17) ++ append2 (5/scale).
+    let append0 = n_scales * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL);
+    let append2_0 = append0 + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
+    let mut v = Vec::new();
+    for scale in 0..n_scales {
+        for ch in 0..3 {
+            if !append_cell_active(true, ch, scale) {
+                continue;
+            }
+            let base = append0
+                + scale * 3 * FEATURES_PER_CHANNEL_APPEND
+                + ch * FEATURES_PER_CHANNEL_APPEND;
+            for local in [
+                idx_append::GLOBAL_DMEAN,
+                idx_append::GLOBAL_CGAIN,
+                idx_append::GLOBAL_CLOSS,
+            ] {
+                v.push(base + local);
+            }
+        }
+        v.push(append2_0 + scale * APPEND2_PER_SCALE + idx_append2::LUMA_MEAN_REF);
+    }
+    v
+}
 impl Default for V2NewFeatureToggles {
     fn default() -> Self {
         Self {
@@ -1831,14 +1871,24 @@ impl ComputeSet {
     /// policy, two call sites, never duplicated.
     ///
     /// A bake WIDER than the v1 layout (a folded-720/944/append model) is
-    /// not analysed block-by-block here: deriving append/append2/csfw/
-    /// gradient/blockiness read-sets from layer 0 is future work, out of
-    /// scope for the v1-only profiles this function serves today. It gets
-    /// the safe "everything is needed" fallback — the same shape
+    /// checked against exactly ONE more thing before falling back:
+    /// [`crate::fold_engine::wide_bake_v2_read`] — does it read anything
+    /// beyond `v1_total` that ISN'T one of the 40
+    /// [`V1FreeExtras::RawMoments`] slots (`GLOBAL_*`/`LUMA_MEAN_REF`) a
+    /// v1-only walk can finalize for free? A 944-wide `--keep-features`
+    /// bake whose live columns sit entirely inside basic+peaks+the free 40
+    /// (the free-set training arms, `benchmarks/free_features_2026-09-01.md`)
+    /// gets the CHEAP set here — `v2_blocks` false, `free_extras` set only
+    /// if it actually reads one of the 40. Anything that reads genuine
+    /// v2-348/append/append2/csfw content gets the safe "everything is
+    /// needed" fallback — the same shape
     /// [`crate::fold_engine::bake_pool_need_from_model`] uses for a bake it
     /// cannot analyse ([`V1PoolNeed::ALL`]) — so a caller that hands this
-    /// function a wide model degrades to computing everything rather than
-    /// silently under-computing.
+    /// function a wide model with real v2-era reads degrades to computing
+    /// everything rather than silently under-computing. Before this check
+    /// existed, EVERY wide bake — including the free-set arms this fallback
+    /// was named for — took this path, which was correct but paid the full
+    /// 944 walk for a bake reading 40 or fewer of its 572 non-v1 columns.
     ///
     /// Not yet a runtime call site (see the "smallest fix" trade recorded in
     /// `era2_fast_profile_subset_2026-08-31.md` §5: [`Self::from_toggles`]'s
@@ -1858,36 +1908,61 @@ impl ComputeSet {
         let v1_total = crate::NUM_SCALES
             * 3
             * (crate::metric::FEATURES_PER_CHANNEL_EXTENDED + crate::metric::FEATURES_PER_CHANNEL_IW);
-        if model.caller_input_width() > v1_total {
+        let everything = Self {
+            v1_basic: true,
+            v1_pools: V1PoolsMode::Full,
+            v2_blocks: true,
+            gradient: true,
+            blockiness: true,
+            transducer_bank: true,
+            transducers_luma_only: false,
+            append: true,
+            append2: true,
+            append2_dst_activity: true,
+            csfw: true,
+            free_extras: V1FreeExtras::Off,
+        };
+        // v1_pools is independent of the wide/narrow question below — a
+        // wide bake's [156,372) reads are checked the SAME way a narrow
+        // bake's are, via the same shared, tested derivation.
+        let need = crate::fold_engine::bake_pool_need_from_model(model);
+        let v1_pools = crate::fold_engine::pools_mode_for_need(need);
+        if model.caller_input_width() <= v1_total {
             return Self {
                 v1_basic: true,
-                v1_pools: V1PoolsMode::Full,
-                v2_blocks: true,
-                gradient: true,
-                blockiness: true,
-                transducer_bank: true,
+                v1_pools,
+                v2_blocks: false,
+                gradient: false,
+                blockiness: false,
+                transducer_bank: false,
                 transducers_luma_only: false,
-                append: true,
-                append2: true,
-                append2_dst_activity: true,
-                csfw: true,
+                append: false,
+                append2: false,
+                append2_dst_activity: false,
+                csfw: false,
                 free_extras: V1FreeExtras::Off,
             };
         }
-        let need = crate::fold_engine::bake_pool_need_from_model(model);
-        Self {
-            v1_basic: true,
-            v1_pools: crate::fold_engine::pools_mode_for_need(need),
-            v2_blocks: false,
-            gradient: false,
-            blockiness: false,
-            transducer_bank: false,
-            transducers_luma_only: false,
-            append: false,
-            append2: false,
-            append2_dst_activity: false,
-            csfw: false,
-            free_extras: V1FreeExtras::Off,
+        match crate::fold_engine::wide_bake_v2_read(model, v1_total) {
+            None => everything,
+            Some(reads_free) => Self {
+                v1_basic: true,
+                v1_pools,
+                v2_blocks: false,
+                gradient: false,
+                blockiness: false,
+                transducer_bank: false,
+                transducers_luma_only: false,
+                append: false,
+                append2: false,
+                append2_dst_activity: false,
+                csfw: false,
+                free_extras: if reads_free {
+                    V1FreeExtras::RawMoments
+                } else {
+                    V1FreeExtras::Off
+                },
+            },
         }
     }
 }
@@ -12998,6 +13073,243 @@ pub(crate) mod tests {
         assert_eq!(cs.v1_pools, want);
     }
 
+    /// Minimal synthetic 944-wide (`Folded720Append2`), 1-layer, identity,
+    /// f32 ZNPR v3 bake — built through the MANDATED JSON pipeline
+    /// (`zenpredict_bake::bake_from_json_str`, CLAUDE.md "JSON pipeline
+    /// mandate for ZNPR v3 bakes"), never hand-rolled wire bytes. `nonzero`
+    /// names the input indices carrying a live (1.0) weight; every other
+    /// input's weight is exactly 0.0. This is the synthetic stand-in for
+    /// the real A3b/A4b/K-class campaign bakes
+    /// (`/mnt/v/output/zensim/wave-r4-2026-09-01/bakes/A4b_156_s4004.bin`,
+    /// 509 KB — too large to commit and not CI-portable) that motivated
+    /// this fix: this task independently re-verified the real A4b bake
+    /// gets the cheap set through this same code path before committing
+    /// (ad hoc, not part of the suite, since the file can't ship with it).
+    fn wide_free_set_bake_bytes(nonzero: &[usize]) -> Vec<u8> {
+        const N: usize = 944;
+        let mut weights = vec![0.0f32; N];
+        for &i in nonzero {
+            assert!(i < N, "index {i} out of range");
+            weights[i] = 1.0;
+        }
+        let arr = |v: &[f32]| -> String {
+            let mut s = String::from("[");
+            for (k, x) in v.iter().enumerate() {
+                if k > 0 {
+                    s.push(',');
+                }
+                s.push_str(&x.to_string());
+            }
+            s.push(']');
+            s
+        };
+        let json = format!(
+            r#"{{
+                "schema_hash": 1,
+                "scaler_mean": {mean},
+                "scaler_scale": {scale},
+                "layers": [
+                    {{
+                        "in_dim": {n},
+                        "out_dim": 1,
+                        "activation": "identity",
+                        "dtype": "f32",
+                        "weights": {weights},
+                        "biases": [0.0]
+                    }}
+                ]
+            }}"#,
+            n = N,
+            mean = arr(&vec![0.0f32; N]),
+            scale = arr(&vec![1.0f32; N]),
+            weights = arr(&weights),
+        );
+        zenpredict_bake::bake_from_json_str(&json).expect("synthetic wide bake must build")
+    }
+
+    /// **The A4b-class gap this fix closes.** A 944-wide bake whose only
+    /// live columns are inside basic + peaks + two of the 40 FREE
+    /// raw-moments slots (one `GLOBAL_DMEAN`-family slot, one
+    /// `LUMA_MEAN_REF`) must get the CHEAP compute set — `v2_blocks`
+    /// false, `free_extras: RawMoments` — not the "everything" fallback a
+    /// bare `caller_input_width() > 372` check would give it.
+    #[test]
+    fn from_block_profile_gives_a4b_class_free_set_bakes_the_cheap_set() {
+        let free = free_slot_indices(crate::NUM_SCALES);
+        assert!(free.len() >= 2, "need at least two free slots to pick from");
+        let nonzero = [5usize, 200, free[0], free[10.min(free.len() - 1)]];
+        let bytes = wide_free_set_bake_bytes(&nonzero);
+        let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
+        assert_eq!(model.caller_input_width(), 944);
+
+        let cs = ComputeSet::from_block_profile(&model);
+        assert!(
+            !cs.v2_blocks && !cs.gradient && !cs.blockiness && !cs.transducer_bank
+                && !cs.append && !cs.append2 && !cs.csfw,
+            "a bake reading only basic+peaks+free slots must get the cheap set, got {cs:?}"
+        );
+        assert_eq!(
+            cs.free_extras,
+            V1FreeExtras::RawMoments,
+            "the bake DOES read free-extras positions, so free_extras must be requested"
+        );
+        assert_eq!(cs.v1_pools, V1PoolsMode::Peaks, "reads peaks (idx 200), not masked/IW");
+    }
+
+    /// The same free-set shape, but with NO live weight in the free slots
+    /// at all (basic+peaks only, width still 944) — `free_extras` must
+    /// come back `Off`: requesting `RawMoments` for a bake that never
+    /// reads it would cost cycles for nothing.
+    #[test]
+    fn from_block_profile_leaves_free_extras_off_when_unread() {
+        let bytes = wide_free_set_bake_bytes(&[5, 200]);
+        let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
+        let cs = ComputeSet::from_block_profile(&model);
+        assert!(!cs.v2_blocks);
+        assert_eq!(cs.free_extras, V1FreeExtras::Off);
+    }
+
+    /// A bake that reads even ONE non-free column at or beyond f372 (here:
+    /// `idx_append::XMASK_TRANSDUCER`, f720 — inside the append block but
+    /// NOT one of the 40 free slots) must fall all the way back to
+    /// "everything" — the safety property item 2 of
+    /// `era2_fast_profile_subset_2026-08-31.md` §5 asks for: the cheap-set
+    /// carve-out must never fire on a bake it can't fully account for.
+    #[test]
+    fn from_block_profile_falls_back_on_a_non_free_append_read() {
+        let free = free_slot_indices(crate::NUM_SCALES);
+        let non_free_append = 720 + idx_append::XMASK_TRANSDUCER; // = 720
+        assert!(
+            !free.contains(&non_free_append),
+            "fixture picked a position that IS free — fixture bug, not a product bug"
+        );
+        let bytes = wide_free_set_bake_bytes(&[5, 200, non_free_append]);
+        let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
+        let cs = ComputeSet::from_block_profile(&model);
+        assert!(
+            cs.v2_blocks && cs.append && cs.append2 && cs.gradient && cs.blockiness
+                && cs.transducer_bank && cs.csfw,
+            "a non-free append read must trigger the full fallback, got {cs:?}"
+        );
+    }
+
+    /// Same, for a genuine v2-348 read (f372..720 — gradient/blockiness/
+    /// transducer territory, no free slots live there at all).
+    #[test]
+    fn from_block_profile_falls_back_on_a_v2_348_read() {
+        let bytes = wide_free_set_bake_bytes(&[5, 200, 400]);
+        let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
+        let cs = ComputeSet::from_block_profile(&model);
+        assert!(cs.v2_blocks, "a v2-348 read must trigger the full fallback");
+    }
+
+    /// **Bit-identical scores, cheap set vs everything, on the free-set
+    /// fixture** — this is pure compute-skipping (the coordinator's
+    /// gate): the two compute sets must produce the SAME score whenever
+    /// both are asked to score the same pair, because the skipped slots
+    /// are provably unread by this model. Drives the fold walk directly
+    /// (`compute_folded_v1_372_streaming_impl`-style, at 944 width) via
+    /// `V2NewFeatureToggles` built from each `ComputeSet` by hand, since
+    /// `ComputeSet` itself has no public "run me" entry point yet.
+    #[test]
+    fn from_block_profile_cheap_set_is_score_neutral_for_a4b_class_bakes() {
+        use crate::source::RgbSlice;
+        let free = free_slot_indices(crate::NUM_SCALES);
+        let nonzero = [5usize, 200, free[0], free[10.min(free.len() - 1)]];
+        let bytes = wide_free_set_bake_bytes(&nonzero);
+        let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
+        let cs_cheap = ComputeSet::from_block_profile(&model);
+        assert!(!cs_cheap.v2_blocks, "fixture must actually resolve to the cheap set");
+
+        let src = tests::textured_image(96, 64, 13);
+        let dst = tests::quantize_distort(&src, 96, 64);
+        let (sref, dref) = (RgbSlice::new(&src, 96, 64), RgbSlice::new(&dst, 96, 64));
+        let mut scratch = V2Scratch::new();
+
+        let toggles_everything = V2NewFeatureToggles {
+            v1_pools: V1PoolsMode::Full,
+            append_block: true,
+            append2_block: true,
+            free_extras: V1FreeExtras::Off,
+            ..V2NewFeatureToggles::default()
+        };
+        // `append_block`/`append2_block` control the OUTPUT LAYOUT
+        // (`layout_append`/`layout_append2` in `foldapp_streaming_walk`),
+        // independently of `v1_only` gating the actual append/append2
+        // COMPUTE off (`ComputeSet.append`/`.append2`, which is what makes
+        // this walk cheap) — both must stay on so the free-extras values
+        // have their normal 944-wide homes to land in and the two vectors
+        // stay directly comparable index-for-index.
+        let toggles_cheap = V2NewFeatureToggles {
+            v1_pools: cs_cheap.v1_pools,
+            v1_only: true,
+            append_block: true,
+            append2_block: true,
+            free_extras: cs_cheap.free_extras,
+            ..V2NewFeatureToggles::default()
+        };
+        let full = foldapp_streaming_walk(
+            &sref,
+            &dref,
+            false,
+            toggles_everything,
+            crate::feature_v2_stream::FrontEnd::Sdr,
+            &mut scratch,
+            FoldWalkExtras::default(),
+        )
+        .into_features();
+        let cheap = foldapp_streaming_walk(
+            &sref,
+            &dref,
+            false,
+            toggles_cheap,
+            crate::feature_v2_stream::FrontEnd::Sdr,
+            &mut scratch,
+            FoldWalkExtras::default(),
+        )
+        .into_features();
+        assert_eq!(full.len(), cheap.len());
+        // Basic+peaks slots (pure v1, no raw-moments involved) must be
+        // BIT-identical -- the cheap walk's v1 fold and the full walk's v1
+        // fold are the same code, nothing about free-extras touches them.
+        for &i in &[5usize, 200] {
+            assert_eq!(
+                full[i].to_bits(),
+                cheap[i].to_bits(),
+                "slot {i} (basic/peaks, unrelated to free-extras) moved between full and cheap"
+            );
+        }
+        // The free-extras slots themselves are NOT required to be
+        // bit-identical: `free_extras_match_the_944_append_block` (this
+        // same test module) already establishes and bounds the summation-
+        // order tolerance between the v1-only fused-kernel accumulation and
+        // the dedicated append kernel's -- 2e-5, `benchmarks/
+        // free_features_2026-09-01.md`. Reused here, not re-derived.
+        const FREE_TOL: f64 = 2e-5;
+        for &i in &nonzero {
+            if i == 5 || i == 200 {
+                continue; // already checked above as a bit-exact slot
+            }
+            let d = (full[i] - cheap[i]).abs();
+            assert!(
+                d <= FREE_TOL,
+                "slot {i} (a LIVE free-extras weight): full={:e} cheap={:e} |Δ|={d:e} > {FREE_TOL:e}",
+                full[i],
+                cheap[i]
+            );
+        }
+        // And the SCORE this model would produce -- dot(features, weights)
+        // over exactly the live positions -- must therefore also agree
+        // well within the model's own tolerance for this class of bake.
+        let score = |f: &[f64]| -> f64 { nonzero.iter().map(|&i| f[i]).sum() };
+        assert!(
+            (score(&full) - score(&cheap)).abs() <= FREE_TOL * nonzero.len() as f64,
+            "full={:e} cheap={:e}",
+            score(&full),
+            score(&cheap)
+        );
+    }
+
     /// The trap that motivates [`super::era2_reduce8`]: `reduce_add()` is
     /// TIER-DEPENDENT (§14.2), so it can never be part of era-2's semantics.
     ///
@@ -13962,38 +14274,6 @@ pub(crate) mod tests {
     }
 
 
-    /// Indices of the 40 FREE slots ([`V1FreeExtras::RawMoments`]) in the
-    /// 944 layout, for a 4-scale pyramid: the three `GLOBAL_*` append slots
-    /// per (scale, channel) plus append2's per-scale `LUMA_MEAN_REF`. The
-    /// `APPEND_SKIP_B_SCALE0` cell is excluded — the 944 walk never computes
-    /// that append cell, so its slots are structural zeros on BOTH sides and
-    /// including them would make the parity gate weaker, not stronger.
-    #[cfg(feature = "training")]
-    fn free_slot_indices(n_scales: usize) -> Vec<usize> {
-        // v1 (31/ch/scale) ++ v2 (29) ++ append (17) ++ append2 (5/scale).
-        let append0 = n_scales * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL);
-        let append2_0 = append0 + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
-        let mut v = Vec::new();
-        for scale in 0..n_scales {
-            for ch in 0..3 {
-                if !super::append_cell_active(true, ch, scale) {
-                    continue;
-                }
-                let base = append0
-                    + scale * 3 * FEATURES_PER_CHANNEL_APPEND
-                    + ch * FEATURES_PER_CHANNEL_APPEND;
-                for local in [
-                    idx_append::GLOBAL_DMEAN,
-                    idx_append::GLOBAL_CGAIN,
-                    idx_append::GLOBAL_CLOSS,
-                ] {
-                    v.push(base + local);
-                }
-            }
-            v.push(append2_0 + scale * APPEND2_PER_SCALE + idx_append2::LUMA_MEAN_REF);
-        }
-        v
-    }
 
     /// **FREE-EXTRAS GATE 1 — the free set is pure ADDITION.**
     ///

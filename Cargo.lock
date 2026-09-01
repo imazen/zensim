@@ -5830,6 +5830,7 @@ dependencies = [
  "zenpixels",
  "zenpng",
  "zenpredict",
+ "zenpredict-bake",
  "zenresize",
 ]
 

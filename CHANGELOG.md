@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Fixed — `ComputeSet::from_block_profile` no longer over-falls-back on wide free-set bakes (additive, internal-only) (2026-09-01)
+
+- **No public API change.** `feature_v2::free_slot_indices` (promoted from a
+  `#[cfg(feature = "training")] mod tests`-only helper) and
+  `fold_engine::wide_bake_v2_read` (new) are both `pub(crate)`.
+- **The gap**: `ComputeSet::from_block_profile` fell back to "compute
+  everything" for ANY bake with `caller_input_width() > 372`, regardless of
+  which columns it actually read. Every free-set arm (`A3b`/`A4b`/`K1-K4`,
+  trained with `--keep-features` over 944 slots) is a 944-wide caller whose
+  live columns sit entirely inside basic + peaks + the 40
+  `V1FreeExtras::RawMoments` slots — so `ZensimProfile::D` scored them
+  correctly but silently paid the full 944 walk, defeating the fast path
+  for exactly the candidates about to need it.
+- **The fix**: a wide bake's live columns at or beyond the v1 372-layout are
+  now checked against the known 40 free-extras positions
+  (`fold_engine::wide_bake_v2_read`, reusing `caller_col_spans` and the same
+  per-column weight-liveness check `bake_pool_need_from_model` already
+  uses — no new column-reading logic). All-free (or none) → the cheap set,
+  with `free_extras` requested only when actually read. Any live column
+  outside that 40-position set (genuine v2-348/append/append2/csfw content)
+  → unchanged "everything" fallback, never a silent under-computation.
+- Verified against the real `A4b_156_s4004.bin` campaign bake (944-wide,
+  ad hoc — the 509 KB file can't ship in the crate or CI) and against
+  synthetic fixtures built through the mandated JSON pipeline
+  (`zenpredict_bake::bake_from_json_str`, new dev-dependency): cheap set on
+  an all-free-or-basic-or-peaks bake, "everything" fallback the instant any
+  non-free append column or any v2-348 column is live, and score neutrality
+  (feature slots exact where free-extras isn't involved, within the
+  established 2e-5 free-extras tolerance where it is) between the cheap and
+  full walks on the same fixture.
+
 ### Added — `ZensimProfile::D`, the fast SDR profile (additive, not yet released) (2026-09-01)
 
 - **New public API surface** (queued for the next 0.3.x / minor release, not

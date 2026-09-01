@@ -329,6 +329,71 @@ pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed
     }
 }
 
+/// For a bake WIDER than the v1 372-layout: does it read anything beyond
+/// `v1_total` that a cheap v1-only(+free-extras) walk cannot serve?
+///
+/// Checks every caller line from `v1_total` up to the bake's declared width
+/// against [`crate::feature_v2::free_slot_indices`] (the 40
+/// `V1FreeExtras::RawMoments` positions a v1-only walk can finalize for
+/// free — three `GLOBAL_*` append slots per live (scale, channel) plus
+/// append2's per-scale `LUMA_MEAN_REF`, none of which need the expensive
+/// v2-348/append/append2/csfw compute passes). `None` when the bake can't
+/// be tiled (unanalyzable — same safe-fallback contract as
+/// [`bake_pool_need_from_model`]'s `V1PoolNeed::ALL`) OR when it reads ANY
+/// live column beyond `v1_total` that is NOT in the free set — either way
+/// the caller must fall back to computing everything. `Some(reads_free)`
+/// when every live column beyond `v1_total` sits inside the free set (or
+/// there are none): cheap-set-eligible, and `reads_free` says whether
+/// [`crate::feature_v2::V1FreeExtras::RawMoments`] should be requested.
+///
+/// This is what closes the gap `benchmarks/free_features_2026-09-01.md`-
+/// class bakes (944-wide, `--keep-features` trained, live columns entirely
+/// inside basic+peaks+the free 40) fell into: before this function existed,
+/// [`crate::feature_v2::ComputeSet::from_block_profile`] saw `caller_input_
+/// width() > 372` and unconditionally fell back to "compute everything" —
+/// correct, but silently paying the full 944 walk for a bake that never
+/// reads 904 of its 944 declared inputs.
+pub(crate) fn wide_bake_v2_read(model: &crate::mlp::Model, v1_total: usize) -> Option<bool> {
+    let layer = model.layer(0);
+    let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
+    let spans = caller_col_spans(model, in_dim)?;
+    if spans.len() <= v1_total {
+        // Nothing beyond v1_total to read at all — trivially cheap-eligible,
+        // free_extras unread.
+        return Some(false);
+    }
+    let col_live = |i: usize| -> bool {
+        match &layer.weights {
+            crate::mlp::WeightStorage::F32(w) => {
+                w[i * out_dim..(i + 1) * out_dim].iter().any(|&v| v != 0.0)
+            }
+            crate::mlp::WeightStorage::F16(w) => w[i * out_dim..(i + 1) * out_dim]
+                .iter()
+                .any(|&h| crate::mlp::f16_bits_to_f32(h) != 0.0),
+            crate::mlp::WeightStorage::I8 { weights, scales } => weights
+                [i * out_dim..(i + 1) * out_dim]
+                .iter()
+                .zip(scales.iter())
+                .any(|(&q, &s)| q != 0 && s != 0.0),
+        }
+    };
+    let free: std::collections::HashSet<usize> =
+        crate::feature_v2::free_slot_indices(crate::NUM_SCALES)
+            .into_iter()
+            .collect();
+    let mut reads_free = false;
+    for (pos, &(a, b)) in spans.iter().enumerate().skip(v1_total) {
+        if (a..b).any(&col_live) {
+            if free.contains(&pos) {
+                reads_free = true;
+            } else {
+                return None;
+            }
+        }
+    }
+    Some(reads_free)
+}
+
 /// Layer-0 structural read-set of one bake's BYTES, or [`V1PoolNeed::ALL`]
 /// when the bake cannot be parsed. Parses then delegates to
 /// [`bake_pool_need_from_model`] — see that function for the derivation.

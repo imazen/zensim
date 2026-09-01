@@ -151,6 +151,15 @@ imgref = { workspace = true }
 image = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"
+# Synthetic wide-bake fixtures for `ComputeSet::from_block_profile`'s
+# free-set-vs-genuine-v2-era gate tests (feature_v2.rs) — the mandated JSON
+# pipeline (CLAUDE.md "JSON pipeline mandate for ZNPR v3 bakes"), not a
+# hand-rolled wire-format emitter. Dev-dep only: no effect on the published
+# dependency graph. Real A3b/A4b/K-class campaign bakes are 500 KB+ external
+# artifacts under /mnt/v — too large to commit and not CI-portable, so the
+# committed gate builds a minimal synthetic 944-wide model with the same
+# structural shape instead.
+zenpredict-bake = { workspace = true }
 # Phase-2 (feature-v2b) tooling: decode/resize/re-encode real corpus images
 # through zen* crates instead of the `image` crate, per project convention
 # (image::open/imageops::resize are only kept above for the pre-existing

@@ -456,3 +456,54 @@ source), `benchcompare_default.log` / `benchcompare_rayon4.log`
 (`bench_compare` criterion output, §2.3/§2.4's source). `parse_results.py` /
 `synthesize.py` are the reduction scripts (min-over-starts per
 `(build,threads,size,arm)`, same rule as `scripts/hybrid_speed_read.py`).
+
+---
+
+## Part 3 — follow-up: `from_block_profile` silently over-fell-back on wide free-set bakes
+
+Queued mid-task by the coordinator, landed in this session before wrap-up
+(same commit chain, after Part 2).
+
+**The gap.** `ComputeSet::from_block_profile` (Part 1) fell back to
+"compute everything" for any bake with `caller_input_width() > 372`,
+regardless of which columns it actually read. The A4b-kon lane's free-set
+arms (`A3b`/`A4b`/`K1-K4`, trained with `--keep-features` over 944 slots)
+are exactly that shape: 944-wide callers whose live columns sit entirely
+inside basic + peaks + the 40 `V1FreeExtras::RawMoments` slots. Profile D
+scored them correctly but paid the full 944 walk every time — correctness
+without the speed, for the very candidates about to need it.
+
+**The fix.** `fold_engine::wide_bake_v2_read(model, v1_total)` checks every
+live column at or beyond the v1 layout against
+`feature_v2::free_slot_indices` (promoted from a test-only helper to a
+`pub(crate)` production function — same derivation, one owner, the
+`free_extras_*` gate tests now call the promoted copy instead of a shadow).
+All-free (or none) → the cheap set, `free_extras` requested only when
+actually read. Any live column outside the free-40 → unchanged "everything"
+fallback. **No public API change** — both new/promoted items are
+`pub(crate)`.
+
+**Verification:**
+- 5 new tests in `feature_v2.rs` (`from_block_profile_gives_a4b_class_
+  free_set_bakes_the_cheap_set`, `..._leaves_free_extras_off_when_unread`,
+  `..._falls_back_on_a_non_free_append_read`, `..._falls_back_on_a_v2_348_
+  read`, `..._cheap_set_is_score_neutral_for_a4b_class_bakes`) against
+  synthetic 944-wide fixtures built through the MANDATED JSON pipeline
+  (`zenpredict_bake::bake_from_json_str` — new dev-dependency, no effect on
+  the published dependency graph), not hand-rolled wire bytes.
+- **Independently verified against the real campaign artifact**
+  (`/mnt/v/output/zensim/wave-r4-2026-09-01/bakes/A4b_156_s4004.bin`,
+  944-wide, 509 KB — too large to commit, not CI-portable, so this ran as
+  an ad hoc test that was deleted before committing): `ComputeSet::
+  from_block_profile` returns `v2_blocks: false, v1_pools: Peaks,
+  free_extras: RawMoments` — the cheap set, exactly as intended.
+- Full suite green: 269/269 (all features), 125/125 (default build),
+  113/113 (`candidate-profiles` off) — same pre-existing blur.rs exclusions
+  as Part 1, still unrelated to this work. Clippy clean on both feature
+  combinations.
+- `from_block_profile_falls_back_to_everything_on_a_wide_bake` (Part 1,
+  shipped `C`, a genuine 944-MLP reading broadly) still passes unchanged —
+  the fix narrows the fallback, it does not weaken it.
+
+CHANGELOG entry: `[Unreleased]` → "Fixed — `ComputeSet::from_block_profile`
+no longer over-falls-back on wide free-set bakes".
