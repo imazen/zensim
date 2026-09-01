@@ -1,4 +1,9 @@
 #!/bin/bash
+# NOTE: the group array is TRAIN_GROUPS, never GROUPS -- $GROUPS is a bash
+# READONLY builtin (the primary group id, 1000 here), so assigning to it silently
+# fails and the trainer receives a bare "1000" ("error: unexpected argument '1000'
+# found"). Hit and fixed 2026-09-01; documented in zensim/CLAUDE.md "Shell
+# scripting gotchas".
 # wave-r4 ARMS A3 / A4 — the 156-compute-set student lane (the wave's CANDIDATE
 # lane; A1 is a teacher, see registration §4.2.1).
 #
@@ -39,7 +44,7 @@ case "$MODE" in
 esac
 OUT="${3:-$OUTDIR/${ARM}_156_s${SEED}.bin}"
 
-GROUPS=(
+TRAIN_GROUPS=(
   --group "safesyn:$V/safesyn_pure.parquet:1.0:0.5:both"
   --group "cid22_train:$R4/ext_cid22_train201.parquet:1.0:2.0:both"
   --group "kadid:$R4/ext_kadid.parquet:0.5:1.0:rank"
@@ -51,8 +56,8 @@ GROUPS=(
   --group "konjnd_bpg_val:$R4/ext_konjnd_bpg_val.parquet:0.0:1.5:both"
   --group "tbig_hf:$V/tbig_hf_pure.parquet:1.0:0.0:both"
 )
-if [ -n "$KADIS" ]; then GROUPS+=( --group "kadis:$KADIS:0.15:1.0:both" ); fi
-for g in "${GROUPS[@]}"; do case "$g" in --group) ;; *) p="${g#*:}"; p="${p%%:*}"; [ -f "$p" ] || { echo "ABORT: missing $p"; exit 1; };; esac; done
+if [ -n "$KADIS" ]; then TRAIN_GROUPS+=( --group "kadis:$KADIS:0.15:1.0:both" ); fi
+for g in "${TRAIN_GROUPS[@]}"; do case "$g" in --group) ;; *) p="${g#*:}"; p="${p%%:*}"; [ -f "$p" ] || { echo "ABORT: missing $p"; exit 1; };; esac; done
 
 # f0..155 transforms only — the append2 guards (731..919) have no input at 156
 TF=(
@@ -80,7 +85,7 @@ TF=(
 TFARGS=(); for t in "${TF[@]}"; do TFARGS+=( --feature-transform "$t" ); done
 
 echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} (append2 guards dropped) $(date -u +%H:%M:%SZ)"
-exec "$TRAIN" "${GROUPS[@]}" \
+exec "$TRAIN" "${TRAIN_GROUPS[@]}" \
   --n-hidden-layers 0 --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 --max-features 156 --allow-narrow-features \
   --coarse-decay 1e-5 "${TFARGS[@]}" --seed "$SEED" --out "$OUT"

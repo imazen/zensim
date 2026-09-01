@@ -34,9 +34,9 @@ DEST  = os.environ.get("WR4_VIEWS", os.path.join(R4, "recipe_views"))
 os.makedirs(DEST, exist_ok=True)
 
 def die(m): sys.exit("ABORT: " + m)
-def load(p, cols=None):
+def load(p, columns=None):
     if not os.path.exists(p): die(f"missing {p}")
-    return pq.read_table(p, columns=cols)
+    return pq.read_table(p, columns=columns)
 def stem(x): return x.rsplit(".", 1)[0]
 
 manifest = {"root": R4, "era1_mirror": ERA1, "gates": {}, "views": {}}

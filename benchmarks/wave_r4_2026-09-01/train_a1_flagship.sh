@@ -1,4 +1,9 @@
 #!/bin/bash
+# NOTE: the group array is TRAIN_GROUPS, never GROUPS -- $GROUPS is a bash
+# READONLY builtin (the primary group id, 1000 here), so assigning to it silently
+# fails and the trainer receives a bare "1000" ("error: unexpected argument '1000'
+# found"). Hit and fixed 2026-09-01; documented in zensim/CLAUDE.md "Shell
+# scripting gotchas".
 # wave-r4 ARM A1 — the W10L9PH_s4004 recipe VERBATIM on the radius-4 root.
 #
 # The argv below is the shipped Profile-C bake's own embedded `zentrain.repro`
@@ -30,7 +35,7 @@ for f in "$V/safesyn_pure.parquet" "$R4/ext_cid22_train201.parquet" \
   [ -f "$f" ] || { echo "ABORT: missing training input $f"; exit 1; }
 done
 
-GROUPS=(
+TRAIN_GROUPS=(
   --group "safesyn:$V/safesyn_pure.parquet:1.0:0.5:both"
   --group "cid22_train:$R4/ext_cid22_train201.parquet:1.0:2.0:both"
   --group "kadid:$R4/ext_kadid.parquet:0.5:1.0:rank"
@@ -43,7 +48,7 @@ GROUPS=(
 )
 if [ -n "$KADIS" ]; then
   [ -f "$KADIS" ] || { echo "ABORT: WR4_KADIS set but missing: $KADIS"; exit 1; }
-  GROUPS+=( --group "kadis:$KADIS:0.15:1.0:both" )
+  TRAIN_GROUPS+=( --group "kadis:$KADIS:0.15:1.0:both" )
   echo "== kadis leg PRESENT: $KADIS"
 else
   echo "== kadis leg ABSENT (recipe deviation, registered) — arm is A1-nokadis"
@@ -86,8 +91,8 @@ TF=(
 )
 TFARGS=(); for t in "${TF[@]}"; do TFARGS+=( --feature-transform "$t" ); done
 
-echo "== A1 seed=$SEED out=$OUT groups=${#GROUPS[@]} transforms=${#TF[@]} $(date -u +%H:%M:%SZ)"
-exec "$TRAIN" "${GROUPS[@]}" \
+echo "== A1 seed=$SEED out=$OUT groups=${#TRAIN_GROUPS[@]} transforms=${#TF[@]} $(date -u +%H:%M:%SZ)"
+exec "$TRAIN" "${TRAIN_GROUPS[@]}" \
   --n-hidden-layers 0 --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 --max-features 944 --allow-narrow-features \
   --coarse-decay 1e-5 "${TFARGS[@]}" \
