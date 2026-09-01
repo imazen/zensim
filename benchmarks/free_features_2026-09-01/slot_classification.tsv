@@ -1,0 +1,945 @@
+slot	block	scale	channel	name	class	reads
+0	v1_basic	0	0	ssim_mean	computed	the 156 walk IS this
+1	v1_basic	0	0	ssim_l4	computed	the 156 walk IS this
+2	v1_basic	0	0	ssim_l2	computed	the 156 walk IS this
+3	v1_basic	0	0	art_mean	computed	the 156 walk IS this
+4	v1_basic	0	0	art_l4	computed	the 156 walk IS this
+5	v1_basic	0	0	art_l2	computed	the 156 walk IS this
+6	v1_basic	0	0	det_mean	computed	the 156 walk IS this
+7	v1_basic	0	0	det_l4	computed	the 156 walk IS this
+8	v1_basic	0	0	det_l2	computed	the 156 walk IS this
+9	v1_basic	0	0	mse	computed	the 156 walk IS this
+10	v1_basic	0	0	hf_var_loss	computed	the 156 walk IS this
+11	v1_basic	0	0	hf_mad_loss	computed	the 156 walk IS this
+12	v1_basic	0	0	hf_var_gain	computed	the 156 walk IS this
+13	v1_basic	0	1	ssim_mean	computed	the 156 walk IS this
+14	v1_basic	0	1	ssim_l4	computed	the 156 walk IS this
+15	v1_basic	0	1	ssim_l2	computed	the 156 walk IS this
+16	v1_basic	0	1	art_mean	computed	the 156 walk IS this
+17	v1_basic	0	1	art_l4	computed	the 156 walk IS this
+18	v1_basic	0	1	art_l2	computed	the 156 walk IS this
+19	v1_basic	0	1	det_mean	computed	the 156 walk IS this
+20	v1_basic	0	1	det_l4	computed	the 156 walk IS this
+21	v1_basic	0	1	det_l2	computed	the 156 walk IS this
+22	v1_basic	0	1	mse	computed	the 156 walk IS this
+23	v1_basic	0	1	hf_var_loss	computed	the 156 walk IS this
+24	v1_basic	0	1	hf_mad_loss	computed	the 156 walk IS this
+25	v1_basic	0	1	hf_var_gain	computed	the 156 walk IS this
+26	v1_basic	0	2	ssim_mean	computed	the 156 walk IS this
+27	v1_basic	0	2	ssim_l4	computed	the 156 walk IS this
+28	v1_basic	0	2	ssim_l2	computed	the 156 walk IS this
+29	v1_basic	0	2	art_mean	computed	the 156 walk IS this
+30	v1_basic	0	2	art_l4	computed	the 156 walk IS this
+31	v1_basic	0	2	art_l2	computed	the 156 walk IS this
+32	v1_basic	0	2	det_mean	computed	the 156 walk IS this
+33	v1_basic	0	2	det_l4	computed	the 156 walk IS this
+34	v1_basic	0	2	det_l2	computed	the 156 walk IS this
+35	v1_basic	0	2	mse	computed	the 156 walk IS this
+36	v1_basic	0	2	hf_var_loss	computed	the 156 walk IS this
+37	v1_basic	0	2	hf_mad_loss	computed	the 156 walk IS this
+38	v1_basic	0	2	hf_var_gain	computed	the 156 walk IS this
+39	v1_basic	1	0	ssim_mean	computed	the 156 walk IS this
+40	v1_basic	1	0	ssim_l4	computed	the 156 walk IS this
+41	v1_basic	1	0	ssim_l2	computed	the 156 walk IS this
+42	v1_basic	1	0	art_mean	computed	the 156 walk IS this
+43	v1_basic	1	0	art_l4	computed	the 156 walk IS this
+44	v1_basic	1	0	art_l2	computed	the 156 walk IS this
+45	v1_basic	1	0	det_mean	computed	the 156 walk IS this
+46	v1_basic	1	0	det_l4	computed	the 156 walk IS this
+47	v1_basic	1	0	det_l2	computed	the 156 walk IS this
+48	v1_basic	1	0	mse	computed	the 156 walk IS this
+49	v1_basic	1	0	hf_var_loss	computed	the 156 walk IS this
+50	v1_basic	1	0	hf_mad_loss	computed	the 156 walk IS this
+51	v1_basic	1	0	hf_var_gain	computed	the 156 walk IS this
+52	v1_basic	1	1	ssim_mean	computed	the 156 walk IS this
+53	v1_basic	1	1	ssim_l4	computed	the 156 walk IS this
+54	v1_basic	1	1	ssim_l2	computed	the 156 walk IS this
+55	v1_basic	1	1	art_mean	computed	the 156 walk IS this
+56	v1_basic	1	1	art_l4	computed	the 156 walk IS this
+57	v1_basic	1	1	art_l2	computed	the 156 walk IS this
+58	v1_basic	1	1	det_mean	computed	the 156 walk IS this
+59	v1_basic	1	1	det_l4	computed	the 156 walk IS this
+60	v1_basic	1	1	det_l2	computed	the 156 walk IS this
+61	v1_basic	1	1	mse	computed	the 156 walk IS this
+62	v1_basic	1	1	hf_var_loss	computed	the 156 walk IS this
+63	v1_basic	1	1	hf_mad_loss	computed	the 156 walk IS this
+64	v1_basic	1	1	hf_var_gain	computed	the 156 walk IS this
+65	v1_basic	1	2	ssim_mean	computed	the 156 walk IS this
+66	v1_basic	1	2	ssim_l4	computed	the 156 walk IS this
+67	v1_basic	1	2	ssim_l2	computed	the 156 walk IS this
+68	v1_basic	1	2	art_mean	computed	the 156 walk IS this
+69	v1_basic	1	2	art_l4	computed	the 156 walk IS this
+70	v1_basic	1	2	art_l2	computed	the 156 walk IS this
+71	v1_basic	1	2	det_mean	computed	the 156 walk IS this
+72	v1_basic	1	2	det_l4	computed	the 156 walk IS this
+73	v1_basic	1	2	det_l2	computed	the 156 walk IS this
+74	v1_basic	1	2	mse	computed	the 156 walk IS this
+75	v1_basic	1	2	hf_var_loss	computed	the 156 walk IS this
+76	v1_basic	1	2	hf_mad_loss	computed	the 156 walk IS this
+77	v1_basic	1	2	hf_var_gain	computed	the 156 walk IS this
+78	v1_basic	2	0	ssim_mean	computed	the 156 walk IS this
+79	v1_basic	2	0	ssim_l4	computed	the 156 walk IS this
+80	v1_basic	2	0	ssim_l2	computed	the 156 walk IS this
+81	v1_basic	2	0	art_mean	computed	the 156 walk IS this
+82	v1_basic	2	0	art_l4	computed	the 156 walk IS this
+83	v1_basic	2	0	art_l2	computed	the 156 walk IS this
+84	v1_basic	2	0	det_mean	computed	the 156 walk IS this
+85	v1_basic	2	0	det_l4	computed	the 156 walk IS this
+86	v1_basic	2	0	det_l2	computed	the 156 walk IS this
+87	v1_basic	2	0	mse	computed	the 156 walk IS this
+88	v1_basic	2	0	hf_var_loss	computed	the 156 walk IS this
+89	v1_basic	2	0	hf_mad_loss	computed	the 156 walk IS this
+90	v1_basic	2	0	hf_var_gain	computed	the 156 walk IS this
+91	v1_basic	2	1	ssim_mean	computed	the 156 walk IS this
+92	v1_basic	2	1	ssim_l4	computed	the 156 walk IS this
+93	v1_basic	2	1	ssim_l2	computed	the 156 walk IS this
+94	v1_basic	2	1	art_mean	computed	the 156 walk IS this
+95	v1_basic	2	1	art_l4	computed	the 156 walk IS this
+96	v1_basic	2	1	art_l2	computed	the 156 walk IS this
+97	v1_basic	2	1	det_mean	computed	the 156 walk IS this
+98	v1_basic	2	1	det_l4	computed	the 156 walk IS this
+99	v1_basic	2	1	det_l2	computed	the 156 walk IS this
+100	v1_basic	2	1	mse	computed	the 156 walk IS this
+101	v1_basic	2	1	hf_var_loss	computed	the 156 walk IS this
+102	v1_basic	2	1	hf_mad_loss	computed	the 156 walk IS this
+103	v1_basic	2	1	hf_var_gain	computed	the 156 walk IS this
+104	v1_basic	2	2	ssim_mean	computed	the 156 walk IS this
+105	v1_basic	2	2	ssim_l4	computed	the 156 walk IS this
+106	v1_basic	2	2	ssim_l2	computed	the 156 walk IS this
+107	v1_basic	2	2	art_mean	computed	the 156 walk IS this
+108	v1_basic	2	2	art_l4	computed	the 156 walk IS this
+109	v1_basic	2	2	art_l2	computed	the 156 walk IS this
+110	v1_basic	2	2	det_mean	computed	the 156 walk IS this
+111	v1_basic	2	2	det_l4	computed	the 156 walk IS this
+112	v1_basic	2	2	det_l2	computed	the 156 walk IS this
+113	v1_basic	2	2	mse	computed	the 156 walk IS this
+114	v1_basic	2	2	hf_var_loss	computed	the 156 walk IS this
+115	v1_basic	2	2	hf_mad_loss	computed	the 156 walk IS this
+116	v1_basic	2	2	hf_var_gain	computed	the 156 walk IS this
+117	v1_basic	3	0	ssim_mean	computed	the 156 walk IS this
+118	v1_basic	3	0	ssim_l4	computed	the 156 walk IS this
+119	v1_basic	3	0	ssim_l2	computed	the 156 walk IS this
+120	v1_basic	3	0	art_mean	computed	the 156 walk IS this
+121	v1_basic	3	0	art_l4	computed	the 156 walk IS this
+122	v1_basic	3	0	art_l2	computed	the 156 walk IS this
+123	v1_basic	3	0	det_mean	computed	the 156 walk IS this
+124	v1_basic	3	0	det_l4	computed	the 156 walk IS this
+125	v1_basic	3	0	det_l2	computed	the 156 walk IS this
+126	v1_basic	3	0	mse	computed	the 156 walk IS this
+127	v1_basic	3	0	hf_var_loss	computed	the 156 walk IS this
+128	v1_basic	3	0	hf_mad_loss	computed	the 156 walk IS this
+129	v1_basic	3	0	hf_var_gain	computed	the 156 walk IS this
+130	v1_basic	3	1	ssim_mean	computed	the 156 walk IS this
+131	v1_basic	3	1	ssim_l4	computed	the 156 walk IS this
+132	v1_basic	3	1	ssim_l2	computed	the 156 walk IS this
+133	v1_basic	3	1	art_mean	computed	the 156 walk IS this
+134	v1_basic	3	1	art_l4	computed	the 156 walk IS this
+135	v1_basic	3	1	art_l2	computed	the 156 walk IS this
+136	v1_basic	3	1	det_mean	computed	the 156 walk IS this
+137	v1_basic	3	1	det_l4	computed	the 156 walk IS this
+138	v1_basic	3	1	det_l2	computed	the 156 walk IS this
+139	v1_basic	3	1	mse	computed	the 156 walk IS this
+140	v1_basic	3	1	hf_var_loss	computed	the 156 walk IS this
+141	v1_basic	3	1	hf_mad_loss	computed	the 156 walk IS this
+142	v1_basic	3	1	hf_var_gain	computed	the 156 walk IS this
+143	v1_basic	3	2	ssim_mean	computed	the 156 walk IS this
+144	v1_basic	3	2	ssim_l4	computed	the 156 walk IS this
+145	v1_basic	3	2	ssim_l2	computed	the 156 walk IS this
+146	v1_basic	3	2	art_mean	computed	the 156 walk IS this
+147	v1_basic	3	2	art_l4	computed	the 156 walk IS this
+148	v1_basic	3	2	art_l2	computed	the 156 walk IS this
+149	v1_basic	3	2	det_mean	computed	the 156 walk IS this
+150	v1_basic	3	2	det_l4	computed	the 156 walk IS this
+151	v1_basic	3	2	det_l2	computed	the 156 walk IS this
+152	v1_basic	3	2	mse	computed	the 156 walk IS this
+153	v1_basic	3	2	hf_var_loss	computed	the 156 walk IS this
+154	v1_basic	3	2	hf_mad_loss	computed	the 156 walk IS this
+155	v1_basic	3	2	hf_var_gain	computed	the 156 walk IS this
+156	v1_peaks	0	0	ssim_max	A	unconditional in fused_vblur_features_ssim
+157	v1_peaks	0	0	art_max	A	unconditional in fused_vblur_features_ssim
+158	v1_peaks	0	0	det_max	A	unconditional in fused_vblur_features_ssim
+159	v1_peaks	0	0	ssim_l8	A	unconditional in fused_vblur_features_ssim
+160	v1_peaks	0	0	art_l8	A	unconditional in fused_vblur_features_ssim
+161	v1_peaks	0	0	det_l8	A	unconditional in fused_vblur_features_ssim
+162	v1_peaks	0	1	ssim_max	A	unconditional in fused_vblur_features_ssim
+163	v1_peaks	0	1	art_max	A	unconditional in fused_vblur_features_ssim
+164	v1_peaks	0	1	det_max	A	unconditional in fused_vblur_features_ssim
+165	v1_peaks	0	1	ssim_l8	A	unconditional in fused_vblur_features_ssim
+166	v1_peaks	0	1	art_l8	A	unconditional in fused_vblur_features_ssim
+167	v1_peaks	0	1	det_l8	A	unconditional in fused_vblur_features_ssim
+168	v1_peaks	0	2	ssim_max	A	unconditional in fused_vblur_features_ssim
+169	v1_peaks	0	2	art_max	A	unconditional in fused_vblur_features_ssim
+170	v1_peaks	0	2	det_max	A	unconditional in fused_vblur_features_ssim
+171	v1_peaks	0	2	ssim_l8	A	unconditional in fused_vblur_features_ssim
+172	v1_peaks	0	2	art_l8	A	unconditional in fused_vblur_features_ssim
+173	v1_peaks	0	2	det_l8	A	unconditional in fused_vblur_features_ssim
+174	v1_peaks	1	0	ssim_max	A	unconditional in fused_vblur_features_ssim
+175	v1_peaks	1	0	art_max	A	unconditional in fused_vblur_features_ssim
+176	v1_peaks	1	0	det_max	A	unconditional in fused_vblur_features_ssim
+177	v1_peaks	1	0	ssim_l8	A	unconditional in fused_vblur_features_ssim
+178	v1_peaks	1	0	art_l8	A	unconditional in fused_vblur_features_ssim
+179	v1_peaks	1	0	det_l8	A	unconditional in fused_vblur_features_ssim
+180	v1_peaks	1	1	ssim_max	A	unconditional in fused_vblur_features_ssim
+181	v1_peaks	1	1	art_max	A	unconditional in fused_vblur_features_ssim
+182	v1_peaks	1	1	det_max	A	unconditional in fused_vblur_features_ssim
+183	v1_peaks	1	1	ssim_l8	A	unconditional in fused_vblur_features_ssim
+184	v1_peaks	1	1	art_l8	A	unconditional in fused_vblur_features_ssim
+185	v1_peaks	1	1	det_l8	A	unconditional in fused_vblur_features_ssim
+186	v1_peaks	1	2	ssim_max	A	unconditional in fused_vblur_features_ssim
+187	v1_peaks	1	2	art_max	A	unconditional in fused_vblur_features_ssim
+188	v1_peaks	1	2	det_max	A	unconditional in fused_vblur_features_ssim
+189	v1_peaks	1	2	ssim_l8	A	unconditional in fused_vblur_features_ssim
+190	v1_peaks	1	2	art_l8	A	unconditional in fused_vblur_features_ssim
+191	v1_peaks	1	2	det_l8	A	unconditional in fused_vblur_features_ssim
+192	v1_peaks	2	0	ssim_max	A	unconditional in fused_vblur_features_ssim
+193	v1_peaks	2	0	art_max	A	unconditional in fused_vblur_features_ssim
+194	v1_peaks	2	0	det_max	A	unconditional in fused_vblur_features_ssim
+195	v1_peaks	2	0	ssim_l8	A	unconditional in fused_vblur_features_ssim
+196	v1_peaks	2	0	art_l8	A	unconditional in fused_vblur_features_ssim
+197	v1_peaks	2	0	det_l8	A	unconditional in fused_vblur_features_ssim
+198	v1_peaks	2	1	ssim_max	A	unconditional in fused_vblur_features_ssim
+199	v1_peaks	2	1	art_max	A	unconditional in fused_vblur_features_ssim
+200	v1_peaks	2	1	det_max	A	unconditional in fused_vblur_features_ssim
+201	v1_peaks	2	1	ssim_l8	A	unconditional in fused_vblur_features_ssim
+202	v1_peaks	2	1	art_l8	A	unconditional in fused_vblur_features_ssim
+203	v1_peaks	2	1	det_l8	A	unconditional in fused_vblur_features_ssim
+204	v1_peaks	2	2	ssim_max	A	unconditional in fused_vblur_features_ssim
+205	v1_peaks	2	2	art_max	A	unconditional in fused_vblur_features_ssim
+206	v1_peaks	2	2	det_max	A	unconditional in fused_vblur_features_ssim
+207	v1_peaks	2	2	ssim_l8	A	unconditional in fused_vblur_features_ssim
+208	v1_peaks	2	2	art_l8	A	unconditional in fused_vblur_features_ssim
+209	v1_peaks	2	2	det_l8	A	unconditional in fused_vblur_features_ssim
+210	v1_peaks	3	0	ssim_max	A	unconditional in fused_vblur_features_ssim
+211	v1_peaks	3	0	art_max	A	unconditional in fused_vblur_features_ssim
+212	v1_peaks	3	0	det_max	A	unconditional in fused_vblur_features_ssim
+213	v1_peaks	3	0	ssim_l8	A	unconditional in fused_vblur_features_ssim
+214	v1_peaks	3	0	art_l8	A	unconditional in fused_vblur_features_ssim
+215	v1_peaks	3	0	det_l8	A	unconditional in fused_vblur_features_ssim
+216	v1_peaks	3	1	ssim_max	A	unconditional in fused_vblur_features_ssim
+217	v1_peaks	3	1	art_max	A	unconditional in fused_vblur_features_ssim
+218	v1_peaks	3	1	det_max	A	unconditional in fused_vblur_features_ssim
+219	v1_peaks	3	1	ssim_l8	A	unconditional in fused_vblur_features_ssim
+220	v1_peaks	3	1	art_l8	A	unconditional in fused_vblur_features_ssim
+221	v1_peaks	3	1	det_l8	A	unconditional in fused_vblur_features_ssim
+222	v1_peaks	3	2	ssim_max	A	unconditional in fused_vblur_features_ssim
+223	v1_peaks	3	2	art_max	A	unconditional in fused_vblur_features_ssim
+224	v1_peaks	3	2	det_max	A	unconditional in fused_vblur_features_ssim
+225	v1_peaks	3	2	ssim_l8	A	unconditional in fused_vblur_features_ssim
+226	v1_peaks	3	2	art_l8	A	unconditional in fused_vblur_features_ssim
+227	v1_peaks	3	2	det_l8	A	unconditional in fused_vblur_features_ssim
+228	v1_masked	0	0	ssim_mean	D	activity chain + store_sigma + *_inline_both
+229	v1_masked	0	0	ssim_4th	D	activity chain + store_sigma + *_inline_both
+230	v1_masked	0	0	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+231	v1_masked	0	0	art_4th	D	activity chain + store_sigma + *_inline_both
+232	v1_masked	0	0	det_4th	D	activity chain + store_sigma + *_inline_both
+233	v1_masked	0	0	mse	D	activity chain + store_sigma + *_inline_both
+234	v1_masked	0	1	ssim_mean	D	activity chain + store_sigma + *_inline_both
+235	v1_masked	0	1	ssim_4th	D	activity chain + store_sigma + *_inline_both
+236	v1_masked	0	1	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+237	v1_masked	0	1	art_4th	D	activity chain + store_sigma + *_inline_both
+238	v1_masked	0	1	det_4th	D	activity chain + store_sigma + *_inline_both
+239	v1_masked	0	1	mse	D	activity chain + store_sigma + *_inline_both
+240	v1_masked	0	2	ssim_mean	D	activity chain + store_sigma + *_inline_both
+241	v1_masked	0	2	ssim_4th	D	activity chain + store_sigma + *_inline_both
+242	v1_masked	0	2	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+243	v1_masked	0	2	art_4th	D	activity chain + store_sigma + *_inline_both
+244	v1_masked	0	2	det_4th	D	activity chain + store_sigma + *_inline_both
+245	v1_masked	0	2	mse	D	activity chain + store_sigma + *_inline_both
+246	v1_masked	1	0	ssim_mean	D	activity chain + store_sigma + *_inline_both
+247	v1_masked	1	0	ssim_4th	D	activity chain + store_sigma + *_inline_both
+248	v1_masked	1	0	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+249	v1_masked	1	0	art_4th	D	activity chain + store_sigma + *_inline_both
+250	v1_masked	1	0	det_4th	D	activity chain + store_sigma + *_inline_both
+251	v1_masked	1	0	mse	D	activity chain + store_sigma + *_inline_both
+252	v1_masked	1	1	ssim_mean	D	activity chain + store_sigma + *_inline_both
+253	v1_masked	1	1	ssim_4th	D	activity chain + store_sigma + *_inline_both
+254	v1_masked	1	1	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+255	v1_masked	1	1	art_4th	D	activity chain + store_sigma + *_inline_both
+256	v1_masked	1	1	det_4th	D	activity chain + store_sigma + *_inline_both
+257	v1_masked	1	1	mse	D	activity chain + store_sigma + *_inline_both
+258	v1_masked	1	2	ssim_mean	D	activity chain + store_sigma + *_inline_both
+259	v1_masked	1	2	ssim_4th	D	activity chain + store_sigma + *_inline_both
+260	v1_masked	1	2	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+261	v1_masked	1	2	art_4th	D	activity chain + store_sigma + *_inline_both
+262	v1_masked	1	2	det_4th	D	activity chain + store_sigma + *_inline_both
+263	v1_masked	1	2	mse	D	activity chain + store_sigma + *_inline_both
+264	v1_masked	2	0	ssim_mean	D	activity chain + store_sigma + *_inline_both
+265	v1_masked	2	0	ssim_4th	D	activity chain + store_sigma + *_inline_both
+266	v1_masked	2	0	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+267	v1_masked	2	0	art_4th	D	activity chain + store_sigma + *_inline_both
+268	v1_masked	2	0	det_4th	D	activity chain + store_sigma + *_inline_both
+269	v1_masked	2	0	mse	D	activity chain + store_sigma + *_inline_both
+270	v1_masked	2	1	ssim_mean	D	activity chain + store_sigma + *_inline_both
+271	v1_masked	2	1	ssim_4th	D	activity chain + store_sigma + *_inline_both
+272	v1_masked	2	1	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+273	v1_masked	2	1	art_4th	D	activity chain + store_sigma + *_inline_both
+274	v1_masked	2	1	det_4th	D	activity chain + store_sigma + *_inline_both
+275	v1_masked	2	1	mse	D	activity chain + store_sigma + *_inline_both
+276	v1_masked	2	2	ssim_mean	D	activity chain + store_sigma + *_inline_both
+277	v1_masked	2	2	ssim_4th	D	activity chain + store_sigma + *_inline_both
+278	v1_masked	2	2	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+279	v1_masked	2	2	art_4th	D	activity chain + store_sigma + *_inline_both
+280	v1_masked	2	2	det_4th	D	activity chain + store_sigma + *_inline_both
+281	v1_masked	2	2	mse	D	activity chain + store_sigma + *_inline_both
+282	v1_masked	3	0	ssim_mean	D	activity chain + store_sigma + *_inline_both
+283	v1_masked	3	0	ssim_4th	D	activity chain + store_sigma + *_inline_both
+284	v1_masked	3	0	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+285	v1_masked	3	0	art_4th	D	activity chain + store_sigma + *_inline_both
+286	v1_masked	3	0	det_4th	D	activity chain + store_sigma + *_inline_both
+287	v1_masked	3	0	mse	D	activity chain + store_sigma + *_inline_both
+288	v1_masked	3	1	ssim_mean	D	activity chain + store_sigma + *_inline_both
+289	v1_masked	3	1	ssim_4th	D	activity chain + store_sigma + *_inline_both
+290	v1_masked	3	1	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+291	v1_masked	3	1	art_4th	D	activity chain + store_sigma + *_inline_both
+292	v1_masked	3	1	det_4th	D	activity chain + store_sigma + *_inline_both
+293	v1_masked	3	1	mse	D	activity chain + store_sigma + *_inline_both
+294	v1_masked	3	2	ssim_mean	D	activity chain + store_sigma + *_inline_both
+295	v1_masked	3	2	ssim_4th	D	activity chain + store_sigma + *_inline_both
+296	v1_masked	3	2	ssim_2nd	D	activity chain + store_sigma + *_inline_both
+297	v1_masked	3	2	art_4th	D	activity chain + store_sigma + *_inline_both
+298	v1_masked	3	2	det_4th	D	activity chain + store_sigma + *_inline_both
+299	v1_masked	3	2	mse	D	activity chain + store_sigma + *_inline_both
+300	v1_iw	0	0	ssim_mean	D	same pass group as masked
+301	v1_iw	0	0	ssim_4th	D	same pass group as masked
+302	v1_iw	0	0	ssim_2nd	D	same pass group as masked
+303	v1_iw	0	0	art_4th	D	same pass group as masked
+304	v1_iw	0	0	det_4th	D	same pass group as masked
+305	v1_iw	0	0	mse	D	same pass group as masked
+306	v1_iw	0	1	ssim_mean	D	same pass group as masked
+307	v1_iw	0	1	ssim_4th	D	same pass group as masked
+308	v1_iw	0	1	ssim_2nd	D	same pass group as masked
+309	v1_iw	0	1	art_4th	D	same pass group as masked
+310	v1_iw	0	1	det_4th	D	same pass group as masked
+311	v1_iw	0	1	mse	D	same pass group as masked
+312	v1_iw	0	2	ssim_mean	D	same pass group as masked
+313	v1_iw	0	2	ssim_4th	D	same pass group as masked
+314	v1_iw	0	2	ssim_2nd	D	same pass group as masked
+315	v1_iw	0	2	art_4th	D	same pass group as masked
+316	v1_iw	0	2	det_4th	D	same pass group as masked
+317	v1_iw	0	2	mse	D	same pass group as masked
+318	v1_iw	1	0	ssim_mean	D	same pass group as masked
+319	v1_iw	1	0	ssim_4th	D	same pass group as masked
+320	v1_iw	1	0	ssim_2nd	D	same pass group as masked
+321	v1_iw	1	0	art_4th	D	same pass group as masked
+322	v1_iw	1	0	det_4th	D	same pass group as masked
+323	v1_iw	1	0	mse	D	same pass group as masked
+324	v1_iw	1	1	ssim_mean	D	same pass group as masked
+325	v1_iw	1	1	ssim_4th	D	same pass group as masked
+326	v1_iw	1	1	ssim_2nd	D	same pass group as masked
+327	v1_iw	1	1	art_4th	D	same pass group as masked
+328	v1_iw	1	1	det_4th	D	same pass group as masked
+329	v1_iw	1	1	mse	D	same pass group as masked
+330	v1_iw	1	2	ssim_mean	D	same pass group as masked
+331	v1_iw	1	2	ssim_4th	D	same pass group as masked
+332	v1_iw	1	2	ssim_2nd	D	same pass group as masked
+333	v1_iw	1	2	art_4th	D	same pass group as masked
+334	v1_iw	1	2	det_4th	D	same pass group as masked
+335	v1_iw	1	2	mse	D	same pass group as masked
+336	v1_iw	2	0	ssim_mean	D	same pass group as masked
+337	v1_iw	2	0	ssim_4th	D	same pass group as masked
+338	v1_iw	2	0	ssim_2nd	D	same pass group as masked
+339	v1_iw	2	0	art_4th	D	same pass group as masked
+340	v1_iw	2	0	det_4th	D	same pass group as masked
+341	v1_iw	2	0	mse	D	same pass group as masked
+342	v1_iw	2	1	ssim_mean	D	same pass group as masked
+343	v1_iw	2	1	ssim_4th	D	same pass group as masked
+344	v1_iw	2	1	ssim_2nd	D	same pass group as masked
+345	v1_iw	2	1	art_4th	D	same pass group as masked
+346	v1_iw	2	1	det_4th	D	same pass group as masked
+347	v1_iw	2	1	mse	D	same pass group as masked
+348	v1_iw	2	2	ssim_mean	D	same pass group as masked
+349	v1_iw	2	2	ssim_4th	D	same pass group as masked
+350	v1_iw	2	2	ssim_2nd	D	same pass group as masked
+351	v1_iw	2	2	art_4th	D	same pass group as masked
+352	v1_iw	2	2	det_4th	D	same pass group as masked
+353	v1_iw	2	2	mse	D	same pass group as masked
+354	v1_iw	3	0	ssim_mean	D	same pass group as masked
+355	v1_iw	3	0	ssim_4th	D	same pass group as masked
+356	v1_iw	3	0	ssim_2nd	D	same pass group as masked
+357	v1_iw	3	0	art_4th	D	same pass group as masked
+358	v1_iw	3	0	det_4th	D	same pass group as masked
+359	v1_iw	3	0	mse	D	same pass group as masked
+360	v1_iw	3	1	ssim_mean	D	same pass group as masked
+361	v1_iw	3	1	ssim_4th	D	same pass group as masked
+362	v1_iw	3	1	ssim_2nd	D	same pass group as masked
+363	v1_iw	3	1	art_4th	D	same pass group as masked
+364	v1_iw	3	1	det_4th	D	same pass group as masked
+365	v1_iw	3	1	mse	D	same pass group as masked
+366	v1_iw	3	2	ssim_mean	D	same pass group as masked
+367	v1_iw	3	2	ssim_4th	D	same pass group as masked
+368	v1_iw	3	2	ssim_2nd	D	same pass group as masked
+369	v1_iw	3	2	art_4th	D	same pass group as masked
+370	v1_iw	3	2	det_4th	D	same pass group as masked
+371	v1_iw	3	2	mse	D	same pass group as masked
+372	v2_348	0	0	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+373	v2_348	0	0	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+374	v2_348	0	0	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+375	v2_348	0	0	ART	C-blur	mu1,mu2,s,d
+376	v2_348	0	0	DET	C-blur	mu1,mu2,s,d
+377	v2_348	0	0	MSE	C-raw	s,d
+378	v2_348	0	0	HF_GAIN	C-blur	mu1,mu2,s,d
+379	v2_348	0	0	HF_LOSS	C-blur	mu1,mu2,s,d
+380	v2_348	0	0	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+381	v2_348	0	0	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+382	v2_348	0	0	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+383	v2_348	0	0	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+384	v2_348	0	0	MASKED_SSIM	D	activity
+385	v2_348	0	0	MASKED_ART	D	activity
+386	v2_348	0	0	MASKED_DET	D	activity
+387	v2_348	0	0	MASKED_MSE	D	activity
+388	v2_348	0	0	IW_SSIM	D	activity
+389	v2_348	0	0	IW_ART	D	activity
+390	v2_348	0	0	IW_DET	D	activity
+391	v2_348	0	0	IW_MSE	D	activity
+392	v2_348	0	0	PJND_TRANSDUCER	D	activity
+393	v2_348	0	0	PJND_FRAGILITY	E	grad stencil
+394	v2_348	0	0	GMS	E	grad stencil
+395	v2_348	0	0	PJND_TRANSDUCER_LOW_K	D	activity
+396	v2_348	0	0	PJND_TRANSDUCER_HIGH_K	D	activity
+397	v2_348	0	0	BLOCKINESS	E	lattice pass
+398	v2_348	0	0	RINGING	D	activity+grad
+399	v2_348	0	0	BANDING	E	grad stencil
+400	v2_348	0	0	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+401	v2_348	0	1	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+402	v2_348	0	1	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+403	v2_348	0	1	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+404	v2_348	0	1	ART	C-blur	mu1,mu2,s,d
+405	v2_348	0	1	DET	C-blur	mu1,mu2,s,d
+406	v2_348	0	1	MSE	C-raw	s,d
+407	v2_348	0	1	HF_GAIN	C-blur	mu1,mu2,s,d
+408	v2_348	0	1	HF_LOSS	C-blur	mu1,mu2,s,d
+409	v2_348	0	1	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+410	v2_348	0	1	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+411	v2_348	0	1	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+412	v2_348	0	1	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+413	v2_348	0	1	MASKED_SSIM	D	activity
+414	v2_348	0	1	MASKED_ART	D	activity
+415	v2_348	0	1	MASKED_DET	D	activity
+416	v2_348	0	1	MASKED_MSE	D	activity
+417	v2_348	0	1	IW_SSIM	D	activity
+418	v2_348	0	1	IW_ART	D	activity
+419	v2_348	0	1	IW_DET	D	activity
+420	v2_348	0	1	IW_MSE	D	activity
+421	v2_348	0	1	PJND_TRANSDUCER	D	activity
+422	v2_348	0	1	PJND_FRAGILITY	E	grad stencil
+423	v2_348	0	1	GMS	E	grad stencil
+424	v2_348	0	1	PJND_TRANSDUCER_LOW_K	D	activity
+425	v2_348	0	1	PJND_TRANSDUCER_HIGH_K	D	activity
+426	v2_348	0	1	BLOCKINESS	E	lattice pass
+427	v2_348	0	1	RINGING	D	activity+grad
+428	v2_348	0	1	BANDING	E	grad stencil
+429	v2_348	0	1	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+430	v2_348	0	2	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+431	v2_348	0	2	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+432	v2_348	0	2	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+433	v2_348	0	2	ART	C-blur	mu1,mu2,s,d
+434	v2_348	0	2	DET	C-blur	mu1,mu2,s,d
+435	v2_348	0	2	MSE	C-raw	s,d
+436	v2_348	0	2	HF_GAIN	C-blur	mu1,mu2,s,d
+437	v2_348	0	2	HF_LOSS	C-blur	mu1,mu2,s,d
+438	v2_348	0	2	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+439	v2_348	0	2	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+440	v2_348	0	2	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+441	v2_348	0	2	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+442	v2_348	0	2	MASKED_SSIM	D	activity
+443	v2_348	0	2	MASKED_ART	D	activity
+444	v2_348	0	2	MASKED_DET	D	activity
+445	v2_348	0	2	MASKED_MSE	D	activity
+446	v2_348	0	2	IW_SSIM	D	activity
+447	v2_348	0	2	IW_ART	D	activity
+448	v2_348	0	2	IW_DET	D	activity
+449	v2_348	0	2	IW_MSE	D	activity
+450	v2_348	0	2	PJND_TRANSDUCER	D	activity
+451	v2_348	0	2	PJND_FRAGILITY	E	grad stencil
+452	v2_348	0	2	GMS	E	grad stencil
+453	v2_348	0	2	PJND_TRANSDUCER_LOW_K	D	activity
+454	v2_348	0	2	PJND_TRANSDUCER_HIGH_K	D	activity
+455	v2_348	0	2	BLOCKINESS	E	lattice pass
+456	v2_348	0	2	RINGING	D	activity+grad
+457	v2_348	0	2	BANDING	E	grad stencil
+458	v2_348	0	2	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+459	v2_348	1	0	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+460	v2_348	1	0	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+461	v2_348	1	0	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+462	v2_348	1	0	ART	C-blur	mu1,mu2,s,d
+463	v2_348	1	0	DET	C-blur	mu1,mu2,s,d
+464	v2_348	1	0	MSE	C-raw	s,d
+465	v2_348	1	0	HF_GAIN	C-blur	mu1,mu2,s,d
+466	v2_348	1	0	HF_LOSS	C-blur	mu1,mu2,s,d
+467	v2_348	1	0	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+468	v2_348	1	0	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+469	v2_348	1	0	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+470	v2_348	1	0	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+471	v2_348	1	0	MASKED_SSIM	D	activity
+472	v2_348	1	0	MASKED_ART	D	activity
+473	v2_348	1	0	MASKED_DET	D	activity
+474	v2_348	1	0	MASKED_MSE	D	activity
+475	v2_348	1	0	IW_SSIM	D	activity
+476	v2_348	1	0	IW_ART	D	activity
+477	v2_348	1	0	IW_DET	D	activity
+478	v2_348	1	0	IW_MSE	D	activity
+479	v2_348	1	0	PJND_TRANSDUCER	D	activity
+480	v2_348	1	0	PJND_FRAGILITY	E	grad stencil
+481	v2_348	1	0	GMS	E	grad stencil
+482	v2_348	1	0	PJND_TRANSDUCER_LOW_K	D	activity
+483	v2_348	1	0	PJND_TRANSDUCER_HIGH_K	D	activity
+484	v2_348	1	0	BLOCKINESS	E	lattice pass
+485	v2_348	1	0	RINGING	D	activity+grad
+486	v2_348	1	0	BANDING	E	grad stencil
+487	v2_348	1	0	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+488	v2_348	1	1	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+489	v2_348	1	1	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+490	v2_348	1	1	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+491	v2_348	1	1	ART	C-blur	mu1,mu2,s,d
+492	v2_348	1	1	DET	C-blur	mu1,mu2,s,d
+493	v2_348	1	1	MSE	C-raw	s,d
+494	v2_348	1	1	HF_GAIN	C-blur	mu1,mu2,s,d
+495	v2_348	1	1	HF_LOSS	C-blur	mu1,mu2,s,d
+496	v2_348	1	1	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+497	v2_348	1	1	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+498	v2_348	1	1	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+499	v2_348	1	1	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+500	v2_348	1	1	MASKED_SSIM	D	activity
+501	v2_348	1	1	MASKED_ART	D	activity
+502	v2_348	1	1	MASKED_DET	D	activity
+503	v2_348	1	1	MASKED_MSE	D	activity
+504	v2_348	1	1	IW_SSIM	D	activity
+505	v2_348	1	1	IW_ART	D	activity
+506	v2_348	1	1	IW_DET	D	activity
+507	v2_348	1	1	IW_MSE	D	activity
+508	v2_348	1	1	PJND_TRANSDUCER	D	activity
+509	v2_348	1	1	PJND_FRAGILITY	E	grad stencil
+510	v2_348	1	1	GMS	E	grad stencil
+511	v2_348	1	1	PJND_TRANSDUCER_LOW_K	D	activity
+512	v2_348	1	1	PJND_TRANSDUCER_HIGH_K	D	activity
+513	v2_348	1	1	BLOCKINESS	E	lattice pass
+514	v2_348	1	1	RINGING	D	activity+grad
+515	v2_348	1	1	BANDING	E	grad stencil
+516	v2_348	1	1	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+517	v2_348	1	2	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+518	v2_348	1	2	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+519	v2_348	1	2	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+520	v2_348	1	2	ART	C-blur	mu1,mu2,s,d
+521	v2_348	1	2	DET	C-blur	mu1,mu2,s,d
+522	v2_348	1	2	MSE	C-raw	s,d
+523	v2_348	1	2	HF_GAIN	C-blur	mu1,mu2,s,d
+524	v2_348	1	2	HF_LOSS	C-blur	mu1,mu2,s,d
+525	v2_348	1	2	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+526	v2_348	1	2	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+527	v2_348	1	2	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+528	v2_348	1	2	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+529	v2_348	1	2	MASKED_SSIM	D	activity
+530	v2_348	1	2	MASKED_ART	D	activity
+531	v2_348	1	2	MASKED_DET	D	activity
+532	v2_348	1	2	MASKED_MSE	D	activity
+533	v2_348	1	2	IW_SSIM	D	activity
+534	v2_348	1	2	IW_ART	D	activity
+535	v2_348	1	2	IW_DET	D	activity
+536	v2_348	1	2	IW_MSE	D	activity
+537	v2_348	1	2	PJND_TRANSDUCER	D	activity
+538	v2_348	1	2	PJND_FRAGILITY	E	grad stencil
+539	v2_348	1	2	GMS	E	grad stencil
+540	v2_348	1	2	PJND_TRANSDUCER_LOW_K	D	activity
+541	v2_348	1	2	PJND_TRANSDUCER_HIGH_K	D	activity
+542	v2_348	1	2	BLOCKINESS	E	lattice pass
+543	v2_348	1	2	RINGING	D	activity+grad
+544	v2_348	1	2	BANDING	E	grad stencil
+545	v2_348	1	2	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+546	v2_348	2	0	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+547	v2_348	2	0	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+548	v2_348	2	0	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+549	v2_348	2	0	ART	C-blur	mu1,mu2,s,d
+550	v2_348	2	0	DET	C-blur	mu1,mu2,s,d
+551	v2_348	2	0	MSE	C-raw	s,d
+552	v2_348	2	0	HF_GAIN	C-blur	mu1,mu2,s,d
+553	v2_348	2	0	HF_LOSS	C-blur	mu1,mu2,s,d
+554	v2_348	2	0	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+555	v2_348	2	0	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+556	v2_348	2	0	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+557	v2_348	2	0	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+558	v2_348	2	0	MASKED_SSIM	D	activity
+559	v2_348	2	0	MASKED_ART	D	activity
+560	v2_348	2	0	MASKED_DET	D	activity
+561	v2_348	2	0	MASKED_MSE	D	activity
+562	v2_348	2	0	IW_SSIM	D	activity
+563	v2_348	2	0	IW_ART	D	activity
+564	v2_348	2	0	IW_DET	D	activity
+565	v2_348	2	0	IW_MSE	D	activity
+566	v2_348	2	0	PJND_TRANSDUCER	D	activity
+567	v2_348	2	0	PJND_FRAGILITY	E	grad stencil
+568	v2_348	2	0	GMS	E	grad stencil
+569	v2_348	2	0	PJND_TRANSDUCER_LOW_K	D	activity
+570	v2_348	2	0	PJND_TRANSDUCER_HIGH_K	D	activity
+571	v2_348	2	0	BLOCKINESS	E	lattice pass
+572	v2_348	2	0	RINGING	D	activity+grad
+573	v2_348	2	0	BANDING	E	grad stencil
+574	v2_348	2	0	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+575	v2_348	2	1	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+576	v2_348	2	1	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+577	v2_348	2	1	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+578	v2_348	2	1	ART	C-blur	mu1,mu2,s,d
+579	v2_348	2	1	DET	C-blur	mu1,mu2,s,d
+580	v2_348	2	1	MSE	C-raw	s,d
+581	v2_348	2	1	HF_GAIN	C-blur	mu1,mu2,s,d
+582	v2_348	2	1	HF_LOSS	C-blur	mu1,mu2,s,d
+583	v2_348	2	1	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+584	v2_348	2	1	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+585	v2_348	2	1	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+586	v2_348	2	1	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+587	v2_348	2	1	MASKED_SSIM	D	activity
+588	v2_348	2	1	MASKED_ART	D	activity
+589	v2_348	2	1	MASKED_DET	D	activity
+590	v2_348	2	1	MASKED_MSE	D	activity
+591	v2_348	2	1	IW_SSIM	D	activity
+592	v2_348	2	1	IW_ART	D	activity
+593	v2_348	2	1	IW_DET	D	activity
+594	v2_348	2	1	IW_MSE	D	activity
+595	v2_348	2	1	PJND_TRANSDUCER	D	activity
+596	v2_348	2	1	PJND_FRAGILITY	E	grad stencil
+597	v2_348	2	1	GMS	E	grad stencil
+598	v2_348	2	1	PJND_TRANSDUCER_LOW_K	D	activity
+599	v2_348	2	1	PJND_TRANSDUCER_HIGH_K	D	activity
+600	v2_348	2	1	BLOCKINESS	E	lattice pass
+601	v2_348	2	1	RINGING	D	activity+grad
+602	v2_348	2	1	BANDING	E	grad stencil
+603	v2_348	2	1	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+604	v2_348	2	2	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+605	v2_348	2	2	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+606	v2_348	2	2	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+607	v2_348	2	2	ART	C-blur	mu1,mu2,s,d
+608	v2_348	2	2	DET	C-blur	mu1,mu2,s,d
+609	v2_348	2	2	MSE	C-raw	s,d
+610	v2_348	2	2	HF_GAIN	C-blur	mu1,mu2,s,d
+611	v2_348	2	2	HF_LOSS	C-blur	mu1,mu2,s,d
+612	v2_348	2	2	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+613	v2_348	2	2	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+614	v2_348	2	2	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+615	v2_348	2	2	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+616	v2_348	2	2	MASKED_SSIM	D	activity
+617	v2_348	2	2	MASKED_ART	D	activity
+618	v2_348	2	2	MASKED_DET	D	activity
+619	v2_348	2	2	MASKED_MSE	D	activity
+620	v2_348	2	2	IW_SSIM	D	activity
+621	v2_348	2	2	IW_ART	D	activity
+622	v2_348	2	2	IW_DET	D	activity
+623	v2_348	2	2	IW_MSE	D	activity
+624	v2_348	2	2	PJND_TRANSDUCER	D	activity
+625	v2_348	2	2	PJND_FRAGILITY	E	grad stencil
+626	v2_348	2	2	GMS	E	grad stencil
+627	v2_348	2	2	PJND_TRANSDUCER_LOW_K	D	activity
+628	v2_348	2	2	PJND_TRANSDUCER_HIGH_K	D	activity
+629	v2_348	2	2	BLOCKINESS	E	lattice pass
+630	v2_348	2	2	RINGING	D	activity+grad
+631	v2_348	2	2	BANDING	E	grad stencil
+632	v2_348	2	2	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+633	v2_348	3	0	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+634	v2_348	3	0	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+635	v2_348	3	0	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+636	v2_348	3	0	ART	C-blur	mu1,mu2,s,d
+637	v2_348	3	0	DET	C-blur	mu1,mu2,s,d
+638	v2_348	3	0	MSE	C-raw	s,d
+639	v2_348	3	0	HF_GAIN	C-blur	mu1,mu2,s,d
+640	v2_348	3	0	HF_LOSS	C-blur	mu1,mu2,s,d
+641	v2_348	3	0	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+642	v2_348	3	0	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+643	v2_348	3	0	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+644	v2_348	3	0	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+645	v2_348	3	0	MASKED_SSIM	D	activity
+646	v2_348	3	0	MASKED_ART	D	activity
+647	v2_348	3	0	MASKED_DET	D	activity
+648	v2_348	3	0	MASKED_MSE	D	activity
+649	v2_348	3	0	IW_SSIM	D	activity
+650	v2_348	3	0	IW_ART	D	activity
+651	v2_348	3	0	IW_DET	D	activity
+652	v2_348	3	0	IW_MSE	D	activity
+653	v2_348	3	0	PJND_TRANSDUCER	D	activity
+654	v2_348	3	0	PJND_FRAGILITY	E	grad stencil
+655	v2_348	3	0	GMS	E	grad stencil
+656	v2_348	3	0	PJND_TRANSDUCER_LOW_K	D	activity
+657	v2_348	3	0	PJND_TRANSDUCER_HIGH_K	D	activity
+658	v2_348	3	0	BLOCKINESS	E	lattice pass
+659	v2_348	3	0	RINGING	D	activity+grad
+660	v2_348	3	0	BANDING	E	grad stencil
+661	v2_348	3	0	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+662	v2_348	3	1	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+663	v2_348	3	1	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+664	v2_348	3	1	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+665	v2_348	3	1	ART	C-blur	mu1,mu2,s,d
+666	v2_348	3	1	DET	C-blur	mu1,mu2,s,d
+667	v2_348	3	1	MSE	C-raw	s,d
+668	v2_348	3	1	HF_GAIN	C-blur	mu1,mu2,s,d
+669	v2_348	3	1	HF_LOSS	C-blur	mu1,mu2,s,d
+670	v2_348	3	1	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+671	v2_348	3	1	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+672	v2_348	3	1	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+673	v2_348	3	1	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+674	v2_348	3	1	MASKED_SSIM	D	activity
+675	v2_348	3	1	MASKED_ART	D	activity
+676	v2_348	3	1	MASKED_DET	D	activity
+677	v2_348	3	1	MASKED_MSE	D	activity
+678	v2_348	3	1	IW_SSIM	D	activity
+679	v2_348	3	1	IW_ART	D	activity
+680	v2_348	3	1	IW_DET	D	activity
+681	v2_348	3	1	IW_MSE	D	activity
+682	v2_348	3	1	PJND_TRANSDUCER	D	activity
+683	v2_348	3	1	PJND_FRAGILITY	E	grad stencil
+684	v2_348	3	1	GMS	E	grad stencil
+685	v2_348	3	1	PJND_TRANSDUCER_LOW_K	D	activity
+686	v2_348	3	1	PJND_TRANSDUCER_HIGH_K	D	activity
+687	v2_348	3	1	BLOCKINESS	E	lattice pass
+688	v2_348	3	1	RINGING	D	activity+grad
+689	v2_348	3	1	BANDING	E	grad stencil
+690	v2_348	3	1	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+691	v2_348	3	2	SSIM_MEAN	C-blur	mu1,mu2,ssq,s12
+692	v2_348	3	2	SSIM_DEV2	C-blur	mu1,mu2,ssq,s12
+693	v2_348	3	2	SSIM_DEV4	C-blur	mu1,mu2,ssq,s12
+694	v2_348	3	2	ART	C-blur	mu1,mu2,s,d
+695	v2_348	3	2	DET	C-blur	mu1,mu2,s,d
+696	v2_348	3	2	MSE	C-raw	s,d
+697	v2_348	3	2	HF_GAIN	C-blur	mu1,mu2,s,d
+698	v2_348	3	2	HF_LOSS	C-blur	mu1,mu2,s,d
+699	v2_348	3	2	HF_MAG_LOSS	C-blur	mu1,mu2,s,d
+700	v2_348	3	2	SSIM_SOFT_PEAK	C-blur	mu1,mu2,ssq,s12
+701	v2_348	3	2	ART_SOFT_PEAK	C-blur	mu1,mu2,s,d
+702	v2_348	3	2	DET_SOFT_PEAK	C-blur	mu1,mu2,s,d
+703	v2_348	3	2	MASKED_SSIM	D	activity
+704	v2_348	3	2	MASKED_ART	D	activity
+705	v2_348	3	2	MASKED_DET	D	activity
+706	v2_348	3	2	MASKED_MSE	D	activity
+707	v2_348	3	2	IW_SSIM	D	activity
+708	v2_348	3	2	IW_ART	D	activity
+709	v2_348	3	2	IW_DET	D	activity
+710	v2_348	3	2	IW_MSE	D	activity
+711	v2_348	3	2	PJND_TRANSDUCER	D	activity
+712	v2_348	3	2	PJND_FRAGILITY	E	grad stencil
+713	v2_348	3	2	GMS	E	grad stencil
+714	v2_348	3	2	PJND_TRANSDUCER_LOW_K	D	activity
+715	v2_348	3	2	PJND_TRANSDUCER_HIGH_K	D	activity
+716	v2_348	3	2	BLOCKINESS	E	lattice pass
+717	v2_348	3	2	RINGING	D	activity+grad
+718	v2_348	3	2	BANDING	E	grad stencil
+719	v2_348	3	2	EDGE_WIDTH_CHANGE	E	grad stencil (2 scales)
+720	append_204	0	0	XMASK_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+721	append_204	0	0	LUM_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+722	append_204	0	0	LUM_DARK_ERR	C-xch	s,d,ref_y
+723	append_204	0	0	LUM_MID_ERR	C-xch	s,d,ref_y
+724	append_204	0	0	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+725	append_204	0	0	MSCN_DIFF_MEAN	D	bs2
+726	append_204	0	0	MSCN_DIFF_L2	D	bs2
+727	append_204	0	0	CONTRAST_GAIN	D	bs2
+728	append_204	0	0	CONTRAST_LOSS	D	bs2
+729	append_204	0	0	TEXTURE_DISSIM	D	bs2
+730	append_204	0	0	GMS_DEV2	E	grad stencil
+731	append_204	0	0	ART_DEV2	C-blur	mu1,mu2,s,d
+732	append_204	0	0	DET_DEV2	C-blur	mu1,mu2,s,d
+733	append_204	0	0	GLOBAL_DMEAN	C-raw	s,d
+734	append_204	0	0	GLOBAL_CGAIN	C-raw	s,d
+735	append_204	0	0	GLOBAL_CLOSS	C-raw	s,d
+736	append_204	0	0	GRAD_SRC_MEAN	E	grad stencil
+737	append_204	0	1	XMASK_TRANSDUCER	D	act_x,act_b (Y only)
+738	append_204	0	1	LUM_TRANSDUCER	D	activity,ref_y (Y only)
+739	append_204	0	1	LUM_DARK_ERR	C-xch	s,d,ref_y
+740	append_204	0	1	LUM_MID_ERR	C-xch	s,d,ref_y
+741	append_204	0	1	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+742	append_204	0	1	MSCN_DIFF_MEAN	D	bs2
+743	append_204	0	1	MSCN_DIFF_L2	D	bs2
+744	append_204	0	1	CONTRAST_GAIN	D	bs2
+745	append_204	0	1	CONTRAST_LOSS	D	bs2
+746	append_204	0	1	TEXTURE_DISSIM	D	bs2
+747	append_204	0	1	GMS_DEV2	E	grad stencil
+748	append_204	0	1	ART_DEV2	C-blur	mu1,mu2,s,d
+749	append_204	0	1	DET_DEV2	C-blur	mu1,mu2,s,d
+750	append_204	0	1	GLOBAL_DMEAN	C-raw	s,d
+751	append_204	0	1	GLOBAL_CGAIN	C-raw	s,d
+752	append_204	0	1	GLOBAL_CLOSS	C-raw	s,d
+753	append_204	0	1	GRAD_SRC_MEAN	E	grad stencil
+754	append_204	0	2	XMASK_TRANSDUCER	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+755	append_204	0	2	LUM_TRANSDUCER	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+756	append_204	0	2	LUM_DARK_ERR	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+757	append_204	0	2	LUM_MID_ERR	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+758	append_204	0	2	LUM_BRIGHT_ERR	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+759	append_204	0	2	MSCN_DIFF_MEAN	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+760	append_204	0	2	MSCN_DIFF_L2	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+761	append_204	0	2	CONTRAST_GAIN	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+762	append_204	0	2	CONTRAST_LOSS	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+763	append_204	0	2	TEXTURE_DISSIM	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+764	append_204	0	2	GMS_DEV2	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+765	append_204	0	2	ART_DEV2	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+766	append_204	0	2	DET_DEV2	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+767	append_204	0	2	GLOBAL_DMEAN	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+768	append_204	0	2	GLOBAL_CGAIN	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+769	append_204	0	2	GLOBAL_CLOSS	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+770	append_204	0	2	GRAD_SRC_MEAN	A0	APPEND_SKIP_B_SCALE0 -> 0 in the 944 tables too
+771	append_204	1	0	XMASK_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+772	append_204	1	0	LUM_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+773	append_204	1	0	LUM_DARK_ERR	C-xch	s,d,ref_y
+774	append_204	1	0	LUM_MID_ERR	C-xch	s,d,ref_y
+775	append_204	1	0	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+776	append_204	1	0	MSCN_DIFF_MEAN	D	bs2
+777	append_204	1	0	MSCN_DIFF_L2	D	bs2
+778	append_204	1	0	CONTRAST_GAIN	D	bs2
+779	append_204	1	0	CONTRAST_LOSS	D	bs2
+780	append_204	1	0	TEXTURE_DISSIM	D	bs2
+781	append_204	1	0	GMS_DEV2	E	grad stencil
+782	append_204	1	0	ART_DEV2	C-blur	mu1,mu2,s,d
+783	append_204	1	0	DET_DEV2	C-blur	mu1,mu2,s,d
+784	append_204	1	0	GLOBAL_DMEAN	C-raw	s,d
+785	append_204	1	0	GLOBAL_CGAIN	C-raw	s,d
+786	append_204	1	0	GLOBAL_CLOSS	C-raw	s,d
+787	append_204	1	0	GRAD_SRC_MEAN	E	grad stencil
+788	append_204	1	1	XMASK_TRANSDUCER	D	act_x,act_b (Y only)
+789	append_204	1	1	LUM_TRANSDUCER	D	activity,ref_y (Y only)
+790	append_204	1	1	LUM_DARK_ERR	C-xch	s,d,ref_y
+791	append_204	1	1	LUM_MID_ERR	C-xch	s,d,ref_y
+792	append_204	1	1	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+793	append_204	1	1	MSCN_DIFF_MEAN	D	bs2
+794	append_204	1	1	MSCN_DIFF_L2	D	bs2
+795	append_204	1	1	CONTRAST_GAIN	D	bs2
+796	append_204	1	1	CONTRAST_LOSS	D	bs2
+797	append_204	1	1	TEXTURE_DISSIM	D	bs2
+798	append_204	1	1	GMS_DEV2	E	grad stencil
+799	append_204	1	1	ART_DEV2	C-blur	mu1,mu2,s,d
+800	append_204	1	1	DET_DEV2	C-blur	mu1,mu2,s,d
+801	append_204	1	1	GLOBAL_DMEAN	C-raw	s,d
+802	append_204	1	1	GLOBAL_CGAIN	C-raw	s,d
+803	append_204	1	1	GLOBAL_CLOSS	C-raw	s,d
+804	append_204	1	1	GRAD_SRC_MEAN	E	grad stencil
+805	append_204	1	2	XMASK_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+806	append_204	1	2	LUM_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+807	append_204	1	2	LUM_DARK_ERR	C-xch	s,d,ref_y
+808	append_204	1	2	LUM_MID_ERR	C-xch	s,d,ref_y
+809	append_204	1	2	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+810	append_204	1	2	MSCN_DIFF_MEAN	D	bs2
+811	append_204	1	2	MSCN_DIFF_L2	D	bs2
+812	append_204	1	2	CONTRAST_GAIN	D	bs2
+813	append_204	1	2	CONTRAST_LOSS	D	bs2
+814	append_204	1	2	TEXTURE_DISSIM	D	bs2
+815	append_204	1	2	GMS_DEV2	E	grad stencil
+816	append_204	1	2	ART_DEV2	C-blur	mu1,mu2,s,d
+817	append_204	1	2	DET_DEV2	C-blur	mu1,mu2,s,d
+818	append_204	1	2	GLOBAL_DMEAN	C-raw	s,d
+819	append_204	1	2	GLOBAL_CGAIN	C-raw	s,d
+820	append_204	1	2	GLOBAL_CLOSS	C-raw	s,d
+821	append_204	1	2	GRAD_SRC_MEAN	E	grad stencil
+822	append_204	2	0	XMASK_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+823	append_204	2	0	LUM_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+824	append_204	2	0	LUM_DARK_ERR	C-xch	s,d,ref_y
+825	append_204	2	0	LUM_MID_ERR	C-xch	s,d,ref_y
+826	append_204	2	0	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+827	append_204	2	0	MSCN_DIFF_MEAN	D	bs2
+828	append_204	2	0	MSCN_DIFF_L2	D	bs2
+829	append_204	2	0	CONTRAST_GAIN	D	bs2
+830	append_204	2	0	CONTRAST_LOSS	D	bs2
+831	append_204	2	0	TEXTURE_DISSIM	D	bs2
+832	append_204	2	0	GMS_DEV2	E	grad stencil
+833	append_204	2	0	ART_DEV2	C-blur	mu1,mu2,s,d
+834	append_204	2	0	DET_DEV2	C-blur	mu1,mu2,s,d
+835	append_204	2	0	GLOBAL_DMEAN	C-raw	s,d
+836	append_204	2	0	GLOBAL_CGAIN	C-raw	s,d
+837	append_204	2	0	GLOBAL_CLOSS	C-raw	s,d
+838	append_204	2	0	GRAD_SRC_MEAN	E	grad stencil
+839	append_204	2	1	XMASK_TRANSDUCER	D	act_x,act_b (Y only)
+840	append_204	2	1	LUM_TRANSDUCER	D	activity,ref_y (Y only)
+841	append_204	2	1	LUM_DARK_ERR	C-xch	s,d,ref_y
+842	append_204	2	1	LUM_MID_ERR	C-xch	s,d,ref_y
+843	append_204	2	1	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+844	append_204	2	1	MSCN_DIFF_MEAN	D	bs2
+845	append_204	2	1	MSCN_DIFF_L2	D	bs2
+846	append_204	2	1	CONTRAST_GAIN	D	bs2
+847	append_204	2	1	CONTRAST_LOSS	D	bs2
+848	append_204	2	1	TEXTURE_DISSIM	D	bs2
+849	append_204	2	1	GMS_DEV2	E	grad stencil
+850	append_204	2	1	ART_DEV2	C-blur	mu1,mu2,s,d
+851	append_204	2	1	DET_DEV2	C-blur	mu1,mu2,s,d
+852	append_204	2	1	GLOBAL_DMEAN	C-raw	s,d
+853	append_204	2	1	GLOBAL_CGAIN	C-raw	s,d
+854	append_204	2	1	GLOBAL_CLOSS	C-raw	s,d
+855	append_204	2	1	GRAD_SRC_MEAN	E	grad stencil
+856	append_204	2	2	XMASK_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+857	append_204	2	2	LUM_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+858	append_204	2	2	LUM_DARK_ERR	C-xch	s,d,ref_y
+859	append_204	2	2	LUM_MID_ERR	C-xch	s,d,ref_y
+860	append_204	2	2	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+861	append_204	2	2	MSCN_DIFF_MEAN	D	bs2
+862	append_204	2	2	MSCN_DIFF_L2	D	bs2
+863	append_204	2	2	CONTRAST_GAIN	D	bs2
+864	append_204	2	2	CONTRAST_LOSS	D	bs2
+865	append_204	2	2	TEXTURE_DISSIM	D	bs2
+866	append_204	2	2	GMS_DEV2	E	grad stencil
+867	append_204	2	2	ART_DEV2	C-blur	mu1,mu2,s,d
+868	append_204	2	2	DET_DEV2	C-blur	mu1,mu2,s,d
+869	append_204	2	2	GLOBAL_DMEAN	C-raw	s,d
+870	append_204	2	2	GLOBAL_CGAIN	C-raw	s,d
+871	append_204	2	2	GLOBAL_CLOSS	C-raw	s,d
+872	append_204	2	2	GRAD_SRC_MEAN	E	grad stencil
+873	append_204	3	0	XMASK_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+874	append_204	3	0	LUM_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+875	append_204	3	0	LUM_DARK_ERR	C-xch	s,d,ref_y
+876	append_204	3	0	LUM_MID_ERR	C-xch	s,d,ref_y
+877	append_204	3	0	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+878	append_204	3	0	MSCN_DIFF_MEAN	D	bs2
+879	append_204	3	0	MSCN_DIFF_L2	D	bs2
+880	append_204	3	0	CONTRAST_GAIN	D	bs2
+881	append_204	3	0	CONTRAST_LOSS	D	bs2
+882	append_204	3	0	TEXTURE_DISSIM	D	bs2
+883	append_204	3	0	GMS_DEV2	E	grad stencil
+884	append_204	3	0	ART_DEV2	C-blur	mu1,mu2,s,d
+885	append_204	3	0	DET_DEV2	C-blur	mu1,mu2,s,d
+886	append_204	3	0	GLOBAL_DMEAN	C-raw	s,d
+887	append_204	3	0	GLOBAL_CGAIN	C-raw	s,d
+888	append_204	3	0	GLOBAL_CLOSS	C-raw	s,d
+889	append_204	3	0	GRAD_SRC_MEAN	E	grad stencil
+890	append_204	3	1	XMASK_TRANSDUCER	D	act_x,act_b (Y only)
+891	append_204	3	1	LUM_TRANSDUCER	D	activity,ref_y (Y only)
+892	append_204	3	1	LUM_DARK_ERR	C-xch	s,d,ref_y
+893	append_204	3	1	LUM_MID_ERR	C-xch	s,d,ref_y
+894	append_204	3	1	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+895	append_204	3	1	MSCN_DIFF_MEAN	D	bs2
+896	append_204	3	1	MSCN_DIFF_L2	D	bs2
+897	append_204	3	1	CONTRAST_GAIN	D	bs2
+898	append_204	3	1	CONTRAST_LOSS	D	bs2
+899	append_204	3	1	TEXTURE_DISSIM	D	bs2
+900	append_204	3	1	GMS_DEV2	E	grad stencil
+901	append_204	3	1	ART_DEV2	C-blur	mu1,mu2,s,d
+902	append_204	3	1	DET_DEV2	C-blur	mu1,mu2,s,d
+903	append_204	3	1	GLOBAL_DMEAN	C-raw	s,d
+904	append_204	3	1	GLOBAL_CGAIN	C-raw	s,d
+905	append_204	3	1	GLOBAL_CLOSS	C-raw	s,d
+906	append_204	3	1	GRAD_SRC_MEAN	E	grad stencil
+907	append_204	3	2	XMASK_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+908	append_204	3	2	LUM_TRANSDUCER	A0	cross-channel cell, 0 for ch != Y
+909	append_204	3	2	LUM_DARK_ERR	C-xch	s,d,ref_y
+910	append_204	3	2	LUM_MID_ERR	C-xch	s,d,ref_y
+911	append_204	3	2	LUM_BRIGHT_ERR	C-xch	s,d,ref_y
+912	append_204	3	2	MSCN_DIFF_MEAN	D	bs2
+913	append_204	3	2	MSCN_DIFF_L2	D	bs2
+914	append_204	3	2	CONTRAST_GAIN	D	bs2
+915	append_204	3	2	CONTRAST_LOSS	D	bs2
+916	append_204	3	2	TEXTURE_DISSIM	D	bs2
+917	append_204	3	2	GMS_DEV2	E	grad stencil
+918	append_204	3	2	ART_DEV2	C-blur	mu1,mu2,s,d
+919	append_204	3	2	DET_DEV2	C-blur	mu1,mu2,s,d
+920	append_204	3	2	GLOBAL_DMEAN	C-raw	s,d
+921	append_204	3	2	GLOBAL_CGAIN	C-raw	s,d
+922	append_204	3	2	GLOBAL_CLOSS	C-raw	s,d
+923	append_204	3	2	GRAD_SRC_MEAN	E	grad stencil
+924	append2_20	0	1	BANDVIS_GAIN	D	activity + 2nd-difference stencil (Y)
+925	append2_20	0	1	BANDVIS_LOSS	D	activity + 2nd-difference stencil (Y)
+926	append2_20	0	1	LUMA_MEAN_REF	C-raw	s (Y)
+927	append2_20	0	1	HL_BIN1	A0	HDR-route only -> 0 on SDR
+928	append2_20	0	1	HL_BIN2	A0	HDR-route only -> 0 on SDR
+929	append2_20	1	1	BANDVIS_GAIN	D	activity + 2nd-difference stencil (Y)
+930	append2_20	1	1	BANDVIS_LOSS	D	activity + 2nd-difference stencil (Y)
+931	append2_20	1	1	LUMA_MEAN_REF	C-raw	s (Y)
+932	append2_20	1	1	HL_BIN1	A0	HDR-route only -> 0 on SDR
+933	append2_20	1	1	HL_BIN2	A0	HDR-route only -> 0 on SDR
+934	append2_20	2	1	BANDVIS_GAIN	D	activity + 2nd-difference stencil (Y)
+935	append2_20	2	1	BANDVIS_LOSS	D	activity + 2nd-difference stencil (Y)
+936	append2_20	2	1	LUMA_MEAN_REF	C-raw	s (Y)
+937	append2_20	2	1	HL_BIN1	A0	HDR-route only -> 0 on SDR
+938	append2_20	2	1	HL_BIN2	A0	HDR-route only -> 0 on SDR
+939	append2_20	3	1	BANDVIS_GAIN	D	activity + 2nd-difference stencil (Y)
+940	append2_20	3	1	BANDVIS_LOSS	D	activity + 2nd-difference stencil (Y)
+941	append2_20	3	1	LUMA_MEAN_REF	C-raw	s (Y)
+942	append2_20	3	1	HL_BIN1	A0	HDR-route only -> 0 on SDR
+943	append2_20	3	1	HL_BIN2	A0	HDR-route only -> 0 on SDR

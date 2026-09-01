@@ -45,7 +45,10 @@ echo "[build] $BIN" | tee -a "$LOG"
 
 printf 'size\tthreads\tarm\tstart\tmin_ms\tmedian_ms\tload1\n' > "$TSV"
 echo "[run] starts=$STARTS iters=$ITERS sizes='$SIZES' threads='$THREADS' arms='$ARMS'" | tee -a "$LOG"
-echo "[run] commit $(cd "$REPO" && git rev-parse --short HEAD)  host $(hostname)  $(date -u +%FT%TZ)" | tee -a "$LOG"
+# jj workspaces have no .git of their own, so ask jj first and fall back to git.
+REV=$( (cd "$REPO" && jj log -r @- --no-graph -T 'commit_id.short()' 2>/dev/null) \
+       || (cd "$REPO" && git rev-parse --short HEAD 2>/dev/null) || echo unknown )
+echo "[run] commit $REV  host $(hostname)  $(date -u +%FT%TZ)" | tee -a "$LOG"
 
 for size in $SIZES; do
   for th in $THREADS; do

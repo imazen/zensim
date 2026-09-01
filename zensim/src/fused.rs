@@ -295,6 +295,10 @@ fn fused_vblur_ssim_inner_v4(
         let mut sum_m2 = f32x16::zero(token);
         let mut sum_sq = f32x16::zero(token);
         let mut sum_s12 = f32x16::zero(token);
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x16::zero(token), f32x16::zero(token), f32x16::zero(token), f32x16::zero(token));
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -389,14 +393,29 @@ fn fused_vblur_ssim_inner_v4(
                 // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
                 // and append2's LUMA_MEAN_REF, which are the only 944 slots
                 // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). Same per-row
-                // f64-reduce shape as every accumulator above it, so this
-                // introduces no new accumulation shape.
+                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
+                // f64-reduce accumulator above it, this vector-adds across
+                // rows (`fm_*`) with no per-row reduce_add, then reduces
+                // ONCE at the band's last inner row — reduce_add is a
+                // horizontal SIMD op, so 4 of them every row (one per
+                // accumulator) is the shape this avoids; the doc above
+                // prices the result. The vector sum is bounded to
+                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
+                // so the reorder costs negligible precision: worst |Δ| vs
+                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
+                // ~2 orders below the module's 5e-4 tolerance
+                // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    acc.sum_s += s.reduce_add() as f64;
-                    acc.sum_d += d.reduce_add() as f64;
-                    acc.sum_s2 += (s * s).reduce_add() as f64;
-                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                    fm_s = fm_s + s;
+                    fm_d = fm_d + d;
+                    fm_s2 = fm_s2 + s * s;
+                    fm_d2 = fm_d2 + d * d;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s.reduce_add() as f64;
+                        acc.sum_d += fm_d.reduce_add() as f64;
+                        acc.sum_s2 += fm_s2.reduce_add() as f64;
+                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                    }
                 }
             }
 
@@ -438,6 +457,10 @@ fn fused_vblur_ssim_inner_v4(
         let mut sum_m2 = f32x8::zero(v3);
         let mut sum_sq = f32x8::zero(v3);
         let mut sum_s12 = f32x8::zero(v3);
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x8::zero(v3), f32x8::zero(v3), f32x8::zero(v3), f32x8::zero(v3));
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -524,14 +547,29 @@ fn fused_vblur_ssim_inner_v4(
                 // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
                 // and append2's LUMA_MEAN_REF, which are the only 944 slots
                 // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). Same per-row
-                // f64-reduce shape as every accumulator above it, so this
-                // introduces no new accumulation shape.
+                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
+                // f64-reduce accumulator above it, this vector-adds across
+                // rows (`fm_*`) with no per-row reduce_add, then reduces
+                // ONCE at the band's last inner row — reduce_add is a
+                // horizontal SIMD op, so 4 of them every row (one per
+                // accumulator) is the shape this avoids; the doc above
+                // prices the result. The vector sum is bounded to
+                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
+                // so the reorder costs negligible precision: worst |Δ| vs
+                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
+                // ~2 orders below the module's 5e-4 tolerance
+                // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    acc.sum_s += s.reduce_add() as f64;
-                    acc.sum_d += d.reduce_add() as f64;
-                    acc.sum_s2 += (s * s).reduce_add() as f64;
-                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                    fm_s = fm_s + s;
+                    fm_d = fm_d + d;
+                    fm_s2 = fm_s2 + s * s;
+                    fm_d2 = fm_d2 + d * d;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s.reduce_add() as f64;
+                        acc.sum_d += fm_d.reduce_add() as f64;
+                        acc.sum_s2 += fm_s2.reduce_add() as f64;
+                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                    }
                 }
             }
 
@@ -559,6 +597,10 @@ fn fused_vblur_ssim_inner_v4(
         let mut sum_m2 = 0.0f32;
         let mut sum_sq = 0.0f32;
         let mut sum_s12 = 0.0f32;
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -639,10 +681,16 @@ fn fused_vblur_ssim_inner_v4(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    acc.sum_s += sv as f64;
-                    acc.sum_d += dv as f64;
-                    acc.sum_s2 += (sv * sv) as f64;
-                    acc.sum_d2 += (dv * dv) as f64;
+                    fm_s += sv;
+                    fm_d += dv;
+                    fm_s2 += sv * sv;
+                    fm_d2 += dv * dv;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s as f64;
+                        acc.sum_d += fm_d as f64;
+                        acc.sum_s2 += fm_s2 as f64;
+                        acc.sum_d2 += fm_d2 as f64;
+                    }
                 }
             }
 
@@ -706,6 +754,10 @@ fn fused_vblur_ssim_inner_v4x(
         let mut sum_m2 = f32x16::zero(token);
         let mut sum_sq = f32x16::zero(token);
         let mut sum_s12 = f32x16::zero(token);
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x16::zero(token), f32x16::zero(token), f32x16::zero(token), f32x16::zero(token));
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -800,14 +852,29 @@ fn fused_vblur_ssim_inner_v4x(
                 // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
                 // and append2's LUMA_MEAN_REF, which are the only 944 slots
                 // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). Same per-row
-                // f64-reduce shape as every accumulator above it, so this
-                // introduces no new accumulation shape.
+                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
+                // f64-reduce accumulator above it, this vector-adds across
+                // rows (`fm_*`) with no per-row reduce_add, then reduces
+                // ONCE at the band's last inner row — reduce_add is a
+                // horizontal SIMD op, so 4 of them every row (one per
+                // accumulator) is the shape this avoids; the doc above
+                // prices the result. The vector sum is bounded to
+                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
+                // so the reorder costs negligible precision: worst |Δ| vs
+                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
+                // ~2 orders below the module's 5e-4 tolerance
+                // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    acc.sum_s += s.reduce_add() as f64;
-                    acc.sum_d += d.reduce_add() as f64;
-                    acc.sum_s2 += (s * s).reduce_add() as f64;
-                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                    fm_s = fm_s + s;
+                    fm_d = fm_d + d;
+                    fm_s2 = fm_s2 + s * s;
+                    fm_d2 = fm_d2 + d * d;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s.reduce_add() as f64;
+                        acc.sum_d += fm_d.reduce_add() as f64;
+                        acc.sum_s2 += fm_s2.reduce_add() as f64;
+                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                    }
                 }
             }
 
@@ -849,6 +916,10 @@ fn fused_vblur_ssim_inner_v4x(
         let mut sum_m2 = f32x8::zero(v3);
         let mut sum_sq = f32x8::zero(v3);
         let mut sum_s12 = f32x8::zero(v3);
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x8::zero(v3), f32x8::zero(v3), f32x8::zero(v3), f32x8::zero(v3));
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -935,14 +1006,29 @@ fn fused_vblur_ssim_inner_v4x(
                 // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
                 // and append2's LUMA_MEAN_REF, which are the only 944 slots
                 // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). Same per-row
-                // f64-reduce shape as every accumulator above it, so this
-                // introduces no new accumulation shape.
+                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
+                // f64-reduce accumulator above it, this vector-adds across
+                // rows (`fm_*`) with no per-row reduce_add, then reduces
+                // ONCE at the band's last inner row — reduce_add is a
+                // horizontal SIMD op, so 4 of them every row (one per
+                // accumulator) is the shape this avoids; the doc above
+                // prices the result. The vector sum is bounded to
+                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
+                // so the reorder costs negligible precision: worst |Δ| vs
+                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
+                // ~2 orders below the module's 5e-4 tolerance
+                // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    acc.sum_s += s.reduce_add() as f64;
-                    acc.sum_d += d.reduce_add() as f64;
-                    acc.sum_s2 += (s * s).reduce_add() as f64;
-                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                    fm_s = fm_s + s;
+                    fm_d = fm_d + d;
+                    fm_s2 = fm_s2 + s * s;
+                    fm_d2 = fm_d2 + d * d;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s.reduce_add() as f64;
+                        acc.sum_d += fm_d.reduce_add() as f64;
+                        acc.sum_s2 += fm_s2.reduce_add() as f64;
+                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                    }
                 }
             }
 
@@ -970,6 +1056,10 @@ fn fused_vblur_ssim_inner_v4x(
         let mut sum_m2 = 0.0f32;
         let mut sum_sq = 0.0f32;
         let mut sum_s12 = 0.0f32;
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -1050,10 +1140,16 @@ fn fused_vblur_ssim_inner_v4x(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    acc.sum_s += sv as f64;
-                    acc.sum_d += dv as f64;
-                    acc.sum_s2 += (sv * sv) as f64;
-                    acc.sum_d2 += (dv * dv) as f64;
+                    fm_s += sv;
+                    fm_d += dv;
+                    fm_s2 += sv * sv;
+                    fm_d2 += dv * dv;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s as f64;
+                        acc.sum_d += fm_d as f64;
+                        acc.sum_s2 += fm_s2 as f64;
+                        acc.sum_d2 += fm_d2 as f64;
+                    }
                 }
             }
 
@@ -1119,6 +1215,10 @@ fn fused_vblur_ssim_inner_v3(
         let mut sum_m2 = f32x8::zero(token);
         let mut sum_sq = f32x8::zero(token);
         let mut sum_s12 = f32x8::zero(token);
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x8::zero(token), f32x8::zero(token), f32x8::zero(token), f32x8::zero(token));
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -1206,14 +1306,29 @@ fn fused_vblur_ssim_inner_v3(
                 // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
                 // and append2's LUMA_MEAN_REF, which are the only 944 slots
                 // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). Same per-row
-                // f64-reduce shape as every accumulator above it, so this
-                // introduces no new accumulation shape.
+                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
+                // f64-reduce accumulator above it, this vector-adds across
+                // rows (`fm_*`) with no per-row reduce_add, then reduces
+                // ONCE at the band's last inner row — reduce_add is a
+                // horizontal SIMD op, so 4 of them every row (one per
+                // accumulator) is the shape this avoids; the doc above
+                // prices the result. The vector sum is bounded to
+                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
+                // so the reorder costs negligible precision: worst |Δ| vs
+                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
+                // ~2 orders below the module's 5e-4 tolerance
+                // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    acc.sum_s += s.reduce_add() as f64;
-                    acc.sum_d += d.reduce_add() as f64;
-                    acc.sum_s2 += (s * s).reduce_add() as f64;
-                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                    fm_s = fm_s + s;
+                    fm_d = fm_d + d;
+                    fm_s2 = fm_s2 + s * s;
+                    fm_d2 = fm_d2 + d * d;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s.reduce_add() as f64;
+                        acc.sum_d += fm_d.reduce_add() as f64;
+                        acc.sum_s2 += fm_s2.reduce_add() as f64;
+                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                    }
                 }
             }
 
@@ -1241,6 +1356,10 @@ fn fused_vblur_ssim_inner_v3(
         let mut sum_m2 = 0.0f32;
         let mut sum_sq = 0.0f32;
         let mut sum_s12 = 0.0f32;
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -1321,10 +1440,16 @@ fn fused_vblur_ssim_inner_v3(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    acc.sum_s += sv as f64;
-                    acc.sum_d += dv as f64;
-                    acc.sum_s2 += (sv * sv) as f64;
-                    acc.sum_d2 += (dv * dv) as f64;
+                    fm_s += sv;
+                    fm_d += dv;
+                    fm_s2 += sv * sv;
+                    fm_d2 += dv * dv;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s as f64;
+                        acc.sum_d += fm_d as f64;
+                        acc.sum_s2 += fm_s2 as f64;
+                        acc.sum_d2 += fm_d2 as f64;
+                    }
                 }
             }
 
@@ -1392,6 +1517,10 @@ fn fused_vblur_ssim_inner(
         let mut sum_m2_a = [0.0f32; 8];
         let mut sum_sq_a = [0.0f32; 8];
         let mut sum_s12_a = [0.0f32; 8];
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x8::zero(token), f32x8::zero(token), f32x8::zero(token), f32x8::zero(token));
 
         // Initialize running sums
         {
@@ -1494,14 +1623,29 @@ fn fused_vblur_ssim_inner(
                 // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
                 // and append2's LUMA_MEAN_REF, which are the only 944 slots
                 // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). Same per-row
-                // f64-reduce shape as every accumulator above it, so this
-                // introduces no new accumulation shape.
+                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
+                // f64-reduce accumulator above it, this vector-adds across
+                // rows (`fm_*`) with no per-row reduce_add, then reduces
+                // ONCE at the band's last inner row — reduce_add is a
+                // horizontal SIMD op, so 4 of them every row (one per
+                // accumulator) is the shape this avoids; the doc above
+                // prices the result. The vector sum is bounded to
+                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
+                // so the reorder costs negligible precision: worst |Δ| vs
+                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
+                // ~2 orders below the module's 5e-4 tolerance
+                // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    acc.sum_s += s.reduce_add() as f64;
-                    acc.sum_d += d.reduce_add() as f64;
-                    acc.sum_s2 += (s * s).reduce_add() as f64;
-                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                    fm_s = fm_s + s;
+                    fm_d = fm_d + d;
+                    fm_s2 = fm_s2 + s * s;
+                    fm_d2 = fm_d2 + d * d;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s.reduce_add() as f64;
+                        acc.sum_d += fm_d.reduce_add() as f64;
+                        acc.sum_s2 += fm_s2.reduce_add() as f64;
+                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                    }
                 }
             }
 
@@ -1536,6 +1680,10 @@ fn fused_vblur_ssim_inner(
         let mut sum_m2 = 0.0f32;
         let mut sum_sq = 0.0f32;
         let mut sum_s12 = 0.0f32;
+        // Free raw moments: one lane accumulator per column group, reduced
+        // at the band's last inner row (see `raw_moments`). Dead code when
+        // the caller did not ask.
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -1616,10 +1764,16 @@ fn fused_vblur_ssim_inner(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    acc.sum_s += sv as f64;
-                    acc.sum_d += dv as f64;
-                    acc.sum_s2 += (sv * sv) as f64;
-                    acc.sum_d2 += (dv * dv) as f64;
+                    fm_s += sv;
+                    fm_d += dv;
+                    fm_s2 += sv * sv;
+                    fm_d2 += dv * dv;
+                    if y + 1 == inner_end {
+                        acc.sum_s += fm_s as f64;
+                        acc.sum_d += fm_d as f64;
+                        acc.sum_s2 += fm_s2 as f64;
+                        acc.sum_d2 += fm_d2 as f64;
+                    }
                 }
             }
 
