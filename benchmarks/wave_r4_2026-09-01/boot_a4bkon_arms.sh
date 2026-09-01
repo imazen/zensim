@@ -7,7 +7,7 @@ set -euo pipefail
 REPO=/home/lilith/work/zen/zensim--a4bkon
 cd "$REPO"
 export O=/mnt/v/output/zensim/a4bkon-2026-09-01
-export ARMS="K1_w1.8_s4004 K1_w1.8_s4005 K1_w2.4_s4004 K1_w2.4_s4005 K2_s4004 K2_s4005 K4"
+export ARMS="K1_w1.8_s4004 K1_w1.8_s4005 K1_w2.4_s4004 K1_w2.4_s4005 K2_s4004 K2_s4005 K3_s4004 K3_s4005 K4"
 # zen_stats.py's auto-discovery doesn't know about the wave-r4 build tree.
 export ZEN_PANEL_BIN=/mnt/v/zen/cargo-targets/waver4/release/panel
 OUTLOG=/mnt/v/output/zensim/a4bkon-2026-09-01/paired_boot_a4bkon.txt
