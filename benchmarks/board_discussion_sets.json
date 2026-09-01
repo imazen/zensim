@@ -133,6 +133,32 @@
     "a4bkon_K3_s4005"
    ],
    "note": "K1 (kon-mass sweep, w1.8/2.4), K2 (ttbig mixed-teacher leg) and K3 (combined) all fail to close A4b's KonJND-only W1 gap (wave_r4_2026-09-01.md §24): K1/K3 make KonJND WORSE (-0.077 to -0.086 vs A4b), K2 is a statistical wash (-0.001) but costs composite + a within-image CID22 axis A4b itself passes. A4b/K4 (=A4b_s4004 here) remains the best 156+free profile produced, composite 0.8664. W4 (AMENDMENT B2, <=1.25x add156_156basic) directly measured: clean PASS at 1T every size; 8T PASSES 576/2304 but FAILS 1152 (1.4375-1.4583x, repeatable). Closing verdict: ssim2_replacement_bar_2026-08-31.md APPENDIX C."
+  },
+  {
+   "id": "2026-09-01-wave-r4",
+   "date": "2026-09-01",
+   "label": "2026-09-01 · wave-r4 era-2×radius-4 retrain — nothing passes W1–W7 (14 arms promoted)",
+   "bakes": [
+    "A1foldapp2_r4_s4004",
+    "A1foldapp2_r4_s4005",
+    "A2_r4",
+    "A2b_l0.002",
+    "A2b_l0.3",
+    "A2ctrl_l0.3",
+    "A3_r4_s4004",
+    "A3_r4_s4005",
+    "A3b_s4004",
+    "A4_r4_s4004",
+    "A4b_s4004",
+    "A5_r4_s4004",
+    "A5_r4_s4005",
+    "A6_l002",
+    "A6_l3",
+    "W10L9PH_s4004_packed",
+    "ADD156_safesyn_only_raw_lasso",
+    "peer_ssim2"
+   ],
+   "note": "wave_r4_2026-09-01.md §19 closing exam: NOTHING in this wave passes W1–W7 against peer_ssim2, matching the exam's own pre-registered expectation. 16 fullevals existed on disk; 14 promoted here (A4b_s4004 already on the board, sha256-identical, promoted earlier this session as K4 in the a4bkon lane -- not re-promoted; A1_r4_s4004 SKIPPED -- it is the pre-fix wrong-regime diagnostic run §7.3/§7.6 explicitly says is 'not cited' (best_val 0.3058, dial-mono 0.9271 below the 0.93 gate, silently fell back to the era-1 features root) and is kept on disk only as regime-mismatch evidence, not a candidate arm; the doc's real A1 flagship citation is A1foldapp2_r4_s4004/s4005, both promoted). Two honest rankings: A5 s4005 (944, kon w=2.4) is the cleanest W1 profile in the whole wave (its only miss is the same raw-delta KonJND edge every 944-class arm shows, Δ−0.0195, CID22 flat); A4b (156+free, distill target, teacher HYA_w084) is the cleanest in the 156-class-ish family, matching A1foldapp2's own single-axis KonJND-only failure shape at roughly a fifth of the 944-class extraction cost, and posts the highest product composite of any arm scored this wave (0.8664, beating the 944 teacher's own 0.8601). A6 (196k safesyn leg, §21) is the wave's biggest single lever: +0.0617 CID22 over its 111k control (A2) at λ=0.002 and +0.023 at λ=0.3, cross-checking the hybrid lane's independent +0.057 citation within 0.005. The free-set (156+free) family wins on every axis over its 156-only control at zero extra training-data cost: A2b vs A2ctrl at matched λ=0.3, CID22 +0.031, KonJND +0.071, CSIQ +0.025, hfnl_cid22band +0.05 pooled (§14.2) -- though both still fail W6's 0.85 nonphoto floor, the one axis where architecture class (additive vs MLP) decides regardless of slice width. W4: every 944-class arm (A1foldapp2, A5) fails structurally at both 1T and 8T (worse threaded, 2.1–4.1x over the 1.25x bar); every 156-class arm (A2/A2ctrl/A3/A4/A6) passes by architecture-class construction; the two free-set MLPs (A3b/A4b) pass evidence-backed (~5–7% over the add156_156basic walk, not a direct bench-measured arm) rather than automatically. W7 (default-build reachability) fails for every arm in this wave -- none is wired into a ZensimProfile variant; that remains a follow-up product decision, out of scope here. Two data-integrity bugs this wave found and fixed in-flight, both flagged in §7: the wave root's regime didn't match the flagship recipe's training regime (foldapp2pools vs foldapp2, §7.3), and kadid_pairs_ab.tsv still carries the pre-2026-08-05 INVERTED KADID target so any fresh extraction re-introduces the bug until the TSV itself is fixed at its owner (§7.4)."
   }
  ]
 }
