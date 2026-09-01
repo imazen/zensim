@@ -13,6 +13,39 @@ change how its published numbers should be read.
 
 **14 defects, D1–D14 (§2), 5 ship-blocking or high.**
 
+> **REMEDIATION LANDED 2026-08-31** (commits `5dd4d4e9` D9, `cb76bd5c` D10,
+> `6e508793` D2, `be6ba6c2` D4, `0753275a` D3, `7cb78395` D7; zenmetrics
+> `e4bb566b`+`fc971815` D14). Each carries a test that fails before the fix.
+> **Three of this document's findings did not survive contact with the code and
+> are corrected below — read the corrections before citing the defect:**
+>
+> * **D3 is FALSIFIED.** `freeze_check` compares `class` against
+>   `"944-ensemble"` and nothing else; `"era-bridge"` is tested nowhere, and
+>   selectability is `m3a != Unmeasured && n_pass > 0`, in which the class is not
+>   a term. `--select` on the board fullevals does not merely permit ADD156, it
+>   prints **`SELECTED: ADD156_safesyn_only_raw_lasso — 6/8 floors,
+>   selection_composite 0.9644`**, ahead of shipped `B` at 0.9151 — both stamped
+>   `era-bridge`. The "NO" in §1.2 came from *this audit's own* ad-hoc fulleval
+>   omitting `m3a_coherence`, the value §1.6 measured at 0.9641. The genuinely
+>   misleading part — a class note reading "never shortlisted" — is fixed.
+>   Registered: `add156-audit-d3-unselectable-falsified-2026-08-31`.
+> * **D7 §1.4 understates the defect and mis-names the symptom.** G-RANGE fails
+>   **8 of 14** corpora, not 4 of 8 (LIVE/CSIQ/KADID/TID also fail). And
+>   `n_feature_bounds: 0` is not the difference from `B` — **`B` reports 0 too**;
+>   the guard rides in 372 `feature_transforms` `winsor_p99` entries. The
+>   spline-top half of the fix is rank-EXACT and closes the 100 %-above-knot
+>   near-lossless row for free; the winsor half costs LIVE −0.045 / KADID −0.036
+>   / TID −0.026 and is left as a user-gated trade.
+>   See `benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md`.
+> * **D10 is larger than filed.** Beyond the 3 out-of-array findings, **19 of 42**
+>   entries carried a `scope` the matcher cannot evaluate, so they matched zero
+>   cells: **22 of 45 findings were invisible to the gate**, not 3.
+>
+> Two defects found *during* remediation and NOT fixed: `pack` always refits the
+> spline, so it **erases** a D7 spline extension (byte-identical to the packed
+> baseline) and no packed ADD156 can pass G-RANGE today; and a spline **bottom**
+> extension has no owner. D1 is unchanged and still needs public-API approval.
+
 Audited bake: `/mnt/v/output/zensim/corr-lq/ADD156_safesyn_only_raw_lasso.bin`,
 3,575 B, sha256 `51437a34f04887ce850b25eff4f72a6bcd12926873ce060a12878d558a7517db`.
 Control: shipped **B** (`b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin`),
