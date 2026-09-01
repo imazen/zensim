@@ -165,12 +165,18 @@ fn usage() -> ! {
 // flattered / absent-not-failed numbers are never read as clean wins. Schema
 // documented in the registry file's `_schema` header. ──────────────────────
 #[derive(Clone)]
+#[derive(Debug)]
 struct AnnEntry {
     id: String,
     kind: String, // "invalidated" | "annotated" | "absent-not-failed"
     fields: Vec<String>,
     scope: serde_json::Value,
     reason: String,
+    /// Documentation-only finding: its `scope` carries no machine predicate
+    /// (`{"manual": …}`), so it never applies to a cell. It is still LOADED
+    /// and SURFACED — the point of the D10 fix is that a finding the matcher
+    /// cannot evaluate must be visible, not silently inert.
+    manual: bool,
 }
 
 /// Dot-path presence: absent key OR explicit null ⇒ not present.
@@ -187,6 +193,11 @@ fn field_present(v: &serde_json::Value, dotpath: &str) -> bool {
 
 /// Scope predicate: exactly one of missing / present / names / all.
 fn ann_matches(v: &serde_json::Value, e: &AnnEntry) -> bool {
+    // A documentation-only finding has no machine predicate and applies to
+    // nothing — explicitly, rather than by falling through the match arms.
+    if e.manual {
+        return false;
+    }
     if let Some(p) = e.scope.get("missing").and_then(|x| x.as_str()) {
         return !field_present(v, p);
     }
@@ -212,20 +223,116 @@ fn ann_covers(entry_field: &str, floor_field: &str) -> bool {
             && floor_field.as_bytes().get(entry_field.len()) == Some(&b'.'))
 }
 
+/// The only top-level keys the registry may carry. Anything else is a
+/// finding that was written OUTSIDE `entries[]` and would be dropped.
+const ANN_TOP_LEVEL_KEYS: [&str; 2] = ["_schema", "entries"];
+/// Scope predicates `ann_matches` can evaluate.
+const ANN_SCOPE_PREDICATES: [&str; 4] = ["missing", "present", "names", "all"];
+/// Explicit "no machine predicate — documentation only" scope form.
+const ANN_SCOPE_MANUAL: &str = "manual";
+/// The `kind` values that mean something to a consumer.
+const ANN_KINDS: [&str; 3] = ["invalidated", "annotated", "absent-not-failed"];
+
+/// True iff `scope` carries exactly one predicate `ann_matches` understands.
+fn scope_is_machine_predicate(scope: &serde_json::Value) -> bool {
+    scope
+        .as_object()
+        .is_some_and(|o| o.len() == 1 && ANN_SCOPE_PREDICATES.iter().any(|k| o.contains_key(*k)))
+}
+
 fn load_annotations(path: &std::path::Path) -> Result<Vec<AnnEntry>, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let v: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))?;
-    let entries = v
+    load_annotations_value(&v, &path.display().to_string())
+}
+
+/// Parse + VALIDATE a registry document (ADD156 ship audit, defect **D10**).
+///
+/// A registry that silently loses integrity notes is worse than no registry,
+/// so every way a finding could go unnoticed is a hard error here:
+///
+/// * a finding written as a bare TOP-LEVEL key instead of an `entries[]`
+///   member (it would never be read at all — this is how the annotation
+///   documenting audit defect D2 stayed invisible);
+/// * a `scope` the matcher cannot evaluate (it would match ZERO cells and be
+///   indistinguishable from one that legitimately does not apply). A finding
+///   with no machine predicate must say so with `{"manual": …}`, which is
+///   loaded and surfaced but never applied;
+/// * an unknown `kind` (only `absent-not-failed` drives the floor accounting,
+///   so a typo silently changes behaviour);
+/// * a duplicate `id` (the later entry would shadow the earlier in tooltips).
+fn load_annotations_value(v: &serde_json::Value, whence: &str) -> Result<Vec<AnnEntry>, String> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| format!("{whence}: registry must be a JSON object"))?;
+    let stray: Vec<&str> = obj
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !ANN_TOP_LEVEL_KEYS.contains(k))
+        .collect();
+    if !stray.is_empty() {
+        return Err(format!(
+            "{whence}: {} finding(s) written as top-level keys instead of \
+             members of `entries`, where nothing would ever read them: {}. \
+             Move each into the `entries` array (with `id`, `kind`, `fields`, \
+             `scope`).",
+            stray.len(),
+            stray.join(", ")
+        ));
+    }
+    let entries = obj
         .get("entries")
         .and_then(|e| e.as_array())
-        .ok_or_else(|| format!("{}: no `entries` array", path.display()))?;
-    let mut out = Vec::new();
-    for e in entries {
-        let s = |k: &str| e.get(k).and_then(|x| x.as_str()).map(str::to_string);
+        .ok_or_else(|| format!("{whence}: no `entries` array"))?;
+
+    let mut out: Vec<AnnEntry> = Vec::with_capacity(entries.len());
+    for (i, e) in entries.iter().enumerate() {
+        let at = |what: &str| format!("{whence}: entries[{i}] {what}");
+        let e = e
+            .as_object()
+            .ok_or_else(|| at("is not an object"))?;
+        let id = e
+            .get("id")
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| at("missing a non-empty `id`"))?
+            .to_string();
+        if out.iter().any(|p| p.id == id) {
+            return Err(format!("{whence}: duplicate entry id `{id}`"));
+        }
+        let kind = e
+            .get("kind")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| format!("{whence}: entry `{id}` missing `kind`"))?
+            .to_string();
+        if !ANN_KINDS.contains(&kind.as_str()) {
+            return Err(format!(
+                "{whence}: entry `{id}` has unknown kind `{kind}` — expected one of {}",
+                ANN_KINDS.join(", ")
+            ));
+        }
+        let scope = e.get("scope").cloned().unwrap_or(serde_json::Value::Null);
+        let scope_obj = scope.as_object().ok_or_else(|| {
+            format!("{whence}: entry `{id}` has no `scope` object — use one of {} for a \
+                     machine predicate, or {{\"{ANN_SCOPE_MANUAL}\": …}} for a \
+                     documentation-only finding", ANN_SCOPE_PREDICATES.join("/"))
+        })?;
+        let manual = scope_obj.len() == 1 && scope_obj.contains_key(ANN_SCOPE_MANUAL);
+        if !manual && !scope_is_machine_predicate(&scope) {
+            let keys: Vec<&str> = scope_obj.keys().map(String::as_str).collect();
+            return Err(format!(
+                "{whence}: entry `{id}` has a scope the matcher cannot evaluate \
+                 (keys: [{}]) — it would match ZERO cells and be silently inert. \
+                 Use exactly one of {} for a machine predicate, or wrap the prose \
+                 as {{\"{ANN_SCOPE_MANUAL}\": …}} to declare it documentation-only.",
+                keys.join(", "),
+                ANN_SCOPE_PREDICATES.join("/")
+            ));
+        }
         out.push(AnnEntry {
-            id: s("id").ok_or("entry missing `id`")?,
-            kind: s("kind").ok_or("entry missing `kind`")?,
+            id,
+            kind,
             fields: e
                 .get("fields")
                 .and_then(|x| x.as_array())
@@ -235,8 +342,13 @@ fn load_annotations(path: &std::path::Path) -> Result<Vec<AnnEntry>, String> {
                         .collect()
                 })
                 .unwrap_or_default(),
-            scope: e.get("scope").cloned().unwrap_or(serde_json::Value::Null),
-            reason: s("reason").unwrap_or_default(),
+            scope,
+            reason: e
+                .get("reason")
+                .and_then(|x| x.as_str())
+                .map(str::to_string)
+                .unwrap_or_default(),
+            manual,
         });
     }
     Ok(out)
@@ -1221,7 +1333,33 @@ fn tsv_row(v: &serde_json::Value, r: &BalancedReport) -> String {
 /// wins; default = `$ZENSIM_EVAL_ANNOTATIONS`, else the committed
 /// `./benchmarks/eval_annotations.json` if present, else none (noted out
 /// loud). Shared by the balanced-profile and `--select` paths.
+/// Print the documentation-only findings once, so a registry entry with no
+/// machine predicate is SURFACED to whoever runs the gate rather than sitting
+/// inert (ADD156 ship audit, defect D10).
+fn note_manual_annotations(anns: &[AnnEntry]) {
+    let manual: Vec<&str> = anns
+        .iter()
+        .filter(|e| e.manual)
+        .map(|e| e.id.as_str())
+        .collect();
+    if manual.is_empty() {
+        return;
+    }
+    eprintln!(
+        "freeze_check: registry carries {} documentation-only finding(s) with no \
+         machine scope — NOT applied to any cell, read them by hand: {}",
+        manual.len(),
+        manual.join(", ")
+    );
+}
+
 fn load_annotations_arg(arg: Option<&str>) -> Vec<AnnEntry> {
+    let anns = load_annotations_arg_inner(arg);
+    note_manual_annotations(&anns);
+    anns
+}
+
+fn load_annotations_arg_inner(arg: Option<&str>) -> Vec<AnnEntry> {
     match arg {
         Some("none") => Vec::new(),
         Some(p) => match load_annotations(std::path::Path::new(p)) {
@@ -1851,6 +1989,7 @@ mod tests {
             fields: fields.iter().map(|s| s.to_string()).collect(),
             scope,
             reason: format!("test reason for {id}"),
+            manual: false,
         }
     }
 
@@ -1991,6 +2130,127 @@ mod tests {
         assert_eq!(
             cols[ann_i], "dial-mono-raw-unit",
             "annotations col carries the id"
+        );
+    }
+
+    /// **D10 (ADD156 ship audit, `benchmarks/add156_ship_audit_2026-08-31.md`).**
+    /// A registry that silently loses integrity notes is worse than no
+    /// registry. Two silent-drop classes existed:
+    ///
+    ///  1. **Out-of-array findings.** Three entries sat as bare TOP-LEVEL keys
+    ///     of `eval_annotations.json` instead of inside `entries[]`;
+    ///     `load_annotations` reads only `v["entries"]`, so all three were
+    ///     dropped with no warning — including
+    ///     `konjnd-372-full-file-dilution-2026-08-29`, which is *the*
+    ///     annotation explaining audit defect D2. The gate that exists to
+    ///     surface such caveats could not surface it.
+    ///  2. **Scopes the matcher cannot evaluate.** `ann_matches` understands
+    ///     exactly four predicates (`missing`/`present`/`names`/`all`) and
+    ///     returns `false` for anything else — so an entry scoped
+    ///     `{"note": …}` / `{"trained_with": …}` / `{}` matched ZERO cells and
+    ///     was indistinguishable from one that simply did not apply. This
+    ///     audit found **19 of 42** committed entries in that state, on top of
+    ///     the 3 orphans: 22 of 45 findings invisible to the gate.
+    ///
+    /// The fix makes both classes impossible: unknown top-level keys and
+    /// unevaluable scopes are REJECTED at load, and a finding with no machine
+    /// predicate must say so explicitly (`{"manual": …}`), which the loader
+    /// then surfaces instead of dropping.
+    #[test]
+    fn d10_registry_findings_are_never_silently_dropped() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let path = repo.join("benchmarks/eval_annotations.json");
+
+        // (1) Every finding in the committed file must be REACHABLE. Count the
+        // findings in the raw JSON independently of the loader: entries[] plus
+        // any top-level key that is not `_schema`/`entries`.
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("read registry"))
+                .expect("registry is valid json");
+        let obj = raw.as_object().expect("registry is a json object");
+        let orphans: Vec<&str> = obj
+            .keys()
+            .filter(|k| k.as_str() != "_schema" && k.as_str() != "entries")
+            .map(|k| k.as_str())
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "registry findings sit OUTSIDE entries[] and are dropped by the \
+             loader: {orphans:?} — move them into entries[]"
+        );
+
+        let anns = load_annotations(&path).expect("committed registry loads");
+        assert_eq!(
+            anns.len(),
+            obj["entries"].as_array().unwrap().len(),
+            "loader dropped entries"
+        );
+
+        // (2) Every loaded entry must be EVALUABLE: either it carries one of
+        // the four machine predicates, or it declares itself documentation-only.
+        // An entry that is neither matched nothing and told nobody.
+        let inert: Vec<&str> = anns
+            .iter()
+            .filter(|e| !e.manual && !scope_is_machine_predicate(&e.scope))
+            .map(|e| e.id.as_str())
+            .collect();
+        assert!(
+            inert.is_empty(),
+            "entries whose scope the matcher cannot evaluate — they match ZERO \
+             cells and are silently inert: {inert:?}"
+        );
+
+        // (3) A documentation-only entry never applies to a cell...
+        for e in anns.iter().filter(|e| e.manual) {
+            assert!(
+                !ann_matches(&passing_fixture(), e),
+                "manual entry {} must not apply to cells",
+                e.id
+            );
+        }
+        // ...but it is still LOADED, so callers can surface it.
+        assert!(
+            anns.iter().any(|e| e.manual),
+            "expected the migrated documentation-only entries to be present"
+        );
+
+        // (4) The loader REJECTS both silent-drop classes rather than dropping.
+        let with_orphan = serde_json::json!({
+            "_schema": {"description": "t"},
+            "entries": [],
+            "some-finding-2026-08-31": {"reason": "r", "status": "open"}
+        });
+        let err = load_annotations_value(&with_orphan, "<test>")
+            .expect_err("an out-of-array finding must be REJECTED, not dropped");
+        assert!(
+            err.contains("some-finding-2026-08-31") && err.contains("entries"),
+            "diagnostic must name the orphan and where it belongs; got: {err}"
+        );
+
+        let with_bad_scope = serde_json::json!({
+            "entries": [{
+                "id": "bad-scope", "kind": "annotated", "fields": ["rank.cid22"],
+                "scope": {"note": "prose, not a predicate"}, "reason": "r"
+            }]
+        });
+        let err = load_annotations_value(&with_bad_scope, "<test>")
+            .expect_err("an unevaluable scope must be REJECTED, not silently inert");
+        assert!(
+            err.contains("bad-scope") && err.contains("note"),
+            "diagnostic must name the entry and the offending scope key; got: {err}"
+        );
+
+        // An unknown `kind` is equally a silent-behaviour change (only
+        // `absent-not-failed` drives the floor accounting).
+        let with_bad_kind = serde_json::json!({
+            "entries": [{
+                "id": "bad-kind", "kind": "absent_not_failed",
+                "fields": ["rank.cid22"], "scope": {"all": true}, "reason": "r"
+            }]
+        });
+        assert!(
+            load_annotations_value(&with_bad_kind, "<test>").is_err(),
+            "an unknown `kind` must be REJECTED"
         );
     }
 

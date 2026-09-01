@@ -511,8 +511,17 @@ def _ann_field_present(o, dotpath):
 
 
 def _ann_matches(o, entry):
-    """Mirror of freeze_check's scope predicates (missing/present/names/all)."""
+    """Mirror of freeze_check's scope predicates (missing/present/names/all).
+
+    `{"manual": ...}` is the explicit documentation-only form (ADD156 ship
+    audit D10): no machine predicate, so it badges NO cell — but it is still
+    carried in `meta`/`DATA.annRegistry` so the finding stays visible. Before
+    D10 an unrecognised scope fell through to `bool(scope.get("all"))` and was
+    silently inert, indistinguishable from one that legitimately did not apply;
+    freeze_check now REJECTS any other shape at load."""
     scope = entry.get("scope") or {}
+    if "manual" in scope:
+        return False
     if "missing" in scope:
         return not _ann_field_present(o, scope["missing"])
     if "present" in scope:
