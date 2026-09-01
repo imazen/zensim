@@ -16,6 +16,20 @@
 # That is a real recipe difference from A1 and is recorded, not hidden.
 #
 #   A3  MODE=human    : targets human_score  (the plain 156 retrain)
+#   A3b/A4b (2026-09-01 amendment, closes the free-features coordination gap
+#            registered §14.3 of the wave doc as "would need --keep-features
+#            wired" -- WRONG, that flag already exists, added 2026-08-04
+#            appendix J, well before this wave): set WR4_KEEP to
+#            scripts/sota944/slice_basic156_free.txt (265 coords, f0..155 +
+#            72 peaks + 37 raw-moment slots, max idx 941) and this script
+#            switches to --max-features 944 --keep-features "$WR4_KEEP",
+#            dropping --allow-narrow-features (944 already clears the >=372
+#            floor). None of the free-set's 109 non-basic indices intersect
+#            A1's 24 append2 winsor(0,0) guard columns (731..919) -- checked
+#            by direct set intersection, empty -- so the SAME 34-entry TF
+#            array below (f0..155 only) is correct unchanged for A3b/A4b;
+#            every free-set index gets default scaling, same as it would in
+#            A1's own 944-wide run for any index outside its 58 guarded ones.
 #   A4  MODE=distill  : the tsafesyn leg is re-targeted at the TEACHER's
 #                       output (registration §3.0.2 point 3: HYA_w084 =
 #                       0.84*W10L9PH_s4004 + 0.16*Q7b, era-1-trained, grafted
@@ -49,6 +63,7 @@ V="${WR4_VIEWS:-$R4/recipe_views}"
 OUTDIR="${WR4_OUT:-/mnt/v/output/zensim/wave-r4-2026-09-01/bakes}"
 TRAIN="${ZL_TRAIN:?ZL_TRAIN must point at the zensim_mlp_train binary}"
 KADIS="${WR4_KADIS:-}"
+WR4_KEEP="${WR4_KEEP:-}"
 mkdir -p "$OUTDIR"
 
 TTBIG=""
@@ -65,6 +80,7 @@ case "$MODE" in
            fi ;;
   *) echo "ABORT: MODE must be human|distill"; exit 1 ;;
 esac
+if [ -n "$WR4_KEEP" ]; then ARM="${ARM}b"; fi
 OUT="${3:-$OUTDIR/${ARM}_156_s${SEED}.bin}"
 
 TRAIN_GROUPS=(
@@ -107,8 +123,14 @@ TF=(
 )
 TFARGS=(); for t in "${TF[@]}"; do TFARGS+=( --feature-transform "$t" ); done
 
-echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} (append2 guards dropped) $(date -u +%H:%M:%SZ)"
+WIDTH_ARGS=(--max-features 156 --allow-narrow-features)
+if [ -n "$WR4_KEEP" ]; then
+  [ -f "$WR4_KEEP" ] || { echo "ABORT: WR4_KEEP set but missing: $WR4_KEEP"; exit 1; }
+  WIDTH_ARGS=(--max-features 944 --keep-features "$WR4_KEEP")
+fi
+
+echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) $(date -u +%H:%M:%SZ)"
 exec "$TRAIN" "${TRAIN_GROUPS[@]}" \
   --n-hidden-layers 0 --target-column human_score --target-scale 100 \
-  --epochs 120 --pairs-per-epoch 50000 --max-features 156 --allow-narrow-features \
+  --epochs 120 --pairs-per-epoch 50000 "${WIDTH_ARGS[@]}" \
   --coarse-decay 1e-5 "${TFARGS[@]}" --seed "$SEED" --out "$OUT"
