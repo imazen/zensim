@@ -4880,3 +4880,30 @@ three `blur.rs` ring tests panic `subtract with overflow` in DEBUG only (release
   tables, sort clicks, ECharts SSR, **960 ⚠-badged cells**). Board 19.95 MB →
   http://localhost:3300/zensim/reports/summer_gauntlet.html ; prior board + pre-change cells
   preserved with SHA256SUMS.
+
+### Round 36 addendum — the 2026-08-31 discussion set, and two silently-inert sets repaired (`0aec701e`)
+
+**Appended** `2026-08-31-era2-fast-profile` (era-2 flip + fast-profile subset + the ADD156 ship
+audit): `ADD156_safesyn_only_raw_lasso`, its `@cur372` half,
+`b_sdr_linear_cid80_inclwinsor_dense_dial@cur372`, `Q7b_pools_g0.2_a0.2_b0.97`,
+`W10L9P_s4005_packed` — **all five resolve, nothing dropped**; incumbents unioned by the page, not
+duplicated.
+**The two null-id legacy sets were broken WORSE than suspected, measured on the built payload:**
+(1) **they selected NOTHING** — the page reads `d.bakes||[]` and both carried their models under
+`members`, so `discussionSets[5].bakes.length == 0` and `[6] == 0`: selecting either showed
+**incumbents ∪ peers only (7 rows)**, never the 6 and 7 models they name, and the options rendered
+with correct labels so it was invisible; (2) **sorting was broken** — `gauntlet.py:882` sorts on
+`x.get("date","")` descending, so a missing date sinks: two sets labelled 2026-08-29 rendered
+BELOW the 2026-08-28 set, violating the `_schema`'s own latest-first contract. Repaired in place as
+`2026-08-29-r6-fresh-b-linear-pair` and `2026-08-29-b-swap-decision` with dates, **and** `members`
+→ `bakes` (ids+dates alone would have fixed their POSITION while leaving them inert — a cosmetic
+fix reported as complete); `note` kept as provenance, nothing removed or reordered. All 8 sets now
+resolve every name they list and the date order is monotone.
+**Dropdown verified through the SHIPPED handler**, not a re-implementation — the `sel.onchange`
+block was extracted verbatim from the emitted HTML and run against the emitted `DATA`: the new
+option is present and FIRST, and selecting it yields **exactly 12 visible rows = 5 set + 3
+incumbents + 4 peers**, disjoint, no unresolved name. Gates PASS with counts identical to the
+previous regen (962 badged cells, 362 bakes, 18 tables, ECharts SSR); byte-comparing old vs new
+HTML around the `discussionSets` array, prefix and suffix are **byte-identical** and the file grows
+by exactly **+477 B**. Prior board preserved. Board:
+http://localhost:3300/zensim/reports/summer_gauntlet.html
