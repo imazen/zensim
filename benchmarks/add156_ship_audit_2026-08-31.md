@@ -7,8 +7,11 @@ usability check and come back with a defect list.
 
 **Answer in one line:** the MODEL is sound and unusually era-robust; **the
 PRODUCT is not built** — there is no profile slot, no `ComputeSet::
-from_block_profile`, and no embedded repro, and the audit found four defects
-that are not ADD156's fault but change how its published numbers should be read.
+from_block_profile`, no embedded repro, and no way to reach it from
+`zenmetrics` — and the audit found four defects that are not ADD156's fault but
+change how its published numbers should be read.
+
+**14 defects, D1–D14 (§2), 5 ship-blocking or high.**
 
 Audited bake: `/mnt/v/output/zensim/corr-lq/ADD156_safesyn_only_raw_lasso.bin`,
 3,575 B, sha256 `51437a34f04887ce850b25eff4f72a6bcd12926873ce060a12878d558a7517db`.
@@ -180,6 +183,21 @@ Repeated on a **2048×1358** reference (exercises era-2 tiling): identity
 100.000000, **0 inversions**, 16.41 → 88.23, path agreement exact.
 ADD156's dial reaches *higher* at q100 than `B`'s (90.96 vs 85.29) — more
 usable headroom in the near-lossless zone, consistent with §1.6.
+
+**Thread invariance — PASS, bit-exact.** The §3.27 defect class (v1 masked/IW as
+a function of `RAYON_NUM_THREADS`) is what the era machinery exists to prevent.
+Scored the 2048×1358 pair at `RAYON_NUM_THREADS` = 1 / 4 / 8 / 16 / 32:
+
+| threads | 1 | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|---|
+| identity | 100.000000 | 100.000000 | 100.000000 | 100.000000 | 100.000000 |
+| q20 | 48.754459 | 48.754459 | 48.754459 | 48.754459 | 48.754459 |
+| q90 | 82.042875 | 82.042875 | 82.042875 | 82.042875 | 82.042875 |
+
+Bit-identical at every pool size. ADD156 reads only `f0..155`, the block that
+was never thread-dependent, so this is expected — it is recorded because it is
+the ADD156-specific form of a gate the brief named, and it was not previously
+measured on this bake.
 
 ### 1.8 Era robustness — ADD156's standout property, measured three ways
 
@@ -435,6 +453,23 @@ possible additional speedup left on the table, and a doc/code contradiction.
 should admit `Peaks`/`Off`.
 **Class:** docs (+ one perf question).
 
+### D14 — MEDIUM. `zenmetrics` cannot score ADD156 at all.
+**What breaks.** The fleet metric path and `jobexec` reach zensim through
+`zenmetrics-api`, and **every** call site constructs
+`zensim::ZensimProfile::latest_preview()` as a hard-coded literal
+(`cpu_dispatch.rs:149`, `:269`, `metric.rs:371`, and the GPU/CPU test paths).
+There is **no `--zensim-bake` and no `--zensim-profile` flag anywhere in the
+repo** — grep returns only two Python sweep scripts writing a provenance string.
+So a candidate bake cannot be scored through the fleet at all, which is where
+any large re-scoring of ADD156 would have to happen.
+**Measurement.** Full-repo grep of `~/work/zen/zenmetrics` for
+`zensim-bake|zensim_bake|zensim-profile|zensim_profile`: no CLI flag; all
+`ZensimProfile` uses are the hard-coded `latest_preview()`.
+**Smallest fix.** A `--zensim-profile {a,b,c,...}` selector, and — once D1 lands
+— a `--zensim-bake <path>` that routes through the new profile slot. Until then
+ADD156 is a `bake_verdict`-only model.
+**Class:** code (in zenmetrics, a sibling repo — flagged, not touched).
+
 ---
 
 ## 3. Corrections to published ADD156 numbers
@@ -503,7 +538,13 @@ audit would request.
 **Recommended order:** D4 + D7 (bake edits, hours) → D6 (re-emit with repro) →
 D2 + D10 (corpus map + registry, so the numbers published are the right ones) →
 D1 (`from_block_profile` + profile slot, the actual product) → D3 (register a
-`fast-*` selection profile) → D5 (loop routing).
+`fast-*` selection profile) → D5 (loop routing) → D14 (zenmetrics selector).
+
+**Public API changes this audit would request** (none taken here): promote
+`ComputeSet` + add `ComputeSet::from_block_profile`, and add a fast-profile
+`ZensimProfile` variant. Both are listed for approval in
+`benchmarks/era2_perf_break_2026-08-31.md` §26; this audit is evidence *for*
+them, not authority to make them.
 
 ---
 
