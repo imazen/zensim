@@ -262,6 +262,20 @@ CURATED_BOARD = [
     # 14 board corpora (its verdict ran a partial corpus list) — the other seven render
     # as NOT-MEASURED em-dashes, never zeros.
     "Q7b_pools_g0.2_a0.2_b0.97",
+    # HYBRID lane (benchmarks/hybrid_candidate_2026-09-01.md). Both earn
+    # curation by the registered rule (arm-candidate / named leader, and the
+    # first is an ensemble):
+    #  * HYA_w084 = 0.84*W10L9PH_s4004_packed + 0.16*Q7b — the ONLY arm in the
+    #    exam that passes W1 (no held-out human axis worse than peer_ssim2 by
+    #    more than delta), which NEITHER parent does. Under the amended W4
+    #    (<=1.25x the 156 walk) it is the lane's TEACHER / quality ceiling, not
+    #    a passing candidate: it costs 2.6x the bar.
+    #  * SADD_BIGLEG = the 156-class additive student that distillation was
+    #    aimed at. Ties ADD156 on CID22/CSIQ, beats it on KonJND (0.5432, above
+    #    peer_ssim2's 0.5272), and gains the W3 ladder pass ADD156 fails
+    #    (mono 0.99596 >= ssim2's 0.99298, 0% of q>=85 ladders ending backwards
+    #    against ADD156's 2%).
+    "HYA_w084", "SADD_BIGLEG",
 ]
 # "Sprint bests" (user request 2026-08-28): ONE selected leader per sprint/era,
 # newest last. The ensembles sprint's best is resolved at build time (highest

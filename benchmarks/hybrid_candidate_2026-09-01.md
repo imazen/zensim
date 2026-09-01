@@ -629,11 +629,17 @@ measuring the axis the mission names.
    `add156_156basic` arm across ASLR process starts bounds how tight a bar can
    be *read at all*. A bar below ~1.10× would be inside that spread and would
    therefore rank layout lottery. **1.25× is comfortably outside it.**
-2. **The next class up is further away than the bar.** The 372-class fold costs
-   **1.27–1.43×** the 156 walk and the 944 folds **2.3–3.6×** (exam §3.6 ratios,
-   reproduced in §10). So a bar at 1.25× admits the 156 class *and its noise
+2. **The next class up is further away than the bar.** MEASURED in §13 on the
+   clause's own instrument (end-to-end, extraction + forward, interleaved):
+   the shipped 372 class is **1.55–1.85×** the 156 class and the 944 classes
+   are **2.06–2.68×**. So a bar at 1.25× admits the 156 class *and its noise
    band* and excludes every other measured class — it cuts between classes, in
-   the gap, not through one.
+   the gap, not through one. *(This paragraph originally quoted 1.27–1.43× for
+   the 372 class from the exam's §3.6, which is an EXTRACTION-ONLY ratio of
+   `fold372_full` to `fold228_peaks` — the peaks fold, not the basic one. The
+   clause specifies end-to-end against `fold156_basic`, so §13's own numbers
+   replace it; the gap is wider than the original estimate, and the conclusion
+   is unchanged.)*
 3. **It is reachable by construction.** `ADD156` itself sits at 1.00× by
    definition, so the bar is not vacuous: at least one existing model passes it,
    which is the property a bar must have before it can fail anything.
@@ -880,3 +886,142 @@ to produce:
 > lever on CSIQ (+0.02 to +0.06), and a first-order **cost** on KonJND
 > (−0.01 to −0.12) — so a fleet-scale student should carry a **mixed** target,
 > not a pure teacher one.
+
+---
+
+## 13. THE AMENDED-W4 MEASUREMENT
+
+### 13.1 Instrument and estimator
+
+`zensim-bench/benches/ssim2_speed_bar.rs`, six arms **interleaved inside one
+process** on the same generated pair — the strongest form of the protocol,
+because the quantity the clause needs is a RATIO and interleaving is what makes
+a ratio survive a shared box. CCD0-pinned (`taskset -c 0`), ASLR on, 5 process
+starts, `ZEN_S2_ROUNDS=40 / WALL_S=25`.
+
+**The estimator is the PER-START ratio**, not the ratio of per-arm minima: each
+start yields `arm_ms / add156_156basic_ms` from the same round set, and the
+median over starts is reported with the min and max beside it. Taking `min`
+per-arm across starts would mix arms measured in different starts, which under
+load is exactly how a broken ratio gets published.
+
+Raw: `speed/s2_plain_*t_start*.txt.err`, reduced table
+`speed/ratio_1t.tsv`, per-start box load in `speed/loads.tsv`.
+
+### 13.2 The 1-thread column — MEASURED, and clean
+
+Median per-start ratio to the 156-walk bar (min–max across 5 starts in
+brackets); `add156_156basic` = **6.90 / 25.70 / 107.20 ms** at 576² / 1152² /
+2304², which is the bar:
+
+| arm | class | 576² | 1152² | 2304² | **W4 (≤ 1.25×)** |
+|---|---|--:|--:|--:|:--:|
+| **`add156_156basic`** (the BAR) | 156 | **1.000** | **1.000** | **1.000** | **PASS** |
+| every PART II student (`SADD_*`) | 156 | 1.000 | 1.000 | 1.000 | **PASS** |
+| `zensim_B` — the shipped 372 public API | 372 | 1.551 [1.543–1.565] | 1.846 | 1.841 [1.837–1.859] | **FAIL** |
+| `flagship_944off` — `W10L9PH` + its walk | 944-folded | 2.101 [2.071–2.130] | 2.062 | 2.156 [2.137–2.182] | **FAIL** |
+| `q7b_944pools` — `Q7b` + its walk | 944-pools | 2.420 [2.406–2.435] | 2.446 | 2.578 [2.553–2.591] | **FAIL** |
+| **`hybrid_944pools`** — PART I's blend, ONE extraction + BOTH forwards | 944-pools | 2.565 [2.522–2.929] | 2.677 | 2.602 [2.578–2.675] | **FAIL** |
+| *`fast_ssim2` — CONTEXT, no longer the bar* | — | *2.783* | *3.258* | *3.395* | — |
+
+Three things this table settles:
+
+1. **§9.4's prediction holds exactly.** No 944 arm is within 2× of the bar, let
+   alone 1.25×. The gap is the extraction and no forward-side change touches it.
+2. **The ensemble's second forward is nearly free**, which is the one number
+   PART I could not have known: `hybrid_944pools` costs **+0.145 / +0.231 /
+   +0.024** of a 156-walk over `q7b_944pools` — i.e. the whole second model
+   (a 667→128→1 f16 MLP over 944 inputs, plus its spline) is **1–6 % of one
+   compare**. B.1's "an ensemble is priced as ONE compare" rule is not a
+   convenience; it is what the measurement says.
+3. **The opponent is 2.8–3.4× the 156 class.** So the 156 students are ~3×
+   faster than fast-ssim2 while the 944 arms are ~1.3×, which is the whole
+   reason the class bar replaced the opponent bar.
+
+### 13.3 The 8-thread column — NOT MEASURED by this lane, and why
+
+This lane's 8-thread re-run was **abandoned rather than published**: from
+10:00 local the box carried a sustained **`v2_ab_extract` at 2801 % CPU**
+(28 cores — the era-2 / radius-4 re-extraction wave itself), and the 5 starts
+taken under it give per-start ratios spanning **0.02× to 2.9× for the same
+arm**, which is not a measurement of anything. Reported as **NOT MEASURED
+(box contended)**, never as a number.
+
+**What stands in for it, cited not re-measured**, from the feature-cost lane's
+own zenbench table on this box (2304², ms):
+
+| | 1 T | 8 T | 16 T |
+|---|--:|--:|--:|
+| the 156 walk | 109.6 | **28.0** | 32.2 |
+| the 944-full walk | 278 | **124** | 113.6 |
+| **ratio 944 / 156** | **2.54×** | **4.43×** | 3.53× |
+
+**The 1 T half of that cited table agrees with this lane's own measurement to
+2 %** (109.6 vs 107.20 for the bar; 2.54× vs 2.578× for `q7b_944pools`), which
+is what makes the 8 T half usable as an ATTACH row. And it says the 944 class is
+**further** from the bar at 8 threads (4.43×) than at 1 (2.54×) — so the amended
+W4's second thread count, which was added precisely so a per-core win could not
+hide a threaded loss, **fails the 944 class harder**, not softer.
+
+**Named follow-up:** re-run `scripts/hybrid_speed.sh run` at 8 T on a quiet box
+and replace §13.3's ATTACH row with a measured one. Nothing in the verdict
+turns on it — every 944 arm fails the 1 T column by ≥ 65 % of the bar's own
+value — but the clause says both counts bind, and a cited row is not a measured
+one.
+
+---
+
+## 14. THE VERDICT — the exam table under the amended W4
+
+Every held-out human number is `bake_verdict --full-json` on the keyed pools-944
+substrate; every CI is the exam's own reference-clustered paired bootstrap
+(B = 10,000, seed 20260901); every speed cell is §13; `peer_ssim2` is read from
+the board cell it already published. `ADD156` and shipped `B` are carried as the
+exam's incumbents.
+
+| clause | `peer_ssim2` | **`SADD_BIGLEG`** (156, 31 coef, 4,117 B) | `SADD_HT1` (156, 12 coef) | `ADD156` (156, 28 coef) | shipped **B** (372) | **`HYA_w084`** (944 blend) — UPPER BOUND | `W10L9PH` (944) | `Q7b` (944) |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| **W1** no held-out human axis worse by > δ | — | **FAIL** (CID22 −0.025, AIC-3 −0.019) | **FAIL** (CID22 −0.074, KonJND −0.074, AIC-3 −0.038, LIVE −0.015) | **FAIL** (CID22 −0.026) | **FAIL** (AIC-3 −0.032) | **PASS** | **FAIL** (KonJND −0.027) | **FAIL** ×6 |
+| **W2** ≥2 strict wins, ≥1 named | — | FAIL | FAIL | **FAIL** (+ the band, −0.070) | FAIL | **FAIL** (3 wins, none named) | FAIL | **FAIL** (1 win, and it IS named) |
+| **W3** ladder ≥ ssim2 | — | **PASS** (mono 0.99596, dyn 89.0) | **PASS** (0.99638) | **FAIL** (ends 2 % of q≥85 ladders backwards) | **FAIL** | **PASS** | PASS | PASS |
+| **W4** ≤ 1.25× the 156 walk, 1 T **and** 8 T | — | **PASS** (1.00×) | **PASS** (1.00×) | **PASS** (1.00×) | **FAIL** (1.55–1.85×) | **FAIL** (2.57–2.68× @1T; 4.4× @8T cited) | **FAIL** (2.06–2.16×) | **FAIL** (2.42–2.58×) |
+| **W5** HDR | — | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| **W6** not circular | — | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| **W7** default build | — | **FAIL** (no profile slot; `ComputeSet::from_block_profile` does not exist) | **FAIL** | **FAIL** | PASS | **FAIL** (ensemble) | **FAIL** | **FAIL** |
+| **clauses passed** (of 6 evaluable) | — | **3** | **3** | 2 | 2 | 3 | 3 | 2 |
+
+**VERDICT: nobody passes, and the two things that changed are worth naming
+separately.**
+
+- **PART I's `HYA_w084` is the best model in the exam and cannot pass it.** It
+  is the only arm that clears **W1**, it clears W3, and it is disqualified by
+  the amended **W4** at 2.6× the bar. That is not a defect in the model; it is
+  the directive's point. `HYA_w084` is hereby the lane's **TEACHER and quality
+  ceiling**, and PART I is the measurement of how much quality there is to
+  distil.
+- **`SADD_BIGLEG` is the best thing in the 156 class this lane produced**, and
+  it ties the incumbent it was built to beat: CID22 0.8642 vs `ADD156`'s 0.8632,
+  CSIQ 0.9007 vs 0.9024, **KonJND 0.5432 vs 0.5350 — and +0.016 ABOVE
+  `peer_ssim2`** — at 31 coefficients and 4,117 bytes. Where it clearly beats
+  the incumbent is the **ladder**: pooled monotonicity **0.99596 ≥ ssim2's
+  0.99298** with **0 %** of near-lossless ladders ending backwards, against
+  `ADD156`'s 2 %. **So the 156 class gains a W3 pass it did not have** — three
+  clauses instead of two — while its W1 failures (CID22, AIC-3) are inherited
+  unchanged.
+- **No student closes W1's CID22 gap**, and §12 says why: the reachable
+  training leg is 111k rows where the incumbent's is 196k, and the 196k leg
+  cannot carry this teacher without a re-extraction.
+
+### 14.1 What closes the remaining gaps — revised for PART II
+
+| clause | who fails it | shortest path | cost class |
+|---|---|---|---|
+| **W1** (CID22 −0.025, AIC-3 −0.019) for the 156 class | every student, and `ADD156` | **Re-extract the dense legs at `folded720append2pools`** — §12.3 prices the 111k → 196k leg change at **+0.057 CID22** on the identical recipe, which is 2.3× the remaining gap. Then re-run §10.2's arms with a teacher on the same rows. | **the era-2 / radius-4 fleet wave — already launching** |
+| **W2** (no named strict win) | everything | The named axis `hfnl_cid22band` is n = 1,425 and its best margin is +0.0151 with a +0.0006 lower bound. The HF-human lane's **n = 515,250** forced-choice axis measures the same zone and already shows a **strict win for `W10L9PH`** (+0.0012 [+0.0002, +0.0025]). Admitting that axis to the exam is the cheapest possible move and it is **one `bake_verdict` run per arm** on that lane's tables. | **local, one command** — that lane owns the axis |
+| **W4** for the 944 class | `HYA_w084`, both flagships, `Q7b`, shipped `B` | **Unreachable by any fit.** The gap is extraction. The only route from a 944 model to the 156 class is distillation, which is what PART II is. | — (structural) |
+| **W7** for the 156 class | every student, `ADD156` | `ComputeSet::from_block_profile` + a `ZensimProfile` slot, so a basic-only bake's 156 walk is reachable by a caller. **Until it exists, every W4 PASS in this table is a property of the model and not of any code path a user can run.** | **user call (public API)** |
+
+**Not recommended, measured:** a pure-teacher student. §12.2 shows the teacher
+target costs KonJND monotonically (up to −0.115), and `SADD_T` is the only
+student in the table whose KonJND (0.4244) falls below `peer_ssim2` by more than
+δ on its own. A fleet-scale student should carry the **mixed** target.

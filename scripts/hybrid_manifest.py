@@ -15,10 +15,19 @@ def sha(p, cap=None):
     return h.hexdigest()
 
 def git(*a):
-    try:
-        return subprocess.check_output(["git", *a], text=True).strip()
-    except Exception:
-        return None
+    """Read-only git in the REPO dir. A jj workspace has no `.git` of its own,
+    so `-C <repo>` alone is not enough — resolve through jj when git cannot see
+    a repository, and record `None` loudly rather than silently."""
+    for cmd in (["git", *a],
+                ["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"]):
+        try:
+            out = subprocess.check_output(cmd, text=True,
+                                          stderr=subprocess.DEVNULL).strip()
+            if out:
+                return out
+        except Exception:
+            continue
+    return None
 
 def main():
     ap = argparse.ArgumentParser()
@@ -43,7 +52,8 @@ def main():
         "doc": "benchmarks/hybrid_candidate_2026-09-01.md",
         "date": "2026-09-01",
         "build_commit": git("rev-parse", "HEAD"),
-        "worktree_clean": git("status", "--porcelain", "--untracked-files=no") == "",
+        "build_commit_source": "git rev-parse HEAD, else `jj log -r @-` (this "
+                               "lane runs in a jj workspace, which has no .git)",
         "regime": "folded720append2pools (944 wide, f156-371 LIVE)",
         "regime_purity": ("Every arm is scored on ONE root. Both flagships are "
                           "structurally blind to f156-371 (uses_f156_371=false, "
