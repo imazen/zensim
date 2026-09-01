@@ -1,0 +1,19 @@
+# a4bkon lane W4 speed measurement — free156_peaks_raw vs add156_156basic
+# date: 2026-09-01  host: dev  commit: ec903a5a9d6d (measure(a4bkon lane, CLOSING) ...)
+# command: benchmarks/wave_r4_2026-09-01/run_a4bkon_w4_bench.sh {1,8,16} 3
+# raw per-start logs (not committed, data): /mnt/v/output/zensim/a4bkon-2026-09-01/speed/{1,8,16}t_start{1,2,3}.txt
+#
+W4 direct measurement: free156_peaks_raw vs add156_156basic bar
+Protocol: CCD0/core-matched pinned, nice-19, ASLR on, ZEN_S2_ROUNDS=40 WALL_S=25,
+N=3 process starts per thread count, per-start ratio (not ratio-of-minima).
+
+  T  size  add(med)  free(med)  ratio_med  ratio_min  ratio_max  flag_ratio_med  W4<=1.25x
+  1   576      8.00      8.500     1.0625     1.0000     1.0759           1.835       PASS
+  1  1152     28.10     29.400     1.0463     1.0430     1.0565           1.989       PASS
+  1  2304    108.30    116.400     1.0766     1.0669     1.0852           2.121       PASS
+  8   576      2.20      2.800     1.1667     1.1364     1.6111           2.958       PASS
+  8  1152      4.80      6.900     1.4468     1.4375     1.4583           3.375       FAIL
+  8  2304     19.90     23.100     1.1436     1.1357     1.1717           3.500       PASS
+ 16   576      3.80      3.200     0.8974     0.8421     1.2609           2.128       PASS
+ 16  1152      8.30      9.900     1.2857     0.9417     1.3133           2.916       FAIL
+ 16  2304     37.90     34.700     0.9129     0.8763     0.9866           2.699       PASS
