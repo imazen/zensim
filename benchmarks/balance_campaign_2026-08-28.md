@@ -4990,3 +4990,43 @@ dial panel on a reference metric — reproduces a bake's own dial section line-f
 cells) and `panel --per-group` (canonical per-group SROCC, parity-exact vs `per_ref_mean`); plus
 the fast-ssim2 speed bar. **Seven proposed instrument changes in §4.5 — proposed, not implemented;
 adoption of the exam as THE bar is the user's call.**
+
+## 2026-09-01 ~01:3xZ — ROUND 39: the near-lossless "human" axis was NEVER HUMAN — and the exam's only strict win appears (`f2681f5a`; APPENDIX A of the ssim2-bar doc)
+
+- **★ `hf_nearlossless` is an ssim2 SELF-TARGET, not a human corpus**: its `human_score` column IS
+  `ssim2_gpu / 100` — float-equal on **1200/1200 rows, max |Δ| = 0.0**; scored by the owner, ssim2
+  as predictor: pooled SROCC 1.0000, per-ref 1.0000. **W2's near-lossless clause was UNWINNABLE at
+  any feature width** — a 944 extraction would have produced an axis the opponent wins by
+  definition. (`hfnlproxy` was already declared `self_target` on the board; `hf_nearlossless`
+  escaped only because `peer_ssim2` carries no row for it.) The extraction is also unreachable
+  regardless: the 1,200 distorted JXL bitstreams of the 2026-07-06 sweep are GONE (blank
+  `encoded_filename` on 1200/1200 of the sweep's own pareto.tsv, both `refit/distorted/` mirrors
+  empty, refs rooted in wiped /tmp) — regeneration priced and REJECTED as a substitution (encoder 2
+  months past the pinned rev; the GPU-ssim2 target unreproducible here). Bonus defect: **four row
+  populations have shipped under the name `hfnlproxy`** (7,224/7,717/9,167/11,356) and the
+  opponent's 9,167 is on no surviving root — W10L9PH and ssim2 never shared rows there either.
+- **The non-circular replacement, registered**: `hfnl_cid22band` = CID22's top MOS band
+  (merged-decile-2026-08-06, MOS ≥ 0.80, **n = 1,425 over all 49 refs**), reference-clustered
+  paired bootstrap (B = 10,000):
+
+  | arm | pooled | Δ vs ssim2 | per-ref | Δ vs ssim2 |
+  |---|--:|---|--:|---|
+  | ssim2 | 0.5058 | — | 0.7099 | — |
+  | B | 0.5089 | +0.003 [−0.031,+0.039] | 0.7020 | −0.008 [−0.027,+0.011] |
+  | ADD156 | 0.4349 | **−0.070 [−0.103,−0.033]** | 0.6691 | **−0.041 [−0.062,−0.021]** |
+  | W10L9PH | 0.4984 | −0.007 [−0.043,+0.023] | 0.7060 | −0.004 [−0.016,+0.010] |
+  | **Q7b** | 0.4584 | −0.045 | **0.7250** | **+0.0151 [+0.0006,+0.0301], P=0.980** |
+
+- **Exam update**: W10L9PH **TIES** ssim2 in the near-lossless human zone (both CIs straddle 0) —
+  W2 still FAILS but for a measured structural reason, not an instrument gap; its line is W1 FAIL
+  (KonJND −0.027) / W2 FAIL / W3-W4-W6 PASS / W7 FAIL. **Nobody passes.** Two rows move: **Q7b now
+  holds the exam's ONLY strict win over ssim2 on a named non-circular axis** (within-image +0.0151;
+  marginal by its own lower bound, one axis of six, and nominally behind pooled on the same rows);
+  **ADD156 gains a new W1 failing axis** (−0.070 pooled in the zone the fast profile is sold on).
+  Cross-checks reproduced exactly (B backwards on 0.208333 of `hf_nearlossless` refs, ADD156 0).
+- Landed as `rank.hfnl_cid22band` on the six candidate cells (sha-gated grafts; board rendering
+  unchanged — the axis is not in CORP_ORDER). 9 gates pass incl. flagless-reproduction of the
+  committed bootstrap and arm-is-its-own-board-vector identity. Four superseded exam claims + the
+  project CLAUDE.md "targets human_score + ssim2_gpu" wording corrected in place. Two defects
+  reported not fixed: `panel --json --per-group` emits two concatenated JSON documents;
+  `peer_ssim2`'s stored `per_pair.cid22.mos` is on 0–100 where every model cell's is [0,1].
