@@ -164,6 +164,17 @@ struct Args {
     col_target: String,
     col_sigma: String,
     col_band: String,
+    /// Pairwise mode: a TSV of weighted forced-choice rows
+    /// (`group`, `s_left`, `s_right`, `choice`, optional `weight`) — the
+    /// triplet-comparison statistic owned by
+    /// `zensim_validate::pairwise::agreement`. Mutually exclusive with
+    /// `--input` / `--batch`.
+    pairwise: Option<PathBuf>,
+    /// Optional cluster-bootstrap resample manifest for `--pairwise`:
+    /// lines `LABEL<TAB>g1,g2,...` of GROUP indices (`*` = all groups once).
+    /// One output row per line. The caller owns the RNG; this binary stays
+    /// deterministic, exactly as `--batch` does.
+    resample: Option<PathBuf>,
     /// `--per-group`: additionally summarize SROCC computed WITHIN each
     /// `band` value — the canonical `zenstats::per_group_srocc`, i.e. the
     /// exact quantity `bake_verdict` publishes as `rank.<corpus>.per_ref_mean`
@@ -216,6 +227,10 @@ fn print_usage() {
          \x20\x20--col-sigma <NAME>      override the 'sigma' column name\n\
          \x20\x20--col-band <NAME>       override the 'band' column name\n\
          \x20\x20--per-group             + within-band SROCC summary (per_group_srocc)\n\
+         \x20\x20--pairwise <PATH|->     forced-choice (2AFC / triplet) agreement:\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20TSV cols group,s_left,s_right,choice[,weight]\n\
+         \x20\x20--resample <PATH|->     cluster-bootstrap group-index manifest for\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20--pairwise ('LABEL<TAB>g-csv' or 'LABEL<TAB>*')\n\
          \n\
          All statistics come from zensim_validate::panel (no stat math is\n\
          reimplemented here). See the module docs for the file:line map.\n\
@@ -234,6 +249,8 @@ fn parse_args() -> Result<Args, String> {
     let mut col_band = "band".to_string();
     let mut per_group = false;
     let mut emit_rescaled = false;
+    let mut pairwise: Option<PathBuf> = None;
+    let mut resample: Option<PathBuf> = None;
 
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -262,6 +279,16 @@ fn parse_args() -> Result<Args, String> {
             "--col-sigma" => col_sigma = it.next().ok_or("--col-sigma requires a value")?,
             "--col-band" => col_band = it.next().ok_or("--col-band requires a value")?,
             "--per-group" => per_group = true,
+            "--pairwise" => {
+                pairwise = Some(PathBuf::from(
+                    it.next().ok_or("--pairwise requires a value")?,
+                ));
+            }
+            "--resample" => {
+                resample = Some(PathBuf::from(
+                    it.next().ok_or("--resample requires a value")?,
+                ));
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -273,11 +300,20 @@ fn parse_args() -> Result<Args, String> {
     if input.is_some() && batch.is_some() {
         return Err("--input and --batch are mutually exclusive".to_string());
     }
+    if pairwise.is_some() && (input.is_some() || batch.is_some()) {
+        return Err("--pairwise is mutually exclusive with --input / --batch".to_string());
+    }
+    if resample.is_some() && pairwise.is_none() {
+        return Err("--resample requires --pairwise".to_string());
+    }
+    if pairwise.is_some() && json {
+        return Err("--json is not supported with --pairwise (the TSV is the contract)".to_string());
+    }
     if batch.is_some() && json {
         return Err("--json is not supported with --batch (the TSV is the contract)".to_string());
     }
-    if input.is_none() && batch.is_none() {
-        return Err("--input or --batch is required".to_string());
+    if input.is_none() && batch.is_none() && pairwise.is_none() {
+        return Err("--input, --batch or --pairwise is required".to_string());
     }
 
     Ok(Args {
@@ -291,6 +327,8 @@ fn parse_args() -> Result<Args, String> {
         col_band,
         per_group,
         emit_rescaled,
+        pairwise,
+        resample,
     })
 }
 
@@ -992,6 +1030,142 @@ fn render_json(reports: &[GroupReport], has_sigma: bool) -> String {
 }
 
 // ----------------------------------------------------------------------
+// pairwise (2AFC / triplet) mode
+// ----------------------------------------------------------------------
+
+fn read_text(p: &Path) -> Result<String, String> {
+    if p.as_os_str() == "-" {
+        use std::io::Read;
+        let mut s = String::new();
+        std::io::stdin()
+            .read_to_string(&mut s)
+            .map_err(|e| format!("read stdin: {e}"))?;
+        Ok(s)
+    } else {
+        std::fs::read_to_string(p).map_err(|e| format!("read {p:?}: {e}"))
+    }
+}
+
+const PAIRWISE_HEADER: &str = "label\tn_groups\tn_responses\tacc_response\ttie_rate\tceiling_response\tacc_norm\tacc_group_majority\tn_groups_majority\n";
+
+fn pairwise_row(label: &str, s: &zensim_validate::pairwise::PairwiseStats) -> String {
+    format!(
+        "{label}\t{}\t{:.0}\t{:.10}\t{:.10}\t{:.10}\t{:.10}\t{:.10}\t{}\n",
+        s.n_groups,
+        s.n_responses,
+        s.acc_response,
+        s.tie_rate,
+        s.ceiling_response,
+        s.acc_norm,
+        s.acc_group_majority,
+        s.n_groups_majority
+    )
+}
+
+/// `--pairwise`: read weighted forced-choice rows, emit one stat row (or one
+/// per `--resample` line). No stat math here — every number comes from
+/// `zensim_validate::pairwise`.
+fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> {
+    use std::collections::HashMap;
+    use zensim_validate::pairwise::{
+        Choice, PairwiseRow, agreement, agreement_by_group_index, index_rows_by_group,
+    };
+
+    let text = read_text(path)?;
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let header = lines.next().ok_or("--pairwise: empty input")?;
+    let cols: Vec<&str> = header.split('\t').map(|c| c.trim()).collect();
+    let col = |name: &str| cols.iter().position(|c| *c == name);
+    let (ig, il, ir, ic) = (
+        col("group").ok_or("--pairwise: missing column 'group'")?,
+        col("s_left").ok_or("--pairwise: missing column 's_left'")?,
+        col("s_right").ok_or("--pairwise: missing column 's_right'")?,
+        col("choice").ok_or("--pairwise: missing column 'choice'")?,
+    );
+    let iw = col("weight");
+
+    let mut key_to_idx: HashMap<String, usize> = HashMap::new();
+    let mut group_names: Vec<String> = Vec::new();
+    let mut rows: Vec<PairwiseRow> = Vec::new();
+    for (n, line) in lines.enumerate() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let need = ig.max(il).max(ir).max(ic).max(iw.unwrap_or(0));
+        if f.len() <= need {
+            return Err(format!("--pairwise: line {} has {} fields", n + 2, f.len()));
+        }
+        let key = f[ig].to_string();
+        let g = *key_to_idx.entry(key.clone()).or_insert_with(|| {
+            group_names.push(key);
+            group_names.len() - 1
+        });
+        let parse = |v: &str, what: &str| -> Result<f64, String> {
+            v.trim()
+                .parse::<f64>()
+                .map_err(|e| format!("--pairwise: line {}: {what}: {e}", n + 2))
+        };
+        let choice = Choice::parse(f[ic]).ok_or_else(|| {
+            format!("--pairwise: line {}: choice must be left|right, got {:?}", n + 2, f[ic])
+        })?;
+        let weight = match iw {
+            Some(i) => parse(f[i], "weight")?,
+            None => 1.0,
+        };
+        if !(weight.is_finite() && weight >= 0.0) {
+            return Err(format!("--pairwise: line {}: weight must be finite >= 0", n + 2));
+        }
+        rows.push(PairwiseRow {
+            group: g,
+            s_left: parse(f[il], "s_left")?,
+            s_right: parse(f[ir], "s_right")?,
+            choice,
+            weight,
+        });
+    }
+    if rows.is_empty() {
+        return Err("--pairwise: no data rows".to_string());
+    }
+
+    let n_groups = group_names.len();
+    let mut out = String::from(PAIRWISE_HEADER);
+    match resample {
+        None => out.push_str(&pairwise_row("ALL", &agreement(&rows, n_groups))),
+        Some(rp) => {
+            let by_group = index_rows_by_group(&rows, n_groups);
+            let rtext = read_text(rp)?;
+            for (n, line) in rtext.lines().enumerate() {
+                let line = line.trim_end();
+                if line.trim().is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let (label, spec) = line
+                    .split_once('\t')
+                    .ok_or_else(|| format!("--resample: line {} needs LABEL<TAB>spec", n + 1))?;
+                let picked: Vec<usize> = if spec.trim() == "*" {
+                    (0..n_groups).collect()
+                } else {
+                    let mut v = Vec::new();
+                    for t in spec.split(',') {
+                        let i: usize = t.trim().parse().map_err(|e| {
+                            format!("--resample: line {}: index {t:?}: {e}", n + 1)
+                        })?;
+                        if i >= n_groups {
+                            return Err(format!(
+                                "--resample: line {}: group index {i} >= {n_groups}",
+                                n + 1
+                            ));
+                        }
+                        v.push(i);
+                    }
+                    v
+                };
+                out.push_str(&pairwise_row(label, &agreement_by_group_index(&by_group, &picked)));
+            }
+        }
+    }
+    Ok(out)
+}
+
+// ----------------------------------------------------------------------
 // main
 // ----------------------------------------------------------------------
 
@@ -1004,6 +1178,21 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+
+    // Pairwise mode: forced-choice agreement, optionally over a caller's
+    // cluster-bootstrap resamples. See `zensim_validate::pairwise`.
+    if let Some(pw_path) = &args.pairwise {
+        match run_pairwise(pw_path, args.resample.as_deref()) {
+            Ok(out) => {
+                print!("{out}");
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("panel: {e}");
+                return ExitCode::from(2);
+            }
+        }
+    }
 
     // Batch mode: read the manifest (file or stdin), emit the TSV, done.
     if let Some(batch_path) = &args.batch {
@@ -1296,6 +1485,63 @@ mod tests {
     // tests/panel_parity.rs; scipy cross-check in
     // scripts/verify_panel_batch_parity.py).
     // ------------------------------------------------------------------
+
+    #[test]
+    fn pairwise_reads_weights_groups_and_resamples() {
+        // Two triplets. Group A: humans 6-4 for LEFT, metric says LEFT worse
+        // (60 < 90) -> agrees with the 6. Group B: humans 9-2 for RIGHT,
+        // metric says LEFT worse (91 > 89 is false => s_left 89 < 91) ->
+        // disagrees with the 9.
+        let dir = std::env::temp_dir().join(format!("panel_pw_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rows = dir.join("rows.tsv");
+        std::fs::write(
+            &rows,
+            "group\ts_left\ts_right\tchoice\tweight\n\
+             A\t60\t90\tleft\t6\n\
+             A\t60\t90\tright\t4\n\
+             B\t89\t91\tleft\t2\n\
+             B\t89\t91\tright\t9\n",
+        )
+        .unwrap();
+        let out = run_pairwise(&rows, None).unwrap();
+        let line: Vec<&str> = out.lines().nth(1).unwrap().split('\t').collect();
+        assert_eq!(line[0], "ALL");
+        assert_eq!(line[1], "2", "n_groups");
+        assert_eq!(line[2], "21", "n_responses = 6+4+2+9");
+        // agreement = (6 + 2) / 21
+        let acc: f64 = line[3].parse().unwrap();
+        assert!((acc - 8.0 / 21.0).abs() < 1e-9, "{acc}");
+        // ceiling = (max(6,4) + max(2,9)) / 21 = 15/21
+        let ceil: f64 = line[5].parse().unwrap();
+        assert!((ceil - 15.0 / 21.0).abs() < 1e-9, "{ceil}");
+        // majority: A right, B wrong -> 0.5 over 2 groups
+        let maj: f64 = line[7].parse().unwrap();
+        assert!((maj - 0.5).abs() < 1e-9, "{maj}");
+
+        // Resample: '*' must reproduce the point estimate; a duplicate draw
+        // of group A alone must read a pure-A statistic.
+        let man = dir.join("man.tsv");
+        std::fs::write(&man, "POINT\t*\nAA\t0,0\n").unwrap();
+        let out2 = run_pairwise(&rows, Some(&man)).unwrap();
+        let l1: Vec<&str> = out2.lines().nth(1).unwrap().split('\t').collect();
+        assert_eq!(l1[0], "POINT");
+        assert_eq!(l1[3], line[3], "'*' must equal the no-resample point estimate");
+        let l2: Vec<&str> = out2.lines().nth(2).unwrap().split('\t').collect();
+        assert_eq!(l2[1], "2", "group A drawn twice = two clusters");
+        let acc_aa: f64 = l2[3].parse().unwrap();
+        assert!((acc_aa - 0.6).abs() < 1e-9, "{acc_aa}");
+
+        // A bad choice token must fail loud, not be silently dropped.
+        let bad = dir.join("bad.tsv");
+        std::fs::write(&bad, "group\ts_left\ts_right\tchoice\nA\t1\t2\tmaybe\n").unwrap();
+        assert!(run_pairwise(&bad, None).is_err());
+        // A missing required column must fail loud too.
+        let nocol = dir.join("nocol.tsv");
+        std::fs::write(&nocol, "group\ts_left\tchoice\nA\t1\tleft\n").unwrap();
+        assert!(run_pairwise(&nocol, None).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn batch_parses_explicit_and_indexed_and_star() {

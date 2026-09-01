@@ -33,9 +33,12 @@ use std::path::{Path, PathBuf};
 #[derive(Parser, Debug)]
 #[command(version, about = "Stage-1 dHash-64 overlap detector")]
 struct Args {
-    /// Directory containing the 49 CID22 validation reference PNGs
-    /// (e.g. /mnt/v/dataset/cid22/CID22_validation_set/original).
-    #[arg(long)]
+    /// Directory of HOLDOUT reference images to protect. Named for its
+    /// original use (the 49 CID22 validation references) and aliased
+    /// `--holdout-refs` for any other holdout set — the audit is the same
+    /// one either way, and other eval corpora need protecting too
+    /// (KADID / TID / CSIQ / LIVE / KonJND references, 2026-09-01).
+    #[arg(long, alias = "holdout-refs")]
     cid22_refs: PathBuf,
 
     /// Path to a training CSV whose first column lists source images
@@ -65,14 +68,20 @@ fn main() -> Result<()> {
         .filter(|p| {
             p.extension()
                 .and_then(|s| s.to_str())
-                .map(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg"))
+                .map(|e| {
+                    matches!(
+                        e.to_ascii_lowercase().as_str(),
+                        "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" | "webp"
+                    )
+                })
                 .unwrap_or(false)
         })
         .collect();
     eprintln!("CID22 refs: {} files", cid22_paths.len());
     if cid22_paths.len() != 49 {
         eprintln!(
-            "WARN: expected 49 CID22 validation refs, got {} — sanity-check path",
+            "NOTE: {} reference images (49 = the CID22 validation set; any other \
+             count means a different holdout set — sanity-check the path)",
             cid22_paths.len()
         );
     }

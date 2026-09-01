@@ -26,6 +26,7 @@ pub mod npz;
 pub mod output_calibration_spline;
 pub mod panel;
 pub mod parallel;
+pub mod pairwise;
 pub mod parquet_loader;
 pub mod perf_trace;
 pub mod prune;
