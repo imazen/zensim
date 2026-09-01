@@ -43,9 +43,18 @@
   near-lossless ladders carrying an inversion) while B and ADD156 lose and are
   the only arms that END ladders backwards. HDR: shipped **BHdr beats ssim2's
   integrated-PU path 0.7536 vs 0.7044** on UPIQ, while the frozen HDR
-  candidate-of-record loses to both. Also recorded: the board's stored CID22
-  `srocc_ci` is a PAIR bootstrap and **understates the reference-clustered
-  uncertainty by ~2×** (±0.006 vs ±0.010).
+  candidate-of-record loses to both. Through the **public API** end to end
+  (`Profile::B.compute()`) zensim is **~1.95× at 1T and 5.9–9.9× at 8T**; and
+  fast-ssim2's optional `rayon` feature was measured rather than assumed — it
+  is worth ~1.2× at 576² and nothing above it, so the multithreaded comparison
+  is not a flag left off. Also recorded: the board's stored CID22 `srocc_ci` is
+  a PAIR bootstrap and **understates the reference-clustered uncertainty by
+  ~2×** (±0.006 vs ±0.010); and `peer_ssim2` has the **highest
+  `balanced_composite` on the board** (0.8979, above every model) while ranking
+  last at 4/8 floors — the first by arithmetic (`nonphoto` = ssim2 at weight
+  0.30), the second because four floors were structurally unmeasurable for a
+  peer. Two of those four are now measurable and ssim2 passes both, moving it
+  4/8 → 6/8.
 
 ### Added
 - **Failure profiles — the board now says what a model gets WRONG and where that bites** (`benchmarks/failure_profiles_2026-08-31.md`, `benchmarks/failure_profiles_2026-08-31.pointer.md`). The gauntlet was a leaderboard; a reader choosing between two models could not see either one's flaws. Three parts. (1) **`bake_verdict` now splits ladder inversions by codec × quality zone and content class × zone** (`dial.zones`, scheme `ladder-inversion-2026-08-31`): the DIAL panel's five per-rung outcomes bucketed at `q<50` / `q50-85` / `q>=85`, plus the two ladder-level statements a codec loop actually meets — share of ladders carrying a material backwards rung, and share whose zone **endpoints** run backwards — plus the worst ladders **by reference image name**. Content classes are a recorded hand review of the 39 dial-grid references (`benchmarks/dial_grid_content_classes_2026-08-31.tsv`), deliberately not a classifier. The `all` rows re-derive the pooled G3 counters and the run **asserts** it (ADD156: 4,318 pairs / 65 inversions → `1−65/4318` = the stored `mono_pct` to the last digit). (2) **Measured board-wide** — 322 of 379 cells, 0 graft failures, every one of the 57 skips carrying a reason; `scripts/v_next/measure_dial_zones.py` never guesses the regime, it re-runs under every dial grid on disk and accepts only the run whose pooled dial block is **byte-identical** to the board's, and `promote_fulleval.py --graft-dial-zones` writes under the same gate. (3) **The "Failure profile" board panel** — per model, findings ranked by product impact in the form *what breaks / how big / where you meet it / evidence*, a sortable side-by-side comparison table, the named worst ladders, the honest inverse ("reliably good at"), and an explicit NOT MEASURED list with reasons. Nothing on the page is recomputed. **Results:** `q>=85` is where the board fails — median inversion rate 2.83 % against 0.76 %/0.79 % in the lower bands, and **189 of 322 models carry at least one ladder that ends backwards there**; avif is the worst codec (median 3.64 %, p90 14.03 %, 185 models with a backwards ladder) and webp nearly clean (median 0.00 %, 8). Shipped **B**'s worst single reversal at `q<50` is **30.2 dial points**; `Q7b_pools` has no backwards ladders but a **91.3-point** single step at `q>=85`. Board 19,946,713 → 20,696,597 B (+3.76 %); `gauntlet_gates.sh` PASS, and the render harness gained a failure-panel test that fails on a blank panel or on a NOT-MEASURED cell drawn as a zero (it caught a real crash pre-ship: `corruption.per_family` is a list on bake cells and an object on peer rows). (`926e8020`, `835cde0a`)

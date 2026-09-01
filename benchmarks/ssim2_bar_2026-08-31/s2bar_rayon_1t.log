@@ -1,0 +1,36 @@
+# ssim2_speed_bar: RAYON_NUM_THREADS=1 ssim2_rayon_feature=true
+[zenbench] calibration: int=0.18ns/iter mem_bw=101.3GiB/s mem_lat=8.9ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788243864-23dc0c.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788243864-23dc0c
+═══════════════════════════════════════════════════════════════
+
+  ssim2_bar_576  4 rounds × 1 calls ⚠ only 4 rounds
+                 mean ±mad ms  95% CI vs base   
+  ├─ fast_ssim2   25.6 ±0.4ms  [25.4–25.9]ms    
+  ╰─ zensim_B     13.7 ±0.9ms  [-50.3%–-42.7%]  
+
+  zensim_B    ███████████████████████████████ 13.70ms
+  fast_ssim2  ██████████████████████████████████████████████████████████ 25.64ms
+
+  ssim2_bar_1152  4 rounds × 1 calls ⚠ only 4 rounds
+                 mean ±mad ms  95% CI vs base   
+  ├─ fast_ssim2   95.7 ±2.9ms  [90.5–99.7]ms    
+  ╰─ zensim_B     49.6 ±0.3ms  [-54.5%–-38.1%]  
+
+  zensim_B    ██████████████████████████████ 49.59ms
+  fast_ssim2  ██████████████████████████████████████████████████████████ 95.73ms
+
+  ssim2_bar_2304  4 rounds × 1 calls ⚠ only 4 rounds
+                  mean ±mad ms  95% CI vs base   
+  ├─ fast_ssim2   388.4 ±5.6ms  [379.7–401.1]ms  
+  ╰─ zensim_B     209.0 ±4.0ms  [-49.5%–-43.2%]  
+
+  zensim_B    ███████████████████████████████ 208.99ms
+  fast_ssim2  █████████████████████████████████████████████████████████ 388.35ms
+
+  total: 380.1s  (360 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json

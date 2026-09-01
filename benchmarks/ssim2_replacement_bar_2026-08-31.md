@@ -54,9 +54,15 @@ zenbench, this box, arms interleaved in one process (`extract_paths_bench`,
 | zensim as shipped today (buffered 372) | 11.1 (1.95×) | 47.0 (1.84×) | 198.9 (1.88×) |
 
 At 8 threads the 372 fold walk is **5.3–6.5×** ssim2 and even the 944 walk is
-**2.4–3.0×**. **Every zensim class beats ssim2 at every size and thread count
-measured, including the one the campaign spent its money on.** The three
-numbers that settle it: 21.7 / 18.3 / 9.4 ms at 576²/1T.
+**2.4–3.0×**. Through the **public API** end to end (`Profile::B.compute()`,
+extraction + forward + spline) it is **~1.95× at 1 T and 5.9–9.9× at 8 T**. And
+the obvious objection — that fast-ssim2 has an optional `rayon` feature it is
+not being given — was **tested, not assumed**: enabling it is worth ~1.2× at
+576² and nothing above it, so the multithreaded columns stand.
+
+**Every zensim class beats ssim2 at every size and thread count measured,
+including the one the campaign spent its money on.** The three numbers that
+settle it: 21.7 / 18.3 / 9.4 ms at 576²/1T.
 
 The relevant self-criticism is not that we are slow. It is that **"are we
 faster than the metric we want to replace" had no answer in the repo until
@@ -619,10 +625,10 @@ consumer gets.
 | shipped today | 1.95× | 5.69× | 1.84× | 8.77× | 1.88× | 9.04× |
 
 **Every zensim class beats fast-ssim2 at every size and thread count measured.**
-The 1T column is the honest one and the only one W4 is judged on: at 8/16 T
-zensim uses rayon and fast-ssim2 (default features) does not, so those columns
-are "us with threads vs them without". Read them as the deployment comparison
-they are, not as a per-core claim.
+W4 is judged on the 1 T column, which is the conservative one. The 8/16 T
+columns are a *deployment* comparison rather than a per-core claim — and the
+obvious objection to them (fast-ssim2 has threads it is not being given) was
+tested and does not hold: see the `rayon` row below.
 
 **Through the PUBLIC API, end to end.** The table above prices extraction
 only. `zensim-bench/benches/ssim2_speed_bar.rs` runs the same opponent against
@@ -640,6 +646,25 @@ So the ~1.9× is not an artifact of excluding the model forward: **the shipped
 product API is about twice fast-ssim2's speed at every size.** (The 2304² row
 was taken while another lane's bench held the box — hence the ±; the ratio is
 stable across all three sizes and matches the extraction-only reading.)
+
+**And giving the opponent its threads changes nothing.** fast-ssim2's `rayon`
+feature parallelises its Gaussian blur — the dominant kernel — and is off in
+what a consumer gets, so §3.6's 8/16 T columns could have been read as unfair.
+They are not. `ssim2_speed_bar` built twice, the same binary otherwise, the
+`zensim_B` arm present in both purely as the cross-build anchor:
+
+| 8 threads | fast_ssim2 **without** `rayon` | fast_ssim2 **with** `rayon` | zensim `Profile::B` |
+|---|--:|--:|--:|
+| 576² | 30.7 | **25.2** | 3.4–5.2 |
+| 1152² | 97.0 | **93.3** | 9.6–9.8 |
+| 2304² | 389.1 | **399.9** | 46.5–46.7 |
+
+**Its threading is worth ~1.2× at 576² and nothing at 1152²/2304²** (2304²
+is nominally *slower* with it on). At 8 T with `rayon` enabled the ratios are
+still **7.4× / 9.7× / 8.6×**. So the multithreaded columns are a fair
+deployment comparison, not an artifact of a flag left off — and that is now
+measured rather than assumed. At 1 T the feature is inert by construction
+(25.6 / 95.7 vs 23.3 / 96.8, i.e. box noise).
 
 **Cross-lane anchor.** The seven zensim arms in this run reproduce the
 feature-cost lane's independent zenbench table on the same box within ~5 %
@@ -1061,11 +1086,12 @@ cargo build --release --bench ssim2_speed_bar [--features ssim2-rayon]
   the solid one; 8/16 T were taken on a shared box and should be read for
   shape. The cross-lane agreement in §3.6 (~5 % on four shared arms against an
   independent zenbench run) is the confidence those numbers deserve.
-- **fast-ssim2 is measured at default features, i.e. single-threaded.** Its
-  8/16 T columns therefore show it not benefiting from threads it does not
-  use — that is the honest deployment comparison, not a per-core claim, and it
-  is stated at the table. The `rayon`-enabled variant is priced separately by
-  `zensim-bench/benches/ssim2_speed_bar.rs`.
+- **fast-ssim2 is measured at default features, i.e. single-threaded** — and
+  that turned out not to matter: the `rayon`-enabled build was measured too and
+  is worth ~1.2× at 576² and nothing above it (§3.6), so the multithreaded
+  columns are a fair deployment comparison rather than a flag left off. This is
+  the one caveat in the speed row that was closed by measurement rather than
+  stated as a limitation.
 - **The bootstrap resamples REFERENCES, not pairs.** 4,292 CID22 rows are 49
   clusters. This is deliberately more conservative than the board's stored
   `srocc_ci` (a pair bootstrap, ±0.006 on CID22, against this lane's ±0.010),
