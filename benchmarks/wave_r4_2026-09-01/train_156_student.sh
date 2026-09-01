@@ -16,9 +16,29 @@
 # That is a real recipe difference from A1 and is recorded, not hidden.
 #
 #   A3  MODE=human    : targets human_score  (the plain 156 retrain)
-#   A4  MODE=distill  : the teacher legs are re-targeted at A1's OWN outputs,
-#                       so the student fits the 944 flagship rather than the
-#                       labels (WR4_TEACHER must point at the A1 bake).
+#   A4  MODE=distill  : the tsafesyn leg is re-targeted at the TEACHER's
+#                       output (registration §3.0.2 point 3: HYA_w084 =
+#                       0.84*W10L9PH_s4004 + 0.16*Q7b, era-1-trained, grafted
+#                       onto wave-r4 r4 features by build_teacher944.py
+#                       --graft-from — the row-identity join, NOT a re-forward
+#                       over new features; A1 is the secondary/comparison
+#                       teacher, not the primary). WR4_DISTILL_SAFESYN must
+#                       point at the grafted safesyn table.
+#
+#                       WR4_DISTILL_TBIG is OPTIONAL (2026-09-01 amendment):
+#                       when unset, the ttbig group is DROPPED rather than
+#                       falling back to the old default self-teacher target —
+#                       that would silently mix two different teachers across
+#                       the two legs. Building an HYA-graft for tbig needs a
+#                       row-matched era-1-pools subset of the 208,169-row raw
+#                       tbig_pools944 table down to wave-r4's 192,714-row
+#                       filtered recipe view; not done this session. So A4
+#                       (as currently run) isolates ONE variable: does the
+#                       tsafesyn leg's teacher-vs-human target matter on r4
+#                       features, holding bigcodec at its human target as A3
+#                       does. This is a scoped-down A4, stated rather than
+#                       hidden — a fuller version with a tbig teacher leg is
+#                       registered as follow-up work, not claimed as done.
 #
 # Usage: train_156_student.sh <MODE:human|distill> <seed> [out.bin]
 set -euo pipefail
@@ -31,15 +51,18 @@ TRAIN="${ZL_TRAIN:?ZL_TRAIN must point at the zensim_mlp_train binary}"
 KADIS="${WR4_KADIS:-}"
 mkdir -p "$OUTDIR"
 
+TTBIG=""
 case "$MODE" in
   human)   ARM=A3; TSAFE="$V/safesyn_teacher944_pure.parquet"; TTBIG="$V/tbig_teacher944_pure.parquet" ;;
   distill) ARM=A4
-           TSAFE="${WR4_DISTILL_SAFESYN:-$V/safesyn_distill_a1.parquet}"
-           TTBIG="${WR4_DISTILL_TBIG:-$V/tbig_distill_a1.parquet}"
-           for f in "$TSAFE" "$TTBIG"; do
-             [ -f "$f" ] || { echo "ABORT: distill target table missing: $f
-  build it first with benchmarks/wave_r4_2026-09-01/make_distill_targets.sh <A1.bin>"; exit 1; }
-           done ;;
+           TSAFE="${WR4_DISTILL_SAFESYN:?WR4_DISTILL_SAFESYN must point at the HYA-grafted safesyn distill table}"
+           [ -f "$TSAFE" ] || { echo "ABORT: distill target table missing: $TSAFE"; exit 1; }
+           if [ -n "${WR4_DISTILL_TBIG:-}" ]; then
+             TTBIG="$WR4_DISTILL_TBIG"
+             [ -f "$TTBIG" ] || { echo "ABORT: WR4_DISTILL_TBIG set but missing: $TTBIG"; exit 1; }
+           else
+             echo "== ttbig leg DROPPED (WR4_DISTILL_TBIG unset) — bigcodec stays human-target-only, see header note"
+           fi ;;
   *) echo "ABORT: MODE must be human|distill"; exit 1 ;;
 esac
 OUT="${3:-$OUTDIR/${ARM}_156_s${SEED}.bin}"
@@ -51,11 +74,11 @@ TRAIN_GROUPS=(
   --group "tid:$R4/ext_tid.parquet:0.5:1.0:rank"
   --group "bigcodec:$V/tbig_944_200k_pure.parquet:0.5:1.0:both"
   --group "tsafesyn:$TSAFE:0.5:1.0:both"
-  --group "ttbig:$TTBIG:0.5:1.0:both"
   --group "konjnd_bpg:$R4/ext_konjnd_bpg_train.parquet:1.2:0.0:both"
   --group "konjnd_bpg_val:$R4/ext_konjnd_bpg_val.parquet:0.0:1.5:both"
   --group "tbig_hf:$V/tbig_hf_pure.parquet:1.0:0.0:both"
 )
+if [ -n "$TTBIG" ]; then TRAIN_GROUPS+=( --group "ttbig:$TTBIG:0.5:1.0:both" ); fi
 if [ -n "$KADIS" ]; then TRAIN_GROUPS+=( --group "kadis:$KADIS:0.15:1.0:both" ); fi
 for g in "${TRAIN_GROUPS[@]}"; do case "$g" in --group) ;; *) p="${g#*:}"; p="${p%%:*}"; [ -f "$p" ] || { echo "ABORT: missing $p"; exit 1; };; esac; done
 
