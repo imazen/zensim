@@ -1628,6 +1628,22 @@
    "evidence": "benchmarks/hfhuman_2026-09-01.md SS2.7",
    "date": "2026-09-01",
    "fix_path": "upstream request to aicdb.jpeg.org for the IPTC stimulus set; not a computation"
+  },
+  {
+   "id": "jpeg-aic-btc-boosted-arm-dependence",
+   "kind": "annotated",
+   "fields": [
+    "rank.aic3",
+    "rank.aic4",
+    "rank.sdr25"
+   ],
+   "scope": {
+    "manual": "reading-dependence of the JPEG-AIC pairwise axes - documentation-only, applies to no fulleval cell"
+   },
+   "reason": "The AIC-3/SDR25 BTC stimuli are BOOSTED - 2x magnified and ~1.8x distortion-amplified renderings of a 310x400 CTC region (MEASURED: LS gain 1.64-1.88, MAE ratio 1.79-2.66, residual corr >= 0.81 over 125 cells). Scoring the DISPLAYED pixels and the NATIVE counterpart serves the IDENTICAL 504,960 responses over the IDENTICAL 3,960 triplets, and 14 of 36 (subset, scorer) verdicts vs peer_ssim2 FLIP between them - including the only strict win in the table (W10L9PH/W10L9P on the JPEG-AI leg: +0.0012 [+0.0002,+0.0025] native, -0.0029/-0.0055 displayed, both CIs excluding zero). Report a JPEG-AIC pairwise verdict WITH its arm, never bare; the arm-invariant facts are that nobody beats ssim2 under both readings, shipped B is behind under both, Q7b never loses on the pooled or cross-codec axis, and the 944 pair is the most reading-sensitive arm",
+   "evidence": "benchmarks/hfhuman_2026-09-01.md SS2.4 + SS5.3a; /mnt/v/output/zensim/hfhuman-2026-09-01/arm_invariance.tsv",
+   "date": "2026-09-01",
+   "fix_path": "none - a property of the BTC boosting design; recovering the IPTC stimuli would add an unboosted leg 6x the size of the only current one"
   }
  ]
 }

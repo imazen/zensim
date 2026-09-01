@@ -61,6 +61,38 @@ const GOLD_Z_RMSE_PER_SAMPLE: f64 = 0.1726477695;
 
 const TOL: f64 = 1e-9;
 
+
+/// Where is the built `panel` binary? Checks, in order: `ZEN_PANEL_BIN`
+/// (explicit override), `$CARGO_TARGET_DIR/{release,debug}/panel`, then the
+/// in-repo `target/{release,debug}/panel`. Before 2026-09-01 only the last was
+/// checked, so this parity gate was UNRUNNABLE for any session using its own
+/// `CARGO_TARGET_DIR` — which is the workspace's own guidance.
+fn locate_panel(repo_root: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("ZEN_PANEL_BIN") {
+        let p = std::path::PathBuf::from(p);
+        assert!(p.exists(), "ZEN_PANEL_BIN does not exist: {}", p.display());
+        return p;
+    }
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(t) = std::env::var("CARGO_TARGET_DIR") {
+        roots.push(std::path::PathBuf::from(t));
+    }
+    roots.push(repo_root.join("target"));
+    roots
+        .iter()
+        .flat_map(|r| {
+            ["release", "debug"]
+                .iter()
+                .map(move |p| r.join(p).join("panel"))
+        })
+        .find(|p| p.exists())
+        .expect(
+            "build the `panel` binary first: \
+             cargo build -p zensim-validate --bin panel \
+             (set ZEN_PANEL_BIN or CARGO_TARGET_DIR if it is not in ./target)",
+        )
+}
+
 #[test]
 fn golden_panel_matches_reference() {
     let p: PanelStats = panel::compute_panel(&PRED, &TGT);
@@ -139,15 +171,10 @@ fn cross_language_parity_via_python() {
         script.display()
     );
 
-    // Locate the built `panel` binary (release preferred, then debug).
-    let bin = ["target/release/panel", "target/debug/panel"]
-        .iter()
-        .map(|p| repo_root.join(p))
-        .find(|p| p.exists())
-        .expect(
-            "build the `panel` binary first: \
-             cargo build -p zensim-validate --bin panel",
-        );
+    // Locate the built `panel` binary — honours ZEN_PANEL_BIN /
+    // CARGO_TARGET_DIR so the gate is runnable under the per-agent
+    // target-dir discipline; the in-repo `target/` stays the fallback.
+    let bin = locate_panel(&repo_root);
 
     let out = Command::new("python3")
         .arg(&script)
@@ -202,14 +229,10 @@ fn cross_language_batch_parity_via_python() {
         script.display()
     );
 
-    let bin = ["target/release/panel", "target/debug/panel"]
-        .iter()
-        .map(|p| repo_root.join(p))
-        .find(|p| p.exists())
-        .expect(
-            "build the `panel` binary first: \
-             cargo build -p zensim-validate --bin panel",
-        );
+    // Locate the built `panel` binary — honours ZEN_PANEL_BIN /
+    // CARGO_TARGET_DIR so the gate is runnable under the per-agent
+    // target-dir discipline; the in-repo `target/` stays the fallback.
+    let bin = locate_panel(&repo_root);
 
     let out = Command::new("python3")
         .arg(&script)

@@ -31,25 +31,35 @@
   `aic4_all` (300, the rank arm). Extracted at **all three live regimes**
   (`v1` 372 / `foldapp2` 944 / `foldapp2pools`) with each bake scored only on
   its own — the guard against the registered `--regime` mis-scoring bug.
-- **VERDICT (`btc_native`, 3,960 triplets / 379,048 responses, triplet-clustered
-  paired bootstrap B = 2,000):** ssim2 acc **0.7302** against a majority-oracle
-  **ceiling of 0.7346**, calling **0.9575** of triplets right. Q7b +0.0002,
-  W10L9P −0.0001, ADD156 −0.0002, W10L9PH −0.0003 — **all TIE**; shipped **B
-  −0.0025 [−0.0037, −0.0014] — measurably BEHIND**. The same verdict the exam
-  reached on CID22, now on 88× the judgments and in the near-lossless zone.
-- **A STRICT WIN, on the learned-codec leg.** On the JPEG-AI-SDR25 study
-  (660 triplets, 60,785 responses) **W10L9PH_s4004 and W10L9P_s4005 both beat
-  ssim2: +0.0012 [+0.0002, +0.0025], P = 0.979** (triplets called right 0.9879
-  vs 0.9818) — replicated across two independent seeds of the same recipe.
-  Small, one cell of a 6×4×6 grid, would not survive Bonferroni; the seed
-  replication is what makes it more than a lucky cell.
-- **A NEW measured failure mode for the 944 class: out-of-distribution content.**
-  On the *boosted* pixels (2× magnified, ~1.8× distortion-amplified — measured,
-  not assumed) cross-codec agreement collapses for W10L9PH (−0.0276) and
-  W10L9P (−0.0288), both CIs excluding zero, while the additive arms hold
-  (Q7b −0.0026, ADD156 −0.0030) and ssim2 *gains*. Same triplets, same humans,
-  only the pixels change. On native content the 944 class is the best zensim
-  arm; on upsampled/amplified content it is the worst.
+- **VERDICT (`btc_native` — native scale/amplitude; 3,960 triplets / 379,048
+  responses, triplet-clustered paired bootstrap B = 2,000):** ssim2 acc
+  **0.7302** against a majority-oracle **ceiling of 0.7346** (not 1.0 — the
+  observers split), calling **0.9575** of triplets right. Q7b +0.0002, W10L9P
+  −0.0001, ADD156 −0.0002, W10L9PH −0.0003 — **all TIE**; shipped **B −0.0025
+  [−0.0037, −0.0014] — measurably BEHIND**. The same verdict the exam reached
+  on CID22, now on 88× the judgments and in the near-lossless zone.
+- **The corpus supplies its own robustness test, and it is the sharper result.**
+  BTC stimuli are *boosted* — the workers judged a 2× magnified, ~1.8×
+  distortion-amplified rendering (MEASURED, gate G2). `btc_displayed` and
+  `btc_native` therefore serve the **identical** responses over the
+  **identical** triplets and differ only in which pixels the metric is shown.
+  **14 of 36 (subset, scorer) verdicts FLIP between them.** What survives:
+  **(a) nobody strictly beats ssim2 on any subset under both readings — not one
+  WIN→WIN cell; (b) shipped `B` is BEHIND under both** on the pooled axis
+  (−0.0025 / −0.0039), cross-codec (−0.0164 / −0.0207) and the AIC-3 leg;
+  **(c) `Q7b_pools` is the only candidate that never loses** on the pooled or
+  cross-codec axis under either reading; **(d) the 944 pair is the most
+  reading-sensitive arm**, TIE→LOSS on the pooled axis, on cross-codec
+  (−0.0020 → −0.0276) and on the AIC-3 leg, while the additive arms and ssim2
+  hold. Table: `…/hfhuman-2026-09-01/arm_invariance.tsv`.
+- **The one strict win in the table is ARM-DEPENDENT and is reported as such.**
+  On the JPEG-AI-SDR25 leg (660 triplets, 60,785 responses) W10L9PH_s4004 and
+  W10L9P_s4005 both beat ssim2 **+0.0012 [+0.0002, +0.0025], P = 0.979** on the
+  native reading — replicated across two independent seeds — and both
+  **REVERSE to a significant loss** on the displayed reading (−0.0029 and
+  −0.0055, CIs excluding zero). Two defensible readings of the same 60,785
+  human judgments disagree about the sign; **this lane does not claim the win**,
+  it claims the measurement and that the arm choice decides it.
 - **`aic3`'s target is a DESIGN value, not a score** — `score.jnd ==
   −0.25 × quality_level` **exactly on 600/600 rows**, i.e. a 10-level ordinal
   ladder with 60 tied targets per level, **121/600 of them interpolated**
