@@ -1025,3 +1025,78 @@ separately.**
 target costs KonJND monotonically (up to −0.115), and `SADD_T` is the only
 student in the table whose KonJND (0.4244) falls below `peer_ssim2` by more than
 δ on its own. A fleet-scale student should carry the **mixed** target.
+
+---
+
+## 15. COORDINATION — what this fits-only probe tells the era-2 / radius-4 wave
+
+Per the coordinator: this lane's results "are the fast probe that tells that
+wave which student arms deserve fleet-scale training". The probe's answer, in
+priority order, each with the measurement behind it:
+
+1. **Extract the DENSE LEGS at `folded720append2pools`, biggest first.** The
+   156-student class is leg-limited, not method-limited: 111k rows → CID22
+   0.8139, 196k rows → **0.8643**, same recipe, same slice, same λ family
+   (§12.1). **+0.057 CID22, and no KonJND cost.** Until that leg exists at the
+   pools regime, *no* distillation arm can be measured at the incumbent's own
+   operating point, because the teacher only forwards on a 944 pools root.
+   `canonical-2026-05-21/train/safesyn.parquet` (196,086 rows) is the specific
+   file.
+2. **Train the student on a MIXED target, never a pure teacher one.** Measured
+   over nine λ: the teacher target buys CID22 (+0.017 median) and CSIQ (+0.022
+   median) and **costs KonJND monotonically up to −0.115** (§12.2). The 1:1 mix
+   keeps most of the gain and gives back about half the loss. A pure-teacher
+   student is the one arm here whose KonJND falls below `peer_ssim2` by more
+   than δ.
+3. **The teacher should be the BLEND, not a single flagship.** PART I measured
+   that `0.84·W10L9PH + 0.16·Q7b` is the only model in the exam that clears W1
+   — including KonJND, where both parents are behind ssim2 and the blend is
+   ahead (§6.3). A distillation target inherits its teacher's trade-offs, and
+   this teacher's are strictly better than either parent's.
+4. **Do NOT re-extract `hf_nearlossless`** at any width (exam APPENDIX A.1/A.2:
+   ssim2 self-target, bitstreams gone), and **do not spend a wave on features
+   for the CID22 axis** — E-M6b priced v3-marginal at ≈+0.001/seed against
+   +0.004 for a data slice, and §12.3 prices the leg at +0.057. Data, then
+   target, then features.
+5. **Two code items gate whether any of this is shippable**, and neither is a
+   training problem: `ComputeSet::from_block_profile` + a `ZensimProfile` slot
+   (so a basic-only bake's 156 walk is reachable by a caller — **without it,
+   every W4 PASS in §14 is a property of the model and not of any code path a
+   user can run**), and an 8-thread re-measurement of §13.3 on a quiet box.
+
+**Nothing here is launched or approved.** The wave is another lane's; this
+section is the ranked, priced input it asked for.
+
+---
+
+## 16. REPRODUCTION
+
+```sh
+# PART I — the 33 frozen arms + the 16 declared refinement cells
+scripts/hybrid_arms.sh score        # bake_verdict --ensemble --ensemble-weights, pools root
+scripts/hybrid_arms.sh refine       # the H-A1 step-0.02 window
+scripts/hybrid_arms.sh peerdial     # the opponent's ladder on the SAME grid
+ARMS="HYA_w000 HYA_w076 HYA_w080 HYA_w086 HYB_w080 HYB_w086 HYC_w080 HYA_w100" \
+  scripts/hybrid_arms.sh boot cid22 cid22:0.8 csiq aic3 live aic4
+python3 scripts/hybrid_exam_table.py            # the W1/W2/W3 scorecard
+
+# W4 — the amended speed clause
+scripts/hybrid_speed.sh build && scripts/hybrid_speed.sh run 5
+python3 scripts/hybrid_speed_read.py            # min/median/max per (build, threads, size, arm)
+
+# PART II — distillation into the 156 compute set
+scripts/hybrid_distill.sh gates     # G-P1a/b, G-E, G-S
+scripts/hybrid_distill.sh teacher   # HYA_w084 forwarded over the pools safesyn leg
+scripts/hybrid_distill.sh gram      # --max-feat 372, clipped + unclipped
+scripts/hybrid_distill.sh fit       # --slice-file scripts/sota944/slice_basic156.txt
+scripts/hybrid_distill.sh eval      # both roots
+
+python3 scripts/hybrid_manifest.py  # _MANIFEST.json: shas for every artifact + input
+```
+
+Artifacts + `_MANIFEST.json` (build commit, binary shas, parent-bake shas,
+substrate shas, 560 files): `/mnt/v/output/zensim/hybrid-2026-09-01/`.
+Board cells: `HYA_w084` and `SADD_BIGLEG`, promoted by
+`scripts/promote_fulleval.py` (nothing recomputed; `source_verdict` chains each
+board number back to the committed verdict, and `dial.zones` is carried so the
+failure-profile panel renders).

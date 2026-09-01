@@ -54,7 +54,58 @@
   + `_RECOVERY_2026-09-01_iptc_map.tsv` (130 rows, per-file sha256). No pixels
   were downloaded, copied, or renamed.
 
-### Measured — the HYBRID candidate, and the exam's speed clause amended to 8 threads (2026-09-01)
+### Measured — the HYBRID candidate, the speed clause as a CLASS bar, and the 156-student probe (2026-09-01)
+
+- **W4 amended TWICE, and the second supersedes the first.** APPENDIX B added
+  the 8-thread count (user directive). **AMENDMENT B2** then replaced the
+  opponent bar with a **CLASS bar** (user directive): a passing candidate must
+  be **≤ 1.25 × the 156-walk class at BOTH 1 and 8 threads**, with `fast-ssim2`
+  retained as a context row. The 1.25 is derived — below ~1.10× is inside the
+  bar arm's own ASLR spread, the 372 class measures 1.55–1.85× and the 944
+  classes 2.06–2.68×, so 1.25× cuts in the gap between classes; and `ADD156`
+  sits at 1.00×, so the bar is not vacuous.
+- **MEASURED, per-start ratio to the 156 bar, 1 thread, 5 ASLR starts,
+  interleaved in one process** (576²/1152²/2304²): bar **6.90 / 25.70 /
+  107.20 ms**; `zensim_B` 1.551/1.846/1.841; `flagship_944off`
+  2.101/2.062/2.156; `q7b_944pools` 2.420/2.446/2.578; `hybrid_944pools`
+  2.565/2.677/2.602; `fast_ssim2` (context) 2.783/3.258/3.395. **No 944 arm is
+  within 2× of the bar** — the gap is the extraction. The ensemble's second
+  forward is **1–6 % of one compare**, which is what makes "an ensemble is
+  priced as ONE compare" a measurement. 8 T is **NOT MEASURED** by this lane
+  (the box carried a 2801 %-CPU `v2_ab_extract` throughout); the cited
+  feature-cost table, whose 1 T half agrees to 2 %, puts the 944 class at
+  **4.43×** the bar at 8 T.
+- **Consequence: the 944 class cannot pass, and `HYA_w084` becomes the TEACHER.**
+- **PART II — distilling into the 156 compute set.** 372-input students with
+  support confined to f0..155 (`fit-lasso --slice-file`, the new
+  `scripts/sota944/slice_basic156.txt`), teacher = `HYA_w084` forwarded over the
+  stored tables. **The control did not reproduce its incumbent, and finding out
+  why is the result**: the target clip is worth +0.007, the λ regime +0.06 and
+  it plateaus, the solver a trade, the fit substrate **nothing** (the same
+  corpus fit at both roots reads 0.7927 vs 0.7885) — and the **TRAINING LEG is
+  worth +0.057 and reproduces `ADD156` exactly** (196k canonical safesyn: CID22
+  0.8643 / CSIQ 0.9015 / KonJND 0.5406 at 31 coefficients vs 0.8632 / 0.9024 /
+  0.5350 at 28).
+- **The distillation signal, over nine λ:** the teacher target beats the human
+  target on CID22 at 8/9 (median +0.017) and CSIQ at 8/9 (+0.022), and **costs
+  KonJND monotonically, −0.008 → −0.115**. The 1:1 mix is the operating point.
+  **The leg is ~7× the teacher on CID22 and carries no KonJND cost** — the
+  priced ask for the era-2 / radius-4 wave is to re-extract the 196k dense leg
+  at `folded720append2pools`, and any fleet student should carry a MIXED target.
+- **`SADD_BIGLEG`** (156-class, 31 coefficients, 4,117 B) ties `ADD156` on
+  CID22/CSIQ, beats it on **KonJND 0.5432 — above `peer_ssim2`'s 0.5272** — and
+  **gains the W3 ladder pass `ADD156` fails** (pooled monotonicity 0.99596 ≥
+  ssim2's 0.99298, 0 % of q ≥ 85 ladders ending backwards vs 2 %).
+- **Owner fixes on the way through:** `bake_dial_refit predict` sized its input
+  buffer and its cross-member check by `n_inputs()`, so it handed a
+  dead-column-pruned bake a 667-column **prefix** of a 944-wide row and refused
+  a pruned+unpruned ensemble that `bake_verdict` accepts — now
+  `caller_input_width()`, as its own doc comment always claimed. Plus
+  `predict --ensemble-weights`, `gram --max-feat`, `fit-lasso --anchor-prefix`,
+  `build_teacher944.py --twin/--weights`, and a `promote_fulleval.py` refusal
+  when `--members` disagrees with the verdict's own member list.
+
+### Measured — the HYBRID candidate, PART I (2026-09-01)
 
 - **APPENDIX B amends the ssim2 exam's W4**, per the user directive that "the
   exam should also be perf runtime at 8t". W4 now binds at **BOTH 1 and 8
