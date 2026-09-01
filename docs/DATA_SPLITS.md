@@ -157,6 +157,51 @@ source_id % 10 == 9  → TEST    ( 14,000 sources /  70,000 cells)
 
 | **avif944 / avifgen-2026-08-06** (564,300 cells, 1,455 renditions, 1,082 origins — ALL train-side by construction) | **T2 (CLOSED 2026-08-21; campaign appendix Z.R)** | AC.R1 amendment 2: the corpus reuses train_renditions_2026-06-14 (every origin ends 0/2/4/6/8 — the June even/odd rule puts all of it train-side), so validate/test views are structurally EMPTY. Views: `train_944` = origins ending 0/2/4/6 (459,780 rows / 873 origins; the wave-12 TRAIN-ONLY leg, target `ssim2_gpu`) + `eval8_944` = origins ending 8 (104,520 rows / 209 origins; leg-side eval holdout — never trained on; the G-AC2 AVIF instrument population). Emitter: `zenmetrics scripts/jobsys/avifgen_training_views.py` (origin_split owner; hard-errors on any non-train-side digit). Rank validation for wave-12 stays the T0 estate (CID22 etc.) | N/A (our corpus; targets are metric teachers) | 4 byte-identical rendition pairs — all train/train, zero leakage (`duplicate_renditions.json`). GPU-score VRAM corruption caught at birth by G-Z5 + cured by the AC.R1 rescue (verdict 3/2,000 mismatches; re-gate 0.9993) — see `/mnt/v/output/avifgen-2026-08-06/_MANIFEST.json` |
 
+### §3d. The JPEG-AIC study family — one holdout family (registered 2026-09-01)
+
+The three T0 rows above (**AIC-3 CTC**, **AIC-4 sample**, **JPEG-AI-SDR25**)
+govern the *derived pair corpora*. They did not govern the material behind
+them, which is the same content: the **10 AIC-3 CTC full-resolution sources**
+(`00001`…`00010`) and their 600 encodes, every **620×800 BTC / PTC / IPTC
+crop**, the **50 JPEG-AI VM full-resolution encodes**, and the **567,120 raw
+triplet responses**.
+
+**Registered rule `jpeg-aic-family-holdout-2026-09-01`
+(`benchmarks/eval_annotations.json`): all of it is ONE holdout family, never a
+training input, membership by CONTENT — a crop of a member is a member.**
+Measured basis (`benchmarks/hfhuman_2026-09-01.md`): every PTC crop is a
+pixel-exact crop of a CTC source (G1) and every PTC distorted stimulus a
+pixel-exact crop of its CTC decode (G5, 250/250); BTC crops are 2× magnified,
+~1.8× distortion-amplified renderings of a 310×400 CTC region (G2/G7). So
+training on any member contaminates `aic3` **and** `aic4` **and** `sdr25` at
+once — and `sdr25` is `bake_verdict`'s selection comparator, so that leak
+changes which model *ships*. It would buy ≤ **900 labelled rows on 10 images**.
+The alternative 6/4 reference partition is priced in the doc §3.3 (it leaves
+`aic4` at 2 references and `sdr25` at 20 rows) and is **recommended against**.
+
+Two corrections to the rows above, both registered in
+`benchmarks/eval_annotations.json`:
+
+* **`aic3-target-is-design-jnd`** — `ext_aic3`'s `human_score` is the CTC
+  **design** value: `score.jnd == −0.25 × quality_level` **exactly on 600/600
+  rows**. It is a 10-level ordinal ladder with 60 tied targets per level, and
+  **121/600** of the levels are `method: estimated` (interpolated), image
+  `00004` being 31/60. A cross-codec *equalization* test, not a MOS
+  correlation.
+* **`sdr25-is-aic4-subslice`** — the containment was already registered
+  (Appendix I); what is new is that the two axes carry **different**
+  reconstructions of the same stimuli, differing by up to **1.79 JND**.
+
+**NOT-REACHABLE:** the 130 `IPTC_*` stimulus files (2024-06-28 IPTC study,
+51,870 responses) exist nowhere under `/mnt/v`
+(`aic3-iptc-stimuli-not-reachable`).
+
+**EVAL axes built on it (2026-09-01, holdout-legal):** four arms over the
+515,250 scoreable responses — `ptc_native` / `btc_displayed` / `btc_native` /
+`aic4_all` — at all three live regimes, statistic
+`panel --pairwise` = `zensim_validate::pairwise::agreement`. Artifacts
+`/mnt/v/output/zensim/hfhuman-2026-09-01/`.
+
 ### SSIMULACRA2's own data usage (for fair comparisons)
 
 Per the README (read 2026-07-02): ssim2 was Nelder-Mead-tuned on **CID22

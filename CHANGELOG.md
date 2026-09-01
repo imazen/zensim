@@ -2,6 +2,119 @@
 
 ## [Unreleased]
 
+### Measured — the JPEG-AIC study family, ingested as EVAL axes (2026-09-01)
+
+- **They are ONE study family on TEN source images, and three board axes are
+  already built from it** — `aic3`, `aic4`, and `sdr25` (`bake_verdict`'s
+  selection comparator). JPEG-AI-SDR25 is the JPEG-AI arm of the same
+  experiment as AIC-3/AIC-4, run on the same five crops (`crops_sources/PTC_*`
+  is **pixel-identical** to the AIC-3 `PTC_images.zip` reference; byte identity
+  does not hold, both shas recorded). Raw material: **567,120 human forced
+  choices, 515,250 of them scoreable** over 4,520 triplets and 1,237 workers.
+- **REGISTERED SPLIT RULE `jpeg-aic-family-holdout-2026-09-01`: HOLDOUT-ONLY,
+  family-wide, membership by CONTENT** (a crop of a member is a member).
+  Training on any member contaminates `aic3` **and** `aic4` **and** `sdr25`
+  at once — and a leak into `sdr25` changes which model *ships*, not merely
+  what is reported — while buying at most **900 labelled rows on 10 images**
+  against a training mass whose smallest leg has 81 references. **No training
+  leg was produced, by design**; the priced alternative (a 6/4 reference
+  partition, which would leave `aic4` at 2 references and `sdr25` at 20 rows)
+  is documented and recommended against.
+- **Overlap audit clean.** dHash-64 over all 20 family sources against **1,221
+  references** (CID22 49 + KADID 81 + TID 24 + CSIQ 30 + LIVE 29 + KonJND
+  1,008): **zero at d ≤ 10, minimum d = 12**, ten closest pairs eye-verified
+  (montages committed to block storage). CID22 is untouched under any use.
+- **NEW: a non-circular human near-lossless axis at n = 515,250** — the exam's
+  `hfnl_cid22band` has 1,425 pairs. Four arms: `ptc_native` (45 stimuli, native
+  scale, zero reconstruction), `btc_displayed` / `btc_native` (305 each — the
+  boosted pixels the worker saw, and the same region at native scale), and
+  `aic4_all` (300, the rank arm). Extracted at **all three live regimes**
+  (`v1` 372 / `foldapp2` 944 / `foldapp2pools`) with each bake scored only on
+  its own — the guard against the registered `--regime` mis-scoring bug.
+- **VERDICT (`btc_native`, 3,960 triplets / 379,048 responses, triplet-clustered
+  paired bootstrap B = 2,000):** ssim2 acc **0.7302** against a majority-oracle
+  **ceiling of 0.7346**, calling **0.9575** of triplets right. Q7b +0.0002,
+  W10L9P −0.0001, ADD156 −0.0002, W10L9PH −0.0003 — **all TIE**; shipped **B
+  −0.0025 [−0.0037, −0.0014] — measurably BEHIND**. The same verdict the exam
+  reached on CID22, now on 88× the judgments and in the near-lossless zone.
+- **A STRICT WIN, on the learned-codec leg.** On the JPEG-AI-SDR25 study
+  (660 triplets, 60,785 responses) **W10L9PH_s4004 and W10L9P_s4005 both beat
+  ssim2: +0.0012 [+0.0002, +0.0025], P = 0.979** (triplets called right 0.9879
+  vs 0.9818) — replicated across two independent seeds of the same recipe.
+  Small, one cell of a 6×4×6 grid, would not survive Bonferroni; the seed
+  replication is what makes it more than a lucky cell.
+- **A NEW measured failure mode for the 944 class: out-of-distribution content.**
+  On the *boosted* pixels (2× magnified, ~1.8× distortion-amplified — measured,
+  not assumed) cross-codec agreement collapses for W10L9PH (−0.0276) and
+  W10L9P (−0.0288), both CIs excluding zero, while the additive arms hold
+  (Q7b −0.0026, ADD156 −0.0030) and ssim2 *gains*. Same triplets, same humans,
+  only the pixels change. On native content the 944 class is the best zensim
+  arm; on upsampled/amplified content it is the worst.
+- **`aic3`'s target is a DESIGN value, not a score** — `score.jnd ==
+  −0.25 × quality_level` **exactly on 600/600 rows**, i.e. a 10-level ordinal
+  ladder with 60 tied targets per level, **121/600 of them interpolated**
+  (`method: estimated`). Registered `aic3-target-is-design-jnd`.
+- **`sdr25` is a strict 50-row stimulus SUBSET of `aic4`'s 300** (50/50
+  feature-key hits at the ext944 root) carrying a different reconstruction
+  (targets differ by up to 1.79 JND). Not an independent axis. Registered
+  `sdr25-is-aic4-subslice`.
+- **NAMED MISSING ARTIFACT: the 130 `IPTC_*` stimulus files** of the 2024-06-28
+  JPEG-AIC IPTC study — absent everywhere under `/mnt/v`, so its 51,870
+  responses are unscoreable. Recovering them would grow the only native-scale
+  unboosted axis from 10,290 to 62,160 responses. Registered
+  `aic3-iptc-stimuli-not-reachable`.
+- **Instrument gates:** this lane's CPU SSIMULACRA2 reproduces the dataset
+  authors' **own published** SSIMULACRA2 column on all 300 AIC-4 stimuli at
+  **SROCC 1.0000 / PLCC 1.0000** (max abs diff 0.125), and its AIC-4 rank row
+  reproduces the board's `peer_ssim2` **exactly** (0.9127 vs 0.9127) with every
+  candidate within 0.0006 of its board cell.
+- Provenance gates, all passing: **G1** every PTC crop is a pixel-exact crop of
+  its CTC full-resolution source; **G5** 250/250 PTC distorted stimuli are
+  pixel-exact crops of their CTC decodes; **G6** every JPEG-AI dlevel resolves
+  to exactly one VM full-resolution file (from bytes, not filename order);
+  **G7** every BTC region offset is a strict local minimum; **G4** the response
+  flags mean what the READMEs say and the pivot is the original on 567,120/567,120
+  rows (orientation established from the trap questions: 80.7 % name the
+  distorted side; bias floor 46.2 % left).
+- Doc `benchmarks/hfhuman_2026-09-01.md`, artifacts +
+  `_MANIFEST.json` (build commit, per-file + input shas)
+  `/mnt/v/output/zensim/hfhuman-2026-09-01/`, pointer
+  `benchmarks/hfhuman_2026-09-01.pointer.md`.
+
+### Added — forced-choice (2AFC / triplet) agreement, the statistic (2026-09-01)
+
+- **`zensim_validate::pairwise`** — the one owner for metric-vs-human
+  forced-choice agreement. Nothing in `zenstats` computed it: every rank
+  statistic the project owns consumes a per-stimulus SCALAR target, which is
+  exactly why 515,250 triplet judgments had only ever reached the board through
+  a reconstruction collapsing them to 655 numbers. Reports the **majority-oracle
+  ceiling** beside the accuracy (a metric cannot exceed it, and it is 0.73 on
+  this corpus, not 1.0), `acc_norm`, per-group majority accuracy, and a
+  metric-tie rate that scores ties at chance rather than silently winning or
+  dropping them. `agreement_by_group_index` is the cluster-bootstrap primitive:
+  **the caller keeps the RNG**, the registered `panel --batch` contract.
+  9 tests incl. a randomized parity check against an independent brute-force
+  oracle over 200 generated cases and the load-bearing `weights == expansion`
+  equivalence. It **belongs in `zenstats`** and says so in its own docs; it
+  landed here because this lane may not edit the `zenmetrics` repo.
+- **`panel --pairwise <rows.tsv> [--resample <sets.tsv>]`** — the single call
+  site, so no script re-derives the statistic. Parser gate-tested (weights,
+  group re-keying, `*`, duplicate draws, bad choice token, missing column).
+
+### Fixed (2026-09-01)
+
+- **`panel --json --per-group` emitted two concatenated top-level JSON
+  documents** — i.e. its stdout was not valid JSON. Reported by the ssim2-bar
+  lane (A.7) and not fixed there. `per_group` is now a key of the panel
+  document; regression test asserts one document and that the no-per-group form
+  is byte-unchanged.
+- **`check_holdout_overlap` silently skipped every `.bmp` / `.BMP` reference**
+  — its extension filter accepted only png/jpg/jpeg, so an audit pointed at
+  LIVE or TID references protected nothing (`image::open` already handled
+  them). Now accepts bmp/tif/tiff/webp, and `--holdout-refs` is a name that
+  does not lie when the directory is not CID22.
+
+
 ### Measured — the near-lossless clause of the ssim2 bar, closed (2026-09-01)
 
 - **The `hf_nearlossless` corpus is an ssim2 SELF-TARGET, not a human corpus.**

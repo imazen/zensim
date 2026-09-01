@@ -1278,10 +1278,12 @@ fn main() -> ExitCode {
     };
 
     if args.json {
-        print!("{}", render_json(&reports, has_sigma));
-        if let Some(g) = &per_group {
-            print!("{}", render_per_group_json(g));
-        }
+        // ONE document. Before 2026-09-01 `--json --per-group` printed two
+        // concatenated top-level objects, i.e. stdout was not valid JSON
+        // (found by the ssim2-bar lane, A.7; nothing had tripped on it
+        // because `zen_stats.panel` never passes `--per-group`). The
+        // per-group block is now a key of the panel document.
+        print!("{}", render_json_with_per_group(&reports, has_sigma, per_group.as_ref()));
     } else {
         print!("{}", render_text(&reports, has_sigma));
         if args.per_group {
@@ -1350,6 +1352,36 @@ fn render_per_group_text(g: Option<&panel::PerGroupSrocc>) -> String {
     }
 }
 
+/// `render_json` + an optional `"per_group"` key, as ONE valid document.
+fn render_json_with_per_group(
+    reports: &[GroupReport],
+    has_sigma: bool,
+    g: Option<&panel::PerGroupSrocc>,
+) -> String {
+    let base = render_json(reports, has_sigma);
+    let Some(g) = g else { return base };
+    let trimmed = base.trim_end();
+    let Some(body) = trimmed.strip_suffix('}') else {
+        // render_json's shape changed; fail loud rather than emit bad JSON.
+        panic!("render_json no longer ends with '}}' — cannot splice per_group");
+    };
+    format!(
+        "{}, \"per_group\": {{\n\
+         \x20\x20\x20\x20\"n_groups\": {},\n\
+         \x20\x20\x20\x20\"mean\": {},\n\
+         \x20\x20\x20\x20\"median\": {},\n\
+         \x20\x20\x20\x20\"frac_negative\": {},\n\
+         \x20\x20\x20\x20\"frac_perfect\": {}\n  }}\n}}\n",
+        body.trim_end(),
+        g.n_groups,
+        json_f(g.mean),
+        json_f(g.median),
+        json_f(g.frac_negative),
+        json_f(g.frac_perfect)
+    )
+}
+
+#[allow(dead_code)]
 fn render_per_group_json(g: &panel::PerGroupSrocc) -> String {
     format!(
         "{{\n  \"per_group\": {{\n\
@@ -1471,6 +1503,33 @@ mod tests {
         let sigma = vec![1.0; 40];
         let with = report_group("t", &predicted, &target, Some(&sigma));
         assert!(with.z_rmse_per_sample.is_some());
+    }
+
+    #[test]
+    fn json_with_per_group_is_one_document() {
+        // Regression for the two-concatenated-documents defect: stdout of
+        // `--json --per-group` must parse as ONE object carrying per_group.
+        let pred = vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0];
+        let targ = vec![1.0, 2.0, 3.0, 3.0, 2.0, 1.0];
+        let band = vec![
+            "a".to_string(), "a".to_string(), "a".to_string(),
+            "b".to_string(), "b".to_string(), "b".to_string(),
+        ];
+        let reports = vec![GroupReport {
+            label: "ALL".to_string(),
+            panel: panel::compute_panel(&pred, &targ),
+            z_rmse_per_sample: None,
+            n_kept: pred.len(),
+            n_dropped: 0,
+        }];
+        let g = per_group_summary(&pred, &targ, &band).expect("two groups");
+        let out = render_json_with_per_group(&reports, false, Some(&g));
+        // Exactly one top-level object: the text must open once and close once.
+        assert_eq!(out.matches("\n}").count(), 1, "more than one document:\n{out}");
+        assert!(out.contains("\"per_group\""), "{out}");
+        assert!(out.contains("\"n_groups\": 2"), "{out}");
+        // and the no-per-group form is unchanged
+        assert_eq!(render_json_with_per_group(&reports, false, None), render_json(&reports, false));
     }
 
     #[test]
