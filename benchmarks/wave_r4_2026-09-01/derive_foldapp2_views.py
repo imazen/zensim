@@ -43,10 +43,22 @@ TABLES = [t for t in (os.environ.get("WR4_ZERO_TABLES","").split(",")) if t] or 
     "recipe_views/tbig_teacher944_pure.parquet",
 ]
 POOL = [f"f{i}" for i in range(156, 372)]
-man = {"source_root": SRC, "regime": "folded720append2",
-       "rule": "f156..f371 := 0.0 on every row (measured EXACT vs a native foldapp2 extraction)",
-       "purity": "NEVER column-mix with the folded720append2pools tables these came from",
-       "tables": {}}
+# MERGE into an existing manifest rather than overwrite it (fixed 2026-09-01,
+# same run that added derive_foldapp2_anchor.py). A scoped re-invocation via
+# WR4_ZERO_TABLES (e.g. finalize_safesyn_big_r4.sh's A6 step, which derives
+# only the ONE new safesyn-big table) used to silently discard every prior
+# entry -- this is provenance data loss, not just a cosmetic manifest gap, and
+# it is exactly the failure class "ML Data Pipeline Discipline SS2" exists to
+# prevent. A full unscoped run reproduces the same 22-24 entries either way,
+# so this is safe in both the full and the scoped case.
+_man_path = os.path.join(DEST, "_MANIFEST.json")
+man = json.load(open(_man_path)) if os.path.exists(_man_path) else {
+    "source_root": SRC, "regime": "folded720append2",
+    "rule": "f156..f371 := 0.0 on every row (measured EXACT vs a native foldapp2 extraction)",
+    "purity": "NEVER column-mix with the folded720append2pools tables these came from",
+    "tables": {},
+}
+man.setdefault("tables", {})
 
 for rel in TABLES:
     src = os.path.join(SRC, rel)
