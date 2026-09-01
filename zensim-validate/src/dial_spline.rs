@@ -58,6 +58,38 @@ pub fn push_bin(mask: &[usize], preds: &[f64], tgt: &[f64], kx: &mut Vec<f64>, k
     }
 }
 
+/// Does the `neg_tail` choice CHANGE the fitted spline for this anchor?
+///
+/// Returns `Some((n_knots_without_dedup, n_knots_with_dedup))` when it does —
+/// i.e. when the fit produced a RUN of more than one knot at `y <= 1e-6`.
+///
+/// **Why this matters (ADD156 ship audit, defect D4).** A run of `y ≈ 0` knots
+/// makes the spline's bottom segment FLAT at zero, so every prediction in that
+/// x-range maps to exactly `0.0` and the linear extrapolation below the bottom
+/// knot has slope 0. The negative tail — which the product contract requires to
+/// work, because inputs worse than the worst codec output must score BELOW 0 —
+/// is silently deleted. `neg_tail` dedups the run down to its last knot, which
+/// restores the slope.
+///
+/// Measured cost of getting this wrong on ADD156: dial p5 `−12.4334` →
+/// `0.0000`, and up to **−0.021 SROCC** (LIVE 0.9602 → 0.9397; CSIQ, KADID,
+/// PIPAL and TID all moved too). `--neg-tail` restored every corpus exactly.
+///
+/// `None` = the choice is immaterial for this anchor and either setting emits
+/// the same knots.
+pub fn neg_tail_is_material(
+    preds: &[f64],
+    tgt: &[f64],
+    n_edges: usize,
+) -> Option<(usize, usize)> {
+    let (kx_keep, _) = fit_spline_knots(preds, tgt, n_edges, false);
+    let (kx_dedup, _) = fit_spline_knots(preds, tgt, n_edges, true);
+    if kx_keep.len() == kx_dedup.len() {
+        return None;
+    }
+    Some((kx_keep.len(), kx_dedup.len()))
+}
+
 /// Faithful port of `linear_projections_2026-07-03.py::fit_spline_knots`:
 /// percentile-EDGE bins (edges at `linspace(1,99,n_edges)` percentiles),
 /// per-bin median `(pred, target)` knots, a strictly-increasing-x /

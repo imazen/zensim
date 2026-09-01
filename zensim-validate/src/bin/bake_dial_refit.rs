@@ -1250,9 +1250,28 @@ struct PackArgs {
     #[arg(long)]
     protect_last: bool,
     /// Keep only the last of any run of y<=1e-6 spline knots (negative-tail
-    /// dedup in `fit_spline_knots`).
+    /// dedup in `fit_spline_knots`) — i.e. PRESERVE the dial's negative tail.
+    ///
+    /// **You almost always want this.** Without it, a run of `y ≈ 0` knots
+    /// leaves the spline's bottom segment FLAT at zero: every prediction in
+    /// that range maps to exactly `0.0` and the extrapolation below the bottom
+    /// knot has slope 0, so inputs worse than the worst codec output — which
+    /// the product contract says must score BELOW 0 — pin to a dead zone.
+    /// Measured on ADD156: dial p5 `−12.4334` → `0.0000` and up to −0.021
+    /// SROCC (LIVE 0.9602 → 0.9397), all of it restored by this flag.
+    ///
+    /// When the choice would change the fitted spline, `pack` REFUSES to run
+    /// without one of `--neg-tail` / `--no-neg-tail` (ADD156 audit, D4).
     #[arg(long)]
     neg_tail: bool,
+    /// Explicitly accept the FLAT-bottom spline (the pre-2026-08-31 default):
+    /// keep every `y <= 1e-6` knot and let the negative tail collapse to a
+    /// dead zone at 0.
+    ///
+    /// Exists so a historical bake can still be reproduced byte-for-byte. It
+    /// is never the right choice for a new ship candidate.
+    #[arg(long, conflicts_with = "neg_tail")]
+    no_neg_tail: bool,
     /// Anchor parquet the packed-network spline is fit on
     /// (`f0..fN` + `--target-col`).
     #[arg(
@@ -1505,6 +1524,90 @@ fn set_meta_utf8(md: &mut Vec<OwnedMeta>, key: &str, value: Vec<u8>) {
 ///   demand `|Δ| <= --prune-identity-tol` and report the worst case.
 ///
 /// Fails loud either way. A pruner that quietly changes predictions is
+
+/// What packing did to the dial's NEGATIVE TAIL — the half of "identity" the
+/// prune gate structurally cannot see (ADD156 ship audit, defect **D4**).
+///
+/// `check_prune_identity` compares the NETWORK's raw outputs on in-domain
+/// anchor rows. The tail lives in the output-calibration SPLINE, which `pack`
+/// refits from scratch, so a run could delete the tail entirely and still
+/// print nothing but "PASS — BIT-identical". This report closes that gap.
+#[derive(Debug, PartialEq)]
+struct DialTailReport {
+    /// Leading spline knots pinned at `y <= 1e-6`. More than one ⇒ the bottom
+    /// segment is flat and the extrapolation below it has slope 0.
+    flat_bottom_knots: usize,
+    /// Anchor rows the INPUT bake scored below zero.
+    in_negative: usize,
+    /// ...of which the packed bake pins to (approximately) zero.
+    pinned_to_zero: usize,
+    in_p5: f64,
+    out_p5: f64,
+}
+
+impl DialTailReport {
+    fn tail_deleted(&self) -> bool {
+        self.flat_bottom_knots > 1 || (self.in_negative > 0 && self.pinned_to_zero > 0)
+    }
+    fn render(&self) -> String {
+        if self.tail_deleted() {
+            format!(
+                "dial tail: ⚠ DELETED — {} leading spline knots sit at y<=1e-6 (flat bottom, \
+                 slope 0 below it) and {}/{} anchor rows the INPUT bake scored below zero are \
+                 pinned to zero by the packed bake; dial p5 {:.4} -> {:.4}. Negative zensim \
+                 values MUST work: inputs worse than the worst codec output score BELOW 0. \
+                 Re-pack with --neg-tail.",
+                self.flat_bottom_knots,
+                self.pinned_to_zero,
+                self.in_negative,
+                self.in_p5,
+                self.out_p5
+            )
+        } else {
+            format!(
+                "dial tail: PRESERVED — bottom knot is not a flat run ({} at y<=1e-6), {} \
+                 negative anchor rows survive packing; dial p5 {:.4} -> {:.4}",
+                self.flat_bottom_knots,
+                self.in_negative - self.pinned_to_zero,
+                self.in_p5,
+                self.out_p5
+            )
+        }
+    }
+}
+
+fn dial_tail_report(
+    cx: &[f64],
+    cy: &[f64],
+    in_scores: &[f64],
+    out_scores: &[f64],
+) -> DialTailReport {
+    let _ = cx;
+    let flat_bottom_knots = cy.iter().take_while(|&&y| y <= 1e-6).count();
+    let mut in_negative = 0usize;
+    let mut pinned_to_zero = 0usize;
+    for (&i, &o) in in_scores.iter().zip(out_scores.iter()) {
+        if i < 0.0 {
+            in_negative += 1;
+            if o.abs() <= 1e-6 {
+                pinned_to_zero += 1;
+            }
+        }
+    }
+    let p5 = |v: &[f64]| {
+        let mut s = v.to_vec();
+        s.sort_by(f64::total_cmp);
+        zensim_validate::dial_spline::percentile_linear(&s, 5.0)
+    };
+    DialTailReport {
+        flat_bottom_knots,
+        in_negative,
+        pinned_to_zero,
+        in_p5: p5(in_scores),
+        out_p5: p5(out_scores),
+    }
+}
+
 /// the exact failure this whole module exists to make impossible.
 fn check_prune_identity(
     plan: &prune::PrunePlan,
@@ -1754,6 +1857,32 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
     );
 
     // 2. fit spline ON THE PACKED NETWORK (re-anchors identity).
+    //
+    // D4 (ADD156 ship audit): omitting `--neg-tail` here used to SILENTLY
+    // delete the dial's negative tail. The prune identity gate above cannot
+    // see it — it compares the NETWORK's raw outputs on in-domain anchor rows
+    // and reports "BIT-identical" while the spline underneath is being refit
+    // with a flat bottom. So when the choice is material, refuse rather than
+    // pick one for the caller.
+    if let Some((n_flat, n_dedup)) =
+        zensim_validate::dial_spline::neg_tail_is_material(&preds, &tgt, 18)
+    {
+        if !a.neg_tail && !a.no_neg_tail {
+            return Err(format!(
+                "the --neg-tail choice CHANGES this bake's spline ({n_flat} knots without the \
+                 dedup vs {n_dedup} with it) and there is no safe default, so pack refuses to \
+                 guess.\n  \
+                 Without the dedup the bottom segment is FLAT at y=0: every prediction in that \
+                 range maps to exactly 0.0 and the extrapolation below the bottom knot has \
+                 slope 0, so the NEGATIVE TAIL the product contract requires is deleted. \
+                 Measured on ADD156: dial p5 -12.4334 -> 0.0000 and up to -0.021 SROCC \
+                 (LIVE 0.9602 -> 0.9397).\n  \
+                 Pass --neg-tail to preserve the tail (what every shipped packed bake used), \
+                 or --no-neg-tail to accept the flat bottom deliberately (reproduces the \
+                 pre-2026-08-31 default byte-for-byte)."
+            ));
+        }
+    }
     let (cx, cy) = fit_spline_knots(&preds, &tgt, 18, a.neg_tail);
     if cx.len() < 2 {
         return Err(format!(
@@ -1777,6 +1906,21 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
         &md_final,
     );
     std::fs::write(&a.out, &final_bytes).map_err(|e| format!("write {:?}: {e}", a.out))?;
+    // D4 second half: the identity story must COVER THE DIAL TAIL. The prune
+    // gate speaks only for the network on in-domain anchor rows; a run that
+    // deleted the tail used to print nothing but "BIT-identical". Score the
+    // input and the packed bake END-TO-END (through their own splines) and
+    // state what happened to the negative tail, on every pack.
+    match forward_scored_6dec(&bytes, &feats) {
+        Ok(in_scores) => match forward_scored_6dec(&final_bytes, &feats) {
+            Ok(out_scores) => {
+                let rep = dial_tail_report(&cx, &cy, &in_scores, &out_scores);
+                eprintln!("{}", rep.render());
+            }
+            Err(e) => eprintln!("dial tail: NOT CHECKED — scoring the packed bake failed: {e}"),
+        },
+        Err(e) => eprintln!("dial tail: NOT CHECKED — scoring the input bake failed: {e}"),
+    }
     eprintln!(
         "packed {:?} ({} B) -> {:?} ({} B); {} spline knots, dial y-range [{:.1},{:.1}]",
         a.input,
@@ -4082,6 +4226,97 @@ mod tests {
         );
     }
 
+    #[test]
+    /// **D4 (ADD156 ship audit, `benchmarks/add156_ship_audit_2026-08-31.md`).**
+    /// `pack` without `--neg-tail` used to SILENTLY delete the dial's negative
+    /// tail while the prune identity gate went on reporting "BIT-identical" —
+    /// because that gate compares the NETWORK's raw outputs on in-domain anchor
+    /// rows, and the damage is in the output-calibration SPLINE, which `pack`
+    /// refits from scratch underneath it.
+    ///
+    /// Half one pins the pathology; half two asserts the two new guards.
+    fn d4_flat_bottom_spline_deletes_the_negative_tail_and_is_now_caught() {
+        use zensim_validate::dial_spline::{fit_spline_knots, neg_tail_is_material};
+        use zensim_validate::output_calibration_spline as ocs;
+
+        // An anchor whose low end is CLAMPED at zero — the shape every real
+        // dial anchor has, because the target is a bounded [0,100] score.
+        // Several low bins therefore share a median target of 0.0.
+        let preds: Vec<f64> = (0..600).map(|i| -1.0 + i as f64 * 0.005).collect();
+        let tgt: Vec<f64> = preds
+            .iter()
+            .map(|&p| if p <= 0.4 { 0.0 } else { (p - 0.4) * 120.0 })
+            .collect();
+
+        // (1) THE PATHOLOGY. Without the dedup the fit keeps the whole run of
+        // y≈0 knots, so the bottom segment is flat and everything below it
+        // maps to exactly 0.0 — a dead zone, not a tail.
+        let (fx, fy) = fit_spline_knots(&preds, &tgt, 18, false);
+        let (dx, dy) = fit_spline_knots(&preds, &tgt, 18, true);
+        let flat_run = fy.iter().take_while(|&&y| y <= 1e-6).count();
+        assert!(
+            flat_run > 1,
+            "fixture no longer produces a flat-zero knot run ({flat_run})"
+        );
+        assert_eq!(
+            dy.iter().take_while(|&&y| y <= 1e-6).count(),
+            1,
+            "the dedup must leave exactly one y≈0 knot"
+        );
+
+        let payload_flat = spline_payload(&fx, &fy);
+        let payload_tail = spline_payload(&dx, &dy);
+        let sp_flat = ocs::parse_payload(&payload_flat).expect("flat spline parses");
+        let sp_tail = ocs::parse_payload(&payload_tail).expect("tail spline parses");
+
+        // Below the bottom knot the flat spline is pinned at exactly 0.0...
+        let deep = dx[0] - 0.5;
+        assert_eq!(
+            ocs::apply(deep, &sp_flat),
+            0.0,
+            "flat-bottom spline must reproduce the dead zone this test exists to pin"
+        );
+        // ...while the deduped one keeps a real slope and goes NEGATIVE, which
+        // is the product contract ("inputs worse than the worst codec output
+        // score BELOW 0; do NOT clamp at 0").
+        assert!(
+            ocs::apply(deep, &sp_tail) < -1e-3,
+            "deduped spline must extrapolate below zero, got {}",
+            ocs::apply(deep, &sp_tail)
+        );
+
+        // (2a) GUARD ONE: the choice is detected as material, so `pack` can
+        // refuse instead of silently picking the tail-deleting side.
+        let material = neg_tail_is_material(&preds, &tgt, 18);
+        assert_eq!(
+            material,
+            Some((fx.len(), dx.len())),
+            "a flat-zero run must be reported as a MATERIAL --neg-tail choice"
+        );
+        // An anchor with no clamped run leaves the choice immaterial, so an
+        // ordinary pack is not gratuitously blocked.
+        let clean_tgt: Vec<f64> = preds.iter().map(|&p| (p + 2.0) * 20.0).collect();
+        assert_eq!(neg_tail_is_material(&preds, &clean_tgt, 18), None);
+
+        // (2b) GUARD TWO: the identity report now COVERS the tail, so a
+        // deleted tail can never again pass as "bit-identical".
+        let in_scores = vec![-12.0, -3.0, 5.0, 40.0, 90.0];
+        let killed = vec![0.0, 0.0, 5.0, 40.0, 90.0];
+        let kept = vec![-12.0, -3.0, 5.0, 40.0, 90.0];
+        let rep_bad = dial_tail_report(&fx, &fy, &in_scores, &killed);
+        assert!(rep_bad.tail_deleted());
+        assert_eq!((rep_bad.in_negative, rep_bad.pinned_to_zero), (2, 2));
+        assert!(
+            rep_bad.render().contains("DELETED") && rep_bad.render().contains("--neg-tail"),
+            "the report must say what happened and how to fix it: {}",
+            rep_bad.render()
+        );
+        let rep_ok = dial_tail_report(&dx, &dy, &in_scores, &kept);
+        assert!(!rep_ok.tail_deleted());
+        assert!(rep_ok.render().contains("PRESERVED"));
+    }
+
+    #[test]
     #[test]
     fn fit_spline_knots_is_monotone() {
         // synthetic: pred uniform, target a monotone-with-noise function.
