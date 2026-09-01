@@ -255,6 +255,13 @@ CURATED_BOARD = [
     "W10L9PH_s4004_packed", "W10L9PH_s4003_packed", "BAL_E1_s4010_s4006",
     # H-TRAJ checkpoint alternative on the live decision (M3a 0.833, 7/8 floors)
     "PH_s4004_e060",
+    # W-LIN round-7b candidate-the-registered-rule-names (benchmarks/
+    # wlin_round7_rawframe_2026-08-30.md §"The candidate the registered rule names"):
+    # 3,583 B, 944-input, 5/5 bars + G-RANGE PASS. Curated 2026-08-31 as the ADD156
+    # comparator the sparse-linear lane is actually judged against. It carries 7 of the
+    # 14 board corpora (its verdict ran a partial corpus list) — the other seven render
+    # as NOT-MEASURED em-dashes, never zeros.
+    "Q7b_pools_g0.2_a0.2_b0.97",
 ]
 # "Sprint bests" (user request 2026-08-28): ONE selected leader per sprint/era,
 # newest last. The ensembles sprint's best is resolved at build time (highest
@@ -317,6 +324,11 @@ def family_of(name: str) -> str:
         return "lodestar"
     if n.startswith(("HDR944", "bhdr")):
         return "HDR"
+    # W-LIN lane (round 7/7b linear blends + the copperline wlin4 cells). Without this
+    # branch every one of these stems fell through to "pre-944 era", which is both wrong
+    # (they are 944-input) and invisible — the standing check on every new stem pattern.
+    if n.startswith(("Q7b_", "T7b_", "H7b_", "wlin", "copperline_wlin")):
+        return "W-LIN"
     return "pre-944 era"
 
 
@@ -576,6 +588,17 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             # negative; it is not part of this gate.)
             cid = _signed(rank, "cid22")
             nph = _signed(rank, "nonphoto")
+            reject = (cid is None or cid < 0.84) or (nph is not None and nph < 0.80)
+        elif o.get("peer") or (o.get("model") or {}).get("kind") == "reference-metric":
+            # A PEER row has no product_composite and never will — `bake_verdict` (the
+            # formula's owner) does not run on a reference metric. Falling through to
+            # `_composite` gave it the UNNORMALISED legacy sum (max ~1.65) while every
+            # bake carries the normalised Rust value (max 1.0), so the four peers sat at
+            # the top of the board's DEFAULT SORT with 1.11-1.42 against the best bake's
+            # 0.872 — a scale artefact reading as "ssim2 beats every model". Publish NOT
+            # MEASURED instead: the scoreboard renders an em-dash and sorts nulls last.
+            comp = None
+            cid, nph = _signed(rank, "cid22"), _signed(rank, "nonphoto")
             reject = (cid is None or cid < 0.84) or (nph is not None and nph < 0.80)
         else:
             comp, reject = _composite(rank)
@@ -1137,7 +1160,9 @@ function renderBar(){
       'one selected leader per sprint/era: '+((DATA.sprintBest||[]).map(x=>x.s+' \u2192 '+x.n).join(' \u00b7 ')||'none resolved')),
     mk('all',()=>{DATA.bakes.forEach(b=>state.visible.add(b.name));rerender();renderBar();}),
     mk('none',()=>{state.visible.clear();rerender();renderBar();}),
-    mk('top 6',()=>{const s=[...DATA.bakes].sort((a,b)=>b.composite-a.composite).slice(0,6).map(b=>b.name);
+    mk('top 6',()=>{const cmp=(a,b)=>{const x=a.composite,y=b.composite;
+      if(x==null&&y==null)return 0;if(x==null)return 1;if(y==null)return -1;return y-x;};
+      const s=[...DATA.bakes].sort(cmp).slice(0,6).map(b=>b.name);
       state.visible=new Set(s);rerender();renderBar();}));
   // gate pre-filter (user directive 2026-08-28): exclude gate-FAILING rows from the
   // scoreboard list itself (and drop them from the visible chart set). Not-measured

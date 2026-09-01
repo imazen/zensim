@@ -72,14 +72,36 @@ for peer in list(PEERS):
                 corp[c] = (cand, None, None)
                 break
 
+# Per-corpus ROW FILTER: keep the peer row on the SAME RULER as the candidate rows it
+# is read against. KonJND is the one that needs it — the stored per-pair peer table holds
+# all 1,008 refs (JPEG *and* BPG halves) while every candidate scores the JPEG-504 half
+# (zensim_validate::eval_roots::KONJND_JPEG504_372_SLOTS; ADD156 ship audit D2, fixed in
+# bake_verdict/bake_compare by 6e508793). The `/jpeg/` subset of the peer TSV is provably
+# that same population: 504 rows whose `pjnd` is bit-identical to the 504 parquet's
+# `human_score` for every ref (verified 2026-08-31, max|delta| 0.0). Without this the peer
+# columns were the diluted ruler and cross-class reads against them inverted.
+ROW_FILTERS = {
+    "konjnd": ("dist_path contains /jpeg/ — KonJND JPEG-504 ruler (D2, 6e508793)",
+               lambda r: "/jpeg/" in (r.get("dist_path") or "")),
+}
+
 HUMAN_CANDS = ["MCOS", "DMOS", "MOS", "mos", "jnd", "q_jnd", "human", "human_score", "dmos", "pjnd", "label"]
 
-def load_pairs(path):
+def load_pairs(path, corpus=None):
     with open(path) as f:
         rd = csv.DictReader(f, delimiter="\t")
         rows = list(rd)
     if not rows:
         return None
+    filt = ROW_FILTERS.get(corpus)
+    if filt is not None:
+        _, keep = filt
+        rows = [r for r in rows if keep(r)]
+        # A filter that silently matches nothing would drop the corpus and render it as an
+        # em-dash — indistinguishable from "never measured". Fail loud instead.
+        if not rows:
+            raise SystemExit(f"row filter for {corpus} matched 0 of the rows in {path} — "
+                             "the table's shape changed; fix the filter, do not drop it")
     cols = rows[0].keys()
     hcol = next((c for c in HUMAN_CANDS if c in cols), None)
     # metric col = the last non-path, non-human, non-id numeric column
@@ -107,7 +129,7 @@ def main():
             p = os.path.join(RM, tsv)
             if not os.path.exists(p):
                 continue
-            got = load_pairs(p)
+            got = load_pairs(p, corpus)
             if not got:
                 continue
             xs, ys, hcol, mcol = got
@@ -132,7 +154,9 @@ def main():
                             "pwrc": st["pwrc"], "z_rmse": st["z_rmse"], "n": st["n"]}
             per_pair_all[corpus] = per_pair_local
             prov[corpus] = {"tsv": tsv, "human_col": hcol, "metric_col": mcol,
-                            "n": st["n"], "oriented": "negated" if sign < 0 else "as-is"}
+                            "n": st["n"], "oriented": "negated" if sign < 0 else "as-is",
+                            **({"row_filter": ROW_FILTERS[corpus][0]}
+                               if corpus in ROW_FILTERS else {})}
         doc = {
             "name": f"peer_{peer}",
             "regime": "reference-metric",
@@ -152,10 +176,31 @@ def main():
             "peer_provenance": prov,
         }
         out = os.path.join(OUT, f"peer_{peer}.fulleval.json")
+        # MERGE, never clobber. This builder owns the corpora it just computed and the
+        # identity/model scalars — nothing else. Later programs graft blocks onto a peer
+        # row that this script cannot produce (the family-aware imazen26/nonphoto/
+        # hfnlproxy reslices of 2026-08-28, and the dial/corruption blocks), and a plain
+        # overwrite silently deleted every one of them on the next re-run. Anything this
+        # run did not compute is carried through byte-identical and the carried keys are
+        # printed, so a re-run is a safe, repeatable operation.
+        carried = []
+        if os.path.exists(out):
+            prev = json.load(open(out))
+            for k, v in prev.items():
+                if k in ("rank", "per_pair", "peer_provenance"):
+                    for c, blk in (v or {}).items():
+                        if c not in doc[k]:
+                            doc[k][c] = blk
+                            carried.append(f"{k}.{c}")
+                elif k not in doc:
+                    doc[k] = v
+                    carried.append(k)
         json.dump(doc, open(out, "w"), indent=1)
-        print(f"peer_{peer}: {len(rank)} corpora -> {out}")
+        print(f"peer_{peer}: {len(rank)} corpora computed -> {out}")
         for c, b in sorted(rank.items()):
             print(f"   {c}: srocc {b['srocc']:.4f} (n={b['n']})")
+        if carried:
+            print(f"   carried through unchanged ({len(carried)}): {', '.join(sorted(carried))}")
 
 if __name__ == "__main__":
     main()

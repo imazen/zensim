@@ -244,16 +244,28 @@ def graft_rank_corpus(board: Path, verdict: Path, corpus: str, dry_run: bool = F
                               dry_run, f"graft rank.{corpus} ({v.get('name')})")
 
 
-def reslice_rank(board: Path, verdict: Path, corpora, dry_run: bool = False) -> bool:
-    """Replace `rank.<corpus>` blocks with a same-bake verdict scored on the
-    FAMILY-AWARE re-sliced eval tables (registered program 2026-08-28, user
-    decision: structural re-slice + full-board rescore; zensim
-    benchmarks/imazen26_dhash_audit_2026-08-27.md ★REGISTERED section).
+RESLICE_TAG_DEFAULT = "family-aware-2026-08-28"
+
+
+def reslice_rank(board: Path, verdict: Path, corpora, dry_run: bool = False,
+                 tag: str = RESLICE_TAG_DEFAULT) -> bool:
+    """Replace `rank.<corpus>` blocks with the same-bake verdict's, tagged by the
+    program that motivated the replacement.
+
+    Default `tag` = the FAMILY-AWARE re-slice this mode was built for (registered
+    program 2026-08-28, user decision: structural re-slice + full-board rescore;
+    zensim benchmarks/imazen26_dhash_audit_2026-08-27.md ★REGISTERED section).
+    A *ruler* correction is the same surgery with a different reason, so it passes
+    its own tag rather than getting a second copy of this function — e.g.
+    `konjnd-jpeg504-ruler-2026-08-31`, the D2 fix (commit `6e508793`) that moved
+    the 372 KonJND default off the diluted 1,008-ref file. The tag is what tells a
+    later reader WHICH program produced a stored block, so it must never be a lie:
+    pass the one naming your program.
 
     A REPLACEMENT graft: sha-gated to the same bake, provenance per corpus in
-    `rank_graft_sources.<corpus>` carrying the reslice tag + the superseded
-    srocc, and the everything-else-byte-identical gate of the other surgical
-    modes (only rank.<named corpora> + rank_graft_sources may change)."""
+    `rank_graft_sources.<corpus>` carrying the tag + the superseded srocc, and the
+    everything-else-byte-identical gate of the other surgical modes (only
+    rank.<named corpora> + rank_graft_sources may change)."""
     bdoc = _load_board(board)
     v_bytes = verdict.read_bytes()
     v = json.loads(v_bytes)
@@ -270,8 +282,9 @@ def reslice_rank(board: Path, verdict: Path, corpora, dry_run: bool = False) -> 
         old = (bdoc.get("rank") or {}).get(corpus)
         doc.setdefault("rank", {})[corpus] = blk
         srcs[corpus] = {"path": str(verdict), "sha256": hashlib.sha256(v_bytes).hexdigest(),
-                        "name": v.get("name"), "reslice": "family-aware-2026-08-28",
-                        "superseded_srocc": (old or {}).get("srocc")}
+                        "name": v.get("name"), "reslice": tag,
+                        "superseded_srocc": (old or {}).get("srocc"),
+                        "superseded_n": (old or {}).get("n")}
         changed.append(corpus)
     if not changed:
         return False
@@ -281,7 +294,42 @@ def reslice_rank(board: Path, verdict: Path, corpora, dry_run: bool = False) -> 
             continue
         if _jc((bdoc.get("rank") or {}).get(k)) != _jc((doc.get("rank") or {}).get(k)):
             raise SystemExit(f"reslice-rank: rank.{k} changed — refusing to write")
-    return _write_board_gated(board, bdoc, doc, {"rank", "rank_graft_sources"},
+
+    # `composite` is a WEIGHTED FUNCTION OF rank (the Rust `product_composite`:
+    # CID22 + imazen26 + nonphoto + KonJND + AIC-3 + AIC-4). Replacing a rank block and
+    # leaving the stored composite alone makes the cell disagree with itself — measured
+    # 2026-08-31: 276 board cells were left in exactly that state by the 2026-08-28
+    # family-aware reslice, stale by up to 2.4e-2 on the scoreboard's default sort key.
+    # So carry the verdict's composite, which the OWNER computed from these same blocks.
+    # Nothing is recomputed here and no formula is duplicated: the gate is that every rank
+    # corpus the two sides SHARE, other than the replaced ones, already has an identical
+    # `srocc` — which makes the verdict's composite the board's composite with only the
+    # replaced terms moved. If they disagree the verdict is not a same-inputs read and the
+    # write is refused.
+    allowed = {"rank", "rank_graft_sources"}
+    v_comp = v.get("composite")
+    if isinstance(v_comp, (int, float)):
+        shared = (set(bdoc.get("rank") or {}) & set(v.get("rank") or {})) - set(changed)
+        bad = [c for c in sorted(shared)
+               if _jc(((bdoc["rank"].get(c) or {}).get("srocc")))
+               != _jc(((v["rank"].get(c) or {}).get("srocc")))]
+        if bad:
+            raise SystemExit(f"reslice-rank: composite carry refused — {verdict.name} "
+                             f"disagrees with the board on rank.{{{','.join(bad)}}}.srocc, "
+                             "so its composite is not this cell's composite")
+        old_comp = bdoc.get("composite")
+        if _jc(old_comp) != _jc(v_comp):
+            doc["composite"] = v_comp
+            srcs["_composite"] = {"path": str(verdict),
+                                  "sha256": hashlib.sha256(v_bytes).hexdigest(),
+                                  "reslice": tag, "superseded_composite": old_comp}
+            doc["rank_graft_sources"] = srcs
+            allowed.add("composite")
+            print(f"  composite {old_comp} -> {v_comp} (carried from the verdict)")
+    else:
+        print(f"  NOTE: {verdict.name} carries no composite — board composite left as-is "
+              "and is now STALE with respect to the replaced rank block")
+    return _write_board_gated(board, bdoc, doc, allowed,
                               dry_run, f"reslice rank.{{{','.join(changed)}}}")
 
 
@@ -585,6 +633,10 @@ def main(argv=None) -> int:
     ap.add_argument("--reslice-rank", default=None, metavar="CORPORA",
                     help="comma list: REPLACE rank.<corpus> blocks from --verdict "
                          "(family-aware re-slice graft, sha-gated; use with --graft-into)")
+    ap.add_argument("--reslice-tag", default=RESLICE_TAG_DEFAULT, metavar="TAG",
+                    help="provenance tag stored in rank_graft_sources.<corpus>.reslice "
+                         "for --reslice-rank; name the program that motivated the "
+                         f"replacement (default: {RESLICE_TAG_DEFAULT})")
     ap.add_argument("--graft-rank", default=None, metavar="CORPUS",
                     help="with --graft-into: graft rank.<CORPUS> from --verdict instead of "
                          "corruption_head (era-bridge hfnlproxy fill; sha-gated)")
@@ -656,7 +708,8 @@ def main(argv=None) -> int:
         if not a.graft_into.exists():
             raise SystemExit(f"graft: board file not found: {a.graft_into}")
         if a.reslice_rank:
-            reslice_rank(a.graft_into, a.verdict, a.reslice_rank.split(","), a.dry_run)
+            reslice_rank(a.graft_into, a.verdict, a.reslice_rank.split(","), a.dry_run,
+                         tag=a.reslice_tag)
         elif a.repair_rank_orientation:
             repair_rank_orientation(a.graft_into, a.verdict, a.repair_rank_orientation, a.dry_run)
         elif a.graft_rank:

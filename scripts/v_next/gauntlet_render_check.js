@@ -190,6 +190,18 @@ const cellText = (e) => {
   if (e.textContent) return String(e.textContent);
   return (e.childNodes || []).map(cellText).join('');
 };
+// cellText() stops at td.textContent, so it cannot see an APPENDED child — and the ⚠
+// registry badge, the ens×k marker and the dominated marker are all appended <span>s.
+// deepText = own text + every descendant's = what a reader actually sees. Used by the
+// badge test and by --dump-row (which otherwise printed rows with every badge stripped,
+// making it useless for exactly the verification it exists for).
+const deepText = (e) => {
+  if (!e) return '';
+  if (e.nodeType === 3) return String(e.textContent || '');
+  let s = String(e.textContent || '');
+  (e.childNodes || e.children || []).forEach(c => { s += deepText(c); });
+  return s;
+};
 const rowsOf = (t) => { const acc = []; (function walk(e) { if (!e || !e.children) return; if (e.tagName === 'TR') acc.push(e); e.children.forEach(walk); })(t); return acc; };
 // ATTACHED tables only (walked from #panels): a detached rebuild must not count — that
 // is exactly the sortability bug shape (built the sorted table, never mounted it).
@@ -334,30 +346,42 @@ if (DATA) (function scoreboardSortTest() {
   const isBoard = h => h.includes('bake') && h.includes('composite');
   const boards = attachedTables(isBoard);
   if (boards.length !== 1) { fail('sort test: expected exactly 1 attached scoreboard, got ' + boards.length); return; }
+  // NULL composite is a real state (a peer/reference-metric row has no product_composite
+  // — bake_verdict does not run on a reference metric), and the page's rule for EVERY
+  // column is "nulls last in either direction". The old -1e9 sentinel encoded the
+  // opposite (nulls first when ascending) and only passed because no cell was null; it
+  // also never checked WHERE nulls landed. Keep them null here and assert both halves.
   const compsOf = rs => rs.slice(1).map(tr => {
     const b = DATA.bakes.find(x => x.name === bakeOfRow(tr));
-    return b && b.composite != null && isFinite(b.composite) ? b.composite : -1e9;
+    return b && b.composite != null && isFinite(b.composite) ? b.composite : null;
   });
+  // nulls must form a suffix; the non-null prefix must obey `ord`.
+  const nullsLast = a => a.findIndex(v => v === null) < 0
+    || a.slice(a.findIndex(v => v === null)).every(v => v === null);
+  const defined = a => a.filter(v => v !== null);
   const head0 = boards[0][0].children.map(cellText).map(s => String(s).trim());
   const ci = head0.indexOf('composite');
   const before = compsOf(boards[0]);
   if (before.length < 3) { fail('sort test: too few scoreboard rows to test (' + before.length + ')'); return; }
-  if (!nonincr(before)) fail('sort test: default scoreboard order is not composite-descending');
+  if (!nonincr(defined(before)) || !nullsLast(before))
+    fail('sort test: default scoreboard order is not composite-descending with nulls last');
   const th1 = boards[0][0].children[ci];
   if (typeof th1.onclick !== 'function') { fail('SORT REGRESSION: scoreboard header has no click handler'); return; }
   th1.onclick();     // composite is the default sort key -> this click flips to ascending
   const after1 = attachedTables(isBoard);
   if (after1.length !== 1) { fail('sort test: after click, attached scoreboards = ' + after1.length); return; }
   const a1 = compsOf(after1[0]);
-  if (!nondecr(a1) || (new Set(a1).size > 1 && nonincr(a1)))
+  const d1 = defined(a1);
+  if (!nondecr(d1) || !nullsLast(a1) || (new Set(d1).size > 1 && nonincr(d1)))
     fail('SORT REGRESSION: clicking the composite header did not re-sort the ATTACHED scoreboard '
-      + '(expected ascending; first=' + a1[0] + ' last=' + a1[a1.length - 1] + ')');
+      + '(expected ascending with nulls last; first=' + a1[0] + ' last=' + a1[a1.length - 1]
+      + ' nulls=' + a1.filter(v => v === null).length + ')');
   const th2 = after1[0][0].children[ci];
   if (typeof th2.onclick === 'function') th2.onclick();  // flip back to descending
   const after2 = attachedTables(isBoard);
   const a2 = after2.length ? compsOf(after2[0]) : [];
-  if (!a2.length || !nonincr(a2))
-    fail('SORT REGRESSION: second composite click did not restore descending order');
+  if (!a2.length || !nonincr(defined(a2)) || !nullsLast(a2))
+    fail('SORT REGRESSION: second composite click did not restore descending order (nulls last)');
 })();
 
 if (DATA) (function statTableSortTest() {
@@ -408,16 +432,7 @@ if (failed) process.exit(1);
     aic3: 'AIC-3', live: 'LIVE', csiq: 'CSIQ', hfnl: 'HF-NL/ref', 'dial-mono': 'dial-mono',
     tied: 'tied', 'M3a-attr': 'M3a-attr', 'M3-coh': 'M3-coh' };
   const covers = (ef, cf) => cf === ef || (cf.indexOf(ef) === 0 && cf.charAt(ef.length) === '.');
-  // cellText() returns td.textContent when set and STOPS — it cannot see an appended
-  // child (the badge is a child <span>, exactly like the ens/dom badges). Deep text =
-  // own textContent + every descendant's, which is what a reader actually sees.
-  const deepText = (e) => {
-    if (!e) return '';
-    if (e.nodeType === 3) return String(e.textContent || '');
-    let s = String(e.textContent || '');
-    (e.childNodes || e.children || []).forEach(c => { s += deepText(c); });
-    return s;
-  };
+  // deepText is a shared helper (hoisted above).
   const boards = attachedTables(h => h.includes('bake') && h.includes('composite'));
   if (boards.length !== 1) { fail('badge test: expected exactly 1 attached scoreboard, got ' + boards.length); return; }
   const trs = boards[0], head = trs[0].children.map(cellText).map(s => String(s).trim());
@@ -473,7 +488,7 @@ if (process.argv.includes('--dump-row')) {
   const row = trs.slice(1).find(tr => tr.children.length && cellText(tr.children[0]).trim().startsWith(want));
   if (!row) { console.error('--dump-row: no scoreboard row starting with ' + want); process.exit(1); }
   console.log('--- rendered scoreboard row: ' + want + ' ---');
-  row.children.forEach((td, i) => console.log((head[i] || ('col' + i)).padEnd(16) + '  ' + cellText(td).trim()));
+  row.children.forEach((td, i) => console.log((head[i] || ('col' + i)).padEnd(16) + '  ' + deepText(td).trim()));
 }
 
 console.log('render OK: ' + nBakes + ' bakes, ' + panelsEl.children.length + ' sections, '

@@ -1,15 +1,15 @@
 {
  "_schema": {
-  "description": "Board-wide invalidation/annotation registry (board-integrity pass 2026-08-04). One committed, machine-readable place where superseded, flattered, or absent-not-failed numbers are FLAGGED so prior bakes/evals never sit on stolen wins. Consumers: `freeze_check --annotations` (default = this file; floor rows print '— (absent)' for absent-not-failed axes, TSV gains n_measured/absent/annotations columns) and `scripts/v_next/gauntlet.py` (warning badge + tooltip reason on affected cells/fields + caption line). Entries are append-only; never delete — supersede with a new entry and point `fix_path` at the resolution.",
+  "description": "Board-wide invalidation/annotation registry (board-integrity pass 2026-08-04). One committed, machine-readable place where superseded, flattered, or absent-not-failed numbers are FLAGGED so prior bakes/evals never sit on stolen wins. Consumers: `freeze_check --annotations` (default = this file; floor rows print '\u2014 (absent)' for absent-not-failed axes, TSV gains n_measured/absent/annotations columns) and `scripts/v_next/gauntlet.py` (warning badge + tooltip reason on affected cells/fields + caption line). Entries are append-only; never delete \u2014 supersede with a new entry and point `fix_path` at the resolution.",
   "entry_fields": {
    "id": "stable kebab-case identifier, referenced from docs and tooltips",
-   "kind": "one of: 'invalidated' (the number is wrong/superseded — do not cite), 'annotated' (the number is real but must be read with the stated caveat), 'absent-not-failed' (the field is missing because the instrument did not exist / was not run for this cell; absence is 'not measured', DISTINCT from a measured fail — consumers print '— (absent)' and state both n/8 (registered absent=not-passed rule) and n/m-measured forms)",
+   "kind": "one of: 'invalidated' (the number is wrong/superseded \u2014 do not cite), 'annotated' (the number is real but must be read with the stated caveat), 'absent-not-failed' (the field is missing because the instrument did not exist / was not run for this cell; absence is 'not measured', DISTINCT from a measured fail \u2014 consumers print '\u2014 (absent)' and state both n/8 (registered absent=not-passed rule) and n/m-measured forms)",
    "fields": "list of fulleval dot-paths the entry covers; a path covers itself and any deeper subpath (segment-boundary prefix match), e.g. 'rank.hfnlproxy' covers 'rank.hfnlproxy.per_ref_mean'",
    "scope": "predicate object selecting which fulleval cells the entry applies to; exactly one key of: {\"missing\": \"dot.path\"} (field absent or null), {\"present\": \"dot.path\"} (field present and non-null), {\"names\": [\"bake\", ...]} (exact bake-name list), {\"all\": true} (every cell), OR {\"manual\": <anything>} = DOCUMENTATION-ONLY: no machine predicate, the entry is loaded and printed but applied to no cell. Any other shape is REJECTED at load (ADD156 ship audit D10, 2026-08-31): before that, an unrecognised scope silently matched ZERO cells and was indistinguishable from one that did not apply (19 of 42 committed entries were in that state), and a finding written as a bare TOP-LEVEL key instead of an entries[] member was never read at all (3 more).",
    "reason": "one-sentence human reason shown in tooltips/reports",
    "evidence": "commit sha(s) / doc section that established the finding",
    "date": "YYYY-MM-DD the entry landed",
-   "fix_path": "what un-flags a cell (re-measure path, tooling, or 'none — permanent caveat')"
+   "fix_path": "what un-flags a cell (re-measure path, tooling, or 'none \u2014 permanent caveat')"
   }
  },
  "entries": [
@@ -37,10 +37,10 @@
    "scope": {
     "missing": "rank.hfnlproxy"
    },
-   "reason": "the hfnlproxy corpus (ext944-canonical-2026-08-01) postdates the era-bridge fullevals; a cell nobody measured on the axis did not FAIL it — the F6 row prints '— (absent)', n/8 keeps the registered absent=not-passed rule, and the n/m-measured form is stated alongside (e.g. winner_dial_Ebothg: 5/8 registered, 5/7-measured)",
-   "evidence": "benchmarks/sota944_campaign_2026-08-03.md §8 CORRECTIONS (2026-08-04); AMENDMENT 8 registration ('UNEVALUABLE counts as not-passed' stays the scoring rule)",
+   "reason": "the hfnlproxy corpus (ext944-canonical-2026-08-01) postdates the era-bridge fullevals; a cell nobody measured on the axis did not FAIL it \u2014 the F6 row prints '\u2014 (absent)', n/8 keeps the registered absent=not-passed rule, and the n/m-measured form is stated alongside (e.g. winner_dial_Ebothg: 5/8 registered, 5/7-measured)",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md \u00a78 CORRECTIONS (2026-08-04); AMENDMENT 8 registration ('UNEVALUABLE counts as not-passed' stays the scoring rule)",
    "date": "2026-08-04",
-   "fix_path": "EXERCISED for the ≤372-wide era-bridge cells: scripts/canonical_corpus/derive_hfnlproxy_372.py builds the 372-col slice (SAME 11,356 cells / 772 refs / SAME target as the committed 944 slice, identity-gated row-for-row float-exact), then `bake_verdict --regime 720 --corpora hfnlproxy` + `promote_fulleval.py --graft-rank hfnlproxy` (sha-gated). Filled 2026-08-04: winner_dial, v47, B, Ebothg_scr0_5. Filled 2026-08-06: ADD156_safesyn_only_raw_lasso (+0.8306), v02_bvls_NO_shaping (+0.7874), bhdr_linear_shaped_cvvdpmix (+0.6343), cl_tfm_corruption_LQ_MLP_s13 (+0.0540) — each 4/8→5/8 (3→4 for cl_tfm, 2→3 for v02). The 12 cells still absent are 504/720/924-wide and CANNOT use this slice: they need a >372-wide hfnlproxy extraction, which does not exist yet."
+   "fix_path": "EXERCISED for the \u2264372-wide era-bridge cells: scripts/canonical_corpus/derive_hfnlproxy_372.py builds the 372-col slice (SAME 11,356 cells / 772 refs / SAME target as the committed 944 slice, identity-gated row-for-row float-exact), then `bake_verdict --regime 720 --corpora hfnlproxy` + `promote_fulleval.py --graft-rank hfnlproxy` (sha-gated). Filled 2026-08-04: winner_dial, v47, B, Ebothg_scr0_5. Filled 2026-08-06: ADD156_safesyn_only_raw_lasso (+0.8306), v02_bvls_NO_shaping (+0.7874), bhdr_linear_shaped_cvvdpmix (+0.6343), cl_tfm_corruption_LQ_MLP_s13 (+0.0540) \u2014 each 4/8\u21925/8 (3\u21924 for cl_tfm, 2\u21923 for v02). The 12 cells still absent are 504/720/924-wide and CANNOT use this slice: they need a >372-wide hfnlproxy extraction, which does not exist yet."
   },
   {
    "id": "kadid-tid-train-eq-val",
@@ -52,10 +52,10 @@
    "scope": {
     "all": true
    },
-   "reason": "KADID/TID are 100% train==val pair-overlap for the training-era corpora — their SROCCs reward memorization, not skill; integrity guards only, never ranking signal (already dimmed on the board; this entry formalizes it machine-readably)",
+   "reason": "KADID/TID are 100% train==val pair-overlap for the training-era corpora \u2014 their SROCCs reward memorization, not skill; integrity guards only, never ranking signal (already dimmed on the board; this entry formalizes it machine-readably)",
    "evidence": "docs/EVAL_PANEL_REQUIREMENT.md; CLAUDE.md TWO-PANEL EVAL section; wave-5 Finding 4 (they inflate under ensembling)",
    "date": "2026-08-04",
-   "fix_path": "none — permanent caveat (structural property of the split)"
+   "fix_path": "none \u2014 permanent caveat (structural property of the split)"
   },
   {
    "id": "m3a-pre-append2-fix",
@@ -313,10 +313,10 @@
      "winner_dial_Ebothg_hfgain_winsor_dial"
     ]
    },
-   "reason": "the ext-lineage eval tables (ext720/ext924/ext944 ext_kadid.parquet) store human_score = (5-dmos)/4, the INVERSE of the canonical (dmos-1)/4 — KADID's dmos is quality-oriented (raw crowdsourced DCR falls 4.0789->2.0072 across severity levels 1-5, 349,800 ratings). Every KADID stat measured on an ext root has the WRONG SIGN vs KADID's real human MOS: negate srocc_signed to read it. Rank-order stats (srocc/krocc/pwrc) negate exactly; PLCC/Z-RMSE/OR/bands were fit against a reflected target and must be re-measured, not negated. 110 of 188 board bakes are anti-correlated with KADID's true MOS while the board renders all 188 as positive magnitudes. SCOPE NARROWED 2026-08-05: the ext roots were rebuilt with the corrected target (appendix H part 1), so this entry's blanket scope was replaced by the exact list of the 188 verdicts that existed at rebuild time — every one of them measured KADID on the inverted table. Verdicts produced after the rebuild measure it correctly and are covered by kadid-ext-root-corrected-2026-08-05. Nothing about the finding changed; only the predicate became precise, because leaving it at `all` would have rendered a FALSE 'inverted' badge on correctly-measured cells.",
+   "reason": "the ext-lineage eval tables (ext720/ext924/ext944 ext_kadid.parquet) store human_score = (5-dmos)/4, the INVERSE of the canonical (dmos-1)/4 \u2014 KADID's dmos is quality-oriented (raw crowdsourced DCR falls 4.0789->2.0072 across severity levels 1-5, 349,800 ratings). Every KADID stat measured on an ext root has the WRONG SIGN vs KADID's real human MOS: negate srocc_signed to read it. Rank-order stats (srocc/krocc/pwrc) negate exactly; PLCC/Z-RMSE/OR/bands were fit against a reflected target and must be re-measured, not negated. 110 of 188 board bakes are anti-correlated with KADID's true MOS while the board renders all 188 as positive magnitudes. SCOPE NARROWED 2026-08-05: the ext roots were rebuilt with the corrected target (appendix H part 1), so this entry's blanket scope was replaced by the exact list of the 188 verdicts that existed at rebuild time \u2014 every one of them measured KADID on the inverted table. Verdicts produced after the rebuild measure it correctly and are covered by kadid-ext-root-corrected-2026-08-05. Nothing about the finding changed; only the predicate became precise, because leaving it at `all` would have rendered a FALSE 'inverted' badge on correctly-measured cells.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F + F.R1..F.R8 (T1 bit-exact, both residuals 0.0; T3 root cross-check; F.R1b raw-DCR ground truth); root cause scripts/canonical_corpus/build_fr_corpus_pairs.py:113; benchmarks/wave9/kadid_orientation_2026-08-04.md (735d6978); measurements benchmarks/kadid_orientation/",
    "date": "2026-08-04",
-   "fix_path": "DONE 2026-08-05 (appendix H part 1): build_fr_corpus_pairs.build_kadid() was fixed to (dmos-1)/4 on 2026-08-04, and the three ext roots were rebuilt by scripts/canonical_corpus/fix_ext_kadid_orientation.py; check_target_orientation.py --all-roots now exits 0 (+0.582360 on every root). The 188 verdicts listed here are NOT re-measured — they stay flagged. See kadid-ext-root-corrected-2026-08-05."
+   "fix_path": "DONE 2026-08-05 (appendix H part 1): build_fr_corpus_pairs.build_kadid() was fixed to (dmos-1)/4 on 2026-08-04, and the three ext roots were rebuilt by scripts/canonical_corpus/fix_ext_kadid_orientation.py; check_target_orientation.py --all-roots now exits 0 (+0.582360 on every root). The 188 verdicts listed here are NOT re-measured \u2014 they stay flagged. See kadid-ext-root-corrected-2026-08-05."
   },
   {
    "id": "kadid-ext-trained-inverted-model",
@@ -438,10 +438,10 @@
      "sota944_nt223"
     ]
    },
-   "reason": "this bake is ANTI-CORRELATED with KADID's real human MOS (negative signed SROCC vs the corrected quality-oriented target) — its KADID number is not a weak skill number, it is a backwards one. Cause: it trained on ext_kadid.parquet, whose target is inverted, so the inversion is inherited (dose-response: kadid train weight 0.50 -> mean -0.457, weight 1.50 -> mean -0.925 across 111 fullevals). Per-type evidence: H_co3abpg_s2507 is positive on exactly the 8 compression+noise KADID types and negative on all 17 analytic types.",
+   "reason": "this bake is ANTI-CORRELATED with KADID's real human MOS (negative signed SROCC vs the corrected quality-oriented target) \u2014 its KADID number is not a weak skill number, it is a backwards one. Cause: it trained on ext_kadid.parquet, whose target is inverted, so the inversion is inherited (dose-response: kadid train weight 0.50 -> mean -0.457, weight 1.50 -> mean -0.925 across 111 fullevals). Per-type evidence: H_co3abpg_s2507 is positive on exactly the 8 compression+noise KADID types and negative on all 17 analytic types.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md F.R2/F.R3 (T3 orientation-corrected re-score through bake_verdict; T4 per-distortion-type via panel --batch); the per-bake list is committed at benchmarks/kadid_orientation/kadid_signed_all_2026-08-04.tsv, regenerable from the stored fullevals by negating rank.kadid.srocc_signed",
    "date": "2026-08-04",
-   "fix_path": "retrain on a corrected ext_kadid.parquet if KADID competence is wanted; KADID is a train==val guard, not a ship gate, so no selection outcome changes — but a 944 bake must never be promoted on a KADID number that is actually negative"
+   "fix_path": "retrain on a corrected ext_kadid.parquet if KADID competence is wanted; KADID is a train==val guard, not a ship gate, so no selection outcome changes \u2014 but a 944 bake must never be promoted on a KADID number that is actually negative"
   },
   {
    "id": "kadid-e1-gate-unsigned",
@@ -462,7 +462,7 @@
     ]
    },
    "reason": "wave 8's registered E1 endpoint was 'KADID >= 0.70' on an UNSIGNED magnitude of a signed quantity measured on the inverted ext table: it was PASSED by the three most-inverted arms (W8A/W8B/W8D at -0.906..-0.937 vs true quality) and FAILED by W8C_s3101, the only wave-8 cell whose KADID was correctly oriented (+0.358). The gate did not measure KADID competence.",
-   "evidence": "benchmarks/sota944_campaign_2026-08-03.md §9.3 (corrected in place) + APPENDIX F results; benchmarks/wave8/results_tables_2026-08-04.md correction banner",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md \u00a79.3 (corrected in place) + APPENDIX F results; benchmarks/wave8/results_tables_2026-08-04.md correction banner",
    "date": "2026-08-04",
    "fix_path": "re-express any KADID endpoint as a SIGNED bar on a corrected table (e.g. srocc_signed >= +0.70); an unsigned KADID bar is never valid"
   },
@@ -475,10 +475,10 @@
    "scope": {
     "all": true
    },
-   "reason": "As of 2026-08-05 the ext-lineage ext_kadid.parquet stores the CORRECT quality-oriented target ((dmos-1)/4); the orientation gate reports +0.582360 on all three roots. A verdict produced from this date forward therefore carries a real, correctly-signed KADID number — kadid-ext-root-inverted does NOT apply to it. KADID remains a train==val guard (kadid-tid-train-eq-val still applies) and is NOT a ship gate. REPRO HAZARD: the corrected table took the canonical NAME, so re-running any pre-2026-08-05 bake's embedded zentrain.repro argv verbatim now trains against corrected bytes and will NOT reproduce that bake; the preserved original is ext_kadid_INVERTED_2026-08-04.parquet in the same directory (ext944 sha256 4dde6be26d3c50dca21fdee834f95bd692afa2c65b2d4f6f8a886d105553ca08, which is the sha every affected repro lists). Existing bakes are NOT retrained and NOT re-verdicted.",
+   "reason": "As of 2026-08-05 the ext-lineage ext_kadid.parquet stores the CORRECT quality-oriented target ((dmos-1)/4); the orientation gate reports +0.582360 on all three roots. A verdict produced from this date forward therefore carries a real, correctly-signed KADID number \u2014 kadid-ext-root-inverted does NOT apply to it. KADID remains a train==val guard (kadid-tid-train-eq-val still applies) and is NOT a ship gate. REPRO HAZARD: the corrected table took the canonical NAME, so re-running any pre-2026-08-05 bake's embedded zentrain.repro argv verbatim now trains against corrected bytes and will NOT reproduce that bake; the preserved original is ext_kadid_INVERTED_2026-08-04.parquet in the same directory (ext944 sha256 4dde6be26d3c50dca21fdee834f95bd692afa2c65b2d4f6f8a886d105553ca08, which is the sha every affected repro lists). Existing bakes are NOT retrained and NOT re-verdicted.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX H H.1; scripts/canonical_corpus/fix_ext_kadid_orientation.py + annotate_kadid_orientation_manifests.py; benchmarks/wave10/orientation_{BEFORE,AFTER}_2026-08-05.txt (INVERTED -0.582360 -> OK +0.582360, exit 1 -> 0); benchmarks/wave10/kadid_orientation_fix_2026-08-05.json (corrected ext944 sha256 286f1b239d88c483e215da6be2d1a16337ac0ae0548bff34ff6c32e0da033cf4)",
    "date": "2026-08-05",
-   "fix_path": "none — this entry records a RESOLUTION, not a defect; it stays as the pointer between the two eras"
+   "fix_path": "none \u2014 this entry records a RESOLUTION, not a defect; it stays as the pointer between the two eras"
   },
   {
    "id": "sdr25-subset-of-aic4",
@@ -490,10 +490,10 @@
    "scope": {
     "present": "rank.sdr25"
    },
-   "reason": "sdr25 is not independent of aic4: all 50 sdr25 stimuli are contained in aic4's 300 (the JPEG-AI codec subset of the same 5-crop material; matched on ref_basename + f0..f5 at 9 dp) — reading them as two corroborating corpora double-counts one instrument, and comparing 'sdr25 vs aic4' compares a set with its own subset",
-   "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX I §I.4 (structural findings); docs/DATA_SPLITS.md:108",
+   "reason": "sdr25 is not independent of aic4: all 50 sdr25 stimuli are contained in aic4's 300 (the JPEG-AI codec subset of the same 5-crop material; matched on ref_basename + f0..f5 at 9 dp) \u2014 reading them as two corroborating corpora double-counts one instrument, and comparing 'sdr25 vs aic4' compares a set with its own subset",
+   "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX I \u00a7I.4 (structural findings); docs/DATA_SPLITS.md:108",
    "date": "2026-08-05",
-   "fix_path": "none — permanent structural caveat (the containment is a property of the corpora)"
+   "fix_path": "none \u2014 permanent structural caveat (the containment is a property of the corpora)"
   },
   {
    "id": "hfnl-preauto-orientation-flip-REPAIRED",
@@ -504,10 +504,10 @@
    ],
    "scope": {
     "manual": {
-     "note": "the 80 board cells verdicted BEFORE the per-ref orientation pin (730a386e, 2026-08-04 16:49) whose pooled hfnlproxy srocc_signed < 0 — 75 single bakes (every pre-pin C_co*/C_em944/C_ensk/W8/W9/B_blend/B2_*/konhead cell with negative pooled) + 5 wave-5/6 ensembles; full roster: /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/flipaudit_table.tsv"
+     "note": "the 80 board cells verdicted BEFORE the per-ref orientation pin (730a386e, 2026-08-04 16:49) whose pooled hfnlproxy srocc_signed < 0 \u2014 75 single bakes (every pre-pin C_co*/C_em944/C_ensk/W8/W9/B_blend/B2_*/konhead cell with negative pooled) + 5 wave-5/6 ensembles; full roster: /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/flipaudit_table.tsv"
     }
    },
-   "reason": "Orientation::Auto resolved per-ref polarity from the POOLED sign; on the range-restricted hfnlproxy corpus the pooled sign is dominated by cross-image scale and is noise-level for mid models, so every pre-pin cell with pooled<0 stored per_ref_mean = -(true pinned value) — including the arm-B candidate whose +0.19310280 was the campaign's registered HF-NL bar (true value -0.1931: arm B is hfnl-INVERTED). BOARD FILES ARE REPAIRED IN PLACE (sha-gated repair-rank-orientation grafts; superseded value kept in rank_graft_sources.hfnlproxy.superseded_per_ref_mean); any COPY of the old numbers in docs/tables published before 2026-08-05 is the negated value.",
+   "reason": "Orientation::Auto resolved per-ref polarity from the POOLED sign; on the range-restricted hfnlproxy corpus the pooled sign is dominated by cross-image scale and is noise-level for mid models, so every pre-pin cell with pooled<0 stored per_ref_mean = -(true pinned value) \u2014 including the arm-B candidate whose +0.19310280 was the campaign's registered HF-NL bar (true value -0.1931: arm B is hfnl-INVERTED). BOARD FILES ARE REPAIRED IN PLACE (sha-gated repair-rank-orientation grafts; superseded value kept in rank_graft_sources.hfnlproxy.superseded_per_ref_mean); any COPY of the old numbers in docs/tables published before 2026-08-05 is the negated value.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R (86 single re-runs + 5 ensemble re-runs, pooled srocc_signed bit-identical on all, per_ref_mean exact negation on 80); repair verdicts /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/flipaudit/",
    "date": "2026-08-05",
    "fix_path": "repaired 2026-08-05 via promote_fulleval.py --repair-rank-orientation hfnlproxy; doc-level quotes corrected in the campaign CORRECTIONS entry (appendix O.R)"
@@ -526,22 +526,22 @@
    "reason": "registered axis LSD (appendix O): a per_ref_mean difference below ~0.039 (median paired-bootstrap 95% half-width over 435 model pairs; p90 0.047) is not distinguishable from ref-sampling noise; differences >= ~0.05 are essentially always real. The axis ORDERING itself is highly reliable (split-half model-ranking SROCC 0.992, Spearman-Brown 0.996). Read per-model means with ~+/-0.03-0.04 marginal CI half-widths.",
    "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md (30-model per-ref matrix, B=10000 paired bootstrap seed 777, 20-shuffle split-half seed 4242); benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R",
    "date": "2026-08-05",
-   "fix_path": "none needed — cite deltas with the LSD; the gauntlet HF-NL panel draws it"
+   "fix_path": "none needed \u2014 cite deltas with the LSD; the gauntlet HF-NL panel draws it"
   },
   {
    "id": "hfnl-ceiling-subset-superseded-fullcorpus",
    "kind": "annotated",
    "fields": [
     "reference_rows (hfnl axis JSON)",
-    "hfnl_axis_report §3 subset ceiling"
+    "hfnl_axis_report \u00a73 subset ceiling"
    ],
    "scope": {
     "manual": {
      "note": "the appendix-O O.R2 reference-ceiling values computed on the 118-ref / 2,410-pair non-avif sidecar subset (dssim +0.786, iwssim +0.655, cvvdp +0.549, butteraugli +0.420) and the 'independent metrics reach 0.42-0.79' band reading"
     }
    },
-   "reason": "SUPERSEDED AS THE AXIS CEILING 2026-08-05: the avif 73.6% of the slice had no reference-metric coverage (the 2026-07-02 fill-avif fleets were user-descoped at ~0.2%); the slice was backfilled locally (8,360 avif + 23 gap cells, fill4 implementations, 0 failures, bit-identical vs the 17 fleet blobs that ran) giving 100.0% coverage on all four metrics. Full-corpus rows on the models' exact footing (757 refs, min-3 rule): dssim +0.833, iwssim +0.763, butteraugli +0.733, cvvdp +0.660 — the band is 0.66-0.83, the era-additive/GL top sits AT the dssim ceiling, and avif is the EASIEST stratum for every reference metric (the mid-944 avif deficit is model behavior). The subset values remain valid WITHIN-SUBSET reads (kept as subset_mean); never cite them as the axis ceiling.",
-   "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md §3 (corrected) + benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R7; sidecar fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05.parquet sha 64ce4278c35a2f90d1b8cf85da337ce95418b2ce572769be0318e15e98f6922a; merged table + ceiling_full.json in /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/",
+   "reason": "SUPERSEDED AS THE AXIS CEILING 2026-08-05: the avif 73.6% of the slice had no reference-metric coverage (the 2026-07-02 fill-avif fleets were user-descoped at ~0.2%); the slice was backfilled locally (8,360 avif + 23 gap cells, fill4 implementations, 0 failures, bit-identical vs the 17 fleet blobs that ran) giving 100.0% coverage on all four metrics. Full-corpus rows on the models' exact footing (757 refs, min-3 rule): dssim +0.833, iwssim +0.763, butteraugli +0.733, cvvdp +0.660 \u2014 the band is 0.66-0.83, the era-additive/GL top sits AT the dssim ceiling, and avif is the EASIEST stratum for every reference metric (the mid-944 avif deficit is model behavior). The subset values remain valid WITHIN-SUBSET reads (kept as subset_mean); never cite them as the axis ceiling.",
+   "evidence": "benchmarks/hfnl_axis_report_2026-08-05.md \u00a73 (corrected) + benchmarks/sota944_campaign_2026-08-03.md APPENDIX O.R7; sidecar fill4-6codec-2026-07-01/hfnl_avifgap_4metric_sidecar_2026-08-05.parquet sha 64ce4278c35a2f90d1b8cf85da337ce95418b2ce572769be0318e15e98f6922a; merged table + ceiling_full.json in /mnt/v/output/zensim/reports/hfnl-axis-2026-08-05/",
    "date": "2026-08-05",
    "fix_path": "benchmarks/hfnl_axis_2026-08-05.json reference_rows[].mean = full-corpus (subset preserved as subset_mean); board panel reference lines now full-corpus"
   },
@@ -557,7 +557,7 @@
      "R1_GL2_s2503_packed"
     ]
    },
-   "reason": "R.R0: this cell's CID22 0.90096 is a k=1 UNREPLICATED lottery draw, NOT a candidate claim — its seed sibling measures 0.80711 on the same recipe (now on the board beside it as `sota944_FS_GL2_s2501` — compare the two rows directly), a within-config spread of 0.0938 (the campaign's widest), and the GL/PILOT family spans 0.8005-0.9010 with no middle (measured bimodality; dead lam=16 cell excluded). Appendix J's both-seeds noise rule withheld this cell as a finding and the W8C_s3101 precedent applies here at higher amplitude, so the composite it drives is flattered by the same draw. Any follow-on takes the REGISTERED replication gate first: k >= 4 fresh seeds of the GL2 recipe reporting the FULL distribution — never a median or a best. Even if replicated it is a CID22+HF-NL SPECIALIST, not a general candidate: it fails KonJND 0.329 / nonphoto 0.835 / csiq 0.801 under the balanced profile. What stands k-independently from arm R1 is the DIAL MECHANISM (add-spline + pack --zerobias-bulk 0 recovers the lasso dial, range 5.7-7.0 -> 45-63 dial units, mono >= 99.8%, tied <= 0.7%, every rank axis held exactly), not this seed's rank number.",
+   "reason": "R.R0: this cell's CID22 0.90096 is a k=1 UNREPLICATED lottery draw, NOT a candidate claim \u2014 its seed sibling measures 0.80711 on the same recipe (now on the board beside it as `sota944_FS_GL2_s2501` \u2014 compare the two rows directly), a within-config spread of 0.0938 (the campaign's widest), and the GL/PILOT family spans 0.8005-0.9010 with no middle (measured bimodality; dead lam=16 cell excluded). Appendix J's both-seeds noise rule withheld this cell as a finding and the W8C_s3101 precedent applies here at higher amplitude, so the composite it drives is flattered by the same draw. Any follow-on takes the REGISTERED replication gate first: k >= 4 fresh seeds of the GL2 recipe reporting the FULL distribution \u2014 never a median or a best. Even if replicated it is a CID22+HF-NL SPECIALIST, not a general candidate: it fails KonJND 0.329 / nonphoto 0.835 / csiq 0.801 under the balanced profile. What stands k-independently from arm R1 is the DIAL MECHANISM (add-spline + pack --zerobias-bulk 0 recovers the lasso dial, range 5.7-7.0 -> 45-63 dial units, mono >= 99.8%, tied <= 0.7%, every rank axis held exactly), not this seed's rank number.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX R, R.R0 supervisor verification note + the R.R1 headline table (commits 22095fe6, 8cf106e8, f4df3cb8); sibling value re-verified from the source verdicts this pass (FS_GL2_s2501.full.json rank.cid22.srocc = 0.80711, FS_GL2_s2503.full.json = 0.90096)",
    "date": "2026-08-06",
    "fix_path": "k >= 4 fresh seeds of the GL2 recipe with the FULL distribution reported (R.R0 rule 2); until then the number is context, never a shortlist entry"
@@ -631,7 +631,7 @@
    "scope": {
     "missing": "rank.cid22.band_scheme"
    },
-   "reason": "This cell's bands were cut on the pre-2026-08-06 fixed deciles, so F8's current bar has NOT BEEN MEASURED on it — that is absence, not a measured fail. F8 now reads the SIGNED top and bottom USABLE bands of scheme `merged-decile-2026-08-06`; the legacy `B9` is a different quantity (43 pairs from 11 of 49 refs spanning 0.0194 MOS, published as an ABSOLUTE value), and scoring the new bar against it would compare two different measurements. The cell still counts as NOT-PASSED in n/8 per the registered absent=not-passed rule; the n/m-measured form reports it alongside. To MEASURE it: `promote_fulleval.py --rebuild-bands <cell>` if the cell still carries per-pair (gated bit-identical to a re-verdict), else re-verdict with a current `bake_verdict`.",
+   "reason": "This cell's bands were cut on the pre-2026-08-06 fixed deciles, so F8's current bar has NOT BEEN MEASURED on it \u2014 that is absence, not a measured fail. F8 now reads the SIGNED top and bottom USABLE bands of scheme `merged-decile-2026-08-06`; the legacy `B9` is a different quantity (43 pairs from 11 of 49 refs spanning 0.0194 MOS, published as an ABSOLUTE value), and scoring the new bar against it would compare two different measurements. The cell still counts as NOT-PASSED in n/8 per the registered absent=not-passed rule; the n/m-measured form reports it alongside. To MEASURE it: `promote_fulleval.py --rebuild-bands <cell>` if the cell still carries per-pair (gated bit-identical to a re-verdict), else re-verdict with a current `bake_verdict`.",
    "evidence": "benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX V.5 + V.R5; zensim-validate/src/bin/freeze_check.rs band_scheme()/band_tails(); 160 of 280 board cells are in this state (per-pair stripped by the board-size rule)",
    "date": "2026-08-06",
    "fix_path": "`promote_fulleval.py --rebuild-bands`, or a re-verdict when per-pair was stripped"
@@ -648,7 +648,7 @@
      "trained_with": "synthetic-v2 sources (the metric training pool)"
     }
    },
-   "reason": "9.5% of imazen26 rows (7/74 origins: o_7007,7017,7039,7047,7049,7059,7077) and 10.6% of nonphoto rows (13/128 origins) use refs whose exact generator output (name+seed-identical gen-* content) also feeds synthetic-v2 — potential eval inflation on both axes. Eye-ratified 2026-08-27 (9 flat-content dHash false positives excluded per the user's verdicts). Eval-side origin exclusion + clean-slice recompute is a PENDING USER ACTION. ⇒ SUPERSEDED by imazen26-nonphoto-sharing-corrected-2026-08-27: the origin sets above were derived from the WRONG estate copy (inspiration dir).",
+   "reason": "9.5% of imazen26 rows (7/74 origins: o_7007,7017,7039,7047,7049,7059,7077) and 10.6% of nonphoto rows (13/128 origins) use refs whose exact generator output (name+seed-identical gen-* content) also feeds synthetic-v2 \u2014 potential eval inflation on both axes. Eye-ratified 2026-08-27 (9 flat-content dHash false positives excluded per the user's verdicts). Eval-side origin exclusion + clean-slice recompute is a PENDING USER ACTION. \u21d2 SUPERSEDED by imazen26-nonphoto-sharing-corrected-2026-08-27: the origin sets above were derived from the WRONG estate copy (inspiration dir).",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (EYE PASS RESULTS)",
    "date": "2026-08-27"
   },
@@ -665,7 +665,7 @@
      "supersedes": "imazen26-nonphoto-synthv2-generator-sharing"
     }
    },
-   "reason": "Corrected against the ROOT SOURCE (imazen/imazen-26 repo manifest; the prior audit's refs were the quarantined inspiration dir). Channel A (synth-pool generator sharing, dHash d<=2): 71 canonical ids, ~the whole 7000-lilith-plots class. Channel B (canonical-internal cross-id duplicate whose twin is a TRAIN id): 9 ids. Eval exposure: imazen26 8/74 origins (10.9% rows, both roots: 7007,7017,7027,7039,7047,7049,6067,8229); nonphoto-944 8/58 (13.9%); nonphoto-372 16/128 (12.6%). MEASURED realized inflation ~ZERO: 9 leader bakes ctrl-vs-clean, median delta +0.0026, max |delta| 0.0100, era flagships lose <=0.004 — shared content is hard, not memorized. Axes remain citable with this annotation; exclusion decision stays user-gated but is low-stakes. ⇒ REFINED same day by imazen26-nonphoto-sharing-provenance-2026-08-27 (provenance-derived owner; dHash demoted to verifier).",
+   "reason": "Corrected against the ROOT SOURCE (imazen/imazen-26 repo manifest; the prior audit's refs were the quarantined inspiration dir). Channel A (synth-pool generator sharing, dHash d<=2): 71 canonical ids, ~the whole 7000-lilith-plots class. Channel B (canonical-internal cross-id duplicate whose twin is a TRAIN id): 9 ids. Eval exposure: imazen26 8/74 origins (10.9% rows, both roots: 7007,7017,7027,7039,7047,7049,6067,8229); nonphoto-944 8/58 (13.9%); nonphoto-372 16/128 (12.6%). MEASURED realized inflation ~ZERO: 9 leader bakes ctrl-vs-clean, median delta +0.0026, max |delta| 0.0100, era flagships lose <=0.004 \u2014 shared content is hard, not memorized. Axes remain citable with this annotation; exclusion decision stays user-gated but is low-stakes. \u21d2 REFINED same day by imazen26-nonphoto-sharing-provenance-2026-08-27 (provenance-derived owner; dHash demoted to verifier).",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (CORRECTED RESULTS); /mnt/v/output/zensim/imazen26-dhash-2026-08-27/{affected_ids_2026-08-27.tsv,canon_crossid_pairs_2026-08-27.tsv,cleanslice/cleanslice_summary.tsv,montages_v3/}",
    "date": "2026-08-27"
   },
@@ -681,7 +681,7 @@
      "supersedes": "imazen26-nonphoto-sharing-corrected-2026-08-27"
     }
    },
-   "reason": "Sharing sets now PROVENANCE-DERIVED over the whole corpus (imazen-26/scripts/derive_sharing_provenance.py; dHash = verifier). Channel A exact-generator-token: 68 ids. Channel B split-piercing name families (dpr/viewport ladders, plot kind-variants, +3/+4 patent families): 166 non-train ids with a train twin. Upper-bound eval exposure: imazen26 19/74 origins (25.1% rows), nonphoto-944 19/58 (32.2%), nonphoto-372 35/128 (26.6%). MEASURED at the upper bound (9 leader bakes): median delta +0.0043, max |delta| 0.0143, nonphoto deltas consistently POSITIVE — the shared classes are the hardest content; no memorization advantage. Axes citable under this annotation; exclusion remains user-gated and measured low-stakes.",
+   "reason": "Sharing sets now PROVENANCE-DERIVED over the whole corpus (imazen-26/scripts/derive_sharing_provenance.py; dHash = verifier). Channel A exact-generator-token: 68 ids. Channel B split-piercing name families (dpr/viewport ladders, plot kind-variants, +3/+4 patent families): 166 non-train ids with a train twin. Upper-bound eval exposure: imazen26 19/74 origins (25.1% rows), nonphoto-944 19/58 (32.2%), nonphoto-372 35/128 (26.6%). MEASURED at the upper bound (9 leader bakes): median delta +0.0043, max |delta| 0.0143, nonphoto deltas consistently POSITIVE \u2014 the shared classes are the hardest content; no memorization advantage. Axes citable under this annotation; exclusion remains user-gated and measured low-stakes.",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (PROVENANCE IS THE OWNER); /mnt/v/output/zensim/imazen26-dhash-2026-08-27/{prov_*.tsv,affected_ids_full_2026-08-27.tsv,cleanslice/cleanslice_summary_full.tsv}",
    "date": "2026-08-27"
   },
@@ -698,7 +698,7 @@
      "decision": "user (AskUserQuestion 2026-08-28): family-aware structural re-slice + full-board rescore"
     }
    },
-   "reason": "Eval slices REBUILT family-pure (family-aware split imazen-26 manifests/split_map_family.tsv @ c583263 + channel-A synth-shared ids excluded; per-slice rules in the audit md Amendment; 17.6-27.7% of rows dropped, .pre-reslice.bak kept). ALL 280 single-bake board rows re-scored on the new slices and REPLACEMENT-grafted (promote_fulleval.py --reslice-rank, sha-gated, superseded_srocc recorded per axis). Values published BEFORE 2026-08-28 on these axes are pre-reslice. NOT resliced (axes remain pre-reslice, do not rank against resliced rows): the 11 ensemble rows (member-wise re-aggregation = registered follow-up) and 2 wrong-regime-class rows (ebothg_m504, kbase_KADIS_full720 — bake_verdict's f156-371 guard refused; native roots outside this slice family). Note: >372-width bakes previously read the legacy 720 NN tables now uniformly read the family-pure canonical 944 test views (the FULL_EVAL 924-era convention).",
+   "reason": "Eval slices REBUILT family-pure (family-aware split imazen-26 manifests/split_map_family.tsv @ c583263 + channel-A synth-shared ids excluded; per-slice rules in the audit md Amendment; 17.6-27.7% of rows dropped, .pre-reslice.bak kept). ALL 280 single-bake board rows re-scored on the new slices and REPLACEMENT-grafted (promote_fulleval.py --reslice-rank, sha-gated, superseded_srocc recorded per axis). Values published BEFORE 2026-08-28 on these axes are pre-reslice. NOT resliced (axes remain pre-reslice, do not rank against resliced rows): the 11 ensemble rows (member-wise re-aggregation = registered follow-up) and 2 wrong-regime-class rows (ebothg_m504, kbase_KADIS_full720 \u2014 bake_verdict's f156-371 guard refused; native roots outside this slice family). Note: >372-width bakes previously read the legacy 720 NN tables now uniformly read the family-pure canonical 944 test views (the FULL_EVAL 924-era convention).",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (REGISTERED + Amendment); /mnt/v/output/zensim/imazen26-dhash-2026-08-27/reslice_rescore/",
    "date": "2026-08-28"
   },
@@ -706,7 +706,7 @@
    "id": "hdr-instrument-v3mix-scene-overlap",
    "kind": "annotated",
    "fields": [
-    "hdr census (27-cell) evaluations of hdr_v3mix-trained models (BHdr — the svt/gainmap census judge)"
+    "hdr census (27-cell) evaluations of hdr_v3mix-trained models (BHdr \u2014 the svt/gainmap census judge)"
    ],
    "scope": {
     "manual": {
@@ -714,7 +714,7 @@
      "scenes_in_val": "1065,1495"
     }
    },
-   "reason": "hdr_v3mix/hdr944-leg contains 7 of the 9 frozen HDR census scenes; models trained on it (BHdr, the census JUDGE) overlap the instrument. CORRECTED 2026-08-28: the HDR-944 candidates (HDR944_L1T*) are NOT affected — their training root is the hdrgrid-mc944 legs, verified ZERO census-scene overlap by direct table read. Fix path unchanged: future hdr_v3mix-lineage training (BHdr retrain) uses hdr944-leg-pure-2026-08-28 (census scenes held out).",
+   "reason": "hdr_v3mix/hdr944-leg contains 7 of the 9 frozen HDR census scenes; models trained on it (BHdr, the census JUDGE) overlap the instrument. CORRECTED 2026-08-28: the HDR-944 candidates (HDR944_L1T*) are NOT affected \u2014 their training root is the hdrgrid-mc944 legs, verified ZERO census-scene overlap by direct table read. Fix path unchanged: future hdr_v3mix-lineage training (BHdr retrain) uses hdr944-leg-pure-2026-08-28 (census scenes held out).",
    "record": "benchmarks/imazen26_dhash_audit_2026-08-27.md (MEASUREMENTS 2+3)",
    "date": "2026-08-28"
   },
@@ -746,7 +746,7 @@
      "W10L9PBR_s4005_packed"
     ]
    },
-   "reason": "SPH1-broad trains on the UN-purged tbig base (5 test + 12 validate imazen-26 ids); its imazen26/nonphoto/hfnl reads are family-exposed — REPORTED, never rankable against family-clean candidates (arm registration). Deciding axes were cid22 + semi-hidden; the arm was falsified there (cid22 CI-worse vs both references).",
+   "reason": "SPH1-broad trains on the UN-purged tbig base (5 test + 12 validate imazen-26 ids); its imazen26/nonphoto/hfnl reads are family-exposed \u2014 REPORTED, never rankable against family-clean candidates (arm registration). Deciding axes were cid22 + semi-hidden; the arm was falsified there (cid22 CI-worse vs both references).",
    "record": "benchmarks/sdr_pure_retrain_wave_2026-08-28.md (SPH1-BROAD ARM + fine+broad RESULTS)",
    "date": "2026-08-28"
   },
@@ -815,7 +815,7 @@
      "note": "any cross-bake comparison of native-unit loop error"
     }
    },
-   "reason": "Native loop error is measured in each bake's OWN dial units; bakes with compressed dial spans (e.g. GL2 38-82) get flattered — measured: GL2 best native (jxl k3 0.434, 97/99) while WORST translated (ssim2-judged 1.36-2.71). Cross-bake loop comparisons must use the translated (ssim2/butter-judged) proxy columns with their oracle floors; native columns are per-bake diagnostics only.",
+   "reason": "Native loop error is measured in each bake's OWN dial units; bakes with compressed dial spans (e.g. GL2 38-82) get flattered \u2014 measured: GL2 best native (jxl k3 0.434, 97/99) while WORST translated (ssim2-judged 1.36-2.71). Cross-bake loop comparisons must use the translated (ssim2/butter-judged) proxy columns with their oracle floors; native columns are per-bake diagnostics only.",
    "record": "benchmarks/balance_campaign_2026-08-28.md (LOOP-PROXY RESULTS) + benchmarks/loop_proxy_2026-08-28.json",
    "date": "2026-08-28"
   },
@@ -830,7 +830,7 @@
      "note": "rows whose train_date.src == 'file'"
     }
    },
-   "reason": "Bakes without embedded repro show the bake FILE's mtime (marked *) — that is copy/pack time, NOT training time, and can postdate training by days. Only unstarred (repro timestamp_epoch) stamps are training times.",
+   "reason": "Bakes without embedded repro show the bake FILE's mtime (marked *) \u2014 that is copy/pack time, NOT training time, and can postdate training by days. Only unstarred (repro timestamp_epoch) stamps are training times.",
    "record": "board(dates) commit 05091211",
    "date": "2026-08-28"
   },
@@ -845,7 +845,7 @@
      "note": "peer_ssim2 / peer_butteraugli / peer_cvvdp / peer_iwssim rows"
     }
    },
-   "reason": "Peer rows are computed from stored refmetrics per-pair tables whose pair sets differ in size/composition from candidate evals on some axes (measured: konjnd peers n=1008 vs candidates n=504 — the H-KON invalid-rate incident). Down-column reads vs candidates are indicative, not exact; aligned-set comparisons require a rescore.",
+   "reason": "Peer rows are computed from stored refmetrics per-pair tables whose pair sets differ in size/composition from candidate evals on some axes (measured: konjnd peers n=1008 vs candidates n=504 \u2014 the H-KON invalid-rate incident). Down-column reads vs candidates are indicative, not exact; aligned-set comparisons require a rescore.",
    "record": "balance_campaign_2026-08-28.md (H-KON) + sdr wave konjnd amendment",
    "date": "2026-08-28"
   },
@@ -866,8 +866,8 @@
      "b_sdr_linear_cid80_inclwinsor_dense_dial"
     ]
    },
-   "reason": "read from the pre-2026-08-30 372 root (/mnt/v/zen/zensim-training/2026-05-15-full-features), whose masked/IW block (f228..371) was a function of RAYON_NUM_THREADS and does not reproduce at its own build commit (§3.27); these bakes structurally use f156-371, so their stored-root numbers are an extinct extractor's — MEASURED shift is model-specific, not a constant offset (B CID22 +0.0057 / KonJND |+0.103| / kon504 |-0.074|; cl_tfm KonJND |-0.489|; v02_bvls_NO_shaping kon504 |-0.259|; v47A ~+0.0004 CID22), so no correction factor exists and each cell must be re-verdicted SCOPE NARROWED 2026-08-30 (same day, before anything was cited): this entry originally named six cells on the assumption that a 372-input board row is a 372-root read. MEASURED otherwise — bhdr_linear_shaped_cvvdpmix, cl_tfm_corruption_LQ_MLP_s13, v02_bvls_NO_shaping, v47_strict_QAT_native are stamped regime \"720\" and are ext720-canonical reads (board372-row-read-on-ext720-root-2026-08-30; independently reproduced by the round-4b lane: board cl_tfm_corruption_LQ_MLP_s13 vs a fresh `--regime 720 --corpora cid22` is BIT-EXACT on 4,292 pairs and 96.4 points from a stored-372 read, and the other three differ from BOTH 372 eras). Only the two named here reproduce BIT-EXACTLY against a stored-root re-verdict, so only they are genuine stored-era reads and only B's pair is a clean era A/B on the board. Leaving the broader scope would have rendered a FALSE era-stale badge on four post-fix rows — the same failure mode the kadid-ext-root-inverted narrowing fixed. The finding itself is unchanged; only the predicate became precise.",
-   "evidence": "benchmarks/eval372_current_root_2026-08-30.md (roster, both eras, same instrument) + benchmarks/v1_extractor_drift_2026-08-30.md + docs/DATASET_HISTORY.md §3.27; scope narrowing measured in benchmarks/eval372_current_root_2026-08-30.md §7",
+   "reason": "read from the pre-2026-08-30 372 root (/mnt/v/zen/zensim-training/2026-05-15-full-features), whose masked/IW block (f228..371) was a function of RAYON_NUM_THREADS and does not reproduce at its own build commit (\u00a73.27); these bakes structurally use f156-371, so their stored-root numbers are an extinct extractor's \u2014 MEASURED shift is model-specific, not a constant offset (B CID22 +0.0057 / KonJND |+0.103| / kon504 |-0.074|; cl_tfm KonJND |-0.489|; v02_bvls_NO_shaping kon504 |-0.259|; v47A ~+0.0004 CID22), so no correction factor exists and each cell must be re-verdicted SCOPE NARROWED 2026-08-30 (same day, before anything was cited): this entry originally named six cells on the assumption that a 372-input board row is a 372-root read. MEASURED otherwise \u2014 bhdr_linear_shaped_cvvdpmix, cl_tfm_corruption_LQ_MLP_s13, v02_bvls_NO_shaping, v47_strict_QAT_native are stamped regime \"720\" and are ext720-canonical reads (board372-row-read-on-ext720-root-2026-08-30; independently reproduced by the round-4b lane: board cl_tfm_corruption_LQ_MLP_s13 vs a fresh `--regime 720 --corpora cid22` is BIT-EXACT on 4,292 pairs and 96.4 points from a stored-372 read, and the other three differ from BOTH 372 eras). Only the two named here reproduce BIT-EXACTLY against a stored-root re-verdict, so only they are genuine stored-era reads and only B's pair is a clean era A/B on the board. Leaving the broader scope would have rendered a FALSE era-stale badge on four post-fix rows \u2014 the same failure mode the kadid-ext-root-inverted narrowing fixed. The finding itself is unchanged; only the predicate became precise.",
+   "evidence": "benchmarks/eval372_current_root_2026-08-30.md (roster, both eras, same instrument) + benchmarks/v1_extractor_drift_2026-08-30.md + docs/DATASET_HISTORY.md \u00a73.27; scope narrowing measured in benchmarks/eval372_current_root_2026-08-30.md \u00a77",
    "date": "2026-08-30",
    "fix_path": "re-verdict on /mnt/v/zen/zensim-training/2026-08-30-full-features-372 (current-extractor root, _MANIFEST.json build_commit ea16c7ee); ready-to-promote verdicts at /mnt/v/output/zensim/eval372-roster-2026-08-30/json/<label>_new.json"
   },
@@ -889,10 +889,10 @@
      "winner_dial_Ebothg_hfgain_winsor_dial"
     ]
    },
-   "reason": "MEASURED era-INDEPENDENT: these bakes read only f0..155 (basic), which is bit-identical between the 2026-05-15 and 2026-08-30 372 roots (0 cells over the golden tolerance on 4,292x372 CID22 cells), and a both-era re-verdict reproduces every corpus to +0.00000 — so the eval372-stored-root-thread-dependent-2026-08-30 invalidation does NOT apply to them; do not re-verdict them expecting a change SCOPE UNCHANGED 2026-08-30, with one clarification: these three BOARD rows are additionally ext720 reads (board372-row-read-on-ext720-root-2026-08-30), so they were never stored-root numbers in the first place. The claim made here is about the MODEL, not the row, and stands on its own measurement — a bake that reads only f0..155 scores identically on the 2026-05-15 and 2026-08-30 372 roots (Δ 0.00000 on all 15 corpora). The board rows carry the tell: each differs from the round-4b lane's stored-372 and current-372 runs by the SAME amount (ADD156 0.294/0.294, Ebothg_scr0_5 0.797/0.797, winner_dial 0.502/0.502) — an era-independent offset, i.e. the folded-720 feature space.",
+   "reason": "MEASURED era-INDEPENDENT: these bakes read only f0..155 (basic), which is bit-identical between the 2026-05-15 and 2026-08-30 372 roots (0 cells over the golden tolerance on 4,292x372 CID22 cells), and a both-era re-verdict reproduces every corpus to +0.00000 \u2014 so the eval372-stored-root-thread-dependent-2026-08-30 invalidation does NOT apply to them; do not re-verdict them expecting a change SCOPE UNCHANGED 2026-08-30, with one clarification: these three BOARD rows are additionally ext720 reads (board372-row-read-on-ext720-root-2026-08-30), so they were never stored-root numbers in the first place. The claim made here is about the MODEL, not the row, and stands on its own measurement \u2014 a bake that reads only f0..155 scores identically on the 2026-05-15 and 2026-08-30 372 roots (\u0394 0.00000 on all 15 corpora). The board rows carry the tell: each differs from the round-4b lane's stored-372 and current-372 runs by the SAME amount (ADD156 0.294/0.294, Ebothg_scr0_5 0.797/0.797, winner_dial 0.502/0.502) \u2014 an era-independent offset, i.e. the folded-720 feature space.",
    "evidence": "benchmarks/eval372_current_root_2026-08-30.md (immune-control rows, delta 0.00000 on all 15 corpora)",
    "date": "2026-08-30",
-   "fix_path": "none — permanent property of a basic-block-only model"
+   "fix_path": "none \u2014 permanent property of a basic-block-only model"
   },
   {
    "id": "dial372-grid-thread-dependent-era-2026-08-30",
@@ -907,8 +907,8 @@
      "b_sdr_linear_cid80_inclwinsor_dense_dial"
     ]
    },
-   "reason": "the 372-class dial grid (dial_grid_372col_2026-05-29*.parquet) was itself extracted 2026-05-29 — AFTER the activity-map fix 2dab8f30 (2026-05-17) but BEFORE the geometry-only band layout 6af83b60 (2026-06-09) — so its masked/IW block is from the thread-count-dependent era; a bake that uses f156-371 is therefore dialled against extinct features. It is NOT re-extractable today: its pairs TSV names the q<X>.png decode cache deleted 2026-06-22 (2,560/2,560 dist paths missing), so a rebuild needs a decode pass first. Both eras of a stored-vs-current re-verdict read the SAME grid file, so a dial delta of exactly 0 is a structural identity, not evidence the dial is era-clean SCOPE NARROWED 2026-08-30 (same day): the other seven cells this originally named are ext720 reads (board372-row-read-on-ext720-root-2026-08-30) and are dialled against the 720 grid, not the 2026-05-29 372 grid this entry is about; only the two 372-root rows remain in scope. The @cur372 halves are covered by dial372-grid-thread-dependent-era-current-rows-2026-08-30.",
-   "evidence": "benchmarks/eval372_current_root_2026-08-30.md §dial; benchmarks/eval_grids_2026-05-29.pointer.md; docs/DATASET_HISTORY.md §3.27",
+   "reason": "the 372-class dial grid (dial_grid_372col_2026-05-29*.parquet) was itself extracted 2026-05-29 \u2014 AFTER the activity-map fix 2dab8f30 (2026-05-17) but BEFORE the geometry-only band layout 6af83b60 (2026-06-09) \u2014 so its masked/IW block is from the thread-count-dependent era; a bake that uses f156-371 is therefore dialled against extinct features. It is NOT re-extractable today: its pairs TSV names the q<X>.png decode cache deleted 2026-06-22 (2,560/2,560 dist paths missing), so a rebuild needs a decode pass first. Both eras of a stored-vs-current re-verdict read the SAME grid file, so a dial delta of exactly 0 is a structural identity, not evidence the dial is era-clean SCOPE NARROWED 2026-08-30 (same day): the other seven cells this originally named are ext720 reads (board372-row-read-on-ext720-root-2026-08-30) and are dialled against the 720 grid, not the 2026-05-29 372 grid this entry is about; only the two 372-root rows remain in scope. The @cur372 halves are covered by dial372-grid-thread-dependent-era-current-rows-2026-08-30.",
+   "evidence": "benchmarks/eval372_current_root_2026-08-30.md \u00a7dial; benchmarks/eval_grids_2026-05-29.pointer.md; docs/DATASET_HISTORY.md \u00a73.27",
    "date": "2026-08-30",
    "fix_path": "rebuild the 372 dial grid at HEAD (decode the bitstreams under /mnt/v/input/zensim/images first, then extract_features_372col --corpus pairs); registered, not executed"
   },
@@ -939,10 +939,10 @@
      "winner_dial_Ebothg_hfgain_winsor_dial@cur372"
     ]
    },
-   "reason": "an @cur372 row is a CURRENT-extractor read on only 8 of its 14 corpora (cid22, kadid, tid, konjnd, aic3 re-extracted at build_commit ea16c7ee; csiq, live, pipal measured BIT-IDENTICAL to the stored tables). These six are BYTE-COPIES of the 2026-05-15 root because their distorted material is bigcodec/R2 encodes or — for aic4 — a source CSV that no longer exists, so an era delta of exactly zero on them is true by construction, not evidence of era-cleanliness; aic4 specifically is PRE-FIX (pre-2dab8f30) and unrefreshable, while nonphoto/imazen26 are believed post-fix by BUILD DATE only, an inference and not the measurement the csiq/live/pipal trio got. product_composite inherits the mix: imazen26 0.50 + nonphoto 0.30 + aic4 0.05 of its 2.15 denominator = 39.5% of the composite LEVEL rides on stored-era tables (the stored-vs-current composite DELTA is clean — those terms cancel)",
-   "evidence": "benchmarks/eval372_current_root_2026-08-30.md §2 (root table, 'COPIED ≠ current') + §3a; benchmarks/board_era_rows_2026-08-30.md",
+   "reason": "an @cur372 row is a CURRENT-extractor read on only 8 of its 14 corpora (cid22, kadid, tid, konjnd, aic3 re-extracted at build_commit ea16c7ee; csiq, live, pipal measured BIT-IDENTICAL to the stored tables). These six are BYTE-COPIES of the 2026-05-15 root because their distorted material is bigcodec/R2 encodes or \u2014 for aic4 \u2014 a source CSV that no longer exists, so an era delta of exactly zero on them is true by construction, not evidence of era-cleanliness; aic4 specifically is PRE-FIX (pre-2dab8f30) and unrefreshable, while nonphoto/imazen26 are believed post-fix by BUILD DATE only, an inference and not the measurement the csiq/live/pipal trio got. product_composite inherits the mix: imazen26 0.50 + nonphoto 0.30 + aic4 0.05 of its 2.15 denominator = 39.5% of the composite LEVEL rides on stored-era tables (the stored-vs-current composite DELTA is clean \u2014 those terms cancel)",
+   "evidence": "benchmarks/eval372_current_root_2026-08-30.md \u00a72 (root table, 'COPIED \u2260 current') + \u00a73a; benchmarks/board_era_rows_2026-08-30.md",
    "date": "2026-08-30",
-   "fix_path": "re-extract the six at HEAD (needs a decode pass for the bigcodec/R2 legs; aic4 is permanent — its source CSV is gone). Until then read an @cur372 row's era-clean axes only: cid22/kadid/tid/konjnd/aic3/csiq/live/pipal"
+   "fix_path": "re-extract the six at HEAD (needs a decode pass for the bigcodec/R2 legs; aic4 is permanent \u2014 its source CSV is gone). Until then read an @cur372 row's era-clean axes only: cid22/kadid/tid/konjnd/aic3/csiq/live/pipal"
   },
   {
    "id": "dial372-grid-thread-dependent-era-current-rows-2026-08-30",
@@ -966,8 +966,8 @@
      "winner_dial_Ebothg_hfgain_winsor_dial@cur372"
     ]
    },
-   "reason": "extends dial372-grid-thread-dependent-era-2026-08-30 (whose names scope lists only the stored-era halves) to the @cur372 halves: the dial grid is its own file (--dial-grid), OUTSIDE --features-root, so both eras of a re-verdict read the SAME dial_grid_372col_2026-05-29 parquet and an @cur372 row's dial numbers are BIT-EQUAL to its stored-era sibling's — a structural identity, not a current-extractor measurement. That grid was extracted 2026-05-29, AFTER the activity-map fix 2dab8f30 but BEFORE the geometry-only band layout 6af83b60, so its masked/IW block is from the thread-count-dependent era and a bake using f156-371 is dialled against extinct features",
-   "evidence": "benchmarks/eval372_current_root_2026-08-30.md §3a; benchmarks/eval_grids_2026-05-29.pointer.md; docs/DATASET_HISTORY.md §3.27",
+   "reason": "extends dial372-grid-thread-dependent-era-2026-08-30 (whose names scope lists only the stored-era halves) to the @cur372 halves: the dial grid is its own file (--dial-grid), OUTSIDE --features-root, so both eras of a re-verdict read the SAME dial_grid_372col_2026-05-29 parquet and an @cur372 row's dial numbers are BIT-EQUAL to its stored-era sibling's \u2014 a structural identity, not a current-extractor measurement. That grid was extracted 2026-05-29, AFTER the activity-map fix 2dab8f30 but BEFORE the geometry-only band layout 6af83b60, so its masked/IW block is from the thread-count-dependent era and a bake using f156-371 is dialled against extinct features",
+   "evidence": "benchmarks/eval372_current_root_2026-08-30.md \u00a73a; benchmarks/eval_grids_2026-05-29.pointer.md; docs/DATASET_HISTORY.md \u00a73.27",
    "date": "2026-08-30",
    "fix_path": "rebuild the 372 dial grid at HEAD (decode the bitstreams under /mnt/v/input/zensim/images first, then extract_features_372col --corpus pairs); registered, not executed"
   },
@@ -989,10 +989,10 @@
      "winner_dial_Ebothg_hfgain_winsor_dial"
     ]
    },
-   "reason": "MEASURED SCOPE CORRECTION to eval372-stored-root-thread-dependent-2026-08-30 / eval372-basic-only-bakes-era-independent-2026-08-30, which assume these board rows are reads of the 2026-05-15 372 root. They are NOT: each is stamped regime \"720\" and a fresh `bake_verdict --regime 720 --corpora cid22` reproduces its cid22 per-pair predictions BIT-EXACTLY (max|Δ| = 0.0 on 4,292 pairs for six of the seven; bhdr max|Δ| 4.9e-6), i.e. they were read on the ext720 root (/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_<corpus>.parquet). That root's masked/IW block is POST-FIX — its cid22 f156/f200/f300/f371 columns are element-identical to the 2026-08-30 372 root's — so these rows already agree with the current-extractor 372 read to ≤2e-4 on CID22 (v02_bvls_NO_shaping 3e-5, cl_tfm 7e-5, v47 9e-5, bhdr 1.9e-4, the three basic-only controls 6e-5..1e-4) and the era-stale flag on them is misdirected. The two board rows stamped regime \"372\" (b_sdr_linear_cid80_inclwinsor_dense_dial, T_appT_b372_lam1e-3) ARE true 2026-05-15-root reads — bit-exact against the round-4b _old.json — and their era flag stands. Nothing here changes round-4b's science: its era table compares _old vs _new from ONE instrument on the two 372 roots and never used a board row",
-   "evidence": "benchmarks/board_era_rows_2026-08-30.md §2 (per-row root attribution table, bit-exact reproductions); benchmarks/eval372_current_root_2026-08-30.md (the era table it corrects the board-row attribution for)",
+   "reason": "MEASURED SCOPE CORRECTION to eval372-stored-root-thread-dependent-2026-08-30 / eval372-basic-only-bakes-era-independent-2026-08-30, which assume these board rows are reads of the 2026-05-15 372 root. They are NOT: each is stamped regime \"720\" and a fresh `bake_verdict --regime 720 --corpora cid22` reproduces its cid22 per-pair predictions BIT-EXACTLY (max|\u0394| = 0.0 on 4,292 pairs for six of the seven; bhdr max|\u0394| 4.9e-6), i.e. they were read on the ext720 root (/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22/ext_<corpus>.parquet). That root's masked/IW block is POST-FIX \u2014 its cid22 f156/f200/f300/f371 columns are element-identical to the 2026-08-30 372 root's \u2014 so these rows already agree with the current-extractor 372 read to \u22642e-4 on CID22 (v02_bvls_NO_shaping 3e-5, cl_tfm 7e-5, v47 9e-5, bhdr 1.9e-4, the three basic-only controls 6e-5..1e-4) and the era-stale flag on them is misdirected. The two board rows stamped regime \"372\" (b_sdr_linear_cid80_inclwinsor_dense_dial, T_appT_b372_lam1e-3) ARE true 2026-05-15-root reads \u2014 bit-exact against the round-4b _old.json \u2014 and their era flag stands. Nothing here changes round-4b's science: its era table compares _old vs _new from ONE instrument on the two 372 roots and never used a board row",
+   "evidence": "benchmarks/board_era_rows_2026-08-30.md \u00a72 (per-row root attribution table, bit-exact reproductions); benchmarks/eval372_current_root_2026-08-30.md (the era table it corrects the board-row attribution for)",
    "date": "2026-08-30",
-   "fix_path": "re-verdict the seven at --regime 372 on the current root (their <name>@cur372 row already IS that read); the round-4b doc's §7 registry paragraph should gain this scope correction — flagged for that lane, not edited here"
+   "fix_path": "re-verdict the seven at --regime 372 on the current root (their <name>@cur372 row already IS that read); the round-4b doc's \u00a77 registry paragraph should gain this scope correction \u2014 flagged for that lane, not edited here"
   },
   {
    "id": "v1-372-era2-phantom-column-pooling",
@@ -1004,11 +1004,11 @@
     "manual": {
      "extractor": "buffered v1 (compute_zensim_with_config / compute_zensim_with_ref_and_config)",
      "predicate": "pyramid_plane_stride_era2(W) != W, i.e. W not a multiple of 16, OR W>=512 with (W_aligned/16) even",
-     "note": "per-ROW property of the image width, not a per-table property — tight-width rows are bit-identical across eras and do NOT change era"
+     "note": "per-ROW property of the image width, not a per-table property \u2014 tight-width rows are bit-identical across eras and do NOT change era"
     }
    },
    "reason": "era-2 v1 walked simd_padded_width(W) columns and POOLED the mirror-filled phantom columns, so every v1 feature at a non-tight width is a statistic over columns that are not in the image. MEASURED divergence vs the fold up to 81.6% relative on a pool slot (200x150) and 17.4% (127x93). simd_padded_width added +16 whenever the 16-aligned value was >=512 and an even multiple of 16, so 512/576/768/1024/1152/2304 are ALL in the divergent class.",
-   "evidence": "benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md §1 §7 §9; gate v1_372_bit_exact_to_fold_at_every_width; negative control: restoring era-2 padding fails ONLY the new non-tight golden",
+   "evidence": "benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md \u00a71 \u00a77 \u00a79; gate v1_372_bit_exact_to_fold_at_every_width; negative control: restoring era-2 padding fails ONLY the new non-tight golden",
    "date": "2026-08-30",
    "fix_path": "era-3 = option C (blur::pyramid_plane_stride returns the width; commit 56bbcda2). Re-extract affected 372 tables under era-3; the fold's 944 regimes are UNAFFECTED (its production path never calls the owner)."
   },
@@ -1024,7 +1024,7 @@
      "before": "2026-08-30"
     }
    },
-   "reason": "both fixtures are 64x64 and 96x96 — stride-invariant widths — so the golden set sat entirely in the TIGHT class and was STRUCTURALLY BLIND to the era-2 padded-width defect: it would have passed however wrong that class was. Their VALUES are unchanged by era-3 (re-verified, not re-pinned), which is itself the evidence.",
+   "reason": "both fixtures are 64x64 and 96x96 \u2014 stride-invariant widths \u2014 so the golden set sat entirely in the TIGHT class and was STRUCTURALLY BLIND to the era-2 padded-width defect: it would have passed however wrong that class was. Their VALUES are unchanged by era-3 (re-verified, not re-pinned), which is itself the evidence.",
    "evidence": "negative control 2026-08-30: reintroducing era-2 padding fails ONLY v1_nontight_fixture_matches_golden; synthetic + real both still pass",
    "date": "2026-08-30",
    "fix_path": "GOLDEN_NONTIGHT (200x150) added era-3; that geometry is the one that sees the class"
@@ -1041,8 +1041,8 @@
      "features_root": "/mnt/v/zen/zensim-training/2026-08-30-full-features-372"
     }
    },
-   "reason": "extracted with the era-2 buffered extractor (phantom-column pooling), one day before era-3 shipped. Every non-tight-width row in it is prior-era. The 2026-05-15 STORED root is prior-era for the same reason PLUS the §3.27 thread-count defect.",
-   "evidence": "docs/DATASET_HISTORY.md §3.30; commit 56bbcda2",
+   "reason": "extracted with the era-2 buffered extractor (phantom-column pooling), one day before era-3 shipped. Every non-tight-width row in it is prior-era. The 2026-05-15 STORED root is prior-era for the same reason PLUS the \u00a73.27 thread-count defect.",
+   "evidence": "docs/DATASET_HISTORY.md \u00a73.30; commit 56bbcda2",
    "date": "2026-08-30",
    "fix_path": "re-extract as a dated era-3 root; do NOT flip zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372 until the B-under-C delta is reviewed"
   },
@@ -1063,7 +1063,7 @@
     }
    },
    "reason": "the era-3 root re-extracted 8 corpora + kon504 under option C; these six are NOT re-extractable on this box and were COPIED from the era-2 root, so they carry era-2 (phantom-column-pooled) features inside an era-3 root. Read them as prior-era.",
-   "evidence": "_MANIFEST.json 'COPIED FROM THE OLD ROOT'; benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md §12.1",
+   "evidence": "_MANIFEST.json 'COPIED FROM THE OLD ROOT'; benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md \u00a712.1",
    "date": "2026-08-30",
    "fix_path": "re-extract on a box with the source corpora, then drop this annotation"
   },
@@ -1136,6 +1136,56 @@
     "rank.konjnd"
    ],
    "scope": {
+    "manual": {
+     "note": "the 17 board cells whose rank.konjnd was read on the diluted 1,008-ref file before 2026-08-31; ALL 17 WERE RE-SCORED on the JPEG-504 ruler that day and the machine scope moved to konjnd-372-diluted-ruler-repaired-2026-08-31, which badges them with what actually happened",
+     "cells": [
+      "ADD156_safesyn_only_raw_lasso@cur372",
+      "Ebothg_scr0_5_dial@cur372",
+      "T_appT_b372_lam1e-3",
+      "T_appT_b372_lam1e-3@cur372",
+      "b_sdr_linear_cid80_inclwinsor_dense_dial",
+      "b_sdr_linear_cid80_inclwinsor_dense_dial@cur372",
+      "bhdr_linear_shaped_cvvdpmix@cur372",
+      "cl_tfm_corruption_LQ_MLP_s13@cur372",
+      "mlp_2L_diverse_H128@cur372",
+      "peer_butteraugli",
+      "peer_cvvdp",
+      "peer_iwssim",
+      "peer_ssim2",
+      "v02_bvls_NO_shaping@cur372",
+      "v02_bvls_shaped@cur372",
+      "v47_strict_QAT_native@cur372",
+      "winner_dial_Ebothg_hfgain_winsor_dial@cur372"
+     ]
+    }
+   },
+   "reason": "ERA STEP: these 17 board cells' konjnd row was read on the DILUTED 1,008-ref file (konjnd_features_372col_2026-05-15.parquet, JPEG+BPG) because bake_verdict's 372 corpus map defaulted to it while the JPEG-504 ruler sat in the same directory; the default moved to konjnd_jpeg504_372_*.parquet on 2026-08-31, so every LATER 372-class konjnd number is on the 504 ruler and is NOT comparable to these. The choice inverts model ordering, it does not just shift it: same root/binary/code path, ADD156 0.4462 vs B 0.6497 on the diluted file (B by +0.204) becomes ADD156 0.5332 vs B 0.5194 on JPEG-504 (ADD156 by +0.014). The other 361 board cells (720/944-class, n=504) were ALREADY on the 504 ruler, so this fix makes the board internally consistent rather than moving it. The 4 peer_* reference metrics are in this list: cross-class comparisons against them were also on the diluted ruler. Historical record of the dilution itself: konjnd-372-full-file-dilution-2026-08-29.",
+   "evidence": "benchmarks/add156_ship_audit_2026-08-31.md D2; verified independently by re-running bake_verdict --corpora konjnd on both files with the pinned pre-fix binary and the post-fix binary (n 1008 -> 504); default pinned by tests::konjnd_default_ruler_is_jpeg504_not_the_diluted_file",
+   "date": "2026-08-31",
+   "fix_path": "DONE 2026-08-31 \u2014 all 17 re-scored on the JPEG-504 ruler and re-promoted (13 bakes by bake_verdict + promote_fulleval.py --reslice-rank konjnd; 4 peer_* rows by build_peer_fullevals.py's KonJND row filter). Record: benchmarks/board_regen_2026-08-31.md; superseding entry: konjnd-372-diluted-ruler-repaired-2026-08-31"
+  },
+  {
+   "id": "add156-audit-d3-unselectable-falsified-2026-08-31",
+   "kind": "invalidated",
+   "fields": [
+    "class"
+   ],
+   "scope": {
+    "all": true
+   },
+   "reason": "FALSIFIED: the ADD156 ship audit's defect D3 ('the registered selection rule cannot select ADD156 -- a model that is structurally unshortlistable cannot be selected as a profile', filed HIGH ship-blocking) is wrong about the mechanism AND the outcome. freeze_check compares `class` against \"944-ensemble\" and nothing else; \"era-bridge\" is tested nowhere, and selectability is `m3a != Unmeasured && n_pass > 0`, in which the class is not a term. MEASURED on the board fullevals: `freeze_check --select` ranks ADD156 FIRST and prints 'SELECTED: ADD156_safesyn_only_raw_lasso -- 6/8 floors, selection_composite 0.9644', ahead of shipped B at 0.9151 -- both stamped era-bridge. The audit's own 'NO' came from its ad-hoc fulleval missing m3a_coherence, a value that same audit measured at 0.9641 (27/27 GOLD) and never wrote into the JSON. The misleading half was real and is fixed: the class NOTE read 'context only -- regime-incomparable, never shortlisted', describing an exclusion the code never implemented; it now reads 'non-944 regime -- compare within class, not across; NOT an exclusion (selection reads floors + M3a)'. NO floor, bar or rule was relaxed -- there was nothing to relax.",
+   "evidence": "benchmarks/add156_ship_audit_2026-08-31.md D3 (the claim); falsified by source read of classify/m3a_state/run_select plus a live `freeze_check --select` on the board fullevals; pinned by tests::d3_era_bridge_class_is_a_label_not_an_exclusion, which asserts an era-bridge cell with a measured M3a and >=1 floor is SELECTABLE so nobody implements the exclusion later",
+   "date": "2026-08-31",
+   "fix_path": "none \u2014 permanent correction of the record; the class note is fixed in freeze_check"
+  },
+  {
+   "id": "konjnd-372-diluted-ruler-repaired-2026-08-31",
+   "kind": "annotated",
+   "fields": [
+    "rank.konjnd",
+    "composite"
+   ],
+   "scope": {
     "names": [
      "ADD156_safesyn_only_raw_lasso@cur372",
      "Ebothg_scr0_5_dial@cur372",
@@ -1156,24 +1206,334 @@
      "winner_dial_Ebothg_hfgain_winsor_dial@cur372"
     ]
    },
-   "reason": "ERA STEP: these 17 board cells' konjnd row was read on the DILUTED 1,008-ref file (konjnd_features_372col_2026-05-15.parquet, JPEG+BPG) because bake_verdict's 372 corpus map defaulted to it while the JPEG-504 ruler sat in the same directory; the default moved to konjnd_jpeg504_372_*.parquet on 2026-08-31, so every LATER 372-class konjnd number is on the 504 ruler and is NOT comparable to these. The choice inverts model ordering, it does not just shift it: same root/binary/code path, ADD156 0.4462 vs B 0.6497 on the diluted file (B by +0.204) becomes ADD156 0.5332 vs B 0.5194 on JPEG-504 (ADD156 by +0.014). The other 361 board cells (720/944-class, n=504) were ALREADY on the 504 ruler, so this fix makes the board internally consistent rather than moving it. The 4 peer_* reference metrics are in this list: cross-class comparisons against them were also on the diluted ruler. Historical record of the dilution itself: konjnd-372-full-file-dilution-2026-08-29.",
-   "evidence": "benchmarks/add156_ship_audit_2026-08-31.md D2; verified independently by re-running bake_verdict --corpora konjnd on both files with the pinned pre-fix binary and the post-fix binary (n 1008 -> 504); default pinned by tests::konjnd_default_ruler_is_jpeg504_not_the_diluted_file",
+   "reason": "REPAIRED, not suspect: these 17 cells' KonJND row was re-scored on 2026-08-31 on the JPEG-504 ruler (the D2 default fix, 6e508793) and re-promoted, so EVERY board cell now reads KonJND at n=504 and the column is internally comparable for the first time. Read the CURRENT number normally; the caveat is for COPIES \u2014 any KonJND value for these cells quoted from a doc, table or screenshot dated before 2026-08-31 is the diluted 1,008-ref number and is not comparable to anything else on the board. The pre-fix value is preserved per cell in rank_graft_sources.konjnd.superseded_srocc (bakes). The re-score moved the KonJND column hard, in both directions: v02_bvls_NO_shaping@cur372 0.7275 -> 0.3296 (board KonJND rank 1 -> 295), peer_iwssim 0.1859 -> 0.5704 (364 -> 7), shipped B@cur372 0.6497 -> 0.5194, ADD156@cur372 0.4462 -> 0.5332. `composite` is in scope because product_composite carries KonJND at weight 0.20/2.15, so it was carried from the same fresh verdict in the same write.",
+   "evidence": "benchmarks/board_regen_2026-08-31.md; fresh verdicts /mnt/v/output/zensim/board-konjnd504-2026-08-31/verdicts/ (bake_verdict at the post-fix binary, same bake sha + same features root per cell); every non-KonJND rank block reproduced the stored board value BIT-IDENTICALLY on 12 of 13 bakes (the 13th differs only in band structure), and the 11 @cur372 KonJND values agree to 0.0e+00 with round-4b's independent kon504 shim run",
    "date": "2026-08-31",
-   "fix_path": "re-run bake_verdict on the cell (the default now resolves to the JPEG-504 ruler via zensim_validate::eval_roots::KONJND_JPEG504_372_SLOTS) and re-promote; do NOT retro-edit the stored numbers"
+   "fix_path": "none \u2014 permanent provenance note; the numbers are correct as they stand"
   },
   {
-   "id": "add156-audit-d3-unselectable-falsified-2026-08-31",
+   "id": "composite-stale-after-rank-graft-2026-08-28",
    "kind": "invalidated",
    "fields": [
-    "class"
+    "composite"
    ],
    "scope": {
-    "all": true
+    "names": [
+     "ADD156_safesyn_only_raw_lasso",
+     "CS0p3_s2501",
+     "CS0p3_s2503",
+     "CS1_s2501",
+     "CS1_s2503",
+     "CS2_s2501",
+     "CS2_s2503",
+     "CS4_s2501",
+     "CS4_s2503",
+     "C_co1a_s1303",
+     "C_co1a_s1307",
+     "C_co1b_s1303",
+     "C_co1c_s1301",
+     "C_co2a_s1307",
+     "C_co2b_s1307",
+     "C_co3a_s1301",
+     "C_co3a_s1301_w4repro",
+     "C_co3a_s1303",
+     "C_co3a_s1307",
+     "C_co3a_s1307_packed",
+     "C_co3a_s1319",
+     "C_co3a_s1321",
+     "C_co3a_s1409",
+     "C_co3b_s1303",
+     "C_co4_s1301",
+     "C_co4_s1303",
+     "C_co4_s1307",
+     "C_em944_s31_packed",
+     "C_ensk2_s1301",
+     "C_ensk2_s1303",
+     "C_ensk2_s1307",
+     "C_ensk5_s1301",
+     "C_ensk5_s1303",
+     "C_ensk5_s1307",
+     "Ebothg_scr0_5_dial",
+     "HDR944_L1T1_s4003",
+     "HDR944_L1T1_s4004",
+     "HDR944_L1T1_s4005",
+     "HDR944_L1T2_s4003",
+     "HDR944_L1T2_s4004",
+     "HDR944_L1T2_s4005",
+     "H_co3abpg_s2501",
+     "H_co3abpg_s2503",
+     "H_co3abpg_s2507",
+     "H_co3abpg_s2507_packed",
+     "KFG25_s4101",
+     "KFG25_s4103",
+     "KFG75_s4101",
+     "KFG75_s4103",
+     "R1_CS0p3_s2501_packed",
+     "R1_CS0p3_s2503_packed",
+     "R1_CS1_s2501_packed",
+     "R1_CS1_s2503_packed",
+     "R1_CS2_s2501_packed",
+     "R1_CS2_s2503_packed",
+     "R1_CS4_s2501_packed",
+     "R1_CS4_s2503_packed",
+     "R1_GL0p3_s2503_packed",
+     "R1_GL1_s2503_packed",
+     "R1_GL2_s2503_packed",
+     "R1_PILOT1_s2501_packed",
+     "T_appT_c944m_lam5e-3",
+     "W10L0_s4001",
+     "W10L0_s4003",
+     "W10L0_s4007",
+     "W10L10_s4001",
+     "W10L10_s4003",
+     "W10L1_s4001",
+     "W10L1_s4003",
+     "W10L2_s4001",
+     "W10L2_s4003",
+     "W10L3_s4001",
+     "W10L3_s4003",
+     "W10L4_s4001",
+     "W10L4_s4003",
+     "W10L5_s4001",
+     "W10L5_s4003",
+     "W10L6_s4001",
+     "W10L6_s4003",
+     "W10L7_s4001",
+     "W10L7_s4003",
+     "W10L8_s4001",
+     "W10L8_s4003",
+     "W10L9_s4001",
+     "W10L9_s4003",
+     "W11_s4101",
+     "W11_s4103",
+     "W11_s4105",
+     "W11_s4107",
+     "W11_s4109",
+     "W11_s4111",
+     "W12_s4201",
+     "W12_s4203",
+     "W12_s4205",
+     "W12_s4207",
+     "W12_s4209",
+     "W12_s4211",
+     "W12hw_s4203",
+     "W8A_s3101",
+     "W8A_s3103",
+     "W8A_s3107",
+     "W8B_s3101",
+     "W8B_s3103",
+     "W8B_s3107",
+     "W8C_s3101",
+     "W8D_s3101",
+     "W9A_s3301",
+     "W9A_s3303",
+     "W9A_s3307",
+     "W9B_s3301",
+     "W9B_s3303",
+     "W9B_s3307",
+     "W9Bx_s3301",
+     "W9C_s3301",
+     "bhdr_linear_shaped_cvvdpmix",
+     "cl_tfm_corruption_LQ_MLP_s13",
+     "coherent924_selected",
+     "coherent_E1_s7",
+     "coherent_kw125_s42",
+     "foldMLP_bigcodec_KADIS_E_K5",
+     "foldcanon_KADIS_coherent",
+     "foldcanon_coherent",
+     "ideal_signedpow_p0p2",
+     "ideal_signedpow_p0p333",
+     "linear924_M5_lam2e-3",
+     "sota944_A_bvls_P_AM1_w",
+     "sota944_A_bvls_P_AM5_w",
+     "sota944_A_bvls_X_AM1_w",
+     "sota944_A_raw_X_AM5_lam1e-2_w",
+     "sota944_A_raw_X_AM5_lam1e-3_w",
+     "sota944_A_raw_X_AM5_lam3e-3_w",
+     "sota944_A_shaped_Bplus_AM1_lam1e-2_w",
+     "sota944_A_shaped_Bplus_AM1_lam1e-3_w",
+     "sota944_A_shaped_Bplus_AM1_lam3e-3_w",
+     "sota944_A_shaped_Bplus_AM2_lam1e-2_w",
+     "sota944_A_shaped_Bplus_AM2_lam1e-3_w",
+     "sota944_A_shaped_Bplus_AM2_lam3e-3_w",
+     "sota944_A_shaped_Bplus_AM5_lam1e-2_w",
+     "sota944_A_shaped_Bplus_AM5_lam1e-3_w",
+     "sota944_A_shaped_Bplus_AM5_lam3e-3_w",
+     "sota944_A_shaped_P_AM1_lam1e-2_w",
+     "sota944_A_shaped_P_AM1_lam1e-3_w",
+     "sota944_A_shaped_P_AM1_lam3e-3_w",
+     "sota944_A_shaped_P_AM2_lam1e-2_w",
+     "sota944_A_shaped_P_AM2_lam1e-3_w",
+     "sota944_A_shaped_P_AM2_lam3e-3_w",
+     "sota944_A_shaped_P_AM5_lam1.5e-3_w",
+     "sota944_A_shaped_P_AM5_lam1.8e-2_w",
+     "sota944_A_shaped_P_AM5_lam1e-2_w",
+     "sota944_A_shaped_P_AM5_lam1e-3_w",
+     "sota944_A_shaped_P_AM5_lam3e-3_w",
+     "sota944_A_shaped_P_AM5_lam5.4e-3_w",
+     "sota944_A_shaped_P_AM5_lam5e-3_w",
+     "sota944_A_shaped_X_AM1_lam1e-2_w",
+     "sota944_A_shaped_X_AM1_lam1e-3_w",
+     "sota944_A_shaped_X_AM1_lam3e-3_w",
+     "sota944_A_shaped_X_AM2_lam1.8e-2_w",
+     "sota944_A_shaped_X_AM2_lam1e-2_w",
+     "sota944_A_shaped_X_AM2_lam1e-3_w",
+     "sota944_A_shaped_X_AM2_lam3e-3_w",
+     "sota944_A_shaped_X_AM2_lam5e-3_w",
+     "sota944_A_shaped_X_AM5_lam1e-2_w",
+     "sota944_A_shaped_X_AM5_lam1e-3_w",
+     "sota944_A_shaped_X_AM5_lam3e-3_w",
+     "sota944_B2_addX_AM5hdr_lam3e-3_w",
+     "sota944_B2_blend_hdr_lam1e-3_a0.7_w",
+     "sota944_B2_blend_hdr_lam1e-3_a0.8_w",
+     "sota944_B2_blend_hdr_lam1e-3_a0.9_w",
+     "sota944_B2_blend_hdr_lam2e-3_a0.7_w",
+     "sota944_B2_blend_hdr_lam2e-3_a0.8_w",
+     "sota944_B2_blend_hdr_lam2e-3_a0.9_w",
+     "sota944_B2_blend_hdr_lam3e-3_a0.7_w",
+     "sota944_B2_blend_hdr_lam3e-3_a0.8_w",
+     "sota944_B2_blend_hdr_lam3e-3_a0.9_w",
+     "sota944_B2_cidhead_hdr_lam2e-3_w",
+     "sota944_B2_konhead_hdr_w",
+     "sota944_B_blend_lam1e-3_a0.7_w",
+     "sota944_B_blend_lam1e-3_a0.8_w",
+     "sota944_B_blend_lam1e-3_a0.9_w",
+     "sota944_B_blend_lam2e-3_a0.7_w",
+     "sota944_B_blend_lam2e-3_a0.8_w",
+     "sota944_B_blend_lam2e-3_a0.9_w",
+     "sota944_B_blend_lam3e-3_a0.7_w",
+     "sota944_B_blend_lam3e-3_a0.8_w",
+     "sota944_B_blend_lam3e-3_a0.9_w",
+     "sota944_B_cidhead_lam2e-3_w",
+     "sota944_B_konhead_w",
+     "sota944_C_co1a_s1301",
+     "sota944_C_co1b_s1301",
+     "sota944_C_co1b_s1307",
+     "sota944_C_co1c_s1303",
+     "sota944_C_co1c_s1307",
+     "sota944_C_co2a_s1301",
+     "sota944_C_co2a_s1303",
+     "sota944_C_co2b_s1301",
+     "sota944_C_co2b_s1303",
+     "sota944_C_co3a_s1327",
+     "sota944_C_co3a_s1361",
+     "sota944_C_co3a_s1367",
+     "sota944_C_co3a_s1373",
+     "sota944_C_co3a_s1381",
+     "sota944_C_co3a_s1399",
+     "sota944_C_co3b_s1301",
+     "sota944_C_co3b_s1307",
+     "sota944_C_em944_s101",
+     "sota944_C_em944_s11",
+     "sota944_C_em944_s127",
+     "sota944_C_em944_s13",
+     "sota944_C_em944_s17",
+     "sota944_C_em944_s19",
+     "sota944_C_em944_s199",
+     "sota944_C_em944_s23",
+     "sota944_C_em944_s256",
+     "sota944_C_em944_s29",
+     "sota944_C_em944_s3",
+     "sota944_C_em944_s31",
+     "sota944_C_em944_s37",
+     "sota944_C_em944_s42",
+     "sota944_C_em944_s43",
+     "sota944_C_em944_s5",
+     "sota944_C_em944_s512",
+     "sota944_C_em944_s53",
+     "sota944_C_em944_s61",
+     "sota944_C_em944_s7",
+     "sota944_C_em944_s71",
+     "sota944_C_em944_s79",
+     "sota944_C_em944_s99",
+     "sota944_C_nt944_s211",
+     "sota944_C_nt944_s227",
+     "sota944_C_nt944_s229",
+     "sota944_C_nt944_s233",
+     "sota944_C_nt944_s239",
+     "sota944_C_nt944lo_s211",
+     "sota944_C_nt944lo_s223",
+     "sota944_EM4_s42_on944root",
+     "sota944_EM4_s42_on944root_hfnl",
+     "sota944_FS_GL0p3_s2501",
+     "sota944_FS_GL0p3_s2503",
+     "sota944_FS_GL1_s2501",
+     "sota944_FS_GL1_s2503",
+     "sota944_FS_GL2_s2501",
+     "sota944_FS_GL2_s2503",
+     "sota944_FS_GL4_s2501",
+     "sota944_FS_GL4_s2503",
+     "sota944_FS_K128_s2501",
+     "sota944_FS_K128_s2503",
+     "sota944_FS_K256_s2501",
+     "sota944_FS_K256_s2503",
+     "sota944_FS_K512_s2501",
+     "sota944_FS_K512_s2503",
+     "sota944_FS_K64_s2501",
+     "sota944_FS_K64_s2503",
+     "sota944_FS_K667_s2501",
+     "sota944_FS_K667_s2503",
+     "sota944_FS_K944_s2501",
+     "sota944_FS_K944_s2503",
+     "sota944_FS_K944_s2507",
+     "sota944_FS_PILOT0_s2501",
+     "sota944_FS_PILOT0p01_s2501",
+     "sota944_FS_PILOT0p1_s2501",
+     "sota944_FS_PILOT0p3_s2501",
+     "sota944_FS_PILOT1_s2501",
+     "sota944_FS_PILOT4_s2501",
+     "sota944_Q_hdr944_s6101",
+     "sota944_Q_hdr944_s6103",
+     "sota944_Q_hdr944_s6107",
+     "sota944_Q_lin944_hdr",
+     "sota944_W11_s4101",
+     "sota944_W11_s4103",
+     "sota944_W11_s4107",
+     "sota944_W11_s4109",
+     "sota944_nt223",
+     "sota944_winner_A_bvls_X_AM5",
+     "v02_bvls_NO_shaping",
+     "v47_strict_QAT_native",
+     "winner_dial_Ebothg_hfgain_winsor_dial"
+    ]
    },
-   "reason": "FALSIFIED: the ADD156 ship audit's defect D3 ('the registered selection rule cannot select ADD156 -- a model that is structurally unshortlistable cannot be selected as a profile', filed HIGH ship-blocking) is wrong about the mechanism AND the outcome. freeze_check compares `class` against \"944-ensemble\" and nothing else; \"era-bridge\" is tested nowhere, and selectability is `m3a != Unmeasured && n_pass > 0`, in which the class is not a term. MEASURED on the board fullevals: `freeze_check --select` ranks ADD156 FIRST and prints 'SELECTED: ADD156_safesyn_only_raw_lasso -- 6/8 floors, selection_composite 0.9644', ahead of shipped B at 0.9151 -- both stamped era-bridge. The audit's own 'NO' came from its ad-hoc fulleval missing m3a_coherence, a value that same audit measured at 0.9641 (27/27 GOLD) and never wrote into the JSON. The misleading half was real and is fixed: the class NOTE read 'context only -- regime-incomparable, never shortlisted', describing an exclusion the code never implemented; it now reads 'non-944 regime -- compare within class, not across; NOT an exclusion (selection reads floors + M3a)'. NO floor, bar or rule was relaxed -- there was nothing to relax.",
-   "evidence": "benchmarks/add156_ship_audit_2026-08-31.md D3 (the claim); falsified by source read of classify/m3a_state/run_select plus a live `freeze_check --select` on the board fullevals; pinned by tests::d3_era_bridge_class_is_a_label_not_an_exclusion, which asserts an era-bridge cell with a measured M3a and >=1 floor is SELECTABLE so nobody implements the exclusion later",
+   "reason": "`composite` (the Rust product_composite) is a WEIGHTED FUNCTION of rank: CID22 1.00 + imazen26 0.50 + nonphoto 0.30 + KonJND 0.20 + AIC-3 0.10 + AIC-4 0.05, normalised by the present weights. The 2026-08-28 family-aware reslice replaced rank.imazen26 + rank.nonphoto (two of those six terms) on 276 board cells and did NOT update the stored composite, so each of these cells disagrees with its OWN rank blocks \u2014 measured 2026-08-31 across all 378 cells: 276 stale, |delta| up to 0.02370 (linear924_M5_lam2e-3), median 0.00170. That is the scoreboard's DEFAULT SORT KEY, so the composite column's ordering is not reliable for these cells. NOT affected: freeze_check's balanced_composite and --select, which recompute from rank rather than reading this field; and the 85 cells that were never resliced.",
+   "evidence": "measured over every board fulleval by recomputing the published product_composite weights from each cell's own rank blocks; per-cell table /mnt/v/output/zensim/board-konjnd504-2026-08-31/stale_composites.json. The 13 cells re-scored on 2026-08-31 are NOT in this list \u2014 promote_fulleval.py --reslice-rank now carries the verdict's composite in the same gated write (the fix), which also repaired T_appT_b372_lam1e-3's stale value (0.82340 -> 0.82545)",
    "date": "2026-08-31",
-   "fix_path": "none — permanent correction of the record; the class note is fixed in freeze_check"
+   "fix_path": "re-run the family-aware reslice grafts through the fixed promote_fulleval.py --reslice-rank (it now carries the verdict's composite), or re-promote each cell from a fresh verdict; do NOT hand-edit the field"
+  },
+  {
+   "id": "peer-cvvdp-nonstrict-json-2026-08-31",
+   "kind": "annotated",
+   "fields": [
+    "per_pair.imazen26",
+    "per_pair.nonphoto"
+   ],
+   "scope": {
+    "names": [
+     "peer_cvvdp"
+    ]
+   },
+   "reason": "peer_cvvdp.fulleval.json is the ONE board cell that is not valid strict JSON: 73 bare `NaN` tokens sit in the carried per_pair.imazen26 (43 of 5,000) + per_pair.nonphoto (30 of 5,000) arrays, written by the 2026-08-28 family-aware reslice graft. Python's json accepts NaN so the board renders normally, but serde_json does not, so `freeze_check --select` over a glob that includes this file ABORTS on it rather than skipping it. Peer rows are reference metrics, not selection candidates, so scoping --select to the non-peer cells is the correct read, not a workaround. The scalar rank stats for those two axes come from the same arrays and should be re-derived when the file is rebuilt.",
+   "evidence": "board_regen_2026-08-31.md; grep of all 378 board fullevals for bare NaN/Infinity finds exactly this one file, identically in the 2026-08-31 pre-change snapshot (not introduced by that day's peer rebuild, which carried the blocks through byte-identically)",
+   "date": "2026-08-31",
+   "fix_path": "the reslice owner drops non-finite pairs before writing per_pair (and re-derives rank.imazen26/nonphoto for peer_cvvdp on the finite subset)"
+  },
+  {
+   "id": "peer-konjnd-subset-n-resolved-2026-08-31",
+   "kind": "annotated",
+   "fields": [
+    "rank.konjnd"
+   ],
+   "scope": {
+    "manual": {
+     "note": "peer_ssim2 / peer_butteraugli / peer_cvvdp / peer_iwssim \u2014 the KonJND instance of peer-rank-cells-subset-n"
+    }
+   },
+   "reason": "peer-rank-cells-subset-n (2026-08-28) cites KonJND as its measured example: 'peers n=1008 vs candidates n=504'. That instance is RESOLVED as of 2026-08-31 \u2014 build_peer_fullevals.py now applies a KonJND row filter (dist_path contains /jpeg/) so the peer rows score the same JPEG-504 population as every candidate; the filtered subset was verified to BE that population (504 rows, pjnd bit-identical to the 504 parquet's human_score for every ref, max|delta| 0.0). The parent entry's general caveat still stands for OTHER axes whose peer pair sets differ.",
+   "evidence": "benchmarks/board_regen_2026-08-31.md; scripts/v_next/build_peer_fullevals.py ROW_FILTERS",
+   "date": "2026-08-31",
+   "fix_path": "none for KonJND (resolved); the other axes need an aligned-set rescore per the parent entry"
   }
  ]
 }
