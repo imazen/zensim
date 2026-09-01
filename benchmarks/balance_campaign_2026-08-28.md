@@ -5134,3 +5134,19 @@ Regenerated the board (`bandwise_dashboard.py --fulleval-dir ... --out summer_ga
 tables, 641 rows, 11 svgs, loop panel 11 models, failure panel 16 rows/345 findings, 1360
 registry-annotated cells). Still well over the registered 12 MB cap — the trim decision is
 still the user's, unchanged and untouched here, reported not acted on.
+
+### ROUND 48 addendum — origin `push-*` branch audit (2026-09-01)
+The wave-r4 board lane flagged a conflicted local bookmark; auditing it found **26 `push-*`
+branches on origin** (the `jj git push --change @-` failure-mode residue). Classified by
+`git merge-base --is-ancestor` against origin/main: **15 MERGED** (pure noise, safe to delete
+whenever) and **11 ORPHANS** — every one from the closed April–May V0_x era (V0_4 ssim2-holdout,
+V0_7 340k results, V_24/25 mix experiments incl. the EX-4 FALSIFIED record, ex-mix3 scaffolding,
+hybrid+NiN, balanced-tilt launchers, a v2-era repath fix). **No current-era work is stranded.**
+One provenance note: `push-znwzswtnrvqx` @ `5401f839` uniquely carries
+`zensim-bench/examples/extract_features_372col_zenpng.rs` (229 lines, absent from main) — the
+zenpng-decode extractor variant from the canonical-2026-05-21 LARGE rebuild, i.e. likely the tool
+that produced `cvvdp_iwssim_LARGE_372col.parquet`; main's own `extract_features_372col.rs`
+carries the pairstsv capability via its later lineage. Per the found-in-the-wild rule nothing was
+deleted — the branch list itself is the archive; deletion of the 15 merged ones is a user call.
+Local-only fix applied: `jj bookmark forget push-qqkqluuttltu` (stale conflicted tracking state;
+commits + remote untouched).
