@@ -4731,3 +4731,55 @@ carrying an ADD156 bake. Retrain **W-FAST-1 registered, not launched** (not requ
 trains on basic families only — but warranted, since every current bake was trained at era-1; it
 shares the blast-radius wave's re-extraction). Per-corpus deltas vs B and ssim2 are marked
 NOT-MEASURED-HERE / ATTACH from the frontier lane rather than estimated.
+
+## 2026-08-31 ~19:3xZ — ROUND 34: ADD156 SHIP AUDIT — the model is fine; the PRODUCT PATH and the INSTRUMENTS are not (`b4ddb927`, `f6ebb3b3`; doc `benchmarks/add156_ship_audit_2026-08-31.md`)
+
+**Verdict: ADD156 cannot ship as a fast profile today, and the reason is NOT the model.** It passes
+what the use case needs: **dial fully green and UNCOMPRESSED** (G-DYN **85.5** vs B's 86.1,
+monotonicity 98.5 %, zero dead-zone, **0 ladder inversions** on real zenjpeg ladders at 512 AND
+2048 px), identity exactly **100.000000**, buffered-vs-streaming agreeing to **0.000e0 at every
+point**, thread-invariant bit-exact at 1/4/8/16/32, **M3a 0.9641 / 27-of-27 GOLD with M2 = 1.0000**
+(structural — a single linear layer's gradient IS the model), packs to **837 B** rank-identical on
+all 14 corpora, and it is the most era-robust bake in the roster. The CID22 gap replicates at 0.0187.
+
+| battery | result |
+|---|---|
+| `freeze_check` §5 | 2 FAIL (CID22 0.8634 < 0.89 — **B fails too**; repro MISSING), 9 ATTACH |
+| balanced-2026-08-04 | **6/8 floors** (F1 CID22, F3 nonphoto fail) |
+| `bake_verdict` scorecard | G5 + G-IM26 fail (**B fails G-IM26 too**) |
+| DIAL / G-DYN | **all green** |
+| **G-RANGE** | **FAIL 4 of 8 corpora — NEW finding** |
+| M3a / block profile / product API / thread-invariance | PASS |
+| corruption head, HDR, loop map | **ABSENT / N-A**, not failed |
+
+**14 defects; the five that matter:**
+1. **D1 (BLOCKING) — there is no product path at all.** `ComputeSet` is `pub(crate)`,
+   **`from_block_profile` DOES NOT EXIST** (round 33 reported it as the one new function; it was
+   specified, not written), and `ZensimProfile::Custom` sits behind a non-default feature. **The
+   advertised 2.54× is unreachable by any caller.**
+2. **D2 (high) — `bake_verdict`'s default KonJND corpus is the DILUTED 1008-ref file** while the
+   correct JPEG-504 ruler sits in the same directory. **It inverts the headline**: ADD156 0.4462 vs
+   B 0.6497 on the default; **0.5332 vs 0.5194 on the right ruler.**
+3. **D3 (high)** — the registered selection rule stamps ADD156 *"era-bridge — never shortlisted"*:
+   structurally unselectable.
+4. **D4 (high)** — `bake_dial_refit pack` without `--neg-tail` **silently deletes the negative
+   tail** (p5 −12.43 → 0.0000, up to −0.021 SROCC on LIVE) **while the prune identity gate still
+   reports bit-identical**, because it only checks the network in-domain.
+5. **D7 (high)** — G-RANGE fails 4 of 8 corpora including **100 % of HF near-lossless above the top
+   knot** — the exact zone the profile is sold on (narrow [0.301, 0.968] domain,
+   `n_feature_bounds: 0`).
+Also: **D9** the builder's defaults return **0.000000 for every q from 10 to 100 with no error**
+(reproduced first try); **D10** three registry entries sit OUTSIDE `entries[]` so `freeze_check`
+silently drops them — **including the one documenting D2**; **D14** zenmetrics hard-codes
+`latest_preview()` everywhere, so **the fleet cannot score ADD156 at all**.
+
+**Corrections to published claims (mine included):** "beats B on within-image ranking on 7 of 8"
+replicates as **6 of 8** — though the substance is STRONGER than stated: **B ranks 21 % of HF
+near-lossless ladders backwards; ADD156 0 %.** AIC-4's ⛔INVERTED −0.9325 is a **CORPUS** property
+(shipped B reads −0.8906, also 100 % backwards, same root). Era-2 exposure separated for the first
+time: **the accumulation moves ADD156 by exactly zero; tiling by ≤0.0013 dial points** at 2048 px.
+Not measured, with reason: the campaign battery (G-OUT v2 / G-GRAN v2) is Python-owned and
+unreachable from `freeze_check` (`dial_range_gate.py` has a hardcoded `BAKES` dict needing a hand
+edit) — recorded as NOT RUN, never as passed. No gate, threshold, default or public API changed; no
+retrain run. Two API changes requested in the doc: promote `ComputeSet` + write
+`from_block_profile`, and a fast-profile variant.
