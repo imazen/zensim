@@ -31,6 +31,7 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
 import pyarrow.parquet as pq
 
 ROOT = Path("/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01")
@@ -81,50 +82,70 @@ def main() -> None:
         for row in csv.DictReader(f, delimiter="\t"):
             big_dists.append(row["dist_path"])
 
-    with open(BIG_CSV, newline="") as f:
-        rd = csv.reader(f)
-        hdr = next(rd)
-        big_rows = list(rd)
-    if len(big_rows) != len(big_dists):
-        die(f"big csv {len(big_rows)} != big pairs {len(big_dists)}")
-    fcols = [c for c in hdr if c.startswith("f")]
-    if len(fcols) != 944:
-        die(f"big csv has {len(fcols)} feature cols, expected 944")
-    fpos = {c: hdr.index(c) for c in fcols}
-    ref_cols = {c: tbl.column(c).to_pylist() for c in fcols}
-
+    # Which big-leg rows are the JPEG subset, and where each lands in the
+    # reference table. Established BEFORE reading the CSV so only those rows are
+    # ever materialised (196,086 x 946 as Python strings would be ~185M objects).
     pairs = [(k, ref_idx[d]) for k, d in enumerate(big_dists) if d in ref_idx]
     coverage = f"{len(pairs)}/{tbl.num_rows}"
     if len(pairs) != tbl.num_rows:
         die(f"JPEG-subset coverage {coverage} -- the 196k leg does not contain the 111k leg")
+    slot = {k: n for n, (k, _) in enumerate(pairs)}
+    ref_rows_idx = np.array([i for _, i in pairs], dtype=np.int64)
+    codecs = [big_dists[k].split("/")[-2] for k, _ in pairs]
+
+    with open(BIG_CSV, newline="") as f:
+        rd = csv.reader(f)
+        hdr = next(rd)
+        fcols = [c for c in hdr if c.startswith("f")]
+        if len(fcols) != 944:
+            die(f"big csv has {len(fcols)} feature cols, expected 944")
+        fpos = [hdr.index(c) for c in fcols]
+        A = np.empty((len(pairs), len(fcols)), dtype=np.float64)
+        seen = 0
+        for k, row in enumerate(rd):
+            seen += 1
+            n = slot.get(k)
+            if n is not None:
+                A[n] = [float(row[j]) for j in fpos]
+    if seen != len(big_dists):
+        die(f"big csv {seen} rows != big pairs {len(big_dists)}")
 
     max_abs = 0.0
     max_rel = 0.0
     max_abs_at = ""
     n_cells = 0
     n_diff = 0
-    n_rows_diff = 0
+    rows_diff_mask = np.zeros(len(pairs), dtype=bool)
+
+    # column-blocked so peak memory stays ~O(block * rows), not 944 * rows
+    BLOCK = 64
+    for start in range(0, len(fcols), BLOCK):
+        names = fcols[start : start + BLOCK]
+        b = np.column_stack(
+            [tbl.column(c).to_numpy(zero_copy_only=False)[ref_rows_idx] for c in names]
+        )
+        a = A[:, start : start + len(names)]
+        d = np.abs(a - b)
+        n_cells += d.size
+        nz = d != 0.0
+        n_diff += int(nz.sum())
+        rows_diff_mask |= nz.any(axis=1)
+        if nz.any():
+            fl = int(np.argmax(d))
+            r, c = divmod(fl, d.shape[1])
+            if d[r, c] > max_abs:
+                max_abs = float(d[r, c])
+                max_abs_at = f"{names[c]} codec={codecs[r]}"
+            s = np.maximum(np.abs(a), np.abs(b))
+            ok = s > 1e-12
+            if ok.any():
+                max_rel = max(max_rel, float((d[ok] / s[ok]).max()))
+
+    n_rows_diff = int(rows_diff_mask.sum())
     per_codec_diff: dict[str, int] = {}
-    for k, i in pairs:
-        row = big_rows[k]
-        codec = big_dists[k].split("/")[-2]
-        rowdiff = False
-        for c in fcols:
-            a = float(row[fpos[c]])
-            b = ref_cols[c][i]
-            n_cells += 1
-            d = abs(a - b)
-            if d != 0.0:
-                n_diff += 1
-                rowdiff = True
-                if d > max_abs:
-                    max_abs, max_abs_at = d, f"{c} codec={codec}"
-                s = max(abs(a), abs(b))
-                if s > 1e-12:
-                    max_rel = max(max_rel, d / s)
-        if rowdiff:
-            n_rows_diff += 1
-            per_codec_diff[codec] = per_codec_diff.get(codec, 0) + 1
+    for k, bad in zip(range(len(pairs)), rows_diff_mask):
+        if bad:
+            per_codec_diff[codecs[k]] = per_codec_diff.get(codecs[k], 0) + 1
 
     res = {
         "gate": "wave-r4 A6 JPEG-subset agreement (196k big leg vs 111k ext_safesyn_full)",

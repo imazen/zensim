@@ -180,6 +180,18 @@ implements its A1-A5/A9 candidates.
   its pre-rebuild board row reads `−0.8082`). `freeze_check --annotations` encodes the
   same split as `kadid-ext-root-inverted` (scope: the 188 pre-rebuild verdicts) vs
   `kadid-ext-root-corrected-2026-08-05`.
+  **⚠ THE PAIRS TSV WAS NEVER FIXED (found 2026-09-01, wave-r4).** The
+  2026-08-05 repair rebuilt the ext parquets in place and fixed
+  `build_fr_corpus_pairs.build_kadid()`, but
+  `/mnt/v/dataset/kadid10k/kadid_pairs_ab.tsv` — the artifact
+  `extract_944_canonical.sh` actually feeds to the extractor — still carries the
+  inverted orientation. A fresh extraction therefore copies the bug into a
+  brand-new root, past every gate that only inspects ext parquets. MEASURED on
+  the wave-r4 root: `ext_kadid` 10,125/10,125 rows exactly `1 − corrected`,
+  orientation gate −0.582360, while all fifteen other legs matched the corrected
+  era-1 root exactly. **Run `check_target_orientation.py --corpus kadid` on every
+  freshly-extracted KADID table before training on it**, until the TSV is fixed
+  at its owner.
   Builder fixed + `scripts/canonical_corpus/check_target_orientation.py`
   gates it; **the ext tables WERE rebuilt 2026-08-05 (campaign APPENDIX H part 1,
   `176c4268`)**: `human_score := 1 − human_score` at all three ext roots, gate now OK
