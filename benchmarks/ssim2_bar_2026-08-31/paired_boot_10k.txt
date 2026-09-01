@@ -1,0 +1,28 @@
+# 49 references, 4292 pairs, 10000 bootstrap resamples, seed 20260901
+ssim2	per_ref_mean=0.9613	median=0.9678	n=49
+B	per_ref_mean=0.9534	median=0.9682	n=49
+ADD156	per_ref_mean=0.9509	median=0.9624	n=49
+W10L9P	per_ref_mean=0.9578	median=0.9632	n=49
+W10L9PH	per_ref_mean=0.9585	median=0.9629	n=49
+
+# pooled CID22 SROCC (reference-clustered bootstrap)
+arm	pooled_srocc
+ssim2	0.8894
+B	0.8821
+ADD156	0.8634
+W10L9P	0.8901
+W10L9PH	0.8927
+
+candidate	pooled	ssim2	delta	CI95_lo	CI95_hi	P(cand>ssim2)
+B	0.8821	0.8894	-0.0073	-0.0215	+0.0087	0.175
+ADD156	0.8634	0.8894	-0.0256	-0.0426	-0.0077	0.003
+W10L9P	0.8901	0.8894	+0.0007	-0.0087	+0.0102	0.558
+W10L9PH	0.8927	0.8894	+0.0032	-0.0069	+0.0133	0.738
+
+# within-image (per-reference) paired bootstrap
+
+candidate	mean	ssim2	delta	CI95_lo	CI95_hi	P(cand>ssim2)
+B	0.9534	0.9613	-0.0079	-0.0144	-0.0019	0.004
+ADD156	0.9509	0.9613	-0.0104	-0.0161	-0.0051	0.000
+W10L9P	0.9578	0.9613	-0.0035	-0.0068	+0.0005	0.041
+W10L9PH	0.9585	0.9613	-0.0027	-0.0059	+0.0007	0.056

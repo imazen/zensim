@@ -164,6 +164,21 @@ struct Args {
     col_target: String,
     col_sigma: String,
     col_band: String,
+    /// `--per-group`: additionally summarize SROCC computed WITHIN each
+    /// `band` value — the canonical `zenstats::per_group_srocc`, i.e. the
+    /// exact quantity `bake_verdict` publishes as `rank.<corpus>.per_ref_mean`
+    /// / `per_ref_n` / `frac_negative`.
+    ///
+    /// Why this belongs here and not in a caller: a pooled SROCC conflates
+    /// "does the metric order this image's own quality ladder correctly?"
+    /// with "does it put different images on a common scale?", and the FIRST
+    /// is what a codec target loop consumes. `bake_verdict` can only answer
+    /// it for a BAKE against a feature parquet; a reference metric (ssim2,
+    /// butteraugli, cvvdp) has only a stored per-pair table, so its
+    /// within-image behaviour was structurally unmeasurable — which is why
+    /// every peer row on the board carries an empty `per_ref_mean`.
+    /// `--per-group` closes that with the same owner call, no new stat math.
+    per_group: bool,
     /// Hidden debug flag (used by the parity cross-check
     /// `scripts/verify_panel_parity.py`): instead of the panel, print
     /// the 4-param-logistic-rescaled `predicted` column (one value per
@@ -200,6 +215,7 @@ fn print_usage() {
          \x20\x20--col-target <NAME>     override the 'target' column name\n\
          \x20\x20--col-sigma <NAME>      override the 'sigma' column name\n\
          \x20\x20--col-band <NAME>       override the 'band' column name\n\
+         \x20\x20--per-group             + within-band SROCC summary (per_group_srocc)\n\
          \n\
          All statistics come from zensim_validate::panel (no stat math is\n\
          reimplemented here). See the module docs for the file:line map.\n\
@@ -216,6 +232,7 @@ fn parse_args() -> Result<Args, String> {
     let mut col_target = "target".to_string();
     let mut col_sigma = "sigma".to_string();
     let mut col_band = "band".to_string();
+    let mut per_group = false;
     let mut emit_rescaled = false;
 
     let mut it = std::env::args().skip(1);
@@ -244,6 +261,7 @@ fn parse_args() -> Result<Args, String> {
             "--col-target" => col_target = it.next().ok_or("--col-target requires a value")?,
             "--col-sigma" => col_sigma = it.next().ok_or("--col-sigma requires a value")?,
             "--col-band" => col_band = it.next().ok_or("--col-band requires a value")?,
+            "--per-group" => per_group = true,
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -271,6 +289,7 @@ fn parse_args() -> Result<Args, String> {
         col_target,
         col_sigma,
         col_band,
+        per_group,
         emit_rescaled,
     })
 }
@@ -1054,12 +1073,108 @@ fn main() -> ExitCode {
     let has_sigma = cols.sigma.is_some();
     let reports = build_reports(&cols);
 
+    // Within-band (per-reference) SROCC summary — the canonical owner call.
+    let per_group = if args.per_group {
+        let Some(bands) = &cols.band else {
+            eprintln!(
+                "panel: --per-group needs a grouping column; none found \
+                 (expected {:?}, override with --col-band)",
+                args.col_band
+            );
+            return ExitCode::from(2);
+        };
+        per_group_summary(&cols.predicted, &cols.target, bands)
+    } else {
+        None
+    };
+
     if args.json {
         print!("{}", render_json(&reports, has_sigma));
+        if let Some(g) = &per_group {
+            print!("{}", render_per_group_json(g));
+        }
     } else {
         print!("{}", render_text(&reports, has_sigma));
+        if args.per_group {
+            print!("{}", render_per_group_text(per_group.as_ref()));
+        }
     }
     ExitCode::SUCCESS
+}
+
+/// Within-group SROCC over string group labels — a thin adapter onto the
+/// canonical [`panel::per_group_srocc`], which is generic over `Copy` keys.
+///
+/// `Orientation::Auto` matches what `compute_panel`'s `.abs()` does pooled, so
+/// a group that disagrees with the pooled polarity still comes out NEGATIVE —
+/// which is the detection this stat exists for and the reason it must not be
+/// taken absolute per group.
+fn per_group_summary(
+    predicted: &[f64],
+    target: &[f64],
+    bands: &[String],
+) -> Option<panel::PerGroupSrocc> {
+    let n = predicted.len().min(target.len()).min(bands.len());
+    let mut ids: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut keys: Vec<usize> = Vec::with_capacity(n);
+    for b in bands.iter().take(n) {
+        let next = ids.len();
+        keys.push(*ids.entry(b.as_str()).or_insert(next));
+    }
+    panel::per_group_srocc(
+        &predicted[..n],
+        &target[..n],
+        &keys,
+        PER_GROUP_MIN_LEN,
+        panel::Orientation::Auto,
+    )
+}
+
+/// Minimum pairs in a group before its within-group SROCC means anything.
+/// 3 is the smallest n for which a rank correlation is not forced to ±1,
+/// and it is what `bake_verdict` uses for its `per_ref` rows.
+const PER_GROUP_MIN_LEN: usize = 3;
+
+fn render_per_group_text(g: Option<&panel::PerGroupSrocc>) -> String {
+    match g {
+        None => "\n# per-group SROCC: NOT MEASURED — no group cleared the \
+                 min-length / spread filters\n"
+            .to_string(),
+        Some(g) => format!(
+            "\n# within-group (per-reference) SROCC — zenstats::per_group_srocc, \
+             the same quantity bake_verdict publishes as per_ref_mean\n\
+             {:<24} {:>6} {:>8} {:>8} {:>10} {:>10}\n\
+             {:<24} {:>6} {:>8.4} {:>8.4} {:>10.4} {:>10.4}\n",
+            "stat",
+            "groups",
+            "mean",
+            "median",
+            "frac_neg",
+            "frac_perf",
+            "per_group",
+            g.n_groups,
+            g.mean,
+            g.median,
+            g.frac_negative,
+            g.frac_perfect
+        ),
+    }
+}
+
+fn render_per_group_json(g: &panel::PerGroupSrocc) -> String {
+    format!(
+        "{{\n  \"per_group\": {{\n\
+         \x20\x20\x20\x20\"n_groups\": {},\n\
+         \x20\x20\x20\x20\"mean\": {},\n\
+         \x20\x20\x20\x20\"median\": {},\n\
+         \x20\x20\x20\x20\"frac_negative\": {},\n\
+         \x20\x20\x20\x20\"frac_perfect\": {}\n  }}\n}}\n",
+        g.n_groups,
+        json_f(g.mean),
+        json_f(g.median),
+        json_f(g.frac_negative),
+        json_f(g.frac_perfect)
+    )
 }
 
 // ----------------------------------------------------------------------
@@ -1071,6 +1186,66 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole point of a per-GROUP stat: a group that ranks BACKWARDS must
+    /// come out negative and be counted, where a pooled `.abs()` would hide it.
+    #[test]
+    fn per_group_counts_a_backwards_group_as_negative() {
+        // two forward references, one exactly reversed.
+        let mut pred = Vec::new();
+        let mut targ = Vec::new();
+        let mut band = Vec::new();
+        for g in ["fwdA", "fwdB"] {
+            for i in 0..6 {
+                pred.push(i as f64);
+                targ.push(i as f64);
+                band.push(g.to_string());
+            }
+        }
+        for i in 0..6 {
+            pred.push(i as f64);
+            targ.push(-(i as f64));
+            band.push("backwards".to_string());
+        }
+        let g = per_group_summary(&pred, &targ, &band).expect("three groups");
+        assert_eq!(g.n_groups, 3);
+        assert!(
+            (g.frac_negative - 1.0 / 3.0).abs() < 1e-9,
+            "one of three groups is backwards, got frac_negative={}",
+            g.frac_negative
+        );
+        // mean = (1 + 1 - 1)/3; a pooled abs would have reported ~1.0.
+        assert!((g.mean - 1.0 / 3.0).abs() < 1e-9, "mean={}", g.mean);
+        assert!((g.median - 1.0).abs() < 1e-9, "median={}", g.median);
+    }
+
+    /// Groups shorter than `PER_GROUP_MIN_LEN`, and groups with no spread,
+    /// are dropped rather than contributing a forced ±1.
+    #[test]
+    fn per_group_drops_short_and_degenerate_groups() {
+        let mut pred = Vec::new();
+        let mut targ = Vec::new();
+        let mut band = Vec::new();
+        for i in 0..6 {
+            pred.push(i as f64);
+            targ.push(i as f64);
+            band.push("ok".to_string());
+        }
+        // 2 rows: below PER_GROUP_MIN_LEN
+        for i in 0..2 {
+            pred.push(i as f64);
+            targ.push(i as f64);
+            band.push("tooshort".to_string());
+        }
+        // 5 rows, constant target: no spread
+        for i in 0..5 {
+            pred.push(i as f64);
+            targ.push(7.0);
+            band.push("flat".to_string());
+        }
+        let g = per_group_summary(&pred, &targ, &band).expect("one usable group");
+        assert_eq!(g.n_groups, 1, "only the 6-row spread group is usable");
+    }
 
     #[test]
     fn report_group_drops_nonfinite() {

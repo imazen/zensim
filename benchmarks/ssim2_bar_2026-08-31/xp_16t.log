@@ -1,0 +1,88 @@
+[zenbench] calibration: int=0.19ns/iter mem_bw=89.6GiB/s mem_lat=9.0ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.19ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788242406-2251aa.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788242406-2251aa
+═══════════════════════════════════════════════════════════════
+
+  extract_paths_576  5 rounds × 1 calls ⚠ only 5 rounds
+                    mean ±mad ms  95% CI vs base       
+  ├─ buf_v1_228       2.0 ±0.3ms  [1.9–2.2]ms          
+  ├─ buf_v1_372       2.9 ±0.1ms  [+41.7%–+47.1%]       [1]
+  ├─ fold156_basic    3.3 ±0.4ms  [+44.0%–+75.3%]      
+  ├─ fold228_peaks    3.6 ±0.2ms  [+33.1%–+64.0%]       [2] [3]
+  ├─ fold372_full     3.3 ±0.3ms  [+43.4%–+76.8%]       [4]
+  ├─ fold944_off      8.0 ±0.5ms  [+262.9%–+327.3%]     [5]
+  ├─ fold944_full     8.1 ±1.1ms  [+257.2%–+329.4%]     [6]
+  ╰─ fast_ssim2      24.3 ±2.4ms  [+1014.1%–+1170.3%]   [7]
+
+  buf_v1_228     █████ 2.04ms
+  buf_v1_372     ███████ 2.95ms
+  fold156_basic  ███████ 3.26ms
+  fold372_full   ███████ 3.27ms
+  fold228_peaks  ████████ 3.57ms
+  fold944_off    ██████████████████ 8.03ms
+  fold944_full   ██████████████████ 8.10ms
+  fast_ssim2     ███████████████████████████████████████████████████████ 24.33ms
+  [1] drift r=-1.00 — later rounds faster
+  [2] drift r=0.80 — later rounds slower
+  [3] CV=34%
+  [4] drift r=0.80 — later rounds slower
+  [5] drift r=0.80 — later rounds slower
+  [6] drift r=-0.70 — later rounds faster
+  [7] drift r=-0.70 — later rounds faster
+
+  extract_paths_1152  5 rounds × 1 calls ⚠ only 5 rounds
+                    mean ±mad ms  95% CI vs base       
+  ├─ buf_v1_228       7.1 ±0.6ms  [6.4–8.0]ms          
+  ├─ buf_v1_372      10.8 ±3.0ms  [+27.4%–+75.4%]       [1] [2]
+  ├─ fold156_basic    9.5 ±0.9ms  [+13.5%–+53.8%]       [3]
+  ├─ fold228_peaks   10.9 ±0.7ms  [+44.8%–+60.3%]      
+  ├─ fold372_full    14.8 ±0.4ms  [+97.0%–+117.4%]     
+  ├─ fold944_off     26.6 ±0.6ms  [+249.9%–+293.2%]     [4]
+  ├─ fold944_full    33.2 ±4.4ms  [+333.6%–+365.8%]     [5]
+  ╰─ fast_ssim2      89.7 ±3.7ms  [+1110.2%–+1199.9%]  
+
+  buf_v1_228     ████ 7.14ms
+  fold156_basic  ██████ 9.47ms
+  buf_v1_372     ███████ 10.81ms
+  fold228_peaks  ███████ 10.86ms
+  fold372_full   █████████ 14.80ms
+  fold944_off    ████████████████ 26.56ms
+  fold944_full   ████████████████████ 33.20ms
+  fast_ssim2     ███████████████████████████████████████████████████████ 89.66ms
+  [1] drift r=0.90 — later rounds slower
+  [2] CV=28%
+  [3] drift r=-0.80 — later rounds faster
+  [4] drift r=-0.90 — later rounds faster
+  [5] drift r=0.60 — later rounds slower
+
+  extract_paths_2304  5 rounds × 1 calls ⚠ only 5 rounds
+                     mean ±mad ms  95% CI vs base       
+  ├─ buf_v1_228       23.0 ±1.5ms  [21.9–24.0]ms        
+  ├─ buf_v1_372       32.8 ±5.5ms  [+32.8%–+54.8%]      
+  ├─ fold156_basic   37.4 ±10.0ms  [+37.7%–+85.5%]       [1]
+  ├─ fold228_peaks    35.0 ±1.6ms  [+46.6%–+57.8%]       [2]
+  ├─ fold372_full     44.1 ±2.8ms  [+71.0%–+118.3%]      [3]
+  ├─ fold944_off     98.5 ±16.5ms  [+284.2%–+373.6%]    
+  ├─ fold944_full    122.8 ±6.7ms  [+394.4%–+478.7%]     [4]
+  ╰─ fast_ssim2      382.4 ±2.1ms  [+1580.2%–+1583.5%]   [5]
+
+  buf_v1_228     ███ 22.95ms
+  buf_v1_372     █████ 32.85ms
+  fold228_peaks  █████ 35.01ms
+  fold156_basic  █████ 37.35ms
+  fold372_full   ██████ 44.14ms
+  fold944_off    ██████████████ 98.45ms
+  fold944_full   █████████████████ 122.83ms
+  fast_ssim2     ██████████████████████████████████████████████████████ 382.40ms
+  [1] drift r=0.60 — later rounds slower
+  [2] drift r=-0.70 — later rounds faster
+  [3] drift r=0.60 — later rounds slower
+  [4] drift r=-0.60 — later rounds faster
+  [5] drift r=-1.00 — later rounds faster
+
+  total: 484.4s  (450 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json

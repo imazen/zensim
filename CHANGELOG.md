@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+
+### Added — the ssim2-replacement bar (2026-08-31)
+
+- **`bake_verdict --dial-peer-scores <label>=<tsv>`** — run the DIAL panel (and
+  its `ladder-inversion-2026-08-31` zones) on a REFERENCE METRIC. A reference
+  metric has no bake, so until now the dial panel could not be run on one at
+  all: the board's four peer rows carried a hand-rolled monotonicity their own
+  provenance calls "presentation-grade", with `tied_pct: null` and no zones,
+  and the concurrent failure-profile lane lists "bake_verdict does not run on a
+  reference metric" as a reason for non-measurement. Scores are read from the
+  exact shape `ZENSIM_DIAL_PRED_OUT` dumps, so the pair ROUND-TRIPS — dumping
+  `W10L9P_s4005_packed`'s own cells and reading them back reproduces its dial
+  section line for line (108 body lines; sole diff the wall-time footer). Every
+  downstream rule is unchanged (five-bucket split, 0.5-pt materiality, zone
+  cuts, ladder accounting) — that identity is the point. Refuses
+  `--full-json`/`--fulleval` so a peer dial can never land under a bake's name,
+  and refuses a partially covered grid. 3 unit tests.
+- **`panel --per-group`** — the canonical `zenstats::per_group_srocc` on any
+  table with a grouping column, i.e. the quantity `bake_verdict` publishes as
+  `rank.<corpus>.per_ref_mean` / `per_ref_n` / `frac_negative`, for tables that
+  have no bake. Reproduces `bake_verdict` exactly on CID22 / CSIQ / LIVE
+  (0.953412 / 0.932019 / 0.902374, n = 49 / 30 / 29). 2 unit tests.
+- **`fast_ssim2` arm in `zensim/benches/extract_paths_bench.rs`** (dev-dep) —
+  the speed opponent, interleaved with the seven zensim walk arms in ONE
+  zenbench group. Plus `zensim-bench/benches/ssim2_speed_bar.rs` +
+  `ssim2-rayon` feature to price fast-ssim2's optional threading.
+- `scripts/v_next/dial_peer_cells.py` (key normalisation only, no statistics).
+
+  **MEASURED, first head-to-head against SSIMULACRA2 in the project's history**
+  (`benchmarks/ssim2_replacement_bar_2026-08-31.md`): zensim is **faster at
+  every size and thread count** — at 576²/1T fast-ssim2 21.7 ms vs the 944 walk
+  18.3 (1.19×), the 372 fold 9.4 (2.31×), the basic fold 7.4 (2.93×); at 8T the
+  372 fold is 6.5×. On CID22, reference-clustered paired bootstrap (49 refs,
+  B=10,000): both 944 flagships **TIE** ssim2 pooled (+0.0032 / +0.0007, CIs
+  straddling 0) and within-image, while **shipped B is measurably WORSE
+  within-image (−0.0079, CI excludes 0)** and ADD156 is worse on both. CSIQ is
+  the one strict zensim win (+0.047, CI excludes 0). On ladder health
+  `W10L9P_s4005` beats ssim2 (mono 0.9947 vs 0.9930; 6 % vs 14 % of
+  near-lossless ladders carrying an inversion) while B and ADD156 lose and are
+  the only arms that END ladders backwards. HDR: shipped **BHdr beats ssim2's
+  integrated-PU path 0.7536 vs 0.7044** on UPIQ, while the frozen HDR
+  candidate-of-record loses to both. Also recorded: the board's stored CID22
+  `srocc_ci` is a PAIR bootstrap and **understates the reference-clustered
+  uncertainty by ~2×** (±0.006 vs ±0.010).
+
 ### Added
 - **Failure profiles — the board now says what a model gets WRONG and where that bites** (`benchmarks/failure_profiles_2026-08-31.md`, `benchmarks/failure_profiles_2026-08-31.pointer.md`). The gauntlet was a leaderboard; a reader choosing between two models could not see either one's flaws. Three parts. (1) **`bake_verdict` now splits ladder inversions by codec × quality zone and content class × zone** (`dial.zones`, scheme `ladder-inversion-2026-08-31`): the DIAL panel's five per-rung outcomes bucketed at `q<50` / `q50-85` / `q>=85`, plus the two ladder-level statements a codec loop actually meets — share of ladders carrying a material backwards rung, and share whose zone **endpoints** run backwards — plus the worst ladders **by reference image name**. Content classes are a recorded hand review of the 39 dial-grid references (`benchmarks/dial_grid_content_classes_2026-08-31.tsv`), deliberately not a classifier. The `all` rows re-derive the pooled G3 counters and the run **asserts** it (ADD156: 4,318 pairs / 65 inversions → `1−65/4318` = the stored `mono_pct` to the last digit). (2) **Measured board-wide** — 322 of 379 cells, 0 graft failures, every one of the 57 skips carrying a reason; `scripts/v_next/measure_dial_zones.py` never guesses the regime, it re-runs under every dial grid on disk and accepts only the run whose pooled dial block is **byte-identical** to the board's, and `promote_fulleval.py --graft-dial-zones` writes under the same gate. (3) **The "Failure profile" board panel** — per model, findings ranked by product impact in the form *what breaks / how big / where you meet it / evidence*, a sortable side-by-side comparison table, the named worst ladders, the honest inverse ("reliably good at"), and an explicit NOT MEASURED list with reasons. Nothing on the page is recomputed. **Results:** `q>=85` is where the board fails — median inversion rate 2.83 % against 0.76 %/0.79 % in the lower bands, and **189 of 322 models carry at least one ladder that ends backwards there**; avif is the worst codec (median 3.64 %, p90 14.03 %, 185 models with a backwards ladder) and webp nearly clean (median 0.00 %, 8). Shipped **B**'s worst single reversal at `q<50` is **30.2 dial points**; `Q7b_pools` has no backwards ladders but a **91.3-point** single step at `q>=85`. Board 19,946,713 → 20,696,597 B (+3.76 %); `gauntlet_gates.sh` PASS, and the render harness gained a failure-panel test that fails on a blank panel or on a NOT-MEASURED cell drawn as a zero (it caught a real crash pre-ship: `corruption.per_family` is a list on bake cells and an object on peer rows). (`926e8020`, `835cde0a`)
 - **`rank.*.frac_negative` surfaced as a first-class failure statistic.** It was on 374 of 379 board cells and on no panel: the share of whole **reference ladders** a model orders backwards — the criterion a per-image codec loop consumes. On the real 48-reference `hf_nearlossless` corpus (scored on only 13 board cells) shipped **B** ranks **20.8 %** of references backwards while `ADD156` ranks **0 %**, reproducing the ADD156 ship audit exactly — and two cells the audit never looked at, `mlp_2L_diverse_H128@cur372` and `winner_dial_Ebothg_hfgain_winsor_dial@cur372`, invert **~86 %** of references with a *negative* per-reference mean while publishing positive pooled SROCCs (0.299 / 0.587). That shape — healthy pooled number on top of an inverted per-image mean — is now a `blocker` row. On the larger `hfnlproxy` proxy (757 refs, 372 cells) the median is 14.9 % backwards with **208 cells above 10 %**; every other corpus reads 0.0 % median. (`835cde0a`)

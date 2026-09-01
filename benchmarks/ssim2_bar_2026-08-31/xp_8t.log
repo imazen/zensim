@@ -35,3 +35,53 @@
   [8] CV=38%
   [9] drift r=0.60 — later rounds slower
   [10] CV=51%
+
+  extract_paths_1152  5 rounds × 1 calls ⚠ only 5 rounds
+                    mean ±mad ms  95% CI vs base       
+  ├─ buf_v1_228       7.6 ±0.3ms  [7.2–8.0]ms          
+  ├─ buf_v1_372      10.6 ±0.8ms  [+32.6%–+40.8%]      
+  ├─ fold156_basic    8.6 ±1.2ms  [-4.7%–+9.9%]         [1] [2] [3]
+  ├─ fold228_peaks    8.8 ±0.6ms  [+3.1%–+27.9%]       
+  ├─ fold372_full    14.4 ±0.1ms  [+86.6%–+99.1%]       [4]
+  ├─ fold944_off     25.1 ±0.7ms  [+234.5%–+257.0%]    
+  ├─ fold944_full    31.1 ±0.5ms  [+299.3%–+321.5%]    
+  ╰─ fast_ssim2      93.0 ±0.6ms  [+1177.8%–+1185.5%]   [5]
+
+  buf_v1_228     ████ 7.58ms
+  fold156_basic  █████ 8.58ms
+  fold228_peaks  █████ 8.79ms
+  buf_v1_372     ██████ 10.65ms
+  fold372_full   ████████ 14.37ms
+  fold944_off    ███████████████ 25.10ms
+  fold944_full   ██████████████████ 31.12ms
+  fast_ssim2     ███████████████████████████████████████████████████████ 93.02ms
+  [1] CI crosses zero
+  [2] drift r=0.80 — later rounds slower
+  [3] CV=22%
+  [4] drift r=-0.80 — later rounds faster
+  [5] drift r=-1.00 — later rounds faster
+
+  extract_paths_2304  5 rounds × 1 calls ⚠ only 5 rounds
+                     mean ±mad ms  95% CI vs base       
+  ├─ buf_v1_228       31.6 ±5.2ms  [28.1–35.7]ms        
+  ├─ buf_v1_372       42.8 ±1.3ms  [+19.0%–+34.4%]      
+  ├─ fold156_basic    40.7 ±2.6ms  [+15.2%–+38.6%]      
+  ├─ fold228_peaks    44.9 ±6.0ms  [+24.2%–+59.9%]      
+  ├─ fold372_full     73.0 ±1.6ms  [+117.0%–+144.4%]    
+  ├─ fold944_off     118.7 ±3.8ms  [+262.8%–+287.3%]     [1]
+  ├─ fold944_full    139.4 ±6.2ms  [+319.2%–+361.1%]    
+  ╰─ fast_ssim2      386.7 ±4.6ms  [+1105.9%–+1138.6%]  
+
+  buf_v1_228     ████ 31.64ms
+  fold156_basic  ██████ 40.71ms
+  buf_v1_372     ██████ 42.81ms
+  fold228_peaks  ██████ 44.94ms
+  fold372_full   ██████████ 73.00ms
+  fold944_off    █████████████████ 118.66ms
+  fold944_full   ███████████████████ 139.43ms
+  fast_ssim2     ██████████████████████████████████████████████████████ 386.72ms
+  [1] drift r=0.80 — later rounds slower
+
+  total: 485.2s  (450 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json

@@ -27,8 +27,10 @@ done
 echo "## pass 2 — ssim2_speed_bar (opponent threading)"
 for FEAT in plain rayon; do
   if [ "$FEAT" = plain ]; then FL=(); else FL=(--features ssim2-rayon); fi
-  nice -n19 ionice -c3 cargo build --release --bench ssim2_speed_bar -p zensim-bench \
-    "${FL[@]}" >"$OUT/build_s2_${FEAT}.log" 2>&1 || { echo "build $FEAT FAILED"; continue; }
+  # zensim-bench is NOT a workspace member — build from its own directory.
+  ( cd "$ROOT/zensim-bench" && nice -n19 ionice -c3 cargo build --release \
+      --bench ssim2_speed_bar "${FL[@]}" ) >"$OUT/build_s2_${FEAT}.log" 2>&1 \
+    || { echo "build $FEAT FAILED"; continue; }
   for T in 1 8 16; do
     echo "=== ssim2_speed_bar[$FEAT] T=$T"
     RAYON_NUM_THREADS=$T ZEN_S2_ROUNDS=40 ZEN_S2_WALL_S="$WALL_S" \

@@ -1,0 +1,8 @@
+# ssim2_speed_bar: RAYON_NUM_THREADS=8 ssim2_rayon_feature=false
+[zenbench] calibration: int=0.36ns/iter mem_bw=88.9GiB/s mem_lat=11.9ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.30ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788243483-237483.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788243483-237483
+═══════════════════════════════════════════════════════════════
