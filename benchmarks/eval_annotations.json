@@ -1160,6 +1160,20 @@
    "evidence": "benchmarks/add156_ship_audit_2026-08-31.md D2; verified independently by re-running bake_verdict --corpora konjnd on both files with the pinned pre-fix binary and the post-fix binary (n 1008 -> 504); default pinned by tests::konjnd_default_ruler_is_jpeg504_not_the_diluted_file",
    "date": "2026-08-31",
    "fix_path": "re-run bake_verdict on the cell (the default now resolves to the JPEG-504 ruler via zensim_validate::eval_roots::KONJND_JPEG504_372_SLOTS) and re-promote; do NOT retro-edit the stored numbers"
+  },
+  {
+   "id": "add156-audit-d3-unselectable-falsified-2026-08-31",
+   "kind": "invalidated",
+   "fields": [
+    "class"
+   ],
+   "scope": {
+    "all": true
+   },
+   "reason": "FALSIFIED: the ADD156 ship audit's defect D3 ('the registered selection rule cannot select ADD156 -- a model that is structurally unshortlistable cannot be selected as a profile', filed HIGH ship-blocking) is wrong about the mechanism AND the outcome. freeze_check compares `class` against \"944-ensemble\" and nothing else; \"era-bridge\" is tested nowhere, and selectability is `m3a != Unmeasured && n_pass > 0`, in which the class is not a term. MEASURED on the board fullevals: `freeze_check --select` ranks ADD156 FIRST and prints 'SELECTED: ADD156_safesyn_only_raw_lasso -- 6/8 floors, selection_composite 0.9644', ahead of shipped B at 0.9151 -- both stamped era-bridge. The audit's own 'NO' came from its ad-hoc fulleval missing m3a_coherence, a value that same audit measured at 0.9641 (27/27 GOLD) and never wrote into the JSON. The misleading half was real and is fixed: the class NOTE read 'context only -- regime-incomparable, never shortlisted', describing an exclusion the code never implemented; it now reads 'non-944 regime -- compare within class, not across; NOT an exclusion (selection reads floors + M3a)'. NO floor, bar or rule was relaxed -- there was nothing to relax.",
+   "evidence": "benchmarks/add156_ship_audit_2026-08-31.md D3 (the claim); falsified by source read of classify/m3a_state/run_select plus a live `freeze_check --select` on the board fullevals; pinned by tests::d3_era_bridge_class_is_a_label_not_an_exclusion, which asserts an era-bridge cell with a measured M3a and >=1 floor is SELECTABLE so nobody implements the exclusion later",
+   "date": "2026-08-31",
+   "fix_path": "none — permanent correction of the record; the class note is fixed in freeze_check"
   }
  ]
 }

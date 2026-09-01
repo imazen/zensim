@@ -558,9 +558,30 @@ fn classify(v: &serde_json::Value) -> (&'static str, &'static str) {
         .or_else(|| f(v, &["model", "n_inputs"]))
         .map(|x| x as i64);
     if ni != Some(944) {
+        // NOTE TEXT CORRECTED 2026-08-31 (ADD156 ship audit, defect D3).
+        // It used to read "context only — regime-incomparable, never
+        // shortlisted", which describes an exclusion this code does not
+        // implement and never did: `class` is compared against
+        // `"944-ensemble"` and nothing else (see `m3a_state` and the
+        // `run_select` pool split), and selectability is
+        // `m3a != Unmeasured && n_pass > 0` — the class is not a term in it.
+        //
+        // The wording was not harmless. The audit read it as a structural
+        // block and filed "the registered selection rule cannot select
+        // ADD156" as a HIGH ship-blocker. MEASURED on the board fullevals:
+        // `--select` ranks ADD156 first and prints
+        // "SELECTED: ADD156_safesyn_only_raw_lasso — 6/8 floors,
+        // selection_composite 0.9644", ahead of shipped B (0.9151) — both
+        // stamped `era-bridge`. What produced the audit's "NO" was its own
+        // ad-hoc fulleval missing `m3a_coherence`, a value that same audit
+        // measured at 0.9641 (27/27 GOLD) and never wrote into the JSON.
+        //
+        // So the label says what it is — a regime pool for comparison — and
+        // does not claim a power it lacks.
         return (
             "era-bridge",
-            "context only — regime-incomparable, never shortlisted",
+            "non-944 regime — compare within class, not across; NOT an exclusion \
+             (selection reads floors + M3a)",
         );
     }
     if bake_name(v).starts_with("C_ensk") {
@@ -1117,7 +1138,7 @@ fn eval_balanced(v: &serde_json::Value, anns: &[AnnEntry]) -> BalancedReport {
 
 /// The three M3a states. They are DISTINCT, and none of them is zero — a
 /// missing measurement must never score as "perfectly incoherent".
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum M3aState {
     /// A number is present: rank normally.
     Measured(f64),
@@ -2519,6 +2540,63 @@ mod tests {
             sdr25: f(v, &["rank", "sdr25", "srocc"]).map(f64::abs),
             bake: None,
         }
+    }
+
+    /// **D3 (ADD156 ship audit, `benchmarks/add156_ship_audit_2026-08-31.md`).**
+    /// The audit filed "the registered selection rule cannot select ADD156 —
+    /// a model that is structurally unshortlistable cannot be selected as a
+    /// profile" as a HIGH ship-blocker, on the strength of the `era-bridge`
+    /// class note reading *"context only — regime-incomparable, never
+    /// shortlisted"*.
+    ///
+    /// **That is FALSIFIED.** `class` is compared against `"944-ensemble"`
+    /// and nothing else; `"era-bridge"` is tested nowhere. Selectability is
+    /// `m3a != Unmeasured && n_pass > 0` — the class is not a term. On the
+    /// board fullevals the rule does not merely permit ADD156, it SELECTS it
+    /// (selection_composite 0.9644) over shipped `B` (0.9151), both stamped
+    /// `era-bridge`. The audit's own "NO" came from its ad-hoc fulleval
+    /// missing `m3a_coherence` — a value it had measured at 0.9641.
+    ///
+    /// This test pins both halves so nobody "fixes" D3 by implementing the
+    /// exclusion the note used to describe.
+    #[test]
+    fn d3_era_bridge_class_is_a_label_not_an_exclusion() {
+        // An era-bridge-shaped cell: non-944 input width, M3a measured.
+        let mut v = passing_fixture();
+        merge(
+            &mut v,
+            // `classify` prefers a TOP-LEVEL `n_inputs`, so set both.
+            &json!({"name": "ERA_BRIDGE_CANDIDATE", "m3a_coherence": 0.95,
+                    "n_inputs": 372, "model": {"n_inputs": 372}}),
+        );
+        let r = select_row(&v);
+        assert_eq!(r.class, "era-bridge", "fixture must be in the class under test");
+
+        // The rule's own selectability predicate, verbatim from `run_select`.
+        let selectable = r.m3a != M3aState::Unmeasured && r.n_pass > 0;
+        assert!(
+            selectable,
+            "an era-bridge cell with a measured M3a and {} passing floors must be \
+             SELECTABLE — the class is not a term in the rule",
+            r.n_pass
+        );
+
+        // ...and the printed note must not claim otherwise.
+        let (_, note) = classify(&v);
+        assert!(
+            !note.contains("never shortlisted"),
+            "the class note claims an exclusion the code does not implement: {note}"
+        );
+        assert!(
+            note.contains("NOT an exclusion"),
+            "the note must say what the label actually is: {note}"
+        );
+
+        // The one class that IS special-cased stays special-cased.
+        let mut e = passing_fixture();
+        merge(&mut e, &json!({"model": {"kind": "ensemble"}}));
+        assert_eq!(select_row(&e).class, "944-ensemble");
+        assert_eq!(select_row(&e).m3a, M3aState::NotComputable);
     }
 
     /// PRIMARY is the floor count: a bake with a higher M3a but one fewer
