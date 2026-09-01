@@ -1,0 +1,21 @@
+{
+  "note": "Adjudication-study candidates. Each bake is pinned to the feature table its trainer actually read (the --regime 944 hazard: a 944 bake read at the wrong 944 regime returns a plausible number with no warning). Both tables are the bigcodec TRAIN view (tbig), keyed on encoded_filename.",
+  "candidates": [
+    {
+      "name": "W10L9PH_s4004",
+      "label": "944 flagship (candidate-of-record 2026-08-28)",
+      "bake": "/mnt/v/output/zensim/bakes/sdr-pure-2026-08-28/W10L9PH_s4004_packed.bin",
+      "feature_table": "/mnt/v/zen/zensim-training/sdr-pure-2026-08-28/tbig_944_200k_pure.parquet",
+      "regime": "folded720append2",
+      "n_features": 944
+    },
+    {
+      "name": "Q7b_pools",
+      "label": "W-LIN round-7b winner (Q7b_pools_g0.2_a0.2_b0.97)",
+      "bake": "/mnt/v/output/zensim/wlin7b-2026-08-30/arms/Q7b_pools_g0.2_a0.2_b0.97.bin",
+      "feature_table": "/mnt/v/zen/zensim-training/wlin7-pools944-2026-08-30/tbig_pools944.parquet",
+      "regime": "folded720append2pools",
+      "n_features": 944
+    }
+  ]
+}
