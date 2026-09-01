@@ -5,11 +5,17 @@
  * gauntlet_gates.sh, which the regen MUST run before shipping the HTML).
  *
  * Usage: node gauntlet_render_check.js <summer_gauntlet.html> [--dump-row <bake-name>]
+ *                                      [--dump-failures <bake-name>]
  *
  * `--dump-row` prints the RENDERED scoreboard row (header -> displayed cell text) for one
  * bake after the assertions pass. It exists so a reviewer can spot-check what the page
  * actually shows against the source verdict JSON without opening a browser — the numbers on
  * the board and the numbers in the verdict must be the same numbers.
+ *
+ * `--dump-failures` does the same for the Failure profile card: it prints the RENDERED
+ * finding rows (severity / what breaks / how big / where you meet it / evidence) plus the
+ * named worst ladders, the 'reliably good at' list and the NOT MEASURED list. Use it to
+ * check a failure sentence against the verdict it was formatted from.
  *
  * Why: the client JS lives inside a RAW Python string template in gauntlet.py. A raw
  * string turns \' into literal backslash+quote and one bad escape kills the entire
@@ -564,3 +570,30 @@ if (DATA) (function failurePanelTest() {
   console.log('failure panel OK: ' + (rows.length - 1) + ' rows (' + nMeasured
     + ' measured, ' + nNM + ' NOT MEASURED), ' + sevSpans.length + ' findings');
 })();
+
+// ------------------------------------------------------------- --dump-failures --------
+if (process.argv.includes('--dump-failures')) {
+  const want = process.argv[process.argv.indexOf('--dump-failures') + 1];
+  if (!want) { console.error('--dump-failures needs a bake name'); process.exit(2); }
+  const host = query('#failures');
+  if (!host) { console.error('--dump-failures: #failures panel not rendered'); process.exit(1); }
+  // find the card whose header <b> is exactly the bake name
+  let card = null;
+  (function walk(e) {
+    if (card || !e || !e.children) return;
+    if (e.tagName === 'B' && String(e.textContent || '').trim() === want) {
+      // the card is the grandparent of the header <b> (b -> header div -> card div)
+      card = e.parentNode && e.parentNode.parentNode;
+      return;
+    }
+    e.children.forEach(walk);
+  })(host);
+  if (!card) { console.error('--dump-failures: no failure card for ' + want); process.exit(1); }
+  console.log('--- rendered failure profile: ' + want + ' ---');
+  (card.children || []).forEach(sec => {
+    const t = deepText(sec).trim();
+    if (t) console.log(t.replace(/\s*(how big:)/g, '\n    $1')
+      .replace(/\s*(where you meet it:)/g, '\n    $1')
+      .replace(/\s*(evidence:)/g, '\n    $1') + '\n');
+  });
+}

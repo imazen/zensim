@@ -2563,8 +2563,10 @@ function failures(b){
              :'Ranks whole reference ladders backwards on '+c),
       pc(r.frac_negative)+' of '+r.per_ref_n+' references (within-image mean SROCC '
         +f3(r.per_ref_mean)+' vs pooled '+f3(rs(b,c))+')',
-      corpusWide?('a CORPUS-WIDE inversion — median 60% of aic4 references are backwards '
-        +'across 373 board cells, so this is not evidence about this model')
+      corpusWide?('a CORPUS-WIDE inversion, not evidence about this model: measured board-wide, '
+        +(c==='aic4'?'median 60% of aic4 references are backwards across 373 cells'
+                    :'median 20% of sdr25 references are backwards across 356 cells (sdr25 is a '
+                     +'subset of aic4)'))
         :(flipped?('a per-image tuning loop on '+situ(c)+' — and the scoreboard’s pooled '
           +f3(rs(b,c))+' does not show it')
         :('a per-image tuning loop on '+situ(c))),
@@ -2696,8 +2698,12 @@ function failures(b){
     'those SROCCs are integrity guards, not evidence of generalisation','rank.*.train_eq_val'));
   // ---- 11. registry annotations -------------------------------------------
   (b.annotations||[]).forEach(id=>{
-    bad.push(F('watch',11,'Registry annotation: '+annKind(id),annReason(id),
-      'a published number on this row is qualified or invalidated','eval_annotations.json '+id));
+    bad.push(F('watch',11,'Registry annotation: '+id,
+      annKind(id)==='invalidated'?'INVALIDATED — do not cite the affected number'
+        :(annKind(id)==='absent-not-failed'?'the field is absent because the instrument was not '
+          +'run here — absence is not a measured fail':'the number is real but must be read '
+          +'with the stated caveat'),
+      annReason(id),'eval_annotations.json '+id));
   });
   // ---- 12. reproducibility + root exposure --------------------------------
   if(!b.repro)bad.push(F('watch',12,'No reproduction provenance',

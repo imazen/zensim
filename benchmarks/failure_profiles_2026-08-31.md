@@ -417,7 +417,7 @@ the page only thresholds into severity and names the situation. Payload is the
 ~1.7 KB compact zone projection rather than the 9.4 KB verdict block (which
 would have added 3.0 MB), and `dial` is embedded with `zones` stripped.
 
-**Size:** 19,946,713 → 20,696,199 bytes (**+749,486, +3.76 %**), 19.02 → 19.74
+**Size:** 19,946,713 → 20,696,597 bytes (**+749,884, +3.76 %**), 19.02 → 19.74
 MiB. The documented cap is 12 MB and the board passed it long before this pass;
 if it must come down, the lever is the registered size rule — per-pair scatter
 is already curated-only, and dropping it for the *dominated* curated cells, or
