@@ -1627,7 +1627,7 @@
    "reason": "NAMED MISSING ARTIFACT: the 130 IPTC_* stimulus files of the 2024-06-28 JPEG-AIC IPTC study do not exist anywhere under /mnt/v (find -iname 'IPTC_*.png' -> 0 files), so its 51,870 responses over 1,050 triplets and 352 workers are unscoreable. Their naming and even-only dlevel pattern are consistent with the PTC stimuli at even levels but that identity is UNVERIFIED and was not assumed. Recovering them would grow the only native-scale, unboosted pairwise axis from 10,290 to 62,160 responses",
    "evidence": "benchmarks/hfhuman_2026-09-01.md SS2.7",
    "date": "2026-09-01",
-   "fix_path": "upstream request to aicdb.jpeg.org for the IPTC stimulus set; not a computation"
+   "fix_path": "RESOLVED 2026-09-01 by aic3-iptc-stimuli-recovered-2026-09-01 (doc APPENDIX A): no upstream request was possible or needed - the files were never separately published because the IPTC table IS the source paper's PTC experiment and its stimuli are the plain PTC_* crops already in PTC_images.zip. DO NOT CITE this entry's 'unscoreable' as current"
   },
   {
    "id": "jpeg-aic-btc-boosted-arm-dependence",
@@ -1643,7 +1643,35 @@
    "reason": "The AIC-3/SDR25 BTC stimuli are BOOSTED - 2x magnified and ~1.8x distortion-amplified renderings of a 310x400 CTC region (MEASURED: LS gain 1.64-1.88, MAE ratio 1.79-2.66, residual corr >= 0.81 over 125 cells). Scoring the DISPLAYED pixels and the NATIVE counterpart serves the IDENTICAL 504,960 responses over the IDENTICAL 3,960 triplets, and 14 of 36 (subset, scorer) verdicts vs peer_ssim2 FLIP between them - including the only strict win in the table (W10L9PH/W10L9P on the JPEG-AI leg: +0.0012 [+0.0002,+0.0025] native, -0.0029/-0.0055 displayed, both CIs excluding zero). Report a JPEG-AIC pairwise verdict WITH its arm, never bare; the arm-invariant facts are that nobody beats ssim2 under both readings, shipped B is behind under both, Q7b never loses on the pooled or cross-codec axis, and the 944 pair is the most reading-sensitive arm",
    "evidence": "benchmarks/hfhuman_2026-09-01.md SS2.4 + SS5.3a; /mnt/v/output/zensim/hfhuman-2026-09-01/arm_invariance.tsv",
    "date": "2026-09-01",
-   "fix_path": "none - a property of the BTC boosting design; recovering the IPTC stimuli would add an unboosted leg 6x the size of the only current one"
+   "fix_path": "PARTLY RESOLVED 2026-09-01 (doc APPENDIX A.5): the unboosted leg was built (iptc_native, 130 stimuli / 900 triplets / 35,044 responses) and the two NATIVE readings agree on 22 of 24 verdicts across two independent studies while native-vs-boosted flips 9 of 24 - so the reading-dependence is a property of the BOOSTED rendering, not of btc_native's crop-from-CTC-encode reconstruction. The caveat above stands: still report a JPEG-AIC pairwise verdict WITH its arm"
+  },
+  {
+   "id": "aic3-iptc-stimuli-recovered-2026-09-01",
+   "kind": "annotated",
+   "fields": [
+    "rank.aic3"
+   ],
+   "scope": {
+    "manual": "stimulus-identification record - documentation-only, applies to no fulleval cell"
+   },
+   "reason": "SUPERSEDES aic3-iptc-stimuli-not-reachable. The 130 IPTC_* stimuli are the plain PTC_* crops already shipped in test-images/PTC_images.zip; no separate archive was ever published (probed: dataset-BTC-PTC-24 has 0 releases/0 tags and never held a third archive, aicdb.jpeg.org 404s for IPTC_images.zip and PTC_images.zip, no registration/login/licence wall anywhere, CC BY 4.0). Basis: the DCC-2025 paper's PTC experiment used the same 620x800 crops 'left untouched' at levels 0,2,4,6,8,10 with 1,050 questions / 352 subjects / 494 batches, which the IPTC table matches exactly (the same three-count rule identifies the BTC table at 3,600/778/1,166). Gate G8: 130/130 names resolve 1:1 by IPTC_ -> PTC_, 0 disagreements in 155,610 filename-vs-field checks, level set exactly {0,2,4,6,8,10}. Four mis-mapped control arms make it falsifiable: level REVERSAL flips same_codec agreement to exactly the mirror value (acc_norm +0.9686 -> -0.9686) and image rotation collapses it to -0.7914. LIMIT, stated: the two ORDER-PRESERVING controls (level-shift, codec-rotation) are provably blind (+0.9136/+0.9177) because the AIC-3 ladders are JND-equalised by construction, so codec/level identity rests on the field checks and the paper, not on the behavioural test; and byte-identity of the PNGs the 2024 web app served is NOT claimed - the claim is the stimulus assignment",
+   "evidence": "benchmarks/hfhuman_2026-09-01.md APPENDIX A.1-A.3; 779a63d92fb419ecd3bafde0c448c31f40d5961c; /mnt/v/output/zensim/hfhuman-2026-09-01/iptc/{stimuli_manifest.json,pairwise_results_iptc.tsv}; /mnt/v/datasets/aic3-btc-ptc/_RECOVERY_2026-09-01.md",
+   "date": "2026-09-01",
+   "fix_path": "none - the identification is established; byte-level provenance of the served PNGs would need an author request (Uni Konstanz / EPFL) and would change no number"
+  },
+  {
+   "id": "hfhuman-ptc-native-add156-b-superseded",
+   "kind": "invalidated",
+   "fields": [
+    "rank.aic3"
+   ],
+   "scope": {
+    "manual": "doc-level pairwise number - documentation-only, applies to no fulleval cell"
+   },
+   "reason": "DO NOT CITE hfhuman SS5.4's ptc_native ADD156/B '+0.0051 [+0.0000,+0.0134], P=0.867' as evidence of anything. It was 45 stimuli / 180 triplets / 6,929 responses. On the recovered iptc_native leg - the same kind of native plain content at 5x the triplets (900) and 5x the responses (35,044) - the same two models read -0.0013 and -0.0017, sign REVERSED. SS5.4 already said nothing there reached significance; it is now measured as noise. Current native readings: nobody beats ssim2, best cell W10L9PH +0.0004 [-0.0007,+0.0015] P=0.755, and Q7b_pools takes a real LOSS on the pooled native_all arm (-0.0013 [-0.0027,-0.0000])",
+   "evidence": "benchmarks/hfhuman_2026-09-01.md APPENDIX A.4; /mnt/v/output/zensim/hfhuman-2026-09-01/iptc/pairwise_results_iptc.tsv",
+   "date": "2026-09-01",
+   "fix_path": "none - superseded by a larger measurement of the same quantity"
   }
  ]
 }

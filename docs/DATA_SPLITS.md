@@ -192,15 +192,26 @@ Two corrections to the rows above, both registered in
   (Appendix I); what is new is that the two axes carry **different**
   reconstructions of the same stimuli, differing by up to **1.79 JND**.
 
-**NOT-REACHABLE:** the 130 `IPTC_*` stimulus files (2024-06-28 IPTC study,
-51,870 responses) exist nowhere under `/mnt/v`
-(`aic3-iptc-stimuli-not-reachable`).
+**~~NOT-REACHABLE~~ RECOVERED 2026-09-01** (`aic3-iptc-stimuli-recovered-2026-09-01`,
+doc APPENDIX A): the 130 `IPTC_*` stimulus files were never a separate artifact
+— the `IPTC` response table is the source paper's **PTC** experiment and its
+stimuli are the plain `PTC_*` crops already in `test-images/PTC_images.zip`
+(gate **G8**: 130/130 name map, 0 disagreements in 155,610 filename-vs-field
+checks, level set exactly the published `{0,2,4,6,8,10}`, campaign shape
+1,050 / 352 / 494 = the paper's own PTC row). No upstream archive exists and
+none is needed; there is no licence or registration wall (CC BY 4.0). The
+superseded entry `aic3-iptc-stimuli-not-reachable` is kept and points here.
+**These 130 crops are HOLDOUT members like every other member of this family**
+— they always were, being the same `PTC_*` pixels the rule already covered.
 
-**EVAL axes built on it (2026-09-01, holdout-legal):** four arms over the
-515,250 scoreable responses — `ptc_native` / `btc_displayed` / `btc_native` /
-`aic4_all` — at all three live regimes, statistic
+**EVAL axes built on it (2026-09-01, holdout-legal):** six arms over the
+**567,120** scoreable responses — `ptc_native` / `btc_displayed` / `btc_native`
+/ `aic4_all`, plus (APPENDIX A) **`iptc_native`** (130 stimuli, 900 triplets,
+35,044 decided responses) and the pooled **`native_all`** (175 stimuli, 1,080
+triplets, 41,973) — at all three live regimes, statistic
 `panel --pairwise` = `zensim_validate::pairwise::agreement`. Artifacts
-`/mnt/v/output/zensim/hfhuman-2026-09-01/`.
+`/mnt/v/output/zensim/hfhuman-2026-09-01/` (+ `…/iptc/`). The unboosted,
+native-scale leg is now 62,160 raw judgments rather than 10,290.
 
 ### SSIMULACRA2's own data usage (for fair comparisons)
 
