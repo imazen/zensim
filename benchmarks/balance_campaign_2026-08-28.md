@@ -4783,3 +4783,52 @@ unreachable from `freeze_check` (`dial_range_gate.py` has a hardcoded `BAKES` di
 edit) — recorded as NOT RUN, never as passed. No gate, threshold, default or public API changed; no
 retrain run. Two API changes requested in the doc: promote `ComputeSet` + write
 `from_block_profile`, and a fast-profile variant.
+
+## 2026-08-31 ~20:4xZ — ROUND 35: the PRINCIPLED defects fixed (user directive) — and three audit findings did not survive contact with the code (`a2074bae..a188b0b3`, zenmetrics `e4bb566b`/`fc971815`)
+
+Every fix carries a **failing-first** test; nothing was relaxed.
+
+| # | outcome | failing-first test |
+|---|---|---|
+| **D9** silent 0.000000 | **FIXED** `5dd4d4e9` | `d9_spline_bake_without_skip_score_mapping_is_refused_not_silently_zeroed` — pre-fix panics *"returned Ok and score 0 — silent garbage instead of a diagnostic"* |
+| **D4** pack deletes the neg tail | **FIXED** `be6ba6c2` | `d4_flat_bottom_spline_deletes_the_negative_tail_and_is_now_caught` |
+| **D10** dropped registry entries | **FIXED** `cb76bd5c` | `d10_registry_findings_are_never_silently_dropped` (pre-migration registry panics, naming all 3 orphans) |
+| **D2** diluted KonJND ruler | **FIXED** `6e508793` | `konjnd_default_ruler_is_jpeg504_not_the_diluted_file` |
+| **D14** fleet cannot score a bake | **FIXED** (zenmetrics) | `cpu_umbrella_scores_a_runtime_selected_bake`, proven failing-first twice |
+| **D3** "never shortlisted" | **CLAIM FALSIFIED**; misleading note fixed `0753275a` | `d3_era_bridge_class_is_a_label_not_an_exclusion` |
+| **D7** OOD guard | **MEASURED — free half validated, costly half DECLINED** `7cb78395` | n/a (artifact lane) |
+
+**Three audit findings did not survive contact with the code:**
+- **D3 is FALSIFIED.** `class` is compared only against `"944-ensemble"`; `"era-bridge"` is tested
+  nowhere, and selectability is `m3a != Unmeasured && n_pass > 0`. Running `--select` over the board
+  fullevals prints **`SELECTED: ADD156_safesyn_only_raw_lasso — 6/8 floors, selection_composite
+  0.9644`, ahead of B at 0.9151** — both stamped `era-bridge`. The audit's "NO" came from **its own
+  fulleval omitting `m3a_coherence`** — the value its own §1.6 had measured at 0.9641. **ADD156 was
+  always selectable.**
+- **D10 is ~7× larger than filed**: beyond the 3 out-of-array findings, **19 of 42 entries had a
+  scope the matcher cannot evaluate**, so they matched zero cells ⇒ **22 of 45 findings were
+  invisible**.
+- **D7 understates and mis-names**: G-RANGE fails **8 of 14** corpora, not 4 of 8; and
+  `n_feature_bounds: 0` is NOT the difference from B — **B reports 0 too** (guards ride in
+  `feature_transforms`).
+
+**D2 blast radius, measured**: only **17 of 378** board cells read the diluted ruler; **361 already
+read n=504**, so the fix makes the board *internally consistent* rather than moving it. The 17 are
+enumerated by name in the new registry entry `konjnd-372-diluted-ruler-pre-2026-08-31` and include
+all four `peer_*` reference metrics. Nothing retro-edited. The memory note
+`feedback_konjnd_human_score_two_columns` is about column SEMANTICS and is unaffected (both rulers
+carry the same PJND scale, verified). `bake_compare` had the same defect and is fixed behind the
+same owner.
+**D4 reproduction safety**: the lane chose **refusal over flipping the default** so nothing changes
+silently — verified against the pinned pre-fix binary (`--neg-tail` → `879409d3…` identical to old
+`--neg-tail`; `--no-neg-tail` → `3f03a734…` identical to the old DEFAULT). **No committed artifact
+depended on the old default** — every byte-repro doc and all 16 `pack` call sites in `scripts/*.sh`
+already pass `--neg-tail`. The gate now prints `dial tail: ⚠ DELETED …` beside `PASS — BIT-identical`,
+which the old binary never did.
+**Left open**: **D1 untouched** (needs the user's API approval). **NEW defect, not fixed:** `pack`
+always refits the spline, so it **erases** a D7 spline extension, and `extend-top` after a pruned
+pack is structurally impossible ⇒ **no packed ADD156 can pass G-RANGE today — ship unpacked, as B
+does.** A spline BOTTOM extension has no owner (building it would make D7's remaining half free).
+G-RANGE over-counts on any bake whose bottom knot is the dial's zero. Pre-existing, not this lane's:
+three `blur.rs` ring tests panic `subtract with overflow` in DEBUG only (release green); a stale
+`push-qqkqluuttltu` bookmark conflict; zenmetrics#51.
