@@ -139,6 +139,14 @@ enough = { workspace = true }
 # jxl-encoder-family perceptual diffmap, for the RD block-selection comparison
 # (rd_block_selection example). Matches the version zenavif deploys.
 butteraugli = "0.9.3"
+# The OPPONENT in `benches/extract_paths_bench.rs`'s `fast_ssim2` arm — the
+# speed row of the ssim2-replacement exam wants ssim2 interleaved with the
+# zensim walks in ONE zenbench group, not measured in a separate process.
+# Dev-dep only: no effect on the published dependency graph. Default features
+# (no `rayon`) = what a consumer gets; the threaded variant is priced by
+# `zensim-bench`'s `ssim2_speed_bar` bench under its `ssim2-rayon` feature.
+fast-ssim2 = { version = "0.8.2", default-features = false, features = ["imgref"] }
+imgref = { workspace = true }
 image = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"

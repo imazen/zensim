@@ -342,10 +342,7 @@ fn root_declared_regime(root: &Path) -> Option<String> {
 /// Both `render_corpus` and the load/validate path resolve through here, so
 /// the two cannot drift (they previously carried a "keep these two in sync"
 /// comment and an inlined `corpus.filename`).
-fn resolve_372_slot(
-    corpus: &Corpus,
-    root: &Path,
-) -> zensim_validate::eval_roots::ResolvedSlot {
+fn resolve_372_slot(corpus: &Corpus, root: &Path) -> zensim_validate::eval_roots::ResolvedSlot {
     resolve_slot(corpus.preferred_slots, corpus.filename, root)
 }
 
@@ -373,7 +370,10 @@ fn ruler_lines(corpora: &[&Corpus], root: &Path) -> Vec<String> {
                     root.display()
                 )
             } else {
-                format!("bake_verdict: corpus ruler — {} read on `{}`", c.display, r.file)
+                format!(
+                    "bake_verdict: corpus ruler — {} read on `{}`",
+                    c.display, r.file
+                )
             }
         })
         .collect()
@@ -743,6 +743,27 @@ struct Args {
     /// canonical grid; the section auto-runs when the file is present and
     /// the feature count matches the bake, else skips silently.
     corruption_grid: PathBuf,
+    /// `--dial-peer-scores <label>=<tsv>`: run the DIAL panel (and its
+    /// ladder-inversion zones) on EXTERNALLY SUPPLIED per-cell scores
+    /// instead of the bake's forward. The TSV is the exact shape
+    /// `ZENSIM_DIAL_PRED_OUT` dumps — `image_id\tcodec\tq\tpred` — so the
+    /// dump/read pair round-trips, which is how the mode is gated.
+    ///
+    /// Why it exists: a REFERENCE METRIC (ssim2, butteraugli, cvvdp) has no
+    /// bake, so before this the dial panel could not be run on one at all and
+    /// the board's peer rows carried a hand-rolled, self-described
+    /// "presentation-grade" monotonicity with `tied_pct: null` and no zones.
+    /// "Is zensim's dial more monotone than ssim2's?" is a first-order
+    /// product question and it had no owner-computed answer. This makes the
+    /// opponent measurable on the SAME instrument as every bake — same
+    /// five-bucket rule, same materiality threshold, same zone cuts —
+    /// which is the only way the comparison means anything.
+    ///
+    /// The rank panel still describes `--bake`; only the DIAL section
+    /// changes. Every rendering of that section is stamped with the peer
+    /// label, and `--full-json` / `--fulleval` are REFUSED in this mode so a
+    /// peer dial can never be written into a bake's board row.
+    dial_peer_scores: Option<(String, PathBuf)>,
     /// `--corruption-head <bake.bin>`: companion corruption-head bake — the
     /// shipping design's corruption owner (at 924 the dial's own ordering is
     /// broken by design, distributional; the head trained on negrich carries
@@ -850,6 +871,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             )
         });
     let mut corruption_head: Option<PathBuf> = None;
+    let mut dial_peer_scores: Option<(String, PathBuf)> = None;
     let mut features_root: PathBuf = PathBuf::from(DEFAULT_FEATURES_ROOT_372);
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
@@ -906,6 +928,18 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 let v = args.next().ok_or("--dial-grid requires <path>")?;
                 dial_grid = PathBuf::from(v);
                 dial_grid_set = true;
+            }
+            "--dial-peer-scores" => {
+                let v = args
+                    .next()
+                    .ok_or("--dial-peer-scores requires <label>=<path>")?;
+                let (label, path) = v
+                    .split_once('=')
+                    .ok_or("--dial-peer-scores must be <label>=<path>")?;
+                if label.trim().is_empty() {
+                    return Err("--dial-peer-scores label must be non-empty".into());
+                }
+                dial_peer_scores = Some((label.to_string(), PathBuf::from(path)));
             }
             "--per-pair-output" => {
                 let v = args.next().ok_or("--per-pair-output requires <path>")?;
@@ -1055,6 +1089,17 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             );
         }
     }
+    // A peer dial belongs to the peer, not to `--bake`. Writing it into a
+    // fulleval JSON would put another metric's dial under a bake's name on
+    // the board — refuse rather than trust a convention.
+    if dial_peer_scores.is_some() && (full_json.is_some() || fulleval.is_some()) {
+        return Err(
+            "--dial-peer-scores cannot be combined with --full-json/--fulleval: the DIAL \
+             block would describe the peer while every other block describes --bake. Read \
+             the peer dial from the markdown report (--output) instead."
+                .into(),
+        );
+    }
     Ok(Args {
         bake,
         ensemble,
@@ -1072,6 +1117,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         compare,
         corruption_grid,
         corruption_head,
+        dial_peer_scores,
         full_json,
         fulleval,
         name,
@@ -1639,7 +1685,90 @@ impl DialMetrics {
     };
 }
 
-fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
+/// Read an external per-cell dial score table (`image_id\tcodec\tq\tpred`,
+/// the shape `ZENSIM_DIAL_PRED_OUT` writes) and align it to `grid` row order.
+///
+/// The join key is `(image_id, codec, round(q, 4))`. `q` is rounded because
+/// the grid stores it as f32-widened f64 for some codecs while a TSV carries
+/// the decimal text — the JXL ladder's q-equivalent `100 − 4·distance` is the
+/// case that needs it. Fails LOUD on any unmatched grid row rather than
+/// scoring a partial grid: a dial panel over a subset of ladders is a
+/// different measurement, not a smaller one.
+fn load_peer_dial_scores(path: &Path, grid: &parquet_loader::DialGrid) -> Result<Vec<f64>, String> {
+    let txt = std::fs::read_to_string(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let mut lut: std::collections::HashMap<(String, String, i64), f64> =
+        std::collections::HashMap::new();
+    let key = |img: &str, codec: &str, q: f64| -> (String, String, i64) {
+        (
+            img.to_string(),
+            codec.to_string(),
+            (q * 10_000.0).round() as i64,
+        )
+    };
+    let mut lines = txt.lines();
+    let header = lines.next().ok_or_else(|| format!("{path:?}: empty"))?;
+    let cols: Vec<&str> = header.split('\t').collect();
+    let ci = |n: &str| cols.iter().position(|c| c.trim() == n);
+    let (i_img, i_codec, i_q, i_pred) = (
+        ci("image_id").ok_or_else(|| format!("{path:?}: missing image_id column"))?,
+        ci("codec").ok_or_else(|| format!("{path:?}: missing codec column"))?,
+        ci("q").ok_or_else(|| format!("{path:?}: missing q column"))?,
+        ci("pred").ok_or_else(|| format!("{path:?}: missing pred column"))?,
+    );
+    let mut n_rows = 0usize;
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() <= i_pred.max(i_q).max(i_codec).max(i_img) {
+            return Err(format!("{path:?}: short row {line:?}"));
+        }
+        let q: f64 = f[i_q]
+            .trim()
+            .parse()
+            .map_err(|_| format!("{path:?}: bad q {:?}", f[i_q]))?;
+        let v: f64 = f[i_pred]
+            .trim()
+            .parse()
+            .map_err(|_| format!("{path:?}: bad pred {:?}", f[i_pred]))?;
+        lut.insert(key(f[i_img].trim(), f[i_codec].trim(), q), v);
+        n_rows += 1;
+    }
+    let mut out = Vec::with_capacity(grid.image_id.len());
+    let mut missing: Vec<String> = Vec::new();
+    for i in 0..grid.image_id.len() {
+        match lut.get(&key(&grid.image_id[i], &grid.codec[i], grid.q[i])) {
+            Some(&v) => out.push(v),
+            None => {
+                if missing.len() < 5 {
+                    missing.push(format!(
+                        "({}, {}, {})",
+                        grid.image_id[i], grid.codec[i], grid.q[i]
+                    ));
+                }
+                out.push(f64::NAN);
+            }
+        }
+    }
+    let n_missing = out.iter().filter(|v| v.is_nan()).count();
+    if n_missing > 0 {
+        return Err(format!(
+            "{path:?}: {n_missing} of {} grid rows have no score (table had {n_rows} rows). \
+             First unmatched: {}. A dial panel over a subset of ladders is a DIFFERENT \
+             measurement — refusing rather than reporting one.",
+            grid.image_id.len(),
+            missing.join(", ")
+        ));
+    }
+    Ok(out)
+}
+
+fn dial_panel(
+    ens: &Ensemble,
+    grid_path: &Path,
+    peer: Option<&(String, PathBuf)>,
+) -> (String, DialMetrics) {
     if !grid_path.exists() {
         return (
             format!(
@@ -1666,9 +1795,26 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
     };
 
     dt.mark("dial grid parquet load");
-    // Score every grid row through the SAME dispatch path render_corpus uses.
-    let scores: Vec<f64> = ens.score_rows(&grid.feature_rows);
-    dt.mark("dial MLP forward (score_rows)");
+    // Score every grid row through the SAME dispatch path render_corpus uses —
+    // UNLESS a peer score table was supplied, in which case the scores come
+    // from it and everything downstream (buckets, gates, zones) is identical.
+    // That identity is the point: it is what makes an external metric's dial
+    // comparable to a bake's.
+    let scores: Vec<f64> = match peer {
+        None => ens.score_rows(&grid.feature_rows),
+        Some((label, path)) => match load_peer_dial_scores(path, &grid) {
+            Ok(v) => v,
+            Err(e) => {
+                return (
+                    format!(
+                        "\n## DIAL panel — ⚠ FAILED to load peer scores (`{label}`)\n\n`{e}`\n"
+                    ),
+                    DialMetrics::NAN,
+                );
+            }
+        },
+    };
+    dt.mark("dial forward (score_rows / peer table)");
 
     // Optional per-cell prediction dump for external joins against
     // reference-metric sidecars (zone-consistency / HQ-zone instruments).
@@ -2063,7 +2209,20 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
     let g3 = soft_gate(mono, 0.90, 0.93).min(soft_gate(flat, 0.10, 0.05));
 
     let mut s = String::new();
-    s.push_str("\n## DIAL panel (codec-target G1/G3 — densified multi-codec q-sweep)\n\n");
+    match peer {
+        None => s.push_str(
+            "\n## DIAL panel (codec-target G1/G3 — densified multi-codec q-sweep)\n\n",
+        ),
+        Some((label, path)) => s.push_str(&format!(
+            "\n## DIAL panel — **PEER `{label}`** (codec-target G1/G3 — densified multi-codec q-sweep)\n\n\
+             > ⚠ **These dial numbers describe `{label}`, NOT the `--bake` this report's RANK \
+             panel describes.** Per-cell scores were read from `{}` and every downstream rule \
+             (five-bucket split, {MATERIAL_INV_PT}-pt materiality, zone cuts, ladder accounting) is \
+             the one every bake takes — that identity is the whole point of the mode. \
+             `--full-json`/`--fulleval` are refused here so this can never reach a board row.\n\n",
+            path.display()
+        )),
+    }
     s.push_str(&format!(
         "Grid: `{}` — {} rows, {} curves across {} codec families.\n\n",
         grid_path.display(),
@@ -2175,7 +2334,9 @@ fn dial_panel(ens: &Ensemble, grid_path: &Path) -> (String, DialMetrics) {
     // class x quality zone. The pooled `inversions` row above is one number for
     // a codec loop; this is the number for the loop the reader is actually
     // running, at the quality it is running at.
-    s.push_str("\nLadder inversions by quality zone (rung pairs keyed on the pair's q midpoint):\n\n");
+    s.push_str(
+        "\nLadder inversions by quality zone (rung pairs keyed on the pair's q midpoint):\n\n",
+    );
     s.push_str(
         "| split | key | zone | rung pairs | inversions | inv rate | worst step | flat | ladders | ≥1 inv | ends backwards |\n",
     );
@@ -2709,7 +2870,10 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 /// features root and nothing else (the dial grid keeps its own provenance row
 /// in the markdown header, and its era caveat is registry-tracked as
 /// `dial372-grid-thread-dependent-era-2026-08-30`).
-fn features_root_block(root: &Path, corpus_prov: &[(String, PathBuf, String, u64)]) -> serde_json::Value {
+fn features_root_block(
+    root: &Path,
+    corpus_prov: &[(String, PathBuf, String, u64)],
+) -> serde_json::Value {
     let manifest = root.join("_MANIFEST.json");
     let manifest_sha = zensim_validate::train_manifest::sha256_file(&manifest).ok();
     let files: Vec<serde_json::Value> = corpus_prov
@@ -3455,7 +3619,7 @@ Run the dedicated q-sweep harness for those._\n",
     // ── DIAL panel (codec-target G1/G3) — runs every time, native Rust ──
     // The second mandatory half of the eval (docs/EVAL_PANEL_REQUIREMENT.md):
     // monotonicity + tied + dial range on the densified multi-codec grid.
-    let (dial_md, dial_metrics) = dial_panel(&ens, &args.dial_grid);
+    let (dial_md, dial_metrics) = dial_panel(&ens, &args.dial_grid, args.dial_peer_scores.as_ref());
     buf.push_str(&dial_md);
     pt.mark("DIAL panel (grid load + score + mono/tied)");
 
@@ -4272,6 +4436,90 @@ Run the dedicated q-sweep harness for those._\n",
 
 #[cfg(test)]
 mod tests {
+    use super::load_peer_dial_scores;
+    use zensim_validate::parquet_loader::DialGrid;
+
+    /// A three-row two-ladder grid, including a fractional q (the JXL
+    /// q-equivalent `100 − 4·distance` shape) so the key rounding is exercised.
+    fn tiny_grid() -> DialGrid {
+        DialGrid {
+            image_id: vec!["imgA".into(), "imgA".into(), "imgB".into()],
+            codec: vec!["jpeg".into(), "jpeg".into(), "jxl".into()],
+            q: vec![10.0, 90.0, 99.9],
+            codec_param: vec![10.0, 90.0, 0.025],
+            param_kind: vec!["q".into(), "q".into(), "distance".into()],
+            feature_rows: vec![vec![0.0], vec![0.0], vec![0.0]],
+            n_features: 1,
+        }
+    }
+
+    fn write_tmp(name: &str, body: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "bv_peer_dial_{}_{}_{name}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    /// The join must align to GRID ROW ORDER, not file order, and must not
+    /// care about extra rows the table carries for cells this grid dropped
+    /// (the stored reference-metric tables cover a superset of every grid).
+    #[test]
+    fn peer_dial_scores_align_to_grid_row_order_and_tolerate_extra_rows() {
+        let f = write_tmp(
+            "ok.tsv",
+            // deliberately shuffled, plus two cells absent from the grid
+            "image_id\tcodec\tq\tpred\n\
+             imgB\tjxl\t99.9\t3.5\n\
+             imgZ\tjpeg\t50\t999\n\
+             imgA\tjpeg\t90\t2.5\n\
+             imgA\tjpeg\t10\t1.5\n\
+             imgA\twebp\t10\t999\n",
+        );
+        let v = load_peer_dial_scores(&f, &tiny_grid()).expect("join");
+        assert_eq!(v, vec![1.5, 2.5, 3.5], "scores must follow grid row order");
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// A partial table is a DIFFERENT measurement, not a smaller one: a dial
+    /// panel over some of the ladders would silently report a better (or
+    /// worse) monotonicity than the grid actually contains. Refuse, loudly.
+    #[test]
+    fn peer_dial_scores_refuse_a_partially_covered_grid() {
+        let f = write_tmp(
+            "partial.tsv",
+            "image_id\tcodec\tq\tpred\nimgA\tjpeg\t10\t1.5\n",
+        );
+        let e = load_peer_dial_scores(&f, &tiny_grid()).expect_err("must refuse");
+        assert!(e.contains("2 of 3"), "must name the shortfall, got: {e}");
+        assert!(
+            e.contains("imgA, jpeg, 90") || e.contains("imgB, jxl"),
+            "must name an unmatched cell, got: {e}"
+        );
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// Column order is not part of the contract — the header names are.
+    #[test]
+    fn peer_dial_scores_locate_columns_by_name_not_position() {
+        let f = write_tmp(
+            "reordered.tsv",
+            "pred\tq\timage_id\tcodec\n\
+             1.5\t10\timgA\tjpeg\n\
+             2.5\t90\timgA\tjpeg\n\
+             3.5\t99.9\timgB\tjxl\n",
+        );
+        let v = load_peer_dial_scores(&f, &tiny_grid()).expect("join");
+        assert_eq!(v, vec![1.5, 2.5, 3.5]);
+        let _ = std::fs::remove_file(&f);
+    }
+
     /// Zone edges are a PRODUCT statement (aggressive / ordinary / near-lossless),
     /// so pin them and pin the midpoint rule the split is keyed on.
     #[test]
@@ -4285,12 +4533,14 @@ mod tests {
         assert_eq!(super::zone_of(100.0), "q>=85");
         // every label the report orders on is reachable
         for z in super::ZONE_LABELS {
-            assert!([
-                super::zone_of(10.0),
-                super::zone_of(60.0),
-                super::zone_of(95.0)
-            ]
-            .contains(&z));
+            assert!(
+                [
+                    super::zone_of(10.0),
+                    super::zone_of(60.0),
+                    super::zone_of(95.0)
+                ]
+                .contains(&z)
+            );
         }
     }
 
@@ -4507,7 +4757,10 @@ mod tests {
         let empty = std::env::temp_dir().join("zensim-d2-no-ruler-here");
         let r = resolve_372_slot(konjnd, &empty);
         assert_eq!(r.file, konjnd.filename);
-        assert!(r.degraded, "falling back past every preferred ruler must flag");
+        assert!(
+            r.degraded,
+            "falling back past every preferred ruler must flag"
+        );
         let lines = ruler_lines(&[konjnd], &empty);
         assert_eq!(lines.len(), 1);
         assert!(
@@ -4883,7 +5136,12 @@ mod tests {
         std::fs::write(&outside, b"dial-bytes").unwrap();
 
         let prov = vec![
-            ("CID22".to_string(), inside.clone(), "aaa".to_string(), 12u64),
+            (
+                "CID22".to_string(),
+                inside.clone(),
+                "aaa".to_string(),
+                12u64,
+            ),
             (
                 "dial grid (canonical)".to_string(),
                 outside.clone(),

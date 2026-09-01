@@ -1,0 +1,37 @@
+[zenbench] calibration: int=0.18ns/iter mem_bw=101.8GiB/s mem_lat=8.9ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788241921-21ad71.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788241921-21ad71
+═══════════════════════════════════════════════════════════════
+
+  extract_paths_576  5 rounds × 2 calls ⚠ only 5 rounds
+                    mean ±mad ms  95% CI vs base     
+  ├─ buf_v1_228       3.2 ±0.6ms  [1.9–4.7]ms         [1]
+  ├─ buf_v1_372       4.9 ±1.1ms  [+16.1%–+63.4%]     [2]
+  ├─ fold156_basic    4.0 ±0.9ms  [+20.9%–+33.1%]     [3]
+  ├─ fold228_peaks    4.6 ±1.6ms  [+12.4%–+75.3%]     [4] [5]
+  ├─ fold372_full     4.3 ±0.9ms  [+25.5%–+44.6%]     [6]
+  ├─ fold944_off      8.4 ±2.6ms  [+124.6%–+201.4%]   [7] [8]
+  ├─ fold944_full    11.4 ±1.5ms  [+158.7%–+363.3%]   [9] [10]
+  ╰─ fast_ssim2      27.9 ±1.7ms  [+736.4%–+847.7%]  
+
+  buf_v1_228     ██████ 3.21ms
+  fold156_basic  ████████ 3.96ms
+  fold372_full   █████████ 4.33ms
+  fold228_peaks  █████████ 4.61ms
+  buf_v1_372     ██████████ 4.93ms
+  fold944_off    █████████████████ 8.39ms
+  fold944_full   ███████████████████████ 11.42ms
+  fast_ssim2     ███████████████████████████████████████████████████████ 27.85ms
+  [1] CV=55%
+  [2] CV=70%
+  [3] CV=49%
+  [4] drift r=0.80 — later rounds slower
+  [5] CV=64%
+  [6] CV=39%
+  [7] drift r=0.90 — later rounds slower
+  [8] CV=38%
+  [9] drift r=0.60 — later rounds slower
+  [10] CV=51%

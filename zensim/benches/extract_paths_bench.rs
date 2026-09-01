@@ -12,11 +12,23 @@
 //! | `buf_v1_372`  | same, `extended_features` + `compute_iw_features` | 372 (156 basic + 216 pools) |
 //! | `fold944_off` | STREAMING fold, `V1PoolsMode::Off` (`folded720append2`) | 944, f156..371 = structural zeros |
 //! | `fold944_full`| STREAMING fold, `V1PoolsMode::Full` (`folded720append2pools`) | 944, all live |
+//! | `fast_ssim2`  | the OPPONENT: `fast_ssim2::compute_ssimulacra2`, same pixels | — |
 //!
 //! `buf_v1_372 − buf_v1_228` and `fold944_full − fold944_off` are the
 //! marginal cost of the SAME 216 v1 pool features in each family — that is
 //! the honest same-feature-set comparison, because no fold mode computes
 //! v1-372 alone (`fold_v1` is hardcoded on and v2-348 always rides along).
+//!
+//! The `fast_ssim2` arm (added 2026-08-31 by the ssim2-replacement-bar lane,
+//! `benchmarks/ssim2_replacement_bar_2026-08-31.md`) is the speed row of the
+//! "as good or better than ssim2" exam. It belongs in THIS group rather than a
+//! separate bench because a head-to-head against an external opponent is
+//! exactly where an isolated back-to-back measurement would bake the box's
+//! thermal/neighbour state into the answer — interleaving it with the walks it
+//! is being compared to is the whole point. fast-ssim2 is measured at its
+//! DEFAULT features, i.e. single-threaded (its `rayon` feature parallelises the
+//! Gaussian blur and is off); `zensim-bench`'s `ssim2_speed_bar` prices the
+//! threaded variant, since a cargo feature cannot vary per arm.
 //!
 //! WIDTH NOTE, load-bearing for reading these numbers: the buffered path
 //! walks `simd_padded_width(w)` columns, the fold walks `w`. At 576/1152/2304
@@ -122,7 +134,9 @@ fn toggles_full() -> zensim::feature_v2::V2NewFeatureToggles {
 /// All three 372-class arms set `v1_only`, which is the block-skipping the
 /// predecessor measured at 53 % of the 944 walk; `fold944_full` is the same
 /// request `score()` would run for a 944 bake.
-fn toggles_v1_only(pools: zensim::feature_v2::V1PoolsMode) -> zensim::feature_v2::V2NewFeatureToggles {
+fn toggles_v1_only(
+    pools: zensim::feature_v2::V1PoolsMode,
+) -> zensim::feature_v2::V2NewFeatureToggles {
     zensim::feature_v2::V2NewFeatureToggles {
         v1_only: true,
         v1_pools: pools,
@@ -308,6 +322,14 @@ fn main() {
                             .compute_folded720_features_streaming(&rsv, &dsv, full, &mut scratch)
                             .unwrap();
                         zenbench::black_box((v2.features()[178], v2.features()[943]));
+                    })
+                });
+                // The opponent. Same pixels, same process, same round.
+                group.bench("fast_ssim2", move |b| {
+                    b.iter(move || {
+                        let s = imgref::Img::new(src_s, n, n);
+                        let d = imgref::Img::new(dst_s, n, n);
+                        zenbench::black_box(fast_ssim2::compute_ssimulacra2(s, d).unwrap())
                     })
                 });
             });

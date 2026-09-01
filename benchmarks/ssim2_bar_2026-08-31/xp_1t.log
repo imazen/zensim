@@ -1,0 +1,82 @@
+[zenbench] calibration: int=0.18ns/iter mem_bw=111.1GiB/s mem_lat=8.6ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1788241429-212d5d.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788241429-212d5d
+═══════════════════════════════════════════════════════════════
+
+  extract_paths_576  5 rounds × 1 calls ⚠ only 5 rounds
+                    mean ±mad ms  95% CI vs base     
+  ├─ buf_v1_228       7.0 ±0.5ms  [6.6–7.4]ms        
+  ├─ buf_v1_372      11.1 ±1.5ms  [+43.8%–+73.4%]     [1]
+  ├─ fold156_basic    7.2 ±1.1ms  [-3.5%–+9.3%]       [2]
+  ├─ fold228_peaks    7.4 ±0.9ms  [-10.7%–+5.2%]      [3] [4]
+  ├─ fold372_full     9.4 ±0.3ms  [+22.6%–+46.1%]    
+  ├─ fold944_off     14.8 ±0.9ms  [+93.1%–+109.9%]   
+  ├─ fold944_full    18.3 ±1.5ms  [+134.2%–+159.5%]  
+  ╰─ fast_ssim2      21.7 ±1.5ms  [+183.2%–+244.5%]   [5]
+
+  buf_v1_228     ██████████████████ 7.00ms
+  fold156_basic  ██████████████████ 7.20ms
+  fold228_peaks  ███████████████████ 7.39ms
+  fold372_full   ████████████████████████ 9.37ms
+  buf_v1_372     ████████████████████████████ 11.13ms
+  fold944_off    ██████████████████████████████████████ 14.81ms
+  fold944_full   ██████████████████████████████████████████████ 18.25ms
+  fast_ssim2     ███████████████████████████████████████████████████████ 21.72ms
+  [1] drift r=0.70 — later rounds slower
+  [2] CI crosses zero
+  [3] CI crosses zero
+  [4] drift r=0.80 — later rounds slower
+  [5] drift r=0.60 — later rounds slower
+
+  extract_paths_1152  5 rounds × 1 calls ⚠ only 5 rounds
+                    mean ±mad ms  95% CI vs base     
+  ├─ buf_v1_228      30.8 ±2.1ms  [29.2–32.4]ms      
+  ├─ buf_v1_372      47.0 ±2.6ms  [+52.8%–+61.7%]    
+  ├─ fold156_basic   27.5 ±0.8ms  [-12.8%–-8.6%]     
+  ├─ fold228_peaks   29.5 ±2.0ms  [-16.6%–+8.5%]      [1]
+  ├─ fold372_full    38.5 ±0.8ms  [+27.2%–+27.6%]     [2]
+  ├─ fold944_off     61.2 ±1.1ms  [+90.4%–+105.6%]   
+  ├─ fold944_full    75.1 ±3.1ms  [+133.6%–+144.1%]   [3]
+  ╰─ fast_ssim2      86.5 ±1.2ms  [+174.8%–+186.6%]  
+
+  fold156_basic  ██████████████████ 27.54ms
+  fold228_peaks  ███████████████████ 29.51ms
+  buf_v1_228     ████████████████████ 30.83ms
+  fold372_full   ████████████████████████ 38.46ms
+  buf_v1_372     ██████████████████████████████ 46.99ms
+  fold944_off    ███████████████████████████████████████ 61.18ms
+  fold944_full   ████████████████████████████████████████████████ 75.06ms
+  fast_ssim2     ███████████████████████████████████████████████████████ 86.53ms
+  [1] CI crosses zero
+  [2] drift r=-1.00 — later rounds faster
+  [3] drift r=0.80 — later rounds slower
+
+  extract_paths_2304  5 rounds × 1 calls ⚠ only 5 rounds
+                      mean ±mad ms  95% CI vs base     
+  ├─ buf_v1_228       138.7 ±3.0ms  [129.9–151.1]ms    
+  ├─ buf_v1_372       198.9 ±1.7ms  [+34.7%–+51.1%]    
+  ├─ fold156_basic   121.3 ±10.4ms  [-21.9%–-3.2%]     
+  ├─ fold228_peaks    113.0 ±1.5ms  [-19.5%–-15.2%]     [1]
+  ├─ fold372_full     159.2 ±2.1ms  [+16.3%–+24.7%]    
+  ├─ fold944_off      268.2 ±3.4ms  [+96.9%–+105.6%]    [2]
+  ├─ fold944_full     309.7 ±2.0ms  [+129.0%–+137.3%]  
+  ╰─ fast_ssim2       373.7 ±5.2ms  [+175.2%–+189.5%]   [3]
+
+  fold228_peaks  ████████████████ 112.95ms
+  fold156_basic  ██████████████████ 121.32ms
+  buf_v1_228     ████████████████████ 138.70ms
+  fold372_full   ███████████████████████ 159.17ms
+  buf_v1_372     █████████████████████████████ 198.88ms
+  fold944_off    ███████████████████████████████████████ 268.20ms
+  fold944_full   █████████████████████████████████████████████ 309.74ms
+  fast_ssim2     ██████████████████████████████████████████████████████ 373.74ms
+  [1] drift r=-1.00 — later rounds faster
+  [2] drift r=0.60 — later rounds slower
+  [3] drift r=1.00 — later rounds slower
+
+  total: 491.6s  (451 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json

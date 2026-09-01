@@ -15,6 +15,13 @@ publish = false
 [features]
 training = ["zensim/training"]
 
+# `benches/ssim2_speed_bar.rs`: turn ON fast-ssim2's optional rayon
+# parallelism (it parallelises the Gaussian blur, its dominant kernel).
+# A cargo feature is per-BUILD, not per-arm, so the honest way to price
+# a threaded opponent is to run that bench twice and read the delta
+# against its unchanged `zensim_B` anchor arm.
+ssim2-rayon = ["fast-ssim2/rayon"]
+
 # Enables the `extract_features_372col_omni` example. As of V11-DECODER-FIX
 # (task #195, 2026-05-20) this feature pulls direct zenavif + zenjxl path
 # deps so AVIF + JXL encoded variants are decoded natively (previously
@@ -122,6 +129,11 @@ enough = { version = "0.4", optional = true }
 
 [[bench]]
 name = "bench_compare"
+harness = false
+
+[[bench]]
+# The paired ssim2-vs-zensim speed instrument (ssim2-replacement exam).
+name = "ssim2_speed_bar"
 harness = false
 
 [[bench]]
