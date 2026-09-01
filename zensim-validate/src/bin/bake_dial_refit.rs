@@ -4317,7 +4317,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn fit_spline_knots_is_monotone() {
         // synthetic: pred uniform, target a monotone-with-noise function.
         let preds: Vec<f64> = (0..500).map(|i| i as f64 * 0.2).collect();
