@@ -59,6 +59,10 @@ def main() -> int:
     ap.add_argument("--weights-dir", required=True)
     ap.add_argument("--scratch", required=True)
     ap.add_argument("--arms", default="ptc_native,btc_displayed,btc_native")
+    ap.add_argument("--prov-name", default="score_provenance.json",
+                    help="provenance filename; give a distinct one per run so runs do not overwrite each other")
+    ap.add_argument("--ssim2-only", action="store_true",
+                    help="score only SSIMULACRA2 (the G8 negative-control arms need no bake)")
     a = ap.parse_args()
     d = Path(a.dir); scratch = Path(a.scratch); scratch.mkdir(parents=True, exist_ok=True)
     prov: dict = {"bakes": {}, "arms": {}}
@@ -86,7 +90,7 @@ def main() -> int:
 
         # ---- bakes ------------------------------------------------------
         feats: dict[str, list] = {}
-        for name, (bake, regime) in BAKES.items():
+        for name, (bake, regime) in ({} if a.ssim2_only else BAKES).items():
             bake = bake.replace("WEIGHTS", a.weights_dir)
             if regime not in feats:
                 feats[regime] = read_features(d / "features" / f"{arm}__{regime}.csv")
@@ -107,7 +111,7 @@ def main() -> int:
         prov["arms"][arm] = {"n_rows": len(idx), "scores_tsv": str(out), "columns": keys}
         print(f"{arm}: {len(idx)} stimuli x {len(keys)} scorers -> {out}")
 
-    (d / "score_provenance.json").write_text(json.dumps(prov, indent=2, sort_keys=True))
+    (d / a.prov_name).write_text(json.dumps(prov, indent=2, sort_keys=True))
     return 0
 
 

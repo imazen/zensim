@@ -14,6 +14,17 @@ checked against the boosting choice instead of resting on it:
                 cropped out of the CTC full-resolution encode the boosted view
                 was rendered from. This is the stimulus the reconstructed JND
                 scale is attributed to.
+  iptc_native   the AIC-3 June-2024 interactive-PTC campaign's 130 stimuli --
+                the SAME plain PTC crops, at the even distortion levels that
+                campaign used. Native scale, native amplitude, zero
+                reconstruction, 51,870 responses (gate G8).
+  iptc_ctl_*    deliberately MIS-ASSIGNED pixel maps for the same 130 stimulus
+                keys (level shift / level REVERSAL / codec rotation / image
+                rotation). Shift and rotation are ORDER-PRESERVING within a
+                ladder, so they are expected to be near-neutral; reversal and
+                image rotation are not, and are the discriminating pair. They exist
+                only as negative controls for G8: if the identification is
+                right, the true map must beat all three on the same responses.
 
 Gates (all fail loud):
   G5  every PTC distorted stimulus is a PIXEL-EXACT crop of its CTC decode at
@@ -25,6 +36,18 @@ Gates (all fail loud):
   G7  the recovered BTC region offset is a strict local minimum of the
       reference residual (refined at stride 1), and every materialised native
       crop is byte-reproducible from (source, offset, size).
+  G8  the AIC-3 `IPTC_*` stimuli ARE the plain `PTC_*` crops: 130/130 names
+      resolve 1:1 onto a PTC file on disk, every response row's filename agrees
+      with its own (img_num, codec, dlevel) fields, the level set is exactly the
+      published {0,2,4,6,8,10}, and the campaign shape (1,050 questions, 352
+      assignments) is the one the source paper reports for its PTC experiment.
+      Published chain: Testolina et al., "Fine-grained subjective visual quality
+      assessment for high-fidelity compressed images", DCC 2025
+      (arXiv:2410.09501), "Experimental setup" -- the PTC experiment reused the
+      same five 620x800 crops with "the decoded images ... left untouched", at
+      "distortion levels numbered 0, 2, 4, 6, 8, and 10", 1,050 questions and
+      352 assignments. The prefix in the response table is the campaign's method
+      tag, not a different stimulus set.
 """
 from __future__ import annotations
 import argparse, csv, hashlib, json, re, sys
@@ -35,6 +58,7 @@ from PIL import Image
 SDR25 = Path("/mnt/v/datasets/jpeg-ai-sdr25/dataset-JPEG-AI-SDR25")
 CTC = Path("/mnt/v/dataset/aic3_ctc_epfl")
 AIC3_CSV = Path("/mnt/v/datasets/aic3-btc-ptc/JPEG-AIC_BTC_final_response_data_2024.01.10.csv")
+AIC3_IPTC_CSV = Path("/mnt/v/datasets/aic3-btc-ptc/JPEG-AIC_IPTC_final_response_data_2024_06_28 (1).csv")
 SDR25_BTC_CSV = Path("/mnt/v/datasets/jpeg-ai-sdr25/JPEG_AI_SDR_subjective_data/JPEG_AIC_SDR_BTC_JPEG_AI_responses_2025.02.28_v1.csv")
 SDR25_PTC_CSV = Path("/mnt/v/datasets/jpeg-ai-sdr25/JPEG_AI_SDR_subjective_data/JPEG_AIC_SDR_PTC_JPEG_AI_responses_2025.02.28_v1.csv")
 
@@ -43,7 +67,17 @@ CROP_IMGS = {2: "00002_853x945", 6: "00006_2048x1536", 7: "00007_1600x1200",
 # stimulus-filename codec token -> CTC `decoded/` token ("" = not a CTC codec)
 CTC_TOKEN = {"AVIF": "AVIF", "JPEG-1": "JPEG-1", "JPEG-2000": "JPEG-2000",
              "JPEG-XL": "JPEGXL", "VVC": "VVC", "JPEG-AI": ""}
-STIM_RE = re.compile(r"^(BTC|PTC)_(\d{5})_(.+)_(\d{2})\.png$")
+STIM_RE = re.compile(r"^(BTC|IPTC|PTC)_(\d{5})_(.+)_(\d{2})\.png$")
+# response-table codec id -> stimulus-filename codec token (identical in every
+# JPEG-AIC response CSV; asserted per row by G8)
+CODEC_ID = {"0": "0ref", "1": "AVIF", "2": "JPEG-1", "3": "JPEG-2000",
+            "4": "JPEG-XL", "5": "VVC", "6": "JPEG-AI"}
+IPTC_LEVELS = {0, 2, 4, 6, 8, 10}          # the published PTC level set
+
+
+def ptc_disk_name(n: str) -> str:
+    """`IPTC_...png` -> the PTC file that campaign served (see G8)."""
+    return ("PTC_" + n[len("IPTC_"):]) if n.startswith("IPTC_") else n
 
 
 def load(p) -> np.ndarray:
@@ -92,7 +126,8 @@ def main() -> int:
     per_csv = {}
     for key, p, root in (("aic3_btc", AIC3_CSV, btc_root),
                          ("sdr25_btc", SDR25_BTC_CSV, btc_root),
-                         ("sdr25_ptc", SDR25_PTC_CSV, ptc_root)):
+                         ("sdr25_ptc", SDR25_PTC_CSV, ptc_root),
+                         ("aic3_iptc", AIC3_IPTC_CSV, ptc_root)):
         names = set()
         with open(p) as f:
             for r in csv.DictReader(f):
@@ -102,11 +137,12 @@ def main() -> int:
             m = STIM_RE.match(n)
             fam, num = m.group(1), int(m.group(2))
             d = (btc_root / f"{num:05d}") if fam == "BTC" else (ptc_root / CROP_IMGS[num])
-            fp = d / n
-            if not fp.exists() and fam == "PTC":
-                fp = SDR25 / "PTC_JPEG-AI_images" / f"{num:05d}" / n
-            if not fp.exists() and fam == "PTC":
-                fp = SDR25 / "crops_sources" / n
+            dn = ptc_disk_name(n)
+            fp = d / dn
+            if not fp.exists() and fam != "BTC":
+                fp = SDR25 / "PTC_JPEG-AI_images" / f"{num:05d}" / dn
+            if not fp.exists() and fam != "BTC":
+                fp = SDR25 / "crops_sources" / dn
             if not fp.exists() and fam == "BTC":
                 fp = SDR25 / "BTC_JPEG-AI_images" / f"{num:05d}" / n
             if not fp.exists() and fam == "BTC":
@@ -115,6 +151,51 @@ def main() -> int:
             stim_files[n] = fp
     man["stimuli"]["n_distinct"] = len(stim_files)
     man["stimuli"]["per_response_csv"] = {k: len(v) for k, v in per_csv.items()}
+
+    # ---- G8 : the IPTC campaign served the plain PTC crops ---------------
+    ident = {"n_names": 0, "resolved_to_ptc_file": 0, "unresolved": [],
+             "row_field_filename_disagreements": 0, "n_row_field_checks": 0,
+             "levels": [], "grid": {}, "n_question_id": 0, "n_workers": 0,
+             "n_responses": 0}
+    ipt_names = sorted(n for n in stim_files if n.startswith("IPTC_"))
+    ident["n_names"] = len(ipt_names)
+    for n in ipt_names:
+        fp = stim_files[n]
+        if fp.name == ptc_disk_name(n) and fp.exists():
+            ident["resolved_to_ptc_file"] += 1
+        else:
+            ident["unresolved"].append(n)
+    lv, grid, qids, wrk, nresp = set(), {}, set(), set(), 0
+    with open(AIC3_IPTC_CSV) as f:
+        for r in csv.DictReader(f):
+            nresp += 1
+            qids.add(r["question_id"]); wrk.add(r["worker"])
+            for side in ("left", "right", "pivot"):
+                m = STIM_RE.match(r["img_" + side])
+                ident["n_row_field_checks"] += 3
+                ok = (int(m.group(2)) == int(r["img_num"])
+                      and m.group(3) == CODEC_ID[r["codec_" + side]]
+                      and int(m.group(4)) == int(r["dlevel_" + side]))
+                if not ok:
+                    ident["row_field_filename_disagreements"] += 3
+                lv.add(int(m.group(4)))
+                grid.setdefault(m.group(3), set()).add(int(m.group(4)))
+    ident["levels"] = sorted(lv)
+    ident["grid"] = {k: sorted(v) for k, v in sorted(grid.items())}
+    ident["n_question_id"] = len(qids)
+    ident["n_workers"] = len(wrk)
+    ident["n_responses"] = nresp
+    ident["source_paper"] = ("Testolina et al., DCC 2025, arXiv:2410.09501 -- "
+                             "PTC reused the same 620x800 crops untouched at "
+                             "levels 0,2,4,6,8,10; 1050 questions; 352 assignments")
+    g8 = (ident["n_names"] == 130
+          and ident["resolved_to_ptc_file"] == 130
+          and ident["row_field_filename_disagreements"] == 0
+          and lv == IPTC_LEVELS
+          and ident["n_question_id"] == 1050
+          and ident["n_workers"] == 352)
+    man["gates"]["G8_iptc_stimuli_are_the_plain_ptc_crops"] = bool(g8)
+    man["iptc_identification"] = ident
 
     # ---- G6 : resolve the JPEG-AI dlevel -> VM quality map from bytes -----
     vm_map, g6_ok = [], True
@@ -197,7 +278,7 @@ def main() -> int:
     for n, fp in sorted(stim_files.items()):
         m = STIM_RE.match(n)
         fam, num, tok, lvl = m.group(1), int(m.group(2)), m.group(3), int(m.group(4))
-        if fam == "PTC":
+        if fam in ("PTC", "IPTC"):
             ref = ptc_root / CROP_IMGS[num] / f"PTC_{num:05d}_0ref_00.png"
             if not ref.exists():
                 ref = SDR25 / "crops_sources" / f"PTC_{num:05d}_0ref_00.png"
@@ -222,7 +303,42 @@ def main() -> int:
         "btc_displayed": [(n, stim_files[f"BTC_{STIM_RE.match(n).group(2)}_0ref_00.png"], stim_files[n])
                           for n in sorted(stim_files) if n.startswith("BTC_")],
         "btc_native": [(n, *stim_native[n]) for n in sorted(stim_files) if n.startswith("BTC_")],
+        "iptc_native": [(n, *stim_native[n]) for n in sorted(stim_files) if n.startswith("IPTC_")],
     }
+    # ---- G8 negative controls: the same 130 keys, deliberately mis-mapped -
+    # If the IPTC->PTC identification is right, the true map must beat every one
+    # of these on the identical responses. They are pixel maps only; the ref side
+    # and the response side are untouched.
+    codrot = {"AVIF": "JPEG-1", "JPEG-1": "JPEG-2000", "JPEG-2000": "JPEG-XL",
+              "JPEG-XL": "VVC", "VVC": "AVIF"}
+    imgrot = {2: 6, 6: 7, 7: 9, 9: 10, 10: 2}
+
+    def ctl(n: str, kind: str):
+        m = STIM_RE.match(n)
+        num, tok, lvl = int(m.group(2)), m.group(3), int(m.group(4))
+        if tok == "0ref":
+            # the reference is the reference under every map; only the DISTORTED
+            # assignment is perturbed, so the control differs from the truth on
+            # exactly the 125 distorted stimuli
+            r = ptc_root / CROP_IMGS[num] / f"PTC_{num:05d}_0ref_00.png"
+            return (n, r, r)
+        if kind == "levelshift":
+            tgt = (num, tok, lvl - 1)
+        elif kind == "levelrev":
+            tgt = (num, tok, 12 - lvl)      # 02<->10, 04<->08, 06 fixed
+        elif kind == "codecrot":
+            tgt = (num, codrot[tok], lvl)
+        else:
+            tgt = (imgrot[num], tok, lvl)
+        q, t, l = tgt
+        ref = ptc_root / CROP_IMGS[num] / f"PTC_{num:05d}_0ref_00.png"
+        dist = ptc_root / CROP_IMGS[q] / f"PTC_{q:05d}_{t}_{l:02d}.png"
+        assert dist.exists(), f"control {kind} target missing: {dist}"
+        return (n, ref, dist)
+
+    for kind in ("levelshift", "levelrev", "codecrot", "imgrot"):
+        arms[f"iptc_ctl_{kind}"] = [ctl(n, kind) for n in sorted(stim_files)
+                                    if n.startswith("IPTC_")]
     for arm, rows in arms.items():
         tsv = out / f"{arm}_pairs.tsv"
         with open(tsv, "w", newline="") as f:

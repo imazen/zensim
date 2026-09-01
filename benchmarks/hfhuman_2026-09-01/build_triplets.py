@@ -34,10 +34,20 @@ STUDIES = {
     "aic3_btc": ("/mnt/v/datasets/aic3-btc-ptc/JPEG-AIC_BTC_final_response_data_2024.01.10.csv", "BTC"),
     "sdr25_btc": ("/mnt/v/datasets/jpeg-ai-sdr25/JPEG_AI_SDR_subjective_data/JPEG_AIC_SDR_BTC_JPEG_AI_responses_2025.02.28_v1.csv", "BTC"),
     "sdr25_ptc": ("/mnt/v/datasets/jpeg-ai-sdr25/JPEG_AI_SDR_subjective_data/JPEG_AIC_SDR_PTC_JPEG_AI_responses_2025.02.28_v1.csv", "PTC"),
+    "aic3_iptc": ("/mnt/v/datasets/aic3-btc-ptc/JPEG-AIC_IPTC_final_response_data_2024_06_28 (1).csv", "IPTC"),
 }
 ARM_STUDIES = {"ptc_native": ["sdr25_ptc"],
                "btc_displayed": ["aic3_btc", "sdr25_btc"],
-               "btc_native": ["aic3_btc", "sdr25_btc"]}
+               "btc_native": ["aic3_btc", "sdr25_btc"],
+               # the recovered AIC-3 interactive-PTC campaign (build_stimuli G8)
+               "iptc_native": ["aic3_iptc"],
+               # ... and its mis-mapped negative controls, same responses
+               "iptc_ctl_levelshift": ["aic3_iptc"],
+               "iptc_ctl_levelrev": ["aic3_iptc"],
+               "iptc_ctl_codecrot": ["aic3_iptc"],
+               "iptc_ctl_imgrot": ["aic3_iptc"],
+               # both native legs pooled -- the axis §2.7 said recovery would grow
+               "native_all": ["sdr25_ptc", "aic3_iptc"]}
 UNDECIDED = {"notsure", "notSure", "skip", ""}
 
 
@@ -65,6 +75,10 @@ def main() -> int:
     ap.add_argument("--panel-bin", required=True)
     ap.add_argument("--scratch", required=True)
     ap.add_argument("--boot", type=int, default=2000)
+    ap.add_argument("--arms", default="ptc_native,btc_displayed,btc_native",
+                    help="comma list; the default reproduces the original three-arm run byte-for-byte")
+    ap.add_argument("--out-name", default="pairwise_results.tsv")
+    ap.add_argument("--diag-name", default="pairwise_diagnostics.json")
     ap.add_argument("--seed", type=int, default=20260901)
     a = ap.parse_args()
     d = Path(a.dir); scratch = Path(a.scratch); scratch.mkdir(parents=True, exist_ok=True)
@@ -72,9 +86,18 @@ def main() -> int:
     results = []
     diag = {}
 
-    for arm, studies in ARM_STUDIES.items():
-        srows = list(csv.DictReader(open(d / f"{arm}_scores.tsv"), delimiter="\t"))
+    want = [x for x in a.arms.split(",") if x]
+    for arm in want:
+        assert arm in ARM_STUDIES, f"unknown arm {arm}"
+    for arm, studies in ((k, ARM_STUDIES[k]) for k in want):
+        if arm == "native_all":
+            srows = []
+            for src in ("ptc_native", "iptc_native"):
+                srows += list(csv.DictReader(open(d / f"{src}_scores.tsv"), delimiter="\t"))
+        else:
+            srows = list(csv.DictReader(open(d / f"{arm}_scores.tsv"), delimiter="\t"))
         score = {r["stimulus"]: r for r in srows}
+        assert len(score) == len(srows), f"{arm}: duplicate stimulus keys in the score table"
         scorers = [c for c in srows[0] if c not in ("row", "stimulus")]
         # ---- assemble decided responses, keyed by triplet -----------------
         # counts[(subset, group)] -> {"left": w, "right": w, "L": name, "R": name}
@@ -194,14 +217,14 @@ def main() -> int:
                   f"ssim2 acc={float(base['question'][0]['acc_response']):.4f} "
                   f"ceiling={float(base['question'][0]['ceiling_response']):.4f}")
 
-    outp = d / "pairwise_results.tsv"
+    outp = d / a.out_name
     keys = list(results[0])
     with open(outp, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys, delimiter="\t")
         w.writeheader()
         for r in results:
             w.writerow(r)
-    (d / "pairwise_diagnostics.json").write_text(json.dumps(diag, indent=2, sort_keys=True))
+    (d / a.diag_name).write_text(json.dumps(diag, indent=2, sort_keys=True))
     print(f"-> {outp}")
     return 0
 

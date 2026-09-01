@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+### Recovered — the 130 AIC-3 `IPTC_*` stimuli were never missing, and the native pairwise axis is 6x larger (2026-09-01)
+
+- **APPENDIX A of `benchmarks/hfhuman_2026-09-01.md`.** §2.7 called the 130
+  `IPTC_*` stimuli NOT-REACHABLE and §9 called recovering them "an upstream
+  request". Both were wrong: **there is no upstream archive to fetch and none is
+  needed** — the AIC-3 `IPTC` response table IS the source paper's **PTC**
+  experiment, and its stimuli are the plain 620x800 `PTC_*` crops already inside
+  `test-images/PTC_images.zip`. Probed and recorded: `dataset-BTC-PTC-24` has 0
+  releases / 0 tags and only ever held the two zips; `aicdb.jpeg.org` 404s for
+  anything PTC/IPTC; **no registration, login or licence click-through exists
+  anywhere** (CC BY 4.0, open HTTP + public Git-LFS).
+- **New gate G8** (`build_stimuli.py`): **130/130** names resolve 1:1 by
+  `IPTC_` -> `PTC_`; **0 disagreements in 155,610 checks** between each response
+  row's filename and its own `img_num`/`codec_*`/`dlevel_*`; grid 5 x (1 ref +
+  5 codecs x 5 levels), level set exactly the published `{0,2,4,6,8,10}`;
+  campaign shape 1,050 questions / 352 workers / 494 assignments — the paper's
+  own PTC row, by the same three-count rule that identifies the BTC table
+  (3,600 / 778 / 1,166).
+- **Four falsifiable negative controls** (`iptc_ctl_{levelshift,levelrev,codecrot,imgrot}`):
+  the same 130 keys re-pointed at other pixels and scored against the identical
+  51,870 responses. Reversing the level ladder flips `same_codec` agreement to
+  **exactly the mirror value** (acc_norm +0.9686 -> **-0.9686**) and the wrong
+  image collapses it to -0.7914, while the two ORDER-PRESERVING perturbations
+  are provably invisible (+0.9136 / +0.9177) because the AIC-3 ladders are
+  JND-equalised by construction — stated, not hidden.
+- **The axis exists at 6x**: `iptc_native` = 130 stimuli / 900 triplets /
+  **35,044** responses (was 45 / 180 / 6,929), pooled `native_all` = 41,973
+  decided judgments out of the predicted **62,160** raw. Native scale, native
+  amplitude, **zero reconstruction**.
+- **The §5.3a arm question is settled.** The two *native* readings — two
+  independent studies, different workers, different stimulus geometry — agree on
+  **22 of 24** verdicts, while native vs the boosted rendering flips **9 of 24**
+  (11 of 24 pooled), every flip TIE -> LOSS. So the 14-of-36 flips belong to the
+  **boosted rendering**, not to `btc_native`'s crop-from-CTC-encode
+  reconstruction: the input-distribution reading stands and the alternative is
+  dead.
+- **§5.4's ADD156/B +0.0051 does not replicate** — at 5x the triplets it is
+  **-0.0013 / -0.0017**, sign reversed. `Q7b_pools` picks up a real LOSS on the
+  pooled arm (-0.0013 [-0.0027, -0.0000]). Nobody beats ssim2; the best native
+  cell is W10L9PH **+0.0004** (P = 0.755) on 35,044 responses.
+- **Additive-only tooling**, every new flag defaulting to prior behaviour:
+  `build_triplets.py --arms/--out-name/--diag-name`, `score_arms.py
+  --ssim2-only/--prov-name`, `arm_invariance.py --arm-a/--arm-b/--results
+  (repeatable)/--subsets/--out` (so two *corpora* can be compared, not just two
+  readings), plus `manifest.py`. **Regression gates all pass**: `ptc_native` +
+  `btc_displayed` pairs sha256-identical, 305/305 `native_btc` crops
+  byte-identical, `ptc_native_scores.tsv` byte-identical, and §5.3a reproduces
+  36/36 rows ("14 of 36 flip").
+- Dataset-side provenance: `/mnt/v/datasets/aic3-btc-ptc/_RECOVERY_2026-09-01.md`
+  + `_RECOVERY_2026-09-01_iptc_map.tsv` (130 rows, per-file sha256). No pixels
+  were downloaded, copied, or renamed.
+
 ### Measured — the HYBRID candidate, and the exam's speed clause amended to 8 threads (2026-09-01)
 
 - **APPENDIX B amends the ssim2 exam's W4**, per the user directive that "the
