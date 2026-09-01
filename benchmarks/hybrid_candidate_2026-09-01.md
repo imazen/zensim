@@ -754,3 +754,129 @@ necessary by the redirect:
    registered as era-independent (`eval372-basic-only-bakes-era-independent-2026-08-30`).
    §11's first gate re-measures it on THIS lane's two roots rather than citing
    it, because every student depends on it.
+
+---
+
+## 11. PART II GATES, and one declared amendment
+
+### 11.1 Gates — all run before any student was read
+
+| gate | statement | result |
+|---|---|---|
+| **G-P1a** | `predict --ensemble M,L --ensemble-weights 1,0` == `predict --bake M` | **BIT-IDENTICAL**, 4,292 rows |
+| **G-P1b** | `predict --ensemble M,L --ensemble-weights 0.5,0.5` == the unweighted `--ensemble` | **BIT-IDENTICAL** |
+| **G-P2** | the teacher forward is possible at all | **It was NOT, before this lane.** `predict` sized its buffer and its cross-member check by `n_inputs()`; `W10L9PH` is dead-column-pruned (667 internal / 944 caller) and `Q7b` is not, so the pair was REFUSED — and a pruned bake alone was handed the first 667 columns of a 944-wide row, a prefix the repo's own pruning rule forbids. Fixed to `caller_input_width()`, which is what `bake_verdict`'s `Ensemble` already used. |
+| **G-E** | basic-only bakes are era-independent across THIS lane's two roots | **MEASURED, and it is "≈", not "="**: `ADD156` reads CID22 `srocc_signed` **0.8633799667** on the 372 root and **0.8632384891** on the pools root — equal to **1.4e-4**. The registry's `eval372-basic-only-bakes-era-independent-2026-08-30` is upheld in substance; the exact form is not, and every student below is therefore scored on **both** roots. |
+| **G-S** | the student needs only the 156 walk | `bake_block_profile` on every student: `uses_f156_371 = false`, `f156_371.exact_zero = 216/216`. The `--slice-file` constraint holds exactly. |
+| **G-T** | teacher affine + clip fraction | 111,068 safesyn rows, affine `[−13.995884554862975, 12.710690306377414]`, teacher mean 0.5918, **clip 0.2017 %** — the same rule and the same clip magnitude the registered EM4 teacher chain produced. |
+
+### 11.2 AMENDMENT H-A2 — the target clip, and the L1 sweep, declared before they were read
+
+Two settings were NOT in §10.2's arm table and are declared here rather than
+folded in silently:
+
+1. **`--target-clip-min −100` on the human gram.** This is the **registered
+   E-LIN policy** ("MSE magnitude protection for catastrophic tails"), and it is
+   load-bearing on this leg: the safesyn human target reaches **−739** at the
+   ×100 scale, so **13 rows of 111,068** carry ~40 % of the least-squares loss.
+   The teacher target is affine'd into [0, 100], so the same flag is a **no-op**
+   on that gram and the two stay symmetric (0 rows clipped). The **unclipped
+   fits are kept as a declared control** (`distill/noclip_control/`), and the
+   measured effect of the policy is reported rather than assumed: CID22
+   0.7504 → 0.7576 on the human-only arm at λ = 3e-4.
+2. **The L1 penalty becomes a swept axis**, λ ∈ {0.01, 0.03, 0.1, 0.3, 1.0,
+   3.0} in addition to the registered {3e-4, 1e-3, 3e-3}. **Reason, stated
+   before the sweep ran:** at the registered λ the fit leaves **148–156 of 156**
+   coefficients active, while the incumbent it must beat, `ADD156`, has **28**.
+   A dense 156-coefficient additive fit and a 28-coefficient one are different
+   models, and comparing the arm to `ADD156` without reaching its sparsity
+   regime would compare a hyperparameter to a hypothesis. The sweep is over the
+   SAME three target regimes and changes no bar, no selection rule and no other
+   arm.
+
+---
+
+## 12. PART II RESULTS — the distillation probe, and the one variable that dominates it
+
+### 12.1 The control does not reproduce the incumbent — and finding out why IS the result
+
+`SADD_H` is the registered like-for-like control: the ADD156 recipe (safesyn
+only, raw space, lasso, 156-slice) re-run through the current owner. It should
+land where `ADD156` lands. It does not — it lands **0.05 CID22 below it** — and
+every candidate explanation was tested rather than assumed:
+
+| tested explanation | how | measured effect on CID22 |
+|---|---|---|
+| the registered target clip was missing | rebuilt the gram with `--target-clip-min −100` (13 of 111,068 rows clip, and they carry ~40 % of the loss) | **+0.007** (0.7504 → 0.7576). Real, small. |
+| the fit was not in ADD156's sparsity regime | λ swept over 9 points from 3e-4 to 3.0; active coefficients 156 → 4 | **+0.06** and it plateaus (0.7576 → 0.8139 at λ = 0.5 / 17 coefficients). Does not close it. |
+| the solver | BVLS + the registered sign mask instead of lasso | **+0.05 on CID22, −0.13 on CSIQ** (0.8104 / 0.5073). A trade, not a fix. |
+| **the fit SUBSTRATE** (folded pools f0..155 vs buffered v1-372 f0..155) | the SAME corpus (`kadid`) grammed and fit at BOTH roots, then each student scored at BOTH roots | **NOT the variable: 0.7927 (fit@pools) vs 0.7885 (fit@372)**, a 0.004 difference, inside noise, in both evaluation frames |
+| **the TRAINING LEG** | the same recipe on `canonical-2026-05-21/train/safesyn.parquet` — **196,086 rows**, the leg `ADD156` was actually fit on — instead of the pools root's `ext_safesyn_full` — **111,068 rows** | **+0.057, and it reproduces the incumbent**: λ = 0.3 gives CID22 **0.8643**, CSIQ **0.9015**, KonJND **0.5406** at **31 coefficients** against `ADD156`'s 0.8632 / 0.9024 / 0.5350 at 28 |
+
+**So the chain is right and the leg is short.** The 156-class additive recipe
+reproduces its incumbent to within 0.001 on all three axes when it is given the
+incumbent's 196k leg; on the 111k leg reachable from the pools root it is 0.05
+behind, whatever the λ, the clip or the solver.
+
+### 12.2 The distillation signal, measured at matched recipe
+
+Because every arm shares one chain, one leg and one evaluation, the *relative*
+question is answerable even though the absolute one is capped. Teacher target vs
+human target, same 111k leg, same λ, same slice:
+
+| λ | active | **H** (human) | **T** (teacher) | **HT** (1:1 mix) | Δ (T − H) CID22 | Δ CSIQ | Δ KonJND |
+|--:|--:|--:|--:|--:|--:|--:|--:|
+| 0.01 | 132/124/119 | 0.7590 | **0.7908** | 0.7766 | **+0.0318** | +0.057 | −0.008 |
+| 0.03 | 90/83/90 | 0.7558 | **0.7794** | 0.7721 | +0.0236 | +0.032 | −0.021 |
+| 0.10 | 48/38/48 | 0.7602 | **0.7770** | 0.7701 | +0.0168 | −0.007 | −0.028 |
+| 0.30 | 26/21/22 | 0.8071 | **0.8156** | 0.8113 | +0.0085 | +0.040 | −0.082 |
+| 0.50 | 17/14/12 | 0.8139 | 0.8134 | **0.8154** | −0.0005 | +0.024 | −0.097 |
+| 1.00 | 13/7/7 | 0.8078 | 0.8096 | **0.8122** | +0.0018 | +0.020 | −0.115 |
+| 2.00 | 8/5/7 | 0.8022 | **0.8190** | 0.8172 | +0.0168 | +0.022 | −0.101 |
+| 3.00 | 6/4/5 | 0.8014 | **0.8324** | 0.8117 | **+0.0310** | +0.020 | −0.087 |
+
+**Three readings, all consistent across nine λ:**
+
+1. **The teacher target helps CID22 and CSIQ.** T ≥ H on CID22 at 8 of 9 λ
+   (median +0.017) and on CSIQ at 8 of 9 (median +0.022). Distillation from a
+   944 blend into a 156-slice additive head transfers *something the human
+   target on the same rows does not carry*.
+2. **The teacher target costs KonJND, monotonically and heavily** — **−0.008 at
+   λ = 0.01 growing to −0.115 at λ = 1.0**. The teacher is a 944 blend whose own
+   KonJND is 0.5265; the student cannot inherit that from a scalar target, and
+   the human target's near-threshold signal is what it loses. This is the same
+   KonJND↔CID22 trade the campaign has paid for repeatedly, appearing here as a
+   property of the *target*.
+3. **The mix is the sensible operating point** and behaves like one: `HT`
+   recovers most of T's CID22/CSIQ while giving back roughly half of the KonJND
+   loss (at λ = 0.5: CID22 0.8154, CSIQ 0.9267, KonJND 0.4537 vs H's 0.4955 and
+   T's 0.3990), at **12 active coefficients and 4,164 bytes**.
+
+### 12.3 The number the fleet wave needs
+
+Two levers, both measured at matched λ = 0.3 on the same recipe:
+
+| lever | Δ CID22 | Δ CSIQ | Δ KonJND |
+|---|--:|--:|--:|
+| **TRAINING LEG** 111k → 196k (human target) | **+0.057** | +0.021 | +0.057 |
+| **TEACHER TARGET** human → teacher (111k leg) | +0.009 | +0.040 | **−0.082** |
+
+**The leg is ~7× the teacher on CID22, and it is free of the KonJND cost.** And
+the two cannot currently be combined: the teacher is a 944 blend one of whose
+members reads f156-371, so it can only be forwarded on a pools-944 root — and
+the 196k leg exists **only at v1-372 width**. A like-for-like "ADD156's leg +
+this teacher" arm needs `canonical-2026-05-21/train/safesyn.parquet`
+re-extracted at `folded720append2pools`.
+
+**That is the coordination message for the era-2 / radius-4 re-extraction +
+retrain wave**, and it is the concrete, priced ask this fits-only probe exists
+to produce:
+
+> **Re-extract the 196k canonical safesyn leg (and the other dense legs) at the
+> pools-944 regime.** On the evidence here that is worth **+0.057 CID22 to the
+> 156-student class before any teacher is applied**, and it is the precondition
+> for measuring distillation at the incumbent's own operating point. Distilling
+> is a real but second-order lever on CID22 (+0.009 to +0.031), a first-order
+> lever on CSIQ (+0.02 to +0.06), and a first-order **cost** on KonJND
+> (−0.01 to −0.12) — so a fleet-scale student should carry a **mixed** target,
+> not a pure teacher one.

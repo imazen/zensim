@@ -55,22 +55,33 @@ gram)
     # The STUDENT is 372-wide (ADD156's shape). --max-feat 372 makes the pools
     # table's leading 372 columns the fit space; --slice-file then zeroes
     # f156..371 so the block profile reads uses_f156_371=false.
+    # --target-clip-min -100 is the REGISTERED E-LIN policy (MSE magnitude
+    # protection for catastrophic tails) and it is load-bearing here: the
+    # safesyn human target reaches -739 at the x100 scale, so a handful of rows
+    # otherwise dominate the least-squares. The teacher target is already
+    # affine'd into [0,100], so the same flag is a NO-OP on that gram and the
+    # two stay symmetric. The unclipped grams are kept as the declared control.
     "$BDR" gram --parquet "$SAFE" --target human_score --target-scale 100 \
         --space raw --max-feat 372 --out "$D/g_safe_human.npz"
+    "$BDR" gram --parquet "$SAFE" --target human_score --target-scale 100 --target-clip-min -100 \
+        --space raw --max-feat 372 --out "$D/g_safe_human_c100.npz"
     "$BDR" gram --parquet "$D/teach/safesyn_teacher944.parquet" --target human_score \
-        --target-scale 100 --space raw --max-feat 372 --out "$D/g_safe_teacher.npz" ;;
+        --target-scale 100 --space raw --max-feat 372 --out "$D/g_safe_teacher.npz"
+    "$BDR" gram --parquet "$D/teach/safesyn_teacher944.parquet" --target human_score \
+        --target-scale 100 --target-clip-min -100 \
+        --space raw --max-feat 372 --out "$D/g_safe_teacher_c100.npz" ;;
 fit)
     for lam in 0.0003 0.001 0.003; do
-        "$BDR" fit-lasso --gram "$D/g_safe_human.npz" --space raw --target human_score \
+        "$BDR" fit-lasso --gram "$D/g_safe_human_c100.npz" --space raw --target human_score \
             --lam "$lam" --slice-file "$SLICE" \
             --anchor-parquet "$SAFE" --anchor-target human_score --anchor-scale 100 --anchor-stride 37 --anchor-prefix \
             --embed-repro --out "$D/SADD_H_l$lam.bin"
-        "$BDR" fit-lasso --gram "$D/g_safe_teacher.npz" --space raw --target human_score \
+        "$BDR" fit-lasso --gram "$D/g_safe_teacher_c100.npz" --space raw --target human_score \
             --lam "$lam" --slice-file "$SLICE" \
             --anchor-parquet "$SAFE" --anchor-target human_score --anchor-scale 100 --anchor-stride 37 --anchor-prefix \
             --embed-repro --out "$D/SADD_T_l$lam.bin"
         for w in 0.25 0.5 1.0 2.0; do
-            "$BDR" fit-lasso --gram "$D/g_safe_human.npz" --gram "$D/g_safe_teacher.npz" \
+            "$BDR" fit-lasso --gram "$D/g_safe_human_c100.npz" --gram "$D/g_safe_teacher_c100.npz" \
                 --weight 1.0 --weight "$w" --space raw --target human_score \
                 --lam "$lam" --slice-file "$SLICE" \
                 --anchor-parquet "$SAFE" --anchor-target human_score --anchor-scale 100 --anchor-stride 37 --anchor-prefix \
