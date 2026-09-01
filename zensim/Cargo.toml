@@ -303,3 +303,9 @@ required-features = ["training", "feature-regime-v2"]
 name = "v2_feature_group_cost"
 harness = false
 required-features = ["training", "feature-regime-v2"]
+
+# PRODUCT-API audit for a candidate bake: identity / ladder monotonicity /
+# boundedness / negative reach / buffered-vs-streaming path agreement.
+[[example]]
+name = "profile_api_audit"
+required-features = ["custom-profiles"]
