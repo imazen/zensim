@@ -271,10 +271,11 @@ CURATED_BOARD = [
     #    (<=1.25x the 156 walk) it is the lane's TEACHER / quality ceiling, not
     #    a passing candidate: it costs 2.6x the bar.
     #  * SADD_BIGLEG = the 156-class additive student that distillation was
-    #    aimed at. Ties ADD156 on CID22/CSIQ, beats it on KonJND (0.5432, above
-    #    peer_ssim2's 0.5272), and gains the W3 ladder pass ADD156 fails
-    #    (mono 0.99596 >= ssim2's 0.99298, 0% of q>=85 ladders ending backwards
-    #    against ADD156's 2%).
+    #    aimed at. Ties ADD156 on CID22/CSIQ and beats it on KonJND (0.5432,
+    #    above peer_ssim2's 0.5272) at 31 coefficients / 4,117 B. It gains NO
+    #    exam clause: on the regime-matched 372 grid both it and ADD156 fail W3
+    #    (0.98541 vs 0.98495 pooled monotonicity, 2% of q>=85 ladders ending
+    #    backwards either way).
     "HYA_w084", "SADD_BIGLEG",
 ]
 # "Sprint bests" (user request 2026-08-28): ONE selected leader per sprint/era,

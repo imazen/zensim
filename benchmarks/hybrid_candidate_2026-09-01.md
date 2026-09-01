@@ -983,12 +983,12 @@ exam's incumbents.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | **W1** no held-out human axis worse by > δ | — | **FAIL** (CID22 −0.025, AIC-3 −0.019) | **FAIL** (CID22 −0.074, KonJND −0.074, AIC-3 −0.038, LIVE −0.015) | **FAIL** (CID22 −0.026) | **FAIL** (AIC-3 −0.032) | **PASS** | **FAIL** (KonJND −0.027) | **FAIL** ×6 |
 | **W2** ≥2 strict wins, ≥1 named | — | FAIL | FAIL | **FAIL** (+ the band, −0.070) | FAIL | **FAIL** (3 wins, none named) | FAIL | **FAIL** (1 win, and it IS named) |
-| **W3** ladder ≥ ssim2 | — | **PASS** (mono 0.99596, dyn 89.0) | **PASS** (0.99638) | **FAIL** (ends 2 % of q≥85 ladders backwards) | **FAIL** | **PASS** | PASS | PASS |
+| **W3** ladder ≥ ssim2 (regime-matched grid) | — | **FAIL** (372 grid: mono 0.98541, **2 %** end backwards) | **FAIL** (same grid class) | **FAIL** (372 grid: 0.98495, 2 %) | **FAIL** | **PASS** | PASS | PASS |
 | **W4** ≤ 1.25× the 156 walk, 1 T **and** 8 T | — | **PASS** (1.00×) | **PASS** (1.00×) | **PASS** (1.00×) | **FAIL** (1.55–1.85×) | **FAIL** (2.57–2.68× @1T; 4.4× @8T cited) | **FAIL** (2.06–2.16×) | **FAIL** (2.42–2.58×) |
 | **W5** HDR | — | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
 | **W6** not circular | — | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | **W7** default build | — | **FAIL** (no profile slot; `ComputeSet::from_block_profile` does not exist) | **FAIL** | **FAIL** | PASS | **FAIL** (ensemble) | **FAIL** | **FAIL** |
-| **clauses passed** (of 6 evaluable) | — | **3** | **3** | 2 | 2 | 3 | 3 | 2 |
+| **clauses passed** (of 6 evaluable) | — | **2** | **2** | 2 | 2 | 3 | 3 | 2 |
 
 **VERDICT: nobody passes, and the two things that changed are worth naming
 separately.**
@@ -999,15 +999,27 @@ separately.**
   the directive's point. `HYA_w084` is hereby the lane's **TEACHER and quality
   ceiling**, and PART I is the measurement of how much quality there is to
   distil.
-- **`SADD_BIGLEG` is the best thing in the 156 class this lane produced**, and
-  it ties the incumbent it was built to beat: CID22 0.8642 vs `ADD156`'s 0.8632,
-  CSIQ 0.9007 vs 0.9024, **KonJND 0.5432 vs 0.5350 — and +0.016 ABOVE
-  `peer_ssim2`** — at 31 coefficients and 4,117 bytes. Where it clearly beats
-  the incumbent is the **ladder**: pooled monotonicity **0.99596 ≥ ssim2's
-  0.99298** with **0 %** of near-lossless ladders ending backwards, against
-  `ADD156`'s 2 %. **So the 156 class gains a W3 pass it did not have** — three
-  clauses instead of two — while its W1 failures (CID22, AIC-3) are inherited
-  unchanged.
+- **`SADD_BIGLEG` TIES the incumbent it was built to beat, and gains no clause.**
+  CID22 0.8642 vs `ADD156`'s 0.8632, CSIQ 0.9007 vs 0.9024, and **KonJND 0.5432
+  vs 0.5350 — +0.016 ABOVE `peer_ssim2`, the one axis where it is clearly ahead
+  of both the incumbent and the opponent** — at 31 coefficients and 4,117 bytes.
+  Its W1 failures (CID22 −0.025, AIC-3 −0.019) are the incumbent's, inherited
+  unchanged. **PART II is therefore HYBRID-NEUTRAL for the 156 class**: the
+  student matches its incumbent and the clause count does not move.
+
+  > **CORRECTION, made before publication.** This paragraph first claimed
+  > `SADD_BIGLEG` "gains a W3 pass `ADD156` fails", from its **0.99596** pooled
+  > monotonicity. That was a **cross-grid comparison** — the exam's `ADD156` row
+  > is on the 372 `quarantined_v2` grid and 0.99596 is on the pools-944 grid.
+  > Re-measured on **each grid with both models**: on the pools grid `ADD156`
+  > reads **0.995959** and 0 % ends-backwards — it passes there too, so nothing
+  > was gained; on the regime-matched 372 grid `SADD_BIGLEG` reads **0.98541 /
+  > 12 % / 2 % ends backwards** against `ADD156`'s **0.98495 / 14 % / 2 %**, so
+  > **both FAIL W3** and the student's edge is 0.0005 of monotonicity. The
+  > 372-grid row is the one in the table above, because the exam scores a model
+  > on the grid matching its regime and both models are 372-class. This is the
+  > exact trap §3.3 of the exam flags with "use the `_quarantined_v2` numbers";
+  > it is recorded rather than quietly fixed.
 - **No student closes W1's CID22 gap**, and §12 says why: the reachable
   training leg is 111k rows where the incumbent's is 196k, and the 196k leg
   cannot carry this teacher without a re-extraction.

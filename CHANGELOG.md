@@ -92,10 +92,13 @@
   **The leg is ~7× the teacher on CID22 and carries no KonJND cost** — the
   priced ask for the era-2 / radius-4 wave is to re-extract the 196k dense leg
   at `folded720append2pools`, and any fleet student should carry a MIXED target.
-- **`SADD_BIGLEG`** (156-class, 31 coefficients, 4,117 B) ties `ADD156` on
-  CID22/CSIQ, beats it on **KonJND 0.5432 — above `peer_ssim2`'s 0.5272** — and
-  **gains the W3 ladder pass `ADD156` fails** (pooled monotonicity 0.99596 ≥
-  ssim2's 0.99298, 0 % of q ≥ 85 ladders ending backwards vs 2 %).
+- **`SADD_BIGLEG`** (156-class, 31 coefficients, 4,117 B) **ties `ADD156` and
+  gains no clause**: CID22 0.8642 vs 0.8632, CSIQ 0.9007 vs 0.9024, and
+  **KonJND 0.5432 — above `peer_ssim2`'s 0.5272**, the one axis where it is
+  clearly ahead of both. On the regime-matched 372 grid both models FAIL W3
+  (0.98541 / 2 % ends-backwards vs 0.98495 / 2 %). *(A first draft claimed a W3
+  gain from a pools-grid 0.99596; that was a cross-grid comparison and is
+  corrected in the doc, with both models re-measured on both grids.)*
 - **Owner fixes on the way through:** `bake_dial_refit predict` sized its input
   buffer and its cross-member check by `n_inputs()`, so it handed a
   dead-column-pruned bake a 667-column **prefix** of a 944-wide row and refused
