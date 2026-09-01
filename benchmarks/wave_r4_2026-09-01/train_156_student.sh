@@ -30,6 +30,12 @@
 #            array below (f0..155 only) is correct unchanged for A3b/A4b;
 #            every free-set index gets default scaling, same as it would in
 #            A1's own 944-wide run for any index outside its 58 guarded ones.
+#   A3b/A4b kon-weight sweep (a4bkon follow-up lane, 2026-09-01): WR4_KONJND_
+#            TRAIN_W overrides the konjnd_bpg group's train weight (mirrors
+#            train_a1_flagship.sh's own WR4_KONJND_TRAIN_W lever exactly, same
+#            env var name, same default 1.2 = A1/A3b/A4b's own verbatim
+#            value). Ported here unmodified otherwise -- see
+#            benchmarks/a4bkon_2026-09-01.md for the registration.
 #   A4  MODE=distill  : the tsafesyn leg is re-targeted at the TEACHER's
 #                       output (registration §3.0.2 point 3: HYA_w084 =
 #                       0.84*W10L9PH_s4004 + 0.16*Q7b, era-1-trained, grafted
@@ -64,6 +70,7 @@ OUTDIR="${WR4_OUT:-/mnt/v/output/zensim/wave-r4-2026-09-01/bakes}"
 TRAIN="${ZL_TRAIN:?ZL_TRAIN must point at the zensim_mlp_train binary}"
 KADIS="${WR4_KADIS:-}"
 WR4_KEEP="${WR4_KEEP:-}"
+KONW="${WR4_KONJND_TRAIN_W:-1.2}"
 mkdir -p "$OUTDIR"
 
 TTBIG=""
@@ -90,7 +97,7 @@ TRAIN_GROUPS=(
   --group "tid:$R4/ext_tid.parquet:0.5:1.0:rank"
   --group "bigcodec:$V/tbig_944_200k_pure.parquet:0.5:1.0:both"
   --group "tsafesyn:$TSAFE:0.5:1.0:both"
-  --group "konjnd_bpg:$R4/ext_konjnd_bpg_train.parquet:1.2:0.0:both"
+  --group "konjnd_bpg:$R4/ext_konjnd_bpg_train.parquet:$KONW:0.0:both"
   --group "konjnd_bpg_val:$R4/ext_konjnd_bpg_val.parquet:0.0:1.5:both"
   --group "tbig_hf:$V/tbig_hf_pure.parquet:1.0:0.0:both"
 )
@@ -129,7 +136,7 @@ if [ -n "$WR4_KEEP" ]; then
   WIDTH_ARGS=(--max-features 944 --keep-features "$WR4_KEEP")
 fi
 
-echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) $(date -u +%H:%M:%SZ)"
+echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW $(date -u +%H:%M:%SZ)"
 exec "$TRAIN" "${TRAIN_GROUPS[@]}" \
   --n-hidden-layers 0 --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 "${WIDTH_ARGS[@]}" \
