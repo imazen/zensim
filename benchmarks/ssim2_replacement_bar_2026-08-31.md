@@ -23,20 +23,22 @@ cited. Nothing is extrapolated. The instruments are named at every number.
 
 ## 1. The one-page answer
 
-**Has real progress been made toward "the new ssim2"? Per axis: SPEED yes and
-by more than anyone claimed; RANK a statistical tie, which is progress but not
-a win; DIAL yes for the 944 class and no for the shipped one; HDR no —
-not against ssim2, because that comparison has never been run.**
+**Has real progress been made toward "the new ssim2"? Per axis: SPEED yes,
+by 1.2–7×, and it had never been measured; RANK a statistical tie at the top,
+which is progress on July's "clear #2" but is not a win; DIAL yes for the 944
+class and no for the shipped one; HDR yes for the shipped `BHdr` and no for
+the model frozen to succeed it.**
 
 The worry is **partly true, and precisely locatable.** It is not true that
 nothing works: the 944 class ties the opponent on the gold human holdout and
 beats it on the dial, and the whole crate is 1.2–7× faster than the opponent.
 It *is* true that the shipped default (`B`) loses to ssim2 on the axis the
-product exists for, that no candidate has ever been measured against ssim2 on
-HDR, and that the campaign's own instruments could not have told anyone either
-of those things, because until today **`bake_verdict` refused to run on a
-reference metric at all** and the board's four peer rows carried no dial, no
-per-reference number, and no bands.
+product exists for, that the frozen HDR candidate-of-record is worse than both
+ssim2's HDR path and the model it was meant to replace, and that the campaign's
+own instruments could not have told anyone either of those things — because
+until today **`bake_verdict` refused to run on a reference metric at all**, the
+board's four peer rows carried no dial, no per-reference number and no bands,
+and **no gate in the stack contains the opponent at all**.
 
 ### Axis 1 — SPEED. **WON, by 1.2×–7×, and it had never been measured.**
 
@@ -49,7 +51,7 @@ zenbench, this box, arms interleaved in one process (`extract_paths_bench`,
 | zensim 944 walk (the most expensive class) | 18.3 (**1.19×**) | 75.1 (**1.15×**) | 309.7 (**1.21×**) |
 | zensim 372 fold walk (shipped `B`'s class) | 9.4 (**2.31×**) | 38.5 (**2.25×**) | 159.2 (**2.35×**) |
 | zensim basic walk (`ADD156`'s class) | 7.4 (**2.93×**) | 29.5 (**2.93×**) | 113.0 (**3.31×**) |
-| zensim as shipped today (buffered 372) | 11.1 (1.96×) | 47.0 (1.84×) | 198.9 (1.88×) |
+| zensim as shipped today (buffered 372) | 11.1 (1.95×) | 47.0 (1.84×) | 198.9 (1.88×) |
 
 At 8 threads the 372 fold walk is **5.3–6.5×** ssim2 and even the 944 walk is
 **2.4–3.0×**. **Every zensim class beats ssim2 at every size and thread count
@@ -62,6 +64,11 @@ today**, while a great deal of effort went into pricing our own regimes against
 each other.
 
 ### Axis 2 — RANK on human labels. **A TIE at the top. Not a win, and not nothing.**
+
+*(This axis has prior art — `b_bhdr_vs_field_2026-07-12.md` measured
+"ssim2 leads rank, B is a clear #2" in July. What is new here is the paired
+confidence interval, the within-image column, and the fact that the difference
+now has a bar attached to it.)*
 
 CID22 is the only large human-MOS corpus of *codec* distortions and it is
 validation-only forever. Paired bootstrap against ssim2 on the identical 4,292
@@ -223,12 +230,30 @@ does neither.
 
 ## 2. THE EXAM — "becomes the new ssim2", as one registered test
 
-### 2.0 Why this did not exist
+### 2.0 What existed, and what did not
 
-The project has eight balanced floors, a §5 freeze bar, `product_composite`,
-`balanced_composite`, `selection_composite`, five scorecard gates, a G-OUT
-outlier gate and a G-GRAN dial gate. **Every one of them is internal.** Not one
-of them contains the opponent. `freeze_check`'s CID22 bar is `≥ 0.89`, whose
+**Prior art, stated first so this note does not overclaim.**
+`benchmarks/b_bhdr_vs_field_2026-07-12.md` — *"B + BHdr vs the field"* — did
+compare `B` against ssim2/cvvdp/iwssim on the full Mohammadi panel across
+CID22 / AIC-3 / AIC-4 / KonJND on a verified-clean test set, and reached a
+conclusion this note reproduces: *"ssim2 leads rank … B is a clear #2"*, with
+CID22 ssim2 0.8895 vs B 0.8764. `baseline_panels_2026-05-18.md` carries the
+peer panels it read. **So the RANK comparison is not new**, and its stable
+value across four months (0.8895 → 0.8894) is a small piece of evidence that
+the peer row is trustworthy.
+
+What did **not** exist is everything else: no paired confidence interval on any
+of those differences (point estimates only), no within-image comparison, no
+ladder comparison, no speed comparison, no HDR head-to-head, and — the reason
+those absences persisted — **no pass/fail rule that says what "better than
+ssim2" would mean.** A #2 finish recorded in one benchmark doc in July did not
+become a bar, a gate, a board column, or a target.
+
+And the gate stack could not have made it one. The project has eight balanced
+floors, a §5 freeze bar, `product_composite`, `balanced_composite`,
+`selection_composite`, five scorecard gates, a G-OUT outlier gate and a G-GRAN
+dial gate. **Every one of them is internal.** Not one of them contains the
+opponent. `freeze_check`'s CID22 bar is `≥ 0.89`, whose
 stated precedent is *our own seed* `EM4 0.8924`; that it lands within 0.0006 of
 `peer_ssim2`'s 0.8894 is a coincidence, not a design.
 
@@ -249,9 +274,12 @@ Four structural reasons the comparison could not be made even if someone tried:
    ssim2 scores **0.8979** on our own ranking composite, above every model on
    the board. Anyone who ranked with the composite would have concluded ssim2
    already won, for a reason that is arithmetic rather than perceptual.
-4. **No speed row.** `bench_compare.rs` has compared zensim to ssimulacra2
-   since before the campaign — under criterion, in isolated runs, and nobody
-   ever put the number in a decision document.
+4. **No speed row anywhere.** `bench_compare.rs` has had a `fast_ssim2` arm
+   since before the campaign — under **criterion**, which measures each
+   function in isolated back-to-back runs and bakes the box's thermal/neighbour
+   state into an A/B. Its number never reached a benchmark doc: every
+   `fast-ssim2` mention across `benchmarks/*.md` and `docs/*.md` is a *rank*
+   number, never a millisecond. (Grepped: 10 files, all rank panels.)
 
 ### 2.1 Scope and the circularity flag (mandatory, stated first)
 
@@ -378,7 +406,7 @@ winner), and **peer_ssim2** as the control row.
 | **W1** no regression > δ on any held-out human axis | — | **FAIL** (KonJND −0.083) | **FAIL** (KonJND −0.027) | **FAIL** (AIC-3 −0.032, CI excl. 0) | **FAIL** (CID22 −0.026) | **UNEVALUABLE** |
 | **W2** ≥2 strict wins, ≥1 on CID22 or near-lossless | — | **FAIL** (1 win: CSIQ) | **FAIL** (2 wins, neither named) | FAIL | FAIL | UNEVALUABLE |
 | **W3** ladder ≥ ssim2 | — | **PASS** | **PASS** | **FAIL** | **FAIL** | not measured on a shared grid |
-| **W4** speed ≥ fast-ssim2 @1T | — | **PASS** (1.21×) | **PASS** (1.21×) | **PASS** (1.88× as shipped) | **PASS** (3.31×) | **PASS** (1.21×) |
+| **W4** speed ≥ fast-ssim2 @1T | — | **PASS** (1.15–1.21×) | **PASS** (1.15–1.21×) | **PASS** (1.84–1.95× as shipped) | **PASS** (2.93–3.31×) | **PASS** (1.15–1.21×) |
 | **W5** HDR ≥ ssim2-PU | — | N/A (no HDR head) | N/A | N/A | N/A | N/A |
 | **W6** not circular | — | PASS | PASS | PASS | PASS | PASS |
 | **W7** reachable by a default build | — | **FAIL** (`custom-profiles`) | **FAIL** | **PASS** | **FAIL** (no profile slot, no `from_block_profile`) | **FAIL** |
@@ -588,13 +616,30 @@ consumer gets.
 | 944 class | **1.19×** | 2.45× | **1.15×** | 2.99× | **1.21×** | 2.77× |
 | 372 fold | **2.31×** | 6.49× | **2.25×** | 6.46× | **2.35×** | 5.30× |
 | basic fold | **2.93×** | 6.07× | **2.93×** | 10.57× | **3.31×** | 8.61× |
-| shipped today | 1.96× | 5.69× | 1.84× | 8.77× | 1.88× | 9.03× |
+| shipped today | 1.95× | 5.69× | 1.84× | 8.77× | 1.88× | 9.04× |
 
 **Every zensim class beats fast-ssim2 at every size and thread count measured.**
 The 1T column is the honest one and the only one W4 is judged on: at 8/16 T
 zensim uses rayon and fast-ssim2 (default features) does not, so those columns
 are "us with threads vs them without". Read them as the deployment comparison
 they are, not as a per-core claim.
+
+**Through the PUBLIC API, end to end.** The table above prices extraction
+only. `zensim-bench/benches/ssim2_speed_bar.rs` runs the same opponent against
+`Zensim::new(ZensimProfile::B).compute(...)` — extraction **plus** the bake
+forward plus the output spline, i.e. exactly what a caller gets — interleaved,
+1 thread:
+
+| | 576² | 1152² | 2304² |
+|---|--:|--:|--:|
+| fast_ssim2 | 23.3 | 96.8 | 517.4 ±169 |
+| **zensim `Profile::B`, full `compute()`** | **11.7** | **49.6** | **268.2 ±81** |
+| ratio | **1.99×** | **1.95×** | **1.93×** |
+
+So the ~1.9× is not an artifact of excluding the model forward: **the shipped
+product API is about twice fast-ssim2's speed at every size.** (The 2304² row
+was taken while another lane's bench held the box — hence the ±; the ratio is
+stable across all three sizes and matches the extraction-only reading.)
 
 **Cross-lane anchor.** The seven zensim arms in this run reproduce the
 feature-cost lane's independent zenbench table on the same box within ~5 %
@@ -608,7 +653,7 @@ makes the `fast_ssim2` number in the same group trustworthy at the same scale.
 |---|---|---|---|---|
 | **W10L9PH_s4004** | W1 KonJND | −0.027 vs ssim2 | The KonJND↔CID22 trade is measured and certified (wave-7: the kon lever is data-mass, not selection; `B` gets +0.066 from a 372-linear recipe). A blend or a KonJND-weighted leg is the registered lever | fleet wave |
 | | W2 (needs a named win) | CID22 +0.0032 vs ±0.010 | **DATA, not features** — E-M6b priced v3-marginal at ≈+0.001/seed vs +0.004 for the data slice | fleet wave |
-| | W2 (near-lossless axis) | **NOT MEASURED** | Run `hf_nearlossless` (300 pairs, exists on disk) at the 944 root. This is not a modelling gap, it is an eval-coverage gap | **local, hours** |
+| | W2 (near-lossless axis) | **NOT MEASURED** | `hf_nearlossless` (300 pairs, 50 refs) exists **only at 372 width**; the 2026-08-30 root carries it as a byte-copy because *"their distorted material is bigcodec/R2 encodes"*. A 944 read therefore needs the encodes pulled and re-extracted — an eval-coverage gap, not a modelling one, but **not** the free command it first looks like | **R2 pull + extraction** (300 pairs — small, but not local-only) |
 | | W7 | needs `custom-profiles` | a profile slot + a ship call | user call |
 | **W10L9P_s4005** | as above, plus KonJND −0.083 | | same | same |
 | **shipped B** | W1 AIC-3 (−0.032, CI excl. 0), W2, W3 | ladder 0.9792 vs 0.9930; within-image CID22 −0.0079 | Nothing in flight targets B; the 944 class already dominates it on W1/W2/W3 while being 1.9× slower. **The measured answer is to replace it, not to fix it** | user call |
@@ -674,13 +719,42 @@ its weight sits on axes whose target is the opponent's output.
 
 ### 4.2 The circularity is not hypothetical — it inverts the ranking
 
-Run `freeze_check --profile balanced-2026-08-04` over the board including the
-peer row and **`peer_ssim2` scores `balanced_composite` 0.8979 — higher than
-every model on the board** (best model 0.8615). It gets there on
-`nonphoto = 1.0000` at weight 0.30, which is a definition. Anyone ranking with
-the project's own ranking composite would have concluded ssim2 already beat us,
-by arithmetic. That the board never drew that conclusion is because nobody ever
-ranked the peer — which is the same blindness from the other side.
+Run `freeze_check --profile balanced-2026-08-04 --select` over the six rows of
+§3 and the output is this (verbatim, this lane):
+
+```
+| rank | bake                                     | class      | floors | bal_comp | M3a        | sel_comp | selectable |
+|    1 | W10L9P_s4005_packed                      | 944-single |    8/8 |   0.8565 | 0.8744     |   0.9876 | yes        |
+|    2 | W10L9PH_s4004_packed                     | 944-single |    8/8 |   0.8615 | 0.7628     |   0.9759 | yes        |
+|    3 | ADD156_safesyn_only_raw_lasso            | era-bridge |    6/8 |   0.8213 | 0.9540     |   0.9644 | yes        |
+|    4 | b_sdr_linear_cid80_inclwinsor_dense_dial | era-bridge |    6/8 |   0.8292 | 0.5968     |   0.9187 | yes        |
+|    5 | Q7b_pools_g0.2_a0.2_b0.97                | 944-single |    5/8 |   0.8145 | UNMEASURED |        — | NO         |
+|    6 | peer_ssim2                               | era-bridge |    4/8 |   0.8979 | UNMEASURED |        — | NO         |
+```
+
+**`peer_ssim2` has the highest `balanced_composite` on the page — 0.8979,
+above every model (best 0.8615) — and simultaneously ranks LAST at 4/8
+floors.** Both facts are artifacts:
+
+- The 0.8979 comes from `nonphoto = 1.0000` entering at weight 0.30, which is a
+  definition, not a measurement. Anyone ranking with the project's own ranking
+  composite would have concluded ssim2 already beat us, by arithmetic.
+- The 4/8 comes from four floors being **structurally unmeasurable** for a
+  reference metric, not from failing them: F4 (dial mono/tied) and F5 (dial
+  span) needed a dial block a peer could not have, F6 needs `per_ref_mean`, F8
+  needs bands.
+
+**Two of those four are now measurable, and ssim2 passes both.** With this
+lane's `--dial-peer-scores`: mono **0.9930 ≥ 0.93** and tied **0.0000 ≤ 0.05**
+(F4 PASS), dial span **83.5** inside [1, 120] (F5 PASS). That moves the
+opponent from 4/8 to **6/8 — level with shipped `B` and ADD156, and still
+behind the two 944 models at 8/8.** Which is the point: an unmeasured axis was
+reading as a failure, and the profile could not tell the difference. The
+registry has a convention for exactly this (`absent-not-failed`) and the peer
+rows never got it.
+
+That the board never drew either conclusion is because nobody ever ranked the
+peer — the same blindness from the other side.
 
 ### 4.3 Case study — the KonJND ruler, and what it says about gate design
 
@@ -759,9 +833,12 @@ them).
    is a dial. *Cost: a registered composite revision — which invalidates
    comparisons across the change, so it needs a version stamp like the band
    scheme got.*
-5. **Fix the HF coverage gap.** Score `hf_nearlossless` (300 pairs, on disk) at
-   the 944 root so the product zone is measured on the leading candidates, and
-   pin `hfnlproxy` to one slice. *Cost: local, hours.*
+5. **Fix the HF coverage gap.** Extract `hf_nearlossless` (300 pairs, 50 refs)
+   at 944 so the product zone is measured on the leading candidates, and pin
+   `hfnlproxy` to one slice. *Cost: an R2 pull plus a 300-pair extraction — the
+   table exists only at 372 and the 2026-08-30 root carries it as a byte-copy,
+   so this is not the one-command job it looks like.* It is still the cheapest
+   way to make the exam's near-lossless clause evaluable at all.
 6. **Add a `ref` column to the peer per-pair tables** (or a stable pair key to
    both sides) so LIVE — and every future corpus — can be paired. *Cost: one
    column.*
