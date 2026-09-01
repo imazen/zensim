@@ -47,6 +47,14 @@ pub(crate) struct StripChannelAccum {
     pub ssim_max: f32,
     pub edge_art_max: f32,
     pub edge_det_max: f32,
+    // --- Free raw moments (`raw_moments`; zero and untouched otherwise) ---
+    // Σsrc, Σdst, Σsrc², Σdst² over the inner rows. Written ONLY when the
+    // caller asks; every existing field's value and accumulation order is
+    // unchanged whether it asks or not.
+    pub sum_s: f64,
+    pub sum_d: f64,
+    pub sum_s2: f64,
+    pub sum_d2: f64,
 }
 
 impl StripChannelAccum {
@@ -72,6 +80,10 @@ impl StripChannelAccum {
             ssim_max: 0.0,
             edge_art_max: 0.0,
             edge_det_max: 0.0,
+            sum_s: 0.0,
+            sum_d: 0.0,
+            sum_s2: 0.0,
+            sum_d2: 0.0,
         }
     }
 }
@@ -124,6 +136,9 @@ pub(crate) fn fused_vblur_features_ssim(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
+    // `raw_moments`: accumulate the four FREE raw moments (Σs, Σd, Σs²,
+    // Σd²) alongside the existing sums. See `StripChannelAccum::sum_s`.
+    raw_moments: bool,
 ) -> StripChannelAccum {
     incant!(
         fused_vblur_ssim_inner(
@@ -145,7 +160,8 @@ pub(crate) fn fused_vblur_features_ssim(
             store_sd,
             ssq_out,
             s12_out,
-            store_sigma
+            store_sigma,
+            raw_moments
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -253,6 +269,9 @@ fn fused_vblur_ssim_inner_v4(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
+    // `raw_moments`: accumulate the four FREE raw moments (Σs, Σd, Σs²,
+    // Σd²) alongside the existing sums. See `StripChannelAccum::sum_s`.
+    raw_moments: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -363,6 +382,22 @@ fn fused_vblur_ssim_inner_v4(
                 // === MSE: (src - dst)² ===
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+
+                // === Free raw moments (`raw_moments`) ===
+                // Plain sums of the raw pixels already in registers — no
+                // new plane, no new load, no new pass. They finalize the
+                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
+                // and append2's LUMA_MEAN_REF, which are the only 944 slots
+                // whose value is a function of the RAW planes alone (see
+                // `benchmarks/free_features_2026-09-01.md`). Same per-row
+                // f64-reduce shape as every accumulator above it, so this
+                // introduces no new accumulation shape.
+                if raw_moments {
+                    acc.sum_s += s.reduce_add() as f64;
+                    acc.sum_d += d.reduce_add() as f64;
+                    acc.sum_s2 += (s * s).reduce_add() as f64;
+                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                }
             }
 
             // Slide V-blur window
@@ -482,6 +517,22 @@ fn fused_vblur_ssim_inner_v4(
                 // MSE
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+
+                // === Free raw moments (`raw_moments`) ===
+                // Plain sums of the raw pixels already in registers — no
+                // new plane, no new load, no new pass. They finalize the
+                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
+                // and append2's LUMA_MEAN_REF, which are the only 944 slots
+                // whose value is a function of the RAW planes alone (see
+                // `benchmarks/free_features_2026-09-01.md`). Same per-row
+                // f64-reduce shape as every accumulator above it, so this
+                // introduces no new accumulation shape.
+                if raw_moments {
+                    acc.sum_s += s.reduce_add() as f64;
+                    acc.sum_d += d.reduce_add() as f64;
+                    acc.sum_s2 += (s * s).reduce_add() as f64;
+                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -585,6 +636,14 @@ fn fused_vblur_ssim_inner_v4(
                 // MSE
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
+
+                // === Free raw moments (`raw_moments`) — scalar tail ===
+                if raw_moments {
+                    acc.sum_s += sv as f64;
+                    acc.sum_d += dv as f64;
+                    acc.sum_s2 += (sv * sv) as f64;
+                    acc.sum_d2 += (dv * dv) as f64;
+                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -621,6 +680,9 @@ fn fused_vblur_ssim_inner_v4x(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
+    // `raw_moments`: accumulate the four FREE raw moments (Σs, Σd, Σs²,
+    // Σd²) alongside the existing sums. See `StripChannelAccum::sum_s`.
+    raw_moments: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -731,6 +793,22 @@ fn fused_vblur_ssim_inner_v4x(
                 // === MSE: (src - dst)² ===
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+
+                // === Free raw moments (`raw_moments`) ===
+                // Plain sums of the raw pixels already in registers — no
+                // new plane, no new load, no new pass. They finalize the
+                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
+                // and append2's LUMA_MEAN_REF, which are the only 944 slots
+                // whose value is a function of the RAW planes alone (see
+                // `benchmarks/free_features_2026-09-01.md`). Same per-row
+                // f64-reduce shape as every accumulator above it, so this
+                // introduces no new accumulation shape.
+                if raw_moments {
+                    acc.sum_s += s.reduce_add() as f64;
+                    acc.sum_d += d.reduce_add() as f64;
+                    acc.sum_s2 += (s * s).reduce_add() as f64;
+                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                }
             }
 
             // Slide V-blur window
@@ -850,6 +928,22 @@ fn fused_vblur_ssim_inner_v4x(
                 // MSE
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+
+                // === Free raw moments (`raw_moments`) ===
+                // Plain sums of the raw pixels already in registers — no
+                // new plane, no new load, no new pass. They finalize the
+                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
+                // and append2's LUMA_MEAN_REF, which are the only 944 slots
+                // whose value is a function of the RAW planes alone (see
+                // `benchmarks/free_features_2026-09-01.md`). Same per-row
+                // f64-reduce shape as every accumulator above it, so this
+                // introduces no new accumulation shape.
+                if raw_moments {
+                    acc.sum_s += s.reduce_add() as f64;
+                    acc.sum_d += d.reduce_add() as f64;
+                    acc.sum_s2 += (s * s).reduce_add() as f64;
+                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -953,6 +1047,14 @@ fn fused_vblur_ssim_inner_v4x(
                 // MSE
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
+
+                // === Free raw moments (`raw_moments`) — scalar tail ===
+                if raw_moments {
+                    acc.sum_s += sv as f64;
+                    acc.sum_d += dv as f64;
+                    acc.sum_s2 += (sv * sv) as f64;
+                    acc.sum_d2 += (dv * dv) as f64;
+                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -994,6 +1096,9 @@ fn fused_vblur_ssim_inner_v3(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
+    // `raw_moments`: accumulate the four FREE raw moments (Σs, Σd, Σs²,
+    // Σd²) alongside the existing sums. See `StripChannelAccum::sum_s`.
+    raw_moments: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
@@ -1094,6 +1199,22 @@ fn fused_vblur_ssim_inner_v3(
                 // MSE
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+
+                // === Free raw moments (`raw_moments`) ===
+                // Plain sums of the raw pixels already in registers — no
+                // new plane, no new load, no new pass. They finalize the
+                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
+                // and append2's LUMA_MEAN_REF, which are the only 944 slots
+                // whose value is a function of the RAW planes alone (see
+                // `benchmarks/free_features_2026-09-01.md`). Same per-row
+                // f64-reduce shape as every accumulator above it, so this
+                // introduces no new accumulation shape.
+                if raw_moments {
+                    acc.sum_s += s.reduce_add() as f64;
+                    acc.sum_d += d.reduce_add() as f64;
+                    acc.sum_s2 += (s * s).reduce_add() as f64;
+                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -1197,6 +1318,14 @@ fn fused_vblur_ssim_inner_v3(
                 // MSE
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
+
+                // === Free raw moments (`raw_moments`) — scalar tail ===
+                if raw_moments {
+                    acc.sum_s += sv as f64;
+                    acc.sum_d += dv as f64;
+                    acc.sum_s2 += (sv * sv) as f64;
+                    acc.sum_d2 += (dv * dv) as f64;
+                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -1237,6 +1366,9 @@ fn fused_vblur_ssim_inner(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
+    // `raw_moments`: accumulate the four FREE raw moments (Σs, Σd, Σs²,
+    // Σd²) alongside the existing sums. See `StripChannelAccum::sum_s`.
+    raw_moments: bool,
 ) -> StripChannelAccum {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -1355,6 +1487,22 @@ fn fused_vblur_ssim_inner(
                 // MSE
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+
+                // === Free raw moments (`raw_moments`) ===
+                // Plain sums of the raw pixels already in registers — no
+                // new plane, no new load, no new pass. They finalize the
+                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
+                // and append2's LUMA_MEAN_REF, which are the only 944 slots
+                // whose value is a function of the RAW planes alone (see
+                // `benchmarks/free_features_2026-09-01.md`). Same per-row
+                // f64-reduce shape as every accumulator above it, so this
+                // introduces no new accumulation shape.
+                if raw_moments {
+                    acc.sum_s += s.reduce_add() as f64;
+                    acc.sum_d += d.reduce_add() as f64;
+                    acc.sum_s2 += (s * s).reduce_add() as f64;
+                    acc.sum_d2 += (d * d).reduce_add() as f64;
+                }
             }
 
             // Slide V-blur window
@@ -1465,6 +1613,14 @@ fn fused_vblur_ssim_inner(
                 // MSE
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
+
+                // === Free raw moments (`raw_moments`) — scalar tail ===
+                if raw_moments {
+                    acc.sum_s += sv as f64;
+                    acc.sum_d += dv as f64;
+                    acc.sum_s2 += (sv * sv) as f64;
+                    acc.sum_d2 += (dv * dv) as f64;
+                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);

@@ -1697,6 +1697,9 @@ fn process_strip_channel(
                 &mut [],
                 &mut [],
                 false,
+                // v1's 372 layout has no append/append2 block, so the free
+                // raw moments have nowhere to land on this path.
+                false,
             );
 
             // Accumulate weighted features into diffmap before extended features

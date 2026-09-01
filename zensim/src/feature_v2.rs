@@ -1513,6 +1513,13 @@ pub struct V2NewFeatureToggles {
     /// lever can be measured and shipped independently of it.
     #[doc(hidden)]
     pub v1_only: bool,
+    /// FREE-EXTRAS (2026-09-01): emit the v2-era slots that a v1-only walk
+    /// can produce for free — see [`V1FreeExtras`]. `#[doc(hidden)] pub` for
+    /// the same reason [`Self::v1_only`] is: this struct is constructed
+    /// out-of-crate with `..Default::default()`, which requires every field
+    /// to be visible.
+    #[doc(hidden)]
+    pub free_extras: V1FreeExtras,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -1551,6 +1558,41 @@ impl V1PoolsMode {
     /// The ten carrier slots (`Carriers`), in v1's 372 layout.
     pub const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243, 303, 321, 333];
 }
+
+/// Which v2-era slots a **v1-only** walk emits from byproducts the v1 fused
+/// kernel can carry without a new plane, a new load or a new pass.
+///
+/// The classification behind this type is
+/// `benchmarks/free_features_2026-09-01.md`. Read from source: of the 788
+/// slots above `f156`, exactly **40** are a function of the RAW `src`/`dst`
+/// planes alone — every other one needs either the V-blurred moment planes
+/// (which a v1 band computes at a DIFFERENT accumulation origin than phase A,
+/// so its value would not be the 944 table's value), the ref-side activity
+/// plane, the `bs2` σ-split plane, or a neighbour stencil. Those 40 are the
+/// three `GLOBAL_*` append slots and append2's `LUMA_MEAN_REF`, and all four
+/// finalize from the same four sums.
+///
+/// This is a COMPUTE-SET selector at a FIXED layout, exactly like
+/// [`V1PoolsMode`]: the emitted vector keeps the requesting regime's width
+/// and every other slot stays at its structural 0.0. Rows extracted with it
+/// ON are their own regime — never column-mix them with `Off` rows, whose
+/// `GLOBAL_*` are structural zeros rather than values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum V1FreeExtras {
+    /// Nothing extra. The fused kernel runs the identical instruction
+    /// sequence it ran before this type existed.
+    #[default]
+    Off,
+    /// Accumulate Σsrc, Σdst, Σsrc², Σdst² in the fused kernel and finalize
+    /// `GLOBAL_DMEAN` / `GLOBAL_CGAIN` / `GLOBAL_CLOSS` (`f720+`, 3 per
+    /// (scale, channel), minus the `APPEND_SKIP_B_SCALE0` cell the 944 walk
+    /// also skips) and `LUMA_MEAN_REF` (`f924+`, one per scale, Y-only).
+    ///
+    /// Only writes slots whose OWNING block is not running: with the append
+    /// block on, the append kernel owns `GLOBAL_*` and this writes nothing
+    /// there. So a full 944 walk is unaffected whatever this is set to.
+    RawMoments,
+}
 impl Default for V2NewFeatureToggles {
     fn default() -> Self {
         Self {
@@ -1564,6 +1606,7 @@ impl Default for V2NewFeatureToggles {
             append2_dst_activity: false,
             v1_pools: V1PoolsMode::Off,
             v1_only: false,
+            free_extras: V1FreeExtras::Off,
         }
     }
 }
@@ -1702,6 +1745,10 @@ pub(crate) struct ComputeSet {
     pub append2: bool,
     pub append2_dst_activity: bool,
     pub csfw: bool,
+    /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
+    /// here rather than re-read from the toggles at each site, so
+    /// `raw_moments` has ONE derivation.
+    pub free_extras: V1FreeExtras,
 }
 
 impl ComputeSet {
@@ -1726,7 +1773,18 @@ impl ComputeSet {
             append2,
             append2_dst_activity: t.append2_dst_activity && append2,
             csfw: t.csfw_block && v2_blocks,
+            free_extras: t.free_extras,
         }
+    }
+
+    /// Does the v1 fused kernel need to carry the four raw moments?
+    ///
+    /// Only when something will READ them: the free-extras request is on AND
+    /// at least one owning block is off (with `append` on, the append kernel
+    /// owns `GLOBAL_*`; with `append2` on it owns `LUMA_MEAN_REF`). So a full
+    /// 944 walk never pays for this however the toggle is set.
+    pub(crate) fn raw_moments(&self) -> bool {
+        self.free_extras == V1FreeExtras::RawMoments && !(self.append && self.append2)
     }
 
     /// Which plane GROUPS the strip scratch must hold, given whether the v1
@@ -4221,6 +4279,32 @@ fn finish_csfw(csfw: &CsfwAccum, out: &mut [f64]) {
 /// Finalize one channel-scale's append block into its 17 output slots.
 /// `dense`/`grad` supply the first moments matching `app`'s second moments
 /// (identical per-pixel values by construction — see [`AppendAccum`]).
+/// The three `GLOBAL_*` append slots, from the four raw moments — the ONE
+/// implementation, shared by [`finish_append`] (which reads the moments off
+/// the append kernel) and the free-extras finalize (which reads the
+/// BIT-SAME-DEFINITION moments off the v1 fused kernel). Sharing it is what
+/// makes `free_extras_match_append_block` a gate on the ACCUMULATION rather
+/// than a comparison of two hand-copied formulas.
+///
+/// Returns `(GLOBAL_DMEAN, g_cgain, g_closs)`; the caller applies its own
+/// clamp to the pair, exactly as before.
+#[inline]
+fn global_stats_from_raw_moments(
+    sum_s: f64,
+    sum_d: f64,
+    sum_s2: f64,
+    sum_d2: f64,
+    n_f: f64,
+) -> (f64, f64, f64) {
+    let dmean = saturate((sum_s - sum_d).abs() / n_f, C_GDMEAN);
+    let gmean_s = sum_s / n_f;
+    let gmean_d = sum_d / n_f;
+    let gvar1 = (sum_s2 / n_f - gmean_s * gmean_s).max(0.0);
+    let gvar2 = (sum_d2 / n_f - gmean_d * gmean_d).max(0.0);
+    let (g_cgain, g_closs) = bounded_excess_pair(gvar2, gvar1, C_GCONTRAST);
+    (dmean, g_cgain, g_closs)
+}
+
 fn finish_append(
     dense: &DenseAccum,
     app: &AppendAccum,
@@ -4278,12 +4362,9 @@ fn finish_append(
     };
     out[idx_append::ART_DEV2] = clamp01(dev_from_moments(dense.sum_art, app.sum_art2, n_f));
     out[idx_append::DET_DEV2] = clamp01(dev_from_moments(dense.sum_det, app.sum_det2, n_f));
-    out[idx_append::GLOBAL_DMEAN] = saturate((app.sum_s - app.sum_d).abs() / n_f, C_GDMEAN);
-    let gmean_s = app.sum_s / n_f;
-    let gmean_d = app.sum_d / n_f;
-    let gvar1 = (app.sum_s2 / n_f - gmean_s * gmean_s).max(0.0);
-    let gvar2 = (app.sum_d2 / n_f - gmean_d * gmean_d).max(0.0);
-    let (g_cgain, g_closs) = bounded_excess_pair(gvar2, gvar1, C_GCONTRAST);
+    let (g_dmean, g_cgain, g_closs) =
+        global_stats_from_raw_moments(app.sum_s, app.sum_d, app.sum_s2, app.sum_d2, n_f);
+    out[idx_append::GLOBAL_DMEAN] = g_dmean;
     out[idx_append::GLOBAL_CGAIN] = clamp01(g_cgain);
     out[idx_append::GLOBAL_CLOSS] = clamp01(g_closs);
     out[idx_append::GRAD_SRC_MEAN] = if toggles.gradient_features {
@@ -4347,6 +4428,14 @@ struct V1BasicSums {
     iw_art4: f64,
     iw_det4: f64,
     iw_mse: f64,
+    // --- FREE raw moments ([`V1FreeExtras::RawMoments`]) ---
+    // Σsrc, Σdst, Σsrc², Σdst² over this (scale, channel). Zero unless the
+    // request asked for them; the fused kernel's own fields of the same
+    // name are their only source.
+    sum_s: f64,
+    sum_d: f64,
+    sum_s2: f64,
+    sum_d2: f64,
 }
 
 impl V1BasicSums {
@@ -4386,6 +4475,10 @@ impl V1BasicSums {
         self.iw_art4 += o.iw_art4;
         self.iw_det4 += o.iw_det4;
         self.iw_mse += o.iw_mse;
+        self.sum_s += o.sum_s;
+        self.sum_d += o.sum_d;
+        self.sum_s2 += o.sum_s2;
+        self.sum_d2 += o.sum_d2;
     }
 
     fn accumulate(&mut self, s: &crate::fused::StripChannelAccum) {
@@ -4412,6 +4505,13 @@ impl V1BasicSums {
         self.ssim_max = self.ssim_max.max(s.ssim_max);
         self.edge_art_max = self.edge_art_max.max(s.edge_art_max);
         self.edge_det_max = self.edge_det_max.max(s.edge_det_max);
+        // FREE raw moments: plain sums, so an unconditional merge is exact
+        // whether the kernel filled them (+0.0 otherwise) — same shape as
+        // the peaks above.
+        self.sum_s += s.sum_s;
+        self.sum_d += s.sum_d;
+        self.sum_s2 += s.sum_s2;
+        self.sum_d2 += s.sum_d2;
     }
 
     /// Finalize the v1 pool blocks — peaks (6/ch), masked (6/ch), IW
@@ -4442,6 +4542,22 @@ impl V1BasicSums {
         iw[3] = (self.iw_art4 * one_over_n).max(0.0).powf(0.25).abs();
         iw[4] = (self.iw_det4 * one_over_n).max(0.0).powf(0.25).abs();
         iw[5] = self.iw_mse * one_over_n;
+    }
+
+    /// Finalize the FREE v2-era slots ([`V1FreeExtras::RawMoments`]) this
+    /// (scale, channel)'s raw moments can produce: the three `GLOBAL_*`
+    /// append values (via the shared [`global_stats_from_raw_moments`]) and
+    /// append2's `LUMA_MEAN_REF` (Y-channel only, the same
+    /// `saturate(mean ref, C_LUM_T).clamp(0,1)` the append2 finalize applies
+    /// to the append kernel's `sum_s`).
+    fn finalize_free(&self, n: usize) -> ([f64; 3], f64) {
+        let n_f = n as f64;
+        let (dmean, cgain, closs) =
+            global_stats_from_raw_moments(self.sum_s, self.sum_d, self.sum_s2, self.sum_d2, n_f);
+        (
+            [dmean, cgain.clamp(0.0, 1.0), closs.clamp(0.0, 1.0)],
+            saturate(self.sum_s / n_f, C_LUM_T).clamp(0.0, 1.0),
+        )
     }
 
     /// Finalize into one channel's 13 basic features, replicating v1's
@@ -4626,6 +4742,11 @@ fn fold_v1_one_band(
     raw: [&[f32]; 2],
     sums: &mut V1BasicSums,
     mut pools: Option<(&mut FoldPoolScratch, BandPoolWork)>,
+    // `raw_moments`: also accumulate the FREE raw moments (Σs, Σd, Σs²,
+    // Σd²) in the fused kernel — the four sums that finalize the append
+    // block's GLOBAL_* trio and append2's LUMA_MEAN_REF without any new
+    // plane, load or pass ([`V1FreeExtras`]).
+    raw_moments: bool,
 ) -> usize {
     let [src, dst] = raw;
     let rows = 0..rows_end;
@@ -4724,6 +4845,7 @@ fn fold_v1_one_band(
                 &mut [],
                 &mut [],
                 false,
+                raw_moments,
             ));
             return b1;
         }
@@ -4823,6 +4945,7 @@ fn fold_v1_one_band(
             &mut ssq_v[..band_n],
             &mut s12_v[..band_n],
             full,
+            raw_moments,
         ));
         let inner = inner_start * width..(inner_start + inner_h) * width;
         let inner_src = &src[span.start + inner.start..span.start + inner.end];
@@ -4891,6 +5014,7 @@ fn fold_v1_one_band(
             &mut [],
             &mut [],
             false,
+            raw_moments,
         ));
     }
     b1
@@ -4957,6 +5081,10 @@ fn fold_v1_basic_bands(
     sums: &mut V1BasicSums,
     pools: Option<(&mut [FoldPoolScratch], BandPoolWork)>,
     parallel: bool,
+    // `raw_moments`: see [`fold_v1_one_band`] — forwarded verbatim to every
+    // band on both the serial and the band-parallel path, so the two stay
+    // identical by construction.
+    raw_moments: bool,
 ) {
     assert!(
         !matches!(h_src, FoldHSource::SelfBlur) || pools.is_some(),
@@ -5028,6 +5156,7 @@ fn fold_v1_basic_bands(
                                 raw,
                                 &mut local,
                                 Some((&mut *ps, work)),
+                                raw_moments,
                             );
                             crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                             out.push(local);
@@ -5058,6 +5187,7 @@ fn fold_v1_basic_bands(
                         raw,
                         &mut local,
                         None,
+                        raw_moments,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                     local
@@ -5088,6 +5218,7 @@ fn fold_v1_basic_bands(
             pools
                 .as_mut()
                 .map(|(p, f)| (&mut p[i.min(p.len() - 1)], *f)),
+            raw_moments,
         );
         sums.merge(&local);
     }
@@ -6676,6 +6807,12 @@ fn stream_phase_b(
                 V1PoolsMode::Full => Some((&mut acc.pool_scratch[..], BandPoolWork::Full)),
             },
             band_parallel,
+            // FREE EXTRAS: the fused kernel carries the four raw moments only
+            // when a block that is OFF will finalize them (`ComputeSet::
+            // raw_moments`). With the append + append2 blocks on, their own
+            // kernels own those slots and this is false, so the full 944 walk
+            // is untouched.
+            ComputeSet::from_toggles(toggles).raw_moments(),
         );
     }
 
@@ -8128,6 +8265,30 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             for (ch, acc) in accums.iter().enumerate() {
                 let base = scale * 39 + ch * 13;
                 acc.v1[scale].finalize_into(n, &mut features_v12[base..base + 13]);
+                // FREE EXTRAS ([`V1FreeExtras::RawMoments`]): the v2-era
+                // slots this walk can finalize from the fused kernel's raw
+                // moments, written ONLY where the owning block is off — so
+                // this can never race the append/append2 finalize below.
+                // Index-stable: every other slot of those blocks keeps its
+                // structural 0.0.
+                if toggles.free_extras == V1FreeExtras::RawMoments {
+                    let (globals, luma_mean) = acc.v1[scale].finalize_free(n);
+                    // `GLOBAL_*` live in the append block. The 944 walk skips
+                    // the (B, scale 0) append cell entirely
+                    // (`APPEND_SKIP_B_SCALE0`), so this must skip it too or
+                    // the emitted row would not be the 944 row.
+                    if layout_append && !append_on && append_cell_active(true, ch, scale) {
+                        let apb = app_scale_base + ch * FEATURES_PER_CHANNEL_APPEND;
+                        features_app[apb + idx_append::GLOBAL_DMEAN] = globals[0];
+                        features_app[apb + idx_append::GLOBAL_CGAIN] = globals[1];
+                        features_app[apb + idx_append::GLOBAL_CLOSS] = globals[2];
+                    }
+                    // `LUMA_MEAN_REF` is append2's, Y-only.
+                    if layout_append2 && !append2_on && ch == APPEND2_CHANNEL {
+                        features_app2[scale * APPEND2_PER_SCALE + idx_append2::LUMA_MEAN_REF] =
+                            luma_mean;
+                    }
+                }
                 if toggles.v1_pools != V1PoolsMode::Off {
                     // v1's block-major 372 layout: [basic 156][peaks 72]
                     // [masked 72][iw 72], each pool block scale-major then
@@ -12615,6 +12776,10 @@ pub(crate) mod tests {
                     append2_dst_activity: bits & 128 != 0,
                     v1_pools: pm,
                     v1_only: bits & 3 == 3,
+                    // The free-extras field is exercised by its own gates
+                    // (`free_extras_*`); this one holds the LEGACY derivation,
+                    // which predates it.
+                    free_extras: super::V1FreeExtras::Off,
                 };
                 let cs = ComputeSet::from_toggles(t);
                 // --- the legacy derivation, verbatim ---
@@ -13286,6 +13451,9 @@ pub(crate) mod tests {
                         &mut sums,
                         Some((&mut pool[..], BandPoolWork::Full)),
                         parallel,
+                        // Free moments ON: the self-blur-vs-precomputed
+                        // identity has to cover them too.
+                        true,
                     );
                     sums
                 };
@@ -13614,6 +13782,288 @@ pub(crate) mod tests {
                         "{w}x{h} {tag} par={parallel}: Peaks emitted an all-zero peak block"
                     );
                 }
+            }
+        }
+    }
+
+
+    /// Indices of the 40 FREE slots ([`V1FreeExtras::RawMoments`]) in the
+    /// 944 layout, for a 4-scale pyramid: the three `GLOBAL_*` append slots
+    /// per (scale, channel) plus append2's per-scale `LUMA_MEAN_REF`. The
+    /// `APPEND_SKIP_B_SCALE0` cell is excluded — the 944 walk never computes
+    /// that append cell, so its slots are structural zeros on BOTH sides and
+    /// including them would make the parity gate weaker, not stronger.
+    #[cfg(feature = "training")]
+    fn free_slot_indices(n_scales: usize) -> Vec<usize> {
+        // v1 (31/ch/scale) ++ v2 (29) ++ append (17) ++ append2 (5/scale).
+        let append0 = n_scales * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL);
+        let append2_0 = append0 + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
+        let mut v = Vec::new();
+        for scale in 0..n_scales {
+            for ch in 0..3 {
+                if !super::append_cell_active(true, ch, scale) {
+                    continue;
+                }
+                let base = append0
+                    + scale * 3 * FEATURES_PER_CHANNEL_APPEND
+                    + ch * FEATURES_PER_CHANNEL_APPEND;
+                for local in [
+                    idx_append::GLOBAL_DMEAN,
+                    idx_append::GLOBAL_CGAIN,
+                    idx_append::GLOBAL_CLOSS,
+                ] {
+                    v.push(base + local);
+                }
+            }
+            v.push(append2_0 + scale * APPEND2_PER_SCALE + idx_append2::LUMA_MEAN_REF);
+        }
+        v
+    }
+
+    /// **FREE-EXTRAS GATE 1 — the free set is pure ADDITION.**
+    ///
+    /// [`V1FreeExtras::RawMoments`] on a `v1_only` walk must leave every slot
+    /// the walk already emitted BIT-IDENTICAL and fill only the 40 free
+    /// slots, which are `+0.0` with it off. This is the claim that makes the
+    /// perf question a fair one: the two arms differ by the accumulators, not
+    /// by any change to what the walk computes.
+    #[cfg(feature = "training")]
+    #[test]
+    fn free_extras_are_pure_addition_to_the_v1_only_walk() {
+        const CELLS: &[(usize, usize)] = &[
+            (96, 64),
+            (208, 144),
+            (592, 80),
+            (127, 93),
+            (200, 151),
+            (576, 96),
+            (255, 96),
+        ];
+        for &parallel in &[false, true] {
+            let z =
+                crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(parallel);
+            let mut scratch = V2Scratch::new();
+            for &(w, h) in CELLS {
+                let src = textured_image(w, h, 7);
+                let dst = quantize_distort(&src, w, h);
+                let sref = RgbSlice::new(&src, w, h);
+                let dref = RgbSlice::new(&dst, w, h);
+                // v1-only COMPUTE at the 944 LAYOUT: the free slots have
+                // somewhere to land, and every v2-era block stays off.
+                let base = V2NewFeatureToggles {
+                    v1_only: true,
+                    v1_pools: V1PoolsMode::Peaks,
+                    append_block: true,
+                    append2_block: true,
+                    ..V2NewFeatureToggles::default()
+                };
+                let off = z
+                    .compute_folded720_append_features_streaming(&sref, &dref, base, &mut scratch)
+                    .unwrap();
+                let on = z
+                    .compute_folded720_append_features_streaming(
+                        &sref,
+                        &dref,
+                        V2NewFeatureToggles {
+                            free_extras: V1FreeExtras::RawMoments,
+                            ..base
+                        },
+                        &mut scratch,
+                    )
+                    .unwrap();
+                let (fo, fn_) = (off.features(), on.features());
+                assert_eq!(fo.len(), fn_.len(), "{w}x{h}: width moved");
+                assert_eq!(fo.len(), 944, "{w}x{h}: expected the 944 layout");
+                let free: std::collections::HashSet<usize> =
+                    free_slot_indices(off.n_scales()).into_iter().collect();
+                for i in 0..fo.len() {
+                    if free.contains(&i) {
+                        assert_eq!(
+                            fo[i].to_bits(),
+                            0.0f64.to_bits(),
+                            "{w}x{h} par={parallel}: free slot {i} is {:e} with the mode OFF",
+                            fo[i]
+                        );
+                    } else {
+                        assert_eq!(
+                            fo[i].to_bits(),
+                            fn_[i].to_bits(),
+                            "{w}x{h} par={parallel}: slot {i} moved ({:e} -> {:e})",
+                            fo[i],
+                            fn_[i]
+                        );
+                    }
+                }
+                assert!(
+                    free.iter().filter(|&&i| fn_[i] != 0.0).count() >= free.len() / 2,
+                    "{w}x{h} par={parallel}: the free block came out mostly zero"
+                );
+            }
+        }
+    }
+
+    /// **FREE-EXTRAS GATE 2 — the free slots ARE the 944 slots.**
+    ///
+    /// The whole point of the free set is that a 156-class walk can emit
+    /// slots a model trained on 944 TABLES already knows. That is only true
+    /// if the value matches. It cannot match BITWISE — the v1 fused kernel
+    /// sums a (scale, channel) in column-group-major order over v1's 32-row
+    /// bands while the append kernel sums it row-major over 128-row strips,
+    /// so the two are the same multiset of f64 addends in a different
+    /// grouping — but they must agree to f64 reassociation.
+    ///
+    /// MEASURED, and the binding term is NOT reassociation — it is that the
+    /// two kernels accumulate at different PRECISION. The append kernel adds
+    /// a whole row into f32 SIMD lanes (`r_s = r_s + s`, `width/8` adds per
+    /// lane) and reduces to f64 once per row; the fused kernel reduces every
+    /// 16-lane group to f64 immediately. So the append side carries ~`width/8`
+    /// f32 accumulation steps where this side carries one, and the free value
+    /// is the MORE accurate of the two. The signature confirms it: the
+    /// deltas below scale with WIDTH (worst at the widest cell) and are
+    /// bit-identical between the serial and band-parallel arms, so nothing
+    /// about threading or band order is involved.
+    ///
+    /// Worst measured |Δ| over these cells (both arms): **4.62e-6** at
+    /// 2304×64 (4.44e-6 at 1152×72, 1.24e-6 at 576×96 — the width scaling)
+    /// on `GLOBAL_DMEAN`, i.e. ~1.9e-4 RELATIVE on a
+    /// feature of scale 2.4e-2 — three orders inside this module's own
+    /// documented 5e-4 v2 tolerance. The bar is 2e-5; the full table is in
+    /// `benchmarks/free_features_2026-09-01.md`. `ZENSIM_FREE_DIAG=1`
+    /// prints every non-zero delta with its (scale, channel, slot).
+    #[cfg(feature = "training")]
+    fn free_tol() -> f64 {
+        std::env::var("ZENSIM_FREE_TOL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2e-5)
+    }
+
+    #[cfg(feature = "training")]
+    #[test]
+    fn free_extras_match_the_944_append_block() {
+        const CELLS: &[(usize, usize)] = &[
+            (96, 64),
+            (208, 144),
+            (592, 80),
+            (127, 93),
+            (200, 151),
+            (576, 96),
+            (255, 96),
+            (1152, 72),
+            // Production widths: the delta is width-driven, so the bar has
+            // to be exercised where the product runs, not only at 576².
+            (2304, 64),
+        ];
+        let mut worst = 0.0f64;
+        let mut worst_at = (0usize, 0usize, 0usize);
+        for &parallel in &[false, true] {
+            let z =
+                crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(parallel);
+            let mut scratch = V2Scratch::new();
+            for &(w, h) in CELLS {
+                let src = textured_image(w, h, 7);
+                let dst = quantize_distort(&src, w, h);
+                let sref = RgbSlice::new(&src, w, h);
+                let dref = RgbSlice::new(&dst, w, h);
+                let full = z
+                    .compute_folded720_append_features_streaming(
+                        &sref,
+                        &dref,
+                        V2NewFeatureToggles {
+                            append_block: true,
+                            append2_block: true,
+                            ..V2NewFeatureToggles::default()
+                        },
+                        &mut scratch,
+                    )
+                    .unwrap();
+                let free = z
+                    .compute_folded720_append_features_streaming(
+                        &sref,
+                        &dref,
+                        V2NewFeatureToggles {
+                            v1_only: true,
+                            v1_pools: V1PoolsMode::Peaks,
+                            append_block: true,
+                            append2_block: true,
+                            free_extras: V1FreeExtras::RawMoments,
+                            ..V2NewFeatureToggles::default()
+                        },
+                        &mut scratch,
+                    )
+                    .unwrap();
+                let (a, b) = (full.features(), free.features());
+                for i in free_slot_indices(full.n_scales()) {
+                    let d = (a[i] - b[i]).abs();
+                    if d > worst {
+                        worst = d;
+                        worst_at = (w, h, i);
+                    }
+                    if std::env::var("ZENSIM_FREE_DIAG").is_ok() && d > 1e-12 {
+                        let append0 = full.n_scales() * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL);
+                        let (sc, ch, loc) = if i < append0 + full.n_scales() * 3 * FEATURES_PER_CHANNEL_APPEND {
+                            let r = i - append0;
+                            (r / (3 * FEATURES_PER_CHANNEL_APPEND),
+                             (r % (3 * FEATURES_PER_CHANNEL_APPEND)) / FEATURES_PER_CHANNEL_APPEND,
+                             r % FEATURES_PER_CHANNEL_APPEND)
+                        } else {
+                            (99, 99, 99)
+                        };
+                        eprintln!("DIAG {w}x{h} par={parallel} slot={i} s{sc} c{ch} L{loc} 944={:.12e} free={:.12e} d={d:.3e}", a[i], b[i]);
+                    }
+                    assert!(
+                        d <= free_tol(),
+                        "{w}x{h} par={parallel}: free slot {i} = {:e}, 944 walk says {:e} (Δ {d:e})",
+                        b[i],
+                        a[i]
+                    );
+                }
+            }
+        }
+        eprintln!("free-extras vs 944 append: worst |Δ| = {worst:e} at {worst_at:?}");
+    }
+
+    /// **FREE-EXTRAS GATE 3 — a live 944 walk is untouched.**
+    ///
+    /// With the append + append2 blocks ON, their own kernels own every free
+    /// slot, so `ComputeSet::raw_moments` must be false and the whole 944
+    /// walk must be bit-identical whatever the toggle says. This is what
+    /// makes the field safe to set unconditionally in a profile.
+    #[cfg(feature = "training")]
+    #[test]
+    fn free_extras_never_touch_a_live_944_walk() {
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let mut scratch = V2Scratch::new();
+        for &(w, h) in &[(208usize, 144usize), (127, 93), (576, 96)] {
+            let src = textured_image(w, h, 7);
+            let dst = quantize_distort(&src, w, h);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            let base = V2NewFeatureToggles {
+                append_block: true,
+                append2_block: true,
+                ..V2NewFeatureToggles::default()
+            };
+            let off = z
+                .compute_folded720_append_features_streaming(&sref, &dref, base, &mut scratch)
+                .unwrap();
+            let on = z
+                .compute_folded720_append_features_streaming(
+                    &sref,
+                    &dref,
+                    V2NewFeatureToggles {
+                        free_extras: V1FreeExtras::RawMoments,
+                        ..base
+                    },
+                    &mut scratch,
+                )
+                .unwrap();
+            for (i, (x, y)) in off.features().iter().zip(on.features()).enumerate() {
+                assert_eq!(
+                    x.to_bits(),
+                    y.to_bits(),
+                    "{w}x{h}: 944 slot {i} moved under free_extras ({x:e} -> {y:e})"
+                );
             }
         }
     }

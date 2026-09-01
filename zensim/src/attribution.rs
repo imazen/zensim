@@ -858,6 +858,9 @@ fn process_channel_banded(
             &mut [],
             &mut [],
             false,
+            // The attribution walk emits no append/append2 slots, so it never
+            // needs the free raw moments.
+            false,
         );
         merge_acc(&mut acc, &band);
         y = inner_end;

@@ -16,7 +16,7 @@
 //! # allocates O(image) — multiple GB at 80 MP).
 //! ```
 
-use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
+use zensim::feature_v2::{V1FreeExtras, V1PoolsMode, V2NewFeatureToggles, V2Scratch};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
 /// Deterministic procedural content — `tests/streaming_strips.rs`'s
@@ -77,6 +77,8 @@ fn main() {
     //   `944full` — every pool live (`folded720append2pools`), the product mode
     //   `924`     — append2/csfw/pools off (the crate default)
     //   `372`     — `v1_only`: phase A never runs, each fold band self-blurs
+    //   `156`/`15c`/`15f` — the basic-only class, its 944-layout control, and
+    //             the free-superset walk (free_features_2026-09-01)
     let arm = std::env::var("ZENSIM_BIGPAIR_TOGGLES").unwrap_or_else(|_| "944full".into());
     let toggles = match arm.as_str() {
         "372" => V2NewFeatureToggles {
@@ -99,6 +101,33 @@ fn main() {
         "156" => V2NewFeatureToggles {
             v1_only: true,
             v1_pools: V1PoolsMode::Peaks,
+            ..Default::default()
+        },
+        // --- the free-feature A/B (`benchmarks/free_features_2026-09-01.md`).
+        // THREE characters like `156`, because the ASLR protocol (era-2 §22.5)
+        // requires byte-identical environment blocks between interleaved arms:
+        // the size of the env block is itself a layout input, and an arm
+        // selected by a longer string is measuring a different address space.
+        //
+        // `15c` — the CONTROL: the 944 LAYOUT with the v1-only COMPUTE set, so
+        // it differs from `15f` in nothing but the four accumulators. Its
+        // measured delta against `15f` is the whole question; its delta
+        // against `156` is what the wider output vector costs.
+        "15c" => V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Peaks,
+            append_block: true,
+            append2_block: true,
+            ..Default::default()
+        },
+        // `15f` — the FREE SUPERSET walk: the same compute set plus the four
+        // raw moments, which finalize the 40 free v2-era slots.
+        "15f" => V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Peaks,
+            append_block: true,
+            append2_block: true,
+            free_extras: V1FreeExtras::RawMoments,
             ..Default::default()
         },
         // `944carriers` — pools reduced to the 10 named carrier slots.
