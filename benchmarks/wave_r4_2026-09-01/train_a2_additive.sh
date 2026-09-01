@@ -15,28 +15,44 @@
 #      available without the decode step).
 # A6 = the SAME recipe on the 196k leg (once decoded + extracted) — the
 #      hybrid lane's own measured +0.057 CID22 lever (SS12.1/SS12.3).
+# A2b = the free-features lane's 2026-09-01 hand-off (benchmarks/
+#       free_features_2026-09-01.md SS4): 156 + 109 free slots (72 peaks,
+#       already live in any pools-regime wave-r4 table since a full 944 walk
+#       computes them via the append kernel regardless of the RawMoments
+#       toggle -- VERIFIED empirically on ext_safesyn_full.parquet, all 37
+#       raw-moment indices substantially nonzero, no re-extraction needed).
+#       Needs WR4_MAXFEAT=944 (the free slots sit past f371) and
+#       WR4_SLICE=slice_basic156_free.txt -- both env-overridable below,
+#       defaulting to A2's exact prior behavior (372 / slice_basic156.txt)
+#       so this change is backward compatible.
 #
-# Usage: train_a2_additive.sh <ARM:A2|A6> <safesyn.parquet>
+# Usage: train_a2_additive.sh <ARM:A2|A6|A2b|...> <safesyn.parquet> [lam]
 set -euo pipefail
-ARM="${1:?ARM required: A2|A6}"
+ARM="${1:?ARM required: A2|A6|A2b|...}"
 SAFE="${2:?safesyn parquet required}"
 [ -f "$SAFE" ] || { echo "ABORT: missing $SAFE"; exit 1; }
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 BDR="${ZL_BDR:-/mnt/v/zen/cargo-targets/waver4/release/bake_dial_refit}"
-SLICE="$REPO/scripts/sota944/slice_basic156.txt"
+SLICE="${WR4_SLICE:-$REPO/scripts/sota944/slice_basic156.txt}"
+MAXFEAT="${WR4_MAXFEAT:-372}"
 OUT="${WR4_OUT:-/mnt/v/output/zensim/wave-r4-2026-09-01/bakes}"
 mkdir -p "$OUT"
-LAM=0.002
+LAM="${3:-0.002}"
 
-echo "== $ARM gram (raw, max-feat 372, target-clip-min -100) on $SAFE $(date -u +%H:%M:%SZ)"
-"$BDR" gram --parquet "$SAFE" --target human_score --target-scale 100 \
-    --target-clip-min -100 --space raw --max-feat 372 --out "$OUT/${ARM}_gram_human_c100.npz"
+GRAM="$OUT/${ARM}_gram_human_c100_mf${MAXFEAT}.npz"
+if [ ! -f "$GRAM" ]; then
+  echo "== $ARM gram (raw, max-feat $MAXFEAT, target-clip-min -100) on $SAFE $(date -u +%H:%M:%SZ)"
+  "$BDR" gram --parquet "$SAFE" --target human_score --target-scale 100 \
+      --target-clip-min -100 --space raw --max-feat "$MAXFEAT" --out "$GRAM"
+else
+  echo "== $ARM gram already built at $GRAM (max-feat $MAXFEAT), reusing"
+fi
 
-echo "== $ARM fit-lasso lam=$LAM (ADD156's own) $(date -u +%H:%M:%SZ)"
-"$BDR" fit-lasso --gram "$OUT/${ARM}_gram_human_c100.npz" --space raw --target human_score \
+echo "== $ARM fit-lasso lam=$LAM slice=$(basename "$SLICE") $(date -u +%H:%M:%SZ)"
+"$BDR" fit-lasso --gram "$GRAM" --space raw --target human_score \
     --lam "$LAM" --slice-file "$SLICE" \
     --anchor-parquet "$SAFE" --anchor-target human_score --anchor-scale 100 \
     --anchor-stride 37 --anchor-prefix \
-    --embed-repro --out "$OUT/${ARM}_r4.bin"
+    --embed-repro --out "$OUT/${ARM}_r4_l${LAM}.bin"
 
-echo "DONE $ARM -> $OUT/${ARM}_r4.bin"
+echo "DONE $ARM -> $OUT/${ARM}_r4_l${LAM}.bin"
