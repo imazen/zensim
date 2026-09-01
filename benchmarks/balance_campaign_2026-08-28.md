@@ -5070,3 +5070,67 @@ exception. Remaining honest KonJND paths for the 156 class: new human near-thres
 staged squintly study targets exactly this zone and is data we would OWN), architecture beyond
 this recipe, the unexploited class-C in-register free slots, or shipping D with the kon weakness
 stated while B/944 serves kon-sensitive uses.
+
+## ROUND 48 — board closure (both closure lanes onto the gauntlet, `5f9f2376`/`4b95b4a2`/`52932525`..)
+
+Two closure lanes landed the same session and both are now on the board, per the standing
+'gauntlet always current' rule (every verdict cell belongs on the board, negative results
+included).
+
+**(a) a4bkon exam stamp + K1-K4 promotion.** `5f9f2376` stamps APPENDIX C onto
+`ssim2_replacement_bar_2026-08-31.md`: the a4bkon lane's three KonJND closers (K1 kon-weight
+1.8/2.4, K2 the ttbig mixed-teacher leg, K3 combined) all fail to close A4b's KonJND-only W1
+gap — K1/K3 make KonJND *worse* (−0.0855/−0.0804/−0.0774 vs A4b's 0.4327), K2 is a
+statistical wash (−0.0010) but costs composite and a within-image CID22 axis A4b itself
+passes. A4b/K4 stands as the best 156+free profile produced (composite 0.8664, the highest of
+the whole wave). `4b95b4a2` then promoted the 9 a4bkon fullevals (K1 w1.8/w2.4 × 2 seeds, K2 ×
+2 seeds, K3 × 2 seeds, K4) via `scripts/promote_fulleval.py --strip-per-pair` +
+`--set-block-profile` — K4 under its true identity `A4b_s4004` (sha256-confirmed identical to
+wave-r4's own file, not a duplicate name), K1-K3 as `a4bkon_K*`. All 9 round-tripped exactly
+against wave doc §24.7; board grew 21,035,320 → 21,386,638 bytes; both mandatory gates PASSED.
+
+**(b) wave-r4's own 16 arms (this round).** Inventoried `wave_r4_2026-09-01.md` §19 (the
+closing exam table) against the artifact root `/mnt/v/output/zensim/wave-r4-2026-09-01/`:
+16 `.fulleval.json` files on disk, matching exactly the 13 §19 table rows plus 3 arms that
+exist on disk but aren't in the closing table (`A1_r4_s4004`, the pre-fix diagnostic; `A2_r4`,
+superseded in the table by A6's bigger leg but never re-cited; `A2b_l0.002`, the sparser-λ
+sibling of the promoted `A2b_l0.3`). sha256-cross-checked all 16 against the 390 existing
+board fullevals first: only `A4b_s4004` was already present (byte-identical, promoted minutes
+earlier in (a) as K4) — not re-promoted. Of the remaining 15: **14 promoted**, **1 skipped**.
+
+Skipped: `A1_r4_s4004` — the wave doc (§7.3/§7.6) explicitly disclaims this file as a
+wrong-regime diagnostic: the first A1 retrain was scored with a bare `bake_verdict` call that
+silently fell back to the era-1 canonical features root instead of the wave's own
+`foldapp2_views/` root, and the doc says outright the resulting `.verdict.md`/fulleval "are
+kept on disk as that historical (wrong-root) record; they are **not** cited below" — best_val
+0.3058 (vs the corrected retrain's 0.9242), dial-mono 0.9271 (below the 0.93 gate). This is
+bug-diagnosis evidence, not a candidate arm; the doc's real A1 flagship citation is
+`A1foldapp2_r4_s4004`/`A1foldapp2_r4_s4005`, both promoted under their own on-disk names.
+
+Promoted (own on-disk stem as board name, matching the K4-keeps-its-own-identity precedent —
+none of these needed a `waver4_` disambiguation prefix, they're already wave-scoped and
+distinct): `A1foldapp2_r4_s4004`, `A1foldapp2_r4_s4005`, `A2_r4`, `A2b_l0.002`, `A2b_l0.3`,
+`A2ctrl_l0.3`, `A3_r4_s4004`, `A3_r4_s4005`, `A3b_s4004`, `A4_r4_s4004`, `A5_r4_s4004`,
+`A5_r4_s4005`, `A6_l002`, `A6_l3` — all via `promote_fulleval.py --strip-per-pair` then
+`--set-block-profile`; M3a is `null` on all 14 (never measured this wave, `harvest_bakes.sh`
+was not run — correctly rendered as an em-dash, never a fabricated zero). Spot-checked 4 cells'
+CID22/KonJND/composite against the wave doc's own tables — **exact matches on every figure**:
+`A1foldapp2_r4_s4004` CID22 0.8897/KonJND 0.4773/composite 0.8601 (§8.1+§23); `A6_l3` CID22
+0.8495/KonJND 0.4870/composite 0.8150 (§21.2+§23); `A3b_s4004` KonJND 0.3540/composite 0.8598
+(§23), and its promoted `block_profile` reproduces §23's fingerprint exactly (`v1_basic`
+156/156, `v1_peaks` 72/72, `v1_masked`+`v1_iw` 0/72 each, `f720_943` 37/224); `A2_r4` CID22
+0.7760/KonJND 0.3964/composite 0.7650 (§9).
+
+Appended discussion set `2026-09-01-wave-r4` to `board_discussion_sets.json` (current
+id/date/label/bakes/note schema) listing the 14 new names + `A4b_s4004` + the incumbent/peer
+comparators (`W10L9PH_s4004_packed`, `ADD156_safesyn_only_raw_lasso`, `peer_ssim2`), with a
+note summarizing §19's closing verdict and the two honest rankings (A5 s4005 cleanest 944-class
+W1 profile; A4b cleanest 156-class-ish + highest composite of the wave).
+
+Regenerated the board (`bandwise_dashboard.py --fulleval-dir ... --out summer_gauntlet.html`,
+404 fullevals now on disk, 53.8s wall): 21,386,638 → **21,872,718 bytes (+486,080 B, +0.46 MB,
+20.86 MB total)**. Both mandatory gates (`gauntlet_gates.sh`) **PASS**: GATE 1 (`node --check`,
+2 script blocks) and GATE 2 (DOM-shim render harness: 387 bakes rendered, 13 sections, 31
+tables, 641 rows, 11 svgs, loop panel 11 models, failure panel 16 rows/345 findings, 1360
+registry-annotated cells). Still well over the registered 12 MB cap — the trim decision is
+still the user's, unchanged and untouched here, reported not acted on.
