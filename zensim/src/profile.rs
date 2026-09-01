@@ -763,6 +763,18 @@ impl ProfileParamsBuilder {
 
     /// Return the bake's raw (already-calibrated) output directly instead
     /// of applying `100 − A·d^B`. Correct for MCOS/spline-calibrated bakes.
+    ///
+    /// **Defaults to `false`, and every modern bake needs `true`.** Any bake
+    /// carrying a `zentrain.output_calibration_spline` already emits a
+    /// calibrated 0–100 score; leaving this `false` composes the legacy
+    /// *distance* mapping on top of that spline and drives essentially every
+    /// score to exactly `0.0` after the clamp. That combination is
+    /// **refused** at scoring time with a
+    /// [`ModelForwardFailed`](crate::ZensimError::ModelForwardFailed) naming
+    /// this setting, rather than returning the zero (ADD156 ship audit
+    /// 2026-08-31, defect D9). Pair it with
+    /// [`extrapolate_score(true)`](Self::extrapolate_score) to keep the
+    /// negative tail the product contract requires.
     pub fn skip_score_mapping(mut self, v: bool) -> Self {
         self.inner.skip_score_mapping = v;
         self
@@ -825,6 +837,12 @@ impl ProfileParamsBuilder {
 
     /// Return the (spline-extrapolated) score without any clamp, allowing
     /// values below 0 / above 100. Overrides `soft_clamp_score`.
+    ///
+    /// **Defaults to `false`, which silently deletes the negative tail.**
+    /// Inputs worse than the worst codec output are contracted to score
+    /// below 0; the default hard clamp pins them all to `0.0` and collapses
+    /// their rank into one tie block. Every spline-carrying profile in this
+    /// crate sets this `true`.
     pub fn extrapolate_score(mut self, v: bool) -> Self {
         self.inner.extrapolate_score = v;
         self

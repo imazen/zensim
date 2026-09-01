@@ -3592,6 +3592,27 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
+    // **Score-disposition guard (D9).** A bake carrying
+    // `zentrain.output_calibration_spline` emits an already-calibrated
+    // 0-100 score. Scoring it with `skip_score_mapping == false` applies
+    // the legacy `100 - A*d^B` DISTANCE mapping on top of that spline,
+    // sending every realistic score deeply negative; the default hard
+    // clamp then pins it to exactly 0.0. The observed signature is a
+    // model that looks catastrophically broken: identity 100, the very
+    // worst quality point scoring ~9, and every other point exactly
+    // 0.000000 (ADD156 ship audit 2026-08-31, defect D9 — reproduced
+    // first try, because the naive builder configuration IS the wrong
+    // one: `ProfileParams::builder()` defaults BOTH `skip_score_mapping`
+    // and `extrapolate_score` to `false`).
+    //
+    // Silently-wrong pixels/scores are a shipping bug, never a tolerated
+    // tradeoff, so we refuse the combination instead of returning the
+    // zero. The check runs only when `skip_score_mapping == false`, which
+    // no spline-carrying profile in this crate sets, so the shipped path
+    // pays nothing.
+    if !params.skip_score_mapping {
+        check_score_disposition(params, loader)?;
+    }
     // **Identity-image short-circuit guard.** When the byte-identical
     // short-circuit in `compute_with_config_inner` /
     // `compute_zensim_with_config` fires, it produces
@@ -4407,6 +4428,59 @@ fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
 /// samples rather than computed per-sample. See
 /// `apply_hybrid_head_runtime` above for the formula and payload
 /// layout.
+/// True iff `bytes` parses as a bake carrying a
+/// `zentrain.output_calibration_spline` metadata entry — i.e. its raw
+/// output is already a calibrated 0-100 score rather than a distance.
+///
+/// A parse failure returns `false`: the forward pass that follows will
+/// surface the real parse error with a better diagnostic than this guard
+/// could, and this helper must never turn a load problem into a
+/// configuration complaint.
+fn bake_carries_output_spline(bytes: &[u8]) -> bool {
+    crate::mlp::Model::from_bytes(bytes)
+        .map(|model| model.metadata().get(OUTPUT_CALIBRATION_SPLINE_KEY).is_some())
+        .unwrap_or(false)
+}
+
+/// Refuse a profile configuration that would silently produce garbage
+/// scores (ADD156 ship audit 2026-08-31, defect **D9**).
+///
+/// Every bake whose raw output feeds [`dispose_mlp_raw`] is checked: if it
+/// carries an output-calibration spline while the profile asks for the
+/// legacy distance mapping, the two calibrations compose into nonsense and
+/// the hard clamp hides it as an exact `0.0`. Fail loud, naming the
+/// setting that is missing.
+///
+/// The ensemble CLASSIFIER bake is deliberately not checked — its output is
+/// a routing logit that never reaches the score disposition.
+fn check_score_disposition(
+    params: &crate::profile::ProfileParams,
+    primary: fn() -> &'static [u8],
+) -> Result<(), ZensimError> {
+    const MISCONFIGURED: &str = "bake carries zentrain.output_calibration_spline \
+         (its raw output is already a calibrated 0-100 score) but \
+         ProfileParams::skip_score_mapping is false, so the legacy 100-A*d^B \
+         distance mapping would be applied on top of the spline and clamp \
+         virtually every score to exactly 0 — set .skip_score_mapping(true), \
+         and .extrapolate_score(true) to keep the negative tail";
+
+    for loader in [
+        Some(primary),
+        params.mlp_bytes_b3,
+        params.mlp_bytes_compression,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if bake_carries_output_spline(loader()) {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: MISCONFIGURED,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn forward_one_bake(
     bytes: &[u8],
     features: &[f64],
@@ -5344,6 +5418,139 @@ pub(crate) fn combine_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **D9 (ADD156 ship audit, `benchmarks/add156_ship_audit_2026-08-31.md`).**
+    /// A bake carrying `zentrain.output_calibration_spline` already emits a
+    /// calibrated 0–100 score. Configuring it with
+    /// `skip_score_mapping == false` re-applies the legacy `100 − A·d^B`
+    /// *distance* mapping on top of the spline, which drives every realistic
+    /// score deeply negative; the default hard clamp then pins it to
+    /// **exactly 0.0**. The audit reproduced this first try on ADD156:
+    /// identity 100.000000, q5 = 9.300537, and **q10 through q100 all
+    /// exactly 0.000000**, with no error and no warning — a model that looks
+    /// catastrophically broken when only its wiring is.
+    ///
+    /// Two assertions, and both must hold:
+    ///  1. the pathology itself is PINNED — a real spline-bake output run
+    ///     through the misconfigured disposition really is exactly `0.0`, so
+    ///     nobody can "fix" this by quietly changing the mapping and leave
+    ///     the silent-zero class alive;
+    ///  2. the combination is now REFUSED with a diagnostic that names the
+    ///     missing setting, instead of returning that zero.
+    ///
+    /// Assertion 2 is the one that fails before the fix.
+    #[test]
+    fn d9_spline_bake_without_skip_score_mapping_is_refused_not_silently_zeroed() {
+        use crate::source::RgbSlice;
+
+        // A deterministic non-degenerate pair. The distorted side is a
+        // coarse quantization of the reference, which lands the score well
+        // inside the dial's interior (nowhere near 0 or 100).
+        const W: usize = 64;
+        const H: usize = 64;
+        let mut refpx = vec![[0u8; 3]; W * H];
+        let mut dstpx = vec![[0u8; 3]; W * H];
+        for y in 0..H {
+            for x in 0..W {
+                let i = y * W + x;
+                let r = ((x * 3 + y) % 256) as u8;
+                let g = ((x + y * 5) % 256) as u8;
+                let b = ((x * 7 + y * 2) % 256) as u8;
+                refpx[i] = [r, g, b];
+                // 5-bit quantize + a structured ripple: a real, visible distortion.
+                let q = |v: u8| (v & 0xF8).saturating_add(if (x + y) % 3 == 0 { 9 } else { 0 });
+                dstpx[i] = [q(r), q(g), q(b)];
+            }
+        }
+        let src = RgbSlice::new(&refpx, W, H);
+        let dst = RgbSlice::new(&dstpx, W, H);
+
+        // Control: the SHIPPED, correct configuration (PROFILE_B sets
+        // `skip_score_mapping: true` + `extrapolate_score: true`).
+        let control = Zensim::new(ZensimProfile::B)
+            .with_parallel(false)
+            .compute(&src, &dst)
+            .expect("control compute with the shipped B profile");
+        let good_score = control.score();
+        assert!(
+            good_score.is_finite() && good_score > 1.0 && good_score < 99.0,
+            "control score {good_score} is not in the dial interior — the \
+             fixture no longer exercises the path this test is about"
+        );
+        let feats = control.features().to_vec();
+        assert_eq!(
+            feats.len(),
+            372,
+            "B is a 372-input profile; got {} features",
+            feats.len()
+        );
+
+        // The misconfiguration: identical to PROFILE_B except for the two
+        // dispositions a caller using `ProfileParams::builder()` gets BY
+        // DEFAULT (both `false`).
+        let broken = crate::profile::ProfileParams {
+            weights: &crate::profile::WEIGHTS_PREVIEW_V0_2,
+            blur_radius: 5,
+            blur_passes: 1,
+            num_scales: 4,
+            bounded_squash: false,
+            score_mapping_a: 18.0,
+            score_mapping_b: 0.7,
+            skip_score_mapping: false, // <-- the defect
+            mlp_bytes: Some(crate::profile::linear_bake_b_cid80),
+            mlp_bytes_b3: None,
+            mlp_primary_mix: 1.0,
+            extended_features: true,
+            compute_iw_features: true,
+            soft_clamp_score: false,
+            extrapolate_score: false, // <-- the defect's silencer
+            ensemble_classifier_bytes: None,
+            mlp_bytes_compression: None,
+        };
+
+        // (1) Pin the pathology. `control.raw_distance()` is the bake's
+        // post-spline raw output — already a 0–100 score. Running it through
+        // the misconfigured disposition yields EXACTLY zero.
+        let raw = control.raw_distance();
+        assert!(
+            raw > 7.5,
+            "fixture raw output {raw} is too small to trigger the pathology"
+        );
+        let silent_garbage = dispose_mlp_raw(raw, &broken);
+        assert_eq!(
+            silent_garbage, 0.0,
+            "the D9 pathology no longer reproduces: raw {raw} disposed to \
+             {silent_garbage} instead of exactly 0.0"
+        );
+
+        // (2) The guard: scoring under that configuration must FAIL LOUD.
+        let mut result = ZensimResult::new(
+            0.0,
+            0.0,
+            feats,
+            ZensimProfile::B,
+            control.mean_offset(),
+        );
+        let outcome = apply_mlp_scoring(&mut result, &broken, W as u32, H as u32);
+        let err = match outcome {
+            Err(e) => e,
+            Ok(()) => panic!(
+                "D9 REGRESSION: a spline-carrying bake scored with \
+                 skip_score_mapping=false returned Ok and score {} — silent \
+                 garbage instead of a diagnostic",
+                result.score()
+            ),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("skip_score_mapping"),
+            "the diagnostic must name the setting that was missing; got: {msg}"
+        );
+        assert!(
+            msg.contains("output_calibration_spline"),
+            "the diagnostic must name what the bake carries; got: {msg}"
+        );
+    }
 
     /// `soft_clamp_score` matches its documented boundary values and
     /// stays monotone strictly increasing — the rank-preservation
