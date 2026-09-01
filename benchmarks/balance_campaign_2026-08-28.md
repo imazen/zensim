@@ -4907,3 +4907,43 @@ previous regen (962 badged cells, 362 bakes, 18 tables, ECharts SSR); byte-compa
 HTML around the `discussionSets` array, prefix and suffix are **byte-identical** and the file grows
 by exactly **+477 B**. Prior board preserved. Board:
 http://localhost:3300/zensim/reports/summer_gauntlet.html
+
+## 2026-08-31 ~23:3xZ — ROUND 37: THE FAILURE-PROFILE PANEL (user: "minimal info on its flaws and where they will hurt") — ladder inversions board-wide, and pooled numbers proven to hide the risk (`926e8020`..`dc477a08`; doc `benchmarks/failure_profiles_2026-08-31.md`)
+
+**The board now says what a model gets WRONG**: a "Failure profile — what breaks, how big, where
+you meet it" section under the scoreboard — findings ranked by product impact in the four-part form
+(what breaks / how big / where you meet it / evidence), a side-by-side comparison for the
+discussion set, named worst ladders, the honest inverse ("reliably good at"), and an explicit
+NOT-MEASURED list. Nothing recomputed — stored numbers thresholded into severity + situation.
+**`frac_negative` was the buried lede**: present on 374 of 379 cells and rendered on no panel — it
+is the share of images where a per-image codec loop walks the WRONG WAY.
+
+**Ladder inversions, board-wide, built into the owner** (`bake_verdict`'s dial panel: codec × zone
++ content × zone buckets, ladders-ending-backwards, worst ladders BY NAME; the `all` rows re-derive
+the pooled G3 counters and the run ASSERTS it to the last digit). **322 of 379 cells measured, 0
+graft failures**; the driver accepts only the run whose pooled dial block is byte-identical to the
+board's; every skip carries a reason. **q≥85 is where the board fails**: median inversion 2.83 %
+(vs 0.76/0.79 below), **189 of 322 models carry a ladder that ends backwards there**; avif worst
+(median 3.64 %, p90 14.03 %), webp nearly clean. Discussion set: shipped **B**'s worst single
+reversal at aggressive quality is **30.2 dial points** — a statement its pooled mono 0.9792 does
+not contain; `Q7b_pools` has NO backwards ladders but the deepest single step (91.3) — a different
+risk shape a mono column cannot distinguish; the 944 flagship is cleanest at q≥85 (0.36 %, 0
+backwards).
+
+**Two honest negatives, both registered**: (1) the byte-identity gate found **7 board cells cut on
+the un-quarantined 2026-05-29 grid** (their inversion counts inflated BY THE GRID) — and this
+FALSIFIED the pass's own draft headline: the ~19-point "collapse" at a JXL rung is CORRECT scoring
+of a broken encode (66.7 % of features grow 5–8 orders of magnitude on the bad grid vs 0.6 % on the
+healthy one); (2) `aic4-corpus-wide-per-ref-inversion` measured on 373 cells (median 60 % of refs
+backwards) and reported as a CORPUS property, never a model defect. **Extended the audit's HF
+finding**: on the real 48-ref `hf_nearlossless`, shipped B ranks **20.8 %** of references backwards
+where ADD156 ranks 0 % — and `mlp_2L_diverse_H128@cur372` / `winner_dial…@cur372` invert **~86 %
+of references with NEGATIVE per-ref means while publishing positive pooled SROCCs**; that shape is
+now a `blocker` row on the board.
+
+Render harness EXTENDED (a blank failure panel or a NOT-MEASURED cell drawn as zero now FAILS the
+gate — it caught a real crash pre-ship); gates PASS (974 badges, 29 tables). Board +3.76 % to
+20.7 MB (already past the documented cap before this pass; the trim lever is the registered size
+rule). Not measured, stated: per-ref-by-name on rank corpora (zenstats returns aggregates; the
+interned-id fix is a sibling-repo item), KonJND has no per-ref statistic, G-RANGE/G-RD/G-TARGET are
+other tools' rows.
