@@ -151,6 +151,18 @@ def promote(verdict: Path, name: str, members: list[str] | None, out_dir: Path,
         # ANCHOR member (bake_verdict introspects Ensemble::primary).
         if not members:
             raise SystemExit("promote: --members / --members-file produced an empty list")
+        # The verdict may already carry the member list AND the convex weights
+        # (`bake_verdict --ensemble [--ensemble-weights]` stamps both). When it
+        # does, the caller's list must AGREE with it — otherwise the board's
+        # `ens×k` marker and its member names would describe a different mix
+        # from the one that scored, which is exactly the drift `--members`
+        # exists to prevent. `member_weights` is carried through untouched.
+        src_names = model.get("member_names")
+        if isinstance(src_names, list) and list(src_names) != list(members):
+            raise SystemExit(
+                f"promote: --members {list(members)} disagrees with the verdict's own "
+                f"model.member_names {list(src_names)} — refusing to relabel a mix that "
+                f"did not score")
         model["kind"] = "ensemble"
         model["members"] = len(members)
         model["member_names"] = list(members)

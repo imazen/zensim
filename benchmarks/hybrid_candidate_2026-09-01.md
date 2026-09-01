@@ -309,3 +309,160 @@ of a narrow window depends on whether the refinement was planned or was a
 search for a passing cell. Every refined cell is reported, and the window's
 measured width — not the existence of one passing cell — is what §7 argues
 from.
+
+---
+
+## 6. RESULTS
+
+Every number below is `bake_verdict --full-json` (rank + dial) or the exam's
+own `paired_perref_boot.py` (CIs, B = 10,000, seed 20260901, references as the
+resample unit), on the ONE keyed pools-944 substrate, with `peer_ssim2` read
+from the board cell it already published. Nothing statistical is computed in
+this lane.
+
+### 6.1 The sweep, and the endpoint identity that anchors it
+
+`w = 0` and `w = 1` are the parents, scored through the *weighted-ensemble*
+code path rather than as single bakes, and they reproduce the published rows
+exactly:
+
+| | CID22 | KonJND \|·\| | CSIQ | LIVE | AIC-3 | AIC-4 |
+|---|--:|--:|--:|--:|--:|--:|
+| `HYA_w000` (= `Q7b`) | **0.8588** | 0.5118 | 0.8794 | 0.8129 | 0.7444 | 0.8538 |
+| `HYA_w100` (= `W10L9PH`) | **0.8927** | 0.5006 | 0.9443 | 0.9636 | 0.8000 | 0.9144 |
+| **`peer_ssim2`** | **0.8894** | **0.5272** | 0.9047 | 0.9599 | 0.7970 | 0.9127 |
+
+`HYA_w000`'s CID22 0.8588 is `Q7b`'s published 0.8588; `HYA_w100`'s 0.8927 and
+KonJND 0.5006 are `W10L9PH`'s published values; and the paired CID22 bootstrap
+on `HYA_w100` returns **+0.0032 [−0.0069, +0.0133], P = 0.738** pooled and
+**−0.0027 [−0.0059, +0.0007], P = 0.056** within-image — the exam's §3.1 and
+§3.2 rows for `W10L9PH`, to the last published digit, from a different root
+through a different code path. That agreement is the cross-check that makes the
+interior of the sweep readable.
+
+**It also closes an exam gap in passing:** `Q7b` had no paired CID22 CI at all
+(§3.1 says "not paired"). It has one now — **−0.0301 [−0.0496, −0.0116],
+P = 0.000** pooled and **−0.0078 [−0.0127, −0.0034]** within-image, i.e. `Q7b`
+alone is *measurably behind* ssim2 on the gold holdout, both ways.
+
+### 6.2 W1 — the hybrid passes a clause NEITHER parent passes, over a measured window
+
+W1 asks that no held-out human axis be worse than `peer_ssim2` by more than
+δ (0.010 pooled, 0.004 within-image on CID22). **Both parents fail it. Six
+interior weights pass it.**
+
+Δ vs ssim2, pooled (the six held-out human corpora) — the binding axes only:
+
+| arm | CID22 | CSIQ | **LIVE** | AIC-3 | AIC-4 | **KonJND** | W1 |
+|---|--:|--:|--:|--:|--:|--:|:--:|
+| `HYA_w000` (Q7b) | −0.0306 | −0.0254 | **−0.1470** | −0.0526 | −0.0589 | −0.0153 | **FAIL** ×6 |
+| `HYA_w070` | +0.0007 | +0.0321 | **−0.0110** | −0.0104 | −0.0124 | +0.0069 | FAIL (LIVE, AIC-3/4) |
+| `HYA_w074` | +0.0013 | +0.0339 | −0.0074 | −0.0084 | **−0.0108** | +0.0039 | FAIL (AIC-4) |
+| **`HYA_w076`** | +0.0017 | +0.0349 | −0.0059 | −0.0075 | −0.0098 | +0.0027 | **PASS** |
+| **`HYA_w078`** | +0.0019 | +0.0357 | −0.0043 | −0.0067 | −0.0090 | +0.0015 | **PASS** |
+| **`HYA_w080`** | +0.0022 | +0.0365 | −0.0028 | −0.0058 | −0.0082 | −0.0007 | **PASS** |
+| **`HYA_w082`** | +0.0024 | +0.0372 | −0.0015 | −0.0050 | −0.0071 | −0.0037 | **PASS** |
+| **`HYA_w084`** | +0.0026 | +0.0380 | −0.0003 | −0.0039 | −0.0060 | −0.0054 | **PASS** |
+| **`HYA_w086`** | +0.0028 | +0.0388 | +0.0007 | −0.0030 | −0.0053 | −0.0082 | **PASS** |
+| `HYA_w088` | +0.0029 | +0.0395 | +0.0016 | −0.0021 | −0.0041 | **−0.0108** | FAIL (KonJND) |
+| `HYA_w100` (W10L9PH) | +0.0033 | +0.0395 | +0.0037 | +0.0029 | +0.0017 | **−0.0266** | **FAIL** (KonJND) |
+
+Within-image, the same arms are inside δ on all four pairable corpora
+(CID22 −0.0018, CSIQ +0.0345, AIC-3 +0.0045, LIVE +0.0010 at `w = 0.80`).
+
+**The window is bounded on BOTH sides, by DIFFERENT corpora**, which is what
+makes it a window rather than a lucky point: **LIVE** closes it from below
+(the linear parent reads 0.8129 there — 0.147 behind ssim2 — so its weight has
+a hard ceiling) and **KonJND** closes it from above (the MLP parent reads
+0.5006, 0.027 behind, so its weight has one too). Measured widths:
+**HY-A w ∈ [0.76, 0.86] — 0.10 wide**, HY-B w ∈ [0.80, 0.86] — 0.06 wide.
+`HY-C` never passes: replacing half the MLP weight with a second 944 seed makes
+KonJND **monotone decreasing** in w (0.5118 → 0.4802) instead of peaked, so
+seed-averaging destroys exactly the property the blend exists to buy.
+
+### 6.3 The mechanism — KonJND is SUPER-ADDITIVE, and that is the whole result
+
+§4.4 risk 1 registered the open question: both parents are *below* ssim2 on
+KonJND (0.5006 and 0.5118 vs 0.5272), so a convex blend has no arithmetic
+reason to clear it. Measured, it does — by a wide margin, and with an interior
+peak:
+
+| w | 0.0 | 0.2 | 0.4 | **0.5** | **0.6** | 0.7 | 0.8 | 0.9 | 1.0 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `HYA` \|KonJND\| | 0.5118 | 0.5271 | 0.5372 | **0.5390** | **0.5390** | 0.5341 | 0.5265 | 0.5134 | 0.5006 |
+
+**0.5390 at w = 0.5–0.6, above both parents and above `peer_ssim2`'s 0.5272.**
+Rank correlation is not linear in the score, so a blend of two mediocre
+rankings can rank better than either — and here it does, by +0.027 over the
+better parent. That is the single fact this lane adds to the KonJND↔CID22 trade
+the campaign has been paying data for: on this pair, **a fits-only convex blend
+buys what wave-7 priced as a data-mass problem.** It does not survive to the
+W1 window intact (at w = 0.80 KonJND is back to 0.5265, a tie with ssim2), and
+the reason is §6.5.
+
+### 6.4 W3 — the ladder, and the blend repairs Q7b's registered failure shape
+
+ssim2's own ladder on the SAME (pools) grid, via
+`bake_verdict --dial-peer-scores` — 4,817 rows, 115 curves, the same
+five-bucket split and 0.5-pt materiality every bake takes:
+**pooled material monotonicity 0.9929817 (33 inversions / 4,702 rung pairs),
+q ≥ 85: 14 % of ladders carry an inversion, 0 % end backwards, flat 0.0000.**
+
+| arm | pooled mono | tied | q≥85 ladders w/ inv | **ends backwards** | **deepest q≥85 backwards step** | W3 |
+|---|--:|--:|--:|--:|--:|:--:|
+| **ssim2** | **0.9929817** | 0.0000 | **14 %** | **0 %** | 52.2 | — |
+| `HYA_w000` (Q7b) | 0.9931944 | 0.0000 | 10 % | 0 % | **91.3** | PASS |
+| `HYA_w076` | 0.9931944 | 0.0000 | 8 % | 0 % | 33.5 | **PASS** |
+| `HYA_w080` | 0.9931944 | 0.0000 | 7 % | 0 % | **30.4** | **PASS** |
+| `HYA_w084` | 0.9929817 | 0.0000 | 7 % | 0 % | 27.4 | **PASS** (ties the bar) |
+| `HYA_w086` | 0.9929817 | 0.0000 | 7 % | 0 % | 25.8 | **PASS** (ties the bar) |
+| `HYB_w080` | **0.9927690** | 0.0000 | 8 % | 0 % | 31.4 | **FAIL** (below the bar) |
+| `HYB_w086` | 0.9929817 | 0.0000 | 7 % | 0 % | 26.5 | PASS |
+| `HYC_w080` | **0.9946831** | 0.0000 | **5 %** | 0 % | 30.6 | PASS |
+| `HYA_w100` (W10L9PH) | 0.9931944 | **0.0376** | 7 % | 0 % | 15.2 | PASS |
+
+Two things worth naming:
+
+- **The blend repairs the round-37 failure shape Q7b was flagged for.** Q7b's
+  profile is "no backwards ladders, but the deepest single step" — **91.3 dial
+  points** at q ≥ 85, by far the worst in this table and 1.75× ssim2's own
+  worst. The blend cuts it **monotonically in w**: 91.3 → 33.5 → **30.4** →
+  25.8 → 15.2. At `w = 0.80` the hybrid's worst step is **below ssim2's 52.2**,
+  which the linear parent never manages.
+- **The blend also removes the MLP parent's tied rate.** `W10L9PH` is the only
+  arm here with a dead zone (`tied 0.0376`); every blend reads **0.0000**,
+  because the linear member breaks the MLP's ties. Neither parent has both
+  properties; the blends do.
+
+`HYB_w080` is the one arm that FAILS W3, at 0.9927690 vs the bar's 0.9929817 —
+one extra material inversion out of 4,702. It is reported as a fail, not
+rounded up to the 4-dp tie it looks like in the printed table.
+
+### 6.5 W2 — FAILS, and the reason is the sharpest finding in the lane
+
+W2 needs **two** strict wins (paired 95 % CI excluding zero) with **at least
+one on CID22 or the near-lossless axis**. The window arms hold three strict
+wins — and none of them is a named one:
+
+| arm | CSIQ pooled | CSIQ within | AIC-3 within | CID22 pooled | CID22 within | **`hfnl_cid22band` within** |
+|---|---|---|---|---|---|---|
+| `HYA_w076` | **+0.0349** [+.029,+.041] | **+0.0336** [+.028,+.040] | **+0.0040** [+.001,+.007] | +0.0017 (tie) | −0.0018 (tie) | +0.0034 [−0.0071, +0.0148] **tie** |
+| `HYA_w080` | **+0.0365** [+.031,+.043] | **+0.0345** [+.029,+.041] | **+0.0045** [+.001,+.007] | +0.0022 (tie) | −0.0018 (tie) | +0.0018 [−0.0093, +0.0139] **tie** |
+| `HYA_w086` | **+0.0388** [+.033,+.045] | **+0.0365** [+.030,+.044] | **+0.0055** [+.002,+.009] | +0.0027 (tie) | −0.0020 (tie) | +0.0011 [−0.0103, +0.0136] **tie** |
+| `HYA_w000` (Q7b) | −0.0245 (loss) | −0.0092 (tie) | −0.0164 (loss) | −0.0301 (loss) | −0.0078 (loss) | **+0.0151 [+0.0006, +0.0301]** ✅ |
+| `HYA_w100` (W10L9PH) | **+0.0395** | **+0.0375** | **+0.0060** | +0.0032 (tie) | −0.0027 (tie) | −0.0038 (tie) |
+
+**The two clauses live at opposite ends of the weight axis and their feasible
+regions do not intersect.** W1 requires w ≥ 0.76 (LIVE). The named win requires
+essentially all of the linear parent's weight: at w = 0.80 the point estimate
+survives (+0.0018, still positive) but the interval swallows it, because Q7b's
+own win is marginal to begin with — its lower bound is **+0.0006**, i.e. it
+clears zero by a fiftieth of its own width, and diluting it to 20 % of the
+blend puts it back inside noise. Nothing about this is a tuning failure; it is
+a structural statement about **this pair of parents**: the model that holds the
+only non-circular win over ssim2 is the same model that is 0.147 behind on
+LIVE, and W1 will not buy enough of it.
+
+So **W2 FAILS for every hybrid arm, for the same reason it fails for
+`W10L9PH`** — no named strict win — while `Q7b`, which holds the named win,
+fails W1 on five axes out of six.
