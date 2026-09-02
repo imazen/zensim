@@ -5426,3 +5426,71 @@ recorded boundary (907 blobs) and **rows are now heterogeneous**: key on the
 metrics present per row, never on a fixed row count. AG stays undeclared on
 purpose — it encodes the *native* corpus under the same filenames (§12.3/§12.4),
 so declaring it against the crop prefix would have silently scored wrong pixels.
+
+## 2026-09-02 — ROUND 54: AVIF-DOE wave COMPLETE + Stage A — two knobs were never wired, and the plan's own isolation rule made a third of its design undeclarable
+
+**A fleet + analysis round on the AVIF knob DOE, recorded here for three
+measurement-hygiene lessons.** Full record:
+`zenmetrics/benchmarks/avif_doe_stageA_2026-09-02.md`; plan §14.
+
+**The wave finished: 49,120 cells across four svt-rs runs, live-gap 0, ZERO
+failed cells, all scored.** A0R (the control arm every effect is differenced
+against) and AG had no encode workers at all when the round opened.
+
+**Lesson 1 — a stale read of a FINISHED run looked exactly like a gap.** The
+plan's §13.8 recorded A1 as `live_done 6,432, gap 480, failed-only`, and the
+brief for this round carried that forward as work to triage. A1's ledger shows
+the run finished at **04:47:21Z, ~57 minutes before that snapshot**, 6,912/6,912
+live-done, with **zero post-fix `encoder_panic`** — the §11.7 pardon worked and
+laundered nothing. Nothing needed requeueing. The triage that had been queued
+was for a gap that did not exist; the ledger, not the report line, is the
+evidence.
+
+**Lesson 2 — the fingerprint said the knob changed and the bytes said it did
+not.** `tune=0` and `screen_content_mode=Some(3)` produce **byte-identical
+bitstreams to the default on 288/288 cells at both presets**, while zenavif's
+own resolved-state fingerprint separates them (`525f0219…` vs `98b71736…`).
+`tune=3` *does* move the bytes, so tune is partly wired. Consequence beyond the
+port bug: **all 27 A2 pairs containing an inert knob are byte-identical aliases
+of the other knob's single arm** (verified 288/288 each), so 29 of A2's 118
+strata carry no information and **8,972 cells of the wave measured nothing**.
+Content-addressed storage is what made this visible at all — it is the same
+property that turns "two configs" into one blob. **When a knob axis is
+declared, check byte-identity against the control before trusting any effect
+size computed from it.**
+
+**Lesson 3 — a registered cell count that its own constraint forbids.** §3.2
+registered A1 as "17 arms × all 7 effective presets" = 34,272 cells. At
+`--max-deviations 1` a non-default preset **is** the one permitted deviation, so
+a knob×preset cell is inexpressible; zenavif's own test fixes the design at
+**24 strata** = the declared 6,912. Nobody reconciled the 5× discrepancy for a
+day. The load-bearing consequence is not the count — it is that **knob main
+effects exist at two presets, not seven**, so the preset-inversion trigger
+(B-5) has one preset pair to work with and the slow end is untested.
+
+**Lesson 4 — the pre-registered gate earned its keep, and not through its
+headline.** The cross-size transfer gate certifies only **2 of 16** knobs for
+reduced-size screening (`mtx32`, `qml1.8.15`), holds direction on 7, and fails
+2 outright. Its most valuable output came from its *sign* test: **tiling's
+bitrate cost is largely a reduced-size artefact** — `tl1.0` +0.65 % at the 1024²
+budget vs **−0.12 % at native** (sign flip), `tl1.1` 8.6× smaller, carrying the
+only two significant T3 binomials in the set (p 0.012, 0.001). The main-effects
+table alone says "tiling costs bits on every image at both presets, tight CI",
+and that statement does not survive a size change. **A knob measured at one size
+is a knob measured at one size.**
+
+**Lesson 5 — a "free" measurement that was never free.** §3.9's bytes
+decomposition (`total = α + β·pixels`, from running the control at two sizes)
+**is not identifiable from a crop/native pair**: a crop is a different image,
+not a smaller one, so the two-point intercept absorbs the content difference
+instead of a container header. **SROCC(α, q) median 0.943** over 91
+(image, speed) groups, α climbing **731 → 59,176 bytes** across the ladder (81×)
+and going **negative on 781 of 2,639 fits**. Cropping was chosen over downscaling
+to preserve native HF content — right for the transfer gate, fatal for the bytes
+model, and the plan did not notice the two goals were in tension.
+
+**Result.** Stage-A tables + the mechanical Stage-B trigger list are published;
+honouring every trigger costs **447,636 cells against a registered 60,000
+envelope (7.5×)**, so prioritisation is a coordinator decision and **no Stage-B
+wave was declared**. Fleet returned to its pre-round state (five encode workers
+created, all torn down).
