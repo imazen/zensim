@@ -5912,3 +5912,59 @@ K=16 picks at 6 BT.709 / 10 P3, deterministic across three runs, sha256
 **Scope on every number this arm will produce (H-BD-4):** at presets ≤ 8 the
 zenav1-svt port is not byte-identical to C SVT-AV1, so T1 measures **this
 port's** 10-bit encoder and no result may be stated as a property of SVT-AV1.
+
+# ROUND — bit-depth capability lane (`claude-bitdepth`), 2026-09-02
+
+| field | value |
+|---|---|
+| **round** | bit-depth capability layer under the AVIF HBD arm |
+| **directive** | "identify and fix what is needed for least-bitdepth lossy encoding" (2026-09-02) |
+| **scope** | make lossy encode + its evaluation honest across 8/10/12, so depth can eventually be a picker knob |
+| **repos** | `zenav1-svt` (1 commit), `zenmetrics` (4 commits). `zenavif` surveyed, deliberately unmodified |
+| **commits (all VERIFIED on their remote)** | `6fe01232` zenav1-svt/main · `7051921a`, `0155c165`, `fdce651e`, `58e10310` zenmetrics/master |
+| **coordination** | shared checkouts with the live `claude-hbdexec` lane; additive `.workongoing.bitdepth` markers, file ownership negotiated in both directions (their marker names `crates/zenmetrics-cli/src/hdr.rs` as mine), every commit `jj split` to my files only |
+
+## Outcomes
+
+| gap | outcome | evidence |
+|---|---|---|
+| **b** silent `with_bit_depth` coercion | **FIXED** | `avif.rs:207` stores verbatim; the existing encode-time guard refuses 8\|10 violations as a typed error. `unsupported_bit_depth_is_not_silently_coerced_to_8` (0/1/7/9/11/16/255) FAILS at the parent |
+| **a** aom-rs hardcoded `bd: 8` | **FIXED** | `bd` knob 8/10/12; refused BY NAME outside `--cpu-used {0,7,8,9}`; bit-replication promotion; **bitstream read-back at 8/10/12 via `av1C`** |
+| **d** fleet scoring depth-blind | **FIXED** | `score-pairs` / `batch` / jobexec now take the umbrella's f32 feeding; u8 shell retained as fallback only |
+| **c** `EncodeBitDepth::Twelve` | **REGISTERED, not added** — would lie on `encode_rgb16` today, and is a 0.1.7→0.2.0 semver break | capability matrix §3 |
+
+## Key measurements
+
+- **The u8 shell erases 94.17 %** of a 10-bit-vs-8-bit difference (99.75 % of f32
+  samples differ; 5.82 % of u8 bytes do). Pre-fix all four metrics were **bit-identical**
+  to the shell.
+- Post-fix deviation from identity, shell → f32: ssim2 **1.65×**, zensim **1.21×**,
+  iwssim **1.29×**, butteraugli **3.03×**.
+- Cost: the f32 route is **≈2× per pair** at every size (64² → 2048², paired arms in
+  one binary).
+- **12-bit AVIF encode works end to end** through zenav1-aom + zenavif-serialize,
+  verified from the emitted `av1C`.
+
+## Carried forward (in the matrix, not in a handoff)
+
+1. ⚠ **NEW DEFECT**: `zenavif::encode_rgb16`/`encode_rgba16` ignore `config.bit_depth`
+   → `bit_depth: Eight` + a 16-bit buffer is a silent 10-bit file. Published path,
+   reachable from the generic zencodec route. Registered with the reason it was not
+   fixed under a concurrent lane.
+2. ⚠ **SCORING-ERA BREAK**: stored `--hdr` ssim2/zensim/iwssim/butteraugli-CPU numbers
+   from before `7051921a` are u8-shelled — do not join across it.
+3. ⚠ `--hdr-transfer` is now **inert** on the faithful route (pinned by a test).
+4. zensim HDR **feature** vectors still use the v1 PU21 u8-shell regime — a DATA
+   decision, deliberately not made here; the scalar now follows the feature path's
+   regime so a sidecar row cannot disagree with itself.
+5. Environment: `zenav1-svt`'s `tier_invariance` corpus test wants
+   `$ZENAV1_CORPUS_ROOT/gb82-sc/graph.png`; the corpus is at `~/work/codec-corpus`,
+   not `~/work/zen/codec-corpus`. Fails before and after this lane's change.
+
+## The honest state of the goal
+
+Encode is depth-honest (8/10/12 reachable, gated, read back from the bitstream).
+Scoring is depth-honest (f32 end to end on every route). **The corpus is not**: every
+depth cell today is 8-bit content at a deeper coded depth (the `Rgb8Image` funnel), and
+the wired HDR references are gain-map-reconstructed from 8-bit bases. **A depth picker
+cannot yet be trained honestly** — that is now a corpus problem, not a wiring one.
