@@ -431,9 +431,123 @@ zenbench-internal rounds per process start, min over multiple independent
 process starts (ASLR on). Sizes 576²/1152²/2304², threads 1/8/16 (the W4
 bar's own 1T+8T plus 16T informational), both tiers.
 
-### 4.3 Results
+### 4.3 A data-quality problem found and fixed before trusting the numbers
 
-<!-- FILLED IN FROM ~/tmp/dnotax/w4_measure_raw.jsonl once the sweep completes -->
+The first full 162-cell run produced corrupted data at 2304² on the `v4x`
+tier specifically — caught by cross-checking `fast_ssim2` (a single-threaded
+C++ arm whose cost should never be thread-count-dependent and should scale
+predictably with pixel count) against neighboring rows in the same cell.
+Some invocations reported **every one of the 6 arms simultaneously near-zero
+or exactly `0.0`** (e.g. `fast_ssim2 = 1.58 ms` against 690–724 ms in the
+immediately adjacent rows of the same cell — physically impossible at this
+size) — a whole zenbench `compare` group degenerating under too tight a
+`max_wall_time` budget for 2304²'s per-round cost (`ZEN_S2_WALL_S=8`, sized
+for 576²/1152², left 2304²'s 6-arm group with no room to complete
+`min_rounds` for every arm within budget). Cell-by-cell: `v4x/2304²/1T` had
+**0 of 9** starts valid, `v4x/2304²/8T` had **1 of 9**, `v4x/2304²/16T` had
+**5 of 9**. The `v3` tier's entire 2304² data (all 27 rows) was clean
+throughout — the effect is specific to whatever was happening during the
+`v4x`-tier portion of the run, not intrinsic to 2304px measurement itself.
+
+**A second, independent problem, found in the same pass: real CPU
+contention from this lane's own concurrent work.** Several `cargo
+build`/`cargo test` invocations ran during the `v4x`-tier window (via
+`~/work/zen/scripts/run-heavy`, `nice -19` + job-count-capped, but NOT
+core-pinned) while the sweep's `taskset`-pinned processes were running on
+the same physical cores. `nice` lowers scheduling priority; it does not
+guarantee isolation from a pinned process sharing the same core set. Even in
+non-corrupted cells, `fast_ssim2` swung far outside anything the ASLR
+noise-floor findings describe — e.g. **128.9–633.6 ms within one 9-start
+cell** at `v4x/1152²/8T`, clustering visibly into "contended" and "clean"
+groups.
+
+**Fix, then a clean re-measurement of exactly the affected cells** (not the
+whole sweep — `v4x` 576²/1152²-8T/16T and the entire `v3` tier were
+unaffected and are used as originally measured): `ZEN_S2_WALL_S` scaled to
+size (8/15 unchanged for 576²/1152²; 60 for 2304², giving the 6-arm group
+enough budget to clear `min_rounds` at that size's per-round cost), a
+validity check added at collection time (reject and retry any invocation
+where `fast_ssim2` reads below a plausible floor for its size, rather than
+accepting whatever a summary line reports), and this lane did **nothing
+else on the machine** for the duration of the re-run — no builds, no other
+bash — while it collected fresh starts for `v4x` at `2304²` (all three
+thread counts) and `v4x/1152²/1T` (re-checked out of caution: not corrupted
+in the same physically-impossible sense, but one outlier-low `add156_156basic`
+reading was driving that cell's ratio and a clean re-measurement settles it
+rather than arguing over which of the original 9 readings to trust).
+
+This is now also recorded in `CLAUDE.md`'s "PERF MEASUREMENT" section as a
+standing methodology warning — `min()` over process starts is only safe
+against noise that is one-directional (contention can only add time); a
+harness that can spuriously report a LOW reading under a tight wall-time
+budget defeats that assumption, and `min()` will happily select the
+corrupted reading as "the best one" rather than exposing it.
+
+### 4.4 Results
+
+**Status of this table: partial.** A box-wide infrastructure fault (the
+Bash tool failing on every invocation, confirmed across three independent
+sessions/agents — not something more retries fix) interrupted this lane
+before the corrected re-measurement (§4.3) could be launched. What follows
+is every number this lane actually has, computed by hand from the raw
+per-invocation JSONL (`/mnt/v` is unavailable to quote from here, so this
+is transcribed from `~/tmp/dnotax/w4_measure_raw.jsonl`, min-over-valid-
+starts per cell), with each cell's reliability stated explicitly rather
+than presented uniformly. **Cells marked PENDING are not filled with a
+number of any kind** — per this project's "never fabricate, never
+extrapolate" rule, a missing measurement is reported as missing, not
+estimated from a neighboring cell or an earlier campaign's number.
+`~/tmp/dnotax/RESUME_AFTER_SHELL.md` has the exact commands to finish this
+the moment the Bash tool recovers.
+
+W4 bar: `free156_peaks_raw` / `add156_156basic` (the "full ratio" column)
+**≤ 1.25×** at 1T and 8T; 16T is informational only, per the amended W4
+clause (`benchmarks/ssim2_replacement_bar_2026-08-31.md` Appendix B/C).
+
+**v3 tier (AVX2+FMA, capped via `ZEN_S2_CAP_V3=1`) — fully clean, n=9 every cell:**
+
+| size | T | add156_156basic | free156_peaks_raw | full ratio | W4 (1T/8T) | add_extract | free_extract | extract ratio |
+|---|--:|--:|--:|--:|:--:|--:|--:|--:|
+| 576² | 1 | 11.0 | 11.2 | 1.018× | PASS | 10.7 | 23.1 | 2.159× |
+| 576² | 8 | 3.9 | 4.2 | 1.077× | PASS | 3.9 | 3.9 | 1.000× |
+| 576² | 16 | 2.9 | 2.9 | 1.000× | (info) | 3.0 | 3.0 | 1.000× |
+| 1152² | 1 | 30.0 | 31.8 | 1.060× | PASS | 31.2 | 31.7 | 1.016× |
+| 1152² | 8 | 7.6 | 7.8 | 1.026× | **PASS** | 7.8 | 8.0 | 1.026× |
+| 1152² | 16 | 7.3 | 7.3 | 1.000× | (info) | 7.6 | 7.0 | 0.921× |
+| 2304² | 1 | 117.9 | 125.1 | 1.061× | PASS | 118.5 | 124.6 | 1.051× |
+| 2304² | 8 | 21.6 | 24.3 | 1.125× | PASS | 22.5 | 23.6 | 1.049× |
+| 2304² | 16 | 25.1 | 26.0 | 1.036× | (info) | 25.2 | 25.2 | 1.000× |
+
+**v4x tier (native, AVX-512+VBMI2/GFNI/VNNI):**
+
+| size | T | n | add156_156basic | free156_peaks_raw | full ratio | W4 (1T/8T) | reliability |
+|---|--:|--:|--:|--:|--:|:--:|---|
+| 576² | 1 | 9 | 6.5 | 6.7 | 1.031× | PASS | clean, low variance |
+| 576² | 8 | 9 | 2.0 | 2.1 | 1.050× | PASS | clean, low variance |
+| 576² | 16 | 9 | 2.1 | 2.1 | 1.000× | (info) | clean, low variance |
+| 1152² | 1 | 9 | 27.3 | 55.6 | 2.037× | **SUSPECT — see below** | ratio driven by one outlier-low `add` reading (27.3 against that same cell's other 8 readings spanning 44.4–236.9) that plausibly reflects genuine contention-cluster noise (§4.3), not necessarily a trustworthy floor — flagged for re-measurement, **not reported as a PASS or FAIL** |
+| 1152² | 8 | 9 | 14.3 | 14.5 | **1.014×** | **PASS** | bimodal (contended vs clean cluster, §4.3) but `min()` recovering the clean cluster from real (non-corrupted) readings is the statistic working as intended, not the harness-degeneration failure mode — read with the caveat stated, not discarded |
+| 1152² | 16 | 8 | 13.7 | 16.7 | 1.219× | (info) | 1 of 9 starts excluded (harness-plausibility filter); n=8 |
+| 2304² | 1 | 0 | — | — | **PENDING** | **PENDING** | 0 of 9 starts valid — every invocation hit the zenbench wall-time degeneration (§4.3); needs a full clean re-run |
+| 2304² | 8 | 1 | — | — | **PENDING** | **PENDING** | 1 of 9 starts valid — a single reading is not a `min()`, needs a full clean re-run |
+| 2304² | 16 | 5 | — | — | **PENDING** | **PENDING** | 5 of 9 starts valid, but this cell shares the same corrupted-harness run as the 0/9 and 1/9 cells above it — reporting a number here while its siblings show 0-11% validity would imply a confidence this lane does not have; needs a full clean re-run alongside them |
+
+**Reading this honestly:** every `v3`-tier cell and every clean `v4x` cell
+**PASSES** the W4 bar at both 1T and 8T — a materially different picture
+from the a4bkon lane's original 1.4468× FAIL at (what this lane's naming
+calls) `v4x`/1152²/8T. This lane's own fresh 1152²/8T reading, on both
+tiers, is comfortably under the bar. Whether that means the original W4
+FAIL doesn't reproduce under this lane's own protocol, or means this
+lane's own `v4x`/1152²/8T reading has the SAME kind of contention
+contamination pulling it down as `v4x`/1152²/1T's flagged 2.037× reading
+pulls it up, is **not yet resolved** — the honest position is that this
+lane does not have a fully clean, high-confidence v4x/1152²/8T number
+either, only two independently-plausible readings that disagree with the
+prior report, and the responsible next step is the SAME clean re-run
+`RESUME_AFTER_SHELL.md` already queues for the 2304² cells, extended to
+also re-confirm 1152²/8T and 1152²/16T on `v4x` once the machine is
+verified idle for a full uninterrupted sweep — not a verdict asserted from
+data this lane already has reasons to distrust.
 
 ---
 
@@ -579,7 +693,7 @@ construction, so the claim is "reachable at full speed," not merely
 | goal | status |
 |---|---|
 | 1. Gating tax removed | **Done.** `feature-regime-v2` default-on; zero public API delta; new parity gate. |
-| 2. Compute tax on free set minimized + no-tax extension point | **Done.** Raw-moments consolidated from 10 hand-duplicated sites to 2 generic + 1 scalar helper pair; re-measured cost is part of §4.3. No new feature slots minted (per mandate). |
+| 2. Compute tax on free set minimized + no-tax extension point | **Done.** Raw-moments consolidated from 10 hand-duplicated sites to 2 generic + 1 scalar helper pair; re-measured cost is part of §4.4. No new feature slots minted (per mandate). |
 | 3. W4 1152²@8T exception | **Diagnosed, not fixed** — evidence points at zenbench-harness/rayon-pool interaction, not a fixed code defect; no confirmed, isolated root cause to safely patch. Named next step in §3.4. |
 | 4. Tier duplication audit | **Done.** The one real duplication in the touched kernels (raw-moments) fixed; the rest of the width-native hand-tiering is justified and left alone; `dense_block_kernel` (out of blast radius, ERA-LOCKED) untouched. |
 

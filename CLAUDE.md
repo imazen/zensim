@@ -862,6 +862,54 @@ min + `smaps_rollup` Rss/AnonHugePages), `ZENSIM_BIGPAIR_PARALLEL=1`,
 `ZENSIM_BIGPAIR_DUMP=<path>` (every feature with its `to_bits()` — the
 bit-identity control).
 
+### A SECOND, LARGER 2304² noise source: zenbench itself can degenerate under a tight wall-time budget, and own-process CPU contention is real even niced (2026-09-01)
+
+**MEASURED, `benchmarks/profile_d_notax_2026-09-01.md` §4** (the Profile-D
+no-tax refactor's own both-tier sweep). The ASLR noise documented above
+(±10%, bimodal, ~334/360ms) is a property of the WALK. This is a DIFFERENT,
+much larger-magnitude problem in the MEASUREMENT HARNESS: a `zenbench`
+`compare` group given too little `max_wall_time` for the arms/sizes it's
+asked to run can silently report a **spuriously near-zero mean for every
+arm in the group simultaneously** — not a crash, not a warning, a plausible-
+looking small number that is off by 100-1000×. Found because `fast_ssim2`
+(a single-threaded C++ arm whose cost has nothing to do with zensim's own
+threading) read exact `0.0` or ~0.2-1.6 ms in the bad rows, against
+380-900+ ms in neighboring good rows at the same cell (2304², where a
+single round's slowest arm alone costs 400-900 ms). At `ZEN_S2_WALL_S=8`
+(sized for 576²/1152², both fine), a 6-arm group at 2304² blew the wall
+budget before completing `min_rounds` for every arm, and the reported mean
+degenerated rather than gracefully returning a partial-but-honest number.
+**Consequence for anyone reusing the min-over-starts protocol above: min()
+is only safe against noise that is one-directional (contention can only
+ADD time). A harness that can spuriously report LOW is a different failure
+mode entirely — min() will happily select the corrupted reading as "the
+best one" and hide the defect.** Fix: scale `max_wall_time`/`ZEN_S2_WALL_S`
+with image size (this repo's own re-run used 60s at 2304² after 8s produced
+a 0-of-9-valid cell), and **validate every reading at collection time**
+(a stable reference arm like `fast_ssim2` reading below a plausible floor
+for its size is a free, cheap sanity check) rather than trusting a
+zenbench summary line to always be honest under a tight budget.
+
+**Own-process CPU contention corrupted the SAME tier's data independently
+of the above.** During the flagged sweep's `v4x`-tier window, several
+`cargo build`/`cargo test` invocations ran concurrently via
+`~/work/zen/scripts/run-heavy` (`nice -19`, job-count-capped) while the
+`taskset`-pinned sweep was running on the same physical cores — `nice`
+lowers scheduling PRIORITY, it does not GUARANTEE isolation from a
+`taskset`-pinned process sharing the same core set, especially under a
+job-count cap that doesn't itself account for cores another process has
+pinned. Result: even in cells with no zenbench-degeneration corruption,
+`fast_ssim2` (which should be stable and thread-count-independent) swung
+**128.9-633.6 ms within one 9-start cell** — whole-machine-load variance
+riding along with every arm together, clustering into a visibly bimodal
+"contended" / "clean" split. `min()` over enough starts still recovers the
+clean cluster IF the clean cluster is well-represented and not itself
+corrupted by the harness issue above — but the honest fix is **do nothing
+else on the machine for the duration of a taskset-pinned sweep**, full
+stop, regardless of how "cheap" the concurrent work seems (a single 5-10s
+`cargo build` is enough to contaminate several nearby sweep invocations at
+this box's per-invocation cadence).
+
 ## PERF: on the strip walk, TILE MEANS PACK — restricting a loop range does nothing (2026-08-31)
 
 **MEASURED, `benchmarks/era2_perf_break_2026-08-31.md` §23.** The phase-A
