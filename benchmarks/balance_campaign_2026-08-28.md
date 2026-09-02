@@ -5152,3 +5152,171 @@ Local-only fix applied: `jj bookmark forget push-qqkqluuttltu` (stale conflicted
 commits + remote untouched).
 
 **2026-09-01 follow-up (user-directed):** the 15 merged `push-*` branches were DELETED from origin (each re-verified `merge-base --is-ancestor` origin/main immediately before deletion; commits remain reachable via main). Exactly the 11 V0_x-era orphan branches remain, held per the found-in-the-wild rule.
+
+## 2026-09-01 — ROUND 49: PERMUTATION RETROFIT — the 2026-09-01 AVIF subsample sweep was 17.8 % duplicate work
+
+*(Parked by the permutation-retrofit lane while `zensim` was claimed by `claude-dnotax`;
+applied verbatim by the post-outage recovery lane. Belongs with "FRESH AVIF WAVE — SVT
+BACKEND" / "AOM ARM" above, appended here to keep the ledger chronological.)*
+
+The `avifsub-{svt,aom}-enc-20260901` sweep (successor to this campaign's "FRESH
+AVIF WAVE — SVT BACKEND" / "AOM ARM") was declared as a naive Cartesian product
+and **3,424 of its 19,200 cells are byte-wise duplicates**. Two alias classes,
+both confirmed against `output_sha` in the run's own ledger and by a controlled
+encode probe:
+
+- **zenavif svt-rs speeds 7, 8, 9 and 10 are ONE encode** — all resolve to SVT
+  preset 9, because C remaps every all-intra preset above M9 down to M9
+  (`enc_handle.c:4416-4419`). 30 of 30 `(image, q)` cells covered at ≥2 of those
+  speeds have identical `output_sha`; a direct probe gives identical
+  encoded_bytes AND identical SSIMULACRA2 to six decimals across the class, with
+  speed 6 differing on every cell as the control. **The svt-rs speed dial has 7
+  distinct settings, not 10** (presets 2, 5, 8 are unreachable through it).
+- **q 98 ≡ q 100 on BOTH backends** — each clamps its lossy dial off the
+  lossless quantizer (svt QP 1 via `quality_to_qp_gated`, aom cq 1 via
+  `aom_rs_cq_level`). 60 identical-`output_sha` groups, every one exactly
+  `{98, 100}`. **29 distinct quantizers, not 30.**
+
+**The q alias applies retroactively to the 2026-08-30 wave recorded above**,
+which used the same `avifsvt_cells.py` emitter and the same 30-point q grid: its
+q=100 column duplicates its q=98 column on both backends, so **~1/30 of its
+130,590 svt + 125,688 aom harvested cells are byte-identical repeats**
+(~4,353 + ~4,190 rows). Anything trained on those tables should de-duplicate on
+`output_sha` rather than treat `(speed, q)` as distinct samples — a duplicate
+row is not a free extra sample, it is a mislabelled one.
+
+Its **speed** sampling `{4, 6, 8}` is unaffected: those map to presets 4, 7 and
+9, which are genuinely distinct. Worth knowing for interpretation, though, is
+that **speed 8 is the M9 saturation point** — it is the FASTEST setting the dial
+reaches, identical to 9 and 10 (and to 7), not a midpoint between 6 and 10. A
+speed model fit on `{4, 6, 8}` therefore has no sample between preset 7 and the
+saturation point, and none at presets 0–3 (speeds 1–3) at all.
+
+Fixed at the owners, not worked around: `zenavif::sweep` gained a backend axis
+and svt-rs resolved-state fingerprints (`292582fb`), and `zenmetrics-cli` gained
+`sweep::dedup::knob_cell_identity` plus `--dry-run/--emit-cells` on the
+`--knob-grid` path (`e91a03b4`). A drifted mirror was repaired on the way:
+`speed_to_svt_preset` returned the un-clamped 0..=13 value while the upstream
+`AvifEncoder::speed_to_preset` it documents itself as mirroring clamps `.min(9)`
+(byte-neutral, and its test asserted the drifted value).
+
+Full record: `zenmetrics/benchmarks/avif_sweep_permutation_retrofit_2026-09-01.md`.
+
+## 2026-09-01/02 — ROUND 50: AVIF DOE lane — the 2026-09-01 subsample wave becomes a control arm, and the aom naive arm is cut by 80 % of its CPU
+
+*(Parked by the `claude-avifdoe` lane for the same reason; applied verbatim by the
+post-outage recovery lane, which then executed the lane's resume file — see ROUND 51.)*
+
+The `avifsub-{svt,aom}-enc-20260901` wave (32 k-means imazen26 picks × the
+speed/cpu-used dial × a 30-point q grid, both pure-Rust AV1 backends) is now the
+**control arm** of a registered design of experiments for encoder-knob tuning:
+`zenmetrics/benchmarks/avif_doe_plan_2026-09-01.md` (commit `6bc743b8`,
+`zenmetrics master@origin`).
+
+What changed for anyone reading the wave's tables:
+
+- **`avifsub-aom-enc-20260901` was shrunk from 9,280 to 5,179 declared cells.**
+  Kept: `cpu-used {4,6,8,9}` at all 29 q; `{2,3,5,7}` at a 9-point ladder;
+  `{0,1}` at a 5-point ladder. Removed: 4,096 cells by design + 5 known-poison
+  cells (`1432.scale3000x4000.png × cpu-used 0`, `encoder_panic`, a zenav1-aom
+  KB-41 lead). Verified a **strict subset with byte-identical retained jobs**,
+  so no `JobId` moved and every completed cell is reused; the pre-shrink
+  manifest is preserved at
+  `s3://zentrain/jobs/avifsub-aom-enc-20260901/manifest.pre-doeshrink-2026-09-01.json`.
+  Ledger rows and blobs for the 310 completed cells that fall outside the new
+  grid are untouched and remain valid data — they are simply no longer declared.
+- **Justification is measured, not aesthetic**: aom encode time is flat in `q`
+  (every q column 14.27–14.62 % of 7 sampled, uniform 14.29 %), so a speed model
+  gets nothing from q density, and the shrink keeps the **full 10-value
+  `cpu-used` ladder**. The saving is **128.8 CPU-h of the 161.2 CPU-h** the
+  declared arm would have cost — 80 %, almost all of it `cpu-used` 0–1.
+- **A cost-model note for anyone re-deriving these numbers:** the aom per-speed
+  costs descend from a smoke test whose two images were **both screen-detected
+  screenshots** (the class that pays the IntraBC DV-search tax), so every aom
+  CPU-h figure in this campaign is an **upper bound**. The svt figures are
+  direct measurements on 5 corpus images and reproduce the launch doc's own
+  total to 17 %.
+
+Two findings that bear on any table built from this wave:
+
+1. **`encode_ms` is not persisted by the wave at all.** `jobexec` emits it only
+   on the `metric` job kind, which re-encodes; the `encode` kind writes the
+   encoded bytes (they are the content-addressed output) and `score_file` scores
+   persisted blobs without re-encoding, and the ledger schema has no timing
+   column. **Any speed/`encode_ms` analysis of these runs has no input data.**
+   The DOE adds a separate single-host uncontended timing instrument rather than
+   trusting fleet-contended times.
+2. **Nothing was scoring.** Over 2026-09-02T01:35Z→01:55Z the encode blob counts
+   grew by 1,279 while score blobs stayed at 29 (svt) and 7 (aom); no score
+   worker was running on any host. The score runs were declared and their
+   manifests refreshed every 5 minutes, with no consumer.
+
+## 2026-09-02 — ROUND 51: THE OUTAGE — `/tmp` quota, and the root cause was ~30× larger than either paused lane diagnosed
+
+Two lanes (`claude-dnotax` in this repo, `claude-avifdoe` in `zenmetrics`/`zenavif`)
+stopped mid-flight when every Bash invocation began returning `exit 1` with zero
+output. Both wrote resume files, parked their uncommitted work in the working tree,
+and stopped honestly rather than guessing. Both diagnosed the *class* of fault
+correctly and the *occupant* incorrectly. This round is the recovery lane's
+measurement of what actually happened, because the wrong number is the one a future
+session would otherwise budget against.
+
+**The mechanism (measured, not inferred).** `/tmp` is a 31 GB tmpfs mounted
+**`usrquota`** — so the failure mode is `EDQUOT` against a *per-user* limit, not
+`ENOSPC` against the filesystem. The harness appends a `pwd -P >| /tmp/claude-*-cwd`
+write to every command; once the quota was hit that write failed, and the failure
+surfaced as `exit 1` with no captured output — **on commands whose bodies had
+already run to completion.**
+
+**⇒ The load-bearing lesson: `exit 1` with no output ≠ "did not execute".** The
+command ran; only the harness's own bookkeeping write failed. Corroborating
+evidence: the during-outage `kill` of the two spinning local workers *took effect*
+(both PIDs were confirmed dead on recovery) even though the invocation reported
+failure and printed nothing. A lane that reads exit-1-no-output as "nothing
+happened" will re-run destructive or non-idempotent work. The recovery channel is
+**redirect output to a file on `/home`** (`cmd > ~/tmp/out.log 2>&1`) — a different
+filesystem, so the command's own output survives even while `/tmp` refuses writes.
+
+**The occupant, corrected.** The working diagnosis on entry was "~730 MB of stale
+`svt_census` scratch plus worker parquet staging". Measured, the actual occupant was
+**22.93 GB in 10,988 files sitting directly in `/tmp`**: `zenmetrics`' `jobexec`
+source-image cache. `resolve_source_raw`
+(`zenmetrics/crates/zenmetrics-cli/src/jobexec.rs:289`) stages every source image as
+`std::env::temp_dir()/jobexec_src_{pid}_{basename}` after a verified-complete
+download, as a deliberate warm-process cache — and **nothing ever removes it**:
+not per cell, not on process exit. Because the filename is PID-scoped, every worker
+process re-downloads and re-caches its own private copy. The measured shape:
+**10,413 distinct owning PIDs (zero still alive) holding only 60 distinct source
+images** — roughly 46 duplicate copies of each image. A further **7,639 truncated
+`.part` files** were left behind once the quota hit: the code writes a `.part`
+sibling and renames on success, so a quota-failed write leaks the partial with no
+cleanup path.
+
+**Why both lanes missed it, and the diagnostic that finds it.** Both ran
+`du -x --max-depth=1 /tmp`, which rolls depth-1 *files* into the summary line without
+listing them: it reported `24G /tmp` while every child it printed summed to ~500 MB,
+so both concluded the space was somewhere they couldn't see (root-owned dirs,
+deleted-but-open handles) and moved on. Neither is true here. **`find /tmp -maxdepth 1
+-type f -printf '%s\n' | awk '{s+=$1} END{print s}'` is the diagnostic that finds it**
+— use it whenever `du`'s total and its children disagree. (`quota`/`repquota` are not
+installed on this box, so `usrquota` is only visible in `mount`.)
+
+**Reclaimed, conservatively.** 22.77 GB freed; `/tmp` went 78 % → **3 %** (735 MB
+used, 30 GB free). Every deletion was gated on recoverability first: all 7,639
+`.part` files (truncated by construction — never valid data), plus cached copies for
+the **59 of 60** source basenames independently confirmed present on `/mnt/v`
+(`avifsvt-subsample-2026-09-01/sources`, `imazen-26-hdr-grid-2026-06-14`,
+`imazen-26-variants`). The 1 basename that could not be confirmed
+(`5309_noaa_nhc-al022024-beryl_p26_2550x3300.scale297x384.png`) and its 8 files were
+**left in place**, per the never-delete-unverified rule.
+
+**Not fixed in code, deliberately, and registered here instead.** The jobexec cache
+leak is a real defect (unbounded, PID-duplicated, no eviction, leaks `.part` on
+error), but the fleet runs a pinned `ghcr.io/imazen/zenfleet-worker:exec-*` image, so
+a local source edit would not reach a single remote worker — it would only change
+this box while leaving the actual fleet behaviour identical, which is the worse of
+the two states to be in. The mitigation applied instead: relaunched local workers get
+`TMPDIR=/home/lilith/tmp/zfw-scratch`, which **is** honoured, because the staging path
+goes through `std::env::temp_dir()` (verified in source, not assumed). A proper fix —
+evict on process exit, share the cache across PIDs, and unlink the `.part` on write
+failure — belongs at the owner, with a rebuilt-and-pushed worker image.
