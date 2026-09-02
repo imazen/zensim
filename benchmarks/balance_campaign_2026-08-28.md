@@ -5722,3 +5722,91 @@ not route. A cell mis-sent to the SDR path now fails loudly instead of returning
 a number, which is what makes the arm's **G5** satisfiable — but G5 still
 requires *positive* evidence in the run log that the PQ `--hdr` route was taken,
 because a refusal proves only that the wrong route was rejected.
+
+---
+
+## ROUND 58 — the issue-17 recheck: `tune=0` still dead, `scm=3` was never a bug, and a third arm nobody swept
+
+**Trigger.** The user's read that zenav1-svt#17 "might be fixed". It is not — but
+the recheck splits the issue three ways and **one third of it retracts a claim
+this campaign filed**, so the DOE's own conclusions move.
+
+**What was probed.** `zenav1-svt` at `0284b855c` (308 commits past the
+`30cf4b3d0`-era binary the wave encoded with, including `188948556` sc-detector
+tier-1 and `b8e5e1c11` tune-vmaf), then re-run at `6fe01232` — **byte-identical
+TSV both times**, so nothing in between moved these arms. 288 encodes at the
+**port boundary**, not through zenavif: `EncodePipeline::new(w, h, preset, Cqp,
+0, 1).with_chroma_420(true)`, `hdr = mainline()`, exactly ONE field overwritten
+— the construction `encoder_svt_rs.rs:690` + `apply_svt_params` uses, pinned by
+zenavif's own `svt_params_default_leaves_the_pipeline_at_mainline`. 3 content
+classes × presets **4, 6, 8** × qp 20/32/45/55 × 8 arms. Landed as
+`rust/svtav1/examples/knob_byte_identity.rs` (zenav1-svt `70883fbe8`) — the
+bitstream-level assertion §3 said would have caught this.
+
+**Positive controls carry the null**, which is the whole reason to believe it:
+`tune=3` **0/36** identical, `sharpness=7` **0/36** identical. The probe is not
+blind.
+
+| arm | p4 | p6 | p8 | verdict |
+|---|--:|--:|--:|---|
+| `tn0` (mainline) | 12/12 | 12/12 | 12/12 | **still dead** |
+| `fork_tn0` (same delta, `hdr_fork()`) | 4/12 | 0/12 | 0/12 | moves on 32/36 |
+| `scm3` | 12/12 | 12/12 | **8/12** | live at p8 |
+| `scm0` | 12/12 | 12/12 | 12/12 | **dead everywhere** |
+
+**1. `tune=0` — NOT fixed, and now localised to one predicate.** The `tn0` and
+`fork_tn0` rows differ in exactly one thing: `if self.hdr.is_fork()` guarding
+`tune::lf_sharpness_for_tune` in `pipeline.rs`. Walking every `tune` read in
+`svtav1-encoder`, that is the **only** site that can separate tune 0 from tune 1
+— each other one keys on `TUNE_IQ`, `TUNE_MS_SSIM`, or `tune_uses_ssim_rdmult`
+(`SSIM|IQ|MS_SSIM`), all of which exclude both (`hdr_mode.rs:358,369`,
+`chroma_q.rs:89,122`, `pipeline.rs:2322,2382,2546,2578,2977,2985,10020`,
+`pd0.rs:252`, `md_config.rs:927`, `mds3.rs:2843`). The fork arm's differences
+are **same-length, different-bytes** (photo p4 q20: 2846 B → 2846 B), the
+signature of a deblocking-strength change — which is what `TUNE_VQ ⇒ min(7,
+sharpness+2)` should produce. Whether the fix is dropping the gate or
+documenting 0 ≡ 1 as faithful turns on whether `deblocking_filter.c:1157`'s VQ
+arm is mainline v4.2.0; **not settled** (the C submodule is not checked out
+locally), so it is filed as a lead with a measurement behind it, not a
+diagnosis. The adjacent `apply_tune_overrides` call site carries a comment
+saying this exact `is_fork()` gating was already a bug once and was fixed there.
+
+**2. `screen_content_mode = Some(3)` is NOT a bug — §3's filing was wrong, and
+this is the retraction.** It reaches the bitstream. It is inert at presets ≤ 7
+because C's allintra default is **already 3** there (`sc_detect.rs`:
+`Allintra => preset <= 7`; `Some(3) => preset.min(7)` is the identity at 4 and
+6). At preset 8 it moves screen content hard — 2,898 → **930 B** at q20, 2,186 →
+833, 1,615 → 833, 1,984 → 807 — while photo and detail stay identical because
+the detector correctly finds no screen content in them. **The DOE swept presets
+4 and 6 only, which is exactly the range where the knob is a semantic
+identity.** The wasted cells are real; the cause is the sweep design, not the
+port. Consequence for Stage B: `scm3` is **not** a dead arm to drop — it is a
+preset-≥8 knob, worth nothing at 4/6 and worth measuring above.
+
+**3. NEW: `screen_content_mode = Some(0)` is genuinely unplumbed** — 36/36
+identical at **every** preset including 8. The match is `Some(3) => …, _ =>
+preset`, so `Some(0)` falls through the wildcard and is indistinguishable from
+`None`; at presets ≤ 7 it fails to *disable* the tools. Never swept, so it cost
+this wave nothing — but it is the real instance of the bug class §3 opened on.
+
+**No rerun declared.** The task's rerun branch was conditional on the arms
+moving; `tn0` does not, and `scm3` does not at the swept presets, so
+re-declaring the 27 aliased A2 arm-pairs would reproduce the same 8,972
+byte-identical cells at the same cost. The fleet stays on B-6/T1/T2. The
+original §3 measurement **stands unamended** as a fact about the `30cf4b3d0`-era
+binary — only its interpretation of `scm3` changes.
+
+**Ancillary, same commit** (`70883fbe8`): `bd10.rs`'s header claimed *"UNWIRED
+(add `pub mod bd10;` when integration starts) … no build run yet"*. It described
+the 2026-07-17 bulk-write directive and was never updated — `lib.rs` declares
+the module, `cdef.rs` and `quant.rs` read it, `tests/c_parity_bd10_quant.rs`
+gates it. Corrected against those call sites; the "inert for bd8" line sharpened
+to *byte-inert by construction* (`qzbin_factor`'s `8 => 148` arm reproduces
+`build_quant_table`'s own threshold), which is a different claim from
+"unreached".
+
+**Evidence.** zenav1-svt#17 comments
+[5511181545](https://github.com/imazen/zenav1-svt/issues/17#issuecomment-5511181545)
++ [5511234180](https://github.com/imazen/zenav1-svt/issues/17#issuecomment-5511234180);
+issue left **OPEN** on the `tune=0` gate and the `scm=0` wildcard. Reproduce:
+`cargo run --release -p zenav1-svt --example knob_byte_identity -- <outdir>`.
