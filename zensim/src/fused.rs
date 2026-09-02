@@ -20,8 +20,148 @@ use magetypes::simd::f32x8;
 use magetypes::simd::generic::f32x8 as GenericF32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
+use magetypes::simd::backends::F32x8Backend;
+#[cfg(target_arch = "x86_64")]
+use magetypes::simd::backends::F32x16Backend;
 
 const C2: f32 = 0.0009;
+
+// ============================================================
+// Free raw-moments accumulation — shared across every SIMD tier
+// (`benchmarks/free_features_2026-09-01.md`, `benchmarks/profile_d_notax_2026-09-01.md`)
+// ============================================================
+//
+// The four FREE raw moments (`Σs, Σd, Σs², Σd²` — `V1FreeExtras::RawMoments`,
+// `StripChannelAccum::sum_s` etc.) are the same two-line accumulate + one
+// conditional four-line finish at every call site, independent of lane
+// width or which concrete SIMD backend produced the row's `s`/`d` values.
+// Before this pair of helpers the sequence was hand-duplicated at 6 vector
+// sites (`_v4`'s and `_v4x`'s native f32x16 main loops, `_v4`'s and `_v4x`'s
+// f32x8 REMAINDER loops via `token.v3()`, `_v3`'s native f32x8 main loop,
+// and the `#[magetypes(neon, wasm128, scalar)]`-generated function's f32x8
+// main loop) plus 4 scalar-tail sites — the free-features doc's own count.
+// Consolidating the two WIDTHS into one generic definition each removes the
+// vector-site duplication (6 -> 2 source definitions, still 6 call sites)
+// and is also the "no waste, no effort duplication" extension point a
+// future `V1FreeExtras` variant (a "class C" slot — see the free-features
+// doc §4) can reuse without re-deriving or re-copying this arithmetic a
+// 7th/8th/9th time: add the new lane-accumulate step here once, call it
+// from wherever the new class needs it.
+//
+// `#[inline(always)]`, not `#[rite]`: both helpers are GENERIC over a
+// backend TRAIT (`T: F32x8Backend` / `T: F32x16Backend`), not a concrete
+// token, so there is no single `#[target_feature]` string to attach at the
+// definition site the way `#[rite]` needs for a concrete-token function —
+// each monomorphized instantiation inherits its caller's already-established
+// feature region purely through ordinary generic inlining, exactly like
+// every other `T: F32x8Backend`-generic kernel in this codebase
+// (`feature_v2.rs`'s `dense_block_kernel_generic`, `ssim_d_local_v`, etc.).
+// `dense_block_kernel_generic`'s own doc comment already carries the
+// MEASURED reason forcing the inline is mandatory here too: an un-inlined
+// generic SIMD helper compiles to a call into a `core::arch` shim OUTSIDE
+// the `#[target_feature]` region, measured as a 5.3x whole-extraction
+// regression on that kernel. Verified inlined away on this refactor via
+// `cargo asm` (no `raw_moments_accumulate{8,16}`/`raw_moments_finish{8,16}`
+// symbol survives in the release build of any `_v4`/`_v4x`/`_v3` tier).
+
+/// Accumulate one row's contribution to the four free raw-moment lane sums.
+/// Bit-identical to the hand-inlined `fm_s = fm_s + s; …` sequence it
+/// replaces — same operations, same order, same intermediate rounding
+/// (`s * s` before adding, not any fused/reassociated form).
+#[inline(always)]
+fn raw_moments_accumulate8<T: F32x8Backend + Copy>(
+    fm_s: &mut GenericF32x8<T>,
+    fm_d: &mut GenericF32x8<T>,
+    fm_s2: &mut GenericF32x8<T>,
+    fm_d2: &mut GenericF32x8<T>,
+    s: GenericF32x8<T>,
+    d: GenericF32x8<T>,
+) {
+    *fm_s = *fm_s + s;
+    *fm_d = *fm_d + d;
+    *fm_s2 = *fm_s2 + s * s;
+    *fm_d2 = *fm_d2 + d * d;
+}
+
+/// Reduce the four lane accumulators to scalars and add them into `acc`'s
+/// running f64 sums — the band's-last-inner-row finish step. Bit-identical
+/// to the hand-inlined `acc.sum_s += fm_s.reduce_add() as f64; …` it
+/// replaces.
+#[inline(always)]
+fn raw_moments_finish8<T: F32x8Backend + Copy>(
+    acc: &mut StripChannelAccum,
+    fm_s: GenericF32x8<T>,
+    fm_d: GenericF32x8<T>,
+    fm_s2: GenericF32x8<T>,
+    fm_d2: GenericF32x8<T>,
+) {
+    acc.sum_s += fm_s.reduce_add() as f64;
+    acc.sum_d += fm_d.reduce_add() as f64;
+    acc.sum_s2 += fm_s2.reduce_add() as f64;
+    acc.sum_d2 += fm_d2.reduce_add() as f64;
+}
+
+/// 16-lane sibling of [`raw_moments_accumulate8`] — `_v4`'s and `_v4x`'s
+/// native f32x16 main loops (x86-64 only, hence the arch gate matching
+/// `f32x16`'s own import).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn raw_moments_accumulate16<T: F32x16Backend + Copy>(
+    fm_s: &mut f32x16<T>,
+    fm_d: &mut f32x16<T>,
+    fm_s2: &mut f32x16<T>,
+    fm_d2: &mut f32x16<T>,
+    s: f32x16<T>,
+    d: f32x16<T>,
+) {
+    *fm_s = *fm_s + s;
+    *fm_d = *fm_d + d;
+    *fm_s2 = *fm_s2 + s * s;
+    *fm_d2 = *fm_d2 + d * d;
+}
+
+/// 16-lane sibling of [`raw_moments_finish8`].
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn raw_moments_finish16<T: F32x16Backend + Copy>(
+    acc: &mut StripChannelAccum,
+    fm_s: f32x16<T>,
+    fm_d: f32x16<T>,
+    fm_s2: f32x16<T>,
+    fm_d2: f32x16<T>,
+) {
+    acc.sum_s += fm_s.reduce_add() as f64;
+    acc.sum_d += fm_d.reduce_add() as f64;
+    acc.sum_s2 += fm_s2.reduce_add() as f64;
+    acc.sum_d2 += fm_d2.reduce_add() as f64;
+}
+
+/// Scalar sibling of [`raw_moments_accumulate8`] / [`raw_moments_accumulate16`]
+/// — every tier's remainder-columns tail (width not a multiple of its
+/// vector width) falls back to plain `f32`.
+#[inline(always)]
+fn raw_moments_accumulate_scalar(
+    fm_s: &mut f32,
+    fm_d: &mut f32,
+    fm_s2: &mut f32,
+    fm_d2: &mut f32,
+    s: f32,
+    d: f32,
+) {
+    *fm_s += s;
+    *fm_d += d;
+    *fm_s2 += s * s;
+    *fm_d2 += d * d;
+}
+
+/// Scalar sibling of [`raw_moments_finish8`] / [`raw_moments_finish16`].
+#[inline(always)]
+fn raw_moments_finish_scalar(acc: &mut StripChannelAccum, fm_s: f32, fm_d: f32, fm_s2: f32, fm_d2: f32) {
+    acc.sum_s += fm_s as f64;
+    acc.sum_d += fm_d as f64;
+    acc.sum_s2 += fm_s2 as f64;
+    acc.sum_d2 += fm_d2 as f64;
+}
 
 /// Accumulated feature sums from a fused V-blur + feature extraction pass.
 /// All values are raw sums (not yet divided by pixel count).
@@ -406,15 +546,9 @@ fn fused_vblur_ssim_inner_v4(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    fm_s = fm_s + s;
-                    fm_d = fm_d + d;
-                    fm_s2 = fm_s2 + s * s;
-                    fm_d2 = fm_d2 + d * d;
+                    raw_moments_accumulate16(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s.reduce_add() as f64;
-                        acc.sum_d += fm_d.reduce_add() as f64;
-                        acc.sum_s2 += fm_s2.reduce_add() as f64;
-                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                        raw_moments_finish16(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -560,15 +694,9 @@ fn fused_vblur_ssim_inner_v4(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    fm_s = fm_s + s;
-                    fm_d = fm_d + d;
-                    fm_s2 = fm_s2 + s * s;
-                    fm_d2 = fm_d2 + d * d;
+                    raw_moments_accumulate8(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s.reduce_add() as f64;
-                        acc.sum_d += fm_d.reduce_add() as f64;
-                        acc.sum_s2 += fm_s2.reduce_add() as f64;
-                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -681,15 +809,9 @@ fn fused_vblur_ssim_inner_v4(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    fm_s += sv;
-                    fm_d += dv;
-                    fm_s2 += sv * sv;
-                    fm_d2 += dv * dv;
+                    raw_moments_accumulate_scalar(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s as f64;
-                        acc.sum_d += fm_d as f64;
-                        acc.sum_s2 += fm_s2 as f64;
-                        acc.sum_d2 += fm_d2 as f64;
+                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -865,15 +987,9 @@ fn fused_vblur_ssim_inner_v4x(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    fm_s = fm_s + s;
-                    fm_d = fm_d + d;
-                    fm_s2 = fm_s2 + s * s;
-                    fm_d2 = fm_d2 + d * d;
+                    raw_moments_accumulate16(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s.reduce_add() as f64;
-                        acc.sum_d += fm_d.reduce_add() as f64;
-                        acc.sum_s2 += fm_s2.reduce_add() as f64;
-                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                        raw_moments_finish16(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -1019,15 +1135,9 @@ fn fused_vblur_ssim_inner_v4x(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    fm_s = fm_s + s;
-                    fm_d = fm_d + d;
-                    fm_s2 = fm_s2 + s * s;
-                    fm_d2 = fm_d2 + d * d;
+                    raw_moments_accumulate8(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s.reduce_add() as f64;
-                        acc.sum_d += fm_d.reduce_add() as f64;
-                        acc.sum_s2 += fm_s2.reduce_add() as f64;
-                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -1140,15 +1250,9 @@ fn fused_vblur_ssim_inner_v4x(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    fm_s += sv;
-                    fm_d += dv;
-                    fm_s2 += sv * sv;
-                    fm_d2 += dv * dv;
+                    raw_moments_accumulate_scalar(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s as f64;
-                        acc.sum_d += fm_d as f64;
-                        acc.sum_s2 += fm_s2 as f64;
-                        acc.sum_d2 += fm_d2 as f64;
+                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -1319,15 +1423,9 @@ fn fused_vblur_ssim_inner_v3(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    fm_s = fm_s + s;
-                    fm_d = fm_d + d;
-                    fm_s2 = fm_s2 + s * s;
-                    fm_d2 = fm_d2 + d * d;
+                    raw_moments_accumulate8(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s.reduce_add() as f64;
-                        acc.sum_d += fm_d.reduce_add() as f64;
-                        acc.sum_s2 += fm_s2.reduce_add() as f64;
-                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -1440,15 +1538,9 @@ fn fused_vblur_ssim_inner_v3(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    fm_s += sv;
-                    fm_d += dv;
-                    fm_s2 += sv * sv;
-                    fm_d2 += dv * dv;
+                    raw_moments_accumulate_scalar(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s as f64;
-                        acc.sum_d += fm_d as f64;
-                        acc.sum_s2 += fm_s2 as f64;
-                        acc.sum_d2 += fm_d2 as f64;
+                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -1636,15 +1728,9 @@ fn fused_vblur_ssim_inner(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if raw_moments {
-                    fm_s = fm_s + s;
-                    fm_d = fm_d + d;
-                    fm_s2 = fm_s2 + s * s;
-                    fm_d2 = fm_d2 + d * d;
+                    raw_moments_accumulate8(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s.reduce_add() as f64;
-                        acc.sum_d += fm_d.reduce_add() as f64;
-                        acc.sum_s2 += fm_s2.reduce_add() as f64;
-                        acc.sum_d2 += fm_d2.reduce_add() as f64;
+                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }
@@ -1764,15 +1850,9 @@ fn fused_vblur_ssim_inner(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    fm_s += sv;
-                    fm_d += dv;
-                    fm_s2 += sv * sv;
-                    fm_d2 += dv * dv;
+                    raw_moments_accumulate_scalar(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv);
                     if y + 1 == inner_end {
-                        acc.sum_s += fm_s as f64;
-                        acc.sum_d += fm_d as f64;
-                        acc.sum_s2 += fm_s2 as f64;
-                        acc.sum_d2 += fm_d2 as f64;
+                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
                 }
             }

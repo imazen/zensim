@@ -223,17 +223,21 @@ pub enum ZensimProfile {
     /// - **SDR content only** — structurally, like [`Self::C`]; route HDR
     ///   content to [`Self::BHdr`].
     ///
-    /// **Default-build behaviour (no `feature-regime-v2`): `D` scores
-    /// correctly via the ordinary buffered walk, at the SAME per-pixel cost
-    /// as `B`** (it still extracts the full 372-feature vector; only the
-    /// forward pass is smaller) — a default build gets a correct, `B`-class
-    /// dial with `D`'s ranking properties, not the `156`-class speed. The
-    /// 2.54×+ speedup is reachable only in a build compiled with
-    /// `feature-regime-v2` (still gated `#[doc(hidden)]` today — see
-    /// `Zensim::with_engine` / `Zensim::with_unread_feature_skipping`, which
-    /// `Zensim::new(ZensimProfile::D)` sets automatically under that
-    /// feature). MEASURED in
-    /// `benchmarks/profile_d_and_published_speed_2026-09-01.md`.
+    /// **Default-build behaviour: `feature-regime-v2` is default-on since
+    /// 2026-09-01** (`benchmarks/profile_d_notax_2026-09-01.md`, the gating-
+    /// tax removal), so a plain `cargo add zensim` build reaches the fold's
+    /// `156`-class speed for `D` with no extra feature flag —
+    /// `Zensim::new(ZensimProfile::D)` sets `Zensim::with_engine` /
+    /// `Zensim::with_unread_feature_skipping` (both still `#[doc(hidden)]`,
+    /// internal knobs) automatically. Only a build compiled with
+    /// `--no-default-features` (and no explicit re-add of
+    /// `feature-regime-v2`) falls back: `D` still scores correctly via the
+    /// ordinary buffered walk, at the SAME per-pixel cost as `B` (it still
+    /// extracts the full 372-feature vector; only the forward pass is
+    /// smaller) — a `B`-class dial with `D`'s ranking properties, not the
+    /// `156`-class speed. Both cases MEASURED in
+    /// `benchmarks/profile_d_and_published_speed_2026-09-01.md` and
+    /// `benchmarks/profile_d_notax_2026-09-01.md`.
     ///
     /// Full audit, corrections, and reproduction:
     /// `benchmarks/add156_ship_audit_2026-08-31.md`,

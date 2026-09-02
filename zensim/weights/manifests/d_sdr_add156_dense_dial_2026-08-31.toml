@@ -1,0 +1,79 @@
+# Manifest for the shipped `zensim-d` (SDR, FAST) bake —
+# `ZensimProfile::D`, shipped 2026-09-01.
+# Schema: zensim/weights/manifests/README.md
+#
+# Added 2026-09-01 by the Profile-D no-tax refactor lane, after
+# `cargo test --workspace` (a check the profile's own landing commit did not
+# run — it scoped gates to `-p zensim`) surfaced that D shipped with no
+# manifest at all, exactly the gap `shipped_bake_provenance.rs` exists to
+# catch. `[bake]` below is independently verified against the shipped file
+# in this repo (`sha256sum` + `wc -c`), not copied from prose.
+#
+# NOTE ON SCOPE — this manifest documents the LAST step of D's provenance
+# chain precisely (the free spline-top extension that turned the raw lasso
+# fit into the shipped bake) and is explicit about where it stops, rather
+# than fabricating training-recipe fields for a step it does not re-verify.
+# Same convention `b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.toml`
+# uses for its own non-MLP-trainer bake: absence over an invented "n/a".
+
+[bake]
+name               = "zensim-d"
+internal_version   = "d-sdr-add156-dense-dial"
+file               = "../d_sdr_add156_dense_dial_2026-08-31.bin"
+sha256             = "4481c2d4a7c0d35e82f423587b9bc5ce8a52642375e778e5214af38b799ad504"
+file_bytes         = 3671
+n_inputs           = 372
+arch               = "PURE LINEAR (basic-only): 372-declared-width single identity-activation layer, 28 nonzero coefficients over f0..156 (v1's basic block only — 0 of the 216 f156..372 peak/masked/IW pool coefficients are live), + a training-fitted concave PCHIP dial-spline TOP extension (no winsor/feature-bounds guard — see 'known gaps' below). Forward = dot product (156 of 372 inputs actually read) + spline lookup."
+date               = "2026-08-31"
+ship_commit        = "0f7eb2ea54b854f81e053e446f7453ad3a23259b"   # first commit carrying this .bin + ZensimProfile::D
+
+# --- Lineage: what this manifest VERIFIES, and where it stops ---
+#
+# Verified in this repo (`sha256sum`/`wc -c` on the tracked files/pointer
+# docs, 2026-09-01): the shipped bake is byte-identical to arm A from
+# `benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md`
+# (`ADD156_dense_dial_nowinsor_2026-08-31.bin`, sha256 4481c2d4… there too),
+# which that doc derives from a RAW lasso-fit bake via ONE free,
+# rank-exact, deterministic step:
+#
+#   ADD156_safesyn_only_raw_lasso.bin (3,575 B, sha256
+#   51437a34f04887ce850b25eff4f72a6bcd12926873ce060a12878d558a7517db,
+#   READ-ONLY input, re-verified untouched at the end of that run)
+#     --[bake_dial_refit extend-top]-->
+#   ADD156_dense_dial_nowinsor_2026-08-31.bin = SHIPPED (this bake)
+#
+# `extend-top` fits a training-fitted concave saturation onto the spline's
+# TOP knot from a multiband anchor — a fixed, deterministic post-step (same
+# tool B's own manifest documents), which is why that pointer doc could
+# assert rank-exactness (Δ = 0.000000 on 5 of 6 corpora, −0.000002 on the
+# 6th) rather than re-fitting anything.
+#
+# NOT independently re-verified here: the exact `fit-lasso` CLI invocation
+# (target column, corpus, lambda, `--tau`) that PRODUCED
+# `ADD156_safesyn_only_raw_lasso.bin` in the first place. That fit predates
+# the 2026-08-31 D7/ship-audit work this manifest traces and was not
+# re-derived as part of the Profile-D no-tax refactor (out of that task's
+# scope) — `profile.rs`'s own `ZensimProfile::D` doc comment already states
+# this as an honest gap ("No embedded byte-repro block … its 28 coefficients
+# are a 400-sweep solver truncation … that provenance lives only in the
+# campaign record, not in the bake"). The campaign record in question is the
+# sota944 selection sweep that produced `ADD156_safesyn_only_raw_lasso.bin`
+# (referenced as an already-built input throughout
+# `benchmarks/add156_ship_audit_2026-08-31.md` and
+# `benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md`, both of which cite
+# it only by path+sha256, not by CLI) — a future session closing this gap
+# should trace it from there rather than re-deriving flags by guesswork.
+
+[docs]
+ship_audit        = "benchmarks/add156_ship_audit_2026-08-31.md"
+ood_guard_fix     = "benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md"   # the extend-top step, arm A
+audit_artifacts   = "benchmarks/add156_audit_artifacts_2026-08-31.pointer.md"
+fast_subset_perf  = "benchmarks/era2_fast_profile_subset_2026-08-31.md"      # the 156-compute-set speed measurement D ships for
+profile_d_landing = "benchmarks/profile_d_and_published_speed_2026-09-01.md"
+no_tax_refactor   = "benchmarks/profile_d_notax_2026-09-01.md"
+
+# Held-out panel at ship time. Cited from the docs above, not re-derived here.
+[eval]
+cid22_srocc  = 0.8634
+konjnd_srocc = 0.5332   # JPEG-504 ruler, the registry-correct one (add156_ship_audit D2)
+notes = "Within 0.019 pooled CID22 of shipped B (0.8634 vs 0.8821); beats B on within-image ranking on 6 of 8 canonical corpora, incl. HF near-lossless (B ranks 21% of reference ladders backwards, D ranks 0%). Known gaps (see ZensimProfile::D's own rustdoc): no winsor feature-bounds OOD guard (G-RANGE fails 6 of 14 corpora — the free spline-top fix already applied here closes the near-lossless class; the winsor guard itself is a separate, costly, user-gated trade per the ood_guard_fix doc), no embedded zentrain.repro block, no companion corruption head."

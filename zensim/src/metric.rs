@@ -1221,21 +1221,27 @@ pub struct Zensim {
     /// scale boundaries inside the streaming walk. See [`Zensim::with_stop`].
     stop: Option<StopHandle>,
     /// Route the scoring entries through the streaming fold instead of the
-    /// buffered walk (fold-engine lane, 2026-08-30). Always `false` unless
-    /// something explicitly asks for it via
-    /// `Zensim::with_engine(ScoringEngine::Fold)`, which only exists under
-    /// `feature-regime-v2` — so a default build cannot leave this `false`.
-    /// Requests the fold cannot serve bit-identically
-    /// (`fold_engine::is_fold_backable`) fall back to buffered even when set.
+    /// buffered walk (fold-engine lane, 2026-08-30). `false` for every
+    /// profile except [`crate::profile::ZensimProfile::D`], which
+    /// `Zensim::new` sets it `true` for by construction (see `fast_by_default`
+    /// there) — or wherever something explicitly asks via
+    /// `Zensim::with_engine(ScoringEngine::Fold)`. Both routes only exist
+    /// under `feature-regime-v2` (default-on since 2026-09-01;
+    /// `--no-default-features` removes the field's only readers, so it stays
+    /// permanently `false`-equivalent there). Requests the fold cannot serve
+    /// bit-identically (`fold_engine::is_fold_backable`) fall back to
+    /// buffered even when set.
     pub(crate) fold_engine: bool,
     /// Let a fold-backed SCORE skip computing the v1 pool families the loaded
     /// profile structurally never reads (fold_engine::score_pool_mode).
-    /// **Default `false`** — opt-in via
+    /// **Default `false`** for every profile except `D` (same
+    /// `fast_by_default` wiring as `fold_engine` above) — opt-in elsewhere via
     /// [`Zensim::with_unread_feature_skipping`], because it leaves the
     /// skipped slots at `0.0` in [`ZensimResult::features`]. The SCORE and
     /// `raw_distance` are bit-identical either way, by construction: a slot
     /// is only skipped when every consumer's weight on it is exactly zero.
-    /// Read only by the `feature-regime-v2`-gated fold engine.
+    /// Read only by the `feature-regime-v2`-gated fold engine (default-on
+    /// since 2026-09-01; inert dead field under `--no-default-features`).
     #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
     pub(crate) skip_unread_pools: bool,
 }
@@ -1268,13 +1274,18 @@ impl Zensim {
         // both derive `V1PoolsMode::Peaks` for it), so — unlike every other
         // profile, which defaults to the buffered walk and leaves these
         // `#[doc(hidden)]` knobs to an explicit opt-in — `D` opts itself in.
-        // On a build without `feature-regime-v2` these two fields are inert
-        // (nothing reads them outside that feature), so `D` computes
-        // correctly via the ordinary buffered walk at `B`-class cost; the
-        // `156`-class speedup is reachable only with the feature compiled
-        // in. See the `D` variant's rustdoc and
-        // `benchmarks/profile_d_and_published_speed_2026-09-01.md` for the
-        // measured default-build-vs-feature-enabled consequence.
+        // `feature-regime-v2` (the fold engine's gate) is default-on since
+        // 2026-09-01 (`benchmarks/profile_d_notax_2026-09-01.md`), so a plain
+        // `cargo add zensim` build reaches the fast fold path for `D` with no
+        // extra feature flag. On a build with `--no-default-features` (or an
+        // explicit re-add list that omits `feature-regime-v2`) these two
+        // fields are inert (nothing reads them outside that feature), so `D`
+        // still computes correctly via the ordinary buffered walk, just at
+        // `B`-class cost rather than the fold's `156`-class speedup. See the
+        // `D` variant's rustdoc and
+        // `benchmarks/profile_d_and_published_speed_2026-09-01.md` /
+        // `benchmarks/profile_d_notax_2026-09-01.md` for the measured
+        // buffered-vs-fold and gated-vs-default-build numbers.
         #[cfg(feature = "candidate-profiles")]
         let fast_by_default = matches!(profile, ZensimProfile::D);
         #[cfg(not(feature = "candidate-profiles"))]

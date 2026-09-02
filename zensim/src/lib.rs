@@ -276,9 +276,14 @@ pub(crate) mod fold_timing;
 //
 // `#[doc(hidden)]`: its one public item (`ScoringEngine`) is an internal
 // engine selector for the parity gates and the perf comparison, not a product
-// knob. `Buffered` is the default and a build without `feature-regime-v2`
-// cannot name the module at all, so a default build's documented surface and
-// behaviour are unchanged by its existence.
+// knob. `Buffered` is the default for every profile except `ZensimProfile::D`
+// (`benchmarks/profile_d_notax_2026-09-01.md` — `D`'s whole reason to exist is
+// speed, so `Zensim::new` opts it into `Fold` itself). `feature-regime-v2` is
+// default-on as of 2026-09-01, so `fold_engine` is reachable (though still
+// `#[doc(hidden)]`, an internal selector rather than a documented product
+// knob) in a plain `cargo add zensim` build; `--no-default-features` still
+// removes the module and its type entirely, in which case every profile
+// including `D` runs the buffered walk unconditionally.
 #[cfg(feature = "feature-regime-v2")]
 #[doc(hidden)]
 pub mod fold_engine;

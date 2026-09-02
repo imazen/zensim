@@ -37,7 +37,7 @@ include = [
 all-features = true
 
 [features]
-default = ["avx512", "imgref", "threads", "deprecated-profiles", "candidate-profiles"]
+default = ["avx512", "imgref", "threads", "deprecated-profiles", "candidate-profiles", "feature-regime-v2"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## Diagnostic ONLY: accumulate `Σ activity` during extraction so `ScaleStats::
 ## iw_mean_w` reports the factor the `1/n`-pooled `iw_*` features carry (they
@@ -100,8 +100,11 @@ deprecated-profiles = []
 # re-add what you need) to save ~329 KB of embedded bake bytes — the same
 # opt-out shape as `deprecated-profiles` (A's ~27 KB v47 bake).
 candidate-profiles = []
-## Opt-in "bounded" v2 feature-extraction regime (`feature_v2` module,
-## `Zensim::compute_v2_features`, `FeatureViewV2`). STRICTLY ADDITIVE — the
+## The "bounded" v2 feature-extraction regime (`feature_v2` module,
+## `Zensim::compute_v2_features`, `FeatureViewV2`) AND the streaming fold
+## engine it carries (`fold_engine.rs`, `benchmarks/fold_engine_2026-08-31.md`)
+## — **ON by default since 2026-09-01** (the Profile-D no-tax refactor,
+## `benchmarks/profile_d_notax_2026-09-01.md`). STRICTLY ADDITIVE — the
 ## default v1 372-feature extraction (`metric.rs`, `streaming.rs`) is byte-frozen
 ## and unaffected whether this feature is on or off; every canonical parquet and
 ## shipped bake depends on that freeze. v2 redesigns every feature to be
@@ -111,10 +114,27 @@ candidate-profiles = []
 ## explicit per-pixel map — including the deviation/"peak" signals that v1's
 ## max/L8 pooling could not express as a per-pixel map). See
 ## `docs/FEATURE_V2_SPEC_2026-07-18.md` for the full defect inventory (D1-D9),
-## design principles, and per-feature formula/bound/citation table. Off by
-## default: iteration 1 is a scalar correctness-first reference implementation
-## (not yet fused into the archmage/SIMD streaming hot path), intended for
-## validation and future trainer experiments, not for production throughput.
+## design principles, and per-feature formula/bound/citation table.
+##
+## **Why default-on now.** The v2 module also carries the FUSED, SIMD-dispatched
+## streaming fold (`foldapp_streaming_walk` + `V1PoolsMode` + `V1FreeExtras`),
+## which is `zensim`'s FASTEST walk for the v1-basic(+peaks/free) class of
+## bake (`ZensimProfile::D`) — since option C (2026-08-30) the fold's `f0..372`
+## is bit-identical to v1's own 372-feature extraction at every width
+## (`v1_372_bit_exact_to_fold_at_every_width`). Before this flip, that speed
+## was reachable only behind this explicit opt-in feature, so `D`'s "whole
+## reason to exist is speed" silently fell back to the buffered (B-class-cost)
+## walk on any plain `cargo add zensim` build — the W7 gap this flip closes.
+## The stale "off by default: a scalar reference impl, not for production
+## throughput" framing that used to sit here described iteration 1 (pre-fusion,
+## 2026-07-18); it stopped being true once the fused/SIMD fold landed and is
+## corrected here rather than left to mislead the next reader. Adds no new
+## dependency (`= []`); the cost is compiled code size / build time, not a
+## runtime behavior change for any profile other than `D` (every other profile
+## still defaults to the buffered walk — see `Zensim::new`'s `fast_by_default`).
+## Disable via `--no-default-features` (re-add the other defaults you need) if
+## the extra compiled surface is unwanted and `D`'s buffered-speed fallback is
+## acceptable.
 feature-regime-v2 = []
 
 [dependencies]

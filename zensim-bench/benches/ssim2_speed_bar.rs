@@ -147,7 +147,47 @@ fn env_usize(key: &str, dflt: usize) -> usize {
         .unwrap_or(dflt)
 }
 
+/// Cap the SIMD tier at `X64V3Token` (x86-64-v3 = AVX2+FMA+BMI2, Haswell
+/// 2013 / Zen 1 2017 — see archmage's own token docs; this is NOT SSE4.2,
+/// despite older notes in this repo's memory saying so) by disabling
+/// `X64V4Token` process-wide, which cascades to `X64V4xToken` and
+/// `Avx512Fp16Token` too (archmage `tokens::mod.rs`). `incant!` then resolves
+/// to the `_v3` variant everywhere, on every arch this box runs (x86-64
+/// only — a no-op returning `false` elsewhere). Requires the `testable_dispatch`
+/// archmage feature (already a `[dependencies]` feature here) AND a build
+/// without `-C target-cpu=native` (CLAUDE.md already bans that for
+/// benchmarking) — `dangerously_disable_token_process_wide` returns `Err`
+/// when the target features are compile-time-guaranteed, which this reports
+/// rather than silently ignoring.
+///
+/// `ZEN_S2_CAP_V3=1` selects the capped (AVX2) tier for the WHOLE process;
+/// unset/`=0` leaves the native top tier (AVX-512 on this box) — Cargo
+/// features are per-build, so capping per-arm inside one process is not
+/// possible; the honest way to price both tiers is two process runs with
+/// this env flipped, exactly like `ssim2-rayon` above.
+#[cfg(target_arch = "x86_64")]
+fn cap_tier_v3(cap: bool) -> Result<(), String> {
+    archmage::X64V4Token::dangerously_disable_token_process_wide(cap)
+        .map_err(|e| e.to_string())
+}
+#[cfg(not(target_arch = "x86_64"))]
+fn cap_tier_v3(_cap: bool) -> Result<(), String> {
+    Ok(())
+}
+
 fn main() {
+    if env_usize("ZEN_S2_CAP_V3", 0) == 1 {
+        match cap_tier_v3(true) {
+            Ok(()) => eprintln!("# ZEN_S2_CAP_V3=1: X64V4Token disabled process-wide, ceiling=v3(AVX2)"),
+            Err(e) => {
+                eprintln!(
+                    "# ZEN_S2_CAP_V3=1 requested but could not disable X64V4Token: {e} \
+                     — refusing to report a native-tier run mislabeled as capped."
+                );
+                std::process::exit(1);
+            }
+        }
+    }
     let sizes: Vec<usize> = std::env::var("ZEN_S2_SIZES")
         .ok()
         .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
@@ -269,6 +309,50 @@ fn main() {
                             zenbench::black_box(f.forward(&mut pred, &mut x, v2.features()))
                         })
                     });
+                }
+                // ---- diagnostic: EXTRACTION ONLY, same entry point + toggles as the
+                // two arms above, forward pass excluded (`ZEN_S2_EXTRACT_ONLY=1`).
+                // Off by default so the exam's arm set is unchanged; exists to answer
+                // "is a W4 anomaly in the walk or in the bake's forward pass" without
+                // a second, potentially-mismatched instrument
+                // (`benchmarks/profile_d_notax_2026-09-01.md` §W4 diagnosis).
+                if env_usize("ZEN_S2_EXTRACT_ONLY", 0) == 1 {
+                    if add.is_some() {
+                        group.bench("add156_extract_only", move |b| {
+                            let mut scratch = zensim::feature_v2::V2Scratch::new();
+                            b.iter(move || {
+                                let rs = RgbSlice::new(src_s, n, n);
+                                let ds = RgbSlice::new(dst_s, n, n);
+                                let v2 = zf
+                                    .compute_folded720_features_streaming(
+                                        &rs,
+                                        &ds,
+                                        v1_basic,
+                                        &mut scratch,
+                                    )
+                                    .unwrap();
+                                zenbench::black_box(v2.features().iter().fold(0.0f64, |a, &b| a + b))
+                            })
+                        });
+                    }
+                    if free.is_some() {
+                        group.bench("free156_extract_only", move |b| {
+                            let mut scratch = zensim::feature_v2::V2Scratch::new();
+                            b.iter(move || {
+                                let rs = RgbSlice::new(src_s, n, n);
+                                let ds = RgbSlice::new(dst_s, n, n);
+                                let v2 = zf
+                                    .compute_folded720_features_streaming(
+                                        &rs,
+                                        &ds,
+                                        v1_basic_free,
+                                        &mut scratch,
+                                    )
+                                    .unwrap();
+                                zenbench::black_box(v2.features().iter().fold(0.0f64, |a, &b| a + b))
+                            })
+                        });
+                    }
                 }
                 if let Some(m) = mlp {
                     group.bench("flagship_944off", move |b| {

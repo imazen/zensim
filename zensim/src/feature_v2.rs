@@ -1,6 +1,8 @@
-//! V2 "bounded" feature extraction — opt-in, additive regime.
+//! V2 "bounded" feature extraction — additive regime.
 //!
-//! Gated behind `feature-regime-v2` (default OFF). Full defect inventory
+//! Gated behind `feature-regime-v2` (default ON since 2026-09-01 — the
+//! Profile-D no-tax refactor, `benchmarks/profile_d_notax_2026-09-01.md`;
+//! `--no-default-features` still removes this whole module). Full defect inventory
 //! (D1-D9), design principles, per-feature formula/bound/citation table,
 //! and iteration-1 as-built: `docs/FEATURE_V2_SPEC_2026-07-18.md` Part A/B.
 //! This file is iteration 2 ("phase 2" / "feature-v2b"): §A.11/§A.12 of

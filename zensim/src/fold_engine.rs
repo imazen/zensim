@@ -59,9 +59,14 @@ use crate::source::ImageSource;
 ///
 /// `#[doc(hidden)]`: this is an internal engine selector for the parity gates
 /// and the perf comparison, not a product knob. [`ScoringEngine::Buffered`]
-/// is the default and a build without `feature-regime-v2` cannot name this
-/// type at all — so a default build's behaviour and public surface are
-/// unchanged by its existence.
+/// is the default for every profile except [`crate::profile::ZensimProfile::D`]
+/// (`Zensim::new` opts `D` into `Fold` itself, since speed is its whole reason
+/// to exist — `benchmarks/profile_d_notax_2026-09-01.md`). `feature-regime-v2`
+/// is default-on as of 2026-09-01, so a plain `cargo add zensim` build CAN
+/// name this type (it stays `#[doc(hidden)]`, not surfaced in rendered docs);
+/// `--no-default-features` removes it and the module entirely, and every
+/// profile including `D` then runs `Buffered` unconditionally — correctly,
+/// just without the fold's speed.
 ///
 /// It is `pub` rather than `pub(crate)` for the same reason
 /// `V2NewFeatureToggles::v1_only` is: the parity gate lives in
@@ -771,6 +776,125 @@ mod skip_policy_tests {
                     );
                 }
             }
+        }
+    }
+
+    /// **The gating-tax-removal gate** (`benchmarks/profile_d_notax_2026-09-01.md`):
+    /// a plain default build (this crate's `default` feature list, which has
+    /// carried `feature-regime-v2` since 2026-09-01) must score `D`
+    /// IDENTICALLY — score, `raw_distance`, mean_offset, and every SCORED
+    /// feature slot — to what a `--no-default-features` build re-adding only
+    /// the OTHER defaults (`avx512,imgref,threads,deprecated-profiles,
+    /// candidate-profiles`, i.e. everything except `feature-regime-v2`) would
+    /// have produced. Such a build cannot name `ScoringEngine` or
+    /// `with_engine` at all (`fold_engine` does not exist without the
+    /// feature), so it can only ever run [`ScoringEngine::Buffered`] — this
+    /// crate's proxy for "what the gated-off build computes" is therefore
+    /// forcing `Buffered` explicitly (leaving `skip_unread_pools` untouched:
+    /// the buffered walk never reads that field either way, proven by the
+    /// MEASURED finding below) and diffing against this build's DEFAULT
+    /// construction (which, for `D`, is fast-by-default = `Fold`+skip where
+    /// serviceable).
+    ///
+    /// **Why the comparison stops at `f0..228` and not the full 372, and why
+    /// that is the correct claim rather than a weakened one — MEASURED, not
+    /// assumed.** An earlier draft of this test asserted full-vector
+    /// equality and failed immediately at `f228` (96×64: `0.0` vs
+    /// `2.302614610319627e-3`) while `score()` matched exactly
+    /// (`68.94795355810257` both arms, bit-for-bit) — the failure was the
+    /// test's premise, not a code defect. `V1PoolsMode::Peaks` (what
+    /// `fast_by_default` selects for `D`, since `ADD156` reads 0 of
+    /// `f156..372`) deliberately leaves `f228..372` (masked/IW) at `0.0` —
+    /// that is `with_unread_feature_skipping`'s own documented contract
+    /// ("leaves the skipped slots at 0.0"). The buffered walk has no
+    /// skipping concept at all and always computes real values there,
+    /// confirmed directly: `Zensim::new(D).with_engine(Buffered).compute(..)`
+    /// (skip untouched) gives the SAME `2.302614610319627e-3` at `f228` as
+    /// the `skip=false` proxy, on both arms' `score()` still bit-identical.
+    /// So a genuinely gated-off build's `D` and this build's default `D`
+    /// PROVABLY differ at `f228..372` — real values vs deliberate zeros —
+    /// while agreeing on everything that actually reaches the score
+    /// (`score_v1_layout_features` reads `f0..228` for `D`'s class of
+    /// profile; masked/IW carries zero weight). Asserting full-vector
+    /// equality would have enshrined a false claim; asserting it only over
+    /// the scored prefix states the true invariant the gating-tax refactor
+    /// actually provides: speed changes, SCORE never does.
+    /// `profile_d_scores_are_engine_and_skip_invariant` above already proves
+    /// `Buffered == Fold` for `D`'s score as one of its four combinations;
+    /// this test is its own standalone, narrowly-named regression gate for
+    /// the gated-vs-default-build claim specifically, with the scored-region
+    /// boundary stated and justified rather than left implicit.
+    #[cfg(feature = "candidate-profiles")]
+    #[test]
+    fn default_build_profile_d_matches_feature_gated_off_buffered_walk() {
+        use crate::source::RgbSlice;
+        // 96x64 / 577x385: the existing invariant test's sub-64-pad and
+        // odd-dims fixtures. 592x400: `simd_padded_width(592) == 592` (a
+        // multiple of 16 that stays below the +16 rounding some widths get,
+        // per CLAUDE.md's "option C" pad-column note) — a control size for
+        // the v1/fold padded-width class of defect, so this gate does not
+        // accidentally only ever exercise geometries where that class of bug
+        // is invisible.
+        for &(w, h) in &[(96usize, 64usize), (577, 385), (592, 400)] {
+            let src = crate::feature_v2::tests::textured_image(w, h, 29);
+            let dst = crate::feature_v2::tests::quantize_distort(&src, w, h);
+            let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+
+            let default_build = crate::Zensim::new(ZensimProfile::D)
+                .compute(&sref, &dref)
+                .expect("D scores by default");
+            // The gated-off proxy: forced Buffered, `skip_unread_pools` left
+            // untouched (a genuinely gated-off build cannot set it at all,
+            // and the buffered walk never reads it — see the doc comment).
+            let gated_off_proxy = crate::Zensim::new(ZensimProfile::D)
+                .with_engine(ScoringEngine::Buffered)
+                .compute(&sref, &dref)
+                .expect("D scores forced-buffered");
+
+            assert_eq!(
+                default_build.score().to_bits(),
+                gated_off_proxy.score().to_bits(),
+                "{w}x{h}: default-build D score diverged from the feature-gated-off proxy"
+            );
+            assert_eq!(
+                default_build.raw_distance().to_bits(),
+                gated_off_proxy.raw_distance().to_bits(),
+                "{w}x{h}: raw_distance diverged"
+            );
+            assert_eq!(
+                default_build.mean_offset(),
+                gated_off_proxy.mean_offset(),
+                "{w}x{h}: mean_offset diverged"
+            );
+            // The scored prefix (`D`'s class reads `f0..228` —
+            // `score_v1_layout_features`) must be bit-identical: this is
+            // every slot that can move the score, so it is the honest scope
+            // of "the gating-tax refactor changes only speed".
+            let (df, gf) = (default_build.features(), gated_off_proxy.features());
+            assert_eq!(df.len(), gf.len(), "{w}x{h}: feature vector width diverged");
+            for (i, (&a, &b)) in df[..228].iter().zip(gf[..228].iter()).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "{w}x{h}: SCORED feature slot {i} diverged ({a:e} vs {b:e})"
+                );
+            }
+            // f228..372 (masked/IW) is DELIBERATELY zero on the default
+            // (fast-by-default skip) arm for this bake and real on the
+            // gated-off (always-buffered) arm — assert that documented
+            // asymmetry holds (not "any difference is fine": specifically
+            // this one, in this direction), so a future change that starts
+            // agreeing here (e.g. skip stops firing) or starts disagreeing
+            // in `f0..228` (a real regression) both fail loudly rather than
+            // silently passing a loosened gate.
+            assert!(
+                df[228..372].iter().all(|&v| v == 0.0),
+                "{w}x{h}: default (fast-by-default skip) arm's masked/IW block is no longer all-zero"
+            );
+            assert!(
+                gf[228..372].iter().any(|&v| v != 0.0),
+                "{w}x{h}: gated-off (buffered) arm's masked/IW block is unexpectedly all-zero"
+            );
         }
     }
 

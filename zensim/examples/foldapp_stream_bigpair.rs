@@ -103,6 +103,17 @@ fn main() {
             v1_pools: V1PoolsMode::Peaks,
             ..Default::default()
         },
+        // DIAGNOSTIC (temporary, profile_d_notax lane): `V1PoolsMode::Off` +
+        // `v1_only` — the exact combination `zensim-bench/benches/
+        // ssim2_speed_bar.rs`'s `v1_basic` toggle constructs by hand for the
+        // `add156_156basic` arm, bypassing the `pools_mode_for_need` policy
+        // that never returns `Off` in production. Checking whether this
+        // specific combination hangs under threading.
+        "156off" => V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Off,
+            ..Default::default()
+        },
         // --- the free-feature A/B (`benchmarks/free_features_2026-09-01.md`).
         // THREE characters like `156`, because the ASLR protocol (era-2 §22.5)
         // requires byte-identical environment blocks between interleaved arms:
