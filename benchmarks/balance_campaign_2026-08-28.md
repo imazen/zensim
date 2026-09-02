@@ -6207,3 +6207,135 @@ Written to ~/tmp rather than committed: the zensim `.workongoing` was NOT free
   the vvc leg staged its ffmpeg n7.1.5 binary under `~/tmp/tools/` (volatile).
 - zenav1-aom: PREREQ-AOM-STANDALONE itself is queued, not implemented; DOE arm
   A3 stays BLOCKED, svt arm carries the DOE.
+
+---
+
+## 2026-09-02 — ROUND 62: B-6 ANALYSED — the reduced-size screening failure was MISCALIBRATION, not a wrong direction, and both knobs are out of the tuning model
+
+**This is ROUND 56's analysis lane.** Record: zenmetrics
+`benchmarks/avif_doe_stageB6_analysis_2026-09-02.md` (+ `.pointer.md`), DOE plan
+**§17**, commit zenmetrics `693787a0` (verified on `master@origin`).
+**Analysis only — nothing declared, launched or stopped.**
+
+**The wave.** `avifdoe-svt-b6-20260902` (native, 9 levels × 29 q × 32 images ×
+speeds {4,6,7}) **25,056/25,056, live-gap 0**; its score run COMPLETE with
+**23,489/23,489 distinct bitstreams scored, 0 cells missing `ssim2` or bytes**.
+The score run's `done 5907 > declared 2112` is the chunk-key **rework echo**, not
+3,795 extra cells — score jobs are chunk-keyed, so a re-declaration after the
+sort changed mints new job identities over the same cells. Counted by distinct
+scored cell it is exactly 100%.
+
+**The registered question, answered.** B-6 existed to find out whether 1024²
+screening was *miscalibrated* or *directionally wrong* for the two arms that
+failed the transfer gate's T1. **Miscalibrated.** On every (speed, knob) cell
+where **both** legs carry an effect above ±0.5%, budget and native agree on
+**sign 1.000 of the time** (6/6, 10/10, 11/11, 11/11, 1/1).
+
+- **`acb3` is NOT-MEASURED at native, not FAIL.** Only **2 of 11** cropped refs
+  clear ±0.5% at speed 4 and **0 of 11** at speed 6 — there is no direction to
+  transfer. Stage A's T1 = 0.25 was four references that cleared the floor on a
+  **3-point** ladder.
+- **`shp3`'s failure is real and speed-4-specific**: FAIL-T1 at s4 (T1 **0.75**
+  vs the 0.80 bar, up from 0.62) and **PASS at s6** (1.000). Stage A's gate ran
+  at speed 4 only and structurally could not see this.
+- **T1 has a construction defect**, registered and deliberately **not** fixed
+  (amending a pre-registered bar after seeing results is the coordinator's call):
+  its denominator counts a reference by its *native* effect only and asks nothing
+  of the budget leg, so it **grades sign agreement against budget-side noise**.
+  Stage A §8.2 named the vanishing-effect half; the surviving-effect half is
+  worse and produced one of B-6's two arms.
+- **Magnitude, honestly:** per-image overstatement is **not** established
+  (pooled 29/46, p = 0.104); suggestive at s6 only (`shp3` 9/11 p = 0.065, median
+  ratio 1.63). A *ratio of medians* would have read 1.02–1.63 and told a tidier,
+  less true story — the per-image test is the one reported. No relation to the
+  size jump (SROCC 0.068).
+
+**The knob verdicts — both OUT of the per-image knob set.**
+
+- **`ac_bias` has no native effect at any level.** 12 (speed, level) medians span
+  **−0.03% to +0.39%** BD-rate; at speed 7 every level is inside ±0.02%. It is
+  also **not learnable** — per-image sign survives the three presets on **6–15 of
+  31** images, at or barely above chance. `acb8`, the unclamped **H-10** level,
+  *is* genuinely live (byte-identical to control on only 6.7% of cells, median
+  **+0.559%** bytes, p95 +5.67%) — and it is the only `ac_bias` level with a
+  defensible effect and it is a **LOSS**. All 2,784 `acb8` cells flagged.
+- **`sharpness` is a pure bit cost that rises toward the fast presets** —
+  `shp7` **+7.15 / +7.99 / +9.46%** at s4/s6/s7, `shp5` +5.57/+5.67/+7.52,
+  `shp3` +1.20/+1.49/+2.75, and **`shp1` free** (+0.00…+0.23%; it moves the
+  bitstream on 90% of cells and its *size* by +0.000%). Class spread is
+  **10.97 pp** (`shp7` @s6: plot +0.17%, ai-gen +11.13%) but **B-3 does not
+  fire** — no B-6 knob has opposite-signed class medians past ±1%.
+- **The stakes.** A perfect per-image oracle over all 8 levels buys a corpus
+  median **−0.23 / −0.09 / −0.01 pp**; a realistic speed-4-trained rule buys
+  **−0.05 to −0.24 pp**. **One lead, n = 1–2**: `7004` and `7058` (both `plot`,
+  1.05 MP) are where sharpness pays — `shp7` −7.41% and −5.02% at s7 — while the
+  other four plots lose +0.54% to +8.72% on the same knob at the same size and
+  speed. Two images is a lead, not a rule.
+
+**QM × sharpness at native: NOT MEASURED, and it stays that way.** B-6 carries
+no QM axis and no cross-wave join can make one (Stage A's pair cells are 1024²
+crops whose native twins are provably different pixels: **0/2,535**
+byte-identical). Only the **sharpness half of the additive baseline** is
+re-measured, and it shifts **−0.39 pp** at corpus level (−1.86 pp on cropped
+refs alone, but 19 of 32 refs are passthroughs contributing exactly zero). A
+−0.4 pp shift does not overturn Stage A's −5.2…−5.5% residual, so **size is not
+a plausible explanation for the synergy** — that is an argument about one input,
+not a measurement of the output.
+
+**Four gates, none assumed.** BD-rate parity vs `zenavif/scripts/rd_gap/bd_arm.py`
+(max |Δ| **0.0 exactly**); a **new cross-run byte-identity gate** (AG's native leg
+≡ B-6 on **576/576** shared cells; a0r/a1/a2 ≡ B-6 on **3,705/3,705**
+passthroughs and **0/2,535** cropped — exactly as the corpus design requires);
+the naive `avifsub-svt-enc` sweep as an **independent** native-defaults control
+(21 of 24 medians identical to 4 dp, max |Δ| **0.0015 pp** — because they are the
+*same bitstreams*, **928/928**); passthrough null **0 violations of 19** on all 8
+q-matched cells.
+
+**Three corrections owed to the record.** (1) DOE plan §15.4's preset column is
+wrong — `s6` is preset **6** and `s7` is preset **7**, proven by 928/928 byte
+identity and 0/928 against every other naive speed (the CPU-cost numbers are
+unaffected; only the labels). (2) **Stage A §5.3's `6006`/`6018` exclusion is
+CROP-specific** — at native `6006` yields BD-rates at all three speeds and is the
+*largest* effect in the wave (`shp7` @s7 **+18.72%**); a native wave must re-test
+degeneracy at native rather than inherit the budget exclusion list. (3) The naive
+sweep's speeds **7, 8, 9 and 10 are byte-identical** (1–6 are mutually distinct)
+— the preset saturates at 7, so 630 of its cells measure preset 7 three extra
+times. Same *shape* as the Stage-A inert-knob finding but on the **speed** axis;
+flagged for the port program, **no issue opened by this lane**.
+
+**Two owners extended, not forked** (per the no-duplicate-implementations rule):
+`avifdoe_harvest.py` now reads the naive sweep's knob-tuple shape (its label
+synthesis **asserts chroma**, backed by the 928/928 identity measurement, which
+the code names as the check to re-run for a future backend); and
+`avifdoe_stagea_analyze.py`'s control-source label was hardcoded `"in-run-9q"`
+and would have misreported B-6's **29-q** control — **verified non-regressive,
+all five Stage-A `a0r` tables reproduce BYTE-IDENTICALLY**. The new
+`avifdoe_stageb6_analyze.py` imports `bd_rate`/`frontier`/`median_ci`/`q1q3` from
+the Stage-A analyzer, `binom_two_sided` from the Stage-A gates and SROCC from
+`zenstats` — **it re-implements no statistic.**
+
+**Limitations that matter for anyone citing these numbers.** `ssim2` is the
+**only** corpus-wide scalar response — `zensim` is emitted as a 720-wide feature
+vector with **no scalar**, butteraugli is dropped by standing directive — and
+`sharpness` is a *perceptual sharpening* control, so *"it costs bits at matched
+ssim2"* and *"it is not worth enabling"* are different claims and **only the
+first is measured**. Whether sharpness buys anything a sharpness-blind metric
+cannot see is **NOT MEASURED** — not zero, not disproven. Also: one backend
+(svt-rs), no speed axis (`encode_ms` still unpersisted, B-4 still NOT EVALUABLE),
+three presets with the slow end untested while the sharpness cost *rises* toward
+the fast end, class n = 5–9 with `plot` bimodal, and every T1/T2/T3 figure at
+**n = 11** because 19 of 32 references have no size contrast at all.
+
+**Outputs.** `/mnt/v/output/zensim-avifdoe-b6/` +
+`s3://zentrain/analysis/avif-doe-stageB6-2026-09-02/` (20 objects, 1.77 MB), with
+a sha256 pointer in the zenmetrics record. **Tower was NOT mirrored** — `/mnt/tower`
+returned a stale NFS handle; recorded as unavailable, not as done.
+
+**What this buys the remaining 53 triggers.** B-6 cost **13.2 CPU-h** of the
+60 CPU-h Stage-B envelope (0.22×) and retired the two arms §10 called "the
+cheapest high-value cells". Anything keyed on `acb3`/`shp3` at reduced size
+should be re-scoped or dropped, and the same question should be put to the three
+NOT-MEASURED arms (`acb1`, `tl1.0`, `tl1.1`) — their verdict may likewise be *"no
+effect to transfer"* rather than *"untested"*. **B-2's QM × sharpness cluster is
+now the only route to the synergy question**, and B-6 has removed the concern
+that its residual is a size artefact. Prioritisation remains the coordinator's.
