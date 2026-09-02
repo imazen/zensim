@@ -5320,3 +5320,57 @@ the two states to be in. The mitigation applied instead: relaunched local worker
 goes through `std::env::temp_dir()` (verified in source, not assumed). A proper fix —
 evict on process exit, share the cache across PIDs, and unlink the `.part` on write
 failure — belongs at the owner, with a rebuilt-and-pushed worker image.
+
+## 2026-09-02 — ROUND 52: the DOE gap-closure lane — R51's root cause is FIXED at the owner, and a gate that was satisfiable by a no-op is now un-fakeable
+
+*(Full record: `zenmetrics/benchmarks/avif_doe_plan_2026-09-01.md` §12. One commit,
+`ad4d44b3`, verified on `zenmetrics` origin/master.)*
+
+R51 diagnosed the outage and deliberately left the fix at the owner. This round is
+that fix, plus the two other gaps the recovery lane recorded honestly rather than
+papering over.
+
+**The `/tmp` occupant is fixed structurally, not relocated.** R51's mitigation moved
+`TMPDIR` to `/home`, which bought room while the growth continued.
+`jobexec::resolve_source_raw` now keys its source cache on **`sha256(resolved URI)`**
+instead of `{pid}_{basename}`, collapsing copies from (processes × images) to
+(images) — the 46× that produced 22.93 GB from 60 images. A lazily-once
+`sweep_src_cache_once()` ages out entries untouched for 24 h (env-tunable), which
+also collects R51's 10,413 legacy PID-scoped files **and** the 7,639 orphaned
+`.part` files R51 measured; `.part` is now per-writer so a shared `dst` cannot be
+interleaved, and a cache hit touches its entry so "age" is time-since-last-**use**.
+R51 proposed "evict on process exit"; content-addressing is strictly better — it
+also fixes a **latent wrong-image bug** the PID key was hiding, because two corpora
+in this very wave hold different pixels under one filename (the DOE plan keeps the
+corpus key unchanged across its 1024² crop), and two such fetches inside one
+`--serve` process collided. 4 tests, 24 pass.
+
+**A gate that could be cleared by a no-op is the reusable lesson.** The budget-corpus
+builder documented `--features-cmd` as satisfying its feature-re-extraction gate and
+flipped the manifest off `PENDING` when it was passed — while importing no
+`subprocess` and executing nothing. The flag is removed; the extractor is now really
+run, and — the part worth copying — **the gate validates itself against data it
+cannot fake**: 19 of the 32 references are symlinks, bit-identical to the clustered
+parents, so re-extraction must reproduce those parents' own clusters, and a missing,
+no-op, wrong-schema or garbage extractor fails that control and exits non-zero.
+Measured drift control first (re-extracting the 32 parents moves them **0.0253 max /
+0.0012 mean** in the clustering z-space, against decision margins of 0.3–8, so
+extractor drift cannot flip an assignment); then the gate: **native control 19/19,
+11 of 13 crops preserved their cluster, 2 moved**. `1442` moved out of a **singleton**
+cluster at a displacement of 24.41 — cropping removed exactly what made it an
+outlier. And `6604` reads PRESERVED at a displacement of **67.72**, so *preserved is
+not unchanged*: read `parent_z_dist` beside the verdict, never the verdict alone.
+
+**Two `+10 %`-class findings that only appear when you recheck arithmetic against
+what was actually built.** (a) The corpus is 13 cropped / 19 native, not the
+registered 23/9 — **AMENDED, not rebuilt**, because 13,532 cells (25,383 twenty
+minutes later) were already encoded against those references, cell identity is
+content-addressed on the reference bytes (so a rebuild orphans rather than corrupts),
+and the deviation costs +10.3 % pixels on a budget the design itself makes a free
+variable plus exactly **one** reference's superblock purity. (b) The pre-registered
+cross-size transfer gate is **degenerate on the as-built corpus**: 19 of its 32
+comparisons are the same encode against itself, so its `T3` median-of-32 has 19 exact
+zeros and **cannot fail for any arm**, and its `T1` "80 % of 32" is an effective
+7-of-13 (54 %). Registered correction: compute it over the 13 cropped references
+only. A pre-registered bar is not automatically a live bar — it has to be rechecked
+against the population that actually got built.
