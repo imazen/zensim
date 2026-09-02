@@ -6339,3 +6339,75 @@ NOT-MEASURED arms (`acb1`, `tl1.0`, `tl1.1`) — their verdict may likewise be *
 effect to transfer"* rather than *"untested"*. **B-2's QM × sharpness cluster is
 now the only route to the synergy question**, and B-6 has removed the concern
 that its residual is a size artefact. Prioritisation remains the coordinator's.
+
+## 2026-09-02 — ROUND 63: zenav1-svt #18 LOCALISED AND FIXED — bd10's ">8 MP" cliff was AV1's FORCED tile grid, and it reproduces at 0.27 MP
+
+Differential-localisation lane for **imazen/zenav1-svt#18**, opened by the HBD
+executor of the AVIF/HDR arm (`zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md`
+§10.4d) after a high-bit-depth wave was stopped at 120/3,248 cells. Record lives
+in zenav1-svt (commit **`3121b6a8`**, verified on `main@origin`; issue comment
+[#18](https://github.com/imazen/zenav1-svt/issues/18#issuecomment-5516202540));
+this is the zensim-side ledger row. **Nothing declared, launched or stopped
+here.**
+
+**The reported shape was a proxy, and following it would have been the wrong
+search.** The issue bracketed a correctness cliff between **8.01 MP (healthy)**
+and **12.00 MP (broken)** at `bd10`, with 8-bit and zenrav1e clean at the same
+sizes — a shape that reads as a 16/32-bit overflow. It is not. AV1 **forces** a
+multi-tile grid once a frame passes `MAX_TILE_WIDTH` (**width > 4096 px**) or
+`MAX_TILE_AREA` (**SB-aligned area > 4096·2304 = 9,437,184 px**), and it
+**clamps a `(0,0)` tile request UP** to that minimum. `AvifEncoder` never
+requests a tile, so every AVIF encode past ~9.44 MP had been multi-tile all
+along. Intra prediction is tile-scoped in AV1; two `bd10` sites were not
+(`extract_neighbors_hbd` frame-absolute at preset ≤ 8; `TileMi::whole_frame` in
+the preset ≥ 9 level re-encode), so the encoder predicted across tile edges a
+conforming decoder cannot see.
+
+**Discriminating cell, chosen before the size bisect.** `4096×64` vs `4160×64`
+— one superblock column apart, **0.26 vs 0.27 MP**, twenty times *below* the
+reported bracket. bd10: **clean vs 65,054 of 399,360 samples wrong**; bd8:
+identical in both. That single pair rules out area, width, height and every
+accumulator-overflow hypothesis in one 4-second encode, and it is now the CI
+regression cell. The predicted flip — `ceil(w/64)·ceil(h/64) > 2304` — was then
+tested on a **0.19 MP** bracket (`2944×3200` = 2300 SB clean vs `2944×3264` =
+2346 SB, 3,448,059 of 14,413,824 wrong) and confirmed exactly.
+
+**Oracle note that generalises past this issue.** The defect was invisible to
+every byte-parity gate the port owns, because byte-parity against C cannot see
+an encoder/decoder prediction **mismatch** — both encoders being wrong the same
+way stays green. It was found by comparing the encoder's own published
+reconstruction against the reference decoder's output, which is the same
+two-oracle discipline `alignment_gate.sh` already uses. A 2026-07-22 note in
+that repo recording this exact threading as "byte-inert" was **correct on the
+byte oracle and blind to the class** — and after the fix, 7 of its 8
+pinned-diverging cells became byte-exact with C anyway (axis 4/12 → 11/12).
+
+**What this means for our data.** Any `bd10` AVIF result produced by this
+backend on a source whose SB-aligned area exceeds **9,437,184 px**, **or whose
+width exceeds 4096 px**, is invalid and needs re-encoding — the width limit is
+independent of area, so a 6 MP panorama wider than 4096 px was affected while
+the issue's bracket said "healthy below 8 MP". Everything below both limits was
+single-tile and is unaffected. The stopped HBD wave can resume against
+`3121b6a8`.
+
+**Gates now standing** (all measured, this lane): `issue18_repro.rs` — 3
+multi-tile cells + a single-tile control, on the decoder oracle. Written before
+the fix and run at the parent commit: **2 fail, the control passes** (the third
+multi-tile cell is the preset-9 re-encode arm, added after fixing the funnel arm
+exposed it, and measured failing at that intermediate state — 49,606/98,304).
+Plus 4 `bd10ReconEq` cells in
+`regression_spotcheck.sh`; workspace **2,458/2,458** (189 binaries), spotcheck
+**71/71**, coverage combos **40/40**, bd10 recon parity vs C **13/13**,
+alignment **74/74**, bd10 matrix **36/36**, non-flat **309/309**, partial-SB
+**159/159**, hbd-src **26/26**, tile gate **29/29**. Byte-inertness A/B: **26 of
+28** cells emit identical OBUs (every single-tile cell at both depths, every bd8
+multi-tile cell); only bd10 × multi-tile moved.
+
+**One gate is NOT green and it is NOT this lane's** — recorded so nobody reads
+the list above as "everything passes". `bd10_hbd_pq_gate.sh` reads **48/60** on
+this box, the 12 failures all at preset 6. Those are the cells
+`docs/SUSPECTED-C-BUGS.md` #9 pins as `uname -m`-scoped to aarch64, failing here
+on x86-64 against a **locally built** C reference rather than CI's. Ruled out as
+this lane's doing by direct A/B: the port's OBU is **byte-identical pre-fix vs
+post-fix on all 60 cells**, so the verdict cannot have moved. Left as found and
+not silently annotated — the C-oracle host-divergence entry is the owner.
