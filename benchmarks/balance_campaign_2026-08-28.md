@@ -5494,3 +5494,57 @@ honouring every trigger costs **447,636 cells against a registered 60,000
 envelope (7.5×)**, so prioritisation is a coordinator decision and **no Stage-B
 wave was declared**. Fleet returned to its pre-round state (five encode workers
 created, all torn down).
+
+---
+
+## 2026-09-02 — ROUND 55: DOE close-out — a recurring declaration was re-doing its own work forever, and the "drained" run could never drain
+
+**Two bounded cleanups left over from ROUND 54's Stage A.** Records:
+`zenmetrics` `08215e84` (fix) + `986899c6` (doc correction);
+`zenmetrics/benchmarks/avif_doe_stageA_2026-09-02.md` §1.4.
+
+**The fix.** `zenfleet-ctl pairs` emitted its DONE rows in `HashMap` order, so a
+recurring `declare-scorefiles` loop re-minted every `job_id` each round and the
+fleet redid finished work. Now sorted on a TOTAL key (cell identity, `job_id`
+last as the tie-break — unique by construction, being the `LedgerView` map key).
+Verified live: three separate `pairs` processes over a frozen 6,496-row ledger
+gave byte-identical `.tsv` **and** `.parquet` (sha `148165c7…`), and two
+`declare-scorefiles` runs gave byte-identical manifests (sha `2ce81289…`). Four
+new tests; both gate tests confirmed to FAIL with the sort defeated.
+
+**Lesson 1 — the mechanism was mis-stated, and the correct version is what
+decides who else is exposed.** §1.4 blamed input order. But `JobId::of` sorts and
+dedups its inputs, so member order *within* a chunk cannot move an id. What moves
+it is chunk MEMBERSHIP: a permutation re-cuts which members share a chunk, and
+**only when a ref has more members than `--chunk`**. This run was maximally
+exposed — 32 refs × 203 members at chunk 12, ~17 chunks per ref — while a run
+whose refs fit one chunk was never affected at all. It also explains the shape of
+the symptom: `declared` stayed pinned at exactly 4,128 while the identities
+rotated, because a permutation changes which members pair up, never how many
+chunks fall out. Pinned by `only_refs_larger_than_the_chunk_can_remint`.
+
+**Lesson 2 — "drained" was read from a gap that closed every round and reopened
+every round.** The brief for this lane, and §1.4's decision to hold the fix, both
+rested on the wave being finished and the churn being a bounded historical cost.
+It was live. Over rounds 37-40 the encode side sat **frozen** at 49,120 DONE
+cells and `declared` was pinned at 4,128, yet score blobs climbed
+**25,818 → 26,251 → 26,973 → 27,639** with four workers re-scoring finished
+cells. The multiplier had gone **4.0× → 6.7×** and was still rising. **A run in
+that state can never drain**, so holding did not avoid churn — it extended it.
+The generalisable form: *live-gap 0 is not evidence of completion when something
+re-declares on a timer; check whether the denominator is being re-minted.*
+
+**Lesson 3 — no restart was needed, because the loop re-execs its binary.** The
+gap-fill loops spawn `./target/release/zenfleet-ctl` fresh each round, so the
+rebuilt binary was picked up automatically; the `.pid` files held wrapper PIDs
+(the live `bash` was a different pid), which is why the loops first read as dead.
+Verified by observation rather than by resetting the round counter.
+
+**Task 2.** The Stage-A dead-knob finding (`tune=0` and
+`screen_content_mode=Some(3)` byte-identical to baseline on 288/288 cells at both
+presets, while `tune=3` moves bytes) is filed as
+[imazen/zenav1-svt#17](https://github.com/imazen/zenav1-svt/issues/17) with the
+repro, the 8,972-cell blast radius, and one consumer-side lead: only tunes 3/4
+rewrite config via the port's `apply_tune_overrides`, and the existing parity
+test compares **config to config**, so it cannot catch a field that resolves
+correctly and is then never consumed.
