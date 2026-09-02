@@ -6553,3 +6553,64 @@ the reported shape rather than a stand-in. `regression_spotcheck.sh` **81/81**
 (+5). Workspace **2,486/2,486** (189 binaries), coverage combos 40/40, bd10
 recon parity vs C 13/13, alignment 74/74, matrix 36/36, non-flat 309/309,
 partial-SB 159/159, tile gate 29/29.
+
+---
+
+## 2026-09-02 — ROUND 66: #18 closed at the second fix, t2a restarted, and the axis I named was the wrong one
+
+**Owning record:** `zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md`
+§10.4f. Follows ROUND 64 (the validity re-audit).
+
+**I got the residual's cause wrong, and the way I got it wrong is the useful
+part.** After `3121b6a8` I reported the remaining breakage as
+**orientation-dependent**, on the strength of one pair: 4000×3000 healthy
+(+88.96) against 3000×4000 broken (−10.61), identical area, identical
+sb-aligned area. I described it as "a pair differing only in orientation." **It
+wasn't.** They are different source images — `1442.scale4000x3000` and
+`1008.scale3000x4000` — so content varied too, and 1442 was already the mildest
+of the eight broken cells before any fix (+7.88 vs −59.84). Both shapes resolve
+to the same 1×2 tile grid, so orientation was never the discriminator.
+
+The real axis was **preset**. `dr_predict_hbd` — the *directional* HBD intra
+path — derived all four availability predicates from the **frame** while its u8
+twin was tile-scoped, and directional modes only enter the candidate set at
+**presets 0–5**. Every cell I measured ran speed 4 = preset 4, dead centre of
+that band, which is why the first fix looked shape-dependent instead of
+mode-dependent.
+
+> **The transferable error:** from "same area, one repaired" the correct move is
+> *find the variable that actually separates the two*, not *name the one that
+> visibly differs*. My "tightest control in the audit" was not a control at all
+> — it varied two things and I reported one.
+
+**META-FINDING, and it outlives this bug.** The C-parity axis stayed green
+through **both** rounds because every cell it ran was preset 6/10/13 — outside
+the directional band. A parity or recon gate that samples only fast presets is
+structurally blind to this defect class. **Extend recon/parity coverage DOWN
+the preset band, not merely across sizes.** The new gate
+(`scripts/jobsys/avifhbd_recon_gate.sh`) is built on exactly that: bd10 ×
+forced-multi-tile × low preset, refusing any source that does not force
+multi-tile, asserting **bd10 ≥ 8-bit − TOL on the same cell** so it calibrates
+itself. Verified both ways — PASS at +4.182 on the fixed binary, FAIL (exit 1)
+at −143.623 on the recorded pre-fix value.
+
+**Repair, measured** (bd10 q90, preset 4, portrait over-limit):
+
+| dims | old pin | `+3121b6a8` | **`+2ca060f4`** |
+|---|--:|--:|--:|
+| 3000×4000 | −57.05 | −10.61 | **+90.75** |
+| 3302×4844 | broken | +1.56 | **+75.57** |
+| 3286×4868 | broken | −15.45 | **+81.65** |
+
+bd10 now beats its 8-bit twin (+4.18 over an 86.57 control) — the arm's premise,
+finally observable.
+
+**Rollout.** Pin bumped **in zenavif** (`56179fcb`, `ef0b122bd`→`2ca060f42`,
+`cargo test --workspace` green), and the interim workspace-root `[patch]`
+**reverted** — left on master it would silently redirect every other lane's
+build to a local working copy, the hazard that pin exists to prevent. t2a
+restarted as a **fresh run** (`avifhbd-t2a-fix-20260902`), not a requeue:
+cells are content-addressed, so re-declaring into the old run would have
+counted its 120 **invalid** cells as done. Fleet blobs now score
+**+76.67 / +81.07 / +83.08** at q88/90/92 against the pre-fix wave's
+**−67.80 / −66.85 / −64.26**.
