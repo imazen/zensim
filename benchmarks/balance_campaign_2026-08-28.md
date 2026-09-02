@@ -5968,3 +5968,83 @@ Scoring is depth-honest (f32 end to end on every route). **The corpus is not**: 
 depth cell today is 8-bit content at a deeper coded depth (the `Rgb8Image` funnel), and
 the wired HDR references are gain-map-reconstructed from 8-bit bases. **A depth picker
 cannot yet be trained honestly** — that is now a corpus problem, not a wiring one.
+
+# ROUND — av1C container-metadata lane (`claude-av1cfix`), 2026-09-02
+
+**One defect, found by another lane on real fleet artifacts, fixed at its owner.**
+The HBD executor's G3 pass over `avifhbd-t2a-20260902` blobs found an `av1C` box
+claiming `seq_profile = 1` / `ssx = ssy = 0` (4:4:4) over an AV1 sequence header
+that says `seq_profile = 0` (Main, 4:2:0-only) — not a legal pair
+(`zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md` §10.4c). The encode is
+genuinely 4:2:0 10-bit, so the **bitstream is right and the container lies**. This
+is the wrong-metadata-consumers-trust class: our own decoder reads the sequence
+header and scores fine; a strict consumer keying on `av1C` mis-handles the file.
+
+**The owner was not the call site.** `zenavif-serialize`'s
+`Aviffy::build_color_ipma` (`zenavif-serialize/src/lib.rs:750`) took the `av1C`
+profile from the caller's `min_seq_profile` — **default 1** — and the chroma from
+`chroma_subsampling` — **default `NONE` (4:4:4)** — and never looked at the payload
+it was handed. Two of the three call sites in the workspace never set either:
+`zenmetrics` `sweep/hdr.rs:614` (the HDR svt arm, the one that was measured) and
+`sweep/encode.rs:1397` (the aom-rs SDR port arm, **a second instance nobody had
+reported** — it was never G3'd for profile). The third,
+`zenavif/src/encoder_svt_rs.rs:725-727`, states both explicitly, which is exactly
+why the SDR svt blobs and the whole T2-b arm muxed correctly from the same port.
+**A default that produces an illegal file when a caller forgets is the defect; the
+forgetting is the symptom.**
+
+**Fix = derive, not patch a literal** (`zenavif ae9a354f`, 95 production LOC).
+`stream_seq_profile` walks the OBUs to the first `OBU_SEQUENCE_HEADER` and reads its
+first three bits (AV1 5.5.1) — the whole parse needed, because AV1 5.5.2 then
+*determines* chroma for the two profiles that admit one format only: profile 0 is
+4:2:0-or-mono (`ssx = ssy = 1`), profile 1 is 4:4:4 and never mono. Profile 2
+(4:2:2, or any 12-bit) is genuinely ambiguous and still takes the caller's
+subsampling, as does a payload with no readable sequence header — that fallback is
+what keeps every previously-correct mux byte-identical.
+
+**Measured, not argued.**
+- Failing-test-first: `av1c_profile_and_chroma_follow_the_sequence_header_hdr_420_10bit`
+  fails at the parent with `left: 1, right: 0` — the exact T2-a signature — and
+  passes after. Five more cases pin the converse (a real profile-1 payload must
+  still read profile 1), the explicit-profile SDR call-site shape, monochrome, and
+  the no-sequence-header fallback. `test_seq_header_obu` hand-builds spec-valid
+  reduced-still-picture headers, so the assertion is against a real bitstream.
+- **The other lane's own G3 tool, on a mux of a real 10-bit 4:2:0 conformance
+  payload through the `hdr.rs:614` shape:** `chroma` **444 → 420**, `seq_profile`
+  **0 on both sides**, and `av1c_depth`/`seqhdr_depth`/`decoder_depth` **10/10/10
+  unchanged** with `decoder_transfer = 16`. Both blobs PASS `--expect-depth 10` —
+  which is precisely why **G3 passed on the defective blobs and still stands**, and
+  why a depth-only gate could never have caught this.
+- **SDR byte-identity:** six representative muxes (explicit-profile call-site shape,
+  full container metadata, monochrome, alpha, 4:4:4, and both no-sequence-header
+  fixtures) hash to `1bb2ffef62e6c7a3ca98e728858048a0e1847f593eab752858e020b1202be9a4`
+  **on both sides of the fix**. Adding the defect shape moves the hash. The change
+  touches exactly the broken shape and nothing else.
+- `cargo public-api`: **0 of 418 items differ.** `set_seq_profile` survives as the
+  profile-2 hint and the no-sequence-header fallback. zenavif-serialize is published
+  at **0.1.4** and the manifest is already pre-bumped to 0.2.0, so the behaviour
+  change needs no new version pressure.
+
+**Blast radius: ANNOTATE, do not re-encode.** `avifhbd-t2a-20260902` (3,248 cells)
+carries the bad `av1C`; `avifhbd-t2b-20260902` does not (it routes through
+`zenavif::AvifEncoderConfig`). The AV1 payloads and every score derived from them
+are **valid** — decoders read the sequence header — so re-encoding buys nothing.
+No consumer-facing use exists: no reference outside the plan doc in zenmetrics'
+`scripts/` or `benchmarks/`, no `site/` reference, no `/mnt/v/output` publication
+directory. They are internal DOE artifacts. Annotated in place at
+`zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md` §10.4c (`10665c6e`) and in
+`~/work/zen/DATA_PROVENANCE.md`'s t2 entry.
+
+**Forward rule** (beside the executor's existing "future T2 image must re-run G3"):
+the fix rides in automatically on any image rebuild — `zenavif-serialize` is a
+**path** dep of the zenmetrics workspace (`Cargo.toml:362`) — so a worker image
+built from source on or after `ae9a354f` mints correct `av1C`. **A rebuilt image's
+G3 should assert profile/chroma agreement as well as depth**: require the `chroma`
+column to read `420` with `seq_profile` `0` on the svt HDR arm. The defective blobs
+passed the depth-only gate; a gate that only checks depth cannot see this class.
+
+**Not done, deliberately:** the two zenmetrics call sites were left alone. With the
+derivation in the muxer they need no setters, and editing sweep code under a running
+wave buys nothing. The **alpha** `av1C` (`lib.rs:861`) still writes profile from
+depth alone — correct by construction (alpha is monochrome, so profile 0 or 2 with
+`ssx = ssy = 1` is the only legal shape), so it was not changed.
