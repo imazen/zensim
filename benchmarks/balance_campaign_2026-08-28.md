@@ -5648,3 +5648,77 @@ tower rule, it is a live media server); scoring on dev (`20-29`) into
 `avifdoe-svt-b6-sf-cpu-20260902` (`ssim2,zensim`), fed by the DOE gap-fill loop
 now **parameterised** (`ZEN_DOE_RUNS`) so B-6 runs as a second instance of that
 loop rather than a fork. B-6 *analysis* is a later lane.
+
+---
+
+## 2026-09-02 — ROUND 57: the AVIF HDR tripwire — a PQ AVIF scored to a plausible number for as long as the path has existed, and the tiled/plain split was the wrong diagnosis
+
+**TODO-0 of the AVIF-HDR-arm plan, a zero-tolerance silent-corruption defect.**
+zenmetrics commits `e9e2ef71` (fix + gates) and `cece471e` (plan doc); record:
+`zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md` §3.2, resolution block.
+
+**The defect.** An AVIF whose container `colr`/`nclx` box signalled PQ (16) or
+HLG (18) was decoded, narrowed to 8 bits and relabelled sRGB by the
+`RowConverter` funnel in `decode::pixel_slice_to_rgb8` — **no error, no
+warning**. PNG had refused exactly this since its cICP tripwire
+(`decode.rs:151-166`); AVIF had no equivalent, and the second-line zenpixels
+`HdrSourceRequiresPeak` guard structurally cannot fire, because
+`ManagedAvifDecoder`'s buffered path never calls `descriptor_with_cicp` (only
+the row-sink paths do), so the buffer arrives tagged
+`TransferFunction::Unknown` and the conversion is a byte passthrough.
+
+**Measured, on the then-current release binary, before touching anything.**
+`ref_64.avif` patched to `tc=16` and to `tc=18` each scored
+`ssim2=96.137450` — **bit-identical to the sRGB original**, i.e. the transfer
+signalling was ignored end to end. Genuine 10-bit PQ files from zenavif's
+vectors (`cosmos1650_yuv444_10bpc_p3pq.avif`, `colors_hdr_rec2020.avif`) scored
+`100.000000` against themselves. The same PNG content with a cICP PQ chunk was
+refused loudly by the existing tripwire — one question, two answers, in one
+binary.
+
+**The plan's own diagnosis was half wrong, and measuring it first is what
+caught it.** §3.2 predicted the behaviour differed between tiled and plain
+files — that a grid-tiled AVIF "is tagged (`sink.rs:290`) and would be handled
+correctly", so an experiment could produce correct and corrupt cells side by
+side. A real 1×5 grid AVIF (`sofa_grid1x5_420`) patched to `tc=16` scored
+**silently too** (`100.000000`): `sink.rs:290` is the *row-sink* grid path,
+while `decoder.rs::decode_grid` — the one the buffered decode actually uses —
+does not tag either. **Both shapes were corrupt.** That is a worse defect and a
+*simpler* fix: there was no correct-for-grid behaviour to preserve, so one guard
+serves both. Had the tiled/plain split been taken on trust, the fix would have
+been designed around a divergence that does not exist.
+
+**The fix, and what bounds it.** `decode_avif` now takes
+`ManagedAvifDecoder::decode_full` — the same decoder `decode_with` already
+selected here and the one `sweep::hdr::decode_avif_to_nits` drives, so decoded
+pixels are unchanged — and refuses on an HDR transfer, naming the code, the
+transfer and the **real bit depth** and pointing at `--hdr`. `decode_full`
+branches on `grid_config()` internally and returns an `ImageInfo` either way, so
+the single guard site covers both shapes by construction. ~19 non-comment lines
+of production change; no public API change; no zenpixels or zenavif change.
+
+**The guard is deliberately narrow — only 16 and 18, and that is load-bearing.**
+Narrowing a 10-bit *SDR* AVIF to 8 bits is `decode.rs`'s documented contract and
+the 8-vs-10-bit SDR track (`bd10`) depends on it; BT.2020's SDR transfers (14,
+15) sit adjacent to PQ/HLG in the CICP table. An over-broad guard would have
+refused live sweep cells. SDR non-regression was measured pre-fix vs post-fix
+binary — **identical output** on 8-bit AVIF vs PNG, the `tc=1` variant,
+grid-tiled SDR, and genuine **10-bit SDR** AVIFs (`plum-blossom` profile0 10bpc
+4:2:0 and profile1 10bpc 4:4:4).
+
+**Gates.** `zenmetrics/crates/zenmetrics-cli/tests/avif_hdr_tripwire.rs` —
+`pq_transfer_is_refused` and `hlg_transfer_is_refused` **fail at the parent
+commit** with the recorded message *"expected a loud refusal, got a silent 64x64
+decode (12288 bytes)"*; plus `committed_sdr_fixture_decodes`,
+`patching_transfer_alone_does_not_change_pixels` (pins that the fixture helper
+perturbs signalling only) and `refusal_is_scoped_to_hdr_transfers_only`. In
+`decode.rs`: `only_pq_and_hlg_are_refused` pins the policy over **all 256**
+transfer codes, and `bt2020_sdr_transfers_are_not_hdr` pins the two neighbours.
+Fixtures are built in-test by rewriting one `u16` in the committed 445-byte
+`ref_64.avif`; nothing binary was added to git.
+
+**What it does NOT do — stated so no one over-reads it.** It refuses; it does
+not route. A cell mis-sent to the SDR path now fails loudly instead of returning
+a number, which is what makes the arm's **G5** satisfiable — but G5 still
+requires *positive* evidence in the run log that the PQ `--hdr` route was taken,
+because a refusal proves only that the wrong route was rejected.
