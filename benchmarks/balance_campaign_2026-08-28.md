@@ -6164,3 +6164,46 @@ so that needs a decision, not a swap. Trap registered before it bites: the
 frozen `asrun/{avthdr,hdrvdc}` ffmpeg drivers are the only recorded route to
 re-extract those HDR-video reads, and imazen has **no demuxer and no HEVC/VVC
 video decoder** — that study is currently un-re-runnable under the rule.
+
+# ROUND row — blessqueue lane (2026-09-02)
+
+Written to ~/tmp rather than committed: the zensim `.workongoing` was NOT free
+(foreign `claude-imazenonly` marker, path-scoped coexistence used), per brief.
+
+| round | lane | outcome | artifacts | verified |
+|---|---|---|---|---|
+| 2026-09-02 blessqueue | 3 user decisions: bless frozen ffmpeg reads; queue PREREQ-AOM-STANDALONE; open its issue | ALL 3 LANDED. Provenance corrected on 2 points while verifying (codec facts; SCM-detector framing) | zensim `47a7233c` (eval_annotations entry `extreads-ffmpeg-blessed-avthdr-hdrvdc-2026-09-02` + `scripts/external_reads/asrun/README.md`); zenav1-aom `64f3cdb8` (CLAUDE.md coverage-queue T3 row); issue imazen/zenav1-aom#15 | both commits confirmed ancestors of their `origin/main`; annotation load exercised via `freeze_check --profile balanced-2026-08-04` (surfaces as 1 of 30 documentation-only findings) |
+
+## Corrections made against the brief (measured, not assumed)
+
+1. **"both domains ship only as HEVC-encoded video" — FALSE on both counts.**
+   HDR-VDC ships **AV1** (SVT-AV1 v1.5.0 preset 4, 10-bit yuv420p limited range;
+   `hdrvdc/PROTOCOL.md:63`), decoded via libdav1d (`:96`). AVT-VQDB-UHD-1-HDR ships
+   **three** coded codecs — 65 av1 `.mkv` + 65 hevc `.mp4` + 65 vvc `.266` = 195
+   bitstreams — plus FFVHUFF lossless `.mkv` references (`avthdr/PROTOCOL.md:68`),
+   and needs **two** pinned ffmpeg builds because system 4.4.2 has no VVC decoder
+   (`:131-137`). Also corrected in `~/work/zen/CLAUDE.md` line 41 (not a git repo,
+   so no commit); the blessing text itself is unchanged.
+2. **ffmpeg's role is wider than demux+decode** — swscale also does the bt2020
+   tv->full csc to rgb48le AND a Lanczos a=3 resample to the 4K display frame
+   (+ a 1920x1080 far-viewing leg for hdrvdc). A foreign colour converter and
+   resampler are in the chain; both registered common-mode across legs.
+3. **"C's SCM detector drives the port's ToggleKnobs" — the detector is ALREADY
+   PORTED.** `estimate_screen_content_antialiasing_aware` runs at
+   `aom-bench/src/lib.rs:1904` but is only ASSERTED equal to the bootstrap-parsed
+   `p.allow_screen_content_tools` (`:1914`); the value threaded into the search is
+   the bootstrap's (`:1720`, `:2044`, `:2069`). It is a differential gate, not the
+   driver. Narrows the standalone work.
+4. **"port payload is spliced into the oracle's OBU frame"** — the port DOES
+   re-serialize the frame header itself (`:2487`, `:2494`; the multi-tile path
+   says "nothing is spliced from the bootstrap"). What is missing is a
+   sequence-header OBU emitter and temporal-unit framing; the return value is a
+   bare frame OBU payload.
+
+## Registered, not executed
+
+- zensim: a from-scratch re-extraction of the avthdr/hdrvdc 944 tables needs
+  fresh user sign-off (or an imazen video-decode capability). Hazard recorded:
+  the vvc leg staged its ffmpeg n7.1.5 binary under `~/tmp/tools/` (volatile).
+- zenav1-aom: PREREQ-AOM-STANDALONE itself is queued, not implemented; DOE arm
+  A3 stays BLOCKED, svt arm carries the DOE.
