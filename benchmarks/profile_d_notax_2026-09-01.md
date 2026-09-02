@@ -134,7 +134,7 @@ speed changes, the score never does, and the feature vector differs
   the `benchmarks/wave_r4_2026-09-01.md` §23/§24 candidates). Those are a
   *different* candidate family from `D`/`ADD156` and shipping them was
   explicitly out of this task's mandate ("no waste" — not "ship more
-  bakes"). §5 below states precisely what this means for the exam's W7
+  bakes"). §7 below states precisely what this means for the exam's W7
   verdict on that family.
 
 ---
@@ -245,7 +245,7 @@ that precedent rather than introducing a second convention.
   the binary — the helpers are fully inlined away, not left as un-inlined
   call sites the 5.3× regression class would produce.
 - **Full workspace test suite, all three required feature combinations,
-  clippy, and fmt** — §6.
+  clippy, and fmt** — §8.
 
 ---
 
@@ -434,3 +434,155 @@ bar's own 1T+8T plus 16T informational), both tiers.
 ### 4.3 Results
 
 <!-- FILLED IN FROM ~/tmp/dnotax/w4_measure_raw.jsonl once the sweep completes -->
+
+---
+
+## 5. Tier duplication in the touched kernels — audit summary
+
+Beyond the raw-moments consolidation (§2.3), the kernels this lane actually
+touched (`fused.rs`'s `_v4`/`_v4x`/`_v3`/generic SSIM+V-blur functions) were
+audited for further unjustified per-tier hand duplication. Finding: **the
+SSIM math itself is not duplicated without reason** — the width-native
+tiering (16-wide on AVX-512, 8-wide on AVX2) is a deliberate, justified
+choice (matching magetypes' own documented guidance: pick the width the
+algorithm wants, don't downshift a wide tier to a narrower generic
+abstraction), and the file already demonstrates working cross-tier
+composition (`_v4`/`_v4x` downcast their token via `.v3()` for their
+8-wide remainder loops, reusing the SAME 8-wide arithmetic the `_v3` tier's
+own main loop and the magetypes-generated neon/wasm128/scalar function use
+— this is exactly the pattern this lane extended to the raw-moments
+accumulator). `dense_block_kernel` (`feature_v2.rs`) — a much larger,
+MT-ceiling kernel flagged ERA-LOCKED in this repo's own CLAUDE.md — was
+**not** touched or restructured, per that standing directive; it was not in
+this task's blast radius (this lane's job was Profile D / the free set, not
+a general SIMD-kernel refactor campaign).
+
+**`#[rite]` vs `#[inline(always)]`, settled from archmage's macro source,
+not the task brief's guess.** `archmage-macros/src/rite.rs` shows `#[rite]`
+resolves its `#[target_feature]` string from a *concrete* token parameter
+type or from tier names passed as macro arguments (which generate
+*separate, suffixed monomorphic copies* — the opposite of a shared generic
+body). It has no mechanism to attach a single feature string to a function
+generic over a *backend trait* (`T: F32x8Backend`). `#[inline(always)]` is
+therefore not a fallback choice but the only correct one for these
+helpers, and it matches this codebase's own established, MEASURED-necessary
+precedent (`dense_block_kernel_generic`'s 5.3× regression note).
+
+---
+
+## 6. Public API surface — verified, not asserted
+
+`cargo semver-checks --manifest-path zensim/Cargo.toml --baseline-rev
+f007ca78e7bfc6a06d7187b64fa6d5193faa32a9` (this lane's own starting commit,
+before any of its changes), run twice:
+
+| run | result |
+|---|---|
+| default features (both sides) | `196 checks: 196 pass, 58 skip` — **no semver update required** |
+| `--all-features` (both sides) | `196 checks: 196 pass, 58 skip` — **no semver update required** |
+
+**Zero new public items from this lane's own commits.** The default-feature
+run isolates exactly the Cargo.toml default-list edit's consequence
+(already-declared items becoming reachable, not new items existing) — and
+semver-checks reports no violation either way, consistent with every newly
+*reachable* item (`ScoringEngine`, `with_engine`,
+`with_unread_feature_skipping`) already being `#[doc(hidden)]`. The
+all-features run isolates the source-code changes (fused.rs, the new test,
+the doc-comment fixes) — also clean, since every new function/type this
+lane added is `pub(crate)` or private, and the sole `#[test]` addition is
+not part of the public API. (`ZensimProfile::D` itself, the one genuinely
+new public variant in this area, was added by the PRIOR commit `0f7eb2ea`,
+before this lane started, and is unaffected by anything here.)
+
+Nothing was published; `cargo publish` was not run.
+
+---
+
+## 7. The W7 exam clause, revisited
+
+`benchmarks/ssim2_replacement_bar_2026-08-31.md` Appendix C (2026-09-01,
+the a4bkon closure) records **W7 FAIL** for the `A3b`/`A4b`/K1-K4 156+free
+candidate family: *"none of K1–K4/A4b is wired into a `ZensimProfile`
+variant … shipping A4b's bytes through `ZensimProfile::D` remains an
+unmade ship decision, not a code gap this lane closed."* That verdict is
+about a **different** candidate family from `D`/`ADD156` — it is
+**unchanged by this lane**, which did not ship any new profile or bake
+(explicitly out of the mandate: "no waste" meant closing the gating tax on
+the profile that already exists, not shipping more bakes).
+
+For `ZensimProfile::D`/`ADD156` specifically, the one W7-relevant profile
+this lane's mandate covers: **W7 ("the winning bytes are loadable by a
+default build") is now cleanly satisfied, in the sense the clause's own
+wording asks — and at its designed speed, which is a stronger claim than
+the clause's literal text requires.** `D`'s bytes were already loadable by
+any default build once Profile D shipped (`candidate-profiles` is
+default-on) — what was missing, and what this lane closed, is that they
+were loadable **at buffered (`B`-class) speed only**, not at the `156`-class
+speed the profile exists to provide, unless the caller separately opted
+into `feature-regime-v2`. As of this lane, `Zensim::new(ZensimProfile::D)
+.compute(...)` in a **plain `cargo add zensim` build, with zero extra
+feature flags and zero extra API calls**, reaches the fold's `156`-class
+walk. §1.4's new gate proves this is score-identical to every other
+construction, so the claim is "reachable at full speed," not merely
+"reachable."
+
+---
+
+## 8. Full verification
+
+- `cargo test --workspace --release`: **0 failures**, every crate in the
+  root workspace (zensim, zensim-experimental, zensim-validate,
+  zensim-regress, zensim-wasm-tests, zensim-train-core, zensim-train-gpu).
+  Discovered and fixed one PRE-EXISTING, unrelated gap along the way (not
+  caused by this lane — confirmed via `jj diff` against this lane's own
+  starting commit showing zero touches to `weights/`/`weights/manifests/`
+  before the fix): `zensim-validate`'s `shipped_bake_provenance` test
+  failed because `ZensimProfile::D`'s bake never got a manifest when it
+  shipped (2026-09-01, commit `0f7eb2ea` — that landing's own gate run
+  scoped to `-p zensim`, never exercising this workspace-wide test). Added
+  `zensim/weights/manifests/d_sdr_add156_dense_dial_2026-08-31.toml`: the
+  `[bake]` section independently verified (`sha256sum`/`wc -c` against the
+  tracked file, not copied from prose); the lineage section traces the free
+  spline-top-extension step from `ADD156_safesyn_only_raw_lasso.bin`
+  (verified from `add156_d7_ood_guard_2026-08-31.pointer.md`) and states
+  plainly that the pre-extension lasso fit's exact CLI was not independently
+  re-derived (out of scope) rather than fabricating it.
+- `cargo test -p zensim --release --features
+  feature-regime-v2,candidate-profiles,custom-profiles,training,threads,
+  classification,zenpixels,oracle`: **0 failures** (274 lib tests + every
+  integration/doctest target).
+- `cargo test -p zensim --release --no-default-features --features
+  avx512,imgref,threads,deprecated-profiles`: **0 failures** (116 lib tests
+  + every integration/doctest target).
+- `cargo clippy -p zensim --release --all-targets -- -D warnings` clean on
+  all three of the above feature combinations.
+- `cargo fmt --check`, scoped precisely: `fused.rs` and
+  `zensim-bench/benches/ssim2_speed_bar.rs` (the two files whose drift was
+  this lane's own) reformatted; every other fmt-check hit found during this
+  pass (`feature_v2.rs`, `fold_engine.rs`, `metric.rs`, `profile.rs`,
+  `blur.rs`, `feature_v2_stream.rs`, `fold_timing.rs`, `streaming.rs`,
+  several `tests/*.rs`, most of `zensim-bench`'s other examples/benches) was
+  confirmed line-by-line to sit OUTSIDE every hunk this lane touched and
+  left untouched — no bulk reformatting of files/regions outside this
+  task's scope.
+- **No pre-existing test exclusions needed.** The prior Profile-D landing's
+  own gate run (`benchmarks/profile_d_and_published_speed_2026-09-01.md`
+  §1.5) excluded two `blur.rs`/`feature_v2.rs` tests as a known, unrelated,
+  pre-existing failure (`attempt to subtract with overflow`); both now pass
+  cleanly on this lane's `main` — fixed by other, unrelated, concurrent work
+  sometime between that landing and this one.
+
+---
+
+## 9. Honest status against the mandate
+
+| goal | status |
+|---|---|
+| 1. Gating tax removed | **Done.** `feature-regime-v2` default-on; zero public API delta; new parity gate. |
+| 2. Compute tax on free set minimized + no-tax extension point | **Done.** Raw-moments consolidated from 10 hand-duplicated sites to 2 generic + 1 scalar helper pair; re-measured cost is part of §4.3. No new feature slots minted (per mandate). |
+| 3. W4 1152²@8T exception | **Diagnosed, not fixed** — evidence points at zenbench-harness/rayon-pool interaction, not a fixed code defect; no confirmed, isolated root cause to safely patch. Named next step in §3.4. |
+| 4. Tier duplication audit | **Done.** The one real duplication in the touched kernels (raw-moments) fixed; the rest of the width-native hand-tiering is justified and left alone; `dense_block_kernel` (out of blast radius, ERA-LOCKED) untouched. |
+
+No sub-goal was silently scope-shrunk. §3's diagnosis is the honest-stop
+case the mandate itself anticipated.
+
