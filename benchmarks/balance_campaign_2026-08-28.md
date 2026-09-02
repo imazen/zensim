@@ -5545,9 +5545,14 @@ The generalisable form: *live-gap 0 is not evidence of completion when something
 re-declares on a timer; check whether the denominator is being re-minted.* Here
 `report` printed `VERDICT: COMPLETE — every run live-gap==0` throughout the
 churn, because the gap really did close every round — and the next round re-minted
-it. **Post-fix, confirmed live:** rounds 43 and 44 uploaded byte-identical
-manifests (sha `aeb915e2…`), so the id set has stopped rotating and the run can
-settle.
+it. **Post-fix, confirmed live:** rounds 43, 44 **and 45** uploaded byte-identical
+manifests (sha `aeb915e2…`, `declared=4,128` each), so the id set has stopped
+rotating. The loop picked the fix up unaided — it re-execs its binary each round
+— so no restart was needed. One caveat for whoever reads the counter next: blob
+count keeps rising for one more pass (`ever_done` 29,664 → 30,264) because round
+43 minted a brand-new stable set and the fleet is completing its 4,128 jobs
+once; every later round re-declares the same set and is a no-op. **Check the
+manifest sha, not the slope.**
 
 **Lesson 3 — no restart was needed, because the loop re-execs its binary.** The
 gap-fill loops spawn `./target/release/zenfleet-ctl` fresh each round, so the
