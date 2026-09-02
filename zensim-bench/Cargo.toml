@@ -22,6 +22,14 @@ training = ["zensim/training"]
 # against its unchanged `zensim_B` anchor arm.
 ssim2-rayon = ["fast-ssim2/rayon"]
 
+# `examples/m3_fixture_gen.rs`: the IMAZEN owner for the M3/M3a coherence
+# fixture grid — zenpng decode/encode + zenresize Mitchell downscale + zenjpeg
+# encode. Replaces the ImageMagick shell-out `run_full_eval.sh` used for both
+# the size and the quality axis (USER RULE "IMAZEN-ONLY IMAGING/CODEC SOFTWARE",
+# 2026-09-02). ERA HAZARD: it does NOT reproduce the ImageMagick-era fixtures —
+# see the example's module doc before regenerating anything.
+m3-fixtures = ["dep:zenpng", "dep:zenjpeg", "dep:zenresize", "dep:zenpixels", "dep:zenpixels-convert", "dep:enough"]
+
 # Enables the `extract_features_372col_omni` example. As of V11-DECODER-FIX
 # (task #195, 2026-05-20) this feature pulls direct zenavif + zenjxl path
 # deps so AVIF + JXL encoded variants are decoded natively (previously
@@ -136,6 +144,10 @@ zenpng = { version = "0.1.4", optional = true, default-features = false }
 # a bitstream decoded by --decode-list matches what the fleet extractor saw.
 zenpixels-convert = { version = ">=0.2.16, <0.4.0", optional = true }
 enough = { version = "0.4", optional = true }
+# `m3_fixture_gen` (the M3/M3a coherence-fixture generator): the imazen owners
+# for the size axis (Mitchell downscale) that replaced the ImageMagick shell-out
+# in `scripts/run_full_eval.sh` on 2026-09-02, per the IMAZEN-ONLY rule.
+zenresize = { version = ">=0.3.1, <0.4.0", optional = true }
 
 [[bench]]
 name = "bench_compare"
@@ -170,6 +182,10 @@ required-features = ["sdr944-extract"]
 [[example]]
 name = "extract_features_372col"
 required-features = ["training"]
+
+[[example]]
+name = "m3_fixture_gen"
+required-features = ["m3-fixtures"]
 
 # `aic3_one_pair_smoke` and `extended_iw_perf` likewise use zensim's
 # `training`-gated research API; guard them so a default `--all-targets`

@@ -6048,3 +6048,119 @@ derivation in the muxer they need no setters, and editing sweep code under a run
 wave buys nothing. The **alpha** `av1C` (`lib.rs:861`) still writes profile from
 depth alone — correct by construction (alpha is monochrome, so profile 0 or 2 with
 `ssx = ssy = 1` is the only legal shape), so it was not changed.
+
+---
+
+## 2026-09-02 — ROUND 61: the imazen-only correction lane — a C oracle was the encoder, the probe AND the gate in the aom tuning path, and ImageMagick was inside model selection
+
+USER RULE **"IMAZEN-ONLY IMAGING/CODEC SOFTWARE"** landed in
+`~/work/zen/CLAUDE.md` this round: never reach for imaging/codec software not
+written by imazen — as encoder, reference, admission gate, or probe —
+**especially in a pipeline that develops predictive models designed to tune
+imazen software.** C references are for differential port validation **inside
+the port repos only**. It was minted after a session wrongly declared
+zenav1-aom *"validation-only, not a backend"*. Four findings, three commits in
+zenmetrics (`6f1f1f22`, `cbc2ab00`, `b590aa6d`) and one here.
+
+**1. The claim that started it was wrong, and its likely SOURCE is a stale
+comment.** zenav1-aom **is** a wired decode backend — `DecodeBackend::AomRs`
+behind `aom-backend`, reaching the public API for stills, alpha, grid,
+animation, gain-map, 8/10/12-bit and mono, with 15 tests. The trap is that
+zenavif has **two** backend enums: `Av1Backend` (encode) and `DecodeBackend`
+(decode). aom lives in the second, so checking the encode enum gives a true
+negative to a question you did not mean to ask. And
+`zenavif/src/decoder_managed/aom.rs:25-27` still claims *"grid images and
+animation return honest `Unsupported`"* — **false**, contradicted by code 50
+lines below it and by two passing tests. It is the first thing a reader hits.
+**Date correction:** PR #31 merged **2026-08-11**, not 2026-07-13 (that is the
+branch commit); anything dating these seams "on main in mid-July" is off by a
+month. Full truth table + 5 doc-vs-source discrepancies:
+`zenmetrics/benchmarks/bitdepth_capability_matrix_2026-09-02.md` §7.
+
+**2. In the aom sweep arm the C oracle is not merely a gate — it is partly the
+encoder and wholly the probe.** MEASURED at
+`zenmetrics-cli/src/sweep/encode.rs:1307-1380`: every aom-rs cell runs a full C
+libaom encode as its **sequence/frame header source**, reads the
+**screen-content decision out of the C stream** and feeds it to the port's
+`ToggleKnobs` (so C's detector chooses the *port's* coding tools), refuses
+unless the payloads match byte-for-byte, then **splices the port's payload into
+the oracle's OBU frame**. Root cause is an API-shape mismatch, not a policy
+slip: zenmetrics drives the port through `aom-bench`, which is the port's
+**differential-validation harness**, and every `port_encode*` takes a C-encoded
+bootstrap **by signature** (`aom-bench/src/lib.rs:1150,:1176`). **So deleting
+the byte-identity compare would not purge C** — the header would still be C's.
+The aom arm cannot be de-oracled at the zenmetrics layer at all.
+
+**3. The HBD refusal was keyed on the wrong thing, and the port's own record
+says so.** The `bd>8` × `cpu-used` 1..=6 refusal was justified by divergence
+from C. But zenav1-aom files that band under tier **T4 — "measured, pinned,
+unlocalized (byte divergences, NO REFUSAL)"** (`zenav1-aom/CLAUDE.md` T4 row
+`HBD_OPEN`/`b10_64`; pinned set `aom-bench/tests/s4cov_qm_axis.rs:380`): the
+port **encodes** there and does not call its own output invalid. Neither branch
+of the brief's if/else applied — the refusal **stays**, because finding 2 makes
+it structurally forced at *every* depth, but it is now keyed on the port's own
+pin plus the harness constraint, with C-parity demoted to metadata and an
+explicit disclaimer that the port's HBD encode is not claimed wrong.
+Failing-test-first: the pinning test went 2 → 4 assertions and was observed
+failing on the old message for exactly that reason.
+
+**4. ⚠ ImageMagick was inside MODEL SELECTION, and its removal is an era
+break.** `scripts/run_full_eval.sh` shelled `magick` for **both** M3 axes —
+`-filter Mitchell -resize` and `-quality Q` (ImageMagick's libjpeg) — and M3a
+is a first-class selection input (`WAVE_PLAYBOOK` step 6; the `freeze_check
+--select` tie-break is `balanced_composite + 0.15·M3a`). It also carried a
+**graceful skip**: with no `magick` on the box the size axis silently collapsed
+to 576-only, so **M3a changed meaning without failing**. Now
+`zensim-bench/examples/m3_fixture_gen.rs` (zenpng + zenresize `Filter::Mitchell`
++ zenjpeg), and a missing generator is **fatal, exit 3**.
+
+**MEASURED era hazard — the reason nothing was regenerated.** zenjpeg's `q` is
+not ImageMagick-libjpeg's `q`. Same `city_384`, same nominal quality:
+
+| q | ImageMagick-era B | zenjpeg B | ratio |
+|--:|--:|--:|--:|
+| 20 | 11,852 | 10,752 | **0.907** |
+| 50 | 20,513 | 16,307 | **0.795** |
+| 75 | 30,113 | 24,897 | **0.827** |
+
+The Mitchell downscales differ too (241,630 vs 241,828 B at 384; not
+byte-identical at either size). A fixture from the new owner is a **different
+rate point**, so an M3a measured on it is not comparable to any M3a in the
+record. The 48 ImageMagick-era fixtures under
+`/mnt/v/output/zensim/diffmap-coherence-2026-07-18/` are therefore **left
+alone**, the default `$FIX` still points at them, and the rewired loop only
+fills a **missing** file. **VERIFIED:** with the generator deliberately absent
+the loop needs **zero** regenerations and the fixture-set digest is
+**unchanged** — no published M3/M3a number moves. Regenerating means a **new
+era-stamped directory** (same discipline as `2026-05-15-full-features` vs
+`2026-08-30-full-features-372`) and expecting the axis to re-base.
+
+**A3 is REDESIGNED, not declared** (`zenmetrics/benchmarks/avif_doe_plan_2026-09-01.md`
+§16): arms drive zenav1-aom's own encoder over the **port's** knob surface (so
+`tune=iq` and `deltaq_mode2/3`, excluded only because C could not be driven to
+match, become eligible); the port's emitted bitstream is ground truth; validity
+is the port's **own** decode-verify (`aom_decode::frame::decode_frame_obus` +
+`zenavif-parse` read-back) — a stronger product statement than byte-equality
+with C, which never proved a stream decodes. G-AOM-BASE/G-AOM-ARM are
+**withdrawn as tuning-data gates** and re-registered unchanged as port-repo
+checks. **Blocked on `PREREQ-AOM-STANDALONE`** (zenav1-aom exposing an encode
+entry that derives its own header) — owned by zenav1-aom, not built here. Until
+then the draining A0 aom arm is **re-labelled, not discarded**: valid
+port-parity evidence, **not admissible tuning data** for a model that tunes
+zenav1-aom. The **svt arm has no C anywhere in its path** and now carries the
+DOE as the load-bearing plan rather than a fallback.
+
+**Tool sweep:** 31 hits across the campaign paths (12 live, 8 peripheral, 5
+dead, 6 mention-only). The Rust sweep dir is **clean**. Two fixed (the M3 path
+above; and `zenmetrics/scripts/sweep/CLAUDE.md`'s *"libjxl is the authority…
+always test with `djxl` directly"* — a committed instruction that reproduced the
+violation on every read, now scoped to port-repo triage). Nine registered with
+owners (§8.2), seven of which share one missing piece: **a `zenmetrics image
+{probe,decode,resize,encode}` subcommand**, the highest-leverage build on the
+list. Two deliberately not drive-by: the DoE budget-corpus PIL decode would
+change every `crop_sha256` under a **live** wave, and `synth_nonphoto.py`
+**rasterises** training sources with PIL/matplotlib — imazen has no rasteriser,
+so that needs a decision, not a swap. Trap registered before it bites: the
+frozen `asrun/{avthdr,hdrvdc}` ffmpeg drivers are the only recorded route to
+re-extract those HDR-video reads, and imazen has **no demuxer and no HEVC/VVC
+video decoder** — that study is currently un-re-runnable under the rule.

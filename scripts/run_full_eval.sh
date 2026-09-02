@@ -149,27 +149,58 @@ fi
 M3_CONTENT=(city dog girl)
 M3_SIZES=(576 384 256) # 576=orig; 384/256 = Mitchell downscales (no upscaling)
 M3_QS=(20 50 75)
-RESIZE=""
-command -v magick >/dev/null 2>&1 && RESIZE="magick"
-[[ -z "$RESIZE" ]] && command -v convert >/dev/null 2>&1 && RESIZE="convert"
-# Generate the size×q fixtures once (idempotent; persisted under $FIX).
-if [[ -n "$RESIZE" ]]; then
-    for ref in "${M3_CONTENT[@]}"; do
-        for sz in "${M3_SIZES[@]}"; do
-            if [[ "$sz" == "576" ]]; then rp="$FIX/${ref}.png"; else
-                rp="$FIX/${ref}_${sz}.png"
-                [[ -f "$rp" ]] || "$RESIZE" "$FIX/${ref}.png" -filter Mitchell -resize "${sz}x${sz}" "$rp" 2>/dev/null
+# FIXTURE GENERATION — IMAZEN OWNERS ONLY (2026-09-02).
+#
+# This block used to shell ImageMagick for BOTH axes: `-filter Mitchell
+# -resize NxN` for size and `-quality Q` (ImageMagick's bundled libjpeg) for
+# quality. That is a USER-RULE violation ("IMAZEN-ONLY IMAGING/CODEC SOFTWARE",
+# ~/work/zen/CLAUDE.md, 2026-09-02) in the worst possible place: M3a is a
+# first-class MODEL-SELECTION input (WAVE_PLAYBOOK step 6, freeze_check
+# --select tie-break), so a foreign JPEG encoder sat inside the loop that picks
+# which zensim model ships. The owner is now
+# `zensim-bench/examples/m3_fixture_gen.rs` — zenpng decode/encode + zenresize
+# Mitchell + zenjpeg encode.
+#
+# ⚠ ERA HAZARD, MEASURED 2026-09-02 — do NOT regenerate $FIX in place.
+# zenjpeg's q is not ImageMagick-libjpeg's q. On city_384 the same nominal
+# quality gives 0.907x (q20), 0.795x (q50), 0.827x (q75) of the ImageMagick
+# bytes, and the Mitchell downscales differ too (241828 vs 241630 B at 384).
+# So a fixture made by the new owner is a DIFFERENT rate point, and an M3a
+# measured on it is NOT comparable to any M3a in the record. The 48 fixtures
+# under the default $FIX are ImageMagick-era and every published M3/M3a value
+# was measured against them, so they are LEFT ALONE: the loop below only ever
+# fills in a MISSING file. Point ZENSIM_M3_FIXTURES at a NEW era-stamped
+# directory to regenerate from scratch (same discipline as the 372 feature
+# roots: 2026-05-15-full-features vs 2026-08-30-full-features-372), and expect
+# the whole M3a axis to re-base when you do.
+M3GEN="${ZENSIM_M3_FIXTURE_GEN:-$REPO_ROOT/zensim-bench/target/release/examples/m3_fixture_gen}"
+for ref in "${M3_CONTENT[@]}"; do
+    for sz in "${M3_SIZES[@]}"; do
+        if [[ "$sz" == "576" ]]; then rp="$FIX/${ref}.png"; else
+            rp="$FIX/${ref}_${sz}.png"
+        fi
+        for q in "${M3_QS[@]}"; do
+            dp="$FIX/${ref}_${sz}_q${q}.jpg"
+            [[ -f "$rp" && -f "$dp" ]] && continue
+            # NO GRACEFUL SKIP (CLAUDE.md: "a test that silently passes without
+            # testing anything is worse than one that loudly fails"). The old
+            # code dropped the size axis to (576) with a warning when magick was
+            # absent, which silently CHANGED WHAT M3a MEANS mid-run. A missing
+            # generator is now fatal.
+            if [[ ! -x "$M3GEN" ]]; then
+                echo "FATAL: M3 fixture missing ($rp / $dp) and the generator is not built." >&2
+                echo "  build: cd $REPO_ROOT/zensim-bench && cargo build --release \\" >&2
+                echo "           --example m3_fixture_gen --features m3-fixtures" >&2
+                echo "  or set ZENSIM_M3_FIXTURE_GEN to its path." >&2
+                echo "  Refusing to silently shrink the M3 grid — the size axis is load-bearing" >&2
+                echo "  for M3a, which is a model-selection input." >&2
+                exit 3
             fi
-            for q in "${M3_QS[@]}"; do
-                dp="$FIX/${ref}_${sz}_q${q}.jpg"
-                [[ -f "$dp" ]] || "$RESIZE" "$rp" -quality "$q" "$dp" 2>/dev/null
-            done
+            [[ -f "$rp" ]] || "$M3GEN" resize --in "$FIX/${ref}.png" --out "$rp" --max "$sz" || exit 3
+            [[ -f "$dp" ]] || "$M3GEN" jpeg --in "$rp" --out "$dp" --quality "$q" || exit 3
         done
     done
-else
-    echo "   M3: no magick/convert — size axis skipped, orig-size q-sweep only" >&2
-    M3_SIZES=(576)
-fi
+done
 
 # Delegate the grid loop to its OWNER (scripts/m3a_sweep.sh, extracted
 # 2026-08-04 per the no-duplication rule: one implementation, two callers —
