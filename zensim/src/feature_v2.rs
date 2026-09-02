@@ -18207,14 +18207,23 @@ pub fn harness_active_tier() -> &'static str {
     #[cfg(target_arch = "x86_64")]
     {
         use archmage::SimdToken as _;
+        // Tier labels corrected 2026-09-01 (Profile-D no-tax refactor):
+        // archmage's own token docs (`X64V3Token` = "x86-64-v3", AVX2+FMA+
+        // BMI1/2, Haswell 2013 / Zen 1 2017; `X64V4Token` = "AVX-512"
+        // baseline; `X64V4xToken` = "x86-64-v4x", AVX-512 + VBMI2/GFNI/VNNI)
+        // — this function previously reported "v4 (AVX2)" / "v3 (SSE4.2)",
+        // both one tier off (v4 is AVX-512, not AVX2; v3 is AVX2, not
+        // SSE4.2). There is no dedicated SSE4.2-only tier in current
+        // archmage/magetypes; x86-64-v2 (SSE4.2+POPCNT) exists as a token but
+        // is not part of this dispatcher's ladder.
         if archmage::X64V4xToken::summon().is_some() {
-            return "v4x (AVX-512)";
+            return "v4x (AVX-512+VBMI2/GFNI/VNNI)";
         }
         if archmage::X64V4Token::summon().is_some() {
-            return "v4 (AVX2)";
+            return "v4 (AVX-512)";
         }
         if archmage::X64V3Token::summon().is_some() {
-            return "v3 (SSE4.2)";
+            return "v3 (AVX2+FMA)";
         }
     }
     "scalar/other"

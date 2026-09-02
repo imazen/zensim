@@ -672,9 +672,102 @@ not a drive-by.
 **Profiling here:** `perf` is unusable (`perf_event_paranoid = 4` under WSL2
 refuses even user-space events). Use callgrind on a `--no-default-features`
 build (valgrind cannot execute AVX-512) — and remember the resulting profile is
-the **v3/SSE tier**, so kernel *ratios* may shift at v4x. Put the profiling
-`CARGO_TARGET_DIR` under `target/` — `.gitignore`'s `/target` does NOT match a
-sibling `target-cg`, and 54 MiB of build output reached main that way once.
+the **v3/AVX2 tier** (CORRECTED 2026-09-01: archmage's own token docs —
+`X64V3Token` = "x86-64-v3" = AVX2+FMA+BMI1/2, Haswell 2013 / Zen 1 2017; there
+is no dedicated SSE4.2-only tier in this dispatcher's ladder — this line
+previously said "v3/SSE", the same one-tier-off mislabeling
+`benchmarks/profile_d_notax_2026-09-01.md` found and fixed in
+`feature_v2.rs::harness_active_tier` and flagged, unfixed, in several other
+campaign docs from 2026-08-28/30/31), so kernel *ratios* may shift at v4x. Put
+the profiling `CARGO_TARGET_DIR` under `target/` — `.gitignore`'s `/target`
+does NOT match a sibling `target-cg`, and 54 MiB of build output reached main
+that way once.
+
+### Profile D's gating tax is REMOVED — `feature-regime-v2` is now default-on (2026-09-01)
+
+Full record: [`benchmarks/profile_d_notax_2026-09-01.md`](benchmarks/profile_d_notax_2026-09-01.md).
+
+**The fold engine + `V1PoolsMode`/`V1FreeExtras` (everything this section
+describes) is in `zensim`'s `default` feature list as of 2026-09-01.** Before
+this, `ZensimProfile::D`'s `fast_by_default` wiring (`Zensim::new` sets
+`fold_engine = true, skip_unread_pools = true` for `D` unconditionally) was a
+no-op on a plain `cargo add zensim` build — the fields it sets are only read
+inside `#[cfg(feature = "feature-regime-v2")]` blocks, and that feature
+wasn't default, so `D` silently fell back to the buffered (`B`-class-cost)
+walk on any build that didn't explicitly opt in. That was the W7 gap
+("reachable by a default build") multiple campaigns registered and didn't
+close. `--no-default-features` still removes the whole module family; every
+profile including `D` still scores correctly there, just without the fold's
+speed. Adds zero dependencies (`feature-regime-v2 = []`) — the cost is
+default-build compile time (the ~18k-line `feature_v2.rs` plus siblings now
+always compiles), not a runtime behavior change for any profile other than
+`D`. A genuine module split (carving the v1-only fold subset out of the
+v2-bounded machinery it's interleaved with, so a default build pays only for
+what `D` needs) remains a larger, separately-scoped refactor, named but not
+attempted here.
+
+New gate: `fold_engine::skip_policy_tests::
+default_build_profile_d_matches_feature_gated_off_buffered_walk` — proves
+score/`raw_distance`/`mean_offset` and the entire SCORED `f0..228` prefix
+bit-identical between default-build `D` and a forced-`Buffered` proxy, while
+explicitly asserting the two arms' `f228..372` (masked/IW) LEGITIMATELY
+differ — the skip optimization zeroes it, the buffered walk always computes
+it, and both are correct. An earlier draft asserted full-372-vector equality
+and correctly failed at `f228`; see the test's own doc comment (and the
+benchmarks doc §1.4) for the corrected claim and why it's the honest one.
+
+**The free-set raw-moments accumulator (`V1FreeExtras::RawMoments`,
+`fused.rs`) was hand-duplicated at 6 vector SIMD sites + 4 scalar-tail sites
+(one per tier: `_v4`/`_v4x` native-16-wide main loops + their 8-wide
+`token.v3()` remainder loops, `_v3`'s native 8-wide main loop, the
+`#[magetypes(neon, wasm128, scalar)]`-generated function's 8-wide main
+loop) — now two generic helper pairs
+(`raw_moments_accumulate{8,16}`/`raw_moments_finish{8,16}<T: F32x{8,16}Backend
++ Copy>`) plus one scalar pair, `#[inline(always)]` (verified with `nm` —
+zero `raw_moments_*` symbols survive in a release binary; see
+`dense_block_kernel_generic`'s own comment for why `#[inline(always)]` and
+not something weaker is mandatory here — a 5.3× regression from an
+un-inlined generic SIMD helper, already measured once in this file).
+**`#[rite]` does not apply**: it resolves `#[target_feature]` from a
+concrete token parameter or explicit tier-name arguments
+(`archmage-macros/src/rite.rs`), and these helpers are generic over a
+*backend trait*, not a concrete token — there is no single tier for `#[rite]`
+to attach to a shared body. This is also the "add a new free slot at ~zero
+marginal EFFORT" extension point the free-features doc's own hand-off asked
+for: a future `V1FreeExtras` variant's per-row step is one function to add,
+not up to 10 hand-copies to keep in sync.
+
+**Tier-naming correction, made from archmage's own source, spread across
+this repo's own docs and one bit of shipped code:** `X64V3Token` =
+`"x86-64-v3"` = **AVX2+FMA+BMI1/2** (Haswell 2013 / Zen 1 2017), NOT SSE4.2 —
+there is no dedicated SSE4.2-only tier in the `v4x/v4/v3/neon/wasm128/scalar`
+ladder. `X64V4Token` = AVX-512 baseline; `X64V4xToken` = AVX-512 +
+VBMI2/GFNI/VNNI/etc. `zensim/src/feature_v2.rs::harness_active_tier` reported
+`"v4 (AVX2)"` / `"v3 (SSE4.2)"` — both one tier off — fixed to `"v4
+(AVX-512)"` / `"v3 (AVX2+FMA)"`. Several 2026-08-28/30/31 campaign docs
+(`benchmarks/balance_campaign_2026-08-28.md`,
+`benchmarks/era2_perf_break_2026-08-31.md`,
+`benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md`) carry the
+same "v3 = SSE4.2" mislabeling describing fleet hardware (e.g. "i134 …
+v3 (SSE4.2)") — flagged here, **not edited**: correcting historical
+measurement-hardware labels in someone else's campaign record needs
+verifying what CPU tier that box actually ran on, which is out of this
+lane's scope.
+
+**Both tiers are now first-class in the named speed instrument.**
+`zensim-bench/benches/ssim2_speed_bar.rs` gained `ZEN_S2_CAP_V3` (disables
+`X64V4Token` process-wide via `testable_dispatch`, cascading to `X64V4xToken`
+— confirmed from archmage source, not assumed — leaving `X64V3Token`/AVX2 as
+the ceiling) and `ZEN_S2_EXTRACT_ONLY` (adds `add156_extract_only`/
+`free156_extract_only` arms — same entry point as the real arms, minus the
+`Predictor` forward pass, to separate extraction cost from forward-pass
+cost without a second, potentially-mismatched instrument). See the
+benchmarks doc for the measured 1T/8T/16T × 576²/1152²/2304² × both-tier
+table and the W4 1152²@8T diagnosis (reproduced; not primarily a forward-pass
+effect; does not reproduce as an isolated single-arm cost, implicating
+zenbench's round-robin rayon-thread-pool interleaving over a fixed defect in
+the walk's own code — diagnosed, not silently patched with an unverified
+fix).
 
 ## LATENCY + TOKEN DISCIPLINE — idle waiting is re-charged, not cached (2026-08-04)
 

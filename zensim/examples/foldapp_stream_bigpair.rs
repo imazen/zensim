@@ -103,12 +103,17 @@ fn main() {
             v1_pools: V1PoolsMode::Peaks,
             ..Default::default()
         },
-        // DIAGNOSTIC (temporary, profile_d_notax lane): `V1PoolsMode::Off` +
-        // `v1_only` — the exact combination `zensim-bench/benches/
-        // ssim2_speed_bar.rs`'s `v1_basic` toggle constructs by hand for the
-        // `add156_156basic` arm, bypassing the `pools_mode_for_need` policy
-        // that never returns `Off` in production. Checking whether this
-        // specific combination hangs under threading.
+        // DIAGNOSTIC (added by the profile_d_notax lane, 2026-09-01):
+        // `V1PoolsMode::Off` + `v1_only` — the exact combination `zensim-bench/
+        // benches/ssim2_speed_bar.rs`'s `v1_basic` toggle constructs by hand
+        // for the `add156_156basic` arm, bypassing the `pools_mode_for_need`
+        // policy that never returns `Off` in production (`Off` and `Peaks`
+        // cost the same to compute; `Off` just emits fewer live slots). Used
+        // to confirm this specific combination does NOT hang core zensim
+        // under threading — it doesn't (5.49-8.27 ms at 1152x1152/8T) — which
+        // localized a `ssim2_speed_bar --bench` hang (add-only, no free arm)
+        // to the zenbench-harness/Predictor-3-arm-group context instead of
+        // this crate. See `benchmarks/profile_d_notax_2026-09-01.md` §3.3.
         "156off" => V2NewFeatureToggles {
             v1_only: true,
             v1_pools: V1PoolsMode::Off,

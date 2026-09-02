@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Changed — `feature-regime-v2` is now a default feature; the gating tax on `ZensimProfile::D` is removed (2026-09-01)
+
+- **Public API delta: none**, verified with `cargo semver-checks --baseline-rev
+  <pre-refactor commit> [--all-features]` — both runs report "no semver
+  update required," 196/196 checks passed, 0 failed. The only consequence is
+  that already-declared items (`fold_engine::ScoringEngine`,
+  `Zensim::with_engine`, `Zensim::with_unread_feature_skipping` — all
+  `#[doc(hidden)]`) become reachable in a default build; nothing changed
+  shape and nothing new was made non-doc-hidden.
+- **Why:** `ZensimProfile::D`'s whole reason to exist is speed
+  (`Zensim::new` opts it into the fold engine + pool-skip by construction),
+  but the fold engine lived entirely behind the non-default
+  `feature-regime-v2` feature — so a plain `cargo add zensim` build silently
+  fell back to the buffered (`B`-class-cost) walk for `D`, the W7
+  ("reachable by a default build") gap several prior campaigns registered
+  and didn't close. `--no-default-features` still removes the whole module
+  family; `D` still scores correctly there, at buffered speed.
+- **Also fixed in the same pass:** the free-set `V1FreeExtras::RawMoments`
+  accumulator (`fused.rs`) was hand-duplicated at 6 vector SIMD sites + 4
+  scalar-tail sites (one per SIMD tier); consolidated into two generic
+  `#[inline(always)]` helper pairs (verified fully inlined via `nm` on the
+  compiled binary) — the extension point for any future free-set addition.
+  A new gate (`fold_engine::skip_policy_tests::
+  default_build_profile_d_matches_feature_gated_off_buffered_walk`) proves
+  the default build and a feature-gated-off proxy agree on score /
+  `raw_distance` / `mean_offset` / every scored feature slot.
+- Full record, both-SIMD-tier speed measurement, and the W4 1152²@8T
+  diagnosis: `benchmarks/profile_d_notax_2026-09-01.md`.
+
 ### Fixed — `ComputeSet::from_block_profile` no longer over-falls-back on wide free-set bakes (additive, internal-only) (2026-09-01)
 
 - **No public API change.** `feature_v2::free_slot_indices` (promoted from a

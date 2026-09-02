@@ -1,0 +1,436 @@
+# Profile D no-tax refactor (2026-09-01)
+
+User directive (verbatim intent): *"refactor so Profile D pays no tax and the
+remaining features can be added for no tax either — no waste or effort
+duplication, full efficiency on both v4x and v3 psABI."* Four sub-goals,
+addressed in order below: (1) the **gating tax** (`feature-regime-v2` was
+opt-in, so a default build never reached the fast walk), (2) the **compute
+tax** on the free set + a **no-tax extension point**, (3) the **W4 1152²@8T
+exception**, (4) **tier duplication** in the touched kernels.
+
+Prerequisite reading this lane relied on (not re-derived here):
+`benchmarks/profile_d_and_published_speed_2026-09-01.md` (Profile D's own
+landing — the fast path existed but only under `feature-regime-v2`),
+`benchmarks/free_features_2026-09-01.md` (the free-set classification + the
+raw-moments accumulator this lane consolidated), `benchmarks/
+fold_engine_2026-08-31.md` (the fold-backed scoring engine architecture),
+`benchmarks/era2_perf_break_2026-08-31.md` §22 (the ASLR noise-floor
+protocol) and §23 (H-tile packing), `benchmarks/ssim2_replacement_bar_2026-08-31.md`
+Appendix B/C (the amended W4 clause and the a4bkon lane's 1.4375–1.4583×
+1152²@8T finding this lane was asked to diagnose).
+
+---
+
+## 1. The gating tax — `feature-regime-v2` is now default-on
+
+### 1.1 What was wrong, read from source (not assumed)
+
+`ZensimProfile::D` (shipped 2026-09-01, commit `0f7eb2ea`) sets
+`fold_engine = true, skip_unread_pools = true` unconditionally in
+`Zensim::new` for the `D` variant — but `fold_engine`/`skip_unread_pools` are
+only ever **read** inside `#[cfg(feature = "feature-regime-v2")]` blocks in
+`metric.rs` (`compute_with_config_inner`, `compare_against_ref_into`), and
+the entire `feature_v2`/`fold_engine`/`feature_v2_stream`/`fold_timing`
+module family was `#[cfg(feature = "feature-regime-v2")]`-gated at the `mod`
+level in `lib.rs`, with `feature-regime-v2` **not** in the crate's `default`
+feature list. A plain `cargo add zensim` build therefore could not name
+`ScoringEngine` or `with_engine` at all, `fold_engine`/`skip_unread_pools`
+were dead fields, and `Zensim::new(ZensimProfile::D).compute(...)` ran the
+ordinary buffered v1-372 walk at `B`-class cost — the entire reason `D`
+exists (the fold's `156`-class speedup) was unreachable without an extra
+feature flag nobody outside this repo's own test matrix would think to pass.
+
+The plumbing itself was already correct and already tested: every
+`crate::fold_engine::*` call site in `metric.rs` is paired with a
+`#[cfg(not(feature = "feature-regime-v2"))]` fallback, so there was no
+"split the module" surgery required — the two options on the table were
+"promote the fold-backed code out of the gate" (a large, invasive
+cross-cutting refactor separating v1-only fold code from the interleaved
+v2-bounded-feature machinery it shares 18k+ lines with) or "make the gate a
+default feature" (a one-line `Cargo.toml` change). The prior Profile-D
+landing session explicitly declined to make this call under time pressure
+next to other concurrent work; this lane's job was to decide from the code,
+not carry that deferral forward.
+
+### 1.2 The decision: default-on, not a module split
+
+**`feature-regime-v2` is now in `zensim`'s `default` feature list.** Read
+from the code (§1.1) and confirmed by inspection: `feature-regime-v2 = []`
+carries **zero** additional dependencies — turning it on changes what
+compiles from this crate's own source, nothing in the dependency graph.
+Every other profile (`A`, `B`, `C`, `CHdr`) still defaults to the buffered
+walk regardless — `Zensim::new`'s `fast_by_default` is `true` only for `D` —
+so the default-on flip is a **speed-only** change for every profile except
+`D`, and a **speed-only** change for `D` too (§1.4 proves the score is
+identical either way). `--no-default-features` (re-adding whatever subset is
+wanted) still removes the whole module family and every profile, `D`
+included, correctly falls back to the buffered walk.
+
+A genuine module split — carving the v1-only fold subset
+(`ComputeSet`/`V1PoolsMode`/`fold_v1_basic_bands`/
+`compute_folded_v1_372_streaming_impl`) out of `feature_v2.rs`'s 18,679 lines
+into its own always-compiled home, leaving the v2-bounded machinery (HDR PU
+front-end, the 944 append/append2/csfw blocks, the streaming strip producer)
+behind the flag — remains a real, larger, separately-scoped refactor. It
+would let a *default* build skip the ~18k-line-file compile cost this flip
+now pays for every consumer, default or not; that's a real cost of the
+chosen shape, named rather than hidden (§1.5).
+
+### 1.3 Doc corrections (in place, not left stale)
+
+Every doc comment across `lib.rs`, `fold_engine.rs`, `metric.rs`,
+`profile.rs`, `feature_v2.rs`, and `Cargo.toml` that asserted "off by
+default" / "a default build cannot name this" as a present-tense fact was
+corrected in the same commit, rather than left to mislead the next reader.
+The `feature-regime-v2` feature doc-comment's older framing — "iteration 1
+is a scalar correctness-first reference implementation … not for production
+throughput" — was already false relative to the fused/SIMD fold that landed
+2026-08-30/31; corrected to state what's actually true now.
+
+### 1.4 New parity gate, and what it actually proves
+
+Mandate: *"Any new fast-path default routing needs a NEW parity test proving
+default-build D scores are bit-identical to the gated build's."*
+`fold_engine::skip_policy_tests::
+default_build_profile_d_matches_feature_gated_off_buffered_walk` does this —
+with a real correction recorded in its own doc comment, because the first
+draft asserted the wrong thing and the failure was informative:
+
+- **First draft asserted full-372-feature-vector equality** between the
+  default build's `D` and a `.with_engine(Buffered)` proxy. It failed
+  immediately at `f228` (96×64: `0.0` vs `2.302614610319627e-3`), while
+  `score()` matched **exactly** (`68.94795355810257` both arms, bit-for-bit).
+- **Root cause, confirmed directly, not inferred:** `V1PoolsMode::Peaks`
+  (what `fast_by_default` selects for `D`, since `ADD156` reads 0 of
+  `f156..372`) deliberately leaves `f228..372` (masked/IW) at `0.0` — that
+  is `with_unread_feature_skipping`'s own documented contract. The buffered
+  walk has no skipping concept and always computes real values there —
+  verified by running `Buffered` with skip left untouched (not forced
+  either way) and getting the identical `2.302614610319627e-3` at `f228`.
+- **The test now asserts the TRUE invariant**: score / `raw_distance` /
+  `mean_offset` bit-identical, the entire **scored** prefix `f0..228`
+  (everything `score_v1_layout_features` actually reads for this class of
+  bake) bit-identical, and — asserted explicitly in both directions rather
+  than left as an unstated side effect — `f228..372` is all-zero on the
+  default (skip) arm and NOT all-zero on the gated-off (buffered) arm. A
+  future change that starts agreeing there (skip stops firing) or starts
+  disagreeing in `f0..228` (a real regression) both fail loudly.
+
+This is the honest scope of "the gating-tax refactor changes only speed":
+speed changes, the score never does, and the feature vector differs
+*exactly* where the skip optimization says it will and nowhere else.
+
+### 1.5 What this does NOT do (named, not hidden)
+
+- **No module split.** The ~18k-line `feature_v2.rs` (plus `fold_engine.rs`,
+  `feature_v2_stream.rs`, `fold_timing.rs`) now compiles into every default
+  build, including the v2-bounded machinery `D` never uses (HDR PU
+  front-end, 944 append/append2/csfw blocks, the streaming strip producer).
+  This costs default-build **compile time**, not runtime — no profile's
+  *behavior* changes from carrying this — but it is a real cost, and the
+  module-split alternative that would avoid it remains a legitimate,
+  larger, future refactor.
+- **No new profile slot for the a4bkon 156+free class** (`A3b`/`A4b`/K1-K4,
+  the `benchmarks/wave_r4_2026-09-01.md` §23/§24 candidates). Those are a
+  *different* candidate family from `D`/`ADD156` and shipping them was
+  explicitly out of this task's mandate ("no waste" — not "ship more
+  bakes"). §5 below states precisely what this means for the exam's W7
+  verdict on that family.
+
+---
+
+## 2. The compute tax on the free set + the no-tax extension point
+
+### 2.1 What "free set" means here, unchanged from the source doc
+
+`benchmarks/free_features_2026-09-01.md` classifies the 944-wide table's 788
+slots above `f156` by marginal cost given a v1-basic (156) walk: 72 are
+already emitted for free (`V1PoolsMode::Peaks`, unconditional byproduct of
+the fused kernel), 37 more (`V1FreeExtras::RawMoments` — three `GLOBAL_*`
+append slots per live scale/channel plus append2's per-scale
+`LUMA_MEAN_REF`) cost **+0.8–1.6 % of the 156-walk's time at 1T** — small,
+honestly priced, not zero. This lane did not re-litigate that classification
+or add new slots (the append-only discipline: new slots need registration +
+an extraction wave, explicitly out of scope). The work here is entirely
+about the **code structure** that carries the existing free set, per the
+mandate: *"the STRUCTURE such that further in-register slots ('class C')
+can be added at ~zero marginal cost … demonstrate it with the EXISTING free
+set."*
+
+### 2.2 The duplication, read from source
+
+`fused.rs`'s four raw-moment accumulators (`Σs, Σd, Σs², Σd²`) were
+hand-duplicated at exactly the sites the free-features doc's own count says
+("6 vector SIMD sites + 4 scalar-tail sites"), confirmed by direct line
+audit:
+
+| site | width | function | why it exists separately |
+|---|---|---|---|
+| `_v4` main loop | 16-wide (`f32x16`) | `fused_vblur_ssim_inner_v4` | AVX-512 baseline's native width |
+| `_v4` remainder | 8-wide (`f32x8`, via `token.v3()`) | same | tail columns not a multiple of 16 |
+| `_v4x` main loop | 16-wide | `fused_vblur_ssim_inner_v4x` | richer AVX-512's native width |
+| `_v4x` remainder | 8-wide (via `token.v3()`) | same | same tail reason |
+| `_v3` main loop | 8-wide (native) | `fused_vblur_ssim_inner_v3` | AVX2's native width |
+| generic main loop | 8-wide (generic) | `fused_vblur_ssim_inner` (`#[magetypes(neon, wasm128, scalar)]`) | covers neon/wasm128/scalar from ONE body already |
+| 4× scalar tail | scalar `f32` | one inside each of the four functions above | remainder columns below any vector width |
+
+The **width-native hand-tiering itself is justified** — `_v4`/`_v4x` use
+16-wide ops because that's AVX-512's native width, `_v3` uses 8-wide because
+that's AVX2's; using a uniform generic width everywhere would cost real
+throughput on the wider tiers (per magetypes' own documented guidance: pick
+the width the algorithm wants, don't downshift). What was **not**
+justified is that the *raw-moments arithmetic itself* — four lines of
+`fm_s = fm_s + s; …` plus four lines of reduce-and-add-into-`acc` — was
+retyped by hand at every one of those sites instead of written once and
+reused.
+
+### 2.3 The fix: two generic helper pairs, `#[inline(always)]` not `#[rite]`
+
+```rust
+fn raw_moments_accumulate8<T: F32x8Backend + Copy>(fm_s: &mut GenericF32x8<T>, …, s: GenericF32x8<T>, d: GenericF32x8<T>);
+fn raw_moments_finish8<T: F32x8Backend + Copy>(acc: &mut StripChannelAccum, fm_s: GenericF32x8<T>, …);
+fn raw_moments_accumulate16<T: F32x16Backend + Copy>(…);   // x86-64 only, matches f32x16's own gate
+fn raw_moments_finish16<T: F32x16Backend + Copy>(…);
+fn raw_moments_accumulate_scalar(fm_s: &mut f32, …, s: f32, d: f32);
+fn raw_moments_finish_scalar(acc: &mut StripChannelAccum, fm_s: f32, …);
+```
+
+One 8-wide pair now serves all four 8-wide sites (`_v4`'s and `_v4x`'s
+remainder loops via their `token.v3()` downcast, `_v3`'s native main loop,
+and the magetypes-generated function's main loop when monomorphized at
+neon/wasm128/scalar) — verified type-sound from source, not assumed:
+`magetypes::simd::f32x8` (the "fixed" x86-64 alias every `_v4`/`_v3` site
+uses) is **literally** `pub type f32x8 = generic::f32x8<archmage::X64V3Token>`
+(`magetypes/src/simd/mod.rs`), the exact same type the generic helper is
+written against with `T = X64V3Token`. One 16-wide pair serves both `_v4`
+and `_v4x` main loops. One plain-scalar pair serves all four scalar tails.
+**Six-plus-four hand-copies become two source definitions** — the "no waste,
+no effort duplication" extension point: a future `V1FreeExtras` variant
+needing its own per-row accumulate step adds it here once and every tier
+picks it up, rather than re-deriving the same four-line pattern at up to 10
+sites again.
+
+**`#[inline(always)]`, not `#[rite]` — decided from archmage's own macro
+source, not the brief's suggestion.** `archmage-macros/src/rite.rs`: `#[rite]`
+resolves its `#[target_feature]` string either from the function's
+**concrete** token parameter type, or from explicit tier names passed as
+macro arguments (`#[rite(v3)]`, `#[rite(v3, v4, neon)]` — which *generates
+suffixed monomorphic copies*, the opposite of what a shared generic body
+needs). A function generic over a **backend trait** (`T: F32x8Backend`, no
+concrete token) has no single tier for `#[rite]` to attach at the
+definition site — the macro is built for concrete-token functions, not
+trait-generic ones. `#[inline(always)]` is the correct tool here, and it's
+already the established, MEASURED-necessary pattern in this exact codebase
+for this exact situation: `feature_v2.rs`'s `dense_block_kernel_generic<T:
+F32x8Backend + Copy, …>` carries a comment recording a **5.3× regression**
+(38.2s vs 7.2s on 100 aic3 pairs) from a generic SIMD helper that wasn't
+force-inlined — the call compiled to a non-inlined `core::arch` shim call
+*outside* the `#[target_feature]` region. This refactor's helpers follow
+that precedent rather than introducing a second convention.
+
+### 2.4 Verification
+
+- **Bit-identity, before vs after the consolidation:** `free_extras_are_pure_addition_to_the_v1_only_walk`,
+  `free_extras_match_the_944_append_block`, `free_extras_never_touch_a_live_944_walk`
+  (all pass); `v1_golden_bytes` (5/5), `fold_engine_parity` (13/13),
+  `v1_feature_width_pure_function` (10/10) — the raw-moments-off path (every
+  pre-existing golden/parity fixture) is untouched by construction (the new
+  code lives entirely inside `if raw_moments { … }`), and this is confirmed
+  rather than assumed.
+- **Inlining, verified with `nm`, not asserted from the doc comment alone:**
+  `nm -C` on the compiled `ssim2_speed_bar` bench binary shows the tier
+  entry points present as local symbols
+  (`zensim::fused::__arcane_fused_vblur_ssim_inner_{v3,v4,v4x}`) and **zero**
+  occurrences of `raw_moments_accumulate`/`raw_moments_finish` anywhere in
+  the binary — the helpers are fully inlined away, not left as un-inlined
+  call sites the 5.3× regression class would produce.
+- **Full workspace test suite, all three required feature combinations,
+  clippy, and fmt** — §6.
+
+---
+
+## 3. The W4 1152²@8T exception — diagnosed, not silently fixed
+
+### 3.1 Reproduced on this box today
+
+The a4bkon lane's own report (`benchmarks/a4bkon_w4_speed_2026-09-01.txt`):
+`free156_peaks_raw` (the forward-scored `A4b`-class arm) vs
+`add156_156basic` at 8T/1152² read **1.4468× median (1.4375–1.4583×
+range)** — a FAIL against the ≤1.25× W4 bar, "a tight, repeatable band, not
+noise," while every other cell (576²/2304² at every thread count, and
+1152² at 1T) PASSED. This lane re-ran the exact same real bench + real
+bakes (`A2ctrl_r4_l0.3_packed.bin` / `A4b_156_s4004_packed.bin`) fresh on
+this box, same pair, at 8T/1152²: a clean 4-arm group (`fast_ssim2`,
+`zensim_B`, `add156_156basic`, `free156_peaks_raw` only) read `add=4.80,
+free=6.49` → **1.352×**; the same pair measured again after adding the
+`ZEN_S2_EXTRACT_ONLY` arms to the SAME group read `add=4.72–5.71,
+free=5.26–6.40` → **1.096–1.121×** across three starts. Same direction,
+same rough order of magnitude, confirming the original finding reproduces
+and is not a one-off artifact of the original measurement run — but also
+the first hint (sharpened in §3.3) that the exact ratio is sensitive to
+which other arms share the zenbench group, not a single fixed number.
+
+### 3.2 It is not primarily a forward-pass effect
+
+Added a genuine diagnostic capability to the named instrument
+(`ssim2_speed_bar.rs`'s new `ZEN_S2_EXTRACT_ONLY=1`, which adds
+`add156_extract_only`/`free156_extract_only` arms — the SAME entry point
+(`compute_folded720_features_streaming`) and toggles as the real
+`add156_156basic`/`free156_peaks_raw` arms, minus the `Predictor` forward
+pass) to separate extraction cost from forward-pass cost, rather than
+guessing from the outside. At 1152²/8T, three interleaved zenbench runs
+(all 6 arms present in the same group — `fast_ssim2`, `zensim_B`,
+`add156_156basic`, `free156_peaks_raw`, `add156_extract_only`,
+`free156_extract_only`; `ZEN_S2_ROUNDS=60 ZEN_S2_WALL_S=20`), reading
+`free156_extract_only`/`add156_extract_only`: **6.43/4.73 = 1.36×,
+6.53/4.86 = 1.34×, 7.53/5.81 = 1.30×** — the anomaly is present, at
+comparable magnitude, in **extraction alone**.
+The `A4b_156_s4004_packed.bin` bake (32,604 B — a real MLP with hidden
+layers, vs `A2ctrl`'s 1,436 B sparse additive head) does add its own real
+forward-pass cost, but that cost is not what's driving this specific
+1152²@8T signature.
+
+### 3.3 It does not reproduce as an isolated, single-arm cost — the load-bearing finding
+
+Driving `zensim/examples/foldapp_stream_bigpair.rs` (unmodified for this
+sweep — its `156`/`15c`/`15f`/`944full` arms already existed as the named
+free-set reference arms) through a 10-thread-count × 4-arm sweep
+({1,2,3,4,6,7,8,9,12,16} threads, min-over-9 process starts each, each
+start an independent taskset-pinned process invocation) at 1152² found
+**no comparable anomaly at any thread count**: `15f`/`156` ratio stayed
+within **1.00–1.02×** at every thread count including 8, min-over-9-starts.
+This measures the SAME underlying walk (`compute_folded720_append_streaming_impl`
+is provably the same code as `compute_folded720_streaming_impl` — the
+former is a two-line wrapper forcing `toggles.append_block = true` before
+calling the latter, confirmed by reading `feature_v2.rs` directly) but in a
+different *measurement context*: one process, one arm, per invocation,
+versus zenbench's round-robin interleaving of several different-shaped
+parallel workloads within **one shared rayon global thread pool** in the
+real bench.
+
+**Reading these two results together is the diagnosis.** A functionally
+equivalent walk shows the anomaly when measured via zenbench's in-process
+round-robin (multiple arms sharing one rayon pool, one right after another)
+and does **not** show it when measured via isolated per-process invocations
+(each arm getting a freshly-initialized rayon pool with nothing else ever
+having shared it). That pattern points at **rayon-thread-pool cross-arm
+interaction under the zenbench harness** — most plausibly a scheduling/
+work-stealing/thread-parking transient when a differently-shaped parallel
+task graph (add's narrower walk vs free's wider-layout walk) follows
+immediately after a different one on the same pool, specifically exposed at
+8 threads (this box's own documented noisiest cell — `era2_perf_break
+_2026-08-31.md` §22.5) and specifically at 1152² (also documented as a
+`H_TILE`-adjacent size in that same section, though this lane's own probe
+below rules out `H_TILE` as this mechanism's direct cause) — rather than a
+fixed, deterministic property of the free-set walk's own instructions or
+memory-access pattern at that exact size.
+
+**H-tiling was tested directly and is not the driver, though it is its own
+small, separate real cost for the v1-only walk.** `ZENSIM_H_TILE=0` vs the
+default `1024` on the `15f` arm (min-over-11-starts, `foldapp_stream_bigpair`):
+576² identical (1.290 vs 1.290 — both below the tile width, the required
+control), **1152² tiling costs +7.1 % (5.000 vs 4.670 ms, tiling SLOWER)**,
+2304² tiling costs +4.4 % (20.640 vs 19.770 ms). Both are real, small,
+*negative* effects from tiling specifically for the v1-only walk (unlike
+the 944-full walk, where §23 of `era2_perf_break_2026-08-31.md` found
+tiling a clear win) — plausibly because `v1_only` already skips the
+upstream sweeps that made the 944-full walk's H-blur working set exceed L2
+in the first place, so tiling here only adds packing overhead with no
+cache-fit benefit to buy back. This is flagged as its own small, honest
+finding, but at +4–7 % it is roughly a fifth of the ~30–45 % 1152²@8T
+signature and present at 2304² too (where W4 passes) — it does not by
+itself explain why 1152²@8T specifically fails.
+
+**A separate finding, not the W4 mechanism, surfaced while isolating it:**
+`ssim2_speed_bar --bench` with **only** `ZEN_HY_ADD` set (no `ZEN_HY_FREE`)
+hung past 30 s at 8T/1152² under zenbench, while the paired add+free run and
+the free-only run both completed normally in seconds. Testing the exact
+same toggle combination (`V1PoolsMode::Off` + `v1_only`, which
+`ssim2_speed_bar`'s hand-rolled `v1_basic` constructs directly, bypassing
+the `pools_mode_for_need` policy that never returns `Off` in production)
+through `foldapp_stream_bigpair` directly completes normally
+(5.49–8.27 ms) — so this is a zenbench-harness/Predictor-3-arm-group-level
+finding, not a zensim core hang, and out of scope to chase further here
+(zenbench is a sibling crate; per policy, flagged for the user rather than
+patched).
+
+### 3.4 Verdict: diagnosed, not fixed — and why not
+
+No code change was made chasing this specific cell. Per the mandate ("if
+the fix requires byte-affecting kernel changes, they must pass the existing
+gates … do not slip a silent numeric change"): the two structural
+hypotheses this lane could test cleanly (H-tile-remainder cost, and a
+channel×band parallelism-granularity mismatch) were tested directly and
+found insufficient — H-tiling explains at most a fifth of the magnitude and
+the wrong sign story doesn't fit a granularity-mismatch model that would
+also have to show up at every thread count that doesn't divide evenly,
+which it doesn't (§3.3's 10-thread-count sweep is flat). The evidence that
+*is* consistent — context-dependence on the measurement harness rather than
+the arm's own code — does not point at any specific line in `feature_v2.rs`
+or `fused.rs` to change, and guessing at a fix without a confirmed,
+isolated root cause is exactly the "silent numeric change chasing a ghost"
+this project's discipline exists to prevent. **Honest-stop: diagnosed with
+evidence, not fixed. Next attempt, if someone picks this back up:**
+instrument rayon's own scheduling (worker-thread timeline / task counts)
+across an add→free transition inside one zenbench group specifically at
+8T/1152², since that is the one context that reproduces it.
+
+---
+
+## 4. Both SIMD tiers, measured — v4x (native) and v3/AVX2 (capped)
+
+### 4.1 The tier-forcing mechanism, added to the named instrument
+
+`zensim-bench/benches/ssim2_speed_bar.rs` gained `ZEN_S2_CAP_V3` (env,
+`"0"`/`"1"` — equal byte length, per the ASLR protocol's own env-length
+rule), using `archmage::X64V4Token::dangerously_disable_token_process_wide(true)`
+— confirmed from archmage's own source
+(`archmage/src/tokens/generated/x86.rs`) to **cascade** to `X64V4xToken`
+and `Avx512Fp16Token`, leaving `X64V3Token` (AVX2+FMA) as the ceiling
+`incant!` resolves to. Requires the `testable_dispatch` archmage feature
+(already a `zensim-bench` dependency feature) and a build without
+`-C target-cpu=native` (already this project's standing benchmarking rule —
+`dangerously_disable_token_process_wide` refuses and reports an error,
+never silently no-ops, when the target features are compile-time
+guaranteed). Mirrors the existing `tier_isolation.rs` bench's `set_simd`
+pattern (which forces `X64V3Token` down to scalar for a *different*
+question — SIMD-vs-scalar, not AVX-512-vs-AVX2) rather than inventing a new
+one.
+
+**Terminology correction, made from archmage's own source, not memory:**
+this task's own brief's parenthetical ("v3 psABI = archmage v4/AVX2") is
+wrong, and so was this repo's memory note calling `v3` "SSE4.2"
+(`~/.claude/CLAUDE.md`-derived context, and — found while fixing this —
+`zensim/src/feature_v2.rs::harness_active_tier` and CLAUDE.md's own
+"Profiling here" paragraph, both corrected in this lane's commits).
+Archmage's actual, current, verified-from-source naming: `X64V3Token` =
+`"x86-64-v3"` = AVX2+FMA+BMI1/2+F16C+LZCNT+MOVBE (Haswell 2013 / Zen 1
+2017) — this **is** the x86-64-v3 psABI level. `X64V4Token` = AVX-512
+baseline (avx512f/bw/cd/dq/vl). `X64V4xToken` = `"x86-64-v4x"` = AVX-512 +
+VBMI/VBMI2/VNNI/BITALG/VPOPCNTDQ/IFMA/GFNI/VAES/VPCLMULQDQ. There is no
+dedicated SSE4.2-only tier in this dispatcher's six-tier ladder
+(`v4x, v4, v3, neon, wasm128, scalar`). This box (AMD Ryzen 9 9950X3D, Zen
+5) natively dispatches `v4x` — confirmed via `/proc/cpuinfo` flags
+(`avx512_vbmi2`, `avx512_vnni`, `avx512_bitalg`, `avx512_vpopcntdq` all
+present — Linux's flag-naming is inconsistently underscored across the
+AVX-512 extension family, which cost a false-alarm re-check before landing
+on this) and independently via `zensim`'s own `harness_active_tier()` probe
+after the label fix.
+
+### 4.2 Measurement protocol
+
+One binary, `ZEN_S2_CAP_V3` selecting the tier for the WHOLE process (Cargo
+features are per-build; capping per-arm inside one process is not
+possible — same limitation `ssim2-rayon` already documents for threading),
+arms interleaved within each zenbench `compare` group, `RAYON_NUM_THREADS`
++ `taskset` pinned per thread-count cell (1T → core 0; 8T → cores 0-7,
+CCD0's physical cores; 16T → cores 0-7,16-23, CCD0 fully SMT-populated —
+this box is a 9950X3D with two 8-physical-core CCDs, confirmed via
+`/sys/devices/system/cpu/cpu*/cache/index3/shared_cpu_list`), min of N
+zenbench-internal rounds per process start, min over multiple independent
+process starts (ASLR on). Sizes 576²/1152²/2304², threads 1/8/16 (the W4
+bar's own 1T+8T plus 16T informational), both tiers.
+
+### 4.3 Results
+
+<!-- FILLED IN FROM ~/tmp/dnotax/w4_measure_raw.jsonl once the sweep completes -->

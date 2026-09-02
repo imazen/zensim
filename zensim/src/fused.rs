@@ -60,9 +60,11 @@ const C2: f32 = 0.0009;
 // MEASURED reason forcing the inline is mandatory here too: an un-inlined
 // generic SIMD helper compiles to a call into a `core::arch` shim OUTSIDE
 // the `#[target_feature]` region, measured as a 5.3x whole-extraction
-// regression on that kernel. Verified inlined away on this refactor via
-// `cargo asm` (no `raw_moments_accumulate{8,16}`/`raw_moments_finish{8,16}`
-// symbol survives in the release build of any `_v4`/`_v4x`/`_v3` tier).
+// regression on that kernel. Verified inlined away on this refactor: `nm -C`
+// on the compiled `ssim2_speed_bar` release binary shows the tier entry
+// points present (`zensim::fused::__arcane_fused_vblur_ssim_inner_{v3,v4,v4x}`)
+// and zero occurrences of `raw_moments_accumulate`/`raw_moments_finish`
+// anywhere in the binary — no un-inlined call site survives.
 
 /// Accumulate one row's contribution to the four free raw-moment lane sums.
 /// Bit-identical to the hand-inlined `fm_s = fm_s + s; …` sequence it
