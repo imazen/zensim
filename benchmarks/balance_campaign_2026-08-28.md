@@ -5815,6 +5815,15 @@ issue left **OPEN** on the `tune=0` gate and the `scm=0` wildcard. Reproduce:
 
 ## 2026-09-02 — ROUND 59: the AVIF high-bit-depth arm, Track T1 — why `bd10` had no s6 number was structural, and two of the registered cell counts were wrong
 
+> **Numbering note.** This row is **59**, not 58: a concurrent lane landed its
+> own ROUND 58 (`d29e97ff`, the issue-17 recheck) while this one was being
+> written, and it was renumbered on discovery. ⚠ The commit that first added
+> this row (`bf7284ce`) still carries **"ROUND 58" in its subject line** — a
+> `jj squash --use-destination-message` kept the parent's message, and the
+> corrected message landed on a commit that lost the race to the bookmark. The
+> **file** has always said 59; only that one subject line is wrong, and it is
+> left rather than force-pushed.
+
 **Track T1 of the AVIF-HBD arm plan declared, gated and staged.** zenavif
 `bcd79789`; zenmetrics `32e68a8f` (declare), `c863fd30` (the G3 gate tool),
 `e6959efe` (T2 picks), `8670ea55` (execution record). Record:
