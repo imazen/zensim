@@ -5527,12 +5527,27 @@ chunks fall out. Pinned by `only_refs_larger_than_the_chunk_can_remint`.
 every round.** The brief for this lane, and §1.4's decision to hold the fix, both
 rested on the wave being finished and the churn being a bounded historical cost.
 It was live. Over rounds 37-40 the encode side sat **frozen** at 49,120 DONE
-cells and `declared` was pinned at 4,128, yet score blobs climbed
-**25,818 → 26,251 → 26,973 → 27,639** with four workers re-scoring finished
-cells. The multiplier had gone **4.0× → 6.7×** and was still rising. **A run in
-that state can never drain**, so holding did not avoid churn — it extended it.
+cells and `declared` stayed pinned at 4,128, with four workers re-scoring
+finished cells. Re-measured with the owning tool at the moment the fix landed:
+`declared=4128 ever_done=29664 live_done=29664 rescore tax 1.01x errors=0` — the
+multiplier had gone **4.0× → 7.19×**, about seven full passes over one pass of
+work, and was still rising. **A run in that state never settles**, so holding did
+not avoid churn — it extended it.
+
+*(Corrected in the same lane: the first figure published here was **6.7×**, taken
+as score-blobs ÷ declared. That is not a multiplier — it happens to look like one
+because blobs track distinct completed `job_id`s about 1:1, 29,608 against
+`ever_done` 29,664. The defensible ratio is `ever_done ÷ declared`, which is what
+the wave's original 4.0× was. Measure the multiplier with the tool that owns it,
+not from a blob count that merely correlates.)*
+
 The generalisable form: *live-gap 0 is not evidence of completion when something
-re-declares on a timer; check whether the denominator is being re-minted.*
+re-declares on a timer; check whether the denominator is being re-minted.* Here
+`report` printed `VERDICT: COMPLETE — every run live-gap==0` throughout the
+churn, because the gap really did close every round — and the next round re-minted
+it. **Post-fix, confirmed live:** rounds 43 and 44 uploaded byte-identical
+manifests (sha `aeb915e2…`), so the id set has stopped rotating and the run can
+settle.
 
 **Lesson 3 — no restart was needed, because the loop re-execs its binary.** The
 gap-fill loops spawn `./target/release/zenfleet-ctl` fresh each round, so the
