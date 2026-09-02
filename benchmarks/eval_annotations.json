@@ -1672,6 +1672,21 @@
    "evidence": "benchmarks/hfhuman_2026-09-01.md APPENDIX A.4; /mnt/v/output/zensim/hfhuman-2026-09-01/iptc/pairwise_results_iptc.tsv",
    "date": "2026-09-01",
    "fix_path": "none - superseded by a larger measurement of the same quantity"
+  },
+  {
+   "id": "extreads-ffmpeg-blessed-avthdr-hdrvdc-2026-09-02",
+   "kind": "annotated",
+   "fields": [
+    "external_reads.avthdr",
+    "external_reads.hdrvdc"
+   ],
+   "scope": {
+    "manual": "sanctioned-exception record for two external-validation domains - documentation-only, applies to no fulleval cell"
+   },
+   "reason": "SANCTIONED EXCEPTION to the imazen-only imaging/codec rule (user, 2026-09-02): the frozen scripts/external_reads/asrun/{avthdr,hdrvdc} ffmpeg drivers and their stored artifacts are BLESSED as-is. The numbers stay VALID and citable - this is a provenance caveat, not an invalidation. Scope is EVAL-ONLY: both domains are external-validation reads, never training input. PROVENANCE AS THE DRIVERS ACTUALLY RECORD IT (read 2026-09-02; the rule text's 'HEVC-only' shorthand is WRONG on both counts and is corrected here). HDR-VDC ships AV1, not HEVC: SVT-AV1 v1.5.0 preset 4, 10-bit yuv420p limited range (PROTOCOL.md:63), decoded via ffmpeg libdav1d (PROTOCOL.md:96). AVT-VQDB-UHD-1-HDR ships THREE coded codecs, not one: 195 bitstreams = 65 av1 .mkv + 65 hevc .mp4 + 65 vvc .266 (PROTOCOL.md:68), plus FFVHUFF lossless .mkv sources (27.5 GB) as the references. It needs TWO pinned ffmpeg builds: system 4.4.2 (libdav1d / native hevc / native ffvhuff) and a BtbN static n7.1.5 for the native vvc decoder, which 4.4.2 lacks - vvc runs two-step, n7.1.5 raw decode piped to the SAME system-ffmpeg filter chain so csc/scale stays common-mode across codecs (PROTOCOL.md:131-137). ffmpeg's role is also WIDER than demux+decode: swscale does the YCbCr->R'G'B' conversion (in_color_matrix=bt2020, in_range=tv -> out_range=full, accurate_rnd+full_chroma_int, to rgb48le) AND a Lanczos a=3 resample to the 4K display frame, plus a second 1920x1080 far-viewing leg for hdrvdc - i.e. a foreign COLOR CONVERTER and RESAMPLER are in the chain, not only a decoder. Both are registered common-mode approximations, identical across all legs, so leg deltas are unaffected (hdrvdc PROTOCOL.md 'Chroma-upsampling and swscale-vs-GPU-sampler differences ... are registered approximations, identical across all legs'). Everything DOWNSTREAM of the pixels is imazen-owned: extraction is zensim's own target/release/examples/hdrvdc_features_extract running compute_folded720_append2_features_hdr(..., csfw_block:false) at mode 944, profile codec_target(), and all correlations go through the canonical Rust panel. Extraction was ONE-TIME; the stored pooled 944-feature tables are what every rescoring reads - hdrvdc_pooled_944.csv (580x944, sha256 567731161871559e) and avthdr_pooled_944.csv (195x944, sha256 81d392e72dd67fc0). ROUTINE PATH is run_external_reads.py --from-stored (default; ~11 s for the full seven-domain read set, ZERO video decode), so nothing in normal operation shells ffmpeg at all. A from-scratch RE-EXTRACTION requires FRESH USER SIGN-OFF or an imazen video-decode capability; note the vvc leg additionally staged its n7.1.5 binary under ~/tmp/tools/, which is volatile scratch and is likely gone. Recorded reads this covers: avt q1 pooled 0.7742 (av1 0.7553, hevc 0.8410, vvc 0.7071); hdrvdc q2 pooled legs 0.6695 / 0.6517 / 0.7462",
+   "evidence": "~/work/zen/CLAUDE.md 'IMAZEN-ONLY ... Sanctioned exception' (user directive 2026-09-02); scripts/external_reads/asrun/{avthdr,hdrvdc}/{driver.py,PROTOCOL.md,PROVENANCE.txt} (frozen 2026-07-31, build_commit 1f0f92d5075d / 6b3505a57174); scripts/external_reads/README.md; benchmarks/avthdr_validation_2026-07-29.md; benchmarks/hdrvdc_conditions_2026-07-29.md",
+   "date": "2026-09-02",
+   "fix_path": "none - permanent caveat while these two domains are read. It lifts only if an imazen video-decode route (AV1 + HEVC + VVC demux/decode, plus zenpixels csc and zenresize Lanczos) can re-extract the 944 tables; that is a fresh-sign-off re-extraction, not a rescore"
   }
  ]
 }
