@@ -5568,3 +5568,83 @@ repro, the 8,972-cell blast radius, and one consumer-side lead: only tunes 3/4
 rewrite config via the port's `apply_tune_overrides`, and the existing parity
 test compares **config to config**, so it cannot catch a field that resolves
 correctly and is then never consumed.
+
+## 2026-09-02 — ROUND 56: Stage B opens with B-6 — the two arms that provably do not screen at reduced size, at native
+
+**User decision, verbatim: "go with B-6 first".** Stage B is opened with **one**
+trigger. The other 53 (§10 of the DOE plan: B-1 17, B-2 23, B-3 13) stay
+undeclared and the rest of the 60,000-cell envelope is unspent. Record: DOE plan
+doc **§15**; commits zenavif `43423054` + `386b82f8`, zenmetrics `8d5d3d93` +
+`6b3c41fe` + `c1208d29`.
+
+**What B-6 is.** Stage A's cross-size transfer gate certified only `mtx32` and
+`qml1.8.15` for reduced-size screening. Two arms — `acb3` (`ac_bias` 3.0) and
+`shp3` (`sharpness` 3) — **failed T1**: their direction at the 1024² screening
+budget does not carry to native. So leaving them at budget is *known* to be
+wrong, which is what makes them the cheapest high-value cells in the trigger
+list. Their follow-up runs the B-1 dense grid **at native size**.
+
+**The arithmetic, and why two right numbers disagree.** Registered 27,840
+reproduces exactly as `2 × (5 levels × 29 q × 32 img × 3 speeds)`. Declared is
+**25,056**. The 2,784 gap is the two knobs' **shared default level** —
+`ac_bias` 0.0 and `sharpness` 0 are the *same configuration*, so one axis
+carries 9 levels, not 10. The trigger list counts that control block once per
+knob; the declaration counts it once in total. Nothing was re-registered.
+
+**Five gates, none assumed.** 32/32 native refs sha-match local (0 mismatches;
+13 differ / 19 passthrough vs the budget twin, the as-built split); the
+native/crop **filename collision is impossible at CELL level, not merely
+avoided** — 6604's declared `source_sha` is `769b0df4` native vs `4ac38273`
+crop; declaration is deterministic (two rounds sha-equal); `pairs` is
+deterministic (`82aea675` — R55's fix holds, so R55's 4.0× re-declare
+multiplier does not apply here); G-FIRSTCELL passed on **both** halves — the
+first encode blob is `ftypavif`/`mif1miaf`, `file(1)` AVIF, and *decodes and
+scores* (ssim2 59.42), and the first score blob carries 12 ssim2 scalars + 12
+zensim 720-wide feature rows.
+
+**Cost measured, not extrapolated** — through `zenmetrics jobexec`, the
+worker's own entry point, on the real corpus, before the fleet was scaled:
+**13.2 CPU-h encode = 0.22× the 60 CPU-h envelope**, 14.3 GB blobs. Three
+things the plan did not have:
+
+- **`ac_bias = 8.0` is not clamped.** `SvtParams::clamped()` clamps the
+  variance-boost pair, the QM levels, `max_tx_size` and `sharpness` — but not
+  `ac_bias`. The top of the documented range was therefore a genuine
+  release-mode out-of-range risk (the **H-10** class). It encodes cleanly and
+  *moves bytes* (29,049 vs the default's 28,516), so the level is live, not a
+  third inert knob.
+- **Preset dominates and cost is super-linear in pixels.** Preset 4 runs
+  **1.842 MP/s at 1.57 MP but 0.591 MP/s at 16 MP**, and is **17–27×** presets
+  7/9 — 88 % of the wave's CPU. So **cell-count fill overstates real progress**
+  (measured 1.28×: 8.02 % of cells was 6.27 % of the work). Report this wave
+  work-weighted.
+- **Bytes and time have different q shapes** — the 29-q ladder factor is 53–56
+  for bytes but 27–30 for time. High-q cells are cheap to compute, expensive to
+  store; one factor cannot serve both plans.
+
+**A diagnostic that would have lied.** zenmetrics' "unknown zenavif plan"
+message hand-typed the plan list and its own comment called itself a
+"human-readable mirror" — it drifted the instant `svt_doe_b6` landed and
+omitted it. That message **is** the control arm §11.5 uses to prove a fleet
+image is not stale, the check whose absence cost the DOE wave 93 % of its
+main-effects arm. A reader running it against a *good* image would have been
+told the plan they just declared does not exist. Fixed at the owner: one static
+`PLANS` table behind `by_name` + `names()`, so a second copy is no longer
+expressible. It was caught only because the control arm was actually run — and
+its first run measured nothing (an empty sources dir makes the real and bogus
+arms return the same "no source files found", exactly the trap §11.5
+documents).
+
+**Two corrections to assumed state.** The corpus has **no 16320×7612 pano** —
+32 refs spanning **0.25–16.00 MP**, 161.59 MP total, median 1.57. And the fleet
+was **not** idle: `avifsub-aom-{r7900x,tower}` had been up 11 h re-touching
+poison on a run already at live-gap 0 (zenfleet's own `idle` waste). Both were
+stopped; nothing was destroyed.
+
+**Live at report time (14:14Z):** 3,030/25,056 cells (12.09 %) = **11.27 % of
+the work**; effective throughput **8.6 CPU-h per wall-h**; **ETA 1.35 h**
+(~15:32Z). Encode on r7900x (`0-19`) + tower (`0-19`, shares 256, 24g — the
+tower rule, it is a live media server); scoring on dev (`20-29`) into
+`avifdoe-svt-b6-sf-cpu-20260902` (`ssim2,zensim`), fed by the DOE gap-fill loop
+now **parameterised** (`ZEN_DOE_RUNS`) so B-6 runs as a second instance of that
+loop rather than a fork. B-6 *analysis* is a later lane.
