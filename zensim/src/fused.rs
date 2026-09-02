@@ -15,14 +15,14 @@
 use archmage::arcane;
 use archmage::incant;
 use archmage::magetypes;
+use magetypes::simd::backends::F32x8Backend;
+#[cfg(target_arch = "x86_64")]
+use magetypes::simd::backends::F32x16Backend;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
 use magetypes::simd::generic::f32x8 as GenericF32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
-use magetypes::simd::backends::F32x8Backend;
-#[cfg(target_arch = "x86_64")]
-use magetypes::simd::backends::F32x16Backend;
 
 const C2: f32 = 0.0009;
 
@@ -156,7 +156,13 @@ fn raw_moments_accumulate_scalar(
 
 /// Scalar sibling of [`raw_moments_finish8`] / [`raw_moments_finish16`].
 #[inline(always)]
-fn raw_moments_finish_scalar(acc: &mut StripChannelAccum, fm_s: f32, fm_d: f32, fm_s2: f32, fm_d2: f32) {
+fn raw_moments_finish_scalar(
+    acc: &mut StripChannelAccum,
+    fm_s: f32,
+    fm_d: f32,
+    fm_s2: f32,
+    fm_d2: f32,
+) {
     acc.sum_s += fm_s as f64;
     acc.sum_d += fm_d as f64;
     acc.sum_s2 += fm_s2 as f64;
@@ -438,7 +444,12 @@ fn fused_vblur_ssim_inner_v4(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x16::zero(token), f32x16::zero(token), f32x16::zero(token), f32x16::zero(token));
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+            f32x16::zero(token),
+            f32x16::zero(token),
+            f32x16::zero(token),
+            f32x16::zero(token),
+        );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -594,7 +605,12 @@ fn fused_vblur_ssim_inner_v4(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x8::zero(v3), f32x8::zero(v3), f32x8::zero(v3), f32x8::zero(v3));
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+            f32x8::zero(v3),
+            f32x8::zero(v3),
+            f32x8::zero(v3),
+            f32x8::zero(v3),
+        );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -809,7 +825,9 @@ fn fused_vblur_ssim_inner_v4(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    raw_moments_accumulate_scalar(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv);
+                    raw_moments_accumulate_scalar(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv,
+                    );
                     if y + 1 == inner_end {
                         raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
@@ -879,7 +897,12 @@ fn fused_vblur_ssim_inner_v4x(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x16::zero(token), f32x16::zero(token), f32x16::zero(token), f32x16::zero(token));
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+            f32x16::zero(token),
+            f32x16::zero(token),
+            f32x16::zero(token),
+            f32x16::zero(token),
+        );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -1035,7 +1058,12 @@ fn fused_vblur_ssim_inner_v4x(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x8::zero(v3), f32x8::zero(v3), f32x8::zero(v3), f32x8::zero(v3));
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+            f32x8::zero(v3),
+            f32x8::zero(v3),
+            f32x8::zero(v3),
+            f32x8::zero(v3),
+        );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -1250,7 +1278,9 @@ fn fused_vblur_ssim_inner_v4x(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    raw_moments_accumulate_scalar(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv);
+                    raw_moments_accumulate_scalar(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv,
+                    );
                     if y + 1 == inner_end {
                         raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
@@ -1322,7 +1352,12 @@ fn fused_vblur_ssim_inner_v3(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x8::zero(token), f32x8::zero(token), f32x8::zero(token), f32x8::zero(token));
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+            f32x8::zero(token),
+            f32x8::zero(token),
+            f32x8::zero(token),
+            f32x8::zero(token),
+        );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
@@ -1538,7 +1573,9 @@ fn fused_vblur_ssim_inner_v3(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    raw_moments_accumulate_scalar(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv);
+                    raw_moments_accumulate_scalar(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv,
+                    );
                     if y + 1 == inner_end {
                         raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }
@@ -1612,7 +1649,12 @@ fn fused_vblur_ssim_inner(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (f32x8::zero(token), f32x8::zero(token), f32x8::zero(token), f32x8::zero(token));
+        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+            f32x8::zero(token),
+            f32x8::zero(token),
+            f32x8::zero(token),
+            f32x8::zero(token),
+        );
 
         // Initialize running sums
         {
@@ -1850,7 +1892,9 @@ fn fused_vblur_ssim_inner(
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if raw_moments {
-                    raw_moments_accumulate_scalar(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv);
+                    raw_moments_accumulate_scalar(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv,
+                    );
                     if y + 1 == inner_end {
                         raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
                     }

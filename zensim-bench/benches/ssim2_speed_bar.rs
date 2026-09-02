@@ -92,7 +92,10 @@ impl Head {
         };
         let has_transforms = model.has_nontrivial_feature_transforms();
         let width = model.caller_input_width();
-        eprintln!("# {var}={path}: n_inputs={} caller_width={width}", model.n_inputs());
+        eprintln!(
+            "# {var}={path}: n_inputs={} caller_width={width}",
+            model.n_inputs()
+        );
         Some(Head {
             model,
             has_transforms,
@@ -167,8 +170,7 @@ fn env_usize(key: &str, dflt: usize) -> usize {
 /// this env flipped, exactly like `ssim2-rayon` above.
 #[cfg(target_arch = "x86_64")]
 fn cap_tier_v3(cap: bool) -> Result<(), String> {
-    archmage::X64V4Token::dangerously_disable_token_process_wide(cap)
-        .map_err(|e| e.to_string())
+    archmage::X64V4Token::dangerously_disable_token_process_wide(cap).map_err(|e| e.to_string())
 }
 #[cfg(not(target_arch = "x86_64"))]
 fn cap_tier_v3(_cap: bool) -> Result<(), String> {
@@ -178,7 +180,9 @@ fn cap_tier_v3(_cap: bool) -> Result<(), String> {
 fn main() {
     if env_usize("ZEN_S2_CAP_V3", 0) == 1 {
         match cap_tier_v3(true) {
-            Ok(()) => eprintln!("# ZEN_S2_CAP_V3=1: X64V4Token disabled process-wide, ceiling=v3(AVX2)"),
+            Ok(()) => {
+                eprintln!("# ZEN_S2_CAP_V3=1: X64V4Token disabled process-wide, ceiling=v3(AVX2)")
+            }
             Err(e) => {
                 eprintln!(
                     "# ZEN_S2_CAP_V3=1 requested but could not disable X64V4Token: {e} \
@@ -331,7 +335,9 @@ fn main() {
                                         &mut scratch,
                                     )
                                     .unwrap();
-                                zenbench::black_box(v2.features().iter().fold(0.0f64, |a, &b| a + b))
+                                zenbench::black_box(
+                                    v2.features().iter().fold(0.0f64, |a, &b| a + b),
+                                )
                             })
                         });
                     }
@@ -349,7 +355,9 @@ fn main() {
                                         &mut scratch,
                                     )
                                     .unwrap();
-                                zenbench::black_box(v2.features().iter().fold(0.0f64, |a, &b| a + b))
+                                zenbench::black_box(
+                                    v2.features().iter().fold(0.0f64, |a, &b| a + b),
+                                )
                             })
                         });
                     }
