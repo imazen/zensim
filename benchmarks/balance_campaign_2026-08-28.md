@@ -5374,3 +5374,55 @@ zeros and **cannot fail for any arm**, and its `T1` "80 % of 32" is an effective
 7-of-13 (54 %). Registered correction: compute it over the 13 cropped references
 only. A pre-registered bar is not automatically a live bar — it has to be rechecked
 against the population that actually got built.
+
+## 2026-09-02 — ROUND 53: AVIF-DOE scoring scale-up — the backlog was UNDECLARED, and the first "measurement" measured failure
+
+**Not a zensim-model round — a fleet-ops round on the AVIF DOE, recorded here
+because two of its lessons are measurement-hygiene lessons this campaign keeps
+re-learning.** Full record: `zenmetrics/benchmarks/avif_doe_plan_2026-09-01.md`
+§13.
+
+**The trickle had three causes and the dominant one was not throughput.** With
+~36 k encode blobs on disk, score progress read 148 + 256 blobs. Cause: the four
+`avifdoe-*` encode runs had **zero** score runs declared — `aws s3 ls
+s3://zentrain/jobs/` shows four `avifdoe-*-enc` prefixes and no `avifdoe-*-sf-*`
+at all. The 5-minute gap-fill loop everyone assumed was dead was **alive**
+(round 51), but its `for backend in svt aom` covers only the *naive* wave's two
+runs; it never had a DOE branch to lose. Second cause: the fleet held **one**
+score worker, on **2 cores**, serving one of the two declared score runs — while
+a 32-thread box ran none. Per-pair cost and store I/O were both measured and
+were never the constraint.
+
+**The lesson that belongs in this campaign: a fast number is a suspicious
+number.** The first local timing read **6.72 s per 12-pair chunk** and was
+entirely fake — every row carried `chooser: no measurements for metric 'ssim2'`
+and **zero numeric scores**. Acting on it, a worker wrote **322 `done` ledger
+rows over 333 error blobs in under three minutes** and *looked like the fix*:
+exit 0, well-formed JSONL, right row count, right blob size, 257 blobs in 134 s.
+Nothing failed. The only thing that caught it was noticing the rate was ~13×
+what the CPU budget allows and then **opening a blob and counting numeric
+scores**. Cause: the local binary was built without `--no-default-features`, so
+it carries the orchestrator, whose persistent capability profile has an empty
+`[metrics]` table (the box's CPU changed — it now reports a **9950X3D / 32
+logical cores**, not the 7950X/28 these docs assume, so its `machine_hash` is new
+and the older populated profiles do not apply). `zenmetrics score --metric ssim2`
+on the same pair returns `19.796691`, which is exactly why it is hard to see: the
+binary is correct everywhere except the path the fleet uses. Resolution: run the
+**proven fleet image**, not a speculative rebuild. The 322 poisoned rows were
+verified to be one worker's (`{'wsl-score-smoke': 323}`, no other worker in the
+run) and cleared, not pardoned — `requeue` keys on failed/poison `error_class`
+and `reassert` reverses buried *done* rows, so neither targets a row that is
+genuinely `done` over garbage.
+
+**Result.** One new run `avifdoe-svt-sf-cpu-20260902` (A1+A2, ~3.4 k jobs /
+~41 k pairs) plus a recurring declaration loop that **fails loud** (heartbeat file
++ error counter, the thing its silent predecessor lacked), and four local workers
+inside cpuset `0-23` (8 of 32 threads left free). Score blob rate went from
+**~20/h to 4,508/h (3-metric)**, and the mid-lane user directive *"you can skip
+butteraugli even"* then **1.9×'d** it again to **8,514/h = 102 k pairs/h** (487 s window). Because `JobId::of(&kind,
+&inputs)` hashes the metric list, the metric change could not be an in-place
+edit — it is a disjoint job set, so the switch was made **going forward** at a
+recorded boundary (907 blobs) and **rows are now heterogeneous**: key on the
+metrics present per row, never on a fixed row count. AG stays undeclared on
+purpose — it encodes the *native* corpus under the same filenames (§12.3/§12.4),
+so declaring it against the crop prefix would have silently scored wrong pixels.
