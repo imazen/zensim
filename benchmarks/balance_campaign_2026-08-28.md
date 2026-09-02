@@ -5810,3 +5810,96 @@ to *byte-inert by construction* (`qzbin_factor`'s `8 => 148` arm reproduces
 + [5511234180](https://github.com/imazen/zenav1-svt/issues/17#issuecomment-5511234180);
 issue left **OPEN** on the `tune=0` gate and the `scm=0` wildcard. Reproduce:
 `cargo run --release -p zenav1-svt --example knob_byte_identity -- <outdir>`.
+
+---
+
+## 2026-09-02 — ROUND 59: the AVIF high-bit-depth arm, Track T1 — why `bd10` had no s6 number was structural, and two of the registered cell counts were wrong
+
+**Track T1 of the AVIF-HBD arm plan declared, gated and staged.** zenavif
+`bcd79789`; zenmetrics `32e68a8f` (declare), `c863fd30` (the G3 gate tool),
+`e6959efe` (T2 picks), `8670ea55` (execution record). Record:
+`zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md` **§10**.
+
+**The finding that made the block cheap to build.** Stage A recorded `bd10` as
+"the worst-covered arm in the wave — no s6 main effect, no interaction coverage
+and no transfer evidence," which reads like an omission. It is not: it is
+**forced by the axis layout**. `svt_doe_main` carries
+`bit_depths = [Auto, Ten]`, so under `with_max_deviations(1)` a 10-bit cell has
+**already spent its one deviation on depth** and can only be emitted at the
+default speed. No amount of re-running A1 would ever have produced a `bd10` s6
+cell. The fix is one line of axis algebra rather than a new deviation budget:
+pin `bit_depths = [Ten]`, which makes `Ten` **index 0** and therefore costs
+**zero** deviations (`cross()`'s `idxs` array contains the bit-depth index),
+freeing the speed — or the knob — to be the isolated deviation. Three plans
+follow from that: `svt_doe_t1_bd10_ladder` (7 speeds × 1 arm),
+`svt_doe_t1_bd10_knobs` (15 live arms at s6), `svt_doe_t1_bd10_transfer`
+(s4, native).
+
+**"15 live single-deviation arms" means the default plus 14, not 15
+non-default.** The knob set holds 17 configurations, 16 of them non-default,
+and Stage A proved two byte-inert (`tn0`, `scm3` — 288/288 identical to the
+default). 16 − 2 = 14 live non-default arms, so the registered 4,320 =
+15 × 9 × 32 only closes once the default stratum is counted as one of the 15.
+The live set is expressed as a **filter over `svt_doe_knob_sets`** rather than a
+re-listing, so a level added to the owner arrives automatically — the opposite
+choice from `svt_doe_b6_knob_sets`, which needed different levels and had to
+re-list.
+
+**Two count corrections, both measured at declare time, neither anticipated.**
+6,432 job ids declared (matching the plan's block sum exactly) but only **6,087
+DISTINCT cells**. 288 of the gap is the s6 knob-default stratum, which the plan
+counts three times over. The other **57** is the interesting one: **19 of the 32
+corpus images are sub-budget passthroughs**, so their "native" and "1024² budget"
+files are byte-identical, share a `source_sha`, and therefore share a `CellId`.
+Stage A had measured the same 19/13 split and *relies* on it (A0-native ≡ A0R on
+3,857/3,857 cells) — but nobody had carried it forward into a native-vs-budget
+cell count. **The consequence is not bookkeeping: T1-d's cross-size transfer
+gate has n = 13 IMAGES, NOT 32.** On the 19 passthroughs there is no size
+transfer to measure. Q4 ("does −1.02 % survive native size") is answerable only
+at that n, and any statement that does not report it is overstating its sample
+by 2.5×.
+
+**G3 — the gate that exists because a request is not evidence.**
+`AvifEncoder::with_bit_depth` was documented to coerce unknown depths to 8
+**silently**, so a typo'd depth yields a valid 8-bit encode labelled 10-bit and
+every BD-rate measures nothing. `avif_depth_verify` answers it from the stored
+blob with **three independent reads** — av1C box, AV1 sequence header, decoder
+`ImageInfo` — and treats disagreement as a FAIL on the blob's own evidence, with
+no expected depth supplied. Verified on **207 conformance vectors** (zero
+mismatches, zero disagreements) and, crucially, **watched to fail** on five
+negative controls: 8-bit and 12-bit blobs against `--expect-depth 10`, a
+byte-identical `--control`, an empty directory, and an **av1C patched to claim 8
+while the sequence header still says 10** — which fails without any expectation
+flag and proves the three reads are genuinely independent, since the container
+flipped and the bitstream reads did not. On the arm's own first cell: **7/7 at
+depth 10**, all three reads agreeing, and **0/7 byte-identical** to the 8-bit
+control, which itself reads depth 8 on all three.
+
+**A hazard that may have already been retired, read from source and NOT
+measured.** H-BD-3's stated mechanism looks stale at current `zenav1-svt` HEAD:
+`svtav1/src/avif.rs:218` and `lib.rs:135` both read
+`{ self.bit_depth = depth; self }`, with a doc comment saying the function
+"deliberately does NOT coerce … It used to". The plan cites the knob dossier
+§605 for the coercing behaviour. This does **not** retire G3 — the
+zenavif/zenrav1e arm reaches depth by a different path, the new refusal was
+never exercised end to end, and G3's byte-identity half is untouched either way.
+
+**Track T2 is blocked, and the blocker is a wiring gap the plan did not
+record.** `validate_hdr_sweep` admits only `Zenjxl` and `Zenavif`; `zenav1-svt`
+is not a `CodecKind` at all, and the only route to `HdrCodec::Zenav1Svt` is
+`from_name`, whose sole caller is the fleet path — whose ssim2/zensim scoring is
+the **u8 shell** gate G5 forbids for T2. So T2-a's two requirements (svt
+encodes, f32 scoring) are individually reachable and **jointly are not**, which
+is precisely what TODO-4 exists to fix. A concurrent capability lane owns that
+file and was writing it during this execution, so T2-a is **sequenced, not
+dead**. T2-b was **deliberately not smoke-tested**: it calls into the same
+in-flight file, so a G5 route assertion produced from this tree would be
+evidence about a tree that has never existed on `master` — worse than no
+measurement, because it looks like one. **NOT MEASURED — never a null, never a
+zero.** T2's corpus gates are complete and committed regardless (76/76 G0.2;
+K=16 picks at 6 BT.709 / 10 P3, deterministic across three runs, sha256
+`fb805707…`).
+
+**Scope on every number this arm will produce (H-BD-4):** at presets ≤ 8 the
+zenav1-svt port is not byte-identical to C SVT-AV1, so T1 measures **this
+port's** 10-bit encoder and no result may be stated as a property of SVT-AV1.
