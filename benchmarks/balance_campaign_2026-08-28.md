@@ -6411,3 +6411,70 @@ on x86-64 against a **locally built** C reference rather than CI's. Ruled out as
 this lane's doing by direct A/B: the port's OBU is **byte-identical pre-fix vs
 post-fix on all 60 cells**, so the verdict cannot have moved. Left as found and
 not silently annotated — the C-oracle host-divergence entry is the owner.
+
+---
+
+## 2026-09-02 — ROUND 64: the #18 validity re-audit — no published number was contaminated, and the fix repairs only half the shapes
+
+**Owning record:** `zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md`
+§10.4e. Follows ROUND 63 (which localised and fixed `zenav1-svt#18`).
+
+**The audit had to be redone, because the first pass checked the wrong thing.**
+`#18`'s root cause is AV1's **forced tile grid**, and it has **two** triggers:
+`width > 4096` — *area-independent* — and sb-aligned area > `4096·2304`. My
+original clearance of Track T1 was **area-only**, so the width limit was
+genuinely unchecked. Re-run against both, from final encode dimensions:
+
+| wave | backend | cells | valid | invalid |
+|---|---|--:|--:|--:|
+| t1ac | zenav1-svt | 2,016 | **2,016** | **0** |
+| t1b (unencoded) | zenav1-svt | 4,320 | 4,320 | 0 |
+| t1d | zenav1-svt | 96 | 72 | **24** |
+| t2a | zenav1-svt | 3,248 | 203 | **3,045** |
+| t2b | **zenrav1e** | 432 | **432** | 0 |
+
+**No published number consumed an invalid cell**, and the reason is a property
+of the corpus rather than luck: the budget corpus is **0/32 invalid on both
+triggers**, its widest file being 1536×1024 — the width limit is not merely
+unexceeded, it is not approached. Both A1's `bd10` median and this arm's t1b
+refusal ran entirely on it. **Verified rather than asserted:** the gate was
+re-run with an explicit per-cell validity filter and came back
+**byte-identical** (A1 repro n=31 median −1.025 %, 23/31; T1-c n=31 median
+−0.214 %, CI [−0.836, +1.321], 18/31). **The t1b refusal stands.**
+
+The 8 native images the triggers predict broken are **exactly** the 8 measured
+broken — root cause and observation agree cell-for-cell, which is the strongest
+confirmation available that #18 is the whole story for T1-d.
+
+**But the fix repairs only one of the two tile axes.** Composed `3121b6a8` in
+via a workspace-root `[patch]` — necessary because zenavif moved `zenav1-svt`
+to a git-rev pin *the same day*, and that pin **predates the fix**, so building
+against it reproduced `−57.049692` **exactly**. With the fix in, and with the
+fix's own four `issue18_repro` tests **passing** in the same tree:
+
+| dims | orientation | sb-area | post-fix |
+|---|---|--:|--:|
+| **4000×3000** | landscape | 12,128,256 | **+88.96 ✅** |
+| **3000×4000** | **portrait** | 12,128,256 | **−10.61 ❌** |
+| 3302×4844 | portrait | 16,187,392 | +1.56 ❌ |
+| 3286×4868 | portrait | 16,400,384 | −15.45 ❌ |
+
+**Identical area, identical sb-aligned area; only the long axis differs, and
+only one is repaired.** The 8-bit control on that cell is 86.57. Reported as a
+[#18 follow-up](https://github.com/imazen/zenav1-svt/issues/18#issuecomment-5516506667).
+
+**So t2a was NOT restarted.** 14 of its 16 references are portrait *and* over
+the area limit, so a restart would still mis-encode **88 %** of the corpus —
+the same waste a second time — and the 2 usable refs would destroy the K=16
+stratification and G0.5 primaries balance that make T2-a a baseline at all.
+
+**t2b is complete and valid**: 432/432 encoded, 48/48 scored, zero poison, on
+the zenrav1e backend that #18 never touched. It is the workspace's first HDR-10
+RD dataset, currently standing alone rather than as the contrast §4.3 designed.
+
+**Transferable lesson.** A synthetic repro passing is not the same as the
+production path being repaired: four targeted tests covering *both* tile axes
+went green while the real portrait path stayed broken. The check that caught it
+was a real corpus cell with a known-good 8-bit control beside it — and the
+tightest control in the whole audit was a **pair differing only in
+orientation**.
