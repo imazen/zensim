@@ -6478,3 +6478,78 @@ went green while the real portrait path stayed broken. The check that caught it
 was a real corpus cell with a known-good 8-bit control beside it — and the
 tightest control in the whole audit was a **pair differing only in
 orientation**.
+
+## 2026-09-02 — ROUND 65: zenav1-svt #18 ROUND 2 — the residual was a predictor that took a tile and ignored it, and my own round-1 tests were blind on the PRESET axis
+
+Follow-on to ROUND 63. The HBD executor's independent re-verification (issue #18
+follow-up) showed the first fix repaired only part of the class: with it in
+tree and all four ROUND-63 tests passing, `4000x3000` landscape scored **+88.96**
+while `3000x4000` **portrait** still scored **−10.61** against an 8-bit control
+of +86.57. Record in zenav1-svt (commit **`2ca060f4`**, verified on
+`main@origin`; issue comment 5516796458); this is the zensim-side row. **Nothing
+declared, launched or stopped.**
+
+**The residual, and it is a lesson about reading code rather than about tiles.**
+`intra_edge::dr_predict_hbd` — the DIRECTIONAL 10-bit predictor — received the
+correct `DrGeom.tile` and then derived **all four** availability predicates from
+the FRAME (`have_top` from `g.mi_row > 0`, `right_available` against `mi_cols`,
+…), while its u8 twin `dr_predict` scoped every one to `g.tile`. ROUND 63's own
+note had cleared this arm on the grounds that *"it passed `tile: geom.tile`"* —
+**passing a tile is not using one**, and that arm turned out to be the larger
+half of the defect, because it is the one real photographs reach. Four lines.
+
+**The orientation reading was a coincidence, and disproving it mattered.**
+`4000x3000` and `3000x4000` both resolve to **1 tile column × 2 tile rows** —
+the same grid — so "the row axis is unrepaired" could not have been the
+mechanism. Sweeping the ROUND-63 test geometry instead (256×256, 2 tile rows,
+bd10) found the real axis:
+
+| | q6 | q12 | q20 | q40 |
+|---|---|---|---|---|
+| **p0 / p2 / p3 / p4 / p5** | FAIL | FAIL | FAIL | FAIL |
+| p6 / p7 / p8 / p9 | ok | ok | ok | ok |
+| `uniform`, any preset | ok | ok | ok | ok |
+
+**It is the PRESET axis** — a predictor is reached only when mode decision picks
+it, and the intra candidate set narrows with preset. ROUND 63's cells were
+presets 6 and 9: the passing side. Not content, not qp, not the tile axis, not
+orientation; each was varied and none discriminates. `AvifEncoder` **speed 4 →
+preset 4** and **quality 90 → qp 6** sit dead centre of the failing band, which
+is the entire distance between "synthetic gates green" and "product broken".
+
+**Measured, before → after.** The reported cell — the real `3000x4000`
+photograph at qp 6 / preset 4 — **6,468,452 of 18,000,000 samples wrong, first
+at Y r2048** (= the 32-SB tile-row boundary) **→ 0**. Forced-by-AREA portrait
+control `gradient 2920x3270` (9.55 MP, 2392 SB, partial SB on both axes)
+4,185,160/14,322,600, first Y r1664 (= 26 SB × 64) **→ 0**. The 60-cell
+{gradient,diag,uniform} × preset{0,2,4,6,9} × qp{6,12,20,40} sweep is clean at
+2 tile rows and at 2×2 tiles; **bd8 was clean throughout**. Byte-inertness A/B:
+**30 of 32** cells identical (every single-tile cell at both depths across nine
+presets, every bd8 multi-tile cell).
+
+**A green gate that proves nothing, named so it is not trusted again.**
+`coverage_combos_gate`'s bd10×tiles axis read **11/12 identically before and
+after** this fix, because every cell on it is preset 6, 10 or 13. That axis was
+green over a live wrong-pixels bug for the whole interval. Recorded in
+`docs/coverage-combos-map.md`: extending it means extending it **down** into
+presets 0-5.
+
+**For our data, unchanged from ROUND 63 and now actually true**: any `bd10`
+AVIF result from this backend whose source exceeds **9,437,184 px** of
+SB-aligned area **or 4096 px of width** is invalid. t2a (3,248 HDR cells, 88 %
+portrait over the area limit) re-encodes from scratch against `2ca060f4`.
+
+**Two rollout steps remain and neither is this lane's:** `zenavif` pins
+`zenav1-svt` at rev `ef0b122bd`, which predates both fixes (ancestry-confirmed —
+that is why the executor needed a workspace `[patch]`), so it needs a
+**deliberate pin-bump commit in zenavif, never a `[patch]` left on master**;
+then a new fleet image tag carrying the bumped seam.
+
+**Gates:** `issue18_repro.rs` is now 8 cells — a preset-BAND sweep, a
+directional forced-tile-column cell, a single-tile band control that passes
+before and after (so "low preset is just broken" and "a fix that disabled
+directional prediction" both fail it), and a forced-by-area **portrait** cell at
+the reported shape rather than a stand-in. `regression_spotcheck.sh` **81/81**
+(+5). Workspace **2,486/2,486** (189 binaries), coverage combos 40/40, bd10
+recon parity vs C 13/13, alignment 74/74, matrix 36/36, non-flat 309/309,
+partial-SB 159/159, tile gate 29/29.
