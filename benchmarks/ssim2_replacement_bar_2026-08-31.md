@@ -1618,3 +1618,76 @@ Reproduction: `benchmarks/wave_r4_2026-09-01.md` §24 (full method, frozen
 registration before any fit, all raw numbers); `_MANIFEST.json` at
 `/mnt/v/output/zensim/a4bkon-2026-09-01/`; commit range `38d948ce..2c348ad6`
 on `origin/main`.
+
+---
+
+## APPENDIX C ADDENDUM — W4's "one measured exception" does not reproduce (2026-09-02, Profile-D no-tax lane)
+
+**Nothing in APPENDIX C is edited.** Its W4 row stands as the record of what
+that lane measured under its protocol. This addendum records a second,
+independent measurement of the same quantity that disagrees on the one cell,
+and states precisely how the two protocols differ so a reader can weigh them.
+
+**What APPENDIX C records:** W4 = "MOSTLY PASS, one measured exception" —
+`free156_peaks_raw` / `add156_156basic` **FAILS at 1152²/8T, 1.4375×–1.4583×
+across all three starts, "a tight, repeatable band, not noise"**, at
+**N = 3 process starts** per thread count, native tier, CCD0/core-pinned.
+
+**What this lane measures**
+(`benchmarks/profile_d_notax_2026-09-01.md` §4.4):
+
+| cell | APPENDIX C | this lane, `v4x` | this lane, `v3` |
+|---|---|---|---|
+| **1152² @ 8T** | **1.4375–1.4583× FAIL** | **1.143× PASS** | **1.026× PASS** |
+| 1152² @ 1T | pass (1.046–1.077 median band) | 1.079× PASS | 1.060× PASS |
+| 2304² @ 8T | pass (1.14–1.17×) | 1.189× PASS | 1.125× PASS |
+| 576² @ 8T | pass (recorded 1.14–1.61×) | 1.050× PASS | 1.077× PASS |
+
+**All 18 cells across both tiers pass the 1.25× bar at 1T and at 8T.** The worst
+full ratio anywhere in the grid is 1.189× (`v4x`/2304²/8T).
+
+**How the protocols differ**, which is the whole of why this is an addendum and
+not a correction:
+
+1. **N = 9 process starts per cell, not 3.**
+2. **Both SIMD tiers**, `v4x` native and `v3` capped (`ZEN_S2_CAP_V3`), not one.
+3. **Per-size wall budget** — `ZEN_S2_WALL_S` 8/15/**60** for 576/1152/2304. A
+   flat budget sized for the small cells makes a 6-arm `zenbench` group at 2304²
+   degenerate and report a **spuriously near-zero mean for every arm at once**;
+   this lane hit 0-of-9, 1-of-9 and 5-of-9 valid starts on the three 2304² cells
+   before fixing it.
+4. **A collection-time plausibility filter** rejecting any invocation whose
+   `fast_ssim2` arm reads below a physical floor for its size, with retries.
+5. **An idle machine.** The first attempt ran concurrently with this lane's own
+   `nice`-d builds; `nice` lowers priority but does not isolate from a
+   `taskset`-pinned process on the same cores, and `fast_ssim2` — an arm whose
+   cost cannot depend on zensim's thread count — swung **128.9–633.6 ms inside a
+   single 9-start cell**.
+
+On the clean run: **0 corrupt reads and 0 retries in all 54 invocations.**
+
+**What this does and does not establish.** It does **not** show the APPENDIX C
+number was computed wrongly. It shows that under a protocol with 3× the starts,
+both tiers, a size-scaled wall budget, a validity filter and an idle box, the
+1152²/8T exception is **not reproducible**, and that the dimension the two
+protocols differ in is measurably capable of moving a reading by hundreds of
+percent. The same contamination cuts both ways and is visible in this lane's own
+data: its first pass produced a *spurious* 2.037× at `v4x`/1152²/1T that resolves
+to **1.079×** clean — one contaminated arm reading inflating a ratio by ~1.9×.
+
+**Consequence for the exam.** W4's "one measured exception" is, on this evidence,
+**not a property of the 156+free profile**. The standing W1–W7 conclusion is
+otherwise untouched: W4 was already the clause the 156+free class mostly passed,
+and this addendum only removes its asterisk. **No other clause is affected, and
+"nothing passes W1–W7" still stands** — W1 (KonJND) remains the binding failure,
+exactly as APPENDIX C concludes.
+
+**One reading question for the owner, flagged not resolved:** APPENDIX C's W4 row
+lists 576²/8T as *passing* at "1.14–1.61×", but 1.61× is outside the 1.25× bar
+that same row applies. Either the range is a typo, or it is quoting a different
+denominator than the cell it is scoring. Left as-is; this lane's own 576²/8T
+readings are 1.050× (`v4x`) and 1.077× (`v3`).
+
+Method + all 54 raw invocations: `benchmarks/profile_d_notax_2026-09-01.md`
+§4.3–§4.4; raw JSONL `~/tmp/dnotax/w4_measure_raw.jsonl` (rows marked
+`"rerun": true`).
