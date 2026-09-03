@@ -6805,3 +6805,113 @@ order. Registered, not fixed: making it order-invariant would move every
 published Stage-A CI. (d) n is 30–32 not 32 because two scanned documents have
 a Pareto frontier that collapses to 2 points at speeds 4/6; Stage-A carries the
 same n on the identical image set.
+
+# PREREQ-AOM-STANDALONE ledger row (2026-09-03, FINAL)
+
+Lane: claude-aomstandalone (fresh restart after a prior Opus lane was killed
+by a server-side 500 almost immediately; no salvageable prior work found —
+first action was `jj git fetch`, which revealed origin/main had already
+moved ~13 commits past the local checkout, including two PRIOR lanes' full
+landings of the sequence-header emitter + TU framing + standalone entry
+point + the first 186-cell gate).
+
+## State on entry
+
+Issue #15 was already ~85% closed by two prior landings (790f3f9..7992b24,
+then 0ace8a0..c3e1b4ab): `encode_key_frame` existed, 186/186 byte-exact,
+screen-content decision already driver-not-cross-check, 3 pins. Still
+explicitly open: SB128, `av1_determine_sc_tools_with_encoding`, explicit
+tile-columns/rows, `aom-bench`'s bootstrap-taking `port_encode*`, and the
+DoD's `zenavif-parse` read-back leg (never attempted).
+
+## This lane's four commits (all verified on origin/main via
+`git merge-base --is-ancestor`)
+
+1. **`65ffb75d`** — extended the sweep 186->225: crossed bit-depth x speed x
+   tile-count for the first time (MEASURED 4 new genuine divergences,
+   registered as pins with a measured `Where` attribution, narrower and
+   tile-count-dependent vs the pre-existing `HBD_OPEN`/`b10_64` pin);
+   25-cell regression probe reproducing the historical "14 tiny" poison-
+   panic GEOMETRY class on `encode_key_frame`'s code path (does not
+   reproduce, 25/25 byte-exact); two adversarial differential probes
+   (105 cells, 0 divergences) specifically targeting whether
+   `av1_determine_sc_tools_with_encoding`'s absence is reachable, including
+   a checker-patch sweep that brackets the base detector's own threshold
+   crossover from both sides.
+2. **`55a029d7`** — docs reconciliation: CLAUDE.md coverage-queue row
+   (found + fixed one stale claim inherited from before the tile-clamp fix:
+   "four cells pinned" should have read "closed"), PARITY.md C3 (adversarial-
+   probe evidence added), coverage-audit/COVERAGE.md row 1.3.
+3. **`bda14f3d`** — explicit `--tile-columns`/`--tile-rows` wired
+   (`derive_tile_info` already implemented the clamp correctly, just never
+   received a nonzero request). Sweep 225->230.
+4. **`abe20559`** — SB128 wired (the underlying search/pack layers were
+   already superblock-size-generic; only three shell constants + the
+   sequence-header bit were hardcoded to SB64). Sweep 230->241.
+5. **`ff3263a7`** — `zenavif-parse` container read-back (the DoD's second
+   validation leg, never attempted before this lane): 19 cells round-trip
+   through a real AVIF container and back through the independently-
+   maintained `zenavif-parse` crate, byte-exact + metadata-consistent.
+   Docs reconciled again: CLAUDE.md's coverage-queue row REWRITTEN (not
+   just patched — it had accumulated three layers of correction/extension
+   paragraphs across the day and was becoming unreadable; now a clean
+   current-state summary pointing at STATUS.md/PARITY.md/source as the
+   detailed record), STATUS.md (one consolidated entry), COVERAGE.md row 1.3.
+
+Issue #15 comments posted twice (after commit 1-2, and after commits 3-5):
+- https://github.com/imazen/zenav1-aom/issues/15#issuecomment-5527936563
+- https://github.com/imazen/zenav1-aom/issues/15#issuecomment-5528416898
+
+## Final DoD status (issue #15)
+
+- Self-contained OBU stream, no bootstrap — MET (pre-existing).
+- Validated by own decode — MET (pre-existing).
+- Validated by a zenavif-parse read-back — MET (this lane, commit `ff3263a7`).
+- Screen-content decision is the port's own — MET (pre-existing).
+- `av1_determine_sc_tools_with_encoding` ported OR refused by name — **NOT
+  MET, deliberately left open**. Full port scoped by PARITY.md C3 at
+  "(M)"/"NOT a one-sitting port," its own multi-session item (roots #22-27)
+  — disproportionate to this prereq issue. A blanket refusal would be
+  unjustified: most non-screen content reaches the C guard condition, and
+  105 adversarially-designed cells found zero divergence, including AT the
+  detector's own threshold boundary. Documented, not silently left vague.
+- C parity stays separate, `port_encode*` unchanged — MET, by design.
+
+**Issue #15 is NOT closed** — the SCM-trial item keeps it open, correctly.
+Every other DoD bullet is met and evidenced.
+
+## Explicitly NOT done / out of scope
+
+- Full port of `av1_determine_sc_tools_with_encoding` — belongs to
+  PARITY.md C3's own tracked effort, not this issue.
+- SB128's pipeline pieces / tile-columns were BOTH found to already exist
+  in the search/pack/tile-derivation layers and were WIRED this lane — not
+  left undone.
+- **zenmetrics capability-matrix §7 addendum** — requested in the original
+  brief. Not done: zenmetrics is a sibling repo (never touch a different
+  repository, ABSOLUTE ANATHEMA per the global safety rules — a delegated
+  brief instruction does not override this). Checked read-only:
+  `benchmarks/avif_doe_plan_2026-09-01.md`'s actual §7 is "Analysis plan and
+  Stage-B triggers"; no distinct "capability matrix" table was found under
+  it to draft against. Flagged in both the ledger and the second issue
+  comment so a zenmetrics-scoped lane can locate the real target rather
+  than trusting an unconfirmed pointer.
+- Upstream zenavif-parse fix — found a genuine, well-localized bug
+  (`parse_frame_header_quantization`'s `reduced_still_picture_header`
+  branch nesting), could not file: `imazen/zenavif-parse` is archived
+  (`gh issue create` refused). Documented in code + STATUS.md instead.
+
+## Verification (not just agent claims — see "DONE requires master@{u}
+verification")
+
+- Every commit's own message records its own `cargo test` run.
+- Final full-crate regression BEFORE the last push:
+  `cargo test --profile test-fast -p zenav1-aom-encode` (every integration
+  test file in the crate, not just the ones this lane touched) —
+  **137 test binaries, 0 FAILED**, ~4.8 minutes (`run-heavy: done rc=0`).
+- `cargo build --profile test-fast --workspace --tests`: clean, checked
+  after every landing.
+- All four feat/test/docs commits independently verified with
+  `git merge-base --is-ancestor <sha> origin/main` AFTER push, not trusted
+  from jj's own push report alone.
+- `.workongoing` removed on completion; `jj status` clean at handoff.
