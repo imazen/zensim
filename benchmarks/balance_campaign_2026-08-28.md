@@ -6687,3 +6687,121 @@ early `env` dump (before the LAN-store env vars were understood) printed a
 live `OPENAI_API_KEY` in cleartext — the `secret|access_key|token` filter
 this lane was handed does not match `API_KEY`. Switched to allowlist-only
 env inspection for the rest of the round; flagged to the user for rotation.
+
+## 2026-09-03 — ROUND 68: era-delta + T2-HDR analysis, `claude-deltaanal` (Opus lane)
+
+**Owning records:** `zenmetrics/benchmarks/avif_eradelta_analysis_2026-09-03.md`
++ `avif_hdr_rd_baseline_2026-09-03.md` (+ their pointer docs). Two docs, not
+one: the waves share no corpus, no instrument and no pin.
+
+**STABILITY — the era changed NOTHING, provably, and the proof is bytes not
+statistics.** Arm-set A replicated `svt_doe_main` at the new pin and reproduced
+Stage-A's bitstreams on **6,912 / 6,912 shared cells, byte-identical**.
+Arm-set B — a *different* plan written this era — reproduced the same bytes
+independently on **3,456** speed-4/control cells (vs `a1`) and **2,880**
+speed-6 knob cells (vs `a2`). **13,248 verified cell-pairs, 9,792 distinct cell
+identities, 0 differing.** Because the bytes are identical *and the scorers
+agree exactly*, every covered effect is the SAME NUMBER, not "within CI":
+`shp7` 5.4676/7.3077, `tn3` −7.0342/−4.4807, `qml1.2.10` −0.2895/−2.5853 all
+reproduce Stage-A's `stagea_inrun` to every digit. **≥1 pp movement: 0.0000 pp
+on every replicated cell.** Scope stated rather than implied — 7 of the 16
+speed-6 knobs (`acb1 acb3 mtx32 qml1.8.15 tl1.0 tl1.1 tn0`) were **not**
+re-measured this wave and keep their Stage-A numbers unverified.
+
+**SCORER-vs-ENCODER drift, separated.** Identical bytes make score differences
+attributable: on 6,912 provably-identical bitstreams the era-delta scorer image
+and Stage-A's agree on `ssim2` to **exactly 0** (max |Δ bytes| 0 too). So the
+byte result and the effect result are not two ways of saying the same thing —
+the second needed the first plus a measured instrument.
+
+**★ scm3 at speed 7 (preset 9): a knob believed dead is worth a MEDIAN −50 %
+BD-rate on screen content.** 90 of 288 cells differ from the control at speed 7;
+**0/288 at speed 4 and 0/288 at speed 6** (reproducing the dossier's "dead at
+preset ≤7" on a different instrument). Divergence is content-EXCLUSIVE:
+photo 0/63, AI-gen 0/81, scan 18/45, screenshot 27/45, plot 45/54. Conditional
+on firing (10 of 32 images) the BD-rate is **median −50.08 %, range −88.86 % to
+−18.57 %, 10 of 10 wins**. Grounded in bytes: `6018` (a scan) at q90 goes
+434,757 B → 29,536 B (**14.7×**) while ssim2 goes 94.636 → **100.000**. The
+corpus median is 0.0000 — a knob confined to a content class is invisible in a
+corpus-median, so the conditional statistic + firing count is what is reported.
+`tn3` tracks it closely on the firing images (it aliases the same field),
+confirming the mechanism the delta audit predicted.
+
+**★ Arm-set C: the bd10-native answer INVERTS, and t1d is superseded
+everywhere.** 72/96 cells reproduce byte-identically; **24 differ, on exactly
+the 8 images #18's tile-forcing predicate selects — zero false positives, zero
+false negatives.** Worse than "24 of 96": the registered n for the cross-size
+question is **13 images**, and **8 of those 13 (61.5 %) are the corrupt ones**.
+Clean read at n=13, q45: **−0.69 % bytes for +0.244 ssim2, bd10 DOMINATES on
+10/13**; the superseded block read **−104.80 ssim2** at q90 with 8/13
+DOMINATED. Δbytes is unchanged pre-to-post on all 24 cells — the broken encoder
+emitted normally-sized bitstreams containing wrong pixels, which is why only the
+quality column shows it. **Q4 answered: bd10 DOES survive native resolution, and
+is marginally stronger on the large images** (10/13 DOMINATES vs 8/19 on the
+passthroughs). Independent cross-check: `1008` q90 reads **+4.182**, the same
+value §10.4f recorded from the local recon gate, reached through fleet encode +
+fleet scoring instead. **A BD-rate is NOT MEASURED for this block in either
+era** — a 3-point ladder cannot satisfy the ≥4-point guard, and the guard was
+not loosened. t1d is annotated SUPERSEDED in the plan doc (3 sites) and
+DATA_PROVENANCE.
+
+**★ HDR T2 — an instrument check, and a CORRECTION this lane owes the record.**
+Two scoring images touched the T2 corpus. Measured on **351 (encode_sha, metric)
+pairs scored by BOTH**: `ssim2` 0 differing, max |Δ| **0.0000000000**; `zensim`
+225 differing, max |Δ| **1.156e-7**. So the images agree and there is no
+material era split. An earlier draft of the doc claimed an 11.14-point zensim
+split between images, inferred from ONE hand-run — **wrong**: that gap is
+between the **fleet ScoreFile executor** and a hand-run `score-pairs --metric
+zensim` (the CLI's default profile), and a third build reproduces the shape in
+the other direction. **`score-pairs --metric zensim` and the ScoreFile
+executor's `zensim` are different quantities** — a trap that generalises. Every
+T2 number was already `ssim2` so nothing published moves; the 48 pre-era blobs
+stay excluded as hygiene (last-write-wins over a sha-sorted glob) rather than
+necessity. G5 route proof re-run on this wave's own cell:
+`--hdr-transfer pq` ≡ `pu-rescale` (Δ 0.0) ⇒ faithful f32, and the value is
+bit-equal to the fleet's stored score; the no-`--hdr` tripwire refuses loudly.
+
+**★ THE HDR-10 RD BASELINE EXISTS — and svt beats zenrav1e by a median
+−43.01 % BD-rate.** 3,680/3,680 cells scored (16 PQ refs × 7 svt presets × 29 q
++ 3 zenrav1e speeds × 9 q, all 10-bit PQ, faithful f32). **Q5** (a baseline, no
+PASS/FAIL bar by registration): the per-(arm, q) reference curve is on disk;
+svt's median ceiling is **ssim2 86.1** vs **77.0**, its rate floor **9–10 KB**
+vs **91–93 KB**, and at the *same* dial position svt is both cheaper and
+lower-quality (q45: 0.083 bpp / 2.6 vs 0.235 bpp / 29.0) — the two dials are not
+comparable, so only matched-quality reads mean anything. **Q6** (a CONTRAST —
+backend, chroma 4:2:0-vs-4:4:4 and matrix all differ): per-backend Pareto
+envelope **−43.01 %**, 95 % CI [−48.63, −37.97], **16/16 images**, range −57.00
+to −18.22. **The ladder-density objection is resolved by measurement, not
+argument**: all 21 cross-backend arm pairs land between −36.70 % and −45.38 %,
+the envelope sits inside that range, and the most conservative single-arm read
+available — svt's SLOWEST preset vs zenrav1e's FASTEST speed — is still
+−36.70 % on 16/16. Density buys a few points at most; it is not the gap.
+
+**Two fleet gaps found and closed, not worked around.** (1) The era-delta wave
+was declared with **no score gapfill loop and no scoring worker** — 0 of 15,648
+cells scored at pickup, and none would have been. (2) The T2 scorefiles were
+declared correctly (with `--hdr`) but **`avifhbd-t2a-fix` was 0/3,248 scored**
+while containers on tower AND r7900x sat in idle-drain restart loops against
+the already-COMPLETE *encode* run. Both repurposed to score runs.
+
+**Tooling (committed, each non-regression-measured against the owner's own
+outputs):** `avifdoe_era_compare.py` (new — cross-era cell identity,
+scorer-vs-encoder drift separation, effect-stability verdicts with n on both
+sides); `avifhbd_t2_analyze.py` (new — Q5/Q6, importing frontier/bd_rate/
+median_ci from the BD-rate owner, refusing to map preset↔speed);
+`avifdoe_harvest.py` (+3 additive columns for HDR single-dial knob tuples — 14
+pre-existing columns byte-identical); `avifdoe_stagea_analyze.py` (+ the paired
+matched-q read, the `transform` column, and `--runs` — all six owned tables
+byte-identical to the committed `stagea_inrun/` outputs, verified three times).
+
+**Method notes worth keeping.** (a) Stability uses `--control inrun` on BOTH
+sides, matching `stagea_inrun/` not `stagea_a0r/` — differencing an in-run-9q
+effect against an a0r-dense one confounds instrument with era. (b) `--runs`
+exists because arm-sets A and B share 3,456 cell identities; pooling them would
+enter each image twice with the same BD-rate and halve the bootstrap CI on
+duplicate values. (c) Medians reproduce exactly across eras but bootstrap CI
+*bounds* can differ in the third decimal — `median_ci` resamples in insertion
+order. Registered, not fixed: making it order-invariant would move every
+published Stage-A CI. (d) n is 30–32 not 32 because two scanned documents have
+a Pareto frontier that collapses to 2 points at speeds 4/6; Stage-A carries the
+same n on the identical image set.
