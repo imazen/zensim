@@ -6614,3 +6614,76 @@ cells are content-addressed, so re-declaring into the old run would have
 counted its 120 **invalid** cells as done. Fleet blobs now score
 **+76.67 / +81.07 / +83.08** at q88/90/92 against the pre-fix wave's
 **−67.80 / −66.85 / −64.26**.
+
+---
+
+## 2026-09-03 — ROUND 67: new-era delta audit + sweep, `claude-newera3` (Sonnet
+failover after two Opus-service-incident deaths mid-early-phase)
+
+**Owning records:** `zenmetrics/benchmarks/avif_newera_delta_2026-09-03.md`
+(the audit) + `avif_newera_sweep_2026-09-03.md` (the grid + Stage-B
+reconciliation). Follows ROUND 66 — the pin this round audits IS the
+`2ca060f4` fix ROUND 66 shipped.
+
+**t2a-fix + t2b: both COMPLETE** (live gap 0, 0 errors, verified against the
+live ledger — the stored snapshot predates the run and lies). Nothing left to
+avoid disturbing; scored capacity freed.
+
+**The era delta is real but narrow: 33 zenav1-svt commits, 2 of them
+AVIF-reachable.** The other 31 are inter/video-mode port work (PD0, NSQ
+motion search, conformance) with zero surface on the intra-only still-image
+path. Three items in this lane's own brief — sc-detector tier-1, a
+depth-coercion fix, "new tune-vmaf" — all **pre-date** the pin (checked by
+ancestry, not assumed) and are corrected out of the delta. tune-vmaf is
+additionally **falsified as a knob at all**: the ported preprocessing chain
+is called from nowhere in the encode pipeline.
+
+**Re-probed the two known-dead knobs at HEAD** (`knob_byte_identity`, 3
+presets → widened to 5 to find the edge): `tn0`/`scm0` still fully dead.
+**`scm3` is not** — 32/288 divergent, all screen content, all at raw SVT
+preset 8–9. Preset 8 turned out **unreachable** through zenavif's product
+speed dial (`speed_to_svt_preset` skips it entirely, 1→10 maps to
+`{0,1,3,4,6,7,9,9,9,9}`); preset 9 **is** reachable, via speed ∈{7,8,9,10}.
+`tn3` (tune=IQ, Stage-A's biggest win and least certain one) forces this
+exact field as one of 9 aliased fields and has never been measured past
+speed 6 — flagged top priority for the stability re-run this round declares.
+
+**Found mid-audit, before writing any new code (the mandatory duplication
+check): `avifdoe-svt-t1d-20260902` already asked the bd10-native question**
+(committed 08:30 the same day as ROUND 66's fix work) **and its data is
+corrupted** — encoded 09:57–10:16, 4.5–7h before either #18 fix, 24 of 96
+cells on the two known-broken images (`6602`/`6604`) plus six more
+12 MP forced-multi-tile images. Re-declared fresh as
+`avifdoe-svt-eradelta-c1-20260903` rather than written from scratch.
+
+**Declared + launched, smoke-verified grinding, zero errors:**
+`avifdoe-svt-eradelta-{a1,b1,c1}-20260903` (6,912 + 8,640 + 96 = 15,648
+cells; new plan `svt_doe_era_delta_r1` in zenavif `b552418e`, additive, 251/251
+lib tests green; image `exec-avifhbd-eradelta-e015344f`, control-arm
+verified with a real mounted source per the empty-dir trap ROUND 66's own
+lineage documented). **G3 + the recon gate on the re-run bd10-native cells,
+the whole point of arm-set C**, both known-broken images, era-delta binary:
+`6602` bd10 **75.573** vs 8-bit **75.114** (Δ+0.459, PASS); `6604` bd10
+**81.651** vs 8-bit **80.856** (Δ+0.795, PASS, essentially reproducing ROUND
+66's own +81.65). The fix holds on a fresh, independently-built binary.
+
+**Stage-B B-1/B-2/B-3**: 55 triggers registered, 447,636 cells if all
+honoured against a 60,000-cell envelope (7.5× over) — unchanged by this era's
+findings, since none of B-2's QM×sharpness cluster or most of B-1/B-3's
+other knobs sit in the AVIF-reachable 2-commit delta. `tn3`'s B-1 trigger and
+`bd10`'s B-3 trigger are partially absorbed by this round's arm-sets B/C; the
+other 51 remain the coordinator's budget call, stated plainly rather than
+silently deferred.
+
+**aom tranche**: registered PLANNED-BLOCKED per the addendum, not declared.
+zenav1-aom#15 is OPEN but far more advanced than briefed — the concurrent
+lane's self-contained encode path covers the real ALLINTRA-default envelope
+186/186 byte-exact + dual-decoder-verified, already wired into zenavif main
+(`000ac9a`, zenav1-aom rev `c3e1b4ab`) — squarely that lane's live work in a
+shared repo, moving in real time throughout this round.
+
+**One incident this round owes the record, unrelated to the above**: an
+early `env` dump (before the LAN-store env vars were understood) printed a
+live `OPENAI_API_KEY` in cleartext — the `secret|access_key|token` filter
+this lane was handed does not match `API_KEY`. Switched to allowlist-only
+env inspection for the rest of the round; flagged to the user for rotation.
