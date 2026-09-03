@@ -6915,3 +6915,81 @@ verification")
   `git merge-base --is-ancestor <sha> origin/main` AFTER push, not trusted
   from jj's own push report alone.
 - `.workongoing` removed on completion; `jj status` clean at handoff.
+
+# zenavif-parse closure lane — ledger row (2026-09-03, claude-parsefix)
+
+| field | value |
+|---|---|
+| bug | `zenavif-parse` frame-header re-parse misaligned on `reduced_still_picture_header`; `base_q_idx` / `lossless` wrong |
+| verdict | **FORK-ONLY** — not present upstream; nothing to report to kornelski/avif-parse |
+| issue | https://github.com/imazen/zenavif/issues/46 (opened AND closed, assignee lilith) |
+| fix commit | `6dfdf6f` on imazen/zenavif `main` (verified `git merge-base --is-ancestor` vs `origin/main`) |
+| aom note commit | `8c67755` on imazen/zenav1-aom `main` (verified likewise) |
+| archived-repo README | ALREADY redirecting — no unarchive performed; repo left `archived=true` |
+| upstream draft | none needed (fork-only) |
+
+## Mechanism
+
+`obu.rs::read_uncompressed_header_until_tiles` returned early for
+`reduced_still_picture_header`, consuming **0 bits**, documented as "matches the
+spec's implied defaults". AV1 spec 5.9.2 only infers the fields *inside* that
+branch. Still coded after it: `disable_cdf_update` f(1);
+`allow_screen_content_tools` f(1) (the sequence header *forces*
+`seq_force_screen_content_tools = SELECT` for reduced-still, per 5.5.1);
+`force_integer_mv` f(1) when that is set; `use_superres` f(1) when
+`enable_superres`; `render_and_frame_size_different` f(1) (+32);
+`allow_intrabc` f(1). ⇒ 3 bits minimum unconsumed on a typical still, and
+`tile_info()`'s frame-size-dependent length made the fixed misalignment land on a
+different `base_q_idx` byte per size.
+
+Four more bit-walk errors in the same fork-added probe, fixed with it:
+`error_resilient_mode` + `refresh_frame_flags` are inferred for a shown
+`KEY_FRAME` (9-bit over-read on the non-reduced path);
+`disable_frame_end_update_cdf` never read; `allow_intrabc` missing its
+`UpscaledWidth == FrameWidth` gate; `quantization_params()` skipping the
+`diff_uv_delta` bit and reading `using_qmatrix` only when chroma present.
+
+## Fork-vs-inherited evidence
+
+- `git log -S'parse_frame_header_quantization'` → introduced at `8b1096c`
+  ("rebase imazen/zenavif-parse onto kornelski/avif-parse"), i.e. the fork side
+  of the rebase. `base_q_idx` traces back to `21810a8`
+  ("feat: add AVIF quality estimation and detection module").
+- Current upstream `kornelski/avif-parse` `src/obu.rs` (`main` @ 2026-03-28,
+  532 lines) fetched via `gh api`: **five** functions — `get_byte`, `parse_obu`,
+  `SequenceHeaderObu::read`, `color_config`, `obu_header`. Zero hits for
+  `parse_frame_header_quantization`, `base_q_idx`, `FrameQuantization`,
+  `quantization_params`, `disable_cdf_update`, `uncompressed_header`,
+  `is_frame_header`, `tile_info`, `frame_type`.
+
+## Tests
+
+`zenavif-parse/src/obu.rs` → `mod frame_header_walk_tests`, 11 tests, fixtures
+generated in-test by a spec-shaped bit writer (no committed binaries):
+
+`reduced_still_picture_base_q_idx_round_trips_at_every_size`,
+`reduced_still_picture_base_q_idx_is_size_invariant`,
+`reduced_still_picture_disable_cdf_update_bit_is_consumed`,
+`reduced_still_picture_screen_content_tool_bits_are_consumed`,
+`reduced_still_picture_render_size_bits_are_consumed`,
+`superres_bits_are_consumed`,
+`non_reduced_shown_key_frame_base_q_idx_round_trips`,
+`superblock_128_tile_info_round_trips`,
+`monochrome_quantization_params_round_trip`,
+`separate_uv_delta_q_codes_a_diff_uv_delta_bit`,
+`lossless_flag_tracks_base_q_idx`.
+
+**Pre-fix: 9 of 11 FAIL** (base_q_idx 24 for 96, 21 for 42, 37 for 150, 32 for 0;
+3 could not reach `quantization_params()`). Post-fix: 11/11.
+
+## Verification
+
+- 124/124 `zenavif-parse` tests (incl. 100 integration over aomedia/link-u/local corpora)
+- 201/201 workspace lib tests (zenavif 107, zenavif-parse 18, zenavif-serialize 76)
+- clippy clean, `cargo fmt --check` clean (0 diff lines)
+- public API unchanged: `mod obu;` private, no `pub` in the diff,
+  `docs/public-api/*` byte-identical ⇒ semver-patch shape for published 0.7.0
+- **zenav1-aom 19-cell round-trip, base_q_idx ASSERTED: 19/19 pass.** cq=32 → 128
+  everywhere (was 48/64/0/72 by size); cq=0 → 0; cq=63 → 255. Temp path patch
+  reverted; zenav1-aom Cargo.toml/Cargo.lock restored byte-identical.
+- Nothing published. Archived repo untouched.
