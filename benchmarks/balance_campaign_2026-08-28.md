@@ -6993,3 +6993,139 @@ generated in-test by a spec-shaped bit writer (no committed binaries):
   everywhere (was 48/64/0/72 by size); cq=0 → 0; cq=63 → 255. Temp path patch
   reverted; zenav1-aom Cargo.toml/Cargo.lock restored byte-identical.
 - Nothing published. Archived repo untouched.
+
+## ROUND 71— speed instrument + Stage-B remainder (2026-09-03, lane `claude-speedtrig`)
+
+**Two tracks, host-partitioned, both launched and verified in-flight.**
+
+**TRACK S — the speed instrument (r7900x, exclusive).** `encode_ms` is persisted by
+no fleet path, so trigger **B-4 has been NOT EVALUABLE since Stage A**. Built the
+instrument on the canonical owner (`zenmetrics sweep` already persists `encode_ms`)
+rather than new timing code, and extended that owner with **`--no-score`**
+(zenmetrics `3f7281d1`, 2 tests). That flag is a **correctness fix, not a tidiness
+one**: MEASURED, the first launch carried **23 min of wall clock against 15.0 s of
+`encode_ms`** — scoring was ~99 % of the run *and* ran a multi-threaded metric on
+every core between two single-threaded timed encodes, i.e. a systematic
+perturbation of the measured quantity. Byte-neutral (same cell, 71,552 B both
+ways); rate went **57 rows/20 min → 66 rows/40 s**. First run DISCARDED, relaunched
+encode-only.
+
+Grid: **32 ladder inputs** (7 crop rungs × 5 sources, 4,096 → 7,929,856 px, 3.3
+decades, **crops not downscales** so pixel count varies and content does not) ×
+**10 speeds × 2 backends × 3 passes**, plus a separate q-flatness probe. The ladder
+was built by running the **existing** budget-corpus builder at seven `--side`
+values — zero new cropping code.
+
+MEASURED already, before the fits land:
+- **svt-rs is 52× faster than zenrav1e** at 1024²/s6/q45 (143.9 ms vs 7,539.8 ms)
+  **and** 40 % smaller (71,552 vs 118,509 B) **and** higher zensim (57.84 vs 53.79).
+- The dials **alias differently**: svt saturates at preset 9 (speeds 7–10 byte- and
+  time-identical), **zenrav1e is still moving at speed 10** — and on a different
+  image aliases at 7/8 instead. Assuming one backend's alias structure transfers
+  would have thrown away a third of the zenrav1e dial.
+- zenrav1e's per-pixel cost has a **3.4× content spread** (47.2 s/MP photo vs
+  160.9 s/MP screenshot, summed over the dial), so a single pooled β is wrong.
+
+**TRACK T — Stage-B remainder (tower + local; r7900x deliberately excluded).**
+Two runs, **16,768 cells**, **MEASURED 22.5 CPU-h** against the ~34,944 cells /
+46.8 CPU-h left after B-6 — 52 % margin, envelope treated as a ceiling not a target.
+
+- `avifdoe-svt-brnat-20260903` — **7,488** cells, NATIVE. **Rank 1 is QM ×
+  sharpness**, and the 12 QM/shp strata are a **complete 4×3 factorial**, i.e. B-2's
+  registered "3 levels each" shape *exceeded* on the qml axis. A2 ran the same plan
+  at BUDGET with the same ladder, so this is a clean **size A/B on the interaction
+  itself**, cell for cell.
+- `avifdoe-rav-brsdr-20260903` — **9,280** cells, BUDGET. The **zenrav1e SDR RD
+  arm** the coordinator required for backend picking; the corpus had **zero**
+  zenrav1e SDR coverage. BUDGET because A0R-svt already holds the 29-q ladder
+  there, so the comparison costs no new svt encodes.
+- **Neither run needed a zenavif change or a new image** — the interaction block is
+  an existing Stage-A plan pointed at the native corpus and stratum-filtered; the
+  zenrav1e arm goes through `--knob-grid`, since `backend` is already a
+  first-class zenavif sweep knob and `zenravif` is its default.
+- **Excluded with citations, not shrugs:** all `vbst` (Stage A ranks them last),
+  all `scm3` pairs (**MOOTED** — era-delta measured 0/288 bitstream changes at
+  speed 6, so an interaction cannot exist there), all `acb` (B-6 retired it).
+
+**All seven gates PASS.** Counts match the registered arithmetic exactly; strata are
+LIVE not collapsing to control; the stale-image control arm was run **with a real
+source mounted** (an empty dir makes both arms return the same error — the trap
+plan §11.5 documents) and in-image first cells encode 118/118 and 1/1. **G-RATE was measured, then CORRECTED**: an 89-second
+paired sample gave 7.17 CPU-s/cell (52 % margin); the cumulative figure from
+launch gives **15.42 CPU-s/cell → 43.7 of 46.8 CPU-h, a 7 % margin**. The short
+window sampled one content class of a 3.4×-spread corpus — a rate measured over
+90 seconds of a multi-hour run is not a rate. Both are kept in the record. The
+pre-registered gate still PASSES so the de-scope does not fire, but G-RATE is now
+a STANDING check. **G-SCORERATE**: 10.8 CPU-s/cell on a native-dominated mix
+(~22.5 CPU-h for the native leg of the 50 ceiling); the blended number is *not*
+extrapolated from a pixel ratio.
+
+**SCORING WAS DECLARED AT LAUNCH** — run `avifdoe-br-sf-cpu-20260903`, metrics
+`ssim2,zensim`, 60 cells → 6 jobs in round 1, before either document was written.
+Three prior waves launched with nothing scoring.
+
+**Three further items, all measured this session:**
+- **S1c added** to the instrument — 32 images × 2 sizes × both backends — because
+  S1a's ladder covers only 5 of the corpus's 12 content classes. Runs *after* the
+  α+β passes so the primary deliverable is not held behind it.
+- **A real defect fixed in the corpus builder**: its pixel budget was hardcoded to
+  the default side's 1.048576 rather than derived from `--side`, so at any other
+  side a sub-1.048 MP source passed through whole where a crop was asked for
+  (MEASURED on `8288` at side 64). Rebuilding the registered corpus after the fix
+  reproduced it **5/5 byte-identical**, so nothing already encoded moved.
+- **A silent-garbage hazard caught before it ran**: 30 of the native corpus's 32
+  entries are symlinks into `/mnt/v`, so a plain `rsync -a` staged **30 broken
+  links and 2 real files** — a run would have encoded 2 images and merely looked
+  small. Re-staged with `--copy-links` and verified before arming.
+
+**Waste stopped:** two **drained** B-6 containers (r7900x + tower) were in
+`unless-stopped` restart loops with **2,466 restarts each**, reporting `done=0`
+every pass for ~27 % of a core. B-6 is COMPLETE, so nothing was destroyed.
+**And it is systemic, not incidental:** `unless-stopped` plus the worker's
+self-exit-on-drain means docker restarts a worker forever the moment its run
+completes. **Five containers across three hosts today** — the two B-6 ones plus
+another lane's three era-delta workers at 458/561/178 restarts — each reporting
+`done=0` and re-fetching a 14 MB manifest per cycle. The other lane's three were
+left alone (not my state; measured as only 2 cores of overlap with my scorer) but
+this wants a launcher fix, not a fourth round of cleanup.
+
+Commits: zenmetrics `3f7281d1` (`--no-score` + instrument) and `68c5fbfe`
+(declaration machinery + both registration docs), both verified on
+`refs/heads/master`. Records:
+`benchmarks/avif_speed_instrument_2026-09-03.md`,
+`benchmarks/avif_stageB_remainder_2026-09-03.md`; provenance in
+`~/work/zen/DATA_PROVENANCE.md`.
+
+**FIRST FITS LANDED** (S1a pass 1 partial, 328 rows, 2 photo sources × 7 rungs;
+one pass so no drift control yet, q-flatness still pending on S1b):
+
+- **The α+β model is RIGHT and POOLING is what fails.** Pooled R² 0.597–0.951
+  across all 20 arms looks like a broken model; the same arms fit **per source at
+  R² 0.989–1.0000 (median 0.999)**. The residual is β varying with **content** —
+  **1.46×–5.40× between two PHOTOGRAPHS** of the same class (svt s1: 15,961.6 vs
+  2,953.5 ms/MP). **⇒ the speed model must be feature-conditioned per image, not a
+  per-(backend, speed) constant** — which is exactly what backend picking needs.
+- Power fits give **γ = 0.93–1.09** with no negative intercepts: cost is linear in
+  pixels *within* a source, so this is not nonlinearity.
+- **The intercept is not decorative**: svt s1 α = 874.5 ms while the slope
+  contributes 39 ms at the 64² rung — a bare "ms/MP" would misprice it ~20×.
+- **Both aliases confirmed across the whole ladder**, not one cell: svt 7/8/9/10 fit
+  β within **0.4 %** over four independent 17-point regressions (H-2 saturation);
+  zenrav1e 7/8 land **0.1 %** apart while its 9 and 10 stay distinct.
+- **Backend picking, per dial position: svt-rs is 3.7×–64.8× faster**, widest in the
+  fast-preset region a web pipeline uses. Dial position is *not* matched quality —
+  that comparison is the RD wave's job, in quality space.
+
+The finding forced two fixes to the analyzer, which would otherwise have shipped the
+wrong conclusion twice: it only fell back to a power fit on α<0 (every arm here has
+α>0 with R² as low as 0.60, so 20/20 would have been blessed as clean linear fits),
+and a poor pooled R² alone cannot separate "model wrong" from "pooling wrong" — it
+now fits per source and reports `POOLING_NOT_MODEL`.
+
+**Still open by construction:** the q-flatness verdict (S1b runs after S1a), drift
+control (needs ≥2 passes), and S1c's content-class coverage. A pass is **~2.3–2.6 h**
+— the registered 43-min estimate was low, built from one image's curve, i.e. the same
+content dependence §6.1 measures — so the instrument runs overnight, unattended: The **knob-time axis is BLOCKED with the blocker
+named** — the sweep's AVIF knob vocabulary does not carry the DOE deviations, and
+the plan path that does runs through the jobexec kind that persists no `encode_ms`.
+aom-rs is PLANNED-BLOCKED on era pins post-#15 for both tracks.
