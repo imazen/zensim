@@ -7129,3 +7129,20 @@ content dependence §6.1 measures — so the instrument runs overnight, unattend
 named** — the sweep's AVIF knob vocabulary does not carry the DOE deviations, and
 the plan path that does runs through the jobexec kind that persists no `encode_ms`.
 aom-rs is PLANNED-BLOCKED on era pins post-#15 for both tracks.
+
+# restartfix ledger row — 2026-09-03
+
+| field | value |
+|---|---|
+| lane | zenmetrics ops-fix: fleet worker restart-loop |
+| repo | ~/work/zen/zenmetrics (via sibling jj workspace `zenmetrics--restartfix`, forgotten+removed after landing) |
+| commits (verified on origin/master via `git merge-base --is-ancestor`) | `62c1f2fb` fix(jobsys): lan_score_launch.sh restart-loop on clean drain; `3539a5f2` docs: CHANGELOG entry |
+| root cause | `scripts/jobsys/lan_score_launch.sh` launched workers with `--restart unless-stopped`; `fleet-entrypoint.sh`'s clean drain-exit (ZEN_IDLE_PASSES / ZEN_MAX_MIN) is `exit 0` with nothing after it in the script — confirmed by source read + an isolated bash reproduction of the exact break-then-EOF control flow (exit 0) |
+| fix | `--restart unless-stopped` -> `--restart on-failure:5` (matches the existing Hetzner pattern in `crates/zenfleet-hetzner/src/cloud_init.rs`) |
+| verification | real container launched against confirmed-COMPLETE run `avifdoe-svt-eradelta-c1-20260903` (96/96, live-gap 0 via `zenfleet-ctl report`): drained in 8 passes (~3.2s), exit 0, RestartCount stayed 0, still Exited 30s later. Negative control (`exit 1` under on-failure:5) restarted 5x then stopped. |
+| containers stopped (this pass) | local: zen-score-edc1 (217), zen-score-edb1 (686), zen-score-eda1 (615), zen-score-b6sf (2958), zen-score-svtsf (6358), zen-score-aomsf (7457), zen-score-doe1 (4333), zen-score-doe2 (4343) — restart counts at time of stop, all runs confirmed live-gap 0 via `zenfleet-ctl report` before touching |
+| containers already handled (prior lane, confirmed still stopped) | r7900x zen-score-b6enc (2469 restarts, frozen at RestartPolicy=no); tower zen-score-b6enc (1012 restarts, frozen at RestartPolicy=no) |
+| containers explicitly left alone (LIVE) | local zen-score-brsf (avifdoe-br-sf-cpu-20260903), local zen-score-brsdr (avifdoe-rav-brsdr-20260903), tower zen-score-brnat (avifdoe-svt-brnat-20260903) — the speed-instrument lane's live work; not touched |
+| out-of-scope, left alone | local zen-score-l5070 (Created, RestartCount=0, never started — a different/unrelated bug, not a restart-loop; its run hdrgrid-sf-gpu-20260807 also happens to be live-gap 0 but the container isn't looping so it's outside this fix's mandate) |
+| total restart-loop containers found+resolved (this pass + already-done) | 10 across 3 hosts (8 local + 1 r7900x + 1 tower), up to 7,457 restarts on one |
+| doc | docs/RUNNING_JOBS.md #9b (additive) + launcher header comment |
