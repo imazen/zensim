@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Fixed — `fit_spline_knots`'s neg-tail dedup deleted genuinely-negative knots (2026-09-04)
+
+- `zensim_validate::dial_spline::fit_spline_knots` selected its neg-tail dedup run
+  with `y <= 1e-6`. The documented intent is a run of **zero** knots — the `y == 0`
+  plateau a *clamped* anchor (`target_score = max(ssim2, 0)`) produces — so the test
+  is now `|y| <= 1e-6`.
+- **What it was doing.** With an UNCLAMPED anchor target the old predicate matched
+  every genuinely NEGATIVE knot, so the dedup deleted the negative tail's structure
+  and kept only its shallowest member. MEASURED on a 4,021-row anchor holding 2,147
+  negative rows spanning ssim2 −1437.97 … −0.74: the fitted bottom knot came back at
+  **y = −12.16** (10 knots survived). Because `output_calibration_spline::apply`
+  floors the downward extrapolation at `ys[0] − (ys[n−1] − ys[0])`, that capped the
+  dial's whole negative tail at **−124.33**. Post-fix the same anchor yields 19 knots,
+  `ys[0] = −56.57`, and a tail reaching −213.
+- **BYTE-INERT for every clamped anchor** — when no `y` is negative the two predicates
+  select the same indices, so no recipe on disk changes. Gated by
+  `neg_tail_dedup_is_byte_inert_on_a_clamped_anchor` (`to_bits()` equality vs the
+  pre-fix predicate at n = 200/1000/2000) and
+  `neg_tail_dedup_keeps_genuinely_negative_knots` (which carries its own negative
+  control), and re-verified on the real recipe: the shipped Profile D chain still
+  reproduces `51437a34…` and `4481c2d4…` byte-for-byte after the fix.
+- Found while building `D-id100` — `benchmarks/d_id100_2026-09-04.md`.
+
 ### Added — `zentrain.sample_coverage`: what a run's sampler actually touched (2026-09-04)
 
 - **Every bake now embeds a `zentrain.sample_coverage` block**, and

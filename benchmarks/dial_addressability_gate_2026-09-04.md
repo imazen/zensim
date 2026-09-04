@@ -827,9 +827,18 @@ D also beats A on **four of five** rank corpora (and is 0.0027 behind on CID22),
   before any new build. It is contract-clean today and nothing else is.
 - **(ii)** Otherwise, build **`D-id100`** first — Profile D re-anchored with identity at
   100 — and re-gate it. Fact 1 above says the C2 cost that blocks the B lineage cannot
-  arise. **REGISTERED, NOT RUN:** the build is a different lineage from this lane's arms
-  (ADD156 lasso, its own scaler and anchor), so it is a real build, not a re-spline, and
-  nothing here claims its A-row outcome.
+  arise. ~~**REGISTERED, NOT RUN:**~~ **RUN 2026-09-04 — see
+  [`d_id100_2026-09-04.md`](d_id100_2026-09-04.md).** Fact 1 held: `tied` stays 0.0000 and
+  `above-identity` stays 0. **`D-id100` reads CONTRACT 6/6 + REGRESSION 4/9** (A1 96.049 →
+  99.380, A3 95.284 → 95.518, A4, A6) and **`D-id100-negrich` reads CONTRACT 6/6 +
+  REGRESSION 7/9** — only A7 and A9 fail, both for measured structural reasons. Two of this
+  bullet's premises were **overturned by measurement**: the pin is **not** deliverable by
+  the fit (eight real re-fits folding identity into the Gram at 0.1 %–20 % of the data mass
+  move the identity dial +0.0055 and cost −0.0125 CID22 — the identity Gram's `S`/`s`/`q`
+  are all exactly zero, so it is nearly the bias offset that is a provable no-op), and it
+  therefore **is** a re-spline: the winning arms carry weights **byte-identical** to shipped
+  D (sha `330d8c09…` after stripping spline + repro), with zero pair-order flips on all 14
+  corpora and `product_composite` byte-identical.
 - **(iii)** shipped **B stays the rank leader on CID22** (0.88212) and is not displaced by
   either on that axis. The dial and the ranker are not the same decision.
 

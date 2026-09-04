@@ -131,7 +131,25 @@ pub fn fit_spline_knots(
         }
     }
     if neg_tail {
-        let zeros: Vec<usize> = (0..cy.len()).filter(|&i| cy[i] <= 1e-6).collect();
+        // The run this dedups is a run of ZERO knots — the y == 0 plateau a
+        // CLAMPED anchor (`target_score = max(ssim2, 0)`) produces. The test
+        // must therefore be `|y| <= 1e-6`, not `y <= 1e-6`.
+        //
+        // MEASURED 2026-09-04 (D-id100 lane): with an UNCLAMPED anchor target
+        // (`ssim2_gpu`, which the multiband anchor already carries at full
+        // depth) `y <= 1e-6` matches every genuinely NEGATIVE knot too, so the
+        // dedup deleted the entire negative tail and kept only its shallowest
+        // member. On a 4,021-row anchor holding 2,147 negative rows spanning
+        // ssim2 −1437.97 … −0.74, the fitted bottom knot came back at
+        // y = −12.16 (10 knots survived); the deep evidence was discarded.
+        // Because the dial's OOD floor is `ys[0] − (ys[n−1] − ys[0])`, that
+        // capped the whole negative tail at −124.33.
+        //
+        // BYTE-INERT for every clamped anchor: when no `y` is negative,
+        // `y <= 1e-6` and `|y| <= 1e-6` select the same indices. Gated by
+        // `neg_tail_dedup_is_byte_inert_on_a_clamped_anchor` +
+        // `neg_tail_dedup_keeps_genuinely_negative_knots` below.
+        let zeros: Vec<usize> = (0..cy.len()).filter(|&i| cy[i].abs() <= 1e-6).collect();
         if zeros.len() > 1 {
             let drop: std::collections::HashSet<usize> =
                 zeros[..zeros.len() - 1].iter().copied().collect();
@@ -147,4 +165,81 @@ pub fn fit_spline_knots(
         }
     }
     (cx, cy)
+}
+
+#[cfg(test)]
+mod neg_tail_dedup_tests {
+    use super::*;
+
+    /// Build an anchor whose targets are the CLAMPED form (`max(y, 0)`) with a
+    /// long zero plateau at the bottom — the shape every shipped recipe fits on.
+    fn clamped_anchor(n: usize) -> (Vec<f64>, Vec<f64>) {
+        let preds: Vec<f64> = (0..n).map(|i| i as f64 / n as f64).collect();
+        // Truth ramps from -60 to 100; the stored target clamps the negatives.
+        let tgt: Vec<f64> = preds.iter().map(|p| (-60.0 + 160.0 * p).max(0.0)).collect();
+        (preds, tgt)
+    }
+
+    /// The fix must not move a single knot for a clamped anchor: when no `y` is
+    /// negative, `y <= 1e-6` and `|y| <= 1e-6` select the same indices. This is
+    /// what makes the change inert for every recipe already on disk.
+    #[test]
+    fn neg_tail_dedup_is_byte_inert_on_a_clamped_anchor() {
+        for n in [200usize, 1000, 2000] {
+            let (preds, tgt) = clamped_anchor(n);
+            assert!(tgt.iter().all(|&y| y >= 0.0), "fixture must be clamped");
+            let (kx, ky) = fit_spline_knots(&preds, &tgt, 18, true);
+            // Reference: the pre-fix predicate, applied to the same pre-dedup knots.
+            let (rx, ry) = {
+                let (cx, cy) = fit_spline_knots(&preds, &tgt, 18, false);
+                let zeros: Vec<usize> = (0..cy.len()).filter(|&i| cy[i] <= 1e-6).collect();
+                if zeros.len() > 1 {
+                    let drop: std::collections::HashSet<usize> =
+                        zeros[..zeros.len() - 1].iter().copied().collect();
+                    (
+                        (0..cx.len()).filter(|i| !drop.contains(i)).map(|i| cx[i]).collect(),
+                        (0..cy.len()).filter(|i| !drop.contains(i)).map(|i| cy[i]).collect(),
+                    )
+                } else {
+                    (cx, cy)
+                }
+            };
+            assert_eq!(kx.len(), rx.len(), "knot count moved at n={n}");
+            for i in 0..kx.len() {
+                assert_eq!(kx[i].to_bits(), rx[i].to_bits(), "kx[{i}] moved at n={n}");
+                assert_eq!(ky[i].to_bits(), ry[i].to_bits(), "ky[{i}] moved at n={n}");
+            }
+        }
+    }
+
+    /// With an UNCLAMPED anchor the dedup must keep the negative knots. The
+    /// pre-fix predicate collapsed the whole run down to its shallowest member,
+    /// which is what capped the dial's negative reach (the OOD floor is
+    /// `ys[0] - (ys[n-1] - ys[0])`, so a shallow `ys[0]` is a shallow floor).
+    #[test]
+    fn neg_tail_dedup_keeps_genuinely_negative_knots() {
+        let n = 2000usize;
+        let preds: Vec<f64> = (0..n).map(|i| i as f64 / n as f64).collect();
+        let tgt: Vec<f64> = preds.iter().map(|p| -400.0 + 500.0 * p).collect();
+        assert!(tgt.iter().any(|&y| y < -100.0), "fixture must go deep");
+        let (kx, ky) = fit_spline_knots(&preds, &tgt, 18, true);
+        assert_eq!(kx.len(), ky.len());
+        let n_neg = ky.iter().filter(|&&y| y < -1e-6).count();
+        assert!(
+            n_neg > 1,
+            "the negative tail must survive the dedup, got {n_neg} negative knots: {ky:?}"
+        );
+        assert!(
+            ky[0] < -100.0,
+            "the bottom knot must carry the anchor's deep evidence, got {}",
+            ky[0]
+        );
+        // The pre-fix predicate is the negative control: it keeps exactly one.
+        let (_, cy) = fit_spline_knots(&preds, &tgt, 18, false);
+        let zeros: Vec<usize> = (0..cy.len()).filter(|&i| cy[i] <= 1e-6).collect();
+        assert!(
+            zeros.len() > 1,
+            "control: the pre-fix predicate must have had a run to collapse"
+        );
+    }
 }

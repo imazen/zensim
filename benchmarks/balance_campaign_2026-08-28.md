@@ -7399,3 +7399,39 @@ AFFECTED (CPython `strtod` is correctly rounded). Record: `benchmarks/fair_gaunt
 `benchmarks/fairness_tiers_2026-09-04.pointer.md`. OPEN: `freeze_check --select --seed-group` must adopt the
 board's grouping rule (it had not landed at this HEAD); `zentrain.sample_coverage` is the missing measurement
 that would split seed spread into model variance vs subset coverage.
+
+## ROUND 78 — 2026-09-04: `D-id100` — the first D-lineage bake to pass the CONTRACT tier, and the identity pin is a SPLINE property (lane `claude-did100`)
+Ran §14.6(ii), registered-not-run. **Control first: the shipped Profile D chain reproduces BYTE-EXACTLY end to
+end** (`fit-lasso` → `51437a34…` = `ADD156_safesyn_only_raw_lasso.bin`; `extend-top` → `4481c2d4…` = the shipped
+bake), which closes the gap D's own manifest records as unrecovered. **Two premises overturned by measurement.**
+(1) *The identity constraint cannot be delivered by the FIT.* Eight real re-fits folding the identity rows into
+the Gram at 0.1 %→20 % of the weighted data mass move the identity dial **+0.0055 pts** (96.1157→96.1212,
+non-monotone in W) while costing **−0.0125 CID22** and 3 of 28 coefficients — because the identity Gram's `S`,
+`s`, `q` are all exactly **0** (its whole content is n=38, Y1=38), so it is nearly the bias offset that is a
+*provable* no-op: `fit_spline_knots` is translation-equivariant in the prediction axis, so a uniform raw shift is
+undone exactly by the spline refit. What decides the identity dial is `raw(0⃗) − raw(grid)`, and D separates them
+by **0.0008 raw ≈ 0.12 ssim2 units, 13× less than ssim2's own 1.62**. The frozen Gram's minmax01 target also
+CLIPS safesyn's near-lossless top and a perfect copy to the same `1.0`, so the fit is shown no evidence to learn
+from. (2) *The pin is the anchor/spline step.* 21 identity rows (`0⃗ ↦ 100`, ≈1 % = exactly the `≥p99` top bin
+`fit_spline_knots` cuts) give **`D-id100`: CONTRACT 6/6** (identity **100.0000**, 0 above-identity, tied 0.0) +
+**REGRESSION 4/9** (A1 96.049→**99.380**, A3 95.284→**95.518**, A4, A6) — vs shipped D's 5/6 + 2/9. **Weights are
+BYTE-IDENTICAL** (strip spline+repro on every arm → sha `330d8c09…`): rank paired-bootstrap ΔSROCC 95 % CI
+**[0,0]** on cid22/konjnd/aic3/csiq/nonphoto/imazen26, ≤8e−6 on tid/live/kadid, **ZERO pair-order flips on all 14
+corpora**, `product_composite` byte-identical, M3a 0.9641. **`D-id100-negrich`** additionally reads the multiband
+anchor's OWN unclamped `ssim2_gpu` (`target_score == max(ssim2_gpu,0)` exactly; 147 rows to −64.16 — gate-doc §5's
+"the lever is the clamp, not the anchor", no new data): **CONTRACT 6/6 + REGRESSION 7/9** — A2 −57.17, A5 156.55
+(past ssim2's 153.73), A8 −211.66 — only A7/A9 fail. **A defect found + fixed on the way:** `fit_spline_knots`'s
+neg-tail dedup tested `y <= 1e-6`, so with an unclamped anchor it deleted every genuinely NEGATIVE knot and kept
+the shallowest (measured: 2,147 negative rows spanning −1438…−0.74 → bottom knot **−12.16**, tail capped −124.33);
+now `|y| <= 1e-6`, **byte-inert on every clamped anchor** (2 gates + the shipped-D repro still reproduces both
+shas). Both candidates embed `zentrain.repro`, so `freeze_check` FAILs drop 2→1 (D never had one). **Both
+remaining A-rows are structural, not tuning:** A9=1.0 needs the dial's zero-crossing at the probe's raw **max
++23.135** (grid span is [−0.062, 0.972]) — a model-ordering limit, same class as B's C2⊻C6 proof; A7 is the OOD
+floor `2·ys[0]−100`, needing `ys[0] ≤ −335` where only **0.170 %** of kadis_negrich's negatives sit, and forcing
+it breaks A2/A5 (measured, 2 deep-extension arms, probe-disjointness sha-verified 0/2000). Also found, reported
+not fixed: **`affine_calibrate` cannot read a current compressed ZNPR v3 bake** (asserts `out_dim=1`, reads
+16777472). Board: `d_id100@did100lane`, `d_id100_negrich@did100lane`, `D_shipped_ctl@did100lane`, discussion set
+`2026-09-04-d-id100` (board NOT regenerated — left to the gauntlet lane). Record:
+`benchmarks/d_id100_2026-09-04.md`; artifacts `benchmarks/d_id100_bakes_2026-09-04.pointer.md`. **PROPOSAL ONLY,
+no default flipped** — the ship text (identity reads 100 not 96.1; near-lossless up to +3.3 pts and closer to
+ssim2; floor −12.2→−57.2; reach 108→157; rank and speed unchanged; the cost is a D-dial ERA BREAK) is §10.
