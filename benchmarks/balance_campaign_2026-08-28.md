@@ -7330,3 +7330,24 @@ directive), zenmetrics (primary), zenmetrics--chromasplit,
 zensim--reboot-resume (this workspace, after this commit). Every commit above
 independently confirmed via `git merge-base --is-ancestor <sha> master@{u}`
 before being reported done, not taken on trust from any intermediate step.
+
+## ROUND 75 — 2026-09-04 day summary (post-reboot; AVIF HALTED by user mid-day; zensim model push)
+AVIF: chroma verdict CHROMA k11=11/11 (4:2:0 is a reach ceiling on sharp synthetic content, +0.08% bytes — a
+format property); S1c content-class betas; autotune v1 = canonical training view (79,368 rows) + two bakes (core
+13.4% held-out regret; backend head FAILS — unlearnable, zenrav1e only at 1024²; time head not a budget gate;
+safety flag false) + AvifTuner in zenavif's feature-gated auto-tune (knob-free measured stub, 7 real-encode gates)
++ zenpipe seam; then the USER HALTED AVIF (backend under active rewrite, 2× faster coming) — everything parked
+with resume files, the transcribed speed LUT flagged stale-on-resume. Dependency graph: the zenpipe blocker was
+a stale lockfile (two zenanalyze revs), not manifests — fixed; zenpipe 283 tests green; `zenanalyze-api 0.1.1`
+publish proposed (one non_exhaustive variant). ZENSIM: (1) fastclass distillation wave — NOTHING MOVES KonJND,
+21/21 fail W1 with CI, nine mechanisms dead; variance-stabilised D3 + D2's first training-time W3 movement;
+`predict --ensemble` RAW-vs-SCORE owner defect fixed (every prior teacher table wrong); A4b headlines were
+best-of-3 seeds; K2 was the real positive lever; `--select` needs a seed-group key; next dollar = squintly.
+(2) B-fresh: skew is the DIAL (100% of anchor pre-fix; 13.5% of weight mass) — the `image`-crate "10⁴×
+un-reextractable" probe RETRACTED (imazen decoders: 52× smaller, inside the June bounds), extractor fixed
+(fail-loud, all formats via zencodec), imazen-26 anchor built (4,000 rows), clean 2×2: ERA +3.9/+4.8/+3.9 vs
+CONTENT −0.4/−1.0/−0.2 on the dial, rank identical to 5dp; proposal `B_safesyn_curera` (78% of the correction,
+¼ the reach loss) — era break is the user's call. (3) class-C: 24 slots emitted single-source (+1.3–2.3% cost,
+NOT free), already present in pools944, free-40's GLOBAL_CGAIN/CLOSS precision skew found + bounded. OPEN WITH
+THE USER: B_safesyn_curera era break; zenanalyze-api 0.1.1; zenavif-parse 0.7.0; squintly's 10 hours; GitHub
+MCP token; AVIF hold lift.
