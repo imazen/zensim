@@ -20,6 +20,10 @@
 # Env:   FF_STARTS (default 15)  FF_ITERS (default 7)
 #        FF_SIZES  (default "576 1152 2304")
 #        FF_THREADS(default "1 8 16")
+#        FF_ARMS   (default "156 15c 15f"; the class-C lane adds 15x)
+#        ZEN_S2_CAP_V3=1 -> cap the dispatch ceiling at v3 (AVX2); the
+#                          value is forwarded verbatim to every arm, so
+#                          the env block stays byte-identical within a sweep
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,7 +32,7 @@ STARTS="${FF_STARTS:-15}"
 ITERS="${FF_ITERS:-7}"
 SIZES="${FF_SIZES:-576 1152 2304}"
 THREADS="${FF_THREADS:-1 8 16}"
-ARMS="156 15c 15f"
+ARMS="${FF_ARMS:-156 15c 15f}"
 mkdir -p "$OUT"
 TSV="$OUT/ab_raw.tsv"
 LOG="$OUT/ab_progress.log"
@@ -64,6 +68,7 @@ for size in $SIZES; do
           ZENSIM_BIGPAIR_TOGGLES="$arm" \
           ZENSIM_BIGPAIR_PARALLEL="$PAR" \
           ZENSIM_BIGPAIR_ITERS="$ITERS" \
+          ZEN_S2_CAP_V3="${ZEN_S2_CAP_V3:-0}" \
           "${PIN[@]}" "$BIN" "$size" "$size" 2>&1 | grep '^arm=' || true)
         mn=$(sed -E 's/.*min ([0-9.]+).*/\1/' <<<"$line")
         md=$(sed -E 's/.*median ([0-9.]+) ms.*/\1/' <<<"$line")

@@ -12,6 +12,13 @@ isolated ratios the ab.sh header documents:
                real 156-only production walk, accumulators off both sides)
   15f / 156  = the combined cost a caller who flips the toggle actually pays
 
+The class-C lane (benchmarks/free_features_classC_2026-09-04.md) adds a
+fourth arm; when `15x` rows are present two more ratios are reported:
+
+  15x / 15f  = the CLASS-C marginal cost alone (bounded error + the Y
+               luminance bins, on top of the raw moments)
+  15x / 15c  = what the WHOLE free set costs over the same-layout control
+
 A bootstrap (resample the 15 starts with replacement, recompute the min,
 1000 draws) gives a CI on each ratio so "free" is a stated interval, not a
 single point estimate that could be one lucky ASLR layout.
@@ -52,8 +59,15 @@ def boot_ratio(a_vals, b_vals, iters=B_ITERS):
     return statistics.median(draws), lo, hi
 
 print(f"n_starts per cell: {len(next(iter(cells.values())))}")
-print(f"{'size':>5} {'thr':>3} {'156(ms)':>9} {'15c(ms)':>9} {'15f(ms)':>9}  "
-      f"{'15f/15c med [95%CI]':>28}  {'15c/156 med [95%CI]':>28}  {'15f/156 med [95%CI]':>28}")
+has_x = any(k[2] == "15x" for k in cells)
+hdr = (f"{'size':>5} {'thr':>3} {'156(ms)':>9} {'15c(ms)':>9} {'15f(ms)':>9}  ")
+if has_x:
+    hdr += f"{'15x(ms)':>9}  "
+hdr += (f"{'15f/15c med [95%CI]':>28}  {'15c/156 med [95%CI]':>28}  "
+        f"{'15f/156 med [95%CI]':>28}")
+if has_x:
+    hdr += f"  {'15x/15f med [95%CI]':>28}  {'15x/15c med [95%CI]':>28}"
+print(hdr)
 
 rows_out = []
 for size in sizes:
@@ -65,22 +79,40 @@ for size in sizes:
         r_fc = boot_ratio(m15f, m15c)
         r_c1 = boot_ratio(m15c, m156)
         r_f1 = boot_ratio(m15f, m156)
-        print(f"{size:>5} {th:>3} {min156:>9.3f} {min15c:>9.3f} {min15f:>9.3f}  "
-              f"{r_fc[0]:.4f} [{r_fc[1]:.4f},{r_fc[2]:.4f}]      "
-              f"{r_c1[0]:.4f} [{r_c1[1]:.4f},{r_c1[2]:.4f}]      "
-              f"{r_f1[0]:.4f} [{r_f1[1]:.4f},{r_f1[2]:.4f}]")
-        rows_out.append((size, th, min156, min15c, min15f,
-                          r_fc[0], r_fc[1], r_fc[2],
-                          r_c1[0], r_c1[1], r_c1[2],
-                          r_f1[0], r_f1[1], r_f1[2]))
+        line = f"{size:>5} {th:>3} {min156:>9.3f} {min15c:>9.3f} {min15f:>9.3f}  "
+        row = [size, th, min156, min15c, min15f]
+        if has_x:
+            m15x = cells[(size, th, "15x")]
+            min15x = min(m15x)
+            r_xf = boot_ratio(m15x, m15f)
+            r_xc = boot_ratio(m15x, m15c)
+            line += f"{min15x:>9.3f}  "
+            row.append(min15x)
+        line += (f"{r_fc[0]:.4f} [{r_fc[1]:.4f},{r_fc[2]:.4f}]      "
+                 f"{r_c1[0]:.4f} [{r_c1[1]:.4f},{r_c1[2]:.4f}]      "
+                 f"{r_f1[0]:.4f} [{r_f1[1]:.4f},{r_f1[2]:.4f}]")
+        row += [r_fc[0], r_fc[1], r_fc[2], r_c1[0], r_c1[1], r_c1[2],
+                r_f1[0], r_f1[1], r_f1[2]]
+        if has_x:
+            line += (f"      {r_xf[0]:.4f} [{r_xf[1]:.4f},{r_xf[2]:.4f}]"
+                     f"      {r_xc[0]:.4f} [{r_xc[1]:.4f},{r_xc[2]:.4f}]")
+            row += [r_xf[0], r_xf[1], r_xf[2], r_xc[0], r_xc[1], r_xc[2]]
+        print(line)
+        rows_out.append(tuple(row))
 
 out_tsv = sys.argv[2] if len(sys.argv) > 2 else None
 if out_tsv:
     with open(out_tsv, "w") as f:
-        f.write("size\tthreads\tmin156_ms\tmin15c_ms\tmin15f_ms\t"
-                 "r_15f_15c_med\tr_15f_15c_lo\tr_15f_15c_hi\t"
-                 "r_15c_156_med\tr_15c_156_lo\tr_15c_156_hi\t"
-                 "r_15f_156_med\tr_15f_156_lo\tr_15f_156_hi\n")
+        cols = ["size", "threads", "min156_ms", "min15c_ms", "min15f_ms"]
+        if has_x:
+            cols.append("min15x_ms")
+        cols += ["r_15f_15c_med", "r_15f_15c_lo", "r_15f_15c_hi",
+                 "r_15c_156_med", "r_15c_156_lo", "r_15c_156_hi",
+                 "r_15f_156_med", "r_15f_156_lo", "r_15f_156_hi"]
+        if has_x:
+            cols += ["r_15x_15f_med", "r_15x_15f_lo", "r_15x_15f_hi",
+                     "r_15x_15c_med", "r_15x_15c_lo", "r_15x_15c_hi"]
+        f.write("\t".join(cols) + "\n")
         for r in rows_out:
             f.write("\t".join(str(x) for x in r) + "\n")
     print(f"\nwrote {out_tsv}")

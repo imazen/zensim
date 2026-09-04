@@ -236,8 +236,18 @@ fn main() {
     let pools_mode = match mode.as_str() {
         "foldapp2pools" => zensim::feature_v2::V1PoolsMode::Full,
         "foldapp2carriers" => zensim::feature_v2::V1PoolsMode::Carriers,
+        // "foldapp2fast" = the FAST-CLASS route
+        // (benchmarks/free_features_classC_2026-09-04.md): the v1-only
+        // COMPUTE set at the 944 LAYOUT, peaks live, plus every free extra.
+        // It emits f0..155 + the 72 peaks + the 40 raw-moment slots + the 24
+        // class-C bounded-error slots; every other 944 position stays at its
+        // structural zero. Exists so the route can be checked against
+        // "foldapp2pools" on the SAME REAL PIXELS — the values a fast-class
+        // model trained on a pools-944 table would be served at inference.
+        "foldapp2fast" => zensim::feature_v2::V1PoolsMode::Peaks,
         _ => zensim::feature_v2::V1PoolsMode::Off,
     };
+    let fast_route = mode == "foldapp2fast";
     let pools_on = pools_mode != zensim::feature_v2::V1PoolsMode::Off;
     let do_app2 = mode == "foldapp2" || mode == "foldcsfw" || pools_on;
     let app2_on = mode.starts_with("foldapp2") || mode.starts_with("foldcsfw");
@@ -250,10 +260,9 @@ fn main() {
         "v2" => (false, true),
         // own branches below
         "none" | "fold" | "foldapp" | "foldstream" | "foldappstream" | "foldapphdr100"
-        | "foldapphdrpq" | "foldapp2" | "foldapp2pools" | "foldapp2carriers" | "foldapp2hdr100" | "foldapp2hdrpq" | "foldcsfw"
-        | "foldcsfwhdr100" | "foldcsfwhdrpq" | "v1stream" | "v1ref" | "v1streamref" => {
-            (false, false)
-        }
+        | "foldapphdrpq" | "foldapp2" | "foldapp2pools" | "foldapp2carriers" | "foldapp2fast"
+        | "foldapp2hdr100" | "foldapp2hdrpq" | "foldcsfw" | "foldcsfwhdr100" | "foldcsfwhdrpq"
+        | "v1stream" | "v1ref" | "v1streamref" => (false, false),
         _ => (true, true),
     };
 
@@ -410,6 +419,12 @@ fn main() {
                 csfw_block: csfw_on,
                 append2_dst_activity: dstact_on,
                 v1_pools: pools_mode,
+                v1_only: fast_route,
+                free_extras: if fast_route {
+                    zensim::feature_v2::V1FreeExtras::RawMomentsPlusBoundedErr
+                } else {
+                    zensim::feature_v2::V1FreeExtras::Off
+                },
                 ..V2NewFeatureToggles::default()
             };
             let t0 = std::time::Instant::now();

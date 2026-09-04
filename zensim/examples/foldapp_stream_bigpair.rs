@@ -52,6 +52,25 @@ fn make_pair(w: usize, h: usize, seed: u32) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
 }
 
 fn main() {
+    // `ZEN_S2_CAP_V3=1` disables `X64V4Token` process-wide, so the dispatch
+    // ceiling becomes v3 (AVX2+FMA) — the SAME flag name and the same
+    // refuse-rather-than-mislabel contract as
+    // `zensim-bench/benches/ssim2_speed_bar.rs::cap_tier_v3`, so one
+    // convention prices both tiers across both instruments. A cap cannot be
+    // per-arm inside one process, so the honest shape is two sweeps with
+    // this flipped; the env block stays byte-identical WITHIN a sweep,
+    // which is what the ASLR protocol requires.
+    #[cfg(target_arch = "x86_64")]
+    if std::env::var("ZEN_S2_CAP_V3").as_deref() == Ok("1") {
+        if let Err(e) = archmage::X64V4Token::dangerously_disable_token_process_wide(true) {
+            eprintln!(
+                "# ZEN_S2_CAP_V3=1 requested but could not disable X64V4Token: {e} \
+                 — refusing to report a native-tier run mislabeled as capped."
+            );
+            std::process::exit(1);
+        }
+        eprintln!("# ZEN_S2_CAP_V3=1: X64V4Token disabled process-wide, ceiling=v3(AVX2)");
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let w: usize = args.first().map(|s| s.parse().unwrap()).unwrap_or(8000);
     let h: usize = args.get(1).map(|s| s.parse().unwrap()).unwrap_or(10000);
@@ -144,6 +163,18 @@ fn main() {
             append_block: true,
             append2_block: true,
             free_extras: V1FreeExtras::RawMoments,
+            ..Default::default()
+        },
+        // `15x` — the CLASS-C walk: `15f` plus the bounded-error tranche
+        // (`benchmarks/free_features_classC_2026-09-04.md`). Three
+        // characters, same reason as `15c`/`15f`. `15x` vs `15f` is the
+        // class-C marginal cost; `15x` vs `15c` is the whole free set's.
+        "15x" => V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Peaks,
+            append_block: true,
+            append2_block: true,
+            free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
             ..Default::default()
         },
         // `944carriers` — pools reduced to the 10 named carrier slots.

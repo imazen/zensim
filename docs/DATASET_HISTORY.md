@@ -1303,3 +1303,63 @@ now this). The decode helpers already exist at
 **Nothing was rewritten, retrained, or flipped.** Record:
 `benchmarks/b_reextract_wave_2026-09-04.md`. Instruments + `_MANIFEST.json`:
 `/mnt/v/output/zensim/bfresh-2026-09-04/`.
+
+### §3.33 — class-C free slots: no new root was needed, and the free-40's route parity does not hold on real pixels (2026-09-04)
+
+**Thought-why.** The class-C lane was scoped to emit the next tranche of "already in a
+register, never emitted" 944 slots from a v1-basic-only walk, and then to **extract a new
+dated fast-class root** (`/mnt/v/zen/zensim-training/2026-09-04-fastclass-classC/`) on the
+fleet so the distillation lane would have tables carrying them. The implicit model was:
+new slots ⇒ new columns ⇒ new extraction.
+
+**Actual-why.** The model is wrong for this tranche, and measuring it first saved a fleet
+wave.
+
+1. **The class-C slots are EXISTING 944 positions, so every non-folded 944 root already
+   carries them.** The 24 landed slots are the v2-348 `MSE` cell per (scale, channel) and
+   the append `LUM_{DARK,MID,BRIGHT}_ERR` trio at Y per scale — positions a FULL 944 walk
+   has always computed. What the class-C route changes is the COST of producing them, not
+   their existence. MEASURED on
+   `/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_cid22val.parquet` (regime
+   `folded720append2pools`, `build_commit ced6f52a`): **4,292/4,292 rows non-zero on every
+   one of the 24**. **No new root was built.** The distillation lane trains on the existing
+   root with `scripts/sota944/slice_basic156_free_classc.txt` (289 coordinates).
+
+2. **Real-pixel route parity: the class-C 24 hold, the previous lane's free-40 do not.**
+   `v2_ab_extract` gained mode `foldapp2fast` (the cheap route) beside `foldapp2pools` (the
+   full walk that built the root); both were run over the SAME 773 real pairs (1-in-9
+   stride of `pairs_imazen26_png.tsv`, real zenavif/zenwebp/zenjpeg output, 64×48 …
+   1024×1024). Against the free-features lane's own 2e-5 bar:
+
+   | set | cells | over bar | worst \|Δ\| |
+   |---|--:|--:|--:|
+   | class-C (24) | 18,552 | **0 (0.00 %)** | **9.81e-8** |
+   | free-40 (raw moments) | 28,601 | **2,607 (9.12 %)** | **3.63e-3** |
+
+   The misses are entirely `GLOBAL_CLOSS` (1,467) + `GLOBAL_CGAIN` (1,132), with
+   `GLOBAL_DMEAN` 8 and `LUMA_MEAN_REF` **0** — i.e. exactly the slots
+   `global_stats_from_raw_moments` derives through `Σs²/n − (Σs/n)²`, a
+   catastrophic-cancellation form, where the two routes' f32→f64 staging differs and the
+   true value on a near-identical pair sits at the f32 accumulation floor (worst relative
+   error ~55×). It grows with plane size (3.63e-3 in the largest-25 % bucket vs 1.60e-3 in
+   the smallest). The previous lane's gate is synthetic-image-only, which is why it read
+   5.35e-6 and passed. **Reported, NOT fixed — those slots belong to that lane.** Consequence
+   for anyone shipping a fast-class model: it would be trained on one route's
+   `GLOBAL_CGAIN`/`GLOBAL_CLOSS` and served the other's, disagreeing by up to 3.6e-3.
+   Basic + peaks are BIT-identical between the routes (worst \|Δ\| exactly 0.0 over
+   773 × 228 cells).
+
+3. **A v1-only 944 walk does not leave every unreached slot at zero.** All twelve
+   `PJND_FRAGILITY` slots (`f393 422 451 / 480 509 538 / 567 596 625 / 654 683 712`) read a
+   constant **1.0** on 773/773 rows — a `finish_channel_scale` formula artifact on zeroed
+   accumulators, pre-existing and identical on the `RawMoments` route. A training lane must
+   slice to the free set explicitly; "every non-zero column" hands a model twelve constant
+   columns that do not exist in the stored 944 tables.
+
+**Cost of the tranche, published honestly:** +1.3–1.5 % of the 156 walk at 1T on the
+native AVX-512 tier and +2.0–2.3 % on the v3/AVX2 tier (CI-excludes-1.0 at every 1T cell,
+both tiers); threaded cells mostly straddle 1.0 and are reported, not asserted. The lane
+brief expected "~zero marginal"; the measurement is what is published.
+
+Record: `benchmarks/free_features_classC_2026-09-04.md`. Artifacts:
+`/mnt/v/output/zensim/classc-2026-09-04/{native,capv3,routeparity}/`. Code: `a8b24c8e`.

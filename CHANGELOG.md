@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+### Added — class-C free slots: 24 more 944 positions a 156-class walk can emit (2026-09-04)
+
+- **`V1FreeExtras::RawMomentsPlusBoundedErr`** (a strict superset of
+  `RawMoments`) lets a v1-basic-only walk fill 24 EXISTING 944-layout slots
+  it previously left at their structural zeros: the v2-348 `MSE` cell per
+  (scale, channel) — `clamp01(mean sat((s-d)^2, C_MSE))` — and the append
+  `LUM_DARK_ERR` / `LUM_MID_ERR` / `LUM_BRIGHT_ERR` trio at the Y channel,
+  one per scale. **No slot is renumbered and none is invented**, so the
+  append-only feature-numbering discipline is satisfied rather than bent.
+  `pd = s - d` is already in register for `acc.mse`, and on the Y channel the
+  bins' `sat(ref_Y, C_LUM_T)` weight reads that channel's own `src` — so this
+  adds no plane, no load and no pass.
+- **Public API delta: none.** `V1FreeExtras` is `pub` under the
+  `feature-regime-v2` feature; the added variant is additive on a
+  non-`#[non_exhaustive]` enum, so a downstream exhaustive `match` would need
+  a new arm — no such match exists outside this crate, and no shipped profile
+  requests the variant (default stays `Off`).
+- **Cost, measured and published rather than assumed:** **+1.3-1.5 %** of the
+  156 walk's wall time at 1T on the native AVX-512 tier, **+2.0-2.3 %** on the
+  v3/AVX2 tier (`ZEN_S2_CAP_V3=1`), CI-excludes-1.0 at every 1T cell of both
+  tiers; threaded cells mostly straddle 1.0 and are reported, not asserted.
+  Protocol: one binary, runtime arms, identical-length env, interleaved,
+  min-of-7-inner then min-over-15-starts (era-2 §22.5).
+- **Two defects found by the new gates, both fixed:** the raw-moments emission
+  gate was an exact `== RawMoments` test, so requesting any superset variant
+  silently zeroed all 40 raw-moment slots; and the kernel-constant gate was
+  stated as an `as f64` round-trip, which is false for a correct f32
+  implementation (corrected to f32 equality against what the 944 kernel
+  splats). Six new tests: pure-addition bit-identity, an f64 scalar oracle on
+  the integrands, per-slot parity vs the full 944 walk, rayon-pool and
+  serial-vs-parallel bit-identity, and append-only slot bookkeeping.
+- **`lum_bins_from_weighted_sums`** is now the single owner of the three
+  luminance-bin values, called by both `finish_append` and the free finalize.
+  `fold_engine::wide_bake_v2_read` returns the cheapest covering
+  `V1FreeExtras` instead of a bool, so a bake reading these slots still gets
+  the cheap walk. `v2_ab_extract` gained mode `foldapp2fast`;
+  `foldapp_stream_bigpair` gained arm `15x` and honours `ZEN_S2_CAP_V3`.
+- Record: `benchmarks/free_features_classC_2026-09-04.md` (which also reports
+  a real-pixel finding about the PREVIOUS free-40 tranche, unfixed and
+  attributed).
+
+
 ### Changed — `feature-regime-v2` is now a default feature; the gating tax on `ZensimProfile::D` is removed (2026-09-01)
 
 - **Public API delta: none**, verified with `cargo semver-checks --baseline-rev
