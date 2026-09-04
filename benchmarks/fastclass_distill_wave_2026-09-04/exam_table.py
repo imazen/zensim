@@ -106,5 +106,31 @@ for arm in summary:
     print(sep.join([arm.rjust(5)] +
         [f"{summary[arm][c]['mean'] - SSIM2[c]:+.4f}".rjust(9) if c in summary[arm]
          else "—".rjust(9) for c in AXES]))
+# ---- seed noise vs arm effect ------------------------------------------
+# Plain descriptive statistics (stdev of numbers already read out of the
+# fullevals), NOT a new IQA statistic — no zenstats duplication. The question
+# it answers is the one k=1 comparisons cannot: is the spread BETWEEN arms
+# bigger than the spread WITHIN an arm at fixed recipe?
+print("\n# seed noise vs arm effect — within-arm SD (pooled over arms, k>=2)"
+      " vs SD of the arm means")
+print(sep.join(["axis".rjust(10), "within_SD".rjust(10), "between_SD".rjust(11),
+                "ratio".rjust(7), "arms".rjust(5), "verdict".rjust(28)]))
+for c in cols:
+    within = []
+    for arm, rs in rows.items():
+        vs = [r[c] for r in rs if r[c] is not None]
+        if len(vs) >= 2:
+            within.append(statistics.stdev(vs))
+    means = [summary[arm][c]["mean"] for arm in summary if c in summary[arm]]
+    if not within or len(means) < 2:
+        continue
+    w = statistics.fmean(within); b = statistics.stdev(means)
+    ratio = (b / w) if w > 0 else float("inf")
+    v = ("arm effects EXCEED seed noise" if ratio >= 1.5 else
+         "arm effects INSIDE seed noise" if ratio <= 1.0 else
+         "comparable — not separable")
+    print(sep.join([c.rjust(10), f"{w:.4f}".rjust(10), f"{b:.4f}".rjust(11),
+                    f"{ratio:.2f}".rjust(7), str(len(means)).rjust(5), v.rjust(28)]))
+
 json.dump(summary, open(os.path.join(a.dir, "exam_summary.json"), "w"), indent=1)
 print(f"\n# wrote {os.path.join(a.dir, 'exam_summary.json')}")

@@ -2816,6 +2816,14 @@ struct PredictArgs {
     /// Comma-separated ZNPR bakes scored as ONE equal-weight ensemble: every
     /// row's prediction is the arithmetic mean of the members' raw predictions.
     ///
+    /// **⚠ Only with `--score-units` does this mirror `bake_verdict`'s
+    /// `Ensemble::score_rows` contract.** Without it the accumulation happens
+    /// in RAW network units, which is a DIFFERENT blend whenever the members'
+    /// raw scales differ (measured: |SROCC| 0.5218 vs 0.5019 on the `HYA`
+    /// pair at w = 0.84). The paragraph below describes the intended
+    /// contract, which `--score-units` implements; the historical default
+    /// does not, and is kept only so stored recipes reproduce.
+    ///
     /// This mirrors `bake_verdict`'s `Ensemble::score_rows` contract exactly —
     /// same averaging order (after each member's own output spline, i.e. in
     /// each member's score units), same k=1 short-circuit (one member runs the
@@ -2838,10 +2846,36 @@ struct PredictArgs {
     #[arg(long)]
     corpus: PathBuf,
     /// Output TSV path (`row_idx<TAB>pred`, file row order — positional
-    /// alignment is the join contract; raw model output, spline applied only
-    /// when the bake carries one, via the production path).
+    /// alignment is the join contract).
+    ///
+    /// **Units: RAW network output by default** — the head/tanh-pin/output-
+    /// spline dispatch is NOT applied. Pass `--score-units` for the
+    /// `bake_verdict` scoring units. See `--score-units` for why the default
+    /// is raw and why it matters for `--ensemble`.
     #[arg(long)]
     out: PathBuf,
+    /// Emit **scoring units** instead of raw network output: run the SAME
+    /// post-network dispatch `bake_verdict` runs — per-sample-α / hybrid /
+    /// min-max head, tanh pin, and the bake's own output-calibration spline —
+    /// through the shared owner (`zensim_validate::bake_runtime::score_row`,
+    /// which is literally the function `bake_verdict`'s scorer calls).
+    ///
+    /// **Why this flag exists (measured 2026-09-04).** Without it, a `k >= 2`
+    /// `--ensemble` averages members in RAW units while `bake_verdict
+    /// --ensemble` averages them in SCORE units, so the two tools disagree on
+    /// every blend — and the doc on `--ensemble` claimed they could not. On
+    /// the `HYA` pair over 504 KonJND rows the divergence is |SROCC| 0.5390
+    /// (bake_verdict) vs 0.5073 (raw) at w = 0.5, and 0.5218 vs 0.5019 at
+    /// w = 0.84, because the members' raw scales differ 17x (7.18 vs 0.41)
+    /// while their score-unit scales do not. It is invisible at k = 1: a
+    /// monotone spline is rank-invariant, so every single-bake SROCC agrees.
+    ///
+    /// **Default is OFF and byte-identical to every historical invocation**,
+    /// because existing teacher-build recipes store affine bounds fitted in
+    /// raw units (e.g. `lo = -13.996, hi = 12.711`) and flipping the default
+    /// would silently move them. New blended-teacher builds should pass it.
+    #[arg(long, default_value_t = false)]
+    score_units: bool,
 }
 
 fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
@@ -2928,21 +2962,57 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
         let transformed = model.has_nontrivial_feature_transforms();
         let mut predictor = zenpredict::Predictor::new(model);
         let mut xbuf = vec![0f32; n_in];
+        // `--score-units`: the SAME post-network dispatch `bake_verdict`'s
+        // scorer runs, through the shared owner — nothing re-implemented here.
+        let (psa, hyb, tanh, ospline, mmh) = if a.score_units {
+            (
+                zensim_validate::bake_runtime::extract_per_sample_alpha_head(model),
+                zensim_validate::bake_runtime::extract_hybrid_head(model),
+                zensim_validate::bake_runtime::extract_tanh_output_head_scale(model),
+                zensim_validate::output_calibration_spline::extract(model),
+                zensim_validate::bake_runtime::extract_minmax_head(model),
+            )
+        } else {
+            (None, None, None, None, None)
+        };
         for (i, row) in g.feature_rows.iter().enumerate() {
-            let take = n_in.min(row.len());
-            for (d, s) in xbuf[..take].iter_mut().zip(row[..take].iter()) {
-                *d = *s as f32;
-            }
-            let p = if transformed {
-                predictor.predict_transformed(&xbuf)
+            let p0: f64 = if a.score_units {
+                match mmh.as_ref() {
+                    Some(mm) => zensim_validate::bake_runtime::score_row_minmax(
+                        model,
+                        mm,
+                        tanh,
+                        ospline.as_ref(),
+                        row,
+                    ),
+                    None => zensim_validate::bake_runtime::score_row(
+                        &mut predictor,
+                        transformed,
+                        psa.as_ref(),
+                        hyb.as_ref(),
+                        tanh,
+                        ospline.as_ref(),
+                        &mut xbuf,
+                        row,
+                    ),
+                }
             } else {
-                predictor.predict(&xbuf)
-            }
-            .map_err(|e| format!("predictor forward: {e:?}"))?;
+                let take = n_in.min(row.len());
+                for (d, s) in xbuf[..take].iter_mut().zip(row[..take].iter()) {
+                    *d = *s as f32;
+                }
+                let p = if transformed {
+                    predictor.predict_transformed(&xbuf)
+                } else {
+                    predictor.predict(&xbuf)
+                }
+                .map_err(|e| format!("predictor forward: {e:?}"))?;
+                p[0] as f64
+            };
             match wi {
-                Some(w) => acc[i] += w * p[0] as f64,
-                None if k == 1 => acc[i] = p[0] as f64,
-                None => acc[i] += p[0] as f64,
+                Some(w) => acc[i] += w * p0,
+                None if k == 1 => acc[i] = p0,
+                None => acc[i] += p0,
             }
         }
     }
@@ -2960,7 +3030,7 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
     }
     std::fs::write(&a.out, &out).map_err(|e| format!("write {:?}: {e}", a.out))?;
     eprintln!(
-        "predict: {} rows x k={k}{} -> {:?} (caller_input_width {n_in})",
+        "predict: {} rows x k={k}{} -> {:?} (caller_input_width {n_in}, units={})",
         g.feature_rows.len(),
         match &weights {
             Some(w) => format!(
@@ -2972,7 +3042,8 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
             ),
             None => String::new(),
         },
-        a.out
+        a.out,
+        if a.score_units { "score" } else { "raw" }
     );
     Ok(())
 }
