@@ -265,3 +265,100 @@ None of these is a lane decision. A Profile-B swap is a ship-default flip.
 - `benchmarks/v1_extractor_drift_2026-08-30.md` §4c.3 estimates the SDR re-extraction at
   "~227k pairs at ~600 pair/s ≈ 6–7 min of single-box CPU". The compute estimate is fine;
   the **inputs do not exist**, which is the binding constraint and was not checked.
+
+---
+
+## 9. The dial defect, isolated: a re-anchoring corrects it at **zero rank cost**
+
+§6 argued the −5-point shift is a spline-calibration artifact, not a weights problem.
+That is now **measured**, with the confound (anchor *content*) held exactly fixed.
+
+### 9a. Design
+
+`kadid` + `tid` exist in **both eras with row-order-identical refs and byte-identical
+`human_score`** (§2a), so they give a matched-era anchor pair: same rows, same targets,
+only the feature era differs. Built with a strict positional gate — kadid 10,125/10,125
+and tid 2,880/3,000 rows agreeing exactly on `(ref_basename, human_score)`; **13,005
+rows**, `target_score = max(ssim2_gpu, 0)` (the shipped anchor's own semantics), masked+IW
+max `|cur − stored|` on the kept rows 6.15e-1 (kadid) / 3.78e-1 (tid).
+
+| artifact | sha256 (16) |
+|---|---|
+| `anchor_kadidtid_storedera_2026-09-04.parquet` | `ca3bd09790cefb17` |
+| `anchor_kadidtid_curera_2026-09-04.parquet` | `51f9e8ee0ff5f16d` |
+
+Three arms, all evaluated on the **current-era** (runtime) eval root:
+
+| arm | spline |
+|---|---|
+| `shipped` | as-shipped (winsor + `extend-top` on the pre-fix safesyn multiband anchor) |
+| `reanchor_storedera` | `bake_dial_refit shared-anchor` on the STORED-era kadid+tid anchor |
+| `reanchor_curera` | `bake_dial_refit shared-anchor` on the CURRENT-era kadid+tid anchor |
+
+### 9b. Rank is untouched — the spline is rank-invariant, as designed
+
+SROCC (signed), current-era root, identical to 5 dp across all three arms:
+
+| corpus | shipped | reanchor_storedera | reanchor_curera |
+|---|---:|---:|---:|
+| cid22 | 0.88212 | 0.88212 | 0.88212 |
+| konjnd | −0.51938 | −0.51938 | −0.51938 |
+| aic3 | 0.76501 | 0.76501 | 0.76501 |
+| tid | 0.77852 | 0.77852 | 0.77852 |
+| kadid | 0.80847 | 0.80847 | 0.80847 |
+
+(These also independently reproduce the drift study's round-4b corrected current-era
+values exactly.) **A dial re-anchoring costs nothing on any rank axis.**
+
+### 9c. The era effect on the dial — content held fixed
+
+`reanchor_curera − reanchor_storedera`, per pair, same eval features:
+
+| corpus | n | mean | median | sd | \|Δ\| p90 | p99 | max | frac >0.5 | >2 | >5 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| CID22 | 4,292 | **+6.196** | +6.075 | 2.246 | 8.868 | 10.836 | 17.575 | **1.0000** | 0.9746 | 0.6829 |
+| KonJND | 504 | **+6.235** | +6.091 | 1.929 | 8.856 | 9.968 | 10.775 | **1.0000** | 1.0000 | 0.6468 |
+
+Compare the defect the drift study measured for shipped B (stored→fresh **eval** features):
+**−4.977 (CID22, sd 2.301) / −5.857 (KonJND, sd 2.299)**.
+
+**Same order of magnitude, opposite sign, and nearly identical spread** (2.25 vs 2.30;
+1.93 vs 2.30). That is the signature of a compensating calibration: the current extractor
+produces a lower raw score, the shipped spline maps it ~5 points low, and a spline fit on
+current-era features raises the mapping by ~6 to put it back. **The −5-point skew is a
+spline artifact and a re-anchoring collapses it, with zero rank cost.**
+
+### 9d. The caveat that matters: anchor CONTENT moves the dial just as much
+
+`reanchor_storedera − shipped` (both stored-era-calibrated; only the anchor corpus and the
+refit procedure differ) is **−6.443 (CID22) / −7.776 (KonJND)** mean, max 23.6.
+
+This comparison is **confounded** — it changes anchor content (safesyn multiband →
+kadid+tid) *and* procedure (`add-winsor`+`extend-top`, 30 knots → `shared-anchor`, 12
+knots) at once, so it is not an estimate of "content effect" alone. But it bounds
+something important: **B's absolute dial is anchor-dependent at the ±6–8 point level,
+which is the same order as the era defect.** Swapping to a kadid+tid anchor is therefore
+*not* a drop-in fix, and the fact that `shipped` and `reanchor_curera` happen to land
+close on CID22 (median 65.18 vs 66.28) is a near-cancellation of two ±6-point terms, not
+evidence of correctness.
+
+**Consequence for the ship decision.** The in-recipe fix — re-extract the safesyn
+multiband anchor and re-run `add-winsor` + `extend-top` verbatim — is the only change that
+corrects the era term *without* introducing a comparable content term, and it is blocked
+by §3. Everything else on the table trades one uncontrolled ±6-point dial shift for
+another. That is a product decision, not a lane decision.
+
+### 9e. Reproduction
+
+```sh
+# anchors (positional gate inside): the builder is recorded in this section
+bake_dial_refit shared-anchor --in zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin \
+  --out B_reanchor_<era>.bin --anchor anchor_kadidtid_<era>_2026-09-04.parquet --target-col target_score
+bake_verdict --bake B_reanchor_<era>.bin --corpora cid22,konjnd,kadid,tid,aic3 --full-json verdict_<era>.json
+```
+Artifacts + verdict JSONs (with `per_pair`): `/mnt/v/output/zensim/bfresh-2026-09-04/`.
+Bakes: `B_reanchor_storedera.bin` `3f832ac3222b580e`, `B_reanchor_curera.bin`
+`fe31b66a05b424ce` (7,181 B each).
+
+**Neither re-anchored bake is a ship candidate.** They are instruments that isolate the
+era term. No default was flipped and no weight file was modified.
