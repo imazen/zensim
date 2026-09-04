@@ -336,6 +336,93 @@ now implements G1′ and carries this whole finding in its header, because the
 next lane to write a "bake byte-identity" gate will otherwise hit it too:
 **a bake's bytes are not a function of its model alone.**
 
+## 6d. W3 CANNOT BE FIXED BY RE-SPLINING — the registered expectation-7 answer, from stored bytes
+
+Answered before the arms land, because it needs no arm: it is a property of
+A4b's published dial. Read from `K4.fulleval.json` (`bake_verdict`'s own dial
+panel; nothing recomputed):
+
+| zone | pairs | material inversions | rate | med \|Δ\| | max \|Δ\| | ladders w/ inv | ends backwards |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| q≥85 | 3,025 | 22 | 0.00727 | **0.968** | 16.458 | 16 / 115 | 0 % |
+| q50–85 | 883 | 7 | 0.00793 | **1.962** | 3.997 | 5 / 115 | 0 % |
+| q<50 | 794 | 28 | 0.03526 | **2.526** | 25.718 | 22 / 105 | 0 % |
+| **pooled** | **4,702** | **57** | 0.01212 | — | — | — | **0 %** |
+
+mono = 1 − 57/4702 = **0.9879**; the bar is **0.9930**, so the material count
+must fall **57 → ≤ 32 — a 25-event reduction.** Ends-backwards is already 0 %,
+so W3's second clause is met and only the mono clause binds.
+
+**The spline is monotone and therefore RANK-invariant: it cannot reorder a
+ladder.** The only thing it can change is an inversion's MAGNITUDE in score
+units relative to the 0.5-pt materiality threshold — i.e. it can only help by
+compressing the dial where the inversions live. That trade is bounded by G1,
+and the bound is tight:
+
+* current dial: p5 **13.67**, p95 **93.95**, range **80.28**, mid ≈ 53.8;
+* G1 requires p95 ≥ 85, so a uniform k× compression about the mid needs
+  `53.8 + 40.14/k ≥ 85` ⟹ **k ≤ 1.287**;
+* at the maximum G1-legal compression the effective materiality threshold
+  rises 0.5 → **0.64 score-pt**, which can only reclassify inversions lying in
+  **[0.50, 0.64)**;
+* the zone medians are **0.97 / 1.96 / 2.53 pt**. More than half of every
+  zone's events are far above that sliver.
+
+A *non-uniform* re-knot is the same trade applied locally, and there is no
+quiet region to borrow range from: the 57 events are spread 22 / 7 / 28 across
+all three zones. **So no legal re-splining of this bake reaches 0.9930.**
+Anything that did would be a compressed dial bought by failing G1 — gaming,
+and this wave will not ship it.
+
+**W3 is therefore a TRAINING-time clause for this class, not a packaging one.**
+The levers that could reach it are the trainer's own ladder regularizers —
+`--tv-pairs-file` + `--tv-weight` (a hinge on ladder pairs, `--tv-band-weights`
+for a per-zone schedule), or `--monotonicity-reg`, which is per-sample-α-head
+only. Neither is in this wave's frozen arm set; both are named as follow-up
+rather than deferred silently. Note the shape of the target this implies: the
+q<50 zone carries **half the events at 3× the rate** of the other two, so a
+ladder regularizer for this class should be weighted toward LOW quality, not
+toward the near-lossless zone where the campaign's attention has been.
+
+## 6e. W7 — the Profile-D wirability note, read from source (not a result, a prerequisite)
+
+The deliverable asks what it would take to ship a candidate of this class. Read
+from `zensim/` at this commit, so it is checkable rather than remembered:
+
+* **`ZensimProfile::D` IS reachable by a plain `cargo add zensim`.** Both gates
+  it needs are in `zensim/Cargo.toml`'s `default` list —
+  `candidate-profiles` (which admits the `D` variant) and `feature-regime-v2`
+  (the fold engine, default-on since 2026-09-01,
+  `benchmarks/profile_d_notax_2026-09-01.md`). `Zensim::new` sets
+  `fold_engine = true, skip_unread_pools = true` for `D` and no other profile.
+  So W7's "reachable" clause is **not** the blocker it was when the exam was
+  written.
+* **What `D` derives from its bake today is `V1PoolsMode` only**, through the
+  cached `fold_engine::score_pool_mode` → `pools_mode_for_need`. For an
+  A4b-class bake that correctly yields `Peaks` (peaks read, masked/IW not).
+* **What it does NOT derive at runtime is the WIDE-bake free-set read.**
+  `ComputeSet::from_block_profile` — which calls
+  `fold_engine::wide_bake_v2_read` to prove that every live column above the
+  372 v1 layout sits inside the 40-slot `V1FreeExtras::RawMoments` free set,
+  and then requests the cheap set instead of the full 944 walk — is
+  `#[cfg_attr(not(test), allow(dead_code))]` (`feature_v2.rs:1904`). Its own
+  doc says so: *"Not yet a runtime call site… swapping [the cached
+  `score_pool_mode`] for a per-call uncached parse through this function would
+  regress the exact hot path this exists to speed up."* It is exercised only by
+  the cross-check tests that gate it against `bake_block_profile`.
+* **A4b's class is exactly the shape that function was written for** (944
+  declared, 265 live: 156 basic + 72 peaks + 37 of the 40 free slots), and
+  `wide_bake_v2_read`'s own doc names it: *"this is what closes the gap
+  `benchmarks/free_features_2026-09-01.md`-class bakes… fell into."*
+
+**So the honest W7 status for any candidate this wave could produce is: one
+scoped change away, and the change is named.** Either give the wide-bake
+free-set derivation a *cached* runtime call site (the same treatment
+`score_pool_mode` already has, which is why the trade its doc records was
+made), or declare the compute set statically in a new profile variant. Neither
+is attempted here — it is a product/ship decision, out of this wave's scope,
+and it is not a reason to call W7 passed.
+
 ## 7. RESULTS
 
 *(appended below as arms land; nothing above this line is edited)*
