@@ -1430,13 +1430,28 @@ current bar. Re-pin record: gate doc **§14**.
   `--bake`), `--gaddr-json` (the G-ADDR block alone at full f64, stamped with which scorer it
   describes — peer-safe where `--full-json`/`--fulleval` are refused), `--gaddr-reference`.
   Re-grade an existing bake with `scripts/dialgate_arms.sh score <label> <bake.bin> [regime]`.
+- **BOARD COVERAGE (2026-09-04, gate doc §15):** all **97** fair-board cells are graded under
+  both pin sets and 96 carry the verdict; the board draws a **NOT SHIPPABLE** badge off a
+  MEASURED contract FAIL (**47** cells; C3+C4 dominate at 39 each — dials that never go below
+  zero on an all-negative probe — then C2 at 23). The **only** contract-clean cell is
+  `v47_strict_QAT_native` (6/6). A probe is scored only when its column count equals the
+  bake's caller width, so the 372 probes reach 3 cells; two **944** negative-tail probes were
+  cut in-era by `scripts/cut_gaddr_negtail_probe.py` (the committed owner of that cut; its
+  control reproduces the stored 372 probe EXACTLY) and are deliberately **NOT registered** —
+  no reference has been measured on them, so A7–A9 stay NOT MEASURED there while the
+  absolute-bar C3/C4 read normally. Graft with `promote_fulleval.py --graft-gaddr`.
 
 **Facts that are now measured and must not be re-derived:**
 
-- **The identity feature vector is the ZERO vector, for every image** (38/38 dial-grid refs,
-  byte-identical), so the identity dial is a SCALAR property of a bake, `dial(0⃗)`:
-  **v47-QAT 97.6893, shipped B 96.2412, ADD156 96.1157.** The `[97.5, 100]` identity band is
-  a **v47-era** property; both shipped LINEAR dials miss it.
+- **The identity feature vector is the ZERO vector, for every image — AT 372 ONLY** (38/38
+  dial-grid refs, byte-identical), so at that width the identity dial is a SCALAR property of
+  a bake, `dial(0⃗)`: **v47-QAT 97.6893, shipped B 96.2412, ADD156 96.1157.** The
+  `[97.5, 100]` identity band is a **v47-era** property; both shipped LINEAR dials miss it.
+  **⚠ It does NOT extend to 944 (MEASURED 2026-09-04, gate doc §15.3):** extracting the same
+  38 `ref == dist` pairs through `sdr944_extract` gives **190 of 944 slots non-zero**, varying
+  per image (row-to-row spread 0.594). A 944 identity read is an extractor-era-dependent
+  measurement, not an algebraic constant — so C5/C6 need a real in-era 38-pair extraction per
+  944 era, and none exists yet (94 of 97 fair board cells read NOT MEASURED on those rows).
 - **Shipped B ranks 266 of 4,424 dial-grid cells (6.01 %) ABOVE a perfect copy** in RAW
   space. Consequence, proved in §10.3: **C2 ⊻ C6** — pin identity at 100 and those cells cap
   (tied 0.0567 > 0.05); leave it below and they out-score identity. **No monotone output
