@@ -1,12 +1,20 @@
 {
   "_schema": {
-    "what": "The G-ADDR (dial ADDRESSABILITY) floor registry. One committed row per dial grid + per probe, holding the SHIPPED product dial's measured end-of-range behaviour on that instrument. A candidate bake clears the REGRESSION tier only when it reaches at least as far at BOTH ends as the row for the instrument it was measured on.",
+    "what": "The G-ADDR (dial ADDRESSABILITY) floor registry. One committed row per (instrument, REFERENCE), holding that reference scorer's measured end-of-range behaviour on that instrument. A candidate bake clears the REGRESSION tier only when it reaches at least as far at BOTH ends as the ACTIVE reference's row for the instrument it was measured on.",
     "why": "USER RULE 2026-09-04: 'floor and ceiling dial addressability is crucial ... any model that limits dial range cannot ship'. A dial that compresses at the ends cannot serve a target near the ends, which is where near-lossless product decisions live. SROCC is rank-invariant and structurally cannot see this; G1 (p5<=25, p95>=85) is far too loose to.",
-    "keyed_by": "dial_grid_sha256 for the grid rows; probe_sha256 for the negative-tail and identity rows. An UNREGISTERED grid or probe is NOT-MEASURABLE / NOT-MEASURED, never a pass -- a bar you can dodge by choosing a friendlier instrument is not a bar.",
+    "keyed_by": "(dial_grid_sha256, reference) for the grid rows; (probe_sha256, reference) for the negative-tail and identity rows. BOTH halves are load-bearing: a row is a measurement OF ONE SCORER on one instrument, so reading a peer_ssim2 bar off a shipped_b row would compare a candidate against the wrong mentor. An UNREGISTERED grid or probe is NOT-MEASURABLE / NOT-MEASURED, never a pass -- a bar you can dodge by choosing a friendlier instrument is not a bar.",
+
+    "reference_sets": {
+      "ACTIVE (bars)": "peer_ssim2 -- the REFERENCE METRIC. USER DECISION 2026-09-04, verbatim: 'I don't think we should pin to B, ssim2 seems a better mentor.' Direction semantics: a candidate must address AT LEAST the range ssim2 addresses (reach/max/p95/DR/frac<0 >= ssim2's; min/p5/negtail-min/negtail-p1 <= ssim2's).",
+      "incumbent (printed, never a bar)": "shipped_b -- the shipped product dial. Retained so a reader can always see whether a fail is 'worse than the mentor' or 'worse than what shipped', and so the pre-2026-09-04 verdicts stay readable against the pins they were graded on. Labelled BIASED: measured on 2026-09-04 to put A1/A3/A6 ABOVE the reference metric's own values on the same grid (bars 99.98/99.72/86.08 vs truth 98.38/95.46/85.20 -- a dial calibrated exactly to the truth failed all three, and so did both other shipped profiles), and to meet A4 (p5 <= 13.65) only through a -23-point low-band bias (B reads +11.97 on the 221 lowest-truth cells where the truth is -11.30; the train-on-test ORACLE, the ceiling for any monotone re-map of B's ordering, reads p5 21.5-22.8).",
+      "not a relaxation": "Re-pinning MOVED the difficulty from the ceiling to the FLOOR. ssim2's grid min is -55.35 against B's +3.13 and its negative-tail probe is 100% below zero against B's 0%, so A2/A5/A7-A9 all got much harder. That is correct: the floor is where the incumbent is genuinely broken.",
+      "rows without a `reference` field": "pre-2026-09-04 rows, all shipped_b. A serde default supplies the label so those rows stay BYTE-UNTOUCHED, which is what append-only requires.",
+      "derivation": "Every peer_ssim2 value came out of the owner instrument at full f64 precision -- `bake_verdict --dial-peer-scores peer_ssim2=<cells> --negtail-peer-scores ... --identity-peer-scores ... --gaddr-json` -- never from percentile math re-implemented beside it."
+    },
     "owner": "zensim-validate/src/dial_addressability.rs (embedded with include_str!, so a stale or missing file cannot silently disarm the gate). Consumed by bake_verdict's DIAL panel; emitted into --full-json at dial.addressability.",
-    "two_tiers": "REGRESSION rows (A*) bar against the shipped dial's own value on the same instrument -- 'no worse at either end than what users have today'. CONTRACT rows (C*) are absolute product requirements. The shipped dial FAILS four contract rows today (C3/C4 negative tail, C5 identity band, C6 nothing-above-identity); those are standing defects recorded here, NOT bars invented for this gate, and the `incumbent` column in every report says so.",
+    "two_tiers": "REGRESSION rows (A*) bar against the ACTIVE reference's value on the same instrument -- since 2026-09-04, 'addresses at least the range ssim2 addresses'. CONTRACT rows (C*) are absolute product requirements. The shipped dial FAILS four contract rows today (C3/C4 negative tail, C5 identity band, C6 nothing-above-identity); those are standing defects recorded here, NOT bars invented for this gate, and the `incumbent` column in every report says so. MEASURED 2026-09-04: peer_ssim2 PASSES all six contract rows -- mono 0.9924, tied 0.0000, negtail frac<0 1.0000 / min -770.62, identity exactly 100.0000 on all 38 refs, 0 of 4,424 cells above identity. That is what 'as good as the mentor at the ends' means, and it is a measurement, not a target.",
     "append_only": "Rows are appended, never edited. A floor is a measurement of a specific bake on a specific instrument; changing it retroactively invalidates every verdict that quoted it. To raise a bar (a better dial ships), append a new row and retire the old one by label.",
-    "record": "benchmarks/dial_addressability_gate_2026-09-04.md"
+    "record": "benchmarks/dial_addressability_gate_2026-09-04.md (section 'Re-pin 2026-09-04' carries the user decision, the derivation and the re-graded candidate table)"
   },
 
   "reference_bake": {
@@ -59,6 +67,24 @@
       "registered": "2026-09-04",
       "active": true,
       "note": "Registered ONLY so the 2026-09-04 imazen-26 anchor numbers (reach 96.85 / p5 13.73 / DR 85.99) stay checkable against their own instrument. New work should use the canonical grid; a verdict on this one carries bake_verdict's own NOT-CANONICAL warning."
+    },
+    {
+      "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL)",
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
+      "n_rows": 4424,
+      "min": -55.354544,
+      "max": 98.376644,
+      "p5": 10.26332105,
+      "p95": 95.45929934999998,
+      "reach": 153.731188,
+      "dynamic_range": 85.19597829999998,
+      "mono": 0.99235757295044,
+      "tied": 0.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "note": "THE ACTIVE REGRESSION PIN SET. ssim2's own dial on the canonical grid, measured by the owner instrument (bake_verdict --dial-peer-scores peer_ssim2=<dialcells_ssim2_qv2grid.tsv> --gaddr-json), full f64 precision straight out of dial_addressability::to_json -- no re-implemented percentile math. Note it is MORE monotone than the shipped dial (0.9924 vs 0.9792) and has zero ties, so C1/C2 are not bars ssim2 needs help with. The un-quarantined companion grid deliberately has NO peer_ssim2 row: no ssim2 cell table covers its 33 extra pre-fix JXL cells, and measuring a bar on known-corrupt ladders would be worse than reading NOT MEASURABLE there."
     }
   ],
 
@@ -78,6 +104,19 @@
       "registered": "2026-09-04",
       "active": true,
       "incumbent_note": "SHIPPED B never goes below zero on this probe (frac_below_zero 0.0000, min +2.5167) even though every row's truth is negative. That is a standing violation of the product contract ('NEGATIVE zensim values MUST work'), recorded here as the incumbent's own value so a candidate is judged on both the relative and the absolute question."
+    },
+    {
+      "probe_sha256": "5609d19fa10aef81326d655803a7b51ad3c7339513f959266c272bebfaeeb6d8",
+      "reference": "peer_ssim2",
+      "label": "negtail_probe_372_2026-09-04 -- ssim2's OWN values (the probe parquet's `ssim2_gpu` column, the same measurement the probe's population was selected on)",
+      "n_rows": 2000,
+      "min": -770.619744,
+      "p1": -187.13142578999998,
+      "p5": -71.55064789999999,
+      "frac_below_zero": 1.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "note": "frac_below_zero = 1.0000 is DEFINITIONAL, not a coincidence: the probe was built by selecting rows whose ssim2 is negative, so the reference metric is below zero on all 2,000 by construction. A9 therefore asks a candidate for perfect sign agreement with ssim2 on an all-negative population. That is the strictest reading of 'address at least the range ssim2 addresses' and it is stated here so nobody mistakes it for an empirically-discovered bar. The incumbent reads 0.0000."
     }
   ],
 
@@ -96,6 +135,18 @@
       "registered": "2026-09-04",
       "active": true,
       "incumbent_note": "SHIPPED B calls a perfect copy 96.2412 while emitting up to 99.9833 on LOSSY dial-grid cells: 266 of 4,424 cells (6.01%) out-score an exact copy, worst `1a20ecb0c1b92466_1022x818` jxl d=0.05 at 99.9833. Standing ceiling defect, recorded as the incumbent's own value."
+    },
+    {
+      "probe_sha256": "e6f9096b8e0ebd97f1c36e40bb7e589e77a599bfdfcb7ff94dde89520018b650",
+      "reference": "peer_ssim2",
+      "label": "identity_probe_372_2026-09-04 -- ssim2's OWN values on the 38 ref==dist pairs",
+      "n_rows": 38,
+      "dial_min": 100.0,
+      "dial_median": 100.0,
+      "dial_max": 100.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "note": "MEASURED, not assumed: zenmetrics batch --metric ssim2 (CPU SSIMULACRA2) over the 38 dial-grid references paired with themselves reads EXACTLY 100.000000 on all 38, min == median == max, one distinct value. So the mentor is inside the registered [97.5, 100] identity band at its ceiling, and since its grid max is 98.3766 < 100 it has ZERO cells out-scoring a perfect copy -- ssim2 passes C5 and C6, the two contract rows the shipped dial fails. The grid truth is ssim2_gpu and this is the CPU implementation; identity is 100 by SSIMULACRA2's construction, which is why the cross-implementation question does not arise at this point."
     }
   ]
 }

@@ -795,6 +795,35 @@ struct Args {
     /// label, and `--full-json` / `--fulleval` are REFUSED in this mode so a
     /// peer dial can never be written into a bake's board row.
     dial_peer_scores: Option<(String, PathBuf)>,
+    /// `--negtail-peer-scores <label>=<tsv>`: the NEGATIVE-TAIL probe's scores
+    /// for a peer, as `entry\tpred`. Companion to `--dial-peer-scores` — it is
+    /// what makes G-ADDR's floor axes measurable for a reference metric, which
+    /// is a prerequisite for pinning the regression bars to one.
+    ///
+    /// **Why it is REQUIRED in peer mode rather than optional.** Without it a
+    /// peer run measured the grid axes from the peer and the tail axes from
+    /// `--bake` — a chimera nobody asked for and nothing labelled. The G-ADDR
+    /// axes are now all-or-nothing per run: in peer mode an unsupplied probe
+    /// axis is NOT MEASURED, never silently filled from the bake.
+    negtail_peer_scores: Option<(String, PathBuf)>,
+    /// `--identity-peer-scores <label>=<tsv>`: the IDENTITY probe's scores for
+    /// a peer, as `entry\tpred`. Same all-or-nothing rule as
+    /// `--negtail-peer-scores`; additionally the "no grid cell out-scores a
+    /// perfect copy" count is only meaningful when the grid scores and the
+    /// identity score come from the SAME scorer.
+    identity_peer_scores: Option<(String, PathBuf)>,
+    /// `--gaddr-json <path>`: write ONLY the G-ADDR block (the
+    /// `dial_addressability` verdict, full f64 precision) to a standalone JSON
+    /// file. Allowed in peer mode — unlike `--full-json`/`--fulleval` it is not
+    /// a board row and every field in it describes the same scorer the DIAL
+    /// section describes, stamped with `scorer`.
+    ///
+    /// This is how a REFERENCE pin set is derived: run the gate on the peer,
+    /// read the `measured` block at full precision, append it to the registry.
+    /// Deriving pins by re-implementing the percentile/tail math outside the
+    /// owner would be exactly the duplication the no-duplicate-implementations
+    /// rule forbids, and the numbers would drift the first time either moved.
+    gaddr_json: Option<PathBuf>,
     /// `--corruption-head <bake.bin>`: companion corruption-head bake — the
     /// shipping design's corruption owner (at 924 the dial's own ordering is
     /// broken by design, distributional; the head trained on negrich carries
@@ -919,6 +948,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut negtail_probe: Option<PathBuf> = None;
     let mut identity_probe: Option<PathBuf> = None;
     let mut dial_peer_scores: Option<(String, PathBuf)> = None;
+    let mut negtail_peer_scores: Option<(String, PathBuf)> = None;
+    let mut identity_peer_scores: Option<(String, PathBuf)> = None;
+    let mut gaddr_json: Option<PathBuf> = None;
     let mut features_root: PathBuf = PathBuf::from(DEFAULT_FEATURES_ROOT_372);
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
@@ -987,6 +1019,28 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     return Err("--dial-peer-scores label must be non-empty".into());
                 }
                 dial_peer_scores = Some((label.to_string(), PathBuf::from(path)));
+            }
+            "--gaddr-json" => {
+                let v = args.next().ok_or("--gaddr-json requires <path>")?;
+                gaddr_json = Some(PathBuf::from(v));
+            }
+            "--negtail-peer-scores" | "--identity-peer-scores" => {
+                let which = arg.clone();
+                let v = args
+                    .next()
+                    .ok_or_else(|| format!("{which} requires <label>=<path>"))?;
+                let (label, path) = v
+                    .split_once('=')
+                    .ok_or_else(|| format!("{which} must be <label>=<path>"))?;
+                if label.trim().is_empty() {
+                    return Err(format!("{which} label must be non-empty").into());
+                }
+                let slot = if which == "--negtail-peer-scores" {
+                    &mut negtail_peer_scores
+                } else {
+                    &mut identity_peer_scores
+                };
+                *slot = Some((label.to_string(), PathBuf::from(path)));
             }
             "--per-pair-output" => {
                 let v = args.next().ok_or("--per-pair-output requires <path>")?;
@@ -1191,6 +1245,30 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     // A peer dial belongs to the peer, not to `--bake`. Writing it into a
     // fulleval JSON would put another metric's dial under a bake's name on
     // the board — refuse rather than trust a convention.
+    // A peer PROBE table describes the peer for exactly the same reason, and it
+    // is only meaningful when the grid it is reported beside is the same
+    // scorer's — otherwise the G-ADDR headline mixes two scorers under one
+    // verdict.
+    if (negtail_peer_scores.is_some() || identity_peer_scores.is_some())
+        && dial_peer_scores.is_none()
+    {
+        return Err(
+            "--negtail-peer-scores / --identity-peer-scores require --dial-peer-scores: \
+                    a peer's tail or identity reported beside the BAKE's dial grid is two \
+                    scorers under one G-ADDR headline, which is not a measurement of either."
+                .into(),
+        );
+    }
+    if (negtail_peer_scores.is_some() || identity_peer_scores.is_some())
+        && (full_json.is_some() || fulleval.is_some())
+    {
+        return Err(
+            "--negtail-peer-scores / --identity-peer-scores cannot be combined with \
+                    --full-json/--fulleval: the G-ADDR block would describe the peer while \
+                    every other block describes --bake."
+                .into(),
+        );
+    }
     if dial_peer_scores.is_some() && (full_json.is_some() || fulleval.is_some()) {
         return Err(
             "--dial-peer-scores cannot be combined with --full-json/--fulleval: the DIAL \
@@ -1220,6 +1298,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         negtail_probe,
         identity_probe,
         dial_peer_scores,
+        negtail_peer_scores,
+        identity_peer_scores,
+        gaddr_json,
         full_json,
         fulleval,
         name,
@@ -1897,6 +1978,66 @@ fn load_peer_dial_scores(path: &Path, grid: &parquet_loader::DialGrid) -> Result
              First unmatched: {}. A dial panel over a subset of ladders is a DIFFERENT \
              measurement — refusing rather than reporting one.",
             grid.image_id.len(),
+            missing.join(", ")
+        ));
+    }
+    Ok(out)
+}
+
+/// Peer scores for a G-ADDR PROBE, joined to the probe parquet's own `entry`
+/// labels. TSV shape `entry\tpred`, mirroring `--dial-peer-scores`'s
+/// `image_id\tcodec\tq\tpred`.
+///
+/// Partial coverage is REFUSED, not padded: a tail depth computed over a subset
+/// of an all-negative-truth probe is a different measurement, and the whole
+/// point of the probe is that its population is pinned by sha256.
+fn load_peer_probe_scores(path: &Path, entries: &[String]) -> Result<Vec<f64>, String> {
+    let txt = std::fs::read_to_string(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let mut lines = txt.lines();
+    let header = lines.next().ok_or_else(|| format!("{path:?}: empty"))?;
+    let cols: Vec<&str> = header.split('\t').collect();
+    let ci = |n: &str| cols.iter().position(|c| c.trim() == n);
+    let (i_entry, i_pred) = (
+        ci("entry").ok_or_else(|| format!("{path:?}: missing entry column"))?,
+        ci("pred").ok_or_else(|| format!("{path:?}: missing pred column"))?,
+    );
+    let mut lut: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    let mut n_rows = 0usize;
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() <= i_pred.max(i_entry) {
+            return Err(format!("{path:?}: short row {line:?}"));
+        }
+        let v: f64 = f[i_pred]
+            .trim()
+            .parse()
+            .map_err(|_| format!("{path:?}: bad pred {:?}", f[i_pred]))?;
+        lut.insert(f[i_entry].trim().to_string(), v);
+        n_rows += 1;
+    }
+    let mut out = Vec::with_capacity(entries.len());
+    let mut missing: Vec<String> = Vec::new();
+    for e in entries {
+        match lut.get(e) {
+            Some(&v) => out.push(v),
+            None => {
+                if missing.len() < 5 {
+                    missing.push(e.clone());
+                }
+                out.push(f64::NAN);
+            }
+        }
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "{path:?}: {} of {} probe rows have no score (table had {n_rows} rows). First \
+             unmatched: {}. A probe axis over a subset of its pinned population is a DIFFERENT \
+             measurement — refusing rather than reporting one.",
+            out.iter().filter(|v| v.is_nan()).count(),
+            entries.len(),
             missing.join(", ")
         ));
     }
@@ -3870,7 +4011,19 @@ Run the dedicated q-sweep harness for those._\n",
     // what this bake emits. A probe whose feature width does not match the
     // bake is REFUSED loudly rather than silently dropped: a quietly absent
     // axis is exactly the failure this gate exists to prevent.
-    let probe_scores = |path: &PathBuf, what: &str| -> Option<(Vec<String>, Vec<f64>, String)> {
+    //
+    // PEER MODE IS ALL-OR-NOTHING per axis. When `--dial-peer-scores` supplies
+    // the grid, a probe axis is scored from its OWN `--*-peer-scores` table or
+    // it is NOT MEASURED — it is never quietly filled in from `--bake`. Mixing
+    // them would report a peer's grid reach beside the bake's tail depth under
+    // one headline, and the "no cell out-scores a perfect copy" count would
+    // compare one scorer's grid against another's identity, which is not a
+    // measurement of anything.
+    let peer_grid_label: Option<&str> = args.dial_peer_scores.as_ref().map(|(l, _)| l.as_str());
+    let probe_scores = |path: &PathBuf,
+                        what: &str,
+                        peer: Option<&(String, PathBuf)>|
+     -> Option<(Vec<String>, Vec<f64>, String)> {
         if !path.exists() {
             eprintln!(
                 "bake_verdict: {what} probe {} is absent — G-ADDR axis NOT MEASURED",
@@ -3878,13 +4031,55 @@ Run the dedicated q-sweep harness for those._\n",
             );
             return None;
         }
-        match parquet_loader::load_labeled_grid(path) {
-            Ok(g) if g.n_features == n_inputs => {
-                let sha = zensim_validate::train_manifest::sha256_file(path).unwrap_or_default();
-                let dial = ens.score_rows(&g.feature_rows);
-                Some((g.label, dial, sha))
+        let g = match parquet_loader::load_labeled_grid(path) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!(
+                    "bake_verdict: {what} probe {} failed to load: {e} — G-ADDR axis NOT MEASURED",
+                    path.display()
+                );
+                return None;
             }
-            Ok(g) => {
+        };
+        let sha = zensim_validate::train_manifest::sha256_file(path).unwrap_or_default();
+        match (peer, peer_grid_label) {
+            // Peer scores supplied: the probe parquet contributes only its
+            // pinned row labels; the values come from the peer's table, so the
+            // feature width is irrelevant (a reference metric has no bake).
+            (Some((label, ppath)), _) => match load_peer_probe_scores(ppath, &g.label) {
+                Ok(v) => {
+                    eprintln!(
+                        "bake_verdict: {what} probe scored from PEER `{label}` ({})",
+                        ppath.display()
+                    );
+                    Some((g.label, v, sha))
+                }
+                Err(e) => {
+                    eprintln!(
+                        "bake_verdict: {what} peer probe `{label}` failed: {e} — G-ADDR axis \
+                         NOT MEASURED"
+                    );
+                    None
+                }
+            },
+            // Grid came from a peer but this probe did not: refuse to mix.
+            (None, Some(label)) => {
+                eprintln!(
+                    "bake_verdict: DIAL grid is peer `{label}` but no --{}-peer-scores was \
+                     supplied — G-ADDR axis NOT MEASURED (refusing to score this probe with \
+                     --bake while the grid describes `{label}`)",
+                    if what.starts_with("neg") {
+                        "negtail"
+                    } else {
+                        "identity"
+                    }
+                );
+                None
+            }
+            (None, None) if g.n_features == n_inputs => {
+                Some((g.label, ens.score_rows(&g.feature_rows), sha))
+            }
+            (None, None) => {
                 eprintln!(
                     "bake_verdict: {what} probe {} has {} feature columns; bake expects {} — \
                      G-ADDR axis NOT MEASURED",
@@ -3894,26 +4089,21 @@ Run the dedicated q-sweep harness for those._\n",
                 );
                 None
             }
-            Err(e) => {
-                eprintln!(
-                    "bake_verdict: {what} probe {} failed to load: {e} — G-ADDR axis NOT MEASURED",
-                    path.display()
-                );
-                None
-            }
         }
     };
     let addr_probes = AddrProbes {
         negtail: args.negtail_probe.as_ref().and_then(|p| {
-            probe_scores(p, "negative-tail").map(|(_lbl, dial, sha)| {
-                (
-                    zensim_validate::dial_addressability::NegTailMeasure::from_scores(&dial),
-                    sha,
-                )
-            })
+            probe_scores(p, "negative-tail", args.negtail_peer_scores.as_ref()).map(
+                |(_lbl, dial, sha)| {
+                    (
+                        zensim_validate::dial_addressability::NegTailMeasure::from_scores(&dial),
+                        sha,
+                    )
+                },
+            )
         }),
         identity: args.identity_probe.as_ref().and_then(|p| {
-            probe_scores(p, "identity")
+            probe_scores(p, "identity", args.identity_peer_scores.as_ref())
                 .map(|(lbl, dial, sha)| (lbl.into_iter().zip(dial).collect::<Vec<_>>(), sha))
         }),
     };
@@ -3928,6 +4118,45 @@ Run the dedicated q-sweep harness for those._\n",
     );
     buf.push_str(&dial_md);
     pt.mark("DIAL panel (grid load + score + mono/tied)");
+
+    if let Some(path) = args.gaddr_json.as_ref() {
+        match dial_metrics.addr.as_ref() {
+            Some(v) => {
+                let mut j = zensim_validate::dial_addressability::to_json(v);
+                // Stamp WHOSE dial this describes. In peer mode that is the
+                // peer, not `--bake`, and a file that does not say so is a
+                // mislabelled measurement waiting to be quoted.
+                if let Some(obj) = j.as_object_mut() {
+                    obj.insert(
+                        "scorer".into(),
+                        serde_json::json!(match args.dial_peer_scores.as_ref() {
+                            Some((label, path)) => serde_json::json!({
+                                "kind": "peer",
+                                "label": label,
+                                "dial_cells": path.display().to_string(),
+                                "negtail_peer": args.negtail_peer_scores.as_ref()
+                                    .map(|(_, p)| p.display().to_string()),
+                                "identity_peer": args.identity_peer_scores.as_ref()
+                                    .map(|(_, p)| p.display().to_string()),
+                            }),
+                            None => serde_json::json!({
+                                "kind": "bake",
+                                "label": args.bake.display().to_string(),
+                            }),
+                        }),
+                    );
+                }
+                match std::fs::write(path, serde_json::to_string_pretty(&j).unwrap_or_default()) {
+                    Ok(()) => eprintln!("wrote G-ADDR json to {}", path.display()),
+                    Err(e) => eprintln!("--gaddr-json write failed ({}): {e}", path.display()),
+                }
+            }
+            None => eprintln!(
+                "--gaddr-json: the DIAL panel produced no G-ADDR verdict (grid missing or \
+                 unreadable) — nothing written"
+            ),
+        }
+    }
 
     let basename = |p: &Path| -> String {
         p.file_name()
@@ -4974,14 +5203,21 @@ mod tests {
     /// make silent.
     #[test]
     fn canonical_dial_grid_has_a_g_addr_floor_row() {
+        use zensim_validate::dial_addressability as gaddr;
         assert!(
-            zensim_validate::dial_addressability::floor_for_grid(CANONICAL_DIAL_GRID_SHA256)
-                .is_some(),
+            gaddr::floor_for_grid(CANONICAL_DIAL_GRID_SHA256, gaddr::ACTIVE_REFERENCE).is_some(),
             "benchmarks/dial_addressability_floor_2026-09-04.json must register the canonical \
-             dial grid (sha {}). If the canonical grid is rotated, measure the SHIPPED \
-             reference dial on the new one and APPEND a row — never edit an existing row, and \
-             never drop the gate to unblock.",
-            &CANONICAL_DIAL_GRID_SHA256[..16]
+             dial grid (sha {}) for the ACTIVE reference `{}`. If the canonical grid is \
+             rotated, measure the REFERENCE METRIC on the new one \
+             (`bake_verdict --dial-peer-scores … --gaddr-json`) and APPEND a row — never edit \
+             an existing row, and never drop the gate to unblock.",
+            &CANONICAL_DIAL_GRID_SHA256[..16],
+            gaddr::ACTIVE_REFERENCE
+        );
+        assert!(
+            gaddr::floor_for_grid(CANONICAL_DIAL_GRID_SHA256, gaddr::INCUMBENT_REFERENCE).is_some(),
+            "the incumbent row must survive too — it is the `incumbent` column and the grading \
+             of every pre-2026-09-04 verdict"
         );
     }
 

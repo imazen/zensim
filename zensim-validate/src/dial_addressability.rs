@@ -10,10 +10,50 @@
 //! compressed dial clears easily), G3 asks about ordering, and SROCC is
 //! rank-invariant and therefore *structurally* incapable of seeing it.
 //!
-//! G-ADDR is a **relative** gate: the bar is the SHIPPED product dial's own
-//! measured behaviour on the SAME instrument. That is deliberate — an absolute
-//! number would be a guess, while "no worse at either end than what users have
-//! today" is exactly the promise the rule asks for.
+//! G-ADDR is a **referenced** gate: every REGRESSION bar is some *other*
+//! scorer's own measured behaviour on the SAME instrument. Which scorer is the
+//! reference is the whole design question, and it has one answer as of
+//! 2026-09-04.
+//!
+//! # The reference is the REFERENCE METRIC, not the incumbent
+//!
+//! **USER DECISION 2026-09-04:** *"I don't think we should pin to B, ssim2
+//! seems a better mentor."*
+//!
+//! The gate's first use pinned the regression tier to shipped **B**'s own dial
+//! values and then MEASURED those pins to be defective — not merely strict,
+//! but pointing the wrong way:
+//!
+//! * **A1 / A3 / A6 sat ABOVE the reference metric's own values on the same
+//!   grid** (truth `max` 98.38 / `p95` 95.46 / DR 85.20 against bars 99.98 /
+//!   99.72 / 86.08). A dial calibrated *exactly to the truth* failed all three,
+//!   and both other shipped profiles did. Those bars encoded the incumbent's
+//!   **stretch**, not its reach.
+//! * **A4** (`p5 ≤ 13.65`) was met by B only through a **−23-point low-band
+//!   bias**: on the 221 lowest-truth cells B reads +11.97 against a truth of
+//!   −11.30, and the train-on-test ORACLE — the best any monotone re-map of
+//!   B's ordering can do — reads `p5` 21.5-22.8. B's low `p5` is the low band
+//!   mapped *below* its conditional median, and the old A4 rewarded that.
+//!
+//! So the incumbent is the wrong mentor: pinning to it bars a candidate for
+//! being *closer to the truth than the incumbent is*. The bars are therefore
+//! derived from **`peer_ssim2` — the reference metric the dial's own anchor
+//! target is built from** — measured by the owner instrument on the identical
+//! grid and probes. The direction semantics are unchanged in form and sharper
+//! in meaning: **a candidate must address at least the range ssim2 addresses.**
+//!
+//! Both pin sets stay in the registry and both are printed. `bar` is
+//! `peer_ssim2` (what a candidate must clear); `incumbent` is shipped **B**
+//! (what users have today). A reader can always see whether a fail is "worse
+//! than the mentor" or "worse than what shipped", and the B pins remain
+//! readable as an incumbent-comparison row — labelled biased, never a bar.
+//!
+//! Re-pinning is **not** a relaxation, and it did not unblock anything: it
+//! moves the difficulty from the ceiling to the floor. ssim2's grid `min` is
+//! −55.35 against B's +3.13 and its negative-tail probe is 100 % below zero
+//! against B's 0 %, so A2 / A5 / A7-A9 all got *much* harder — which is
+//! correct, because the floor is exactly where the incumbent is genuinely
+//! broken.
 //!
 //! # What it measures, and where each number comes from
 //!
@@ -63,6 +103,29 @@ const REGISTRY_JSON: &str =
 
 // ─────────────────────────────── registry ───────────────────────────────
 
+/// The reference whose measured values are the REGRESSION bars.
+/// **USER DECISION 2026-09-04** — the reference metric, not the incumbent.
+pub const REFERENCE_PEER_SSIM2: &str = "peer_ssim2";
+
+/// The shipped product dial. Kept as a readable *incumbent* pin set — printed
+/// beside every bar so "worse than the mentor" and "worse than what shipped"
+/// are never confused — but **no longer a bar**. See the module docs for the
+/// four measured defects that retired it.
+pub const REFERENCE_SHIPPED_B: &str = "shipped_b";
+
+/// The pin set the REGRESSION tier bars against.
+pub const ACTIVE_REFERENCE: &str = REFERENCE_PEER_SSIM2;
+
+/// The pin set reported in the `incumbent` column.
+pub const INCUMBENT_REFERENCE: &str = REFERENCE_SHIPPED_B;
+
+/// Registry rows written before 2026-09-04 carry no `reference` field; they are
+/// all shipped-B measurements. A serde default keeps those rows **byte-
+/// untouched**, which is what the registry's append-only rule requires.
+fn default_reference() -> String {
+    REFERENCE_SHIPPED_B.to_string()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedBars {
     pub mono_min: f64,
@@ -77,6 +140,9 @@ pub struct FixedBars {
 pub struct GridFloor {
     pub dial_grid_sha256: String,
     pub label: String,
+    /// Which scorer this row measures. Absent ⇒ [`REFERENCE_SHIPPED_B`].
+    #[serde(default = "default_reference")]
+    pub reference: String,
     #[serde(default)]
     pub path: String,
     #[serde(default)]
@@ -96,6 +162,9 @@ pub struct GridFloor {
 pub struct NegTailFloor {
     pub probe_sha256: String,
     pub label: String,
+    /// Which scorer this row measures. Absent ⇒ [`REFERENCE_SHIPPED_B`].
+    #[serde(default = "default_reference")]
+    pub reference: String,
     #[serde(default)]
     pub n_rows: usize,
     pub min: f64,
@@ -109,6 +178,9 @@ pub struct NegTailFloor {
 pub struct IdentityFloor {
     pub probe_sha256: String,
     pub label: String,
+    /// Which scorer this row measures. Absent ⇒ [`REFERENCE_SHIPPED_B`].
+    #[serde(default = "default_reference")]
+    pub reference: String,
     #[serde(default)]
     pub n_rows: usize,
     pub dial_min: f64,
@@ -135,28 +207,33 @@ pub fn fixed_bars() -> FixedBars {
     registry().fixed_bars
 }
 
-/// The registered floor for a dial grid, keyed by the grid file's sha256.
-pub fn floor_for_grid(grid_sha256: &str) -> Option<GridFloor> {
+/// The registered floor for a dial grid, keyed by `(grid file sha256,
+/// reference)`. A row is a measurement OF ONE SCORER on one instrument, so both
+/// halves of the key are load-bearing: reading a `peer_ssim2` bar off a
+/// `shipped_b` row would silently compare a candidate against the wrong mentor.
+pub fn floor_for_grid(grid_sha256: &str, reference: &str) -> Option<GridFloor> {
     registry()
         .grids
         .into_iter()
-        .find(|g| g.dial_grid_sha256 == grid_sha256)
+        .find(|g| g.dial_grid_sha256 == grid_sha256 && g.reference == reference)
 }
 
-/// The registered floor for a negative-tail probe, keyed by the probe's sha256.
-pub fn floor_for_negtail(probe_sha256: &str) -> Option<NegTailFloor> {
+/// The registered floor for a negative-tail probe, keyed by `(probe sha256,
+/// reference)`.
+pub fn floor_for_negtail(probe_sha256: &str, reference: &str) -> Option<NegTailFloor> {
     registry()
         .negtail_probes
         .into_iter()
-        .find(|p| p.probe_sha256 == probe_sha256)
+        .find(|p| p.probe_sha256 == probe_sha256 && p.reference == reference)
 }
 
-/// The registered floor for an identity probe, keyed by the probe's sha256.
-pub fn floor_for_identity(probe_sha256: &str) -> Option<IdentityFloor> {
+/// The registered floor for an identity probe, keyed by `(probe sha256,
+/// reference)`.
+pub fn floor_for_identity(probe_sha256: &str, reference: &str) -> Option<IdentityFloor> {
     registry()
         .identity_probes
         .into_iter()
-        .find(|p| p.probe_sha256 == probe_sha256)
+        .find(|p| p.probe_sha256 == probe_sha256 && p.reference == reference)
 }
 
 // ─────────────────────────────── measures ───────────────────────────────
@@ -418,7 +495,11 @@ pub struct Verdict {
     pub contract: Overall,
     pub grid_label: String,
     pub grid_sha256: String,
+    /// The pin set the `bar` column comes from — what a candidate must clear.
     pub reference: String,
+    /// The pin set the `incumbent` column comes from — what users have today.
+    /// Printed beside every bar, never used as one.
+    pub incumbent_reference: String,
 }
 
 impl Verdict {
@@ -495,8 +576,9 @@ fn row(
     }
 }
 
-/// Evaluate G-ADDR. `grid_sha256` is the sha256 of the dial-grid FILE the
-/// measurement came from; an unregistered sha yields
+/// Evaluate G-ADDR against the ACTIVE reference ([`ACTIVE_REFERENCE`] —
+/// `peer_ssim2` since the 2026-09-04 re-pin). `grid_sha256` is the sha256 of
+/// the dial-grid FILE the measurement came from; an unregistered sha yields
 /// [`Overall::NotMeasurable`] on the regression tier with every end-of-range
 /// row `NotMeasured`.
 pub fn evaluate(
@@ -506,9 +588,37 @@ pub fn evaluate(
     negtail: Option<(&NegTailMeasure, &str)>,
     identity: Option<(&IdentityMeasure, &str)>,
 ) -> Verdict {
+    evaluate_with_reference(
+        ACTIVE_REFERENCE,
+        grid_sha256,
+        grid_label,
+        m,
+        negtail,
+        identity,
+    )
+}
+
+/// Evaluate G-ADDR against an explicitly named pin set. `evaluate` is this with
+/// [`ACTIVE_REFERENCE`]; the explicit form exists so a test (or a deliberate
+/// incumbent-comparison read) can ask "how would this have graded under the
+/// retired shipped-B pins?" without the answer depending on which reference
+/// happens to be active.
+pub fn evaluate_with_reference(
+    reference: &str,
+    grid_sha256: &str,
+    grid_label: &str,
+    m: &GridMeasure,
+    negtail: Option<(&NegTailMeasure, &str)>,
+    identity: Option<(&IdentityMeasure, &str)>,
+) -> Verdict {
     let bars = fixed_bars();
-    let floor = floor_for_grid(grid_sha256);
+    let floor = floor_for_grid(grid_sha256, reference);
     let f = floor.as_ref();
+    // The incumbent pin set: printed, never barred against. When the active
+    // reference IS the incumbent the two coincide, which is exactly what the
+    // pre-2026-09-04 gate did.
+    let inc_floor = floor_for_grid(grid_sha256, INCUMBENT_REFERENCE);
+    let fi = inc_floor.as_ref();
     let unreg = || "dial grid not in the G-ADDR floor registry".to_string();
     let none_note = |present: bool| {
         if present { String::new() } else { unreg() }
@@ -522,7 +632,7 @@ pub fn evaluate(
             Some(m.max),
             f.map(|x| x.max),
             "≥",
-            f.map(|x| x.max),
+            fi.map(|x| x.max),
             none_note(has),
         ),
         row(
@@ -532,7 +642,7 @@ pub fn evaluate(
             Some(m.min),
             f.map(|x| x.min),
             "≤",
-            f.map(|x| x.min),
+            fi.map(|x| x.min),
             none_note(has),
         ),
         row(
@@ -542,7 +652,7 @@ pub fn evaluate(
             Some(m.p95),
             f.map(|x| x.p95),
             "≥",
-            f.map(|x| x.p95),
+            fi.map(|x| x.p95),
             none_note(has),
         ),
         row(
@@ -552,7 +662,7 @@ pub fn evaluate(
             Some(m.p5),
             f.map(|x| x.p5),
             "≤",
-            f.map(|x| x.p5),
+            fi.map(|x| x.p5),
             none_note(has),
         ),
         row(
@@ -562,7 +672,7 @@ pub fn evaluate(
             Some(m.reach),
             f.map(|x| x.reach),
             "≥",
-            f.map(|x| x.reach),
+            fi.map(|x| x.reach),
             none_note(has),
         ),
         row(
@@ -572,7 +682,7 @@ pub fn evaluate(
             Some(m.dynamic_range),
             f.map(|x| x.dynamic_range),
             "≥",
-            f.map(|x| x.dynamic_range),
+            fi.map(|x| x.dynamic_range),
             none_note(has),
         ),
     ];
@@ -580,7 +690,8 @@ pub fn evaluate(
     // ── negative tail ──
     match negtail {
         Some((nm, sha)) => {
-            let nf = floor_for_negtail(sha);
+            let nf = floor_for_negtail(sha, reference);
+            let nfi = floor_for_negtail(sha, INCUMBENT_REFERENCE);
             let note = if nf.is_none() {
                 format!(
                     "probe {} not in the G-ADDR floor registry",
@@ -596,7 +707,7 @@ pub fn evaluate(
                 Some(nm.min),
                 nf.as_ref().map(|x| x.min),
                 "≤",
-                nf.as_ref().map(|x| x.min),
+                nfi.as_ref().map(|x| x.min),
                 note.clone(),
             ));
             rows.push(row(
@@ -606,7 +717,7 @@ pub fn evaluate(
                 Some(nm.p1),
                 nf.as_ref().map(|x| x.p1),
                 "≤",
-                nf.as_ref().map(|x| x.p1),
+                nfi.as_ref().map(|x| x.p1),
                 note.clone(),
             ));
             rows.push(row(
@@ -616,7 +727,7 @@ pub fn evaluate(
                 Some(nm.frac_below_zero),
                 nf.as_ref().map(|x| x.frac_below_zero),
                 "≥",
-                nf.as_ref().map(|x| x.frac_below_zero),
+                nfi.as_ref().map(|x| x.frac_below_zero),
                 note,
             ));
         }
@@ -648,7 +759,7 @@ pub fn evaluate(
         Some(m.mono),
         Some(bars.mono_min),
         "≥",
-        f.map(|x| x.mono),
+        fi.map(|x| x.mono),
         String::new(),
     ));
     rows.push(row(
@@ -658,13 +769,13 @@ pub fn evaluate(
         Some(m.tied),
         Some(bars.tied_max),
         "≤",
-        f.map(|x| x.tied),
+        fi.map(|x| x.tied),
         String::new(),
     ));
 
     match negtail {
         Some((nm, sha)) => {
-            let nf = floor_for_negtail(sha);
+            let nf = floor_for_negtail(sha, INCUMBENT_REFERENCE);
             rows.push(row(
                 "C3",
                 Tier::Contract,
@@ -716,7 +827,7 @@ pub fn evaluate(
 
     match identity {
         Some((im, sha)) => {
-            let idf = floor_for_identity(sha);
+            let idf = floor_for_identity(sha, INCUMBENT_REFERENCE);
             rows.push(row("C5", Tier::Contract,
                 "identity — dial(ref==dist) inside the registered band",
                 Some(im.n_outside_band as f64), Some(0.0), "≤",
@@ -803,12 +914,17 @@ pub fn evaluate(
         grid_label: floor
             .as_ref()
             .map(|x| x.label.clone())
+            .or_else(|| inc_floor.as_ref().map(|x| x.label.clone()))
             .unwrap_or_else(|| grid_label.to_string()),
         grid_sha256: grid_sha256.to_string(),
         reference: floor
             .as_ref()
-            .map(|_| "shipped B (b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07)".to_string())
-            .unwrap_or_else(|| "—".to_string()),
+            .map(|x| format!("{} — {}", reference, x.label))
+            .unwrap_or_else(|| format!("{reference} (no registry row)")),
+        incumbent_reference: inc_floor
+            .as_ref()
+            .map(|x| format!("{} — {}", INCUMBENT_REFERENCE, x.label))
+            .unwrap_or_else(|| format!("{INCUMBENT_REFERENCE} (no registry row)")),
     }
 }
 
@@ -818,18 +934,25 @@ pub fn render_markdown(v: &Verdict) -> String {
     s.push_str("\n## DIAL ADDRESSABILITY gate (G-ADDR — floor + ceiling reach)\n\n");
     s.push_str(&format!(
         "**{}** — {} pass / {} fail / {} not measured.\n\n\
-         Instrument: `{}` (sha `{}`). REGRESSION bars = the SHIPPED product dial's own \
-         end-of-range behaviour on this same instrument ({}); CONTRACT bars are absolute \
-         product requirements that the shipped dial can itself fail — the `incumbent` column \
-         says what it reads, so a standing contract failure is never misread as a regression \
-         this candidate introduced.\n\n",
+         Instrument: `{}` (sha `{}`).\n\n\
+         - **`bar` = vs {} (the bar)** — the REFERENCE METRIC's own end-of-range behaviour on \
+         this same instrument. A candidate must address at least the range ssim2 addresses. \
+         *(USER DECISION 2026-09-04: \"I don't think we should pin to B, ssim2 seems a better \
+         mentor.\" The retired shipped-B pins put A1/A3/A6 ABOVE what the reference metric \
+         itself reaches, and A4 was met only via a −23-point low-band bias.)*\n\
+         - **`incumbent` = vs {} (incumbent)** — what users have today. Printed for contrast, \
+         **never a bar**; the shipped-B pin set is retained in the registry and labelled \
+         biased. CONTRACT bars are absolute product requirements the shipped dial can itself \
+         fail, so a standing contract failure is never misread as a regression this candidate \
+         introduced.\n\n",
         v.headline(),
         v.n_pass(),
         v.n_fail(),
         v.n_not_measured(),
         v.grid_label,
         &v.grid_sha256[..v.grid_sha256.len().min(16)],
-        v.reference
+        v.reference,
+        v.incumbent_reference
     ));
     if v.regression == Overall::NotMeasurable {
         s.push_str(
@@ -841,7 +964,10 @@ pub fn render_markdown(v: &Verdict) -> String {
              registered one.\n\n",
         );
     }
-    s.push_str("| id | tier | axis | measured | bar | incumbent | pass |\n|---|---|---|--:|---|--:|:--:|\n");
+    s.push_str(
+        "| id | tier | axis | measured | bar (vs ssim2) | incumbent (shipped B) | pass |\n\
+         |---|---|---|--:|---|--:|:--:|\n",
+    );
     for r in &v.rows {
         let meas = match r.measured {
             Some(x) if x.is_finite() => format!("{x:.4}"),
@@ -878,9 +1004,12 @@ pub fn render_markdown(v: &Verdict) -> String {
          is a worse product dial — a codec loop asked for a near-lossless target can only \
          reach it if the metric still moves there, and a loop asked for an aggressive target \
          can only reach it if the metric still goes down there. Every REGRESSION bar is the \
-         shipped dial's own measured value on the same instrument, so a pass means \"no worse \
-         at either end than what users have today\"; nothing there is an invented threshold. \
-         `—` is NOT MEASURED and is never counted as a pass._\n\n",
+         REFERENCE METRIC's own measured value on the same instrument, so a pass means \"this \
+         dial addresses at least the range ssim2 addresses\"; nothing there is an invented \
+         threshold. Re-pinning to ssim2 is not a relaxation — it moved the difficulty from \
+         the ceiling to the FLOOR (ssim2 reaches −55.35 on this grid where shipped B stops at \
+         +3.13, and its negative-tail probe is 100 % below zero against B's 0 %). `—` is NOT \
+         MEASURED and is never counted as a pass._\n\n",
     );
     s
 }
@@ -898,6 +1027,8 @@ pub fn to_json(v: &Verdict) -> serde_json::Value {
         "grid_label": v.grid_label,
         "grid_sha256": v.grid_sha256,
         "reference": v.reference,
+        "incumbent_reference": v.incumbent_reference,
+        "active_reference": ACTIVE_REFERENCE,
         "measured": {
             "grid": {
                 "min": v.grid.min, "max": v.grid.max,
@@ -949,21 +1080,55 @@ mod tests {
             "fixed bars must be populated"
         );
         assert!(
-            r.grids
-                .iter()
-                .any(|g| g.dial_grid_sha256 == CANONICAL_GRID_SHA),
+            r.grids.iter().any(
+                |g| g.dial_grid_sha256 == CANONICAL_GRID_SHA && g.reference == ACTIVE_REFERENCE
+            ),
             "bake_verdict's CANONICAL_DIAL_GRID_SHA256 must have a floor row — otherwise a \
              default-flag verdict cannot be gated at all"
         );
         assert!(
-            !r.negtail_probes.is_empty(),
-            "a negative-tail probe row is required — 'negative values MUST work' is a product \
-             contract, and an unregistered probe makes C3/C4 unfalsifiable"
+            r.negtail_probes
+                .iter()
+                .any(|p| p.reference == ACTIVE_REFERENCE),
+            "a negative-tail probe row for the ACTIVE reference is required — 'negative values \
+             MUST work' is a product contract, and an unregistered probe makes C3/C4 \
+             unfalsifiable"
         );
         assert!(
-            !r.identity_probes.is_empty(),
-            "an identity probe row is required"
+            r.identity_probes
+                .iter()
+                .any(|p| p.reference == ACTIVE_REFERENCE),
+            "an identity probe row for the ACTIVE reference is required"
         );
+        // The retired shipped-B pin set must SURVIVE the re-pin. It is what the
+        // `incumbent` column prints and what every pre-2026-09-04 verdict was
+        // graded on; dropping it would make those numbers unreadable.
+        for (what, present) in [
+            (
+                "grid",
+                r.grids.iter().any(|g| {
+                    g.reference == REFERENCE_SHIPPED_B && g.dial_grid_sha256 == CANONICAL_GRID_SHA
+                }),
+            ),
+            (
+                "negtail",
+                r.negtail_probes
+                    .iter()
+                    .any(|p| p.reference == REFERENCE_SHIPPED_B),
+            ),
+            (
+                "identity",
+                r.identity_probes
+                    .iter()
+                    .any(|p| p.reference == REFERENCE_SHIPPED_B),
+            ),
+        ] {
+            assert!(
+                present,
+                "the retired shipped-B {what} row must stay in the registry (append-only; it is \
+                 the `incumbent` column and the grading of every pre-re-pin verdict)"
+            );
+        }
         for g in &r.grids {
             assert_eq!(
                 g.dial_grid_sha256.len(),
@@ -992,7 +1157,13 @@ mod tests {
     }
 
     fn canonical() -> GridFloor {
-        floor_for_grid(CANONICAL_GRID_SHA).expect("canonical grid registered")
+        floor_for_grid(CANONICAL_GRID_SHA, ACTIVE_REFERENCE).expect("canonical grid registered")
+    }
+
+    /// The retired shipped-B pin set for the same grid — kept readable so a
+    /// test can assert the two pin sets genuinely disagree.
+    fn canonical_b() -> GridFloor {
+        floor_for_grid(CANONICAL_GRID_SHA, REFERENCE_SHIPPED_B).expect("shipped-B grid row kept")
     }
 
     fn tie(f: &GridFloor) -> GridMeasure {
@@ -1012,8 +1183,28 @@ mod tests {
     fn probes() -> (NegTailFloor, IdentityFloor) {
         let r = registry();
         (
-            r.negtail_probes.into_iter().next().unwrap(),
-            r.identity_probes.into_iter().next().unwrap(),
+            r.negtail_probes
+                .into_iter()
+                .find(|p| p.reference == ACTIVE_REFERENCE)
+                .expect("active-reference negtail row"),
+            r.identity_probes
+                .into_iter()
+                .find(|p| p.reference == ACTIVE_REFERENCE)
+                .expect("active-reference identity row"),
+        )
+    }
+
+    fn probes_b() -> (NegTailFloor, IdentityFloor) {
+        let r = registry();
+        (
+            r.negtail_probes
+                .into_iter()
+                .find(|p| p.reference == REFERENCE_SHIPPED_B)
+                .expect("shipped-B negtail row kept"),
+            r.identity_probes
+                .into_iter()
+                .find(|p| p.reference == REFERENCE_SHIPPED_B)
+                .expect("shipped-B identity row kept"),
         )
     }
 
@@ -1021,10 +1212,10 @@ mod tests {
         v.rows.iter().find(|r| r.id == id).expect("row present")
     }
 
-    /// Re-measuring the reference bake itself must pass every REGRESSION axis
+    /// Re-measuring the ACTIVE REFERENCE itself must pass every REGRESSION axis
     /// — the bars ARE its values, and `≥` / `≤` are inclusive so a tie passes.
     #[test]
-    fn the_reference_bake_ties_its_own_regression_bars() {
+    fn the_active_reference_ties_its_own_regression_bars() {
         let f = canonical();
         let (nf, _) = probes();
         let nm = NegTailMeasure {
@@ -1169,25 +1360,27 @@ mod tests {
         assert!(!v.shippable());
     }
 
-    /// The CONTRACT tier is absolute and independent of the incumbent: a
-    /// candidate whose negative tail never goes below zero fails C3/C4 even
-    /// when it exactly ties the (equally broken) shipped tail.
+    /// The CONTRACT tier is absolute and independent of any reference: replaying
+    /// the SHIPPED dial's own measured tail fails C3/C4 — the tail never goes
+    /// below zero on an all-negative-truth probe — no matter which pin set the
+    /// regression tier is barring against.
     #[test]
     fn contract_tier_is_absolute_not_relative() {
         let f = canonical();
-        let (nf, idf) = probes();
+        let (nfb, idfb) = probes_b();
+        let (nf, _) = probes();
         let nm = NegTailMeasure {
-            n: nf.n_rows,
-            min: nf.min,
-            p1: nf.p1,
-            p5: nf.p5,
-            frac_below_zero: nf.frac_below_zero,
+            n: nfb.n_rows,
+            min: nfb.min,
+            p1: nfb.p1,
+            p5: nfb.p5,
+            frac_below_zero: nfb.frac_below_zero,
         };
         let im = IdentityMeasure {
-            n: idf.n_rows,
-            dial_min: idf.dial_min,
-            dial_median: idf.dial_median,
-            dial_max: idf.dial_max,
+            n: idfb.n_rows,
+            dial_min: idfb.dial_min,
+            dial_median: idfb.dial_median,
+            dial_max: idfb.dial_max,
             n_outside_band: 0,
             n_above_identity: 0,
             n_grid_cells_compared: 4424,
@@ -1199,26 +1392,297 @@ mod tests {
             &f.label,
             &tie(&f),
             Some((&nm, &nf.probe_sha256)),
-            Some((&im, &idf.probe_sha256)),
+            Some((&im, &idfb.probe_sha256)),
+        );
+        // C3/C4 are decided by the MEASUREMENT, never by the reference.
+        assert_eq!(
+            nfb.frac_below_zero, 0.0,
+            "the shipped dial's own registered tail never goes below zero — if this changes, \
+             the fixture below is no longer testing what it claims"
+        );
+        assert_eq!(row_by_id(&v, "C3").state, State::Fail);
+        assert_eq!(row_by_id(&v, "C4").state, State::Fail);
+        assert_eq!(v.contract, Overall::Fail);
+        assert_eq!(row_by_id(&v, "C3").tier, Tier::Contract);
+    }
+
+    // ───────────────── the 2026-09-04 re-pin: ssim2, not B ─────────────────
+
+    fn measure_of(f: &GridFloor) -> GridMeasure {
+        tie(f)
+    }
+
+    /// **The headline behavioural change.** The two pin sets genuinely
+    /// disagree, in BOTH directions, and each fixture is one shipped scorer's
+    /// real measured values — not a synthetic perturbation.
+    ///
+    /// * A candidate reading exactly **ssim2's** values clears every A row
+    ///   under the active pins and **fails A1/A3/A6 under the retired B pins**,
+    ///   because those three bars sat ABOVE what the reference metric itself
+    ///   reaches (99.98 / 99.72 / 86.08 against 98.38 / 95.46 / 85.20).
+    /// * A candidate reading exactly **shipped B's** values is the mirror
+    ///   image: it clears the retired pins by construction and **fails A2/A5
+    ///   under ssim2**, because B's floor stops at +3.13 where ssim2 reaches
+    ///   −55.35.
+    ///
+    /// If this test ever passes trivially (both arms agreeing), the re-pin has
+    /// been undone.
+    #[test]
+    fn ssim2_bars_and_shipped_b_bars_genuinely_disagree() {
+        let ssim2 = canonical();
+        let b = canonical_b();
+        assert_eq!(ssim2.reference, REFERENCE_PEER_SSIM2);
+        assert_eq!(b.reference, REFERENCE_SHIPPED_B);
+
+        // ssim2's own values: PASS under the active (ssim2) pins …
+        let v = evaluate(
+            &ssim2.dial_grid_sha256,
+            &ssim2.label,
+            &measure_of(&ssim2),
+            None,
+            None,
+        );
+        for id in ["A1", "A2", "A3", "A4", "A5", "A6"] {
+            assert_eq!(
+                row_by_id(&v, id).state,
+                State::Pass,
+                "{id}: the mentor must clear its own bar"
+            );
+        }
+        // … and FAIL the retired shipped-B pins on the three ceiling/spread
+        // axes that were measured to sit above the truth.
+        let vb = evaluate_with_reference(
+            REFERENCE_SHIPPED_B,
+            &ssim2.dial_grid_sha256,
+            &ssim2.label,
+            &measure_of(&ssim2),
+            None,
+            None,
+        );
+        for id in ["A1", "A3", "A6"] {
+            assert_eq!(
+                row_by_id(&vb, id).state,
+                State::Fail,
+                "{id}: a dial calibrated exactly to the truth must FAIL the retired B bar — \
+                 that defect is the whole reason for the re-pin"
+            );
+        }
+
+        // Mirror image: shipped B's own values clear the retired pins …
+        let vbb = evaluate_with_reference(
+            REFERENCE_SHIPPED_B,
+            &b.dial_grid_sha256,
+            &b.label,
+            &measure_of(&b),
+            None,
+            None,
+        );
+        // (Only A1-A6 are supplied here — no probes — so assert the ROWS, not
+        // the tier state, which is legitimately INCOMPLETE without a tail.)
+        for id in ["A1", "A2", "A3", "A4", "A5", "A6"] {
+            assert_eq!(
+                row_by_id(&vbb, id).state,
+                State::Pass,
+                "{id}: the incumbent ties its own retired pin"
+            );
+        }
+        assert_eq!(vbb.regression, Overall::Incomplete, "no probes supplied");
+        // … and fail the mentor's FLOOR axes.
+        let vbs = evaluate(&b.dial_grid_sha256, &b.label, &measure_of(&b), None, None);
+        for id in ["A2", "A5"] {
+            assert_eq!(
+                row_by_id(&vbs, id).state,
+                State::Fail,
+                "{id}: the incumbent's floor is far short of the mentor's"
+            );
+        }
+        assert_eq!(
+            vbs.regression,
+            Overall::Fail,
+            "the shipped dial must no longer set — nor clear — the regression bars (a FAIL here \
+             outranks the missing-probe INCOMPLETE, which is the point)"
+        );
+    }
+
+    /// A4 specifically: the retired bar rewarded shipped B's −23-point low-band
+    /// bias. A candidate whose `p5` sits BETWEEN the mentor's and the
+    /// incumbent's passes the old bar and fails the new one; Profile D's real
+    /// measured `p5` (9.52) passes both.
+    #[test]
+    fn a4_stops_rewarding_the_low_band_bias() {
+        let ssim2 = canonical();
+        let b = canonical_b();
+        assert!(
+            ssim2.p5 < b.p5,
+            "fixture premise: the mentor's p5 ({}) must be below the incumbent's ({})",
+            ssim2.p5,
+            b.p5
+        );
+        let mid = 0.5 * (ssim2.p5 + b.p5); // ≈ 11.95, between 10.26 and 13.65
+        let mut c = measure_of(&ssim2);
+        c.p5 = mid;
+        c.dynamic_range = c.p95 - c.p5;
+        assert_eq!(
+            row_by_id(
+                &evaluate_with_reference(
+                    REFERENCE_SHIPPED_B,
+                    &b.dial_grid_sha256,
+                    &b.label,
+                    &c,
+                    None,
+                    None
+                ),
+                "A4"
+            )
+            .state,
+            State::Pass,
+            "the retired bar accepts a p5 well above the truth's"
         );
         assert_eq!(
-            v.regression,
-            Overall::Pass,
-            "tying the incumbent everywhere must clear the regression tier"
+            row_by_id(
+                &evaluate(&ssim2.dial_grid_sha256, &ssim2.label, &c, None, None),
+                "A4"
+            )
+            .state,
+            State::Fail,
+            "the mentor's bar does not"
         );
-        // Whether the incumbent CLEARS the contract tier is a measured fact
-        // about the shipped dial, not an assumption — assert only that the
-        // two tiers are computed separately and that C3 reads the probe.
-        let c3 = row_by_id(&v, "C3");
-        assert_eq!(c3.tier, Tier::Contract);
+
+        // Profile D, measured 2026-09-04 on this same grid.
+        let mut d = measure_of(&ssim2);
+        d.p5 = 9.52;
+        d.dynamic_range = d.p95 - d.p5;
         assert_eq!(
-            c3.state,
-            if nf.frac_below_zero > 0.0 {
-                State::Pass
-            } else {
-                State::Fail
-            },
-            "C3 must be decided by the probe measurement, not by the incumbent"
+            row_by_id(
+                &evaluate(&ssim2.dial_grid_sha256, &ssim2.label, &d, None, None),
+                "A4"
+            )
+            .state,
+            State::Pass,
+            "A4 is reachable — Profile D reaches it — so it stays a bar, just a truthful one"
+        );
+    }
+
+    /// The negative-tail pins are reference-scoped too, and the two disagree by
+    /// the entire range of the axis: ssim2 is below zero on 100 % of an
+    /// all-negative-truth probe, the shipped dial on 0 %.
+    #[test]
+    fn negtail_pins_are_reference_scoped() {
+        let f = canonical();
+        let (nf, _) = probes();
+        let (nfb, _) = probes_b();
+        assert_eq!(nf.frac_below_zero, 1.0);
+        assert_eq!(nfb.frac_below_zero, 0.0);
+        assert!(nf.min < nfb.min);
+
+        // The shipped dial's own tail, barred against the mentor: A7/A8/A9 fail.
+        let nm = NegTailMeasure {
+            n: nfb.n_rows,
+            min: nfb.min,
+            p1: nfb.p1,
+            p5: nfb.p5,
+            frac_below_zero: nfb.frac_below_zero,
+        };
+        let v = evaluate(
+            &f.dial_grid_sha256,
+            &f.label,
+            &tie(&f),
+            Some((&nm, &nf.probe_sha256)),
+            None,
+        );
+        for id in ["A7", "A8", "A9"] {
+            assert_eq!(row_by_id(&v, id).state, State::Fail, "{id}");
+        }
+        // Same numbers under the retired pins: all three pass (they ARE the pin).
+        let vb = evaluate_with_reference(
+            REFERENCE_SHIPPED_B,
+            &f.dial_grid_sha256,
+            &f.label,
+            &tie(&f),
+            Some((&nm, &nf.probe_sha256)),
+            None,
+        );
+        for id in ["A7", "A8", "A9"] {
+            assert_eq!(row_by_id(&vb, id).state, State::Pass, "{id}");
+        }
+    }
+
+    /// The report must show BOTH: `bar` = the mentor, `incumbent` = what
+    /// shipped. They are different numbers on every end-of-range axis, and a
+    /// reader who cannot tell them apart cannot tell "worse than the mentor"
+    /// from "worse than what shipped".
+    #[test]
+    fn bar_is_the_mentor_and_incumbent_is_the_shipped_dial() {
+        let ssim2 = canonical();
+        let b = canonical_b();
+        let v = evaluate(
+            &ssim2.dial_grid_sha256,
+            &ssim2.label,
+            &measure_of(&ssim2),
+            None,
+            None,
+        );
+        for (id, mentor, incumbent) in [
+            ("A1", ssim2.max, b.max),
+            ("A2", ssim2.min, b.min),
+            ("A3", ssim2.p95, b.p95),
+            ("A4", ssim2.p5, b.p5),
+            ("A5", ssim2.reach, b.reach),
+            ("A6", ssim2.dynamic_range, b.dynamic_range),
+        ] {
+            let r = row_by_id(&v, id);
+            assert_eq!(r.bar, Some(mentor), "{id}: bar must be the mentor's value");
+            assert_eq!(
+                r.incumbent,
+                Some(incumbent),
+                "{id}: incumbent must be the shipped dial's value"
+            );
+            assert_ne!(
+                r.bar, r.incumbent,
+                "{id}: the two pin sets must genuinely differ, else the re-pin was a no-op"
+            );
+        }
+        assert!(v.reference.contains(REFERENCE_PEER_SSIM2));
+        assert!(v.incumbent_reference.contains(REFERENCE_SHIPPED_B));
+        let md = render_markdown(&v);
+        assert!(
+            md.contains("bar (vs ssim2)"),
+            "the table header must name the mentor"
+        );
+        assert!(
+            md.contains("incumbent (shipped B)"),
+            "the table header must name the incumbent"
+        );
+    }
+
+    /// **MEASURED 2026-09-04: the mentor passes the entire CONTRACT tier.**
+    /// This is the answer to "what does 'as good as the mentor' mean at the
+    /// ends" — every absolute product bar, including the four the shipped dial
+    /// fails. Pinned as a test so a later registry edit cannot quietly move it.
+    #[test]
+    fn the_mentor_passes_the_whole_contract_tier() {
+        let f = canonical();
+        let (nf, idf) = probes();
+        assert!(f.mono >= fixed_bars().mono_min, "C1: mono {}", f.mono);
+        assert!(f.tied <= fixed_bars().tied_max, "C2: tied {}", f.tied);
+        assert!(nf.frac_below_zero > 0.0, "C3");
+        assert!(nf.min < 0.0, "C4");
+        let bars = fixed_bars();
+        assert!(
+            idf.dial_min >= bars.identity_lo && idf.dial_max <= bars.identity_hi,
+            "C5: identity {}..{} outside [{}, {}]",
+            idf.dial_min,
+            idf.dial_max,
+            bars.identity_lo,
+            bars.identity_hi
+        );
+        // C6 follows from the two registry rows without any extra measurement:
+        // the mentor's worst grid cell is below its identity value.
+        assert!(
+            f.max <= idf.dial_max,
+            "C6: grid max {} must not exceed identity {}",
+            f.max,
+            idf.dial_max
         );
     }
 
