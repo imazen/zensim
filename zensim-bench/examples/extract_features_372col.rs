@@ -31,6 +31,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use rayon::prelude::*;
 use zensim::{ZensimConfig, compute_zensim_with_config};
 
+// THE decode owner (imazen-only: magic-byte detection via zencodec + zenjpeg /
+// zenpng / zenwebp / zenavif / zenjxl). Shared verbatim with
+// `verify_bitstream_decode`; never re-implement decoding here.
+#[path = "shared/zen_decode.rs"]
+mod zen_decode;
+
 #[derive(Debug, Clone)]
 struct Pair {
     reference: PathBuf,
@@ -51,12 +57,16 @@ fn main() {
     let mut path: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
     let mut max_pairs: usize = usize::MAX;
+    let mut allow_failures: usize = 0;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
             "--out" => out = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
+            // How many pairs may fail extraction before the run aborts.
+            // Default 0 — see the NO GRACEFUL SKIPS block below.
+            "--allow-failures" => allow_failures = args.next().unwrap().parse().unwrap(),
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -99,7 +109,7 @@ fn main() {
     let progress = AtomicUsize::new(0);
     let log_every = (n_total / 20).max(1);
 
-    let scored: Vec<Option<(String, f64, Vec<(String, f64)>, Vec<f64>)>> = pairs
+    let scored: Vec<Result<(String, f64, Vec<(String, f64)>, Vec<f64>), String>> = pairs
         .par_iter()
         .map(|kp| {
             let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
@@ -113,14 +123,48 @@ fn main() {
         })
         .collect();
 
-    let mut rows: Vec<(String, f64, Vec<(String, f64)>, Vec<f64>)> =
-        scored.into_iter().flatten().collect();
+    // NO GRACEFUL SKIPS. A pair that cannot be decoded or scored is a hard
+    // failure by default; tolerating any is a decision the CALLER makes
+    // explicitly with `--allow-failures N`, so it is visible in the invocation
+    // chain instead of buried in the loop body. (This function used to
+    // `.flatten()` an `Option` — a corpus could lose 30 % of its rows and the
+    // only trace was a smaller row count in the "scored N/M" line.)
+    let mut rows: Vec<(String, f64, Vec<(String, f64)>, Vec<f64>)> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+    for r in scored {
+        match r {
+            Ok(row) => rows.push(row),
+            Err(e) => failures.push(e),
+        }
+    }
     eprintln!(
-        "scored {}/{} pairs in {:.1}s",
+        "scored {}/{} pairs in {:.1}s ({} failed)",
         rows.len(),
         n_total,
-        started.elapsed().as_secs_f64()
+        started.elapsed().as_secs_f64(),
+        failures.len()
     );
+    if !failures.is_empty() {
+        eprintln!(
+            "{} of {n_total} pairs FAILED to extract (--allow-failures {allow_failures}):",
+            failures.len()
+        );
+        for e in failures.iter().take(20) {
+            eprintln!("  {e}");
+        }
+        if failures.len() > 20 {
+            eprintln!("  … and {} more", failures.len() - 20);
+        }
+        if failures.len() > allow_failures {
+            eprintln!(
+                "ABORT: {} failures exceeds --allow-failures {allow_failures}. \
+                 Fix the corpus or raise the budget deliberately; a partial \
+                 extraction written silently is a data-integrity bug.",
+                failures.len()
+            );
+            std::process::exit(4);
+        }
+    }
 
     let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
     if n_feat != 372 {
@@ -174,27 +218,55 @@ fn main() {
     );
 }
 
-fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<(String, f64)>, Vec<f64>)> {
-    let src_img = image::open(&kp.reference).ok()?.to_rgb8();
-    let dst_img = image::open(&kp.distorted).ok()?.to_rgb8();
-    let (w, h) = src_img.dimensions();
-    let (dw, dh) = dst_img.dimensions();
-    if w != dw || h != dh {
-        return None;
+/// Extract one pair's 372 features.
+///
+/// Returns `Err` — never a silent skip — on every failure path. Decoding goes
+/// through [`zen_decode`], the imazen-only decode owner: magic-byte format
+/// detection plus zenjpeg / zenpng / zenwebp / zenavif / zenjxl. Before
+/// 2026-09-04 this function called `image::open(..).ok()?`, which (a) has no
+/// AVIF or JXL decoder in its default features, so 30.8 % of the safesyn
+/// corpus was dropped without a word, and (b) decodes an XYB JPEG as an
+/// ordinary JPEG, producing wrong pixels that still parse. See the module doc
+/// of `shared/zen_decode.rs`.
+fn extract_features(kp: &Pair) -> Result<(String, f64, Vec<(String, f64)>, Vec<f64>), String> {
+    let src = zen_decode::decode_rgb8_path(&kp.reference).map_err(|e| format!("reference: {e}"))?;
+    let dst = zen_decode::decode_rgb8_path(&kp.distorted).map_err(|e| format!("distorted: {e}"))?;
+    if src.width != dst.width || src.height != dst.height {
+        return Err(format!(
+            "dimension mismatch: reference {}x{} ({}) vs distorted {}x{} ({})",
+            src.width,
+            src.height,
+            kp.reference.display(),
+            dst.width,
+            dst.height,
+            kp.distorted.display()
+        ));
     }
-    let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-    let dst_pixels: Vec<[u8; 3]> = dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-    let w_us = w as usize;
-    let h_us = h as usize;
+    let w_us = src.width as usize;
+    let h_us = src.height as usize;
     if w_us < 8 || h_us < 8 {
-        return None;
+        return Err(format!(
+            "image too small for the 4-scale pyramid: {w_us}x{h_us} ({})",
+            kp.reference.display()
+        ));
     }
+    let src_pixels: Vec<[u8; 3]> = src
+        .pixels
+        .chunks_exact(3)
+        .map(|c| [c[0], c[1], c[2]])
+        .collect();
+    let dst_pixels: Vec<[u8; 3]> = dst
+        .pixels
+        .chunks_exact(3)
+        .map(|c| [c[0], c[1], c[2]])
+        .collect();
     let mut config = ZensimConfig::default();
     config.extended_features = true;
     config.compute_iw_features = true;
-    let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, config).ok()?;
+    let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, config)
+        .map_err(|e| format!("compute_zensim ({}): {e:?}", kp.distorted.display()))?;
     let features: Vec<f64> = result.features().to_vec();
-    Some((
+    Ok((
         kp.ref_basename.clone(),
         kp.human_score,
         kp.extra_targets.clone(),

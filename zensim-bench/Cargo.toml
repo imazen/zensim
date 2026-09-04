@@ -56,6 +56,21 @@ verify-jxl = ["verify-decode", "dep:zenjxl", "zenjxl/zencodec"]
 verify-webp = ["verify-decode", "dep:zenwebp"]
 verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 
+# THE decode path for the corpus feature extractors (2026-09-04). Pulls every
+# codec the shared owner `examples/shared/zen_decode.rs` dispatches to, so a
+# corpus row in ANY of the five formats decodes through an imazen decoder —
+# notably zenjpeg, which is XYB-aware where the `image` crate is not. An alias
+# for `verify-all` rather than a parallel dep list, so the extractor and
+# `verify_bitstream_decode` are guaranteed to build the SAME decoders.
+zen-decode = ["verify-all"]
+
+# Test-only: the fixture ENCODERS for `tests/zen_decode_formats.rs`. The gates
+# synthesise their own AVIF / JXL / XYB-JPEG / WebP / PNG fixtures rather than
+# reading a corpus, so the suite is self-contained (no network, no /mnt/v, no
+# "skip if the file is missing"). Separate from `zen-decode` so the extractor
+# build does not pay for encoder graphs it never calls.
+zen-decode-tests = ["zen-decode", "zenavif/encode", "zenjxl/encode", "zenjpeg/zencodec", "zenjpeg/__test-utils"]
+
 # `hdr944_extract` example (SOTA-944 hdr_v3mix amendment): decode the HDR
 # datagen's (PQ-PNG ref, .jxl dist) pairs in memory and extract the 944
 # folded+append2 HDR-PQ features — no PNG decode-cache on disk.
@@ -179,9 +194,14 @@ required-features = ["hdr944-extract"]
 name = "sdr944_extract"
 required-features = ["sdr944-extract"]
 
+# `extract_features_372col` requires `zen-decode` as of 2026-09-04: its decode
+# path moved off the `image` crate onto the imazen-only shared owner
+# (`examples/shared/zen_decode.rs`). Making the codecs a REQUIRED feature is the
+# loud form of the fix — there is no longer a build in which the extractor
+# exists but silently cannot read AVIF or JXL.
 [[example]]
 name = "extract_features_372col"
-required-features = ["training"]
+required-features = ["training", "zen-decode"]
 
 [[example]]
 name = "m3_fixture_gen"
@@ -208,6 +228,10 @@ required-features = ["extract-omni"]
 [[example]]
 name = "verify_bitstream_decode"
 required-features = ["verify-decode"]
+
+[[test]]
+name = "zen_decode_formats"
+required-features = ["zen-decode-tests"]
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
