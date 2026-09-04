@@ -520,6 +520,103 @@ The safe shape is an **additive** `--score-units` opt-in plus a test pinning
 existing caller. Registered as owner work with the measurement above as its
 acceptance data.
 
+## 6g. AMENDMENT A3 — the class-C lane's two inputs, both MEASURED against this wave before any G1 result existed
+
+The class-C lane (`benchmarks/free_features_classC_2026-09-04.md`) landed two
+things that bear on this wave. Both are checked here against **this wave's own
+root and slice**, because neither can be inherited on assertion.
+
+### A3.1 The free-40 train/serve skew — this wave's arms DO consume it, and the effect is BOUNDED and sub-noise
+
+The class-C lane measured route parity on 773 real corpus pairs and found the
+free-40 raw-moment set fails its own 2e-5 bar on **2,607 / 28,601 cells
+(9.12 %), worst \|Δ\| 3.63e-3, entirely `GLOBAL_CLOSS` (1,467) and
+`GLOBAL_CGAIN` (1,132)** — catastrophic-cancellation forms whose two routes
+stage f32→f64 differently. `LUMA_MEAN_REF` and the class-C 24 are clean; basic
+and peaks are bit-identical.
+
+**Does this wave's slice consume them? YES — computed, not assumed.** The
+`GLOBAL_*` append indices are `base = 720 + 51·scale + 17·ch`, `+13/+14/+15`,
+over the 11 active append cells (B at scale 0 is skipped). All 22 CGAIN/CLOSS
+coordinates — `734 735 751 752 785 786 802 803 819 820 836 837 853 854 870 871
+887 888 904 905 921 922` — are in `slice_basic156_free.txt`, which every arm
+of this wave, **and A4b, and K1–K4, and every published 156+free number**,
+trains and is scored on. This is not a defect this wave introduces; it is one
+the whole class carries.
+
+**Rather than register a hand-wave, this lane bounded it.** Strict worst case:
+add the single worst observed \|Δ\| (3.63e-3) to **all 22** affected inputs
+**coherently** — far beyond the 9.12 % of cells that actually deviate and the
+typical magnitude — then re-score the control through the owner forward:
+
+| corpus | variant | \|SROCC\| | **ΔSROCC** | max \|Δscore\| | mean \|Δscore\| |
+|---|---|--:|--:|--:|--:|
+| KonJND JPEG-504 | baseline | 0.432725 | — | — | — |
+| | coherent +ε | 0.426546 | **−0.00618** | 0.282 | 0.074 |
+| | coherent −ε | 0.438521 | **+0.00580** | 0.225 | 0.076 |
+| | random sign | 0.435386 | +0.00266 | 0.265 | 0.054 |
+| CID22 val | coherent +ε | 0.889271 | **−0.00102** | 0.350 | 0.132 |
+| | coherent −ε | 0.890882 | +0.00059 | 0.396 | 0.139 |
+| | random sign | 0.889934 | −0.00036 | 0.508 | 0.077 |
+
+**Verdict, registered:** on the rank axes the skew is a **bounded upper bound
+of \|ΔSROCC\| ≤ 0.0062 on KonJND and ≤ 0.0010 on CID22** — respectively
+**1/15th of this wave's own measured control seed spread (0.133)** and at
+δ_cid22's noise floor. It cannot move any rank conclusion in §7. It is
+therefore recorded as a **known, measured, bounded train/serve skew**, not
+excluded from the frozen slice (which is frozen, and shared with every number
+the class is compared against).
+
+**One place it is NOT negligible, stated because it is the honest caveat:**
+max \|Δscore\| reaches **0.51 dial points**, and W3's materiality threshold is
+**0.5 points**. A coherent worst-case skew could flip a marginal ladder rung
+across that threshold. It cannot rescue W3 (§6d needs a 25-event reduction),
+but a *single* borderline W3 cell should not be read as exact. The clean fix
+belongs to the slot family's owner (compensated or f64 `Σs²`), as that lane
+says.
+
+### A3.2 The class-C 24 are LIVE in THIS wave's root — so G1 is a labelled EXTRA arm, not a next tranche
+
+The class-C lane verified its 24 slots in `r1b-pools944-2026-08-30`. This wave
+trains on a **different** root (`ext944-era2r4-2026-09-01`), so that could not
+be inherited. MEASURED on `ext_cid22val.parquet` at both roots:
+
+| root | class-C 24 non-zero rows | `f377` range | mean |
+|---|--:|---|--:|
+| `r1b-pools944-2026-08-30` (class-C lane's) | **4292 / 4292** on all 24 | 2.621e-04 … 7.573e-02 | 8.370e-03 |
+| **`ext944-era2r4-2026-09-01` (this wave's)** | **4292 / 4292** on all 24 | 2.621e-04 … 7.573e-02 | 8.370e-03 |
+
+Identical to the digit, so no new extraction and no root change: a class-C arm
+is **one environment variable** on this wave's own recipe.
+
+**ARM G1 (labelled EXTRA, declared before any G1 result exists):** A4b's recipe
+verbatim, `WR4_KEEP=scripts/sota944/slice_basic156_free_classc.txt` (289 coords
+= this wave's 265 + the 24), seeds 4004/4005/4006, same driver chain, scored
+identically. It is **not** part of the frozen 7-arm comparison set and is
+reported separately; it is a *tranche* test (does a wider cheap slice help),
+not one of the registered KonJND mechanisms.
+
+**W4 accounting for G1, carried from the class-C lane's own measurement:**
++1.3–1.5 % (AVX-512) / +2.0–2.3 % (AVX2) at 1T **on top of** the 156+free
+walk, which the exam's APPENDIX C addendum measures at 1.026–1.189× of the
+`add156_156basic` bar across both tiers. Worst case 1.189 × 1.023 = **1.216×**,
+still inside the 1.25× W4 bar — but with only 0.034 of headroom at the worst
+cell, so a G1 that becomes a candidate needs its own direct W4 measurement, not
+this arithmetic.
+
+### A3.3 The PJND_FRAGILITY trap does not bite this wave — checked, not assumed
+
+The class-C lane warns that a v1-only 944 walk leaves twelve `PJND_FRAGILITY`
+slots at a constant **1.0**, so a model built from "whatever columns are
+non-zero" would ingest twelve information-free columns. Two independent reasons
+this wave is clear, both measured: (a) **0 of 12** of those indices
+(`393 422 451 / 480 509 538 / 567 596 625 / 654 683 712`) appear in either
+slice — the slices are explicit index lists, never a non-zero scan; and (b) in
+the **stored** 944 tables at both roots those columns are **not** constant 1.0
+(0/12 constant), because the stored tables come from the full walk. The
+constant is a property of the cheap serving route, which is exactly why (a) is
+the part that matters.
+
 ## 7. RESULTS
 
 ### 7.1 THE CONTROL — A4b's headline numbers are its BEST seed, and the seed spread swallows every published arm effect
