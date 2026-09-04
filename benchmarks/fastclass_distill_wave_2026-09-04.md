@@ -679,6 +679,218 @@ Corrections are being carried into the affected docs as labelled addenda; the
 original text stands as the record of what those lanes measured under their
 protocol.
 
-### 7.3 The arms
 
-*(appended as arms land)*
+### 7.3 The arms — every cell, k = 3, read from its own fulleval
+
+| arm | KonJND mean [min..max] | CID22 | CSIQ | LIVE | AIC-3 | AIC-4 | composite | mono | q≥85 inv | q≥85 bkw |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| **C0** control | 0.3561 [0.2998..0.4327] | 0.8862 | 0.9559 | 0.9531 | 0.7968 | 0.9133 | 0.8572 | 0.9884 | 0.122 | 0.000 |
+| **D1** kon withinref | 0.4073 [0.3881..0.4252] | 0.8819 | 0.9555 | 0.9561 | 0.8040 | 0.9120 | 0.8601 | 0.9885 | 0.125 | 0.000 |
+| **D2** hf withinref | 0.4315 [0.4043..0.4484] | 0.8905 | 0.9544 | 0.9437 | 0.7992 | 0.9094 | **0.8657** | **0.9921** | **0.049** | 0.0029 |
+| **D3** both | **0.4322** [0.4232..0.4377] | 0.8863 | 0.9559 | 0.9442 | 0.8018 | 0.9186 | 0.8645 | 0.9899 | 0.052 | 0.0029 |
+| **D4** high-q-boost 3.0 | 0.3461 [0.2991..0.3860] | 0.8844 | 0.9485 | 0.9566 | 0.8048 | 0.9199 | 0.8527 | 0.9860 | 0.174 | 0.0029 |
+| **F1** KADIS w=0.15 | 0.4066 [0.4025..0.4145] | 0.8777 | 0.9448 | 0.9604 | 0.7921 | 0.9147 | 0.8534 | 0.9893 | 0.110 | 0.000 |
+| **G1** class-C (extra) | 0.3800 [0.3369..0.4370] | 0.8859 | 0.9557 | 0.9524 | 0.7952 | 0.9113 | 0.8592 | 0.9888 | 0.119 | 0.000 |
+| **E1** capacity | **NOT MEASURED — structural, §7.6** | | | | | | | | | |
+| *ssim2 (opponent)* | *0.5272* | *0.8894* | *0.9047* | *0.9599* | *0.7970* | *0.9127* | — | *0.9930* | — | *0 %* |
+
+### 7.4 **NOTHING MOVES KonJND.** The mean shifts are not significant at k = 3
+
+The seeds are shared across arms, so the seed effect is a matched nuisance and
+the powerful test is **paired by seed**. Per-seed Δ vs the control, mean, and a
+paired t on 3 matched pairs (df = 2):
+
+| arm | per-seed Δ vs C0 (4004 / 4005 / 4006) | mean Δ | SD(Δ) | **t(df=2)** | sign |
+|---|---|--:|--:|--:|:--:|
+| D1 | −0.0075 / +0.0524 / +0.1089 | +0.0513 | 0.0582 | **+1.52** | 2/3 |
+| D2 | −0.0284 / +0.1126 / +0.1420 | +0.0754 | 0.0911 | **+1.43** | 2/3 |
+| D3 | −0.0096 / +0.1020 / +0.1359 | +0.0761 | 0.0761 | **+1.73** | 2/3 |
+| D4 | −0.1336 / +0.0174 / +0.0862 | −0.0100 | 0.1124 | −0.15 | 2/3 |
+| F1 | −0.0298 / +0.0787 / +0.1027 | +0.0506 | 0.0706 | +1.24 | 2/3 |
+| G1 | −0.0668 / +0.0012 / +0.1372 | +0.0239 | 0.1038 | +0.40 | 2/3 |
+
+**No arm reaches significance** (|t| < 1.8 throughout; t(0.975, df=2) = 4.30).
+And the pattern is the same in every arm: **each one is NEGATIVE on seed 4004 —
+the control's lucky seed — and positive on the two where the control
+collapses.** The arms are not adding KonJND skill; they are *removing the
+control's downside*.
+
+**And no arm's BEST seed reaches the opponent.** The highest KonJND anywhere in
+the wave is `D2_s4005` at **0.4484**, against ssim2's **0.5272** — still
+−0.079. The registered W1 clause fails for every arm, every seed.
+
+### 7.5 What DID move, significantly: the VARIANCE, and W3
+
+Two effects clear their tests where the means do not.
+
+**(a) Seed variance on KonJND.** F-test of the control's variance over each
+arm's (F(2,2) upper-5 % critical value = 19.0):
+
+| arm | per-seed KonJND | SD | min | F vs C0 | significant? |
+|---|---|--:|--:|--:|:--:|
+| C0 | 0.4327 / 0.3357 / 0.2998 | 0.0688 | 0.2998 | — | — |
+| D1 | 0.4252 / 0.3881 / 0.4087 | 0.0186 | 0.3881 | 13.7 | no |
+| D2 | 0.4043 / 0.4484 / 0.4418 | 0.0238 | 0.4043 | 8.4 | no |
+| **D3** | 0.4232 / 0.4377 / 0.4357 | **0.0079** | 0.4232 | **75.9** | **YES p<0.05** |
+| D4 | 0.2991 / 0.3531 / 0.3860 | 0.0439 | 0.2991 | 2.5 | no |
+| **F1** | 0.4030 / 0.4145 / 0.4025 | **0.0068** | 0.4025 | **103.1** | **YES p<0.05** |
+| G1 | 0.3659 / 0.3369 / 0.4370 | 0.0515 | 0.3369 | 1.8 | no |
+
+**D3 and F1 make KonJND REPRODUCIBLE where the control is a coin flip.** D3
+sits at 0.432 ± 0.008 — it matches the control's best seed and never falls
+below it — while the control swings 0.300–0.433. That is a real product
+property (a metric whose weakest axis is stable beats one that is a lottery),
+and it is the only KonJND result in this wave that clears a significance test.
+It is a **variance** finding, not a mean finding, and it must not be reported
+as the latter.
+
+**(b) D2 improves W3's monotonicity, consistently.** Paired by seed, mono
+Δ = **+0.0037, 3/3 positive, t = +3.00** — the most consistent single effect in
+the wave — and q≥85 ladder inversions fall **0.122 → 0.049**, the largest
+arm-effect-to-seed-noise ratio anywhere in the table (**3.56**, vs 1.31 for
+KonJND). §6d argued W3 could only be reached at training time; this is that
+lever existing. **But W3 still FAILS**: mono 0.9921 < 0.9930, and D2/D3/D4 pick
+up a nonzero `ends-backwards` (0.0029, one seed each) that the control does not
+have — a second clause, newly broken. Also note §6f's caveat: the free-40
+train/serve skew can move a rung by up to 0.51 dial points against a 0.5-pt
+materiality threshold, so a single borderline W3 cell here is not exact.
+
+### 7.6 E1 (capacity) is NOT MEASURED, and the reason is structural
+
+All three E1 fits failed in 10 s with a **loud, correct trainer refusal**:
+
+```
+FATAL: --keep-features / --group-l1 are implemented on the plain
+n_features→n_hidden→1 path only; --n-hidden-layers >= 2 routes layer-1
+weights through a different owner and would silently ignore them.
+```
+
+The 156+free class **is** `--keep-features` (265 of 944), so **a 2-layer
+student of this class cannot be built today** — the trainer refuses rather than
+emit a bake that silently reads all 944 inputs, which would blow W4 outright.
+That is the guard working, and it is also the answer to the capacity arm: the
+lever is blocked by an owner limitation, not by evidence. Extending
+`--keep-features` to the multi-layer path is registered owner work; it was not
+attempted here. **E1 is reported as NOT MEASURED with a named cause, never as a
+null.**
+
+### 7.7 A meta-finding: the registered selection rule reproduces the k = 1 defect this wave documented
+
+`freeze_check --select` over the nine M3a-measured cells (all GOLD, 0.889–0.941):
+
+| rank | bake | floors | bal_comp | M3a | sel_comp |
+|---:|---|---:|--:|--:|--:|
+| **1 (SELECTED)** | **FC_C0_s4004** | 8/8 | 0.8615 | 0.9390 | **1.0023** |
+| 2 | FC_D2_s4005 | 8/8 | 0.8622 | 0.9095 | 0.9986 |
+| 3 | FC_D2_s4006 | 8/8 | 0.8607 | 0.9092 | 0.9971 |
+| 4 | FC_D3_s4006 | 8/8 | 0.8573 | 0.9258 | 0.9962 |
+| 5 | FC_D3_s4005 | 8/8 | 0.8595 | 0.8894 | 0.9929 |
+
+**The rule selects the control's lucky seed** — the exact cell §7.1 proved is
+the maximum of three draws. This is not a bug in `freeze_check`; it is the rule
+operating as registered. But the rule ranks **individual cells** and has no
+seed-aggregation step, so on a model class with 0.133 KonJND seed spread it
+will systematically prefer lucky draws. **Recommendation, registered rather
+than implemented:** `--select` should take a seed-group key and rank arms by
+their k-seed mean (reporting the spread), with single-cell ranking reserved for
+k = 1 families. Until then, a `--select` winner on this class should be read as
+"the best CELL", never "the best RECIPE".
+
+### 7.8 MECHANISM — what moved KonJND, what did not, and why
+
+The saturated-leg story from AMENDMENT A1 was a *prediction*, made before any
+arm. Here is how it scored — including where it was wrong.
+
+| A1 predicted | outcome | verdict on the prediction |
+|---|---|---|
+| **D1 null** — the konjnd leg is saturated (0.9997 within-ref, 81.6 % of refs perfect), so within-ref pairing has no drowned ladder to recover | mean +0.0513, **t = 1.52, not significant**; variance ÷13.7 | **right on the mean, blind to the variance.** A1 reasoned only about signal, not stability |
+| **D2 is the live lever** — `tbig_hf` is the only leg with headroom (0.8406 within-ref, 32.8 % perfect) | largest mean shift (+0.0754) and the **only significant W3 gain** (mono 3/3, t = 3.00) | **right about which lever was live**, and right that the route would be indirect |
+| **D4 diffuse** — only 6.5 % of the ≥90 mass is konjnd; 36 % is `tbig_hf` | **the only arm with a negative KonJND mean** (−0.0100), degrades mono (0/3), **triples** q≥85 inversions (0.122 → 0.174) | **confirmed, and worse than predicted** |
+
+**The saturated-leg story, tested rather than asserted.** Two arms act on the
+same leg in opposite directions. K1 (prior lane) *added mass* to it and made
+KonJND worse; D1 (this lane) *changed its pairing* and produced no significant
+mean change but a 13.7× variance drop. Both are what you expect from a leg with
+no gradient left: extra mass can only displace sampling from legs that still
+have some, and re-pairing can only change the noise it injects, not the signal
+it carries. **The story survives its test.**
+
+**The two arms nobody had run before:**
+- **F1 (KADIS w = 0.15)** — KonJND +0.0506 (ns) with the wave's **most
+  consistent effect of any kind: a CID22 loss, 0/3 seeds, t = −4.07**, plus the
+  largest W6 degradation (nonphoto 0.9503 → 0.9372). The 924-era KADIS
+  role-reversal partially reproduces at this width: it buys KonJND stability
+  (F = 103.1, significant) and pays in CID22 and circularity-sanity.
+- **G1 (class-C, 289 coords)** — KonJND +0.0239 (t = 0.40), variance F = 1.8,
+  every other axis flat. **The 24 class-C slots do not move this axis.** They
+  cost +1.3–2.3 % of walk time for nothing measurable here; that is a clean
+  negative result for this axis, not a verdict on the slots (they were designed
+  for the near-lossless zone, and this wave did not test them there).
+
+**The reason nothing moves it, and it is not the levers.** §1.3 and A1 together
+say the quantity is absent from the training signal: the KonJND legs carry a
+**metric-mix** target in [−0.65, 0.96] on 403+101 BPG references, the exam
+ruler is a **PJND threshold** in [22.5, 70.0] on 504 *disjoint* JPEG
+references, and the model is already at **0.9997 within-reference** on the
+proxy while reading **0.43** on the ruler. Under `--val-policy min`, KonJND is
+the *best* group throughout training and therefore never selects a checkpoint;
+`tbig_hf` (the worst) does. **Six mechanisms — data mass, teacher composition,
+pair geometry ×3, zone mass, corpus addition, feature width — all move this
+axis by less than its own seed variance, because none of them adds the missing
+quantity.** Rearranging a training set that does not contain the target cannot
+produce it.
+
+### 7.9 THE EXAM — W1–W7 per arm, against `peer_ssim2`
+
+| arm | W1 | W2 | W3 | W4 | W5 | W6 | W7 |
+|---|:--|:--|:--|:--|:--|:--|:--|
+| C0 (=A4b) | **FAIL** (KonJND −0.171 mean) | FAIL (1 win, CSIQ) | FAIL (mono 0.9884) | PASS (inherited, ≤1.19×) | n/a | PASS (0.950/0.950) | FAIL |
+| D1 | **FAIL** (KonJND −0.120) | FAIL (1 win) | FAIL (mono 0.9885) | PASS | n/a | PASS (0.948/0.950) | FAIL |
+| **D2** | **FAIL** (KonJND −0.096) | FAIL (1 win) | FAIL (mono **0.9921**, bkw 0.0029) | PASS | n/a | PASS (0.947/0.950) | FAIL |
+| **D3** | **FAIL** (KonJND −0.095) | FAIL (1 win) | FAIL (mono 0.9899, bkw 0.0029) | PASS | n/a | PASS (0.949/0.950) | FAIL |
+| D4 | **FAIL** (KonJND −0.181) | FAIL (1 win) | FAIL (mono 0.9860) | PASS | n/a | PASS (0.941/0.942) | FAIL |
+| F1 | **FAIL** (KonJND −0.121, CID22 −0.0117) | FAIL (1 win) | FAIL (mono 0.9893) | PASS | n/a | PASS (0.937/0.939) | FAIL |
+| G1 | **FAIL** (KonJND −0.147) | FAIL (1 win) | FAIL (mono 0.9888) | PASS* (1.216× worst-case, §6g) | n/a | PASS (0.950/0.951) | FAIL |
+| E1 | — | — | — | — | — | — | **NOT MEASURED (§7.6)** |
+
+CSIQ is a real strict win for every arm (+0.040 to +0.051, CI excludes zero),
+but W2 needs **two** with one on CID22 or the near-lossless band, and no arm
+has a second. W7 fails for all: none is wired into a `ZensimProfile`, and §6e
+names the one change that would fix it.
+
+### 7.10 **BOTTOM LINE — NOTHING MOVES KonJND, and the wave says where the next dollar goes**
+
+**No arm in this wave closes W1 on KonJND, and none comes close.** The best
+mean is D3's 0.4322 against ssim2's 0.5272 (−0.095); the best single seed
+anywhere is D2_s4005's 0.4484 (−0.079); every paired-by-seed mean shift is
+**below significance at k = 3** (max |t| = 1.73 vs a 4.30 critical value).
+Adding the three levers the prior lane tried and the six this one did, **nine
+distinct mechanisms have now failed on this axis for this architecture class.**
+
+What the wave *did* establish, all of it new:
+
+1. **The axis is variance-dominated, and that was never measured before.** The
+   control's own KonJND spans 0.2998–0.4327 at fixed recipe. Every published
+   single-seed comparison on this class — including A4b's own headline and the
+   entire a4bkon lever table — is inside that spread (§7.1, §7.2).
+2. **Two arms make it reproducible** (D3 F = 75.9, F1 F = 103.1, both p < 0.05).
+   A stable 0.432 is a better product than a coin flip between 0.30 and 0.43,
+   even though it is not a better *mean*.
+3. **D2 is the first training-time lever to move W3 in this class** (mono 3/3,
+   t = 3.00; q≥85 inversions halved) — the lever §6d proved packaging could
+   never supply. It still does not clear the bar.
+4. **The capacity axis is blocked by an owner limitation, not by evidence**
+   (§7.6) — a 2-layer 156+free student cannot be built today.
+5. **The selection rule itself has the k = 1 defect** this wave documented
+   (§7.7): applied mechanically it picks the control's lucky seed.
+
+**Where the next dollar goes.** The measured reason nothing works is that the
+target quantity is not in the training signal (§7.8): a metric-mix proxy on
+disjoint BPG references, saturated at 0.9997, against a PJND ruler at 0.43.
+That is not a lever problem and no rearrangement of this corpus set will fix
+it. **The staged squintly near-threshold human study is the indicated next
+investment** — it is the only named path that adds a genuinely new,
+non-metric-derived human signal in exactly the zone KonJND probes. Every lever
+tried across two lanes has been metric- or data-mass-derived, and all nine have
+now failed.
+
